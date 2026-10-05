@@ -14,14 +14,15 @@ fn flag(name: String) -> Bool = {
   __flag_at(env.args(), "--" + name, "-" + string.slice(name, 0, 1), 0)
 }
 
-fn __flag_at(args: List[String], long: String, short: String, i: Int) -> Bool = if i >= list.len(args) then false
-else {
+fn __flag_at(args: List[String], long: String, short: String, i: Int) -> Bool =
+  if i >= list.len(args) then false
+  else {
 
 
-  let a = list.get_or(args, i, "")
-  if a == long or a == short then true
-  else __flag_at(args, long, short, i + 1)
-}
+    let a = list.get_or(args, i, "")
+    if a == long or a == short then true
+    else __flag_at(args, long, short, i + 1)
+  }
 
 /// Value of --name=v or --name v; none if absent.
 fn option(name: String) -> String? = {
@@ -42,9 +43,10 @@ fn option(name: String) -> String? = {
   }
 }
 
-fn __find_prefixed(args: List[String], prefix: String, i: Int) -> String? = if i >= list.len(args) then none
-else if string.starts_with(list.get_or(args, i, ""), prefix) then list.get(args, i)
-else __find_prefixed(args, prefix, i + 1)
+fn __find_prefixed(args: List[String], prefix: String, i: Int) -> String? =
+  if i >= list.len(args) then none
+  else if string.starts_with(list.get_or(args, i, ""), prefix) then list.get(args, i)
+  else __find_prefixed(args, prefix, i + 1)
 
 /// option(name), or fallback when absent.
 fn option_or(name: String, fallback: String) -> String = match option(name) {
@@ -176,10 +178,12 @@ else if c >= 48 and c <= 57 then c + 4
 else if c == 43 or c == 45 then 62
 else if c == 47 or c == 95 then 63 else 0 - 1
 
-fn __b64d_strip(p: Int, end: Int) -> Int = if end > 0 and prim.load8(p + end - 1) == 61 then __b64d_strip(
-  p,
-  end - 1,
-) else end
+fn __b64d_strip(p: Int, end: Int) -> Int =
+  if end > 0 and prim.load8(p + end - 1) == 61 then __b64d_strip(
+    p,
+    end - 1,
+  )
+  else end
 
 fn __b64d_scan(p: Int, n: Int, i: Int) -> Bool = if i >= n then true
 else if __b64d_val(prim.load8(p + i)) < 0 then false
@@ -1351,19 +1355,20 @@ fn bytes_slice(b: Bytes, start: Int, end: Int) -> Bytes = {
 }
 
 
-fn __bytecmp(pa: Int, pb: Int, na: Int, nb: Int, i: Int) -> Int = if i >= na then (if i >= nb then 0 else 0 - 1)
-else {
-  if i >= nb then 1
+fn __bytecmp(pa: Int, pb: Int, na: Int, nb: Int, i: Int) -> Int =
+  if i >= na then (if i >= nb then 0 else 0 - 1)
   else {
-    let x = prim.load8(pa + i)
-    let y = prim.load8(pb + i)
-    if x < y then 0 - 1
+    if i >= nb then 1
     else {
-      if x > y then 1
-      else __bytecmp(pa, pb, na, nb, i + 1)
+      let x = prim.load8(pa + i)
+      let y = prim.load8(pb + i)
+      if x < y then 0 - 1
+      else {
+        if x > y then 1
+        else __bytecmp(pa, pb, na, nb, i + 1)
+      }
     }
   }
-}
 
 
 fn bytes_cmp(a: Bytes, b: Bytes) -> Int = {
@@ -2168,87 +2173,104 @@ pub const SRC_BYTES_CURSOR: &str = r#"
 
 fn __bc_n(b: Bytes) -> Int = prim.load32(prim.handle(b) + 4)
 
-fn bytes_read_u8_at(b: Bytes, pos: Int) -> (Int, Int?) = if pos < 0 or pos > __bc_n(b) - 1 then (pos, none) else (pos + 1, some(bytes.read_u8(
-  b,
-  pos,
-)))
+fn bytes_read_u8_at(b: Bytes, pos: Int) -> (Int, Int?) =
+  if pos < 0 or pos > __bc_n(b) - 1 then (pos, none) else (pos + 1, some(bytes.read_u8(
+    b,
+    pos,
+  )))
 
-fn bytes_read_bool_at(b: Bytes, pos: Int) -> (Int, Bool?) = if pos < 0 or pos >= __bc_n(b) then (pos, none) else (pos + 1, some(prim.load8(prim.handle(b) + 12 + pos) != 0))
+fn bytes_read_bool_at(b: Bytes, pos: Int) -> (Int, Bool?) =
+  if pos < 0 or pos >= __bc_n(b) then (pos, none) else (pos + 1, some(prim.load8(prim.handle(b) + 12 + pos) != 0))
 
-fn bytes_read_u16_le_at(b: Bytes, pos: Int) -> (Int, Int?) = if pos < 0 or pos > __bc_n(b) - 2 then (pos, none) else (pos + 2, some(bytes.read_u16_le(
-  b,
-  pos,
-)))
+fn bytes_read_u16_le_at(b: Bytes, pos: Int) -> (Int, Int?) =
+  if pos < 0 or pos > __bc_n(b) - 2 then (pos, none) else (pos + 2, some(bytes.read_u16_le(
+    b,
+    pos,
+  )))
 
-fn bytes_read_u16_be_at(b: Bytes, pos: Int) -> (Int, Int?) = if pos < 0 or pos > __bc_n(b) - 2 then (pos, none) else (pos + 2, some(bytes.read_u16_be(
-  b,
-  pos,
-)))
+fn bytes_read_u16_be_at(b: Bytes, pos: Int) -> (Int, Int?) =
+  if pos < 0 or pos > __bc_n(b) - 2 then (pos, none) else (pos + 2, some(bytes.read_u16_be(
+    b,
+    pos,
+  )))
 
-fn bytes_read_i16_le_at(b: Bytes, pos: Int) -> (Int, Int?) = if pos < 0 or pos > __bc_n(b) - 2 then (pos, none) else (pos + 2, some(bytes.read_i16_le(
-  b,
-  pos,
-)))
+fn bytes_read_i16_le_at(b: Bytes, pos: Int) -> (Int, Int?) =
+  if pos < 0 or pos > __bc_n(b) - 2 then (pos, none) else (pos + 2, some(bytes.read_i16_le(
+    b,
+    pos,
+  )))
 
-fn bytes_read_i16_be_at(b: Bytes, pos: Int) -> (Int, Int?) = if pos < 0 or pos > __bc_n(b) - 2 then (pos, none) else (pos + 2, some(bytes.read_i16_be(
-  b,
-  pos,
-)))
+fn bytes_read_i16_be_at(b: Bytes, pos: Int) -> (Int, Int?) =
+  if pos < 0 or pos > __bc_n(b) - 2 then (pos, none) else (pos + 2, some(bytes.read_i16_be(
+    b,
+    pos,
+  )))
 
-fn bytes_read_u32_le_at(b: Bytes, pos: Int) -> (Int, Int?) = if pos < 0 or pos > __bc_n(b) - 4 then (pos, none) else (pos + 4, some(bytes.read_u32_le(
-  b,
-  pos,
-)))
+fn bytes_read_u32_le_at(b: Bytes, pos: Int) -> (Int, Int?) =
+  if pos < 0 or pos > __bc_n(b) - 4 then (pos, none) else (pos + 4, some(bytes.read_u32_le(
+    b,
+    pos,
+  )))
 
-fn bytes_read_u32_be_at(b: Bytes, pos: Int) -> (Int, Int?) = if pos < 0 or pos > __bc_n(b) - 4 then (pos, none) else (pos + 4, some(bytes.read_u32_be(
-  b,
-  pos,
-)))
+fn bytes_read_u32_be_at(b: Bytes, pos: Int) -> (Int, Int?) =
+  if pos < 0 or pos > __bc_n(b) - 4 then (pos, none) else (pos + 4, some(bytes.read_u32_be(
+    b,
+    pos,
+  )))
 
-fn bytes_read_i32_le_at(b: Bytes, pos: Int) -> (Int, Int?) = if pos < 0 or pos > __bc_n(b) - 4 then (pos, none) else (pos + 4, some(bytes.read_i32_le(
-  b,
-  pos,
-)))
+fn bytes_read_i32_le_at(b: Bytes, pos: Int) -> (Int, Int?) =
+  if pos < 0 or pos > __bc_n(b) - 4 then (pos, none) else (pos + 4, some(bytes.read_i32_le(
+    b,
+    pos,
+  )))
 
-fn bytes_read_i32_be_at(b: Bytes, pos: Int) -> (Int, Int?) = if pos < 0 or pos > __bc_n(b) - 4 then (pos, none) else (pos + 4, some(bytes.read_i32_be(
-  b,
-  pos,
-)))
+fn bytes_read_i32_be_at(b: Bytes, pos: Int) -> (Int, Int?) =
+  if pos < 0 or pos > __bc_n(b) - 4 then (pos, none) else (pos + 4, some(bytes.read_i32_be(
+    b,
+    pos,
+  )))
 
-fn bytes_read_i64_le_at(b: Bytes, pos: Int) -> (Int, Int?) = if pos < 0 or pos > __bc_n(b) - 8 then (pos, none) else (pos + 8, some(bytes.read_i64_le(
-  b,
-  pos,
-)))
+fn bytes_read_i64_le_at(b: Bytes, pos: Int) -> (Int, Int?) =
+  if pos < 0 or pos > __bc_n(b) - 8 then (pos, none) else (pos + 8, some(bytes.read_i64_le(
+    b,
+    pos,
+  )))
 
-fn bytes_read_i64_be_at(b: Bytes, pos: Int) -> (Int, Int?) = if pos < 0 or pos > __bc_n(b) - 8 then (pos, none) else (pos + 8, some(bytes.read_i64_be(
-  b,
-  pos,
-)))
+fn bytes_read_i64_be_at(b: Bytes, pos: Int) -> (Int, Int?) =
+  if pos < 0 or pos > __bc_n(b) - 8 then (pos, none) else (pos + 8, some(bytes.read_i64_be(
+    b,
+    pos,
+  )))
 
-fn bytes_read_f16_le_at(b: Bytes, pos: Int) -> (Int, Float?) = if pos < 0 or pos > __bc_n(b) - 2 then (pos, none) else (pos + 2, some(bytes.read_f16_le(
-  b,
-  pos,
-)))
+fn bytes_read_f16_le_at(b: Bytes, pos: Int) -> (Int, Float?) =
+  if pos < 0 or pos > __bc_n(b) - 2 then (pos, none) else (pos + 2, some(bytes.read_f16_le(
+    b,
+    pos,
+  )))
 
-fn bytes_read_f32_le_at(b: Bytes, pos: Int) -> (Int, Float?) = if pos < 0 or pos > __bc_n(b) - 4 then (pos, none) else (pos + 4, some(bytes.read_f32_le(
-  b,
-  pos,
-)))
+fn bytes_read_f32_le_at(b: Bytes, pos: Int) -> (Int, Float?) =
+  if pos < 0 or pos > __bc_n(b) - 4 then (pos, none) else (pos + 4, some(bytes.read_f32_le(
+    b,
+    pos,
+  )))
 
-fn bytes_read_f32_be_at(b: Bytes, pos: Int) -> (Int, Float?) = if pos < 0 or pos > __bc_n(b) - 4 then (pos, none) else (pos + 4, some(bytes.read_f32_be(
-  b,
-  pos,
-)))
+fn bytes_read_f32_be_at(b: Bytes, pos: Int) -> (Int, Float?) =
+  if pos < 0 or pos > __bc_n(b) - 4 then (pos, none) else (pos + 4, some(bytes.read_f32_be(
+    b,
+    pos,
+  )))
 
-fn bytes_read_f64_le_at(b: Bytes, pos: Int) -> (Int, Float?) = if pos < 0 or pos > __bc_n(b) - 8 then (pos, none) else (pos + 8, some(bytes.read_f64_le(
-  b,
-  pos,
-)))
+fn bytes_read_f64_le_at(b: Bytes, pos: Int) -> (Int, Float?) =
+  if pos < 0 or pos > __bc_n(b) - 8 then (pos, none) else (pos + 8, some(bytes.read_f64_le(
+    b,
+    pos,
+  )))
 
-fn bytes_read_f64_be_at(b: Bytes, pos: Int) -> (Int, Float?) = if pos < 0 or pos > __bc_n(b) - 8 then (pos, none) else (pos + 8, some(bytes.read_f64_be(
-  b,
-  pos,
-)))
+fn bytes_read_f64_be_at(b: Bytes, pos: Int) -> (Int, Float?) =
+  if pos < 0 or pos > __bc_n(b) - 8 then (pos, none) else (pos + 8, some(bytes.read_f64_be(
+    b,
+    pos,
+  )))
 
 fn __bc_copy(dst: Int, src: Int, n: Int, i: Int) -> Int = if i >= n then 0
 else {
@@ -2256,19 +2278,21 @@ else {
   __bc_copy(dst, src, n, i + 1)
 }
 
-fn bytes_take_at(b: Bytes, pos: Int, len: Int) -> (Int, Bytes?) = if pos < 0 or len < 0 or pos > __bc_n(b) - len then (pos, none)
-else {
-  let out = prim.alloc_bytes(len)
-  let _c = __bc_copy(prim.handle(out) + 12, prim.handle(b) + 12 + pos, len, 0)
-  (pos + len, some(out))
-}
+fn bytes_take_at(b: Bytes, pos: Int, len: Int) -> (Int, Bytes?) =
+  if pos < 0 or len < 0 or pos > __bc_n(b) - len then (pos, none)
+  else {
+    let out = prim.alloc_bytes(len)
+    let _c = __bc_copy(prim.handle(out) + 12, prim.handle(b) + 12 + pos, len, 0)
+    (pos + len, some(out))
+  }
 
-fn bytes_read_string_be_at(b: Bytes, pos: Int) -> (Int, String?) = if pos < 0 or pos > __bc_n(b) - 4 then (pos, none)
-else {
-  let slen = bytes.read_u32_be(b, pos)
-  if slen > __bc_n(b) - 4 - pos then (pos, none)
-  else (pos + 4 + slen, some(bytes.read_string_at(b, pos + 4, slen)))
-}
+fn bytes_read_string_be_at(b: Bytes, pos: Int) -> (Int, String?) =
+  if pos < 0 or pos > __bc_n(b) - 4 then (pos, none)
+  else {
+    let slen = bytes.read_u32_be(b, pos)
+    if slen > __bc_n(b) - 4 - pos then (pos, none)
+    else (pos + 4 + slen, some(bytes.read_string_at(b, pos + 4, slen)))
+  }
 "#;
 pub const SRC_BYTES_F16: &str = r#"
 
@@ -2363,13 +2387,14 @@ pub const SRC_BYTES_LENPREFIX: &str = r#"
 
 
 
-fn __lps_count(b: Bytes, blen: Int, p: Int, remaining: Int, acc: Int) -> Int = if remaining == 0 then acc
-else if p < 0 or p > blen - 4 then acc
-else {
-  let sl = bytes.read_u32_le(b, p)
-  if sl > blen - 4 - p then acc
-  else __lps_count(b, blen, p + 4 + sl, remaining - 1, acc + 1)
-}
+fn __lps_count(b: Bytes, blen: Int, p: Int, remaining: Int, acc: Int) -> Int =
+  if remaining == 0 then acc
+  else if p < 0 or p > blen - 4 then acc
+  else {
+    let sl = bytes.read_u32_le(b, p)
+    if sl > blen - 4 - p then acc
+    else __lps_count(b, blen, p + 4 + sl, remaining - 1, acc + 1)
+  }
 
 fn __lps_fill(dh: Int, b: Bytes, p: Int, n: Int, i: Int) -> Int = if i >= n then 0
 else {
@@ -2801,29 +2826,32 @@ fn __bsp_piece(h: Int, start: Int, end: Int) -> Bytes = {
 
 
 
-fn __bsp_sep_at(bh: Int, blen: Int, seph: Int, seplen: Int, p: Int, j: Int) -> Bool = if j >= seplen then true
-else if p + j >= blen then false
-else {
-  let sb = prim.load8(bh + 12 + p + j)
-  let tb = prim.load8(seph + 12 + j)
-  if sb == tb then __bsp_sep_at(bh, blen, seph, seplen, p, j + 1)
-  else false
-}
+fn __bsp_sep_at(bh: Int, blen: Int, seph: Int, seplen: Int, p: Int, j: Int) -> Bool =
+  if j >= seplen then true
+  else if p + j >= blen then false
+  else {
+    let sb = prim.load8(bh + 12 + p + j)
+    let tb = prim.load8(seph + 12 + j)
+    if sb == tb then __bsp_sep_at(bh, blen, seph, seplen, p, j + 1)
+    else false
+  }
 
 
-fn __bsp_find(bh: Int, blen: Int, seph: Int, seplen: Int, from: Int) -> Int = if from + seplen > blen then blen
-else {
-  let hit = __bsp_sep_at(bh, blen, seph, seplen, from, 0)
-  if hit then from
-  else __bsp_find(bh, blen, seph, seplen, from + 1)
-}
+fn __bsp_find(bh: Int, blen: Int, seph: Int, seplen: Int, from: Int) -> Int =
+  if from + seplen > blen then blen
+  else {
+    let hit = __bsp_sep_at(bh, blen, seph, seplen, from, 0)
+    if hit then from
+    else __bsp_find(bh, blen, seph, seplen, from + 1)
+  }
 
-fn __bsp_count(bh: Int, blen: Int, seph: Int, seplen: Int, from: Int, acc: Int) -> Int = if from + seplen > blen then acc
-else {
-  let pos = __bsp_find(bh, blen, seph, seplen, from)
-  if pos >= blen then acc
-  else __bsp_count(bh, blen, seph, seplen, pos + seplen, acc + 1)
-}
+fn __bsp_count(bh: Int, blen: Int, seph: Int, seplen: Int, from: Int, acc: Int) -> Int =
+  if from + seplen > blen then acc
+  else {
+    let pos = __bsp_find(bh, blen, seph, seplen, from)
+    if pos >= blen then acc
+    else __bsp_count(bh, blen, seph, seplen, pos + seplen, acc + 1)
+  }
 
 fn __bsp_fill(lh: Int, bh: Int, blen: Int, seph: Int, seplen: Int, from: Int, idx: Int) -> Int = {
   let pos = __bsp_find(bh, blen, seph, seplen, from)
@@ -2881,13 +2909,14 @@ else {
   else __bl_find_nl(bh, blen, from + 1)
 }
 
-fn __bl_fill(lh: Int, bh: Int, blen: Int, from: Int, idx: Int, total: Int) -> Int = if idx >= total then idx
-else {
-  let nl = __bl_find_nl(bh, blen, from)
-  let piece = __bsp_piece(bh, from, nl)
-  prim.store_str(lh + 12 + idx * 8, piece)
-  __bl_fill(lh, bh, blen, nl + 1, idx + 1, total)
-}
+fn __bl_fill(lh: Int, bh: Int, blen: Int, from: Int, idx: Int, total: Int) -> Int =
+  if idx >= total then idx
+  else {
+    let nl = __bl_find_nl(bh, blen, from)
+    let piece = __bsp_piece(bh, from, nl)
+    prim.store_str(lh + 12 + idx * 8, piece)
+    __bl_fill(lh, bh, blen, nl + 1, idx + 1, total)
+  }
 
 fn bytes_lines(b: Bytes) -> List[Bytes] = {
   let bh = prim.handle(b)
@@ -2899,14 +2928,15 @@ fn bytes_lines(b: Bytes) -> List[Bytes] = {
 }
 
 
-fn __bc_outer(oh: Int, bh: Int, total: Int, size: Int, ci: Int, start: Int) -> Int = if start >= total then 0
-else {
-  let rem = total - start
-  let clen = if rem < size then rem else size
-  let chunk = __bsp_piece(bh, start, start + clen)
-  prim.store_str(oh + 12 + ci * 8, chunk)
-  __bc_outer(oh, bh, total, size, ci + 1, start + size)
-}
+fn __bc_outer(oh: Int, bh: Int, total: Int, size: Int, ci: Int, start: Int) -> Int =
+  if start >= total then 0
+  else {
+    let rem = total - start
+    let clen = if rem < size then rem else size
+    let chunk = __bsp_piece(bh, start, start + clen)
+    prim.store_str(oh + 12 + ci * 8, chunk)
+    __bc_outer(oh, bh, total, size, ci + 1, start + size)
+  }
 
 fn bytes_chunks(b: Bytes, size: Int) -> List[Bytes] = {
   let bh = prim.handle(b)
@@ -3021,20 +3051,26 @@ fn __endian_is_le(e: Endian) -> Bool = match e {
   BigEndian => false,
 }
 
-fn bytes_read_uint16(b: Bytes, offset: Int, e: Endian) -> Int = if __endian_is_le(e) then bytes.read_u16_le(
-  b,
-  offset,
-) else bytes.read_u16_be(b, offset)
+fn bytes_read_uint16(b: Bytes, offset: Int, e: Endian) -> Int =
+  if __endian_is_le(e) then bytes.read_u16_le(
+    b,
+    offset,
+  )
+  else bytes.read_u16_be(b, offset)
 
-fn bytes_read_uint32(b: Bytes, offset: Int, e: Endian) -> Int = if __endian_is_le(e) then bytes.read_u32_le(
-  b,
-  offset,
-) else bytes.read_u32_be(b, offset)
+fn bytes_read_uint32(b: Bytes, offset: Int, e: Endian) -> Int =
+  if __endian_is_le(e) then bytes.read_u32_le(
+    b,
+    offset,
+  )
+  else bytes.read_u32_be(b, offset)
 
-fn bytes_read_int32(b: Bytes, offset: Int, e: Endian) -> Int = if __endian_is_le(e) then bytes.read_i32_le(
-  b,
-  offset,
-) else bytes.read_i32_be(b, offset)
+fn bytes_read_int32(b: Bytes, offset: Int, e: Endian) -> Int =
+  if __endian_is_le(e) then bytes.read_i32_le(
+    b,
+    offset,
+  )
+  else bytes.read_i32_be(b, offset)
 
 
 
@@ -3198,33 +3234,36 @@ pub const SRC_CODEC_DECODE: &str = r#"
 fn __is_null(v: Value) -> Bool = prim.load32(prim.handle(v) + 4) == 0
 
 
-fn __dl_int(items: List[Value], n: Int, i: Int, acc: List[Int]) -> Result[List[Int], String] = if i >= n then ok(acc)
-else match value.as_int(list.get(items, i) ?? value.null()) {
-  ok(x) => __dl_int(items, n, i + 1, acc + [x]),
-  err(e) => err(__err_at_index(e, i)),
-}
+fn __dl_int(items: List[Value], n: Int, i: Int, acc: List[Int]) -> Result[List[Int], String] =
+  if i >= n then ok(acc)
+  else match value.as_int(list.get(items, i) ?? value.null()) {
+    ok(x) => __dl_int(items, n, i + 1, acc + [x]),
+    err(e) => err(__err_at_index(e, i)),
+  }
 
 fn __decode_list_int(v: Value) -> Result[List[Int], String] = match value.as_array(v) {
   ok(items) => __dl_int(items, list.len(items), 0, []),
   err(e) => err(e),
 }
 
-fn __dl_float(items: List[Value], n: Int, i: Int, acc: List[Float]) -> Result[List[Float], String] = if i >= n then ok(acc)
-else match value.as_float(list.get(items, i) ?? value.null()) {
-  ok(x) => __dl_float(items, n, i + 1, acc + [x]),
-  err(e) => err(__err_at_index(e, i)),
-}
+fn __dl_float(items: List[Value], n: Int, i: Int, acc: List[Float]) -> Result[List[Float], String] =
+  if i >= n then ok(acc)
+  else match value.as_float(list.get(items, i) ?? value.null()) {
+    ok(x) => __dl_float(items, n, i + 1, acc + [x]),
+    err(e) => err(__err_at_index(e, i)),
+  }
 
 fn __decode_list_float(v: Value) -> Result[List[Float], String] = match value.as_array(v) {
   ok(items) => __dl_float(items, list.len(items), 0, []),
   err(e) => err(e),
 }
 
-fn __dl_bool(items: List[Value], n: Int, i: Int, acc: List[Bool]) -> Result[List[Bool], String] = if i >= n then ok(acc)
-else match value.as_bool(list.get(items, i) ?? value.null()) {
-  ok(x) => __dl_bool(items, n, i + 1, acc + [x]),
-  err(e) => err(__err_at_index(e, i)),
-}
+fn __dl_bool(items: List[Value], n: Int, i: Int, acc: List[Bool]) -> Result[List[Bool], String] =
+  if i >= n then ok(acc)
+  else match value.as_bool(list.get(items, i) ?? value.null()) {
+    ok(x) => __dl_bool(items, n, i + 1, acc + [x]),
+    err(e) => err(__err_at_index(e, i)),
+  }
 
 fn __decode_list_bool(v: Value) -> Result[List[Bool], String] = match value.as_array(v) {
   ok(items) => __dl_bool(items, list.len(items), 0, []),
@@ -3256,11 +3295,12 @@ fn __err_at(e: String, seg: String) -> String = {
 
 fn __err_at_index(e: String, i: Int) -> String = __err_at(e, "[" + int.to_string(i) + "]")
 
-fn __dl_string(items: List[Value], n: Int, i: Int, acc: List[String]) -> Result[List[String], String] = if i >= n then ok(acc)
-else match value.as_string(list.get(items, i) ?? value.null()) {
-  ok(x) => __dl_string(items, n, i + 1, acc + [x]),
-  err(e) => err(__err_at_index(e, i)),
-}
+fn __dl_string(items: List[Value], n: Int, i: Int, acc: List[String]) -> Result[List[String], String] =
+  if i >= n then ok(acc)
+  else match value.as_string(list.get(items, i) ?? value.null()) {
+    ok(x) => __dl_string(items, n, i + 1, acc + [x]),
+    err(e) => err(__err_at_index(e, i)),
+  }
 
 fn __decode_list_string(v: Value) -> Result[List[String], String] = match value.as_array(v) {
   ok(items) => __dl_string(items, list.len(items), 0, []),
@@ -3388,24 +3428,27 @@ else __el_int(items, n, i + 1, acc + [
 
 fn __encode_list_int(items: List[Int]) -> Value = value.array(__el_int(items, list.len(items), 0, []))
 
-fn __el_float(items: List[Float], n: Int, i: Int, acc: List[Value]) -> List[Value] = if i >= n then acc
-else __el_float(items, n, i + 1, acc + [
-  value.float(list.get(items, i) ?? 0.0)
-])
+fn __el_float(items: List[Float], n: Int, i: Int, acc: List[Value]) -> List[Value] =
+  if i >= n then acc
+  else __el_float(items, n, i + 1, acc + [
+    value.float(list.get(items, i) ?? 0.0)
+  ])
 
 fn __encode_list_float(items: List[Float]) -> Value = value.array(__el_float(items, list.len(items), 0, []))
 
-fn __el_bool(items: List[Bool], n: Int, i: Int, acc: List[Value]) -> List[Value] = if i >= n then acc
-else __el_bool(items, n, i + 1, acc + [
-  value.bool(list.get(items, i) ?? false)
-])
+fn __el_bool(items: List[Bool], n: Int, i: Int, acc: List[Value]) -> List[Value] =
+  if i >= n then acc
+  else __el_bool(items, n, i + 1, acc + [
+    value.bool(list.get(items, i) ?? false)
+  ])
 
 fn __encode_list_bool(items: List[Bool]) -> Value = value.array(__el_bool(items, list.len(items), 0, []))
 
-fn __el_string(items: List[String], n: Int, i: Int, acc: List[Value]) -> List[Value] = if i >= n then acc
-else __el_string(items, n, i + 1, acc + [
-  value.str(list.get(items, i) ?? "")
-])
+fn __el_string(items: List[String], n: Int, i: Int, acc: List[Value]) -> List[Value] =
+  if i >= n then acc
+  else __el_string(items, n, i + 1, acc + [
+    value.str(list.get(items, i) ?? "")
+  ])
 
 fn __encode_list_string(items: List[String]) -> Value = value.array(__el_string(items, list.len(items), 0, []))
 
@@ -3823,11 +3866,12 @@ fn __dpi_field(s: String) -> Int? = if string.is_digit(s) then match int.parse(s
 } else none
 
 
-fn __dpi_nums(parts: List[String], i: Int, acc: List[Int]) -> List[Int]? = if i >= list.len(parts) then some(acc)
-else match __dpi_field(list.get(parts, i) ?? "") {
-  some(v) => __dpi_nums(parts, i + 1, acc + [v]),
-  none => none,
-}
+fn __dpi_nums(parts: List[String], i: Int, acc: List[Int]) -> List[Int]? =
+  if i >= list.len(parts) then some(acc)
+  else match __dpi_field(list.get(parts, i) ?? "") {
+    some(v) => __dpi_nums(parts, i + 1, acc + [v]),
+    none => none,
+  }
 
 
 fn __dpi_sign_at(t: String) -> Int? = match (string.index_of(t, "+"), string.index_of(t, "-")) {
@@ -4199,11 +4243,12 @@ pub const SRC_FAN_ANY: &str = r#"
 
 
 
-fn __fan_any_go(xs: List[Int], f: (Int) -> Result[Int, String], i: Int) -> Result[Int, String] = if i >= list.len(xs) then err("fan.any: all candidates failed")
-else match f(list.get(xs, i) ?? 0) {
-  ok(y) => ok(y),
-  err(_) => __fan_any_go(xs, f, i + 1),
-}
+fn __fan_any_go(xs: List[Int], f: (Int) -> Result[Int, String], i: Int) -> Result[Int, String] =
+  if i >= list.len(xs) then err("fan.any: all candidates failed")
+  else match f(list.get(xs, i) ?? 0) {
+    ok(y) => ok(y),
+    err(_) => __fan_any_go(xs, f, i + 1),
+  }
 
 fn fan_any(xs: List[Int], f: (Int) -> Result[Int, String]) -> Result[Int, String] = __fan_any_go(
   xs,
@@ -4212,11 +4257,12 @@ fn fan_any(xs: List[Int], f: (Int) -> Result[Int, String]) -> Result[Int, String
 )
 
 
-fn __fan_any_is_go(xs: List[Int], f: (Int) -> Result[String, String], i: Int) -> Result[String, String] = if i >= list.len(xs) then err("fan.any: all candidates failed")
-else match f(list.get(xs, i) ?? 0) {
-  ok(y) => ok(y),
-  err(_) => __fan_any_is_go(xs, f, i + 1),
-}
+fn __fan_any_is_go(xs: List[Int], f: (Int) -> Result[String, String], i: Int) -> Result[String, String] =
+  if i >= list.len(xs) then err("fan.any: all candidates failed")
+  else match f(list.get(xs, i) ?? 0) {
+    ok(y) => ok(y),
+    err(_) => __fan_any_is_go(xs, f, i + 1),
+  }
 
 fn fan_any_is(xs: List[Int], f: (Int) -> Result[String, String]) -> Result[String, String] = __fan_any_is_go(
   xs,
@@ -4225,11 +4271,12 @@ fn fan_any_is(xs: List[Int], f: (Int) -> Result[String, String]) -> Result[Strin
 )
 
 
-fn __fan_any_ss_go(xs: List[String], f: (String) -> Result[String, String], i: Int) -> Result[String, String] = if i >= list.len(xs) then err("fan.any: all candidates failed")
-else match f(list.get(xs, i) ?? "") {
-  ok(y) => ok(y),
-  err(_) => __fan_any_ss_go(xs, f, i + 1),
-}
+fn __fan_any_ss_go(xs: List[String], f: (String) -> Result[String, String], i: Int) -> Result[String, String] =
+  if i >= list.len(xs) then err("fan.any: all candidates failed")
+  else match f(list.get(xs, i) ?? "") {
+    ok(y) => ok(y),
+    err(_) => __fan_any_ss_go(xs, f, i + 1),
+  }
 
 fn fan_any_ss(xs: List[String], f: (String) -> Result[String, String]) -> Result[String, String] = __fan_any_ss_go(
   xs,
@@ -4238,11 +4285,12 @@ fn fan_any_ss(xs: List[String], f: (String) -> Result[String, String]) -> Result
 )
 
 
-fn __fan_any_si_go(xs: List[String], f: (String) -> Result[Int, String], i: Int) -> Result[Int, String] = if i >= list.len(xs) then err("fan.any: all candidates failed")
-else match f(list.get(xs, i) ?? "") {
-  ok(y) => ok(y),
-  err(_) => __fan_any_si_go(xs, f, i + 1),
-}
+fn __fan_any_si_go(xs: List[String], f: (String) -> Result[Int, String], i: Int) -> Result[Int, String] =
+  if i >= list.len(xs) then err("fan.any: all candidates failed")
+  else match f(list.get(xs, i) ?? "") {
+    ok(y) => ok(y),
+    err(_) => __fan_any_si_go(xs, f, i + 1),
+  }
 
 fn fan_any_si(xs: List[String], f: (String) -> Result[Int, String]) -> Result[Int, String] = __fan_any_si_go(
   xs,
@@ -4251,11 +4299,12 @@ fn fan_any_si(xs: List[String], f: (String) -> Result[Int, String]) -> Result[In
 )
 
 
-fn __fan_any_if_go(xs: List[Int], f: (Int) -> Result[Float, String], i: Int) -> Result[Float, String] = if i >= list.len(xs) then err("fan.any: all candidates failed")
-else match f(list.get(xs, i) ?? 0) {
-  ok(y) => ok(y),
-  err(_) => __fan_any_if_go(xs, f, i + 1),
-}
+fn __fan_any_if_go(xs: List[Int], f: (Int) -> Result[Float, String], i: Int) -> Result[Float, String] =
+  if i >= list.len(xs) then err("fan.any: all candidates failed")
+  else match f(list.get(xs, i) ?? 0) {
+    ok(y) => ok(y),
+    err(_) => __fan_any_if_go(xs, f, i + 1),
+  }
 
 fn fan_any_if(xs: List[Int], f: (Int) -> Result[Float, String]) -> Result[Float, String] = __fan_any_if_go(
   xs,
@@ -4264,11 +4313,12 @@ fn fan_any_if(xs: List[Int], f: (Int) -> Result[Float, String]) -> Result[Float,
 )
 
 
-fn __fan_any_fi_go(xs: List[Float], f: (Float) -> Result[Int, String], i: Int) -> Result[Int, String] = if i >= list.len(xs) then err("fan.any: all candidates failed")
-else match f(list.get(xs, i) ?? 0.0) {
-  ok(y) => ok(y),
-  err(_) => __fan_any_fi_go(xs, f, i + 1),
-}
+fn __fan_any_fi_go(xs: List[Float], f: (Float) -> Result[Int, String], i: Int) -> Result[Int, String] =
+  if i >= list.len(xs) then err("fan.any: all candidates failed")
+  else match f(list.get(xs, i) ?? 0.0) {
+    ok(y) => ok(y),
+    err(_) => __fan_any_fi_go(xs, f, i + 1),
+  }
 
 fn fan_any_fi(xs: List[Float], f: (Float) -> Result[Int, String]) -> Result[Int, String] = __fan_any_fi_go(
   xs,
@@ -4277,11 +4327,12 @@ fn fan_any_fi(xs: List[Float], f: (Float) -> Result[Int, String]) -> Result[Int,
 )
 
 
-fn __fan_any_ff_go(xs: List[Float], f: (Float) -> Result[Float, String], i: Int) -> Result[Float, String] = if i >= list.len(xs) then err("fan.any: all candidates failed")
-else match f(list.get(xs, i) ?? 0.0) {
-  ok(y) => ok(y),
-  err(_) => __fan_any_ff_go(xs, f, i + 1),
-}
+fn __fan_any_ff_go(xs: List[Float], f: (Float) -> Result[Float, String], i: Int) -> Result[Float, String] =
+  if i >= list.len(xs) then err("fan.any: all candidates failed")
+  else match f(list.get(xs, i) ?? 0.0) {
+    ok(y) => ok(y),
+    err(_) => __fan_any_ff_go(xs, f, i + 1),
+  }
 
 fn fan_any_ff(xs: List[Float], f: (Float) -> Result[Float, String]) -> Result[Float, String] = __fan_any_ff_go(
   xs,
@@ -4290,11 +4341,12 @@ fn fan_any_ff(xs: List[Float], f: (Float) -> Result[Float, String]) -> Result[Fl
 )
 
 
-fn __fan_any_fs_go(xs: List[Float], f: (Float) -> Result[String, String], i: Int) -> Result[String, String] = if i >= list.len(xs) then err("fan.any: all candidates failed")
-else match f(list.get(xs, i) ?? 0.0) {
-  ok(y) => ok(y),
-  err(_) => __fan_any_fs_go(xs, f, i + 1),
-}
+fn __fan_any_fs_go(xs: List[Float], f: (Float) -> Result[String, String], i: Int) -> Result[String, String] =
+  if i >= list.len(xs) then err("fan.any: all candidates failed")
+  else match f(list.get(xs, i) ?? 0.0) {
+    ok(y) => ok(y),
+    err(_) => __fan_any_fs_go(xs, f, i + 1),
+  }
 
 fn fan_any_fs(xs: List[Float], f: (Float) -> Result[String, String]) -> Result[String, String] = __fan_any_fs_go(
   xs,
@@ -4303,11 +4355,12 @@ fn fan_any_fs(xs: List[Float], f: (Float) -> Result[String, String]) -> Result[S
 )
 
 
-fn __fan_any_sf_go(xs: List[String], f: (String) -> Result[Float, String], i: Int) -> Result[Float, String] = if i >= list.len(xs) then err("fan.any: all candidates failed")
-else match f(list.get(xs, i) ?? "") {
-  ok(y) => ok(y),
-  err(_) => __fan_any_sf_go(xs, f, i + 1),
-}
+fn __fan_any_sf_go(xs: List[String], f: (String) -> Result[Float, String], i: Int) -> Result[Float, String] =
+  if i >= list.len(xs) then err("fan.any: all candidates failed")
+  else match f(list.get(xs, i) ?? "") {
+    ok(y) => ok(y),
+    err(_) => __fan_any_sf_go(xs, f, i + 1),
+  }
 
 fn fan_any_sf(xs: List[String], f: (String) -> Result[Float, String]) -> Result[Float, String] = __fan_any_sf_go(
   xs,
@@ -4326,13 +4379,14 @@ pub const SRC_FAN_MAP: &str = r#"
 
 
 
-fn __fan_map_go(xs: List[Int], f: (Int) -> Result[Int, String], i: Int, acc: List[Int], first: String?) -> Result[List[Int], String] = if i >= list.len(xs) then match first {
-  some(e) => err(e),
-  none => ok(acc),
-} else match f(list.get(xs, i) ?? 0) {
-  ok(y) => __fan_map_go(xs, f, i + 1, acc + [y], first),
-  err(e) => __fan_map_go(xs, f, i + 1, acc, some(first ?? e)),
-}
+fn __fan_map_go(xs: List[Int], f: (Int) -> Result[Int, String], i: Int, acc: List[Int], first: String?) -> Result[List[Int], String] =
+  if i >= list.len(xs) then match first {
+    some(e) => err(e),
+    none => ok(acc),
+  } else match f(list.get(xs, i) ?? 0) {
+    ok(y) => __fan_map_go(xs, f, i + 1, acc + [y], first),
+    err(e) => __fan_map_go(xs, f, i + 1, acc, some(first ?? e)),
+  }
 
 fn fan_map(xs: List[Int], f: (Int) -> Result[Int, String]) -> Result[List[Int], String] = __fan_map_go(
   xs,
@@ -4343,13 +4397,14 @@ fn fan_map(xs: List[Int], f: (Int) -> Result[Int, String]) -> Result[List[Int], 
 )
 
 
-fn __fan_map_is_go(xs: List[Int], f: (Int) -> Result[String, String], i: Int, acc: List[String], first: String?) -> Result[List[String], String] = if i >= list.len(xs) then match first {
-  some(e) => err(e),
-  none => ok(acc),
-} else match f(list.get(xs, i) ?? 0) {
-  ok(y) => __fan_map_is_go(xs, f, i + 1, acc + [y], first),
-  err(e) => __fan_map_is_go(xs, f, i + 1, acc, some(first ?? e)),
-}
+fn __fan_map_is_go(xs: List[Int], f: (Int) -> Result[String, String], i: Int, acc: List[String], first: String?) -> Result[List[String], String] =
+  if i >= list.len(xs) then match first {
+    some(e) => err(e),
+    none => ok(acc),
+  } else match f(list.get(xs, i) ?? 0) {
+    ok(y) => __fan_map_is_go(xs, f, i + 1, acc + [y], first),
+    err(e) => __fan_map_is_go(xs, f, i + 1, acc, some(first ?? e)),
+  }
 
 fn fan_map_is(xs: List[Int], f: (Int) -> Result[String, String]) -> Result[List[String], String] = __fan_map_is_go(
   xs,
@@ -4360,13 +4415,14 @@ fn fan_map_is(xs: List[Int], f: (Int) -> Result[String, String]) -> Result[List[
 )
 
 
-fn __fan_map_ss_go(xs: List[String], f: (String) -> Result[String, String], i: Int, acc: List[String], first: String?) -> Result[List[String], String] = if i >= list.len(xs) then match first {
-  some(e) => err(e),
-  none => ok(acc),
-} else match f(list.get(xs, i) ?? "") {
-  ok(y) => __fan_map_ss_go(xs, f, i + 1, acc + [y], first),
-  err(e) => __fan_map_ss_go(xs, f, i + 1, acc, some(first ?? e)),
-}
+fn __fan_map_ss_go(xs: List[String], f: (String) -> Result[String, String], i: Int, acc: List[String], first: String?) -> Result[List[String], String] =
+  if i >= list.len(xs) then match first {
+    some(e) => err(e),
+    none => ok(acc),
+  } else match f(list.get(xs, i) ?? "") {
+    ok(y) => __fan_map_ss_go(xs, f, i + 1, acc + [y], first),
+    err(e) => __fan_map_ss_go(xs, f, i + 1, acc, some(first ?? e)),
+  }
 
 fn fan_map_ss(xs: List[String], f: (String) -> Result[String, String]) -> Result[List[String], String] = __fan_map_ss_go(
   xs,
@@ -4377,13 +4433,14 @@ fn fan_map_ss(xs: List[String], f: (String) -> Result[String, String]) -> Result
 )
 
 
-fn __fan_map_si_go(xs: List[String], f: (String) -> Result[Int, String], i: Int, acc: List[Int], first: String?) -> Result[List[Int], String] = if i >= list.len(xs) then match first {
-  some(e) => err(e),
-  none => ok(acc),
-} else match f(list.get(xs, i) ?? "") {
-  ok(y) => __fan_map_si_go(xs, f, i + 1, acc + [y], first),
-  err(e) => __fan_map_si_go(xs, f, i + 1, acc, some(first ?? e)),
-}
+fn __fan_map_si_go(xs: List[String], f: (String) -> Result[Int, String], i: Int, acc: List[Int], first: String?) -> Result[List[Int], String] =
+  if i >= list.len(xs) then match first {
+    some(e) => err(e),
+    none => ok(acc),
+  } else match f(list.get(xs, i) ?? "") {
+    ok(y) => __fan_map_si_go(xs, f, i + 1, acc + [y], first),
+    err(e) => __fan_map_si_go(xs, f, i + 1, acc, some(first ?? e)),
+  }
 
 fn fan_map_si(xs: List[String], f: (String) -> Result[Int, String]) -> Result[List[Int], String] = __fan_map_si_go(
   xs,
@@ -4394,13 +4451,14 @@ fn fan_map_si(xs: List[String], f: (String) -> Result[Int, String]) -> Result[Li
 )
 
 
-fn __fan_map_if_go(xs: List[Int], f: (Int) -> Result[Float, String], i: Int, acc: List[Float], first: String?) -> Result[List[Float], String] = if i >= list.len(xs) then match first {
-  some(e) => err(e),
-  none => ok(acc),
-} else match f(list.get(xs, i) ?? 0) {
-  ok(y) => __fan_map_if_go(xs, f, i + 1, acc + [y], first),
-  err(e) => __fan_map_if_go(xs, f, i + 1, acc, some(first ?? e)),
-}
+fn __fan_map_if_go(xs: List[Int], f: (Int) -> Result[Float, String], i: Int, acc: List[Float], first: String?) -> Result[List[Float], String] =
+  if i >= list.len(xs) then match first {
+    some(e) => err(e),
+    none => ok(acc),
+  } else match f(list.get(xs, i) ?? 0) {
+    ok(y) => __fan_map_if_go(xs, f, i + 1, acc + [y], first),
+    err(e) => __fan_map_if_go(xs, f, i + 1, acc, some(first ?? e)),
+  }
 
 fn fan_map_if(xs: List[Int], f: (Int) -> Result[Float, String]) -> Result[List[Float], String] = __fan_map_if_go(
   xs,
@@ -4411,13 +4469,14 @@ fn fan_map_if(xs: List[Int], f: (Int) -> Result[Float, String]) -> Result[List[F
 )
 
 
-fn __fan_map_fi_go(xs: List[Float], f: (Float) -> Result[Int, String], i: Int, acc: List[Int], first: String?) -> Result[List[Int], String] = if i >= list.len(xs) then match first {
-  some(e) => err(e),
-  none => ok(acc),
-} else match f(list.get(xs, i) ?? 0.0) {
-  ok(y) => __fan_map_fi_go(xs, f, i + 1, acc + [y], first),
-  err(e) => __fan_map_fi_go(xs, f, i + 1, acc, some(first ?? e)),
-}
+fn __fan_map_fi_go(xs: List[Float], f: (Float) -> Result[Int, String], i: Int, acc: List[Int], first: String?) -> Result[List[Int], String] =
+  if i >= list.len(xs) then match first {
+    some(e) => err(e),
+    none => ok(acc),
+  } else match f(list.get(xs, i) ?? 0.0) {
+    ok(y) => __fan_map_fi_go(xs, f, i + 1, acc + [y], first),
+    err(e) => __fan_map_fi_go(xs, f, i + 1, acc, some(first ?? e)),
+  }
 
 fn fan_map_fi(xs: List[Float], f: (Float) -> Result[Int, String]) -> Result[List[Int], String] = __fan_map_fi_go(
   xs,
@@ -4428,13 +4487,14 @@ fn fan_map_fi(xs: List[Float], f: (Float) -> Result[Int, String]) -> Result[List
 )
 
 
-fn __fan_map_ff_go(xs: List[Float], f: (Float) -> Result[Float, String], i: Int, acc: List[Float], first: String?) -> Result[List[Float], String] = if i >= list.len(xs) then match first {
-  some(e) => err(e),
-  none => ok(acc),
-} else match f(list.get(xs, i) ?? 0.0) {
-  ok(y) => __fan_map_ff_go(xs, f, i + 1, acc + [y], first),
-  err(e) => __fan_map_ff_go(xs, f, i + 1, acc, some(first ?? e)),
-}
+fn __fan_map_ff_go(xs: List[Float], f: (Float) -> Result[Float, String], i: Int, acc: List[Float], first: String?) -> Result[List[Float], String] =
+  if i >= list.len(xs) then match first {
+    some(e) => err(e),
+    none => ok(acc),
+  } else match f(list.get(xs, i) ?? 0.0) {
+    ok(y) => __fan_map_ff_go(xs, f, i + 1, acc + [y], first),
+    err(e) => __fan_map_ff_go(xs, f, i + 1, acc, some(first ?? e)),
+  }
 
 fn fan_map_ff(xs: List[Float], f: (Float) -> Result[Float, String]) -> Result[List[Float], String] = __fan_map_ff_go(
   xs,
@@ -4445,13 +4505,14 @@ fn fan_map_ff(xs: List[Float], f: (Float) -> Result[Float, String]) -> Result[Li
 )
 
 
-fn __fan_map_fs_go(xs: List[Float], f: (Float) -> Result[String, String], i: Int, acc: List[String], first: String?) -> Result[List[String], String] = if i >= list.len(xs) then match first {
-  some(e) => err(e),
-  none => ok(acc),
-} else match f(list.get(xs, i) ?? 0.0) {
-  ok(y) => __fan_map_fs_go(xs, f, i + 1, acc + [y], first),
-  err(e) => __fan_map_fs_go(xs, f, i + 1, acc, some(first ?? e)),
-}
+fn __fan_map_fs_go(xs: List[Float], f: (Float) -> Result[String, String], i: Int, acc: List[String], first: String?) -> Result[List[String], String] =
+  if i >= list.len(xs) then match first {
+    some(e) => err(e),
+    none => ok(acc),
+  } else match f(list.get(xs, i) ?? 0.0) {
+    ok(y) => __fan_map_fs_go(xs, f, i + 1, acc + [y], first),
+    err(e) => __fan_map_fs_go(xs, f, i + 1, acc, some(first ?? e)),
+  }
 
 fn fan_map_fs(xs: List[Float], f: (Float) -> Result[String, String]) -> Result[List[String], String] = __fan_map_fs_go(
   xs,
@@ -4462,13 +4523,14 @@ fn fan_map_fs(xs: List[Float], f: (Float) -> Result[String, String]) -> Result[L
 )
 
 
-fn __fan_map_sf_go(xs: List[String], f: (String) -> Result[Float, String], i: Int, acc: List[Float], first: String?) -> Result[List[Float], String] = if i >= list.len(xs) then match first {
-  some(e) => err(e),
-  none => ok(acc),
-} else match f(list.get(xs, i) ?? "") {
-  ok(y) => __fan_map_sf_go(xs, f, i + 1, acc + [y], first),
-  err(e) => __fan_map_sf_go(xs, f, i + 1, acc, some(first ?? e)),
-}
+fn __fan_map_sf_go(xs: List[String], f: (String) -> Result[Float, String], i: Int, acc: List[Float], first: String?) -> Result[List[Float], String] =
+  if i >= list.len(xs) then match first {
+    some(e) => err(e),
+    none => ok(acc),
+  } else match f(list.get(xs, i) ?? "") {
+    ok(y) => __fan_map_sf_go(xs, f, i + 1, acc + [y], first),
+    err(e) => __fan_map_sf_go(xs, f, i + 1, acc, some(first ?? e)),
+  }
 
 fn fan_map_sf(xs: List[String], f: (String) -> Result[Float, String]) -> Result[List[Float], String] = __fan_map_sf_go(
   xs,
@@ -4643,36 +4705,44 @@ fn from_float64(n: Float64) -> Float = _
 
 
 /// some iff n is an integer in -128..127.
-fn to_int8_checked(n: Float) -> Int8? = if float.is_nan(n) or float.is_infinite(n) or n < -128.0 or n > 127.0 then none
-else if float.floor(n) == n then some(float.to_int8(n)) else none
+fn to_int8_checked(n: Float) -> Int8? =
+  if float.is_nan(n) or float.is_infinite(n) or n < -128.0 or n > 127.0 then none
+  else if float.floor(n) == n then some(float.to_int8(n)) else none
 
 /// some iff n is an integer in -32768..32767.
-fn to_int16_checked(n: Float) -> Int16? = if float.is_nan(n) or float.is_infinite(n) or n < -32768.0 or n > 32767.0 then none
-else if float.floor(n) == n then some(float.to_int16(n)) else none
+fn to_int16_checked(n: Float) -> Int16? =
+  if float.is_nan(n) or float.is_infinite(n) or n < -32768.0 or n > 32767.0 then none
+  else if float.floor(n) == n then some(float.to_int16(n)) else none
 
 /// some iff n is an integer in -2^31..2^31-1.
-fn to_int32_checked(n: Float) -> Int32? = if float.is_nan(n) or float.is_infinite(n) or n < -2147483648.0 or n > 2147483647.0 then none
-else if float.floor(n) == n then some(float.to_int32(n)) else none
+fn to_int32_checked(n: Float) -> Int32? =
+  if float.is_nan(n) or float.is_infinite(n) or n < -2147483648.0 or n > 2147483647.0 then none
+  else if float.floor(n) == n then some(float.to_int32(n)) else none
 
 /// some iff n is an integer in -2^63..2^63-1.
-fn to_int64_checked(n: Float) -> Int64? = if float.is_nan(n) or float.is_infinite(n) or n < -9223372036854776000.0 or n >= 9223372036854776000.0 then none
-else if float.floor(n) == n then some(float.to_int64(n)) else none
+fn to_int64_checked(n: Float) -> Int64? =
+  if float.is_nan(n) or float.is_infinite(n) or n < -9223372036854776000.0 or n >= 9223372036854776000.0 then none
+  else if float.floor(n) == n then some(float.to_int64(n)) else none
 
 /// some iff n is an integer in 0..255.
-fn to_uint8_checked(n: Float) -> UInt8? = if float.is_nan(n) or float.is_infinite(n) or n < 0.0 or n > 255.0 then none
-else if float.floor(n) == n then some(float.to_uint8(n)) else none
+fn to_uint8_checked(n: Float) -> UInt8? =
+  if float.is_nan(n) or float.is_infinite(n) or n < 0.0 or n > 255.0 then none
+  else if float.floor(n) == n then some(float.to_uint8(n)) else none
 
 /// some iff n is an integer in 0..65535.
-fn to_uint16_checked(n: Float) -> UInt16? = if float.is_nan(n) or float.is_infinite(n) or n < 0.0 or n > 65535.0 then none
-else if float.floor(n) == n then some(float.to_uint16(n)) else none
+fn to_uint16_checked(n: Float) -> UInt16? =
+  if float.is_nan(n) or float.is_infinite(n) or n < 0.0 or n > 65535.0 then none
+  else if float.floor(n) == n then some(float.to_uint16(n)) else none
 
 /// some iff n is an integer in 0..2^32-1.
-fn to_uint32_checked(n: Float) -> UInt32? = if float.is_nan(n) or float.is_infinite(n) or n < 0.0 or n > 4294967295.0 then none
-else if float.floor(n) == n then some(float.to_uint32(n)) else none
+fn to_uint32_checked(n: Float) -> UInt32? =
+  if float.is_nan(n) or float.is_infinite(n) or n < 0.0 or n > 4294967295.0 then none
+  else if float.floor(n) == n then some(float.to_uint32(n)) else none
 
 /// some iff n is an integer in 0..2^64-1.
-fn to_uint64_checked(n: Float) -> UInt64? = if float.is_nan(n) or float.is_infinite(n) or n < 0.0 or n >= 18446744073709552000.0 then none
-else if float.floor(n) == n then some(float.to_uint64(n)) else none
+fn to_uint64_checked(n: Float) -> UInt64? =
+  if float.is_nan(n) or float.is_infinite(n) or n < 0.0 or n >= 18446744073709552000.0 then none
+  else if float.floor(n) == n then some(float.to_uint64(n)) else none
 
 
 
@@ -5291,10 +5361,12 @@ fn __fmod_exp(bits: Int) -> Int = {
   if e != 0 then e else __fmod_sub_exp(prim.bshl(bits, 12), 0)
 }
 
-fn __fmod_sig(bits: Int, e: Int) -> Int = if prim.band(prim.bshr_u(bits, 52), 2047) != 0 then prim.bor(
-  prim.band(bits, 4503599627370495),
-  4503599627370496,
-) else prim.bshl(prim.band(bits, 4503599627370495), 1 - e)
+fn __fmod_sig(bits: Int, e: Int) -> Int =
+  if prim.band(prim.bshr_u(bits, 52), 2047) != 0 then prim.bor(
+    prim.band(bits, 4503599627370495),
+    4503599627370496,
+  )
+  else prim.bshl(prim.band(bits, 4503599627370495), 1 - e)
 
 
 fn __fmod_loop(ux: Int, uy: Int, ex: Int, ey: Int) -> Int = if ex <= ey then {
@@ -5374,21 +5446,27 @@ fn __fp_lc(b: Int) -> Int = if b >= 65 and b <= 90 then b + 32 else b
 
 fn __fp_eqci(addr: Int, c: Int) -> Bool = __fp_lc(prim.load8(addr)) == c
 
-fn __fp_skip_sp(addr: Int, end: Int) -> Int = if addr < end and __fp_isspace(prim.load8(addr)) then __fp_skip_sp(
-  addr + 1,
-  end,
-) else addr
+fn __fp_skip_sp(addr: Int, end: Int) -> Int =
+  if addr < end and __fp_isspace(prim.load8(addr)) then __fp_skip_sp(
+    addr + 1,
+    end,
+  )
+  else addr
 
-fn __fp_skip_sp_end(start: Int, end: Int) -> Int = if end > start and __fp_isspace(prim.load8(end - 1)) then __fp_skip_sp_end(
-  start,
-  end - 1,
-) else end
+fn __fp_skip_sp_end(start: Int, end: Int) -> Int =
+  if end > start and __fp_isspace(prim.load8(end - 1)) then __fp_skip_sp_end(
+    start,
+    end - 1,
+  )
+  else end
 
 
-fn __fp_scan_digits(addr: Int, end: Int) -> Int = if addr < end and __fp_isdigit(prim.load8(addr)) then __fp_scan_digits(
-  addr + 1,
-  end,
-) else addr
+fn __fp_scan_digits(addr: Int, end: Int) -> Int =
+  if addr < end and __fp_isdigit(prim.load8(addr)) then __fp_scan_digits(
+    addr + 1,
+    end,
+  )
+  else addr
 
 
 fn __fp_acc(addr: Int, stop: Int, m: Int) -> Int = if addr < stop then __fp_acc(
@@ -5440,7 +5518,8 @@ fn __hpd_sd(hb: Int, i: Int, v: Int) -> Unit = prim.store8(hb + 16 + i, v)
 fn __hpd_trim(hb: Int, m: Int) -> Int = if m > 0 and __hpd_d(hb, m - 1) == 0 then __hpd_trim(
   hb,
   m - 1,
-) else m
+)
+else m
 
 
 fn __hpd_lzc(hb: Int, i: Int, n: Int) -> Int = if i < n and __hpd_d(hb, i) == 0 then __hpd_lzc(
@@ -5488,13 +5567,14 @@ fn __hpd_lsh1(hb: Int) -> Unit = {
 
 
 
-fn __hpd_rsh1_prime(hb: Int, r: Int, acc: Int, n: Int) -> Int = if acc < 2 and r < n then __hpd_rsh1_prime(
-  hb,
-  r + 1,
-  acc * 10 + __hpd_d(hb, r),
-  n,
-)
-else r * 100 + acc
+fn __hpd_rsh1_prime(hb: Int, r: Int, acc: Int, n: Int) -> Int =
+  if acc < 2 and r < n then __hpd_rsh1_prime(
+    hb,
+    r + 1,
+    acc * 10 + __hpd_d(hb, r),
+    n,
+  )
+  else r * 100 + acc
 
 fn __hpd_rsh1_main(hb: Int, r: Int, acc: Int, w: Int, n: Int) -> Int = if r < n or acc > 0 then {
   let out = acc / 2
@@ -5515,21 +5595,23 @@ fn __hpd_rsh1(hb: Int) -> Unit = {
 
 
 
-fn __hpd_to_half(hb: Int, e2: Int) -> Int = if __hpd_dp(hb) > 0 or (__hpd_dp(hb) == 0 and __hpd_n(hb) > 0 and __hpd_d(
-  hb,
-  0,
-) >= 5) then {
-  __hpd_rsh1(hb)
-  __hpd_to_half(hb, e2 + 1)
-} else e2
+fn __hpd_to_half(hb: Int, e2: Int) -> Int =
+  if __hpd_dp(hb) > 0 or (__hpd_dp(hb) == 0 and __hpd_n(hb) > 0 and __hpd_d(
+    hb,
+    0,
+  ) >= 5) then {
+    __hpd_rsh1(hb)
+    __hpd_to_half(hb, e2 + 1)
+  } else e2
 
-fn __hpd_from_half(hb: Int, e2: Int) -> Int = if __hpd_dp(hb) < 0 or (__hpd_dp(hb) == 0 and __hpd_n(hb) > 0 and __hpd_d(
-  hb,
-  0,
-) < 5) then {
-  __hpd_lsh1(hb)
-  __hpd_from_half(hb, e2 - 1)
-} else e2
+fn __hpd_from_half(hb: Int, e2: Int) -> Int =
+  if __hpd_dp(hb) < 0 or (__hpd_dp(hb) == 0 and __hpd_n(hb) > 0 and __hpd_d(
+    hb,
+    0,
+  ) < 5) then {
+    __hpd_lsh1(hb)
+    __hpd_from_half(hb, e2 - 1)
+  } else e2
 
 fn __hpd_rshn(hb: Int, k: Int) -> Unit = if k > 0 then {
   __hpd_rsh1(hb)
@@ -6032,16 +6114,17 @@ fn __sf_render(f: Int, m: Int, k: Int, neg: Bool, dot0: Bool) -> String = {
 }
 
 
-fn __sf_finish(f: Int, e: Int, neg: Bool, dot0: Bool) -> String = if (f / 10) * 10 == f then __sf_finish(
-  f / 10,
-  e + 1,
-  neg,
-  dot0,
-)
-else {
-  let m = __sf_ndig(f, 1, 0)
-  __sf_render(f, m, m + e, neg, dot0)
-}
+fn __sf_finish(f: Int, e: Int, neg: Bool, dot0: Bool) -> String =
+  if (f / 10) * 10 == f then __sf_finish(
+    f / 10,
+    e + 1,
+    neg,
+    dot0,
+  )
+  else {
+    let m = __sf_ndig(f, 1, 0)
+    __sf_render(f, m, m + e, neg, dot0)
+  }
 
 
 
@@ -6652,13 +6735,14 @@ fn __ffl_line(sh: Int, start: Int, endp: Int) -> String = {
   out
 }
 
-fn __ffl_walk_msi(sh: Int, slen: Int, pos: Int, acc: Map[String, Int], f: (Map[String, Int], String) -> Map[String, Int]) -> Map[String, Int] = if pos >= slen then acc
-else {
-  let e = __ffl_nl(sh, slen, pos)
-  let line = __ffl_line(sh, pos, e)
-  let nacc = f(acc, line)
-  __ffl_walk_msi(sh, slen, e + 1, nacc, f)
-}
+fn __ffl_walk_msi(sh: Int, slen: Int, pos: Int, acc: Map[String, Int], f: (Map[String, Int], String) -> Map[String, Int]) -> Map[String, Int] =
+  if pos >= slen then acc
+  else {
+    let e = __ffl_nl(sh, slen, pos)
+    let line = __ffl_line(sh, pos, e)
+    let nacc = f(acc, line)
+    __ffl_walk_msi(sh, slen, e + 1, nacc, f)
+  }
 
 effect fn fs_fold_lines_msi(path: String, init: Map[String, Int], f: (Map[String, Int], String) -> Map[String, Int]) -> Result[Map[String, Int], String] = {
   let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines")
@@ -6684,15 +6768,16 @@ effect fn fs_fold_lines_msi(path: String, init: Map[String, Int], f: (Map[String
 
 
 
-fn __ffl_walk_eff_msi(sh: Int, slen: Int, pos: Int, acc: Map[String, Int], f: (Map[String, Int], String) -> Result[Map[String, Int], String]) -> Result[Map[String, Int], String] = if pos >= slen then ok(acc)
-else {
-  let e = __ffl_nl(sh, slen, pos)
-  let line = __ffl_line(sh, pos, e)
-  match f(acc, line) {
-    ok(nacc) => __ffl_walk_eff_msi(sh, slen, e + 1, nacc, f),
-    err(m) => err(m),
+fn __ffl_walk_eff_msi(sh: Int, slen: Int, pos: Int, acc: Map[String, Int], f: (Map[String, Int], String) -> Result[Map[String, Int], String]) -> Result[Map[String, Int], String] =
+  if pos >= slen then ok(acc)
+  else {
+    let e = __ffl_nl(sh, slen, pos)
+    let line = __ffl_line(sh, pos, e)
+    match f(acc, line) {
+      ok(nacc) => __ffl_walk_eff_msi(sh, slen, e + 1, nacc, f),
+      err(m) => err(m),
+    }
   }
-}
 
 effect fn fs_fallible_fold_lines_msi(path: String, init: Map[String, Int], f: (Map[String, Int], String) -> Result[Map[String, Int], String]) -> Result[Map[String, Int], String] = {
   let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines")
@@ -6722,28 +6807,30 @@ else {
   }
 }
 
-fn __ffl_range_walk_msi(sh: Int, slen: Int, pos: Int, endp: Int, acc: Map[String, Int], f: (Map[String, Int], String) -> Map[String, Int]) -> Map[String, Int] = if pos >= endp or pos >= slen then acc
-else {
-  let e = __ffl_nl(sh, slen, pos)
-  let line = __ffl_line(sh, pos, e)
-  let nacc = f(acc, line)
-  __ffl_range_walk_msi(sh, slen, e + 1, endp, nacc, f)
-}
+fn __ffl_range_walk_msi(sh: Int, slen: Int, pos: Int, endp: Int, acc: Map[String, Int], f: (Map[String, Int], String) -> Map[String, Int]) -> Map[String, Int] =
+  if pos >= endp or pos >= slen then acc
+  else {
+    let e = __ffl_nl(sh, slen, pos)
+    let line = __ffl_line(sh, pos, e)
+    let nacc = f(acc, line)
+    __ffl_range_walk_msi(sh, slen, e + 1, endp, nacc, f)
+  }
 
 
 
 
 
 
-fn __ffl_chunks_msi(sh: Int, slen: Int, lh: Int, n: Int, chunk: Int, i: Int, init: Map[String, Int], f: (Map[String, Int], String) -> Map[String, Int]) -> Int = if i >= n then 0
-else {
-  let s = i * chunk
-  let e = if s + chunk < slen then s + chunk else slen
-  let p0 = __ffl_range_start(sh, slen, s)
-  let part = __ffl_range_walk_msi(sh, slen, p0, e, init, f)
-  prim.store_str(lh + 12 + i * 8, part)
-  __ffl_chunks_msi(sh, slen, lh, n, chunk, i + 1, init, f)
-}
+fn __ffl_chunks_msi(sh: Int, slen: Int, lh: Int, n: Int, chunk: Int, i: Int, init: Map[String, Int], f: (Map[String, Int], String) -> Map[String, Int]) -> Int =
+  if i >= n then 0
+  else {
+    let s = i * chunk
+    let e = if s + chunk < slen then s + chunk else slen
+    let p0 = __ffl_range_start(sh, slen, s)
+    let part = __ffl_range_walk_msi(sh, slen, p0, e, init, f)
+    prim.store_str(lh + 12 + i * 8, part)
+    __ffl_chunks_msi(sh, slen, lh, n, chunk, i + 1, init, f)
+  }
 
 effect fn fs_fold_lines_chunked_msi(path: String, workers: Int, init: Map[String, Int], f: (Map[String, Int], String) -> Map[String, Int]) -> Result[List[Map[String, Int]], String] = {
   let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines_chunked")
@@ -6770,23 +6857,25 @@ effect fn fs_fold_lines_chunked_msi(path: String, workers: Int, init: Map[String
 
 
 
-fn __ffl_range_walk_i(sh: Int, slen: Int, pos: Int, endp: Int, acc: Int, f: (Int, String) -> Int) -> Int = if pos >= endp or pos >= slen then acc
-else {
-  let e = __ffl_nl(sh, slen, pos)
-  let line = __ffl_line(sh, pos, e)
-  let nacc = f(acc, line)
-  __ffl_range_walk_i(sh, slen, e + 1, endp, nacc, f)
-}
+fn __ffl_range_walk_i(sh: Int, slen: Int, pos: Int, endp: Int, acc: Int, f: (Int, String) -> Int) -> Int =
+  if pos >= endp or pos >= slen then acc
+  else {
+    let e = __ffl_nl(sh, slen, pos)
+    let line = __ffl_line(sh, pos, e)
+    let nacc = f(acc, line)
+    __ffl_range_walk_i(sh, slen, e + 1, endp, nacc, f)
+  }
 
-fn __ffl_chunks_i(sh: Int, slen: Int, lh: Int, n: Int, chunk: Int, i: Int, init: Int, f: (Int, String) -> Int) -> Int = if i >= n then 0
-else {
-  let s = i * chunk
-  let e = if s + chunk < slen then s + chunk else slen
-  let p0 = __ffl_range_start(sh, slen, s)
-  let part = __ffl_range_walk_i(sh, slen, p0, e, init, f)
-  prim.store64(lh + 12 + i * 8, part)
-  __ffl_chunks_i(sh, slen, lh, n, chunk, i + 1, init, f)
-}
+fn __ffl_chunks_i(sh: Int, slen: Int, lh: Int, n: Int, chunk: Int, i: Int, init: Int, f: (Int, String) -> Int) -> Int =
+  if i >= n then 0
+  else {
+    let s = i * chunk
+    let e = if s + chunk < slen then s + chunk else slen
+    let p0 = __ffl_range_start(sh, slen, s)
+    let part = __ffl_range_walk_i(sh, slen, p0, e, init, f)
+    prim.store64(lh + 12 + i * 8, part)
+    __ffl_chunks_i(sh, slen, lh, n, chunk, i + 1, init, f)
+  }
 
 effect fn fs_fold_lines_chunked_i(path: String, workers: Int, init: Int, f: (Int, String) -> Int) -> Result[List[Int], String] = {
   let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines_chunked")
@@ -6812,13 +6901,14 @@ effect fn fs_fold_lines_chunked_i(path: String, workers: Int, init: Int, f: (Int
 
 
 
-fn __ffl_range_walk_ls(sh: Int, slen: Int, pos: Int, endp: Int, acc: List[String], f: (List[String], String) -> List[String]) -> List[String] = if pos >= endp or pos >= slen then acc
-else {
-  let e = __ffl_nl(sh, slen, pos)
-  let line = __ffl_line(sh, pos, e)
-  let nacc = f(acc, line)
-  __ffl_range_walk_ls(sh, slen, e + 1, endp, nacc, f)
-}
+fn __ffl_range_walk_ls(sh: Int, slen: Int, pos: Int, endp: Int, acc: List[String], f: (List[String], String) -> List[String]) -> List[String] =
+  if pos >= endp or pos >= slen then acc
+  else {
+    let e = __ffl_nl(sh, slen, pos)
+    let line = __ffl_line(sh, pos, e)
+    let nacc = f(acc, line)
+    __ffl_range_walk_ls(sh, slen, e + 1, endp, nacc, f)
+  }
 
 
 
@@ -6826,15 +6916,16 @@ else {
 
 
 
-fn __ffl_chunks_ls(sh: Int, slen: Int, lh: Int, n: Int, chunk: Int, i: Int, init: List[String], f: (List[String], String) -> List[String]) -> Int = if i >= n then 0
-else {
-  let s = i * chunk
-  let e = if s + chunk < slen then s + chunk else slen
-  let p0 = __ffl_range_start(sh, slen, s)
-  let part = __ffl_range_walk_ls(sh, slen, p0, e, init, f)
-  prim.store_str(lh + 12 + i * 8, part)
-  __ffl_chunks_ls(sh, slen, lh, n, chunk, i + 1, init, f)
-}
+fn __ffl_chunks_ls(sh: Int, slen: Int, lh: Int, n: Int, chunk: Int, i: Int, init: List[String], f: (List[String], String) -> List[String]) -> Int =
+  if i >= n then 0
+  else {
+    let s = i * chunk
+    let e = if s + chunk < slen then s + chunk else slen
+    let p0 = __ffl_range_start(sh, slen, s)
+    let part = __ffl_range_walk_ls(sh, slen, p0, e, init, f)
+    prim.store_str(lh + 12 + i * 8, part)
+    __ffl_chunks_ls(sh, slen, lh, n, chunk, i + 1, init, f)
+  }
 
 effect fn fs_fold_lines_chunked_ls(path: String, workers: Int, init: List[String], f: (List[String], String) -> List[String]) -> Result[List[List[String]], String] = {
   let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines_chunked")
@@ -6875,13 +6966,14 @@ effect fn fs_fold_lines_range_ls(path: String, start: Int, endp: Int, init: List
 
 
 
-fn __ffl_walk_s(sh: Int, slen: Int, pos: Int, acc: String, f: (String, String) -> String) -> String = if pos >= slen then acc
-else {
-  let e = __ffl_nl(sh, slen, pos)
-  let line = __ffl_line(sh, pos, e)
-  let nacc = f(acc, line)
-  __ffl_walk_s(sh, slen, e + 1, nacc, f)
-}
+fn __ffl_walk_s(sh: Int, slen: Int, pos: Int, acc: String, f: (String, String) -> String) -> String =
+  if pos >= slen then acc
+  else {
+    let e = __ffl_nl(sh, slen, pos)
+    let line = __ffl_line(sh, pos, e)
+    let nacc = f(acc, line)
+    __ffl_walk_s(sh, slen, e + 1, nacc, f)
+  }
 
 effect fn fs_fold_lines_s(path: String, init: String, f: (String, String) -> String) -> Result[String, String] = {
   let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines")
@@ -6899,13 +6991,14 @@ effect fn fs_fold_lines_s(path: String, init: String, f: (String, String) -> Str
 
 
 
-fn __ffl_walk_i(sh: Int, slen: Int, pos: Int, acc: Int, f: (Int, String) -> Int) -> Int = if pos >= slen then acc
-else {
-  let e = __ffl_nl(sh, slen, pos)
-  let line = __ffl_line(sh, pos, e)
-  let nacc = f(acc, line)
-  __ffl_walk_i(sh, slen, e + 1, nacc, f)
-}
+fn __ffl_walk_i(sh: Int, slen: Int, pos: Int, acc: Int, f: (Int, String) -> Int) -> Int =
+  if pos >= slen then acc
+  else {
+    let e = __ffl_nl(sh, slen, pos)
+    let line = __ffl_line(sh, pos, e)
+    let nacc = f(acc, line)
+    __ffl_walk_i(sh, slen, e + 1, nacc, f)
+  }
 
 effect fn fs_fold_lines_i(path: String, init: Int, f: (Int, String) -> Int) -> Result[Int, String] = {
   let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines")
@@ -6923,13 +7016,14 @@ effect fn fs_fold_lines_i(path: String, init: Int, f: (Int, String) -> Int) -> R
 
 
 
-fn __ffl_walk_ls(sh: Int, slen: Int, pos: Int, acc: List[String], f: (List[String], String) -> List[String]) -> List[String] = if pos >= slen then acc
-else {
-  let e = __ffl_nl(sh, slen, pos)
-  let line = __ffl_line(sh, pos, e)
-  let nacc = f(acc, line)
-  __ffl_walk_ls(sh, slen, e + 1, nacc, f)
-}
+fn __ffl_walk_ls(sh: Int, slen: Int, pos: Int, acc: List[String], f: (List[String], String) -> List[String]) -> List[String] =
+  if pos >= slen then acc
+  else {
+    let e = __ffl_nl(sh, slen, pos)
+    let line = __ffl_line(sh, pos, e)
+    let nacc = f(acc, line)
+    __ffl_walk_ls(sh, slen, e + 1, nacc, f)
+  }
 
 effect fn fs_fold_lines_ls(path: String, init: List[String], f: (List[String], String) -> List[String]) -> Result[List[String], String] = {
   let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines")
@@ -6975,15 +7069,16 @@ effect fn fs_for_each_line(path: String, f: (String) -> Unit) -> Result[Unit, St
 
 
 
-fn __ffl_walk_eff_i(sh: Int, slen: Int, pos: Int, acc: Int, f: (Int, String) -> Result[Int, String]) -> Result[Int, String] = if pos >= slen then ok(acc)
-else {
-  let e = __ffl_nl(sh, slen, pos)
-  let line = __ffl_line(sh, pos, e)
-  match f(acc, line) {
-    ok(nacc) => __ffl_walk_eff_i(sh, slen, e + 1, nacc, f),
-    err(m) => err(m),
+fn __ffl_walk_eff_i(sh: Int, slen: Int, pos: Int, acc: Int, f: (Int, String) -> Result[Int, String]) -> Result[Int, String] =
+  if pos >= slen then ok(acc)
+  else {
+    let e = __ffl_nl(sh, slen, pos)
+    let line = __ffl_line(sh, pos, e)
+    match f(acc, line) {
+      ok(nacc) => __ffl_walk_eff_i(sh, slen, e + 1, nacc, f),
+      err(m) => err(m),
+    }
   }
-}
 
 effect fn fs_fallible_fold_lines_i(path: String, init: Int, f: (Int, String) -> Result[Int, String]) -> Result[Int, String] = {
   let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines")
@@ -6998,15 +7093,16 @@ effect fn fs_fallible_fold_lines_i(path: String, init: Int, f: (Int, String) -> 
   }
 }
 
-fn __ffl_walk_eff_u(sh: Int, slen: Int, pos: Int, f: (String) -> Result[Unit, String]) -> Result[Unit, String] = if pos >= slen then ok(())
-else {
-  let e = __ffl_nl(sh, slen, pos)
-  let line = __ffl_line(sh, pos, e)
-  match f(line) {
-    ok(_u) => __ffl_walk_eff_u(sh, slen, e + 1, f),
-    err(m) => err(m),
+fn __ffl_walk_eff_u(sh: Int, slen: Int, pos: Int, f: (String) -> Result[Unit, String]) -> Result[Unit, String] =
+  if pos >= slen then ok(())
+  else {
+    let e = __ffl_nl(sh, slen, pos)
+    let line = __ffl_line(sh, pos, e)
+    match f(line) {
+      ok(_u) => __ffl_walk_eff_u(sh, slen, e + 1, f),
+      err(m) => err(m),
+    }
   }
-}
 
 effect fn fs_fallible_for_each_line(path: String, f: (String) -> Result[Unit, String]) -> Result[Unit, String] = {
   let r: Result[String, String] = prim.read_text_file_as(path, "fs.for_each_line")
@@ -7042,13 +7138,14 @@ effect fn fs_fold_lines_range_i(path: String, start: Int, endp: Int, init: Int, 
 
 
 
-fn __ffl_range_walk_s(sh: Int, slen: Int, pos: Int, endp: Int, acc: String, f: (String, String) -> String) -> String = if pos >= endp or pos >= slen then acc
-else {
-  let e = __ffl_nl(sh, slen, pos)
-  let line = __ffl_line(sh, pos, e)
-  let nacc = f(acc, line)
-  __ffl_range_walk_s(sh, slen, e + 1, endp, nacc, f)
-}
+fn __ffl_range_walk_s(sh: Int, slen: Int, pos: Int, endp: Int, acc: String, f: (String, String) -> String) -> String =
+  if pos >= endp or pos >= slen then acc
+  else {
+    let e = __ffl_nl(sh, slen, pos)
+    let line = __ffl_line(sh, pos, e)
+    let nacc = f(acc, line)
+    __ffl_range_walk_s(sh, slen, e + 1, endp, nacc, f)
+  }
 
 effect fn fs_fold_lines_range_s(path: String, start: Int, endp: Int, init: String, f: (String, String) -> String) -> Result[String, String] = {
   let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines_range")
@@ -7087,15 +7184,16 @@ effect fn fs_fold_lines_range_msi(path: String, start: Int, endp: Int, init: Map
 
 
 
-fn __ffl_chunks_s(sh: Int, slen: Int, lh: Int, n: Int, chunk: Int, i: Int, init: String, f: (String, String) -> String) -> Int = if i >= n then 0
-else {
-  let s = i * chunk
-  let e = if s + chunk < slen then s + chunk else slen
-  let p0 = __ffl_range_start(sh, slen, s)
-  let part = __ffl_range_walk_s(sh, slen, p0, e, init, f)
-  prim.store_str(lh + 12 + i * 8, part)
-  __ffl_chunks_s(sh, slen, lh, n, chunk, i + 1, init, f)
-}
+fn __ffl_chunks_s(sh: Int, slen: Int, lh: Int, n: Int, chunk: Int, i: Int, init: String, f: (String, String) -> String) -> Int =
+  if i >= n then 0
+  else {
+    let s = i * chunk
+    let e = if s + chunk < slen then s + chunk else slen
+    let p0 = __ffl_range_start(sh, slen, s)
+    let part = __ffl_range_walk_s(sh, slen, p0, e, init, f)
+    prim.store_str(lh + 12 + i * 8, part)
+    __ffl_chunks_s(sh, slen, lh, n, chunk, i + 1, init, f)
+  }
 
 effect fn fs_fold_lines_chunked_s(path: String, workers: Int, init: String, f: (String, String) -> String) -> Result[List[String], String] = {
   let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines_chunked")
@@ -7452,16 +7550,17 @@ fn __walk_ftype(path: String) -> Int = {
   if errno != 0 then 0 else prim.load8(p + 16)
 }
 
-effect fn __walk_entries(dir: String, entries: List[String], i: Int, depth: Int, acc: List[String], call: String) -> Result[List[String], String] = if i >= list.len(entries) then ok(acc)
-else {
-  let name = list.get(entries, i) ?? ""
-  let p = dir + "/" + name
-  let acc2 = acc + [p]
-  if depth != 1 and __walk_ftype(p) == 3 then {
-    let sub = __walk_into(p, depth - 1, acc2, call)!
-    __walk_entries(dir, entries, i + 1, depth, sub, call)
-  } else __walk_entries(dir, entries, i + 1, depth, acc2, call)
-}
+effect fn __walk_entries(dir: String, entries: List[String], i: Int, depth: Int, acc: List[String], call: String) -> Result[List[String], String] =
+  if i >= list.len(entries) then ok(acc)
+  else {
+    let name = list.get(entries, i) ?? ""
+    let p = dir + "/" + name
+    let acc2 = acc + [p]
+    if depth != 1 and __walk_ftype(p) == 3 then {
+      let sub = __walk_into(p, depth - 1, acc2, call)!
+      __walk_entries(dir, entries, i + 1, depth, sub, call)
+    } else __walk_entries(dir, entries, i + 1, depth, acc2, call)
+  }
 
 effect fn __walk_into(dir: String, depth: Int, acc: List[String], call: String) -> Result[List[String], String] = {
   let r: Result[List[String], String] = prim.read_dir_as(dir, call)
@@ -7503,15 +7602,16 @@ effect fn fs_walk(dir: String) -> Result[List[String], String] = {
 
 
 
-fn __glob_mid_match(region: String, parts: List[String], i: Int, end: Int, pos: Int) -> Bool = if i >= end then true
-else {
-  let part = list.get(parts, i) ?? ""
-  if string.len(part) == 0 then __glob_mid_match(region, parts, i + 1, end, pos)
-  else match string.index_of(string.slice(region, pos, string.len(region)), part) {
-    some(idx) => __glob_mid_match(region, parts, i + 1, end, pos + idx + string.len(part)),
-    none => false,
+fn __glob_mid_match(region: String, parts: List[String], i: Int, end: Int, pos: Int) -> Bool =
+  if i >= end then true
+  else {
+    let part = list.get(parts, i) ?? ""
+    if string.len(part) == 0 then __glob_mid_match(region, parts, i + 1, end, pos)
+    else match string.index_of(string.slice(region, pos, string.len(region)), part) {
+      some(idx) => __glob_mid_match(region, parts, i + 1, end, pos + idx + string.len(part)),
+      none => false,
+    }
   }
-}
 
 fn __glob_star_match(pat: String, seg: String) -> Bool = {
   let parts = string.split(pat, "*")
@@ -7531,31 +7631,34 @@ fn __glob_star_match(pat: String, seg: String) -> Bool = {
 
 
 
-fn __glob_segs_match(pats: List[String], pi: Int, segs: List[String], si: Int) -> Bool = if pi >= list.len(pats) then si >= list.len(segs)
-else {
-  let pat = list.get(pats, pi) ?? ""
-  if pat == "**" then __glob_dstar_match(pats, pi, segs, si)
-  else if si >= list.len(segs) then false
-  else if not __glob_star_match(pat, list.get(segs, si) ?? "") then false
-  else __glob_segs_match(pats, pi + 1, segs, si + 1)
-}
+fn __glob_segs_match(pats: List[String], pi: Int, segs: List[String], si: Int) -> Bool =
+  if pi >= list.len(pats) then si >= list.len(segs)
+  else {
+    let pat = list.get(pats, pi) ?? ""
+    if pat == "**" then __glob_dstar_match(pats, pi, segs, si)
+    else if si >= list.len(segs) then false
+    else if not __glob_star_match(pat, list.get(segs, si) ?? "") then false
+    else __glob_segs_match(pats, pi + 1, segs, si + 1)
+  }
 
-fn __glob_dstar_match(pats: List[String], pi: Int, segs: List[String], si: Int) -> Bool = if __glob_segs_match(
-  pats,
-  pi + 1,
-  segs,
-  si,
-) then true
-else if si < list.len(segs) then __glob_dstar_match(pats, pi, segs, si + 1)
-else false
+fn __glob_dstar_match(pats: List[String], pi: Int, segs: List[String], si: Int) -> Bool =
+  if __glob_segs_match(
+    pats,
+    pi + 1,
+    segs,
+    si,
+  ) then true
+  else if si < list.len(segs) then __glob_dstar_match(pats, pi, segs, si + 1)
+  else false
 
 
-fn __glob_segs(parts: List[String], i: Int, acc: List[String]) -> List[String] = if i >= list.len(parts) then acc
-else {
-  let s = list.get(parts, i) ?? ""
-  if string.len(s) == 0 then __glob_segs(parts, i + 1, acc)
-  else __glob_segs(parts, i + 1, acc + [s])
-}
+fn __glob_segs(parts: List[String], i: Int, acc: List[String]) -> List[String] =
+  if i >= list.len(parts) then acc
+  else {
+    let s = list.get(parts, i) ?? ""
+    if string.len(s) == 0 then __glob_segs(parts, i + 1, acc)
+    else __glob_segs(parts, i + 1, acc + [s])
+  }
 
 
 fn __glob_lit_count(segs: List[String], i: Int) -> Int = if i >= list.len(segs) then i
@@ -7572,20 +7675,21 @@ else {
 
 
 
-fn __glob_collect(all: List[String], i: Int, pats: List[String], cut: Int, prefix: String, acc: List[String]) -> List[String] = if i >= list.len(all) then acc
-else {
-  let p = list.get(all, i) ?? ""
-  let rel = string.slice(p, cut, string.len(p))
-  if __glob_segs_match(pats, 0, string.split(rel, "/"), 0) then __glob_collect(
-    all,
-    i + 1,
-    pats,
-    cut,
-    prefix,
-    acc + [prefix + rel],
-  )
-  else __glob_collect(all, i + 1, pats, cut, prefix, acc)
-}
+fn __glob_collect(all: List[String], i: Int, pats: List[String], cut: Int, prefix: String, acc: List[String]) -> List[String] =
+  if i >= list.len(all) then acc
+  else {
+    let p = list.get(all, i) ?? ""
+    let rel = string.slice(p, cut, string.len(p))
+    if __glob_segs_match(pats, 0, string.split(rel, "/"), 0) then __glob_collect(
+      all,
+      i + 1,
+      pats,
+      cut,
+      prefix,
+      acc + [prefix + rel],
+    )
+    else __glob_collect(all, i + 1, pats, cut, prefix, acc)
+  }
 
 effect fn fs_glob(pattern: String) -> Result[List[String], String] = {
   let empty: List[String] = []
@@ -7859,60 +7963,62 @@ else {
   __sha_wext(wp, t + 1)
 }
 
-fn __sha_rounds(sp: Int, kp: Int, wp: Int, t: Int, a: Int, b: Int, c: Int, d: Int, e: Int, f: Int, g: Int, h: Int) -> Int = if t >= 64 then {
-  prim.store64(sp, prim.band(prim.load64(sp) + a, 4294967295))
-  prim.store64(sp + 8, prim.band(prim.load64(sp + 8) + b, 4294967295))
-  prim.store64(sp + 16, prim.band(prim.load64(sp + 16) + c, 4294967295))
-  prim.store64(sp + 24, prim.band(prim.load64(sp + 24) + d, 4294967295))
-  prim.store64(sp + 32, prim.band(prim.load64(sp + 32) + e, 4294967295))
-  prim.store64(sp + 40, prim.band(prim.load64(sp + 40) + f, 4294967295))
-  prim.store64(sp + 48, prim.band(prim.load64(sp + 48) + g, 4294967295))
-  prim.store64(sp + 56, prim.band(prim.load64(sp + 56) + h, 4294967295))
-  0
-} else {
-  let s1 = prim.bxor(prim.bxor(__ror32(e, 6), __ror32(e, 11)), __ror32(e, 25))
-  let ch = prim.bxor(prim.band(e, f), prim.band(prim.bxor(e, 4294967295), g))
-  let t1 = prim.band(h + s1 + ch + prim.load64(kp + t * 8) + prim.load64(wp + t * 8), 4294967295)
-  let s0 = prim.bxor(prim.bxor(__ror32(a, 2), __ror32(a, 13)), __ror32(a, 22))
-  let maj = prim.bxor(prim.bxor(prim.band(a, b), prim.band(a, c)), prim.band(b, c))
-  let t2 = prim.band(s0 + maj, 4294967295)
-  __sha_rounds(
-    sp,
-    kp,
-    wp,
-    t + 1,
-    prim.band(t1 + t2, 4294967295),
-    a,
-    b,
-    c,
-    prim.band(d + t1, 4294967295),
-    e,
-    f,
-    g,
-  )
-}
+fn __sha_rounds(sp: Int, kp: Int, wp: Int, t: Int, a: Int, b: Int, c: Int, d: Int, e: Int, f: Int, g: Int, h: Int) -> Int =
+  if t >= 64 then {
+    prim.store64(sp, prim.band(prim.load64(sp) + a, 4294967295))
+    prim.store64(sp + 8, prim.band(prim.load64(sp + 8) + b, 4294967295))
+    prim.store64(sp + 16, prim.band(prim.load64(sp + 16) + c, 4294967295))
+    prim.store64(sp + 24, prim.band(prim.load64(sp + 24) + d, 4294967295))
+    prim.store64(sp + 32, prim.band(prim.load64(sp + 32) + e, 4294967295))
+    prim.store64(sp + 40, prim.band(prim.load64(sp + 40) + f, 4294967295))
+    prim.store64(sp + 48, prim.band(prim.load64(sp + 48) + g, 4294967295))
+    prim.store64(sp + 56, prim.band(prim.load64(sp + 56) + h, 4294967295))
+    0
+  } else {
+    let s1 = prim.bxor(prim.bxor(__ror32(e, 6), __ror32(e, 11)), __ror32(e, 25))
+    let ch = prim.bxor(prim.band(e, f), prim.band(prim.bxor(e, 4294967295), g))
+    let t1 = prim.band(h + s1 + ch + prim.load64(kp + t * 8) + prim.load64(wp + t * 8), 4294967295)
+    let s0 = prim.bxor(prim.bxor(__ror32(a, 2), __ror32(a, 13)), __ror32(a, 22))
+    let maj = prim.bxor(prim.bxor(prim.band(a, b), prim.band(a, c)), prim.band(b, c))
+    let t2 = prim.band(s0 + maj, 4294967295)
+    __sha_rounds(
+      sp,
+      kp,
+      wp,
+      t + 1,
+      prim.band(t1 + t2, 4294967295),
+      a,
+      b,
+      c,
+      prim.band(d + t1, 4294967295),
+      e,
+      f,
+      g,
+    )
+  }
 
 
-fn __sha_blocks(sp: Int, kp: Int, wp: Int, mp: Int, nblocks: Int, i: Int) -> Int = if i >= nblocks then 0
-else {
-  let _w = __sha_w16(wp, mp + i * 64, 0)
-  let _x = __sha_wext(wp, 16)
-  let _r = __sha_rounds(
-    sp,
-    kp,
-    wp,
-    0,
-    prim.load64(sp),
-    prim.load64(sp + 8),
-    prim.load64(sp + 16),
-    prim.load64(sp + 24),
-    prim.load64(sp + 32),
-    prim.load64(sp + 40),
-    prim.load64(sp + 48),
-    prim.load64(sp + 56),
-  )
-  __sha_blocks(sp, kp, wp, mp, nblocks, i + 1)
-}
+fn __sha_blocks(sp: Int, kp: Int, wp: Int, mp: Int, nblocks: Int, i: Int) -> Int =
+  if i >= nblocks then 0
+  else {
+    let _w = __sha_w16(wp, mp + i * 64, 0)
+    let _x = __sha_wext(wp, 16)
+    let _r = __sha_rounds(
+      sp,
+      kp,
+      wp,
+      0,
+      prim.load64(sp),
+      prim.load64(sp + 8),
+      prim.load64(sp + 16),
+      prim.load64(sp + 24),
+      prim.load64(sp + 32),
+      prim.load64(sp + 40),
+      prim.load64(sp + 48),
+      prim.load64(sp + 56),
+    )
+    __sha_blocks(sp, kp, wp, mp, nblocks, i + 1)
+  }
 
 fn __sha_out(dst: Int, sp: Int, i: Int) -> Int = if i >= 8 then 0
 else {
@@ -8658,7 +8764,8 @@ fn __segment_ok(s: String, last: Bool) -> Bool = if __is_rest(s) then last and n
 else if __is_param(s) then __name_of(s) != "" and not string.contains(__name_of(s), "{") and not string.contains(
   __name_of(s),
   "}",
-) else not string.contains(s, "{") and not string.contains(s, "}")
+)
+else not string.contains(s, "{") and not string.contains(s, "}")
 
 fn __method_ok(m: String) -> Bool = string.chars(m) |> list.all((c) => string.contains("ABCDEFGHIJKLMNOPQRSTUVWXYZ", c))
 
@@ -8736,11 +8843,12 @@ fn router(routes: List[HttpRoute]) -> Result[HttpHandler, String] = {
 
 /// Applies middleware; the first is the outermost.
 @concurrent(handler, middleware)
-fn wrap(handler: HttpHandler, middleware: List[HttpMiddleware]) -> HttpHandler = if list.is_empty(middleware) then handler
-else wrap(
-  __apply(list.last(middleware) ?? __no_middleware, handler),
-  list.take(middleware, list.len(middleware) - 1),
-)
+fn wrap(handler: HttpHandler, middleware: List[HttpMiddleware]) -> HttpHandler =
+  if list.is_empty(middleware) then handler
+  else wrap(
+    __apply(list.last(middleware) ?? __no_middleware, handler),
+    list.take(middleware, list.len(middleware) - 1),
+  )
 
 
 
@@ -9054,12 +9162,13 @@ fn __hr_ci_eq(x: String, y: String) -> Bool = {
 
 
 
-fn __hr_hdrs(headers: Map[String, String], ks: List[String], i: Int, acc: List[String]) -> List[String] = if i >= list.len(ks) then acc
-else {
-  let k = list.get(ks, i) ?? ""
-  let v = map.get(headers, k) ?? ""
-  __hr_hdrs(headers, ks, i + 1, __hr_set(acc, 2, k, v))
-}
+fn __hr_hdrs(headers: Map[String, String], ks: List[String], i: Int, acc: List[String]) -> List[String] =
+  if i >= list.len(ks) then acc
+  else {
+    let k = list.get(ks, i) ?? ""
+    let v = map.get(headers, k) ?? ""
+    __hr_hdrs(headers, ks, i + 1, __hr_set(acc, 2, k, v))
+  }
 
 fn http_with_headers(status: Int, body: String, headers: Map[String, String]) -> List[String] = {
   let st = int.to_string(status)
@@ -9086,9 +9195,10 @@ fn http_set_header(resp: List[String], key: String, value: String) -> List[Strin
   value,
 )
 
-fn __hr_set(resp: List[String], i: Int, key: String, value: String) -> List[String] = if i >= list.len(resp) then resp + [key, value]
-else if __hr_ci_eq(list.get(resp, i) ?? "", key) then list.set(resp, i + 1, value)
-else __hr_set(resp, i + 2, key, value)
+fn __hr_set(resp: List[String], i: Int, key: String, value: String) -> List[String] =
+  if i >= list.len(resp) then resp + [key, value]
+  else if __hr_ci_eq(list.get(resp, i) ?? "", key) then list.set(resp, i + 1, value)
+  else __hr_set(resp, i + 2, key, value)
 
 
 fn http_status_code(resp: List[String]) -> Int = int.parse(list.get(resp, 0) ?? "0") ?? 0
@@ -9096,16 +9206,17 @@ fn http_status_code(resp: List[String]) -> Int = int.parse(list.get(resp, 0) ?? 
 
 fn http_header_values(resp: List[String], key: String) -> List[String] = __hr_all(resp, 2, key, [])
 
-fn __hr_all(resp: List[String], i: Int, key: String, acc: List[String]) -> List[String] = if i >= list.len(resp) then acc
-else if __hr_ci_eq(list.get(resp, i) ?? "", key) then __hr_all(
-  resp,
-  i + 2,
-  key,
-  acc + [
-    list.get(resp, i + 1) ?? ""
-  ],
-)
-else __hr_all(resp, i + 2, key, acc)
+fn __hr_all(resp: List[String], i: Int, key: String, acc: List[String]) -> List[String] =
+  if i >= list.len(resp) then acc
+  else if __hr_ci_eq(list.get(resp, i) ?? "", key) then __hr_all(
+    resp,
+    i + 2,
+    key,
+    acc + [
+      list.get(resp, i + 1) ?? ""
+    ],
+  )
+  else __hr_all(resp, i + 2, key, acc)
 
 
 
@@ -9114,13 +9225,14 @@ fn __hr_lower(s: String) -> String = string.chars(s) |> list.map((c) => __hr_fol
 
 fn http_headers(resp: List[String]) -> Map[String, String] = __hr_map(resp, 2, map.new())
 
-fn __hr_map(resp: List[String], i: Int, acc: Map[String, String]) -> Map[String, String] = if i >= list.len(resp) then acc
-else {
-  let k = __hr_lower(list.get(resp, i) ?? "")
-  let next = if map.contains(acc, k) then acc
-  else map.set(acc, k, list.get(resp, i + 1) ?? "")
-  __hr_map(resp, i + 2, next)
-}
+fn __hr_map(resp: List[String], i: Int, acc: Map[String, String]) -> Map[String, String] =
+  if i >= list.len(resp) then acc
+  else {
+    let k = __hr_lower(list.get(resp, i) ?? "")
+    let next = if map.contains(acc, k) then acc
+    else map.set(acc, k, list.get(resp, i + 1) ?? "")
+    __hr_map(resp, i + 2, next)
+  }
 
 
 fn http_set_body(resp: List[String], body: String) -> List[String] = list.set(resp, 1, body)
@@ -9235,18 +9347,19 @@ fn http_url_decode(s: String) -> String = {
 
 
 
-fn __qp_fill(pairs: List[String], i: Int, acc: Map[String, String]) -> Map[String, String] = if i >= list.len(pairs) then acc
-else {
-  let p = list.get(pairs, i) ?? ""
-  match string.index_of(p, "=") {
-    some(at) => __qp_fill(
-      pairs,
-      i + 1,
-      map.set(acc, http_url_decode(string.take(p, at)), http_url_decode(string.drop(p, at + 1))),
-    ),
-    none => __qp_fill(pairs, i + 1, acc),
+fn __qp_fill(pairs: List[String], i: Int, acc: Map[String, String]) -> Map[String, String] =
+  if i >= list.len(pairs) then acc
+  else {
+    let p = list.get(pairs, i) ?? ""
+    match string.index_of(p, "=") {
+      some(at) => __qp_fill(
+        pairs,
+        i + 1,
+        map.set(acc, http_url_decode(string.take(p, at)), http_url_decode(string.drop(p, at + 1))),
+      ),
+      none => __qp_fill(pairs, i + 1, acc),
+    }
   }
-}
 
 fn http_query_params(req: List[String]) -> Map[String, String] = {
   let target = list.get(req, 1) ?? ""
@@ -11441,43 +11554,44 @@ else {
 }
 
 
-fn __jp_str_fill(base: Int, len: Int, p: Int, dh: Int, o: Int) -> (Int, Int) = if p >= len then (p, o)
-else {
-  let b = prim.load8(base + p)
-  if b == 34 then (p + 1, o)
-  else if b == 92 then {
-    let e = if p + 1 < len then prim.load8(base + p + 1) else 0
-    if e == 110 then {
-      prim.store8(dh + o, 10)
-      __jp_str_fill(base, len, p + 2, dh, o + 1)
-    } else if e == 116 then {
-      prim.store8(dh + o, 9)
-      __jp_str_fill(base, len, p + 2, dh, o + 1)
-    } else if e == 114 then {
-      prim.store8(dh + o, 13)
-      __jp_str_fill(base, len, p + 2, dh, o + 1)
-    } else if e == 98 then {
-      prim.store8(dh + o, 8)
-      __jp_str_fill(base, len, p + 2, dh, o + 1)
-    } else if e == 102 then {
-      prim.store8(dh + o, 12)
-      __jp_str_fill(base, len, p + 2, dh, o + 1)
-    } else if e == 34 then {
-      prim.store8(dh + o, 34)
-      __jp_str_fill(base, len, p + 2, dh, o + 1)
-    } else if e == 92 then {
-      prim.store8(dh + o, 92)
-      __jp_str_fill(base, len, p + 2, dh, o + 1)
-    } else if e == 47 then {
-      prim.store8(dh + o, 47)
-      __jp_str_fill(base, len, p + 2, dh, o + 1)
-    } else if e == 117 then __jp_str_u(base, len, p, dh, o)
-    else __jp_str_fill(base, len, p + 2, dh, o)
-  } else {
-    prim.store8(dh + o, b)
-    __jp_str_fill(base, len, p + 1, dh, o + 1)
+fn __jp_str_fill(base: Int, len: Int, p: Int, dh: Int, o: Int) -> (Int, Int) =
+  if p >= len then (p, o)
+  else {
+    let b = prim.load8(base + p)
+    if b == 34 then (p + 1, o)
+    else if b == 92 then {
+      let e = if p + 1 < len then prim.load8(base + p + 1) else 0
+      if e == 110 then {
+        prim.store8(dh + o, 10)
+        __jp_str_fill(base, len, p + 2, dh, o + 1)
+      } else if e == 116 then {
+        prim.store8(dh + o, 9)
+        __jp_str_fill(base, len, p + 2, dh, o + 1)
+      } else if e == 114 then {
+        prim.store8(dh + o, 13)
+        __jp_str_fill(base, len, p + 2, dh, o + 1)
+      } else if e == 98 then {
+        prim.store8(dh + o, 8)
+        __jp_str_fill(base, len, p + 2, dh, o + 1)
+      } else if e == 102 then {
+        prim.store8(dh + o, 12)
+        __jp_str_fill(base, len, p + 2, dh, o + 1)
+      } else if e == 34 then {
+        prim.store8(dh + o, 34)
+        __jp_str_fill(base, len, p + 2, dh, o + 1)
+      } else if e == 92 then {
+        prim.store8(dh + o, 92)
+        __jp_str_fill(base, len, p + 2, dh, o + 1)
+      } else if e == 47 then {
+        prim.store8(dh + o, 47)
+        __jp_str_fill(base, len, p + 2, dh, o + 1)
+      } else if e == 117 then __jp_str_u(base, len, p, dh, o)
+      else __jp_str_fill(base, len, p + 2, dh, o)
+    } else {
+      prim.store8(dh + o, b)
+      __jp_str_fill(base, len, p + 1, dh, o + 1)
+    }
   }
-}
 
 
 
@@ -11542,12 +11656,13 @@ else {
 }
 
 
-fn __jp_digits(base: Int, len: Int, p: Int) -> Int = if p < len and prim.load8(base + p) >= 48 and prim.load8(base + p) <= 57 then __jp_digits(
-  base,
-  len,
-  p + 1,
-)
-else p
+fn __jp_digits(base: Int, len: Int, p: Int) -> Int =
+  if p < len and prim.load8(base + p) >= 48 and prim.load8(base + p) <= 57 then __jp_digits(
+    base,
+    len,
+    p + 1,
+  )
+  else p
 
 fn __jp_number(base: Int, len: Int, p: Int) -> Result[(Value, Int), String] = {
   let p1 = if prim.load8(base + p) == 45 then p + 1 else p
@@ -11576,26 +11691,28 @@ fn __jp_number(base: Int, len: Int, p: Int) -> Result[(Value, Int), String] = {
 
 fn __jp_lit_at(base: Int, len: Int, p: Int, b0: Int, b1: Int, b2: Int, b3: Int) -> Bool = p + 4 <= len and prim.load8(base + p) == b0 and prim.load8(base + p + 1) == b1 and prim.load8(base + p + 2) == b2 and prim.load8(base + p + 3) == b3
 
-fn __jp_bool(base: Int, len: Int, p: Int) -> Result[(Value, Int), String] = if __jp_lit_at(
-  base,
-  len,
-  p,
-  116,
-  114,
-  117,
-  101,
-) then ok((value.bool(true), p + 4))
-else if __jp_lit_at(base, len, p, 102, 97, 108, 115) and p + 5 <= len and prim.load8(base + p + 4) == 101 then ok((value.bool(false), p + 5)) else err("expected bool")
+fn __jp_bool(base: Int, len: Int, p: Int) -> Result[(Value, Int), String] =
+  if __jp_lit_at(
+    base,
+    len,
+    p,
+    116,
+    114,
+    117,
+    101,
+  ) then ok((value.bool(true), p + 4))
+  else if __jp_lit_at(base, len, p, 102, 97, 108, 115) and p + 5 <= len and prim.load8(base + p + 4) == 101 then ok((value.bool(false), p + 5)) else err("expected bool")
 
-fn __jp_null(base: Int, len: Int, p: Int) -> Result[(Value, Int), String] = if __jp_lit_at(
-  base,
-  len,
-  p,
-  110,
-  117,
-  108,
-  108,
-) then ok((value.null(), p + 4)) else err("expected null")
+fn __jp_null(base: Int, len: Int, p: Int) -> Result[(Value, Int), String] =
+  if __jp_lit_at(
+    base,
+    len,
+    p,
+    110,
+    117,
+    108,
+    108,
+  ) then ok((value.null(), p + 4)) else err("expected null")
 
 
 
@@ -11698,18 +11815,19 @@ fn json_path_index(path: List[String], i: Int) -> List[String] = {
 
 fn json_path_get(j: Value, path: List[String]) -> Value? = json_path_get_go(j, path, 0)
 
-fn json_path_get_go(j: Value, path: List[String], k: Int) -> Value? = if k >= list.len(path) then some(j)
-else {
-  let seg = list.get(path, k) ?? ""
-  let rest = string.drop(seg, 1)
-  if string.take(seg, 1) == "f" then match value.field(j, rest) {
-    ok(v) => json_path_get_go(v, path, k + 1),
-    err(_) => none,
-  } else match int.parse(rest) {
-    ok(i) => json_path_step_index(j, path, k, i),
-    err(_) => none,
+fn json_path_get_go(j: Value, path: List[String], k: Int) -> Value? =
+  if k >= list.len(path) then some(j)
+  else {
+    let seg = list.get(path, k) ?? ""
+    let rest = string.drop(seg, 1)
+    if string.take(seg, 1) == "f" then match value.field(j, rest) {
+      ok(v) => json_path_get_go(v, path, k + 1),
+      err(_) => none,
+    } else match int.parse(rest) {
+      ok(i) => json_path_step_index(j, path, k, i),
+      err(_) => none,
+    }
   }
-}
 
 fn json_path_step_index(j: Value, path: List[String], k: Int, i: Int) -> Value? = match value.as_array(j) {
   ok(xs) => {
@@ -11763,104 +11881,114 @@ fn json_path_set(j: Value, path: List[String], nv: Value) -> Result[Value, Strin
   nv,
 ))
 
-fn json_path_set_go(j: Value, path: List[String], k: Int, nv: Value) -> Value = if k >= list.len(path) then nv
-else {
-  let seg = list.get(path, k) ?? ""
-  let rest = string.drop(seg, 1)
-  if string.take(seg, 1) == "f" then json_path_set_field(j, path, k, rest, nv)
-  else json_path_set_index(j, path, k, int.parse(rest) ?? 0, nv)
-}
-
-fn json_path_set_field(j: Value, path: List[String], k: Int, key: String, nv: Value) -> Value = if prim.load32(prim.handle(j) + 4) == 6 then {
-  let n = prim.load32(prim.handle(j) + 8) / 2
-  let pairs = __jps_pairs(j, path, k, key, nv, 0, n, [])
-  if __jp_has(j, key, 0, n) then value.object(pairs)
+fn json_path_set_go(j: Value, path: List[String], k: Int, nv: Value) -> Value =
+  if k >= list.len(path) then nv
   else {
+    let seg = list.get(path, k) ?? ""
+    let rest = string.drop(seg, 1)
+    if string.take(seg, 1) == "f" then json_path_set_field(j, path, k, rest, nv)
+    else json_path_set_index(j, path, k, int.parse(rest) ?? 0, nv)
+  }
+
+fn json_path_set_field(j: Value, path: List[String], k: Int, key: String, nv: Value) -> Value =
+  if prim.load32(prim.handle(j) + 4) == 6 then {
+    let n = prim.load32(prim.handle(j) + 8) / 2
+    let pairs = __jps_pairs(j, path, k, key, nv, 0, n, [])
+    if __jp_has(j, key, 0, n) then value.object(pairs)
+    else {
+      let seed = __jp_empty_obj()
+      let sv = json_path_set_go(seed, path, k + 1, nv)
+      value.object(pairs + [(key, sv)])
+    }
+  } else {
     let seed = __jp_empty_obj()
     let sv = json_path_set_go(seed, path, k + 1, nv)
-    value.object(pairs + [(key, sv)])
+    value.object([(key, sv)])
   }
-} else {
-  let seed = __jp_empty_obj()
-  let sv = json_path_set_go(seed, path, k + 1, nv)
-  value.object([(key, sv)])
-}
 
-fn __jps_pairs(j: Value, path: List[String], k: Int, key: String, nv: Value, i: Int, n: Int, acc: List[(String, Value)]) -> List[(String, Value)] = if i >= n then acc
-else {
-  let h = prim.handle(j)
-  let ek: String = prim.load_handle(h + 12 + (2 * i) * 8)
-  let ev: Value = prim.load_handle(h + 12 + (2 * i + 1) * 8)
-  if ek == key then {
-    let sv = json_path_set_go(ev, path, k + 1, nv)
-    __jps_pairs(j, path, k, key, nv, i + 1, n, acc + [(ek, sv)])
-  } else __jps_pairs(j, path, k, key, nv, i + 1, n, acc + [(ek, ev)])
-}
+fn __jps_pairs(j: Value, path: List[String], k: Int, key: String, nv: Value, i: Int, n: Int, acc: List[(String, Value)]) -> List[(String, Value)] =
+  if i >= n then acc
+  else {
+    let h = prim.handle(j)
+    let ek: String = prim.load_handle(h + 12 + (2 * i) * 8)
+    let ev: Value = prim.load_handle(h + 12 + (2 * i + 1) * 8)
+    if ek == key then {
+      let sv = json_path_set_go(ev, path, k + 1, nv)
+      __jps_pairs(j, path, k, key, nv, i + 1, n, acc + [(ek, sv)])
+    } else __jps_pairs(j, path, k, key, nv, i + 1, n, acc + [(ek, ev)])
+  }
 
-fn json_path_set_index(j: Value, path: List[String], k: Int, i: Int, nv: Value) -> Value = if prim.load32(prim.handle(j) + 4) == 5 then {
-  let n = prim.load32(prim.handle(j) + 8)
-  let idx = if i < 0 then n + i else i
-  if idx >= 0 and idx < n then value.array(__jps_items(j, path, k, nv, idx, 0, n, []))
-  else j
-} else j
+fn json_path_set_index(j: Value, path: List[String], k: Int, i: Int, nv: Value) -> Value =
+  if prim.load32(prim.handle(j) + 4) == 5 then {
+    let n = prim.load32(prim.handle(j) + 8)
+    let idx = if i < 0 then n + i else i
+    if idx >= 0 and idx < n then value.array(__jps_items(j, path, k, nv, idx, 0, n, []))
+    else j
+  } else j
 
-fn __jps_items(j: Value, path: List[String], k: Int, nv: Value, tgt: Int, i: Int, n: Int, acc: List[Value]) -> List[Value] = if i >= n then acc
-else {
-  let ev: Value = prim.load_handle(prim.handle(j) + 12 + i * 8)
-  if i == tgt then {
-    let sv = json_path_set_go(ev, path, k + 1, nv)
-    __jps_items(j, path, k, nv, tgt, i + 1, n, acc + [sv])
-  } else __jps_items(j, path, k, nv, tgt, i + 1, n, acc + [ev])
-}
+fn __jps_items(j: Value, path: List[String], k: Int, nv: Value, tgt: Int, i: Int, n: Int, acc: List[Value]) -> List[Value] =
+  if i >= n then acc
+  else {
+    let ev: Value = prim.load_handle(prim.handle(j) + 12 + i * 8)
+    if i == tgt then {
+      let sv = json_path_set_go(ev, path, k + 1, nv)
+      __jps_items(j, path, k, nv, tgt, i + 1, n, acc + [sv])
+    } else __jps_items(j, path, k, nv, tgt, i + 1, n, acc + [ev])
+  }
 
 fn json_path_remove(j: Value, path: List[String]) -> Value = json_path_rm_go(j, path, 0)
 
-fn json_path_rm_go(j: Value, path: List[String], k: Int) -> Value = if k >= list.len(path) then value.null()
-else {
-  let seg = list.get(path, k) ?? ""
-  let rest = string.drop(seg, 1)
-  let last = k + 1 >= list.len(path)
-  if string.take(seg, 1) == "f" then json_path_rm_field(j, path, k, rest, last)
-  else json_path_rm_index(j, path, k, int.parse(rest) ?? 0, last)
-}
+fn json_path_rm_go(j: Value, path: List[String], k: Int) -> Value =
+  if k >= list.len(path) then value.null()
+  else {
+    let seg = list.get(path, k) ?? ""
+    let rest = string.drop(seg, 1)
+    let last = k + 1 >= list.len(path)
+    if string.take(seg, 1) == "f" then json_path_rm_field(j, path, k, rest, last)
+    else json_path_rm_index(j, path, k, int.parse(rest) ?? 0, last)
+  }
 
-fn json_path_rm_field(j: Value, path: List[String], k: Int, key: String, last: Bool) -> Value = if prim.load32(prim.handle(j) + 4) == 6 then {
-  let n = prim.load32(prim.handle(j) + 8) / 2
-  value.object(__jpr_pairs(j, path, k, key, last, 0, n, []))
-} else j
+fn json_path_rm_field(j: Value, path: List[String], k: Int, key: String, last: Bool) -> Value =
+  if prim.load32(prim.handle(j) + 4) == 6 then {
+    let n = prim.load32(prim.handle(j) + 8) / 2
+    value.object(__jpr_pairs(j, path, k, key, last, 0, n, []))
+  } else j
 
-fn __jpr_pairs(j: Value, path: List[String], k: Int, key: String, last: Bool, i: Int, n: Int, acc: List[(String, Value)]) -> List[(String, Value)] = if i >= n then acc
-else {
-  let h = prim.handle(j)
-  let ek: String = prim.load_handle(h + 12 + (2 * i) * 8)
-  let ev: Value = prim.load_handle(h + 12 + (2 * i + 1) * 8)
-  if ek == key then {
-    if last then __jpr_pairs(j, path, k, key, last, i + 1, n, acc)
-    else {
-      let rv = json_path_rm_go(ev, path, k + 1)
-      __jpr_pairs(j, path, k, key, last, i + 1, n, acc + [(ek, rv)])
-    }
-  } else __jpr_pairs(j, path, k, key, last, i + 1, n, acc + [(ek, ev)])
-}
+fn __jpr_pairs(j: Value, path: List[String], k: Int, key: String, last: Bool, i: Int, n: Int, acc: List[(String, Value)]) -> List[(String, Value)] =
+  if i >= n then acc
+  else {
+    let h = prim.handle(j)
+    let ek: String = prim.load_handle(h + 12 + (2 * i) * 8)
+    let ev: Value = prim.load_handle(h + 12 + (2 * i + 1) * 8)
+    if ek == key then {
+      if last then __jpr_pairs(j, path, k, key, last, i + 1, n, acc)
+      else {
+        let rv = json_path_rm_go(ev, path, k + 1)
+        __jpr_pairs(j, path, k, key, last, i + 1, n, acc + [(ek, rv)])
+      }
+    } else __jpr_pairs(j, path, k, key, last, i + 1, n, acc + [(ek, ev)])
+  }
 
-fn json_path_rm_index(j: Value, path: List[String], k: Int, i: Int, last: Bool) -> Value = if prim.load32(prim.handle(j) + 4) == 5 then {
-  let n = prim.load32(prim.handle(j) + 8)
-  let idx = if i < 0 then n + i else i
-  if idx >= 0 and idx < n then value.array(__jpr_items(j, path, k, idx, last, 0, n, []))
-  else j
-} else j
+fn json_path_rm_index(j: Value, path: List[String], k: Int, i: Int, last: Bool) -> Value =
+  if prim.load32(prim.handle(j) + 4) == 5 then {
+    let n = prim.load32(prim.handle(j) + 8)
+    let idx = if i < 0 then n + i else i
+    if idx >= 0 and idx < n then value.array(__jpr_items(j, path, k, idx, last, 0, n, []))
+    else j
+  } else j
 
-fn __jpr_items(j: Value, path: List[String], k: Int, tgt: Int, last: Bool, i: Int, n: Int, acc: List[Value]) -> List[Value] = if i >= n then acc
-else {
-  let ev: Value = prim.load_handle(prim.handle(j) + 12 + i * 8)
-  if i == tgt then {
-    if last then __jpr_items(j, path, k, tgt, last, i + 1, n, acc)
-    else {
-      let rv = json_path_rm_go(ev, path, k + 1)
-      __jpr_items(j, path, k, tgt, last, i + 1, n, acc + [rv])
-    }
-  } else __jpr_items(j, path, k, tgt, last, i + 1, n, acc + [ev])
-}
+fn __jpr_items(j: Value, path: List[String], k: Int, tgt: Int, last: Bool, i: Int, n: Int, acc: List[Value]) -> List[Value] =
+  if i >= n then acc
+  else {
+    let ev: Value = prim.load_handle(prim.handle(j) + 12 + i * 8)
+    if i == tgt then {
+      if last then __jpr_items(j, path, k, tgt, last, i + 1, n, acc)
+      else {
+        let rv = json_path_rm_go(ev, path, k + 1)
+        __jpr_items(j, path, k, tgt, last, i + 1, n, acc + [rv])
+      }
+    } else __jpr_items(j, path, k, tgt, last, i + 1, n, acc + [ev])
+  }
 "#;
 pub const SRC_LIST: &str = r#"
 
@@ -12664,14 +12792,15 @@ fn __fallible_zip_with[A, B, C, E](xs: List[A], ys: List[B], f: (A, B) -> Result
 }
 
 
-fn __fallible_update[A, E](xs: List[A], i: Int, f: (A) -> Result[A, E]) -> Result[List[A], E] = if i < 0 then ok(xs)
-else match list.get(xs, i) {
-  none => ok(xs),
-  some(v) => match f(v) {
-    ok(nv) => ok(list.set(xs, i, nv)),
-    err(e) => err(e),
-  },
-}
+fn __fallible_update[A, E](xs: List[A], i: Int, f: (A) -> Result[A, E]) -> Result[List[A], E] =
+  if i < 0 then ok(xs)
+  else match list.get(xs, i) {
+    none => ok(xs),
+    some(v) => match f(v) {
+      ok(nv) => ok(list.set(xs, i, nv)),
+      err(e) => err(e),
+    },
+  }
 
 
 fn __fallible_iterate[T, E](seed: T, f: (T) -> Result[T, E], n: Int) -> Result[List[T], E] = {
@@ -12797,14 +12926,15 @@ fn __chunk_one(sh: Int, start: Int, clen: Int) -> List[Int] = {
 }
 
 
-fn __chunk_outer(oh: Int, sh: Int, total: Int, cn: Int, ci: Int, start: Int) -> Int = if start >= total then 0
-else {
-  let rem = total - start
-  let clen = if rem < cn then rem else cn
-  let chunk = __chunk_one(sh, start, clen)
-  prim.store_str(oh + 12 + ci * 8, chunk)
-  __chunk_outer(oh, sh, total, cn, ci + 1, start + cn)
-}
+fn __chunk_outer(oh: Int, sh: Int, total: Int, cn: Int, ci: Int, start: Int) -> Int =
+  if start >= total then 0
+  else {
+    let rem = total - start
+    let clen = if rem < cn then rem else cn
+    let chunk = __chunk_one(sh, start, clen)
+    prim.store_str(oh + 12 + ci * 8, chunk)
+    __chunk_outer(oh, sh, total, cn, ci + 1, start + cn)
+  }
 
 fn list_chunk(xs: List[Int], n: Int) -> List[List[Int]] = {
 
@@ -12879,14 +13009,15 @@ fn __chunk_one_str(sh: Int, start: Int, clen: Int) -> List[String] = {
   c
 }
 
-fn __chunk_outer_str(oh: Int, sh: Int, total: Int, cn: Int, ci: Int, start: Int) -> Int = if start >= total then 0
-else {
-  let rem = total - start
-  let clen = if rem < cn then rem else cn
-  let chunk = __chunk_one_str(sh, start, clen)
-  prim.store_str(oh + 12 + ci * 8, chunk)
-  __chunk_outer_str(oh, sh, total, cn, ci + 1, start + cn)
-}
+fn __chunk_outer_str(oh: Int, sh: Int, total: Int, cn: Int, ci: Int, start: Int) -> Int =
+  if start >= total then 0
+  else {
+    let rem = total - start
+    let clen = if rem < cn then rem else cn
+    let chunk = __chunk_one_str(sh, start, clen)
+    prim.store_str(oh + 12 + ci * 8, chunk)
+    __chunk_outer_str(oh, sh, total, cn, ci + 1, start + cn)
+  }
 
 fn list_chunk_str(xs: List[String], n: Int) -> List[List[String]] = {
   if n == 0 then prim.die(prim.handle("Error: chunk size must be positive\n")) else ()
@@ -13119,11 +13250,12 @@ pub const SRC_LIST_ENUMERATE: &str = r#"
 
 
 
-fn __enum_str_rec(xs: List[String], i: Int, n: Int, acc: List[(Int, String)]) -> List[(Int, String)] = if i >= n then acc
-else {
-  let line = list.get(xs, i) ?? ""
-  __enum_str_rec(xs, i + 1, n, acc + [(i, line)])
-}
+fn __enum_str_rec(xs: List[String], i: Int, n: Int, acc: List[(Int, String)]) -> List[(Int, String)] =
+  if i >= n then acc
+  else {
+    let line = list.get(xs, i) ?? ""
+    __enum_str_rec(xs, i + 1, n, acc + [(i, line)])
+  }
 
 fn list_enumerate_str(xs: List[String]) -> List[(Int, String)] = __enum_str_rec(
   xs,
@@ -13157,17 +13289,18 @@ pub const SRC_LIST_FILTER: &str = r#"
 
 
 
-fn __filter_fill(dh: Int, sh: Int, f: (Int) -> Bool, n: Int, i: Int, di: Int) -> Int = if i >= n then di
-else {
-  let x = prim.load64(sh + 12 + i * 8)
-  let keep = f(x)
-  if keep then {
-    prim.store64(dh + 12 + di * 8, x)
-    __filter_fill(dh, sh, f, n, i + 1, di + 1)
-  } else {
-    __filter_fill(dh, sh, f, n, i + 1, di)
+fn __filter_fill(dh: Int, sh: Int, f: (Int) -> Bool, n: Int, i: Int, di: Int) -> Int =
+  if i >= n then di
+  else {
+    let x = prim.load64(sh + 12 + i * 8)
+    let keep = f(x)
+    if keep then {
+      prim.store64(dh + 12 + di * 8, x)
+      __filter_fill(dh, sh, f, n, i + 1, di + 1)
+    } else {
+      __filter_fill(dh, sh, f, n, i + 1, di)
+    }
   }
-}
 
 fn list_filter(xs: List[Int], f: (Int) -> Bool) -> List[Int] = {
   let n = list.len(xs)
@@ -13185,16 +13318,17 @@ pub const SRC_LIST_FILTER_RC: &str = r#"
 
 
 
-fn __filterrc_fill(dh: Int, sh: Int, f: (Int) -> Bool, n: Int, i: Int, di: Int) -> Int = if i >= n then di
-else {
-  let x = prim.load64(sh + 12 + i * 8)
-  let keep = f(x)
-  if keep then {
-    prim.rc_inc(x)
-    prim.store64(dh + 12 + di * 8, x)
-    __filterrc_fill(dh, sh, f, n, i + 1, di + 1)
-  } else __filterrc_fill(dh, sh, f, n, i + 1, di)
-}
+fn __filterrc_fill(dh: Int, sh: Int, f: (Int) -> Bool, n: Int, i: Int, di: Int) -> Int =
+  if i >= n then di
+  else {
+    let x = prim.load64(sh + 12 + i * 8)
+    let keep = f(x)
+    if keep then {
+      prim.rc_inc(x)
+      prim.store64(dh + 12 + di * 8, x)
+      __filterrc_fill(dh, sh, f, n, i + 1, di + 1)
+    } else __filterrc_fill(dh, sh, f, n, i + 1, di)
+  }
 
 fn list_filter_rc(xs: List[Int], f: (Int) -> Bool) -> List[Int] = {
   let n = list.len(xs)
@@ -13210,16 +13344,17 @@ pub const SRC_LIST_FILTER_STR: &str = r#"
 
 
 
-fn __filterstr_fill(dh: Int, sh: Int, f: (String) -> Bool, n: Int, i: Int, di: Int) -> Int = if i >= n then di
-else {
-  let x = prim.load_str(sh + 12 + i * 8)
-  let keep = f(x)
-  if keep then {
-    let copy = string.repeat(x, 1)
-    prim.store_str(dh + 12 + di * 8, copy)
-    __filterstr_fill(dh, sh, f, n, i + 1, di + 1)
-  } else __filterstr_fill(dh, sh, f, n, i + 1, di)
-}
+fn __filterstr_fill(dh: Int, sh: Int, f: (String) -> Bool, n: Int, i: Int, di: Int) -> Int =
+  if i >= n then di
+  else {
+    let x = prim.load_str(sh + 12 + i * 8)
+    let keep = f(x)
+    if keep then {
+      let copy = string.repeat(x, 1)
+      prim.store_str(dh + 12 + di * 8, copy)
+      __filterstr_fill(dh, sh, f, n, i + 1, di + 1)
+    } else __filterstr_fill(dh, sh, f, n, i + 1, di)
+  }
 
 fn list_filter_str(xs: List[String], f: (String) -> Bool) -> List[String] = {
   let n = list.len(xs)
@@ -13325,8 +13460,9 @@ fn __list_find_is_at(h: Int, f: ((Int, String)) -> Bool, n: Int, i: Int) -> (Int
   else __list_find_is_loop(h, f, n, i + 1)
 }
 
-fn __list_find_is_loop(h: Int, f: ((Int, String)) -> Bool, n: Int, i: Int) -> (Int, String)? = if i >= n then __lfis_none()
-else __list_find_is_at(h, f, n, i)
+fn __list_find_is_loop(h: Int, f: ((Int, String)) -> Bool, n: Int, i: Int) -> (Int, String)? =
+  if i >= n then __lfis_none()
+  else __list_find_is_at(h, f, n, i)
 
 fn list_find_int_str(xs: List[(Int, String)], f: ((Int, String)) -> Bool) -> (Int, String)? = {
   let h = prim.handle(xs)
@@ -13369,11 +13505,12 @@ fn __flm_fill_step(dh: Int, sh: Int, f: (Int) -> List[Int], i: Int, di: Int) -> 
   __flm_copy(dh, subh, sublen, 0, di)
 }
 
-fn __flm_fill(dh: Int, sh: Int, f: (Int) -> List[Int], n: Int, i: Int, di: Int) -> Int = if i >= n then di
-else {
-  let ndi = __flm_fill_step(dh, sh, f, i, di)
-  __flm_fill(dh, sh, f, n, i + 1, ndi)
-}
+fn __flm_fill(dh: Int, sh: Int, f: (Int) -> List[Int], n: Int, i: Int, di: Int) -> Int =
+  if i >= n then di
+  else {
+    let ndi = __flm_fill_step(dh, sh, f, i, di)
+    __flm_fill(dh, sh, f, n, i + 1, ndi)
+  }
 
 fn list_flat_map(xs: List[Int], f: (Int) -> List[Int]) -> List[Int] = {
   let n = list.len(xs)
@@ -13400,19 +13537,21 @@ fn __flmstr_len_step(sh: Int, f: (String) -> List[String], i: Int) -> Int = {
   list.len(sub)
 }
 
-fn __flmstr_total(sh: Int, f: (String) -> List[String], n: Int, i: Int, acc: Int) -> Int = if i >= n then acc
-else {
-  let s = __flmstr_len_step(sh, f, i)
-  __flmstr_total(sh, f, n, i + 1, acc + s)
-}
+fn __flmstr_total(sh: Int, f: (String) -> List[String], n: Int, i: Int, acc: Int) -> Int =
+  if i >= n then acc
+  else {
+    let s = __flmstr_len_step(sh, f, i)
+    __flmstr_total(sh, f, n, i + 1, acc + s)
+  }
 
-fn __flmstr_copy(dh: Int, sub: List[String], sublen: Int, j: Int, di: Int) -> Int = if j >= sublen then di
-else {
-  let e = list.get(sub, j) ?? ""
-  let copy = string.repeat(e, 1)
-  prim.store_str(dh + 12 + di * 8, copy)
-  __flmstr_copy(dh, sub, sublen, j + 1, di + 1)
-}
+fn __flmstr_copy(dh: Int, sub: List[String], sublen: Int, j: Int, di: Int) -> Int =
+  if j >= sublen then di
+  else {
+    let e = list.get(sub, j) ?? ""
+    let copy = string.repeat(e, 1)
+    prim.store_str(dh + 12 + di * 8, copy)
+    __flmstr_copy(dh, sub, sublen, j + 1, di + 1)
+  }
 
 fn __flmstr_fill_step(dh: Int, sh: Int, f: (String) -> List[String], i: Int, di: Int) -> Int = {
   let x = prim.load_str(sh + 12 + i * 8)
@@ -13420,11 +13559,12 @@ fn __flmstr_fill_step(dh: Int, sh: Int, f: (String) -> List[String], i: Int, di:
   __flmstr_copy(dh, sub, list.len(sub), 0, di)
 }
 
-fn __flmstr_fill(dh: Int, sh: Int, f: (String) -> List[String], n: Int, i: Int, di: Int) -> Int = if i >= n then di
-else {
-  let ndi = __flmstr_fill_step(dh, sh, f, i, di)
-  __flmstr_fill(dh, sh, f, n, i + 1, ndi)
-}
+fn __flmstr_fill(dh: Int, sh: Int, f: (String) -> List[String], n: Int, i: Int, di: Int) -> Int =
+  if i >= n then di
+  else {
+    let ndi = __flmstr_fill_step(dh, sh, f, i, di)
+    __flmstr_fill(dh, sh, f, n, i + 1, ndi)
+  }
 
 fn list_flat_map_str(xs: List[String], f: (String) -> List[String]) -> List[String] = {
   let n = list.len(xs)
@@ -13452,11 +13592,12 @@ fn __flmh_len_step(sh: Int, f: (String) -> List[String], i: Int) -> Int = {
   list.len(sub)
 }
 
-fn __flmh_total(sh: Int, f: (String) -> List[String], n: Int, i: Int, acc: Int) -> Int = if i >= n then acc
-else {
-  let s = __flmh_len_step(sh, f, i)
-  __flmh_total(sh, f, n, i + 1, acc + s)
-}
+fn __flmh_total(sh: Int, f: (String) -> List[String], n: Int, i: Int, acc: Int) -> Int =
+  if i >= n then acc
+  else {
+    let s = __flmh_len_step(sh, f, i)
+    __flmh_total(sh, f, n, i + 1, acc + s)
+  }
 
 fn __flmh_copy_step(dh: Int, subh: Int, j: Int, di: Int) -> Int = {
   let e = prim.load64(subh + 12 + j * 8)
@@ -13477,11 +13618,12 @@ fn __flmh_fill_step(dh: Int, sh: Int, f: (String) -> List[String], i: Int, di: I
   __flmh_copy(dh, prim.handle(sub), list.len(sub), 0, di)
 }
 
-fn __flmh_fill(dh: Int, sh: Int, f: (String) -> List[String], n: Int, i: Int, di: Int) -> Int = if i >= n then di
-else {
-  let ndi = __flmh_fill_step(dh, sh, f, i, di)
-  __flmh_fill(dh, sh, f, n, i + 1, ndi)
-}
+fn __flmh_fill(dh: Int, sh: Int, f: (String) -> List[String], n: Int, i: Int, di: Int) -> Int =
+  if i >= n then di
+  else {
+    let ndi = __flmh_fill_step(dh, sh, f, i, di)
+    __flmh_fill(dh, sh, f, n, i + 1, ndi)
+  }
 
 fn list_flat_map_h(xs: List[String], f: (String) -> List[String]) -> List[String] = {
   let n = list.len(xs)
@@ -13681,12 +13823,13 @@ pub const SRC_LIST_FOLD_HREC: &str = r#"
 
 
 
-fn __fold_hrec_loop(h: Int, f: (Value, Value) -> Value, n: Int, i: Int, acc: Value) -> Value = if i >= n then acc
-else {
-  let x: Value = prim.load_handle(h + 12 + i * 8)
-  let nacc = f(acc, x)
-  __fold_hrec_loop(h, f, n, i + 1, nacc)
-}
+fn __fold_hrec_loop(h: Int, f: (Value, Value) -> Value, n: Int, i: Int, acc: Value) -> Value =
+  if i >= n then acc
+  else {
+    let x: Value = prim.load_handle(h + 12 + i * 8)
+    let nacc = f(acc, x)
+    __fold_hrec_loop(h, f, n, i + 1, nacc)
+  }
 
 fn list_fold_hrec(xs: List[Value], init: Value, f: (Value, Value) -> Value) -> Value = {
   let h = prim.handle(xs)
@@ -13704,12 +13847,13 @@ pub const SRC_LIST_FOLD_HSCA: &str = r#"
 
 
 
-fn __fold_hsca_loop(h: Int, f: (Value, Int) -> Value, n: Int, i: Int, acc: Value) -> Value = if i >= n then acc
-else {
-  let x = prim.load64(h + 12 + i * 8)
-  let nacc = f(acc, x)
-  __fold_hsca_loop(h, f, n, i + 1, nacc)
-}
+fn __fold_hsca_loop(h: Int, f: (Value, Int) -> Value, n: Int, i: Int, acc: Value) -> Value =
+  if i >= n then acc
+  else {
+    let x = prim.load64(h + 12 + i * 8)
+    let nacc = f(acc, x)
+    __fold_hsca_loop(h, f, n, i + 1, nacc)
+  }
 
 fn list_fold_hsca(xs: List[Int], init: Value, f: (Value, Int) -> Value) -> Value = {
   let h = prim.handle(xs)
@@ -13725,12 +13869,13 @@ pub const SRC_LIST_FOLD_OLS: &str = r#"
 
 
 
-fn __fold_ols_loop(h: Int, f: (List[String]?, String) -> List[String]?, n: Int, i: Int, acc: List[String]?) -> List[String]? = if i >= n then acc
-else {
-  let x = prim.load_str(h + 12 + i * 8)
-  let nacc = f(acc, x)
-  __fold_ols_loop(h, f, n, i + 1, nacc)
-}
+fn __fold_ols_loop(h: Int, f: (List[String]?, String) -> List[String]?, n: Int, i: Int, acc: List[String]?) -> List[String]? =
+  if i >= n then acc
+  else {
+    let x = prim.load_str(h + 12 + i * 8)
+    let nacc = f(acc, x)
+    __fold_ols_loop(h, f, n, i + 1, nacc)
+  }
 
 fn list_fold_ols(xs: List[String], init: List[String]?, f: (List[String]?, String) -> List[String]?) -> List[String]? = {
   let h = prim.handle(xs)
@@ -13748,12 +13893,13 @@ fn list_fold_ols(xs: List[String], init: List[String]?, f: (List[String]?, Strin
 
 
 
-fn __fold_str_hacc_loop(h: Int, f: (Value, String) -> Value, n: Int, i: Int, acc: Value) -> Value = if i >= n then acc
-else {
-  let x = prim.load_str(h + 12 + i * 8)
-  let nacc = f(acc, x)
-  __fold_str_hacc_loop(h, f, n, i + 1, nacc)
-}
+fn __fold_str_hacc_loop(h: Int, f: (Value, String) -> Value, n: Int, i: Int, acc: Value) -> Value =
+  if i >= n then acc
+  else {
+    let x = prim.load_str(h + 12 + i * 8)
+    let nacc = f(acc, x)
+    __fold_str_hacc_loop(h, f, n, i + 1, nacc)
+  }
 
 fn list_fold_str_hacc(xs: List[String], init: Value, f: (Value, String) -> Value) -> Value = {
   let h = prim.handle(xs)
@@ -13978,13 +14124,14 @@ fn __lshu_val(hit: Bool, addr: Int, old: Value, f: (Value) -> Value) -> Int = if
   0
 }
 
-fn __lshu_fill(sh: Int, bh: Int, n: Int, i: Int, f: (Value) -> Value, j: Int) -> Int = if j >= n then 0
-else {
-  let old: Value = prim.load_handle(sh + 12 + j * 8)
-  let hit = j == i
-  let _s = __lshu_val(hit, bh + 12 + j * 8, old, f)
-  __lshu_fill(sh, bh, n, i, f, j + 1)
-}
+fn __lshu_fill(sh: Int, bh: Int, n: Int, i: Int, f: (Value) -> Value, j: Int) -> Int =
+  if j >= n then 0
+  else {
+    let old: Value = prim.load_handle(sh + 12 + j * 8)
+    let hit = j == i
+    let _s = __lshu_val(hit, bh + 12 + j * 8, old, f)
+    __lshu_fill(sh, bh, n, i, f, j + 1)
+  }
 
 fn list_update_heapelem(xs: List[Value], i: Int, f: (Value) -> Value) -> List[Value] = {
   let h = prim.handle(xs)
@@ -14015,17 +14162,18 @@ fn list_insert_heapelem(xs: List[Value], i: Int, x: Value) -> List[Value] = {
   buf
 }
 
-fn __lsh_remove_fill(srcbase: Int, dstbase: Int, n: Int, i: Int, oob: Int) -> Int = if oob == 1 then __lsh_copy(
-  srcbase,
-  dstbase,
-  n,
-  0,
-)
-else {
-  let _a = __lsh_copy(srcbase, dstbase, i, 0)
-  let i1 = i + 1
-  __lsh_copy(srcbase + i1 * 8, dstbase + i * 8, n - i1, 0)
-}
+fn __lsh_remove_fill(srcbase: Int, dstbase: Int, n: Int, i: Int, oob: Int) -> Int =
+  if oob == 1 then __lsh_copy(
+    srcbase,
+    dstbase,
+    n,
+    0,
+  )
+  else {
+    let _a = __lsh_copy(srcbase, dstbase, i, 0)
+    let i1 = i + 1
+    __lsh_copy(srcbase + i1 * 8, dstbase + i * 8, n - i1, 0)
+  }
 
 
 
@@ -14563,17 +14711,18 @@ fn list_insert_str(xs: List[String], i: Int, x: String) -> List[String] = {
   buf
 }
 
-fn __ls_remove_fill(srcbase: Int, dstbase: Int, n: Int, i: Int, oob: Int) -> Int = if oob == 1 then __copy_slots_rc(
-  srcbase,
-  dstbase,
-  n,
-  0,
-)
-else {
-  let _a = __copy_slots_rc(srcbase, dstbase, i, 0)
-  let i1 = i + 1
-  __copy_slots_rc(srcbase + i1 * 8, dstbase + i * 8, n - i1, 0)
-}
+fn __ls_remove_fill(srcbase: Int, dstbase: Int, n: Int, i: Int, oob: Int) -> Int =
+  if oob == 1 then __copy_slots_rc(
+    srcbase,
+    dstbase,
+    n,
+    0,
+  )
+  else {
+    let _a = __copy_slots_rc(srcbase, dstbase, i, 0)
+    let i1 = i + 1
+    __copy_slots_rc(srcbase + i1 * 8, dstbase + i * 8, n - i1, 0)
+  }
 
 fn list_remove_at_str(xs: List[String], i: Int) -> List[String] = {
   let h = prim.handle(xs)
@@ -14634,13 +14783,14 @@ fn __lsu_val_str(hit: Bool, addr: Int, old: String, f: (String) -> String) -> In
   0
 }
 
-fn __lsu_fill_str(sh: Int, bh: Int, n: Int, i: Int, f: (String) -> String, j: Int) -> Int = if j >= n then 0
-else {
-  let old = prim.load_str(sh + 12 + j * 8)
-  let hit = j == i
-  let _s = __lsu_val_str(hit, bh + 12 + j * 8, old, f)
-  __lsu_fill_str(sh, bh, n, i, f, j + 1)
-}
+fn __lsu_fill_str(sh: Int, bh: Int, n: Int, i: Int, f: (String) -> String, j: Int) -> Int =
+  if j >= n then 0
+  else {
+    let old = prim.load_str(sh + 12 + j * 8)
+    let hit = j == i
+    let _s = __lsu_val_str(hit, bh + 12 + j * 8, old, f)
+    __lsu_fill_str(sh, bh, n, i, f, j + 1)
+  }
 
 fn list_update_str(xs: List[String], i: Int, f: (String) -> String) -> List[String] = {
   let h = prim.handle(xs)
@@ -14671,13 +14821,14 @@ fn __lsuv_val(hit: Bool, addr: Int, old: Value, f: (Value) -> Value) -> Int = if
   0
 }
 
-fn __lsuv_fill(sh: Int, bh: Int, n: Int, i: Int, f: (Value) -> Value, j: Int) -> Int = if j >= n then 0
-else {
-  let old: Value = prim.load_handle(sh + 12 + j * 8)
-  let hit = j == i
-  let _s = __lsuv_val(hit, bh + 12 + j * 8, old, f)
-  __lsuv_fill(sh, bh, n, i, f, j + 1)
-}
+fn __lsuv_fill(sh: Int, bh: Int, n: Int, i: Int, f: (Value) -> Value, j: Int) -> Int =
+  if j >= n then 0
+  else {
+    let old: Value = prim.load_handle(sh + 12 + j * 8)
+    let hit = j == i
+    let _s = __lsuv_val(hit, bh + 12 + j * 8, old, f)
+    __lsuv_fill(sh, bh, n, i, f, j + 1)
+  }
 
 fn list_update_value(xs: List[Value], i: Int, f: (Value) -> Value) -> List[Value] = {
   let h = prim.handle(xs)
@@ -14769,22 +14920,23 @@ fn list_insert(xs: List[Int], i: Int, x: Int) -> List[Int] = {
 
 
 
-fn __remove_fill(srcbase: Int, dstbase: Int, n: Int, i: Int, oob: Int) -> Int = if oob == 1 then __copy_slots(
-  srcbase,
-  dstbase,
-  n,
-  0,
-)
-else {
-  let _a = __copy_slots(srcbase, dstbase, i, 0)
+fn __remove_fill(srcbase: Int, dstbase: Int, n: Int, i: Int, oob: Int) -> Int =
+  if oob == 1 then __copy_slots(
+    srcbase,
+    dstbase,
+    n,
+    0,
+  )
+  else {
+    let _a = __copy_slots(srcbase, dstbase, i, 0)
 
-  let i1 = i + 1
-  let src_suf = srcbase + i1 * 8
-  let dst_suf = dstbase + i * 8
-  let cnt = n - i1
+    let i1 = i + 1
+    let src_suf = srcbase + i1 * 8
+    let dst_suf = dstbase + i * 8
+    let cnt = n - i1
 
-  __copy_slots(src_suf, dst_suf, cnt, 0)
-}
+    __copy_slots(src_suf, dst_suf, cnt, 0)
+  }
 
 fn list_remove_at(xs: List[Int], i: Int) -> List[Int] = {
   let h = prim.handle(xs)
@@ -14916,15 +15068,16 @@ pub const SRC_LIST_ORD_COMPOUND: &str = r#"
 
 
 
-fn __ordc_strcmp_at(ah: Int, bh: Int, la: Int, lb: Int, k: Int) -> Int = if k >= la then (if k >= lb then 0 else 0 - 1)
-else if k >= lb then 1
-else {
-  let ca = prim.load8(ah + 12 + k)
-  let cb = prim.load8(bh + 12 + k)
-  if ca < cb then 0 - 1
-  else if ca > cb then 1
-  else __ordc_strcmp_at(ah, bh, la, lb, k + 1)
-}
+fn __ordc_strcmp_at(ah: Int, bh: Int, la: Int, lb: Int, k: Int) -> Int =
+  if k >= la then (if k >= lb then 0 else 0 - 1)
+  else if k >= lb then 1
+  else {
+    let ca = prim.load8(ah + 12 + k)
+    let cb = prim.load8(bh + 12 + k)
+    if ca < cb then 0 - 1
+    else if ca > cb then 1
+    else __ordc_strcmp_at(ah, bh, la, lb, k + 1)
+  }
 
 fn __ordc_strcmp(ah: Int, bh: Int) -> Int = __ordc_strcmp_at(
   ah,
@@ -14948,13 +15101,14 @@ fn __cmp_tsstr(a: Int, b: Int) -> Int = {
   if c0 != 0 then c0 else __ordc_strcmp(prim.load64(a + 20), prim.load64(b + 20))
 }
 
-fn __cmp_lint_at(a: Int, b: Int, la: Int, lb: Int, k: Int) -> Int = if k >= la then (if k >= lb then 0 else 0 - 1)
-else if k >= lb then 1
-else {
-  let c = __ordc_icmp(prim.load64(a + 12 + k * 8), prim.load64(b + 12 + k * 8))
-  if c != 0 then c
-  else __cmp_lint_at(a, b, la, lb, k + 1)
-}
+fn __cmp_lint_at(a: Int, b: Int, la: Int, lb: Int, k: Int) -> Int =
+  if k >= la then (if k >= lb then 0 else 0 - 1)
+  else if k >= lb then 1
+  else {
+    let c = __ordc_icmp(prim.load64(a + 12 + k * 8), prim.load64(b + 12 + k * 8))
+    if c != 0 then c
+    else __cmp_lint_at(a, b, la, lb, k + 1)
+  }
 
 fn __cmp_lint(a: Int, b: Int) -> Int = __cmp_lint_at(
   a,
@@ -14964,13 +15118,14 @@ fn __cmp_lint(a: Int, b: Int) -> Int = __cmp_lint_at(
   0,
 )
 
-fn __cmp_lstr_at(a: Int, b: Int, la: Int, lb: Int, k: Int) -> Int = if k >= la then (if k >= lb then 0 else 0 - 1)
-else if k >= lb then 1
-else {
-  let c = __ordc_strcmp(prim.load64(a + 12 + k * 8), prim.load64(b + 12 + k * 8))
-  if c != 0 then c
-  else __cmp_lstr_at(a, b, la, lb, k + 1)
-}
+fn __cmp_lstr_at(a: Int, b: Int, la: Int, lb: Int, k: Int) -> Int =
+  if k >= la then (if k >= lb then 0 else 0 - 1)
+  else if k >= lb then 1
+  else {
+    let c = __ordc_strcmp(prim.load64(a + 12 + k * 8), prim.load64(b + 12 + k * 8))
+    if c != 0 then c
+    else __cmp_lstr_at(a, b, la, lb, k + 1)
+  }
 
 fn __cmp_lstr(a: Int, b: Int) -> Int = __cmp_lstr_at(
   a,
@@ -15006,35 +15161,38 @@ else if sel == 2 then __cmp_lint(a, b) else __cmp_oint(a, b)
 
 
 
-fn __ordc_mrun(sel: Int, srch: Int, dsth: Int, mid: Int, hi: Int, i: Int, j: Int, k: Int) -> Int = if k >= hi then 0
-else {
-  let takel = if j >= hi then true
-  else if i >= mid then false
-  else __ordc_cmp(sel, prim.load64(srch + 12 + i * 8), prim.load64(srch + 12 + j * 8)) <= 0
-  if takel then {
-    prim.store64(dsth + 12 + k * 8, prim.load64(srch + 12 + i * 8))
-    __ordc_mrun(sel, srch, dsth, mid, hi, i + 1, j, k + 1)
-  } else {
-    prim.store64(dsth + 12 + k * 8, prim.load64(srch + 12 + j * 8))
-    __ordc_mrun(sel, srch, dsth, mid, hi, i, j + 1, k + 1)
+fn __ordc_mrun(sel: Int, srch: Int, dsth: Int, mid: Int, hi: Int, i: Int, j: Int, k: Int) -> Int =
+  if k >= hi then 0
+  else {
+    let takel = if j >= hi then true
+    else if i >= mid then false
+    else __ordc_cmp(sel, prim.load64(srch + 12 + i * 8), prim.load64(srch + 12 + j * 8)) <= 0
+    if takel then {
+      prim.store64(dsth + 12 + k * 8, prim.load64(srch + 12 + i * 8))
+      __ordc_mrun(sel, srch, dsth, mid, hi, i + 1, j, k + 1)
+    } else {
+      prim.store64(dsth + 12 + k * 8, prim.load64(srch + 12 + j * 8))
+      __ordc_mrun(sel, srch, dsth, mid, hi, i, j + 1, k + 1)
+    }
   }
-}
 
-fn __ordc_mpass(sel: Int, srch: Int, dsth: Int, n: Int, width: Int, lo: Int) -> Int = if lo >= n then 0
-else {
-  let m0 = lo + width
-  let mid = if m0 > n then n else m0
-  let h0 = lo + width * 2
-  let hi = if h0 > n then n else h0
-  let _r = __ordc_mrun(sel, srch, dsth, mid, hi, lo, mid, lo)
-  __ordc_mpass(sel, srch, dsth, n, width, lo + width * 2)
-}
+fn __ordc_mpass(sel: Int, srch: Int, dsth: Int, n: Int, width: Int, lo: Int) -> Int =
+  if lo >= n then 0
+  else {
+    let m0 = lo + width
+    let mid = if m0 > n then n else m0
+    let h0 = lo + width * 2
+    let hi = if h0 > n then n else h0
+    let _r = __ordc_mrun(sel, srch, dsth, mid, hi, lo, mid, lo)
+    __ordc_mpass(sel, srch, dsth, n, width, lo + width * 2)
+  }
 
-fn __ordc_mrounds(sel: Int, curh: Int, othh: Int, n: Int, width: Int) -> Int = if width >= n then curh
-else {
-  let _p = __ordc_mpass(sel, curh, othh, n, width, 0)
-  __ordc_mrounds(sel, othh, curh, n, width * 2)
-}
+fn __ordc_mrounds(sel: Int, curh: Int, othh: Int, n: Int, width: Int) -> Int =
+  if width >= n then curh
+  else {
+    let _p = __ordc_mpass(sel, curh, othh, n, width, 0)
+    __ordc_mrounds(sel, othh, curh, n, width * 2)
+  }
 
 fn __ordc_copy(srch: Int, dsth: Int, n: Int, i: Int) -> Int = if i >= n then 0
 else {
@@ -15408,17 +15566,18 @@ pub const SRC_LIST_PARTITION: &str = r#"
 
 
 
-fn __lpart_fill(yh: Int, nh: Int, sh: Int, f: (Int) -> Bool, n: Int, i: Int, yi: Int, ni: Int) -> Int = if i >= n then yi * 1048576 + ni
-else {
-  let v = prim.load64(sh + 12 + i * 8)
-  if f(v) then {
-    prim.store64(yh + 12 + yi * 8, v)
-    __lpart_fill(yh, nh, sh, f, n, i + 1, yi + 1, ni)
-  } else {
-    prim.store64(nh + 12 + ni * 8, v)
-    __lpart_fill(yh, nh, sh, f, n, i + 1, yi, ni + 1)
+fn __lpart_fill(yh: Int, nh: Int, sh: Int, f: (Int) -> Bool, n: Int, i: Int, yi: Int, ni: Int) -> Int =
+  if i >= n then yi * 1048576 + ni
+  else {
+    let v = prim.load64(sh + 12 + i * 8)
+    if f(v) then {
+      prim.store64(yh + 12 + yi * 8, v)
+      __lpart_fill(yh, nh, sh, f, n, i + 1, yi + 1, ni)
+    } else {
+      prim.store64(nh + 12 + ni * 8, v)
+      __lpart_fill(yh, nh, sh, f, n, i + 1, yi, ni + 1)
+    }
   }
-}
 
 fn list_partition(xs: List[Int], f: (Int) -> Bool) -> (List[Int], List[Int]) = {
   let n = list.len(xs)
@@ -15430,19 +15589,20 @@ fn list_partition(xs: List[Int], f: (Int) -> Bool) -> (List[Int], List[Int]) = {
   (yes, no)
 }
 
-fn __lpart_fill_rc(yh: Int, nh: Int, sh: Int, f: (Int) -> Bool, n: Int, i: Int, yi: Int, ni: Int) -> Int = if i >= n then yi * 1048576 + ni
-else {
-  let v = prim.load64(sh + 12 + i * 8)
-  if f(v) then {
-    prim.rc_inc(v)
-    prim.store64(yh + 12 + yi * 8, v)
-    __lpart_fill_rc(yh, nh, sh, f, n, i + 1, yi + 1, ni)
-  } else {
-    prim.rc_inc(v)
-    prim.store64(nh + 12 + ni * 8, v)
-    __lpart_fill_rc(yh, nh, sh, f, n, i + 1, yi, ni + 1)
+fn __lpart_fill_rc(yh: Int, nh: Int, sh: Int, f: (Int) -> Bool, n: Int, i: Int, yi: Int, ni: Int) -> Int =
+  if i >= n then yi * 1048576 + ni
+  else {
+    let v = prim.load64(sh + 12 + i * 8)
+    if f(v) then {
+      prim.rc_inc(v)
+      prim.store64(yh + 12 + yi * 8, v)
+      __lpart_fill_rc(yh, nh, sh, f, n, i + 1, yi + 1, ni)
+    } else {
+      prim.rc_inc(v)
+      prim.store64(nh + 12 + ni * 8, v)
+      __lpart_fill_rc(yh, nh, sh, f, n, i + 1, yi, ni + 1)
+    }
   }
-}
 
 fn list_partition_rc(xs: List[Int], f: (Int) -> Bool) -> (List[Int], List[Int]) = {
   let n = list.len(xs)
@@ -15487,12 +15647,13 @@ pub const SRC_LIST_REDUCE: &str = r#"
 
 
 
-fn __reduce_loop(sh: Int, f: (Int, Int) -> Int, n: Int, i: Int, acc: Int) -> Int = if i >= n then acc
-else {
-  let x = prim.load64(sh + 12 + i * 8)
-  let nacc = f(acc, x)
-  __reduce_loop(sh, f, n, i + 1, nacc)
-}
+fn __reduce_loop(sh: Int, f: (Int, Int) -> Int, n: Int, i: Int, acc: Int) -> Int =
+  if i >= n then acc
+  else {
+    let x = prim.load64(sh + 12 + i * 8)
+    let nacc = f(acc, x)
+    __reduce_loop(sh, f, n, i + 1, nacc)
+  }
 
 fn __reduce_none() -> Int? = none
 
@@ -15581,13 +15742,14 @@ pub const SRC_LIST_SCAN: &str = r#"
 
 
 
-fn __scan_fill(dh: Int, sh: Int, f: (Int, Int) -> Int, n: Int, i: Int, acc: Int) -> Int = if i >= n then 0
-else {
-  let x = prim.load64(sh + 12 + i * 8)
-  let nacc = f(acc, x)
-  prim.store64(dh + 12 + i * 8, nacc)
-  __scan_fill(dh, sh, f, n, i + 1, nacc)
-}
+fn __scan_fill(dh: Int, sh: Int, f: (Int, Int) -> Int, n: Int, i: Int, acc: Int) -> Int =
+  if i >= n then 0
+  else {
+    let x = prim.load64(sh + 12 + i * 8)
+    let nacc = f(acc, x)
+    prim.store64(dh + 12 + i * 8, nacc)
+    __scan_fill(dh, sh, f, n, i + 1, nacc)
+  }
 
 fn list_scan(xs: List[Int], init: Int, f: (Int, Int) -> Int) -> List[Int] = {
   let n = list.len(xs)
@@ -15602,14 +15764,15 @@ fn list_scan(xs: List[Int], init: Int, f: (Int, Int) -> Int) -> List[Int] = {
 
 
 
-fn __scan_str_fill(dh: Int, sh: Int, f: (String, Int) -> String, n: Int, i: Int, acc: String) -> Int = if i >= n then 0
-else {
-  let x = prim.load64(sh + 12 + i * 8)
-  let nacc = f(acc, x)
-  prim.store_str(dh + 12 + i * 8, nacc)
-  let nb = prim.load_str(dh + 12 + i * 8)
-  __scan_str_fill(dh, sh, f, n, i + 1, nb)
-}
+fn __scan_str_fill(dh: Int, sh: Int, f: (String, Int) -> String, n: Int, i: Int, acc: String) -> Int =
+  if i >= n then 0
+  else {
+    let x = prim.load64(sh + 12 + i * 8)
+    let nacc = f(acc, x)
+    prim.store_str(dh + 12 + i * 8, nacc)
+    let nb = prim.load_str(dh + 12 + i * 8)
+    __scan_str_fill(dh, sh, f, n, i + 1, nb)
+  }
 
 fn list_scan_str(xs: List[Int], init: String, f: (String, Int) -> String) -> List[String] = {
   let n = list.len(xs)
@@ -15695,18 +15858,19 @@ fn __sort_load(h: Int, i: Int) -> Int = prim.load64(h + 12 + i * 8)
 
 
 
-fn __merge_run(srch: Int, dsth: Int, mid: Int, hi: Int, i: Int, j: Int, k: Int) -> Int = if k >= hi then 0
-else {
-  let takel = if j >= hi then true
-  else if i >= mid then false else __sort_load(srch, i) <= __sort_load(srch, j)
-  if takel then {
-    prim.store64(dsth + 12 + k * 8, __sort_load(srch, i))
-    __merge_run(srch, dsth, mid, hi, i + 1, j, k + 1)
-  } else {
-    prim.store64(dsth + 12 + k * 8, __sort_load(srch, j))
-    __merge_run(srch, dsth, mid, hi, i, j + 1, k + 1)
+fn __merge_run(srch: Int, dsth: Int, mid: Int, hi: Int, i: Int, j: Int, k: Int) -> Int =
+  if k >= hi then 0
+  else {
+    let takel = if j >= hi then true
+    else if i >= mid then false else __sort_load(srch, i) <= __sort_load(srch, j)
+    if takel then {
+      prim.store64(dsth + 12 + k * 8, __sort_load(srch, i))
+      __merge_run(srch, dsth, mid, hi, i + 1, j, k + 1)
+    } else {
+      prim.store64(dsth + 12 + k * 8, __sort_load(srch, j))
+      __merge_run(srch, dsth, mid, hi, i, j + 1, k + 1)
+    }
   }
-}
 
 
 
@@ -15756,15 +15920,16 @@ fn list_sort(xs: List[Int]) -> List[Int] = {
 
 
 
-fn __strcmp_at(ah: Int, bh: Int, la: Int, lb: Int, k: Int) -> Int = if k >= la then (if k >= lb then 0 else 0 - 1)
-else if k >= lb then 1
-else {
-  let ca = prim.load8(ah + 12 + k)
-  let cb = prim.load8(bh + 12 + k)
-  if ca < cb then 0 - 1
-  else if ca > cb then 1
-  else __strcmp_at(ah, bh, la, lb, k + 1)
-}
+fn __strcmp_at(ah: Int, bh: Int, la: Int, lb: Int, k: Int) -> Int =
+  if k >= la then (if k >= lb then 0 else 0 - 1)
+  else if k >= lb then 1
+  else {
+    let ca = prim.load8(ah + 12 + k)
+    let cb = prim.load8(bh + 12 + k)
+    if ca < cb then 0 - 1
+    else if ca > cb then 1
+    else __strcmp_at(ah, bh, la, lb, k + 1)
+  }
 
 fn __strcmp(ah: Int, bh: Int) -> Int = __strcmp_at(
   ah,
@@ -15788,21 +15953,23 @@ else {
 
 
 
-fn __merge_run_str(srch: Int, dsth: Int, mid: Int, hi: Int, i: Int, j: Int, k: Int) -> Int = if k >= hi then 0
-else {
-  let takel = if j >= hi then true
-  else if i >= mid then false else __strcmp(
-    prim.load64(srch + 12 + i * 8),
-    prim.load64(srch + 12 + j * 8),
-  ) <= 0
-  if takel then {
-    prim.store64(dsth + 12 + k * 8, prim.load64(srch + 12 + i * 8))
-    __merge_run_str(srch, dsth, mid, hi, i + 1, j, k + 1)
-  } else {
-    prim.store64(dsth + 12 + k * 8, prim.load64(srch + 12 + j * 8))
-    __merge_run_str(srch, dsth, mid, hi, i, j + 1, k + 1)
+fn __merge_run_str(srch: Int, dsth: Int, mid: Int, hi: Int, i: Int, j: Int, k: Int) -> Int =
+  if k >= hi then 0
+  else {
+    let takel = if j >= hi then true
+    else if i >= mid then false
+    else __strcmp(
+      prim.load64(srch + 12 + i * 8),
+      prim.load64(srch + 12 + j * 8),
+    ) <= 0
+    if takel then {
+      prim.store64(dsth + 12 + k * 8, prim.load64(srch + 12 + i * 8))
+      __merge_run_str(srch, dsth, mid, hi, i + 1, j, k + 1)
+    } else {
+      prim.store64(dsth + 12 + k * 8, prim.load64(srch + 12 + j * 8))
+      __merge_run_str(srch, dsth, mid, hi, i, j + 1, k + 1)
+    }
   }
-}
 
 fn __merge_pass_str(srch: Int, dsth: Int, n: Int, width: Int, lo: Int) -> Int = if lo >= n then 0
 else {
@@ -15887,36 +16054,39 @@ pub const SRC_LIST_SORT_BY_KEYS: &str = r#"
 
 
 
-fn __sbk_mrun(svh: Int, skh: Int, dvh: Int, dkh: Int, mid: Int, hi: Int, i: Int, j: Int, k: Int) -> Int = if k >= hi then 0
-else {
-  let takel = if j >= hi then true
-  else if i >= mid then false else prim.load64(skh + 12 + i * 8) <= prim.load64(skh + 12 + j * 8)
-  if takel then {
-    prim.store64(dvh + 12 + k * 8, prim.load64(svh + 12 + i * 8))
-    prim.store64(dkh + 12 + k * 8, prim.load64(skh + 12 + i * 8))
-    __sbk_mrun(svh, skh, dvh, dkh, mid, hi, i + 1, j, k + 1)
-  } else {
-    prim.store64(dvh + 12 + k * 8, prim.load64(svh + 12 + j * 8))
-    prim.store64(dkh + 12 + k * 8, prim.load64(skh + 12 + j * 8))
-    __sbk_mrun(svh, skh, dvh, dkh, mid, hi, i, j + 1, k + 1)
+fn __sbk_mrun(svh: Int, skh: Int, dvh: Int, dkh: Int, mid: Int, hi: Int, i: Int, j: Int, k: Int) -> Int =
+  if k >= hi then 0
+  else {
+    let takel = if j >= hi then true
+    else if i >= mid then false else prim.load64(skh + 12 + i * 8) <= prim.load64(skh + 12 + j * 8)
+    if takel then {
+      prim.store64(dvh + 12 + k * 8, prim.load64(svh + 12 + i * 8))
+      prim.store64(dkh + 12 + k * 8, prim.load64(skh + 12 + i * 8))
+      __sbk_mrun(svh, skh, dvh, dkh, mid, hi, i + 1, j, k + 1)
+    } else {
+      prim.store64(dvh + 12 + k * 8, prim.load64(svh + 12 + j * 8))
+      prim.store64(dkh + 12 + k * 8, prim.load64(skh + 12 + j * 8))
+      __sbk_mrun(svh, skh, dvh, dkh, mid, hi, i, j + 1, k + 1)
+    }
   }
-}
 
-fn __sbk_mpass(svh: Int, skh: Int, dvh: Int, dkh: Int, n: Int, width: Int, lo: Int) -> Int = if lo >= n then 0
-else {
-  let m0 = lo + width
-  let mid = if m0 > n then n else m0
-  let h0 = lo + width * 2
-  let hi = if h0 > n then n else h0
-  let _r = __sbk_mrun(svh, skh, dvh, dkh, mid, hi, lo, mid, lo)
-  __sbk_mpass(svh, skh, dvh, dkh, n, width, lo + width * 2)
-}
+fn __sbk_mpass(svh: Int, skh: Int, dvh: Int, dkh: Int, n: Int, width: Int, lo: Int) -> Int =
+  if lo >= n then 0
+  else {
+    let m0 = lo + width
+    let mid = if m0 > n then n else m0
+    let h0 = lo + width * 2
+    let hi = if h0 > n then n else h0
+    let _r = __sbk_mrun(svh, skh, dvh, dkh, mid, hi, lo, mid, lo)
+    __sbk_mpass(svh, skh, dvh, dkh, n, width, lo + width * 2)
+  }
 
-fn __sbk_mrounds(cvh: Int, ckh: Int, ovh: Int, okh: Int, n: Int, width: Int) -> Int = if width >= n then cvh
-else {
-  let _p = __sbk_mpass(cvh, ckh, ovh, okh, n, width, 0)
-  __sbk_mrounds(ovh, okh, cvh, ckh, n, width * 2)
-}
+fn __sbk_mrounds(cvh: Int, ckh: Int, ovh: Int, okh: Int, n: Int, width: Int) -> Int =
+  if width >= n then cvh
+  else {
+    let _p = __sbk_mpass(cvh, ckh, ovh, okh, n, width, 0)
+    __sbk_mrounds(ovh, okh, cvh, ckh, n, width * 2)
+  }
 
 fn __sbk_mcopy(srch: Int, dsth: Int, n: Int, i: Int) -> Int = if i >= n then 0
 else {
@@ -15965,14 +16135,15 @@ pub const SRC_LIST_SORT_BY_STR_KEY: &str = r#"
 
 
 
-fn __sbs_init(bh: Int, sh: Int, kh: Int, f: (Int) -> String, n: Int, i: Int) -> Int = if i >= n then 0
-else {
-  let v = prim.load64(sh + 12 + i * 8)
-  let k = f(v)
-  prim.store64(bh + 12 + i * 8, v)
-  prim.store_str(kh + 12 + i * 8, k)
-  __sbs_init(bh, sh, kh, f, n, i + 1)
-}
+fn __sbs_init(bh: Int, sh: Int, kh: Int, f: (Int) -> String, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let v = prim.load64(sh + 12 + i * 8)
+    let k = f(v)
+    prim.store64(bh + 12 + i * 8, v)
+    prim.store_str(kh + 12 + i * 8, k)
+    __sbs_init(bh, sh, kh, f, n, i + 1)
+  }
 
 
 
@@ -16005,39 +16176,42 @@ fn __sbs_le_h(ah: Int, bh: Int) -> Bool = __sbs_cmp_at(
 
 
 
-fn __sbs_mrun(svh: Int, skh: Int, dvh: Int, dkh: Int, mid: Int, hi: Int, i: Int, j: Int, k: Int) -> Int = if k >= hi then 0
-else {
-  let takel = if j >= hi then true
-  else if i >= mid then false else __sbs_le_h(
-    prim.load64(skh + 12 + i * 8),
-    prim.load64(skh + 12 + j * 8),
-  )
-  if takel then {
-    prim.store64(dvh + 12 + k * 8, prim.load64(svh + 12 + i * 8))
-    prim.store64(dkh + 12 + k * 8, prim.load64(skh + 12 + i * 8))
-    __sbs_mrun(svh, skh, dvh, dkh, mid, hi, i + 1, j, k + 1)
-  } else {
-    prim.store64(dvh + 12 + k * 8, prim.load64(svh + 12 + j * 8))
-    prim.store64(dkh + 12 + k * 8, prim.load64(skh + 12 + j * 8))
-    __sbs_mrun(svh, skh, dvh, dkh, mid, hi, i, j + 1, k + 1)
+fn __sbs_mrun(svh: Int, skh: Int, dvh: Int, dkh: Int, mid: Int, hi: Int, i: Int, j: Int, k: Int) -> Int =
+  if k >= hi then 0
+  else {
+    let takel = if j >= hi then true
+    else if i >= mid then false else __sbs_le_h(
+      prim.load64(skh + 12 + i * 8),
+      prim.load64(skh + 12 + j * 8),
+    )
+    if takel then {
+      prim.store64(dvh + 12 + k * 8, prim.load64(svh + 12 + i * 8))
+      prim.store64(dkh + 12 + k * 8, prim.load64(skh + 12 + i * 8))
+      __sbs_mrun(svh, skh, dvh, dkh, mid, hi, i + 1, j, k + 1)
+    } else {
+      prim.store64(dvh + 12 + k * 8, prim.load64(svh + 12 + j * 8))
+      prim.store64(dkh + 12 + k * 8, prim.load64(skh + 12 + j * 8))
+      __sbs_mrun(svh, skh, dvh, dkh, mid, hi, i, j + 1, k + 1)
+    }
   }
-}
 
-fn __sbs_mpass(svh: Int, skh: Int, dvh: Int, dkh: Int, n: Int, width: Int, lo: Int) -> Int = if lo >= n then 0
-else {
-  let m0 = lo + width
-  let mid = if m0 > n then n else m0
-  let h0 = lo + width * 2
-  let hi = if h0 > n then n else h0
-  let _r = __sbs_mrun(svh, skh, dvh, dkh, mid, hi, lo, mid, lo)
-  __sbs_mpass(svh, skh, dvh, dkh, n, width, lo + width * 2)
-}
+fn __sbs_mpass(svh: Int, skh: Int, dvh: Int, dkh: Int, n: Int, width: Int, lo: Int) -> Int =
+  if lo >= n then 0
+  else {
+    let m0 = lo + width
+    let mid = if m0 > n then n else m0
+    let h0 = lo + width * 2
+    let hi = if h0 > n then n else h0
+    let _r = __sbs_mrun(svh, skh, dvh, dkh, mid, hi, lo, mid, lo)
+    __sbs_mpass(svh, skh, dvh, dkh, n, width, lo + width * 2)
+  }
 
-fn __sbs_mrounds(cvh: Int, ckh: Int, ovh: Int, okh: Int, n: Int, width: Int) -> Int = if width >= n then cvh
-else {
-  let _p = __sbs_mpass(cvh, ckh, ovh, okh, n, width, 0)
-  __sbs_mrounds(ovh, okh, cvh, ckh, n, width * 2)
-}
+fn __sbs_mrounds(cvh: Int, ckh: Int, ovh: Int, okh: Int, n: Int, width: Int) -> Int =
+  if width >= n then cvh
+  else {
+    let _p = __sbs_mpass(cvh, ckh, ovh, okh, n, width, 0)
+    __sbs_mrounds(ovh, okh, cvh, ckh, n, width * 2)
+  }
 
 fn __sbs_mcopy(srch: Int, dsth: Int, n: Int, i: Int) -> Int = if i >= n then 0
 else {
@@ -16077,15 +16251,16 @@ fn list_sort_by_str_key(xs: List[Int], f: (Int) -> String) -> List[Int] = {
 
 
 
-fn __sbsr_init(bh: Int, sh: Int, kh: Int, f: (Int) -> String, n: Int, i: Int) -> Int = if i >= n then 0
-else {
-  let v = prim.load64(sh + 12 + i * 8)
-  let k = f(v)
-  prim.rc_inc(v)
-  prim.store64(bh + 12 + i * 8, v)
-  prim.store_str(kh + 12 + i * 8, k)
-  __sbsr_init(bh, sh, kh, f, n, i + 1)
-}
+fn __sbsr_init(bh: Int, sh: Int, kh: Int, f: (Int) -> String, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let v = prim.load64(sh + 12 + i * 8)
+    let k = f(v)
+    prim.rc_inc(v)
+    prim.store64(bh + 12 + i * 8, v)
+    prim.store_str(kh + 12 + i * 8, k)
+    __sbsr_init(bh, sh, kh, f, n, i + 1)
+  }
 
 fn list_sort_by_str_key_rc(xs: List[Int], f: (Int) -> String) -> List[Int] = {
   let n = list.len(xs)
@@ -16117,18 +16292,19 @@ fn __sortf_load(h: Int, i: Int) -> Int = prim.load64(h + 12 + i * 8)
 
 
 
-fn __sortf_mrun(srch: Int, dsth: Int, mid: Int, hi: Int, i: Int, j: Int, k: Int) -> Int = if k >= hi then 0
-else {
-  let takel = if j >= hi then true
-  else if i >= mid then false else __ftotal_sf(__sortf_load(srch, i)) <= __ftotal_sf(__sortf_load(srch, j))
-  if takel then {
-    prim.store64(dsth + 12 + k * 8, __sortf_load(srch, i))
-    __sortf_mrun(srch, dsth, mid, hi, i + 1, j, k + 1)
-  } else {
-    prim.store64(dsth + 12 + k * 8, __sortf_load(srch, j))
-    __sortf_mrun(srch, dsth, mid, hi, i, j + 1, k + 1)
+fn __sortf_mrun(srch: Int, dsth: Int, mid: Int, hi: Int, i: Int, j: Int, k: Int) -> Int =
+  if k >= hi then 0
+  else {
+    let takel = if j >= hi then true
+    else if i >= mid then false else __ftotal_sf(__sortf_load(srch, i)) <= __ftotal_sf(__sortf_load(srch, j))
+    if takel then {
+      prim.store64(dsth + 12 + k * 8, __sortf_load(srch, i))
+      __sortf_mrun(srch, dsth, mid, hi, i + 1, j, k + 1)
+    } else {
+      prim.store64(dsth + 12 + k * 8, __sortf_load(srch, j))
+      __sortf_mrun(srch, dsth, mid, hi, i, j + 1, k + 1)
+    }
   }
-}
 
 fn __sortf_mpass(srch: Int, dsth: Int, n: Int, width: Int, lo: Int) -> Int = if lo >= n then 0
 else {
@@ -16293,36 +16469,39 @@ else {
 
 
 
-fn __sb_mrun(svh: Int, skh: Int, dvh: Int, dkh: Int, mid: Int, hi: Int, i: Int, j: Int, k: Int) -> Int = if k >= hi then 0
-else {
-  let takel = if j >= hi then true
-  else if i >= mid then false else prim.load64(skh + 12 + i * 8) <= prim.load64(skh + 12 + j * 8)
-  if takel then {
-    prim.store64(dvh + 12 + k * 8, prim.load64(svh + 12 + i * 8))
-    prim.store64(dkh + 12 + k * 8, prim.load64(skh + 12 + i * 8))
-    __sb_mrun(svh, skh, dvh, dkh, mid, hi, i + 1, j, k + 1)
-  } else {
-    prim.store64(dvh + 12 + k * 8, prim.load64(svh + 12 + j * 8))
-    prim.store64(dkh + 12 + k * 8, prim.load64(skh + 12 + j * 8))
-    __sb_mrun(svh, skh, dvh, dkh, mid, hi, i, j + 1, k + 1)
+fn __sb_mrun(svh: Int, skh: Int, dvh: Int, dkh: Int, mid: Int, hi: Int, i: Int, j: Int, k: Int) -> Int =
+  if k >= hi then 0
+  else {
+    let takel = if j >= hi then true
+    else if i >= mid then false else prim.load64(skh + 12 + i * 8) <= prim.load64(skh + 12 + j * 8)
+    if takel then {
+      prim.store64(dvh + 12 + k * 8, prim.load64(svh + 12 + i * 8))
+      prim.store64(dkh + 12 + k * 8, prim.load64(skh + 12 + i * 8))
+      __sb_mrun(svh, skh, dvh, dkh, mid, hi, i + 1, j, k + 1)
+    } else {
+      prim.store64(dvh + 12 + k * 8, prim.load64(svh + 12 + j * 8))
+      prim.store64(dkh + 12 + k * 8, prim.load64(skh + 12 + j * 8))
+      __sb_mrun(svh, skh, dvh, dkh, mid, hi, i, j + 1, k + 1)
+    }
   }
-}
 
-fn __sb_mpass(svh: Int, skh: Int, dvh: Int, dkh: Int, n: Int, width: Int, lo: Int) -> Int = if lo >= n then 0
-else {
-  let m0 = lo + width
-  let mid = if m0 > n then n else m0
-  let h0 = lo + width * 2
-  let hi = if h0 > n then n else h0
-  let _r = __sb_mrun(svh, skh, dvh, dkh, mid, hi, lo, mid, lo)
-  __sb_mpass(svh, skh, dvh, dkh, n, width, lo + width * 2)
-}
+fn __sb_mpass(svh: Int, skh: Int, dvh: Int, dkh: Int, n: Int, width: Int, lo: Int) -> Int =
+  if lo >= n then 0
+  else {
+    let m0 = lo + width
+    let mid = if m0 > n then n else m0
+    let h0 = lo + width * 2
+    let hi = if h0 > n then n else h0
+    let _r = __sb_mrun(svh, skh, dvh, dkh, mid, hi, lo, mid, lo)
+    __sb_mpass(svh, skh, dvh, dkh, n, width, lo + width * 2)
+  }
 
-fn __sb_mrounds(cvh: Int, ckh: Int, ovh: Int, okh: Int, n: Int, width: Int) -> Int = if width >= n then cvh
-else {
-  let _p = __sb_mpass(cvh, ckh, ovh, okh, n, width, 0)
-  __sb_mrounds(ovh, okh, cvh, ckh, n, width * 2)
-}
+fn __sb_mrounds(cvh: Int, ckh: Int, ovh: Int, okh: Int, n: Int, width: Int) -> Int =
+  if width >= n then cvh
+  else {
+    let _p = __sb_mpass(cvh, ckh, ovh, okh, n, width, 0)
+    __sb_mrounds(ovh, okh, cvh, ckh, n, width * 2)
+  }
 
 fn __sb_mcopy(srch: Int, dsth: Int, n: Int, i: Int) -> Int = if i >= n then 0
 else {
@@ -16404,36 +16583,39 @@ else {
 
 
 
-fn __sbf_mrun(svh: Int, skh: Int, dvh: Int, dkh: Int, mid: Int, hi: Int, i: Int, j: Int, k: Int) -> Int = if k >= hi then 0
-else {
-  let takel = if j >= hi then true
-  else if i >= mid then false else prim.load64(skh + 12 + i * 8) <= prim.load64(skh + 12 + j * 8)
-  if takel then {
-    prim.store64(dvh + 12 + k * 8, prim.load64(svh + 12 + i * 8))
-    prim.store64(dkh + 12 + k * 8, prim.load64(skh + 12 + i * 8))
-    __sbf_mrun(svh, skh, dvh, dkh, mid, hi, i + 1, j, k + 1)
-  } else {
-    prim.store64(dvh + 12 + k * 8, prim.load64(svh + 12 + j * 8))
-    prim.store64(dkh + 12 + k * 8, prim.load64(skh + 12 + j * 8))
-    __sbf_mrun(svh, skh, dvh, dkh, mid, hi, i, j + 1, k + 1)
+fn __sbf_mrun(svh: Int, skh: Int, dvh: Int, dkh: Int, mid: Int, hi: Int, i: Int, j: Int, k: Int) -> Int =
+  if k >= hi then 0
+  else {
+    let takel = if j >= hi then true
+    else if i >= mid then false else prim.load64(skh + 12 + i * 8) <= prim.load64(skh + 12 + j * 8)
+    if takel then {
+      prim.store64(dvh + 12 + k * 8, prim.load64(svh + 12 + i * 8))
+      prim.store64(dkh + 12 + k * 8, prim.load64(skh + 12 + i * 8))
+      __sbf_mrun(svh, skh, dvh, dkh, mid, hi, i + 1, j, k + 1)
+    } else {
+      prim.store64(dvh + 12 + k * 8, prim.load64(svh + 12 + j * 8))
+      prim.store64(dkh + 12 + k * 8, prim.load64(skh + 12 + j * 8))
+      __sbf_mrun(svh, skh, dvh, dkh, mid, hi, i, j + 1, k + 1)
+    }
   }
-}
 
-fn __sbf_mpass(svh: Int, skh: Int, dvh: Int, dkh: Int, n: Int, width: Int, lo: Int) -> Int = if lo >= n then 0
-else {
-  let m0 = lo + width
-  let mid = if m0 > n then n else m0
-  let h0 = lo + width * 2
-  let hi = if h0 > n then n else h0
-  let _r = __sbf_mrun(svh, skh, dvh, dkh, mid, hi, lo, mid, lo)
-  __sbf_mpass(svh, skh, dvh, dkh, n, width, lo + width * 2)
-}
+fn __sbf_mpass(svh: Int, skh: Int, dvh: Int, dkh: Int, n: Int, width: Int, lo: Int) -> Int =
+  if lo >= n then 0
+  else {
+    let m0 = lo + width
+    let mid = if m0 > n then n else m0
+    let h0 = lo + width * 2
+    let hi = if h0 > n then n else h0
+    let _r = __sbf_mrun(svh, skh, dvh, dkh, mid, hi, lo, mid, lo)
+    __sbf_mpass(svh, skh, dvh, dkh, n, width, lo + width * 2)
+  }
 
-fn __sbf_mrounds(cvh: Int, ckh: Int, ovh: Int, okh: Int, n: Int, width: Int) -> Int = if width >= n then cvh
-else {
-  let _p = __sbf_mpass(cvh, ckh, ovh, okh, n, width, 0)
-  __sbf_mrounds(ovh, okh, cvh, ckh, n, width * 2)
-}
+fn __sbf_mrounds(cvh: Int, ckh: Int, ovh: Int, okh: Int, n: Int, width: Int) -> Int =
+  if width >= n then cvh
+  else {
+    let _p = __sbf_mpass(cvh, ckh, ovh, okh, n, width, 0)
+    __sbf_mrounds(ovh, okh, cvh, ckh, n, width * 2)
+  }
 
 fn __sbf_mcopy(srch: Int, dsth: Int, n: Int, i: Int) -> Int = if i >= n then 0
 else {
@@ -16544,13 +16726,14 @@ fn list_index_of_str(xs: List[String], x: String) -> Int? = {
 
 
 
-fn __list_str_count_hits(h: Int, f: (String) -> Bool, n: Int, i: Int, acc: Int) -> Int = if i >= n then acc
-else {
-  let x = prim.load_str(h + 12 + i * 8)
-  let hit = f(x)
-  if hit then __list_str_count_hits(h, f, n, i + 1, acc + 1)
-  else __list_str_count_hits(h, f, n, i + 1, acc)
-}
+fn __list_str_count_hits(h: Int, f: (String) -> Bool, n: Int, i: Int, acc: Int) -> Int =
+  if i >= n then acc
+  else {
+    let x = prim.load_str(h + 12 + i * 8)
+    let hit = f(x)
+    if hit then __list_str_count_hits(h, f, n, i + 1, acc + 1)
+    else __list_str_count_hits(h, f, n, i + 1, acc)
+  }
 
 fn list_any_str(xs: List[String], f: (String) -> Bool) -> Bool = {
   let h = prim.handle(xs)
@@ -16574,12 +16757,13 @@ fn list_count_str(xs: List[String], f: (String) -> Bool) -> Int = {
 
 
 
-fn __list_str_fold_loop(h: Int, f: (Int, String) -> Int, n: Int, i: Int, acc: Int) -> Int = if i >= n then acc
-else {
-  let x = prim.load_str(h + 12 + i * 8)
-  let nacc = f(acc, x)
-  __list_str_fold_loop(h, f, n, i + 1, nacc)
-}
+fn __list_str_fold_loop(h: Int, f: (Int, String) -> Int, n: Int, i: Int, acc: Int) -> Int =
+  if i >= n then acc
+  else {
+    let x = prim.load_str(h + 12 + i * 8)
+    let nacc = f(acc, x)
+    __list_str_fold_loop(h, f, n, i + 1, nacc)
+  }
 
 fn list_fold_str(xs: List[String], init: Int, f: (Int, String) -> Int) -> Int = {
   let h = prim.handle(xs)
@@ -16606,8 +16790,9 @@ fn __list_find_str_at(h: Int, f: (String) -> Bool, n: Int, i: Int) -> String? = 
   else __list_find_str_loop(h, f, n, i + 1)
 }
 
-fn __list_find_str_loop(h: Int, f: (String) -> Bool, n: Int, i: Int) -> String? = if i >= n then __lfs_none()
-else __list_find_str_at(h, f, n, i)
+fn __list_find_str_loop(h: Int, f: (String) -> Bool, n: Int, i: Int) -> String? =
+  if i >= n then __lfs_none()
+  else __list_find_str_at(h, f, n, i)
 
 fn list_find_str(xs: List[String], f: (String) -> Bool) -> String? = {
   let h = prim.handle(xs)
@@ -16701,8 +16886,9 @@ fn __intersperse_step(sh: Int, oh: Int, sep: String, n: Int, last: Int, i: Int, 
   }
 }
 
-fn __intersperse_fill(sh: Int, oh: Int, sep: String, n: Int, last: Int, i: Int, di: Int) -> Int = if i >= n then di
-else __intersperse_step(sh, oh, sep, n, last, i, di)
+fn __intersperse_fill(sh: Int, oh: Int, sep: String, n: Int, last: Int, i: Int, di: Int) -> Int =
+  if i >= n then di
+  else __intersperse_step(sh, oh, sep, n, last, i, di)
 
 fn list_intersperse_str(xs: List[String], sep: String) -> List[String] = {
   let h = prim.handle(xs)
@@ -16794,13 +16980,14 @@ pub const SRC_LIST_TAKEDROP_STR: &str = r#"
 fn __clamp_str(n: Int, len: Int) -> Int = if n < 0 then len
 else if n > len then len else n
 
-fn __copy_slice_str(srch: Int, dsth: Int, start: Int, count: Int, i: Int) -> Int = if i >= count then 0
-else {
-  let x = prim.load_str(srch + 12 + (start + i) * 8)
-  let copy = string.repeat(x, 1)
-  prim.store_str(dsth + 12 + i * 8, copy)
-  __copy_slice_str(srch, dsth, start, count, i + 1)
-}
+fn __copy_slice_str(srch: Int, dsth: Int, start: Int, count: Int, i: Int) -> Int =
+  if i >= count then 0
+  else {
+    let x = prim.load_str(srch + 12 + (start + i) * 8)
+    let copy = string.repeat(x, 1)
+    prim.store_str(dsth + 12 + i * 8, copy)
+    __copy_slice_str(srch, dsth, start, count, i + 1)
+  }
 
 fn list_take_str(xs: List[String], n: Int) -> List[String] = {
   let h = prim.handle(xs)
@@ -17280,13 +17467,14 @@ pub const SRC_LIST_UNIQUEBY: &str = r#"
 
 
 
-fn __ub_count(sh: Int, f: (Int) -> Int, k: Int, j: Int, i: Int, acc: Int) -> Int = if j >= i then acc
-else {
-  let xj = prim.load64(sh + 12 + j * 8)
-  let kj = f(xj)
-  if kj == k then __ub_count(sh, f, k, j + 1, i, acc + 1)
-  else __ub_count(sh, f, k, j + 1, i, acc)
-}
+fn __ub_count(sh: Int, f: (Int) -> Int, k: Int, j: Int, i: Int, acc: Int) -> Int =
+  if j >= i then acc
+  else {
+    let xj = prim.load64(sh + 12 + j * 8)
+    let kj = f(xj)
+    if kj == k then __ub_count(sh, f, k, j + 1, i, acc + 1)
+    else __ub_count(sh, f, k, j + 1, i, acc)
+  }
 
 fn __ub_fill(dh: Int, sh: Int, f: (Int) -> Int, n: Int, i: Int, di: Int) -> Int = if i >= n then di
 else {
@@ -17332,26 +17520,28 @@ fn __ubsk_eq(a: String, b: String) -> Bool = {
   else __ubsk_eq_bytes(ha + 12, hb + 12, la, 0)
 }
 
-fn __ubsk_count(sh: Int, f: (Int) -> String, k: String, j: Int, i: Int, acc: Int) -> Int = if j >= i then acc
-else {
-  let xj = prim.load64(sh + 12 + j * 8)
-  let kj = f(xj)
-  let same = __ubsk_eq(kj, k)
-  if same then __ubsk_count(sh, f, k, j + 1, i, acc + 1)
-  else __ubsk_count(sh, f, k, j + 1, i, acc)
-}
-
-fn __ubsk_fill(dh: Int, sh: Int, f: (Int) -> String, n: Int, i: Int, di: Int) -> Int = if i >= n then di
-else {
-  let x = prim.load64(sh + 12 + i * 8)
-  let k = f(x)
-  let c = __ubsk_count(sh, f, k, 0, i, 0)
-  if c > 0 then __ubsk_fill(dh, sh, f, n, i + 1, di)
+fn __ubsk_count(sh: Int, f: (Int) -> String, k: String, j: Int, i: Int, acc: Int) -> Int =
+  if j >= i then acc
   else {
-    prim.store64(dh + 12 + di * 8, x)
-    __ubsk_fill(dh, sh, f, n, i + 1, di + 1)
+    let xj = prim.load64(sh + 12 + j * 8)
+    let kj = f(xj)
+    let same = __ubsk_eq(kj, k)
+    if same then __ubsk_count(sh, f, k, j + 1, i, acc + 1)
+    else __ubsk_count(sh, f, k, j + 1, i, acc)
   }
-}
+
+fn __ubsk_fill(dh: Int, sh: Int, f: (Int) -> String, n: Int, i: Int, di: Int) -> Int =
+  if i >= n then di
+  else {
+    let x = prim.load64(sh + 12 + i * 8)
+    let k = f(x)
+    let c = __ubsk_count(sh, f, k, 0, i, 0)
+    if c > 0 then __ubsk_fill(dh, sh, f, n, i + 1, di)
+    else {
+      prim.store64(dh + 12 + di * 8, x)
+      __ubsk_fill(dh, sh, f, n, i + 1, di + 1)
+    }
+  }
 
 fn list_unique_by_sk(xs: List[Int], f: (Int) -> String) -> List[Int] = {
   let n = list.len(xs)
@@ -17414,15 +17604,16 @@ fn list_drop_while(xs: List[Int], f: (Int) -> Bool) -> List[Int] = {
 
 
 
-fn __takew_str_fill(dh: Int, sh: Int, f: (String) -> Bool, n: Int, i: Int, di: Int) -> Int = if i >= n then di
-else {
-  let x = prim.load_str(sh + 12 + i * 8)
-  if f(x) then {
-    let copy = string.repeat(x, 1)
-    prim.store_str(dh + 12 + di * 8, copy)
-    __takew_str_fill(dh, sh, f, n, i + 1, di + 1)
-  } else di
-}
+fn __takew_str_fill(dh: Int, sh: Int, f: (String) -> Bool, n: Int, i: Int, di: Int) -> Int =
+  if i >= n then di
+  else {
+    let x = prim.load_str(sh + 12 + i * 8)
+    if f(x) then {
+      let copy = string.repeat(x, 1)
+      prim.store_str(dh + 12 + di * 8, copy)
+      __takew_str_fill(dh, sh, f, n, i + 1, di + 1)
+    } else di
+  }
 
 fn list_take_while_str(xs: List[String], f: (String) -> Bool) -> List[String] = {
   let n = list.len(xs)
@@ -17460,14 +17651,15 @@ pub const SRC_LIST_ZIPWITH: &str = r#"
 
 
 
-fn __zipw_fill(dh: Int, ah: Int, bh: Int, f: (Int, Int) -> Int, n: Int, i: Int) -> Int = if i >= n then 0
-else {
-  let x = prim.load64(ah + 12 + i * 8)
-  let y = prim.load64(bh + 12 + i * 8)
-  let z = f(x, y)
-  prim.store64(dh + 12 + i * 8, z)
-  __zipw_fill(dh, ah, bh, f, n, i + 1)
-}
+fn __zipw_fill(dh: Int, ah: Int, bh: Int, f: (Int, Int) -> Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let x = prim.load64(ah + 12 + i * 8)
+    let y = prim.load64(bh + 12 + i * 8)
+    let z = f(x, y)
+    prim.store64(dh + 12 + i * 8, z)
+    __zipw_fill(dh, ah, bh, f, n, i + 1)
+  }
 
 fn list_zip_with(a: List[Int], b: List[Int], f: (Int, Int) -> Int) -> List[Int] = {
   let na = list.len(a)
@@ -17484,14 +17676,15 @@ fn list_zip_with(a: List[Int], b: List[Int], f: (Int, Int) -> Int) -> List[Int] 
 
 
 
-fn __zipw_str_fill(dh: Int, ah: Int, bh: Int, f: (String, String) -> String, n: Int, i: Int) -> Int = if i >= n then 0
-else {
-  let x = prim.load_str(ah + 12 + i * 8)
-  let y = prim.load_str(bh + 12 + i * 8)
-  let z = f(x, y)
-  prim.store_str(dh + 12 + i * 8, z)
-  __zipw_str_fill(dh, ah, bh, f, n, i + 1)
-}
+fn __zipw_str_fill(dh: Int, ah: Int, bh: Int, f: (String, String) -> String, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let x = prim.load_str(ah + 12 + i * 8)
+    let y = prim.load_str(bh + 12 + i * 8)
+    let z = f(x, y)
+    prim.store_str(dh + 12 + i * 8, z)
+    __zipw_str_fill(dh, ah, bh, f, n, i + 1)
+  }
 
 fn list_zip_with_str(a: List[String], b: List[String], f: (String, String) -> String) -> List[String] = {
   let na = list.len(a)
@@ -18013,20 +18206,21 @@ fn map_get_or(m: Map[Int, Int], k: Int, default: Int) -> Int = {
 
 
 
-fn __map_eqm_at(ah: Int, an: Int, bh: Int, bn: Int, bcap: Int, i: Int) -> Bool = if i >= an then true
-else {
-  let j = __map_lookup(bh, bn, bcap, prim.load64(ah + 12 + i * 16))
-  if j < 0 then false
-  else if prim.load64(ah + 12 + i * 16 + 8) == prim.load64(bh + 12 + j * 16 + 8) then __map_eqm_at(
-    ah,
-    an,
-    bh,
-    bn,
-    bcap,
-    i + 1,
-  )
-  else false
-}
+fn __map_eqm_at(ah: Int, an: Int, bh: Int, bn: Int, bcap: Int, i: Int) -> Bool =
+  if i >= an then true
+  else {
+    let j = __map_lookup(bh, bn, bcap, prim.load64(ah + 12 + i * 16))
+    if j < 0 then false
+    else if prim.load64(ah + 12 + i * 16 + 8) == prim.load64(bh + 12 + j * 16 + 8) then __map_eqm_at(
+      ah,
+      an,
+      bh,
+      bn,
+      bcap,
+      i + 1,
+    )
+    else false
+  }
 
 fn map_eq(a: Map[Int, Int], b: Map[Int, Int]) -> Bool = {
   let ah = prim.handle(a)
@@ -18062,21 +18256,22 @@ fn __map_put(rh: Int, len: Int, idx: Int, k: Int, v: Int) -> Int = if idx < 0 th
 
 
 
-fn __map_idx_carry(sh: Int, rh: Int, secap: Int, necap: Int, len: Int, idx: Int, k: Int) -> Int = if necap < 16 then 0
-else if necap != secap then 0
-else {
-  let ilen = prim.load64(__map_il(sh, secap))
-  if ilen != len then 0
+fn __map_idx_carry(sh: Int, rh: Int, secap: Int, necap: Int, len: Int, idx: Int, k: Int) -> Int =
+  if necap < 16 then 0
+  else if necap != secap then 0
   else {
-    let _c = __map_copy_slots(sh, rh, secap * 2, secap + 1, 0)
-    if idx >= 0 then 0
+    let ilen = prim.load64(__map_il(sh, secap))
+    if ilen != len then 0
     else {
-      let _p = __map_idx_put(__map_bb(rh, necap), necap * 2 - 1, k, len)
-      prim.store64(__map_il(rh, necap), len + 1)
-      0
+      let _c = __map_copy_slots(sh, rh, secap * 2, secap + 1, 0)
+      if idx >= 0 then 0
+      else {
+        let _p = __map_idx_put(__map_bb(rh, necap), necap * 2 - 1, k, len)
+        prim.store64(__map_il(rh, necap), len + 1)
+        0
+      }
     }
   }
-}
 
 
 
@@ -18199,16 +18394,17 @@ fn __map_merge_put(rh: Int, ecap: Int, w: Int, idx: Int, k: Int, v: Int) -> Int 
   w2
 }
 
-fn __map_merge_addb(rh: Int, ecap: Int, bh: Int, blen: Int, j: Int, w: Int) -> Int = if j >= blen then w
-else {
-  let k = prim.load64(bh + 12 + j * 16)
-  let v = prim.load64(bh + 12 + j * 16 + 8)
-  let mask = ecap * 2 - 1
-  let idx = if ecap < 16 then __map_find(rh, w, k, 0)
-  else __map_probe(rh, __map_bb(rh, ecap), mask, k, prim.band(__map_mix(k), mask))
-  let w2 = __map_merge_put(rh, ecap, w, idx, k, v)
-  __map_merge_addb(rh, ecap, bh, blen, j + 1, w2)
-}
+fn __map_merge_addb(rh: Int, ecap: Int, bh: Int, blen: Int, j: Int, w: Int) -> Int =
+  if j >= blen then w
+  else {
+    let k = prim.load64(bh + 12 + j * 16)
+    let v = prim.load64(bh + 12 + j * 16 + 8)
+    let mask = ecap * 2 - 1
+    let idx = if ecap < 16 then __map_find(rh, w, k, 0)
+    else __map_probe(rh, __map_bb(rh, ecap), mask, k, prim.band(__map_mix(k), mask))
+    let w2 = __map_merge_put(rh, ecap, w, idx, k, v)
+    __map_merge_addb(rh, ecap, bh, blen, j + 1, w2)
+  }
 
 fn map_merge(a: Map[Int, Int], b: Map[Int, Int]) -> Map[Int, Int] = {
   let ah = prim.handle(a)
@@ -18252,19 +18448,20 @@ fn map_update(m: Map[Int, Int], k: Int, f: (Int) -> Int) -> Map[Int, Int] = {
 
 
 
-fn __map_filter_fill(sh: Int, len: Int, rh: Int, f: (Int, Int) -> Bool, i: Int, w: Int) -> Int = if i >= len then w
-else {
-  let k = prim.load64(sh + 12 + i * 16)
-  let v = prim.load64(sh + 12 + i * 16 + 8)
-  let keep = f(k, v)
-  if keep then {
-    prim.store64(rh + 12 + w * 16, k)
-    prim.store64(rh + 12 + w * 16 + 8, v)
-    __map_filter_fill(sh, len, rh, f, i + 1, w + 1)
-  } else {
-    __map_filter_fill(sh, len, rh, f, i + 1, w)
+fn __map_filter_fill(sh: Int, len: Int, rh: Int, f: (Int, Int) -> Bool, i: Int, w: Int) -> Int =
+  if i >= len then w
+  else {
+    let k = prim.load64(sh + 12 + i * 16)
+    let v = prim.load64(sh + 12 + i * 16 + 8)
+    let keep = f(k, v)
+    if keep then {
+      prim.store64(rh + 12 + w * 16, k)
+      prim.store64(rh + 12 + w * 16 + 8, v)
+      __map_filter_fill(sh, len, rh, f, i + 1, w + 1)
+    } else {
+      __map_filter_fill(sh, len, rh, f, i + 1, w)
+    }
   }
-}
 
 fn map_filter(m: Map[Int, Int], f: (Int, Int) -> Bool) -> Map[Int, Int] = {
   let sh = prim.handle(m)
@@ -18277,14 +18474,15 @@ fn map_filter(m: Map[Int, Int], f: (Int, Int) -> Bool) -> Map[Int, Int] = {
 }
 
 
-fn __map_count_hits(sh: Int, len: Int, f: (Int, Int) -> Bool, i: Int, acc: Int) -> Int = if i >= len then acc
-else {
-  let k = prim.load64(sh + 12 + i * 16)
-  let v = prim.load64(sh + 12 + i * 16 + 8)
-  let h = f(k, v)
-  if h then __map_count_hits(sh, len, f, i + 1, acc + 1)
-  else __map_count_hits(sh, len, f, i + 1, acc)
-}
+fn __map_count_hits(sh: Int, len: Int, f: (Int, Int) -> Bool, i: Int, acc: Int) -> Int =
+  if i >= len then acc
+  else {
+    let k = prim.load64(sh + 12 + i * 16)
+    let v = prim.load64(sh + 12 + i * 16 + 8)
+    let h = f(k, v)
+    if h then __map_count_hits(sh, len, f, i + 1, acc + 1)
+    else __map_count_hits(sh, len, f, i + 1, acc)
+  }
 
 fn map_all(m: Map[Int, Int], f: (Int, Int) -> Bool) -> Bool = {
   let sh = prim.handle(m)
@@ -18309,13 +18507,14 @@ fn map_count(m: Map[Int, Int], f: (Int, Int) -> Bool) -> Int = {
 
 
 
-fn __map_fold_loop(sh: Int, f: (Int, Int, Int) -> Int, len: Int, i: Int, acc: Int) -> Int = if i >= len then acc
-else {
-  let k = prim.load64(sh + 12 + i * 16)
-  let v = prim.load64(sh + 12 + i * 16 + 8)
-  let nacc = f(acc, k, v)
-  __map_fold_loop(sh, f, len, i + 1, nacc)
-}
+fn __map_fold_loop(sh: Int, f: (Int, Int, Int) -> Int, len: Int, i: Int, acc: Int) -> Int =
+  if i >= len then acc
+  else {
+    let k = prim.load64(sh + 12 + i * 16)
+    let v = prim.load64(sh + 12 + i * 16 + 8)
+    let nacc = f(acc, k, v)
+    __map_fold_loop(sh, f, len, i + 1, nacc)
+  }
 
 fn map_fold(m: Map[Int, Int], init: Int, f: (Int, Int, Int) -> Int) -> Int = {
   let sh = prim.handle(m)
@@ -18327,14 +18526,15 @@ fn map_fold(m: Map[Int, Int], init: Int, f: (Int, Int, Int) -> Int) -> Int = {
 
 
 
-fn __map_from_list_at(pairs: List[(Int, Int)], i: Int, m: Map[Int, Int]) -> Map[Int, Int] = if i >= list.len(pairs) then m
-else match list.get(pairs, i) {
-  some(p) => {
-    let (k, v) = p
-    __map_from_list_at(pairs, i + 1, map.set(m, k, v))
-  },
-  none => m,
-}
+fn __map_from_list_at(pairs: List[(Int, Int)], i: Int, m: Map[Int, Int]) -> Map[Int, Int] =
+  if i >= list.len(pairs) then m
+  else match list.get(pairs, i) {
+    some(p) => {
+      let (k, v) = p
+      __map_from_list_at(pairs, i + 1, map.set(m, k, v))
+    },
+    none => m,
+  }
 
 fn map_from_list(pairs: List[(Int, Int)]) -> Map[Int, Int] = {
   let m: Map[Int, Int] = map.new()
@@ -18360,8 +18560,9 @@ fn __map_find_at(sh: Int, len: Int, f: (Int, Int) -> Bool, i: Int) -> (Int, Int)
   else __map_find_loop(sh, len, f, i + 1)
 }
 
-fn __map_find_loop(sh: Int, len: Int, f: (Int, Int) -> Bool, i: Int) -> (Int, Int)? = if i >= len then __map_find_none()
-else __map_find_at(sh, len, f, i)
+fn __map_find_loop(sh: Int, len: Int, f: (Int, Int) -> Bool, i: Int) -> (Int, Int)? =
+  if i >= len then __map_find_none()
+  else __map_find_at(sh, len, f, i)
 
 fn map_find(m: Map[Int, Int], f: (Int, Int) -> Bool) -> (Int, Int)? = {
   let sh = prim.handle(m)
@@ -18415,13 +18616,14 @@ pub const SRC_MAP_FOLD_HACC: &str = r#"
 
 
 
-fn __mfh_str_loop(sh: Int, f: (Map[String, Int], String, String) -> Map[String, Int], entries: Int, i: Int, acc: Map[String, Int]) -> Map[String, Int] = if i >= entries then acc
-else {
-  let k = prim.load_str(sh + 12 + i * 16)
-  let v = prim.load_str(sh + 12 + i * 16 + 8)
-  let nacc = f(acc, k, v)
-  __mfh_str_loop(sh, f, entries, i + 1, nacc)
-}
+fn __mfh_str_loop(sh: Int, f: (Map[String, Int], String, String) -> Map[String, Int], entries: Int, i: Int, acc: Map[String, Int]) -> Map[String, Int] =
+  if i >= entries then acc
+  else {
+    let k = prim.load_str(sh + 12 + i * 16)
+    let v = prim.load_str(sh + 12 + i * 16 + 8)
+    let nacc = f(acc, k, v)
+    __mfh_str_loop(sh, f, entries, i + 1, nacc)
+  }
 
 fn map_fold_str_msi(m: Map[String, String], init: Map[String, Int], f: (Map[String, Int], String, String) -> Map[String, Int]) -> Map[String, Int] = {
   let sh = prim.handle(m)
@@ -18429,13 +18631,14 @@ fn map_fold_str_msi(m: Map[String, String], init: Map[String, Int], f: (Map[Stri
   __mfh_str_loop(sh, f, n / 2, 0, init)
 }
 
-fn __mfh_skv_loop(sh: Int, f: (Map[String, Int], String, Int) -> Map[String, Int], entries: Int, i: Int, acc: Map[String, Int]) -> Map[String, Int] = if i >= entries then acc
-else {
-  let k = prim.load_str(sh + 12 + i * 8)
-  let v = prim.load64(sh + 12 + (entries + i) * 8)
-  let nacc = f(acc, k, v)
-  __mfh_skv_loop(sh, f, entries, i + 1, nacc)
-}
+fn __mfh_skv_loop(sh: Int, f: (Map[String, Int], String, Int) -> Map[String, Int], entries: Int, i: Int, acc: Map[String, Int]) -> Map[String, Int] =
+  if i >= entries then acc
+  else {
+    let k = prim.load_str(sh + 12 + i * 8)
+    let v = prim.load64(sh + 12 + (entries + i) * 8)
+    let nacc = f(acc, k, v)
+    __mfh_skv_loop(sh, f, entries, i + 1, nacc)
+  }
 
 fn map_fold_skv_msi(m: Map[String, Int], init: Map[String, Int], f: (Map[String, Int], String, Int) -> Map[String, Int]) -> Map[String, Int] = {
   let sh = prim.handle(m)
@@ -18447,13 +18650,14 @@ fn map_fold_skv_msi(m: Map[String, Int], init: Map[String, Int], f: (Map[String,
 
 
 
-fn __mfh_str_sacc_loop(sh: Int, f: (String, String, String) -> String, entries: Int, i: Int, acc: String) -> String = if i >= entries then acc
-else {
-  let k = prim.load_str(sh + 12 + i * 16)
-  let v = prim.load_str(sh + 12 + i * 16 + 8)
-  let nacc = f(acc, k, v)
-  __mfh_str_sacc_loop(sh, f, entries, i + 1, nacc)
-}
+fn __mfh_str_sacc_loop(sh: Int, f: (String, String, String) -> String, entries: Int, i: Int, acc: String) -> String =
+  if i >= entries then acc
+  else {
+    let k = prim.load_str(sh + 12 + i * 16)
+    let v = prim.load_str(sh + 12 + i * 16 + 8)
+    let nacc = f(acc, k, v)
+    __mfh_str_sacc_loop(sh, f, entries, i + 1, nacc)
+  }
 
 fn map_fold_str_sacc(m: Map[String, String], init: String, f: (String, String, String) -> String) -> String = {
   let sh = prim.handle(m)
@@ -18465,12 +18669,13 @@ fn map_fold_str_sacc(m: Map[String, String], init: String, f: (String, String, S
 
 
 
-fn __fold_smsi_loop(h: Int, f: (Map[String, Int], String) -> Map[String, Int], n: Int, i: Int, acc: Map[String, Int]) -> Map[String, Int] = if i >= n then acc
-else {
-  let x = prim.load_str(h + 12 + i * 8)
-  let nacc = f(acc, x)
-  __fold_smsi_loop(h, f, n, i + 1, nacc)
-}
+fn __fold_smsi_loop(h: Int, f: (Map[String, Int], String) -> Map[String, Int], n: Int, i: Int, acc: Map[String, Int]) -> Map[String, Int] =
+  if i >= n then acc
+  else {
+    let x = prim.load_str(h + 12 + i * 8)
+    let nacc = f(acc, x)
+    __fold_smsi_loop(h, f, n, i + 1, nacc)
+  }
 
 fn list_fold_str_msi(xs: List[String], init: Map[String, Int], f: (Map[String, Int], String) -> Map[String, Int]) -> Map[String, Int] = {
   let h = prim.handle(xs)
@@ -18488,13 +18693,14 @@ fn list_fold_str_msi(xs: List[String], init: Map[String, Int], f: (Map[String, I
 
 
 
-fn __mfh_skv_hacc_loop(sh: Int, f: (String, String, Int) -> String, entries: Int, i: Int, acc: String) -> String = if i >= entries then acc
-else {
-  let k = prim.load_str(sh + 12 + i * 8)
-  let v = prim.load64(sh + 12 + (entries + i) * 8)
-  let nacc = f(acc, k, v)
-  __mfh_skv_hacc_loop(sh, f, entries, i + 1, nacc)
-}
+fn __mfh_skv_hacc_loop(sh: Int, f: (String, String, Int) -> String, entries: Int, i: Int, acc: String) -> String =
+  if i >= entries then acc
+  else {
+    let k = prim.load_str(sh + 12 + i * 8)
+    let v = prim.load64(sh + 12 + (entries + i) * 8)
+    let nacc = f(acc, k, v)
+    __mfh_skv_hacc_loop(sh, f, entries, i + 1, nacc)
+  }
 
 fn map_fold_skv_hacc(m: Map[String, Int], init: String, f: (String, String, Int) -> String) -> String = {
   let sh = prim.handle(m)
@@ -18543,20 +18749,21 @@ fn __hobj_store_key(addr: Int, s: String) -> Int = {
 
 
 
-fn __hobj_set_copy(sh: Int, rh: Int, n: Int, rn: Int, k: String, vh: Int, i: Int) -> Int = if i >= n then 0
-else {
-  let kk = prim.load_str(sh + 12 + i * 8)
-  let _kc = __hobj_store_key(rh + 12 + i * 8, kk)
-  if __hobj_str_eq(kk, k) then {
-    prim.rc_inc(vh)
-    prim.store64(rh + 12 + (rn + i) * 8, vh)
-  } else {
-    let old = prim.load64(sh + 12 + (n + i) * 8)
-    prim.rc_inc(old)
-    prim.store64(rh + 12 + (rn + i) * 8, old)
+fn __hobj_set_copy(sh: Int, rh: Int, n: Int, rn: Int, k: String, vh: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let kk = prim.load_str(sh + 12 + i * 8)
+    let _kc = __hobj_store_key(rh + 12 + i * 8, kk)
+    if __hobj_str_eq(kk, k) then {
+      prim.rc_inc(vh)
+      prim.store64(rh + 12 + (rn + i) * 8, vh)
+    } else {
+      let old = prim.load64(sh + 12 + (n + i) * 8)
+      prim.rc_inc(old)
+      prim.store64(rh + 12 + (rn + i) * 8, old)
+    }
+    __hobj_set_copy(sh, rh, n, rn, k, vh, i + 1)
   }
-  __hobj_set_copy(sh, rh, n, rn, k, vh, i + 1)
-}
 
 fn __hobj_set_append(rh: Int, rn: Int, idx: Int, k: String, vh: Int) -> Int = if idx >= 0 then 0
 else {
@@ -18585,14 +18792,15 @@ fn __hobj_set(m: Map[String, String], k: String, vh: Int) -> Map[String, String]
   r
 }
 
-fn __hobj_from_at(ph: Int, n: Int, i: Int, m: Map[String, String]) -> Map[String, String] = if i >= n then m
-else {
-  let th = prim.load64(ph + 12 + i * 8)
-  let k = prim.load_str(th + 12)
-  let vh = prim.load64(th + 20)
-  let nm = __hobj_set(m, k, vh)
-  __hobj_from_at(ph, n, i + 1, nm)
-}
+fn __hobj_from_at(ph: Int, n: Int, i: Int, m: Map[String, String]) -> Map[String, String] =
+  if i >= n then m
+  else {
+    let th = prim.load64(ph + 12 + i * 8)
+    let k = prim.load_str(th + 12)
+    let vh = prim.load64(th + 20)
+    let nm = __hobj_set(m, k, vh)
+    __hobj_from_at(ph, n, i + 1, nm)
+  }
 
 fn map_from_list_hobj(pairs: List[(String, String)]) -> Map[String, String] = {
   let ph = prim.handle(pairs)
@@ -18667,20 +18875,21 @@ fn __hvl_store_key(addr: Int, s: String) -> Int = {
 
 
 
-fn __hvl_set_copy(sh: Int, rh: Int, n: Int, rn: Int, k: String, vh: Int, i: Int) -> Int = if i >= n then 0
-else {
-  let kk = prim.load_str(sh + 12 + i * 8)
-  let _kc = __hvl_store_key(rh + 12 + i * 8, kk)
-  if __hvl_str_eq(kk, k) then {
-    prim.rc_inc(vh)
-    prim.store64(rh + 12 + (rn + i) * 8, vh)
-  } else {
-    let old = prim.load64(sh + 12 + (n + i) * 8)
-    prim.rc_inc(old)
-    prim.store64(rh + 12 + (rn + i) * 8, old)
+fn __hvl_set_copy(sh: Int, rh: Int, n: Int, rn: Int, k: String, vh: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let kk = prim.load_str(sh + 12 + i * 8)
+    let _kc = __hvl_store_key(rh + 12 + i * 8, kk)
+    if __hvl_str_eq(kk, k) then {
+      prim.rc_inc(vh)
+      prim.store64(rh + 12 + (rn + i) * 8, vh)
+    } else {
+      let old = prim.load64(sh + 12 + (n + i) * 8)
+      prim.rc_inc(old)
+      prim.store64(rh + 12 + (rn + i) * 8, old)
+    }
+    __hvl_set_copy(sh, rh, n, rn, k, vh, i + 1)
   }
-  __hvl_set_copy(sh, rh, n, rn, k, vh, i + 1)
-}
 
 fn __hvl_set_append(rh: Int, rn: Int, idx: Int, k: String, vh: Int) -> Int = if idx >= 0 then 0
 else {
@@ -18750,14 +18959,15 @@ fn __drop_map_hval(m: Map[String, List[Int]]) -> Unit = {
 
 
 
-fn __hvf_at(pairs: List[(String, List[Int])], i: Int, m: Map[String, List[Int]]) -> Map[String, List[Int]] = if i >= list.len(pairs) then m
-else match list.get(pairs, i) {
-  some(p) => {
-    let (k, v) = p
-    __hvf_at(pairs, i + 1, map_set_hval(m, k, v))
-  },
-  none => m,
-}
+fn __hvf_at(pairs: List[(String, List[Int])], i: Int, m: Map[String, List[Int]]) -> Map[String, List[Int]] =
+  if i >= list.len(pairs) then m
+  else match list.get(pairs, i) {
+    some(p) => {
+      let (k, v) = p
+      __hvf_at(pairs, i + 1, map_set_hval(m, k, v))
+    },
+    none => m,
+  }
 
 fn map_from_list_hval(pairs: List[(String, List[Int])]) -> Map[String, List[Int]] = __hvf_at(
   pairs,
@@ -18795,13 +19005,14 @@ fn map_to_string_hval(m: Map[String, List[Int]]) -> String = {
 
 
 
-fn __drop_list_map_hval_at(xs: List[Map[String, List[Int]]], i: Int, n: Int) -> Unit = if i >= n then ()
-else {
-  let lh = prim.handle(xs)
-  let m: Map[String, List[Int]] = prim.load_handle(lh + 12 + i * 8)
-  __drop_map_hval(m)
-  __drop_list_map_hval_at(xs, i + 1, n)
-}
+fn __drop_list_map_hval_at(xs: List[Map[String, List[Int]]], i: Int, n: Int) -> Unit =
+  if i >= n then ()
+  else {
+    let lh = prim.handle(xs)
+    let m: Map[String, List[Int]] = prim.load_handle(lh + 12 + i * 8)
+    __drop_map_hval(m)
+    __drop_list_map_hval_at(xs, i + 1, n)
+  }
 
 fn __drop_list_map_hval(xs: List[Map[String, List[Int]]]) -> Unit = {
   let h = prim.handle(xs)
@@ -18894,15 +19105,16 @@ fn __gby_add(m: Map[String, List[Int]], k: String, x: Int) -> Map[String, List[I
   map_set_hval(m, k, nl)
 }
 
-fn __gby_step(xs: List[Int], f: (Int) -> String, n: Int, i: Int, m: Map[String, List[Int]]) -> Map[String, List[Int]] = if i >= n then m
-else {
-  let x = prim.load64(prim.handle(xs) + 12 + i * 8)
-  let k = f(x)
-  let h = prim.handle(m)
-  let idx = __hvl_find(h, prim.load32(h + 4), k, 0)
-  if idx >= 0 then __gby_step(xs, f, n, i + 1, __gby_upd(m, k, x, idx))
-  else __gby_step(xs, f, n, i + 1, __gby_add(m, k, x))
-}
+fn __gby_step(xs: List[Int], f: (Int) -> String, n: Int, i: Int, m: Map[String, List[Int]]) -> Map[String, List[Int]] =
+  if i >= n then m
+  else {
+    let x = prim.load64(prim.handle(xs) + 12 + i * 8)
+    let k = f(x)
+    let h = prim.handle(m)
+    let idx = __hvl_find(h, prim.load32(h + 4), k, 0)
+    if idx >= 0 then __gby_step(xs, f, n, i + 1, __gby_upd(m, k, x, idx))
+    else __gby_step(xs, f, n, i + 1, __gby_add(m, k, x))
+  }
 
 fn list_group_by(xs: List[Int], f: (Int) -> String) -> Map[String, List[Int]] = {
   let n = prim.load32(prim.handle(xs) + 4)
@@ -18934,14 +19146,15 @@ pub const SRC_MAP_IF: &str = r#"
 
 
 
-fn __mif_at(pairs: List[(Int, Float)], i: Int, m: Map[Int, Float]) -> Map[Int, Float] = if i >= list.len(pairs) then m
-else match list.get(pairs, i) {
-  some(p) => {
-    let (k, v) = p
-    __mif_at(pairs, i + 1, map.set(m, k, v))
-  },
-  none => m,
-}
+fn __mif_at(pairs: List[(Int, Float)], i: Int, m: Map[Int, Float]) -> Map[Int, Float] =
+  if i >= list.len(pairs) then m
+  else match list.get(pairs, i) {
+    some(p) => {
+      let (k, v) = p
+      __mif_at(pairs, i + 1, map.set(m, k, v))
+    },
+    none => m,
+  }
 
 fn map_from_list_if(pairs: List[(Int, Float)]) -> Map[Int, Float] = {
   let m: Map[Int, Float] = map.new()
@@ -18983,20 +19196,21 @@ fn __ivh_store_val(addr: Int, s: String) -> Int = {
 
 
 
-fn __ivh_set_copy(sh: Int, rh: Int, n: Int, rn: Int, k: Int, v: String, i: Int) -> Int = if i >= n then 0
-else {
-  let kk = prim.load64(sh + 12 + i * 8)
-  prim.store64(rh + 12 + i * 8, kk)
-  if kk == k then {
-    let _s = __ivh_store_val(rh + 12 + (rn + i) * 8, v)
-    ()
-  } else {
-    let old = prim.load64(sh + 12 + (n + i) * 8)
-    prim.rc_inc(old)
-    prim.store64(rh + 12 + (rn + i) * 8, old)
+fn __ivh_set_copy(sh: Int, rh: Int, n: Int, rn: Int, k: Int, v: String, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let kk = prim.load64(sh + 12 + i * 8)
+    prim.store64(rh + 12 + i * 8, kk)
+    if kk == k then {
+      let _s = __ivh_store_val(rh + 12 + (rn + i) * 8, v)
+      ()
+    } else {
+      let old = prim.load64(sh + 12 + (n + i) * 8)
+      prim.rc_inc(old)
+      prim.store64(rh + 12 + (rn + i) * 8, old)
+    }
+    __ivh_set_copy(sh, rh, n, rn, k, v, i + 1)
   }
-  __ivh_set_copy(sh, rh, n, rn, k, v, i + 1)
-}
 
 fn __ivh_set_append(rh: Int, rn: Int, idx: Int, k: Int, v: String) -> Int = if idx >= 0 then 0
 else {
@@ -19061,14 +19275,15 @@ fn __drop_map_ivh(m: Map[Int, String]) -> Unit = {
 
 
 
-fn __ivh_from_list_at(pairs: List[(Int, String)], i: Int, m: Map[Int, String]) -> Map[Int, String] = if i >= list.len(pairs) then m
-else match list.get(pairs, i) {
-  some(p) => {
-    let (k, v) = p
-    __ivh_from_list_at(pairs, i + 1, map_set_ivh(m, k, v))
-  },
-  none => m,
-}
+fn __ivh_from_list_at(pairs: List[(Int, String)], i: Int, m: Map[Int, String]) -> Map[Int, String] =
+  if i >= list.len(pairs) then m
+  else match list.get(pairs, i) {
+    some(p) => {
+      let (k, v) = p
+      __ivh_from_list_at(pairs, i + 1, map_set_ivh(m, k, v))
+    },
+    none => m,
+  }
 
 fn map_from_list_ivh(pairs: List[(Int, String)]) -> Map[Int, String] = __ivh_from_list_at(
   pairs,
@@ -19161,20 +19376,21 @@ fn __mlo_store_key(addr: Int, s: String) -> Int = {
 
 
 
-fn __mlo_set_copy(sh: Int, rh: Int, n: Int, rn: Int, k: String, vh: Int, i: Int) -> Int = if i >= n then 0
-else {
-  let kk = prim.load_str(sh + 12 + i * 8)
-  let _kc = __mlo_store_key(rh + 12 + i * 8, kk)
-  if __mlo_str_eq(kk, k) then {
-    prim.rc_inc(vh)
-    prim.store64(rh + 12 + (rn + i) * 8, vh)
-  } else {
-    let old = prim.load64(sh + 12 + (n + i) * 8)
-    prim.rc_inc(old)
-    prim.store64(rh + 12 + (rn + i) * 8, old)
+fn __mlo_set_copy(sh: Int, rh: Int, n: Int, rn: Int, k: String, vh: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let kk = prim.load_str(sh + 12 + i * 8)
+    let _kc = __mlo_store_key(rh + 12 + i * 8, kk)
+    if __mlo_str_eq(kk, k) then {
+      prim.rc_inc(vh)
+      prim.store64(rh + 12 + (rn + i) * 8, vh)
+    } else {
+      let old = prim.load64(sh + 12 + (n + i) * 8)
+      prim.rc_inc(old)
+      prim.store64(rh + 12 + (rn + i) * 8, old)
+    }
+    __mlo_set_copy(sh, rh, n, rn, k, vh, i + 1)
   }
-  __mlo_set_copy(sh, rh, n, rn, k, vh, i + 1)
-}
 
 fn __mlo_set_append(rh: Int, rn: Int, idx: Int, k: String, vh: Int) -> Int = if idx >= 0 then 0
 else {
@@ -19206,14 +19422,15 @@ fn map_set_mlo(m: Map[String, List[Int?]], k: String, v: List[Int?]) -> Map[Stri
   r
 }
 
-fn __mlo_from_at(ph: Int, n: Int, i: Int, m: Map[String, List[Int?]]) -> Map[String, List[Int?]] = if i >= n then m
-else {
-  let th = prim.load64(ph + 12 + i * 8)
-  let k = prim.load_str(th + 12)
-  let v: List[Int?] = prim.load_handle(th + 20)
-  let nm = map_set_mlo(m, k, v)
-  __mlo_from_at(ph, n, i + 1, nm)
-}
+fn __mlo_from_at(ph: Int, n: Int, i: Int, m: Map[String, List[Int?]]) -> Map[String, List[Int?]] =
+  if i >= n then m
+  else {
+    let th = prim.load64(ph + 12 + i * 8)
+    let k = prim.load_str(th + 12)
+    let v: List[Int?] = prim.load_handle(th + 20)
+    let nm = map_set_mlo(m, k, v)
+    __mlo_from_at(ph, n, i + 1, nm)
+  }
 
 fn map_from_list_mlo(pairs: List[(String, List[Int?])]) -> Map[String, List[Int?]] = {
   let ph = prim.handle(pairs)
@@ -19273,13 +19490,14 @@ fn __drop_list_str_mlo(xs: List[(String, List[Int?])]) -> Unit = {
 
 
 
-fn __drop_list_map_mlo_at(xs: List[Map[String, List[Int?]]], i: Int, n: Int) -> Unit = if i >= n then ()
-else {
-  let lh = prim.handle(xs)
-  let m: Map[String, List[Int?]] = prim.load_handle(lh + 12 + i * 8)
-  __drop_map_mlo(m)
-  __drop_list_map_mlo_at(xs, i + 1, n)
-}
+fn __drop_list_map_mlo_at(xs: List[Map[String, List[Int?]]], i: Int, n: Int) -> Unit =
+  if i >= n then ()
+  else {
+    let lh = prim.handle(xs)
+    let m: Map[String, List[Int?]] = prim.load_handle(lh + 12 + i * 8)
+    __drop_map_mlo(m)
+    __drop_list_map_mlo_at(xs, i + 1, n)
+  }
 
 fn __drop_list_map_mlo(xs: List[Map[String, List[Int?]]]) -> Unit = {
   let h = prim.handle(xs)
@@ -19348,20 +19566,21 @@ fn __msv_store_key(addr: Int, s: String) -> Int = {
 
 
 
-fn __msv_set_copy(sh: Int, rh: Int, n: Int, rn: Int, k: String, vh: Int, i: Int) -> Int = if i >= n then 0
-else {
-  let kk = prim.load_str(sh + 12 + i * 8)
-  let _kc = __msv_store_key(rh + 12 + i * 8, kk)
-  if __msv_str_eq(kk, k) then {
-    prim.rc_inc(vh)
-    prim.store64(rh + 12 + (rn + i) * 8, vh)
-  } else {
-    let old = prim.load64(sh + 12 + (n + i) * 8)
-    prim.rc_inc(old)
-    prim.store64(rh + 12 + (rn + i) * 8, old)
+fn __msv_set_copy(sh: Int, rh: Int, n: Int, rn: Int, k: String, vh: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let kk = prim.load_str(sh + 12 + i * 8)
+    let _kc = __msv_store_key(rh + 12 + i * 8, kk)
+    if __msv_str_eq(kk, k) then {
+      prim.rc_inc(vh)
+      prim.store64(rh + 12 + (rn + i) * 8, vh)
+    } else {
+      let old = prim.load64(sh + 12 + (n + i) * 8)
+      prim.rc_inc(old)
+      prim.store64(rh + 12 + (rn + i) * 8, old)
+    }
+    __msv_set_copy(sh, rh, n, rn, k, vh, i + 1)
   }
-  __msv_set_copy(sh, rh, n, rn, k, vh, i + 1)
-}
 
 fn __msv_set_append(rh: Int, rn: Int, idx: Int, k: String, vh: Int) -> Int = if idx >= 0 then 0
 else {
@@ -19393,14 +19612,15 @@ fn map_set_msv(m: Map[String, Map[String, String]], k: String, v: Map[String, St
   r
 }
 
-fn __msv_from_at(ph: Int, n: Int, i: Int, m: Map[String, Map[String, String]]) -> Map[String, Map[String, String]] = if i >= n then m
-else {
-  let th = prim.load64(ph + 12 + i * 8)
-  let k = prim.load_str(th + 12)
-  let v: Map[String, String] = prim.load_handle(th + 20)
-  let nm = map_set_msv(m, k, v)
-  __msv_from_at(ph, n, i + 1, nm)
-}
+fn __msv_from_at(ph: Int, n: Int, i: Int, m: Map[String, Map[String, String]]) -> Map[String, Map[String, String]] =
+  if i >= n then m
+  else {
+    let th = prim.load64(ph + 12 + i * 8)
+    let k = prim.load_str(th + 12)
+    let v: Map[String, String] = prim.load_handle(th + 20)
+    let nm = map_set_msv(m, k, v)
+    __msv_from_at(ph, n, i + 1, nm)
+  }
 
 fn map_from_list_msv(pairs: List[(String, Map[String, String])]) -> Map[String, Map[String, String]] = {
   let ph = prim.handle(pairs)
@@ -19412,16 +19632,17 @@ fn map_from_list_msv(pairs: List[(String, Map[String, String])]) -> Map[String, 
 
 
 
-fn __msv_remove_copy(sh: Int, rh: Int, n: Int, rn: Int, skip: Int, i: Int, j: Int) -> Int = if i >= n then 0
-else if i == skip then __msv_remove_copy(sh, rh, n, rn, skip, i + 1, j)
-else {
-  let kk = prim.load_str(sh + 12 + i * 8)
-  let _kc = __msv_store_key(rh + 12 + j * 8, kk)
-  let old = prim.load64(sh + 12 + (n + i) * 8)
-  prim.rc_inc(old)
-  prim.store64(rh + 12 + (rn + j) * 8, old)
-  __msv_remove_copy(sh, rh, n, rn, skip, i + 1, j + 1)
-}
+fn __msv_remove_copy(sh: Int, rh: Int, n: Int, rn: Int, skip: Int, i: Int, j: Int) -> Int =
+  if i >= n then 0
+  else if i == skip then __msv_remove_copy(sh, rh, n, rn, skip, i + 1, j)
+  else {
+    let kk = prim.load_str(sh + 12 + i * 8)
+    let _kc = __msv_store_key(rh + 12 + j * 8, kk)
+    let old = prim.load64(sh + 12 + (n + i) * 8)
+    prim.rc_inc(old)
+    prim.store64(rh + 12 + (rn + j) * 8, old)
+    __msv_remove_copy(sh, rh, n, rn, skip, i + 1, j + 1)
+  }
 
 fn map_remove_msv(m: Map[String, Map[String, String]], k: String) -> Map[String, Map[String, String]] = {
   let sh = prim.handle(m)
@@ -19679,24 +19900,26 @@ fn __skv_store_key(addr: Int, s: String) -> Int = {
 
 
 
-fn __skv_set_copy(sh: Int, rh: Int, sentries: Int, rentries: Int, k: String, newv: Int, i: Int) -> Int = if i >= sentries then 0
-else {
-  let kk = prim.load_str(sh + 12 + i * 8)
-  let _kc = __skv_store_key(rh + 12 + i * 8, kk)
-  let oldv = prim.load64(sh + 12 + (sentries + i) * 8)
-  let eq = __skv_eq(kk, k)
-  let putv = if eq then newv else oldv
-  prim.store64(rh + 12 + (rentries + i) * 8, putv)
-  __skv_set_copy(sh, rh, sentries, rentries, k, newv, i + 1)
-}
+fn __skv_set_copy(sh: Int, rh: Int, sentries: Int, rentries: Int, k: String, newv: Int, i: Int) -> Int =
+  if i >= sentries then 0
+  else {
+    let kk = prim.load_str(sh + 12 + i * 8)
+    let _kc = __skv_store_key(rh + 12 + i * 8, kk)
+    let oldv = prim.load64(sh + 12 + (sentries + i) * 8)
+    let eq = __skv_eq(kk, k)
+    let putv = if eq then newv else oldv
+    prim.store64(rh + 12 + (rentries + i) * 8, putv)
+    __skv_set_copy(sh, rh, sentries, rentries, k, newv, i + 1)
+  }
 
 
-fn __skv_set_append(rh: Int, sentries: Int, rentries: Int, idx: Int, k: String, v: Int) -> Int = if idx >= 0 then 0
-else {
-  let _kc = __skv_store_key(rh + 12 + sentries * 8, k)
-  prim.store64(rh + 12 + (rentries + sentries) * 8, v)
-  0
-}
+fn __skv_set_append(rh: Int, sentries: Int, rentries: Int, idx: Int, k: String, v: Int) -> Int =
+  if idx >= 0 then 0
+  else {
+    let _kc = __skv_store_key(rh + 12 + sentries * 8, k)
+    prim.store64(rh + 12 + (rentries + sentries) * 8, v)
+    0
+  }
 
 fn map_set_skv(m: Map[String, Int], k: String, v: Int) -> Map[String, Int] = {
   let sh = prim.handle(m)
@@ -19721,18 +19944,19 @@ fn map_set_skv(m: Map[String, Int], k: String, v: Int) -> Map[String, Int] = {
 
 
 
-fn __skv_remove_fill(sh: Int, rh: Int, sentries: Int, rentries: Int, k: String, i: Int, w: Int) -> Int = if i >= sentries then w
-else {
-  let kk = prim.load_str(sh + 12 + i * 8)
-  let eq = __skv_eq(kk, k)
-  if eq then __skv_remove_fill(sh, rh, sentries, rentries, k, i + 1, w)
+fn __skv_remove_fill(sh: Int, rh: Int, sentries: Int, rentries: Int, k: String, i: Int, w: Int) -> Int =
+  if i >= sentries then w
   else {
-    let _kc = __skv_store_key(rh + 12 + w * 8, kk)
-    let vv = prim.load64(sh + 12 + (sentries + i) * 8)
-    prim.store64(rh + 12 + (rentries + w) * 8, vv)
-    __skv_remove_fill(sh, rh, sentries, rentries, k, i + 1, w + 1)
+    let kk = prim.load_str(sh + 12 + i * 8)
+    let eq = __skv_eq(kk, k)
+    if eq then __skv_remove_fill(sh, rh, sentries, rentries, k, i + 1, w)
+    else {
+      let _kc = __skv_store_key(rh + 12 + w * 8, kk)
+      let vv = prim.load64(sh + 12 + (sentries + i) * 8)
+      prim.store64(rh + 12 + (rentries + w) * 8, vv)
+      __skv_remove_fill(sh, rh, sentries, rentries, k, i + 1, w + 1)
+    }
   }
-}
 
 fn map_remove_skv(m: Map[String, Int], k: String) -> Map[String, Int] = {
   let sh = prim.handle(m)
@@ -19788,19 +20012,20 @@ fn map_values_skv(m: Map[String, Int]) -> List[Int] = {
 
 
 
-fn __skv_filter_fill(sh: Int, sentries: Int, rh: Int, f: (String, Int) -> Bool, i: Int, w: Int) -> Int = if i >= sentries then w
-else {
-  let k = prim.load_str(sh + 12 + i * 8)
-  let v = prim.load64(sh + 12 + (sentries + i) * 8)
-  let keep = f(k, v)
-  if keep then {
-    let _kc = __skv_store_key(rh + 12 + w * 8, k)
-    prim.store64(rh + 12 + (sentries + w) * 8, v)
-    __skv_filter_fill(sh, sentries, rh, f, i + 1, w + 1)
-  } else {
-    __skv_filter_fill(sh, sentries, rh, f, i + 1, w)
+fn __skv_filter_fill(sh: Int, sentries: Int, rh: Int, f: (String, Int) -> Bool, i: Int, w: Int) -> Int =
+  if i >= sentries then w
+  else {
+    let k = prim.load_str(sh + 12 + i * 8)
+    let v = prim.load64(sh + 12 + (sentries + i) * 8)
+    let keep = f(k, v)
+    if keep then {
+      let _kc = __skv_store_key(rh + 12 + w * 8, k)
+      prim.store64(rh + 12 + (sentries + w) * 8, v)
+      __skv_filter_fill(sh, sentries, rh, f, i + 1, w + 1)
+    } else {
+      __skv_filter_fill(sh, sentries, rh, f, i + 1, w)
+    }
   }
-}
 
 
 
@@ -19824,14 +20049,15 @@ fn map_filter_skv(m: Map[String, Int], f: (String, Int) -> Bool) -> Map[String, 
 }
 
 
-fn __skv_count_hits(sh: Int, entries: Int, f: (String, Int) -> Bool, i: Int, acc: Int) -> Int = if i >= entries then acc
-else {
-  let k = prim.load_str(sh + 12 + i * 8)
-  let v = prim.load64(sh + 12 + (entries + i) * 8)
-  let h = f(k, v)
-  if h then __skv_count_hits(sh, entries, f, i + 1, acc + 1)
-  else __skv_count_hits(sh, entries, f, i + 1, acc)
-}
+fn __skv_count_hits(sh: Int, entries: Int, f: (String, Int) -> Bool, i: Int, acc: Int) -> Int =
+  if i >= entries then acc
+  else {
+    let k = prim.load_str(sh + 12 + i * 8)
+    let v = prim.load64(sh + 12 + (entries + i) * 8)
+    let h = f(k, v)
+    if h then __skv_count_hits(sh, entries, f, i + 1, acc + 1)
+    else __skv_count_hits(sh, entries, f, i + 1, acc)
+  }
 
 fn map_all_skv(m: Map[String, Int], f: (String, Int) -> Bool) -> Bool = {
   let sh = prim.handle(m)
@@ -19875,8 +20101,9 @@ fn __skv_find_at(sh: Int, entries: Int, f: (String, Int) -> Bool, i: Int) -> (St
   else __skv_find_loop(sh, entries, f, i + 1)
 }
 
-fn __skv_find_loop(sh: Int, entries: Int, f: (String, Int) -> Bool, i: Int) -> (String, Int)? = if i >= entries then __skv_find_none()
-else __skv_find_at(sh, entries, f, i)
+fn __skv_find_loop(sh: Int, entries: Int, f: (String, Int) -> Bool, i: Int) -> (String, Int)? =
+  if i >= entries then __skv_find_none()
+  else __skv_find_at(sh, entries, f, i)
 
 fn map_find_skv(m: Map[String, Int], f: (String, Int) -> Bool) -> (String, Int)? = {
   let sh = prim.handle(m)
@@ -19887,13 +20114,14 @@ fn map_find_skv(m: Map[String, Int], f: (String, Int) -> Bool) -> (String, Int)?
 
 
 
-fn __skv_fold_loop(sh: Int, f: (Int, String, Int) -> Int, entries: Int, i: Int, acc: Int) -> Int = if i >= entries then acc
-else {
-  let k = prim.load_str(sh + 12 + i * 8)
-  let v = prim.load64(sh + 12 + (entries + i) * 8)
-  let nacc = f(acc, k, v)
-  __skv_fold_loop(sh, f, entries, i + 1, nacc)
-}
+fn __skv_fold_loop(sh: Int, f: (Int, String, Int) -> Int, entries: Int, i: Int, acc: Int) -> Int =
+  if i >= entries then acc
+  else {
+    let k = prim.load_str(sh + 12 + i * 8)
+    let v = prim.load64(sh + 12 + (entries + i) * 8)
+    let nacc = f(acc, k, v)
+    __skv_fold_loop(sh, f, entries, i + 1, nacc)
+  }
 
 fn map_fold_skv(m: Map[String, Int], init: Int, f: (Int, String, Int) -> Int) -> Int = {
   let sh = prim.handle(m)
@@ -20022,15 +20250,16 @@ fn map_from_list_skv(pairs: List[(String, Int)]) -> Map[String, Int] = {
 
 
 
-fn __skv_update_copy(sh: Int, rh: Int, entries: Int, k: String, f: (Int) -> Int, i: Int) -> Int = if i >= entries then 0
-else {
-  let kk = prim.load_str(sh + 12 + i * 8)
-  let _kc = __skv_store_key(rh + 12 + i * 8, kk)
-  let oldv = prim.load64(sh + 12 + (entries + i) * 8)
-  let putv = if __skv_eq(kk, k) then f(oldv) else oldv
-  prim.store64(rh + 12 + (entries + i) * 8, putv)
-  __skv_update_copy(sh, rh, entries, k, f, i + 1)
-}
+fn __skv_update_copy(sh: Int, rh: Int, entries: Int, k: String, f: (Int) -> Int, i: Int) -> Int =
+  if i >= entries then 0
+  else {
+    let kk = prim.load_str(sh + 12 + i * 8)
+    let _kc = __skv_store_key(rh + 12 + i * 8, kk)
+    let oldv = prim.load64(sh + 12 + (entries + i) * 8)
+    let putv = if __skv_eq(kk, k) then f(oldv) else oldv
+    prim.store64(rh + 12 + (entries + i) * 8, putv)
+    __skv_update_copy(sh, rh, entries, k, f, i + 1)
+  }
 
 
 
@@ -20055,14 +20284,15 @@ fn map_update_skv(m: Map[String, Int], k: String, f: (Int) -> Int) -> Map[String
 }
 
 
-fn __skv_map_copy(sh: Int, rh: Int, entries: Int, f: (Int) -> Int, i: Int) -> Int = if i >= entries then 0
-else {
-  let kk = prim.load_str(sh + 12 + i * 8)
-  let _kc = __skv_store_key(rh + 12 + i * 8, kk)
-  let nv = f(prim.load64(sh + 12 + (entries + i) * 8))
-  prim.store64(rh + 12 + (entries + i) * 8, nv)
-  __skv_map_copy(sh, rh, entries, f, i + 1)
-}
+fn __skv_map_copy(sh: Int, rh: Int, entries: Int, f: (Int) -> Int, i: Int) -> Int =
+  if i >= entries then 0
+  else {
+    let kk = prim.load_str(sh + 12 + i * 8)
+    let _kc = __skv_store_key(rh + 12 + i * 8, kk)
+    let nv = f(prim.load64(sh + 12 + (entries + i) * 8))
+    prim.store64(rh + 12 + (entries + i) * 8, nv)
+    __skv_map_copy(sh, rh, entries, f, i + 1)
+  }
 
 fn map_map_skv(m: Map[String, Int], f: (Int) -> Int) -> Map[String, Int] = {
   let sh = prim.handle(m)
@@ -20076,32 +20306,35 @@ fn map_map_skv(m: Map[String, Int], f: (Int) -> Int) -> Map[String, Int] = {
 
 
 
-fn __skv_merge_bnew(ah: Int, bh: Int, an: Int, bn: Int, j: Int, acc: Int) -> Int = if j >= bn then acc
-else {
-  let kk = prim.load_str(bh + 12 + j * 8)
-  if __skv_find(ah, an, kk, 0) < 0 then __skv_merge_bnew(ah, bh, an, bn, j + 1, acc + 1)
-  else __skv_merge_bnew(ah, bh, an, bn, j + 1, acc)
-}
+fn __skv_merge_bnew(ah: Int, bh: Int, an: Int, bn: Int, j: Int, acc: Int) -> Int =
+  if j >= bn then acc
+  else {
+    let kk = prim.load_str(bh + 12 + j * 8)
+    if __skv_find(ah, an, kk, 0) < 0 then __skv_merge_bnew(ah, bh, an, bn, j + 1, acc + 1)
+    else __skv_merge_bnew(ah, bh, an, bn, j + 1, acc)
+  }
 
-fn __skv_merge_acopy(ah: Int, bh: Int, rh: Int, an: Int, bn: Int, rn: Int, i: Int) -> Int = if i >= an then 0
-else {
-  let kk = prim.load_str(ah + 12 + i * 8)
-  let _kc = __skv_store_key(rh + 12 + i * 8, kk)
-  let bidx = __skv_find(bh, bn, kk, 0)
-  let v = if bidx < 0 then prim.load64(ah + 12 + (an + i) * 8) else prim.load64(bh + 12 + (bn + bidx) * 8)
-  prim.store64(rh + 12 + (rn + i) * 8, v)
-  __skv_merge_acopy(ah, bh, rh, an, bn, rn, i + 1)
-}
+fn __skv_merge_acopy(ah: Int, bh: Int, rh: Int, an: Int, bn: Int, rn: Int, i: Int) -> Int =
+  if i >= an then 0
+  else {
+    let kk = prim.load_str(ah + 12 + i * 8)
+    let _kc = __skv_store_key(rh + 12 + i * 8, kk)
+    let bidx = __skv_find(bh, bn, kk, 0)
+    let v = if bidx < 0 then prim.load64(ah + 12 + (an + i) * 8) else prim.load64(bh + 12 + (bn + bidx) * 8)
+    prim.store64(rh + 12 + (rn + i) * 8, v)
+    __skv_merge_acopy(ah, bh, rh, an, bn, rn, i + 1)
+  }
 
-fn __skv_merge_bapp(ah: Int, bh: Int, rh: Int, an: Int, bn: Int, rn: Int, j: Int, w: Int) -> Int = if j >= bn then 0
-else {
-  let kk = prim.load_str(bh + 12 + j * 8)
-  if __skv_find(ah, an, kk, 0) < 0 then {
-    let _kc = __skv_store_key(rh + 12 + w * 8, kk)
-    prim.store64(rh + 12 + (rn + w) * 8, prim.load64(bh + 12 + (bn + j) * 8))
-    __skv_merge_bapp(ah, bh, rh, an, bn, rn, j + 1, w + 1)
-  } else __skv_merge_bapp(ah, bh, rh, an, bn, rn, j + 1, w)
-}
+fn __skv_merge_bapp(ah: Int, bh: Int, rh: Int, an: Int, bn: Int, rn: Int, j: Int, w: Int) -> Int =
+  if j >= bn then 0
+  else {
+    let kk = prim.load_str(bh + 12 + j * 8)
+    if __skv_find(ah, an, kk, 0) < 0 then {
+      let _kc = __skv_store_key(rh + 12 + w * 8, kk)
+      prim.store64(rh + 12 + (rn + w) * 8, prim.load64(bh + 12 + (bn + j) * 8))
+      __skv_merge_bapp(ah, bh, rh, an, bn, rn, j + 1, w + 1)
+    } else __skv_merge_bapp(ah, bh, rh, an, bn, rn, j + 1, w)
+  }
 
 fn map_merge_skv(a: Map[String, Int], b: Map[String, Int]) -> Map[String, Int] = {
   let ah = prim.handle(a)
@@ -20210,19 +20443,21 @@ fn __store_copy(addr: Int, s: String) -> Int = {
 fn __mset_value(eq: Bool, addr: Int, newv: String, oldv: String) -> Int = if eq then __store_copy(
   addr,
   newv,
-) else __store_copy(addr, oldv)
+)
+else __store_copy(addr, oldv)
 
 
 
-fn __mset_copy(sh: Int, rh: Int, entries: Int, k: String, newv: String, i: Int) -> Int = if i >= entries then 0
-else {
-  let kk = prim.load_str(sh + 12 + i * 16)
-  let _kc = __store_copy(rh + 12 + i * 16, kk)
-  let oldv = prim.load_str(sh + 12 + i * 16 + 8)
-  let eq = __str_eq(kk, k)
-  let _vc = __mset_value(eq, rh + 12 + i * 16 + 8, newv, oldv)
-  __mset_copy(sh, rh, entries, k, newv, i + 1)
-}
+fn __mset_copy(sh: Int, rh: Int, entries: Int, k: String, newv: String, i: Int) -> Int =
+  if i >= entries then 0
+  else {
+    let kk = prim.load_str(sh + 12 + i * 16)
+    let _kc = __store_copy(rh + 12 + i * 16, kk)
+    let oldv = prim.load_str(sh + 12 + i * 16 + 8)
+    let eq = __str_eq(kk, k)
+    let _vc = __mset_value(eq, rh + 12 + i * 16 + 8, newv, oldv)
+    __mset_copy(sh, rh, entries, k, newv, i + 1)
+  }
 
 
 fn __mset_append(rh: Int, entries: Int, idx: Int, k: String, v: String) -> Int = if idx >= 0 then 0
@@ -20291,18 +20526,19 @@ fn map_values_str(m: Map[String, String]) -> List[String] = {
 }
 
 
-fn __mremove_fill(sh: Int, rh: Int, entries: Int, k: String, i: Int, w: Int) -> Int = if i >= entries then w
-else {
-  let kk = prim.load_str(sh + 12 + i * 16)
-  let eq = __str_eq(kk, k)
-  if eq then __mremove_fill(sh, rh, entries, k, i + 1, w)
+fn __mremove_fill(sh: Int, rh: Int, entries: Int, k: String, i: Int, w: Int) -> Int =
+  if i >= entries then w
   else {
-    let _kc = __store_copy(rh + 12 + w * 16, kk)
-    let vv = prim.load_str(sh + 12 + i * 16 + 8)
-    let _vc = __store_copy(rh + 12 + w * 16 + 8, vv)
-    __mremove_fill(sh, rh, entries, k, i + 1, w + 1)
+    let kk = prim.load_str(sh + 12 + i * 16)
+    let eq = __str_eq(kk, k)
+    if eq then __mremove_fill(sh, rh, entries, k, i + 1, w)
+    else {
+      let _kc = __store_copy(rh + 12 + w * 16, kk)
+      let vv = prim.load_str(sh + 12 + i * 16 + 8)
+      let _vc = __store_copy(rh + 12 + w * 16 + 8, vv)
+      __mremove_fill(sh, rh, entries, k, i + 1, w + 1)
+    }
   }
-}
 
 fn map_remove_str(m: Map[String, String], k: String) -> Map[String, String] = {
   let sh = prim.handle(m)
@@ -20326,27 +20562,29 @@ fn __mmerge_aval(ah: Int, bh: Int, rh: Int, i: Int, bidx: Int) -> Int = if bidx 
   __store_copy(rh + 12 + i * 16 + 8, bv)
 }
 
-fn __mmerge_copya(ah: Int, bh: Int, bentries: Int, rh: Int, aentries: Int, i: Int) -> Int = if i >= aentries then 0
-else {
-  let k = prim.load_str(ah + 12 + i * 16)
-  let _kc = __store_copy(rh + 12 + i * 16, k)
-  let bidx = __mstr_find(bh, bentries, k, 0)
-  let _vc = __mmerge_aval(ah, bh, rh, i, bidx)
-  __mmerge_copya(ah, bh, bentries, rh, aentries, i + 1)
-}
-
-fn __mmerge_addnew(ah: Int, aentries: Int, bh: Int, bentries: Int, rh: Int, j: Int, w: Int) -> Int = if j >= bentries then w
-else {
-  let k = prim.load_str(bh + 12 + j * 16)
-  let aidx = __mstr_find(ah, aentries, k, 0)
-  if aidx >= 0 then __mmerge_addnew(ah, aentries, bh, bentries, rh, j + 1, w)
+fn __mmerge_copya(ah: Int, bh: Int, bentries: Int, rh: Int, aentries: Int, i: Int) -> Int =
+  if i >= aentries then 0
   else {
-    let v = prim.load_str(bh + 12 + j * 16 + 8)
-    let _kc = __store_copy(rh + 12 + w * 16, k)
-    let _vc = __store_copy(rh + 12 + w * 16 + 8, v)
-    __mmerge_addnew(ah, aentries, bh, bentries, rh, j + 1, w + 1)
+    let k = prim.load_str(ah + 12 + i * 16)
+    let _kc = __store_copy(rh + 12 + i * 16, k)
+    let bidx = __mstr_find(bh, bentries, k, 0)
+    let _vc = __mmerge_aval(ah, bh, rh, i, bidx)
+    __mmerge_copya(ah, bh, bentries, rh, aentries, i + 1)
   }
-}
+
+fn __mmerge_addnew(ah: Int, aentries: Int, bh: Int, bentries: Int, rh: Int, j: Int, w: Int) -> Int =
+  if j >= bentries then w
+  else {
+    let k = prim.load_str(bh + 12 + j * 16)
+    let aidx = __mstr_find(ah, aentries, k, 0)
+    if aidx >= 0 then __mmerge_addnew(ah, aentries, bh, bentries, rh, j + 1, w)
+    else {
+      let v = prim.load_str(bh + 12 + j * 16 + 8)
+      let _kc = __store_copy(rh + 12 + w * 16, k)
+      let _vc = __store_copy(rh + 12 + w * 16 + 8, v)
+      __mmerge_addnew(ah, aentries, bh, bentries, rh, j + 1, w + 1)
+    }
+  }
 
 fn map_merge_str(a: Map[String, String], b: Map[String, String]) -> Map[String, String] = {
   let ah = prim.handle(a)
@@ -20373,22 +20611,24 @@ fn __store_fv(addr: Int, oldv: String, f: (String) -> String) -> Int = {
   0
 }
 
-fn __mupdate_val(eq: Bool, addr: Int, oldv: String, f: (String) -> String) -> Int = if eq then __store_fv(
-  addr,
-  oldv,
-  f,
-)
-else __store_copy(addr, oldv)
+fn __mupdate_val(eq: Bool, addr: Int, oldv: String, f: (String) -> String) -> Int =
+  if eq then __store_fv(
+    addr,
+    oldv,
+    f,
+  )
+  else __store_copy(addr, oldv)
 
-fn __mupdate_copy(sh: Int, rh: Int, entries: Int, k: String, f: (String) -> String, i: Int) -> Int = if i >= entries then 0
-else {
-  let kk = prim.load_str(sh + 12 + i * 16)
-  let _kc = __store_copy(rh + 12 + i * 16, kk)
-  let oldv = prim.load_str(sh + 12 + i * 16 + 8)
-  let eq = __str_eq(kk, k)
-  let _vc = __mupdate_val(eq, rh + 12 + i * 16 + 8, oldv, f)
-  __mupdate_copy(sh, rh, entries, k, f, i + 1)
-}
+fn __mupdate_copy(sh: Int, rh: Int, entries: Int, k: String, f: (String) -> String, i: Int) -> Int =
+  if i >= entries then 0
+  else {
+    let kk = prim.load_str(sh + 12 + i * 16)
+    let _kc = __store_copy(rh + 12 + i * 16, kk)
+    let oldv = prim.load_str(sh + 12 + i * 16 + 8)
+    let eq = __str_eq(kk, k)
+    let _vc = __mupdate_val(eq, rh + 12 + i * 16 + 8, oldv, f)
+    __mupdate_copy(sh, rh, entries, k, f, i + 1)
+  }
 
 fn map_update_str(m: Map[String, String], k: String, f: (String) -> String) -> Map[String, String] = {
   let sh = prim.handle(m)
@@ -20405,28 +20645,30 @@ fn map_update_str(m: Map[String, String], k: String, f: (String) -> String) -> M
 
 
 
-fn map_upsert_str(m: Map[String, String], k: String, init: String, f: (String) -> String) -> Map[String, String] = if map_contains_str(
-  m,
-  k,
-) then map_update_str(m, k, f)
-else map_set_str(m, k, init)
+fn map_upsert_str(m: Map[String, String], k: String, init: String, f: (String) -> String) -> Map[String, String] =
+  if map_contains_str(
+    m,
+    k,
+  ) then map_update_str(m, k, f)
+  else map_set_str(m, k, init)
 
 
 
 
-fn __mfilter_fill(sh: Int, rh: Int, entries: Int, f: (String, String) -> Bool, i: Int, w: Int) -> Int = if i >= entries then w
-else {
-  let k = prim.load_str(sh + 12 + i * 16)
-  let v = prim.load_str(sh + 12 + i * 16 + 8)
-  let keep = f(k, v)
-  if keep then {
-    let _kc = __store_copy(rh + 12 + w * 16, k)
-    let _vc = __store_copy(rh + 12 + w * 16 + 8, v)
-    __mfilter_fill(sh, rh, entries, f, i + 1, w + 1)
-  } else {
-    __mfilter_fill(sh, rh, entries, f, i + 1, w)
+fn __mfilter_fill(sh: Int, rh: Int, entries: Int, f: (String, String) -> Bool, i: Int, w: Int) -> Int =
+  if i >= entries then w
+  else {
+    let k = prim.load_str(sh + 12 + i * 16)
+    let v = prim.load_str(sh + 12 + i * 16 + 8)
+    let keep = f(k, v)
+    if keep then {
+      let _kc = __store_copy(rh + 12 + w * 16, k)
+      let _vc = __store_copy(rh + 12 + w * 16 + 8, v)
+      __mfilter_fill(sh, rh, entries, f, i + 1, w + 1)
+    } else {
+      __mfilter_fill(sh, rh, entries, f, i + 1, w)
+    }
   }
-}
 
 fn map_filter_str(m: Map[String, String], f: (String, String) -> Bool) -> Map[String, String] = {
   let sh = prim.handle(m)
@@ -20439,14 +20681,15 @@ fn map_filter_str(m: Map[String, String], f: (String, String) -> Bool) -> Map[St
   r
 }
 
-fn __mcount_hits(sh: Int, entries: Int, f: (String, String) -> Bool, i: Int, acc: Int) -> Int = if i >= entries then acc
-else {
-  let k = prim.load_str(sh + 12 + i * 16)
-  let v = prim.load_str(sh + 12 + i * 16 + 8)
-  let h = f(k, v)
-  if h then __mcount_hits(sh, entries, f, i + 1, acc + 1)
-  else __mcount_hits(sh, entries, f, i + 1, acc)
-}
+fn __mcount_hits(sh: Int, entries: Int, f: (String, String) -> Bool, i: Int, acc: Int) -> Int =
+  if i >= entries then acc
+  else {
+    let k = prim.load_str(sh + 12 + i * 16)
+    let v = prim.load_str(sh + 12 + i * 16 + 8)
+    let h = f(k, v)
+    if h then __mcount_hits(sh, entries, f, i + 1, acc + 1)
+    else __mcount_hits(sh, entries, f, i + 1, acc)
+  }
 
 fn map_all_str(m: Map[String, String], f: (String, String) -> Bool) -> Bool = {
   let sh = prim.handle(m)
@@ -20473,13 +20716,14 @@ fn map_count_str(m: Map[String, String], f: (String, String) -> Bool) -> Int = {
 
 
 
-fn __mfold_loop(sh: Int, f: (Int, String, String) -> Int, entries: Int, i: Int, acc: Int) -> Int = if i >= entries then acc
-else {
-  let k = prim.load_str(sh + 12 + i * 16)
-  let v = prim.load_str(sh + 12 + i * 16 + 8)
-  let nacc = f(acc, k, v)
-  __mfold_loop(sh, f, entries, i + 1, nacc)
-}
+fn __mfold_loop(sh: Int, f: (Int, String, String) -> Int, entries: Int, i: Int, acc: Int) -> Int =
+  if i >= entries then acc
+  else {
+    let k = prim.load_str(sh + 12 + i * 16)
+    let v = prim.load_str(sh + 12 + i * 16 + 8)
+    let nacc = f(acc, k, v)
+    __mfold_loop(sh, f, entries, i + 1, nacc)
+  }
 
 fn map_fold_str(m: Map[String, String], init: Int, f: (Int, String, String) -> Int) -> Int = {
   let sh = prim.handle(m)
@@ -20492,14 +20736,15 @@ fn map_fold_str(m: Map[String, String], init: Int, f: (Int, String, String) -> I
 
 
 
-fn __msf_at(ph: Int, n: Int, i: Int, m: Map[String, String]) -> Map[String, String] = if i >= n then m
-else {
-  let th = prim.load64(ph + 12 + i * 8)
-  let k = prim.load_str(th + 12)
-  let v = prim.load_str(th + 20)
-  let nm = map_set_str(m, k, v)
-  __msf_at(ph, n, i + 1, nm)
-}
+fn __msf_at(ph: Int, n: Int, i: Int, m: Map[String, String]) -> Map[String, String] =
+  if i >= n then m
+  else {
+    let th = prim.load64(ph + 12 + i * 8)
+    let k = prim.load_str(th + 12)
+    let v = prim.load_str(th + 20)
+    let nm = map_set_str(m, k, v)
+    __msf_at(ph, n, i + 1, nm)
+  }
 
 fn map_from_list_str(pairs: List[(String, String)]) -> Map[String, String] = {
   let ph = prim.handle(pairs)
@@ -20585,14 +20830,15 @@ fn __mts_key_width(elem: Int) -> Int = {
 }
 
 
-fn __mts_body_len(kaddr: Int, vaddr: Int, count: Int, i: Int, acc: Int) -> Int = if i >= count then acc
-else {
-  let kelem = prim.load64(kaddr + i * 8)
-  let v = prim.load64(vaddr + i * 8)
-  let sep = if i > 0 then 2 else 0
-  let ew = __mts_key_width(kelem) + 2 + __mts_int_width(v)
-  __mts_body_len(kaddr, vaddr, count, i + 1, acc + sep + ew)
-}
+fn __mts_body_len(kaddr: Int, vaddr: Int, count: Int, i: Int, acc: Int) -> Int =
+  if i >= count then acc
+  else {
+    let kelem = prim.load64(kaddr + i * 8)
+    let v = prim.load64(vaddr + i * 8)
+    let sep = if i > 0 then 2 else 0
+    let ew = __mts_key_width(kelem) + 2 + __mts_int_width(v)
+    __mts_body_len(kaddr, vaddr, count, i + 1, acc + sep + ew)
+  }
 
 
 fn __mts_fill_key(elem: Int, pos: Int) -> Int = {
@@ -20603,25 +20849,26 @@ fn __mts_fill_key(elem: Int, pos: Int) -> Int = {
   mid + 1
 }
 
-fn __mts_fill_body(kaddr: Int, vaddr: Int, count: Int, i: Int, pos: Int) -> Int = if i >= count then pos
-else {
-  let pos1 = if i > 0 then {
-    prim.store8(pos, 44)
+fn __mts_fill_body(kaddr: Int, vaddr: Int, count: Int, i: Int, pos: Int) -> Int =
+  if i >= count then pos
+  else {
+    let pos1 = if i > 0 then {
+      prim.store8(pos, 44)
 
-    prim.store8(pos + 1, 32)
+      prim.store8(pos + 1, 32)
 
-    pos + 2
-  } else pos
-  let kelem = prim.load64(kaddr + i * 8)
-  let pos2 = __mts_fill_key(kelem, pos1)
-  prim.store8(pos2, 58)
+      pos + 2
+    } else pos
+    let kelem = prim.load64(kaddr + i * 8)
+    let pos2 = __mts_fill_key(kelem, pos1)
+    prim.store8(pos2, 58)
 
-  prim.store8(pos2 + 1, 32)
+    prim.store8(pos2 + 1, 32)
 
-  let v = prim.load64(vaddr + i * 8)
-  let pos3 = __mts_fill_int(v, pos2 + 2)
-  __mts_fill_body(kaddr, vaddr, count, i + 1, pos3)
-}
+    let v = prim.load64(vaddr + i * 8)
+    let pos3 = __mts_fill_int(v, pos2 + 2)
+    __mts_fill_body(kaddr, vaddr, count, i + 1, pos3)
+  }
 
 fn map_to_string(m: Map[String, Int]) -> String = {
   let ks = map.keys(m)
@@ -20648,30 +20895,32 @@ fn map_to_string(m: Map[String, Int]) -> String = {
 
 
 
-fn __mts_body_len_ss(kaddr: Int, vaddr: Int, count: Int, i: Int, acc: Int) -> Int = if i >= count then acc
-else {
-  let kelem = prim.load64(kaddr + i * 8)
-  let velem = prim.load64(vaddr + i * 8)
-  let sep = if i > 0 then 2 else 0
-  let ew = __mts_key_width(kelem) + 2 + __mts_key_width(velem)
-  __mts_body_len_ss(kaddr, vaddr, count, i + 1, acc + sep + ew)
-}
+fn __mts_body_len_ss(kaddr: Int, vaddr: Int, count: Int, i: Int, acc: Int) -> Int =
+  if i >= count then acc
+  else {
+    let kelem = prim.load64(kaddr + i * 8)
+    let velem = prim.load64(vaddr + i * 8)
+    let sep = if i > 0 then 2 else 0
+    let ew = __mts_key_width(kelem) + 2 + __mts_key_width(velem)
+    __mts_body_len_ss(kaddr, vaddr, count, i + 1, acc + sep + ew)
+  }
 
-fn __mts_fill_body_ss(kaddr: Int, vaddr: Int, count: Int, i: Int, pos: Int) -> Int = if i >= count then pos
-else {
-  let pos1 = if i > 0 then {
-    prim.store8(pos, 44)
-    prim.store8(pos + 1, 32)
-    pos + 2
-  } else pos
-  let kelem = prim.load64(kaddr + i * 8)
-  let pos2 = __mts_fill_key(kelem, pos1)
-  prim.store8(pos2, 58)
-  prim.store8(pos2 + 1, 32)
-  let velem = prim.load64(vaddr + i * 8)
-  let pos3 = __mts_fill_key(velem, pos2 + 2)
-  __mts_fill_body_ss(kaddr, vaddr, count, i + 1, pos3)
-}
+fn __mts_fill_body_ss(kaddr: Int, vaddr: Int, count: Int, i: Int, pos: Int) -> Int =
+  if i >= count then pos
+  else {
+    let pos1 = if i > 0 then {
+      prim.store8(pos, 44)
+      prim.store8(pos + 1, 32)
+      pos + 2
+    } else pos
+    let kelem = prim.load64(kaddr + i * 8)
+    let pos2 = __mts_fill_key(kelem, pos1)
+    prim.store8(pos2, 58)
+    prim.store8(pos2 + 1, 32)
+    let velem = prim.load64(vaddr + i * 8)
+    let pos3 = __mts_fill_key(velem, pos2 + 2)
+    __mts_fill_body_ss(kaddr, vaddr, count, i + 1, pos3)
+  }
 
 fn map_to_string_ss(m: Map[String, String]) -> String = {
   let ks = map.keys(m)
@@ -20713,30 +20962,32 @@ fn __mts_fill_bool(v: Int, pos: Int) -> Int = if v == 0 then {
   pos + 4
 }
 
-fn __mts_body_len_sb(kaddr: Int, vaddr: Int, count: Int, i: Int, acc: Int) -> Int = if i >= count then acc
-else {
-  let kelem = prim.load64(kaddr + i * 8)
-  let velem = prim.load64(vaddr + i * 8)
-  let sep = if i > 0 then 2 else 0
-  let ew = __mts_key_width(kelem) + 2 + __mts_bool_width(velem)
-  __mts_body_len_sb(kaddr, vaddr, count, i + 1, acc + sep + ew)
-}
+fn __mts_body_len_sb(kaddr: Int, vaddr: Int, count: Int, i: Int, acc: Int) -> Int =
+  if i >= count then acc
+  else {
+    let kelem = prim.load64(kaddr + i * 8)
+    let velem = prim.load64(vaddr + i * 8)
+    let sep = if i > 0 then 2 else 0
+    let ew = __mts_key_width(kelem) + 2 + __mts_bool_width(velem)
+    __mts_body_len_sb(kaddr, vaddr, count, i + 1, acc + sep + ew)
+  }
 
-fn __mts_fill_body_sb(kaddr: Int, vaddr: Int, count: Int, i: Int, pos: Int) -> Int = if i >= count then pos
-else {
-  let pos1 = if i > 0 then {
-    prim.store8(pos, 44)
-    prim.store8(pos + 1, 32)
-    pos + 2
-  } else pos
-  let kelem = prim.load64(kaddr + i * 8)
-  let pos2 = __mts_fill_key(kelem, pos1)
-  prim.store8(pos2, 58)
-  prim.store8(pos2 + 1, 32)
-  let velem = prim.load64(vaddr + i * 8)
-  let pos3 = __mts_fill_bool(velem, pos2 + 2)
-  __mts_fill_body_sb(kaddr, vaddr, count, i + 1, pos3)
-}
+fn __mts_fill_body_sb(kaddr: Int, vaddr: Int, count: Int, i: Int, pos: Int) -> Int =
+  if i >= count then pos
+  else {
+    let pos1 = if i > 0 then {
+      prim.store8(pos, 44)
+      prim.store8(pos + 1, 32)
+      pos + 2
+    } else pos
+    let kelem = prim.load64(kaddr + i * 8)
+    let pos2 = __mts_fill_key(kelem, pos1)
+    prim.store8(pos2, 58)
+    prim.store8(pos2 + 1, 32)
+    let velem = prim.load64(vaddr + i * 8)
+    let pos3 = __mts_fill_bool(velem, pos2 + 2)
+    __mts_fill_body_sb(kaddr, vaddr, count, i + 1, pos3)
+  }
 
 fn map_to_string_sb(m: Map[String, Bool]) -> String = {
   let ks = map.keys(m)
@@ -20790,14 +21041,15 @@ fn __mts_fill_float(bits: Int, pos: Int) -> Int = {
   __mts_fill_bytes(sh + 12, w, 0, pos)
 }
 
-fn __mts_body_len_sf(kaddr: Int, vaddr: Int, count: Int, i: Int, acc: Int) -> Int = if i >= count then acc
-else {
-  let kelem = prim.load64(kaddr + i * 8)
-  let velem = prim.load64(vaddr + i * 8)
-  let sep = if i > 0 then 2 else 0
-  let ew = __mts_key_width(kelem) + 2 + __mts_float_width(velem)
-  __mts_body_len_sf(kaddr, vaddr, count, i + 1, acc + sep + ew)
-}
+fn __mts_body_len_sf(kaddr: Int, vaddr: Int, count: Int, i: Int, acc: Int) -> Int =
+  if i >= count then acc
+  else {
+    let kelem = prim.load64(kaddr + i * 8)
+    let velem = prim.load64(vaddr + i * 8)
+    let sep = if i > 0 then 2 else 0
+    let ew = __mts_key_width(kelem) + 2 + __mts_float_width(velem)
+    __mts_body_len_sf(kaddr, vaddr, count, i + 1, acc + sep + ew)
+  }
 
 fn __mts_fill_bytes(src: Int, n: Int, i: Int, pos: Int) -> Int = if i >= n then pos
 else {
@@ -20805,21 +21057,22 @@ else {
   __mts_fill_bytes(src, n, i + 1, pos + 1)
 }
 
-fn __mts_fill_body_sf(kaddr: Int, vaddr: Int, count: Int, i: Int, pos: Int) -> Int = if i >= count then pos
-else {
-  let pos1 = if i > 0 then {
-    prim.store8(pos, 44)
-    prim.store8(pos + 1, 32)
-    pos + 2
-  } else pos
-  let kelem = prim.load64(kaddr + i * 8)
-  let pos2 = __mts_fill_key(kelem, pos1)
-  prim.store8(pos2, 58)
-  prim.store8(pos2 + 1, 32)
-  let velem = prim.load64(vaddr + i * 8)
-  let pos3 = __mts_fill_float(velem, pos2 + 2)
-  __mts_fill_body_sf(kaddr, vaddr, count, i + 1, pos3)
-}
+fn __mts_fill_body_sf(kaddr: Int, vaddr: Int, count: Int, i: Int, pos: Int) -> Int =
+  if i >= count then pos
+  else {
+    let pos1 = if i > 0 then {
+      prim.store8(pos, 44)
+      prim.store8(pos + 1, 32)
+      pos + 2
+    } else pos
+    let kelem = prim.load64(kaddr + i * 8)
+    let pos2 = __mts_fill_key(kelem, pos1)
+    prim.store8(pos2, 58)
+    prim.store8(pos2 + 1, 32)
+    let velem = prim.load64(vaddr + i * 8)
+    let pos3 = __mts_fill_float(velem, pos2 + 2)
+    __mts_fill_body_sf(kaddr, vaddr, count, i + 1, pos3)
+  }
 
 fn map_to_string_sf(m: Map[String, Float]) -> String = {
   let ks = map.keys(m)
@@ -20894,12 +21147,13 @@ fn map_entries_hvalt(m: Map[String, (Int, Int)]) -> List[(String, (Int, Int))] =
 }
 
 
-fn __mtc_skv2str_go(sh: Int, entries: Int, f: (Int) -> String, i: Int, acc: Map[String, String]) -> Map[String, String] = if i >= entries then acc
-else {
-  let k: String = prim.load_str(sh + 12 + i * 8)
-  let nv = f(prim.load64(sh + 12 + (entries + i) * 8))
-  __mtc_skv2str_go(sh, entries, f, i + 1, map.set(acc, k, nv))
-}
+fn __mtc_skv2str_go(sh: Int, entries: Int, f: (Int) -> String, i: Int, acc: Map[String, String]) -> Map[String, String] =
+  if i >= entries then acc
+  else {
+    let k: String = prim.load_str(sh + 12 + i * 8)
+    let nv = f(prim.load64(sh + 12 + (entries + i) * 8))
+    __mtc_skv2str_go(sh, entries, f, i + 1, map.set(acc, k, nv))
+  }
 
 fn map_map_skv2str(m: Map[String, Int], f: (Int) -> String) -> Map[String, String] = {
   let sh = prim.handle(m)
@@ -20908,12 +21162,13 @@ fn map_map_skv2str(m: Map[String, Int], f: (Int) -> String) -> Map[String, Strin
 }
 
 
-fn __mtc_str2skv_go(sh: Int, entries: Int, f: (String) -> Int, i: Int, acc: Map[String, Int]) -> Map[String, Int] = if i >= entries then acc
-else {
-  let k: String = prim.load_str(sh + 12 + i * 16)
-  let v: String = prim.load_str(sh + 12 + i * 16 + 8)
-  __mtc_str2skv_go(sh, entries, f, i + 1, map.set(acc, k, f(v)))
-}
+fn __mtc_str2skv_go(sh: Int, entries: Int, f: (String) -> Int, i: Int, acc: Map[String, Int]) -> Map[String, Int] =
+  if i >= entries then acc
+  else {
+    let k: String = prim.load_str(sh + 12 + i * 16)
+    let v: String = prim.load_str(sh + 12 + i * 16 + 8)
+    __mtc_str2skv_go(sh, entries, f, i + 1, map.set(acc, k, f(v)))
+  }
 
 fn map_map_str2skv(m: Map[String, String], f: (String) -> Int) -> Map[String, Int] = {
   let sh = prim.handle(m)
@@ -20922,12 +21177,13 @@ fn map_map_str2skv(m: Map[String, String], f: (String) -> Int) -> Map[String, In
 }
 
 
-fn __mtc_ivh2core_go(sh: Int, entries: Int, f: (String) -> Int, i: Int, acc: Map[Int, Int]) -> Map[Int, Int] = if i >= entries then acc
-else {
-  let k = prim.load64(sh + 12 + i * 8)
-  let v: String = prim.load_str(sh + 12 + (entries + i) * 8)
-  __mtc_ivh2core_go(sh, entries, f, i + 1, map.set(acc, k, f(v)))
-}
+fn __mtc_ivh2core_go(sh: Int, entries: Int, f: (String) -> Int, i: Int, acc: Map[Int, Int]) -> Map[Int, Int] =
+  if i >= entries then acc
+  else {
+    let k = prim.load64(sh + 12 + i * 8)
+    let v: String = prim.load_str(sh + 12 + (entries + i) * 8)
+    __mtc_ivh2core_go(sh, entries, f, i + 1, map.set(acc, k, f(v)))
+  }
 
 fn map_map_ivh2core(m: Map[Int, String], f: (String) -> Int) -> Map[Int, Int] = {
   let sh = prim.handle(m)
@@ -20944,14 +21200,15 @@ fn __mtc_store_key(addr: Int, s: String) -> Int = {
   0
 }
 
-fn __mtc_skv2hvalt_fill(sh: Int, rh: Int, entries: Int, f: (Int) -> (Int, Int), i: Int) -> Int = if i >= entries then 0
-else {
-  let k: String = prim.load_str(sh + 12 + i * 8)
-  let _kc = __mtc_store_key(rh + 12 + i * 8, k)
-  let t = f(prim.load64(sh + 12 + (entries + i) * 8))
-  prim.store_str(rh + 12 + (entries + i) * 8, t)
-  __mtc_skv2hvalt_fill(sh, rh, entries, f, i + 1)
-}
+fn __mtc_skv2hvalt_fill(sh: Int, rh: Int, entries: Int, f: (Int) -> (Int, Int), i: Int) -> Int =
+  if i >= entries then 0
+  else {
+    let k: String = prim.load_str(sh + 12 + i * 8)
+    let _kc = __mtc_store_key(rh + 12 + i * 8, k)
+    let t = f(prim.load64(sh + 12 + (entries + i) * 8))
+    prim.store_str(rh + 12 + (entries + i) * 8, t)
+    __mtc_skv2hvalt_fill(sh, rh, entries, f, i + 1)
+  }
 
 fn map_map_skv2hvalt(m: Map[String, Int], f: (Int) -> (Int, Int)) -> Map[String, (Int, Int)] = {
   let sh = prim.handle(m)
@@ -20967,11 +21224,12 @@ fn map_map_skv2hvalt(m: Map[String, Int], f: (Int) -> (Int, Int)) -> Map[String,
 
 
 
-fn __stc_i2s_go(sh: Int, n: Int, f: (Int) -> String, i: Int, acc: Set[String]) -> Set[String] = if i >= n then acc
-else {
-  let v = f(prim.load64(sh + 12 + i * 8))
-  __stc_i2s_go(sh, n, f, i + 1, set.insert(acc, v))
-}
+fn __stc_i2s_go(sh: Int, n: Int, f: (Int) -> String, i: Int, acc: Set[String]) -> Set[String] =
+  if i >= n then acc
+  else {
+    let v = f(prim.load64(sh + 12 + i * 8))
+    __stc_i2s_go(sh, n, f, i + 1, set.insert(acc, v))
+  }
 
 fn set_map_i2s(s: Set[Int], f: (Int) -> String) -> Set[String] = {
   let sh = prim.handle(s)
@@ -20990,14 +21248,15 @@ pub const SRC_MAP_VKEY: &str = r#"
 
 fn __vtag(k: Value) -> Int = prim.load64(prim.handle(k) + 12)
 
-fn __mvt_at(pairs: List[(Value, Int)], i: Int, m: Map[Int, Int]) -> Map[Int, Int] = if i >= list.len(pairs) then m
-else match list.get(pairs, i) {
-  some(p) => {
-    let (k, v) = p
-    __mvt_at(pairs, i + 1, map.set(m, __vtag(k), v))
-  },
-  none => m,
-}
+fn __mvt_at(pairs: List[(Value, Int)], i: Int, m: Map[Int, Int]) -> Map[Int, Int] =
+  if i >= list.len(pairs) then m
+  else match list.get(pairs, i) {
+    some(p) => {
+      let (k, v) = p
+      __mvt_at(pairs, i + 1, map.set(m, __vtag(k), v))
+    },
+    none => m,
+  }
 
 fn map_from_list_vtag(pairs: List[(Value, Int)]) -> Map[Int, Int] = {
   let m: Map[Int, Int] = map.new()
@@ -21022,14 +21281,15 @@ fn __srec_key(k: Value) -> String = {
   __srec_key_go(h, n, 0, "")
 }
 
-fn __msr_at(pairs: List[(Value, String)], i: Int, m: Map[String, String]) -> Map[String, String] = if i >= list.len(pairs) then m
-else match list.get(pairs, i) {
-  some(p) => {
-    let (k, v) = p
-    __msr_at(pairs, i + 1, map.set(m, __srec_key(k), v))
-  },
-  none => m,
-}
+fn __msr_at(pairs: List[(Value, String)], i: Int, m: Map[String, String]) -> Map[String, String] =
+  if i >= list.len(pairs) then m
+  else match list.get(pairs, i) {
+    some(p) => {
+      let (k, v) = p
+      __msr_at(pairs, i + 1, map.set(m, __srec_key(k), v))
+    },
+    none => m,
+  }
 
 fn map_from_list_srec(pairs: List[(Value, String)]) -> Map[String, String] = {
   let m: Map[String, String] = map.new()
@@ -21054,11 +21314,12 @@ fn map_contains_srec(m: Map[String, String], k: Value) -> Bool = map.contains(m,
 
 
 
-fn __sfl_srec_at(xs: List[Value], i: Int, acc: Set[String]) -> Set[String] = if i >= list.len(xs) then acc
-else match list.get(xs, i) {
-  some(x) => __sfl_srec_at(xs, i + 1, set.insert(acc, __srec_key(x))),
-  none => acc,
-}
+fn __sfl_srec_at(xs: List[Value], i: Int, acc: Set[String]) -> Set[String] =
+  if i >= list.len(xs) then acc
+  else match list.get(xs, i) {
+    some(x) => __sfl_srec_at(xs, i + 1, set.insert(acc, __srec_key(x))),
+    none => acc,
+  }
 
 fn set_from_list_srec(xs: List[Value]) -> Set[String] = {
   let acc: Set[String] = set.new()
@@ -22742,13 +23003,14 @@ fn __ph_loop(tabh: Int, xh: Int, fh: Int, qh: Int, iqh: Int, sth: Int, jx: Int, 
 }
 
 
-fn __ph_extend(tabh: Int, xh: Int, fh: Int, qh: Int, jx: Int, jv: Int, lo: Int, hi: Int) -> Int = if lo > hi then 0
-else {
-  prim.store64(fh + 12 + (jx + lo) * 8, prim.fbits(prim.i2f(__ipio2(tabh, jv + lo))))
-  let fw = __ph_dot(xh, fh, jx, lo, 0, 0.0)
-  prim.store64(qh + 12 + lo * 8, prim.fbits(fw))
-  __ph_extend(tabh, xh, fh, qh, jx, jv, lo + 1, hi)
-}
+fn __ph_extend(tabh: Int, xh: Int, fh: Int, qh: Int, jx: Int, jv: Int, lo: Int, hi: Int) -> Int =
+  if lo > hi then 0
+  else {
+    prim.store64(fh + 12 + (jx + lo) * 8, prim.fbits(prim.i2f(__ipio2(tabh, jv + lo))))
+    let fw = __ph_dot(xh, fh, jx, lo, 0, 0.0)
+    prim.store64(qh + 12 + lo * 8, prim.fbits(fw))
+    __ph_extend(tabh, xh, fh, qh, jx, jv, lo + 1, hi)
+  }
 
 
 fn __ph_chop(iqh: Int, sth: Int) -> Int = {
@@ -23602,20 +23864,22 @@ fn __sg_cell(xrow_h: Int, wg: List[List[Float]], wu: List[List[Float]], j: Int, 
   (g * sig) * u
 }
 
-fn __sg_row_cells(dh: Int, xrow_h: Int, wg: List[List[Float]], wu: List[List[Float]], d_out: Int, d_in: Int, j: Int) -> Int = if j >= d_out then 0
-else {
-  prim.store64(dh + 12 + j * 8, prim.fbits(__sg_cell(xrow_h, wg, wu, j, d_in)))
-  __sg_row_cells(dh, xrow_h, wg, wu, d_out, d_in, j + 1)
-}
+fn __sg_row_cells(dh: Int, xrow_h: Int, wg: List[List[Float]], wu: List[List[Float]], d_out: Int, d_in: Int, j: Int) -> Int =
+  if j >= d_out then 0
+  else {
+    prim.store64(dh + 12 + j * 8, prim.fbits(__sg_cell(xrow_h, wg, wu, j, d_in)))
+    __sg_row_cells(dh, xrow_h, wg, wu, d_out, d_in, j + 1)
+  }
 
-fn __sg_rows(ho: Int, x: List[List[Float]], wg: List[List[Float]], wu: List[List[Float]], r: Int, d_out: Int, d_in: Int, i: Int) -> Int = if i >= r then 0
-else {
-  let xrow_h = prim.load64(prim.handle(x) + 12 + i * 8)
-  let row = prim.alloc_list_f64(d_out)
-  let _c = __sg_row_cells(prim.handle(row), xrow_h, wg, wu, d_out, d_in, 0)
-  prim.store_str(ho + 12 + i * 8, row)
-  __sg_rows(ho, x, wg, wu, r, d_out, d_in, i + 1)
-}
+fn __sg_rows(ho: Int, x: List[List[Float]], wg: List[List[Float]], wu: List[List[Float]], r: Int, d_out: Int, d_in: Int, i: Int) -> Int =
+  if i >= r then 0
+  else {
+    let xrow_h = prim.load64(prim.handle(x) + 12 + i * 8)
+    let row = prim.alloc_list_f64(d_out)
+    let _c = __sg_row_cells(prim.handle(row), xrow_h, wg, wu, d_out, d_in, 0)
+    prim.store_str(ho + 12 + i * 8, row)
+    __sg_rows(ho, x, wg, wu, r, d_out, d_in, i + 1)
+  }
 
 
 
@@ -23719,26 +23983,27 @@ else {
 
 
 
-fn __rope_pairs(dh: Int, sh: Int, pos_f: Float, head_dim_f: Float, theta: Float, h: Int, head_dim: Int, half: Int, i_pair: Int) -> Int = if i_pair >= half then 0
-else {
-  let j0 = h * head_dim + 2 * i_pair
-  let x0 = prim.ffrombits(prim.load64(sh + 12 + j0 * 8))
-  let x1 = prim.ffrombits(prim.load64(sh + 12 + (j0 + 1) * 8))
-  let two_i_f = int.to_float(2 * i_pair)
+fn __rope_pairs(dh: Int, sh: Int, pos_f: Float, head_dim_f: Float, theta: Float, h: Int, head_dim: Int, half: Int, i_pair: Int) -> Int =
+  if i_pair >= half then 0
+  else {
+    let j0 = h * head_dim + 2 * i_pair
+    let x0 = prim.ffrombits(prim.load64(sh + 12 + j0 * 8))
+    let x1 = prim.ffrombits(prim.load64(sh + 12 + (j0 + 1) * 8))
+    let two_i_f = int.to_float(2 * i_pair)
 
 
 
 
 
 
-  let inv_freq = 1.0 / math.fpow(theta, two_i_f / head_dim_f)
-  let angle = pos_f * inv_freq
-  let s = math.sin(angle)
-  let c = math.cos(angle)
-  prim.store64(dh + 12 + j0 * 8, prim.fbits(x0 * c - x1 * s))
-  prim.store64(dh + 12 + (j0 + 1) * 8, prim.fbits(x0 * s + x1 * c))
-  __rope_pairs(dh, sh, pos_f, head_dim_f, theta, h, head_dim, half, i_pair + 1)
-}
+    let inv_freq = 1.0 / math.fpow(theta, two_i_f / head_dim_f)
+    let angle = pos_f * inv_freq
+    let s = math.sin(angle)
+    let c = math.cos(angle)
+    prim.store64(dh + 12 + j0 * 8, prim.fbits(x0 * c - x1 * s))
+    prim.store64(dh + 12 + (j0 + 1) * 8, prim.fbits(x0 * s + x1 * c))
+    __rope_pairs(dh, sh, pos_f, head_dim_f, theta, h, head_dim, half, i_pair + 1)
+  }
 
 fn __mx_head_count(n: Int) -> Int = {
   if n < 1 then prim.die(prim.handle("Error: head count must be positive\n")) else ()
@@ -23756,80 +24021,85 @@ fn __mx_head_geometry(nh: Int, head_dim: Int, rows: Int, cols: Int) -> Int = {
   nh
 }
 
-fn __rope_heads(dh: Int, sh: Int, pos_f: Float, head_dim_f: Float, theta: Float, n_heads: Int, head_dim: Int, half: Int, h: Int) -> Int = if h >= n_heads then 0
-else {
-  let _p = __rope_pairs(dh, sh, pos_f, head_dim_f, theta, h, head_dim, half, 0)
-  __rope_heads(dh, sh, pos_f, head_dim_f, theta, n_heads, head_dim, half, h + 1)
-}
+fn __rope_heads(dh: Int, sh: Int, pos_f: Float, head_dim_f: Float, theta: Float, n_heads: Int, head_dim: Int, half: Int, h: Int) -> Int =
+  if h >= n_heads then 0
+  else {
+    let _p = __rope_pairs(dh, sh, pos_f, head_dim_f, theta, h, head_dim, half, 0)
+    __rope_heads(dh, sh, pos_f, head_dim_f, theta, n_heads, head_dim, half, h + 1)
+  }
 
-fn __rope_rows(ho: Int, hx: Int, n_heads: Int, head_dim: Int, half: Int, head_dim_f: Float, theta: Float, cols: Int, rows: Int, start: Int, p: Int) -> Int = if p >= rows then 0
-else {
-  let sh = prim.load64(hx + 12 + p * 8)
-  let row = prim.alloc_list_f64(cols)
-  let dh = prim.handle(row)
-  let _cp = __rope_copy(dh, sh, cols, 0)
-  let _ht = __rope_heads(
-    dh,
-    sh,
-    int.to_float(start + p),
-    head_dim_f,
-    theta,
-    n_heads,
-    head_dim,
-    half,
-    0,
-  )
-  prim.store_str(ho + 12 + p * 8, row)
-  __rope_rows(ho, hx, n_heads, head_dim, half, head_dim_f, theta, cols, rows, start, p + 1)
-}
-
-
-
-
+fn __rope_rows(ho: Int, hx: Int, n_heads: Int, head_dim: Int, half: Int, head_dim_f: Float, theta: Float, cols: Int, rows: Int, start: Int, p: Int) -> Int =
+  if p >= rows then 0
+  else {
+    let sh = prim.load64(hx + 12 + p * 8)
+    let row = prim.alloc_list_f64(cols)
+    let dh = prim.handle(row)
+    let _cp = __rope_copy(dh, sh, cols, 0)
+    let _ht = __rope_heads(
+      dh,
+      sh,
+      int.to_float(start + p),
+      head_dim_f,
+      theta,
+      n_heads,
+      head_dim,
+      half,
+      0,
+    )
+    prim.store_str(ho + 12 + p * 8, row)
+    __rope_rows(ho, hx, n_heads, head_dim, half, head_dim_f, theta, cols, rows, start, p + 1)
+  }
 
 
-fn __rope_neox_pairs(dh: Int, sh: Int, pos_f: Float, head_dim_f: Float, theta: Float, h: Int, head_dim: Int, half: Int, j: Int) -> Int = if j >= half then 0
-else {
-  let j0 = h * head_dim + j
-  let j1 = h * head_dim + half + j
-  let x0 = prim.ffrombits(prim.load64(sh + 12 + j0 * 8))
-  let x1 = prim.ffrombits(prim.load64(sh + 12 + j1 * 8))
-  let two_j_f = int.to_float(2 * j)
-  let inv_freq = 1.0 / math.fpow(theta, two_j_f / head_dim_f)
-  let angle = pos_f * inv_freq
-  let s = math.sin(angle)
-  let c = math.cos(angle)
-  prim.store64(dh + 12 + j0 * 8, prim.fbits(x0 * c - x1 * s))
-  prim.store64(dh + 12 + j1 * 8, prim.fbits(x0 * s + x1 * c))
-  __rope_neox_pairs(dh, sh, pos_f, head_dim_f, theta, h, head_dim, half, j + 1)
-}
 
-fn __rope_neox_heads(dh: Int, sh: Int, pos_f: Float, head_dim_f: Float, theta: Float, n_heads: Int, head_dim: Int, half: Int, h: Int) -> Int = if h >= n_heads then 0
-else {
-  let _p = __rope_neox_pairs(dh, sh, pos_f, head_dim_f, theta, h, head_dim, half, 0)
-  __rope_neox_heads(dh, sh, pos_f, head_dim_f, theta, n_heads, head_dim, half, h + 1)
-}
 
-fn __rope_neox_rows(ho: Int, hx: Int, n_heads: Int, head_dim: Int, half: Int, head_dim_f: Float, theta: Float, cols: Int, rows: Int, start: Int, p: Int) -> Int = if p >= rows then 0
-else {
-  let sh = prim.load64(hx + 12 + p * 8)
-  let row = prim.alloc_list_f64(cols)
-  let dh = prim.handle(row)
-  let _cp = __rope_copy(dh, sh, cols, 0)
-  let _ht = __rope_neox_heads(
-    dh,
-    sh,
-    int.to_float(start + p),
-    head_dim_f,
-    theta,
-    n_heads,
-    head_dim,
-    half,
-    0,
-  )
-  prim.store_str(ho + 12 + p * 8, row)
-  __rope_neox_rows(ho, hx, n_heads, head_dim, half, head_dim_f, theta, cols, rows, start, p + 1)
-}
+
+
+fn __rope_neox_pairs(dh: Int, sh: Int, pos_f: Float, head_dim_f: Float, theta: Float, h: Int, head_dim: Int, half: Int, j: Int) -> Int =
+  if j >= half then 0
+  else {
+    let j0 = h * head_dim + j
+    let j1 = h * head_dim + half + j
+    let x0 = prim.ffrombits(prim.load64(sh + 12 + j0 * 8))
+    let x1 = prim.ffrombits(prim.load64(sh + 12 + j1 * 8))
+    let two_j_f = int.to_float(2 * j)
+    let inv_freq = 1.0 / math.fpow(theta, two_j_f / head_dim_f)
+    let angle = pos_f * inv_freq
+    let s = math.sin(angle)
+    let c = math.cos(angle)
+    prim.store64(dh + 12 + j0 * 8, prim.fbits(x0 * c - x1 * s))
+    prim.store64(dh + 12 + j1 * 8, prim.fbits(x0 * s + x1 * c))
+    __rope_neox_pairs(dh, sh, pos_f, head_dim_f, theta, h, head_dim, half, j + 1)
+  }
+
+fn __rope_neox_heads(dh: Int, sh: Int, pos_f: Float, head_dim_f: Float, theta: Float, n_heads: Int, head_dim: Int, half: Int, h: Int) -> Int =
+  if h >= n_heads then 0
+  else {
+    let _p = __rope_neox_pairs(dh, sh, pos_f, head_dim_f, theta, h, head_dim, half, 0)
+    __rope_neox_heads(dh, sh, pos_f, head_dim_f, theta, n_heads, head_dim, half, h + 1)
+  }
+
+fn __rope_neox_rows(ho: Int, hx: Int, n_heads: Int, head_dim: Int, half: Int, head_dim_f: Float, theta: Float, cols: Int, rows: Int, start: Int, p: Int) -> Int =
+  if p >= rows then 0
+  else {
+    let sh = prim.load64(hx + 12 + p * 8)
+    let row = prim.alloc_list_f64(cols)
+    let dh = prim.handle(row)
+    let _cp = __rope_copy(dh, sh, cols, 0)
+    let _ht = __rope_neox_heads(
+      dh,
+      sh,
+      int.to_float(start + p),
+      head_dim_f,
+      theta,
+      n_heads,
+      head_dim,
+      half,
+      0,
+    )
+    prim.store_str(ho + 12 + p * 8, row)
+    __rope_neox_rows(ho, hx, n_heads, head_dim, half, head_dim_f, theta, cols, rows, start, p + 1)
+  }
 
 
 
@@ -23915,22 +24185,24 @@ fn matrix_rope_rotate_neox_at(x: List[List[Float]], n_heads: Int, head_dim: Int,
 }
 
 
-fn __mha_dot(qh: Int, kh: Int, col0: Int, dh: Int, k: Int, acc: Float) -> Float = if k >= dh then acc
-else {
-  let qv = prim.ffrombits(prim.load64(qh + 12 + (col0 + k) * 8))
-  let kv = prim.ffrombits(prim.load64(kh + 12 + (col0 + k) * 8))
-  __mha_dot(qh, kh, col0, dh, k + 1, acc + qv * kv)
-}
+fn __mha_dot(qh: Int, kh: Int, col0: Int, dh: Int, k: Int, acc: Float) -> Float =
+  if k >= dh then acc
+  else {
+    let qv = prim.ffrombits(prim.load64(qh + 12 + (col0 + k) * 8))
+    let kv = prim.ffrombits(prim.load64(kh + 12 + (col0 + k) * 8))
+    __mha_dot(qh, kh, col0, dh, k + 1, acc + qv * kv)
+  }
 
-fn __mha_scores(sch: Int, qh: Int, kmat: List[List[Float]], col0: Int, dh: Int, sk: Int, scale: Float, mask: Int, j: Int) -> Int = if j >= sk then 0
-else {
-  let kh = prim.load64(prim.handle(kmat) + 12 + j * 8)
-  let dot = __mha_dot(qh, kh, col0, dh, 0, 0.0)
-  let scaled = dot * scale
-  let masked = if mask >= 0 and j > mask then scaled + (0.0 - 1000000000.0) else scaled
-  prim.store64(sch + 12 + j * 8, prim.fbits(masked))
-  __mha_scores(sch, qh, kmat, col0, dh, sk, scale, mask, j + 1)
-}
+fn __mha_scores(sch: Int, qh: Int, kmat: List[List[Float]], col0: Int, dh: Int, sk: Int, scale: Float, mask: Int, j: Int) -> Int =
+  if j >= sk then 0
+  else {
+    let kh = prim.load64(prim.handle(kmat) + 12 + j * 8)
+    let dot = __mha_dot(qh, kh, col0, dh, 0, 0.0)
+    let scaled = dot * scale
+    let masked = if mask >= 0 and j > mask then scaled + (0.0 - 1000000000.0) else scaled
+    prim.store64(sch + 12 + j * 8, prim.fbits(masked))
+    __mha_scores(sch, qh, kmat, col0, dh, sk, scale, mask, j + 1)
+  }
 
 fn __mha_max(sch: Int, sk: Int, j: Int, acc: Float) -> Float = if j >= sk then acc
 else {
@@ -23961,30 +24233,32 @@ else {
 
 
 
-fn __mha_out(oh: Int, sch: Int, vmat: List[List[Float]], col0: Int, dh: Int, sk: Int, inv: Float, j: Int) -> Int = if j >= sk then 0
-else {
-  let w = prim.ffrombits(prim.load64(sch + 12 + j * 8)) * inv
-  let _c = if w == 0.0 then 0
-  else __mha_acc_cols(oh, prim.load64(prim.handle(vmat) + 12 + j * 8), col0, dh, w, 0)
-  __mha_out(oh, sch, vmat, col0, dh, sk, inv, j + 1)
-}
+fn __mha_out(oh: Int, sch: Int, vmat: List[List[Float]], col0: Int, dh: Int, sk: Int, inv: Float, j: Int) -> Int =
+  if j >= sk then 0
+  else {
+    let w = prim.ffrombits(prim.load64(sch + 12 + j * 8)) * inv
+    let _c = if w == 0.0 then 0
+    else __mha_acc_cols(oh, prim.load64(prim.handle(vmat) + 12 + j * 8), col0, dh, w, 0)
+    __mha_out(oh, sch, vmat, col0, dh, sk, inv, j + 1)
+  }
 
-fn __mha_heads(oh: Int, qh: Int, kmat: List[List[Float]], vmat: List[List[Float]], nh: Int, dh: Int, sk: Int, sq: Int, i: Int, scale: Float, causal: Bool, h: Int) -> Int = if h >= nh then 0
-else {
-  let col0 = h * dh
-  let scores = prim.alloc_list_f64(sk)
-  let sch = prim.handle(scores)
-  let mask = if causal then (sk - sq) + i else 0 - 1
-  let _s = __mha_scores(sch, qh, kmat, col0, dh, sk, scale, mask, 0)
+fn __mha_heads(oh: Int, qh: Int, kmat: List[List[Float]], vmat: List[List[Float]], nh: Int, dh: Int, sk: Int, sq: Int, i: Int, scale: Float, causal: Bool, h: Int) -> Int =
+  if h >= nh then 0
+  else {
+    let col0 = h * dh
+    let scores = prim.alloc_list_f64(sk)
+    let sch = prim.handle(scores)
+    let mask = if causal then (sk - sq) + i else 0 - 1
+    let _s = __mha_scores(sch, qh, kmat, col0, dh, sk, scale, mask, 0)
 
 
 
 
-  let mx = __mha_max(sch, sk, 0, prim.ffrombits(int.bshl(4095, 52)))
-  let sum = __mha_exp(sch, sk, mx, 0, 0.0)
-  let _o = __mha_out(oh, sch, vmat, col0, dh, sk, 1.0 / sum, 0)
-  __mha_heads(oh, qh, kmat, vmat, nh, dh, sk, sq, i, scale, causal, h + 1)
-}
+    let mx = __mha_max(sch, sk, 0, prim.ffrombits(int.bshl(4095, 52)))
+    let sum = __mha_exp(sch, sk, mx, 0, 0.0)
+    let _o = __mha_out(oh, sch, vmat, col0, dh, sk, 1.0 / sum, 0)
+    __mha_heads(oh, qh, kmat, vmat, nh, dh, sk, sq, i, scale, causal, h + 1)
+  }
 
 fn __mha_zero(oh: Int, dm: Int, i: Int) -> Int = if i >= dm then 0
 else {
@@ -23992,16 +24266,17 @@ else {
   __mha_zero(oh, dm, i + 1)
 }
 
-fn __mha_rows(ho: Int, qmat: List[List[Float]], kmat: List[List[Float]], vmat: List[List[Float]], nh: Int, dh: Int, dm: Int, sk: Int, sq: Int, scale: Float, causal: Bool, i: Int) -> Int = if i >= sq then 0
-else {
-  let qh = prim.load64(prim.handle(qmat) + 12 + i * 8)
-  let row = prim.alloc_list_f64(dm)
-  let oh = prim.handle(row)
-  let _z = __mha_zero(oh, dm, 0)
-  let _h = __mha_heads(oh, qh, kmat, vmat, nh, dh, sk, sq, i, scale, causal, 0)
-  prim.store_str(ho + 12 + i * 8, row)
-  __mha_rows(ho, qmat, kmat, vmat, nh, dh, dm, sk, sq, scale, causal, i + 1)
-}
+fn __mha_rows(ho: Int, qmat: List[List[Float]], kmat: List[List[Float]], vmat: List[List[Float]], nh: Int, dh: Int, dm: Int, sk: Int, sq: Int, scale: Float, causal: Bool, i: Int) -> Int =
+  if i >= sq then 0
+  else {
+    let qh = prim.load64(prim.handle(qmat) + 12 + i * 8)
+    let row = prim.alloc_list_f64(dm)
+    let oh = prim.handle(row)
+    let _z = __mha_zero(oh, dm, 0)
+    let _h = __mha_heads(oh, qh, kmat, vmat, nh, dh, sk, sq, i, scale, causal, 0)
+    prim.store_str(ho + 12 + i * 8, row)
+    __mha_rows(ho, qmat, kmat, vmat, nh, dh, dm, sk, sq, scale, causal, i + 1)
+  }
 
 
 
@@ -24071,12 +24346,13 @@ fn __dq_zero(v: Float) -> Float = if v == 0.0 then 0.0 else v
 
 
 
-fn __fp16_subnormal_bits(signbits: Int, m: Int, e: Int) -> Int = if prim.band(m, 1024) == 0 then __fp16_subnormal_bits(
-  signbits,
-  prim.bshl(m, 1),
-  e - 1,
-)
-else prim.bor(prim.bor(signbits, prim.bshl(e + 127, 23)), prim.bshl(prim.band(m, 1023), 13))
+fn __fp16_subnormal_bits(signbits: Int, m: Int, e: Int) -> Int =
+  if prim.band(m, 1024) == 0 then __fp16_subnormal_bits(
+    signbits,
+    prim.bshl(m, 1),
+    e - 1,
+  )
+  else prim.bor(prim.bor(signbits, prim.bshl(e + 127, 23)), prim.bshl(prim.band(m, 1023), 13))
 
 
 
@@ -24121,11 +24397,12 @@ fn __q10_val(base: Int, limit: Int, k: Int) -> Float = {
   }
 }
 
-fn __q10_row(dh: Int, base: Int, limit: Int, row_k0: Int, cols: Int, c: Int) -> Int = if c >= cols then 0
-else {
-  prim.store64(dh + 12 + c * 8, prim.fbits(__q10_val(base, limit, row_k0 + c)))
-  __q10_row(dh, base, limit, row_k0, cols, c + 1)
-}
+fn __q10_row(dh: Int, base: Int, limit: Int, row_k0: Int, cols: Int, c: Int) -> Int =
+  if c >= cols then 0
+  else {
+    prim.store64(dh + 12 + c * 8, prim.fbits(__q10_val(base, limit, row_k0 + c)))
+    __q10_row(dh, base, limit, row_k0, cols, c + 1)
+  }
 
 
 
@@ -24142,13 +24419,14 @@ else {
 
 
 
-fn __q10_rows(ho: Int, base: Int, limit: Int, rows: Int, cols: Int, r: Int) -> Int = if r >= rows then 0
-else {
-  let row = prim.alloc_list_f64(cols)
-  let _c = __q10_row(prim.handle(row), base, limit, r * cols, cols, 0)
-  prim.store_str(ho + 12 + r * 8, row)
-  __q10_rows(ho, base, limit, rows, cols, r + 1)
-}
+fn __q10_rows(ho: Int, base: Int, limit: Int, rows: Int, cols: Int, r: Int) -> Int =
+  if r >= rows then 0
+  else {
+    let row = prim.alloc_list_f64(cols)
+    let _c = __q10_row(prim.handle(row), base, limit, r * cols, cols, 0)
+    prim.store_str(ho + 12 + r * 8, row)
+    __q10_rows(ho, base, limit, rows, cols, r + 1)
+  }
 
 
 
@@ -24205,20 +24483,21 @@ else if offset > len then len else offset
 
 
 
-fn __q10_sel_rows(ho: Int, base: Int, limit: Int, ids: List[Int], cols: Int, i: Int) -> Int = if i >= list.len(ids) then 0
-else {
-  let rid0 = list.get(ids, i) ?? 0
-  let rid = if rid0 < 0 then 0 else rid0
-  let row_bytes = cols / 128 * 18
-  let cr = cols / 128 * 128
-  let row = prim.alloc_list_f64(cols)
-  let _c = if __q_row_fits(limit - base, rid, row_bytes) then {
-    let _d = __q10_row(prim.handle(row), base, limit, rid * cr, cr, 0)
-    __q8_zfill(prim.handle(row), cols, cr)
-  } else __q8_zfill(prim.handle(row), cols, 0)
-  prim.store_str(ho + 12 + i * 8, row)
-  __q10_sel_rows(ho, base, limit, ids, cols, i + 1)
-}
+fn __q10_sel_rows(ho: Int, base: Int, limit: Int, ids: List[Int], cols: Int, i: Int) -> Int =
+  if i >= list.len(ids) then 0
+  else {
+    let rid0 = list.get(ids, i) ?? 0
+    let rid = if rid0 < 0 then 0 else rid0
+    let row_bytes = cols / 128 * 18
+    let cr = cols / 128 * 128
+    let row = prim.alloc_list_f64(cols)
+    let _c = if __q_row_fits(limit - base, rid, row_bytes) then {
+      let _d = __q10_row(prim.handle(row), base, limit, rid * cr, cr, 0)
+      __q8_zfill(prim.handle(row), cols, cr)
+    } else __q8_zfill(prim.handle(row), cols, 0)
+    prim.store_str(ho + 12 + i * 8, row)
+    __q10_sel_rows(ho, base, limit, ids, cols, i + 1)
+  }
 
 fn matrix_select_rows_q1_0(data: Bytes, offset: Int, cols: Int, row_ids: List[Int]) -> List[List[Float]] = {
   let hd = prim.handle(data)
@@ -24261,17 +24540,18 @@ else {
 
 
 
-fn __q8_sel_rows(ho: Int, base: Int, limit: Int, ids: List[Int], cols: Int, row_bytes: Int, i: Int) -> Int = if i >= list.len(ids) then 0
-else {
-  let rid0 = list.get(ids, i) ?? 0
-  let rid = if rid0 < 0 then 0 else rid0
-  let row = prim.alloc_list_f64(cols)
-  let fits = __q_row_fits(limit - base, rid, row_bytes)
-  let _c = if fits then __q8_row(prim.handle(row), base, rid * row_bytes, cols, 0)
-  else __q8_zfill(prim.handle(row), cols, 0)
-  prim.store_str(ho + 12 + i * 8, row)
-  __q8_sel_rows(ho, base, limit, ids, cols, row_bytes, i + 1)
-}
+fn __q8_sel_rows(ho: Int, base: Int, limit: Int, ids: List[Int], cols: Int, row_bytes: Int, i: Int) -> Int =
+  if i >= list.len(ids) then 0
+  else {
+    let rid0 = list.get(ids, i) ?? 0
+    let rid = if rid0 < 0 then 0 else rid0
+    let row = prim.alloc_list_f64(cols)
+    let fits = __q_row_fits(limit - base, rid, row_bytes)
+    let _c = if fits then __q8_row(prim.handle(row), base, rid * row_bytes, cols, 0)
+    else __q8_zfill(prim.handle(row), cols, 0)
+    prim.store_str(ho + 12 + i * 8, row)
+    __q8_sel_rows(ho, base, limit, ids, cols, row_bytes, i + 1)
+  }
 
 fn matrix_select_rows_q8_0_dq(data: Bytes, offset: Int, cols: Int, row_ids: List[Int]) -> List[List[Float]] = {
   let hd = prim.handle(data)
@@ -24766,25 +25046,27 @@ fn matrix_gather_rows(m: List[List[Float]], indices: List[Int]) -> List[List[Flo
   out
 }
 
-fn __mx_gather_one(hm: Int, mr: Int, cols: Int, idx: Int) -> List[Float] = if idx >= 0 and idx < mr then {
-  let src = prim.load64(hm + 12 + idx * 8)
-  let c = prim.load32(src + 4)
-  let row = prim.alloc_list_f64(c)
-  let _f = __mx_copy_off(prim.handle(row), src, 0, c, 0)
-  row
-} else {
-  let row = prim.alloc_list_f64(cols)
-  let _f = __mx_fill_row(prim.handle(row), cols, prim.fbits(0.0), 0)
-  row
-}
+fn __mx_gather_one(hm: Int, mr: Int, cols: Int, idx: Int) -> List[Float] =
+  if idx >= 0 and idx < mr then {
+    let src = prim.load64(hm + 12 + idx * 8)
+    let c = prim.load32(src + 4)
+    let row = prim.alloc_list_f64(c)
+    let _f = __mx_copy_off(prim.handle(row), src, 0, c, 0)
+    row
+  } else {
+    let row = prim.alloc_list_f64(cols)
+    let _f = __mx_fill_row(prim.handle(row), cols, prim.fbits(0.0), 0)
+    row
+  }
 
-fn __mx_gather_fill(ho: Int, hm: Int, mr: Int, cols: Int, hi: Int, n: Int, i: Int) -> Int = if i >= n then 0
-else {
-  let idx = prim.load64(hi + 12 + i * 8)
-  let row = __mx_gather_one(hm, mr, cols, idx)
-  prim.store_str(ho + 12 + i * 8, row)
-  __mx_gather_fill(ho, hm, mr, cols, hi, n, i + 1)
-}
+fn __mx_gather_fill(ho: Int, hm: Int, mr: Int, cols: Int, hi: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let idx = prim.load64(hi + 12 + i * 8)
+    let row = __mx_gather_one(hm, mr, cols, idx)
+    prim.store_str(ho + 12 + i * 8, row)
+    __mx_gather_fill(ho, hm, mr, cols, hi, n, i + 1)
+  }
 
 
 fn matrix_causal_mask_add(m: List[List[Float]], mask_val: Float) -> List[List[Float]] = {
@@ -24875,13 +25157,14 @@ else {
   __mx_mul_row(rh, arh, hb, k, n, j + 1)
 }
 
-fn __mx_mul_cell(arh: Int, hb: Int, j: Int, k: Int, kk: Int, acc: Float) -> Float = if kk >= k then acc
-else {
-  let x = prim.ffrombits(prim.load64(arh + 12 + kk * 8))
-  let brh = prim.load64(hb + 12 + kk * 8)
-  let y = prim.ffrombits(prim.load64(brh + 12 + j * 8))
-  __mx_mul_cell(arh, hb, j, k, kk + 1, acc + x * y)
-}
+fn __mx_mul_cell(arh: Int, hb: Int, j: Int, k: Int, kk: Int, acc: Float) -> Float =
+  if kk >= k then acc
+  else {
+    let x = prim.ffrombits(prim.load64(arh + 12 + kk * 8))
+    let brh = prim.load64(hb + 12 + kk * 8)
+    let y = prim.ffrombits(prim.load64(brh + 12 + j * 8))
+    __mx_mul_cell(arh, hb, j, k, kk + 1, acc + x * y)
+  }
 
 
 
@@ -24918,24 +25201,26 @@ fn matrix_linear_row_no_bias(x: List[List[Float]], weight: List[List[Float]]) ->
   out
 }
 
-fn __mx_lin_rows(ho: Int, hx: Int, hw: Int, hbias: Int, with_bias: Int, n_out: Int, n: Int, i: Int) -> Int = if i >= n then 0
-else {
-  let xrh = prim.load64(hx + 12 + i * 8)
-  let row = prim.alloc_list_f64(n_out)
-  let _f = __mx_lin_row(prim.handle(row), xrh, hw, hbias, with_bias, n_out, 0)
-  prim.store_str(ho + 12 + i * 8, row)
-  __mx_lin_rows(ho, hx, hw, hbias, with_bias, n_out, n, i + 1)
-}
+fn __mx_lin_rows(ho: Int, hx: Int, hw: Int, hbias: Int, with_bias: Int, n_out: Int, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let xrh = prim.load64(hx + 12 + i * 8)
+    let row = prim.alloc_list_f64(n_out)
+    let _f = __mx_lin_row(prim.handle(row), xrh, hw, hbias, with_bias, n_out, 0)
+    prim.store_str(ho + 12 + i * 8, row)
+    __mx_lin_rows(ho, hx, hw, hbias, with_bias, n_out, n, i + 1)
+  }
 
-fn __mx_lin_row(rh: Int, xrh: Int, hw: Int, hbias: Int, with_bias: Int, n_out: Int, j: Int) -> Int = if j >= n_out then 0
-else {
-  let wrh = prim.load64(hw + 12 + j * 8)
-  let n_in = prim.load32(xrh + 4)
-  let s = __mx_dot_raw(xrh, wrh, n_in, 0, 0.0)
-  let y = if with_bias == 1 then s + prim.ffrombits(prim.load64(hbias + 12 + j * 8)) else s
-  prim.store64(rh + 12 + j * 8, prim.fbits(y))
-  __mx_lin_row(rh, xrh, hw, hbias, with_bias, n_out, j + 1)
-}
+fn __mx_lin_row(rh: Int, xrh: Int, hw: Int, hbias: Int, with_bias: Int, n_out: Int, j: Int) -> Int =
+  if j >= n_out then 0
+  else {
+    let wrh = prim.load64(hw + 12 + j * 8)
+    let n_in = prim.load32(xrh + 4)
+    let s = __mx_dot_raw(xrh, wrh, n_in, 0, 0.0)
+    let y = if with_bias == 1 then s + prim.ffrombits(prim.load64(hbias + 12 + j * 8)) else s
+    prim.store64(rh + 12 + j * 8, prim.fbits(y))
+    __mx_lin_row(rh, xrh, hw, hbias, with_bias, n_out, j + 1)
+  }
 
 
 
@@ -24978,18 +25263,19 @@ fn matrix_rms_norm_rows(m: List[List[Float]], gamma: List[Float], eps: Float) ->
   out
 }
 
-fn __mx_rms_rows(ho: Int, hm: Int, gh: Int, glen: Int, eps: Float, n: Int, i: Int) -> Int = if i >= n then 0
-else {
-  let rh = prim.load64(hm + 12 + i * 8)
-  let c = prim.load32(rh + 4)
-  let sq = __mx_sq_sum(rh, c, 0, 0.0)
-  let inv = 1.0 / prim.fsqrt(sq / prim.i2f(c) + eps)
-  let outn = if c < glen then c else glen
-  let row = prim.alloc_list_f64(outn)
-  let _f = __mx_rms_row(prim.handle(row), rh, gh, inv, outn, 0)
-  prim.store_str(ho + 12 + i * 8, row)
-  __mx_rms_rows(ho, hm, gh, glen, eps, n, i + 1)
-}
+fn __mx_rms_rows(ho: Int, hm: Int, gh: Int, glen: Int, eps: Float, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let rh = prim.load64(hm + 12 + i * 8)
+    let c = prim.load32(rh + 4)
+    let sq = __mx_sq_sum(rh, c, 0, 0.0)
+    let inv = 1.0 / prim.fsqrt(sq / prim.i2f(c) + eps)
+    let outn = if c < glen then c else glen
+    let row = prim.alloc_list_f64(outn)
+    let _f = __mx_rms_row(prim.handle(row), rh, gh, inv, outn, 0)
+    prim.store_str(ho + 12 + i * 8, row)
+    __mx_rms_rows(ho, hm, gh, glen, eps, n, i + 1)
+  }
 
 fn __mx_rms_row(dh: Int, rh: Int, gh: Int, inv: Float, n: Int, i: Int) -> Int = if i >= n then 0
 else {
@@ -25014,29 +25300,31 @@ fn matrix_layer_norm_rows(m: List[List[Float]], gamma: List[Float], beta: List[F
   out
 }
 
-fn __mx_ln_rows(ho: Int, hm: Int, gh: Int, bh: Int, gb: Int, eps: Float, n: Int, i: Int) -> Int = if i >= n then 0
-else {
-  let rh = prim.load64(hm + 12 + i * 8)
-  let c = prim.load32(rh + 4)
-  let nf = prim.i2f(c)
-  let mean = __mx_sum(rh, c, 0, 0.0) / nf
-  let vr = __mx_var_sum(rh, mean, c, 0, 0.0) / nf
-  let inv = 1.0 / prim.fsqrt(vr + eps)
-  let outn = if c < gb then c else gb
-  let row = prim.alloc_list_f64(outn)
-  let _f = __mx_ln_row(prim.handle(row), rh, gh, bh, mean, inv, outn, 0)
-  prim.store_str(ho + 12 + i * 8, row)
-  __mx_ln_rows(ho, hm, gh, bh, gb, eps, n, i + 1)
-}
+fn __mx_ln_rows(ho: Int, hm: Int, gh: Int, bh: Int, gb: Int, eps: Float, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let rh = prim.load64(hm + 12 + i * 8)
+    let c = prim.load32(rh + 4)
+    let nf = prim.i2f(c)
+    let mean = __mx_sum(rh, c, 0, 0.0) / nf
+    let vr = __mx_var_sum(rh, mean, c, 0, 0.0) / nf
+    let inv = 1.0 / prim.fsqrt(vr + eps)
+    let outn = if c < gb then c else gb
+    let row = prim.alloc_list_f64(outn)
+    let _f = __mx_ln_row(prim.handle(row), rh, gh, bh, mean, inv, outn, 0)
+    prim.store_str(ho + 12 + i * 8, row)
+    __mx_ln_rows(ho, hm, gh, bh, gb, eps, n, i + 1)
+  }
 
-fn __mx_ln_row(dh: Int, rh: Int, gh: Int, bh: Int, mean: Float, inv: Float, n: Int, i: Int) -> Int = if i >= n then 0
-else {
-  let x = prim.ffrombits(prim.load64(rh + 12 + i * 8))
-  let g = prim.ffrombits(prim.load64(gh + 12 + i * 8))
-  let b = prim.ffrombits(prim.load64(bh + 12 + i * 8))
-  prim.store64(dh + 12 + i * 8, prim.fbits((x - mean) * inv * g + b))
-  __mx_ln_row(dh, rh, gh, bh, mean, inv, n, i + 1)
-}
+fn __mx_ln_row(dh: Int, rh: Int, gh: Int, bh: Int, mean: Float, inv: Float, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let x = prim.ffrombits(prim.load64(rh + 12 + i * 8))
+    let g = prim.ffrombits(prim.load64(gh + 12 + i * 8))
+    let b = prim.ffrombits(prim.load64(bh + 12 + i * 8))
+    prim.store64(dh + 12 + i * 8, prim.fbits((x - mean) * inv * g + b))
+    __mx_ln_row(dh, rh, gh, bh, mean, inv, n, i + 1)
+  }
 
 
 
@@ -25105,20 +25393,21 @@ else {
   __mx_zero_row(dh, c, j + 1)
 }
 
-fn __mx_f32_sel_rows(ho: Int, hd: Int, offset: Int, len: Int, ids: List[Int], c: Int, i: Int) -> Int = if i >= list.len(ids) then 0
-else {
-  let rid0 = list.get(ids, i) ?? 0
-  let rid = if rid0 < 0 then 0 else rid0
-  let row = prim.alloc_list_f64(c)
+fn __mx_f32_sel_rows(ho: Int, hd: Int, offset: Int, len: Int, ids: List[Int], c: Int, i: Int) -> Int =
+  if i >= list.len(ids) then 0
+  else {
+    let rid0 = list.get(ids, i) ?? 0
+    let rid = if rid0 < 0 then 0 else rid0
+    let row = prim.alloc_list_f64(c)
 
 
-  let rb = c * 4
-  let fits = offset <= len and rb <= len - offset and (rb == 0 or rid <= (len - offset - rb) / rb)
-  let _f = if not fits then __mx_zero_row(prim.handle(row), c, 0)
-  else __mx_f32_row(prim.handle(row), hd, offset + rid * rb, c, 0)
-  prim.store_str(ho + 12 + i * 8, row)
-  __mx_f32_sel_rows(ho, hd, offset, len, ids, c, i + 1)
-}
+    let rb = c * 4
+    let fits = offset <= len and rb <= len - offset and (rb == 0 or rid <= (len - offset - rb) / rb)
+    let _f = if not fits then __mx_zero_row(prim.handle(row), c, 0)
+    else __mx_f32_row(prim.handle(row), hd, offset + rid * rb, c, 0)
+    prim.store_str(ho + 12 + i * 8, row)
+    __mx_f32_sel_rows(ho, hd, offset, len, ids, c, i + 1)
+  }
 
 fn matrix_select_rows_f32(data: Bytes, offset: Int, cols: Int, row_ids: List[Int]) -> List[List[Float]] = {
   let hd = prim.handle(data)
@@ -25216,22 +25505,24 @@ fn matrix_split_cols_even(m: List[List[Float]], n: Int) -> List[List[List[Float]
   out
 }
 
-fn __mx_split_parts(ho: Int, hm: Int, r: Int, chunk: Int, parts: Int, hidx: Int) -> Int = if hidx >= parts then 0
-else {
-  let sub: List[List[Float]] = prim.alloc_list_str(r)
-  let _f = __mx_split_rows(prim.handle(sub), hm, r, hidx * chunk, chunk, 0)
-  prim.store_str(ho + 12 + hidx * 8, sub)
-  __mx_split_parts(ho, hm, r, chunk, parts, hidx + 1)
-}
+fn __mx_split_parts(ho: Int, hm: Int, r: Int, chunk: Int, parts: Int, hidx: Int) -> Int =
+  if hidx >= parts then 0
+  else {
+    let sub: List[List[Float]] = prim.alloc_list_str(r)
+    let _f = __mx_split_rows(prim.handle(sub), hm, r, hidx * chunk, chunk, 0)
+    prim.store_str(ho + 12 + hidx * 8, sub)
+    __mx_split_parts(ho, hm, r, chunk, parts, hidx + 1)
+  }
 
-fn __mx_split_rows(hs: Int, hm: Int, r: Int, start: Int, chunk: Int, i: Int) -> Int = if i >= r then 0
-else {
-  let src = prim.load64(hm + 12 + i * 8)
-  let row = prim.alloc_list_f64(chunk)
-  let _c = __mx_copy_off(prim.handle(row), src, start, chunk, 0)
-  prim.store_str(hs + 12 + i * 8, row)
-  __mx_split_rows(hs, hm, r, start, chunk, i + 1)
-}
+fn __mx_split_rows(hs: Int, hm: Int, r: Int, start: Int, chunk: Int, i: Int) -> Int =
+  if i >= r then 0
+  else {
+    let src = prim.load64(hm + 12 + i * 8)
+    let row = prim.alloc_list_f64(chunk)
+    let _c = __mx_copy_off(prim.handle(row), src, start, chunk, 0)
+    prim.store_str(hs + 12 + i * 8, row)
+    __mx_split_rows(hs, hm, r, start, chunk, i + 1)
+  }
 
 
 
@@ -25394,40 +25685,44 @@ fn matrix_row_dot(m: List[List[Float]], r: Int, vec: List[Float]) -> Float = {
 
 
 
-fn __cv_tap(hin: Int, wo: Int, t_in: Int, in_ch: Int, k: Int, p: Int, base: Int, c: Int, ki: Int, acc: Float) -> Float = if ki >= k then acc
-else {
-  let tp = base + ki
-  if tp >= p and tp < p + t_in then {
-    let tc = tp - p
-    let w = prim.ffrombits(prim.load64(wo + 12 + (c * k + ki) * 8))
-    let irow = prim.load64(hin + 12 + tc * 8)
-    let x = prim.ffrombits(prim.load64(irow + 12 + c * 8))
-    __cv_tap(hin, wo, t_in, in_ch, k, p, base, c, ki + 1, acc + w * x)
-  } else __cv_tap(hin, wo, t_in, in_ch, k, p, base, c, ki + 1, acc)
-}
+fn __cv_tap(hin: Int, wo: Int, t_in: Int, in_ch: Int, k: Int, p: Int, base: Int, c: Int, ki: Int, acc: Float) -> Float =
+  if ki >= k then acc
+  else {
+    let tp = base + ki
+    if tp >= p and tp < p + t_in then {
+      let tc = tp - p
+      let w = prim.ffrombits(prim.load64(wo + 12 + (c * k + ki) * 8))
+      let irow = prim.load64(hin + 12 + tc * 8)
+      let x = prim.ffrombits(prim.load64(irow + 12 + c * 8))
+      __cv_tap(hin, wo, t_in, in_ch, k, p, base, c, ki + 1, acc + w * x)
+    } else __cv_tap(hin, wo, t_in, in_ch, k, p, base, c, ki + 1, acc)
+  }
 
-fn __cv_chans(hin: Int, wo: Int, t_in: Int, in_ch: Int, k: Int, p: Int, base: Int, c: Int, acc: Float) -> Float = if c >= in_ch then acc
-else {
-  let acc2 = __cv_tap(hin, wo, t_in, in_ch, k, p, base, c, 0, acc)
-  __cv_chans(hin, wo, t_in, in_ch, k, p, base, c + 1, acc2)
-}
+fn __cv_chans(hin: Int, wo: Int, t_in: Int, in_ch: Int, k: Int, p: Int, base: Int, c: Int, acc: Float) -> Float =
+  if c >= in_ch then acc
+  else {
+    let acc2 = __cv_tap(hin, wo, t_in, in_ch, k, p, base, c, 0, acc)
+    __cv_chans(hin, wo, t_in, in_ch, k, p, base, c + 1, acc2)
+  }
 
-fn __cv_outs(dh: Int, hin: Int, hw: Int, hbias: Int, t_in: Int, in_ch: Int, out_ch: Int, k: Int, p: Int, base: Int, o: Int) -> Int = if o >= out_ch then 0
-else {
-  let wo = prim.load64(hw + 12 + o * 8)
-  let b0 = prim.ffrombits(prim.load64(hbias + 12 + o * 8))
-  let sum = __cv_chans(hin, wo, t_in, in_ch, k, p, base, 0, b0)
-  prim.store64(dh + 12 + o * 8, prim.fbits(sum))
-  __cv_outs(dh, hin, hw, hbias, t_in, in_ch, out_ch, k, p, base, o + 1)
-}
+fn __cv_outs(dh: Int, hin: Int, hw: Int, hbias: Int, t_in: Int, in_ch: Int, out_ch: Int, k: Int, p: Int, base: Int, o: Int) -> Int =
+  if o >= out_ch then 0
+  else {
+    let wo = prim.load64(hw + 12 + o * 8)
+    let b0 = prim.ffrombits(prim.load64(hbias + 12 + o * 8))
+    let sum = __cv_chans(hin, wo, t_in, in_ch, k, p, base, 0, b0)
+    prim.store64(dh + 12 + o * 8, prim.fbits(sum))
+    __cv_outs(dh, hin, hw, hbias, t_in, in_ch, out_ch, k, p, base, o + 1)
+  }
 
-fn __cv_rows(ho: Int, hin: Int, hw: Int, hbias: Int, t_in: Int, in_ch: Int, out_ch: Int, k: Int, s: Int, p: Int, t_out: Int, t: Int) -> Int = if t >= t_out then 0
-else {
-  let row = prim.alloc_list_f64(out_ch)
-  let _f = __cv_outs(prim.handle(row), hin, hw, hbias, t_in, in_ch, out_ch, k, p, t * s, 0)
-  prim.store_str(ho + 12 + t * 8, row)
-  __cv_rows(ho, hin, hw, hbias, t_in, in_ch, out_ch, k, s, p, t_out, t + 1)
-}
+fn __cv_rows(ho: Int, hin: Int, hw: Int, hbias: Int, t_in: Int, in_ch: Int, out_ch: Int, k: Int, s: Int, p: Int, t_out: Int, t: Int) -> Int =
+  if t >= t_out then 0
+  else {
+    let row = prim.alloc_list_f64(out_ch)
+    let _f = __cv_outs(prim.handle(row), hin, hw, hbias, t_in, in_ch, out_ch, k, p, t * s, 0)
+    prim.store_str(ho + 12 + t * 8, row)
+    __cv_rows(ho, hin, hw, hbias, t_in, in_ch, out_ch, k, s, p, t_out, t + 1)
+  }
 
 
 
@@ -26831,14 +27126,15 @@ fn __omsi_key_width(elem: Int) -> Int = {
   2 + __omsi_esc_len(elem + 12, slen, 0, 0)
 }
 
-fn __omsi_body_len(kaddr: Int, vaddr: Int, count: Int, i: Int, acc: Int) -> Int = if i >= count then acc
-else {
-  let kelem = prim.load64(kaddr + i * 8)
-  let v = prim.load64(vaddr + i * 8)
-  let sep = if i > 0 then 2 else 0
-  let ew = __omsi_key_width(kelem) + 2 + __omsi_int_width(v)
-  __omsi_body_len(kaddr, vaddr, count, i + 1, acc + sep + ew)
-}
+fn __omsi_body_len(kaddr: Int, vaddr: Int, count: Int, i: Int, acc: Int) -> Int =
+  if i >= count then acc
+  else {
+    let kelem = prim.load64(kaddr + i * 8)
+    let v = prim.load64(vaddr + i * 8)
+    let sep = if i > 0 then 2 else 0
+    let ew = __omsi_key_width(kelem) + 2 + __omsi_int_width(v)
+    __omsi_body_len(kaddr, vaddr, count, i + 1, acc + sep + ew)
+  }
 
 fn __omsi_fill_key(elem: Int, pos: Int) -> Int = {
   let slen = prim.load32(elem + 4)
@@ -26848,23 +27144,24 @@ fn __omsi_fill_key(elem: Int, pos: Int) -> Int = {
   mid + 1
 }
 
-fn __omsi_fill_body(kaddr: Int, vaddr: Int, count: Int, i: Int, pos: Int) -> Int = if i >= count then pos
-else {
-  let pos1 = if i > 0 then {
-    prim.store8(pos, 44)
-    prim.store8(pos + 1, 32)
-    pos + 2
-  } else pos
-  let kelem = prim.load64(kaddr + i * 8)
-  let pos2 = __omsi_fill_key(kelem, pos1)
-  prim.store8(pos2, 58)
+fn __omsi_fill_body(kaddr: Int, vaddr: Int, count: Int, i: Int, pos: Int) -> Int =
+  if i >= count then pos
+  else {
+    let pos1 = if i > 0 then {
+      prim.store8(pos, 44)
+      prim.store8(pos + 1, 32)
+      pos + 2
+    } else pos
+    let kelem = prim.load64(kaddr + i * 8)
+    let pos2 = __omsi_fill_key(kelem, pos1)
+    prim.store8(pos2, 58)
 
-  prim.store8(pos2 + 1, 32)
+    prim.store8(pos2 + 1, 32)
 
-  let v = prim.load64(vaddr + i * 8)
-  let pos3 = __omsi_fill_int(v, pos2 + 2)
-  __omsi_fill_body(kaddr, vaddr, count, i + 1, pos3)
-}
+    let v = prim.load64(vaddr + i * 8)
+    let pos3 = __omsi_fill_int(v, pos2 + 2)
+    __omsi_fill_body(kaddr, vaddr, count, i + 1, pos3)
+  }
 
 
 fn __omsi_some(m: Map[String, Int]) -> String = {
@@ -28506,10 +28803,12 @@ fn __rx_brace_end(p: Int, pe: Int) -> Int = {
 }
 
 
-fn __rx_digits_end(p: Int, pe: Int) -> Int = if p < pe and prim.load8(p) >= 48 and prim.load8(p) <= 57 then __rx_digits_end(
-  p + 1,
-  pe,
-) else p
+fn __rx_digits_end(p: Int, pe: Int) -> Int =
+  if p < pe and prim.load8(p) >= 48 and prim.load8(p) <= 57 then __rx_digits_end(
+    p + 1,
+    pe,
+  )
+  else p
 
 
 fn __rx_digits_val(p: Int, e: Int, acc: Int) -> Int = if p >= e then acc
@@ -28654,7 +28953,8 @@ fn __rx_back(t: Int, ts: Int) -> Int = {
   else if prim.band(prim.load8(t1), 192) == 128 then __rx_back(t1, ts) else t1
 }
 
-fn __rx_flags(pat0: Int) -> Int = if prim.load8(pat0) == 40 and prim.load8(pat0 + 1) == 63 and prim.load8(pat0 + 2) == 109 and prim.load8(pat0 + 3) == 41 then 1 else 0
+fn __rx_flags(pat0: Int) -> Int =
+  if prim.load8(pat0) == 40 and prim.load8(pat0 + 1) == 63 and prim.load8(pat0 + 2) == 109 and prim.load8(pat0 + 3) == 41 then 1 else 0
 
 fn __rx_is_word(c: Int) -> Bool = (c >= 48 and c <= 57) or (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or c == 95
 
@@ -28983,7 +29283,8 @@ fn __rx_alts(p: Int, pend: Int, t: Int, k: Int, m: Int) -> Int = {
 
 
 
-fn __rx_lazy(ae: Int, pnext: Int) -> Int = if pnext >= ae + 2 and prim.load8(pnext - 1) == 63 and (prim.load8(pnext - 2) == 42 or prim.load8(pnext - 2) == 43 or prim.load8(pnext - 2) == 63 or prim.load8(pnext - 2) == 125) then 1 else 0
+fn __rx_lazy(ae: Int, pnext: Int) -> Int =
+  if pnext >= ae + 2 and prim.load8(pnext - 1) == 63 and (prim.load8(pnext - 2) == 42 or prim.load8(pnext - 2) == 43 or prim.load8(pnext - 2) == 63 or prim.load8(pnext - 2) == 125) then 1 else 0
 
 
 
@@ -29067,13 +29368,14 @@ fn __rx_repi_fwd(p: Int, ae: Int, pnext: Int, pend: Int, t: Int, count: Int, mn:
   else __rx_repi_try(pnext, pend, t, count, mn, k, m)
 }
 
-fn __rx_repi_try(pnext: Int, pend: Int, t: Int, i: Int, mn: Int, k: Int, m: Int) -> Int = if i < mn then __rx_fail(m)
-else {
-  let ts = prim.load64(m + 32)
-  let _0 = if i > mn then __rx_back_choice(pnext, pend, __rx_back(t, ts), i - 1, mn, k, m)
-  else 0
-  __rx_seq(pnext, pend, t, k, m)
-}
+fn __rx_repi_try(pnext: Int, pend: Int, t: Int, i: Int, mn: Int, k: Int, m: Int) -> Int =
+  if i < mn then __rx_fail(m)
+  else {
+    let ts = prim.load64(m + 32)
+    let _0 = if i > mn then __rx_back_choice(pnext, pend, __rx_back(t, ts), i - 1, mn, k, m)
+    else 0
+    __rx_seq(pnext, pend, t, k, m)
+  }
 
 
 
@@ -29150,20 +29452,21 @@ fn regex_find(pat: String, s: String) -> String? = {
 }
 
 
-fn __rx_find_all_go(p: Int, pe: Int, pos: Int, m: Int, acc: List[String]) -> List[String] = if pos > __rx_te(m) then acc
-else {
-  let st = __rx_find_start(p, pe, pos, m)
-  if st < 0 then acc
+fn __rx_find_all_go(p: Int, pe: Int, pos: Int, m: Int, acc: List[String]) -> List[String] =
+  if pos > __rx_te(m) then acc
   else {
-    let en = __rx_end(m)
-    let hit = __rx_sub(st, en)
-    if en > st then __rx_find_all_go(p, pe, en, m, acc + [hit])
+    let st = __rx_find_start(p, pe, pos, m)
+    if st < 0 then acc
     else {
-      if en < __rx_te(m) then __rx_find_all_go(p, pe, en + __rx_w(en), m, acc + [hit])
-      else acc + [hit]
+      let en = __rx_end(m)
+      let hit = __rx_sub(st, en)
+      if en > st then __rx_find_all_go(p, pe, en, m, acc + [hit])
+      else {
+        if en < __rx_te(m) then __rx_find_all_go(p, pe, en + __rx_w(en), m, acc + [hit])
+        else acc + [hit]
+      }
     }
   }
-}
 
 fn regex_find_all(pat: String, s: String) -> List[String] = {
   let ph = prim.handle(pat)
@@ -29298,15 +29601,16 @@ else {
   __rx_fill_neg(dst + 8, n - 1)
 }
 
-fn __rx_caps_out(caps: Int, i: Int, ncap: Int, acc: List[String]) -> List[String] = if i >= ncap then acc
-else {
-  let st = prim.load64(caps + i * 16)
-  if st < 0 then __rx_caps_out(caps, i + 1, ncap, acc + [""])
+fn __rx_caps_out(caps: Int, i: Int, ncap: Int, acc: List[String]) -> List[String] =
+  if i >= ncap then acc
   else {
-    let hit = __rx_sub(st, prim.load64(caps + i * 16 + 8))
-    __rx_caps_out(caps, i + 1, ncap, acc + [hit])
+    let st = prim.load64(caps + i * 16)
+    if st < 0 then __rx_caps_out(caps, i + 1, ncap, acc + [""])
+    else {
+      let hit = __rx_sub(st, prim.load64(caps + i * 16 + 8))
+      __rx_caps_out(caps, i + 1, ncap, acc + [hit])
+    }
   }
-}
 
 
 
@@ -30492,14 +30796,15 @@ fn __rts_map_key_width(elem: Int) -> Int = {
   2 + __rts_esc_len(elem + 12, slen, 0, 0)
 }
 
-fn __rts_map_body_len(kaddr: Int, vaddr: Int, count: Int, i: Int, acc: Int) -> Int = if i >= count then acc
-else {
-  let kelem = prim.load64(kaddr + i * 8)
-  let v = prim.load64(vaddr + i * 8)
-  let sep = if i > 0 then 2 else 0
-  let ew = __rts_map_key_width(kelem) + 2 + __rts_int_width(v)
-  __rts_map_body_len(kaddr, vaddr, count, i + 1, acc + sep + ew)
-}
+fn __rts_map_body_len(kaddr: Int, vaddr: Int, count: Int, i: Int, acc: Int) -> Int =
+  if i >= count then acc
+  else {
+    let kelem = prim.load64(kaddr + i * 8)
+    let v = prim.load64(vaddr + i * 8)
+    let sep = if i > 0 then 2 else 0
+    let ew = __rts_map_key_width(kelem) + 2 + __rts_int_width(v)
+    __rts_map_body_len(kaddr, vaddr, count, i + 1, acc + sep + ew)
+  }
 
 fn __rts_map_fill_key(elem: Int, pos: Int) -> Int = {
   let slen = prim.load32(elem + 4)
@@ -30509,23 +30814,24 @@ fn __rts_map_fill_key(elem: Int, pos: Int) -> Int = {
   mid + 1
 }
 
-fn __rts_map_fill_body(kaddr: Int, vaddr: Int, count: Int, i: Int, pos: Int) -> Int = if i >= count then pos
-else {
-  let pos1 = if i > 0 then {
-    prim.store8(pos, 44)
-    prim.store8(pos + 1, 32)
-    pos + 2
-  } else pos
-  let kelem = prim.load64(kaddr + i * 8)
-  let pos2 = __rts_map_fill_key(kelem, pos1)
-  prim.store8(pos2, 58)
+fn __rts_map_fill_body(kaddr: Int, vaddr: Int, count: Int, i: Int, pos: Int) -> Int =
+  if i >= count then pos
+  else {
+    let pos1 = if i > 0 then {
+      prim.store8(pos, 44)
+      prim.store8(pos + 1, 32)
+      pos + 2
+    } else pos
+    let kelem = prim.load64(kaddr + i * 8)
+    let pos2 = __rts_map_fill_key(kelem, pos1)
+    prim.store8(pos2, 58)
 
-  prim.store8(pos2 + 1, 32)
+    prim.store8(pos2 + 1, 32)
 
-  let v = prim.load64(vaddr + i * 8)
-  let pos3 = __rts_fill_int(v, pos2 + 2)
-  __rts_map_fill_body(kaddr, vaddr, count, i + 1, pos3)
-}
+    let v = prim.load64(vaddr + i * 8)
+    let pos3 = __rts_fill_int(v, pos2 + 2)
+    __rts_map_fill_body(kaddr, vaddr, count, i + 1, pos3)
+  }
 
 fn __rts_ok_map(m: Map[String, Int]) -> String = {
   let ks = map.keys(m)
@@ -31135,21 +31441,22 @@ fn set_new() -> Set[Int] = __set_alloc_cap(0)
 
 
 
-fn __set_idx_carry(sh: Int, rh: Int, secap: Int, necap: Int, len: Int, present: Bool, x: Int) -> Int = if necap < 16 then 0
-else if necap != secap then 0
-else {
-  let ilen = prim.load64(__set_il(sh, secap))
-  if ilen != len then 0
+fn __set_idx_carry(sh: Int, rh: Int, secap: Int, necap: Int, len: Int, present: Bool, x: Int) -> Int =
+  if necap < 16 then 0
+  else if necap != secap then 0
   else {
-    let _c = __set_copy_slots(sh, rh, secap, secap + 1, 0)
-    if present then 0
+    let ilen = prim.load64(__set_il(sh, secap))
+    if ilen != len then 0
     else {
-      let _p = __set_idx_put(__set_bb(rh, necap), necap * 2 - 1, x, len)
-      prim.store64(__set_il(rh, necap), len + 1)
-      0
+      let _c = __set_copy_slots(sh, rh, secap, secap + 1, 0)
+      if present then 0
+      else {
+        let _p = __set_idx_put(__set_bb(rh, necap), necap * 2 - 1, x, len)
+        prim.store64(__set_il(rh, necap), len + 1)
+        0
+      }
     }
   }
-}
 
 
 
@@ -31176,15 +31483,16 @@ fn set_insert(s: Set[Int], x: Int) -> Set[Int] = {
 }
 
 
-fn __set_remove_fill(sh: Int, slen: Int, rh: Int, x: Int, i: Int, w: Int) -> Int = if i >= slen then w
-else {
-  let e = prim.load64(sh + 12 + i * 8)
-  if e == x then __set_remove_fill(sh, slen, rh, x, i + 1, w)
+fn __set_remove_fill(sh: Int, slen: Int, rh: Int, x: Int, i: Int, w: Int) -> Int =
+  if i >= slen then w
   else {
-    prim.store64(rh + 12 + w * 8, e)
-    __set_remove_fill(sh, slen, rh, x, i + 1, w + 1)
+    let e = prim.load64(sh + 12 + i * 8)
+    if e == x then __set_remove_fill(sh, slen, rh, x, i + 1, w)
+    else {
+      prim.store64(rh + 12 + w * 8, e)
+      __set_remove_fill(sh, slen, rh, x, i + 1, w + 1)
+    }
   }
-}
 
 
 
@@ -31201,16 +31509,17 @@ fn set_remove(s: Set[Int], x: Int) -> Set[Int] = {
 
 
 
-fn __set_addb_nota(ah: Int, bh: Int, blen: Int, rh: Int, j: Int, w: Int) -> Int = if j >= blen then w
-else {
-  let x = prim.load64(bh + 12 + j * 8)
-  let inA = __set_member(ah, x)
-  if inA then __set_addb_nota(ah, bh, blen, rh, j + 1, w)
+fn __set_addb_nota(ah: Int, bh: Int, blen: Int, rh: Int, j: Int, w: Int) -> Int =
+  if j >= blen then w
   else {
-    prim.store64(rh + 12 + w * 8, x)
-    __set_addb_nota(ah, bh, blen, rh, j + 1, w + 1)
+    let x = prim.load64(bh + 12 + j * 8)
+    let inA = __set_member(ah, x)
+    if inA then __set_addb_nota(ah, bh, blen, rh, j + 1, w)
+    else {
+      prim.store64(rh + 12 + w * 8, x)
+      __set_addb_nota(ah, bh, blen, rh, j + 1, w + 1)
+    }
   }
-}
 
 fn set_symmetric_difference(a: Set[Int], b: Set[Int]) -> Set[Int] = {
   let ah = prim.handle(a)
@@ -31230,17 +31539,18 @@ fn set_symmetric_difference(a: Set[Int], b: Set[Int]) -> Set[Int] = {
 
 
 
-fn __set_filter_fill(dh: Int, sh: Int, f: (Int) -> Bool, n: Int, i: Int, di: Int) -> Int = if i >= n then di
-else {
-  let x = prim.load64(sh + 12 + i * 8)
-  let keep = f(x)
-  if keep then {
-    prim.store64(dh + 12 + di * 8, x)
-    __set_filter_fill(dh, sh, f, n, i + 1, di + 1)
-  } else {
-    __set_filter_fill(dh, sh, f, n, i + 1, di)
+fn __set_filter_fill(dh: Int, sh: Int, f: (Int) -> Bool, n: Int, i: Int, di: Int) -> Int =
+  if i >= n then di
+  else {
+    let x = prim.load64(sh + 12 + i * 8)
+    let keep = f(x)
+    if keep then {
+      prim.store64(dh + 12 + di * 8, x)
+      __set_filter_fill(dh, sh, f, n, i + 1, di + 1)
+    } else {
+      __set_filter_fill(dh, sh, f, n, i + 1, di)
+    }
   }
-}
 
 fn set_filter(s: Set[Int], f: (Int) -> Bool) -> Set[Int] = {
   let sh = prim.handle(s)
@@ -31278,14 +31588,15 @@ fn set_any(s: Set[Int], f: (Int) -> Bool) -> Bool = {
 
 
 
-fn __set_map_fill(dh: Int, sh: Int, f: (Int) -> Int, ecap: Int, n: Int, i: Int, w: Int) -> Int = if i >= n then w
-else {
-  let x = prim.load64(sh + 12 + i * 8)
-  let y = f(x)
-  let present = __set_has_at(dh, ecap, w, y)
-  if present then __set_map_fill(dh, sh, f, ecap, n, i + 1, w)
-  else __set_map_fill(dh, sh, f, ecap, n, i + 1, __set_add_ix(dh, ecap, w, y))
-}
+fn __set_map_fill(dh: Int, sh: Int, f: (Int) -> Int, ecap: Int, n: Int, i: Int, w: Int) -> Int =
+  if i >= n then w
+  else {
+    let x = prim.load64(sh + 12 + i * 8)
+    let y = f(x)
+    let present = __set_has_at(dh, ecap, w, y)
+    if present then __set_map_fill(dh, sh, f, ecap, n, i + 1, w)
+    else __set_map_fill(dh, sh, f, ecap, n, i + 1, __set_add_ix(dh, ecap, w, y))
+  }
 
 fn set_map(s: Set[Int], f: (Int) -> Int) -> Set[Int] = {
   let sh = prim.handle(s)
@@ -31301,12 +31612,13 @@ fn set_map(s: Set[Int], f: (Int) -> Int) -> Set[Int] = {
 
 
 
-fn __set_fold_loop(sh: Int, f: (Int, Int) -> Int, n: Int, i: Int, acc: Int) -> Int = if i >= n then acc
-else {
-  let x = prim.load64(sh + 12 + i * 8)
-  let nacc = f(acc, x)
-  __set_fold_loop(sh, f, n, i + 1, nacc)
-}
+fn __set_fold_loop(sh: Int, f: (Int, Int) -> Int, n: Int, i: Int, acc: Int) -> Int =
+  if i >= n then acc
+  else {
+    let x = prim.load64(sh + 12 + i * 8)
+    let nacc = f(acc, x)
+    __set_fold_loop(sh, f, n, i + 1, nacc)
+  }
 
 fn set_fold(s: Set[Int], init: Int, f: (Int, Int) -> Int) -> Int = {
   let sh = prim.handle(s)
@@ -31408,17 +31720,18 @@ else {
 }
 
 
-fn __set_str_addb(acount: Int, bh: Int, blen: Int, rh: Int, j: Int, w: Int) -> Int = if j >= blen then w
-else {
-  let x = prim.load_str(bh + 12 + j * 8)
-  let present = __set_has_str(rh, acount, x, 0)
-  if present then __set_str_addb(acount, bh, blen, rh, j + 1, w)
+fn __set_str_addb(acount: Int, bh: Int, blen: Int, rh: Int, j: Int, w: Int) -> Int =
+  if j >= blen then w
   else {
-    let copy = string.repeat(x, 1)
-    prim.store_str(rh + 12 + w * 8, copy)
-    __set_str_addb(acount, bh, blen, rh, j + 1, w + 1)
+    let x = prim.load_str(bh + 12 + j * 8)
+    let present = __set_has_str(rh, acount, x, 0)
+    if present then __set_str_addb(acount, bh, blen, rh, j + 1, w)
+    else {
+      let copy = string.repeat(x, 1)
+      prim.store_str(rh + 12 + w * 8, copy)
+      __set_str_addb(acount, bh, blen, rh, j + 1, w + 1)
+    }
   }
-}
 
 fn set_union_str(a: Set[String], b: Set[String]) -> Set[String] = {
   let ah = prim.handle(a)
@@ -31435,16 +31748,17 @@ fn set_union_str(a: Set[String], b: Set[String]) -> Set[String] = {
 }
 
 
-fn __set_str_inter(ah: Int, alen: Int, bh: Int, blen: Int, rh: Int, i: Int, w: Int) -> Int = if i >= alen then w
-else {
-  let x = prim.load_str(ah + 12 + i * 8)
-  let inB = __set_has_str(bh, blen, x, 0)
-  if inB then {
-    let copy = string.repeat(x, 1)
-    prim.store_str(rh + 12 + w * 8, copy)
-    __set_str_inter(ah, alen, bh, blen, rh, i + 1, w + 1)
-  } else __set_str_inter(ah, alen, bh, blen, rh, i + 1, w)
-}
+fn __set_str_inter(ah: Int, alen: Int, bh: Int, blen: Int, rh: Int, i: Int, w: Int) -> Int =
+  if i >= alen then w
+  else {
+    let x = prim.load_str(ah + 12 + i * 8)
+    let inB = __set_has_str(bh, blen, x, 0)
+    if inB then {
+      let copy = string.repeat(x, 1)
+      prim.store_str(rh + 12 + w * 8, copy)
+      __set_str_inter(ah, alen, bh, blen, rh, i + 1, w + 1)
+    } else __set_str_inter(ah, alen, bh, blen, rh, i + 1, w)
+  }
 
 fn set_intersection_str(a: Set[String], b: Set[String]) -> Set[String] = {
   let ah = prim.handle(a)
@@ -31459,17 +31773,18 @@ fn set_intersection_str(a: Set[String], b: Set[String]) -> Set[String] = {
 }
 
 
-fn __set_str_diff(ah: Int, alen: Int, bh: Int, blen: Int, rh: Int, i: Int, w: Int) -> Int = if i >= alen then w
-else {
-  let x = prim.load_str(ah + 12 + i * 8)
-  let inB = __set_has_str(bh, blen, x, 0)
-  if inB then __set_str_diff(ah, alen, bh, blen, rh, i + 1, w)
+fn __set_str_diff(ah: Int, alen: Int, bh: Int, blen: Int, rh: Int, i: Int, w: Int) -> Int =
+  if i >= alen then w
   else {
-    let copy = string.repeat(x, 1)
-    prim.store_str(rh + 12 + w * 8, copy)
-    __set_str_diff(ah, alen, bh, blen, rh, i + 1, w + 1)
+    let x = prim.load_str(ah + 12 + i * 8)
+    let inB = __set_has_str(bh, blen, x, 0)
+    if inB then __set_str_diff(ah, alen, bh, blen, rh, i + 1, w)
+    else {
+      let copy = string.repeat(x, 1)
+      prim.store_str(rh + 12 + w * 8, copy)
+      __set_str_diff(ah, alen, bh, blen, rh, i + 1, w + 1)
+    }
   }
-}
 
 fn set_difference_str(a: Set[String], b: Set[String]) -> Set[String] = {
   let ah = prim.handle(a)
@@ -31501,13 +31816,14 @@ fn set_is_subset_str(a: Set[String], b: Set[String]) -> Bool = {
 }
 
 
-fn __set_str_none_in(ah: Int, alen: Int, bh: Int, blen: Int, i: Int) -> Bool = if i >= alen then true
-else {
-  let x = prim.load_str(ah + 12 + i * 8)
-  let inB = __set_has_str(bh, blen, x, 0)
-  if inB then false
-  else __set_str_none_in(ah, alen, bh, blen, i + 1)
-}
+fn __set_str_none_in(ah: Int, alen: Int, bh: Int, blen: Int, i: Int) -> Bool =
+  if i >= alen then true
+  else {
+    let x = prim.load_str(ah + 12 + i * 8)
+    let inB = __set_has_str(bh, blen, x, 0)
+    if inB then false
+    else __set_str_none_in(ah, alen, bh, blen, i + 1)
+  }
 
 fn set_is_disjoint_str(a: Set[String], b: Set[String]) -> Bool = {
   let ah = prim.handle(a)
@@ -31550,17 +31866,18 @@ fn set_insert_str(s: Set[String], x: String) -> Set[String] = {
 }
 
 
-fn __set_str_remove_fill(sh: Int, slen: Int, rh: Int, x: String, i: Int, w: Int) -> Int = if i >= slen then w
-else {
-  let e = prim.load_str(sh + 12 + i * 8)
-  let eq = __str_eq(e, x)
-  if eq then __set_str_remove_fill(sh, slen, rh, x, i + 1, w)
+fn __set_str_remove_fill(sh: Int, slen: Int, rh: Int, x: String, i: Int, w: Int) -> Int =
+  if i >= slen then w
   else {
-    let copy = string.repeat(e, 1)
-    prim.store_str(rh + 12 + w * 8, copy)
-    __set_str_remove_fill(sh, slen, rh, x, i + 1, w + 1)
+    let e = prim.load_str(sh + 12 + i * 8)
+    let eq = __str_eq(e, x)
+    if eq then __set_str_remove_fill(sh, slen, rh, x, i + 1, w)
+    else {
+      let copy = string.repeat(e, 1)
+      prim.store_str(rh + 12 + w * 8, copy)
+      __set_str_remove_fill(sh, slen, rh, x, i + 1, w + 1)
+    }
   }
-}
 
 fn set_remove_str(s: Set[String], x: String) -> Set[String] = {
   let sh = prim.handle(s)
@@ -31574,17 +31891,18 @@ fn set_remove_str(s: Set[String], x: String) -> Set[String] = {
 
 
 
-fn __set_str_addb_nota(ah: Int, alen: Int, bh: Int, blen: Int, rh: Int, j: Int, w: Int) -> Int = if j >= blen then w
-else {
-  let x = prim.load_str(bh + 12 + j * 8)
-  let inA = __set_has_str(ah, alen, x, 0)
-  if inA then __set_str_addb_nota(ah, alen, bh, blen, rh, j + 1, w)
+fn __set_str_addb_nota(ah: Int, alen: Int, bh: Int, blen: Int, rh: Int, j: Int, w: Int) -> Int =
+  if j >= blen then w
   else {
-    let copy = string.repeat(x, 1)
-    prim.store_str(rh + 12 + w * 8, copy)
-    __set_str_addb_nota(ah, alen, bh, blen, rh, j + 1, w + 1)
+    let x = prim.load_str(bh + 12 + j * 8)
+    let inA = __set_has_str(ah, alen, x, 0)
+    if inA then __set_str_addb_nota(ah, alen, bh, blen, rh, j + 1, w)
+    else {
+      let copy = string.repeat(x, 1)
+      prim.store_str(rh + 12 + w * 8, copy)
+      __set_str_addb_nota(ah, alen, bh, blen, rh, j + 1, w + 1)
+    }
   }
-}
 
 fn set_symmetric_difference_str(a: Set[String], b: Set[String]) -> Set[String] = {
   let ah = prim.handle(a)
@@ -31602,18 +31920,19 @@ fn set_symmetric_difference_str(a: Set[String], b: Set[String]) -> Set[String] =
 
 
 
-fn __set_str_filter_fill(dh: Int, sh: Int, f: (String) -> Bool, n: Int, i: Int, di: Int) -> Int = if i >= n then di
-else {
-  let x = prim.load_str(sh + 12 + i * 8)
-  let keep = f(x)
-  if keep then {
-    let copy = string.repeat(x, 1)
-    prim.store_str(dh + 12 + di * 8, copy)
-    __set_str_filter_fill(dh, sh, f, n, i + 1, di + 1)
-  } else {
-    __set_str_filter_fill(dh, sh, f, n, i + 1, di)
+fn __set_str_filter_fill(dh: Int, sh: Int, f: (String) -> Bool, n: Int, i: Int, di: Int) -> Int =
+  if i >= n then di
+  else {
+    let x = prim.load_str(sh + 12 + i * 8)
+    let keep = f(x)
+    if keep then {
+      let copy = string.repeat(x, 1)
+      prim.store_str(dh + 12 + di * 8, copy)
+      __set_str_filter_fill(dh, sh, f, n, i + 1, di + 1)
+    } else {
+      __set_str_filter_fill(dh, sh, f, n, i + 1, di)
+    }
   }
-}
 
 fn set_filter_str(s: Set[String], f: (String) -> Bool) -> Set[String] = {
   let sh = prim.handle(s)
@@ -31625,13 +31944,14 @@ fn set_filter_str(s: Set[String], f: (String) -> Bool) -> Set[String] = {
   r
 }
 
-fn __set_str_count_hits(sh: Int, f: (String) -> Bool, n: Int, i: Int, acc: Int) -> Int = if i >= n then acc
-else {
-  let x = prim.load_str(sh + 12 + i * 8)
-  let h = f(x)
-  if h then __set_str_count_hits(sh, f, n, i + 1, acc + 1)
-  else __set_str_count_hits(sh, f, n, i + 1, acc)
-}
+fn __set_str_count_hits(sh: Int, f: (String) -> Bool, n: Int, i: Int, acc: Int) -> Int =
+  if i >= n then acc
+  else {
+    let x = prim.load_str(sh + 12 + i * 8)
+    let h = f(x)
+    if h then __set_str_count_hits(sh, f, n, i + 1, acc + 1)
+    else __set_str_count_hits(sh, f, n, i + 1, acc)
+  }
 
 fn set_all_str(s: Set[String], f: (String) -> Bool) -> Bool = {
   let sh = prim.handle(s)
@@ -31649,12 +31969,13 @@ fn set_any_str(s: Set[String], f: (String) -> Bool) -> Bool = {
 
 
 
-fn __set_str_fold_loop(sh: Int, f: (Int, String) -> Int, n: Int, i: Int, acc: Int) -> Int = if i >= n then acc
-else {
-  let x = prim.load_str(sh + 12 + i * 8)
-  let nacc = f(acc, x)
-  __set_str_fold_loop(sh, f, n, i + 1, nacc)
-}
+fn __set_str_fold_loop(sh: Int, f: (Int, String) -> Int, n: Int, i: Int, acc: Int) -> Int =
+  if i >= n then acc
+  else {
+    let x = prim.load_str(sh + 12 + i * 8)
+    let nacc = f(acc, x)
+    __set_str_fold_loop(sh, f, n, i + 1, nacc)
+  }
 
 fn set_fold_str(s: Set[String], init: Int, f: (Int, String) -> Int) -> Int = {
   let sh = prim.handle(s)
@@ -32285,14 +32606,15 @@ fn string_is_alpha(s: String) -> Bool = {
   else __is_alpha_scan(h + 12, h + 12 + blen, __alpha_table())
 }
 
-fn __is_case_scan(addr: Int, end: Int, at: String, ct: String, cn: Int, seen: Int) -> Int = if addr >= end then seen
-else {
-  let (cp, w) = __cls_cp(addr)
-  if __cls_in(at, 761, cp) then {
-    if __cls_in(ct, cn, cp) then __is_case_scan(addr + w, end, at, ct, cn, 1)
-    else 2
-  } else __is_case_scan(addr + w, end, at, ct, cn, seen)
-}
+fn __is_case_scan(addr: Int, end: Int, at: String, ct: String, cn: Int, seen: Int) -> Int =
+  if addr >= end then seen
+  else {
+    let (cp, w) = __cls_cp(addr)
+    if __cls_in(at, 761, cp) then {
+      if __cls_in(ct, cn, cp) then __is_case_scan(addr + w, end, at, ct, cn, 1)
+      else 2
+    } else __is_case_scan(addr + w, end, at, ct, cn, seen)
+  }
 
 fn string_is_upper(s: String) -> Bool = {
   let h = prim.handle(s)
@@ -32313,15 +32635,16 @@ pub const SRC_STRING_CMP: &str = r#"
 
 
 
-fn __scmp_at(ah: Int, bh: Int, la: Int, lb: Int, k: Int) -> Int = if k >= la then (if k >= lb then 0 else 0 - 1)
-else if k >= lb then 1
-else {
-  let ca = prim.load8(ah + 12 + k)
-  let cb = prim.load8(bh + 12 + k)
-  if ca < cb then 0 - 1
-  else if ca > cb then 1
-  else __scmp_at(ah, bh, la, lb, k + 1)
-}
+fn __scmp_at(ah: Int, bh: Int, la: Int, lb: Int, k: Int) -> Int =
+  if k >= la then (if k >= lb then 0 else 0 - 1)
+  else if k >= lb then 1
+  else {
+    let ca = prim.load8(ah + 12 + k)
+    let cb = prim.load8(bh + 12 + k)
+    if ca < cb then 0 - 1
+    else if ca > cb then 1
+    else __scmp_at(ah, bh, la, lb, k + 1)
+  }
 
 fn string_cmp(a: String, b: String) -> Int = {
   let ah = prim.handle(a)
@@ -32701,8 +33024,9 @@ fn __fb_is_cont(b: Int) -> Bool = if b >= 128 then (if b <= 191 then true else f
 else false
 
 
-fn __fb_in_range(b: Int, lo: Int, hi: Int) -> Bool = if b >= lo then (if b <= hi then true else false)
-else false
+fn __fb_in_range(b: Int, lo: Int, hi: Int) -> Bool =
+  if b >= lo then (if b <= hi then true else false)
+  else false
 
 
 
@@ -32915,13 +33239,14 @@ else {
 }
 
 
-fn __join_totlen(ph: Int, count: Int, sep_len: Int, i: Int, acc: Int) -> Int = if i >= count then acc
-else {
-  let elem = prim.load64(ph + 12 + i * 8)
-  let elen = prim.load32(elem + 4)
-  let gap = if i > 0 then sep_len else 0
-  __join_totlen(ph, count, sep_len, i + 1, acc + gap + elen)
-}
+fn __join_totlen(ph: Int, count: Int, sep_len: Int, i: Int, acc: Int) -> Int =
+  if i >= count then acc
+  else {
+    let elem = prim.load64(ph + 12 + i * 8)
+    let elen = prim.load32(elem + 4)
+    let gap = if i > 0 then sep_len else 0
+    __join_totlen(ph, count, sep_len, i + 1, acc + gap + elen)
+  }
 
 
 fn __join_sep(rh: Int, seph: Int, sep_len: Int, i: Int, off: Int) -> Int = if i > 0 then {
@@ -32929,14 +33254,15 @@ fn __join_sep(rh: Int, seph: Int, sep_len: Int, i: Int, off: Int) -> Int = if i 
   off + sep_len
 } else off
 
-fn __join_fill(rh: Int, ph: Int, count: Int, seph: Int, sep_len: Int, i: Int, off: Int) -> Int = if i >= count then off
-else {
-  let off1 = __join_sep(rh, seph, sep_len, i, off)
-  let elem = prim.load64(ph + 12 + i * 8)
-  let elen = prim.load32(elem + 4)
-  let _x = __bcopy(rh + 12 + off1, elem + 12, elen, 0)
-  __join_fill(rh, ph, count, seph, sep_len, i + 1, off1 + elen)
-}
+fn __join_fill(rh: Int, ph: Int, count: Int, seph: Int, sep_len: Int, i: Int, off: Int) -> Int =
+  if i >= count then off
+  else {
+    let off1 = __join_sep(rh, seph, sep_len, i, off)
+    let elem = prim.load64(ph + 12 + i * 8)
+    let elen = prim.load32(elem + 4)
+    let _x = __bcopy(rh + 12 + off1, elem + 12, elen, 0)
+    __join_fill(rh, ph, count, seph, sep_len, i + 1, off1 + elen)
+  }
 
 fn string_join(parts: List[String], sep: String) -> String = {
   let ph = prim.handle(parts)
@@ -33045,14 +33371,15 @@ fn __lntake(sh: Int, start: Int, n: Int) -> String = {
   piece
 }
 
-fn __lines_fill(lh: Int, sh: Int, slen: Int, from: Int, idx: Int, total: Int) -> Int = if idx >= total then idx
-else {
-  let nl = __find_nl(sh, slen, from)
-  let endp = __strip_cr(sh, slen, from, nl)
-  let piece = __lntake(sh, from, endp - from)
-  prim.store_str(lh + 12 + idx * 8, piece)
-  __lines_fill(lh, sh, slen, nl + 1, idx + 1, total)
-}
+fn __lines_fill(lh: Int, sh: Int, slen: Int, from: Int, idx: Int, total: Int) -> Int =
+  if idx >= total then idx
+  else {
+    let nl = __find_nl(sh, slen, from)
+    let endp = __strip_cr(sh, slen, from, nl)
+    let piece = __lntake(sh, from, endp - from)
+    prim.store_str(lh + 12 + idx * 8, piece)
+    __lines_fill(lh, sh, slen, nl + 1, idx + 1, total)
+  }
 
 fn string_lines(s: String) -> List[String] = {
   let sh = prim.handle(s)
@@ -33111,11 +33438,12 @@ fn __pad_one(dst: Int, pbase: Int, plen: Int, pclen: Int) -> Int = if plen <= 0 
 } else __pad_copy(pbase, dst, pclen)
 
 
-fn __pad_fill(dst: Int, pbase: Int, plen: Int, pclen: Int, count: Int) -> Int = if count <= 0 then dst
-else {
-  let _w = __pad_one(dst, pbase, plen, pclen)
-  __pad_fill(dst + pclen, pbase, plen, pclen, count - 1)
-}
+fn __pad_fill(dst: Int, pbase: Int, plen: Int, pclen: Int, count: Int) -> Int =
+  if count <= 0 then dst
+  else {
+    let _w = __pad_one(dst, pbase, plen, pclen)
+    __pad_fill(dst + pclen, pbase, plen, pclen, count - 1)
+  }
 
 
 fn __pad_copy_str(s: String) -> String = {
@@ -33289,15 +33617,17 @@ else {
   else false
 }
 
-fn __rep_matches(pos: Int, send: Int, fbase: Int, flen: Int) -> Bool = if pos + flen > send then false
-else __rep_eq(pos, fbase, flen)
+fn __rep_matches(pos: Int, send: Int, fbase: Int, flen: Int) -> Bool =
+  if pos + flen > send then false
+  else __rep_eq(pos, fbase, flen)
 
-fn __rep_count(pos: Int, send: Int, fbase: Int, flen: Int, acc: Int) -> Int = if pos + flen > send then acc
-else {
-  let m = __rep_eq(pos, fbase, flen)
-  if m then __rep_count(pos + flen, send, fbase, flen, acc + 1)
-  else __rep_count(pos + 1, send, fbase, flen, acc)
-}
+fn __rep_count(pos: Int, send: Int, fbase: Int, flen: Int, acc: Int) -> Int =
+  if pos + flen > send then acc
+  else {
+    let m = __rep_eq(pos, fbase, flen)
+    if m then __rep_count(pos + flen, send, fbase, flen, acc + 1)
+    else __rep_count(pos + 1, send, fbase, flen, acc)
+  }
 
 fn __rep_copy(src: Int, dst: Int, n: Int) -> Int = if n <= 0 then 0
 else {
@@ -33306,17 +33636,18 @@ else {
 }
 
 
-fn __rep_fill(spos: Int, send: Int, fbase: Int, flen: Int, tbase: Int, tlen: Int, dst: Int) -> Int = if spos >= send then dst
-else {
-  let m = __rep_matches(spos, send, fbase, flen)
-  if m then {
-    let _c = __rep_copy(tbase, dst, tlen)
-    __rep_fill(spos + flen, send, fbase, flen, tbase, tlen, dst + tlen)
-  } else {
-    prim.store8(dst, prim.load8(spos))
-    __rep_fill(spos + 1, send, fbase, flen, tbase, tlen, dst + 1)
+fn __rep_fill(spos: Int, send: Int, fbase: Int, flen: Int, tbase: Int, tlen: Int, dst: Int) -> Int =
+  if spos >= send then dst
+  else {
+    let m = __rep_matches(spos, send, fbase, flen)
+    if m then {
+      let _c = __rep_copy(tbase, dst, tlen)
+      __rep_fill(spos + flen, send, fbase, flen, tbase, tlen, dst + tlen)
+    } else {
+      prim.store8(dst, prim.load8(spos))
+      __rep_fill(spos + 1, send, fbase, flen, tbase, tlen, dst + 1)
+    }
   }
-}
 
 
 fn __rep_copy_str(s: String) -> String = {
@@ -33360,14 +33691,15 @@ else __rep_nchars(p + 1, send, acc)
 fn __rep_next_cs(p: Int, send: Int) -> Int = if p >= send then send
 else if __rep_cstart(p) then p else __rep_next_cs(p + 1, send)
 
-fn __rep_empty_fill(spos: Int, send: Int, tbase: Int, tlen: Int, dst: Int) -> Int = if spos >= send then dst
-else {
-  let nxt = __rep_next_cs(spos + 1, send)
-  let clen = nxt - spos
-  let _c = __rep_copy(spos, dst, clen)
-  let _t = __rep_copy(tbase, dst + clen, tlen)
-  __rep_empty_fill(nxt, send, tbase, tlen, dst + clen + tlen)
-}
+fn __rep_empty_fill(spos: Int, send: Int, tbase: Int, tlen: Int, dst: Int) -> Int =
+  if spos >= send then dst
+  else {
+    let nxt = __rep_next_cs(spos + 1, send)
+    let clen = nxt - spos
+    let _c = __rep_copy(spos, dst, clen)
+    let _t = __rep_copy(tbase, dst + clen, tlen)
+    __rep_empty_fill(nxt, send, tbase, tlen, dst + clen + tlen)
+  }
 
 fn __empty_replace(s: String, to: String) -> String = {
   let h = prim.handle(s)
@@ -33397,12 +33729,13 @@ fn string_replace(s: String, from: String, to: String) -> String = {
 
 
 
-fn __repf_find(pos: Int, send: Int, fbase: Int, flen: Int) -> Int = if pos + flen > send then send + 1
-else {
-  let m = __rep_eq(pos, fbase, flen)
-  if m then pos
-  else __repf_find(pos + 1, send, fbase, flen)
-}
+fn __repf_find(pos: Int, send: Int, fbase: Int, flen: Int) -> Int =
+  if pos + flen > send then send + 1
+  else {
+    let m = __rep_eq(pos, fbase, flen)
+    if m then pos
+    else __repf_find(pos + 1, send, fbase, flen)
+  }
 
 
 fn __repf_do(s: String, from: String, to: String, off: Int) -> String = {
@@ -33561,12 +33894,13 @@ fn string_ends_with(s: String, suffix: String) -> Bool = {
 }
 
 
-fn __contains_scan(sbase: Int, slen: Int, nbase: Int, nlen: Int, pos: Int) -> Bool = if pos + nlen > slen then false
-else {
-  let m = __byte_eq(sbase + pos, nbase, nlen)
-  if m then true
-  else __contains_scan(sbase, slen, nbase, nlen, pos + 1)
-}
+fn __contains_scan(sbase: Int, slen: Int, nbase: Int, nlen: Int, pos: Int) -> Bool =
+  if pos + nlen > slen then false
+  else {
+    let m = __byte_eq(sbase + pos, nbase, nlen)
+    if m then true
+    else __contains_scan(sbase, slen, nbase, nlen, pos + 1)
+  }
 
 fn string_contains(s: String, needle: String) -> Bool = {
   let hs = prim.handle(s)
@@ -33592,12 +33926,13 @@ else {
 
 
 
-fn __count_scan(sbase: Int, slen: Int, nbase: Int, nlen: Int, pos: Int, acc: Int) -> Int = if pos + nlen > slen then acc
-else {
-  let m = __byte_eq(sbase + pos, nbase, nlen)
-  if m then __count_scan(sbase, slen, nbase, nlen, pos + nlen, acc + 1)
-  else __count_scan(sbase, slen, nbase, nlen, pos + 1, acc)
-}
+fn __count_scan(sbase: Int, slen: Int, nbase: Int, nlen: Int, pos: Int, acc: Int) -> Int =
+  if pos + nlen > slen then acc
+  else {
+    let m = __byte_eq(sbase + pos, nbase, nlen)
+    if m then __count_scan(sbase, slen, nbase, nlen, pos + nlen, acc + 1)
+    else __count_scan(sbase, slen, nbase, nlen, pos + 1, acc)
+  }
 
 fn string_count(s: String, needle: String) -> Int = {
   let hs = prim.handle(s)
@@ -33613,12 +33948,13 @@ fn string_count(s: String, needle: String) -> Int = {
 
 
 
-fn __find_byte(sbase: Int, slen: Int, nbase: Int, nlen: Int, pos: Int) -> Int = if pos + nlen > slen then -1
-else {
-  let m = __byte_eq(sbase + pos, nbase, nlen)
-  if m then pos
-  else __find_byte(sbase, slen, nbase, nlen, pos + 1)
-}
+fn __find_byte(sbase: Int, slen: Int, nbase: Int, nlen: Int, pos: Int) -> Int =
+  if pos + nlen > slen then -1
+  else {
+    let m = __byte_eq(sbase + pos, nbase, nlen)
+    if m then pos
+    else __find_byte(sbase, slen, nbase, nlen, pos + 1)
+  }
 
 
 
@@ -33747,29 +34083,32 @@ pub const SRC_STRING_SPLIT: &str = r#"
 
 
 
-fn __sep_at(sh: Int, slen: Int, seph: Int, seplen: Int, p: Int, j: Int) -> Bool = if j >= seplen then true
-else if p + j >= slen then false
-else {
-  let sb = prim.load8(sh + 12 + p + j)
-  let tb = prim.load8(seph + 12 + j)
-  if sb == tb then __sep_at(sh, slen, seph, seplen, p, j + 1)
-  else false
-}
+fn __sep_at(sh: Int, slen: Int, seph: Int, seplen: Int, p: Int, j: Int) -> Bool =
+  if j >= seplen then true
+  else if p + j >= slen then false
+  else {
+    let sb = prim.load8(sh + 12 + p + j)
+    let tb = prim.load8(seph + 12 + j)
+    if sb == tb then __sep_at(sh, slen, seph, seplen, p, j + 1)
+    else false
+  }
 
 
-fn __find_sep(sh: Int, slen: Int, seph: Int, seplen: Int, from: Int) -> Int = if from + seplen > slen then slen
-else {
-  let hit = __sep_at(sh, slen, seph, seplen, from, 0)
-  if hit then from
-  else __find_sep(sh, slen, seph, seplen, from + 1)
-}
+fn __find_sep(sh: Int, slen: Int, seph: Int, seplen: Int, from: Int) -> Int =
+  if from + seplen > slen then slen
+  else {
+    let hit = __sep_at(sh, slen, seph, seplen, from, 0)
+    if hit then from
+    else __find_sep(sh, slen, seph, seplen, from + 1)
+  }
 
-fn __count_seps(sh: Int, slen: Int, seph: Int, seplen: Int, from: Int, acc: Int) -> Int = if from + seplen > slen then acc
-else {
-  let pos = __find_sep(sh, slen, seph, seplen, from)
-  if pos >= slen then acc
-  else __count_seps(sh, slen, seph, seplen, pos + seplen, acc + 1)
-}
+fn __count_seps(sh: Int, slen: Int, seph: Int, seplen: Int, from: Int, acc: Int) -> Int =
+  if from + seplen > slen then acc
+  else {
+    let pos = __find_sep(sh, slen, seph, seplen, from)
+    if pos >= slen then acc
+    else __count_seps(sh, slen, seph, seplen, pos + seplen, acc + 1)
+  }
 
 fn __copy_bytes(dst: Int, src: Int, n: Int, i: Int) -> Int = if i >= n then 0
 else {
@@ -33808,13 +34147,14 @@ fn __next_cstart(sh: Int, slen: Int, p: Int) -> Int = if p >= slen then slen
 else if __is_cstart(sh, p) then p
 else __next_cstart(sh, slen, p + 1)
 
-fn __empty_split_fill(lh: Int, sh: Int, slen: Int, from: Int, idx: Int) -> Int = if from >= slen then idx
-else {
-  let nxt = __next_cstart(sh, slen, from + 1)
-  let piece = __substr(sh, from, nxt)
-  prim.store_str(lh + 12 + idx * 8, piece)
-  __empty_split_fill(lh, sh, slen, nxt, idx + 1)
-}
+fn __empty_split_fill(lh: Int, sh: Int, slen: Int, from: Int, idx: Int) -> Int =
+  if from >= slen then idx
+  else {
+    let nxt = __next_cstart(sh, slen, from + 1)
+    let piece = __substr(sh, from, nxt)
+    prim.store_str(lh + 12 + idx * 8, piece)
+    __empty_split_fill(lh, sh, slen, nxt, idx + 1)
+  }
 
 fn __empty_split(s: String) -> List[String] = {
   let sh = prim.handle(s)
@@ -33854,23 +34194,25 @@ pub const SRC_STRING_SPLIT_ONCE: &str = r#"
 
 
 
-fn __so_at(sh: Int, slen: Int, seph: Int, seplen: Int, p: Int, j: Int) -> Bool = if j >= seplen then true
-else if p + j >= slen then false
-else {
-  let sb = prim.load8(sh + 12 + p + j)
-  let tb = prim.load8(seph + 12 + j)
-  if sb == tb then __so_at(sh, slen, seph, seplen, p, j + 1)
-  else false
-}
+fn __so_at(sh: Int, slen: Int, seph: Int, seplen: Int, p: Int, j: Int) -> Bool =
+  if j >= seplen then true
+  else if p + j >= slen then false
+  else {
+    let sb = prim.load8(sh + 12 + p + j)
+    let tb = prim.load8(seph + 12 + j)
+    if sb == tb then __so_at(sh, slen, seph, seplen, p, j + 1)
+    else false
+  }
 
 
 
-fn __so_find(sh: Int, slen: Int, seph: Int, seplen: Int, from: Int) -> Int = if from + seplen > slen then 0 - 1
-else {
-  let hit = __so_at(sh, slen, seph, seplen, from, 0)
-  if hit then from
-  else __so_find(sh, slen, seph, seplen, from + 1)
-}
+fn __so_find(sh: Int, slen: Int, seph: Int, seplen: Int, from: Int) -> Int =
+  if from + seplen > slen then 0 - 1
+  else {
+    let hit = __so_at(sh, slen, seph, seplen, from, 0)
+    if hit then from
+    else __so_find(sh, slen, seph, seplen, from + 1)
+  }
 
 fn __so_copy(dst: Int, src: Int, n: Int, i: Int) -> Int = if i >= n then 0
 else {
@@ -34251,51 +34593,52 @@ fn __to_lower_w(dh: Int, o: Int, cp: Int) -> Int = if cp < 128 then {
   4
 }
 
-fn __to_lower_walk(p: Int, end: Int, th: Int, nent: Int, sh: Int, dh: Int, o: Int, st: Int, ch: Int, ih: Int) -> Int = if p >= end then o
-else {
-  let b0 = prim.load8(p)
-  if b0 < 128 then {
-    prim.store8(dh + o, (if b0 >= 65 and b0 <= 90 then b0 + 32 else b0))
-    __to_lower_walk(p + 1, end, th, nent, sh, dh, o + 1, st, ch, ih)
-  } else {
-    let (cp, l) = __to_lower_cp(p)
-    if cp == 931 then {
-      let fin = __to_lower_bck(st, p, ch, 151, ih, 464) and not __to_lower_fwd(
-        p + l,
-        end,
-        ch,
-        151,
-        ih,
-        464,
-      )
-      let w = __to_lower_w(dh, o, (if fin then 962 else 963))
-      __to_lower_walk(p + l, end, th, nent, sh, dh, o + w, st, ch, ih)
+fn __to_lower_walk(p: Int, end: Int, th: Int, nent: Int, sh: Int, dh: Int, o: Int, st: Int, ch: Int, ih: Int) -> Int =
+  if p >= end then o
+  else {
+    let b0 = prim.load8(p)
+    if b0 < 128 then {
+      prim.store8(dh + o, (if b0 >= 65 and b0 <= 90 then b0 + 32 else b0))
+      __to_lower_walk(p + 1, end, th, nent, sh, dh, o + 1, st, ch, ih)
     } else {
-      let idx = __to_lower_find(th, 0, nent, cp)
-      if idx < 0 then {
-        let w = __to_lower_w(dh, o, cp)
+      let (cp, l) = __to_lower_cp(p)
+      if cp == 931 then {
+        let fin = __to_lower_bck(st, p, ch, 151, ih, 464) and not __to_lower_fwd(
+          p + l,
+          end,
+          ch,
+          151,
+          ih,
+          464,
+        )
+        let w = __to_lower_w(dh, o, (if fin then 962 else 963))
         __to_lower_walk(p + l, end, th, nent, sh, dh, o + w, st, ch, ih)
       } else {
-        let v = __to_lower_rd6(th + idx * 12 + 6)
-        if v < 15728640 then {
-          let w = __to_lower_w(dh, o, v)
+        let idx = __to_lower_find(th, 0, nent, cp)
+        if idx < 0 then {
+          let w = __to_lower_w(dh, o, cp)
           __to_lower_walk(p + l, end, th, nent, sh, dh, o + w, st, ch, ih)
         } else {
-          let sa = sh + (v - 15728640) * 18
-          let c1 = __to_lower_rd6(sa)
-          let c2 = __to_lower_rd6(sa + 6)
-          let c3 = __to_lower_rd6(sa + 12)
-          let w1 = __to_lower_w(dh, o, c1)
-          let w2 = if c2 != 0 then __to_lower_w(dh, o + w1, c2)
-          else 0
-          let w3 = if c3 != 0 then __to_lower_w(dh, o + w1 + w2, c3)
-          else 0
-          __to_lower_walk(p + l, end, th, nent, sh, dh, o + w1 + w2 + w3, st, ch, ih)
+          let v = __to_lower_rd6(th + idx * 12 + 6)
+          if v < 15728640 then {
+            let w = __to_lower_w(dh, o, v)
+            __to_lower_walk(p + l, end, th, nent, sh, dh, o + w, st, ch, ih)
+          } else {
+            let sa = sh + (v - 15728640) * 18
+            let c1 = __to_lower_rd6(sa)
+            let c2 = __to_lower_rd6(sa + 6)
+            let c3 = __to_lower_rd6(sa + 12)
+            let w1 = __to_lower_w(dh, o, c1)
+            let w2 = if c2 != 0 then __to_lower_w(dh, o + w1, c2)
+            else 0
+            let w3 = if c3 != 0 then __to_lower_w(dh, o + w1 + w2, c3)
+            else 0
+            __to_lower_walk(p + l, end, th, nent, sh, dh, o + w1 + w2 + w3, st, ch, ih)
+          }
         }
       }
     }
   }
-}
 
 
 
@@ -34313,29 +34656,33 @@ else {
 }
 
 
-fn __to_lower_prev(start: Int, i: Int) -> Int = if i > start and prim.load8(i - 1) >= 128 and prim.load8(i - 1) < 192 then __to_lower_prev(
-  start,
-  i - 1,
-) else i - 1
+fn __to_lower_prev(start: Int, i: Int) -> Int =
+  if i > start and prim.load8(i - 1) >= 128 and prim.load8(i - 1) < 192 then __to_lower_prev(
+    start,
+    i - 1,
+  )
+  else i - 1
 
 
 
-fn __to_lower_bck(start: Int, i: Int, ch: Int, cn: Int, ih: Int, inn: Int) -> Bool = if i <= start then false
-else {
-  let ps = __to_lower_prev(start, i)
-  let (cp, l) = __to_lower_cp(ps)
-  if __to_lower_inr(ih, 0, inn, cp) then __to_lower_bck(start, ps, ch, cn, ih, inn)
-  else __to_lower_inr(ch, 0, cn, cp)
-}
+fn __to_lower_bck(start: Int, i: Int, ch: Int, cn: Int, ih: Int, inn: Int) -> Bool =
+  if i <= start then false
+  else {
+    let ps = __to_lower_prev(start, i)
+    let (cp, l) = __to_lower_cp(ps)
+    if __to_lower_inr(ih, 0, inn, cp) then __to_lower_bck(start, ps, ch, cn, ih, inn)
+    else __to_lower_inr(ch, 0, cn, cp)
+  }
 
 
 
-fn __to_lower_fwd(p: Int, end: Int, ch: Int, cn: Int, ih: Int, inn: Int) -> Bool = if p >= end then false
-else {
-  let (cp, l) = __to_lower_cp(p)
-  if __to_lower_inr(ih, 0, inn, cp) then __to_lower_fwd(p + l, end, ch, cn, ih, inn)
-  else __to_lower_inr(ch, 0, cn, cp)
-}
+fn __to_lower_fwd(p: Int, end: Int, ch: Int, cn: Int, ih: Int, inn: Int) -> Bool =
+  if p >= end then false
+  else {
+    let (cp, l) = __to_lower_cp(p)
+    if __to_lower_inr(ih, 0, inn, cp) then __to_lower_fwd(p + l, end, ch, cn, ih, inn)
+    else __to_lower_inr(ch, 0, cn, cp)
+  }
 
 fn string_to_lower(s: String) -> String = {
   let tbl = "00004100006100004200006200004300006300004400006400004500006500004600006600004700006700004800006800004900006900004A00006A00004B00006B00004C00006C00004D00006D00004E00006E00004F00006F00005000007000005100007100005200007200005300007300005400007400005500007500005600007600005700007700005800007800005900007900005A00007A0000C00000E00000C10000E10000C20000E20000C30000E30000C40000E40000C50000E50000C60000E60000C70000E70000C80000E80000C90000E90000CA0000EA0000CB0000EB0000CC0000EC0000CD0000ED0000CE0000EE0000CF0000EF0000D00000F00000D10000F10000D20000F20000D30000F30000D40000F40000D50000F50000D60000F60000D80000F80000D90000F90000DA0000FA0000DB0000FB0000DC0000FC0000DD0000FD0000DE0000FE00010000010100010200010300010400010500010600010700010800010900010A00010B00010C00010D00010E00010F00011000011100011200011300011400011500011600011700011800011900011A00011B00011C00011D00011E00011F00012000012100012200012300012400012500012600012700012800012900012A00012B00012C00012D00012E00012F000130F0000000013200013300013400013500013600013700013900013A00013B00013C00013D00013E00013F00014000014100014200014300014400014500014600014700014800014A00014B00014C00014D00014E00014F00015000015100015200015300015400015500015600015700015800015900015A00015B00015C00015D00015E00015F00016000016100016200016300016400016500016600016700016800016900016A00016B00016C00016D00016E00016F0001700001710001720001730001740001750001760001770001780000FF00017900017A00017B00017C00017D00017E00018100025300018200018300018400018500018600025400018700018800018900025600018A00025700018B00018C00018E0001DD00018F00025900019000025B00019100019200019300026000019400026300019600026900019700026800019800019900019C00026F00019D00027200019F0002750001A00001A10001A20001A30001A40001A50001A60002800001A70001A80001A90002830001AC0001AD0001AE0002880001AF0001B00001B100028A0001B200028B0001B30001B40001B50001B60001B70002920001B80001B90001BC0001BD0001C40001C60001C50001C60001C70001C90001C80001C90001CA0001CC0001CB0001CC0001CD0001CE0001CF0001D00001D10001D20001D30001D40001D50001D60001D70001D80001D90001DA0001DB0001DC0001DE0001DF0001E00001E10001E20001E30001E40001E50001E60001E70001E80001E90001EA0001EB0001EC0001ED0001EE0001EF0001F10001F30001F20001F30001F40001F50001F60001950001F70001BF0001F80001F90001FA0001FB0001FC0001FD0001FE0001FF00020000020100020200020300020400020500020600020700020800020900020A00020B00020C00020D00020E00020F00021000021100021200021300021400021500021600021700021800021900021A00021B00021C00021D00021E00021F00022000019E00022200022300022400022500022600022700022800022900022A00022B00022C00022D00022E00022F00023000023100023200023300023A002C6500023B00023C00023D00019A00023E002C6600024100024200024300018000024400028900024500028C00024600024700024800024900024A00024B00024C00024D00024E00024F00037000037100037200037300037600037700037F0003F30003860003AC0003880003AD0003890003AE00038A0003AF00038C0003CC00038E0003CD00038F0003CE0003910003B10003920003B20003930003B30003940003B40003950003B50003960003B60003970003B70003980003B80003990003B900039A0003BA00039B0003BB00039C0003BC00039D0003BD00039E0003BE00039F0003BF0003A00003C00003A10003C10003A30003C30003A40003C40003A50003C50003A60003C60003A70003C70003A80003C80003A90003C90003AA0003CA0003AB0003CB0003CF0003D70003D80003D90003DA0003DB0003DC0003DD0003DE0003DF0003E00003E10003E20003E30003E40003E50003E60003E70003E80003E90003EA0003EB0003EC0003ED0003EE0003EF0003F40003B80003F70003F80003F90003F20003FA0003FB0003FD00037B0003FE00037C0003FF00037D00040000045000040100045100040200045200040300045300040400045400040500045500040600045600040700045700040800045800040900045900040A00045A00040B00045B00040C00045C00040D00045D00040E00045E00040F00045F00041000043000041100043100041200043200041300043300041400043400041500043500041600043600041700043700041800043800041900043900041A00043A00041B00043B00041C00043C00041D00043D00041E00043E00041F00043F00042000044000042100044100042200044200042300044300042400044400042500044500042600044600042700044700042800044800042900044900042A00044A00042B00044B00042C00044C00042D00044D00042E00044E00042F00044F00046000046100046200046300046400046500046600046700046800046900046A00046B00046C00046D00046E00046F00047000047100047200047300047400047500047600047700047800047900047A00047B00047C00047D00047E00047F00048000048100048A00048B00048C00048D00048E00048F00049000049100049200049300049400049500049600049700049800049900049A00049B00049C00049D00049E00049F0004A00004A10004A20004A30004A40004A50004A60004A70004A80004A90004AA0004AB0004AC0004AD0004AE0004AF0004B00004B10004B20004B30004B40004B50004B60004B70004B80004B90004BA0004BB0004BC0004BD0004BE0004BF0004C00004CF0004C10004C20004C30004C40004C50004C60004C70004C80004C90004CA0004CB0004CC0004CD0004CE0004D00004D10004D20004D30004D40004D50004D60004D70004D80004D90004DA0004DB0004DC0004DD0004DE0004DF0004E00004E10004E20004E30004E40004E50004E60004E70004E80004E90004EA0004EB0004EC0004ED0004EE0004EF0004F00004F10004F20004F30004F40004F50004F60004F70004F80004F90004FA0004FB0004FC0004FD0004FE0004FF00050000050100050200050300050400050500050600050700050800050900050A00050B00050C00050D00050E00050F00051000051100051200051300051400051500051600051700051800051900051A00051B00051C00051D00051E00051F00052000052100052200052300052400052500052600052700052800052900052A00052B00052C00052D00052E00052F00053100056100053200056200053300056300053400056400053500056500053600056600053700056700053800056800053900056900053A00056A00053B00056B00053C00056C00053D00056D00053E00056E00053F00056F00054000057000054100057100054200057200054300057300054400057400054500057500054600057600054700057700054800057800054900057900054A00057A00054B00057B00054C00057C00054D00057D00054E00057E00054F00057F0005500005800005510005810005520005820005530005830005540005840005550005850005560005860010A0002D000010A1002D010010A2002D020010A3002D030010A4002D040010A5002D050010A6002D060010A7002D070010A8002D080010A9002D090010AA002D0A0010AB002D0B0010AC002D0C0010AD002D0D0010AE002D0E0010AF002D0F0010B0002D100010B1002D110010B2002D120010B3002D130010B4002D140010B5002D150010B6002D160010B7002D170010B8002D180010B9002D190010BA002D1A0010BB002D1B0010BC002D1C0010BD002D1D0010BE002D1E0010BF002D1F0010C0002D200010C1002D210010C2002D220010C3002D230010C4002D240010C5002D250010C7002D270010CD002D2D0013A000AB700013A100AB710013A200AB720013A300AB730013A400AB740013A500AB750013A600AB760013A700AB770013A800AB780013A900AB790013AA00AB7A0013AB00AB7B0013AC00AB7C0013AD00AB7D0013AE00AB7E0013AF00AB7F0013B000AB800013B100AB810013B200AB820013B300AB830013B400AB840013B500AB850013B600AB860013B700AB870013B800AB880013B900AB890013BA00AB8A0013BB00AB8B0013BC00AB8C0013BD00AB8D0013BE00AB8E0013BF00AB8F0013C000AB900013C100AB910013C200AB920013C300AB930013C400AB940013C500AB950013C600AB960013C700AB970013C800AB980013C900AB990013CA00AB9A0013CB00AB9B0013CC00AB9C0013CD00AB9D0013CE00AB9E0013CF00AB9F0013D000ABA00013D100ABA10013D200ABA20013D300ABA30013D400ABA40013D500ABA50013D600ABA60013D700ABA70013D800ABA80013D900ABA90013DA00ABAA0013DB00ABAB0013DC00ABAC0013DD00ABAD0013DE00ABAE0013DF00ABAF0013E000ABB00013E100ABB10013E200ABB20013E300ABB30013E400ABB40013E500ABB50013E600ABB60013E700ABB70013E800ABB80013E900ABB90013EA00ABBA0013EB00ABBB0013EC00ABBC0013ED00ABBD0013EE00ABBE0013EF00ABBF0013F00013F80013F10013F90013F20013FA0013F30013FB0013F40013FC0013F50013FD001C89001C8A001C900010D0001C910010D1001C920010D2001C930010D3001C940010D4001C950010D5001C960010D6001C970010D7001C980010D8001C990010D9001C9A0010DA001C9B0010DB001C9C0010DC001C9D0010DD001C9E0010DE001C9F0010DF001CA00010E0001CA10010E1001CA20010E2001CA30010E3001CA40010E4001CA50010E5001CA60010E6001CA70010E7001CA80010E8001CA90010E9001CAA0010EA001CAB0010EB001CAC0010EC001CAD0010ED001CAE0010EE001CAF0010EF001CB00010F0001CB10010F1001CB20010F2001CB30010F3001CB40010F4001CB50010F5001CB60010F6001CB70010F7001CB80010F8001CB90010F9001CBA0010FA001CBD0010FD001CBE0010FE001CBF0010FF001E00001E01001E02001E03001E04001E05001E06001E07001E08001E09001E0A001E0B001E0C001E0D001E0E001E0F001E10001E11001E12001E13001E14001E15001E16001E17001E18001E19001E1A001E1B001E1C001E1D001E1E001E1F001E20001E21001E22001E23001E24001E25001E26001E27001E28001E29001E2A001E2B001E2C001E2D001E2E001E2F001E30001E31001E32001E33001E34001E35001E36001E37001E38001E39001E3A001E3B001E3C001E3D001E3E001E3F001E40001E41001E42001E43001E44001E45001E46001E47001E48001E49001E4A001E4B001E4C001E4D001E4E001E4F001E50001E51001E52001E53001E54001E55001E56001E57001E58001E59001E5A001E5B001E5C001E5D001E5E001E5F001E60001E61001E62001E63001E64001E65001E66001E67001E68001E69001E6A001E6B001E6C001E6D001E6E001E6F001E70001E71001E72001E73001E74001E75001E76001E77001E78001E79001E7A001E7B001E7C001E7D001E7E001E7F001E80001E81001E82001E83001E84001E85001E86001E87001E88001E89001E8A001E8B001E8C001E8D001E8E001E8F001E90001E91001E92001E93001E94001E95001E9E0000DF001EA0001EA1001EA2001EA3001EA4001EA5001EA6001EA7001EA8001EA9001EAA001EAB001EAC001EAD001EAE001EAF001EB0001EB1001EB2001EB3001EB4001EB5001EB6001EB7001EB8001EB9001EBA001EBB001EBC001EBD001EBE001EBF001EC0001EC1001EC2001EC3001EC4001EC5001EC6001EC7001EC8001EC9001ECA001ECB001ECC001ECD001ECE001ECF001ED0001ED1001ED2001ED3001ED4001ED5001ED6001ED7001ED8001ED9001EDA001EDB001EDC001EDD001EDE001EDF001EE0001EE1001EE2001EE3001EE4001EE5001EE6001EE7001EE8001EE9001EEA001EEB001EEC001EED001EEE001EEF001EF0001EF1001EF2001EF3001EF4001EF5001EF6001EF7001EF8001EF9001EFA001EFB001EFC001EFD001EFE001EFF001F08001F00001F09001F01001F0A001F02001F0B001F03001F0C001F04001F0D001F05001F0E001F06001F0F001F07001F18001F10001F19001F11001F1A001F12001F1B001F13001F1C001F14001F1D001F15001F28001F20001F29001F21001F2A001F22001F2B001F23001F2C001F24001F2D001F25001F2E001F26001F2F001F27001F38001F30001F39001F31001F3A001F32001F3B001F33001F3C001F34001F3D001F35001F3E001F36001F3F001F37001F48001F40001F49001F41001F4A001F42001F4B001F43001F4C001F44001F4D001F45001F59001F51001F5B001F53001F5D001F55001F5F001F57001F68001F60001F69001F61001F6A001F62001F6B001F63001F6C001F64001F6D001F65001F6E001F66001F6F001F67001F88001F80001F89001F81001F8A001F82001F8B001F83001F8C001F84001F8D001F85001F8E001F86001F8F001F87001F98001F90001F99001F91001F9A001F92001F9B001F93001F9C001F94001F9D001F95001F9E001F96001F9F001F97001FA8001FA0001FA9001FA1001FAA001FA2001FAB001FA3001FAC001FA4001FAD001FA5001FAE001FA6001FAF001FA7001FB8001FB0001FB9001FB1001FBA001F70001FBB001F71001FBC001FB3001FC8001F72001FC9001F73001FCA001F74001FCB001F75001FCC001FC3001FD8001FD0001FD9001FD1001FDA001F76001FDB001F77001FE8001FE0001FE9001FE1001FEA001F7A001FEB001F7B001FEC001FE5001FF8001F78001FF9001F79001FFA001F7C001FFB001F7D001FFC001FF30021260003C900212A00006B00212B0000E500213200214E00216000217000216100217100216200217200216300217300216400217400216500217500216600217600216700217700216800217800216900217900216A00217A00216B00217B00216C00217C00216D00217D00216E00217E00216F00217F0021830021840024B60024D00024B70024D10024B80024D20024B90024D30024BA0024D40024BB0024D50024BC0024D60024BD0024D70024BE0024D80024BF0024D90024C00024DA0024C10024DB0024C20024DC0024C30024DD0024C40024DE0024C50024DF0024C60024E00024C70024E10024C80024E20024C90024E30024CA0024E40024CB0024E50024CC0024E60024CD0024E70024CE0024E80024CF0024E9002C00002C30002C01002C31002C02002C32002C03002C33002C04002C34002C05002C35002C06002C36002C07002C37002C08002C38002C09002C39002C0A002C3A002C0B002C3B002C0C002C3C002C0D002C3D002C0E002C3E002C0F002C3F002C10002C40002C11002C41002C12002C42002C13002C43002C14002C44002C15002C45002C16002C46002C17002C47002C18002C48002C19002C49002C1A002C4A002C1B002C4B002C1C002C4C002C1D002C4D002C1E002C4E002C1F002C4F002C20002C50002C21002C51002C22002C52002C23002C53002C24002C54002C25002C55002C26002C56002C27002C57002C28002C58002C29002C59002C2A002C5A002C2B002C5B002C2C002C5C002C2D002C5D002C2E002C5E002C2F002C5F002C60002C61002C6200026B002C63001D7D002C6400027D002C67002C68002C69002C6A002C6B002C6C002C6D000251002C6E000271002C6F000250002C70000252002C72002C73002C75002C76002C7E00023F002C7F000240002C80002C81002C82002C83002C84002C85002C86002C87002C88002C89002C8A002C8B002C8C002C8D002C8E002C8F002C90002C91002C92002C93002C94002C95002C96002C97002C98002C99002C9A002C9B002C9C002C9D002C9E002C9F002CA0002CA1002CA2002CA3002CA4002CA5002CA6002CA7002CA8002CA9002CAA002CAB002CAC002CAD002CAE002CAF002CB0002CB1002CB2002CB3002CB4002CB5002CB6002CB7002CB8002CB9002CBA002CBB002CBC002CBD002CBE002CBF002CC0002CC1002CC2002CC3002CC4002CC5002CC6002CC7002CC8002CC9002CCA002CCB002CCC002CCD002CCE002CCF002CD0002CD1002CD2002CD3002CD4002CD5002CD6002CD7002CD8002CD9002CDA002CDB002CDC002CDD002CDE002CDF002CE0002CE1002CE2002CE3002CEB002CEC002CED002CEE002CF2002CF300A64000A64100A64200A64300A64400A64500A64600A64700A64800A64900A64A00A64B00A64C00A64D00A64E00A64F00A65000A65100A65200A65300A65400A65500A65600A65700A65800A65900A65A00A65B00A65C00A65D00A65E00A65F00A66000A66100A66200A66300A66400A66500A66600A66700A66800A66900A66A00A66B00A66C00A66D00A68000A68100A68200A68300A68400A68500A68600A68700A68800A68900A68A00A68B00A68C00A68D00A68E00A68F00A69000A69100A69200A69300A69400A69500A69600A69700A69800A69900A69A00A69B00A72200A72300A72400A72500A72600A72700A72800A72900A72A00A72B00A72C00A72D00A72E00A72F00A73200A73300A73400A73500A73600A73700A73800A73900A73A00A73B00A73C00A73D00A73E00A73F00A74000A74100A74200A74300A74400A74500A74600A74700A74800A74900A74A00A74B00A74C00A74D00A74E00A74F00A75000A75100A75200A75300A75400A75500A75600A75700A75800A75900A75A00A75B00A75C00A75D00A75E00A75F00A76000A76100A76200A76300A76400A76500A76600A76700A76800A76900A76A00A76B00A76C00A76D00A76E00A76F00A77900A77A00A77B00A77C00A77D001D7900A77E00A77F00A78000A78100A78200A78300A78400A78500A78600A78700A78B00A78C00A78D00026500A79000A79100A79200A79300A79600A79700A79800A79900A79A00A79B00A79C00A79D00A79E00A79F00A7A000A7A100A7A200A7A300A7A400A7A500A7A600A7A700A7A800A7A900A7AA00026600A7AB00025C00A7AC00026100A7AD00026C00A7AE00026A00A7B000029E00A7B100028700A7B200029D00A7B300AB5300A7B400A7B500A7B600A7B700A7B800A7B900A7BA00A7BB00A7BC00A7BD00A7BE00A7BF00A7C000A7C100A7C200A7C300A7C400A79400A7C500028200A7C6001D8E00A7C700A7C800A7C900A7CA00A7CB00026400A7CC00A7CD00A7CE00A7CF00A7D000A7D100A7D200A7D300A7D400A7D500A7D600A7D700A7D800A7D900A7DA00A7DB00A7DC00019B00A7F500A7F600FF2100FF4100FF2200FF4200FF2300FF4300FF2400FF4400FF2500FF4500FF2600FF4600FF2700FF4700FF2800FF4800FF2900FF4900FF2A00FF4A00FF2B00FF4B00FF2C00FF4C00FF2D00FF4D00FF2E00FF4E00FF2F00FF4F00FF3000FF5000FF3100FF5100FF3200FF5200FF3300FF5300FF3400FF5400FF3500FF5500FF3600FF5600FF3700FF5700FF3800FF5800FF3900FF5900FF3A00FF5A01040001042801040101042901040201042A01040301042B01040401042C01040501042D01040601042E01040701042F01040801043001040901043101040A01043201040B01043301040C01043401040D01043501040E01043601040F01043701041001043801041101043901041201043A01041301043B01041401043C01041501043D01041601043E01041701043F01041801044001041901044101041A01044201041B01044301041C01044401041D01044501041E01044601041F01044701042001044801042101044901042201044A01042301044B01042401044C01042501044D01042601044E01042701044F0104B00104D80104B10104D90104B20104DA0104B30104DB0104B40104DC0104B50104DD0104B60104DE0104B70104DF0104B80104E00104B90104E10104BA0104E20104BB0104E30104BC0104E40104BD0104E50104BE0104E60104BF0104E70104C00104E80104C10104E90104C20104EA0104C30104EB0104C40104EC0104C50104ED0104C60104EE0104C70104EF0104C80104F00104C90104F10104CA0104F20104CB0104F30104CC0104F40104CD0104F50104CE0104F60104CF0104F70104D00104F80104D10104F90104D20104FA0104D30104FB01057001059701057101059801057201059901057301059A01057401059B01057501059C01057601059D01057701059E01057801059F0105790105A001057A0105A101057C0105A301057D0105A401057E0105A501057F0105A60105800105A70105810105A80105820105A90105830105AA0105840105AB0105850105AC0105860105AD0105870105AE0105880105AF0105890105B001058A0105B101058C0105B301058D0105B401058E0105B501058F0105B60105900105B70105910105B80105920105B90105940105BB0105950105BC010C80010CC0010C81010CC1010C82010CC2010C83010CC3010C84010CC4010C85010CC5010C86010CC6010C87010CC7010C88010CC8010C89010CC9010C8A010CCA010C8B010CCB010C8C010CCC010C8D010CCD010C8E010CCE010C8F010CCF010C90010CD0010C91010CD1010C92010CD2010C93010CD3010C94010CD4010C95010CD5010C96010CD6010C97010CD7010C98010CD8010C99010CD9010C9A010CDA010C9B010CDB010C9C010CDC010C9D010CDD010C9E010CDE010C9F010CDF010CA0010CE0010CA1010CE1010CA2010CE2010CA3010CE3010CA4010CE4010CA5010CE5010CA6010CE6010CA7010CE7010CA8010CE8010CA9010CE9010CAA010CEA010CAB010CEB010CAC010CEC010CAD010CED010CAE010CEE010CAF010CEF010CB0010CF0010CB1010CF1010CB2010CF2010D50010D70010D51010D71010D52010D72010D53010D73010D54010D74010D55010D75010D56010D76010D57010D77010D58010D78010D59010D79010D5A010D7A010D5B010D7B010D5C010D7C010D5D010D7D010D5E010D7E010D5F010D7F010D60010D80010D61010D81010D62010D82010D63010D83010D64010D84010D65010D850118A00118C00118A10118C10118A20118C20118A30118C30118A40118C40118A50118C50118A60118C60118A70118C70118A80118C80118A90118C90118AA0118CA0118AB0118CB0118AC0118CC0118AD0118CD0118AE0118CE0118AF0118CF0118B00118D00118B10118D10118B20118D20118B30118D30118B40118D40118B50118D50118B60118D60118B70118D70118B80118D80118B90118D90118BA0118DA0118BB0118DB0118BC0118DC0118BD0118DD0118BE0118DE0118BF0118DF016E40016E60016E41016E61016E42016E62016E43016E63016E44016E64016E45016E65016E46016E66016E47016E67016E48016E68016E49016E69016E4A016E6A016E4B016E6B016E4C016E6C016E4D016E6D016E4E016E6E016E4F016E6F016E50016E70016E51016E71016E52016E72016E53016E73016E54016E74016E55016E75016E56016E76016E57016E77016E58016E78016E59016E79016E5A016E7A016E5B016E7B016E5C016E7C016E5D016E7D016E5E016E7E016E5F016E7F016EA0016EBB016EA1016EBC016EA2016EBD016EA3016EBE016EA4016EBF016EA5016EC0016EA6016EC1016EA7016EC2016EA8016EC3016EA9016EC4016EAA016EC5016EAB016EC6016EAC016EC7016EAD016EC8016EAE016EC9016EAF016ECA016EB0016ECB016EB1016ECC016EB2016ECD016EB3016ECE016EB4016ECF016EB5016ED0016EB6016ED1016EB7016ED2016EB8016ED301E90001E92201E90101E92301E90201E92401E90301E92501E90401E92601E90501E92701E90601E92801E90701E92901E90801E92A01E90901E92B01E90A01E92C01E90B01E92D01E90C01E92E01E90D01E92F01E90E01E93001E90F01E93101E91001E93201E91101E93301E91201E93401E91301E93501E91401E93601E91501E93701E91601E93801E91701E93901E91801E93A01E91901E93B01E91A01E93C01E91B01E93D01E91C01E93E01E91D01E93F01E91E01E94001E91F01E94101E92001E94201E92101E943"
@@ -34413,38 +34760,39 @@ fn __to_upper_w(dh: Int, o: Int, cp: Int) -> Int = if cp < 128 then {
   4
 }
 
-fn __to_upper_walk(p: Int, end: Int, th: Int, nent: Int, sh: Int, dh: Int, o: Int) -> Int = if p >= end then o
-else {
-  let b0 = prim.load8(p)
-  if b0 < 128 then {
-    prim.store8(dh + o, (if b0 >= 97 and b0 <= 122 then b0 - 32 else b0))
-    __to_upper_walk(p + 1, end, th, nent, sh, dh, o + 1)
-  } else {
-    let (cp, l) = __to_upper_cp(p)
-    let idx = __to_upper_find(th, 0, nent, cp)
-    if idx < 0 then {
-      let w = __to_upper_w(dh, o, cp)
-      __to_upper_walk(p + l, end, th, nent, sh, dh, o + w)
+fn __to_upper_walk(p: Int, end: Int, th: Int, nent: Int, sh: Int, dh: Int, o: Int) -> Int =
+  if p >= end then o
+  else {
+    let b0 = prim.load8(p)
+    if b0 < 128 then {
+      prim.store8(dh + o, (if b0 >= 97 and b0 <= 122 then b0 - 32 else b0))
+      __to_upper_walk(p + 1, end, th, nent, sh, dh, o + 1)
     } else {
-      let v = __to_upper_rd6(th + idx * 12 + 6)
-      if v < 15728640 then {
-        let w = __to_upper_w(dh, o, v)
+      let (cp, l) = __to_upper_cp(p)
+      let idx = __to_upper_find(th, 0, nent, cp)
+      if idx < 0 then {
+        let w = __to_upper_w(dh, o, cp)
         __to_upper_walk(p + l, end, th, nent, sh, dh, o + w)
       } else {
-        let sa = sh + (v - 15728640) * 18
-        let c1 = __to_upper_rd6(sa)
-        let c2 = __to_upper_rd6(sa + 6)
-        let c3 = __to_upper_rd6(sa + 12)
-        let w1 = __to_upper_w(dh, o, c1)
-        let w2 = if c2 != 0 then __to_upper_w(dh, o + w1, c2)
-        else 0
-        let w3 = if c3 != 0 then __to_upper_w(dh, o + w1 + w2, c3)
-        else 0
-        __to_upper_walk(p + l, end, th, nent, sh, dh, o + w1 + w2 + w3)
+        let v = __to_upper_rd6(th + idx * 12 + 6)
+        if v < 15728640 then {
+          let w = __to_upper_w(dh, o, v)
+          __to_upper_walk(p + l, end, th, nent, sh, dh, o + w)
+        } else {
+          let sa = sh + (v - 15728640) * 18
+          let c1 = __to_upper_rd6(sa)
+          let c2 = __to_upper_rd6(sa + 6)
+          let c3 = __to_upper_rd6(sa + 12)
+          let w1 = __to_upper_w(dh, o, c1)
+          let w2 = if c2 != 0 then __to_upper_w(dh, o + w1, c2)
+          else 0
+          let w3 = if c3 != 0 then __to_upper_w(dh, o + w1 + w2, c3)
+          else 0
+          __to_upper_walk(p + l, end, th, nent, sh, dh, o + w1 + w2 + w3)
+        }
       }
     }
   }
-}
 
 fn string_to_upper(s: String) -> String = {
   let tbl = "00006100004100006200004200006300004300006400004400006500004500006600004600006700004700006800004800006900004900006A00004A00006B00004B00006C00004C00006D00004D00006E00004E00006F00004F00007000005000007100005100007200005200007300005300007400005400007500005500007600005600007700005700007800005800007900005900007A00005A0000B500039C0000DFF000000000E00000C00000E10000C10000E20000C20000E30000C30000E40000C40000E50000C50000E60000C60000E70000C70000E80000C80000E90000C90000EA0000CA0000EB0000CB0000EC0000CC0000ED0000CD0000EE0000CE0000EF0000CF0000F00000D00000F10000D10000F20000D20000F30000D30000F40000D40000F50000D50000F60000D60000F80000D80000F90000D90000FA0000DA0000FB0000DB0000FC0000DC0000FD0000DD0000FE0000DE0000FF00017800010100010000010300010200010500010400010700010600010900010800010B00010A00010D00010C00010F00010E00011100011000011300011200011500011400011700011600011900011800011B00011A00011D00011C00011F00011E00012100012000012300012200012500012400012700012600012900012800012B00012A00012D00012C00012F00012E00013100004900013300013200013500013400013700013600013A00013900013C00013B00013E00013D00014000013F000142000141000144000143000146000145000148000147000149F0000100014B00014A00014D00014C00014F00014E00015100015000015300015200015500015400015700015600015900015800015B00015A00015D00015C00015F00015E00016100016000016300016200016500016400016700016600016900016800016B00016A00016D00016C00016F00016E00017100017000017300017200017500017400017700017600017A00017900017C00017B00017E00017D00017F00005300018000024300018300018200018500018400018800018700018C00018B0001920001910001950001F600019900019800019A00023D00019B00A7DC00019E0002200001A10001A00001A30001A20001A50001A40001A80001A70001AD0001AC0001B00001AF0001B40001B30001B60001B50001B90001B80001BD0001BC0001BF0001F70001C50001C40001C60001C40001C80001C70001C90001C70001CB0001CA0001CC0001CA0001CE0001CD0001D00001CF0001D20001D10001D40001D30001D60001D50001D80001D70001DA0001D90001DC0001DB0001DD00018E0001DF0001DE0001E10001E00001E30001E20001E50001E40001E70001E60001E90001E80001EB0001EA0001ED0001EC0001EF0001EE0001F0F000020001F20001F10001F30001F10001F50001F40001F90001F80001FB0001FA0001FD0001FC0001FF0001FE00020100020000020300020200020500020400020700020600020900020800020B00020A00020D00020C00020F00020E00021100021000021300021200021500021400021700021600021900021800021B00021A00021D00021C00021F00021E00022300022200022500022400022700022600022900022800022B00022A00022D00022C00022F00022E00023100023000023300023200023C00023B00023F002C7E000240002C7F00024200024100024700024600024900024800024B00024A00024D00024C00024F00024E000250002C6F000251002C6D000252002C7000025300018100025400018600025600018900025700018A00025900018F00025B00019000025C00A7AB00026000019300026100A7AC00026300019400026400A7CB00026500A78D00026600A7AA00026800019700026900019600026A00A7AE00026B002C6200026C00A7AD00026F00019C000271002C6E00027200019D00027500019F00027D002C640002800001A600028200A7C50002830001A900028700A7B10002880001AE00028900024400028A0001B100028B0001B200028C0002450002920001B700029D00A7B200029E00A7B000034500039900037100037000037300037200037700037600037B0003FD00037C0003FE00037D0003FF000390F000030003AC0003860003AD0003880003AE0003890003AF00038A0003B0F000040003B10003910003B20003920003B30003930003B40003940003B50003950003B60003960003B70003970003B80003980003B90003990003BA00039A0003BB00039B0003BC00039C0003BD00039D0003BE00039E0003BF00039F0003C00003A00003C10003A10003C20003A30003C30003A30003C40003A40003C50003A50003C60003A60003C70003A70003C80003A80003C90003A90003CA0003AA0003CB0003AB0003CC00038C0003CD00038E0003CE00038F0003D00003920003D10003980003D50003A60003D60003A00003D70003CF0003D90003D80003DB0003DA0003DD0003DC0003DF0003DE0003E10003E00003E30003E20003E50003E40003E70003E60003E90003E80003EB0003EA0003ED0003EC0003EF0003EE0003F000039A0003F10003A10003F20003F90003F300037F0003F50003950003F80003F70003FB0003FA00043000041000043100041100043200041200043300041300043400041400043500041500043600041600043700041700043800041800043900041900043A00041A00043B00041B00043C00041C00043D00041D00043E00041E00043F00041F00044000042000044100042100044200042200044300042300044400042400044500042500044600042600044700042700044800042800044900042900044A00042A00044B00042B00044C00042C00044D00042D00044E00042E00044F00042F00045000040000045100040100045200040200045300040300045400040400045500040500045600040600045700040700045800040800045900040900045A00040A00045B00040B00045C00040C00045D00040D00045E00040E00045F00040F00046100046000046300046200046500046400046700046600046900046800046B00046A00046D00046C00046F00046E00047100047000047300047200047500047400047700047600047900047800047B00047A00047D00047C00047F00047E00048100048000048B00048A00048D00048C00048F00048E00049100049000049300049200049500049400049700049600049900049800049B00049A00049D00049C00049F00049E0004A10004A00004A30004A20004A50004A40004A70004A60004A90004A80004AB0004AA0004AD0004AC0004AF0004AE0004B10004B00004B30004B20004B50004B40004B70004B60004B90004B80004BB0004BA0004BD0004BC0004BF0004BE0004C20004C10004C40004C30004C60004C50004C80004C70004CA0004C90004CC0004CB0004CE0004CD0004CF0004C00004D10004D00004D30004D20004D50004D40004D70004D60004D90004D80004DB0004DA0004DD0004DC0004DF0004DE0004E10004E00004E30004E20004E50004E40004E70004E60004E90004E80004EB0004EA0004ED0004EC0004EF0004EE0004F10004F00004F30004F20004F50004F40004F70004F60004F90004F80004FB0004FA0004FD0004FC0004FF0004FE00050100050000050300050200050500050400050700050600050900050800050B00050A00050D00050C00050F00050E00051100051000051300051200051500051400051700051600051900051800051B00051A00051D00051C00051F00051E00052100052000052300052200052500052400052700052600052900052800052B00052A00052D00052C00052F00052E00056100053100056200053200056300053300056400053400056500053500056600053600056700053700056800053800056900053900056A00053A00056B00053B00056C00053C00056D00053D00056E00053E00056F00053F00057000054000057100054100057200054200057300054300057400054400057500054500057600054600057700054700057800054800057900054900057A00054A00057B00054B00057C00054C00057D00054D00057E00054E00057F00054F000580000550000581000551000582000552000583000553000584000554000585000555000586000556000587F000050010D0001C900010D1001C910010D2001C920010D3001C930010D4001C940010D5001C950010D6001C960010D7001C970010D8001C980010D9001C990010DA001C9A0010DB001C9B0010DC001C9C0010DD001C9D0010DE001C9E0010DF001C9F0010E0001CA00010E1001CA10010E2001CA20010E3001CA30010E4001CA40010E5001CA50010E6001CA60010E7001CA70010E8001CA80010E9001CA90010EA001CAA0010EB001CAB0010EC001CAC0010ED001CAD0010EE001CAE0010EF001CAF0010F0001CB00010F1001CB10010F2001CB20010F3001CB30010F4001CB40010F5001CB50010F6001CB60010F7001CB70010F8001CB80010F9001CB90010FA001CBA0010FD001CBD0010FE001CBE0010FF001CBF0013F80013F00013F90013F10013FA0013F20013FB0013F30013FC0013F40013FD0013F5001C80000412001C81000414001C8200041E001C83000421001C84000422001C85000422001C8600042A001C87000462001C8800A64A001C8A001C89001D7900A77D001D7D002C63001D8E00A7C6001E01001E00001E03001E02001E05001E04001E07001E06001E09001E08001E0B001E0A001E0D001E0C001E0F001E0E001E11001E10001E13001E12001E15001E14001E17001E16001E19001E18001E1B001E1A001E1D001E1C001E1F001E1E001E21001E20001E23001E22001E25001E24001E27001E26001E29001E28001E2B001E2A001E2D001E2C001E2F001E2E001E31001E30001E33001E32001E35001E34001E37001E36001E39001E38001E3B001E3A001E3D001E3C001E3F001E3E001E41001E40001E43001E42001E45001E44001E47001E46001E49001E48001E4B001E4A001E4D001E4C001E4F001E4E001E51001E50001E53001E52001E55001E54001E57001E56001E59001E58001E5B001E5A001E5D001E5C001E5F001E5E001E61001E60001E63001E62001E65001E64001E67001E66001E69001E68001E6B001E6A001E6D001E6C001E6F001E6E001E71001E70001E73001E72001E75001E74001E77001E76001E79001E78001E7B001E7A001E7D001E7C001E7F001E7E001E81001E80001E83001E82001E85001E84001E87001E86001E89001E88001E8B001E8A001E8D001E8C001E8F001E8E001E91001E90001E93001E92001E95001E94001E96F00006001E97F00007001E98F00008001E99F00009001E9AF0000A001E9B001E60001EA1001EA0001EA3001EA2001EA5001EA4001EA7001EA6001EA9001EA8001EAB001EAA001EAD001EAC001EAF001EAE001EB1001EB0001EB3001EB2001EB5001EB4001EB7001EB6001EB9001EB8001EBB001EBA001EBD001EBC001EBF001EBE001EC1001EC0001EC3001EC2001EC5001EC4001EC7001EC6001EC9001EC8001ECB001ECA001ECD001ECC001ECF001ECE001ED1001ED0001ED3001ED2001ED5001ED4001ED7001ED6001ED9001ED8001EDB001EDA001EDD001EDC001EDF001EDE001EE1001EE0001EE3001EE2001EE5001EE4001EE7001EE6001EE9001EE8001EEB001EEA001EED001EEC001EEF001EEE001EF1001EF0001EF3001EF2001EF5001EF4001EF7001EF6001EF9001EF8001EFB001EFA001EFD001EFC001EFF001EFE001F00001F08001F01001F09001F02001F0A001F03001F0B001F04001F0C001F05001F0D001F06001F0E001F07001F0F001F10001F18001F11001F19001F12001F1A001F13001F1B001F14001F1C001F15001F1D001F20001F28001F21001F29001F22001F2A001F23001F2B001F24001F2C001F25001F2D001F26001F2E001F27001F2F001F30001F38001F31001F39001F32001F3A001F33001F3B001F34001F3C001F35001F3D001F36001F3E001F37001F3F001F40001F48001F41001F49001F42001F4A001F43001F4B001F44001F4C001F45001F4D001F50F0000B001F51001F59001F52F0000C001F53001F5B001F54F0000D001F55001F5D001F56F0000E001F57001F5F001F60001F68001F61001F69001F62001F6A001F63001F6B001F64001F6C001F65001F6D001F66001F6E001F67001F6F001F70001FBA001F71001FBB001F72001FC8001F73001FC9001F74001FCA001F75001FCB001F76001FDA001F77001FDB001F78001FF8001F79001FF9001F7A001FEA001F7B001FEB001F7C001FFA001F7D001FFB001F80F0000F001F81F00010001F82F00011001F83F00012001F84F00013001F85F00014001F86F00015001F87F00016001F88F00017001F89F00018001F8AF00019001F8BF0001A001F8CF0001B001F8DF0001C001F8EF0001D001F8FF0001E001F90F0001F001F91F00020001F92F00021001F93F00022001F94F00023001F95F00024001F96F00025001F97F00026001F98F00027001F99F00028001F9AF00029001F9BF0002A001F9CF0002B001F9DF0002C001F9EF0002D001F9FF0002E001FA0F0002F001FA1F00030001FA2F00031001FA3F00032001FA4F00033001FA5F00034001FA6F00035001FA7F00036001FA8F00037001FA9F00038001FAAF00039001FABF0003A001FACF0003B001FADF0003C001FAEF0003D001FAFF0003E001FB0001FB8001FB1001FB9001FB2F0003F001FB3F00040001FB4F00041001FB6F00042001FB7F00043001FBCF00044001FBE000399001FC2F00045001FC3F00046001FC4F00047001FC6F00048001FC7F00049001FCCF0004A001FD0001FD8001FD1001FD9001FD2F0004B001FD3F0004C001FD6F0004D001FD7F0004E001FE0001FE8001FE1001FE9001FE2F0004F001FE3F00050001FE4F00051001FE5001FEC001FE6F00052001FE7F00053001FF2F00054001FF3F00055001FF4F00056001FF6F00057001FF7F00058001FFCF0005900214E00213200217000216000217100216100217200216200217300216300217400216400217500216500217600216600217700216700217800216800217900216900217A00216A00217B00216B00217C00216C00217D00216D00217E00216E00217F00216F0021840021830024D00024B60024D10024B70024D20024B80024D30024B90024D40024BA0024D50024BB0024D60024BC0024D70024BD0024D80024BE0024D90024BF0024DA0024C00024DB0024C10024DC0024C20024DD0024C30024DE0024C40024DF0024C50024E00024C60024E10024C70024E20024C80024E30024C90024E40024CA0024E50024CB0024E60024CC0024E70024CD0024E80024CE0024E90024CF002C30002C00002C31002C01002C32002C02002C33002C03002C34002C04002C35002C05002C36002C06002C37002C07002C38002C08002C39002C09002C3A002C0A002C3B002C0B002C3C002C0C002C3D002C0D002C3E002C0E002C3F002C0F002C40002C10002C41002C11002C42002C12002C43002C13002C44002C14002C45002C15002C46002C16002C47002C17002C48002C18002C49002C19002C4A002C1A002C4B002C1B002C4C002C1C002C4D002C1D002C4E002C1E002C4F002C1F002C50002C20002C51002C21002C52002C22002C53002C23002C54002C24002C55002C25002C56002C26002C57002C27002C58002C28002C59002C29002C5A002C2A002C5B002C2B002C5C002C2C002C5D002C2D002C5E002C2E002C5F002C2F002C61002C60002C6500023A002C6600023E002C68002C67002C6A002C69002C6C002C6B002C73002C72002C76002C75002C81002C80002C83002C82002C85002C84002C87002C86002C89002C88002C8B002C8A002C8D002C8C002C8F002C8E002C91002C90002C93002C92002C95002C94002C97002C96002C99002C98002C9B002C9A002C9D002C9C002C9F002C9E002CA1002CA0002CA3002CA2002CA5002CA4002CA7002CA6002CA9002CA8002CAB002CAA002CAD002CAC002CAF002CAE002CB1002CB0002CB3002CB2002CB5002CB4002CB7002CB6002CB9002CB8002CBB002CBA002CBD002CBC002CBF002CBE002CC1002CC0002CC3002CC2002CC5002CC4002CC7002CC6002CC9002CC8002CCB002CCA002CCD002CCC002CCF002CCE002CD1002CD0002CD3002CD2002CD5002CD4002CD7002CD6002CD9002CD8002CDB002CDA002CDD002CDC002CDF002CDE002CE1002CE0002CE3002CE2002CEC002CEB002CEE002CED002CF3002CF2002D000010A0002D010010A1002D020010A2002D030010A3002D040010A4002D050010A5002D060010A6002D070010A7002D080010A8002D090010A9002D0A0010AA002D0B0010AB002D0C0010AC002D0D0010AD002D0E0010AE002D0F0010AF002D100010B0002D110010B1002D120010B2002D130010B3002D140010B4002D150010B5002D160010B6002D170010B7002D180010B8002D190010B9002D1A0010BA002D1B0010BB002D1C0010BC002D1D0010BD002D1E0010BE002D1F0010BF002D200010C0002D210010C1002D220010C2002D230010C3002D240010C4002D250010C5002D270010C7002D2D0010CD00A64100A64000A64300A64200A64500A64400A64700A64600A64900A64800A64B00A64A00A64D00A64C00A64F00A64E00A65100A65000A65300A65200A65500A65400A65700A65600A65900A65800A65B00A65A00A65D00A65C00A65F00A65E00A66100A66000A66300A66200A66500A66400A66700A66600A66900A66800A66B00A66A00A66D00A66C00A68100A68000A68300A68200A68500A68400A68700A68600A68900A68800A68B00A68A00A68D00A68C00A68F00A68E00A69100A69000A69300A69200A69500A69400A69700A69600A69900A69800A69B00A69A00A72300A72200A72500A72400A72700A72600A72900A72800A72B00A72A00A72D00A72C00A72F00A72E00A73300A73200A73500A73400A73700A73600A73900A73800A73B00A73A00A73D00A73C00A73F00A73E00A74100A74000A74300A74200A74500A74400A74700A74600A74900A74800A74B00A74A00A74D00A74C00A74F00A74E00A75100A75000A75300A75200A75500A75400A75700A75600A75900A75800A75B00A75A00A75D00A75C00A75F00A75E00A76100A76000A76300A76200A76500A76400A76700A76600A76900A76800A76B00A76A00A76D00A76C00A76F00A76E00A77A00A77900A77C00A77B00A77F00A77E00A78100A78000A78300A78200A78500A78400A78700A78600A78C00A78B00A79100A79000A79300A79200A79400A7C400A79700A79600A79900A79800A79B00A79A00A79D00A79C00A79F00A79E00A7A100A7A000A7A300A7A200A7A500A7A400A7A700A7A600A7A900A7A800A7B500A7B400A7B700A7B600A7B900A7B800A7BB00A7BA00A7BD00A7BC00A7BF00A7BE00A7C100A7C000A7C300A7C200A7C800A7C700A7CA00A7C900A7CD00A7CC00A7CF00A7CE00A7D100A7D000A7D300A7D200A7D500A7D400A7D700A7D600A7D900A7D800A7DB00A7DA00A7F600A7F500AB5300A7B300AB700013A000AB710013A100AB720013A200AB730013A300AB740013A400AB750013A500AB760013A600AB770013A700AB780013A800AB790013A900AB7A0013AA00AB7B0013AB00AB7C0013AC00AB7D0013AD00AB7E0013AE00AB7F0013AF00AB800013B000AB810013B100AB820013B200AB830013B300AB840013B400AB850013B500AB860013B600AB870013B700AB880013B800AB890013B900AB8A0013BA00AB8B0013BB00AB8C0013BC00AB8D0013BD00AB8E0013BE00AB8F0013BF00AB900013C000AB910013C100AB920013C200AB930013C300AB940013C400AB950013C500AB960013C600AB970013C700AB980013C800AB990013C900AB9A0013CA00AB9B0013CB00AB9C0013CC00AB9D0013CD00AB9E0013CE00AB9F0013CF00ABA00013D000ABA10013D100ABA20013D200ABA30013D300ABA40013D400ABA50013D500ABA60013D600ABA70013D700ABA80013D800ABA90013D900ABAA0013DA00ABAB0013DB00ABAC0013DC00ABAD0013DD00ABAE0013DE00ABAF0013DF00ABB00013E000ABB10013E100ABB20013E200ABB30013E300ABB40013E400ABB50013E500ABB60013E600ABB70013E700ABB80013E800ABB90013E900ABBA0013EA00ABBB0013EB00ABBC0013EC00ABBD0013ED00ABBE0013EE00ABBF0013EF00FB00F0005A00FB01F0005B00FB02F0005C00FB03F0005D00FB04F0005E00FB05F0005F00FB06F0006000FB13F0006100FB14F0006200FB15F0006300FB16F0006400FB17F0006500FF4100FF2100FF4200FF2200FF4300FF2300FF4400FF2400FF4500FF2500FF4600FF2600FF4700FF2700FF4800FF2800FF4900FF2900FF4A00FF2A00FF4B00FF2B00FF4C00FF2C00FF4D00FF2D00FF4E00FF2E00FF4F00FF2F00FF5000FF3000FF5100FF3100FF5200FF3200FF5300FF3300FF5400FF3400FF5500FF3500FF5600FF3600FF5700FF3700FF5800FF3800FF5900FF3900FF5A00FF3A01042801040001042901040101042A01040201042B01040301042C01040401042D01040501042E01040601042F01040701043001040801043101040901043201040A01043301040B01043401040C01043501040D01043601040E01043701040F01043801041001043901041101043A01041201043B01041301043C01041401043D01041501043E01041601043F01041701044001041801044101041901044201041A01044301041B01044401041C01044501041D01044601041E01044701041F01044801042001044901042101044A01042201044B01042301044C01042401044D01042501044E01042601044F0104270104D80104B00104D90104B10104DA0104B20104DB0104B30104DC0104B40104DD0104B50104DE0104B60104DF0104B70104E00104B80104E10104B90104E20104BA0104E30104BB0104E40104BC0104E50104BD0104E60104BE0104E70104BF0104E80104C00104E90104C10104EA0104C20104EB0104C30104EC0104C40104ED0104C50104EE0104C60104EF0104C70104F00104C80104F10104C90104F20104CA0104F30104CB0104F40104CC0104F50104CD0104F60104CE0104F70104CF0104F80104D00104F90104D10104FA0104D20104FB0104D301059701057001059801057101059901057201059A01057301059B01057401059C01057501059D01057601059E01057701059F0105780105A00105790105A101057A0105A301057C0105A401057D0105A501057E0105A601057F0105A70105800105A80105810105A90105820105AA0105830105AB0105840105AC0105850105AD0105860105AE0105870105AF0105880105B00105890105B101058A0105B301058C0105B401058D0105B501058E0105B601058F0105B70105900105B80105910105B90105920105BB0105940105BC010595010CC0010C80010CC1010C81010CC2010C82010CC3010C83010CC4010C84010CC5010C85010CC6010C86010CC7010C87010CC8010C88010CC9010C89010CCA010C8A010CCB010C8B010CCC010C8C010CCD010C8D010CCE010C8E010CCF010C8F010CD0010C90010CD1010C91010CD2010C92010CD3010C93010CD4010C94010CD5010C95010CD6010C96010CD7010C97010CD8010C98010CD9010C99010CDA010C9A010CDB010C9B010CDC010C9C010CDD010C9D010CDE010C9E010CDF010C9F010CE0010CA0010CE1010CA1010CE2010CA2010CE3010CA3010CE4010CA4010CE5010CA5010CE6010CA6010CE7010CA7010CE8010CA8010CE9010CA9010CEA010CAA010CEB010CAB010CEC010CAC010CED010CAD010CEE010CAE010CEF010CAF010CF0010CB0010CF1010CB1010CF2010CB2010D70010D50010D71010D51010D72010D52010D73010D53010D74010D54010D75010D55010D76010D56010D77010D57010D78010D58010D79010D59010D7A010D5A010D7B010D5B010D7C010D5C010D7D010D5D010D7E010D5E010D7F010D5F010D80010D60010D81010D61010D82010D62010D83010D63010D84010D64010D85010D650118C00118A00118C10118A10118C20118A20118C30118A30118C40118A40118C50118A50118C60118A60118C70118A70118C80118A80118C90118A90118CA0118AA0118CB0118AB0118CC0118AC0118CD0118AD0118CE0118AE0118CF0118AF0118D00118B00118D10118B10118D20118B20118D30118B30118D40118B40118D50118B50118D60118B60118D70118B70118D80118B80118D90118B90118DA0118BA0118DB0118BB0118DC0118BC0118DD0118BD0118DE0118BE0118DF0118BF016E60016E40016E61016E41016E62016E42016E63016E43016E64016E44016E65016E45016E66016E46016E67016E47016E68016E48016E69016E49016E6A016E4A016E6B016E4B016E6C016E4C016E6D016E4D016E6E016E4E016E6F016E4F016E70016E50016E71016E51016E72016E52016E73016E53016E74016E54016E75016E55016E76016E56016E77016E57016E78016E58016E79016E59016E7A016E5A016E7B016E5B016E7C016E5C016E7D016E5D016E7E016E5E016E7F016E5F016EBB016EA0016EBC016EA1016EBD016EA2016EBE016EA3016EBF016EA4016EC0016EA5016EC1016EA6016EC2016EA7016EC3016EA8016EC4016EA9016EC5016EAA016EC6016EAB016EC7016EAC016EC8016EAD016EC9016EAE016ECA016EAF016ECB016EB0016ECC016EB1016ECD016EB2016ECE016EB3016ECF016EB4016ED0016EB5016ED1016EB6016ED2016EB7016ED3016EB801E92201E90001E92301E90101E92401E90201E92501E90301E92601E90401E92701E90501E92801E90601E92901E90701E92A01E90801E92B01E90901E92C01E90A01E92D01E90B01E92E01E90C01E92F01E90D01E93001E90E01E93101E90F01E93201E91001E93301E91101E93401E91201E93501E91301E93601E91401E93701E91501E93801E91601E93901E91701E93A01E91801E93B01E91901E93C01E91A01E93D01E91B01E93E01E91C01E93F01E91D01E94001E91E01E94101E91F01E94201E92001E94301E921"
@@ -34644,7 +34992,8 @@ fn testing_assert_gt(a: Int, b: Int) -> Unit = if a > b then () else prim.die(pr
 
 fn testing_assert_lt(a: Int, b: Int) -> Unit = if a < b then () else prim.die(prim.handle("assert_lt failed\n"))
 
-fn testing_assert_approx(a: Float, b: Float, epsilon: Float) -> Unit = if float.abs(a - b) < epsilon then () else prim.die(prim.handle("assert_approx failed\n"))
+fn testing_assert_approx(a: Float, b: Float, epsilon: Float) -> Unit =
+  if float.abs(a - b) < epsilon then () else prim.die(prim.handle("assert_approx failed\n"))
 
 fn testing_assert_contains(haystack: String, needle: String) -> Unit = if string.contains(
   haystack,
@@ -35040,64 +35389,81 @@ fn to_uint32(x: UInt64) -> UInt32 = int.to_uint32(int.from_uint64(x))
 
 
 /// Float32 value; may round when x > 2^24.
-fn to_float32(x: UInt64) -> Float32 = if int.from_uint64(x) >= 0 then int.to_float32(int.from_uint64(x))
-else {
-  let hf = int.to_float(int.from_uint64(x / 2))
-  float.to_float32(hf + hf + int.to_float(int.from_uint64(x % 2)))
-}
+fn to_float32(x: UInt64) -> Float32 =
+  if int.from_uint64(x) >= 0 then int.to_float32(int.from_uint64(x))
+  else {
+    let hf = int.to_float(int.from_uint64(x / 2))
+    float.to_float32(hf + hf + int.to_float(int.from_uint64(x % 2)))
+  }
 
 /// Float64 value; may round when x > 2^53.
-fn to_float64(x: UInt64) -> Float64 = if int.from_uint64(x) >= 0 then int.to_float64(int.from_uint64(x))
-else {
-  let hf = int.to_float(int.from_uint64(x / 2))
-  float.to_float64(hf + hf + int.to_float(int.from_uint64(x % 2)))
-}
+fn to_float64(x: UInt64) -> Float64 =
+  if int.from_uint64(x) >= 0 then int.to_float64(int.from_uint64(x))
+  else {
+    let hf = int.to_float(int.from_uint64(x / 2))
+    float.to_float64(hf + hf + int.to_float(int.from_uint64(x % 2)))
+  }
 
 /// Decimal digits, no sign; exact up to 2^64-1.
-fn to_string(x: UInt64) -> String = if int.from_uint64(x) >= 0 then int.to_string(int.from_uint64(x)) else int.to_string(int.from_uint64(x / 10)) + int.to_string(int.from_uint64(x % 10))
+fn to_string(x: UInt64) -> String =
+  if int.from_uint64(x) >= 0 then int.to_string(int.from_uint64(x)) else int.to_string(int.from_uint64(x / 10)) + int.to_string(int.from_uint64(x % 10))
 
 
 /// some(x), or none if x exceeds 127.
-fn to_int8_checked(x: UInt64) -> Int8? = if int.from_uint64(x) >= 0 then int.to_int8_checked(int.from_uint64(x)) else none
+fn to_int8_checked(x: UInt64) -> Int8? =
+  if int.from_uint64(x) >= 0 then int.to_int8_checked(int.from_uint64(x)) else none
 
 /// Clamps x to at most 127.
-fn to_int8_saturating(x: UInt64) -> Int8 = if int.from_uint64(x) >= 0 then int.to_int8_saturating(int.from_uint64(x)) else int.to_int8(127)
+fn to_int8_saturating(x: UInt64) -> Int8 =
+  if int.from_uint64(x) >= 0 then int.to_int8_saturating(int.from_uint64(x)) else int.to_int8(127)
 
 /// some(x), or none if x exceeds 32767.
-fn to_int16_checked(x: UInt64) -> Int16? = if int.from_uint64(x) >= 0 then int.to_int16_checked(int.from_uint64(x)) else none
+fn to_int16_checked(x: UInt64) -> Int16? =
+  if int.from_uint64(x) >= 0 then int.to_int16_checked(int.from_uint64(x)) else none
 
 /// Clamps x to at most 32767.
-fn to_int16_saturating(x: UInt64) -> Int16 = if int.from_uint64(x) >= 0 then int.to_int16_saturating(int.from_uint64(x)) else int.to_int16(32767)
+fn to_int16_saturating(x: UInt64) -> Int16 =
+  if int.from_uint64(x) >= 0 then int.to_int16_saturating(int.from_uint64(x)) else int.to_int16(32767)
 
 /// some(x), or none if x exceeds 2^31-1.
-fn to_int32_checked(x: UInt64) -> Int32? = if int.from_uint64(x) >= 0 then int.to_int32_checked(int.from_uint64(x)) else none
+fn to_int32_checked(x: UInt64) -> Int32? =
+  if int.from_uint64(x) >= 0 then int.to_int32_checked(int.from_uint64(x)) else none
 
 /// Clamps x to at most 2^31-1.
-fn to_int32_saturating(x: UInt64) -> Int32 = if int.from_uint64(x) >= 0 then int.to_int32_saturating(int.from_uint64(x)) else int.to_int32(2147483647)
+fn to_int32_saturating(x: UInt64) -> Int32 =
+  if int.from_uint64(x) >= 0 then int.to_int32_saturating(int.from_uint64(x)) else int.to_int32(2147483647)
 
 /// some(x), or none if x exceeds 2^63-1.
-fn to_int64_checked(x: UInt64) -> Int64? = if int.from_uint64(x) >= 0 then some(int.to_int64(int.from_uint64(x))) else none
+fn to_int64_checked(x: UInt64) -> Int64? =
+  if int.from_uint64(x) >= 0 then some(int.to_int64(int.from_uint64(x))) else none
 
 /// Clamps x to at most 2^63-1.
-fn to_int64_saturating(x: UInt64) -> Int64 = if int.from_uint64(x) >= 0 then int.to_int64(int.from_uint64(x)) else int.to_int64(9223372036854775807)
+fn to_int64_saturating(x: UInt64) -> Int64 =
+  if int.from_uint64(x) >= 0 then int.to_int64(int.from_uint64(x)) else int.to_int64(9223372036854775807)
 
 /// some(x), or none if x exceeds 255.
-fn to_uint8_checked(x: UInt64) -> UInt8? = if int.from_uint64(x) >= 0 then int.to_uint8_checked(int.from_uint64(x)) else none
+fn to_uint8_checked(x: UInt64) -> UInt8? =
+  if int.from_uint64(x) >= 0 then int.to_uint8_checked(int.from_uint64(x)) else none
 
 /// Clamps x to at most 255.
-fn to_uint8_saturating(x: UInt64) -> UInt8 = if int.from_uint64(x) >= 0 then int.to_uint8_saturating(int.from_uint64(x)) else int.to_uint8(255)
+fn to_uint8_saturating(x: UInt64) -> UInt8 =
+  if int.from_uint64(x) >= 0 then int.to_uint8_saturating(int.from_uint64(x)) else int.to_uint8(255)
 
 /// some(x), or none if x exceeds 65535.
-fn to_uint16_checked(x: UInt64) -> UInt16? = if int.from_uint64(x) >= 0 then int.to_uint16_checked(int.from_uint64(x)) else none
+fn to_uint16_checked(x: UInt64) -> UInt16? =
+  if int.from_uint64(x) >= 0 then int.to_uint16_checked(int.from_uint64(x)) else none
 
 /// Clamps x to at most 65535.
-fn to_uint16_saturating(x: UInt64) -> UInt16 = if int.from_uint64(x) >= 0 then int.to_uint16_saturating(int.from_uint64(x)) else int.to_uint16(65535)
+fn to_uint16_saturating(x: UInt64) -> UInt16 =
+  if int.from_uint64(x) >= 0 then int.to_uint16_saturating(int.from_uint64(x)) else int.to_uint16(65535)
 
 /// some(x), or none if x exceeds 2^32-1.
-fn to_uint32_checked(x: UInt64) -> UInt32? = if int.from_uint64(x) >= 0 then int.to_uint32_checked(int.from_uint64(x)) else none
+fn to_uint32_checked(x: UInt64) -> UInt32? =
+  if int.from_uint64(x) >= 0 then int.to_uint32_checked(int.from_uint64(x)) else none
 
 /// Clamps x to at most 2^32-1.
-fn to_uint32_saturating(x: UInt64) -> UInt32 = if int.from_uint64(x) >= 0 then int.to_uint32_saturating(int.from_uint64(x)) else int.to_uint32(4294967295)
+fn to_uint32_saturating(x: UInt64) -> UInt32 =
+  if int.from_uint64(x) >= 0 then int.to_uint32_saturating(int.from_uint64(x)) else int.to_uint32(4294967295)
 
 
 /// Smallest UInt64: 0.
@@ -35457,12 +35823,13 @@ fn __url_hex2(a: String, b: String) -> Int? = match (__url_hex_val(a), __url_hex
 
 
 
-fn __url_pct_end(cs: List[String], i: Int, n: Int) -> Int = if i >= n or (list.get(cs, i) ?? "") != "%" then i
-else if i + 3 > n then 0 - 1
-else match __url_hex2(list.get(cs, i + 1) ?? "", list.get(cs, i + 2) ?? "") {
-  some(_) => __url_pct_end(cs, i + 3, n),
-  none => 0 - 2,
-}
+fn __url_pct_end(cs: List[String], i: Int, n: Int) -> Int =
+  if i >= n or (list.get(cs, i) ?? "") != "%" then i
+  else if i + 3 > n then 0 - 1
+  else match __url_hex2(list.get(cs, i + 1) ?? "", list.get(cs, i + 2) ?? "") {
+    some(_) => __url_pct_end(cs, i + 3, n),
+    none => 0 - 2,
+  }
 
 
 fn __url_pbyte(cs: List[String], p: Int) -> Int = match __url_hex2(
@@ -35480,60 +35847,62 @@ fn __url_cont(b: Int) -> Bool = b >= 128 and b <= 191
 
 
 
-fn __url_utf8_go(cs: List[String], p: Int, end: Int, acc: String) -> Result[String, String] = if p >= end then ok(acc)
-else {
-  let b0 = __url_pbyte(cs, p)
-  if b0 >= 0 and b0 < 128 then __url_utf8_go(cs, p + 3, end, acc + string.from_codepoint(b0))
-  else if b0 >= 194 and b0 <= 223 then {
-    let b1 = __url_pbyte(cs, p + 3)
-    if p + 6 <= end and __url_cont(b1) then __url_utf8_go(
-      cs,
-      p + 6,
-      end,
-      acc + string.from_codepoint((b0 - 192) * 64 + (b1 - 128)),
-    )
-    else err("url.decode_component: invalid UTF-8 in percent data")
-  } else if b0 >= 224 and b0 <= 239 then {
-    let b1 = __url_pbyte(cs, p + 3)
-    let b2 = __url_pbyte(cs, p + 6)
-    let lo1 = if b0 == 224 then 160 else 128
-    let hi1 = if b0 == 237 then 159 else 191
-    if p + 9 <= end and b1 >= lo1 and b1 <= hi1 and __url_cont(b2) then __url_utf8_go(
-      cs,
-      p + 9,
-      end,
-      acc + string.from_codepoint((b0 - 224) * 4096 + (b1 - 128) * 64 + (b2 - 128)),
-    )
-    else err("url.decode_component: invalid UTF-8 in percent data")
-  } else if b0 >= 240 and b0 <= 244 then {
-    let b1 = __url_pbyte(cs, p + 3)
-    let b2 = __url_pbyte(cs, p + 6)
-    let b3 = __url_pbyte(cs, p + 9)
-    let lo1 = if b0 == 240 then 144 else 128
-    let hi1 = if b0 == 244 then 143 else 191
-    if p + 12 <= end and b1 >= lo1 and b1 <= hi1 and __url_cont(b2) and __url_cont(b3) then __url_utf8_go(
-      cs,
-      p + 12,
-      end,
-      acc + string.from_codepoint((b0 - 240) * 262144 + (b1 - 128) * 4096 + (b2 - 128) * 64 + (b3 - 128)),
-    )
-    else err("url.decode_component: invalid UTF-8 in percent data")
-  } else err("url.decode_component: invalid UTF-8 in percent data")
-}
+fn __url_utf8_go(cs: List[String], p: Int, end: Int, acc: String) -> Result[String, String] =
+  if p >= end then ok(acc)
+  else {
+    let b0 = __url_pbyte(cs, p)
+    if b0 >= 0 and b0 < 128 then __url_utf8_go(cs, p + 3, end, acc + string.from_codepoint(b0))
+    else if b0 >= 194 and b0 <= 223 then {
+      let b1 = __url_pbyte(cs, p + 3)
+      if p + 6 <= end and __url_cont(b1) then __url_utf8_go(
+        cs,
+        p + 6,
+        end,
+        acc + string.from_codepoint((b0 - 192) * 64 + (b1 - 128)),
+      )
+      else err("url.decode_component: invalid UTF-8 in percent data")
+    } else if b0 >= 224 and b0 <= 239 then {
+      let b1 = __url_pbyte(cs, p + 3)
+      let b2 = __url_pbyte(cs, p + 6)
+      let lo1 = if b0 == 224 then 160 else 128
+      let hi1 = if b0 == 237 then 159 else 191
+      if p + 9 <= end and b1 >= lo1 and b1 <= hi1 and __url_cont(b2) then __url_utf8_go(
+        cs,
+        p + 9,
+        end,
+        acc + string.from_codepoint((b0 - 224) * 4096 + (b1 - 128) * 64 + (b2 - 128)),
+      )
+      else err("url.decode_component: invalid UTF-8 in percent data")
+    } else if b0 >= 240 and b0 <= 244 then {
+      let b1 = __url_pbyte(cs, p + 3)
+      let b2 = __url_pbyte(cs, p + 6)
+      let b3 = __url_pbyte(cs, p + 9)
+      let lo1 = if b0 == 240 then 144 else 128
+      let hi1 = if b0 == 244 then 143 else 191
+      if p + 12 <= end and b1 >= lo1 and b1 <= hi1 and __url_cont(b2) and __url_cont(b3) then __url_utf8_go(
+        cs,
+        p + 12,
+        end,
+        acc + string.from_codepoint((b0 - 240) * 262144 + (b1 - 128) * 4096 + (b2 - 128) * 64 + (b3 - 128)),
+      )
+      else err("url.decode_component: invalid UTF-8 in percent data")
+    } else err("url.decode_component: invalid UTF-8 in percent data")
+  }
 
-fn __url_dec_go(cs: List[String], i: Int, n: Int, acc: String) -> Result[String, String] = if i >= n then ok(acc)
-else {
-  let c = list.get(cs, i) ?? ""
-  if c == "%" then {
-    let e = __url_pct_end(cs, i, n)
-    if e == 0 - 1 then err("url.decode_component: truncated percent escape")
-    else if e == 0 - 2 then err("url.decode_component: invalid percent escape")
-    else match __url_utf8_go(cs, i, e, "") {
-      ok(dec) => __url_dec_go(cs, e, n, acc + dec),
-      err(er) => err(er),
-    }
-  } else __url_dec_go(cs, i + 1, n, acc + c)
-}
+fn __url_dec_go(cs: List[String], i: Int, n: Int, acc: String) -> Result[String, String] =
+  if i >= n then ok(acc)
+  else {
+    let c = list.get(cs, i) ?? ""
+    if c == "%" then {
+      let e = __url_pct_end(cs, i, n)
+      if e == 0 - 1 then err("url.decode_component: truncated percent escape")
+      else if e == 0 - 2 then err("url.decode_component: invalid percent escape")
+      else match __url_utf8_go(cs, i, e, "") {
+        ok(dec) => __url_dec_go(cs, e, n, acc + dec),
+        err(er) => err(er),
+      }
+    } else __url_dec_go(cs, i + 1, n, acc + c)
+  }
 
 
 
@@ -36349,17 +36718,18 @@ fn list_insert_value(xs: List[Value], i: Int, x: Value) -> List[Value] = {
   buf
 }
 
-fn __lsv_remove_fill(srcbase: Int, dstbase: Int, n: Int, i: Int, oob: Int) -> Int = if oob == 1 then __lsv_copy(
-  srcbase,
-  dstbase,
-  n,
-  0,
-)
-else {
-  let _a = __lsv_copy(srcbase, dstbase, i, 0)
-  let i1 = i + 1
-  __lsv_copy(srcbase + i1 * 8, dstbase + i * 8, n - i1, 0)
-}
+fn __lsv_remove_fill(srcbase: Int, dstbase: Int, n: Int, i: Int, oob: Int) -> Int =
+  if oob == 1 then __lsv_copy(
+    srcbase,
+    dstbase,
+    n,
+    0,
+  )
+  else {
+    let _a = __lsv_copy(srcbase, dstbase, i, 0)
+    let i1 = i + 1
+    __lsv_copy(srcbase + i1 * 8, dstbase + i * 8, n - i1, 0)
+  }
 
 fn list_remove_at_value(xs: List[Value], i: Int) -> List[Value] = {
   let h = prim.handle(xs)
@@ -36443,45 +36813,48 @@ fn list_tail_value(xs: List[Value]) -> List[Value] = {
   buf
 }
 
-fn __vmerge_bnew(a: Value, b: Value, j: Int, nb: Int, na: Int, acc: Int) -> Int = if j >= nb then acc
-else {
-  let bh = prim.handle(b)
-  let bk: String = prim.load_handle(bh + 12 + (2 * j) * 8)
-  let inc = if __vobj_find(a, bk, 0, na) < 0 and __vobj_find(b, bk, 0, j) < 0 then 1 else 0
-  __vmerge_bnew(a, b, j + 1, nb, na, acc + inc)
-}
+fn __vmerge_bnew(a: Value, b: Value, j: Int, nb: Int, na: Int, acc: Int) -> Int =
+  if j >= nb then acc
+  else {
+    let bh = prim.handle(b)
+    let bk: String = prim.load_handle(bh + 12 + (2 * j) * 8)
+    let inc = if __vobj_find(a, bk, 0, na) < 0 and __vobj_find(b, bk, 0, j) < 0 then 1 else 0
+    __vmerge_bnew(a, b, j + 1, nb, na, acc + inc)
+  }
 
-fn __vmerge_fill_a(a: Value, b: Value, dst: Value, i: Int, na: Int, nb: Int) -> Unit = if i >= na then ()
-else {
-  let ah = prim.handle(a)
-  let dh = prim.handle(dst)
-  let key = prim.load64(ah + 12 + (2 * i) * 8)
-  let ak: String = prim.load_handle(ah + 12 + (2 * i) * 8)
-  let bidx = if __vobj_find(a, ak, 0, i) < 0 then __vobj_find_last(b, ak, nb)
-  else 0 - 1
-  let val = if bidx < 0 then prim.load64(ah + 12 + (2 * i + 1) * 8) else prim.load64(prim.handle(b) + 12 + (2 * bidx + 1) * 8)
-  prim.rc_inc(key)
-  prim.rc_inc(val)
-  prim.store64(dh + 12 + (2 * i) * 8, key)
-  prim.store64(dh + 12 + (2 * i + 1) * 8, val)
-  __vmerge_fill_a(a, b, dst, i + 1, na, nb)
-}
-
-fn __vmerge_app_b(a: Value, b: Value, dst: Value, j: Int, nb: Int, na: Int, w: Int) -> Unit = if j >= nb then ()
-else {
-  let bh = prim.handle(b)
-  let bk: String = prim.load_handle(bh + 12 + (2 * j) * 8)
-  if __vobj_find(a, bk, 0, na) < 0 and __vobj_find(b, bk, 0, j) < 0 then {
+fn __vmerge_fill_a(a: Value, b: Value, dst: Value, i: Int, na: Int, nb: Int) -> Unit =
+  if i >= na then ()
+  else {
+    let ah = prim.handle(a)
     let dh = prim.handle(dst)
-    let kh = prim.load64(bh + 12 + (2 * j) * 8)
-    let vh = prim.load64(bh + 12 + (2 * __vobj_find_last(b, bk, nb) + 1) * 8)
-    prim.rc_inc(kh)
-    prim.rc_inc(vh)
-    prim.store64(dh + 12 + (2 * w) * 8, kh)
-    prim.store64(dh + 12 + (2 * w + 1) * 8, vh)
-    __vmerge_app_b(a, b, dst, j + 1, nb, na, w + 1)
-  } else __vmerge_app_b(a, b, dst, j + 1, nb, na, w)
-}
+    let key = prim.load64(ah + 12 + (2 * i) * 8)
+    let ak: String = prim.load_handle(ah + 12 + (2 * i) * 8)
+    let bidx = if __vobj_find(a, ak, 0, i) < 0 then __vobj_find_last(b, ak, nb)
+    else 0 - 1
+    let val = if bidx < 0 then prim.load64(ah + 12 + (2 * i + 1) * 8) else prim.load64(prim.handle(b) + 12 + (2 * bidx + 1) * 8)
+    prim.rc_inc(key)
+    prim.rc_inc(val)
+    prim.store64(dh + 12 + (2 * i) * 8, key)
+    prim.store64(dh + 12 + (2 * i + 1) * 8, val)
+    __vmerge_fill_a(a, b, dst, i + 1, na, nb)
+  }
+
+fn __vmerge_app_b(a: Value, b: Value, dst: Value, j: Int, nb: Int, na: Int, w: Int) -> Unit =
+  if j >= nb then ()
+  else {
+    let bh = prim.handle(b)
+    let bk: String = prim.load_handle(bh + 12 + (2 * j) * 8)
+    if __vobj_find(a, bk, 0, na) < 0 and __vobj_find(b, bk, 0, j) < 0 then {
+      let dh = prim.handle(dst)
+      let kh = prim.load64(bh + 12 + (2 * j) * 8)
+      let vh = prim.load64(bh + 12 + (2 * __vobj_find_last(b, bk, nb) + 1) * 8)
+      prim.rc_inc(kh)
+      prim.rc_inc(vh)
+      prim.store64(dh + 12 + (2 * w) * 8, kh)
+      prim.store64(dh + 12 + (2 * w + 1) * 8, vh)
+      __vmerge_app_b(a, b, dst, j + 1, nb, na, w + 1)
+    } else __vmerge_app_b(a, b, dst, j + 1, nb, na, w)
+  }
 
 fn value_merge(a: Value, b: Value) -> Value = {
   let ah = prim.handle(a)
@@ -36997,13 +37370,14 @@ fn map_entries_str(m: Map[String, String]) -> List[(String, String)] = __ment_bu
 
 
 
-fn __ment_build(m: Map[String, String], n: Int, i: Int, acc: List[(String, String)]) -> List[(String, String)] = if i >= n then acc
-else {
-  let h = prim.handle(m)
-  let k: String = prim.load_str(h + 12 + i * 16)
-  let v: String = prim.load_str(h + 12 + i * 16 + 8)
-  __ment_build(m, n, i + 1, acc + [(k, v)])
-}
+fn __ment_build(m: Map[String, String], n: Int, i: Int, acc: List[(String, String)]) -> List[(String, String)] =
+  if i >= n then acc
+  else {
+    let h = prim.handle(m)
+    let k: String = prim.load_str(h + 12 + i * 16)
+    let v: String = prim.load_str(h + 12 + i * 16 + 8)
+    __ment_build(m, n, i + 1, acc + [(k, v)])
+  }
 
 fn __vfill(v: Value, dst: List[Value], i: Int, n: Int) -> Unit = if i >= n then ()
 else {
@@ -37189,31 +37563,33 @@ else {
 }
 
 
-fn __vu_count(v: Value, keys: List[String], want: Bool, i: Int, n: Int, nk: Int, acc: Int) -> Int = if i >= n then acc
-else {
-  let k: String = prim.load_handle(prim.handle(v) + 12 + (2 * i) * 8)
-  let hit = __vu_has(keys, k, 0, nk)
-  if hit == want then __vu_count(v, keys, want, i + 1, n, nk, acc + 1)
-  else __vu_count(v, keys, want, i + 1, n, nk, acc)
-}
+fn __vu_count(v: Value, keys: List[String], want: Bool, i: Int, n: Int, nk: Int, acc: Int) -> Int =
+  if i >= n then acc
+  else {
+    let k: String = prim.load_handle(prim.handle(v) + 12 + (2 * i) * 8)
+    let hit = __vu_has(keys, k, 0, nk)
+    if hit == want then __vu_count(v, keys, want, i + 1, n, nk, acc + 1)
+    else __vu_count(v, keys, want, i + 1, n, nk, acc)
+  }
 
 
-fn __vu_fill(v: Value, keys: List[String], dst: Value, want: Bool, i: Int, n: Int, nk: Int, w: Int) -> Int = if i >= n then w
-else {
-  let h = prim.handle(v)
-  let k: String = prim.load_handle(h + 12 + (2 * i) * 8)
-  let hit = __vu_has(keys, k, 0, nk)
-  if hit == want then {
-    let dh = prim.handle(dst)
-    let kh = prim.load64(h + 12 + (2 * i) * 8)
-    let vh = prim.load64(h + 12 + (2 * i + 1) * 8)
-    prim.rc_inc(kh)
-    prim.rc_inc(vh)
-    prim.store64(dh + 12 + (2 * w) * 8, kh)
-    prim.store64(dh + 12 + (2 * w + 1) * 8, vh)
-    __vu_fill(v, keys, dst, want, i + 1, n, nk, w + 1)
-  } else __vu_fill(v, keys, dst, want, i + 1, n, nk, w)
-}
+fn __vu_fill(v: Value, keys: List[String], dst: Value, want: Bool, i: Int, n: Int, nk: Int, w: Int) -> Int =
+  if i >= n then w
+  else {
+    let h = prim.handle(v)
+    let k: String = prim.load_handle(h + 12 + (2 * i) * 8)
+    let hit = __vu_has(keys, k, 0, nk)
+    if hit == want then {
+      let dh = prim.handle(dst)
+      let kh = prim.load64(h + 12 + (2 * i) * 8)
+      let vh = prim.load64(h + 12 + (2 * i + 1) * 8)
+      prim.rc_inc(kh)
+      prim.rc_inc(vh)
+      prim.store64(dh + 12 + (2 * w) * 8, kh)
+      prim.store64(dh + 12 + (2 * w + 1) * 8, vh)
+      __vu_fill(v, keys, dst, want, i + 1, n, nk, w + 1)
+    } else __vu_fill(v, keys, dst, want, i + 1, n, nk, w)
+  }
 
 fn __vu_sel(v: Value, keys: List[String], want: Bool) -> Value = {
   let h = prim.handle(v)
@@ -37228,19 +37604,21 @@ fn __vu_sel(v: Value, keys: List[String], want: Bool) -> Value = {
   dst
 }
 
-fn value_pick(v: Value, keys: List[String]) -> Value = if prim.load32(prim.handle(v) + 4) == 6 then __vu_sel(
-  v,
-  keys,
-  true,
-)
-else v
+fn value_pick(v: Value, keys: List[String]) -> Value =
+  if prim.load32(prim.handle(v) + 4) == 6 then __vu_sel(
+    v,
+    keys,
+    true,
+  )
+  else v
 
-fn value_omit(v: Value, keys: List[String]) -> Value = if prim.load32(prim.handle(v) + 4) == 6 then __vu_sel(
-  v,
-  keys,
-  false,
-)
-else v
+fn value_omit(v: Value, keys: List[String]) -> Value =
+  if prim.load32(prim.handle(v) + 4) == 6 then __vu_sel(
+    v,
+    keys,
+    false,
+  )
+  else v
 
 
 
@@ -37343,9 +37721,11 @@ fn __vu_ren_s(v: Value) -> Value = {
   dst
 }
 
-fn value_to_camel_case(v: Value) -> Value = if prim.load32(prim.handle(v) + 4) == 6 then __vu_ren_c(v) else v
+fn value_to_camel_case(v: Value) -> Value =
+  if prim.load32(prim.handle(v) + 4) == 6 then __vu_ren_c(v) else v
 
-fn value_to_snake_case(v: Value) -> Value = if prim.load32(prim.handle(v) + 4) == 6 then __vu_ren_s(v) else v
+fn value_to_snake_case(v: Value) -> Value =
+  if prim.load32(prim.handle(v) + 4) == 6 then __vu_ren_s(v) else v
 "#;
 pub const SRC_ZLIB: &str = r#"
 
