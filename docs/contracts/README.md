@@ -411,4 +411,5 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-373 | var destructures with the let patterns and every bound name is mutable, identically on both targets | 0.67.0 | active | fixture | 1 |
 | C-374 | process on the embedded wasm host answers what native answers; a stand-alone artifact that starts a child carries the private almide:process/spawn import and is refused at load where it is not defined | 0.67.0 | active | fixture | 0 |
 | C-375 | a serve-shaped program built for stock wasm is a wasi:http/handler@0.3.0 export that wasmtime serve runs with no flags and that answers what native answers | 0.67.0 | active | fixture | 0 |
+| C-376 | A raw address taken from a Bytes block stays valid until the call it is handed to returns | 0.67.0 | active | fixture | 1 |
 
