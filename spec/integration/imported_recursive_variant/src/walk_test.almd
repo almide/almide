@@ -1,0 +1,83 @@
+// #3422: the test file is the entry; every match below is on a type it
+// imports. The native lane bound `l` as `Box<T>` and rustc refused `cur = l`.
+import self.tree
+import self.tree.{T, Leaf, Node, R, RLeaf, Many}
+
+fn leftmost(t: T) -> String = {
+  var cur = t
+  var going = true
+  var out = ""
+  while going {
+    match cur {
+      Node(l, _) => {
+        cur = l
+      },
+      Leaf(s) => {
+        out = s
+        going = false
+      },
+    }
+  }
+  out
+}
+
+fn rightmost(t: tree.T) -> String = {
+  var cur = t
+  var going = true
+  var out = ""
+  while going {
+    match cur {
+      tree.Node(_, r) => {
+        cur = r
+      },
+      tree.Leaf(s) => {
+        out = s
+        going = false
+      },
+    }
+  }
+  out
+}
+
+fn left(t: T) -> T = match t {
+  Node(l, _) => l,
+  Leaf(_) => t,
+}
+
+fn first_child(r: R) -> R = {
+  var cur = r
+  match cur {
+    Many(xs) => {
+      cur = list.first(xs) ?? RLeaf(0)
+    },
+    RLeaf(_) => {
+      cur = cur
+    },
+  }
+  cur
+}
+
+fn sum(r: R) -> Int = match r {
+  RLeaf(n) => n,
+  Many(xs) => xs |> list.fold(0, (a, x) => a + sum(x)),
+}
+
+test "selective import, statement-position match" {
+  assert_eq(leftmost(Node(Node(Leaf("a"), Leaf("b")), Leaf("c"))), "a")
+}
+
+test "qualified constructors" {
+  assert_eq(rightmost(tree.Node(tree.Leaf("a"), tree.Node(tree.Leaf("b"), tree.Leaf("c")))), "c")
+}
+
+test "expression-position match" {
+  assert_eq(leftmost(left(Node(Leaf("q"), Leaf("r")))), "q")
+}
+
+test "payload through a list" {
+  assert_eq(sum(Many([
+    RLeaf(1),
+    Many([RLeaf(2), RLeaf(3)])
+  ])), 6)
+  assert_eq(sum(first_child(Many([RLeaf(4), RLeaf(5)]))), 4)
+}
