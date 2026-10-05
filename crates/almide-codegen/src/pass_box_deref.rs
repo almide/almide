@@ -212,9 +212,16 @@ pub fn collect_deref_vars(program: &IrProgram) -> (HashSet<VarId>, HashSet<Strin
         program.type_decls.iter().chain(program.modules.iter().flat_map(|m| m.type_decls.iter()))
     );
 
-    // Step 2: Walk all match expressions and find Bind vars in recursive positions
+    // Step 2: Walk all match expressions and find Bind vars in recursive positions.
+    // The entry program's constructors resolve against its OWN decls first and
+    // then every module's — a match on a type imported from a module (the
+    // entry of `almide test` / `almide run`, #3422) must find that module's
+    // decl, exactly as a module function's match does in Step 2 of `run`.
+    let all_type_decls: Vec<IrTypeDecl> = program.type_decls.iter()
+        .chain(program.modules.iter().flat_map(|m| m.type_decls.iter()))
+        .cloned().collect();
     for func in &program.functions {
-        collect_from_expr(&func.body, &recursive_enums, &program.type_decls, &name_to_var, &mut deref_vars);
+        collect_from_expr(&func.body, &recursive_enums, &all_type_decls, &name_to_var, &mut deref_vars);
     }
 
     (deref_vars, recursive_enums)
