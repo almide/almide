@@ -114,27 +114,65 @@ fn base_reads(fields: &[(almide_base::intern::Sym, IrExpr)], b: VarId) -> Option
     (!r.bad).then_some(r.seen)
 }
 
-/// The address of every `b.f` node of the field values (the slot-take
-/// key, node_marks.rs).
+/// The address of every `b.f` node of the field values that sits in an
+/// OWNING position (the slot-take key, node_marks.rs).
+///
+/// A moved slot is an owned value, so its consumer must spend the credit.
+/// Only some consumers do: the field's own store, a call argument (lowered
+/// under the mode its arm or callee declares, which releases an owned
+/// argument it only read), a `let` value (the bind owns it), and the arms
+/// and tail of a conditional or block in such a position (normalized to one
+/// credit). Every other consumer — a binary op (`b.f + [x]`), an
+/// interpolation, an index, a match subject, the object of a further field
+/// read (`b.f.g`) — READS its operand and never releases it: arg_temps.rs
+/// binds such operands at the IR level, before the emitter decides a read
+/// is a take, so a take there left the old slot's block live forever
+/// (#3441: `sc = { ...sc, funs: sc.funs + [e] }` leaked one list per
+/// rebuild). A read outside an owning position shares as before.
 fn member_reads(fields: &[(almide_base::intern::Sym, IrExpr)], b: VarId, f: almide_base::intern::Sym) -> Vec<usize> {
     struct Find {
         b: VarId,
         f: almide_base::intern::Sym,
+        owning: std::collections::HashSet<usize>,
         out: Vec<usize>,
+    }
+    fn key(e: &IrExpr) -> usize {
+        e as *const IrExpr as usize
     }
     impl IrVisitor for Find {
         fn visit_expr(&mut self, e: &IrExpr) {
+            let owning = self.owning.contains(&key(e));
             match &e.kind {
                 IrExprKind::Member { object, field }
                     if *field == self.f && matches!(&object.kind, IrExprKind::Var { id } if *id == self.b) =>
                 {
-                    self.out.push(e as *const IrExpr as usize);
+                    if owning {
+                        self.out.push(key(e));
+                    }
+                    return;
                 }
-                _ => walk_expr(self, e),
+                IrExprKind::Call {
+                    target: almide_ir::CallTarget::Named { .. } | almide_ir::CallTarget::Module { .. },
+                    args,
+                    ..
+                } => self.owning.extend(args.iter().map(key)),
+                IrExprKind::If { then, else_, .. } if owning => self.owning.extend([key(then), key(else_)]),
+                IrExprKind::Match { arms, .. } if owning => self.owning.extend(arms.iter().map(|a| key(&a.body))),
+                IrExprKind::Block { stmts, expr } => {
+                    self.owning.extend(stmts.iter().filter_map(|s| match &s.kind {
+                        IrStmtKind::Bind { value, .. } => Some(key(value)),
+                        _ => None,
+                    }));
+                    if owning && let Some(t) = expr {
+                        self.owning.insert(key(t));
+                    }
+                }
+                _ => {}
             }
+            walk_expr(self, e);
         }
     }
-    let mut fd = Find { b, f, out: Vec::new() };
+    let mut fd = Find { b, f, owning: fields.iter().map(|(_, e)| key(e)).collect(), out: Vec::new() };
     for (_, e) in fields {
         fd.visit_expr(e);
     }
