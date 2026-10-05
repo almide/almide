@@ -59,7 +59,7 @@ pub fn almide_rt_list_swap<T: Clone>(xs: &[T], i: i64, j: i64) -> Vec<T> { let m
 pub fn almide_rt_list_map<A, B>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> B>) -> Vec<B> { let f = move |a| f(a); xs.into_iter().map(f).collect() }
 pub fn almide_rt_list_filter<A: Clone>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> bool>) -> Vec<A> { let f = move |a| f(a); xs.into_iter().filter(|x| f(x.clone())).collect() }
 pub fn almide_rt_list_fold<A, B>(xs: Vec<A>, init: B, f: std::rc::Rc<dyn Fn(B, A) -> B>) -> B { let f = move |a, b| f(a, b); xs.into_iter().fold(init, f) }
-pub fn almide_rt_list_find<A: Clone>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> bool>) -> Option<A> { let f = move |a| f(a); xs.into_iter().find(|x| f(x.clone())) }
+pub fn almide_rt_list_find<A: Clone>(xs: &[A], f: std::rc::Rc<dyn Fn(A) -> bool>) -> Option<A> { let f = move |a| f(a); xs.iter().find(|x| f((*x).clone())).cloned() }
 pub fn almide_rt_list_any<A: Clone>(xs: &[A], f: std::rc::Rc<dyn Fn(A) -> bool>) -> bool { let f = move |a| f(a); xs.iter().any(|x| f(x.clone())) }
 pub fn almide_rt_list_all<A: Clone>(xs: &[A], f: std::rc::Rc<dyn Fn(A) -> bool>) -> bool { let f = move |a| f(a); xs.iter().all(|x| f(x.clone())) }
 pub fn almide_rt_list_each<A: Clone>(xs: &[A], f: std::rc::Rc<dyn Fn(A)>) { let f = move |a| f(a); for x in xs { f(x.clone()); } }
@@ -103,10 +103,10 @@ pub fn almide_rt_list_flat_map_arr<A, B, const N: usize, F: Fn(A) -> [B; N]>(xs:
 pub fn almide_rt_list_flat_map_effect<A, B>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> Result<Vec<B>, String>>) -> Result<Vec<B>, String> { let f = move |a| f(a); let mut r = Vec::new(); for x in xs { r.extend(f(x)?); } Ok(r) }
 pub fn almide_rt_list_filter_map<A, B>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> Option<B>>) -> Vec<B> { let f = move |a| f(a); xs.into_iter().filter_map(f).collect() }
 pub fn almide_rt_list_find_index<A: Clone>(xs: &[A], f: std::rc::Rc<dyn Fn(A) -> bool>) -> Option<i64> { let f = move |a| f(a); xs.iter().position(|x| f(x.clone())).map(|i| i as i64) }
-pub fn almide_rt_list_take<T>(xs: Vec<T>, n: i64) -> Vec<T> { xs.into_iter().take(n as usize).collect() }
-pub fn almide_rt_list_drop<T>(xs: Vec<T>, n: i64) -> Vec<T> { xs.into_iter().skip(n as usize).collect() }
-pub fn almide_rt_list_take_while<A: Clone>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> bool>) -> Vec<A> { let f = move |a| f(a); xs.into_iter().take_while(|x| f(x.clone())).collect() }
-pub fn almide_rt_list_drop_while<A: Clone>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> bool>) -> Vec<A> { let f = move |a| f(a); xs.into_iter().skip_while(|x| f(x.clone())).collect() }
+pub fn almide_rt_list_take<T: Clone>(xs: &[T], n: i64) -> Vec<T> { xs.iter().take(n as usize).cloned().collect() }
+pub fn almide_rt_list_drop<T: Clone>(xs: &[T], n: i64) -> Vec<T> { xs.iter().skip(n as usize).cloned().collect() }
+pub fn almide_rt_list_take_while<A: Clone>(xs: &[A], f: std::rc::Rc<dyn Fn(A) -> bool>) -> Vec<A> { let f = move |a| f(a); xs.iter().take_while(|x| f((*x).clone())).cloned().collect() }
+pub fn almide_rt_list_drop_while<A: Clone>(xs: &[A], f: std::rc::Rc<dyn Fn(A) -> bool>) -> Vec<A> { let f = move |a| f(a); xs.iter().skip_while(|x| f((*x).clone())).cloned().collect() }
 pub fn almide_rt_list_partition<A: Clone>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> bool>) -> (Vec<A>, Vec<A>) { let f = move |a| f(a); xs.into_iter().partition(|x| f(x.clone())) }
 pub fn almide_rt_list_group_by<A: Clone, B: PartialEq + Clone + 'static>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> B>) -> AlmideMap<B, Vec<A>> {
     let f = move |a| f(a);
