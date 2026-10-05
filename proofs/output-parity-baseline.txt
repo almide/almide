@@ -947,6 +947,7 @@ spec/wasm_cross/top_let_closure_record.almd
 spec/wasm_cross/top_let_div_eager.almd
 spec/wasm_cross/top_let_div_used.almd
 spec/wasm_cross/top_let_eager_through_call.almd
+spec/wasm_cross/top_let_fn_value_bytes_param.almd
 spec/wasm_cross/top_let_fn_value_closure_param.almd
 spec/wasm_cross/top_let_rc_value.almd
 spec/wasm_cross/top_let_stored_in_container.almd
