@@ -151,6 +151,31 @@ every program that compiles for both targets produces **byte-identical
 stdout/stderr/exit code** native ⇄ wasm, tracked contract-by-contract in
 [docs/contracts/](../contracts).
 
+### The embedded host's call-stack budget (#3435)
+
+Recursion past a target's call-stack resources is a resource limit, not a
+cross-target promise (C-196). Where the limit sits is still a choice for the
+lane we ship: the embedded host behind `almide run --target wasm`, `almide
+bench --target wasm` and the wasm leg of `almide test` sets wasmtime's
+`max_wasm_stack` to **8 MiB** (`EMBEDDED_WASM_STACK` in
+`crates/almide-wasm-run/src/host.rs`), the size of native's main-thread stack.
+It runs each guest — and each `fan` worker instance — on a host thread with a
+64 MiB native stack, since wasmtime needs the host stack to exceed the wasm
+budget plus host frames. wasmtime's own default is 512 KiB, which the host
+used until #3435.
+
+Measured 2026-10-06 (macOS aarch64, release build; the deepest argument that
+still answers):
+
+| recursion shape | native | embedded, 512 KiB | embedded, 8 MiB |
+|---|---:|---:|---:|
+| non-tail tree walk returning `T!` (#3434's `infer`) | ~43,000 | ~5,400 | ~87,000 |
+| recursion with four heap locals per frame | ~32,500 | ~5,400 | ~87,000 |
+| `1 + depth(f)` over a tree | no limit (LLVM makes it a loop) | ~32,500 | ~523,000 |
+
+Stock runtimes keep their own limits: `wasmtime run` defaults to 512 KiB
+(`-W max-wasm-stack=N` raises it), and browsers set theirs.
+
 ## Measuring allocation: the watermark and the counter (#2407)
 
 Every structural-leg module exports its bump-heap pointer as the `__heap`
