@@ -551,6 +551,7 @@ impl Parser {
             TypeExpr::Union { ref members } if members.iter().all(|m| matches!(m, TypeExpr::Simple { name } if name.starts_with(char::is_uppercase))) => {
                 TypeExpr::Variant {
                     comments: Vec::new(),
+                    multiline: false,
                     cases: members.iter().map(|m| {
                         if let TypeExpr::Simple { name } = m { VariantCase::Unit { name: name.clone() } } else { unreachable!() }
                     }).collect(),
@@ -559,8 +560,18 @@ impl Parser {
             other => other,
         };
         let mut ty = ty;
-        if let TypeExpr::Variant { comments, .. } = &mut ty {
-            *comments = super::variant_comments::collect(&self.tokens[type_start..self.pos]);
+        if let TypeExpr::Variant { comments, multiline, .. } = &mut ty {
+            // A comment ending the LAST case's line sits after the type's
+            // tokens; left in the stream, the top level filed it under the
+            // next declaration and fmt moved it there (#3393). It belongs to
+            // that case, like any earlier case's same-line comment.
+            let last_line = self.pos.checked_sub(1).and_then(|i| self.tokens.get(i)).map(|t| t.line);
+            let mut end = self.pos;
+            while self.tokens.get(end).is_some_and(|t| t.token_type == TokenType::Comment && Some(t.line) == last_line) {
+                end += 1;
+            }
+            self.pos = end;
+            (*comments, *multiline) = super::variant_comments::collect(&self.tokens[type_start..end]);
         }
         Ok(Decl::Type { name, ty, deriving, deriving_refs, deriving_spans, visibility, generics, span: Some(span) })
     }

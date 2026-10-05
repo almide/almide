@@ -257,7 +257,7 @@ impl Parser {
             // lookahead leaves those tokens for the caller.
             self.skip_newlines_if_followed_by(TokenType::Pipe);
         }
-        Ok(TypeExpr::Variant { cases, comments: Vec::new() })
+        Ok(TypeExpr::Variant { cases, comments: Vec::new(), multiline: false })
     }
     fn try_parse_inline_variant(&mut self, first_name: Sym, first_args: Vec<TypeExpr>) -> Result<TypeExpr, String> {
         let mut cases = Vec::new();
@@ -307,7 +307,7 @@ impl Parser {
                 .collect();
             Ok(TypeExpr::Union { members })
         } else {
-            Ok(TypeExpr::Variant { cases, comments: Vec::new() })
+            Ok(TypeExpr::Variant { cases, comments: Vec::new(), multiline: false })
         }
     }
     fn parse_record_type(&mut self) -> Result<TypeExpr, String> {
@@ -342,9 +342,10 @@ impl Parser {
                 None
             };
             let comments = std::mem::take(&mut pending);
-            fields.push(FieldType { name: field_name, ty: field_type, default, alias, attrs, comments });
-            pending.extend(self.skip_newlines_take_comments());
-            if self.check(TokenType::Comma) { self.advance(); pending.extend(self.skip_newlines_take_comments()); }
+            let mut field = FieldType { name: field_name, ty: field_type, default, alias, attrs, comments, trailing_comments: Vec::new() };
+            self.take_field_gap_comments(&mut field, &mut pending);
+            if self.check(TokenType::Comma) { self.advance(); self.take_field_gap_comments(&mut field, &mut pending); }
+            fields.push(field);
         }
         self.expect(TokenType::RBrace)?;
         if open { Ok(TypeExpr::OpenRecord { fields }) }
@@ -371,11 +372,21 @@ impl Parser {
                 None
             };
             let comments = std::mem::take(&mut pending);
-            fields.push(FieldType { name: field_name, ty: field_type, default, alias, attrs, comments });
-            pending.extend(self.skip_newlines_take_comments());
-            if self.check(TokenType::Comma) { self.advance(); pending.extend(self.skip_newlines_take_comments()); }
+            let mut field = FieldType { name: field_name, ty: field_type, default, alias, attrs, comments, trailing_comments: Vec::new() };
+            self.take_field_gap_comments(&mut field, &mut pending);
+            if self.check(TokenType::Comma) { self.advance(); self.take_field_gap_comments(&mut field, &mut pending); }
+            fields.push(field);
         }
         Ok(fields)
+    }
+    /// The newline/comment run after a record field (before or after its
+    /// comma): a comment ending the field's own line stays with that field as
+    /// TRAILING; an own-line one introduces the next field (#3393 — binding
+    /// it forward made fmt print `rooms: T, // why` above the next field).
+    fn take_field_gap_comments(&mut self, field: &mut FieldType, pending: &mut Vec<String>) {
+        for c in self.walk_newline_run() {
+            if c.own_line { pending.push(c.text) } else { field.trailing_comments.push(c.text) }
+        }
     }
     /// Parse optional `as "alias"` after field name.
     fn parse_field_alias(&mut self) -> Result<Option<Sym>, String> {

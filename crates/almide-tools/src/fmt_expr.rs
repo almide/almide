@@ -495,10 +495,19 @@ fn try_fmt_fan_block_resugar(out: &mut String, callee: &Expr, args: &[Expr], dep
 fn fmt_expr_if(out: &mut String, expr: &Expr, depth: usize) {
     let ExprKind::If { cond, then, else_, .. } = &expr.kind else { unreachable!() };
     out.push_str("if "); fmt_expr(out, cond, depth); out.push_str(" then "); fmt_expr(out, then, depth);
-    if is_short(then) && is_short(else_) { out.push(' '); }
-    else if out.ends_with('}') { out.push(' '); }
-    else { out.push('\n'); out.push_str(&ind(depth)); }
+    if out.ends_with('}') || (is_short(then) && is_short(else_) && !else_on_own_line(then, else_)) {
+        out.push(' ');
+    } else {
+        out.push('\n'); out.push_str(&ind(depth));
+    }
     out.push_str("else "); fmt_expr(out, else_, depth);
+}
+
+/// #3393: the author put `else` on its own line — keep the break (the output
+/// re-parses that way, so the choice is stable), as `members_span_lines`
+/// keeps a split argument list.
+fn else_on_own_line(then: &Expr, else_: &Expr) -> bool {
+    matches!((then.span, else_.span), (Some(t), Some(e)) if e.line > t.line)
 }
 
 fn fmt_expr_iflet(out: &mut String, expr: &Expr, depth: usize) {

@@ -697,3 +697,87 @@ mod line_width_tests {
         assert_eq!(fmt_src(&once), once, "the hugged layout must be a fixed point");
     }
 }
+
+/// #3393: three rewrites that made formatted code harder to read, one of
+/// which changed what a comment documents.
+#[cfg(test)]
+mod issue_3393_tests {
+    use super::*;
+    use almide_lang::lexer::Lexer;
+    use almide_lang::parser::Parser;
+
+    /// Format `src`, then assert that formatting the output gives it back.
+    fn stable(src: &str) -> String {
+        let fmt = |s: &str| {
+            let mut parser = Parser::new(Lexer::tokenize(s));
+            let program = parser.parse().expect("parse succeeds");
+            assert!(parser.errors.is_empty(), "parse errors on:\n{s}");
+            format_program(&program)
+        };
+        let once = fmt(src);
+        assert_eq!(fmt(&once), once, "fmt must be idempotent");
+        once
+    }
+
+    /// A comment ending a field's line stays on that line. Printed above the
+    /// next field, it read as the doc of `room`, not `rooms`.
+    #[test]
+    fn a_trailing_field_comment_stays_on_its_fields_line() {
+        let src = "type Env = {\n  entries: Map[String, Int],\n  rooms: Map[String, List[String]],   // room -> every room it can see\n  room: String,\n}\n";
+        let out = stable(src);
+        assert!(out.contains("  rooms: Map[String, List[String]], // room -> every room it can see\n  room: String,\n"), "got:\n{out}");
+        // The last field, written without a comma, and a variant's record case.
+        let out = stable("type R = {\n  a: Int, // the a\n  b: Int // the b\n}\n");
+        assert!(out.contains("  a: Int, // the a\n  b: Int, // the b\n}"), "got:\n{out}");
+        let out = stable("type V =\n  | P { x: Int, // the x\n    y: Int }\n  | Q\n");
+        assert!(out.contains("x: Int, // the x\n"), "got:\n{out}");
+        // An own-line comment still introduces the field below it.
+        let out = stable("type R = {\n  a: Int,\n  // the b\n  b: Int,\n}\n");
+        assert!(out.contains("  a: Int,\n  // the b\n  b: Int,\n"), "got:\n{out}");
+    }
+
+    /// A comment ending the LAST variant case's line stays on it; it used to
+    /// escape the declaration and land after it.
+    #[test]
+    fn a_trailing_comment_on_the_last_variant_case_stays_on_it() {
+        let out = stable("type C =\n  | A(Int) // first\n  | B(Int) // last\n\nfn f() -> Int = 1\n");
+        assert!(out.starts_with("type C =\n  | A(Int) // first\n  | B(Int) // last\n\nfn f()"), "got:\n{out}");
+    }
+
+    /// The recursion idiom's shape — break before `if` and before `else` —
+    /// survives; it used to be hoisted onto the signature line, where the
+    /// width rule exploded the two-argument call in the `then` arm.
+    #[test]
+    fn a_split_if_body_keeps_its_breaks() {
+        let src = "fn scan(t: String, p: Int) -> Int =\n  if p < string.len(t) and string.get(t, p) == some(\"a\") then scan(t, p + 1)\n  else p\n";
+        assert_eq!(stable(src), src);
+        // Written on one line but too wide: the break goes before `if`, not
+        // inside the call.
+        let one = "fn scan(t: String, p: Int) -> Int = if p < string.len(t) and string.get(t, p) == some(\"a\") then scan(t, p + 1) else p\n";
+        assert_eq!(
+            stable(one),
+            "fn scan(t: String, p: Int) -> Int =\n  if p < string.len(t) and string.get(t, p) == some(\"a\") then scan(t, p + 1) else p\n"
+        );
+        // Fitting one-liners and a braced `then` keep the signature line.
+        let short = "fn f(x: Int) -> Int = if x > 0 then 1 else 0\n";
+        assert_eq!(stable(short), short);
+        let braced = "fn h(x: Int) -> Int = if x > 0 then {\n  let y = x + 1\n  y\n} else {\n  0\n}\n";
+        assert_eq!(stable(braced), braced);
+    }
+
+    /// A one-case-per-line variant stays that way, and a one-line variant
+    /// that does not fit is broken into one; a short one-liner stays. No
+    /// space is left after `=` when the cases start on the next line.
+    #[test]
+    fn variant_cases_keep_one_per_line() {
+        let src = "type Term =\n  | Sort(Int)\n  | Var(Int)\n  | Const(String)\n  | App(Term, Term)\n  | Lam(String, Term, Term)\n  | Pi(String, Term, Term)\n";
+        assert_eq!(stable(src), src);
+        let short = "type Small = | A | B(Int)\n";
+        assert_eq!(stable(short), short);
+        let wide = "type Long = | Alpha(String, String, String) | Beta(String, String, String) | Gamma(String, String, String) | Delta(Int)\n";
+        assert_eq!(
+            stable(wide),
+            "type Long =\n  | Alpha(String, String, String)\n  | Beta(String, String, String)\n  | Gamma(String, String, String)\n  | Delta(Int)\n"
+        );
+    }
+}
