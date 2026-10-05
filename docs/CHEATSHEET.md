@@ -983,7 +983,8 @@ fn types, Result) — wrap those in a named Codec type or convert at the boundar
 
 ## Common mistakes (DO NOT)
 - `list[1, 2, 3]` → **WRONG**. Write `[1, 2, 3]`. `list` is a module, not a type constructor
-- `each(xs, f)` → **WRONG**. Write `list.each(xs, f)`. All stdlib functions need module prefix
+- `map(xs, f)` → **WRONG**. Write `list.map(xs, f)`. All stdlib functions need module prefix
+- `list.each(xs, f)` / `list.for_each(xs, f)` → **WRONG**. There is no plain `each`; run a side effect per element with `for x in xs { ... }`
 - `map[K, V]` as a value → **WRONG**. Write `[:]` with type annotation to create an empty map
 - `List.new()` → **WRONG**. Write `[]`. There is no `new()` for List
 - `{"a": 1}` as a map → **WRONG**. Write `["a": 1]`. Braces `{}` are for records/blocks, brackets `[]` for lists and maps
