@@ -538,7 +538,13 @@ impl Checker {
                         _ => t.clone(),
                     }
                 };
-                let (cmp_then, cmp_else) = if self.env.auto_unwrap {
+                let lifted = self.lift_mixed_tail_peers(expect.as_ref(), &[then_ty.clone(), else_ty.clone()]);
+                let (cmp_then, cmp_else) = if let Some(lifted) = lifted {
+                    // #3385 / #3395: a lifting tail (`-> T!`, or an effect fn
+                    // declaring `-> Result[..]`) lifts each branch on its own —
+                    // the same rule the match arms follow.
+                    (lifted[0].clone(), lifted[1].clone())
+                } else if self.env.auto_unwrap {
                     // #2182: a branch whose Result the comparison strips is
                     // implicit propagation — report it at the branch's tail
                     // leaves (the `else` side never reached any report: the
@@ -550,10 +556,6 @@ impl Checker {
                         }
                     }
                     (cmp_unwrap(&then_ty, &self.uf), cmp_unwrap(&else_ty, &self.uf))
-                } else if let Some(lifted) = self.lift_mixed_tail_peers(expect.as_ref(), &[then_ty.clone(), else_ty.clone()]) {
-                    // #3385: a lifting tail lifts each branch on its own —
-                    // the same rule the match arms follow.
-                    (lifted[0].clone(), lifted[1].clone())
                 } else {
                     (then_ty.clone(), else_ty.clone())
                 };

@@ -517,8 +517,9 @@ impl Checker {
         self.record_int_literal_context(body, &ret_ty);
         // A `-> T!` body's value leaves lift into `ok(..)` one by one (#3385),
         // so a bare literal leaf beside an explicit `ok(..)` one is a value of
-        // the payload `T` — pinned last, it faces T's range.
-        if fallible_marker
+        // the payload `T` — pinned last, it faces T's range. An effect fn
+        // declaring `-> Result[T, E]` lifts the same way (#3395).
+        if (fallible_marker || is_effect)
             && let Ty::Applied(crate::types::TypeConstructorId::Result, args) = &ret_ty
             && args.len() == 2
         {

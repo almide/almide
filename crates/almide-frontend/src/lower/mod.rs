@@ -403,7 +403,17 @@ fn lower_decls(
                 // consumers (codegen / mir / interp), so one wrap serves all.
                 // Result-typed exits (Phase 1a's pass-through / ok / err
                 // bodies) are left untouched — the wrap is type-driven.
-                if matches!(return_type, ast::TypeExpr::Generic { name: g, .. } if g.as_str() == "!") {
+                //
+                // #3395 (ADR-0002 D3): an effect fn that DECLARES `-> Result[..]`
+                // gets the same per-leaf lift — its value tails used to be
+                // wrapped only by the native codegen, so wasm refused them and
+                // a mixed `match` never type-checked. (An effect fn declaring
+                // `-> T` is sig-lifted by codegen; its ret_ty is not a Result
+                // here.)
+                let declared_result_effect = f.is_effect && f.ret_ty.is_result();
+                if declared_result_effect
+                    || matches!(return_type, ast::TypeExpr::Generic { name: g, .. } if g.as_str() == "!")
+                {
                     // ADR-0012 D2 (#1193): the resolver already mapped the
                     // marker to Result[T, E], so the declared E is read off
                     // f.ret_ty — `T!` yields String there, `T!E` yields E.
@@ -645,7 +655,8 @@ pub(crate) fn wrap_fallible_value_tail(body: IrExpr, err_ty: &Ty) -> IrExpr {
         IrExprKind::If { cond, then, else_ } => {
             let then = Box::new(wrap_fallible_value_tail(*then, err_ty));
             let else_ = Box::new(wrap_fallible_value_tail(*else_, err_ty));
-            let wty = then.ty.clone();
+            let diverges = |e: &IrExpr| matches!(e.ty, Ty::Never) || is_panic_call(e);
+            let wty = if diverges(&then) { else_.ty.clone() } else { then.ty.clone() };
             IrExpr { kind: IrExprKind::If { cond, then, else_ }, ty: wty, span, def_id: None }
         }
         IrExprKind::Match { subject, arms } => {
@@ -658,7 +669,9 @@ pub(crate) fn wrap_fallible_value_tail(body: IrExpr, err_ty: &Ty) -> IrExpr {
                 })
                 .collect();
             let wty = arms
-                .first()
+                .iter()
+                .find(|a| !matches!(a.body.ty, Ty::Never) && !is_panic_call(&a.body))
+                .or(arms.first())
                 .map(|a| a.body.ty.clone())
                 .unwrap_or_else(|| Ty::result(ty, err_ty.clone()));
             IrExpr { kind: IrExprKind::Match { subject, arms }, ty: wty, span, def_id: None }
@@ -666,6 +679,10 @@ pub(crate) fn wrap_fallible_value_tail(body: IrExpr, err_ty: &Ty) -> IrExpr {
         // Already Result — Phase 1a's forms stay untouched.
         IrExprKind::ResultOk { .. } | IrExprKind::ResultErr { .. } => body,
         _ if ty.is_result() => body,
+        // A diverging leaf (`panic(..)`) yields no value to lift; wrapping it
+        // stamped `ok(panic)` at the wrong payload (the native tail wrap
+        // leaves it bare for the same reason, #3118).
+        _ if matches!(ty, Ty::Never) || is_panic_call(&body) => body,
         _ => {
             let result_ty = Ty::result(ty.clone(), err_ty.clone());
             IrExpr {
@@ -675,5 +692,15 @@ pub(crate) fn wrap_fallible_value_tail(body: IrExpr, err_ty: &Ty) -> IrExpr {
                 def_id: None,
             }
         }
+    }
+}
+
+/// `panic(..)` as a value leaf (possibly a block's tail): it diverges, so the
+/// lift leaves it bare.
+fn is_panic_call(e: &IrExpr) -> bool {
+    match &e.kind {
+        IrExprKind::Call { target: almide_ir::CallTarget::Named { name }, .. } => name.as_str() == "panic",
+        IrExprKind::Block { expr: Some(tail), .. } => is_panic_call(tail),
+        _ => false,
     }
 }

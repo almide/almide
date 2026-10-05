@@ -1,0 +1,64 @@
+// #3395: an effect fn that declares `-> Result[T, String]` lifts each value
+// exit into `ok(..)` on its own (ADR-0002 D3: a `-> Result[T, String]` body
+// has the auto-ok of a tail `T`, the same as `-> T!`). An `if` lifts per
+// branch exactly as a `match` lifts per arm, on every target.
+effect fn plain_value(n: Int) -> Result[Int, String] = n + 1
+
+effect fn if_value_then_ok(b: Bool) -> Result[Int, String] = if b then 1 else ok(2)
+
+effect fn if_ok_then_value(b: Bool) -> Result[Int, String] = if b then ok(1) else 2
+
+effect fn if_err_then_value(b: Bool) -> Result[Int, String] = if b then err("no") else 1
+
+effect fn match_value_and_ok(b: Bool) -> Result[Int, String] = match b {
+  true => 1,
+  false => ok(2),
+}
+
+effect fn match_mixed(x: Int) -> Result[Int, String] = match x {
+  0 => ok(10),
+  1 => err("one"),
+  _ => x,
+}
+
+effect fn nested(a: Bool, b: Bool) -> Result[Int, String] = if a then (if b then 1 else ok(2))
+else match b {
+  true => 3,
+  false => ok(4),
+}
+
+effect fn block_tail(b: Bool) -> Result[String, String] = {
+  let base = "v"
+  if b then base else ok("${base}!")
+}
+
+effect fn sized(b: Bool) -> Result[Int8, String] = if b then 1 else ok(2)
+
+test "effect -> Result: if branches lift one by one" {
+  assert_eq(plain_value(1), ok(2))
+  assert_eq(if_value_then_ok(true), ok(1))
+  assert_eq(if_value_then_ok(false), ok(2))
+  assert_eq(if_ok_then_value(true), ok(1))
+  assert_eq(if_ok_then_value(false), ok(2))
+  assert_eq(if_err_then_value(true), err("no"))
+  assert_eq(if_err_then_value(false), ok(1))
+}
+
+test "effect -> Result: match arms lift one by one" {
+  assert_eq(match_value_and_ok(true), ok(1))
+  assert_eq(match_value_and_ok(false), ok(2))
+  assert_eq(match_mixed(0), ok(10))
+  assert_eq(match_mixed(1), err("one"))
+  assert_eq(match_mixed(5), ok(5))
+}
+
+test "effect -> Result: nested, block-tail and sized lifts" {
+  assert_eq(nested(true, true), ok(1))
+  assert_eq(nested(true, false), ok(2))
+  assert_eq(nested(false, true), ok(3))
+  assert_eq(nested(false, false), ok(4))
+  assert_eq(block_tail(true), ok("v"))
+  assert_eq(block_tail(false), ok("v!"))
+  assert_eq(sized(true), ok(1))
+  assert_eq(sized(false), ok(2))
+}
