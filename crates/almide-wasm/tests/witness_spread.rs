@@ -1,6 +1,7 @@
 //! #2758 (#1696 step 4) — the SPREAD RECORD `{ ...b, f: v }` in the structural
-//! witness. The build is a fresh block copied from a BOUND base: the base is
-//! only read, the copy helper's credit on each handle slot (and its release
+//! witness. A base that DIES at the spread (a param at the frame's tail,
+//! #3406) hands its credit to the rebuilt record (`im`); any other bound
+//! base is only read, the copy helper's credit on each handle slot (and its release
 //! of the overwritten one) is the helper's interior bookkeeping, and each
 //! field store is the payload-store hook's (`am` for a shared Var, `im` for a
 //! moved temporary). A PRODUCED base is an owned temporary the copy reads and
@@ -46,14 +47,16 @@ fn spread_records_witness_their_field_stores_and_release_a_produced_base() {
     // ONE test: the witness sink is process-global.
     let w = witnesses();
     let expect = [
-        // The borrowed base is only read (no probe on a block the frame does
-        // not own); the borrowed `s` shares into the overwritten slot; the
-        // fresh copy moves out.
-        ("renamed", "\nam\nim\n"),
-        // A scalar field carries no site: only the copy's move-out.
-        ("bumped", "\nim\n"),
+        // #3406: a spread at the frame's tail CONSUMES its base param (owned,
+        // param_borrow.rs), and the dying base hands its credit to the
+        // rebuilt record (`im`: received, moved — dying_move.rs); the
+        // borrowed `s` shares into the overwritten slot; the result moves out.
+        ("renamed", "im\nam\nim\n"),
+        // A scalar field carries no site: `p.n` reads the base (`b`) before
+        // its hand-over, and the result moves out.
+        ("bumped", "ibm\nim\n"),
         // A fresh list literal (and its element) moves into the slot.
-        ("tagged", "\nim\nim\nim\n"),
+        ("tagged", "im\nim\nim\nim\n"),
         // A LOCAL base: born by the call, read by the spread (`b`) and by
         // `p.n`, released at the exit; the copy is a fresh bind of its own.
         ("local_base", "\nibbd\nibd\n"),

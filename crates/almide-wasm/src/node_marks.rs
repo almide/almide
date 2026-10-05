@@ -52,6 +52,17 @@ pub(crate) struct NodeMarks {
     pinned: Vec<Rc<IrExpr>>,
     /// Argument lists the emitter built (cloned operands) and lowered.
     pinned_args: Vec<Rc<[IrExpr]>>,
+    /// #3406: Var reads at which their var DIES (dying_move.rs) — the
+    /// receiver of a consuming op that is the rhs of the var's own
+    /// reassignment, or the frame's tail. Keyed like a mark; consumed by
+    /// the route that hands the var's credit over.
+    dying: HashSet<usize>,
+    /// #3406: the dying Var read being lowered right now as a MOVE (its
+    /// lowering's `forget` does not clear it; the route that set it does).
+    moving: Option<usize>,
+    /// #3406: `b.f` reads that MOVE the slot's credit out of a record the
+    /// frame holds uniquely (a dying spread base), with the slot's offset.
+    takes: std::collections::HashMap<usize, u32>,
 }
 
 struct Collect<'a>(&'a mut HashSet<usize>);
@@ -129,6 +140,59 @@ impl NodeMarks {
         if let IrExprKind::Call { target, .. } = &e.kind {
             self.marks.remove(&target_key(target));
         }
+    }
+
+    /// #3406: the var read at `e` dies there (see the field).
+    pub(crate) fn set_dying(&mut self, e: &IrExpr, on: bool) {
+        if !on {
+            self.dying.remove(&expr_key(e));
+        } else if self.accept(expr_key(e), "dying read") {
+            self.dying.insert(expr_key(e));
+        }
+    }
+
+    /// Consume the dying note on `e`, if it carries one.
+    pub(crate) fn take_dying(&mut self, e: &IrExpr) -> bool {
+        self.dying.remove(&expr_key(e))
+    }
+
+    /// Is the var read at `e` noted dying (without consuming the note)?
+    pub(crate) fn is_dying(&self, e: &IrExpr) -> bool {
+        self.dying.contains(&expr_key(e))
+    }
+
+    /// #3406: the field read at `e` moves the slot at `off` out (`None`
+    /// withdraws the note).
+    /// The node is named by its address (a node of a live tree).
+    pub(crate) fn set_take(&mut self, key: usize, off: Option<u32>) {
+        match off {
+            Some(off) if self.accept(key, "slot take") => {
+                self.takes.insert(key, off);
+            }
+            _ => {
+                self.takes.remove(&key);
+            }
+        }
+    }
+
+    /// #3406: the Var read `e` is lowered as a move (`on`), or no longer.
+    pub(crate) fn set_moving(&mut self, e: &IrExpr, on: bool) {
+        self.moving = on.then(|| expr_key(e));
+    }
+
+    /// Is the Var read `e` being lowered as a move?
+    pub(crate) fn is_moving(&self, e: &IrExpr) -> bool {
+        self.moving == Some(expr_key(e))
+    }
+
+    /// Does the field read `e` carry a pending slot-take note?
+    pub(crate) fn has_take(&self, e: &IrExpr) -> bool {
+        self.takes.contains_key(&expr_key(e))
+    }
+
+    /// Consume the slot-take note on `e`: the slot offset to move out.
+    pub(crate) fn take_slot(&mut self, e: &IrExpr) -> Option<u32> {
+        self.takes.remove(&expr_key(e))
     }
 
     pub(crate) fn is_marked(&self, e: &IrExpr) -> bool {

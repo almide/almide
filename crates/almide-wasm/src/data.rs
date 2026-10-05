@@ -330,7 +330,10 @@ impl Emitter<'_> {
                     return unsup("record-unknown-field");
                 };
                 let (fty, off) = (fi.ty, fi.offset);
-                self.load_ty_slot(fty, off);
+                // #3406: a dying spread base's field read may move its slot.
+                if !self.try_take_slot(e, fty)? {
+                    self.load_ty_slot(fty, off);
+                }
                 fty
             }
             other => return unsup(&format!("expr:{}", expr_kind_name(other))),
@@ -350,6 +353,10 @@ impl Emitter<'_> {
         fields: &[(almide_base::intern::Sym, IrExpr)],
         _want: Option<SliceTy>,
     ) -> Result<SliceTy, EmitError> {
+        // #3406: a base that dies here is rebuilt in place (dying_move.rs).
+        if let Some(ty) = self.try_spread_dying(base, fields)? {
+            return Ok(ty);
+        }
         Ok({
 
                 let ty = self.lower(base, None)?;
