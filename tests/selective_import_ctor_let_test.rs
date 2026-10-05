@@ -9,7 +9,10 @@
 //!
 //! `spec/integration/modules/selective_ctor_let_test.almd` holds the shapes;
 //! `almide test` runs one leg, so this net runs it on both, and re-states the
-//! cheatsheet's `import self.<module>.{..}` form in a package.
+//! cheatsheet's `import self.<module>.{..}` form in a package. The lets whose
+//! reads the MIR lowering walls (a constructor-built `ZERO`, a function-valued
+//! `inc`) live in `tests/fixtures/selective_import/let_values_test.almd`,
+//! outside the spec corpus; it runs here next to a copy of the same module.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -68,6 +71,40 @@ fn selective_ctor_and_let_imports_run_on_every_leg() {
         return;
     }
     let (ok, out) = run(&integration, &["test", file, "--target", "wasm"]);
+    assert!(ok, "wasm leg failed:\n{out}");
+}
+
+/// The fixture beside a copy of `spec/integration/modules/selvar`, so both
+/// files import the one module source.
+fn let_values_project() -> tempfile::TempDir {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::create_dir_all(dir.path().join("selvar/src")).unwrap();
+    std::fs::copy(
+        root.join("spec/integration/modules/selvar/src/mod.almd"),
+        dir.path().join("selvar/src/mod.almd"),
+    )
+    .expect("copy the selvar module");
+    std::fs::copy(
+        root.join("tests/fixtures/selective_import/let_values_test.almd"),
+        dir.path().join("let_values_test.almd"),
+    )
+    .expect("copy the let-values fixture");
+    dir
+}
+
+#[cfg_attr(debug_assertions, ignore = "compiles the program on every leg (CI: release-shape job)")]
+#[test]
+fn selectively_imported_ctor_and_fn_valued_lets_run_on_every_leg() {
+    let dir = let_values_project();
+    let (ok, out) = run(dir.path(), &["test", "let_values_test.almd", "--target", "rust"]);
+    assert!(ok, "native leg failed:\n{out}");
+    assert!(out.contains("2 tests"), "both tests must run:\n{out}");
+    if !wasmtime_available() {
+        eprintln!("wasmtime not on PATH — the wasm leg is skipped here (CI installs it)");
+        return;
+    }
+    let (ok, out) = run(dir.path(), &["test", "let_values_test.almd", "--target", "wasm"]);
     assert!(ok, "wasm leg failed:\n{out}");
 }
 
