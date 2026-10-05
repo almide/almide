@@ -1,4 +1,4 @@
-# oracle: almide 0.67.0 (dev) at 2714f7ccd — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.67.0 (dev) at 679f9083c — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 9e174e6cc9ab173d59b961cc661eb5ad49ebf240e8099edca409c3a40db9f4d4	spec/churn/closure_env_churn.almd
 2b1c42676caca20af04e182941d53484f93c88e08fb03a09efc07e94ec37f895	spec/churn/construct_from_temp_churn.almd
 5d02cd41ef410020f099769da494465fd8141da0fd1068072ee3e94df9d143d3	spec/churn/enumerate_rich_churn.almd
@@ -213,7 +213,7 @@ a090b633a435253d92d6f376059f67881c4a29b73471d83620cb503c1185ca5b	spec/integratio
 63bb0b4e29476155752d837e4f007e9396c41fab8a35af8312a19583205ce357	spec/integration/modules/same_name_ctor_test.almd
 7089d7fb82b66b0d33e9ec4d8937cd8f552b3aea8b1f4f30740e8eaf102bce83	spec/integration/modules/same_name_toplet_test.almd
 8588cd7750f97cb7556dc13eeffab7114f4d99ae2cc1639bdc9720128ab898da	spec/integration/modules/same_shape_records_test.almd
-abbb2c9416e8a0fc0120aed731c5a117364e52a761828af8f9460986a5227565	spec/integration/modules/selective_ctor_let_test.almd
+de69b9f5ac6aa6d7e9dae3d6865f897ac455fc48c1ef65e1a89f9cafb2b3a0a9	spec/integration/modules/selective_ctor_let_test.almd
 2019920570635e7c5c9ba26c6ac74b06c31c20fb4534f60a4f0f6080642f8a44	spec/integration/modules/selvar/src/mod.almd
 27a62a78f0832e97e543169ec9579de0c4eef66003d8dd8ac61ebf8c3b3f527e	spec/integration/modules/shapeextent/src/mod.almd
 059baa63dc1f0ae9b7790e523ea38a8edbca0f3ea16a17fcba3713f392bfbca7	spec/integration/modules/shapesize/src/mod.almd
