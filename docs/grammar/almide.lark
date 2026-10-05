@@ -131,7 +131,7 @@ _o_attr_args: attr_args
 attr_args: "(" _nl _o_attr_arg_list ")"
 _o_attr_arg_list: attr_arg (COMMA _nl attr_arg)* _comma _nl
                 |
-attr_arg: IDENT EQ attr_value
+attr_arg: IDENT (EQ | COLON) attr_value
         | attr_value
 ?attr_value: plain_string | INT | MINUS INT | TRUE | FALSE | IDENT
 ?attr_name: IDENT | TYPENAME | keyword_as_name
