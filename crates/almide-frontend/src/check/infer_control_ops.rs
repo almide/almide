@@ -412,6 +412,16 @@ impl Checker {
     fn join_match_arms(&mut self, inferred: MatchArmTypes, expect: Option<&super::types::TailExpect>) -> Ty {
         let MatchArmTypes { types, real_types, peers, blame_spans, bangs, .. } = inferred;
         if types.is_empty() { return Ty::Unit };
+        // #3385: in a lifting tail each arm lifts into `ok(..)` on its own,
+        // so a value arm and an explicit `ok(..)` arm join at the lifted
+        // level — the same rule the `if` branches follow.
+        let (types, peers) = match self.lift_mixed_tail_peers(expect, &types) {
+            Some(lifted) => {
+                let peers = peers.into_iter().zip(&lifted).map(|((_, s, lit), t)| (t.clone(), s, lit)).collect();
+                (lifted, peers)
+            }
+            None => (types, peers),
+        };
         let (anchor, declared) = self.pick_join_anchor(expect, &types);
         let first = types[anchor].clone();
         for (i, aty) in types.iter().enumerate() {
@@ -540,6 +550,10 @@ impl Checker {
                         }
                     }
                     (cmp_unwrap(&then_ty, &self.uf), cmp_unwrap(&else_ty, &self.uf))
+                } else if let Some(lifted) = self.lift_mixed_tail_peers(expect.as_ref(), &[then_ty.clone(), else_ty.clone()]) {
+                    // #3385: a lifting tail lifts each branch on its own —
+                    // the same rule the match arms follow.
+                    (lifted[0].clone(), lifted[1].clone())
                 } else {
                     (then_ty.clone(), else_ty.clone())
                 };
