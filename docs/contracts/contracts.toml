@@ -4892,3 +4892,14 @@ status    = "active"
 evidence  = [
   { path = "spec/embedded_cross/process_spawn_family.almd", class = "fixture" },
 ]
+[[contract]]
+id        = "C-375"
+spec      = "ALS-R5"
+title     = "a serve-shaped program built for stock wasm is a wasi:http/handler@0.3.0 export that wasmtime serve runs with no flags and that answers what native answers"
+statement = "ALS-R5 (almide/almide#2659, ADR-0020 §5.4, ADR-0023 §3.3): `almide build --target wasm` of a serve-shaped program — `main`'s body is exactly one call `http.serve(port, app)`, optionally preceded by `let`s read only by `port` — emits a component that exports `wasi:http/handler@0.3.0` and that `wasmtime serve` loads and serves with no flags. The component imports only service-world interfaces: no `wasi:filesystem`. `main` is not run, and `port` is not evaluated: the host owns the address. The app and the top-level `let`s are evaluated per instance. One handler is in flight per instance (backpressure); a host serves concurrent requests with more instances. The guest applies native's limits: a request body over the limit (1 MiB) answers `413` and a request line over the limit (8 KiB) answers `414`, and the handler is not called. A trap or abort in the handler answers the host's `500` and the host discards that instance. Every other admitted request is answered with the same status code, header set and de-framed body as native, under C-367's HTTP-semantic comparison: the reason phrase, `date` and the framing are the host's, not byte-compared. NOT covered: the host's address, admission, concurrency, instance reuse, timeouts, shutdown and log decoration (all host configuration). Evidence: spec/serve_cross/http_serve_export.almd, a server fixture that no generic runner executes; the implementation's driver builds it for stock wasm, serves the artifact with `wasmtime serve` and runs it natively, replays one request script against both and compares each response's status code, header set and de-framed body, sends an over-limit body and an over-long request line to the artifact, and asks `/trap` last."
+since     = "0.67.0"
+status    = "active"
+evidence  = [
+  { path = "spec/serve_cross/http_serve_export.almd", class = "fixture" },
+  { path = "tests/http_serve_export_test.rs", name = "the_stock_serve_export_answers_what_native_answers_under_wasmtime_serve", class = "fixture" },
+]
