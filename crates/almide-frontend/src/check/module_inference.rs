@@ -62,6 +62,10 @@ impl Checker {
         let (mod_table, diags) = build_import_table(prog, Some(import_table_name), &self.env.user_modules);
         self.env.import_table = mod_table;
         self.diagnostics.extend(diags);
+        // #3396: the same top-level `let` rules (E012 / E061) the entry
+        // program gets — an imported module checked here skipped them, and a
+        // lambda-valued `let` reached lowering as an IR-verify ICE.
+        self.check_top_let_shapes(&prog.decls);
         // Recorded before the snapshot so it outlives this inference: the
         // module's lowering resolves its bare type names the same way (#2715).
         crate::canonicalize::resolve::register_scoped_bare_type_keys(&mut self.env, Some(module_name));

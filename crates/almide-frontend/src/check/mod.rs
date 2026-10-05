@@ -1005,11 +1005,12 @@ impl Checker {
 
     // ── Main entry point ──
 
-    /// Type-check a program whose environment was pre-populated by `canonicalize_program`.
-    /// Skips import table building and declaration registration — inference only.
-    pub fn infer_program(&mut self, program: &mut ast::Program) -> Vec<Diagnostic> {
-        // #1311 front-end phase accounting (no-op unless `--timings`).
-        let _phase = almide_base::profile::phase_scope(almide_base::profile::Phase::Check);
+    /// The top-level `let` rules every checked program and every checked
+    /// module share (E012 duplicates, E061 lambda-valued lets). Run once per
+    /// source file: from `infer_program` for the entry, from `infer_module`
+    /// for each imported module (#3396 — an importer used to skip them and
+    /// died on an IR-verify ICE instead of reporting E061).
+    pub(crate) fn check_top_let_shapes(&mut self, decls: &[ast::Decl]) {
         // E012 for DUPLICATE top-level lets: registration is idempotent by
         // design (it re-runs per driver leg), so the seed insert cannot
         // detect a second declaration — the last one silently won and the
@@ -1019,7 +1020,7 @@ impl Checker {
         {
             let mut seen: std::collections::HashMap<almide_base::intern::Sym, Option<ast::Span>> =
                 std::collections::HashMap::new();
-            for decl in &program.decls {
+            for decl in decls {
                 if let ast::Decl::TopLet { name, span, .. } = decl {
                     if let Some(first) = seen.get(name) {
                         let mut d = err(
@@ -1047,7 +1048,7 @@ impl Checker {
         // (call position resolved E002) — accepted-but-unusable in every
         // spelling, so the honest answer is a check-time diagnostic. Inside a
         // fn/test body both uses work and stay untouched.
-        for decl in &program.decls {
+        for decl in decls {
             if let ast::Decl::TopLet { name, value, span, .. } = decl {
                 if matches!(&value.kind, ast::ExprKind::Lambda { .. }) {
                     let mut d = err(
@@ -1066,6 +1067,14 @@ impl Checker {
                 }
             }
         }
+    }
+
+    /// Type-check a program whose environment was pre-populated by `canonicalize_program`.
+    /// Skips import table building and declaration registration — inference only.
+    pub fn infer_program(&mut self, program: &mut ast::Program) -> Vec<Diagnostic> {
+        // #1311 front-end phase accounting (no-op unless `--timings`).
+        let _phase = almide_base::profile::phase_scope(almide_base::profile::Phase::Check);
+        self.check_top_let_shapes(&program.decls);
         // ADR-0006 D1 (#1108): record every fn DECLARED `-> T!` before
         // resolution erases the marker, so a named callback argument's
         // fallibility bit is known at HOF call sites.
