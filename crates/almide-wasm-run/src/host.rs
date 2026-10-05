@@ -665,19 +665,25 @@ fn host_linker(engine: &wasmtime::Engine) -> anyhow::Result<wasmtime::Linker<Hos
     Ok(linker)
 }
 
-/// The one stderr line a trapped run reports (#1826), in the `Error: `
-/// abort form: wasmtime's own `Trap` Display — already spelled
-/// `wasm trap: <reason>` ("out of bounds memory access", "wasm
-/// `unreachable` instruction executed", "call stack exhausted", …) —
-/// when the error is a trap, else the chain's root cause under the same
-/// prefix. Never the multi-line backtrace.
 /// The `unreachable` trap — the instruction the die lowering ends on.
 fn is_unreachable_trap(e: &wasmtime::Error) -> bool {
     matches!(e.downcast_ref::<wasmtime::Trap>(), Some(wasmtime::Trap::UnreachableCodeReached))
 }
 
+/// The one stderr line a trapped run reports (#1826), in the `Error: `
+/// abort form: `Error: stack overflow` for call-stack exhaustion (C-196),
+/// otherwise wasmtime's own `Trap` Display — already spelled
+/// `wasm trap: <reason>` ("out of bounds memory access", "wasm
+/// `unreachable` instruction executed", …) — when the error is a trap,
+/// else the chain's root cause under the same prefix. Never the
+/// multi-line backtrace.
 fn trap_line(e: &wasmtime::Error) -> String {
     match e.downcast_ref::<wasmtime::Trap>() {
+        // C-196: call-stack exhaustion is ALS-T6's defined abort, spelled as
+        // the native leg spells it (prelude_stack.rs), not as wasmtime's
+        // `wasm trap: call stack exhausted`. The depth it happens at stays
+        // this host's own ([`EMBEDDED_WASM_STACK`]).
+        Some(wasmtime::Trap::StackOverflow) => "Error: stack overflow\n".to_string(),
         Some(t) => format!("Error: {t}\n"),
         None => format!("Error: wasm trap: {}\n", e.root_cause()),
     }
@@ -742,6 +748,17 @@ mod tests {
         let r = run_wasm(&module(&oob)).expect("engine runs the module");
         assert_eq!(r.exit, 1);
         assert_eq!(r.stderr, "Error: wasm trap: out of bounds memory access\n");
+    }
+
+    /// C-196: an unbounded non-tail self-call exhausts the wasm stack, and the
+    /// run ends with ALMIDE's abort line for it — the native leg's spelling —
+    /// not wasmtime's `wasm trap: call stack exhausted`.
+    #[test]
+    fn stack_exhaustion_is_the_defined_abort() {
+        let r = run_wasm(&module(&[Instruction::Call(0)])).expect("engine runs the module");
+        assert_eq!(r.exit, 1);
+        assert_eq!(r.stdout, "");
+        assert_eq!(r.stderr, "Error: stack overflow\n");
     }
 
     /// A runaway program is STOPPED, not hung (#2955): the test harness's
