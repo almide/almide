@@ -519,12 +519,11 @@ impl Emitter<'_> {
                         // witnesses a second holder (a borrowed subject
                         // takes +1; an owned one is the cursor's own), and
                         // the cursor releases its credit after the loop.
-                        if !self.rc_owned_result(iterable) {
+                        let owned = self.rc_owned_result(iterable);
+                        if !owned {
                             self.rc_inc_top();
                         }
-                        // The cursor's share and its release after the loop
-                        // are not recorded yet (#2757).
-                        self.witness_decline("forin-map");
+                        let cursor = self.witness.as_mut().map(|w| w.cursor_take(owned));
                         let drop_map = self.dec_fn_of(SliceTy::Map(kh, vh));
                         let bh = self.hold_i32()?;
                         let cur = self.hold_i32()?;
@@ -547,12 +546,18 @@ impl Emitter<'_> {
                             i.local_get(cur).local_get(end).i32_ge_u().br_if(1);
                             i.local_get(cur).i32_const(koff as i32).i32_add();
                         }
+                        // One activation per entry; the key and the value are
+                        // VIEWS of the entry's slots.
+                        self.witness_loop_open();
                         self.load_ty_slot_at(k);
                         self.f.instructions().local_set(ki);
+                        self.witness_view_local(ki, k);
                         self.f.instructions().local_get(cur).i32_const(voff as i32).i32_add();
                         self.load_ty_slot_at(v);
                         self.f.instructions().local_set(vi);
+                        self.witness_view_local(vi, v);
                         self.lower_loop_body(body, true)?;
+                        self.witness_loop_close();
                         self.f
                             .instructions()
                             .local_get(cur)
@@ -563,6 +568,9 @@ impl Emitter<'_> {
                             .end()
                             .end();
                         self.f.instructions().local_get(bh).call(drop_map);
+                        if let (Some(w), Some(o)) = (self.witness.as_mut(), cursor) {
+                            w.cursor_release(o);
+                        }
                         self.release_i32();
                         self.release_i32();
                         self.release_i32();

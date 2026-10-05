@@ -587,17 +587,9 @@ fn stmt_body_subset(e: &IrExpr) -> Option<Why> {
         IrExprKind::While { cond, body } => value_subset(cond)
             .map(|w| w.inside("while-cond"))
             .or_else(|| stmts_subset(body).map(Why::Deep)),
-        // A map walk shares its subject for the cursor and releases it
-        // after the loop — sites the recorder does not hook yet.
-        IrExprKind::ForIn { iterable, .. }
-            if matches!(
-                &iterable.ty,
-                almide_types::types::Ty::Applied(almide_types::types::constructor::TypeConstructorId::Map, _)
-            ) =>
-        {
-            Some(Why::Deep("forin-map".into()))
-        }
-        // A range head is a counting loop over its bounds — no list.
+        // A range head is a counting loop over its bounds — no list. A map
+        // walk's cursor takes and settles its own credit on the subject
+        // (witness_rest.rs `cursor_take`), each entry an activation.
         IrExprKind::ForIn { iterable, body, .. } => match &iterable.kind {
             IrExprKind::Range { start, end, .. } => value_subset(start).or_else(|| value_subset(end)),
             _ => value_subset(iterable),
