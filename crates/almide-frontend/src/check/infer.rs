@@ -164,7 +164,16 @@ impl Checker {
                         // Constructor with payload used as value → function type
                         VariantPayload::Tuple(tys) if !tys.is_empty() =>
                             self.ctor_fn_value_ty(&case, type_name.as_str(), type_name),
-                        _ => Ty::Named(type_name, vec![])
+                        // #3394: a unit case of a generic type carries its
+                        // type's params as fresh vars, as the qualified
+                        // `m.Tip` and the payload cases already do. Bare
+                        // `Tree` (no args) unified with any `Tree[_]` as a
+                        // wildcard, so `depth(Tip)` passed check with `A`
+                        // never pinned and mono left the call unspecialised.
+                        _ => {
+                            let generic_args = self.instantiate_type_generics(type_name.as_str());
+                            Ty::Named(type_name, generic_args)
+                        }
                     }
                 }
                 else if let Some(ty) = self.selective_top_let_ty(name) { ty }

@@ -1,0 +1,15 @@
+// #3394: an un-annotated binding of a bare unit case of a generic variant
+// (`let t = Tip`) keeps the variant's type parameter open when no later
+// use pins it. It passed check while both builds failed; it is E025, the
+// same rule as `let o = none`, never silently defaulted.
+type Tree[A] = | Tip | Bin(Tree[A], A, Tree[A])
+
+fn depth[A](t: Tree[A]) -> Int = match t {
+  Tip => 0,
+  Bin(l, _, r) => 1 + int.max(depth(l), depth(r)),
+}
+
+fn main() -> Unit = {
+  let t: Tree[Int] = Tip
+  println(int.to_string(depth(t)))
+}
