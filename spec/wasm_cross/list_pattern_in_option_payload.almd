@@ -1,0 +1,40 @@
+// @contract: C-070
+// #3413: a list pattern nested below an option payload — directly, inside a
+// tuple element, or two options deep — tests the list's length and binds its
+// elements on both targets. Native kept a list pattern below any position
+// but the top of an arm (or a tuple element) unlowered and panicked in the
+// compiler. The custom-variant payload form (`Op(_, [_, b])`) is pinned by
+// tests/nested_list_pattern_variant_test.rs: the incumbent brick walls a
+// custom-variant match on a list payload, so it stays out of this corpus.
+fn pair_sum(o: List[Int]?) -> Int = match o {
+  some([x, y]) => x + y,
+  some([x]) => x,
+  _ => 0,
+}
+
+fn in_tuple(p: (List[Int]?, Int)) -> Int = match p {
+  (some([x]), 1) => x,
+  (some([x, y]), _) => x + y,
+  _ => 0,
+}
+
+fn nested_opt(o: (List[Int]?)?) -> Int = match o {
+  some(some([x, _])) => x,
+  some(none) => -1,
+  _ => 0,
+}
+
+fn main() -> Unit = {
+  println(int.to_string(pair_sum(some([3, 4]))))
+  println(int.to_string(pair_sum(some([5]))))
+  println(int.to_string(pair_sum(some([1, 2, 3]))))
+  println(int.to_string(pair_sum(none)))
+  println(int.to_string(in_tuple((some([7]), 1))))
+  println(int.to_string(in_tuple((some([7]), 2))))
+  println(int.to_string(in_tuple((some([7, 8]), 2))))
+  println(int.to_string(in_tuple((none, 1))))
+  println(int.to_string(nested_opt(some(some([9, 1])))))
+  println(int.to_string(nested_opt(some(some([9])))))
+  println(int.to_string(nested_opt(some(none))))
+  println(int.to_string(nested_opt(none)))
+}
