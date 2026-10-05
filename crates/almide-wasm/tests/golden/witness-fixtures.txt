@@ -1,7 +1,7 @@
 # spec/wasm_cross fixtures whose EVERY frame in the shipped emission pass carries a
 # certificate the portable checker (almide-verify) accepts (#2754). GROW-ONLY; re-anchor with
 # ALMIDE_UPDATE_WITNESS_FLOOR=1 cargo test --release -p almide-wasm --test witness_floor
-# certified: 855 of 902
+# certified: 861 of 902
 spec/wasm_cross/accum_recursion_declined.almd
 spec/wasm_cross/accum_recursion_int.almd
 spec/wasm_cross/adr0005_operator_equivalence.almd
@@ -107,6 +107,7 @@ spec/wasm_cross/codec_string_escapes.almd
 spec/wasm_cross/codec_triple_list.almd
 spec/wasm_cross/codec_variant_roundtrip.almd
 spec/wasm_cross/codec_whitespace_tolerance.almd
+spec/wasm_cross/collection_literals.almd
 spec/wasm_cross/composition_fuzz_batch.almd
 spec/wasm_cross/compound_eq.almd
 spec/wasm_cross/compound_repr_interp.almd
@@ -311,6 +312,7 @@ spec/wasm_cross/index_bounds_write_heap.almd
 spec/wasm_cross/index_bounds_write_only_var.almd
 spec/wasm_cross/inplace_clear_alias.almd
 spec/wasm_cross/inplace_clear_alias_field.almd
+spec/wasm_cross/inplace_clear_family.almd
 spec/wasm_cross/inplace_mutator_statement.almd
 spec/wasm_cross/int8_div_overflow.almd
 spec/wasm_cross/int_bit_family.almd
@@ -432,6 +434,8 @@ spec/wasm_cross/loop_buffer_churn.almd
 spec/wasm_cross/loop_effect_match_stmt.almd
 spec/wasm_cross/loop_outer_inplace_mutate_rc.almd
 spec/wasm_cross/loop_push_trailing_increment.almd
+spec/wasm_cross/map_entries_reclaim.almd
+spec/wasm_cross/map_entry_loop.almd
 spec/wasm_cross/map_filter.almd
 spec/wasm_cross/map_fold.almd
 spec/wasm_cross/map_fold_heap_acc.almd
@@ -446,6 +450,7 @@ spec/wasm_cross/map_literal_ctor_values.almd
 spec/wasm_cross/map_of_maps_value.almd
 spec/wasm_cross/map_rich_variant_key.almd
 spec/wasm_cross/map_set_eq.almd
+spec/wasm_cross/map_set_in_place.almd
 spec/wasm_cross/map_set_index_threshold.almd
 spec/wasm_cross/map_set_ops.almd
 spec/wasm_cross/map_set_typechange.almd
@@ -505,6 +510,7 @@ spec/wasm_cross/mut_call_hoisted_args_distinct.almd
 spec/wasm_cross/mut_call_nested_read_before.almd
 spec/wasm_cross/mut_call_two_mut_args_read.almd
 spec/wasm_cross/mut_map_param.almd
+spec/wasm_cross/mut_param_alias_cow.almd
 spec/wasm_cross/mut_param_alias_in_place_mutators.almd
 spec/wasm_cross/mut_param_branch_forward.almd
 spec/wasm_cross/mut_param_cell_tail_capture_read.almd
