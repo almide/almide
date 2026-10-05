@@ -1,0 +1,20 @@
+// #3388: selectively imported top-level lets whose value is a variant built
+// by a constructor (`ZERO`) or a function (`inc`). Moved out of
+// spec/integration/modules/selective_ctor_let_test.almd because the MIR
+// lowering walls both reads (a heap cross-module let with a constructor
+// initializer; a call through a cross-module function value) and the spec
+// corpus may not add a walled function. tests/selective_import_ctor_let_test.rs
+// runs it on both legs next to a copy of spec/integration/modules/selvar.
+import selvar.{T, V, A, size, NUMBERS, ZERO, inc}
+
+fn mk() -> T = A(V(1), V(2))
+
+test "a selectively imported constructor-built let" {
+  assert_eq(size(ZERO), 1)
+  assert_eq(size(A(mk(), ZERO)), 3)
+}
+
+test "a selectively imported function-valued let is called through its value" {
+  assert_eq(inc(41), 42)
+  assert_eq(list.map(NUMBERS, inc), [2, 3, 4])
+}
