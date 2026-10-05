@@ -1,7 +1,6 @@
 # Structural witness decline histogram (#2754): reason<TAB>declined frames of the
 # SHIPPED emission pass (fixture x fn, over the spec/wasm_cross rows of the run manifest). SHRINK-ONLY per reason; re-anchor with
 # ALMIDE_UPDATE_WITNESS_FLOOR=1 cargo test --release -p almide-wasm --test witness_floor
-arm-value:borrowed-temp	1
 bind:view-result	6
 call-arg:Lambda:fs.__fallible_fold_lines:propagating	1
 call-arg:Lambda:list.group_by	1
