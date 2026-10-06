@@ -32,6 +32,8 @@ use crate::SliceTy;
 pub(crate) mod witness_mut;
 #[path = "witness_inline.rs"]
 mod witness_inline;
+#[path = "witness_guard.rs"]
+mod witness_guard;
 
 /// A hooked node's identity for the module-call audit.
 fn node(e: &almide_ir::IrExpr) -> usize {
@@ -356,8 +358,10 @@ impl Emitter<'_> {
     /// initializer is born and released after the copy (`id`), the fresh
     /// copy moves into the global (`im`). Any other shape: an owned value
     /// moves into the global (`im`); a borrowed one takes a share at the
-    /// store (#2992) on a source object this frame does not track (another
-    /// global, a pool static) — not modelled, so it declines.
+    /// store (#2992) and the share moves into the global (`am`, a view's).
+    /// The initializer lowers with this frame's locals hidden (func.rs), so
+    /// what it borrows is held by another global or is a pool static —
+    /// never an object this frame holds a credit of.
     pub(crate) fn witness_top_let(&mut self, declared: SliceTy, owned: bool, copied: bool) {
         if !self.rc_droppable(declared) {
             return;
@@ -369,7 +373,7 @@ impl Emitter<'_> {
                 w.temp_move();
             }
             (true, false) | (false, true) => w.temp_move(),
-            (false, false) => w.decline("top-let:borrowed"),
+            (false, false) => w.view_share_move(),
         }
     }
 

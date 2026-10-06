@@ -7,8 +7,10 @@
 //! released, a share moved into a callee), so a path that falls through
 //! leaves the guard in the state it entered with, and the guard's events are
 //! judged against that same state on its own arm. A guard that binds a local
-//! (a block, a lambda, a nested match) still declines: the local outlives it.
-//! No new event letter.
+//! (a block, a lambda, a nested match) keeps it past the guard: that arm is
+//! recorded as its verdict site and its select site (witness_guard.rs), so
+//! the local's release is checked on every path it runs on, the fall-through
+//! ones included. No new event letter.
 
 const PROGRAM: &str = r#"type R = { k: String, n: Int }
 
@@ -75,7 +77,7 @@ fn accepted(cert: &str) -> bool {
 }
 
 #[test]
-fn guarded_arms_witness_on_their_own_path_and_a_binding_guard_declines() {
+fn guarded_arms_witness_on_their_own_path_and_a_binding_guard_on_every_path_past_it() {
     // ONE test: the witness sink is process-global.
     let w = witnesses();
     for name in ["eq_guard", "call_guard", "len_guard", "or_guard"] {
@@ -90,8 +92,16 @@ fn guarded_arms_witness_on_their_own_path_and_a_binding_guard_declines() {
     assert_eq!(w["call_guard"], "\n\n\n{|im}\n{|im}\n{|im}\nim\n");
     assert_eq!(w["len_guard"], "\n\n{|im}\n{|im}\n{|im}\nim\n");
     assert_eq!(w["or_guard"], "\n\n");
-    // A guard that binds a local declines: an explicit `let` block, and
-    // `f(x)!`, whose carrier arg_temps parks in a `let` before the guard.
-    assert_eq!(w["binds_guard"], "!decline:match-guard:binds\n");
-    assert_eq!(w["bang_guard"], "!decline:match-guard:binds\n");
+    // A guard that binds a local: an explicit `let` block (a scalar: no
+    // event), and `f(x)!`, whose carrier arg_temps parks in a `let` before
+    // the guard. Each carrier is born on its verdict arm and released on
+    // every path past the guard: the arm's, the fall-through's, and the
+    // later guard's `!` exit (`{ibdx|}`).
+    assert_eq!(w["binds_guard"], "\n");
+    assert_eq!(w["bang_guard"], "{ibadmx|}{ibdx|}{|ibd}\n{ibadmx|}{|ibd}\n{|im}\n");
+    assert!(accepted(&w["bang_guard"]));
+    // Drill: the first carrier's release dropped on the path that falls
+    // through to the second arm's `!` exit — a leak the checker must see.
+    let leak = w["bang_guard"].replacen("{ibdx|}", "{ibx|}", 1);
+    assert!(!accepted(&leak), "a fall-through leak of a guard-bound carrier was accepted: {leak:?}");
 }
