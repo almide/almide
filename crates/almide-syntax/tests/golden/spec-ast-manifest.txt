@@ -1,4 +1,4 @@
-# oracle: almide 0.67.0 (dev) at a10818a0f — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.67.0 (dev) at 1f19412ca — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 9e174e6cc9ab173d59b961cc661eb5ad49ebf240e8099edca409c3a40db9f4d4	spec/churn/closure_env_churn.almd
 2b1c42676caca20af04e182941d53484f93c88e08fb03a09efc07e94ec37f895	spec/churn/construct_from_temp_churn.almd
 5d02cd41ef410020f099769da494465fd8141da0fd1068072ee3e94df9d143d3	spec/churn/enumerate_rich_churn.almd
@@ -1307,6 +1307,7 @@ ee9b26a4ffba1c3a3cfe710a45c8535d8ad5c9aaba39089cd6dd23578624a409	spec/wasm_cross
 408b2195e0c395c046a0d06788f31063272de58103b4ff8e44b40a8c79b77a4d	spec/wasm_cross/mut_call_nested_read_before.almd
 ab4b6c71ea435e69d258085ad4fa1115e80e6aab4e9bfa47b4f436c99b288a64	spec/wasm_cross/mut_call_two_mut_args_read.almd
 6629415c72315dee8d6792e569f6d22bea14478a96a891cc1b12c6ba93778ad4	spec/wasm_cross/mut_heap_param.almd
+b709bc50a97e54453a5f00145c68dce898e557d67611f2d02a95ae7457d12a51	spec/wasm_cross/mut_list_param_read_by_range_ops.almd
 e011300bc9a1e05f7b6dd7f70ee83f1b3f56b02a4fb5da1d85611eb88e68f405	spec/wasm_cross/mut_map_param.almd
 a6ea07ec07b9f2fafaca4c0a2227a8425f6dc24e95356dca958c8b7e18310ed3	spec/wasm_cross/mut_param_alias_cow.almd
 b1685fede8f5e72042edda5f3b03860b9a4b4ce9d211cf9ee60159ebc85c7457	spec/wasm_cross/mut_param_alias_in_place_mutators.almd
