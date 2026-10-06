@@ -362,13 +362,15 @@ fn value_subset(e: &IrExpr) -> Option<Why> {
 /// first): the element is a VIEW of the list's slot — a consumer that keeps
 /// it shares it (`is_extraction_view`), a reader spends nothing — and an
 /// out-of-bounds index aborts after the frame's owners are released, a
-/// recorded exit arm. A Bytes index has its own unrecorded abort.
+/// recorded exit arm. A Bytes index reads a scalar byte, and its abort is a
+/// recorded abort site of its own (bytes_rw.rs `lower_bytes_index`).
 fn index_subset(object: &IrExpr, index: &IrExpr) -> Option<Why> {
+    use almide_types::types::{constructor::TypeConstructorId as TC, Ty};
     let core = crate::rc_ownership::rc_tail(object);
     if !crate::witness_unwrap::slot_read_of_var(object) {
         return Some(Why::Here(format!("IndexAccess-object:{}", tag(&core.kind))));
     }
-    if !matches!(&core.ty, almide_types::types::Ty::Applied(almide_types::types::constructor::TypeConstructorId::List, _)) {
+    if !matches!(&core.ty, Ty::Applied(TC::List, _) | Ty::Bytes) {
         return Some(Why::Here("IndexAccess:non-list".into()));
     }
     value_subset(object).or_else(|| value_subset(index).map(|w| w.inside("index")))

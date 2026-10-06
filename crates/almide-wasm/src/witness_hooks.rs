@@ -232,10 +232,16 @@ impl Emitter<'_> {
     /// withdraws it.
     pub(crate) fn witness_record_default(&mut self, d: &almide_ir::IrExpr) {
         use almide_ir::IrExprKind as K;
-        if !matches!(
-            &d.kind,
-            K::LitInt { .. } | K::LitFloat { .. } | K::LitBool { .. } | K::LitStr { .. } | K::Unit | K::OptionNone
-        ) {
+        // A list of literals (`tags: List[String] = []`, `= [1, 2]`) is a
+        // fresh block whose element stores are the list literal's own hooks.
+        fn literal(d: &almide_ir::IrExpr) -> bool {
+            match &d.kind {
+                K::LitInt { .. } | K::LitFloat { .. } | K::LitBool { .. } | K::LitStr { .. } | K::Unit | K::OptionNone => true,
+                K::List { elements } => elements.iter().all(literal),
+                _ => false,
+            }
+        }
+        if !literal(d) {
             self.witness_decline("record:default");
         }
     }
