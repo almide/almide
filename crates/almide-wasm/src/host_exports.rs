@@ -220,3 +220,31 @@ impl Drop for JsHostGuard {
         STRING_ABI.with(|c| c.set(false));
     }
 }
+
+/// The allocator state a host shim saves before a unit of work that leaves
+/// nothing live, and restores after it, so that everything the work
+/// allocated is taken back at once (#3444: the stock serve export runs each
+/// request in such an arena).
+///
+/// It is the state a region window (region.rs) files: the bump pointer, the
+/// size-class free-list heads and the large-list head. A host-side arena
+/// also covers the two runtime blocks that live by design once made
+/// (func_toplets.rs, `release_runtime_blocks_for_measurement`): the
+/// keyed-lookup side table (`G_MAPIDX`) and the line-buffer arena a build
+/// that outgrew the fixed room relocated to (`G_LINE_DELTA` / `G_LINE_ROOM`,
+/// with the build cursor beside them).
+///
+/// The saver must zero the heads after saving them, as `RegionSave` does: a
+/// block filed outside the arena must not be taken inside it, or the restore
+/// would file it again with its link word overwritten.
+pub mod arena {
+    /// The mutable i32 globals to save and restore, by global index. The first
+    /// is the bump pointer, the one the module exports as `__heap`.
+    pub const GLOBALS: [u32; 5] = [crate::G_HEAP, crate::G_LINE_CURSOR, crate::G_LINE_DELTA, crate::G_LINE_ROOM, crate::G_MAPIDX];
+
+    /// The free-list heads, as absolute addresses of i32 words: the large-list
+    /// head, then the sixteen class slots (the unused ones stay zero).
+    pub fn head_words() -> impl Iterator<Item = u32> {
+        std::iter::once(crate::runtime_large::LARGE_HEAD).chain((0..16).map(|k| crate::FREELIST_BASE + 4 * k))
+    }
+}
