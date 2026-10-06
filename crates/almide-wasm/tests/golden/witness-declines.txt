@@ -8,7 +8,6 @@ call-arg:Lambda:map.__fallible_map__Int_String_String_Int	1
 caps:argv-in-plain-fn	8
 heap-operand:OptionNone	3
 interp-part:IndexAccess:non-list	2
-match-guard:binds	8
 module-arm:unaudited:fan.__par_0	3
 operand:IndexAccess:non-list	1
 payload:UnwrapOr-carrier:OptionNone	1
