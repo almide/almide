@@ -542,7 +542,7 @@ impl Emitter<'_> {
         } else {
             crate::fs::witness_walkers::WalkAcc::Carried(None)
         };
-        self.fs_frames_foreach_borrowed(hraw, hlen, Some((cb, act)), |em| {
+        self.fs_frames_foreach_borrowed(hraw, hlen, Some((cb, act)), |em, _| {
             em.f.instructions().local_set(params[1]);
             // once an err landed, the callback never runs again
             em.f.instructions().local_get(hr).i32_eqz().if_(BlockType::Empty);
@@ -653,9 +653,19 @@ impl Emitter<'_> {
         let acc_dec = self.elem_is_handle(acc_ty).then(|| self.dec_fn_of(acc_ty));
         let hline = self.hold_i32()?;
         let hres = self.hold_i32()?;
-        self.fs_frames_foreach_borrowed(hraw, hlen, None, |em| {
+        // #2755: the walk holds the accumulator in `hacc` — a frame owner
+        // bound before the loop, as the inline fold's param is.
+        let record = self.witness_fallible_walk(Some((hacc, acc_ty)), true);
+        let heap_acc = record && acc_dec.is_some();
+        let act = if heap_acc {
+            crate::fs::witness_walkers::WalkAcc::Outer(hacc)
+        } else {
+            crate::fs::witness_walkers::WalkAcc::Carried(None)
+        };
+        self.fs_frames_foreach_borrowed(hraw, hlen, Some((cb, act)), |em, line| {
             em.f.instructions().local_set(hline);
             em.f.instructions().local_get(hr).i32_eqz().if_(BlockType::Empty);
+            em.witness_fallible_open(record);
             // Closure convention (calls.rs): env first, then the args —
             // each a borrowed view, so the RC-3 callee-owned guard +1s
             // it (the closure's epilogue decs its params).
@@ -663,13 +673,16 @@ impl Emitter<'_> {
             em.f.instructions().local_get(hacc);
             if acc_droppable {
                 em.rc_inc_top();
+                em.witness_walk_share(heap_acc.then_some(hacc), None);
             }
             em.f.instructions().local_get(hline);
             if line_droppable {
                 em.rc_inc_top();
+                em.witness_walk_share(None, line);
             }
             em.f.instructions().local_get(hcl).i32_load(slot_memarg(0));
             em.f.instructions().call_indirect(0, ti);
+            let wc = em.witness_fallible_carrier(record);
             let mut i = em.f.instructions();
             i.local_set(hres);
             i.local_get(hres).i32_load(slot_memarg(almide_layout::SUM_TAG)).i32_eqz();
@@ -687,11 +700,13 @@ impl Emitter<'_> {
             i.local_get(hres).local_set(hr);
             i.end();
             i.end();
+            em.witness_fallible_close(wc, true, heap_acc.then_some(hacc));
             Ok(())
         })?;
         self.release_i32();
         self.release_i32();
         self.fs_frames_release_raw(hraw, herr);
+        self.witness_fallible_result(heap_acc, hacc, acc_ty);
         let hs = self.hold_i32()?;
         {
             let mut i = self.f.instructions();

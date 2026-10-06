@@ -424,13 +424,14 @@ impl Emitter<'_> {
     ///
     /// `act`: the inlined callback (and its heap accumulator's local) whose
     /// activation each iteration is, for the witness (witness_walkers.rs);
-    /// `None` for a callback called as a closure value.
+    /// `None` declines. `body` receives the line's witness object (a closure
+    /// route shares the line into the callee).
     pub(crate) fn fs_frames_foreach_borrowed(
         &mut self,
         hraw: u32,
         hlen: u32,
         act: Option<(&IrExpr, crate::fs::witness_walkers::WalkAcc)>,
-        body: impl FnOnce(&mut Self) -> Result<(), EmitError>,
+        body: impl FnOnce(&mut Self, Option<u32>) -> Result<(), EmitError>,
     ) -> Result<(), EmitError> {
         let hln = self.hold_i32()?;
         let dec_str = self.dec_fn_of(STR);
@@ -443,7 +444,7 @@ impl Emitter<'_> {
                 }
             };
             em.f.instructions().local_tee(hln);
-            body(em)?;
+            body(em, line)?;
             em.f.instructions().local_get(hln).call(dec_str);
             if act.is_some() {
                 em.witness_line_close(line);
@@ -536,7 +537,7 @@ impl Emitter<'_> {
                 // result takes its share, and the replaced accumulator is
                 // released before the rebind (#3137).
                 let acc_dec = self.elem_is_handle(acc_ty).then(|| self.dec_fn_of(acc_ty));
-                self.fs_frames_foreach_borrowed(hraw, hlen, Some((cb, crate::fs::witness_walkers::WalkAcc::Carried(Some(params[0])))), |em| {
+                self.fs_frames_foreach_borrowed(hraw, hlen, Some((cb, crate::fs::witness_walkers::WalkAcc::Carried(Some(params[0])))), |em, _| {
                     em.f.instructions().local_set(params[1]);
                     em.lower(body, Some(acc_ty))?;
                     em.rc_share_guard(body, acc_ty);
@@ -579,7 +580,7 @@ impl Emitter<'_> {
                 let (params, body) = self.hof_lambda(cb, 1)?;
                 self.fs_call_1(p, OP_FOR_EACH_LINE)?;
                 let (hraw, hlen, herr) = self.fs_frames_or_err()?;
-                self.fs_frames_foreach_borrowed(hraw, hlen, Some((cb, crate::fs::witness_walkers::WalkAcc::Carried(None))), |em| {
+                self.fs_frames_foreach_borrowed(hraw, hlen, Some((cb, crate::fs::witness_walkers::WalkAcc::Carried(None))), |em, _| {
                     em.f.instructions().local_set(params[0]);
                     em.lower_stmt_expr(body)?;
                     Ok(())
