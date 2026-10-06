@@ -117,6 +117,10 @@ impl Emitter<'_> {
             i.local_get(hb).i32_load(len_memarg()).i32_const(estride).i32_div_u().local_set(hn);
             // the request block
             i.i32_const(elems_at as i32).local_get(hn).i32_const(8).i32_mul().i32_add().call(F_ALLOC).local_set(ha);
+        }
+        let request = self.witness_par_room();
+        {
+            let mut i = self.f.instructions();
             let head: Vec<i64> = [k, 0, i64::from(m), i64::from(r)]
                 .into_iter()
                 .chain(fields.iter().flat_map(|&(t, off)| [kind_code(t), i64::from(almide_layout::PAYLOAD + off)]))
@@ -147,6 +151,11 @@ impl Emitter<'_> {
             i.local_get(hi).i32_const(1).i32_add().local_set(hi).br(0).end().end();
             // the answer room
             i.local_get(hn).i32_const(width as i32).i32_mul().call(F_ALLOC).local_set(ho);
+        }
+        let answer = self.witness_par_room();
+        self.witness_par_served(!fields.is_empty());
+        {
+            let mut i = self.f.instructions();
             i.i32_const(OP_FAN_PAR);
             i.local_get(ha).i32_const(almide_layout::PAYLOAD as i32).i32_add();
             i.local_get(ha).i32_load(len_memarg());
@@ -186,6 +195,7 @@ impl Emitter<'_> {
             i.else_();
         }
         // not served: the sequential map, exactly as before the rewrite
+        self.witness_par_fallback(fallback);
         self.lower(fallback, Some(out_ty))?;
         {
             let mut i = self.f.instructions();
@@ -193,6 +203,7 @@ impl Emitter<'_> {
             i.local_get(ha).call(F_FREE);
             i.local_get(ho).call(F_FREE);
         }
+        self.witness_par_close([request, answer]);
         for _ in 0..6 {
             self.release_i32();
         }
