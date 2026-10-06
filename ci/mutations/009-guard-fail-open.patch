@@ -2,10 +2,10 @@ diff --git a/crates/almide-wasm/src/patterns.rs b/crates/almide-wasm/src/pattern
 index 50f0e4ef9..d288afc22 100644
 --- a/crates/almide-wasm/src/patterns.rs
 +++ b/crates/almide-wasm/src/patterns.rs
-@@ -96,7 +96,7 @@ impl Emitter<'_> {
-                 self.emit_pattern_binds(&arm.pattern, subj_ty, scr)?;
+@@ -111,7 +111,7 @@ impl Emitter<'_> {
                  self.witness_pattern_views(&arm.pattern);
                  self.lower(g, Some(BOOL))?;
+                 self.witness_verdict_close(split);
 -                self.f.instructions().else_().i32_const(0).end();
 +                self.f.instructions().else_().i32_const(1).end();
              }
