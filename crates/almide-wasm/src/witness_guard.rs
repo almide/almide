@@ -19,6 +19,12 @@
 //! verdict site, so the guard's events reach the fall-through paths too.
 //! The product includes infeasible pairs (pattern failed × body); a path set
 //! that is a superset of the executable one only adds checks.
+//!
+//! The same derived-select recording carries `let t = if c then a else b`
+//! over two borrowed reads (#2755, `bind:view-result`): the Bind route's
+//! `rc_inc_top` lands on whichever block the `if` chose, so the share is
+//! recorded as a select site after the `if`'s own, each arm aliasing the
+//! local to its own source (`witness_bind_select`).
 
 use crate::emitter::Emitter;
 
@@ -59,5 +65,40 @@ impl Emitter<'_> {
         if split {
             self.witness_branch_close();
         }
+    }
+
+    /// The two sources of `if c then a else b` when each arm is a bound
+    /// local (`Some(local)`) or a view the arm reads out of one — a slot
+    /// read, a `!` payload, a global (`None`). `None` for any other value.
+    fn witness_if_sources(&self, value: &almide_ir::IrExpr) -> Option<[Option<u32>; 2]> {
+        let almide_ir::IrExprKind::If { then, else_, .. } = &crate::rc_ownership::rc_tail(value).kind else {
+            return None;
+        };
+        let source = |arm: &almide_ir::IrExpr| match self.witness_src_local(arm) {
+            Some(l) => Some(Some(l)),
+            None if crate::witness_unwrap::is_extraction_view(arm) || self.witness_top_let_ty(arm).is_some() => Some(None),
+            None => None,
+        };
+        Some([source(then)?, source(else_)?])
+    }
+
+    /// A borrowed `if` bound to `idx` (stmts.rs, right after the Bind route's
+    /// share): a select site whose arms each take the share on their own
+    /// source — a local's block (`a`, aliased as `bind_alias` does) or a
+    /// view (`bind_view`). False when the value is not such an `if`.
+    pub(crate) fn witness_bind_select(&mut self, idx: u32, value: &almide_ir::IrExpr) -> bool {
+        let Some(sources) = self.witness_if_sources(value) else { return false };
+        let Some(w) = self.witness.as_mut() else { return true };
+        w.branch_open();
+        for src in sources {
+            w.branch_arm();
+            match src {
+                Some(l) if w.bind_alias(idx, l) => {}
+                Some(_) => w.poison(),
+                None => w.bind_view(idx),
+            }
+        }
+        w.branch_close();
+        true
     }
 }

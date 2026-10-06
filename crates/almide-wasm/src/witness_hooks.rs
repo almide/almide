@@ -44,7 +44,7 @@ impl Emitter<'_> {
     /// The local whose object a value SHARES: a Var, read through block
     /// tails (`{ let t = …; t }` is `t`'s object — the routes' +1 lands on
     /// the tail's value, `rc_owned_result` reads through blocks the same way).
-    fn witness_src_local(&self, e: &almide_ir::IrExpr) -> Option<u32> {
+    pub(crate) fn witness_src_local(&self, e: &almide_ir::IrExpr) -> Option<u32> {
         if let almide_ir::IrExprKind::Var { id } = &crate::rc_ownership::rc_tail(e).kind {
             self.locals.get(id).map(|&(l, _)| l)
         } else {
@@ -63,7 +63,13 @@ impl Emitter<'_> {
     pub(crate) fn witness_bind(&mut self, idx: u32, _declared: SliceTy, value: &almide_ir::IrExpr) {
         let src_local = self.witness_src_local(value);
         let owned = self.rc_owned_result(value);
-        let view = crate::witness_unwrap::is_extraction_view(value);
+        // A top-let GLOBAL holds its own credit (a `var` one until a writer
+        // replaces it, which releases only the global's): the bind's share
+        // is a view's, the local its owner from here.
+        let view = crate::witness_unwrap::is_extraction_view(value) || self.witness_top_let_ty(value).is_some();
+        if !owned && self.witness_bind_select(idx, value) {
+            return;
+        }
         let Some(w) = self.witness.as_mut() else { return };
         if owned {
             w.bind_fresh(idx);
@@ -71,7 +77,7 @@ impl Emitter<'_> {
         }
         match src_local {
             Some(src) if w.bind_alias(idx, src) => {}
-            // #2758: a `!` payload read out of a bound carrier.
+            // #2758: a `!` payload read out of a bound carrier, or a global.
             None if view => w.bind_view(idx),
             // The frame withdraws; the local still gets an (opaque) object
             // so its later release or loop-back carry is attributed, not
@@ -279,7 +285,7 @@ impl Emitter<'_> {
     }
 
     /// The declared type of a top-let global `e` names (a Var no local maps).
-    fn witness_top_let_ty(&self, e: &almide_ir::IrExpr) -> Option<SliceTy> {
+    pub(crate) fn witness_top_let_ty(&self, e: &almide_ir::IrExpr) -> Option<SliceTy> {
         let almide_ir::IrExprKind::Var { id } = &e.kind else { return None };
         if self.locals.contains_key(id) {
             return None;
