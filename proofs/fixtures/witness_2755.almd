@@ -1,6 +1,5 @@
 // proofs/gate.sh fixture (#2755): the structural witness's later shapes, one
 // small fn each, so a drill names one object's line.
-
 effect fn raise(x: Int) -> Int = if x == 0 then err("zero") else ok(x)
 
 // A callback that RAISES over a Map / a Set instantiates the self-hosted
@@ -16,8 +15,19 @@ fn is_none(o: String?) -> Bool = o == none
 // `none ?? fallback`: the carrier is NULL, the fresh fallback joins.
 fn or_fresh(s: String) -> String = none ?? s + "!"
 
+// A Bytes index reads a scalar byte; out of bounds aborts holding `b`.
+fn byte_of(i: Int) -> Int = {
+  let b = bytes.from_list([1, 2, 3])
+  b[i]
+}
+
+// A record literal that omits a field with a literal-list default.
+type Tagged = { name: String, tags: List[String] = [] }
+
+fn tagged(n: String) -> Tagged = Tagged { name: n }
+
 effect fn main() -> Unit = {
   let m = raised_map(["a": 1])!
   let s = raised_set(set.from_list([2]))!
-  println("${map.len(m)} ${set.len(s)} ${is_none(none)} ${or_fresh("x")}")
+  println("${map.len(m)} ${set.len(s)} ${is_none(none)} ${or_fresh("x")} ${byte_of(1)} ${tagged("t").name}")
 }
