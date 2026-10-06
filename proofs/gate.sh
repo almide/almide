@@ -720,6 +720,20 @@ GB=spec/wasm_cross/map_insertion_order.almd
 run_structural "$GB" main 0
 tamper_fixture "$GB" main '93s/^{id|im}$/{i|im}/' "#2755 group_by key"
 
+# ── #2755: an instance-parallel `fan.map` chunk (`fan.__par_K`, fan_par.rs) is
+# a branch site on the host's answer: the served arm copies the answer room
+# into the result list (a tuple element's block moving in), the other arm
+# runs the sequential `list.map` fallback. The request and answer rooms are
+# born before the site and freed after it — lines 48 and 49 of the
+# fixture's `main` are the chunk's request and answer rooms (`{|id}`: the
+# path that left the frame earlier never allocated them). Drill: the answer
+# room never freed.
+echo
+echo "== structural leg, fan par chunk  ⊳  proven checker (#2755) =="
+FP=spec/wasm_cross/fan_map_parallel_scalar.almd
+run_structural "$FP" main 0
+tamper_fixture "$FP" main '49s/^{|id}$/{|i}/' "#2755 fan par answer room"
+
 echo
 echo "== structural leg, names + capabilities  ⊳  proven checker (#2759) =="
 WS=spec/wasm_cross/witness_straightline.almd
