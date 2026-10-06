@@ -662,6 +662,37 @@ echo "ok   structural-tamper(#2758 call modes): a site that lends where its call
 # in the proof). Drills: an index one past the function space (an undefined
 # callee), one past `shed`'s locals, a file write reached from the plain fn,
 # and the same write added to a plain fn's node of the call graph.
+# ── #2755: a match GUARD that binds a local. `seen()!` in a guard binds its
+# Result carrier, which stays in the local past the guard — on the arm's path
+# and on the path the false guard falls through to. The arm is recorded as
+# its verdict site (binds + guard ran, or the pattern failed) followed by its
+# select site (body, or the rest of the chain), so the carrier's release
+# reaches every path it runs on. The or-pattern's second alternative is line
+# 3. Drill: that carrier's release dropped on the path that goes on past it.
+tamper_fixture() { # fixture fn sed-expr label
+  emit_structural "$1" "$2" | sed "$3" > /tmp/structural.tamper
+  if cmp -s /tmp/structural.tamper <(emit_structural "$1" "$2"); then
+    echo "FAIL structural-tamper($4): the drill changed nothing (the witness shape moved)"; exit 1
+  fi
+  set +e; "$ROOT/proofs/checker" ownership /tmp/structural.tamper >/dev/null 2>&1; src_rc=$?; set -e
+  if [ "$src_rc" -ne 1 ]; then echo "FAIL structural-tamper($4): the leak was accepted"; exit 1; fi
+  kernel_verify ownership /tmp/structural.tamper 1   || { echo "FAIL structural-tamper($4): the kernel accepted the leak"; exit 1; }
+  portable_agrees ownership /tmp/structural.tamper 1 || { echo "FAIL structural-tamper($4): almide-verify accepted the leak"; exit 1; }
+  echo "ok   structural-tamper($4): the leak is rejected by the binary AND the kernel"
+}
+echo
+echo "== structural leg, binding match guard  ⊳  proven checker (#2755) =="
+GO=spec/wasm_cross/ref_gleam_or_pattern_alternatives.almd
+run_structural "$GO" guarded 0
+tamper_fixture "$GO" guarded '3s/{|ibd}$/{|ib}/' "#2755 guard-bound carrier"
+# A top-let initialized from ANOTHER global (`MESSAGE_2 = MESSAGE`, line 9)
+# borrows: the store's share moves into the new global (`am`, a view's — the
+# initializer lowers with main's locals hidden, so its source is a global or
+# a static). Drill: the share is taken and never handed to the global.
+GT=spec/wasm_cross/gleam_toplet_consts.almd
+run_structural "$GT" main 0
+tamper_fixture "$GT" main '9s/^am$/a/' "#2755 borrowed top-let"
+
 echo
 echo "== structural leg, names + capabilities  ⊳  proven checker (#2759) =="
 WS=spec/wasm_cross/witness_straightline.almd
