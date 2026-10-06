@@ -1,7 +1,7 @@
 # spec/wasm_cross fixtures whose EVERY frame in the shipped emission pass carries a
 # certificate the portable checker (almide-verify) accepts (#2754). GROW-ONLY; re-anchor with
 # ALMIDE_UPDATE_WITNESS_FLOOR=1 cargo test --release -p almide-wasm --test witness_floor
-# certified: 916 of 926
+# certified: 921 of 926
 spec/wasm_cross/accum_recursion_declined.almd
 spec/wasm_cross/accum_recursion_int.almd
 spec/wasm_cross/adr0005_operator_equivalence.almd
@@ -386,6 +386,7 @@ spec/wasm_cross/koka_reuse1_unzip.almd
 spec/wasm_cross/koka_reuse4_map_rebuild.almd
 spec/wasm_cross/koka_unicode_combining.almd
 spec/wasm_cross/lambda_captures_mut_param.almd
+spec/wasm_cross/lambda_failure_channel.almd
 spec/wasm_cross/leak_free_list_rest_exit.almd
 spec/wasm_cross/leak_free_map_walk_exit.almd
 spec/wasm_cross/leak_free_propagating_literal_operand.almd
@@ -432,6 +433,7 @@ spec/wasm_cross/list_pattern_variant_element.almd
 spec/wasm_cross/list_pop_map_insert_on_record_field.almd
 spec/wasm_cross/list_product_overflow.almd
 spec/wasm_cross/list_push_on_record_field.almd
+spec/wasm_cross/list_reduce_fused_fold_release.almd
 spec/wasm_cross/list_remove_at_oob.almd
 spec/wasm_cross/list_repeat_size_ceiling.almd
 spec/wasm_cross/list_rest_pattern.almd
@@ -538,6 +540,7 @@ spec/wasm_cross/mut_call_hoisted_args_distinct.almd
 spec/wasm_cross/mut_call_hoisted_args_in_branch.almd
 spec/wasm_cross/mut_call_nested_read_before.almd
 spec/wasm_cross/mut_call_two_mut_args_read.almd
+spec/wasm_cross/mut_heap_param.almd
 spec/wasm_cross/mut_map_param.almd
 spec/wasm_cross/mut_param_alias_cow.almd
 spec/wasm_cross/mut_param_alias_in_place_mutators.almd
@@ -550,11 +553,13 @@ spec/wasm_cross/mut_param_closure_capture_write.almd
 spec/wasm_cross/mut_param_closure_field_path_write.almd
 spec/wasm_cross/mut_param_effect_can_err.almd
 spec/wasm_cross/mut_param_effect_never_err.almd
+spec/wasm_cross/mut_param_effect_unpropagated.almd
 spec/wasm_cross/mut_param_err_write_visible.almd
 spec/wasm_cross/mut_param_global_callee_sees_precall.almd
 spec/wasm_cross/mut_param_global_no_reach_in_place.almd
 spec/wasm_cross/mut_param_interpolated.almd
 spec/wasm_cross/mut_param_loop_stays_in_place.almd
+spec/wasm_cross/mut_param_move_mode_gaps.almd
 spec/wasm_cross/mut_param_nested_place_writeback.almd
 spec/wasm_cross/mut_param_reassign_from_hof.almd
 spec/wasm_cross/mut_param_spread_reassign.almd
