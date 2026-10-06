@@ -1,7 +1,7 @@
 # spec/wasm_cross fixtures whose EVERY frame in the shipped emission pass carries a
 # certificate the portable checker (almide-verify) accepts (#2754). GROW-ONLY; re-anchor with
 # ALMIDE_UPDATE_WITNESS_FLOOR=1 cargo test --release -p almide-wasm --test witness_floor
-# certified: 896 of 926
+# certified: 903 of 926
 spec/wasm_cross/accum_recursion_declined.almd
 spec/wasm_cross/accum_recursion_int.almd
 spec/wasm_cross/adr0005_operator_equivalence.almd
@@ -122,6 +122,7 @@ spec/wasm_cross/cross_dep_accumulator.almd
 spec/wasm_cross/cross_module_spread.almd
 spec/wasm_cross/ctor_fn_value.almd
 spec/wasm_cross/ctor_if_payload.almd
+spec/wasm_cross/ctor_scalar_call_payload.almd
 spec/wasm_cross/ctor_turbofish_family.almd
 spec/wasm_cross/ctor_var_copy_semantics.almd
 spec/wasm_cross/datetime_format.almd
@@ -457,6 +458,7 @@ spec/wasm_cross/map_get_fallback_key_and_lazy.almd
 spec/wasm_cross/map_index_order.almd
 spec/wasm_cross/map_index_released_with_block.almd
 spec/wasm_cross/map_index_string_key_shapes.almd
+spec/wasm_cross/map_insertion_order.almd
 spec/wasm_cross/map_interp_string_value.almd
 spec/wasm_cross/map_literal_borrowed_if_arg.almd
 spec/wasm_cross/map_literal_ctor_values.almd
@@ -520,6 +522,7 @@ spec/wasm_cross/mem_checkpoint.almd
 spec/wasm_cross/memory_stress.almd
 spec/wasm_cross/mg_rebuild_two_phase.almd
 spec/wasm_cross/module_global_const.almd
+spec/wasm_cross/module_var_alias_cow.almd
 spec/wasm_cross/mut_call_hoisted_args_distinct.almd
 spec/wasm_cross/mut_call_hoisted_args_in_branch.almd
 spec/wasm_cross/mut_call_nested_read_before.almd
@@ -541,15 +544,19 @@ spec/wasm_cross/mut_param_global_callee_sees_precall.almd
 spec/wasm_cross/mut_param_global_no_reach_in_place.almd
 spec/wasm_cross/mut_param_interpolated.almd
 spec/wasm_cross/mut_param_loop_stays_in_place.almd
+spec/wasm_cross/mut_param_nested_place_writeback.almd
 spec/wasm_cross/mut_param_reassign_from_hof.almd
 spec/wasm_cross/mut_param_spread_reassign.almd
 spec/wasm_cross/mut_param_tail_recursion.almd
 spec/wasm_cross/mut_param_writeback_growth.almd
 spec/wasm_cross/mut_scalar_param_reassign.almd
+spec/wasm_cross/mutable_global_bytes_arena.almd
 spec/wasm_cross/mutable_global_bytes_copy_from.almd
 spec/wasm_cross/mutable_global_field_mut_arg.almd
 spec/wasm_cross/mutable_global_mut_arg_callee_touches_global.almd
+spec/wasm_cross/mutable_global_repeat_writes.almd
 spec/wasm_cross/mutable_global_scalar_assign.almd
+spec/wasm_cross/mutator_writeback_releases_old_block.almd
 spec/wasm_cross/mutual_append.almd
 spec/wasm_cross/mutual_recursive_types.almd
 spec/wasm_cross/mutual_tail_recursion.almd
