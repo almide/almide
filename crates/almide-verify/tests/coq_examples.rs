@@ -75,6 +75,14 @@ fn ownership_checker_examples() {
             ("i{dx|t}", false),
             ("i{t|}", false),
             ("i{tx|}d", false),
+            // check_xc (#3229, owned-line resurrection)
+            ("idam", false),
+            ("iiddam", false),
+            ("id(ad)", false),
+            ("id{ad|ad}", false),
+            ("i(ad)a{d|d}d", true),
+            ("amamam", true),
+            ("(id)am", true),
             // CallModes.v — inlined streams over the same fold
             ("iadd", true),
             ("id", true),
@@ -108,6 +116,8 @@ fn build_checker_rows() {
             ("I{I|I}DD\n", true),
             ("I{I|}D\n", false),
             ("{I|D}\n", false),
+            ("IDAM\n", false),
+            ("AMAM\n", true),
         ],
     );
     verdicts(Property::CapsTransitive, &[("1 2|2|1;1|1|", true), ("1 2|2|1;0|0|", false)]);

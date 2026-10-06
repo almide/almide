@@ -94,6 +94,51 @@ impl Checker {
         }
     }
 
+    /// ADR-0002 D3 (#3385): in a LIFTING tail — a `-> T!` body — every value
+    /// exit lifts into `ok(..)` on its own: the lowering
+    /// (`wrap_fallible_value_tail`) wraps each branch / arm leaf by its own
+    /// type. So
+    /// peers that mix a plain `T` with an explicit `Result[T, E]` are not a
+    /// mismatch; they are compared at the lifted level. One rule for `if`
+    /// branches and `match` arms.
+    ///
+    /// Only a MIXED peer set lifts (at least one Result peer and one concrete
+    /// non-Result peer): an all-value join keeps the #880 sized-peer rule and
+    /// an all-Result join is untouched. `Never` peers (an `err(..)` arm, a
+    /// `panic`) and still-open inference variables are left as they are — the
+    /// lift is decided by a peer's type, and an open one has none yet. A
+    /// lifted peer keeps its own (unresolved) type inside the `Result`, so a
+    /// literal still narrows to the declared payload (`-> Int8!`).
+    ///
+    /// An effect fn that declares `-> Result[T, E]` itself is a lifting tail
+    /// too (#3395, ADR-0002 D3: a `-> Result[T, String]` body has the same
+    /// auto-ok of a tail `T`): the lowering lifts its value leaves the same
+    /// way, so `if` and `match` follow one rule on both targets. An effect
+    /// fn declaring `-> T` is not — its expectation is not a `Result`.
+    /// Returns the peer types to join, or `None` when nothing lifts.
+    pub(super) fn lift_mixed_tail_peers(&self, expect: Option<&TailExpect>, tys: &[Ty]) -> Option<Vec<Ty>> {
+        let expect = expect.filter(|e| e.effect_body)?;
+        let Ty::Applied(TypeConstructorId::Result, want) = resolve_ty(&expect.ty, &self.uf) else { return None };
+        if want.len() != 2 {
+            return None;
+        }
+        let resolved: Vec<Ty> = tys.iter().map(|t| resolve_ty(t, &self.uf)).collect();
+        let liftable = |t: &Ty| {
+            !t.is_result()
+                && !matches!(t, Ty::Never | Ty::Unknown)
+                && super::types::is_inference_var(t).is_none()
+        };
+        if !resolved.iter().any(Ty::is_result) || !resolved.iter().any(liftable) {
+            return None;
+        }
+        Some(
+            tys.iter()
+                .zip(&resolved)
+                .map(|(t, r)| if liftable(r) { Ty::result(t.clone(), want[1].clone()) } else { t.clone() })
+                .collect(),
+        )
+    }
+
     /// The un-`!`ed Result call a blamed peer wraps in `ok(..)` / `some(..)`
     /// — `ok(level())` in an effect fn is `Result[Result[T, E], E]` where
     /// `Result[T, E]` was meant (ADR-0008: propagation is spelled `!`).

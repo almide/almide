@@ -53,48 +53,76 @@ fn stage_for(i: &mut wasm_encoder::InstructionSink<'_>, park: u64, need: u32, st
 /// spec's 4096; this is the p1 twin, at a size no host refuses.
 const WRITE_CHUNK: i32 = 65536;
 
+/// Where a shim reads the park's base address from: the constant itself, or
+/// a local that holds it. A shim that names the park eight times or more
+/// spends fewer bytes loading it once into a local (#3136): a local.get is
+/// two bytes, the constant four.
+#[derive(Clone, Copy)]
+enum ParkAt {
+    Const(u64),
+    Local(u32),
+}
+
+impl ParkAt {
+    fn push(self, i: &mut wasm_encoder::InstructionSink<'_>) {
+        match self {
+            ParkAt::Const(park) => i.i32_const(park as i32),
+            ParkAt::Local(l) => i.local_get(l),
+        };
+    }
+}
+
 /// Write all of `len` bytes at `ptr` to `fd`: slice at [`WRITE_CHUNK`] and
 /// advance by each call's `nwritten`, so neither a host's per-call bound nor
 /// a short write drops the tail (#3206 — a `println` of 128 MiB or more
 /// printed an empty line, exit 0). An errno or a zero-byte write ends the
 /// loop, the prior single-call behavior for a stream that refuses output.
-/// `ptr` and `len` are locals this consumes.
-fn write_all(i: &mut wasm_encoder::InstructionSink<'_>, fd: i32, park: u64, ptr: u32, len: u32) {
+/// `ptr` and `len` are locals this consumes; `n` is an i32 scratch local that
+/// holds each call's `nwritten`, read once from the park (#3136: the three
+/// reloads it replaces were 8 B of every printing artifact). `park` is the
+/// park's address, and `at` where to load it from.
+fn write_all(i: &mut wasm_encoder::InstructionSink<'_>, fd: i32, park: u64, at: ParkAt, (ptr, len, n): (u32, u32, u32)) {
     i.block(BlockType::Empty).loop_(BlockType::Empty);
     i.local_get(len).i32_eqz().br_if(1);
-    i.i32_const(park as i32).local_get(ptr).i32_store(mem(IOV));
-    i.i32_const(park as i32);
+    at.push(i);
+    i.local_get(ptr).i32_store(mem(IOV));
+    at.push(i);
     i.local_get(len).i32_const(WRITE_CHUNK).local_get(len).i32_const(WRITE_CHUNK).i32_lt_u().select();
     i.i32_store(mem(IOV + 4));
     i.i32_const(fd);
-    i.i32_const((park + IOV) as i32);
+    at.push(i); // park + IOV, IOV = 0
     i.i32_const(1);
     i.i32_const((park + NREAD) as i32);
     i.call(0); // fd_write: one slice
     i.br_if(1);
-    i.i32_const(park as i32).i32_load(mem(NREAD)).i32_eqz().br_if(1);
-    i.local_get(ptr).i32_const(park as i32).i32_load(mem(NREAD)).i32_add().local_set(ptr);
-    i.local_get(len).i32_const(park as i32).i32_load(mem(NREAD)).i32_sub().local_set(len);
+    at.push(i);
+    i.i32_load(mem(NREAD)).local_tee(n).i32_eqz().br_if(1);
+    i.local_get(ptr).local_get(n).i32_add().local_set(ptr);
+    i.local_get(len).local_get(n).i32_sub().local_set(len);
     i.br(0);
     i.end().end();
 }
+const _: () = assert!(IOV == 0, "write_all passes the park itself as the iovec address");
 
 /// `(ptr, len) -> ()`: the payload through [`write_all`], then `"\n"` in its
 /// own call. Not one call over both iovecs: wasmtime's preview-1
 /// `fd_write` writes only the FIRST non-empty iovec and returns its count
 /// (measured 2026-09-24, wasmtime 47: `fd_write(1, [("hello",5),("\n",1)])`
 /// printed `hello` with no newline), so a single call would drop every
-/// line's `\n` unless the shim looped on `nwritten` (#2312 shape 3).
+/// line's `\n` unless the shim looped on `nwritten` (#2312 shape 3). The
+/// park's address is named eight times, so it rides in a local.
 fn shim_print(fd: i32, park: u64) -> Function {
-    let (ptr, len) = (0u32, 1u32);
-    let mut f = Function::new([]);
+    let (ptr, len, n, p) = (0u32, 1u32, 2u32, 3u32);
+    let at = ParkAt::Local(p);
+    let mut f = Function::new([(2, ValType::I32)]);
     let mut i = f.instructions();
-    write_all(&mut i, fd, park, ptr, len);
-    i.i32_const(park as i32).i32_const(0x0A).i32_store8(mem8(NL));
-    i.i32_const(park as i32).i32_const((park + NL) as i32).i32_store(mem(IOV));
-    i.i32_const(park as i32).i32_const(1).i32_store(mem(IOV + 4));
+    i.i32_const(park as i32).local_set(p);
+    write_all(&mut i, fd, park, at, (ptr, len, n));
+    i.local_get(p).i32_const(0x0A).i32_store8(mem8(NL));
+    i.local_get(p).i32_const((park + NL) as i32).i32_store(mem(IOV));
+    i.local_get(p).i32_const(1).i32_store(mem(IOV + 4));
     i.i32_const(fd);
-    i.i32_const((park + IOV) as i32);
+    i.local_get(p); // park + IOV
     i.i32_const(1);
     i.i32_const((park + NREAD) as i32);
     i.call(0); // fd_write: the newline
@@ -168,7 +196,7 @@ fn shim_fs_call(
     // module's op set names it (`panic`), so no other artifact grows.
     for (code, fd) in [(30, 1), (73, 2)].into_iter().filter(|(code, _)| has(*code)) {
         i.local_get(op).i32_const(code).i32_eq().if_(BlockType::Empty);
-        write_all(&mut i, fd, park, b_ptr, b_len);
+        write_all(&mut i, fd, park, ParkAt::Const(park), (b_ptr, b_len, nread));
         i.i64_const(0).return_();
         i.end();
     }
@@ -197,6 +225,15 @@ fn shim_fs_call(
 
     if has(36) {
         sleep_arm(&mut i, park, (op, a_len, deadline));
+    }
+
+    // op 74: the instance-parallel fan offer (#3003, ADR-0011 §D2a). A stock
+    // runtime has no second instance to run a chunk on: 0 = not served, and
+    // the guest runs the chunks sequentially, as before the offer existed.
+    if has(74) {
+        i.local_get(op).i32_const(74).i32_eq().if_(BlockType::Empty);
+        i.i64_const(0).return_();
+        i.end();
     }
 
     // Everything else: the defined refusal.
@@ -282,29 +319,14 @@ fn shim_host_read(park: u64, g_plen: u32, g_ppos: Option<u32>) -> Function {
     f
 }
 
-/// op 37 (env.set): append `[klen u32][vlen u32][key][val]` to the overlay
-/// log page. The log is append-only; op 26 scans it last-write-wins, so a
-/// re-set key needs no in-place edit. A full page takes the defined
-/// refusal — never a silent drop.
+/// op 37 (env.set): append to the overlay log page (`env_overlay.rs`). A
+/// full page takes the defined refusal — never a silent drop.
 fn shim_env_set(park: u64, g_ovl: u32) -> Function {
     // params: 0=op 1=a_ptr 2=a_len 3=b_ptr 4=b_len; locals: 5=at
-    let (a_ptr, a_len, b_ptr, b_len, at) = (1u32, 2u32, 3u32, 4u32, 5u32);
     let mut f = Function::new([(1, ValType::I32)]);
     let mut i = f.instructions();
-    i.i32_const((park + OVL) as i32).global_get(g_ovl).i32_add().local_set(at);
-    // Room check: entry must fit under the park end.
-    i.local_get(at).i32_const(8).i32_add().local_get(a_len).i32_add().local_get(b_len).i32_add();
-    i.i32_const((park + PARK_SPAN) as i32).i32_gt_u().if_(BlockType::Empty);
-    refuse(&mut i, park, MSG2, ENV_FULL_MSG.len());
-    i.end();
-    i.local_get(at).local_get(a_len).i32_store(mem(0));
-    i.local_get(at).local_get(b_len).i32_store(mem(4));
-    i.local_get(at).i32_const(8).i32_add().local_get(a_ptr).local_get(a_len).memory_copy(0, 0);
-    i.local_get(at).i32_const(8).i32_add().local_get(a_len).i32_add();
-    i.local_get(b_ptr).local_get(b_len).memory_copy(0, 0);
-    i.global_get(g_ovl).i32_const(8).i32_add().local_get(a_len).i32_add().local_get(b_len).i32_add();
-    i.global_set(g_ovl);
-    i.i64_const(0).return_();
+    let log = env_overlay::OverlayLog { base: park + OVL, g_len: g_ovl };
+    env_overlay::emit_append(&mut i, log, 5, |i| refuse(i, park, MSG2, ENV_FULL_MSG.len()));
     i.unreachable();
     i.end();
     f
@@ -327,37 +349,8 @@ fn shim_env_get(park: u64, g_plen: u32, g_ppos: u32, g_ovl: u32, i_sizes: u32, i
     let mut i = f.instructions();
 
     // ── overlay scan, last match wins ──
-    i.i32_const(0).local_set(best);
-    i.i32_const((park + OVL) as i32).local_set(p);
-    i.i32_const((park + OVL) as i32).global_get(g_ovl).i32_add().local_set(endp);
-    i.block(BlockType::Empty).loop_(BlockType::Empty);
-    i.local_get(p).local_get(endp).i32_ge_u().br_if(1);
-    i.local_get(p).i32_load(mem(0)).local_set(klen);
-    i.local_get(p).i32_load(mem(4)).local_set(vlen);
-    i.local_get(klen).local_get(a_len).i32_eq().if_(BlockType::Empty);
-    // byte compare key at p+8 vs a_ptr
-    i.i32_const(0).local_set(j);
-    i.block(BlockType::Empty).loop_(BlockType::Empty);
-    i.local_get(j).local_get(klen).i32_ge_u().if_(BlockType::Empty);
-    i.local_get(p).local_set(best); // full match
-    i.br(2);
-    i.end();
-    i.local_get(p).i32_const(8).i32_add().local_get(j).i32_add().i32_load8_u(mem8(0));
-    i.local_get(a_ptr).local_get(j).i32_add().i32_load8_u(mem8(0));
-    i.i32_ne().br_if(1);
-    i.local_get(j).i32_const(1).i32_add().local_set(j);
-    i.br(0).end().end();
-    i.end();
-    i.local_get(p).i32_const(8).i32_add().local_get(klen).i32_add().local_get(vlen).i32_add().local_set(p);
-    i.br(0).end().end();
-    // A hit: the value already sits in the overlay log, so point at it in
-    // place rather than copying it into a page that may not hold it (#2120).
-    i.local_get(best).i32_const(0).i32_ne().if_(BlockType::Empty);
-    i.local_get(best).i32_load(mem(4)).local_set(vlen);
-    i.local_get(best).i32_const(8).i32_add().local_get(best).i32_load(mem(0)).i32_add().global_set(g_ppos);
-    i.local_get(vlen).global_set(g_plen);
-    i.local_get(vlen).i64_extend_i32_u().return_();
-    i.end();
+    let log = env_overlay::OverlayLog { base: park + OVL, g_len: g_ovl };
+    env_overlay::emit_scan(&mut i, log, (g_ppos, g_plen), env_overlay::ScanLocals { p, endp, klen, vlen, best, j });
 
     // ── real environ fallthrough ──
     i.i32_const((park + NREAD) as i32).i32_const((park + NREAD + 4) as i32).call(i_sizes); // environ_sizes_get

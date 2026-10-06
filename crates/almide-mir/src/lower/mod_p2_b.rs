@@ -315,6 +315,12 @@ pub(crate) struct LowerCtx {
     /// so it must take an OWNED container-grain `Dup` (mutable in place), NOT a precise borrow
     /// (a shared field handle the value-model refuses to mutate). Read by `lower_heap_extraction`.
     binding_is_mutable: bool,
+    /// #3261 / #3265: the vars whose block, or a block on their field path, may be
+    /// released or written in place in this function ([`borrow_release_roots`]:
+    /// `list.pop(cell.words)`, `xs = …` under a branch). A `let v = root.f…` or
+    /// `let v = root…[i]` bound before it must not keep a mere borrow of that
+    /// block's field or element: it takes a reference of its own.
+    borrow_release_roots: std::collections::HashSet<VarId>,
     /// Count of SYNTHETIC temp VarIds allocated while lowering this function (for ANF-lifting a
     /// Call-result whose heap field/element/tuple is extracted directly — `f(x).field`). Each
     /// synthetic id is `u32::MAX - n`, descending from the top of the VarId space so it can never

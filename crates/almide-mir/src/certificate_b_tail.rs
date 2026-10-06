@@ -14,6 +14,24 @@
 /// physical rc: the arm's −1 and the merge's +1 are the same reference changing hands). An
 /// UNUSED merge dst stays event-free exactly as before. Without this the chained-`!`
 /// witness read as a bare `m` and the proven checker REJECTED it (flight-evidence-gaps F8).
+/// The `IfThen` dsts the certificate opens a line for (an `i` at the merge):
+/// a released merge, or one that feeds a loop-carried slot. Any other merge
+/// dst carries no reference of the frame's own — its value was moved on into
+/// a container slot (`Store(addr, prim.handle(dst))`) without a `Consume`.
+/// `verify_ownership` owns exactly these (#3279).
+pub(crate) fn merge_dsts_holding_a_reference(func: &MirFunction) -> std::collections::HashSet<crate::ValueId> {
+    let mut held = ownership_certificate_released_merge_dsts(func);
+    let (feeder_to_slot, _, _) = loop_carried_slots(func);
+    for op in &func.ops {
+        if let Op::IfThen { dst: Some(d), .. } = op {
+            if feeder_to_slot.contains_key(d) {
+                held.insert(*d);
+            }
+        }
+    }
+    held
+}
+
 fn ownership_certificate_released_merge_dsts(
     func: &MirFunction,
 ) -> std::collections::HashSet<crate::ValueId> {
@@ -96,6 +114,14 @@ pub fn ownership_certificate(func: &MirFunction) -> String {
 /// them (#1146); the kernel-proven checker still rejects the poisoned cert,
 /// which is the poison's whole job.
 pub fn ownership_certificate_with_poison(func: &MirFunction) -> (String, bool) {
+    let (cert, poisoned, _) = certificate_scan(func);
+    (cert, poisoned)
+}
+
+/// The certificate, its poison flag, and how many copy-on-write `Dup`s opened
+/// their own `i`-born line (#3321) — each backed by its `Dup` op rather than an
+/// allocation, which [`plus_one_events_backed`] accounts.
+fn certificate_scan(func: &MirFunction) -> (String, bool, usize) {
     // Sequential-phase split (codopsy8 complexity sweep): the two pre-scan sets below are
     // each an independent, self-contained computation over `func.ops` (the original code
     // already delineated the first as its own `{ .. }` scope) — extracted verbatim as their
@@ -132,6 +158,9 @@ pub fn ownership_certificate_with_poison(func: &MirFunction) -> (String, bool) {
         feeder_to_slot,
         slots,
         line_slots,
+        addr_of: BTreeMap::new(),
+        child_of: BTreeMap::new(),
+        paths: PathScopes { cow_dups: cow_dup_dsts(func), ..PathScopes::default() },
     };
     for op in &func.ops {
         scan.step(op);
@@ -157,7 +186,7 @@ pub fn ownership_certificate_with_poison(func: &MirFunction) -> (String, bool) {
         out.push_str(&scan.s.stream[o]);
         out.push('\n');
     }
-    (out, scan.s.poisoned)
+    (out, scan.s.poisoned, scan.paths.cow_opened)
 }
 
 /// The NON-RECURRING soundness gate for the borrow-by-default calling
@@ -170,7 +199,7 @@ pub fn ownership_certificate_with_poison(func: &MirFunction) -> (String, bool) {
 /// fs.fold_lines_chunked loop shape: one more real op than cert lines) both
 /// refuse.
 pub fn plus_one_events_backed(func: &MirFunction) -> bool {
-    let (cert, poisoned) = ownership_certificate_with_poison(func);
+    let (cert, poisoned, cow_opened) = certificate_scan(func);
     // A POISONED certificate deliberately replaced a nested-region arm's real
     // events with the always-rejecting `{i|}` — its counts cannot be compared
     // against the op list (the fs.fold_lines_chunked class, #1146). The
@@ -204,9 +233,501 @@ pub fn plus_one_events_backed(func: &MirFunction) -> bool {
         .count();
     let dups = func.ops.iter().filter(|o| matches!(o, crate::Op::Dup { .. })).count();
     let merge_credits = merge_dst_i_credits(func);
+    // A copy-on-write `Dup` (#3321) opens its own line with `i`, not `a`: the
+    // same one +1, backed by the same `Dup` op, moved from the `a` count to the
+    // `i` count.
     // Single-condition decisions (MC/DC ledger, #566): && as early return.
-    if i != allocs + heap_results + merge_credits {
+    if i != allocs + heap_results + merge_credits + cow_opened {
         return false;
     }
-    a == dups
+    a + cow_opened == dups
+}
+
+/// The handle-READ probes (#3233). A line witnessed only its `+1`/`−1` events
+/// and the explicit `Borrow`/`MakeUnique` uses, so an owned object freed and
+/// then read through the address bridge (`prim.handle` → `+ off` →
+/// `LoadHandle`/`Load`/`Store`) or passed as a call's handle argument, with
+/// no later `Dup`, left a balanced line and certified. Every such read is now
+/// the existing `b` (+0, faults at count 0) on its object, so the proven
+/// checker's liveness guard sees it. A read here is a DEREFERENCE (a load or
+/// store through an address into the object) or a borrowing use (a call's
+/// handle arg, a list element op, a `Pure`/`ChargeDyn` operand). Probed on an OWNED line only — one born
+/// by an `i` (the `guard_line` notion of owned): a borrowed param's or a
+/// slot's line legitimately sits at 0 while the caller holds the object.
+impl CertScan {
+    fn read_probes(&mut self, op: &Op) {
+        match op {
+            Op::Call { args, .. }
+            | Op::CallFn { args, .. }
+            | Op::CallImport { args, .. }
+            | Op::CallIndirect { args, .. } => self.call_arg_probes(args),
+            Op::Prim { kind, dst, args } => self.prim_read_probe(kind, *dst, args),
+            Op::IntBinOp { dst, op: crate::IntOp::Add, a, b } => self.address_alias(*dst, *a, *b),
+            Op::ListGetScalar { list, .. } | Op::ListSetScalar { list, .. } => self.probe_handle(*list),
+            Op::ChargeDyn { src, .. } => self.probe_handle(*src),
+            Op::Pure { uses, .. } => uses.iter().for_each(|v| self.probe_handle(*v)),
+            // A raw loaded child's own Borrow/MakeUnique, and a `Dup` of it (the
+            // Dup reads the block it shares — a Dup of a freed child is a use
+            // after free), go through the child rule (#3261).
+            Op::Borrow { v } | Op::MakeUnique { v } => self.probe_raw_child(*v),
+            Op::Dup { src, .. } => self.probe_raw_child(*src),
+            Op::SetLocal { local, src } => self.rebind_ends_children(*local, *src),
+            _ => {}
+        }
+    }
+
+    /// A call's handle arg is probed on the object it points into, like a
+    /// dereference: a `prim.handle` carrier of a raw child is only in
+    /// `addr_of`, and passing it after the child's parent was freed is a use
+    /// after free (#3263; `verify_ownership`'s `call_arg_live`).
+    fn call_arg_probes(&mut self, args: &[CallArg]) {
+        for a in args {
+            if let CallArg::Handle(v) = a {
+                self.probe_address(*v);
+            }
+        }
+    }
+
+    /// A load/store DEREFERENCES the object its address points into; `ElemAddr`
+    /// reads its list's bounds and its result is an address into that list,
+    /// like the `Add` bridge. `prim.handle` itself is not probed: it only
+    /// turns the pointer into an integer, and the lowering's move into a
+    /// container (`Consume v`, then `Store(slot, prim.handle(v))`) reads it
+    /// after the `m` that transferred the reference — a transfer, not a use.
+    fn prim_read_probe(&mut self, kind: &PrimKind, dst: Option<ValueId>, args: &[ValueId]) {
+        let Some(&first) = args.first() else { return };
+        match kind {
+            PrimKind::LoadHandle => {
+                self.probe_address(first);
+                self.load_child(dst, first);
+                self.note_view(dst, first);
+            }
+            PrimKind::Load { .. } | PrimKind::Store { .. } => self.probe_address(first),
+            PrimKind::Handle => {
+                self.child_handle(dst, first);
+                self.note_view(dst, first);
+                if let (Some(d), true) = (dst, self.s.of.contains_key(&first)) {
+                    self.paths.carriers.insert(d);
+                }
+            }
+            PrimKind::ElemAddr => {
+                self.probe_address(first);
+                if let (Some(d), Some(o)) = (dst, self.address_object(first)) {
+                    self.addr_of.insert(d, o);
+                }
+                self.note_view(dst, first);
+            }
+            _ => {}
+        }
+    }
+
+    /// An `Add` with exactly one tracked operand is an address INTO that
+    /// operand's object (verify_ownership's `step_add_address_alias`).
+    fn address_alias(&mut self, dst: ValueId, a: ValueId, b: ValueId) {
+        match (self.address_object(a), self.address_object(b)) {
+            (Some(o), None) => {
+                self.addr_of.insert(dst, o);
+                self.note_view(Some(dst), a);
+            }
+            (None, Some(o)) => {
+                self.addr_of.insert(dst, o);
+                self.note_view(Some(dst), b);
+            }
+            _ => {}
+        }
+    }
+
+    /// The object an address (or a handle used as one) points into.
+    fn address_object(&self, v: ValueId) -> Option<ValueId> {
+        if let Some(&o) = self.addr_of.get(&v) {
+            return Some(o);
+        }
+        if self.is_raw_child(v) {
+            return Some(v);
+        }
+        self.s.of.get(&v).map(|_| self.s.object_of(v))
+    }
+
+    fn probe_address(&mut self, addr: ValueId) {
+        if self.paths.rebound.contains(&addr) {
+            self.s.event(addr, 'b');
+            return;
+        }
+        if let Some(o) = self.address_object(addr) {
+            self.probe_object(o);
+        }
+    }
+
+    fn probe_handle(&mut self, v: ValueId) {
+        if self.paths.rebound.contains(&v) {
+            self.s.event(v, 'b');
+        } else if self.s.of.contains_key(&v) {
+            let o = self.s.object_of(v);
+            self.probe_object(o);
+        } else {
+            self.probe_raw_child(v);
+        }
+    }
+
+    fn probe_object(&mut self, o: ValueId) {
+        if self.child_of.contains_key(&o) {
+            self.child_probe(o);
+        } else if self.owned_line(o) {
+            self.s.event(o, 'b');
+        }
+    }
+
+    /// Is `o`'s line born by a fresh `i`? Its first event decides: on the
+    /// stream if it has one, else in the outermost open branch arm holding it.
+    fn owned_line(&self, o: ValueId) -> bool {
+        if let Some(line) = self.s.stream.get(&o) {
+            return line.starts_with('i');
+        }
+        for fr in &self.s.frames {
+            let t = fr.then_ev.get(&o).map_or("", |s| s.as_str());
+            let e = fr.else_ev.get(&o).map_or("", |s| s.as_str());
+            if !t.is_empty() {
+                return t.starts_with('i');
+            }
+            if !e.is_empty() {
+                return e.starts_with('i');
+            }
+        }
+        false
+    }
+}
+
+/// The loaded-CHILD rule (#3261). A `LoadHandle` through an address into a
+/// tracked object yields a RAW child: a handle the parent's slot holds, with
+/// no reference of the frame's own. It is live while its parent is live, or
+/// while a reference the frame took on it (a `Dup`) is held. The child's own
+/// line (keyed by the raw child) carries exactly those `Dup` references: a
+/// `Dup` of the raw child is an `a` on it (`dup_step`, identity object), and
+/// each release of a `Dup`'d handle a `d`/`m`.
+///
+/// A read of the raw child is ONE `b` probe on whichever of those lines the
+/// producer finds positive on the current path: the child's own line, else
+/// (up the chain of children) its parent's. The producer's choice is not
+/// trusted: any line the checker finds above 0 at the probe proves the child
+/// live (its own references, or the parent's slot reference). When none is
+/// positive the probe lands on the root parent's line, where the checker
+/// rejects a freed owned object. A root the frame does not own (a borrowed
+/// param) is the caller's to keep alive and takes no probe, as before.
+impl CertScan {
+    fn is_raw_child(&self, v: ValueId) -> bool {
+        self.child_of.contains_key(&v) && !self.s.of.contains_key(&v)
+    }
+
+    /// A `LoadHandle` dst through an address into a tracked object is a raw child.
+    fn load_child(&mut self, dst: Option<ValueId>, addr: ValueId) {
+        if let (Some(d), Some(o)) = (dst, self.address_object(addr)) {
+            if !self.s.of.contains_key(&d) {
+                self.child_of.insert(d, o);
+            }
+        }
+    }
+
+    /// `prim.handle` of a raw child is an address into the child.
+    fn child_handle(&mut self, dst: Option<ValueId>, src: ValueId) {
+        if let (Some(d), true) = (dst, self.is_raw_child(src)) {
+            self.addr_of.insert(d, src);
+        }
+    }
+
+    /// #3269: a `SetLocal` rebinds a slot to a new block (`xs = list.set(xs,
+    /// i, v)`: new block, `Drop` of the old, `SetLocal`). The new block's `i`
+    /// lands on the slot's line, so that line never reaches 0, yet the views
+    /// taken of the old block still point into it: a raw child loaded from it,
+    /// an address into it, a `prim.handle` carrier of it. Every such view of
+    /// the slot's object ends here; a later read of one lands on its own line
+    /// at 0, unless (a child) a `Dup` the frame took keeps it. A `Dup` of the
+    /// slot owns a reference of its own and is not a view.
+    ///
+    /// The slot's line also holds the NEW block (its feeder's `i` is routed
+    /// there), so a view is ended only when it was taken from a handle other
+    /// than the rebind's source: a view of the new block stays live.
+    fn rebind_ends_children(&mut self, local: ValueId, new: ValueId) {
+        if !self.s.of.contains_key(&local) {
+            return;
+        }
+        let slot = self.s.object_of(local);
+        let mut ended: Vec<ValueId> = self.child_of.keys().copied().filter(|&c| self.child_root(c) == slot).collect();
+        ended.extend(self.addr_of.iter().filter(|(_, &o)| o == slot).map(|(&a, _)| a));
+        ended.extend(self.paths.carriers.iter().copied().filter(|&c| c != local && self.s.of.contains_key(&c) && self.s.object_of(c) == slot));
+        ended.retain(|v| self.paths.view_src.get(v) != Some(&new));
+        self.paths.rebound.extend(ended);
+    }
+
+    /// `view` was taken from `from` (a carrier, an address, a loaded child):
+    /// record the handle at the base of the chain (#3269).
+    fn note_view(&mut self, view: Option<ValueId>, from: ValueId) {
+        let Some(v) = view else { return };
+        let base = self.paths.view_src.get(&from).copied().unwrap_or(from);
+        self.paths.view_src.insert(v, base);
+        self.paths.rebound.remove(&v);
+        if self.paths.rebound.contains(&from) {
+            self.paths.rebound.insert(v);
+        }
+    }
+
+    /// The object at the top of a raw child's chain of parents.
+    fn child_root(&self, c: ValueId) -> ValueId {
+        let mut o = c;
+        while let Some(&p) = self.child_of.get(&o) {
+            o = p;
+        }
+        o
+    }
+
+    fn probe_raw_child(&mut self, v: ValueId) {
+        if self.is_raw_child(v) {
+            self.child_probe(v);
+        }
+    }
+
+    fn child_probe(&mut self, child: ValueId) {
+        let mut c = child;
+        loop {
+            if self.path_balance(c) > 0 || self.paths.rebound.contains(&c) {
+                self.s.event(c, 'b');
+                return;
+            }
+            let Some(&p) = self.child_of.get(&c) else { return };
+            if !self.child_of.contains_key(&p) {
+                if self.owned_line(p) {
+                    self.s.event(p, 'b');
+                }
+                return;
+            }
+            c = p;
+        }
+    }
+
+    /// `o`'s count on the path being emitted: its stream, plus the CURRENT
+    /// arm of each open branch region.
+    fn path_balance(&self, o: ValueId) -> i64 {
+        let mut b = self.s.stream.get(&o).map_or(0, |l| seg_net(l));
+        for fr in &self.s.frames {
+            let arm = if fr.in_else { &fr.else_ev } else { &fr.then_ev };
+            b += arm.get(&o).map_or(0, |l| seg_net(l));
+        }
+        b
+    }
+}
+
+/// Copy-on-write copies (#3321). A `Dup` onto a line the frame does not own
+/// (a borrowed param's, a raw child's: no `i` on it) is one more reference to a
+/// block someone else keeps alive, and every read of such a line is safe at
+/// count 0, so the line takes no read probe. When the function later
+/// `MakeUnique`s that `Dup`, it is a copy-on-write copy: `MakeUnique` always
+/// copies there (the other holder plus the `Dup` make the count at least 2) and
+/// the handle then owns a block of its own. Such a `Dup` opens its OWN line with
+/// a fresh `i`: an owned line like any other, so a read of it after its release
+/// is probed, and a `Dup` of it after its release is the resurrection the guard
+/// rejects. A slot or a slot feeder keeps its fold.
+impl CertScan {
+    fn cow_copy(&mut self, dst: ValueId, src: ValueId) -> bool {
+        if !self.paths.cow_dups.contains(&dst) || self.feeder_to_slot.contains_key(&dst) || self.slot_object(dst) {
+            return false;
+        }
+        let src_obj = if self.s.of.contains_key(&src) { Some(self.s.object_of(src)) } else { None };
+        let shared = match src_obj {
+            Some(o) => !self.owned_line(o),
+            None => self.is_raw_child(src),
+        };
+        if !shared {
+            return false;
+        }
+        self.s.of.insert(dst, dst);
+        self.s.event(dst, 'i');
+        self.paths.cow_opened += 1;
+        true
+    }
+
+    /// Is `h` a loop-carried or straight-line slot, or the object one rides on?
+    fn slot_object(&self, h: ValueId) -> bool {
+        self.slots.iter().chain(&self.line_slots).any(|&sl| sl == h || self.s.object_of(sl) == h)
+    }
+}
+
+/// The `Dup`s a function later `MakeUnique`s (#3321).
+pub(crate) fn cow_dup_dsts(func: &MirFunction) -> BTreeSet<ValueId> {
+    let uniqued: BTreeSet<ValueId> =
+        func.ops.iter().filter_map(|op| if let Op::MakeUnique { v } = op { Some(*v) } else { None }).collect();
+    func.ops
+        .iter()
+        .filter_map(|op| if let Op::Dup { dst, .. } = op { Some(*dst) } else { None })
+        .filter(|d| uniqued.contains(d))
+        .collect()
+}
+
+/// The handle maps as one path sees them (#3267).
+type PathMaps = (BTreeMap<ValueId, ValueId>, BTreeMap<ValueId, ValueId>, BTreeMap<ValueId, ValueId>);
+
+/// The handle-to-object, address and loaded-child maps are scoped to the
+/// control-flow path: each arm of an `IfThen` starts from the maps at the
+/// `IfThen`, and after the `EndIf` only what dominates the `if` stays. A
+/// handle an arm defined is not defined on the other arm's path, nor after the
+/// join (the merge value reaches the join through the `IfThen` dst). Before
+/// this, a handle the then arm bound stayed visible in the else arm, so the
+/// else arm's `Dup` of it counted on the then arm's object and certified a
+/// read of a value its path never computed (#3267, the guard err arm of a
+/// `mut`-param effect fn).
+#[derive(Default)]
+struct PathScopes {
+    /// The maps at each open `IfThen`, innermost last.
+    entry: Vec<PathMaps>,
+    /// Handles some arm defined that are now out of scope.
+    out: BTreeSet<ValueId>,
+    /// Objects of handles now out of scope: a later `Return` still takes
+    /// its exit obligation on them, as before.
+    retired: BTreeSet<ValueId>,
+    /// Views of a slot's old block (raw children, addresses, carriers) whose
+    /// slot was rebound on the current path (#3269).
+    rebound: BTreeSet<ValueId>,
+    /// `prim.handle` carriers of a tracked object (#3269).
+    carriers: BTreeSet<ValueId>,
+    /// `Dup`s the function later `MakeUnique`s (#3321).
+    cow_dups: BTreeSet<ValueId>,
+    /// How many of them opened their own line.
+    cow_opened: usize,
+    /// Each view (carrier, address, loaded child) → the handle it was taken
+    /// from, at the base of its chain (#3269).
+    view_src: BTreeMap<ValueId, ValueId>,
+    /// `rebound` at each open `IfThen`, and what the then arm left at `Else`.
+    rebound_entry: Vec<(BTreeSet<ValueId>, BTreeSet<ValueId>)>,
+}
+
+impl CertScan {
+    fn path_maps(&self) -> PathMaps {
+        (self.s.of.clone(), self.addr_of.clone(), self.child_of.clone())
+    }
+
+    fn enter_branch_scope(&mut self) {
+        let maps = self.path_maps();
+        self.paths.entry.push(maps);
+        let rebound = self.paths.rebound.clone();
+        self.paths.rebound_entry.push((rebound, BTreeSet::new()));
+    }
+
+    /// The rebound children per path (#3269): each arm starts from the set at
+    /// the `IfThen`, and after the `EndIf` a child rebound on either arm stays
+    /// ended (its block may be gone on that path).
+    fn leave_arm_rebound(&mut self, is_end: bool) {
+        if is_end {
+            let Some((_, then_left)) = self.paths.rebound_entry.pop() else { return };
+            self.paths.rebound.extend(then_left);
+        } else if let Some((entry, then_left)) = self.paths.rebound_entry.last_mut() {
+            *then_left = std::mem::replace(&mut self.paths.rebound, entry.clone());
+        }
+    }
+
+    /// At `Else` (`is_end` false) and `EndIf`: retire what the arm just
+    /// closed defined, and restore the maps at the `IfThen`.
+    fn leave_arm(&mut self, is_end: bool) {
+        self.leave_arm_rebound(is_end);
+        let Some(entry) = (if is_end { self.paths.entry.pop() } else { self.paths.entry.last().cloned() }) else {
+            return;
+        };
+        let defined = |m: &BTreeMap<ValueId, ValueId>, e: &BTreeMap<ValueId, ValueId>| {
+            m.keys().filter(|k| !e.contains_key(k)).copied().collect::<Vec<_>>()
+        };
+        let mut gone = defined(&self.s.of, &entry.0);
+        gone.extend(defined(&self.addr_of, &entry.1));
+        gone.extend(defined(&self.child_of, &entry.2));
+        self.paths.retired.extend(self.s.of.values().copied());
+        self.paths.out.extend(gone);
+        (self.s.of, self.addr_of, self.child_of) = entry;
+    }
+
+    /// Is `v` a handle some arm defined that the current path does not?
+    fn out_of_path(&self, v: ValueId) -> bool {
+        self.paths.out.contains(&v)
+            && !self.s.of.contains_key(&v)
+            && !self.addr_of.contains_key(&v)
+            && !self.child_of.contains_key(&v)
+    }
+
+    /// A use of a handle the current path never defined reads a value that
+    /// was not computed: a `b` on that handle's own line, at count 0, which
+    /// the checker rejects.
+    fn cross_path_probes(&mut self, op: &Op) {
+        let uses: Vec<ValueId> = handle_uses(op).into_iter().filter(|v| self.out_of_path(*v)).collect();
+        for v in uses {
+            self.s.event(v, 'b');
+        }
+    }
+
+    /// Frame-targeted early exit (law 6): the returned value MOVES out HERE
+    /// — the same boundary `m` the tail emits for `func.ret` — then every
+    /// object tracked so far takes the divergence marker `x` (+0) into the
+    /// current arm buffer, so each object's `{then|else}` bracket carries its
+    /// own exit obligation. An object created later (in the surviving
+    /// continuation) gets no `x`; a borrowed param's lone `x` sits at 0.
+    fn return_step(&mut self, val: Option<ValueId>) {
+        if let Some(v) = val {
+            if self.s.of.contains_key(&v) {
+                let o = self.s.object_of(v);
+                self.s.event(o, 'm');
+            }
+        }
+        let mut objs: BTreeSet<ValueId> = self.s.of.values().copied().collect();
+        objs.extend(self.paths.retired.iter().copied());
+        for o in objs {
+            self.s.event(o, 'x');
+        }
+    }
+}
+
+/// Every value an op reads as a handle or an address.
+pub(crate) fn handle_uses(op: &Op) -> Vec<ValueId> {
+    match op {
+        Op::Dup { src, .. } => vec![*src],
+        Op::Consume { v } | Op::Borrow { v } | Op::MakeUnique { v } => vec![*v],
+        Op::ListGetScalar { list, .. } | Op::ListSetScalar { list, .. } => vec![*list],
+        Op::ChargeDyn { src, .. } => vec![*src],
+        Op::SetLocal { src, .. } => vec![*src],
+        Op::Pure { uses, .. } => uses.clone(),
+        Op::Prim { args, .. } => args.clone(),
+        Op::IntBinOp { a, b, .. } => vec![*a, *b],
+        Op::Else { val } | Op::EndIf { val } | Op::Return { val } => val.iter().copied().collect(),
+        Op::Call { args, .. } | Op::CallFn { args, .. } | Op::CallImport { args, .. } | Op::CallIndirect { args, .. } => args
+            .iter()
+            .filter_map(|a| if let CallArg::Handle(v) = a { Some(*v) } else { None })
+            .collect(),
+        _ => drop_family_value(op).into_iter().collect(),
+    }
+}
+
+/// Borrowed roots — heap params (the caller keeps them) and handles loaded
+/// out of another block (`LoadHandle`) — that the function DROPS before it
+/// rebinds them (`Drop p; SetLocal p = new`). Such a `SetLocal` is NOT folded
+/// into a slot: the fold reads the drop as the previous rebind's object,
+/// rc-preserving from 0 (`(id)`), while the first drop releases the caller's —
+/// or the parent block's — reference (#3298). Unfolded, that drop lands on the
+/// root's own line at count 0, which the checker rejects. A root rebound
+/// without a drop first (its old value left to its owner) still folds, and the
+/// lowering's pre-loop `Dup` copy is an ordinary owned slot.
+fn borrowed_roots(func: &MirFunction) -> BTreeSet<ValueId> {
+    let mut roots: BTreeSet<ValueId> = func.params.iter().filter(|p| p.repr.is_heap()).map(|p| p.value).collect();
+    for op in &func.ops {
+        if let Op::Prim { kind: PrimKind::LoadHandle, dst: Some(d), .. } = op {
+            roots.insert(*d);
+        }
+    }
+    let mut dropped: BTreeSet<ValueId> = BTreeSet::new();
+    let mut refused: BTreeSet<ValueId> = BTreeSet::new();
+    for op in &func.ops {
+        if let Some(v) = drop_family_value(op) {
+            if roots.contains(&v) {
+                dropped.insert(v);
+            }
+        }
+        if let Op::SetLocal { local, .. } = op {
+            if dropped.contains(local) {
+                refused.insert(*local);
+            }
+        }
+    }
+    refused
 }

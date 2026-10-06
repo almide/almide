@@ -30,8 +30,14 @@
 #                 entropy, the fs family, http ops 43..=50 and — since
 #                 ADR-0023 step 3 — env.get / env.args / process.args /
 #                 env.sleep_ms (ops 26 / 29 / 36, over wasi:cli/environment
-#                 and monotonic-clock.wait-for). The artifact runs on a
-#                 stock wasmtime 46+ with no feature flag (step 1).
+#                 and monotonic-clock.wait-for). Since #3140 the fs family is
+#                 the p1 fs service itself over a wasi:filesystem@0.3
+#                 adapter: every op P1_SERVED_OPS names, with env.os /
+#                 env.temp_dir / env.cwd (27 / 28 / 33); since #3223 env.set
+#                 (37) too, through the p1 shim's guest-side overlay log,
+#                 so component_availability.rs declares no exclusion. The
+#                 artifact runs on a stock wasmtime 46+ with no feature
+#                 flag (step 1).
 #
 # Row discipline (per leg, the rustc tier-check rule): every measured
 # wall MUST have its leg in a row, every declared leg MUST still measure
@@ -57,12 +63,23 @@
 #                        import, a p3 world); closes when the port lands.
 #                        Shrink-only ratchet: pending_port_ceiling.
 #   native-only-forever  the fn cannot exist on the wasm target as
-#                        specified (no subprocess API in stock WASI, an
-#                        uncatchable trap); the row carries a
-#                        `justification` sentence and never counts as
-#                        pending. No ceiling — but a forever leg that
-#                        starts serving is still STALE (the two-direction
-#                        agreement covers every class).
+#                        specified (an uncatchable trap, a Unix-domain
+#                        socket); the row carries a `justification`
+#                        sentence and never counts as pending. No ceiling —
+#                        but a forever leg that starts serving is still
+#                        STALE (the two-direction agreement covers every
+#                        class).
+#   host-capability      the fn works only where the HOST grants a
+#                        capability stock WASI does not define: it runs on
+#                        native and on the embedded host, and its stock
+#                        artifact builds but carries a PRIVATE `almide:*`
+#                        import that a stock runtime refuses at load (the
+#                        probe reads the import off the artifact). The
+#                        subprocess family over `almide:process/spawn`
+#                        (#2589, ADR-0025) is the only member. The row
+#                        carries a `justification` sentence; no ceiling, and
+#                        a leg that starts serving is STALE as for every
+#                        class.
 # A pending row needs an `issue`; a row that says `reason = "pending-self-
 # host"` must be class pending-self-host (the reason tag and the class
 # cannot disagree); a missing or unknown class fails the gate. Moving a
@@ -102,7 +119,7 @@ schema = 3
 # wasi_services.rs), testing.assert_throws is native-only-forever with
 # the subprocess family (process.exec/exec_in/exec_status/
 # exec_status_timeout/exec_with_stdin/spawn/is_alive/kill/pid; and
-# exec_attached, #2540);
+# exec_attached, #2540; run/run_in, #3379);
 # process.env and process.stdin_lines stay pending-port (environ and
 # stdin exist in WASI; the split the ruling asked for).
 # 2026-09-21 (schema 3): 34 -> 56 is the CLASS basis, not a regression.
@@ -244,7 +261,22 @@ pending_self_host_ceiling = 5
 # `prim.die` line verbatim and exit 1. testing.assert_throws stays
 # native-only-forever. Evidence: the ten spec test files that rode the
 # incumbent for these asserts now run on the structural test lane.
-pending_port_ceiling = 43
+# 2026-10-03 (#2589): 43 -> 41. process.env and process.sleep lose every leg:
+# the structural leg lowers them over host ops 26 and 36 (env.get's and
+# env.sleep_ms's own ops), which every host serves. The subprocess family
+# moves from native-only-forever to the new host-capability class (the
+# embedded host serves almide:process/spawn, ADR-0025), keeping its stock-p1
+# leg only. Evidence: spec/embedded_cross/process_spawn_family.almd and the
+# three process spec files on the wasm test lane.
+# 2026-10-06 (#2659): 41 -> 40. http.serve loses its stock-p1 leg: the
+# default `build --target wasm` of a serve-shaped program (main's body is
+# one `http.serve(port, app)` call, optionally after `let`s that only `port`
+# reads) is a wasi:http/handler@0.3.0 component that `wasmtime serve` runs
+# with no flags (C-375); any other main that reaches http.serve is E081 with
+# the shape rule as the reason. The probe measures it through its variant 5
+# (http.serve as main's only statement). Evidence:
+# spec/serve_cross/http_serve_export.almd under tests/http_serve_export_test.rs.
+pending_port_ceiling = 40
 
 # The unprobed class (#1827), per leg. Empty since #2588: the five
 # HttpRequest readers (http.query_params / req_body / req_header / req_method /
@@ -405,13 +437,6 @@ reason-embedded = "no wasm host binding for the streaming client (the framed ops
 reason-stock-p1 = "no wasm host binding for the streaming client (the framed ops 43..=50 serve the non-streaming family only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
 reason-structural = "host-surface"
 issue = "#1827"
-
-[[unavailable]]
-fn = "http.serve"
-legs = ["stock-p1"]
-class = "pending-port"
-reason = "embedded-lane-served (#2650, C-367): `almide run --target wasm` serves it — one instance, sequential, the same status, header set and body through the shared server core (host ops 70..=72); a stock p1 artifact has no listening socket, so `almide build --target wasm` refuses it — run it with `almide run --target wasm` or natively"
-issue = "#2659"
 
 [[unavailable]]
 fn = "matrix.linear_q1_0_row_no_bias"
@@ -686,124 +711,102 @@ reason-embedded = "stock WASI has no Unix-domain sockets or descriptor passing �
 reason-stock-p1 = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
 reason-structural = "host-surface (native-only-forever)"
 issue = "#1423"
-[[unavailable]]
-fn = "process.env"
-legs = ["embedded", "stock-p1", "structural"]
-class = "pending-port"
-reason-embedded = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
-reason-stock-p1 = "no wasm host binding for the module — run natively, or wait for the wasi-p3 port (#1628)"
-reason-structural = "host-surface"
-issue = "#1423"
 
 [[unavailable]]
 fn = "process.exec"
-legs = ["embedded", "stock-p1", "structural"]
-class = "native-only-forever"
-justification = "stock WASI (0.2 and 0.3) has no subprocess API, so a child process cannot be started on the wasm target as specified — ruled native-only-forever (#1423 bucket C, 2026-08-31)"
-reason-embedded = "stock WASI has no subprocess API — run natively (native-only-forever, #1423)"
-reason-stock-p1 = "stock WASI has no subprocess API — run natively (native-only-forever, #1423)"
-reason-structural = "host-surface (native-only-forever)"
-issue = "#1423"
+legs = ["stock-p1"]
+class = "host-capability"
+justification = "stock WASI (0.2 and 0.3) has no subprocess API; the fn runs where the host grants the private almide:process/spawn capability (native, the embedded host), and its stock artifact carries that import, which a stock runtime refuses at load (#2589, ADR-0025)"
+reason-stock-p1 = "the artifact imports the private almide:process/spawn capability, which a stock runtime refuses at load — run natively, with `almide run --target wasm`, or on a host that implements the import (host-capability, ADR-0025)"
+issue = "#2589"
 
 [[unavailable]]
 fn = "process.exec_attached"
-legs = ["embedded", "stock-p1", "structural"]
-class = "native-only-forever"
-justification = "stock WASI (0.2 and 0.3) has no subprocess API, so a child process cannot be started on the wasm target as specified — ruled native-only-forever (#1423 bucket C, 2026-08-31); the terminal-attached entry point (#2540) joins the subprocess family"
-reason-embedded = "stock WASI has no subprocess API — run natively (native-only-forever, #1423)"
-reason-stock-p1 = "stock WASI has no subprocess API — run natively (native-only-forever, #1423)"
-reason-structural = "host-surface (native-only-forever)"
-issue = "#1423"
+legs = ["stock-p1"]
+class = "host-capability"
+justification = "stock WASI (0.2 and 0.3) has no subprocess API; the fn runs where the host grants the private almide:process/spawn capability (native, the embedded host), and its stock artifact carries that import, which a stock runtime refuses at load (#2589, ADR-0025)"
+reason-stock-p1 = "the artifact imports the private almide:process/spawn capability, which a stock runtime refuses at load — run natively, with `almide run --target wasm`, or on a host that implements the import (host-capability, ADR-0025)"
+issue = "#2589"
+
+[[unavailable]]
+fn = "process.run"
+legs = ["stock-p1"]
+class = "host-capability"
+justification = "stock WASI (0.2 and 0.3) has no subprocess API; the fn runs where the host grants the private almide:process/spawn capability (native, the embedded host), and its stock artifact carries that import, which a stock runtime refuses at load (#2589, ADR-0025)"
+reason-stock-p1 = "the artifact imports the private almide:process/spawn capability, which a stock runtime refuses at load — run natively, with `almide run --target wasm`, or on a host that implements the import (host-capability, ADR-0025)"
+issue = "#2589"
+
+[[unavailable]]
+fn = "process.run_in"
+legs = ["stock-p1"]
+class = "host-capability"
+justification = "stock WASI (0.2 and 0.3) has no subprocess API; the fn runs where the host grants the private almide:process/spawn capability (native, the embedded host), and its stock artifact carries that import, which a stock runtime refuses at load (#2589, ADR-0025)"
+reason-stock-p1 = "the artifact imports the private almide:process/spawn capability, which a stock runtime refuses at load — run natively, with `almide run --target wasm`, or on a host that implements the import (host-capability, ADR-0025)"
+issue = "#2589"
 
 [[unavailable]]
 fn = "process.exec_in"
-legs = ["embedded", "stock-p1", "structural"]
-class = "native-only-forever"
-justification = "stock WASI (0.2 and 0.3) has no subprocess API, so a child process cannot be started on the wasm target as specified — ruled native-only-forever (#1423 bucket C, 2026-08-31)"
-reason-embedded = "stock WASI has no subprocess API — run natively (native-only-forever, #1423)"
-reason-stock-p1 = "stock WASI has no subprocess API — run natively (native-only-forever, #1423)"
-reason-structural = "host-surface (native-only-forever)"
-issue = "#1423"
+legs = ["stock-p1"]
+class = "host-capability"
+justification = "stock WASI (0.2 and 0.3) has no subprocess API; the fn runs where the host grants the private almide:process/spawn capability (native, the embedded host), and its stock artifact carries that import, which a stock runtime refuses at load (#2589, ADR-0025)"
+reason-stock-p1 = "the artifact imports the private almide:process/spawn capability, which a stock runtime refuses at load — run natively, with `almide run --target wasm`, or on a host that implements the import (host-capability, ADR-0025)"
+issue = "#2589"
 
 [[unavailable]]
 fn = "process.exec_status"
-legs = ["embedded", "stock-p1", "structural"]
-class = "native-only-forever"
-justification = "stock WASI (0.2 and 0.3) has no subprocess API, so a child process cannot be started on the wasm target as specified — ruled native-only-forever (#1423 bucket C, 2026-08-31)"
-reason-embedded = "stock WASI has no subprocess API — run natively (native-only-forever, #1423)"
-reason-stock-p1 = "stock WASI has no subprocess API — run natively (native-only-forever, #1423)"
-reason-structural = "host-surface (native-only-forever)"
-issue = "#1423"
+legs = ["stock-p1"]
+class = "host-capability"
+justification = "stock WASI (0.2 and 0.3) has no subprocess API; the fn runs where the host grants the private almide:process/spawn capability (native, the embedded host), and its stock artifact carries that import, which a stock runtime refuses at load (#2589, ADR-0025)"
+reason-stock-p1 = "the artifact imports the private almide:process/spawn capability, which a stock runtime refuses at load — run natively, with `almide run --target wasm`, or on a host that implements the import (host-capability, ADR-0025)"
+issue = "#2589"
 
 [[unavailable]]
 fn = "process.exec_status_timeout"
-legs = ["embedded", "stock-p1", "structural"]
-class = "native-only-forever"
-justification = "stock WASI (0.2 and 0.3) has no subprocess API, so a child process cannot be started on the wasm target as specified — ruled native-only-forever (#1423 bucket C, 2026-08-31)"
-reason-embedded = "stock WASI has no subprocess API — run natively (native-only-forever, #1423)"
-reason-stock-p1 = "stock WASI has no subprocess API — run natively (native-only-forever, #1423)"
-reason-structural = "host-surface (native-only-forever)"
-issue = "#1423"
+legs = ["stock-p1"]
+class = "host-capability"
+justification = "stock WASI (0.2 and 0.3) has no subprocess API; the fn runs where the host grants the private almide:process/spawn capability (native, the embedded host), and its stock artifact carries that import, which a stock runtime refuses at load (#2589, ADR-0025)"
+reason-stock-p1 = "the artifact imports the private almide:process/spawn capability, which a stock runtime refuses at load — run natively, with `almide run --target wasm`, or on a host that implements the import (host-capability, ADR-0025)"
+issue = "#2589"
 
 [[unavailable]]
 fn = "process.exec_with_stdin"
-legs = ["embedded", "stock-p1", "structural"]
-class = "native-only-forever"
-justification = "stock WASI (0.2 and 0.3) has no subprocess API, so a child process cannot be started on the wasm target as specified — ruled native-only-forever (#1423 bucket C, 2026-08-31)"
-reason-embedded = "stock WASI has no subprocess API — run natively (native-only-forever, #1423)"
-reason-stock-p1 = "stock WASI has no subprocess API — run natively (native-only-forever, #1423)"
-reason-structural = "host-surface (native-only-forever)"
-issue = "#1423"
+legs = ["stock-p1"]
+class = "host-capability"
+justification = "stock WASI (0.2 and 0.3) has no subprocess API; the fn runs where the host grants the private almide:process/spawn capability (native, the embedded host), and its stock artifact carries that import, which a stock runtime refuses at load (#2589, ADR-0025)"
+reason-stock-p1 = "the artifact imports the private almide:process/spawn capability, which a stock runtime refuses at load — run natively, with `almide run --target wasm`, or on a host that implements the import (host-capability, ADR-0025)"
+issue = "#2589"
 
 [[unavailable]]
 fn = "process.is_alive"
-legs = ["embedded", "stock-p1", "structural"]
-class = "native-only-forever"
-justification = "stock WASI (0.2 and 0.3) has no subprocess API and no process handles, so there is no child to query on the wasm target — ruled native-only-forever (#1423 bucket C, 2026-08-31)"
-reason-embedded = "stock WASI has no subprocess API — run natively (native-only-forever, #1423)"
-reason-stock-p1 = "stock WASI has no subprocess API — run natively (native-only-forever, #1423)"
-reason-structural = "host-surface (native-only-forever)"
-issue = "#1423"
+legs = ["stock-p1"]
+class = "host-capability"
+justification = "stock WASI (0.2 and 0.3) has no subprocess API; the fn runs where the host grants the private almide:process/spawn capability (native, the embedded host), and its stock artifact carries that import, which a stock runtime refuses at load (#2589, ADR-0025)"
+reason-stock-p1 = "the artifact imports the private almide:process/spawn capability, which a stock runtime refuses at load — run natively, with `almide run --target wasm`, or on a host that implements the import (host-capability, ADR-0025)"
+issue = "#2589"
 
 [[unavailable]]
 fn = "process.kill"
-legs = ["embedded", "stock-p1", "structural"]
-class = "native-only-forever"
-justification = "stock WASI (0.2 and 0.3) has no subprocess API and no process handles, so there is no child to signal on the wasm target — ruled native-only-forever (#1423 bucket C, 2026-08-31)"
-reason-embedded = "stock WASI has no subprocess API — run natively (native-only-forever, #1423)"
-reason-stock-p1 = "stock WASI has no subprocess API — run natively (native-only-forever, #1423)"
-reason-structural = "host-surface (native-only-forever)"
-issue = "#1423"
+legs = ["stock-p1"]
+class = "host-capability"
+justification = "stock WASI (0.2 and 0.3) has no subprocess API; the fn runs where the host grants the private almide:process/spawn capability (native, the embedded host), and its stock artifact carries that import, which a stock runtime refuses at load (#2589, ADR-0025)"
+reason-stock-p1 = "the artifact imports the private almide:process/spawn capability, which a stock runtime refuses at load — run natively, with `almide run --target wasm`, or on a host that implements the import (host-capability, ADR-0025)"
+issue = "#2589"
 
 [[unavailable]]
 fn = "process.pid"
-legs = ["embedded", "stock-p1", "structural"]
-class = "native-only-forever"
-justification = "stock WASI (0.2 and 0.3) has no process identity (no getpid), so the value does not exist on the wasm target — ruled native-only-forever (#1423 bucket C, 2026-08-31)"
-reason-embedded = "stock WASI has no subprocess API — run natively (native-only-forever, #1423)"
-reason-stock-p1 = "stock WASI has no subprocess API — run natively (native-only-forever, #1423)"
-reason-structural = "host-surface (native-only-forever)"
-issue = "#1423"
-
-[[unavailable]]
-fn = "process.sleep"
-legs = ["structural", "stock-p1", "embedded"]
-class = "pending-port"
-reason-embedded = "no wasm host binding for process.sleep (not an admitted effectful call) — the served clock spelling is env.sleep_ms"
-reason-stock-p1 = "no wasm host binding for process.sleep (not an admitted effectful call) — the served clock spelling is env.sleep_ms"
-reason-structural = "host-surface"
-alt = "env.sleep_ms(ms)"
-issue = "#1827"
+legs = ["stock-p1"]
+class = "host-capability"
+justification = "stock WASI (0.2 and 0.3) has no subprocess API; the fn runs where the host grants the private almide:process/spawn capability (native, the embedded host), and its stock artifact carries that import, which a stock runtime refuses at load (#2589, ADR-0025)"
+reason-stock-p1 = "the artifact imports the private almide:process/spawn capability, which a stock runtime refuses at load — run natively, with `almide run --target wasm`, or on a host that implements the import (host-capability, ADR-0025)"
+issue = "#2589"
 
 [[unavailable]]
 fn = "process.spawn"
-legs = ["embedded", "stock-p1", "structural"]
-class = "native-only-forever"
-justification = "stock WASI (0.2 and 0.3) has no subprocess API, so a child process cannot be started on the wasm target as specified — ruled native-only-forever (#1423 bucket C, 2026-08-31)"
-reason-embedded = "stock WASI has no subprocess API — run natively (native-only-forever, #1423)"
-reason-stock-p1 = "stock WASI has no subprocess API — run natively (native-only-forever, #1423)"
-reason-structural = "host-surface (native-only-forever)"
-issue = "#1423"
+legs = ["stock-p1"]
+class = "host-capability"
+justification = "stock WASI (0.2 and 0.3) has no subprocess API; the fn runs where the host grants the private almide:process/spawn capability (native, the embedded host), and its stock artifact carries that import, which a stock runtime refuses at load (#2589, ADR-0025)"
+reason-stock-p1 = "the artifact imports the private almide:process/spawn capability, which a stock runtime refuses at load — run natively, with `almide run --target wasm`, or on a host that implements the import (host-capability, ADR-0025)"
+issue = "#2589"
 
 [[unavailable]]
 fn = "process.stdin_lines"

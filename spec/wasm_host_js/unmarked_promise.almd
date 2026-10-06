@@ -1,0 +1,25 @@
+// @leg: structural
+// A hook that returns a Promise while its @extern is NOT marked
+// `returns: promise` (#3371). The call cannot wait for it, so the glue
+// refuses the thenable instead of handing the module "[object Promise]" or
+// 0: it throws an error naming the hook and the fix, and abandons the
+// instance. That holds for an infallible hook (`name_of`, `ping`) and a
+// fallible one (`load`) alike — the refusal is not the hook's err. A hook
+// that answers directly is untouched. No hook here is marked, so this needs
+// no JSPI. The host-side checks live in unmarked_promise.host.mjs.
+@extern(wasm, "js", "name_of")
+fn name_of(id: Int) -> String
+
+@extern(wasm, "js", "load")
+effect fn load(key: String) -> String
+
+@extern(wasm, "js", "ping")
+fn ping(n: Int) -> Unit
+
+fn greet(id: Int) -> String = "hi " + name_of(id)
+
+effect fn read(key: String) -> String = "got " + load(key)!
+
+fn poke(n: Int) -> Unit = ping(n)
+
+fn main() -> Unit = println(greet(1))

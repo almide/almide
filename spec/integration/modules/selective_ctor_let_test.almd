@@ -1,0 +1,38 @@
+// #3384: variant constructors named in a selective import are the
+// constructors — the import passed check and the lowering then called a
+// function `selvar.A` that does not exist (IR verify ICE).
+// #3388: a top-level `let` named in a selective import binds the bare name,
+// the form docs/CHEATSHEET.md documents (`import self.m.{f, NUMBERS}`).
+// The variant-valued `ZERO` and the function-valued `inc` are read in
+// tests/fixtures/selective_import/let_values_test.almd instead: the MIR
+// lowering walls a heap cross-module let built by a constructor and a call
+// through a cross-module function value, and this corpus may not add a
+// walled function. tests/selective_import_ctor_let_test.rs runs both files
+// on both legs.
+import selvar.{T, V, A, size, LIMIT, NUMBERS, step}
+
+fn mk() -> T = A(V(1), V(2))
+
+fn step_shadowed() -> Int = {
+  let step = 10
+  step
+}
+
+test "selectively imported constructors construct" {
+  assert_eq(size(mk()), 2)
+  assert_eq(size(A(mk(), V(0))), 3)
+}
+
+test "selectively imported constructor as a function value" {
+  assert_eq(list.map([1, 2], V) |> list.map((t) => size(t)), [1, 1])
+}
+
+test "selectively imported top-level lets" {
+  assert_eq(LIMIT, 3)
+  assert_eq(NUMBERS |> list.map((n) => n * LIMIT), [3, 6, 9])
+  assert_eq(step + LIMIT, 5)
+}
+
+test "a local binding shadows a selectively imported let" {
+  assert_eq(step_shadowed(), 10)
+}

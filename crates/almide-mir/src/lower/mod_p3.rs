@@ -311,6 +311,11 @@ impl LowerCtx {
         // SHRINK the set (a new non-head read disqualifies), and shrinking it
         // just returns a var to today's materializing path, so extending the
         // map rather than replacing it stays sound.
+        // #3261 / #3265: likewise only grows — a root added here makes a field or
+        // element bind take its own reference, balanced whether or not the release
+        // happens.
+        self.borrow_release_roots.extend(crate::lower::borrow_release_roots(body));
+        self.precopy_branch_mutated_params(body);
         for (v, r) in crate::lower::range_counting_vars(body) {
             self.range_counting_vars.entry(v).or_insert(r);
         }
@@ -579,10 +584,9 @@ impl LowerCtx {
             let new = self.lower_scalar_loop_fresh_owned_producer(value);
             if let Some(new) = new {
                 if new != slot_local {
-                    let drop_op = self.drop_op_for(slot_local);
-                    self.ops.push(drop_op);
-                    self.ops.push(Op::SetLocal { local: slot_local, src: new });
-                    self.live_heap_handles.retain(|&v| v != new);
+                    if self.rebind_loop_slot(var, slot_local, new)? {
+                        self.live_heap_handles.retain(|&v| v != new);
+                    }
                     return Ok(());
                 }
             }
@@ -622,11 +626,7 @@ impl LowerCtx {
             if matches!(&left.kind, IrExprKind::Var { id } if id == &var) {
                 if let Some(&slot_local) = self.value_of.get(&var) {
                     if let Some(new) = self.try_lower_concat_list(value) {
-                        let drop_op = self.drop_op_for(slot_local);
-                        self.ops.push(drop_op);
-                        self.ops
-                            .push(Op::SetLocal { local: slot_local, src: new });
-                        return true;
+                        return self.rebind_loop_slot(var, slot_local, new).is_ok();
                     }
                 }
             }
@@ -662,10 +662,7 @@ impl LowerCtx {
                     repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
                     init,
                 });
-                let drop_op = self.drop_op_for(slot_local);
-                self.ops.push(drop_op);
-                self.ops.push(Op::SetLocal { local: slot_local, src: new });
-                return true;
+                return self.rebind_loop_slot(var, slot_local, new).is_ok();
             }
         }
         false

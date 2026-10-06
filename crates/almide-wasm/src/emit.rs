@@ -22,6 +22,9 @@ mod eta;
 /// loops, `?.`).
 #[path = "front_desugar.rs"]
 mod front_desugar;
+/// #1315: source lines of the emitted code, and their DWARF form.
+#[path = "debug_lines.rs"]
+pub mod debug_lines;
 
 /// Emit a core wasm module for `ir`, or say precisely why not yet.
 /// Two passes: the first loads the WHOLE linked registry graph (so
@@ -76,6 +79,10 @@ fn emit_with_ops(ir: &IrProgram, library: bool) -> Result<(Vec<u8>, std::collect
     // than substituted (inline_calls.rs) — the stdlib's own kernels too.
     let inlined = crate::inline_calls::inline_small_scalar_calls(ir);
     let ir = inlined.as_ref().unwrap_or(ir);
+    // #3003 stage 1 (ADR-0011 §D2a): pure scalar `fan` chunk maps become
+    // exported per-chunk fns the host may run on separate instances.
+    let routed = crate::fan_par::route(ir);
+    let ir = routed.as_ref().unwrap_or(ir);
     // Witness sweeps (#2754) see the pass boundaries and which pass shipped
     // (no-ops unless a sweep collects).
     use crate::witness::{mark_pass as mark, mark_shipped as ship};
@@ -92,6 +99,7 @@ fn emit_with_ops(ir: &IrProgram, library: bool) -> Result<(Vec<u8>, std::collect
     };
     if !bounded.bounded_fired {
         ship(bounded_pass);
+        debug_lines::publish(&bounded.lines, ir);
         return Ok((bounded.bytes, bounded.ops));
     }
     // #2312: the bounded-line rewrites (line_bounded.rs) usually shrink a
@@ -108,6 +116,7 @@ fn emit_with_ops(ir: &IrProgram, library: bool) -> Result<(Vec<u8>, std::collect
         ship(crate::witness::CHECKED_PASS);
         checked
     };
+    debug_lines::publish(&best.lines, ir);
     Ok((best.bytes, best.ops))
 }
 
@@ -144,6 +153,8 @@ struct Pass {
     ops: std::collections::BTreeSet<i32>,
     /// A bounded-line rewrite was emitted (`FnWork::bounded_fired`).
     bounded_fired: bool,
+    /// #1315: per-instruction source lines (empty unless recording).
+    lines: Vec<debug_lines::FnLines>,
 }
 
 fn emit_program_pass(
@@ -187,10 +198,13 @@ fn emit_program_pass(
         };
         // #2275: a body-less `@extern` is a declared import on the wasm
         // target, or a wall — never a hollow body.
-        let (import, refuse) = match extern_import(f, &params, ret) {
+        let (import, refuse) = match extern_import(f, &params, ret, &types) {
             Ok(import) => (import, refuse),
             Err(reason) => (None, refuse.or(Some(reason))),
         };
+        if let Some((m, n)) = &import {
+            crate::host_exports::note_import(m, n, crate::host_exports::export_ret(ret, &types), crate::fan::js_async::returns_promise(f));
+        }
         let key = qual.clone().unwrap_or_else(|| f.name.as_str().to_string());
         // impl_index carries ONLY registry implementation symbols — a
         // global simple-name index over ALL module fns collides across
@@ -216,7 +230,9 @@ fn emit_program_pass(
             ret,
             refuse,
             param_owned: Vec::new(),
+            yields_address: false,
             param_mut,
+            param_mut_decl: f.params.iter().map(|p| p.is_mut).collect(),
             import,
             scoped_entry: f.is_scoped_block_entry(),
         });
@@ -226,6 +242,10 @@ fn emit_program_pass(
     // read the same vector.
     for (i, owned) in crate::param_borrow::infer(&program_fns, &table, &types).into_iter().enumerate() {
         table.infos[i].param_owned = owned;
+    }
+    // #3420: which fns hand out an address their caller's blocks back.
+    for (i, y) in crate::exit_plan::address_yielders(&program_fns, &table).into_iter().enumerate() {
+        table.infos[i].yields_address = y;
     }
     let main_index = F_FN_BASE + program_fns.len() as u32;
     let region_pure = region::region_pure_fns(ir, &program_fns, &table);
@@ -261,93 +281,106 @@ fn emit_program_pass(
     let mut fn_lambdas: Vec<std::ops::Range<usize>> = Vec::new();
     // #2807: the source line each failed body refused at (decline_site.rs).
     let mut fail_lines: HashMap<usize, usize> = HashMap::new();
+    let mut dbg = debug_lines::PassLines::default();
     for (i, (f, qual, space)) in program_fns.iter().enumerate() {
         let lifted_before = work.lifted.borrow().len();
-        if let Some(r) = &table.infos[i].refuse {
-            lowered.push(Err(r.clone()));
-            fn_lambdas.push(lifted_before..lifted_before);
-            continue;
-        }
-        if table.infos[i].import.is_some() {
-            // A declared import's slot: the loud stub the post-pass removes.
-            let mut stub = Function::new([]);
-            stub.instructions().unreachable().end();
-            lowered.push(Ok((stub, HashSet::new())));
-            continue;
-        }
-        let params: Vec<(VarId, SliceTy)> =
-            f.params.iter().zip(&table.infos[i].params).map(|(p, &t)| (p.var, t)).collect();
-        let ctx = Ctx { table: &table, types: &types, work: &work, globals: &global_map, var_name: &var_name };
-        let cur_module = fn_module(qual.as_deref(), f);
-        let effect_raw = if f.is_effect {
-            match slice_ty_of(&f.ret_ty, &types) {
-                Some(SliceTy::Unit) => Some(SliceTy::Unit),
-                // A declared-Result effect fn is SINGLE-layer (probe:
-                // `wrap_sum(p)!` strips once to Int): the body yields the
-                // Result value itself via ok()/err() — no wrap. Declared-
-                // Option and raw-T bodies yield the raw value and wrap
-                // (call sites are annotated Result[T?, E] / Result[T, E]).
-                Some(SliceTy::Result(..)) => None,
-                other => other,
+        // #3296: every iteration records its lambda range, whichever arm it
+        // leaves by — `fn_lambdas[i]` must stay aligned with `program_fns[i]`.
+        // The import arm used to `continue` without one, so every fn after a
+        // declared `@extern(wasm)` import read its NEIGHBOUR's lambdas: a
+        // closure's callees went unreached, pass 2 dropped them, and the
+        // closure walled with `call:<fn>`.
+        'one_fn: {
+            if let Some(r) = &table.infos[i].refuse {
+                lowered.push(Err(r.clone()));
+                break 'one_fn;
             }
-        } else {
-            None
-        };
-        let plan = FnPlan {
-            ret: table.infos[i].ret,
-            cur_module: cur_module.map(str::to_string),
-            effect_raw,
-            in_main: false,
-            env_captures: None,
-            metered: meter.user.contains(f.name.as_str()),
-            charge_entry: meter.user.contains(f.name.as_str())
-                && !meter.exempt.contains(f.name.as_str()),
-            var_space: *space,
-            name: qual.clone().unwrap_or_else(|| f.name.as_str().to_string()),
-            witness_name: Some(
-                qual.clone().unwrap_or_else(|| f.name.as_str().to_string()),
-            ),
-            self_index: Some(table.infos[i].wasm_index),
-            param_owned: Some(table.infos[i].param_owned.clone()),
-        };
-        crate::decline_site::reset_pending();
-        match lower_fn(&params, plan, &f.body, &[], &ctx, &mut pool) {
-            Ok(ok) => {
-                // Any display helpers this fn registered build NOW — a
-                // failing body refuses THIS fn, not the program.
-                match display::build_display_helpers(&table, &types, &work, &mut pool) {
-                    Ok(calls) => {
-                        display_helper_calls.extend(calls);
-                        // Self-tail-recursion → loop (tco.rs): only fns
-                        // whose call set includes THEMSELVES are scanned.
-                        let (body, fcalls) = ok;
-                        let body = if fcalls.contains(&i) {
-                            let info = &table.infos[i];
-                            let pvts: Vec<ValType> =
-                                info.params.iter().map(|t| t.val_type()).collect();
-                            let rvt = info.ret.map(SliceTy::val_type);
-                            tco::loop_convert(&body, &pvts, rvt, info.wasm_index)
-                                .unwrap_or(body)
-                        } else {
-                            body
-                        };
-                        lowered.push(Ok((body, fcalls)));
+            if table.infos[i].import.is_some() {
+                // A declared import's slot: the loud stub the post-pass removes.
+                let mut stub = Function::new([]);
+                stub.instructions().unreachable().end();
+                lowered.push(Ok((stub, HashSet::new())));
+                break 'one_fn;
+            }
+            let params: Vec<(VarId, SliceTy)> =
+                f.params.iter().zip(&table.infos[i].params).map(|(p, &t)| (p.var, t)).collect();
+            let ctx = Ctx { table: &table, types: &types, work: &work, globals: &global_map, var_name: &var_name };
+            let cur_module = fn_module(qual.as_deref(), f);
+            let effect_raw = if f.is_effect {
+                match slice_ty_of(&f.ret_ty, &types) {
+                    Some(SliceTy::Unit) => Some(SliceTy::Unit),
+                    // A declared-Result effect fn is SINGLE-layer (probe:
+                    // `wrap_sum(p)!` strips once to Int): the body yields the
+                    // Result value itself via ok()/err() — no wrap. Declared-
+                    // Option and raw-T bodies yield the raw value and wrap
+                    // (call sites are annotated Result[T?, E] / Result[T, E]).
+                    Some(SliceTy::Result(..)) => None,
+                    other => other,
+                }
+            } else {
+                None
+            };
+            let plan = FnPlan {
+                ret: table.infos[i].ret,
+                cur_module: cur_module.map(str::to_string),
+                effect_raw,
+                in_main: false,
+                env_captures: None,
+                metered: meter.user.contains(f.name.as_str()),
+                charge_entry: meter.user.contains(f.name.as_str())
+                    && !meter.exempt.contains(f.name.as_str()),
+                var_space: *space,
+                name: qual.clone().unwrap_or_else(|| f.name.as_str().to_string()),
+                witness_name: Some(
+                    qual.clone().unwrap_or_else(|| f.name.as_str().to_string()),
+                ),
+                self_index: Some(table.infos[i].wasm_index),
+                param_owned: Some(table.infos[i].param_owned.clone()),
+            };
+            crate::decline_site::reset_pending();
+            let (lowered_fn, frame) = debug_lines::framed(|| lower_fn(&params, plan, &f.body, &[], &ctx, &mut pool));
+            match lowered_fn {
+                Ok(ok) => {
+                    let name = qual.clone().unwrap_or_else(|| f.name.as_str().to_string());
+                    dbg.record(debug_lines::Body::Program(i), name, *space, &ok.0, frame);
+                    // Any display helpers this fn registered build NOW — a
+                    // failing body refuses THIS fn, not the program.
+                    match display::build_display_helpers(&table, &types, &work, &mut pool) {
+                        Ok(calls) => {
+                            display_helper_calls.extend(calls);
+                            // Self-tail-recursion → loop (tco.rs): only fns
+                            // whose call set includes THEMSELVES are scanned.
+                            let (body, fcalls) = ok;
+                            let body = if fcalls.contains(&i) {
+                                let info = &table.infos[i];
+                                let pvts: Vec<ValType> =
+                                    info.params.iter().map(|t| t.val_type()).collect();
+                                let rvt = info.ret.map(SliceTy::val_type);
+                                let mut origin = Vec::new();
+                                tco::loop_convert(&body, &pvts, rvt, info.wasm_index, &mut origin)
+                                    .inspect(|_| dbg.remap(debug_lines::Body::Program(i), &origin))
+                                    .unwrap_or(body)
+                            } else {
+                                body
+                            };
+                            lowered.push(Ok((body, fcalls)));
+                        }
+                        Err(EmitError::Unsupported(r)) => lowered.push(Err(r)),
+                // E083: a compiler defect is fatal for the whole program — a
+                // reachable-or-not leak is still a defect, never a wall.
+                Err(e @ EmitError::OwnershipLowering(_)) => return Err(e),
                     }
-                    Err(EmitError::Unsupported(r)) => lowered.push(Err(r)),
-            // E083: a compiler defect is fatal for the whole program — a
-            // reachable-or-not leak is still a defect, never a wall.
-            Err(e @ EmitError::OwnershipLowering(_)) => return Err(e),
                 }
-            }
-            Err(EmitError::Unsupported(r)) => {
-                if let Some(sp) = crate::decline_site::take_pending() {
-                    fail_lines.insert(i, sp.line);
+                Err(EmitError::Unsupported(r)) => {
+                    if let Some(sp) = crate::decline_site::take_pending() {
+                        fail_lines.insert(i, sp.line);
+                    }
+                    lowered.push(Err(r))
                 }
-                lowered.push(Err(r))
+                // E083: a compiler defect is fatal for the whole program — a
+                // reachable-or-not leak is still a defect, never a wall.
+                Err(e @ EmitError::OwnershipLowering(_)) => return Err(e),
             }
-            // E083: a compiler defect is fatal for the whole program — a
-            // reachable-or-not leak is still a defect, never a wall.
-            Err(e @ EmitError::OwnershipLowering(_)) => return Err(e),
         }
         fn_lambdas.push(lifted_before..work.lifted.borrow().len());
     }
@@ -373,8 +406,10 @@ fn emit_program_pass(
     };
     let main_lambdas_from = work.lifted.borrow().len();
     crate::decline_site::reset_pending();
-    let (main_fn, main_calls) = lower_fn(&[], main_plan, main_body, &init_lets, &ctx, &mut pool)
-        .inspect_err(|_| crate::decline_site::set(Some(crate::decline_site::take_main_site())))?;
+    let (main_lowered, frame) = debug_lines::framed(|| lower_fn(&[], main_plan, main_body, &init_lets, &ctx, &mut pool));
+    let (main_fn, main_calls) =
+        main_lowered.inspect_err(|_| crate::decline_site::set(Some(crate::decline_site::take_main_site())))?;
+    dbg.record(debug_lines::Body::Main, "main".into(), 0, &main_fn, frame);
     let main_lambdas = main_lambdas_from..work.lifted.borrow().len();
     display_helper_calls.extend(display::build_display_helpers(&table, &types, &work, &mut pool)?);
 
@@ -424,8 +459,13 @@ fn emit_program_pass(
             };
             let children_from = work.lifted.borrow().len();
             crate::decline_site::reset_pending();
-            let (f, calls, err) = match lower_fn(&ll.params, plan, &ll.body, &[], &ctx, &mut pool) {
-                Ok((f, calls)) => (f, calls, None),
+            let (lowered_lambda, frame) = debug_lines::framed(|| lower_fn(&ll.params, plan, &ll.body, &[], &ctx, &mut pool));
+            let (f, calls, err) = match lowered_lambda {
+                Ok((f, calls)) => {
+                    let name = ll.site_name.clone().map_or(lambda_name.clone(), |s| format!("{s}::{lambda_name}"));
+                    dbg.record(debug_lines::Body::Lambda(lifted_fns.len()), name, ll.var_space, &f, frame);
+                    (f, calls, None)
+                }
                 Err(EmitError::Unsupported(r)) => {
                     // The stub ships unrecorded: counted, never certified.
                     crate::witness::decline_unrecorded(&lambda_name, "lambda:unlowered");
@@ -520,26 +560,32 @@ fn emit_program_pass(
     // fn's own name, and makes the export an obligation: a declared export
     // that does not lower refuses the module in either form, never ships an
     // artifact silently missing the entry point its host calls.
+    // #3281: a fn of a linked module (sibling `import self.x`, dependency
+    // package) exports only when it DECLARES `@export(wasm, ..)` — its own
+    // pub surface stays internal — under the same obligation and the same
+    // one-namespace duplicate wall as an entry fn.
     let mut export_fns: Vec<(String, u32)> = Vec::new();
+    let mut export_owners: Vec<String> = Vec::new();
     for (i, (f, qual, _space)) in program_fns.iter().enumerate() {
         let name = f.name.as_str();
-        if qual.is_some()
-            || name == "main"
+        let declared = f.export_attrs.iter().find(|a| a.target.as_str() == "wasm").map(|a| a.symbol.to_string());
+        let skip_entry = !matches!(f.visibility, almide_ir::IrVisibility::Public);
+        if name == "main"
             || name.starts_with("__")
             || f.is_test
             || f.generics.as_ref().is_some_and(|g| !g.is_empty())
-            || !matches!(f.visibility, almide_ir::IrVisibility::Public)
+            || if qual.is_some() { declared.is_none() } else { skip_entry }
         {
             continue;
         }
-        let declared = f.export_attrs.iter().find(|a| a.target.as_str() == "wasm").map(|a| a.symbol.to_string());
+        let owner = qual.clone().unwrap_or_else(|| name.to_string());
         let export_name = declared.clone().unwrap_or_else(|| name.to_string());
         let (sub, err, site) = reach(vec![i], Vec::new());
         if let Some(reason) = &err
             && (library || declared.is_some())
         {
             crate::decline_site::set(site);
-            return unsup(&format!("exported function `{name}` cannot be lowered: {reason}"));
+            return unsup(&format!("exported function `{owner}` cannot be lowered: {reason}"));
         }
         if err.is_none() {
             // A second export of one name is an invalid module — a wall,
@@ -547,16 +593,30 @@ fn emit_program_pass(
             // `memory`, `main` and the `__`-prefixed runtime exports are the
             // module's own.
             let reserved = matches!(export_name.as_str(), "memory" | "main") || export_name.starts_with("__");
-            if reserved || export_fns.iter().any(|(e, _)| *e == export_name) {
+            let prior = export_fns.iter().position(|(e, _)| *e == export_name);
+            if reserved || prior.is_some() {
+                let claimants = match prior {
+                    Some(p) => format!("fns `{}` and `{owner}`", export_owners[p]),
+                    None => format!("fn `{owner}` and the module's own export"),
+                };
                 return unsup(&format!(
-                    "duplicate wasm export name `{export_name}` (fn `{name}`) — two exports claim it, which is an invalid module"
+                    "duplicate wasm export name `{export_name}` ({claimants}) — two exports claim it, which is an invalid module"
                 ));
             }
             visited.extend(sub);
-            crate::host_exports::note_export(&export_name, table.infos[i].param_owned.clone());
+            crate::host_exports::note_export(
+                &export_name,
+                table.infos[i].param_owned.clone(),
+                crate::host_exports::export_params(&table.infos[i].params, &types),
+                crate::host_exports::export_ret(table.infos[i].ret, &types),
+            );
             export_fns.push((export_name, table.infos[i].wasm_index));
+            export_owners.push(owner);
         }
     }
+
+    // #3003: every reached instance-parallel chunk is a host-callable export.
+    export_fns.extend(crate::fan_par::site_exports(&program_fns, &visited, &table));
 
     // Extra functions (ok-wrap adapters + lifted lambdas) resolve BEFORE
     // the type section is built — their call_indirect/type interning must
@@ -585,11 +645,23 @@ fn emit_program_pass(
             let (module, name) = info.import.clone()?;
             Some(imports::Declared { index: info.wasm_index, module, name })
         })
+        .chain(crate::fan::js_async::declared_protocol(&table, &work))
         .collect();
-    let bytes = imports::declare(&bytes, &declared).map_err(|e| EmitError::Unsupported(format!("extern-import:{e}")))?;
+    let pre_declare = bytes;
+    let bytes = imports::declare(&pre_declare, &declared).map_err(|e| EmitError::Unsupported(format!("extern-import:{e}")))?;
+    let lines = dbg.finish(debug_lines::Placement {
+        program: &|i| (lowered[i].is_ok() && visited.contains(&i)).then(|| table.infos[i].wasm_index),
+        main_index,
+        lambdas: work.entries.borrow().iter().zip(&entry_fn_indices).filter_map(|(e, &idx)| match e {
+            TableEntry::Lambda(j) => Some((*j as usize, idx)),
+            _ => None,
+        }).collect(),
+        pre_declare: &pre_declare,
+        stubs: declared.iter().map(|d| d.index).collect(),
+    });
     record_decls(&program_fns, (main, main_index), &work, &entry_fn_indices, &declared, &bytes);
     let host_ops = work.host_ops.borrow().clone();
-Ok(Pass { bytes, visited, total, ops: host_ops, bounded_fired: work.bounded_fired.get() })
+Ok(Pass { bytes, visited, total, ops: host_ops, bounded_fired: work.bounded_fired.get(), lines })
 }
 
 /// #2759: the declaration table the name and capability witnesses read
@@ -671,10 +743,13 @@ fn fn_site(entry: &(&IrFunction, Option<String>, u32), refused_at: Option<usize>
 /// The `@extern(wasm, module, name)` import a body-less fn declares (#2275):
 /// `Ok(Some((module, name)))` when its signature has the scalar host ABI
 /// (`Int`/sized ints → i64, `Float` → f64, `Bool` → i32, `String` → i32
-/// block, `Unit` → no result); `Ok(None)` for a fn with a body; `Err` for a
-/// native (`rs`/`rust`) extern — there is no wasm host for it, so an import
-/// would be a hollow lie — and for a param or return outside the ABI.
-fn extern_import(f: &IrFunction, params: &[SliceTy], ret: Option<SliceTy>) -> Result<Option<(String, String)>, String> {
+/// block, `Unit` → no result), or — a fallible import (#3356: an `effect fn`
+/// extern, or one declaring `Result[T, String]`) — an i32 `Result` block the
+/// host builds, ok a scalar or Unit, err a String; `Ok(None)` for a fn with
+/// a body; `Err` for a native (`rs`/`rust`) extern — there is no wasm host
+/// for it, so an import would be a hollow lie — and for a param or return
+/// outside the ABI.
+fn extern_import(f: &IrFunction, params: &[SliceTy], ret: Option<SliceTy>, types: &TypeTable) -> Result<Option<(String, String)>, String> {
     if f.extern_attrs.is_empty() {
         return Ok(None);
     }
@@ -689,7 +764,15 @@ fn extern_import(f: &IrFunction, params: &[SliceTy], ret: Option<SliceTy>) -> Re
             return Err(format!("extern-ty:{}:{}", f.name, p.name));
         }
     }
-    if !matches!(ret, None | Some(SliceTy::Scalar(_))) {
+    let fallible = |ok: crate::ETy, err: crate::ETy| {
+        matches!(types.el(ok), SliceTy::Scalar(_) | SliceTy::Unit) && types.el(err) == crate::STR
+    };
+    let host_ret = match ret {
+        None | Some(SliceTy::Scalar(_)) => true,
+        Some(SliceTy::Result(ok, err)) => fallible(ok, err),
+        _ => false,
+    };
+    if !host_ret {
         return Err(format!("extern-ret:{}", f.name));
     }
     Ok(Some((a.module.as_str().to_string(), a.function.as_str().to_string())))

@@ -30,7 +30,9 @@ mod survive_legs;
 mod docs_gen;
 mod cargo_build;
 mod native_target;
+mod native_legacy_aliases;
 mod js_host;
+mod wasm_debug;
 
 // `cargo_build_cdylib`/`cargo_build_generated`/`cargo_build_generated_with_native`/
 // `cargo_build_test_with_native` are called from sibling modules (`build.rs`,
@@ -60,33 +62,30 @@ use crate::err;
 /// Check that all effects used in the program are allowed by [permissions].allow in almide.toml.
 /// Returns Ok(()) if no violations, or Err with a description of violations.
 pub fn check_permissions(ir: &almide::ir::IrProgram, permissions: &[String]) -> Result<(), String> {
-    use almide::codegen::pass_effect_inference::{EffectInferencePass, Effect};
+    use almide::codegen::pass_effect_inference::EffectInferencePass;
     use almide::codegen::pass::NanoPass;
 
+    let allowed = allowed_permissions_or_report(permissions)?;
     let result = EffectInferencePass.run(ir.clone(), almide::codegen::pass::Target::Rust);
     let ir_after = result.program;
 
-    let allowed: std::collections::HashSet<Effect> = permissions.iter()
-        .filter_map(|s| match s.as_str() {
-            "IO" => Some(Effect::IO),
-            "Net" => Some(Effect::Net),
-            "Env" => Some(Effect::Env),
-            "Time" => Some(Effect::Time),
-            "Rand" => Some(Effect::Rand),
-            "Fan" => Some(Effect::Fan),
-            _ => None,
-        })
-        .collect();
-
+    // Report in name order so the same program prints the same report on every run and route.
+    let mut functions: Vec<_> = ir_after.effect_map.functions.iter().collect();
+    functions.sort_by(|a, b| a.0.cmp(b.0));
     let mut violations = 0;
-    for (name, fe) in &ir_after.effect_map.functions {
-        let forbidden: Vec<_> = fe.transitive.iter()
+    for (name, fe) in functions {
+        let mut forbidden: Vec<_> = fe.transitive.iter()
             .filter(|e| !allowed.contains(e))
             .collect();
+        forbidden.sort_by_key(|e| e.to_string());
         if !forbidden.is_empty() {
             err(&format!("error: capability violation in `{}`", name));
             for e in &forbidden {
                 err(&format!("  {} is not in [permissions].allow", e));
+                // ADR-0026 D4: the path the category reaches this function by.
+                if let Some(path) = fe.paths.get(*e) {
+                    err(&format!("  path: {path}"));
+                }
             }
             violations += 1;
         }
@@ -96,6 +95,109 @@ pub fn check_permissions(ir: &almide::ir::IrProgram, permissions: &[String]) -> 
         return Err(format!("{} capability violation(s)", violations));
     }
     Ok(())
+}
+
+/// The subprocess fns that START a child, with the index of the argument
+/// that names the command (#2589).
+const PROC_SPAWNING: &[(&str, usize)] = &[
+    ("exec", 0),
+    ("exec_in", 1),
+    ("exec_with_stdin", 0),
+    ("exec_status", 0),
+    ("exec_status_timeout", 0),
+    ("run", 0),
+    ("run_in", 1),
+    ("exec_attached", 0),
+    ("spawn", 0),
+];
+
+/// `[permissions] proc` (#2589, ADR-0025), statically: every call that starts
+/// a child must name its command as a string literal on the list. A command
+/// computed at run time, or a spawning fn passed as a value, cannot be checked
+/// here and is refused too — so a program that compiles never starts a
+/// command outside the list, on any target.
+pub fn check_proc_allowlist(ir: &almide::ir::IrProgram, allow: &[String]) -> Result<(), String> {
+    use almide::ir::visit::IrVisitor;
+    use almide::ir::{CallTarget, IrExpr, IrExprKind};
+    struct Scan<'a> {
+        allow: &'a [String],
+        bad: Vec<String>,
+    }
+    impl IrVisitor for Scan<'_> {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            match &e.kind {
+                IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
+                    if module.as_str() == "process" =>
+                {
+                    if let Some(&(_, at)) = PROC_SPAWNING.iter().find(|(f, _)| *f == func.as_str()) {
+                        let line = e.span.map_or(String::new(), |s| format!(" (line {})", s.line));
+                        match args.get(at).map(|a| &a.kind) {
+                            Some(IrExprKind::LitStr { value }) if self.allow.iter().any(|c| c == value) => {}
+                            Some(IrExprKind::LitStr { value }) => {
+                                self.bad.push(format!("process.{func}(\"{value}\"){line}: `{value}` is not in [permissions] proc"))
+                            }
+                            _ => self.bad.push(format!(
+                                "process.{func}{line}: the command is not a string literal, so [permissions] proc cannot check it"
+                            )),
+                        }
+                    }
+                }
+                IrExprKind::FnRef { name } => {
+                    let n = name.as_str();
+                    if let Some(f) = n.strip_prefix("process.").filter(|f| PROC_SPAWNING.iter().any(|(p, _)| p == f)) {
+                        self.bad.push(format!("process.{f} passed as a value: [permissions] proc cannot check its command"));
+                    }
+                }
+                _ => {}
+            }
+            almide::ir::visit::walk_expr(self, e);
+        }
+    }
+    let mut scan = Scan { allow, bad: Vec::new() };
+    for f in ir.functions.iter().chain(ir.modules.iter().flat_map(|m| m.functions.iter())) {
+        scan.visit_expr(&f.body);
+    }
+    if scan.bad.is_empty() {
+        return Ok(());
+    }
+    for b in &scan.bad {
+        err(&format!("error: {b}"));
+    }
+    err(&format!("  hint: [permissions] proc = {allow:?} in almide.toml lists the commands process.* may start"));
+    Err(format!("{} [permissions] proc violation(s)", scan.bad.len()))
+}
+
+/// Apply `[permissions] proc`: the static gate above, and the same list as
+/// the embedded wasm host's run-time bound (`almide:process/spawn` answers a
+/// command outside it with an err naming the command).
+/// The whole `[permissions]` gate: the capability allow-list (`allow`, via
+/// [`check_permissions`]) and the subprocess allow-list (`proc`, #2589).
+/// `[permissions]` is a property of the program, not of the target (#3275):
+/// the build routes reach it through `compile_driver::optimize_gate_and_link`,
+/// and `check` calls it directly. Each violation is printed as it is found.
+pub fn enforce_project_permissions(ir: &almide::ir::IrProgram, proj: &crate::project::Project) -> Result<(), String> {
+    if !proj.permissions.is_empty() {
+        check_permissions(ir, &proj.permissions)?;
+    }
+    enforce_proc_allowlist(ir, proj.proc_allow.as_deref())
+}
+
+pub fn enforce_proc_allowlist(ir: &almide::ir::IrProgram, allow: Option<&[String]>) -> Result<(), String> {
+    almide_wasm_run::set_proc_allowlist(allow.map(<[String]>::to_vec));
+    match allow {
+        Some(list) => check_proc_allowlist(ir, list),
+        None => Ok(()),
+    }
+}
+
+/// `[permissions].allow` → the categories it grants, via the one shared
+/// matcher (`project::allowed_effects`). The manifest gate in `main` refuses
+/// an unknown name on its line before any command runs; this reports it
+/// again for a caller that reached here without that gate (#3247).
+pub(crate) fn allowed_permissions_or_report(
+    permissions: &[String],
+) -> Result<std::collections::HashSet<almide::ir::effect::Effect>, String> {
+    crate::project::allowed_effects(permissions).inspect_err(|e| err(&format!("error: {e}")))
 }
 
 /// Compute a 64-bit hash of a byte slice (using DefaultHasher).

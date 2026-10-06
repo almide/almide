@@ -1,0 +1,31 @@
+// #3305: every top-level global keeps its own native static, across modules.
+// Native named a module global `ALMIDE_RT_<MOD>_<NAME>` upper-cased, so `m.x`
+// and `m.X` were one static, module `a` + `b_c` and module `a_b` + `c` were
+// one static, and an entry global spelled like a generated static named the
+// module's (`let almide_rt_m_thing` beside `m.THING`, #3314). Native and wasm
+// print the same.
+import self.m as m
+import self.a as a
+import self.a_b as ab
+
+let x = 3
+
+let ALMIDE_RT_M_X = 4
+
+let ALMIDE_RT_1_m_x = 5
+
+let almide_rt_m_thing = 100
+
+effect fn main() -> Unit = {
+  let names = "${m.x} ${m.X} ${x} ${ALMIDE_RT_M_X} ${ALMIDE_RT_1_m_x}"
+  println(names)
+  let modules = "${a.b_c} ${ab.c}"
+  println(modules)
+  println(int.to_string(m.THING + almide_rt_m_thing))
+  m.bump()
+  m.hits = m.hits + 1000
+  m.HITS = m.HITS + 7
+  m.bump()
+  let counts = "${m.hits} ${m.HITS}"
+  println(counts)
+}

@@ -19,8 +19,10 @@ struct MatchArmTypes {
     peers: Vec<(Ty, Option<ast::Span>, bool)>,
     /// Every `err(..)` arm's payload type and body span. The join reads such
     /// an arm as `Never`, so its payload is judged separately against the
-    /// error type the match produces (#2722).
-    err_payloads: Vec<(Ty, Option<ast::Span>)>,
+    /// error type the match produces (#2722). The first element is the
+    /// arm's OK slot, joined with the match's own OK type when the match
+    /// produces a Result (#3415).
+    err_payloads: Vec<(Ty, Ty, Option<ast::Span>)>,
     /// Per arm: where its value is reported (a block body's tail) and the
     /// un-`!`ed call it wraps in `ok(..)` / `some(..)`, if any (#2927).
     blame_spans: Vec<Option<ast::Span>>,
@@ -195,6 +197,25 @@ impl Checker {
             ExprKind::SpreadRecord { base, fields, .. } => {
                 let base_ty = self.infer_expr(base);
                 for f in fields.iter_mut() { self.infer_expr(&mut f.value); }
+                // #3358: an updated field takes the base record's DECLARED field
+                // type, as the same field of a record literal does
+                // (`constrain_record_fields`). Without this the value was
+                // inferred bare: `{ ...r, rows: [] }` was E018 though `rows` is
+                // `List[Int]`, and `{ ...r, rows: ["x"] }` passed check. Only a
+                // base whose record shape is already known pins its fields; an
+                // unresolved base is left as before.
+                let decl = match self.env.resolve_named(&resolve_ty(&base_ty, &self.uf)) {
+                    Ty::Record { fields } | Ty::OpenRecord { fields } => fields,
+                    _ => Vec::new(),
+                };
+                for f in fields.iter() {
+                    if let Some((_, ety)) = decl.iter().find(|(n, _)| n.as_str() == f.name.as_str()) {
+                        self.record_int_literal_context(&f.value, ety);
+                        if let Some(vty) = self.type_map.get(&f.value.id).cloned() {
+                            self.constrain(ety.clone(), vty, format!("field {}", f.name));
+                        }
+                    }
+                }
                 base_ty
             }
             ExprKind::IndexAccess { object: _, index: _, .. } => self.infer_expr_g2_index_access(expr),
@@ -240,17 +261,27 @@ impl Checker {
     /// joined slot is often still open (#2599 leaves `ok(v)`'s error slot
     /// fresh), and the payload must not pin it before the fn's declared return
     /// does — the arm then reports at itself, not at the fn.
-    fn check_err_arm_payloads(&mut self, joined: &Ty, err_payloads: Vec<(Ty, Option<ast::Span>)>) {
+    fn check_err_arm_payloads(&mut self, joined: &Ty, err_payloads: Vec<(Ty, Ty, Option<ast::Span>)>) {
         if err_payloads.is_empty() {
             return;
         }
         let target = match resolve_ty(joined, &self.uf) {
-            Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => Some(args),
+            Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => {
+                // #3415: a match that PRODUCES a Result (`let n = match o {
+                // N(n) => ok(n), _ => err(..) }!`) carries its `err(..)` arms
+                // as values of that Result, not as early returns, so their OK
+                // slot is the match's — not the enclosing fn's declared one,
+                // which `open_result_slot` only offers as a default.
+                for (ok_slot, _, _) in &err_payloads {
+                    self.unify_infer(ok_slot, &args[0]);
+                }
+                Some(args)
+            }
             Ty::Never | Ty::Unknown | Ty::TypeVar(_) => None,
             // ADR-0021: inside a lambda a value-join `err(..)` arm returns into
             // the lambda's own channel — its error type joins ε.
             _ if self.env.lambda_depth > 0 => {
-                for (payload, span) in &err_payloads {
+                for (_, payload, span) in &err_payloads {
                     self.record_lambda_returned_err(&Ty::result(Ty::Unit, payload.clone()), false, *span);
                 }
                 None
@@ -258,7 +289,7 @@ impl Checker {
             value => self.bang_channel_err_ty().map(|e| vec![value, e]),
         };
         let Some(target) = target else { return };
-        for (payload, span) in err_payloads {
+        for (_, payload, span) in err_payloads {
             let fix_hint = self.erased_callback_behind(&payload);
             self.constraints.push(super::types::Constraint {
                 expected: Ty::result(target[0].clone(), target[1].clone()),
@@ -346,8 +377,8 @@ impl Checker {
             out.blame_spans.push(super::arm_blame::value_leaf_span(&arm.body));
             out.bangs.push(self.wrapped_unbanged_call(&arm.body));
             if matches!(&arm.body.kind, ExprKind::Err { .. }) {
-                if let Some((_, payload)) = resolve_ty(&arm_ty, &self.uf).inner2() {
-                    out.err_payloads.push((payload.clone(), arm.body.span));
+                if let Some((ok_slot, payload)) = resolve_ty(&arm_ty, &self.uf).inner2() {
+                    out.err_payloads.push((ok_slot.clone(), payload.clone(), arm.body.span));
                 }
             }
             let arm_ty = self.match_arm_join_ty(arm, arm_ty, arms_have_result_ctor);
@@ -393,6 +424,16 @@ impl Checker {
     fn join_match_arms(&mut self, inferred: MatchArmTypes, expect: Option<&super::types::TailExpect>) -> Ty {
         let MatchArmTypes { types, real_types, peers, blame_spans, bangs, .. } = inferred;
         if types.is_empty() { return Ty::Unit };
+        // #3385: in a lifting tail each arm lifts into `ok(..)` on its own,
+        // so a value arm and an explicit `ok(..)` arm join at the lifted
+        // level — the same rule the `if` branches follow.
+        let (types, peers) = match self.lift_mixed_tail_peers(expect, &types) {
+            Some(lifted) => {
+                let peers = peers.into_iter().zip(&lifted).map(|((_, s, lit), t)| (t.clone(), s, lit)).collect();
+                (lifted, peers)
+            }
+            None => (types, peers),
+        };
         let (anchor, declared) = self.pick_join_anchor(expect, &types);
         let first = types[anchor].clone();
         for (i, aty) in types.iter().enumerate() {
@@ -509,7 +550,13 @@ impl Checker {
                         _ => t.clone(),
                     }
                 };
-                let (cmp_then, cmp_else) = if self.env.auto_unwrap {
+                let lifted = self.lift_mixed_tail_peers(expect.as_ref(), &[then_ty.clone(), else_ty.clone()]);
+                let (cmp_then, cmp_else) = if let Some(lifted) = lifted {
+                    // #3385 / #3395: a lifting tail (`-> T!`, or an effect fn
+                    // declaring `-> Result[..]`) lifts each branch on its own —
+                    // the same rule the match arms follow.
+                    (lifted[0].clone(), lifted[1].clone())
+                } else if self.env.auto_unwrap {
                     // #2182: a branch whose Result the comparison strips is
                     // implicit propagation — report it at the branch's tail
                     // leaves (the `else` side never reached any report: the
@@ -619,12 +666,15 @@ impl Checker {
                 // never freshened anything (its mapping was never written), so
                 // it was an identity deep copy of the already-cloned type.
                 if let Some(ty) = self.env.lookup_var(name).cloned() { ty }
+                else if let Some(ty) = self.selective_top_let_ty(name) { ty }
                 else if let Some(ty) = self.env.top_lets.get(&sym(name)).cloned() { ty }
                 // Const param: `N: Int` in generic params resolves to its underlying type
                 else if let Some(Ty::ConstParam { ty, .. }) = self.env.types.get(&sym(name)).cloned() {
                     *ty
                 }
                 else if let Some(sig) = self.env.functions.get(&sym(name)).cloned() {
+                    let callee = self.purity_callee(name);
+                    self.record_purity_ref(callee, expr.span);
                     self.fn_value_ty(&sig)
                 }
                 else {

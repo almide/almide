@@ -1,0 +1,3 @@
+check_target = "wasm"
+expects_code = "E082"
+expects_error = "exported function `generic.first` is generic"

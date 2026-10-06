@@ -53,6 +53,54 @@ fn ext(x: Int) -> Int"#,
         );
     }
 
+    fn parse_err(src: &str) -> String {
+        let tokens = Lexer::tokenize(src);
+        let mut parser = Parser::new(tokens);
+        match parser.parse() {
+            Ok(_) if parser.errors.is_empty() => panic!("expected a parse error for {src}"),
+            Ok(_) => parser.errors.iter().map(|e| format!("{e:?}")).collect::<Vec<_>>().join("\n"),
+            Err(e) => e,
+        }
+    }
+
+    // ── #3371: `returns: promise` on a JS extern ──────────────────
+
+    #[test]
+    fn extern_returns_promise_is_recorded() {
+        for src in [
+            "@extern(wasm, \"js\", \"kv_get\", returns: promise)\nfn kv_get(k: String) -> String",
+            "@extern(wasm, \"js\", \"kv_get\", returns = promise)\neffect fn kv_get(k: String) -> String",
+        ] {
+            let prog = parse_program(src);
+            let Decl::Fn { extern_attrs, attrs, .. } = first_fn(&prog) else { panic!("expected fn") };
+            assert_eq!(extern_attrs.len(), 1);
+            assert!(extern_attrs[0].returns_promise, "{src}");
+            assert_eq!(extern_attrs[0].function.as_str(), "kv_get");
+            assert!(attrs.is_empty());
+        }
+        let prog = parse_program("@extern(wasm, \"js\", \"kv_get\")\nfn kv_get(k: String) -> String");
+        let Decl::Fn { extern_attrs, .. } = first_fn(&prog) else { panic!("expected fn") };
+        assert!(!extern_attrs[0].returns_promise);
+    }
+
+    #[test]
+    fn extern_named_args_other_than_returns_promise_are_refused() {
+        let cases = [
+            ("@extern(wasm, \"js\", \"f\", async: true)\nfn f() -> Int", "no named argument `async`"),
+            ("@extern(wasm, \"js\", \"f\", returns: future)\nfn f() -> Int", "takes only `promise`"),
+            ("@extern(wasm, \"js\", \"f\", returns: \"promise\")\nfn f() -> Int", "takes only `promise`"),
+            ("@extern(wasm, \"js\", \"f\", returns: promise, returns: promise)\nfn f() -> Int", "repeats"),
+            ("@extern(wasm, \"js\", \"f\", promise)\nfn f() -> Int", "got 4"),
+            ("@extern(wasm, \"env\", \"f\", returns: promise)\nfn f() -> Int", "applies only to @extern(wasm, "),
+            ("@extern(rust, \"js\", \"f\", returns: promise)\nfn f() -> Int", "applies only to @extern(wasm, "),
+        ];
+        for (src, want) in cases {
+            let e = parse_err(src);
+            assert!(e.contains(want), "{src}: {e}");
+            assert!(e.contains("returns: promise"), "the hint names the accepted spelling: {e}");
+        }
+    }
+
     #[test]
     fn export_attr_still_goes_to_typed_struct() {
         let prog = parse_program(

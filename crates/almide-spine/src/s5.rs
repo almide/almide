@@ -13,6 +13,13 @@ pub struct RunResult {
     pub exit: i32,
     pub stdout: String,
     pub stderr: String,
+    /// The run ended at the interpreter's own call-stack threshold
+    /// (`RunStatus::StackExhausted`, C-196). `exit` is then 1 and `stderr`
+    /// carries `Error: stack overflow` — the defined abort — but the threshold
+    /// is the interpreter's, not the target's, so a harness counts it as a
+    /// vote only where it matches the other leg, and otherwise as the C-196
+    /// resource class (the abstain the old depth-as-fuel `-3` gave).
+    pub stack_exhausted: bool,
 }
 
 // Commissioned (Stage 2): the driver moved to the root crate so the product
@@ -29,5 +36,6 @@ pub fn run_file(path: &str, source_text: &str) -> Result<RunResult, String> {
         almide::interp::RunStatus::Unsupported(r) => r.clone(),
         _ => out.stderr.clone(),
     };
-    Ok(RunResult { exit: out.exit_code(), stdout: out.stdout, stderr })
+    let stack_exhausted = matches!(out.status, almide::interp::RunStatus::StackExhausted);
+    Ok(RunResult { exit: out.exit_code(), stdout: out.stdout, stderr, stack_exhausted })
 }

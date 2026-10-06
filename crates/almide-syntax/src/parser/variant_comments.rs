@@ -2,8 +2,12 @@
 use crate::ast::ExprComments;
 use crate::lexer::{Token, TokenType};
 
-pub(super) fn collect(tokens: &[Token]) -> Vec<ExprComments> {
+/// The per-case comments of a variant declaration, and whether its cases were
+/// written on more than one line (#3393: fmt keeps that layout instead of
+/// folding a one-case-per-line declaration onto a single long line).
+pub(super) fn collect(tokens: &[Token]) -> (Vec<ExprComments>, bool) {
     let mut cases: Vec<ExprComments> = Vec::new();
+    let mut case_lines: Vec<usize> = Vec::new();
     let mut pending = Vec::new();
     let mut depth = 0usize;
     let mut expect_case = true;
@@ -18,6 +22,7 @@ pub(super) fn collect(tokens: &[Token]) -> Vec<ExprComments> {
             }
             TokenType::TypeName if depth == 0 && expect_case => {
                 cases.push(ExprComments { leading: std::mem::take(&mut pending), ..Default::default() });
+                case_lines.push(token.line);
                 expect_case = false;
             }
             TokenType::Pipe if depth == 0 => expect_case = true,
@@ -27,5 +32,6 @@ pub(super) fn collect(tokens: &[Token]) -> Vec<ExprComments> {
         }
         if !matches!(token.token_type, TokenType::Comment | TokenType::Newline) { last_line = token.line; }
     }
-    cases
+    let multiline = case_lines.windows(2).any(|w| w[1] != w[0]);
+    (cases, multiline)
 }

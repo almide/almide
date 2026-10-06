@@ -135,11 +135,161 @@ still one dependency declared twice.
 
 Test: `tests/manifest_duplicate_key_test.rs`.
 
+**A key no reader reads is a warning** (#3382). It used to be dropped without a
+word, so `brnach = "main"` or `tags = "v0.1.0"` in a dependency built from the
+default ref, not the one written. Every command that reads `almide.toml` now
+warns once, naming the line, the key, the keys that table accepts, and the key
+one edit away (insertion, deletion, substitution or an adjacent swap) when
+there is one:
+
+```text
+warning: unknown key `brnach` in dependency `foo` is ignored — it changes nothing
+  --> almide.toml:5
+  hint: did you mean `branch`? The keys dependency `foo` accepts are `git`, `tag`, `branch`, `version`, `path`, `subdir`
+```
+
+| Table | Accepted keys |
+|---|---|
+| top level | `[package]`, `[dependencies]`, `[native-deps]`, `[permissions]`, `[target]` |
+| `[package]` | `name`, `version`, `almide`; and `description`, `edition`, `license`, `repository`, which describe the package and are read by nothing (no warning) |
+| a `[dependencies]` entry (inline table, dotted keys or `[dependencies.<name>]`) | `git`, `tag`, `branch`, `version`, `path`, `subdir` |
+| `[permissions]` | `allow`, `proc` |
+
+A dependency entry that is not a table, or names neither `git` nor `path`,
+declares nothing and is warned about the same way. `[native-deps]` entries are
+crate names, so any key is one (their specs are Cargo's to judge); an unknown
+table under `[target.<platform>]` is already an error (§6.2).
+
+The build still runs exactly as if the key were absent, and the exit code does
+not change (`check --deny-warnings` does not count it either). `almide check
+--json` carries the warning as a `"level":"warning"` row on stdout; every other
+command prints it on stderr. Escalating it to an error is planned for a later
+dialect epoch, after a release that carries the warning; there is no epoch
+entry yet. The key lists live beside their readers in `src/project.rs`, and
+`tests/manifest_unknown_key_test.rs` asserts that every listed key changes the
+parse (and that every metadata key does not), so a list cannot drift from its
+reader.
+
 Short form (defaults to github.com/almide/):
 ```bash
 almide add bindgen@v0.1.0
 # → git = "https://github.com/almide/almide-bindgen", tag = "v0.1.0"
 ```
+
+### 6.1 A package in a subdirectory of the repository: `subdir`
+
+A repository can hold several packages, each in its own directory with its own
+`almide.toml`. A git dependency names one of them with `subdir` (#3381):
+
+```toml
+[dependencies]
+ceangal = { git = "https://github.com/almide-graphics/ceangal2", tag = "v0.1.0", subdir = "ceangal" }
+snaidhm = { git = "https://github.com/almide-graphics/ceangal2", tag = "v0.1.0", subdir = "snaidhm" }
+```
+
+The package is named explicitly rather than found by scanning the repository
+for a package of that name (Cargo's rule): the manifest says exactly which
+directory is built, nothing depends on what else the repository holds, and a
+reader of `almide.toml` sees it without fetching.
+
+- **Spelling.** `subdir` is a path relative to the repository root, `/`-separated
+  on every platform. It is normalized before use: `./`, repeated and trailing `/`
+  are dropped (`./pkgs//c/` is `pkgs/c`), and the normalized spelling is the
+  one the lock records. Every command that reads `almide.toml` refuses, on the
+  line that writes it, a `subdir` that is not a string, is empty, names the root
+  itself (`.` — delete `subdir` instead), is absolute (`/x`, `C:/x`), uses `\`,
+  or contains `..` at all (even `a/../b`: one spelling per directory).
+- **Git only.** `subdir` beside `path` is refused — a `path` already names the
+  package directory; the hint gives the joined `path`.
+- **Checked at fetch.** The directory must exist in the checkout, stay inside it
+  (a symlink out of the clone is refused), and hold an `almide.toml` whose
+  `[package] name` is the dependency's key — the key is the import name. Each
+  refusal names the manifest line and lists the package directories the
+  repository does hold (up to two levels down):
+
+```text
+error: almide.toml:6: dependency `ceangal` names subdir `snaidhm`, whose package is `snaidhm`
+  hint: the dependency key is the import name and must be the package's name — rename the key to `snaidhm`, or point `subdir` at the package `ceangal`
+error: almide.toml:6: subdir `pkgs/ceangal` of dependency `ceangal` does not exist in https://… at v0.1.0
+  hint: the packages in this repository are `ceangal`, `snaidhm` — point `subdir` at one
+```
+
+  A git dependency WITHOUT `subdir` whose repository root is no package (no
+  `almide.toml`, no `src/`, no `.almd` file) while its subdirectories are is
+  refused the same way, with the `subdir = "…"` to add.
+- **Identity.** A package is a source and a directory in it: two subdirs of one
+  repository are two packages, walked separately for their own requirements and
+  locked as two entries. `PkgId` (name, major) and MVS are unchanged — the name
+  is still the package's own `[package] name`.
+- **One clone.** A `subdir` dependency's checkout is keyed by its source alone,
+  `~/.almide/cache/.repos/.src-<source>/<ref-or-commit>/`, so the packages of one
+  repository at one ref (or one locked commit) are one fetch and one directory;
+  each reads its own `subdir` inside it. (`.repos` starts with a dot, which no
+  package name can, so it never aliases a `<name>/` directory.) A dependency
+  without `subdir` keeps the name-keyed layout, so its cache entries stay valid;
+  it does not share a clone with a `subdir` dependency on the same repository.
+- **CLI.** `almide add <repo>[@<tag>] --subdir <dir>` names the package after
+  the subdir's last component (`--subdir pkgs/ceangal` → `ceangal`); with
+  `--git <url>` the first argument is the name. `add` fetches and checks the
+  package BEFORE it writes `almide.toml`, so a wrong `subdir` leaves the
+  manifest as it was. `almide deps` prints `… (<ref>) subdir <dir>`, and
+  `almide dep-path <name>` prints the package's directory inside the clone
+  (its `src/` when it has one). `almide update` advances the entry like any
+  other git dependency.
+
+Tests: `tests/dep_git_subdir_test.rs` (a local repository holding two packages:
+check, lock, one shared clone, `dep-path`, `deps`, `add --subdir`, every
+refusal), the `project_fetch` unit tests (`package_dir_in_checks_the_subdir_against_the_checkout`,
+`subdir_packages_of_one_repository_share_a_clone_root`), `tests/lock_roundtrip_test.rs`.
+
+### 6.2 Native Rust dependencies: `[native-deps]`
+
+A package with `native/*.rs` modules or `@extern(rust, …)` functions declares
+the crates.io crates they use in `[native-deps]`. Each entry is copied verbatim
+into the generated crate's Cargo.toml, on every native build route (binary,
+`--cdylib`, `--repr-c`, `almide run`, `almide test`). A dependency package's
+`[native-deps]` are added the same way.
+
+```toml
+[native-deps]
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+```
+
+**Target-specific native deps** (#3350). A crate that builds only on some
+targets goes under `[target.<platform>.native-deps]`, which uses Cargo's
+syntax and meaning. It is emitted as `[target.<platform>.dependencies]`, so
+Cargo compiles the crate only when the build's target (the host, or
+`--target <triple>`) matches:
+
+```toml
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.native-deps]
+arboard = "3"
+
+[target.'cfg(target_os = "android")'.native-deps]
+jni = "0.21"
+
+[target.x86_64-pc-windows-gnu.native-deps]
+winapi = "0.3"
+```
+
+`<platform>` is either `cfg(<expr>)` or a target triple, exactly as Cargo
+accepts them. `<expr>` is `all(…)`, `any(…)`, `not(…)`, a name (`unix`), or
+`name = "value"`. Every command that reads `almide.toml` refuses a key Cargo
+would refuse, and names the key and its line:
+
+```text
+error: almide.toml:4: invalid platform `cfg(target_os = android)` in [target.'cfg(target_os = android)'.native-deps]: expected a string after `target_os =`, found `android`
+```
+
+Only `native-deps` can be target-specific: any other table under
+`[target.<platform>]` is an error. A crate the runtime itself needs (for
+example `flate2` for `zlib`, or the TLS crates for `http`) is always declared
+for every target. If you also declare that crate for one target, both
+declarations are written and Cargo merges them.
+
+Tests: `tests/manifest_toml_reader_test.rs`, `tests/native_deps_target_cfg_test.rs`,
+and the `cargo_build` unit tests.
 
 ## 7. Lock File
 
@@ -148,7 +298,15 @@ almide add bindgen@v0.1.0
 
 bindgen = { git = "https://github.com/almide/almide-bindgen", ref = "v0.1.0", commit = "a629eded8d20..." }
 json = { git = "https://github.com/almide/json", ref = "v2.0.0", commit = "b8f3a1..." }
+ceangal = { git = "https://github.com/almide-graphics/ceangal2", ref = "v0.1.0", commit = "c41d...", subdir = "ceangal" }
 ```
+
+An entry for a `subdir` dependency (§6.1) records the normalized `subdir`, so
+the lock names the package exactly; entries without one are written exactly as
+before. Two packages of one repository may share `(git, ref, commit)` — the
+pin is a fact about the repository at that ref, so it is looked up by
+`(git, ref)` as for any dependency, and both packages build from the same
+commit.
 
 One entry per direct dependency, one line each; the writer never emits a name
 twice. A lock that holds a name twice (written by a compiler before #2583
@@ -186,6 +344,7 @@ Test: `tests/manifest_duplicate_key_test.rs`, `tests/lock_roundtrip_test.rs`,
 2. For each dep:
    a. If almide.lock has an entry for this (git, ref) → use its exact commit
    b. Else fetch tag/branch
+   c. With `subdir`, the package is that directory of the checkout (§6.1)
 3. Parse dep's almide.toml → transitive dependencies
 4. Recurse (depth-first, leaves first)
 5. Dedup by PkgId(name, major):

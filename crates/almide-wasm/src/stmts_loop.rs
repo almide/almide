@@ -6,7 +6,8 @@
 //! nothing on the jump edge: the body's heap locals are FRAME credits (the
 //! next pass's rebind releases the previous occupant, the epilogue the last),
 //! so leaving the body early leaves them exactly where a fall-through pass
-//! does.
+//! does. The one exception is a named list rest of an arm the jump leaves:
+//! no rebind releases it, so the jump edge does (#3377, arm_rests.rs).
 
 use almide_ir::{IrExpr, IrExprKind, IrStmt, IrStmtKind};
 use wasm_encoder::BlockType;
@@ -23,6 +24,16 @@ impl Emitter<'_> {
         // reaches only element-wise — cleared before the unrolled lane too,
         // which runs copies of this same condition and body.
         let flags = self.hoist_cow_flags(Some(cond), body)?;
+        // #3345: the pre-judge, guarded by one extra evaluation of an INERT
+        // condition (cow_hoist.rs) — before the unrolled lane, whose bodies
+        // run only where the condition holds.
+        let pre = if crate::cow_hoist::inert_cond(cond) {
+            self.prejudge_first_stores(Some(cond), body, &|e: &mut Self| e.lower(cond, Some(BOOL)).map(|_| ()))?
+        } else {
+            Vec::new()
+        };
+        // #3345: address-stable lists address through a payload pointer.
+        let ptrs = self.hoist_payload_ptrs(Some(cond), body, &pre)?;
         // Counted-shape fast lane (unroll.rs): on `true` the rolled loop
         // below drains the remainder iterations.
         let _ = self.try_unroll_while(cond, body)?;
@@ -47,6 +58,8 @@ impl Emitter<'_> {
         self.witness_loop_close();
         self.f.instructions().br(0).end().end();
         self.drop_hoisted_counts(hoisted);
+        self.drop_payload_ptrs(ptrs);
+        self.drop_prejudged(pre);
         self.drop_cow_flags(flags);
         Ok(())
     }
@@ -58,19 +71,35 @@ impl Emitter<'_> {
     /// exit block (while: 1; for-in: 2 — the inner block adds one).
     pub(crate) fn lower_loop_body(&mut self, body: &[IrStmt], for_in: bool) -> Result<(), EmitError> {
         let saved = self.loop_ctl.take();
+        let rest_floor = self.open_loop_rests();
         if for_in {
             self.f.instructions().block(BlockType::Empty);
             self.loop_ctl = Some((0, 2));
         } else {
             self.loop_ctl = Some((0, 1));
         }
-        for st in body {
-            self.lower_stmt(st)?;
-        }
+        // #3345: each iteration starts with no bounds facts (bounds_facts.rs).
+        let outer_facts = self.bounds_facts.replace(Vec::new());
+        self.lower_stmts_moving(body, None, Self::lower_stmt_with_facts)?;
+        self.bounds_facts = outer_facts;
         if for_in {
             self.f.instructions().end();
         }
         self.loop_ctl = saved;
+        self.close_loop_rests(rest_floor);
+        Ok(())
+    }
+
+    /// `continue` / `break` in statement position: a branch to the loop
+    /// context's continue label (`break` adds the depth to its exit). The
+    /// arms the jump leaves release their list rests first (#3377).
+    pub(crate) fn lower_loop_jump(&mut self, brk: bool) -> Result<(), EmitError> {
+        let Some((extra, delta)) = self.loop_ctl else {
+            return unsup(if brk { "expr:Break" } else { "expr:Continue" });
+        };
+        self.release_jumped_rests();
+        self.f.instructions().br(if brk { extra + delta } else { extra });
+        self.witness_loop_jump();
         Ok(())
     }
 

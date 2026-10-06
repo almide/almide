@@ -212,10 +212,15 @@ pub fn collect_deref_vars(program: &IrProgram) -> (HashSet<VarId>, HashSet<Strin
         program.type_decls.iter().chain(program.modules.iter().flat_map(|m| m.type_decls.iter()))
     );
 
-    // Step 2: Walk all match expressions and find Bind vars in recursive positions
-    for func in &program.functions {
-        collect_from_expr(&func.body, &recursive_enums, &program.type_decls, &name_to_var, &mut deref_vars);
-    }
+    // Step 2: Walk all match expressions and find Bind vars in recursive positions.
+    // The entry program's constructors resolve against its OWN decls first and
+    // then every module's — a match on a type imported from a module (the
+    // entry of `almide test` / `almide run`, #3422) must find that module's
+    // decl, exactly as a module function's match does in Step 2 of `run`.
+    let all_type_decls: Vec<IrTypeDecl> = program.type_decls.iter()
+        .chain(program.modules.iter().flat_map(|m| m.type_decls.iter()))
+        .cloned().collect();
+    collect_scope(&program.functions, &program.top_lets, &recursive_enums, &all_type_decls, &name_to_var, &mut deref_vars);
 
     (deref_vars, recursive_enums)
 }
@@ -248,10 +253,26 @@ pub fn collect_module_deref_vars_with_vt(
     }
     let mut deref_vars = HashSet::new();
     let recursive_enums = find_recursive_enums(all_type_decls.iter());
-    for func in &module.functions {
-        collect_from_expr(&func.body, &recursive_enums, all_type_decls, &name_to_var, &mut deref_vars);
-    }
+    collect_scope(&module.functions, &module.top_lets, &recursive_enums, all_type_decls, &name_to_var, &mut deref_vars);
     deref_vars
+}
+
+/// The one walk over a scope's code — every fn body AND every top-level let
+/// value — so a match binding a boxed payload in a top-level let is collected
+/// exactly as one in a fn body (#3423). `insert_deref_nodes` /
+/// `insert_module_deref_nodes` rewrite the same two sets.
+fn collect_scope(
+    functions: &[IrFunction],
+    top_lets: &[IrTopLet],
+    recursive_enums: &HashSet<String>,
+    type_decls: &[IrTypeDecl],
+    name_to_var: &std::collections::HashMap<String, Vec<VarId>>,
+    deref_vars: &mut HashSet<VarId>,
+) {
+    let bodies = functions.iter().map(|f| &f.body).chain(top_lets.iter().map(|tl| &tl.value));
+    for body in bodies {
+        collect_from_expr(body, recursive_enums, type_decls, name_to_var, deref_vars);
+    }
 }
 
 /// Insert Deref IR nodes for a single module's functions and top_lets.

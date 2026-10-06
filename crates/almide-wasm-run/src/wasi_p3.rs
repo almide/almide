@@ -6,17 +6,19 @@
 //!
 //! Same doctrine as `to_p2` (#1588/#1628 stage 1) with the five-op host
 //! surface (console out, exit codes, stdin, entropy, wall clock) PLUS the
-//! filesystem READ surface (increment 2a: exists/is-dir/is-file via
-//! stat-at, read_text/read_bytes via open-at + stream reads) AND
-//! the WRITE surface (increment 2d: write/append/write_bytes through
-//! write-via-stream with the completion-future durability handshake,
-//! recursive mkdir_p, remove/remove_all via stat-then-unlink-or-rmdir —
-//! a NON-EMPTY remove_all answers the honest not-empty error until the
-//! recursive walk lands). Guest paths resolve against the FIRST preopen
-//! (`wasmtime run --dir=.`). `env.get`, the program arguments and
-//! `env.sleep_ms` ride `wasi:cli/environment` and
+//! whole filesystem surface: since #3140 the component carries the p1 fs
+//! service itself (`fs_service.wat`, the code the stock-p1 artifact runs)
+//! over a preview-1 adapter on wasi:filesystem@0.3.0 (`p3_fs_adapter.wat`,
+//! `wasi_p3_fs_service.rs`) — path resolution against the full preopen
+//! table and the cwd, every fs op, env.os / env.temp_dir / env.cwd, and
+//! native's `fs.<call>("<path>")` error heads. The fan prefetch triple
+//! (ops 40..=42) stays in this shim: its opens are async-lowered subtasks
+//! (increment 2b), on the descriptor the service resolves. `env.get`, the
+//! program arguments and `env.sleep_ms` ride `wasi:cli/environment` and
 //! `monotonic-clock.wait-for` (ADR-0023 step 3, `wasi_p3_env.rs`), each
-//! import shipped only when the op set names its op.
+//! import shipped only when the op set names its op; `env.set` writes the
+//! p1 shim's guest-side overlay log, which `env.get` reads before the
+//! environment snapshot (#3223).
 //! Canonical-ABI facts (variant discriminants, payload offsets) are
 //! DERIVED from the vendored WIT at emit time (`FsAbi`), never
 //! hand-counted. Requested p3 filesystem programs route here without an
@@ -72,8 +74,8 @@ use wasm_encoder::{
 
 use crate::component_alloc::{shim_cabi_realloc, shim_realloc_checked, shim_reserve};
 use crate::wasi::{
-    mem, mem8, parse_module, reencode_body, type_index, Parsed, Remap, DATA, MSG, OOM_MSG,
-    PARK_SPAN, UNSUPPORTED_MSG,
+    mem, mem8, parse_module, reencode_body, type_index, Parsed, Remap, DATA, ENV_FULL_MSG, MSG,
+    MSG2, OOM_MSG, PARK_SPAN, UNSUPPORTED_MSG,
 };
 
 // Import indices (18 imports replace the 5 almide.* ones).
@@ -188,25 +190,9 @@ const STATRET: u64 = 128;
 // value on the NEXT exchange: `failed to read result … unknown handle
 // index <the rcode string's address>`.
 const SENDRET: u64 = STATRET;
-// Static fs error messages (canonical-ABI error-code -> the SAME strings
-// the native runtime's io::Error Display produces, so the common error
-// legs stay byte-identical). The bytes are `almide_base::fs_errno`'s rows
-// (#2206) — the table every leg spells from, pinned against the host's
-// `Display` by its own test. Offsets within the park span.
-const MSG_NOENT: u64 = 256;
-const MSG_ACCES: u64 = 296;
-const MSG_ISDIR: u64 = 328;
-const MSG_NOTDIR: u64 = 360;
-const MSG_EXIST: u64 = 392;
-const MSG_GEN: u64 = 448;
-const MSG_NOPRE: u64 = 512;
-const E_NOENT: &[u8] = almide_base::fs_errno::ENOENT.text.as_bytes();
-const E_ACCES: &[u8] = almide_base::fs_errno::EACCES.text.as_bytes();
-const E_ISDIR: &[u8] = almide_base::fs_errno::EISDIR.text.as_bytes();
-const E_NOTDIR: &[u8] = almide_base::fs_errno::ENOTDIR.text.as_bytes();
-const E_EXIST: &[u8] = almide_base::fs_errno::EEXIST.text.as_bytes();
-const E_GEN: &[u8] = b"filesystem operation failed";
-const E_NOPRE: &[u8] = b"no filesystem preopen (run with --dir)";
+// The fs error texts are the spliced fs service's (#3140): its
+// `$errno_text` statics are `almide_base::fs_errno`'s rows (#2206), with the
+// `fs.<call>("<path>"): ` head native carries — the park holds none of them.
 // The p3 http bring-up static (#1710 PR B): only the ALMIDE_P3_HTTP_STOP
 // bisect knob answers it now — every real failure is classified and
 // rendered from rt-core's texts (ADR-0023 step 2, wasi_p3_http_err.rs).
@@ -236,13 +222,8 @@ const AWAIT_EV: u64 = 800;
 const _: () = {
     assert!(RET + 32 <= MSG);
     assert!(MSG + UNSUPPORTED_MSG.len() as u64 <= STATRET);
-    assert!(MSG_NOENT + E_NOENT.len() as u64 <= MSG_ACCES);
-    assert!(MSG_ACCES + E_ACCES.len() as u64 <= MSG_ISDIR);
-    assert!(MSG_ISDIR + E_ISDIR.len() as u64 <= MSG_NOTDIR);
-    assert!(MSG_NOTDIR + E_NOTDIR.len() as u64 <= MSG_EXIST);
-    assert!(MSG_EXIST + E_EXIST.len() as u64 <= MSG_GEN);
-    assert!(MSG_GEN + E_GEN.len() as u64 <= MSG_NOPRE);
-    assert!(MSG_NOPRE + E_NOPRE.len() as u64 <= MSG_HTTP);
+    // The env.set refusal line (#3223) sits in the gap past the stat result.
+    assert!(MSG2 + ENV_FULL_MSG.len() as u64 <= MSG_HTTP);
     assert!(MSG_HTTP + E_HTTP.len() as u64 <= MSG_CLEN);
     assert!(MSG_CLEN + E_CLEN.len() as u64 <= CLEN_BUF);
     assert!(CLEN_BUF + 20 <= MSG_OOM);
@@ -268,29 +249,22 @@ const PREOPEN_RESERVE: i32 = 65536;
 const SLOT_CAP: i32 = 1024;
 const SLOT_STRIDE: i32 = 64;
 
-/// Canonical-ABI facts the fs shim stores through — DERIVED from the
-/// vendored WIT at emit time, never hand-counted (the wit-bindgen
-/// doctrine: a case index or payload offset written as a literal drifts
-/// silently when the WIT moves; a lookup by name fails loudly).
+/// Canonical-ABI facts the fs shim and the service's adapter store through
+/// — DERIVED from the vendored WIT at emit time, never hand-counted (the
+/// wit-bindgen doctrine: a case index or payload offset written as a
+/// literal drifts silently when the WIT moves; a lookup by name fails
+/// loudly).
 struct FsAbi {
-    ec_no_entry: i32,      // error-code case index
-    ec_access: i32,
-    ec_not_permitted: i32,
-    ec_is_directory: i32,
-    ec_not_directory: i32,
-    ec_exist: i32,
-    dt_directory: i32,     // descriptor-type case index
-    dt_regular_file: i32,
     open_payload: u64,     // result<descriptor, error-code> payload offset
     unit_payload: u64,     // result<_, error-code> payload offset (the path ops)
     stat_payload: u64,     // result<descriptor-stat, error-code> payload offset
     stat_size: u64,        // full result size (park-span room check)
 }
 
-fn fs_abi(resolve: &wit_parser::Resolve) -> anyhow::Result<FsAbi> {
-    use wit_parser::{Type, TypeDefKind};
-    // Scope the lookups to wasi:filesystem's `types` interface — bare
-    // name search collides (wasi:cli has its own `error-code`).
+/// A type of wasi:filesystem's `types` interface, by name — scoped to that
+/// interface, because a bare name search collides (wasi:cli has its own
+/// `error-code`).
+fn fs_type(resolve: &wit_parser::Resolve, name: &str) -> anyhow::Result<wit_parser::TypeId> {
     let (_, fs_pkg) = resolve
         .packages
         .iter()
@@ -300,27 +274,17 @@ fn fs_abi(resolve: &wit_parser::Resolve) -> anyhow::Result<FsAbi> {
         .interfaces
         .get("types")
         .ok_or_else(|| anyhow::anyhow!("wasi:filesystem/types interface not found"))?;
-    let iface = &resolve.interfaces[iface_id];
-    let find = |name: &str| -> anyhow::Result<wit_parser::TypeId> {
-        iface
-            .types
-            .get(name)
-            .copied()
-            .ok_or_else(|| anyhow::anyhow!("wit type {name} not found in wasi:filesystem/types"))
-    };
-    let case = |id: wit_parser::TypeId, name: &str| -> anyhow::Result<i32> {
-        match &resolve.types[id].kind {
-            TypeDefKind::Variant(v) => v
-                .cases
-                .iter()
-                .position(|c| c.name == name)
-                .map(|p| p as i32)
-                .ok_or_else(|| anyhow::anyhow!("variant case {name} not found")),
-            k => Err(anyhow::anyhow!("expected variant, got {k:?}")),
-        }
-    };
+    resolve.interfaces[iface_id]
+        .types
+        .get(name)
+        .copied()
+        .ok_or_else(|| anyhow::anyhow!("wit type {name} not found in wasi:filesystem/types"))
+}
+
+fn fs_abi(resolve: &wit_parser::Resolve) -> anyhow::Result<FsAbi> {
+    use wit_parser::Type;
+    let find = |name: &str| fs_type(resolve, name);
     let ec = find("error-code")?;
-    let dt = find("descriptor-type")?;
     let stat = find("descriptor-stat")?;
     let mut sa = wit_parser::SizeAlign::default();
     // 0.259 made `fill` fallible: a type whose size it cannot compute leaves the
@@ -337,14 +301,6 @@ fn fs_abi(resolve: &wit_parser::Resolve) -> anyhow::Result<FsAbi> {
     let unit_payload = ec_align; // result<_, error-code>: the err IS the payload
     let stat_payload = stat_align.max(ec_align);
     Ok(FsAbi {
-        ec_no_entry: case(ec, "no-entry")?,
-        ec_access: case(ec, "access")?,
-        ec_not_permitted: case(ec, "not-permitted")?,
-        ec_is_directory: case(ec, "is-directory")?,
-        ec_not_directory: case(ec, "not-directory")?,
-        ec_exist: case(ec, "exist")?,
-        dt_directory: case(dt, "directory")?,
-        dt_regular_file: case(dt, "regular-file")?,
         open_payload,
         unit_payload,
         stat_payload,
@@ -371,7 +327,6 @@ struct P3Globals {
     g_out_fut: u32,
     g_err_tx: u32,
     g_err_fut: u32,
-    g_pre: u32,
     g_wset: u32,
     g_slots: u32,
     g_slotn: u32,
@@ -407,6 +362,9 @@ struct ReadLocals {
     total: u32,
     n: u32,
 }
+
+// The fs service splice and its p3 adapter (#3140): wasi_p3_fs_service.rs.
+include!("wasi_p3_fs_service.rs");
 
 // The http shim (shim_http + its frame/body helpers): wasi_p3_http.rs.
 include!("wasi_p3_http.rs");
@@ -515,6 +473,10 @@ fn http_abi(resolve: &wit_parser::Resolve) -> anyhow::Result<HttpAbi> {
 fn mem64(offset: u64) -> MemArg {
     MemArg { offset, align: 3, memory_index: 0 }
 }
+
+// The stock serve export (`to_p3_service`'s shims): wasi_p3_serve.rs.
+include!("wasi_p3_serve.rs");
+include!("wasi_p3_serve_arena.rs");
 
 // The p3 transform itself (`to_p3`): wasi_p3_emit.rs.
 include!("wasi_p3_emit.rs");
@@ -681,5 +643,9 @@ mod wit_tests {
         resolve2
             .select_world(&[pkg2], Some("p3-command-http"))
             .expect("p3-command-http");
+        // The stock serve export's world (#2659): its handler's ABI facts
+        // derive from the same resolve.
+        resolve2.select_world(&[pkg2], Some("p3-service")).expect("p3-service");
+        super::serve_abi(&resolve2).expect("the serve export's ABI facts");
     }
 }

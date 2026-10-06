@@ -647,7 +647,7 @@ pub(crate) fn insert_clones_live(mut expr: IrExpr, ctx: &mut CloneCtx) -> IrExpr
 
         IrExprKind::Call { target, args, type_args } => insert_clones_call(target, args, type_args, ctx),
         IrExprKind::RuntimeCall { symbol, args } => {
-            let args = insert_clones_runtime_call(args, ctx);
+            let args = insert_clones_runtime_call(symbol, args, ctx);
             IrExprKind::RuntimeCall { symbol, args }
         }
 
@@ -659,12 +659,7 @@ pub(crate) fn insert_clones_live(mut expr: IrExpr, ctx: &mut CloneCtx) -> IrExpr
         IrExprKind::Record { name, fields } => IrExprKind::Record {
             name, fields: super::pass_clone_record_fields::rewrite(fields, ctx),
         },
-        IrExprKind::SpreadRecord { base, fields } => {
-            // Fields are evaluated before the spread base in Rust struct literals
-            let new_fields: Vec<_> = fields.into_iter().map(|(k, v)| (k, insert_clones_live(v, ctx))).collect();
-            let new_base = insert_clones_live(*base, ctx);
-            IrExprKind::SpreadRecord { base: Box::new(new_base), fields: new_fields }
-        },
+        IrExprKind::SpreadRecord { base, fields } => super::pass_clone_record_fields::rewrite_spread(*base, fields, ctx),
         IrExprKind::Clone { expr } => {
             let mut inner = insert_clones_live(*expr, ctx);
             // An existing clone already preserves ownership. The liveness
@@ -768,7 +763,7 @@ pub(crate) fn insert_clone_stmts_live(stmts: Vec<IrStmt>, ctx: &mut CloneCtx) ->
             IrStmtKind::Bind { var, mutability, ty, value } => IrStmtKind::Bind {
                 var, mutability, ty, value: insert_clones_live(value, ctx),
             },
-            IrStmtKind::Assign { var, value } => IrStmtKind::Assign { var, value: insert_clones_live(value, ctx) },
+            IrStmtKind::Assign { var, value } => super::pass_clone_places::insert_clones_reassign(var, value, ctx),
             IrStmtKind::Expr { expr } => IrStmtKind::Expr { expr: insert_clones_live(expr, ctx) },
             IrStmtKind::Guard { cond, else_ } => IrStmtKind::Guard {
                 cond: insert_clones_live(cond, ctx), else_: insert_clones_live(else_, ctx),

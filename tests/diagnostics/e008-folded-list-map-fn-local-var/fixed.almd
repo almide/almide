@@ -1,0 +1,12 @@
+// The same `var` used by a lambda passed straight to list.map: list.map runs
+// it before returning and never stores it, so `c` stays per invocation.
+fn scaled(xs: List[Int]) -> Int = {
+  var c = 10
+  c = c + 1
+  xs |> list.map((x) => x + c) |> list.sum
+}
+
+effect fn main() -> Unit = {
+  let r = fan.map([1, 2, 3], (x) => ok(scaled([x, x])))!
+  println("${list.sum(r)}")
+}

@@ -1,6 +1,6 @@
 # CLI Specification
 
-> Last updated: 2026-09-26
+> Last updated: 2026-10-03
 
 ## Overview
 
@@ -117,21 +117,24 @@ almide build app.almd --target wasm     # WASM バイナリ（直接 emit、rust
 almide build app.almd --target linux-musl -o app  # Linux の静的 musl バイナリ（#2772）
 almide build app.almd --target x86_64-unknown-linux-musl  # 任意の rustc ターゲット三つ組
 almide build app.almd --target wasm --host js -o dist/app.wasm  # + dist/app.js, dist/app.d.ts (JS ホスト、#2265)
+almide build app.almd --target wasm --debug   # + DWARF 行テーブル（.debug_* カスタムセクション、#1315）
 almide build --release                  # 最適化ビルド (opt-level=2)
 almide build --fast                     # 最大性能 (opt-level=3, LTO, native CPU)
 ```
 
 | オプション | 説明 |
 |---|---|
-| `-o <name>` | 出力ファイル名 |
+| `-o <path>` | 出力ファイルのパス。どのネイティブ経路（バイナリ / `--cdylib` / `--repr-c` / その組み合わせ）でも同じ意味で、書いたパスそのものに出力し、親ディレクトリが無ければ作る（#3349）。拡張子や `lib` 接頭辞は付け足さない |
 | `--target wasm` | WASM バイナリを生成（直接 emit） |
 | `--target <triple>` | ネイティブバイナリのターゲット（#2772）。`rust` / `native`（既定、このホスト）、`linux-musl`（ホストのアーキテクチャの `<arch>-unknown-linux-musl`。x86_64 と aarch64）、または rustc のターゲット三つ組。cargo に `--target` を渡し、`target/<triple>/<profile>/` から成果物を拾う。ターゲットの標準ライブラリは `rustup target add <triple>` で入れる。musl ターゲットは Rust の既定（`crt-static`）で**静的リンク**になり、almide は追加のリンクフラグを付けない（glibc ターゲットは従来どおり動的）。依存の無いプログラムは rustc 同梱の musl crt で x86_64 ホスト上なら追加ツール無しにリンクできる。別アーキテクチャ向けや C を含む `[native-deps]` には、そのターゲットのリンカ / C コンパイラ（`musl-tools` 等）が要る。未知の値（三つ組の形をしていないもの）と `wasm32-*` は、ホスト向けに黙ってビルドせず終了コード 2 で拒否する |
-| `--host js` | `--target wasm` 専用: モジュールの隣に JS ホスト `<mod>.js`（依存なしの ES module）と `<mod>.d.ts` を書く（#2265）。`init(source?, hooks?)` がインスタンス化、`run()` が `main`、`pub fn` ごとに 1 つのラッパ。`@extern(wasm, "js", "name")` は `init({ js: { name } })` で結線。マーシャルは Int（`number`、±2^53 の範囲検査）/ Float / Bool / String / Unit — それ以外の型を境界に持つ `pub fn` はビルド時に型名を挙げて拒否。出荷物はプログラムが使う分だけ（#2276）: `__alloc`/`__release` の export と glue の String ヘルパは境界に `String` がある時だけ、WASI shim は出荷モジュール（`--wasm-opt` 後）が import する名前だけ。ゲート: `scripts/check-js-host.sh`（`spec/wasm_host_js/` を node で実行し、期待出力と native 出力に一致させ、モジュールのバイト同一性・shim 集合・`glue-ceiling.txt` の上限を検査）。仕様: docs/wasm/WASM-OUTPUT.md「JS host」節 |
+| `--host js` | `--target wasm` 専用: モジュールの隣に JS ホスト `<mod>.js`（依存なしの ES module）と `<mod>.d.ts` を書く（#2265）。`init(source?, hooks?)` がインスタンス化、`run()` が `main`、`pub fn` ごとに 1 つのラッパ。`@extern(wasm, "js", "name")` は `init({ js: { name } })` で結線（`effect fn` か `Result[T, String]` で宣言した extern は hook の throw / reject を err として受け取り、Almide 側で `!` 伝搬できる。それ以外の extern で hook が throw するとインスタンスは放棄され、`init()` し直すまで呼べない — #3356）。Promise を返す hook は extern 側に `@extern(wasm, "js", "name", returns: promise)` と書く（#3353 / #3371）: glue がそれを `WebAssembly.Suspending` で包み、そこへ到達しうる export（と `run()`）だけを呼び出しグラフから推論して `WebAssembly.promising` 経由の async 関数（`.d.ts` は `Promise<T>`）にする。インスタンスへの呼び出しは 1 つずつ呼んだ順に直列化され、async 呼び出しが中断中の同期 export は入らずに例外。JSPI の無い実行系では `init()` が理由を挙げて拒否。言語の型・効果・呼び出し側は変わらず、native は無視する。印の無い hook が thenable を返すと `almide: hooks.js.<name> returned a Promise; mark its @extern with returns: promise` を throw してインスタンスを放棄する（fallible extern でも err にはならない）。develop にあった暫定フラグ `--async-import` は v0.67.0-rc1 より前に削除され、どのリリースにも入っていない。設計: docs/wasm/JS-HOST-ASYNC-IMPORTS.md。マーシャルは Int（`number`、±2^53 の範囲検査）/ Float / Bool / String / Unit、export ではさらに Bytes（`Uint8Array`）/ List[T]（配列、入れ子可）/ Option[T]（`T | undefined`）/ レコード（宣言順のフィールドを持つ plain object）を引数・戻り値の両方で（#3354、レイアウトとビルド側の所有権はエミッタが export ごとに記録したものに従う）— それ以外の型（バリアント / Map / Set / タプル / 関数）を境界に持つ `pub fn` はビルド時に型名を挙げて拒否。`effect fn`（と `Result[T, String]` を返す fn）の戻り値はモジュール上では Result ブロックで、ラッパはエミッタが記録した戻り ABI から作る: ok は `T` の値、err は message を持つ `AlmideError`（`Error` の派生）を throw する。記録とソースの型が合わない export もビルド時に関数名を挙げて拒否（#3352）。出荷物はプログラムが使う分だけ（#2276）: `__alloc`/`__release` の export と glue の String ヘルパは境界に `String` がある時だけ、WASI shim は出荷モジュール（`--wasm-opt` 後）が import する名前だけ。ゲート: `scripts/check-js-host.sh`（`spec/wasm_host_js/` を node で実行し、期待出力と native 出力に一致させ、モジュールのバイト同一性・shim 集合・`glue-ceiling.txt` の上限を検査）。仕様: docs/wasm/WASM-OUTPUT.md「JS host」節 |
+| `--debug` | `--target wasm` 専用: 出荷するモジュール（`to_wasi` 後）の末尾に DWARF 4 の `.debug_info` / `.debug_abbrev` / `.debug_line` / `.debug_str` / `.debug_ranges` をカスタムセクションとして足し、コードオフセット（Code セクション内容先頭からのバイト位置、LLVM/Emscripten と同じ "DWARF for WebAssembly" 規約）から `.almd` の file:line:col を引けるようにする（#1315）。ソースファイルごとに compile unit 1 つ、関数ごとに `DW_TAG_subprogram`（名前・`low_pc`/`high_pc`）1 つ。Chrome DevTools と wasmtime + lldb がフラグ無しで読む。行はエミッタが命令ごとに IR の span から記録し（span を持たない合成ノードは最も近い祖先の span を継ぐ、祖先にも無い命令 — 関数の出口の解放など — は line 0）、コード自体は変えない: 既定（`--debug` 無し）の出力はバイト同一で、`size-baseline*.txt` の対象外。`--component` / `--wasm-opt` とは併用不可（どちらも出荷バイトを書き換え、表が指すアドレスが変わるため、終了コード 2 で拒否）。ネイティブターゲットでも拒否 |
 | `--release` | 最適化ビルド |
 | `--fast` | 最大性能（`--release` を含む + LTO + native CPU） |
 | `--unchecked-index` | 配列の境界チェックを無効化（unsafe） |
 | `--no-check` | 型チェックをスキップ |
 | `--repr-c` | struct/enum に `#[repr(C)]` を付与（C ABI 互換） |
+| `--cdylib` | 共有ライブラリ（`.so` / `.dylib` / `.dll`）を生成。`-o` 省略時はカレントディレクトリの `lib<名前>.<拡張子>`（Windows は `<名前>.dll`）。Cargo の crate 名は `-o` ではなくパッケージ名（`almide.toml` の `[package].name`、無ければエントリファイル名）から作る（#3349） |
 
 **`CARGO_BUILD_TARGET`**(#2772): `--target` が無いとき、環境変数 `CARGO_BUILD_TARGET` はターゲットの指定として
 `--target <triple>` と同じに扱う（`--target rust` はそれを打ち消してホスト向けにする）。どちらの場合も almide は cargo に
@@ -347,13 +350,23 @@ almide check --json                     # 診断を JSON で出力(パッケー�
 almide check --explain E001             # エラーコードの説明
 almide check --effects                  # 各関数のエフェクト分析を表示
 almide check --timings                  # フロントエンドの phase 別内訳
+almide check app.almd --profile critical --allow IO  # critical profile (#567)
 ```
 
 | オプション | 説明 |
 |---|---|
 | `--deny-warnings` | 警告をエラー扱い |
+| `--profile critical` | 全関数に bounded profile を適用、capability は deny-all から(下記) |
+| `--allow <CAP>` | `--profile critical` で capability を 1 つ許可(複数回指定可) |
 | `--json` | 診断を JSON で出力（1 行 1 診断、エディタ/エージェント統合用） |
 | `--explain <code>` | エラーコードの説明(`almide explain <code>` と同じ) |
+
+`./almide.toml` にどのリーダーも読まないキー(`brnach = "main"` など)があると、
+`check` / `build` / `run` / `test` を含む全コマンドが一度だけ警告する(#3382):
+行(`almide.toml:LINE`)・キー・その表が受け付けるキー・1 編集距離の候補を出す。
+ビルドはキーが無い場合と同じに走り、終了コードは変わらない(`--deny-warnings`
+も数えない)。`--json` では `"level":"warning"` の行として stdout に、それ以外は
+stderr に出る。表ごとの受理キーは [package-system.md §6](package-system.md#6-dependency-declaration)。
 
 `almide explain --list [--json]`(#2149)は全コードを 1 行ずつ出す:
 `{code, mnemonic, severity, since, verdict}`。`mnemonic` は `docs/diagnostics/<CODE>.md`
@@ -362,8 +375,52 @@ almide check --timings                  # フロントエンドの phase 別内�
 `docs/diagnostics/codes.toml`。行の集合はコンパイラが出すコードの集合と一致し
 (`with_code` の 77 + ビルド経路が `error[EXXX]` を直接出す E081–E083)、
 severity はフィクスチャ全件で実際の level と照合される(`tests/explain_list_test.rs`)。
-| `--effects` | 各関数のエフェクト/ケイパビリティ分析 |
+| `--effects` | 各関数のエフェクト/ケイパビリティ分析。受け取ったクロージャを呼ぶ関数は `{} + whatever f (arg 1) does` と表示され pure に数えない(#3268)。クロージャのカテゴリ集合は値と一緒に流れ、呼ぶ側の呼び出し地点に課される(ADR-0026 D1、`docs/specs/effect-system.md`)。`[permissions]` 違反は `path:` 行で経路を示す(D4) |
 | `--timings` | lex / parse / check の phase 別 wall time（#1311） |
+
+#### `--profile critical`
+
+`--profile critical`(#567)は bounded profile(ALS §B、E070–E078)を **全関数** に
+適用する。`@bounded` 属性は要らない。critical で通るコードは通常モードでも必ず通る
+(部分集合であって方言ではない)。高階呼び出しやクロージャ生成は E074 になる。
+
+capability は deny-all から始まる。host に触れる stdlib 呼び出しは E076 になり、
+`--allow` で許可した分だけ通る。`--allow` の語彙と、それぞれが許可する module は
+`crates/almide-frontend/src/check/bounded.rs` の `CAPABILITY_GRANTS`:
+
+| `--allow` | 許可する module |
+|---|---|
+| `IO` | `io`, `fs` |
+| `Net` | `http`, `net` |
+| `Env` | `env`, `args` |
+| `Time` | `datetime`, `duration` |
+| `Rand` | `random` |
+| `Process` | `process` |
+
+`Fan` は無い。`fan.*` は critical profile の外にある(#1628)。この語彙は
+`almide.toml` の `[permissions].allow`(`IO` / `Net` / `Env` / `Time` / `Rand` / `Fan`、
+`docs/specs/effect-system.md` §8)とは別物で、`Process` と `Fan` が違う。
+
+```
+$ almide check rd.almd --profile critical
+error[E076]: an effect outside the declared capability is not admissible under `--profile critical`
+  hint: capabilities start deny-all — grant one with --allow IO|Net|Env|Time|Rand|Process
+$ almide check rd.almd --profile critical --allow IO
+No errors found
+```
+
+拒否されるもの(いずれも終了コード 1):
+
+- 語彙に無い名前: ``error: unknown capability `io` in --allow — grantable capabilities are IO, Net, Env, Time, Rand, Process``
+  と ``hint: did you mean `IO`?``。文面は `[permissions].allow` の拒否と同じ(#3247)
+- `--profile` 無しの `--allow`: `error: --allow requires --profile critical`
+- `critical` 以外の profile 名: ``error: unknown profile `strict` — the only profile is `critical` ``
+- `--effects` との併用: `error: --profile is not supported with --effects`
+
+`--json` とパッケージ全体の形(FILE 省略)も同じ profile で判定する。
+
+テスト: `tests/critical_profile_test.rs`、`tests/manifest_permissions_test.rs`
+(`critical_allow_suggests_the_nearest_capability`)
 
 #### `--timings`
 
@@ -788,12 +845,18 @@ almide add bindgen                      # github.com/almide/bindgen
 almide add almide/almide-bindgen        # github.com/almide/almide-bindgen
 almide add user/repo@v0.1.0             # バージョン指定
 almide add --git https://example.com/repo.git --tag v1.0 mylib
+almide add almide-graphics/ceangal2@v0.1.0 --subdir ceangal  # リポジトリ内のサブディレクトリにあるパッケージ
 ```
 
 短縮記法:
 - `almide add name` → `https://github.com/almide/{name}`
 - `almide add user/repo` → `https://github.com/{user}/{repo}`
 - `@v0.1.0` → `tag = "v0.1.0"`
+- `--subdir <dir>` → `subdir = "<dir>"`(#3381、[package-system.md §6.1](./package-system.md))。パッケージ名は
+  subdir の最後の要素(`--git` 指定時は第 1 引数)。
+
+フェッチと検査(subdir の存在・`almide.toml` の package name が依存名と一致)が通ってから
+`almide.toml` に書き込む。失敗時はマニフェストを変更しない。
 
 ---
 
@@ -805,6 +868,7 @@ almide add --git https://example.com/repo.git --tag v1.0 mylib
 almide deps
 # bindgen = https://github.com/almide/almide-bindgen (v0.1.0)
 # json = https://github.com/almide/json (main)
+# ceangal = https://github.com/almide-graphics/ceangal2 (v0.1.0) subdir ceangal
 ```
 
 ---
@@ -816,6 +880,8 @@ almide deps
 ```bash
 almide dep-path bindgen
 # /Users/you/.almide/cache/bindgen/.src-2080cb5159116353/a629eded8d20/src
+almide dep-path ceangal     # subdir 依存: 共有クローン内のパッケージディレクトリ
+# /Users/you/.almide/cache/.repos/.src-<source>/<commit>/ceangal/src
 ```
 
 用途: 依存パッケージの `.almd` ファイルを `process.exec("almide", ["run", path])` で実行する場合のパス取得。
@@ -956,7 +1022,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_DBG_DESUGAR_FN=value` | debug | print the fully desugared body of the fn named by the value (v1 lowering; was `DBG_DESUGAR_FN` before #2205) |
 | `ALMIDE_DBG_DESUGAR_RAW` | debug | with `ALMIDE_DBG_DESUGAR_FN`, print the raw pre-desugar body too (was `DBG_DESUGAR_RAW`) |
 | `ALMIDE_DBG_ELEM` | debug | print why a list-literal Block element declined (v1 lowering) |
-| `ALMIDE_DBG_FAN` | debug | print the fan lowering's prefetch and pattern decisions (structural leg) |
+| `ALMIDE_DBG_FAN` | debug | print the fan lowering's prefetch, pattern and instance-parallel decisions (structural leg and embedded host) |
 | `ALMIDE_DBG_GINIT` | debug | print the eager top-let init runner's admission set and why an extended runner declined (v1 lowering, C-007) |
 | `ALMIDE_DBG_LINK` | debug | dump the wasm link demand set and what each key resolves to |
 | `ALMIDE_DBG_LOWER_FN=value` | debug | print the fully desugared body the v1 lowering actually lowers, for the fn named by the value (was `DBG_LOWER_FN`) |
@@ -975,10 +1041,14 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_DUMP_MIR` | debug | print every lowered fn's op stream before the native render runs |
 | `ALMIDE_DUMP_VERIFY` | debug | print the native render's verification transcript |
 | `ALMIDE_DUMP_WMIR=value` | debug | print the lowered wasm-leg op stream of every fn whose name contains the value |
+| `ALMIDE_DWARF_FIXTURES=value` | harness | the DWARF line-table span-resolution measurement (`crates/almide-wasm/tests/dwarf_lines.rs`, ignored test): the `.almd` files to measure, comma-separated (#1315) |
 | `ALMIDE_EXPECT_TOOLS` | harness | make a harness test FAIL instead of skipping when an external tool (wasmtime, wasm-tools) is missing; CI sets it |
 | `ALMIDE_F32_SWEEP_N=value` | harness | how many xorshift32 bit patterns the Float32 printer sweep prints (`${x}` and `float32.to_string`) and compares with Rust f32 Display on each leg (default 100000; tests/float32_to_string_cross_target_test.rs) |
 | `ALMIDE_FALLBACK_NAMES` | tool | make `almide test` print one `FALLBACK <file>` line per file the wasm leg did not pass — the wasm coverage ratchet's data feed |
-| `ALMIDE_FAN_SEQUENTIAL` | runtime | run `fan.*` sequentially in the native runtime (a determinism lever for measurement; the observable result is the same by contract) |
+| `ALMIDE_FAN_COST_OFF` | ablation | go parallel on every `fan` offer the cost model (#3341) would keep sequential — the pre-#3341 behaviour, on both legs (native threads and the embedded wasm host's instances); the ablation the crossover measurement and the parallel-path tests use |
+| `ALMIDE_FAN_PAR_OFF` | ablation | keep `fan` chunk maps off the structural leg's instance-parallel offer (#3003): every chunk runs sequentially in the run's own instance |
+| `ALMIDE_FAN_SEQUENTIAL` | runtime | run `fan.*` sequentially in the native runtime, and build a `--host js` fan over async hooks with one suspension per element instead of the overlap protocol (#3383) — a determinism lever for measurement; the observable result is the same by contract |
+| `ALMIDE_FAN_THREADS=value` | runtime | cap the worker count of `fan`'s parallel maps on both legs — native threads and the embedded wasm host's chunk instances (#3003; a measurement lever for thread-scaling curves, the observable result is the same by contract; default: available parallelism) |
 | `ALMIDE_FLOAT_SWEEP_N=value` | harness | how many xorshift64 bit patterns the float printer sweep prints and compares with Rust `format!` on each leg (default 100000; tests/float_to_string_cross_target_test.rs) |
 | `ALMIDE_FMOD_SWEEP_N=value` | harness | how many xorshift64 bit-pattern pairs the float `%` sweep compares with Rust `%` on each leg, as Float and as Float32 (default 20000; tests/float_fmod_cross_target_test.rs) |
 | `ALMIDE_FN_ESCAPE_OFF` | ablation | make BorrowInsertion borrow EVERY fn-typed param as `&dyn Fn`, escaping or not (#2288) — the ablation the ownership certifier's C5 sensitivity test drives |

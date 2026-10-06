@@ -1,0 +1,75 @@
+// #3307 / #3312: writes into another module's `var` reach that module's
+// global, from inside closures and outside them.
+// #3307: native rendered a whole write inside a closure as the bare
+// `X.set(1)` (rustc E0425) — the closure-capture analysis took the use-site
+// var for a captured local and made it a shared cell — while reads, and the
+// same write outside a closure, reached the module's static.
+// #3312: an index or field write (`m.xs[1] = 7`, `m.rec.n = 3`) had no root
+// binding in the lowering and panicked the compiler on both legs (inside a
+// closure: an unresolved place type natively, E082 on wasm).
+// Rows: a whole assign of an Int, a Float, a String, a record and a List; a
+// read-modify-write; a List index write, a Map key write, a field write and a
+// nested field write — at the top level, in a closure, in a nested closure,
+// in a lambda handed to a higher-order fn and in one passed to a user fn.
+// #3339: a Map key write to the module's var inside a callback walled the
+// wasm leg (E082 cell-write:map-insert). Native and wasm print the same.
+import self.m as m
+
+fn bump() -> Unit = {
+  let f = () => {
+    m.x = 1
+  }
+  f()
+}
+
+fn run(g: () -> Unit) -> Unit = g()
+
+effect fn main() -> Unit = {
+  bump()
+  println(int.to_string(m.x))
+  m.xs[1] = 7
+  m.rec.n = 3
+  m.rec.inner.n = 9
+  m.counts["a"] = 1
+  println("${m.xs[1]} ${m.rec.n} ${m.rec.inner.n} ${map.len(m.counts)}")
+  let add = (k: Int) => {
+    m.x = m.x + k
+  }
+  add(10)
+  add(100)
+  println(int.to_string(m.x))
+  let set_all = () => {
+    m.f = m.f * 4.0
+    m.name = m.name + "!"
+    m.xs[0] = m.xs[1] + 1
+    m.rec.tag = "${m.rec.tag}!"
+    m.rec.inner.n = m.rec.inner.n * 2
+    m.counts["b"] = 2
+  }
+  set_all()
+  println("${m.f} ${m.name} ${m.xs[0]} ${m.rec.tag} ${m.rec.inner.n} ${map.len(m.counts)}")
+  let outer = () => {
+    let inner = () => {
+      m.x = m.x * 2
+      m.xs[1] = m.xs[1] * 2
+      m.counts["inner"] = m.xs[1]
+    }
+    inner()
+    inner()
+  }
+  outer()
+  println("${m.x} ${m.xs[1]}")
+  let seen = [1, 2, 3] |> list.map((v) => {
+    m.x = m.x + v
+    m.xs[0] = m.xs[0] + v
+    m.counts["k${v}"] = v
+    m.x
+  })
+  run(() => {
+    m.rec = { n: m.rec.n + 1, tag: "${m.rec.tag}-${m.x}", inner: m.rec.inner }
+    m.xs = m.xs + [
+      m.x
+    ]
+  })
+  println("${m.x} ${m.rec.n} ${m.rec.tag} ${list.sum(seen)} ${map.len(m.counts)} ${list.len(m.xs)}")
+}

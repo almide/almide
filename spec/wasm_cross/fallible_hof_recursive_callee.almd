@@ -1,0 +1,71 @@
+// @contract: C-284
+// #3392, single-file half: fallible lambdas (`list.map` and `list.flat_map`
+// callbacks with `!`) in fallible fns call a user fallible fn that recurses
+// through its own fallible callback, over a recursive variant spine. The
+// module half (the same fns in a sibling module, where v0.64.0 walled the
+// structural wasm leg with `call:count`) is
+// spec/integration/module_fallible_lambda_callee. Rows: the ok path and both
+// err paths (first-err short-circuit). Native and wasm print the same.
+type T = | V(Int) | C(String) | A(T, T)
+
+type Env = { syms: Map[String, Int] }
+
+fn spine(t: T) -> (T, List[T]) = match t {
+  A(f, a) => {
+    let (h, args) = spine(f)
+    (h, args + [a])
+  },
+  other => (other, []),
+}
+
+fn head_name(h: T) -> String = match h {
+  C(c) => c,
+  _ => "",
+}
+
+fn var_index(p: T) -> Int = match p {
+  V(k) => k,
+  _ => -1,
+}
+
+fn count(env: Env, p: T, n: Int) -> Int! = {
+  let k = var_index(p)
+  guard k < n else err("bound")
+  if k >= 0 then ok(1)
+  else {
+    let (h, args) = spine(p)
+    let c = head_name(h)
+    guard map.contains(env.syms, c) else err("not a symbol")
+    let nested = args |> list.map((a) => count(env, a, n)!)!
+    ok(list.sum(nested))
+  }
+}
+
+fn total(env: Env, ps: List[T], n: Int) -> Int! = {
+  let all = ps |> list.map((p) => count(env, p, n)!)!
+  ok(list.sum(all))
+}
+
+fn spread(env: Env, ps: List[T], n: Int) -> Int! = {
+  let xs = ps |> list.flat_map((p) => [
+    count(env, p, n)!,
+    0
+  ])!
+  ok(list.len(xs) + list.sum(xs))
+}
+
+fn show(r: Result[Int, String]) -> String = match r {
+  ok(n) => "ok ${int.to_string(n)}",
+  err(e) => "err ${e}",
+}
+
+effect fn main() -> Unit = {
+  let env = Env { syms: ["f": 1, "g": 2] }
+  println(show(total(env, [V(0), V(1)], 2)))
+  let app = A(A(C("f"), V(0)), V(1))
+  println(show(total(env, [app, V(1)], 2)))
+  println(show(total(env, [V(0), V(5)], 2)))
+  println(show(total(env, [A(C("h"), V(0))], 2)))
+  println(show(spread(env, [app, V(1)], 2)))
+  println(show(spread(env, [V(3)], 2)))
+}

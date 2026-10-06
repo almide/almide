@@ -19,10 +19,11 @@ use crate::*;
 /// (the shipped module) emits none of it.
 pub(crate) fn emit_alloc(oom_msg: u32, counters: Option<u32>) -> Function {
     // params: 0=len i32; locals: 1=base i32, 2=next i32 (class scratch
-    // before the bump path claims it), 3=want i32, 4=head i32
+    // before the bump path claims it), 3=want i32, 4=head i32, 5..=9 the
+    // large-list walk (pp, p, q, z, r — runtime_large.rs)
     let (len, base, next, want, head) = (0u32, 1u32, 2u32, 3u32, 4u32);
     let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
-    let mut f = Function::new([(4, ValType::I32)]);
+    let mut f = Function::new([(9, ValType::I32)]);
     let mut i = f.instructions();
     if let Some(c) = counters {
         bump_counter(&mut i, c + crate::alloc_count::COUNT);
@@ -81,6 +82,13 @@ pub(crate) fn emit_alloc(oom_msg: u32, counters: Option<u32>) -> Function {
     // request taken by ceil; the churn gate measured 123 MB of misses).
     i.i32_const(28).local_get(want).i32_const(1).i32_sub().i32_clz().i32_sub().local_set(next);
     i.i32_const(16).local_get(next).i32_shl().local_set(want);
+    // Above the ceiling (#3348): the exact-size large list first.
+    i.else_();
+    crate::runtime_large::emit_ltake(&mut i, (want, len), (5, 6, 7, 8, 9), |i| {
+        if let Some(c) = counters {
+            bump_counter(i, c + crate::alloc_count::REUSED);
+        }
+    });
     i.end();
     // base = G_HEAP; next = base + want (class-rounded; huge stays exact)
     i.global_get(G_HEAP).local_set(base);
@@ -168,18 +176,18 @@ pub(crate) fn emit_alloc(oom_msg: u32, counters: Option<u32>) -> Function {
 /// `$free(block)`: file a dead block into its size-class free list —
 /// filed by FLOOR class (its actual total covers the class capacity),
 /// taken by ceil at alloc, so reuse never under-serves. Blocks too
-/// small for a next pointer (empty payloads) and huge blocks (total ≥
-/// 2^20) are abandoned to the bump graveyard, exactly as before RC-2.
+/// small for a next pointer are abandoned; blocks above the ceiling join
+/// the exact-size large list (runtime_large.rs, #3348).
 /// The caller must OWN the block outright — there is no rc check yet;
 /// the only callers are the sort machinery's private scratch buffers.
 ///
 /// `counters` (#2407): when armed, every call bumps `__free_count` on
 /// entry — filed or abandoned alike, so the number is "blocks released".
 pub(crate) fn emit_free(counters: Option<u32>) -> Function {
-    // params: 0=block i32; locals: 1=total i32, 2=class i32
+    // params: 0=block; locals: 1=total, 2=class, 3..=5 the large-list walk
     let (block, total, class) = (0u32, 1u32, 2u32);
     let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
-    let mut f = Function::new([(2, ValType::I32)]);
+    let mut f = Function::new([(5, ValType::I32)]);
     let mut i = f.instructions();
     if let Some(c) = counters {
         bump_counter(&mut i, c + crate::alloc_count::FREES);
@@ -198,7 +206,9 @@ pub(crate) fn emit_free(counters: Option<u32>) -> Function {
     // class = CEIL class of the block's want — the class alloc rounded
     // it to, so filing lands exactly where the next taker looks.
     i.i32_const(28).local_get(total).i32_const(1).i32_sub().i32_clz().i32_sub().local_set(class);
+    // Above the ceiling (#3348): the exact-size large list.
     i.local_get(class).i32_const(FREELIST_CLASSES as i32).i32_ge_u().if_(BlockType::Empty);
+    crate::runtime_large::emit_lfree(&mut i, (block, total), (3, 4, 5));
     i.return_();
     i.end();
     i.local_get(class)
@@ -755,7 +765,7 @@ mod tests {
         // the emitted trees moved: update proofs/StructuralRuntime.v to
         // the new trees (re-proving what changed), then this constant.
         assert_eq!(
-            got, 0x2312b47da07c14b0,
+            got, 0xe367ec7ac138a3d8,
             "runtime tree bytes drifted from the proofs/StructuralRuntime.v transcription (got {got:#x})"
         );
     }

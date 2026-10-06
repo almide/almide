@@ -935,6 +935,14 @@ fn fmt_decl_type(out: &mut String, decl: &Decl, depth: usize) {
             fmt_protocol_refs(out, d, deriving_refs, ", ");
         }
     }
+    if matches!(ty, TypeExpr::Variant { .. }) {
+        // Decided once, here: a one-case-per-line variant starts on the next
+        // line, so no space follows `=` (the old output ended `type C = `).
+        let multiline = variant_is_multiline(ty, current_col(out) + " = ".len(), depth);
+        out.push_str(if multiline { " =" } else { " = " });
+        fmt_variant_cases(out, ty, depth, multiline);
+        return;
+    }
     out.push_str(" = ");
     fmt_type(out, ty, depth);
 }
@@ -972,9 +980,12 @@ fn fmt_decl(out: &mut String, decl: &Decl, depth: usize) {
 }
 
 fn fmt_decl_fn(out: &mut String, decl: &Decl, depth: usize) {
-    let Decl::Fn { name, effect, scoped, visibility, params, return_type, body, extern_attrs, export_attrs, attrs, generics, .. } = decl else { unreachable!() };
+    let Decl::Fn { name, effect, scoped, visibility, params, return_type, body, extern_attrs, export_attrs, attrs, generics, span, .. } = decl else { unreachable!() };
     let i = ind(depth);
-    for a in extern_attrs { wln!(out, "{i}@extern({}, \"{}\", \"{}\")", a.target, escape_dquoted(a.module.as_str()), escape_dquoted(a.function.as_str())); }
+    for a in extern_attrs {
+        let promise = if a.returns_promise { ", returns: promise" } else { "" };
+        wln!(out, "{i}@extern({}, \"{}\", \"{}\"{promise})", a.target, escape_dquoted(a.module.as_str()), escape_dquoted(a.function.as_str()));
+    }
     for a in export_attrs { wln!(out, "{i}@export({}, \"{}\")", a.target, escape_dquoted(a.symbol.as_str())); }
     for a in attrs { wln!(out, "{i}{}", format_attribute(a)); }
     out.push_str(&i); fmt_vis(out, visibility);
@@ -996,7 +1007,40 @@ fn fmt_decl_fn(out: &mut String, decl: &Decl, depth: usize) {
         if let Some(ref d) = p.default { out.push_str(" = "); fmt_expr(out, d, depth); }
     });
     out.push_str(") -> "); fmt_return_type(out, return_type, depth);
-    if let Some(b) = body { out.push_str(" = "); fmt_expr(out, b, depth); }
+    let Some(b) = body else { return };
+    if if_body_breaks_before(out, b, *span, depth) {
+        w!(out, " =\n{}", ind(depth + 1));
+        fmt_expr(out, b, depth + 1);
+    } else {
+        out.push_str(" = ");
+        fmt_expr(out, b, depth);
+    }
+}
+
+/// #3393: an `if` body goes on the line below the signature — the
+/// `=\n  if … then …\n  else …` shape of the cheatsheet's recursion idiom —
+/// when the author put it there (idempotent: the output re-parses that way),
+/// or when its head `if <cond> then <then>` would not fit on the signature
+/// line. The old layout always hoisted it onto the signature line, where the
+/// width rule then exploded a two-argument call in the `then` arm to make
+/// room. The head is measured UNEXPLODED (each part rendered on its own, its
+/// first line taken — a braced `then` counts as `{`), so the decision cannot
+/// depend on the explosion it exists to prevent; a fitting `= if c then a`
+/// followed by `else` on the next line stays as fmt has always printed it.
+fn if_body_breaks_before(out: &str, body: &Expr, decl: Option<Span>, depth: usize) -> bool {
+    let ExprKind::If { cond, then, .. } = &body.kind else { return false };
+    if let (Some(d), Some(b)) = (decl, body.span) {
+        if b.line > d.line {
+            return true;
+        }
+    }
+    let first_line_width = |e: &Expr| {
+        let mut s = String::new();
+        fmt_expr(&mut s, e, depth);
+        s.lines().next().unwrap_or("").chars().count()
+    };
+    let head = "if ".len() + first_line_width(cond) + " then ".len() + first_line_width(then);
+    current_col(out) + " = ".len() + head > MAX_WIDTH
 }
 
 fn fmt_decl_test(out: &mut String, decl: &Decl, depth: usize) {
@@ -1096,7 +1140,7 @@ fn fmt_option_shorthand(out: &mut String, inner: &TypeExpr, depth: usize) {
 /// is emitted multi-line. Records without comments keep the single-line shape,
 /// so existing sources do not churn (#1090).
 fn fmt_record_type(out: &mut String, fields: &[FieldType], open: bool, depth: usize) {
-    if fields.iter().any(|f| !f.comments.is_empty()) {
+    if fields_carry_comments(fields) {
         fmt_record_type_multiline(out, fields, open, depth);
         return;
     }
@@ -1110,6 +1154,12 @@ fn fmt_record_type(out: &mut String, fields: &[FieldType], open: bool, depth: us
     out.push('}');
 }
 
+/// Does any field carry a comment (above it, or ending its line)? Such a
+/// record has to be laid out one field per line.
+fn fields_carry_comments(fields: &[FieldType]) -> bool {
+    fields.iter().any(|f| !f.comments.is_empty() || !f.trailing_comments.is_empty())
+}
+
 /// A union type's members, `A | B | C`.
 fn fmt_union_members(out: &mut String, members: &[TypeExpr], depth: usize) {
     for (i, m) in members.iter().enumerate() {
@@ -1120,10 +1170,32 @@ fn fmt_union_members(out: &mut String, members: &[TypeExpr], depth: usize) {
     }
 }
 
+/// The one-line rendering of a variant's cases: `| A | B(Int)`.
+fn variant_cases_one_line(cases: &[VariantCase], depth: usize) -> String {
+    let mut one = String::new();
+    for (i, case) in cases.iter().enumerate() {
+        one.push_str(if i > 0 { " | " } else { "| " });
+        fmt_variant_case(&mut one, case, depth);
+    }
+    one
+}
+
+/// Is this variant laid out one case per line? When its cases carry
+/// comments (they have nowhere else to go), when the author wrote it that
+/// way, or when the one-line form would run past `MAX_WIDTH` from `col`
+/// (#3393: a 9-case declaration had become a 230-column line). The second
+/// rule makes the third idempotent: the broken form re-parses as multiline.
+fn variant_is_multiline(ty: &TypeExpr, col: usize, depth: usize) -> bool {
+    let TypeExpr::Variant { cases, comments, multiline } = ty else { return false };
+    *multiline
+        || comments.iter().any(|c| !c.leading.is_empty() || !c.line_trailing.is_empty())
+        || col + variant_cases_one_line(cases, depth).chars().count() > MAX_WIDTH
+}
+
 /// A variant type's cases, with a LEADING `|` on the first case too — the
 /// declaration style `type T =\n  | A\n  | B` round-trips only if it is emitted.
-fn fmt_variant_cases(out: &mut String, cases: &[VariantCase], comments: &[ExprComments], depth: usize) {
-    let multiline = comments.iter().any(|c| !c.leading.is_empty() || !c.line_trailing.is_empty());
+fn fmt_variant_cases(out: &mut String, ty: &TypeExpr, depth: usize, multiline: bool) {
+    let TypeExpr::Variant { cases, comments, .. } = ty else { unreachable!() };
     if multiline {
         for (index, case) in cases.iter().enumerate() {
             out.push('\n');
@@ -1138,10 +1210,7 @@ fn fmt_variant_cases(out: &mut String, cases: &[VariantCase], comments: &[ExprCo
         }
         return;
     }
-    for (i, case) in cases.iter().enumerate() {
-        out.push_str(if i > 0 { " | " } else { "| " });
-        fmt_variant_case(out, case, depth);
-    }
+    out.push_str(&variant_cases_one_line(cases, depth));
 }
 
 /// ADR-0012 D3 (#1194): RETURN POSITION normalizes to the fallibility marker
@@ -1241,7 +1310,10 @@ fn fmt_type(out: &mut String, ty: &TypeExpr, depth: usize) {
         TypeExpr::ConstLit { value } => {
             out.push_str(&value.to_string());
         }
-        TypeExpr::Variant { cases, comments } => fmt_variant_cases(out, cases, comments, depth),
+        TypeExpr::Variant { .. } => {
+            let multiline = variant_is_multiline(ty, current_col(out), depth);
+            fmt_variant_cases(out, ty, depth, multiline)
+        }
     }
 }
 
@@ -1256,6 +1328,10 @@ fn fmt_variant_case(out: &mut String, case: &VariantCase, depth: usize) {
             out.push('(');
             comma_sep(out, fields, |out, f| fmt_type(out, f, depth));
             out.push(')');
+        }
+        VariantCase::Record { name, fields } if fields_carry_comments(fields) => {
+            w!(out, "{name} ");
+            fmt_record_type_multiline(out, fields, false, depth);
         }
         VariantCase::Record { name, fields } => {
             w!(out, "{name} {{ ");
@@ -1277,7 +1353,13 @@ fn fmt_record_type_multiline(out: &mut String, fields: &[FieldType], open: bool,
         }
         w!(out, "{inner}");
         fmt_field_type(out, f, depth + 1);
-        out.push_str(",\n");
+        out.push(',');
+        // #3393: a comment that ended the field's line goes back there — above
+        // the NEXT field it would read as that field's doc.
+        for c in &f.trailing_comments {
+            w!(out, " {c}");
+        }
+        out.push('\n');
     }
     if open {
         wln!(out, "{inner}..");

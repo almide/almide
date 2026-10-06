@@ -291,6 +291,9 @@ impl Emitter<'_> {
     /// The release fn of an owned LOCAL, by the type `rc_own` recorded
     /// for it (a param is recorded at frame entry).
     pub(crate) fn dec_fn_of_local(&self, idx: u32) -> u32 {
+        if let Some(t) = self.arm_rests.ty_of(idx) {
+            return self.dec_fn_of(t);
+        }
         let Some(&t) = self.owned_ty.get(&idx) else { return F_DEC_FLAT };
         // A C-319 cell local owns the CELL, not the occupant (#2010).
         let is_cell = self.locals.iter().any(|(v, &(i, _))| i == idx && self.cells.contains(v));
@@ -442,6 +445,8 @@ impl Emitter<'_> {
         // var's block is its alone). Binds/assigns copy, so a plain var
         // never shares; a fresh value has no other holder to witness.
         match &e.kind {
+            // #3406: a dying var's credit moves in (dying_move.rs).
+            almide_ir::IrExprKind::Var { .. } if self.owned_call_marks.is_moving(e) => {}
             // A C-319 cell var reads its OCCUPANT out of the cell, and the
             // cell holds one credit on it that the next assign releases
             // (#2010) — so a container storing the read co-owns it exactly
@@ -525,7 +530,7 @@ impl Emitter<'_> {
     }
 
     pub(crate) fn rc_owned_result(&self, e: &almide_ir::IrExpr) -> bool {
-        if rc_certainly_fresh(&e.kind) {
+        if rc_certainly_fresh(&e.kind) || self.owned_call_marks.is_moving(e) {
             return true;
         }
         // `{ let t = …; op(t) }` (arg_temps.rs) and any block: the value
@@ -568,6 +573,8 @@ impl Emitter<'_> {
                 | almide_ir::IrExprKind::MapAccess { .. }
                 // `fan { … }` (fan.rs `lower_fan_block`): owned when marked.
                 | almide_ir::IrExprKind::Fan { .. }
+                // #3406: a moved slot (dying_move.rs).
+                | almide_ir::IrExprKind::Member { .. }
         ) {
             return self.owned_call_marks.is_marked(e);
         }

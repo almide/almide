@@ -1,0 +1,9 @@
+// The router is built in main, so the app passed to http.serve is a local.
+import http
+
+effect fn main() -> Unit = {
+  let app = http.router([
+    http.route("GET /", (req) => http.response(200, "home"))
+  ])!
+  http.serve(8080, app)!
+}

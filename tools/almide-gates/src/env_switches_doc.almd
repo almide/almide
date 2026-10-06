@@ -29,10 +29,11 @@ fn embedded_block(doc: String) -> List[String]? = {
 }
 
 // The first index where the two line lists differ, if any.
-fn first_diff(a: List[String], b: List[String], i: Int) -> Int? = if i >= list.len(a) and i >= list.len(b) then none
-else if i >= list.len(a) or i >= list.len(b) then some(i)
-else if list.get_or(a, i, "") != list.get_or(b, i, "") then some(i)
-else first_diff(a, b, i + 1)
+fn first_diff(a: List[String], b: List[String], i: Int) -> Int? =
+  if i >= list.len(a) and i >= list.len(b) then none
+  else if i >= list.len(a) or i >= list.len(b) then some(i)
+  else if list.get_or(a, i, "") != list.get_or(b, i, "") then some(i)
+  else first_diff(a, b, i + 1)
 
 effect fn run(root: String, almide_bin: String) -> Verdict = {
   let doc_path = root + "/docs/specs/cli.md"

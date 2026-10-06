@@ -1,6 +1,10 @@
 // codegen_variant_record_test — Variant with record payload edge cases
 // ── Variant with record payload and default fields ──
-type Event = | Click { x: Int, y: Int, button: String = "left" } | KeyPress { key: String, ctrl: Bool = false, shift: Bool = false } | Resize { width: Int, height: Int } | Close
+type Event =
+  | Click { x: Int, y: Int, button: String = "left" }
+  | KeyPress { key: String, ctrl: Bool = false, shift: Bool = false }
+  | Resize { width: Int, height: Int }
+  | Close
 
 fn event_label(e: Event) -> String = match e {
   Click { button, .. } => "click:${button}",
@@ -94,7 +98,10 @@ test "extract fields from variant records" {
 }
 
 // ── Nested variant records ──
-type Widget = | Button { label: String, on_click: Event } | Panel { title: String, children: List[Widget] } | Spacer
+type Widget =
+  | Button { label: String, on_click: Event }
+  | Panel { title: String, children: List[Widget] }
+  | Spacer
 
 fn widget_name(w: Widget) -> String = match w {
   Button { label, .. } => "btn:${label}",

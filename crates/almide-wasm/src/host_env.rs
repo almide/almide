@@ -22,8 +22,9 @@ impl Emitter<'_> {
         args: &[IrExpr],
     ) -> Result<Option<Option<Lowered>>, EmitError> {
         let out = match (module, func, args) {
-            // Option[String]: status 2 = unset → none.
-            ("env", "get", [name]) => {
+            // Option[String]: status 2 = unset → none. `process.env` is the
+            // same read under the process module's name (#2589).
+            ("env", "get", [name]) | ("process", "env", [name]) => {
                 self.fs_call_1(name, OP_ENV_GET)?;
                 let hret = self.hold_i64()?;
                 let mut i = self.f.instructions();
@@ -253,31 +254,7 @@ impl Emitter<'_> {
             // [0, i32::MAX]), the i64 status dropped, then the always-ok
             // unit carrier io.print builds (#1423 bucket A).
             ("env", "sleep_ms", [ms]) => {
-                self.lower_arg(ms, Some(INT), ArgMode::Borrow)?;
-                let hm = self.hold_i64()?;
-                self.note_host_op(crate::fs_meta::OP_SLEEP_MS);
-                {
-                    let mut i = self.f.instructions();
-                    i.local_set(hm);
-                    i.i32_const(crate::fs_meta::OP_SLEEP_MS);
-                    i.i32_const(0);
-                    i.local_get(hm).i64_const(0).i64_lt_s();
-                    i.if_(BlockType::Result(wasm_encoder::ValType::I64));
-                    i.i64_const(0);
-                    i.else_();
-                    i.local_get(hm).i64_const(0x7FFF_FFFF).i64_lt_s();
-                    i.if_(BlockType::Result(wasm_encoder::ValType::I64));
-                    i.local_get(hm);
-                    i.else_();
-                    i.i64_const(0x7FFF_FFFF);
-                    i.end();
-                    i.end();
-                    i.i32_wrap_i64();
-                    i.i32_const(0).i32_const(0);
-                    i.call(F_FS_CALL);
-                    i.drop();
-                }
-                self.release_i64();
+                self.sleep_ms(ms)?;
                 let hb = self.hold_i32()?;
                 {
                     let mut i = self.f.instructions();
@@ -293,6 +270,12 @@ impl Emitter<'_> {
                 let uh = self.types.intern(SliceTy::Unit);
                 let sh = self.types.intern(STR);
                 Some(Lowered::owned(SliceTy::Result(uh, sh)))
+            }
+            // `process.sleep` is a plain fn returning Unit (no carrier): the
+            // same host sleep, nothing on the stack (#2589).
+            ("process", "sleep", [ms]) => {
+                self.sleep_ms(ms)?;
+                None
             }
             // List[Int] → low bytes, then the same raw sink.
             ("io", "write_bytes", [xs]) => {
@@ -396,6 +379,37 @@ impl Emitter<'_> {
             _ => return Ok(None),
         };
         Ok(Some(out))
+    }
+
+    /// Op 36: sleep `ms` on the host (the count rides the a_len slot with a
+    /// null a_ptr — the op-35 scalar discipline; clamped to [0, i32::MAX]),
+    /// the i64 status dropped. Nothing is left on the stack.
+    fn sleep_ms(&mut self, ms: &IrExpr) -> Result<(), EmitError> {
+        self.lower_arg(ms, Some(INT), ArgMode::Borrow)?;
+        let hm = self.hold_i64()?;
+        self.note_host_op(crate::fs_meta::OP_SLEEP_MS);
+        let mut i = self.f.instructions();
+        i.local_set(hm);
+        i.i32_const(crate::fs_meta::OP_SLEEP_MS);
+        i.i32_const(0);
+        i.local_get(hm).i64_const(0).i64_lt_s();
+        i.if_(BlockType::Result(wasm_encoder::ValType::I64));
+        i.i64_const(0);
+        i.else_();
+        i.local_get(hm).i64_const(0x7FFF_FFFF).i64_lt_s();
+        i.if_(BlockType::Result(wasm_encoder::ValType::I64));
+        i.local_get(hm);
+        i.else_();
+        i.i64_const(0x7FFF_FFFF);
+        i.end();
+        i.end();
+        i.i32_wrap_i64();
+        i.i32_const(0).i32_const(0);
+        i.call(F_FS_CALL);
+        i.drop();
+        let _ = i;
+        self.release_i64();
+        Ok(())
     }
 
     /// Op 34 (the wall clock, raw epoch nanos) divided down to `per_unit`

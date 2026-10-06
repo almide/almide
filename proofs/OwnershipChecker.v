@@ -1217,9 +1217,211 @@ Fixpoint parse_xc (s : string) (cur : list CertItem)
       end
   end.
 
-(* The full exit-aware checker over raw certificate bytes (format v5). *)
+(* ─── OWNED-LINE RESURRECTION (#3229) ───
+   `Alias` folds like `Inc`, with no liveness guard: a borrowed PARAM's line
+   starts at 0 with the caller's reference uncounted, so an `a` at count 0 is
+   that line's normal first event (`amamam`: dup the param, move the dup out,
+   again). But the same fold also accepted `idam`: an OWNED object allocated,
+   released to 0 — FREED — and then aliased and moved out. That is a
+   use-after-free the balance cannot see (it nets to 0). The MIR lowering
+   produced exactly that witness when a field-path copy-on-write rebound a
+   `mut` param inside a model-one-iteration `while` frame: the frame-end drop
+   (`drop_arm_locals`) freed the copy, and the write-back then `Dup`'d it.
+
+   The rule, decided from the certificate alone: a line whose FIRST item is a
+   top-level fresh acquire (`COp Inc`) is an OWNED object — born at that event,
+   with no reference outside this frame. On such a line a count of 0 after the
+   birth means the object is DEAD, so every later ALIAS (`a`, a new reference
+   to an object that must already exist) must meet a live count. `guard_line`
+   makes that obligation explicit by placing the existing `b` liveness probe
+   (+0, faults at 0) before every `a` after the birth, inside loop bodies and
+   branch arms too; the line is then judged by the unchanged `check_line`.
+   A fresh `i` is NOT probed: it is a block straight from the allocator, so it
+   can never revive a freed one — on a loop-carried slot's line it is the
+   slot's next value (`i(di)m`: drop the old accumulator, allocate the new).
+   A line that does not start with `COp Inc` (a borrowed param's, a slot whose
+   first event is a loop) is judged exactly as before. No new byte: every
+   certificate parses as it did. *)
+Definition guard_op (o : Op) : list Op :=
+  match o with
+  | Alias => [Borrow; Alias]
+  | _ => [o]
+  end.
+
+Definition guard_ops (ops : list Op) : list Op := flat_map guard_op ops.
+
+Definition guard_item (c : CertItem) : list CertItem :=
+  match c with
+  | COp o => map COp (guard_op o)
+  | CLoop body => [CLoop (guard_ops body)]
+  | CCondLoop thenb elseb => [CCondLoop (guard_ops thenb) (guard_ops elseb)]
+  | CBranch thenb elseb => [CBranch (guard_ops thenb) (guard_ops elseb)]
+  | CBranchRet f thenb elseb => [CBranchRet f (guard_ops thenb) (guard_ops elseb)]
+  | CBranchAbort f thenb elseb => [CBranchAbort f (guard_ops thenb) (guard_ops elseb)]
+  | CPoison => [CPoison]
+  end.
+
+Definition guard_line (cs : list CertItem) : list CertItem :=
+  match cs with
+  | COp Inc :: rest => COp Inc :: flat_map guard_item rest
+  | _ => cs
+  end.
+
+(* The probes only ADD faults: wherever the guarded run succeeds, the
+   unguarded run succeeds with the same count. *)
+Lemma exec_guard_op :
+  forall o rc r, exec (guard_op o) rc = Some r -> exec [o] rc = Some r.
+Proof.
+  intros o rc r H. destruct o; simpl in *; try exact H;
+    destruct (rc <=? 0); try discriminate; exact H.
+Qed.
+
+Lemma exec_guard_ops :
+  forall ops rc r, exec (guard_ops ops) rc = Some r -> exec ops rc = Some r.
+Proof.
+  unfold guard_ops.
+  induction ops as [| o ops IH]; intros rc r H.
+  - exact H.
+  - cbn [flat_map] in H. rewrite exec_app in H. rewrite exec_cons.
+    destruct (exec (guard_op o) rc) as [r1 |] eqn:E1; [| discriminate].
+    rewrite (exec_guard_op o rc r1 E1). exact (IH r1 r H).
+Qed.
+
+(* exec_line is a left fold over the items, like exec over the ops. *)
+Lemma exec_line_app :
+  forall a b rc,
+    exec_line (a ++ b) rc =
+      match exec_line a rc with Some r => exec_line b r | None => None end.
+Proof.
+  induction a as [| c a IH]; intros b rc; [reflexivity |].
+  destruct c as [o | body | t e | t e | f t e | f t e |]; cbn [app exec_line].
+  - destruct (exec [o] rc); [apply IH | reflexivity].
+  - destruct (exec body rc) as [r |]; [| reflexivity].
+    destruct (Z.eqb r rc); [apply IH | reflexivity].
+  - destruct (exec t rc) as [rt |]; destruct (exec e rc) as [re |]; try reflexivity.
+    destruct (andb (Z.eqb rt rc) (Z.eqb re rc)); [apply IH | reflexivity].
+  - destruct (exec t rc) as [rt |]; destruct (exec e rc) as [re |]; try reflexivity.
+    destruct (Z.eqb rt re); [apply IH | reflexivity].
+  - destruct (exec t rc) as [rt |]; destruct (exec e rc) as [re |]; try reflexivity.
+    destruct f; [destruct (Z.eqb rt 0) | destruct (Z.eqb re 0)];
+      first [apply IH | reflexivity].
+  - destruct (exec t rc) as [rt |]; destruct (exec e rc) as [re |]; try reflexivity.
+    destruct f; apply IH.
+  - reflexivity.
+Qed.
+
+Lemma exec_line_guard_item :
+  forall c rc r, exec_line (guard_item c) rc = Some r -> exec_line [c] rc = Some r.
+Proof.
+  intros c rc r H.
+  destruct c as [o | body | t e | t e | f t e | f t e |]; cbn [guard_item] in H.
+  - destruct o; simpl in *; try exact H;
+      destruct (rc <=? 0); try discriminate; exact H.
+  - cbn [exec_line] in H |- *.
+    destruct (exec (guard_ops body) rc) as [r1 |] eqn:E; [| discriminate].
+    rewrite (exec_guard_ops body rc r1 E). exact H.
+  - cbn [exec_line] in H |- *.
+    destruct (exec (guard_ops t) rc) as [rt |] eqn:Et; [| discriminate].
+    destruct (exec (guard_ops e) rc) as [re |] eqn:Ee; [| discriminate].
+    rewrite (exec_guard_ops t rc rt Et), (exec_guard_ops e rc re Ee). exact H.
+  - cbn [exec_line] in H |- *.
+    destruct (exec (guard_ops t) rc) as [rt |] eqn:Et; [| discriminate].
+    destruct (exec (guard_ops e) rc) as [re |] eqn:Ee; [| discriminate].
+    rewrite (exec_guard_ops t rc rt Et), (exec_guard_ops e rc re Ee). exact H.
+  - cbn [exec_line] in H |- *.
+    destruct (exec (guard_ops t) rc) as [rt |] eqn:Et; [| discriminate].
+    destruct (exec (guard_ops e) rc) as [re |] eqn:Ee; [| discriminate].
+    rewrite (exec_guard_ops t rc rt Et), (exec_guard_ops e rc re Ee). exact H.
+  - cbn [exec_line] in H |- *.
+    destruct (exec (guard_ops t) rc) as [rt |] eqn:Et; [| discriminate].
+    destruct (exec (guard_ops e) rc) as [re |] eqn:Ee; [| discriminate].
+    rewrite (exec_guard_ops t rc rt Et), (exec_guard_ops e rc re Ee). exact H.
+  - discriminate.
+Qed.
+
+Lemma exec_line_guard_items :
+  forall cs rc r,
+    exec_line (flat_map guard_item cs) rc = Some r -> exec_line cs rc = Some r.
+Proof.
+  induction cs as [| c cs IH]; intros rc r H; [exact H |].
+  cbn [flat_map] in H. rewrite exec_line_app in H.
+  change (c :: cs) with ([c] ++ cs). rewrite exec_line_app.
+  destruct (exec_line (guard_item c) rc) as [r1 |] eqn:E1; [| discriminate].
+  rewrite (exec_line_guard_item c rc r1 E1). exact (IH r1 r H).
+Qed.
+
+(* Every line the guarded checker accepts, the unguarded one accepts: the
+   resurrection rule only REJECTS more, so every soundness theorem proved
+   about `check_line` carries over to `check_xc` unchanged. *)
+Lemma check_line_guard_weaken :
+  forall cs, check_line (guard_line cs) = true -> check_line cs = true.
+Proof.
+  intros cs H. destruct cs as [| c cs]; [exact H |].
+  destruct c as [o | | | | | |]; try exact H. destruct o; try exact H.
+  unfold check_line in *. cbn [guard_line exec_line] in H |- *.
+  destruct (exec [Inc] 0) as [r0 |]; [| exact H].
+  destruct (exec_line (flat_map guard_item cs) r0) as [z |] eqn:E; [| discriminate].
+  rewrite (exec_line_guard_items cs r0 z E). exact H.
+Qed.
+
+(* Unrolling commutes with the guard: a concrete run of an owned line's tail,
+   with a probe before every alias, is a concrete run of the guarded tail. *)
+Lemma guard_ops_app :
+  forall a b, guard_ops (a ++ b) = guard_ops a ++ guard_ops b.
+Proof. intros a b. unfold guard_ops. apply flat_map_app. Qed.
+
+Lemma guard_ops_repeat :
+  forall body n,
+    guard_ops (List.concat (List.repeat body n)) =
+      List.concat (List.repeat (guard_ops body) n).
+Proof.
+  intros body n. induction n as [| n IH]; [reflexivity |].
+  cbn [List.repeat List.concat]. rewrite guard_ops_app, IH. reflexivity.
+Qed.
+
+Lemma guard_ops_cond :
+  forall thenb elseb bs,
+    guard_ops (cond_concat thenb elseb bs) =
+      cond_concat (guard_ops thenb) (guard_ops elseb) bs.
+Proof.
+  intros thenb elseb bs. induction bs as [| b bs IH]; [reflexivity |].
+  destruct b; cbn [cond_concat]; rewrite guard_ops_app, IH; reflexivity.
+Qed.
+
+Lemma unrolls_map_cop :
+  forall l a b, UnrollsL a b -> UnrollsL (map COp l ++ a) (l ++ b).
+Proof.
+  induction l as [| o l IH]; intros a b H; [exact H |].
+  cbn [map app]. apply UL_op. apply IH. exact H.
+Qed.
+
+Lemma unrolls_guard :
+  forall cs fops, UnrollsL cs fops ->
+    UnrollsL (flat_map guard_item cs) (guard_ops fops).
+Proof.
+  intros cs fops HU. induction HU; cbn [flat_map guard_item].
+  - constructor.
+  - unfold guard_ops at 1. cbn [flat_map]. apply unrolls_map_cop. exact IHHU.
+  - rewrite guard_ops_app, guard_ops_repeat. apply UL_loop. exact IHHU.
+  - rewrite guard_ops_app, guard_ops_cond. apply UL_cond. exact IHHU.
+  - rewrite guard_ops_app. destruct choice.
+    + exact (UL_branch (guard_ops thenb) (guard_ops elseb) _ _ true IHHU).
+    + exact (UL_branch (guard_ops thenb) (guard_ops elseb) _ _ false IHHU).
+  - destruct retthen.
+    + exact (UL_branchret_exit true (guard_ops thenb) (guard_ops elseb) _).
+    + exact (UL_branchret_exit false (guard_ops thenb) (guard_ops elseb) _).
+  - rewrite guard_ops_app. destruct retthen.
+    + exact (UL_branchret_cont true (guard_ops thenb) (guard_ops elseb) _ _ IHHU).
+    + exact (UL_branchret_cont false (guard_ops thenb) (guard_ops elseb) _ _ IHHU).
+  - rewrite guard_ops_app. destruct abthen.
+    + exact (UL_branchabort_cont true (guard_ops thenb) (guard_ops elseb) _ _ IHHU).
+    + exact (UL_branchabort_cont false (guard_ops thenb) (guard_ops elseb) _ _ IHHU).
+Qed.
+
+(* The full exit-aware checker over raw certificate bytes (format v6), with
+   the owned-line resurrection rule (#3229). *)
 Definition check_xc (s : string) : bool :=
-  forallb check_line (parse_xc s [] None None None).
+  forallb (fun cs => check_line (guard_line cs)) (parse_xc s [] None None None).
 
 (* SOUNDNESS over bytes (1-line corollary of check_line_unroll_sound, covering
    CBranchRet via UL_branchret_exit / UL_branchret_cont): an accepted exit-aware
@@ -1233,7 +1435,27 @@ Theorem check_xc_unroll_sound :
 Proof.
   intros s H cs Hin fops HU.
   unfold check_xc in H. rewrite forallb_forall in H.
-  apply (check_line_unroll_sound cs (H cs Hin) fops HU).
+  apply (check_line_unroll_sound cs (check_line_guard_weaken cs (H cs Hin)) fops HU).
+Qed.
+
+(* NO RESURRECTION (#3229): on an accepted certificate, every OWNED line (one
+   born by a top-level fresh acquire) never aliases its object again once it
+   is dead. Stated over the concrete runs: for EVERY unrolling `f` of the
+   line's tail, the run with a liveness probe before each later alias
+   (`guard_ops f`) is fault-free — so no `a` after the birth ever meets a
+   count of 0 — and still balances. Without the rule, `idam` (freed, then
+   aliased and moved out) balanced to 0 and was accepted. *)
+Theorem check_xc_no_resurrection :
+  forall s, check_xc s = true ->
+    forall rest, In (COp Inc :: rest) (parse_xc s [] None None None) ->
+      forall f, UnrollsL rest f ->
+        run (Inc :: guard_ops f) <> None /\ run (Inc :: guard_ops f) = Some 0.
+Proof.
+  intros s H rest Hin f HU.
+  unfold check_xc in H. rewrite forallb_forall in H.
+  pose proof (H _ Hin) as Hline. cbn [guard_line] in Hline.
+  apply (check_line_unroll_sound _ Hline).
+  apply UL_op. apply unrolls_guard. exact HU.
 Qed.
 
 (* FORMAT v6 SAFETY over bytes: an accepted certificate has, for EVERY parsed
@@ -1247,7 +1469,7 @@ Theorem check_xc_abort_sound :
 Proof.
   intros s H cs Hin fops HA.
   unfold check_xc in H. rewrite forallb_forall in H.
-  apply (check_line_abort_sound cs (H cs Hin) fops HA).
+  apply (check_line_abort_sound cs (check_line_guard_weaken cs (H cs Hin)) fops HA).
 Qed.
 
 (* backward-compat (flat + loop + cond-loop + branch certs verify exactly as
@@ -1316,6 +1538,30 @@ Proof. reflexivity. Qed.
 Example cert_xc_abort_double_mark_rejects : check_xc "i{tx|}d"%string = false.
 Proof. reflexivity. Qed.
 
+(* #3229 — OWNED-LINE RESURRECTION. The witness the MIR lowering emitted for
+   `drain(mut u)` with the copy-on-write in a modeled `while` frame: the copy
+   is born, freed at frame end, then aliased (the write-back `Dup`) and moved
+   out. Balanced, and accepted before the rule. *)
+Example cert_xc_resurrect_rejects : check_xc "idam"%string = false.
+Proof. reflexivity. Qed.
+(* its two-level twin (`d.inner.xs`): both record levels copied, both freed. *)
+Example cert_xc_resurrect_two_level_rejects : check_xc "iiddam"%string = false.
+Proof. reflexivity. Qed.
+(* the probe reaches into loop bodies and branch arms. *)
+Example cert_xc_resurrect_in_loop_rejects : check_xc "id(ad)"%string = false.
+Proof. reflexivity. Qed.
+Example cert_xc_resurrect_in_branch_rejects : check_xc "id{ad|ad}"%string = false.
+Proof. reflexivity. Qed.
+(* a LIVE owned object may still be aliased, in a loop or an arm. *)
+Example cert_xc_owned_alias_live_accepts : check_xc "i(ad)a{d|d}d"%string = true.
+Proof. reflexivity. Qed.
+(* a borrowed PARAM's line (no top-level birth): the caller's reference is
+   uncounted, so re-aliasing at 0 stays legal — judged exactly as before. *)
+Example cert_xc_param_realias_accepts : check_xc "amamam"%string = true.
+Proof. reflexivity. Qed.
+Example cert_xc_param_slot_accepts : check_xc "(id)am"%string = true.
+Proof. reflexivity. Qed.
+
 (* AXIOM AUDIT (the "Print Assumptions ⊆ standard" gate). Soundness must rest on
    nothing but the Coq kernel — no admits, no extra axioms. Expected output:
    "Closed under the global context". *)
@@ -1327,6 +1573,7 @@ Print Assumptions check_bc_unroll_sound.
 Print Assumptions check_xc_unroll_sound.
 Print Assumptions check_line_abort_sound.
 Print Assumptions check_xc_abort_sound.
+Print Assumptions check_xc_no_resurrection.
 Print Assumptions check_line_prefix_safe.
 Print Assumptions check_all_sound.
 Print Assumptions check_cert_sound.

@@ -39,13 +39,14 @@ fn __ffl_line(sh: Int, start: Int, endp: Int) -> String = {
   out
 }
 
-fn __ffl_walk_msi(sh: Int, slen: Int, pos: Int, acc: Map[String, Int], f: (Map[String, Int], String) -> Map[String, Int]) -> Map[String, Int] = if pos >= slen then acc
-else {
-  let e = __ffl_nl(sh, slen, pos)
-  let line = __ffl_line(sh, pos, e)
-  let nacc = f(acc, line)
-  __ffl_walk_msi(sh, slen, e + 1, nacc, f)
-}
+fn __ffl_walk_msi(sh: Int, slen: Int, pos: Int, acc: Map[String, Int], f: (Map[String, Int], String) -> Map[String, Int]) -> Map[String, Int] =
+  if pos >= slen then acc
+  else {
+    let e = __ffl_nl(sh, slen, pos)
+    let line = __ffl_line(sh, pos, e)
+    let nacc = f(acc, line)
+    __ffl_walk_msi(sh, slen, e + 1, nacc, f)
+  }
 
 effect fn fs_fold_lines_msi(path: String, init: Map[String, Int], f: (Map[String, Int], String) -> Map[String, Int]) -> Result[Map[String, Int], String] = {
   let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines")
@@ -71,15 +72,16 @@ effect fn fs_fold_lines_msi(path: String, init: Map[String, Int], f: (Map[String
 // promises. Typed twin: the `Map[String, Int]` accumulator, the same shape the
 // total `_msi` walker carries; every other accumulator routes to an
 // unregistered `_x` name and walls at render.
-fn __ffl_walk_eff_msi(sh: Int, slen: Int, pos: Int, acc: Map[String, Int], f: (Map[String, Int], String) -> Result[Map[String, Int], String]) -> Result[Map[String, Int], String] = if pos >= slen then ok(acc)
-else {
-  let e = __ffl_nl(sh, slen, pos)
-  let line = __ffl_line(sh, pos, e)
-  match f(acc, line) {
-    ok(nacc) => __ffl_walk_eff_msi(sh, slen, e + 1, nacc, f),
-    err(m) => err(m),
+fn __ffl_walk_eff_msi(sh: Int, slen: Int, pos: Int, acc: Map[String, Int], f: (Map[String, Int], String) -> Result[Map[String, Int], String]) -> Result[Map[String, Int], String] =
+  if pos >= slen then ok(acc)
+  else {
+    let e = __ffl_nl(sh, slen, pos)
+    let line = __ffl_line(sh, pos, e)
+    match f(acc, line) {
+      ok(nacc) => __ffl_walk_eff_msi(sh, slen, e + 1, nacc, f),
+      err(m) => err(m),
+    }
   }
-}
 
 effect fn fs_fallible_fold_lines_msi(path: String, init: Map[String, Int], f: (Map[String, Int], String) -> Result[Map[String, Int], String]) -> Result[Map[String, Int], String] = {
   let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines")
@@ -109,28 +111,30 @@ else {
   }
 }
 
-fn __ffl_range_walk_msi(sh: Int, slen: Int, pos: Int, endp: Int, acc: Map[String, Int], f: (Map[String, Int], String) -> Map[String, Int]) -> Map[String, Int] = if pos >= endp or pos >= slen then acc
-else {
-  let e = __ffl_nl(sh, slen, pos)
-  let line = __ffl_line(sh, pos, e)
-  let nacc = f(acc, line)
-  __ffl_range_walk_msi(sh, slen, e + 1, endp, nacc, f)
-}
+fn __ffl_range_walk_msi(sh: Int, slen: Int, pos: Int, endp: Int, acc: Map[String, Int], f: (Map[String, Int], String) -> Map[String, Int]) -> Map[String, Int] =
+  if pos >= endp or pos >= slen then acc
+  else {
+    let e = __ffl_nl(sh, slen, pos)
+    let line = __ffl_line(sh, pos, e)
+    let nacc = f(acc, line)
+    __ffl_range_walk_msi(sh, slen, e + 1, endp, nacc, f)
+  }
 
 // `fs.fold_lines_chunked` msi twin: the SAME byte partition the native runtime
 // computes (`chunk = size / max(workers,1) + 1`; range i = [i*chunk,
 // min(+chunk, size)) while the start is in-file), folded SEQUENTIALLY in chunk
 // order — the partials list is byte-identical to native's (parallelism is a
 // wall-clock property, never an observable; C-220).
-fn __ffl_chunks_msi(sh: Int, slen: Int, lh: Int, n: Int, chunk: Int, i: Int, init: Map[String, Int], f: (Map[String, Int], String) -> Map[String, Int]) -> Int = if i >= n then 0
-else {
-  let s = i * chunk
-  let e = if s + chunk < slen then s + chunk else slen
-  let p0 = __ffl_range_start(sh, slen, s)
-  let part = __ffl_range_walk_msi(sh, slen, p0, e, init, f)
-  prim.store_str(lh + 12 + i * 8, part)
-  __ffl_chunks_msi(sh, slen, lh, n, chunk, i + 1, init, f)
-}
+fn __ffl_chunks_msi(sh: Int, slen: Int, lh: Int, n: Int, chunk: Int, i: Int, init: Map[String, Int], f: (Map[String, Int], String) -> Map[String, Int]) -> Int =
+  if i >= n then 0
+  else {
+    let s = i * chunk
+    let e = if s + chunk < slen then s + chunk else slen
+    let p0 = __ffl_range_start(sh, slen, s)
+    let part = __ffl_range_walk_msi(sh, slen, p0, e, init, f)
+    prim.store_str(lh + 12 + i * 8, part)
+    __ffl_chunks_msi(sh, slen, lh, n, chunk, i + 1, init, f)
+  }
 
 effect fn fs_fold_lines_chunked_msi(path: String, workers: Int, init: Map[String, Int], f: (Map[String, Int], String) -> Map[String, Int]) -> Result[List[Map[String, Int]], String] = {
   let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines_chunked")
@@ -157,23 +161,25 @@ effect fn fs_fold_lines_chunked_msi(path: String, workers: Int, init: Map[String
 // SAME byte partition and walker as the msi twin, with each partial stored
 // as a raw i64 slot (a scalar carries no ownership; the partials list is a
 // flat block, the fan.map payload class).
-fn __ffl_range_walk_i(sh: Int, slen: Int, pos: Int, endp: Int, acc: Int, f: (Int, String) -> Int) -> Int = if pos >= endp or pos >= slen then acc
-else {
-  let e = __ffl_nl(sh, slen, pos)
-  let line = __ffl_line(sh, pos, e)
-  let nacc = f(acc, line)
-  __ffl_range_walk_i(sh, slen, e + 1, endp, nacc, f)
-}
+fn __ffl_range_walk_i(sh: Int, slen: Int, pos: Int, endp: Int, acc: Int, f: (Int, String) -> Int) -> Int =
+  if pos >= endp or pos >= slen then acc
+  else {
+    let e = __ffl_nl(sh, slen, pos)
+    let line = __ffl_line(sh, pos, e)
+    let nacc = f(acc, line)
+    __ffl_range_walk_i(sh, slen, e + 1, endp, nacc, f)
+  }
 
-fn __ffl_chunks_i(sh: Int, slen: Int, lh: Int, n: Int, chunk: Int, i: Int, init: Int, f: (Int, String) -> Int) -> Int = if i >= n then 0
-else {
-  let s = i * chunk
-  let e = if s + chunk < slen then s + chunk else slen
-  let p0 = __ffl_range_start(sh, slen, s)
-  let part = __ffl_range_walk_i(sh, slen, p0, e, init, f)
-  prim.store64(lh + 12 + i * 8, part)
-  __ffl_chunks_i(sh, slen, lh, n, chunk, i + 1, init, f)
-}
+fn __ffl_chunks_i(sh: Int, slen: Int, lh: Int, n: Int, chunk: Int, i: Int, init: Int, f: (Int, String) -> Int) -> Int =
+  if i >= n then 0
+  else {
+    let s = i * chunk
+    let e = if s + chunk < slen then s + chunk else slen
+    let p0 = __ffl_range_start(sh, slen, s)
+    let part = __ffl_range_walk_i(sh, slen, p0, e, init, f)
+    prim.store64(lh + 12 + i * 8, part)
+    __ffl_chunks_i(sh, slen, lh, n, chunk, i + 1, init, f)
+  }
 
 effect fn fs_fold_lines_chunked_i(path: String, workers: Int, init: Int, f: (Int, String) -> Int) -> Result[List[Int], String] = {
   let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines_chunked")
@@ -199,13 +205,14 @@ effect fn fs_fold_lines_chunked_i(path: String, workers: Int, init: Int, f: (Int
 // collect_partition shape `(acc, line) => acc + [line]`): the SAME range
 // walker over a List[String] acc. The acc moves through f per line; the final
 // acc is the owned Ok payload.
-fn __ffl_range_walk_ls(sh: Int, slen: Int, pos: Int, endp: Int, acc: List[String], f: (List[String], String) -> List[String]) -> List[String] = if pos >= endp or pos >= slen then acc
-else {
-  let e = __ffl_nl(sh, slen, pos)
-  let line = __ffl_line(sh, pos, e)
-  let nacc = f(acc, line)
-  __ffl_range_walk_ls(sh, slen, e + 1, endp, nacc, f)
-}
+fn __ffl_range_walk_ls(sh: Int, slen: Int, pos: Int, endp: Int, acc: List[String], f: (List[String], String) -> List[String]) -> List[String] =
+  if pos >= endp or pos >= slen then acc
+  else {
+    let e = __ffl_nl(sh, slen, pos)
+    let line = __ffl_line(sh, pos, e)
+    let nacc = f(acc, line)
+    __ffl_range_walk_ls(sh, slen, e + 1, endp, nacc, f)
+  }
 
 // `fs.fold_lines_chunked` List[String]-accumulator twin (`_ls` — the same
 // collect_partition shape, chunked). Identical byte partition to the msi twin,
@@ -213,15 +220,16 @@ else {
 // block: `Result[List[List[String]], String]` is the msi payload class with a
 // List[String] element instead of a Map — both are heap blocks whose slots the
 // partials list owns, so the recursive drop route is the same one msi rides.
-fn __ffl_chunks_ls(sh: Int, slen: Int, lh: Int, n: Int, chunk: Int, i: Int, init: List[String], f: (List[String], String) -> List[String]) -> Int = if i >= n then 0
-else {
-  let s = i * chunk
-  let e = if s + chunk < slen then s + chunk else slen
-  let p0 = __ffl_range_start(sh, slen, s)
-  let part = __ffl_range_walk_ls(sh, slen, p0, e, init, f)
-  prim.store_str(lh + 12 + i * 8, part)
-  __ffl_chunks_ls(sh, slen, lh, n, chunk, i + 1, init, f)
-}
+fn __ffl_chunks_ls(sh: Int, slen: Int, lh: Int, n: Int, chunk: Int, i: Int, init: List[String], f: (List[String], String) -> List[String]) -> Int =
+  if i >= n then 0
+  else {
+    let s = i * chunk
+    let e = if s + chunk < slen then s + chunk else slen
+    let p0 = __ffl_range_start(sh, slen, s)
+    let part = __ffl_range_walk_ls(sh, slen, p0, e, init, f)
+    prim.store_str(lh + 12 + i * 8, part)
+    __ffl_chunks_ls(sh, slen, lh, n, chunk, i + 1, init, f)
+  }
 
 effect fn fs_fold_lines_chunked_ls(path: String, workers: Int, init: List[String], f: (List[String], String) -> List[String]) -> Result[List[List[String]], String] = {
   let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines_chunked")
@@ -262,13 +270,14 @@ effect fn fs_fold_lines_range_ls(path: String, start: Int, endp: Int, init: List
 // `fold_lines(p, "", (acc, line) => acc + line)`): the SAME full-file walk as
 // the msi twin over a String acc. The acc moves through f per line; the final
 // acc is the owned Ok payload (flat drop — one buffer).
-fn __ffl_walk_s(sh: Int, slen: Int, pos: Int, acc: String, f: (String, String) -> String) -> String = if pos >= slen then acc
-else {
-  let e = __ffl_nl(sh, slen, pos)
-  let line = __ffl_line(sh, pos, e)
-  let nacc = f(acc, line)
-  __ffl_walk_s(sh, slen, e + 1, nacc, f)
-}
+fn __ffl_walk_s(sh: Int, slen: Int, pos: Int, acc: String, f: (String, String) -> String) -> String =
+  if pos >= slen then acc
+  else {
+    let e = __ffl_nl(sh, slen, pos)
+    let line = __ffl_line(sh, pos, e)
+    let nacc = f(acc, line)
+    __ffl_walk_s(sh, slen, e + 1, nacc, f)
+  }
 
 effect fn fs_fold_lines_s(path: String, init: String, f: (String, String) -> String) -> Result[String, String] = {
   let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines")
@@ -286,13 +295,14 @@ effect fn fs_fold_lines_s(path: String, init: String, f: (String, String) -> Str
 // `fs.fold_lines` Int-accumulator twin (`_i` — the counting shape
 // `fold_lines(p, 0, (acc, line) => acc + string.len(line))`): a scalar acc
 // carries no ownership; the len-as-tag Result[Int, String] payload class.
-fn __ffl_walk_i(sh: Int, slen: Int, pos: Int, acc: Int, f: (Int, String) -> Int) -> Int = if pos >= slen then acc
-else {
-  let e = __ffl_nl(sh, slen, pos)
-  let line = __ffl_line(sh, pos, e)
-  let nacc = f(acc, line)
-  __ffl_walk_i(sh, slen, e + 1, nacc, f)
-}
+fn __ffl_walk_i(sh: Int, slen: Int, pos: Int, acc: Int, f: (Int, String) -> Int) -> Int =
+  if pos >= slen then acc
+  else {
+    let e = __ffl_nl(sh, slen, pos)
+    let line = __ffl_line(sh, pos, e)
+    let nacc = f(acc, line)
+    __ffl_walk_i(sh, slen, e + 1, nacc, f)
+  }
 
 effect fn fs_fold_lines_i(path: String, init: Int, f: (Int, String) -> Int) -> Result[Int, String] = {
   let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines")
@@ -310,13 +320,14 @@ effect fn fs_fold_lines_i(path: String, init: Int, f: (Int, String) -> Int) -> R
 // `fs.fold_lines` List[String]-accumulator twin (`_ls` — the read_lines
 // equivalence shape `fold_lines(p, [], (acc, line) => acc + [line])`): the
 // full-file version of the range walker's acc class.
-fn __ffl_walk_ls(sh: Int, slen: Int, pos: Int, acc: List[String], f: (List[String], String) -> List[String]) -> List[String] = if pos >= slen then acc
-else {
-  let e = __ffl_nl(sh, slen, pos)
-  let line = __ffl_line(sh, pos, e)
-  let nacc = f(acc, line)
-  __ffl_walk_ls(sh, slen, e + 1, nacc, f)
-}
+fn __ffl_walk_ls(sh: Int, slen: Int, pos: Int, acc: List[String], f: (List[String], String) -> List[String]) -> List[String] =
+  if pos >= slen then acc
+  else {
+    let e = __ffl_nl(sh, slen, pos)
+    let line = __ffl_line(sh, pos, e)
+    let nacc = f(acc, line)
+    __ffl_walk_ls(sh, slen, e + 1, nacc, f)
+  }
 
 effect fn fs_fold_lines_ls(path: String, init: List[String], f: (List[String], String) -> List[String]) -> Result[List[String], String] = {
   let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines")
@@ -362,15 +373,16 @@ effect fn fs_for_each_line(path: String, f: (String) -> Unit) -> Result[Unit, St
 // C-274): the FIRST err ends the walk — the callback is NOT invoked for any
 // later line (the invocation trace is the cross-target observable, same as
 // the msi fallible walker above).
-fn __ffl_walk_eff_i(sh: Int, slen: Int, pos: Int, acc: Int, f: (Int, String) -> Result[Int, String]) -> Result[Int, String] = if pos >= slen then ok(acc)
-else {
-  let e = __ffl_nl(sh, slen, pos)
-  let line = __ffl_line(sh, pos, e)
-  match f(acc, line) {
-    ok(nacc) => __ffl_walk_eff_i(sh, slen, e + 1, nacc, f),
-    err(m) => err(m),
+fn __ffl_walk_eff_i(sh: Int, slen: Int, pos: Int, acc: Int, f: (Int, String) -> Result[Int, String]) -> Result[Int, String] =
+  if pos >= slen then ok(acc)
+  else {
+    let e = __ffl_nl(sh, slen, pos)
+    let line = __ffl_line(sh, pos, e)
+    match f(acc, line) {
+      ok(nacc) => __ffl_walk_eff_i(sh, slen, e + 1, nacc, f),
+      err(m) => err(m),
+    }
   }
-}
 
 effect fn fs_fallible_fold_lines_i(path: String, init: Int, f: (Int, String) -> Result[Int, String]) -> Result[Int, String] = {
   let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines")
@@ -385,15 +397,16 @@ effect fn fs_fallible_fold_lines_i(path: String, init: Int, f: (Int, String) -> 
   }
 }
 
-fn __ffl_walk_eff_u(sh: Int, slen: Int, pos: Int, f: (String) -> Result[Unit, String]) -> Result[Unit, String] = if pos >= slen then ok(())
-else {
-  let e = __ffl_nl(sh, slen, pos)
-  let line = __ffl_line(sh, pos, e)
-  match f(line) {
-    ok(_u) => __ffl_walk_eff_u(sh, slen, e + 1, f),
-    err(m) => err(m),
+fn __ffl_walk_eff_u(sh: Int, slen: Int, pos: Int, f: (String) -> Result[Unit, String]) -> Result[Unit, String] =
+  if pos >= slen then ok(())
+  else {
+    let e = __ffl_nl(sh, slen, pos)
+    let line = __ffl_line(sh, pos, e)
+    match f(line) {
+      ok(_u) => __ffl_walk_eff_u(sh, slen, e + 1, f),
+      err(m) => err(m),
+    }
   }
-}
 
 effect fn fs_fallible_for_each_line(path: String, f: (String) -> Result[Unit, String]) -> Result[Unit, String] = {
   let r: Result[String, String] = prim.read_text_file_as(path, "fs.for_each_line")
@@ -429,13 +442,14 @@ effect fn fs_fold_lines_range_i(path: String, start: Int, endp: Int, init: Int, 
 
 // `fs.fold_lines_range` String-accumulator twin (`_s` — the concat-in-range
 // shape): the SAME range walker over a String acc.
-fn __ffl_range_walk_s(sh: Int, slen: Int, pos: Int, endp: Int, acc: String, f: (String, String) -> String) -> String = if pos >= endp or pos >= slen then acc
-else {
-  let e = __ffl_nl(sh, slen, pos)
-  let line = __ffl_line(sh, pos, e)
-  let nacc = f(acc, line)
-  __ffl_range_walk_s(sh, slen, e + 1, endp, nacc, f)
-}
+fn __ffl_range_walk_s(sh: Int, slen: Int, pos: Int, endp: Int, acc: String, f: (String, String) -> String) -> String =
+  if pos >= endp or pos >= slen then acc
+  else {
+    let e = __ffl_nl(sh, slen, pos)
+    let line = __ffl_line(sh, pos, e)
+    let nacc = f(acc, line)
+    __ffl_range_walk_s(sh, slen, e + 1, endp, nacc, f)
+  }
 
 effect fn fs_fold_lines_range_s(path: String, start: Int, endp: Int, init: String, f: (String, String) -> String) -> Result[String, String] = {
   let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines_range")
@@ -474,15 +488,16 @@ effect fn fs_fold_lines_range_msi(path: String, start: Int, endp: Int, init: Map
 // partial stored as a heap handle into the partials block. Completes the
 // walker x accumulator twin matrix (#1423 bucket A): every accumulating
 // walker now carries {_msi, _i, _ls, _s}.
-fn __ffl_chunks_s(sh: Int, slen: Int, lh: Int, n: Int, chunk: Int, i: Int, init: String, f: (String, String) -> String) -> Int = if i >= n then 0
-else {
-  let s = i * chunk
-  let e = if s + chunk < slen then s + chunk else slen
-  let p0 = __ffl_range_start(sh, slen, s)
-  let part = __ffl_range_walk_s(sh, slen, p0, e, init, f)
-  prim.store_str(lh + 12 + i * 8, part)
-  __ffl_chunks_s(sh, slen, lh, n, chunk, i + 1, init, f)
-}
+fn __ffl_chunks_s(sh: Int, slen: Int, lh: Int, n: Int, chunk: Int, i: Int, init: String, f: (String, String) -> String) -> Int =
+  if i >= n then 0
+  else {
+    let s = i * chunk
+    let e = if s + chunk < slen then s + chunk else slen
+    let p0 = __ffl_range_start(sh, slen, s)
+    let part = __ffl_range_walk_s(sh, slen, p0, e, init, f)
+    prim.store_str(lh + 12 + i * 8, part)
+    __ffl_chunks_s(sh, slen, lh, n, chunk, i + 1, init, f)
+  }
 
 effect fn fs_fold_lines_chunked_s(path: String, workers: Int, init: String, f: (String, String) -> String) -> Result[List[String], String] = {
   let r: Result[String, String] = prim.read_text_file_as(path, "fs.fold_lines_chunked")

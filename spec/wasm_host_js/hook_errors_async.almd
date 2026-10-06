@@ -1,0 +1,41 @@
+// @leg: structural
+// A rejecting async hook (#3356, through JSPI #3353; every hook here is
+// marked `returns: promise`, #3371) — the async twin of
+// hook_errors.almd. `get`, `count` and `touch` are FALLIBLE externs
+// (an `effect fn`, a `Result[T, String]`, an effect `Unit`): a throw comes
+// back into wasm as an err, and the Almide caller propagates it through its
+// own release path — a block held across the call is released, so failing
+// calls leave memory flat. `peek` is infallible: a throw there abandons the
+// instance with an error naming the import and the fix. The host-side
+// checks live in hook_errors_async.host.mjs.
+@extern(wasm, "js", "get", returns: promise)
+effect fn get(key: String) -> String
+
+@extern(wasm, "js", "count", returns: promise)
+fn count(key: String) -> Result[Int, String]
+
+@extern(wasm, "js", "touch", returns: promise)
+effect fn touch(key: String) -> Unit
+
+@extern(wasm, "js", "peek", returns: promise)
+fn peek(key: String) -> String
+
+effect fn lookup(key: String) -> String = {
+  let held = string.repeat(key, 40)
+  let got = get(key)!
+  string.slice(held, 0, 1) + "=" + got
+}
+
+effect fn total(keys: List[String]) -> Int = keys |> list.map((k) => count(k)!)! |> list.fold(
+  0,
+  (a, b) => a + b,
+)
+
+effect fn mark(key: String) -> String = {
+  touch(key)!
+  "marked " + key
+}
+
+fn peek_twice(key: String) -> String = peek(key) + peek(key)
+
+fn main() -> Unit = println("hooks")

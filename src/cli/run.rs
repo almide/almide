@@ -432,7 +432,7 @@ pub(crate) fn build_native_cached(
     // binary), so they are part of the key: the same rs_code built against
     // different [native-deps] must not collide on one cache entry.
     let dep_key = native_deps.iter()
-        .map(|d| format!("{}={}", d.name, d.spec))
+        .map(|d| format!("{}={}@{}", d.name, d.spec, d.target.as_deref().unwrap_or("")))
         .collect::<Vec<_>>()
         .join(",");
     // Everything copied INTO the crate besides `rs_code` — the package's and
@@ -442,6 +442,7 @@ pub(crate) fn build_native_cached(
     // narrower, editing an input the key did not see was a cache hit that
     // shipped the previous binary with exit 0.
     let inputs = super::cargo_build::CrateInputs::collect(source_root)?;
+    inputs.warn_legacy_callbacks(rs_code);
     let native_key = inputs.cache_key();
     // The target triple (#2772) is part of the identity too: a musl build of
     // the same code is a different binary, and keyed without it `almide build

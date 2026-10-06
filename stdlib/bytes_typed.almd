@@ -21,20 +21,26 @@ fn __endian_is_le(e: Endian) -> Bool = match e {
   BigEndian => false,
 }
 
-fn bytes_read_uint16(b: Bytes, offset: Int, e: Endian) -> Int = if __endian_is_le(e) then bytes.read_u16_le(
-  b,
-  offset,
-) else bytes.read_u16_be(b, offset)
+fn bytes_read_uint16(b: Bytes, offset: Int, e: Endian) -> Int =
+  if __endian_is_le(e) then bytes.read_u16_le(
+    b,
+    offset,
+  )
+  else bytes.read_u16_be(b, offset)
 
-fn bytes_read_uint32(b: Bytes, offset: Int, e: Endian) -> Int = if __endian_is_le(e) then bytes.read_u32_le(
-  b,
-  offset,
-) else bytes.read_u32_be(b, offset)
+fn bytes_read_uint32(b: Bytes, offset: Int, e: Endian) -> Int =
+  if __endian_is_le(e) then bytes.read_u32_le(
+    b,
+    offset,
+  )
+  else bytes.read_u32_be(b, offset)
 
-fn bytes_read_int32(b: Bytes, offset: Int, e: Endian) -> Int = if __endian_is_le(e) then bytes.read_i32_le(
-  b,
-  offset,
-) else bytes.read_i32_be(b, offset)
+fn bytes_read_int32(b: Bytes, offset: Int, e: Endian) -> Int =
+  if __endian_is_le(e) then bytes.read_i32_le(
+    b,
+    offset,
+  )
+  else bytes.read_i32_be(b, offset)
 
 // A v1 `Float32` VALUE holds the f32 BIT PATTERN in its i64 slot (lib.rs's
 // identity-cast contract), so the Float-returning width reads narrow via

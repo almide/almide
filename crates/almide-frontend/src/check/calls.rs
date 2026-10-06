@@ -136,6 +136,8 @@ impl Checker {
                     let _ = self.infer_expr(callee);
                 }
                 self.arg_spans = args.iter().map(|a| a.span).collect();
+                // #3274: `let g = rd; g(x)` is a call of `rd`.
+                self.check_effect_alias_call(&name);
                 // SHADOWING FIRST. A local binding or function PARAMETER of Fn
                 // type is called THROUGH that variable, never as a same-named
                 // top-level fn — the rule `lower/calls_target.rs` already
@@ -315,9 +317,13 @@ impl Checker {
     /// codegen resolves from the sibling arm — the "leave it alone"
     /// case the binding check already carves out.
     fn enqueue_ctor_arg_unresolved(&mut self, a: &ast::Expr, aty: &Ty) {
+        // #3394: a bare unit case of a generic variant (`depth(Tip)`)
+        // opens the same kind of slot. The validator only fires on an
+        // undecidable `?` var, so a non-generic `Red` costs one push.
         if matches!(
             a.kind,
             ExprKind::None | ExprKind::Some { .. } | ExprKind::Ok { .. } | ExprKind::Err { .. }
+                | ExprKind::TypeName { .. }
         ) {
             self.deferred_unresolved_binding_checks.push(crate::check::UnresolvedBindingSite {
                 ty: aty.clone(),
@@ -441,6 +447,7 @@ impl Checker {
         (sig, qualified_via_direct)
     }
     pub(crate) fn check_named_call_with_type_args(&mut self, name: &str, arg_tys: &[Ty], type_args: Option<&[Ty]>) -> Ty {
+        self.record_purity_call(name);
         // Try builtin resolution first
         if let Some(ty) = self.check_builtin_call(name, arg_tys) {
             return ty;
@@ -519,39 +526,49 @@ impl Checker {
     /// Effect isolation: pure fn cannot call effect fn. Verbatim text move out of [`Self::check_named_call_with_type_args`].
     pub(crate) fn check_effect_isolation(&mut self, name: &str, sig: &crate::types::FnSig) {
         if sig.is_effect && !self.env.can_call_effect {
-            let (msg, hint) = match self.env.metered_region {
-                // Inside a metered region the caller usually IS an effect fn —
-                // "mark it effect" would send the user in a circle. The region
-                // is pure BY DESIGN (determinism), so the fix is to move the
-                // effect out.
-                Some(region) => (
-                    format!("cannot call effect function '{}' inside a {} region", name, region),
-                    format!(
-                        "{region} meters deterministic computation, so its body is PURE. \
-                         Run the effect before the region and pass the value in"
-                    ),
-                ),
-                None if self.env.lambda_depth > 0 => (
-                    format!("cannot call effect function '{}' from a pure function", name),
-                    // The call sits in a LAMBDA: a lambda has no effect marker
-                    // of its own — it inherits the enclosing fn's capability
-                    // (one rule for every higher-order callee, list.map and
-                    // http.serve alike, #1051) — so the fix is one level up.
-                    "A lambda inherits its context's effect capability — mark the enclosing \
-                     function as `effect fn`"
-                        .to_string(),
-                ),
-                None => (
-                    format!("cannot call effect function '{}' from a pure function", name),
-                    "Mark the calling function as `effect fn`".to_string(),
-                ),
-            };
-            let mut diag = super::err(msg, hint, format!("call to {}()", name)).with_code("E006");
-            if let Some(&(line, col)) = self.env.fn_decl_spans.get(&sym(name)) {
-                diag = diag.with_secondary(line, Some(col), format!("'{}' declared as effect fn here", name));
-            }
-            self.emit(diag);
+            self.report_effect_isolation(name, None);
         }
+    }
+
+    /// The E006 of [`Self::check_effect_isolation`]. `via` names the binding
+    /// the effect fn `name` was reached through (#3274: `let g = rd; g(x)`).
+    pub(crate) fn report_effect_isolation(&mut self, name: &str, via: Option<&str>) {
+        let (msg, hint) = match self.env.metered_region {
+            // Inside a metered region the caller usually IS an effect fn —
+            // "mark it effect" would send the user in a circle. The region
+            // is pure BY DESIGN (determinism), so the fix is to move the
+            // effect out.
+            Some(region) => (
+                format!("cannot call effect function '{}' inside a {} region", name, region),
+                format!(
+                    "{region} meters deterministic computation, so its body is PURE. \
+                     Run the effect before the region and pass the value in"
+                ),
+            ),
+            None if self.env.lambda_depth > 0 => (
+                format!("cannot call effect function '{}' from a pure function", name),
+                // The call sits in a LAMBDA: a lambda has no effect marker
+                // of its own — it inherits the enclosing fn's capability
+                // (one rule for every higher-order callee, list.map and
+                // http.serve alike, #1051) — so the fix is one level up.
+                "A lambda inherits its context's effect capability — mark the enclosing \
+                 function as `effect fn`"
+                    .to_string(),
+            ),
+            None => (
+                format!("cannot call effect function '{}' from a pure function", name),
+                "Mark the calling function as `effect fn`".to_string(),
+            ),
+        };
+        let (msg, context) = match via {
+            Some(alias) => (format!("{} (through `{}`, which holds it)", msg, alias), format!("call to {}()", alias)),
+            None => (msg, format!("call to {}()", name)),
+        };
+        let mut diag = super::err(msg, hint, context).with_code("E006");
+        if let Some(&(line, col)) = self.env.fn_decl_spans.get(&sym(name)) {
+            diag = diag.with_secondary(line, Some(col), format!("'{}' declared as effect fn here", name));
+        }
+        self.emit(diag);
     }
     /// Validate argument count, emitting a placeholder-signature E004 on mismatch. Verbatim text move out of [`Self::check_named_call_with_type_args`].
     fn check_arg_count(&mut self, name: &str, sig: &crate::types::FnSig, arg_tys: &[Ty]) {
@@ -943,8 +960,11 @@ impl Checker {
         }
         // #2588: a top-level `let` holding a closure is callable like a local
         // one — `app(http.new_request(...))` against `let app = http.router(...)`.
-        let ty = self.env.lookup_var(name).cloned()
-            .or_else(|| self.env.top_lets.get(&sym(name)).cloned())?;
+        let ty = match self.env.lookup_var(name).cloned() {
+            Some(ty) => ty,
+            None => self.selective_top_let_ty(name)
+                .or_else(|| self.env.top_lets.get(&sym(name)).cloned())?,
+        };
         if let Some(ret) = self.call_fn_typed_local(name, &ty, arg_tys) {
             return Some(ret);
         }
@@ -1081,6 +1101,7 @@ impl Checker {
             let arg = arg_exprs[idx];
             match &arg.kind {
                 ExprKind::Ident { name, .. } => {
+                    self.check_closure_escape(name, format!("{}({}, ...)", fn_name, name));
                     if !self.env.mutable_vars.contains(&sym(name)) {
                         self.emit(super::err(
                             format!("cannot pass immutable binding '{}' to `mut` parameter of {}()", name, fn_name),
@@ -1092,7 +1113,9 @@ impl Checker {
                 // A field/element of a mutable place is itself a mutable place: `list.push(box.items, x)` with `var box` (or a `mut box` param) lowers to `&mut box.items`, valid Rust. Walk the member/index chain down to its root identifier.
                 ExprKind::Member { .. } | ExprKind::TupleIndex { .. } => {
                     match Self::place_root(arg) {
-                        Some(root) if self.env.mutable_vars.contains(&sym(root)) => {}
+                        Some(root) if self.env.mutable_vars.contains(&sym(root)) => {
+                            self.check_closure_escape(root, format!("{}({}..., ...)", fn_name, root));
+                        }
                         Some(root) => {
                             self.emit(super::err(
                                 format!("cannot mutate a field of immutable binding '{}' via `mut` parameter of {}()", root, fn_name),

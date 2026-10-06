@@ -50,16 +50,17 @@ fn witnesses() -> std::collections::BTreeMap<String, String> {
 fn the_call_boundary_shapes_witness_exactly_and_balance() {
     let w = witnesses();
     let expect = [
-        ("pass", "iamd\n"),
-        ("both", "iamd\niamd\n"),
+        ("pass", "ibamd\n"),
+        ("both", "ibamd\nibamd\n"),
         // `mk(3)` in tail position is a `return_call`: the callee hands its
         // credit straight to this frame's caller, and nothing after the
         // jump runs here (#2756: the recorder treats it as dead code), so
         // the result object is never born in this frame.
         ("owned_tail", "\n"),
         ("fresh_tail", "im\n"),
-        // bind (i), share into take (a m), released before the jump (d).
-        ("bind_then_pass", "iamd\n"),
+        // bind (i), read as the argument (b, #3259), share into take (a m),
+        // released before the jump (d).
+        ("bind_then_pass", "ibamd\n"),
         ("temp_arg", "im\n"),
     ];
     for (name, cert) in expect {

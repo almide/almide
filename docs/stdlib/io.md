@@ -4,10 +4,10 @@ Standard I/O. import io, effect.
 
 **stdout is one buffer** (#2245). `println`, `io.print`, `io.write` and
 `io.write_bytes` all write through the same 64 KiB buffer, so they appear in
-program order. When stdout is a terminal the buffer flushes after every
-write (each line shows as it happens); when it is a pipe or a file it fills
-and flushes in blocks — 50,000 short lines cost the time of a handful of
-system calls instead of one each. It is flushed at exit, when the program
+program order. The buffer is line-buffered (#3417): a write that ends a line
+flushes it, on a terminal, a pipe or a file alike, so a long-running program
+(a watcher, a server) shows each line as it prints it. When stdout is a
+terminal every write flushes. It is also flushed at exit, when the program
 panics or `main` returns an error, before a child process runs, before every
 read of stdin, and by `io.print`, which always flushes (so `io.print("")` is
 an explicit flush). `eprintln` writes to stderr unbuffered, so when stdout is
@@ -117,7 +117,9 @@ Hi
 
 ### `io.read_byte() -> Int`
 
-Read a single byte from stdin (returns -1 on EOF).
+Read a single byte from stdin (returns -1 on EOF). An `effect fn`: it reads
+stdin, so its caller is an `effect fn` (a plain fn calling it was legal before
+dialect epoch 8 and is E006 now).
 
 ```almd check
 import io
@@ -130,7 +132,8 @@ effect fn main() -> Unit = {
 
 ### `io.read_n_bytes(n: Int) -> List[Int]`
 
-Read N bytes from stdin (may return fewer on EOF).
+Read N bytes from stdin (may return fewer on EOF). An `effect fn`, like
+`io.read_byte`.
 
 ```almd check
 import io
@@ -164,11 +167,11 @@ effect io.read_all() -> String
 
 // Next stdin byte 0..255, or -1 at EOF.
 // @since 0.12.1 or earlier
-io.read_byte() -> Int
+effect io.read_byte() -> Int
 
 // Up to n stdin bytes; [] if n <= 0.
 // @since 0.12.1 or earlier
-io.read_n_bytes(n: Int) -> List[Int]
+effect io.read_n_bytes(n: Int) -> List[Int]
 
 // Low byte of each Int to stdout; unflushed.
 // @since 0.9.8 or earlier

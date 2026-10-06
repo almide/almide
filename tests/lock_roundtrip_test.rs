@@ -27,6 +27,7 @@ fn hostile_ref_round_trips() {
             git: "https://github.com/almide/plain".into(),
             ref_name: "v0.1.0".into(),
             commit: "aaaa1111".into(),
+            subdir: None,
         },
         // A comma, a closing brace, a quote and a space — each one broke the
         // old splitter in a different way.
@@ -35,6 +36,15 @@ fn hostile_ref_round_trips() {
             git: "https://github.com/almide/hostile".into(),
             ref_name: "feat/x,y}z\"w v2".into(),
             commit: "bbbb2222".into(),
+            subdir: None,
+        },
+        // #3381: a package in a subdirectory of the repository.
+        LockedDep {
+            name: "ceangal".into(),
+            git: "https://github.com/almide-graphics/ceangal2".into(),
+            ref_name: "v0.1.0".into(),
+            commit: "cccc3333".into(),
+            subdir: Some("pkgs/ceangal".into()),
         },
     ];
     write_lock_file(&path, &deps).expect("write");
@@ -48,7 +58,14 @@ fn hostile_ref_round_trips() {
         assert_eq!(got.git, want.git);
         assert_eq!(got.ref_name, want.ref_name);
         assert_eq!(got.commit, want.commit);
+        assert_eq!(got.subdir, want.subdir);
     }
+    // An entry without `subdir` is written exactly as before #3381.
+    let text = std::fs::read_to_string(&path).expect("read");
+    assert!(
+        text.contains("plain = { git = \"https://github.com/almide/plain\", ref = \"v0.1.0\", commit = \"aaaa1111\" }\n"),
+        "{text}"
+    );
 }
 
 /// A malformed entry is an error naming the dependency — never a silently

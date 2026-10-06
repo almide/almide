@@ -106,11 +106,16 @@ pub struct UnionFind {
     parent: Vec<u32>,
     rank: Vec<u8>,
     bound: Vec<Option<Ty>>,
+    /// Per class: an anonymous record literal's DEFERRED type (#3290). Its
+    /// binding starts as the literal's structural record and becomes the
+    /// nominal record it is unified with; a structural unification never
+    /// replaces a nominal binding.
+    literal: Vec<bool>,
 }
 
 impl UnionFind {
     pub fn new() -> Self {
-        UnionFind { parent: Vec::new(), rank: Vec::new(), bound: Vec::new() }
+        UnionFind { parent: Vec::new(), rank: Vec::new(), bound: Vec::new(), literal: Vec::new() }
     }
 
     /// Allocate a fresh, unbound type variable.
@@ -119,7 +124,23 @@ impl UnionFind {
         self.parent.push(id);
         self.rank.push(0);
         self.bound.push(None);
+        self.literal.push(false);
         id
+    }
+
+    /// A fresh class for an anonymous record literal, bound to its structural
+    /// record `rec` until a nominal unification names it (#3290).
+    pub fn fresh_record_literal(&mut self, rec: Ty) -> u32 {
+        let id = self.fresh();
+        self.bound[id as usize] = Some(rec);
+        self.literal[id as usize] = true;
+        id
+    }
+
+    /// Is `id`'s class the deferred type of an anonymous record literal?
+    pub fn is_record_literal(&self, id: u32) -> bool {
+        let root = self.find(id);
+        self.literal.get(root as usize).copied().unwrap_or(false)
     }
 
     /// Find the root representative of `id`'s equivalence class.
@@ -152,9 +173,18 @@ impl UnionFind {
         if self.rank[winner as usize] == self.rank[loser as usize] {
             self.rank[winner as usize] += 1;
         }
-        // Merge bound types: prefer the one that has a concrete binding
+        // Merge bound types: prefer the one that has a concrete binding —
+        // and, in a record literal's class, a nominal binding over a
+        // structural one (#3290).
         let loser_bound = self.bound[loser as usize].take();
-        if self.bound[winner as usize].is_none() {
+        let literal = self.literal[winner as usize] || self.literal[loser as usize];
+        self.literal[winner as usize] = literal;
+        let take_loser = match (&self.bound[winner as usize], &loser_bound) {
+            (None, _) => true,
+            (Some(w), Some(l)) => literal && is_structural_record(w) && matches!(l, Ty::Named(..)),
+            _ => false,
+        };
+        if take_loser {
             self.bound[winner as usize] = loser_bound;
         }
     }
@@ -191,6 +221,49 @@ impl UnionFind {
             Ty::Fn { params, ret, is_effect: _ } => params.iter().any(|p| self.occurs(var, p)) || self.occurs(var, ret),
             _ => false,
         }
+    }
+}
+
+/// A structural record type (closed or open).
+pub fn is_structural_record(ty: &Ty) -> bool {
+    matches!(ty, Ty::Record { .. } | Ty::OpenRecord { .. })
+}
+
+/// [`resolve_ty`] for UNIFICATION (#3290): an anonymous record literal's
+/// deferred variable that is still bound to its structural record stays a
+/// variable, so a nominal type unified with a type that CONTAINS it
+/// (`List[?e]` against `List[b.Extent]`) still reaches and names it. Every
+/// other variable resolves exactly as [`resolve_ty`] does.
+pub fn resolve_ty_keeping_literals(ty: &Ty, uf: &UnionFind) -> Ty {
+    if let Ty::TypeVar(name) = ty
+        && let Some(id) = name.strip_prefix('?').and_then(|n| n.parse::<u32>().ok())
+        && uf.is_record_literal(id)
+        && uf.resolve(id).is_some_and(is_structural_record)
+    {
+        return Ty::TypeVar(sym(&format!("?{}", uf.find(id))));
+    }
+    match ty {
+        Ty::TypeVar(name) if name.starts_with('?') => match name[1..].parse::<u32>().ok().and_then(|id| uf.resolve(id)) {
+            Some(bound) => resolve_ty_keeping_literals(bound, uf),
+            None => resolve_ty(ty, uf),
+        },
+        Ty::Applied(id, args) => Ty::Applied(id.clone(), args.iter().map(|a| resolve_ty_keeping_literals(a, uf)).collect()),
+        Ty::Tuple(elems) => Ty::Tuple(elems.iter().map(|e| resolve_ty_keeping_literals(e, uf)).collect()),
+        Ty::Fn { params, ret, is_effect } => Ty::Fn {
+            params: params.iter().map(|p| resolve_ty_keeping_literals(p, uf)).collect(),
+            ret: Box::new(resolve_ty_keeping_literals(ret, uf)),
+            is_effect: *is_effect,
+        },
+        Ty::Named(name, args) if !args.is_empty() => {
+            Ty::Named(*name, args.iter().map(|a| resolve_ty_keeping_literals(a, uf)).collect())
+        }
+        Ty::Record { fields } => Ty::Record {
+            fields: fields.iter().map(|(n, t)| (*n, resolve_ty_keeping_literals(t, uf))).collect(),
+        },
+        Ty::OpenRecord { fields } => Ty::OpenRecord {
+            fields: fields.iter().map(|(n, t)| (*n, resolve_ty_keeping_literals(t, uf))).collect(),
+        },
+        _ => ty.clone(),
     }
 }
 

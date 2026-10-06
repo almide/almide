@@ -61,6 +61,7 @@ The authoritative references are:
 | Doc | What |
 |-----|------|
 | [Capability System](./capability-system.md) | Compile-time least-privilege enforcement — current |
+| [JS host async imports](./JS-HOST-ASYNC-IMPORTS.md) | `@extern(wasm, "js", ..., returns: promise)` on `--host js`: JSPI suspension, which exports become async, serialisation, the no-JSPI refusal, the unmarked-Promise refusal (#3353, #3371) — current |
 
 ## Archive
 

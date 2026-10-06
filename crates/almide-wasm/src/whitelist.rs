@@ -301,6 +301,19 @@ pub(crate) const HTTP_SERVE_SUM: &[&str] = &[
     "http_query_params",
 ];
 
+/// The subprocess family (#2589, ADR-0025, audited 2026-10-03):
+/// stdlib/process_wasm.almd — language surface only (string interpolation and
+/// slicing, list.map/fold, int.parse/to_string, `??`, the ProcessStatus record
+/// literal, ok()); the only leaves are the op-80..=90 host calls this emitter
+/// lowers itself (calls.rs). Result returns build through language-level
+/// constructors; the bodies never touch a raw layout.
+pub(crate) const PROCESS_SUM: &[&str] = &[
+    "__process_exec_impl", "__process_exec_in_impl", "__process_exec_with_stdin_impl",
+    "__process_exec_status_impl", "__process_exec_status_timeout_impl",
+    "__process_run_impl", "__process_run_in_impl", "__process_spawn_impl",
+    "__process_kill_impl", "__process_is_alive_impl", "__process_pid_impl",
+];
+
 pub(crate) const MATH_VERIFIED: &[&str] = &[
     "math_abs", "math_atan", "math_choose", "math_cos", "math_e", "math_exp",
     "math_factorial", "math_fmax", "math_fmin", "math_fpow", "math_log", "math_log10",
@@ -364,6 +377,7 @@ const TIERS: &[(&[&str], bool)] = &[
     (HTTP_CLIENT_SUM, true),
     (HTTP_CALL_SUM, true),
     (HTTP_SERVE_SUM, true),
+    (PROCESS_SUM, true),
     (MATRIX_COMPOSITIONS, false),
 ];
 

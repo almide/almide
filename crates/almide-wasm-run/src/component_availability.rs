@@ -1,25 +1,88 @@
 //! Validate emitted operations against the selected direct component shim.
 //! Preview1 availability does not imply availability in a component world.
 
+/// Whether the direct component shim serves `op`. Both worlds serve stdio,
+/// entropy, the clocks and panic; p3 adds env.get (26), the program
+/// arguments (29) and env.sleep_ms (36) over wasi:cli/environment and
+/// monotonic-clock.wait-for (ADR-0023 step 3), env.set (37) through the
+/// guest-side overlay env.get reads first (#3223), the http client
+/// (43..=50), and — through the spliced p1 fs service over its
+/// wasi:filesystem@0.3 adapter (#3140) — every op the p1 fs service
+/// answers, the fan prefetch triple (40..=42) and env.os / env.temp_dir /
+/// env.cwd (27 / 28 / 33) among them.
+pub fn serves(op: i32, p3: bool) -> bool {
+    // 74: the instance-parallel fan offer (#3003), answered "not served" by
+    // both component shims — the guest then runs its chunks sequentially.
+    let common = matches!(op, 30..=32 | 34..=35 | 60 | 73 | 74);
+    let extra = p3
+        && (matches!(op, 26 | 29 | 36 | 37 | 40..=50)
+            || crate::wasi::FS_SERVICE_OPS.iter().any(|(o, _, _)| *o == op));
+    common || extra
+}
+
+/// The p1-served ops the p3 component does NOT serve, each with the reason
+/// (#3140's gate: the p3 served set covers `P1_SERVED_OPS` minus exactly
+/// these; `tests` below hold both directions). Since #3223 only the
+/// subprocess family (#2589): the p1 core module carries it as the private
+/// `almide:process/spawn` import, and no component world declares that
+/// interface (ADR-0025).
+const PROC_EXCLUDED: &str = "the private almide:process/spawn import has no place in a component world (ADR-0025)";
+pub const P3_EXCLUDED_P1_OPS: &[(i32, &str)] = &[
+    (80, PROC_EXCLUDED),
+    (81, PROC_EXCLUDED),
+    (82, PROC_EXCLUDED),
+    (83, PROC_EXCLUDED),
+    (84, PROC_EXCLUDED),
+    (85, PROC_EXCLUDED),
+    (86, PROC_EXCLUDED),
+    (87, PROC_EXCLUDED),
+    (88, PROC_EXCLUDED),
+    (89, PROC_EXCLUDED),
+    (90, PROC_EXCLUDED),
+];
+
 /// Reject an artifact before writing it when its direct shim cannot serve it.
 /// P3 HTTP imports are selected separately whenever an HTTP operation is emitted.
 pub fn check(host_ops: &[i32], p3: bool) -> Result<(), String> {
-    let unsupported = host_ops.iter().copied().find(|op| {
-        let common = matches!(op, 30..=32 | 34..=35 | 60 | 73);
-        // p3 also serves env.get (26), the program arguments (29) and
-        // env.sleep_ms (36) over wasi:cli/environment and
-        // monotonic-clock.wait-for (ADR-0023 step 3).
-        let extra = p3 && matches!(op, 1..=9 | 13..=16 | 26 | 29 | 36 | 40..=50);
-        !(common || extra)
-    });
-    match unsupported {
+    match host_ops.iter().copied().find(|op| !serves(*op, p3)) {
         Some(op) => Err(format!(
             "error[E081]: {} (host op {op}) is unavailable in the direct WASI {} component. \
              Use a target that serves this operation; `almide run --target wasm` uses the embedded host.",
-            operation_name(op), if p3 { "0.3" } else { "0.2" },
+            operation_label(op), if p3 { "0.3" } else { "0.2" },
         )),
         None => Ok(()),
     }
+}
+
+/// Whether the p3 SERVICE shim (the stock serve export, #2659, C-375) serves
+/// `op`: the p3 command shim's set without the filesystem — the service
+/// world imports no `wasi:filesystem`, which `wasmtime serve` does not link
+/// without a flag (#2659, measured on wasmtime 47) — plus `http.serve`'s
+/// own ops 70..=72, which the shim answers guest-side.
+pub fn serves_service(op: i32) -> bool {
+    let fs = matches!(op, 40..=42) || crate::wasi::FS_SERVICE_OPS.iter().any(|(o, _, _)| *o == op);
+    matches!(op, 70..=72) || (!fs && serves(op, true))
+}
+
+/// [`check`] for the service shape: an op the export cannot answer is E081
+/// with the reason the service world gives.
+pub fn check_service(host_ops: &[i32]) -> Result<(), String> {
+    match host_ops.iter().copied().find(|op| !serves_service(*op)) {
+        Some(op) => Err(format!(
+            "error[E081]: {} (host op {op}) is unavailable in the stock serve export\n  \
+             reason: an http.serve program builds as a wasi:http/handler@0.3.0 component, whose world imports no \
+             wasi:filesystem (`wasmtime serve` links none without a flag) and no capability beyond the WASI 0.3 service \
+             world (#2659)\n  \
+             note: `almide run --target wasm` and the native target serve it",
+            operation_label(op),
+        )),
+        None => Ok(()),
+    }
+}
+
+/// `operation_name`, with the subprocess family (#2589) named as one.
+fn operation_label(op: i32) -> &'static str {
+    if (80..=90).contains(&op) { "the subprocess family (process.exec / exec_status / spawn / kill / …)" } else { operation_name(op) }
 }
 
 fn operation_name(op: i32) -> &'static str {
@@ -37,6 +100,7 @@ fn operation_name(op: i32) -> &'static str {
     ];
     usize::try_from(op).ok().and_then(|index| NAMES.get(index)).copied()
         .unwrap_or(match op {
+            38 => "fs.stat", 39 => "fs.glob",
             40..=42 => "filesystem fan prefetch",
             43 => "http.get", 44 => "http.post", 45 => "http.put",
             46 => "http.patch", 47 => "http.delete",
@@ -49,4 +113,31 @@ fn operation_name(op: i32) -> &'static str {
             73 => "panic",
             _ => "unknown operation",
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{serves, P3_EXCLUDED_P1_OPS};
+
+    /// #3140's exit gate: a program that builds as a p1 core module also
+    /// builds as a p3 component — the p3 served set covers every p1-served op
+    /// but the declared exclusions, and each exclusion carries a reason.
+    #[test]
+    fn p3_serves_every_p1_op_but_the_declared_exclusions() {
+        for op in crate::wasi::P1_SERVED_OPS {
+            let excluded = P3_EXCLUDED_P1_OPS.iter().any(|(o, _)| o == op);
+            assert!(serves(*op, true) || excluded, "p1 serves host op {op} and p3 neither serves nor excludes it");
+        }
+    }
+
+    /// The other direction: an exclusion is a p1 op p3 really refuses, with
+    /// a reason — a served or never-p1 op listed here is stale.
+    #[test]
+    fn every_p3_exclusion_is_a_refused_p1_op_with_a_reason() {
+        for (op, why) in P3_EXCLUDED_P1_OPS {
+            assert!(crate::wasi::P1_SERVED_OPS.contains(op), "exclusion {op} is not a p1-served op");
+            assert!(!serves(*op, true), "exclusion {op} is served on p3: drop it");
+            assert!(!why.trim().is_empty(), "exclusion {op} has no reason");
+        }
+    }
 }

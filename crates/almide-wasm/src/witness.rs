@@ -43,7 +43,7 @@
 //! the arms do NOT yet cover DECLINES at emission time with a counted
 //! reason (`!decline:…`, the measurement channel this step opened):
 //! an arm that lowers an argument outside `lower_arg`, a droppable View
-//! result, a Retain of a flat / cell local. The frame's certificate is
+//! result, a Retain of a flat local (or of a cell no hook bound). The frame's certificate is
 //! withdrawn, never under-recorded.
 //!
 //! Event vocabulary (certificate v0, the format `proofs/` checks):
@@ -51,7 +51,9 @@
 //!         droppable param — the structural convention is CALLEE-OWNED:
 //!         the call site's rc_arg_guard pre-paid the +1 this records);
 //!   `a` = a +1 backed by a real `rc_inc` (the borrowed-rhs bind share);
-//!   `d` = a −1 backed by a real `$dec_flat` (epilogue release, dec-old).
+//!   `d` = a −1 backed by a real `$dec_flat` (epilogue release, dec-old);
+//!   `b` = a +0 read of the block a local holds (#3259), which the checker
+//!         rejects at count 0 (a read after the release).
 //! Balance (every prefix nonnegative, every stream ending at zero) is
 //! re-checked here by `balanced` — the Rust mirror of the proven rule —
 //! and the certificate text is byte-compatible with the extracted checker
@@ -381,6 +383,14 @@ impl WitnessRecorder {
         self.held_ops(local, "am")
     }
 
+    /// A READ of the block `local` holds (#3259): the `b` probe (+0, faults
+    /// at count 0). Rendered only on a line born by `i` (witness_paths.rs),
+    /// so a block this frame does not own — a borrowed param, a view, a
+    /// loop activation of an outer block — is read without a probe.
+    pub fn read(&mut self, local: u32) {
+        self.held_ops(local, "b");
+    }
+
     /// A real `$dec_flat` on the local's object (epilogue / dec-old). In
     /// dead code (after a frame replacement on this path) it is attributed
     /// (the local is known) but not recorded.
@@ -523,6 +533,23 @@ impl WitnessRecorder {
     /// One line per object, in object order — certificate v0. A poison
     /// outranks a decline: a hook disagreement is a bug even in a frame
     /// that withdrew.
+    /// #2758: the recorded `(a, d, i)` events, every path together — one
+    /// per emitted RC instruction (witness_helper.rs audits them).
+    pub(crate) fn event_totals(&self) -> (usize, usize, usize) {
+        let mut n = (0, 0, 0);
+        for ev in &self.log {
+            if let Ev::Op(_, c) | Ev::LOp(_, c) = ev {
+                match c {
+                    'a' => n.0 += 1,
+                    'd' => n.1 += 1,
+                    'i' => n.2 += 1,
+                    _ => {}
+                }
+            }
+        }
+        n
+    }
+
     pub fn certificate(&self) -> String {
         if self.poisoned {
             return "!poison\n".to_string();
@@ -541,9 +568,10 @@ impl WitnessRecorder {
 }
 
 /// The proven balance rule, mirrored: per stream, `i`/`a` = +1, `d`/`m` =
-/// −1, every prefix nonnegative (no release at rc 0), final balance zero
-/// (no leak). Arm braces are phase-B vocabulary — their presence here is
-/// out of subset and fails.
+/// −1, `b` = +0 at a count above 0 (no read after the release), every
+/// prefix nonnegative (no release at rc 0), final balance zero (no leak).
+/// Arm braces are phase-B vocabulary — their presence here is out of subset
+/// and fails.
 pub fn balanced(cert: &str) -> bool {
     for line in cert.lines() {
         let mut bal: i64 = 0;
@@ -551,6 +579,7 @@ pub fn balanced(cert: &str) -> bool {
             match c {
                 'i' | 'a' => bal += 1,
                 'd' | 'm' => bal -= 1,
+                'b' if bal > 0 => {}
                 _ => return false,
             }
             if bal < 0 {
@@ -563,6 +592,9 @@ pub fn balanced(cert: &str) -> bool {
     }
     true
 }
+
+#[path = "witness_rest.rs"]
+mod rest;
 
 // The subset gate lives in witness_gate.rs (the file budget).
 #[path = "witness_gate.rs"]
@@ -739,6 +771,10 @@ pub(crate) fn decline_unrecorded(name: &str, reason: &str) {
 }
 
 // The Emitter-side hooks live in witness_hooks.rs.
+
+/// An Emitter-built helper frame's audited witness (#2758).
+#[path = "witness_helper.rs"]
+pub(crate) mod helper;
 
 use crate::{Scalar, SliceTy};
 

@@ -41,6 +41,9 @@ struct EnvImports {
     /// `wasi:clocks/monotonic-clock.wait-for` (op 36), a sync lower of the
     /// async func: the task blocks for the duration.
     wait_for: Option<u32>,
+    /// `env.set` (op 37, #3223): the overlay log's append, which imports
+    /// nothing — as on p1.
+    set: bool,
 }
 
 impl EnvImports {
@@ -60,12 +63,21 @@ impl EnvImports {
             get_env: take(wants_http || host_ops.contains(&26)),
             get_args: take(host_ops.contains(&29)),
             wait_for: take(host_ops.contains(&36)),
+            set: host_ops.contains(&37),
         };
         (e, next)
     }
 
     fn any(self) -> bool {
-        self.get_env.is_some() || self.get_args.is_some() || self.wait_for.is_some()
+        self.get_env.is_some() || self.get_args.is_some() || self.wait_for.is_some() || self.set
+    }
+
+    /// The ops the service answers — what `shim_fs_call` forwards to it.
+    fn ops(self) -> Vec<i32> {
+        [(self.get_env.is_some(), 26), (self.get_args.is_some(), 29), (self.wait_for.is_some(), 36), (self.set, 37)]
+            .into_iter()
+            .filter_map(|(on, op)| on.then_some(op))
+            .collect()
     }
 
     /// The block's import-section entries, in index order.
@@ -86,10 +98,47 @@ impl EnvImports {
 /// length, so the reservation is a ceiling, not an exact bound.
 const ENV_RESERVE: i32 = 262_144;
 
+/// The env.set overlay on p3 (#3223): the p1 log (`env_overlay`) on its own
+/// page past the park and the fs page, and the eprintln shim its refusal
+/// prints through. Present exactly when the op set names op 37.
+#[derive(Clone, Copy)]
+struct P3Overlay {
+    log: crate::wasi::env_overlay::OverlayLog,
+    f_eprintln: u32,
+}
+
+impl P3Overlay {
+    /// The overlay when the op set names env.set: the log at `base`, its
+    /// length in global `g_len`, refusals through `f_eprintln`.
+    fn plan(e: EnvImports, base: u64, g_len: u32, f_eprintln: u32) -> Option<Self> {
+        e.set.then_some(P3Overlay { log: crate::wasi::env_overlay::OverlayLog { base, g_len }, f_eprintln })
+    }
+
+    /// The log-length global (starts empty), in its planned slot.
+    fn emit_global(ovl: Option<Self>, globals: &mut GlobalSection) {
+        if ovl.is_some() {
+            let t = GlobalType { val_type: ValType::I32, mutable: true, shared: false };
+            globals.global(t, &ConstExpr::i32_const(0));
+        }
+    }
+
+    /// The full-log refusal line, at `park + MSG2` as on p1.
+    fn emit_data(ovl: Option<Self>, data: &mut wasm_encoder::DataSection, park: u64) {
+        if ovl.is_some() {
+            data.active(0, &ConstExpr::i32_const((park + MSG2) as i32), ENV_FULL_MSG.iter().copied());
+        }
+    }
+}
+
 /// The env service over the fs_call ABI `(op, a_ptr, a_len, b_ptr, b_len)
 /// -> i64` — the native semantics the embedded host and the p1 shim serve:
 ///
-/// - op 26 `env.get(key)`: the FIRST `(name, value)` of `get-environment`
+/// - op 37 `env.set(key, value)` (#3223): appends to the overlay log — the
+///   p1 shim's own emitter, so a set is local to the instance and never
+///   reaches the host, as with wasi-libc's `setenv` over its copy of the
+///   environment. A full log prints `ENV_FULL_MSG` and exits 1, as on p1.
+/// - op 26 `env.get(key)`: the overlay first (last write wins), then the
+///   FIRST `(name, value)` of `get-environment`
 ///   whose name equals the key byte for byte answers `pack(0, len)` with
 ///   the value parked (it already sits where the canonical ABI lowered it);
 ///   no match answers `pack(2, 0)`, the ok-none tag. The list is fetched
@@ -103,12 +152,24 @@ const ENV_RESERVE: i32 = 262_144;
 /// - op 36 `env.sleep_ms(ms)`: the count rides `a_len` (negative = 0);
 ///   `wait-for(ms * 1_000_000)` on the monotonic clock. The task blocks —
 ///   no busy-wait (the p1 shim's spin has no p3 counterpart).
-fn shim_env(g: P3Globals, e: EnvImports) -> Function {
+fn shim_env(g: P3Globals, e: EnvImports, ovl: Option<P3Overlay>) -> Function {
+    use crate::wasi::env_overlay::{emit_append, emit_scan, ScanLocals};
     let P3Globals { park, g_plen, g_ppos, f_alloc, f_reserve, g_env, g_envn, .. } = g;
     let (op, a_ptr, a_len) = (0u32, 1u32, 2u32);
     let (p, endp, j, total, buf, out) = (5u32, 6u32, 7u32, 8u32, 9u32, 10u32);
-    let mut f = Function::new([(6, ValType::I32)]);
+    let (klen, vlen, best) = (11u32, 12u32, 13u32);
+    let mut f = Function::new([(9, ValType::I32)]);
     let mut i = f.instructions();
+
+    if let Some(P3Overlay { log, f_eprintln }) = ovl {
+        i.local_get(op).i32_const(37).i32_eq().if_(BlockType::Empty);
+        emit_append(&mut i, log, p, |i| {
+            i.i32_const((park + MSG2) as i32).i32_const(ENV_FULL_MSG.len() as i32 - 1).call(f_eprintln);
+            i.i32_const(1).call(I_EXIT);
+            i.unreachable();
+        });
+        i.end();
+    }
 
     if let Some(wait_for) = e.wait_for {
         i.local_get(op).i32_const(36).i32_eq().if_(BlockType::Empty);
@@ -123,6 +184,10 @@ fn shim_env(g: P3Globals, e: EnvImports) -> Function {
 
     if let Some(get_env) = e.get_env {
         i.local_get(op).i32_const(26).i32_eq().if_(BlockType::Empty);
+        if let Some(P3Overlay { log, .. }) = ovl {
+            emit_scan(&mut i, log, (g_ppos, g_plen), ScanLocals { p, endp, klen, vlen, best, j });
+        }
+        // The snapshot, taken once.
         i.global_get(g_env).i32_const(0).i32_lt_s().if_(BlockType::Empty);
         i.i32_const(ENV_RESERVE).call(f_reserve);
         i.i32_const((park + RET) as i32).call(get_env);

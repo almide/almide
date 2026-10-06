@@ -1,0 +1,11 @@
+// The handler draws its own value per request.
+import http
+import random
+
+effect fn main() -> Unit = http.serve(
+  8080,
+  (req) => {
+    let boot = random.int(1, 1000000)
+    http.response(200, "boot=${boot}")
+  },
+)!

@@ -576,17 +576,18 @@ fn list_insert_value(xs: List[Value], i: Int, x: Value) -> List[Value] = {
   buf
 }
 
-fn __lsv_remove_fill(srcbase: Int, dstbase: Int, n: Int, i: Int, oob: Int) -> Int = if oob == 1 then __lsv_copy(
-  srcbase,
-  dstbase,
-  n,
-  0,
-)
-else {
-  let _a = __lsv_copy(srcbase, dstbase, i, 0)
-  let i1 = i + 1
-  __lsv_copy(srcbase + i1 * 8, dstbase + i * 8, n - i1, 0)
-}
+fn __lsv_remove_fill(srcbase: Int, dstbase: Int, n: Int, i: Int, oob: Int) -> Int =
+  if oob == 1 then __lsv_copy(
+    srcbase,
+    dstbase,
+    n,
+    0,
+  )
+  else {
+    let _a = __lsv_copy(srcbase, dstbase, i, 0)
+    let i1 = i + 1
+    __lsv_copy(srcbase + i1 * 8, dstbase + i * 8, n - i1, 0)
+  }
 
 fn list_remove_at_value(xs: List[Value], i: Int) -> List[Value] = {
   let h = prim.handle(xs)
@@ -670,45 +671,48 @@ fn list_tail_value(xs: List[Value]) -> List[Value] = {
   buf
 }
 
-fn __vmerge_bnew(a: Value, b: Value, j: Int, nb: Int, na: Int, acc: Int) -> Int = if j >= nb then acc
-else {
-  let bh = prim.handle(b)
-  let bk: String = prim.load_handle(bh + 12 + (2 * j) * 8)
-  let inc = if __vobj_find(a, bk, 0, na) < 0 and __vobj_find(b, bk, 0, j) < 0 then 1 else 0
-  __vmerge_bnew(a, b, j + 1, nb, na, acc + inc)
-}
+fn __vmerge_bnew(a: Value, b: Value, j: Int, nb: Int, na: Int, acc: Int) -> Int =
+  if j >= nb then acc
+  else {
+    let bh = prim.handle(b)
+    let bk: String = prim.load_handle(bh + 12 + (2 * j) * 8)
+    let inc = if __vobj_find(a, bk, 0, na) < 0 and __vobj_find(b, bk, 0, j) < 0 then 1 else 0
+    __vmerge_bnew(a, b, j + 1, nb, na, acc + inc)
+  }
 
-fn __vmerge_fill_a(a: Value, b: Value, dst: Value, i: Int, na: Int, nb: Int) -> Unit = if i >= na then ()
-else {
-  let ah = prim.handle(a)
-  let dh = prim.handle(dst)
-  let key = prim.load64(ah + 12 + (2 * i) * 8)
-  let ak: String = prim.load_handle(ah + 12 + (2 * i) * 8)
-  let bidx = if __vobj_find(a, ak, 0, i) < 0 then __vobj_find_last(b, ak, nb)
-  else 0 - 1
-  let val = if bidx < 0 then prim.load64(ah + 12 + (2 * i + 1) * 8) else prim.load64(prim.handle(b) + 12 + (2 * bidx + 1) * 8)
-  prim.rc_inc(key)
-  prim.rc_inc(val)
-  prim.store64(dh + 12 + (2 * i) * 8, key)
-  prim.store64(dh + 12 + (2 * i + 1) * 8, val)
-  __vmerge_fill_a(a, b, dst, i + 1, na, nb)
-}
-
-fn __vmerge_app_b(a: Value, b: Value, dst: Value, j: Int, nb: Int, na: Int, w: Int) -> Unit = if j >= nb then ()
-else {
-  let bh = prim.handle(b)
-  let bk: String = prim.load_handle(bh + 12 + (2 * j) * 8)
-  if __vobj_find(a, bk, 0, na) < 0 and __vobj_find(b, bk, 0, j) < 0 then {
+fn __vmerge_fill_a(a: Value, b: Value, dst: Value, i: Int, na: Int, nb: Int) -> Unit =
+  if i >= na then ()
+  else {
+    let ah = prim.handle(a)
     let dh = prim.handle(dst)
-    let kh = prim.load64(bh + 12 + (2 * j) * 8)
-    let vh = prim.load64(bh + 12 + (2 * __vobj_find_last(b, bk, nb) + 1) * 8)
-    prim.rc_inc(kh)
-    prim.rc_inc(vh)
-    prim.store64(dh + 12 + (2 * w) * 8, kh)
-    prim.store64(dh + 12 + (2 * w + 1) * 8, vh)
-    __vmerge_app_b(a, b, dst, j + 1, nb, na, w + 1)
-  } else __vmerge_app_b(a, b, dst, j + 1, nb, na, w)
-}
+    let key = prim.load64(ah + 12 + (2 * i) * 8)
+    let ak: String = prim.load_handle(ah + 12 + (2 * i) * 8)
+    let bidx = if __vobj_find(a, ak, 0, i) < 0 then __vobj_find_last(b, ak, nb)
+    else 0 - 1
+    let val = if bidx < 0 then prim.load64(ah + 12 + (2 * i + 1) * 8) else prim.load64(prim.handle(b) + 12 + (2 * bidx + 1) * 8)
+    prim.rc_inc(key)
+    prim.rc_inc(val)
+    prim.store64(dh + 12 + (2 * i) * 8, key)
+    prim.store64(dh + 12 + (2 * i + 1) * 8, val)
+    __vmerge_fill_a(a, b, dst, i + 1, na, nb)
+  }
+
+fn __vmerge_app_b(a: Value, b: Value, dst: Value, j: Int, nb: Int, na: Int, w: Int) -> Unit =
+  if j >= nb then ()
+  else {
+    let bh = prim.handle(b)
+    let bk: String = prim.load_handle(bh + 12 + (2 * j) * 8)
+    if __vobj_find(a, bk, 0, na) < 0 and __vobj_find(b, bk, 0, j) < 0 then {
+      let dh = prim.handle(dst)
+      let kh = prim.load64(bh + 12 + (2 * j) * 8)
+      let vh = prim.load64(bh + 12 + (2 * __vobj_find_last(b, bk, nb) + 1) * 8)
+      prim.rc_inc(kh)
+      prim.rc_inc(vh)
+      prim.store64(dh + 12 + (2 * w) * 8, kh)
+      prim.store64(dh + 12 + (2 * w + 1) * 8, vh)
+      __vmerge_app_b(a, b, dst, j + 1, nb, na, w + 1)
+    } else __vmerge_app_b(a, b, dst, j + 1, nb, na, w)
+  }
 
 fn value_merge(a: Value, b: Value) -> Value = {
   let ah = prim.handle(a)
@@ -1224,13 +1228,14 @@ fn map_entries_str(m: Map[String, String]) -> List[(String, String)] = __ment_bu
 // recursively by `__drop_result_lv` at the caller's scope end — see Op::DropResultListValue).
 // Copy the n inline element handles of a tag-5 Array `v` into a fresh List[Value] `dst`, rc_inc'ing
 // each (both the array and the new list own a ref; each frees its own at its scope end).
-fn __ment_build(m: Map[String, String], n: Int, i: Int, acc: List[(String, String)]) -> List[(String, String)] = if i >= n then acc
-else {
-  let h = prim.handle(m)
-  let k: String = prim.load_str(h + 12 + i * 16)
-  let v: String = prim.load_str(h + 12 + i * 16 + 8)
-  __ment_build(m, n, i + 1, acc + [(k, v)])
-}
+fn __ment_build(m: Map[String, String], n: Int, i: Int, acc: List[(String, String)]) -> List[(String, String)] =
+  if i >= n then acc
+  else {
+    let h = prim.handle(m)
+    let k: String = prim.load_str(h + 12 + i * 16)
+    let v: String = prim.load_str(h + 12 + i * 16 + 8)
+    __ment_build(m, n, i + 1, acc + [(k, v)])
+  }
 
 fn __vfill(v: Value, dst: List[Value], i: Int, n: Int) -> Unit = if i >= n then ()
 else {

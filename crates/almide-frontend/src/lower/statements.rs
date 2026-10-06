@@ -200,6 +200,18 @@ fn coerce_field_write(ctx: &LowerCtx, var: VarId, field: almide_base::intern::Sy
     coerce_literal_to_sized(ir_val, &field_ty, ctx.env);
 }
 
+/// `m.xs[i] = v` / `m.rec.f = v` where `m` is a MODULE alias, not a local:
+/// the place is rooted at that module's top-level `var` `path[0]` (#3312).
+/// Resolved by the rule the read path and `m.x = v` use; the root used to
+/// fall back to `VarId(0)`, which panicked the lowering (or left the place
+/// `Unknown`-typed inside a closure).
+fn module_place_root(ctx: &mut LowerCtx, module: almide_base::intern::Sym, path: &[almide_base::intern::Sym]) -> Option<VarId> {
+    let first = *path.first()?;
+    let resolved = ctx.env.import_table.resolve(&module).map_or_else(|| module.to_string(), |s| s.to_string());
+    let ty = ctx.env.top_lets.get(&sym(&format!("{resolved}.{first}")))?.clone();
+    crate::lower::expressions::module_top_let_var(ctx, module, first, &ty).map(|(var, _)| var)
+}
+
 fn lower_place_write(
     ctx: &mut LowerCtx,
     target: &almide_base::intern::Sym,
@@ -207,7 +219,13 @@ fn lower_place_write(
     span: Option<almide_base::Span>,
     write: impl FnOnce(&mut LowerCtx, VarId) -> IrStmtKind,
 ) -> IrStmtKind {
-    let root = ctx.lookup_var(target).unwrap_or(VarId(0));
+    let (root, path) = match ctx.lookup_var(target) {
+        Some(var) => (var, path),
+        None => match module_place_root(ctx, *target, path) {
+            Some(var) => (var, &path[1..]),
+            None => (VarId(0), path),
+        },
+    };
     if path.is_empty() {
         return write(ctx, root);
     }
@@ -398,6 +416,7 @@ pub(crate) fn coerce_literal_to_sized(ir_val: &mut IrExpr, declared: &Ty, env: &
         }
         _ => {}
     }
+    retag_anon_record_nominal(ir_val, declared, env);
     // Resolve a named type alias to its structural form so a record / sized
     // alias declared via `type Rec = { b: Int8, .. }` (a `Ty::Named`) becomes
     // its `Ty::Record { .. }` / `Ty::Int8` / etc. before the match below.
@@ -435,6 +454,28 @@ pub(crate) fn coerce_literal_to_sized(ir_val: &mut IrExpr, declared: &Ty, env: &
     }
 }
 
+/// #3283: an anonymous record literal in a slot of a declared record type IS
+/// that type. The checker types `{ w: .., h: .. }` structurally, so without
+/// this the literal reached codegen as a bare `Ty::Record` and native named
+/// it by a program-wide shape lookup — the FIRST module's same-field struct
+/// (`almide_rt_a_Size { .. }` in a fn returning `b.Extent`, rustc E0308).
+/// The slot's nominal type is the checker's answer; the literal takes it.
+fn retag_anon_record_nominal(ir_val: &mut IrExpr, declared: &Ty, env: &TypeEnv) {
+    if !matches!(declared, Ty::Named(..)) {
+        return;
+    }
+    let IrExprKind::Record { name: None, fields } = &ir_val.kind else { return };
+    if !matches!(ir_val.ty, Ty::Record { .. } | Ty::OpenRecord { .. } | Ty::Unknown) {
+        return;
+    }
+    let Ty::Record { fields: decl_fields } = env.resolve_named(declared) else { return };
+    let same_names = decl_fields.len() == fields.len()
+        && decl_fields.iter().all(|(n, _)| fields.iter().any(|(f, _)| f == n));
+    if same_names {
+        ir_val.ty = declared.clone();
+    }
+}
+
 /// Whether `inner` is the default numeric type a literal of the sized `slot`
 /// starts at (`Int` for the integer widths, `Float` for `Float32`) — or not
 /// yet known — so a carrier or fn type built around it may take the slot.
@@ -442,6 +483,10 @@ fn is_default_width_of(inner: &Ty, slot: &Ty) -> bool {
     let default = match slot {
         Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64 => Ty::Int,
         Ty::Float32 => Ty::Float,
+        // A structural record the checker unified with a nominal slot is that
+        // nominal type (#3283): `none` in `-> Option[b.Extent]` spells
+        // `None::<b.Extent>`, not the first same-field struct of the program.
+        Ty::Named(..) if matches!(inner, Ty::Record { .. } | Ty::OpenRecord { .. }) => return true,
         _ => return inner == slot,
     };
     *inner == default || *inner == *slot || matches!(inner, Ty::Unknown | Ty::TypeVar(_))

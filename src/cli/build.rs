@@ -1,5 +1,6 @@
 use std::process::Command;
 use crate::{parse_file, canonicalize, check, diagnostic, resolve, project, project_fetch, err};
+use super::wasm_debug::{debug_build_guard, with_debug_lines};
 
 /// Flags for [`cmd_build`] — bundled into one struct (was 12 positional
 /// params, a max-params violation on its own) so the function signature
@@ -24,6 +25,8 @@ pub struct BuildArgs<'a> {
     pub heap_cap: Option<u32>,
     /// `--host js` (#2265): write the JS host next to the wasm output.
     pub host: Option<&'a str>,
+    /// `--debug` (#1315): DWARF line tables in the wasm output.
+    pub debug: bool,
 }
 
 /// The npm/JavaScript target was removed with the TS backend; reject it with
@@ -49,11 +52,9 @@ fn compute_output_path(file: &str, output: Option<&str>, is_wasm: bool) -> Strin
     let default_output = if is_wasm {
         format!("{}.wasm", file.strip_suffix(".almd").unwrap_or("a.out"))
     } else if std::path::Path::new("almide.toml").exists() {
-        let toml_content = std::fs::read_to_string("almide.toml").unwrap_or_default();
-        toml_content.lines()
-            .find(|l| l.starts_with("name"))
-            .and_then(|l| l.split('=').nth(1))
-            .map(|s| s.trim().trim_matches('"').to_string())
+        // `[package].name` as TOML reads it — not the first line that starts
+        // with `name`, which could be a key in any table (#3253).
+        project::manifest_package_name(std::path::Path::new("almide.toml"))
             .unwrap_or_else(|| file.strip_suffix(".almd").unwrap_or("a.out").to_string())
     } else {
         file.strip_suffix(".almd").unwrap_or("a.out").to_string()
@@ -70,26 +71,96 @@ fn compute_output_path(file: &str, output: Option<&str>, is_wasm: bool) -> Strin
     }
 }
 
-/// `cmd_build`'s cdylib target: build a shared library (.dylib/.so).
-/// Extracted verbatim — exits the process on a compile error, otherwise
-/// prints the built path and returns.
-fn cmd_build_cdylib(rs_code: &str, output: &str, use_release: bool, native_deps: &[project::NativeDep], source_root: Option<&std::path::Path>) {
+/// The generated crate's Cargo name for a native build of `file` (#3349):
+/// `[package].name` of the `almide.toml` in the working directory — the same
+/// source the default output name reads — else the entry file's stem. Never
+/// the `-o` value: that is an output PATH, and a path is not a crate name.
+fn native_crate_name(file: &str) -> String {
+    let manifest = std::path::Path::new("almide.toml");
+    let base = manifest.exists().then(|| project::manifest_package_name(manifest)).flatten()
+        .unwrap_or_else(|| std::path::Path::new(file).file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default());
+    sanitize_crate_name(&base)
+}
+
+/// Make `name` a valid Cargo library name: every character outside
+/// `[A-Za-z0-9_]` becomes `_`, and a name that is empty or starts with a digit
+/// gets a leading `almide_`.
+fn sanitize_crate_name(name: &str) -> String {
+    let clean: String = name.chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
+        .collect();
+    match clean.chars().next() {
+        Some(c) if !c.is_ascii_digit() => clean,
+        _ => format!("almide_{clean}"),
+    }
+}
+
+/// Where a cdylib build writes its library (#3349): the `-o` path exactly as
+/// given — the same meaning `-o` has for a binary — else today's default,
+/// `lib<crate>.<ext>` for the build's target in the working directory.
+fn cdylib_output_path(output: Option<&str>, crate_name: &str, triple: Option<&str>) -> std::path::PathBuf {
+    match output {
+        Some(o) => std::path::PathBuf::from(o),
+        None => std::path::PathBuf::from(super::native_target::cdylib_file_name(crate_name, triple)),
+    }
+}
+
+/// Install a built artifact at `dest`: create the parent directory, then
+/// stage-and-RENAME, never copy onto an existing file. A bare `fs::copy`
+/// rewrites the destination IN PLACE (same inode), and on macOS the kernel's
+/// code-signature cache is keyed by vnode: a binary overwritten at the same
+/// inode after its previous content was executed gets SIGKILLed on the next
+/// exec — no exit code, no stderr, nothing to debug. `almide build app.almd -o
+/// app` twice in a row then `./app` reproduced it sporadically, and the
+/// fuzzer's per-worker reused output path hit it reliably deep into a campaign
+/// (seed 1785165458340124000 index 572: a phantom "native run failed while
+/// wasm succeeded"). A loaded dylib is mapped the same way. The rename gives
+/// the destination a fresh inode atomically; the staging temp lives in the
+/// SAME directory so the rename cannot cross a filesystem. `-o build/app` must
+/// not fail just because `build/` doesn't exist yet.
+fn install_artifact(built: &std::path::Path, dest: &std::path::Path) -> std::io::Result<()> {
+    if let Some(parent) = dest.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)?;
+        }
+    }
+    let file_name = dest.file_name().map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| dest.to_string_lossy().into_owned());
+    let staged = dest.with_file_name(format!(".{}.staged-{}", file_name, std::process::id()));
+    let copy_then_rename = std::fs::copy(built, &staged).and_then(|_| std::fs::rename(&staged, dest));
+    if copy_then_rename.is_err() {
+        let _ = std::fs::remove_file(&staged);
+    }
+    copy_then_rename
+}
+
+/// `cmd_build`'s cdylib target: build a shared library (.dylib/.so/.dll) and
+/// write it to `dest`. Exits the process on a compile error, otherwise prints
+/// the written path and returns.
+fn cmd_build_cdylib(rs_code: &str, crate_name: &str, dest: &std::path::Path, use_release: bool, native_deps: &[project::NativeDep], source_root: Option<&std::path::Path>) {
     let project_dir = std::env::temp_dir().join("almide-build-cdylib");
     // Strip fn main() from the code — cdylib has no entry point
     let lib_code = rs_code.replace("fn main()", "fn __almide_unused_main()");
     // Serialize across processes: the shared scratch dir's src + target would
-    // otherwise be corrupted by a concurrent `almide build`.
+    // otherwise be corrupted by a concurrent `almide build`. The lock is held
+    // through the install so the library copied out is this build's.
     let _ = std::fs::create_dir_all(&project_dir);
     let _flock = super::run::BuildDirLock::acquire(&project_dir)
         .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
     // Same stale-incremental-session recovery as the bin path (#2500), under
     // the lock just taken.
     let built = super::cargo_build::build_recovering_from_ice(&project_dir, || {
-        super::cargo_build_cdylib(&lib_code, &project_dir, output, use_release, native_deps, source_root)
+        super::cargo_build_cdylib(&lib_code, &project_dir, crate_name, use_release, native_deps, source_root)
     });
     match built {
         Ok(lib_path) => {
-            err(&format!("Built {}", lib_path.display()));
+            if let Err(e) = install_artifact(&lib_path, dest) {
+                err(&format!("Failed to copy library to {}: {}", dest.display(), e));
+                std::process::exit(1);
+            }
+            err(&format!("Built {}", dest.display()));
         }
         Err(e) => {
             err(&format!("Compile error:\n{}", e));
@@ -103,41 +174,11 @@ fn cmd_build_cdylib(rs_code: &str, output: &str, use_release: bool, native_deps:
 /// from any caller (or any source path) reuses one binary and skips cargo
 /// entirely. Locking and atomic binary staging live inside
 /// `build_native_cached`; the copy-out below reads a content-named,
-/// atomically-renamed file, so it needs no lock. Extracted verbatim.
+/// atomically-renamed file, so it needs no lock.
 fn cmd_build_native(rs_code: &str, output: &str, use_release: bool, native_deps: &[project::NativeDep], source_root: Option<&std::path::Path>) {
     match super::run::build_native_cached(rs_code, false, use_release, None, native_deps, source_root) {
         Ok(bin_path) => {
-            // Copy the built binary to the desired output location. Create the
-            // output's parent directory first — `-o build/app` must not fail
-            // just because `build/` doesn't exist yet (it's the natural place
-            // to put a binary, and every caller otherwise needs a manual mkdir).
-            if let Some(parent) = std::path::Path::new(&output).parent() {
-                if !parent.as_os_str().is_empty() {
-                    let _ = std::fs::create_dir_all(parent);
-                }
-            }
-            // Stage-and-RENAME, never copy onto an existing executable. A bare
-            // `fs::copy` rewrites the destination IN PLACE (same inode), and on
-            // macOS the kernel's code-signature cache is keyed by vnode: a
-            // binary overwritten at the same inode after its previous content
-            // was executed gets SIGKILLed on the next exec — no exit code, no
-            // stderr, nothing to debug. `almide build app.almd -o app` twice in
-            // a row then `./app` reproduced it sporadically, and the fuzzer's
-            // per-worker reused output path hit it reliably deep into a
-            // campaign (seed 1785165458340124000 index 572: a phantom
-            // "native run failed while wasm succeeded"). The rename gives the
-            // destination a fresh inode atomically; the staging temp lives in
-            // the SAME directory so the rename cannot cross a filesystem.
-            let staged = {
-                let out_path = std::path::Path::new(&output);
-                let file_name = out_path.file_name().map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| output.to_string());
-                out_path.with_file_name(format!(".{}.staged-{}", file_name, std::process::id()))
-            };
-            let copy_then_rename = std::fs::copy(&bin_path, &staged)
-                .and_then(|_| std::fs::rename(&staged, output));
-            if let Err(e) = copy_then_rename {
-                let _ = std::fs::remove_file(&staged);
+            if let Err(e) = install_artifact(&bin_path, std::path::Path::new(output)) {
                 err(&format!("Failed to copy binary to {}: {}", output, e));
                 std::process::exit(1);
             }
@@ -155,7 +196,7 @@ pub fn cmd_build(args: BuildArgs) {
     // (verbatim) — this is purely a call-site params bundling.
     let BuildArgs {
         file, output, target, release, fast, unchecked_index: _unchecked_index,
-        no_check, repr_c, cdylib, emit_unverified, verified, native_verified, wasm_opt, component, heap_cap, host,
+        no_check, repr_c, cdylib, emit_unverified, verified, native_verified, wasm_opt, component, heap_cap, host, debug,
     } = args;
     reject_removed_target(target);
     let is_wasm = matches!(target, Some("wasm" | "wasm32" | "wasi"));
@@ -169,8 +210,13 @@ pub fn cmd_build(args: BuildArgs) {
         // thread-local is exactly as scoped as this call.
         // #1729: the cap becomes the emitted memory's declared maximum.
         let _cap = heap_cap.map(almide_wasm::heap_cap::HeapCapGuard::set);
+        let _lines = debug.then(|| debug_build_guard(component, wasm_opt));
         cmd_build_wasm_direct(file, output, no_check, emit_unverified, verified, wasm_opt, component, host);
         return;
+    }
+    if debug {
+        err("error: --debug is a wasm option (DWARF line tables): `almide build app.almd --target wasm --debug`");
+        std::process::exit(2);
     }
     if host.is_some() {
         err("error: --host is a wasm option: `almide build app.almd --target wasm --host js`");
@@ -192,6 +238,7 @@ pub fn cmd_build(args: BuildArgs) {
         }
     });
 
+    let requested_output = output;
     let output = compute_output_path(file, output, is_wasm);
 
     let opts = crate::codegen::CodegenOptions { repr_c, allow_unverified: false, trace: false };
@@ -249,7 +296,12 @@ pub fn cmd_build(args: BuildArgs) {
 
     // cdylib target: build shared library (.dylib/.so)
     if cdylib {
-        cmd_build_cdylib(&rs_code, &output, use_release, &native_deps, source_root.as_deref());
+        // #3349: `-o` is the library FILE, as it is for a binary; the crate
+        // name comes from the package / entry, not from the output path.
+        let crate_name = native_crate_name(file);
+        let triple = super::native_target::cross_target();
+        let dest = cdylib_output_path(requested_output, &crate_name, triple.as_deref());
+        cmd_build_cdylib(&rs_code, &crate_name, &dest, use_release, &native_deps, source_root.as_deref());
         return;
     }
 
@@ -492,8 +544,13 @@ fn write_js_host(output: &str, file: &str, bytes: &[u8], surface: &crate::cli::j
     let base = output.strip_suffix(".wasm").unwrap_or(output);
     let (js_path, dts_path) = (format!("{base}.js"), format!("{base}.d.ts"));
     let wasm_name = std::path::Path::new(output).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| output.to_string());
-    let owned = almide_wasm::host_exports::export_param_owned();
-    let (js, dts) = match crate::cli::js_host::generate(&wasm_name, file, bytes, surface, &owned) {
+    let notes = crate::cli::js_host::ExportNotes {
+        owned: almide_wasm::host_exports::export_param_owned(),
+        params: almide_wasm::host_exports::export_params_noted(),
+        rets: almide_wasm::host_exports::export_rets(),
+        imports: almide_wasm::host_exports::import_rets(),
+    };
+    let (js, dts) = match crate::cli::js_host::generate(&wasm_name, file, bytes, surface, &notes) {
         Ok(g) => g,
         Err(message) => {
             let _ = std::fs::remove_file(output);
@@ -556,7 +613,29 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
     // on). `ALMIDE_COMPONENT_ADAPTER=1` is the switch back to the stage-0
     // adapter wrap over the `to_wasi` module (#2752 keeps it: the adapter
     // route is also what an fs program takes below).
-    let direct_p2 = component && !almide_base::env::flag("ALMIDE_COMPONENT_ADAPTER");
+    // #2589 (ADR-0025): the subprocess family rides the private
+    // `almide:process/spawn` import, which the p1 core module carries and no
+    // component world declares — refuse the component build by name rather
+    // than let a transform fail on an import it cannot place.
+    let proc_op = host_ops.iter().copied().find(|op| (80..=90).contains(op));
+    if component && let Some(op) = proc_op {
+        err(&format!(
+            "error[E081]: process.* (host op {op}) needs the private almide:process/spawn capability, which no component world declares (ADR-0025)\n  \
+             hint: build the core module (drop --component) for a host that implements almide:process/spawn, or run it with `almide run {file} --target wasm`"
+        ));
+        std::process::exit(1);
+    }
+    // #2659 (C-375): a program that reaches `http.serve` (its main
+    // serve-shaped — checked in `compile_to_wasm_bytes_surfaced`) builds as
+    // the stock serve export, a `wasi:http/handler@0.3.0` component, with or
+    // without `--component`.
+    let serve_export = host_ops.iter().any(|op| (70..=72).contains(op));
+    if serve_export && js_host {
+        err("error[E081]: `http.serve` builds as a wasi:http/handler@0.3.0 component, which --host js does not write");
+        std::process::exit(1);
+    }
+    let component = component || serve_export;
+    let direct_p2 = component && !serve_export && !almide_base::env::flag("ALMIDE_COMPONENT_ADAPTER");
     // `ALMIDE_COMPONENT_P3=1` (#1628 stage 2, experimental): the WASI 0.3
     // component — stdio over component-model streams on the async
     // canonical ABI. Needs a p3-capable runtime (wasmtime 46+); stays an
@@ -582,7 +661,15 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
         err(&message);
         std::process::exit(1);
     }
-    let bytes = if direct_p3 {
+    let bytes = if serve_export {
+        match almide_wasm_run::wasi_p3::to_p3_service(&bytes, &host_ops) {
+            Ok(c) => c,
+            Err(e) => {
+                err(&format!("error: p3 serve export transform failed — this is an Almide bug: {e}"));
+                std::process::exit(1);
+            }
+        }
+    } else if direct_p3 {
         match almide_wasm_run::wasi_p3::to_p3(&bytes, &host_ops) {
             Ok(c) => c,
             Err(e) => {
@@ -599,13 +686,14 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
             }
         }
     } else {
-        let bytes = match almide_wasm_run::wasi::to_wasi(&bytes, &host_ops) {
+        let wasi = match almide_wasm_run::wasi::to_wasi_mapped(&bytes, &host_ops) {
             Ok(w) => w,
             Err(e) => {
                 err(&format!("error: WASI transform failed — this is an Almide bug: {e}"));
                 std::process::exit(1);
             }
         };
+        let bytes = with_debug_lines(file, &bytes, wasi);
         // Stage-0 adapter wrap: the WASI core module + the Cargo-pinned
         // preview1 adapter. Packaging, not a rewrite.
         if component {
@@ -645,6 +733,7 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
     // diagnosis time — a "wasm doesn't work" report cannot be split
     // between legs without it.
     let leg = match component {
+        true if serve_export => "structural leg, WASI 0.3 wasi:http/handler export — serve it with `wasmtime serve`",
         false => "structural leg",
         true if direct_p3 => "structural leg, WASI 0.3 component (direct, async ABI)",
         true if direct_p2 => "structural leg, WASI 0.2 component (direct)",
@@ -655,6 +744,14 @@ fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allo
     // docs/contracts/proven-vs-trusted.md). `verified` on output no
     // certificate covers is how #2154's run-time trap shipped (#2184).
     let trust = "trusted, certificate pending";
+    // The artifact needs a host that grants the subprocess capability: say
+    // so at build time, since a stock runtime will refuse it at load.
+    if proc_op.is_some() {
+        err(&format!(
+            "note: {output} imports almide:process/spawn (process.*, ADR-0025): a stock WASI runtime refuses it at load; \
+             it runs on a host that implements that import — `almide run {file} --target wasm` is one"
+        ));
+    }
     if !wasm_opt {
         let host_note = host_from_shipped(&bytes);
         err(&format!(
@@ -815,13 +912,7 @@ fn typecheck_wasm_program(file: &str, source_text: &str, program: &mut almide::a
 /// path), link, optimize, and monomorphize. Extracted verbatim.
 fn lower_and_link_wasm_ir(program: &almide::ast::Program, checker: &mut check::Checker, resolved: &mut resolve::ResolvedModules) -> Result<almide::ir::IrProgram, ()> {
     // Pre-register versioned names before root lowering
-    for (name, _, pkg_id, _) in &resolved.modules {
-        if let Some(pid) = pkg_id.as_ref() {
-            let base = pid.mod_name();
-            let v = if let Some(suffix) = name.strip_prefix(&pid.name) { format!("{}{}", base, suffix) } else { base };
-            checker.env.module_versioned_names.insert(almide::intern::sym(name), almide::intern::sym(&v));
-        }
-    }
+    almide::wasm_leg::register_versioned_module_names(checker, &resolved.modules);
     let mut ir_program = almide::lower::lower_program(program, &checker.env, &checker.type_map);
 
     // Lower user modules to IR. Bundled stdlib modules (stdlib/<m>.almd) are
@@ -843,7 +934,13 @@ fn lower_and_link_wasm_ir(program: &almide::ast::Program, checker: &mut check::C
     // `almide_mir::pipeline`. Both were green, so the cross-target equivalence claim was
     // resting on "the position of ir_link never matters" rather than on a shared driver
     // (#925, and #785 is a recorded bug from exactly that divergence).
-    almide_driver::link_ir(&mut ir_program);
+    //
+    // #3275: through the build routes' shared halves, so the `[permissions]`
+    // gate judges this route exactly as it does the native build, on the same
+    // post-optimize, pre-mono IR. This route's integrity check is
+    // `verify_wasm_ir`, after the link.
+    let proj = crate::compile_driver::cwd_project();
+    crate::compile_driver::optimize_gate_and_link(&mut ir_program, proj.as_ref(), |_| Ok(())).map_err(|_| ())?;
 
     Ok(ir_program)
 }
@@ -880,12 +977,13 @@ fn check_wasm_availability(
     ir_program: &almide::ir::IrProgram,
     package: &std::collections::HashSet<String>,
     embedded_leg: bool,
-) -> Result<(), ()> {
+    serve_shape: &Result<(), String>,
+) -> Result<bool, ()> {
     // The measurement escape: the availability PROBE builds through this
     // binary to measure the ground truth the table declares — with the
     // check armed it would measure its own declaration (circular).
     if almide_base::env::flag("ALMIDE_NO_AVAIL_CHECK") {
-        return Ok(());
+        return Ok(!embedded_leg && serve_shape.is_ok() && reaches_http_serve(ir_program));
     }
     use std::collections::BTreeMap;
     use std::sync::OnceLock;
@@ -914,6 +1012,12 @@ fn check_wasm_availability(
                 .find_map(|l| l.strip_prefix("legs = ["))
                 .unwrap_or("")
                 .to_string();
+            // A host-capability row (#2589, ADR-0025) is not a build wall:
+            // the artifact ships with the capability's import and a host
+            // without it refuses at load.
+            if field("class").as_deref() == Some("host-capability") {
+                continue;
+            }
             if let Some(fn_name) = field("fn") {
                 out.insert(
                     fn_name,
@@ -940,6 +1044,8 @@ fn check_wasm_availability(
         own: &'a std::collections::HashSet<String>,
         leg_lit: &'static str,
         hits: BTreeMap<String, &'a Row>,
+        /// A reachable `http.serve` call (#2659), row or no row.
+        serves: bool,
     }
     impl<'a> IrVisitor for Scan<'a> {
         fn visit_expr(&mut self, e: &almide::ir::IrExpr) {
@@ -948,6 +1054,7 @@ fn check_wasm_availability(
             } = &e.kind
             {
                 let key = format!("{}.{}", module.as_str(), func.as_str());
+                self.serves |= key == "http.serve" && !self.own.contains(&key);
                 if let Some(row) = self.table.get(&key)
                     && row.0.contains(self.leg_lit)
                     && !self.own.contains(&key)
@@ -958,7 +1065,7 @@ fn check_wasm_availability(
             almide::ir::visit::walk_expr(self, e);
         }
     }
-    let mut scan = Scan { table, own: &own, leg_lit, hits: BTreeMap::new() };
+    let mut scan = Scan { table, own: &own, leg_lit, hits: BTreeMap::new(), serves: false };
     // Only REACHABLE bodies are scanned — the same reachability the wasm
     // emitter prunes by (`reachability::reachable_fn_names`), so the
     // check-time diagnostic and the emit agree: a call the emitter never
@@ -979,6 +1086,7 @@ fn check_wasm_availability(
         }
     }
     hits.extend(scan.hits);
+    let serves = scan.serves;
     // The p3 component serves the http string family (#1710 PR B): under
     // ALMIDE_COMPONENT_P3 the ops-43..=50 fns ship through the to_p3 http
     // shim, so their stock-p1 rows do not bar THIS build path — the same
@@ -1000,8 +1108,24 @@ fn check_wasm_availability(
             hits.remove(k);
         }
     }
+    // The stock serve export (#2659, C-375): a program whose `main` is
+    // serve-shaped builds as a `wasi:http/handler@0.3.0` component; any other
+    // program that reaches `http.serve` is refused with the shape rule as the
+    // reason.
+    let serve_export = !embedded_leg && serves && serve_shape.is_ok();
+    let shape_refusal = match serve_shape {
+        Err(why) if !embedded_leg && serves => Some(why),
+        _ => None,
+    };
+    if let Some(why) = shape_refusal {
+        err(&format!(
+            "error[E081]: `http.serve` is not available on --target wasm from this `main`\n  \
+             reason: {why}\n  \
+             note: `almide run --target wasm` and the native target serve it as written"
+        ));
+    }
     if hits.is_empty() {
-        return Ok(());
+        return if shape_refusal.is_some() { Err(()) } else { Ok(serve_export) };
     }
     for (key, (_, r_stock, r_emb, r_shared, alt)) in &hits {
         let reason = if embedded_leg { r_emb.as_ref() } else { r_stock.as_ref() }
@@ -1017,6 +1141,29 @@ fn check_wasm_availability(
         ));
     }
     Err(())
+}
+
+/// Whether any reachable body calls `http.serve` — the measurement escape's
+/// stand-in for the availability scan's hit.
+fn reaches_http_serve(ir_program: &almide::ir::IrProgram) -> bool {
+    use almide::ir::visit::IrVisitor;
+    struct Find(bool);
+    impl IrVisitor for Find {
+        fn visit_expr(&mut self, e: &almide::ir::IrExpr) {
+            if let almide::ir::IrExprKind::Call { target: almide::ir::CallTarget::Module { module, func, .. }, .. } = &e.kind
+                && module.as_str() == "http"
+                && func.as_str() == "serve"
+            {
+                self.0 = true;
+            }
+            almide::ir::visit::walk_expr(self, e);
+        }
+    }
+    let mut find = Find(false);
+    for f in ir_program.functions.iter().chain(ir_program.modules.iter().flat_map(|m| m.functions.iter())) {
+        find.visit_expr(&f.body);
+    }
+    find.0
 }
 
 fn check_no_native_only_matrix(ir_program: &almide::ir::IrProgram) -> Result<(), ()> {
@@ -1046,11 +1193,12 @@ fn render_wasm_module_routed(
     file: &str,
     source_text: &str,
     library_ok: bool,
+    serve_export: bool,
     inputs: almide::wasm_route::RouteInputs,
     dep_paths: &[(project::PkgId, std::path::PathBuf)],
 ) -> Result<(Vec<u8>, Vec<i32>), ()> {
     use almide::wasm_route::{route_wasm, ModuleSource, RouteOptions};
-    let opts = RouteOptions::from_env(library_ok);
+    let opts = RouteOptions { serve_export, ..RouteOptions::from_env(library_ok) };
     let mut trace = |line: &str| err(line);
     match route_wasm(file, source_text, ModuleSource::Disk { dep_paths }, Some(inputs), opts, &mut trace) {
         Ok(module) => Ok((module.bytes, module.host_ops)),
@@ -1112,6 +1260,8 @@ pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified
 /// read from the IR before routing — what `--host js` marshals (#2265).
 pub(crate) fn compile_to_wasm_bytes_surfaced(file: &str, allow_unverified: bool, verified: bool, library_ok: bool, embedded_leg: bool) -> Result<(Vec<u8>, Vec<i32>, crate::cli::js_host::HostSurface), ()> {
     let (mut program, source_text, mut resolved, dep_paths) = parse_and_resolve_wasm(file)?;
+    // Read off the source before the checker desugars it (#2659).
+    let serve_shape = almide::serve_export::check_serve_shape(&program);
     // ALMIDE_WASM_ALLOC_COUNT (#2407): arm the structural leg's allocation
     // counters for this emission — the wasm twin of `arm_alloc_count`. The
     // guard scopes the thread-local to this build; off, nothing is emitted.
@@ -1131,7 +1281,12 @@ pub(crate) fn compile_to_wasm_bytes_surfaced(file: &str, allow_unverified: bool,
         .map(|(name, ..)| name.clone())
         .filter(|name| resolved.sources.contains_key(name))
         .collect();
-    check_wasm_availability(&ir_program, &package, embedded_leg)?;
+    // The availability check runs on EVERY route (run, check, build); only the
+    // serve-export verdict it answers is the build route's (#2659).
+    let serves_export = check_wasm_availability(&ir_program, &package, embedded_leg, &serve_shape)?;
+    let serve_export = library_ok && serves_export;
+    // `[permissions]` (`allow`, and `proc` #2589 — statically, and as the
+    // embedded host's run-time bound) was enforced in `lower_and_link_wasm_ir`.
 
     // Routing inputs (`RouteInputs::of_ir`, the one rule): project shape,
     // decided from what the v0 gates already computed — never from a
@@ -1153,8 +1308,15 @@ pub(crate) fn compile_to_wasm_bytes_surfaced(file: &str, allow_unverified: bool,
     // the module. An unlinked stdlib fn walls at lowering (#1598), so every
     // newly linked fn flips its own verdict with no hand-mirrored list.
     let _ = (&mut ir_program, allow_unverified, verified);
-    render_wasm_module_routed(file, &source_text, library_ok, inputs, &dep_paths)
-        .map(|(b, o)| (b, o, surface))
+    let (bytes, host_ops) = render_wasm_module_routed(file, &source_text, library_ok, serve_export, inputs, &dep_paths)?;
+    // The export's world imports no wasi:filesystem (`wasmtime serve` links
+    // none without a flag): an op the service shim cannot answer is refused
+    // here, at check time as at build time.
+    if serve_export && let Err(message) = almide_wasm_run::component_availability::check_service(&host_ops) {
+        err(&message);
+        return Err(());
+    }
+    Ok((bytes, host_ops, surface))
 }
 
 /// Run `wasm-opt -Oz` on the output file, in-place.
@@ -1218,4 +1380,34 @@ fn run_wasm_opt(path: &str) -> Result<usize, String> {
     }
     let meta = std::fs::metadata(path).map_err(|e| format!("stat {}: {}", path, e))?;
     Ok(meta.len() as usize)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_crate_name_is_an_identifier_whatever_the_package_is_called() {
+        assert_eq!(sanitize_crate_name("ceangal"), "ceangal");
+        assert_eq!(sanitize_crate_name("my-lib"), "my_lib");
+        assert_eq!(sanitize_crate_name("out/libx.dylib"), "out_libx_dylib");
+        assert_eq!(sanitize_crate_name("3d"), "almide_3d");
+        assert_eq!(sanitize_crate_name(""), "almide_");
+    }
+
+    #[test]
+    fn a_cdylib_output_is_the_path_given_else_the_target_named_default() {
+        // #3349: `-o` is the file, verbatim, in every spelling.
+        for o in ["x", "out/libx.dylib", "/abs/dir/libx.so", "x.dll"] {
+            assert_eq!(cdylib_output_path(Some(o), "pkg", None), std::path::PathBuf::from(o));
+        }
+        assert_eq!(
+            cdylib_output_path(None, "pkg", Some("x86_64-unknown-linux-gnu")),
+            std::path::PathBuf::from("libpkg.so")
+        );
+        assert_eq!(
+            cdylib_output_path(None, "pkg", Some("x86_64-pc-windows-gnu")),
+            std::path::PathBuf::from("pkg.dll")
+        );
+    }
 }

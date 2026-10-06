@@ -196,14 +196,14 @@ mod tests {
 
         // A load64-fed rc (NO prim.handle carrier) stays UNMODELED — the differential-test floor: the
         // RcInc on a non-carrier handle emits no `a` and the verifier no-ops it, so the function is
-        // just the balanced Alloc+Drop ("id").
+        // just the balanced Alloc+Drop, plus the load's own live dereference probe ("ibd").
         let load_fed = func(vec![
             Op::Alloc { dst: o, repr: heap(), init: Init::Opaque },
             Op::Prim { kind: PrimKind::Load { width: 8 }, dst: Some(h), args: vec![o] },
             Op::Prim { kind: PrimKind::RcInc, dst: None, args: vec![h] },
             Op::Drop { v: o },
         ]);
-        assert_eq!(ownership_certificate(&load_fed), "id\n");
+        assert_eq!(ownership_certificate(&load_fed), "ibd\n");
         assert_eq!(verify_ownership(&load_fed), Ok(()));
     }
 
@@ -343,12 +343,15 @@ mod tests {
     /// Re-run the proven checker's decision in Rust (mirrors the Coq `check_bc`):
     /// every line's stream must never dec-below-zero and must end at 0, with the
     /// format-v4 branch rule — `{then|else}` arms both execute from the current
-    /// count, must not fault, and must AGREE on the leaving count.
+    /// count, must not fault, and must AGREE on the leaving count. A line born
+    /// by a top-level `i` is an OWNED object: an `a` at count 0 there aliases a
+    /// freed object and faults (the `check_xc` owned-line rule, #3229).
     fn cert_all_balanced(cert: &str) -> bool {
         // The flat fold (format v1 alphabet + the 5b `b` guard); None = fault.
-        fn fold(seg: &str, mut rc: i64) -> Option<i64> {
+        fn fold(seg: &str, mut rc: i64, owned: bool) -> Option<i64> {
             for c in seg.chars() {
                 match c {
+                    'a' if owned && rc == 0 => return None,
                     // i/a = +1 (fresh/alias), d/m = −1 (release/move-out).
                     'i' | 'a' => rc += 1,
                     'd' | 'm' => {
@@ -370,10 +373,11 @@ mod tests {
             Some(rc)
         }
         cert.lines().all(|line| {
+            let owned = line.starts_with('i');
             let mut rc: i64 = 0;
             let mut rest = line;
             while let Some(open) = rest.find('{') {
-                rc = match fold(&rest[..open], rc) {
+                rc = match fold(&rest[..open], rc, owned) {
                     Some(r) => r,
                     None => return false,
                 };
@@ -385,13 +389,13 @@ mod tests {
                     Some(p) => p,
                     None => return false,
                 };
-                match (fold(t, rc), fold(e, rc)) {
+                match (fold(t, rc, owned), fold(e, rc, owned)) {
                     (Some(rt), Some(re)) if rt == re => rc = rt, // arms AGREE
                     _ => return false, // an arm faults or the arms disagree
                 }
                 rest = &rest[close + 1..];
             }
-            match fold(rest, rc) {
+            match fold(rest, rc, owned) {
                 Some(r) => r == 0, // leak iff != 0
                 None => false,
             }
@@ -498,5 +502,119 @@ mod tests {
         }
     }
 
+    /// #3229: an owned object released to 0, then `Dup`'d and moved out (what a
+    /// copy-on-write freed by a modeled frame's end produced). The cert BALANCES
+    /// (`idam`), so the count alone accepted it; verify_ownership sees the Dup of
+    /// a dead handle, and the owned-line rule makes the certificate agree.
+    #[test]
+    fn alias_after_free_is_rejected_by_both() {
+        let (a, b) = (ValueId(0), ValueId(1));
+        let f = func(vec![
+            Op::Alloc { dst: a, repr: heap(), init: Init::Opaque },
+            Op::Drop { v: a },
+            Op::Dup { dst: b, src: a },
+            Op::Consume { v: b },
+        ]);
+        let cert = ownership_certificate(&f);
+        assert_eq!(cert, "idam\n");
+        assert!(verify_ownership(&f).is_err());
+        assert!(!cert_all_balanced(&cert));
+        // a borrowed PARAM's line re-aliased at 0 stays legal (the caller holds it).
+        assert!(cert_all_balanced("amam\n"));
+    }
+
+    /// #3233: a freed owned object read only through the address bridge
+    /// (`prim.handle` → `+ off` → `LoadHandle`) or as a call's handle argument
+    /// left NO event, so its line was a balanced `id` and certified. Every
+    /// dereference and every call handle arg is now a `b` probe, and the
+    /// liveness guard rejects both shapes.
+    #[test]
+    fn handle_reads_after_free_are_witnessed() {
+        let (o, h, off, addr, p) = (ValueId(0), ValueId(1), ValueId(2), ValueId(3), ValueId(4));
+        let load = || Op::Prim { kind: PrimKind::LoadHandle, dst: Some(p), args: vec![addr] };
+        let mut ops = vec![
+            Op::Alloc { dst: o, repr: heap(), init: Init::Opaque },
+            Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![o] },
+            Op::ConstInt { dst: off, value: 12 },
+            Op::IntBinOp { dst: addr, op: crate::IntOp::Add, a: h, b: off },
+            load(),
+            Op::Drop { v: o },
+        ];
+        let live = func(ops.clone());
+        assert_eq!(ownership_certificate(&live), "ibd\n");
+        assert!(cert_all_balanced(&ownership_certificate(&live)));
+        ops.push(load());
+        let after_free = func(ops);
+        assert_eq!(ownership_certificate(&after_free), "ibdb\n");
+        assert!(!cert_all_balanced(&ownership_certificate(&after_free)));
+
+        let call_after_free = func(vec![
+            Op::Alloc { dst: o, repr: heap(), init: Init::Opaque },
+            Op::Drop { v: o },
+            Op::Call { dst: None, func: RtFn::PrintStr, args: vec![CallArg::Handle(o)], result: None },
+        ]);
+        assert_eq!(ownership_certificate(&call_after_free), "idb\n");
+        assert!(verify_ownership(&call_after_free).is_err());
+        assert!(!cert_all_balanced(&ownership_certificate(&call_after_free)));
+
+        // The lowering's move into a container: `Consume v`, then the slot
+        // store of `prim.handle(v)`. The handle bridge is not a dereference of
+        // `v` (the store dereferences the LIST), so `v`'s line stays `im`.
+        let (xs, v, hx, hv) = (ValueId(5), ValueId(6), ValueId(7), ValueId(8));
+        let store_move = func(vec![
+            Op::Alloc { dst: xs, repr: heap(), init: Init::Opaque },
+            Op::Alloc { dst: v, repr: heap(), init: Init::Opaque },
+            Op::Prim { kind: PrimKind::Handle, dst: Some(hx), args: vec![xs] },
+            Op::Consume { v },
+            Op::Prim { kind: PrimKind::Handle, dst: Some(hv), args: vec![v] },
+            Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![hx, hv] },
+            Op::Drop { v: xs },
+        ]);
+        assert_eq!(ownership_certificate(&store_move), "ibd\nim\n");
+
+        // A borrowed PARAM's line is not owned: passing the param on after its
+        // own Dup was moved out is the caller's reference, not a probe (`am`).
+        let param = param_fn("pass_param_on", vec![
+            Op::Dup { dst: h, src: o },
+            Op::Consume { v: h },
+            Op::Call { dst: None, func: RtFn::PrintStr, args: vec![CallArg::Handle(o)], result: None },
+        ], None);
+        assert_eq!(ownership_certificate(&param), "am\n");
+    }
+
+    /// #3259: `verify_ownership` live-checks the object behind a load's
+    /// address, so the #3233 shape is rejected by both sides now.
+    #[test]
+    fn verify_ownership_rejects_a_load_through_a_freed_address() {
+        let (o, h, off, addr, p) = (ValueId(0), ValueId(1), ValueId(2), ValueId(3), ValueId(4));
+        let load = || Op::Prim { kind: PrimKind::LoadHandle, dst: Some(p), args: vec![addr] };
+        let mut ops = vec![
+            Op::Alloc { dst: o, repr: heap(), init: Init::Opaque },
+            Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![o] },
+            Op::ConstInt { dst: off, value: 12 },
+            Op::IntBinOp { dst: addr, op: crate::IntOp::Add, a: h, b: off },
+            load(),
+            Op::Drop { v: o },
+        ];
+        assert_eq!(verify_ownership(&func(ops.clone())), Ok(()));
+        ops.push(load());
+        let errs = verify_ownership(&func(ops)).unwrap_err();
+        assert_eq!(errs[0].kind, crate::ViolationKind::UseAfterFree);
+        assert_eq!(errs[0].op_index, 6);
+
+        // An ElemAddr result is an address into its list too.
+        let (xs, idx, e) = (ValueId(0), ValueId(1), ValueId(2));
+        let elem = func(vec![
+            Op::Alloc { dst: xs, repr: heap(), init: Init::Opaque },
+            Op::ConstInt { dst: idx, value: 0 },
+            Op::Prim { kind: PrimKind::ElemAddr, dst: Some(e), args: vec![xs, idx] },
+            Op::Drop { v: xs },
+            Op::Prim { kind: PrimKind::Load { width: 8 }, dst: Some(ValueId(3)), args: vec![e] },
+        ]);
+        assert_eq!(ownership_certificate(&elem), "ibdb\n");
+        assert!(verify_ownership(&elem).is_err());
+    }
+
+    include!("certificate_c_gen.rs");
     include!("certificate_p2.rs");
 }

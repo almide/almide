@@ -9,7 +9,8 @@
 // blessed spelling `list.find_map(xs, (x) => f(x)!)!` lives in fn bodies.
 local fn even_tenfold(x: Int) -> Int? = if x % 2 == 0 then some(x * 10) else none
 
-local fn later_three_letter_len(n: String) -> Int? = if string.len(n) == 3 and n != "ann" then some(string.len(n)) else none
+local fn later_three_letter_len(n: String) -> Int? =
+  if string.len(n) == 3 and n != "ann" then some(string.len(n)) else none
 
 local fn label_past_one(n: Int) -> String? = list.find([n], (k) => k > 1) |> option.map((k) => "n${k}")
 

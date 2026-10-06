@@ -44,8 +44,9 @@ fn __fb_is_cont(b: Int) -> Bool = if b >= 128 then (if b <= 191 then true else f
 else false
 
 // Is `b` within [lo, hi]?
-fn __fb_in_range(b: Int, lo: Int, hi: Int) -> Bool = if b >= lo then (if b <= hi then true else false)
-else false
+fn __fb_in_range(b: Int, lo: Int, hi: Int) -> Bool =
+  if b >= lo then (if b <= hi then true else false)
+  else false
 
 // The step helpers are written as FLAT `else if` chains whose every arm is a literal or a
 // single tail call — never a `{ … }` block ending in a nested `if`. That is the shape the v1

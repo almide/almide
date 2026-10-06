@@ -1,0 +1,88 @@
+// A recursive fn over a variant that hands a part of its param back to itself
+// and reads that part again afterwards (#3434). Native borrows the param and
+// clones only the parts an arm moves; every arm must still produce the value
+// semantics say, and the caller's value must be unchanged afterwards.
+type T =
+  | Leaf
+  | Wrap(T, T)
+  | Node(T, T)
+  | Tag(String, T)
+  | Many(List[T])
+
+fn describe(t: T) -> String = match t {
+  Leaf => "leaf",
+  Wrap(_, _) => "wrap",
+  Node(_, _) => "node",
+  Tag(s, _) => "tag ${s}",
+  Many(xs) => "many ${int.to_string(list.len(xs))}",
+}
+
+fn size(t: T) -> Int = match t {
+  Leaf => 1,
+  Wrap(a, b) => 1 + size(a) + size(b),
+  Node(a, b) => 1 + size(a) + size(b),
+  Tag(_, x) => 1 + size(x),
+  Many(xs) => xs |> list.fold(1, (acc, x) => acc + size(x)),
+}
+
+fn keep(t: T) -> T = t
+
+fn infer(t: T) -> T! = match t {
+  Leaf => ok(Leaf),
+  Wrap(a, b) => ok(Wrap(keep(a), b)),
+  Tag(s, x) => ok(Tag(s + "!", x)),
+  Many(xs) => ok(Many(xs)),
+  Node(f, a) => {
+    let ty = infer(f)!
+    guard describe(f) != "?" else err("bad")
+    match a {
+      Leaf => ok(ty),
+      _ => ok(Node(ty, a)),
+    }
+  },
+}
+
+fn left(t: T) -> T = match t {
+  Wrap(a, _) => a,
+  Node(f, _) => {
+    let r = left(f)
+    if describe(f) == "?" then Leaf else r
+  },
+  _ => Leaf,
+}
+
+fn deep(n: Int) -> T = {
+  var t = Wrap(Tag("x", Leaf), Leaf)
+  for _ in 0..<n {
+    t = Node(t, Leaf)
+  }
+  t
+}
+
+test "a part the arm moves is copied, the caller keeps its value" {
+  let t = Node(Node(Wrap(Leaf, Tag("x", Leaf)), Many([Leaf, Leaf])), Leaf)
+  let r = infer(t) ?? Leaf
+  assert_eq(describe(r), "node")
+  assert_eq(size(r), 8)
+  assert_eq(size(t), 10)
+  assert_eq(describe(t), "node")
+}
+
+test "each moving arm builds its own result" {
+  assert_eq(describe(infer(Node(Tag("a", Leaf), Leaf)) ?? Leaf), "tag a!")
+  assert_eq(describe(infer(Node(Many([Leaf]), Leaf)) ?? Leaf), "many 1")
+  assert_eq(describe(infer(Node(Leaf, Wrap(Leaf, Leaf))) ?? Leaf), "node")
+}
+
+test "a part returned bare comes back whole" {
+  let t = deep(50)
+  assert_eq(describe(left(t)), "tag x")
+  assert_eq(size(left(t)), 2)
+  assert_eq(size(t), 104)
+}
+
+test "a deep chain recurses through the borrowed part" {
+  let t = deep(2000)
+  assert_eq(size(infer(t) ?? Leaf), 4)
+  assert_eq(size(t), 4004)
+}

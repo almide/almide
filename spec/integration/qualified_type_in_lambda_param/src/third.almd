@@ -1,0 +1,3 @@
+type Entry = { kind: Int, text: String }
+
+fn first() -> Entry = { kind: 1, text: "a" }

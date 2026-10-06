@@ -70,8 +70,20 @@ impl Emitter<'_> {
         }
     }
 
-    /// #2755: a mut receiver read WITHOUT the copy-on-write — a parameter,
-    /// whose writes stay caller-visible (`emit_read_mut_var_cow`). The read
+    /// #3259: a READ of a droppable local's value (the Var route, a mut
+    /// receiver read) — the read probe on the block the local holds. A cell
+    /// local holds the cell, not the block, so it is not probed.
+    pub(crate) fn witness_read(&mut self, id: &almide_ir::VarId, idx: u32, ty: SliceTy) {
+        if self.cells.contains(id) || !self.rc_droppable(ty) {
+            return;
+        }
+        if let Some(w) = self.witness.as_mut() {
+            w.read(idx);
+        }
+    }
+
+    /// #2755: a mut receiver read WITHOUT the copy-on-write — a String or a
+    /// Map, which `emit_read_mut_var_cow` does not judge. The read
     /// moves no credit; an in-place write through it records nothing, and a
     /// helper that answers with another block is a rebind of its own.
     pub(crate) fn witness_mut_read(&mut self, id: almide_ir::VarId, global: bool) {
@@ -146,6 +158,44 @@ impl Emitter<'_> {
                 }
             }
             None => self.witness_store(value, t),
+        }
+    }
+
+    /// #2758: the Bind route of a C-319 cell var (stmts.rs `lower_stmt_bind`).
+    /// Two blocks, in instruction order: the OCCUPANT is handed to the new
+    /// cell behind the bind's share guard (`rc_inc_top` on a borrowed rhs) —
+    /// the cell is its holder, so it is recorded as any value stored into a
+    /// holder (`im` / `am`, [`Emitter::witness_share_or_move`]); then the
+    /// CELL is a fresh block the local owns (`i`), whose previous cell the
+    /// `$dec_cell` before `$alloc` released (dec-old, as any rebind). The
+    /// cell's later events: one `a`+`m` per env that captures it
+    /// ([`Emitter::witness_cell_capture`]), its release at every exit
+    /// (exit_plan.rs, `dec_fn_of_local` picks `$dec_cell`). A write through
+    /// the cell is the outer holder's (#3138, [`Emitter::witness_holder`]);
+    /// a share of the occupant read through the cell lands on the cell's
+    /// line — the occupant lives exactly as long as the cell holds it, and a
+    /// share is `a`+`m`, so the line's balance is unchanged.
+    pub(crate) fn witness_cell_bind(&mut self, idx: u32, declared: SliceTy, value: &almide_ir::IrExpr) {
+        if self.witness.is_none() {
+            return;
+        }
+        if self.rc_droppable(declared) {
+            self.witness_share_or_move(value, "bind:cell-borrowed-temp");
+        }
+        if let Some(w) = self.witness.as_mut() {
+            w.bind_fresh(idx);
+        }
+    }
+
+    /// #2758: a C-319 cell captured by a new closure (emitter_values.rs
+    /// `lower_lambda_value`): the route's `F_INC` on the cell is the share
+    /// and the env takes it away (`am`; the env's drop glue releases it). A
+    /// cell this frame did not bind (a closure's own scalar-typed capture,
+    /// func.rs binds only droppable ones) is not attributable: decline.
+    pub(crate) fn witness_cell_capture(&mut self, idx: u32) {
+        let Some(w) = self.witness.as_mut() else { return };
+        if !w.arg_share_move(idx) {
+            w.decline("capture:cell");
         }
     }
 }

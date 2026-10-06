@@ -1,0 +1,12 @@
+// #3439: two modules that each declare a type with the same name keep their
+// own: inside module `a`, `Ctx` is a's list alias, and inside `b` it is b's
+// record, whichever module is imported last.
+import self.a
+import self.b
+
+effect fn main() -> Unit = {
+  println(int.to_string(list.len(a.extend([]))))
+  println(int.to_string(list.len(b.empty().names)))
+  println(int.to_string(a.size(a.extend(a.extend([])))))
+  println(b.add(b.add(b.empty(), "p"), "q").names |> list.join(","))
+}

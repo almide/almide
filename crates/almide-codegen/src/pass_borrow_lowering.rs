@@ -60,9 +60,48 @@ impl NanoPass for BorrowLoweringPass {
             lower.own_consumed_ref_mut(body_tail(&mut func.body));
             ref_binders.extend(lower.ref_binders);
         }
+        // A top-level let's value is code too: the call-site borrow pass
+        // inserts its `Borrow` nodes (`insert_borrows_at_call_sites`), so its
+        // final form is decided here like a fn body's. Unvisited, a named fn
+        // taken as a value (`let keep = apply`) kept `&_fn_arg0` of its
+        // eta-expansion's closure param — `&Rc<dyn Fn>` at a `&dyn Fn` slot,
+        // rustc E0277 (#3297). A top-let has no params of its own.
+        let top_lets = program.top_lets.iter_mut()
+            .chain(program.modules.iter_mut().flat_map(|m| m.top_lets.iter_mut()));
+        for tl in top_lets {
+            let mut lower = Lower { params: &[], ann: &program.codegen_annotations, counting_binders: HashSet::new(), ref_binders: HashSet::new() };
+            lower.visit_expr_mut(&mut tl.value);
+            ref_binders.extend(lower.ref_binders);
+        }
+        let mut guard_reads = GuardReads::default();
+        let bodies = program.functions.iter().map(|f| &f.body)
+            .chain(program.top_lets.iter().map(|tl| &tl.value))
+            .chain(program.modules.iter().flat_map(|m| m.functions.iter().map(|f| &f.body)
+                .chain(m.top_lets.iter().map(|tl| &tl.value))));
+        for body in bodies {
+            almide_ir::visit::IrVisitor::visit_expr(&mut guard_reads, body);
+        }
+        let codegen_annotations = &mut program.codegen_annotations;
         codegen_annotations.param_borrows = param_borrows;
         codegen_annotations.ref_binders = ref_binders;
+        codegen_annotations.guard_read_vars = guard_reads.0;
         PassResult { program, changed: true }
+    }
+}
+
+/// Every variable a `match` arm's guard reads, over the FINAL IR — the
+/// `guard_read_vars` annotation the walker's box-pattern rewrite reads.
+#[derive(Default)]
+struct GuardReads(HashSet<VarId>);
+
+impl almide_ir::visit::IrVisitor for GuardReads {
+    fn visit_expr(&mut self, expr: &IrExpr) {
+        if let IrExprKind::Match { arms, .. } = &expr.kind {
+            for guard in arms.iter().filter_map(|a| a.guard.as_ref()) {
+                self.0.extend(almide_ir::free_vars::free_vars(guard, &HashSet::new()));
+            }
+        }
+        almide_ir::visit::walk_expr(self, expr);
     }
 }
 
@@ -193,6 +232,18 @@ fn propagating_rc_cow_value(e: &IrExpr) -> bool {
         e.kind,
         IrExprKind::If { .. } | IrExprKind::Match { .. } | IrExprKind::Block { .. } | IrExprKind::UnwrapOr { .. }
     )
+}
+
+/// A list value no binding holds — a call's result, a collected chain, a
+/// literal: borrowing it borrows a temporary that dies with the statement, so
+/// handing it over by value moves nothing anyone reads again.
+fn is_temporary(e: &IrExpr) -> bool {
+    match &e.kind {
+        IrExprKind::RuntimeCall { symbol, .. } => !symbol.as_str().ends_with('!'),
+        IrExprKind::Call { .. } | IrExprKind::List { .. } => true,
+        IrExprKind::IterChain { collector, .. } => matches!(collector, IterCollector::Collect),
+        _ => false,
+    }
 }
 
 /// The runtime's borrowing twin of a decoded-field lookup (#1679): the plain
@@ -371,10 +422,33 @@ impl Lower<'_> {
     /// (rustc E0308 behind a green check): the reference side derefs.
     /// Both sides references (`p == q`) compare as `&T == &T` and need
     /// nothing; strings are already borrowed on both sides as `&str`.
+    ///
+    /// A binder a match over a borrowed subject bound (`ref_binders`) is a
+    /// reference exactly like the param it reads: `other => other == b` was
+    /// `other == (*b)`, `&T == T` (rustc E0277, #3437). A `Copy` scalar
+    /// binder is already read as `*n` and is a value here.
     fn lower_compare(&self, expr: &mut IrExpr) {
         let IrExprKind::BinOp { op: BinOp::Eq | BinOp::Neq, left, right } = &mut expr.kind else { return };
+        // The box-deref of a boxed payload bound by reference (`Node(l, _)`
+        // over a borrowed subject binds `l: &Box<T>`) is `*l`, a `Box<T>`,
+        // which compares with neither a `T` nor a `&T`: read the value
+        // through both (`**l`).
+        for side in [&mut *left, &mut *right] {
+            if let IrExprKind::Deref { expr: inner } = &side.kind
+                && let Some(id) = var_id(inner)
+                && self.ref_binders.contains(&id)
+                && self.ann.box_binders.contains(&id)
+                && !is_copy_scalar(&side.ty)
+            {
+                let value = std::mem::replace(side.as_mut(), mk(IrExprKind::Unit, Ty::Unit, None));
+                let ty = value.ty.clone();
+                let span = value.span;
+                *side.as_mut() = mk(IrExprKind::Deref { expr: Box::new(value) }, ty, span);
+            }
+        }
         let is_ref = |e: &IrExpr| var_id(e).is_some_and(|id| {
             matches!(param_mode(self.params, id), Some(ParamBorrow::Ref | ParamBorrow::RefSlice))
+                || (self.ref_binders.contains(&id) && !is_copy_scalar(&e.ty))
         });
         let (l, r) = (is_ref(left), is_ref(right));
         if l == r {
@@ -411,7 +485,13 @@ impl Lower<'_> {
             IrExprKind::Clone { expr } => match var_id(expr) { Some(id) => id, None => return },
             _ => return,
         };
-        let owns_first = is_ref_param(self.params, id) || (is_ref_mut_param(self.params, id) && !is_copy_scalar(&value.ty));
+        // A payload binder of a match over a borrowed subject is bound `&T`
+        // by Rust's default binding modes (`ref_binders`): stored into an
+        // owned place it is owned first, like the param it was read from
+        // (#3303 — `color = c` in `Solid(c) => ..` was `expected C, found &C`).
+        // A `Copy` scalar binder is already read as `*n`.
+        let owns_first = is_ref_param(self.params, id)
+            || ((is_ref_mut_param(self.params, id) || self.ref_binders.contains(&id)) && !is_copy_scalar(&value.ty));
         if !owns_first {
             return;
         }
@@ -442,13 +522,70 @@ impl Lower<'_> {
         if !branches.is_empty() {
             return branches.into_iter().for_each(|b| self.own_consumed_ref_mut(b));
         }
+        // The box-deref of a payload a by-reference match bound (`*a` with
+        // `a: &Box<T>`, #3434) is a `Box<T>` place behind a reference: a
+        // by-value slot owns the boxed value, `(**a).clone()`.
+        if let IrExprKind::Deref { expr: inner } = &e.kind
+            && var_id(inner).is_some_and(|id| self.ref_binders.contains(&id))
+            && !is_copy_scalar(&e.ty)
+        {
+            let ty = e.ty.clone();
+            let span = e.span;
+            let place = std::mem::replace(e, mk(IrExprKind::Unit, Ty::Unit, None));
+            *e = owned_read(mk(IrExprKind::Deref { expr: Box::new(place) }, ty, span));
+            return;
+        }
         let Some(id) = var_id(e) else { return };
-        if !is_ref_mut_param(self.params, id) || is_copy_scalar(&e.ty) {
+        // A field a destructure bound by reference off a borrowed record
+        // (`let { b, n } = p`, #3303) is in the same position: the binder is
+        // `&T`, and a by-value slot owns it first.
+        if !(is_ref_mut_param(self.params, id) || self.ref_binders.contains(&id)) || is_copy_scalar(&e.ty) {
             return;
         }
         let ty = e.ty.clone();
         let span = e.span;
         *e = owned_read(mk(IrExprKind::Var { id }, ty, span));
+    }
+
+    /// The source of a range op whose runtime takes it either way (#3398,
+    /// `owned_source.rs`). A source that is an owned value — the bare `Var`
+    /// the clone pass or TailCallOpt left at its last use, or a temporary the
+    /// borrow would have pointed at — is passed by value to the op's `_owned`
+    /// twin, which moves the kept elements instead of cloning them. A bare
+    /// `Var` that is a reference in Rust (a by-reference param or binder, a
+    /// borrowed loop binder) or a place a move cannot leave (a global, a
+    /// shared cell, a copy-on-write `var`) is borrowed again: the borrowing
+    /// op is what it takes.
+    fn lower_either_way_source(&self, expr: &mut IrExpr) {
+        let IrExprKind::RuntimeCall { symbol, args } = &mut expr.kind else { return };
+        let Some(twin) = crate::owned_source::owned_twin(symbol.as_str()) else { return };
+        let Some(source) = args.first_mut() else { return };
+        match &source.kind {
+            IrExprKind::Var { id } if self.stays_borrowed(*id) => {
+                let value = std::mem::replace(source, mk(IrExprKind::Unit, Ty::Unit, None));
+                let (ty, span) = (value.ty.clone(), value.span);
+                *source = mk(IrExprKind::Borrow { expr: Box::new(value), as_str: false, mutable: false }, ty, span);
+            }
+            IrExprKind::Var { .. } => *symbol = sym(twin),
+            IrExprKind::Borrow { expr: inner, as_str: false, mutable: false } if is_temporary(inner) => {
+                let IrExprKind::Borrow { expr: inner, .. } = std::mem::replace(&mut source.kind, IrExprKind::Unit) else { unreachable!() };
+                *source = *inner;
+                *symbol = sym(twin);
+            }
+            _ => {}
+        }
+    }
+
+    /// A var the walker renders as a reference or as a place nothing may be
+    /// moved out of.
+    fn stays_borrowed(&self, id: VarId) -> bool {
+        is_ref_param(self.params, id)
+            || is_ref_mut_param(self.params, id)
+            || self.ref_binders.contains(&id)
+            || self.ann.borrowed_loop_vars.contains(&id)
+            || self.ann.global(id).is_some()
+            || self.ann.is_shared_mut(&id)
+            || self.ann.is_rc_cow(&id)
     }
 
     /// The by-value positions [`Lower::own_consumed_ref_mut`] applies to. A
@@ -482,6 +619,9 @@ impl IrMutVisitor for Lower<'_> {
         {
             self.counting_binders.insert(*var);
         }
+        // Before the consumer rule, which would own a bare reference source
+        // with `.to_vec()` where a borrow is what the op takes.
+        self.lower_either_way_source(expr);
         // Before the walk: the rule reads the ORIGINAL bare `Var` operands,
         // which the scalar-read lowering below would otherwise turn into
         // `Deref` first (a scalar is exempt anyway; the order keeps the two
@@ -540,6 +680,22 @@ impl IrMutVisitor for Lower<'_> {
         // carries the reference on purpose, and only becomes a bare `Var`
         // once the expression walk below lowers it.
         self.take_overwritten_ref_mut(stmt);
+        // `let { b, n } = p` over a by-reference param (or a binder such a
+        // match or destructure bound) binds its fields by reference, exactly
+        // like a match arm's payloads (#3303): record them before the
+        // statements that read them are walked.
+        if let IrStmtKind::BindDestructure { pattern, value } = &stmt.kind
+            && let Some(id) = (match &value.kind {
+                IrExprKind::Borrow { expr: inner, .. } => var_id(inner),
+                _ => var_id(value),
+            })
+            && (matches!(param_mode(self.params, id), Some(ParamBorrow::Ref)) || self.ref_binders.contains(&id))
+        {
+            let mut bound = Vec::new();
+            pattern_binders(pattern, &mut bound);
+            self.ref_binders.insert(id);
+            self.ref_binders.extend(bound);
+        }
         match &mut stmt.kind {
             IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. }
             | IrStmtKind::FieldAssign { value, .. } | IrStmtKind::IndexAssign { value, .. } => {

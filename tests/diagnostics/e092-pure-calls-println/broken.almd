@@ -1,0 +1,8 @@
+// #3250: `@pure` is checked — output is not pure.
+@pure
+fn area(w: Int, h: Int) -> Int = {
+  println("w=${w}")
+  w * h
+}
+
+fn main() -> Unit = println("${area(2, 3)}")

@@ -1,0 +1,39 @@
+// @leg: structural
+// @fan-sequential-twin
+// A fan over async JS hooks overlaps their waits on --host js (#3383): every
+// element is one call of a `returns: promise` hook on a value it already has,
+// so the module starts every hook, suspends once, and takes the values in arm
+// order (the start / wait / take protocol, docs/wasm/JS-HOST-ASYNC-IMPORTS.md).
+// The observation is the sequential lowering's (ADR-0024 D1/D6/N7): values in
+// arm order, every element runs, the first err in arm order is the result.
+// scripts/check-js-host.sh runs this fixture twice — overlapped, and built
+// with ALMIDE_FAN_SEQUENTIAL=1 (one suspension per element) — and both runs
+// must print this .expected; the host-side checks, including the timing and
+// the in-flight count each lowering must show, live in
+// fan_async_overlap.host.mjs.
+@extern(wasm, "js", "fetch", returns: promise)
+effect fn fetch(key: String) -> String
+
+@extern(wasm, "js", "size", returns: promise)
+fn size(key: String) -> Result[Int, String]
+
+@extern(wasm, "js", "peek", returns: promise)
+fn peek(key: String) -> String
+
+effect fn fetch_all(keys: List[String]) -> List[String] = fan.map(keys, (k) => fetch(k))!
+
+effect fn sizes(keys: List[String]) -> List[Int] = fan.map(keys, (k) => size(k))!
+
+effect fn peek_all(keys: List[String]) -> List[String] = fan.map(keys, (k) => ok(peek(k)))!
+
+effect fn first_found(keys: List[String]) -> String = fan.any(keys, (k) => fetch(k))!
+
+effect fn pair(a: String, b: String) -> String = {
+  let (x, y) = fan {
+    fetch(a)
+    peek(b)
+  }
+  x + "+" + y
+}
+
+fn main() -> Unit = println("fan overlap")

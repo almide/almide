@@ -59,7 +59,7 @@ pub fn almide_rt_list_swap<T: Clone>(xs: &[T], i: i64, j: i64) -> Vec<T> { let m
 pub fn almide_rt_list_map<A, B>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> B>) -> Vec<B> { let f = move |a| f(a); xs.into_iter().map(f).collect() }
 pub fn almide_rt_list_filter<A: Clone>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> bool>) -> Vec<A> { let f = move |a| f(a); xs.into_iter().filter(|x| f(x.clone())).collect() }
 pub fn almide_rt_list_fold<A, B>(xs: Vec<A>, init: B, f: std::rc::Rc<dyn Fn(B, A) -> B>) -> B { let f = move |a, b| f(a, b); xs.into_iter().fold(init, f) }
-pub fn almide_rt_list_find<A: Clone>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> bool>) -> Option<A> { let f = move |a| f(a); xs.into_iter().find(|x| f(x.clone())) }
+pub fn almide_rt_list_find<A: Clone>(xs: &[A], f: std::rc::Rc<dyn Fn(A) -> bool>) -> Option<A> { let f = move |a| f(a); xs.iter().find(|x| f((*x).clone())).cloned() }
 pub fn almide_rt_list_any<A: Clone>(xs: &[A], f: std::rc::Rc<dyn Fn(A) -> bool>) -> bool { let f = move |a| f(a); xs.iter().any(|x| f(x.clone())) }
 pub fn almide_rt_list_all<A: Clone>(xs: &[A], f: std::rc::Rc<dyn Fn(A) -> bool>) -> bool { let f = move |a| f(a); xs.iter().all(|x| f(x.clone())) }
 pub fn almide_rt_list_each<A: Clone>(xs: &[A], f: std::rc::Rc<dyn Fn(A)>) { let f = move |a| f(a); for x in xs { f(x.clone()); } }
@@ -102,11 +102,11 @@ pub fn almide_rt_list_flat_map_arr<A, B, const N: usize, F: Fn(A) -> [B; N]>(xs:
 }
 pub fn almide_rt_list_flat_map_effect<A, B>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> Result<Vec<B>, String>>) -> Result<Vec<B>, String> { let f = move |a| f(a); let mut r = Vec::new(); for x in xs { r.extend(f(x)?); } Ok(r) }
 pub fn almide_rt_list_filter_map<A, B>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> Option<B>>) -> Vec<B> { let f = move |a| f(a); xs.into_iter().filter_map(f).collect() }
-pub fn almide_rt_list_find_index<A: Clone>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> bool>) -> Option<i64> { let f = move |a| f(a); xs.into_iter().position(|x| f(x)).map(|i| i as i64) }
-pub fn almide_rt_list_take<T>(xs: Vec<T>, n: i64) -> Vec<T> { xs.into_iter().take(n as usize).collect() }
-pub fn almide_rt_list_drop<T>(xs: Vec<T>, n: i64) -> Vec<T> { xs.into_iter().skip(n as usize).collect() }
-pub fn almide_rt_list_take_while<A: Clone>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> bool>) -> Vec<A> { let f = move |a| f(a); xs.into_iter().take_while(|x| f(x.clone())).collect() }
-pub fn almide_rt_list_drop_while<A: Clone>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> bool>) -> Vec<A> { let f = move |a| f(a); xs.into_iter().skip_while(|x| f(x.clone())).collect() }
+pub fn almide_rt_list_find_index<A: Clone>(xs: &[A], f: std::rc::Rc<dyn Fn(A) -> bool>) -> Option<i64> { let f = move |a| f(a); xs.iter().position(|x| f(x.clone())).map(|i| i as i64) }
+pub fn almide_rt_list_take<T: Clone>(xs: &[T], n: i64) -> Vec<T> { xs.iter().take(n as usize).cloned().collect() }
+pub fn almide_rt_list_drop<T: Clone>(xs: &[T], n: i64) -> Vec<T> { xs.iter().skip(n as usize).cloned().collect() }
+pub fn almide_rt_list_take_while<A: Clone>(xs: &[A], f: std::rc::Rc<dyn Fn(A) -> bool>) -> Vec<A> { let f = move |a| f(a); xs.iter().take_while(|x| f((*x).clone())).cloned().collect() }
+pub fn almide_rt_list_drop_while<A: Clone>(xs: &[A], f: std::rc::Rc<dyn Fn(A) -> bool>) -> Vec<A> { let f = move |a| f(a); xs.iter().skip_while(|x| f((*x).clone())).cloned().collect() }
 pub fn almide_rt_list_partition<A: Clone>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> bool>) -> (Vec<A>, Vec<A>) { let f = move |a| f(a); xs.into_iter().partition(|x| f(x.clone())) }
 pub fn almide_rt_list_group_by<A: Clone, B: PartialEq + Clone + 'static>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> B>) -> AlmideMap<B, Vec<A>> {
     let f = move |a| f(a);
@@ -117,7 +117,7 @@ pub fn almide_rt_list_group_by<A: Clone, B: PartialEq + Clone + 'static>(xs: Vec
     }
     m
 }
-pub fn almide_rt_list_slice<T: Clone>(xs: Vec<T>, start: i64, end: i64) -> Vec<T> { let s = start as usize; let e = (end as usize).min(xs.len()); if s >= e { vec![] } else { xs[s..e].to_vec() } }
+pub fn almide_rt_list_slice<T: Clone>(xs: &[T], start: i64, end: i64) -> Vec<T> { let s = start as usize; let e = (end as usize).min(xs.len()); if s >= e { vec![] } else { xs[s..e].to_vec() } }
 pub fn almide_rt_list_insert<T>(mut xs: Vec<T>, i: i64, x: T) -> Vec<T> { let idx = (i as usize).min(xs.len()); xs.insert(idx, x); xs }
 pub fn almide_rt_list_remove_at<T>(mut xs: Vec<T>, i: i64) -> Vec<T> { if (i as usize) < xs.len() { xs.remove(i as usize); } xs }
 pub fn almide_rt_list_update<A: Clone>(mut xs: Vec<A>, i: i64, f: std::rc::Rc<dyn Fn(A) -> A>) -> Vec<A> { let f = move |a| f(a); if let Some(s) = xs.get_mut(i as usize) { *s = f(s.clone()); } xs }
@@ -165,14 +165,29 @@ pub fn almide_rt_list_sort_by<A: Clone, B: Ord>(mut xs: Vec<A>, f: std::rc::Rc<d
 pub fn almide_rt_list_fold_effect<A, B>(xs: Vec<A>, init: B, f: std::rc::Rc<dyn Fn(B, A) -> Result<B, String>>) -> Result<B, String> { let f = move |a, b| f(a, b); let mut a = init; for x in xs { a = f(a, x)?; } Ok(a) }
 pub fn almide_rt_list_map_effect<A, B>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> Result<B, String>>) -> Result<Vec<B>, String> { let f = move |a| f(a); xs.into_iter().map(f).collect() }
 
-pub fn almide_rt_list_take_end<T: Clone>(xs: Vec<T>, n: i64) -> Vec<T> {
+pub fn almide_rt_list_take_end<T: Clone>(xs: &[T], n: i64) -> Vec<T> {
     let start = if n as usize >= xs.len() { 0 } else { xs.len() - n as usize };
     xs[start..].to_vec()
 }
-pub fn almide_rt_list_drop_end<T: Clone>(xs: Vec<T>, n: i64) -> Vec<T> {
+pub fn almide_rt_list_drop_end<T: Clone>(xs: &[T], n: i64) -> Vec<T> {
     let end = if n as usize >= xs.len() { 0 } else { xs.len() - n as usize };
     xs[..end].to_vec()
 }
+
+// The OWNED twins of the range ops (#3398). The ops above borrow their source
+// (#3397); where the source is not read again — its last use, or a temporary —
+// BorrowLowering hands it over by value and calls the `_owned` twin, which
+// keeps the elements it returns by moving them instead of cloning each one.
+// Same results as the borrowing op for every argument (negative counts and
+// out-of-range bounds included); the twin table is `owned_source.rs`.
+pub fn almide_rt_list_take_owned<T>(mut xs: Vec<T>, n: i64) -> Vec<T> { xs.truncate(n as usize); xs }
+pub fn almide_rt_list_drop_owned<T>(mut xs: Vec<T>, n: i64) -> Vec<T> { let k = (n as usize).min(xs.len()); xs.drain(..k); xs }
+pub fn almide_rt_list_take_while_owned<A: Clone>(mut xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> bool>) -> Vec<A> { let k = xs.iter().take_while(|x| f((*x).clone())).count(); xs.truncate(k); xs }
+pub fn almide_rt_list_drop_while_owned<A: Clone>(mut xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> bool>) -> Vec<A> { let k = xs.iter().take_while(|x| f((*x).clone())).count(); xs.drain(..k); xs }
+pub fn almide_rt_list_find_owned<A: Clone>(mut xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> bool>) -> Option<A> { let i = xs.iter().position(|x| f(x.clone()))?; Some(xs.swap_remove(i)) }
+pub fn almide_rt_list_slice_owned<T>(mut xs: Vec<T>, start: i64, end: i64) -> Vec<T> { let s = start as usize; let e = (end as usize).min(xs.len()); if s >= e { return Vec::new(); } xs.truncate(e); xs.drain(..s); xs }
+pub fn almide_rt_list_take_end_owned<T>(mut xs: Vec<T>, n: i64) -> Vec<T> { let start = if n as usize >= xs.len() { 0 } else { xs.len() - n as usize }; xs.drain(..start); xs }
+pub fn almide_rt_list_drop_end_owned<T>(mut xs: Vec<T>, n: i64) -> Vec<T> { let end = if n as usize >= xs.len() { 0 } else { xs.len() - n as usize }; xs.truncate(end); xs }
 // Keep the FIRST element of each distinct key, in first-occurrence order.
 // The key bound is `PartialEq` (not `Eq + Hash`) so a record, variant, tuple,
 // Option or Float key dedups exactly as the wasm leg's generic-equality scan
@@ -207,7 +222,7 @@ pub fn almide_rt_list_shuffle<T>(mut xs: Vec<T>) -> Vec<T> {
 // unified `Error: …` + exit 1 form (std's `windows(0)` panics — a raw Rust
 // panic exit 101 the wasm leg never shows). n > len returns empty like the
 // plural twin instead of leaking std's behavior.
-pub fn almide_rt_list_window<T: Clone>(xs: Vec<T>, n: i64) -> Vec<Vec<T>> {
+pub fn almide_rt_list_window<T: Clone>(xs: &[T], n: i64) -> Vec<Vec<T>> {
     if n == 0 { almide_abort("window size must be positive"); }
     if (n as usize) > xs.len() { return vec![]; }
     xs.windows(n as usize).map(|w| w.to_vec()).collect()
@@ -238,29 +253,196 @@ pub fn almide_rt_list_par_sequential() -> bool {
 }
 
 /// Worker count for `len` items: one per available core, never more than `len`.
+/// `ALMIDE_FAN_THREADS=N` (read once) caps it further — the thread-scaling
+/// lever #3003 measures both legs with; the result is the same at any N.
 pub fn almide_rt_list_par_workers(len: usize) -> usize {
+    static CAP: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    let cap = *CAP.get_or_init(|| {
+        std::env::var("ALMIDE_FAN_THREADS").ok().and_then(|v| v.parse::<usize>().ok()).filter(|&n| n > 0).unwrap_or(usize::MAX)
+    });
     let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
-    cpus.max(1).min(len.max(1))
+    cpus.max(1).min(cap).min(len.max(1))
+}
+
+// #3341 — THE FAN COST MODEL, one formula on both legs (the embedded wasm
+// host's copy is crates/almide-wasm-run/src/host_fan.rs `plan`; the two
+// constants are pinned to docs/benchmarks/fan-cost-model.txt by
+// tests/fan_cost_model_test.rs). Every parallel twin is a SITE (one per
+// callback type — the monomorphised twin's own address), and every offer at
+// a site records the compute time its elements took (`AlmideFanClock`: the
+// threads' CPU time inside the elements, so spawn latency and the time a
+// thread sat descheduled are not counted, and each worker's first element —
+// its warm-up — is kept out of the mean). A site's FIRST offer goes parallel, as
+// before #3341; later offers estimate each element at the site's last
+// measured time `t`. A parallel offer on W workers COSTS `OFFER + W·WORKER`
+// (thread spawn, join, the group's bookkeeping — measured) and SAVES
+// `t·(n − ⌈n/W⌉)`; the W with the largest positive net saving wins, and none
+// = the offer runs here, sequentially. Output is the same either way (C-321).
+// Timing element 0 first and deciding after it was measured and rejected: it
+// serialises one whole chunk, ~2x wall time when n ≈ workers (fannkuchredux).
+pub const ALMIDE_FAN_OFFER_NS: u128 = 30_000;
+pub const ALMIDE_FAN_WORKER_NS: u128 = 9_000;
+
+/// The worker count for an offer of `n` elements whose site last measured
+/// `per_elem` ns per element (`None` = its first offer): >= 2 = go parallel
+/// on that many workers, 1 = stay sequential.
+pub fn almide_rt_fan_plan(n: usize, per_elem: Option<u128>) -> usize {
+    // `ALMIDE_FAN_COST_OFF` (read once): every offer goes parallel — the
+    // pre-#3341 behaviour, the ablation the crossover is measured against.
+    static OFF: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let off = *OFF.get_or_init(|| std::env::var("ALMIDE_FAN_COST_OFF").map(|v| !v.is_empty() && v != "0").unwrap_or(false));
+    let Some(t) = per_elem.filter(|_| !off) else { return almide_rt_list_par_workers(n) };
+    let mut best = (1usize, 0u128);
+    for w in 2..=almide_rt_list_par_workers(n) {
+        let saved = t.saturating_mul((n - n.div_ceil(w)) as u128);
+        let cost = ALMIDE_FAN_OFFER_NS + ALMIDE_FAN_WORKER_NS * w as u128;
+        if saved > cost && saved - cost > best.1 {
+            best = (w, saved - cost);
+        }
+    }
+    best.0
+}
+
+fn almide_fan_history() -> &'static std::sync::Mutex<std::collections::HashMap<usize, u128>> {
+    static H: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<usize, u128>>> = std::sync::OnceLock::new();
+    H.get_or_init(Default::default)
+}
+
+/// The site's last measured time per element, if it has run before.
+fn almide_fan_estimate(site: usize) -> Option<u128> {
+    almide_fan_history().lock().ok()?.get(&site).copied()
+}
+
+/// The calling thread's CPU time in ns — the clock an offer's elements are
+/// measured on (the wasm host's copy is host_fan.rs `cpu_ns`). Wall time
+/// would also count the time the thread sat descheduled: on a loaded
+/// machine ONE preempted element of a trivial body read 4.6 ms and kept its
+/// site parallel. Elsewhere: a monotonic wall clock.
+#[cfg(all(any(target_os = "linux", target_os = "macos"), target_pointer_width = "64"))]
+fn almide_fan_cpu_ns() -> u64 {
+    #[repr(C)]
+    struct Timespec { sec: i64, nsec: i64 }
+    unsafe extern "C" {
+        fn clock_gettime(clock: i32, ts: *mut Timespec) -> i32;
+    }
+    // CLOCK_THREAD_CPUTIME_ID
+    const CLOCK: i32 = if cfg!(target_os = "linux") { 3 } else { 16 };
+    let mut ts = Timespec { sec: 0, nsec: 0 };
+    if unsafe { clock_gettime(CLOCK, &mut ts) } != 0 {
+        return 0;
+    }
+    (ts.sec as u64).wrapping_mul(1_000_000_000).wrapping_add(ts.nsec as u64)
+}
+#[cfg(not(all(any(target_os = "linux", target_os = "macos"), target_pointer_width = "64")))]
+fn almide_fan_cpu_ns() -> u64 {
+    static T0: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    T0.get_or_init(std::time::Instant::now).elapsed().as_nanos() as u64
+}
+
+/// What one offer's elements took. A worker thread's FIRST element is its
+/// warm-up (a fresh thread's first touch of the body) and is kept apart —
+/// that cost belongs to the offer's `WORKER` term, not to `t`; the estimate
+/// is the warm elements' mean, or the warm-ups' when no worker ran a second
+/// element. The calling thread's sequential run is all warm.
+struct AlmideFanClock {
+    warm: [std::sync::atomic::AtomicU64; 2],
+    cold: [std::sync::atomic::AtomicU64; 2],
+}
+
+impl AlmideFanClock {
+    fn new() -> Self {
+        let z = || std::sync::atomic::AtomicU64::new(0);
+        AlmideFanClock { warm: [z(), z()], cold: [z(), z()] }
+    }
+
+    fn add(cell: &[std::sync::atomic::AtomicU64; 2], ns: u64, n: u64) {
+        cell[0].fetch_add(ns, std::sync::atomic::Ordering::Relaxed);
+        cell[1].fetch_add(n, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// The calling thread runs the offer: `g` returns its result and how
+    /// many elements it evaluated.
+    fn calling<R>(&self, g: impl FnOnce() -> (R, usize)) -> R {
+        let t0 = almide_fan_cpu_ns();
+        let (r, n) = g();
+        Self::add(&self.warm, almide_fan_cpu_ns().wrapping_sub(t0), n as u64);
+        r
+    }
+
+    /// A worker thread runs `items` through `each`: `Some(go_on)` = it
+    /// evaluated the element, `None` = it stopped without evaluating it.
+    fn worker<T>(&self, items: impl IntoIterator<Item = T>, mut each: impl FnMut(T) -> Option<bool>) {
+        let mut it = items.into_iter();
+        let Some(first) = it.next() else { return };
+        let t0 = almide_fan_cpu_ns();
+        let go = each(first);
+        let t1 = almide_fan_cpu_ns();
+        if go.is_some() {
+            Self::add(&self.cold, t1.wrapping_sub(t0), 1);
+        }
+        if go != Some(true) {
+            return;
+        }
+        let mut n = 0u64;
+        for x in it {
+            match each(x) {
+                Some(go_on) => {
+                    n += 1;
+                    if !go_on { break; }
+                }
+                None => break,
+            }
+        }
+        Self::add(&self.warm, almide_fan_cpu_ns().wrapping_sub(t1), n);
+    }
+
+    /// Record the offer as the site's estimate: ns per element.
+    fn record(self, site: usize) {
+        let [w, wn] = self.warm.map(|a| a.into_inner());
+        let [c, cn] = self.cold.map(|a| a.into_inner());
+        let (ns, n) = if wn > 0 { (w, wn) } else { (c, cn) };
+        if n > 0 {
+            if let Ok(mut h) = almide_fan_history().lock() {
+                h.insert(site, u128::from(ns) / u128::from(n));
+            }
+        }
+    }
 }
 
 pub fn almide_rt_list_par_map<A: Send + Sync + Clone, B: Send, F: Fn(A) -> B + Send + Sync>(xs: Vec<A>, f: F) -> Vec<B> {
     if xs.len() < ALMIDE_PARALLEL_THRESHOLD || almide_rt_list_par_sequential() {
         return xs.into_iter().map(&f).collect();
     }
-    let chunk_size = xs.len().div_ceil(almide_rt_list_par_workers(xs.len()));
-    let mut slots: Vec<Option<B>> = (0..xs.len()).map(|_| None).collect();
+    let site = almide_rt_list_par_map::<A, B, F> as fn(Vec<A>, F) -> Vec<B> as usize;
+    let n = xs.len();
+    let workers = almide_rt_fan_plan(n, almide_fan_estimate(site));
+    let clock = AlmideFanClock::new();
+    if workers < 2 {
+        let out = clock.calling(|| (xs.into_iter().map(&f).collect(), n));
+        clock.record(site);
+        return out;
+    }
+    let chunk_size = n.div_ceil(workers);
+    let mut slots: Vec<Option<B>> = (0..n).map(|_| None).collect();
     // Flush first: a worker's abort cannot reach this thread's buffer (C-197).
     almide_stdout_flush();
+    // The workers work for the enclosing fan element: a trap on one waits for
+    // the elements below it (ADR-0024 D6).
+    let sink = almide_fan_current();
     std::thread::scope(|s| {
         for (chunk, out) in xs.chunks(chunk_size).zip(slots.chunks_mut(chunk_size)) {
-            let f = &f;
+            let (f, clock) = (&f, &clock);
+            let sink = sink.clone();
             s.spawn(move || {
-                for (slot, x) in out.iter_mut().zip(chunk) {
+                almide_fan_adopt(sink);
+                clock.worker(out.iter_mut().zip(chunk), |(slot, x)| {
                     *slot = Some(f(x.clone()));
-                }
+                    Some(true)
+                });
             });
         }
     });
+    clock.record(site);
     slots.into_iter().map(|b| b.expect("list.par_map: every slot is written by its worker")).collect()
 }
 
@@ -268,81 +450,106 @@ pub fn almide_rt_list_par_filter<A: Send + Sync + Clone, F: Fn(A) -> bool + Send
     if xs.len() < ALMIDE_PARALLEL_THRESHOLD || almide_rt_list_par_sequential() {
         return xs.into_iter().filter(|x| f(x.clone())).collect();
     }
-    let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
-    let chunk_size = (xs.len() + cpus - 1) / cpus;
-    let chunks: Vec<Vec<A>> = xs.chunks(chunk_size).map(|c| c.to_vec()).collect();
+    let site = almide_rt_list_par_filter::<A, F> as fn(Vec<A>, F) -> Vec<A> as usize;
+    let n = xs.len();
+    let workers = almide_rt_fan_plan(n, almide_fan_estimate(site));
+    let clock = AlmideFanClock::new();
+    if workers < 2 {
+        let out = clock.calling(|| (xs.into_iter().filter(|x| f(x.clone())).collect(), n));
+        clock.record(site);
+        return out;
+    }
+    let chunk_size = n.div_ceil(workers);
+    let chunks: Vec<&[A]> = xs.chunks(chunk_size).collect();
     let mut results: Vec<Option<Vec<A>>> = (0..chunks.len()).map(|_| None).collect();
     // Flush first: a worker's abort cannot reach this thread's buffer (C-197).
     almide_stdout_flush();
+    // The workers work for the enclosing fan element: a trap on one waits for
+    // the elements below it (ADR-0024 D6).
+    let sink = almide_fan_current();
     std::thread::scope(|s| {
         let mut handles = Vec::new();
         for chunk in &chunks {
-            let f = &f;
+            let (f, clock) = (&f, &clock);
+            let sink = sink.clone();
             handles.push(s.spawn(move || {
-                chunk.iter().filter(|x| f((*x).clone())).cloned().collect::<Vec<A>>()
+                almide_fan_adopt(sink);
+                let mut kept = Vec::new();
+                clock.worker(chunk.iter(), |x| {
+                    if f(x.clone()) {
+                        kept.push(x.clone());
+                    }
+                    Some(true)
+                });
+                kept
             }));
         }
         for (i, handle) in handles.into_iter().enumerate() {
             results[i] = Some(handle.join().unwrap());
         }
     });
+    clock.record(site);
     results.into_iter().flatten().flatten().collect()
+}
+
+/// `any` (`stop_on` = true) / `all` (`stop_on` = false): does some element's
+/// verdict equal `stop_on`. Records the elements it actually evaluated.
+fn almide_fan_search<A: Send + Sync + Clone, F: Fn(A) -> bool + Send + Sync>(site: usize, xs: &[A], f: &F, stop_on: bool) -> bool {
+    let clock = AlmideFanClock::new();
+    let look = |x: &A| f(x.clone()) == stop_on;
+    let workers = almide_rt_fan_plan(xs.len(), almide_fan_estimate(site));
+    let hit = if workers < 2 {
+        clock.calling(|| {
+            let mut seen = 0usize;
+            let hit = xs.iter().any(|x| {
+                seen += 1;
+                look(x)
+            });
+            (hit, seen)
+        })
+    } else {
+        let chunk_size = xs.len().div_ceil(workers);
+        let hit = std::sync::atomic::AtomicBool::new(false);
+        // Flush first: a worker's abort cannot reach this thread's buffer (C-197).
+        almide_stdout_flush();
+        // The workers work for the enclosing fan element: a trap on one waits for
+        // the elements below it (ADR-0024 D6).
+        let sink = almide_fan_current();
+        std::thread::scope(|s| {
+            for chunk in xs.chunks(chunk_size) {
+                let (hit, clock, look) = (&hit, &clock, &look);
+                let sink = sink.clone();
+                s.spawn(move || {
+                    almide_fan_adopt(sink);
+                    clock.worker(chunk, |x| {
+                        if hit.load(std::sync::atomic::Ordering::Relaxed) { return None; }
+                        if look(x) {
+                            hit.store(true, std::sync::atomic::Ordering::Relaxed);
+                            return Some(false);
+                        }
+                        Some(true)
+                    });
+                });
+            }
+        });
+        hit.load(std::sync::atomic::Ordering::Relaxed)
+    };
+    clock.record(site);
+    hit
 }
 
 pub fn almide_rt_list_par_any<A: Send + Sync + Clone, F: Fn(A) -> bool + Send + Sync>(xs: &[A], f: F) -> bool {
     if xs.len() < ALMIDE_PARALLEL_THRESHOLD || almide_rt_list_par_sequential() {
         return xs.iter().any(|x| f(x.clone()));
     }
-    let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
-    let chunk_size = (xs.len() + cpus - 1) / cpus;
-    let chunks: Vec<&[A]> = xs.chunks(chunk_size).collect();
-    let found = std::sync::atomic::AtomicBool::new(false);
-    // Flush first: a worker's abort cannot reach this thread's buffer (C-197).
-    almide_stdout_flush();
-    std::thread::scope(|s| {
-        for chunk in &chunks {
-            let f = &f;
-            let found = &found;
-            s.spawn(move || {
-                for x in *chunk {
-                    if found.load(std::sync::atomic::Ordering::Relaxed) { return; }
-                    if f(x.clone()) {
-                        found.store(true, std::sync::atomic::Ordering::Relaxed);
-                        return;
-                    }
-                }
-            });
-        }
-    });
-    found.load(std::sync::atomic::Ordering::Relaxed)
+    almide_fan_search(almide_rt_list_par_any::<A, F> as fn(&[A], F) -> bool as usize, xs, &f, true)
 }
 
 pub fn almide_rt_list_par_all<A: Send + Sync + Clone, F: Fn(A) -> bool + Send + Sync>(xs: &[A], f: F) -> bool {
     if xs.len() < ALMIDE_PARALLEL_THRESHOLD || almide_rt_list_par_sequential() {
         return xs.iter().all(|x| f(x.clone()));
     }
-    let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
-    let chunk_size = (xs.len() + cpus - 1) / cpus;
-    let chunks: Vec<&[A]> = xs.chunks(chunk_size).collect();
-    let failed = std::sync::atomic::AtomicBool::new(false);
-    // Flush first: a worker's abort cannot reach this thread's buffer (C-197).
-    almide_stdout_flush();
-    std::thread::scope(|s| {
-        for chunk in &chunks {
-            let f = &f;
-            let failed = &failed;
-            s.spawn(move || {
-                for x in *chunk {
-                    if failed.load(std::sync::atomic::Ordering::Relaxed) { return; }
-                    if !f(x.clone()) {
-                        failed.store(true, std::sync::atomic::Ordering::Relaxed);
-                        return;
-                    }
-                }
-            });
-        }
-    });
-    !failed.load(std::sync::atomic::Ordering::Relaxed)
+    !almide_fan_search(almide_rt_list_par_all::<A, F> as fn(&[A], F) -> bool as usize, xs, &f, false)
 }
 
 // ── Mutable operations ──

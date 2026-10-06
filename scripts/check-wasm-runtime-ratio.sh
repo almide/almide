@@ -170,6 +170,19 @@ if [ "${1:-}" = "--measure" ]; then
 # same change); a measured row that stops benching fails as a regression.
 # ab_band is the A/B tolerance in percent (a policy line, not a measurement);
 # a fan row overrides it with `ab_band=NN` at the end of its row.
+# fan=… on a fan row names the wasm route (#3003, ADR-0011 §D2a):
+#   fan=instance    — a pure scalar chunk map (`fan { list.map(xs, f) }`,
+#                     scalar or scalar-tuple results, scalar captures): the
+#                     embedded host runs the chunks on pooled instances of
+#                     the module, one per OS thread. Every other host — stock wasmtime, any WASI
+#                     runtime, the `to_wasi` / p2 / p3 artifacts — runs the
+#                     same artifact sequentially, byte-identical (C-321).
+#   fan=sequential  — a shape stage 1 does not offer (heap elements, results
+#                     or captures; `fan.map`): sequential on every wasm host
+#                     until #3331 (copy-in/out with a measured break-even).
+#                     binarytrees' and mandelbrot's `fan.map` callbacks are
+#                     sequential on the native leg too (#2044 threads only
+#                     the `fan { list.map }` shape fannkuchredux uses).
 HDR
     echo "version = $ver"
     echo "date    = $(date +%F)"
@@ -186,6 +199,7 @@ HDR
       done
       suffix="${a:+ args=$a}"
       case "$name" in binarytrees|mandelbrot|fannkuchredux) suffix="$suffix ab_band=100" ;; esac
+      case "$name" in fannkuchredux) suffix="$suffix fan=instance" ;; binarytrees|mandelbrot) suffix="$suffix fan=sequential" ;; esac
       if [ -n "$w" ] && [ -n "$n" ] && [ -n "$wc" ] && [ -n "$nc" ]; then
         fmt=$(python3 -c "
 n,w,nc,wc=$n,$w,$nc,$wc

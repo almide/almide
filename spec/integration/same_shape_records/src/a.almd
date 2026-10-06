@@ -1,0 +1,7 @@
+// #3283: `Size` and `b.Extent` declare the same field set. Every literal in
+// this module is a `Size`; every literal in `b` is an `Extent`.
+type Size = { w: Float, h: Float }
+
+fn unit() -> Size = { w: 1.0, h: 1.0 }
+
+fn area(s: Size) -> Float = s.w * s.h

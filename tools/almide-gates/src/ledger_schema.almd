@@ -95,11 +95,12 @@ else if string.ends_with(path, ".almd") then "test" else ""
 // (b) — an ACTIVE contract must reach the `fixture` rank. A flagged one is EXEMPT: being
 // flagged is the honest way to say a claim currently rests on prose, and the flagged count is
 // itself a down-only ratchet, so the exemption cannot be used to hide.
-fn active_floor_error(id: String, status: String, max_rank: Int, fixture_rank: Int) -> List[String] = if status == "flagged-for-revision" then []
-else if max_rank >= fixture_rank then []
-else [
-  id + " is active but has no evidence of class >= fixture (by-construction/doc-only alone cannot certify observable behaviour; add a fixture or set status=flagged-for-revision)"
-]
+fn active_floor_error(id: String, status: String, max_rank: Int, fixture_rank: Int) -> List[String] =
+  if status == "flagged-for-revision" then []
+  else if max_rank >= fixture_rank then []
+  else [
+    id + " is active but has no evidence of class >= fixture (by-construction/doc-only alone cannot certify observable behaviour; add a fixture or set status=flagged-for-revision)"
+  ]
 
 test "an id is C- plus exactly three digits" {
   // `C-1` and `C-1000` are MALFORMED, not leniently accepted: the ledger's own tooling

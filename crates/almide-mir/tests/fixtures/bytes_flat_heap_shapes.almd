@@ -1,0 +1,43 @@
+// #2739: shapes the MIR rung walled while the structural leg ran them — a
+// `Bytes` element, payload or tuple slot is the same one-level block as a
+// `String` one, a record literal is a container a field read can borrow from,
+// and a map key write to a module `var` is the functional rebind a local's is.
+type Packet = | Raw(Bytes) | Empty
+
+type Blob = { data: Bytes, n: Int }
+
+var stash: List[Bytes] = []
+
+var counts: Map[String, Int] = [:]
+
+fn push_global() -> Int = {
+  stash = stash + [bytes.from_list([4, 5])]
+  list.len(stash)
+}
+
+fn bytes_list_literal() -> Int = {
+  let xs = [bytes.from_list([1]), bytes.from_list([2, 3])]
+  list.len(xs)
+}
+
+fn bytes_payload() -> Int = match Raw(bytes.from_list([7, 8, 9])) {
+  Raw(b) => bytes.len(b),
+  Empty => 0,
+}
+
+fn bytes_pair_map() -> Int = {
+  let m: Map[String, Bytes] = map.from_list([("a", bytes.from_list([1, 2]))])
+  map.len(m)
+}
+
+fn record_literal_field() -> Int = bytes.len({ data: bytes.from_list([1, 2]), n: 2 }.data)
+
+fn global_map_key_write() -> Int = {
+  counts["a"] = 1
+  map.len(counts)
+}
+
+effect fn main() -> Unit = {
+  println(int.to_string(push_global() + bytes_list_literal() + bytes_payload()))
+  println(int.to_string(bytes_pair_map() + record_literal_field() + global_map_key_write()))
+}

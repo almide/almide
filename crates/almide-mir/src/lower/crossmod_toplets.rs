@@ -1,8 +1,10 @@
 //! Cross-module top-let references (#3058).
 //!
 //! The entry file reads `lib.TITLE` through a VarId the frontend synthesizes
-//! in the ENTRY var table (`module_top_let_var`: the name uppercased,
-//! `module_origin` = the module's mangled ident). The module's own top-let
+//! in the ENTRY var table (`module_top_let_var`: the source spelling,
+//! `module_origin` = the module's mangled ident). This resolver folds case
+//! on both sides, so case twins (`buf` / `BUF`, #3316) are a name defined
+//! twice and stay unbound. The module's own top-let
 //! lives in the MODULE's var table under another id, so no globals map keyed
 //! by the module's ids binds the reference, and the function walled on
 //! "use of unbound var" or an unresolvable condition.
@@ -13,7 +15,8 @@
 //! function (both resolve in the module's own scope), resolves to that top-let's declared type and initializer.
 //! Anything else stays unbound (an honest wall): a `var` (its init would
 //! const-fold reads across writes), a name defined twice, an init that would
-//! carry a module-scoped id or call across regions, or a type that disagrees.
+//! carry a module-scoped id or call across regions, or a type that disagrees
+//! (an `Unknown` hole in the entry's synthesized type is not a disagreement).
 
 use std::collections::HashMap;
 
@@ -21,10 +24,10 @@ use almide_ir::{IrExpr, IrExprKind, IrModule, IrProgram, Mutability, VarId};
 use almide_lang::types::Ty;
 
 /// The `module_origin` spelling of a module: its versioned name when it has
-/// one, else its name, dots turned into underscores — byte for byte what the
+/// one, else its name, as its `module_ident` (#3338) — byte for byte what the
 /// frontend writes into a synthesized reference.
-fn origin_key(m: &IrModule) -> String {
-    m.versioned_name.map(|v| v.as_str().to_string()).unwrap_or_else(|| m.name.as_str().to_string()).replace('.', "_")
+pub(crate) fn origin_key(m: &IrModule) -> String {
+    almide_base::names::module_ident(m.versioned_name.unwrap_or(m.name).as_str())
 }
 
 /// Does `e` read a variable or call a function? Either is resolved in the
@@ -79,6 +82,24 @@ fn target(m: &IrModule, var: VarId, ty: &Ty, value: &IrExpr) -> Option<(Ty, IrEx
     Some((ty.clone(), init.clone()))
 }
 
+/// Does the entry file's synthesized type agree with the top-let's declared
+/// type? The frontend leaves the part of an un-annotated top-let it could not
+/// see from the entry file `Unknown` (`List[Unknown]` for a list of records):
+/// an `Unknown` there is a hole the declared type fills, anything else must
+/// match constructor for constructor.
+fn agrees(entry: &Ty, decl: &Ty) -> bool {
+    match (entry, decl) {
+        (Ty::Unknown, _) => true,
+        (Ty::Applied(c1, a1), Ty::Applied(c2, a2)) => c1 == c2 && args_agree(a1, a2),
+        (Ty::Tuple(a1), Ty::Tuple(a2)) => args_agree(a1, a2),
+        _ => entry == decl,
+    }
+}
+
+fn args_agree(a: &[Ty], b: &[Ty]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).all(|(x, y)| agrees(x, y))
+}
+
 /// Every entry-file reference to another module's top-let that resolves (see
 /// the module doc): VarId → (declared type, initializer).
 pub fn cross_module_toplet_refs(ir: &IrProgram) -> HashMap<VarId, (Ty, IrExpr)> {
@@ -99,7 +120,7 @@ pub fn cross_module_toplet_refs(ir: &IrProgram) -> HashMap<VarId, (Ty, IrExpr)> 
         let Some(Some((ty, init))) = by_name.get(&(origin.to_string(), info.name.as_str().to_uppercase())) else {
             continue;
         };
-        if matches!(info.ty, Ty::Unknown) || info.ty == *ty {
+        if agrees(&info.ty, ty) {
             out.insert(VarId(i as u32), (ty.clone(), init.clone()));
         }
     }

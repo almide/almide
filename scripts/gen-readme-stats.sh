@@ -20,7 +20,7 @@
 #                        stamped baseline docs/benchmarks/wasm-size.txt —
 #                        measuring and publishing are separate acts (the
 #                        build-speed block's rule): `--measure` rebuilds Hello,
-#                        world on both wasm legs and restamps the baseline.
+#                        world on the wasm leg and restamps the baseline.
 #
 #   bash scripts/gen-readme-stats.sh            # rewrite README.md in place
 #   bash scripts/gen-readme-stats.sh --check    # exit 1 if a block is stale; with a
@@ -80,6 +80,8 @@ measure_leg() {
   printf '%s %s\n' "$(printf '%s' "$line" | grep -oE '[0-9]+' | head -1)" structural
 }
 
+kv() { grep -E "^$1[[:space:]]*=" "$BASELINE" | head -1 | sed -E 's/^[^=]*=[[:space:]]*//'; }
+
 measure_both() { # sets S_BYTES from a fresh build
   local bin s
   bin="$(almide_bin)"
@@ -89,27 +91,85 @@ measure_both() { # sets S_BYTES from a fresh build
   BIN_VERSION="$("$bin" --version 2>/dev/null | head -1)"
 }
 
+# Which build a version line names, in words a reader cannot misread (#2384).
+# A develop build carries the number of the last Cargo.toml bump, so
+# "almide 0.66.0 (dev)" is NOT the 0.66.0 release — it may be days of commits
+# after it (or, between a bump and its tag, before it). Stamped as bare
+# "almide 0.66.0 (dev)", the README read as "the 0.66.0 release ships 325 B"
+# while the release shipped 953 B. So the stamp records the build's identity:
+#   release → "almide X (release, sha)", as `almide --version` prints it
+#   dev     → "the develop build at <sha>, after|before the vX release"
+# and a version line that names neither (a pre-#2384 binary) is refused: a
+# number that cannot say which compiler produced it is not a measurement.
+describe_build() { # $1 = `almide --version` line → one phrase on stdout
+  local line="$1" num sha tag p
+  num="$(printf '%s' "$line" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+  case "$line" in
+    *"(release"*) printf '%s' "$line"; return 0 ;;
+    *"(dev"*) ;;
+    *) echo "::error::'$line' names no build provenance (release/dev) — measure with a binary built by this tree's Makefile or the release workflow" >&2; return 1 ;;
+  esac
+  sha="$(printf '%s' "$line" | grep -oE '\(dev, [0-9a-f]+\)' | grep -oE '[0-9a-f]{7,}' || true)"
+  # A dev binary built without ALMIDE_BUILD_SHA (plain `cargo build`) has no
+  # sha; --check still re-verifies the committed bytes against this tree's own
+  # build on every CI run, so the tree's HEAD is the build being stamped.
+  [ -n "$sha" ] || sha="$(git rev-parse --short=9 HEAD)"
+  tag="v$num"
+  # The release tag sits on main's merge commit, so "after" means: the tag's
+  # commit or one of its parents (the develop tip that was merged) is an
+  # ancestor of this build.
+  if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+    for p in $(git rev-parse "$tag^{commit}") $(git rev-parse "$tag^{commit}^@"); do
+      if git merge-base --is-ancestor "$p" "$sha" 2>/dev/null; then
+        printf 'the develop build at %s, after the %s release' "$sha" "$tag"; return 0
+      fi
+    done
+    printf 'a develop build at %s that does not contain the %s release' "$sha" "$tag"
+  else
+    printf 'the develop build at %s, before %s is tagged' "$sha" "$tag"
+  fi
+}
+
 if [ "$MODE" = "--measure" ]; then
   measure_both
+  BUILD_DESC="$(describe_build "$BIN_VERSION")" || exit 2
+  # The released row: README_RELEASE_BIN names a binary from a release asset
+  # (`gh release download vX.Y.Z -R almide/almide`); without it the previous
+  # stamp is carried over — a release's bytes are immutable once shipped.
+  if [ -n "${README_RELEASE_BIN:-}" ]; then
+    R_VERSION="$("$README_RELEASE_BIN" --version 2>/dev/null | head -1)"
+    case "$R_VERSION" in *"(release"*) ;; *) echo "::error::README_RELEASE_BIN is '$R_VERSION', not a release build"; exit 2 ;; esac
+    r="$(measure_leg "$README_RELEASE_BIN")"; R_BYTES="${r%% *}"; R_DATE="$(date +%F)"
+  else
+    R_VERSION="$(kv release_version 2>/dev/null || true)"; R_BYTES="$(kv release_bytes 2>/dev/null || true)"; R_DATE="$(kv release_date 2>/dev/null || true)"
+  fi
   cat > "$BASELINE" <<EOF
 # Hello, world wasm size — the SOURCE for the README's wasm-size block.
 # Regenerate: bash scripts/gen-readme-stats.sh --measure
+#             (README_RELEASE_BIN=<binary from a release asset> also restamps
+#             the released row; without it the released row is carried over)
 # Checked:    bash scripts/gen-readme-stats.sh --check rebuilds Hello, world and
 #             demands these exact bytes — a changed preamble is re-stamped HERE,
 #             never edited by hand in README.md. The bytes are machine-independent:
 #             the emitters are pure Rust and the structural leg's build artifact is
 #             the #1588 WASI form.
+# build is derived from the binary's \`almide --version\` line (#2384): a develop
+# build is named by its sha and the release it follows, never by the bare
+# version number it carries.
 version          = $BIN_VERSION
+build            = $BUILD_DESC
 date             = $(date +%F)
 program          = fn main() -> Unit = { println("Hello, world!") }
 structural_bytes = $S_BYTES
+release_version  = $R_VERSION
+release_bytes    = $R_BYTES
+release_date     = $R_DATE
 EOF
-  echo "wasm-size: baseline restamped in $BASELINE (structural $S_BYTES B)"
+  echo "wasm-size: baseline restamped in $BASELINE (structural $S_BYTES B, $BUILD_DESC)"
 fi
 
 [ -f "$BASELINE" ] || { echo "::error::$BASELINE not found — run: bash scripts/gen-readme-stats.sh --measure"; exit 2; }
 
-kv() { grep -E "^$1[[:space:]]*=" "$BASELINE" | head -1 | sed -E 's/^[^=]*=[[:space:]]*//'; }
 thousands() { printf '%s' "$1" | awk '{ n=$1; s=""; while (length(n) > 3) { s="," substr(n, length(n)-2) s; n=substr(n, 1, length(n)-3) } print n s }'; }
 
 # The stamped totals, as recorded (the measurement recipes: scripts/lib/ledger-counts.sh).
@@ -125,13 +185,38 @@ trap 'rm -f "$stats_body" "$size_body" "$rt_body" "$rendered"' EXIT
 
 counts_render_stats > "$stats_body"
 
+# The develop and released columns come from ONE stamp each; the develop
+# column's label is the stamped `build` phrase, never the bare version number a
+# develop binary carries (describe_build above). A baseline stamped before the
+# `build` key existed is refused rather than rendered as if it were a release.
+size_build="$(kv build || true)"
+[ -n "$size_build" ] || { echo "::error::$BASELINE has no 'build' line — restamp with: bash scripts/gen-readme-stats.sh --measure"; exit 2; }
+rel_version="$(kv release_version || true)"; rel_bytes="$(kv release_bytes || true)"; rel_date="$(kv release_date || true)"
+if [ -n "$rel_bytes" ]; then
+  rel_num="$(printf '%s' "$rel_version" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+  rel_head=" released v${rel_num} |"; rel_rule="---:|"; rel_cell=" **$(thousands "$rel_bytes") B** |"
+  rel_line=" The released column is the compiler from the v${rel_num} release asset (\`${rel_version}\`, \`gh release download v${rel_num} -R almide/almide\`), measured ${rel_date}."
+else
+  rel_head=""; rel_rule=""; rel_cell=""; rel_line=""
+fi
 cat > "$size_body" <<EOF
-| Program (\`almide build --target wasm\`, as shipped) | structural leg |
-|---|---:|
-| Hello, world | **${size_struct} B** |
+| Program (\`almide build --target wasm\`, as shipped) | develop |${rel_head}
+|---|---:|${rel_rule}
+| Hello, world | **${size_struct} B** |${rel_cell}
 
-Measured on ${size_version}, ${size_date}, from \`docs/benchmarks/wasm-size.txt\`; no post-hoc optimizer touches the shipped bytes (\`--wasm-opt\` is opt-in and its output is not the renderer's own module).
+The develop column is ${size_build} (\`almide --version\`: \`${size_version}\`), measured ${size_date}; CI rebuilds it on every push and fails if the bytes move without a restamp of \`docs/benchmarks/wasm-size.txt\`.${rel_line} No post-hoc optimizer touches the shipped bytes (\`--wasm-opt\` is opt-in and its output is not the renderer's own module).
 EOF
+
+# A ledger stamped by a develop binary records `almide X (dev)`, which reads as
+# the X release to anyone who does not know #2384. Say what it is.
+say_version() { # $1 = a recorded `almide --version` line
+  local num
+  num="$(printf '%s' "$1" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+  case "$1" in
+    *"(dev"*) printf 'a develop build carrying version %s, not the %s release' "$num" "$num" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
 
 # The wasm-runtime block (#1701), rendered from the committed ledger — the
 # gate (scripts/check-wasm-runtime-ratio.sh) re-measures the ratios; this
@@ -148,9 +233,9 @@ rt_date="$(grep -E '^date' "$RT_LEDGER" | head -1 | sed -E 's/^[^=]*=[[:space:]]
   oom=$(grep -cE '^[a-z].*\| oom-embedded' "$RT_LEDGER" || true)
   echo
   printf '%s%s%s\n' \
-    'Embedded wasm host (Perceus RC in linear memory) against the native binary, same machine, same run. The ratio times the program'"'"'s own `main`, entry to return, on both legs (native in-process, wasm around the host call): process spawn and module compile/instantiate are outside it, and the cold-start column shows them (#2980). Small workloads run at a ledger-fixed size (`args=`) so `main` is long enough to time. Cross-engine ratios do NOT cancel hardware (a 2-core CI runner measures nbody ~10x worse), so the stamped ratio verdict runs on the stamping machine class; CI gates the STATUS taxonomy below and judges the wasm leg by a same-runner A/B against the latest release binary (interleaved, min-of-runs, `ab_band` in the ledger — #2143) (`scripts/check-wasm-runtime-ratio.sh`). binarytrees and mandelbrot run their fan arms on the embedded host'"'"'s thread pool; fannkuchredux'"'"'s fan runs sequentially on wasm, which is most of its gap. The unmeasured corpus cells stay honest instead of estimated: ' \
+    'Embedded wasm host (Perceus RC in linear memory) against the native binary, same machine, same run. The ratio times the program'"'"'s own `main`, entry to return, on both legs (native in-process, wasm around the host call): process spawn and module compile/instantiate are outside it, and the cold-start column shows them (#2980). Small workloads run at a ledger-fixed size (`args=`) so `main` is long enough to time. Cross-engine ratios do NOT cancel hardware (a 2-core CI runner measures nbody ~10x worse), so the stamped ratio verdict runs on the stamping machine class; CI gates the STATUS taxonomy below and judges the wasm leg by a same-runner A/B against the latest release binary (interleaved, min-of-runs, `ab_band` in the ledger — #2143) (`scripts/check-wasm-runtime-ratio.sh`). Of these rows only fannkuchredux runs its `fan` in parallel: native on threads (#2044), the embedded wasm host on separate instances of the module (#3003, ADR-0011 §D2a; every other wasm host runs it sequentially, byte-identical); binarytrees'"'"' and mandelbrot'"'"'s `fan.map` callbacks run sequentially on both legs (user time equals wall time on both, measured 2026-10-03). The unmeasured corpus cells stay honest instead of estimated: ' \
     "${walled} wall on the wasm build path, ${oom} exhaust the embedded heap (#1729)" \
-    ' — each re-measured every gate run, so a cell that starts benching fails the gate until its row is promoted. Ledger: `docs/benchmarks/wasm-runtime.txt` ('"${rt_version}, ${rt_date}"').' 
+    ' — each re-measured every gate run, so a cell that starts benching fails the gate until its row is promoted. Ledger: `docs/benchmarks/wasm-runtime.txt` ('"$(say_version "${rt_version}"), ${rt_date}"').' 
 } > "$rt_body"
 
 # The native-victory block (#1330), rendered from the committed ledger — the
@@ -159,9 +244,13 @@ rt_date="$(grep -E '^date' "$RT_LEDGER" | head -1 | sed -E 's/^[^=]*=[[:space:]]
 # what is committed, same rule as the two blocks above.
 vic_version="$(grep -E '^version' "$VIC_LEDGER" | head -1 | sed -E 's/^[^=]*=[[:space:]]*//')"
 vic_date="$(grep -E '^date' "$VIC_LEDGER" | head -1 | sed -E 's/^[^=]*=[[:space:]]*//')"
+vic_kv() { grep -E "^$1[[:space:]]*=" "$VIC_LEDGER" | head -1 | sed -E 's/^[^=]*=[[:space:]]*//'; }
+vic_run="$(vic_kv runner_run)"; vic_commit="$(vic_kv runner_commit)"
+vic_rversion="$(vic_kv runner_version)"; vic_rdate="$(vic_kv runner_date)"
+[ -n "$vic_run" ] && [ -n "$vic_rdate" ] || { echo "::error::$VIC_LEDGER has no runner_run/runner_date stamp for its CI column"; exit 2; }
 vic_body=$(mktemp -t readme-vic.XXXXXX)
 {
-  echo '| Workload (`bench.py`, median of 9, interleaved) | optimization | Almide / ordinary Rust | without it (`ALMIDE_REGION_OFF=1` / `ALMIDE_FAN_SEQUENTIAL=1`) | CI runner |'
+  echo '| Workload (`bench.py`, median of 9, interleaved) | optimization | Almide / ordinary Rust, M4 Pro | without it (`ALMIDE_REGION_OFF=1` / `ALMIDE_FAN_SEQUENTIAL=1`), M4 Pro | ubuntu-latest CI runner |'
   echo "|---|---|---:|---:|---:|"
   grep -E '^[a-z][a-z_-]* *\|' "$VIC_LEDGER" | while IFS='|' read -r n opt small large abl runner; do
     printf '| %s | %s | **%s** / **%s** | %s | %s |\n' "$(echo "$n" | xargs)" "$(echo "$opt" | xargs)" \
@@ -169,7 +258,7 @@ vic_body=$(mktemp -t readme-vic.XXXXXX)
   done
   echo
   printf '%s\n' \
-    'Two ratios per row are the two input sizes (the win holds at both); the Rust side is the ordinary program a person writes for it — a `Box` per node, one thread, no arena, no `unsafe`, no SIMD — compiled with the same `rustc` flags, and the "without it" column is the same Almide source with the region window turned off, so the whole gap is that one optimization. The absolute ratio is allocator-dependent (the CI runner frees a `Box` cheaper), the direction is not: the `perf-ratchet` job fails if either row reaches 1.0 or the ablation stops paying. Declaration and methodology: [docs/project/BENCHMARKS.md](./docs/project/BENCHMARKS.md#faster-than-ordinary-rust-1330). Ledger: `docs/benchmarks/native-victory.txt` ('"${vic_version}, ${vic_date}"').'
+    'Two ratios per row are the two input sizes (the win holds at both); the Rust side is the ordinary program a person writes for it — a `Box` per node, one thread, no arena, no `unsafe`, no SIMD — compiled with the same `rustc` flags, and the "without it" column is the same Almide source with the region window turned off, so the whole gap is that one optimization. The absolute ratio is allocator-dependent (the CI runner frees a `Box` cheaper), the direction is not: the `perf-ratchet` job fails if either row reaches 1.0 or the ablation stops paying. Declaration and methodology: [docs/project/BENCHMARKS.md](./docs/project/BENCHMARKS.md#faster-than-ordinary-rust-1330). Ledger: `docs/benchmarks/native-victory.txt`. The M4 Pro columns were measured on '"${vic_version}, ${vic_date}"' and have not been re-measured since; the runner column is what the `perf-ratchet` job of develop CI run ['"${vic_run}"'](https://github.com/almide/almide/actions/runs/'"${vic_run}"') printed at `'"${vic_commit}"'` ('"$(say_version "${vic_rversion}")"'), '"${vic_rdate}"' (the size is in each cell).'
 } > "$vic_body"
 
 splice() { # $1 start marker, $2 end marker, $3 body file; stdin → stdout

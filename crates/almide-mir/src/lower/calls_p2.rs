@@ -66,11 +66,15 @@ fn is_str_value_tuple_elem(elem_ty: &Ty) -> bool {
 /// co-owns each row); the outer's recursive `Op::DropListListStr` frees each row's cells + each
 /// row block.
 /// Extracted from `try_lower_concat_list` (codopsy round-2 complexity sweep, nested-list family 1 of 2).
+/// A `List[List[scalar]]` element (the derived Codec's `List[List[List[Int]]]`
+/// decode accumulator, #2739 family Q) has the same two-level physics: each inner
+/// cell is a FLAT block (`is_flat_scalar_list_elem`), whose rc_dec is its full free
+/// exactly as a String cell's is, so the nested sweep is exact for it too.
 fn is_list_str_elem(elem_ty: &Ty) -> bool {
     use almide_lang::types::constructor::TypeConstructorId;
     matches!(elem_ty,
         Ty::Applied(TypeConstructorId::List, a)
-            if a.len() == 1 && matches!(a[0], Ty::String))
+            if a.len() == 1 && (matches!(a[0], Ty::String) || is_flat_scalar_list_elem(&a[0])))
 }
 
 /// A `List[scalar]` ELEMENT (so the concat's `value` is `List[List[Int]]` — the memory_stress
@@ -235,8 +239,9 @@ impl LowerCtx {
         // element; the source's recursive drop frees its own refs). A heap-FIELD aggregate element
         // (tuple/record with inner heap) still DEFERS — it needs the masked recursive drop (tuple-heap).
         let scalar_elem = !is_heap_ty(elem_ty);
+        // `Bytes` is the same one-level block as `String` (#2739).
         let heap_elem =
-            is_heap_ty(elem_ty) && (matches!(elem_ty, Ty::String) || crate::lower::is_value_ty(elem_ty));
+            is_heap_ty(elem_ty) && (matches!(elem_ty, Ty::String | Ty::Bytes) || crate::lower::is_value_ty(elem_ty));
         // A RECORD element (`parent.children + [child]` — the svg `add_child` shape): `__list_concat_rc`
         // rc-incs each record handle (the new list co-owns each), freed recursively by the generated
         // `$__drop_list_<R>` (each element → `$__drop_<R>`). Gated to a recursive-drop record so that fn

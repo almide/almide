@@ -35,20 +35,21 @@ fn __hvl_store_key(addr: Int, s: String) -> Int = {
 
 // Copy every entry from sh to rh: keys deep-copied, values rc-shared; the
 // matched key's value is replaced with an rc-share of `v`.
-fn __hvl_set_copy(sh: Int, rh: Int, n: Int, rn: Int, k: String, vh: Int, i: Int) -> Int = if i >= n then 0
-else {
-  let kk = prim.load_str(sh + 12 + i * 8)
-  let _kc = __hvl_store_key(rh + 12 + i * 8, kk)
-  if __hvl_str_eq(kk, k) then {
-    prim.rc_inc(vh)
-    prim.store64(rh + 12 + (rn + i) * 8, vh)
-  } else {
-    let old = prim.load64(sh + 12 + (n + i) * 8)
-    prim.rc_inc(old)
-    prim.store64(rh + 12 + (rn + i) * 8, old)
+fn __hvl_set_copy(sh: Int, rh: Int, n: Int, rn: Int, k: String, vh: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let kk = prim.load_str(sh + 12 + i * 8)
+    let _kc = __hvl_store_key(rh + 12 + i * 8, kk)
+    if __hvl_str_eq(kk, k) then {
+      prim.rc_inc(vh)
+      prim.store64(rh + 12 + (rn + i) * 8, vh)
+    } else {
+      let old = prim.load64(sh + 12 + (n + i) * 8)
+      prim.rc_inc(old)
+      prim.store64(rh + 12 + (rn + i) * 8, old)
+    }
+    __hvl_set_copy(sh, rh, n, rn, k, vh, i + 1)
   }
-  __hvl_set_copy(sh, rh, n, rn, k, vh, i + 1)
-}
 
 fn __hvl_set_append(rh: Int, rn: Int, idx: Int, k: String, vh: Int) -> Int = if idx >= 0 then 0
 else {
@@ -118,14 +119,15 @@ fn __drop_map_hval(m: Map[String, List[Int]]) -> Unit = {
 // v0's `map.from_list` over (String, List[Int]) pairs — duplicate key keeps FIRST
 // position with LAST value (map_set_hval's replace-in-place). Recursion over the
 // pairs list; each step's map is a fresh block (the previous drops by scope).
-fn __hvf_at(pairs: List[(String, List[Int])], i: Int, m: Map[String, List[Int]]) -> Map[String, List[Int]] = if i >= list.len(pairs) then m
-else match list.get(pairs, i) {
-  some(p) => {
-    let (k, v) = p
-    __hvf_at(pairs, i + 1, map_set_hval(m, k, v))
-  },
-  none => m,
-}
+fn __hvf_at(pairs: List[(String, List[Int])], i: Int, m: Map[String, List[Int]]) -> Map[String, List[Int]] =
+  if i >= list.len(pairs) then m
+  else match list.get(pairs, i) {
+    some(p) => {
+      let (k, v) = p
+      __hvf_at(pairs, i + 1, map_set_hval(m, k, v))
+    },
+    none => m,
+  }
 
 fn map_from_list_hval(pairs: List[(String, List[Int])]) -> Map[String, List[Int]] = __hvf_at(
   pairs,
@@ -163,13 +165,14 @@ fn map_to_string_hval(m: Map[String, List[Int]]) -> String = {
 
 // A `List[Map[String, List[Int]]]` (the nested `[["a": [1, 2]], ["b": [3]]]` repr
 // literal): per-element free via __drop_map_hval, then the list block.
-fn __drop_list_map_hval_at(xs: List[Map[String, List[Int]]], i: Int, n: Int) -> Unit = if i >= n then ()
-else {
-  let lh = prim.handle(xs)
-  let m: Map[String, List[Int]] = prim.load_handle(lh + 12 + i * 8)
-  __drop_map_hval(m)
-  __drop_list_map_hval_at(xs, i + 1, n)
-}
+fn __drop_list_map_hval_at(xs: List[Map[String, List[Int]]], i: Int, n: Int) -> Unit =
+  if i >= n then ()
+  else {
+    let lh = prim.handle(xs)
+    let m: Map[String, List[Int]] = prim.load_handle(lh + 12 + i * 8)
+    __drop_map_hval(m)
+    __drop_list_map_hval_at(xs, i + 1, n)
+  }
 
 fn __drop_list_map_hval(xs: List[Map[String, List[Int]]]) -> Unit = {
   let h = prim.handle(xs)
@@ -262,15 +265,16 @@ fn __gby_add(m: Map[String, List[Int]], k: String, x: Int) -> Map[String, List[I
   map_set_hval(m, k, nl)
 }
 
-fn __gby_step(xs: List[Int], f: (Int) -> String, n: Int, i: Int, m: Map[String, List[Int]]) -> Map[String, List[Int]] = if i >= n then m
-else {
-  let x = prim.load64(prim.handle(xs) + 12 + i * 8)
-  let k = f(x)
-  let h = prim.handle(m)
-  let idx = __hvl_find(h, prim.load32(h + 4), k, 0)
-  if idx >= 0 then __gby_step(xs, f, n, i + 1, __gby_upd(m, k, x, idx))
-  else __gby_step(xs, f, n, i + 1, __gby_add(m, k, x))
-}
+fn __gby_step(xs: List[Int], f: (Int) -> String, n: Int, i: Int, m: Map[String, List[Int]]) -> Map[String, List[Int]] =
+  if i >= n then m
+  else {
+    let x = prim.load64(prim.handle(xs) + 12 + i * 8)
+    let k = f(x)
+    let h = prim.handle(m)
+    let idx = __hvl_find(h, prim.load32(h + 4), k, 0)
+    if idx >= 0 then __gby_step(xs, f, n, i + 1, __gby_upd(m, k, x, idx))
+    else __gby_step(xs, f, n, i + 1, __gby_add(m, k, x))
+  }
 
 fn list_group_by(xs: List[Int], f: (Int) -> String) -> Map[String, List[Int]] = {
   let n = prim.load32(prim.handle(xs) + 4)

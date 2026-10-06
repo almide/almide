@@ -4,15 +4,11 @@
 // out of lower/mod.rs (max-lines, #852); moved verbatim.
 
 /// The module identity the cross-module top-let bridge keys on: the VERSIONED name when
-/// the module carries one (`snaidhm_v0.web.gpu`), else its plain name, with dots turned
-/// into underscores. This is byte-for-byte the `origin` the frontend's `module_top_let_var`
+/// the module carries one (`snaidhm_v0.web.gpu`), else its plain name, as its `module_ident` (#3338). This is byte-for-byte the `origin` the frontend's `module_top_let_var`
 /// writes into a synthesized reference's `VarInfo::module_origin`, so a lookup by that
 /// field hits — the single spelling both sides of the bridge agree on.
 pub(crate) fn module_origin_key(m: &almide_ir::IrModule) -> String {
-    m.versioned_name
-        .map(|v| v.as_str().to_string())
-        .unwrap_or_else(|| m.name.as_str().to_string())
-        .replace('.', "_")
+    almide_base::names::module_ident(m.versioned_name.unwrap_or(m.name).as_str())
 }
 
 /// Extracted from `bridge_cross_module_toplets` (codopsy8 complexity sweep, phase 1 of

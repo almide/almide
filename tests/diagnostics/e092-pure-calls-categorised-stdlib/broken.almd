@@ -1,0 +1,7 @@
+import io
+
+// #3250: io.write is a plain fn, but it writes stdout — it has the IO category.
+@pure
+fn emit(b: Bytes) -> Unit = io.write(b)
+
+fn main() -> Unit = emit(bytes.from_string("hi"))

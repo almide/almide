@@ -1,0 +1,8 @@
+// The router is a top-level `let`; main unwraps it where it serves it.
+import http
+
+let app = http.router([
+  http.route("GET /", (req) => http.response(200, "home"))
+])
+
+effect fn main() -> Unit = http.serve(8080, app!)!

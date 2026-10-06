@@ -71,7 +71,8 @@ impl LowerCtx {
             .lower_heap_result_arm_literal(arm, result_ty)
             .or_else(|| self.lower_heap_result_arm_option(arm, result_ty))
             .or_else(|| self.lower_heap_result_arm_result(arm, result_ty))
-            .or_else(|| self.lower_heap_result_arm_ctrl(arm, result_ty));
+            .or_else(|| self.lower_heap_result_arm_ctrl(arm, result_ty))
+            .or_else(|| self.lower_result_ctor_arm_via_bound_payload(arm, result_ty));
         if out.is_none() {
             crate::trace::trace("ALMIDE_DBG_ELEM", || {
                 format!(
@@ -639,6 +640,16 @@ impl LowerCtx {
                 let p = self
                     .lower_pure_module_value_call(module.as_str(), func.as_str(), args, &expr.ty)
                     .ok()?;
+                self.live_heap_handles.retain(|h| *h != p);
+                self.drop_arm_locals(arm_mark);
+                p
+            }
+            // `some("hi " + s)` — a String concat payload: the `__str_concat` chain's fresh
+            // owned String moves into the Option (sole owner, no Dup); its operand temps free
+            // WITHIN the arm (the untaken-arm garbage rc_dec trap, as for the list concat below).
+            IrExprKind::BinOp { op: almide_ir::BinOp::ConcatStr, .. } => {
+                let arm_mark = self.live_heap_handles.len();
+                let p = self.try_lower_concat_str(expr)?;
                 self.live_heap_handles.retain(|h| *h != p);
                 self.drop_arm_locals(arm_mark);
                 p

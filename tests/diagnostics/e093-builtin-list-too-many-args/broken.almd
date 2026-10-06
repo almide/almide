@@ -1,0 +1,4 @@
+// The builtin `List[T]` applied to two type arguments.
+fn total(xs: List[Int, Int]) -> Int = list.fold(xs, 0, (a, x) => a + x)
+
+effect fn main() -> Unit = println(int.to_string(total([1, 2])))

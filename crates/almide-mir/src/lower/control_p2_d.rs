@@ -167,7 +167,7 @@ impl LowerCtx {
         let ops_mark = self.ops.len();
         let lifted_mark = self.lifted.len();
         let lhh_mark = self.live_heap_handles.len();
-        let Some(subj) = self.materialize_variant_subject(subject, result_ty) else {
+        let Some(subj) = self.materialize_variant_subject(subject) else {
             self.probe_rollback(ops_mark, lifted_mark, lhh_mark);
             return None;
         };
@@ -224,24 +224,25 @@ impl LowerCtx {
         Some((inner_layout, stripped))
     }
 
-    /// Materialize/borrow a variant `match` subject to a Handle, declining the two
-    /// shapes the tag dispatch cannot serve:
+    /// Materialize/borrow a variant `match` subject to a Handle, declining the one
+    /// shape the tag dispatch cannot serve: a DEFERRED-Opaque subject is an EMPTY
+    /// block — reading its tag would take a wrong arm silently (the record-ctor mt2
+    /// miscompile).
     ///
-    /// * a DEFERRED-Opaque subject is an EMPTY block — reading its tag would take a
-    ///   wrong arm silently (the record-ctor mt2 miscompile);
-    /// * a HEAP result over an OWNED subject temp would overlap the owned-subject
-    ///   borrow with the arm's heap move-out (the cert rejects it). Subject-drop-
-    ///   before-arms is ADT brick 4b — for now decline (a borrowed param/var
-    ///   subject, the recursive-`to_string` case, proceeds).
+    /// An OWNED subject (a `let`-bound constructor, a fresh call result) is served
+    /// like a borrowed one (#3181): the arm reads its fields through the dispatch
+    /// handle, a heap payload it returns is `Dup`'d into a fresh owned value by
+    /// `lower_heap_result_arm`, the arm frame releases the field binds, and the
+    /// subject itself stays in `live_heap_handles` until its scope-end drop — after
+    /// the merged result exists. An arm that moves the WHOLE subject out
+    /// (`other => other`) is the release-parity case `emit_variant_arm_chain`
+    /// balances across arms.
     ///
     /// The caller owns the rollback: this may have emitted ops before declining.
-    fn materialize_variant_subject(&mut self, subject: &IrExpr, result_ty: &Ty) -> Option<ValueId> {
+    fn materialize_variant_subject(&mut self, subject: &IrExpr) -> Option<ValueId> {
         let arg = self.lower_call_args(std::slice::from_ref(subject)).ok()?.into_iter().next()?;
         let CallArg::Handle(subj) = arg else { return None };
         if self.deferred_opaque_binds.contains(&subj) {
-            return None;
-        }
-        if is_heap_ty(result_ty) && self.live_heap_handles.contains(&subj) {
             return None;
         }
         Some(subj)

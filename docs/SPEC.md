@@ -604,9 +604,10 @@ y = y + 1                   // reassign (var only)
 
 ```
 let { name, age } = user    // record destructure (one level only)
+var (x, y) = pair           // var takes the let patterns; x and y are both vars
 ```
 
-- Immutable bindings only (no `var` destructure)
+- `var` takes the same patterns as `let`, and every bound name is mutable (#3149)
 - Nested destructuring is not allowed
 - Renaming is not allowed
 
@@ -1203,7 +1204,7 @@ The `is_` prefix convention is used for predicates in the stdlib: `string.is_emp
 
 ## 16. Standard Library
 
-1017 functions across 43 modules, defined in pure Almide (`stdlib/*.almd`). Runtime implementation: 100%.
+1019 functions across 43 modules, defined in pure Almide (`stdlib/*.almd`). Runtime implementation: 100%.
 
 ### 16.1 Auto-Imported Modules
 
@@ -1352,7 +1353,7 @@ Target source code
 6. BuiltinLowering -- assert_eq, println, etc. to Rust macros
 7. FanLowering -- fan blocks to scoped threads (`std::thread::scope`)
 
-Templates are defined in TOML files (`codegen/templates/*.toml`), separating syntax from semantics.
+Templates are defined in TOML files (`crates/almide-codegen/templates/*.toml`), separating syntax from semantics.
 
 ### 18.3 Cross-Target Semantics
 

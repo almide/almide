@@ -219,23 +219,76 @@ Setting environment variables is not part of WASI preview 1. The host must provi
 |----------|-----------|-------------|
 | `process.exec(cmd, args)` | `(String, List[String]) -> Result[String, String]` | Execute command, return stdout |
 | `process.exec_in(dir, cmd, args)` | `(String, String, List[String]) -> Result[String, String]` | Execute in working directory |
-| `process.exec_with_stdin(cmd, args, input)` | `(String, String, List[String], String) -> Result[String, String]` | Execute with stdin pipe |
-| `process.exec_status(cmd, args)` | `(String, List[String]) -> Result[{code, stdout, stderr}, String]` | Execute, return full result |
-| `process.exit(code)` | `(Int) -> Never` | Exit process |
-| `process.stdin_lines()` | `() -> Result[List[String], String]` | Read all stdin lines |
-
-**WASI imports:**
-
-| Import | Source | Role |
-|--------|--------|------|
-| `almide_host_proc` | `almide_host` module | Spawn child process |
-| `proc_exit` | `wasi_snapshot_preview1` | Terminate with exit code |
+| `process.exec_with_stdin(cmd, args, input)` | `(String, List[String], String) -> Result[String, String]` | Execute with stdin pipe |
+| `process.exec_status(cmd, args)` | `(String, List[String]) -> Result[ProcessStatus, String]` | Execute, return code, stdout and stderr |
+| `process.exec_status_timeout(cmd, args, ms)` | `(String, List[String], Int) -> Result[ProcessStatus, String]` | `exec_status`, killed at the deadline |
+| `process.run(cmd, args)` | `(String, List[String]) -> Result[Int, String]` | Run on this terminal; exit code |
+| `process.run_in(dir, cmd, args)` | `(String, String, List[String]) -> Result[Int, String]` | `run` in `dir` |
+| `process.spawn(cmd, args)` | `(String, List[String]) -> Result[Int, String]` | Start in the background; pid |
+| `process.kill(pid, signal)` | `(Int, Int) -> Result[Unit, String]` | Signal a process |
+| `process.is_alive(pid)` | `(Int) -> Bool` | Whether the process exists |
+| `process.pid()` | `() -> Int` | This program's pid |
 
 Process execution is the most dangerous capability. An agent with `Proc` can execute arbitrary shell commands, which can bypass all other capability restrictions at the OS level.
 
 **Real-world example:** A build agent that runs `cargo build`, `npm install`, or `make` as part of a CI pipeline.
 
 **Without this capability:** The agent cannot spawn any child processes. It cannot run shell commands, compilers, or any external tools. This is the single most important capability to deny for untrusted agents.
+
+#### What the checker enforces today
+
+`Proc` is not yet its own effect: `pass_effect_inference` maps the `process`
+module to `Env`, so `[permissions] allow = ["Env"]` is what admits a process
+call. Within that grant, `[permissions] proc` lists the commands the family may
+start (#2589, [ADR-0025](../adr/0025-wasm-process-is-a-private-host-capability.md)):
+
+```toml
+[permissions]
+allow = ["IO", "Env"]
+proc = ["git", "cargo"]
+```
+
+- The compiler checks every call that starts a child (`exec`, `exec_in`,
+  `exec_with_stdin`, `exec_status`, `exec_status_timeout`, `run`, `run_in`,
+  `spawn`, and the deprecated `exec_attached`): its command must be a string literal on the list. A literal off the
+  list is refused with ``process.exec("make") (line N): `make` is not in
+  [permissions] proc``. A command computed at run time, or a spawning fn passed
+  as a value, cannot be checked and is refused too (`cli::check_proc_allowlist`:
+  `run`, `build` and `test` on both targets; `almide check` sees the direct
+  calls).
+- The embedded wasm host holds the same list and answers a command outside it
+  with an err naming the command, before anything runs.
+- Without the key nothing is bounded. `proc = []` allows no command.
+
+#### On wasm: the private `almide:process/spawn` import
+
+Stock WASI (0.2 and 0.3) has no subprocess API, and there is no proposal for
+one. A process program therefore leaves its wasm artifact through a PRIVATE
+interface, `almide:process/spawn`
+(`crates/almide-wasm-run/wit/process/spawn.wit`):
+
+```wit
+package almide:process;
+
+interface spawn {
+  enum op { exec, exec-in, exec-with-stdin, exec-status, exec-status-timeout,
+            exec-attached, spawn, kill, is-alive, pid }
+  call: func(op: op, a: string, b: string) -> result<string, string>;
+}
+```
+
+| Where | What happens |
+|-------|--------------|
+| `almide run --target wasm`, the wasm leg of `almide test` | The embedded host serves the family (host ops 80..=90) with the core native runs (`crates/almide-rt-core/src/process_core.rs`): the same stdout, exit code and err text as native. |
+| `almide build --target wasm` | The p1 artifact imports `almide:process/spawn` `call` (its canonical-ABI form) and exports `cabi_realloc`, **only** when the program's op set names a process op. The build prints a note saying so. |
+| A stock runtime (`wasmtime run app.wasm`) | Refuses the module at load, before `_start`: ``unknown import: `almide:process/spawn::call` has not been defined``. Never a silent failure and never a wrong answer. |
+| A host that implements the import | Runs the artifact (`almide_wasm_run::link_spawn_import` is the embedded host's implementation). |
+| `--component` (p2 / p3) | Refused at build time with E081: no component world declares the interface yet. |
+
+`proofs/target-availability.toml` records the family as **host-capability**:
+served on native and on the embedded host, and walled on the stock-p1 leg by
+the import. ADR-0025 is the one exception to ADR-0023 §2.6 (no private host
+ABI on stock runtimes) and states its bounds and falsifiers.
 
 ---
 
@@ -383,6 +436,13 @@ Note: `fd_write` serves both `IO.stdout` and `IO.stderr`, differentiated by the 
 [permissions]
 allow = ["FS.read", "IO.stdout"]
 ```
+
+> The dotted names in this document are a design. The compiler does not
+> accept them. Today `allow` takes the six effect categories `IO`, `Net`,
+> `Env`, `Time`, `Rand` and `Fan` ([effect-system.md §8](../specs/effect-system.md#8-permissions)),
+> and refuses any other name, these included (#3247). The one implemented
+> addition is the `proc` command list beside it ([What the checker enforces
+> today](#what-the-checker-enforces-today)).
 
 No `[permissions]` section = all capabilities allowed (backward compatible with pre-capability code).
 
@@ -543,7 +603,7 @@ The binary is never produced.
 - `path_open`, `path_filestat_get` (for FS.read support)
 - `fd_readdir` (for FS.read directory listing)
 
-Missing imports: `path_create_directory`, `path_rename`, `path_unlink_file`, `path_remove_directory`, `environ_get`, `args_get`, `random_get`, `clock_time_get`, `proc_exit`, `almide_host_fetch`, `almide_host_listen`, `almide_host_proc` -- **physically absent from the binary**. Even if the compiler has a bug, the WASM runtime will reject calls to nonexistent imports.
+Missing imports: `path_create_directory`, `path_rename`, `path_unlink_file`, `path_remove_directory`, `environ_get`, `args_get`, `random_get`, `clock_time_get`, `proc_exit`, `almide_host_fetch`, `almide_host_listen` -- **physically absent from the binary**. Even if the compiler has a bug, the WASM runtime will reject calls to nonexistent imports.
 
 ### Layer 3: WASI Runtime (--dir scoping)
 
@@ -716,7 +776,7 @@ The following table shows exactly which WASI imports are included in the binary 
 | `Net.listen` | `almide_host_listen` |
 | `Env.read` | `environ_get`, `environ_sizes_get`, `args_get`, `args_sizes_get` |
 | `Env.write` | `almide_host_environ_set` |
-| `Proc` | `almide_host_proc`, `proc_exit` |
+| `Proc` | `almide:process/spawn` `call` (private, ADR-0025) + an exported `cabi_realloc`; only when the program starts a child |
 | `Time` | `clock_time_get` |
 | `Rand` | `random_get` |
 | `Fan` | (none -- internal implementation) |
@@ -777,7 +837,7 @@ The following shows the WASM import section for three representative configurati
 (import "wasi_snapshot_preview1" "args_sizes_get"         (func ...))
 (import "almide_host" "fetch"                             (func ...))
 (import "almide_host" "listen"                            (func ...))
-(import "almide_host" "proc"                              (func ...))
+(import "almide:process/spawn" "call"                     (func ...))  ;; private, ADR-0025
 (import "almide_host" "environ_set"                       (func ...))
 ;; 23 imports (19 WASI + 4 host)
 ;; Binary: ~5 KB overhead

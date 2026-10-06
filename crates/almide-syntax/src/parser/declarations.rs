@@ -19,10 +19,19 @@ fn parse_int_literal(raw: &str) -> Result<i64, String> {
 /// into the legacy typed `ExternAttr`. Mirrors the old hand-written
 /// parser so diagnostics stay recognizable.
 fn extract_extern_attr(attr: &Attribute) -> Result<ExternAttr, String> {
-    let args = &attr.args;
+    let positional = attr.args.iter().take_while(|a| a.name.is_none()).count();
+    let args = &attr.args[..positional];
     if args.len() != 3 {
+        // A 4th positional is most likely the Promise marker written bare
+        // (`async` / `promise`): name the one spelling there is (#3371).
+        let hint = if args.len() > 3 {
+            let at = attr.span.map(|s| format!(" at line {}:{}", s.line, s.col)).unwrap_or_default();
+            format!("{at}\n  Hint: Anything after the 3rd argument is named; the only one is `returns: promise`, for a JS hook that returns a Promise: `@extern(wasm, \"js\", \"name\", returns: promise)`")
+        } else {
+            String::new()
+        };
         return Err(format!(
-            "@extern expects 3 positional arguments (target, \"module\", \"function\"); got {}",
+            "@extern expects 3 positional arguments (target, \"module\", \"function\"); got {}{hint}",
             args.len()
         ));
     }
@@ -38,7 +47,48 @@ fn extract_extern_attr(attr: &Attribute) -> Result<ExternAttr, String> {
         AttrArg { name: None, value: AttrValue::String { value } } => sym(value),
         _ => return Err("@extern third argument must be a string literal function".into()),
     };
-    Ok(ExternAttr { target, module, function })
+    let returns_promise = extern_named_args(attr, &attr.args[positional..], target.as_str(), module.as_str(), function.as_str())?;
+    Ok(ExternAttr { target, module, function, returns_promise })
+}
+
+/// The named arguments after `@extern`'s three positional ones (#3371). The
+/// only one is `returns: promise`, on `@extern(wasm, "js", "name", ...)`:
+/// the JS hook answers with a Promise. Returns whether it is present.
+fn extern_named_args(attr: &Attribute, named: &[AttrArg], target: &str, module: &str, function: &str) -> Result<bool, String> {
+    let at = attr.span.map(|s| format!(" at line {}:{}", s.line, s.col)).unwrap_or_default();
+    let spelled = format!("@extern(wasm, \"js\", \"{function}\", returns: promise)");
+    let mut returns_promise = false;
+    for arg in named {
+        let Some(name) = arg.name else {
+            return Err(format!(
+                "@extern takes its 3 positional arguments first; a positional argument after a named one is not allowed{at}\n  Hint: Write the target, \"module\" and \"function\" first, then the named argument: `{spelled}`"
+            ));
+        };
+        match (name.as_str(), &arg.value) {
+            ("returns", AttrValue::Ident { name: v }) if v.as_str() == "promise" => {
+                if returns_promise {
+                    return Err(format!("@extern repeats `returns: promise`{at}\n  Hint: Write it once: `{spelled}`"));
+                }
+                returns_promise = true;
+            }
+            ("returns", _) => {
+                return Err(format!(
+                    "@extern's `returns` takes only `promise` (the JS hook answers with a Promise){at}\n  Hint: Write `{spelled}`, or drop `returns` when the hook returns its value directly"
+                ));
+            }
+            (other, _) => {
+                return Err(format!(
+                    "@extern has no named argument `{other}`{at}\n  Hint: The only named argument is `returns: promise`, for a JS hook that returns a Promise: `{spelled}`"
+                ));
+            }
+        }
+    }
+    if returns_promise && (target != "wasm" || module != "js") {
+        return Err(format!(
+            "`returns: promise` applies only to @extern(wasm, \"js\", ...), not @extern({target}, \"{module}\", ...){at}\n  Hint: It marks a hook of the generated JS host (`--host js`) that returns a Promise; drop it here, or bind the hook as `{spelled}`"
+        ));
+    }
+    Ok(returns_promise)
 }
 
 /// Convert a generic `Attribute` that the user wrote as `@export(...)`
@@ -249,7 +299,21 @@ impl Parser {
         if token_type == TokenType::Unknown {
             return self.unknown_char_error(&value, line, col);
         }
-        if let Some(result) = self.check_hint(None, super::hints::HintScope::TopLevel) {
+        let typo_hint = self.check_hint(None, super::hints::HintScope::TopLevel);
+        // #3370: an indented line after a braceless `fn … =` body. Pushed as
+        // the rich diagnostic; the entry loop then skips the string twin. A
+        // keyword-typo hint (`return`, `const`, `def`, ...) wins: that line is
+        // wrong inside braces too. The loop-keyword hint does not — "no
+        // top-level loops" misreads a loop the author indented into the body.
+        let loop_head = matches!(value.as_str(), "while" | "for" | "loop");
+        if (typo_hint.is_none() || loop_head)
+            && let Some(diag) = self.braceless_body_overflow()
+        {
+            let msg = format!("{} at line {}:{}", diag.message, line, col);
+            self.errors.push(diag);
+            return msg;
+        }
+        if let Some(result) = typo_hint {
             let msg = result.message.as_deref().unwrap_or("Unexpected token at top level");
             return format!("{} at line {}:{}\n  Hint: {}", msg, line, col, result.hint);
         }
@@ -336,11 +400,13 @@ impl Parser {
     /// or `name=value` (named). The lookahead for `name=` is an ident
     /// followed by `=` that is NOT `==`.
     fn parse_attr_arg(&mut self) -> Result<AttrArg, String> {
+        // `name: value` is the call-argument spelling, and the one
+        // `@extern(..., returns: promise)` is written in (#3371).
         let is_named = self.check(TokenType::Ident)
-            && matches!(self.peek_at(1).map(|t| &t.token_type), Some(&TokenType::Eq));
+            && matches!(self.peek_at(1).map(|t| &t.token_type), Some(&TokenType::Eq) | Some(&TokenType::Colon));
         let name = if is_named {
             let n = self.expect_ident()?;
-            self.advance(); // consume `=`
+            self.advance(); // consume `=` / `:`
             Some(n)
         } else {
             None
@@ -485,6 +551,7 @@ impl Parser {
             TypeExpr::Union { ref members } if members.iter().all(|m| matches!(m, TypeExpr::Simple { name } if name.starts_with(char::is_uppercase))) => {
                 TypeExpr::Variant {
                     comments: Vec::new(),
+                    multiline: false,
                     cases: members.iter().map(|m| {
                         if let TypeExpr::Simple { name } = m { VariantCase::Unit { name: name.clone() } } else { unreachable!() }
                     }).collect(),
@@ -493,8 +560,18 @@ impl Parser {
             other => other,
         };
         let mut ty = ty;
-        if let TypeExpr::Variant { comments, .. } = &mut ty {
-            *comments = super::variant_comments::collect(&self.tokens[type_start..self.pos]);
+        if let TypeExpr::Variant { comments, multiline, .. } = &mut ty {
+            // A comment ending the LAST case's line sits after the type's
+            // tokens; left in the stream, the top level filed it under the
+            // next declaration and fmt moved it there (#3393). It belongs to
+            // that case, like any earlier case's same-line comment.
+            let last_line = self.pos.checked_sub(1).and_then(|i| self.tokens.get(i)).map(|t| t.line);
+            let mut end = self.pos;
+            while self.tokens.get(end).is_some_and(|t| t.token_type == TokenType::Comment && Some(t.line) == last_line) {
+                end += 1;
+            }
+            self.pos = end;
+            (*comments, *multiline) = super::variant_comments::collect(&self.tokens[type_start..end]);
         }
         Ok(Decl::Type { name, ty, deriving, deriving_refs, deriving_spans, visibility, generics, span: Some(span) })
     }

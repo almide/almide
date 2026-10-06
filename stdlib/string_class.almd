@@ -80,14 +80,15 @@ fn string_is_alpha(s: String) -> Bool = {
   else __is_alpha_scan(h + 12, h + 12 + blen, __alpha_table())
 }
 
-fn __is_case_scan(addr: Int, end: Int, at: String, ct: String, cn: Int, seen: Int) -> Int = if addr >= end then seen
-else {
-  let (cp, w) = __cls_cp(addr)
-  if __cls_in(at, 761, cp) then {
-    if __cls_in(ct, cn, cp) then __is_case_scan(addr + w, end, at, ct, cn, 1)
-    else 2
-  } else __is_case_scan(addr + w, end, at, ct, cn, seen)
-}
+fn __is_case_scan(addr: Int, end: Int, at: String, ct: String, cn: Int, seen: Int) -> Int =
+  if addr >= end then seen
+  else {
+    let (cp, w) = __cls_cp(addr)
+    if __cls_in(at, 761, cp) then {
+      if __cls_in(ct, cn, cp) then __is_case_scan(addr + w, end, at, ct, cn, 1)
+      else 2
+    } else __is_case_scan(addr + w, end, at, ct, cn, seen)
+  }
 
 fn string_is_upper(s: String) -> Bool = {
   let h = prim.handle(s)

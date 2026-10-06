@@ -246,7 +246,10 @@ pub fn to_p2(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
         .section(&element_sec)
         .section(&code)
         .section(&data);
-    let mut core = m.finish();
+    // The p1 build's last pass (#3136): drop the shims, helper slots,
+    // imports and globals nothing the exports reach names, before the
+    // component encode reads the core module's imports.
+    let mut core = crate::wasi::prune(&m.finish())?;
     wasmparser::validate(&core)?;
 
     // Embed the world's component-type metadata, then encode WITHOUT an
@@ -431,6 +434,13 @@ fn shim_fs_call(
     // (u64 nanos) lowers to a bare `() -> i64`, answered as is.
     i.local_get(op).i32_const(60).i32_eq().if_(BlockType::Empty);
     i.call(I_MONO_NOW).return_();
+    i.end();
+
+    // op 74: the instance-parallel fan offer (#3003, ADR-0011 §D2a). This
+    // runtime has no second instance to run a chunk on: 0 = not served, and
+    // the guest runs the chunks sequentially, as on every host before it.
+    i.local_get(op).i32_const(74).i32_eq().if_(BlockType::Empty);
+    i.i64_const(0).return_();
     i.end();
 
     // Everything else: the defined refusal — the message on stderr, exit 1.

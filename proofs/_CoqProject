@@ -21,6 +21,8 @@ WasmRcDec.v
 WasmEncode.v
 WasmExec.v
 CowSafety.v
+LargeList.v
+LargeTree.v
 StructuralRuntime.v
 StructuralAlloc.v
 StructuralDecode.v

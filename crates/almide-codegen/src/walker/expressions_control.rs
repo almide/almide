@@ -4,14 +4,7 @@ fn render_string_interp(ctx: &RenderContext, parts: &[IrStringPart]) -> String {
     for part in parts {
         match part {
             IrStringPart::Lit { value } => {
-                fmt_parts.push(value
-                    .replace('\\', "\\\\")
-                    .replace('"', "\\\"")
-                    .replace('\n', "\\n")
-                    .replace('\t', "\\t")
-                    .replace('\r', "\\r")
-                    .replace('{', "{{")
-                    .replace('}', "}}"));
+                fmt_parts.push(super::helpers::escape_rust_fmt_str(value));
             }
             IrStringPart::Expr { expr } => {
                 fmt_parts.push("{}".to_string());
@@ -81,8 +74,8 @@ fn render_expr_var(ctx: &RenderContext, expr: &IrExpr) -> String {
     if let Some(info) = ctx.ann.global(*id) {
         use almide_ir::top_let_storage::TopLetStorage as Tls;
         let read = match info.storage {
-            Tls::Cell => format!("{}.with(|c| c.get())", info.static_name),
-            Tls::RcRefCell => format!("{}.with(|c| (**c.borrow()).clone())", info.static_name),
+            Tls::Cell => format!("{}.with(|__almide_cell| __almide_cell.get())", info.static_name),
+            Tls::RcRefCell => format!("{}.with(|__almide_cell| (**__almide_cell.borrow()).clone())", info.static_name),
             Tls::Lazy { .. } => ctx.templates
                 .render_with("deref_lazy", None, &[], &[("name", info.static_name.as_str())])
                 .unwrap_or_else(|| info.static_name.clone()),
@@ -272,7 +265,7 @@ fn render_expr_call(ctx: &RenderContext, expr: &IrExpr) -> String {
         CallTarget::Module { module, func, .. } => {
             // Module calls: use template (TS/JS) or runtime function (Rust)
             let args_str = args.iter().map(|a| render_expr_owned(ctx, a)).collect::<Vec<_>>().join(", ");
-            let mod_ident = module.replace('.', "_");
+            let mod_ident = almide_base::names::module_ident(module.as_str());
             let func_ident = func.replace('.', "_");
             let call = ctx.templates.render_with("module_call", None, &[], &[("module", mod_ident.as_str()), ("func", func_ident.as_str()), ("args", args_str.as_str())])
                 .unwrap_or_else(|| {
@@ -744,9 +737,7 @@ fn render_expr_borrow(ctx: &RenderContext, expr: &IrExpr) -> String {
     } else if *as_str {
         // String literal → bare &str in Rust, skip .to_string() allocation
         if let IrExprKind::LitStr { value } = &inner.kind {
-            let escaped = value.replace('\\', "\\\\").replace('"', "\\\"")
-                .replace('\n', "\\n").replace('\t', "\\t").replace('\r', "\\r");
-            return format!("\"{}\"", escaped);
+            return format!("\"{}\"", super::helpers::escape_rust_str(value));
         }
         format!("&*{}", render_expr(ctx, inner))
     } else {
@@ -767,18 +758,21 @@ fn render_fan(ctx: &RenderContext, exprs: &[IrExpr]) -> String {
         if e.ty.is_result() && body.ends_with('?') { body.pop(); }
         body
     }).collect();
+    if let ([e], [body]) = (exprs, rendered.as_slice()) {
+        return render_fan_single(ctx, e, body);
+    }
     let exprs_s = rendered.join(", ");
     let count_s = format!("{}", exprs.len());
-    let handles: Vec<String> = (0..exprs.len()).map(|i| format!("__fan_h{}", i)).collect();
+    let handles: Vec<String> = (0..exprs.len()).map(|i| format!("__almide_fan_h{}", i)).collect();
     let spawns: Vec<String> = rendered.iter().enumerate()
-        .map(|(i, body)| format!("let {} = __s.spawn(move || {{ {} }});", handles[i], body))
+        .map(|(i, body)| format!("let {} = __almide_s.spawn(move || {{ let __almide_fan_e = almide_fan_enter(__almide_fan_g, {}); {} }});", handles[i], i, body))
         .collect();
     let any_result = exprs.iter().any(|e| e.ty.is_result());
     let joins: Vec<String> = exprs.iter().enumerate().map(|(i, e)| {
         if e.ty.is_result() {
-            if ctx.auto_unwrap { format!("{}.join().unwrap()?", handles[i]) }
-            else { format!("{}.join().unwrap().unwrap()", handles[i]) }
-        } else { format!("{}.join().unwrap()", handles[i]) }
+            if ctx.auto_unwrap { format!("almide_fan_join({})?", handles[i]) }
+            else { format!("almide_fan_join({}).unwrap()", handles[i]) }
+        } else { format!("almide_fan_join({})", handles[i]) }
     }).collect();
     let join_expr = if joins.len() == 1 { joins[0].clone() }
         else { format!("({})", joins.join(", ")) };
@@ -786,4 +780,11 @@ fn render_fan(ctx: &RenderContext, exprs: &[IrExpr]) -> String {
     let construct = if any_result && ctx.auto_unwrap { "fan_effect" } else { "fan_expr" };
     ctx.templates.render_with(construct, None, &[], &[("exprs", exprs_s.as_str()), ("count", count_s.as_str()), ("spawns", spawns_s.as_str()), ("join_expr", join_expr.as_str())])
         .unwrap_or_else(|| format!("fan({})", rendered.join(", ")))
+}
+
+/// #3341: a one-arm fan runs its arm inline (`fan_single`), with the join's `?` / `.unwrap()`.
+fn render_fan_single(ctx: &RenderContext, e: &IrExpr, body: &str) -> String {
+    let tail = match (e.ty.is_result(), ctx.auto_unwrap) { (true, true) => "?", (true, false) => ".unwrap()", _ => "" };
+    let body = if tail.is_empty() { body.to_string() } else { format!("({body}){tail}") };
+    ctx.templates.render_with("fan_single", None, &[], &[("body", body.as_str())]).unwrap_or(body)
 }

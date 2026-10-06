@@ -129,7 +129,7 @@ evidence  = [
 id        = "C-004"
 spec      = "ALS-R3"
 title     = "fan.any / fan.map / fan.settle are deterministic by list order"
-statement = "`fan.any` tries thunks in list order and returns the first Ok. `fan.map` runs element fns sequentially in list order; `fan.settle` returns results in list order. All are byte-identical native == wasm. (any skips failures to find an Ok.) `fan.race` was REMOVED in 0.42.0: under the deterministic model it was exactly `thunks[0]()` — `desugar_fan.rs` replaced the call with thunk[0]'s body and never evaluated the rest — so its name promised a wall-clock race the language does not have. It is an E027 check-time tombstone, the same treatment `fan.timeout` got in 0.29.0. EXCEPTION: side-effect INTERLEAVING inside `fan { }` block arms and `fan.settle` thunks is wall-clock on native (both run on real threads) and sequential on wasm — they pin their RESULT (tuple / list) order only. The block was an undercount here until #915's audit: it spawns per-arm scoped threads on native, the same interleaving class as settle. The three MAPPER heads (`fan.map/any/settle(xs, f)`) accept an EFFECT callback in both spellings — an inline lambda calling an effect fn, and a bare effect-fn value — and the result is byte-identical on both legs (#1350; the slot's `is_effect: false` was a declaration bug, never a permission, since unification is effect-agnostic by #1055). A callback reaching a stdlib capability with no wasm implementation (`http.get`) walls on the wasm leg, but that is the capability's own gap — it walls identically with no `fan` in the program — not a mapper-purity rule. The converse holds too (#1406): a CAPABILITY-BEARING callback whose capability HAS a wasm implementation (fs) runs byte-identically on both legs, in both spellings — an inline lambda reaching fs directly, and a lambda calling an effect HELPER that wraps fs (the passthrough shape `effect fn helper(p) = fs.read_text(p)`, which seeds no ResultErr and carries no `!`/`?` of its own) — consumed via `??` and via `!` alike. Two compiler facts carry this cell: the can-err ABI seeds a fn whose TAIL position returns a foreign Result (`returns_foreign_result`, so the passthrough keeps the uniform Result-carrier funcref ABI), and the mapper's result-family tracking is TYPE-split at the classify sites (`is_fan_any_map` + `is_heap_ok_result` — the pre-routing name `fan.any_map` covers all nine 3×3 pairings, so the String-output pairings' heap-Ok cap-as-tag family cannot be told apart by name). EXTENDED (#1406, 0.61.2): on the STRUCTURAL leg (the 0.60 default, which `almide run --target wasm` takes for fs programs) every spelling the ruling admits agrees with native on all three mapper heads — the canonical `!` tail (`(p) => fs.read_text(p)!`, `(p) => helper(p)!`), a COMPOUND body with a statement before the `!`, and a bare effect-fn VALUE — consumed via `!`, `??`, and a match over settle's list. Two shapes diverged before: `fan.settle`'s canonical `!` (the frontend strips the marker only for `list.*` callees, and settle desugars to `list.map` AFTER that pass, so the emitter saw `ok(unwrap(f(p)))`) and a compound body on ANY head — the structural leg inlined the callback into the ENCLOSING frame, so its `!` propagated out of `main` (`Error: No such file or directory (os error 2)` at the time; since #2090 the same line reads `Error: fs.read_text(\"p\"): No such file or directory (os error 2)` — the call and its operand prefixed, the errno tail verbatim — on every leg, exit 1) where native captured the err into the element's Result. A callback body that still propagates after the canonical-wrapper strip is now lowered once as a closure value and called per element through the funcref table (the #1806 route the fs walkers take), so its `!` rides the closure's own Result channel; the fn-value `list.map` route gained the closure convention's RC-3 +1 on the borrowed element it hands the callee. The fixture lives in spec/embedded_cross (an fs program routes to the incumbent on the BUILD path), the fs-backed effect column is one row per head in spec/lang/fan_mapper_matrix_test.almd (fan.race is the reasoned omission: its mapper meters a PURE body, E006), and the http-bodied twin stays refused on stock artifacts by the CAPABILITY — proofs/wall-corpus/fan_mapper_http_callback.almd pins the E081 text naming `http.get`, never the mapper — while the embedded lane serves it identically to native (C-328)."
+statement = "`fan.any` tries thunks in list order and returns the first Ok. `fan.map` and `fan.settle` behave as a sequential evaluation of EVERY element in list order, whatever the substrate (ADR-0024 D1): the observation (stdout, stderr, exit code, returned value) is that of evaluating element 0, then element 1, and so on to the last, and no choice of substrate (sequential, threads, async subtasks) may change it; `fan.map` returns the results in list order, `fan.settle` every element's Result in list order. All are byte-identical native == wasm. (any skips failures to find an Ok.) `fan.race` was REMOVED in 0.42.0: under the deterministic model it was exactly `thunks[0]()` — `desugar_fan.rs` replaced the call with thunk[0]'s body and never evaluated the rest — so its name promised a wall-clock race the language does not have. It is an E027 check-time tombstone, the same treatment `fan.timeout` got in 0.29.0. The three MAPPER heads (`fan.map/any/settle(xs, f)`) accept an EFFECT callback in both spellings — an inline lambda calling an effect fn, and a bare effect-fn value — and the result is byte-identical on both legs (#1350; the slot's `is_effect: false` was a declaration bug, never a permission, since unification is effect-agnostic by #1055). A callback reaching a stdlib capability with no wasm implementation (`http.get`) walls on the wasm leg, but that is the capability's own gap — it walls identically with no `fan` in the program — not a mapper-purity rule. The converse holds too (#1406): a CAPABILITY-BEARING callback whose capability HAS a wasm implementation (fs) runs byte-identically on both legs, in both spellings — an inline lambda reaching fs directly, and a lambda calling an effect HELPER that wraps fs (the passthrough shape `effect fn helper(p) = fs.read_text(p)`, which seeds no ResultErr and carries no `!`/`?` of its own) — consumed via `??` and via `!` alike. Two compiler facts carry this cell: the can-err ABI seeds a fn whose TAIL position returns a foreign Result (`returns_foreign_result`, so the passthrough keeps the uniform Result-carrier funcref ABI), and the mapper's result-family tracking is TYPE-split at the classify sites (`is_fan_any_map` + `is_heap_ok_result` — the pre-routing name `fan.any_map` covers all nine 3×3 pairings, so the String-output pairings' heap-Ok cap-as-tag family cannot be told apart by name). EXTENDED (#1406, 0.61.2): on the STRUCTURAL leg (the 0.60 default, which `almide run --target wasm` takes for fs programs) every spelling the ruling admits agrees with native on all three mapper heads — the canonical `!` tail (`(p) => fs.read_text(p)!`, `(p) => helper(p)!`), a COMPOUND body with a statement before the `!`, and a bare effect-fn VALUE — consumed via `!`, `??`, and a match over settle's list. Two shapes diverged before: `fan.settle`'s canonical `!` (the frontend strips the marker only for `list.*` callees, and settle desugars to `list.map` AFTER that pass, so the emitter saw `ok(unwrap(f(p)))`) and a compound body on ANY head — the structural leg inlined the callback into the ENCLOSING frame, so its `!` propagated out of `main` (`Error: No such file or directory (os error 2)` at the time; since #2090 the same line reads `Error: fs.read_text(\"p\"): No such file or directory (os error 2)` — the call and its operand prefixed, the errno tail verbatim — on every leg, exit 1) where native captured the err into the element's Result. A callback body that still propagates after the canonical-wrapper strip is now lowered once as a closure value and called per element through the funcref table (the #1806 route the fs walkers take), so its `!` rides the closure's own Result channel; the fn-value `list.map` route gained the closure convention's RC-3 +1 on the borrowed element it hands the callee. The fixture lives in spec/embedded_cross (an fs program routes to the incumbent on the BUILD path), the fs-backed effect column is one row per head in spec/lang/fan_mapper_matrix_test.almd (fan.race is the reasoned omission: its mapper meters a PURE body, E006), and the http-bodied twin stays refused on stock artifacts by the CAPABILITY — proofs/wall-corpus/fan_mapper_http_callback.almd pins the E081 text naming `http.get`, never the mapper — while the embedded lane serves it identically to native (C-328)."
 since     = "0.24.0"
 status    = "active"
 evidence  = [
@@ -147,12 +147,13 @@ evidence  = [
 id        = "C-005"
 spec      = "ALS-R3"
 title     = "fan error propagation surfaces as the unified main-error abort"
-statement = "The first element fn returning Err in `fan.map` (named or inline lambda) and the all-fail case of `fan.any` (defined `Err(\"fan.any: all candidates failed\")`) all propagate as `Error: <msg>` + exit 1 on BOTH targets via the effect-main termination — NOT a native panic (101) nor a wasm trap (134)."
+statement = "`fan.map` (named or inline lambda) evaluates EVERY element in list order, including the elements after one that returns Err (ADR-0024 D1): their output appears in list order before the abort, and when several elements return Err the LOWEST-INDEX Err is the one that surfaces, the same rule `fan { }` block arms follow (C-199). That Err and the all-fail case of `fan.any` (defined `Err(\"fan.any: all candidates failed\")`) propagate as `Error: <msg>` + exit 1 on BOTH targets via the effect-main termination — NOT a native panic (101) nor a wasm trap (134). To stop at the first failure, the writer spells a `for` loop with `!`."
 since     = "0.24.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/fan_map_err.almd", class = "fixture" },
   { path = "spec/wasm_cross/fan_map_inline_err.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fan_map_err_runs_every_element.almd", class = "fixture" },
   { path = "spec/wasm_cross/fan_any_allfail.almd", class = "fixture" },
   { path = "spec/wasm_cross/option_none_unwrap_term.almd", class = "fixture" },
 ]
@@ -305,6 +306,7 @@ evidence  = [
   { path = "spec/wasm_cross/list_of_tuples_equality.almd", class = "fixture" },
   { path = "spec/wasm_cross/map_rich_variant_key.almd", class = "fixture" },
   { path = "spec/wasm_cross/match_guard_eq_borrows_binding.almd", class = "fixture" },
+  { path = "spec/wasm_cross/match_catchall_binder_eq.almd", class = "fixture" },
 ]
 
 # ── UNICODE STRING SURFACE ───────────────────────────────────────────
@@ -316,6 +318,7 @@ statement = "Codepoint-aware string ops (chars/reverse/slice/take/drop/first/las
 since     = "0.24.0"
 status    = "active"
 evidence  = [
+  { path = "spec/wasm_cross/string_bidi_controls_literal.almd", class = "fixture" },
   { path = "spec/wasm_cross/string_codepoint.almd", class = "fixture" },
   { path = "spec/wasm_cross/string_ops.almd", class = "fixture" },
 ]
@@ -528,6 +531,7 @@ evidence  = [
   { path = "spec/wasm_cross/list_pop_map_insert_on_record_field.almd", class = "fixture" },
   { path = "spec/wasm_cross/nested_field_path_mut.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_param_alias_cow.almd", class = "fixture" },
+  { path = "spec/wasm_cross/mut_param_alias_in_place_mutators.almd", class = "fixture" },
   { path = "spec/wasm_cross/inplace_clear_family.almd", class = "fixture" },
   { path = "spec/wasm_cross/bytes_set_on_record_field.almd", class = "fixture" },
   { path = "spec/wasm_cross/inplace_clear_alias.almd", class = "fixture" },
@@ -536,6 +540,8 @@ evidence  = [
   { path = "spec/wasm_cross/mutator_writeback_releases_old_block.almd", class = "fixture" },
   { path = "spec/wasm_cross/nested_place_assign.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_param_nested_place_writeback.almd", class = "fixture" },
+  { path = "spec/wasm_cross/record_map_field_update.almd", class = "fixture" },
+  { path = "spec/wasm_cross/tuple_bound_list_mapped_in_loop.almd", class = "fixture" },
 ]
 
 # ── LIST BOUNDS GRACEFULNESS ─────────────────────────────────────────
@@ -693,6 +699,10 @@ evidence  = [
   { path = "spec/wasm_cross/leak_free_reader_temporaries.almd", class = "fixture" },
   { path = "spec/wasm_cross/leak_free_propagating_literal_operand.almd", class = "fixture" },
   { path = "spec/wasm_cross/leak_free_result_option_carriers.almd", class = "fixture" },
+  { path = "spec/wasm_cross/leak_free_spread_produced_base.almd", class = "fixture" },
+  { path = "spec/wasm_cross/leak_free_map_walk_exit.almd", class = "fixture" },
+  { path = "spec/wasm_cross/leak_free_list_rest_exit.almd", class = "fixture" },
+  { path = "tests/leak_free_exits_test.rs", class = "fixture", name = "every_walled_exit_shape_agrees_with_native_frees_every_block_and_certifies" },
 ]
 
 # ── FILESYSTEM (WASI PREOPEN RESOLUTION) ─────────────────────────────
@@ -705,6 +715,7 @@ since     = "0.24.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/fs_preopen_resolve.almd", class = "fixture" },
+  { path = "tests/component_p3_fs_cross_test.rs", class = "fixture", name = "p3_component_fs_fixtures_match_native" },
 ]
 
 # ── RECURSIVE-ENUM HEAP INDIRECTION / NAME COLLISION ────────────────
@@ -733,6 +744,7 @@ evidence  = [
   { path = "spec/wasm_cross/control_flow.almd", class = "fixture" },
   { path = "spec/wasm_cross/unwrap_or_value_fn_named_parse.almd", class = "fixture" },
   { path = "spec/wasm_cross/match_err_arm_typed_payload.almd", class = "fixture" },
+  { path = "spec/wasm_cross/map_get_fallback_key_and_lazy.almd", class = "fixture" },
 ]
 
 # ── LIST[STRING] PARAM CODEGEN ───────────────────────────────────────
@@ -920,6 +932,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/empty_collection_annotated.almd", class = "fixture" },
   { path = "tests/diagnostics/e018-empty-collection-element/broken.almd", class = "fixture" },
+  { path = "spec/wasm_cross/generic_unit_ctor_pinned.almd", class = "fixture" },
 ]
 
 # ── COMPILE-TIME RECURSION IS HOST/PROFILE-INDEPENDENT (no stack-overflow crash) ─
@@ -1060,6 +1073,8 @@ since     = "0.27.6"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/nested_ctor_pattern.almd", class = "fixture" },
+  { path = "spec/wasm_cross/option_payload_recursive_variant.almd", class = "fixture" },
+  { path = "spec/wasm_cross/list_pattern_variant_element.almd", class = "fixture" },
   { path = "spec/wasm_cross/record_variant_field_literal.almd", class = "fixture" },
   { path = "spec/wasm_cross/positional_variant_field_literal.almd", class = "fixture" },
   { path = "spec/wasm_cross/nested_variant_tag_box.almd", class = "fixture" },
@@ -1067,6 +1082,11 @@ evidence  = [
   { path = "spec/wasm_cross/nested_tuple_pattern.almd", class = "fixture" },
   { path = "spec/wasm_cross/recursive_payload_closure_capture.almd", class = "fixture" },
   { path = "spec/wasm_cross/recursive_payload_nested_pattern.almd", class = "fixture" },
+  { path = "spec/wasm_cross/recursive_payload_top_let.almd", class = "fixture" },
+  { path = "spec/wasm_cross/tuple_scrutinee_recursive_variants.almd", class = "fixture" },
+  { path = "spec/wasm_cross/tuple_scrutinee_list_payload_into_ok.almd", class = "fixture" },
+  { path = "spec/wasm_cross/list_pattern_in_option_payload.almd", class = "fixture" },
+  { path = "spec/wasm_cross/nested_box_guard_binder.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-071"
@@ -1118,6 +1138,8 @@ since     = "0.27.6"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/r5_lowmisc_param_try_err.almd", class = "fixture" },
+  { path = "spec/wasm_cross/match_binder_stored_owned.almd", class = "fixture" },
+  { path = "spec/wasm_cross/self_call_swapped_params.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-076"
@@ -1259,6 +1281,7 @@ since     = "0.27.6"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/reserved_keyword_fn.almd", class = "fixture" },
+  { path = "spec/wasm_cross/generated_binder_hygiene.almd", class = "fixture" },
   { path = "tests/keyword_submodule_test.rs", name = "keyword_fn_in_submodule_builds_and_runs_native", class = "fixture" },
   { path = "tests/keyword_submodule_test.rs", name = "keyword_fn_in_submodule_matches_on_wasm", class = "fixture" },
 ]
@@ -1542,6 +1565,8 @@ evidence  = [
   { path = "spec/wasm_cross/destructure_let_unwrap.almd", class = "fixture" },
   { path = "spec/wasm_cross/unwrap_callarg_single_expr_effect_body.almd", class = "fixture" },
   { path = "spec/wasm_cross/effect_operand_unwrap_distinct.almd", class = "fixture" },
+  { path = "spec/wasm_cross/statement_after_tail_walker_bang.almd", class = "fixture" },
+  { path = "spec/wasm_cross/err_arm_takes_let_match_type.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-109"
@@ -1593,6 +1618,7 @@ since     = "0.27.6"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/letbound_variant_match.almd", class = "fixture" },
+  { path = "spec/wasm_cross/letbound_variant_match_heap_payload.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-114"
@@ -1802,6 +1828,7 @@ evidence  = [
   { path = "spec/wasm_cross/bytes_param_writeback.almd", class = "fixture" },
   { path = "spec/wasm_cross/bytes_clear_mut_param.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_param_alias_cow.almd", class = "fixture" },
+  { path = "spec/wasm_cross/mut_param_alias_in_place_mutators.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_param_effect_never_err.almd", class = "fixture" },
   { path = "spec/wasm_cross/effect_mut_generic_port.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_param_effect_can_err.almd", class = "fixture" },
@@ -1810,10 +1837,14 @@ evidence  = [
   { path = "spec/wasm_cross/mutable_global_field_mut_arg.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_param_effect_unpropagated.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_call_hoisted_args_distinct.almd", class = "fixture" },
+  { path = "spec/wasm_cross/mut_call_hoisted_args_in_branch.almd", class = "fixture" },
+  { path = "spec/wasm_cross/mut_call_nested_read_before.almd", class = "fixture" },
+  { path = "spec/wasm_cross/mut_call_two_mut_args_read.almd", class = "fixture" },
   { path = "spec/wasm_cross/mutator_writeback_releases_old_block.almd", class = "fixture" },
   { path = "spec/wasm_cross/mutable_global_mut_arg_callee_touches_global.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_param_nested_place_writeback.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_param_interpolated.almd", class = "fixture" },
+  { path = "spec/wasm_cross/interp_mut_call_part_order.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_param_loop_stays_in_place.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_param_global_callee_sees_precall.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_param_global_no_reach_in_place.almd", class = "fixture" },
@@ -1878,6 +1909,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/fs_relative_path.almd", class = "fixture" },
   { path = "spec/stdlib/fs_stat_test.almd", class = "fixture" },
+  { path = "tests/component_p3_fs_cross_test.rs", class = "fixture", name = "p3_component_fs_fixtures_match_native" },
 ]
 [[contract]]
 id        = "C-138"
@@ -2152,7 +2184,7 @@ evidence  = [
 id        = "C-162"
 spec      = "ALS-T5"
 title     = "io.write / io.write_bytes emit in program order, interleaved with println"
-statement = "`io.write(Bytes)` and `io.write_bytes(List[Int])` write their payload to stdout at the point of the call, so a program interleaving them with `println` produces the SAME byte stream in the SAME order on native and wasm. Two defects met here. (1) Neither fn had a wasm self-host: `io.write` was not in the admitted-effectful set, so it walled as `effectful/impure stdlib Module call io.write needs a declared capability` and any byte-streaming program was native-only; both are now self-hosted in stdlib/io_write.almd over the single-iovec `prim.fd_write` floor, carrying the SAME Capability::Stdout as `io.print` (a stdout write is a stdout write). (2) Once linked, the ORDER diverged: native routed the byte writers through a 64 KiB `BufWriter<Stdout>` flushed only at exit, while `println!` wrote through Rust's own `Stdout` handle — two independent buffers over one fd, so every `io.write` landed AFTER every line write (wrong even native-only), where the wasm leg's direct `fd_write` kept program order. Native now routes every stdout write — `println` included — through ONE buffer (#2245), so program order holds by construction; that buffer flushes per write only when stdout is a terminal, and otherwise at exit, on a panic, before a child process runs and before every stdin read. A zero-length write emits nothing and disturbs no ordering."
+statement = "`io.write(Bytes)` and `io.write_bytes(List[Int])` write their payload to stdout at the point of the call, so a program interleaving them with `println` produces the SAME byte stream in the SAME order on native and wasm. Two defects met here. (1) Neither fn had a wasm self-host: `io.write` was not in the admitted-effectful set, so it walled as `effectful/impure stdlib Module call io.write needs a declared capability` and any byte-streaming program was native-only; both are now self-hosted in stdlib/io_write.almd over the single-iovec `prim.fd_write` floor, carrying the SAME Capability::Stdout as `io.print` (a stdout write is a stdout write). (2) Once linked, the ORDER diverged: native routed the byte writers through a 64 KiB `BufWriter<Stdout>` flushed only at exit, while `println!` wrote through Rust's own `Stdout` handle — two independent buffers over one fd, so every `io.write` landed AFTER every line write (wrong even native-only), where the wasm leg's direct `fd_write` kept program order. Native now routes every stdout write — `println` included — through ONE buffer (#2245), so program order holds by construction; that buffer flushes per write when stdout is a terminal; otherwise it flushes at every write that ends a line (a `println`, or a byte write containing `\n`), and in both cases at exit, on a panic, before a child process runs and before every stdin read, so a long-running program's output reaches a pipe or a file line by line (almide/almide#3417). A zero-length write emits nothing and disturbs no ordering."
 since     = "0.35.0"
 status    = "active"
 evidence  = [
@@ -2481,6 +2513,7 @@ since     = "0.37.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/env_platform_reporting.almd", class = "fixture" },
+  { path = "tests/component_p3_fs_cross_test.rs", class = "fixture", name = "p3_component_fs_fixtures_match_native" },
 ]
 [[contract]]
 id        = "C-190"
@@ -2552,12 +2585,13 @@ evidence  = [
 [[contract]]
 id        = "C-196"
 spec      = "ALS-T6"
-title     = "Call-stack exhaustion is a resource limit, not an observable-behavior promise"
-statement = "Termination that depends on recursion depth beyond a target's call-stack resources is TARGET-DEPENDENT, and the divergence is contracted rather than silent: when one leg's optimizer legally transforms an unbounded self-recursion into iteration (LLVM's accumulator tail-recursion elimination on native — Wave 4 finding 57, a mutated C-044 fixture whose `factorial(n - -2147483648)` recursion is ~4.29e9 frames deep) while the other leg recurses faithfully and traps (`call stack exhausted` on wasmtime; `stack overflow` on the native guard page), neither leg is wrong — no finite stack absorbs the recursion, and termination-by-transformation is not a semantic promise. The convergent boundary IS promised: recursion within both targets' limits stays byte-identical (the fixture). The differential oracle classifies the one-sided stack-exhaustion case as this contracted class (ladder.rs `one_sided_stack_exhaustion`, unit-tested, mirroring the pre-existing both-legs-exhausted skip). A depth-guard normalization — a defined T6 abort at the same depth on both targets — remains the strengthening follow-up that would retire this exception."
+title     = "Call-stack exhaustion is a defined abort at a per-target depth"
+statement = "Termination that depends on recursion depth beyond a target's call-stack resources is TARGET-DEPENDENT in WHERE it happens, and the divergence is contracted rather than silent: when one leg's optimizer legally transforms an unbounded self-recursion into iteration (LLVM's accumulator tail-recursion elimination on native — Wave 4 finding 57, a mutated C-044 fixture whose `factorial(n - -2147483648)` recursion is ~4.29e9 frames deep) while the other leg recurses faithfully and exhausts its stack, neither leg is wrong — no finite stack absorbs the recursion, and termination-by-transformation is not a semantic promise. What IS promised: (1) the convergent boundary — recursion within both targets' limits stays byte-identical (spec/wasm_cross/recursion_depth_within_limits.almd); (2) the FAILURE FORM — exhaustion is the DEFINED abort `Error: stack overflow` on stderr + exit 1, with the stdout written before it kept, on native and on the embedded wasm host (`almide run --target wasm`) alike (spec/wasm_fail/stack_overflow_abort.almd): never Rust's `thread 'main' has overflowed its stack` / `fatal runtime error: stack overflow, aborting` (SIGABRT, exit 134), never `Error: wasm trap: call stack exhausted`. This is C-197's cohort pattern applied to the stack: unify the failure form, let the THRESHOLD stay structural, and DECLARE it per target instead of equalising it — one common depth would make native refuse depths it reaches today. The declared thresholds: native, the overflowing thread's own stack (the platform's main-thread stack, 8 MiB by default on Linux and macOS; Rust's spawned-thread default, 2 MiB, for the thread of a `fan` arm or a parallel worker); the embedded host, an 8 MiB wasm stack. The declared residuals: (a) a STOCK runtime (`wasmtime run` of a p1 module or a component, a browser engine) owns the trap and its form — `wasm trap: call stack exhausted`, exit 134 under wasmtime — because a guest cannot observe its own stack exhaustion soundly: wasm exposes no stack bound to the guest, and a frame-depth counter's limit corresponds to no byte budget on any engine; (b) on Linux, a native thread that did not record its stack bounds when it started keeps Rust's message — every thread the runtime spawns records them; (c) an overflow inside a `fan` arm exits without the ordered trap wait of ADR-0024 D6, so output that a LOWER arm had not yet flushed is not printed. The differential oracle classifies the one-sided stack-exhaustion case as this contracted class (tools/xtarget-fuzz ladder.rs `resource_class`, unit-tested, mirroring the both-legs-exhausted skip)."
 since     = "0.41.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/recursion_depth_within_limits.almd", class = "fixture" },
+  { path = "spec/wasm_fail/stack_overflow_abort.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-197"
@@ -2611,11 +2645,12 @@ evidence  = [
 id        = "C-200"
 spec      = "ALS-T6"
 title     = "A trap in a fan sibling exits through the unified main-error abort, convergently"
-statement = "A runtime trap inside a `fan` sibling (division by zero, integer overflow, index out of bounds) terminates the program through the SAME unified `Error: <msg>` + exit 1 the effect-main path uses — never a native panic (101) nor a wasm trap (134) — and the two targets agree, including on what reached stdout first. In-flight siblings are NOT waited for: measured with a 1.5s-sleeping second sibling, both targets abort in ~0s with an empty stdout. This closes #1026's third complaint (the block's documented outcomes — a tuple, or the first Err in list order per C-199 — were not the only exits, and the trap exit was uncontracted). It does NOT require the per-arm output buffering the Unit's design note proposed: that was written on the assumption that the trap case diverged, and the measurement says it converges. Buffering remains the answer to a DIFFERENT question — C-004's EXCEPTION clause, where two siblings both PRINT and native interleaves by wall clock while wasm is sequential."
+statement = "A runtime trap inside a `fan` element (division by zero, integer overflow, index out of bounds, `panic`, a failed `assert`) terminates the program through the SAME unified `Error: <msg>` + exit 1 the effect-main path uses — never a native panic (101) nor a wasm trap (134) — and the observation is that of the sequential evaluation (ADR-0024 D6): a trap in element k means elements 0..k-1 ran to completion and their output appears in list order, then element k's output up to the trap, and nothing of any element after k. A concurrent substrate meets this by no longer starting elements, WAITING for every element below k, letting the lowest-index trap win, and flushing the timelines below it in order, then the trapping element's partial timeline, before the abort; an element above k is not waited for and its output is discarded. RESIDUAL (stated, not hidden): an element above the winning trap that a concurrent substrate had already started may have sent requests to the outside world that the sequential evaluation never sends — the observation matches, the effect on the world does not; a trap is a bug-class exit, and closing it would require never starting element k+1 before element k finishes, which is sequential execution. This replaces the 0.42.0 rule that in-flight siblings are NOT waited for (#1026: measured then with a 1.5s-sleeping second sibling, both targets aborted in ~0s with an empty stdout — still the observation when the trapping element is the FIRST, as in fan_sibling_trap.almd). Per-element output buffering (ADR-0011 D1) is what lets a concurrent substrate meet it, and is the same mechanism C-004's EXCEPTION clause waits on."
 since     = "0.42.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/fan_sibling_trap.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fan_trap_waits_for_elements_below.almd", class = "fixture" },
 ]
 
 # ── OPTION TUPLE-PAYLOAD MATRIX ─
@@ -2802,6 +2837,7 @@ since     = "0.53.6"
 status    = "active"
 evidence  = [
   { path = "spec/stdlib/process_timeout_test.almd", class = "fixture" },
+  { path = "spec/embedded_cross/process_spawn_family.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-215"
@@ -2816,6 +2852,7 @@ evidence  = [
   { path = "spec/wasm_cross/fs_call_head_family.almd", class = "fixture" },
   { path = "spec/wasm_cross/fs_read_bytes_raw_call_head.almd", class = "fixture" },
   { path = "spec/wasm_cross/fs_fallible_walker_call_head.almd", class = "fixture" },
+  { path = "tests/component_p3_fs_cross_test.rs", class = "fixture", name = "p3_component_fs_fixtures_match_native" },
 ]
 [[contract]]
 id        = "C-216"
@@ -2887,6 +2924,8 @@ evidence  = [
   { path = "spec/stdlib/fs_fold_lines_range_test.almd", class = "fixture" },
   { path = "spec/stdlib/fs_fold_lines_chunked_test.almd", class = "fixture" },
   { path = "spec/wasm_cross/line_endings_bare_cr.almd", class = "fixture" },
+  { path = "tests/component_p3_fs_cross_test.rs", class = "fixture", name = "p3_component_fs_fixtures_match_native" },
+  { path = "spec/wasm_cross/statement_after_tail_walker_bang.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-221"
@@ -2949,6 +2988,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/fs_read_lines.almd", class = "fixture" },
   { path = "spec/wasm_cross/line_endings_bare_cr.almd", class = "fixture" },
+  { path = "tests/component_p3_fs_cross_test.rs", class = "fixture", name = "p3_component_fs_fixtures_match_native" },
 ]
 [[contract]]
 id        = "C-226"
@@ -2959,6 +2999,8 @@ since     = "0.56.2"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/mut_param_call_chain.almd", class = "fixture" },
+  { path = "spec/wasm_cross/closure_mut_arg_in_nested_match.almd", class = "fixture" },
+  { path = "spec/wasm_cross/lambda_captures_mut_param.almd", class = "fixture" },
   { path = "spec/wasm_cross/effect_call_arg_credit.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_param_writeback_growth.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_param_spread_reassign.almd", class = "fixture" },
@@ -2967,6 +3009,7 @@ evidence  = [
   { path = "spec/wasm_cross/nested_field_path_mut.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_scalar_param_reassign.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_param_tail_recursion.almd", class = "fixture" },
+  { path = "spec/wasm_cross/mut_list_param_read_by_range_ops.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-227"
@@ -2977,6 +3020,8 @@ since     = "0.56.2"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/fs_metadata_family.almd", class = "fixture" },
+  { path = "tests/component_p3_fs_cross_test.rs", class = "fixture", name = "p3_component_fs_fixtures_match_native" },
+  { path = "tests/component_p3_fs_cross_test.rs", class = "fixture", name = "p3_component_reads_and_writes_past_the_host_per_call_bound" },
 ]
 [[contract]]
 id        = "C-228"
@@ -2990,6 +3035,7 @@ evidence  = [
   { path = "spec/wasm_cross/matrix_select_rows.almd", class = "fixture" },
   { path = "spec/wasm_cross/fs_glob_segments.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_shape_family.almd", class = "fixture" },
+  { path = "tests/component_p3_fs_cross_test.rs", class = "fixture", name = "p3_component_fs_fixtures_match_native" },
 ]
 [[contract]]
 id        = "C-229"
@@ -3188,6 +3234,7 @@ since     = "0.57.1"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/string_interpolation.almd", class = "fixture" },
+  { path = "spec/wasm_cross/top_let_case_distinct_names.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-247"
@@ -3336,6 +3383,9 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/declaration_forms.almd", class = "fixture" },
   { path = "spec/wasm_cross/top_let_closure_record.almd", class = "fixture" },
+  { path = "spec/wasm_cross/top_let_fn_value_closure_param.almd", class = "fixture" },
+  { path = "spec/wasm_cross/top_let_fn_value_bytes_param.almd", class = "fixture" },
+  { path = "spec/wasm_cross/top_let_rc_value.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-261"
@@ -3469,6 +3519,7 @@ since     = "0.57.1"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/fs_list_dir_multipass.almd", class = "fixture" },
+  { path = "tests/component_p3_fs_cross_test.rs", class = "fixture", name = "p3_component_fs_fixtures_match_native" },
 ]
 
 # ── fs WRITE-SIDE ERROR TEXT ───────────────────────────────────────────
@@ -3481,6 +3532,7 @@ since     = "0.57.1"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/fs_write_errno.almd", class = "fixture" },
+  { path = "tests/component_p3_fs_cross_test.rs", class = "fixture", name = "p3_component_fs_fixtures_match_native" },
 ]
 
 # ── ADR-0006 FALLIBLE CALLBACK FOR THE fs STREAMING WALKERS ────────────
@@ -3496,6 +3548,7 @@ evidence  = [
   { path = "spec/wasm_cross/fs_fallible_stream_callback.almd", class = "fixture" },
   { path = "spec/stdlib/fs_streaming_test.almd", class = "fixture" },
   { path = "tests/fs_streaming_family_gate_test.rs", name = "every_streaming_cell_decides_its_fallible_form", class = "fixture" },
+  { path = "tests/component_p3_fs_cross_test.rs", class = "fixture", name = "p3_component_fs_fixtures_match_native" },
 ]
 
 # ── http RESPONSE HEADERS ──────────────────────────────────────────────
@@ -3616,6 +3669,8 @@ evidence  = [
   { path = "spec/wasm_cross/list_find_map_short_circuit.almd", class = "fixture" },
   { path = "spec/wasm_cross/fallible_hof_matrix_list.almd", class = "fixture" },
   { path = "spec/wasm_cross/fallible_hof_matrix_containers.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fallible_hof_recursive_callee.almd", class = "fixture" },
+  { path = "spec/integration/module_fallible_lambda_callee/src/main.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-285"
@@ -3677,6 +3732,7 @@ since     = "0.57.1"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/adr0005_operator_equivalence.almd", class = "fixture" },
+  { path = "spec/wasm_cross/optional_chain_heap_field.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-290"
@@ -3687,6 +3743,7 @@ since     = "0.57.2"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/fs_read_text_utf8.almd", class = "fixture" },
+  { path = "tests/component_p3_fs_cross_test.rs", class = "fixture", name = "p3_component_fs_fixtures_match_native" },
 ]
 
 # ── REFERENCE-SUITE CONFORMANCE CORPUS ─
@@ -3950,6 +4007,8 @@ since     = "0.60.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/closure_captured_list_mutation.almd", class = "fixture" },
+  { path = "spec/wasm_cross/closure_captured_map_key_write.almd", class = "fixture" },
+  { path = "spec/wasm_cross/closure_bytes_list_index_arg.almd", class = "fixture" },
   { path = "spec/wasm_cross/closure_captured_map_records.almd", class = "fixture" },
   { path = "spec/wasm_cross/bytes_writer_mut_from_declaration.almd", class = "fixture" },
   { path = "spec/wasm_cross/closure_reads_var_written_by_mut_call.almd", class = "fixture" },
@@ -4174,6 +4233,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/fan_prefetch_fs.almd", class = "fixture" },
   { path = "tests/component_p3_test.rs", class = "fixture", name = "p3_component_fan_prefetch_reads_concurrently" },
+  { path = "tests/component_p3_fs_cross_test.rs", class = "fixture", name = "p3_component_fs_fixtures_match_native" },
 ]
 [[contract]]
 id        = "C-322"
@@ -4285,6 +4345,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/env_set_overlay.almd", class = "fixture" },
   { path = "crates/almide-wasm/tests/wasi_services.rs", name = "hello_ships_no_environ_or_args_service", class = "by-construction" },
+  { path = "tests/component_p3_fs_cross_test.rs", class = "fixture", name = "p3_component_env_set_matches_native_and_p1" },
 ]
 [[contract]]
 id        = "C-331"
@@ -4746,7 +4807,7 @@ evidence  = [
 id        = "C-367"
 spec      = "ALS-R5"
 title     = "http.serve runs on the embedded wasm lane with native's one-instance, sequential semantics and the same status, header set and body"
-statement = "`http.serve(port, f)` serves on the EMBEDDED wasm lane (`almide run --target wasm`, almide/almide#2650) with native's semantics. ONE instance serves every request of the run, sequentially and in accept order: main runs once and calls `http.serve` exactly as it does natively, the host binds `0.0.0.0:<port>` and hands the guest one parsed request at a time, and the handler runs in the same instance and heap as main, so a value main computed before `serve` (a random draw, a clock read) and captured by the handler is the same on every request of the run, and main's effects before `serve` happen once — never the per-request instance of a `wasi:http` proxy host. The request is read by the SAME code on both legs: the request line's method and target, header lines split at the first colon and trimmed, in wire order, and a Content-Length body decoded as UTF-8 with replacement. Every request is answered with the same status code, header set and body on both legs. The header set is the response's header fields as (name, value) pairs, where names compare ASCII-case-insensitively; fields with different names are unordered, and fields with the same name keep their relative order (RFC 9110 §5.3). The fields a host manages are excluded: `date`, `connection`, `keep-alive`, `transfer-encoding` and `content-length` (the framing; the body is compared de-framed). The reason phrase is not part of the contract: HTTP/2 and HTTP/3 carry none (RFC 9113 §8.3.2, RFC 9114 §4.3.2), and a host's HTTP library writes its own (`418 OK` from the native core, `418 I'm a teapot` under hyper, measured by the almide/almide#2659 prototype). `req_method` / `req_path` / `req_body` / `req_header` (first match, ASCII case-insensitive) / `query_params` (the target's text after the first `?`, split on `&`, each pair split at its first `=`, a pair without `=` skipped, `+` and `%XX` decoded, a later key winning) answer the same values; a handler `err(m)` is a `500` whose body is `Internal error: <m>` with `Content-Type: text/plain`; a bind failure ABORTS the run with `Error: bind failed: <os message>` on stderr and exit 1 wherever the call sits — `http.serve` is typed never-err, so a caller's `!` is a no-op, and before this contract the native runtime's returned err surfaced only when the call was a fn's tail (elsewhere the program silently went on without a server). The lane keeps native's stream rules while the server runs: stderr is unbuffered, so every stderr line of a run reaches the stream on both legs and the two transcripts hold the same lines, whose order across requests is not promised, and stdout is flushed per write on a terminal and 64 KiB-buffered otherwise. A signal stops the server without losing its output (almide/almide#2692): on the first SIGTERM or SIGINT (on Windows, Ctrl-C or Ctrl-Break) while `http.serve` runs, the host stops accepting (a connection it has not accepted is closed unanswered), lets the request in flight finish and answers it, flushes stdout, and `http.serve` returns, so the statements after it run and the exit code is main's. A second signal, during that drain or after `serve` returned, or a drain still waiting when the request timeout (30 s) has passed, flushes stdout and exits 1 without answering the request in flight; no stop exits with 128+signal (C-350's `0..=125`). NOT covered: HTTP framing and connection reuse (the host's); other signals; on native Windows the forced stop exits 1 without flushing stdout, since only the serving thread can reach its stdout buffer until stdout becomes one process-global buffer (ADR-0020 §5.5 in almide/almide); the stock p1 artifact (`almide build --target wasm`) has no listening socket, so `http.serve` stays refused there at check time (E081 on the stock-p1 leg), and the stock p3 component (ALMIDE_COMPONENT_P3 under `--component`) refuses it at build time with E081 too: it exports no `wasi:http/handler@0.3.0`, which is ADR-0023 step 8's shape and not described here (almide/almide#2659). Evidence: spec/serve_cross/http_serve_replay.almd, a server fixture that no generic runner executes (it never exits); the implementation's driver starts it on both legs, replays one request script (GET, POST with a UTF-8 body and a header, a percent-encoded query, a status outside the reason table, a redirect, a 404, a handler err, another method) and compares each response's status code, header set and de-framed body and the stderr transcripts as multisets of lines, asserts that the captured draw answers the same on two requests of one run, and starts it on an occupied port to compare the abort; spec/serve_cross/http_serve_shutdown.almd, a server fixture the same driver starts on both legs with stdout redirected to a file: one SIGTERM while a request sleeps in its handler must answer that request, leave every stdout line in the file including the one main prints after `http.serve`, and exit 0; two SIGTERMs while a request stalls must exit 1 with every line printed before the stop."
+statement = "`http.serve(port, f)` serves on the EMBEDDED wasm lane (`almide run --target wasm`, almide/almide#2650) with native's semantics. ONE instance serves every request of the run, sequentially and in accept order: main runs once and calls `http.serve` exactly as it does natively, the host binds `0.0.0.0:<port>` and hands the guest one parsed request at a time, and main's effects before `serve` happen once. The app passed to `serve` is instance-closed (it reads no local of main, almide/almide#2698), so nothing is promised about a value main computed before `serve`, and how many instances evaluate the app is not observable. The request is read by the SAME code on both legs: the request line's method and target, header lines split at the first colon and trimmed, in wire order, and a Content-Length body decoded as UTF-8 with replacement. Every request is answered with the same status code, header set and body on both legs. The header set is the response's header fields as (name, value) pairs, where names compare ASCII-case-insensitively; fields with different names are unordered, and fields with the same name keep their relative order (RFC 9110 §5.3). The fields a host manages are excluded: `date`, `connection`, `keep-alive`, `transfer-encoding` and `content-length` (the framing; the body is compared de-framed). The reason phrase is not part of the contract: HTTP/2 and HTTP/3 carry none (RFC 9113 §8.3.2, RFC 9114 §4.3.2), and a host's HTTP library writes its own (`418 OK` from the native core, `418 I'm a teapot` under hyper, measured by the almide/almide#2659 prototype). `req_method` / `req_path` / `req_body` / `req_header` (first match, ASCII case-insensitive) / `query_params` (the target's text after the first `?`, split on `&`, each pair split at its first `=`, a pair without `=` skipped, `+` and `%XX` decoded, a later key winning) answer the same values; a handler `err(m)` is a `500` whose body is `Internal error: <m>` with `Content-Type: text/plain`; on an export host (`wasmtime serve` running the stock `wasi:http/handler@0.3.0` export of a serve-shaped program) a trap or abort in the handler answers the host's own `500` and that instance is discarded; on a socket host (native, the embedded lane) a bind failure ABORTS the run with `Error: bind failed: <os message>` on stderr and exit 1 wherever the call sits — `http.serve` is typed never-err, so a caller's `!` is a no-op, and before this contract the native runtime's returned err surfaced only when the call was a fn's tail (elsewhere the program silently went on without a server). On a socket host the lane keeps native's stream rules while the server runs: stderr is unbuffered, so every stderr line of a run reaches the stream on both legs and the two transcripts hold the same lines, whose order across requests is not promised (a host's log decoration, such as `wasmtime serve`'s `stdout [req_id] :: ` line prefix, is not part of a transcript), and stdout is flushed per write on a terminal and at every line end otherwise (C-162). On a socket host a signal stops the server without losing its output (almide/almide#2692): on the first SIGTERM or SIGINT (on Windows, Ctrl-C or Ctrl-Break) while `http.serve` runs, the host stops accepting (a connection it has not accepted is closed unanswered), lets the request in flight finish and answers it, flushes stdout, and `http.serve` returns, so the statements after it run and the exit code is main's. A second signal, during that drain or after `serve` returned, or a drain still waiting when the request timeout (30 s) has passed, flushes stdout and exits 1 without answering the request in flight; no stop exits with 128+signal (C-350's `0..=125`). NOT covered: HTTP framing and connection reuse (the host's); other signals; on native Windows the forced stop exits 1 without flushing stdout, since only the serving thread can reach its stdout buffer until stdout becomes one process-global buffer (ADR-0020 §5.5 in almide/almide); a stock artifact (`almide build --target wasm`) owns no listening socket: a serve-shaped program builds there as the `wasi:http/handler@0.3.0` export that C-375 states, and any other program that reaches `http.serve` stays refused for stock artifacts at check time and at build time with E081 (almide/almide#2659). Evidence: spec/serve_cross/http_serve_replay.almd, a server fixture that no generic runner executes (it never exits); the implementation's driver starts it on both legs, replays one request script (GET, POST with a UTF-8 body and a header, a percent-encoded query, a status outside the reason table, a redirect, a 404, a handler err, another method) and compares each response's status code, header set and de-framed body and the stderr transcripts as multisets of lines, and starts it on an occupied port to compare the abort; spec/serve_cross/http_serve_shutdown.almd, a server fixture the same driver starts on both legs with stdout redirected to a file: one SIGTERM while a request sleeps in its handler must answer that request, leave every stdout line in the file including the one main prints after `http.serve`, and exit 0; two SIGTERMs while a request stalls must exit 1 with every line printed before the stop."
 since     = "0.64.0"
 status    = "active"
 evidence  = [
@@ -4814,4 +4875,45 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/float32_display_shortest.almd", class = "fixture" },
   { path = "spec/wasm_cross/sized_display_matrix.almd", class = "fixture" },
+]
+[[contract]]
+id        = "C-373"
+spec      = "ALS-ST2"
+title     = "var destructures with the let patterns and every bound name is mutable, identically on both targets"
+statement = "ALS-ST2 (almide#3149): `var` accepts the patterns `let` destructures with — a tuple, a nested tuple with `_` holes, and a record shorthand `{ a, b }` — and every name the pattern binds is a var. `var (x, y) = e` evaluates `e` exactly once and is observationally `var x = e.0` / `var y = e.1` written one name at a time: each name is then reassigned on its own, and a write to one name reaches neither the other names nor the destructured value, for scalar and heap (String, List) components alike. The form binds loop state before a `while` and binds fresh vars on every iteration of a `for` body. Byte-identical stdout, stderr and exit code native <-> wasm."
+since     = "0.67.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/var_destructure.almd", class = "fixture" },
+]
+[[contract]]
+id        = "C-374"
+spec      = "ALS-R5"
+title     = "process on the embedded wasm host answers what native answers; a stand-alone artifact that starts a child carries the private almide:process/spawn import and is refused at load where it is not defined"
+statement = "ALS-R5 (almide#2589, ADR-0025): on the embedded wasm host (`almide run --target wasm` and the wasm leg of `almide test`) the subprocess family — `process.exec`, `exec_in`, `exec_with_stdin`, `exec_status`, `exec_status_timeout`, `run`, `run_in`, `spawn`, `kill`, `is_alive` and `pid` — answers what the native leg answers: the captured stdout and stderr text, the exit code (-1 for a child ended by a signal) and every err string are byte-identical. Pids are host values and are not compared across legs. A stand-alone artifact (`almide build --target wasm`) whose program names a subprocess operation imports `call` from the private interface `almide:process/spawn`, and an artifact whose program names none does not carry that import; a runtime that does not define the import refuses the module at load, before `_start` runs, so no subprocess call is ever answered wrongly at run time. A component build (`--component`) of such a program is refused with E081."
+since     = "0.67.0"
+status    = "active"
+evidence  = [
+  { path = "spec/embedded_cross/process_spawn_family.almd", class = "fixture" },
+]
+[[contract]]
+id        = "C-375"
+spec      = "ALS-R5"
+title     = "a serve-shaped program built for stock wasm is a wasi:http/handler@0.3.0 export that wasmtime serve runs with no flags and that answers what native answers"
+statement = "ALS-R5 (almide/almide#2659, ADR-0020 §5.4, ADR-0023 §3.3): `almide build --target wasm` of a serve-shaped program — `main`'s body is exactly one call `http.serve(port, app)`, optionally preceded by `let`s read only by `port` — emits a component that exports `wasi:http/handler@0.3.0` and that `wasmtime serve` loads and serves with no flags. The component imports only service-world interfaces: no `wasi:filesystem`. `main` is not run, and `port` is not evaluated: the host owns the address. The app and the top-level `let`s are evaluated per instance. One handler is in flight per instance (backpressure); a host serves concurrent requests with more instances. The guest applies native's limits: a request body over the limit (1 MiB) answers `413` and a request line over the limit (8 KiB) answers `414`, and the handler is not called. A trap or abort in the handler answers the host's `500` and the host discards that instance. Every other admitted request is answered with the same status code, header set and de-framed body as native, under C-367's HTTP-semantic comparison: the reason phrase, `date` and the framing are the host's, not byte-compared. NOT covered: the host's address, admission, concurrency, instance reuse, timeouts, shutdown and log decoration (all host configuration). Evidence: spec/serve_cross/http_serve_export.almd, a server fixture that no generic runner executes; the implementation's driver builds it for stock wasm, serves the artifact with `wasmtime serve` and runs it natively, replays one request script against both and compares each response's status code, header set and de-framed body, sends an over-limit body and an over-long request line to the artifact, and asks `/trap` last."
+since     = "0.67.0"
+status    = "active"
+evidence  = [
+  { path = "spec/serve_cross/http_serve_export.almd", class = "fixture" },
+  { path = "tests/http_serve_export_test.rs", name = "the_stock_serve_export_answers_what_native_answers_under_wasmtime_serve", class = "fixture" },
+]
+[[contract]]
+id        = "C-376"
+spec      = "ALS-D7"
+title     = "A raw address taken from a Bytes block stays valid until the call it is handed to returns"
+statement = "ALS-D7 (almide/almide#3420): a RawPtr or address taken from a Bytes value (`bytes.as_ptr`, `bytes.as_mut_ptr`, `bytes.data_ptr`) BORROWS that value's block: on both targets the block is not released, and its bytes are not reused, before the call or expression the address is handed to has returned. This holds when the value's last use is in the same argument list as the address (`peek(bytes.data_ptr(b), bytes.len(b))`), when the call is in tail position, when the value is a temporary built inside the argument (`bytes.data_ptr(bytes.from_string(s))`), and when the address is returned by a fn that took it. A named value whose address is bound to a `let` stays valid as long as that binding can be used. Observable: the bytes read or written through the address are the value's own, byte-identical native and wasm. NOT covered: an address used after its value's enclosing fn has returned; the pointer's numeric value. Evidence: spec/wasm_cross/bytes_rawptr.almd, whose #3420 rows read through an address after the value's last use in a tail call, through a temporary, a helper and a `let`-bound address."
+since     = "0.67.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/bytes_rawptr.almd", class = "fixture" },
 ]

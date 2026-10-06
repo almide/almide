@@ -91,7 +91,7 @@ stdin plumbing that landed with the C-320 arc.
 
 ### Where the stdlib went
 
-Almide's stdlib is 1017 functions across 43 modules — but they are **self-hosted
+Almide's stdlib is 1019 functions across 43 modules — but they are **self-hosted
 in Almide** and linked *on demand*. The compiler scans the lowered program for
 called dispatch names (`string.len`, `map.set`, `list.sort_by`, …) and links
 only the matching self-host sources, iterating to a fixpoint so a linked
@@ -150,6 +150,34 @@ playground) produce byte-identical modules for the cross-target fixture corpus
 every program that compiles for both targets produces **byte-identical
 stdout/stderr/exit code** native ⇄ wasm, tracked contract-by-contract in
 [docs/contracts/](../contracts).
+
+### The embedded host's call-stack budget (#3435)
+
+Recursion past a target's call-stack resources ends in the defined abort
+`Error: stack overflow` + exit 1 on native and on the embedded host alike
+(C-196, ALS-T6); the depth it happens at is each target's own and is declared,
+not equalised. Where the embedded limit sits is a choice for the lane we ship: the embedded host behind `almide run --target wasm`, `almide
+bench --target wasm` and the wasm leg of `almide test` sets wasmtime's
+`max_wasm_stack` to **8 MiB** (`EMBEDDED_WASM_STACK` in
+`crates/almide-wasm-run/src/host.rs`), the size of native's main-thread stack.
+It runs each guest — and each `fan` worker instance — on a host thread with a
+64 MiB native stack, since wasmtime needs the host stack to exceed the wasm
+budget plus host frames. wasmtime's own default is 512 KiB, which the host
+used until #3435.
+
+Measured 2026-10-06 (macOS aarch64, release build; the deepest argument that
+still answers):
+
+| recursion shape | native | embedded, 512 KiB | embedded, 8 MiB |
+|---|---:|---:|---:|
+| non-tail tree walk returning `T!` (#3434's `infer`) | ~43,000 | ~5,400 | ~87,000 |
+| recursion with four heap locals per frame | ~32,500 | ~5,400 | ~87,000 |
+| `1 + depth(f)` over a tree | no limit (LLVM makes it a loop) | ~32,500 | ~523,000 |
+
+Stock runtimes keep their own limits and their own failure form — the
+residual C-196 declares: `wasmtime run` defaults to 512 KiB (`-W
+max-wasm-stack=N` raises it) and reports exhaustion as its `wasm trap: call
+stack exhausted`, exit 134; browsers set their own.
 
 ## Measuring allocation: the watermark and the counter (#2407)
 
@@ -281,9 +309,60 @@ marshalling. `app.js` is a dependency-free ES module:
   name (it has no host for the import) and points at `--host js`.
 - Every `pub fn` gets a wrapper: `Int` ↔ `number` (a `RangeError` outside
   ±2^53 rather than a silent truncation — pass a `BigInt`-aware hook to keep a
-  wider value exact), `Float`, `Bool`, `String`, `Unit`. Any other type on the
-  boundary is a build-time refusal naming the function and the type (lists,
-  records and variants are the next step, following the bindgen table).
+  wider value exact), `Float`, `Bool`, `String`, `Unit`, and (#3354) the block
+  shapes, as params and returns: `Bytes` ↔ `Uint8Array` (a copy), `List[T]` ↔
+  `Array<T>` (any element type here, nested lists included), `Option[T]` ↔
+  `T | undefined` (`none` is `undefined`; `null` is accepted going in), and a
+  record ↔ a plain object with the record's fields in declared order (a
+  missing field is a `TypeError` before the call). Each block is built and
+  read by the layout the emitter records per export
+  (`almide_wasm::host_exports::export_params_noted` / `export_rets`: element
+  stride, field offsets, record size), never re-derived by the host; a record
+  that disagrees with the source type is a build-time refusal. Ownership
+  follows the recorded param ownership: a block the callee owns is its to
+  release, a borrowed one the host releases after the call. Because the
+  module's `__release` is flat, the host walks the shape when it drops the
+  last credit on a block and releases the children that block held. Variants,
+  `Map`, `Set`, tuples and functions are still a build-time refusal naming the
+  function and the type. `memoryBytes()` (shipped with the block helpers)
+  reports the linear memory size, so a host can check for leaks.
+- An `effect fn` export (and a fn declaring `Result[T, String]`) returns one
+  `Result` block (tag at payload+0, 0 = ok; value slot at payload+8), whatever
+  its declared `T` (#3352). Its wrapper unwraps it: ok is `T` marshalled as
+  above, err throws `AlmideError` (an `Error`) whose `message` is the err
+  String. The block is released through `__release`, and the slot's own
+  String block too when the Result held the last reference. The wrapper is
+  chosen from the return ABI the emitter records for each export
+  (`almide_wasm::host_exports::export_rets`), not from the source type, and a
+  record that disagrees with the source type (or an err that is not a
+  String) is a build-time refusal naming the function. The `.d.ts` gives `T`
+  and declares `AlmideError`, which ships only when some export unwraps a
+  Result. Gate: `spec/wasm_host_js/effect_exports.almd` runs every
+  marshalled type × {fn, effect fn} × {ok, err} under node.
+- A hook that throws (or, for one marked `returns: promise`, rejects) (#3356). An
+  exception that unwinds through wasm skips every release the unwound frames
+  would have run, so the glue never lets one through:
+  - A **fallible** extern is an `effect fn` or one declaring
+    `Result[T, String]` (`T` a scalar, `String` or `Unit`). It imports as an
+    i32 `Result` block the host builds. The hook's value is ok and its throw
+    is err (the message). The Almide caller propagates the err with `!`
+    through its own release path, and an export that propagates it rejects or
+    throws `AlmideError`. Failing calls leave memory flat:
+    `spec/wasm_host_js/hook_errors{,_async}.almd` pin it over 3,000 and 600
+    rounds. Unwinding instead grew linear memory from 0.9 MB to 7.3 MB over
+    the same 3,000 rounds.
+  - An **infallible** extern (a plain `fn` returning `T`) cannot fail by its
+    declaration, so a throw there is a trap. The glue rethrows an error that
+    names the import and the fix (declare it `effect fn`), and *abandons* the
+    instance. Every later call throws `… abandoned … call init() again`
+    instead of running on a heap whose unwound frames kept their blocks.
+    `init()` starts a fresh instance.
+- A hook that returns a Promise is marked on its declaration,
+  `@extern(wasm, "js", "name", returns: promise)` (#3353, #3371), and the
+  glue suspends on it through JSPI. An UNMARKED hook that returns a thenable
+  throws `almide: hooks.js.<name> returned a Promise; mark its @extern with
+  returns: promise` and abandons the instance, for a fallible extern too.
+  Design: [JS-HOST-ASYNC-IMPORTS.md](./JS-HOST-ASYNC-IMPORTS.md).
 - `main` is `run()`; `_start` is not called by `init`.
 
 String marshalling reads the block layout (`almide-layout`:

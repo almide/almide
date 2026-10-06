@@ -1,0 +1,28 @@
+// #3290: the binding of an anonymous record literal carries the nominal type
+// of the slot it is later used in.
+import self.a
+import self.b
+
+test "an un-annotated literal binding takes the type of where it goes" {
+  let r = b.span(b.returned(2.0))
+  assert_eq(r, 5.0)
+  let p = b.passed(4.0)
+  assert_eq(p, 6.0)
+  let n = list.len(b.stored(1.0))
+  assert_eq(n, 2)
+  let br = b.span(b.branch(false))
+  assert_eq(br, 7.0)
+  let w = b.field_read(1.0).w
+  assert_eq(w, 6.0)
+  let s = b.shown(2.0)
+  assert_eq(s, "Extent { w: 2, h: 1 }")
+}
+
+test "a binding in another module's slot takes that module's type" {
+  let e = { w: 9.0, h: 9.0 }
+  let total = b.span(e)
+  assert_eq(total, 18.0)
+  let u = { w: 2.0, h: 3.0 }
+  let area = a.area(u)
+  assert_eq(area, 6.0)
+}

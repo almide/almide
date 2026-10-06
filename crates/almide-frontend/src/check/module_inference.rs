@@ -32,7 +32,9 @@ impl Checker {
         self.validate_implicit_propagation();
         self.lint_error_surface(program);
         self.check_bounded_profile(program);
+        self.check_concurrent_var_reach(program);
         self.check_scoped(program);
+        self.check_pure_attrs(program);
     }
 
     /// Type-check a module's declarations. Populates type_map for all expressions.
@@ -60,6 +62,10 @@ impl Checker {
         let (mod_table, diags) = build_import_table(prog, Some(import_table_name), &self.env.user_modules);
         self.env.import_table = mod_table;
         self.diagnostics.extend(diags);
+        // #3396: the same top-level `let` rules (E012 / E061) the entry
+        // program gets — an imported module checked here skipped them, and a
+        // lambda-valued `let` reached lowering as an IR-verify ICE.
+        self.check_top_let_shapes(&prog.decls);
         // Recorded before the snapshot so it outlives this inference: the
         // module's lowering resolves its bare type names the same way (#2715).
         crate::canonicalize::resolve::register_scoped_bare_type_keys(&mut self.env, Some(module_name));
@@ -91,9 +97,13 @@ impl Checker {
         );
         self.validate_protocol_refs(prog);
         self.validate_bare_type_visibility(prog);
+        self.validate_qualified_type_heads(prog);
+        self.validate_alias_cycles(&prog.decls);
         self.body_diag_start = self.diagnostics.len();
         self.reject_user_prim_import(&prog.imports);
+        let saved_top_effect_aliases = self.collect_top_effect_aliases(&prog.decls);
         for decl in prog.decls.iter_mut() { self.check_decl(decl); }
+        self.env.top_effect_aliases = saved_top_effect_aliases;
         self.solve_constraints();
         self.resolve_deferred_tuple_indices();
         self.flush_pending_toplet_tys();
@@ -506,6 +516,16 @@ impl Checker {
             self.record_int_literal_context(body, &Ty::result(ret_ty.clone(), Ty::String));
         }
         self.record_int_literal_context(body, &ret_ty);
+        // A `-> T!` body's value leaves lift into `ok(..)` one by one (#3385),
+        // so a bare literal leaf beside an explicit `ok(..)` one is a value of
+        // the payload `T` — pinned last, it faces T's range. An effect fn
+        // declaring `-> Result[T, E]` lifts the same way (#3395).
+        if (fallible_marker || is_effect)
+            && let Ty::Applied(crate::types::TypeConstructorId::Result, args) = &ret_ty
+            && args.len() == 2
+        {
+            self.record_int_literal_context(body, &args[0]);
+        }
         // #2927: the body-vs-return mismatch is reported at the value that
         // fixed the body's type (a block's tail, the anchoring arm), not at
         // wherever inference happened to end — the last arm's last leaf.

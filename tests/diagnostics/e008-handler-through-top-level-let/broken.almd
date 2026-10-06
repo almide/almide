@@ -1,0 +1,15 @@
+// The handler reaches the `var` through a top-level `let` holding the routes.
+import http
+
+var hits = 0
+
+effect fn home(req: HttpRequest) -> HttpResponse = {
+  hits = hits + 1
+  http.response(200, "hits=${hits}")
+}
+
+let routes = [http.route("GET /", home)]
+
+let app = http.router(routes)
+
+effect fn main() -> Unit = http.serve(8080, app!)!

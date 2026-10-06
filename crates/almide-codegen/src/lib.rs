@@ -47,8 +47,10 @@ mod pass_clone_record_fields;
 pub mod pass_top_let_storage;
 pub mod pass_var_storage;
 pub mod pass_borrow_lowering;
+pub mod owned_source;
 pub mod pass_fan_lowering;
 pub mod pass_list_pattern;
+mod pass_list_pattern_nested;
 pub mod pass_match_subject;
 pub mod pass_pattern_literal_guard;
 pub mod pass_result_propagation;
@@ -59,6 +61,7 @@ pub mod pass_stream_fusion;
 pub mod pass_chain_source_borrow;
 mod pass_fan_local_state;
 pub mod pass_effect_inference;
+pub mod effect_flow;
 pub mod pass_tco;
 pub mod pass_licm;
 pub mod pass_peephole;
@@ -66,6 +69,8 @@ pub mod pass_range_counting;
 pub mod pass_region_window;
 pub mod pass_region_window_clone;
 mod prelude_region;
+mod prelude_fan;
+mod prelude_stack;
 pub use prelude_region::region_arena_prelude_source;
 pub mod perceus_verified;
 pub mod pass_egg_saturation;
@@ -342,18 +347,27 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     // syscall per line, 50k lines = 0.35 s — while `io.write` went through a
     // separate 64 KiB BufWriter flushed per call to keep program order across
     // the two handles. Every stdout write now goes through this buffer, so the
-    // order is the program's by construction, and the buffer flushes per line
-    // only when stdout is a terminal (the usual rule); to a pipe or a file it
-    // fills 64 KiB. Flush points: exit (the `fn main` wrapper), a panic (the
+    // order is the program's by construction. The buffer is LINE-buffered
+    // (#3417): a write that ends a line flushes it, as Rust's own `println!`
+    // does on any stdout and as the verified native render (which lowers to
+    // `println!`) already did — a program that walls into this codegen must
+    // not hold a watcher's or a server's output until exit when stdout is a
+    // pipe or a file. What the buffer still saves is the second syscall of
+    // `print`-without-newline pieces and of a line written in fragments; on a
+    // terminal every write flushes. Other flush points: exit (the `fn main` wrapper), a panic (the
     // hook the wrapper installs), `io.print` (interactive output — always),
     // `process.exit`, before a child process runs (its output must follow
     // ours), and before every stdin read (a prompt precedes the read).
     // `eprintln` stays unbuffered on stderr, so the RELATIVE order of stdout
     // and stderr is not preserved when stdout is not a terminal — the same as
     // every C/Rust program; the bytes on each stream are unchanged.
+    // `ALMIDE_STDOUT_LIVE` says whether this thread's buffer exists yet without
+    // creating it: the stack-overflow handler (C-196, prelude_stack.rs) writes
+    // out a partial line still in the buffer, and must not allocate one.
     s.push_str("thread_local! {\n");
+    s.push_str("    static ALMIDE_STDOUT_LIVE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };\n");
     s.push_str(&format!("    {vis}static ALMIDE_STDOUT_BUF: std::cell::RefCell<std::io::BufWriter<std::io::Stdout>> =\n"));
-    s.push_str("        std::cell::RefCell::new(std::io::BufWriter::with_capacity(65536, std::io::stdout()));\n}\n");
+    s.push_str("        { ALMIDE_STDOUT_LIVE.with(|c| c.set(true)); std::cell::RefCell::new(std::io::BufWriter::with_capacity(65536, std::io::stdout())) };\n}\n");
     s.push_str(&format!("{vis}fn almide_stdout_is_terminal() -> bool {{ static TTY: std::sync::OnceLock<bool> = std::sync::OnceLock::new(); *TTY.get_or_init(|| std::io::IsTerminal::is_terminal(&std::io::stdout())) }}\n"));
     s.push_str(&format!("{vis}fn almide_stdout_flush() {{ ALMIDE_STDOUT_BUF.with(|buf| {{ let _ = std::io::Write::flush(&mut *buf.borrow_mut()); }}); }}\n"));
     // The exit-time counterpart: flush, then give back the two allocations the
@@ -374,7 +388,7 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     // printing, so exactly one line and the same exit code on every leg. The
     // stderr write ignores its error: a panic here would leave the guard taken
     // and turn the abort into a join panic (exit 101).
-    s.push_str(&format!("{vis}fn almide_abort(msg: impl std::fmt::Display) -> ! {{ static ALMIDE_ABORTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false); if ALMIDE_ABORTING.swap(true, std::sync::atomic::Ordering::SeqCst) {{ loop {{ std::thread::park(); }} }} {{ let _ = std::io::Write::write_fmt(&mut std::io::stderr().lock(), format_args!(\"Error: {{}}\\n\", msg)); }} almide_stdout_flush(); std::process::exit(1) }}\n"));
+    s.push_str(&format!("{vis}fn almide_abort(msg: impl std::fmt::Display) -> ! {{ almide_fan_trap_wait(); static ALMIDE_ABORTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false); if ALMIDE_ABORTING.swap(true, std::sync::atomic::Ordering::SeqCst) {{ loop {{ std::thread::park(); }} }} {{ let _ = std::io::Write::write_fmt(&mut std::io::stderr().lock(), format_args!(\"Error: {{}}\\n\", msg)); }} almide_stdout_flush(); std::process::exit(1) }}\n"));
     // `panic(msg)` (#3118): the SAME once-guarded abort, spelled the way C-219
     // pins it on every leg — `PANIC: <msg>` on stderr with NO trailing newline,
     // exit 1 — never a raw Rust panic (exit 101 + the thread banner). A `--test`
@@ -382,11 +396,18 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     // payload and `testing.assert_throws` catches it. The `cfg!(test)` sits in
     // the MACRO so it is read in the crate the `panic` is written in — the
     // prelude may be compiled once, as a crate of its own, without `--test`.
-    s.push_str(&format!("{vis}fn almide_panic_abort(msg: std::fmt::Arguments<'_>) -> ! {{ static ALMIDE_PANICKING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false); if ALMIDE_PANICKING.swap(true, std::sync::atomic::Ordering::SeqCst) {{ loop {{ std::thread::park(); }} }} almide_stdout_flush(); {{ let _ = std::io::Write::write_fmt(&mut std::io::stderr().lock(), format_args!(\"PANIC: {{}}\", msg)); }} std::process::exit(1) }}\n"));
+    s.push_str(&format!("{vis}fn almide_panic_abort(msg: std::fmt::Arguments<'_>) -> ! {{ almide_fan_trap_wait(); static ALMIDE_PANICKING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false); if ALMIDE_PANICKING.swap(true, std::sync::atomic::Ordering::SeqCst) {{ loop {{ std::thread::park(); }} }} almide_stdout_flush(); {{ let _ = std::io::Write::write_fmt(&mut std::io::stderr().lock(), format_args!(\"PANIC: {{}}\", msg)); }} std::process::exit(1) }}\n"));
     s.push_str(&format!("{macro_attr}macro_rules! almide_panic {{ ($($arg:tt)*) => {{ if cfg!(test) {{ panic!($($arg)*) }} else {{ $crate::almide_panic_abort(format_args!($($arg)*)) }} }}; }}\n"));
-    s.push_str(&format!("{vis}fn almide_stdout_write_fmt(args: std::fmt::Arguments<'_>, newline: bool) {{ ALMIDE_STDOUT_BUF.with(|buf| {{ let mut w = buf.borrow_mut(); let _ = std::io::Write::write_fmt(&mut *w, args); if newline {{ let _ = std::io::Write::write_all(&mut *w, b\"\\n\"); }} if almide_stdout_is_terminal() {{ let _ = std::io::Write::flush(&mut *w); }} }}); }}\n"));
-    s.push_str(&format!("{vis}fn almide_stdout_write_bytes(bytes: &[u8]) {{ ALMIDE_STDOUT_BUF.with(|buf| {{ let mut w = buf.borrow_mut(); let _ = std::io::Write::write_all(&mut *w, bytes); if almide_stdout_is_terminal() {{ let _ = std::io::Write::flush(&mut *w); }} }}); }}\n"));
+    s.push_str(&format!("{vis}fn almide_stdout_write_fmt(args: std::fmt::Arguments<'_>, newline: bool) {{ if almide_fan_active() {{ return almide_fan_write_fmt(false, args, newline); }} ALMIDE_STDOUT_BUF.with(|buf| {{ let mut w = buf.borrow_mut(); let _ = std::io::Write::write_fmt(&mut *w, args); if newline {{ let _ = std::io::Write::write_all(&mut *w, b\"\\n\"); }} if newline || almide_stdout_is_terminal() {{ let _ = std::io::Write::flush(&mut *w); }} }}); }}\n"));
+    s.push_str(&format!("{vis}fn almide_stdout_write_bytes(bytes: &[u8]) {{ if almide_fan_active() {{ return almide_out_write(false, bytes); }} ALMIDE_STDOUT_BUF.with(|buf| {{ let mut w = buf.borrow_mut(); let _ = std::io::Write::write_all(&mut *w, bytes); if bytes.contains(&b'\\n') || almide_stdout_is_terminal() {{ let _ = std::io::Write::flush(&mut *w); }} }}); }}\n"));
     s.push_str(&format!("{macro_attr}macro_rules! almide_println {{ ($($arg:tt)*) => {{ $crate::almide_stdout_write_fmt(format_args!($($arg)*), true) }}; }}\n"));
+    // `eprintln` (ADR-0024 D5): unbuffered on stderr as before, except inside a
+    // `fan` element, where it joins the element's one stdout+stderr timeline.
+    s.push_str(&format!("{vis}fn almide_stderr_write_fmt(args: std::fmt::Arguments<'_>, newline: bool) {{ if almide_fan_active() {{ return almide_fan_write_fmt(true, args, newline); }} let mut e = std::io::stderr().lock(); let _ = std::io::Write::write_fmt(&mut e, args); if newline {{ let _ = std::io::Write::write_all(&mut e, b\"\\n\"); }} }}\n"));
+    s.push_str(&format!("{vis}fn almide_fan_write_fmt(err: bool, args: std::fmt::Arguments<'_>, newline: bool) {{ let mut v: Vec<u8> = Vec::new(); let _ = std::io::Write::write_fmt(&mut v, args); if newline {{ v.push(b'\\n'); }} almide_out_write(err, &v) }}\n"));
+    s.push_str(&format!("{macro_attr}macro_rules! almide_eprintln {{ ($($arg:tt)*) => {{ $crate::almide_stderr_write_fmt(format_args!($($arg)*), true) }}; }}\n"));
+    s.push_str(&prelude_fan::fan_timeline_prelude(vis));
+    s.push_str(&prelude_stack::stack_guard_prelude(vis));
     s.push_str(&format!("{macro_attr}macro_rules! almide_eq {{ ($a:expr, $b:expr) => {{ ($a) == ($b) }}; }}\n"));
     s.push_str(&format!("{macro_attr}macro_rules! almide_ne {{ ($a:expr, $b:expr) => {{ ($a) != ($b) }}; }}\n"));
     // almide_div!/almide_mod!: total integer `/` and `%`. `checked_div`/`checked_rem`
@@ -676,11 +697,8 @@ fn rust_runtime_modules(needed: &std::collections::HashSet<&str>) -> String {
     out
 }
 
-/// Runtime modules that cannot live in the bare-rustc `almide_rt` rlib: `http`
-/// needs rustls, `zlib` needs flate2, and `sse` calls into `http` for its
-/// streaming transport. Programs using these stay on the cargo path; the rlib
-/// fast path only covers std-only programs (a link error otherwise falls back).
-pub const NON_STD_RUNTIME_MODULES: &[&str] = &["http", "zlib", "sse"];
+mod runtime_crates;
+pub use runtime_crates::{runtime_crate_deps, RUNTIME_MODULE_CRATES};
 
 /// Emit the full `almide_rt` runtime crate source: the prelude (pub items +
 /// exported macros) plus every std-only runtime module. Built once into an
@@ -696,7 +714,7 @@ pub fn emit_runtime_crate() -> String {
     // Every std-only runtime module (exclude external-dep modules).
     let mut needed: std::collections::HashSet<&str> = std::collections::HashSet::new();
     for (name, _) in crate::generated::rust_runtime::RUST_RUNTIME_MODULES {
-        if !NON_STD_RUNTIME_MODULES.contains(name) {
+        if !RUNTIME_MODULE_CRATES.iter().any(|(m, _)| m == name) {
             needed.insert(*name);
         }
     }

@@ -16,11 +16,15 @@
         `dec_unique_files_take_class` consumes — the reuse CYCLE closes:
         take at class c → release → refile at class c → next take pops it.
 
-     `alloc_bumps_fresh` — when the class list is empty (or the request
-        is beyond the class table), `$alloc` returns the bump frontier,
-        advances it by the class-rounded want (exact for huge requests),
-        and writes the same header shape. `FreeList.alloc`'s frontier
-        branch, concrete.
+     `alloc_bumps_fresh` — when the class list is empty, `$alloc` returns
+        the bump frontier, advances it by the class-rounded want, and
+        writes the same header shape. `FreeList.alloc`'s frontier branch,
+        concrete.
+
+     `alloc_large_hit` / `alloc_large_bump` (#3348) — above the class
+        table (totals over 64 KiB) `$alloc` first runs the large-list take
+        (LargeTree.v): a hit is returned as is; otherwise the bump proceeds
+        from the (possibly lowered) frontier by the EXACT want.
 
    HONEST SCOPE, stated plainly:
    - Same tree-level binding as slice 1: the transcription is pinned to
@@ -49,11 +53,17 @@
 
 From AlmideTrust Require Import RuntimeModel.
 From AlmideTrust Require Import StructuralRuntime.
+From AlmideTrust Require LargeTree.
 From Stdlib Require Import ZArith.
 From Stdlib Require Import List.
 Import ListNotations.
 From Stdlib Require Import Lia.
 Open Scope Z_scope.
+
+(* The large-list loops stay folded under the trees' reductions. *)
+Arguments LargeTree.ltake_run_of : simpl never.
+Arguments LargeTree.ltake_run : simpl never.
+Opaque LargeTree.ltake_tree LargeTree.LFUEL.
 
 Section AllocTree.
 
@@ -111,6 +121,8 @@ Inductive astmt : Type :=
   | ASetGHeap (e : aexpr)
   | AStore (addr v : aexpr)
   | AIf (cond : aexpr) (body : list astmt)
+  | AIfElse (cond : aexpr) (th el : list astmt)
+  | SLTake (ss : list LargeTree.lstmt)   (* an inlined loop tree: the large-list take *)
   | ARetV (e : aexpr)
   | SGrow    (* the abstract grow step (see the header) *)
   | SOom.    (* the abstract C-197 abort (the wrap guard's body) *)
@@ -145,6 +157,26 @@ Fixpoint astep (s : astmt) (c : A) {struct s} : aout :=
   | ARetV e => ARet (aev e c) c
   | SGrow => AFall (grow_sem c)
   | SOom => AAbort
+  | SLTake ss =>
+      match LargeTree.ltake_run_of ss len (abase c) (anext c) (awant c) (ahead c) (am c) (agh c) with
+      | LargeTree.RRet q s' =>
+          ARet q (mkA (LargeTree.loc s' 1) (LargeTree.loc s' 2) (LargeTree.loc s' 3)
+                      (LargeTree.loc s' 4) (LargeTree.gh s') (apages c) (LargeTree.mem s'))
+      | LargeTree.RNorm s' =>
+          AFall (mkA (LargeTree.loc s' 1) (LargeTree.loc s' 2) (LargeTree.loc s' 3)
+                     (LargeTree.loc s' 4) (LargeTree.gh s') (apages c) (LargeTree.mem s'))
+      | LargeTree.RFuel => AAbort
+      end
+  | AIfElse e th el =>
+      (fix runl (ss : list astmt) (c0 : A) {struct ss} : aout :=
+         match ss with
+         | [] => AFall c0
+         | s' :: r =>
+             match astep s' c0 with
+             | AFall c' => runl r c'
+             | o => o
+             end
+         end) (if Z.eqb (aev e c) 0 then el else th) c
   | AIf e body =>
       if Z.eqb (aev e c) 0 then AFall c
       else
@@ -179,7 +211,7 @@ Definition alloc_body : list astmt :=
     AIf (ALtU AWant (AC 16)) [ ASetWant (AC 16) ];
     (* next = 28 - clz(want - 1)  — the ceil class *)
     ASetNext (ASub (AC 28) (AClz (ASub AWant (AC 1))));
-    AIf (ALtU ANext (AC 16))
+    AIfElse (ALtU ANext (AC 13))
       [ (* next = the class slot ADDRESS *)
         ASetNext (AAdd (AShl ANext (AC 2)) (AC fbase));
         ASetHead (ALoad ANext);
@@ -195,11 +227,13 @@ Definition alloc_body : list astmt :=
             ARetV AHead ];
         (* freelist miss: class-round the bump request *)
         ASetNext (ASub (AC 28) (AClz (ASub AWant (AC 1))));
-        ASetWant (AShl (AC 16) ANext) ];
+        ASetWant (AShl (AC 16) ANext) ]
+      [ (* above the class table: the exact-size large list (#3348) *)
+        SLTake LargeTree.ltake_tree ];
     (* bump *)
     ASetBase AGHeap;
     ASetNext (ALand (AAdd (AAdd (AAdd ABase (AC 12)) ALen) (AC 3)) (AC (-4)));
-    AIf (ALeU AWant (AC 524288))
+    AIf (ALeU AWant (AC 65536))
       [ ASetNext (AAdd ABase AWant) ];
     (* the wrap guard: a frontier below its base is the i32 having wrapped *)
     AIf (ALtU ANext ABase) [ SOom ];
@@ -237,7 +271,7 @@ Theorem alloc_pops_filed_head : forall c w cl slot h,
   w = Z.land (len + 15) (-4) ->
   16 <= w ->
   cl = class_of w ->
-  cl < 16 ->
+  cl < 13 ->
   slot = fbase + 4 * cl ->
   h = am c slot ->
   h <> 0 ->
@@ -257,7 +291,7 @@ Proof.
   rewrite <- Hw.
   replace (w <? 16) with false by (symmetry; apply Z.ltb_ge; exact H16).
   lit.
-  replace (28 - clz32 (w - 1) <? 16) with true.
+  replace (28 - clz32 (w - 1) <? 13) with true.
   2:{ symmetry. apply Z.ltb_lt.
       rewrite Hcl, class_of_log2 in Hcl16. unfold class_of. unfold clz32.
       lia. }
@@ -296,7 +330,7 @@ Theorem alloc_bumps_fresh_classed : forall c w cl,
   w = Z.land (len + 15) (-4) ->
   16 <= w ->
   cl = class_of w ->
-  cl < 16 ->
+  cl < 13 ->
   am c (fbase + 4 * cl) = 0 ->
   0 <= len ->
   let rounded := 16 * 2 ^ cl in
@@ -316,7 +350,7 @@ Proof.
   rewrite <- Hw.
   replace (w <? 16) with false by (symmetry; apply Z.ltb_ge; exact H16).
   lit.
-  replace (28 - clz32 (w - 1) <? 16) with true.
+  replace (28 - clz32 (w - 1) <? 13) with true.
   2:{ symmetry. apply Z.ltb_lt.
       rewrite Hcl, class_of_log2 in Hcl16. unfold clz32. lia. }
   lit.
@@ -337,10 +371,10 @@ Proof.
   (* collapse the classed if FIRST — the inner guards sit under its
      binder until it folds *)
   lit.
-  (* rounded <= 16 << 15: cl < 16 so 16*2^cl <= 16*2^15 = 524288 *)
-  replace (rounded <=? 524288) with true.
+  (* rounded <= 16 << 12: cl < 13 so 16*2^cl <= 16*2^12 = 65536 *)
+  replace (rounded <=? 65536) with true.
   2:{ symmetry. apply Z.leb_le. unfold rounded.
-      assert (2 ^ cl <= 2 ^ 15).
+      assert (2 ^ cl <= 2 ^ 12).
       { apply Z.pow_le_mono_r; [lia | lia]. }
       lia. }
   lit.
@@ -366,7 +400,7 @@ Remark bump_skips_grow : forall c w cl,
   w = Z.land (len + 15) (-4) ->
   16 <= w ->
   cl = class_of w ->
-  cl < 16 ->
+  cl < 13 ->
   am c (fbase + 4 * cl) = 0 ->
   0 <= len ->
   agh c + 16 * 2 ^ cl <= Z.shiftl (apages c) 16 ->
@@ -377,6 +411,69 @@ Proof.
   split.
   - apply (alloc_bumps_fresh_classed c w cl); assumption.
   - reflexivity.
+Qed.
+
+(* ══ THE LARGE PATH (#3348) ════════════════════════════════════════════
+   Above the class table `$alloc` first runs the large-list take
+   (LargeTree.ltake_tree; `LargeTree.ltake_run_spec` says what it does on
+   a well-formed list). A hit is returned as is; otherwise the bump
+   proceeds from the (possibly lowered) frontier by the EXACT want. *)
+
+Lemma large_class_guard : forall w,
+  16 <= w -> 13 <= class_of w ->
+  (28 - clz32 (w - 1) <? 13) = false /\ (w <=? 65536) = false.
+Proof.
+  intros w H16 Hc. split.
+  - apply Z.ltb_ge. unfold class_of in Hc. exact Hc.
+  - apply Z.leb_gt. rewrite class_of_log2 in Hc.
+    assert (H : 2 ^ 16 <= w - 1).
+    { assert (Hl : 16 <= Z.log2 (w - 1)) by lia.
+      apply Z.log2_le_pow2 in Hl; [ exact Hl | lia ]. }
+    lia.
+Qed.
+
+Theorem alloc_large_hit : forall c w q s',
+  w = Z.land (len + 15) (-4) ->
+  16 <= w ->
+  13 <= class_of w ->
+  LargeTree.ltake_run len (abase c) (28 - clz32 (w - 1)) w (ahead c) (am c) (agh c)
+    = LargeTree.RRet q s' ->
+  run_alloc c
+  = ARet q (mkA (LargeTree.loc s' 1) (LargeTree.loc s' 2) (LargeTree.loc s' 3)
+                (LargeTree.loc s' 4) (LargeTree.gh s') (apages c) (LargeTree.mem s')).
+Proof.
+  intros c w q s' Hw H16 Hc Hrun. unfold LargeTree.ltake_run in Hrun.
+  destruct (large_class_guard w H16 Hc) as [Hg1 _].
+  unfold run_alloc, alloc_body. acbn. rewrite <- Hw.
+  replace (w <? 16) with false by (symmetry; apply Z.ltb_ge; exact H16).
+  lit. rewrite Hg1. lit. rewrite Hrun. reflexivity.
+Qed.
+
+Theorem alloc_large_bump : forall c w s',
+  w = Z.land (len + 15) (-4) ->
+  16 <= w ->
+  13 <= class_of w ->
+  LargeTree.ltake_run len (abase c) (28 - clz32 (w - 1)) w (ahead c) (am c) (agh c)
+    = LargeTree.RNorm s' ->
+  LargeTree.loc s' 3 = w ->
+  let g := LargeTree.gh s' in
+  let nx := Z.land (g + 12 + len + 3) (-4) in
+  g <= nx ->
+  nx <= Z.shiftl (apages c) 16 ->
+  run_alloc c
+  = ARet g (mkA g nx w (LargeTree.loc s' 4) nx (apages c)
+               (upd (upd (upd (LargeTree.mem s') g 1) (g + 4) len) (g + 8) (w - 12))).
+Proof.
+  intros c w s' Hw H16 Hc Hrun Hw' g nx Hwrap Hfit. unfold LargeTree.ltake_run in Hrun.
+  destruct (large_class_guard w H16 Hc) as [Hg1 Hg2].
+  unfold run_alloc, alloc_body. acbn. rewrite <- Hw.
+  replace (w <? 16) with false by (symmetry; apply Z.ltb_ge; exact H16).
+  lit. rewrite Hg1. lit. rewrite Hrun. acbn. rewrite Hw'. rewrite Hg2. lit.
+  fold g. fold nx.
+  replace (nx <? g) with false by (symmetry; apply Z.ltb_ge; exact Hwrap).
+  lit.
+  replace (Z.shiftl (apages c) 16 <? nx) with false by (symmetry; apply Z.ltb_ge; exact Hfit).
+  lit. reflexivity.
 Qed.
 
 End AllocTree.

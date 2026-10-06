@@ -149,12 +149,13 @@ fn is_ident_start(c: Int) -> Bool = (c >= 65 and c <= 90) or (c >= 97 and c <= 1
 
 fn is_ident_char(c: Int) -> Bool = is_ident_start(c) or is_digit(c)
 
-fn scan_while(src: List[Int], i: Int, pred: (Int) -> Bool) -> Int = if i < list.len(src) and pred(src[i]) then scan_while(
-  src,
-  i + 1,
-  pred,
-)
-else i
+fn scan_while(src: List[Int], i: Int, pred: (Int) -> Bool) -> Int =
+  if i < list.len(src) and pred(src[i]) then scan_while(
+    src,
+    i + 1,
+    pred,
+  )
+  else i
 
 // End of a quoted run starting at i (opening quote q, doubled q escapes).
 fn scan_quoted(src: List[Int], i: Int, q: Int) -> Int = {

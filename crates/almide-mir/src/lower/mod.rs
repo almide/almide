@@ -36,7 +36,9 @@ use std::collections::{HashMap, HashSet};
 pub mod registry_sig;
 mod crossmod_toplets;
 mod list_rest;
+mod literal_elems;
 pub use list_rest::desugar_list_rest_matches;
+pub use literal_elems::bind_heap_unwrap_or_literal_elems;
 pub use crossmod_toplets::{bind_cross_module_toplets, cross_module_toplet_refs};
 
 /// The KNOWN wall shapes (#931): a coarse classification of the constructs
@@ -460,3 +462,4 @@ include!("mod_c.rs");
 include!("mod_d.rs");
 include!("crossmod_toplet_bridge.rs");
 include!("continuation_lift.rs");
+include!("loop_slot_rebind.rs");

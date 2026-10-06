@@ -42,7 +42,7 @@
 //    is how a cap ends up below every real use of the function.
 import io
 
-fn main() -> Unit = {
+effect fn main() -> Unit = {
   // ── list.range: the wide span, and the legitimate ones it must not swallow.
   println("r_ok=" + int.to_string(list.len(list.range(0, 5))))
   println("r_far=" + int.to_string(list.len(list.range(1000000000, 1000000001))))

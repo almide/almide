@@ -94,8 +94,8 @@ fn collect_decode_by_ref(program: &IrProgram) -> std::collections::HashSet<Strin
     }
     for m in &program.modules {
         let ident = m.versioned_name
-            .map(|v| v.to_string().replace('.', "_"))
-            .unwrap_or_else(|| m.name.to_string().replace('.', "_"));
+            .map(|v| almide_base::names::module_ident(v.as_str()))
+            .unwrap_or_else(|| almide_base::names::module_ident(m.name.as_str()));
         for f in &m.functions {
             add(f, Some(&ident));
         }
@@ -139,11 +139,11 @@ fn collect_module_method_fns(program: &IrProgram) -> HashMap<String, String> {
         if !name.contains('.') {
             return;
         }
-        let flat = name.replace('.', "_");
-        let base = flat.strip_prefix(&format!("{}_", origin)).unwrap_or(&flat);
+        let rest = almide_base::names::strip_module_path(name, origin);
+        let base = rest.unwrap_or(name).replace('.', "_");
         let symbol = format!("almide_rt_{}_{}", origin, base);
         map.insert(name.to_string(), symbol.clone());
-        if let Some(bare) = name.strip_prefix(&format!("{}.", origin)) {
+        if let Some(bare) = rest {
             map.insert(bare.to_string(), symbol.clone());
         } else {
             // The qualified spelling (`moda.Box.tag`) a call site emits when
@@ -169,8 +169,8 @@ fn collect_module_method_fns(program: &IrProgram) -> HashMap<String, String> {
     }
     for m in &program.modules {
         let ident = m.versioned_name
-            .map(|v| v.to_string().replace('.', "_"))
-            .unwrap_or_else(|| m.name.to_string().replace('.', "_"));
+            .map(|v| almide_base::names::module_ident(v.as_str()))
+            .unwrap_or_else(|| almide_base::names::module_ident(m.name.as_str()));
         for f in &m.functions {
             add(&mut map, f.name.as_str(), &ident);
         }
@@ -444,11 +444,13 @@ fn rewrite_call_as_macro(name: Sym, args: Vec<IrExpr>, ty: Ty, span: Option<Span
     }
     // println / eprintln → RustMacro. `println` is the runtime prelude's
     // `almide_println!` — the one stdout buffer (#2245), not Rust's
-    // line-buffered `println!`; `eprintln` stays Rust's (stderr, unbuffered).
+    // line-buffered `println!`. `eprintln` is the prelude's `almide_eprintln!`:
+    // unbuffered on stderr, but inside a `fan` element it joins the element's
+    // output timeline (ADR-0024 D5).
     if name == "println" || name == "eprintln" {
         let mut macro_args = vec![IrExpr { kind: IrExprKind::LitStr { value: "{}".into() }, ty: Ty::String, span: None, def_id: None }];
         macro_args.extend(args);
-        let name = if name == "println" { Sym::from("almide_println") } else { name };
+        let name = if name == "println" { Sym::from("almide_println") } else { Sym::from("almide_eprintln") };
         return IrExpr { kind: IrExprKind::RustMacro { name, args: macro_args }, ty, span, def_id: None };
     }
     unreachable!("rewrite_call_as_macro reached with a non-macro builtin: {}", name)

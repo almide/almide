@@ -1,0 +1,6 @@
+// A fan.map callback that reads a `var` of the enclosing fn.
+effect fn main() -> Unit = {
+  var scale = 2
+  let r = fan.map([1, 2, 3], (x) => ok(x * scale))!
+  println("${list.sum(r)}")
+}

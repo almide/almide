@@ -123,13 +123,14 @@ fn forward_edges(fixture_dir: String, tables: List[toml.Table]) -> List[String] 
 // first is an omission, the second is a header someone wrote and got wrong, which would
 // otherwise be silently treated as absent. The bash distinguishes them by looking for the bare
 // word `@contract` after the strict pattern fails.
-fn header_errors(base: String, src: String, ids: List[String]) -> List[String] = if list.len(ids) > 0 then []
-else if string.contains(src, "@contract") then [
-  base + " has a malformed // @contract: header (must match: // @contract: C-NNN[, C-MMM])"
-]
-else [
-  base + " has no // @contract: header (every cross-target fixture must name the contract(s) it certifies)"
-]
+fn header_errors(base: String, src: String, ids: List[String]) -> List[String] =
+  if list.len(ids) > 0 then []
+  else if string.contains(src, "@contract") then [
+    base + " has a malformed // @contract: header (must match: // @contract: C-NNN[, C-MMM])"
+  ]
+  else [
+    base + " has no // @contract: header (every cross-target fixture must name the contract(s) it certifies)"
+  ]
 
 // The two asymmetries carry DIFFERENT messages because they mean different things — see the
 // forward/reverse split in contract_audit.almd.

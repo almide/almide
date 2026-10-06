@@ -1,0 +1,4 @@
+expects_code = "E094"
+expects_error = "type aliases form a cycle: Coord → Pos → Coord"
+hint_substring = "a record or variant may refer to itself"
+expects_line_col = "2:6"

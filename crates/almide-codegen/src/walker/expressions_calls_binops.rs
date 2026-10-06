@@ -31,13 +31,20 @@ fn render_iter_chain(ctx: &RenderContext, source: &IrExpr, consume: bool, steps:
             IterStep::Enumerate => chain = format!("{}.enumerate().map(|(__ei, __ex)| (__ei as i64, __ex))", chain),
         }
     }
+    render_iter_collector(ctx, &chain, collector)
+}
 
+/// The terminal call of a rendered chain (the `collector` half of
+/// [`render_iter_chain`]).
+fn render_iter_collector(ctx: &RenderContext, chain: &str, collector: &IterCollector) -> String {
     match collector {
         IterCollector::Collect => format!("{}.collect::<Vec<_>>()", chain),
         IterCollector::Fold { init, lambda } => format!("{}.fold({}, {})", chain, render_expr(ctx, init), render_expr(ctx, lambda)),
         IterCollector::Any { lambda } => format!("{}.any({})", chain, render_expr(ctx, lambda)),
         IterCollector::All { lambda } => format!("{}.all({})", chain, render_expr(ctx, lambda)),
         IterCollector::Find { lambda } => format!("{}.find({})", chain, render_expr(ctx, lambda)),
+        IterCollector::FindIndex { lambda } => format!("{}.position({}).map(|i| i as i64)", chain, render_expr(ctx, lambda)),
+        IterCollector::FindMap { lambda } => format!("{}.find_map({})", chain, render_expr(ctx, lambda)),
         IterCollector::Count { lambda } => format!("{}.filter({}).count() as i64", chain, render_expr(ctx, lambda)),
         // Same law as `almide_rt_list_sum` (C-056): two's-complement wrapping,
         // never the profile-dependent `Iterator::sum` overflow check.
@@ -830,13 +837,13 @@ fn global_mut_place(ctx: &RenderContext, arg: &IrExpr, allow_clone: bool) -> Opt
 /// the stored value — the call-level twin of the field-assign template
 /// (`G.with(|c| Rc::make_mut(&mut *c.borrow_mut()).f = v)`):
 ///
-/// `G.with(|__gc0| f(&mut std::rc::Rc::make_mut(&mut *__gc0.borrow_mut()).xs, a))`
+/// `G.with(|__almide_gc0| f(&mut std::rc::Rc::make_mut(&mut *__almide_gc0.borrow_mut()).xs, a))`
 ///
 /// A root place passes `Rc::make_mut(…)` itself (already `&mut T`). Every
 /// other argument renders through `render_arg`; `BorrowInsertion`'s hoist
 /// (`HoistCx::must_hoist`) has already moved out any sibling that reads the
 /// global or runs user code, so none re-borrows the cell while it is held.
-/// The closure parameter is `__gc<k>`, never a name a user binding can take.
+/// The closure parameter is `__almide_gc<k>`, never a name a user binding can take.
 /// `None` when no argument is a global place.
 ///
 /// That form holds `borrow_mut` for the whole call, so it is only taken when
@@ -866,14 +873,14 @@ fn render_call_through_global_places(
         Some((static_name, suffix)) => {
             let k = cells.len();
             cells.push(static_name.clone());
-            let target = format!("std::rc::Rc::make_mut(&mut *__gc{k}.borrow_mut())");
+            let target = format!("std::rc::Rc::make_mut(&mut *__almide_gc{k}.borrow_mut())");
             if suffix.is_empty() { target } else { format!("&mut {target}{suffix}") }
         }
         None => render_arg(a),
     }).collect();
     let mut out = format!("{}({})", callee, rendered.join(", "));
     for (k, static_name) in cells.iter().enumerate().rev() {
-        out = format!("{static_name}.with(|__gc{k}| {out})");
+        out = format!("{static_name}.with(|__almide_gc{k}| {out})");
     }
     Some(out)
 }
@@ -888,10 +895,10 @@ fn render_call_through_global_places(
 /// write-back overwrites whatever the callee stored into that same place
 /// (other fields the callee wrote are kept).
 ///
-/// `({ let mut __gp0 = G.with(|__gc| (**__gc.borrow()).xs.clone());
-///     let __gr = f(&mut __gp0, a);
-///     G.with(|__gc| std::rc::Rc::make_mut(&mut *__gc.borrow_mut()).xs = __gp0);
-///     __gr })`
+/// `({ let mut __almide_gp0 = G.with(|__almide_gc| (**__almide_gc.borrow()).xs.clone());
+///     let __almide_gr = f(&mut __almide_gp0, a);
+///     G.with(|__almide_gc| std::rc::Rc::make_mut(&mut *__almide_gc.borrow_mut()).xs = __almide_gp0);
+///     __almide_gr })`
 ///
 /// Sibling arguments are rendered in the call itself, after the copies:
 /// `BorrowInsertion`'s hoist has already moved any that read the global or
@@ -908,19 +915,19 @@ fn render_call_with_copied_global_places(
         Some((static_name, suffix)) => {
             let k = copy_in.len();
             copy_in.push(format!(
-                "let mut __gp{k} = {static_name}.with(|__gc| (**__gc.borrow()){suffix}.clone());"
+                "let mut __almide_gp{k} = {static_name}.with(|__almide_gc| (**__almide_gc.borrow()){suffix}.clone());"
             ));
             write_back.push(if suffix.is_empty() {
-                format!("{static_name}.with(|__gc| *__gc.borrow_mut() = std::rc::Rc::new((__gp{k}).into()));")
+                format!("{static_name}.with(|__almide_gc| *__almide_gc.borrow_mut() = std::rc::Rc::new((__almide_gp{k}).into()));")
             } else {
-                format!("{static_name}.with(|__gc| std::rc::Rc::make_mut(&mut *__gc.borrow_mut()){suffix} = __gp{k});")
+                format!("{static_name}.with(|__almide_gc| std::rc::Rc::make_mut(&mut *__almide_gc.borrow_mut()){suffix} = __almide_gp{k});")
             });
-            format!("&mut __gp{k}")
+            format!("&mut __almide_gp{k}")
         }
         None => render_arg(a),
     }).collect();
     format!(
-        "({{ {} let __gr = {}({}); {} __gr }})",
+        "({{ {} let __almide_gr = {}({}); {} __almide_gr }})",
         copy_in.join(" "),
         callee,
         rendered.join(", "),
@@ -972,6 +979,19 @@ fn render_runtime_call_arg_owned(ctx: &RenderContext, symbol: &almide_base::inte
     // as a user callee does: a Bytes global reaches it glued (#2937).
     if !rc_cow_symbol_is_native_runtime(symbol.as_str()) {
         return render_user_call_arg(ctx, a);
+    }
+    // #3318: `&xs[i]` of a Bytes/Matrix element read out of a captured cell
+    // stays a snapshot `&almide_index!(..)` — a block whose `AlmideRcCow` tail
+    // rustc checks against the raw param type it expects (E0308), where a
+    // reference would have deref-coerced. `&*` takes the raw value out
+    // first. (A global's elements are stored raw already.)
+    if let IrExprKind::Borrow { expr: inner, as_str: false, mutable: false } = &a.kind
+        && let IrExprKind::IndexAccess { object, .. } = &inner.kind
+        && let IrExprKind::Var { id } = &object.kind
+        && ctx.ann.global(*id).is_none()
+        && matches!(inner.ty, Ty::Bytes | Ty::Matrix | Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Matrix, _))
+    {
+        return format!("(&*{})", render_expr(ctx, inner));
     }
     let r = render_expr_owned(ctx, a);
     // #617: a concrete container-of-raw runtime param cannot deref-coerce

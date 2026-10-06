@@ -13,7 +13,8 @@ impl<'a> Interpreter<'a> {
     ///
     /// The evaluation runs on a dedicated [`INTERP_STACK_SIZE`]-byte thread so
     /// the [`MAX_DEPTH`] recursion bound is decoupled from the *caller's* thread
-    /// stack: a deeply-recursive program reports a clean `FuelExhausted` instead
+    /// stack: a deeply-recursive program reports a clean `StackExhausted` (C-196's
+    /// defined abort at the interpreter's own threshold) instead
     /// of a native stack overflow whether it is driven from a 2 MiB cargo-test
     /// worker, the 8 MiB main thread, or any other host stack. Only the
     /// `Send + Sync` `&IrProgram` crosses into the thread and the `Send`
@@ -263,6 +264,20 @@ impl<'a> Interpreter<'a> {
                 stdout: self.stdout.clone(),
                 stderr: self.stderr.clone(),
             },
+            // C-196: the interpreter's call stack reached its declared
+            // threshold (MAX_DEPTH). The defined abort — the stdout so far,
+            // `Error: stack overflow` on stderr, exit 1 — exactly the line the
+            // native and embedded-wasm legs print at their own thresholds.
+            Flow::Stack => {
+                let mut stderr = self.stderr.clone();
+                stderr.push_str("Error: stack overflow\n");
+                RunOutcome {
+                    bridge_fallbacks: self.bridge_fallbacks.borrow().clone(),
+                    status: RunStatus::StackExhausted,
+                    stdout: self.stdout.clone(),
+                    stderr,
+                }
+            }
             Flow::Unsupported(what) => RunOutcome {
                 bridge_fallbacks: self.bridge_fallbacks.borrow().clone(),
                 status: RunStatus::Unsupported(what),
@@ -374,7 +389,8 @@ impl<'a> Interpreter<'a> {
     ) -> (Flow, env::Scope) {
         let d = self.depth.get();
         if d >= MAX_DEPTH {
-            return (Flow::Fuel, base.child());
+            // Stack exhaustion at the declared threshold, not step fuel.
+            return (Flow::Stack, base.child());
         }
         self.depth.set(d + 1);
         let det_was_user = self.det_in_user.get();

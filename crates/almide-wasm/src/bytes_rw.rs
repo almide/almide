@@ -117,48 +117,6 @@ impl Emitter<'_> {
         Ok(Some(Lowered::owned(SliceTy::List(self.types.intern(STR)))))
     }
 
-    /// Append `k` big-endian bytes of the value (LSB-only when k = 1 —
-    /// `val as u8`); `float` reinterprets an f64 to its bit pattern
-    /// first (write_f64_be).
-    pub(crate) fn lower_bytes_write_be(
-        &mut self,
-        b: &IrExpr,
-        v: &IrExpr,
-        k: i32,
-        float: bool,
-    ) -> ArmResult {
-        self.lower_arg(b, Some(BYTES), ArgMode::Borrow)?;
-        let hb = self.hold_i32()?;
-        self.f.instructions().local_set(hb);
-        self.lower_arg(v, Some(if float { FLOAT } else { INT }), ArgMode::Borrow)?;
-        let hv = self.hold_i64()?;
-        let ho = self.hold_i32()?;
-        let mut i = self.f.instructions();
-        if float {
-            i.i64_reinterpret_f64();
-        }
-        i.local_set(hv);
-        i.local_get(hb).i32_load(len_memarg()).i32_const(k).i32_add().call(F_ALLOC);
-        i.local_set(ho);
-        i.local_get(ho).i32_const(almide_layout::PAYLOAD as i32).i32_add();
-        i.local_get(hb).i32_const(almide_layout::PAYLOAD as i32).i32_add();
-        i.local_get(hb).i32_load(len_memarg());
-        i.memory_copy(0, 0);
-        for j in 0..k {
-            // byte_k already carries the PAYLOAD offset — the base here
-            // is handle + byte index only (the double-add once landed
-            // every cursor byte in the next block's zero header).
-            i.local_get(ho).local_get(hb).i32_load(len_memarg()).i32_add();
-            i.local_get(hv).i64_const(i64::from((k - 1 - j) * 8)).i64_shr_u().i32_wrap_i64();
-            i.i32_store8(byte_k(j as u8));
-        }
-        i.local_get(ho);
-        let _ = i;
-        self.release_i32();
-        self.release_i64();
-        self.release_i32();
-        Ok(Some(Lowered::owned(BYTES)))
-    }
     /// chunks: `b.chunks(size)` — size <= 0 yields the empty list; a
     /// size past the buffer is one whole chunk (the i64 clamp precedes
     /// every i32 narrowing).

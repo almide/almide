@@ -486,8 +486,10 @@
         // exponential-blow-up guard, GENERALIZED: the per-count bound (≤ 2) was retired
         // when the desugar generalized — a 4-chain lowers 16 balanced copies (real
         // chains are 2–4 deep). What remains is the NODE-COUNT cap: a 20-chain
-        // (≈2^20 copies) is discarded and the bind WALLS — an honest refusal
-        // instead of a compile-time hang.
+        // (≈2^20 copies) is discarded — and the bind then takes the executing
+        // heap-result-`if` JOIN (walls lane 3, #2739): each `if` merges once, in
+        // order, so the 20-chain lowers LINEARLY (one IfThen per bind, no copies)
+        // and every merge drops exactly once — not a wall, not a hang.
         let b4 = body(vec![
             bind(0, Ty::String, mk()),
             bind(1, Ty::String, mk()),
@@ -503,10 +505,10 @@
                 .chain([println_s(0)])
                 .collect::<Vec<_>>(),
         );
-        match lower_body(&b20, "main") {
-            Err(LowerError::Unsupported(_)) => {}
-            other => panic!("a 20-chain must hit the node cap and wall, got: {other:?}"),
-        }
+        let mir20 = lower_body(&b20, "main").expect("a 20-chain lowers through the join");
+        let ifs = mir20.ops.iter().filter(|o| matches!(o, Op::IfThen { .. })).count();
+        assert_eq!(ifs, 20, "one merge per bind — the continuation is not duplicated");
+        assert_eq!(verify_ownership(&mir20), Ok(()), "every merge dropped exactly once");
     }
 
     #[test]

@@ -1,0 +1,40 @@
+// @contract: C-132
+// #3405: two arguments that each call a fn taking the same `mut` parameter,
+// in an `else` branch under `or`, receive their own values on both targets.
+// 0.64.0 native bound both to one `__hoist`, so the callee compared the second
+// argument with itself and `eq(Leaf(1), Leaf(2), c)` answered "equal".
+type T =
+  | Leaf(Int)
+  | Node(T, T)
+
+type Counter = { n: Int }
+
+fn norm(t: T, mut c: Counter) -> T = {
+  c.n = c.n + 1
+  t
+}
+
+fn same(x: T, y: T, mut c: Counter) -> Bool = x == y
+
+fn eq(a: T, b: T, mut c: Counter) -> Bool =
+  if a == b then true
+  else same(norm(a, c), norm(b, c), c) or false
+
+fn sum2(x: Int, y: Int) -> Int = x * 10 + y
+
+fn tick(v: Int, mut c: Counter) -> Int = {
+  c.n = c.n + 1
+  v + c.n
+}
+
+fn pair_in_branch(flag: Bool, mut c: Counter) -> Int =
+  if flag then 0
+  else sum2(tick(1, c), tick(2, c))
+
+effect fn main() -> Unit = {
+  var c = Counter { n: 0 }
+  println(if eq(Leaf(1), Leaf(2), c) then "equal (wrong)" else "different")
+  println(if eq(Node(Leaf(1), Leaf(2)), Node(Leaf(1), Leaf(2)), c) then "equal" else "different (wrong)")
+  println("norm calls: ${int.to_string(c.n)}")
+  println("pair: ${int.to_string(pair_in_branch(false, c))} n=${int.to_string(c.n)}")
+}

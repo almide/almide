@@ -77,6 +77,14 @@ impl Scope<'_> {
     fn is_borrow_eligible(&self, ty: &Ty) -> bool {
         is_borrow_eligible(ty, self.round.records) || is_named_in(ty, self.round.variants)
     }
+
+    /// The slot mode a published signature gives `arg` at `index`. A
+    /// fn-typed argument rides a callee's NON-ESCAPING slot as a borrow too
+    /// (#2288): the callee only calls it.
+    fn known_slot(&self, borrows: &[ParamBorrow], index: usize, arg: &IrExpr) -> SlotMode {
+        let mode = slot_of(borrows.get(index), SlotMode::Consume);
+        if mode != SlotMode::Consume && (self.is_borrow_eligible(&arg.ty) || matches!(arg.ty, Ty::Fn { .. })) { mode } else { SlotMode::Consume }
+    }
 }
 
 /// The slot mode a signature entry spells: a missing slot is `absent`.
@@ -107,21 +115,27 @@ impl SlotOracle for Scope<'_> {
     /// nothing names their signature here.
     fn call_slot(&self, target: &CallTarget, index: usize, arg: &IrExpr) -> SlotMode {
         let name = match target {
-            // Self-recursive: optimistic. For tail-recursive parsers passing
-            // the same `data` through, the first-pass pessimism must not lock
-            // the param to Own and prevent the fixed point from promoting it.
-            CallTarget::Named { name } if name.as_str() == self.current_fn => return SlotMode::Borrow,
+            // Self-recursive: optimistic until the fn's own signature is
+            // published. For tail-recursive parsers passing the same `data`
+            // through, the first-pass pessimism must not lock the param to
+            // Own and prevent the fixed point from promoting it. Once the
+            // previous round published it, a self-call reads its slots like
+            // any callee's (#3402): `pairs(b, a)` hands `b` to the slot the
+            // body consumes `a` through, so `b` must be owned too — a
+            // permanently-borrowed self slot let `b` stay `&E` and the
+            // swapped call passed `&E` where `E` is expected (E0308).
+            CallTarget::Named { name } if name.as_str() == self.current_fn => {
+                return match self.resolve(name.as_str()) {
+                    Callee::Known(borrows) => self.known_slot(borrows, index, arg),
+                    Callee::Pending | Callee::Unknown => SlotMode::Borrow,
+                };
+            }
             CallTarget::Named { name } => name.to_string(),
             CallTarget::Module { module, func, .. } => format!("{}::{}", module, func),
             CallTarget::Method { .. } | CallTarget::Computed { .. } => return SlotMode::Consume,
         };
         match self.resolve(&name) {
-            Callee::Known(borrows) => {
-                let mode = slot_of(borrows.get(index), SlotMode::Consume);
-                // A fn-typed argument rides a callee's NON-ESCAPING slot as a
-                // borrow too (#2288): the callee only calls it.
-                if mode != SlotMode::Consume && (self.is_borrow_eligible(&arg.ty) || matches!(arg.ty, Ty::Fn { .. })) { mode } else { SlotMode::Consume }
-            }
+            Callee::Known(borrows) => self.known_slot(borrows, index, arg),
             Callee::Pending => SlotMode::Borrow,
             Callee::Unknown => SlotMode::Consume,
         }
@@ -258,6 +272,14 @@ pub(crate) fn is_named_in(ty: &Ty, names: &HashSet<String>) -> bool {
 /// `let __cap = b` outside the closure, and that bind IS the capture (#3174).
 /// The verdict runs before the binds exist and passes an empty set.
 pub(crate) fn scrutinee_binders_borrow_only(body: &IrExpr, var: VarId, uses: &UseSites, captures: &HashSet<VarId>) -> bool {
+    subject_binders(body, var, uses, captures, &|_| false).is_some()
+}
+
+/// The binders every `match` on `var` introduces (transitively, through a
+/// nested match on a binder), when each one is only READ — or consumed at a
+/// position `clonable` accepts, where the clone pass owns a by-reference
+/// binder first. `None` when a binder is consumed anywhere else.
+fn subject_binders(body: &IrExpr, var: VarId, uses: &UseSites, captures: &HashSet<VarId>, clonable: &dyn Fn(&Use) -> bool) -> Option<HashSet<VarId>> {
     use almide_ir::visit::{IrVisitor, walk_expr, walk_stmt};
     use std::collections::HashMap;
     /// Every match in the body whose subject is a variable (bare, or under
@@ -309,7 +331,7 @@ pub(crate) fn scrutinee_binders_borrow_only(body: &IrExpr, var: VarId, uses: &Us
     let mut scan = Scan { matches: HashMap::new(), captures, captured: HashSet::new() };
     scan.visit_expr(body);
     if !scan.matches.contains_key(&var) {
-        return false;
+        return None;
     }
     // A binder is READ when none of its occurrences consumes it — directly,
     // or through a projection chain (`*t` of a boxed payload into a
@@ -323,24 +345,75 @@ pub(crate) fn scrutinee_binders_borrow_only(body: &IrExpr, var: VarId, uses: &Us
         || matches!((u.site, u.chain), (Site::Deref, Some(c)) if c.top == Site::Scrutinee && c.len == 1);
     let mut todo = vec![var];
     let mut seen: std::collections::HashSet<VarId> = std::collections::HashSet::new();
+    let mut parts = HashSet::new();
     while let Some(root) = todo.pop() {
         if !seen.insert(root) { continue; }
         let Some(bound) = scan.matches.get(&root) else { continue };
         for (b, ty) in bound {
+            parts.insert(*b);
             if almide_ir::top_let_storage::clone_free(ty) { continue; }
             for u in uses.of(*b) {
                 if nested_subject(u) {
-                    if !scan.matches.contains_key(b) { return false; }
+                    if !scan.matches.contains_key(b) { return None; }
                     todo.push(*b);
-                } else if (consumed(u) && !u.in_guard) || scan.captured.contains(b) {
+                } else if (consumed(u) && !u.in_guard && !clonable(u)) || scan.captured.contains(b) {
                     // A guard's consuming read clones (#2605), from a `&T`
                     // binder as well as from an owned one.
-                    return false;
+                    return None;
                 }
             }
         }
     }
-    true
+    Some(parts)
+}
+
+/// A consuming position the borrow lowering owns a by-reference binder at
+/// with one clone of that binder alone: a constructor operand, an owned call
+/// slot, or the value an arm returns — outside closures and loops, so the
+/// clone runs at most once per call.
+fn part_clone_site(u: &Use) -> bool {
+    let top = match u.chain { Some(c) if c.heap => c.top, _ => u.site };
+    let site_ok = match top {
+        Site::Construct(c) => !matches!(c, Ctor::Interp | Ctor::Fan),
+        Site::Arg(SlotMode::Consume) | Site::Result | Site::Concat => true,
+        _ => false,
+    };
+    site_ok && u.depth == 0 && !u.in_loop && !u.in_chain
+}
+
+/// #3434: a recursive fn over a variant that hands a PART of its param back
+/// to itself and reads that part again afterwards (`let ty = infer(f)!` then
+/// `describe(f)`). Owned, the param makes that call site deep-copy the part
+/// at every level of the recursion, and each copy stays alive below it —
+/// quadratic time and memory in the depth. Borrowed, the copying moves into
+/// the arms that build a result from a part (`Wrap(a, b) => ok(Wrap(a, b))`),
+/// which clone just that part, once, and only when they run. So the param is
+/// matched by reference when every binder its matches introduce is either
+/// read or consumed at a [`part_clone_site`], and a self-call at this slot
+/// passes a binder that is still used after the call.
+fn recursion_rereads_a_part(body: &IrExpr, slot: usize, var: VarId, uses: &UseSites, scope: &Scope) -> bool {
+    use almide_ir::visit::{IrVisitor, walk_expr, walk_stmt};
+    let Some(parts) = subject_binders(body, var, uses, &HashSet::new(), &part_clone_site) else { return false };
+    struct Scan<'a> { fn_name: &'a str, slot: usize, args: Vec<VarId> }
+    impl IrVisitor for Scan<'_> {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &e.kind
+                && name.as_str() == self.fn_name
+                && let Some(id) = args.get(self.slot).and_then(subject_root)
+            {
+                self.args.push(id);
+            }
+            walk_expr(self, e);
+        }
+        fn visit_stmt(&mut self, s: &IrStmt) { walk_stmt(self, s); }
+    }
+    let mut scan = Scan { fn_name: scope.current_fn, slot, args: Vec::new() };
+    scan.visit_expr(body);
+    scan.args.iter().filter(|id| parts.contains(id)).any(|id| {
+        let all: Vec<&Use> = uses.of(*id).collect();
+        all.iter().any(|u| matches!(u.chain.map_or(u.site, |c| c.top), Site::Arg(_)) && u.depth == 0
+            && all.iter().any(|w| !std::ptr::eq(*w, *u) && after(u, w) && uses.keeps_live(u, w)))
+    })
 }
 
 /// The variable a match subject reads, through the wrappers passes add:
@@ -395,7 +468,8 @@ fn param_borrow(slot: usize, param: &IrParam, uses: &UseSites, scope: &Scope, bo
     // verdict: matching by value moves it out for free where a borrowed
     // match would clone it.
     let variant_subject = is_named_in(&param.ty, scope.round.variants)
-        && scrutinee_binders_borrow_only(body, param.var, uses, &HashSet::new());
+        && (scrutinee_binders_borrow_only(body, param.var, uses, &HashSet::new())
+            || recursion_rereads_a_part(body, slot, param.var, uses, scope));
     let read_by_ref = |u: &Use| ((literal_subject || variant_subject) && u.site == Site::Scrutinee)
         || (is_string && u.site == Site::Construct(Ctor::Interp) && u.depth == 0);
     // A consuming use that a LATER statement follows with another use of

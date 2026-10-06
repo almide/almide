@@ -54,7 +54,9 @@ pub enum TypeExpr {
     OpenRecord { fields: Vec<FieldType> },
     Fn { params: Vec<TypeExpr>, ret: Box<TypeExpr>, is_effect: bool },
     Tuple { elements: Vec<TypeExpr> },
-    Variant { cases: Vec<VariantCase>, #[serde(skip)] comments: Vec<ExprComments> },
+    /// `multiline`: the declaration wrote its cases on separate lines — layout
+    /// trivia the formatter keeps (#3393), like `comments`, never type data.
+    Variant { cases: Vec<VariantCase>, #[serde(skip)] comments: Vec<ExprComments>, #[serde(skip)] multiline: bool },
     Union { members: Vec<TypeExpr> },
     /// Compile-time literal value in type argument position (e.g., `Array[Float, 128]`).
     ConstLit { value: i64 },
@@ -85,6 +87,12 @@ pub struct FieldType {
     /// record of its unit or invariant, and dropping it is unrecoverable.
     #[serde(skip)]
     pub comments: Vec<String>,
+    /// Comments written AFTER this field on its own line (`rooms: T, // why`).
+    /// Kept apart from `comments` so the formatter can put them back at the
+    /// end of the field's line: printed above the next field instead, they
+    /// would read as that field's doc (#3393).
+    #[serde(skip)]
+    pub trailing_comments: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -333,7 +341,11 @@ pub struct LambdaParam {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Stmt {
     Let { name: Sym, #[serde(rename = "type")] ty: Option<TypeExpr>, value: Expr, #[serde(skip)] span: Option<Span> },
-    LetDestructure { pattern: Pattern, value: Expr, #[serde(skip)] span: Option<Span> },
+    /// `let <pattern> = value`, or with `mutable` set, `var <pattern> = value`
+    /// (#3149): every name the pattern binds is then a `var`. The checker
+    /// desugars the `var` form into one `var` per name before typing it
+    /// ([`crate::var_destructure::desugar_var_destructure`]); the node keeps the written shape for fmt.
+    LetDestructure { pattern: Pattern, value: Expr, #[serde(default, skip_serializing_if = "std::ops::Not::not")] mutable: bool, #[serde(skip)] span: Option<Span> },
     Var { name: Sym, #[serde(rename = "type")] ty: Option<TypeExpr>, value: Expr, #[serde(skip)] span: Option<Span> },
     Assign { name: Sym, value: Expr, #[serde(skip)] span: Option<Span> },
     /// `target(.p)*[index] = value`. `path` is the chain of fields between the
@@ -385,6 +397,12 @@ pub struct ExternAttr {
     pub target: Sym,     // "rust" or "ts"
     pub module: Sym,     // e.g., "fast_lib"
     pub function: Sym,   // e.g., "reverse"
+    /// `returns: promise` (#3371): the JS hook bound by
+    /// `@extern(wasm, "js", ...)` answers with a Promise, so the generated
+    /// JS host suspends on it through JSPI. Only that target/module takes
+    /// it; types, effects and callers are unchanged and native ignores it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub returns_promise: bool,
 }
 
 /// @export(c, "symbol") annotation — export function with C ABI.

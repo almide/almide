@@ -156,7 +156,8 @@ fn walk_expr_mut_iter_chain<V: IrMutVisitor>(
         IterCollector::Collect | IterCollector::Sum { .. } | IterCollector::Len => {}
         IterCollector::Fold { init, lambda } => { v.visit_expr_mut(init); v.visit_expr_mut(lambda); }
         IterCollector::Any { lambda } | IterCollector::All { lambda }
-        | IterCollector::Find { lambda } | IterCollector::Count { lambda } => {
+        | IterCollector::Find { lambda } | IterCollector::Count { lambda }
+        | IterCollector::FindIndex { lambda } | IterCollector::FindMap { lambda } => {
             v.visit_expr_mut(lambda);
         }
     }

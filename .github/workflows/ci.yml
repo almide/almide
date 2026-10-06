@@ -242,6 +242,24 @@ jobs:
           case "$BASE" in ""|0000000000000000000000000000000000000000) BASE="$(git rev-parse HEAD~1)";; esac
           git cat-file -e "$BASE^{commit}" 2>/dev/null || BASE="$(git rev-parse HEAD~1)"
           bash scripts/check-walled-real-growth.sh "$BASE"
+      - name: Shape-matrix known-open rows grow only with an open issue cited (#3309)
+        # tests/shape_matrix_test.rs holds the list to the matrix exactly (a
+        # listed cell that passes, or fails in other columns, is red); this
+        # holds each NEW row to an owner, with the walled-real owner check.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = pull_request ]; then
+            BASE="$(git merge-base "origin/${{ github.base_ref }}" HEAD)"
+          elif [ "${{ github.event_name }}" = merge_group ]; then
+            BASE="${{ github.event.merge_group.base_sha }}"
+          else
+            BASE="${{ github.event.before }}"
+          fi
+          case "$BASE" in ""|0000000000000000000000000000000000000000) BASE="$(git rev-parse HEAD~1)";; esac
+          git cat-file -e "$BASE^{commit}" 2>/dev/null || BASE="$(git rev-parse HEAD~1)"
+          LEDGER=proofs/shape-matrix-baseline.txt bash scripts/check-walled-real-growth.sh "$BASE"
       - name: The gate judges each commit by the law at its parent (negative controls)
         # Needs the full history this job checks out: the old law it replays
         # is the gate's real July version.
@@ -522,9 +540,13 @@ jobs:
         # ALMIDE_EXPECT_TOOLS=1: this leg CLAIMS full tool coverage, so the
         # tripwire test fails loudly if wasmtime/wasm-opt/almide ever go
         # missing instead of letting the tool-gated suites skip-as-pass (#983).
+        # SHAPE_MATRIX_SLICE (#3309): tests/shape_matrix_test.rs runs a fixed
+        # quarter of the shape matrix per PR (the cells whose name hashes to 0
+        # mod 4); .github/workflows/shape-matrix-nightly.yml runs all of it.
         env:
           ALMIDE_BIN: /tmp/almide-bin/almide
           ALMIDE_EXPECT_TOOLS: "1"
+          SHAPE_MATRIX_SLICE: "0/4"
         # The script enumerates every workspace test target from cargo's own
         # JSON (root package AND member crates — a bare `cargo test` at the root
         # tests only the root, and the members' suites silently never ran in CI
@@ -707,23 +729,18 @@ jobs:
       - name: Install wasm-opt (binaryen)
         run: sudo apt-get update && sudo apt-get install -y binaryen && wasm-opt --version
 
-      - name: Generated runtime registry matches committed sources (regenerate and diff)
-        # crates/almide-codegen/src/generated/{rust_runtime,runtime_fn_modes}.rs
-        # are committed, but build.rs regenerates them from runtime/rs/src by
-        # embedding each module's source TEXT. A draft edited in runtime/rs/src
-        # but not committed can be baked into the generated file and committed on
-        # its own, silently desyncing the two (this is exactly how the #419
-        # codepoint draft leaked). Force a fresh regen (touch the generator so
-        # cargo re-runs the build script) and fail on any diff — in CI only
-        # committed sources exist, so a leaked draft cannot reproduce. Mirrors the
-        # "Contract README up to date" regenerate-and-diff gate.
-        run: |
-          touch crates/almide-codegen/buildscript/runtime_registry.rs
-          cargo build -p almide-codegen
-          git diff --exit-code -- \
-            crates/almide-codegen/src/generated/rust_runtime.rs \
-            crates/almide-codegen/src/generated/runtime_fn_modes.rs \
-            || { echo "::error::generated runtime registry is stale — a runtime/rs/src edit was not committed, or a generated file was hand-edited. Rebuild almide-codegen and commit crates/almide-codegen/src/generated/*.rs"; exit 1; }
+      - name: Generated build tables match committed sources (regenerate and diff, #3361)
+        # Every table a crate embeds from files OUTSIDE its package is committed
+        # under that crate's src/generated/ — almide-types (stdlib/*.almd),
+        # almide-codegen (runtime/rs/src -> rust_runtime.rs, runtime_fn_modes.rs),
+        # almide-egg-lab (stdlib/matrix.almd), almide-interp (runtime libm) — so a
+        # crate vendored on its own builds from what it ships (#3361). Their build
+        # scripts regenerate them inside a checkout; this forces that and fails
+        # on any diff. In CI only committed sources exist, so a draft edited in
+        # runtime/rs/src but baked into a committed table cannot reproduce (the
+        # #419 codepoint-draft leak this step was first written for), and a
+        # stdlib/ edit committed without its table goes red here.
+        run: bash scripts/check-build-inputs-in-package.sh --regen
 
       # #2183: the AST / check / run parity goldens the greenfield legs are
       # judged by claimed a pinned old oracle while being re-recorded from the
@@ -1477,9 +1494,11 @@ jobs:
       - name: Doc fences execute (#1490 — marked stdlib examples check/run byte-exactly)
         run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-doc-fences.sh
 
+      # Node 24: the JS host gate's `returns: promise` fixtures need JSPI
+      # (WebAssembly.Suspending / promising, on by default from Node 24.20, #3353 #3362).
       - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 24
       - name: Install wasm-opt (binaryen) for the JS host gate's post-opt shim-set assertion (#2276)
         run: sudo apt-get update && sudo apt-get install -y binaryen && wasm-opt --version
       - name: JS host (#2265/#2276 — `--host js` glue runs the wasm_host_js fixtures under node, stdout byte-equal to expected and native; the module and glue ship only the program's surface)
@@ -1500,6 +1519,9 @@ jobs:
 
       - name: Forbidden impurities (no raw clocks/threads in the compile path)
         run: scripts/check-forbidden-impurities.sh
+
+      - name: Every crate builds from its own package (#3361 — no shipped source reads past its crate dir; the shared build-script copies are identical)
+        run: bash scripts/check-build-inputs-in-package.sh
 
       - name: Workflow files parse strictly (a schedule-only workflow that cannot parse fails silently, #1234)
         run: bash scripts/check-workflows.sh
@@ -2184,7 +2206,7 @@ jobs:
       # unreported. scripts/check-release-only-tests.sh keeps this list
       # honest; the wasm crate's seven ride the carried-gates step above.
       - name: Release-only root tests (the shards skip these by profile)
-        run: cargo test --release --locked --test anon_record_structural_identity_matrix_test --test cross_module_field_defaults_test --test embedded_cross_test --test http_serve_cross_test --test module_type_repr_test --test qualified_ctor_names_test --test record_literal_through_alias_test --test top_let_forward_reference_test --test wasm_vm_parity_test
+        run: cargo test --release --locked --test anon_record_structural_identity_matrix_test --test cross_module_field_defaults_test --test embedded_cross_test --test http_serve_cross_test --test imported_recursive_variant_test --test module_fn_value_let_test --test module_type_repr_test --test qualified_ctor_names_test --test record_literal_binding_test --test record_literal_through_alias_test --test same_shape_records_test --test selective_import_ctor_let_test --test top_let_forward_reference_test --test top_let_recursive_payload_test --test wasm_vm_parity_test
 
   commissioned-wasm-gates-probes:
     name: Commissioned wasm gates (target availability + runtime ratio)

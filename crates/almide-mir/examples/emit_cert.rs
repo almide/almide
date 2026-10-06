@@ -10,7 +10,8 @@ use almide_mir::{
     certificate::{
         call_modes_witness, cap_witness_string, name_witness_string, ownership_certificate,
     },
-    CallArg, Capability, Init, MirFunction, MirParam, Op, Repr, RtFn, ValueId, PLACEHOLDER_LAYOUT,
+    CallArg, Capability, Init, IntOp, MirFunction, MirParam, Op, PrimKind, Repr, RtFn, ValueId,
+    PLACEHOLDER_LAYOUT,
 };
 use std::collections::BTreeMap;
 
@@ -18,6 +19,18 @@ fn heap() -> Repr {
     Repr::Ptr {
         layout: PLACEHOLDER_LAYOUT,
     }
+}
+
+/// The payload-borrow address bridge the lowering's `load_at_offset` emits:
+/// `v2 = prim.handle(obj)`, `v4 = v2 + 12`, `v5 = LoadHandle(v4)`.
+fn handle_load_at(obj: ValueId) -> Vec<Op> {
+    let (h, off, addr, p) = (ValueId(2), ValueId(3), ValueId(4), ValueId(5));
+    vec![
+        Op::Prim { kind: PrimKind::Handle, dst: Some(h), args: vec![obj] },
+        Op::ConstInt { dst: off, value: 12 },
+        Op::IntBinOp { dst: addr, op: IntOp::Add, a: h, b: off },
+        Op::Prim { kind: PrimKind::LoadHandle, dst: Some(p), args: vec![addr] },
+    ]
 }
 
 fn scenario(which: &str) -> MirFunction {
@@ -108,11 +121,13 @@ fn scenario(which: &str) -> MirFunction {
             declared_caps: vec![], // declares no capability
             ..Default::default()
         },
-        // A one-shot BRANCH whose arms AGREE at net +1 on a pre-branch object
-        // (each arm acquires one alias of `a` — the heap-result-branch class):
-        // cert `i{a|a}dd`, ACCEPTED by the proven CBranch agreement rule.
+        // A one-shot BRANCH whose arms AGREE at net −1 on a pre-branch object
+        // (each arm releases the alias `y` taken before the branch): cert
+        // `ia{d|d}d`, ACCEPTED by the proven CBranch agreement rule. (#3267:
+        // the earlier `i{a|a}dd` form dropped after the join a handle only the
+        // then arm defined, which both sides now reject.)
         "branch-agree" => {
-            let (x, y, z, c) = (ValueId(0), ValueId(1), ValueId(2), ValueId(3));
+            let (x, y, c) = (ValueId(0), ValueId(1), ValueId(3));
             MirFunction {
                 name: "f".into(),
                 ops: vec![
@@ -121,14 +136,14 @@ fn scenario(which: &str) -> MirFunction {
                         repr: heap(),
                         init: Init::Opaque,
                     },
+                    Op::Dup { dst: y, src: x },
                     Op::Const { dst: c },
                     Op::IfThen { cond: c, dst: None },
-                    Op::Dup { dst: y, src: x },
+                    Op::Drop { v: y },
                     Op::Else { val: None },
-                    Op::Dup { dst: z, src: x },
+                    Op::Drop { v: y },
                     Op::EndIf { val: None },
                     Op::Drop { v: x },
-                    Op::Drop { v: y },
                 ],
                 ..Default::default()
             }
@@ -168,6 +183,56 @@ fn scenario(which: &str) -> MirFunction {
                 Op::MakeUnique { v: a },
                 Op::Drop { v: a },
             ],
+            ..Default::default()
+        },
+        // #3229: an owned object released to 0, then `Dup`'d and moved out —
+        // the shape a copy-on-write freed by a modeled frame's end produced.
+        // Cert `idam` BALANCES, so the count alone accepted it; the owned-line
+        // resurrection rule (an `a` on a dead owned object) → REJECT.
+        "alias-after-free" => MirFunction {
+            name: "f".into(),
+            ops: vec![
+                Op::Alloc {
+                    dst: a,
+                    repr: heap(),
+                    init: Init::Opaque,
+                },
+                Op::Drop { v: a },
+                Op::Dup { dst: b, src: a },
+                Op::Consume { v: b },
+            ],
+            ..Default::default()
+        },
+        // #3233: a heap READ through the address bridge (`prim.handle` →
+        // `+ offset` → `LoadHandle`) of a LIVE owned object. Every dereference
+        // is a `b` probe on the object the address points into: `ibd` → ACCEPT.
+        "loadhandle-live" => {
+            let mut ops = vec![Op::Alloc { dst: a, repr: heap(), init: Init::Opaque }];
+            ops.extend(handle_load_at(a));
+            ops.push(Op::Drop { v: a });
+            MirFunction { name: "f".into(), ops, ..Default::default() }
+        }
+        // The same load, then the release, then a SECOND load through the
+        // address computed while the object lived: before #3233 a `LoadHandle`
+        // emitted no event, so the cert was `id` and certified. Now `ibdb` →
+        // the `b` guard faults → REJECT.
+        "loadhandle-after-free" => {
+            let mut ops = vec![Op::Alloc { dst: a, repr: heap(), init: Init::Opaque }];
+            ops.extend(handle_load_at(a));
+            ops.push(Op::Drop { v: a });
+            ops.push(Op::Prim { kind: PrimKind::LoadHandle, dst: Some(ValueId(6)), args: vec![ValueId(4)] });
+            MirFunction { name: "f".into(), ops, ..Default::default() }
+        }
+        // #3233: a freed object passed as a call's HANDLE argument. Before, a
+        // call arg emitted no event (`id`, certified); now `idb` → REJECT.
+        "callarg-after-free" => MirFunction {
+            name: "f".into(),
+            ops: vec![
+                Op::Alloc { dst: a, repr: heap(), init: Init::Str("hi".into()) },
+                Op::Drop { v: a },
+                Op::Call { dst: None, func: RtFn::PrintStr, args: vec![CallArg::Handle(a)], result: None },
+            ],
+            declared_caps: vec![Capability::Stdout],
             ..Default::default()
         },
         // The SAME use AFTER the release — a use-after-free the cert previously
@@ -240,7 +305,8 @@ fn scenario(which: &str) -> MirFunction {
             eprintln!(
                 "unknown scenario: {other} \
                  (try: balanced | leak | dangling | sandboxed | undeclared | \
-                 branch-agree | branch-mismatch | borrow-live | borrow-uaf | \
+                 branch-agree | branch-mismatch | borrow-live | borrow-uaf | alias-after-free | \
+                 loadhandle-live | loadhandle-after-free | callarg-after-free | \
                  branch-ret | branch-ret-leak)"
             );
             std::process::exit(2);

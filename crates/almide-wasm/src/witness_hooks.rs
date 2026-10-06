@@ -143,9 +143,42 @@ impl Emitter<'_> {
             }
             return;
         }
-        if self.rc_droppable(ty) {
+        if self.rc_droppable(ty) && !self.rc_owned_result(e) && self.is_pool_static_case(e, ty) {
+            // #2758: a nullary case the ownership predicate did not class as
+            // owned (a generic instance's case, resolved only by the slot's
+            // type): the share guard's `rc_inc_top` is a real call that
+            // no-ops on the pool static, and the container's credit on it
+            // is never released for real. A view's share and move (`am`).
+            if let Some(w) = self.witness.as_mut() {
+                w.view_share_move();
+            }
+        } else if self.rc_droppable(ty) {
             self.witness_share_or_move(e, "store:borrowed-temp");
         }
+    }
+
+    /// Does `e`, lowered against the slot type `ty`, build a NULLARY variant
+    /// case — the pool static `lower_variant_ctor` interns (#1961)? The same
+    /// two routes `lower_call_at` resolves a ctor by: the hint's own cases,
+    /// then the global ctor map. A ctor reached with no argument lowers only
+    /// when its case has no field (the arity check), so either route is a
+    /// static.
+    fn is_pool_static_case(&self, e: &almide_ir::IrExpr, ty: SliceTy) -> bool {
+        use crate::types_table::NamedDef;
+        let almide_ir::IrExprKind::Call { target: almide_ir::CallTarget::Named { name }, args, .. } = &e.kind else {
+            return false;
+        };
+        let name = name.as_str();
+        let nullary = |ti: u32, ci: usize| matches!(self.types.def(ti), NamedDef::Variant(v) if v.cases.get(ci).is_some_and(|c| c.fields.is_empty()));
+        let by_type = match ty {
+            SliceTy::Named(ti) => match self.types.def(ti) {
+                NamedDef::Variant(v) => v.cases.iter().position(|c| c.name == name).map(|ci| (ti, ci)),
+                _ => None,
+            },
+            _ => None,
+        };
+        let ctor = by_type.or_else(|| self.types.ctors.get(name).map(|&(ti, ci)| (ti, ci as usize)));
+        args.is_empty() && ctor.is_some_and(|(ti, ci)| nullary(ti, ci))
     }
 
     /// One arm of `r ?? fallback` (data.rs, #2970), right after the arm's
@@ -236,6 +269,8 @@ impl Emitter<'_> {
                     w.temp_borrowed();
                 }
             }
+            // #3406: a dying var moves in — its site records the move.
+            ArgMode::Retain if is_var && self.owned_call_marks.is_moving(e) => {}
             ArgMode::Retain if is_var => self.witness_retain_var(e, "module-arg"),
             ArgMode::Retain => self.witness_share_or_move(e, "module-arg:retain-borrowed-temp"),
         }
@@ -250,17 +285,16 @@ impl Emitter<'_> {
         self.globals.get(&(self.var_space, *id)).map(|&(_, t)| t)
     }
 
-    /// Retain of a Var mirrors `rc_share_guard`: a cell var shares
-    /// nothing (decline — the cell's credit is not this frame's); a
-    /// handle-typed local took the real `rc_inc` and its credit moves
-    /// into the arm (`am`); a droppable local that is not a handle took
-    /// no +1 at all — the arm retains what it did not share: decline.
+    /// Retain of a Var mirrors `rc_share_guard`: a handle-typed local took
+    /// the real `rc_inc` and its credit moves into the arm (`am`); a
+    /// droppable local that is not a handle took no +1 at all — the arm
+    /// retains what it did not share: decline. A C-319 cell var shares its
+    /// OCCUPANT the same way (`rc_share_guard`, #2010); the share lands on
+    /// the cell's line (witness_mut.rs `witness_cell_bind`), and a cell no
+    /// hook bound declines.
     fn witness_retain_var(&mut self, e: &almide_ir::IrExpr, position: &str) {
         let almide_ir::IrExprKind::Var { id } = &e.kind else { return };
-        if self.cells.contains(id) {
-            self.witness_decline(&format!("{position}:retain-cell"));
-            return;
-        }
+        let is_cell = self.cells.contains(id);
         let Some(&(l, vt)) = self.locals.get(id) else {
             // A global's block: `rc_share_guard` shares a handle, a view's
             // share moved into the holder (`am`).
@@ -281,22 +315,29 @@ impl Emitter<'_> {
         if let Some(w) = self.witness.as_mut()
             && !w.arg_share_move(l)
         {
-            w.poison();
+            if is_cell {
+                w.decline(&format!("{position}:retain-cell"));
+            } else {
+                w.poison();
+            }
         }
     }
 
     /// #2758: a capture stored into a new closure's env (emitter_values.rs
     /// `lower_lambda_value`). The env is a holder: a handle-typed capture
     /// takes the `share_handle_top` +1 and its credit moves into the env
-    /// (`am`, released by the env's drop glue). A C-319 cell co-owns the
-    /// cell, not the value (decline); a droppable capture that is not a
-    /// handle took no +1 (decline, as `witness_retain_var`).
+    /// (`am`, released by the env's drop glue). A C-319 cell: the env
+    /// co-owns the CELL (witness_mut.rs); a droppable capture that is not
+    /// a handle took no +1 (decline, as `witness_retain_var`).
     pub(crate) fn witness_capture(&mut self, idx: u32, t: SliceTy, is_cell: bool) {
-        if self.witness.is_none() || !self.rc_droppable(t) {
+        if self.witness.is_none() {
             return;
         }
         if is_cell {
-            self.witness_decline("capture:cell");
+            self.witness_cell_capture(idx);
+            return;
+        }
+        if !self.rc_droppable(t) {
             return;
         }
         if !self.elem_is_handle(t) {
@@ -577,12 +618,13 @@ impl Emitter<'_> {
         Some(self.witness.as_mut()?.temp_born())
     }
 
-    /// The carrier's two routes, as a branch: it LEAVES as the whole fan's
-    /// result (`map`'s err, `any`'s winner — the consumer records the owned
-    /// result, the call-result convention), or it is consumed here: `any`
-    /// releases a losing err (`d`), `map` releases the shell (`d`) after the
-    /// ok payload's credit moved into the accumulator (a fresh value moved,
-    /// `im`, when the payload is droppable).
+    /// The carrier's routes, as a branch: it LEAVES as the whole fan's
+    /// result (`map`'s lowest-index err, `any`'s winner — the consumer
+    /// records the owned result, the call-result convention), or it is
+    /// consumed here: `any` releases a losing err (`d`), `map` releases the
+    /// shell (`d`) after the ok payload's credit moved into the accumulator (a
+    /// fresh value moved, `im`, when the payload is droppable), and — every
+    /// element runs (ADR-0024 D1) — releases an err after the first (`d`).
     pub(crate) fn witness_fan_step(&mut self, c: Option<u32>, first_ok_wins: bool, payload: SliceTy) {
         let payload_moves = !first_ok_wins && self.rc_droppable(payload);
         let (Some(w), Some(o)) = (self.witness.as_mut(), c) else { return };
@@ -593,6 +635,10 @@ impl Emitter<'_> {
         w.temp_ops(o, "d");
         if payload_moves {
             w.temp_move();
+        }
+        if !first_ok_wins {
+            w.branch_arm();
+            w.temp_ops(o, "d");
         }
         w.branch_close();
     }
@@ -662,27 +708,32 @@ impl Emitter<'_> {
     /// value moves (`im`), a borrowed Var arm took the normalizing +1 and
     /// moves (`am`), a borrowed non-Var declines. Mirrors `lower_if_arms` /
     /// `lower_arm_body`, which call it exactly where they settle the credit.
+    /// An arm that already left (a `panic`'s abort) settles nothing: its
+    /// settling instructions are unreachable.
     pub(crate) fn witness_arm_value(&mut self, e: &almide_ir::IrExpr) {
-        if self.witness.is_some() {
+        if self.witness.as_ref().is_some_and(|w| !w.dead()) {
             self.witness_share_or_move(e, "arm-value:borrowed-temp");
         }
     }
 
     /// A match arm's pattern binds (#2756): each droppable binder is a VIEW
     /// of the subject's payload — a known object the frame holds no credit
-    /// of (patterns.rs binds by `local.set`, no share, no release).
+    /// of (patterns.rs binds by `local.set`, no share, no release). A NAMED
+    /// list rest is a fresh block instead, which its arm releases (#2971,
+    /// witness_rest.rs).
     pub(crate) fn witness_pattern_views(&mut self, p: &almide_ir::IrPattern) {
         if self.witness.is_none() {
             return;
         }
-        let mut vars = Vec::new();
+        let (mut vars, mut rests) = (Vec::new(), Vec::new());
         pattern_binders(p, &mut vars);
-        for v in vars {
-            let Some(&(idx, ty)) = self.locals.get(&v) else { continue };
+        crate::patterns::named_rests(p, &mut rests);
+        for v in vars.iter().map(|v| (v, false)).chain(rests.iter().map(|v| (v, true))) {
+            let Some(&(idx, ty)) = self.locals.get(v.0) else { continue };
             if self.rc_droppable(ty)
                 && let Some(w) = self.witness.as_mut()
             {
-                w.param_borrowed(idx);
+                if v.1 { w.rest_born(idx) } else { w.param_borrowed(idx) }
             }
         }
     }
@@ -697,8 +748,8 @@ impl Emitter<'_> {
     }
 }
 
-/// Every variable a pattern binds (the list-rest binder included: the gate
-/// declines a named rest before any frame reaches here).
+/// Every variable a pattern binds as a view (a named list rest is not one:
+/// `crate::patterns::named_rests`).
 fn pattern_binders(p: &almide_ir::IrPattern, out: &mut Vec<almide_ir::VarId>) {
     use almide_ir::IrPattern as P;
     match p {
@@ -714,7 +765,7 @@ fn pattern_binders(p: &almide_ir::IrPattern, out: &mut Vec<almide_ir::VarId>) {
         }
         P::List { elements, rest } => {
             elements.iter().for_each(|q| pattern_binders(q, out));
-            if let Some(r) = rest {
+            if let Some(r) = rest.as_deref().filter(|r| !matches!(r, P::Bind { .. })) {
                 pattern_binders(r, out);
             }
         }

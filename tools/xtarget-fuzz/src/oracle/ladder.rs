@@ -231,7 +231,16 @@ pub fn run_ladder(
         // matching the one-step form, which only ever minted this finding on
         // the diagnostic markers.
         let stderr = String::from_utf8_lossy(&nbuild.stderr);
-        if stderr.contains("Compile error") || stderr.contains("error[E") {
+        // An internal compiler error / `[COMPILER BUG]` refusal / compiler
+        // panic is the compiler failing on an accepted program — a finding,
+        // not a toolchain event (#3309: the shape family's IR-verify ICEs,
+        // #3315, were being skipped here).
+        if stderr.contains("Compile error")
+            || stderr.contains("error[E")
+            || stderr.contains("internal compiler error")
+            || stderr.contains("[COMPILER BUG]")
+            || stderr.contains("panicked at")
+        {
             return Outcome::Finding(Finding {
                 rung: Rung::NativeBuild,
                 kind: FindingKind::NativeBuildFailure,
@@ -800,9 +809,9 @@ impl ResourceLimit {
 ///
 /// | leg | limit | stderr marker | exit |
 /// |---|---|---|---|
-/// | native | stack | `stack overflow` (Rust guard page: "thread 'main' has overflowed its stack" / "fatal runtime error: stack overflow") | SIGABRT → `None` |
+/// | native | stack | `stack overflow` (the C-196 guard-page handler's `Error: stack overflow`; before it, and still on a thread the runtime did not register, Rust's "thread 'main' has overflowed its stack" / "fatal runtime error: stack overflow") | 1 (Rust's: SIGABRT → `None`) |
 /// | native | memory | `memory allocation of ` … ` bytes failed` (std's alloc-error handler) | SIGABRT → `None` |
-/// | wasm | stack | `call stack exhausted` (the wasmtime trap) | 134 |
+/// | wasm | stack | `call stack exhausted` (the stock wasmtime trap this oracle runs — C-196's declared residual) | 134 |
 /// | wasm | memory | `Error: out of memory` (the `$oom` primitive, C-197 — never a raw OOB trap) | 1 |
 ///
 /// The exit code is NOT part of the decision: it differs by host and by

@@ -5,23 +5,25 @@
 // match, same as string_split (sep is a full string, so both pieces stay valid UTF-8).
 // Each piece is a FRESH owned String; source + sep are borrowed.
 // Does sep (seplen bytes at seph+12) occur at byte position p in s (sh+12)?
-fn __so_at(sh: Int, slen: Int, seph: Int, seplen: Int, p: Int, j: Int) -> Bool = if j >= seplen then true
-else if p + j >= slen then false
-else {
-  let sb = prim.load8(sh + 12 + p + j)
-  let tb = prim.load8(seph + 12 + j)
-  if sb == tb then __so_at(sh, slen, seph, seplen, p, j + 1)
-  else false
-}
+fn __so_at(sh: Int, slen: Int, seph: Int, seplen: Int, p: Int, j: Int) -> Bool =
+  if j >= seplen then true
+  else if p + j >= slen then false
+  else {
+    let sb = prim.load8(sh + 12 + p + j)
+    let tb = prim.load8(seph + 12 + j)
+    if sb == tb then __so_at(sh, slen, seph, seplen, p, j + 1)
+    else false
+  }
 
 // First byte index >= `from` where sep occurs, or -1 if sep is absent. An empty sep
 // hits immediately at `from` (j >= seplen on the first probe), mirroring Rust.
-fn __so_find(sh: Int, slen: Int, seph: Int, seplen: Int, from: Int) -> Int = if from + seplen > slen then 0 - 1
-else {
-  let hit = __so_at(sh, slen, seph, seplen, from, 0)
-  if hit then from
-  else __so_find(sh, slen, seph, seplen, from + 1)
-}
+fn __so_find(sh: Int, slen: Int, seph: Int, seplen: Int, from: Int) -> Int =
+  if from + seplen > slen then 0 - 1
+  else {
+    let hit = __so_at(sh, slen, seph, seplen, from, 0)
+    if hit then from
+    else __so_find(sh, slen, seph, seplen, from + 1)
+  }
 
 fn __so_copy(dst: Int, src: Int, n: Int, i: Int) -> Int = if i >= n then 0
 else {

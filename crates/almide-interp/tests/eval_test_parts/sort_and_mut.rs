@@ -224,24 +224,31 @@ effect fn main() -> Unit = {
 fn deep_recursion_hits_depth_guard_cleanly() {
     // `sum_to(5000)` nests 5000 interp call frames — past MAX_DEPTH (4000). The
     // evaluator runs on a dedicated big-stack thread, so this terminates as a
-    // CLEAN `FuelExhausted` (the depth guard) rather than overflowing the native
-    // stack of the default cargo-test worker thread (~2 MiB) and aborting the
-    // whole process. This test is itself driven from that default-stack worker,
-    // so it is the real regression scenario.
+    // CLEAN `StackExhausted` (the depth guard: C-196's defined abort at the
+    // interpreter's declared threshold, distinct from step fuel) rather than
+    // overflowing the native stack of the default cargo-test worker thread
+    // (~2 MiB) and aborting the whole process. This test is itself driven from
+    // that default-stack worker, so it is the real regression scenario.
     let src = r#"
 fn sum_to(n: Int) -> Int =
   if n <= 0 then 0 else n + sum_to(n - 1)
 fn main() -> Unit = {
+  println("before")
   println("${sum_to(5000)}")
 }"#;
     let ir = lower(src);
     let out = Interpreter::new(&ir).run_main();
     assert_eq!(
         out.status,
-        RunStatus::FuelExhausted,
+        RunStatus::StackExhausted,
         "deep recursion must trip the depth guard cleanly, not overflow; got {:?}",
         out.status
     );
+    // C-196's rendering: the stdout so far survives, one `Error: stack
+    // overflow` line on stderr, exit 1.
+    assert_eq!(out.stdout, "before\n");
+    assert_eq!(out.stderr, "Error: stack overflow\n");
+    assert_eq!(out.exit_code(), 1);
 }
 
 #[test]

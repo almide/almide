@@ -23,6 +23,13 @@
 #     cross-checked by scripts/check-dialect-epochs.sh, so neither can drift.
 #   - Entries are APPEND-ONLY. An epoch that shipped is history; editing it
 #     rewrites what a stamp in an existing file means.
+#   - A spelling kept alive for a window before it is removed is a
+#     `[[deprecation]]` (after the epochs): `since_epoch` is the epoch it was
+#     deprecated in, `removal_epoch` the future epoch whose `breaks` will
+#     remove it. Deprecating breaks nothing, so it takes no epoch of its own;
+#     the removal does. `removal_epoch` must be above `since_epoch`, and the
+#     compiler constant that prints it is cross-checked by
+#     scripts/check-dialect-epochs.sh.
 #
 # What this ledger is not, yet: the join to per-break migration diagnostics.
 # The `breaks` strings are prose today. Making each one a `@deprecated`
@@ -85,3 +92,74 @@ summary = "The bytes in-place writers declare their receiver `mut`, like `list.p
 breaks = [
   "passing a `let` binding, a non-`mut` parameter or a temporary to a bytes writer (`bytes.append_*`, `set_*`, `write_*`, `fill`, `clear`, `copy_from`) is E032 — declare a local buffer with `var`, and give a helper that fills its caller's buffer a `mut b: Bytes` parameter (the caller then passes a `var`)",
 ]
+
+[[epoch]]
+n = 6
+since = "0.67.0"
+name = "no-var-in-concurrent-bodies"
+summary = "E008 generalized from a `fan` block capturing a `var` to any concurrently-run body reaching one: http handlers, every fan head and callback, and the user fns their slots flow through (ADR-0020 §3, #2697). Measured impact: 0 programs across spec/, examples/, stdlib, research exercises and the 44 downstream canary projects."
+breaks = [
+  "a `var` reachable from an http handler or a `fan` body (captured, top-level, or through a called fn) is E008; keep cross-request state outside the program, bind a `let` copy for read-only use",
+]
+
+[[epoch]]
+n = 7
+since = "0.67.0"
+name = "fan-map-runs-every-element"
+summary = "`fan.map` evaluates every element in list order, including the ones after an element that returns `Err`, and the lowest-index `Err` surfaces — the rule `fan { }` block arms already followed (ADR-0024 D1, C-005). Measured impact: 0 programs — none of the 18 programs in spec/ and examples/ that call `fan.map` changes its observation (native A/B against 0.64.0), and the almide-dojo corpus (124 .almd files) has no `fan.map`."
+breaks = [
+  "`fan.map` runs every element even after one returns `Err`; to stop at the first failure, use a `for` loop with `!`",
+]
+
+[[epoch]]
+n = 8
+since = "0.67.0"
+name = "readers-are-effects"
+summary = "A plain fn writes and aborts but never reads (ADR-0022): the stdlib readers that were plain fns are effect fns, `@pure` is checked, and `[permissions]` sees the categories the stdlib and externs really touch (#3245, #3246, #3248, #3250)."
+breaks = [
+  "`io.read_byte`, `io.read_n_bytes` and `process.args` are `effect fn`s — a call from a plain fn is E006; mark the caller `effect fn`, or read in the caller and pass the value in",
+  "`@pure` is checked — a `@pure` fn that is an effect fn or an extern, or that reaches `println` / `eprintln` / `panic` / `assert*`, a stdlib call with an effect category, or an `@extern`, is E092; move that call to a caller, or remove `@pure`",
+  "`[permissions].allow` counts `random` as `Rand` and `io` as `IO`, and an `@extern` fn as every category — a project whose allow list omits one of those now fails `almide build` with a capability violation; add the category it names (an extern needs all six until a bound can be declared)",
+]
+
+[[epoch]]
+n = 9
+since = "0.67.0"
+name = "closure-mutation-every-write-form"
+summary = "E011 judges the binding a closure mutates, so every write form of an enclosing `var` inside a pure fn's closure is rejected — not only the whole assign (#3344)."
+breaks = [
+  "inside a closure of a pure fn, an index or map-key write (`seen[k] = v`), a field or nested-place write (`s.f = v`), or an in-place mutator handed the enclosing `var` (`list.push(acc, x)`) is E011, as `seen = v` already was — mark the enclosing fn `effect fn`, or move the mutation out of the closure (a `for` loop, or a `list.fold` / `list.map`)",
+]
+
+[[epoch]]
+n = 10
+since = "0.67.0"
+name = "names-resolve-where-declared"
+summary = "Two names the checker used to accept without resolving them are refused: a module-qualified type resolves only through a module in scope that declares it, and every `[permissions].allow` name must be a grantable capability (#3252). Found by the v0.67.0-rc1 downstream canary (run 37224303801): almide/parsegen and O6lvl4/gramide (types), almide/porta (permissions)."
+breaks = [
+  "a type qualified by a module the file does not import (`lex.LexError` with no `import self.lex`), or by a module that does not itself declare it (`dfa.Dfa` where package `dfa` declares `Dfa` in its submodule `table`), is E029 — import the declaring module (`import self.lex`, `import dfa.table`) and qualify by it (`table.Dfa`)",
+  "an unknown name in `[permissions].allow` (`\"FS.read\"`, `\"FS.write\"`) is refused on its manifest line (0.66.0 accepted it) — write only IO, Net, Env, Time, Rand, Fan (file access is IO)",
+]
+
+# DEPRECATIONS — spellings accepted for a window, with the epoch that removes them
+# =============================================================
+
+[[deprecation]]
+id = "legacy-native-callback-names"
+issue = 3425
+since_epoch = 10
+since = "0.67.0"
+removal_epoch = 12
+summary = "A package's `native/*.rs` may still call the package's own fns by their spelling before #3338 (`almide_rt_tf_v0_entry`, `almide_rt_tf_v0_calc_double`), through a deprecated alias of the injective name (`almide_rt_tf_0v0_entry`, `almide_rt_tf_0v0_1calc_double`). The build warns once per old name it finds. A name that the old spelling made ambiguous (`a.b` and `a_b`) gets no alias."
+removal = "epoch 12 drops the aliases: a `native/*.rs` calling `crate::almide_rt_<pkg>_v<N>_<fn>` or `..._v<N>_<sub>_<fn>` gets rustc E0425 — write the injective name the warning prints (`_` in a segment is `_0`, a `.` is `_1`)"
+=======
+[[epoch]]
+n = 11
+since = "0.67.0"
+name = "served-app-is-instance-closed"
+summary = "The app passed to `http.serve` is instance-closed: it reads no local of the fn that serves it, only top-level items (ADR-0020 §5.2, #2698). Measured impact: 1 program across spec/, examples/, stdlib and research exercises (spec/serve_cross/http_serve_replay.almd, migrated in the same change)."
+breaks = [
+  "an app passed to `http.serve` that reads a `let`, `var` or parameter of the fn that serves it (a handler lambda capturing a local of main, or `let app = http.router(…)!` in main) is E095; make the value a top-level `let` (`let app = http.router(…)` served as `http.serve(port, app!)!`) or compute it inside the handler",
+]
+
+# ======================================================

@@ -36,6 +36,9 @@ pub(crate) fn is_self_host_result_module_fn(module: &str, func: &str) -> bool {
             // shape, so a `match`/`!` over the bound result EXECUTES.
             | ("fs", "file_size")
             | ("fs", "modified_at")
+            // `datetime.parse_iso` — Result[Int, String] from the ok()/err() ctors
+            // (datetime_parse_iso.almd), the int.parse scalar-Ok shape.
+            | ("datetime", "parse_iso")
     )
 }
 
@@ -117,6 +120,33 @@ pub fn is_self_host_result_str_module_fn(module: &str, func: &str) -> bool {
             // (ok()/err() ctors), and additionally FORWARDS the callback's own
             // err block — same cap-as-tag layout either way.
             | ("fs", "__fallible_fold_lines")
+            // #3159: the visitor twins (fs_fold_lines.almd) — `ok(())`/`err(m)` ctors,
+            // and the fallible carrier forwards the callback's own err block: the
+            // Result[Unit, String] layout fs.write has. Missing from this set, a
+            // `match`/`!` over them fell to the untracked-subject wall (main's
+            // `fs.for_each_line(..)!` followed by a statement).
+            | ("fs", "for_each_line")
+            | ("fs", "__fallible_for_each_line")
+            // `json.set_path` / `value.field` — Result[Value, String] built by the
+            // ok()/err() ctors (json_path.almd, value_core.almd), json.parse's shape.
+            | ("json", "set_path")
+            | ("value", "field")
+            // The zlib family — Result[Bytes, String] from the ok()/err() ctors
+            // (zlib_deflate.almd, zlib_inflate.almd), fs.read_bytes_raw's shape.
+            | ("zlib", "deflate")
+            | ("zlib", "deflate_level")
+            | ("zlib", "compress")
+            | ("zlib", "compress_level")
+            | ("zlib", "gzip")
+            | ("zlib", "inflate")
+            | ("zlib", "decompress")
+            | ("zlib", "gunzip")
+            // The text decoders — ok()/err() ctors over a fresh payload: Bytes from
+            // hex_encode.almd / base64_encode.almd, a String from bytes_core.almd.
+            | ("hex", "decode")
+            | ("base64", "decode")
+            | ("base64", "decode_url")
+            | ("bytes", "to_string")
             // `fs.stat` returns the cap-as-tag `Result[FileStat, String]` (the self-host builds
             // it with the ordinary ok()/err() ctors — payload @12, tag @16). The Ok payload is a
             // SCALAR-ONLY record block (size/is_dir/is_file/modified — no heap fields), so the
@@ -288,9 +318,17 @@ pub(crate) fn result_family(ty: &Ty) -> ResultFamily {
 /// membership means ONLY "materialized" — the layout family comes from
 /// [`result_family`] on the call's TYPE. (The two tables below survive as the
 /// merged set's storage; their split no longer carries family meaning.)
+///
+/// A Result-returning host op (`crate::host_ops`, #2739) is a member: it is an
+/// ordinary call, so its result is a fresh owned block of its type's canonical
+/// layout, the same promise a user callee's return makes. Only the rows whose
+/// declaration returns a `Result` (`HostOp::returns_result`, checked against
+/// the stdlib by the contract test) — an Option- or scalar-returning host op
+/// (`random.choice`, `env.millis`) must not be read as a Result block.
 pub(crate) fn is_self_host_materialized_result_fn(module: &str, func: &str) -> bool {
     is_self_host_result_module_fn(module, func)
         || is_self_host_result_str_module_fn(module, func)
+        || crate::host_ops::host_op(module, func).is_some_and(|o| o.returns_result)
 }
 
 /// Is `ty` a `Result[Unit, String]` (the fs.write/fs.copy shape — no Ok payload, a String

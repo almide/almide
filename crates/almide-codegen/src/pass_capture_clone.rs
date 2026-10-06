@@ -127,7 +127,7 @@ fn detect_shared_mut(program: &IrProgram) -> HashSet<VarId> {
     // double-classifies it (ModuleRc AND AlmideSharedMut) and the two emit conflicting
     // references: the closure body uses `G.with(…)` while the enclosing read uses a
     // lowercase `g.get()` that doesn't exist → `error[E0425]: cannot find value g`.
-    // So exclude globals here; their mutability is handled by the ModuleRc path.
+    // So exclude globals here (#3307: and use-sites); the ModuleRc path owns them.
     let globals: HashSet<VarId> = program.top_lets.iter().map(|t| t.var)
         .chain(program.modules.iter().flat_map(|m| m.top_lets.iter().map(|t| t.var)))
         .collect();
@@ -155,8 +155,9 @@ fn detect_shared_mut(program: &IrProgram) -> HashSet<VarId> {
                 // mutability flag alone misses it — hence the explicit mutation scan.
                 let mutated = written_vars(body);
                 for v in almide_ir::free_vars::free_vars(body, &param_set) {
-                    if self.globals.contains(&v) { continue; }
                     let info = self.vt.get(v);
+                    // `module_origin`: another module's global at its use-site id (#3307).
+                    if self.globals.contains(&v) || info.module_origin.is_some() { continue; }
                     // A captured var that is mutated through the closure must become a
                     // shared cell so the mutation is visible to the enclosing scope.
                     // Copy types lower to `Rc<Cell<T>>`, non-Copy to `AlmideSharedMut`
@@ -353,7 +354,8 @@ fn transform_expr_iter_chain(expr: &mut IrExpr, cx: &mut Cx, scope_vars: &HashSe
             changed |= transform_chain_lambda(lambda, cx, scope_vars);
         }
         IterCollector::Any { lambda } | IterCollector::All { lambda }
-        | IterCollector::Find { lambda } | IterCollector::Count { lambda } => {
+        | IterCollector::Find { lambda } | IterCollector::Count { lambda }
+        | IterCollector::FindIndex { lambda } | IterCollector::FindMap { lambda } => {
             changed |= transform_chain_lambda(lambda, cx, scope_vars);
         }
     }
@@ -670,7 +672,8 @@ fn replace_vars_iter_chain(expr: &mut IrExpr, renames: &Renames) {
             replace_vars(lambda, renames);
         }
         IterCollector::Any { lambda } | IterCollector::All { lambda }
-        | IterCollector::Find { lambda } | IterCollector::Count { lambda } => {
+        | IterCollector::Find { lambda } | IterCollector::Count { lambda }
+        | IterCollector::FindIndex { lambda } | IterCollector::FindMap { lambda } => {
             replace_vars(lambda, renames);
         }
     }

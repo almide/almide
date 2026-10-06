@@ -20,78 +20,44 @@ impl LowerCtx {
     /// store the unique handle back into the record's slot. The mutator's own receiver
     /// arg then borrows the slot and writes the uniquely-owned block.
     ///
+    /// A DEEPER path (`d.inner.xs`, `doc.root.inner.ss`) takes the same discipline at
+    /// every record level: each level on the path is spread-copied into a fresh block
+    /// that the level above stores in place of a `Dup` (so no copy ever co-owns the
+    /// old child), and the last record's field takes the level-2 unique.
+    ///
     /// Returns None (nothing emitted — the ops are appended only after every gate
     /// passes) when the receiver is not a LOCAL var bound to a materialized aggregate
-    /// with a resolvable layout — the caller walls, unchanged.
+    /// (or a borrowed `mut` param outside a loop/unit arm) with a resolvable layout at
+    /// every level — the caller walls, unchanged.
     fn two_level_field_cow(
         &mut self,
         object: &IrExpr,
         field: almide_lang::intern::Sym,
     ) -> Option<()> {
-        use crate::{Init, PrimKind};
-        let IrExprKind::Var { id } = &object.kind else { return None };
+        let (root, path) = member_path(object);
+        let IrExprKind::Var { id } = &root.kind else { return None };
         let old = self.value_for(*id).ok()?;
-        if self.param_values.contains(&old) || !self.materialized_aggregates.contains(&old) {
+        // A BORROWED `mut` param (the C-132 write-back body) is copied like a local but
+        // never released — the caller owns it; the copy is a plain tracked local from
+        // here, and the write-back returns it. In a loop or unit arm its stable local
+        // would hold the borrow on the first pass and the copy after: walled.
+        let borrowed = self.param_values.contains(&old);
+        if borrowed && (self.scalar_loop_depth > 0 || self.unit_arm_depth > 0) {
             return None;
         }
-        let (names, tys) = self.aggregate_field_tys(&object.ty)?;
-        let fidx = names.iter().position(|n| n.as_str() == field.as_str())?;
-        if !is_heap_ty(&tys[fidx]) {
-            return None; // a scalar field is not an in-place heap receiver
+        // A MODELED frame (the model-one-iteration `while`, a non-executing arm) releases
+        // its own handles at frame end, so a copy made there would be dropped while the
+        // var still names it — the heap-rebind-in-a-frame refusal `Assign` makes.
+        if self.in_frame > 0 && self.scalar_loop_depth == 0 && self.unit_arm_depth == 0 {
+            return None;
         }
-        // Level 1: the record spread-copy.
-        let n = tys.len();
-        let len = self.fresh_value();
-        self.ops.push(Op::ConstInt { dst: len, value: n as i64 });
-        let new = self.fresh_value();
-        self.ops.push(Op::Alloc {
-            dst: new,
-            repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
-            init: Init::DynList { len },
-        });
-        let old_h = self.fresh_value();
-        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(old_h), args: vec![old] });
-        let new_h = self.fresh_value();
-        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(new_h), args: vec![new] });
-        for (i, fty) in tys.iter().enumerate() {
-            let off = crate::lower::layout::slot_offset(i) as i64;
-            let src_addr = self.addr_at(old_h, off);
-            let dst_addr = self.addr_at(new_h, off);
-            if is_heap_ty(fty) {
-                let child = self.fresh_value();
-                self.ops.push(Op::Prim {
-                    kind: PrimKind::LoadHandle,
-                    dst: Some(child),
-                    args: vec![src_addr],
-                });
-                let owned = self.fresh_value();
-                self.ops.push(Op::Dup { dst: owned, src: child });
-                let handle = self.fresh_value();
-                self.ops.push(Op::Prim {
-                    kind: PrimKind::Handle,
-                    dst: Some(handle),
-                    args: vec![owned],
-                });
-                self.ops.push(Op::Prim {
-                    kind: PrimKind::Store { width: 8 },
-                    dst: None,
-                    args: vec![dst_addr, handle],
-                });
-                self.ops.push(Op::Consume { v: owned });
-            } else {
-                let val = self.fresh_value();
-                self.ops.push(Op::Prim {
-                    kind: PrimKind::Load { width: 8 },
-                    dst: Some(val),
-                    args: vec![src_addr],
-                });
-                self.ops.push(Op::Prim {
-                    kind: PrimKind::Store { width: 8 },
-                    dst: None,
-                    args: vec![dst_addr, val],
-                });
-            }
+        if !borrowed && !self.materialized_aggregates.contains(&old) {
+            return None;
         }
+        let levels = self.record_path_levels(&root.ty, &path, field)?;
+        // Every level on the path is copied; the deepest record's field is made unique
+        // AFTER the old root drops (an unshared field is then not copied at all).
+        let (new, new_h) = self.copy_record_path(old, &levels);
         // Inside an EXECUTING loop body or unit arm the var's value is its stable
         // local, carried across iterations / out of the arm: a `value_of` rebind is
         // frame-local, so every later iteration would re-read (and re-drop) the
@@ -103,7 +69,7 @@ impl LowerCtx {
             self.ops.push(old_drop);
             self.ops.push(Op::SetLocal { local: old, src: new });
             self.live_heap_handles.retain(|h| *h != new);
-            self.two_level_field_unique(new_h, fidx);
+            self.path_field_unique(new_h, &levels);
             return Some(());
         }
         // Rebind the var to the copy; transfer the read-shape/drop tracking; release the
@@ -119,12 +85,105 @@ impl LowerCtx {
         if self.value_drops.get(&old).is_some_and(|d| d.flat_elems) {
             self.value_drops.entry(new).or_default().flat_elems = true;
         }
-        let old_drop = self.drop_op_for(old);
-        self.ops.push(old_drop);
-        self.live_heap_handles.retain(|h| *h != old);
+        if !borrowed {
+            let old_drop = self.drop_op_for(old);
+            self.ops.push(old_drop);
+            self.live_heap_handles.retain(|h| *h != old);
+        }
         self.live_heap_handles.push(new);
-        self.two_level_field_unique(new_h, fidx);
+        self.path_field_unique(new_h, &levels);
         Some(())
+    }
+
+    /// The record levels of the path `root.path….field`, root first: each level's
+    /// field types and the slot index the path takes through it. `None` when a level
+    /// has no resolvable layout, a name misses, or the final field is not heap.
+    fn record_path_levels(
+        &self,
+        root_ty: &Ty,
+        path: &[almide_lang::intern::Sym],
+        field: almide_lang::intern::Sym,
+    ) -> Option<Vec<(Vec<Ty>, usize)>> {
+        let mut levels = Vec::with_capacity(path.len() + 1);
+        let mut ty = root_ty.clone();
+        for f in path.iter().chain(std::iter::once(&field)) {
+            let (names, tys) = self.aggregate_field_tys(&ty)?;
+            let idx = names.iter().position(|n| n.as_str() == f.as_str())?;
+            ty = tys[idx].clone();
+            levels.push((tys, idx));
+        }
+        is_heap_ty(&ty).then_some(levels)
+    }
+
+    /// Level 1 of [`Self::two_level_field_cow`] over every record on the path: a
+    /// fresh block per level, each scalar slot value-copied, each heap slot `Dup`'d
+    /// and moved in — except the slot the path continues through, which receives the
+    /// next level's copy (moved in). Returns the root copy and its handle.
+    fn copy_record_path(&mut self, src: ValueId, levels: &[(Vec<Ty>, usize)]) -> (ValueId, ValueId) {
+        use crate::{Init, PrimKind};
+        let (tys, fidx) = &levels[0];
+        let len = self.fresh_value();
+        self.ops.push(Op::ConstInt { dst: len, value: tys.len() as i64 });
+        let new = self.fresh_value();
+        self.ops.push(Op::Alloc {
+            dst: new,
+            repr: crate::Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT },
+            init: Init::DynList { len },
+        });
+        let old_h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(old_h), args: vec![src] });
+        let new_h = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(new_h), args: vec![new] });
+        for (i, fty) in tys.iter().enumerate() {
+            let off = crate::lower::layout::slot_offset(i) as i64;
+            let src_addr = self.addr_at(old_h, off);
+            let dst_addr = self.addr_at(new_h, off);
+            if i == *fidx && levels.len() > 1 {
+                let child = self.load_handle(src_addr);
+                let (copy, _) = self.copy_record_path(child, &levels[1..]);
+                self.store_moved(dst_addr, copy);
+            } else if is_heap_ty(fty) {
+                let child = self.load_handle(src_addr);
+                let owned = self.fresh_value();
+                self.ops.push(Op::Dup { dst: owned, src: child });
+                self.store_moved(dst_addr, owned);
+            } else {
+                let val = self.fresh_value();
+                self.ops.push(Op::Prim { kind: PrimKind::Load { width: 8 }, dst: Some(val), args: vec![src_addr] });
+                self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![dst_addr, val] });
+            }
+        }
+        (new, new_h)
+    }
+
+    /// Level 2 at the end of the path: borrow down from the root copy's handle
+    /// through each intermediate record slot, then make the last field unique.
+    fn path_field_unique(&mut self, root_h: ValueId, levels: &[(Vec<Ty>, usize)]) {
+        let (last, inner) = levels.split_last().expect("a path has a field level");
+        let mut h = root_h;
+        for (_, idx) in inner {
+            let addr = self.addr_at(h, crate::lower::layout::slot_offset(*idx) as i64);
+            let child = self.load_handle(addr);
+            h = self.fresh_value();
+            self.ops.push(Op::Prim { kind: crate::PrimKind::Handle, dst: Some(h), args: vec![child] });
+        }
+        self.two_level_field_unique(h, last.1);
+    }
+
+    /// The (borrowed) child handle stored at `addr`.
+    fn load_handle(&mut self, addr: ValueId) -> ValueId {
+        let child = self.fresh_value();
+        self.ops.push(Op::Prim { kind: crate::PrimKind::LoadHandle, dst: Some(child), args: vec![addr] });
+        child
+    }
+
+    /// Store the OWNED block `v` into the slot at `addr`, moving it in.
+    fn store_moved(&mut self, addr: ValueId, v: ValueId) {
+        use crate::PrimKind;
+        let handle = self.fresh_value();
+        self.ops.push(Op::Prim { kind: PrimKind::Handle, dst: Some(handle), args: vec![v] });
+        self.ops.push(Op::Prim { kind: PrimKind::Store { width: 8 }, dst: None, args: vec![addr, handle] });
+        self.ops.push(Op::Consume { v });
     }
 
     /// Level 2 of [`Self::two_level_field_cow`]: the FIELD COW — load the (possibly
@@ -602,3 +661,16 @@ include!("calls_p4.rs");
 include!("calls_p4_b.rs");
 include!("calls_p4_b_tail.rs");
 include!("calls_p4_c.rs");
+
+/// `root.f1.….fk` as its root expression and the field names after it, root
+/// first (`d.inner` → (`d`, [`inner`]); a bare `d` → (`d`, [])).
+fn member_path(e: &IrExpr) -> (&IrExpr, Vec<almide_lang::intern::Sym>) {
+    match &e.kind {
+        IrExprKind::Member { object, field } => {
+            let (root, mut path) = member_path(object);
+            path.push(*field);
+            (root, path)
+        }
+        _ => (e, Vec::new()),
+    }
+}

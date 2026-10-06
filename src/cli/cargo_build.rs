@@ -45,43 +45,100 @@ lto = true
 codegen-units = 1
 "#;
 
-/// Cargo.toml template with HTTP/TLS dependencies (only when http runtime is used).
-const GENERATED_CARGO_TOML_HTTP: &str = r#"[package]
-name = "almide-out"
-version = "0.1.0"
-edition = "2021"
+/// Does the generated code use a runtime module whose source needs a crate?
+/// (The cdylib/bin/test fast paths that skip cargo ask exactly this.)
+pub(super) fn needs_runtime_crates(rs_code: &str) -> bool {
+    !almide_codegen::runtime_crate_deps(rs_code).is_empty()
+}
 
-[workspace]
+/// Every crate dependency of a generated project, on EVERY build route (bin,
+/// `--cdylib`, `--repr-c`, test, `almide run`, #3346): `[native-deps]` first
+/// (the user's spelling of a crate wins), then the runtime's
+/// (`almide_codegen::runtime_crate_deps`) minus any crate the user already
+/// declared for every target — so declaring `flate2` yourself (the #3346
+/// workaround) never writes a second `flate2` key. A user crate declared only
+/// under `[target.'cfg(...)'.native-deps]` (#3350) does not stand in for the
+/// runtime's: the runtime needs it on every target, so both are written, one
+/// in `[dependencies]` and one in that target's table (Cargo merges them).
+pub(super) fn generated_crate_deps(rs_code: &str, native_deps: &[crate::project::NativeDep]) -> Vec<crate::project::NativeDep> {
+    let mut deps = native_deps.to_vec();
+    for (name, spec) in almide_codegen::runtime_crate_deps(rs_code) {
+        if !deps.iter().any(|d| d.name == name && d.target.is_none()) {
+            deps.push(crate::project::NativeDep { name: name.into(), spec: spec.into(), target: None });
+        }
+    }
+    deps
+}
 
-[dependencies]
-rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
-webpki-roots = "0.26"
-rustls-native-certs = "0.8"
+/// The Cargo.toml table a native dep is written under: `[dependencies]`, or
+/// `[target.<key>.dependencies]` for a `[target.<key>.native-deps]` entry
+/// (#3350). The key is quoted as a TOML literal string — a `cfg(...)` holds
+/// `"` — or as a basic string when it also holds `'`.
+fn dependency_table_header(target: Option<&str>) -> String {
+    match target {
+        None => "[dependencies]".to_string(),
+        Some(t) if !t.contains('\'') => format!("[target.'{t}'.dependencies]"),
+        Some(t) => format!("[target.\"{}\".dependencies]", t.replace('\\', "\\\\").replace('"', "\\\"")),
+    }
+}
 
-# `opt-level = 1` is LOAD-BEARING FOR CORRECTNESS, not a speed choice. Do not lower it.
-#
-# It was lowered to 0 once, for a real and large win: the cargo phase of `almide run` on a
-# 2,103-line program is 3,215ms at level 1 and 724ms at level 0 (4.4x), measured with a real
-# source edit each time and a phase trace inside the pipeline. It was reverted the same day
-# because `spec/wasm_cross/mutual_tail_recursion.almd` began overflowing the native stack:
-# **MUTUAL tail recursion is turned into a loop by LLVM's tail-call optimisation, which does
-# not run at opt-level 0.** Wasm is unaffected (it has `return_call`), so the two targets
-# diverged — a cross-target contract broken by a Cargo setting.
-#
-# What made the mistake possible: the pre-change check measured 200,000-deep SELF-recursion,
-# which Almide's own TCO already turns into a loop, so it passed at both levels and proved
-# nothing about the mutual case. A native semantic property must not depend on an
-# optimisation level; until the compiler eliminates mutual tail calls itself (#1043), this
-# line is what keeps the contract.
-[profile.dev]
-opt-level = 1
-overflow-checks = false
+/// The byte range of the table `header` opens in `toml` — from just after
+/// the header line to the next table header (or the end) — or `None` when
+/// `toml` has no such table.
+fn table_body(toml: &str, header: &str) -> Option<std::ops::Range<usize>> {
+    let mut offset = 0;
+    let mut start = None;
+    for line in toml.split_inclusive('\n') {
+        let trimmed = line.trim();
+        if start.is_some() && trimmed.starts_with('[') {
+            return start.map(|s| s..offset);
+        }
+        offset += line.len();
+        if trimmed == header {
+            start = Some(offset);
+        }
+    }
+    start.map(|s| s..toml.len())
+}
 
-[profile.release]
-opt-level = 3
-lto = true
-codegen-units = 1
-"#;
+/// Does `body` (a table's lines) assign `name`?
+fn assigns(body: &str, name: &str) -> bool {
+    body.lines().any(|l| {
+        l.trim_start().strip_prefix(name).is_some_and(|rest| rest.trim_start().starts_with('='))
+    })
+}
+
+/// Write `dep` into its table of `toml` ([`dependency_table_header`]): at the
+/// end of the table, so deps keep the order they are given in; creating the
+/// table at the end of the file when absent. A crate the table already
+/// declares is left as it is — the base template may carry it (e.g. rayon in
+/// the ML profile), and a second key is a Cargo hard error (#646).
+fn insert_cargo_dep(toml: &mut String, dep: &crate::project::NativeDep) {
+    let header = dependency_table_header(dep.target.as_deref());
+    let line = if dep.spec.starts_with('{') {
+        format!("{} = {}\n", dep.name, dep.spec)
+    } else {
+        format!("{} = \"{}\"\n", dep.name, dep.spec)
+    };
+    if !toml.ends_with('\n') {
+        toml.push('\n');
+    }
+    match table_body(toml, &header) {
+        Some(body) if assigns(&toml[body.clone()], &dep.name) => {}
+        Some(body) => {
+            // After the table's last entry, before the blank lines that
+            // separate it from the next table.
+            let last = body.start + toml[body.clone()].trim_end().len();
+            let at = if last == body.start {
+                body.start
+            } else {
+                toml[last..].find('\n').map_or(toml.len(), |i| last + i + 1)
+            };
+            toml.insert_str(at, &line);
+        }
+        None => toml.push_str(&format!("\n{header}\n{line}")),
+    }
+}
 
 /// `--cfg almide_par` enables the rayon-backed parallel runtime paths. The cfg
 /// follows the DEPENDENCY: inject it only when the generated project's Cargo.toml
@@ -90,14 +147,10 @@ codegen-units = 1
 /// matrix-using program fail to resolve `rayon::prelude` (E0433). Without the cfg
 /// the runtime compiles its serial side, exactly like the raw-rustc test harness.
 fn inject_almide_par_if_rayon(cmd: &mut std::process::Command, project_dir: &std::path::Path) {
+    // Only an unconditional rayon counts: one under a `[target.…]` table
+    // (#3350) is absent on other targets, where the cfg would break the build.
     let has_rayon = std::fs::read_to_string(project_dir.join("Cargo.toml"))
-        .map(|t| {
-            t.lines().any(|l| {
-                l.trim_start()
-                    .strip_prefix("rayon")
-                    .is_some_and(|r| r.trim_start().starts_with('='))
-            })
-        })
+        .map(|t| table_body(&t, "[dependencies]").is_some_and(|body| assigns(&t[body], "rayon")))
         .unwrap_or(false);
     if has_rayon {
         cmd.env(
@@ -107,39 +160,13 @@ fn inject_almide_par_if_rayon(cmd: &mut std::process::Command, project_dir: &std
     }
 }
 
-/// Build a Cargo.toml string by inserting native deps into the [dependencies] section.
+/// Build a Cargo.toml string by writing each native dep into its table:
+/// `[dependencies]`, or `[target.<key>.dependencies]` for a target-specific
+/// one (#3350). See [`insert_cargo_dep`].
 fn build_cargo_toml(base_toml: &str, native_deps: &[crate::project::NativeDep]) -> String {
-    if native_deps.is_empty() {
-        return base_toml.to_string();
-    }
     let mut toml = base_toml.to_string();
-    let mut extra_deps = String::new();
     for dep in native_deps {
-        // The base template may already carry this crate (e.g. rayon in the ML
-        // profile); a second key is a Cargo hard error. Skip the [native-deps]
-        // entry when the template already declares it — declaring it in
-        // [native-deps] then stays the portable answer for both build AND the
-        // test harness's manifest. (#646)
-        let already = toml.lines().any(|l| {
-            l.trim_start().strip_prefix(&dep.name)
-                .is_some_and(|rest| rest.trim_start().starts_with('='))
-        });
-        if already {
-            continue;
-        }
-        let dep_line = if dep.spec.starts_with('{') {
-            format!("{} = {}\n", dep.name, dep.spec)
-        } else {
-            format!("{} = \"{}\"\n", dep.name, dep.spec)
-        };
-        extra_deps.push_str(&dep_line);
-    }
-    if let Some(pos) = toml.find("[dependencies]") {
-        let insert_pos = toml[pos..].find('\n').map(|i| pos + i + 1).unwrap_or(toml.len());
-        toml.insert_str(insert_pos, &extra_deps);
-    } else {
-        toml.push_str("\n[dependencies]\n");
-        toml.push_str(&extra_deps);
+        insert_cargo_dep(&mut toml, dep);
     }
     toml
 }
@@ -174,6 +201,9 @@ struct PackageNatives {
     files: Vec<(std::path::PathBuf, Vec<u8>)>,
     /// The `native/*.rs` stems that get a `mod <stem>;`, sorted.
     mod_stems: Vec<String>,
+    /// The package's `[package].name`, when it has `native/*.rs` modules:
+    /// whose items get their pre-#3338 aliases (#3425).
+    name: Option<String>,
 }
 
 impl CrateInputs {
@@ -216,12 +246,46 @@ impl CrateInputs {
             for (path, bytes) in &pkg.files {
                 acc.push_str(&format!("{}:{:016x};", path.display(), super::hash64(bytes)));
             }
-            acc.push_str(&format!("mods={}]", pkg.mod_stems.join(",")));
+            acc.push_str(&format!("mods={}", pkg.mod_stems.join(",")));
+            if let Some(name) = &pkg.name {
+                acc.push_str(&format!(";name={}", name));
+            }
+            acc.push(']');
         }
         for nd in &self.dep_native_deps {
-            acc.push_str(&format!("dep:{}={};", nd.name, nd.spec));
+            acc.push_str(&format!("dep:{}={}@{};", nd.name, nd.spec, nd.target.as_deref().unwrap_or("")));
         }
         acc
+    }
+
+    /// The pre-#3338 aliases of the items of every package whose `native/`
+    /// modules this crate carries, resolved against `code` (#3425).
+    fn legacy_aliases(&self, code: &str) -> super::native_legacy_aliases::LegacyAliases {
+        let pkgs: Vec<String> = self.packages.iter().filter_map(|p| p.name.clone()).collect();
+        if pkgs.is_empty() {
+            return Default::default();
+        }
+        super::native_legacy_aliases::legacy_aliases(code, &pkgs)
+    }
+
+    /// Warn, once per name, for every pre-#3338 spelling a package's
+    /// `native/*.rs` names (#3425). Called before the build cache is
+    /// consulted, so a cache hit warns too.
+    pub(super) fn warn_legacy_callbacks(&self, code: &str) {
+        if crate::warnings_suppressed() || self.packages.iter().all(|p| p.name.is_none()) {
+            return;
+        }
+        let aliases = self.legacy_aliases(code);
+        for pkg in &self.packages {
+            let Some(name) = &pkg.name else { continue };
+            for (rel, bytes) in pkg.files.iter().filter(|(rel, _)| rel.extension().is_some_and(|e| e == "rs")) {
+                let file = format!("native/{} of package `{}`", rel.display(), name);
+                let text = String::from_utf8_lossy(bytes);
+                for w in super::native_legacy_aliases::warnings(&file, &text, &aliases) {
+                    crate::err(&w);
+                }
+            }
+        }
     }
 
     /// Write the collected files into `src_dir`, declare their modules in
@@ -231,12 +295,14 @@ impl CrateInputs {
         for pkg in &self.packages {
             pkg.apply(code, src_dir)?;
         }
+        // The old spellings the packages' native code may still call (#3425).
+        // Nothing is added to a crate without a package `native/` module.
+        code.push_str(&super::native_legacy_aliases::render(&self.legacy_aliases(code)));
         if !self.dep_native_deps.is_empty() {
             let cargo_path = project_dir.join("Cargo.toml");
             let mut cargo = std::fs::read_to_string(&cargo_path).unwrap_or_default();
             for nd in &self.dep_native_deps {
-                if cargo.contains(&nd.name) { continue; }
-                append_cargo_dep(&mut cargo, &nd.name, &nd.spec);
+                insert_cargo_dep(&mut cargo, nd);
             }
             let _ = std::fs::write(&cargo_path, &cargo);
         }
@@ -265,6 +331,11 @@ impl PackageNatives {
             } else if path.is_dir() {
                 read_tree(&path, std::path::Path::new(&entry), &mut pkg.files)?;
             }
+        }
+        if !pkg.mod_stems.is_empty() {
+            pkg.name = crate::project::parse_toml(&root.join("almide.toml")).ok()
+                .map(|p| p.package.name)
+                .filter(|n| !n.is_empty());
         }
         Ok(pkg)
     }
@@ -334,7 +405,7 @@ fn read_tree(dir: &std::path::Path, rel: &std::path::Path, out: &mut Vec<(std::p
 ///   `.cargo/config{,.toml}` in it and every ancestor, and in `CARGO_HOME`.
 pub(super) fn build_environment_key(project_dir: &std::path::Path) -> String {
     let recipe = super::hash64(
-        concat!(include_str!("cargo_build.rs"), include_str!("native_target.rs")).as_bytes(),
+        concat!(include_str!("cargo_build.rs"), include_str!("native_target.rs"), include_str!("native_legacy_aliases.rs")).as_bytes(),
     );
     let mut acc = format!("recipe={:016x};rustc={};", recipe, toolchain_identity());
     let mut vars: Vec<(String, String)> = std::env::vars()
@@ -383,18 +454,10 @@ fn toolchain_identity() -> &'static str {
     })
 }
 
-fn append_cargo_dep(cargo: &mut String, name: &str, spec: &str) {
-    let line = if spec.starts_with('{') { format!("{} = {}\n", name, spec) }
-        else { format!("{} = \"{}\"\n", name, spec) };
-    if let Some(pos) = cargo.find("[dependencies]") {
-        let insert = cargo[pos..].find('\n').map(|i| pos + i + 1).unwrap_or(cargo.len());
-        cargo.insert_str(insert, &line);
-    } else {
-        cargo.push_str(&format!("\n[dependencies]\n{}", line));
-    }
-}
 
-/// Build generated Rust code as a cdylib shared library (.dylib/.so).
+/// Build generated Rust code as a cdylib shared library (.dylib/.so) in
+/// `project_dir` and return the built library's path there. `lib_name` is the
+/// Cargo crate name — a valid identifier, never the output path (#3349).
 pub(super) fn cargo_build_cdylib(rs_code: &str, project_dir: &std::path::Path, lib_name: &str, release: bool, native_deps: &[crate::project::NativeDep], source_root: Option<&std::path::Path>) -> Result<std::path::PathBuf, String> {
     let src_dir = project_dir.join("src");
     std::fs::create_dir_all(&src_dir).map_err(|e| format!("failed to create {}: {}", src_dir.display(), e))?;
@@ -439,7 +502,7 @@ opt-level = 3
 lto = true
 codegen-units = 1
 "#, lib_name.replace('-', "_"));
-    let cargo_toml = build_cargo_toml(&cdylib_base, native_deps);
+    let cargo_toml = build_cargo_toml(&cdylib_base, &generated_crate_deps(rs_code, native_deps));
     std::fs::write(project_dir.join("Cargo.toml"), &cargo_toml)
         .map_err(|e| format!("failed to write Cargo.toml: {}", e))?;
 
@@ -447,7 +510,9 @@ codegen-units = 1
     // modules + `[native-deps]` from dependency packages — same wiring as
     // `cargo_build_generated_with_native`.
     let mut lib_code = rs_code.to_string();
-    CrateInputs::collect(source_root)?.apply(&mut lib_code, &src_dir, project_dir)?;
+    let inputs = CrateInputs::collect(source_root)?;
+    inputs.warn_legacy_callbacks(rs_code);
+    inputs.apply(&mut lib_code, &src_dir, project_dir)?;
     std::fs::write(src_dir.join("lib.rs"), &lib_code)
         .map_err(|e| format!("failed to write lib.rs: {}", e))?;
 
@@ -478,11 +543,9 @@ codegen-units = 1
         return Err(format!("expected library not found at {}", lib_path.display()));
     }
 
-    // Copy to current directory
-    let dest = std::path::Path::new(".").join(&lib_filename);
-    std::fs::copy(&lib_path, &dest)
-        .map_err(|e| format!("failed to copy library: {}", e))?;
-    Ok(dest)
+    // The library stays in the scratch dir; the caller installs it at the
+    // requested output path (#3349).
+    Ok(lib_path)
 }
 
 /// Does the generated crate DEFINE an entry point?
@@ -579,8 +642,8 @@ fn try_rlib_fast_build(rs_code: &str, project_dir: &std::path::Path, release: bo
 }
 
 /// Write the generated Cargo.toml + `src/main.rs` for a cargo-based build:
-/// creates `src/`, selects the HTTP-enabled base Cargo.toml template when
-/// needed, appends zlib to `native_deps` when needed, injects native
+/// creates `src/`, writes the manifest with every crate the program needs
+/// ([`generated_crate_deps`], shared with the cdylib route), injects native
 /// modules (`inputs`: the package's and its dependencies'), auto-generates
 /// an empty `fn main()` for library-only code, and writes both files.
 /// Matrix programs need NO extra deps: the flat AlmideMatrix runtime + the
@@ -595,18 +658,11 @@ fn write_generated_cargo_project(
     project_dir: &std::path::Path,
     native_deps: &[crate::project::NativeDep],
     inputs: &CrateInputs,
-    uses_http: bool,
-    uses_zlib: bool,
 ) -> Result<std::path::PathBuf, String> {
     let src_dir = project_dir.join("src");
     std::fs::create_dir_all(&src_dir).map_err(|e| format!("failed to create {}: {}", src_dir.display(), e))?;
 
-    let base_toml = if uses_http { GENERATED_CARGO_TOML_HTTP } else { GENERATED_CARGO_TOML };
-    let mut all_deps = native_deps.to_vec();
-    if uses_zlib {
-        all_deps.push(crate::project::NativeDep { name: "flate2".into(), spec: "1".into() });
-    }
-    let cargo_toml = build_cargo_toml(base_toml, &all_deps);
+    let cargo_toml = build_cargo_toml(GENERATED_CARGO_TOML, &generated_crate_deps(rs_code, native_deps));
     std::fs::write(project_dir.join("Cargo.toml"), &cargo_toml)
         .map_err(|e| format!("failed to write Cargo.toml: {}", e))?;
 
@@ -687,14 +743,12 @@ pub(super) fn cargo_build_generated_with_native(
     inputs: &CrateInputs,
 ) -> Result<std::path::PathBuf, String> {
     let uses_matrix = rs_code.contains("almide_rt_matrix_");
-    let uses_http = rs_code.contains("almide_rt_http_") || rs_code.contains("use rustls");
-    let uses_zlib = rs_code.contains("almide_rt_zlib_") || rs_code.contains("use flate2");
 
     // The rlib fast path links a HOST-built runtime with a bare host rustc, so a
     // cross build (#2772) always takes the cargo path.
     if !almide_base::env::flag("ALMIDE_NO_RTLIB")
         && super::native_target::cross_target().is_none()
-        && !uses_matrix && !uses_http && !uses_zlib
+        && !uses_matrix && !needs_runtime_crates(rs_code)
         && native_deps.is_empty() && source_root.is_none()
     {
         if let Some(bin_path) = try_rlib_fast_build(rs_code, project_dir, release) {
@@ -702,7 +756,7 @@ pub(super) fn cargo_build_generated_with_native(
         }
     }
 
-    write_generated_cargo_project(rs_code, project_dir, native_deps, inputs, uses_http, uses_zlib)?;
+    write_generated_cargo_project(rs_code, project_dir, native_deps, inputs)?;
 
     run_cargo_build_and_locate_binary(project_dir, release)
 }
@@ -966,19 +1020,16 @@ pub(super) fn cargo_build_test_with_native(
     source_root: Option<&std::path::Path>,
     inputs: &CrateInputs,
 ) -> Result<std::path::PathBuf, String> {
-    let uses_http = rs_code.contains("almide_rt_http_") || rs_code.contains("use rustls");
-    let uses_zlib = rs_code.contains("almide_rt_zlib_") || rs_code.contains("use flate2");
-
     // Fast path: the generated test crate is dependency-free (the runtime is
     // inlined as source). `cargo test --no-run` serializes concurrent builds on
     // cargo's global `~/.cargo/.package-cache` lock — even across separate
     // project dirs — so a parallel test run is effectively sequential. A bare
     // `rustc --test` has no such lock, so per-file builds run truly in parallel.
-    if !uses_http && !uses_zlib && native_deps.is_empty() && source_root.is_none() {
+    if !needs_runtime_crates(rs_code) && native_deps.is_empty() && source_root.is_none() {
         return cargo_build_test_fast_path(rs_code, project_dir);
     }
 
-    write_generated_cargo_project(rs_code, project_dir, native_deps, inputs, uses_http, uses_zlib)?;
+    write_generated_cargo_project(rs_code, project_dir, native_deps, inputs)?;
 
     run_cargo_test_no_run_and_locate_binary(project_dir)
 }
@@ -1266,5 +1317,103 @@ mod tests {
         let (build, calls) = scripted(vec![Err(ICE)]);
         assert_eq!(build_recovering_from_ice(dir.path(), build), Err(ICE.to_string()));
         assert_eq!(calls.get(), 1, "no retry when there was no session to clear");
+    }
+
+    // ── #3350: target-specific native deps ──
+
+    use super::{build_cargo_toml, generated_crate_deps, insert_cargo_dep, GENERATED_CARGO_TOML};
+    use crate::project::NativeDep;
+
+    fn dep(name: &str, spec: &str, target: Option<&str>) -> NativeDep {
+        NativeDep { name: name.into(), spec: spec.into(), target: target.map(str::to_string) }
+    }
+
+    /// The `(table, name, spec)` triples of a generated manifest, read back as
+    /// TOML — what Cargo will see, not what the text looks like.
+    fn deps_of(manifest: &str) -> Vec<(String, String, String)> {
+        let doc: toml::Table = toml::from_str(manifest).unwrap_or_else(|e| panic!("not TOML ({e}):\n{manifest}"));
+        let mut out = Vec::new();
+        let mut push = |table: &str, deps: &toml::Value| {
+            for (name, spec) in deps.as_table().expect("a dependency table") {
+                out.push((table.to_string(), name.clone(), spec.to_string()));
+            }
+        };
+        if let Some(d) = doc.get("dependencies") {
+            push("dependencies", d);
+        }
+        for (key, platform) in doc.get("target").and_then(toml::Value::as_table).into_iter().flatten() {
+            if let Some(d) = platform.get("dependencies") {
+                push(key, d);
+            }
+        }
+        out
+    }
+
+    const ANDROID: &str = r#"cfg(target_os = "android")"#;
+    const DESKTOP: &str = r#"cfg(not(any(target_os = "android", target_os = "ios")))"#;
+
+    #[test]
+    fn a_target_specific_native_dep_lands_only_under_its_target_table() {
+        let manifest = build_cargo_toml(GENERATED_CARGO_TOML, &[
+            dep("anyhow", "1", None),
+            dep("arboard", "3", Some(DESKTOP)),
+            dep("jni", "0.21", Some(ANDROID)),
+            dep("ndk", "{ version = \"0.9\", default-features = false }", Some(ANDROID)),
+        ]);
+        let got = deps_of(&manifest);
+        let table_of = |name: &str| got.iter().filter(|(_, n, _)| n == name).map(|(t, _, _)| t.as_str()).collect::<Vec<_>>();
+        assert_eq!(table_of("anyhow"), ["dependencies"], "{manifest}");
+        assert_eq!(table_of("arboard"), [DESKTOP], "{manifest}");
+        assert_eq!(table_of("jni"), [ANDROID], "{manifest}");
+        assert_eq!(table_of("ndk"), [ANDROID], "{manifest}");
+        assert!(manifest.contains(&format!("[target.'{ANDROID}'.dependencies]\njni = \"0.21\"\nndk = ")), "file order within a table:\n{manifest}");
+    }
+
+    #[test]
+    fn a_triple_and_a_key_holding_a_quote_are_written_as_cargo_reads_them() {
+        let odd = r#"cfg(feature = "it's")"#;
+        let manifest = build_cargo_toml(GENERATED_CARGO_TOML, &[
+            dep("winapi", "0.3", Some("x86_64-pc-windows-gnu")),
+            dep("odd", "1", Some(odd)),
+        ]);
+        let got = deps_of(&manifest);
+        assert!(got.contains(&("x86_64-pc-windows-gnu".into(), "winapi".into(), "\"0.3\"".into())), "{manifest}");
+        assert!(got.contains(&(odd.into(), "odd".into(), "\"1\"".into())), "{manifest}");
+    }
+
+    /// The runtime's crates (#3346) compose with target tables: a user crate
+    /// declared only for one target does not stand in for the runtime's
+    /// unconditional one, while an unconditional user crate still does.
+    #[test]
+    fn a_runtime_crate_is_declared_for_every_target_even_when_the_user_gates_one() {
+        let code = "fn f() { almide_rt_zlib_deflate(); }";
+        let gated = generated_crate_deps(code, &[dep("flate2", "{ version = \"1\", features = [\"zlib\"] }", Some(ANDROID))]);
+        let got = deps_of(&build_cargo_toml(GENERATED_CARGO_TOML, &gated));
+        let flate: Vec<&str> = got.iter().filter(|(_, n, _)| n == "flate2").map(|(t, _, _)| t.as_str()).collect();
+        assert_eq!(flate, ["dependencies", ANDROID]);
+
+        let plain = generated_crate_deps(code, &[dep("flate2", "1.0.30", None)]);
+        let got = deps_of(&build_cargo_toml(GENERATED_CARGO_TOML, &plain));
+        let flate: Vec<&(String, String, String)> = got.iter().filter(|(_, n, _)| n == "flate2").collect();
+        assert_eq!(flate.len(), 1, "{got:?}");
+        assert_eq!(flate[0].2, "\"1.0.30\"", "the user's spelling wins");
+    }
+
+    /// A dependency package's native deps are written into the finished
+    /// manifest one at a time (`CrateInputs::apply`): into the right table,
+    /// never twice, and a name that merely CONTAINS a declared one (the old
+    /// `contains` check skipped `rand` because of `rand_core`) still lands.
+    #[test]
+    fn a_dependency_packages_native_deps_join_the_right_tables() {
+        let mut manifest = build_cargo_toml(GENERATED_CARGO_TOML, &[dep("rand_core", "0.6", None), dep("jni", "0.21", Some(ANDROID))]);
+        for d in [dep("rand", "0.8", None), dep("jni", "0.20", Some(ANDROID)), dep("ndk", "0.9", Some(ANDROID)), dep("objc2", "0.5", Some("cfg(target_os = \"ios\")"))] {
+            insert_cargo_dep(&mut manifest, &d);
+        }
+        let got = deps_of(&manifest);
+        assert!(got.contains(&("dependencies".into(), "rand".into(), "\"0.8\"".into())), "{manifest}");
+        assert!(got.contains(&(ANDROID.into(), "jni".into(), "\"0.21\"".into())), "the first declaration stays:\n{manifest}");
+        assert!(got.contains(&(ANDROID.into(), "ndk".into(), "\"0.9\"".into())), "{manifest}");
+        assert!(got.iter().any(|(t, n, _)| t == "cfg(target_os = \"ios\")" && n == "objc2"), "{manifest}");
+        assert_eq!(got.len(), 5, "{got:?}");
     }
 }

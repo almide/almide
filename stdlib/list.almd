@@ -66,14 +66,17 @@ fn zip[A, B](xs: List[A], ys: List[B]) -> List[(A, B)] = _
 @intrinsic("almide_rt_list_flatten")
 fn flatten[T](xss: List[List[T]]) -> List[T] = _
 
+// The range ops (take / drop / slice / take_end / drop_end / take_while /
+// drop_while / find …) borrow their source and copy only what they return:
+// consuming it cloned the WHOLE list per call whenever the source was read
+// again, O(n) per `take(xs, 2)` (#3397). Gated by
+// tests/list_read_only_source_borrow_test.rs.
 /// First n elements; all if n >= len or n < 0.
 @intrinsic("almide_rt_list_take")
-@consume(xs)
 fn take[A](xs: List[A], n: Int) -> List[A] = _
 
 /// All but the first n; [] if n >= len or n < 0.
 @intrinsic("almide_rt_list_drop")
-@consume(xs)
 fn drop[A](xs: List[A], n: Int) -> List[A] = _
 
 /// All but the first element; [] when empty.
@@ -139,7 +142,6 @@ fn filter[A](xs: List[A], f: (A) -> Bool) -> List[A] = _
 
 /// First element where f holds, or none.
 @intrinsic("almide_rt_list_find")
-@consume(xs)
 fn find[A](xs: List[A], f: (A) -> Bool) -> A? = _
 
 /// true if f holds for some x; false when empty.
@@ -177,12 +179,10 @@ fn sort_by[A, B](xs: List[A], f: (A) -> B) -> List[A] = _
 
 /// Longest prefix where f holds.
 @intrinsic("almide_rt_list_take_while")
-@consume(xs)
 fn take_while[A](xs: List[A], f: (A) -> Bool) -> List[A] = _
 
 /// Rest after the longest prefix where f holds.
 @intrinsic("almide_rt_list_drop_while")
-@consume(xs)
 fn drop_while[A](xs: List[A], f: (A) -> Bool) -> List[A] = _
 
 /// (where f holds, the rest), order kept.
@@ -202,7 +202,6 @@ fn group_by[A, B](xs: List[A], f: (A) -> B) -> Map[B, List[A]] = _
 
 /// Index of the first x where f holds, or none.
 @intrinsic("almide_rt_list_find_index")
-@consume(xs)
 fn find_index[A](xs: List[A], f: (A) -> Bool) -> Int? = _
 
 /// Copy with slot i = f(old); no-op if i out of range.
@@ -232,7 +231,6 @@ fn range(start: Int, end: Int) -> List[Int] = _
 
 /// Indices start..<end, clamped; [] if start >= end.
 @intrinsic("almide_rt_list_slice")
-@consume(xs)
 fn slice[A](xs: List[A], start: Int, end: Int) -> List[A] = _
 
 /// Copy with val at i; i >= len or i < 0 appends.
@@ -264,12 +262,10 @@ fn dedup[A](xs: List[A]) -> List[A] = _
 
 /// Last n elements; all if n >= len or n < 0.
 @intrinsic("almide_rt_list_take_end")
-@consume(xs)
 fn take_end[A](xs: List[A], n: Int) -> List[A] = _
 
 /// All but the last n; [] if n >= len or n < 0.
 @intrinsic("almide_rt_list_drop_end")
-@consume(xs)
 fn drop_end[A](xs: List[A], n: Int) -> List[A] = _
 
 /// Random permutation; unseeded, differs per run.
@@ -279,7 +275,6 @@ fn shuffle[A](xs: List[A]) -> List[A] = _
 
 /// All n-long runs; [] if n > len; n = 0 aborts.
 @intrinsic("almide_rt_list_window")
-@consume(xs)
 fn window[A](xs: List[A], n: Int) -> List[List[A]] = _
 
 /// Index of target in ascending xs, or none.
@@ -805,14 +800,15 @@ fn __fallible_zip_with[A, B, C, E](xs: List[A], ys: List[B], f: (A, B) -> Result
 }
 
 // An index outside the list leaves it unchanged without calling `f`.
-fn __fallible_update[A, E](xs: List[A], i: Int, f: (A) -> Result[A, E]) -> Result[List[A], E] = if i < 0 then ok(xs)
-else match list.get(xs, i) {
-  none => ok(xs),
-  some(v) => match f(v) {
-    ok(nv) => ok(list.set(xs, i, nv)),
-    err(e) => err(e),
-  },
-}
+fn __fallible_update[A, E](xs: List[A], i: Int, f: (A) -> Result[A, E]) -> Result[List[A], E] =
+  if i < 0 then ok(xs)
+  else match list.get(xs, i) {
+    none => ok(xs),
+    some(v) => match f(v) {
+      ok(nv) => ok(list.set(xs, i, nv)),
+      err(e) => err(e),
+    },
+  }
 
 // `f` runs exactly `n` times, as in `iterate`; an err on any of them is the result.
 fn __fallible_iterate[T, E](seed: T, f: (T) -> Result[T, E], n: Int) -> Result[List[T], E] = {

@@ -25,11 +25,11 @@
 //!
 //! ```text
 //! {
-//!     let __sa = &a; let __sb = &b;
-//!     let mut __sc: Vec<Vec<f32>> = Vec::with_capacity(r);
-//!     __sc.push(vec![__sa[0][0] * __sb[0][0] + ..., ...]);
+//!     let __almide_sa = &a; let __almide_sb = &b;
+//!     let mut __almide_sc: Vec<Vec<f32>> = Vec::with_capacity(r);
+//!     __almide_sc.push(vec![__almide_sa[0][0] * __almide_sb[0][0] + ..., ...]);
 //!     ...
-//!     __sc
+//!     __almide_sc
 //! }
 //! ```
 //!
@@ -408,7 +408,7 @@ fn make_unrolled_mul(
             let mut terms = Vec::with_capacity(k as usize);
             for p in 0..k {
                 terms.push(format!(
-                    "almide_rt_matrix_get(__sa, {i}i64, {p}i64) * almide_rt_matrix_get(__sb, {p}i64, {j}i64)",
+                    "almide_rt_matrix_get(__almide_sa, {i}i64, {p}i64) * almide_rt_matrix_get(__almide_sb, {p}i64, {j}i64)",
                 ));
             }
             let sum = if terms.is_empty() {
@@ -425,7 +425,7 @@ fn make_unrolled_mul(
     // `from_lists` result wraps at this InlineRust boundary (the `&{a}`/`&{b}`
     // reads deref-coerce through AlmideRcCow unchanged).
     let template = format!(
-        "{{ let __sa = &{{a}}; let __sb = &{{b}}; AlmideRcCow::from(almide_rt_matrix_from_lists(&vec![{rows}])) }}",
+        "{{ let __almide_sa = &{{a}}; let __almide_sb = &{{b}}; AlmideRcCow::from(almide_rt_matrix_from_lists(&vec![{rows}])) }}",
         rows = rows.join(", "),
     );
 

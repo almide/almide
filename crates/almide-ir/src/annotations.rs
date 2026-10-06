@@ -40,6 +40,12 @@ pub struct CodegenAnnotations {
     /// `BorrowLoweringPass`; the walker's box-pattern rewrite reads it to
     /// spell a borrowed subject's guards and move-outs through the reference.
     pub ref_binders: HashSet<VarId>,
+    /// Every variable a `match` arm's guard reads. Published by
+    /// `BorrowLoweringPass` from the final IR; the walker's box-pattern
+    /// rewrite reads it to bind, inside the guard, the names a boxed nested
+    /// pattern binds and the guard reads (#3414) — a binder is scoped to its
+    /// own arm, so membership here means its arm's guard reads it.
+    pub guard_read_vars: HashSet<VarId>,
     /// Pattern binders of a recursive enum's boxed field: the Almide type is
     /// `T`, the Rust binding is `Box<T>`, and every read is a `Deref`.
     /// Decided by `BoxDerefPass`; `CaptureClonePass` reads it so a closure's
@@ -151,6 +157,11 @@ pub struct CodegenAnnotations {
     /// containing a fn-carrying type still derived Debug and rustc refused
     /// the generated Rust.
     pub fn_blocked_types: HashSet<String>,
+    /// User-defined record/enum names that transitively contain an
+    /// `Rc`-backed value — a closure, or a `Bytes` / `Matrix` (`AlmideRcCow`).
+    /// A value of one is neither `Send` nor `Sync`, so a top-level `let` of it
+    /// cannot be a `static LazyLock` (#3287).
+    pub rc_blocked_types: HashSet<String>,
     /// Record types ALL of whose generic params are phantom (declared but used
     /// by no field). Rust rejects an unused type param (`error[E0392]`), so the
     /// Rust struct is emitted WITHOUT generics and every `Ty::Named` reference to

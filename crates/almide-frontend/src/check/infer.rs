@@ -142,6 +142,16 @@ impl Checker {
     }
 
 
+    /// The type of a bare name a selective import brings in from a module's
+    /// top-level `let` (`import self.k.{LIMIT}`, #3388), marking the import
+    /// used. Same question the lowering asks (`TypeEnv::selective_top_let`).
+    pub(super) fn selective_top_let_ty(&mut self, name: &str) -> Option<Ty> {
+        let (module, key) = self.env.selective_top_let(&sym(name))?;
+        let ty = self.env.top_lets.get(&key).cloned()?;
+        self.env.import_table.used.insert(module);
+        Some(ty)
+    }
+
     fn infer_expr_type_name(&mut self, expr: &mut ast::Expr) -> Ty {
         let ExprKind::TypeName { name, .. } = &mut expr.kind else { unreachable!("infer_expr_type_name called on the wrong ExprKind") };
                 // Const param reference: `N` where `N: Int` is a compile-time value param
@@ -154,9 +164,19 @@ impl Checker {
                         // Constructor with payload used as value → function type
                         VariantPayload::Tuple(tys) if !tys.is_empty() =>
                             self.ctor_fn_value_ty(&case, type_name.as_str(), type_name),
-                        _ => Ty::Named(type_name, vec![])
+                        // #3394: a unit case of a generic type carries its
+                        // type's params as fresh vars, as the qualified
+                        // `m.Tip` and the payload cases already do. Bare
+                        // `Tree` (no args) unified with any `Tree[_]` as a
+                        // wildcard, so `depth(Tip)` passed check with `A`
+                        // never pinned and mono left the call unspecialised.
+                        _ => {
+                            let generic_args = self.instantiate_type_generics(type_name.as_str());
+                            Ty::Named(type_name, generic_args)
+                        }
                     }
                 }
+                else if let Some(ty) = self.selective_top_let_ty(name) { ty }
                 else if let Some(ty) = self.env.top_lets.get(&sym(name)).cloned() { ty }
                 // A DECLARED type's bare name is a legitimate value-position
                 // occurrence (static-dispatch receiver `Type.method`, enum
@@ -191,7 +211,10 @@ impl Checker {
                         let ty = self.type_map.get(&f.value.id).map(|it| resolve_ty(it, &self.uf)).unwrap_or(Ty::Unknown);
                         (sym(&f.name), ty)
                     }).collect();
-                    Ty::Record { fields: field_tys }
+                    // #3290: deferred — the nominal record the literal is
+                    // unified with becomes its type (`unify_record_literal`).
+                    let id = self.uf.fresh_record_literal(Ty::Record { fields: field_tys });
+                    Ty::TypeVar(sym(&format!("?{}", id)))
                 }
     }
 

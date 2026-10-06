@@ -1,4 +1,4 @@
-// @contract: C-062
+// @contract: C-062, C-376
 // Cross-target differential fixture: the RawPtr / linear-memory bridge
 // (`bytes.as_ptr` / `as_mut_ptr` / `from_raw_ptr` / `copy_to_ptr`, #440).
 //
@@ -8,6 +8,40 @@
 // Read side: as_ptr + from_raw_ptr copies a buffer. Write side: copy_to_ptr
 // writes through as_mut_ptr into a fresh buffer, with capacity clamping.
 fn row(b: Bytes) -> String = int.to_string(bytes.read_u8(b, 0)) + "," + int.to_string(bytes.read_u8(b, 1)) + "," + int.to_string(bytes.read_u8(b, 2)) + "," + int.to_string(bytes.read_u8(b, 3))
+
+// #3420: a RawPtr BORROWS the Bytes it points into, so the block outlives
+// the call the pointer is handed to. On wasm each `round_trip*` shape freed
+// the block before `copy_out` read it — a tail call whose last argument was
+// the block's last use released the frame's blocks before the jump, and a
+// temporary whose only reader was `as_ptr` was released when `as_ptr`
+// returned — and the copy came back with the free-list header over its
+// first four bytes. Native keeps the block to the end of the scope (or of
+// the statement, for the temporary).
+fn copy_out(p: RawPtr, n: Int) -> Bytes = bytes.from_raw_ptr(p, n)
+
+fn round_trip(s: String) -> Bytes = {
+  let b = bytes.from_string(s)
+  copy_out(bytes.as_ptr(b), bytes.len(b))
+}
+
+fn round_trip_temp(s: String) -> Bytes = copy_out(bytes.as_ptr(bytes.from_string(s)), string.len(s))
+
+fn round_trip_held(s: String) -> Bytes = {
+  let b = bytes.from_string(s)
+  let p = bytes.as_ptr(b)
+  let n = bytes.len(b)
+  let other = bytes.from_string("a block allocated in between")
+  copy_out(p, n + bytes.len(other) - 28)
+}
+
+fn pointer_of(b: Bytes) -> RawPtr = if bytes.len(b) > 1000000 then bytes.as_ptr(bytes.new(0)) else bytes.as_ptr(b)
+
+fn round_trip_helper(s: String) -> Bytes = {
+  let b = bytes.from_string(s)
+  copy_out(pointer_of(b), bytes.len(b))
+}
+
+fn show_bytes(b: Bytes) -> String = bytes.to_list(b) |> list.map((x) => int.to_string(x)) |> list.join(",")
 
 fn main() -> Unit = {
   let src = bytes.from_list([65, 66, 67, 68])
@@ -35,4 +69,9 @@ fn main() -> Unit = {
   println("z:" + int.to_string(z))
   let back = bytes.from_raw_ptr(bytes.as_ptr(empty), 3)
   println("back:" + int.to_string(bytes.len(back)))
+  println(show_bytes(round_trip("hello, world")))
+  println(show_bytes(round_trip("añb")))
+  println(show_bytes(round_trip_temp("a temporary")))
+  println(show_bytes(round_trip_held("held")))
+  println(show_bytes(round_trip_helper("helper")))
 }

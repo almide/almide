@@ -1,0 +1,44 @@
+// @contract: C-108, C-220
+// #3159: in `main`, a statement AFTER `fs.for_each_line(...)!`. The `!`
+// desugars to `match fs.for_each_line(..) { err(e) => <die>, ok(_) => <rest> }`,
+// and the MIR rung read that subject as UNTRACKED — `fs.for_each_line` and its
+// fallible carrier were missing from the materialized-Result name set, though
+// both build their Result with the ok()/err() ctors — so it walled the whole
+// function ("match over an UNTRACKED subject with a call- or assignment-bearing
+// arm"). Fixtures ended on the `!` to dodge it. Here every walker form is
+// followed by a statement, a direct statement `match` over each walker reads
+// both arms, and the last walker fails so the `!` reaches stderr and the exit
+// code.
+//
+// SELF-CONTAINED: creates its own temp dir (never printed); the failing walker
+// reads a relative path that is never created, so stderr needs no redaction.
+import fs
+
+fn note(l: String) -> Unit! = if l == "b" then err("bad line: " + l) else ok(())
+
+effect fn main() -> Unit = {
+  let dir = fs.create_temp_dir("xt_3159")!
+  let p = dir + "/lines.txt"
+  fs.write(p, "a\nc\n")!
+  fs.for_each_line(p, (l) => println("plain ${l}"))!
+  println("after plain")
+  fs.for_each_line(p, (l) => note(l)!)!
+  println("after fallible")
+  match fs.for_each_line(p, (l) => println("matched ${l}")) {
+    ok(_) => println("match ok"),
+    err(e) => println("match err ${e}"),
+  }
+  match fs.for_each_line(dir + "/absent.txt", (l) => println(l)) {
+    ok(_) => println("absent ok"),
+    err(_) => println("absent err"),
+  }
+  fs.write(p, "a\nb\nc\n")!
+  match fs.for_each_line(p, (l) => note(l)!) {
+    ok(_) => println("carrier ok"),
+    err(e) => println("carrier err ${e}"),
+  }
+  fs.remove_all(dir)!
+  println("cleaned")
+  fs.for_each_line("xt_3159_never_created/absent.txt", (l) => note(l)!)!
+  println("unreachable")
+}

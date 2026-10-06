@@ -156,14 +156,22 @@ impl Checker {
         let mut rooted: HashSet<Sym> = HashSet::new();
         let mut roots: Vec<Diagnostic> = Vec::new();
         let checks = std::mem::take(&mut self.deferred_unknown_type_checks);
+        let mut arity_seen: HashSet<(Sym, usize)> = HashSet::new();
         for (ty, span, ctx) in checks {
             let resolved = resolve_ty(&ty, &self.uf);
+            roots.extend(self.type_arity_diags(&resolved, span, &ctx, &mut arity_seen, &mut rooted));
             let mut names = Vec::new();
             collect_named(&resolved, &mut names);
             for s in names {
                 // `Value` is the BUILT-IN dynamic type (json/codec surface) —
                 // nominal by name but never declared in env.types.
-                if s.as_str() == "Value" || self.env.types.contains_key(&s) || !reported.insert(s) {
+                // A builtin applied to the wrong count carries its E093 (#3408).
+                if s.as_str() == "Value" || self.env.types.contains_key(&s) || rooted.contains(&s) || !reported.insert(s) {
+                    continue;
+                }
+                // Its qualified spelling already carries the root E029 (#3336).
+                if self.qualified_type_misses.contains(&s) {
+                    rooted.insert(s);
                     continue;
                 }
                 // A runtime-backed stdlib nominal (`HttpRequest`, bare or

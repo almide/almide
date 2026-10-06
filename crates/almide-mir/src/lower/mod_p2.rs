@@ -245,20 +245,44 @@ pub fn install_effect_abi_facts(program: &almide_ir::IrProgram) {
 }
 
 /// The storage slot of every MUTABLE module-level `var` (program and module
-/// top-lets, `tl.mutable`), in declaration (= VarId) order: a pure function of
-/// the program, so a slot index means the same thing to every fn lowered.
+/// top-lets, `tl.mutable`): a pure function of the program, so a slot index
+/// means the same thing to every fn lowered.
+///
+/// The map is keyed by the ENTRY file's VarIds — the region the lowered fns
+/// speak. A module's top-let lives under an id of the MODULE's var table, so
+/// it is reached through the entry's reference to it (the frontend's
+/// `module_top_let_var`: same name, `module_origin` = the module's ident).
+/// Keying the module's own ids here put two regions in one key space: an
+/// entry id that happened to equal a module var's id read that var's slot
+/// and type (`m.rec.n = 3` walled on `m.counts`' `Map` type, #2739).
 fn install_mutable_globals(program: &almide_ir::IrProgram) {
-    let mut vars: Vec<_> = program
-        .top_lets
-        .iter()
-        .chain(program.modules.iter().flat_map(|m| m.top_lets.iter()))
-        .filter(|tl| tl.mutable)
-        .collect();
-    vars.sort_by_key(|tl| tl.var.0);
-    MUTABLE_GLOBAL_VARS.with(|s| {
-        *s.borrow_mut() =
-            vars.iter().enumerate().map(|(i, tl)| (tl.var.0, (i as u32, tl.ty.clone()))).collect();
-    });
+    let mut entry: Vec<_> = program.top_lets.iter().filter(|tl| tl.mutable).collect();
+    entry.sort_by_key(|tl| tl.var.0);
+    let mut slots: std::collections::HashMap<u32, (u32, Ty)> =
+        entry.iter().enumerate().map(|(i, tl)| (tl.var.0, (i as u32, tl.ty.clone()))).collect();
+    let mut next = entry.len() as u32;
+    // (module ident, exact name) → (slot, declared type); a name a module
+    // defines twice is ambiguous and binds nothing.
+    let mut by_name: std::collections::HashMap<(String, String), Option<(u32, Ty)>> =
+        std::collections::HashMap::new();
+    for m in &program.modules {
+        let origin = crate::lower::crossmod_toplets::origin_key(m);
+        let mut vars: Vec<_> = m.top_lets.iter().filter(|tl| tl.mutable).collect();
+        vars.sort_by_key(|tl| tl.var.0);
+        for tl in vars {
+            let Some(info) = m.var_table.entries.get(tl.var.0 as usize) else { continue };
+            let key = (origin.clone(), info.name.as_str().to_string());
+            by_name.entry(key).and_modify(|e| *e = None).or_insert(Some((next, tl.ty.clone())));
+            next += 1;
+        }
+    }
+    for (i, info) in program.var_table.entries.iter().enumerate() {
+        let Some(origin) = info.module_origin.as_deref() else { continue };
+        if let Some(Some(slot)) = by_name.get(&(origin.to_string(), info.name.as_str().to_string())) {
+            slots.entry(i as u32).or_insert_with(|| slot.clone());
+        }
+    }
+    MUTABLE_GLOBAL_VARS.with(|s| *s.borrow_mut() = slots);
 }
 
 fn install(facts: almide_ir::effect_abi::EffectAbiFacts) {

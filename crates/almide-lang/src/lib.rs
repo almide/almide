@@ -6,6 +6,8 @@ pub use almide_syntax::ast;
 pub use almide_syntax::lexer;
 pub use almide_syntax::parser;
 pub use almide_syntax::parse_cached;
+/// `var <pattern> = e` → one `var` per bound name (#3149).
+pub use almide_syntax::var_destructure;
 
 pub use almide_types::types;
 /// The language dialect epoch (`@dialect(N)`) — one constant and one

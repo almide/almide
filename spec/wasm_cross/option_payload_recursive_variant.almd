@@ -1,0 +1,29 @@
+// @contract: C-070
+// #3421: a variant pattern nested in `some(..)` binds a recursive payload as
+// the payload's own type on both targets. 0.64.0 native bound `ss` as
+// `Box<Vec<S>>` (rustc E0277 on the concat) while wasm printed the answer.
+type S =
+  | Name(String)
+  | Con(String, List[S])
+
+fn args_of(o: S?) -> List[S] = match o {
+  some(Con(_, ss)) => ss + [Name("end")],
+  _ => [],
+}
+
+fn arity(o: S?) -> Int = match o {
+  some(Con(_, ss)) => list.len(ss),
+  some(Name(_)) => 0,
+  none => -1,
+}
+
+effect fn main() -> Unit = {
+  let a = args_of(some(Con("f", [Name("x")])))
+  println(int.to_string(list.len(a)))
+  let b = args_of(some(Name("y")))
+  println(int.to_string(list.len(b)))
+  let c = arity(some(Con("g", [Name("p"), Name("q")])))
+  println(int.to_string(c))
+  let d = arity(none)
+  println(int.to_string(d))
+}

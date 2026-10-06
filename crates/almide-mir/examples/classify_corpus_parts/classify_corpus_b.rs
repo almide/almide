@@ -42,7 +42,7 @@ fn discover_self_modules(
 /// (`bindgen` + `get_str` → `almide_rt_bindgen_get_str`) — the v1 analogue of v0's
 /// `ir_link_flatten` module-fn renaming.
 fn user_module_fn_name(module: &str, func: &str) -> String {
-    format!("almide_rt_{}_{}", module.replace('.', "_"), func.replace('.', "_"))
+    format!("almide_rt_{}_{}", almide_base::names::module_ident(module), func.replace('.', "_"))
 }
 
 /// Build the set of NATIVE-FFI function keys over the LINKED IR: functions that TRANSITIVELY
@@ -125,7 +125,10 @@ fn compute_native_ffi_set(ir: &almide_ir::IrProgram) -> HashSet<String> {
                         // #1040: the deadline twin — same no-child-process
                         // structural class as exec_status.
                         | "exec_status_timeout"
-                        // #2540: the terminal-attached run — same class.
+                        // #2540: the terminal-attached run — same class
+                        // (`run` above; #3379 adds the cwd twin and keeps
+                        // the deprecated alias).
+                        | "run_in"
                         | "exec_attached"
                         | "env"
                 ))
@@ -354,6 +357,7 @@ fn source_to_ir(path: &Path, source: &str) -> FrontendOutcome {
         almide_ir::mut_param::lower_mut_params_move_mode(&mut ir);
         // Arg-block hoist, THEN guard → if restructure — the SAME order the
         // pipeline runs (see source_to_ir_with, #1968).
+        almide_mir::lower::bind_heap_unwrap_or_literal_elems(&mut ir);
         almide_mir::lower::hoist_block_call_args(&mut ir);
         // #3058: list-rest matches become the length-test chain the lowering runs.
         almide_mir::lower::desugar_list_rest_matches(&mut ir);
@@ -463,6 +467,9 @@ struct Tally {
     /// Functions whose certificate has an UNBACKED `+1` (the borrow-by-default
     /// soundness gate). Must stay empty — a non-empty list is a wall breach.
     cert_backing_breaches: Vec<String>,
+    /// Lowered calls into a capability module that are neither a host op nor
+    /// pure (#3302): a host reach the caps witness would omit. Must stay empty.
+    uncounted_host_calls: Vec<String>,
     /// Poisoned certificates EXCLUDED from the ownership witness (#1146):
     /// kernel-unrepresentable nested-region arms, counted so the exclusion is
     /// never a silent shrink of the proof surface.

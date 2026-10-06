@@ -73,7 +73,7 @@ fn emitted_fn(rust: &str, name: &str) -> String {
 /// cell's snapshot (`.get()`), never through a live `.borrow()` — which is
 /// what keeps the adapter's borrow from observing the write.
 const MUTATED: &str = r#"
-fn main() -> Unit = {
+effect fn main() -> Unit = {
   var xs = [1, 2, 3]
   let total = list.fold(list.enumerate(xs), 0, (a, p) => {
     xs[2] = 99

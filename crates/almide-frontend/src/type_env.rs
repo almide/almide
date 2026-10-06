@@ -106,6 +106,16 @@ pub struct TypeEnv {
     /// produced it. Popped with the scope; cleared by any non-`let` binding
     /// of the same name (`define_var`), so it never outlives its binding.
     pub let_origins: Vec<std::collections::HashMap<Sym, crate::ast::Span>>,
+    /// #3274: parallel to `scopes` — a local bound to an EFFECT fn value
+    /// (`let g = rd`), mapped to the effect fn it holds. A named effect fn's
+    /// value type is its carrier with the effect bit off (`fn_value_ty`), so
+    /// the bit rides the binding here: a call of `g` (or `g` passed to a plain
+    /// slot) is the effect use a call of `rd` is. Same lifetime as
+    /// `let_origins`.
+    pub effect_aliases: Vec<std::collections::HashMap<Sym, Sym>>,
+    /// #3274: the module-scope twin of `effect_aliases` — a top-level
+    /// `let g = rd`, keyed by the bare name.
+    pub top_effect_aliases: std::collections::HashMap<Sym, Sym>,
     /// Current function's return type
     pub current_ret: Option<Ty>,
     /// ADR-0006 D1 (#1108 Phase 2b): the INNERMOST lambda's provisional
@@ -162,6 +172,10 @@ pub struct TypeEnv {
     /// (self submodules load under bare names, dep submodules under
     /// `dep.sub` dotted names).
     pub dep_root_modules: std::collections::HashSet<Sym>,
+    /// E008 (ADR-0020 §3): each user module fn's inferred concurrent slots and
+    /// whether its body reaches a `var` — computed over the resolved module
+    /// set at canonicalization, read by every program's reach check.
+    pub concurrent_summaries: crate::concurrent_reach::Summaries,
     /// The package's own module name (set when `register_module` is called with `is_self: true`).
     /// Used to resolve `import self` in the main file.
     pub self_module_name: Option<Sym>,
@@ -196,6 +210,9 @@ pub struct TypeEnv {
     pub var_decl_locs: std::collections::HashMap<Sym, (usize, usize)>,
     /// Top-level `let` constants: name -> type
     pub top_lets: std::collections::HashMap<Sym, Ty>,
+    /// The `top_lets` keys declared `var` — what another module may write
+    /// through `m.x = v`, `m.xs[i] = v` or `m.r.f = v` (#3312).
+    pub mutable_top_lets: std::collections::HashSet<Sym>,
     /// Record type key (same keys as `types`) -> field names that carry a
     /// declared DEFAULT. Used by record-construction validation: a missing
     /// field is an error only when it has no default (#488).
@@ -248,6 +265,10 @@ pub struct TypeEnv {
     /// Explicit `fn Type.method` declarations that have a body, keyed by the
     /// prefixed fn key — the cross-module half of lowering's per-file set.
     pub explicit_convention_fns: std::collections::HashSet<Sym>,
+    /// Every `@extern` fn, by the key its callers resolve it under. Recorded
+    /// at registration — before any body is inferred — so the `@pure` check
+    /// (E092, #3250) knows a foreign callee in a file inferred later.
+    pub extern_fns: std::collections::HashSet<Sym>,
     /// Types' declared protocol conformances: type name → set of protocol names
     pub type_protocols: std::collections::HashMap<Sym, std::collections::HashSet<Sym>>,
     /// Type arguments of an explicit conformance to a GENERIC protocol
@@ -293,6 +314,8 @@ impl TypeEnv {
             functions: std::collections::HashMap::new(),
             scopes: vec![std::collections::HashMap::new()],
             let_origins: vec![std::collections::HashMap::new()],
+            effect_aliases: vec![std::collections::HashMap::new()],
+            top_effect_aliases: std::collections::HashMap::new(),
             current_ret: None,
             lambda_ret: None,
             lambda_prop_used: false,
@@ -303,6 +326,7 @@ impl TypeEnv {
             constructors: std::collections::HashMap::new(),
             user_modules: std::collections::HashSet::new(),
             dep_root_modules: std::collections::HashSet::new(),
+            concurrent_summaries: std::collections::HashMap::new(),
             self_module_name: None,
             import_table: ImportTable::new(),
             fn_visibility: std::collections::HashMap::new(),
@@ -314,6 +338,7 @@ impl TypeEnv {
             skip_auto_unwrap: false,
             skip_auto_unwrap_for: std::collections::HashSet::new(),
             mutable_vars: std::collections::HashSet::new(),
+            mutable_top_lets: std::collections::HashSet::new(),
             lambda_depth: 0,
             var_lambda_depth: std::collections::HashMap::new(),
             param_vars: std::collections::HashSet::new(),
@@ -330,6 +355,7 @@ impl TypeEnv {
             field_default_exprs: std::collections::HashMap::new(),
             module_import_aliases: std::collections::HashMap::new(),
             explicit_convention_fns: std::collections::HashSet::new(),
+            extern_fns: std::collections::HashSet::new(),
             protocols: std::collections::HashMap::new(),
             type_protocols: std::collections::HashMap::new(),
             type_protocol_args: std::collections::HashMap::new(),
@@ -634,11 +660,13 @@ impl TypeEnv {
     pub fn push_scope(&mut self) {
         self.scopes.push(std::collections::HashMap::new());
         self.let_origins.push(std::collections::HashMap::new());
+        self.effect_aliases.push(std::collections::HashMap::new());
     }
 
     pub fn pop_scope(&mut self) {
         self.scopes.pop();
         self.let_origins.pop();
+        self.effect_aliases.pop();
     }
 
     pub fn define_var(&mut self, name: &str, ty: Ty) {
@@ -650,6 +678,9 @@ impl TypeEnv {
         // scope: it has no call origin, so the entry must not survive it.
         if let Some(origins) = self.let_origins.last_mut() {
             origins.remove(&sym(name));
+        }
+        if let Some(aliases) = self.effect_aliases.last_mut() {
+            aliases.remove(&sym(name));
         }
         // A new binding also shadows a parameter of the same name; the fn
         // decl re-inserts its own parameters right after defining them.
@@ -674,6 +705,27 @@ impl TypeEnv {
         self.scopes.iter().zip(self.let_origins.iter()).rev()
             .find(|(scope, _)| scope.contains_key(&key))
             .and_then(|(_, origins)| origins.get(&key).copied())
+    }
+
+    /// #3274: record that the local `name` now holds the effect fn `target`,
+    /// in the scope that binds `name` (a `var` reassigned in a nested block
+    /// is marked where it lives). Never cleared by reassignment: a `var` that
+    /// ever held an effect fn may still hold it.
+    pub fn record_effect_alias(&mut self, name: &str, target: Sym) {
+        let key = sym(name);
+        let at = self.scopes.iter().rposition(|scope| scope.contains_key(&key));
+        if let Some(aliases) = at.and_then(|i| self.effect_aliases.get_mut(i)) {
+            aliases.insert(key, target);
+        }
+    }
+
+    /// #3274: the effect fn the local `name` currently resolves to holding —
+    /// `None` when the visible binding holds no effect fn value.
+    pub fn effect_alias(&self, name: &str) -> Option<Sym> {
+        let key = sym(name);
+        self.scopes.iter().zip(self.effect_aliases.iter()).rev()
+            .find(|(scope, _)| scope.contains_key(&key))
+            .and_then(|(_, aliases)| aliases.get(&key).copied())
     }
 
     pub fn define_var_at(&mut self, name: &str, ty: Ty, line: usize, col: usize) {
@@ -719,6 +771,34 @@ impl TypeEnv {
             }
         }
         names
+    }
+
+    /// A selectively imported bare name that the module declares as a
+    /// top-level `let` (`import self.k.{LIMIT}`, #3388): the module and the
+    /// `module.NAME` key the let is registered under. The checker and the
+    /// lowering both read the bare name through this one question, so the
+    /// type check and the IR name the same let.
+    pub fn selective_top_let(&self, name: &Sym) -> Option<(Sym, Sym)> {
+        let module = *self.import_table.direct.get(name)?;
+        let key = sym(&format!("{}.{}", module.as_str(), name.as_str()));
+        self.top_lets.contains_key(&key).then_some((module, key))
+    }
+
+    /// The module a selectively imported bare CALL `name(..)` is a fn of
+    /// (`import json.{parse}` → `json`). A name the module declares as a
+    /// variant constructor (#3384) or a top-level `let` (#3388) and NOT as a
+    /// fn is no module fn call: the checker resolves it as that constructor /
+    /// let, and the lowering must too — routing it to `module.Name` named a
+    /// function that does not exist (IR verify: unknown function). A name the
+    /// module declares as none of these keeps the module call, so an unknown
+    /// name is reported where it always was.
+    pub fn selective_fn_module(&self, name: &Sym) -> Option<Sym> {
+        let module = *self.import_table.direct.get(name)?;
+        let names_fn = crate::stdlib::lookup_sig(module.as_str(), name.as_str()).is_some()
+            || self.functions.contains_key(&sym(&format!("{}.{}", module.as_str(), name.as_str())));
+        let names_other = self.lookup_ctor_owned(name, module.as_str()).is_some()
+            || self.selective_top_let(name).is_some();
+        (names_fn || !names_other).then_some(module)
     }
 
     /// Resolve a bare variant-constructor name to its (type name, case). Returns

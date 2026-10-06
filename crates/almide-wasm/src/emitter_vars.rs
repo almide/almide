@@ -44,6 +44,7 @@ impl Emitter<'_> {
             self.f.instructions().global_get(idx);
         } else {
             self.f.instructions().local_get(idx);
+            self.witness_read(id, idx, ty);
             if self.cells.contains(id) {
                 self.load_ty_slot(ty, 0);
             }
@@ -63,11 +64,13 @@ impl Emitter<'_> {
         global: bool,
     ) -> Result<(), EmitError> {
         self.emit_read_mut_var(id, idx, ty, global);
-        // Params are exempt: they are borrowed views of the caller's
-        // block, and writes through them must stay caller-visible.
-        if matches!(ty, SliceTy::List(_) | SliceTy::Scalar(Scalar::Bytes))
-            && (global || idx >= self.rc_param_ceiling)
-        {
+        // A `mut` PARAM is judged too (#3342): the C-132 write-back hands
+        // the callee's buffer back to the caller, so a copy made here is
+        // what the caller rebinds — the write stays caller-visible — while
+        // an alias the callee bound (`let ys = xs`) keeps its value. The
+        // write-back site moves its var in (#3337), so an unaliased param
+        // arrives at rc 1 and the judge copies nothing.
+        if matches!(ty, SliceTy::List(_) | SliceTy::Scalar(Scalar::Bytes)) {
             let scr = self.scr_i32_local;
             let cow = self.cow_fn_of(ty);
             self.f.instructions().call(cow).local_set(scr);
@@ -106,8 +109,8 @@ impl Emitter<'_> {
     /// site's credit the same way (param_borrow.rs marks a param a module
     /// op touches owned), so no receiver is exempt. The value must not BE
     /// the old block: an in-place helper that may answer with its operand
-    /// (`$list_push`, `$bytes_push`) settles through
-    /// `settle_outgrown_receiver` instead.
+    /// (`$list_push`, `$bytes_push`) frees the outgrown block itself: its
+    /// receiver was made unique by the judge first.
     pub(crate) fn emit_rebind_mut_var_fresh(
         &mut self,
         id: VarId,
@@ -196,7 +199,9 @@ impl Emitter<'_> {
     /// each copy stored back into its (already unique) holder. An unshared
     /// path costs one rc test per level and copies nothing. Before this,
     /// the leaf block was written through while an alias still held it, so
-    /// the alias showed the callee's write (C-033). The C-132 write-back
+    /// the alias showed the callee's write (C-033). A PARAMETER root is
+    /// judged the same way (#3342): an alias the frame bound itself must
+    /// keep its value, and the copy is what the write-back hands back. The C-132 write-back
     /// (mut_param_place.rs) then stores the returned buffer into the same
     /// place.
     ///
@@ -227,11 +232,7 @@ impl Emitter<'_> {
         }
         steps.reverse();
         let Some((idx, root_ty, global)) = self.mut_var(&id) else { return Ok(()) };
-        // A PARAMETER root is exempt, as the var arm and the record-field
-        // bytes receiver (bytes_recv.rs) exempt it: its block is the
-        // caller's, the site's argument credit keeps its count above one,
-        // and its writes must stay caller-visible.
-        if !self.rc_droppable(root_ty) || (!global && idx < self.rc_param_ceiling) {
+        if !self.rc_droppable(root_ty) {
             return Ok(());
         }
         let cow = self.cow_fn_of(root_ty);

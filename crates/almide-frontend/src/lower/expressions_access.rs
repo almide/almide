@@ -113,6 +113,14 @@ fn lower_module_member(
         {
             return Some(e);
         }
+        // A function-VALUED top-level `let` of the module (`let thing = inc1`)
+        // is that let's value, not an eta-expansion of a fn `m.thing` that
+        // does not exist (#3315).
+        if !names_fn
+            && let Some(e) = module_top_let_ref(ctx, mod_name, *field, ty, span)
+        {
+            return Some(e);
+        }
         let is_module_fn = names_fn
             || ctx.env.user_modules.contains(&sym(&mod_name))
             || ctx.env.import_table.aliases.contains_key(&sym(&mod_name));
@@ -122,11 +130,8 @@ fn lower_module_member(
         }
     }
     // Cross-module top-level `let` access: `utils.CATEGORY_ORDER`.
-    if let Some((var_id, def_id)) = module_top_let_var(ctx, mod_name, *field, ty) {
-        return Some(match def_id {
-            Some(def_id) => ctx.mk_def(IrExprKind::Var { id: var_id }, ty.clone(), span, def_id),
-            None => ctx.mk(IrExprKind::Var { id: var_id }, ty.clone(), span),
-        });
+    if let Some(e) = module_top_let_ref(ctx, mod_name, *field, ty, span) {
+        return Some(e);
     }
     lower_module_ctor_value(ctx, mod_name, field, ty, span)
 }
@@ -653,6 +658,8 @@ fn lower_expr_type_name(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Opti
                     target: CallTarget::Named { name: sym(name) },
                     args: vec![], type_args: vec![],
                 }, ty, span)
+            } else if let Some(e) = selective_top_let_ref(ctx, *name, &ty, span) {
+                e
             } else if let Some(var_id) = ctx.lookup_var(name) {
                 ctx.mk(IrExprKind::Var { id: var_id }, ty, span)
             } else if let Some(Ty::ConstParam { name: pname, ty: param_ty }) = ctx.env.types.get(&sym(name)).cloned() {
@@ -669,6 +676,15 @@ fn lower_expr_type_name(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Opti
             } else {
                 ctx.mk(IrExprKind::Var { id: VarId(0) }, ty, span)
             }
+}
+
+/// A bare name brought in by a selective import of a module's top-level
+/// `let` (`import self.k.{LIMIT}`, #3388) lowers exactly as the qualified
+/// `k.LIMIT` does. The question is `TypeEnv::selective_top_let`, the one the
+/// checker asks, so check and lowering resolve the name the same way.
+fn selective_top_let_ref(ctx: &mut LowerCtx, name: almide_base::intern::Sym, ty: &Ty, span: Option<crate::ast::Span>) -> Option<IrExpr> {
+    let (module, _) = ctx.env.selective_top_let(&name)?;
+    module_top_let_ref(ctx, module, name, ty, span)
 }
 
 fn lower_expr_ident(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<crate::ast::Span>) -> IrExpr {
@@ -693,6 +709,8 @@ fn lower_expr_ident(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<c
                     } else { ty }
                 } else { ty };
                 ctx.mk(IrExprKind::Var { id: var_id }, resolved, span)
+            } else if let Some(e) = selective_top_let_ref(ctx, *name, &ty, span) {
+                e
             } else if let Ty::Fn { is_effect: _, params: param_tys, ret } = &ty {
                 // Function/top-let used as a value → eta-expand to lambda
                 // so borrow insertion handles param types correctly (e.g. String → &str).

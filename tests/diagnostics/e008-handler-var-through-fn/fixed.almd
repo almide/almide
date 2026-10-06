@@ -1,0 +1,16 @@
+// The called fn keeps its state per invocation.
+import http
+
+effect fn count(path: String) -> Int = {
+  var n = 0
+  for _ in string.chars(path) {
+    n = n + 1
+  }
+  n
+}
+
+let app = http.router([
+  http.route("GET /", (req) => http.response(200, "n=${count(http.req_path(req))!}"))
+])
+
+effect fn main() -> Unit = http.serve(8080, app!)!

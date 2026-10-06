@@ -1,7 +1,8 @@
 //! The ownership checker — the Rust mirror of `proofs/OwnershipChecker.v`'s
 //! `check_xc` (certificate format v6: flat events, `(…)` loops, `[…|…]`
 //! conditional loops, `{…|…}` one-shot branches, the `x` arm-exit marker and
-//! the `t` arm-abort terminal).
+//! the `t` arm-abort terminal), with the owned-line resurrection rule (#3229:
+//! on a line born by a top-level `i`, every later `a` must meet a live count).
 //!
 //! One line per reference-counted object. Every function below is a
 //! transcription of the Gallina definition named in its comment, including
@@ -287,9 +288,45 @@ fn parse(witness: &[u8]) -> Vec<Vec<Item>> {
         .collect()
 }
 
-/// `check_xc`: every line of the certificate is fault-free and balanced.
+/// `guard_ops`: a liveness probe (`Borrow`) before every `Alias`.
+fn guard_ops(ops: &[Op]) -> Vec<Op> {
+    ops.iter()
+        .flat_map(|o| match o {
+            Op::Alias => vec![Op::Borrow, Op::Alias],
+            other => vec![*other],
+        })
+        .collect()
+}
+
+/// `guard_item`: the probe inside every op, loop body and arm.
+fn guard_item(item: &Item) -> Vec<Item> {
+    match item {
+        Item::Op(o) => guard_ops(std::slice::from_ref(o)).into_iter().map(Item::Op).collect(),
+        Item::Loop(body) => vec![Item::Loop(guard_ops(body))],
+        Item::CondLoop(t, e) => vec![Item::CondLoop(guard_ops(t), guard_ops(e))],
+        Item::Branch(t, e) => vec![Item::Branch(guard_ops(t), guard_ops(e))],
+        Item::BranchRet(f, t, e) => vec![Item::BranchRet(*f, guard_ops(t), guard_ops(e))],
+        Item::BranchAbort(f, t, e) => vec![Item::BranchAbort(*f, guard_ops(t), guard_ops(e))],
+        Item::Poison => vec![Item::Poison],
+    }
+}
+
+/// `guard_line` (#3229): a line whose first item is a top-level `Inc` is an
+/// OWNED object, dead once its count returns to 0, so every later `Alias`
+/// must meet a live count. Any other line is returned unchanged.
+fn guard_line(items: &[Item]) -> Vec<Item> {
+    match items.split_first() {
+        Some((Item::Op(Op::Inc), rest)) => std::iter::once(Item::Op(Op::Inc))
+            .chain(rest.iter().flat_map(guard_item))
+            .collect(),
+        _ => items.to_vec(),
+    }
+}
+
+/// `check_xc`: every line of the certificate, with the owned-line
+/// resurrection probe, is fault-free and balanced.
 pub(crate) fn check_xc(witness: &[u8]) -> bool {
-    parse(witness).iter().all(|line| check_line(line))
+    parse(witness).iter().all(|line| check_line(&guard_line(line)))
 }
 
 #[cfg(test)]

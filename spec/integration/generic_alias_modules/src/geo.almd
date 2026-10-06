@@ -1,0 +1,18 @@
+// #3403: generic transparent aliases declared in a module. Inside the
+// module the bare spelling `Pair[Int]` is its own alias; other files reach
+// it qualified (`geo.Pair[Int]`) or through an import alias.
+type Pair[T] = (T, T)
+
+type Both[T] = Pair[List[T]]
+
+type Step[T] = (T) -> T
+
+type Seg = { ends: Pair[Int], name: String }
+
+fn span(s: Seg) -> Int = s.ends.1 - s.ends.0
+
+fn swap[T](p: Pair[T]) -> Pair[T] = (p.1, p.0)
+
+fn sizes(b: Both[String]) -> Int = list.len(b.0) * 10 + list.len(b.1)
+
+fn apply[T](f: Step[T], x: T) -> T = f(x)

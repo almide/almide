@@ -194,6 +194,12 @@ enum Commands {
         /// marshalled, anything else is refused at build time.
         #[arg(long = "host")]
         host: Option<String>,
+        /// `--target wasm` only: append DWARF (`.debug_line`, `.debug_info`,
+        /// …) custom sections mapping code offsets to `.almd` file:line
+        /// (#1315), read by Chrome DevTools and lldb on wasmtime. Off by
+        /// default: without it the module is byte-identical.
+        #[arg(long)]
+        debug: bool,
     },
     /// Run tests
     Test {
@@ -340,6 +346,11 @@ enum Commands {
         /// Git tag
         #[arg(long)]
         tag: Option<String>,
+        /// The package's directory inside the repository (a repository
+        /// holding several packages); the package is named after its last
+        /// component
+        #[arg(long)]
+        subdir: Option<String>,
     },
     /// List dependencies
     Deps,
@@ -894,10 +905,7 @@ fn expand_capability_grants(allow: &[String]) -> Vec<String> {
     for cap in allow {
         let Some((_, granted)) = almide::check::CAPABILITY_GRANTS.iter().find(|(c, _)| c == cap) else {
             let names: Vec<&str> = almide::check::CAPABILITY_GRANTS.iter().map(|(c, _)| *c).collect();
-            eprintln!(
-                "error: unknown capability `{cap}` — grantable capabilities are {}",
-                names.join(", ")
-            );
+            eprintln!("error: {}", project::unknown_capability_message(cap, "--allow", &names));
             std::process::exit(1);
         };
         for m in *granted {
@@ -970,20 +978,32 @@ fn dispatch_fmt(files: Vec<String>, check: bool, json: bool, dry_run: bool, no_i
 }
 
 /// `dispatch`'s `Commands::Add` arm. Extracted verbatim.
-fn dispatch_add(pkg: String, git: Option<String>, tag: Option<String>) {
-    let (name, git_url, tag) = project_fetch::resolve_add_target(pkg, git, tag);
-    project_fetch::add_dep_to_toml(&name, &git_url, tag.as_deref())
-        .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
+///
+/// The dependency is fetched BEFORE almide.toml is written, so a `--subdir`
+/// (#3381) or a tag the repository does not have leaves the manifest as it
+/// was rather than holding an entry no command can resolve.
+fn dispatch_add(pkg: String, git: Option<String>, tag: Option<String>, subdir: Option<String>) {
+    let subdir = subdir.map(|s| {
+        project::normalize_subdir(&s).unwrap_or_else(|why| {
+            err(&format!("invalid --subdir `{s}`: {why}"));
+            std::process::exit(1);
+        })
+    });
+    let (name, git_url, tag) = project_fetch::resolve_add_target(pkg, git, tag, subdir.as_deref());
     let dep = project::Dependency {
         name: name.clone(),
-        git: git_url,
-        tag,
+        git: git_url.clone(),
+        tag: tag.clone(),
         branch: None,
         version: None,
         path: None,
+        subdir: subdir.clone(),
+        declared_at: None,
     };
     project_fetch::fetch_dep(&dep)
         .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
+    project_fetch::add_dep_to_toml(&name, &git_url, tag.as_deref(), subdir.as_deref())
+        .unwrap_or_else(|e| { err(&e.to_string()); std::process::exit(1); });
 }
 
 /// `dispatch`'s `Commands::Update` arm (#1131): the sanctioned path FORWARD
@@ -1026,7 +1046,10 @@ fn dispatch_deps() {
                     continue;
                 }
                 let ref_name = dep.tag.as_deref().or(dep.branch.as_deref()).unwrap_or("main");
-                out(&format!("{} = {} ({})", dep.name, dep.git, ref_name));
+                match &dep.subdir {
+                    Some(sub) => out(&format!("{} = {} ({}) subdir {}", dep.name, dep.git, ref_name, sub)),
+                    None => out(&format!("{} = {} ({})", dep.name, dep.git, ref_name)),
+                }
             }
         }
     } else {
@@ -1079,7 +1102,7 @@ fn dispatch_rest(command: Commands) {
             cli::cmd_compile(module.as_deref(), json, dry_run, output.as_deref());
         }
         Commands::Clean => cli::cmd_clean(),
-        Commands::Add { pkg, git, tag } => dispatch_add(pkg, git, tag),
+        Commands::Add { pkg, git, tag, subdir } => dispatch_add(pkg, git, tag, subdir),
         Commands::Update { dep } => dispatch_update(dep),
         Commands::Deps => dispatch_deps(),
         Commands::DepPath { name } => dispatch_dep_path(name),
@@ -1117,15 +1140,16 @@ fn dispatch_rest(command: Commands) {
     }
 }
 
-/// Refuse a `./almide.toml` that declares a key twice (#2583) before any
-/// command runs. Most readers of the manifest treat a parse error as "no
+/// Refuse a `./almide.toml` that declares a key twice (#2583), is not TOML
+/// (#3253), or whose `[permissions].allow` names something that is not a
+/// capability (#3247), before any command runs. Most readers of the manifest treat a parse error as "no
 /// project" (`parse_toml(..).ok()`), which is right for a missing file but
 /// would turn this error into a silent run without dependencies; one gate
 /// here makes the refusal the same on every command. The commands that must
 /// keep working in a broken project are exempt: `init`, `clean`, the editor
 /// servers (an exit would kill the session; their manifest reads already
 /// fail closed), and the ones that never read the manifest.
-fn refuse_duplicate_manifest_keys(command: &Commands) {
+fn refuse_invalid_manifest(command: &Commands) {
     if matches!(
         command,
         Commands::Init
@@ -1141,9 +1165,30 @@ fn refuse_duplicate_manifest_keys(command: &Commands) {
     }
     let path = std::path::Path::new("almide.toml");
     let Ok(content) = std::fs::read_to_string(path) else { return };
-    if let Err(e) = project::check_manifest_duplicates(path, &content) {
+    if let Err(e) = project::check_manifest(path, &content) {
         err(&format!("error: {}", e));
         std::process::exit(1);
+    }
+    report_manifest_warnings(command, path, &content);
+}
+
+/// A key the manifest writes and no reader reads (#3382) is a warning, once
+/// per command, printed here with the manifest refusals above. `check
+/// --json` carries it as a diagnostic row on stdout; every other command
+/// prints it on stderr, so no other machine-readable stdout changes. The
+/// exit code never changes: the build runs exactly as if the key were absent.
+/// `survive-test-leg` is a child of `survive`, which already warned.
+fn report_manifest_warnings(command: &Commands, path: &std::path::Path, content: &str) {
+    if matches!(command, Commands::SurviveTestLeg { .. }) {
+        return;
+    }
+    let json = matches!(command, Commands::Check { json: true, .. });
+    for d in project::manifest_warnings(path, content) {
+        if json {
+            out(&diagnostic_render::to_json(&d));
+        } else {
+            err(&diagnostic_render::display(&d));
+        }
     }
 }
 
@@ -1162,7 +1207,7 @@ fn dispatch(cli: Cli) {
             return;
         }
     };
-    refuse_duplicate_manifest_keys(&command);
+    refuse_invalid_manifest(&command);
     match command {
         Commands::Init => cli::cmd_init(),
         Commands::Run { file, no_check, release, target, verified: _, no_verified, time_report, program_args } =>
@@ -1171,7 +1216,7 @@ fn dispatch(cli: Cli) {
             let file = resolve_file(file);
             cli::cmd_bench(&file, runs, target.as_deref(), &program_args);
         }
-        Commands::Build { file, o, target, release, fast, unchecked_index, no_check, repr_c, cdylib, emit_unverified, verified: _, no_verified, wasm_opt, component, heap_cap, host } => {
+        Commands::Build { file, o, target, release, fast, unchecked_index, no_check, repr_c, cdylib, emit_unverified, verified: _, no_verified, wasm_opt, component, heap_cap, host, debug } => {
             let file = resolve_file(file);
             warn_no_verified_deprecated(no_verified);
             cli::cmd_build(cli::BuildArgs {
@@ -1191,7 +1236,8 @@ fn dispatch(cli: Cli) {
                 component,
                 heap_cap,
                 host: host.as_deref(),
-            });
+                debug,
+                });
         }
         Commands::Test { file, run, no_check, json, target, update_snapshots, ci, allow_no_tests, show_output } => {
             dispatch_test(TestArgs { file, run, no_check, json, target, update_snapshots, ci, allow_no_tests, show_output })

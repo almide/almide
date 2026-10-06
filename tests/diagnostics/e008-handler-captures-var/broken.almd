@@ -1,0 +1,17 @@
+// A handler lambda that captures a `var` of the fn that builds the app:
+// handlers run concurrently, so every request would share `hits`.
+import http
+
+effect fn main() -> Unit = {
+  var hits = 0
+  let app = http.router([
+    http.route(
+      "GET /",
+      (req) => {
+        hits = hits + 1
+        http.response(200, "hits=${hits}")
+      },
+    )
+  ])!
+  http.serve(8080, app)!
+}

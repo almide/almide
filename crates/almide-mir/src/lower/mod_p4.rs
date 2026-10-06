@@ -105,77 +105,6 @@ pub(crate) fn body_reassigns_heap(stmts: &[IrStmt]) -> bool {
     s.found
 }
 
-/// Collect every var a loop body HEAP-REASSIGNS — directly (`Assign` with a heap
-/// value, `FieldAssign`/`MapInsert` targets whose write lowers to a rebind) or via
-/// the functional-rebind rewrites (`list.push(v, x)` / `string.push(s, x)` /
-/// `bytes.push(b, x)` and their Member-receiver forms, which rewrite into
-/// Assign/FieldAssign during lowering). Descends into nested control flow but NOT
-/// into nested loops (each loop pre-copies its own borrowed slots when reached).
-pub(crate) fn collect_heap_reassign_vars(stmts: &[IrStmt], out: &mut Vec<VarId>) {
-    use almide_ir::visit::{walk_expr, walk_stmt, IrVisitor};
-    struct Scan<'a> {
-        out: &'a mut Vec<VarId>,
-    }
-    impl Scan<'_> {
-        fn push(&mut self, v: VarId) {
-            if !self.out.contains(&v) {
-                self.out.push(v);
-            }
-        }
-        fn push_receiver(&mut self, recv: &IrExpr) {
-            match &recv.kind {
-                IrExprKind::Var { id } => self.push(*id),
-                IrExprKind::Member { object, .. } => {
-                    if let IrExprKind::Var { id } = &object.kind {
-                        self.push(*id);
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-    impl IrVisitor for Scan<'_> {
-        fn visit_stmt(&mut self, stmt: &IrStmt) {
-            match &stmt.kind {
-                IrStmtKind::Assign { var, value } => {
-                    if is_heap_ty(&value.ty) {
-                        self.push(*var);
-                    }
-                }
-                IrStmtKind::FieldAssign { target, value, .. } => {
-                    if is_heap_ty(&value.ty) {
-                        self.push(*target);
-                    }
-                }
-                IrStmtKind::MapInsert { target, .. } => {
-                    self.push(*target);
-                }
-                _ => {}
-            }
-            walk_stmt(self, stmt);
-        }
-        fn visit_expr(&mut self, e: &IrExpr) {
-            match &e.kind {
-                IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
-                    if func.as_str() == "push"
-                        && matches!(module.as_str(), "list" | "string" | "bytes")
-                        && !args.is_empty() =>
-                {
-                    self.push_receiver(&args[0]);
-                    walk_expr(self, e);
-                }
-                // A nested loop pre-copies its OWN borrowed slots — do not descend.
-                IrExprKind::ForIn { .. } | IrExprKind::While { .. } => {}
-                _ => walk_expr(self, e),
-            }
-        }
-    }
-    let mut s = Scan { out };
-    for stmt in stmts {
-        s.visit_stmt(stmt);
-    }
-}
-
 /// Does `body` directly project a FIELD/INDEX off `v` — a `v.field` Member or `v.N` TupleIndex
 /// EXPRESSION whose object is `Var(v)`? A `for-in` heap-AGGREGATE element is bound as the whole
 /// element handle, which is correct for a `let (x, y) = v` destructure (a tuple PATTERN) or passing
@@ -340,8 +269,10 @@ pub fn is_self_host_option_module_fn(module: &str, func: &str) -> bool {
         // `json.get_bool(v,k) ?? false`, `json.get_array(v,k) ?? []` and a `match` over any of them
         // EXECUTE (the typed-accessor sibling of json.get, the manifest/jsonrpc parser idiom root).
         // http.get_header is self-hosted (stdlib/http_response.almd) returning a real
-        // materialized Option[String] — a `match` over it EXECUTES.
-        "http" => matches!(func, "get_header"),
+        // materialized Option[String] — a `match` over it EXECUTES. `http.poll` is
+        // the one Option-returning host op (crate::host_ops, #2739): an ordinary
+        // call, so its result is a real Option block.
+        "http" => matches!(func, "get_header" | "poll"),
         "json" => matches!(
             func,
             "as_int" | "as_float" | "as_bool" | "as_string" | "get" | "as_array"
@@ -721,7 +652,8 @@ fn interp_to_string_call(ty: &Ty) -> Option<(&'static str, &'static str)> {
         // floats (`3.0`->`3`, `100.0`->`100`) — exactly the compound formatter
         // `float.to_string_compound`, NOT `float.to_string` (which keeps `.0` for an EXPLICIT
         // `float.to_string(x)` call). Same drop-.0 Display a Float record/list field already uses.
-        Ty::Float => ("float", "to_string_compound"),
+        // `Float64` is the sized spelling of the same f64 (`f.to_float64()` returns it).
+        Ty::Float | Ty::Float64 => ("float", "to_string_compound"),
         // A Float32 prints native's f32 Display — the shortest digits that round-trip to the
         // f32, not the widened f64's (`0.1` stays `0.1`) — through the f32 Schubfach (#3079).
         Ty::Float32 => ("float32", "to_string_compound"),

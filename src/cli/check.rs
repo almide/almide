@@ -69,6 +69,14 @@ fn resolve_and_typecheck_for_check(file: &str, program: &mut almide::ast::Progra
     }
     let diagnostics = checker.infer_program(program);
     checker.profile_critical = false;
+    // The entry's expression types, as the build path lowers them: it lowers
+    // the entry before any module is inferred. Module inference below writes
+    // its own expressions into the same map and overwrites entries of the
+    // entry program, so a later `lower_program(program, ..)` read the wrong
+    // types (`let f = make()!` lowered as a Float64 call with no unwrap) —
+    // invisible to a type-blind analysis, wrong for the category-set flow of
+    // ADR-0026 D1, which follows fn-typed values.
+    let entry_types = checker.type_map.clone();
 
     // #862: an imported module's OWN body was never inferred on the check
     // path, so an E006 (or any other body-level error) inside it stayed
@@ -91,6 +99,7 @@ fn resolve_and_typecheck_for_check(file: &str, program: &mut almide::ast::Progra
     if crate::compile_driver::report_module_diagnostics(&module_diags).is_err() {
         std::process::exit(1);
     }
+    checker.type_map = entry_types;
 
     (diagnostics, checker)
 }
@@ -204,9 +213,9 @@ fn check_one(file: &str, deny_warnings: bool, timings: bool, stamp: bool, critic
     // Security Layer 2: check permissions if defined in almide.toml
     if std::path::Path::new("almide.toml").exists() {
         if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
-            if !proj.permissions.is_empty() {
+            if !proj.permissions.is_empty() || proj.proc_allow.is_some() {
                 let ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
-                if let Err(_) = super::check_permissions(&ir, &proj.permissions) {
+                if super::enforce_project_permissions(&ir, &proj).is_err() {
                     std::process::exit(1);
                 }
             }
@@ -368,18 +377,9 @@ fn enforce_effect_permissions(
     proj: &project::Project,
     entries: &[(&String, &almide::codegen::pass_effect_inference::FunctionEffects)],
 ) {
-    use almide::codegen::pass_effect_inference::Effect;
-    let allowed: std::collections::HashSet<Effect> = proj.permissions.iter()
-        .filter_map(|s| match s.as_str() {
-            "IO" => Some(Effect::IO),
-            "Net" => Some(Effect::Net),
-            "Env" => Some(Effect::Env),
-            "Time" => Some(Effect::Time),
-            "Rand" => Some(Effect::Rand),
-            "Fan" => Some(Effect::Fan),
-            _ => None,
-        })
-        .collect();
+    let Ok(allowed) = super::allowed_permissions_or_report(&proj.permissions) else {
+        std::process::exit(1);
+    };
 
     let mut violations = 0;
     for (name, fe) in entries {
@@ -393,6 +393,9 @@ fn enforce_effect_permissions(
             ));
             for e in &forbidden {
                 err(&format!("  {} is not in [permissions].allow", e));
+                if let Some(path) = fe.paths.get(*e) {
+                    err(&format!("  path: {path}"));
+                }
             }
             err(&format!(
                 "  hint: add {} to [permissions].allow in almide.toml",
@@ -447,14 +450,17 @@ pub fn cmd_check_effects(file: &str) {
     entries.sort_by_key(|(name, _)| (*name).clone());
 
     for (name, fe) in &entries {
-        let effects = EffectMap::format_effects(&fe.transitive);
         let marker = if fe.is_effect { " (effect fn)" } else { "" };
-        err(&format!("  {}  → {}{}", name, effects, marker));
+        let returns = fe.returns_report().map(|r| format!("; {r}")).unwrap_or_default();
+        err(&format!("  {}  → {}{}{}", name, fe.report(), marker, returns));
     }
 
-    let pure_count = entries.iter().filter(|(_, fe)| fe.transitive.is_empty()).count();
-    let effect_count = entries.len() - pure_count;
-    err(&format!("\n{} functions: {} pure, {} with effects", entries.len(), pure_count, effect_count));
+    // A function that calls closures it is handed runs whatever they do; their
+    // categories are charged at each call site that hands one over (ADR-0026
+    // D1), so it is not counted pure (#3268).
+    let (pure, dependent, effects) = EffectMap::summary_counts(entries.iter().map(|(_, fe)| *fe));
+    let dependent_part = if dependent > 0 { format!(", {dependent} callback-dependent") } else { String::new() };
+    err(&format!("\n{} functions: {} pure{}, {} with effects", entries.len(), pure, dependent_part, effects));
 
     // Check permissions from almide.toml
     if std::path::Path::new("almide.toml").exists() {

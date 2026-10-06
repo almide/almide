@@ -95,6 +95,14 @@ pub(crate) fn ctor_enum_for(ctx: &RenderContext, ctor: &str, ty: Option<&Ty>) ->
 /// Prefix that renames the four keywords rustc refuses to raw-escape.
 const UNRAWABLE_KEYWORD_PREFIX: &str = "almide_kw_";
 
+/// The prefix every Rust binder the walker and the templates GENERATE around
+/// user code carries (`X.with(|__almide_cell| …)`, `__almide_rs`, the fan's
+/// `__almide_s` / `__almide_fan_g`, …). A user identifier with this prefix is
+/// escaped by [`escape_rust_ident`], so no user binding can share a spelling
+/// with a generated one and be captured by it (#3304 — `X.with(|c| … c * 2.0)`
+/// read the `RefCell` where the user's `c` was meant).
+pub(crate) const HYGIENE_PREFIX: &str = "__almide_";
+
 /// Escape `name` for use as a Rust identifier (definition or reference).
 /// Single source of truth for every emission site (`var_name`, fn param, fn
 /// DEFINITION, fn call site, and every record / variant-payload FIELD name:
@@ -112,9 +120,12 @@ const UNRAWABLE_KEYWORD_PREFIX: &str = "almide_kw_";
 /// already starts with `almide_kw_` is prefixed once more, so a record that
 /// declares both `self` and `almide_kw_self` (both legal Almide field names)
 /// still gets two distinct Rust fields (`almide_kw_self` and
-/// `almide_kw_almide_kw_self`). Every output that starts with the prefix came
-/// from exactly one prefixed input; every other output is `name` or
-/// `r#name`, which never starts with it.
+/// `almide_kw_almide_kw_self`). An identifier in the generated-binder space
+/// ([`HYGIENE_PREFIX`], `__almide_…`) is prefixed the same way, so it never
+/// spells a generated binder (#3304); `almide_kw___almide_…` cannot collide
+/// with the other two prefixed forms. Every output that starts with the
+/// prefix came from exactly one prefixed input; every other output is `name`
+/// or `r#name`, which never starts with it or with the hygiene prefix.
 ///
 /// Only the Rust SPELLING changes: user-visible text that names a field (the
 /// derived `AlmideRepr` format string, Codec's JSON keys) keeps the original
@@ -122,7 +133,9 @@ const UNRAWABLE_KEYWORD_PREFIX: &str = "almide_kw_";
 pub(crate) fn escape_rust_ident(name: &str, templates: &TemplateSet) -> String {
     match name {
         "self" | "Self" | "super" | "crate" => format!("{}{}", UNRAWABLE_KEYWORD_PREFIX, name),
-        _ if name.starts_with(UNRAWABLE_KEYWORD_PREFIX) => format!("{}{}", UNRAWABLE_KEYWORD_PREFIX, name),
+        _ if name.starts_with(UNRAWABLE_KEYWORD_PREFIX) || name.starts_with(HYGIENE_PREFIX) => {
+            format!("{}{}", UNRAWABLE_KEYWORD_PREFIX, name)
+        }
         _ if is_rust_keyword(name) => templates
             .render_with("keyword_escape", None, &[], &[("name", name)])
             .unwrap_or_else(|| name.to_string()),
@@ -480,7 +493,7 @@ fn render_fn_safe_name(
         // avoid doubling the module (#433 × #411-B). Mirrors the call-site strip;
         // gated on a dotted IR name so plain module fns are unaffected.
         let base: String = if func.name.as_str().contains('.') {
-            safe_name.strip_prefix(&format!("{}_", origin)).unwrap_or(&safe_name).to_string()
+            almide_base::names::strip_module_path(&raw_name, origin).map_or_else(|| safe_name.clone(), rust_safe_fn_name)
         } else {
             safe_name.clone()
         };
@@ -489,10 +502,12 @@ fn render_fn_safe_name(
         // prefix_intra_module_calls, ...) mangle without escaping — escaping
         // before prefixing produced `almide_rt_util_r#move` (#1494).
         safe_name = format!("almide_rt_{}_{}", origin, base);
-    } else {
+    } else if !(is_rust_effect_main || is_rust_plain_main_with_forces) {
         // Escape a Rust-keyword fn name (`box` → `r#box`) so the DEFINITION
         // matches the CALL site exactly (#659). Only unprefixed names can
         // collide with a keyword, so the escape lives on this branch (#1494).
+        // The generated `__almide_main` is the compiler's own spelling (the
+        // `main` wrapper calls it verbatim), not a user name to keep hygienic.
         safe_name = escape_rust_ident(&safe_name, ctx.templates);
     }
     format!("{}{}", safe_name, fn_generics)
@@ -512,40 +527,52 @@ fn render_fn_safe_name(
 /// single-file and module layouts. A no-op off unix.
 const MAIN_SIGPIPE_PRELUDE: &str = "    #[cfg(unix)]\n    {\n        extern \"C\" {\n            fn signal(sig: i32, handler: usize) -> usize;\n        }\n        // SIGPIPE = 13, SIG_DFL = 0\n        unsafe {\n            signal(13, 0);\n        }\n    }\n";
 
-/// The stdout buffer's flush on a panic (#2245): stdout is block-buffered
-/// when it is not a terminal, and a panic unwinding out of `main` never runs
+/// Call-stack exhaustion as the defined abort (C-196): replace std's
+/// guard-page handler with the one that prints `Error: stack overflow` and
+/// exits 1 (prelude_stack.rs), before anything else in `main` runs.
+const MAIN_STACK_PRELUDE: &str = "    almide_stack_guard_install();\n";
+
+/// The stdout buffer's flush on a panic (#2245): stdout is buffered (a
+/// line written in fragments, `io.print`-less pieces), and a panic unwinding out of `main` never runs
 /// the main thread's thread-local destructors, so the lines a program printed
 /// before an `assert` failed would be lost. The hook flushes, then hands the
 /// panic to the default hook — the message and exit code are unchanged.
 const MAIN_STDOUT_PRELUDE: &str = "    {\n        let __almide_hook = std::panic::take_hook();\n        std::panic::set_hook(std::boxed::Box::new(move |info| { almide_stdout_flush(); __almide_hook(info); }));\n    }\n";
 
-/// A lazy top-let whose value holds a closure renders as a per-thread slot
-/// behind a `Deref` handle (`top_let_thread_lazy`), not a `static LazyLock`:
-/// `Rc<dyn Fn>` is not `Sync`, so rustc refuses it in a static (#2537).
-/// A public alias (`type Handler = (Int) -> Int`) is expanded transparently
-/// by `render_type`, so it is looked through here too; `fn_blocked_types`
-/// already covers records and variants transitively.
+/// A lazy top-let whose stored value is not `Sync` renders as a per-thread
+/// slot behind a `Deref` handle (`top_let_thread_lazy`), not a `static
+/// LazyLock`: rustc refuses a non-`Sync` static. Decided by type — an
+/// `Rc`-backed leaf (a closure, #2537; a `Bytes` / `Matrix`, #3287) anywhere
+/// in the STORED shape, through user records and variants transitively
+/// (`rc_blocked_types`). A `Bytes` / `Matrix` the glue stores raw (`Vec<u8>`,
+/// through List / Option / Result / tuple, #617) is `Sync` and stays a
+/// shared static. A public alias (`type Handler = (Int) -> Int`) is expanded
+/// transparently by `render_type`, so it is looked through here too.
 pub(crate) fn top_let_is_thread_local(ctx: &RenderContext, ty: &Ty) -> bool {
-    fn holds_fn(ctx: &RenderContext, ty: &Ty, depth: u32) -> bool {
-        if declarations::ty_has_fn_with(ty, &ctx.ann.fn_blocked_types) {
-            return true;
-        }
+    fn stored_holds_rc(ctx: &RenderContext, ty: &Ty, raw: bool, depth: u32) -> bool {
+        use almide_lang::types::constructor::TypeConstructorId as TC;
         if depth > 32 {
             return false;
         }
         match ty {
+            Ty::Bytes | Ty::Matrix | Ty::Applied(TC::Matrix, _) => !raw,
+            Ty::Fn { .. } => true,
             Ty::Named(name, args) => {
-                args.iter().any(|t| holds_fn(ctx, t, depth + 1))
-                    || ctx.type_aliases.get(name).is_some_and(|t| holds_fn(ctx, t, depth + 1))
+                ctx.ann.rc_blocked_types.contains(name.as_str())
+                    || args.iter().any(|t| stored_holds_rc(ctx, t, false, depth + 1))
+                    || ctx.type_aliases.get(name).is_some_and(|t| stored_holds_rc(ctx, t, raw, depth + 1))
             }
-            Ty::Tuple(elems) | Ty::Applied(_, elems) => elems.iter().any(|t| holds_fn(ctx, t, depth + 1)),
+            Ty::Applied(TC::List | TC::Option | TC::Result, args) | Ty::Tuple(args) => {
+                args.iter().any(|t| stored_holds_rc(ctx, t, raw, depth + 1))
+            }
+            Ty::Applied(_, args) => args.iter().any(|t| stored_holds_rc(ctx, t, false, depth + 1)),
             Ty::Record { fields } | Ty::OpenRecord { fields } => {
-                fields.iter().any(|(_, t)| holds_fn(ctx, t, depth + 1))
+                fields.iter().any(|(_, t)| stored_holds_rc(ctx, t, false, depth + 1))
             }
             _ => false,
         }
     }
-    holds_fn(ctx, ty, 0)
+    stored_holds_rc(ctx, ty, expressions::rc_cow_needs_glue(ty), 0)
 }
 
 fn wrap_main_fn_code(fn_code: String, ctx: &RenderContext, is_rust_effect_main: bool, is_rust_plain_main_with_forces: bool) -> String {
@@ -559,9 +586,9 @@ fn wrap_main_fn_code(fn_code: String, ctx: &RenderContext, is_rust_effect_main: 
         })
         .collect();
     if is_rust_effect_main {
-        format!("{}\n\nfn main() {{\n{}{}{}    if let Err(__almide_err) = __almide_main() {{\n        almide_stdout_finish();\n        eprintln!(\"Error: {{}}\", __almide_err);\n        std::process::exit(1);\n    }}\n    almide_stdout_finish();\n}}", fn_code, MAIN_SIGPIPE_PRELUDE, MAIN_STDOUT_PRELUDE, force_lines)
+        format!("{}\n\nfn main() {{\n{}{}{}{}    if let Err(__almide_err) = __almide_main() {{\n        almide_stdout_finish();\n        eprintln!(\"Error: {{}}\", __almide_err);\n        std::process::exit(1);\n    }}\n    almide_stdout_finish();\n}}", fn_code, MAIN_SIGPIPE_PRELUDE, MAIN_STACK_PRELUDE, MAIN_STDOUT_PRELUDE, force_lines)
     } else if is_rust_plain_main_with_forces {
-        format!("{}\n\nfn main() {{\n{}{}{}    __almide_main();\n    almide_stdout_finish();\n}}", fn_code, MAIN_SIGPIPE_PRELUDE, MAIN_STDOUT_PRELUDE, force_lines)
+        format!("{}\n\nfn main() {{\n{}{}{}{}    __almide_main();\n    almide_stdout_finish();\n}}", fn_code, MAIN_SIGPIPE_PRELUDE, MAIN_STACK_PRELUDE, MAIN_STDOUT_PRELUDE, force_lines)
     } else {
         fn_code
     }

@@ -1,0 +1,110 @@
+// @leg: structural
+// Block-shaped values across the export boundary (#3354): Bytes, List of
+// each scalar and of String, nested List, Option, records (flat, nested,
+// and in a List). Each one is a parameter AND a return, on a plain fn and
+// on an effect fn whose `pass` picks ok or err. `main` prints the native
+// reference lines; the host-side matrix lives in marshal_blocks.host.mjs.
+type Point = { x: Int, y: Int }
+
+type Item = { name: String, tags: List[String], weight: Float, score: Int?, ok: Bool, at: Point }
+
+local fn gate(pass: Bool) -> Result[Int, String] = if pass then ok(1) else err("refused")
+
+fn bytes_rev(b: Bytes) -> Bytes = bytes.from_list(list.reverse(bytes.to_list(b)))
+
+fn ints_double(xs: List[Int]) -> List[Int] = xs |> list.map((x) => x * 2)
+
+fn floats_half(xs: List[Float]) -> List[Float] = xs |> list.map((x) => x / 2.0)
+
+fn bools_not(xs: List[Bool]) -> List[Bool] = xs |> list.map((x) => not x)
+
+fn strs_upper(xs: List[String]) -> List[String] = xs |> list.map((s) => string.to_upper(s))
+
+fn grid_flip(g: List[List[Int]]) -> List[List[Int]] = g |> list.map((row) => list.reverse(row))
+
+fn opt_inc(o: Int?) -> Int? = match o {
+  some(n) => some(n + 1),
+  none => none,
+}
+
+fn opt_greet(o: String?) -> String? = match o {
+  some(s) => some("hi " + s),
+  none => none,
+}
+
+fn point_swap(p: Point) -> Point = Point { x: p.y, y: p.x }
+
+fn item_bump(i: Item) -> Item = Item {
+  name: string.to_upper(i.name),
+  tags: i.tags + ["seen"],
+  weight: i.weight * 2.0,
+  score: match i.score {
+    some(n) => some(n + 1),
+    none => none,
+  },
+  ok: not i.ok,
+  at: point_swap(i.at),
+}
+
+fn points_shift(ps: List[Point]) -> List[Point] = ps |> list.map((p) => Point { x: p.x + 1, y: p.y + 1 })
+
+effect fn e_bytes_rev(b: Bytes, pass: Bool) -> Bytes = {
+  let _ = gate(pass)!
+  bytes_rev(b)
+}
+
+effect fn e_ints_double(xs: List[Int], pass: Bool) -> List[Int] = {
+  let _ = gate(pass)!
+  ints_double(xs)
+}
+
+effect fn e_floats_half(xs: List[Float], pass: Bool) -> List[Float] = {
+  let _ = gate(pass)!
+  floats_half(xs)
+}
+
+effect fn e_bools_not(xs: List[Bool], pass: Bool) -> List[Bool] = {
+  let _ = gate(pass)!
+  bools_not(xs)
+}
+
+effect fn e_strs_upper(xs: List[String], pass: Bool) -> List[String] = {
+  let _ = gate(pass)!
+  strs_upper(xs)
+}
+
+effect fn e_grid_flip(g: List[List[Int]], pass: Bool) -> List[List[Int]] = {
+  let _ = gate(pass)!
+  grid_flip(g)
+}
+
+effect fn e_opt_inc(o: Int?, pass: Bool) -> Int? = {
+  let _ = gate(pass)!
+  opt_inc(o)
+}
+
+effect fn e_opt_greet(o: String?, pass: Bool) -> String? = {
+  let _ = gate(pass)!
+  opt_greet(o)
+}
+
+effect fn e_point_swap(p: Point, pass: Bool) -> Point = {
+  let _ = gate(pass)!
+  point_swap(p)
+}
+
+effect fn e_item_bump(i: Item, pass: Bool) -> Item = {
+  let _ = gate(pass)!
+  item_bump(i)
+}
+
+effect fn e_points_shift(ps: List[Point], pass: Bool) -> List[Point] = {
+  let _ = gate(pass)!
+  points_shift(ps)
+}
+
+fn main() -> Unit = {
+  println(int.to_string(list.len(ints_double([1, 2, 3]))))
+  println(list.join(strs_upper(["a", "b"]), ","))
+  println(int.to_string(point_swap(Point { x: 1, y: 2 }).x))
+}

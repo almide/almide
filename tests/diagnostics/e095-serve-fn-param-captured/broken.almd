@@ -1,0 +1,9 @@
+// The app reads a parameter of the fn that serves it.
+import http
+
+effect fn serve_greeting(port: Int, greeting: String) -> Unit = http.serve(
+  port,
+  (req) => http.response(200, greeting),
+)!
+
+effect fn main() -> Unit = serve_greeting(8080, "hello")!

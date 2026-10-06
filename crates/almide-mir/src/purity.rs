@@ -37,6 +37,12 @@
 //! `is_pure(module)` needs no per-function table. (Per-function admission — e.g.
 //! the pure `datetime.add_days` inside a walled module — is a later refinement.)
 //!
+//! EFFECTFUL calls are admitted only through [`crate::host_ops`] (#2739, #3302):
+//! one table, audited as a matrix over every capability module's intrinsics.
+//! Each row is certified as an ordinary call and `cap_witness` counts its
+//! capabilities at the call site, so `used` stays complete whether or not a
+//! self-host body is in the program map.
+//!
 //! HIGHER-ORDER calls are walled SEPARATELY in lowering (a pure module like `list`
 //! still has `list.map`, whose closure argument invokes user code with unmodelled
 //! capabilities) — see `lower::is_higher_order`. Purity here is necessary, not

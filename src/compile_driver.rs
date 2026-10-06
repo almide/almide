@@ -115,17 +115,10 @@ pub(crate) fn register_versioned_module_names(
     checker: &mut check::Checker,
     resolved_modules: &[(String, ast::Program, Option<project::PkgId>, bool)],
 ) {
-    for (name, _, pkg_id, _) in resolved_modules {
-        if let Some(pid) = pkg_id.as_ref() {
-            let base = pid.mod_name();
-            let versioned = if let Some(suffix) = name.strip_prefix(&pid.name) {
-                format!("{}{}", base, suffix)
-            } else {
-                base
-            };
-            checker.env.module_versioned_names.insert(almide::intern::sym(name), almide::intern::sym(&versioned));
-        }
-    }
+    // The single copy lives in the lib, shared with the structural wasm leg
+    // (#3286: that leg had no pre-registration and walled a dependency's
+    // top-let read with var:unmapped).
+    almide::wasm_leg::register_versioned_module_names(checker, resolved_modules)
 }
 
 /// Lower the root program to IR once parsing succeeded, printing unused-var
@@ -186,6 +179,10 @@ pub(crate) fn lower_one_user_module(
         } else {
             base
         }
+    }).or_else(|| {
+        // A `self` module the package's native code calls back into is
+        // pre-registered under its versioned name (#3424).
+        checker.env.module_versioned_names.get(&almide::intern::sym(name)).map(|v| v.to_string())
     });
     if let Some(ref v) = versioned {
         checker.env.module_versioned_names.insert(almide::intern::sym(name), almide::intern::sym(v));
@@ -212,16 +209,41 @@ pub(crate) fn lower_one_user_module(
     }
 }
 
-fn verify_ir_or_err(ir_program: &Option<almide::ir::IrProgram>) -> Result<(), String> {
-    if let Some(ir) = ir_program {
-        let verify_errors = almide::ir::verify_program(ir);
-        if !verify_errors.is_empty() {
-            for e in &verify_errors {
-                err(&format!("internal compiler error: {}", e));
-            }
-            return Err(format!("{} IR verification error(s)", verify_errors.len()));
+fn verify_ir_or_err(ir: &almide::ir::IrProgram) -> Result<(), String> {
+    let verify_errors = almide::ir::verify_program(ir);
+    if !verify_errors.is_empty() {
+        for e in &verify_errors {
+            err(&format!("internal compiler error: {}", e));
         }
+        return Err(format!("{} IR verification error(s)", verify_errors.len()));
     }
+    Ok(())
+}
+
+/// The project manifest in the working directory, if there is one that
+/// parses — the same lookup every command makes.
+pub(crate) fn cwd_project() -> Option<project::Project> {
+    let path = std::path::Path::new("almide.toml");
+    if path.exists() { project::parse_toml(path).ok() } else { None }
+}
+
+/// The post-lowering pipeline every build route runs: the driver's optimize
+/// half, the route's integrity check (`verify`), the `[permissions]` gate,
+/// then monomorphize + link. The gate inspects the post-optimize, pre-mono
+/// IR on every route, and lives here once so a route cannot reach codegen
+/// around it: the wasm build/run route skipped it entirely while the native
+/// build refused the same program (#3275).
+pub(crate) fn optimize_gate_and_link(
+    ir: &mut almide::ir::IrProgram,
+    proj: Option<&project::Project>,
+    verify: impl FnOnce(&almide::ir::IrProgram) -> Result<(), String>,
+) -> Result<(), String> {
+    almide_driver::optimize_half(ir);
+    verify(ir)?;
+    if let Some(proj) = proj {
+        cli::enforce_project_permissions(ir, proj)?;
+    }
+    almide_driver::link_half(ir);
     Ok(())
 }
 
@@ -229,7 +251,7 @@ fn verify_ir_or_err(ir_program: &Option<almide::ir::IrProgram>) -> Result<(), St
 /// verbatim — each error arm prints via `err` before returning, exactly
 /// matching the original `.map_err(|e| { err(...); e })` chain.
 #[allow(clippy::type_complexity)]
-fn parse_and_resolve_for_compile(file: &str) -> Result<(ast::Program, String, Vec<diagnostic::Diagnostic>, bool, resolve::ResolvedModules, Option<project::Project>), String> {
+fn parse_and_resolve_for_compile(file: &str) -> Result<(ast::Program, String, Vec<diagnostic::Diagnostic>, bool, resolve::ResolvedModules, Option<project::Project>, resolve::SelfVersionedNames), String> {
     let (program, source_text, parse_errors) = parse_file(file);
     let has_parse_errors = !parse_errors.is_empty();
 
@@ -254,10 +276,15 @@ fn parse_and_resolve_for_compile(file: &str) -> Result<(ast::Program, String, Ve
         vec![]
     };
 
-    let resolved = resolve::resolve_imports_with_deps(file, &program, &dep_paths)
+    let mut resolved = resolve::resolve_imports_with_deps(file, &program, &dep_paths)
+        .map_err(|e| { err(&format!("{}", e)); e.clone() })?;
+    // #3424: this is the native (Rust) build, the one that compiles the
+    // package's `native/*.rs` — so it also loads the modules that native code
+    // calls back into, under the names it spells them by.
+    let self_versioned = resolve::include_native_callback_modules(file, &dep_paths, &mut resolved)
         .map_err(|e| { err(&format!("{}", e)); e.clone() })?;
 
-    Ok((program, source_text, parse_errors, has_parse_errors, resolved, parsed_project))
+    Ok((program, source_text, parse_errors, has_parse_errors, resolved, parsed_project, self_versioned))
 }
 
 /// `try_compile_with_ir`'s parse-phase output needed by the type-check
@@ -278,6 +305,7 @@ fn typecheck_and_lower_for_compile(
     parsed: ParsedSource,
     program: &mut ast::Program,
     resolved: &mut resolve::ResolvedModules,
+    self_versioned: &resolve::SelfVersionedNames,
     module_irs: &mut std::collections::HashMap<String, almide::ir::IrProgram>,
 ) -> Result<Option<almide::ir::IrProgram>, String> {
     let canon = canonicalize::canonicalize_program(
@@ -296,6 +324,11 @@ fn typecheck_and_lower_for_compile(
     // Pre-register versioned names BEFORE root lowering so cross-module
     // top_let references (mc_bot.DEFAULT_CONFIG) get correct V0 prefix.
     register_versioned_module_names(&mut checker, &resolved.modules);
+    // The package's own modules, when its native code calls them by their
+    // versioned name (#3424); `lower_one_user_module` reads them back.
+    for (name, versioned) in self_versioned {
+        checker.env.module_versioned_names.insert(almide::intern::sym(name), almide::intern::sym(versioned));
+    }
 
     // Lower root program (versioned names now available)
     let mut ir_program = lower_root_program_if_ready(parsed.has_parse_errors, program, &checker, parsed.source_text, parsed.file);
@@ -320,42 +353,22 @@ fn typecheck_and_lower_for_compile(
 /// integrity, check `[permissions]`, monomorphize, and link dependency
 /// modules into the root. Extracted verbatim.
 fn optimize_verify_and_link(ir_program: &mut Option<almide::ir::IrProgram>, parsed_project: &Option<project::Project>) -> Result<(), String> {
-    // The driver's FIRST half (optimize + top-let reclassify). The integrity gates below
-    // deliberately run on the post-optimize, pre-mono IR, so this site takes the two halves
-    // rather than one `link_ir` call — the order still lives in `almide-driver`, and the
-    // gate insertion point is now explicit instead of implicit in a hand-copied sequence.
-    if let Some(ir) = ir_program.as_mut() {
-        almide_driver::optimize_half(ir);
+    // The driver's two halves with the integrity check and the `[permissions]`
+    // gate (Security Layer 2) between them — the sequence the wasm route shares.
+    match ir_program.as_mut() {
+        Some(ir) => optimize_gate_and_link(ir, parsed_project.as_ref(), verify_ir_or_err),
+        None => Ok(()),
     }
-
-    // Verify IR integrity
-    verify_ir_or_err(ir_program)?;
-
-    // Security Layer 2: check permissions if defined in almide.toml
-    if let Some(proj) = parsed_project {
-        if !proj.permissions.is_empty() {
-            if let Some(ir) = ir_program.as_ref() {
-                cli::check_permissions(ir, &proj.permissions)?;
-            }
-        }
-    }
-
-    // The driver's SECOND half (monomorphize + link), after the gates above.
-    if let Some(ir) = ir_program.as_mut() {
-        almide_driver::link_half(ir);
-    }
-
-    Ok(())
 }
 
 pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &codegen::CodegenOptions) -> Result<(String, Option<almide::ir::IrProgram>), String> {
-    let (mut program, source_text, parse_errors, has_parse_errors, mut resolved, parsed_project) = parse_and_resolve_for_compile(file)?;
+    let (mut program, source_text, parse_errors, has_parse_errors, mut resolved, parsed_project, self_versioned) = parse_and_resolve_for_compile(file)?;
 
     let mut ir_program: Option<almide::ir::IrProgram> = None;
     let mut module_irs = std::collections::HashMap::new();
     if !no_check {
         let parsed = ParsedSource { file, source_text: &source_text, parse_errors: &parse_errors, has_parse_errors };
-        ir_program = typecheck_and_lower_for_compile(parsed, &mut program, &mut resolved, &mut module_irs)?;
+        ir_program = typecheck_and_lower_for_compile(parsed, &mut program, &mut resolved, &self_versioned, &mut module_irs)?;
     }
 
     optimize_verify_and_link(&mut ir_program, &parsed_project)?;

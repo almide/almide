@@ -16,7 +16,7 @@ equal to the set of codes the compiler emits.
 | [E005](E005.md) | Argument type mismatch (constructor / function call) |
 | [E006](E006.md) | Effect isolation: pure fn calls effect fn |
 | [E007](E007.md) | `fan` block outside effect fn |
-| [E008](E008.md) | `fan` block captures mutable variable |
+| [E008](E008.md) | a concurrently-run body reaches a `var` |
 | [E009](E009.md) | Reassignment to immutable binding |
 | [E010](E010.md) | Non-exhaustive match |
 | [E011](E011.md) | Mutable var mutated inside closure in pure fn |
@@ -59,13 +59,20 @@ equal to the set of codes the compiler emits.
 | [E088](E088.md) | `scoped`: a recursive call retains the current scoped activation (ALS-E31) |
 | [E089](E089.md) | Interpolating a value with no defined string form (Bytes, Unit, Matrix, a raw pointer, a function value or a value holding one) — including through a generic instantiation |
 | [E090](E090.md) | An `@extern(c)` signature with a type that has no C representation (a heap value, a `String` return, a `mut` parameter) |
-| [E091](E091.md) | A pattern after `var` (`var (x, y) = p`): `var` binds one name, so bind each with its own `var` or destructure with `let` |
+| [E092](E092.md) | A `@pure` fn is not pure: it is an `effect fn` or an `@extern`, or it reaches output, a `panic` / `assert*`, a stdlib call with an effect category, or an `@extern` |
+| [E093](E093.md) | A type written with brackets is applied to a different number of type arguments than its declaration has parameters (a generic alias, record or variant, a type declared without parameters, or a builtin: `List[Int, Int]`, `Map[String]`) |
+| [E094](E094.md) | Type aliases form a cycle: an alias leads back to itself through other aliases or a type argument (`type A = B` / `type B = A`, `type Tree = List[Tree]`) |
+| [E095](E095.md) | The app passed to `http.serve` reads a local of the fn that serves it (a `let`, `var` or parameter of main): the app must be closed over top-level items |
 | [E420](E420.md) | Function visibility violation (placeholder code, renumber candidate) |
 
 Retired codes: **E039** (the result.collect/collect_map deprecation window — the fns are removed, `result.partition` is the substance) and **E040** (the json.*/value.* alias deprecation window) each fired
 for one release and was retired when the aliases dropped (#1078) — a retired
 spelling is an ordinary [E002](E002.md) now; the migration map is recorded in
 [docs/stdlib/json.md](../stdlib/json.md#renamed-operations).
+**E091** (a pattern after `var`, 0.66.0) was retired in 0.67.0 when `var`
+began to take the `let` patterns (#3149): `var (x, y) = p` and
+`var { a, b } = r` are legal and bind every name as a `var`, so nothing is
+left for the code to report.
 
 Codes in the 4-digit range (`E0001` and up) that leak into output
 are **rustc** errors, not Almide ones — they indicate a codegen bug

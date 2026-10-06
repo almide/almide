@@ -2240,13 +2240,33 @@ EXIT CODE, observable to the parent — 0 is success by convention.
 """
 
 [[process.fn]]
-name = "exec_attached"
+name = "run"
 index_unit = "value"
 probe = "1"
 expect = "1"
 note = """
 Declared, not probed (host-capability): the Int is the child's EXIT CODE, or -1
-when a signal killed it — the same reading as ProcessStatus.code (#2540).
+when a signal killed it — the same reading as ProcessStatus.code (#2540, #3379).
+"""
+
+[[process.fn]]
+name = "run_in"
+index_unit = "value"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability): the Int is the child's EXIT CODE, or -1
+when a signal killed it, as `run` (#3379).
+"""
+
+[[process.fn]]
+name = "exec_attached"
+index_unit = "value"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability): the deprecated alias of `run` — the Int
+is the child's EXIT CODE, or -1 when a signal killed it (#2540, #3379).
 """
 
 [[process.fn]]

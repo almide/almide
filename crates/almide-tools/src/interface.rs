@@ -110,6 +110,16 @@ pub struct FunctionExport {
     /// must supply in the `imports` object passed to `WebAssembly.instantiate`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub import: Option<ImportRef>,
+    /// ADR-0020 §3.1: the parameters that run concurrently — declared with
+    /// `@concurrent`, or inferred because they flow into a concurrent slot.
+    /// A caller's argument there may not reach a `var` (E008).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub concurrent: Vec<String>,
+    /// ADR-0020 §3.3: set when this fn's body reaches a `var` declared
+    /// outside it (the var and the witness path), so a concurrent body that
+    /// calls it is E008.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reaches_var: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -318,6 +328,8 @@ fn extract_functions(program: &IrProgram, cx: &ExtractCtx) -> Vec<FunctionExport
             examples: info.map(|i| i.examples.clone()).unwrap_or_default(),
             deprecated: info.and_then(|i| i.deprecated.clone()),
             import,
+            concurrent: Vec::new(),
+            reaches_var: None,
         });
     }
     functions

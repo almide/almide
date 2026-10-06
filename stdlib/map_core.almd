@@ -190,6 +190,33 @@ fn map_get_or(m: Map[Int, Int], k: Int, default: Int) -> Int = {
   if idx < 0 then default else prim.load64(h + 12 + idx * 16 + 8)
 }
 
+// `a == b` over Map[Int, Int] (the eq lowering's `map.eq`), order-independent like v0's:
+// the same entry count and every (k, v) of `a` has an equal value under k in `b`.
+fn __map_eqm_at(ah: Int, an: Int, bh: Int, bn: Int, bcap: Int, i: Int) -> Bool =
+  if i >= an then true
+  else {
+    let j = __map_lookup(bh, bn, bcap, prim.load64(ah + 12 + i * 16))
+    if j < 0 then false
+    else if prim.load64(ah + 12 + i * 16 + 8) == prim.load64(bh + 12 + j * 16 + 8) then __map_eqm_at(
+      ah,
+      an,
+      bh,
+      bn,
+      bcap,
+      i + 1,
+    )
+    else false
+  }
+
+fn map_eq(a: Map[Int, Int], b: Map[Int, Int]) -> Bool = {
+  let ah = prim.handle(a)
+  let bh = prim.handle(b)
+  let an = prim.load32(ah + 4)
+  let bn = prim.load32(bh + 4)
+  if an != bn then false
+  else __map_eqm_at(ah, an, bh, bn, prim.load32(bh + 8), 0)
+}
+
 // Copy all `len` entries (key+value pairs) from sh to rh.
 fn __map_copy(sh: Int, rh: Int, len: Int, i: Int) -> Int = if i >= len then 0
 else {
@@ -215,21 +242,22 @@ fn __map_put(rh: Int, len: Int, idx: Int, k: Int, v: Int) -> Int = if idx < 0 th
 // copy, so the buckets stay exact) and extend it with the appended key. A stale source
 // index, or a grow that changed the bucket count, simply leaves the result INVALID for
 // the next read to rebuild. Returns 0 (a statement helper).
-fn __map_idx_carry(sh: Int, rh: Int, secap: Int, necap: Int, len: Int, idx: Int, k: Int) -> Int = if necap < 16 then 0
-else if necap != secap then 0
-else {
-  let ilen = prim.load64(__map_il(sh, secap))
-  if ilen != len then 0
+fn __map_idx_carry(sh: Int, rh: Int, secap: Int, necap: Int, len: Int, idx: Int, k: Int) -> Int =
+  if necap < 16 then 0
+  else if necap != secap then 0
   else {
-    let _c = __map_copy_slots(sh, rh, secap * 2, secap + 1, 0)
-    if idx >= 0 then 0
+    let ilen = prim.load64(__map_il(sh, secap))
+    if ilen != len then 0
     else {
-      let _p = __map_idx_put(__map_bb(rh, necap), necap * 2 - 1, k, len)
-      prim.store64(__map_il(rh, necap), len + 1)
-      0
+      let _c = __map_copy_slots(sh, rh, secap * 2, secap + 1, 0)
+      if idx >= 0 then 0
+      else {
+        let _p = __map_idx_put(__map_bb(rh, necap), necap * 2 - 1, k, len)
+        prim.store64(__map_il(rh, necap), len + 1)
+        0
+      }
     }
   }
-}
 
 // GEOMETRIC capacity (#1219): the slot count comes from `__map_cap_for`, a doubling ladder
 // keyed on the entry capacity, instead of the exact (len+1)*2. The $alloc free-list reuses
@@ -352,16 +380,17 @@ fn __map_merge_put(rh: Int, ecap: Int, w: Int, idx: Int, k: Int, v: Int) -> Int 
   w2
 }
 
-fn __map_merge_addb(rh: Int, ecap: Int, bh: Int, blen: Int, j: Int, w: Int) -> Int = if j >= blen then w
-else {
-  let k = prim.load64(bh + 12 + j * 16)
-  let v = prim.load64(bh + 12 + j * 16 + 8)
-  let mask = ecap * 2 - 1
-  let idx = if ecap < 16 then __map_find(rh, w, k, 0)
-  else __map_probe(rh, __map_bb(rh, ecap), mask, k, prim.band(__map_mix(k), mask))
-  let w2 = __map_merge_put(rh, ecap, w, idx, k, v)
-  __map_merge_addb(rh, ecap, bh, blen, j + 1, w2)
-}
+fn __map_merge_addb(rh: Int, ecap: Int, bh: Int, blen: Int, j: Int, w: Int) -> Int =
+  if j >= blen then w
+  else {
+    let k = prim.load64(bh + 12 + j * 16)
+    let v = prim.load64(bh + 12 + j * 16 + 8)
+    let mask = ecap * 2 - 1
+    let idx = if ecap < 16 then __map_find(rh, w, k, 0)
+    else __map_probe(rh, __map_bb(rh, ecap), mask, k, prim.band(__map_mix(k), mask))
+    let w2 = __map_merge_put(rh, ecap, w, idx, k, v)
+    __map_merge_addb(rh, ecap, bh, blen, j + 1, w2)
+  }
 
 fn map_merge(a: Map[Int, Int], b: Map[Int, Int]) -> Map[Int, Int] = {
   let ah = prim.handle(a)
@@ -405,19 +434,20 @@ fn map_update(m: Map[Int, Int], k: Int, f: (Int) -> Int) -> Map[Int, Int] = {
 // ── Higher-order Map[Int,Int] (closures machinery) ── the predicate f is a TWO-arity closure
 // f : (Key, Value) -> Bool invoked via CallIndirect $closure_fn2. A pure predicate byte-matches
 // v0 (single pass, insertion order). filter keeps a subset of entries (still unique keys).
-fn __map_filter_fill(sh: Int, len: Int, rh: Int, f: (Int, Int) -> Bool, i: Int, w: Int) -> Int = if i >= len then w
-else {
-  let k = prim.load64(sh + 12 + i * 16)
-  let v = prim.load64(sh + 12 + i * 16 + 8)
-  let keep = f(k, v)
-  if keep then {
-    prim.store64(rh + 12 + w * 16, k)
-    prim.store64(rh + 12 + w * 16 + 8, v)
-    __map_filter_fill(sh, len, rh, f, i + 1, w + 1)
-  } else {
-    __map_filter_fill(sh, len, rh, f, i + 1, w)
+fn __map_filter_fill(sh: Int, len: Int, rh: Int, f: (Int, Int) -> Bool, i: Int, w: Int) -> Int =
+  if i >= len then w
+  else {
+    let k = prim.load64(sh + 12 + i * 16)
+    let v = prim.load64(sh + 12 + i * 16 + 8)
+    let keep = f(k, v)
+    if keep then {
+      prim.store64(rh + 12 + w * 16, k)
+      prim.store64(rh + 12 + w * 16 + 8, v)
+      __map_filter_fill(sh, len, rh, f, i + 1, w + 1)
+    } else {
+      __map_filter_fill(sh, len, rh, f, i + 1, w)
+    }
   }
-}
 
 fn map_filter(m: Map[Int, Int], f: (Int, Int) -> Bool) -> Map[Int, Int] = {
   let sh = prim.handle(m)
@@ -430,14 +460,15 @@ fn map_filter(m: Map[Int, Int], f: (Int, Int) -> Bool) -> Map[Int, Int] = {
 }
 
 // Sum the predicate's 0/1 over all entries → the hit COUNT (a Bool is an i64 0/1).
-fn __map_count_hits(sh: Int, len: Int, f: (Int, Int) -> Bool, i: Int, acc: Int) -> Int = if i >= len then acc
-else {
-  let k = prim.load64(sh + 12 + i * 16)
-  let v = prim.load64(sh + 12 + i * 16 + 8)
-  let h = f(k, v)
-  if h then __map_count_hits(sh, len, f, i + 1, acc + 1)
-  else __map_count_hits(sh, len, f, i + 1, acc)
-}
+fn __map_count_hits(sh: Int, len: Int, f: (Int, Int) -> Bool, i: Int, acc: Int) -> Int =
+  if i >= len then acc
+  else {
+    let k = prim.load64(sh + 12 + i * 16)
+    let v = prim.load64(sh + 12 + i * 16 + 8)
+    let h = f(k, v)
+    if h then __map_count_hits(sh, len, f, i + 1, acc + 1)
+    else __map_count_hits(sh, len, f, i + 1, acc)
+  }
 
 fn map_all(m: Map[Int, Int], f: (Int, Int) -> Bool) -> Bool = {
   let sh = prim.handle(m)
@@ -462,13 +493,14 @@ fn map_count(m: Map[Int, Int], f: (Int, Int) -> Bool) -> Int = {
 // map.fold — left fold with a THREE-arity closure f : (Acc, Key, Value) -> Acc (v0's
 // fold(m, init, f), acc first). Int accumulator. The closure dispatches via $closure_fn3 (the
 // render generates one closure type per arity that appears — 3-arity needs no new machinery).
-fn __map_fold_loop(sh: Int, f: (Int, Int, Int) -> Int, len: Int, i: Int, acc: Int) -> Int = if i >= len then acc
-else {
-  let k = prim.load64(sh + 12 + i * 16)
-  let v = prim.load64(sh + 12 + i * 16 + 8)
-  let nacc = f(acc, k, v)
-  __map_fold_loop(sh, f, len, i + 1, nacc)
-}
+fn __map_fold_loop(sh: Int, f: (Int, Int, Int) -> Int, len: Int, i: Int, acc: Int) -> Int =
+  if i >= len then acc
+  else {
+    let k = prim.load64(sh + 12 + i * 16)
+    let v = prim.load64(sh + 12 + i * 16 + 8)
+    let nacc = f(acc, k, v)
+    __map_fold_loop(sh, f, len, i + 1, nacc)
+  }
 
 fn map_fold(m: Map[Int, Int], init: Int, f: (Int, Int, Int) -> Int) -> Int = {
   let sh = prim.handle(m)
@@ -480,14 +512,15 @@ fn map_fold(m: Map[Int, Int], init: Int, f: (Int, Int, Int) -> Int) -> Int = {
 // (the map_if composition; FIRST position with LAST value = set's replace-in-place).
 // Wide scalar keys (Int64/UInt64 — map_wide_int_key) are i64 slots like Int, so the
 // one twin serves every scalar-key/scalar-value instantiation.
-fn __map_from_list_at(pairs: List[(Int, Int)], i: Int, m: Map[Int, Int]) -> Map[Int, Int] = if i >= list.len(pairs) then m
-else match list.get(pairs, i) {
-  some(p) => {
-    let (k, v) = p
-    __map_from_list_at(pairs, i + 1, map.set(m, k, v))
-  },
-  none => m,
-}
+fn __map_from_list_at(pairs: List[(Int, Int)], i: Int, m: Map[Int, Int]) -> Map[Int, Int] =
+  if i >= list.len(pairs) then m
+  else match list.get(pairs, i) {
+    some(p) => {
+      let (k, v) = p
+      __map_from_list_at(pairs, i + 1, map.set(m, k, v))
+    },
+    none => m,
+  }
 
 fn map_from_list(pairs: List[(Int, Int)]) -> Map[Int, Int] = {
   let m: Map[Int, Int] = map.new()
@@ -513,8 +546,9 @@ fn __map_find_at(sh: Int, len: Int, f: (Int, Int) -> Bool, i: Int) -> (Int, Int)
   else __map_find_loop(sh, len, f, i + 1)
 }
 
-fn __map_find_loop(sh: Int, len: Int, f: (Int, Int) -> Bool, i: Int) -> (Int, Int)? = if i >= len then __map_find_none()
-else __map_find_at(sh, len, f, i)
+fn __map_find_loop(sh: Int, len: Int, f: (Int, Int) -> Bool, i: Int) -> (Int, Int)? =
+  if i >= len then __map_find_none()
+  else __map_find_at(sh, len, f, i)
 
 fn map_find(m: Map[Int, Int], f: (Int, Int) -> Bool) -> (Int, Int)? = {
   let sh = prim.handle(m)

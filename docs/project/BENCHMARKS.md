@@ -20,8 +20,8 @@ Almide compiles to Rust, which then compiles to native machine code. No runtime,
 
 | Metric | Value |
 |--------|-------|
-| Binary size (minigit CLI) | **418 KB** (stripped) |
-| Dependencies | **0** (single static binary) |
+| Binary size (`perf/native/cli_app.almd`, the minigit-shaped CLI) | **464,488 B** stripped — macOS arm64, measured 2026-10-03 by `research/benchmark/perf/native/measure.sh` with the develop build and the v0.66.0 release (418 KB on 2026-07-30) |
+| Dependencies | **0** crates (only the platform C library is dynamically linked: `libSystem` on macOS) |
 | WASM target | `almide build app.almd --target wasm` |
 
 ### Runtime scoreboard (2026-07-30, Apple M4 Pro, rustc 1.96.1)

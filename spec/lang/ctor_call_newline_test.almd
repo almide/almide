@@ -1,0 +1,24 @@
+// #3387: `ok(` / `err(` / `some(` read their operand like any call — a
+// newline after `(`, a trailing comma and a newline before `)` are
+// insignificant, the shape a long error message wraps into.
+fn a() -> Result[Int, String] = ok(1)
+
+fn b() -> Int? = some(1)
+
+fn c(n: Int) -> Result[Int, String] = err("too long a message to fit on the line: ${n}")
+
+fn checked(n: Int) -> Int! = {
+  guard n > 0 else err("must be positive, got ${n}")
+  n
+}
+
+test "ok / some / err accept a newline after the opening paren" {
+  assert_eq(a(), ok(1))
+  assert_eq(b(), some(1))
+  assert_eq(c(7), err("too long a message to fit on the line: 7"))
+}
+
+test "a wrapped err in a guard else" {
+  assert_eq(checked(3), ok(3))
+  assert_eq(checked(-1), err("must be positive, got -1"))
+}

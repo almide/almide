@@ -33,11 +33,12 @@ fn __pad_one(dst: Int, pbase: Int, plen: Int, pclen: Int) -> Int = if plen <= 0 
 } else __pad_copy(pbase, dst, pclen)
 
 // Write `count` pad chars from `dst`.
-fn __pad_fill(dst: Int, pbase: Int, plen: Int, pclen: Int, count: Int) -> Int = if count <= 0 then dst
-else {
-  let _w = __pad_one(dst, pbase, plen, pclen)
-  __pad_fill(dst + pclen, pbase, plen, pclen, count - 1)
-}
+fn __pad_fill(dst: Int, pbase: Int, plen: Int, pclen: Int, count: Int) -> Int =
+  if count <= 0 then dst
+  else {
+    let _w = __pad_one(dst, pbase, plen, pclen)
+    __pad_fill(dst + pclen, pbase, plen, pclen, count - 1)
+  }
 
 // Copy `s` into a fresh owned String (the already-wide-enough fallback).
 fn __pad_copy_str(s: String) -> String = {

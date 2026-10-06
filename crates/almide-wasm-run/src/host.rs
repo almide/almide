@@ -10,6 +10,9 @@
 
 use std::sync::{Arc, Mutex};
 
+#[path = "host_fan.rs"]
+mod fan;
+
 /// One wasm run's cross-target observables: stdout, stderr, exit code.
 /// A trap WITHOUT a recorded `almide.exit` code is a runtime abort
 /// (unreachable / div-by-zero / OOB) — exit 1, the native abort contract,
@@ -99,13 +102,17 @@ struct Host {
     /// `http.serve`'s listener and pending connection (ops 70..=72, #2650).
     serve: Arc<Mutex<crate::host_serve::ServeState>>,
     /// The product runner's LIVE streams (#2650): stdout through a 64 KiB
-    /// buffer flushed per write on a terminal — native's rule — and stderr
+    /// buffer flushed at every line end, and per write on a terminal —
+    /// native's rule (#3417) — and stderr
     /// straight through, so a program that never returns (a server) shows
     /// its output as it runs. None = the buffered harness capture.
     live_out: Option<Arc<Mutex<std::io::BufWriter<std::io::Stdout>>>>,
     /// The last stderr line written, in either mode: the die convention
     /// (#1912) reads it after a trap.
     err_last: Arc<Mutex<String>>,
+    /// The instance-parallel fan context (#3003): set on a run's own store,
+    /// `None` on a chunk's — a chunk's nested offer runs sequentially.
+    par: Option<Arc<fan::ParCtx>>,
 }
 
 /// Is the process's stdout a terminal (native flushes per write there).
@@ -122,7 +129,9 @@ fn emit_out(host: &Host, text: &str) {
             use std::io::Write as _;
             let mut w = w.lock().expect("live stdout");
             let _ = w.write_all(text.as_bytes());
-            if stdout_is_terminal() {
+            // Line-buffered, native's rule (#3417): a line end flushes on any
+            // stdout, every write on a terminal.
+            if text.contains('\n') || stdout_is_terminal() {
                 let _ = w.flush();
             }
         }
@@ -284,7 +293,62 @@ pub fn run_wasm_real_stdin_args(bytes: &[u8], args: &[String]) -> anyhow::Result
     run_wasm_src(bytes, StdinSource::RealOnce, None, args, None, true)
 }
 
+/// The embedded host's wasm call-stack budget (#3435), set as wasmtime's
+/// `Config::max_wasm_stack` on the one engine every run (and every fan
+/// instance of that run) uses. wasmtime's default is 512 KiB, which made a
+/// plain non-tail recursion (a tree walk, a type checker's `infer`) trap
+/// with `call stack exhausted` 5–8x shallower than the native binary, whose
+/// main thread has an 8 MiB stack. 8 MiB matches native's budget; measured
+/// on 2026-10-06, the embedded lane then reaches at least native's depth on
+/// a non-tail tree walk and on a recursion with heap locals per frame (a
+/// wasm frame is smaller than its native twin). Exhaustion stays the
+/// resource limit C-196 names; this only sets where it is. Stock runtimes
+/// (`wasmtime run`, browsers) keep their own limits.
+pub const EMBEDDED_WASM_STACK: usize = 8 * 1024 * 1024;
+
+/// The native stack of the host thread a guest runs on. wasmtime requires
+/// it to exceed [`EMBEDDED_WASM_STACK`] plus the host frames below and
+/// between guest frames (host imports, the trap handler, and Cranelift
+/// compiling the module on this thread), or a deep guest overflows the
+/// thread's guard page instead of trapping. The size is a virtual
+/// reservation, committed lazily, so a shallow program pays nothing.
+pub(crate) const EMBEDDED_HOST_THREAD_STACK: usize = EMBEDDED_WASM_STACK + 56 * 1024 * 1024;
+
+/// Spawn a scoped thread with [`EMBEDDED_HOST_THREAD_STACK`] — every host
+/// thread that calls into a guest of an [`EMBEDDED_WASM_STACK`] engine.
+pub(crate) fn spawn_guest_thread<'scope, 'env, T: Send + 'scope>(
+    scope: &'scope std::thread::Scope<'scope, 'env>,
+    f: impl FnOnce() -> T + Send + 'scope,
+) -> std::thread::ScopedJoinHandle<'scope, T> {
+    std::thread::Builder::new()
+        .name("almide-wasm-guest".to_string())
+        .stack_size(EMBEDDED_HOST_THREAD_STACK)
+        .spawn_scoped(scope, f)
+        .expect("failed to spawn the embedded wasm guest thread")
+}
+
+/// Run the guest on its own host thread sized for [`EMBEDDED_WASM_STACK`]
+/// (the caller's thread may be any size: a test harness worker, the CLI's
+/// driver). Everything a run touches — stdout/stderr, the exit code, the
+/// serve loop and its signal handling — is per-run state or process-wide,
+/// so moving the run off the caller's thread changes nothing observable; a
+/// host panic is re-raised on the caller's thread.
 fn run_wasm_src(
+    bytes: &[u8],
+    stdin: StdinSource,
+    max_memory_bytes: Option<usize>,
+    args: &[String],
+    watchdog: Option<std::time::Duration>,
+    live: bool,
+) -> anyhow::Result<RunResult> {
+    std::thread::scope(|s| {
+        spawn_guest_thread(s, || run_wasm_src_here(bytes, stdin, max_memory_bytes, args, watchdog, live))
+            .join()
+            .unwrap_or_else(|p| std::panic::resume_unwind(p))
+    })
+}
+
+fn run_wasm_src_here(
     bytes: &[u8],
     stdin: StdinSource,
     max_memory_bytes: Option<usize>,
@@ -298,6 +362,11 @@ fn run_wasm_src(
     // deadline maps to a plain trap.
     let mut cfg = wasmtime::Config::new();
     cfg.epoch_interruption(watchdog.is_some());
+    cfg.max_wasm_stack(EMBEDDED_WASM_STACK);
+    // wasmtime refuses a `max_wasm_stack` above `async_stack_size` (2 MiB by
+    // default) even when, as here, nothing runs async: no fiber is ever
+    // allocated, so this only satisfies the engine's config check.
+    cfg.async_stack_size(EMBEDDED_WASM_STACK + 1024 * 1024);
     let engine = wasmtime::Engine::new(&cfg)?;
     let module = wasmtime::Module::new(&engine, bytes)?;
     let out = Arc::new(Mutex::new(String::new()));
@@ -323,153 +392,29 @@ fn run_wasm_src(
             serve: Arc::new(Mutex::new(crate::host_serve::ServeState::default())),
             live_out: live.then(|| Arc::new(Mutex::new(std::io::BufWriter::with_capacity(65536, std::io::stdout())))),
             err_last: Arc::new(Mutex::new(String::new())),
+            par: None,
         },
     );
     store.limiter(|h| &mut h.limits);
-    let mut linker = wasmtime::Linker::new(&engine);
-    linker.func_wrap(
-        "almide",
-        "println",
-        |mut caller: wasmtime::Caller<'_, Host>, ptr: i32, len: i32| {
-            append_line(&mut caller, |h| &h.out, ptr, len);
-        },
-    )?;
-    linker.func_wrap(
-        "almide",
-        "eprintln",
-        |mut caller: wasmtime::Caller<'_, Host>, ptr: i32, len: i32| {
-            append_line(&mut caller, |h| &h.err, ptr, len);
-        },
-    )?;
-    // A fn item (not a closure): a return-type-annotated closure is not
-    // higher-ranked over the Caller lifetime and fails IntoFunc.
-    fn exit_host(caller: wasmtime::Caller<'_, Host>, code: i32) -> wasmtime::Result<()> {
-        *caller.data().exit.lock().expect("test harness invariant") = Some(code);
-        // Unwind: the emitter guarantees an `unreachable` follows the
-        // call, so returning an error here is the ONLY way out — no
-        // instruction after `process.exit` ever executes.
-        Err(wasmtime::Error::msg("almide.exit"))
-    }
-    linker.func_wrap("almide", "exit", exit_host)?;
-    linker.func_wrap(
-        "almide",
-        "fs_call",
-        |mut caller: wasmtime::Caller<'_, Host>,
-         op: i32,
-         a_ptr: i32,
-         a_len: i32,
-         b_ptr: i32,
-         b_len: i32|
-         -> wasmtime::Result<i64> {
-            // op 35 = incremental stdin (up to a_len bytes off the cursor).
-            // Handled BEFORE the a/b buffer reads: the count rides in
-            // a_len with a null a_ptr, and materializing it as a guest
-            // buffer would read a_len bytes of guest memory (the 4 GiB
-            // trap the op-31 comment in the emitter records).
-            if op == 35 {
-                let n = i64::from(a_len).max(0) as usize;
-                let got = caller.data().stdin.lock().expect("stdin").take(n);
-                let len = got.len();
-                *caller.data().fs_buf.lock().expect("fs buf") = got;
-                return Ok((len as i64) & 0xFFFF_FFFF);
-            }
-            // op 36 = env.sleep_ms: the count rides a_len (scalar, null
-            // a_ptr — the op-35 discipline). No observable value.
-            if op == 36 {
-                let ms = i64::from(a_len).max(0) as u64;
-                std::thread::sleep(std::time::Duration::from_millis(ms));
-                return Ok(0);
-            }
-            // op 60 = the monotonic clock (datetime.monotonic_ns): raw
-            // nanos since the run's first read, native's own origin rule
-            // (a process-wide OnceLock<Instant>). No args, no buffer.
-            if op == 60 {
-                static ORIGIN: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
-                let start = ORIGIN.get_or_init(std::time::Instant::now);
-                return Ok(start.elapsed().as_nanos() as i64);
-            }
-            // ops 54..=59 = the http call handle on call `id` (#2633): the
-            // id rides a_len (scalar, null a_ptr — the op-35 discipline).
-            if (54..=59).contains(&op) {
-                let calls = caller.data().calls.clone();
-                let (ret, buf) = crate::http_call_host::by_id(&calls, op, a_len as u32);
-                *caller.data().fs_buf.lock().expect("fs buf") = buf;
-                return Ok(ret);
-            }
-            // op 29 = args (#1716): argv0 + the run's program args; the
-            // guest skips frame 0 (native argv[1..] semantics).
-            if op == 29 {
-                let mut names = vec!["wasm-harness".to_string()];
-                names.extend(caller.data().args.iter().cloned());
-                let buf = frames(&names);
-                let len = buf.len();
-                *caller.data().fs_buf.lock().expect("fs buf") = buf;
-                return Ok((len as i64) & 0xFFFF_FFFF);
-            }
-            let mem = caller
-                .get_export("memory")
-                .and_then(|e| e.into_memory())
-                .expect("exported memory");
-            let mut a = vec![0u8; a_len as u32 as usize];
-            mem.read(&caller, a_ptr as u32 as usize, &mut a)?;
-            let mut b = vec![0u8; b_len as u32 as usize];
-            mem.read(&caller, b_ptr as u32 as usize, &mut b)?;
-            let a = String::from_utf8_lossy(&a).to_string();
-            // op 30 = raw stdout append (io.write / io.write_bytes):
-            // PROGRAM order with println is the C-contract, so it goes
-            // straight into the same sink, no trailing newline.
-            // op 34 = wall clock (nanos, RAW i64 — no status packing).
-            if op == 34 {
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_nanos() as i64;
-                return Ok(now);
-            }
-            if op == 30 {
-                emit_out(caller.data(), &String::from_utf8_lossy(&b));
-                return Ok(0);
-            }
-            // op 73 = raw stderr append (`panic`'s line, #2769): no newline.
-            if op == 73 {
-                emit_err_raw(caller.data(), &String::from_utf8_lossy(&b));
-                return Ok(0);
-            }
-            // http.serve (#2650): the listener and the held connection
-            // live in the run's own state — one per run, like native's.
-            if (crate::host_serve::OP_SERVE_BIND..=crate::host_serve::OP_SERVE_REPLY).contains(&op) {
-                let (ret, buf) = crate::host_serve::dispatch(&caller.data().serve, caller.data().live_out.as_ref(), op, &a, frames, parse_http_frame);
-                *caller.data().fs_buf.lock().expect("fs buf") = buf;
-                return Ok(ret);
-            }
-            // op 53 = open an http call (#2633): url in a, the start frame in b.
-            let (ret, buf) = if op == 53 {
-                crate::http_call_host::open(&caller.data().calls.clone(), &a, &b)
-            } else {
-                fs_dispatch(op, &a, &b)
-            };
-            *caller.data().fs_buf.lock().expect("fs buf") = buf;
-            Ok(ret)
-        },
-    )?;
-    linker.func_wrap(
-        "almide",
-        "host_read",
-        |mut caller: wasmtime::Caller<'_, Host>, dst: i32| -> wasmtime::Result<()> {
-            let mem = caller
-                .get_export("memory")
-                .and_then(|e| e.into_memory())
-                .expect("exported memory");
-            let buf = caller.data().fs_buf.lock().expect("fs buf").clone();
-            mem.write(&mut caller, dst as u32 as usize, &buf)?;
-            Ok(())
-        },
-    )?;
+    let linker = host_linker(&engine)?;
+    // #3003 (ADR-0011 §D2a): the instance-parallel fan offer (op 74) runs a
+    // chunk on fresh instances of THIS module, through THIS import set.
+    let ticked = watchdog.map(|_| Arc::new(std::sync::atomic::AtomicBool::new(false)));
+    store.data_mut().par = Some(Arc::new(fan::ParCtx::new(
+        (engine.clone(), module.clone(), linker.clone()),
+        max_memory_bytes,
+        ticked.clone(),
+        args.to_vec(),
+    )));
     let ticker = watchdog.map(|after| {
         store.set_epoch_deadline(1);
         let eng = engine.clone();
+        let ticked = ticked.clone();
         std::thread::spawn(move || {
             std::thread::sleep(after);
+            if let Some(t) = ticked {
+                t.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
             eng.increment_epoch();
         })
     });
@@ -552,19 +497,193 @@ fn run_wasm_src(
     })
 }
 
-/// The one stderr line a trapped run reports (#1826), in the `Error: `
-/// abort form: wasmtime's own `Trap` Display — already spelled
-/// `wasm trap: <reason>` ("out of bounds memory access", "wasm
-/// `unreachable` instruction executed", "call stack exhausted", …) —
-/// when the error is a trap, else the chain's root cause under the same
-/// prefix. Never the multi-line backtrace.
+/// The `almide.*` import set every instance of a run links against — the
+/// run's own and, for the instance-parallel fan offer (#3003), its chunks'.
+fn host_linker(engine: &wasmtime::Engine) -> anyhow::Result<wasmtime::Linker<Host>> {
+    let mut linker = wasmtime::Linker::new(engine);
+    linker.func_wrap(
+        "almide",
+        "println",
+        |mut caller: wasmtime::Caller<'_, Host>, ptr: i32, len: i32| {
+            append_line(&mut caller, |h| &h.out, ptr, len);
+        },
+    )?;
+    linker.func_wrap(
+        "almide",
+        "eprintln",
+        |mut caller: wasmtime::Caller<'_, Host>, ptr: i32, len: i32| {
+            append_line(&mut caller, |h| &h.err, ptr, len);
+        },
+    )?;
+    // A fn item (not a closure): a return-type-annotated closure is not
+    // higher-ranked over the Caller lifetime and fails IntoFunc.
+    fn exit_host(caller: wasmtime::Caller<'_, Host>, code: i32) -> wasmtime::Result<()> {
+        *caller.data().exit.lock().expect("test harness invariant") = Some(code);
+        // Unwind: the emitter guarantees an `unreachable` follows the
+        // call, so returning an error here is the ONLY way out — no
+        // instruction after `process.exit` ever executes.
+        Err(wasmtime::Error::msg("almide.exit"))
+    }
+    linker.func_wrap("almide", "exit", exit_host)?;
+    // The private subprocess import (#2589): the canonical form a stock
+    // artifact carries, served here with the same core as ops 80..=90.
+    crate::host_process::link_spawn_import(&mut linker)?;
+    linker.func_wrap(
+        "almide",
+        "fs_call",
+        |mut caller: wasmtime::Caller<'_, Host>,
+         op: i32,
+         a_ptr: i32,
+         a_len: i32,
+         b_ptr: i32,
+         b_len: i32|
+         -> wasmtime::Result<i64> {
+            // op 74 = the instance-parallel fan offer (#3003): the request
+            // and the answer room are raw i64 slots, never text.
+            if op == fan::OP_FAN_PAR {
+                return fan::serve(&mut caller, (a_ptr, a_len), (b_ptr, b_len));
+            }
+            // op 35 = incremental stdin (up to a_len bytes off the cursor).
+            // Handled BEFORE the a/b buffer reads: the count rides in
+            // a_len with a null a_ptr, and materializing it as a guest
+            // buffer would read a_len bytes of guest memory (the 4 GiB
+            // trap the op-31 comment in the emitter records).
+            if op == 35 {
+                let n = i64::from(a_len).max(0) as usize;
+                let got = caller.data().stdin.lock().expect("stdin").take(n);
+                let len = got.len();
+                *caller.data().fs_buf.lock().expect("fs buf") = got;
+                return Ok((len as i64) & 0xFFFF_FFFF);
+            }
+            // op 36 = env.sleep_ms: the count rides a_len (scalar, null
+            // a_ptr — the op-35 discipline). No observable value.
+            if op == 36 {
+                let ms = i64::from(a_len).max(0) as u64;
+                std::thread::sleep(std::time::Duration::from_millis(ms));
+                return Ok(0);
+            }
+            // op 60 = the monotonic clock (datetime.monotonic_ns): raw
+            // nanos since the run's first read, native's own origin rule
+            // (a process-wide OnceLock<Instant>). No args, no buffer.
+            if op == 60 {
+                static ORIGIN: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+                let start = ORIGIN.get_or_init(std::time::Instant::now);
+                return Ok(start.elapsed().as_nanos() as i64);
+            }
+            // ops 54..=59 = the http call handle on call `id` (#2633): the
+            // id rides a_len (scalar, null a_ptr — the op-35 discipline).
+            if (54..=59).contains(&op) {
+                let calls = caller.data().calls.clone();
+                let (ret, buf) = crate::http_call_host::by_id(&calls, op, a_len as u32);
+                *caller.data().fs_buf.lock().expect("fs buf") = buf;
+                return Ok(ret);
+            }
+            // op 29 = args (#1716): argv0 + the run's program args; the
+            // guest skips frame 0 (native argv[1..] semantics).
+            if op == 29 {
+                let mut names = vec!["wasm-harness".to_string()];
+                names.extend(caller.data().args.iter().cloned());
+                let buf = frames(&names);
+                let len = buf.len();
+                *caller.data().fs_buf.lock().expect("fs buf") = buf;
+                return Ok((len as i64) & 0xFFFF_FFFF);
+            }
+            let mem = caller
+                .get_export("memory")
+                .and_then(|e| e.into_memory())
+                .expect("exported memory");
+            let mut a = vec![0u8; a_len as u32 as usize];
+            mem.read(&caller, a_ptr as u32 as usize, &mut a)?;
+            let mut b = vec![0u8; b_len as u32 as usize];
+            mem.read(&caller, b_ptr as u32 as usize, &mut b)?;
+            let a = String::from_utf8_lossy(&a).to_string();
+            // op 30 = raw stdout append (io.write / io.write_bytes):
+            // PROGRAM order with println is the C-contract, so it goes
+            // straight into the same sink, no trailing newline.
+            // op 34 = wall clock (nanos, RAW i64 — no status packing).
+            if op == 34 {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos() as i64;
+                return Ok(now);
+            }
+            if op == 30 {
+                emit_out(caller.data(), &String::from_utf8_lossy(&b));
+                return Ok(0);
+            }
+            // op 73 = raw stderr append (`panic`'s line, #2769): no newline.
+            if op == 73 {
+                emit_err_raw(caller.data(), &String::from_utf8_lossy(&b));
+                return Ok(0);
+            }
+            // http.serve (#2650): the listener and the held connection
+            // live in the run's own state — one per run, like native's.
+            if (crate::host_serve::OP_SERVE_BIND..=crate::host_serve::OP_SERVE_REPLY).contains(&op) {
+                let (ret, buf) = crate::host_serve::dispatch(&caller.data().serve, caller.data().live_out.as_ref(), op, &a, frames, parse_http_frame);
+                *caller.data().fs_buf.lock().expect("fs buf") = buf;
+                return Ok(ret);
+            }
+            // ops 80..=90 = almide:process/spawn (#2589, ADR-0025): the
+            // subprocess core native runs; stdout flushed before a child
+            // that shares it.
+            if (crate::host_process::OP_FIRST..=crate::host_process::OP_LAST).contains(&op) {
+                let live = caller.data().live_out.clone();
+                let flush = move || {
+                    if let Some(w) = &live {
+                        use std::io::Write as _;
+                        let _ = w.lock().expect("live stdout").flush();
+                    }
+                };
+                let (ret, buf) = crate::host_process::dispatch(op, &a, &b, &flush);
+                *caller.data().fs_buf.lock().expect("fs buf") = buf;
+                return Ok(ret);
+            }
+            // op 53 = open an http call (#2633): url in a, the start frame in b.
+            let (ret, buf) = if op == 53 {
+                crate::http_call_host::open(&caller.data().calls.clone(), &a, &b)
+            } else {
+                fs_dispatch(op, &a, &b)
+            };
+            *caller.data().fs_buf.lock().expect("fs buf") = buf;
+            Ok(ret)
+        },
+    )?;
+    linker.func_wrap(
+        "almide",
+        "host_read",
+        |mut caller: wasmtime::Caller<'_, Host>, dst: i32| -> wasmtime::Result<()> {
+            let mem = caller
+                .get_export("memory")
+                .and_then(|e| e.into_memory())
+                .expect("exported memory");
+            let buf = caller.data().fs_buf.lock().expect("fs buf").clone();
+            mem.write(&mut caller, dst as u32 as usize, &buf)?;
+            Ok(())
+        },
+    )?;
+    Ok(linker)
+}
+
 /// The `unreachable` trap — the instruction the die lowering ends on.
 fn is_unreachable_trap(e: &wasmtime::Error) -> bool {
     matches!(e.downcast_ref::<wasmtime::Trap>(), Some(wasmtime::Trap::UnreachableCodeReached))
 }
 
+/// The one stderr line a trapped run reports (#1826), in the `Error: `
+/// abort form: `Error: stack overflow` for call-stack exhaustion (C-196),
+/// otherwise wasmtime's own `Trap` Display — already spelled
+/// `wasm trap: <reason>` ("out of bounds memory access", "wasm
+/// `unreachable` instruction executed", …) — when the error is a trap,
+/// else the chain's root cause under the same prefix. Never the
+/// multi-line backtrace.
 fn trap_line(e: &wasmtime::Error) -> String {
     match e.downcast_ref::<wasmtime::Trap>() {
+        // C-196: call-stack exhaustion is ALS-T6's defined abort, spelled as
+        // the native leg spells it (prelude_stack.rs), not as wasmtime's
+        // `wasm trap: call stack exhausted`. The depth it happens at stays
+        // this host's own ([`EMBEDDED_WASM_STACK`]).
+        Some(wasmtime::Trap::StackOverflow) => "Error: stack overflow\n".to_string(),
         Some(t) => format!("Error: {t}\n"),
         None => format!("Error: wasm trap: {}\n", e.root_cause()),
     }
@@ -629,6 +748,17 @@ mod tests {
         let r = run_wasm(&module(&oob)).expect("engine runs the module");
         assert_eq!(r.exit, 1);
         assert_eq!(r.stderr, "Error: wasm trap: out of bounds memory access\n");
+    }
+
+    /// C-196: an unbounded non-tail self-call exhausts the wasm stack, and the
+    /// run ends with ALMIDE's abort line for it — the native leg's spelling —
+    /// not wasmtime's `wasm trap: call stack exhausted`.
+    #[test]
+    fn stack_exhaustion_is_the_defined_abort() {
+        let r = run_wasm(&module(&[Instruction::Call(0)])).expect("engine runs the module");
+        assert_eq!(r.exit, 1);
+        assert_eq!(r.stdout, "");
+        assert_eq!(r.stderr, "Error: stack overflow\n");
     }
 
     /// A runaway program is STOPPED, not hung (#2955): the test harness's

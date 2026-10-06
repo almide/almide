@@ -52,17 +52,24 @@
    Z ones (the WasmRcDec convention). *)
 
 From AlmideTrust Require Import RuntimeModel.
+From AlmideTrust Require LargeTree.
 From Stdlib Require Import ZArith.
 From Stdlib Require Import List.
 Import ListNotations.
 From Stdlib Require Import Lia.
 Open Scope Z_scope.
 
+(* The large-list loops stay folded under the trees' reductions. *)
+Arguments LargeTree.lfree_mem_of : simpl never.
+Arguments LargeTree.lfree_mem : simpl never.
+Opaque LargeTree.lfree_tree LargeTree.LFUEL.
+
 (* ── Layout/runtime constants (matched by the Rust-side pin):
-      almide_layout: RC = 0, CAP = 8, PAYLOAD = 12; 16 size classes. ── *)
+      almide_layout: RC = 0, CAP = 8, PAYLOAD = 12; 13 size classes (totals
+      up to 64 KiB); above them the exact-size large list (#3348). ── *)
 Definition CAP_OFFSET : Z := 8.
 Definition PAYLOAD : Z := 12.
-Definition CLASSES : Z := 16.
+Definition CLASSES : Z := 13.
 
 (* count-leading-zeros of a positive i32, spelled through log2. *)
 Definition clz32 (z : Z) : Z := 31 - Z.log2 z.
@@ -197,7 +204,7 @@ Qed.
    statement (every `if` in these trees does), which keeps the runner
    structurally recursive with early `SRet` propagation. Layout constants
    appear as their computed literals (8 = CAP offset, 12 = PAYLOAD,
-   15 = PAYLOAD + 3, 16 = the class count and the minimum classed total)
+   15 = PAYLOAD + 3, 16 = the minimum classed total, 13 = the class count)
    so the operational goals stay in one spelling; the pure keystones
    above carry the named forms. *)
 
@@ -252,7 +259,10 @@ Inductive stmt : Type :=
   | SStore (addr v : expr)
   | SIf (cond : expr) (body : stmt)
   | SRet
-  | SCallFree.
+  | SCallFree
+  | SLRun (ss : list LargeTree.lstmt).
+      (* an inlined loop tree (the large-list release, LargeTree.lfree_tree),
+         then return *)
 
 (* One statement: `(returned?, state)`. `fsem` is the semantics of
    `call $free` — instantiated below with free's own runner, so dec's
@@ -267,6 +277,8 @@ Fixpoint sstep (fsem : C -> C) (s : stmt) (c : C) : bool * C :=
   | SIf e b => if Z.eqb (ev e c) 0 then (false, c) else sstep fsem b c
   | SRet => (true, c)
   | SCallFree => (false, fsem c)
+  | SLRun ss => (true, mkC (ctot c) (ccls c) (ctmp c)
+                            (LargeTree.lfree_mem_of ss blk (ctot c) (ccls c) (cm c)))
   end.
 
 Fixpoint srun (fsem : C -> C) (ss : list stmt) (c : C) : C :=
@@ -299,7 +311,7 @@ Definition dec_body : list stmt :=
      total = (load(block+8 = CAP) + 12 + 3) & -4;
      if (total < 16) return;
      class = 28 - clz(total - 1);
-     if (class >= 16 = CLASSES) return;
+     if (class >= 13 = CLASSES) { $lfree(block, total); return }  (#3348)
      class = (class << 2) + FREELIST_BASE;
      store(block + 12 = PAYLOAD, load(class));  // block.payload[0] = head
      store(class, block).                       // head = block ── *)
@@ -307,7 +319,7 @@ Definition free_body : list stmt :=
   [ SSetTot (ELand (EAdd (ELoad (EAdd EBlk (EC 8))) (EC 15)) (EC (-4)));
     SIf (ELtU ETot (EC 16)) SRet;
     SSetCls (ESub (EC 28) (EClz (ESub ETot (EC 1))));
-    SIf (EGeU ECls (EC 16)) SRet;
+    SIf (EGeU ECls (EC 13)) (SLRun LargeTree.lfree_tree);
     SSetCls (EAdd (EShl ECls (EC 2)) (EC fbase));
     SStore (EAdd EBlk (EC 12)) (ELoad ECls);
     SStore ECls EBlk ].
@@ -406,21 +418,23 @@ Proof.
   cbn. reflexivity.
 Qed.
 
-(* ... as does a total whose class overflows the 16-entry table. *)
-Theorem free_abandons_huge : forall c t,
+(* A total above the class table joins the large list: memory becomes
+   exactly what LargeTree's `$lfree` tree computes (its realization,
+   `LargeTree.lfree_mem_spec`, is the coalescing insert). *)
+Theorem free_files_large : forall c t,
   t = Z.land (cm c (blk + 8) + 15) (-4) ->
   16 <= t ->
-  16 <= class_of t ->
-  cm (run_free c) = cm c.
+  13 <= class_of t ->
+  cm (run_free c) = LargeTree.lfree_mem blk t (class_of t) (cm c).
 Proof.
   intros c t Ht H16 Hcls. unfold run_free, free_body.
   rcbn. rewrite <- Ht.
   replace (t <? 16) with false by (symmetry; apply Z.ltb_ge; exact H16).
   rcbn. replace (0 =? 0) with true by reflexivity. rcbn.
-  replace (28 - clz32 (t - 1) >=? 16) with true.
+  replace (28 - clz32 (t - 1) >=? 13) with true.
   2:{ symmetry. apply Z.geb_le. unfold class_of in Hcls. exact Hcls. }
   rcbn. replace (1 =? 0) with false by reflexivity. rcbn.
-  reflexivity.
+  unfold LargeTree.lfree_mem, class_of. reflexivity.
 Qed.
 
 (* `$free`, the FILING: for a class-eligible total, memory receives
@@ -431,7 +445,7 @@ Qed.
 Theorem free_files_by_class : forall c t,
   t = Z.land (cm c (blk + 8) + 15) (-4) ->
   16 <= t ->
-  class_of t < 16 ->
+  class_of t < 13 ->
   cm (run_free c)
   = (let slot := fbase + 4 * class_of t in
      upd (upd (cm c) (blk + 12) (cm c slot)) slot blk).
@@ -440,7 +454,7 @@ Proof.
   rcbn. rewrite <- Ht.
   replace (t <? 16) with false by (symmetry; apply Z.ltb_ge; exact H16).
   rcbn. replace (0 =? 0) with true by reflexivity. rcbn.
-  replace (28 - clz32 (t - 1) >=? 16) with false.
+  replace (28 - clz32 (t - 1) >=? 13) with false.
   2:{ symmetry. rewrite Z.geb_leb. apply Z.leb_gt.
       unfold class_of in Hcls. exact Hcls. }
   rcbn. replace (0 =? 0) with true by reflexivity. rcbn.
@@ -454,13 +468,13 @@ Qed.
 (* The COMPOSED release: a uniquely-held block whose cap was written by
    a class-c take (`16*2^c - 12`) decs to 0 and lands as the head of
    EXACTLY class c — `dec → free → the agreed slot`, end to end. The
-   `c < 16` bound is the take path's own guard (only classed takes write
+   `c < 13` bound is the take path's own guard (only classed takes write
    this cap shape). *)
 Theorem dec_unique_files_take_class : forall c cl,
   floor <= blk ->
   cm c blk = 1 ->
   0 <= cl ->
-  cl < 16 ->
+  cl < 13 ->
   cm c (blk + 8) = 16 * 2 ^ cl - 12 ->
   cm (run_dec c)
   = (let m0 := upd (cm c) blk 0 in

@@ -23,6 +23,14 @@
 #      spec/wasm_host_js/glue-ceiling.txt — shrinking is silent, growing is a
 #      ledger edit in the same change.
 #
+# A fixture's `// @host-flags: <flags>` line adds flags to its --host js
+# builds. A `// @fan-sequential-twin` line also builds and runs it with
+# ALMIDE_FAN_SEQUENTIAL=1 and requires the same output (#3383, step 1b).
+# A fixture with async imports (an `@extern(wasm, "js", ...,
+# returns: promise)`, #3353/#3371) needs a node with JSPI
+# (WebAssembly.Suspending, Node >= 24.20): locally an older node skips that
+# fixture with a warning, in CI it is a failure.
+#
 # Requires: node (>= 18). Locally a missing node skips with a warning; in CI
 # it is a failure (the job installs node, so its absence means the gate
 # silently stopped gating — the #985 rule).
@@ -72,9 +80,12 @@ const [jsPath, hostPath] = process.argv.slice(2);
 const mod = await import(pathToFileURL(jsPath).href);
 const host = hostPath ? await import(pathToFileURL(hostPath).href) : {};
 await mod.init(undefined, { js: host.js ?? {} });
-mod.run();
+await mod.run();
 if (host.after) await host.after(mod);
 JS
+
+HAVE_JSPI=0
+node -e 'process.exit(typeof WebAssembly.Suspending === "function" && typeof WebAssembly.promising === "function" ? 0 : 1)' && HAVE_JSPI=1
 
 fail=0; n=0
 for f in "$FIXTURE_DIR"/*.almd; do
@@ -85,10 +96,17 @@ for f in "$FIXTURE_DIR"/*.almd; do
   expected="$dir/$stem.expected"
   host="$dir/$stem.host.mjs"
   leg="$(sed -n 's|^// @leg: *||p' "$f" | head -1)"
+  read -r -a hostflags <<< "$(sed -n 's|^// @host-flags: *||p' "$f" | head -1)"
+  if [ "$HAVE_JSPI" -eq 0 ] && grep -Eq '^@extern\(wasm, *"js",.*returns *[:=] *promise' "$f"; then
+    if [ "${CI:-}" = "true" ]; then
+      echo "FAIL $f: async imports need a node with JSPI (WebAssembly.Suspending), this one is $(node --version)"; fail=1; continue
+    fi
+    echo "::warning::js-host: $(node --version) has no JSPI — skipping $f"; n=$((n - 1)); continue
+  fi
   if [ ! -f "$expected" ]; then
     echo "FAIL $f: no $stem.expected next to the fixture"; fail=1; continue
   fi
-  if ! "$BIN" build "$f" --target wasm --host js -o "$WORK/$stem.wasm" > "$WORK/$stem.build" 2>&1; then
+  if ! "$BIN" build "$f" --target wasm --host js ${hostflags[@]+"${hostflags[@]}"} -o "$WORK/$stem.wasm" > "$WORK/$stem.build" 2>&1; then
     echo "FAIL $f: build"; sed 's/^/    /' "$WORK/$stem.build"; fail=1; continue
   fi
   if [ -n "$leg" ] && ! grep -q "$leg" "$WORK/$stem.build"; then
@@ -103,6 +121,26 @@ for f in "$FIXTURE_DIR"/*.almd; do
   fi
   if ! cmp -s "$WORK/$stem.out" "$expected"; then
     echo "FAIL $f: stdout differs from $stem.expected"; diff "$expected" "$WORK/$stem.out" | head -20; fail=1; continue
+  fi
+  # 1b. (#3383) a `// @fan-sequential-twin` fixture is built again with
+  # ALMIDE_FAN_SEQUENTIAL=1, the fan lowering without the overlap protocol:
+  # its glue names no `almide:fan` import, the overlapped glue does, and the
+  # twin run prints the same .expected (ADR-0024 N7: the substrate never
+  # changes the observation). The host sees the variable too and asserts the
+  # in-flight count and timing of the lowering it runs.
+  if grep -q '^// @fan-sequential-twin' "$f"; then
+    if ! ALMIDE_FAN_SEQUENTIAL=1 "$BIN" build "$f" --target wasm --host js ${hostflags[@]+"${hostflags[@]}"} -o "$WORK/${stem}_seq.wasm" > "$WORK/$stem.seq.build" 2>&1; then
+      echo "FAIL $f: build with ALMIDE_FAN_SEQUENTIAL=1"; sed 's/^/    /' "$WORK/$stem.seq.build"; fail=1; continue
+    fi
+    if ! grep -q 'almide:fan' "$WORK/$stem.js" || grep -q 'almide:fan' "$WORK/${stem}_seq.js"; then
+      echo "FAIL $f: the overlapped glue must serve the almide:fan protocol and the sequential twin's must not"; fail=1; continue
+    fi
+    if ! ALMIDE_FAN_SEQUENTIAL=1 node "$WORK/run.mjs" "$WORK/${stem}_seq.js" $hostarg > "$WORK/$stem.seq.out" 2> "$WORK/$stem.seq.err"; then
+      echo "FAIL $f: node run of the sequential twin"; sed 's/^/    /' "$WORK/$stem.seq.err" | head -40; fail=1; continue
+    fi
+    if ! cmp -s "$WORK/$stem.seq.out" "$expected"; then
+      echo "FAIL $f: the sequential twin's stdout differs from $stem.expected"; diff "$expected" "$WORK/$stem.seq.out" | head -20; fail=1; continue
+    fi
   fi
   if ! grep -q '@extern(wasm' "$f"; then
     if ! "$BIN" run "$f" > "$WORK/$stem.native" 2> "$WORK/$stem.native.err"; then
@@ -133,7 +171,7 @@ for f in "$FIXTURE_DIR"/*.almd; do
     echo "FAIL $f: glue shims [$(shims_of "$WORK/$stem.js")] != module imports [$(imports_of "$WORK/$stem.wasm")]"; fail=1; continue
   fi
   if [ "$HAVE_WASM_OPT" -eq 1 ]; then
-    if ! "$BIN" build "$f" --target wasm --host js --wasm-opt -o "$WORK/${stem}_opt.wasm" > "$WORK/$stem.opt.build" 2>&1; then
+    if ! "$BIN" build "$f" --target wasm --host js ${hostflags[@]+"${hostflags[@]}"} --wasm-opt -o "$WORK/${stem}_opt.wasm" > "$WORK/$stem.opt.build" 2>&1; then
       echo "FAIL $f: build with --wasm-opt"; sed 's/^/    /' "$WORK/$stem.opt.build"; fail=1; continue
     fi
     if [ "$(shims_of "$WORK/${stem}_opt.js")" != "$(imports_of "$WORK/${stem}_opt.wasm")" ]; then

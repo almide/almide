@@ -49,8 +49,8 @@ flowchart TB
 The **trusted base is the Rocq kernel plus the extracted checker** (~1,400 lines of OCaml derived from the proofs — the exact number is in the block below), plus the hardware and the assumption that the spec says what we intend. Verified extraction (CertiRocq) is a *future ratchet*, not a present fact — see [`proofs/TRUSTED_BASE.md`](../proofs/TRUSTED_BASE.md) for the full ledger. Everything else is either proven against the kernel or untrusted. The stage-by-stage boundary — which rows are proven, which are trusted, and what every gate does and does not claim — is **[proven-vs-trusted.md](contracts/proven-vs-trusted.md)**.
 
 <!-- tcb:generated:start — derived by scripts/gen-claims.sh; DO NOT EDIT between the markers -->
-> **Measured, regenerated:** extracted checker `proofs/checker.ml` = **1394 lines** (+ 339
-> `.mli`); Rocq spine = **193 theorems+lemmas** (axiom-clean, asserted by `proofs/check.sh`);
+> **Measured, regenerated:** extracted checker `proofs/checker.ml` = **1433 lines** (+ 347
+> `.mli`); Rocq spine = **315 theorems+lemmas** (axiom-clean, asserted by `proofs/check.sh`);
 > Lean Perceus belt = **41 theorems**, 0 sorry (CI-gated).
 <!-- tcb:generated:end -->
 

@@ -25,6 +25,26 @@ pub fn scoped_bare_type_key(scope: Option<&str>, name: &str) -> Sym {
     sym(&format!("<in-scope:{}>|{}", scope.unwrap_or(""), name))
 }
 
+/// The key under which a GENERIC type declaration's parameter list is
+/// recorded (#3403): `<type-params:Pair>` / `<type-params:m.Pair>` holds
+/// `Ty::Tuple` of the declared letters, in declaration order, beside the
+/// declaration's own `types` entry. A transparent alias substitutes its
+/// arguments for exactly these letters, and the arity check counts them. No
+/// source can spell the key, and it has no `.Name` suffix, so no scan for a
+/// module's `m.Name` key ever matches it.
+pub fn type_params_key(type_key: &str) -> Sym {
+    sym(&format!("<type-params:{}>", type_key))
+}
+
+/// The declared parameter letters of the generic type registered under
+/// `type_key`, when it has any.
+pub fn declared_type_params<'t>(type_key: &str, types: &'t HashMap<Sym, Ty>) -> Option<&'t [Ty]> {
+    match types.get(&type_params_key(type_key))? {
+        Ty::Tuple(ps) => Some(ps.as_slice()),
+        _ => None,
+    }
+}
+
 /// The key recording that the file `scope` (`None` = the entry program)
 /// declares a type under the bare name of a builtin (#2858): `type Int = ..`
 /// in a package's `src/int.almd`, `type Path = ..` in `main.almd`. A file's
@@ -214,8 +234,18 @@ pub fn canonical_user_type_sym(name: &str, types: &HashMap<Sym, Ty>, cur_mod: Op
     if let Some((key, Ty::Record { .. } | Ty::Variant { .. })) = stdlib_shadow_entry(name, types, cur_mod) {
         return Some(key);
     }
-    canonical_user_type_sym_own_module(name, types, cur_mod)
-        .or_else(|| canonical_user_type_sym_scoped_alias(name, types, cur_mod))
+    if let Some(own) = canonical_user_type_sym_own_module(name, types, cur_mod) {
+        return Some(own);
+    }
+    // The module declares the name itself as an ALIAS (`type Ctx =
+    // List[String]`): its own declaration is the answer, and it is not
+    // nominal, so no `X.Type` key may stand in for it. Without this the
+    // unique-owner fallback below handed a module's bare `Ctx` to ANOTHER
+    // module's same-named record (#3401).
+    if own_module_alias(name, types, cur_mod).is_some() {
+        return None;
+    }
+    canonical_user_type_sym_scoped_alias(name, types, cur_mod)
         .or_else(|| canonical_user_type_sym_qualified(name, types))
         .or_else(|| canonical_user_type_sym_sibling(name, types, cur_mod))
         .or_else(|| canonical_user_type_sym_bare(name, types, cur_mod))
@@ -275,6 +305,24 @@ fn canonical_user_type_sym_own_module(name: &str, types: &HashMap<Sym, Ty>, cur_
         }
     }
     None
+}
+
+// A user module's own bare reference to a type ALIAS it declares (#3401):
+// the alias target registered under `mod.Name`. A record or variant is
+// answered by `canonical_user_type_sym_own_module`; a generic letter in scope
+// is a bound variable, not this declaration.
+fn own_module_alias<'t>(name: &str, types: &'t HashMap<Sym, Ty>, cur_mod: Option<&str>) -> Option<&'t Ty> {
+    let m = cur_mod?;
+    if name.contains('.') || almide_lang::stdlib_info::is_bundled_module(m) {
+        return None;
+    }
+    if matches!(types.get(&sym(name)), Some(Ty::TypeVar(_) | Ty::ConstParam { .. })) {
+        return None;
+    }
+    match types.get(&sym(&format!("{}.{}", m, name)))? {
+        Ty::Record { .. } | Ty::Variant { .. } | Ty::TypeVar(_) | Ty::ConstParam { .. } => None,
+        t => Some(t),
+    }
 }
 
 // A qualified spelling through THIS file's import alias (`bx.Box` under
@@ -345,11 +393,16 @@ fn canonical_user_type_sym_bare(name: &str, types: &HashMap<Sym, Ty>, cur_mod: O
     };
     if cur_mod.is_none() {
         if let Some(bare) = types.get(&sym(name)) {
-            if matches!(bare, Ty::Record { .. } | Ty::Variant { .. }) {
-                let is_alias_of_a_qualified = types.iter().any(|(k, v)| user_module_owner(k) && v == bare);
-                if !is_alias_of_a_qualified {
-                    return Some(sym(name));
-                }
+            let is_alias_of_a_qualified = || types.iter().any(|(k, v)| user_module_owner(k) && v == bare);
+            match bare {
+                Ty::Record { .. } | Ty::Variant { .. } if !is_alias_of_a_qualified() => return Some(sym(name)),
+                // The entry program's own ALIAS of the name (#3401): not
+                // nominal, so it has no key to answer with, but it shadows an
+                // imported module's same-named record just as a local record
+                // does — the bare lookup after this returns it.
+                Ty::Record { .. } | Ty::Variant { .. } | Ty::TypeVar(_) | Ty::ConstParam { .. } | Ty::Named(..) => {}
+                _ if !is_alias_of_a_qualified() => return None,
+                _ => {}
             }
         }
     }
@@ -435,17 +488,21 @@ pub enum TypeSpelling {
     RecordHead,
 }
 
-/// Which spellings of a builtin head the resolver answers.
+/// Which spellings of a builtin head the resolver answers — and, for an
+/// applied head, the parameters it DECLARES, which is the arity every
+/// application of it is checked against (E093, #3408).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BuiltinArity {
     /// Only the bare spelling (`Int`, and `Matrix` without arguments).
     Bare,
-    /// Applied to any number of arguments (`List[T]`; a missing element type
-    /// resolves to `Unknown`).
-    Any,
-    /// Applied to at least this many (`Map[K, V]`; fewer is a nominal name).
-    AtLeast(usize),
-    /// Applied to between `lo` and `hi` arguments inclusive (`T!`, `T!E`).
+    /// Applied to exactly these parameters (`List[T]`, `Map[K, V]`). Another
+    /// count is not this builtin: it stays a nominal name, which the
+    /// checker reports against these letters unless a declaration of the
+    /// same name takes it.
+    Params(&'static [&'static str]),
+    /// Applied to between `lo` and `hi` arguments inclusive (`T!`, `T!E`) —
+    /// a pseudo-generic the parser builds from a suffix, never written with
+    /// brackets, so no count of it is ever an error.
     Between(usize, usize),
 }
 
@@ -453,20 +510,19 @@ impl BuiltinArity {
     fn accepts(self, spelling: TypeSpelling) -> bool {
         match (self, spelling) {
             (BuiltinArity::Bare, TypeSpelling::Bare) => true,
-            (BuiltinArity::Any, TypeSpelling::Applied(_)) => true,
-            (BuiltinArity::AtLeast(lo), TypeSpelling::Applied(n)) => n >= lo,
+            (BuiltinArity::Params(ps), TypeSpelling::Applied(n)) => n == ps.len(),
             (BuiltinArity::Between(lo, hi), TypeSpelling::Applied(n)) => lo <= n && n <= hi,
             _ => false,
         }
     }
 
     /// One spelling this arity accepts — what a test writes to exercise the
-    /// head (`Map[Int, Int]` for `AtLeast(2)`).
+    /// head (`Map[Int, Int]` for `Params(["K", "V"])`).
     pub fn sample(self) -> TypeSpelling {
         match self {
             BuiltinArity::Bare => TypeSpelling::Bare,
-            BuiltinArity::Any => TypeSpelling::Applied(1),
-            BuiltinArity::AtLeast(n) | BuiltinArity::Between(n, _) => TypeSpelling::Applied(n),
+            BuiltinArity::Params(ps) => TypeSpelling::Applied(ps.len()),
+            BuiltinArity::Between(n, _) => TypeSpelling::Applied(n),
         }
     }
 }
@@ -477,10 +533,6 @@ pub struct BuiltinTypeHead {
     pub name: &'static str,
     pub arity: BuiltinArity,
     pub build: fn(&[Ty]) -> Ty,
-}
-
-fn first_or_unknown(ra: &[Ty]) -> Ty {
-    ra.first().cloned().unwrap_or(Ty::Unknown)
 }
 
 /// EVERY type name the resolver answers without consulting a declaration,
@@ -533,22 +585,22 @@ pub const BUILTIN_TYPE_HEADS: &[BuiltinTypeHead] = &[
     // return-position marker: `?` is a property of the value, `!` of the
     // arrow).
     BuiltinTypeHead { name: "?", arity: BuiltinArity::Between(1, 1), build: |ra| Ty::option(ra[0].clone()) },
-    BuiltinTypeHead { name: "List", arity: BuiltinArity::Any, build: |ra| Ty::list(first_or_unknown(ra)) },
-    BuiltinTypeHead { name: "Option", arity: BuiltinArity::Any, build: |ra| Ty::option(first_or_unknown(ra)) },
+    BuiltinTypeHead { name: "List", arity: BuiltinArity::Params(&["T"]), build: |ra| Ty::list(ra[0].clone()) },
+    BuiltinTypeHead { name: "Option", arity: BuiltinArity::Params(&["T"]), build: |ra| Ty::option(ra[0].clone()) },
     BuiltinTypeHead {
-        name: "Result", arity: BuiltinArity::AtLeast(2),
+        name: "Result", arity: BuiltinArity::Params(&["T", "E"]),
         build: |ra| Ty::result(ra[0].clone(), ra[1].clone()),
     },
     BuiltinTypeHead {
-        name: "Map", arity: BuiltinArity::AtLeast(2),
+        name: "Map", arity: BuiltinArity::Params(&["K", "V"]),
         build: |ra| Ty::map_of(ra[0].clone(), ra[1].clone()),
     },
-    BuiltinTypeHead { name: "Set", arity: BuiltinArity::Any, build: |ra| Ty::set_of(first_or_unknown(ra)) },
+    BuiltinTypeHead { name: "Set", arity: BuiltinArity::Params(&["T"]), build: |ra| Ty::set_of(ra[0].clone()) },
     // Sized Numeric Types P4 kickoff: `Matrix[T]` resolves to
     // `Applied(Matrix, [T])` so the checker can discriminate
     // `Matrix[Float32]` / `Matrix[Float64]`.
     BuiltinTypeHead {
-        name: "Matrix", arity: BuiltinArity::Any,
+        name: "Matrix", arity: BuiltinArity::Params(&["T"]),
         build: |ra| Ty::Applied(TypeConstructorId::Matrix, ra.to_vec()),
     },
 ];
@@ -560,6 +612,25 @@ pub const BUILTIN_TYPE_HEADS: &[BuiltinTypeHead] = &[
 pub fn builtin_type_head(name: &str, spelling: TypeSpelling) -> Option<&'static BuiltinTypeHead> {
     let name = name.strip_prefix(GENERATED_BUILTIN_MARK).unwrap_or(name);
     BUILTIN_TYPE_HEADS.iter().find(|h| h.name == name && h.arity.accepts(spelling))
+}
+
+/// The parameters a builtin type name declares when it is applied, for the
+/// arity check (E093, #3408): `["K", "V"]` for `Map`, none for `Int` (a bare
+/// head applied to anything is applied to too many). `None` for a name no
+/// builtin head has, and for the bracket-free pseudo-generics `!` / `?`.
+/// Read off [`BUILTIN_TYPE_HEADS`], the table the resolver dispatches through.
+pub fn builtin_type_params(name: &str) -> Option<&'static [&'static str]> {
+    let mut heads = BUILTIN_TYPE_HEADS.iter().filter(|h| h.name == name).peekable();
+    heads.peek()?;
+    let mut params: &'static [&'static str] = &[];
+    for h in heads {
+        match h.arity {
+            BuiltinArity::Params(ps) => params = ps,
+            BuiltinArity::Between(..) => return None,
+            BuiltinArity::Bare => {}
+        }
+    }
+    Some(params)
 }
 
 /// The mark that makes a builtin's name the generated-source spelling. The
@@ -618,16 +689,19 @@ impl FileTypeScope {
         own: std::collections::HashSet<Sym>,
         names: &std::collections::HashSet<Sym>,
     ) -> Self {
-        let user_modules: std::collections::HashSet<&str> = env.user_modules.iter().map(|m| m.as_str()).collect();
+        // The file's spelled names are checked first, so a key no file
+        // spells costs no module lookup; the module set is the env's own,
+        // probed by symbol rather than copied into a string set per file.
         let mut owners: HashMap<Sym, Vec<Sym>> = HashMap::new();
         for k in env.types.keys() {
-            if let Some((m, base)) = k.as_str().rsplit_once('.')
-                && user_modules.contains(m)
-                && !almide_lang::stdlib_info::is_bundled_module(m)
-            {
+            if let Some((m, base)) = k.as_str().rsplit_once('.') {
                 let base = sym(base);
-                if names.contains(&base) {
-                    owners.entry(base).or_default().push(sym(m));
+                if !names.contains(&base) || almide_lang::stdlib_info::is_bundled_module(m) {
+                    continue;
+                }
+                let m = sym(m);
+                if env.user_modules.contains(&m) {
+                    owners.entry(base).or_default().push(m);
                 }
             }
         }
@@ -635,9 +709,17 @@ impl FileTypeScope {
             mods.sort_by(|a, b| a.as_str().cmp(b.as_str()));
             mods.dedup();
         }
-        let mut visible: std::collections::HashSet<Sym> = env.import_table.accessible.clone();
-        visible.extend(env.import_table.aliases.values().copied());
-        if let Some(h) = scope { visible.insert(sym(h)); }
+        // `locate` asks `visible` only about a module in `owners`, so only
+        // those are decided — not a copy of every module the file can see
+        // (#3340: that copy, per file, was most of this check's cost).
+        let here = scope.map(sym);
+        let visible: std::collections::HashSet<Sym> = owners.values().flatten().copied()
+            .filter(|m| {
+                env.import_table.accessible.contains(m)
+                    || env.import_table.aliases.values().any(|a| a == m)
+                    || Some(*m) == here
+            })
+            .collect();
         FileTypeScope { own, visible, owners }
     }
 
@@ -677,9 +759,7 @@ fn resolve_simple_type_other(other: &str, known_types: Option<&HashMap<Sym, Ty>>
     if let Some(qualified) = known_types.and_then(|types| canonical_user_type_sym(other, types, cur_mod)).map(|s| Ty::Named(s, vec![])) {
         return qualified;
     }
-    // A user ALIAS of a stdlib-owned name (`type Value = Int`) lives under
-    // the shadow key too (#1828); the nominal shapes were answered above.
-    if let Some((_, alias)) = known_types.and_then(|types| stdlib_shadow_entry(other, types, cur_mod)) {
+    if let Some((_, alias)) = known_types.and_then(|types| scoped_alias_entry(other, types, cur_mod)) {
         return alias.clone();
     }
     // - Generic type parameters (T, U, Self, ...) resolve via
@@ -697,13 +777,7 @@ fn resolve_simple_type_other(other: &str, known_types: Option<&HashMap<Sym, Ty>>
     // - Transparent aliases (e.g. `type Score = Int`) follow
     //   through to the target type so `a + b` works.
     if let Some(types) = known_types {
-        // Try exact match first (e.g. "Instr" or "binary.Instr")
-        let found = types.get(&sym(other)).or_else(|| {
-            // For module-qualified types like "binary.Instr",
-            // also try the unqualified name "Instr"
-            other.rsplit_once('.').and_then(|(_, bare)| types.get(&sym(bare)))
-        });
-        if let Some(found) = found {
+        if let Some((_, found)) = table_type_entry(other, types) {
             match found {
                 Ty::TypeVar(tv) => return Ty::TypeVar(*tv),
                 Ty::Record { .. } | Ty::Variant { .. } => {
@@ -724,6 +798,41 @@ fn resolve_simple_type_other(other: &str, known_types: Option<&HashMap<Sym, Ty>>
     }
 }
 
+// The alias entry a name means in `cur_mod` ahead of the plain table lookup:
+// the module's own alias of the name (#3401) — read under its qualified key,
+// since the bare key belongs to whichever module registered last — or a user
+// alias of a stdlib-owned name (`type Value = Int`), which lives under the
+// shadow key (#1828). The nominal shapes are `canonical_user_type_sym`'s.
+fn scoped_alias_entry<'t>(name: &str, types: &'t HashMap<Sym, Ty>, cur_mod: Option<&str>) -> Option<(Sym, &'t Ty)> {
+    if let Some(alias) = own_module_alias(name, types, cur_mod) {
+        return Some((sym(&format!("{}.{}", cur_mod?, name)), alias));
+    }
+    stdlib_shadow_entry(name, types, cur_mod)
+}
+
+// The table entry a type name falls back to: the exact key (`Instr` or
+// `binary.Instr`), else a qualified name's bare key.
+fn table_type_entry<'t>(name: &str, types: &'t HashMap<Sym, Ty>) -> Option<(Sym, &'t Ty)> {
+    let exact = sym(name);
+    if let Some(t) = types.get(&exact) {
+        return Some((exact, t));
+    }
+    let bare = sym(name.rsplit_once('.')?.1);
+    types.get(&bare).map(|t| (bare, t))
+}
+
+// The TRANSPARENT alias a non-nominal name resolves to, with the key it is
+// registered under — the same lookup `resolve_simple_type_other` makes for
+// the bare spelling, so `Pair` and `Pair[Int]` name one declaration. A
+// record, variant or type variable is not an alias.
+fn transparent_alias_entry<'t>(name: &str, types: &'t HashMap<Sym, Ty>, cur_mod: Option<&str>) -> Option<(Sym, &'t Ty)> {
+    let (key, body) = scoped_alias_entry(name, types, cur_mod).or_else(|| table_type_entry(name, types))?;
+    match body {
+        Ty::Record { .. } | Ty::Variant { .. } | Ty::TypeVar(_) | Ty::ConstParam { .. } => None,
+        _ => Some((key, body)),
+    }
+}
+
 // The nominal (non-builtin) arm of `TypeExpr::Generic` resolution, given the
 // already-resolved argument types `ra`.
 fn resolve_nominal_generic_type_expr(name: &Sym, ra: Vec<Ty>, known_types: Option<&HashMap<Sym, Ty>>, cur_mod: Option<&str>) -> Ty {
@@ -731,11 +840,26 @@ fn resolve_nominal_generic_type_expr(name: &Sym, ra: Vec<Ty>, known_types: Optio
     // name; stdlib / local generics stay bare.
     let qualified = known_types.and_then(|types| canonical_user_type_sym(name.as_str(), types, cur_mod));
     if let Some(qn) = qualified {
-        Ty::Named(qn, ra)
-    } else {
-        let resolved_name = name.as_str().rsplit_once('.').map(|(_, bare)| sym(bare)).unwrap_or(*name);
-        Ty::Named(resolved_name, ra)
+        return Ty::Named(qn, ra);
     }
+    // A generic TRANSPARENT alias applied to its arguments (#3403) is its
+    // body with each declared letter replaced by its argument, as a
+    // non-generic alias is its body: `Pair[Int]` under `type Pair[T] =
+    // (T, T)` is `(Int, Int)`. Records and variants stay nominal (above).
+    // A wrong argument count keeps the alias's `Named` key, which the
+    // checker's annotation sweep reports (E093).
+    if let Some((key, body)) = known_types.and_then(|types| transparent_alias_entry(name.as_str(), types, cur_mod)) {
+        let params = known_types.and_then(|types| declared_type_params(key.as_str(), types)).unwrap_or(&[]);
+        if params.len() != ra.len() {
+            return Ty::Named(key, ra);
+        }
+        let bindings: HashMap<Sym, Ty> = params.iter().zip(ra)
+            .filter_map(|(p, a)| match p { Ty::TypeVar(v) => Some((*v, a)), _ => None })
+            .collect();
+        return almide_lang::types::substitute(body, &bindings);
+    }
+    let resolved_name = name.as_str().rsplit_once('.').map(|(_, bare)| sym(bare)).unwrap_or(*name);
+    Ty::Named(resolved_name, ra)
 }
 
 // `TypeExpr::Variant { cases, .. }` resolution: lower each AST variant case form

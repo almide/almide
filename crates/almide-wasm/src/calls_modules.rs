@@ -297,7 +297,7 @@ impl Emitter<'_> {
                 self.lower_linked_call("matrix", func.as_str(), args, tail)
             }
             CallTarget::Module { module, func, .. } if module.as_str() == "fan" => {
-                if let Some(out) = self.lower_fan_call(func.as_str(), args)? {
+                if let Some(out) = self.lower_fan_module_call(func.as_str(), args)? {
                     return Ok(out);
                 }
                 unsup(&format!("call:fan.{func}"))
@@ -313,6 +313,12 @@ impl Emitter<'_> {
             {
                 if let Some(out) = self.lower_host_call(module.as_str(), func.as_str(), args)? {
                     return Ok(out);
+                }
+                // The subprocess family (#2589) is self-hosted over the
+                // `__proc_*` leaves (stdlib/process_wasm.almd): the registry
+                // route, as http's non-host fns take it.
+                if module.as_str() == "process" {
+                    return self.lower_module_call_c(target, args, tail, ret_hint);
                 }
                 unsup(&format!("call:{module}.{func}"))
             }

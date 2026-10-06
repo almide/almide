@@ -1,0 +1,14 @@
+// #3290: un-annotated literal bindings returned and stored as `Extent`.
+type Extent = { w: Float, h: Float }
+
+fn span(e: Extent) -> Float = e.w + e.h
+
+fn returned(n: Float) -> Extent = {
+  let e = { w: n, h: n + 1.0 }
+  e
+}
+
+fn stored(n: Float) -> List[Extent] = {
+  let e = { w: n, h: 3.0 }
+  [e]
+}

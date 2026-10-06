@@ -1,0 +1,22 @@
+// #3384 / #3388: a module whose variant constructors and top-level `let`s
+// an importer brings in by a selective import.
+type T =
+  | V(Int)
+  | A(T, T)
+
+fn size(t: T) -> Int = match t {
+  V(_) => 1,
+  A(f, a) => size(f) + size(a),
+}
+
+let LIMIT = 3
+
+let step = 2
+
+let NUMBERS = [1, 2, 3]
+
+let ZERO = V(0)
+
+fn inc1(x: Int) -> Int = x + 1
+
+let inc = inc1

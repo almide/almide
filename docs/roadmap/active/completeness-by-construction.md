@@ -70,6 +70,14 @@ cross-module 形状がほぼ無かったから。コーパスが踏まない形�
   構築 `m.Cfg(name:)` が E002 — #488 正規化が `TypeName` callee のみ対応で、Member
   callee (`m.Cfg(...)`) を見ていなかった。同日修正、20/20 green。
 - **拡張余地**: 2 パッケージ構成 (#433 同名型クラス)、generic record、effect 形状の追加セル。
+- **生成マトリクス化 (2026-10-04, #3309)**: 手書き 20 セルの外で、実アプリ移植が 2 日で 11 件
+  (#3283–#3307) を踏んだ。`tests/shape_matrix_test.rs` + `tests/shape_matrix/gen.rs` が
+  レイアウト (単一 / sibling / path 依存パッケージ) × 宣言サイト × 使用サイト × 変更形 ×
+  束縛形 × 命名 (case 違い・生成 binder 名・mangled static 綴り) × 同フィールド record を
+  族ごとの直積で列挙し、各セルの期待出力を構築時に持つ (両レッグ独立判定 + interp 第三票)。
+  既知の赤は `proofs/shape-matrix-baseline.txt` (セル → open issue、縮小のみ)。PR は
+  固定 1/4 スライス、全量は `shape-matrix-nightly.yml`。xtarget-fuzz の `--family shape`
+  が同じ語彙を境界の外まで乱択する。
 
 ### §3 Binding 強制の単一チョークポイント — #485 クラスの根絶
 - **不変条件**: `let x = e` が受理される ⟺ `x = e` が受理される (mutability を除く)。

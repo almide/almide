@@ -1,0 +1,19 @@
+// #3403: a module's generic transparent aliases used from another file
+// through an import alias (`g.Pair[Int]`; the test file spells `g.`).
+// v0.64.0 kept `g.Pair[Int]` as a nominal `Pair[Int]`: a tuple index on it
+// was E045. Native and wasm print the same.
+import self.geo as g
+
+fn total(p: g.Pair[Int]) -> Int = p.0 + p.1
+
+fn heads(b: g.Both[Int]) -> Int = list.len(b.0) + list.len(b.1)
+
+effect fn main() -> Unit = {
+  println(int.to_string(total((3, 4))))
+  println(int.to_string(total(g.swap((10, 20)))))
+  println(int.to_string(heads(([1, 2], [3]))))
+  println(int.to_string(g.sizes((["a", "b"], ["c"]))))
+  println(int.to_string(g.span(g.Seg { ends: (2, 9), name: "s" })))
+  let inc: g.Step[Int] = (n) => n + 1
+  println(int.to_string(g.apply(inc, 41)))
+}

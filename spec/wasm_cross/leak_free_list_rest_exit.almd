@@ -1,0 +1,75 @@
+// @contract: C-066
+// Every edge out of a match arm that binds a named list rest `[h, ..t]`
+// releases the rest block once: a `!` that propagates, a guard that returns,
+// a recursive tail call on the rest, and a `continue` out of the arm inside
+// a loop. The structural wasm leg released the rest only after the arm's
+// body ran, so each of these edges leaked it (#3377). An arm whose body
+// falls through still releases its rest exactly once. The program prints the
+// same text on both targets and ends with no block live. A `break` out of
+// the arm and an enclosing arm that keeps its rest across an inner `break`
+// are judged in tests/leak_free_exits_test.rs: the native MIR brick walls
+// them, and a fixture would add walled-real baseline rows.
+fn chk(h: String) -> Result[Int, String] = if string.len(h) > 2 then err("long ${h}") else ok(string.len(h))
+
+fn arm_prop(xs: List[String]) -> Result[Int, String] = match xs {
+  [h, ..t] => {
+    let n = chk(h)!
+    ok(n + list.len(t))
+  },
+  [] => ok(0),
+}
+
+fn arm_prop_rest(xs: List[String]) -> Result[List[String], String] = match xs {
+  [h, ..t] => {
+    let _ = chk(h)!
+    ok(t)
+  },
+  [] => ok([]),
+}
+
+fn arm_guard(xs: List[Int]) -> Int = match xs {
+  [h, ..t] => {
+    guard h < 3 else h + list.len(t)
+    list.len(t)
+  },
+  [] => 0,
+}
+
+fn walk(xs: List[String], acc: Int) -> Int = match xs {
+  [h, ..t] => walk(t, acc + string.len(h)),
+  [] => acc,
+}
+
+fn arm_continue(xs: List[String]) -> Int = {
+  var acc = 0
+  for i in 0..<4 {
+    match xs {
+      [h, ..t] => {
+        guard string.len(h) + i < 3 else continue
+        acc = acc + list.len(t)
+      },
+      [] => {
+        acc = acc + 100
+      },
+    }
+  }
+  acc
+}
+
+fn show(r: Result[Int, String]) -> String = match r {
+  ok(n) => "ok ${n}",
+  err(e) => "err ${e}",
+}
+
+effect fn main() -> Unit = {
+  var total = 0
+  for i in 0..<40 {
+    let w = ["a" + string.repeat("b", i % 4), "c", "dd"]
+    let n = [i % 5, 1, 2, 3]
+    total = total + (arm_prop(w) ?? 1) + list.len(arm_prop_rest(w) ?? ["z"])
+    total = total + arm_guard(n) + walk(w, 0) + arm_continue(w)
+  }
+  println("${show(arm_prop(["abc", "d"]))} ${show(arm_prop(["ab", "d"]))} ${arm_guard([5, 1])} ${arm_guard([1, 1])}")
+  println("${walk(["ab", "c", "def"], 0)} ${arm_continue(["a", "b"])}")
+  println(int.to_string(total))
+}

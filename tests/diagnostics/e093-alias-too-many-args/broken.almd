@@ -1,0 +1,6 @@
+// A one-parameter generic alias applied to two type arguments.
+type Pair[T] = (T, T)
+
+fn first(p: Pair[Int, Int]) -> Int = p.0
+
+effect fn main() -> Unit = println(int.to_string(first((3, 4))))

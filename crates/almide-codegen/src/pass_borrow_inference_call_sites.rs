@@ -256,10 +256,16 @@ fn rewrite_calls_stmt(stmt: IrStmt, sigs: &HashMap<String, Vec<ParamBorrow>>, mo
 /// would re-borrow the cell while it is mutably borrowed and panic. Those
 /// siblings are hoisted too, so they evaluate before the borrow is taken.
 pub fn hoist_conflicting_reads(program: &mut IrProgram) {
+    // Another module's global is reached through a USE-SITE var
+    // (`module_origin` set), a different VarId than its declaration, and the
+    // walker renders its `&mut` place through the same cell (#3307).
     let globals: HashSet<VarId> = program.top_lets.iter()
         .chain(program.modules.iter().flat_map(|m| m.top_lets.iter()))
         .filter(|tl| tl.mutable)
         .map(|tl| tl.var)
+        .chain(program.var_table.entries.iter().enumerate()
+            .filter(|(_, vi)| vi.module_origin.is_some())
+            .map(|(i, _)| VarId(i as u32)))
         .collect();
     let IrProgram { functions, modules, var_table, .. } = program;
     let mut cx = HoistCx { vt: var_table, globals: &globals };
@@ -371,6 +377,7 @@ fn hoist_one_arg(arg: IrExpr, hoisted: &mut Vec<IrStmt>, cx: &mut HoistCx<'_>) -
 fn hoist_expr(expr: IrExpr, cx: &mut HoistCx<'_>) -> IrExpr {
     let ty = expr.ty.clone();
     let span = expr.span;
+    let def_id = expr.def_id;
 
     let kind = match expr.kind {
         IrExprKind::Call { target, args, type_args } => {
@@ -424,26 +431,32 @@ fn hoist_expr(expr: IrExpr, cx: &mut HoistCx<'_>) -> IrExpr {
         IrExprKind::UnwrapOr { expr, fallback } => IrExprKind::UnwrapOr {
             expr: Box::new(hoist_expr(*expr, cx)), fallback: Box::new(hoist_expr(*fallback, cx)),
         },
-        // Explicit-preserve: nodes this hoist pass does NOT descend into. The
-        // &mut-conflict hoist only fires at Call / RuntimeCall sites and the
-        // compound forms above; everything else is returned unchanged, exactly
-        // as the original `other => other` did (zero behaviour change).
-        kind @ (IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. }
-            | IrExprKind::LitStr { .. } | IrExprKind::LitBool { .. }
-            | IrExprKind::Unit | IrExprKind::Var { .. } | IrExprKind::FnRef { .. }
-            | IrExprKind::Fan { .. } | IrExprKind::Break | IrExprKind::Continue
-            | IrExprKind::TailCall { .. } | IrExprKind::List { .. }
-            | IrExprKind::MapLiteral { .. } | IrExprKind::EmptyMap
+        // Operand-carrying forms (#3230): a call nested in a list element, a
+        // record field, a borrow, … is a call site like any other, and a
+        // string interpolation is an operand sequence of its own (see
+        // [`hoist_interp_parts`]). Descended structurally; a node with no
+        // conflict inside comes back unchanged, `def_id` included.
+        kind @ (IrExprKind::List { .. } | IrExprKind::MapLiteral { .. }
             | IrExprKind::Record { .. } | IrExprKind::SpreadRecord { .. }
             | IrExprKind::Tuple { .. } | IrExprKind::Range { .. }
             | IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }
             | IrExprKind::IndexAccess { .. } | IrExprKind::MapAccess { .. }
-            | IrExprKind::StringInterp { .. } | IrExprKind::OptionNone
+            | IrExprKind::StringInterp { .. }
             | IrExprKind::ToOption { .. } | IrExprKind::OptionalChain { .. }
-            | IrExprKind::Clone { .. }
-            | IrExprKind::Deref { .. } | IrExprKind::Borrow { .. }
-            | IrExprKind::BoxNew { .. } | IrExprKind::RcWrap { .. }
-            | IrExprKind::RustMacro { .. } | IrExprKind::ToVec { .. }
+            | IrExprKind::Clone { .. } | IrExprKind::Deref { .. } | IrExprKind::Borrow { .. }
+            | IrExprKind::BoxNew { .. } | IrExprKind::RcWrap { .. } | IrExprKind::ToVec { .. }) => {
+            let node = IrExpr { kind, ty, span, def_id }.map_children(&mut |e| hoist_expr(e, cx));
+            return hoist_interp_parts(node, cx);
+        }
+        // Explicit-preserve: nodes this hoist pass does NOT descend into,
+        // returned unchanged exactly as the original `other => other` did.
+        kind @ (IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. }
+            | IrExprKind::LitStr { .. } | IrExprKind::LitBool { .. }
+            | IrExprKind::Unit | IrExprKind::Var { .. } | IrExprKind::FnRef { .. }
+            | IrExprKind::Fan { .. } | IrExprKind::Break | IrExprKind::Continue
+            | IrExprKind::TailCall { .. } | IrExprKind::EmptyMap
+            | IrExprKind::OptionNone
+            | IrExprKind::RustMacro { .. }
             | IrExprKind::RenderedCall { .. } | IrExprKind::InlineRust { .. }
             | IrExprKind::ClosureCreate { .. } | IrExprKind::EnvLoad { .. }
             | IrExprKind::Hole
@@ -478,6 +491,8 @@ fn map_collector(collector: IterCollector, f: &mut dyn FnMut(IrExpr) -> IrExpr) 
         IterCollector::Any { lambda } => IterCollector::Any { lambda: Box::new(f(*lambda)) },
         IterCollector::All { lambda } => IterCollector::All { lambda: Box::new(f(*lambda)) },
         IterCollector::Find { lambda } => IterCollector::Find { lambda: Box::new(f(*lambda)) },
+        IterCollector::FindIndex { lambda } => IterCollector::FindIndex { lambda: Box::new(f(*lambda)) },
+        IterCollector::FindMap { lambda } => IterCollector::FindMap { lambda: Box::new(f(*lambda)) },
         IterCollector::Count { lambda } => IterCollector::Count { lambda: Box::new(f(*lambda)) },
         IterCollector::Collect => IterCollector::Collect,
         IterCollector::Sum { float } => IterCollector::Sum { float },
@@ -519,68 +534,26 @@ fn hoist_runtime_call(
     cx: &mut HoistCx<'_>,
 ) -> IrExpr {
     let args: Vec<IrExpr> = args.into_iter().map(|a| hoist_expr(a, cx)).collect();
-    let Some(mut_id) = args.iter().find_map(find_mut_borrow_var) else {
-        return IrExpr { kind: IrExprKind::RuntimeCall { symbol, args }, ty, span, def_id: None };
-    };
     let mut hoisted_stmts: Vec<IrStmt> = Vec::new();
-    let new_args: Vec<IrExpr> = args
-        .into_iter()
-        .map(|arg| {
-            if find_mut_borrow_var(&arg).is_some() {
-                arg // keep the &mut arg as-is
-            } else if cx.must_hoist(&arg, mut_id) {
-                hoist_one_arg(arg, &mut hoisted_stmts, cx)
-            } else {
-                arg
-            }
-        })
-        .collect();
+    let new_args = hoist_direct_mut_conflicts(args, &mut hoisted_stmts, cx);
+    let new_args = hoist_before_nested_mut(new_args, &mut hoisted_stmts, cx);
     let call = IrExpr {
         kind: IrExprKind::RuntimeCall { symbol, args: new_args },
-        ty: ty.clone(),
-        span,
-        def_id: None,
-    };
-    if hoisted_stmts.is_empty() {
-        return call;
-    }
-    IrExpr {
-        kind: IrExprKind::Block { stmts: hoisted_stmts, expr: Some(Box::new(call)) },
         ty,
         span,
         def_id: None,
-    }
+    };
+    wrap_hoisted(hoisted_stmts, call)
 }
 
 fn hoist_call_if_needed(target: CallTarget, args: Vec<IrExpr>, type_args: Vec<almide_lang::types::Ty>,
     ty: almide_lang::types::Ty, span: Option<almide_base::span::Span>, cx: &mut HoistCx<'_>) -> IrExpr
 {
-    let mut_var = args.iter().find_map(find_mut_borrow_var);
-    if let Some(mut_id) = mut_var {
-        let mut hoisted_stmts: Vec<IrStmt> = Vec::new();
-        let new_args: Vec<IrExpr> = args.into_iter().map(|arg| {
-            if find_mut_borrow_var(&arg).is_some() {
-                arg
-            } else if cx.must_hoist(&arg, mut_id) {
-                hoist_one_arg(arg, &mut hoisted_stmts, cx)
-            } else {
-                arg
-            }
-        }).collect();
-        if !hoisted_stmts.is_empty() {
-            let call = IrExpr {
-                kind: IrExprKind::Call { target, args: new_args, type_args },
-                ty: ty.clone(), span, def_id: None,
-            };
-            return IrExpr {
-                kind: IrExprKind::Block { stmts: hoisted_stmts, expr: Some(Box::new(call)) },
-                ty, span, def_id: None,
-            };
-        }
-        IrExpr { kind: IrExprKind::Call { target, args: new_args, type_args }, ty, span, def_id: None }
-    } else {
-        IrExpr { kind: IrExprKind::Call { target, args, type_args }, ty, span, def_id: None }
-    }
+    let mut hoisted_stmts: Vec<IrStmt> = Vec::new();
+    let new_args = hoist_direct_mut_conflicts(args, &mut hoisted_stmts, cx);
+    let new_args = hoist_before_nested_mut(new_args, &mut hoisted_stmts, cx);
+    let call = IrExpr { kind: IrExprKind::Call { target, args: new_args, type_args }, ty, span, def_id: None };
+    wrap_hoisted(hoisted_stmts, call)
 }
 
 fn hoist_stmt(stmt: IrStmt, cx: &mut HoistCx<'_>) -> IrStmt {

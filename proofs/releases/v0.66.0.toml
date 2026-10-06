@@ -1,0 +1,27 @@
+# Release evidence seal — v0.66.0. IMMUTABLE: every [derived] field is
+# re-measured from the tag's tree by `scripts/release-seal.sh check`;
+# an edit that disagrees with the tag fails CI. [recorded] fields are
+# facts the tag cannot re-derive (fill them in before committing).
+
+[release]
+version = "0.66.0"
+tag = "v0.66.0"
+tag_commit = "819bbc74f3a53d7994c7f87bef98e93b35be6347"
+date = "2026-10-03"
+url = "https://github.com/almide/almide/releases/tag/v0.66.0"
+
+[derived]
+cargo_version = "0.66.0"
+contracts_sha256 = "f0a57ffa65620f6a5ad92f8e64ba96006919e62b3e34b4fd3473e80f3dd73f88"
+contracts_total = "372"
+contracts_flagged = "0"
+abstain_ledger_sha256 = "c953796d0ce50c8afc764afe3e111606e03935378bbdb141948ddd963bbfd797"
+abstain_ledger_entries = "21"
+wasm_cross_fixtures = "890"
+rust_toolchain = "1.96.0"
+wasmtime = "v49.0.1"
+
+[recorded]
+release_gate = "Minor release through the rc channel (#1484), rc1-rc7; the final is tagged on the rc7 commit (819bbc74f, release PR #3218, tree of develop 06aa9c21b). rc1 (#3010) soak found #3016/#3022 (native fan abort output) and #3017 (unary operand), fixed in rc2 (#3120). rc2 soak found #3126 (I-divergence, Q1_0 loader bound) and #3127 (wasm leak), fixed in rc3 (#3132, via #3128/#3129). rc3 soak found #3139 (operand order) and #3143 (emitter nondeterminism), which exposed #3148, #3154, #3165, #3167, #3176; fixed in rc4 (#3184). rc4 soak found #3185 (sized literal domain), fixed in rc5 (#3191, #3186) with #3187/#3189. rc5 led to the #3192 write-back cell tail fix (#3196, regression) plus #3193 (address-valued fuzz programs denied) and #3194 (bytes.to_string leak), fixed in rc6 (#3205). rc6 soak found #3206 (I-divergence: preview-1 writes of 128 MiB or more silently dropped), fixed in rc7 (#3210). Release-gate fuzz soak on v0.66.0-rc7 = the tag commit (fuzz-nightly run 37078905972): shards 8/8, 481.0 of 480 planned minutes delivered, 80,244 programs generated, 0 findings. Downstream canary on 06aa9c21b (run 37070700652): success, 0 regressions. Blocker gate at the tag: 0 (#1482). Interface diff v0.65.1 -> v0.66.0: additive (added=14 removed=0; #1488): 13 net Unix-socket/shared-memory fns and list.find_map. Trust spine on the tag green (run 37084263822, dossier attached)."
+assets = "7: almide-linux-x86_64.tar.gz, almide-linux-aarch64.tar.gz, almide-macos-x86_64.tar.gz, almide-macos-aarch64.tar.gz, almide-windows-x86_64.zip, almide-checksums.sha256, almide-dossier-v0.66.0.md"
+known_problems = "None release-blocking. Open at the tag: (1) #3177 (bug, A-codegen) — a closure reading a var's field was reported to lose a later mut-param update of that var, filed against a 0.66.0 dev build; its repro prints the expected 1 on the v0.66.0 release binary on native and wasm, and the issue is not yet closed; (2) #3214 (enhancement) — a list param only read around an unfused list.find_index / list.find_map in a repeated body is rendered owned on native (certifier C4, performance only); (3) #3149 (bug, A-frontend) — the var-destructuring parse error does not name the rule."

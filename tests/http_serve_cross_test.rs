@@ -17,9 +17,10 @@
 //!
 //! Two more properties ride along:
 //!
-//! - one instance per run: `/boot` answers a random draw main made once and
-//!   the handler captured — two requests of one run must see the same value
-//!   (a per-request instance would draw again);
+//! - a random draw in the handler: `/boot` draws per request and answers
+//!   whether the draw is in range. The app is instance-closed (ADR-0020 §5.2,
+//!   E095), so C-367 promises nothing about two requests' draws — this checks
+//!   only that the handler can draw on both legs;
 //! - the bind failure: on an occupied port both legs abort with the same
 //!   stderr line and exit code.
 
@@ -52,8 +53,8 @@ fn fixture() -> PathBuf {
 /// read that misses, a percent-encoded query (a pair without `=`, a value
 /// holding `=`, `+`), a status outside the reason table plus a lowercase
 /// header name, a redirect, a 404, a handler err (500), another method, and
-/// a clock read in main and in the handler (#2703: a serving program walled
-/// its clock reads on the embedded lane).
+/// clock reads in the handler (#2703: a serving program walled its clock
+/// reads on the embedded lane; main reads the clock before serve too).
 const SCRIPT: &[&[u8]] = &[
     b"GET /hello HTTP/1.1\r\nHost: t\r\n\r\n",
     "POST /echo HTTP/1.1\r\nHost: t\r\nX-Token: abc\r\nContent-Length: 12\r\n\r\n日本語 ok".as_bytes(),
@@ -268,8 +269,9 @@ fn http_serve_answers_the_same_status_headers_and_body_on_native_and_the_embedde
     assert_eq!(native.stderr.lines().filter(|l| l.starts_with("GET ") || l.starts_with("POST ") || l.starts_with("DELETE ")).count(), SCRIPT.len() + 2, "{:?}", native.stderr);
     assert_eq!(line_multiset(&native.stderr), line_multiset(&wasm.stderr), "the stderr transcripts hold different lines");
     for run in [&native, &wasm] {
-        assert_eq!(run.boots[0], run.boots[1], "one run answered two different draws: not one instance");
-        assert!(!run.boots[0].is_empty());
+        for boot in &run.boots {
+            assert_eq!(boot.as_slice(), b"true", "a handler draw out of range: {:?}", String::from_utf8_lossy(boot));
+        }
     }
 }
 

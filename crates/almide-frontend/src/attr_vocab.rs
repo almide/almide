@@ -34,6 +34,9 @@ pub const KNOWN_ATTRS: &[&str] = &[
     "mutating",
     "consume",
     "borrow_ref",
+    // A parameter that runs concurrently (ADR-0020 §3.1, E008)
+    "concurrent",
+    // The empty effect set, checked (E092, #3250)
     "pure",
     // Scheduling and placement
     "schedule",

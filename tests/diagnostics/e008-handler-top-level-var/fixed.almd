@@ -1,0 +1,8 @@
+// A value fixed before serving is a top-level `let`.
+import http
+
+let greeting = "hello"
+
+effect fn handle(req: HttpRequest) -> HttpResponse = http.response(200, greeting)
+
+effect fn main() -> Unit = http.serve(8080, handle)!

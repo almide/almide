@@ -36,6 +36,19 @@
 # same change); a measured row that stops benching fails as a regression.
 # ab_band is the A/B tolerance in percent (a policy line, not a measurement);
 # a fan row overrides it with `ab_band=NN` at the end of its row.
+# fan=… on a fan row names the wasm route (#3003, ADR-0011 §D2a):
+#   fan=instance    — a pure scalar chunk map (`fan { list.map(xs, f) }`,
+#                     scalar or scalar-tuple results, scalar captures): the
+#                     embedded host runs the chunks on pooled instances of
+#                     the module, one per OS thread. Every other host — stock wasmtime, any WASI
+#                     runtime, the `to_wasi` / p2 / p3 artifacts — runs the
+#                     same artifact sequentially, byte-identical (C-321).
+#   fan=sequential  — a shape stage 1 does not offer (heap elements, results
+#                     or captures; `fan.map`): sequential on every wasm host
+#                     until #3331 (copy-in/out with a measured break-even).
+#                     binarytrees' and mandelbrot's `fan.map` callbacks are
+#                     sequential on the native leg too (#2044 threads only
+#                     the `fan { list.map }` shape fannkuchredux uses).
 version = almide 0.65.1 (dev)
 date    = 2026-09-29
 machine = arm64 Darwin (local stamp; ratios are the gated quantity)
@@ -43,11 +56,11 @@ ab_band = 30
 
 nbody                 | measured         | 12.93 | 14.27 | 1.10 | 14.80 | 16.86 | 1.14 args=500000
 spectralnorm          | measured         | 25.57 | 31.01 | 1.21 | 26.98 | 32.83 | 1.22 args=1000
-binarytrees           | measured         | 19.31 | 20.70 | 1.07 | 21.45 | 22.66 | 1.06 args=15 ab_band=100
+binarytrees           | measured         | 19.31 | 20.70 | 1.07 | 21.45 | 22.66 | 1.06 args=15 ab_band=100 fan=sequential
 treealloc             | measured         | 39.72 | 41.43 | 1.04 | 42.41 | 43.91 | 1.04
 fasta                 | measured         | 14.85 | 22.56 | 1.52 | 16.26 | 24.47 | 1.50 args=150000
-fannkuchredux         | measured         | 20.20 | 190.10| 9.41 | 21.92 | 192.74| 8.79 args=10 ab_band=100
-mandelbrot            | measured         | 22.55 | 24.95 | 1.11 | 24.24 | 26.75 | 1.10 args=800 ab_band=100
+fannkuchredux         | measured         | 21.36 | 27.42 | 1.28 | 23.60 | 30.12 | 1.28 args=10 ab_band=100 fan=instance
+mandelbrot            | measured         | 22.55 | 24.95 | 1.11 | 24.24 | 26.75 | 1.10 args=800 ab_band=100 fan=sequential
 onebrc                | measured         | 10.69 | 13.48 | 1.26 | 12.65 | 16.86 | 1.33 args=30000
 fft                   | measured         | 40.67 | 62.03 | 1.53 | 42.64 | 65.27 | 1.53
 strchurn              | measured         | 52.88 | 44.71 | 0.85 | 55.65 | 47.48 | 0.85

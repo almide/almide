@@ -1,0 +1,27 @@
+// @contract: C-070
+// #3400: a list pattern whose element is a variant pattern with a binder
+// tests the element's case and binds the payload on both targets.
+type Item =
+  | Named(String)
+  | Plain(Int)
+
+fn only_plain(xs: List[Item]) -> Int = match xs {
+  [Plain(n)] => n,
+  _ => -1,
+}
+
+fn pair_score(xs: List[Item]) -> Int = match xs {
+  [Named(_), Named(_)] => 2,
+  [Named(_), Plain(n)] => 100 + n,
+  _ => -1,
+}
+
+fn main() -> Unit = {
+  println(int.to_string(only_plain([Plain(7)])))
+  println(int.to_string(only_plain([Named("x")])))
+  println(int.to_string(only_plain([Plain(1), Plain(2)])))
+  println(int.to_string(only_plain([])))
+  println(int.to_string(pair_score([Named("ab"), Named("cde")])))
+  println(int.to_string(pair_score([Named("a"), Plain(3)])))
+  println(int.to_string(pair_score([Plain(3), Named("a")])))
+}

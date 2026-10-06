@@ -16,6 +16,8 @@
 //! * assigns or mutates it in place (`p = …`, `p[i] = …`, `p.f = …`,
 //!   the list-mutation statements) — the Assign routes release the old
 //!   value, which a borrowed param's caller still holds;
+//! * is the base of the spread its body ends in (`{ ...p, f: v }`, #3406:
+//!   the dying base is rebuilt in place, dying_move.rs);
 //! * passes it directly (`Var`) to a program-function param that is
 //!   owned (the fixpoint), or to a call this pass cannot resolve the way
 //!   the emitter resolves it (the suffix and registry routes) — owned is
@@ -98,6 +100,7 @@ pub(crate) fn infer(
             };
             scan.visit_expr(&f.body);
             scan.tail_fresh(&f.body);
+            scan.tail_spread_base(&f.body);
             let Scan { mark, cross, .. } = scan;
             for k in mark {
                 if crate::rc_ownership::rc_droppable_ty(types, table.infos[i].params[k])
@@ -175,6 +178,17 @@ impl Scan<'_> {
                 }
             }
             _ => {}
+        }
+    }
+
+    /// #3406: a spread at the frame's tail CONSUMES its base param — the
+    /// dying base is rebuilt in place (dying_move.rs), which a borrowed
+    /// block (the caller's) never is.
+    fn tail_spread_base(&mut self, body: &IrExpr) {
+        if let IrExprKind::SpreadRecord { base, .. } = &crate::rc_ownership::rc_tail(body).kind
+            && let Some(k) = self.param_of(base)
+        {
+            self.mark.push(k);
         }
     }
 

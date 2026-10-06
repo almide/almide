@@ -196,7 +196,7 @@ fn lower_pipe(ctx: &mut LowerCtx, left: &ast::Expr, right: &ast::Expr, ty: Ty, s
             let mut all_args = vec![ir_left];
             all_args.extend(args.iter().map(|a| lower_expr(ctx, a)));
             let target = lower_call_target(ctx, callee);
-            let ta = type_args.as_ref().map(|tas| tas.iter().map(|t| resolve_type_expr(t)).collect()).unwrap_or_default();
+            let ta = type_args.as_ref().map(|tas| tas.iter().map(|t| super::types::resolve_type_expr_env(ctx, t)).collect()).unwrap_or_default();
             let resolved_ty = if matches!(ty, Ty::Unknown) {
                 if let CallTarget::Named { name } = &target {
                     ctx.env.functions.get(name).map(|f| f.ret.clone()).unwrap_or(ty)
@@ -220,7 +220,7 @@ fn lower_pipe(ctx: &mut LowerCtx, left: &ast::Expr, right: &ast::Expr, ty: Ty, s
             let param_ty = p
                 .ty
                 .as_ref()
-                .map(resolve_type_expr)
+                .map(|te| super::types::resolve_type_expr_env(ctx, te))
                 .unwrap_or_else(|| ctx.expr_ty(left));
             ctx.push_scope();
             let bind = lower_pipe_lambda_bind(ctx, p, param_ty, ir_left, span);
@@ -343,6 +343,23 @@ fn eta_expand_module_fn(
     }, lambda_ty, span)
 }
 
+/// The use-site expression of a module top-let — the `Var` that
+/// [`module_top_let_var`] mints, carrying the let's `DefId` when it has one.
+/// Shared by `mod.NAME` and a selectively imported bare `NAME` (#3388).
+pub(super) fn module_top_let_ref(
+    ctx: &mut LowerCtx,
+    mod_name: almide_base::intern::Sym,
+    field: almide_base::intern::Sym,
+    ty: &Ty,
+    span: Option<crate::ast::Span>,
+) -> Option<IrExpr> {
+    let (var_id, def_id) = module_top_let_var(ctx, mod_name, field, ty)?;
+    Some(match def_id {
+        Some(def_id) => ctx.mk_def(IrExprKind::Var { id: var_id }, ty.clone(), span, def_id),
+        None => ctx.mk(IrExprKind::Var { id: var_id }, ty.clone(), span),
+    })
+}
+
 /// Resolve `mod.NAME` against the cross-module top-let table and build the
 /// synthetic use-site Var: CLEAN uppercase name in the IR, `module_origin`
 /// carrying the (versioned) module for emit-time prefixing. ONE rule shared
@@ -380,9 +397,11 @@ pub(super) fn module_top_let_var(
             None
         })
         .unwrap_or_else(|| resolved_mod.clone());
-    let clean_name = field.as_str().to_uppercase();
-    let origin = mod_ident.replace('.', "_");
-    let var_id = ctx.var_table.alloc(sym(&clean_name), ty.clone(), Mutability::Let, None);
+    // The use-site Var keeps the SOURCE spelling (#3316): `buf` and `BUF`
+    // are two top-lets, and every resolver that keys on this name must be
+    // able to tell them apart.
+    let origin = almide_base::names::module_ident(&mod_ident);
+    let var_id = ctx.var_table.alloc(field, ty.clone(), Mutability::Let, None);
     ctx.var_table.entries[var_id.0 as usize].module_origin = Some(origin);
     let def_id = ctx.def_map.get(&sym(&qual_let_key)).copied();
     Some((var_id, def_id))

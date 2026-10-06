@@ -101,6 +101,8 @@ fn name(x: Type) -> Int!                             // pure-fallible: sugar for
 effect fn name(x: Type) -> T = expr                  // touches the world; a call is written name(x)! — see Effects
 ```
 
+The body after `=` is ONE expression, even when the lines below it are indented. A body of several statements needs braces: `fn main() -> Unit = { ... }` (see Block).
+
 ### Option shorthand `T?` (ADR-0010)
 
 `T?` ≡ `Option[T]`, valid in EVERY type position (unlike `!`, which marks the
@@ -181,7 +183,7 @@ A user-declared effect fn is **always fallible**: a call yields
 `Result[T, String]`, even when the body cannot fail. `-> T` is the canonical
 spelling — the `effect` already says it can fail.
 
-A pure `fn` may still call `println`, `eprintln`, `panic` and `assert` / `assert_eq` / `assert_ne`: they write or abort, never read, and do not make the fn `effect` (ADR-0022). Every other effect (`fs`, `env`, `io.*`, `http`, `fan`, …) from a pure fn is E006.
+A pure `fn` may still call `println`, `eprintln`, `panic` and `assert` / `assert_eq` / `assert_ne`: they write or abort, never read, and do not make the fn `effect` (ADR-0022). Every other effect (`fs`, `env`, `io.*`, `http`, `fan`, …) from a pure fn is E006. The stdlib readers are effect fns too: `io.read_byte`, `io.read_n_bytes` and `process.args` read stdin or argv, so they need an `effect fn` caller like `io.read_line` and `env.args` do (dialect epoch 8; a pure fn calling one is E006).
 
 Read the `!` on an effect call like Swift's `await`: it marks the point where
 the world is touched, whether or not this particular call can fail (Almide has
@@ -611,6 +613,7 @@ f([:]: Map[String, Int])    // typed empty map in call args
 ### Destructuring
 ```
 let { name, age } = user    // record destructure (1 level only)
+var (x, y) = pair           // var takes the let patterns; every name is a var
 ```
 
 ### Processing a file line-by-line (large files)
@@ -672,12 +675,13 @@ All `fan.*` forms require an `effect fn` context. There is NO `async`/`await` in
 ```
 // Dynamic mappers — a list + one callback returning Result (the mapper matrix
 // covers every A→B pairing with A, B in {Int, Float, String}):
-let results = fan.map(urls, (u) => http.get(u))!          // Result[List[B], String]: first Err (list order) propagates
+let results = fan.map(urls, (u) => http.get(u))!          // Result[List[B], String]: EVERY element runs, the lowest-index Err propagates
 let winner  = fan.any(mirrors, (m) => fetch(m)) ?? fb     // Result[B, String]: first Ok in LIST order; an Err skips that element
 let report  = fan.settle(jobs, (j) => run(j))             // List[Result[B, String]]: EVERY element's Result, Errs captured
 // The callback may be an EFFECT fn, in either spelling — an inline lambda that
 // calls one, or a bare effect-fn value. Same rule as the block heads' arms.
 let checked = fan.map(paths, read_meta)                   // read_meta: an `effect fn`, passed by name
+// To stop at the FIRST failure instead, write a `for` loop with `!` — `fan.map` never stops early.
 // A heavy PURE callback over scalars is parallelised (a thread per core, results in list
 // order) ONLY by writing `fan.map` / `fan { list.map(...) }` — the compiler never threads
 // an implicit `|>` chain (those are fused sequentially).
@@ -979,7 +983,8 @@ fn types, Result) — wrap those in a named Codec type or convert at the boundar
 
 ## Common mistakes (DO NOT)
 - `list[1, 2, 3]` → **WRONG**. Write `[1, 2, 3]`. `list` is a module, not a type constructor
-- `each(xs, f)` → **WRONG**. Write `list.each(xs, f)`. All stdlib functions need module prefix
+- `map(xs, f)` → **WRONG**. Write `list.map(xs, f)`. All stdlib functions need module prefix
+- `list.each(xs, f)` / `list.for_each(xs, f)` → **WRONG**. There is no plain `each`; run a side effect per element with `for x in xs { ... }`
 - `map[K, V]` as a value → **WRONG**. Write `[:]` with type annotation to create an empty map
 - `List.new()` → **WRONG**. Write `[]`. There is no `new()` for List
 - `{"a": 1}` as a map → **WRONG**. Write `["a": 1]`. Braces `{}` are for records/blocks, brackets `[]` for lists and maps

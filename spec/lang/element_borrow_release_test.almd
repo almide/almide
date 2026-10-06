@@ -1,0 +1,108 @@
+// #3265: a field or element bound before its list is released or written in place
+// keeps its value. `let s = xs[2]` reads an element of `xs`'s block; a later
+// `list.pop`, a rebind under a branch or a loop, or a field-path copy-on-write
+// can free or overwrite that block. None of it may show through `s`.
+type R = { n: String, k: Int }
+
+type Cell = { name: String, xs: List[String] }
+
+type Rows = { name: String, xs: List[List[Int]] }
+
+fn pop_twice(mut xs: List[String]) -> String = {
+  let s = xs[2]
+  for _i in 0..<2 {
+    let _q = list.pop(xs)
+  }
+  s
+}
+
+test "an element of a field list keeps its value across a pop of the field" {
+  var cell = { name: "c", xs: ["a", "bb", "ccc"] }
+  let s = cell.xs[2]
+  let q = list.pop(cell.xs)
+  assert_eq(s, "ccc")
+  assert_eq(cell.xs, ["a", "bb"])
+  assert_eq(q, some("ccc"))
+}
+
+test "a list element of a field list keeps its value across a pop of the field" {
+  var rows = { name: "r", xs: [
+    [1],
+    [2, 2],
+    [3, 3, 3]
+  ] }
+  let s = rows.xs[2]
+  let _q = list.pop(rows.xs)
+  assert_eq(s, [3, 3, 3])
+  assert_eq(rows.xs, [
+    [1],
+    [2, 2]
+  ])
+}
+
+test "an element keeps its value across a set of its slot" {
+  var xs = ["a", "bb", "ccc"]
+  let s = xs[2]
+  xs = list.set(xs, 2, "zz")
+  assert_eq(s, "ccc")
+  assert_eq(xs, ["a", "bb", "zz"])
+}
+
+test "an element keeps its value across a rebind under a branch" {
+  var xs = ["a", "bb", "ccc"]
+  let s = xs[2]
+  if list.len(xs) > 1 then {
+    xs = list.set(xs, 2, "zz")
+  } else { () }
+  assert_eq(s, "ccc")
+  assert_eq(xs, ["a", "bb", "zz"])
+}
+
+test "an element keeps its value across pops in a loop" {
+  var xs = ["a", "bb", "ccc"]
+  let s = xs[2]
+  for _i in 0..<2 {
+    let _q = list.pop(xs)
+  }
+  assert_eq(s, "ccc")
+  assert_eq(xs, ["a"])
+}
+
+test "an element keeps its value across a rebind in a loop" {
+  var xs = ["a", "bb", "ccc"]
+  let s = xs[2]
+  for _i in 0..<2 {
+    xs = ["zz"]
+  }
+  assert_eq(s, "ccc")
+  assert_eq(xs, ["zz"])
+}
+
+test "a record element keeps its value across a set of its slot" {
+  var xs = [
+    { n: "a", k: 1 },
+    { n: "bb", k: 2 },
+    { n: "ccc", k: 3 }
+  ]
+  let s = xs[2]
+  xs = list.set(xs, 2, { n: "zz", k: 9 })
+  assert_eq(s, { n: "ccc", k: 3 })
+  assert_eq(xs[2], { n: "zz", k: 9 })
+}
+
+test "a bound field keeps its value across a field write under a branch" {
+  var cell = { name: "c", xs: ["a", "bb", "ccc"] }
+  let snap = cell.xs
+  if list.len(cell.xs) > 1 then {
+    cell.xs = ["zz"]
+  } else { () }
+  assert_eq(snap, ["a", "bb", "ccc"])
+  assert_eq(cell.xs, ["zz"])
+}
+
+test "an element of a mut param keeps its value across pops in a loop" {
+  var ys = ["a", "bb", "ccc"]
+  let s = pop_twice(ys)
+  assert_eq(s, "ccc")
+  assert_eq(ys, ["a"])
+}

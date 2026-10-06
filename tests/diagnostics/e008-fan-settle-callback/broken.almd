@@ -1,0 +1,9 @@
+// A fan.settle callback that writes a `var` of the enclosing fn.
+effect fn main() -> Unit = {
+  var seen = 0
+  let r = fan.settle([1, 2, 3], (x) => {
+    seen = seen + x
+    ok(x)
+  })
+  println("${list.len(r)} ${seen}")
+}

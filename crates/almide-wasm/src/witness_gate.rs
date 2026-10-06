@@ -10,6 +10,10 @@ use almide_ir::{IrExpr, IrExprKind, IrStmtKind};
 #[path = "witness_gate_callbacks.rs"]
 mod callbacks;
 use callbacks::{inline_callback_subset, is_self_hosted_hof};
+/// The built-value rules (split for the file budget).
+#[path = "witness_gate_built.rs"]
+mod built;
+use built::built_value_subset;
 
 /// The phase-A/B1 subset gate: `None` = the body is straight-line and
 /// every RC-affecting site is covered by the recorder hooks (bind,
@@ -111,7 +115,10 @@ impl Why {
 /// value moves into the slot (`witness_store`), an out-of-range index aborts;
 /// `h.f = v` — the copy-on-write field write rebinds the root var
 /// (`witness_field_rebind`), the value moves into the copy's slot
-/// (`witness_field_value`).
+/// (`witness_field_value`). #2758: `m[k] = v` — the in-place window
+/// (map_inplace.rs) lowers the key and the value through `lower_arg`
+/// (`Retain`) and rebinds the var (`witness_mut_rebind`), exactly the
+/// `map.insert(m, k, v)` route; its functional fallback declines at emission.
 fn write_subset(s: &IrStmtKind) -> Option<String> {
     match s {
         IrStmtKind::Assign { value, .. } => value_subset(value).map(|w| w.at("assign")),
@@ -119,6 +126,7 @@ fn write_subset(s: &IrStmtKind) -> Option<String> {
             value_subset(index).or_else(|| value_subset(value)).map(|w| w.at("index-assign"))
         }
         IrStmtKind::FieldAssign { value, .. } => value_subset(value).map(|w| w.at("field-assign")),
+        IrStmtKind::MapInsert { key, value, .. } => value_subset(key).or_else(|| value_subset(value)).map(|w| w.at("map-insert")),
         _ => None,
     }
 }
@@ -174,7 +182,10 @@ fn stmts_subset(stmts: &[almide_ir::IrStmt]) -> Option<String> {
                 }
             }
             IrStmtKind::Expr { expr } => return Some(format!("stmt:Expr:{}", expr_tag(expr))),
-            IrStmtKind::Assign { .. } | IrStmtKind::IndexAssign { .. } | IrStmtKind::FieldAssign { .. } => {
+            IrStmtKind::Assign { .. }
+            | IrStmtKind::IndexAssign { .. }
+            | IrStmtKind::FieldAssign { .. }
+            | IrStmtKind::MapInsert { .. } => {
                 if let Some(why) = write_subset(&s.kind) {
                     return Some(why);
                 }
@@ -191,7 +202,7 @@ fn stmts_subset(stmts: &[almide_ir::IrStmt]) -> Option<String> {
             // exactly a match arm's binders. A named list rest is a fresh
             // block no owner releases (#2971).
             IrStmtKind::BindDestructure { pattern, value } => {
-                if pattern_has_named_rest(pattern) {
+                if pattern_has_named_rest(pattern, false) {
                     return Some("pattern:list-rest".into());
                 }
                 let subject = crate::rc_ownership::rc_tail(value);
@@ -275,9 +286,11 @@ fn value_subset(e: &IrExpr) -> Option<Why> {
         // where the gate cannot see it: `witness_record_default` declines
         // one that is not a literal.
         IrExprKind::Tuple { elements } => elements.iter().find_map(|x| value_subset(x).map(|w| w.inside("tuple-elem"))),
-        IrExprKind::EmptyMap | IrExprKind::MapLiteral { .. } | IrExprKind::Range { .. } | IrExprKind::ToOption { .. } => {
-            built_value_subset(e)
-        }
+        IrExprKind::EmptyMap
+        | IrExprKind::MapLiteral { .. }
+        | IrExprKind::Range { .. }
+        | IrExprKind::ToOption { .. }
+        | IrExprKind::SpreadRecord { .. } => built_value_subset(e),
         IrExprKind::Record { fields, .. } => {
             fields.iter().find_map(|(_, x)| value_subset(x).map(|w| w.inside("field")))
         }
@@ -323,8 +336,9 @@ fn value_subset(e: &IrExpr) -> Option<Why> {
         // The operand is a bound carrier (arg_temps.rs parks every
         // non-tail `f(x)!`; the payload is then a view) or, in tail
         // position, the call itself (an owned carrier). A call typed with
-        // its raw payload (a move-mode effect call, mut_param.rs) has an
-        // ABI carrier no hook sees: declined.
+        // its raw payload (a move-mode effect call, mut_param.rs) still
+        // returns its Result block at the ABI: an owned carrier the same
+        // route takes (#2758, `extraction_or_rt_subset`).
         IrExprKind::UnwrapOr { .. } | IrExprKind::Try { .. } | IrExprKind::Unwrap { .. } | IrExprKind::RuntimeCall { .. } => {
             extraction_or_rt_subset(e)
         }
@@ -337,26 +351,10 @@ fn value_subset(e: &IrExpr) -> Option<Why> {
         // #2755: `r.f` / `t.0` over a bound block (or a chain of such reads):
         // a VIEW of the slot, like an element read, with no abort edge.
         IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => slot_subset(e, object),
+        // #2758: `fan { a; b }` (fan.rs `lower_fan_block`): the arms run in
+        // order, each settled by the fan hooks; the first err aborts.
+        IrExprKind::Fan { exprs } => exprs.iter().find_map(|x| value_subset(x).map(|w| w.inside("fan-arm"))),
         other => Some(Why::Here(tag(other))),
-    }
-}
-
-/// #2755: the values a route BUILDS from its operands. `[]` of a map is a
-/// fresh empty block; `["k": v, …]` lowers as `map.from_list` over a fresh
-/// pairs list (emitter_values.rs) — a borrowed temporary of the arm (`id`)
-/// whose tuple slots are `witness_store`s; a range is a fresh Int list over
-/// its bounds (ranges.rs), whose overflow abort is a recorded terminal; `r?`
-/// converts its carrier (data.rs `witness_to_option`).
-fn built_value_subset(e: &IrExpr) -> Option<Why> {
-    match &e.kind {
-        IrExprKind::MapLiteral { entries } => entries
-            .iter()
-            .find_map(|(k, v)| value_subset(k).or_else(|| value_subset(v)).map(|w| w.inside("map-entry"))),
-        IrExprKind::Range { start, end, .. } => {
-            value_subset(start).or_else(|| value_subset(end)).map(|w| w.inside("range-bound"))
-        }
-        IrExprKind::ToOption { expr } => value_subset(expr).map(|w| w.inside("to-option")),
-        _ => None,
     }
 }
 
@@ -416,6 +414,20 @@ fn extraction_or_rt_subset(e: &IrExpr) -> Option<Why> {
         IrExprKind::Try { expr } | IrExprKind::Unwrap { expr } => match &expr.kind {
             IrExprKind::Var { .. } => None,
             IrExprKind::Call { .. } if carrier_ty(&expr.ty) => call_subset(expr).map(|w| w.inside("unwrap-operand")),
+            // #2758: a MOVE-MODE effect call (C-132, mut_param.rs) is typed
+            // with its raw payload, but its wasm value is the effect ABI's
+            // one Result block (func.rs `fn_signature`), handed over at rc 1.
+            // `lower_try_unwrap` reads it as an owned carrier exactly as for
+            // a carrier-typed tail call: born at the site, out on the err
+            // arm, released on the ok path (`release_ok_carrier`), its
+            // payload's credit moving to the value. A call whose lowered
+            // type is no carrier is refused by the lowering itself.
+            IrExprKind::Call { .. } => call_subset(expr).map(|w| w.inside("unwrap-operand")),
+            // #2758: `err(m)!`, the explicit raise, is a certainly-fresh
+            // carrier — the owned-carrier route of the `!` site
+            // (witness_unwrap.rs): born at the site, out on the err arm,
+            // released on the ok path. Its payload store is the constructor's.
+            IrExprKind::ResultErr { .. } => value_subset(expr).map(|w| w.inside("unwrap-operand")),
             _ => Some(Why::Here(tag(&e.kind))),
         },
         // The deterministic-meter / wall-deadline prims (fuel.rs
@@ -461,6 +473,21 @@ fn read_operand(x: &IrExpr, position: &str) -> Option<Why> {
         IrExprKind::IndexAccess { .. } | IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. } => {
             value_subset(x).map(|w| w.inside(position))
         }
+        // #2758: `r ?? v` / `r ?? "lit"` over a bound carrier: a join that is
+        // never owned (arg_temps.rs `unwrap_or_joins_owned`, the predicate
+        // `own_unwrap_or_join` reads), so both arms are views and the arm
+        // hook records no site — a read like a slot read's. Any other
+        // fallback may own the join, and an owned join must be bound first.
+        IrExprKind::UnwrapOr { fallback, .. }
+            if matches!(fallback.kind, IrExprKind::Var { .. } | IrExprKind::LitStr { .. }) =>
+        {
+            value_subset(x).map(|w| w.inside(position))
+        }
+        // #2758: arg_temps.rs's `{ let t = f(x); read(t) }`: the binds are
+        // the Bind hook's, the value read is the tail's, under this rule.
+        IrExprKind::Block { stmts, expr: Some(tail) } => {
+            stmts_subset(stmts).map(Why::Deep).or_else(|| read_operand(tail, position))
+        }
         other => Some(Why::Deep(format!("heap-{position}:{}", tag(other)))),
     }
 }
@@ -498,14 +525,15 @@ fn call_subset(e: &IrExpr) -> Option<Why> {
             if name.as_str().starts_with("__http_framed_")
                 || name.as_str().starts_with("__http_call_")
                 || name.as_str().starts_with("__http_serve_")
+                || name.as_str().starts_with("__proc_")
             {
                 return Some(Why::Deep("call:host-splice".into()));
             }
-            // `__is_null` reads the Value tag of its lowered argument, and
-            // `panic` concatenates its message into a line it never binds:
-            // no argument hook fires for either, so only an RC-free
-            // argument is honest.
-            if matches!(name.as_str(), "__is_null" | "panic") && !args.iter().all(rc_free) {
+            // `__is_null` reads the Value tag of its lowered argument: no
+            // argument hook fires, so only an RC-free argument is honest.
+            // `panic` concatenates its message into a line and aborts: an
+            // owned message is a block the abort discharges (`witness_panic`).
+            if name.as_str() == "__is_null" && !args.iter().all(rc_free) {
                 return Some(Why::Deep(format!("call:{name}-arg")));
             }
         }
@@ -549,9 +577,6 @@ fn call_subset(e: &IrExpr) -> Option<Why> {
     None
 }
 
-
-
-
 /// A statement body of a branch arm (#2756) or a loop (#2757): a call, a
 /// block of admitted statements, a nested branch or loop, a jump, or nothing.
 fn stmt_body_subset(e: &IrExpr) -> Option<Why> {
@@ -562,17 +587,9 @@ fn stmt_body_subset(e: &IrExpr) -> Option<Why> {
         IrExprKind::While { cond, body } => value_subset(cond)
             .map(|w| w.inside("while-cond"))
             .or_else(|| stmts_subset(body).map(Why::Deep)),
-        // A map walk shares its subject for the cursor and releases it
-        // after the loop — sites the recorder does not hook yet.
-        IrExprKind::ForIn { iterable, .. }
-            if matches!(
-                &iterable.ty,
-                almide_types::types::Ty::Applied(almide_types::types::constructor::TypeConstructorId::Map, _)
-            ) =>
-        {
-            Some(Why::Deep("forin-map".into()))
-        }
-        // A range head is a counting loop over its bounds — no list.
+        // A range head is a counting loop over its bounds — no list. A map
+        // walk's cursor takes and settles its own credit on the subject
+        // (witness_rest.rs `cursor_take`), each entry an activation.
         IrExprKind::ForIn { iterable, body, .. } => match &iterable.kind {
             IrExprKind::Range { start, end, .. } => value_subset(start).or_else(|| value_subset(end)),
             _ => value_subset(iterable),
@@ -599,9 +616,15 @@ fn stmt_body_subset(e: &IrExpr) -> Option<Why> {
 
 /// A match's subject and arm heads (#2756): the subject is evaluated once,
 /// before the site; a pattern binds VIEWS of it (patterns.rs, no share, no
-/// release) — except a named list rest, a fresh block no owner releases
-/// (#2971), declined; a guard runs between two arms' tests, so it must be
-/// RC-free.
+/// release) — except a named list rest, a fresh block only an unguarded arm
+/// releases (#2971, `pattern_has_named_rest`). A guard runs between two arms' tests (patterns.rs
+/// `lower_arm_chain`) and is recorded on its own arm's path, where the
+/// state before it is the one every path through it starts from. Its value
+/// is a scalar Bool, so each credit it takes inside is settled inside it (a
+/// temporary born and released, a share moved into a callee): the path that
+/// falls through to the next arm leaves it in that same state, and the
+/// events checked on the guard's own arm are the ones that path ran. A guard
+/// that BINDS a local declines — the local outlives the guard.
 fn match_head_subset(subject: &IrExpr, arms: &[almide_ir::IrMatchArm]) -> Option<String> {
     // A tuple / record literal subject is a fresh block the match only
     // reads: no route owns or releases it (arg_temps.rs names a produced or
@@ -637,25 +660,60 @@ fn match_head_subset(subject: &IrExpr, arms: &[almide_ir::IrMatchArm]) -> Option
         return Some("match-subject:fresh".into());
     }
     for a in arms {
-        if pattern_has_named_rest(&a.pattern) {
+        if pattern_has_named_rest(&a.pattern, a.guard.is_none()) {
             return Some("pattern:list-rest".into());
         }
-        if a.guard.as_ref().is_some_and(|g| !rc_free(g)) {
-            return Some("match-guard".into());
+        if let Some(g) = a.guard.as_ref().filter(|g| !rc_free(g)) {
+            if binds_a_local(g) {
+                return Some("match-guard:binds".into());
+            }
+            if let Some(w) = value_subset(g) {
+                return Some(w.at("match-guard"));
+            }
         }
     }
     None
 }
 
-fn pattern_has_named_rest(p: &almide_ir::IrPattern) -> bool {
+/// Does `e` bind a local anywhere (a `let` in a block, a lambda param, a
+/// loop var, a pattern)? A guard that does keeps that local past the guard.
+fn binds_a_local(e: &IrExpr) -> bool {
+    struct V(bool);
+    impl almide_ir::visit::IrVisitor for V {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if matches!(
+                e.kind,
+                IrExprKind::Block { .. } | IrExprKind::Lambda { .. } | IrExprKind::ForIn { .. } | IrExprKind::Match { .. }
+            ) {
+                self.0 = true;
+                return;
+            }
+            almide_ir::visit::walk_expr(self, e);
+        }
+    }
+    let mut v = V(false);
+    almide_ir::visit::IrVisitor::visit_expr(&mut v, e);
+    v.0
+}
+
+/// A named list rest no route releases. `arm_releases`: an UNGUARDED match
+/// arm releases each `..t` binder after its body, and every exit or loop
+/// jump out of the arm on its own edge (arm_rests.rs, #3377). A guarded
+/// arm's false guard falls through with the rest
+/// built, and a `let [h, ..t] = xs` never releases it.
+fn pattern_has_named_rest(p: &almide_ir::IrPattern, arm_releases: bool) -> bool {
     use almide_ir::IrPattern as P;
+    let any = |ps: &[P]| ps.iter().any(|q| pattern_has_named_rest(q, arm_releases));
     match p {
         P::List { elements, rest } => {
-            rest.as_deref().is_some_and(|r| !matches!(r, P::Wildcard)) || elements.iter().any(pattern_has_named_rest)
+            rest.as_deref().is_some_and(|r| !matches!(r, P::Wildcard) && !(arm_releases && matches!(r, P::Bind { .. })))
+                || any(elements)
         }
-        P::As { inner, .. } | P::Some { inner } | P::Ok { inner } | P::Err { inner } => pattern_has_named_rest(inner),
-        P::Constructor { args: ps, .. } | P::Tuple { elements: ps } => ps.iter().any(pattern_has_named_rest),
-        P::RecordPattern { fields, .. } => fields.iter().filter_map(|f| f.pattern.as_ref()).any(pattern_has_named_rest),
+        P::As { inner, .. } | P::Some { inner } | P::Ok { inner } | P::Err { inner } => pattern_has_named_rest(inner, arm_releases),
+        P::Constructor { args: ps, .. } | P::Tuple { elements: ps } => any(ps),
+        P::RecordPattern { fields, .. } => {
+            fields.iter().filter_map(|f| f.pattern.as_ref()).any(|q| pattern_has_named_rest(q, arm_releases))
+        }
         P::Bind { .. } | P::Wildcard | P::Literal { .. } | P::None => false,
     }
 }

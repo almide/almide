@@ -7,6 +7,9 @@
 # `fuel_exhausted` is the interpreter's second distinguished outcome (-3, "not
 # a hang or panic"): the one huge-range fixture and effect_tco_err_rewrap (a
 # TCO the interpreter does not perform on the err-rewrap path).
+# Since C-196's defined stack-overflow abort, the interpreter's own call-depth
+# ceiling (MAX_DEPTH) is a separate StackExhausted outcome: identical when it
+# matches the oracle row, otherwise counted here as the resource class.
 #
 # Both are MEASURED and shrink-only: lower them in their own commit citing the
 # solo run (scripts/check-ratchet-separation.sh keeps that commit free of

@@ -148,6 +148,32 @@ program is supposed to print — a text-level shrink would "still
 reproduce" for a reason unrelated to the bug and quietly turn a
 miscompile into a generator artifact.
 
+### The shape family — multi-module projects (#3309)
+
+`--family shape` (and one draw in six of what identity and composition
+leave in `all`). Eleven accepted programs one leg could not build reached
+us from a user in two days (#3283–#3307); none was single-file, and none
+used a name from the fixed pool. This family generates **projects**: one to
+four declaring modules, each a sibling module or a path-dependency package
+(at most one part hosted in the entry itself), with top-level lets of every
+value kind (Rc-backed `Bytes`/`Matrix`, fn values, records of closures),
+module `var`s mutated from closures, nested closures, HOF callbacks and
+other modules, and names drawn from an adversarial pool — case-only twins,
+the native leg's generated binders (`c`, `_fn_arg0`, `__cap_*`,
+`__almide_*`) and spellings of its mangled statics
+(`almide_rt_<module>_<name>`).
+
+The vocabulary is `tests/shape_matrix/gen.rs`, included verbatim
+(`#[path]`): the deterministic shape-matrix gate enumerates a bounded cross
+product of it on every PR, and this family samples past those bounds
+(several lets per module, several modules at once, closure nesting up to
+four deep). Every project knows its stdout by construction. Two rules differ
+from the other families: a **wasm wall is a finding** (check accepted the
+project, so a wall is #3286 / #3296's class, not coverage debt), and a
+finding is recorded whole — `repro.almd` is a bundle of every file under
+`// ==== <path> ====` headers, not minimized (`replay --family shape`
+rewrites the project under the scratch dir).
+
 ### The other two families
 
 - **Type-directed synthesis (~54%)** — `src/generator/{term,program}.rs`.
@@ -202,8 +228,10 @@ resource-limit skips (C-196 stack, C-197 wasm32 memory), so a wasm OOM is
 still a skip rather than a bogus miscompile.
 
 The resource-limit skip (`resource_class` in `ladder.rs`) reads each leg's
-own abort signature — `call stack exhausted` / `Error: out of memory` on the
-wasm leg, `stack overflow` / `memory allocation of … bytes failed` on native
+own abort signature — `call stack exhausted` (stock wasmtime's trap) /
+`Error: out of memory` on the wasm leg, `stack overflow` (C-196's `Error:
+stack overflow`, or Rust's own message on a thread that never registered) /
+`memory allocation of … bytes failed` on native
 — and discards the run only when everything the limited leg printed before
 dying is a prefix of its sibling's stdout. The sibling's fate is not part of
 the question (#2382): "wasm OOMed at the first allocation while native ran on

@@ -622,25 +622,10 @@ impl Emitter<'_> {
             }
             // slice: native usize-min clamps — a NEGATIVE bound casts
             // huge and saturates to len (s >= e is the empty buffer).
-            // The BE serialization cursor (#1099 intrinsics): append k
-            // big-endian bytes of the value, mut on the native surface —
-            // the push convention (var write-back, no value).
-            (
-                "write_u8" | "write_u16_be" | "write_u32_be" | "write_i64_be" | "write_f64_be",
-                [b, v],
-            ) => {
-                let recv = self.bytes_recv("write", b)?;
-                let (k, float) = match func {
-                    "write_u8" => (1, false),
-                    "write_u16_be" => (2, false),
-                    "write_u32_be" => (4, false),
-                    "write_i64_be" => (8, false),
-                    _ => (8, true),
-                };
-                self.lower_bytes_write_be(b, v, k, float)?;
-                self.emit_bytes_writeback_fresh(&recv)?;
-                Ok(None)
-            }
+            // The k-byte append family and the BE / Endian writers (#3294):
+            // each is `push` k times — `$bytes_push`'s amortized growth, the
+            // push receiver protocol (bytes_append.rs).
+            (f, _) if crate::bytes_append::is_member(f) => self.lower_bytes_append(f, args),
             // copy_within: memmove inside the buffer, NO-OP when the
             // range is empty or the destination does not fit (C-213).
             // The fit test is SUBTRACTIVE and signed — `d >= 0 && d <=
@@ -774,13 +759,8 @@ impl Emitter<'_> {
     fn lower_bytes_push(&mut self, b: &IrExpr, v: &IrExpr) -> ArmResult {
         let recv = self.bytes_recv("push", b)?;
         self.emit_read_bytes_recv(&recv, b)?;
-        let shared = match &recv {
-            crate::bytes_recv::BytesRecv::Var { idx, global, .. } => self.note_shared_receiver(*idx, *global)?,
-            crate::bytes_recv::BytesRecv::Temp => None,
-        };
         self.lower_arg(v, Some(INT), ArgMode::Borrow)?;
         self.f.instructions().call(F_BYTES_PUSH);
-        self.settle_outgrown_receiver(shared, BYTES);
         self.emit_bytes_writeback(&recv)?;
         if let crate::bytes_recv::BytesRecv::Var { id, global, .. } = &recv {
             self.witness_mut_rebind(*id, *global);

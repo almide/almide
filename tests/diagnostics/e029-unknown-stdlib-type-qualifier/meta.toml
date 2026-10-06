@@ -1,0 +1,3 @@
+expects_code = "E029"
+expects_error = "unknown module 'json' in type 'json.Value'"
+hint_substring = "Add `import json`"

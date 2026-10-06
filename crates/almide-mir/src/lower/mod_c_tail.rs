@@ -462,7 +462,9 @@ fn lower_function_all_impl(
     // `fn` declares ∅, so reaching ANY cap (a `print`/`random.int`/`env.args`/`fs.read_text` from a
     // non-effect fn — already a frontend type error) would REJECT here too: the soundness floor (pure
     // stays pure) is unchanged; only the host-reaching set grows. (A per-capability effect signature
-    // is a later precision refinement.)
+    // is a later precision refinement.) Clock and Net join the bound with the host ops that
+    // reach them on this rung (#2739: `env.sleep_ms`, the http client) — the structural leg's
+    // `EFFECT_BOUND` (almide-wasm cert_project.rs) already declares both for an effect fn.
     let declared_caps = if func.is_effect {
         vec![
             crate::Capability::Stdout,
@@ -470,7 +472,9 @@ fn lower_function_all_impl(
             crate::Capability::CliArgs,
             crate::Capability::FsRead,
             crate::Capability::FsWrite,
+            crate::Capability::Clock,
             crate::Capability::Stdin,
+            crate::Capability::Net,
         ]
     } else {
         Vec::new()
@@ -522,7 +526,7 @@ mod calls;
 // The in-place `&mut` mutator surface (a free fn in the private `calls` module) — re-exported so
 // `inline_pure_call_globals`'s receiver fence tests the SAME predicate the receiver COW does, and
 // the two can never drift apart (#906).
-pub(crate) use calls::is_inplace_mutator;
+pub(crate) use calls::{borrow_release_roots, is_inplace_mutator, place_root};
 
 
 #[cfg(test)]
@@ -562,6 +566,8 @@ include!("desugar_b.rs");
 include!("desugar_known_ctor.rs");
 include!("desugar_c.rs");
 include!("desugar_call_arg_anf.rs");
+include!("desugar_stmt_lists.rs");
+include!("desugar_c132_bang.rs");
 include!("desugar_unwrap.rs");
 include!("desugar_unwrap_b.rs");
 include!("desugar_nested_unwrap.rs");

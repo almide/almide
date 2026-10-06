@@ -25,10 +25,11 @@
 //! A child that starts and exits non-zero retains its own stderr/status.
 //! C-214 now includes both status twins after almide/als#65 merged.
 //!
-//! `process` has no wasm host binding (E081, the availability matrix's row
-//! names the reason), so this is the only leg that renders these strings — there is no
-//! cross-target equality to maintain here, which is exactly why this half of
-//! #2090 could land while the `fs` half waits on the structural leg's WAT.
+//! Since #2589 (ADR-0025) the embedded wasm host renders these strings too —
+//! with the SAME code: `runtime/rs/src/process.rs` includes
+//! `crates/almide-rt-core/src/process_core.rs`, and the host's
+//! `almide:process/spawn` calls it. The last test below holds the two legs
+//! byte-equal over every row.
 
 use std::process::Command;
 
@@ -66,8 +67,12 @@ fn rows() -> Vec<(&'static str, String)> {
             format!("process.exec_status_timeout({MISSING:?}, 1000):"),
         ),
         (
-            "let _ = process.exec_attached(\"almide-no-such-binary-2090\", [])!",
-            format!("process.exec_attached({MISSING:?}):"),
+            "let _ = process.run(\"almide-no-such-binary-2090\", [])!",
+            format!("process.run({MISSING:?}):"),
+        ),
+        (
+            "let _ = process.run_in(\".\", \"almide-no-such-binary-2090\", [])!",
+            format!("process.run_in(\".\", {MISSING:?}):"),
         ),
         (
             "let _ = process.exec(\"almide-no-such-binary-2090\", [])!",
@@ -159,52 +164,37 @@ fn a_child_that_ran_and_failed_is_untouched() {
     );
 }
 
-/// Why this family has ONE leg, asserted rather than assumed.
-///
-/// Every string above is rendered by the native runtime and by nothing else,
-/// because `process` has no wasm host binding at all — so unlike the `fs` half
-/// of #2090, there is no second implementation to keep byte-identical and no
-/// contract to update. That is the whole reason this half could land alone.
-///
-/// If someone ports `process` to wasi-p3 (#1628), this test goes red, and that
-/// is the point: the port acquires a second renderer for these messages and
-/// C-215's rule starts applying to them.
+/// The second leg (#2589): the embedded wasm host renders every row of the
+/// family byte for byte as native does — stdout, stderr and exit code — since
+/// both run one core. This test used to assert the opposite (that `process`
+/// had no wasm leg), as the tripwire for exactly this moment.
 #[test]
-fn the_process_surface_has_no_second_leg_to_keep_equal() {
+fn the_embedded_wasm_leg_renders_every_row_as_native_does() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let file = dir.path().join("wasmleg.almd");
-    std::fs::write(
-        &file,
-        "import process\n\
-         effect fn main() -> Unit = {\n\
-        \x20 let _ = process.exec(\"ghh-not-a-binary\", [])!\n\
-         }\n",
-    )
-    .expect("write fixture");
-    let out = Command::new(almide())
-        .arg("check")
-        .arg(&file)
-        .args(["--target", "wasm"])
-        .output()
-        .expect("run almide check");
-    let text = format!(
-        "{}{}",
-        String::from_utf8_lossy(&out.stdout),
-        String::from_utf8_lossy(&out.stderr)
-    );
-    assert!(
-        text.contains("error[E081]") && text.contains("is not available on --target wasm"),
-        "process grew a wasm leg — these messages now have a second renderer, so \
-         the #2090 form has to be reproduced there and C-215 applies:\n{text}"
-    );
+    let mut diverged = Vec::new();
+    for (i, (call, _)) in rows().into_iter().enumerate() {
+        let file = dir.path().join(format!("leg{i}.almd"));
+        std::fs::write(&file, format!("import process\neffect fn main() -> Unit = {{\n  {call}\n}}\n")).expect("write fixture");
+        let leg = |extra: &[&str]| {
+            let out = Command::new(almide()).arg("run").arg(&file).args(extra).output().expect("run almide");
+            (out.status.code(), String::from_utf8_lossy(&out.stdout).to_string(), String::from_utf8_lossy(&out.stderr).to_string())
+        };
+        let (native, wasm) = (leg(&[]), leg(&["--target", "wasm"]));
+        if native != wasm {
+            diverged.push(format!("  {call}\n    native: {native:?}\n    wasm:   {wasm:?}"));
+        }
+    }
+    assert!(diverged.is_empty(), "the process.* failure family diverges between native and the embedded host:\n{}", diverged.join("\n"));
 }
 
 /// The status twins joined the family after the normative amendment.
 #[test]
 fn no_anonymous_process_failure_remains() {
-    let src = include_str!("../runtime/rs/src/process.rs");
-    assert!(!src.contains("exec failed:"));
-    assert!(!src.contains(".map_err(|e| e.to_string())"));
+    // The family's bodies live in the shared core since #2589.
+    for src in [include_str!("../runtime/rs/src/process.rs"), include_str!("../crates/almide-rt-core/src/process_core.rs")] {
+        assert!(!src.contains("exec failed:"));
+        assert!(!src.contains(".map_err(|e| e.to_string())"));
+    }
 }
 
 #[test]
@@ -240,4 +230,67 @@ effect fn main() -> Unit = {
         assert_eq!(String::from_utf8_lossy(&output.stdout), format!(
             "process.exec_status({quoted}): {host}\nprocess.exec_status_timeout({quoted}, 1000): {host}\n"));
     }
+}
+
+/// The subprocess family is extended by MATRIX, never point-wise (#3379:
+/// `run_in` was asked for because `exec_in` had no terminal-attached twin,
+/// and `exec_attached` was the one member C-374's list did not name).
+///
+/// The family is every fn stdlib/process.almd declares, minus the named
+/// non-members below. Each member must have every cell:
+/// - its `almide:process/spawn` WIT case (`exec_in` -> `exec-in`);
+/// - its `__proc_<fn>` leaf in the emitter's op table (fs_meta.rs);
+/// - its self-host registry row (the wasm legs);
+/// - its stock-p1 `host-capability` row in proofs/target-availability.toml;
+/// - when it starts a child: a `[permissions] proc` row (src/cli/mod.rs) and
+///   a spawn-failure row in [`rows`] above, which the two-leg test runs.
+/// The pairs `exec`/`run` and `exec_in`/`run_in` are the capture-versus-
+/// terminal matrix; a cell missing on either axis fails here.
+#[test]
+fn the_subprocess_family_has_every_cell() {
+    // Not in the family: process-wide state and the deprecated alias.
+    const NON_MEMBERS: &[&str] = &["exit", "args", "stdin_lines", "env", "sleep", "exec_attached"];
+    // Members that do not start a child.
+    const NO_CHILD: &[&str] = &["kill", "is_alive", "pid"];
+    let root = env!("CARGO_MANIFEST_DIR");
+    let read = |p: &str| std::fs::read_to_string(format!("{root}/{p}")).unwrap_or_else(|e| panic!("{p}: {e}"));
+    let stdlib = read("stdlib/process.almd");
+    let wit = read("crates/almide-wasm-run/wit/process/spawn.wit");
+    let leaves = read("crates/almide-wasm/src/fs_meta.rs");
+    let registry = read("crates/almide-types/src/self_host_registry.rs");
+    let availability = read("proofs/target-availability.toml");
+    let permissions = read("src/cli/mod.rs");
+    let failure_rows: Vec<String> = rows().into_iter().map(|(call, _)| call.to_string()).collect();
+
+    let family: Vec<String> = stdlib
+        .lines()
+        .filter_map(|l| l.strip_prefix("effect fn ").or_else(|| l.strip_prefix("fn ")))
+        .filter_map(|l| l.split('(').next())
+        .map(str::to_string)
+        .filter(|f| !NON_MEMBERS.contains(&f.as_str()))
+        .collect();
+    for pair in [["exec", "run"], ["exec_in", "run_in"]] {
+        for f in pair {
+            assert!(family.iter().any(|m| m == f), "the capture/terminal matrix lost `process.{f}`");
+        }
+    }
+
+    let mut missing = Vec::new();
+    for f in &family {
+        let mut need = |ok: bool, cell: &str| {
+            if !ok {
+                missing.push(format!("  process.{f}: {cell}"));
+            }
+        };
+        let case = f.replace('_', "-");
+        need(wit.lines().any(|l| l.trim() == format!("{case},")), "WIT case in spawn.wit");
+        need(leaves.contains(&format!("(\"__proc_{f}\", ")), "__proc_ leaf in fs_meta.rs PROC_LEAVES");
+        need(registry.contains(&format!("\"process.{f}\")")), "self-host registry row");
+        need(availability.contains(&format!("fn = \"process.{f}\"")), "target-availability row");
+        if !NO_CHILD.contains(&f.as_str()) {
+            need(permissions.contains(&format!("(\"{f}\", ")), "[permissions] proc row in src/cli/mod.rs");
+            need(failure_rows.iter().any(|c| c.contains(&format!("process.{f}("))), "spawn-failure row in rows()");
+        }
+    }
+    assert!(missing.is_empty(), "the subprocess family is missing cells:\n{}", missing.join("\n"));
 }

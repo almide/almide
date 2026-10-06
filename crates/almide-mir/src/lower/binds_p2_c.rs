@@ -659,6 +659,18 @@ impl LowerCtx {
                 }
             }
         }
+        // Any other heap-result `if` (`let label = if c then { list.push(acc, x); "a" } else
+        // "b"` in a loop body, where the tail-duplicating desugar declines): the same
+        // executing join the variant path above uses — each arm builds and Consumes its own
+        // value, the merge is one owned block the released-merge-dst credit certifies, and
+        // the bind scope-tracks it. The arms' writes to enclosing vars run in the taken arm
+        // only. Runs AFTER the identity-else fold, so a fold-shaped bind keeps its bytes.
+        if let IrExprKind::If { cond, then, else_ } = &value.kind {
+            if let Some(obj) = self.try_lower_heap_result_if(cond, then, else_, ty) {
+                self.seed_bound_heap_match_merge(var, ty, obj);
+                return Ok(());
+            }
+        }
         Err(LowerError::shaped(
             value.span,
             WallShape::HeapResultBind,

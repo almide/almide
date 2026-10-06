@@ -1,0 +1,4 @@
+expects_code = "E095"
+expects_error = "the app passed to http.serve captures `boot`, a local of main"
+hint_substring = "Make `boot` a top-level `let`, or compute it inside the handler"
+expects_line_col = "8:56"

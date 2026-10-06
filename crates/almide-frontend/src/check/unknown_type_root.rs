@@ -128,4 +128,94 @@ impl Checker {
         }
         diag
     }
+
+    /// E093 (#3403): every application `X[A, ..]` in an annotation whose
+    /// argument count differs from the declared parameter count of the type
+    /// it names. A generic alias applied to its own count was already
+    /// expanded by the resolver; one applied to another count stays `Named`
+    /// under its key, and so does a generic record or variant. A bare
+    /// spelling (no brackets) is not an application and is never reported.
+    ///
+    /// A BUILTIN head applied to another count than its table entry declares
+    /// (`List[Int, Int]`, `Map[String]`, `Int[String]`, #3408) is not that
+    /// builtin either — the resolver leaves it a `Named` no declaration
+    /// registered — and is counted against `builtin_type_params`. Its name
+    /// goes into `rooted`: the E093 is the root, not an E029 for `Map`.
+    fn type_arity_diags(&self, ty: &Ty, span: Option<crate::ast::Span>, ctx: &str, seen: &mut std::collections::HashSet<(Sym, usize)>, rooted: &mut std::collections::HashSet<Sym>) -> Vec<Diagnostic> {
+        use crate::canonicalize::resolve::{builtin_type_params, declared_type_params};
+        let mut out = Vec::new();
+        let mut stack = vec![ty];
+        while let Some(t) = stack.pop() {
+            if let Ty::Named(s, args) = t
+                && !args.is_empty()
+            {
+                if let Some(params) = declared_type_params(s.as_str(), &self.env.types) {
+                    if params.len() != args.len() && seen.insert((*s, args.len())) {
+                        out.push(self.type_arity_diag(s.as_str(), params, args.len(), span, ctx));
+                    }
+                } else if !self.env.types.contains_key(s)
+                    && let Some(letters) = builtin_type_params(s.as_str())
+                    && letters.len() != args.len()
+                {
+                    rooted.insert(*s);
+                    if seen.insert((*s, args.len())) {
+                        let params: Vec<Ty> = letters.iter().map(|l| Ty::TypeVar(sym(l))).collect();
+                        out.push(self.type_arity_diag(s.as_str(), &params, args.len(), span, ctx));
+                    }
+                }
+            }
+            stack.extend(t.children());
+        }
+        out
+    }
+
+    /// E094 (#3407): every type-alias cycle among this file's declarations,
+    /// located at the first alias's name. Called once per checked file (the
+    /// entry program and each module), so a cycle is reported once.
+    pub(crate) fn validate_alias_cycles(&mut self, decls: &[crate::ast::Decl]) {
+        for (name, mut diag) in crate::canonicalize::registration::alias_cycle_diags(decls) {
+            diag.file = self.source_file.clone();
+            let name = name.as_str();
+            if let (Some(line), Some(col)) = (diag.line, diag.col)
+                && let Some((l, c)) = self.locate_type_name(line, col + "type".len(), name)
+            {
+                diag.line = Some(l);
+                diag.col = Some(c);
+                diag.end_col = Some(c + name.chars().count());
+            }
+            self.diagnostics.push(diag);
+        }
+    }
+
+    fn type_arity_diag(&self, name: &str, params: &[Ty], given: usize, span: Option<crate::ast::Span>, ctx: &str) -> Diagnostic {
+        let letters: Vec<String> = params.iter().map(|p| p.display()).collect();
+        let (msg, hint) = if letters.is_empty() {
+            (
+                format!("type '{}' takes no type arguments, but is applied to {}", name, given),
+                format!("Drop the brackets: write `{}` — only a type declared with parameters (`type {}[T] = ...`) takes arguments", name, name),
+            )
+        } else {
+            let spelled = format!("{}[{}]", name, letters.join(", "));
+            (
+                format!("type '{}' takes {}, but is applied to {}", spelled, plural_args(letters.len()), given),
+                format!("Write exactly one type per parameter: `{}`", spelled),
+            )
+        };
+        let mut diag = err(msg, hint, ctx.to_string()).with_code("E093");
+        let Some(sp) = span else { return diag };
+        diag.file = self.source_file.clone();
+        diag.line = Some(sp.line);
+        diag.col = Some(sp.col);
+        let bare = name.rsplit('.').next().unwrap_or(name);
+        if let Some((line, col)) = self.locate_type_name(sp.line, sp.col, bare) {
+            diag.line = Some(line);
+            diag.col = Some(col);
+            diag.end_col = Some(col + bare.chars().count());
+        }
+        diag
+    }
+}
+
+fn plural_args(n: usize) -> String {
+    if n == 1 { "1 type argument".to_string() } else { format!("{} type arguments", n) }
 }

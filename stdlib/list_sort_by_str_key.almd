@@ -6,14 +6,15 @@
 // scratch keys are fresh OWNED Strings in a List[String] (its recursive scope-end
 // drop frees each); slot shuffles move the raw handles WITHIN that list (no
 // ownership event). The result value list is returned owned; the source borrowed.
-fn __sbs_init(bh: Int, sh: Int, kh: Int, f: (Int) -> String, n: Int, i: Int) -> Int = if i >= n then 0
-else {
-  let v = prim.load64(sh + 12 + i * 8)
-  let k = f(v)
-  prim.store64(bh + 12 + i * 8, v)
-  prim.store_str(kh + 12 + i * 8, k)
-  __sbs_init(bh, sh, kh, f, n, i + 1)
-}
+fn __sbs_init(bh: Int, sh: Int, kh: Int, f: (Int) -> String, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let v = prim.load64(sh + 12 + i * 8)
+    let k = f(v)
+    prim.store64(bh + 12 + i * 8, v)
+    prim.store_str(kh + 12 + i * 8, k)
+    __sbs_init(bh, sh, kh, f, n, i + 1)
+  }
 
 // Byte-lexicographic `a > b` (v0's String Ord — the string_cmp discipline, inlined:
 // the dispatch name `string.cmp` is self-host-only and unknown to the checker).
@@ -46,39 +47,42 @@ fn __sbs_le_h(ah: Int, bh: Int) -> Bool = __sbs_cmp_at(
 // ── stable bottom-up mergesort over the paired (value, key) buffers (#1459):
 // O(n log n) in place of the O(n^2) insertion shift; `<=` takes the left run
 // first, so equal keys keep their order (same stability contract as before).
-fn __sbs_mrun(svh: Int, skh: Int, dvh: Int, dkh: Int, mid: Int, hi: Int, i: Int, j: Int, k: Int) -> Int = if k >= hi then 0
-else {
-  let takel = if j >= hi then true
-  else if i >= mid then false else __sbs_le_h(
-    prim.load64(skh + 12 + i * 8),
-    prim.load64(skh + 12 + j * 8),
-  )
-  if takel then {
-    prim.store64(dvh + 12 + k * 8, prim.load64(svh + 12 + i * 8))
-    prim.store64(dkh + 12 + k * 8, prim.load64(skh + 12 + i * 8))
-    __sbs_mrun(svh, skh, dvh, dkh, mid, hi, i + 1, j, k + 1)
-  } else {
-    prim.store64(dvh + 12 + k * 8, prim.load64(svh + 12 + j * 8))
-    prim.store64(dkh + 12 + k * 8, prim.load64(skh + 12 + j * 8))
-    __sbs_mrun(svh, skh, dvh, dkh, mid, hi, i, j + 1, k + 1)
+fn __sbs_mrun(svh: Int, skh: Int, dvh: Int, dkh: Int, mid: Int, hi: Int, i: Int, j: Int, k: Int) -> Int =
+  if k >= hi then 0
+  else {
+    let takel = if j >= hi then true
+    else if i >= mid then false else __sbs_le_h(
+      prim.load64(skh + 12 + i * 8),
+      prim.load64(skh + 12 + j * 8),
+    )
+    if takel then {
+      prim.store64(dvh + 12 + k * 8, prim.load64(svh + 12 + i * 8))
+      prim.store64(dkh + 12 + k * 8, prim.load64(skh + 12 + i * 8))
+      __sbs_mrun(svh, skh, dvh, dkh, mid, hi, i + 1, j, k + 1)
+    } else {
+      prim.store64(dvh + 12 + k * 8, prim.load64(svh + 12 + j * 8))
+      prim.store64(dkh + 12 + k * 8, prim.load64(skh + 12 + j * 8))
+      __sbs_mrun(svh, skh, dvh, dkh, mid, hi, i, j + 1, k + 1)
+    }
   }
-}
 
-fn __sbs_mpass(svh: Int, skh: Int, dvh: Int, dkh: Int, n: Int, width: Int, lo: Int) -> Int = if lo >= n then 0
-else {
-  let m0 = lo + width
-  let mid = if m0 > n then n else m0
-  let h0 = lo + width * 2
-  let hi = if h0 > n then n else h0
-  let _r = __sbs_mrun(svh, skh, dvh, dkh, mid, hi, lo, mid, lo)
-  __sbs_mpass(svh, skh, dvh, dkh, n, width, lo + width * 2)
-}
+fn __sbs_mpass(svh: Int, skh: Int, dvh: Int, dkh: Int, n: Int, width: Int, lo: Int) -> Int =
+  if lo >= n then 0
+  else {
+    let m0 = lo + width
+    let mid = if m0 > n then n else m0
+    let h0 = lo + width * 2
+    let hi = if h0 > n then n else h0
+    let _r = __sbs_mrun(svh, skh, dvh, dkh, mid, hi, lo, mid, lo)
+    __sbs_mpass(svh, skh, dvh, dkh, n, width, lo + width * 2)
+  }
 
-fn __sbs_mrounds(cvh: Int, ckh: Int, ovh: Int, okh: Int, n: Int, width: Int) -> Int = if width >= n then cvh
-else {
-  let _p = __sbs_mpass(cvh, ckh, ovh, okh, n, width, 0)
-  __sbs_mrounds(ovh, okh, cvh, ckh, n, width * 2)
-}
+fn __sbs_mrounds(cvh: Int, ckh: Int, ovh: Int, okh: Int, n: Int, width: Int) -> Int =
+  if width >= n then cvh
+  else {
+    let _p = __sbs_mpass(cvh, ckh, ovh, okh, n, width, 0)
+    __sbs_mrounds(ovh, okh, cvh, ckh, n, width * 2)
+  }
 
 fn __sbs_mcopy(srch: Int, dsth: Int, n: Int, i: Int) -> Int = if i >= n then 0
 else {
@@ -118,15 +122,16 @@ fn list_sort_by_str_key(xs: List[Int], f: (Int) -> String) -> List[Int] = {
 // list_sort_by_float_rc; the merge phase is shared verbatim (moving raw handles
 // BETWEEN the owned key list and the flat scratch is not an ownership event,
 // and __sbs_msort guarantees the owned list ends holding each handle once).
-fn __sbsr_init(bh: Int, sh: Int, kh: Int, f: (Int) -> String, n: Int, i: Int) -> Int = if i >= n then 0
-else {
-  let v = prim.load64(sh + 12 + i * 8)
-  let k = f(v)
-  prim.rc_inc(v)
-  prim.store64(bh + 12 + i * 8, v)
-  prim.store_str(kh + 12 + i * 8, k)
-  __sbsr_init(bh, sh, kh, f, n, i + 1)
-}
+fn __sbsr_init(bh: Int, sh: Int, kh: Int, f: (Int) -> String, n: Int, i: Int) -> Int =
+  if i >= n then 0
+  else {
+    let v = prim.load64(sh + 12 + i * 8)
+    let k = f(v)
+    prim.rc_inc(v)
+    prim.store64(bh + 12 + i * 8, v)
+    prim.store_str(kh + 12 + i * 8, k)
+    __sbsr_init(bh, sh, kh, f, n, i + 1)
+  }
 
 fn list_sort_by_str_key_rc(xs: List[Int], f: (Int) -> String) -> List[Int] = {
   let n = list.len(xs)

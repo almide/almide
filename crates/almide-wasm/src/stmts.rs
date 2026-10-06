@@ -18,17 +18,6 @@ mod stmts_spend;
 
 impl Emitter<'_> {
     /// Statement position: Unit-typed shapes only (blocks, calls, control).
-    /// `continue` / `break` in statement position: a branch to the loop
-    /// context's continue label (`break` adds the depth to its exit).
-    fn lower_loop_jump(&mut self, brk: bool) -> Result<(), EmitError> {
-        let Some((extra, delta)) = self.loop_ctl else {
-            return unsup(if brk { "expr:Break" } else { "expr:Continue" });
-        };
-        self.f.instructions().br(if brk { extra + delta } else { extra });
-        self.witness_loop_jump();
-        Ok(())
-    }
-
     pub(crate) fn lower_stmt_expr(&mut self, e: &IrExpr) -> Result<(), EmitError> {
         // main's Result-typed statement/tail is the effect carrier —
         // err aborts with the native contract instead of discarding
@@ -280,13 +269,7 @@ impl Emitter<'_> {
             let dec_cell = self.dec_cell_fn(declared);
             self.f.instructions().local_get(idx).call(dec_cell);
             self.rc_own(idx, declared);
-            // #2758: the cell's credits (the frame's and each capturing
-            // env's) are no hook's yet — withdraw, keeping the local known
-            // so its exit release is attributed.
-            if let Some(w) = self.witness.as_mut() {
-                w.decline("bind:cell");
-                w.param_borrowed(idx);
-            }
+            self.witness_cell_bind(idx, declared, value);
             self.f
                 .instructions()
                 .i32_const(declared.slot_size() as i32)
@@ -314,12 +297,25 @@ impl Emitter<'_> {
         Ok(())
     }
 
+    /// `m[k] = v` on a C-319 cell (#3339) — the `map.insert` mut form,
+    /// whose write-back reads the occupant through the cell, releases it
+    /// and stores the functional `set`'s fresh block back. It walled before:
+    /// a captured-and-written var is such a cell (a module `var` written
+    /// from a callback too), so `seen[k] = v` in a closure was E082.
+    fn lower_cell_map_insert(&mut self, target: &VarId, key: &IrExpr, value: &IrExpr) -> Result<(), EmitError> {
+        let var_expr = IrExpr { kind: IrExprKind::Var { id: *target }, ty: Ty::Unit, span: None, def_id: None };
+        let args = self.owned_call_marks.pin_args(vec![var_expr, key.clone(), value.clone()]);
+        self.arm_scope(|em| em.lower_map_call("insert", &args, None))?;
+        Ok(())
+    }
+
     pub(crate) fn rc_own(&mut self, idx: u32, ty: SliceTy) {
         self.rc_owned.insert(idx);
         self.owned_ty.insert(idx, ty);
     }
 
-    pub(crate) fn lower_stmt(&mut self, s: &IrStmt) -> Result<(), EmitError> {
+    /// A statement's lowering; `lower_stmt` (debug_lines.rs) brackets it.
+    pub(crate) fn lower_stmt_kind(&mut self, s: &IrStmt) -> Result<(), EmitError> {
         match &s.kind {
             IrStmtKind::Bind { var, value, .. } => self.lower_stmt_bind(var, value),
             // `p.field = v` on a record var: copy-on-write write-back —
@@ -338,11 +334,13 @@ impl Emitter<'_> {
                     return Ok(());
                 }
                 if self.cells.contains(target) {
-                    return unsup("cell-write:map-insert");
+                    return self.lower_cell_map_insert(target, key, value);
                 }
                 let Some(&(var_idx, _)) = self.locals.get(target) else {
                     return unsup("map-insert:unmapped");
                 };
+                // #2758: this write-back records no rebind of the var's block.
+                self.witness_decline("map-insert:functional");
                 let var_expr = IrExpr {
                     kind: IrExprKind::Var { id: *target },
                     ty: Ty::Unit,
@@ -422,10 +420,12 @@ impl Emitter<'_> {
                     self.f.instructions().local_get(var_idx).local_set(floor);
                     let flags = self.hoist_cow_flags(None, body)?;
                     let incl = *inclusive;
-                    let pre = self.prejudge_first_stores(body, &|e: &mut Self| {
+                    let pre = self.prejudge_first_stores(None, body, &|e: &mut Self| {
                         e.range_exit_test(var_idx, floor, stop, incl);
                         e.f.instructions().i32_eqz();
-                    });
+                        Ok(())
+                    })?;
+                    let ptrs = self.hoist_payload_ptrs(None, body, &pre)?; // #3345
                     self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
                     self.emit_det_charge_const(1);
                     self.range_exit_test(var_idx, floor, stop, *inclusive);
@@ -442,6 +442,7 @@ impl Emitter<'_> {
                         .br(0)
                         .end()
                         .end();
+                    self.drop_payload_ptrs(ptrs);
                     self.drop_prejudged(pre);
                     self.drop_cow_flags(flags);
                     self.release_i64();
@@ -459,10 +460,12 @@ impl Emitter<'_> {
                         }
                         self.f.instructions().local_get(sl).local_set(var_idx);
                         let flags = self.hoist_cow_flags(None, body)?;
-                        let pre = self.prejudge_first_stores(body, &|e: &mut Self| {
+                        let pre = self.prejudge_first_stores(None, body, &|e: &mut Self| {
                             e.range_exit_test(var_idx, sl, el, inclusive);
                             e.f.instructions().i32_eqz();
-                        });
+                            Ok(())
+                        })?;
+                        let ptrs = self.hoist_payload_ptrs(None, body, &pre)?; // #3345
                         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
                         self.emit_det_charge_const(1);
                         self.range_exit_test(var_idx, sl, el, inclusive);
@@ -479,7 +482,8 @@ impl Emitter<'_> {
                             .br(0)
                             .end()
                             .end();
-                        self.drop_prejudged(pre);
+                        self.drop_payload_ptrs(ptrs);
+                    self.drop_prejudged(pre);
                         self.drop_cow_flags(flags);
                         return Ok(());
                     }
@@ -505,16 +509,25 @@ impl Emitter<'_> {
                         // witnesses a second holder (a borrowed subject
                         // takes +1; an owned one is the cursor's own), and
                         // the cursor releases its credit after the loop.
-                        if !self.rc_owned_result(iterable) {
+                        let owned = self.rc_owned_result(iterable);
+                        if !owned {
                             self.rc_inc_top();
                         }
-                        // The cursor's share and its release after the loop
-                        // are not recorded yet (#2757).
-                        self.witness_decline("forin-map");
                         let drop_map = self.dec_fn_of(SliceTy::Map(kh, vh));
                         let bh = self.hold_i32()?;
                         let cur = self.hold_i32()?;
                         let end = self.hold_i32()?;
+                        if let Some(w) = self.witness.as_mut() {
+                            w.cursor_take(owned, bh);
+                        }
+                        // #3374: for the body's duration the cursor's credit
+                        // is a FRAME credit, so every exit edge out of the
+                        // body (a `!`, a guard return) releases it through
+                        // its exit plan, as the loop end below does. A
+                        // `break` / `continue` stays in the frame and reaches
+                        // that release itself.
+                        self.rc_owned.insert(bh);
+                        self.owned_ty.insert(bh, SliceTy::Map(kh, vh));
                         {
                             let mut i = self.f.instructions();
                             i.local_set(bh);
@@ -533,12 +546,18 @@ impl Emitter<'_> {
                             i.local_get(cur).local_get(end).i32_ge_u().br_if(1);
                             i.local_get(cur).i32_const(koff as i32).i32_add();
                         }
+                        // One activation per entry; the key and the value are
+                        // VIEWS of the entry's slots.
+                        self.witness_loop_open();
                         self.load_ty_slot_at(k);
                         self.f.instructions().local_set(ki);
+                        self.witness_view_local(ki, k);
                         self.f.instructions().local_get(cur).i32_const(voff as i32).i32_add();
                         self.load_ty_slot_at(v);
                         self.f.instructions().local_set(vi);
+                        self.witness_view_local(vi, v);
                         self.lower_loop_body(body, true)?;
+                        self.witness_loop_close();
                         self.f
                             .instructions()
                             .local_get(cur)
@@ -548,7 +567,12 @@ impl Emitter<'_> {
                             .br(0)
                             .end()
                             .end();
+                        self.rc_owned.remove(&bh);
+                        self.owned_ty.remove(&bh);
                         self.f.instructions().local_get(bh).call(drop_map);
+                        if let Some(w) = self.witness.as_mut() {
+                            w.cursor_release(bh);
+                        }
                         self.release_i32();
                         self.release_i32();
                         self.release_i32();
@@ -659,7 +683,10 @@ impl Emitter<'_> {
                 // the epilogue releases the local once whichever arm ran —
                 // and the exit validator (E083) checks it; the refusal is
                 // retired (stage 2c-ii: records made the mut_port cell hit it).
+                // #3406: `var` dies at a consuming rhs over it (dying_move.rs).
+                self.note_dying(value, Some(*var), true);
                 self.lower(value, Some(declared))?;
+                self.note_dying(value, Some(*var), false);
                 // RC-5: same share discipline as Bind — except a MOVED
                 // temp (#3104), whose one credit becomes the var's.
                 if self.rc_droppable(declared) && !self.rc_owned_result(value) && moved.is_none() {

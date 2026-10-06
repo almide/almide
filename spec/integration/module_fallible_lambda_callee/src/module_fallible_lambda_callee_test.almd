@@ -1,0 +1,17 @@
+// #3392 on the test lanes: the issue's route was a test file importing the
+// module, where `almide test --target wasm` walled `call:count` and skipped.
+import self.pattern as pattern
+
+test "a module's fallible lambda calls the module's own fn" {
+  let env = pattern.Env { syms: ["f": 1] }
+  assert_eq(pattern.total(env, [pattern.V(0), pattern.V(1)], 2), ok(2))
+  assert_eq(pattern.spread(env, [pattern.V(0)], 2), ok(3))
+  let app = pattern.A(pattern.A(pattern.C("f"), pattern.V(0)), pattern.V(1))
+  assert_eq(pattern.total(env, [app], 2), ok(2))
+}
+
+test "the first err short-circuits through the callback" {
+  let env = pattern.Env { syms: ["f": 1] }
+  assert_eq(pattern.total(env, [pattern.V(0), pattern.V(9)], 2), err("bound"))
+  assert_eq(pattern.total(env, [pattern.A(pattern.C("x"), pattern.V(0))], 2), err("not a symbol"))
+}

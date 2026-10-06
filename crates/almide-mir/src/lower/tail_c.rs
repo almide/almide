@@ -11,7 +11,16 @@ impl LowerCtx {
     fn lower_tail_heap_call_computed(&mut self, tail: &IrExpr) -> Result<Option<ValueId>, LowerError> {
         let IrExprKind::Call { target: CallTarget::Computed { callee }, args, .. } = &tail.kind else { unreachable!() };
         let mark = self.live_heap_handles.len();
-        let blk = self.closure_value_of(callee).expect("the caller's match guard already proved closure_value_of(callee).is_some() for the same callee");
+        // A tracked closure local, or a record-slot `Fn` field (`(q.run)(k)`,
+        // #2739 family N) borrowed from its container — the container keeps
+        // ownership, the borrow joins `param_values` (never dropped here).
+        let Some(blk) = self.closure_block_of_mut(callee) else {
+            return Err(LowerError::at(
+                tail.span,
+                "heap-result method/computed call cannot be faithfully returned in this \
+                 brick (would move out an empty deferred heap value)",
+            ));
+        };
         let lowered = self.lower_call_args(args)?;
         let dst = self.fresh_value();
         let repr = repr_of(&tail.ty)?;
@@ -439,3 +448,91 @@ impl LowerCtx {
         self.lower_tail_heap_match(&rewritten)
     }
 }
+
+impl LowerCtx {
+    /// A tail `ok(<aggregate literal>)` / `err(<aggregate literal>)` whose payload
+    /// no wrapper producer builds in place (`ok((n, [Rec { .. }]))` — a tuple
+    /// holding a list of records, #2739 family O). The bind position already
+    /// builds that aggregate, so build it there: `let $p = <payload>;
+    /// ok($p)`. The temp is scope-tracked like a user binding, the wrapper Dups
+    /// it in, and the epilogue releases the temp's own reference after the
+    /// move-out — the shape `{ let t = (..); ok(t) }` lowers through today.
+    /// A decline rolls everything back, so the caller's honest wall stands.
+    fn lower_tail_result_ctor_via_bound_payload(&mut self, tail: &IrExpr) -> Option<ValueId> {
+        let dst = self.lower_result_ctor_bound_payload(tail, &tail.ty)?;
+        // Tail position has no merge: drop the arm's trailing move marker,
+        // exactly as the direct ctor route in `lower_tail_heap_fresh_ctors_and_opaque` does.
+        if let Some(pos) = self.ops.iter().rposition(|op| matches!(op, Op::Consume { v } if *v == dst)) {
+            self.ops.remove(pos);
+        }
+        Some(dst)
+    }
+
+    /// The ARM-position twin of [`Self::lower_tail_result_ctor_via_bound_payload`]
+    /// (`if c then err((msg, r)) else ..` — the C-132 err carrier over a record
+    /// owning heap, #2739 family C3): the temp is released within the arm's own
+    /// frame, after the wrapper took its reference, so it never outlives the
+    /// arm that built it.
+    pub(crate) fn lower_result_ctor_arm_via_bound_payload(
+        &mut self,
+        arm: &IrExpr,
+        result_ty: &Ty,
+    ) -> Option<ValueId> {
+        let arm_mark = self.live_heap_handles.len();
+        let dst = self.lower_result_ctor_bound_payload(arm, result_ty)?;
+        self.drop_arm_locals(arm_mark);
+        Some(dst)
+    }
+
+    /// `ok(<Tuple|Record>)` / `err(<Tuple|Record>)` → `let $p = <payload>;
+    /// ok($p)`, lowered through [`Self::lower_heap_result_arm`]; the temp stays
+    /// tracked for the caller to release. Refuses a payload the permissive bind
+    /// could only defer (an `Init::Opaque` block), and rolls back on any decline.
+    fn lower_result_ctor_bound_payload(&mut self, ctor: &IrExpr, result_ty: &Ty) -> Option<ValueId> {
+        let (IrExprKind::ResultOk { expr: payload } | IrExprKind::ResultErr { expr: payload }) =
+            &ctor.kind
+        else {
+            return None;
+        };
+        if !is_heap_ty(&payload.ty)
+            || !matches!(&payload.kind, IrExprKind::Tuple { .. } | IrExprKind::Record { .. })
+        {
+            return None;
+        }
+        let mark = self.ops.len();
+        let lhh_mark = self.live_heap_handles.len();
+        let lifted_mark = self.lifted.len();
+        let tmp = self.fresh_synth_var();
+        let lowered = self.lower_bind(tmp, &payload.ty, payload).ok().and_then(|()| {
+            // The permissive bind defers what it cannot build to an EMPTY
+            // `Init::Opaque` block; wrapping that would return an empty
+            // aggregate the caller reads — refuse it, the wall stays honest.
+            if self.ops[mark..]
+                .iter()
+                .any(|op| matches!(op, Op::Alloc { init: crate::Init::Opaque, .. }))
+            {
+                return None;
+            }
+            let var = IrExpr {
+                kind: IrExprKind::Var { id: tmp },
+                ty: payload.ty.clone(),
+                span: payload.span,
+                def_id: None,
+            };
+            let kind = match &ctor.kind {
+                IrExprKind::ResultOk { .. } => IrExprKind::ResultOk { expr: Box::new(var) },
+                _ => IrExprKind::ResultErr { expr: Box::new(var) },
+            };
+            let rebuilt = IrExpr { kind, ..ctor.clone() };
+            self.lower_heap_result_arm(&rebuilt, result_ty)
+        });
+        if lowered.is_none() {
+            self.ops.truncate(mark);
+            self.live_heap_handles.truncate(lhh_mark);
+            self.lifted.truncate(lifted_mark);
+        }
+        lowered
+    }
+}
+
+include!("closure_variant_capture.rs");

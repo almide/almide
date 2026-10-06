@@ -31,6 +31,7 @@ mod arm_blame;
 mod diagnostics;
 mod deprecation_warn;
 mod exit_literal;
+mod pure_attr;
 mod bang_error_channel;
 mod lambda_channel;
 mod intrinsic_authority;
@@ -236,6 +237,9 @@ pub struct Checker {
     /// under (`{module}.{name}` inside a module, bare in the entry), and its
     /// generic parameter names. `None` outside a fn body.
     pub(crate) current_fn: Option<(Sym, Vec<Sym>)>,
+    /// #3250, checker-wide: the resolved call graph and extern set the
+    /// `@pure` check (E092) closes over.
+    pub(crate) purity: pure_attr::PurityFacts,
     /// #2496, checker-wide (survives the per-program union-find swap): for
     /// each generic fn, the segment types (in its rigid generics) its body
     /// interpolates — a requirement every instantiation must meet.
@@ -265,6 +269,10 @@ pub struct Checker {
     /// construction: resolve_type_expr turns an in-scope generic into
     /// `Ty::TypeVar` at annotation time, never `Named`.
     pub(crate) deferred_unknown_type_checks: Vec<(Ty, Option<crate::ast::Span>, String)>,
+    /// The names a qualified-type E029 already reported (#3336), whole and
+    /// with the qualifier stripped (the resolver hands the bare name on): the
+    /// plain E029 walk roots them without a second diagnostic.
+    pub(crate) qualified_type_misses: std::collections::HashSet<Sym>,
     /// Diagnostics about a value whose type is an UNDECLARED name (#2771):
     /// `e.count` on `e: Entyr` is a consequence of the unknown type, not a
     /// second error, and its hint ("values outside records have no fields")
@@ -653,6 +661,7 @@ impl Checker {
             deferred_result_interp_checks: Vec::new(),
             deferred_generic_calls: Vec::new(),
             current_fn: None,
+            purity: Default::default(),
             interp_reqs: std::collections::HashMap::new(),
             generic_calls: Vec::new(),
             interp_reported: std::collections::HashSet::new(),
@@ -672,7 +681,7 @@ impl Checker {
             lambda_err_erasures: Vec::new(),
             lambda_channels: Default::default(),
             bang_erasure_mark: None,
-            deferred_unknown_type_checks: Vec::new(),
+            deferred_unknown_type_checks: Vec::new(), qualified_type_misses: std::collections::HashSet::new(),
             deferred_cascade_diags: Vec::new(),
             body_diag_start: 0,
             pending_toplet_tys: Vec::new(),
@@ -996,11 +1005,12 @@ impl Checker {
 
     // ── Main entry point ──
 
-    /// Type-check a program whose environment was pre-populated by `canonicalize_program`.
-    /// Skips import table building and declaration registration — inference only.
-    pub fn infer_program(&mut self, program: &mut ast::Program) -> Vec<Diagnostic> {
-        // #1311 front-end phase accounting (no-op unless `--timings`).
-        let _phase = almide_base::profile::phase_scope(almide_base::profile::Phase::Check);
+    /// The top-level `let` rules every checked program and every checked
+    /// module share (E012 duplicates, E061 lambda-valued lets). Run once per
+    /// source file: from `infer_program` for the entry, from `infer_module`
+    /// for each imported module (#3396 — an importer used to skip them and
+    /// died on an IR-verify ICE instead of reporting E061).
+    pub(crate) fn check_top_let_shapes(&mut self, decls: &[ast::Decl]) {
         // E012 for DUPLICATE top-level lets: registration is idempotent by
         // design (it re-runs per driver leg), so the seed insert cannot
         // detect a second declaration — the last one silently won and the
@@ -1010,7 +1020,7 @@ impl Checker {
         {
             let mut seen: std::collections::HashMap<almide_base::intern::Sym, Option<ast::Span>> =
                 std::collections::HashMap::new();
-            for decl in &program.decls {
+            for decl in decls {
                 if let ast::Decl::TopLet { name, span, .. } = decl {
                     if let Some(first) = seen.get(name) {
                         let mut d = err(
@@ -1038,7 +1048,7 @@ impl Checker {
         // (call position resolved E002) — accepted-but-unusable in every
         // spelling, so the honest answer is a check-time diagnostic. Inside a
         // fn/test body both uses work and stay untouched.
-        for decl in &program.decls {
+        for decl in decls {
             if let ast::Decl::TopLet { name, value, span, .. } = decl {
                 if matches!(&value.kind, ast::ExprKind::Lambda { .. }) {
                     let mut d = err(
@@ -1057,6 +1067,14 @@ impl Checker {
                 }
             }
         }
+    }
+
+    /// Type-check a program whose environment was pre-populated by `canonicalize_program`.
+    /// Skips import table building and declaration registration — inference only.
+    pub fn infer_program(&mut self, program: &mut ast::Program) -> Vec<Diagnostic> {
+        // #1311 front-end phase accounting (no-op unless `--timings`).
+        let _phase = almide_base::profile::phase_scope(almide_base::profile::Phase::Check);
+        self.check_top_let_shapes(&program.decls);
         // ADR-0006 D1 (#1108): record every fn DECLARED `-> T!` before
         // resolution erases the marker, so a named callback argument's
         // fallibility bit is known at HOF call sites.
@@ -1174,9 +1192,13 @@ impl Checker {
         self.refresh_module_top_lets(program, "__entry");
         self.validate_protocol_refs(program);
         self.validate_bare_type_visibility(program);
+        self.validate_qualified_type_heads(program);
+        self.validate_alias_cycles(&program.decls);
         self.body_diag_start = self.diagnostics.len();
         self.reject_user_prim_import(&program.imports);
+        let saved_top_effect_aliases = self.collect_top_effect_aliases(&program.decls);
         for decl in program.decls.iter_mut() { self.check_decl(decl); }
+        self.env.top_effect_aliases = saved_top_effect_aliases;
         self.solve_constraints();
         self.resolve_deferred_tuple_indices();
         self.flush_pending_toplet_tys();
@@ -1243,8 +1265,8 @@ impl Checker {
         // may have been the use, and the parse error is already the diagnosis.
         let judge_unused = !program.parse_recovered;
         for imp in program.imports.iter().filter(|_| judge_unused) {
-            let (path, alias, span) = match imp {
-                ast::Decl::Import { path, alias, span, .. } => (path, alias, span),
+            let (path, alias, names, span) = match imp {
+                ast::Decl::Import { path, alias, names, span } => (path, alias, names, span),
                 _ => continue,
             };
             let import_name = alias.as_ref().cloned()
@@ -1255,10 +1277,19 @@ impl Checker {
             // removal fix.
             let used_via_bound = self.env.import_table.aliases.get(&sym(&import_name))
                 .is_some_and(|canon| bound_origins.contains(canon));
+            // A selectively imported TYPE or CONSTRUCTOR is spelled bare
+            // (`import self.t.{T, V}` then `-> T`, `V(1)`, #3384): that
+            // spelling is the import's use, and deleting the line would
+            // strand it.
+            let used_via_selective = names.as_ref().is_some_and(|ns| ns.iter().any(|n| {
+                !spelled.declared.contains(n)
+                    && (spelled.bare_ctors.contains(n) || spelled.bare_types.iter().any(|(t, _)| t == n))
+            }));
             if import_name.is_empty()
                 || self.env.import_table.used.contains(&sym(&import_name))
                 || import_name.starts_with('_')
                 || used_via_bound
+                || used_via_selective
             { continue; }
             let line = span.as_ref().map(|s| s.line).unwrap_or(0);
             let mut diag = Diagnostic::warning(
@@ -1407,9 +1438,11 @@ pub(crate) fn is_literal_numeric_ast(e: &ast::Expr) -> bool {
 
 include!("post_solve_validation.rs");
 include!("unknown_type_root.rs");
+include!("qualified_type_head.rs");
 include!("interp_string_form.rs");
 include!("lint_error_surface.rs");
 include!("bounded.rs");
+include!("concurrent_reach_check.rs");
 include!("scoped.rs");
 include!("scoped_walk.rs");
 include!("scoped_shape.rs");
@@ -1438,13 +1471,25 @@ struct ImportSpellings {
     /// of one is the file's own declaration — a user `type Endian` shadows
     /// the stdlib's, it never uses `import bytes` (#1837).
     declared: std::collections::HashSet<Sym>,
+    /// Every QUALIFIED name in a type position (`v.View`, `List[m.Row]`),
+    /// whole — the qualifier check (#3336) reads it.
+    qualified_types: std::collections::HashSet<Sym>,
+    /// Collect only `bare_types` (#3340): the visibility check reads nothing
+    /// else, and skipping the value spellings spares a text lookup of every
+    /// identifier in the file.
+    types_only: bool,
 }
 
 impl ImportSpellings {
     /// `h.x` marks the alias `h`; a bare `X` is a type-position spelling.
     fn ty_name(&mut self, name: Sym, spelling: TypeSpelling) {
         match name.as_str().split_once('.') {
-            Some((h, _)) => { self.heads.insert(sym(h)); }
+            Some((h, _)) => {
+                self.heads.insert(sym(h));
+                if spelling != TypeSpelling::RecordHead {
+                    self.qualified_types.insert(name);
+                }
+            }
             None => { self.bare_types.insert((name, spelling)); }
         }
     }
@@ -1452,6 +1497,9 @@ impl ImportSpellings {
     /// Lower-case bare names are variables, which no constructor table
     /// holds — skipped so the set stays the constructor candidates.
     fn value_name(&mut self, name: Sym) {
+        if self.types_only {
+            return;
+        }
         match name.as_str().split_once('.') {
             Some((h, _)) => { self.heads.insert(sym(h)); }
             None if name.as_str().starts_with(|c: char| c.is_ascii_uppercase()) => {
@@ -1463,6 +1511,16 @@ impl ImportSpellings {
 }
 
 fn import_spellings(program: &mut ast::Program) -> ImportSpellings {
+    spellings(program, false)
+}
+
+/// The bare type spellings alone (`ImportSpellings::bare_types`), by the same
+/// walk with the value spellings skipped (#3340).
+fn bare_type_spellings(program: &mut ast::Program) -> std::collections::HashSet<(Sym, TypeSpelling)> {
+    spellings(program, true).bare_types
+}
+
+fn spellings(program: &mut ast::Program, types_only: bool) -> ImportSpellings {
     fn walk_ty(te: &ast::TypeExpr, s: &mut ImportSpellings) {
         match te {
             ast::TypeExpr::Simple { name } => s.ty_name(*name, TypeSpelling::Bare),
@@ -1535,7 +1593,7 @@ fn import_spellings(program: &mut ast::Program) -> ImportSpellings {
             ast::TestWhere::Bind { .. } => {}
         }
     }
-    let mut s = ImportSpellings::default();
+    let mut s = ImportSpellings { types_only, ..ImportSpellings::default() };
     for decl in &program.decls {
         match decl {
             ast::Decl::Fn { params, return_type, generics, .. } => {
@@ -1795,7 +1853,7 @@ impl Checker {
         let cur = self.current_module_prefix.clone();
         let names_a_case = |env: &crate::types::TypeEnv, n: Sym, sp: TypeSpelling|
             sp == TypeSpelling::RecordHead && env.lookup_ctor_in(&n, cur.as_deref()).is_some();
-        let spelled: Vec<(Sym, TypeSpelling)> = import_spellings(program).bare_types
+        let spelled: Vec<(Sym, TypeSpelling)> = bare_type_spellings(program)
             .into_iter().filter(|(n, sp)| !names_a_case(&self.env, *n, *sp)).collect();
         let names: std::collections::HashSet<Sym> = spelled.iter().map(|(n, _)| *n).collect();
         let scope = FileTypeScope::new(&self.env, self.current_module_prefix.as_deref(), own, &names);
@@ -1819,7 +1877,7 @@ impl Checker {
             };
             let letters: std::collections::HashSet<Sym> = generics.iter().flatten().map(|g| sym(&g.name)).collect();
             shell.decls = vec![decl.clone()];
-            let mut here: Vec<(Sym, TypeSpelling)> = import_spellings(&mut shell).bare_types
+            let mut here: Vec<(Sym, TypeSpelling)> = bare_type_spellings(&mut shell)
                 .into_iter()
                 .filter(|(n, sp)| !letters.contains(n) && !names_a_case(&self.env, *n, *sp))
                 .collect();

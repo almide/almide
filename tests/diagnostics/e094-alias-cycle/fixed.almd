@@ -1,0 +1,7 @@
+type Coord = Pos
+
+type Pos = (Int, Int)
+
+fn origin() -> Pos = (0, 0)
+
+effect fn main() -> Unit = println(int.to_string(origin().0))

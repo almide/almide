@@ -593,7 +593,9 @@ fn still_diverges(src: &str) -> Option<String> {
     let ir = almide_spine::s5::lower_to_ir("reduce.almd", src).ok()?;
     let bytes = almide_wasm::emit_program(&ir).ok()?;
     let interp = almide_spine::s5::run_file("reduce.almd", src).ok()?;
-    if interp.exit < 0 {
+    // A stack exhaustion at the interp's own threshold (C-196, exit 1) is an
+    // abstention here exactly as the old depth-as-fuel -3 was.
+    if interp.exit < 0 || interp.stack_exhausted {
         return None; // oracle abstained — nothing to preserve
     }
     match run_wasm(&bytes) {
@@ -642,7 +644,8 @@ struct Tally {
     /// exit code) — counted apart so generator drift toward aborts stays
     /// visible in the report.
     abort_class: usize,
-    /// The ORACLE abstained (interp exit -2 Unsupported / -3 fuel): the
+    /// The ORACLE abstained (interp exit -2 Unsupported / -3 fuel / its own
+    /// C-196 stack exhaustion): the
     /// wasm leg ran but had nothing to compare against. Kept as its own
     /// VISIBLE class — a growing number here is a growing blind spot
     /// (the interp's #1226 heap-bridge burn-down shrinks it).
@@ -672,7 +675,11 @@ fn run_seed(seed: u64, tally: &mut Tally) -> Result<(), String> {
     };
     let interp = almide_spine::s5::run_file(&path, &src)
         .map_err(|e| format!("seed {seed}: interpreter harness error: {e}\n--- src ---\n{src}"))?;
-    if interp.exit == -2 || interp.exit == -3 {
+    // `stack_exhausted`: the interp's call stack ran out at ITS declared
+    // C-196 threshold (exit 1, `Error: stack overflow`). The wasm leg's
+    // threshold is its own, so that exit is no vote on this program — it
+    // abstains exactly as the old depth-as-fuel -3 did.
+    if interp.exit == -2 || interp.exit == -3 || interp.stack_exhausted {
         // The THIRD oracle: where the reference interpreter abstains
         // (host fs, over-cap materializations, matrix), the RELEASED
         // native binary referees — set ALMIDE_FUZZ_HOST_ORACLE to its

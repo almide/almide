@@ -1,0 +1,4 @@
+expects_code = "E095"
+expects_error = "captures `greeting`, a local of fn `serve_greeting`"
+hint_substring = "the locals of `serve_greeting` do not exist there"
+expects_line_col = "6:31"

@@ -61,3 +61,42 @@ fn a_decline_withdraws_the_certificate_and_a_poison_outranks_it() {
     w.poison();
     assert_eq!(w.certificate(), "!poison\n");
 }
+
+/// #3259: a read of a block after its release is the `b` probe on its
+/// owned line, which the checker rejects. This is the structural poisoned
+/// certificate: an owned param read, released early, then read again (the
+/// Var route of a borrowed call argument, a field read, a match subject).
+#[test]
+fn a_read_after_the_release_is_probed_and_rejected() {
+    let mut w = WitnessRecorder::new();
+    w.param_owned(2);
+    w.read(2);
+    assert!(w.dec_local(2));
+    w.read(2);
+    assert_eq!(w.certificate(), "ibdb\n");
+    assert!(!balanced(&w.certificate()));
+    assert_eq!(w.certificate(), include_str!("../../../proofs/poisoned-certs/3259-structural-read-after-free.cert"));
+}
+
+/// #3259: a read is probed only on a line born by `i`. A borrowed param
+/// sits at 0 while the caller holds it, and a loop activation of a block
+/// bound outside the loop starts from 0 too, so neither takes a probe.
+#[test]
+fn a_read_of_a_block_this_line_does_not_own_is_not_probed() {
+    let mut lent = WitnessRecorder::new();
+    lent.param_lent(2);
+    lent.read(2);
+    let mut unread = WitnessRecorder::new();
+    unread.param_lent(2);
+    assert_eq!(lent.certificate(), unread.certificate());
+
+    let mut looped = WitnessRecorder::new();
+    looped.bind_fresh(3);
+    looped.read(3);
+    looped.loop_open();
+    looped.read(3);
+    looped.loop_close();
+    assert!(looped.dec_local(3));
+    assert_eq!(looped.certificate(), "ibd\n");
+    assert!(balanced(&looped.certificate()));
+}

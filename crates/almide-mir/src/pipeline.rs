@@ -25,7 +25,7 @@ use std::collections::HashMap;
 fn user_module_fn_name(module: &str, func: &str) -> String {
     format!(
         "almide_rt_{}_{}",
-        module.replace('.', "_"),
+        almide_base::names::module_ident(module),
         func.replace('.', "_")
     )
 }
@@ -498,6 +498,8 @@ fn program_to_ir_with(
     // chain once the block has absorbed its call — run after, the guard desugar never
     // saw it and the raw Guard stmt survived to the lowering, whose fallback emitted
     // the scalar continuation against the Result ABI: invalid wasm (#1968).
+    // A heap `??` literal element binds first; its block is absorbed just below.
+    crate::lower::bind_heap_unwrap_or_literal_elems(&mut ir);
     crate::lower::hoist_block_call_args(&mut ir);
     // #3058: list-rest matches become the length-test chain the lowering runs.
     crate::lower::desugar_list_rest_matches(&mut ir);

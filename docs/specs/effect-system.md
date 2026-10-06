@@ -1,4 +1,4 @@
-> Last updated: 2026-09-27
+> Last updated: 2026-10-04
 
 # Effect System
 
@@ -49,7 +49,7 @@ Test: `spec/integration/modules/vis_effect_test.almd`
 Six builtins may be called from a pure `fn`: **`println`, `eprintln`,
 `panic`, `assert`, `assert_eq`, `assert_ne`**. The set is closed. Every other
 output path is a stdlib effect fn and stays E006 from a pure fn, including
-`io.print`, `io.write`, `io.write_bytes` and the `log` module.
+`io.print`, `io.write` and `io.write_bytes`.
 
 1. **They write, or they abort. They never read.** `println` appends to stdout
    and `eprintln` to stderr. `panic` and a failing assert end the process
@@ -78,8 +78,8 @@ output path is a stdlib effect fn and stays E006 from a pure fn, including
    effect fn's. Only the checker enforces the pure/effect distinction.
 6. **Buffering (C-162, and the stream statement in C-367).** A pure fn's output
    uses the same streams as an effect fn's. Native stdout is one buffer,
-   flushed on every write when stdout is a terminal and 64 KiB-buffered
-   otherwise; stderr is unbuffered. The cross-target promise is **per
+   flushed at every line end (and on every write when stdout is a
+   terminal); stderr is unbuffered. The cross-target promise is **per
    stream**: stdout bytes, stderr bytes and the exit code are byte-identical
    between native and wasm. How the two streams interleave when both go to one
    file is not promised. An abort flushes the stdout written before it.
@@ -114,6 +114,62 @@ Tests: `tests/checker_test.rs` (`pure_fn_admits_output_and_abort_builtins`,
 `pure_fn_still_rejects_a_real_read_with_e006`),
 `spec/lang/pure_fn_output_builtins_test.almd`,
 `spec/wasm_cross/pure_fn_output_and_assert_abort.almd` (C-153).
+
+### 2.2 Stdlib readers are effect fns
+
+*Dialect epoch 8 (#3248).* `io.read_byte`, `io.read_n_bytes` and
+`process.args` read stdin or argv, and are `effect fn`s like `io.read_line`
+and `env.args`. They were plain `fn`s, so a pure fn could read the outside
+world through them; a call from a pure fn is now E006. The `args` module's
+argv readers are the one exception still pending its own ruling (#848).
+
+```almide check-fail=E006
+import io
+
+fn first_byte() -> Int = io.read_byte()
+```
+
+Tests: `tests/diagnostics/e006-io-read-byte-in-pure-fn/`,
+`tests/diagnostics/e006-io-read-n-bytes-in-pure-fn/`,
+`tests/diagnostics/e006-process-args-in-pure-fn/`.
+
+### 2.3 `@pure`: the empty effect set (E092)
+
+*Added with #3250.* `@pure` on a fn is checked: the fn, and everything it
+calls, has no effect category (§8), no output and no declared abort. It is
+E092 when the fn is an `effect fn` or an `@extern`, or when anything it
+reaches calls one of the six builtins of §2.1, a stdlib function that carries
+a category, or an `@extern` fn. The error is located at the call that leads
+there and names the path.
+
+A call through a fn-typed parameter is judged where the argument is written,
+so `@pure fn apply(f: (Int) -> Int, x: Int) -> Int = f(x)` is pure. A
+language-defined trap — division by zero, an index out of bounds — is not a
+declared abort and does not count.
+
+```almide check
+@pure
+fn area(w: Int, h: Int) -> Int = w * h
+
+fn main() -> Unit = println("${area(2, 3)}")
+```
+
+```almide check-fail=E092
+@pure
+fn area(w: Int, h: Int) -> Int = {
+  println("w=${w}")
+  w * h
+}
+```
+
+ADR-0027 (draft) proposes a `pure fn` modifier with this meaning and retiring
+the attribute in its favour; `@pure` means the same set, so the two never
+disagree.
+
+Tests: `tests/diagnostics/e092-pure-calls-println/`,
+`tests/diagnostics/e092-pure-reaches-assert-via-helper/`,
+`tests/diagnostics/e092-pure-calls-categorised-stdlib/`,
+`tests/diagnostics/e092-pure-on-effect-fn/`.
 
 ## 3. Return Type Wrapping
 
@@ -321,24 +377,58 @@ The `[permissions]` section in `almide.toml` restricts which effect categories a
 
 ```toml
 [permissions]
-allow = ["IO", "Net", "Log"]
+allow = ["IO", "Net"]
 ```
 
 If `[permissions]` is absent or `allow` is empty, all capabilities are permitted (backwards compatible).
 
+`almide.toml` is read as TOML, so `allow` may use any array spelling: one
+line, several lines, a trailing comma, comments between the items (#3253).
+A multi-line array used to read as empty, which permitted everything.
+
 ### Effect categories
 
-The `EffectInferencePass` maps stdlib module usage to seven categories:
+The `EffectInferencePass` classifies each call into one of six categories. The
+classification is one table, `STDLIB_MODULE_EFFECTS` in
+`crates/almide-ir/src/effect.rs`; a gate beside it refuses a stdlib module with
+no row, and an `@intrinsic` whose runtime symbol classifies unlike the function
+that declares it (#3246).
 
-| Category | Stdlib modules |
-|----------|---------------|
-| `IO` | `fs`, `path` |
-| `Net` | `http`, `url` |
-| `Env` | `env`, `process` |
-| `Time` | `time`, `datetime` |
-| `Rand` | (reserved) |
+| Category | What carries it |
+|----------|-----------------|
+| `IO` | `fs`, `io` (files and the standard streams) |
+| `Net` | `net`, and the `effect fn`s of `http` (its builders and router are pure) |
+| `Env` | `env`, `process`, `args` |
+| `Time` | the `effect fn`s of `datetime` (`now`, `monotonic_ns`); the calendar math is pure |
+| `Rand` | `random` |
 | `Fan` | `fan` |
-| `Log` | `log` |
+
+Every other stdlib module — `path`, `url`, `json`, `regex`, `zlib`, the
+collections and numerics — carries no category.
+
+A call to an **`@extern` fn is every category** (⊤, #3245). Its body is foreign,
+inference cannot see into it, and no bound can be declared on it yet (ADR-0027
+§5 proposes one), so it passes `[permissions]` only when `allow` lists all six.
+
+Tests: `tests/effect_permissions_test.rs`; the table's gate is the
+`classification_gate` module in `crates/almide-ir/src/effect.rs`.
+
+### Unknown names
+
+`allow` accepts exactly these six names. Any other name, including a
+different case (`io`), is an error on the manifest line that writes it, before
+any command runs (#3247):
+
+```
+error: almide.toml:6: unknown capability `Fil` in [permissions].allow — grantable capabilities are IO, Net, Env, Time, Rand, Fan
+  hint: did you mean `IO`?
+```
+
+The hint names the nearest capability, the same way `almide check --profile
+critical --allow` reports an unknown name (`docs/specs/cli.md`).
+
+Test: `tests/manifest_permissions_test.rs`, `tests/manifest_toml_reader_test.rs`,
+`tests/diagnostics/permissions-unknown-capability/`, `tests/diagnostics/permissions-unknown-capability-multiline/`
 
 ### Enforcement
 
@@ -364,6 +454,50 @@ effect fn fetch() -> Result[String, String] = http.get("https://example.com")
 The gate runs after codegen: `almide check` and `almide test` accept the file,
 `almide build` refuses it.
 
+### Callbacks: the set rides the value (ADR-0026 D1)
+
+A closure's categories are performed where it is **called**, and the set moves
+with the value. Creating a closure performs nothing. The set is solved, never
+written:
+
+- **A bare fn-type parameter is transparent.** A function that calls a closure
+  it is handed (`f(x)`, or `xs |> list.map(f)`) is reported with the
+  parameter, never a guessed callee, and each call site that hands it a
+  closure is charged with that closure's set — `apply(paths, (p) => …fs…)`
+  carries `IO`, `apply(names, (s) => string.len(s))` carries nothing.
+- **A stored or returned value keeps its set**: a `let`/`var` local, a record
+  field (the union of every closure stored in that field), a return value, a
+  top-level `let`.
+- A closure put anywhere else (a list, an option payload, a variant, an
+  argument of a stdlib call) joins a pool of its arity; calling a value read
+  back from such a place is charged with that pool. A stdlib call is assumed
+  to run every closure it is given.
+
+```
+  call_box  → {IO}
+  make  → {} (effect fn); returns a closure doing {IO}
+  use_it  → {} + whatever f (arg 1) does
+  main  → {IO} (effect fn)
+```
+
+`[permissions].allow` is checked on these sets, so a violation names the
+function that **runs** the closure, with one path per category (D4). A step
+through a callback names the parameter, then the concrete closure when it is
+known; where several values may flow (a parameter's other call sites, a
+pooled value) the next step is prefixed `e.g.`:
+
+```
+error: capability violation in `main`
+  IO is not in [permissions].allow
+  path: main → use_it → f (arg 1 of use_it) → closure (line 3:42 in make) → fs.read_text (line 3:49)
+```
+
+The sets live in the effect analysis (`crates/almide-codegen/src/effect_flow/`),
+not in `Ty::Fn`: they are computed after type checking and dropped with the
+report, so monomorphisation never sees them. No surface syntax is involved.
+
+Tests: `tests/effect_category_flow_test.rs`, `tests/effects_report_callbacks_test.rs`
+
 ### Design layers
 
 - **Layer 1** (implemented): `effect fn` vs `fn` -- the type checker enforces this
@@ -379,3 +513,4 @@ Test: Effect inference unit tests in `crates/almide-codegen/src/pass_effect_infe
 | E006 | Effect isolation violation | Pure `fn` calls an `effect fn` | Mark the caller as `effect fn` |
 | E007 | Fan block in pure function | `fan { ... }` used outside effect context | Mark the enclosing function as `effect fn` |
 | E008 | Mutable variable capture in fan | `fan` block references a `var` binding | Change `var` to `let`, or copy the value into a `let` before the `fan` |
+| E092 | `@pure` fn is not pure | A `@pure` fn reaches output, an abort, a categorised stdlib call or an `@extern` | Move the call to a caller, or remove `@pure` |

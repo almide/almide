@@ -242,6 +242,59 @@ effect fn main() -> Unit = {
         fns: &["per_head_rms_norm", "repeat_kv", "main"],
         loops: &[],
     },
+    Case {
+        name: "host_env_ops",
+        shape: "env.set / env.sleep_ms as ordinary host calls (host_ops.rs, #2739)",
+        src: r#"import env
+effect fn main() -> Unit = {
+  env.set("LIVE_SHAPE_KEY", "v")
+  env.sleep_ms(0)!
+  println(env.get("LIVE_SHAPE_KEY") ?? "unset")
+}
+"#,
+        fns: &["main"],
+        loops: &[],
+    },
+    Case {
+        name: "host_http_result_match",
+        shape: "a match over a host op's Result, err payload bound (host_ops.rs, #2739)",
+        src: r#"import http
+effect fn main() -> Unit = {
+  match http.get("http://127.0.0.1:9/") {
+    ok(_) => println("unexpected"),
+    err(e) => println("get: ${e}"),
+  }
+}
+"#,
+        fns: &["main"],
+        loops: &[],
+    },
+    Case {
+        name: "literal_heap_qq_elem",
+        shape: "a heap `??` element binds before its list/map literal (literal_elems.rs)",
+        src: r#"fn header(o: Option[String]) -> Map[String, String] = ["X-Echo": o ?? "none", "K": "v"]
+fn count(o: Option[String]) -> Int = map.len(["X-Echo": o ?? "none"])
+fn row(o: Option[String]) -> List[String] = ["a", o ?? "none"]
+"#,
+        fns: &["header", "count", "row"],
+        loops: &[],
+    },
+    Case {
+        name: "closure_from_ok_payload",
+        shape: "an `ok(h)` closure payload is dispatched through (control_p2_e.rs, the router value)",
+        src: r#"fn add1(x: Int) -> Result[List[String], String] = ok(["a", int.to_string(x)])
+fn mk(n: Int) -> Result[(Int) -> Result[List[String], String], String] = if n > 0 then ok(add1) else err("no")
+effect fn go() -> Unit = {
+  let h = mk(1)!
+  let r = h(1)!
+  if list.len(r) == 2 then () else println("bad")
+}
+effect fn main() -> Unit = go()!
+"#,
+        // `__lambda_mk_0` is the closure block `ok(add1)` builds, not a declined callback.
+        fns: &["add1", "mk", "__lambda_mk_0", "go", "main"],
+        loops: &[],
+    },
 ];
 
 #[test]

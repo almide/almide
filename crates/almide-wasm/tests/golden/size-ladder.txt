@@ -1,18 +1,18 @@
 # Stdlib-linking size ladder (#2141): shipped (to_wasi) bytes per rung, pinned exactly.
 # Regenerate (claims every move): ALMIDE_UPDATE_SIZE_LADDER=1 cargo test --release -p almide-wasm --test size_ladder
 # shipped<TAB>rung<TAB>program; the last row is the ladder's total.
-953	T0 nothing	research/benchmark/perf/wasm-size/hello.almd
-1116	T1 Int print	research/benchmark/perf/wasm-size/fibonacci.almd
-7177	T1 Int print	research/benchmark/perf/binarytrees/binarytrees.almd
-9417	T2 Float print	research/benchmark/perf/spectralnorm/spectralnorm.almd
-6733	T3 String	research/benchmark/perf/strchurn/strchurn.almd
-6071	T3 String	research/benchmark/perf/strbuild/strbuild_append.almd
-18745	T4 List	research/benchmark/perf/listbuild/listbuild_append.almd
-19077	T4 List	research/benchmark/perf/listbuild/listbuild_combinator.almd
-8776	T5 Map	research/benchmark/perf/mapbuild/mapbuild.almd
-10888	T5 Map	research/benchmark/perf/wordfreq/wordfreq.almd
-10911	T5 Map	research/benchmark/perf/wordfreq/wordfreq_group.almd
-31472	T6 JSON	research/benchmark/perf/decode/decode.almd
-26529	T6 JSON	spec/wasm_cross/json_gltf_walk.almd
-19783	T7 regex	spec/wasm_cross/regex_engine.almd
-177648	Σ	total
+325	T0 nothing	research/benchmark/perf/wasm-size/hello.almd
+489	T1 Int print	research/benchmark/perf/wasm-size/fibonacci.almd
+7267	T1 Int print	research/benchmark/perf/binarytrees/binarytrees.almd
+9453	T2 Float print	research/benchmark/perf/spectralnorm/spectralnorm.almd
+6751	T3 String	research/benchmark/perf/strchurn/strchurn.almd
+6154	T3 String	research/benchmark/perf/strbuild/strbuild_append.almd
+18823	T4 List	research/benchmark/perf/listbuild/listbuild_append.almd
+19137	T4 List	research/benchmark/perf/listbuild/listbuild_combinator.almd
+8815	T5 Map	research/benchmark/perf/mapbuild/mapbuild.almd
+10968	T5 Map	research/benchmark/perf/wordfreq/wordfreq.almd
+10991	T5 Map	research/benchmark/perf/wordfreq/wordfreq_group.almd
+31359	T6 JSON	research/benchmark/perf/decode/decode.almd
+26527	T6 JSON	spec/wasm_cross/json_gltf_walk.almd
+19757	T7 regex	spec/wasm_cross/regex_engine.almd
+176816	Σ	total

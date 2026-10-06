@@ -5,11 +5,12 @@
 // recursively by `$__drop_list_int_str` (per tuple: rc_dec ONLY the String slot @20, the Int @12 is a
 // scalar; then the tuple, then the list) — co-bundled below so it links with this source. The append
 // + tuple-result drop run on the proven effect-fn/List tuple-result TCO machinery.
-fn __enum_str_rec(xs: List[String], i: Int, n: Int, acc: List[(Int, String)]) -> List[(Int, String)] = if i >= n then acc
-else {
-  let line = list.get(xs, i) ?? ""
-  __enum_str_rec(xs, i + 1, n, acc + [(i, line)])
-}
+fn __enum_str_rec(xs: List[String], i: Int, n: Int, acc: List[(Int, String)]) -> List[(Int, String)] =
+  if i >= n then acc
+  else {
+    let line = list.get(xs, i) ?? ""
+    __enum_str_rec(xs, i + 1, n, acc + [(i, line)])
+  }
 
 fn list_enumerate_str(xs: List[String]) -> List[(Int, String)] = __enum_str_rec(
   xs,

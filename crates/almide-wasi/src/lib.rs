@@ -10,9 +10,10 @@
 //!     plus the environ/args quartet ONLY when the module's emitted op
 //!     set reaches it (below); every non-import index shifts by the
 //!     import delta, and the element section re-encodes through the
-//!     same Remap (#1716). A final pass (`prune.rs`, #3114) then drops
-//!     the imports no shipped body calls — hello, world keeps fd_write
-//!     and proc_exit — along with unreferenced globals and types;
+//!     same Remap (#1716). A final pass (`prune.rs`, #3114, #3136) then
+//!     drops every function no export reaches — the emitter's unreached
+//!     helper slots and the shims nothing calls — and the imports, globals
+//!     and types only dead code named: hello, world keeps fd_write alone;
 //!   - every call to an old import retargets to one of 5 appended SHIM
 //!     functions implementing the almide host contract over WASI;
 //!   - one PARK span is appended to linear memory for iovecs, the
@@ -56,11 +57,22 @@ use wasmparser::{Parser, Payload};
 pub const P1_SERVED_OPS: &[i32] = &[
     1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28,
     29, 30, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 51, 52, 60, 61, 62, 63, 64, 73,
+    // The instance-parallel fan offer (#3003): answered "not served" (0), so
+    // the guest's sequential path runs — byte-identical to the embedded host.
+    74,
+    // The subprocess family (#2589, ADR-0025): forwarded to the private
+    // `almide:process/spawn` import, which a stock runtime refuses at load.
+    80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90,
 ];
 
-mod fs_service;
+pub mod env_overlay;
+pub mod fs_service;
+mod proc_service;
 mod prune;
+pub use proc_service::{wants_proc, PROC_OPS};
 pub use fs_service::{fs_op_name, FS_SERVICE_OPS};
+/// The last pass every shipped form runs (p1 here, p2/p3 in almide-wasm-run).
+pub use prune::prune;
 
 pub const UNSUPPORTED_MSG: &[u8] = b"Error: host op unsupported in the WASI build\n";
 /// The env.set overlay log's own refusal. It used to borrow the line above,
@@ -91,13 +103,15 @@ pub const MSG3: u64 = 384;
 pub const MSG4: u64 = 512;
 const _: () = assert!(MSG3 + OOM_MSG.len() as u64 <= MSG4 && MSG4 + EXIT_WALL_MSG.len() as u64 <= DATA);
 pub const DATA: u64 = 1024; // stdin/entropy bytes + op result staging
-/// The env.set overlay log (#1716): [klen u32][vlen u32][key][val] entries,
-/// append-only, scanned last-write-wins by op 26. Its page sits above the
-/// staging span the other ops use.
+/// The env.set overlay log (#1716, `env_overlay.rs`): [klen u32][vlen u32]
+/// [key][val] entries, append-only, scanned last-write-wins by op 26. Its
+/// page sits above the staging span the other ops use.
 pub const OVL: u64 = 4 * 65536;
 /// The staging room the emitter refuses to overrun (#2118) and this layout
 /// provides: one number, checked here rather than trusted.
 const _: () = assert!((OVL - DATA) as i64 == almide_wasm::WASI_STAGING_ROOM);
+/// The log fills the park's last page exactly.
+const _: () = assert!(OVL + env_overlay::OVERLAY_BYTES == PARK_SPAN);
 /// The park span: five pages carved out at the original heap base — four
 /// for iovecs/messages/stdin, one for the env overlay log.
 pub const PARK_SPAN: u64 = 5 * 65536;
@@ -318,6 +332,9 @@ pub struct P1Services {
     /// any op of [`FS_SERVICE_OPS`] (#2742): the spliced fs service, its
     /// own page past the park, and the WASI imports it reaches.
     pub fs: bool,
+    /// any process op (80..=90, #2589): the `almide:process/spawn` import,
+    /// its forwarder and the `cabi_realloc` export (`proc_service.rs`).
+    pub proc: bool,
 }
 
 impl P1Services {
@@ -328,13 +345,20 @@ impl P1Services {
             env_set: host_ops.contains(&37),
             args: host_ops.contains(&29),
             fs: host_ops.iter().any(|op| fs_service::serves(*op)),
+            proc: wants_proc(host_ops),
         }
+    }
+
+    /// Whether a service can stage a result outside the park (#2120), so the
+    /// module carries `g_ppos`, the pointer `host_read` copies from.
+    pub fn stages_outside_park(self) -> bool {
+        self.env_get || self.args || self.fs || self.proc
     }
 
     /// The WASI imports this selection adds past the base five (the fs
     /// service's own count on top, which depends on the ops it reaches).
     pub fn extra_imports(self) -> u32 {
-        2 * u32::from(self.env_get) + 2 * u32::from(self.args)
+        2 * u32::from(self.env_get) + 2 * u32::from(self.args) + u32::from(self.proc)
     }
 }
 
@@ -375,6 +399,13 @@ fn exit_can_exceed_preview1(bodies: &[wasmparser::FunctionBody<'_>]) -> anyhow::
 }
 
 pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
+    to_wasi_mapped(bytes, host_ops).map(|(out, _)| out)
+}
+
+/// [`to_wasi`] plus, per defined function of `bytes` (in order), the
+/// position of the defined function it became (`None`: pruned) — what a
+/// debug build's line table (#1315) follows its functions by.
+pub fn to_wasi_mapped(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<(Vec<u8>, Vec<Option<u32>>)> {
     let services = P1Services::from_ops(host_ops);
     let parsed = parse_module(bytes)?;
     let Parsed {
@@ -420,7 +451,7 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
     let g_plen = global_count;
     // g_ppos exists only for the services that can stage outside the park
     // (#2120); a module without them keeps the fixed source and its bytes.
-    let g_ppos = (services.env_get || services.args || services.fs).then_some(global_count + 1);
+    let g_ppos = services.stages_outside_park().then_some(global_count + 1);
     // g_ovl (the overlay log length) exists only when an env service
     // ships — nothing else reads or writes the log.
     let g_ovl = (services.env_get || services.env_set)
@@ -453,6 +484,12 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
     let t_print = type_index(&mut types, &[ValType::I32, ValType::I32], &[]);
     let t_fs = type_index(&mut types, &[ValType::I32; 5], &[ValType::I64]);
     let t_read = type_index(&mut types, &[ValType::I32], &[]);
+    let t_proc = services.proc.then(|| {
+        (
+            type_index(&mut types, &[ValType::I32; 6], &[]),
+            type_index(&mut types, &[ValType::I32; 4], &[ValType::I32]),
+        )
+    });
     let fs_types = fs.as_ref().map(|f| f.register_types(&mut types));
 
     let mut type_sec = TypeSection::new();
@@ -486,6 +523,12 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
     });
     // The fs service's WASI imports the artifact did not already have.
     let fs_import_at = fs.as_ref().zip(fs_types.as_ref()).map(|(f, t)| f.import(&mut imports, t, &mut next_import, environ_imports));
+    // The private subprocess import (#2589): only when a process op ships.
+    let proc_import = t_proc.map(|(t_call, _)| {
+        imports.import("almide:process/spawn", "call", EntityType::Function(t_call));
+        next_import += 1;
+        next_import - 1
+    });
     for (module, name, ti) in &foreign_imports {
         imports.import(module, name, EntityType::Function(*ti));
         next_import += 1;
@@ -512,6 +555,13 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
     let f_env_get = service_slot(services.env_get);
     let f_env_set = service_slot(services.env_set);
     let f_args = service_slot(services.args);
+    let f_proc = service_slot(services.proc);
+    // `cabi_realloc` (another type, so not a service slot) sits right after.
+    let f_realloc = t_proc.map(|(_, t_realloc)| {
+        functions.function(t_realloc);
+        next_shim += 1;
+        next_shim - 1
+    });
     // The fs service's shipped functions follow the service shims; the
     // dispatcher among them is what shim_fs_call forwards the fs ops to.
     let fs_first = next_shim;
@@ -520,6 +570,7 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
     let forward: Vec<(i32, u32)> = [(26, f_env_get), (37, f_env_set), (29, f_args)]
         .into_iter()
         .filter_map(|(c, t)| t.map(|t| (c, t)))
+        .chain(f_proc.into_iter().flat_map(|t| PROC_OPS.filter(|op| host_ops.contains(op)).map(move |op| (op, t))))
         .chain(fs.as_ref().zip(f_fs).map(|(f, d)| f.forward(d)).unwrap_or_default())
         .collect();
 
@@ -565,6 +616,9 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
         exports.export(name, *kind, idx);
     }
     exports.export("_start", ExportKind::Func, main_index + shift);
+    f_realloc.into_iter().for_each(|f| {
+        exports.export("cabi_realloc", ExportKind::Func, f);
+    });
 
     let mut code = CodeSection::new();
     let mut remap = Remap { shim_base, shift };
@@ -585,7 +639,8 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
     // (and `host_read` only copies an op's result out), so both shims ship
     // as index-stable `unreachable` stubs — the fs_call dispatcher alone is
     // ~460 B, a quarter of a hello-world artifact. The op set is the same
-    // audited one the build path routes on, so a stub is never reached.
+    // audited one the build path routes on, so a stub is never reached, and
+    // the final prune drops it (#3136) — this only skips building the bodies.
     if host_ops.is_empty() {
         let mut stub = Function::new([]);
         stub.instructions().unreachable().end();
@@ -606,6 +661,10 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
         let (i_sizes, i_get) = args_imports.expect("args service imports its pair");
         code.function(&shim_args(park, g_plen, g_ppos.expect("args stages"), i_sizes, i_get));
     }
+    f_proc.and(proc_import).into_iter().for_each(|i_call| {
+        code.function(&proc_service::shim_proc(park, g_plen, g_ppos.expect("the proc service stages"), i_call));
+        code.function(&proc_service::shim_cabi_realloc(heap_global));
+    });
     if let (Some(f), Some(t), Some(import_at)) = (&fs, &fs_types, fs_import_at) {
         let to = fs_service::SpliceTargets {
             import_at,
@@ -653,12 +712,20 @@ pub fn to_wasi(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> {
         .section(&element_sec)
         .section(&code)
         .section(&data);
-    // Last: drop the imports, globals and types nothing in the finished
-    // module names (#3114) — the base five WASI imports keep fixed indices
-    // above so the shims are written once, and most programs call two.
-    let out = prune::prune(&m.finish())?;
+    // Last: drop the functions no export reaches, and the imports, globals
+    // and types nothing live names (#3114, #3136) — the emitter's helper
+    // slots and the base five WASI imports keep fixed indices above so the
+    // shims are written once, and most programs reach few of them.
+    let (out, fmap) = prune::prune_mapped(&m.finish())?;
     wasmparser::validate(&out)?;
-    Ok(out)
+    let kept_imports = fmap.as_ref().map_or(imports_count, |m| m[..imports_count as usize].iter().flatten().count() as u32);
+    let defined = (0..func_types.len() as u32)
+        .map(|d| match &fmap {
+            None => Some(d),
+            Some(m) => m[(imports_count + d) as usize].map(|f| f - kept_imports),
+        })
+        .collect();
+    Ok((out, defined))
 }
 
 /// Hand-rolled body reencode: call indices remap through the shims, and

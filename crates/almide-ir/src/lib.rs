@@ -540,6 +540,12 @@ pub enum IterCollector {
     Find { lambda: Box<IrExpr> },
     /// `.filter(|x| body).count() as i64`
     Count { lambda: Box<IrExpr> },
+    /// `.position(|x| body).map(|i| i as i64)` — `list.find_index`, returns
+    /// Option<Int>; short-circuits at the first hit (#3214).
+    FindIndex { lambda: Box<IrExpr> },
+    /// `.find_map(|x| body)` — `list.find_map`, returns the first `some` the
+    /// body gives; the body is not called past the hit (#3214).
+    FindMap { lambda: Box<IrExpr> },
     /// `list.sum` over the chain: `wrapping_add` fold for Int (C-056), `.sum()` for Float.
     Sum { float: bool },
     /// `list.len` over the chain: `.count() as i64`
@@ -552,7 +558,8 @@ impl IterCollector {
         match self {
             IterCollector::Fold { lambda, .. } | IterCollector::Any { lambda }
             | IterCollector::All { lambda } | IterCollector::Find { lambda }
-            | IterCollector::Count { lambda } => Some(lambda),
+            | IterCollector::Count { lambda } | IterCollector::FindIndex { lambda }
+            | IterCollector::FindMap { lambda } => Some(lambda),
             IterCollector::Collect | IterCollector::Sum { .. } | IterCollector::Len => None,
         }
     }
@@ -563,8 +570,8 @@ impl IterCollector {
 /// produces a new element (`Map` / `FlatMap` / `FilterMap` — a `Filter`
 /// passes the element on, a `Take` never sees it), then the collector's
 /// lambda when the element still reaches it (a fold's second param, the
-/// predicate of `any` / `all` / `count`). `None` when the element leaves the
-/// chain as a value (`Collect`, `Find`), is re-shaped before any lambda sees
+/// predicate of `any` / `all` / `count` / `find_index`, the `find_map`
+/// body). `None` when the element leaves the chain as a value (`Collect`, `Find`), is re-shaped before any lambda sees
 /// it (`Enumerate`), or a callback is a stored closure value rather than a
 /// lambda literal: the source must then hand its elements over owned.
 ///
@@ -592,7 +599,8 @@ pub fn source_element_receivers<'a>(steps: &'a [IterStep], collector: &'a IterCo
     }
     match collector {
         IterCollector::Fold { lambda, .. } => out.push((param(lambda, 1)?, &**lambda)),
-        IterCollector::Any { lambda } | IterCollector::All { lambda } | IterCollector::Count { lambda } => {
+        IterCollector::Any { lambda } | IterCollector::All { lambda } | IterCollector::Count { lambda }
+        | IterCollector::FindIndex { lambda } | IterCollector::FindMap { lambda } => {
             out.push((param(lambda, 0)?, &**lambda))
         }
         IterCollector::Collect | IterCollector::Find { .. } => return None,
@@ -810,6 +818,8 @@ impl IterCollector {
             IterCollector::Any { lambda } => IterCollector::Any { lambda: Box::new(f(*lambda)) },
             IterCollector::All { lambda } => IterCollector::All { lambda: Box::new(f(*lambda)) },
             IterCollector::Find { lambda } => IterCollector::Find { lambda: Box::new(f(*lambda)) },
+            IterCollector::FindIndex { lambda } => IterCollector::FindIndex { lambda: Box::new(f(*lambda)) },
+            IterCollector::FindMap { lambda } => IterCollector::FindMap { lambda: Box::new(f(*lambda)) },
             IterCollector::Count { lambda } => IterCollector::Count { lambda: Box::new(f(*lambda)) },
             IterCollector::Sum { float } => IterCollector::Sum { float },
             IterCollector::Len => IterCollector::Len,

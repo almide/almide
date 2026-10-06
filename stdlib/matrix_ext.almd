@@ -82,40 +82,44 @@ fn matrix_row_dot(m: List[List[Float]], r: Int, vec: List[Float]) -> Float = {
 
 // ── conv1d: input (T, in_ch), weight (out_ch, in_ch*kernel), bias (out_ch,) →
 //    (T_out, out_ch), T_out = (T + 2P - K)/S + 1; zero padding outside [0, T) ──
-fn __cv_tap(hin: Int, wo: Int, t_in: Int, in_ch: Int, k: Int, p: Int, base: Int, c: Int, ki: Int, acc: Float) -> Float = if ki >= k then acc
-else {
-  let tp = base + ki
-  if tp >= p and tp < p + t_in then {
-    let tc = tp - p
-    let w = prim.ffrombits(prim.load64(wo + 12 + (c * k + ki) * 8))
-    let irow = prim.load64(hin + 12 + tc * 8)
-    let x = prim.ffrombits(prim.load64(irow + 12 + c * 8))
-    __cv_tap(hin, wo, t_in, in_ch, k, p, base, c, ki + 1, acc + w * x)
-  } else __cv_tap(hin, wo, t_in, in_ch, k, p, base, c, ki + 1, acc)
-}
+fn __cv_tap(hin: Int, wo: Int, t_in: Int, in_ch: Int, k: Int, p: Int, base: Int, c: Int, ki: Int, acc: Float) -> Float =
+  if ki >= k then acc
+  else {
+    let tp = base + ki
+    if tp >= p and tp < p + t_in then {
+      let tc = tp - p
+      let w = prim.ffrombits(prim.load64(wo + 12 + (c * k + ki) * 8))
+      let irow = prim.load64(hin + 12 + tc * 8)
+      let x = prim.ffrombits(prim.load64(irow + 12 + c * 8))
+      __cv_tap(hin, wo, t_in, in_ch, k, p, base, c, ki + 1, acc + w * x)
+    } else __cv_tap(hin, wo, t_in, in_ch, k, p, base, c, ki + 1, acc)
+  }
 
-fn __cv_chans(hin: Int, wo: Int, t_in: Int, in_ch: Int, k: Int, p: Int, base: Int, c: Int, acc: Float) -> Float = if c >= in_ch then acc
-else {
-  let acc2 = __cv_tap(hin, wo, t_in, in_ch, k, p, base, c, 0, acc)
-  __cv_chans(hin, wo, t_in, in_ch, k, p, base, c + 1, acc2)
-}
+fn __cv_chans(hin: Int, wo: Int, t_in: Int, in_ch: Int, k: Int, p: Int, base: Int, c: Int, acc: Float) -> Float =
+  if c >= in_ch then acc
+  else {
+    let acc2 = __cv_tap(hin, wo, t_in, in_ch, k, p, base, c, 0, acc)
+    __cv_chans(hin, wo, t_in, in_ch, k, p, base, c + 1, acc2)
+  }
 
-fn __cv_outs(dh: Int, hin: Int, hw: Int, hbias: Int, t_in: Int, in_ch: Int, out_ch: Int, k: Int, p: Int, base: Int, o: Int) -> Int = if o >= out_ch then 0
-else {
-  let wo = prim.load64(hw + 12 + o * 8)
-  let b0 = prim.ffrombits(prim.load64(hbias + 12 + o * 8))
-  let sum = __cv_chans(hin, wo, t_in, in_ch, k, p, base, 0, b0)
-  prim.store64(dh + 12 + o * 8, prim.fbits(sum))
-  __cv_outs(dh, hin, hw, hbias, t_in, in_ch, out_ch, k, p, base, o + 1)
-}
+fn __cv_outs(dh: Int, hin: Int, hw: Int, hbias: Int, t_in: Int, in_ch: Int, out_ch: Int, k: Int, p: Int, base: Int, o: Int) -> Int =
+  if o >= out_ch then 0
+  else {
+    let wo = prim.load64(hw + 12 + o * 8)
+    let b0 = prim.ffrombits(prim.load64(hbias + 12 + o * 8))
+    let sum = __cv_chans(hin, wo, t_in, in_ch, k, p, base, 0, b0)
+    prim.store64(dh + 12 + o * 8, prim.fbits(sum))
+    __cv_outs(dh, hin, hw, hbias, t_in, in_ch, out_ch, k, p, base, o + 1)
+  }
 
-fn __cv_rows(ho: Int, hin: Int, hw: Int, hbias: Int, t_in: Int, in_ch: Int, out_ch: Int, k: Int, s: Int, p: Int, t_out: Int, t: Int) -> Int = if t >= t_out then 0
-else {
-  let row = prim.alloc_list_f64(out_ch)
-  let _f = __cv_outs(prim.handle(row), hin, hw, hbias, t_in, in_ch, out_ch, k, p, t * s, 0)
-  prim.store_str(ho + 12 + t * 8, row)
-  __cv_rows(ho, hin, hw, hbias, t_in, in_ch, out_ch, k, s, p, t_out, t + 1)
-}
+fn __cv_rows(ho: Int, hin: Int, hw: Int, hbias: Int, t_in: Int, in_ch: Int, out_ch: Int, k: Int, s: Int, p: Int, t_out: Int, t: Int) -> Int =
+  if t >= t_out then 0
+  else {
+    let row = prim.alloc_list_f64(out_ch)
+    let _f = __cv_outs(prim.handle(row), hin, hw, hbias, t_in, in_ch, out_ch, k, p, t * s, 0)
+    prim.store_str(ho + 12 + t * 8, row)
+    __cv_rows(ho, hin, hw, hbias, t_in, in_ch, out_ch, k, s, p, t_out, t + 1)
+  }
 
 // The count domain of conv1d, in the native order: stride is a STEP (below 1
 // aborts, C-198's class — 0 was the language's `division by zero` here and a

@@ -132,6 +132,8 @@ impl Checker {
             }
         }
         let val_ty = self.infer_expr(value);
+        // #3274: resolved BEFORE `define_var`, so `let g = g` reads the outer `g`.
+        let effect_target = self.effect_alias_target(value, ty.as_ref());
         let final_ty = if let Some(te) = ty {
             let declared = self.resolve_type_expr(te);
             // E029: an undeclared Named in the annotation compiles to a
@@ -149,6 +151,12 @@ impl Checker {
             let call_hint = self.let_call_fix_hint(value);
             self.constrain_with_hint(declared.clone(), val_ty, format!("let {}", name), call_hint);
             declared
+        } else if let Some(deferred) = self.deferred_record_literal(&val_ty) {
+            // #3290: an un-annotated binding of an anonymous record literal
+            // keeps the literal's deferred type, so the nominal record a later
+            // use unifies it with (a return, an argument, an element) is the
+            // binding's type and every use's.
+            deferred
         } else {
             let t = resolve_ty(&val_ty, &self.uf);
             // ADR-0008 (#1123 N+1): a Result on an un-annotated binding is an
@@ -177,12 +185,52 @@ impl Checker {
         if let Some(vs) = value.span {
             self.env.record_let_origin(name, vs);
         }
+        if let Some(target) = effect_target {
+            self.env.record_effect_alias(name, target);
+        }
+    }
+
+    /// #3274: the effect fn a `let`/`var` binds when its value is a bare
+    /// effect fn reference — unless the annotation is itself an
+    /// `effect (A) -> B` type, whose bit the binding's type already carries
+    /// (calls of it are E006-checked by `call_fn_typed_local`).
+    pub(crate) fn effect_alias_target(&mut self, value: &ast::Expr, ty: Option<&ast::TypeExpr>) -> Option<Sym> {
+        let target = self.effect_fn_value_target(value)?;
+        let declared_effect = ty.is_some_and(|te| {
+            let declared = self.resolve_type_expr(te);
+            matches!(resolve_ty(&declared, &self.uf), Ty::Fn { is_effect: true, .. })
+        });
+        if declared_effect { None } else { Some(target) }
+    }
+
+    /// #3274: fill `top_effect_aliases` for this program's top-level `let`s
+    /// before any body is checked (a fn may sit above the `let` it calls
+    /// through), returning the map it replaces. Iterated to a fixed point so
+    /// `let b = a` resolves whichever of `a`/`b` is declared first.
+    pub(crate) fn collect_top_effect_aliases(&mut self, decls: &[ast::Decl]) -> std::collections::HashMap<Sym, Sym> {
+        let saved = std::mem::take(&mut self.env.top_effect_aliases);
+        loop {
+            let before = self.env.top_effect_aliases.len();
+            for decl in decls {
+                let ast::Decl::TopLet { name, ty, value, .. } = decl else { continue };
+                if self.env.top_effect_aliases.contains_key(name) {
+                    continue;
+                }
+                if let Some(target) = self.effect_alias_target(value, ty.as_ref()) {
+                    self.env.top_effect_aliases.insert(*name, target);
+                }
+            }
+            if self.env.top_effect_aliases.len() == before {
+                return saved;
+            }
+        }
     }
 
     /// `ast::Stmt::Var` arm of [`Self::check_stmt`]. Verbatim text move.
     fn check_stmt_var(&mut self, stmt: &mut ast::Stmt) {
         let ast::Stmt::Var { name, ty, value, span } = stmt else { unreachable!() };
         let val_ty = self.infer_expr(value);
+        let effect_target = self.effect_alias_target(value, ty.as_ref());
         let final_ty = if let Some(te) = ty {
             let declared = self.resolve_type_expr(te);
             // E029: same undeclared-Named annotation check as Let.
@@ -217,6 +265,9 @@ impl Checker {
         self.env.define_var(name, final_ty);
         self.env.mutable_vars.insert(sym(name));
         self.env.var_lambda_depth.insert(sym(name), self.env.lambda_depth);
+        if let Some(target) = effect_target {
+            self.env.record_effect_alias(name, target);
+        }
     }
 
     /// `ast::Stmt::Assign` arm of [`Self::check_stmt`]: the Unit-mutator
@@ -226,9 +277,15 @@ impl Checker {
     fn check_stmt_assign(&mut self, stmt: &mut ast::Stmt) {
         let ast::Stmt::Assign { name, value, .. } = stmt else { unreachable!() };
         let val_ty = self.infer_expr(value);
+        // #3274: `var g = pure_fn; g = rd` — the var now may hold `rd`.
+        if let Some(target) = self.effect_fn_value_target(value)
+            && self.env.lookup_var(name).is_some_and(|t| !matches!(resolve_ty(t, &self.uf), Ty::Fn { is_effect: true, .. }))
+        {
+            self.env.record_effect_alias(name, target);
+        }
         self.check_stmt_assign_unify(name, &val_ty, value);
         self.check_stmt_assign_immutable(name);
-        self.check_stmt_assign_escape(name);
+        self.check_closure_escape(name.as_str(), format!("{} = ...", name));
     }
 
     /// A mut-receiver stdlib mutator (`list.push`, `map.insert`,
@@ -262,7 +319,10 @@ impl Checker {
     /// `o.inner.xs = v` writes into `o.inner`). `None` when the root is not
     /// a binding or a step names no field of its record.
     fn place_ty(&mut self, target: &Sym, path: &[Sym]) -> Option<Ty> {
-        let mut ty = self.assign_target_ty(target)?;
+        let (mut ty, path) = match self.module_place(target, path.first()) {
+            Some(key) => (self.env.top_lets.get(&key)?.clone(), &path[1..]),
+            None => (self.assign_target_ty(target)?, path),
+        };
         for step in path {
             let next = self.resolve_field_type(&ty, step.as_str());
             if matches!(resolve_ty(&next, &self.uf), Ty::Unknown) {
@@ -309,7 +369,15 @@ impl Checker {
         let ast::Stmt::FieldAssign { target, path, field, value, .. } = stmt else { unreachable!() };
         let val_ty = self.infer_expr(value);
         let shape = format!("{}.{} = ...", Self::place_label(target, path), field);
-        self.check_place_root_mutable(target, shape);
+        // `m.x = v`: the whole of another module's top-level binding (#3312).
+        if path.is_empty() && let Some(key) = self.module_place(target, Some(field)) {
+            self.check_module_place_mutable(target, field, key, shape);
+            if let Some(var_ty) = self.env.top_lets.get(&key).cloned() {
+                self.unify_assigned_value(&format!("{}.{}", target, field), var_ty, &val_ty, value);
+            }
+            return;
+        }
+        self.check_place_root_mutable(target, path, shape);
         let Some(obj_ty) = self.place_ty(target, path) else { return };
         let field_ty = self.resolve_field_type(&obj_ty, field.as_str());
         if matches!(resolve_ty(&field_ty, &self.uf), Ty::Unknown) {
@@ -485,21 +553,6 @@ impl Checker {
         }
     }
 
-    /// E011: escape analysis — block `var` mutation inside a closure in a
-    /// pure fn. Verbatim text move out of [`Self::check_stmt_assign`].
-    fn check_stmt_assign_escape(&mut self, name: &Sym) {
-        if self.env.mutable_vars.contains(&sym(name)) && !self.env.can_call_effect {
-            if let Some(&decl_depth) = self.env.var_lambda_depth.get(&sym(name)) {
-                if self.env.lambda_depth > decl_depth {
-                    self.emit(super::err(
-                        format!("mutable variable '{}' is mutated inside a closure in a pure function — use effect fn instead", name),
-                        "Move the mutation out of the closure, or mark the enclosing function as `effect fn`",
-                        format!("{} = ...", name)).with_code("E011"));
-                }
-            }
-        }
-    }
-
     /// `ast::Stmt::IndexAssign` arm of [`Self::check_stmt`]. Verbatim text move.
     /// E009: a place write (`xs[i] = v`, `s.f = v`, `o.inner.xs = v`)
     /// mutates its ROOT binding, which must be a `var` (or a `mut` param).
@@ -508,7 +561,13 @@ impl Checker {
     /// `let g; g[2]=…` slipped past this check and only failed later as
     /// opaque rustc `E0425`. A field write on a `let` passed check the same
     /// way and failed natively as rustc E0594 (#3064).
-    fn check_place_root_mutable(&mut self, target: &Sym, shape: String) {
+    fn check_place_root_mutable(&mut self, target: &Sym, path: &[Sym], shape: String) {
+        if let Some(first) = path.first()
+            && let Some(key) = self.module_place(target, Some(first))
+        {
+            return self.check_module_place_mutable(target, first, key, shape);
+        }
+        self.check_closure_escape(target.as_str(), shape.clone());
         let is_known_binding = self.env.lookup_var(target.as_str()).is_some()
             || self.env.top_lets.contains_key(&sym(target.as_str()));
         if is_known_binding && !self.env.mutable_vars.contains(target) {
@@ -529,7 +588,7 @@ impl Checker {
         let val_ty = self.infer_expr(value);
         self.unify_index_assign(target, path, (index, idx_ty), (value, &val_ty));
         let shape = format!("{}[...] = ...", Self::place_label(target, path));
-        self.check_place_root_mutable(target, shape);
+        self.check_place_root_mutable(target, path, shape);
     }
 
     /// `ast::Stmt::GuardLet` arm of [`Self::check_stmt`]: Swift-style
@@ -569,6 +628,8 @@ impl Checker {
 }
 
 include!("infer_patterns.rs");
+include!("infer_module_place.rs");
+include!("infer_closure_escape.rs");
 
 impl Checker {
 

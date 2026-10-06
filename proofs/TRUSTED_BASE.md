@@ -14,10 +14,12 @@ is the honest counterpart to the receipt's `C-PROVEN` claim.
 Reproduce every claim: `make verify-trust` (or `proofs/check.sh` + `proofs/gate.sh`).
 
 **CI cross-version note (honest).** The `Trust Spine` GitHub Actions workflow
-re-derives the whole spine on opam's latest Rocq 9.x — currently **9.2** (opam
-has no 9.1.1; the canonical pin above is a local source build). The proofs are
-kernel-checked and **axiom-clean on BOTH 9.1.1 and 9.2** — a cross-version
-re-derivation, not a single-version artifact (a strength, not a gap). Rocq 9.2
+re-derives the whole spine on opam's Rocq **9.3** — rocq-core pinned to 9.3.0
+(`ROCQ_CORE_VERSION`, also the cache key), with rocq-stdlib 9.2.0 (opam has no
+9.1.1; the canonical pin above is a local source build). The proofs are
+kernel-checked and **axiom-clean on 9.1.1, 9.2 and 9.3** — a cross-version
+re-derivation, not a single-version artifact (a strength, not a gap). 9.3
+reserves `is`, so no proof binds it (#3368). Rocq 9.2+
 ships only the `rocq` driver, so CI provides `coqc`/`coqchk` as thin shims over
 `rocq compile` / `rocq check` (the latter IS the Rocq Proof Checker — the
 independent De Bruijn re-check is genuine).
@@ -91,6 +93,7 @@ fabricated row fails the gate). The table is a representative sample of the spin
 | `check_xc_unroll_sound` | OwnershipChecker.v | Closed under the global context |
 | `check_line_abort_sound` | OwnershipChecker.v | Closed under the global context |
 | `check_xc_abort_sound` | OwnershipChecker.v | Closed under the global context |
+| `check_xc_no_resurrection` | OwnershipChecker.v | Closed under the global context |
 | `check_line_prefix_safe` | OwnershipChecker.v | Closed under the global context |
 | `merge_subset_sound` | Subset.v | Closed under the global context |
 | `subset_check_fast_sound` | Subset.v | Closed under the global context |
@@ -133,7 +136,7 @@ The receipt's claims are scoped to exactly this:
   machine + the FULL `$rc_dec` bytes' SAFETY — no double-free AND leak-freedom —
   executed on the renderer's real bytes by a general interpreter (`WasmExec`),
   operand-stack balance, and termination of the loop-free fragment — all
-  kernel-checked and axiom-clean (99 audited theorems). What remains is DEPTH (the byte-binding ISA layer; and
+  kernel-checked and axiom-clean (100 audited theorems). What remains is DEPTH (the byte-binding ISA layer; and
   the RENDERER realizing the free-list/`rc_inc` — its safety MODEL is now proven,
   so that slice REFINES a proof rather than adding trusted runtime) and BREADTH
   (lowering beyond the subset: control flow, closures, stdlib) — not new properties

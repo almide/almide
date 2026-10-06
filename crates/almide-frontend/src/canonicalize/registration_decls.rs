@@ -60,6 +60,7 @@ pub fn register_type_decl(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, 
     register_type_decl_variant_ctors(env, diagnostics, name, prefix, &mut resolved);
     register_type_decl_check_duplicate(env, diagnostics, name, prefix, &resolved);
     register_type_decl_finalize(env, name, ty, prefix, resolved, user_shadow);
+    register_type_params(env, name, prefix, &gnames, user_shadow);
 
     if let Some(derives) = deriving {
         register_derive_sigs(env, derives, name, prefix);
@@ -227,6 +228,19 @@ fn register_type_decl_finalize(env: &mut TypeEnv, name: &str, ty: &ast::TypeExpr
         env.prefixed_bare_aliases.remove(&sym(name));
     }
 }
+/// Record the declaration's parameter letters, in declared order, under the
+/// same keys as its `types` entry (#3403): a generic transparent alias
+/// substitutes its arguments for exactly these, and the checker counts them
+/// against every application. A non-generic declaration records none, so
+/// `Score[Int]` under `type Score = Int` is a count of 1 against 0.
+fn register_type_params(env: &mut TypeEnv, name: &str, prefix: Option<&str>, gnames: &[Sym], user_shadow: bool) {
+    let params = Ty::Tuple(gnames.iter().map(|g| Ty::TypeVar(*g)).collect());
+    let key = prefixed_key(prefix, name);
+    env.types.insert(crate::canonicalize::resolve::type_params_key(&key), params.clone());
+    if prefix.is_some() && !user_shadow {
+        env.types.insert(crate::canonicalize::resolve::type_params_key(name), params);
+    }
+}
 /// A module type's field default expressions, keyed `mod.Type` /
 /// `mod.Type.Case` (#3165). Only the canonical, module-prefixed registration
 /// records them: a literal in the declaring module splices its own default
@@ -321,20 +335,28 @@ pub fn register_decls(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, decl
     // registers, so the E020 duplicate check never sees it.
     let reserved = reserve_own_nominal_types(env, decls, prefix);
     super::resolve::register_builtin_named_type_keys(env, decls, type_cur_mod(env, prefix));
-    for decl in decls {
-        match decl {
-            ast::Decl::Type { name, .. } => {
+    // An alias registers after every alias of this module it spells, and an
+    // alias in a cycle registers as `Unknown` (#3407, registration_order.rs).
+    for step in type_registration_steps(decls) {
+        match step {
+            DeclStep::Type { decl, cyclic } => {
+                let ast::Decl::Type { name, .. } = decl else { continue };
                 if let Some(key) = reserved.iter().find(|k| k.as_str().rsplit_once('.').is_some_and(|(_, b)| b == name.as_str()))
                     && env.types.get(key).is_some_and(is_reservation)
                 {
                     env.types.remove(key);
                 }
-                register_decl_type(env, diagnostics, decl, prefix)
+                register_decl_type(env, diagnostics, decl, prefix);
+                if cyclic {
+                    register_cyclic_alias_unknown(env, name.as_str(), prefix);
+                }
             }
-            ast::Decl::Protocol { name, generics, methods, .. } => {
+            DeclStep::Protocol(ast::Decl::Protocol { name, generics, methods, .. }) => {
                 register_protocol_decl(env, name, generics, methods, prefix);
             }
-            _ => {}
+            DeclStep::Protocol(_) => {}
+            // Reported by the checker, which knows the file (`alias_cycle_diags`).
+            DeclStep::Cycle(_) => {}
         }
     }
     for decl in decls {
@@ -397,6 +419,9 @@ fn register_decl_fn(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, seen_f
     let ret = env.functions.get(&sym(&fn_key)).map(|s| s.ret.clone()).unwrap_or(Ty::Unknown);
     let did = env.def_table.alloc(sym(pkg), sym(mod_path), sym(name), almide_ir::DefKind::Function, ret);
     env.def_map.insert(sym(&fn_key), did);
+    if !extern_attrs.is_empty() {
+        env.extern_fns.insert(sym(&fn_key));
+    }
     // An EXPLICIT `fn Type.method` with a body, recorded on the shared env so
     // another module can find it. Lowering's own set only ever holds the
     // program being lowered, so a custom `repr` was silently ignored across an
@@ -523,7 +548,7 @@ fn display_protocol_ref(env: &TypeEnv, name: Sym, r: Option<&ast::ProtocolRef>, 
 }
 /// `ast::Decl::TopLet` arm of [`register_decls`] — top-level `let` type seeding (or reuse of a fully-inferred prior entry) and DefTable registration. Verbatim text move out of [`register_decls`].
 fn register_decl_top_let(env: &mut TypeEnv, decl: &ast::Decl, prefix: Option<&str>) {
-    let ast::Decl::TopLet { name, ty, value, .. } = decl else { unreachable!() };
+    let ast::Decl::TopLet { name, ty, value, mutable, .. } = decl else { unreachable!() };
     // #2645: the annotation pins to `mod.Type` exactly as a fn signature does
     // (`register_fn_sig`). With the plain `resolve` a module's
     // `let STEPS: List[Step]` stayed bare `Step`; that seed is concrete, so
@@ -549,4 +574,5 @@ fn register_decl_top_let(env: &mut TypeEnv, decl: &ast::Decl, prefix: Option<&st
     let mod_path = prefix.unwrap_or("");
     let did = env.def_table.alloc(sym(pkg), sym(mod_path), sym(name), almide_ir::DefKind::TopLet, rt);
     env.def_map.insert(sym(&key), did);
+    if *mutable { env.mutable_top_lets.insert(sym(&key)); }
 }

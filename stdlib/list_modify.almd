@@ -66,17 +66,18 @@ fn list_insert_str(xs: List[String], i: Int, x: String) -> List[String] = {
   buf
 }
 
-fn __ls_remove_fill(srcbase: Int, dstbase: Int, n: Int, i: Int, oob: Int) -> Int = if oob == 1 then __copy_slots_rc(
-  srcbase,
-  dstbase,
-  n,
-  0,
-)
-else {
-  let _a = __copy_slots_rc(srcbase, dstbase, i, 0)
-  let i1 = i + 1
-  __copy_slots_rc(srcbase + i1 * 8, dstbase + i * 8, n - i1, 0)
-}
+fn __ls_remove_fill(srcbase: Int, dstbase: Int, n: Int, i: Int, oob: Int) -> Int =
+  if oob == 1 then __copy_slots_rc(
+    srcbase,
+    dstbase,
+    n,
+    0,
+  )
+  else {
+    let _a = __copy_slots_rc(srcbase, dstbase, i, 0)
+    let i1 = i + 1
+    __copy_slots_rc(srcbase + i1 * 8, dstbase + i * 8, n - i1, 0)
+  }
 
 fn list_remove_at_str(xs: List[String], i: Int) -> List[String] = {
   let h = prim.handle(xs)
@@ -137,13 +138,14 @@ fn __lsu_val_str(hit: Bool, addr: Int, old: String, f: (String) -> String) -> In
   0
 }
 
-fn __lsu_fill_str(sh: Int, bh: Int, n: Int, i: Int, f: (String) -> String, j: Int) -> Int = if j >= n then 0
-else {
-  let old = prim.load_str(sh + 12 + j * 8)
-  let hit = j == i
-  let _s = __lsu_val_str(hit, bh + 12 + j * 8, old, f)
-  __lsu_fill_str(sh, bh, n, i, f, j + 1)
-}
+fn __lsu_fill_str(sh: Int, bh: Int, n: Int, i: Int, f: (String) -> String, j: Int) -> Int =
+  if j >= n then 0
+  else {
+    let old = prim.load_str(sh + 12 + j * 8)
+    let hit = j == i
+    let _s = __lsu_val_str(hit, bh + 12 + j * 8, old, f)
+    __lsu_fill_str(sh, bh, n, i, f, j + 1)
+  }
 
 fn list_update_str(xs: List[String], i: Int, f: (String) -> String) -> List[String] = {
   let h = prim.handle(xs)
@@ -174,13 +176,14 @@ fn __lsuv_val(hit: Bool, addr: Int, old: Value, f: (Value) -> Value) -> Int = if
   0
 }
 
-fn __lsuv_fill(sh: Int, bh: Int, n: Int, i: Int, f: (Value) -> Value, j: Int) -> Int = if j >= n then 0
-else {
-  let old: Value = prim.load_handle(sh + 12 + j * 8)
-  let hit = j == i
-  let _s = __lsuv_val(hit, bh + 12 + j * 8, old, f)
-  __lsuv_fill(sh, bh, n, i, f, j + 1)
-}
+fn __lsuv_fill(sh: Int, bh: Int, n: Int, i: Int, f: (Value) -> Value, j: Int) -> Int =
+  if j >= n then 0
+  else {
+    let old: Value = prim.load_handle(sh + 12 + j * 8)
+    let hit = j == i
+    let _s = __lsuv_val(hit, bh + 12 + j * 8, old, f)
+    __lsuv_fill(sh, bh, n, i, f, j + 1)
+  }
 
 fn list_update_value(xs: List[Value], i: Int, f: (Value) -> Value) -> List[Value] = {
   let h = prim.handle(xs)
@@ -272,22 +275,23 @@ fn list_insert(xs: List[Int], i: Int, x: Int) -> List[Int] = {
 // list.remove_at(xs, i): drop element i (length n-1) when 0<=i<n, else an unchanged
 // length-n copy (v0's `(i as usize) < len`). newlen + the copy plan are scalar, so the
 // length-dependent branch lives in __remove_fill, keeping a plain heap tail.
-fn __remove_fill(srcbase: Int, dstbase: Int, n: Int, i: Int, oob: Int) -> Int = if oob == 1 then __copy_slots(
-  srcbase,
-  dstbase,
-  n,
-  0,
-)
-else {
-  let _a = __copy_slots(srcbase, dstbase, i, 0)
-  // src[0,i) -> dst[0,i)
-  let i1 = i + 1
-  let src_suf = srcbase + i1 * 8
-  let dst_suf = dstbase + i * 8
-  let cnt = n - i1
-  // src[i+1,n) -> dst[i,n-1)
-  __copy_slots(src_suf, dst_suf, cnt, 0)
-}
+fn __remove_fill(srcbase: Int, dstbase: Int, n: Int, i: Int, oob: Int) -> Int =
+  if oob == 1 then __copy_slots(
+    srcbase,
+    dstbase,
+    n,
+    0,
+  )
+  else {
+    let _a = __copy_slots(srcbase, dstbase, i, 0)
+    // src[0,i) -> dst[0,i)
+    let i1 = i + 1
+    let src_suf = srcbase + i1 * 8
+    let dst_suf = dstbase + i * 8
+    let cnt = n - i1
+    // src[i+1,n) -> dst[i,n-1)
+    __copy_slots(src_suf, dst_suf, cnt, 0)
+  }
 
 fn list_remove_at(xs: List[Int], i: Int) -> List[Int] = {
   let h = prim.handle(xs)

@@ -1,4 +1,4 @@
-> Last updated: 2026-09-27
+> Last updated: 2026-10-01
 
 # Almide Language Specification
 
@@ -294,6 +294,15 @@ Attribute names with semantic meaning today:
   runtime. See [§11 of module-system.md](./module-system.md#11-extern).
 - `@export(c, "symbol")` — export with C ABI. Paired with
   `--repr-c` output (see module-system §10).
+- `@export(wasm, "symbol")` — the fn is a `--target wasm` export named
+  `symbol` (not its own name) and a DCE root the host can call. Honoured in
+  every module linked into the artifact: the entry file, a sibling
+  `import self.x` module, a dependency package (#3281). A module's
+  un-annotated `pub fn`s are not exports; the entry file's are. The artifact
+  has one export namespace: two fns claiming one symbol, in any modules, and
+  a declared export that does not lower both refuse the build (E082, naming
+  the fns). テスト: `tests/wasm_export_attr_test.rs`,
+  `tests/wasm_export_nonroot_test.rs`.
 - `@inline_rust("template")` — **bundled stdlib only**. Routes the
   Rust target's codegen for the annotated fn to an inline template,
   overriding the TOML-backed `arg_transforms` dispatch. `{param_name}`
@@ -314,7 +323,12 @@ whose hint names the public function that wraps the floor op.
 テスト: `tests/diagnostics/e085-intrinsic-outside-stdlib/`,
 `tests/diagnostics/e085-prim-outside-stdlib/`.
 
-Other attribute names (`@pure`, `@schedule`, `@rewrite`) parse without
+`@pure` is checked (#3250): the fn and everything it calls has the empty
+effect set — no effect category, no output, no `panic` / `assert*` — or the
+build stops with E092 at the call that breaks it. See
+[effect-system.md §2.3](./effect-system.md).
+
+Other attribute names (`@schedule`, `@rewrite`) parse without
 error and are preserved in the AST, but carry no semantic behavior yet. They are reserved for later
 sub-phases of the Stdlib Declarative Unification and MLIR Backend
 arcs (see `docs/roadmap/done/stdlib-declarative-unification.md` and
@@ -401,6 +415,31 @@ type Name = String
 type Handler = (String) -> String
 ```
 
+An alias may take type parameters. Applied to its arguments it is its body
+with each parameter replaced by its argument, wherever it is written — a
+parameter, a return type, a field, a variant payload, another alias's body —
+and from another module qualified (`geo.Pair[Int]`):
+
+```almide
+type Pair[T] = (T, T)            // Pair[Int] is (Int, Int)
+type Step[T] = (T) -> T          // Step[String] is (String) -> String
+type Both[T] = Pair[List[T]]     // Both[Int] is (List[Int], List[Int])
+
+fn first(p: Pair[Int]) -> Int = p.0
+```
+
+The arguments replace the parameters in declared order. Only an alias is
+expanded: a generic record or variant stays a nominal type. The argument
+count must equal the declared parameter count (E093) — for a builtin too:
+`List`, `Option` and `Set` take one, `Map` and `Result` two, and a scalar
+such as `Int` none.
+
+Declaration order does not matter: an alias may name a type declared further
+down the file or module (`type First = Pair2` above `type Pair2 = (Int,
+Int)`). An alias cannot lead back to itself — `type A = B` with `type B = A`,
+or `type Tree = List[Tree]` through a type argument — since it would name no
+type (E094); a record or variant may refer to itself.
+
 #### Generic Types
 
 ```almide
@@ -417,7 +456,7 @@ type Point: Codec = { x: Float, y: Float }
 
 Built-in conventions: `Eq`, `Repr`, `Ord`, `Hash`, `Codec`.
 
-テスト: `spec/lang/data_types_test.almd`, `spec/lang/type_alias_test.almd`, `spec/lang/variant_record_test.almd`, `spec/lang/derive_conventions_test.almd`
+テスト: `spec/lang/data_types_test.almd`, `spec/lang/type_alias_test.almd`, `spec/lang/generic_type_alias_test.almd`, `spec/lang/forward_type_alias_test.almd`, `spec/lang/variant_record_test.almd`, `spec/lang/derive_conventions_test.almd`
 
 ### 4.4 Protocol Declarations
 
@@ -1085,7 +1124,25 @@ test "tuple destructuring" {
 }
 ```
 
-テスト: `spec/lang/variable_test.almd`, `spec/lang/data_types_test.almd`
+`var` takes the same patterns — tuple (nested, with `_`) and record shorthand —
+and every bound name is a `var` (#3149). The value is evaluated once, and
+`var (x, y) = p` behaves exactly as `var x = p.0` / `var y = p.1` written one
+name at a time: each name is reassigned on its own, and a write to one reaches
+neither the other names nor `p`.
+
+```almide
+test "var destructuring" {
+  let point = (1, 2)
+  var (x, y) = point
+  x = x + 10
+  y = y * 3
+  assert_eq(x + y, 17)
+  assert_eq(point.0, 1)
+}
+```
+
+テスト: `spec/lang/variable_test.almd`, `spec/lang/data_types_test.almd`,
+`spec/lang/var_destructure_test.almd`
 
 ### 6.4 Assignment
 

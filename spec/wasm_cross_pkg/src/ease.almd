@@ -72,7 +72,8 @@ fn ease_out_expo(t: Float) -> Float = if t == 1.0 then 1.0 else 1.0 - math.fpow(
 
 fn ease_in_out_expo(t: Float) -> Float = if t == 0.0 then 0.0
 else if t == 1.0 then 1.0
-else if t < 0.5 then math.fpow(2.0, 20.0 * t - 10.0) / 2.0 else (2.0 - math.fpow(
+else if t < 0.5 then math.fpow(2.0, 20.0 * t - 10.0) / 2.0
+else (2.0 - math.fpow(
   2.0,
   0.0 - 20.0 * t + 10.0,
 )) / 2.0
@@ -154,7 +155,8 @@ fn ease_out_bounce(t: Float) -> Float = {
 
 fn ease_in_bounce(t: Float) -> Float = 1.0 - ease_out_bounce(1.0 - t)
 
-fn ease_in_out_bounce(t: Float) -> Float = if t < 0.5 then (1.0 - ease_out_bounce(1.0 - 2.0 * t)) / 2.0 else (1.0 + ease_out_bounce(2.0 * t - 1.0)) / 2.0
+fn ease_in_out_bounce(t: Float) -> Float =
+  if t < 0.5 then (1.0 - ease_out_bounce(1.0 - 2.0 * t)) / 2.0 else (1.0 + ease_out_bounce(2.0 * t - 1.0)) / 2.0
 
 // ── Easing ID system (for use without closures) ──
 let LINEAR = 0

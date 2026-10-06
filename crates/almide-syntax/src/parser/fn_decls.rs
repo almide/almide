@@ -184,8 +184,10 @@ impl Parser {
         if !self.check(TokenType::Eq) {
             return Ok(None);
         }
+        let eq_idx = self.pos;
         self.advance();
         self.skip_newlines();
+        let body_start_idx = self.pos;
         let body_span = self.current_span();
         let parsed = if self.check(TokenType::Let)
             || self.check(TokenType::Var)
@@ -195,6 +197,14 @@ impl Parser {
         } else {
             self.parse_expr()
         };
+        // #3370: recorded AFTER the body parsed, so a fn nested inside it
+        // (itself an error) cannot leave its shape behind for this decl.
+        self.last_fn_body = parsed.as_ref().ok().map(|b| super::braceless_body::FnBodyShape {
+            eq_idx,
+            body_start_idx,
+            braced: matches!(b.kind, ExprKind::Block { .. })
+                && self.tokens.get(body_start_idx).map(|t| t.token_type) == Some(TokenType::LBrace),
+        });
         let mut body = match parsed {
             Ok(b) => b,
             Err(msg) => {

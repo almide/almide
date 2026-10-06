@@ -9,11 +9,27 @@
 /// reference (immediate Borrow child, an access-object, an in-place
 /// mutation target, an RC op); `lambda` = any read inside a lambda body (a
 /// closure capture — CaptureClone's domain, disqualifying).
+///
+/// `source` = the source of a range op whose runtime takes it owned or
+/// borrowed (`owned_source.rs`, #3398): a `Borrow` that becomes a MOVE when it
+/// is the param's only read on its path to the reassignment (or the exit).
 #[derive(Default)]
 struct OwnedReadCensus {
     bare: u32,
     other: u32,
     lambda: u32,
+    source: u32,
+}
+
+impl OwnedReadCensus {
+    /// The one read is a bare consuming `Var`: it may move as it stands.
+    fn only_bare(&self) -> bool {
+        self.bare == 1 && self.other == 0 && self.source == 0 && self.lambda == 0
+    }
+    /// The one read is a range op's borrowed source: it may move instead.
+    fn only_source(&self) -> bool {
+        self.source == 1 && self.bare == 0 && self.other == 0 && self.lambda == 0
+    }
 }
 
 struct OwnedReadCensusVisitor<'a> {
@@ -30,6 +46,10 @@ impl OwnedReadCensusVisitor<'_> {
     fn note_shielded(&mut self, id: VarId) {
         let c = self.out.entry(id).or_default();
         if self.lambda_depth > 0 { c.lambda += 1 } else { c.other += 1 }
+    }
+    fn note_source(&mut self, id: VarId) {
+        let c = self.out.entry(id).or_default();
+        if self.lambda_depth > 0 { c.lambda += 1 } else { c.source += 1 }
     }
     /// The immediate tracked `Var` of a reference-taking position
     /// (Borrow child / access object), or None.
@@ -66,6 +86,15 @@ impl almide_ir::visit::IrVisitor for OwnedReadCensusVisitor<'_> {
                 else { self.visit_expr(object); }
                 self.visit_expr(key);
             }
+            IrExprKind::RuntimeCall { symbol, args } if crate::owned_source::takes_source_either_way(symbol.as_str()) => {
+                match args.split_first() {
+                    Some((first, rest)) if let Some(id) = either_way_source(first).filter(|id| self.tracked.contains(id)) => {
+                        self.note_source(id);
+                        rest.iter().for_each(|a| self.visit_expr(a));
+                    }
+                    _ => walk_expr(self, e),
+                }
+            }
             IrExprKind::Lambda { body, .. } => {
                 self.lambda_depth += 1;
                 self.visit_expr(body);
@@ -98,6 +127,88 @@ impl almide_ir::visit::IrVisitor for OwnedReadCensusVisitor<'_> {
         }
         walk_stmt(self, s);
     }
+}
+
+/// The var a range op's source `Borrow` reads (`&p`), if that is its shape.
+fn either_way_source(arg: &IrExpr) -> Option<VarId> {
+    match &arg.kind {
+        IrExprKind::Borrow { expr, as_str: false, mutable: false } => match &expr.kind {
+            IrExprKind::Var { id } => Some(*id),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Drop the source `Borrow` of every range op in `expr` that reads one of
+/// `moved` (#3398): the bare `Var` is the move, and BorrowLowering calls the
+/// op's owned twin. `moved` holds only params whose census was
+/// [`OwnedReadCensus::only_source`], so each id has exactly one such site.
+fn move_either_way_sources(expr: IrExpr, moved: &HashSet<VarId>) -> IrExpr {
+    if moved.is_empty() { return expr; }
+    let mut expr = expr.map_children(&mut |c| move_either_way_sources(c, moved));
+    if let IrExprKind::RuntimeCall { symbol, args } = &mut expr.kind
+        && crate::owned_source::takes_source_either_way(symbol.as_str())
+        && let Some(first) = args.first_mut()
+        && either_way_source(first).is_some_and(|id| moved.contains(&id))
+    {
+        let IrExprKind::Borrow { expr: var, .. } = std::mem::replace(&mut first.kind, IrExprKind::Unit) else { unreachable!() };
+        *first = *var;
+    }
+    expr
+}
+
+/// The leading statements of a block whose tail is a self-call: a param's
+/// range-op source in statement `k` moves when that is its only read in `k`,
+/// nothing after `k` (later statements, the call's arguments) reads it, and
+/// the call reassigns it (#3398 — `[x, ..rest] => go(rest)` lowers `rest` to
+/// `list.drop(xs, 1)` in a statement before the call). Reads BEFORE `k` are
+/// over: a `let` binds an owned value, and the param is proven lambda-free.
+fn move_statement_sources(stmts: Vec<IrStmt>, tail: &IrExpr, f: &TailFrame<'_>) -> Vec<IrStmt> {
+    let Some(args) = tail_self_call_args(tail, f.fn_name) else { return stmts };
+    let reassigned: HashSet<VarId> = f.params.iter().zip(args)
+        .filter(|((p, _), arg)| carried_var(arg) != Some(*p))
+        .map(|((p, _), _)| *p)
+        .filter(|p| f.owned_params.contains(p))
+        .collect();
+    let mut later: HashMap<VarId, OwnedReadCensus> = HashMap::new();
+    for arg in args {
+        census_owned_reads(arg, &reassigned, false, &mut later);
+    }
+    let mut moves: Vec<HashSet<VarId>> = vec![HashSet::new(); stmts.len()];
+    for (k, stmt) in stmts.iter().enumerate().rev() {
+        let mut here: HashMap<VarId, OwnedReadCensus> = HashMap::new();
+        census_owned_reads_stmt(stmt, &reassigned, &mut here);
+        for (p, c) in &here {
+            if c.only_source() && !later.contains_key(p) {
+                moves[k].insert(*p);
+            }
+        }
+        for (p, _) in here {
+            later.entry(p).or_default().other += 1;
+        }
+    }
+    stmts.into_iter().zip(moves)
+        .map(|(s, moved)| s.map_exprs(&mut |e| move_either_way_sources(e, &moved)))
+        .collect()
+}
+
+/// The arguments of a direct tail self-call (`go(..)`, `go(..)?`, `go(..)!`).
+fn tail_self_call_args<'a>(e: &'a IrExpr, fn_name: &str) -> Option<&'a [IrExpr]> {
+    let call = match &e.kind {
+        IrExprKind::Try { expr } | IrExprKind::Unwrap { expr } => expr.as_ref(),
+        _ => e,
+    };
+    match &call.kind {
+        IrExprKind::Call { target: CallTarget::Named { name }, args, .. } if *name == fn_name => Some(args),
+        _ => None,
+    }
+}
+
+fn census_owned_reads_stmt(s: &IrStmt, tracked: &HashSet<VarId>, out: &mut HashMap<VarId, OwnedReadCensus>) {
+    if tracked.is_empty() { return; }
+    use almide_ir::visit::IrVisitor;
+    OwnedReadCensusVisitor { tracked, lambda_depth: 0, out }.visit_stmt(s);
 }
 
 fn census_owned_reads(

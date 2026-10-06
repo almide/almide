@@ -1,0 +1,601 @@
+# Rust target syntax templates
+# Pure formatting — no semantic logic.
+# Semantic decisions are in Nanopass passes.
+#
+# Format:
+#   [construct_name]
+#   template = "output with {placeholders}"
+#   when_type = "Int"          # optional: only when node type matches
+#   when_attr = "needs_try"    # optional: only when TargetAttr is set
+#
+# Multiple rules per construct: use [[construct_name]] array syntax.
+# First matching rule wins.
+
+# ── Expressions ──
+
+[if_expr]
+template = "if {cond} {{ {then} }} else {{ {else} }}"
+
+[[call_expr]]
+template = "{callee}({args})"
+
+[[call_expr]]
+when_attr = "needs_try"
+template = "{callee}({args})?"
+
+# ── Stdlib module calls ──
+
+[module_call]
+template = "almide_rt_{module}_{func}({args})"
+
+[binary_op]
+template = "({left} {op} {right})"
+
+# Integer `/` and `%` are total (zero divisor / signed MIN-by-(-1) overflow abort
+# with `Error: <msg>\n` + exit 1 via the prelude macros), not the bare operator.
+[div_int]
+template = "almide_div!({left}, {right})"
+
+[mod_int]
+template = "almide_mod!({left}, {right})"
+
+[field_access]
+template = "{expr}.{field}"
+
+[index_access]
+template = "almide_index!({object}, {index})"
+
+[pipe_call]
+template = "{callee}({pipe_arg}, {args})"
+
+# ── Concat (type-dispatched) ──
+# Both arms route through AlmideConcat, whose owned impls extend in place
+# (push_str / extend) — same bytes as the old format!("{}{}") String arm,
+# but an OWNED left operand (the TCO accumulator move) keeps its capacity,
+# making a tail-recursive string builder amortized O(n) instead of
+# reallocating on every iteration.
+
+[[concat_expr]]
+when_type = "String"
+template = "AlmideConcat::concat({left}, {right})"
+
+[[concat_expr]]
+when_type = "List"
+template = "AlmideConcat::concat({left}, {right})"
+
+# ── Equality ──
+
+[eq_expr]
+template = "almide_eq!({left}, {right})"
+
+[ne_expr]
+template = "almide_ne!({left}, {right})"
+
+# ── Power (type-dispatched) ──
+
+# Int `^` routes through the almide_pow! prelude macro, NOT `.pow()`. The
+# operator form had the SAME precedence trap the Float arm below describes
+# (`-3i64.pow(2)` == `-(3.pow(2))` == -9 where wasm says 9), and its `as u32`
+# exponent cast silently wrapped a negative exponent instead of aborting the way
+# the wasm __pow_trap does. See the macro's comment in almide-codegen (#895).
+[[power_expr]]
+when_type = "Int"
+template = "almide_pow!({left}, {right})"
+
+# Float `**` routes through the vendored musl-libm pow (almide_rt_math_fpow →
+# almide_rt_libm_pow), NOT platform `f64::powf`, so the result is deterministic
+# across platforms AND bit-identical to the WASM target (which calls __float_pow →
+# __libm_pow). The call form also fixes the precedence trap of `-2.0 ** 0.5`
+# rendering as `-2f64.powf(0.5)` == `-(2.powf(0.5))`.
+[[power_expr]]
+when_type = "Float"
+template = "almide_rt_math_fpow({left}, {right})"
+
+# ── Option / Result ──
+
+[some_expr]
+template = "Some({inner})"
+
+[[none_expr]]
+when_attr = "none_type_hint"
+template = "None::<{type_hint}>"
+
+[[none_expr]]
+template = "None"
+
+[ok_expr]
+template = "Ok({inner})"
+
+[err_expr]
+template = "Err(format!(\"{:?}\", {inner}))"
+
+[[unwrap_expr]]
+when_attr = "map_err_join"
+template = "({inner}).map_err(|errs| errs.join(\", \"))?"
+
+# A typed error `!`-ed into a String channel carries its repr text — the
+# `"${e}"` rendering, which both wasm legs and the interp share (ADR-0021,
+# #2725). Rust `Debug` differed on Option/Float/control-char payloads.
+[[unwrap_expr]]
+when_attr = "map_err_debug"
+template = "({inner}).map_err(|e| almide_repr(&e))?"
+
+[[unwrap_expr]]
+template = "({inner})?"
+
+[[unwrap_expr]]
+when_type = "Option"
+template = "({inner}).ok_or(\"none\".to_string())?"
+
+[[unwrap_or_expr]]
+template = "match {inner} {{ Ok(v) => v, Err(_) => {fallback}, }}"
+
+[[unwrap_or_expr]]
+when_type = "Option"
+template = "match {inner} {{ Some(v) => v, None => {fallback}, }}"
+
+[to_option_expr]
+template = "({inner}).ok()"
+
+# ── Match ──
+
+[match_expr]
+template = "match {subject} {{\n{arms}\n}}"
+
+[match_arm]
+template = "{pattern} => {{ {body} }}"
+
+[match_arm_inline]
+template = "{pattern} => {body},"
+
+# Match patterns
+[pattern_some]
+template = "Some({binding})"
+
+[pattern_none]
+template = "None"
+
+[pattern_ok]
+template = "Ok({binding})"
+
+[pattern_err]
+template = "Err({binding})"
+
+[pattern_wildcard]
+template = "_"
+
+[pattern_literal]
+template = "{value}"
+
+[pattern_variant]
+template = "{type}::{name}({fields})"
+
+# ── Literals ──
+
+[int_literal]
+template = "{value}i64"
+
+[float_literal]
+template = "{value}f64"
+
+[string_literal]
+template = "\"{value}\".to_string()"
+
+[bool_literal_true]
+template = "true"
+
+[bool_literal_false]
+template = "false"
+
+[list_literal]
+template = "vec![{elements}]"
+
+[record_literal]
+template = "{type_name} {{ {fields} }}"
+
+[record_field]
+template = "{name}: {value}"
+
+# ── String Interpolation ──
+
+[string_interp]
+template = "format!(\"{format_str}\", {args})"
+
+# ── Statements ──
+
+[let_binding]
+template = "let {name}: {type} = {value};"
+
+[var_binding]
+template = "let mut {name}: {type} = {value};"
+
+[assignment]
+template = "{target} = {value};"
+
+[return_expr]
+template = "{value}"
+
+# ── Declarations ──
+
+[fn_decl]
+template = "pub fn {name}({params}) -> {return_type} {{\n{body}\n}}"
+
+# Effect fn: ret_ty in IR is already Result<T, String>, so use it directly
+[effect_fn_decl]
+template = "pub fn {name}({params}) -> {return_type} {{\n{body}\n}}"
+
+[[fn_param]]
+template = "{name}: {type}"
+
+[[fn_param]]
+when_attr = "needs_borrow"
+template = "{name}: &{type}"
+
+# ── Type annotations ──
+
+[type_int]
+template = "i64"
+
+[type_float]
+template = "f64"
+
+[type_string]
+template = "String"
+
+[type_bool]
+template = "bool"
+
+[type_unit]
+template = "()"
+
+# #617: Bytes/Matrix are AlmideRcCow VALUE types in generated code — copies (call
+# boundaries, member reads, closure captures, collection stores) are O(1)
+# Rc bumps; mutation goes through DerefMut = Rc::make_mut (copy-on-write), so
+# value semantics are observably unchanged. The runtime keeps its raw
+# `&Vec<u8>` / `&AlmideMatrix` signatures: immutable and mutable borrows
+# deref-coerce, and runtime RESULTS are wrapped at the call site by the
+# walker's rc_cow_result_glue.
+[type_bytes]
+template = "AlmideRcCow<Vec<u8>>"
+
+[type_matrix]
+template = "AlmideRcCow<AlmideMatrix>"
+
+[matrix_mul]
+template = "almide_rt_matrix_mul(&{left}, &{right})"
+
+[matrix_add]
+template = "almide_rt_matrix_add(&{left}, &{right})"
+
+[matrix_sub]
+template = "almide_rt_matrix_sub(&{left}, &{right})"
+
+[matrix_scale]
+template = "almide_rt_matrix_scale(&{left}, {right})"
+
+[type_list]
+template = "Vec<{inner}>"
+
+[type_option]
+template = "Option<{inner}>"
+
+[type_result]
+template = "Result<{ok}, {err}>"
+
+[type_map]
+template = "AlmideMap<{key}, {value}>"
+
+[type_set]
+template = "AlmideSet<{inner}>"
+
+# Fn type for struct fields: uses Rc for cloneability
+[type_fn_field]
+template = "std::rc::Rc<dyn Fn({params}) -> {return}>"
+
+# ── Loops ──
+
+[for_loop]
+template = "for {var} in {iter} {{\n{body}\n}}"
+
+[while_loop]
+template = "while {cond} {{\n{body}\n}}"
+
+[break_stmt]
+template = "break;"
+
+[continue_stmt]
+template = "continue;"
+
+# ── Lambda ──
+
+[lambda]
+template = "move |{params}| {{ {body} }}"
+
+[lambda_single]
+template = "move |{params}| {body}"
+
+[lambda_borrowed]
+template = "|{params}| {body}"
+
+# ── Type declarations ──
+
+[type_alias]
+template = "type {name} = {type};"
+
+[[struct_decl]]
+when_attr = "has_fn_fields"
+template = "#[derive(Clone)]\npub struct {name} {{\n{fields}\n}}"
+
+[[struct_decl]]
+when_attr = "has_non_eq_fields"
+template = "#[derive(Clone, Debug)]\npub struct {name} {{\n{fields}\n}}"
+
+[[struct_decl]]
+when_attr = "has_ord_hash"
+template = "#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]\npub struct {name} {{\n{fields}\n}}"
+
+[[struct_decl]]
+when_attr = "has_ord"
+template = "#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]\npub struct {name} {{\n{fields}\n}}"
+
+[[struct_decl]]
+when_attr = "has_hash"
+template = "#[derive(Clone, Debug, PartialEq, Eq, Hash)]\npub struct {name} {{\n{fields}\n}}"
+
+[[struct_decl]]
+when_attr = "repr_c"
+template = "#[repr(C)]\n#[derive(Clone, Debug, PartialEq)]\npub struct {name} {{\n{fields}\n}}"
+
+[[struct_decl]]
+template = "#[derive(Clone, Debug, PartialEq)]\npub struct {name} {{\n{fields}\n}}"
+
+[struct_field]
+template = "    pub {name}: {type},"
+
+[[enum_decl]]
+when_attr = "has_fn_fields"
+template = "#[derive(Clone)]\npub enum {name} {{\n{variants}\n}}"
+
+[[enum_decl]]
+when_attr = "has_ord_hash"
+template = "#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]\npub enum {name} {{\n{variants}\n}}"
+
+[[enum_decl]]
+when_attr = "has_ord"
+template = "#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]\npub enum {name} {{\n{variants}\n}}"
+
+[[enum_decl]]
+when_attr = "has_hash"
+template = "#[derive(Clone, Debug, PartialEq, Eq, Hash)]\npub enum {name} {{\n{variants}\n}}"
+
+[[enum_decl]]
+when_attr = "repr_c"
+template = "#[repr(C)]\n#[derive(Clone, Debug, PartialEq)]\npub enum {name} {{\n{variants}\n}}"
+
+[[enum_decl]]
+template = "#[derive(Clone, Debug, PartialEq)]\npub enum {name} {{\n{variants}\n}}"
+
+[enum_variant]
+template = "    {name}({fields})"
+
+[enum_variant_unit]
+template = "    {name}"
+
+# ── Imports ──
+
+[import]
+template = "// use {module};"
+
+# ── Test ──
+
+[test_module]
+template = "mod tests {{\n    use super::*;\n\n{tests}\n}}"
+
+[test_block]
+template = "#[test]\nfn {name}() {{\n{body}\n}}"
+
+[assert_eq]
+template = "assert!(almide_eq!({left}, {right}), \"assertion failed: {{:?}} != {{:?}}\", {left}, {right});"
+
+# ── Target-agnostic constructs ──
+
+[typevar_infer]
+template = "_"
+
+[unknown_type]
+template = "_"
+
+[empty_map]
+template = "AlmideMap::<{key_type}, {value_type}>::new()"
+
+[try_expr]
+template = "({inner})?"
+
+[await_expr]
+template = "{inner}.await"
+
+[keyword_escape]
+template = "r#{name}"
+
+[mut_param_prefix]
+template = "mut "
+
+[map_literal]
+template = "AlmideMap::from([{entries}])"
+
+[map_entry]
+template = "({key}, {value})"
+
+[map_get]
+template = "{object}.get(&{key}).cloned()"
+
+[map_insert]
+template = "{target}.insert({key}, {value});"
+
+[index_assign]
+template = "{target}[{index} as usize] = {value};"
+
+[stmt_terminator]
+template = ";"
+
+[spread_record]
+template = "{type_name} {{ {fields}, ..{base} }}"
+
+[string_match_subject]
+template = "{subject}.as_str()"
+
+[option_string_match_subject]
+template = "{subject}.as_deref()"
+
+[guard_negate]
+template = "!({cond})"
+
+[empty_list]
+template = "Vec::<{inner_type}>::new()"
+
+[unit_literal]
+template = "()"
+
+[deref_lazy]
+template = "(*{name})"
+
+[deref_var]
+template = "(*{name})"
+
+[clone_expr]
+template = "{expr}.clone()"
+
+# Materialized ranges guard their reserve (C-197): a span the machine cannot
+# satisfy is the defined "Error: out of memory" abort, never collect()'s raw
+# `capacity overflow` panic (xtarget-fuzz seed=20260819 index=2963 - a bound
+# 0..<i64::MAX forced to materialize by list.len/indexing panicked native
+# exit 101 while wasm aborted with the defined line). Mirrors
+# almide_rt_list_range's try_reserve discipline, inlined so the template has
+# no linkage dependency.
+[range_expr]
+template = "{{ let __almide_rs: i64 = {start}; let __almide_re: i64 = {end}; let __almide_rn = __almide_re.saturating_sub(__almide_rs).max(0) as usize; let mut __almide_rv: Vec<i64> = Vec::new(); if __almide_rv.try_reserve_exact(__almide_rn).is_err() {{ almide_abort(\"out of memory\"); }} __almide_rv.extend(__almide_rs..__almide_re); __almide_rv }}"
+
+[range_inclusive]
+template = "{{ let __almide_rs: i64 = {start}; let __almide_re: i64 = {end}; let __almide_rn = if __almide_re >= __almide_rs {{ ((__almide_re as i128) - (__almide_rs as i128) + 1) as usize }} else {{ 0 }}; let mut __almide_rv: Vec<i64> = Vec::new(); if __almide_rv.try_reserve_exact(__almide_rn).is_err() {{ almide_abort(\"out of memory\"); }} __almide_rv.extend(__almide_rs..=__almide_re); __almide_rv }}"
+
+[for_tuple_destructure]
+template = "({vars})"
+
+[ctor_unit]
+template = "{enum_name}::{ctor_name}"
+
+[ctor_call]
+template = "{enum_name}::{ctor_name}({args})"
+
+[ctor_qualify]
+template = "{enum_name}::{ctor_name}"
+
+[type_tuple]
+template = "({elements})"
+
+[tuple_literal]
+template = "({elements})"
+
+[tuple_index]
+template = "{object}.{index}"
+
+[enum_variant_sep]
+template = ",\n"
+
+[enum_variant_record]
+template = "    {name} {{ {fields} }}"
+
+[destructure_pattern]
+template = "{name} {{ {fields} }}"
+
+[bind_destructure]
+template = "let {pattern} = {value};"
+
+[block_expr]
+template = "{{\n{body}\n}}"
+
+[block_result_expr]
+template = "{expr}"
+
+[box_wrap]
+template = "std::rc::Rc::new({inner})"
+
+# The flush before the spawn: stdout is a THREAD-LOCAL buffer, and a runtime
+# abort (`Error: out of memory`, exit 1) raised inside a sibling runs
+# `process::exit` on the worker, which never reaches the spawning thread's
+# buffer — the lines printed before the fan were lost on native while the
+# sequential wasm leg kept them (C-197; fuzz seed 585689703894 index 4740).
+# `almide_fan_group` makes that flush and opens one output timeline per arm
+# (ADR-0024 D5/D6): each spawned arm enters its own (`almide_fan_enter`), and
+# the timelines reach stdout/stderr in arm order, as the sequential evaluation
+# prints them.
+[fan_expr]
+template = "{{ almide_stdout_flush(); let __almide_fan_go = almide_fan_group({count}); let __almide_fan_g = &__almide_fan_go; std::thread::scope(|__almide_s| {{ {spawns} {join_expr} }}) }}"
+
+[fan_effect]
+template = "{{ almide_stdout_flush(); let __almide_fan_go = almide_fan_group({count}); let __almide_fan_g = &__almide_fan_go; std::thread::scope(|__almide_s| -> Result<_, String> {{ {spawns} Ok({join_expr}) }})? }}"
+
+# #3341: a ONE-arm fan has nothing to overlap with — its arm runs inline,
+# after the same stdout flush (group head 0 writes straight through, and no
+# element sits below index 0 for a trap to wait on, so the observation is
+# the threaded form's). `body` carries the join's `?` / `.unwrap()`.
+[fan_single]
+template = "{{ almide_stdout_flush(); {body} }}"
+
+[loop_block]
+template = "loop {{\n{body}\n}}"
+
+[err_inner_string]
+template = "Err({inner}.to_string())"
+
+[err_inner_other]
+template = "Err({inner})"
+
+[record_pattern_rest]
+template = "{name} {{ {fields}, .. }}"
+
+[record_pattern_rest_empty]
+template = "{name} {{ .. }}"
+
+[top_let_const]
+template = "#[allow(non_upper_case_globals)]\nconst {name}: {type} = {value};"
+
+[top_let_lazy]
+template = "#[allow(non_upper_case_globals)]\nstatic {name}: std::sync::LazyLock<{type}> = std::sync::LazyLock::new(|| {value});"
+
+# A top-level let whose value holds a closure (`Rc<dyn Fn>`, not `Sync`) cannot
+# live in a `static LazyLock` (#2537). The value lives in a per-thread lazy
+# slot instead — field `{name}` of the program's one `__ALMIDE_TLS` struct
+# (#3347), evaluated once per thread; a zero-sized `static` handle derefs to
+# it, so every read site renders `(*NAME)` exactly as for `top_let_lazy`.
+[top_let_thread_lazy]
+template = "#[allow(non_camel_case_types)]\nstruct __AlmideTl_{name};\nimpl std::ops::Deref for __AlmideTl_{name} {{\n    type Target = {type};\n    fn deref(&self) -> &{type} {{\n        __ALMIDE_TLS.with(|g| *g.{name}.get_or_init(|| std::boxed::Box::leak(std::boxed::Box::new({value}))))\n    }}\n}}\n#[allow(non_upper_case_globals)]\nstatic {name}: __AlmideTl_{name} = __AlmideTl_{name};"
+
+[top_var]
+template = "thread_local! { #[allow(non_upper_case_globals)] static {name}: std::cell::RefCell<{type}> = std::cell::RefCell::new({value}); }"
+
+[generic_bound]
+template = "{name}: Clone + PartialEq"
+
+[generic_bound_full]
+template = "{name}: Clone + std::fmt::Debug + PartialEq"
+
+[generic_bound_minimal]
+template = "{name}: Clone"
+
+[optional_chain_expr]
+template = "{inner}.as_ref().map(|__v| __v.{field}.clone())"
+
+# ── Peephole optimization templates ──
+
+[peep_swap]
+template = "{target}.swap({a} as usize, {b} as usize);"
+
+[peep_copy_slice]
+template = "{dst}[..{n} as usize].copy_from_slice(&{src}[..{n} as usize]);"
+
+[peep_reverse]
+template = "{target}[..={end} as usize].reverse();"
+
+[peep_rotate_left]
+template = "{target}[..={end} as usize].rotate_left(1);"

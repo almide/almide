@@ -1,6 +1,6 @@
 # ALS §T — Text and Number Semantics (normative)
 
-> Last updated: 2026-09-30
+> Last updated: 2026-10-06
 
 > **Status**: normative. これらの節は実装から独立した**規範**であり、v0（native）と
 > v1（MIR/wasm）の両実装がこの節に適合する義務を負う。適合の証拠は
@@ -98,6 +98,20 @@ fixture `spec/wasm_cross/string_case_unicode.almd` に対して行う）。
 （lo > hi、float は NaN 境界も — `Error: clamp requires min <= max`）に適用される。
 Fixtures: `spec/wasm_cross/int_div_by_zero*.almd`, `int_mod_*`, `int8_div_overflow.almd`,
 `int_pow_negative_exponent.almd`, `int_rotate_nonpositive_width.almd`, `index_bounds.almd`。
+
+呼び出しスタックの枯渇も同じ終了形に従う: native と組み込み wasm ホスト
+（`almide run --target wasm`）は stderr に `Error: stack overflow` を1行出力し
+**exit code 1 で停止**する。それまでに書かれた stdout は失われない。Rust の
+`thread 'main' has overflowed its stack`（SIGABRT、exit 134）や
+`Error: wasm trap: call stack exhausted` は不適合。枯渇する深さ（閾値）は統一せず、
+ターゲットごとの構造的資源として C-196 が宣言する: native は枯渇したスレッド自身の
+スタック（main スレッドはプラットフォーム既定の 8 MiB、`fan` の腕や並列ワーカーの
+スレッドは Rust 既定の 2 MiB）、組み込みホストは 8 MiB の wasm スタック。stock
+ランタイム（素の `wasmtime run` で実行する p1 モジュール・コンポーネント、ブラウザ）
+での枯渇はホスト自身の trap であり（wasmtime では exit 134）、本規約の宣言された
+残余である（C-196）。Fixtures: `spec/wasm_fail/stack_overflow_abort.almd`（abort）、
+`spec/wasm_cross/recursion_depth_within_limits.almd`（両ターゲットの限界内の再帰は
+byte 一致）。
 
 ## ALS-T7 トップレベル let の評価時機
 

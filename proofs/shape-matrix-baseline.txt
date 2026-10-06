@@ -1,0 +1,18 @@
+# Shape-matrix known-open cells (#3309) — tests/shape_matrix_test.rs.
+#
+# One row per generated cell that fails today: `<cell>  <columns>  # #NNNN`,
+# where <columns> is the `+`-joined set of verdict columns the cell fails (the
+# vocabulary is COLUMNS in the test) and #NNNN is the OPEN issue that will burn
+# the row. The test holds this list to the matrix EXACTLY: an unlisted failing
+# cell, a listed cell that passes, a listed cell that fails in other columns,
+# and a row naming no generated cell are all red. So a fix deletes its rows in
+# the same PR, and a new failure is filed and listed before it can land.
+# Growth is owner-checked in CI (scripts/check-walled-real-growth.sh with
+# LEDGER= this file): a new row must cite an issue that is open.
+#
+# A cell that fails for two reasons cites the issue of its first column; when
+# that one is fixed the row's columns change and it is re-listed under the
+# other (e.g. `modvar/sibling.*.case_twin` is #3305 natively and #3316 on wasm).
+#
+# Refresh: SHAPE_MATRIX_RESULTS=/tmp/r.tsv cargo test --test shape_matrix_test
+# writes every cell's verdict; rows come from its failing lines.

@@ -1,0 +1,15 @@
+// The handler reaches the top-level `var` through a fn it calls.
+import http
+
+var hits = 0
+
+effect fn bump() -> Int = {
+  hits = hits + 1
+  hits
+}
+
+let app = http.router([
+  http.route("GET /", (req) => http.response(200, "n=${bump()!}"))
+])
+
+effect fn main() -> Unit = http.serve(8080, app!)!

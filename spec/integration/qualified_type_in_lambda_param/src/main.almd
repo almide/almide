@@ -1,0 +1,17 @@
+// #3433: a lambda parameter annotated with a module-qualified type inside a
+// type application (`List[other.Entry]`) resolves to that module's type even
+// when another module declares a type with the same bare name.
+import self.other
+import self.third
+
+fn position(es: List[other.Entry], g: Int) -> Int = {
+  let w = (xs: List[other.Entry], gs: List[Int]) => other.hit(xs, gs)
+  if w(es, [g, 1]) or w(es, [1, g]) then 1 else 0
+}
+
+effect fn main() -> Unit = {
+  println(int.to_string(position([
+    { lookup: 3, mask: 1 }
+  ], 7)))
+  println(third.first().text)
+}

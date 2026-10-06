@@ -19,10 +19,9 @@ pub(crate) mod node_marks;
 pub(crate) struct Emitter<'a> {
     pub(crate) pool: &'a mut Pool,
     pub(crate) locals: &'a HashMap<VarId, (u32, SliceTy)>,
-    /// Locals below this index are PARAMS (borrowed views of the
-    /// caller's blocks): the COW gate exempts them — in-place writes
-    /// through a plain Bytes param are the caller-visibility contract
-    /// (bytes_param_writeback), exactly the pre-share behavior.
+    /// Locals below this index are PARAMS. The COW gate judges a `mut`
+    /// param like any var (#3342): the C-132 write-back hands its buffer
+    /// back, so a copy is caller-visible (bytes_param_writeback).
     pub(crate) rc_param_ceiling: u32,
     /// Whether a `return_call` site may release ANY frame credit (params
     /// and rc_owned locals alike): the raw-address rule (func.rs
@@ -89,6 +88,8 @@ pub(crate) struct Emitter<'a> {
     /// Every exit `emit_exit` wrote, with the byte offset it started at —
     /// the E083 validator (exit_plan.rs) reads the bytes back against it.
     pub(crate) exit_ledger: Vec<crate::exit_plan::ExitRecord>,
+    /// #3377: named list rests the exit plan releases (arm_rests.rs).
+    pub(crate) arm_rests: crate::patterns::arm_rests::ArmRests,
     // NOTE: rc_owned and rc_frame_params are BOTH dec'd by the
     // epilogue — a local in the two sets at once is a double free. Use
     // rc_own(), never a raw insert (#1770: a mut-param writeback's
@@ -138,9 +139,10 @@ pub(crate) struct Emitter<'a> {
     /// C-319 shared-cell vars: the local holds a one-slot heap cell's
     /// ADDRESS; reads load through it, writes store through it.
     pub(crate) cells: &'a std::collections::HashSet<VarId>,
-    /// #3104: the block temp the statement being lowered may MOVE out of
-    /// (writeback_move.rs) — set by the block walk, taken by the assign.
-    pub(crate) moved_temp: Option<VarId>,
+    /// #3104 / #3337: what the statement being lowered may MOVE
+    /// (writeback_move.rs) — set by the block walk, taken by the assign
+    /// (the temp) and by the call site (the vars handed to `mut` params).
+    pub(crate) moves: crate::writeback_move::BlockMoves,
     /// C-320: Some((saved_local, depth_entry_local)) when this fn is a
     /// region ARM — a cut here runs the exit bookkeeping its early
     /// return would otherwise skip (guarded by depth > depth-at-entry,
@@ -167,6 +169,9 @@ pub(crate) struct Emitter<'a> {
     /// #2980: lists a counting loop judged copy-on-write in its preheader
     /// (cow_hoist.rs, the pre-judge) — their stores inside it skip the judge.
     pub(crate) cow_prejudged: HashSet<VarId>,
+    /// #3345: bounds facts (bounds_facts.rs; `None` = off), payload pointers (payload_ptr.rs).
+    pub(crate) bounds_facts: Option<Vec<(VarId, VarId, i64)>>,
+    pub(crate) payload_ptrs: HashMap<VarId, u32>,
     /// One-shot tail-position marker: set by `lower_tail`, TAKEN at
     /// `lower`'s entry so it never leaks into operand lowering. A direct
     /// call in tail position with a matching return type emits
@@ -263,10 +268,13 @@ impl Emitter<'_> {
         index: &IrExpr,
     ) -> Result<SliceTy, EmitError> {
         // #2319: an enclosing loop may have loaded this list's count already.
-        let hoisted = match &object.kind {
-            almide_ir::IrExprKind::Var { id } => self.hoisted_count_of(*id),
+        let list_var = match &object.kind {
+            almide_ir::IrExprKind::Var { id } => Some(*id),
             _ => None,
         };
+        let hoisted = list_var.and_then(|id| self.hoisted_count_of(id));
+        // #3345: an earlier check of this same `xs[i]` still decides it.
+        let known = list_var.is_some_and(|id| self.bounds_known(id, index));
         let elem = match self.lower(object, None)? {
             SliceTy::List(h) => self.types.el(h),
             crate::bytes::BYTES => return self.lower_bytes_index(index),
@@ -277,7 +285,24 @@ impl Emitter<'_> {
         self.f.instructions().local_set(hold);
         self.lower(index, Some(INT))?;
         let idx = self.hold_i64()?;
-        self.f.instructions().local_tee(idx);
+        if known {
+            self.f.instructions().local_set(idx);
+        } else {
+            self.f.instructions().local_tee(idx);
+            self.emit_read_bounds_check(hold, hoisted, stride);
+            if let Some(id) = list_var {
+                self.bounds_record(id, index);
+            }
+        }
+        let off = self.emit_elem_addr(list_var, hold, idx, index, i64::from(stride))?;
+        self.load_slot_off(elem, off);
+        self.release_i64();
+        self.release_i32();
+        Ok(elem)
+    }
+
+    /// The read's bounds check of the index on the stack (consumed).
+    fn emit_read_bounds_check(&mut self, hold: u32, hoisted: Option<u32>, stride: u32) {
         let msg = self.pool.intern("index out of bounds");
         // ONE UNSIGNED compare (#2319): `idx >=u count` is exactly
         // `idx < 0 || idx >= count` — a negative i64 index reads as a value
@@ -307,15 +332,7 @@ impl Emitter<'_> {
         self.abort_frame();
         self.witness_branch_arm();
         self.witness_branch_close();
-        let mut i = self.f.instructions();
-        i.end();
-        // element address: hold + idx*stride, slot at offset PAYLOAD
-        i.local_get(hold);
-        i.local_get(idx).i32_wrap_i64().i32_const(stride as i32).i32_mul().i32_add();
-        self.load_ty_slot(elem, 0);
-        self.release_i64();
-        self.release_i32();
-        Ok(elem)
+        self.f.instructions().end();
     }
 
     /// The main-level / pure-fn abort frame for a failed `!`: the exact
@@ -460,6 +477,7 @@ impl Emitter<'_> {
             IrExprKind::Var { id } => {
                 if let Some(&(idx, ty)) = self.locals.get(id) {
                     self.f.instructions().local_get(idx);
+                    self.witness_read(id, idx, ty);
                     if self.cells.contains(id) {
                         self.load_ty_slot(ty, 0);
                     }
@@ -564,9 +582,9 @@ impl Emitter<'_> {
             },
             IrExprKind::BinOp { op, left, right } => self.lower_binop(*op, left, right)?,
             IrExprKind::Block { stmts, expr } => {
-                for s in stmts {
-                    self.lower_stmt(s)?;
-                }
+                // The statement walk's moves (#3104, #3337) hold in value
+                // position too: a non-Unit `mut` call's write-back block.
+                self.lower_block_stmts(stmts, expr.as_deref())?;
                 let Some(t) = expr else { return unsup("expr:Block-no-tail") };
                 self.in_tail = tail;
                 self.lower(t, want)?

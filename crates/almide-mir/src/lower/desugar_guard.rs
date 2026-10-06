@@ -564,10 +564,10 @@ pub fn hoist_block_call_args(program: &mut almide_ir::IrProgram) {
     impl IrMutVisitor for H<'_> {
         fn visit_expr_mut(&mut self, e: &mut IrExpr) {
             walk_expr_mut(self, e);
-            if absorb_unwrap_or_block_operand(e) {
+            if absorb_unwrap_or_block_operand(e) || absorb_interp_block_parts(e, self.vt) {
                 return;
             }
-            let IrExprKind::Call { args, .. } = &mut e.kind else { return };
+            let (IrExprKind::Call { args, .. } | IrExprKind::List { elements: args }) = &mut e.kind else { return };
             // Exactly ONE non-empty Block argument, every earlier arg pure.
             let blocks: Vec<usize> = args
                 .iter()
@@ -582,7 +582,7 @@ pub fn hoist_block_call_args(program: &mut almide_ir::IrProgram) {
             let bi = *bi;
             // An impure EARLIER operand (a call) is bound to a fresh temp first, in
             // order (#3084), so it still evaluates before the block's statements.
-            let Some(mut hoisted) = bind_earlier_call_operands(&mut args[..bi], self.vt) else {
+            let Some(mut hoisted) = bind_earlier_call_operands(args, bi, self.vt) else {
                 return;
             };
             let IrExprKind::Block { stmts, expr: Some(tail) } = &mut args[bi].kind else {
@@ -615,7 +615,6 @@ pub fn hoist_block_call_args(program: &mut almide_ir::IrProgram) {
     // interp lowering then sees only plain operands. Sound when every EARLIER Expr
     // part is pure (a literal/Var); parts after the block already evaluate after it.
     fn hoist_in_stmts(stmts: &mut Vec<almide_ir::IrStmt>) {
-        
         let mut i = 0;
         while i < stmts.len() {
             let hoisted = take_first_block_part(&mut stmts[i]);
@@ -677,6 +676,7 @@ pub fn hoist_block_call_args(program: &mut almide_ir::IrProgram) {
     {
         H { vt: &mut *var_table }.visit_expr_mut(&mut func.body);
         S2.visit_expr_mut(&mut func.body);
+        normalize_stmt_lists(&mut func.body, &mut *var_table);
     }
 }
 

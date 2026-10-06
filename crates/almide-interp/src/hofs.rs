@@ -76,31 +76,20 @@ impl<'a> Interpreter<'a> {
             ("set", _) => self.eval_hof_set(f, &evaled),
             ("bytes", "map_each") => self.hof_bytes_map_each(&evaled),
             ("fs", "__fallible_fold_lines") => self.hof_fs_try_fold_lines(&evaled),
+            ("fs", "for_each_line") => self.hof_fs_for_each_line(&evaled, false),
+            ("fs", "__fallible_for_each_line") => self.hof_fs_for_each_line(&evaled, true),
             _ => Flow::Unsupported(format!("HOF {}.{}", m, f)),
         }
     }
 
     /// `fs.__fallible_fold_lines(path, init, (acc, line) => Result[A, E])` —
     /// the carrier the checker rewrites a `fs.fold_lines` with a propagating
-    /// callback to (#1844). Lines come from the sandboxed overlay (then the
-    /// read-only real fs) with exactly `BufRead::read_line`'s split — the
-    /// native `almide_rt_fs_fold_lines_effect` and the wasm self-host walk:
-    /// `\n` stripped, a preceding `\r` too (a bare final `\r` kept), a final unterminated line still
-    /// yielded, no trailing empty line. A read error is the native `io_err`
-    /// Display as the whole call's `err`, before any callback runs; the
-    /// first callback `err` short-circuits like every `__fallible_*`.
+    /// callback to (#1844). The first callback `err` short-circuits like every
+    /// `__fallible_*`; the lines and the read error are [`Self::fs_walker_lines`]'s.
     fn hof_fs_try_fold_lines(&mut self, args: &[Value]) -> Flow {
-        let path = match args.first() {
-            Some(v) => match self.coerce_block_str(v.clone()) {
-                Value::Str(s) => s.to_string(),
-                other => {
-                    return Flow::Unsupported(format!(
-                        "fs.__fallible_fold_lines with a {} path",
-                        other.type_name()
-                    ))
-                }
-            },
-            None => return Flow::Abort("internal: __fallible_fold_lines missing path".into()),
+        let lines = match self.fs_walker_lines(args, "__fallible_fold_lines", "fs.fold_lines") {
+            Ok(lines) => lines,
+            Err(f) => return f,
         };
         let mut acc = match args.get(1) {
             Some(v) => v.clone(),
@@ -110,16 +99,66 @@ impl<'a> Interpreter<'a> {
             Ok(c) => c,
             Err(f) => return f,
         };
+        for line in lines {
+            match self.try_step(&clo, vec![acc.clone(), Value::str(line)]) {
+                Ok(v) => acc = v,
+                Err(f) => return f,
+            }
+        }
+        Flow::val(Value::Result(Ok(Box::new(acc))))
+    }
+
+    /// `fs.for_each_line(path, f)` and its fallible carrier
+    /// `fs.__fallible_for_each_line(path, (line) => Result[Unit, E])` (#3159):
+    /// the visitor twin of the fold above — `f` once per line, in order, for its
+    /// effects. The carrier stops at the first callback `err` and returns it; both
+    /// answer `ok(())` otherwise. Without these arms the call ran the wasm
+    /// self-host body, whose line blocks reached the callback as raw handles.
+    fn hof_fs_for_each_line(&mut self, args: &[Value], fallible: bool) -> Flow {
+        let carrier = if fallible { "__fallible_for_each_line" } else { "for_each_line" };
+        let lines = match self.fs_walker_lines(args, carrier, "fs.for_each_line") {
+            Ok(lines) => lines,
+            Err(f) => return f,
+        };
+        let clo = match Self::recv_closure(args, 1) {
+            Ok(c) => c,
+            Err(f) => return f,
+        };
+        for line in lines {
+            if fallible {
+                if let Err(f) = self.try_step(&clo, vec![Value::str(line)]) {
+                    return f;
+                }
+            } else {
+                val!(self.apply_closure(&clo, vec![Value::str(line)]));
+            }
+        }
+        Flow::val(Value::Result(Ok(Box::new(Value::Unit))))
+    }
+
+    /// The lines a streaming fs walker visits. They come from the sandboxed
+    /// overlay (then the read-only real fs) with exactly `BufRead::read_line`'s
+    /// split — the native walkers and the wasm self-host walk: `\n` stripped, a
+    /// preceding `\r` too (a bare final `\r` kept), a final unterminated line
+    /// still yielded, no trailing empty line. A read error is the native `io_err`
+    /// Display naming the user's call (`shown`) over the quoted path: the `Err`
+    /// flow is then the whole call's `err` value, before any callback runs.
+    fn fs_walker_lines(&mut self, args: &[Value], carrier: &str, shown: &str) -> Result<Vec<String>, Flow> {
+        let path = match args.first() {
+            Some(v) => match self.coerce_block_str(v.clone()) {
+                Value::Str(s) => s.to_string(),
+                other => return Err(Flow::Unsupported(format!("fs.{carrier} with a {} path", other.type_name()))),
+            },
+            None => return Err(Flow::Abort(format!("internal: {carrier} missing path"))),
+        };
         let text = match crate::vfs::read_text(&self.vfs, &path) {
             Ok(t) => t,
-            // The message names the user's call over the quoted path, as native's
-            // `io_err("fs.fold_lines", …)` does (#3148 — this arm returned the
-            // bare errno text, the #2090 prefix never reached it).
             Err(e) => {
-                let m = format!("fs.fold_lines(\"{path}\"): {e}");
-                return Flow::val(Value::Result(Err(Box::new(Value::str(m)))));
+                let m = format!("{shown}(\"{path}\"): {e}");
+                return Err(Flow::val(Value::Result(Err(Box::new(Value::str(m))))));
             }
         };
+        let mut lines = Vec::new();
         let mut rest = text.as_str();
         while !rest.is_empty() {
             // Only a TERMINATED line loses its '\r' — native pops a '\n' first and
@@ -131,13 +170,10 @@ impl<'a> Interpreter<'a> {
                 }
                 None => (rest, ""),
             };
-            match self.try_step(&clo, vec![acc.clone(), Value::str(line.to_string())]) {
-                Ok(v) => acc = v,
-                Err(f) => return f,
-            }
+            lines.push(line.to_string());
             rest = tail;
         }
-        Flow::val(Value::Result(Ok(Box::new(acc))))
+        Ok(lines)
     }
 
     /// `bytes.map_each(b, f)` — every octet through `f` once, in order, the

@@ -1,0 +1,42 @@
+// #3315: `fnlet.thing(1)` where `fnlet` declares `let thing = inc1` is an
+// indirect call through the let's value, as `thing(1)` is inside `fnlet`.
+// It was lowered as a call to a function `fnlet.thing` that does not exist,
+// an IR verify ICE on both legs. Covered: a direct call, a call from a
+// closure, from a nested closure and from a fn passed to `list.map`, the let
+// passed as a value, and the let bound to a local and called.
+import fnlet
+
+fn via(x: Int) -> Int = fnlet.thing(x)
+
+fn apply_to(g: (Int) -> Int, x: Int) -> Int = g(x)
+
+test "a module's fn-valued let is called through its value" {
+  let a = fnlet.thing(1)
+  assert_eq(a, 2)
+  let b = fnlet.other(5)
+  assert_eq(b, 10)
+}
+
+test "the call works from a closure, a nested closure and a callback" {
+  let g = () => fnlet.thing(10)
+  let c = g()
+  assert_eq(c, 11)
+  let h = () => (() => fnlet.other(20))()
+  let d = h()
+  assert_eq(d, 40)
+  let xs = [1, 2] |> list.map(via)
+  assert_eq(xs, [2, 3])
+}
+
+test "the let is a first-class value" {
+  let r = apply_to(fnlet.other, 5)
+  assert_eq(r, 10)
+  let f = fnlet.thing
+  let e = f(30)
+  assert_eq(e, 31)
+}
+
+test "the declaring module calls it the same way" {
+  let u = fnlet.local_use
+  assert_eq(u, 6)
+}

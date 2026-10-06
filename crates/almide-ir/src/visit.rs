@@ -155,7 +155,8 @@ fn walk_expr_iter_chain<V: IrVisitor>(
         IterCollector::Collect | IterCollector::Sum { .. } | IterCollector::Len => {}
         IterCollector::Fold { init, lambda } => { v.visit_expr(init); v.visit_expr(lambda); }
         IterCollector::Any { lambda } | IterCollector::All { lambda }
-        | IterCollector::Find { lambda } | IterCollector::Count { lambda } => {
+        | IterCollector::Find { lambda } | IterCollector::Count { lambda }
+        | IterCollector::FindIndex { lambda } | IterCollector::FindMap { lambda } => {
             v.visit_expr(lambda);
         }
     }

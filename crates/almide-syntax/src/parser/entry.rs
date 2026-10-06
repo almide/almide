@@ -165,7 +165,24 @@ impl Parser {
             program.comment_map.push(std::mem::take(&mut pending));
 
             let pre_err_len = self.errors.len();
-            match self.parse_top_decl() {
+            let start_idx = self.pos;
+            self.last_fn_body = None;
+            let result = self.parse_top_decl();
+            // #3370: remember a braceless-bodied fn for the NEXT iteration's
+            // `top_decl_error`; anything else (or a failure) clears it.
+            self.preceding_expr_fn = match (&result, self.last_fn_body.take()) {
+                (Ok(crate::ast::Decl::Fn { name, effect, .. }), Some(shape)) if !shape.braced => {
+                    Some(super::braceless_body::ExprBodiedFn {
+                        name: name.to_string(),
+                        effect: effect.unwrap_or(false),
+                        start_idx,
+                        eq_idx: shape.eq_idx,
+                        body_start_idx: shape.body_start_idx,
+                    })
+                }
+                _ => None,
+            };
+            match result {
                 Ok(decl) => program.decls.push(decl),
                 Err(msg) => {
                     // If parse_top_decl (or anything it called) already pushed

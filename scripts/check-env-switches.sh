@@ -34,8 +34,10 @@ fail=0
 # Rust: the string literal, in every crate (the harness hooks included: a test
 # that sets an unregistered switch is exactly the drift the registry exists to
 # stop). `git ls-files` keeps target/ and untracked scratch out.
+# A literal ending in `_` is a name prefix (the native static mangling
+# `ALMIDE_G_` / `ALMIDE_RT_`, say), never a whole switch, so it is not matched.
 rs_names="$(git ls-files '*.rs' | grep -v '^crates/almide-base/src/env\.rs$' \
-  | xargs grep -hoE '"ALMIDE_[A-Z0-9_]+"' 2>/dev/null | tr -d '"' | sort -u)"
+  | xargs grep -hoE '"ALMIDE_[A-Z0-9_]*[A-Z0-9]"' 2>/dev/null | tr -d '"' | sort -u)"
 # Shell and workflows: a variable position only — `NAME=`, `$NAME`, `${NAME`,
 # `export NAME`, a YAML `NAME:` env key. A bare identifier in a comment or a
 # table (the runtime's `ALMIDE_REPEAT_MAX_BYTES` constant, say) is not a switch.

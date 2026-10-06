@@ -1,0 +1,14 @@
+// #3403 on the test lanes: a module's generic aliases used from another file.
+import self.geo
+
+test "a qualified generic alias is its substituted body" {
+  let p: geo.Pair[Int] = (2, 5)
+  assert_eq(p.0 + p.1, 7)
+  assert_eq(geo.swap(p), (5, 2))
+}
+
+test "the module's own generic aliases nest and reach fields" {
+  assert_eq(geo.sizes((["a"], ["b", "c"])), 12)
+  assert_eq(geo.span(geo.Seg { ends: (1, 4), name: "x" }), 3)
+  assert_eq(geo.apply((s) => s + "!", "hi"), "hi!")
+}

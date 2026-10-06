@@ -202,7 +202,8 @@ impl Emitter<'_> {
     }
 
     /// One awaited read of `fan.map`'s prefetch: after the first err the
-    /// remaining awaits only drain (second arm, no carrier); otherwise the
+    /// remaining awaits only drain — every read already ran, started in
+    /// phase A (ADR-0024 D1) — (second arm, no carrier); otherwise the
     /// read's Result carrier is born and settled as the sequential `map`'s.
     pub(crate) fn witness_prefetch_map_step(&mut self) {
         if self.witness.is_none() {
@@ -221,5 +222,43 @@ impl Emitter<'_> {
     pub(crate) fn witness_prefetch_any_step(&mut self) {
         let c = self.witness.as_mut().map(|w| w.temp_born());
         self.witness_fan_step(c, true, crate::STR);
+    }
+
+    /// #2758: one arm of a `fan { … }` block (fan.rs `lower_fan_block`), right
+    /// after it was lowered. A Result arm's OWNED carrier is born here and its
+    /// spine released (`id`, the `$dec_flat` every path runs): the ok payload,
+    /// or the err message the block's abort reads, keeps the carrier's credit
+    /// on it. A borrowed carrier and a pure arm have no site here; every arm's
+    /// value is settled at the tuple slot (`witness_fan_block_slot`) or, for a
+    /// one-arm block, is the block's value its consumer records.
+    pub(crate) fn witness_fan_block_arm(&mut self, carrier: bool, owned: bool) {
+        if carrier && owned {
+            self.witness_discard();
+        }
+    }
+
+    /// A slot of the fan block's fresh tuple, after the share the route took
+    /// for a borrowed value (`share_handle_top`): an OWNED value — a pure
+    /// arm's own credit, or an owned carrier's payload whose credit stayed
+    /// with it — moves in (`im`); a borrowed one shares and moves (`am`): a
+    /// carrier's payload is a view of its slot, a pure arm a Var or a view.
+    /// A droppable slot that is no handle takes no share: declined.
+    pub(crate) fn witness_fan_block_slot(&mut self, arm: &almide_ir::IrExpr, carrier: bool, p: SliceTy, owned: bool) {
+        if self.witness.is_none() || !self.rc_droppable(p) {
+            return;
+        }
+        if owned {
+            if let Some(w) = self.witness.as_mut() {
+                w.temp_move();
+            }
+        } else if !self.elem_is_handle(p) {
+            self.witness_decline("fan:flat-slot");
+        } else if carrier {
+            if let Some(w) = self.witness.as_mut() {
+                w.view_share_move();
+            }
+        } else {
+            self.witness_share_or_move(arm, "fan:borrowed-slot");
+        }
     }
 }

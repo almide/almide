@@ -17,8 +17,9 @@ fn __list_find_is_at(h: Int, f: ((Int, String)) -> Bool, n: Int, i: Int) -> (Int
   else __list_find_is_loop(h, f, n, i + 1)
 }
 
-fn __list_find_is_loop(h: Int, f: ((Int, String)) -> Bool, n: Int, i: Int) -> (Int, String)? = if i >= n then __lfis_none()
-else __list_find_is_at(h, f, n, i)
+fn __list_find_is_loop(h: Int, f: ((Int, String)) -> Bool, n: Int, i: Int) -> (Int, String)? =
+  if i >= n then __lfis_none()
+  else __list_find_is_at(h, f, n, i)
 
 fn list_find_int_str(xs: List[(Int, String)], f: ((Int, String)) -> Bool) -> (Int, String)? = {
   let h = prim.handle(xs)

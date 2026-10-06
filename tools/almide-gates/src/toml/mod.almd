@@ -53,12 +53,13 @@ fn raw_value(line: String) -> String = {
   else string.trim(list.slice(parts, 1, list.len(parts)) |> list.join("="))
 }
 
-fn unquote(v: String) -> String = if string.starts_with(v, '"') and string.ends_with(v, '"') and string.len(v) >= 2 then string.slice(
-  v,
-  1,
-  string.len(v) - 1,
-)
-else v
+fn unquote(v: String) -> String =
+  if string.starts_with(v, '"') and string.ends_with(v, '"') and string.len(v) >= 2 then string.slice(
+    v,
+    1,
+    string.len(v) - 1,
+  )
+  else v
 
 // The value after the FIRST `=`, with surrounding quotes stripped.
 fn scalar_value(line: String) -> String = unquote(raw_value(line))
@@ -184,25 +185,27 @@ else s.out }
 
 // Inside `'''`: collect until the closer. The closer's own prefix is kept only when it is
 // non-empty, so a `'''` on a line of its own does not add a trailing blank line to the value.
-fn step_multi(s: Scan, line: String) -> Scan = if not string.contains(line, "'''") then { ...s, multi_lines: s.multi_lines + [line] } else {
-  let before = list.get_or(string.split(line, "'''"), 0, "")
-  let all = if before == "" then s.multi_lines
-  else s.multi_lines + [before]
-  let cleared: List[String] = []
-  { ...s, cur: with_scalar(s.cur, s.multi, list.join(all, "\n")), multi: "", multi_lines: cleared }
-}
+fn step_multi(s: Scan, line: String) -> Scan =
+  if not string.contains(line, "'''") then { ...s, multi_lines: s.multi_lines + [line] } else {
+    let before = list.get_or(string.split(line, "'''"), 0, "")
+    let all = if before == "" then s.multi_lines
+    else s.multi_lines + [before]
+    let cleared: List[String] = []
+    { ...s, cur: with_scalar(s.cur, s.multi, list.join(all, "\n")), multi: "", multi_lines: cleared }
+  }
 
 // Inside `key = [`: an element starts with `{`, the closer is `]`. Anything else — a scalar,
 // a header — means the array never closed. That is precisely the #1843 shape (C-274's array
 // ran on into C-275's header, and the old scanner swallowed the whole next contract as
 // elements): report it, close the array here, and read the line for what it is.
-fn step_array(s: Scan, n: Int, line: String) -> Scan = if closes_array(line) then { ...s, in_array: false } else if string.starts_with(
-  string.trim(line),
-  "{",
-) then { ...s, cur: with_item(s.cur, array_item(line)) } else {
-  let msg = "`" + string.trim(line) + "` inside `" + s.cur.array_key + " = [` is not an inline-table element — the array is missing its `]`"
-  step(problem({ ...s, in_array: false }, n, msg), n, line)
-}
+fn step_array(s: Scan, n: Int, line: String) -> Scan =
+  if closes_array(line) then { ...s, in_array: false } else if string.starts_with(
+    string.trim(line),
+    "{",
+  ) then { ...s, cur: with_item(s.cur, array_item(line)) } else {
+    let msg = "`" + string.trim(line) + "` inside `" + s.cur.array_key + " = [` is not an inline-table element — the array is missing its `]`"
+    step(problem({ ...s, in_array: false }, n, msg), n, line)
+  }
 
 // A scalar line in a block. A duplicate key is reported and the FIRST value stands — the
 // lookup `table_get` performs anyway — so a header-less block pasted into another (the other

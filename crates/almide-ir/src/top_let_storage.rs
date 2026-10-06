@@ -132,9 +132,7 @@ pub enum TopLetStorage {
 #[derive(Debug, Clone)]
 pub struct GlobalInfo {
     pub storage: TopLetStorage,
-    /// The emitted static identifier — THE one site that owns the
-    /// `ALMIDE_RT_{ORIGIN}_{NAME}` format (mirrors the walker's
-    /// `global_static_name`, byte-for-byte).
+    /// The emitted static identifier ([`static_name`]).
     pub static_name: String,
     /// The DECLARATION VarId (alias-resolve synthetic use-site ids to this).
     pub decl: VarId,
@@ -158,11 +156,34 @@ pub fn classify_storage(mutable: bool, kind: TopLetKind, ty: &Ty, init_aborts: b
     }
 }
 
-/// The emitted static name — mirrors `walker::global_static_name` exactly.
+/// Prefix of an entry-program global's static.
+const ENTRY_STATIC_PREFIX: &str = "ALMIDE_G_";
+/// Prefix of a module global's static.
+const MODULE_STATIC_PREFIX: &str = "ALMIDE_RT_";
+
+/// The emitted static name of a top-level `let`/`var` — THE one site that
+/// owns the spelling (the definition, every read and write, the thread-local
+/// wrapper `__AlmideTl_<static>` all derive from it).
+///
+/// INJECTIVE over (module, name), so two globals never share a static
+/// (#3305). The spelling keeps the source CASE — upper-casing is not
+/// injective (`let nest` and `let NEST` both became `NEST`, rustc E0428) —
+/// and every global lives under a prefix, so a user name can never equal
+/// another global's static or a prelude item (`let almide_stdout_buf` was
+/// `ALMIDE_STDOUT_BUF`, the runtime's own stdout buffer):
+///
+/// - entry program: `ALMIDE_G_<name>`;
+/// - module `<origin>`: `ALMIDE_RT_<len(origin)>_<origin>_<name>` — the
+///   length delimits the origin, so `a` + `b_c` and `a_b` + `c` stay apart.
+///
+/// The two prefixes differ before any user text starts, and within each
+/// form the user text decodes uniquely, so no two inputs share an output.
+/// (`origin` is the module's `almide_base::names::module_ident`, itself
+/// injective over module paths — `a.b` and `a_b` are two origins, #3338.)
 pub fn static_name(vi: &VarInfo) -> String {
     match &vi.module_origin {
-        Some(origin) => format!("ALMIDE_RT_{}_{}", origin.to_uppercase(), vi.name.as_str().to_uppercase()),
-        None => vi.name.as_str().to_uppercase(),
+        Some(origin) => format!("{MODULE_STATIC_PREFIX}{}_{origin}_{}", origin.len(), vi.name.as_str()),
+        None => format!("{ENTRY_STATIC_PREFIX}{}", vi.name.as_str()),
     }
 }
 
@@ -604,14 +625,16 @@ fn topo_sort_emit(
     emitted
 }
 
-/// Alias-resolution key: (normalized module origin, UPPERCASE name). The
-/// use-site synthetic Var carries the SCREAMING_CASE spelling and a
-/// dot-normalized origin; the declaration keeps the source name and the
-/// lowering-set origin. Normalizing both sides makes the match total.
+/// Alias-resolution key: (normalized module origin, EXACT name). The
+/// use-site synthetic Var and the declaration both carry the source
+/// spelling; only the origin is normalized (dot vs underscore, case). The
+/// name must not be case-folded: `var buf` and `let BUF` in one module are
+/// two top-lets, and a folded key resolved every use of either to whichever
+/// was declared last (#3316).
 fn alias_key(vi: &VarInfo) -> (String, String) {
     (
         vi.module_origin.as_deref().unwrap_or("").to_uppercase().replace('.', "_"),
-        vi.name.as_str().to_uppercase(),
+        vi.name.as_str().to_string(),
     )
 }
 

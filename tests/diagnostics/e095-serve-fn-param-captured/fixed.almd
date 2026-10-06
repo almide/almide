@@ -1,0 +1,11 @@
+// The greeting is a top-level `let`, which every instance can read.
+import http
+
+let greeting = "hello"
+
+effect fn serve_greeting(port: Int) -> Unit = http.serve(
+  port,
+  (req) => http.response(200, greeting),
+)!
+
+effect fn main() -> Unit = serve_greeting(8080)!

@@ -100,6 +100,8 @@ fn unsup<T>(what: &str) -> Result<T, EmitError> {
 }
 
 mod bytes;
+mod bytes_append;
+mod fan_par;
 pub mod decline_site;
 mod imports;
 mod param_borrow;
@@ -127,7 +129,7 @@ mod collections_set;
 mod map_inplace;
 mod map_index;
 mod emit;
-pub use emit::{emit_library_with_ops, emit_program, emit_program_with_ops, package_keys};
+pub use emit::{debug_lines, emit_library_with_ops, emit_program, emit_program_with_ops, package_keys};
 mod emitter;
 mod emitter_values;
 mod emitter_vars;
@@ -135,6 +137,7 @@ mod patterns;
 mod prim;
 mod runtime;
 mod runtime_alloc;
+mod runtime_large;
 mod runtime_line;
 mod line_bounded;
 mod runtime_str;
@@ -220,23 +223,22 @@ use types_table::TypeTable;
 /// itoa scratch region: digits are written back-to-front ending here.
 /// 32 bytes ≥ the longest rendering, `-9223372036854775808` (20 bytes).
 const ITOA_END: u32 = 48;
-/// Free-list heads (RC-2): 16 size classes × 4B at `[48,112)`. Class c
+/// Free-list heads (RC-2): 16 slots × 4B at `[48,112)`, 13 in use. Class c
 /// holds freed blocks whose TOTAL (header+payload, 4-aligned) is in
 /// `[16<<c, 32<<c)` — filed by floor, taken by ceil, so a taken block
 /// always fits the request without rounding the bump path.
 const FREELIST_BASE: u32 = ITOA_END;
-// 16 classes cover blocks up to 512 KiB; a freed block above the ceiling is
-// ABANDONED. This bound is part of the PROVEN runtime core (StructuralAlloc.v
-// `CLASSES`, the StructuralDecode.v byte transcription and the tree pin) —
-// widening it means re-transcribing and re-proving. The #1729 churn OOM was
-// not this ceiling: it was the assign-site leak (every outgrown generation
-// retained), fixed in stmts.rs; the append window's geometric growth bounds
-// the over-ceiling leak to ~2x the final size.
-const FREELIST_CLASSES: u32 = 16;
+// 13 classes cover blocks up to 64 KiB; a freed block above the ceiling joins
+// the exact-size large list (runtime_large.rs, #3348: split + coalesce, so a
+// peak is bounded by live data, not by call count). The ceiling is part of
+// the PROVEN runtime core (StructuralAlloc.v `CLASSES`, LargeTree.v, the
+// StructuralDecode.v byte transcription and the tree pin). The head table
+// keeps its 16 slots so the pool does not move; slots 13..16 stay zero.
+const FREELIST_CLASSES: u32 = 13;
 /// The pool starts right after the scratch + free-list table: null
 /// guard `[0,PAYLOAD)`, padding to 16, scratch `[16,48)`, free-list
 /// heads `[48,112)`.
-const POOL_START: u32 = FREELIST_BASE + FREELIST_CLASSES * 4;
+const POOL_START: u32 = FREELIST_BASE + 16 * 4;
 /// The line buffer's FIXED room beyond the pool — a floor, not a
 /// ceiling: a build that outgrows it relocates to a heap arena
 /// (`$line_grow`, runtime_line.rs, #1826) and continues, so an
@@ -535,8 +537,6 @@ impl SliceTy {
 
 // ── literal pool ────────────────────────────────────────────────────────
 
-
-
 fn len_memarg() -> MemArg {
     MemArg { offset: u64::from(almide_layout::LEN.offset), align: 2, memory_index: 0 }
 }
@@ -560,20 +560,20 @@ struct FnInfo {
     /// Why call sites must refuse this function (None = callable).
     refuse: Option<String>,
     /// Per param: does the CALLEE own it (the site shares, the exit plan
-    /// releases) or only borrow it (neither) — param_borrow.rs (#2028).
-    /// Both sides of every call edge read this one vector.
+    /// releases) or only borrow it — param_borrow.rs (#2028).
     param_owned: Vec<bool>,
-    /// Per param: was it declared `mut` (#2503)? The C-132 move-mode
-    /// rewrite clears `mutated_params` but keeps each parameter's marker,
-    /// so a CALL SITE can still tell which argument the callee writes into
-    /// and hands back. The site makes that argument's var unique first
-    /// (`emit_read_mut_var_cow`), exactly as a direct in-place write in
-    /// this frame would, so an alias bound before the call keeps its
-    /// pre-write value (C-033) and an unaliased buffer still costs nothing.
+    /// An Int address of a heap block can come out (#3420, exit_plan.rs).
+    yields_address: bool,
+    /// Per param: was it declared `mut` (#2503), on a non-effect callee?
+    /// The C-132 rewrite keeps each parameter's marker, so a CALL SITE can
+    /// tell which argument the callee writes into and hands back, and makes
+    /// that var unique first (`emit_read_mut_var_cow`): an alias bound
+    /// before the call keeps its pre-write value (C-033).
     param_mut: Vec<bool>,
-    /// `@extern(wasm, module, name)` (#2275): the slot is a declared import
-    /// the host serves, not a body — its stub leaves the module in the
-    /// `imports::declare` post-pass.
+    /// Per param: declared `mut`, effect callee or not (writeback_move.rs).
+    param_mut_decl: Vec<bool>,
+    /// `@extern(wasm, module, name)` (#2275): a declared import the host
+    /// serves — its stub leaves the module in `imports::declare`.
     import: Option<(String, String)>,
     /// The outlined body of a `scoped { … }` block (#1997): every call to
     /// it is a DECLARED region boundary — `region.rs` opens the window

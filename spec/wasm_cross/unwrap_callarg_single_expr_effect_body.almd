@@ -18,8 +18,9 @@ effect fn parsed(s: String) -> List[String] = {
   ["200", d]
 }
 
-fn pick(name: String) -> Result[effect (String) -> List[String], String] = if name == "up" then ok(up)
-else if name == "parsed" then ok(parsed) else err("no handler ${name}")
+fn pick(name: String) -> Result[effect (String) -> List[String], String] =
+  if name == "up" then ok(up)
+  else if name == "parsed" then ok(parsed) else err("no handler ${name}")
 
 fn show(r: List[String]) -> String = list.join(r, ",")
 

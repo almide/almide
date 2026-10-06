@@ -10,6 +10,11 @@
 //! Subset by PRINCIPLE, not list: fixtures importing fs/env/process use
 //! host ops the WASI build refuses (the defined refusal path), so they
 //! sit outside the gate the same way they sit outside the alloc ledger.
+//!
+//! A fixture that declares a stock-leg residual with `// @xf-allow:` (the
+//! header tests/wasm_runtime_fail_corpus.rs reads for the same leg — C-196's
+//! stock stack-exhaustion trap is the case) may differ in EXIT CODE only: its
+//! stdout must still reproduce the manifest hash, and the allowance is printed.
 
 use sha2::{Digest, Sha256};
 use std::path::PathBuf;
@@ -51,6 +56,7 @@ fn corpus_reproduces_on_stock_wasmtime() {
     let mut swept = 0usize;
     let mut skipped = 0usize;
     let mut failures: Vec<String> = Vec::new();
+    let mut allowed: Vec<String> = Vec::new();
     for line in almide_corpus::manifest_rows(&manifest) {
         let mut it = line.splitn(3, '\t');
         let want_hash = it.next().expect("manifest row");
@@ -84,7 +90,10 @@ fn corpus_reproduces_on_stock_wasmtime() {
             .expect("wasmtime runs");
         let got_exit = out.status.code().unwrap_or(-1);
         let got_hash = normalized_hash(&out.stdout);
-        if got_hash != want_hash || got_exit != want_exit {
+        let xf_allow = text.lines().find_map(|l| l.trim().strip_prefix("// @xf-allow:")).map(str::trim);
+        if got_hash == want_hash && got_exit != want_exit && xf_allow.is_some() {
+            allowed.push(format!("{rel}: exit {got_exit} (want {want_exit}) — @xf-allow: {}", xf_allow.unwrap_or("")));
+        } else if got_hash != want_hash || got_exit != want_exit {
             failures.push(format!(
                 "{rel}: exit {got_exit} (want {want_exit}), hash {}",
                 if got_hash == want_hash { "ok" } else { "DIFFERS" }
@@ -93,6 +102,9 @@ fn corpus_reproduces_on_stock_wasmtime() {
         swept += 1;
     }
     let _ = std::fs::remove_dir_all(&dir);
+    for a in &allowed {
+        println!("allowed stock-leg residual: {a}");
+    }
     assert!(
         failures.is_empty(),
         "{} of {swept} WASI runs diverge from the manifest on stock wasmtime:\n{}",

@@ -15,13 +15,21 @@
 # Rows: name | optimization | ratio at the small size (arg) | ratio at the
 #       large size (arg) | ratio with the optimization off, large size |
 #       ratio on the ubuntu-latest CI runner (quick arg)
-# The CI column is the runner-class number the ratchet baseline carries
-# (scripts/perf-ratio-baseline.txt); treealloc's is binarytrees' until the
-# first runner measurement replaces it (same shape, same window).
+# The CI column is a MEASUREMENT, not the baseline: the ratios the develop
+# perf-ratchet job printed (`perf-ratio: <row> <ratio> (victory: …)`) in the
+# run named by runner_run. It used to carry "0.61 (est.)" for treealloc and
+# fannkuchredux — binarytrees' number copied across — while the runner read
+# 0.34 and 0.33; an estimate in a published table is a number nobody measured.
+# version/date/machine stamp the local (M4 Pro) columns; runner_* stamp the
+# CI column. The two are re-measured separately, so they carry separate dates.
 version = almide 0.62.0
 date    = 2026-09-08
 machine = arm64 Darwin, Apple M4 Pro (local stamp); runner = ubuntu-latest
+runner_run     = 37092258733
+runner_commit  = 466cac59b
+runner_version = almide 0.66.0 (dev)
+runner_date    = 2026-10-03
 
-binarytrees | region window (#1991) | 0.35 (d17) | 0.32 (d19) | 1.25 | 0.61
-treealloc   | region window (#1991) | 0.30 (d20) | 0.30 (d21) | 1.10 | 0.61 (est.)
-fannkuchredux | parallel fan (#2044) | 0.21 (n10) | 0.12 (n11) | 1.06 | 0.60 (est.)
+binarytrees | region window (#1991) | 0.35 (d17) | 0.32 (d19) | 1.25 | 0.581 (d17)
+treealloc   | region window (#1991) | 0.30 (d20) | 0.30 (d21) | 1.10 | 0.365 (d20)
+fannkuchredux | parallel fan (#2044) | 0.21 (n10) | 0.12 (n11) | 1.06 | 0.315 (n11)

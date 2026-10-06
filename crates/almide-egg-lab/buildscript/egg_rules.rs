@@ -1,14 +1,16 @@
 //! Emit `egg::rewrite!` invocations for every `@rewrite` attribute in
-//! `stdlib/matrix.almd`. Output lands at `$OUT_DIR/matrix_rules_gen.rs`
-//! and is `include!`-ed from `crates/almide-egg-lab/src/lib.rs`.
+//! `stdlib/matrix.almd`. Output lands at the committed
+//! `src/generated/matrix_rules_gen.rs` and is `include!`-ed from
+//! `crates/almide-egg-lab/src/lib.rs`.
 //!
 //! Parser is shared with `almide-codegen/buildscript/fusion_parse.rs`
-//! via `#[path]` include — stdlib is the single source of truth for
-//! both the imperative `FusionRule` registry and the egg `rewrite!`
-//! table. Rename convention: stdlib `matrix.<func>` → egg `matrix_<func>`
+//! as a byte-identical in-crate copy (`fusion_parse.rs` here; #3361 —
+//! a `#[path]` into the sibling crate is gone once the crate is vendored
+//! alone) — stdlib is the single source of truth for both the imperative
+//! `FusionRule` registry and the egg `rewrite!` table. Rename convention: stdlib `matrix.<func>` → egg `matrix_<func>`
 //! because egg's S-expr tokenizer treats `.` as a separator.
 
-#[path = "../../almide-codegen/buildscript/fusion_parse.rs"]
+#[path = "fusion_parse.rs"]
 mod fusion_parse;
 
 use fusion_parse::{extract_rewrites, Pat, RewriteDecl};
@@ -24,9 +26,7 @@ pub fn generate(workspace_root: &Path, out_dir: &Path) {
     let decls = extract_rewrites(&src);
     let rust_src = emit_rust(&decls);
 
-    let out_path = out_dir.join("matrix_rules_gen.rs");
-    std::fs::write(&out_path, rust_src)
-        .unwrap_or_else(|e| panic!("failed to write {}: {}", out_path.display(), e));
+    super::in_checkout::write_if_changed(&out_dir.join("matrix_rules_gen.rs"), &rust_src);
 }
 
 fn emit_rust(decls: &[RewriteDecl]) -> String {

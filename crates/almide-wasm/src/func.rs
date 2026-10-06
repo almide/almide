@@ -11,8 +11,7 @@ use crate::emitter::Emitter;
 use crate::types_table::TypeTable;
 use crate::*;
 
-/// The top-let prelude's store, gate and measurement release (split for
-/// the file budget).
+/// The top-let prelude's store, gate and measurement release (file budget).
 #[path = "func_toplets.rs"]
 mod toplets;
 use toplets::{release_runtime_blocks_for_measurement, release_top_lets_for_measurement, store_top_let, top_lets_gate};
@@ -243,8 +242,8 @@ pub(crate) fn lower_fn(
         seen.insert(*var);
     }
 
-    // C-319: shared-cell vars (captured ∩ mutated) — their locals hold
-    // the CELL ADDRESS (i32); env-captured cells arrive pre-flagged.
+    // C-319: shared-cell LOCALS (captured ∩ mutated; never a global, #3317)
+    // hold the CELL ADDRESS (i32); env-captured cells arrive pre-flagged.
     let mut cell_vars = crate::cells::cell_vars_of(body);
     let mut binds: Vec<(VarId, SliceTy)> = Vec::new();
     if let Some(caps) = &env_captures {
@@ -290,12 +289,12 @@ pub(crate) fn lower_fn(
     let mut local_decls: Vec<(u32, ValType)> = Vec::new();
     for (i, (var, ty)) in binds.iter().enumerate() {
         locals.insert(*var, (env_shift + (params.len() + i) as u32, *ty));
-        // A cell var's local holds the cell ADDRESS.
         local_decls.push((
             1,
             if cell_vars.contains(var) { ValType::I32 } else { ty.val_type() },
         ));
     }
+    cell_vars.retain(|v| locals.contains_key(v));
     let base = env_shift + (params.len() + binds.len()) as u32;
     let (cursor_local, tmp_i32_local, scr_i32_local, scr_i64_local, scr_f64_local) =
         (base, base + 1, base + 2, base + 3, base + 4);
@@ -353,8 +352,7 @@ pub(crate) fn lower_fn(
             pool,
             locals: &locals,
             rc_param_ceiling: env_shift + params.len() as u32,
-            tail_release_allowed: false,
-            rc_frame_params: Vec::new(),
+            tail_release_allowed: false, rc_frame_params: Vec::new(),
             tail_consumed: Default::default(),
             loop_back_releasable: Default::default(),
             self_index,
@@ -362,7 +360,7 @@ pub(crate) fn lower_fn(
             owned_ty: std::collections::HashMap::new(),
             owned_call_marks: Default::default(),
             borrowed_temps: Vec::new(),
-            exit_ledger: Vec::new(),
+            exit_ledger: Vec::new(), arm_rests: Default::default(),
             borrow_base,
             table: ctx.table,
             types: ctx.types,
@@ -383,6 +381,7 @@ pub(crate) fn lower_fn(
             hoisted_counts: HashMap::new(),
             cow_flags: HashMap::new(),
             cow_prejudged: HashSet::new(),
+            bounds_facts: None, payload_ptrs: HashMap::new(), // #3345
             in_tail: false,
             try_see_through: false,
             branch_depth: 0,
@@ -396,7 +395,7 @@ pub(crate) fn lower_fn(
             deferred_ranges: &deferred_ranges,
             metered,
             cells: &cell_vars,
-            moved_temp: None,
+            moves: Default::default(),
             region_repair: region_saved_var.and_then(|v| {
                 let saved = locals.get(&v)?.0;
                 Some((saved, region_depth_entry.expect("allocated with the var")))
@@ -418,9 +417,9 @@ pub(crate) fn lower_fn(
             // share, below). A C-319 cell's ADDRESS travels instead, and the
             // env holds the cell (its drop glue releases it): a READ of the
             // cell's occupant is a view like any capture's — a share it
-            // takes lands on the occupant, a block the frame does not hold —
-            // and every WRITE through the cell declines at its own route
-            // (`assign:global-or-cell`, `mut-receiver:cell`, `*:retain-cell`).
+            // takes lands on the cell's line (witness_mut.rs) — and a WRITE
+            // through the cell is the outer holder's (#3138,
+            // `witness_holder`).
             let pre_gate = if crate::witness::argv_exception(name) {
                 Some("caps:argv-in-plain-fn".to_string())
             } else {
@@ -446,6 +445,7 @@ pub(crate) fn lower_fn(
             }
         }
         populate_tail_release_set(&mut em, cur_module, env_shift, params, body, &param_owned);
+        if em.tail_release_allowed && effect_raw.is_none() { em.note_dying(crate::rc_ownership::rc_tail(body), None, true) } // #3406
         if let Some((_, dl)) = em.region_repair {
             em.f.instructions().global_get(G_DET_DEPTH).local_set(dl);
         }
@@ -712,8 +712,8 @@ fn populate_tail_release_set(
     body: &IrExpr,
     param_owned: &Option<Vec<bool>>,
 ) {
-    // The raw-address rule: a prim-using body keeps every release on the
-    // epilogue (a raw view into a local or param may still be read by
+    // The raw-address rule: a prim-using or address-taking body (#3420)
+    // keeps every release on the epilogue (a raw view into a local may be read by
     // the code after the call); a lifted lambda's env block is not a
     // frame of its own. MODULE SPACE is not an exclusion: the structural
     // witness (#1696 B1) balanced every module-space certificate once
@@ -739,7 +739,7 @@ fn populate_tail_release_set(
     if env_shift != 0 {
         return;
     }
-    if crate::rc_ownership::body_uses_prim(body) {
+    if em.body_takes_raw_address(body) {
         let ids: Vec<VarId> = params.iter().map(|&(v, _)| v).collect();
         let raw = crate::exit_plan::raw_address_sources(body, &ids);
         em.loop_back_releasable = params

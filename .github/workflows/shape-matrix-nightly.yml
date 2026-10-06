@@ -1,0 +1,91 @@
+name: Shape matrix (nightly, full)
+
+# The whole shape matrix (#3309, tests/shape_matrix_test.rs). Every PR runs a
+# fixed quarter of it inside the Rust test shards (SHAPE_MATRIX_SLICE=0/4 in
+# ci.yml); this runs all of it, so a listed known-open cell that a landed fix
+# made pass — or a new failure in the other three quarters — is seen within a
+# day. Red here is a finding to act on: file the failing cell's bug and list
+# it in proofs/shape-matrix-baseline.txt, or delete the row a fix burned. The
+# failure is also posted to an open `shape-matrix` issue, so it reaches a
+# place someone reads rather than only this run's page.
+
+on:
+  schedule:
+    # 04:50 UTC — clear of the fuzz (03:00), conformance (04:30) and
+    # mutation-sweep (05:15) windows.
+    - cron: "50 4 * * *"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_TOOLCHAIN: "1.96.0"
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  matrix:
+    name: Shape matrix, every cell
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: linux-release-${{ env.RUST_TOOLCHAIN }}
+
+      - name: Install wasmtime (the pin setup-test-leg uses)
+        run: |
+          VERSION=v49.0.1
+          TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
+          for i in 1 2 3 4 5; do
+            curl -fLO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" && break
+            echo "wasmtime download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$TARBALL"
+          done
+          tar -xf "$TARBALL"
+          sudo mv wasmtime-*/wasmtime /usr/local/bin/
+          wasmtime --version
+
+      - name: Build the compiler and the matrix test (release)
+        run: cargo build --release --bin almide && cargo test --release --test shape_matrix_test --no-run
+
+      - name: Every cell of the shape matrix
+        env:
+          ALMIDE_BIN: ${{ github.workspace }}/target/release/almide
+          ALMIDE_EXPECT_TOOLS: "1"
+          SHAPE_MATRIX_RESULTS: /tmp/shape-matrix-results.tsv
+        run: |
+          set -o pipefail
+          cargo test --release --test shape_matrix_test -- --nocapture 2>&1 | tee /tmp/shape-matrix.log
+
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: shape-matrix-results
+          path: |
+            /tmp/shape-matrix-results.tsv
+            /tmp/shape-matrix.log
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Post the red night to the open shape-matrix issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          { echo "Shape matrix nightly is red: $RUN_URL"; echo; echo '```'; grep -E '^(FAIL|PASSES BUT LISTED|shape-matrix:)' /tmp/shape-matrix.log | head -80 || true; echo '```'; } > /tmp/body.md
+          N="$(gh issue list --state open --label shape-matrix --json number -q '.[0].number' || true)"
+          if [ -n "$N" ]; then
+            gh issue comment "$N" --body-file /tmp/body.md
+          else
+            gh label create shape-matrix --color BFD4F2 --description "Shape-matrix nightly findings (#3309)" 2>/dev/null || true
+            gh issue create --title "Shape matrix nightly: red" --label shape-matrix --label A-ci --body-file /tmp/body.md
+          fi

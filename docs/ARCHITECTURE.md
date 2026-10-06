@@ -140,7 +140,8 @@ almide/                    Workspace root
 │   ├── almide-optimize/   Monomorphization, DCE, constant propagation,
 │   │                      stream fusion
 │   ├── almide-codegen/    Codegen v3 for Rust (+ WGSL): nanopass pipeline,
-│   │                      TOML template renderer, target-agnostic walker
+│   │                      TOML template renderer, target-agnostic walker;
+│   │                      templates/rust.toml = Rust syntax templates (~330 rules)
 │   ├── almide-interp/     Pre-codegen IR interpreter — 3rd cross-target oracle
 │   ├── almide-tools/      Formatter, module interface (almide compile), ALMDI
 │   ├── almide-dialect/    Pure-Rust MLIR dialect schema (no FFI)
@@ -152,7 +153,6 @@ almide/                    Workspace root
 ├── grammar/               Git submodule → almide/almide-grammar: descriptive
 │                          keyword/precedence data consumed by the tree-sitter
 │                          and TextMate generators (not by the compiler build)
-├── codegen/templates/rust.toml   Rust syntax templates (~330 rules)
 ├── stdlib/                Self-hosted stdlib: ~280 .almd files (see below)
 └── runtime/rs/src/        Native Rust runtime for @intrinsic functions
 ```
@@ -288,7 +288,7 @@ The Wgsl arm is the four rows marked W. Class:
 | # | Pass (`name()`) | File(s) | Targets | Class | Does | Structural wasm leg |
 |---|---|---|---|---|---|---|
 | 1 | `UnifyVarTables` | `pass_unify_var_tables.rs` | all, W | enabler | merge every `IrModule.var_table` into the program table | reads per-module tables (`build_globals`) |
-| 2 | `ListPatternLowering` | `pass_list_pattern.rs` | all | enabler | list patterns → length checks + indexing | lowers `IrPattern::List` natively (`patterns.rs`) |
+| 2 | `ListPatternLowering` | `pass_list_pattern.rs`, `pass_list_pattern_nested.rs` | all | enabler | list patterns → length checks + indexing; a list below a constructor / option / record position is rewritten in place (#3413) | lowers `IrPattern::List` natively (`patterns.rs`) |
 | 3 | `LambdaTypeResolve` | `pass_lambda_type_resolve.rs`, `pass_lambda_type_lookup.rs` | all, W | enabler | closure param types from the stdlib callee signature (top-down) | `TypeTable` (`types_table.rs`) |
 | 4 | `ConcretizeTypes` | `pass_concretize_types.rs`, `pass_concretize_types_call_ret.rs`, `pass_concretize_types_signatures.rs`, `pass_concretize_types_unresolved.rs`, `pass_concretize_types_walker.rs` | all, W | enabler | sync every `IrExpr.ty` with its authoritative concrete type | `TypeTable` |
 | 5 | `PatternLiteralGuard` | `pass_pattern_literal_guard.rs` | Rust | Rust by design | hoist payload-nested string literals into guards (the `as_deref` subject form) | n/a |
@@ -301,7 +301,7 @@ The Wgsl arm is the four rows marked W. Class:
 | 12 | `ConstFold` | `pass_const_fold.rs` | all | optimizer | fold literal arithmetic left by rows 10–11 | superseded by A.1 (`fold`) — see E |
 | 13 | `IntrinsicLowering` | `pass_intrinsic_lowering.rs` | all | enabler | `@intrinsic` stdlib calls → `RuntimeCall { symbol }` | self-host registry link (`src/wasm_leg.rs`); intrinsics are walls |
 | 13b | `StreamFusion` | `pass_stream_fusion.rs` | Rust | optimizer | `RuntimeCall { almide_rt_list_* }` with a lambda literal → `IterChain`, BEFORE `BorrowInsertion` — a chain lambda is a scope the borrow / capture-clone / clone passes never see as a closure, so it borrows what it reads and renders without `move`; the source starts consumed and `BorrowInsertion` decides its mode from what the steps do with each element, not from the twin's `@consume` slot (#2287: `element_reads_only` — a `Copy` element or a heap element every receiving lambda only reads leaves the source `&[T]`, bound `&T` off `.iter()` by the clone pass); a `\|>` chain flattens into one iterator expression only when every callback is pure and the interleaving is unobservable (#2045); `ALMIDE_STREAM_FUSION_OFF` ablates | **no equivalent** — the spec order is stage-by-stage; see E |
-| 14 | `BorrowInsertion` | `pass_borrow_inference.rs`, `pass_borrow_inference_call_sites.rs`, `pass_borrow_inference_ownership.rs` (wrapper in `pass.rs`) | Rust | Rust by design | Roc-style borrow-by-default signatures, `Borrow` nodes at call sites; an iteration's source follows what its body does with the element (#2287); a fn-typed param is `&dyn Fn` unless its callable escapes, and a lambda literal at such a slot is a scope spelled `&(lambda)` (#2288) | RC-3 borrow/fresh classifier (`rc_ownership.rs`) |
+| 14 | `BorrowInsertion` | `pass_borrow_inference.rs`, `pass_borrow_inference_call_sites.rs`, `pass_borrow_inference_ownership.rs`, `pass_borrow_inference_seq_hoist.rs` (wrapper in `pass.rs`) | Rust | Rust by design | Roc-style borrow-by-default signatures, `Borrow` nodes at call sites; an iteration's source follows what its body does with the element (#2287); a fn-typed param is `&dyn Fn` unless its callable escapes, and a lambda literal at such a slot is a scope spelled `&(lambda)` (#2288); an operand read before a nested `mut`-arg call (an interpolation part, a nested call's argument) is hoisted, left to right (#3230) | RC-3 borrow/fresh classifier (`rc_ownership.rs`) |
 | 15 | `TailCallOpt` | `pass_tco.rs`, `pass_tco_loop_rewrite.rs`, `pass_tco_owned_reads.rs` | all | optimizer | self-recursive tail calls → loop | equivalent: `tco.rs` (`loop_convert` over the encoded body; `return_call` otherwise) |
 | 16 | `CaptureClone` | `pass_capture_clone.rs`, `pass_capture_clone_bindings.rs`, `pass_capture_clone_mut_param.rs` | Rust | Rust by design | pre-clone variables captured by `move` closures | n/a |
 | 17 | `CloneInsertion` | `pass_clone.rs`, `pass_clone_calls.rs`, `pass_clone_interp.rs`, `pass_clone_compare.rs`, `pass_clone_places.rs`, `pass_clone_projection.rs`, `pass_clone_record_fields.rs`, `pass_clone_loops.rs` | Rust | Rust by design | `Clone` nodes for heap-typed reuse and proven projection borrows/moves | RC inc/share guards (`rc_ownership.rs`) |

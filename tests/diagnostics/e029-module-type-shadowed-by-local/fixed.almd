@@ -1,0 +1,11 @@
+// #3336: a module in scope that declares no such type is E029 naming the
+// module — even when this file declares a type of that bare name, which the
+// qualified spelling used to fall back to silently.
+import self.geo as g
+
+type Size = { w: Int }
+
+fn main() -> Unit = {
+  let s: Size = { w: 1 }
+  println(int.to_string(s.w + g.origin().x))
+}

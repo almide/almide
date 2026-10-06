@@ -70,6 +70,7 @@ fn build_program_ann(ctx: &RenderContext, program: &IrProgram) -> CodegenAnnotat
         .collect();
     ann.eq_blocked_types = super::walker::declarations::compute_eq_blocked_types(&all_type_decls);
     ann.fn_blocked_types = super::walker::declarations::compute_fn_blocked_types(&all_type_decls);
+    ann.rc_blocked_types = super::walker::declarations::compute_rc_blocked_types(&all_type_decls);
     ann.phantom_param_structs = super::walker::declarations::compute_phantom_param_structs(&all_type_decls);
     // §4 endgame: the legacy pre-index (lazy_top_let_names /
     // eager_force_top_lets / const_top_let_vars) and the mutable-storage
@@ -159,34 +160,61 @@ fn render_program_type_decls(ctx: &RenderContext, program: &IrProgram, parts: &m
 /// Render top-level lets and vars into `parts`. §4 Stage 2: the
 /// declaration consumes the SAME GlobalInfo every reference site
 /// dispatches on (storage class and static name decided once, in the
-/// attribute pass). The former `lazy_vars` mid-emission write is gone —
-/// no reader remains.
+/// attribute pass).
+///
+/// Every PER-THREAD slot — a `var`'s cell, and a closure-holding `let`'s
+/// lazy slot (#2537) — is a field of ONE program-wide `thread_local!`
+/// struct (#3347). One `thread_local!` per item took one OS TLS key each on
+/// targets without native TLS (Android: bionic allows ~128 per process), so a
+/// program with many module vars aborted with "out of TLS keys". The key count
+/// is now one, whatever the program's size. Each field is a `OnceCell` filled
+/// on first access, so an initializer still runs when its global is first
+/// read on that thread — including one that reads another global. Every read
+/// and write site is unchanged: each slot keeps a zero-sized `static` handle
+/// under its static name whose `with` / `Deref` reaches the field.
 fn render_program_top_lets(ctx: &RenderContext, program: &IrProgram, parts: &mut Vec<String>) {
+    let mut tls_fields: Vec<String> = Vec::new();
     for tl in &program.top_lets {
         // #617: a shared static stores the RAW Bytes/Matrix shape (Rc is not Sync;
         // fan threads read globals) — type and initializer un-wrap here, every
         // READ site re-wraps into the AlmideRcCow value shape.
-        let ty_str = expressions::rc_cow_raw_type(&render_type_fn(ctx, &tl.ty));
+        // Only a type the glue converts (`Bytes` / `Matrix` through List /
+        // Option / Result / tuple) is stored raw: a `Map[String, Bytes]` or a
+        // record of Bytes keeps its value shape, in a per-thread slot (#3287).
+        let raw = expressions::rc_cow_needs_glue(&tl.ty);
+        let ty_str = render_type_fn(ctx, &tl.ty);
+        let ty_str = if raw { expressions::rc_cow_raw_type(&ty_str) } else { ty_str };
         let val_str = expressions::rc_cow_unglue(render_expr_fn(ctx, &tl.value), &tl.ty);
         let info = ctx.ann.globals.get(&tl.var).unwrap_or_else(|| panic!(
             "[COMPILER BUG] top-let `{}` missing from the storage attribute",
             ctx.var_table.get(tl.var).name.as_str()
         ));
         use almide_ir::top_let_storage::TopLetStorage as Tls;
-        let name_upper = info.static_name.as_str();
+        let static_name = info.static_name.as_str();
+        let cell_slot = |cell_ty: String, init: String, fields: &mut Vec<String>| {
+            fields.push(format!("    {static_name}: std::cell::OnceCell<{cell_ty}>,"));
+            render_tls_cell_handle(static_name, &cell_ty, &init)
+        };
         let mut rendered = match info.storage {
-            Tls::Cell =>
-                format!("thread_local! {{ static {}: std::cell::Cell<{}> = std::cell::Cell::new({}); }}", name_upper, ty_str, val_str),
-            Tls::RcRefCell =>
-                format!("thread_local! {{ static {}: std::cell::RefCell<std::rc::Rc<{}>> = std::cell::RefCell::new(std::rc::Rc::new({})); }}", name_upper, ty_str, val_str),
+            Tls::Cell => cell_slot(
+                format!("std::cell::Cell<{ty_str}>"),
+                format!("std::cell::Cell::new({val_str})"),
+                &mut tls_fields,
+            ),
+            Tls::RcRefCell => cell_slot(
+                format!("std::cell::RefCell<std::rc::Rc<{ty_str}>>"),
+                format!("std::cell::RefCell::new(std::rc::Rc::new({val_str}))"),
+                &mut tls_fields,
+            ),
+            Tls::Lazy { .. } if top_let_is_thread_local(ctx, &tl.ty) => {
+                tls_fields.push(format!("    {static_name}: std::cell::OnceCell<&'static {ty_str}>,"));
+                ctx.templates.render_with("top_let_thread_lazy", None, &[], &[("name", static_name), ("type", ty_str.as_str()), ("value", val_str.as_str())])
+                    .unwrap_or_else(|| format!("const {} = {};", static_name, val_str))
+            }
             Tls::Const | Tls::Lazy { .. } => {
-                let construct = match info.storage {
-                    Tls::Const => "top_let_const",
-                    _ if top_let_is_thread_local(ctx, &tl.ty) => "top_let_thread_lazy",
-                    _ => "top_let_lazy",
-                };
-                ctx.templates.render_with(construct, None, &[], &[("name", name_upper), ("type", ty_str.as_str()), ("value", val_str.as_str())])
-                    .unwrap_or_else(|| format!("const {} = {};", name_upper, val_str))
+                let construct = if matches!(info.storage, Tls::Const) { "top_let_const" } else { "top_let_lazy" };
+                ctx.templates.render_with(construct, None, &[], &[("name", static_name), ("type", ty_str.as_str()), ("value", val_str.as_str())])
+                    .unwrap_or_else(|| format!("const {} = {};", static_name, val_str))
             }
         };
         if let Some(ref doc) = tl.doc {
@@ -198,6 +226,36 @@ fn render_program_top_lets(ctx: &RenderContext, program: &IrProgram, parts: &mut
         }
         parts.push(rendered);
     }
+    if !tls_fields.is_empty() {
+        parts.push(render_tls_struct(&tls_fields));
+    }
+}
+
+/// The one per-thread struct every TLS slot is a field of (#3347), and its
+/// single `thread_local!` (const-initialized: every field starts empty).
+fn render_tls_struct(fields: &[String]) -> String {
+    let inits: String = fields.iter()
+        .filter_map(|f| f.trim().split(':').next())
+        .map(|name| format!(" {name}: std::cell::OnceCell::new(),"))
+        .collect();
+    format!(
+        "#[allow(non_snake_case, non_camel_case_types)]\nstruct __AlmideTls {{\n{}\n}}\n\
+         thread_local! {{ static __ALMIDE_TLS: __AlmideTls = const {{ __AlmideTls {{{} }} }}; }}",
+        fields.join("\n"),
+        inits,
+    )
+}
+
+/// The `static` handle of a `var`'s per-thread cell: `NAME.with(|c| …)` reaches
+/// field `NAME` of the program's TLS struct, filling it on first access.
+fn render_tls_cell_handle(name: &str, cell_ty: &str, init: &str) -> String {
+    format!(
+        "#[allow(non_camel_case_types)]\nstruct __AlmideTls_{name};\n\
+         impl __AlmideTls_{name} {{\n    \
+         fn with<R>(&self, f: impl FnOnce(&{cell_ty}) -> R) -> R {{\n        \
+         __ALMIDE_TLS.with(|g| f(g.{name}.get_or_init(|| {init})))\n    }}\n}}\n\
+         #[allow(non_upper_case_globals)]\nstatic {name}: __AlmideTls_{name} = __AlmideTls_{name};"
+    )
 }
 
 /// Render non-test functions into `parts`: extern fn imports as one group

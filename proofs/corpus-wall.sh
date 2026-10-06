@@ -332,6 +332,95 @@ else
   rm -f "$KGEN"; exit 1
 fi
 
+# POISON RATCHET, the negative leg (#1147, #3229). The sweep above only shows
+# that honest witnesses ACCEPT; it cannot show the checker would notice a
+# dishonest one. proofs/poisoned-certs/ holds real witnesses of unsafe
+# lowerings, each of which every verdict must REJECT — a checker that starts
+# accepting one has lost a rule, whatever the corpus says.
+#   3229-modeled-frame-cow-drain{,-two-level}.cert — `drain(mut u)` in
+#   spec/wasm_cross/list_pop_map_insert_on_record_field.almd and
+#   nested_field_path_mut.almd, lowered with the field-path copy-on-write
+#   allowed inside a model-one-iteration `while` frame (the refusal in
+#   lower/calls_b.rs disabled). The frame-end `drop_arm_locals` frees the copy,
+#   then the write-back `Dup`s it: the owned line reads `idam` / `iiddam`,
+#   balanced to 0, accepted before the owned-line resurrection rule.
+#   3233-loadhandle-after-free.cert / 3233-callarg-after-free.cert — an owned
+#   object freed, then read only through the address bridge (`prim.handle` →
+#   `+ off` → `LoadHandle`, the address computed while it lived) or passed as
+#   a call's handle argument. Before #3233 neither read emitted an event, so
+#   both lines were a balanced `id`; the producer now probes every handle read
+#   with `b`, and these are its witnesses for the two shapes (`ibdb`, `idb` —
+#   the emit_cert scenarios loadhandle-after-free / callarg-after-free).
+#   3259-structural-read-after-free.cert — the structural recorder's witness
+#   of an owned block read after its release (`ibdb`); structural-wall.sh's
+#   poison leg judges it too.
+#   3261-loaded-child-after-parent-free.cert — a payload loaded from an owned
+#   object (`LoadHandle`), `Dup`'d and the Dup released, the object released,
+#   then the raw payload read (`ibbdb` / `ad`). Before #3261 a raw loaded child
+#   had no line and its read no probe, so the object's line was `ibbd`.
+#   3263-child-carrier-callarg-after-free.cert — a `prim.handle` carrier of a
+#   raw loaded child passed as a call's handle argument after the child's
+#   parent was released (`ibdb`). Before #3263 the carrier sat only in
+#   `addr_of`, the call-arg probe found no line, and the object read `ibd`.
+#   3267-cross-arm-handle.cert — the else arm of an `if` reads a handle only
+#   the then arm defined (`ad` / `bad`): the guard err arm of a `mut`-param
+#   effect fn wrote back the then arm's copy-on-write clone. Before #3267 the
+#   producer's handle map was not scoped to the path, so the read counted on
+#   the param's line (`adad`) and certified.
+#   3269-child-after-slot-rebind.cert — a payload loaded from a slot's block,
+#   read after the slot is rebound (new block, `Drop` of the old, `SetLocal`:
+#   `xs = list.set(xs, 2, v)`) (`ib(id)d` / `b`). The new block's `i` lands on
+#   the slot's line, so before #3269 the read probed a positive line
+#   (`ib(id)bd`) although the payload's block was freed; a rebind now ends
+#   every view of the old block and the read lands on the payload's own line.
+#   3298-borrowed-param-loop-slot.cert — a loop that drops a borrowed `mut`
+#   param and rebinds it (`Drop p; SetLocal p = new`, the functional rebind of
+#   `map.insert` in a tail-recursive fn): the first drop releases the caller's
+#   reference. Before #3298 the slot fold read the param's line as `(id)`,
+#   rc-preserving from 0, and certified; unfolded it is `i` / `d`.
+#   3321-copy-on-write-dup-read-after-release.cert — a `Dup` of a borrowed
+#   param, `MakeUnique`d (so it owns a copy), released, then read and `Dup`'d
+#   again and moved out (`ibdbam`). Before #3321 the `Dup` put the copy on the
+#   param's line, which takes no read probe and no resurrection guard (the
+#   caller keeps the param's block alive): the same function emitted `abd…`,
+#   accepted; a copy-on-write `Dup` now opens its own `i`-born line.
+echo
+echo "== POISON RATCHET (negative leg, #3229, #3233, #3261, #3263, #3267, #3269, #3298, #3321): every poisoned certificate is REJECTED by all three verdicts =="
+POISONED=("$ROOT"/proofs/poisoned-certs/*.cert)
+if [ ! -e "${POISONED[0]}" ]; then
+  echo "POISON RATCHET FAIL: proofs/poisoned-certs/ holds no certificate — the negative leg would pass vacuously." >&2
+  cleanup; exit 1
+fi
+PGEN="$(mktemp /tmp/KernelPoison_XXXXXX).v"
+python3 - "${POISONED[@]}" > "$PGEN" <<'PYEOF'
+import sys
+print("From AlmideTrust Require Import OwnershipChecker.")
+print("From Stdlib Require Import String.")
+print("Open Scope string_scope.")
+for path in sys.argv[1:]:
+    print('Goal check_xc "%s" = false.' % open(path).read().replace('"', '""'))
+    print("Proof. vm_compute. reflexivity. Qed.")
+PYEOF
+for cert in "${POISONED[@]}"; do
+  name="${cert#"$ROOT"/}"
+  set +e
+  ./checker ownership "$cert" >/dev/null 2>&1; XRC=$?
+  "$VERIFY" ownership "$cert" >/dev/null 2>&1; PRC=$?
+  set -e
+  if [ "$XRC" -ne 1 ] || [ "$PRC" -ne 1 ]; then
+    echo "POISON RATCHET FAIL: $name was not rejected (extracted checker exit $XRC, almide-verify exit $PRC; want 1 and 1)." >&2
+    rm -f "$PGEN"; cleanup; exit 1
+  fi
+  echo "  REJECT $name (extracted checker + almide-verify)"
+done
+if (cd "$ROOT/proofs" && "${COQC:-$(command -v coqc)}" -Q . AlmideTrust "$PGEN" >/dev/null 2>&1); then
+  echo "  KERNEL OK: the Rocq kernel rejects all ${#POISONED[@]} poisoned certificate(s)"
+  rm -f "$PGEN" "${PGEN%.v}.vo" "${PGEN%.v}.vos" "${PGEN%.v}.vok" "${PGEN%.v}.glob"
+else
+  echo "POISON RATCHET FAIL: the KERNEL did not reject a poisoned certificate (check_xc = false failed)." >&2
+  rm -f "$PGEN"; cleanup; exit 1
+fi
+
 cleanup
 echo
 echo "CORPUS WALL OK: over the whole v0 corpus, lower_function is total (wall holds,"

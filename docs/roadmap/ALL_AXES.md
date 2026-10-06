@@ -113,7 +113,7 @@ LLVM に命令選択で挑まないという方針は維持するが、B の敗�
 
 > **2026-08-13 のプロファイルによる訂正**（[string-gap-1004.md](../../research/benchmark/perf/string-gap-1004.md)）:
 > この軸で「RcCow 表現コスト」と呼んでいたものは存在しない。`String` は Rust の `String` に
-> 1:1 で落ちており、`RcCow` は Bytes/Matrix 専用（`codegen/templates/rust.toml`）。
+> 1:1 で落ちており、`RcCow` は Bytes/Matrix 専用（`crates/almide-codegen/templates/rust.toml`）。
 > また `listbuild` の ~1.6× は materialize ですらなく、**決定論的ソフトウェア libm**（`sin`/`cos`）
 > が全量で、プラットフォーム libm に差し替えると emit 済みコードが手書き Rust を 1.17× 上回る。
 > materialize が本当に効くのは **安価な lambda body のリストパイプライン**であり、そこでは

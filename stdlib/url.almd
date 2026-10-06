@@ -71,12 +71,13 @@ fn __url_hex2(a: String, b: String) -> Int? = match (__url_hex_val(a), __url_hex
 // escape, -2 = non-hex escape. (Int sentinels are internal-only: a
 // Result[(List[Int], Int), _] payload trips the interpreter's #1226 bridge
 // slice today — see STDLIB-EXCELLENCE queue #4; restructure when it lands.)
-fn __url_pct_end(cs: List[String], i: Int, n: Int) -> Int = if i >= n or (list.get(cs, i) ?? "") != "%" then i
-else if i + 3 > n then 0 - 1
-else match __url_hex2(list.get(cs, i + 1) ?? "", list.get(cs, i + 2) ?? "") {
-  some(_) => __url_pct_end(cs, i + 3, n),
-  none => 0 - 2,
-}
+fn __url_pct_end(cs: List[String], i: Int, n: Int) -> Int =
+  if i >= n or (list.get(cs, i) ?? "") != "%" then i
+  else if i + 3 > n then 0 - 1
+  else match __url_hex2(list.get(cs, i + 1) ?? "", list.get(cs, i + 2) ?? "") {
+    some(_) => __url_pct_end(cs, i + 3, n),
+    none => 0 - 2,
+  }
 
 // Byte value of the %XX escape whose '%' sits at char index p, or -1.
 fn __url_pbyte(cs: List[String], p: Int) -> Int = match __url_hex2(
@@ -94,60 +95,62 @@ fn __url_cont(b: Int) -> Bool = b >= 128 and b <= 191
 // List[Int] crossing the interpreter bridge trips #1226 today; see
 // STDLIB-EXCELLENCE queue #4). Rejects continuation errors, overlong
 // forms, surrogates, and > U+10FFFF.
-fn __url_utf8_go(cs: List[String], p: Int, end: Int, acc: String) -> Result[String, String] = if p >= end then ok(acc)
-else {
-  let b0 = __url_pbyte(cs, p)
-  if b0 >= 0 and b0 < 128 then __url_utf8_go(cs, p + 3, end, acc + string.from_codepoint(b0))
-  else if b0 >= 194 and b0 <= 223 then {
-    let b1 = __url_pbyte(cs, p + 3)
-    if p + 6 <= end and __url_cont(b1) then __url_utf8_go(
-      cs,
-      p + 6,
-      end,
-      acc + string.from_codepoint((b0 - 192) * 64 + (b1 - 128)),
-    )
-    else err("url.decode_component: invalid UTF-8 in percent data")
-  } else if b0 >= 224 and b0 <= 239 then {
-    let b1 = __url_pbyte(cs, p + 3)
-    let b2 = __url_pbyte(cs, p + 6)
-    let lo1 = if b0 == 224 then 160 else 128
-    let hi1 = if b0 == 237 then 159 else 191
-    if p + 9 <= end and b1 >= lo1 and b1 <= hi1 and __url_cont(b2) then __url_utf8_go(
-      cs,
-      p + 9,
-      end,
-      acc + string.from_codepoint((b0 - 224) * 4096 + (b1 - 128) * 64 + (b2 - 128)),
-    )
-    else err("url.decode_component: invalid UTF-8 in percent data")
-  } else if b0 >= 240 and b0 <= 244 then {
-    let b1 = __url_pbyte(cs, p + 3)
-    let b2 = __url_pbyte(cs, p + 6)
-    let b3 = __url_pbyte(cs, p + 9)
-    let lo1 = if b0 == 240 then 144 else 128
-    let hi1 = if b0 == 244 then 143 else 191
-    if p + 12 <= end and b1 >= lo1 and b1 <= hi1 and __url_cont(b2) and __url_cont(b3) then __url_utf8_go(
-      cs,
-      p + 12,
-      end,
-      acc + string.from_codepoint((b0 - 240) * 262144 + (b1 - 128) * 4096 + (b2 - 128) * 64 + (b3 - 128)),
-    )
-    else err("url.decode_component: invalid UTF-8 in percent data")
-  } else err("url.decode_component: invalid UTF-8 in percent data")
-}
+fn __url_utf8_go(cs: List[String], p: Int, end: Int, acc: String) -> Result[String, String] =
+  if p >= end then ok(acc)
+  else {
+    let b0 = __url_pbyte(cs, p)
+    if b0 >= 0 and b0 < 128 then __url_utf8_go(cs, p + 3, end, acc + string.from_codepoint(b0))
+    else if b0 >= 194 and b0 <= 223 then {
+      let b1 = __url_pbyte(cs, p + 3)
+      if p + 6 <= end and __url_cont(b1) then __url_utf8_go(
+        cs,
+        p + 6,
+        end,
+        acc + string.from_codepoint((b0 - 192) * 64 + (b1 - 128)),
+      )
+      else err("url.decode_component: invalid UTF-8 in percent data")
+    } else if b0 >= 224 and b0 <= 239 then {
+      let b1 = __url_pbyte(cs, p + 3)
+      let b2 = __url_pbyte(cs, p + 6)
+      let lo1 = if b0 == 224 then 160 else 128
+      let hi1 = if b0 == 237 then 159 else 191
+      if p + 9 <= end and b1 >= lo1 and b1 <= hi1 and __url_cont(b2) then __url_utf8_go(
+        cs,
+        p + 9,
+        end,
+        acc + string.from_codepoint((b0 - 224) * 4096 + (b1 - 128) * 64 + (b2 - 128)),
+      )
+      else err("url.decode_component: invalid UTF-8 in percent data")
+    } else if b0 >= 240 and b0 <= 244 then {
+      let b1 = __url_pbyte(cs, p + 3)
+      let b2 = __url_pbyte(cs, p + 6)
+      let b3 = __url_pbyte(cs, p + 9)
+      let lo1 = if b0 == 240 then 144 else 128
+      let hi1 = if b0 == 244 then 143 else 191
+      if p + 12 <= end and b1 >= lo1 and b1 <= hi1 and __url_cont(b2) and __url_cont(b3) then __url_utf8_go(
+        cs,
+        p + 12,
+        end,
+        acc + string.from_codepoint((b0 - 240) * 262144 + (b1 - 128) * 4096 + (b2 - 128) * 64 + (b3 - 128)),
+      )
+      else err("url.decode_component: invalid UTF-8 in percent data")
+    } else err("url.decode_component: invalid UTF-8 in percent data")
+  }
 
-fn __url_dec_go(cs: List[String], i: Int, n: Int, acc: String) -> Result[String, String] = if i >= n then ok(acc)
-else {
-  let c = list.get(cs, i) ?? ""
-  if c == "%" then {
-    let e = __url_pct_end(cs, i, n)
-    if e == 0 - 1 then err("url.decode_component: truncated percent escape")
-    else if e == 0 - 2 then err("url.decode_component: invalid percent escape")
-    else match __url_utf8_go(cs, i, e, "") {
-      ok(dec) => __url_dec_go(cs, e, n, acc + dec),
-      err(er) => err(er),
-    }
-  } else __url_dec_go(cs, i + 1, n, acc + c)
-}
+fn __url_dec_go(cs: List[String], i: Int, n: Int, acc: String) -> Result[String, String] =
+  if i >= n then ok(acc)
+  else {
+    let c = list.get(cs, i) ?? ""
+    if c == "%" then {
+      let e = __url_pct_end(cs, i, n)
+      if e == 0 - 1 then err("url.decode_component: truncated percent escape")
+      else if e == 0 - 2 then err("url.decode_component: invalid percent escape")
+      else match __url_utf8_go(cs, i, e, "") {
+        ok(dec) => __url_dec_go(cs, e, n, acc + dec),
+        err(er) => err(er),
+      }
+    } else __url_dec_go(cs, i + 1, n, acc + c)
+  }
 
 // Decode a percent-encoded component. Fails with a reason on a truncated or
 // non-hex escape and on percent data that is not valid UTF-8 (strict:

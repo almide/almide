@@ -126,6 +126,29 @@ struct OwnershipScan {
     /// still set at scan end = a TOP-LEVEL return, so the phase-3/4 boundary
     /// checks are skipped (they already ran at the op).
     diverged: bool,
+    /// An ADDRESS → the object it points into, for the dereference liveness
+    /// check only (#3259): the certificate's `addr_of` rule, mirrored.
+    addr_of: BTreeMap<ValueId, ValueId>,
+    /// A raw `LoadHandle` child → the object it was loaded from (#3261).
+    child_parent: BTreeMap<ValueId, ValueId>,
+    /// Handles a closed `IfThen` arm defined (#3267, lib_d.rs).
+    out_of_path: BTreeSet<ValueId>,
+    /// Raw children whose slot was rebound on the current path, and that set
+    /// at each open `IfThen` with what its then arm left (#3269, lib_d.rs).
+    rebound: BTreeSet<ValueId>,
+    rebound_frames: Vec<(BTreeSet<ValueId>, BTreeSet<ValueId>)>,
+    /// `prim.handle` carriers of a tracked object (#3269).
+    carriers: BTreeSet<ValueId>,
+    /// Constant values, slot roots and their `prim.handle` carriers (#3279, lib_d.rs).
+    consts: BTreeMap<ValueId, i64>,
+    slot_roots: BTreeMap<ValueId, i64>,
+    carried: BTreeMap<ValueId, ValueId>,
+    /// The `IfThen` dsts that hold a reference after the join (#3279, lib_d.rs).
+    owning_merges: std::collections::HashSet<ValueId>,
+    /// Slot objects made at joins so far (#3279, lib_d.rs).
+    slot_objects: u32,
+    /// `Dup`s the function later `MakeUnique`s (#3321, lib_d.rs).
+    cow_dups: BTreeSet<ValueId>,
 }
 
     struct BranchFrame {
@@ -135,6 +158,8 @@ struct OwnershipScan {
         /// in one arm rewrites a slot's object; the other arm must still start
         /// from the entry binding (#3031).
         entry_object_of: BTreeMap<ValueId, ValueId>,
+        /// Every key tracked at the `IfThen` (#3267).
+        entry_keys: BTreeSet<ValueId>,
         then_exit: Option<ArmExit>,
         /// The `IfThen`'s result slot, and whether any arm MOVED a heap value
         /// into it — the branch-result modeling of #1037's second gap. An arm's
@@ -179,9 +204,29 @@ impl OwnershipScan {
             }
             _ => {}
         }
+        // The certificate's address rule (#3259): one operand that is an
+        // address into (or a handle on) an object makes `dst` an address into it.
+        if self.rebound.contains(&a) || self.rebound.contains(&b) {
+            self.rebound.insert(dst);
+        }
+        match (self.address_object(a), self.address_object(b)) {
+            (Some(o), None) | (None, Some(o)) => {
+                self.addr_of.insert(dst, o);
+            }
+            _ => {}
+        }
     }
 
     fn step(&mut self, i: usize, op: &Op) {
+        self.check_defined_uses(i, op);
+        if let Op::ConstInt { dst, value } = op {
+            self.record_const(*dst, *value);
+        }
+        self.step_op(i, op);
+        self.end_slot_roots(op);
+    }
+
+    fn step_op(&mut self, i: usize, op: &Op) {
         match op {
             // Probe charge: no ownership event (no alloc, no dup, no drop).
             // The dyn charge READS its src (a borrow-class use, like a Prim
@@ -211,11 +256,13 @@ impl OwnershipScan {
             // than fall off the model (#1037 — every `option.unwrap_or` tuple/
             // heap payload walled the native verifier on exactly this chain).
             // The `PrimKind::Handle` rule, extended one hop; no `dead` entry is
-            // created — an address is never itself live-checked, only traversed.
+            // created — the handle's own liveness is not checked, but a load or
+            // store through the address checks its OBJECT (#3259).
             Op::IntBinOp { dst, op: crate::IntOp::Add, a, b } => {
                 self.step_add_address_alias(*dst, *a, *b)
             }
-            // A scalar — no ownership accounting.
+            // A scalar — no ownership accounting (a constant is recorded in
+            // `step`, for the slot-root rule).
             Op::Const { dst: _ }
             | Op::ConstInt { .. }
             // A function-table slot index — a scalar constant, no ownership.
@@ -282,7 +329,10 @@ impl OwnershipScan {
             // spot for the NAMEABLE case: prim.handle(v) carries its source object in args[0], so the
             // self.rc events on it verify against the same self.rc machine. load64-fed handles have no carrier
             // and stay unmodeled (the differential-test floor). MIRRORED in ownership_certificate.
-            Op::Prim { kind, dst, args } => self.apply_prim_rc_event(kind, dst, args),
+            Op::Prim { kind, dst, args } => {
+                self.check_dereference(i, kind, *dst, args);
+                self.apply_prim_rc_event(kind, dst, args)
+            }
             // `SetLocal` into a HEAP slot is a loop-carried REBIND (`acc = acc + [x]`):
             // the slot now aliases the source's object. The slot's OLD object was
             // released by a preceding `Drop` in the loop body, so rebinding makes the
@@ -340,7 +390,7 @@ impl OwnershipScan {
     /// [`ViolationKind::UseAfterFree`] when it is not. The shared body of the
     /// `ListGetScalar`/`ListSetScalar` and `Borrow`/`MakeUnique` arms, verbatim.
     fn check_borrowed_use(&mut self, i: usize, v: ValueId) {
-        if live_object(&self.object_of, &self.rc, &self.dead, &self.borrowed, v).is_none() {
+        if self.live(v).is_none() {
             self.violations.push(violation(i, v, ViolationKind::UseAfterFree));
         }
     }
@@ -349,7 +399,10 @@ impl OwnershipScan {
     /// a second handle on `src`'s object and we acquire one more reference to it.
     /// Verbatim.
     fn acquire_reference(&mut self, i: usize, dst: ValueId, src: ValueId) {
-        if let Some(o) = live_object(&self.object_of, &self.rc, &self.dead, &self.borrowed, src) {
+        if let Some(o) = self.live(src) {
+            if self.cow_copy(dst, o) {
+                return;
+            }
             // Acquire OUR own reference. A `Dup` of a self.borrowed param has no
             // prior self.rc entry (we owned none) — start it at 0, then +1.
             *self.rc.entry(o).or_insert(0) += 1;
@@ -381,7 +434,7 @@ impl OwnershipScan {
             // Only heap handles are accountable; scalar uses are absent
             // from `self.object_of` and correctly skipped.
             if self.object_of.contains_key(v)
-                && live_object(&self.object_of, &self.rc, &self.dead, &self.borrowed, *v).is_none()
+                && self.live(*v).is_none()
             {
                 self.violations.push(violation(i, *v, ViolationKind::UseAfterFree));
             }
@@ -402,7 +455,7 @@ impl OwnershipScan {
     ) {
         for a in args {
             if let CallArg::Handle(v) = a {
-                if live_object(&self.object_of, &self.rc, &self.dead, &self.borrowed, *v).is_none() {
+                if !self.call_arg_live(*v) {
                     self.violations.push(violation(i, *v, ViolationKind::UseAfterFree));
                 }
             }
@@ -417,10 +470,12 @@ impl OwnershipScan {
     /// Extracted from [`Self::step`] (codopsy r2, #852): the `IfThen` arm — open a
     /// branch frame remembering the ENTRY state both arms run from. Verbatim.
     fn enter_branch_frame(&mut self, dst: Option<ValueId>) {
+        self.enter_rebound_frame();
         self.branches.push(BranchFrame {
             entry_rc: self.rc.clone(),
             entry_dead: self.dead.clone(),
             entry_object_of: self.object_of.clone(),
+            entry_keys: self.defined_keys(),
             then_exit: None,
             dst,
             moved_in: false,
@@ -440,6 +495,10 @@ impl OwnershipScan {
         // seen" witness either way).
         let diverged = std::mem::take(&mut self.diverged);
         let moved = if diverged { false } else { self.merge_val_move(val) };
+        self.leave_rebound_arm(false);
+        if let Some(entry) = self.branches.last().map(|fr| fr.entry_keys.clone()) {
+            self.retire_arm_keys(&entry);
+        }
         if let Some(fr) = self.branches.last_mut() {
             fr.moved_in |= moved;
             fr.then_diverged = diverged;
@@ -460,7 +519,9 @@ impl OwnershipScan {
         // diverged arm moved nothing into the merge and is not a join input.
         let pending = std::mem::take(&mut self.diverged);
         let moved = if pending { false } else { self.merge_val_move(val) };
+        self.leave_rebound_arm(true);
         if let Some(mut fr) = self.branches.pop() {
+            self.retire_arm_keys(&fr.entry_keys);
             let else_seen = fr.then_exit.is_some();
             let (then_diverged, else_diverged) = if else_seen {
                 (fr.then_diverged, pending)
@@ -489,7 +550,7 @@ impl OwnershipScan {
                         self.object_of = fr.entry_object_of;
                     }
                     if let Some(d) = dst {
-                        self.own_fresh_object(d);
+                        self.own_merge(d);
                     }
                     return;
                 }
@@ -500,7 +561,7 @@ impl OwnershipScan {
                     self.dead = then_dead;
                     self.object_of = then_obj;
                     if let Some(d) = dst {
-                        self.own_fresh_object(d);
+                        self.own_merge(d);
                     }
                     return;
                 }
@@ -528,7 +589,7 @@ impl OwnershipScan {
             // result (#1037, second gap: the unmodeled dst made every later
             // Drop of it a phantom DoubleFree).
             if let Some(d) = dst {
-                self.own_fresh_object(d);
+                self.own_merge(d);
             }
         }
     }
@@ -598,6 +659,8 @@ impl OwnershipScan {
                 rename_object(then_obj, then_rc, oa, ob);
             } else if !entry_objects.contains(&ob) {
                 rename_object(&mut self.object_of, &mut self.rc, ob, oa);
+            } else {
+                self.move_slot_reference(h, (oa, ob), then_rc, then_obj);
             }
         }
     }
@@ -646,11 +709,19 @@ impl OwnershipScan {
     /// ownership-neutral. Verbatim.
     fn apply_prim_rc_event(&mut self, kind: &PrimKind, dst: &Option<ValueId>, args: &[ValueId]) {
         match kind {
+            // The carrier is a LIVE alias of its source's object (#3263): a
+            // borrowing use of it (a call's handle arg — `string.eq(prim.handle
+            // (child))`) live-checks that OBJECT, as the certificate's line does.
+            // It acquires nothing, so a release through it still needs a held
+            // reference.
             PrimKind::Handle => {
+                self.record_carrier(*dst, args);
                 if let (Some(d), Some(&o)) =
                     (dst.as_ref(), args.first().and_then(|a| self.object_of.get(a)))
                 {
                     self.object_of.insert(*d, o);
+                    self.dead.insert(*d, false);
+                    self.carriers.insert(*d);
                 }
             }
             // T1-3 native Result carrier: the borrowed Err-String read ALIASES
@@ -667,19 +738,27 @@ impl OwnershipScan {
             }
             // A `LoadHandle` through a TRACKED address (the `IntBinOp Add` alias
             // above): the loaded CHILD handle — an Option/Result payload, a
-            // record field — ALIASES the parent object for accounting, the same
-            // conflation `ResErrStr` already makes for the Err String. A `Dup`
-            // of it acquires a reference counted on the parent; the matching
-            // `Drop` releases it — per-object balance is preserved, and the
-            // live-check grounds out on the parent the frame still owns
-            // (#1037). An address with NO tracked root stays off the model
+            // record field — is its OWN object, live while the object it was
+            // loaded from is (its slot holds the child) or while the frame
+            // holds a `Dup` of it (#3261, [`Self::object_alive`]). A `Dup`
+            // acquires a reference counted on the CHILD, the matching `Drop`
+            // releases it. (#1037 counted it on the parent, which kept a raw
+            // child "live" through a `Dup` of a grandchild after the parent
+            // was freed.) An address with NO tracked root stays off the model
             // (the pre-existing load64 floor) — unknown, never guessed.
+            // The address may come from `ElemAddr` (a list element — every
+            // `__list_dec_go` / `__list_enc_go` over a borrowed list param), which
+            // only `addr_of` records: the certificate's `load_child` reads the
+            // same map (#3263).
             PrimKind::LoadHandle => {
-                if let (Some(d), Some(&o)) =
-                    (dst.as_ref(), args.first().and_then(|a| self.object_of.get(a)))
+                if let (Some(d), Some(o)) =
+                    (dst.as_ref(), args.first().and_then(|a| self.address_object(*a)))
                 {
-                    self.object_of.insert(*d, o);
+                    self.object_of.insert(*d, *d);
+                    self.child_parent.insert(*d, o);
                     self.dead.insert(*d, false);
+                } else if let (Some(d), Some(a)) = (dst, args.first()) {
+                    self.load_slot_root(*d, *a);
                 }
             }
             PrimKind::RcInc => {
@@ -698,10 +777,84 @@ impl OwnershipScan {
         }
     }
 
+    /// A load or store DEREFERENCES the object its address points into, so that
+    /// object must still be live (#3259, the certificate's `b` probe of #3233).
+    /// `ElemAddr` reads its list's bounds, and its result is an address into the
+    /// list. `prim.handle` is not a dereference: it only turns the pointer into
+    /// an integer (the lowering's move into a container reads it after the
+    /// `Consume` that transferred the reference).
+    fn check_dereference(&mut self, i: usize, kind: &PrimKind, dst: Option<ValueId>, args: &[ValueId]) {
+        let Some(&addr) = args.first() else { return };
+        match kind {
+            PrimKind::LoadHandle | PrimKind::Load { .. } | PrimKind::Store { .. } => {
+                self.check_address_live(i, addr)
+            }
+            PrimKind::ElemAddr => {
+                self.check_address_live(i, addr);
+                if let (Some(d), Some(o)) = (dst, self.address_object(addr)) {
+                    self.addr_of.insert(d, o);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// The object `v` denotes, iff the handle is live ([`live_object`], with
+    /// the loaded-child rule of [`Self::object_alive`]).
+    fn live(&self, v: ValueId) -> Option<ValueId> {
+        if self.dead.get(&v).copied().unwrap_or(true) {
+            return None;
+        }
+        let o = *self.object_of.get(&v)?;
+        self.object_alive(o).then_some(o)
+    }
+
+    /// Object `o` is live: a borrowed param, an object we hold a reference
+    /// to, or a loaded child whose parent is live (#3261).
+    fn object_alive(&self, o: ValueId) -> bool {
+        let mut o = o;
+        loop {
+            if self.borrowed.contains(&o) || self.rc.get(&o).copied().unwrap_or(0) >= 1 {
+                return true;
+            }
+            if self.rebound.contains(&o) {
+                return false;
+            }
+            match self.child_parent.get(&o) {
+                Some(&p) => o = p,
+                None => return false,
+            }
+        }
+    }
+
+    /// A call's handle argument is checked per OBJECT, the certificate's
+    /// probe (#3263): a handle released while a sibling still holds its object
+    /// passes the same live pointer. An untracked argument stays a violation.
+    fn call_arg_live(&self, v: ValueId) -> bool {
+        !self.ended_view(v) && self.address_object(v).is_some_and(|o| self.object_alive(o))
+    }
+
+    /// The object an address (or a handle used as one) points into.
+    fn address_object(&self, v: ValueId) -> Option<ValueId> {
+        self.addr_of.get(&v).or_else(|| self.object_of.get(&v)).copied()
+    }
+
+    /// The object behind `addr` is live: a borrowed param (the caller holds
+    /// it), or an object we still hold a reference to. The check is per OBJECT,
+    /// like the certificate's line: an address outlives the handle it came from.
+    /// An address with no tracked object stays off the model, as before.
+    fn check_address_live(&mut self, i: usize, addr: ValueId) {
+        let Some(o) = self.address_object(addr) else { return };
+        if self.ended_view(addr) || !self.object_alive(o) {
+            self.violations.push(violation(i, addr, ViolationKind::UseAfterFree));
+        }
+    }
+
     /// Extracted from [`Self::step`] (codopsy r2, #852): the `SetLocal` arm — a
     /// loop-carried rebind aliases the slot onto the source's object and makes it
     /// live again. Verbatim.
     fn rebind_local_slot(&mut self, local: ValueId, src: ValueId) {
+        self.end_rebound_children(local);
         if let Some(o) = self.object_of.get(&src).copied() {
             self.object_of.insert(local, o);
             self.dead.insert(local, false);
@@ -798,6 +951,18 @@ pub fn verify_ownership(func: &MirFunction) -> Result<(), Vec<Violation>> {
         branches: Vec::new(),
         violations,
         diverged: false,
+        addr_of: BTreeMap::new(),
+        child_parent: BTreeMap::new(),
+        out_of_path: BTreeSet::new(),
+        rebound: BTreeSet::new(),
+        rebound_frames: Vec::new(),
+        carriers: BTreeSet::new(),
+        consts: BTreeMap::new(),
+        slot_roots: BTreeMap::new(),
+        carried: BTreeMap::new(),
+        owning_merges: crate::certificate::merge_dsts_holding_a_reference(func),
+        slot_objects: 0,
+        cow_dups: crate::certificate::cow_dup_dsts(func),
     };
     for (i, op) in func.ops.iter().enumerate() {
         scan.step(i, op);
@@ -893,4 +1058,5 @@ fn release(
     }
 }
 
+include!("lib_d.rs");
 include!("lib_p2.rs");

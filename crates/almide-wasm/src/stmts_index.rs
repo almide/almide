@@ -14,22 +14,6 @@ impl Emitter<'_> {
     /// exactly once (#1770: both passes firing on one local double-freed
     /// the returned buffer, and its freelist link zeroed the first
     /// payload word).
-    /// The byte address of element `hi` (i64) of the list in `hb`:
-    /// `block + PAYLOAD + hi * stride`.
-    pub(crate) fn emit_index_slot_addr(&mut self, hb: u32, hi: u32, stride: i64) {
-        self.f
-            .instructions()
-            .local_get(hb)
-            .i64_extend_i32_u()
-            .local_get(hi)
-            .i64_const(stride)
-            .i64_mul()
-            .i64_add()
-            .i32_wrap_i64()
-            .i32_const(almide_layout::PAYLOAD as i32)
-            .i32_add();
-    }
-
     /// Judge a LOCAL list copy-on-write into `hb` and write the result back
     /// to its slot. Inside a loop that reaches the list only element-wise
     /// (cow_hoist.rs, #2150) the judge runs once per loop entry: the first
@@ -135,28 +119,36 @@ impl Emitter<'_> {
                 // index too, and a loop that cannot change this list's length
                 // already has the count in a local.
                 let hoisted = if in_cell { None } else { self.hoisted_count_of(*target) };
-                self.f.instructions().local_get(hi);
-                match hoisted {
-                    Some(count) => {
-                        self.f.instructions().local_get(count);
+                // #3345: an earlier check of this same `xs[i]` still decides
+                // it (bounds_facts.rs) — the check is not emitted again.
+                let known = is_local && !in_cell && self.bounds_known(*target, index);
+                if !known {
+                    self.f.instructions().local_get(hi);
+                    match hoisted {
+                        Some(count) => {
+                            self.f.instructions().local_get(count);
+                        }
+                        None => {
+                            get_target(self.f, self.locals, self.globals);
+                            let mut i = self.f.instructions();
+                            i.i32_load(len_memarg())
+                                .i64_extend_i32_u()
+                                .i64_const(stride)
+                                .i64_div_u();
+                        }
                     }
-                    None => {
-                        get_target(self.f, self.locals, self.globals);
+                    {
                         let mut i = self.f.instructions();
-                        i.i32_load(len_memarg())
-                            .i64_extend_i32_u()
-                            .i64_const(stride)
-                            .i64_div_u();
+                        i.i64_ge_u().if_(BlockType::Empty);
+                        i.i32_const(msg as i32);
+                    }
+                    self.emit_error_frame_abort();
+                    self.witness_abort_site();
+                    self.f.instructions().end();
+                    if is_local && !in_cell {
+                        self.bounds_record(*target, index);
                     }
                 }
-                {
-                    let mut i = self.f.instructions();
-                    i.i64_ge_u().if_(BlockType::Empty);
-                    i.i32_const(msg as i32);
-                }
-                self.emit_error_frame_abort();
-                self.witness_abort_site();
-                self.f.instructions().end();
                 // RC-5: the COW judge, not an unconditional copy — a
                 // uniquely-held list takes the store IN PLACE, a shared one
                 // copies and releases one source ref. The old
@@ -181,13 +173,17 @@ impl Emitter<'_> {
                     self.witness_mut_rebind(*target, true);
                 }
                 // The replaced element's credit goes with it.
+                // #3345: the address through the loop's payload pointer when
+                // it has one, with an index `v + c` folded into the offset
+                // (payload_ptr.rs) — the read path's shape.
+                let list = (is_local && !in_cell).then_some(*target);
                 if let Some(dec) = self.elem_is_handle(el).then(|| self.dec_fn_of(el)) {
-                    self.emit_index_slot_addr(hb, hi, stride);
-                    self.f.instructions().i32_load(wasm_encoder::MemArg { offset: 0, align: 2, memory_index: 0 }).call(dec);
+                    let off = self.emit_elem_addr(list, hb, hi, index, stride)?;
+                    self.f.instructions().i32_load(wasm_encoder::MemArg { offset: off, align: 2, memory_index: 0 }).call(dec);
                 }
-                self.emit_index_slot_addr(hb, hi, stride);
+                let off = self.emit_elem_addr(list, hb, hi, index, stride)?;
                 self.f.instructions().local_get(hv);
-                self.store_ty_slot_raw(el);
+                self.store_slot_off(el, off);
                 self.release_i32();
                 self.release_val(el);
                 self.release_i64();

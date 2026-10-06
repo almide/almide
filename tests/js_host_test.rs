@@ -7,7 +7,7 @@ use std::process::Command;
 
 const PROGRAM: &str = "@extern(wasm, \"js\", \"js_log\")\nfn js_log(msg: String) -> Unit\n\npub fn greet(n: Int) -> Int = n + 1\npub fn shout(s: String) -> String = string.to_upper(s)\nfn main() -> Unit = js_log(\"hi ${greet(1)}\")\n";
 
-const UNMARSHALLABLE: &str = "pub fn total(xs: List[Int]) -> Int = list.len(xs)\nfn main() -> Unit = println(int.to_string(total([1])))\n";
+const UNMARSHALLABLE: &str = "pub fn total(xs: Map[String, Int]) -> Int = map.len(xs)\nfn main() -> Unit = println(int.to_string(total(map.new())))\n";
 
 fn almide() -> String {
     std::env::var("ALMIDE_BIN").unwrap_or_else(|_| format!("{}/target/release/almide", env!("CARGO_MANIFEST_DIR")))
@@ -84,8 +84,9 @@ fn a_scalar_only_surface_keeps_the_module_bytes_and_ships_only_its_shims() {
         .filter(|l| l.starts_with("  ") && !l.starts_with("   ") && l.as_bytes()[2].is_ascii_lowercase() && l.contains('('))
         .map(|l| l.trim_start().split('(').next().unwrap())
         .collect();
-    // The renderer's own module links the println floor: fd_write, proc_exit and the clock/random/read imports.
-    assert!(shims.contains(&"fd_write") && shims.contains(&"proc_exit"), "{shims:?}");
+    // The shipped module imports only what its reached code calls (#3136):
+    // `fib` prints and can neither trap nor exit, so `fd_write` alone.
+    assert_eq!(shims, ["fd_write"], "{shims:?}");
     assert!(!shims.contains(&"path_open") && !shims.contains(&"poll_oneoff") && !shims.contains(&"fd_readdir"), "unlinked shims must not ship: {shims:?}");
     for name in &shims {
         assert!(js.contains(&format!("wasiImports.{name} = wasi.{name};")), "every emitted shim is wired: {name}\n{js}");
@@ -100,9 +101,13 @@ fn a_scalar_only_surface_keeps_the_module_bytes_and_ships_only_its_shims() {
 fn a_boundary_type_the_host_cannot_marshal_is_refused_by_name() {
     let dir = tempfile::tempdir().unwrap();
     let (ok, stderr) = build(dir.path(), UNMARSHALLABLE, &["--target", "wasm", "--host", "js", "-o", "app.wasm"]);
-    assert!(!ok, "a List on the boundary must be refused:\n{stderr}");
+    assert!(!ok, "a Map on the boundary must be refused:\n{stderr}");
     assert!(stderr.contains("--host js cannot marshal parameter `xs` of `total`"), "{stderr}");
-    assert!(stderr.contains("List"), "{stderr}");
+    assert!(stderr.contains("Map"), "{stderr}");
+    // The type is spelled as in source, and the hint names `local fn`: an
+    // unmarked fn is public, so "drop `pub`" would not apply (#3360).
+    assert!(!stderr.contains("Applied("), "{stderr}");
+    assert!(stderr.contains("local fn total"), "{stderr}");
     assert!(!dir.path().join("app.js").exists() && !dir.path().join("app.wasm").exists(), "a refused build writes nothing");
     // The same program builds without the switch: the refusal is the host's, not the module's.
     let (ok, stderr) = build(dir.path(), UNMARSHALLABLE, &["--target", "wasm", "-o", "app.wasm"]);
@@ -227,4 +232,192 @@ fn an_extern_declared_in_another_module_is_an_import_of_the_structural_module() 
     let run = Command::new("node").current_dir(root).args(["run.mjs", "app.js"]).output().unwrap();
     assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
     assert_eq!(String::from_utf8_lossy(&run.stdout), "12\n41\n80\n");
+}
+
+/// #3352, #3354: an export whose boundary the host cannot carry is refused
+/// at build time by name — a Map, a declared Result whose err is not a
+/// String, a variant (the module's record says so) — never a wrapper that
+/// reads garbage.
+#[test]
+fn an_export_the_host_cannot_wrap_is_refused_by_name() {
+    let cases = [
+        ("effect fn counts(n: Int) -> Map[String, Int] = map.new()\nfn main() -> Unit = {}\n", "cannot marshal the return type of `counts`"),
+        ("fn coded(n: Int) -> Result[Int, Int] = if n > 0 then ok(n) else err(n)\nfn main() -> Unit = {}\n", "cannot marshal the return type of `coded`"),
+        ("type Shape = | Dot | Box(Int)\nfn shape(n: Int) -> Shape = if n > 0 then Box(n) else Dot\nfn main() -> Unit = {}\n", "cannot wrap the return of `shape`"),
+        ("type Shape = | Dot | Box(Int)\nfn area(s: Shape) -> Int = 0\nfn main() -> Unit = {}\n", "cannot wrap parameter `s` of `area`"),
+    ];
+    for (src, needle) in cases {
+        let dir = tempfile::tempdir().unwrap();
+        let (ok, stderr) = build(dir.path(), src, &["--target", "wasm", "--host", "js", "-o", "app.wasm"]);
+        assert!(!ok, "must be refused ({needle}):\n{stderr}");
+        assert!(stderr.contains(needle), "{stderr}");
+        assert!(!dir.path().join("app.js").exists() && !dir.path().join("app.wasm").exists(), "a refused build writes nothing");
+    }
+}
+
+/// #3354: a block-shaped export is wrapped by its recorded layout, and the
+/// typings name the JS shape.
+#[test]
+fn a_block_shaped_export_is_wrapped_by_its_recorded_layout() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = "type P = { x: Int, name: String }\nfn pick(xs: List[P], b: Bytes, o: Int?) -> List[String] = xs |> list.map((p) => p.name)\nfn main() -> Unit = {}\n";
+    let (ok, stderr) = build(dir.path(), src, &["--target", "wasm", "--host", "js", "-o", "app.wasm"]);
+    assert!(ok, "{stderr}");
+    let js = std::fs::read_to_string(dir.path().join("app.js")).unwrap();
+    let dts = std::fs::read_to_string(dir.path().join("app.d.ts")).unwrap();
+    assert!(js.contains(r#"const S_pick_p0 = {k:"list",stride:4,el:{k:"rec",size:"#), "{js}");
+    assert!(js.contains("const h0 = putBlock(S_pick_p0, xs, \"pick\");") && js.contains("takeBlock(instance.exports.pick(h0, h1, h2), S_pick_r, \"pick\")"), "{js}");
+    assert!(dts.contains("export function pick(xs: Array<{ x: number; name: string }>, b: Uint8Array, o: number | undefined): Array<string>;"), "{dts}");
+}
+
+/// #3352: an effect fn's wrapper unwraps its Result block (`takeResult`) and
+/// the typings name the ok type; a plain fn of the same type keeps the plain
+/// wrapper. Running both exits under node is `effect_exports` in
+/// `spec/wasm_host_js`.
+#[test]
+fn an_effect_export_unwraps_its_result_block() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = "effect fn raw(key: String) -> String = key + \"!\"\nfn plain(key: String) -> String = key + \"?\"\nfn main() -> Unit = {}\n";
+    let (ok, stderr) = build(dir.path(), src, &["--target", "wasm", "--host", "js", "-o", "app.wasm"]);
+    assert!(ok, "{stderr}");
+    let js = std::fs::read_to_string(dir.path().join("app.js")).unwrap();
+    let dts = std::fs::read_to_string(dir.path().join("app.d.ts")).unwrap();
+    assert!(js.contains("return takeResult(instance.exports.raw(h0), S_raw_r, \"raw\");") && js.contains(r#"const S_raw_r = {k:"res",ok:{k:"str"},err:{k:"str"}};"#), "{js}");
+    assert!(js.contains("takeString(instance.exports.plain(h0))"), "{js}");
+    assert!(js.contains("export class AlmideError extends Error"), "{js}");
+    assert!(dts.contains("export function raw(key: string): string;") && dts.contains("export class AlmideError extends Error {}"), "{dts}");
+}
+
+const ASYNC_PROGRAM: &str = "@extern(wasm, \"js\", \"kv_get\", returns: promise)\nfn kv_get(key: String) -> String\n\nfn lookup(key: String) -> String = \"value=\" + kv_get(key)\nfn width(s: String) -> Int = string.len(s)\nfn main() -> Unit = {}\n";
+
+/// #3353/#3371: an `@extern(wasm, "js", ..., returns: promise)` import is
+/// wrapped in `WebAssembly.Suspending`, and exactly the exports that reach it
+/// become async; the rest stay synchronous behind the busy guard. Running it
+/// is `async_imports` in `spec/wasm_host_js` (needs a node with JSPI).
+#[test]
+fn a_promise_extern_makes_the_exports_that_reach_it_async() {
+    let dir = tempfile::tempdir().unwrap();
+    let (ok, stderr) = build(dir.path(), ASYNC_PROGRAM, &["--target", "wasm", "--host", "js", "-o", "app.wasm"]);
+    assert!(ok, "{stderr}");
+    let js = std::fs::read_to_string(dir.path().join("app.js")).unwrap();
+    let dts = std::fs::read_to_string(dir.path().join("app.d.ts")).unwrap();
+    assert!(js.contains("jsImports.kv_get = new WebAssembly.Suspending(async (a0) =>"), "{js}");
+    assert!(js.contains("promised = { lookup: WebAssembly.promising(instance.exports.lookup) };"), "{js}");
+    assert!(js.contains("jspiOrRefuse([\"kv_get\"]);"), "{js}");
+    assert!(js.contains("idle(\"width\");"), "{js}");
+    // A marked hook awaits; it carries no thenable refusal.
+    assert!(!js.contains("sync(\"js\", \"kv_get\""), "{js}");
+    assert!(dts.contains("export function lookup(key: string): Promise<string>;"), "{dts}");
+    assert!(dts.contains("export function width(s: string): number;"), "{dts}");
+    assert!(dts.contains("kv_get: (key: string) => string | Promise<string>;"), "{dts}");
+    // Unmarked, the glue is the synchronous one.
+    let unmarked = ASYNC_PROGRAM.replace(", returns: promise", "");
+    let (ok, stderr) = build(dir.path(), &unmarked, &["--target", "wasm", "--host", "js", "-o", "sync.wasm"]);
+    assert!(ok, "{stderr}");
+    let sync = std::fs::read_to_string(dir.path().join("sync.js")).unwrap();
+    assert!(!sync.contains("Suspending") && !sync.contains("serial(") && !sync.contains("idle("), "{sync}");
+}
+
+/// #3371: the build flag `--async-import` is gone — the marker lives on the
+/// extern declaration.
+#[test]
+fn the_async_import_flag_is_removed() {
+    let dir = tempfile::tempdir().unwrap();
+    let (ok, stderr) = build(dir.path(), ASYNC_PROGRAM, &["--target", "wasm", "--host", "js", "--async-import", "kv_get", "-o", "app.wasm"]);
+    assert!(!ok && stderr.contains("--async-import"), "{stderr}");
+}
+
+/// #3371: a sync hook's answer goes through `sync()`, which refuses a
+/// thenable with the named fix and abandons the instance; a fallible hook's
+/// catch passes that refusal through instead of turning it into an err.
+/// Running it is `unmarked_promise` in `spec/wasm_host_js`.
+#[test]
+fn an_unmarked_hook_that_returns_a_promise_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let (ok, stderr) = build(dir.path(), HOOK_ERRORS, &["--target", "wasm", "--host", "js", "-o", "app.wasm"]);
+    assert!(ok, "{stderr}");
+    let js = std::fs::read_to_string(dir.path().join("app.js")).unwrap();
+    assert!(js.contains("if (typeof r?.then !== \"function\") return r;"), "{js}");
+    assert!(js.contains("returned a Promise; mark its @extern with returns: promise"), "{js}");
+    assert!(js.contains(r#"sync("js", "peek", hook("js", "peek")(readString(a0)))"#), "{js}");
+    assert!(js.contains("catch (e) { if (e instanceof UnmarkedPromise) throw e; return errResult(e); }"), "{js}");
+}
+
+const HOOK_ERRORS: &str = "@extern(wasm, \"js\", \"get\")\neffect fn get(key: String) -> String\n\n@extern(wasm, \"js\", \"count\")\nfn count(key: String) -> Result[Int, String]\n\n@extern(wasm, \"js\", \"peek\")\nfn peek(key: String) -> String\n\neffect fn lookup(key: String) -> String = get(key)! + peek(key)\neffect fn total(key: String) -> Int = count(key)! + 1\nfn main() -> Unit = {}\n";
+
+/// #3356: a fallible extern (`effect fn`, `Result[T, String]`) imports as a
+/// Result block the hook answers — a throw becomes the err; an infallible
+/// one abandons the instance on a throw. Running both is `hook_errors` in
+/// `spec/wasm_host_js`.
+#[test]
+fn a_hook_throw_is_an_err_for_a_fallible_extern_and_abandons_otherwise() {
+    let dir = tempfile::tempdir().unwrap();
+    let (ok, stderr) = build(dir.path(), HOOK_ERRORS, &["--target", "wasm", "--host", "js", "-o", "app.wasm"]);
+    assert!(ok, "{stderr}");
+    let js = std::fs::read_to_string(dir.path().join("app.js")).unwrap();
+    let dts = std::fs::read_to_string(dir.path().join("app.d.ts")).unwrap();
+    assert!(js.contains(r#"jsImports.get = (a0) => { try { return okResult({k:"str"}, sync("js", "get", hook("js", "get")(readString(a0)))); } catch (e) { if (e instanceof UnmarkedPromise) throw e; return errResult(e); } };"#), "{js}");
+    assert!(js.contains(r#"return okResult({k:"int"}, sync("js", "count", hook("js", "count")"#), "{js}");
+    assert!(js.contains(r#"catch (e) { throw abandon("js", "peek", e); }"#), "{js}");
+    assert!(js.contains("if (abandoned !== null) throw new Error(abandoned);"), "{js}");
+    assert!(dts.contains("count: (key: string) => number;") && dts.contains("get: (key: string) => string;"), "{dts}");
+}
+
+const FAN_PROGRAM: &str = "@extern(wasm, \"js\", \"fetch\", returns: promise)\neffect fn fetch(key: String) -> String\n\n@extern(wasm, \"js\", \"peek\", returns: promise)\nfn peek(key: String) -> String\n\n@extern(wasm, \"js\", \"tick\")\nfn tick(key: String) -> String\n\neffect fn all(keys: List[String]) -> List[String] = fan.map(keys, (k) => fetch(k))!\n\neffect fn shout(keys: List[String]) -> List[String] = fan.map(keys, (k) => fetch(k + \"!\"))!\n\neffect fn ticks(keys: List[String]) -> List[String] = fan.map(keys, (k) => ok(tick(k)))!\n\nfn main() -> Unit = println(\"fan\")\n";
+
+/// The `almide:fan` imports a module names, read from its bytes.
+fn fan_imports(wasm: &[u8]) -> Vec<String> {
+    let mut out = Vec::new();
+    for payload in wasmparser::Parser::new(0).parse_all(wasm) {
+        if let Ok(wasmparser::Payload::ImportSection(r)) = payload {
+            for (_, imp) in r.into_iter().flatten().flat_map(|g| g.into_iter().flatten()) {
+                if imp.module == "almide:fan" {
+                    out.push(imp.name.to_string());
+                }
+            }
+        }
+    }
+    out
+}
+
+/// #3383: on `--host js`, a fan whose element is one async-hook call on
+/// values it already has imports the start / wait / take protocol, and only
+/// `wait` suspends. An element that computes its argument, or calls a sync
+/// hook, stays sequential; `ALMIDE_FAN_SEQUENTIAL=1` and a build without
+/// `--host js` name no protocol import. Running both lowerings and comparing
+/// them is `fan_async_overlap` in `spec/wasm_host_js` (needs JSPI).
+#[test]
+fn a_fan_over_async_hooks_overlaps_its_waits_on_the_js_host() {
+    let dir = tempfile::tempdir().unwrap();
+    let (ok, stderr) = build(dir.path(), FAN_PROGRAM, &["--target", "wasm", "--host", "js", "-o", "app.wasm"]);
+    assert!(ok, "{stderr}");
+    let js = std::fs::read_to_string(dir.path().join("app.js")).unwrap();
+    let wasm = std::fs::read(dir.path().join("app.wasm")).unwrap();
+    // `all` overlaps; `shout` computes its argument and `ticks` calls a sync
+    // hook, so neither reaches the protocol.
+    assert_eq!(fan_imports(&wasm), ["start:fetch", "wait", "take:fetch"]);
+    assert!(js.contains(r#"fanImports["start:fetch"] = (a0) => fanStart(() => hook("js", "fetch")(readString(a0)));"#), "{js}");
+    assert!(js.contains(r#"fanImports["wait"] = new WebAssembly.Suspending(fanWait);"#), "{js}");
+    assert!(js.contains(r#"fanImports["take:fetch"] = (s) => { try { return okResult({k:"str"}, fanTake(s)); } catch (e) { return errResult(e); } };"#), "{js}");
+    assert!(js.contains("obj[\"almide:fan\"] = fanImports;") && js.contains("function fanTake(k)"), "{js}");
+    // The export reaching `wait` is entered through promising.
+    assert!(js.contains("all: WebAssembly.promising(instance.exports.all)"), "{js}");
+    // The ablation switch and a build without the host leave no protocol.
+    let seq = Command::new(almide()).current_dir(dir.path()).env("ALMIDE_FAN_SEQUENTIAL", "1").args(["build", "main.almd", "--target", "wasm", "--host", "js", "-o", "seq.wasm"]).output().unwrap();
+    assert!(seq.status.success(), "{}", String::from_utf8_lossy(&seq.stderr));
+    assert!(fan_imports(&std::fs::read(dir.path().join("seq.wasm")).unwrap()).is_empty());
+    assert!(!std::fs::read_to_string(dir.path().join("seq.js")).unwrap().contains("fanImports"));
+    let (ok, stderr) = build(dir.path(), FAN_PROGRAM, &["--target", "wasm", "-o", "plain.wasm"]);
+    assert!(ok, "{stderr}");
+    assert!(fan_imports(&std::fs::read(dir.path().join("plain.wasm")).unwrap()).is_empty());
+}
+
+/// #3383: the protocol's import module belongs to the glue; an extern that
+/// names it is refused by name.
+#[test]
+fn an_extern_on_the_fan_protocol_module_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = "@extern(wasm, \"almide:fan\", \"wait\")\nfn wait() -> Unit\n\nfn main() -> Unit = wait()\n";
+    let (ok, stderr) = build(dir.path(), src, &["--target", "wasm", "--host", "js", "-o", "app.wasm"]);
+    assert!(!ok && stderr.contains("reserves the import module \"almide:fan\""), "{stderr}");
 }

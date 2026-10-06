@@ -163,36 +163,44 @@ fn from_float64(n: Float64) -> Float = _
 // `-0.0` passes as `some(0)` (C-307). The same rule, cell for cell, in
 // stdlib/float_checked.almd (the wasm legs).
 /// some iff n is an integer in -128..127.
-fn to_int8_checked(n: Float) -> Int8? = if float.is_nan(n) or float.is_infinite(n) or n < -128.0 or n > 127.0 then none
-else if float.floor(n) == n then some(float.to_int8(n)) else none
+fn to_int8_checked(n: Float) -> Int8? =
+  if float.is_nan(n) or float.is_infinite(n) or n < -128.0 or n > 127.0 then none
+  else if float.floor(n) == n then some(float.to_int8(n)) else none
 
 /// some iff n is an integer in -32768..32767.
-fn to_int16_checked(n: Float) -> Int16? = if float.is_nan(n) or float.is_infinite(n) or n < -32768.0 or n > 32767.0 then none
-else if float.floor(n) == n then some(float.to_int16(n)) else none
+fn to_int16_checked(n: Float) -> Int16? =
+  if float.is_nan(n) or float.is_infinite(n) or n < -32768.0 or n > 32767.0 then none
+  else if float.floor(n) == n then some(float.to_int16(n)) else none
 
 /// some iff n is an integer in -2^31..2^31-1.
-fn to_int32_checked(n: Float) -> Int32? = if float.is_nan(n) or float.is_infinite(n) or n < -2147483648.0 or n > 2147483647.0 then none
-else if float.floor(n) == n then some(float.to_int32(n)) else none
+fn to_int32_checked(n: Float) -> Int32? =
+  if float.is_nan(n) or float.is_infinite(n) or n < -2147483648.0 or n > 2147483647.0 then none
+  else if float.floor(n) == n then some(float.to_int32(n)) else none
 
 /// some iff n is an integer in -2^63..2^63-1.
-fn to_int64_checked(n: Float) -> Int64? = if float.is_nan(n) or float.is_infinite(n) or n < -9223372036854776000.0 or n >= 9223372036854776000.0 then none
-else if float.floor(n) == n then some(float.to_int64(n)) else none
+fn to_int64_checked(n: Float) -> Int64? =
+  if float.is_nan(n) or float.is_infinite(n) or n < -9223372036854776000.0 or n >= 9223372036854776000.0 then none
+  else if float.floor(n) == n then some(float.to_int64(n)) else none
 
 /// some iff n is an integer in 0..255.
-fn to_uint8_checked(n: Float) -> UInt8? = if float.is_nan(n) or float.is_infinite(n) or n < 0.0 or n > 255.0 then none
-else if float.floor(n) == n then some(float.to_uint8(n)) else none
+fn to_uint8_checked(n: Float) -> UInt8? =
+  if float.is_nan(n) or float.is_infinite(n) or n < 0.0 or n > 255.0 then none
+  else if float.floor(n) == n then some(float.to_uint8(n)) else none
 
 /// some iff n is an integer in 0..65535.
-fn to_uint16_checked(n: Float) -> UInt16? = if float.is_nan(n) or float.is_infinite(n) or n < 0.0 or n > 65535.0 then none
-else if float.floor(n) == n then some(float.to_uint16(n)) else none
+fn to_uint16_checked(n: Float) -> UInt16? =
+  if float.is_nan(n) or float.is_infinite(n) or n < 0.0 or n > 65535.0 then none
+  else if float.floor(n) == n then some(float.to_uint16(n)) else none
 
 /// some iff n is an integer in 0..2^32-1.
-fn to_uint32_checked(n: Float) -> UInt32? = if float.is_nan(n) or float.is_infinite(n) or n < 0.0 or n > 4294967295.0 then none
-else if float.floor(n) == n then some(float.to_uint32(n)) else none
+fn to_uint32_checked(n: Float) -> UInt32? =
+  if float.is_nan(n) or float.is_infinite(n) or n < 0.0 or n > 4294967295.0 then none
+  else if float.floor(n) == n then some(float.to_uint32(n)) else none
 
 /// some iff n is an integer in 0..2^64-1.
-fn to_uint64_checked(n: Float) -> UInt64? = if float.is_nan(n) or float.is_infinite(n) or n < 0.0 or n >= 18446744073709552000.0 then none
-else if float.floor(n) == n then some(float.to_uint64(n)) else none
+fn to_uint64_checked(n: Float) -> UInt64? =
+  if float.is_nan(n) or float.is_infinite(n) or n < 0.0 or n >= 18446744073709552000.0 then none
+  else if float.floor(n) == n then some(float.to_uint64(n)) else none
 
 // `Float → Float32` loses precision for values outside f32's range
 // (±3.4e38) and for subnormal-boundary reals. The round trip here is

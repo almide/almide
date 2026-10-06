@@ -1,7 +1,7 @@
 //! Target configuration: defines which passes and templates each target uses.
 //!
 //! Adding a new target = implement this module:
-//! 1. Create templates in codegen/templates/<target>.toml
+//! 1. Create templates in crates/almide-codegen/templates/<target>.toml
 //! 2. Select which Nanopass passes to enable
 //! 3. Implement any target-specific passes
 //!

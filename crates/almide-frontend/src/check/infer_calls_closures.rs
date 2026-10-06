@@ -141,7 +141,13 @@ impl Checker {
                 }
             }
 
-            ExprKind::Paren { expr, .. } => self.infer_expr(expr),
+            // A parenthesised tail is still the tail: the lowering is
+            // transparent to parens, so the tail expectation (and with it the
+            // per-branch lift, #3385) passes through.
+            ExprKind::Paren { expr, .. } => {
+                self.tail_expect = self.expr_expect.clone();
+                self.infer_expr(expr)
+            }
             ExprKind::Break | ExprKind::Continue => Ty::Unit,
             // Typed holes (#1325): `_` in EXPRESSION position and `todo("msg")`
             // take whatever type the context demands — that is the whole point
@@ -218,7 +224,16 @@ impl Checker {
     /// `match { ok/err }` consumes them — each statement under the set of
     /// names consumed after it that still refer to it (#2795: a shadowed
     /// binding does not inherit its successor's consumer).
-    fn check_stmts_scoped(&mut self, stmts: &mut [ast::Stmt], tail: Option<&ast::Expr>) {
+    fn check_stmts_scoped(&mut self, stmts: &mut Vec<ast::Stmt>, tail: Option<&ast::Expr>) {
+        // #3149: `var <pattern> = e` is one `var` per bound name. Expanded here,
+        // before anything reads the list, so the checker, lowering and every
+        // backend see only the hand-written spelling.
+        let mut next = self.next_synth_expr_id;
+        almide_lang::var_destructure::expand_var_destructures(stmts, &mut || {
+            next += 1;
+            ast::ExprId(next - 1)
+        });
+        self.next_synth_expr_id = next;
         let (per_stmt, _) = collect_block_result_match_vars(stmts, tail);
         let saved_skip = std::mem::take(&mut self.env.skip_auto_unwrap_for);
         for (stmt, skip) in stmts.iter_mut().zip(per_stmt) {
@@ -239,18 +254,8 @@ impl Checker {
                 "Mark the enclosing function as `effect fn`",
                 "fan block".to_string()).with_code("E007"));
         }
-        // Check for mutable variable capture
-        let mutable_captures: Vec<String> = exprs.iter().flat_map(|e| {
-            let mut idents = Vec::new();
-            collect_idents(e, &mut idents);
-            idents.into_iter().filter(|name| self.env.mutable_vars.contains(&sym(name))).collect::<Vec<_>>()
-        }).collect();
-        for name in &mutable_captures {
-            self.emit(super::err(
-                format!("cannot capture mutable variable '{}' inside fan block", name),
-                "Use a `let` binding instead of `var` for values shared across fan expressions",
-                "fan block".to_string()).with_code("E008"));
-        }
+        // A `var` reached from an arm is E008, judged after inference by
+        // `check_concurrent_var_reach` over every concurrent slot (#2697).
         let tys: Vec<Ty> = exprs.iter_mut().map(|e| {
             let ty = self.infer_expr(e);
             // Auto-unwrap Result: fan unwraps Result<T, E> to T
@@ -1105,10 +1110,12 @@ impl Checker {
             // fix (#1055: a bare `eff` laundering its effect bit).
             // Single-condition decisions (MC/DC ledger): each || arm is
             // its own continue guard, same order.
-            if self.env.lookup_var(name).is_some() {
-                continue;
-            }
-            if self.env.top_lets.contains_key(&sym(name)) {
+            // #3274: a local or top-level `let` holding an effect fn value is
+            // that fn here, exactly as its name would be.
+            if self.env.lookup_var(name).is_some() || self.env.top_lets.contains_key(&sym(name)) {
+                if let Some(target) = self.effect_alias_of_binding(name) {
+                    self.check_effect_alias_isolation(name, target);
+                }
                 continue;
             }
             if matches!(self.env.types.get(&sym(name)), Some(Ty::ConstParam { .. })) {
@@ -1118,6 +1125,61 @@ impl Checker {
             if sig.is_effect {
                 self.check_effect_isolation(name, &sig);
             }
+        }
+    }
+
+    /// #3274: the effect fn a binding named `name` holds — the local that
+    /// `name` resolves to, else the top-level `let` of that name.
+    pub(crate) fn effect_alias_of_binding(&self, name: &str) -> Option<Sym> {
+        if self.env.lookup_var(name).is_some() {
+            return self.env.effect_alias(name);
+        }
+        self.env.top_effect_aliases.get(&sym(name)).copied()
+    }
+
+    /// #3274: the effect fn a bare VALUE expression names — `rd`,
+    /// `fs.read_text`, or a binding that already holds one (`let g2 = g`).
+    /// Resolution follows `infer_expr_g2_ident` (local → top-level `let` →
+    /// const param → function), so a local that shadows an effect fn's name
+    /// names that local, never the fn.
+    pub(crate) fn effect_fn_value_target(&self, expr: &ast::Expr) -> Option<Sym> {
+        match &expr.kind {
+            ExprKind::Paren { expr } => self.effect_fn_value_target(expr),
+            ExprKind::Ident { name } => {
+                if self.env.lookup_var(name).is_some() || self.env.top_lets.contains_key(name) {
+                    return self.effect_alias_of_binding(name);
+                }
+                if matches!(self.env.types.get(name), Some(Ty::ConstParam { .. })) {
+                    return None;
+                }
+                self.env.functions.get(name).filter(|s| s.is_effect).map(|_| *name)
+            }
+            ExprKind::Member { object, field } => {
+                let ExprKind::Ident { name: module } = &object.kind else { return None };
+                if self.env.lookup_var(module).is_some() || self.env.top_lets.contains_key(module) {
+                    return None;
+                }
+                self.lookup_call_sig(expr).filter(|s| s.is_effect)
+                    .map(|_| sym(&format!("{}.{}", module, field)))
+            }
+            _ => None,
+        }
+    }
+
+    /// #3274: E006 for a use of `alias`, a binding that holds the effect fn
+    /// `target`, from a pure context — the direct call's diagnostic, naming
+    /// the binding it went through.
+    /// #3274: a call through `name` — `g(x)`, `x |> g` — is a call of the
+    /// effect fn `name` holds, if any.
+    pub(crate) fn check_effect_alias_call(&mut self, name: &str) {
+        if let Some(target) = self.effect_alias_of_binding(name) {
+            self.check_effect_alias_isolation(name, target);
+        }
+    }
+
+    pub(crate) fn check_effect_alias_isolation(&mut self, alias: &str, target: Sym) {
+        if !self.env.can_call_effect {
+            self.report_effect_isolation(target.as_str(), Some(alias));
         }
     }
 
@@ -1477,6 +1539,12 @@ impl Checker {
             self.reject_arg_placeholders(&**callee, args.as_slice(), None);
         }
         let left_ty = self.infer_expr(left);
+        // The piped value is argument 0 of the call this pipe checks: E005's
+        // caret reads `arg_spans`, which this path never wrote, so a mismatch
+        // pointed at whatever call last set them — another argument, or a
+        // line of ANOTHER FILE checked earlier (#3401: `src/a.almd:6:11` in a
+        // 3-line file was the entry program's `println` argument).
+        let left_span = left.span;
         match &right.kind {
             ExprKind::Call { callee, args, .. } if args.is_empty() => {
                 self.reject_exit_literal(callee, left);
@@ -1542,9 +1610,13 @@ impl Checker {
                 // Pipe inserts left as the first argument
                 let mut all_arg_tys: Vec<Ty> = vec![left_ty];
                 all_arg_tys.extend(self.infer_call_arg_tys(callee, args, &call_sig));
+                self.arg_spans = std::iter::once(left_span).chain(args.iter().map(|a| a.span)).collect();
                 // Resolve module calls for pipe (e.g. xs |> list.filter(f))
                 match &mut callee.kind {
-                    ExprKind::Ident { name, .. } => self.check_named_call(name, &all_arg_tys),
+                    ExprKind::Ident { name, .. } => {
+                        self.check_effect_alias_call(name);
+                        self.check_named_call(name, &all_arg_tys)
+                    }
                     ExprKind::Member { object, field, .. } => {
                         let module_key = self.resolve_module_call(object, field);
                         if let Some(key) = module_key {
@@ -1565,13 +1637,16 @@ impl Checker {
             }
             // Pipe RHS is a bare function name (e.g. `5 |> double`)
             ExprKind::Ident { name, .. } => {
+                self.check_effect_alias_call(name);
                 let all_arg_tys = vec![left_ty];
+                self.arg_spans = vec![left_span];
                 self.check_named_call(name, &all_arg_tys)
             }
             // Pipe RHS is a module-qualified function (e.g. `5 |> int.abs`)
             ExprKind::Member { object, field, .. } => {
                 let all_arg_tys = vec![left_ty];
                 if let Some(key) = self.resolve_module_call(object, field) {
+                    self.arg_spans = vec![left_span];
                     return self.check_named_call(&key, &all_arg_tys);
                 }
                 let ct = self.infer_expr(right);

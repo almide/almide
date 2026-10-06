@@ -1,0 +1,50 @@
+// #3283: a record literal takes its nominal type from the slot it fills (the
+// declared return, a parameter, an annotation, a field, an element, a
+// payload), never from the first module that declared the same field set.
+type Extent = { w: Float, h: Float }
+
+type Framed = { size: Extent, label: String }
+
+type Shape = | Rect(Extent) | Dot
+
+let ZERO: Extent = { w: 0.0, h: 0.0 }
+
+fn measure(n: Float) -> Extent = { w: n, h: n * 2.0 }
+
+fn pick(big: Bool) -> Extent = if big then { w: 10.0, h: 20.0 } else { w: 1.0, h: 2.0 }
+
+fn many() -> List[Extent] = [
+  { w: 1.0, h: 1.0 },
+  { w: 2.0, h: 2.0 }
+]
+
+fn maybe(n: Float) -> Extent? = if n > 0.0 then some({ w: n, h: n })
+else none
+
+fn annotated(n: Float) -> Extent = {
+  let e: Extent = { w: n, h: n }
+  e
+}
+
+fn reassigned(n: Float) -> Extent = {
+  var e: Extent = { w: 0.0, h: 0.0 }
+  e = { w: n, h: n * 3.0 }
+  e
+}
+
+fn span(e: Extent) -> Float = e.w + e.h
+
+fn widen(e: Extent) -> Extent = { ...e, w: e.w * 10.0 }
+
+fn total(n: Float) -> Float = span({ w: n, h: n })
+
+fn framed(n: Float) -> Framed = { size: { w: n, h: n + 1.0 }, label: "f" }
+
+fn rect(n: Float) -> Shape = Rect({ w: n, h: n })
+
+fn shape_span(s: Shape) -> Float = match s {
+  Rect(e) => span(e),
+  Dot => 0.0,
+}
+
+fn maker() -> (Float) -> Extent = (n) => { w: n, h: 0.5 }

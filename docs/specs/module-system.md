@@ -491,7 +491,11 @@ version = "0.1.0"
 [dependencies]
 bindgen = { git = "https://github.com/almide/almide-bindgen.git", tag = "v0.1.0" }
 json = { git = "https://github.com/almide/json.git", tag = "v2.0.0" }
+# 複数パッケージを持つリポジトリの 1 つ(#3381): subdir でディレクトリを指定
+ceangal = { git = "https://github.com/almide-graphics/ceangal2", tag = "v0.1.0", subdir = "ceangal" }
 ```
+
+`subdir` の検証・lock・キャッシュ共有の規則は [package-system.md §6.1](./package-system.md)。
 
 ### CLI
 
@@ -646,6 +650,7 @@ fn c_sqrt(x: Float) -> Float = _
 3. `{base_dir}/pkg/src/mod.almd`
 4. `{base_dir}/pkg/src/lib.almd` (非推奨)
 5. `almide.toml` の `[dependencies]` → `~/.almide/cache/{name}/.src-{source}/...`
+   (`subdir` 依存は `~/.almide/cache/.repos/.src-{source}/{ref}/{subdir}/...`)
 
 依存パッケージの `src/mod.almd` が見つかった場合、同ディレクトリのサブモジュールとサブディレクトリを再帰スキャン。
 

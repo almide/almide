@@ -62,10 +62,10 @@ fn closure_frames_and_env_captures_witness_exactly() {
     assert_eq!(w.get("fresh_call").map(String::as_str), Some("\nim\nid\n"));
     // A literal callback inlined by `list.map`: the scalar body carries no
     // site, the owned param is released, the fresh spine moves out.
-    assert_eq!(w.get("bump").map(String::as_str), Some("id\nim\n"));
+    assert_eq!(w.get("bump").map(String::as_str), Some("ibd\nim\n"));
     // `list.take_while`'s activation (#2755): the scalar predicate carries no
     // site, the fresh prefix is lent to `list.len` and released.
-    assert_eq!(w.get("big").map(String::as_str), Some("id\nid\n"));
+    assert_eq!(w.get("big").map(String::as_str), Some("ibd\nid\n"));
     assert!(accepted(&w["big"]));
     let lambdas: Vec<(&String, &String)> = w.iter().filter(|(k, _)| k.starts_with("<lambda#")).collect();
     assert!(!lambdas.is_empty(), "the lambda bodies are witnessed: {w:?}");
@@ -75,6 +75,7 @@ fn closure_frames_and_env_captures_witness_exactly() {
             assert!(accepted(cert), "{name}: the portable checker must accept {cert:?}");
         }
     }
-    // `adder`'s lambda: its param is owned and released, its capture a view.
-    assert!(w.values().any(|c| c == "id\n\n"), "{w:?}");
+    // `adder`'s lambda: its param is owned, read (#3259) and released, its
+    // capture a view.
+    assert!(w.values().any(|c| c == "ibd\n\n"), "{w:?}");
 }

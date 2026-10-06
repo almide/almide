@@ -276,9 +276,10 @@ fn extract_unwrap_from_wrapper(e: &IrExpr, tmp: VarId) -> Option<(IrExpr, IrExpr
 /// / `ok(int.parse(s)!)` into the proven match-based early-return.
 fn extract_first_callarg_unwrap(e: &IrExpr, tmp: VarId) -> Option<(IrExpr, IrExpr)> {
     match &e.kind {
-        IrExprKind::Call { .. } | IrExprKind::Tuple { .. } | IrExprKind::StringInterp { .. } => {
-            extract_unwrap_from_element_list(e, tmp)
-        }
+        IrExprKind::Call { .. }
+        | IrExprKind::Tuple { .. }
+        | IrExprKind::List { .. }
+        | IrExprKind::StringInterp { .. } => extract_unwrap_from_element_list(e, tmp),
         IrExprKind::BinOp { .. }
         | IrExprKind::IndexAccess { .. }
         | IrExprKind::MapAccess { .. }
@@ -297,7 +298,7 @@ fn extract_first_callarg_unwrap(e: &IrExpr, tmp: VarId) -> Option<(IrExpr, IrExp
 }
 
 /// The POSITIONAL-LIST arms of [`extract_first_callarg_unwrap`] — call
-/// arguments, tuple elements, and string-interpolation parts, each scanned
+/// arguments, tuple and list elements, and string-interpolation parts, each scanned
 /// left to right and replaced at its index. Verbatim.
 fn extract_unwrap_from_element_list(e: &IrExpr, tmp: VarId) -> Option<(IrExpr, IrExpr)> {
     let mk = |kind: IrExprKind| IrExpr { kind, ty: e.ty.clone(), span: e.span.clone(), def_id: e.def_id };
@@ -318,6 +319,23 @@ fn extract_unwrap_from_element_list(e: &IrExpr, tmp: VarId) -> Option<(IrExpr, I
                     let mut v = elements.clone();
                     v[idx] = ne;
                     return Some((u, mk(IrExprKind::Tuple { elements: v })));
+                }
+            }
+            None
+        }
+        // A LIST-literal element (`["k" + s, int.to_string(chk(s)!)]`, #3084): every
+        // element is evaluated, left to right — but the hoisted `!` runs before the
+        // whole statement, so it lifts only while every EARLIER element is call-free
+        // (the nested-unwrap hoist's reordering rule); a `!` after a call stays put.
+        IrExprKind::List { elements } => {
+            for (idx, el) in elements.iter().enumerate() {
+                if let Some((u, ne)) = take_unwrap_or_recurse(el, tmp) {
+                    let mut v = elements.clone();
+                    v[idx] = ne;
+                    return Some((u, mk(IrExprKind::List { elements: v })));
+                }
+                if crate::lower::expr_contains_call(el) {
+                    return None;
                 }
             }
             None

@@ -1,0 +1,17 @@
+// #3338: modules `a.b` and `a_b` keep their own items on both legs.
+// The module path reached every generated item name with `.` folded to `_`,
+// so `a.b` and `a_b` were one module ident: native refused the program with
+// E0428 on the shared static, fn and type names, and wasm read and wrote ONE
+// global for both (`p.x` printed `q.x`). Module `a` + fn `b_c` spelled like
+// module `a.b` + fn `c` the same way. Native and wasm print the same.
+import self.a.b as p
+import self.a_b as q
+import self.a as r
+
+effect fn main() -> Unit = {
+  p.hits = p.hits + 1
+  q.hits = q.hits + 5
+  println("${p.x} ${q.x} ${p.f()} ${q.f()}")
+  println("${p.hits} ${q.hits} ${p.mk().n} ${q.mk().n}")
+  println("${p.c()} ${r.b_c()}")
+}

@@ -1,0 +1,2 @@
+// Module `a` + fn `b_c` spells like module `a.b` + fn `c` once `.` folds to `_`.
+fn b_c() -> Int = 1000

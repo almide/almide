@@ -10,6 +10,10 @@ use crate::project;
 use crate::stdlib;
 use crate::err;
 
+#[path = "resolve_native_callbacks.rs"]
+mod native_callbacks;
+pub use native_callbacks::{include_native_callback_modules, SelfVersionedNames};
+
 pub struct ResolvedModules {
     /// Modules in dependency order (leaves first).
     /// Third element is the PkgId (None for local modules).
