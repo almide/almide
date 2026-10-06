@@ -1,7 +1,7 @@
 # spec/wasm_cross fixtures whose EVERY frame in the shipped emission pass carries a
 # certificate the portable checker (almide-verify) accepts (#2754). GROW-ONLY; re-anchor with
 # ALMIDE_UPDATE_WITNESS_FLOOR=1 cargo test --release -p almide-wasm --test witness_floor
-# certified: 922 of 926
+# certified: 924 of 926
 spec/wasm_cross/accum_recursion_declined.almd
 spec/wasm_cross/accum_recursion_int.almd
 spec/wasm_cross/adr0005_operator_equivalence.almd
@@ -141,6 +141,7 @@ spec/wasm_cross/default_param_ref.almd
 spec/wasm_cross/destructure_let_unwrap.almd
 spec/wasm_cross/destructure_owned_tuple_release.almd
 spec/wasm_cross/early_return_control_flow.almd
+spec/wasm_cross/edge_closure_matrix.almd
 spec/wasm_cross/edge_float_formatting.almd
 spec/wasm_cross/edge_int_boundaries.almd
 spec/wasm_cross/edge_map_order.almd
@@ -150,6 +151,7 @@ spec/wasm_cross/effect_branch_keeps_result.almd
 spec/wasm_cross/effect_call_arg_credit.almd
 spec/wasm_cross/effect_dispatcher_many_arms.almd
 spec/wasm_cross/effect_fn_value.almd
+spec/wasm_cross/effect_fn_value_slot_family.almd
 spec/wasm_cross/effect_main_guard_err.almd
 spec/wasm_cross/effect_main_guard_ok.almd
 spec/wasm_cross/effect_mut_generic_port.almd
