@@ -3,9 +3,6 @@
 # ALMIDE_UPDATE_WITNESS_FLOOR=1 cargo test --release -p almide-wasm --test witness_floor
 call-arg:Lambda:fs.__fallible_fold_lines:propagating	1
 caps:argv-in-plain-fn	8
-interp-part:IndexAccess:non-list	2
-operand:IndexAccess:non-list	1
-record:default	2
 stmt:Expr:Unit	1
 stmt:Expr:Var	2
 store:borrowed-temp	1
