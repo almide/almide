@@ -1991,6 +1991,7 @@ evidence  = [
   { path = "spec/wasm_cross/to_result_nested_share.almd", class = "fixture" },
   { path = "spec/wasm_cross/to_result_custom_e.almd", class = "fixture" },
   { path = "spec/wasm_cross/unwrap_or_option_payload.almd", class = "fixture" },
+  { path = "spec/wasm_cross/unwrap_or_fresh_closure_fallback.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-150"

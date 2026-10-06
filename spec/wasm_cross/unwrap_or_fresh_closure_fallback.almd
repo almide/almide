@@ -1,0 +1,47 @@
+// @contract: C-149
+// `opt ?? <fresh closure>` hands the caller ONE credit on both arms (#3446).
+// The `some` arm's closure is a share of a block the carrier (a list) still
+// owns; the fallback is a closure built at the site. The join used to stay
+// borrowed whenever its type was a fn, so the bind took a second credit on
+// the fresh fallback and one closure block per fallback taken was never
+// released: the 100-iteration loop below ended with 100 live blocks on wasm,
+// with the same stdout as native. The shapes: a bind of a fresh lambda, a
+// named fn value, a lambda capturing a heap local, a `??` passed straight to
+// a call, a `??` called directly, and a `??` as a fn tail. (A Result carrier
+// takes the same route on wasm, but the incumbent leg walls a fn-payload
+// Result `??`, so it is not in this fixture.) The structural leg's
+// live-at-exit counter pins this file at zero blocks.
+fn inc(x: Int) -> Int = x + 1
+
+fn apply(f: (Int) -> Int, x: Int) -> Int = f(x)
+
+fn choose(fs: List[(Int) -> Int], i: Int) -> (Int) -> Int = list.get(fs, i) ?? ((x) => x + i)
+
+effect fn main() -> Unit = {
+  let none_fs: List[(Int) -> Int] = []
+  let one_fs: List[(Int) -> Int] = [
+    (x) => x * 2
+  ]
+  var fresh = 0
+  var named = 0
+  var captured = 0
+  var nested = 0
+  var tail = 0
+  for i in 0..<100 {
+    let f = list.get(none_fs, i) ?? ((x) => x + i)
+    fresh = fresh + f(1)
+    let g = list.get(one_fs, i % 2) ?? inc
+    named = named + g(i)
+    let s = "k${i}"
+    let h = list.get(one_fs, i % 2) ?? ((x) => x + string.len(s))
+    captured = captured + h(i)
+    nested = nested + apply(list.get(one_fs, i % 2) ?? ((x) => x + i), i)
+    nested = nested + (list.get(one_fs, i % 3) ?? ((x) => x - i))(1)
+    tail = tail + choose(one_fs, i % 2)(i)
+  }
+  println("fresh ${fresh}")
+  println("named ${named}")
+  println("captured ${captured}")
+  println("nested ${nested}")
+  println("tail ${tail}")
+}
