@@ -1,7 +1,7 @@
 # spec/wasm_cross fixtures whose EVERY frame in the shipped emission pass carries a
 # certificate the portable checker (almide-verify) accepts (#2754). GROW-ONLY; re-anchor with
 # ALMIDE_UPDATE_WITNESS_FLOOR=1 cargo test --release -p almide-wasm --test witness_floor
-# certified: 906 of 926
+# certified: 911 of 926
 spec/wasm_cross/accum_recursion_declined.almd
 spec/wasm_cross/accum_recursion_int.almd
 spec/wasm_cross/adr0005_operator_equivalence.almd
@@ -127,6 +127,7 @@ spec/wasm_cross/ctor_turbofish_family.almd
 spec/wasm_cross/ctor_var_copy_semantics.almd
 spec/wasm_cross/datetime_format.almd
 spec/wasm_cross/datetime_monotonic_ns.almd
+spec/wasm_cross/datetime_parse_iso_strict.almd
 spec/wasm_cross/datetime_pre_epoch.almd
 spec/wasm_cross/declaration_forms.almd
 spec/wasm_cross/declaration_literal_domain.almd
@@ -175,6 +176,7 @@ spec/wasm_cross/exit_code_out_of_range.almd
 spec/wasm_cross/expr_stmt_comment.almd
 spec/wasm_cross/fallible_hof_effect_callback_family.almd
 spec/wasm_cross/fallible_hof_large_input.almd
+spec/wasm_cross/fallible_hof_matrix_containers.almd
 spec/wasm_cross/fallible_hof_matrix_list.almd
 spec/wasm_cross/fallible_hof_option_effect_callback.almd
 spec/wasm_cross/fallible_hof_recursive_callee.almd
@@ -450,6 +452,7 @@ spec/wasm_cross/loop_buffer_churn.almd
 spec/wasm_cross/loop_effect_match_stmt.almd
 spec/wasm_cross/loop_outer_inplace_mutate_rc.almd
 spec/wasm_cross/loop_push_trailing_increment.almd
+spec/wasm_cross/map_core_trio.almd
 spec/wasm_cross/map_entries_reclaim.almd
 spec/wasm_cross/map_entry_loop.almd
 spec/wasm_cross/map_filter.almd
@@ -592,6 +595,7 @@ spec/wasm_cross/nested_variant_tag_box.almd
 spec/wasm_cross/nested_variant_tree.almd
 spec/wasm_cross/newtype_string_form.almd
 spec/wasm_cross/num_edge_to_string.almd
+spec/wasm_cross/opt_ctor_over_call_payload.almd
 spec/wasm_cross/opt_str_str_ctor.almd
 spec/wasm_cross/option_eq.almd
 spec/wasm_cross/option_heap_eq.almd
@@ -679,6 +683,7 @@ spec/wasm_cross/ref_rust_or_pattern_heap_subject.almd
 spec/wasm_cross/regex_captures_accumulator_release.almd
 spec/wasm_cross/regex_engine.almd
 spec/wasm_cross/regex_fuzz_batch.almd
+spec/wasm_cross/regex_repetition_depth.almd
 spec/wasm_cross/repeat_size_ceiling.almd
 spec/wasm_cross/replace_empty_pat.almd
 spec/wasm_cross/repr_parity_pin.almd
