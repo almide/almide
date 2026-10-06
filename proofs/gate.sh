@@ -734,6 +734,27 @@ FP=spec/wasm_cross/fan_map_parallel_scalar.almd
 run_structural "$FP" main 0
 tamper_fixture "$FP" main '49s/^{|id}$/{|i}/' "#2755 fan par answer room"
 
+# ── #2755: the remaining shapes, one small fn each in a gate-only fixture.
+# `raised_map` / `raised_set`: a raising callback over a Map / a Set
+# instantiates the self-hosted `map.` / `set.__fallible_map`, an ordinary
+# call — the literal lambda's env is built here, lent and released (`id`,
+# line 2). `is_none`: `none` read as an operand is the NULL address, no
+# block (the borrowed param's empty line). `or_fresh`: `none ?? s + "!"`
+# joins the fresh fallback, which moves out (`im`, line 2). Drills: an env
+# never released; a release of the block `none` does not have; the joined
+# fallback never leaving.
+echo
+echo "== structural leg, fallible collection HOFs and none  ⊳  proven checker (#2755) =="
+W5=proofs/fixtures/witness_2755.almd
+run_structural "$W5" raised_map 0
+run_structural "$W5" raised_set 0
+run_structural "$W5" is_none 0
+run_structural "$W5" or_fresh 0
+tamper_fixture "$W5" raised_map '2s/^id$/i/' "#2755 fallible map env"
+tamper_fixture "$W5" raised_set '2s/^id$/i/' "#2755 fallible set env"
+tamper_fixture "$W5" is_none '1s/^$/d/' "#2755 none operand"
+tamper_fixture "$W5" or_fresh '2s/^im$/i/' "#2755 none carrier fallback"
+
 echo
 echo "== structural leg, names + capabilities  ⊳  proven checker (#2759) =="
 WS=spec/wasm_cross/witness_straightline.almd

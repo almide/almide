@@ -405,8 +405,9 @@ fn extraction_or_rt_subset(e: &IrExpr) -> Option<Why> {
         // (arg_temps.rs names a produced one), the fallback runs on its arm.
         IrExprKind::UnwrapOr { expr, fallback } => {
             // #2755: a slot of a bound block (`r.f ?? x`) is a carrier view
-            // like a local's.
-            if !crate::witness_unwrap::slot_read_of_var(expr) {
+            // like a local's; a literal `none` is the NULL address (no block,
+            // the payload arm never runs).
+            if !crate::witness_unwrap::slot_read_of_var(expr) && !matches!(expr.kind, IrExprKind::OptionNone) {
                 return Some(Why::Here(format!("UnwrapOr-carrier:{}", tag(&crate::rc_ownership::rc_tail(expr).kind))));
             }
             value_subset(expr).or_else(|| value_subset(fallback).map(|w| w.inside("fallback")))
@@ -468,7 +469,8 @@ fn read_operand(x: &IrExpr, position: &str) -> Option<Why> {
         return value_subset(x).map(|w| w.inside(position));
     }
     match &x.kind {
-        IrExprKind::Var { .. } | IrExprKind::LitStr { .. } => None,
+        // `none` is the NULL address: no block at all.
+        IrExprKind::Var { .. } | IrExprKind::LitStr { .. } | IrExprKind::OptionNone => None,
         // An element read of a bound list: a view the reader spends nothing of.
         IrExprKind::IndexAccess { .. } | IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. } => {
             value_subset(x).map(|w| w.inside(position))
