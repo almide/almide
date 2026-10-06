@@ -11,7 +11,9 @@
 //!
 //! On the artifact alone it then checks native's limits (a body over 1 MiB
 //! answers 413 and a request line over 8 KiB answers 414, the handler not
-//! called), concurrent requests (one handler in flight per instance; the
+//! called; the 431 limits are compared against native in their own test),
+//! a reused instance's heap staying flat over many requests (#3444),
+//! concurrent requests (one handler in flight per instance; the
 //! host serves the rest with more instances), and asks `/trap` last: the
 //! export host answers its own 500 and discards the instance, where native
 //! aborts the process.
@@ -100,6 +102,22 @@ fn kill_group(child: &mut Child) {
     let _ = Command::new("kill").args(["-9", "--", &format!("-{}", child.id())]).status();
     let _ = child.kill();
     let _ = child.wait();
+}
+
+/// `wasmtime serve` on the artifact, with `flags` before it: (port, server).
+fn serve_artifact(dir: &Path, wasm: &Path, flags: &[String]) -> (u16, Child) {
+    let port = free_port();
+    let mut wc = Command::new("wasmtime");
+    wc.arg("serve").arg("--addr").arg(format!("127.0.0.1:{port}")).args(flags).arg(wasm);
+    (port, spawn(wc, &dir.join("wasmtime.log")))
+}
+
+/// The fixture run natively: (port, server).
+fn serve_native(dir: &Path) -> (u16, Child) {
+    let port = free_port();
+    let mut nc = Command::new(almide_bin());
+    nc.arg("run").arg(fixture()).arg("--").arg(port.to_string());
+    (port, spawn(nc, &dir.join("native.log")))
 }
 
 /// One request on a fresh connection, read to the server's close. Every
@@ -241,13 +259,8 @@ fn the_stock_serve_export_answers_what_native_answers_under_wasmtime_serve() {
         return;
     }
 
-    let (wport, nport) = (free_port(), free_port());
-    let mut wc = Command::new("wasmtime");
-    wc.arg("serve").arg("--addr").arg(format!("127.0.0.1:{wport}")).arg(&wasm);
-    let mut served = spawn(wc, &dir.join("wasmtime.log"));
-    let mut nc = Command::new(almide_bin());
-    nc.arg("run").arg(fixture()).arg("--").arg(nport.to_string());
-    let mut native = spawn(nc, &dir.join("native.log"));
+    let (wport, mut served) = serve_artifact(&dir, &wasm, &[]);
+    let (nport, mut native) = serve_native(&dir);
 
     let script = script();
     let answers: Vec<(Vec<u8>, Vec<u8>)> = script.iter().map(|r| (ask(nport, r), ask(wport, r))).collect();
@@ -296,6 +309,108 @@ fn the_stock_serve_export_answers_what_native_answers_under_wasmtime_serve() {
     }
     assert_eq!(ok_status(&trapped), 500, "a trap answers the host's 500");
     assert_eq!(ok_status(&after_trap), 200, "the host serves on with a fresh instance");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The 431 limits (native's server core: more than 100 header fields, or a
+/// header line over 8 KiB with its CRLF), each on both sides of the
+/// boundary, against native under C-367's comparison. The fixture's
+/// request adds `Host` and `Connection`, so 98 more fields is 100 and 99 is
+/// 101; `X-Big: ` plus the value plus CRLF is the line.
+///
+/// One answer is the host's, not the export's: `wasmtime serve` refuses the
+/// 101st field itself (hyper's own limit of 100) before the handler is
+/// called, with an empty body and no `Content-Type`, where native answers
+/// the reason as text/plain. The status and the boundary agree; that case
+/// asserts both and the host's answer as it is, so a host that starts
+/// passing such a request through is noticed here.
+#[test]
+fn the_431_limits_answer_at_natives_boundaries_under_wasmtime_serve() {
+    let dir = scratch("h431");
+    let wasm = build_export(&dir);
+    if !wasmtime_serves_p3() {
+        return;
+    }
+    let (wport, mut served) = serve_artifact(&dir, &wasm, &[]);
+    let (nport, mut native) = serve_native(&dir);
+    let fields = |n: usize| (0..n).map(|k| (format!("X-H{k}"), "v".to_string())).collect::<Vec<_>>();
+    let big = |line: usize| vec![("X-Big".to_string(), "a".repeat(line - "X-Big: \r\n".len()))];
+    let cases = [
+        ("100 fields", fields(98), 200),
+        ("101 fields", fields(99), 431),
+        ("an 8192-byte header line", big(8192), 200),
+        ("an 8193-byte header line", big(8193), 431),
+    ];
+    let answers: Vec<(Vec<u8>, Vec<u8>)> = cases
+        .iter()
+        .map(|(_, h, _)| {
+            let h: Vec<(&str, &str)> = h.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+            let raw = request("GET", "/hello", &h, b"");
+            (ask(nport, &raw), ask(wport, &raw))
+        })
+        .collect();
+    kill_group(&mut served);
+    kill_group(&mut native);
+    let log = std::fs::read_to_string(dir.join("wasmtime.log")).unwrap_or_default();
+    for ((name, _, status), (n, w)) in cases.iter().zip(&answers) {
+        let (on, ow) = (observe(n), observe(w));
+        let on = on.unwrap_or_else(|e| panic!("{name}: native: {e}: {:?}", String::from_utf8_lossy(n)));
+        assert_eq!(on.status, *status, "{name}: native answered {on:?}");
+        if *name == "101 fields" {
+            let ow = ow.unwrap_or_else(|e| panic!("{name}: export: {e}: {:?}\n{log}", String::from_utf8_lossy(w)));
+            assert_eq!(on.body, b"Request Header Fields Too Large", "{name}: native's reason");
+            assert_eq!((ow.status, ow.body.as_slice(), ow.headers.is_empty()), (431, b"".as_slice(), true), "{name}: the host's answer changed: {ow:?}\n{log}");
+            continue;
+        }
+        assert!(
+            Ok(&on) == ow.as_ref(),
+            "{name} answered differently:\nnative: {on:?}\nexport: {ow:?}\nexport raw: {:?}\nwasmtime log:\n{log}",
+            String::from_utf8_lossy(w)
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// One reused instance answers many requests in constant heap (#3444): each
+/// request runs in an arena the export resets once it is answered. The
+/// artifact is served under a linear-memory ceiling a single request fits
+/// in with room to spare (it needs 512 KiB; the ceiling is 2 MiB), and 200
+/// POSTs of a 4 KiB body go to one instance (`--max-instance-reuse-count`,
+/// when the host has it; wasmtime's default for a p3 component is 128). A
+/// shim that keeps its per-request buffers (the header list, the 64 KiB body
+/// buffer, the frames, the reply) and the guest's per-request blocks
+/// outgrows the ceiling within about twenty requests: the guest's allocation
+/// fails, the host answers 500 and starts a fresh instance, which fails the
+/// same way later.
+#[test]
+fn a_reused_instance_answers_many_requests_in_constant_heap() {
+    const REQUESTS: usize = 200;
+    let dir = scratch("arena");
+    let wasm = build_export(&dir);
+    if !wasmtime_serves_p3() {
+        return;
+    }
+    let mut flags = vec!["-W".to_string(), format!("max-memory-size={}", 2 << 20)];
+    let help = Command::new("wasmtime").args(["serve", "--help"]).output().map(|o| o.stdout).unwrap_or_default();
+    if String::from_utf8_lossy(&help).contains("--max-instance-reuse-count") {
+        flags.extend(["--max-instance-reuse-count".to_string(), REQUESTS.to_string()]);
+    }
+    let (wport, mut served) = serve_artifact(&dir, &wasm, &flags);
+    let body: Vec<u8> = (0..4096).map(|k| b'a' + (k % 26) as u8).collect();
+    let mut want = b"POST ".to_vec();
+    want.extend_from_slice(&body);
+    let failed: Vec<(usize, Result<Observed, String>)> = (0..REQUESTS)
+        .map(|k| (k, observe(&ask(wport, &request("POST", "/echo", &[], &body)))))
+        .filter(|(_, o)| !matches!(o, Ok(o) if o.status == 201 && o.body == want))
+        .collect();
+    kill_group(&mut served);
+    let log = std::fs::read_to_string(dir.join("wasmtime.log")).unwrap_or_default();
+    assert!(
+        failed.is_empty(),
+        "{} of {REQUESTS} requests failed under a 2 MiB memory ceiling, the first: {:?}\nwasmtime log:\n{log}",
+        failed.len(),
+        failed.first().map(|(k, o)| (k, o.as_ref().map(|o| o.status)))
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
