@@ -195,6 +195,8 @@ impl Emitter<'_> {
         let msg = self.pool.intern("index out of bounds");
         self.f.instructions().i32_eqz().if_(BlockType::Empty).i32_const(msg as i32);
         self.emit_error_frame_abort();
+        // #2755: out of bounds ABORTS — a recorded abort terminal on its arm.
+        self.witness_abort_site();
         let mut i = self.f.instructions();
         i.end();
         i.local_get(bh).local_get(ih).i32_wrap_i64().i32_add().i64_load8_u(byte_k(0));

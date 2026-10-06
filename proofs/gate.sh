@@ -754,6 +754,15 @@ tamper_fixture "$W5" raised_map '2s/^id$/i/' "#2755 fallible map env"
 tamper_fixture "$W5" raised_set '2s/^id$/i/' "#2755 fallible set env"
 tamper_fixture "$W5" is_none '1s/^$/d/' "#2755 none operand"
 tamper_fixture "$W5" or_fresh '2s/^im$/i/' "#2755 none carrier fallback"
+# `byte_of`: a Bytes index reads a scalar byte; out of bounds aborts with
+# `b` held — a recorded abort site, whose path is a prefix of the returning
+# one (`ibd`, line 2). `tagged`: a literal omits a field whose declaration
+# default is a list of literals, a fresh block moving into the slot (`im`,
+# line 2). Drills: `b` never released; the default list never stored.
+run_structural "$W5" byte_of 0
+run_structural "$W5" tagged 0
+tamper_fixture "$W5" byte_of '2s/^ibd$/ib/' "#2755 bytes index"
+tamper_fixture "$W5" tagged '2s/^im$/i/' "#2755 list default"
 
 echo
 echo "== structural leg, names + capabilities  ⊳  proven checker (#2759) =="
