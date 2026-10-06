@@ -181,6 +181,10 @@ fn stmts_subset(stmts: &[almide_ir::IrStmt]) -> Option<String> {
                     return Some(w.at("stmt:Expr"));
                 }
             }
+            // A `()` statement, and a Var read as a statement: nothing to
+            // release (a Var's discard is a plain drop — one the discard
+            // route would release as an owned move declines there).
+            IrStmtKind::Expr { expr } if matches!(expr.kind, IrExprKind::Unit | IrExprKind::Var { .. }) => {}
             IrStmtKind::Expr { expr } => return Some(format!("stmt:Expr:{}", expr_tag(expr))),
             IrStmtKind::Assign { .. }
             | IrStmtKind::IndexAssign { .. }
@@ -585,7 +589,9 @@ fn call_subset(e: &IrExpr) -> Option<Why> {
 /// block of admitted statements, a nested branch or loop, a jump, or nothing.
 fn stmt_body_subset(e: &IrExpr) -> Option<Why> {
     match &e.kind {
-        IrExprKind::Unit | IrExprKind::Break | IrExprKind::Continue => None,
+        // A Var read as a statement (a writeback block's tail) is dropped
+        // (one the discard route releases as an owned move declines there).
+        IrExprKind::Unit | IrExprKind::Break | IrExprKind::Continue | IrExprKind::Var { .. } => None,
         // A while condition runs at the head of every iteration, the last
         // one being a check that leaves (lower_while records it as such).
         IrExprKind::While { cond, body } => value_subset(cond)
