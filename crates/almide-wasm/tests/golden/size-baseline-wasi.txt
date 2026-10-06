@@ -542,6 +542,7 @@
 9531	spec/wasm_cross/mut_call_nested_read_before.almd
 6195	spec/wasm_cross/mut_call_two_mut_args_read.almd
 5038	spec/wasm_cross/mut_heap_param.almd
+4677	spec/wasm_cross/mut_list_param_read_by_range_ops.almd
 4669	spec/wasm_cross/mut_map_param.almd
 13121	spec/wasm_cross/mut_param_alias_cow.almd
 11050	spec/wasm_cross/mut_param_alias_in_place_mutators.almd
