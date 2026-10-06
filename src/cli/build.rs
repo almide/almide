@@ -1281,7 +1281,10 @@ pub(crate) fn compile_to_wasm_bytes_surfaced(file: &str, allow_unverified: bool,
         .map(|(name, ..)| name.clone())
         .filter(|name| resolved.sources.contains_key(name))
         .collect();
-    let serve_export = library_ok && check_wasm_availability(&ir_program, &package, embedded_leg, &serve_shape)?;
+    // The availability check runs on EVERY route (run, check, build); only the
+    // serve-export verdict it answers is the build route's (#2659).
+    let serves_export = check_wasm_availability(&ir_program, &package, embedded_leg, &serve_shape)?;
+    let serve_export = library_ok && serves_export;
     // `[permissions]` (`allow`, and `proc` #2589 — statically, and as the
     // embedded host's run-time bound) was enforced in `lower_and_link_wasm_ir`.
 
