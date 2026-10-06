@@ -5,8 +5,10 @@
 //! in a fallible fold, which keeps it across an err — a frame owner the ok
 //! rebinds. The prefetch fans run no body: each awaited read's Result carrier
 //! is born in the frame and moved out or released. Every such frame must
-//! certify, and the portable checker must accept it; a compound fallible body
-//! (a closure) still declines.
+//! certify, and the portable checker must accept it. A compound fallible
+//! body is a closure called per line (#2755): each line is born, shared into
+//! the callee and released after it (`{iamd|id}`, the second arm a line
+//! skipped after an err).
 
 const PROGRAM: &str = r#"import fs
 import fan
@@ -75,6 +77,10 @@ fn io_walkers_witness_each_line_and_carrier() {
         assert!(!got.starts_with('!'), "{name}: {got:?}");
         assert!(accepted(got), "{name}: the portable checker must accept {got:?}");
     }
-    // A compound fallible body is a closure called per line: not recorded.
-    assert_eq!(w["compound"], "!decline:call-arg:Lambda:fs.__fallible_fold_lines:propagating\n");
+    // A compound fallible body is a closure called per line.
+    assert_eq!(w["compound"], "ibd\nid\n\n\n{iamd|id}\n\n{x|}{idx|}im\n{id|im}\n{|im}\n");
+    assert!(accepted(&w["compound"]));
+    // Drill: the line's share kept instead of handed to the callee.
+    let leak = w["compound"].replacen("{iamd|id}", "{iad|id}", 1);
+    assert!(!accepted(&leak), "a line share never handed over was accepted: {leak:?}");
 }
