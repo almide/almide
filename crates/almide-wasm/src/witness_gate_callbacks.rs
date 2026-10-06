@@ -5,8 +5,10 @@ use almide_ir::{IrExpr, IrExprKind};
 
 use super::{value_subset, Why};
 
-/// #2758: the fallible list HOFs (`list.__fallible_map__…`, the checker's
-/// instantiation of a callback that raises) are SELF-HOSTED: an ordinary call
+/// #2758: the fallible collection HOFs (`list.__fallible_map__…`,
+/// `map.` / `set.` / `option.__fallible_*`, the checker's instantiation of a
+/// callback that raises — stdlib/{list,map,set,option}.almd) are
+/// SELF-HOSTED: an ordinary call
 /// to a lifted stdlib body, no native arm inlines the lambda. The literal
 /// callback is then a closure VALUE — its env is built by the closure hooks
 /// and handed over under the callee's convention like any fresh argument.
@@ -21,7 +23,7 @@ use super::{value_subset, Why};
 /// (the linked self-host body calls the closure), and `list.push` stores the
 /// closure it is handed as an element (`lower_arg`, Retain).
 pub(super) fn is_self_hosted_hof(module: &str, func: &str) -> bool {
-    (module == "list" && func.starts_with("__fallible_"))
+    (matches!(module, "list" | "map" | "set" | "option") && func.starts_with("__fallible_"))
         || (!func.starts_with("__") && func.contains("__"))
         || matches!((module, func), ("bytes", "map_each") | ("list", "push"))
 }
