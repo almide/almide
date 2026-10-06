@@ -61,7 +61,8 @@ pub(super) fn is_self_hosted_hof(module: &str, func: &str) -> bool {
 ///   the other arm takes its share (`witness_payload_share`).
 ///
 /// A body that still PROPAGATES a `!` is not inlined at all (the fn-value
-/// route, list.rs), so it declines as `call-arg:Lambda:<arm>:propagating`.
+/// route, list.rs), so it declines as `call-arg:Lambda:<arm>:propagating` —
+/// except an fs walker's, whose closure route is recorded.
 /// Any other arm declines as `call-arg:Lambda:<module>.<fn>`.
 pub(super) fn inline_callback_subset(module: &str, func: &str, args: &[IrExpr]) -> Option<Why> {
     let here = |t: &str| Some(Why::Here(format!("Lambda:{module}.{func}{t}")).inside("call-arg"));
@@ -113,6 +114,13 @@ pub(super) fn inline_callback_subset(module: &str, func: &str, args: &[IrExpr]) 
     // that still propagates after the strip takes the closure route.
     let body = if module == "fan" { crate::fan::strip_callback_try(body) } else { body };
     if crate::fs_meta::expr_propagates(body) {
+        // #2755: an fs walker calls a compound callback as the closure value
+        // it is (fs_meta.rs / fs_fallible.rs closure routes): the env is an
+        // ordinary closure argument, each line an activation that shares the
+        // line (and a heap accumulator) into the callee (witness_walkers.rs).
+        if module == "fs" {
+            return args.iter().find_map(|a| value_subset(a).map(|w| w.inside("call-arg")));
+        }
         return here(":propagating");
     }
     rest.iter()
