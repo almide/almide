@@ -566,6 +566,29 @@ echo "== structural leg, unwrap-or  ⊳  proven checker (#2755) =="
 run_structural spec/wasm_cross/witness_straightline.almd or_zero 0
 tamper_structural or_zero 's/^{|im}$/{|i}/' "#2755 unwrap-or fallback"
 
+# ── #3446: the same owned join over a FN payload. `choose` tails
+# `list.get(fs, i) ?? ((x) => x + i)`: the carrier is born, read and released
+# (`ibd`), the fallback closure's env likewise around its build, the fresh
+# closure moves into the join on the none arm (`{|im}`), the list's closure
+# shares and moves on the some arm (`{|am}`), the join moves out (`im`). The
+# join stayed borrowed for a fn type, so the fallback had no owner and the
+# frame declined (`unwrap-or:unowned-fresh-fallback`); on the wasm leg one
+# closure block per fallback taken was never released. Drill: the fallback
+# never reaches the join.
+echo
+echo "== structural leg, unwrap-or over a closure  ⊳  proven checker (#3446) =="
+run_structural spec/wasm_cross/unwrap_or_fresh_closure_fallback.almd choose 0
+run_structural spec/wasm_cross/unwrap_or_fresh_closure_fallback.almd main 0
+emit_structural spec/wasm_cross/unwrap_or_fresh_closure_fallback.almd choose | sed 's/^{|im}$/{|i}/' > /tmp/structural.tamper
+if cmp -s /tmp/structural.tamper <(emit_structural spec/wasm_cross/unwrap_or_fresh_closure_fallback.almd choose); then
+  echo "FAIL structural-tamper(#3446 closure fallback): the drill changed nothing (the witness shape moved)"; exit 1
+fi
+set +e; "$ROOT/proofs/checker" ownership /tmp/structural.tamper >/dev/null 2>&1; src_rc=$?; set -e
+if [ "$src_rc" -ne 1 ]; then echo "FAIL structural-tamper(#3446 closure fallback): a fallback closure that never reached the join was accepted"; exit 1; fi
+kernel_verify ownership /tmp/structural.tamper 1   || { echo "FAIL structural-tamper(#3446 closure fallback): the kernel accepted the leak"; exit 1; }
+portable_agrees ownership /tmp/structural.tamper 1 || { echo "FAIL structural-tamper(#3446 closure fallback): almide-verify accepted the leak"; exit 1; }
+echo "ok   structural-tamper(#3446 closure fallback): the leak is rejected by the binary AND the kernel"
+
 # ── #2758: an `err(e)` RAISED from an effect body, and a call through a record
 # FIELD. `raise`: the literal payload moves into the err block, the block
 # leaves on the raising arm, the ok carrier on the other (`{|im}` each).
