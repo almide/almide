@@ -162,11 +162,14 @@ fn stmts_subset(stmts: &[almide_ir::IrStmt]) -> Option<String> {
             }
             // #2756: a statement-position branch; its arms are statement
             // bodies.
-            // #2757: loops and their jumps — also statement bodies.
+            // #2757: loops and their jumps — also statement bodies, as are a
+            // `()` and a Var read as a statement (#2755, dropped).
             IrStmtKind::Expr { expr }
                 if matches!(
                     expr.kind,
-                    IrExprKind::If { .. }
+                    IrExprKind::Unit
+                        | IrExprKind::Var { .. }
+                        | IrExprKind::If { .. }
                         | IrExprKind::Match { .. }
                         | IrExprKind::While { .. }
                         | IrExprKind::ForIn { .. }
@@ -181,10 +184,6 @@ fn stmts_subset(stmts: &[almide_ir::IrStmt]) -> Option<String> {
                     return Some(w.at("stmt:Expr"));
                 }
             }
-            // A `()` statement, and a Var read as a statement: nothing to
-            // release (a Var's discard is a plain drop — one the discard
-            // route would release as an owned move declines there).
-            IrStmtKind::Expr { expr } if matches!(expr.kind, IrExprKind::Unit | IrExprKind::Var { .. }) => {}
             IrStmtKind::Expr { expr } => return Some(format!("stmt:Expr:{}", expr_tag(expr))),
             IrStmtKind::Assign { .. }
             | IrStmtKind::IndexAssign { .. }
