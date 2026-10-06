@@ -1,7 +1,7 @@
 # spec/wasm_cross fixtures whose EVERY frame in the shipped emission pass carries a
 # certificate the portable checker (almide-verify) accepts (#2754). GROW-ONLY; re-anchor with
 # ALMIDE_UPDATE_WITNESS_FLOOR=1 cargo test --release -p almide-wasm --test witness_floor
-# certified: 891 of 926
+# certified: 896 of 926
 spec/wasm_cross/accum_recursion_declined.almd
 spec/wasm_cross/accum_recursion_int.almd
 spec/wasm_cross/adr0005_operator_equivalence.almd
@@ -273,6 +273,7 @@ spec/wasm_cross/gleam_multi_subject.almd
 spec/wasm_cross/gleam_pipe_shapes.almd
 spec/wasm_cross/gleam_precedence_unary.almd
 spec/wasm_cross/gleam_records_tuples.almd
+spec/wasm_cross/gleam_toplet_consts.almd
 spec/wasm_cross/global_in_both_arms.almd
 spec/wasm_cross/global_in_shortcircuit_operand.almd
 spec/wasm_cross/grain_functions.almd
@@ -653,13 +654,17 @@ spec/wasm_cross/reduce_str.almd
 spec/wasm_cross/ref_gleam_capture_shadow.almd
 spec/wasm_cross/ref_gleam_div_zero_abort.almd
 spec/wasm_cross/ref_gleam_fnvalue_shadow.almd
+spec/wasm_cross/ref_gleam_or_pattern_alternatives.almd
 spec/wasm_cross/ref_gleam_tail_deep.almd
 spec/wasm_cross/ref_grain_nan_struct.almd
 spec/wasm_cross/ref_grain_or_pattern_alias_match.almd
 spec/wasm_cross/ref_int_min_div_abort.almd
+spec/wasm_cross/ref_koka_guard_liveness.almd
 spec/wasm_cross/ref_koka_rescrutinee.almd
 spec/wasm_cross/ref_roc_shared_cow.almd
 spec/wasm_cross/ref_roc_trmc_control.almd
+spec/wasm_cross/ref_rust_or_pattern_guard_count.almd
+spec/wasm_cross/ref_rust_or_pattern_guard_retry.almd
 spec/wasm_cross/ref_rust_or_pattern_heap_subject.almd
 spec/wasm_cross/regex_captures_accumulator_release.almd
 spec/wasm_cross/regex_engine.almd
