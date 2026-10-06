@@ -624,7 +624,10 @@ fn stmt_body_subset(e: &IrExpr) -> Option<Why> {
 /// temporary born and released, a share moved into a callee): the path that
 /// falls through to the next arm leaves it in that same state, and the
 /// events checked on the guard's own arm are the ones that path ran. A guard
-/// that BINDS a local declines — the local outlives the guard.
+/// that BINDS a local keeps that local past the guard, on the arm's path and
+/// on every path it falls through to: the emitter records that arm as its
+/// verdict and select sites (witness_guard.rs), so the guard's events reach
+/// both.
 fn match_head_subset(subject: &IrExpr, arms: &[almide_ir::IrMatchArm]) -> Option<String> {
     // A tuple / record literal subject is a fresh block the match only
     // reads: no route owns or releases it (arg_temps.rs names a produced or
@@ -663,13 +666,8 @@ fn match_head_subset(subject: &IrExpr, arms: &[almide_ir::IrMatchArm]) -> Option
         if pattern_has_named_rest(&a.pattern, a.guard.is_none()) {
             return Some("pattern:list-rest".into());
         }
-        if let Some(g) = a.guard.as_ref().filter(|g| !rc_free(g)) {
-            if binds_a_local(g) {
-                return Some("match-guard:binds".into());
-            }
-            if let Some(w) = value_subset(g) {
-                return Some(w.at("match-guard"));
-            }
+        if let Some(w) = a.guard.as_ref().filter(|g| !rc_free(g)).and_then(value_subset) {
+            return Some(w.at("match-guard"));
         }
     }
     None
@@ -677,7 +675,7 @@ fn match_head_subset(subject: &IrExpr, arms: &[almide_ir::IrMatchArm]) -> Option
 
 /// Does `e` bind a local anywhere (a `let` in a block, a lambda param, a
 /// loop var, a pattern)? A guard that does keeps that local past the guard.
-fn binds_a_local(e: &IrExpr) -> bool {
+pub(crate) fn binds_a_local(e: &IrExpr) -> bool {
     struct V(bool);
     impl almide_ir::visit::IrVisitor for V {
         fn visit_expr(&mut self, e: &IrExpr) {

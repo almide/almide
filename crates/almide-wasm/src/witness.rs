@@ -600,6 +600,7 @@ mod rest;
 #[path = "witness_gate.rs"]
 mod gate;
 pub use gate::{effect_subset, straightline_subset, top_let_subset};
+pub(crate) use gate::binds_a_local;
 
 // ── the collection sink (diagnostic channel, test-enabled) ──────────────
 

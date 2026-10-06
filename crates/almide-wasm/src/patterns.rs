@@ -94,6 +94,8 @@ impl Emitter<'_> {
         // guard (it references them); locals are function-scoped, so on a
         // guarded arm the body needs no re-bind, and a failed guard's
         // binds are harmlessly overwritten by whichever arm matches next.
+        // A guard that binds a local is recorded as two sites (witness_guard.rs).
+        let split = self.witness_guard_splits(arm);
         match &arm.guard {
             None => self.emit_pattern_test(&arm.pattern, subj_ty, scr)?,
             Some(g) if irrefutable => {
@@ -104,9 +106,11 @@ impl Emitter<'_> {
             Some(g) => {
                 self.emit_pattern_test(&arm.pattern, subj_ty, scr)?;
                 self.f.instructions().if_(BlockType::Result(ValType::I32));
+                self.witness_verdict_open(split);
                 self.emit_pattern_binds(&arm.pattern, subj_ty, scr)?;
                 self.witness_pattern_views(&arm.pattern);
                 self.lower(g, Some(BOOL))?;
+                self.witness_verdict_close(split);
                 self.f.instructions().else_().i32_const(0).end();
             }
         }
@@ -115,6 +119,7 @@ impl Emitter<'_> {
             None => BlockType::Empty,
         };
         self.f.instructions().if_(bt);
+        self.witness_select_open(split);
         // A statement-position chain keeps the loop context (#2745): the
         // arm's if_ is one more label between a `break` / `continue` in
         // the body and its target. (Value position suspends it in
@@ -151,6 +156,7 @@ impl Emitter<'_> {
             }
         })();
         self.shift_loop_labels(-1);
+        self.witness_select_close(split);
         r?;
         self.f.instructions().end();
         Ok(())
