@@ -738,7 +738,7 @@ tamper_fixture "$FP" main '49s/^{|id}$/{|i}/' "#2755 fan par answer room"
 # `raised_map` / `raised_set`: a raising callback over a Map / a Set
 # instantiates the self-hosted `map.` / `set.__fallible_map`, an ordinary
 # call — the literal lambda's env is built here, lent and released (`id`,
-# line 2). `is_none`: `none` read as an operand is the NULL address, no
+# line 2). `none_eq`: `none` read as an operand is the NULL address, no
 # block (the borrowed param's empty line). `or_fresh`: `none ?? s + "!"`
 # joins the fresh fallback, which moves out (`im`, line 2). Drills: an env
 # never released; a release of the block `none` does not have; the joined
@@ -748,11 +748,11 @@ echo "== structural leg, fallible collection HOFs and none  ⊳  proven checker 
 W5=proofs/fixtures/witness_2755.almd
 run_structural "$W5" raised_map 0
 run_structural "$W5" raised_set 0
-run_structural "$W5" is_none 0
+run_structural "$W5" none_eq 0
 run_structural "$W5" or_fresh 0
 tamper_fixture "$W5" raised_map '2s/^id$/i/' "#2755 fallible map env"
 tamper_fixture "$W5" raised_set '2s/^id$/i/' "#2755 fallible set env"
-tamper_fixture "$W5" is_none '1s/^$/d/' "#2755 none operand"
+tamper_fixture "$W5" none_eq '1s/^$/d/' "#2755 none operand"
 tamper_fixture "$W5" or_fresh '2s/^im$/i/' "#2755 none carrier fallback"
 # `byte_of`: a Bytes index reads a scalar byte; out of bounds aborts with
 # `b` held — a recorded abort site, whose path is a prefix of the returning
@@ -763,6 +763,19 @@ run_structural "$W5" byte_of 0
 run_structural "$W5" tagged 0
 tamper_fixture "$W5" byte_of '2s/^ibd$/ib/' "#2755 bytes index"
 tamper_fixture "$W5" tagged '2s/^im$/i/' "#2755 list default"
+# `as_text`: a typed error `!`-ed into the String channel — its repr text is
+# born and moves into a fresh err block (`{|im}`, line 2), which leaves the
+# frame (line 3). `pick_text`: a borrowed `if` stored into a list slot is a
+# select site, each arm sharing its own source into the slot (`{|am}`, line
+# 1). `stmt_var`: a Var read as a statement is dropped (the borrowed
+# param's empty line). Drills: the repr text never stored; a source's share
+# never moved; a release of a block the frame never held.
+run_structural "$W5" as_text 0
+run_structural "$W5" pick_text 0
+run_structural "$W5" stmt_var 0
+tamper_fixture "$W5" as_text '2s/^{|im}$/{|i}/' "#2755 err repr"
+tamper_fixture "$W5" pick_text '1s/^{|am}$/{|a}/' "#2755 stored if"
+tamper_fixture "$W5" stmt_var '1s/^$/d/' "#2755 var statement"
 
 echo
 echo "== structural leg, names + capabilities  ⊳  proven checker (#2759) =="

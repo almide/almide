@@ -78,6 +78,7 @@ impl Emitter<'_> {
         ert: SliceTy,
         err_ir: Option<&Ty>,
         owned_carrier: bool,
+        wc: crate::witness_unwrap::WCarrier,
     ) -> Result<(), EmitError> {
         let car = self.hold_i32()?;
         self.f.instructions().local_get(self.scr_i32_local).local_set(car);
@@ -121,9 +122,11 @@ impl Emitter<'_> {
             let dec = self.dec_fn_of(carrier_ty);
             self.f.instructions().local_get(car).call(dec);
         }
+        self.witness_repr_built(wc);
         let plan = self.exit_plan(crate::exit_plan::Continuation::ReturnError);
         self.emit_exit(&plan);
         self.f.instructions().local_get(start).return_();
+        self.witness_unwrap_exit(wc, crate::witness_unwrap::Leaves::Fresh);
         self.release_i32();
         self.release_i32();
         self.release_i32();

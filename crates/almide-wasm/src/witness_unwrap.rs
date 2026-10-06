@@ -27,9 +27,11 @@
 //! ends, and the path ends in the checker's abort terminal (`t`, format v6),
 //! which discharges every credit still outstanding on it.
 //!
-//! The routes that convert the error on the way out (a typed error into a
-//! String channel, #2725) and a pure frame's `!` (a trap) have RC sites or
-//! trap edges this does not record: they decline.
+//! A typed error converted into a String channel on the way out (#2725) is
+//! recorded as its repr block moving into a fresh err block that leaves
+//! (`witness_repr_built`). The joined `List[String]` route and a pure
+//! frame's `!` (a trap) have RC sites or trap edges this does not record:
+//! they decline.
 
 use crate::emitter::Emitter;
 
@@ -154,6 +156,20 @@ impl Emitter<'_> {
             (Leaves::Nothing, _) => {}
         }
         w.frame_replaced();
+    }
+
+    /// #2755: a typed error `!`-ed into a String channel (err_channel.rs
+    /// `propagate_err_as_repr`), once its message is built: the repr text
+    /// is a fresh block moved into the fresh err block (`im`); an OWNED
+    /// carrier was released (`d`), a borrowed one is the exit's to release.
+    /// The exit is armed; the err block leaves at `witness_unwrap_exit`.
+    pub(crate) fn witness_repr_built(&mut self, c: WCarrier) {
+        let Some(w) = self.witness.as_mut() else { return };
+        w.temp_move();
+        if let WCarrier::Temp(o) = c {
+            w.temp_ops(o, "d");
+        }
+        w.arm_err_exit();
     }
 
     /// A route that leaves the frame some other way (a converted error, an

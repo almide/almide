@@ -99,7 +99,12 @@ impl Emitter<'_> {
         if self.rc_droppable(ty) && self.rc_owned_result(e) {
             let dec = self.dec_fn_of(ty);
             self.f.instructions().call(dec);
-            self.witness_discard();
+            // A Var's own block released here is not a temporary's (#2755).
+            if matches!(crate::rc_ownership::rc_tail(e).kind, IrExprKind::Var { .. }) {
+                self.witness_decline("stmt:Expr:Var-owned");
+            } else {
+                self.witness_discard();
+            }
         } else {
             self.f.instructions().drop();
         }

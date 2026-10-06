@@ -24,7 +24,8 @@
 //! over two borrowed reads (#2755, `bind:view-result`): the Bind route's
 //! `rc_inc_top` lands on whichever block the `if` chose, so the share is
 //! recorded as a select site after the `if`'s own, each arm aliasing the
-//! local to its own source (`witness_bind_select`).
+//! local to its own source (`witness_bind_select`), and the same `if`
+//! handed to a holder (`witness_share_select`).
 
 use crate::emitter::Emitter;
 
@@ -96,6 +97,25 @@ impl Emitter<'_> {
                 Some(l) if w.bind_alias(idx, l) => {}
                 Some(_) => w.poison(),
                 None => w.bind_view(idx),
+            }
+        }
+        w.branch_close();
+        true
+    }
+
+    /// A borrowed `if` handed to a new holder (`witness_share_or_move`, after
+    /// the guard's share): a select site whose arms each share their own
+    /// source and move it (`am`). False when the value is not such an `if`.
+    pub(crate) fn witness_share_select(&mut self, e: &almide_ir::IrExpr) -> bool {
+        let Some(sources) = self.witness_if_sources(e) else { return false };
+        let Some(w) = self.witness.as_mut() else { return true };
+        w.branch_open();
+        for src in sources {
+            w.branch_arm();
+            match src {
+                Some(l) if w.arg_share_move(l) => {}
+                Some(_) => w.poison(),
+                None => w.view_share_move(),
             }
         }
         w.branch_close();
