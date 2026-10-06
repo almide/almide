@@ -47,7 +47,7 @@ pub(super) fn is_self_hosted_hof(module: &str, func: &str) -> bool {
 ///   enumerate lowering (list_fuse.rs, list_enumerate_fold.rs): one
 ///   activation per element over every inlined stage (#2755);
 /// - #2755: the other list arms (`sort_by`'s keys, `flat_map`, `filter_map`,
-///   `take_while`, `drop_while`, `unique_by`'s keys, `update`, `reduce`,
+///   `take_while`, `drop_while`, `unique_by`'s and `group_by`'s keys, `update`, `reduce`,
 ///   `scan`, `zip_with`), `matrix.map`, and the map / set arms (`fold`,
 ///   `find`, `filter`, the predicates, `map`, `update`, `upsert`), each
 ///   settling the body's value at the instruction that takes it
@@ -65,7 +65,7 @@ pub(super) fn inline_callback_subset(module: &str, func: &str, args: &[IrExpr]) 
     let here = |t: &str| Some(Why::Here(format!("Lambda:{module}.{func}{t}")).inside("call-arg"));
     let arity = match (module, func, args) {
         ("list", "map" | "filter" | "find" | "any" | "all" | "count", [_, _]) => 1,
-        ("list", "sort_by" | "flat_map" | "filter_map" | "take_while" | "drop_while" | "unique_by", [_, _]) | ("list", "update", [_, _, _]) => 1,
+        ("list", "sort_by" | "flat_map" | "filter_map" | "take_while" | "drop_while" | "unique_by" | "group_by", [_, _]) | ("list", "update", [_, _, _]) => 1,
         ("list", "reduce", [_, _]) | ("list", "scan" | "zip_with", [_, _, _]) => 2,
         ("matrix", "map", [_, _]) => 1,
         ("set", "filter" | "map", [_, _]) | ("map", "map", [_, _]) | ("map", "update", [_, _, _]) => 1,
