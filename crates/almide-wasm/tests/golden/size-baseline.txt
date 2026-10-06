@@ -885,6 +885,7 @@
 2530	spec/wasm_cross/unwrap_in_callarg.almd
 2402	spec/wasm_cross/unwrap_in_if_arm.almd
 3064	spec/wasm_cross/unwrap_in_recursion.almd
+3631	spec/wasm_cross/unwrap_or_fresh_closure_fallback.almd
 4485	spec/wasm_cross/unwrap_or_heap_arg_and_subject.almd
 4355	spec/wasm_cross/unwrap_or_heap_payload.almd
 4984	spec/wasm_cross/unwrap_or_operand.almd
