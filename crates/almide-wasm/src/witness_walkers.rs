@@ -12,6 +12,14 @@
 //! A prefetch fan runs no callback body: each awaited read is a Result
 //! carrier born in the frame, settled as the sequential fan's
 //! (`witness_fan_step`).
+//!
+//! An instance-parallel chunk `fan.__par_K(xs, fallback, c…)`
+//! (fan_par_lower.rs) is a branch site on the host's answer: the SERVED arm
+//! builds the result list from the answer room (one activation per element,
+//! a tuple result's fresh block moving into the list, `im`), the other arm
+//! lowers `fallback` — the sequential `list.map`, its sites the ordinary
+//! hooks — whose owned result is the site's value. The request and answer
+//! rooms are born before the site and freed after it (`id` each).
 
 use crate::emitter::Emitter;
 use crate::SliceTy;
@@ -259,6 +267,43 @@ impl Emitter<'_> {
             }
         } else {
             self.witness_share_or_move(arm, "fan:borrowed-slot");
+        }
+    }
+
+    /// `fan.__par_K`'s request room was allocated (before the request loop).
+    pub(crate) fn witness_par_room(&mut self) -> Option<u32> {
+        self.witness.as_mut().map(|w| w.temp_born())
+    }
+
+    /// The host op's verdict site opens on its SERVED arm: one activation of
+    /// the copy-out loop, where a tuple element's fresh block moves into the
+    /// result list (`im`).
+    pub(crate) fn witness_par_served(&mut self, tuple: bool) {
+        let Some(w) = self.witness.as_mut() else { return };
+        w.branch_open();
+        w.branch_arm();
+        w.loop_open();
+        if tuple {
+            w.temp_move();
+        }
+        w.loop_close();
+    }
+
+    /// The not-served arm lowers `fallback` in place (never through
+    /// `lower_arg`): the node is hooked here for the module-call audit, and
+    /// its owned result is the site's value.
+    pub(crate) fn witness_par_fallback(&mut self, fallback: &almide_ir::IrExpr) {
+        let Some(w) = self.witness.as_mut() else { return };
+        w.note_arg(fallback as *const almide_ir::IrExpr as usize);
+        w.branch_arm();
+    }
+
+    /// The site joins, and the two rooms are freed.
+    pub(crate) fn witness_par_close(&mut self, rooms: [Option<u32>; 2]) {
+        let Some(w) = self.witness.as_mut() else { return };
+        w.branch_close();
+        for o in rooms.into_iter().flatten() {
+            w.temp_ops(o, "d");
         }
     }
 }
