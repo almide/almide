@@ -303,7 +303,8 @@ fn to_p3_shaped(bytes: &[u8], host_ops: &[i32], service: bool) -> anyhow::Result
     let serve_texts = sabi.as_ref().map(|a| ServeTexts::new(park, a));
     if let (Some(a), Some(st), Some(sg), Some(sf)) = (&sabi, &serve_texts, serve_globals, serve_fns) {
         code.function(&shim_serve_op(g, sg));
-        code.function(&shim_serve_handle(g, sg, sf, a, st, main_index + shift));
+        let arena = ServeArena::new(heap_global, g);
+        code.function(&shim_serve_handle(g, sg, sf, (a, st, &arena), main_index + shift));
         code.function(&shim_serve_cell());
     }
     let fs_to = fs_import_at.map(|import_at| SpliceTargets {
