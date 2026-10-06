@@ -708,6 +708,17 @@ GI=spec/wasm_cross/ctor_scalar_call_payload.almd
 run_structural "$GI" main 0
 tamper_fixture "$GI" main '16s/^ibabdd$/ibabd/' "#2755 bound if"
 
+# ── #2755: `list.group_by`'s inlined key callback. One activation per
+# element: an owned key is born, released when its group is present and
+# moved into the new entry when absent (`{id|im}`, line 93 of the fixture's
+# `main`); the absent arm's first group list is born into the entry
+# (`{|im}`), and a handle element is shared into its group on both arms.
+# Drill: the present arm's key never released.
+echo
+echo "== structural leg, group_by key  ⊳  proven checker (#2755) =="
+GB=spec/wasm_cross/map_insertion_order.almd
+run_structural "$GB" main 0
+tamper_fixture "$GB" main '93s/^{id|im}$/{i|im}/' "#2755 group_by key"
 
 echo
 echo "== structural leg, names + capabilities  ⊳  proven checker (#2759) =="

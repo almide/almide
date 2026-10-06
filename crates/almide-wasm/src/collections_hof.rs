@@ -639,11 +639,13 @@ impl Emitter<'_> {
             i.block(BlockType::Empty).loop_(BlockType::Empty);
         }
         self.hof_elem_into(elem, bh, ch, ih, params[0]);
+        self.witness_callback_open(cb, None);
         self.lower(body, Some(kt))?;
         // The key the callback produced: stored on the absent path (a
         // borrowed one takes +1 there), dropped on the present path (an
         // owned one is released there).
         let key_owned = self.rc_owned_result(body);
+        self.witness_group_step(body, kt, key_owned, (params[0], elem));
         {
             let mut i = self.f.instructions();
             i.local_set(hkey);
