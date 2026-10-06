@@ -745,6 +745,7 @@
 45	25	405	45	spec/wasm_cross/stdlib_opaque_shadow.almd
 82	38	665	82	spec/wasm_cross/stdlib_type_shadow.almd
 14	9	188	14	spec/wasm_cross/str_result_heap_bind.almd
+225	193	1517	225	spec/wasm_cross/string_bidi_controls_literal.almd
 0	0	0	0	spec/wasm_cross/string_bool_ordering.almd
 18	10	120062	18	spec/wasm_cross/string_byte_slice.almd
 120	114	2032	120	spec/wasm_cross/string_case_unicode.almd
@@ -867,6 +868,7 @@
 77	57	578	77	spec/wasm_cross/top_let_stored_in_container.almd
 0	0	0	0	spec/wasm_cross/toplevel_const_wrapping.almd
 312	302	62801	312	spec/wasm_cross/trig_libm.almd
+32	13	243	32	spec/wasm_cross/tuple_bound_list_mapped_in_loop.almd
 10	0	184	10	spec/wasm_cross/tuple_eq.almd
 7	1	108	7	spec/wasm_cross/tuple_ops.almd
 32	20	342	32	spec/wasm_cross/tuple_scrutinee_list_payload_into_ok.almd
