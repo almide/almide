@@ -26,6 +26,14 @@
 //                              guest's loop ends and `main` returns.
 //   op 72 reply                the response cells, copied for `handle`.
 //
+// Each request runs in an arena (#3444): `handle` saves the guest
+// allocator's state and the shim's heap-pointing caches on entry and
+// restores them once the response, its trailers and the streams are done,
+// so the shim's buffers (the header list, the body, the frames, the reply)
+// and everything the guest allocated for the request (the parsed request,
+// the app's response, the top-lets `main` evaluates) are taken back at
+// once. A reused instance's heap use is the largest request's, not the sum.
+//
 // The request reaches the guest as native's server core reads it: header
 // values, the target and the body decoded as UTF-8 with replacement (Rust's
 // `from_utf8_lossy`, the maximal-subpart rule), headers in the host's order.
@@ -410,6 +418,8 @@ impl HandleLocals {
     const HEAD: u32 = 37;
     const S64: u32 = 38;
     const I32S: u32 = 37;
+    /// The arena's saved words, past `S64` (ServeArena::LOCALS of them).
+    const ARENA: u32 = 39;
 }
 
 /// Split the `stream.new` / `future.new` pair in `S64`: tx = high half,
@@ -716,13 +726,15 @@ fn http_decimal_i32(i: &mut wasm_encoder::InstructionSink<'_>, at: i32, n: u32, 
 }
 
 /// `(request) -> status`: the async-lifted `wasi:http/handler.handle`.
-fn shim_serve_handle(g: P3Globals, s: ServeGlobals, fns: ServeFns, abi: &ServeAbi, t: &ServeTexts, main: u32) -> Function {
+fn shim_serve_handle(g: P3Globals, s: ServeGlobals, fns: ServeFns, (abi, t, arena): (&ServeAbi, &ServeTexts, &ServeArena), main: u32) -> Function {
     use HandleLocals as L;
-    let mut f = Function::new([(L::I32S, ValType::I32), (1, ValType::I64)]);
+    let mut f = Function::new([(L::I32S, ValType::I32), (1, ValType::I64), (ServeArena::LOCALS, ValType::I32)]);
     debug_assert_eq!(L::S64, L::I32S + 1);
+    debug_assert_eq!(L::ARENA, L::S64 + 1);
     let mut i = f.instructions();
     // One handler in flight per instance: the guest is not re-entrant.
     i.call(S_BP_INC);
+    arena.open(&mut i);
     serve_read_request(&mut i, g, abi, t);
     i.local_get(L::REJ_PTR).if_(BlockType::Empty);
     i.local_get(L::REJ_PTR).local_set(L::CUR);
@@ -748,6 +760,7 @@ fn shim_serve_handle(g: P3Globals, s: ServeGlobals, fns: ServeFns, abi: &ServeAb
         i.i32_const(-1).global_set(g_fut);
         i.end();
     }
+    arena.close(&mut i);
     i.call(S_BP_DEC);
     i.i32_const(0); // EXIT: the task is complete.
     i.end();

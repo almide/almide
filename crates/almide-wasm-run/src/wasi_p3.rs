@@ -476,6 +476,7 @@ fn mem64(offset: u64) -> MemArg {
 
 // The stock serve export (`to_p3_service`'s shims): wasi_p3_serve.rs.
 include!("wasi_p3_serve.rs");
+include!("wasi_p3_serve_arena.rs");
 
 // The p3 transform itself (`to_p3`): wasi_p3_emit.rs.
 include!("wasi_p3_emit.rs");
