@@ -58,6 +58,23 @@ impl Emitter<'_> {
         Some(self.witness.as_mut()?.temp_born())
     }
 
+    /// A closure-route walk (#2755: a compound callback called through its
+    /// env, fs_meta.rs / fs_fallible.rs) hands the callee its own credit of
+    /// an argument (the closure convention's `rc_inc_top`): the share moves
+    /// into the callee (`am`) — on the heap accumulator's local, or on the
+    /// line's object.
+    pub(crate) fn witness_walk_share(&mut self, acc: Option<u32>, line: Option<u32>) {
+        let Some(w) = self.witness.as_mut() else { return };
+        if let Some(l) = acc
+            && !w.arg_share_move(l)
+        {
+            w.poison();
+        }
+        if let Some(o) = line {
+            w.temp_ops(o, "am");
+        }
+    }
+
     /// The walk released the line, and the iteration ends.
     pub(crate) fn witness_line_close(&mut self, line: Option<u32>) {
         if let (Some(w), Some(o)) = (self.witness.as_mut(), line) {
