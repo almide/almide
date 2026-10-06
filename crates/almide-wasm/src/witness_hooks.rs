@@ -118,6 +118,9 @@ impl Emitter<'_> {
         // A top-let GLOBAL holds its own credit for the program's life: a
         // share of it is a view's, like a slot read's.
         let view = crate::witness_unwrap::is_extraction_view(e) || self.witness_top_let_ty(e).is_some();
+        if !fresh && src_local.is_none() && !view && self.witness_share_select(e) {
+            return;
+        }
         let Some(w) = self.witness.as_mut() else { return };
         if fresh {
             w.temp_move();
