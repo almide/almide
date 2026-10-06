@@ -692,6 +692,22 @@ tamper_fixture "$GO" guarded '3s/{|ibd}$/{|ib}/' "#2755 guard-bound carrier"
 GT=spec/wasm_cross/gleam_toplet_consts.almd
 run_structural "$GT" main 0
 tamper_fixture "$GT" main '9s/^am$/a/' "#2755 borrowed top-let"
+# A `let` of a top-let GLOBAL (`let snap = speeds`, line 3): the Bind route's
+# share is a view's (the global holds its own credit, a `var` one until a
+# writer replaces it), and the local owns it from there to its release
+# (`ad`). Drill: the snapshot never released.
+GV=spec/wasm_cross/module_var_alias_cow.almd
+run_structural "$GV" main 0
+tamper_fixture "$GV" main '3s/^ad$/a/' "#2755 bound global"
+# A `let` of a borrowed `if` over two bound locals (`if true then y0 else
+# y0`, the carrier arg_temps names for `??`): the share is a select site
+# after the `if`'s own, each arm aliasing the local to its own source, so
+# the alias's release lands on that source's line (`ibabdd`, line 16).
+# Drill: the alias never released.
+GI=spec/wasm_cross/ctor_scalar_call_payload.almd
+run_structural "$GI" main 0
+tamper_fixture "$GI" main '16s/^ibabdd$/ibabd/' "#2755 bound if"
+
 
 echo
 echo "== structural leg, names + capabilities  ⊳  proven checker (#2759) =="
