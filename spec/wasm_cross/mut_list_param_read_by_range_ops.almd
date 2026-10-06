@@ -1,0 +1,41 @@
+// @contract: C-226
+// #3442: a `mut` list parameter read by value by a read-only list op (the op
+// copies what it keeps, or takes it from the borrow) compiles and answers on
+// both targets; the fn that appends before dropping writes the append back to
+// the caller, as every mut parameter does.
+fn rest(mut xs: List[Int], n: Int) -> List[Int] = list.drop(xs, n)
+
+fn front(mut xs: List[Int], n: Int) -> List[Int] = list.take(xs, n)
+
+fn mid(mut xs: List[Int]) -> List[Int] = list.slice(xs, 1, 3)
+
+fn tail_end(mut xs: List[Int]) -> List[Int] = list.drop_end(xs, 1)
+
+fn head_end(mut xs: List[Int]) -> List[Int] = list.take_end(xs, 2)
+
+fn small(mut xs: List[Int]) -> List[Int] = list.take_while(xs, (x) => x < 3)
+
+fn big(mut xs: List[Int]) -> List[Int] = list.drop_while(xs, (x) => x < 3)
+
+fn first_even(mut xs: List[Int]) -> Int = list.find(xs, (x) => x % 2 == 0) ?? -1
+
+fn grow_then_drop(mut xs: List[Int]) -> List[Int] = {
+  xs = xs + [9]
+  list.drop(xs, 2)
+}
+
+fn show(xs: List[Int]) -> String = xs |> list.map((x) => int.to_string(x)) |> list.join(",")
+
+effect fn main() -> Unit = {
+  var xs = [1, 2, 3, 4]
+  println(show(rest(xs, 1)))
+  println(show(front(xs, 2)))
+  println(show(mid(xs)))
+  println(show(tail_end(xs)))
+  println(show(head_end(xs)))
+  println(show(small(xs)))
+  println(show(big(xs)))
+  println(int.to_string(first_even(xs)))
+  println(show(grow_then_drop(xs)))
+  println(show(xs))
+}
