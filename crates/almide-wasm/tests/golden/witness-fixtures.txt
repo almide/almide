@@ -1,7 +1,7 @@
 # spec/wasm_cross fixtures whose EVERY frame in the shipped emission pass carries a
 # certificate the portable checker (almide-verify) accepts (#2754). GROW-ONLY; re-anchor with
 # ALMIDE_UPDATE_WITNESS_FLOOR=1 cargo test --release -p almide-wasm --test witness_floor
-# certified: 911 of 926
+# certified: 916 of 926
 spec/wasm_cross/accum_recursion_declined.almd
 spec/wasm_cross/accum_recursion_int.almd
 spec/wasm_cross/adr0005_operator_equivalence.almd
@@ -51,8 +51,11 @@ spec/wasm_cross/bytes_equality_call_operands.almd
 spec/wasm_cross/bytes_f16.almd
 spec/wasm_cross/bytes_f16_offset_overflow.almd
 spec/wasm_cross/bytes_from_list_param.almd
+spec/wasm_cross/bytes_index_bounds_read_negative.almd
+spec/wasm_cross/bytes_index_bounds_read_past_end.almd
 spec/wasm_cross/bytes_index_bounds_write_negative.almd
 spec/wasm_cross/bytes_index_bounds_write_past_end.almd
+spec/wasm_cross/bytes_index_write_truncates.almd
 spec/wasm_cross/bytes_negative_offset_family.almd
 spec/wasm_cross/bytes_new_exhaustion.almd
 spec/wasm_cross/bytes_pad_ceiling_oom.almd
@@ -99,6 +102,8 @@ spec/wasm_cross/codec_empty_and_bool.almd
 spec/wasm_cross/codec_extra_keys.almd
 spec/wasm_cross/codec_float_int.almd
 spec/wasm_cross/codec_int_float_boundaries.almd
+spec/wasm_cross/codec_list_default.almd
+spec/wasm_cross/codec_list_default_field.almd
 spec/wasm_cross/codec_list_list_field.almd
 spec/wasm_cross/codec_nested_records.almd
 spec/wasm_cross/codec_none_omission.almd
