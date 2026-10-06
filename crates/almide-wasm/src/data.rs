@@ -638,7 +638,12 @@ impl Emitter<'_> {
     /// borrowed or pool-static fallback (a var, a string literal) leaves both
     /// arms views, as before, and so does a payload type arg_temps does not
     /// name in a reader position (`arg_temps::bindable_ty`): an owned join
-    /// there would be read and never released.
+    /// there would be read and never released. A closure (`Ty::Fn`) joins
+    /// owned too (#3446): no reader position takes a Fn value — it is
+    /// called, bound, passed or stored, each of which spends or releases an
+    /// owned credit — and left borrowed, the bind's share landed on the
+    /// fresh fallback (`list.get(fs, i) ?? ((x) => x + i)`), one closure
+    /// block per fallback taken, never released.
     fn own_unwrap_or_join(&mut self, e: &IrExpr, fallback: &IrExpr, et: SliceTy) {
         if !self.unwrap_or_owns_join(e, fallback, et) {
             return;
@@ -651,7 +656,7 @@ impl Emitter<'_> {
     /// witness reads the same predicate, witness_hooks.rs.)
     pub(crate) fn unwrap_or_owns_join(&self, e: &IrExpr, fallback: &IrExpr, et: SliceTy) -> bool {
         self.rc_droppable(et)
-            && crate::arg_temps::bindable_ty(&e.ty)
+            && (crate::arg_temps::bindable_ty(&e.ty) || matches!(e.ty, Ty::Fn { .. }))
             && crate::arg_temps::unwrap_or_joins_owned(e)
             && self.rc_owned_result(fallback)
     }
