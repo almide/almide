@@ -115,6 +115,21 @@ warning count against develop, not by the rounded grade.
   - The remaining ~5% is creep that a threshold bisect cannot pin down. It needs a sampling profiler; xctrace hung here.
 - **codopsy:** every crate these batches touched stays A with an unchanged warning count: almide-wasm 90/47, almide-codegen 90/32, almide-frontend 90/36.
 
+### 2026-10-07 (evening) — batches 18 and 19
+
+- **Batch 18 = PR #3475** (written, gated locally, in CI at the time of writing): #3464, #3467, #3468 (fan arm error semantics), #3469 (E096 callback-slot hint), #3470 (main aborts on wasm with native's message for a non-String error), and regression tests for the external reports #3472/#3473 (already fixed on develop; A/B: pass on develop, fail on 0.66.0).
+  - Local gates: regen (contracts 938/938, als-pin, dialect-epochs, docs-gen, corpus-wall), `make verify-trust` (structural wall 932/932, kernel OK), ratchet-separation.
+  - The first verify-trust run failed at "A2 byte-binding: the byte dump produced nothing"; the dump test passed on its own and the full rerun passed. Recorded as a transient, not explained.
+  - Skipped locally: the async JS-host fixtures (local node has no JSPI); only CI checks them.
+- **Owner ruling, argv is an effect** (2026-10-07). The six `args.*` readers become `effect fn`; a call from a plain fn is E006 with no warning window, as #3248 did for `process.args`.
+  - **References:** every effect-tracking language surveyed gates argv: Koka (`ndet`), Lean and Roc (argv reaches only the effectful main), Wado, Vera, Aver, Vibe, Ori. Argv is ambient only where effects are untracked.
+  - **Alternative rejected:** ambient argv, which would revert #3248, split `CliArgs` and widen the plain-fn capability bound.
+  - **Compatibility:** rejects programs accepted before, so it is dialect epoch 13 (completing epoch 8 "readers-are-effects", which missed `args`); the legacy native callback alias removal moves from 13 to 14.
+  - `process.env` / `process.pid` are the same class of gap and are not ruled.
+- **Batch 19** (this PR): the argv ruling above, and #3474: `effect fn main() -> Result[Unit, E]` with a user error type now prints `Error: <repr>` and exits 1 on both targets (native needed `Display`, wasm refused with E082). Also fixed: on wasm, a fan arm with a typed `!` in a String-channel non-main fn stopped at the first arm; it now runs every arm and returns the lowest-index Err converted.
+  - Evidence: `tests/main_typed_err_abort_test.rs` 37/37 on both targets with `ALMIDE_EXPECT_TOOLS=1`; the 420 `spec/wasm_cross` fixtures that mention fan or `effect fn main` give identical stdout, stderr and exit code on both targets.
+  - codopsy: almide-wasm 37 → 37 warnings, almide-codegen 31 → 31, both A.
+
 ## Edit loop on a real project: O6lvl4/gramide 0.2.11
 
 gramide has 19 files and 8,106 lines of Almide. It is measured on a copy (`git archive HEAD`) with one line added: `import self.lex` in `src/keystrokes.almd`.
