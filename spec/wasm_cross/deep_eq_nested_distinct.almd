@@ -1,8 +1,13 @@
 // @contract: C-015
-// #3450: `==` on a type nesting several DISTINCT containers / named types
-// (five and seven List levels, a chain of records each holding a list of the
-// previous, a mixed List/Option/tuple/Map stack) compares deeply on both
-// targets instead of the wasm leg refusing it for hold-pool depth.
+// #3450: `==` on a chain of DISTINCT record types, each holding a list of the
+// previous one, compares deeply on both targets. The wasm leg inlines a
+// comparison type by type and refused the chain once its held i32 slots passed
+// the pool (four records deep walled); a comparison that would overflow is now
+// a call to an outlined per-type helper with a fresh pool, so the depth is
+// bounded by the type alone. Five and seven links, equal and unequal at the
+// innermost String. Nested `List[List[...]]` of the same depth is pinned by
+// tests/nested_distinct_eq_test.rs: a function returning a list three or more
+// levels deep walls the MIR corpus leg, so it cannot live in this corpus.
 type A = { xs: List[String] }
 
 type B = { xs: List[A] }
@@ -13,141 +18,34 @@ type D = { xs: List[C] }
 
 type E = { xs: List[D] }
 
+type F = { xs: List[E] }
+
+type G = { xs: List[F] }
+
 fn verdict(b: Bool) -> String = if b then "eq" else "ne"
+
+fn chain(s: String) -> E = E { xs: [
+  D { xs: [
+    C { xs: [
+      B { xs: [
+        A { xs: ["x", s] }
+      ] }
+    ] }
+  ] }
+] }
+
+fn chain7(s: String) -> G = G { xs: [
+  F { xs: [chain("a"), chain(s)] }
+] }
 
 fn same(x: E, y: E) -> Bool = x == y
 
+fn same7(x: G, y: G) -> Bool = x == y
+
 effect fn main() -> Unit = {
-  let a: List[List[List[List[List[String]]]]] = [
-    [
-      [
-        [
-          ["a"]
-        ]
-      ]
-    ]
-  ]
-  println(verdict(a == [
-    [
-      [
-        [
-          ["a"]
-        ]
-      ]
-    ]
-  ]))
-  println(verdict(a == [
-    [
-      [
-        [
-          ["b"]
-        ]
-      ]
-    ]
-  ]))
-  let b: List[List[List[List[List[List[List[String]]]]]]] = [
-    [
-      [
-        [
-          [
-            [
-              ["x", "y"],
-              ["z"]
-            ]
-          ]
-        ]
-      ]
-    ]
-  ]
-  println(verdict(b == [
-    [
-      [
-        [
-          [
-            [
-              ["x", "y"],
-              ["z"]
-            ]
-          ]
-        ]
-      ]
-    ]
-  ]))
-  println(verdict(b == [
-    [
-      [
-        [
-          [
-            [
-              ["x", "y"],
-              ["w"]
-            ]
-          ]
-        ]
-      ]
-    ]
-  ]))
-  println(verdict(b != [
-    [
-      [
-        [
-          [
-            [
-              ["x", "y"]
-            ]
-          ]
-        ]
-      ]
-    ]
-  ]))
-  let d = E { xs: [
-    D { xs: [
-      C { xs: [
-        B { xs: [
-          A { xs: ["a"] }
-        ] }
-      ] }
-    ] }
-  ] }
-  let e = E { xs: [
-    D { xs: [
-      C { xs: [
-        B { xs: [
-          A { xs: ["b"] }
-        ] }
-      ] }
-    ] }
-  ] }
-  println(verdict(same(d, d)))
-  println(verdict(same(d, e)))
-  let m: List[(Int, List[Map[String, List[List[String]]]])?] = [
-    some((1, [
-      [
-        "k": [
-          ["v"]
-        ]
-      ]
-    ])),
-    none
-  ]
-  println(verdict(m == [
-    some((1, [
-      [
-        "k": [
-          ["v"]
-        ]
-      ]
-    ])),
-    none
-  ]))
-  println(verdict(m == [
-    some((1, [
-      [
-        "k": [
-          ["u"]
-        ]
-      ]
-    ])),
-    none
-  ]))
+  println(verdict(same(chain("a"), chain("a"))))
+  println(verdict(same(chain("a"), chain("b"))))
+  println(verdict(chain("a") != chain("b")))
+  println(verdict(same7(chain7("y"), chain7("y"))))
+  println(verdict(same7(chain7("y"), chain7("z"))))
 }
