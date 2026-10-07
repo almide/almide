@@ -70,7 +70,7 @@ impl TestScratch {
         TestScratch { root, native_cache, keep }
     }
 
-    /// Empty the worker dirs nothing has used for `run::CACHE_MAX_AGE`
+    /// Empty the worker dirs nothing has used for `build_dir::CACHE_MAX_AGE`
     /// (#2504), at most once a day per cache root.
     ///
     /// The worker cache holds ONE dir per test-file absolute path, each with
@@ -90,10 +90,10 @@ impl TestScratch {
     /// `ALMIDE_KEEP_SCRATCH` turns the sweep off with the rest of the
     /// scratch cleanup: a run kept for inspection keeps the whole cache.
     fn evict_stale_workers(&self) {
-        if self.keep || !super::run::sweep_due(&self.native_cache) {
+        if self.keep || !super::build_dir::sweep_due(&self.native_cache) {
             return;
         }
-        let Some(cutoff) = std::time::SystemTime::now().checked_sub(super::run::CACHE_MAX_AGE) else { return };
+        let Some(cutoff) = std::time::SystemTime::now().checked_sub(super::build_dir::CACHE_MAX_AGE) else { return };
         let Ok(entries) = std::fs::read_dir(&self.native_cache) else { return };
         for entry in entries.flatten() {
             if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
@@ -101,12 +101,12 @@ impl TestScratch {
             }
             let dir = entry.path();
             // Already emptied by an earlier sweep: nothing to lock or remove.
-            if Self::is_empty_worker(&dir) || super::run::used_since(&dir, cutoff) {
+            if Self::is_empty_worker(&dir) || super::build_dir::used_since(&dir, cutoff) {
                 continue;
             }
-            super::run::clear_build_dir_if_idle(&dir, || !super::run::used_since(&dir, cutoff));
+            super::build_dir::clear_build_dir_if_idle(&dir, || !super::build_dir::used_since(&dir, cutoff));
         }
-        super::run::stamp_sweep(&self.native_cache);
+        super::build_dir::stamp_sweep(&self.native_cache);
     }
 
     /// Bound the worker cache's TOTAL size (#2608): the age sweep above never
@@ -125,7 +125,7 @@ impl TestScratch {
     /// A worker dir an earlier sweep already emptied: only its lockfile is left.
     fn is_empty_worker(dir: &Path) -> bool {
         std::fs::read_dir(dir)
-            .map(|rd| rd.flatten().all(|e| e.file_name() == super::run::BUILD_LOCK_FILE))
+            .map(|rd| rd.flatten().all(|e| e.file_name() == super::build_dir::BUILD_LOCK_FILE))
             .unwrap_or(false)
     }
 

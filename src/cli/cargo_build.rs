@@ -817,9 +817,9 @@ fn ensure_runtime_rlib(opt_level: &str) -> Result<std::path::PathBuf, String> {
         // the rlib dirs of runtimes and toolchains nobody has linked for a
         // week (#2504). The touch comes first, so the sweep can never evict
         // the dir this process is about to link against.
-        super::run::touch_used(rlib);
+        super::build_dir::touch_used(rlib);
         if let Some(dir) = rlib.parent() {
-            super::run::sweep_rtlib_cache(dir);
+            super::build_dir::sweep_rtlib_cache(dir);
         }
     }
     cache.lock().unwrap().insert(opt_level.to_string(), result.clone());
@@ -840,7 +840,7 @@ fn build_runtime_rlib(opt_level: &str) -> Result<std::path::PathBuf, String> {
         return Ok(rlib);
     }
     std::fs::create_dir_all(&dir).map_err(|e| format!("rtlib dir: {e}"))?;
-    let _lock = super::run::BuildDirLock::acquire(&dir)?;
+    let _lock = super::build_dir::BuildDirLock::acquire(&dir)?;
     if rlib.exists() {
         return Ok(rlib); // another builder won the race while we waited
     }

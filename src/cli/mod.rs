@@ -1,6 +1,7 @@
 /// CLI command implementations.
 
 mod run;
+mod build_dir;
 pub(crate) mod build;
 mod build_wasm;
 mod wasm_compile;
