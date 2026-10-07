@@ -29,6 +29,12 @@ expect_pass "$LEDGER" "$CONST" \
 expect_fail "$tmp/empty.toml" "$CONST" \
   "gate passed an empty ledger — a vacuous ledger reads as green forever"
 
+# A leftover merge marker leaves the ledger unparseable while every awk rule
+# below still finds its blocks — the shape that sat on develop after epoch 11.
+{ cat "$LEDGER"; printf '=======\n'; } >"$tmp/marker.toml"
+expect_fail "$tmp/marker.toml" "$CONST" \
+  "gate passed a ledger with a merge marker — an unparseable ledger reads as green"
+
 # A gap in the epoch sequence: a stamp could name an epoch that never existed.
 # The gap is cut out of the MIDDLE so the highest epoch still matches the
 # constant — otherwise the gate could fail on the drift rule and this control
