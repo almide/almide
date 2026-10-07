@@ -1,0 +1,66 @@
+// @contract: C-199, C-004
+// A fan arm that calls a let-bound closure, or captures a Bytes, joins every sibling and
+// reports the first Err in list order, on both targets (#3459).
+//
+// A let-bound closure is an `Rc<dyn Fn>` on the native leg and a Bytes an `Rc`-backed
+// value: neither can move onto a spawned thread, and the threaded fan failed rustc with
+// E0277. Such a fan runs its arms in arm order on the calling thread, the sequential
+// evaluation the threaded form reproduces, so the output is the wasm leg's byte for byte.
+// Shapes: a fan block over a closure value, a closure capturing a list and a record, a
+// nested closure, `fan.map` with a let-bound mapper, a fn-typed parameter read in an arm,
+// a Bytes capture, `fan.any` over a closure, and an arm Err after every arm has printed.
+type Point = { x: Int, name: String }
+
+effect fn twice(x: Int, f: (Int) -> Int) -> Int = {
+  let (a, b) = fan {
+    f(x)
+    f(x + 1)
+  }
+  a + b
+}
+
+effect fn step(f: (Int) -> Int, i: Int) -> Int = {
+  println("arm " + int.to_string(i))
+  if i == 1 then err("arm one failed")!
+  else f(i)
+}
+
+effect fn main() -> Unit = {
+  let k = 10
+  let f = (i: Int) => i * k
+  let (a, b) = fan {
+    f(1)
+    f(2)
+  }
+  println("block " + int.to_string(a + b))
+  let xs = [1, 2, 3]
+  let p = Point { x: 5, name: "p" }
+  let g = (i: Int) => i + list.sum(xs) + p.x
+  let h = (i: Int) => g(i) * 2
+  let (c, d) = fan {
+    g(1)
+    h(2)
+  }
+  println("captures " + int.to_string(c + d) + " " + p.name)
+  let m = (i: Int) => ok(i * k)
+  let ys = fan.map([1, 2, 3], m)!
+  println("map " + int.to_string(list.sum(ys)))
+  println("param " + int.to_string(twice(3, (i) => i + 1)!))
+  let bs = bytes.from_list([1, 2, 3])
+  let (e, w) = fan {
+    bytes.len(bs)
+    bytes.len(bs) + 1
+  }
+  println("bytes " + int.to_string(e + w))
+  let r: (Int) -> Result[Int, String] = (i) => ok(f(i))
+  println("any " + int.to_string(fan.any {
+    r(1)
+    r(2)
+  } ?? 0))
+  let (s, t, u) = fan {
+    step(f, 2)
+    step(f, 1)
+    step(f, 3)
+  }
+  println("unreachable " + int.to_string(s + t + u))
+}
