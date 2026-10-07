@@ -518,6 +518,7 @@ spec/wasm_cross/list_flatten_borrow.almd
 spec/wasm_cross/list_float_equality_family.almd
 spec/wasm_cross/list_float_total_order.almd
 spec/wasm_cross/list_fold_fused_callback_result_ownership.almd
+spec/wasm_cross/list_head_read_borrows.almd
 spec/wasm_cross/list_heap_ops_release_temporaries.almd
 spec/wasm_cross/list_heap_tuple_return.almd
 spec/wasm_cross/list_heapelem_rc.almd

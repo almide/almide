@@ -1630,6 +1630,7 @@ since     = "0.27.6"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/option_match_heap_payload.almd", class = "fixture" },
+  { path = "spec/wasm_cross/list_head_read_borrows.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-115"
