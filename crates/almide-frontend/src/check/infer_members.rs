@@ -57,6 +57,7 @@ impl Checker {
                 self.record_purity_ref(super::pure_attr::PurityCallee::Stdlib(*mod_name, *field), object.span);
                 self.type_map.insert(object.id, Ty::Unit); // placeholder; object isn't evaluated
                 self.env.import_table.mark_used(mod_name);
+                self.reject_mut_param_fn_value(&format!("{}.{}", mod_name, field), &sig, false);
                 return Some(self.fn_value_ty(&sig));
             }
             let resolved_mod_name = self.env.import_table.resolve(mod_name)
@@ -67,6 +68,7 @@ impl Checker {
                 self.record_purity_ref(super::pure_attr::PurityCallee::User(sym(&key)), object.span);
                 self.type_map.insert(object.id, Ty::Unit);
                 self.env.import_table.mark_used(mod_name);
+                self.reject_mut_param_fn_value(&format!("{}.{}", mod_name, field), &sig, true);
                 return Some(self.fn_value_ty(&sig));
             }
             // Cross-module top-level `let` access: `utils.CATEGORY_ORDER`.

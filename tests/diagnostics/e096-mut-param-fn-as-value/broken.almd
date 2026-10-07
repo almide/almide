@@ -1,0 +1,17 @@
+// E096: a fn with a `mut` parameter used as a function value (#3456). The
+// `mut` lives in the fn's signature and a function type has no place for it,
+// so `f(s)` could not write back to `s`: wasm printed 0 and native failed
+// rustc E0596. The name is refused where it becomes a value.
+type St = { count: Int }
+
+fn bump(mut s: St) -> Unit = {
+  s.count = s.count + 1
+}
+
+effect fn main() -> Unit = {
+  var s = St { count: 0 }
+  let f = bump
+  f(s)
+  f(s)
+  println(int.to_string(s.count))
+}

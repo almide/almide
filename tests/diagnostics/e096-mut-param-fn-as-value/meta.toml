@@ -1,0 +1,4 @@
+expects_code = "E096"
+expects_error = "fn 'bump' has a `mut` parameter 's' and cannot be used as a function value"
+expects_line_col = "13:11"
+hint_substring = "Call it directly (`bump(s)` with `var s`), or pass a lambda that names the `var` (`() => bump(s)`)"
