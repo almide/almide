@@ -50,8 +50,10 @@ flags = "-S http=y"
 # per-crate dependabot PRs each failed on split-family version skew,
 # and #2336 repeated it for 0.259 after the same four PRs failed the
 # same way. The per-crate PRs are now grouped in .github/dependabot.yml
-# so the family arrives as one proposal.
-family = "0.259"
+# so the family arrives as one proposal. 0.261 (#3427, with gimli/rustix/wat
+# in one batch) added `canonical_names` to `embed_component_metadata`; both
+# call sites pass false, which keeps 0.259's encoding.
+family = "0.261"
 
 [sources]
 # Dated upstream evidence for the rows above.
@@ -63,4 +65,5 @@ evidence = [
   "wasmtime v49.0.1 release 2026-09-24 (crates.io publish time) — the security release fixing RUSTSEC-2026-0315/-0316 (#2955); rust-version 1.96.0; the embedded host compiled unchanged and the p3 legs pass with no feature flag on the 49.0.1 CLI",
   "wasmtime crate 49.0.2 2026-10-02 — the security release fixing RUSTSEC-2026-0325/-0326/-0327 (GC rooting and tag-import typing, and an unvalidated async-lifted callback result count); the embedded host compiles unchanged, and the CI CLI stays v49.0.1",
   "wasm-tools 0.259.0 release 2026-09-10 (crates.io publish time of wasmparser 0.259.0); `SizeAlign::fill` became fallible, the only API change this tree touches",
+  "wasm-tools 0.261.0 release 2026-10-02 (crates.io publish time of wasmparser 0.261.0); `wit_component::embed_component_metadata` gained a `canonical_names: bool` argument, the only API change this tree touches",
 ]
