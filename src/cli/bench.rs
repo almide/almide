@@ -117,7 +117,7 @@ struct Timing {
 }
 
 fn bench_wasm(file: &str, runs: u32, args: &[String]) {
-    let (bytes, _host_ops) = match super::build::compile_to_wasm_bytes(file, false, true, false, true) {
+    let (bytes, _host_ops) = match super::wasm_compile::compile_to_wasm_bytes(file, false, true, false, true) {
         Ok(b) => b,
         Err(()) => std::process::exit(1),
     };

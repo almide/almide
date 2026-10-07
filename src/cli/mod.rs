@@ -2,6 +2,8 @@
 
 mod run;
 pub(crate) mod build;
+mod build_wasm;
+mod wasm_compile;
 mod bench;
 mod compile;
 mod emit;
