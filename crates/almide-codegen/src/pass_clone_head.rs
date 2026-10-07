@@ -40,10 +40,11 @@
 //! its siblings); flipping an owned param that only the fallback consumed to
 //! borrowed (the call sites are already lowered — that is the borrow
 //! inference's job). A bare owned param as the fallback is instead MOVED
-//! into a local the `none` side reads (inside the arm for a value read,
-//! before the `let` for a binding), so the param stays consumed exactly as
-//! the `??` consumed it; a borrowed result over such a param keeps its copy
-//! (see `owned_params`).
+//! into a local the `none` side reads — inside the arm for a value read,
+//! before the `let` for a binding, at fn entry for a borrowed argument when
+//! the param is named nowhere else — so the param stays consumed exactly as
+//! the `??` consumed it; any other owned-param fallback keeps its copy (see
+//! `owned_params`).
 //!
 //! Compatibility: none observable — the same values on every path, the
 //! fallback still evaluated only on the `none` side, out-of-bounds index
@@ -69,18 +70,39 @@ struct Heads<'a> {
     /// Every param: a borrowed one handed on whole as the `None` side's
     /// reference lowers to the bare param, which reads as a consumption.
     params: HashSet<VarId>,
+    /// Owned params named exactly once in the body, outside every closure:
+    /// such a param may be moved into a local at entry, which a borrowed
+    /// `none` side then points at (`entry_moves`).
+    single_use: HashSet<VarId>,
+    entry_moves: Vec<IrStmt>,
     ref_lets: HashSet<VarId>,
 }
 
 /// Rewrite every head read of `func`'s body; returns the `let` binders now
 /// bound by reference.
 pub(super) fn rewrite(func: &mut IrFunction, vt: &mut VarTable, top_lets: &HashSet<VarId>) -> HashSet<VarId> {
-    let owned_params = func.params.iter()
+    use super::use_kind::{ExplicitBorrows, Site, UseSites};
+    let owned_params: HashSet<VarId> = func.params.iter()
         .filter(|p| p.borrow == ParamBorrow::Own && super::pass_clone::needs_clone(&p.ty))
         .map(|p| p.var).collect();
+    let sites = UseSites::of_expr(&func.body, Site::Result, &ExplicitBorrows);
+    let single_use = owned_params.iter().copied()
+        .filter(|&p| { let mut uses = sites.of(p); uses.next().is_some_and(|u| u.depth == 0 && !u.in_chain) && uses.next().is_none() })
+        .collect();
     let params = func.params.iter().map(|p| p.var).collect();
-    let mut heads = Heads { vt, top_lets, owned_params, params, ref_lets: HashSet::new() };
+    let mut heads = Heads { vt, top_lets, owned_params, params, single_use, entry_moves: Vec::new(), ref_lets: HashSet::new() };
     heads.visit_expr_mut(&mut func.body);
+    if !heads.entry_moves.is_empty() {
+        let body = std::mem::replace(&mut func.body, mk(IrExprKind::Unit, Ty::Unit, None));
+        let (ty, span) = (body.ty.clone(), body.span);
+        func.body = match body.kind {
+            IrExprKind::Block { mut stmts, expr } => {
+                stmts.splice(0..0, heads.entry_moves);
+                mk(IrExprKind::Block { stmts, expr }, ty, span)
+            }
+            _ => mk(IrExprKind::Block { stmts: heads.entry_moves, expr: Some(Box::new(body)) }, ty, span),
+        };
+    }
     heads.ref_lets
 }
 
@@ -147,6 +169,13 @@ fn stays_put(rest: &IrExpr, v: VarId) -> bool {
     })
 }
 
+/// The variables a borrowed read chain over `src ?? d` holds: the list and
+/// the fallback's place.
+fn held_by(chain: &IrExpr) -> Option<Vec<VarId>> {
+    let IrExprKind::UnwrapOr { expr: src, fallback } = &unwrap_or_base(chain)?.kind else { return None };
+    Some(std::iter::once(head_source(src)?).chain(root(fallback)).collect())
+}
+
 /// The `??` a chain of field / tuple reads projects.
 fn unwrap_or_base(e: &IrExpr) -> Option<&IrExpr> {
     match &e.kind {
@@ -187,7 +216,7 @@ impl Heads<'_> {
     /// into both arms of an explicit match the binder proof borrows.
     fn project(&mut self, e: &mut IrExpr) {
         if !matches!(e.kind, IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }) { return; }
-        if let Some((m, _)) = self.head_match(e, false) { *e = m; }
+        if let Some(m) = self.head_match(e, false) { *e = m; }
     }
 
     /// A call argument `&(src ?? d).f` (or `&(src ?? d)`) over a place
@@ -197,20 +226,25 @@ impl Heads<'_> {
         let (IrExprKind::Call { args, .. } | IrExprKind::RuntimeCall { args, .. }) = &mut e.kind else { return };
         for i in 0..args.len() {
             let IrExprKind::Borrow { expr: chain, as_str: false, mutable: false } = &args[i].kind else { continue };
-            let Some((m, held)) = self.head_match(chain, true) else { continue };
+            let Some(held) = held_by(chain) else { continue };
             if args.iter().enumerate().any(|(j, a)| j != i && held.iter().any(|&v| super::pass_clone_projection::mentions(a, v))) { continue; }
+            let Some(m) = self.head_match(chain, true) else { continue };
             args[i] = IrExpr { ty: args[i].ty.clone(), ..m };
         }
     }
 
-    /// The match a read chain over `src ?? d` becomes, and the variables the
-    /// result holds borrowed (the list and, for a borrow, the fallback's place).
-    fn head_match(&mut self, chain: &IrExpr, borrowed: bool) -> Option<(IrExpr, Vec<VarId>)> {
+    /// The match a read chain over `src ?? d` becomes.
+    fn head_match(&mut self, chain: &IrExpr, borrowed: bool) -> Option<IrExpr> {
         let IrExprKind::UnwrapOr { expr: src, fallback } = &unwrap_or_base(chain)?.kind else { return None };
         let (xs, elem) = (head_source(src)?, option_payload(&src.ty)?.clone());
         let place = root(fallback);
         let whole = matches!(chain.kind, IrExprKind::UnwrapOr { .. });
         if !heap_element(&elem) || !self.fallback_admits(fallback, xs, borrowed, whole) { return None; }
+        let moved;
+        let fallback = if borrowed && self.is_param(fallback) && place.is_some_and(|p| self.owned_params.contains(&p)) {
+            moved = self.move_at_entry(fallback, &elem);
+            &moved
+        } else { fallback };
         let v = self.fresh("__head", &elem);
         let var = mk(IrExprKind::Var { id: v }, elem.clone(), chain.span);
         let borrow = |e: IrExpr| mk(IrExprKind::Borrow { expr: Box::new(e), as_str: false, mutable: false }, chain.ty.clone(), chain.span);
@@ -223,8 +257,7 @@ impl Heads<'_> {
         let arms = vec![some_arm(v, &elem, some), none_arm(none)];
         // A value read the binder proof would not borrow stays a copy.
         if !borrowed && super::pass_clone_projection::match_binders(&subject, &arms).is_none() { return None; }
-        let m = mk(IrExprKind::Match { subject: Box::new(subject), arms }, chain.ty.clone(), chain.span);
-        Some((m, std::iter::once(xs).chain(place).collect()))
+        Some(mk(IrExprKind::Match { subject: Box::new(subject), arms }, chain.ty.clone(), chain.span))
     }
 
     /// May `fallback` stand on the `none` side of a head read of `xs`? It
@@ -236,8 +269,18 @@ impl Heads<'_> {
     fn fallback_admits(&self, fallback: &IrExpr, xs: VarId, borrowed: bool, whole: bool) -> bool {
         if super::pass_clone_projection::mentions(fallback, xs) { return false; }
         let Some(place) = root(fallback) else { return !borrowed };
-        if self.owned_params.contains(&place) { return !borrowed && self.is_param(fallback); }
+        if self.owned_params.contains(&place) {
+            return self.is_param(fallback) && (!borrowed || self.single_use.contains(&place));
+        }
         !(borrowed && whole && self.is_param(fallback))
+    }
+
+    /// A single-use owned param moved into a local at fn entry; the local's
+    /// read in its place.
+    fn move_at_entry(&mut self, param: &IrExpr, ty: &Ty) -> Box<IrExpr> {
+        let local = self.fresh("__fallback", ty);
+        self.entry_moves.push(IrStmt { kind: IrStmtKind::Bind { var: local, mutability: Mutability::Let, ty: ty.clone(), value: param.clone() }, span: param.span });
+        Box::new(mk(IrExprKind::Var { id: local }, ty.clone(), param.span))
     }
 
     /// The `none` side of a value read: the read chain over the fallback. A
