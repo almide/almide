@@ -185,7 +185,9 @@ impl Emitter<'_> {
     /// fallthrough on ok. Discarding it swallowed the err (silent exit
     /// 0 — `effect fn main() -> Unit = err("boom")` on the released
     /// 0.61.0). Returns Ok(true) when this handled the expression.
-    /// A non-String err payload walls honestly (no message to print).
+    /// A non-String err payload (#3474) aborts with the message main's `!`
+    /// abort renders from it (`emit_abort_message`): its repr, or a
+    /// `List[String]` joined — native's wrapper prints the same.
     pub(crate) fn try_lower_main_err_carrier(&mut self, e: &IrExpr) -> Result<bool, EmitError> {
         use almide_types::types::{Ty, TypeConstructorId};
         if !self.in_main {
@@ -203,24 +205,28 @@ impl Emitter<'_> {
             self.f.instructions().drop();
             return Ok(true);
         };
-        if self.types.el(eh) != STR {
-            return Err(EmitError::Unsupported("main-err-carrier:non-string-err".into()));
-        }
+        let ert = self.types.el(eh);
+        let err_ir = crate::display::ir_arg(Some(&e.ty), 1).cloned();
         // #2969: an OWNED ok carrier (`effect fn main() -> Result[Unit,
         // String] = { … }` ends in a fresh `ok(())`) is main's last use of
         // it — released on the ok path, where the err path aborts.
         let owned_dec = (self.rc_droppable(got) && self.rc_owned_result(e)).then(|| self.dec_fn_of(got));
         // #2758: the err arm aborts (the checker's terminal), the ok arm
         // releases an owned carrier.
-        self.witness_main_carrier(owned_dec.is_some());
+        // A message rendered from a non-String error is a FRESH block the
+        // abort takes with it (`emit_abort_message`).
+        self.witness_main_carrier(owned_dec.is_some(), ert != STR);
         let hb = self.scr_i32_local;
-        let mut i = self.f.instructions();
-        i.local_set(hb);
-        i.local_get(hb)
+        self.f
+            .instructions()
+            .local_set(hb)
+            .local_get(hb)
             .i32_load(slot_memarg(almide_layout::SUM_TAG))
             .if_(BlockType::Empty);
-        i.local_get(hb).i32_load(slot_memarg(almide_layout::SUM_FIELD));
-        let _ = i;
+        self.emit_abort_message(ert, err_ir.as_ref(), |s| {
+            s.f.instructions().local_get(hb);
+            s.load_ty_slot(ert, almide_layout::SUM_FIELD);
+        })?;
         self.emit_error_frame_abort();
         if let Some(dec) = owned_dec {
             self.f.instructions().else_().local_get(hb).call(dec);

@@ -343,11 +343,16 @@ impl Emitter<'_> {
     /// main's err channel (err_channel.rs): the carrier is read; its err arm
     /// ABORTS (the checker's terminal discharges what is held), its ok arm
     /// releases the carrier when main owns it — born here, released there.
-    pub(crate) fn witness_main_carrier(&mut self, owned: bool) {
+    /// `fresh`: the err arm builds its message (#3474), a block born there
+    /// that the abort takes with it.
+    pub(crate) fn witness_main_carrier(&mut self, owned: bool, fresh: bool) {
         let Some(w) = self.witness.as_mut() else { return };
         let c = owned.then(|| w.temp_born());
         w.branch_open();
         w.branch_arm();
+        if fresh {
+            w.temp_born();
+        }
         w.abort_end();
         w.branch_arm();
         if let Some(o) = c {
