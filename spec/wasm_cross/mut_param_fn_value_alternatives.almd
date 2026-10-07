@@ -1,0 +1,43 @@
+// @contract: C-226
+// #3456: a fn with a `mut` parameter is called, never used as a value
+// (`let f = bump` is E096). The two alternatives the E096 hint names keep the
+// write-back on both targets: the direct call (plain, UFCS and pipe), and a
+// lambda that names the `var` it writes, called once per element.
+type St = { count: Int }
+
+fn bump(mut s: St) -> Unit = {
+  s.count = s.count + 1
+}
+
+fn St.add(mut self, n: Int) -> Unit = {
+  self.count = self.count + n
+}
+
+fn push_twice[T](mut xs: List[T], x: T) -> Unit = {
+  list.push(xs, x)
+  list.push(xs, x)
+}
+
+effect fn main() -> Unit = {
+  var s = St { count: 0 }
+  bump(s)
+  bump(s)
+  s.add(10)
+  St.add(s, 100)
+  s |> bump
+  println("direct=${int.to_string(s.count)}")
+  let tick = () => bump(s)
+  tick()
+  tick()
+  println("lambda=${int.to_string(s.count)}")
+  [1, 2, 3] |> list.map((n) => {
+    s.add(n)
+    n
+  }) |> list.len |> int.to_string |> println
+  println("mapped=${int.to_string(s.count)}")
+  var xs: List[String] = []
+  push_twice(xs, "a")
+  let pusher = (x: String) => push_twice(xs, x)
+  pusher("b")
+  println("generic=${list.join(xs, ",")}")
+}
