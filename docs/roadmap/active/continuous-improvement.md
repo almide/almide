@@ -77,3 +77,42 @@ warning count against develop, not by the rounded grade.
     4. quadratic string concatenation
     5. JSON escaping of control characters
 - **Open, waiting on an owner ruling:** #2755's last witness bucket, `caps:argv-in-plain-fn` (8 frames). It needs a decision on whether argv is ambient or an effect; #848 closed without one.
+
+## Edit loop on a real project: O6lvl4/gramide 0.2.11
+
+gramide has 19 files and 8,106 lines of Almide. It is measured on a copy (`git archive HEAD`) with one line added: `import self.lex` in `src/keystrokes.almd`.
+- That line is required since dialect epoch 10 ("names-resolve-where-declared", 0.67.0). Without it, develop refuses `lex.LexError` with E029 by design; the downstream canary named gramide.
+- The fix in gramide itself belongs to its owner.
+
+Harness:
+- Every run uses a fresh `TMPDIR` and no project `.almide/`, so "clean" means the compiler's own caches are empty. The Cargo registry and the toolchain are warm.
+- Measured with `/usr/bin/time -l`: wall-clock time and max RSS of the whole command.
+- macOS 26.3 arm64. develop is 974c00ea0; the comparison is the v0.66.0 release binary (819bbc74f).
+
+`almide test`: all 10 files run on the wasm lane ("9 via WASM, 0 via native fallback"), so this does not measure native builds. 3 runs each:
+
+| Step | develop | v0.66.0 |
+|---|---|---|
+| clean | 0.66–0.68 s | 0.63–0.68 s |
+| cached | 0.67–0.71 s | 0.64 s |
+| comment-only edit | 0.66–0.70 s | 0.61–0.71 s |
+| one-line code edit | 0.67–0.71 s | 0.64–0.69 s |
+| max RSS | 434–474 MiB | 423–449 MiB |
+
+`almide build src/cli.almd` (native, through cargo), 2 runs each:
+
+| Step | develop | v0.66.0 |
+|---|---|---|
+| clean | 3.89–5.08 s | 3.58–4.27 s |
+| cached | 0.36–0.39 s | 0.33–0.34 s |
+| one-line code edit | 0.90–1.09 s | 0.85–0.86 s |
+| max RSS (clean) | 388–392 MiB | 367–373 MiB |
+
+`almide check src/cli.almd`: 0.09 s on develop, 0.07 s on v0.66.0.
+
+Reading:
+- develop is not faster than 0.66.0 on this loop.
+- It is about 3–10% slower in every row, and its RSS is about 5% higher.
+- The spread is close to the run-to-run noise at 2–3 runs, so the gap is recorded as a lead to investigate, not a confirmed regression.
+- The first single run showed 1.24 s for an edit; repeated runs did not reproduce it.
+
