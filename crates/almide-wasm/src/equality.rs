@@ -42,7 +42,84 @@ impl Emitter<'_> {
     /// The recursive core: `path` carries the Named types currently being
     /// inlined — a CYCLE (recursive type) is cut with a call to the
     /// runtime-recursive `$named_eq_<ti>` helper (the display doctrine).
+    /// #3450: a comparison whose inlined shape would hold more i32 slots
+    /// than the pool has left becomes a CALL to an outlined
+    /// `(a, b) -> i32` helper on a fresh pool, so nesting depth is bounded
+    /// by nothing but the type itself.
     pub(crate) fn emit_val_eq_at(
+        &mut self,
+        ty: SliceTy,
+        path: &mut Vec<u32>,
+    ) -> Result<(), EmitError> {
+        let need = self.eq_hold_need(ty, &mut path.clone());
+        if self.hold_i32_depth + need > crate::emitter::HOLD_I32_POOL {
+            return self.emit_eq_outlined(ty);
+        }
+        self.emit_val_eq_level(ty, path)
+    }
+
+    /// The outlined comparison: `[a, b]` on the stack -> a call to the
+    /// `$named_eqty_<ety>` helper whose body is ONE inlined level of `ty`.
+    fn emit_eq_outlined(&mut self, ty: SliceTy) -> Result<(), EmitError> {
+        use crate::work::NamedOp;
+        let ti = self.types.intern(ty).index() as u32;
+        if matches!(
+            self.work.named_bodies.borrow().get(&(NamedOp::EqTy, ti)),
+            Some(crate::work::DisplayBuild::Failed)
+        ) {
+            return unsup("eq-helper-failed");
+        }
+        let idx = self.work.helper(Helper::NamedOp { op: NamedOp::EqTy, ti });
+        self.f.instructions().call(idx);
+        Ok(())
+    }
+
+    /// How many i32 holds inlining `ty`'s comparison keeps live at its
+    /// deepest point (mirrors the hold counts of `emit_val_eq_level` and
+    /// its splits; a Named on `path` is already a call and holds none).
+    fn eq_hold_need(&self, ty: SliceTy, path: &mut Vec<u32>) -> u32 {
+        match ty {
+            SliceTy::List(h) => match self.types.el(h) {
+                SliceTy::Scalar(Scalar::Int) | SliceTy::Scalar(Scalar::Bool) => 0,
+                el => 5 + self.eq_hold_need(el, path),
+            },
+            SliceTy::Option(h) => 2 + self.eq_hold_need(self.types.el(h), path),
+            SliceTy::Result(o, e) => {
+                let (o, e) = (self.types.el(o), self.types.el(e));
+                2 + self.eq_hold_need(o, path).max(self.eq_hold_need(e, path))
+            }
+            SliceTy::Tuple(id) => 2 + self.eq_fields_need(&self.types.tuple_def(id).fields, path),
+            SliceTy::Map(_, vh) => 6 + self.eq_hold_need(self.types.el(vh), path),
+            SliceTy::Set(_) => 5,
+            SliceTy::Named(ti) if !path.contains(&ti) => {
+                path.push(ti);
+                let need = match &self.types.def(ti) {
+                    NamedDef::Record(r) => {
+                        let fs: Vec<_> = r.fields.iter().map(|f| (f.ty, f.offset)).collect();
+                        2 + self.eq_fields_need(&fs, path)
+                    }
+                    NamedDef::Variant(v) if v.cases.iter().all(|c| c.fields.is_empty()) => 1,
+                    NamedDef::Variant(v) => {
+                        let fs: Vec<_> =
+                            v.cases.iter().flat_map(|c| c.fields.iter().map(|f| (f.ty, f.offset))).collect();
+                        2 + self.eq_fields_need(&fs, path)
+                    }
+                    NamedDef::Excluded => 0,
+                };
+                path.pop();
+                need
+            }
+            _ => 0,
+        }
+    }
+
+    fn eq_fields_need(&self, fields: &[(SliceTy, u32)], path: &mut Vec<u32>) -> u32 {
+        fields.iter().map(|(t, _)| self.eq_hold_need(*t, path)).max().unwrap_or(0)
+    }
+
+    /// One inlined level of `ty`'s comparison; every component recurses
+    /// through `emit_val_eq_at` (which may outline it).
+    pub(crate) fn emit_val_eq_level(
         &mut self,
         ty: SliceTy,
         path: &mut Vec<u32>,
