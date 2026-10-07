@@ -3,7 +3,7 @@ fn grow(mut xs: List[Int]) -> Unit = {
 }
 
 effect fn main() -> Unit = {
-  var acc: List[Int] = []
-  let _ = list.map([1, 2], (_) => grow(acc))
-  println(int.to_string(list.len(acc)))
+  let groups = [[1], [2, 3]]
+  let grown = list.map(groups, (item) => { var copy = item; grow(copy); copy })
+  println("${grown}")
 }
