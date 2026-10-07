@@ -1,0 +1,153 @@
+// @contract: C-015
+// #3450: `==` on a type nesting several DISTINCT containers / named types
+// (five and seven List levels, a chain of records each holding a list of the
+// previous, a mixed List/Option/tuple/Map stack) compares deeply on both
+// targets instead of the wasm leg refusing it for hold-pool depth.
+type A = { xs: List[String] }
+
+type B = { xs: List[A] }
+
+type C = { xs: List[B] }
+
+type D = { xs: List[C] }
+
+type E = { xs: List[D] }
+
+fn verdict(b: Bool) -> String = if b then "eq" else "ne"
+
+fn same(x: E, y: E) -> Bool = x == y
+
+effect fn main() -> Unit = {
+  let a: List[List[List[List[List[String]]]]] = [
+    [
+      [
+        [
+          ["a"]
+        ]
+      ]
+    ]
+  ]
+  println(verdict(a == [
+    [
+      [
+        [
+          ["a"]
+        ]
+      ]
+    ]
+  ]))
+  println(verdict(a == [
+    [
+      [
+        [
+          ["b"]
+        ]
+      ]
+    ]
+  ]))
+  let b: List[List[List[List[List[List[List[String]]]]]]] = [
+    [
+      [
+        [
+          [
+            [
+              ["x", "y"],
+              ["z"]
+            ]
+          ]
+        ]
+      ]
+    ]
+  ]
+  println(verdict(b == [
+    [
+      [
+        [
+          [
+            [
+              ["x", "y"],
+              ["z"]
+            ]
+          ]
+        ]
+      ]
+    ]
+  ]))
+  println(verdict(b == [
+    [
+      [
+        [
+          [
+            [
+              ["x", "y"],
+              ["w"]
+            ]
+          ]
+        ]
+      ]
+    ]
+  ]))
+  println(verdict(b != [
+    [
+      [
+        [
+          [
+            [
+              ["x", "y"]
+            ]
+          ]
+        ]
+      ]
+    ]
+  ]))
+  let d = E { xs: [
+    D { xs: [
+      C { xs: [
+        B { xs: [
+          A { xs: ["a"] }
+        ] }
+      ] }
+    ] }
+  ] }
+  let e = E { xs: [
+    D { xs: [
+      C { xs: [
+        B { xs: [
+          A { xs: ["b"] }
+        ] }
+      ] }
+    ] }
+  ] }
+  println(verdict(same(d, d)))
+  println(verdict(same(d, e)))
+  let m: List[(Int, List[Map[String, List[List[String]]]])?] = [
+    some((1, [
+      [
+        "k": [
+          ["v"]
+        ]
+      ]
+    ])),
+    none
+  ]
+  println(verdict(m == [
+    some((1, [
+      [
+        "k": [
+          ["v"]
+        ]
+      ]
+    ])),
+    none
+  ]))
+  println(verdict(m == [
+    some((1, [
+      [
+        "k": [
+          ["u"]
+        ]
+      ]
+    ])),
+    none
+  ]))
+}
