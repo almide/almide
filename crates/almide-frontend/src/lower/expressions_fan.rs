@@ -726,3 +726,50 @@ fn convert_option_unwraps_to_result(body: &mut IrExpr) {
     }
     Rw.visit_expr_mut(body);
 }
+
+/// #3462: a `fan { … }` arm whose body propagates with `!` is a propagation
+/// SCOPE of its own (C-199, ADR-0024 D1): the `!` ends the ARM with its Err,
+/// every sibling still runs, and the join reports the lowest-index Err. The
+/// arm is lowered as the zero-arg thunk `() => ok(body)` called in place —
+/// the shape a `fan.map` callback's `!` already rides on every consumer — so
+/// no backend reads that `!` as an exit from the enclosing fn. An arm whose
+/// only marker is its own top-level `!` already is a Result arm and is left
+/// alone.
+fn fan_arm_scope(ctx: &mut LowerCtx, arm: IrExpr) -> IrExpr {
+    let inner = match &arm.kind { IrExprKind::Unwrap { expr } => &**expr, _ => &arm };
+    if !propagates_in_scope(inner) {
+        return arm;
+    }
+    let span = arm.span.clone();
+    let mut body = arm;
+    convert_option_unwraps_to_result(&mut body);
+    if !body.ty.is_result() {
+        body = crate::lower::wrap_fallible_value_tail(body, &Ty::String);
+    }
+    let ret = body.ty.clone();
+    let lambda_ty = Ty::Fn { params: Vec::new(), ret: Box::new(ret.clone()), is_effect: false };
+    let lambda_id = Some(ctx.next_lambda_id());
+    let thunk = ctx.mk(IrExprKind::Lambda { params: Vec::new(), body: Box::new(body), lambda_id }, lambda_ty, span.clone());
+    let target = CallTarget::Computed { callee: Box::new(thunk) };
+    ctx.mk(IrExprKind::Call { target, args: Vec::new(), type_args: Vec::new() }, ret, span)
+}
+
+/// Does `e` hold a `!` whose propagation leaves `e` itself — one not inside a
+/// lambda (its own channel) or a nested `fan` (its arms are scoped in turn)?
+fn propagates_in_scope(e: &IrExpr) -> bool {
+    use almide_ir::visit::{walk_expr, IrVisitor};
+    struct Scan(bool);
+    impl IrVisitor for Scan {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            match e.kind {
+                IrExprKind::Unwrap { .. } => self.0 = true,
+                IrExprKind::Lambda { .. } | IrExprKind::Fan { .. } => {}
+                _ if !self.0 => walk_expr(self, e),
+                _ => {}
+            }
+        }
+    }
+    let mut s = Scan(false);
+    s.visit_expr(e);
+    s.0
+}
