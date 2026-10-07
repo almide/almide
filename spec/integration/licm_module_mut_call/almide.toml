@@ -1,0 +1,3 @@
+[package]
+name = "licm_module_mut_call"
+version = "0.1.0"
