@@ -9,8 +9,9 @@
 //!   - fan.any { arms }: one literal list of 0-ary thunks — first Ok
 //!     short-circuits; a PURE arm's value Ok-adapts and wins (#514).
 //!   - `fan { a; b }` (IrExprKind::Fan): every arm evaluates in order,
-//!     payloads unwrap; the FIRST err aborts (after all arms ran) with
-//!     the bare message; one arm = the bare value, else a tuple.
+//!     payloads unwrap; the FIRST err (after all arms ran) is the block's
+//!     result — returned from a non-main effect fn, an abort with the bare
+//!     message in main; one arm = the bare value, else a tuple.
 
 use almide_ir::{CallTarget, IrExpr, IrExprKind};
 use wasm_encoder::{BlockType, ValType};
@@ -20,6 +21,11 @@ use crate::*;
 
 #[path = "fan_js_async.rs"]
 pub(crate) mod js_async;
+
+/// The propagating Err exit of a `fan { … }` block (#3463).
+#[path = "fan_block_err.rs"]
+mod block_err;
+use block_err::FanCarrier;
 
 impl Emitter<'_> {
     /// The prefetch protocol's host ops (40 start / 41 await / 42 abandon),
@@ -301,9 +307,11 @@ impl Emitter<'_> {
     }
 
     /// `fan { a; b; … }` — every arm runs in order, ok payloads unwrap;
-    /// the FIRST err aborts AFTER all arms evaluated (the interp's
-    /// eval_fan order), with the BARE String message. One arm = the bare
-    /// value; several = a tuple of payloads.
+    /// the FIRST err is the block's result AFTER all arms evaluated (the
+    /// interp's eval_fan order). In main, or a frame with no String err
+    /// channel, it aborts with the BARE String message; in any other effect
+    /// frame it is RETURNED, as a `!` there is (#3463, fan_block_err.rs).
+    /// One arm = the bare value; several = a tuple of payloads.
     pub(crate) fn lower_fan_block(&mut self, e: &IrExpr, exprs: &[IrExpr]) -> Result<SliceTy, EmitError> {
         // #3383: every arm one async-hook call on `--host js` — start them
         // all and wait once; each arm's value is then its taken slot.
@@ -315,11 +323,19 @@ impl Emitter<'_> {
             Some(calls) => self.fan_overlap_block_start(calls)?,
             None => Vec::new(),
         };
-        let herr = self.hold_i32()?;
-        self.f.instructions().i32_const(0).local_set(herr);
+        // The abort mode's first-err message; the propagating mode keeps
+        // every carrier instead and decides after the last arm.
+        let herr = if self.fan_err_propagates() {
+            None
+        } else {
+            let h = self.hold_i32()?;
+            self.f.instructions().i32_const(0).local_set(h);
+            Some(h)
+        };
         // (hold, type, does the hold own its value's credit, the arm, was it
         // a carrier) — the last two for the witness's slot record.
         let mut vals: Vec<(u32, SliceTy, bool, &IrExpr, bool)> = Vec::new();
+        let mut carriers: Vec<FanCarrier> = Vec::new();
         for (k, arm) in exprs.iter().enumerate() {
             let got = match &overlap {
                 Some(calls) => {
@@ -329,7 +345,6 @@ impl Emitter<'_> {
                 None => self.lower(arm, None)?,
             };
             let owned = self.rc_owned_result(arm);
-            self.witness_fan_block_arm(matches!(got, SliceTy::Result(..)), owned);
             match got {
                 SliceTy::Result(o, er) => {
                     if self.types.el(er) != STR {
@@ -337,29 +352,10 @@ impl Emitter<'_> {
                     }
                     let p = self.types.el(o);
                     let hv = self.hold_val(p)?;
-                    let ha = self.hold_i32()?;
-                    {
-                        let mut i = self.f.instructions();
-                        i.local_set(ha);
-                        i.local_get(ha)
-                            .i32_load(slot_memarg(almide_layout::SUM_TAG))
-                            .i32_const(0)
-                            .i32_ne();
-                        i.local_get(herr).i32_eqz();
-                        i.i32_and().if_(BlockType::Empty);
-                        i.local_get(ha);
+                    match herr {
+                        Some(herr) => self.fan_arm_first_err(herr, hv, p, owned)?,
+                        None => carriers.push(self.fan_keep_carrier(got, owned, hv, p)?),
                     }
-                    self.load_ty_slot(STR, almide_layout::SUM_FIELD);
-                    self.f.instructions().local_set(herr).end();
-                    self.f.instructions().local_get(ha);
-                    self.load_ty_slot(p, almide_layout::SUM_FIELD);
-                    self.f.instructions().local_set(hv);
-                    // #2969: an OWNED carrier's payload credit moves into the
-                    // value and its spine is released (an err aborts below).
-                    if owned {
-                        self.f.instructions().local_get(ha).call(F_DEC_FLAT);
-                    }
-                    self.release_i32();
                     vals.push((hv, p, owned, arm, true));
                 }
                 pure => {
@@ -369,37 +365,28 @@ impl Emitter<'_> {
                 }
             }
         }
-        // first err → the bare-message abort frame
-        self.f.instructions().local_get(herr).if_(BlockType::Empty);
-        self.f.instructions().local_get(herr);
-        self.emit_error_frame_abort();
-        self.f.instructions().end();
-        self.witness_abort_site();
-        let (out, owned_out) = if vals.len() == 1 {
-            let (hv, p, owned, _, _) = vals[0];
-            self.f.instructions().local_get(hv);
-            (p, owned)
-        } else {
-            let tys: Vec<SliceTy> = vals.iter().map(|(_, p, ..)| *p).collect();
-            let ti = self.types.tuple(tys);
-            let def = self.types.tuple_def(ti);
-            let hb = self.hold_i32()?;
-            self.f.instructions().i32_const(def.size as i32).call(F_ALLOC).local_set(hb);
-            for ((hv, p, owned, arm, carrier), (fty, off)) in vals.iter().zip(def.fields.clone()) {
-                debug_assert_eq!(*p, fty);
-                self.f.instructions().local_get(hb).local_get(*hv);
-                // #2969: the fresh tuple owns every slot — a borrowed
-                // value takes its credit here.
-                if !owned {
-                    self.share_handle_top(*p);
-                }
-                self.witness_fan_block_slot(arm, *carrier, *p, *owned);
-                self.store_ty_slot(*p, off);
+        match herr {
+            Some(herr) => {
+                // first err → the bare-message abort frame
+                self.f.instructions().local_get(herr).if_(BlockType::Empty);
+                self.f.instructions().local_get(herr);
+                self.emit_error_frame_abort();
+                self.f.instructions().end();
+                self.witness_abort_site();
             }
-            self.f.instructions().local_get(hb);
-            self.release_i32();
-            (SliceTy::Tuple(ti), true)
-        };
+            None => {
+                let pures: Vec<(u32, SliceTy)> = vals
+                    .iter()
+                    .filter(|&&(_, p, owned, _, carrier)| !carrier && owned && self.rc_droppable(p))
+                    .map(|&(hv, p, ..)| (hv, p))
+                    .collect();
+                self.fan_return_first_err(&carriers, &pures);
+                for c in &carriers {
+                    self.fan_carrier_payload(c);
+                }
+            }
+        }
+        let (out, owned_out) = self.fan_block_value(&vals)?;
         // The result's one credit is this node's: a bind takes no second.
         if owned_out {
             self.owned_call_marks.mark(e);
@@ -407,11 +394,71 @@ impl Emitter<'_> {
         for (_, p, ..) in vals.iter().rev() {
             self.release_val(*p);
         }
-        self.release_i32();
+        for _ in &carriers {
+            self.release_i32();
+        }
+        if herr.is_some() {
+            self.release_i32();
+        }
         for _ in &slots {
             self.release_i32();
         }
         Ok(out)
+    }
+
+    /// The abort mode's per-arm read of a Result arm (the carrier is on the
+    /// stack): the first err's message into `herr`, the ok payload into
+    /// `hv`, an OWNED carrier's spine released (#2969: its payload credit
+    /// moves into the value; an err aborts below).
+    fn fan_arm_first_err(&mut self, herr: u32, hv: u32, p: SliceTy, owned: bool) -> Result<(), EmitError> {
+        self.witness_fan_block_arm(true, owned);
+        let ha = self.hold_i32()?;
+        {
+            let mut i = self.f.instructions();
+            i.local_set(ha);
+            i.local_get(ha).i32_load(slot_memarg(almide_layout::SUM_TAG)).i32_const(0).i32_ne();
+            i.local_get(herr).i32_eqz();
+            i.i32_and().if_(BlockType::Empty);
+            i.local_get(ha);
+        }
+        self.load_ty_slot(STR, almide_layout::SUM_FIELD);
+        self.f.instructions().local_set(herr).end();
+        self.f.instructions().local_get(ha);
+        self.load_ty_slot(p, almide_layout::SUM_FIELD);
+        self.f.instructions().local_set(hv);
+        if owned {
+            self.f.instructions().local_get(ha).call(F_DEC_FLAT);
+        }
+        self.release_i32();
+        Ok(())
+    }
+
+    /// The block's value: the one arm's, or a fresh tuple that owns every
+    /// slot. Returns its type and whether the stack value carries a credit.
+    fn fan_block_value(&mut self, vals: &[(u32, SliceTy, bool, &IrExpr, bool)]) -> Result<(SliceTy, bool), EmitError> {
+        if let [(hv, p, owned, _, _)] = vals {
+            self.f.instructions().local_get(*hv);
+            return Ok((*p, *owned));
+        }
+        let tys: Vec<SliceTy> = vals.iter().map(|(_, p, ..)| *p).collect();
+        let ti = self.types.tuple(tys);
+        let def = self.types.tuple_def(ti);
+        let hb = self.hold_i32()?;
+        self.f.instructions().i32_const(def.size as i32).call(F_ALLOC).local_set(hb);
+        for ((hv, p, owned, arm, carrier), (fty, off)) in vals.iter().zip(def.fields.clone()) {
+            debug_assert_eq!(*p, fty);
+            self.f.instructions().local_get(hb).local_get(*hv);
+            // #2969: the fresh tuple owns every slot — a borrowed
+            // value takes its credit here.
+            if !owned {
+                self.share_handle_top(*p);
+            }
+            self.witness_fan_block_slot(arm, *carrier, *p, *owned);
+            self.store_ty_slot(*p, off);
+        }
+        self.f.instructions().local_get(hb);
+        self.release_i32();
+        Ok((SliceTy::Tuple(ti), true))
     }
 
     /// The prefetch ANY (#1628 increment 2c): phase A starts every read

@@ -170,6 +170,8 @@ impl IrVisitor for Exits {
                 | IrExprKind::Try { .. }
                 | IrExprKind::Unwrap { .. }
                 | IrExprKind::TailCall { .. }
+                // #3463: a fan block's err returns from a non-main frame.
+                | IrExprKind::Fan { .. }
         ) {
             self.0 = true;
             return;
