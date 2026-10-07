@@ -14,6 +14,9 @@
 //! and whatever is lowered.
 
 use almide_lang::ast::{AttrValue, Attribute, Decl, Param};
+use almide_base::intern::Sym;
+use std::collections::HashMap;
+use crate::{CallTarget, IrExpr, IrExprKind, VarId};
 
 /// The `mut` positions a declaration gives its params: every `mut p`, plus
 /// every param a `@mutating(p)` attribute names (the older spelling), and the
@@ -80,6 +83,99 @@ pub fn stdlib_mut_fns() -> Vec<(&'static str, String, Vec<usize>)> {
         }
     }
     out
+}
+
+/// The positions a call may write through `mut` parameters.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CallWrites {
+    /// The callee is identified; these are its `mut` positions (maybe none).
+    Positions(Vec<usize>),
+    /// The callee is not identified (an unresolved method, a call through a
+    /// fn value, a bare name no table holds or two modules share): any
+    /// argument that names a place may be written.
+    Unknown,
+}
+
+/// The `mut` positions of every fn the program defines, so a call of any
+/// shape can be asked what it writes. A user fn answers from its lowered
+/// `mutated_params`; a bundled stdlib fn from its declaration
+/// ([`stdlib_mut_positions`]), on every leg. A bare call inside a module
+/// (`bump(s)` next to `fn bump(mut s)`) resolves in that module first: the
+/// table that keyed only module-qualified calls let LICM hoist a read past a
+/// same-module write (#3452).
+#[derive(Debug, Default)]
+pub struct MutParamTable {
+    /// Root-program fns by bare name (every fn, mut positions or none).
+    root: HashMap<Sym, Vec<usize>>,
+    /// Module fns by `(module, fn)`.
+    modules: HashMap<(Sym, Sym), Vec<usize>>,
+    /// User-module fns by bare name, for a root call that names an imported
+    /// fn bare; `None` when two modules disagree.
+    bare: HashMap<Sym, Option<Vec<usize>>>,
+}
+
+impl MutParamTable {
+    pub fn of(program: &crate::IrProgram) -> Self {
+        let mut table = MutParamTable::default();
+        for f in &program.functions {
+            table.root.insert(f.name, f.mutated_params.clone());
+        }
+        for m in &program.modules {
+            let bundled = almide_lang::stdlib_info::is_bundled_module(m.name.as_str());
+            for f in &m.functions {
+                let idxs = if bundled {
+                    stdlib_mut_positions(m.name.as_str(), f.name.as_str()).unwrap_or_default()
+                } else {
+                    f.mutated_params.clone()
+                };
+                if !bundled {
+                    table.bare.entry(f.name)
+                        .and_modify(|e| if e.as_ref() != Some(&idxs) { *e = None })
+                        .or_insert_with(|| Some(idxs.clone()));
+                }
+                table.modules.insert((m.name, f.name), idxs);
+            }
+        }
+        table
+    }
+
+    /// What a call to `target` writes, made from inside module `scope`
+    /// (`None` for the root program).
+    pub fn writes(&self, target: &CallTarget, scope: Option<Sym>) -> CallWrites {
+        match target {
+            CallTarget::Module { module, func, .. } => {
+                if almide_lang::stdlib_info::is_bundled_module(module.as_str()) {
+                    return CallWrites::Positions(
+                        stdlib_mut_positions(module.as_str(), func.as_str()).unwrap_or_default(),
+                    );
+                }
+                self.modules.get(&(*module, *func)).cloned().map_or(CallWrites::Unknown, CallWrites::Positions)
+            }
+            CallTarget::Named { name } => {
+                let own = match scope {
+                    Some(m) => self.modules.get(&(m, *name)),
+                    None => self.root.get(name),
+                };
+                match (own, self.bare.get(name)) {
+                    (Some(idxs), _) | (None, Some(Some(idxs))) => CallWrites::Positions(idxs.clone()),
+                    _ => CallWrites::Unknown,
+                }
+            }
+            CallTarget::Method { .. } | CallTarget::Computed { .. } => CallWrites::Unknown,
+        }
+    }
+}
+
+/// The variable a place expression is rooted at: `s`, `w.inner`, `w.a.b`,
+/// `t.0`, `xs[i]` all name their root var. `None` for a temporary.
+pub fn place_root(expr: &IrExpr) -> Option<VarId> {
+    match &expr.kind {
+        IrExprKind::Var { id } => Some(*id),
+        IrExprKind::Member { object, .. }
+        | IrExprKind::TupleIndex { object, .. }
+        | IrExprKind::IndexAccess { object, .. } => place_root(object),
+        _ => None,
+    }
 }
 
 #[cfg(test)]

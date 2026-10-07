@@ -79,14 +79,15 @@ use almide_ir::free_vars::free_vars;
 use almide_ir::substitute::substitute_var_in_expr;
 use almide_ir::visit_mut::{walk_expr_mut, walk_stmt_mut, IrMutVisitor};
 use almide_ir::*;
-use almide_base::intern::sym;
+use almide_base::intern::{sym, Sym};
+use almide_ir::mut_args::{place_root, CallWrites, MutParamTable};
 use almide_lang::types::{is_heap_ty, Ty};
 
 /// Lift every heap-typed `let`/`var`-bound `if`/`match` value into a fresh tail
 /// helper function, replacing the bind value with a call to that helper.
 pub fn lift_heap_branch_binds(program: &mut IrProgram) {
     let mut counter: u32 = 0;
-    let mut_params = MutParams::of(program);
+    let mut_params = MutParamTable::of(program);
 
     // Root program: function bodies + top-level let initializers all share the
     // program-wide `var_table`, so a helper synthesized from any of them resolves
@@ -118,7 +119,7 @@ pub fn lift_heap_branch_binds(program: &mut IrProgram) {
     for module in program.modules.iter_mut() {
         let IrModule { name, functions, top_lets, var_table, .. } = &mut *module;
         let globals: HashSet<VarId> = top_lets.iter().map(|tl| tl.var).collect();
-        let scope = Some(name.as_str().to_string());
+        let scope = Some(*name);
         let mut lifter = BranchLifter { vt: var_table, counter: &mut counter, new_funcs: Vec::new(), loop_depth: 0, dense_depth: 0, globals, mut_params: &mut_params, scope };
         for func in functions.iter_mut() {
             let before = lifter.new_funcs.len();
@@ -169,101 +170,39 @@ struct BranchLifter<'a> {
     /// lifted too: each bind becomes ONE helper call (chain-length immune, no 2^n
     /// duplication), the sound shape the try-lowered helper renders.
     dense_depth: u32,
-    /// Every user fn's `mut` parameter positions (see [`MutParams`]): an
+    /// Every fn's `mut` parameter positions (see [`MutParamTable`]): an
     /// argument passed there is WRITTEN by the call (#2907), exactly like an
     /// `Assign` to it.
-    mut_params: &'a MutParams,
+    mut_params: &'a MutParamTable,
     /// The module whose fns this lifter walks (`None` = the root program): a
     /// bare `Named` call resolves in this scope first.
-    scope: Option<String>,
-}
-
-/// The `mut` parameter positions of the USER fns (root program and user
-/// modules), by the scope they live in. A BUNDLED stdlib fn is never read from
-/// here, even when this leg lowered its module: its positions come from its
-/// declaration (`almide_ir::mut_args`), on every leg. The native leg lowers
-/// the bundled modules and the wasm leg does not, so a table built from the
-/// lowered modules answered differently per leg: wasm missed `list.pop`'s
-/// write (#2931), and native, keying `map.insert` under its bare name over a
-/// user's own `insert(tag, mut m)`, read position 0 for the user fn and lost
-/// its write (#2948).
-pub(crate) struct MutParams {
-    /// Root-program fns by bare name.
-    root: std::collections::HashMap<String, Vec<usize>>,
-    /// User-module fns by `(module, fn)`.
-    modules: std::collections::HashMap<(String, String), Vec<usize>>,
-    /// User-module fns by bare name, for a root call that names an imported
-    /// fn bare; ambiguous names (two modules) are dropped.
-    bare: std::collections::HashMap<String, Option<Vec<usize>>>,
-}
-
-impl MutParams {
-    fn of(program: &IrProgram) -> Self {
-        let mut root = std::collections::HashMap::new();
-        for f in program.functions.iter().filter(|f| !f.mutated_params.is_empty()) {
-            root.insert(f.name.as_str().to_string(), f.mutated_params.clone());
-        }
-        let mut modules = std::collections::HashMap::new();
-        let mut bare: std::collections::HashMap<String, Option<Vec<usize>>> = std::collections::HashMap::new();
-        for m in &program.modules {
-            if almide_lang::stdlib_info::is_bundled_module(m.name.as_str()) {
-                continue;
-            }
-            for f in m.functions.iter().filter(|f| !f.mutated_params.is_empty()) {
-                modules.insert((m.name.as_str().to_string(), f.name.as_str().to_string()), f.mutated_params.clone());
-                bare.entry(f.name.as_str().to_string())
-                    .and_modify(|e| if e.as_ref() != Some(&f.mutated_params) { *e = None })
-                    .or_insert_with(|| Some(f.mutated_params.clone()));
-            }
-        }
-        MutParams { root, modules, bare }
-    }
-
-    /// The positions `target` writes, called from `scope`.
-    fn of_call(&self, target: &CallTarget, scope: Option<&str>) -> Option<Vec<usize>> {
-        match target {
-            CallTarget::Module { module, func, .. } => {
-                if almide_lang::stdlib_info::is_bundled_module(module.as_str()) {
-                    almide_ir::mut_args::stdlib_mut_positions(module.as_str(), func.as_str())
-                } else {
-                    self.modules.get(&(module.as_str().to_string(), func.as_str().to_string())).cloned()
-                }
-            }
-            CallTarget::Named { name } => {
-                let name = name.as_str();
-                let own = match scope {
-                    Some(m) => self.modules.get(&(m.to_string(), name.to_string())),
-                    None => self.root.get(name),
-                };
-                own.cloned().or_else(|| self.bare.get(name).cloned().flatten())
-            }
-            _ => None,
-        }
-    }
+    scope: Option<Sym>,
 }
 
 /// The vars a call in `e` passes at a `mut` parameter position (as the
 /// argument itself or as the record a field argument is read from): the call
 /// writes them back, so outlining it into a helper that takes them by value
 /// would lose the write.
-fn collect_mut_arg_vars(e: &IrExpr, mut_params: &MutParams, scope: Option<&str>, out: &mut HashSet<u32>) {
+fn collect_mut_arg_vars(e: &IrExpr, mut_params: &MutParamTable, scope: Option<Sym>, out: &mut HashSet<u32>) {
     struct V<'m, 'o> {
-        mut_params: &'m MutParams,
-        scope: Option<&'m str>,
+        mut_params: &'m MutParamTable,
+        scope: Option<Sym>,
         out: &'o mut HashSet<u32>,
     }
     impl visit::IrVisitor for V<'_, '_> {
         fn visit_expr(&mut self, e: &IrExpr) {
             if let IrExprKind::Call { target, args, .. } = &e.kind {
-                if let Some(idxs) = self.mut_params.of_call(target, self.scope) {
-                    for i in idxs {
-                        let place = args.get(i).map(|a| match &a.kind {
-                            IrExprKind::Member { object, .. } => &object.kind,
-                            k => k,
-                        });
-                        if let Some(IrExprKind::Var { id }) = place {
-                            self.out.insert(id.0);
-                        }
+                // Only an identified callee counts here, as before the shared
+                // table (LICM, which can only lose by guessing, treats an
+                // unidentified one as writing every place argument).
+                if let CallWrites::Positions(idxs) = self.mut_params.writes(target, self.scope) {
+                    // The written place may be a field path of any depth
+                    // (`bump(o.mid.inner)`): its ROOT var is written. Reading
+                    // one `Member` level only lifted that call into a helper
+                    // taking `o` by value — a native rustc error and a lost
+                    // write on wasm.
+                    for id in idxs.iter().filter_map(|&i| args.get(i).and_then(place_root)) {
+                        self.out.insert(id.0);
                     }
                 }
             }
@@ -428,7 +367,7 @@ impl<'a> BranchLifter<'a> {
         // Include write-only targets and specialized collection mutations too.
         let mut assigned = HashSet::new();
         almide_ir::collect_assigned_vars(value, &mut assigned);
-        collect_mut_arg_vars(value, self.mut_params, self.scope.as_deref(), &mut assigned);
+        collect_mut_arg_vars(value, self.mut_params, self.scope, &mut assigned);
         if !assigned.is_empty() {
             let locals = almide_ir::free_vars::bound_vars(value);
             if assigned.iter().any(|id| {
