@@ -44,10 +44,17 @@ fn fan_err_ty(ctx: &RenderContext) -> Ty {
 }
 
 /// The join's `?` / `.unwrap()` for a Result arm: a typed arm error joined
-/// into a `String` channel takes its repr text, as a `!` there does (#2725).
+/// into a `String` channel takes its repr text, as a `!` there does (#2725);
+/// a `List[String]` one is joined with `", "`, as a `!` there joins it (#2748).
 fn fan_join_suffix(ctx: &RenderContext, e: &IrExpr) -> &'static str {
     match (e.ty.result_err_ty(), ctx.auto_unwrap) {
-        (Some(err), true) if err != fan_err_ty(ctx) && fan_err_ty(ctx) == Ty::String => ".map_err(|e| almide_repr(&e))?",
+        (Some(err), true) if err != fan_err_ty(ctx) && fan_err_ty(ctx) == Ty::String => {
+            if matches!(&err, Ty::Applied(TypeConstructorId::List, a) if matches!(a.as_slice(), [Ty::String])) {
+                ".map_err(|errs| errs.join(\", \"))?"
+            } else {
+                ".map_err(|e| almide_repr(&e))?"
+            }
+        }
         (Some(_), true) => "?",
         (Some(_), false) => ".unwrap()",
         _ => "",
