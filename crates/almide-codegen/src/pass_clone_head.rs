@@ -234,11 +234,10 @@ impl Heads<'_> {
     /// any more (C4) — except the bare owned param of a value read, which
     /// [`Self::consumed_fallback`] still moves.
     fn fallback_admits(&self, fallback: &IrExpr, xs: VarId, borrowed: bool, whole: bool) -> bool {
-        let place = root(fallback);
-        !super::pass_clone_projection::mentions(fallback, xs)
-            && (!borrowed || place.is_some())
-            && !(borrowed && whole && self.is_param(fallback))
-            && !place.is_some_and(|p| self.owned_params.contains(&p) && (borrowed || !self.is_param(fallback)))
+        if super::pass_clone_projection::mentions(fallback, xs) { return false; }
+        let Some(place) = root(fallback) else { return !borrowed };
+        if self.owned_params.contains(&place) { return !borrowed && self.is_param(fallback); }
+        !(borrowed && whole && self.is_param(fallback))
     }
 
     /// The `none` side of a value read: the read chain over the fallback. A
