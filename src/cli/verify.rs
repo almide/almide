@@ -112,7 +112,7 @@ fn manifest_allow() -> Option<Vec<String>> {
 
 /// Produce the bundle for `file` and write it to `out`.
 fn produce(file: &str, out: &Path) -> Result<(), i32> {
-    let (_program, source_text, resolved, _deps) = super::build::parse_and_resolve_wasm(file).map_err(|()| 1)?;
+    let (_program, source_text, resolved, _deps) = super::wasm_compile::parse_and_resolve_wasm(file).map_err(|()| 1)?;
     let modules: Vec<(String, almide_lang::ast::Program, bool)> =
         resolved.modules.iter().map(|(n, p, _pkg, s)| (n.clone(), p.clone(), *s)).collect();
     let allow = manifest_allow();

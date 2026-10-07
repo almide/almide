@@ -227,7 +227,7 @@ fn check_one(file: &str, deny_warnings: bool, timings: bool, stamp: bool, critic
     // structural leg, the stock-p1 host-op audit) minus the write: a fn
     // wall is E081, a shape the leg declines is E082, each with its reason. Measured, never
     // declared, so it cannot drift from what the build does.
-    if wasm_target && super::build::compile_to_wasm_bytes(file, false, true, true, false).is_err() {
+    if wasm_target && super::wasm_compile::compile_to_wasm_bytes(file, false, true, true, false).is_err() {
         std::process::exit(1);
     }
 
