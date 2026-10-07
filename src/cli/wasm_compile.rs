@@ -4,31 +4,37 @@
 
 use crate::{parse_file, canonicalize, check, diagnostic, resolve, project, project_fetch, err};
 
-/// Compile an `.almd` file to a raw wasm32-wasi module (no wasm-opt, no file IO).
-///
-/// This is the single source of truth for the direct-WASM pipeline, shared by
-/// `almide build --target wasm` and `almide run --target wasm`, so both emit
-/// the byte-identical module the cross-target equivalence guarantee promises.
-/// Compile diagnostics are rendered to stderr here; on any error it returns
-/// `Err(())` and the caller decides how to terminate.
-/// Returns `(wasm_bytes, produced_by_v1)`. When the second field is `true`, the module IS the
-/// PCC-verified v1 trust-spine output — the caller MUST NOT post-process it (wasm-opt would replace
-/// the verified bytes with an unverified transform), so `--verified` ships exactly what was verified.
-/// Type-check and lower one user module for the WASM path, appending its IR
-/// directly onto `ir_program`. Extracted verbatim from
-/// `compile_to_wasm_bytes`'s per-module loop body — same checker/env
-/// mutation order, `continue` becomes an early `return`. (Sibling of
-/// `crate::lower_one_user_module` in main.rs, which additionally tracks a
+/// Type-check and lower every user module import resolution found, in
+/// resolution order, appending each one's IR directly onto `ir_program`;
+/// returns the modules' own diagnostics. Shared by `compile_to_wasm_bytes`
+/// and the test lane's wasm leg. (Sibling of
+/// `compile_driver::lower_user_modules`, which additionally tracks a
 /// per-module `module_irs` map the WASM path doesn't need.)
-pub(super) fn lower_one_wasm_module(
+pub(super) fn lower_wasm_modules(
     checker: &mut check::Checker,
-    name: &mut String,
-    mod_prog: &mut almide::ast::Program,
-    pkg_id: &mut Option<project::PkgId>,
+    resolved: &mut resolve::ResolvedModules,
+    ir_program: &mut almide::ir::IrProgram,
+) -> Vec<(String, String, Vec<crate::diagnostic::Diagnostic>)> {
+    let mut module_diags = Vec::new();
+    let sources = std::mem::take(&mut resolved.sources);
+    for module in &mut resolved.modules {
+        lower_one_wasm_module(checker, module, ir_program, &sources, &mut module_diags);
+    }
+    resolved.sources = sources;
+    module_diags
+}
+
+/// Type-check and lower one user module for the WASM path, appending its IR
+/// directly onto `ir_program` — same checker/env mutation order as the loop
+/// body it was.
+fn lower_one_wasm_module(
+    checker: &mut check::Checker,
+    module: &mut (String, almide::ast::Program, Option<project::PkgId>, bool),
     ir_program: &mut almide::ir::IrProgram,
     sources: &std::collections::HashMap<String, (String, String)>,
     module_diags: &mut Vec<(String, String, Vec<crate::diagnostic::Diagnostic>)>,
 ) {
+    let (name, mod_prog, pkg_id, _) = module;
     if almide::stdlib::is_stdlib_module(name) && !almide::stdlib::is_bundled_module(name) { return; }
     let saved_self = checker.env.self_module_name;
     if let Some(pid) = pkg_id.as_ref() {
@@ -141,14 +147,7 @@ fn lower_and_link_wasm_ir(program: &almide::ast::Program, checker: &mut check::C
     // Lower user modules to IR. Bundled stdlib modules (stdlib/<m>.almd) are
     // included so their fns can be invoked through the bundled-dispatch path;
     // colliding TOML-runtime fns are pruned to avoid duplicate definitions.
-    let mut module_diags = Vec::new();
-    let sources = std::mem::take(&mut resolved.sources);
-    for (name, mod_prog, pkg_id, _) in &mut resolved.modules {
-        lower_one_wasm_module(
-            checker, name, mod_prog, pkg_id, &mut ir_program, &sources, &mut module_diags,
-        );
-    }
-    resolved.sources = sources;
+    let module_diags = lower_wasm_modules(checker, resolved, &mut ir_program);
     // An imported module's own type errors abort the wasm build too (#862).
     crate::compile_driver::report_module_diagnostics(&module_diags).map_err(|_| ())?;
 
@@ -474,6 +473,16 @@ fn report_structural_wall_site() {
     }
 }
 
+/// Compile an `.almd` file to a raw wasm32-wasi module (no wasm-opt, no file IO).
+///
+/// This is the single source of truth for the direct-WASM pipeline, shared by
+/// `almide build --target wasm` and `almide run --target wasm`, so both emit
+/// the byte-identical module the cross-target equivalence guarantee promises.
+/// Compile diagnostics are rendered to stderr here; on any error it returns
+/// `Err(())` and the caller decides how to terminate.
+/// Returns `(wasm_bytes, produced_by_v1)`. When the second field is `true`, the module IS the
+/// PCC-verified v1 trust-spine output — the caller MUST NOT post-process it (wasm-opt would replace
+/// the verified bytes with an unverified transform), so `--verified` ships exactly what was verified.
 pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified: bool, library_ok: bool, embedded_leg: bool) -> Result<(Vec<u8>, Vec<i32>), ()> {
     compile_to_wasm_bytes_surfaced(file, allow_unverified, verified, library_ok, embedded_leg).map(|(b, o, _)| (b, o))
 }
