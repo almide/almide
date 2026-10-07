@@ -163,9 +163,9 @@ fn rewrite_expr(expr: IrExpr, inside_fan: bool) -> IrExpr {
     let kind = match expr.kind {
         // Fan block: mark children as inside_fan, strip top-level Try from each expr
         IrExprKind::Fan { exprs } => IrExprKind::Fan {
-            exprs: exprs.into_iter().map(|e| {
-                let rewritten = rewrite_expr(e, true);
-                strip_try_top(rewritten)
+            exprs: exprs.into_iter().map(|e| match peel_arm_thunk(strip_try_top(e)) {
+                Ok(body) => rewrite_expr(body, false),
+                Err(e) => strip_try_top(rewrite_expr(e, true)),
             }).collect(),
         },
 
@@ -250,6 +250,45 @@ fn rewrite_target(target: CallTarget, inside_fan: bool) -> CallTarget {
         },
         // No IrExpr children — total by construction (new variant = compile error).
         other @ (CallTarget::Named { .. } | CallTarget::Module { .. }) => other,
+    }
+}
+
+/// #3462: an arm the frontend scoped as the thunk `(() => ok(body))()` (its
+/// body propagates with `!`) runs as that thunk's body: the spawn / inline
+/// closure already IS a zero-arg closure, so the body's `?` ends the arm with
+/// its Err and the join's `?` reports the lowest-index one (C-199). Its
+/// markers stay — they are the arm's propagation, not the join's auto-try.
+fn peel_arm_thunk(arm: IrExpr) -> Result<IrExpr, IrExpr> {
+    match arm.kind {
+        IrExprKind::Call { target: CallTarget::Computed { callee }, args, .. }
+            if args.is_empty() && thunk_body(&callee).is_some() => Ok(peel_thunk(*callee)),
+        kind => Err(IrExpr { kind, ..arm }),
+    }
+}
+
+/// The zero-arg lambda a callee evaluates to, seen through the closure
+/// representation (`RcWrap`) and the capture binds `CaptureClone` puts in
+/// front of it (`{ let __cap_0 = x.clone(); RcWrap(lambda) }`).
+fn thunk_body(callee: &IrExpr) -> Option<&IrExpr> {
+    match &callee.kind {
+        IrExprKind::Lambda { params, body, .. } if params.is_empty() => Some(body),
+        IrExprKind::RcWrap { expr, .. } => thunk_body(expr),
+        IrExprKind::Block { expr: Some(tail), .. } => thunk_body(tail),
+        _ => None,
+    }
+}
+
+/// The callee with its lambda replaced by the lambda's body; the capture
+/// binds stay in front of it, so the body still reads them.
+fn peel_thunk(callee: IrExpr) -> IrExpr {
+    match callee.kind {
+        IrExprKind::Lambda { body, .. } => *body,
+        IrExprKind::RcWrap { expr, .. } => peel_thunk(*expr),
+        IrExprKind::Block { stmts, expr: Some(tail) } => {
+            let tail = peel_thunk(*tail);
+            IrExpr { ty: tail.ty.clone(), kind: IrExprKind::Block { stmts, expr: Some(Box::new(tail)) }, ..callee }
+        }
+        kind => IrExpr { kind, ..callee },
     }
 }
 
