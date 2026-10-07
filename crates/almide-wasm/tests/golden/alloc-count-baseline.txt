@@ -189,7 +189,6 @@
 13	0	168	13	spec/wasm_cross/fallible_tuple_value_tail.almd
 5	3	101	3	spec/wasm_cross/fan_any_allfail.almd
 30	12	318	30	spec/wasm_cross/fan_any_early_winner.almd
-49	37	711	41	spec/wasm_cross/fan_arm_bang_propagates_to_arm.almd
 13	2	140	13	spec/wasm_cross/fan_arm_unwrap_or.almd
 5	2	70	2	spec/wasm_cross/fan_block_err_list_order.almd
 46	20	518	22	spec/wasm_cross/fan_block_rc_closure_capture.almd
