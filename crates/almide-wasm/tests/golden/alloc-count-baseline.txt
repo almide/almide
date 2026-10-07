@@ -135,7 +135,7 @@
 21	9	220	21	spec/wasm_cross/declaration_forms.almd
 48	22	986	48	spec/wasm_cross/declaration_literal_domain.almd
 8	0	88	8	spec/wasm_cross/deep_eq_heap.almd
-96	6	460	96	spec/wasm_cross/deep_eq_nested_distinct.almd
+156	88	696	156	spec/wasm_cross/deep_eq_nested_distinct.almd
 1	0	4	1	spec/wasm_cross/default_param_ref.almd
 8	2	81	8	spec/wasm_cross/destructure_let_unwrap.almd
 28000	27986	742000	28000	spec/wasm_cross/destructure_owned_tuple_release.almd
