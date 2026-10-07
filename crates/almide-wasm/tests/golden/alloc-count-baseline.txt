@@ -420,6 +420,7 @@
 24	13	294	24	spec/wasm_cross/list_float_equality_family.almd
 66	36	1013	66	spec/wasm_cross/list_float_total_order.almd
 7751	3618	6498155	7751	spec/wasm_cross/list_fold_fused_callback_result_ownership.almd
+47	23	411	47	spec/wasm_cross/list_head_read_borrows.almd
 85	41	882	85	spec/wasm_cross/list_heap_ops_release_temporaries.almd
 1833	1796	15324	1833	spec/wasm_cross/list_heap_tuple_return.almd
 236	193	1920	236	spec/wasm_cross/list_heapelem_rc.almd
