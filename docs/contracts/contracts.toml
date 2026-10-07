@@ -157,6 +157,7 @@ evidence  = [
   { path = "spec/wasm_cross/fan_map_err_runs_every_element.almd", class = "fixture" },
   { path = "spec/wasm_cross/fan_any_allfail.almd", class = "fixture" },
   { path = "spec/wasm_cross/option_none_unwrap_term.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fan_arm_bang_propagates_to_arm.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-006"
@@ -2641,6 +2642,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/fan_block_err_list_order.almd", class = "fixture" },
   { path = "spec/wasm_cross/fan_block_rc_closure_capture.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fan_arm_bang_propagates_to_arm.almd", class = "fixture" },
 ]
 
 # ── FAN SIBLING TRAP ─

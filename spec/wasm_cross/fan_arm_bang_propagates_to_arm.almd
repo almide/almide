@@ -1,0 +1,108 @@
+// @contract: C-199, C-005
+// A `!` inside a `fan { }` arm ends THAT arm with its Err; it is not an exit from the
+// enclosing fn (#3462). Every arm still runs, output appears in arm order, and the block
+// reports the lowest-index Err through the unified `Error: <msg>` + exit 1 — the
+// sequential, run-every-element reading of ADR-0024 D1 that C-199 pins for a Result arm
+// and C-005 pins for a `fan.map` callback's `!`.
+//
+// Native lowered nothing for the inner `!` (FanLowering stripped it: rustc E0308) and the
+// wasm leg read it as an exit from the enclosing fn, so an arm-0 failure skipped arm 1.
+// The helpers run the success paths (threaded, and inline for an arm calling a closure);
+// `fan.map` / `fan.settle` callbacks show the same rule for the mapper heads; main's own
+// block is the failure: arm 0 fails while the later arms print, arm 1's Option `!` fails
+// too, and arm 0's Err is the one that surfaces.
+effect fn boom(n: Int) -> Int = {
+  if n > 1 then err("boom ${n}")!
+  else n
+}
+
+effect fn all_ok(xs: List[Int]) -> Int = {
+  let (a, b, c) = fan {
+    {
+      println("all_ok arm0")
+      let x = boom(1)!
+      x + 1
+    }
+    {
+      println("all_ok arm1")
+      let v = list.get(xs, 1)!
+      v
+    }
+    {
+      match list.len(xs) {
+        2 => boom(1)! + 10,
+        _ => 0,
+      }
+    }
+  }
+  a + b + c
+}
+
+effect fn closure_arms(k: Int) -> Int = {
+  let f = (n: Int) => n * k
+  let (a, b) = fan {
+    {
+      let x = boom(f(0))!
+      println("closure_arms arm0 ${x}")
+      x
+    }
+    {
+      println("closure_arms arm1 ${f(1)}")
+      let y = boom(1)!
+      y + f(2)
+    }
+  }
+  a + b
+}
+
+effect fn mapped() -> List[Int] = fan.map(
+  [3, 1, 4],
+  (n) => {
+    println("mapped el ${n}")
+    let v = boom(n)!
+    ok(v * 10)
+  },
+)!
+
+fn show(label: String, r: Result[Int, String]) -> String = match r {
+  ok(v) => "${label}: ok ${int.to_string(v)}",
+  err(e) => "${label}: err ${e}",
+}
+
+effect fn main() -> Unit = {
+  let xs = [10, 20]
+  println(show("all_ok", all_ok(xs)))
+  println(show("closure_arms", closure_arms(2)))
+  let m = match mapped() {
+    ok(ys) => "ok ${int.to_string(list.len(ys))}",
+    err(e) => "err ${e}",
+  }
+  println("mapped: ${m}")
+  let settled = fan.settle([3, 1], (n) => {
+    let v = boom(n)!
+    ok(v * 10)
+  })
+  for r in settled {
+    println(show("settled", r))
+  }
+  let (a, b, c) = fan {
+    {
+      let x = boom(5)!
+      println("unreachable: main arm0")
+      x + 1
+    }
+    {
+      println("main arm1 runs")
+      let v = list.get(xs, 5)!
+      v
+    }
+    {
+      println("main arm2 runs")
+      match list.len(xs) {
+        2 => boom(1)!,
+        _ => 0,
+      }
+    }
+  }
+  println("unreachable: ${int.to_string(a + b + c)}")
+}
