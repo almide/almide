@@ -26,6 +26,12 @@
 //! - leaves through the exit plan (`ReturnError`), the frame's credits
 //!   released as on any `!` propagation, with the carrier as the value.
 //!
+//! An arm whose error is not the frame's `String` (#3474's sibling: a typed
+//! `E`, or a `List[String]`) leaves converted, exactly as a `!` on it there
+//! converts (err_channel.rs): its site builds a FRESH `err(<msg>)` block —
+//! the repr text, or the list joined with `", "` — releases an owned chosen
+//! carrier, and returns the fresh block instead of the carrier.
+//!
 //! Past the chain every carrier is ok: its payload is read out and an owned
 //! carrier's spine released (`$dec_flat`), the abort mode's per-arm read.
 //!
@@ -71,6 +77,9 @@ pub(crate) struct FanCarrier {
     /// The payload's hold and type, filled past the chain.
     hv: u32,
     p: SliceTy,
+    /// The arm's error type and its IR type when it is not the frame's
+    /// (`String`) error: the site converts it on the way out.
+    conv: Option<(SliceTy, Option<Ty>)>,
 }
 
 impl Emitter<'_> {
@@ -90,24 +99,31 @@ impl Emitter<'_> {
     }
 
     /// The arm's carrier (on the stack) into a hold of its own.
-    pub(crate) fn fan_keep_carrier(&mut self, ty: SliceTy, owned: bool, hv: u32, p: SliceTy) -> Result<FanCarrier, EmitError> {
+    pub(crate) fn fan_keep_carrier(
+        &mut self,
+        ty: SliceTy,
+        owned: bool,
+        (hv, p): (u32, SliceTy),
+        conv: Option<(SliceTy, Option<Ty>)>,
+    ) -> Result<FanCarrier, EmitError> {
         let hold = self.hold_i32()?;
         self.f.instructions().local_set(hold);
         let obj = if owned { self.witness.as_mut().map(|w| w.temp_born()) } else { None };
-        Ok(FanCarrier { hold, ty, owned, obj, hv, p })
+        Ok(FanCarrier { hold, ty, owned, obj, hv, p, conv })
     }
 
     /// The chain of err sites in arm order; `pures` are the owned droppable
     /// pure arm values (hold, type) an exit releases.
-    pub(crate) fn fan_return_first_err(&mut self, carriers: &[FanCarrier], pures: &[(u32, SliceTy)]) {
+    pub(crate) fn fan_return_first_err(&mut self, carriers: &[FanCarrier], pures: &[(u32, SliceTy)]) -> Result<(), EmitError> {
         for k in 0..carriers.len() {
-            self.fan_err_site(carriers, k, pures);
+            self.fan_err_site(carriers, k, pures)?;
         }
+        Ok(())
     }
 
     /// Site k: carrier k is an err (every lower one was ok) — it is the
     /// block's result, and the frame returns it.
-    fn fan_err_site(&mut self, carriers: &[FanCarrier], k: usize, pures: &[(u32, SliceTy)]) {
+    fn fan_err_site(&mut self, carriers: &[FanCarrier], k: usize, pures: &[(u32, SliceTy)]) -> Result<(), EmitError> {
         let c = &carriers[k];
         self.f
             .instructions()
@@ -125,6 +141,12 @@ impl Emitter<'_> {
             let dec = self.dec_fn_of(t);
             self.f.instructions().local_get(h).call(dec);
             self.witness_discard();
+        }
+        if let Some((ert, err_ir)) = &c.conv {
+            self.fan_err_site_converted(c, *ert, err_ir.as_ref())?;
+            self.witness_branch_arm();
+            self.witness_branch_close();
+            return Ok(());
         }
         if !c.owned {
             self.f.instructions().local_get(c.hold).call(F_INC);
@@ -145,6 +167,59 @@ impl Emitter<'_> {
         self.f.instructions().end();
         self.witness_branch_arm();
         self.witness_branch_close();
+        Ok(())
+    }
+
+    /// Site k's exit for an arm whose error the frame's `String` channel
+    /// converts: the message (`emit_abort_message`: the repr, or a joined
+    /// `List[String]`) into a FRESH `err(msg)` block that leaves, the owned
+    /// chosen carrier released — `propagate_err_as_repr` /
+    /// `propagate_err_joined`'s exit, read from the kept carrier. The `if`
+    /// is closed here.
+    fn fan_err_site_converted(&mut self, c: &FanCarrier, ert: SliceTy, err_ir: Option<&Ty>) -> Result<(), EmitError> {
+        let hold = c.hold;
+        let joined = self.is_str_list(ert);
+        self.emit_abort_message(ert, err_ir, |s| {
+            s.f.instructions().local_get(hold);
+            s.load_ty_slot(ert, almide_layout::SUM_FIELD);
+        })?;
+        let blk = self.hold_i32()?;
+        self.f
+            .instructions()
+            .local_set(self.tmp_i32_local)
+            .i32_const(16)
+            .call(F_ALLOC)
+            .local_tee(blk)
+            .i32_const(1)
+            .i32_store(slot_memarg(almide_layout::SUM_TAG))
+            .local_get(blk)
+            .local_get(self.tmp_i32_local)
+            .i32_store(slot_memarg(almide_layout::SUM_FIELD));
+        if c.owned {
+            let dec = self.dec_fn_of(c.ty);
+            self.f.instructions().local_get(hold).call(dec);
+        }
+        if joined {
+            // The joined route is not recorded, as on a `!` (witness_unwrap.rs).
+            self.witness_decline("fan:err-joined");
+        } else if let Some(w) = self.witness.as_mut() {
+            // The repr text moves into the err block; the chosen carrier is released.
+            w.temp_move();
+        }
+        self.fan_witness_ops(c.obj, "d");
+        if let Some(w) = self.witness.as_mut() {
+            w.arm_err_exit();
+        }
+        let plan = self.exit_plan(crate::exit_plan::Continuation::ReturnError);
+        self.emit_exit(&plan);
+        self.f.instructions().local_get(blk).return_();
+        if let Some(w) = self.witness.as_mut() {
+            w.temp_move();
+            w.frame_replaced();
+        }
+        self.f.instructions().end();
+        self.release_i32();
+        Ok(())
     }
 
     /// Past the chain the carrier is ok: its payload into its hold, an
@@ -185,9 +260,13 @@ impl Emitter<'_> {
             return Ok(());
         };
         // A propagating block's arm err must be the one the frame returns:
-        // its own. The abort mode renders any error (#3470).
+        // its own, or any error a `String` frame converts (a `!` there
+        // does). The abort mode renders any error (#3470).
         let ert = self.types.el(er);
-        if abort.is_none() && Some(ert) != self.fan_frame_err() {
+        let frame_err = self.fan_frame_err();
+        let conv = (abort.is_none() && Some(ert) != frame_err && frame_err == Some(STR))
+            .then(|| (ert, crate::display::ir_arg(Some(&arm.ty), 1).cloned()));
+        if abort.is_none() && Some(ert) != frame_err && conv.is_none() {
             return unsup("fan-block-err-ty");
         }
         let p = self.types.el(o);
@@ -197,7 +276,7 @@ impl Emitter<'_> {
                 let err_ir = crate::display::ir_arg(Some(&arm.ty), 1).cloned();
                 self.fan_arm_first_err(a, hv, p, owned, (ert, err_ir))?
             }
-            None => carriers.push(self.fan_keep_carrier(got, owned, hv, p)?),
+            None => carriers.push(self.fan_keep_carrier(got, owned, (hv, p), conv)?),
         }
         vals.push((hv, p, owned, arm, true));
         Ok(())
@@ -248,7 +327,7 @@ impl Emitter<'_> {
             .filter(|&&(_, p, owned, _, carrier)| !carrier && owned && self.rc_droppable(p))
             .map(|&(hv, p, ..)| (hv, p))
             .collect();
-        self.fan_return_first_err(carriers, &pures);
+        self.fan_return_first_err(carriers, &pures)?;
         for c in carriers {
             self.fan_carrier_payload(c);
         }
