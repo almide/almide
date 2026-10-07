@@ -1,0 +1,6 @@
+effect fn main() -> Unit = {
+  var xs: List[Int] = []
+  let add = (x: Int) => list.push(xs, x)
+  add(1)
+  println(int.to_string(list.len(xs)))
+}

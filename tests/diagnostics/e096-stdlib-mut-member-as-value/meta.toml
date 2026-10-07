@@ -1,0 +1,4 @@
+expects_code = "E096"
+expects_error = "fn 'list.push' has a `mut` parameter 'xs' and cannot be used as a function value"
+expects_line_col = "5:13"
+hint_substring = "pass a lambda that names the `var` (`(x) => list.push(xs, x)`)"

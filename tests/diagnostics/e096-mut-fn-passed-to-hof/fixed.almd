@@ -1,0 +1,9 @@
+fn grow(mut xs: List[Int]) -> Unit = {
+  list.push(xs, 0)
+}
+
+effect fn main() -> Unit = {
+  var acc: List[Int] = []
+  let _ = list.map([1, 2], (_) => grow(acc))
+  println(int.to_string(list.len(acc)))
+}
