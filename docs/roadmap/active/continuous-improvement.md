@@ -78,6 +78,43 @@ warning count against develop, not by the rounded grade.
     5. JSON escaping of control characters
 - **Open, waiting on an owner ruling:** #2755's last witness bucket, `caps:argv-in-plain-fn` (8 frames). It needs a decision on whether argv is ambient or an effect; #848 closed without one.
 
+### 2026-10-07 (later)
+
+- **Merged to develop** (not released):
+  - **#3458** (batch 15):
+    - #3452: LICM miscompile
+    - #3456: E096 and dialect epoch 12
+    - #3454: in-place string accumulation
+    - root `src/` codopsy B 86 → A 93
+    - epoch ledger repair: the stray merge marker; the gate now parses the TOML
+    - this ledger
+  - **#3461** (batch 16):
+    - #3453: head reads borrow
+    - #3455: scoped let-bound closures
+    - the Trust Spine caps fix
+- **Trust Spine had been red on develop since batch 14** (974c00ea0). The workflow is not required, so nothing blocked on it.
+  - **Cause:** the fan offer host op 74 had no row in `op_caps`. It read as the unknown-op sentinel, so three fan fixtures certified by #3447 failed [caps]. `proofs/structural-wall.sh` is the only script that checks caps over certified fixtures, and it was not in the batch-14 checks.
+  - **Fix:** op 74 maps to no capability, because the call graph already counts the chunk fn it runs. `proofs/gate.sh` adds a drill that puts the sentinel back and must be rejected.
+  - **Result:** `make verify-trust` went from 926/929 to 929/929.
+  - **Lesson:** for any change to certification, also run `make verify-trust`.
+- **Batch 17** (this PR): #3459 + #3460, #3462, #3463.
+  - **#3462:** in a `fan { }` arm, `!` ends that arm with its Err. Every arm still runs and the lowest-index Err wins.
+    - Before: native failed rustc, and wasm left the function at the failing arm.
+    - The `spec/wasm_cross` fixture was withdrawn rather than seeding `walled-real-baseline.txt` (MIR declines it). The evidence is `tests/fan_arm_bang_test.rs`, on both targets.
+  - **#3463:** on wasm, a fan Err inside a non-main effect fn is now returned instead of aborting. A tail fan or `let r = fan` also runs every arm now, on wasm as on native.
+    - Evidence: `tests/fan_block_propagate_test.rs`, 13 cases on both targets, including one alloc-balance case.
+- **Follow-ups filed:**
+  - #3464: `fan.settle { }` arm `!` gives a misleading E022. Decision taken: accept it scoped to the arm, as the `fan.settle(xs, f)` mapper form already does. Flagged for the owner.
+  - #3465: latent MIR `!` scope and arm-skipping.
+  - #3467: I-divergence. A typed-error arm `!` skips later arms on wasm and gives invalid Rust on native.
+  - #3468: native invalid Rust for a block arm in a tail fan.
+  - #3464, #3467 and #3468 are in progress on branch `fix-fan-arms`.
+- **`almide check` speed (#3466):** develop is about 10% slower than v0.66.0 on gramide's `src/cli.almd` (83.5 vs 75.5 ms, median of 25 interleaved runs).
+  - Build profile ruled out: a non-incremental build like release.yml times the same.
+  - About 2.2 ms is the E008 concurrent-reach analysis (first bad commit be61ee66f).
+  - The remaining ~5% is creep that a threshold bisect cannot pin down. It needs a sampling profiler; xctrace hung here.
+- **codopsy:** every crate these batches touched stays A with an unchanged warning count: almide-wasm 90/47, almide-codegen 90/32, almide-frontend 90/36.
+
 ## Edit loop on a real project: O6lvl4/gramide 0.2.11
 
 gramide has 19 files and 8,106 lines of Almide. It is measured on a copy (`git archive HEAD`) with one line added: `import self.lex` in `src/keystrokes.almd`.
