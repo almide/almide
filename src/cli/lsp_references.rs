@@ -222,10 +222,42 @@ impl<'a> OccWalker<'a> {
         }
     }
 
+    /// Every expression kind lands in exactly one group here, so a new kind
+    /// is a compile error until it is placed.
     fn walk_expr(&mut self, expr: &crate::ast::Expr) {
         use crate::ast::ExprKind as E;
         match &expr.kind {
             E::Ident { name } => self.use_at(*name, expr.span),
+            E::Lambda { .. } | E::Block { .. } | E::Match { .. } | E::IfLet { .. } | E::ForIn { .. } | E::While { .. } => {
+                self.walk_binding_form(expr)
+            }
+            E::FanBounded { .. } | E::FanRace { .. } | E::FanRaceMap { .. } | E::FanTimeout { .. } => self.walk_fan_form(expr),
+            E::InterpolatedString { parts, .. } => {
+                for part in parts {
+                    if let crate::ast::StringPart::Expr { expr } = part {
+                        self.in_hole_depth += 1;
+                        self.walk_expr(expr);
+                        self.in_hole_depth -= 1;
+                    }
+                }
+            }
+            E::List { .. } | E::Tuple { .. } | E::Fan { .. } | E::FanSettle { .. } | E::MapLiteral { .. }
+            | E::Record { .. } | E::SpreadRecord { .. } => self.walk_aggregate(expr),
+            E::Call { .. } | E::Member { .. } | E::OptionalChain { .. } | E::TupleIndex { .. } | E::Scoped { .. }
+            | E::IndexAccess { .. } | E::Pipe { .. } | E::Compose { .. } | E::Binary { .. } | E::If { .. }
+            | E::Unary { .. } | E::Paren { .. } | E::Try { .. }
+            | E::Unwrap { .. } | E::ToOption { .. } | E::Some { .. } | E::Ok { .. } | E::Err { .. }
+            | E::UnwrapOr { .. } | E::TypeAscription { .. } | E::Range { .. } => self.walk_operands(expr),
+            E::Int { .. } | E::Float { .. } | E::String { .. } | E::Bool { .. }
+            | E::TypeName { .. } | E::EmptyMap | E::Hole | E::Todo { .. }
+            | E::Break | E::Continue | E::Placeholder | E::Unit | E::None | E::Error => {}
+        }
+    }
+
+    /// The forms that bind names: each opens the scope its binders live in.
+    fn walk_binding_form(&mut self, expr: &crate::ast::Expr) {
+        use crate::ast::ExprKind as E;
+        match &expr.kind {
             E::Lambda { params, body } => self.scoped(|w| {
                 for p in params {
                     w.define(p.name, expr.span, "parameter");
@@ -271,15 +303,54 @@ impl<'a> OccWalker<'a> {
                 self.walk_expr(cond);
                 self.scoped(|w| w.walk_stmts(body));
             }
-            E::InterpolatedString { parts, .. } => {
-                for part in parts {
-                    if let crate::ast::StringPart::Expr { expr } = part {
-                        self.in_hole_depth += 1;
-                        self.walk_expr(expr);
-                        self.in_hole_depth -= 1;
-                    }
-                }
+            // `walk_expr` routes only the forms above here.
+            _ => {}
+        }
+    }
+
+    /// The bounded and racing `fan` forms: an optional budget, then the arms.
+    fn walk_fan_form(&mut self, expr: &crate::ast::Expr) {
+        use crate::ast::ExprKind as E;
+        match &expr.kind {
+            E::FanBounded { budget, body } => { self.walk_expr(budget); self.walk_expr(body); }
+            E::FanRace { budget, arms } => {
+                if let Some(b) = budget { self.walk_expr(b); }
+                for a in arms { self.walk_expr(a); }
             }
+            E::FanRaceMap { budget, list, mapper } => {
+                if let Some(b) = budget { self.walk_expr(b); }
+                self.walk_expr(list);
+                self.walk_expr(mapper);
+            }
+            E::FanTimeout { deadline, body } => { self.walk_expr(deadline); self.walk_expr(body); }
+            // `walk_expr` routes only the forms above here.
+            _ => {}
+        }
+    }
+
+    /// Literal aggregates — lists, tuples, maps, records — and the plain `fan`
+    /// forms: every element, in source order.
+    fn walk_aggregate(&mut self, expr: &crate::ast::Expr) {
+        use crate::ast::ExprKind as E;
+        match &expr.kind {
+            E::List { elements } | E::Tuple { elements } | E::Fan { exprs: elements } | E::FanSettle { arms: elements } => {
+                for e in elements { self.walk_expr(e); }
+            }
+            E::MapLiteral { entries } => for (k, v) in entries { self.walk_expr(k); self.walk_expr(v); },
+            E::Record { fields, .. } => for f in fields { self.walk_expr(&f.value); },
+            E::SpreadRecord { base, fields } => {
+                self.walk_expr(base);
+                for f in fields { self.walk_expr(&f.value); }
+            }
+            // `walk_expr` routes only the forms above here.
+            _ => {}
+        }
+    }
+
+    /// The remaining forms that bind nothing: walk their operands left to right.
+    fn walk_operands(&mut self, expr: &crate::ast::Expr) {
+        use crate::ast::ExprKind as E;
+        match &expr.kind {
             E::Call { callee, args, named_args, .. } => {
                 self.walk_expr(callee);
                 for a in args { self.walk_expr(a); }
@@ -298,35 +369,14 @@ impl<'a> OccWalker<'a> {
                 self.walk_expr(then);
                 self.walk_expr(else_);
             }
-            E::List { elements } | E::Tuple { elements } | E::Fan { exprs: elements } | E::FanSettle { arms: elements } => {
-                for e in elements { self.walk_expr(e); }
-            }
-            E::MapLiteral { entries } => for (k, v) in entries { self.walk_expr(k); self.walk_expr(v); },
-            E::Record { fields, .. } => for f in fields { self.walk_expr(&f.value); },
-            E::SpreadRecord { base, fields } => {
-                self.walk_expr(base);
-                for f in fields { self.walk_expr(&f.value); }
-            }
-            E::FanBounded { budget, body } => { self.walk_expr(budget); self.walk_expr(body); }
-            E::FanRace { budget, arms } => {
-                if let Some(b) = budget { self.walk_expr(b); }
-                for a in arms { self.walk_expr(a); }
-            }
-            E::FanRaceMap { budget, list, mapper } => {
-                if let Some(b) = budget { self.walk_expr(b); }
-                self.walk_expr(list);
-                self.walk_expr(mapper);
-            }
-            E::FanTimeout { deadline, body } => { self.walk_expr(deadline); self.walk_expr(body); }
             E::Unary { operand, .. } | E::Paren { expr: operand } | E::Try { expr: operand }
             | E::Unwrap { expr: operand } | E::ToOption { expr: operand }
             | E::Some { expr: operand } | E::Ok { expr: operand } | E::Err { expr: operand } => self.walk_expr(operand),
             E::UnwrapOr { expr: e, fallback } => { self.walk_expr(e); self.walk_expr(fallback); }
             E::TypeAscription { expr: e, .. } => self.walk_expr(e),
             E::Range { start, end, .. } => { self.walk_expr(start); self.walk_expr(end); }
-            E::Int { .. } | E::Float { .. } | E::String { .. } | E::Bool { .. }
-            | E::TypeName { .. } | E::EmptyMap | E::Hole | E::Todo { .. }
-            | E::Break | E::Continue | E::Placeholder | E::Unit | E::None | E::Error => {}
+            // `walk_expr` routes only the forms above here.
+            _ => {}
         }
     }
 }
