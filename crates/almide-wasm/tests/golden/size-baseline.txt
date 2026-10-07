@@ -191,7 +191,7 @@
 3569	spec/wasm_cross/fan_any_early_winner.almd
 3377	spec/wasm_cross/fan_arm_unwrap_or.almd
 2125	spec/wasm_cross/fan_block_err_list_order.almd
-4945	spec/wasm_cross/fan_block_rc_closure_capture.almd
+4918	spec/wasm_cross/fan_block_rc_closure_capture.almd
 5433	spec/wasm_cross/fan_deterministic.almd
 3809	spec/wasm_cross/fan_effect_mapper.almd
 5919	spec/wasm_cross/fan_effect_mapper_capability.almd
@@ -265,7 +265,7 @@
 2488	spec/wasm_cross/fusion_two_aborting_stages_staged.almd
 2537	spec/wasm_cross/fuzz_found_nested_interp_capture.almd
 2785	spec/wasm_cross/general_recursion_tail.almd
-8930	spec/wasm_cross/generated_binder_hygiene.almd
+8903	spec/wasm_cross/generated_binder_hygiene.almd
 2283	spec/wasm_cross/generic_chain_unwrap_or.almd
 2313	spec/wasm_cross/generic_concat.almd
 2770	spec/wasm_cross/generic_fn_in_inferred_lambda.almd
@@ -393,7 +393,7 @@
 5463	spec/wasm_cross/leak_free_map_walk_exit.almd
 6208	spec/wasm_cross/leak_free_propagating_literal_operand.almd
 12026	spec/wasm_cross/leak_free_reader_temporaries.almd
-7991	spec/wasm_cross/leak_free_result_option_carriers.almd
+7955	spec/wasm_cross/leak_free_result_option_carriers.almd
 3234	spec/wasm_cross/leak_free_spread_produced_base.almd
 2702	spec/wasm_cross/let_unwrap_propagation.almd
 1567	spec/wasm_cross/let_wildcard_discard.almd
