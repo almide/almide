@@ -189,7 +189,10 @@ fn archive_stem() -> String {
 
 fn tempdir() -> String {
     let dir = std::env::temp_dir().join(format!("almide-update-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        err(&format!("Failed to create {}: {}", dir.display(), e));
+        std::process::exit(1);
+    }
     dir.to_string_lossy().to_string()
 }
 

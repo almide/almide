@@ -895,12 +895,14 @@ pub fn parse_lock_file(path: &Path) -> Result<Vec<LockedDep>, String> {
         let commit = required("commit")?;
         let ref_name =
             entry.get("ref").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-        let subdir = match entry.get("subdir") {
-            None => None,
-            Some(v) => Some(v.as_str().map(str::to_string).ok_or_else(|| {
-                format!("{}: lock entry '{}' has a `subdir` that is not a string", path.display(), name)
-            })?),
-        };
+        let subdir = entry
+            .get("subdir")
+            .map(|v| {
+                v.as_str().map(str::to_string).ok_or_else(|| {
+                    format!("{}: lock entry '{}' has a `subdir` that is not a string", path.display(), name)
+                })
+            })
+            .transpose()?;
         locked.push(LockedDep { name, git, ref_name, commit, subdir });
     }
     Ok(locked)

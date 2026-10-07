@@ -269,7 +269,9 @@ mod uri_to_path_tests {
 
 fn publish_diagnostics(connection: &Connection, uri: &Uri, diags: &[Diagnostic]) {
     let params = PublishDiagnosticsParams { uri: uri.clone(), diagnostics: diags.to_vec(), version: None };
-    let notif = Notification { method: "textDocument/publishDiagnostics".to_string(), params: serde_json::to_value(params).unwrap() };
+    // Plain data with string keys: serializing it cannot fail.
+    let Ok(params) = serde_json::to_value(params) else { return };
+    let notif = Notification { method: "textDocument/publishDiagnostics".to_string(), params };
     connection.sender.send(Message::Notification(notif)).ok();
 }
 
