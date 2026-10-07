@@ -175,7 +175,9 @@ buffer declares `mut b: Bytes`. Value semantics otherwise: `let c = a` copies,
 and a callee cannot reach its caller's binding through a plain parameter.
 A fn with a `mut` parameter is called, never used as a value: `let f = incr`
 or `list.map(xs, incr)` is E096, since a function type cannot carry the
-write-back. Pass a lambda that names the `var` instead (`() => incr(n)`).
+write-back. Call it on the `var` (`incr(n)`, or `() => incr(n)` as a value);
+in a callback slot, copy into a local `var` and return it:
+`list.map(xs, (item) => { var copy = item; incr(copy); copy })`.
 
 ## Effects, failure and `!`
 
