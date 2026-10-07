@@ -92,6 +92,7 @@ fn insert_clones_runtime_args(args: Vec<IrExpr>, also_borrowed: Option<VarId>, c
     }
     let merged: HashSet<VarId> = ctx.always.union(&borrowed).copied().collect();
     let mut call_ctx = CloneCtx {
+        ref_lets: ctx.ref_lets,
         always: &merged,
         eligible: ctx.eligible,
         remaining: ctx.remaining,
@@ -116,6 +117,7 @@ pub(super) fn insert_clones_call(target: CallTarget, args: Vec<IrExpr>, type_arg
     if !borrowed.is_empty() {
         let merged: HashSet<VarId> = ctx.always.union(&borrowed).copied().collect();
         let mut call_ctx = CloneCtx {
+            ref_lets: ctx.ref_lets,
             always: &merged,
             eligible: ctx.eligible,
             remaining: ctx.remaining,
@@ -167,6 +169,7 @@ pub(super) fn insert_clones_iter_chain(chain: IrExpr, ctx: &mut CloneCtx) -> IrE
     } else {
         let merged: HashSet<VarId> = ctx.always.union(&captured).copied().collect();
         let mut chain_ctx = CloneCtx {
+            ref_lets: ctx.ref_lets,
             always: &merged,
             eligible: ctx.eligible,
             remaining: ctx.remaining,

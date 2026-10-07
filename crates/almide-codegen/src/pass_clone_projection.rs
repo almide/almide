@@ -12,7 +12,7 @@ pub(super) fn root(e: &IrExpr) -> Option<VarId> {
     }
 }
 
-fn mentions(e: &IrExpr, v: VarId) -> bool {
+pub(super) fn mentions(e: &IrExpr, v: VarId) -> bool {
     almide_ir::free_vars::free_vars(e, &HashSet::new()).contains(&v)
 }
 
@@ -20,7 +20,7 @@ fn mentions(e: &IrExpr, v: VarId) -> bool {
 /// renders identically for a `&T` binding — a shared `Borrow`, a `Clone`, a
 /// field read? A bare occurrence, a write, anything under a `&mut`, and any
 /// use a closure or fused chain captures says no.
-fn reads_binding(e: &IrExpr, var: VarId) -> bool {
+pub(super) fn reads_binding(e: &IrExpr, var: VarId) -> bool {
     UseSites::of_expr(e, Site::Result, &ExplicitBorrows).of(var).all(|u| {
         u.depth == 0 && !u.in_chain && !u.in_mut
             && matches!(u.site, Site::Borrow { mutable: false } | Site::Clone | Site::Member)
@@ -34,9 +34,7 @@ pub(super) fn match_binders(subject: &IrExpr, arms: &[IrMatchArm]) -> Option<Has
     }
     let root = match &subject.kind {
         IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. } => root(subject)?,
-        IrExprKind::RuntimeCall { symbol, args }
-            if symbol.as_str() == "almide_rt_list_get" && args.len() == 2
-                && matches!(args[1].kind, IrExprKind::Var { .. } | IrExprKind::LitInt { .. }) => root(&args[0])?,
+        IrExprKind::RuntimeCall { .. } => super::pass_clone_head::head_source(subject)?,
         _ => return None,
     };
     let mut all = HashSet::new();
@@ -55,6 +53,25 @@ pub(super) fn match_binders(subject: &IrExpr, arms: &[IrMatchArm]) -> Option<Has
         all.extend(vars);
     }
     Some(all)
+}
+
+/// The borrowed form of a subject `match_binders` accepted: a head read
+/// becomes `almide_list_get_ref!(xs, i)` (`list.first` reads index 0), a
+/// place projection `&place`.
+pub(super) fn borrowed_subject(subject: IrExpr) -> IrExpr {
+    let IrExpr { kind, ty, span, .. } = subject;
+    match kind {
+        IrExprKind::RuntimeCall { symbol, mut args } if matches!(symbol.as_str(), "almide_rt_list_get" | "almide_rt_list_first") => {
+            if args.len() == 1 {
+                args.push(IrExpr { kind: IrExprKind::LitInt { value: 0 }, ty: almide_lang::types::Ty::Int, span, def_id: None });
+            }
+            IrExpr { kind: IrExprKind::RuntimeCall { symbol: almide_base::intern::sym("almide_list_get_ref!"), args }, ty, span, def_id: None }
+        }
+        kind => {
+            let place = IrExpr { kind, ty: ty.clone(), span, def_id: None };
+            IrExpr { kind: IrExprKind::Borrow { expr: Box::new(place), as_str: false, mutable: false }, ty, span, def_id: None }
+        }
+    }
 }
 
 /// An adjacent, single-use projection alias has no observable evaluation gap.

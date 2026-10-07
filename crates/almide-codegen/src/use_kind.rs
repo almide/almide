@@ -813,7 +813,7 @@ pub fn element_reads_only(uses: &UseSites, var: VarId, ty: &Ty, fields_move: boo
 }
 
 /// Does a projection chain's top position move the projected value?
-fn element_top_consumes(top: Site) -> bool {
+pub(crate) fn element_top_consumes(top: Site) -> bool {
     matches!(
         top,
         Site::Result | Site::Scrutinee | Site::Concat | Site::Construct(_) | Site::Receiver
