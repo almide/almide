@@ -4,7 +4,9 @@
 //! In `main` (or a frame with no String err channel) each Result arm's
 //! carrier is read at its arm — the first err's message kept, the payload
 //! taken, an owned spine released — and after the last arm the first err
-//! aborts with the bare message.
+//! aborts with the bare message. An arm whose error is not a `String`
+//! (#3470) keeps its err VALUE instead, and the abort renders it the way
+//! native's `fn main` wrapper does (err_channel.rs `emit_abort_message`).
 //!
 //! In an effect frame other than `main` (#3463, C-199 / ADR-0024 D1): every
 //! arm has run, and the LOWEST-INDEX
@@ -43,6 +45,18 @@ use crate::*;
 /// One arm's value: (hold, type, does the hold own its value's credit, the
 /// arm, was it a carrier) — the last two for the witness's slot record.
 pub(crate) type FanVal<'a> = (u32, SliceTy, bool, &'a IrExpr, bool);
+
+/// The abort mode's first-err state (`main`, or a frame with no err
+/// channel): exactly one arm — the lowest-index Err — records itself.
+pub(crate) struct FanAbort {
+    /// The first err's message when its arm's error is a `String` (0 = none).
+    msg: u32,
+    /// #3470: which typed-error arm failed first (its id, 0 = none) — held
+    /// from the block's first such arm on.
+    first: Option<u32>,
+    /// Each typed-error arm's err value: (id, hold, err type, IR err type).
+    typed: Vec<(i32, u32, SliceTy, Option<Ty>)>,
+}
 
 /// One Result arm's carrier, kept until the block decides.
 pub(crate) struct FanCarrier {
@@ -159,7 +173,7 @@ impl Emitter<'_> {
         &mut self,
         got: SliceTy,
         arm: &'a IrExpr,
-        herr: Option<u32>,
+        abort: Option<&mut FanAbort>,
         vals: &mut Vec<FanVal<'a>>,
         carriers: &mut Vec<FanCarrier>,
     ) -> Result<(), EmitError> {
@@ -170,32 +184,64 @@ impl Emitter<'_> {
             vals.push((hv, got, owned, arm, false));
             return Ok(());
         };
-        // The arm's err must be the one the block exits with: the frame's
-        // own (propagating), or the String message `main` aborts with.
-        if self.types.el(er) != self.fan_frame_err().unwrap_or(STR) {
+        // A propagating block's arm err must be the one the frame returns:
+        // its own. The abort mode renders any error (#3470).
+        let ert = self.types.el(er);
+        if abort.is_none() && Some(ert) != self.fan_frame_err() {
             return unsup("fan-block-err-ty");
         }
         let p = self.types.el(o);
         let hv = self.hold_val(p)?;
-        match herr {
-            Some(herr) => self.fan_arm_first_err(herr, hv, p, owned)?,
+        match abort {
+            Some(a) => {
+                let err_ir = crate::display::ir_arg(Some(&arm.ty), 1).cloned();
+                self.fan_arm_first_err(a, hv, p, owned, (ert, err_ir))?
+            }
             None => carriers.push(self.fan_keep_carrier(got, owned, hv, p)?),
         }
         vals.push((hv, p, owned, arm, true));
         Ok(())
     }
 
-    /// After the last arm: the first err aborts (`herr`, abort mode) or is
+    /// The abort mode's state, its message hold already on the stack of holds.
+    pub(crate) fn fan_abort_open(&mut self) -> Result<FanAbort, EmitError> {
+        let msg = self.hold_i32()?;
+        self.f.instructions().i32_const(0).local_set(msg);
+        Ok(FanAbort { msg, first: None, typed: Vec::new() })
+    }
+
+    /// The abort mode's holds, given back after the block.
+    pub(crate) fn fan_abort_release(&mut self, a: &FanAbort) {
+        for &(_, _, t, _) in &a.typed {
+            self.release_val(t);
+        }
+        if a.first.is_some() {
+            self.release_i32();
+        }
+        self.release_i32();
+    }
+
+    /// After the last arm: the first err aborts (abort mode) or is
     /// returned (propagating mode, whose ok path then reads the payloads).
-    pub(crate) fn fan_block_decide(&mut self, herr: Option<u32>, carriers: &[FanCarrier], vals: &[FanVal<'_>]) {
-        if let Some(herr) = herr {
+    pub(crate) fn fan_block_decide(
+        &mut self,
+        abort: Option<&FanAbort>,
+        carriers: &[FanCarrier],
+        vals: &[FanVal<'_>],
+    ) -> Result<(), EmitError> {
+        if let Some(a) = abort {
             // first err → the bare-message abort frame
-            self.f.instructions().local_get(herr).if_(BlockType::Empty);
-            self.f.instructions().local_get(herr);
+            self.f.instructions().local_get(a.msg).if_(BlockType::Empty);
+            self.f.instructions().local_get(a.msg);
             self.emit_error_frame_abort();
             self.f.instructions().end();
             self.witness_abort_site();
-            return;
+            if let Some(first) = a.first {
+                for (id, hp, ert, err_ir) in &a.typed {
+                    self.fan_typed_abort_site(first, *id, *hp, *ert, err_ir.as_ref())?;
+                }
+            }
+            return Ok(());
         }
         let pures: Vec<(u32, SliceTy)> = vals
             .iter()
@@ -206,25 +252,81 @@ impl Emitter<'_> {
         for c in carriers {
             self.fan_carrier_payload(c);
         }
+        Ok(())
+    }
+
+    /// #3470: the typed-error arm `id` failed first — abort with the message
+    /// rendered from its err value (a fresh block the abort takes with it).
+    fn fan_typed_abort_site(&mut self, first: u32, id: i32, hp: u32, ert: SliceTy, err_ir: Option<&Ty>) -> Result<(), EmitError> {
+        self.f.instructions().local_get(first).i32_const(id).i32_eq().if_(BlockType::Empty);
+        self.witness_branch_open();
+        self.witness_branch_arm();
+        let fresh = self.emit_abort_message(ert, err_ir, |s| {
+            s.f.instructions().local_get(hp);
+        })?;
+        self.witness_abort_built(fresh);
+        self.abort_frame();
+        self.f.instructions().end();
+        self.witness_branch_arm();
+        self.witness_branch_close();
+        Ok(())
     }
 
     /// The abort mode's per-arm read of a Result arm (the carrier is on the
-    /// stack): the first err's message into `herr`, the ok payload into
-    /// `hv`, an OWNED carrier's spine released (#2969: its payload credit
-    /// moves into the value; an err aborts below).
-    fn fan_arm_first_err(&mut self, herr: u32, hv: u32, p: SliceTy, owned: bool) -> Result<(), EmitError> {
+    /// stack): the first err recorded — a `String` one's message into the
+    /// message hold, any other error's value into a hold of its own (#3470)
+    /// — the ok payload into `hv`, an OWNED carrier's spine released (#2969:
+    /// its payload credit moves into the value; an err aborts below). `err`
+    /// is the arm's error type and its IR type.
+    fn fan_arm_first_err(
+        &mut self,
+        a: &mut FanAbort,
+        hv: u32,
+        p: SliceTy,
+        owned: bool,
+        (ert, err_ir): (SliceTy, Option<Ty>),
+    ) -> Result<(), EmitError> {
         self.witness_fan_block_arm(true, owned);
+        // The typed arm's holds sit below the arm's scratch `ha`.
+        let typed = if ert == STR {
+            None
+        } else {
+            let first = match a.first {
+                Some(f) => f,
+                None => {
+                    let f = self.hold_i32()?;
+                    self.f.instructions().i32_const(0).local_set(f);
+                    a.first = Some(f);
+                    f
+                }
+            };
+            let hp = self.hold_val(ert)?;
+            let id = a.typed.len() as i32 + 1;
+            a.typed.push((id, hp, ert, err_ir));
+            Some((first, id, hp))
+        };
         let ha = self.hold_i32()?;
         {
             let mut i = self.f.instructions();
             i.local_set(ha);
             i.local_get(ha).i32_load(slot_memarg(almide_layout::SUM_TAG)).i32_const(0).i32_ne();
-            i.local_get(herr).i32_eqz();
-            i.i32_and().if_(BlockType::Empty);
+            i.local_get(a.msg).i32_eqz();
+            i.i32_and();
+            if let Some(first) = a.first {
+                i.local_get(first).i32_eqz().i32_and();
+            }
+            i.if_(BlockType::Empty);
             i.local_get(ha);
         }
-        self.load_ty_slot(STR, almide_layout::SUM_FIELD);
-        self.f.instructions().local_set(herr).end();
+        self.load_ty_slot(ert, almide_layout::SUM_FIELD);
+        match typed {
+            None => {
+                self.f.instructions().local_set(a.msg).end();
+            }
+            Some((first, id, hp)) => {
+                self.f.instructions().local_set(hp).i32_const(id).local_set(first).end();
+            }
+        }
         self.f.instructions().local_get(ha);
         self.load_ty_slot(p, almide_layout::SUM_FIELD);
         self.f.instructions().local_set(hv);

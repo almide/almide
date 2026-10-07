@@ -325,13 +325,7 @@ impl Emitter<'_> {
         };
         // The abort mode's first-err message; the propagating mode keeps
         // every carrier instead and decides after the last arm.
-        let herr = if self.fan_err_propagates() {
-            None
-        } else {
-            let h = self.hold_i32()?;
-            self.f.instructions().i32_const(0).local_set(h);
-            Some(h)
-        };
+        let mut abort = if self.fan_err_propagates() { None } else { Some(self.fan_abort_open()?) };
         let mut vals: Vec<FanVal<'_>> = Vec::new();
         let mut carriers: Vec<FanCarrier> = Vec::new();
         for (k, arm) in exprs.iter().enumerate() {
@@ -342,9 +336,9 @@ impl Emitter<'_> {
                 }
                 None => self.lower(arm, None)?,
             };
-            self.fan_block_arm(got, arm, herr, &mut vals, &mut carriers)?;
+            self.fan_block_arm(got, arm, abort.as_mut(), &mut vals, &mut carriers)?;
         }
-        self.fan_block_decide(herr, &carriers, &vals);
+        self.fan_block_decide(abort.as_ref(), &carriers, &vals)?;
         let (out, owned_out) = self.fan_block_value(&vals)?;
         // The result's one credit is this node's: a bind takes no second.
         if owned_out {
@@ -353,9 +347,12 @@ impl Emitter<'_> {
         for (_, p, ..) in vals.iter().rev() {
             self.release_val(*p);
         }
-        // The kept carriers, the abort mode's message hold, the overlap slots.
-        for _ in 0..carriers.len() + usize::from(herr.is_some()) + slots.len() {
+        // The kept carriers, the overlap slots, the abort mode's holds.
+        for _ in 0..carriers.len() + slots.len() {
             self.release_i32();
+        }
+        if let Some(a) = &abort {
+            self.fan_abort_release(a);
         }
         Ok(out)
     }

@@ -215,6 +215,15 @@ impl Emitter<'_> {
         }
     }
 
+    /// #3470: main's abort message rendered from a non-String error (its
+    /// repr, or a joined `List[String]`) is a FRESH block born here that the
+    /// abort takes with it — born, then discharged by the abort terminal.
+    pub(crate) fn witness_abort_built(&mut self, fresh: bool) {
+        if fresh && let Some(w) = self.witness.as_mut() {
+            w.temp_born();
+        }
+    }
+
     /// #2758: `panic(msg)` (calls.rs), after the exit: the line `"PANIC: " +
     /// msg` was a parked temporary of the arm scope (`id`, the argument
     /// hook), and the process aborts — the path ends in the checker's abort

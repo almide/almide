@@ -38,7 +38,9 @@
 //! A `!` over an Option, or over a typed error the String channel converts
 //! (ADR-0021 D2), has no Result-of-String arm to become and stays. A `!` over
 //! the frame's own typed error `E` (`-> Result[_, E]`) is the marker too
-//! (#3467): the block's Err is returned whole, in that `E`.
+//! (#3467): the block's Err is returned whole, in that `E`. In `main`'s own
+//! frame every Result arm's `!` is the marker (#3470): the block aborts with
+//! the lowest-index Err after every arm ran, whatever its error type.
 
 use almide_base::intern::sym;
 use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
@@ -51,18 +53,20 @@ pub(crate) fn desugar(ir: &IrProgram) -> Option<IrProgram> {
     let mut out = ir.clone();
     let mut changed = false;
     {
-        let mut v = Rewriter { vars: &mut out.var_table, changed: &mut changed, frame_err: None };
+        let mut v = Rewriter { vars: &mut out.var_table, changed: &mut changed, frame_err: None, in_main: false };
         for f in out.functions.iter_mut() {
             v.frame_err = f.ret_ty.result_err_ty();
+            v.in_main = f.name.as_str() == "main";
             v.visit_expr_mut(&mut f.body);
         }
         v.frame_err = None;
+        v.in_main = false;
         for tl in out.top_lets.iter_mut() {
             v.visit_expr_mut(&mut tl.value);
         }
     }
     for m in out.modules.iter_mut() {
-        let mut v = Rewriter { vars: &mut m.var_table, changed: &mut changed, frame_err: None };
+        let mut v = Rewriter { vars: &mut m.var_table, changed: &mut changed, frame_err: None, in_main: false };
         for f in m.functions.iter_mut() {
             v.frame_err = f.ret_ty.result_err_ty();
             v.visit_expr_mut(&mut f.body);
@@ -80,11 +84,20 @@ struct Rewriter<'a> {
     changed: &'a mut bool,
     /// The error type of the fn being rewritten, when it returns a Result.
     frame_err: Option<Ty>,
+    /// Lowering `main`'s own frame (not a lambda inside it), whose fan
+    /// block aborts with any error type.
+    in_main: bool,
 }
 
 impl IrMutVisitor for Rewriter<'_> {
     fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+        // A lambda is a frame of its own, never `main`'s.
+        let in_main = self.in_main;
+        if matches!(e.kind, IrExprKind::Lambda { .. }) {
+            self.in_main = false;
+        }
         walk_expr_mut(self, e);
+        self.in_main = in_main;
         self.optional_chain(e);
         self.map_loop(e);
         self.matrix_op(e);
@@ -110,7 +123,7 @@ impl Rewriter<'_> {
         for arm in exprs.iter_mut() {
             if let IrExprKind::Try { expr } | IrExprKind::Unwrap { expr } = &mut arm.kind
                 && let Some(err) = expr.ty.result_err_ty()
-                && (err == Ty::String || self.frame_err.as_ref() == Some(&err))
+                && (err == Ty::String || self.in_main || self.frame_err.as_ref() == Some(&err))
             {
                 *arm = std::mem::take(&mut **expr);
                 *self.changed = true;
