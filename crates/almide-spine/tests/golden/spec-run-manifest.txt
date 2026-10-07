@@ -1,4 +1,4 @@
-# oracle: almide 0.67.0 (dev) at c30e2f62a — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.67.0 (dev) at 66687d57f — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 e7ca497fb6b8ff37759ab9e18d5b01e63a642a85baeb5f63fabfa2a82480aa00	0	spec/wasm_cross/accum_recursion_declined.almd
 c04cb55e5ddf0c74b5410feb45743dba9a0405ee40b330b099a13389b94c12b9	0	spec/wasm_cross/accum_recursion_int.almd
 f0709d9573472655341ac75bd847b3f30d2bddc3a201554bfd5cc22c21446902	0	spec/wasm_cross/adr0005_operator_equivalence.almd
@@ -419,6 +419,7 @@ a59b996307fe9bbc2d201d25679131e4984dcc723c4fdc7350939c116946a576	0	spec/wasm_cro
 dbbe485d0ac3ca6e9fd15f8579db891fba4a69861a2eb6898a3c68aeb605ccbb	0	spec/wasm_cross/list_float_equality_family.almd
 cfbdce65832fec4c96eb407d981d3ed95e4345b5c3225078703a51a1562dfde0	0	spec/wasm_cross/list_float_total_order.almd
 0ad8a4c2d1bf6bca062ebefdd091fb67322740b02f0ea7d60caffc73af77900c	0	spec/wasm_cross/list_fold_fused_callback_result_ownership.almd
+ca4bf377140cb2f8fce1b8d84e70b778a3e7063edeae48ee24135efea56d9df8	0	spec/wasm_cross/list_head_read_borrows.almd
 8997e31091a939b4b8a2ad55ddae41e412e6c0e9c7c35638ecbc4bb748d54ee2	0	spec/wasm_cross/list_heap_ops_release_temporaries.almd
 18913d60f51302e44aef367b1b82afd634dbe830c87d0961fa2feb5c886996f3	0	spec/wasm_cross/list_heap_tuple_return.almd
 4e5bf2f0beead25c7824ff7be5e920bca3caef2c5f213bae9cae4452c0581837	0	spec/wasm_cross/list_heapelem_rc.almd
