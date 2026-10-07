@@ -35,8 +35,12 @@
 //!
 //!   fan { f(x)!, g(y) }   =>   fan { f(x), g(y) }
 //!
-//! A `!` over an Option, or over a typed error the String channel converts
-//! (ADR-0021 D2), has no Result-of-String arm to become and stays. A `!` over
+//! A `!` over an Option has no Result arm to become and stays. In a frame
+//! whose error channel is `String` (`-> Result[_, String]`, or an effect fn
+//! not declared `Result`), a `!` over any other error — a typed `E` the
+//! channel carries as its repr (ADR-0021 D2), a `List[String]` it joins — is
+//! the marker too: the block converts the lowest-index Err on the way out,
+//! as that `!` would have (fan_block.rs). A `!` over
 //! the frame's own typed error `E` (`-> Result[_, E]`) is the marker too
 //! (#3467): the block's Err is returned whole, in that `E`. In `main`'s own
 //! frame every Result arm's `!` is the marker (#3470): the block aborts with
@@ -53,25 +57,29 @@ pub(crate) fn desugar(ir: &IrProgram) -> Option<IrProgram> {
     let mut out = ir.clone();
     let mut changed = false;
     {
-        let mut v = Rewriter { vars: &mut out.var_table, changed: &mut changed, frame_err: None, in_main: false };
+        let mut v = Rewriter { vars: &mut out.var_table, changed: &mut changed, frame_err: None, in_main: false, string_channel: false };
         for f in out.functions.iter_mut() {
             v.frame_err = f.ret_ty.result_err_ty();
             v.in_main = f.name.as_str() == "main";
+            v.string_channel = string_channel(f);
             v.visit_expr_mut(&mut f.body);
         }
         v.frame_err = None;
         v.in_main = false;
+        v.string_channel = false;
         for tl in out.top_lets.iter_mut() {
             v.visit_expr_mut(&mut tl.value);
         }
     }
     for m in out.modules.iter_mut() {
-        let mut v = Rewriter { vars: &mut m.var_table, changed: &mut changed, frame_err: None, in_main: false };
+        let mut v = Rewriter { vars: &mut m.var_table, changed: &mut changed, frame_err: None, in_main: false, string_channel: false };
         for f in m.functions.iter_mut() {
             v.frame_err = f.ret_ty.result_err_ty();
+            v.string_channel = string_channel(f);
             v.visit_expr_mut(&mut f.body);
         }
         v.frame_err = None;
+        v.string_channel = false;
         for tl in m.top_lets.iter_mut() {
             v.visit_expr_mut(&mut tl.value);
         }
@@ -87,17 +95,35 @@ struct Rewriter<'a> {
     /// Lowering `main`'s own frame (not a lambda inside it), whose fan
     /// block aborts with any error type.
     in_main: bool,
+    /// Lowering the own frame (not a lambda inside it) of a non-main fn
+    /// whose error channel is `String`, which converts any arm's error.
+    string_channel: bool,
+}
+
+/// Is `f`'s error channel `String` — a `-> Result[_, String]` fn, or an
+/// effect fn not declared `Result` (its channel) — outside `main` (which
+/// aborts) and test blocks?
+fn string_channel(f: &almide_ir::IrFunction) -> bool {
+    if f.name.as_str() == "main" || f.is_test {
+        return false;
+    }
+    match f.ret_ty.result_err_ty() {
+        Some(err) => err == Ty::String,
+        None => f.is_effect,
+    }
 }
 
 impl IrMutVisitor for Rewriter<'_> {
     fn visit_expr_mut(&mut self, e: &mut IrExpr) {
         // A lambda is a frame of its own, never `main`'s.
-        let in_main = self.in_main;
+        let (in_main, string_channel) = (self.in_main, self.string_channel);
         if matches!(e.kind, IrExprKind::Lambda { .. }) {
             self.in_main = false;
+            self.string_channel = false;
         }
         walk_expr_mut(self, e);
         self.in_main = in_main;
+        self.string_channel = string_channel;
         self.optional_chain(e);
         self.map_loop(e);
         self.matrix_op(e);
@@ -123,7 +149,7 @@ impl Rewriter<'_> {
         for arm in exprs.iter_mut() {
             if let IrExprKind::Try { expr } | IrExprKind::Unwrap { expr } = &mut arm.kind
                 && let Some(err) = expr.ty.result_err_ty()
-                && (err == Ty::String || self.in_main || self.frame_err.as_ref() == Some(&err))
+                && (err == Ty::String || self.in_main || self.string_channel || self.frame_err.as_ref() == Some(&err))
             {
                 *arm = std::mem::take(&mut **expr);
                 *self.changed = true;
