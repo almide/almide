@@ -211,7 +211,9 @@ pub fn cmd_build(args: BuildArgs) {
         // #1729: the cap becomes the emitted memory's declared maximum.
         let _cap = heap_cap.map(almide_wasm::heap_cap::HeapCapGuard::set);
         let _lines = debug.then(|| debug_build_guard(component, wasm_opt));
-        super::build_wasm::cmd_build_wasm_direct(file, output, no_check, emit_unverified, verified, wasm_opt, component, host);
+        super::build_wasm::cmd_build_wasm_direct(&super::build_wasm::WasmBuild {
+            file, output, allow_unverified: emit_unverified, verified, wasm_opt, component, host,
+        });
         return;
     }
     if debug {
