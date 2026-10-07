@@ -2406,7 +2406,7 @@ WHOLE matching element ("--out=x"), not the part after the prefix.
 [[args.fn]]
 name = "positional_at"
 index_unit = "element-index"
-probe = 'args.positional_at(0) ?? "none"'
+probe = 'args.positional_at(0)! ?? "none"'
 expect = "none"
 note = """
 The harness runs test files with an empty argv, so in-file the probe can only

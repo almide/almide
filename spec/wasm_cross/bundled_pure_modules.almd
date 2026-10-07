@@ -26,8 +26,8 @@ effect fn main() -> Result[Unit, String] = {
   println(b2s(path.is_absolute("relative/path")))
   // args: exercises env.args() TWICE through the bundled module (the second
   // WASI args_sizes_get call is the alignment regression)
-  println(b2s(args.flag("verbose")))
-  println(args.option_or("output", "out.txt"))
-  println(ostr(args.option("output")))
+  println(b2s(args.flag("verbose")!))
+  println(args.option_or("output", "out.txt")!)
+  println(ostr(args.option("output")!))
   ok(())
 }

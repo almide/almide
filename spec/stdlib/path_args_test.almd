@@ -23,7 +23,9 @@ test "path.is_absolute" {
 
 test "args.flag on empty argv" {
   // The test harness runs with no program args: flag lookups must miss.
-  assert_eq(args.flag("verbose"), false)
-  assert_eq(args.option("output"), none)
-  assert_eq(args.option_or("output", "out.txt"), "out.txt")
+  // The readers are effect fns (dialect epoch 13), so a call is propagated
+  // with `!` like any effect fn's.
+  assert_eq(args.flag("verbose")!, false)
+  assert_eq(args.option("output")!, none)
+  assert_eq(args.option_or("output", "out.txt")!, "out.txt")
 }

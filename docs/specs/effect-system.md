@@ -120,8 +120,16 @@ Tests: `tests/checker_test.rs` (`pure_fn_admits_output_and_abort_builtins`,
 *Dialect epoch 8 (#3248).* `io.read_byte`, `io.read_n_bytes` and
 `process.args` read stdin or argv, and are `effect fn`s like `io.read_line`
 and `env.args`. They were plain `fn`s, so a pure fn could read the outside
-world through them; a call from a pure fn is now E006. The `args` module's
-argv readers are the one exception still pending its own ruling (#848).
+world through them; a call from a pure fn is now E006.
+
+*Dialect epoch 13.* The `args` module's readers (`args.raw`, `args.flag`,
+`args.option`, `args.option_or`, `args.positional`, `args.positional_at`)
+read argv the same way and are `effect fn`s too (#848's ruling: argv is an
+effect). Mark the caller `effect fn`, or read the arguments in
+`effect fn main` and pass the value in. Unlike the template-dispatched
+readers above, they have Almide bodies, so a call is typed
+`Result[T, String]` like a user effect fn's and is propagated with `!`
+(`args.flag("verbose")!`).
 
 ```almide check-fail=E006
 import io
@@ -129,9 +137,16 @@ import io
 fn first_byte() -> Int = io.read_byte()
 ```
 
+```almide check-fail=E006
+import args
+
+fn verbose() -> Bool = args.flag("verbose")
+```
+
 Tests: `tests/diagnostics/e006-io-read-byte-in-pure-fn/`,
 `tests/diagnostics/e006-io-read-n-bytes-in-pure-fn/`,
-`tests/diagnostics/e006-process-args-in-pure-fn/`.
+`tests/diagnostics/e006-process-args-in-pure-fn/`,
+`tests/diagnostics/e006-args-*-in-pure-fn/` (one per `args` reader).
 
 ### 2.3 `@pure`: the empty effect set (E092)
 

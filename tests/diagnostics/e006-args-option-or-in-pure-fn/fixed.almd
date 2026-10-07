@@ -1,0 +1,5 @@
+import args
+
+effect fn output() -> String = args.option_or("output", "out.txt")!
+
+effect fn main() -> Unit = println(output()!)

@@ -76,7 +76,7 @@ warning count against develop, not by the rounded grade.
     3. a list-head read that copies a big structure
     4. quadratic string concatenation
     5. JSON escaping of control characters
-- **Open, waiting on an owner ruling:** #2755's last witness bucket, `caps:argv-in-plain-fn` (8 frames). It needs a decision on whether argv is ambient or an effect; #848 closed without one.
+- **Ruled 2026-10-07 (argv is an effect), branch `args-effect`:** the `args` readers are `effect fn`s (dialect epoch 13), so #2755's last witness bucket, `caps:argv-in-plain-fn` (8 frames), is gone: the frames are certified as effect frames and the counted exception `ARGV_PLAIN_FNS` is deleted. `process.env` / `process.pid` are the same class of gap for environ and still need their own ruling.
 
 ### 2026-10-07 (later)
 

@@ -114,12 +114,49 @@ for name, (is_eff, fname) in defs.items():
         check(f"{module}.{name}")
 
 reached = sorted(x for x in seen)
+
+# 5. EFFECT ISOLATION over the stdlib sources, context-free (#848). The
+# checker enforces E006 on every user module, but a bundled module is
+# inferred outside the context it was written for: args.almd called
+# `env.args()` from four plain fns with no `import env`, the call was an
+# unresolved name there (E003, dropped with the rest of the bundled module's
+# diagnostics), and E006 never got to judge it. So the rule is restated here
+# without types: a plain fn whose body calls a DOTTED `m.f` that
+# stdlib/m.almd declares `effect fn` fails. A BARE same-module call is left
+# to the checker, which reports a bundled E006 (src/wasm_leg.rs): only types
+# can tell a lambda that IS an effect handler (http's `__table`) from one
+# that inherits a plain context.
+dotted_call = re.compile(r"(?<![A-Za-z0-9_.])([a-z_][A-Za-z0-9_]*\.[a-z_][A-Za-z0-9_]*)\s*\(")
+isolation = []
+for fname in sorted(os.listdir("stdlib")):
+    if not fname.endswith(".almd"):
+        continue
+    src = re.sub(r"//[^\n]*", "", open(os.path.join("stdlib", fname)).read())
+    heads = list(fn_head.finditer(src))
+    for i, m in enumerate(heads):
+        if m.group(1):
+            continue
+        body = src[m.end():heads[i + 1].start() if i + 1 < len(heads) else len(src)]
+        for callee in sorted(set(dotted_call.findall(body))):
+            if public_effect.get(callee, False):
+                isolation.append(f"stdlib/{fname}: plain fn {m.group(2)} calls effect fn {callee}")
+
+failed = False
 if offenders:
     print("CAP/EFFECT CONSISTENCY FAIL — nondeterminism (Clock/Entropy) reachable "
           "from a PLAIN public fn; declare it `effect fn` (the #1515 rule):")
     for o in sorted(offenders):
         print(f"  + {o}")
+    failed = True
+if isolation:
+    print("STDLIB EFFECT ISOLATION FAIL — a plain fn calls an effect fn (E006, "
+          "the rule every user module is checked against); declare the caller `effect fn`:")
+    for o in isolation:
+        print(f"  + {o}")
+    failed = True
+if failed:
     sys.exit(1)
 print(f"cap-effect-consistency OK: {len(reached)} public fn(s) reach the nondet floor "
-      f"(clock_time_get / random_get), every one effect-declared")
+      f"(clock_time_get / random_get), every one effect-declared; no plain stdlib fn "
+      f"calls a dotted effect fn")
 PY

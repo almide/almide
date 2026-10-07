@@ -633,7 +633,6 @@ pub(crate) mod modes;
 /// (#2759, witness_decls.rs).
 #[path = "witness_decls.rs"]
 pub mod decls;
-pub(crate) use decls::argv_exception;
 
 /// Every frame the sweep collected, over EVERY emission pass (the pass
 /// markers are stripped).

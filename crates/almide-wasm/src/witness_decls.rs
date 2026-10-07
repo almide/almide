@@ -99,22 +99,6 @@ pub fn take_for(shipped: &[u8]) -> Option<PassDecls> {
     take().into_iter().rev().find(|p| p.bytes == shipped)
 }
 
-/// #3041 group 3, the COUNTED EXCEPTION pending #848's ruling: the `args`
-/// module's surface fns are declared plain `fn` in stdlib/args.almd, yet
-/// they read argv (`almide.fs_call` ENV ops), which a plain bound does not
-/// allow. Until #848 decides whether argv is ambient or `effect`, the
-/// capability witness would REJECT every program that reaches one. Their
-/// frames DECLINE instead, as `caps:argv-in-plain-fn` in the histogram
-/// (golden/witness-declines.txt, shrink-only), so a fixture calling one is
-/// never certified, and proofs/structural-wall-exceptions.txt stays empty.
-/// The list is the set of `args` fns the caps sweep rejected on 2026-09-30.
-pub const ARGV_PLAIN_FNS: &[&str] = &["args.raw", "args.flag", "args.option", "args.option_or", "args.positional"];
-
-/// Is `name` a frame of the #848 counted exception?
-pub(crate) fn argv_exception(name: &str) -> bool {
-    ARGV_PLAIN_FNS.contains(&name)
-}
-
 #[cfg(test)]
 mod tests {
     //! The declaration table as the emitter records it (emit.rs
