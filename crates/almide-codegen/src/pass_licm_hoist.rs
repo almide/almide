@@ -218,8 +218,9 @@ fn try_hoist_for_in(var: VarId, var_tuple: &mut Option<Vec<VarId>>, iterable: &m
 /// `While { cond, body }` arm of [`try_hoist_expr`]. See [`try_hoist_for_in`]
 /// for why the loop body is descended into with an extended `loop_defined`.
 fn try_hoist_while(cond: &mut IrExpr, body: &mut [IrStmt], ctx: &mut HoistCtx) {
-    try_hoist_expr(cond, ctx);
     let mut nested_defined = ctx.loop_defined.clone();
+    collect_call_written_vars(cond, &mut nested_defined, ctx.mm);
+    try_hoist_expr(cond, ctx);
     collect_defined_vars_stmts(body, &mut nested_defined, ctx.mm);
     for stmt in body.iter_mut() {
         extract_invariants_from_stmt(stmt, &nested_defined, ctx.vt, ctx.hoisted, ctx.pure_fns, ctx.mm);
