@@ -260,6 +260,8 @@ impl Checker {
             let ty = self.infer_expr(e);
             // Auto-unwrap Result: fan unwraps Result<T, E> to T
             let concrete = resolve_ty(&ty, &self.uf);
+            let is_effect_call = self.is_effect_call_expr(e);
+            self.check_fan_arm_channel(e, &concrete, is_effect_call);
             match &concrete {
                 Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(),
                 _ => ty,

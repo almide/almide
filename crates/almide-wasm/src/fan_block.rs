@@ -61,10 +61,18 @@ pub(crate) struct FanCarrier {
 
 impl Emitter<'_> {
     /// Does a fan block's Err return from this frame (else abort)? The `!`
-    /// rule (data_unwrap.rs): an effect frame with a String err channel
-    /// returns it; `main` aborts.
+    /// rule (data_unwrap.rs): an effect frame with an err channel returns it
+    /// — a String one, or its own typed error (#3467); `main` aborts.
     pub(crate) fn fan_err_propagates(&self) -> bool {
-        !self.in_main && matches!(self.fn_ret, Some(SliceTy::Result(_, fe)) if self.types.el(fe) == STR)
+        self.fan_frame_err().is_some()
+    }
+
+    /// The err type a propagating frame returns a fan block's Err in.
+    fn fan_frame_err(&self) -> Option<SliceTy> {
+        match self.fn_ret {
+            Some(SliceTy::Result(_, fe)) if !self.in_main => Some(self.types.el(fe)),
+            _ => None,
+        }
     }
 
     /// The arm's carrier (on the stack) into a hold of its own.
@@ -162,7 +170,9 @@ impl Emitter<'_> {
             vals.push((hv, got, owned, arm, false));
             return Ok(());
         };
-        if self.types.el(er) != STR {
+        // The arm's err must be the one the block exits with: the frame's
+        // own (propagating), or the String message `main` aborts with.
+        if self.types.el(er) != self.fan_frame_err().unwrap_or(STR) {
             return unsup("fan-block-err-ty");
         }
         let p = self.types.el(o);
