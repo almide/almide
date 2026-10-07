@@ -420,6 +420,7 @@
 3763	spec/wasm_cross/list_float_equality_family.almd
 8749	spec/wasm_cross/list_float_total_order.almd
 7524	spec/wasm_cross/list_fold_fused_callback_result_ownership.almd
+6622	spec/wasm_cross/list_head_read_borrows.almd
 5601	spec/wasm_cross/list_heap_ops_release_temporaries.almd
 8804	spec/wasm_cross/list_heap_tuple_return.almd
 10300	spec/wasm_cross/list_heapelem_rc.almd
