@@ -140,7 +140,12 @@ fn borrowed_arg(xs: List[Big]) -> Int = {
   let d = dflt()
   show(list.first(xs) ?? d)
 }
-fn param_fallback(xs: List[Big], d: Big) -> Int = (list.get(xs, 0) ?? d).id
+fn param_field(xs: List[Big], d: Big) -> Int = (list.get(xs, 0) ?? d).id
+fn param_let(xs: List[Big], d: Big) -> Int = {
+  let h = list.first(xs) ?? d
+  h.id + list.len(h.data)
+}
+fn param_borrowed(xs: List[Big], d: Big) -> Int = list.len((list.get(xs, 0) ?? d).data)
 fn escape_coalesce(xs: List[Big]) -> Big = list.get(xs, 0) ?? dflt()
 fn escape_let(xs: List[Big]) -> List[Big] = {
   let h = list.first(xs) ?? dflt()
@@ -159,13 +164,14 @@ effect fn main() -> Unit = {
   let d = dflt()
   println("${coalesce_field(xs)} ${coalesce_field(e)} ${coalesce_let(xs)} ${coalesce_let(e)} ${first_field(xs)} ${first_field(e)}")
   println("${first_match(xs)} ${first_match(e)} ${pattern_head(xs)} ${pattern_head(e)} ${map_head(xs)} ${map_head(e)} ${map_first(xs)} ${map_first(e)}")
-  println("${borrowed_len(xs)} ${borrowed_len(e)} ${borrowed_arg(xs)} ${borrowed_arg(e)} ${param_fallback(xs, d)} ${param_fallback(e, d)}")
+  println("${borrowed_len(xs)} ${borrowed_len(e)} ${borrowed_arg(xs)} ${borrowed_arg(e)} ${param_field(xs, d)} ${param_field(e, d)}")
+  println("${param_let(xs, d)} ${param_let(e, d)} ${param_borrowed(xs, d)} ${param_borrowed(e, d)}")
   println("${escape_coalesce(xs).name} ${escape_coalesce(e).name} ${list.len(escape_let(xs))} ${escape_pattern(xs).name} ${escape_pattern(e).name}")
   println("${escape_field(xs)} ${escape_field(e)} ${list.len(escape_moved(xs))} ${xs[0].name} ${list.len(xs[0].data)}")
 }
 "#;
 
-const HEAD_OUTPUT: &str = "7 -1 10 -1 7 -1\n7 0 10 0 7 0 3 0\n2 -1 14 -2 7 -1\na d 1 a d\nsome([1, 2, 3]) none 2 a 3";
+const HEAD_OUTPUT: &str = "7 -1 10 -1 7 -1\n7 0 10 0 7 0 3 0\n2 -1 14 -2 7 -1\n10 -1 3 0\na d 1 a d\nsome([1, 2, 3]) none 2 a 3";
 
 fn emit_fn_bodies(source: &str) -> String {
     let dir = tempfile::tempdir().unwrap();
@@ -189,7 +195,7 @@ fn head_reads_borrow_the_element_and_clone_only_what_escapes() {
     let rust = emit_fn_bodies(HEAD_SOURCE);
     let body = |name| fn_body(&rust, name);
     // Every read-only shape borrows in place and copies nothing.
-    for name in ["coalesce_field", "coalesce_let", "first_field", "first_match", "map_head", "map_first", "borrowed_len", "borrowed_arg"] {
+    for name in ["coalesce_field", "coalesce_let", "first_field", "first_match", "map_head", "map_first", "borrowed_len", "borrowed_arg", "param_field", "param_let"] {
         assert!(body(name).contains("almide_list_get_ref!"), "{name} must borrow the head: {}", body(name));
         assert!(!body(name).contains(".clone()"), "{name} must not copy the element: {}", body(name));
         assert!(!body(name).contains("almide_rt_list_get(") && !body(name).contains("almide_rt_list_first("), "{name}: {}", body(name));
@@ -199,10 +205,16 @@ fn head_reads_borrow_the_element_and_clone_only_what_escapes() {
     // An escaping head is copied exactly once: the runtime read owns it, or
     // the one `.clone()` the pattern binder takes; a projected field that
     // escapes clones that field, never the element.
-    // An owned param as the fallback keeps its copy: the signature is
-    // settled before the rewrite, and a never-consumed owned param would
-    // make every caller pay a clone (the certifier's C4).
-    for name in ["escape_coalesce", "escape_let", "escape_moved", "param_fallback"] {
+    // An owned param as the fallback stays consumed — moved into a local the
+    // `none` side reads — so the settled signature keeps a consumer (the
+    // certifier's C4); a borrow over such a param copies the field it reads,
+    // never the element.
+    for name in ["param_field", "param_let"] {
+        assert!(body(name).contains("= d;"), "{name} must still move `d`: {}", body(name));
+    }
+    assert!(body("param_borrowed").contains("almide_list_get_ref!") && body("param_borrowed").matches(".clone()").count() == 1
+        && body("param_borrowed").contains(".data.clone()"), "{}", body("param_borrowed"));
+    for name in ["escape_coalesce", "escape_let", "escape_moved"] {
         assert!(!body(name).contains("almide_list_get_ref!"), "{name} escapes, it must own: {}", body(name));
         assert_eq!(body(name).matches(".clone()").count(), usize::from(name == "escape_moved"), "{name}: {}", body(name));
     }
