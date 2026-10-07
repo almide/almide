@@ -8,7 +8,7 @@ peek_all: k0,k1,k2,k3,k4,k5,k6,k7
 first_found: v-k1
 first_found none: err: fan.any: all candidates failed
 pair: v-k0+k1
-pair err: err: almide: exit 1
+pair err: err: no bad1
 memory flat
 after init: v-k7
 fan overlap ok
