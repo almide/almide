@@ -31,6 +31,7 @@ mod arm_blame;
 mod diagnostics;
 mod deprecation_warn;
 mod exit_literal;
+mod mut_fn_value;
 mod pure_attr;
 mod bang_error_channel;
 mod lambda_channel;

@@ -1,0 +1,12 @@
+type St = { count: Int }
+
+fn bump(mut s: St) -> Unit = {
+  s.count = s.count + 1
+}
+
+effect fn main() -> Unit = {
+  var s = St { count: 0 }
+  bump(s)
+  bump(s)
+  println(int.to_string(s.count))
+}
