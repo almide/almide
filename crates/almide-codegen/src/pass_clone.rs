@@ -785,7 +785,7 @@ pub(crate) fn insert_clone_stmts_live(stmts: Vec<IrStmt>, ctx: &mut CloneCtx) ->
                 IrStmtKind::IndexAssign { target, index, value }
             }
             IrStmtKind::FieldAssign { target, field, value } => {
-                let value = insert_clones_live(value, ctx);
+                let value = super::pass_clone_places::insert_clones_field_reassign(target, field, value, ctx);
                 count_target_use(target, ctx.eligible, ctx.remaining);
                 IrStmtKind::FieldAssign { target, field, value }
             }
