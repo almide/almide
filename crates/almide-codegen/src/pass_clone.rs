@@ -37,19 +37,25 @@ impl NanoPass for CloneInsertionPass {
     fn run_before(&self) -> Vec<&'static str> { vec!["MatchSubject", "StdlibLowering"] }
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
-        for f in &mut program.functions { super::pass_clone_projection::fold_bindings(&mut f.body); }
-        for m in &mut program.modules {
-            for f in &mut m.functions { super::pass_clone_projection::fold_bindings(&mut f.body); }
+        // Head reads borrow (#3453); a `let` they bind by reference is no
+        // owned value of this walk and renders its annotation `_`.
+        let all_top_lets: HashSet<VarId> = program.top_lets.iter().chain(program.modules.iter().flat_map(|m| &m.top_lets)).map(|tl| tl.var).collect();
+        let IrProgram { functions, modules, var_table, .. } = &mut program;
+        let mut ref_lets = HashSet::new();
+        for f in functions.iter_mut().chain(modules.iter_mut().flat_map(|m| &mut m.functions)) {
+            ref_lets.extend(super::pass_clone_head::rewrite(f, var_table, &all_top_lets));
+            super::pass_clone_projection::fold_bindings(&mut f.body);
         }
+        program.codegen_annotations.infer_binding_tys.extend(ref_lets.iter().copied());
         compute_use_counts(&mut program);
         let top_let_vars: HashSet<VarId> = program.top_lets.iter().map(|tl| tl.var).collect();
-
         // Compute syntactic counts (no loop/lambda bumps) for remaining tracking
         let syntactic = SyntacticCounts::of(&program.functions, &program.top_lets);
 
         let marks = CloneMarks {
             always: program.codegen_annotations.always_clone_vars.clone(),
             tco_owned: program.codegen_annotations.tco_owned_params.clone(),
+            ref_lets,
         };
         let sets = ClassSets::split(&program.var_table, &top_let_vars, &syntactic.total, &marks);
         let mut loops = LoopMarks::default();
@@ -113,6 +119,7 @@ impl SyntacticCounts {
 struct CloneMarks {
     always: HashSet<VarId>,
     tco_owned: HashSet<VarId>,
+    ref_lets: HashSet<VarId>,
 }
 
 /// The `always` / `eligible` classification of one function group. The
@@ -169,11 +176,11 @@ impl BodyScope {
 fn rewrite_bodies(functions: &mut [IrFunction], top_lets: &mut [IrTopLet], syntactic: &SyntacticCounts, sets: &ClassSets, marks: &CloneMarks, loops: &mut LoopMarks) {
     for (func, mentioned) in functions.iter_mut().zip(&syntactic.fn_bodies) {
         let owned = func.params.iter().filter(|p| p.borrow == ParamBorrow::Own).map(|p| p.var).collect();
-        let body = Body { mentioned, always: &sets.always, eligible: &sets.eligible, total: &syntactic.total, tco_owned: &marks.tco_owned };
+        let body = Body { mentioned, always: &sets.always, eligible: &sets.eligible, total: &syntactic.total, marks };
         func.body = rewrite_body(std::mem::take(&mut func.body), &body, owned, loops);
     }
     for (tl, mentioned) in top_lets.iter_mut().zip(&syntactic.top_let_bodies) {
-        let body = Body { mentioned, always: &sets.always, eligible: &sets.eligible, total: &syntactic.total, tco_owned: &marks.tco_owned };
+        let body = Body { mentioned, always: &sets.always, eligible: &sets.eligible, total: &syntactic.total, marks };
         tl.value = rewrite_body(std::mem::take(&mut tl.value), &body, HashSet::new(), loops);
     }
 }
@@ -184,13 +191,13 @@ struct Body<'a> {
     always: &'a HashSet<VarId>,
     eligible: &'a HashSet<VarId>,
     total: &'a HashMap<VarId, u32>,
-    tco_owned: &'a HashSet<VarId>,
+    marks: &'a CloneMarks,
 }
 
 fn rewrite_body(expr: IrExpr, body: &Body, mut owned: HashSet<VarId>, loops: &mut LoopMarks) -> IrExpr {
     owned.extend(almide_ir::free_vars::bound_vars(&expr));
     // TCO manages these moves itself and exempts them from our use counts.
-    owned.retain(|v| !body.tco_owned.contains(v));
+    owned.retain(|v| !body.marks.tco_owned.contains(v) && !body.marks.ref_lets.contains(v));
     let mut scope = BodyScope::narrow(body.mentioned, body.always, body.eligible, body.total);
     // #1230: any id the branch walk can deduct lives in `remaining`, whose
     // key set is exactly `scope.eligible` — so the branch-count memo only
@@ -200,6 +207,7 @@ fn rewrite_body(expr: IrExpr, body: &Body, mut owned: HashSet<VarId>, loops: &mu
     let no_fresh: HashSet<VarId> = HashSet::new();
     let no_captured: HashSet<VarId> = HashSet::new();
     insert_clones_live(expr, &mut CloneCtx {
+        ref_lets: &body.marks.ref_lets,
         always: &scope.always,
         eligible: &scope.eligible,
         remaining: &mut scope.remaining,
@@ -452,6 +460,9 @@ pub(crate) struct CloneCtx<'a> {
     /// The loop binders this walk has classified so far (#1673) — handed to
     /// the walker as `borrowed_loop_vars` / `consumed_loop_vars`.
     pub(crate) loops: &'a mut LoopMarks,
+    /// `let` binders a head read binds by reference (#3453): never owned,
+    /// in a lambda body or a guard as much as at the top of the fn.
+    pub(crate) ref_lets: &'a HashSet<VarId>,
 }
 
 fn make_clone(id: VarId, ty: Ty, span: Option<Span>) -> IrExpr {
@@ -553,16 +564,7 @@ fn insert_clones_match(subject: IrExpr, arms: Vec<IrMatchArm>, ctx: &mut CloneCt
     let borrowed = if owned_final { None } else {
         super::pass_clone_projection::match_binders(&subject, &arms)
     };
-    let subject = if borrowed.is_some() {
-        let mut subject = subject;
-        if let IrExprKind::RuntimeCall { symbol, .. } = &mut subject.kind {
-            *symbol = almide_base::intern::sym("almide_list_get_ref!");
-            subject
-        } else {
-            IrExpr { ty: subject.ty.clone(), span: subject.span, def_id: None,
-                kind: IrExprKind::Borrow { expr: Box::new(subject), as_str: false, mutable: false } }
-        }
-    } else { subject };
+    let subject = if borrowed.is_some() { super::pass_clone_projection::borrowed_subject(subject) } else { subject };
     let new_subject = insert_clones_live(subject, ctx);
     // Memo lookups must happen before `arms.into_iter()` moves the arms out of
     // the Vec buffer — the body's buffer address is the memo key (#1230).
@@ -591,7 +593,7 @@ fn insert_clones_match(subject: IrExpr, arms: Vec<IrMatchArm>, ctx: &mut CloneCt
         }
         let owned: HashSet<_> = ctx.owned.iter().copied()
             .filter(|v| !borrowed.as_ref().is_some_and(|vars| vars.contains(v))).collect();
-        let mut arm_ctx = CloneCtx { owned: &owned, always: ctx.always, eligible: ctx.eligible,
+        let mut arm_ctx = CloneCtx { ref_lets: ctx.ref_lets, owned: &owned, always: ctx.always, eligible: ctx.eligible,
             remaining: ctx.remaining, in_loop: ctx.in_loop, memo: ctx.memo, fresh: ctx.fresh, loops: ctx.loops, captured: ctx.captured };
         // A guard never owns what it reads (#2605): Rust binds the arm's
         // pattern variables by reference while the guard runs (a move is
@@ -603,9 +605,10 @@ fn insert_clones_match(subject: IrExpr, arms: Vec<IrMatchArm>, ctx: &mut CloneCt
         // param) stays a borrow. Only values the guard itself binds may move.
         let new_guard = arm.guard.map(|g| {
             let captured: HashSet<VarId> = almide_ir::free_vars::free_vars(&g, &HashSet::new()).into_iter().collect();
-            let owned_in_guard = almide_ir::free_vars::bound_vars(&g);
+            let mut owned_in_guard = almide_ir::free_vars::bound_vars(&g);
+            owned_in_guard.retain(|v| !arm_ctx.ref_lets.contains(v));
             let no_fresh: HashSet<VarId> = HashSet::new();
-            let mut guard_ctx = CloneCtx { owned: &owned_in_guard, always: arm_ctx.always, eligible: arm_ctx.eligible,
+            let mut guard_ctx = CloneCtx { ref_lets: arm_ctx.ref_lets, owned: &owned_in_guard, always: arm_ctx.always, eligible: arm_ctx.eligible,
                 remaining: arm_ctx.remaining, in_loop: true, memo: arm_ctx.memo, fresh: &no_fresh, loops: arm_ctx.loops, captured: &captured };
             insert_clones_live(g, &mut guard_ctx)
         });
@@ -712,8 +715,9 @@ pub(crate) fn insert_clones_live(mut expr: IrExpr, ctx: &mut CloneCtx) -> IrExpr
             let e = IrExpr { kind: IrExprKind::Lambda { params, body, lambda_id }, ty: ty.clone(), span, def_id: None };
             // Captured values belong to the reusable closure. Only values
             // introduced inside this invocation may have fields moved out.
-            let owned = almide_ir::free_vars::bound_vars(&e);
-            let mut lam_ctx = CloneCtx { always: ctx.always, eligible: ctx.eligible, remaining: ctx.remaining, in_loop: true, memo: ctx.memo, fresh: &fresh, owned: &owned, loops: ctx.loops, captured: &captured };
+            let mut owned = almide_ir::free_vars::bound_vars(&e);
+            owned.retain(|v| !ctx.ref_lets.contains(v));
+            let mut lam_ctx = CloneCtx { ref_lets: ctx.ref_lets, always: ctx.always, eligible: ctx.eligible, remaining: ctx.remaining, in_loop: true, memo: ctx.memo, fresh: &fresh, owned: &owned, loops: ctx.loops, captured: &captured };
             return e.map_children(&mut |child| insert_clones_live(child, &mut lam_ctx));
         }
         // A fused chain whose source is a BORROW (`consume == false`, the

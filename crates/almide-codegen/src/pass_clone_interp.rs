@@ -96,6 +96,7 @@ pub(crate) fn insert_clones_string_interp(parts: Vec<IrStringPart>, ctx: &mut Cl
                 insert_clones_live(expr, ctx)
             } else {
                 let mut guard = CloneCtx {
+                    ref_lets: ctx.ref_lets,
                     always: &merged,
                     eligible: ctx.eligible,
                     remaining: ctx.remaining,

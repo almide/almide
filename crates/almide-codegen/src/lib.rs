@@ -42,6 +42,7 @@ pub mod pass_clone_loops;
 pub mod pass_clone_interp;
 mod pass_clone_compare;
 mod pass_clone_places;
+mod pass_clone_head;
 mod pass_clone_projection;
 mod pass_clone_record_fields;
 pub mod pass_top_let_storage;
