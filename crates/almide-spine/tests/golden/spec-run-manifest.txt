@@ -1,4 +1,4 @@
-# oracle: almide 0.67.0 (dev) at c30e2f62a — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.67.0 (dev) at 3944198ba — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 e7ca497fb6b8ff37759ab9e18d5b01e63a642a85baeb5f63fabfa2a82480aa00	0	spec/wasm_cross/accum_recursion_declined.almd
 c04cb55e5ddf0c74b5410feb45743dba9a0405ee40b330b099a13389b94c12b9	0	spec/wasm_cross/accum_recursion_int.almd
 f0709d9573472655341ac75bd847b3f30d2bddc3a201554bfd5cc22c21446902	0	spec/wasm_cross/adr0005_operator_equivalence.almd
@@ -395,6 +395,7 @@ a9f082abeddfc3ec57866ef608067bdca35353e6bca10973de04c534f17f78e6	0	spec/wasm_cro
 3283508b85ddf6d80686c8b8a34cdb2317d87ae18dc64271b3d009af6b68adb0	0	spec/wasm_cross/leak_free_reader_temporaries.almd
 2623224b60ea69f63fcebc8a411e9cc2fe8c90a890ae23c799c76ce097cb82fb	0	spec/wasm_cross/leak_free_result_option_carriers.almd
 21f08b5b677fcf18370d8cde09cbd398a8b3bc97f8c174ffabbb60fd065b83c2	0	spec/wasm_cross/leak_free_spread_produced_base.almd
+b5d489ba196f2e9120397eda1e11fcc580c5637dc04c47131b551f30ceba4527	0	spec/wasm_cross/let_bound_closure_scope.almd
 9f1872938d5d4e038b5fb5dd8c02ec9c76f4ea9f4b42b4089f418adc52682d66	0	spec/wasm_cross/let_unwrap_propagation.almd
 d117fa006ba9208500b2930ce69cbde436c647afa917cb7396a9bc9111a46dd2	0	spec/wasm_cross/let_wildcard_discard.almd
 78a991822f71959f9bf43638dd500b771378241faed41b78a60768561fae9e5a	0	spec/wasm_cross/letbound_variant_match.almd

@@ -1,0 +1,98 @@
+// @contract: C-258
+// A lambda bound to a name and then called behaves exactly as the same
+// lambda passed inline, on both targets (#3455). On native a bound closure
+// that cannot outlive its fn and only reads what it captures is a scope: the
+// non-`move` `&|..| ..`, so the params it reads stay borrowed and a caller
+// no longer clones its list to make the call. The shapes: the closure called
+// inside a fused fold / map / filter, called directly, two closures sharing
+// one capture, a closure reading a record param's fields, a closure lent to
+// a user fn's callable slot, and one calling another. The closures that keep
+// their owned capture print the same: returned, stored in a list and in a
+// record, and one whose captured list is consumed after it.
+type Cfg = { base: Int, name: String }
+
+type Holder = { run: (Int) -> Int }
+
+fn via_fold(xs: List[Int], n: Int) -> Int = {
+  let f = (i: Int) => list.get(xs, i) ?? 0
+  list.range(0, n) |> list.fold(0, (a, i) => a + f(i))
+}
+
+fn via_map(xs: List[Int], n: Int) -> List[Int] = {
+  let f = (i: Int) => list.get(xs, i) ?? 0
+  list.range(0, n) |> list.map((i) => f(i) * 2)
+}
+
+fn via_filter(xs: List[Int]) -> List[Int] = {
+  let keep = (i: Int) => (list.get(xs, i) ?? 0) > 2
+  list.range(0, list.len(xs)) |> list.filter((i) => keep(i))
+}
+
+fn direct(xs: List[Int]) -> Int = {
+  let f = (i: Int) => list.get(xs, i) ?? 0
+  f(0) + f(1) + f(2)
+}
+
+fn shared(xs: List[Int], n: Int) -> Int = {
+  let f = (i: Int) => list.get(xs, i) ?? 0
+  let g = (i: Int) => list.len(xs) - i
+  list.range(0, n) |> list.fold(0, (a, i) => a + f(i) * g(i))
+}
+
+fn field(c: Cfg, n: Int) -> String = {
+  let h = (i: Int) => "${c.name}-${c.base + i}"
+  h(n) + "," + h(n + 1)
+}
+
+fn twice(g: (Int) -> Int, x: Int) -> Int = g(g(x))
+
+fn lent(xs: List[Int]) -> Int = {
+  let f = (i: Int) => (list.get(xs, i) ?? 0) % list.len(xs)
+  twice(f, 1)
+}
+
+fn layered(xs: List[Int]) -> Int = {
+  let f = (i: Int) => list.get(xs, i) ?? 0
+  let g = (i: Int) => f(i) + f(i + 1)
+  g(0) + g(2)
+}
+
+fn returned(xs: List[Int]) -> (Int) -> Int = {
+  let f = (i: Int) => list.get(xs, i) ?? 0
+  f
+}
+
+fn stored_list(xs: List[Int]) -> Int = {
+  let f = (i: Int) => list.get(xs, i) ?? 0
+  [f, f] |> list.fold(0, (a, g) => a + g(1))
+}
+
+fn stored_record(xs: List[Int]) -> Holder = {
+  let f = (i: Int) => list.get(xs, i) ?? 0
+  { run: f }
+}
+
+fn consumed_after(xs: List[Int]) -> List[Int] = {
+  let f = (i: Int) => list.get(xs, i) ?? 0
+  let first = f(0)
+  xs + [first]
+}
+
+fn show(ys: List[Int]) -> String = ys |> list.map((v) => int.to_string(v)) |> list.join(",")
+
+effect fn main() -> Unit = {
+  let xs = [5, 1, 4, 2, 3]
+  let c = { base: 10, name: "c" }
+  println("fold ${via_fold(xs, 4)}")
+  println("map ${show(via_map(xs, 3))}")
+  println("filter ${show(via_filter(xs))}")
+  println("direct ${direct(xs)}")
+  println("shared ${shared(xs, 5)}")
+  println("field ${field(c, 1)}")
+  println("lent ${lent(xs)}")
+  println("layered ${layered(xs)}")
+  println("returned ${returned(xs)(2)}")
+  println("stored ${stored_list(xs)} ${stored_record(xs).run(3)}")
+  println("consumed ${show(consumed_after(xs))}")
+  println("kept ${show(xs)} ${c.name}")
+}

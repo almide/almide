@@ -3363,6 +3363,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/call_lambda_ctor.almd", class = "fixture" },
   { path = "spec/wasm_cross/hof_fn_value_callbacks.almd", class = "fixture" },
+  { path = "spec/wasm_cross/let_bound_closure_scope.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-259"

@@ -394,6 +394,7 @@
 63	26	670	63	spec/wasm_cross/leak_free_reader_temporaries.almd
 67	32	714	67	spec/wasm_cross/leak_free_result_option_carriers.almd
 970	951	8131	970	spec/wasm_cross/leak_free_spread_produced_base.almd
+91	73	948	91	spec/wasm_cross/let_bound_closure_scope.almd
 7	2	111	7	spec/wasm_cross/let_unwrap_propagation.almd
 2	0	32	2	spec/wasm_cross/let_wildcard_discard.almd
 8	5	73	8	spec/wasm_cross/letbound_variant_match.almd
