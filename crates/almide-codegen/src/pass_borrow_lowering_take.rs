@@ -6,6 +6,10 @@
 //! param, so the old value is dead the moment the write lands: the consuming
 //! read MOVES it out instead (`std::mem::take(ws)`), when nothing can observe
 //! the empty value the take leaves behind until then.
+//!
+//! #3454 extends the field form to a plain local: `b.text = b.text + "ab"` on
+//! a `var b` copied the whole accumulated field on every step (quadratic in a
+//! loop); it now takes it, under the same soundness scan.
 use super::*;
 use almide_ir::visit::{walk_expr, walk_stmt, IrVisitor};
 
@@ -20,11 +24,26 @@ impl Lower<'_> {
             IrStmtKind::FieldAssign { target, field, value } => (*target, Some(*field), value),
             _ => return,
         };
-        let Some(param) = self.params.iter().find(|p| p.var == id) else { return };
-        if param.borrow != ParamBorrow::RefMut || !takeable(&value.ty) || !take_is_sound(value, id) {
+        let place_ok = match self.params.iter().find(|p| p.var == id) {
+            Some(param) => param.borrow == ParamBorrow::RefMut,
+            None => field.is_some() && self.is_plain_local(id),
+        };
+        if !place_ok || !takeable(&value.ty) || !take_is_sound(value, id) {
             return;
         }
         TakeAt { id, field, done: false }.visit_expr_mut(value);
+    }
+
+    /// #3454: `b.text = b.text + "ab"` on a function-local `var b` held as a
+    /// plain `let mut` — no global, no shared cell, no copy-on-write `Rc` (a
+    /// closure captures it), no clone-always class. Its field is a place
+    /// `&mut b.text` reaches directly, so the one read the overwrite kills
+    /// takes it the way a `mut` param's does. (A plain `s = s + …` on a local
+    /// is the clone pass's move, #3404.)
+    fn is_plain_local(&self, id: VarId) -> bool {
+        self.ann.global(id).is_none() && !self.ann.is_shared_mut(&id)
+            && !matches!(self.ann.get_var_storage(&id), almide_ir::annotations::VarStorage::RcCow)
+            && !self.ann.always_clone_vars.contains(&id)
     }
 }
 
