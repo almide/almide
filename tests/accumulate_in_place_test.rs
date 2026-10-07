@@ -24,6 +24,27 @@
 //! don't relax the assertion. The perf cell runs N and 4N appends of each
 //! shape and requires the time ratio to stay under 5 (copying measured 10+).
 //!
+//! Design note. Every reference runtime does this append by reusing the left
+//! operand's buffer when nothing else can see it: Lean's
+//! `lean_string_append` grows `s1` in place when `lean_is_exclusive(s1)`
+//! (src/runtime/object.cpp), Roc's `strConcat` when `RocStr.isUnique()`
+//! (src/builtins/str.zig), Swift's `_StringGuts` append when
+//! `isUniqueNative` (StringGutsRangeReplaceable.swift), and Koka's FBIP /
+//! Perceus reuse (samples/learn/fip.kk) is the constructor-level form of the
+//! same idea. They decide uniqueness at RUN time from a refcount; native
+//! Almide strings are plain owned `String`s, so the decision is made at
+//! COMPILE time instead — the overwritten place is read once, as the left
+//! operand, so it is dead and can be moved (`AlmideConcat`'s owned impls
+//! already `push_str`). Alternatives considered: an `AlmideConcat` impl over
+//! `&mut String` (a new runtime surface for one shape), or rewriting the
+//! statement to `b.text.push_str(…)` in the walker (an ownership decision in
+//! the renderer, which the walker-reads-annotations gate forbids). Both
+//! rules are type-preserving rewrites of the same bytes; the wasm leg does
+//! not run these passes, and the cross-target fixture
+//! spec/wasm_cross/field_and_interp_accumulator.almd (C-105) pins that its
+//! output is unchanged. No compatibility impact: every program prints what
+//! it printed before.
+//!
 //! Skips cleanly when the `almide` binary is unavailable (CI builds it in the
 //! build step; locally run `cargo build --release` first).
 
