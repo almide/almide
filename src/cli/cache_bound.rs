@@ -1,7 +1,7 @@
 //! Size bounds for the native build caches (#2608).
 //!
 //! #2500 and #2504 bound the caches by AGE: an artifact nothing has used for
-//! `run::CACHE_MAX_AGE` (a week) is evicted, at most once a day. Nothing
+//! `build_dir::CACHE_MAX_AGE` (a week) is evicted, at most once a day. Nothing
 //! bounded the total. A workload that tests many DISTINCT files — a task
 //! bank, a corpus sweep, one suite from several worktrees — grows
 //! `$TMPDIR/almide-test/native/` by one worker dir per absolute test-file
@@ -160,14 +160,14 @@ pub(crate) fn dir_bytes(dir: &Path) -> u64 {
 
 /// When a worker dir was last used: the newest file mtime in the dir itself
 /// and in `target/<profile>/`, where the cached binaries a hit touches live
-/// — the files `run::used_since` reads for the age rule.
+/// — the files `build_dir::used_since` reads for the age rule.
 pub(crate) fn last_used(dir: &Path) -> Option<SystemTime> {
     [dir.to_path_buf(), dir.join("target").join("debug"), dir.join("target").join("release")]
         .iter()
         .filter_map(|d| std::fs::read_dir(d).ok())
         .flat_map(|rd| rd.flatten())
         .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
-        .filter(|e| e.file_name() != super::run::BUILD_LOCK_FILE)
+        .filter(|e| e.file_name() != super::build_dir::BUILD_LOCK_FILE)
         .filter_map(|e| e.metadata().and_then(|m| m.modified()).ok())
         .max()
 }
@@ -201,7 +201,7 @@ pub(crate) fn bound_worker_cache_now(root: &Path, cap: u64, now: SystemTime) -> 
         let seen = workers.iter().find(|(d, ..)| *d == dir).map(|(_, used, _)| *used);
         // Under the dir's own lock: a build in flight keeps it (skipped), and
         // a dir used since the scan is no longer the LRU entry it was.
-        if super::run::clear_build_dir_if_idle(&dir, || last_used(&dir) <= seen) {
+        if super::build_dir::clear_build_dir_if_idle(&dir, || last_used(&dir) <= seen) {
             emptied += 1;
         }
     }
@@ -326,7 +326,7 @@ mod tests {
     fn worker(root: &Path, name: &str, bytes: usize, secs_ago: u64) -> PathBuf {
         let d = root.join(name);
         std::fs::create_dir_all(&d).unwrap();
-        std::fs::File::create(d.join(super::super::run::BUILD_LOCK_FILE)).unwrap();
+        std::fs::File::create(d.join(super::super::build_dir::BUILD_LOCK_FILE)).unwrap();
         write_aged(&d.join("src/main.rs"), 10, secs_ago);
         write_aged(&d.join("target/debug/almide-0123456789abcdef"), 10, secs_ago);
         write_aged(&d.join("target/debug/deps/libbulk.rlib"), bytes, secs_ago);
@@ -345,7 +345,7 @@ mod tests {
         for gone in [&a, &b] {
             // Emptied, not removed: the lockfile stays (the #2500 protocol).
             let left: Vec<_> = std::fs::read_dir(gone).unwrap().flatten().map(|e| e.file_name()).collect();
-            assert_eq!(left, vec![std::ffi::OsString::from(super::super::run::BUILD_LOCK_FILE)]);
+            assert_eq!(left, vec![std::ffi::OsString::from(super::super::build_dir::BUILD_LOCK_FILE)]);
         }
         assert!(c.join("target/debug/deps/libbulk.rlib").exists());
         assert!(d.join("target/debug/deps/libbulk.rlib").exists());
@@ -359,7 +359,7 @@ mod tests {
         let root = scratch("held");
         let a = worker(&root, "a_test-1", 4_000, 30_000);
         let _b = worker(&root, "b_test-2", 4_000, 20_000);
-        let lock = super::super::run::BuildDirLock::acquire(&a).unwrap();
+        let lock = super::super::build_dir::BuildDirLock::acquire(&a).unwrap();
         // `a` is the LRU choice but is locked; `b` alone does not bring 8 KB
         // under 1 byte, and the sweep never waits for `a`.
         assert_eq!(bound_worker_cache_now(&root, 1, SystemTime::now()), 1);
