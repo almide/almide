@@ -868,6 +868,16 @@ TO=spec/wasm_cross/fuel_timeout_ends.almd
 run_structural_prop "$TO" caps heavy 0
 sed 's/$/5/' /tmp/structural.prop > /tmp/structural.tamper
 drill_structural_prop caps "#3041 a clock read of the frame's own"
+# #2755: the instance-parallel fan offer (op 74, fan_par_lower.rs) reaches
+# no capability of its own: the workers run the program's exported pure
+# chunk, which the not-served fallback also calls from the frame, so the call
+# graph counts whatever it reaches. `main` of a fixture with a qualifying
+# chunk is bounded by its `effect` declaration. Drill: the op counted as an
+# unknown host operation (the sentinel), as it was before the op was named.
+FPC=spec/wasm_cross/fan_map_parallel_scalar.almd
+run_structural_prop "$FPC" caps main 0
+sed 's/$/ 9/' /tmp/structural.prop > /tmp/structural.tamper
+drill_structural_prop caps "#2755 fan offer as an unknown host op"
 
 # ── #2152: almide-verify against the extracted checker on witnesses NO
 # producer wrote. The rows above only reach the shapes the emitters produce;
