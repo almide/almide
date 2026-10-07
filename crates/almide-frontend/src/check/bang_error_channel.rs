@@ -35,25 +35,7 @@ impl Checker {
     /// checker types a non-`Result` one as `Result[T, String]` already; a
     /// plain operand only survives on the never-err path).
     pub(super) fn check_bang_error_channel(&mut self, operand: &Ty, plain_is_effect_call: bool) {
-        let Some(channel) = self.bang_channel_err_ty() else { return };
-        if matches!(channel, Ty::String | Ty::Unknown | Ty::TypeVar(_)) {
-            return;
-        }
-        let shown = match classify_operand_err(&resolve_ty(operand, &self.uf), plain_is_effect_call) {
-            OperandErr::Unjudged => return,
-            OperandErr::ImplicitString(what) => format!("{what} fails with `String`"),
-            OperandErr::Declared(op_err) => {
-                if self.unify_infer(&channel, &op_err) {
-                    return;
-                }
-                if self.report_lambda_erasure(&channel, &op_err) {
-                    return;
-                }
-                let what = if plain_is_effect_call { "this effect call" } else { "this `Result`" };
-                format!("{what} fails with `{}`", resolve_ty(&op_err, &self.uf).display())
-            }
-        };
-        let fn_err = channel.display();
+        let Some((fn_err, shown)) = self.channel_mismatch(operand, plain_is_effect_call) else { return };
         self.emit(err(
             format!("operator '!' cannot propagate this error: the fn's error type is `{fn_err}`, but {shown}"),
             format!(
@@ -63,6 +45,51 @@ impl Checker {
             ),
             "operator !",
         ).with_code("E022"));
+    }
+
+    /// #3467: a `fan { }` arm's Err is the block's Err (C-199), which leaves
+    /// the fn as a `!` would — so an arm that yields a `Result` (or is an
+    /// effect call) must fail with the fn's own error type. An arm written
+    /// `x!` was judged at its `!`. There is no conversion from `String` to a
+    /// user type: the mismatch was rustc E0277 natively.
+    pub(super) fn check_fan_arm_channel(&mut self, arm: &crate::ast::Expr, arm_ty: &Ty, is_effect_call: bool) {
+        if self.env.in_test_block || matches!(arm.kind, crate::ast::ExprKind::Unwrap { .. }) {
+            return;
+        }
+        let Some((fn_err, shown)) = self.channel_mismatch(arm_ty, is_effect_call) else { return };
+        let saved = self.current_span;
+        self.current_span = arm.span.or(saved);
+        self.emit(err(
+            format!("this fan arm's error cannot leave the block: the fn's error type is `{fn_err}`, but {shown}"),
+            format!(
+                "A fan block's first Err is the fn's Err, so every arm must fail with `{fn_err}`. \
+                 Handle this arm's error inside it: `match` on the result and build a `{fn_err}`, \
+                 or use `?? default` for a fallback value"
+            ),
+            "fan arm",
+        ).with_code("E022"));
+        self.current_span = saved;
+    }
+
+    /// The fn's error type and what the operand fails with instead, when the
+    /// operand's error cannot become the fn's error type.
+    fn channel_mismatch(&mut self, operand: &Ty, plain_is_effect_call: bool) -> Option<(String, String)> {
+        let channel = self.bang_channel_err_ty()?;
+        if matches!(channel, Ty::String | Ty::Unknown | Ty::TypeVar(_)) {
+            return None;
+        }
+        let shown = match classify_operand_err(&resolve_ty(operand, &self.uf), plain_is_effect_call) {
+            OperandErr::Unjudged => return None,
+            OperandErr::ImplicitString(what) => format!("{what} fails with `String`"),
+            OperandErr::Declared(op_err) => {
+                if self.unify_infer(&channel, &op_err) || self.report_lambda_erasure(&channel, &op_err) {
+                    return None;
+                }
+                let what = if plain_is_effect_call { "this effect call" } else { "this `Result`" };
+                format!("{what} fails with `{}`", resolve_ty(&op_err, &self.uf).display())
+            }
+        };
+        Some((channel.display(), shown))
     }
 
     /// #2601: the operand fails with `String` because a callback inside it

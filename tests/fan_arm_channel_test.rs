@@ -5,6 +5,12 @@
 //!   tail or `let`-bound. Before: auto-try put the `?` into the block's tail,
 //!   so native joined a Result as a payload (rustc E0308) and wasm left the
 //!   frame at the first Err before the later arms ran.
+//! - #3467: an arm `f(x)!` (or a bare Result arm, or a block arm with an
+//!   inner `!`) over the enclosing fn's own TYPED error. Before: wasm read the
+//!   `!` as an exit from the frame, so a later arm never ran; native joined
+//!   into `Result<_, String>` and failed rustc E0277. An arm whose error
+//!   cannot become the fn's error type (a `String` one in a `-> Result[_,
+//!   Bad]` fn) is now E022 at check time, as the same `!` is (#2635).
 //!
 //! The pin, per cell: stdout, stderr and the exit code, equal on both legs.
 
@@ -164,4 +170,155 @@ effect fn main() -> Unit = {
   println(\"${p.0 + p.1}\")
 }
 ", "a\nb\n", "Error: big 5\n", 1);
+}
+
+/// `main` reports what `f` returned.
+const REPORT_F: &str = "\
+effect fn main() -> Unit = {
+  match f(5) {
+    ok(v) => println(\"ok ${v}\"),
+    err(e) => println(\"err ${e}\"),
+  }
+  match f(2) {
+    ok(v) => println(\"ok ${v}\"),
+    err(e) => println(\"err ${e}\"),
+  }
+}
+";
+
+// ── #3467: a typed error ──────────────────────────────────────────────
+
+#[test]
+fn a_typed_bang_arm_runs_every_arm_then_returns_its_err() {
+    check("typed-bang", &format!("\
+effect fn f(p: Int) -> Result[Int, Bad] = {{
+  let (a, b) = fan {{ typed(p)!, loud(1)! }}
+  ok(a + b)
+}}
+{REPORT_F}"), "loud 1\nerr Bad(5)\nloud 1\nok 3\n", "", 0);
+}
+
+#[test]
+fn a_bare_typed_result_arm() {
+    check("typed-bare", &format!("\
+effect fn f(p: Int) -> Result[Int, Bad] = {{
+  let (a, b) = fan {{ typed(p), loud(1) }}
+  ok(a + b)
+}}
+{REPORT_F}"), "loud 1\nerr Bad(5)\nloud 1\nok 3\n", "", 0);
+}
+
+#[test]
+fn a_typed_bang_inside_a_block_arm() {
+    check("typed-inner", &format!("\
+effect fn f(p: Int) -> Result[Int, Bad] = {{
+  let (a, b) = fan {{
+    {{ let x = typed(p)!; println(\"arm0 after\"); x }},
+    {{ println(\"arm1 runs\"); let y = typed(1)!; y + 1 }},
+  }}
+  ok(a + b)
+}}
+{REPORT_F}"), "arm1 runs\nerr Bad(5)\narm0 after\narm1 runs\nok 4\n", "", 0);
+}
+
+#[test]
+fn both_typed_arms_fail_and_the_lowest_index_err_wins() {
+    check("typed-both", "\
+effect fn f(p: Int) -> Result[Int, Bad] = {
+  let (a, b) = fan { loud(p)!, loud(p + 2)! }
+  ok(a + b)
+}
+
+effect fn main() -> Unit = {
+  match f(5) {
+    ok(v) => println(\"ok ${v}\"),
+    err(e) => println(\"err ${e}\"),
+  }
+}
+", "loud 5\nloud 7\nerr Bad(5)\n", "", 0);
+}
+
+#[test]
+fn a_typed_fan_as_the_fn_tail() {
+    check("typed-tail", "\
+effect fn f(p: Int) -> Result[(Int, Int), Bad] = fan { typed(p)!, loud(1) }
+
+effect fn main() -> Unit = {
+  match f(5) {
+    ok((a, b)) => println(\"ok ${a + b}\"),
+    err(e) => println(\"err ${e}\"),
+  }
+}
+", "loud 1\nerr Bad(5)\n", "", 0);
+}
+
+/// The reported program's shape, with the second arm failing with `String`
+/// in a `-> Result[_, Bad]` fn: the arm's Err leaves the fn as the block's
+/// Err, and nothing converts a `String` into a `Bad` — rejected at check
+/// time on both targets, as `loud(1)!` there already is (#2635).
+#[test]
+fn a_string_arm_in_a_typed_fn_is_a_check_error() {
+    if !tool_available("rustc") || !tool_available("wasmtime") {
+        return;
+    }
+    let dir = scratch("typed-mixed");
+    let almd = dir.join("main.almd");
+    std::fs::write(&almd, format!("{HELPERS}
+effect fn noisy(n: Int) -> Int = {{
+  println(\"noisy ${{n}}\")
+  ok(n)
+}}
+
+effect fn f(p: Int) -> Result[Int, Bad] = {{
+  let (a, b) = fan {{ typed(p)!, noisy(1) }}
+  ok(a + b)
+}}
+{REPORT_F}")).expect("write source");
+    for target in ["rust", "wasm"] {
+        let (out, err, got) = run(&almd, target);
+        assert_eq!(out, "", "[{target}]: nothing runs");
+        assert!(
+            err.contains("error[E022]: this fan arm's error cannot leave the block: the fn's error type is `Bad`, but this effect call fails with `String`"),
+            "[{target}]: the arm is named, with both error types:\n{err}"
+        );
+        assert_eq!(got, 1, "[{target}]: exit code");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The threaded form joins into the fn's own error type: the emitted Rust
+/// compiles warning-free and still spawns its arms.
+#[test]
+fn the_typed_threaded_form_compiles_warning_free() {
+    if !tool_available("rustc") {
+        return;
+    }
+    let dir = scratch("typed-threaded");
+    let almd = dir.join("main.almd");
+    std::fs::write(&almd, format!("{HELPERS}
+effect fn f(p: Int) -> Result[Int, Bad] = {{
+  let (a, b) = fan {{ typed(p)!, {{ println(\"arm1\"); typed(1)! + 1 }} }}
+  ok(a + b)
+}}
+{REPORT_F}")).expect("write source");
+    let emitted = Command::new(almide_bin()).arg(&almd).args(["--target", "rust"]).output().expect("spawn almide");
+    assert!(emitted.status.success(), "emit failed:\n{}", String::from_utf8_lossy(&emitted.stderr));
+    let rust = String::from_utf8_lossy(&emitted.stdout).into_owned();
+    let user = rust.rsplit("//__ALMIDE_RT_BOUNDARY__").next().unwrap();
+    assert!(user.contains("__almide_s.spawn"), "the arms keep their threads:\n{user}");
+    assert!(user.contains("-> Result<_, Bad>"), "the join propagates into the fn's error type:\n{user}");
+    let rs = dir.join("main.rs");
+    std::fs::write(&rs, &rust).expect("write rust");
+    let bin = dir.join("main");
+    let rustc = Command::new("rustc")
+        .args(["--edition", "2021", "-D", "warnings", "-A", "non_snake_case", "-A", "unused_macros", "-o"])
+        .arg(&bin)
+        .arg(&rs)
+        .output()
+        .expect("spawn rustc");
+    assert!(rustc.status.success(), "the generated Rust does not compile warning-free:\n{}", String::from_utf8_lossy(&rustc.stderr));
+    let out = Command::new(&bin).output().expect("run binary");
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "arm1\nerr Bad(5)\narm1\nok 4\n");
+    assert_eq!(out.status.code(), Some(0));
+    let _ = std::fs::remove_dir_all(&dir);
 }

@@ -36,7 +36,9 @@
 //!   fan { f(x)!, g(y) }   =>   fan { f(x), g(y) }
 //!
 //! A `!` over an Option, or over a typed error the String channel converts
-//! (ADR-0021 D2), has no Result-of-String arm to become and stays.
+//! (ADR-0021 D2), has no Result-of-String arm to become and stays. A `!` over
+//! the frame's own typed error `E` (`-> Result[_, E]`) is the marker too
+//! (#3467): the block's Err is returned whole, in that `E`.
 
 use almide_base::intern::sym;
 use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
@@ -49,19 +51,23 @@ pub(crate) fn desugar(ir: &IrProgram) -> Option<IrProgram> {
     let mut out = ir.clone();
     let mut changed = false;
     {
-        let mut v = Rewriter { vars: &mut out.var_table, changed: &mut changed };
+        let mut v = Rewriter { vars: &mut out.var_table, changed: &mut changed, frame_err: None };
         for f in out.functions.iter_mut() {
+            v.frame_err = f.ret_ty.result_err_ty();
             v.visit_expr_mut(&mut f.body);
         }
+        v.frame_err = None;
         for tl in out.top_lets.iter_mut() {
             v.visit_expr_mut(&mut tl.value);
         }
     }
     for m in out.modules.iter_mut() {
-        let mut v = Rewriter { vars: &mut m.var_table, changed: &mut changed };
+        let mut v = Rewriter { vars: &mut m.var_table, changed: &mut changed, frame_err: None };
         for f in m.functions.iter_mut() {
+            v.frame_err = f.ret_ty.result_err_ty();
             v.visit_expr_mut(&mut f.body);
         }
+        v.frame_err = None;
         for tl in m.top_lets.iter_mut() {
             v.visit_expr_mut(&mut tl.value);
         }
@@ -72,6 +78,8 @@ pub(crate) fn desugar(ir: &IrProgram) -> Option<IrProgram> {
 struct Rewriter<'a> {
     vars: &'a mut VarTable,
     changed: &'a mut bool,
+    /// The error type of the fn being rewritten, when it returns a Result.
+    frame_err: Option<Ty>,
 }
 
 impl IrMutVisitor for Rewriter<'_> {
@@ -96,17 +104,13 @@ fn module_call(module: &str, func: &str, args: Vec<IrExpr>) -> IrExprKind {
     }
 }
 
-/// Is `t` a `Result[_, String]` — the fan block's arm channel?
-fn is_string_result(t: &Ty) -> bool {
-    matches!(t, Ty::Applied(TypeConstructorId::Result, args) if matches!(args.as_slice(), [_, Ty::String]))
-}
-
 impl Rewriter<'_> {
     fn fan_arm_markers(&mut self, e: &mut IrExpr) {
         let IrExprKind::Fan { exprs } = &mut e.kind else { return };
         for arm in exprs.iter_mut() {
             if let IrExprKind::Try { expr } | IrExprKind::Unwrap { expr } = &mut arm.kind
-                && is_string_result(&expr.ty)
+                && let Some(err) = expr.ty.result_err_ty()
+                && (err == Ty::String || self.frame_err.as_ref() == Some(&err))
             {
                 *arm = std::mem::take(&mut **expr);
                 *self.changed = true;
