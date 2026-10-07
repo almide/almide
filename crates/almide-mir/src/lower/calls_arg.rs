@@ -235,6 +235,53 @@ impl LowerCtx {
     })
     }
 
+    /// A heap-result `match` with a literal/binder chain, run as the equivalent
+    /// heap-result `if` (`desugar_match_to_if` + `try_lower_heap_result_if`): the
+    /// executing join each arm builds and Consumes its own value into. Shared by the
+    /// call-argument operand and the let/var bind (#3451: a match arm holding a
+    /// `guard … else err(..)` once `branch_lift` declines to outline it). Rolls the
+    /// op stream and the live-handle set back on a miss.
+    ///
+    /// From the call-argument arm this was extracted from: `desugar_match_to_if`
+    /// wraps its result in a `Block` (hoisted `let` bindings PRECEDING the `If`)
+    /// whenever the subject isn't one of the
+    /// freely-substitutable KINDS `build_match_chain`'s `subject_pure` admits
+    /// (`Var`/`LitInt`/`LitBool`/`LitFloat` — a `LitStr` subject, e.g. a
+    /// single-use `let x = "hello"; match x {...}` after an EARLIER inlining
+    /// pass propagates `x`'s literal value into the subject position, is NOT
+    /// in that list, so it takes the conservative `bind_subject` path instead
+    /// of inline substitution). This site only ever pattern-matched a BARE
+    /// `If`, declining outright on the Block-wrapped form — closing the ENTIRE
+    /// "match value in a call-argument position" class for any subject shape
+    /// needing the hoist, not just the LitStr case (`match arms returning
+    /// tuples`'s `let (label, len) = match x {s if .. => (..), s => (..)}`).
+    /// Lower the hoisted `let`s first (their own scope-end drops apply
+    /// normally), THEN unwrap to the inner `If` and proceed exactly as before.
+    pub(crate) fn try_lower_heap_match_via_if(
+        &mut self,
+        subject: &IrExpr,
+        arms: &[almide_ir::IrMatchArm],
+        ty: &Ty,
+    ) -> Option<ValueId> {
+        let e = self.desugar_match_to_if(subject, arms, ty)?;
+        let (stmts, if_expr) = match e.kind {
+            IrExprKind::If { .. } => (Vec::new(), e),
+            IrExprKind::Block { stmts, expr: Some(tail) } => (stmts, *tail),
+            _ => return None,
+        };
+        let IrExprKind::If { cond, then, else_ } = &if_expr.kind else { return None };
+        let mark = self.ops.len();
+        let lhh_mark = self.live_heap_handles.len();
+        let dst = stmts.iter().all(|s| self.lower_stmt(s).is_ok()).then(|| {
+            self.try_lower_heap_result_if(cond, then, else_, ty)
+        }).flatten();
+        if dst.is_none() {
+            self.ops.truncate(mark);
+            self.live_heap_handles.truncate(lhh_mark);
+        }
+        dst
+    }
+
     /// A heap-result `match` operand in call-argument position — desugared
     /// to the equivalent `if` chain via the proven `desugar_match_to_if`,
     /// hoisted `let`s lowered first, then the heap-result-if call-arg path.
@@ -246,32 +293,7 @@ impl LowerCtx {
         ty: &Ty,
     ) -> Result<CallArg, LowerError> {
         let value = {
-            // `desugar_match_to_if` wraps its result in a `Block` (hoisted `let`
-            // bindings PRECEDING the `If`) whenever the subject isn't one of the
-            // freely-substitutable KINDS `build_match_chain`'s `subject_pure` admits
-            // (`Var`/`LitInt`/`LitBool`/`LitFloat` — a `LitStr` subject, e.g. a
-            // single-use `let x = "hello"; match x {...}` after an EARLIER inlining
-            // pass propagates `x`'s literal value into the subject position, is NOT
-            // in that list, so it takes the conservative `bind_subject` path instead
-            // of inline substitution). This site only ever pattern-matched a BARE
-            // `If`, declining outright on the Block-wrapped form — closing the ENTIRE
-            // "match value in a call-argument position" class for any subject shape
-            // needing the hoist, not just the LitStr case (`match arms returning
-            // tuples`'s `let (label, len) = match x {s if .. => (..), s => (..)}`).
-            // Lower the hoisted `let`s first (their own scope-end drops apply
-            // normally), THEN unwrap to the inner `If` and proceed exactly as before.
-            let lifted = self.desugar_match_to_if(subject, arms, ty).and_then(|e| {
-                let (stmts, if_expr) = match e.kind {
-                    IrExprKind::If { .. } => (Vec::new(), e),
-                    IrExprKind::Block { stmts, expr: Some(tail) } => (stmts, *tail),
-                    _ => return None,
-                };
-                let IrExprKind::If { cond, then, else_ } = &if_expr.kind else { return None };
-                for s in &stmts {
-                    self.lower_stmt(s).ok()?;
-                }
-                self.try_lower_heap_result_if(cond, then, else_, ty)
-            });
+            let lifted = self.try_lower_heap_match_via_if(subject, arms, ty);
             // A VARIANT subject (`match string.index_of(p, " ") { some(i) => (…),
             // none => (…) }` feeding a tuple destructure, #2588) has no literal
             // chain for `desugar_match_to_if` to build. Run the SAME match-value

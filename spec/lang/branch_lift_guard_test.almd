@@ -38,7 +38,29 @@ test "guard err in a let-bound if branch inside a loop" {
   assert_eq(pick(["a", "bad", "c"]), err("bad item"))
 }
 
+fn tag_all(xs: List[String], strict: Bool) -> String! = {
+  var out = ""
+  for x in xs {
+    let r = match x {
+      "a" => "A",
+      "b" => {
+        guard not strict else err("strict b")
+        "B"
+      },
+      _ => x + ".",
+    }
+    out = out + r
+  }
+  ok(out)
+}
+
 test "guard err in a let-bound match arm inside a loop" {
   assert_eq(pick_match(["a", "", "b"]), ok("aemptyb"))
   assert_eq(pick_match(["a", "bad"]), err("bad item"))
+}
+
+test "guard err in a middle literal arm of a let-bound match inside a loop" {
+  assert_eq(tag_all(["a", "b", "c"], false), ok("ABc."))
+  assert_eq(tag_all(["a", "b", "c"], true), err("strict b"))
+  assert_eq(tag_all(["c", "a"], true), ok("c.A"))
 }
