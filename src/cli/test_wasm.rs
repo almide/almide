@@ -314,7 +314,7 @@ fn render_error_summary<'a>(errors: impl Iterator<Item = &'a diagnostic::Diagnos
 
 /// `compile_and_run_wasm_test`'s pre-register + lower phase: pre-register
 /// versioned module names, lower the entry program, then lower each
-/// resolved user module via the shared `wasm_compile::lower_one_wasm_module` (the
+/// resolved user module via the shared `wasm_compile::lower_wasm_modules` (the
 /// same per-module lowering `compile_to_wasm_bytes` uses — this loop body
 /// used to be a byte-for-byte duplicate of it). link/optimize/monomorphize
 /// stay in the caller so the ALMIDE_PROFILE "lower_modules" mark lands at
@@ -322,14 +322,7 @@ fn render_error_summary<'a>(errors: impl Iterator<Item = &'a diagnostic::Diagnos
 fn lower_wasm_test_modules(program: &almide_lang::ast::Program, checker: &mut check::Checker, resolved: &mut resolve::ResolvedModules) -> Result<almide::ir::IrProgram, String> {
     almide::wasm_leg::register_versioned_module_names(checker, &resolved.modules);
     let mut ir_program = almide::lower::lower_program(program, &checker.env, &checker.type_map);
-    let mut module_diags = Vec::new();
-    let sources = std::mem::take(&mut resolved.sources);
-    for (name, mod_prog, pkg_id, _) in &mut resolved.modules {
-        super::wasm_compile::lower_one_wasm_module(
-            checker, name, mod_prog, pkg_id, &mut ir_program, &sources, &mut module_diags,
-        );
-    }
-    resolved.sources = sources;
+    let module_diags = super::wasm_compile::lower_wasm_modules(checker, resolved, &mut ir_program);
     // An imported module's own type errors are NOT printed here: like the
     // entry program's, they route the file to the authoritative native
     // fallback, which prints them (#862) — printing twice would duplicate

@@ -149,21 +149,37 @@ fn lower_root_program_if_ready(
 /// Verify IR integrity, printing internal-compiler-error diagnostics and
 /// returning `Err` on failure. Extracted verbatim from
 /// `try_compile_with_ir`'s post-optimization verification block.
-/// Type-check and lower a single user (non-stdlib) module discovered by
-/// import resolution, appending its IR onto `ir_program` and `module_irs`.
-/// Extracted from `try_compile_with_ir`'s per-module loop body — same
-/// checker/env mutation order, `continue` becomes an early `return`. Shared
-/// with `cmd_emit`, which ran an identical loop body.
-pub(crate) fn lower_one_user_module(
+/// Type-check and lower every user module import resolution found, in
+/// resolution order, appending each one's IR onto `ir_program` and
+/// `module_irs`; returns the modules' own diagnostics. Shared by
+/// `try_compile_with_ir` and `cmd_emit`, which ran identical loops.
+pub(crate) fn lower_user_modules(
     checker: &mut check::Checker,
-    name: &mut String,
-    mod_prog: &mut ast::Program,
-    pkg_id: &mut Option<project::PkgId>,
+    resolved: &mut crate::resolve::ResolvedModules,
+    module_irs: &mut std::collections::HashMap<String, almide::ir::IrProgram>,
+    ir_program: &mut Option<almide::ir::IrProgram>,
+) -> Vec<(String, String, Vec<diagnostic::Diagnostic>)> {
+    let mut module_diags = Vec::new();
+    let sources = std::mem::take(&mut resolved.sources);
+    for module in &mut resolved.modules {
+        lower_one_user_module(checker, module, module_irs, ir_program, &sources, &mut module_diags);
+    }
+    resolved.sources = sources;
+    module_diags
+}
+
+/// Type-check and lower a single user (non-stdlib) module discovered by
+/// import resolution, appending its IR onto `ir_program` and `module_irs` —
+/// same checker/env mutation order as the loop body it was.
+fn lower_one_user_module(
+    checker: &mut check::Checker,
+    module: &mut (String, ast::Program, Option<project::PkgId>, bool),
     module_irs: &mut std::collections::HashMap<String, almide::ir::IrProgram>,
     ir_program: &mut Option<almide::ir::IrProgram>,
     sources: &std::collections::HashMap<String, (String, String)>,
     module_diags: &mut Vec<(String, String, Vec<diagnostic::Diagnostic>)>,
 ) {
+    let (name, mod_prog, pkg_id, _) = module;
     if almide::stdlib::is_stdlib_module(name) && !almide::stdlib::is_bundled_module(name) { return; }
     // For dependency modules, temporarily set self_module_name to the package root
     // so `import self` in sub-modules resolves to the dependency, not the main project
@@ -334,15 +350,7 @@ fn typecheck_and_lower_for_compile(
     let mut ir_program = lower_root_program_if_ready(parsed.has_parse_errors, program, &checker, parsed.source_text, parsed.file);
 
     // Lower user modules
-    let mut module_diags: Vec<(String, String, Vec<diagnostic::Diagnostic>)> = Vec::new();
-    let sources = std::mem::take(&mut resolved.sources);
-    for (name, mod_prog, pkg_id, _) in &mut resolved.modules {
-        lower_one_user_module(
-            &mut checker, name, mod_prog, pkg_id, module_irs, &mut ir_program,
-            &sources, &mut module_diags,
-        );
-    }
-    resolved.sources = sources;
+    let module_diags = lower_user_modules(&mut checker, resolved, module_irs, &mut ir_program);
     // An imported module's own type errors are fatal for the importer too:
     // a program that cannot be checked cannot be trusted to build (#862).
     report_module_diagnostics(&module_diags)?;
