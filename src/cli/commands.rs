@@ -498,6 +498,7 @@ pub fn cmd_test_json(file: &str, run_filter: Option<&str>, allow_no_tests: bool)
 
     let program_args = test_harness_args(run_filter);
     let mut counts = TestCounts::default();
+    let mut failed = 0usize;
 
     // JSONL, one line per file, in sorted file order — a run is diffable
     // against the next one. Each failing file also emits its per-assertion
@@ -514,6 +515,7 @@ pub fn cmd_test_json(file: &str, run_filter: Option<&str>, allow_no_tests: bool)
         let file_counts = libtest_counts(&output).unwrap_or_default();
         counts.add(file_counts);
         let status = if code == 0 { "pass" } else { "fail" };
+        failed += usize::from(code != 0);
         out(&format!(
             r#"{{"file":{},"status":"{}","exit_code":{},"tests":{},"filtered_out":{},"failures":[{}]}}"#,
             serde_json::Value::from(test_file.as_str()),
@@ -525,7 +527,12 @@ pub fn cmd_test_json(file: &str, run_filter: Option<&str>, allow_no_tests: bool)
         ));
     }
     // No summary line on this lane — the records ARE the output — but the
-    // verdict still applies, so a `--json` consumer sees the same exit code.
+    // verdict still applies, so a `--json` consumer sees the same exit code:
+    // 1 when any file failed, exactly as `cmd_test` (#3449 — this lane used to
+    // report `"status":"fail"` in the payload and then exit 0).
+    if failed > 0 {
+        std::process::exit(1);
+    }
     if counts.found_nothing() && !allow_no_tests {
         std::process::exit(NO_TESTS_EXIT);
     }
