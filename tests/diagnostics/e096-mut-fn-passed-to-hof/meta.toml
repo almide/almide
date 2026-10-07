@@ -1,4 +1,4 @@
 expects_code = "E096"
 expects_error = "fn 'grow' has a `mut` parameter 'xs' and cannot be used as a function value"
-expects_line_col = "10:28"
-hint_substring = "pass a lambda that names the `var` (`() => grow(xs)`)"
+expects_line_col = "10:32"
+hint_substring = "Pass a lambda that copies into a local `var`: `(item) => { var copy = item; grow(copy); copy }`"
