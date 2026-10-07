@@ -1,4 +1,4 @@
-# oracle: almide 0.67.0 (dev) at 757861f12 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.67.0 (dev) at 26fca3021 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/churn/closure_env_churn.almd
 44c083433349ffafa9cefe935628110b83a3774af436938fa5001df6f63bd421	0	spec/churn/construct_from_temp_churn.almd
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/churn/enumerate_rich_churn.almd
@@ -1326,6 +1326,7 @@ e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/wasm_cro
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/wasm_cross/mut_param_effect_never_err.almd
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/wasm_cross/mut_param_effect_unpropagated.almd
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/wasm_cross/mut_param_err_write_visible.almd
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/wasm_cross/mut_param_fn_value_alternatives.almd
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/wasm_cross/mut_param_global_callee_sees_precall.almd
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/wasm_cross/mut_param_global_no_reach_in_place.almd
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/wasm_cross/mut_param_interpolated.almd
