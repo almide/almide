@@ -22,13 +22,14 @@
 //! transformation — no host capability, no clock, no I/O, no randomness, no global
 //! state. The non-pure modules fall in two classes, both WALLED:
 //!
-//! - **Effectful (the `effect fn` keyword)**: `env`, `fs`, `http`, `io`, `net`,
-//!   `process`, `random`, `zlib`. Each declares ≥1 `effect fn`; the drift gate
+//! - **Effectful (the `effect fn` keyword)**: `args`, `env`, `fs`, `http`, `io`,
+//!   `net`, `process`, `random`, `zlib`. Each declares ≥1 `effect fn`; the drift gate
 //!   (`proofs/check-stdlib-purity-registry.sh`) asserts no PURE module ever does.
 //! - **Impure-plain (host reach WITHOUT the `effect` keyword — the keyword
 //!   UNDER-approximates)**: `datetime` (`now`/`monotonic_ns` read the wall clock),
-//!   `args` (`raw` = `env.args()`, reads process args), `mem` (`save`/`restore`
-//!   the allocator arena), `testing` (`assert_*` print/abort). These have zero
+//!   `mem` (`save`/`restore` the allocator arena), `testing` (`assert_*`
+//!   print/abort). (`args` was here until its readers became `effect fn`s,
+//!   dialect epoch 13.) These have zero
 //!   `effect fn` yet reach the host, so the keyword alone is NOT a safety proof —
 //!   they are walled WHOLESALE here and the gate records the justification.
 //!
@@ -460,12 +461,12 @@ mod tests {
     fn effectful_and_impure_plain_modules_are_walled() {
         // Effectful (the `effect fn` keyword).
         for m in [
-            "fs", "http", "net", "io", "env", "process", "random", "zlib",
+            "args", "fs", "http", "net", "io", "env", "process", "random", "zlib",
         ] {
             assert!(!is_pure(m, "anything"), "{m} must be walled (effectful)");
         }
         // Impure-plain (host reach without the keyword).
-        for m in ["datetime", "args", "mem", "testing"] {
+        for m in ["datetime", "mem", "testing"] {
             assert!(!is_pure(m, "now"), "{m} must be walled (impure-plain)");
         }
     }

@@ -1,0 +1,6 @@
+import args
+
+// argv is input, so args.positional_at is an effect fn (dialect epoch 13).
+fn input() -> String = args.positional_at(0) ?? "-"
+
+effect fn main() -> Unit = println(input())

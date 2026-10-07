@@ -18,5 +18,5 @@ test "args.__find_prefixed unit=element-index" {
 }
 
 test "args.positional_at unit=element-index" {
-  assert_eq("${args.positional_at(0) ?? "none"}", "none")
+  assert_eq("${args.positional_at(0)! ?? "none"}", "none")
 }

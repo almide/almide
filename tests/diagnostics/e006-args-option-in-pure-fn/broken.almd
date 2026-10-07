@@ -1,0 +1,6 @@
+import args
+
+// argv is input, so args.option is an effect fn (dialect epoch 13).
+fn output() -> String = args.option("output") ?? "out.txt"
+
+effect fn main() -> Unit = println(output())

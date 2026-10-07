@@ -1,0 +1,6 @@
+import args
+
+// argv is input, so args.positional is an effect fn (dialect epoch 13).
+fn inputs() -> String = list.join(args.positional(), ",")
+
+effect fn main() -> Unit = println(inputs())

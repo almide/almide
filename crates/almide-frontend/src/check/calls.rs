@@ -570,7 +570,7 @@ impl Checker {
             ),
             None => (
                 format!("cannot call effect function '{}' from a pure function", name),
-                "Mark the calling function as `effect fn`".to_string(),
+                argv_reader_hint(name).unwrap_or_else(|| "Mark the calling function as `effect fn`".to_string()),
             ),
         };
         let (msg, context) = match via {
@@ -801,6 +801,16 @@ impl Checker {
             if !ret.is_result() {
                 if self.env.functions.contains_key(&sym(name)) {
                     if !is_bundled_stdlib_call {
+                        return Ty::result(ret, Ty::String);
+                    }
+                    // Only a TEMPLATE-dispatched bundled effect fn
+                    // (`@intrinsic`, `@inline_rust`, `@wasm_intrinsic`,
+                    // `@extern`) keeps its raw `T`: its runtime fn returns the
+                    // value. One with an Almide BODY is lifted by both backends
+                    // like a user fn (codegen's ResultPropagation, the wasm
+                    // effect convention), so its call is a Result too (the
+                    // `args` readers, effect fns since dialect epoch 13).
+                    if bundled_call_is_lifted(name) {
                         return Ty::result(ret, Ty::String);
                     }
                 }
@@ -1347,4 +1357,36 @@ fn strip_ty_module(ty: &Ty) -> Ty {
         }
         _ => ty.map_children(&strip_ty_module),
     }
+}
+
+/// A bundled stdlib effect fn with an Almide body (`module.fn`): the backends
+/// lift it to `Result[T, String]`, so its call is typed that way too. Asked
+/// only for an effect callee whose declared return is not a Result.
+fn bundled_call_is_lifted(name: &str) -> bool {
+    name.split_once('.')
+        .is_some_and(|(m, f)| crate::bundled_sigs::bundled_effect_fn_has_body(m, f))
+}
+
+/// The E006 hint for a call to a reader of the program's arguments from a
+/// plain fn. argv is input (ADR-0022: a plain fn writes and aborts, never
+/// reads), so besides "mark the caller `effect fn`" there is a second fix
+/// that keeps the caller pure: read the arguments once in `main` and pass the
+/// value in. `None` for every other effect fn.
+fn argv_reader_hint(name: &str) -> Option<String> {
+    let reads_argv = matches!(
+        name.split_once('.'),
+        Some(("env" | "process", "args"))
+            | Some(("args", "raw" | "flag" | "option" | "option_or" | "positional" | "positional_at"))
+    );
+    // The `args` readers have Almide bodies, so their call is a Result
+    // propagated with `!`; `env.args` / `process.args` are runtime templates
+    // that return the list itself.
+    let call = if name.starts_with("args.") { format!("{name}(..)!") } else { format!("{name}()") };
+    reads_argv.then(|| {
+        format!(
+            "`{name}` reads the program's arguments, and a plain fn never reads input. \
+             Mark the calling function as `effect fn`, or call `{call}` in `effect fn main` \
+             and pass the value in as a parameter"
+        )
+    })
 }

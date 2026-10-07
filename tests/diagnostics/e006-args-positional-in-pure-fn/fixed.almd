@@ -1,0 +1,5 @@
+import args
+
+fn inputs(files: List[String]) -> String = list.join(files, ",")
+
+effect fn main() -> Unit = println(inputs(args.positional()!))

@@ -420,12 +420,7 @@ pub(crate) fn lower_fn(
             // takes lands on the cell's line (witness_mut.rs) — and a WRITE
             // through the cell is the outer holder's (#3138,
             // `witness_holder`).
-            let pre_gate = if crate::witness::argv_exception(name) {
-                Some("caps:argv-in-plain-fn".to_string())
-            } else {
-                top_lets_gate(top_lets, ctx)
-            };
-            let verdict = pre_gate.or_else(|| match effect_raw {
+            let verdict = top_lets_gate(top_lets, ctx).or_else(|| match effect_raw {
                 // #2758: an effect frame is certified at its raw ok type.
                 Some(raw) => crate::witness::effect_subset(body, crate::witness::heapish_ret(raw)),
                 None => crate::witness::straightline_subset(body, ret.is_some_and(crate::witness::heapish_ret)),

@@ -1,0 +1,6 @@
+import args
+
+// argv is input, so args.raw is an effect fn (dialect epoch 13).
+fn arg_count() -> Int = list.len(args.raw())
+
+effect fn main() -> Unit = println(int.to_string(arg_count()))

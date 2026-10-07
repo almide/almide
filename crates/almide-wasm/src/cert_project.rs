@@ -28,8 +28,8 @@
 //!   CALL GRAPH is every `call` / `return_call` / `ref.func` to a defined
 //!   function plus, for `call_indirect`, every element-segment function of
 //!   the site's type. A function's DECLARED bound comes from its source
-//!   (witness_decls.rs): a plain `fn` declares the console (output, and the
-//!   stdin byte readers io.almd declares plain), an `effect fn` every
+//!   (witness_decls.rs): a plain `fn` declares the console output (it never
+//!   reads, ADR-0022: stdin and argv readers are `effect fn`), an `effect fn` every
 //!   modeled capability; a function the source does not
 //!   declare (a runtime routine, a helper, a lifted lambda) gets the least
 //!   bound its own reach needs, and the graph checker holds every caller to

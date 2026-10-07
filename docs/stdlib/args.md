@@ -3,8 +3,12 @@
 Command-line argument parsing over `env.args()`. `import args`.
 
 `args` is a thin, allocation-light reader — there is no parser object and no
-schema. Each call re-reads the process arguments, so the functions are safe to
-call anywhere and in any order.
+schema. Each call re-reads the process arguments, in any order.
+
+Every reader is an `effect fn` (dialect epoch 13): the arguments are input,
+and a plain `fn` never reads input. Call them from an `effect fn` and
+propagate with `!` like any effect fn's call, or read them once in
+`effect fn main` and pass the values to plain fns.
 
 Program arguments come after `--`:
 
@@ -19,8 +23,8 @@ The argument list as given, argv[0] included.
 ```almd check
 import args
 
-fn main() -> Unit = {
-  let all = args.raw()
+effect fn main() -> Unit = {
+  let all = args.raw()!
   println("${all}")
 }
 ```
@@ -33,8 +37,8 @@ character of `name`) is present.
 ```almd check
 import args
 
-fn main() -> Unit = {
-  if args.flag("verbose") then println("loud") else ()
+effect fn main() -> Unit = {
+  if args.flag("verbose")! then println("loud") else ()
 }
 ```
 
@@ -49,7 +53,7 @@ import fs
 
 effect fn main() -> Unit = {
   let body = "report body"
-  match args.option("output") {
+  match args.option("output")! {
     some(path) => fs.write(path, body)!,
     none => println(body),
   }
@@ -63,8 +67,8 @@ effect fn main() -> Unit = {
 ```almd check
 import args
 
-fn main() -> Unit = {
-  let out = args.option_or("output", "out.txt")
+effect fn main() -> Unit = {
+  let out = args.option_or("output", "out.txt")!
   println(out)
 }
 ```
@@ -79,8 +83,8 @@ import args
 
 fn process(file: String) -> Unit = println("processing ${file}")
 
-fn main() -> Unit = {
-  for file in args.positional() { process(file) }
+effect fn main() -> Unit = {
+  for file in args.positional()! { process(file) }
 }
 ```
 
@@ -91,8 +95,8 @@ The i-th positional argument, or `none` when there are fewer.
 ```almd check
 import args
 
-fn main() -> Unit = {
-  let input = args.positional_at(0) ?? "-"
+effect fn main() -> Unit = {
+  let input = args.positional_at(0)! ?? "-"
   println(input)
 }
 ```
@@ -104,27 +108,27 @@ fn main() -> Unit = {
 ```
 // Same as env.args; argv[0] excluded.
 // @since 0.2.0 or earlier
-args.raw() -> List[String]
+effect args.raw() -> List[String]
 
 // True on --name or -<first letter of name>.
 // @since 0.2.0 or earlier
-args.flag(name: String) -> Bool
+effect args.flag(name: String) -> Bool
 
 // Value of --name=v or --name v; none if absent.
 // @since 0.2.0 or earlier
-args.option(name: String) -> Option[String]
+effect args.option(name: String) -> Option[String]
 
 // option(name), or fallback when absent.
 // @since 0.2.0 or earlier
-args.option_or(name: String, fallback: String) -> String
+effect args.option_or(name: String, fallback: String) -> String
 
 // Args not starting with -; option values too.
 // @since 0.2.0 or earlier
-args.positional() -> List[String]
+effect args.positional() -> List[String]
 
 // i-th positional arg; none if out of range.
 // @since 0.2.0 or earlier
-args.positional_at(i: Int) -> Option[String]
+effect args.positional_at(i: Int) -> Option[String]
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

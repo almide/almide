@@ -145,7 +145,9 @@ pub fn stdlib_only(program: &almide::ast::Program) -> bool {
 /// stdlib module on every check (63% of per-file cost, measured by s4_probe)
 /// and, for a stdlib-only entry, produces NO output: bundled modules carry
 /// no user file to blame (the incumbent's own words — "compiled in and
-/// CI-gated"), so `infer_module_capturing` pushes nothing, and any checker
+/// CI-gated"), so `infer_module_capturing` pushes nothing but a bundled
+/// E006, which a clean stdlib never has (tests/bundled_module_effect_
+/// isolation_test.rs), and any checker
 /// mutations it makes come AFTER the entry's diagnostics are already taken.
 /// The one remaining coupling candidate is the unused-var pass reading
 /// `env`/`type_map` after the loop — which is exactly what the 1,062-file
