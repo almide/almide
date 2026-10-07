@@ -297,3 +297,70 @@ effect fn main() -> Unit = {
     assert_eq!(field("allocs"), field("frees"), "allocations and frees differ: {line}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// An arm's top-level `!` — the writer's, or the one auto-try puts on a
+/// Result call arm of a TAIL or `let`-bound fan — is the arm's own marker:
+/// every arm still runs, and the lowest-index Err is the block's. Before,
+/// the wasm leg lowered it as the frame's own exit, so an early arm's Err
+/// left the frame (or aborted `main`) before a later arm ran.
+#[test]
+fn an_arm_level_bang_still_runs_every_arm() {
+    check("arm-bang", "\
+effect fn t(p: Int, q: Int) -> (Int, Int) = fan { boom(p), boom(q) }
+
+effect fn u(p: Int, q: Int) -> Int = {
+  let r = fan { boom(p), boom(q) }
+  r.0 + r.1
+}
+
+effect fn v(p: Int, q: Int) -> Int = {
+  let (a, b) = fan { boom(p)!, boom(q)! }
+  a + b
+}
+
+effect fn main() -> Unit = {
+  match t(5, 1) {
+    ok((a, b)) => println(\"t ok ${a + b}\"),
+    err(e) => println(\"t err ${e}\"),
+  }
+  match u(1, 6) {
+    ok(x) => println(\"u ok ${x}\"),
+    err(e) => println(\"u err ${e}\"),
+  }
+  match v(7, 5) {
+    ok(x) => println(\"v ok ${x}\"),
+    err(e) => println(\"v err ${e}\"),
+  }
+  match t(1, 2) {
+    ok((a, b)) => println(\"t ok ${a + b}\"),
+    err(e) => println(\"t err ${e}\"),
+  }
+  let r = fan { boom(8), boom(2) }
+  println(\"unreachable ${r.0}\")
+}
+", "arm 5\narm 1\nt err boom 5\narm 1\narm 6\nu err boom 6\narm 7\narm 5\nv err boom 7\n\
+arm 1\narm 2\nt ok 3\narm 8\narm 2\n", "Error: boom 8\n", 1);
+}
+
+/// A pure `-> Result[_, String]` call arm beside an effect arm, in a tail
+/// fan: the pure arm's Err does not skip the effect arm.
+#[test]
+fn a_pure_result_arm_beside_an_effect_arm() {
+    check("pure-arm", "\
+fn mk(s: String) -> Result[String, String] = if string.len(s) > 0 then ok(s + \"!\") else err(\"empty\")
+
+effect fn both(s: String) -> (String, Int) = fan {
+  mk(s)
+  boom(1)
+}
+
+effect fn main() -> Unit = {
+  for s in [\"x\", \"\"] {
+    match both(s) {
+      ok((a, b)) => println(\"ok ${a} ${b}\"),
+      err(e) => println(\"err ${e}\"),
+    }
+  }
+}
+", "arm 1\nok x! 1\narm 1\nerr empty\n", "", 0);
+}

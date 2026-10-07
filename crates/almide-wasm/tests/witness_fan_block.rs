@@ -36,6 +36,11 @@ effect fn main() -> Unit = {
   println("${a} ${n} ${one("y")!}")
   let (p, q) = held("z")!
   println("${p} ${q}")
+  let (u, v) = fan {
+    mk("m")
+    num(3)
+  }
+  println("${u} ${v}")
 }
 "#;
 
@@ -51,16 +56,28 @@ fn fan_blocks_witness_their_carriers_abort_and_slots() {
     // ONE test: the witness sink is process-global.
     let w = witnesses();
     let expect = [
-        // Here each arm is `f(x)!`: the parked `mk` carrier is released at the
-        // exit, `num`'s at its extraction; no arm is a carrier, so the block
-        // has no err site. The `mk` payload is a view of its carrier's slot
-        // that shares into the tuple (`am`); the tuple and the ok carrier are
-        // owned and move on (`im`).
-        ("both", "ibamd\n{ibadm|ibd}\nib{admx|}d\n{|am}\n{|im}\n{|im}\n"),
+        // Each arm is the owned carrier of a Result call (the arm's `!` is its
+        // own marker, front_desugar.rs): either one is the err that leaves
+        // (`im`) on its site and is released whole (`id`) on the other's or
+        // on the ok path. Past the sites both payloads and the tuple are
+        // owned values that move on (`im`).
+        ("both", "ibamd\n{id|im}\n{id|im}\n{|im}\n{|im}\n{|im}\n"),
         // A BORROWED Result arm (`r`): read (`b`), released by the frame. On
-        // its err site it is shared out (`am`); on the ok path its payload is
-        // a view of its slot that shares into the tuple (`am`).
-        ("held", "ibambamd\nibd\n{ibadm|ibd}\n{|am}\n{|am}\n{|am}\n{|im}\n{|im}\n"),
+        // its err site it is shared out (`am`) and the owned `mk` carrier is
+        // released (`id`); `mk`'s err leaves (`im`) on its own site. On the
+        // ok path `r`'s payload is a view of its slot that shares into the
+        // tuple (`am`).
+        ("held", "ibambamd\nibd\n{id|im}\n{|am}\n{|am}\n{|im}\n{|im}\n{|im}\n"),
+        // A one-arm block: its owned carrier leaves on the err site (`im`) or
+        // its spine is released on the ok path (`id`), where the payload is
+        // an owned value the tail moves out (`im`). (It declined as a payload
+        // VIEW while the arm's `!` was lowered as the frame's own exit.)
+        ("one", "ibamd\n{id|im}\n{|im}\n{|im}\n"),
+        // `main` keeps the abort mode: every `!` site and the block's own
+        // first-err site end their path in the checker's abort terminal,
+        // which discharges what is held, so each object lives on the path
+        // that falls through (`{|…}`).
+        ("main", "im\nibd\n{|ad}\n{|ad}\n{|im}\n{|ibd}\n{|ad}\n{|id}\n{|im}\n{|ibd}\n{|ad}\n\n\n{|im}\n{|id}\n{|id}\n{|im}\n{|ibd}\n\n"),
     ];
     for (name, cert) in expect {
         let got = w.get(name).unwrap_or_else(|| panic!("{name} must be witnessed"));
@@ -70,7 +87,4 @@ fn fan_blocks_witness_their_carriers_abort_and_slots() {
             "{name}: the portable checker must accept {got:?}"
         );
     }
-    // A one-arm block over a payload VIEW is the block's borrowed value: the
-    // tail's share of it names no local, so the frame declines.
-    assert_eq!(w.get("one").map(String::as_str), Some("!decline:tail:view-result\n"));
 }
