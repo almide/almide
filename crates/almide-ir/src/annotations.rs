@@ -59,6 +59,12 @@ pub struct CodegenAnnotations {
     /// walker reads that one off the `Borrow` node `BorrowInsertion` spells
     /// around it, so a zero-param lambda needs no entry here.)
     pub borrowed_lambda_params: HashSet<VarId>,
+    /// `let`-bound closures that are SCOPES (#3455): the closure cannot
+    /// outlive its fn and only reads what it captures, so the bind is the
+    /// non-`move` `&|..| ..` (`Borrow { Lambda }`) and the binder is a
+    /// reference to it — calling it needs no `Rc` handle and no clone.
+    /// Decided by BorrowInsertion (`commit_scoped_closures`).
+    pub scope_closure_binders: HashSet<VarId>,
     /// List-field loops whose owned root is dead after the head evaluation.
     /// The body needs owned elements, so move them with into_iter rather than clone.
     pub consumed_loop_vars: HashSet<VarId>,
