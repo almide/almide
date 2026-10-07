@@ -116,3 +116,21 @@ Reading:
 - The spread is close to the run-to-run noise at 2–3 runs, so the gap is recorded as a lead to investigate, not a confirmed regression.
 - The first single run showed 1.24 s for an edit; repeated runs did not reproduce it.
 
+## Gramide observations from 0.62, re-checked on 2026-10-07
+
+Builds compared: 0.62.0, 0.66.0 (release 819bbc74f) and develop 974c00ea0.
+- Native probes went through the standard codegen path, because the verified render walls on record types.
+- Wasm probes on develop went through the structural leg; none hit an E082 wall or fell back.
+
+| # | Observation | develop native | develop wasm | Action |
+|---|---|---|---|---|
+| 1 | loop-state read hoisted out of the loop | **wrong** (`0,0,0` vs `1,2,3`) | correct | #3452 (I-miscompile, release blocker); fix in progress on `fix-3452` |
+| 2 | read-only helper deep-copies its argument | the cross-module and `list.slice` shapes are fixed (#2164, #3397); a let-bound closure capturing a parameter still copies | no copy | #3455 |
+| 3 | list-head read copies the element | `match list.get` and `xs[0]` are fixed (#2070); `??`, `list.first`, `[h, ..]` and `option.map` still clone | no copy | #3453 |
+| 4 | `s = s + piece` quadratic | var accumulator fixed (#3404); field assign and interpolation still quadratic | linear | #3454; fix in progress on `perf-3454` |
+| 5 | JSON control characters unescaped | fixed (f461733d3, 0.65.1) | fixed | pinned by `json_stringify_control_chars.almd` (C-095) and `json_quote_matrix_test.rs` |
+
+#3404's var-accumulator move now has its own String pin: the `a_string_accumulator_moves_into_its_own_concat` test, on branch `gramide-probe` (c5569a604).
+
+`almide check` on gramide's `src/cli.almd`, 20 interleaved runs each: develop 80 ms median, v0.66.0 74 ms. That is about 8% slower, and outside the noise. It is a lead to profile; `ALMIDE_TIME_PHASES` covers `almide run` only.
+
