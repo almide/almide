@@ -189,8 +189,10 @@
 66144	spec/wasm_cross/fallible_tuple_value_tail.almd
 65904	spec/wasm_cross/fan_any_allfail.almd
 66400	spec/wasm_cross/fan_any_early_winner.almd
+66624	spec/wasm_cross/fan_arm_bang_propagates_to_arm.almd
 66144	spec/wasm_cross/fan_arm_unwrap_or.almd
 65888	spec/wasm_cross/fan_block_err_list_order.almd
+66768	spec/wasm_cross/fan_block_rc_closure_capture.almd
 66928	spec/wasm_cross/fan_deterministic.almd
 66656	spec/wasm_cross/fan_effect_mapper.almd
 ~	spec/wasm_cross/fan_effect_mapper_capability.almd

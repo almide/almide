@@ -1,4 +1,4 @@
-# oracle: almide 0.67.0 (dev) at c30e2f62a — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.67.0 (dev) at c3bb69eb3 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 e7ca497fb6b8ff37759ab9e18d5b01e63a642a85baeb5f63fabfa2a82480aa00	0	spec/wasm_cross/accum_recursion_declined.almd
 c04cb55e5ddf0c74b5410feb45743dba9a0405ee40b330b099a13389b94c12b9	0	spec/wasm_cross/accum_recursion_int.almd
 f0709d9573472655341ac75bd847b3f30d2bddc3a201554bfd5cc22c21446902	0	spec/wasm_cross/adr0005_operator_equivalence.almd
@@ -190,8 +190,10 @@ e066b9e65980e2db67260481cb2387b35e922aa894420b98bd4bd3e71b6413be	0	spec/wasm_cro
 138c190bb143f01bc5cf915be20d45a1b701a7786f81e24cb483c14b3fb88e9c	0	spec/wasm_cross/fallible_tuple_value_tail.almd
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	1	spec/wasm_cross/fan_any_allfail.almd
 850d86684b44033e07057051b4c94f7d96c43c58b638e0a56a44b6d8e35d13de	0	spec/wasm_cross/fan_any_early_winner.almd
+d397a7364ffad328a22a546fd13e28d61011094b3a3fd8ca8ee4c9bd784b7ee7	1	spec/wasm_cross/fan_arm_bang_propagates_to_arm.almd
 4ed113ed4861f493dcddde906a79628728cfceaa7d998145806bbf80ff1a6723	0	spec/wasm_cross/fan_arm_unwrap_or.almd
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	1	spec/wasm_cross/fan_block_err_list_order.almd
+e8c9c709704188eda17baf5916b32448b63e0a1eaadbafda43c330da520b59ff	1	spec/wasm_cross/fan_block_rc_closure_capture.almd
 8fc3fb27b99885c1f24f9104d7f50cf63eb27abfcfda2a98a562048758614670	0	spec/wasm_cross/fan_deterministic.almd
 26bc38cbd1f883870b846704f6cd9414ae3bfcc0a4074d9c057970f923c217e5	0	spec/wasm_cross/fan_effect_mapper.almd
 20ab52b3128fce4fffd79e0ad17006e1439748cb2200b2249b015bba20845da7	0	spec/wasm_cross/fan_effect_mapper_capability.almd
