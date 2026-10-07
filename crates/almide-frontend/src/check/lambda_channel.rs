@@ -415,3 +415,56 @@ pub(super) fn classify_lambda_operand(op: &Ty, plain_is_effect_call: bool) -> Op
         _ => None,
     }
 }
+
+impl Checker {
+    /// #3464: a `fan.settle { }` arm that propagates with `!` is a channel
+    /// scope of its own, as a `fan { }` arm is (#3462) and as the mapper
+    /// form's callback is: the `!` ends the ARM with its Err, which becomes
+    /// that arm's slot. ε is decided as a lambda's is (the join of the arm's
+    /// `!`s, ADR-0021 D1). Returns the slot `Result[T, ε]`, or `None` when
+    /// the arm has no `!` of its own (its slot keeps the plain rule).
+    pub(super) fn infer_settle_arm_scope(&mut self, arm: &mut crate::ast::Expr) -> Option<Ty> {
+        if !settle_arm_propagates(arm) {
+            return None;
+        }
+        let ok = self.fresh_var();
+        let eps = self.fresh_var();
+        let chan = Ty::result(ok.clone(), eps.clone());
+        let saved_ret = self.env.lambda_ret.replace(chan.clone());
+        let saved_used = std::mem::replace(&mut self.env.lambda_prop_used, false);
+        self.env.lambda_depth += 1;
+        self.open_lambda_channel(eps);
+        let t = self.infer_expr(arm);
+        self.env.lambda_depth -= 1;
+        let used = std::mem::replace(&mut self.env.lambda_prop_used, saved_used);
+        self.env.lambda_ret = saved_ret;
+        self.close_lambda_channel(used);
+        let body = resolve_ty(&t, &self.uf);
+        if body.is_result() {
+            self.constrain(chan.clone(), t, "fan.settle arm");
+        } else if body != Ty::Never {
+            self.constrain(ok, t, "fan.settle arm");
+        }
+        Some(chan)
+    }
+}
+
+/// Does the arm hold a `!` of its own — one not inside a lambda or a nested
+/// fan form, which are scopes of their own?
+fn settle_arm_propagates(arm: &crate::ast::Expr) -> bool {
+    use crate::ast::{visit_expr, Expr, ExprKind};
+    let mut bangs: Vec<*const Expr> = Vec::new();
+    let mut nested: std::collections::HashSet<*const Expr> = std::collections::HashSet::new();
+    visit_expr(arm, &mut |c| match c.kind {
+        ExprKind::Unwrap { .. } => bangs.push(c),
+        ExprKind::Lambda { .. } | ExprKind::Fan { .. } | ExprKind::FanSettle { .. } if !std::ptr::eq(c, arm) => {
+            visit_expr(c, &mut |d| {
+                if matches!(d.kind, ExprKind::Unwrap { .. }) {
+                    nested.insert(d);
+                }
+            });
+        }
+        _ => {}
+    });
+    bangs.iter().any(|b| !nested.contains(b))
+}
