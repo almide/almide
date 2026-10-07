@@ -395,6 +395,7 @@
 12026	spec/wasm_cross/leak_free_reader_temporaries.almd
 7991	spec/wasm_cross/leak_free_result_option_carriers.almd
 3234	spec/wasm_cross/leak_free_spread_produced_base.almd
+7417	spec/wasm_cross/let_bound_closure_scope.almd
 2702	spec/wasm_cross/let_unwrap_propagation.almd
 1567	spec/wasm_cross/let_wildcard_discard.almd
 2183	spec/wasm_cross/letbound_variant_match.almd
