@@ -364,6 +364,7 @@ fn to_p3_shaped(bytes: &[u8], host_ops: &[i32], service: bool) -> anyhow::Result
         &resolve,
         world,
         wit_component::StringEncoding::UTF8,
+        false,
     )
     .map_err(|e| anyhow::anyhow!("embed: {e}"))?;
     let component = wit_component::ComponentEncoder::default()
