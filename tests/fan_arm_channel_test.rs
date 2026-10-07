@@ -11,6 +11,10 @@
 //!   into `Result<_, String>` and failed rustc E0277. An arm whose error
 //!   cannot become the fn's error type (a `String` one in a `-> Result[_,
 //!   Bad]` fn) is now E022 at check time, as the same `!` is (#2635).
+//! - #3464: a `!` in a `fan.settle { }` arm. Before: E022 claiming the `!` was
+//!   outside an effect fn. Now it is scoped to the arm, as in `fan { }`
+//!   (#3462) and the mapper form `fan.settle(xs, f)`: the arm's Err is its
+//!   slot.
 //!
 //! The pin, per cell: stdout, stderr and the exit code, equal on both legs.
 
@@ -321,4 +325,77 @@ effect fn f(p: Int) -> Result[Int, Bad] = {{
     assert_eq!(String::from_utf8_lossy(&out.stdout), "arm1\nerr Bad(5)\narm1\nok 4\n");
     assert_eq!(out.status.code(), Some(0));
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ── #3464: `!` in a `fan.settle { }` arm ──────────────────────────────
+
+#[test]
+fn the_settle_arm_bang_is_captured_in_its_slot() {
+    check("settle-reported", "\
+effect fn main() -> Unit = {
+  let (a, b) = fan.settle { boom(5)!, { println(\"arm1\"); boom(1)! + 1 } }
+  match a {
+    ok(v) => println(\"a ok ${v}\"),
+    err(e) => println(\"a err ${e}\"),
+  }
+  match b {
+    ok(v) => println(\"b ok ${v}\"),
+    err(e) => println(\"b err ${e}\"),
+  }
+}
+", "arm1\na err boom 5\nb ok 2\n", "", 0);
+}
+
+#[test]
+fn a_settle_arm_bang_ends_only_its_arm() {
+    check("settle-inner", "\
+effect fn main() -> Unit = {
+  let (a, b) = fan.settle {
+    { let x = boom(7)!; println(\"not reached\"); x },
+    { println(\"arm1 runs\"); boom(2)! },
+  }
+  println(match a { ok(v) => \"ok ${v}\", err(e) => \"err ${e}\" })
+  println(match b { ok(v) => \"ok ${v}\", err(e) => \"err ${e}\" })
+}
+", "arm1 runs\nerr boom 7\nok 2\n", "", 0);
+}
+
+/// A typed `!` keeps its type in the slot, as the mapper form's callback
+/// channel does (ADR-0021 D1).
+#[test]
+fn a_typed_settle_arm_bang_keeps_its_error_type() {
+    check("settle-typed", "\
+effect fn main() -> Unit = {
+  let (a, b) = fan.settle { typed(7)!, loud(2)! }
+  match a {
+    ok(v) => println(\"a ok ${v}\"),
+    err(Bad(n)) => println(\"a bad ${n}\"),
+  }
+  println(match b { ok(v) => \"b ok ${v}\", err(e) => \"b err ${e}\" })
+}
+", "loud 2\na bad 7\nb ok 2\n", "", 0);
+}
+
+/// The block form and the mapper form agree on the same callback.
+#[test]
+fn the_block_form_agrees_with_the_mapper_form() {
+    check("settle-mapper", "\
+effect fn main() -> Unit = {
+  let (a, b) = fan.settle { boom(5)!, boom(1)! }
+  let xs = fan.settle([5, 1], (n) => boom(n)!)
+  println(\"${[a, b]}\")
+  println(\"${xs}\")
+}
+", "[err(\"boom 5\"), ok(1)]\n[err(\"boom 5\"), ok(1)]\n", "", 0);
+}
+
+/// A settle arm without a `!` of its own is unchanged: its Result is its slot.
+#[test]
+fn a_settle_arm_without_a_bang_is_unchanged() {
+    check("settle-plain", "\
+effect fn main() -> Unit = {
+  let (a, b) = fan.settle { num(5), { println(\"two\"); 2 } }
+  println(\"${[a, b]}\")
+}
+", "two\n[err(\"big 5\"), ok(2)]\n", "", 0);
 }

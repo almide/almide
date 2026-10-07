@@ -1,4 +1,4 @@
-// The scoping of a fan arm's `!` (#3462, #3467) and the
+// The scoping of a fan arm's `!` (#3462, #3464, #3467) and the
 // `fan.settle { }` block's slots. `include!`d by expressions.rs (the
 // 800-line file budget); it shares that module's scope and imports.
 
@@ -10,10 +10,13 @@
 /// literal — and a destructuring bind then splits it into DIRECT per-arm
 /// binds the downstream match tracking understands.
 fn lower_fan_settle(ctx: &mut LowerCtx, arms: &[ast::Expr], ty: Ty, span: Option<ast::Span>) -> IrExpr {
+    let slots: &[Ty] = match &ty { Ty::Tuple(ts) => ts, _ => &[] };
     let elems: Vec<IrExpr> = arms
         .iter()
-        .map(|arm| {
+        .enumerate()
+        .map(|(i, arm)| {
             let a = lower_expr(ctx, arm);
+            let a = settle_arm_scope(ctx, a, slots.get(i));
             if a.ty.result_err_ty().is_some() {
                 return a;
             }
@@ -42,6 +45,15 @@ fn fan_arm_scope(ctx: &mut LowerCtx, arm: IrExpr) -> IrExpr {
         return arm;
     }
     let err_ty = bang_channel_in_scope(&arm).unwrap_or(Ty::String);
+    arm_thunk(ctx, arm, &err_ty)
+}
+
+/// #3464: a `fan.settle { }` arm with a `!` of its own is scoped the same
+/// way — its Err is that arm's slot — and the thunk takes the slot's error
+/// type, which the checker decided as a callback's channel.
+fn settle_arm_scope(ctx: &mut LowerCtx, arm: IrExpr, slot: Option<&Ty>) -> IrExpr {
+    let Some(bang_err) = bang_channel_in_scope(&arm) else { return arm };
+    let err_ty = slot.and_then(Ty::result_err_ty).unwrap_or(bang_err);
     arm_thunk(ctx, arm, &err_ty)
 }
 
