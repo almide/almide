@@ -173,7 +173,9 @@ fn lower_expr_control(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option
         }
 
         ast::ExprKind::Fan { exprs, .. } => {
-            let ir_exprs: Vec<IrExpr> = exprs.iter().map(|e| lower_expr(ctx, e)).collect();
+            let ir_exprs: Vec<IrExpr> = exprs.iter()
+                .map(|e| { let arm = lower_expr(ctx, e); fan_arm_scope(ctx, arm) })
+                .collect();
             ctx.mk(IrExprKind::Fan { exprs: ir_exprs }, ty, span)
         }
         // fan.bounded(budget) { body } — Stage 2 v1 desugar by OUTLINING.
