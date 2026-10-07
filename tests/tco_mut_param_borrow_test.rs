@@ -15,7 +15,7 @@
 //! type the parameter has. These tests pin BOTH halves of the answer:
 //!
 //! 1. the loop form keeps `&mut` (the borrow survived), and
-//! 2. it is still a LOOP (`while true` / `__tco_result`) — the fix is not
+//! 2. it is still a LOOP (`loop` / `__tco_result`, #3460) — the fix is not
 //!    "stop optimising functions with a `mut` parameter".
 //!
 //! Plus the one shape the loop cannot carry — a `mut` parameter a self-call
@@ -90,7 +90,7 @@ fn assert_borrowed_loop(body: &str, param_ty: &str) {
          handed a copy and every mutation is lost (#2293):\n{body}"
     );
     assert!(
-        body.contains("__tco_result") && body.contains("while true"),
+        body.contains("__tco_result") && body.contains("loop {"),
         "expected the tail call to still be a LOOP — the fix keeps the borrow, \
          it does not give up on optimising `mut`-parameter functions:\n{body}"
     );
