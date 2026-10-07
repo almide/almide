@@ -391,8 +391,9 @@ impl Lower<'_> {
         // A borrowed callable (`f: &dyn Fn`, #2288) is cloned by the clone
         // pass's always-clone rule for `Ty::Fn` (an `Rc` handle's refcount
         // bump); the reference itself is what every call reads — no clone.
+        // So is a scope closure's binder (#3455): it is the `&|..| ..` itself.
         if let Some(id) = var_id(inner)
-            && is_ref_param(self.params, id)
+            && (is_ref_param(self.params, id) || self.ann.scope_closure_binders.contains(&id))
             && matches!(inner.ty, Ty::Fn { .. })
         {
             let value = std::mem::replace(inner.as_mut(), mk(IrExprKind::Unit, Ty::Unit, None));

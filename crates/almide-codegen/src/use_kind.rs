@@ -37,6 +37,10 @@ pub trait SlotOracle {
     fn call_slot(&self, target: &CallTarget, index: usize, arg: &IrExpr) -> SlotMode;
     /// The mode of argument `index` of a `RuntimeCall` to `symbol`.
     fn runtime_slot(&self, symbol: Sym, index: usize, arg: &IrExpr) -> SlotMode;
+    /// Is the lambda `let`-bound to `binder` a SCOPE (#3455)? Only the borrow
+    /// fixed point asks before its verdict is spelled; afterwards the IR says
+    /// so with `Borrow { Lambda }`, which every walk reads as a scope.
+    fn scoped_closure(&self, _binder: VarId) -> bool { false }
 }
 
 /// After `BorrowInsertion` the IR spells every borrow as a `Borrow` node
@@ -665,6 +669,9 @@ impl<'a> Walk<'a> {
     fn stmt(&mut self, s: &IrStmt) {
         self.next_stmt();
         match &s.kind {
+            IrStmtKind::Bind { var, value, .. } if matches!(value.kind, IrExprKind::Lambda { .. }) && self.oracle.scoped_closure(*var) => {
+                self.scope_lambda(value)
+            }
             IrStmtKind::Bind { value, .. } => self.expr(value, Site::Assigned),
             IrStmtKind::BindDestructure { pattern, value } => {
                 self.pattern(pattern);

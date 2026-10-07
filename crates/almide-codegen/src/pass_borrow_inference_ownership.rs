@@ -212,7 +212,7 @@ fn infer_function_borrows(func: &IrFunction, scope: &Scope) -> Vec<ParamBorrow> 
     if has_intrinsic {
         return func.params.iter().map(|p| intrinsic_borrow_mode(&p.ty, scope.round.records)).collect();
     }
-    let uses = UseSites::of_fn(func, scope);
+    let (_, uses) = scoped_uses(func, scope);
     func.params.iter().enumerate().map(|(slot, param)| param_borrow(slot, param, &uses, scope, &func.body)).collect()
 }
 

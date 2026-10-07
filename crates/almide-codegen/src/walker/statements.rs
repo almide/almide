@@ -290,6 +290,13 @@ fn render_bind_value_str(ctx: &RenderContext, ty: &Ty, value: &IrExpr) -> String
     }
     match &value.kind {
         IrExprKind::Lambda { params, body, .. } if has_typed(params) => annotate_bind_lambda(ctx, params, body),
+        // A `let`-bound scope lambda (#3455, `BorrowInsertion` spelled it
+        // `&λ`): the non-`move` closure that borrows what it reads, its
+        // params typed as the boxed closure's were — no slot type infers them.
+        IrExprKind::Borrow { expr: inner, mutable: false, .. } => match &inner.kind {
+            IrExprKind::Lambda { params, body, .. } => format!("&{}", super::expressions::render_lambda_with(ctx, params, body, true, true)),
+            _ => render_expr(ctx, value),
+        },
         // Capture-clone-wrapped closure: a shared-mut-capturing raw closure
         // lowers to `{ let __cap = x.clone(); move |k| … }`. The wrapping
         // block hides the lambda from the bare-Lambda case above, so a typed
