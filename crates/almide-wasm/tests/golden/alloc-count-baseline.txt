@@ -394,7 +394,7 @@
 859	836	9479	859	spec/wasm_cross/leak_free_map_walk_exit.almd
 47	41	487	47	spec/wasm_cross/leak_free_propagating_literal_operand.almd
 63	26	670	63	spec/wasm_cross/leak_free_reader_temporaries.almd
-67	32	714	67	spec/wasm_cross/leak_free_result_option_carriers.almd
+67	34	714	67	spec/wasm_cross/leak_free_result_option_carriers.almd
 970	951	8131	970	spec/wasm_cross/leak_free_spread_produced_base.almd
 91	73	948	91	spec/wasm_cross/let_bound_closure_scope.almd
 7	2	111	7	spec/wasm_cross/let_unwrap_propagation.almd
