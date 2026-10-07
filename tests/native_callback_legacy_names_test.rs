@@ -117,7 +117,7 @@ fn assert_old_names_run_and_warn(r: &Run, lane: &str) {
     ] {
         assert_eq!(warnings_for(&r.stderr, old), 1, "{lane}: not one warning for {old}:\n{}", r.stderr);
         assert!(r.stderr.contains(&format!("write `crate::{new}`")), "{lane}: the warning does not name {new}:\n{}", r.stderr);
-        assert!(r.stderr.contains("dialect epoch 13"), "{lane}: the warning does not name the removal epoch:\n{}", r.stderr);
+        assert!(r.stderr.contains("dialect epoch 14"), "{lane}: the warning does not name the removal epoch:\n{}", r.stderr);
     }
 }
 
