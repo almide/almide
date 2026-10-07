@@ -545,13 +545,19 @@ fn handle_notification(notif: Notification, connection: &Connection, documents: 
 pub fn run_lsp() {
     let (connection, io_threads) = Connection::stdio();
 
-    let server_capabilities = serde_json::to_value(lsp_server_capabilities()).unwrap();
+    let server_capabilities = match serde_json::to_value(lsp_server_capabilities()) {
+        Ok(v) => v,
+        Err(e) => { err(&format!("LSP init failed: {}", e)); return; }
+    };
 
     let init_params = match connection.initialize(server_capabilities) {
         Ok(it) => it,
         Err(e) => { err(&format!("LSP init failed: {}", e)); return; }
     };
-    let init: InitializeParams = serde_json::from_value(init_params).unwrap();
+    let init: InitializeParams = match serde_json::from_value(init_params) {
+        Ok(v) => v,
+        Err(e) => { err(&format!("LSP init failed: {}", e)); return; }
+    };
     let workspace_root = derive_workspace_root(&init);
 
     let mut documents: HashMap<Uri, String> = HashMap::new();
