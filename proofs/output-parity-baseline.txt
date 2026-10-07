@@ -323,6 +323,7 @@ spec/wasm_cross/fan_sibling_trap.almd
 spec/wasm_cross/fan_trap_waits_for_elements_below.almd
 spec/wasm_cross/fan_var_thunk_list.almd
 spec/wasm_cross/fan_worker_abort_keeps_stdout.almd
+spec/wasm_cross/field_and_interp_accumulator.almd
 spec/wasm_cross/filter_map_conditional_arm.almd
 spec/wasm_cross/flat_map_aliased_field.almd
 spec/wasm_cross/flight_pid_control.almd

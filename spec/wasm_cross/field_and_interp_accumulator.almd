@@ -1,0 +1,76 @@
+// @contract: C-105
+// FIELD AND INTERPOLATION ACCUMULATORS (#3454). Native extends these in place:
+// `b.text = b.text + "ab"` takes the field (`std::mem::take(&mut b.text)`)
+// instead of copying it, and `s = "${s}ab"` (the overwritten place as the
+// FIRST piece, no later piece reading it) appends to the moved `s` instead of
+// re-formatting the whole string. Nothing observable changes: both legs print
+// the same bytes. The rows pin the accumulated values, a list field, a copy
+// taken before the loop (it must keep the old value), and the shapes that keep
+// the copy — a right side reading the place twice, the place not first.
+type Buf = { text: String, xs: List[Int], n: Int }
+
+fn grow(n: Int) -> Buf = {
+  var b = Buf { text: "", xs: [], n: 0 }
+  for i in 0..<n {
+    b.text = b.text + "ab"
+    b.xs = b.xs + [i]
+    b.text = "${b.text}-${i}"
+    b.n = b.n + 1
+  }
+  b
+}
+
+fn doubled(n: Int) -> Buf = {
+  var b = Buf { text: "x", xs: [1], n: 0 }
+  for _ in 0..<n {
+    b.text = b.text + b.text
+    b.xs = b.xs + b.xs
+    b.text = "${b.text}${b.n}${b.text}"
+  }
+  b
+}
+
+fn interp(n: Int) -> String = {
+  var s = ""
+  for i in 0..<n {
+    s = "${s}[${i}]"
+    s = "${s}."
+  }
+  s
+}
+
+fn interp_reread(n: Int) -> String = {
+  var s = "a"
+  for _ in 0..<n {
+    s = "${s}+${s}"
+    s = "<${s}>"
+  }
+  s
+}
+
+fn keep_old(n: Int) -> (String, String) = {
+  var b = Buf { text: "k", xs: [], n: 0 }
+  let old = b
+  for _ in 0..<n {
+    b.text = "${b.text}k"
+  }
+  (old.text, b.text)
+}
+
+fn main() -> Unit = {
+  let g = grow(4)
+  println("${g.text} ${g.xs} ${g.n}")
+  // ab-0ab-1ab-2ab-3 [0, 1, 2, 3] 4
+  let d = doubled(2)
+  println("${d.text} ${d.xs}")
+  // xx0xxxx0xx0xx0xxxx0xx [1, 1, 1, 1]
+  println(interp(3))
+  // [0].[1].[2].
+  println(interp_reread(2))
+  // <<a+a>+<a+a>>
+  let (o, k) = keep_old(3)
+  println("${o} ${k}")
+  // k kkkk
+  // 5890
+  println(int.to_string(string.len(grow(1000).text)))
+}
