@@ -310,6 +310,8 @@ evidence  = [
   { path = "spec/wasm_cross/match_guard_eq_borrows_binding.almd", class = "fixture" },
   { path = "spec/wasm_cross/match_catchall_binder_eq.almd", class = "fixture" },
   { path = "spec/wasm_cross/deep_eq_nested_distinct.almd", class = "fixture" },
+  { path = "tests/nested_distinct_eq_test.rs", class = "fixture", name = "nested_lists_five_and_seven_deep_compare_on_the_structural_leg" },
+  { path = "tests/nested_distinct_eq_test.rs", class = "fixture", name = "a_mixed_container_stack_compares_on_the_structural_leg" },
 ]
 
 # ── UNICODE STRING SURFACE ───────────────────────────────────────────
