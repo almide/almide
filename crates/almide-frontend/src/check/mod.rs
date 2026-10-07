@@ -180,6 +180,9 @@ pub struct Checker {
     /// checked against it — `http.wrap(app, [(next) => (req) => …])` types
     /// every inline middleware as a `HttpMiddleware`.
     pub(crate) list_elem_expect: Option<crate::types::Ty>,
+    /// #3469: the fn-typed call slot a bare fn reference is filling, so an
+    /// E096 hint can suggest a lambda of the slot's arity.
+    pub(crate) fn_value_slot: Option<crate::types::Ty>,
     pub(crate) constraints: Vec<Constraint>,
     /// A slot of an `ok(..)` / `err(..)` its argument leaves open — the ERR type
     /// of `ok(x)`, the OK type of `err(e)` — paired with the enclosing fn's
@@ -653,6 +656,7 @@ impl Checker {
             lambda_slot_effect: false,
             lambda_ret_expect: None,
             list_elem_expect: None,
+            fn_value_slot: None,
             constraints: Vec::new(), result_slot_defaults: Vec::new(), uf: UnionFind::new(),
             unify_named_in_progress: std::collections::HashSet::new(),
             current_module_prefix: None,

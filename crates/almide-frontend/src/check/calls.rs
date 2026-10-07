@@ -258,7 +258,10 @@ impl Checker {
             {
                 self.list_elem_expect = e.first().cloned();
             }
+            let slot = Self::fn_value_slot_for_arg(a, call_sig, i, &bindings);
+            let prev_fn_slot = std::mem::replace(&mut self.fn_value_slot, slot);
             let aty = self.infer_expr(a);
+            self.fn_value_slot = prev_fn_slot;
             self.list_elem_expect = prev_list_expect;
             self.swap_pending_lambda_source(prev_slot_source);
             self.lambda_ret_expect = prev_ret_expect;
@@ -275,6 +278,16 @@ impl Checker {
             tys.push(aty);
         }
         tys
+    }
+
+    /// #3469: the fn type of call slot `i` when arg `a` is a bare fn reference
+    /// (`grow`, `m.grow`) — what an E096 hint for that reference should fit.
+    fn fn_value_slot_for_arg(a: &ast::Expr, call_sig: &Option<crate::types::FnSig>, i: usize, bindings: &HashMap<Sym, Ty>) -> Option<Ty> {
+        if !matches!(a.kind, ExprKind::Ident { .. } | ExprKind::Member { .. }) {
+            return None;
+        }
+        let (_, pty) = call_sig.as_ref()?.params.get(i)?;
+        Some(crate::types::substitute(pty, bindings)).filter(|t| matches!(t, Ty::Fn { .. }))
     }
 
     /// Pin an unannotated lambda's params to the expected element types substituted with bindings learned from earlier args. A slot whose substituted type still mentions one of the CALLEE's OWN unbound generics (`A` when arg0 was itself an unresolved inference var) gets NO pin: writing the literal sig generic into the lambda param disconnects it from the union-find, so it never picks up the element type that flows in later and silently defaults to Int (nn variance_rows: `let sq = list.map(row, (x) => …)` inside a map lambda).
