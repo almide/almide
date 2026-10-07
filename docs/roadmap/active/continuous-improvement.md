@@ -134,3 +134,15 @@ Builds compared: 0.62.0, 0.66.0 (release 819bbc74f) and develop 974c00ea0.
 
 `almide check` on gramide's `src/cli.almd`, 20 interleaved runs each: develop 80 ms median, v0.66.0 74 ms. That is about 8% slower, and outside the noise. It is a lead to profile; `ALMIDE_TIME_PHASES` covers `almide run` only.
 
+## Root package codopsy (#3152), 2026-10-07
+
+- **`src/`: B 86 → A 93.** Branch `codopsy-root-src` (fa947c150), 12 structural refactors. Warnings went from 52 to 11; the info count is unchanged at 48.
+  - No rc change, no exclusion, no suppression.
+  - Output is identical to the develop binary across the emitted Rust, the wasm bytes, the test/fmt/check transcripts and all `--help` text.
+  - **Side effect:** a one-time native cache miss, because the split cargo_build files now join the hashed build recipe.
+- **`tests/`: B 82, unchanged.** The weighted base is 97.4, but the issue-density penalty is at its cap of 15 with 2010 issues.
+  - 1536 of those issues are `no-unwrap` in integration test files, which codopsy does not recognise as test code: it exempts only a module named `tests`.
+  - The way to A is to rewrite about 1500 test unwraps, which would be churn to satisfy the metric, or to have codopsy treat `tests/*.rs` and `#[test]` fns as test code.
+  - The latter changes the evaluation method, so it is left to the owner.
+- **crates/almide-edit-belt: B 88** (a Lean 4 project). Not started.
+
