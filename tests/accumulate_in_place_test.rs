@@ -289,15 +289,19 @@ fn four_times_the_appends_is_not_sixteen_times_the_time() {
     assert!(build.status.success(), "build failed:\n{}", String::from_utf8_lossy(&build.stderr));
     // Measured A/B on the emitted Rust, release, best of three: the copying
     // form took 0.25 s → 2.6 s for 100k → 400k appends (ratio 10.2–10.6 for
-    // both shapes; 16× in the limit), the in-place form 2.0 ms → 2.5 ms
-    // (ratio 1.2 — the process start dominates). A bound of 5 leaves a 2×
-    // margin under the copying ratio and 4× over the in-place one.
-    let (n, big) = (100_000u64, 400_000u64);
+    // both shapes; 16× in the limit), the in-place form 2.0 ms → 2.5 ms.
+    // At those sizes the process start dominates the in-place times, so a
+    // loaded CI runner's start-up jitter alone read as ratio 5.3 (develop
+    // 37635226175). The sizes are 4× larger so the work dominates: in-place
+    // is linear (≈ 4×; ~10 ms → ~50 ms locally at 1M → 4M) and copying is
+    // quadratic (→ 16×). The bound 8 is their geometric midpoint, 2× from
+    // each — the same margin the old bound kept under the copying ratio.
+    let (n, big) = (400_000u64, 1_600_000u64);
     for (shape, per) in [("field", 1u64), ("interp", 2u64)] {
         let small = best_of_three(&bin, shape, n, n * per);
         let large = best_of_three(&bin, shape, big, big * per);
         let ratio = large.as_secs_f64() / small.as_secs_f64().max(1e-4);
-        assert!(ratio < 5.0, "{shape}: {big} appends took {large:?} against {small:?} for {n} — ratio {ratio:.1}, quadratic again");
+        assert!(ratio < 8.0, "{shape}: {big} appends took {large:?} against {small:?} for {n} — ratio {ratio:.1}, quadratic again");
     }
     std::fs::remove_dir_all(&dir).ok();
 }
