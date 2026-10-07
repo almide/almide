@@ -740,7 +740,7 @@ fn fan_arm_scope(ctx: &mut LowerCtx, arm: IrExpr) -> IrExpr {
     if !propagates_in_scope(inner) {
         return arm;
     }
-    let span = arm.span.clone();
+    let span = arm.span;
     let mut body = arm;
     convert_option_unwraps_to_result(&mut body);
     if !body.ty.is_result() {
@@ -749,7 +749,7 @@ fn fan_arm_scope(ctx: &mut LowerCtx, arm: IrExpr) -> IrExpr {
     let ret = body.ty.clone();
     let lambda_ty = Ty::Fn { params: Vec::new(), ret: Box::new(ret.clone()), is_effect: false };
     let lambda_id = Some(ctx.next_lambda_id());
-    let thunk = ctx.mk(IrExprKind::Lambda { params: Vec::new(), body: Box::new(body), lambda_id }, lambda_ty, span.clone());
+    let thunk = ctx.mk(IrExprKind::Lambda { params: Vec::new(), body: Box::new(body), lambda_id }, lambda_ty, span);
     let target = CallTarget::Computed { callee: Box::new(thunk) };
     ctx.mk(IrExprKind::Call { target, args: Vec::new(), type_args: Vec::new() }, ret, span)
 }
