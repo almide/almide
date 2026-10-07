@@ -210,6 +210,7 @@
 4	1	49	2	spec/wasm_cross/fan_trap_waits_for_elements_below.almd
 4	0	56	4	spec/wasm_cross/fan_var_thunk_list.almd
 0	0	0	0	spec/wasm_cross/fan_worker_abort_keeps_stdout.almd
+8069	8029	9868936	8069	spec/wasm_cross/field_and_interp_accumulator.almd
 12	5	76	12	spec/wasm_cross/filter_map_conditional_arm.almd
 22	6	142	22	spec/wasm_cross/flat_map_aliased_field.almd
 0	0	0	0	spec/wasm_cross/flight_pid_control.almd
