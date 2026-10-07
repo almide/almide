@@ -520,11 +520,11 @@ pub fn desugar_fan_block(body: &IrExpr) -> Option<IrExpr> {
             };
             // A REAL-Result thunk (a declared-Result / lifted-can-err / auto-wrapped
             // NAMED call — its v1 value IS a Result block) takes the SEQUENTIAL
-            // `e!`-equivalent: `fan { e1; e2 } ≡ { let $f1 = e1!; let $f2 = e2!;
-            // ($f1, $f2) }` — v0 joins in list order and `?`-propagates the first Err,
-            // which is exactly the bind-`!` chain's semantics; the whole existing
-            // unwrap machinery (desugar_let_unwrap's ok/err match, the err-type join)
-            // then lowers it. Count-invariant: each thunk call appears exactly once.
+            // settle (`fan_settle_block`): every arm runs, then the `!`s in list
+            // order, so the lowest-index Err wins (C-199). An `e1!; e2!` chain
+            // would skip e2 after e1's Err (#3465). The existing unwrap machinery
+            // (desugar_let_unwrap's ok/err match, the err-type join) lowers each
+            // `!`. Count-invariant: each thunk call appears exactly once.
             let real_result_ok_ty = |x: &IrExpr| -> Option<Ty> {
                 match (&x.ty, &x.kind) {
                     (
@@ -610,56 +610,20 @@ pub fn desugar_fan_block(body: &IrExpr) -> Option<IrExpr> {
                 self.changed = true;
                 return;
             }
-            // Mixed / real-Result elements: the sequential bind-`!` block.
-            let mut stmts: Vec<almide_ir::IrStmt> = Vec::with_capacity(exprs.len());
-            let mut elements: Vec<IrExpr> = Vec::with_capacity(exprs.len());
-            for (x, c) in exprs.iter().zip(&classes) {
-                let (val, vty) = match c {
+            // Mixed / real-Result elements: every arm runs, THEN the `!`s (#3465).
+            let arms: Vec<(IrExpr, Option<Ty>)> = exprs
+                .iter()
+                .zip(&classes)
+                .map(|(x, c)| match c {
                     Elem::Plain(t) => {
                         let mut nx = ok_inner(x).unwrap_or_else(|| x.clone());
                         nx.ty = t.clone();
-                        (nx, t.clone())
+                        (nx, None)
                     }
-                    Elem::Unwrap(t) => (
-                        IrExpr {
-                            kind: IrExprKind::Unwrap { expr: Box::new(x.clone()) },
-                            ty: t.clone(),
-                            span: x.span.clone(),
-                            def_id: None,
-                        },
-                        t.clone(),
-                    ),
-                };
-                let var = almide_ir::VarId(self.next_var);
-                self.next_var += 1;
-                stmts.push(almide_ir::IrStmt {
-                    kind: almide_ir::IrStmtKind::Bind {
-                        var,
-                        mutability: almide_ir::Mutability::Let,
-                        ty: vty.clone(),
-                        value: val,
-                    },
-                    span: None,
-                });
-                elements.push(IrExpr {
-                    kind: IrExprKind::Var { id: var },
-                    ty: vty,
-                    span: None,
-                    def_id: None,
-                });
-            }
-            let tuple = IrExpr {
-                kind: IrExprKind::Tuple { elements },
-                ty: e.ty.clone(),
-                span: e.span.clone(),
-                def_id: e.def_id,
-            };
-            *e = IrExpr {
-                kind: IrExprKind::Block { stmts, expr: Some(Box::new(tuple)) },
-                ty: e.ty.clone(),
-                span: e.span.clone(),
-                def_id: e.def_id,
-            };
+                    Elem::Unwrap(t) => (x.clone(), Some(t.clone())),
+                })
+                .collect();
+            *e = fan_settle_block(arms, e, &mut self.next_var);
             self.changed = true;
         }
     }
@@ -667,4 +631,50 @@ pub fn desugar_fan_block(body: &IrExpr) -> Option<IrExpr> {
     let mut out = body.clone();
     v.visit_expr_mut(&mut out);
     v.changed.then_some(out)
+}
+
+/// The mixed / real-Result fan block (C-199, ADR-0024): `fan { e1; e2 } ≡
+/// { let $r1 = e1; let $r2 = e2; let $v1 = $r1!; let $v2 = $r2!; ($v1, $v2) }`.
+/// Every arm runs in list order BEFORE any `!`, and the `!`s run in list order,
+/// so the lowest-index Err wins. A `None` ok-type arm is raw (bound once, used
+/// as is). The existing bind-`!` machinery lowers each unwrap. Count-invariant.
+fn fan_settle_block(arms: Vec<(IrExpr, Option<Ty>)>, fan: &IrExpr, next_var: &mut u32) -> IrExpr {
+    use almide_ir::{IrStmt, IrStmtKind, Mutability, VarId};
+    let mut fresh = |ty: &Ty, value: IrExpr, stmts: &mut Vec<IrStmt>| -> IrExpr {
+        let var = VarId(*next_var);
+        *next_var += 1;
+        stmts.push(IrStmt {
+            kind: IrStmtKind::Bind { var, mutability: Mutability::Let, ty: ty.clone(), value },
+            span: None,
+        });
+        IrExpr { kind: IrExprKind::Var { id: var }, ty: ty.clone(), span: None, def_id: None }
+    };
+    let mut stmts: Vec<IrStmt> = Vec::with_capacity(arms.len() * 2);
+    let held: Vec<(IrExpr, Option<Ty>)> = arms
+        .into_iter()
+        .map(|(x, ok_ty)| (fresh(&x.ty.clone(), x, &mut stmts), ok_ty))
+        .collect();
+    let elements: Vec<IrExpr> = held
+        .into_iter()
+        .map(|(r, ok_ty)| match ok_ty {
+            None => r,
+            Some(t) => {
+                let span = fan.span.clone();
+                let unwrap = IrExpr { kind: IrExprKind::Unwrap { expr: Box::new(r) }, ty: t.clone(), span, def_id: None };
+                fresh(&t, unwrap, &mut stmts)
+            }
+        })
+        .collect();
+    let tuple = IrExpr {
+        kind: IrExprKind::Tuple { elements },
+        ty: fan.ty.clone(),
+        span: fan.span.clone(),
+        def_id: fan.def_id,
+    };
+    IrExpr {
+        kind: IrExprKind::Block { stmts, expr: Some(Box::new(tuple)) },
+        ty: fan.ty.clone(),
+        span: fan.span.clone(),
+        def_id: fan.def_id,
+    }
 }
