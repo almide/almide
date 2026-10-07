@@ -195,7 +195,7 @@ fn head_reads_borrow_the_element_and_clone_only_what_escapes() {
     let rust = emit_fn_bodies(HEAD_SOURCE);
     let body = |name| fn_body(&rust, name);
     // Every read-only shape borrows in place and copies nothing.
-    for name in ["coalesce_field", "coalesce_let", "first_field", "first_match", "map_head", "map_first", "borrowed_len", "borrowed_arg", "param_field", "param_let"] {
+    for name in ["coalesce_field", "coalesce_let", "first_field", "first_match", "map_head", "map_first", "borrowed_len", "borrowed_arg", "param_field", "param_let", "param_borrowed"] {
         assert!(body(name).contains("almide_list_get_ref!"), "{name} must borrow the head: {}", body(name));
         assert!(!body(name).contains(".clone()"), "{name} must not copy the element: {}", body(name));
         assert!(!body(name).contains("almide_rt_list_get(") && !body(name).contains("almide_rt_list_first("), "{name}: {}", body(name));
@@ -207,13 +207,10 @@ fn head_reads_borrow_the_element_and_clone_only_what_escapes() {
     // escapes clones that field, never the element.
     // An owned param as the fallback stays consumed — moved into a local the
     // `none` side reads — so the settled signature keeps a consumer (the
-    // certifier's C4); a borrow over such a param copies the field it reads,
-    // never the element.
-    for name in ["param_field", "param_let"] {
+    // certifier's C4).
+    for name in ["param_field", "param_let", "param_borrowed"] {
         assert!(body(name).contains("= d;"), "{name} must still move `d`: {}", body(name));
     }
-    assert!(body("param_borrowed").contains("almide_list_get_ref!") && body("param_borrowed").matches(".clone()").count() == 1
-        && body("param_borrowed").contains(".data.clone()"), "{}", body("param_borrowed"));
     for name in ["escape_coalesce", "escape_let", "escape_moved"] {
         assert!(!body(name).contains("almide_list_get_ref!"), "{name} escapes, it must own: {}", body(name));
         assert_eq!(body(name).matches(".clone()").count(), usize::from(name == "escape_moved"), "{name}: {}", body(name));
