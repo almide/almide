@@ -161,7 +161,11 @@ pub(crate) fn build_native_cached(
     // A unique per-call dir has its own src/main.rs, so the global mutex (which
     // only exists to serialize the shared default dir) isn't needed — the
     // per-dir flock still guards a separate process reusing the same dir.
-    let _guard = project_dir_override.is_none().then(|| BUILD_LOCK.lock().unwrap());
+    // The mutex guards no data — only the window — so a lock poisoned by a
+    // build that panicked inside it is still the right lock to take.
+    let _guard = project_dir_override
+        .is_none()
+        .then(|| BUILD_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
     let _flock = BuildDirLock::acquire(&project_dir)?;
 
     // Re-check the cache under the lock: another process/thread may have built
@@ -344,9 +348,11 @@ pub fn run_binary_captured_io(bin: &std::path::Path, program_args: &[String]) ->
     )
 }
 
-/// Compile + run one file, with the D5 dual-time report leg (`--time-report`).
-fn cmd_run_inner_report(file: &str, program_args: &[String], no_check: bool, test_mode: bool, release: bool, native_verified: bool, time_report: bool) -> i32 {
-    match compile_to_binary_with(file, no_check, test_mode, release, None, native_verified) {
+/// `almide run`'s native leg: compile + run one file, with the D5 dual-time
+/// report leg (`--time-report`).
+fn cmd_run_native(args: &RunArgs) -> i32 {
+    let RunArgs { file, program_args, no_check, release, native_verified, time_report, .. } = *args;
+    match compile_to_binary_with(file, no_check, false, release, None, native_verified) {
         Ok(bin) => {
             if time_report {
                 let mut cmd = Command::new(&bin);
@@ -414,6 +420,7 @@ fn run_with_time_report(mut cmd: Command) -> i32 {
 /// Flags for [`cmd_run`] — bundled into one struct (was 7 positional
 /// params, a max-params violation) so the function signature stays under
 /// the params threshold. Field names match `dispatch_run`'s locals 1:1.
+#[derive(Clone, Copy)]
 pub struct RunArgs<'a> {
     pub file: &'a str,
     pub program_args: &'a [String],
@@ -428,10 +435,10 @@ pub struct RunArgs<'a> {
 }
 
 pub fn cmd_run(args: RunArgs) {
-    let RunArgs { file, program_args, no_check, release, target, verified, native_verified, time_report } = args;
+    let RunArgs { file, program_args, target, verified, time_report, .. } = args;
     let code = match target {
         // Default and explicit native target: the cargo/rustc path.
-        None | Some("rust") | Some("native") => cmd_run_inner_report(file, program_args, no_check, false, release, native_verified, time_report),
+        None | Some("rust") | Some("native") => cmd_run_native(&args),
         // WASM target: build the same module `almide build --target wasm`
         // emits, then execute it on the `wasmtime` CLI. Both targets must
         // produce byte-identical stdout/stderr/exit — the cross-target gate.
