@@ -1,0 +1,12 @@
+// E096: a fn with a `mut` parameter handed to a higher-order fn (#3456).
+// `list.map` would call it with each element as a plain value, so the write
+// through `mut` had nowhere to land. Name the `var` in a lambda instead.
+fn grow(mut xs: List[Int]) -> Unit = {
+  list.push(xs, 0)
+}
+
+effect fn main() -> Unit = {
+  let groups = [[1], [2, 3]]
+  let _ = list.map(groups, grow)
+  println("done")
+}
