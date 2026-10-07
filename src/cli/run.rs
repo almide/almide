@@ -124,7 +124,7 @@ pub(crate) fn build_native_cached(
     // SAME value is what the build writes (#887, #3091). Keyed by anything
     // narrower, editing an input the key did not see was a cache hit that
     // shipped the previous binary with exit 0.
-    let inputs = super::cargo_build::CrateInputs::collect(source_root)?;
+    let inputs = super::crate_inputs::CrateInputs::collect(source_root)?;
     inputs.warn_legacy_callbacks(rs_code);
     let native_key = inputs.cache_key();
     // The target triple (#2772) is part of the identity too: a musl build of
@@ -133,7 +133,7 @@ pub(crate) fn build_native_cached(
     let triple = super::native_target::cross_target().unwrap_or_default();
     // And what shapes the binary from OUTSIDE the crate (#3091): the build
     // recipe, the toolchain, the flags and cargo config it reads.
-    let env_key = super::cargo_build::build_environment_key(&project_dir);
+    let env_key = super::crate_inputs::build_environment_key(&project_dir);
     let hash_input = format!(
         "{}:test={}:release={}:deps={}:root={:?}:native={}:target={}:env={}",
         &rs_code, use_test_harness, release, dep_key, source_root, native_key, triple, env_key
@@ -187,7 +187,7 @@ pub(crate) fn build_native_cached(
 
     // One rustc ICE on a stale incremental session clears the session store
     // (under this same lock) and rebuilds once; see `build_recovering_from_ice`.
-    let result = super::cargo_build::build_recovering_from_ice(&project_dir, || {
+    let result = super::cargo_ice::build_recovering_from_ice(&project_dir, || {
         if use_test_harness {
             cargo_build_test_with_native(rs_code, &project_dir, native_deps, source_root, &inputs)
         } else {

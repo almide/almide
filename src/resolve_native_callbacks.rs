@@ -7,7 +7,7 @@
 //! `crate::almide_rt_tf_0v0_1calc_double`. Built as a dependency, the package's modules are loaded under
 //! that versioned name and the shim links. Built as ITSELF (its own tests, its
 //! own `almide run`), the `native/` tree is copied into the crate all the same
-//! (`cli::cargo_build::CrateInputs`), but the root module was loaded only when
+//! (`cli::crate_inputs::CrateInputs`), but the root module was loaded only when
 //! the entry file imported it, and every `self` module lowered unversioned
 //! (`almide_rt_tf_entry`) — so the shim failed rustc with E0425 on a name
 //! that did not exist.

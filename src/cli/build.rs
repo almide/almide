@@ -151,7 +151,7 @@ fn cmd_build_cdylib(rs_code: &str, crate_name: &str, dest: &std::path::Path, use
         .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
     // Same stale-incremental-session recovery as the bin path (#2500), under
     // the lock just taken.
-    let built = super::cargo_build::build_recovering_from_ice(&project_dir, || {
+    let built = super::cargo_ice::build_recovering_from_ice(&project_dir, || {
         super::cargo_build_cdylib(&lib_code, &project_dir, crate_name, use_release, native_deps, source_root)
     });
     match built {
