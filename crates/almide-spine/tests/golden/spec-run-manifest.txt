@@ -1,4 +1,4 @@
-# oracle: almide 0.67.0 (dev) at c30e2f62a — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.67.0 (dev) at 0a3372574 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 e7ca497fb6b8ff37759ab9e18d5b01e63a642a85baeb5f63fabfa2a82480aa00	0	spec/wasm_cross/accum_recursion_declined.almd
 c04cb55e5ddf0c74b5410feb45743dba9a0405ee40b330b099a13389b94c12b9	0	spec/wasm_cross/accum_recursion_int.almd
 f0709d9573472655341ac75bd847b3f30d2bddc3a201554bfd5cc22c21446902	0	spec/wasm_cross/adr0005_operator_equivalence.almd
@@ -399,6 +399,7 @@ a9f082abeddfc3ec57866ef608067bdca35353e6bca10973de04c534f17f78e6	0	spec/wasm_cro
 d117fa006ba9208500b2930ce69cbde436c647afa917cb7396a9bc9111a46dd2	0	spec/wasm_cross/let_wildcard_discard.almd
 78a991822f71959f9bf43638dd500b771378241faed41b78a60768561fae9e5a	0	spec/wasm_cross/letbound_variant_match.almd
 a24b6fb202b938d2fa9cb00af23bdc98477d0fdb419d9793b0b65e50804fafea	0	spec/wasm_cross/letbound_variant_match_heap_payload.almd
+fa364108f9d6bd0f6cabf8a8369e00d3d026b54c0e35e1ead34e2a61b3eb2f90	0	spec/wasm_cross/licm_mut_param_named_call.almd
 65f7a794d1df1ab3701348a40903f9319b7f73b36f8fad7fb985be15660819c9	0	spec/wasm_cross/licm_zero_trip_hoist.almd
 dae8f1d1fcb2a995e9115ca33bcb52422df7049d56dc330701c4cfac96d9c8f2	0	spec/wasm_cross/line_endings_bare_cr.almd
 6177639f1a3b6322ced0f1593c33481466cbeb9c3510417cf3c5cda40ecc4de7	0	spec/wasm_cross/list_arg_map_view.almd

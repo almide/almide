@@ -47,6 +47,7 @@ spec/integration/generic_protocol_ports/src/main.almd
 spec/integration/generics/generics_recursive_test.almd
 spec/integration/global_static_names/src/main.almd
 spec/integration/imported_recursive_variant/src/main.almd
+spec/integration/licm_module_mut_call/src/main.almd
 spec/integration/module_fallible_lambda_callee/src/main.almd
 spec/integration/module_path_identity/src/main.almd
 spec/integration/modules/cross_module_unit_effect_test.almd
@@ -496,6 +497,7 @@ spec/wasm_cross/let_unwrap_propagation.almd
 spec/wasm_cross/let_wildcard_discard.almd
 spec/wasm_cross/letbound_variant_match.almd
 spec/wasm_cross/letbound_variant_match_heap_payload.almd
+spec/wasm_cross/licm_mut_param_named_call.almd
 spec/wasm_cross/licm_zero_trip_hoist.almd
 spec/wasm_cross/list_arg_map_view.almd
 spec/wasm_cross/list_call_element.almd

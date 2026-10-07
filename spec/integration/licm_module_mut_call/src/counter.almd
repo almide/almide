@@ -1,0 +1,16 @@
+type St = { count: Int }
+
+fn bump(mut s: St) -> Unit = {
+  s.count = s.count + 1
+}
+
+fn run() -> String = {
+  var s = St { count: 0 }
+  var seen: List[Int] = []
+  for _k in [1, 2, 3] {
+    bump(s)
+    let c = s.count
+    seen = seen + [c]
+  }
+  seen |> list.map((x) => int.to_string(x)) |> list.join(",")
+}

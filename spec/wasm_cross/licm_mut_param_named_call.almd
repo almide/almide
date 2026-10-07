@@ -5,10 +5,14 @@
 // (`st.bump(s)`), so a bare `bump(s)` let `s.count` be hoisted above the loop
 // and every iteration read the value from before the loop: native printed
 // `0,0,0` where wasm printed `1,2,3`. Each shape below reads, inside the loop,
-// a value the loop's own call writes through a `mut` parameter.
+// a value the loop's own call writes through a `mut` parameter: the call bare,
+// bound by a `let`, forwarded through two fns, on a field path, in UFCS and
+// type-method form, and in a `while` condition (re-run every iteration).
 type St = { count: Int }
 
 type Wrap = { inner: St, tag: Int }
+
+type Outer = { wrap: Wrap }
 
 fn bump(mut s: St) -> Unit = {
   s.count = s.count + 1
@@ -16,6 +20,10 @@ fn bump(mut s: St) -> Unit = {
 
 effect fn bump_checked(mut s: St) -> Unit = {
   s.count = s.count + int.parse("1")!
+}
+
+fn St.inc(mut self) -> Unit = {
+  self.count = self.count + 1
 }
 
 fn bump_get(mut s: St) -> Int = {
@@ -144,6 +152,56 @@ fn mut_list() -> String = {
   show(seen)
 }
 
+fn ufcs() -> String = {
+  var s = St { count: 0 }
+  var seen: List[Int] = []
+  for _k in [1, 2, 3] {
+    s.bump()
+    let c = s.count
+    seen = seen + [c]
+  }
+  show(seen)
+}
+
+fn type_method() -> String = {
+  var s = St { count: 0 }
+  var seen: List[Int] = []
+  for _k in [1, 2, 3] {
+    s.inc()
+    St.inc(s)
+    let c = s.count
+    seen = seen + [c]
+  }
+  show(seen)
+}
+
+fn while_cond() -> String = {
+  var s = St { count: 0 }
+  var seen: List[Int] = []
+  while bump_get(s) < 4 {
+    let c = s.count * 10
+    seen = seen + [c]
+  }
+  show(seen)
+}
+
+// A heap-typed branch bound inside a loop is outlined into a helper fn; a
+// `mut` argument two fields deep (`o.wrap.inner`) must keep it in place, or
+// the helper takes `o` by value and the write is lost.
+fn deep_path_in_branch() -> String = {
+  var o = Outer { wrap: Wrap { inner: St { count: 0 }, tag: 1 } }
+  var labels: List[String] = []
+  for k in [1, 2, 3] {
+    let label: String = if k > 1 then {
+      bump(o.wrap.inner)
+      "hit"
+    } else "miss"
+    labels = labels + [label]
+  }
+  let joined = labels |> list.join(",")
+  "${joined}:${o.wrap.inner.count}"
+}
+
 effect fn main() -> Unit = {
   println("for-in: ${for_in()}")
   println("while: ${while_loop()}")
@@ -154,4 +212,8 @@ effect fn main() -> Unit = {
   println("two-levels: ${two_levels()}")
   println("field-path: ${field_path()}")
   println("mut-list: ${mut_list()}")
+  println("ufcs: ${ufcs()}")
+  println("type-method: ${type_method()}")
+  println("while-cond: ${while_cond()}")
+  println("deep-path-in-branch: ${deep_path_in_branch()}")
 }

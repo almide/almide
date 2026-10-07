@@ -1,0 +1,12 @@
+// @contract: C-226
+// almide#3452, the module half: inside a module, a bare call to a sibling fn
+// (`bump(s)` beside `fn bump(mut s)` in counter.almd) writes `s` as much as a
+// root-program call does. Native LICM resolved a bare call only against the
+// root program's fns, so in a module fn `s.count` was hoisted above the loop
+// and native printed `0,0,0` where wasm printed `1,2,3`. The root-program
+// shapes are spec/wasm_cross/licm_mut_param_named_call.almd.
+import self.counter
+
+effect fn main() -> Unit = {
+  println("module: ${counter.run()}")
+}

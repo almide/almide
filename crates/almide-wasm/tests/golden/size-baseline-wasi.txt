@@ -398,6 +398,7 @@
 1486	spec/wasm_cross/let_wildcard_discard.almd
 2139	spec/wasm_cross/letbound_variant_match.almd
 5256	spec/wasm_cross/letbound_variant_match_heap_payload.almd
+11979	spec/wasm_cross/licm_mut_param_named_call.almd
 2301	spec/wasm_cross/licm_zero_trip_hoist.almd
 13971	spec/wasm_cross/line_endings_bare_cr.almd
 15568	spec/wasm_cross/list_arg_map_view.almd
