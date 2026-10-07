@@ -33,6 +33,15 @@ err() { echo "::error::$1"; fail=1; }
 [ -f "$LEDGER" ] || { err "$LEDGER missing"; exit 1; }
 [ -f "$CONST_FILE" ] || { err "$CONST_FILE missing"; exit 1; }
 
+# Assertion 1 is a real TOML parse, not only the awk walk below: the walk
+# reads `[[epoch]]` blocks line by line and skipped a stray `=======` merge
+# marker that left the ledger unparseable (and epoch 11 after the
+# deprecations) on develop for a day.
+if ! parse_err=$(python3 -c 'import sys, tomllib; tomllib.load(open(sys.argv[1], "rb"))' "$LEDGER" 2>&1); then
+  err "$LEDGER is not valid TOML: ${parse_err##*$'\n'}"
+  exit 1
+fi
+
 max_epoch=$(awk '
   /^\[\[epoch\]\]/ { in_block = 1; n = ""; breaks_open = 0; breaks_items = 0; count++ ; next }
   /^\[\[/ { in_block = 0; next }
