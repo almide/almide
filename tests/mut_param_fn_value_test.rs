@@ -133,3 +133,58 @@ fn calls_and_lambdas_that_name_the_var_still_check() {
   let ys = [1, 2] |> list.map((n) => { s.add(n); n })\n  println(\"${int.to_string(s.count)} ${int.to_string(list.len(xs) + list.len(ys))}\")\n}\n");
     assert!(ok, "the call forms must check, got:\n{text}");
 }
+
+/// The lambda a slot-shaped E096 hint suggests, if it suggests one.
+fn suggested_lambda(text: &str) -> Option<String> {
+    let start = text.find("copies into a local `var`: `")? + "copies into a local `var`: `".len();
+    let len = text[start..].find("`.")?;
+    Some(text[start..start + len].to_string())
+}
+
+/// #3469: a fn reference filling a fn-typed call slot gets a lambda of the
+/// SLOT's arity, over names the lambda binds itself — and putting that lambda
+/// where the reference stood checks. `@F@` marks the reference.
+fn assert_slot_hint_applies(cell: &str, program: &str, fn_ref: &str, want: &str) {
+    let (ok, text) = check_main(&program.replace("@F@", fn_ref));
+    assert!(!ok && text.contains("error[E096]"), "{cell}: expected E096, got:\n{text}");
+    let lambda = suggested_lambda(&text).unwrap_or_else(|| panic!("{cell}: no slot lambda in the hint:\n{text}"));
+    assert_eq!(lambda, want, "{cell}: the suggested lambda");
+    let (ok, fixed) = check_main(&program.replace("@F@", &lambda));
+    assert!(ok, "{cell}: the suggested `{lambda}` does not check:\n{fixed}");
+}
+
+const GROW: &str = "fn grow(mut xs: List[Int]) -> Unit = list.push(xs, 0)\n";
+
+#[test]
+fn a_unit_fn_in_a_map_slot_suggests_a_lambda_returning_the_copy() {
+    let program = format!("{GROW}effect fn main() -> Unit = {{\n  let groups = [[1], [2, 3]]\n  let out = list.map(groups, @F@)\n  println(\"${{out}}\")\n}}\n");
+    assert_slot_hint_applies("map slot", &program, "grow", "(item) => { var copy = item; grow(copy); copy }");
+}
+
+#[test]
+fn a_value_fn_in_a_piped_map_slot_returns_its_own_result() {
+    let program = "effect fn main() -> Unit = println(\"${[1, 2] |> list.map(@F@)}\")\n";
+    assert_slot_hint_applies("pipe slot", program, "show", "(item) => { var copy = item; show(copy) }");
+}
+
+#[test]
+fn a_unit_slot_gets_no_tail() {
+    let program = "fn apply(f: (St) -> Unit, s: St) -> Unit = f(s)\n\
+effect fn main() -> Unit = {\n  let s = St { count: 0 }\n  apply(@F@, s)\n  println(int.to_string(s.count))\n}\n";
+    assert_slot_hint_applies("user hof slot", program, "bump", "(item) => { var copy = item; bump(copy) }");
+}
+
+#[test]
+fn a_stdlib_member_in_a_two_arg_slot_gets_a_two_arg_lambda_without_the_drop_mut_advice() {
+    let program = "effect fn main() -> Unit = {\n  let init: List[Int] = []\n  let xs = list.fold([1, 2], init, @F@)\n  println(\"${xs}\")\n}\n";
+    assert_slot_hint_applies("stdlib member slot", program, "list.push", "(a1, a2) => { var copy = a1; list.push(copy, a2); copy }");
+    let (_, text) = check_main(&program.replace("@F@", "list.push"));
+    assert!(!text.contains("drop `mut`"), "stdlib member slot: a stdlib fn's `mut` cannot be dropped:\n{text}");
+}
+
+#[test]
+fn a_user_fn_in_a_slot_also_gets_the_drop_mut_advice() {
+    let (_, text) = check_main(&format!("{GROW}effect fn main() -> Unit = println(\"${{list.map([[1]], grow)}}\")\n"));
+    assert!(text.contains("drop `mut` from 'xs' and return the new value"), "{text}");
+    assert!(!text.contains("() => grow(xs)"), "the let-shape lambda must not appear in a slot:\n{text}");
+}
