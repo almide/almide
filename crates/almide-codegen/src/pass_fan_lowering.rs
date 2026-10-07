@@ -163,9 +163,10 @@ fn rewrite_expr(expr: IrExpr, inside_fan: bool) -> IrExpr {
     let kind = match expr.kind {
         // Fan block: mark children as inside_fan, strip top-level Try from each expr
         IrExprKind::Fan { exprs } => IrExprKind::Fan {
-            exprs: exprs.into_iter().map(|e| match peel_arm_thunk(strip_try_top(e)) {
-                Ok(body) => rewrite_expr(body, false),
-                Err(e) => strip_try_top(rewrite_expr(e, true)),
+            exprs: exprs.into_iter().map(|e| {
+                let e = strip_try_top(e);
+                if is_arm_thunk(&e) { rewrite_expr(peel_arm_thunk(e), false) }
+                else { strip_try_top(rewrite_expr(e, true)) }
             }).collect(),
         },
 
@@ -258,11 +259,15 @@ fn rewrite_target(target: CallTarget, inside_fan: bool) -> CallTarget {
 /// closure already IS a zero-arg closure, so the body's `?` ends the arm with
 /// its Err and the join's `?` reports the lowest-index one (C-199). Its
 /// markers stay — they are the arm's propagation, not the join's auto-try.
-fn peel_arm_thunk(arm: IrExpr) -> Result<IrExpr, IrExpr> {
+fn is_arm_thunk(arm: &IrExpr) -> bool {
+    matches!(&arm.kind, IrExprKind::Call { target: CallTarget::Computed { callee }, args, .. }
+        if args.is_empty() && thunk_body(callee).is_some())
+}
+
+fn peel_arm_thunk(arm: IrExpr) -> IrExpr {
     match arm.kind {
-        IrExprKind::Call { target: CallTarget::Computed { callee }, args, .. }
-            if args.is_empty() && thunk_body(&callee).is_some() => Ok(peel_thunk(*callee)),
-        kind => Err(IrExpr { kind, ..arm }),
+        IrExprKind::Call { target: CallTarget::Computed { callee }, .. } => peel_thunk(*callee),
+        kind => IrExpr { kind, ..arm },
     }
 }
 
