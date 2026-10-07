@@ -179,7 +179,14 @@ Builds compared: 0.62.0, 0.66.0 (release 819bbc74f) and develop 974c00ea0.
   - **Side effect:** a one-time native cache miss, because the split cargo_build files now join the hashed build recipe.
 - **`tests/`: B 82, unchanged.** The weighted base is 97.4, but the issue-density penalty is at its cap of 15 with 2010 issues.
   - 1536 of those issues are `no-unwrap` in integration test files, which codopsy does not recognise as test code: it exempts only a module named `tests`.
-  - The way to A is to rewrite about 1500 test unwraps, which would be churn to satisfy the metric, or to have codopsy treat `tests/*.rs` and `#[test]` fns as test code.
-  - The latter changes the evaluation method, so it is left to the owner.
+  - **Correction (2026-10-07, measured):** removing the unwraps alone does not reach A, because the density penalty stays capped once total issues exceed about 330.
+    - Measured on a copy of develop's `tests/` with variants of the repo rc: as is **B 82**; `no-unwrap` off **B 85**; `no-unwrap` and `no-println` off **A 90**, exactly at the boundary.
+    - So rewriting about 1500 unwraps (to `expect`, which codopsy does not match) tops out near 85.
+  - **Prior art** (almide-references):
+    - clippy's `is_in_test` is a `#[test]` fn or a `#[cfg(test)]` item, never a path (`clippy_utils/src/lib.rs`).
+    - Its `allow-unwrap-in-tests` and `allow-print-in-tests` are opt-in and default to false.
+    - Gleam and wasmi lint non-test targets only.
+    - codopsy's own CI scores `./src` only.
+    - Recognising `#[test]`/`#[cfg(test)]` in codopsy would correct a misclassification. Exempting `tests/` by path, or exempting println, goes beyond clippy and changes the criterion. Both are the owner's call.
 - **crates/almide-edit-belt: B 88** (a Lean 4 project). Not started.
 
