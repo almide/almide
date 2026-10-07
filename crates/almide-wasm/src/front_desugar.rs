@@ -24,6 +24,19 @@
 //! `matrix.sub`, and `m * k` / `k * m` → `matrix.scale(m, k)` with the
 //! Matrix first (an Int `k` is converted, as native's `as f64`). The
 //! incumbent makes the same rewrite (almide-mir `matrix_binop_rewrite`).
+//!
+//! 4. A `fan { … }` arm whose top-level node is a `!` (the writer's, or the
+//! one auto-try puts on a Result call arm of a tail or `let` fan) over a
+//! `Result[_, String]` is that arm's own marker, not an exit from the frame
+//! (C-199 / ADR-0024 D1, #3463): the arm IS its Result, and the block joins
+//! every arm, the lowest-index Err being the block's — the reading native's
+//! FanLowering takes (it strips the marker and joins). Lowered as a `!`, an
+//! early arm's Err left the frame (or aborted `main`) before a later arm ran.
+//!
+//!   fan { f(x)!, g(y) }   =>   fan { f(x), g(y) }
+//!
+//! A `!` over an Option, or over a typed error the String channel converts
+//! (ADR-0021 D2), has no Result-of-String arm to become and stays.
 
 use almide_base::intern::sym;
 use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
@@ -67,6 +80,7 @@ impl IrMutVisitor for Rewriter<'_> {
         self.optional_chain(e);
         self.map_loop(e);
         self.matrix_op(e);
+        self.fan_arm_markers(e);
     }
 }
 
@@ -82,7 +96,24 @@ fn module_call(module: &str, func: &str, args: Vec<IrExpr>) -> IrExprKind {
     }
 }
 
+/// Is `t` a `Result[_, String]` — the fan block's arm channel?
+fn is_string_result(t: &Ty) -> bool {
+    matches!(t, Ty::Applied(TypeConstructorId::Result, args) if matches!(args.as_slice(), [_, Ty::String]))
+}
+
 impl Rewriter<'_> {
+    fn fan_arm_markers(&mut self, e: &mut IrExpr) {
+        let IrExprKind::Fan { exprs } = &mut e.kind else { return };
+        for arm in exprs.iter_mut() {
+            if let IrExprKind::Try { expr } | IrExprKind::Unwrap { expr } = &mut arm.kind
+                && is_string_result(&expr.ty)
+            {
+                *arm = std::mem::take(&mut **expr);
+                *self.changed = true;
+            }
+        }
+    }
+
     fn matrix_op(&mut self, e: &mut IrExpr) {
         use almide_ir::BinOp as B;
         let IrExprKind::BinOp { op, left, right } = &mut e.kind else { return };
