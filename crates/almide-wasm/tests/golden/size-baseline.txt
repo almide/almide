@@ -559,6 +559,7 @@
 2528	spec/wasm_cross/mut_param_effect_never_err.almd
 5580	spec/wasm_cross/mut_param_effect_unpropagated.almd
 10305	spec/wasm_cross/mut_param_err_write_visible.almd
+4042	spec/wasm_cross/mut_param_fn_value_alternatives.almd
 4827	spec/wasm_cross/mut_param_global_callee_sees_precall.almd
 3084	spec/wasm_cross/mut_param_global_no_reach_in_place.almd
 9506	spec/wasm_cross/mut_param_interpolated.almd
