@@ -21,7 +21,7 @@ pub use almide::{
 // `cli/*.rs` call these via `crate::<name>` — re-exported here (private,
 // visible to descendants of the crate root) so those call sites don't need
 // to change after the `compile_driver` split.
-use compile_driver::{parse_file, try_compile, register_versioned_module_names, lower_one_user_module, try_compile_with_ir};
+use compile_driver::{parse_file, try_compile, register_versioned_module_names, try_compile_with_ir};
 
 use std::process::Command;
 
