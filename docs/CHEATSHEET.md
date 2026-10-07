@@ -173,6 +173,9 @@ in-place stdlib op works (`list.push`, `list.pop`, `list.clear`, `map.insert`,
 parameter, so a local buffer is a `var` and a helper that writes its caller's
 buffer declares `mut b: Bytes`. Value semantics otherwise: `let c = a` copies,
 and a callee cannot reach its caller's binding through a plain parameter.
+A fn with a `mut` parameter is called, never used as a value: `let f = incr`
+or `list.map(xs, incr)` is E096, since a function type cannot carry the
+write-back. Pass a lambda that names the `var` instead (`() => incr(n)`).
 
 ## Effects, failure and `!`
 
