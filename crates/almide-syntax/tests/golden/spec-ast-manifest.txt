@@ -1,4 +1,4 @@
-# oracle: almide 0.67.0 (dev) at 87c706d48 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.67.0 (dev) at f6d17a9cb — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 9e174e6cc9ab173d59b961cc661eb5ad49ebf240e8099edca409c3a40db9f4d4	spec/churn/closure_env_churn.almd
 2b1c42676caca20af04e182941d53484f93c88e08fb03a09efc07e94ec37f895	spec/churn/construct_from_temp_churn.almd
 5d02cd41ef410020f099769da494465fd8141da0fd1068072ee3e94df9d143d3	spec/churn/enumerate_rich_churn.almd
@@ -957,6 +957,7 @@ c185ff2e30070b0f87ef1a3f1bf1adfd9224afd0c875e3fc1bf3ae3c92ef0756	spec/wasm_cross
 14e56d60125dc573851d7e8e7b8495119a40ee59cd1bebddb8ad9425de2b788d	spec/wasm_cross/fan_any_early_winner.almd
 3fcb492696ce9e90b08236a5d982830e6638384f8086a678b64b50d03ba4997a	spec/wasm_cross/fan_arm_unwrap_or.almd
 a447ebeb9b3aa32fb6bf0f76855f36456f41de806e5c8b26ce51460185acbd53	spec/wasm_cross/fan_block_err_list_order.almd
+c3b5ac01e79bcd816c8e70a241890a2f4be36c771395b93118cab35d3cce6f55	spec/wasm_cross/fan_block_rc_closure_capture.almd
 2d3529e97d6502a83d64828e2d745e1593c61833b3c7a886470c0db69a84c156	spec/wasm_cross/fan_deterministic.almd
 b3665b340f097abf85dd0d1b87289d685a21cd87d1e140cdf1bac91972ee7d76	spec/wasm_cross/fan_effect_mapper.almd
 82598484d95837b71232dd1729cdc60ed62703ea83413b8418071b8b3ebc5074	spec/wasm_cross/fan_effect_mapper_capability.almd
