@@ -138,13 +138,15 @@ fn a_callable_the_callee_only_calls_certifies_borrowed() {
 /// DIFFERENT value each time and there is no second move of one value. Both
 /// the capture-move rule and the certifier's C3 previously tested a bare
 /// `in_loop` and so cloned (and could not report) exactly this shape: #2316.
+/// The closure is stored (`[f]`), so it is a closure VALUE with a capture
+/// bind — a closure only called would be a scope that captures nothing (#3455).
 const LOOP_FRESH_CAPTURE: &str = r#"fn main() -> Unit = {
   var sink = 0
   var i = 0
   while i < 3 {
     let s = "cap" + int.to_string(i)
     let f = (x) => string.len(s) + x
-    sink = sink + f(1)
+    sink = sink + list.fold([f], 0, (a, g) => a + g(1))
     i = i + 1
   }
   println(int.to_string(sink))

@@ -424,6 +424,18 @@ ownership certifier's C5 re-reads the verdict on the final IR (a `&dyn Fn`
 param that escapes; a boxed closure at a borrowed slot), and
 `ALMIDE_FN_ESCAPE_OFF=1` is its negative control.
 
+A `let`-bound closure with the same lifetime is a scope too (#3455). When
+every occurrence of its binder is one that rule lets through (called,
+borrowed, lent to a `&dyn Fn` slot — never returned, stored, captured by an
+outliving closure or used in a `fan` arm), and every variable it captures is
+never written, no `var`, and — for a heap value — never consumed anywhere in
+the fn, the bind is the non-`move` `let f = &|i: i64| …`: its reads are
+borrows, the params it reads stay `&T`, and no caller clones its argument to
+make the call. The verdict is the greatest fixed point inside each borrow
+round, spelled `Borrow { Lambda }` once final, so `CaptureClone` adds no
+`__cap_*` bind; a TCO-bound fn is left out. `ALMIDE_SCOPED_CLOSURE_OFF=1`
+restores the owned capture.
+
 Handing the param bare to a callee's owned slot (`stored(t, 1)` where `stored`
 keeps `t` in a record) makes the param owned only when that site is the
 param's LAST use: ownership then buys a move, and a caller that still needs

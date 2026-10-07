@@ -1094,6 +1094,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_REGION_TRAP_STALE` | trap | arm the native region prelude's stale-reference trap (#2200) |
 | `ALMIDE_REPO=value` | ci | the repository slug a release script targets |
 | `ALMIDE_RUN_PROJECT_DIR=value` | tool | the scratch dir `almide run` / `almide build` compile native binaries in, instead of `<temp>/almide-run` (the content-keyed binary cache, its cargo target, its rustc incremental sessions); `almide clean` empties it |
+| `ALMIDE_SCOPED_CLOSURE_OFF` | ablation | make BorrowInsertion treat every `let`-bound closure as a closure value, never as a non-escaping scope (#3455) — its captures are owned again, as before the scope rule |
 | `ALMIDE_SEMLAW_CASES=value` | harness | how many cases the semantic-laws property test draws |
 | `ALMIDE_SHUFFLE_PASSES=value` | gate | run the native passes in the seeded random order the declared dependency edges permit — a pass-dependency probe: the emitted Rust must not change (#2186) |
 | `ALMIDE_SIZE_ALONE=value` | harness | the one fixture a child process of the size ratchet measures alone, for its isolation check (#2309); the ratchet sets it on the processes it spawns |
