@@ -1,4 +1,4 @@
-# oracle: almide 0.67.0 (dev) at 5fa370959 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.67.0 (dev) at d561cb669 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 9e174e6cc9ab173d59b961cc661eb5ad49ebf240e8099edca409c3a40db9f4d4	spec/churn/closure_env_churn.almd
 2b1c42676caca20af04e182941d53484f93c88e08fb03a09efc07e94ec37f895	spec/churn/construct_from_temp_churn.almd
 5d02cd41ef410020f099769da494465fd8141da0fd1068072ee3e94df9d143d3	spec/churn/enumerate_rich_churn.almd
@@ -899,6 +899,7 @@ c375db8494b9a214b9320e87f7fbcdf84a8db1a0474fc6d28fda393b7ea6c22f	spec/wasm_cross
 9eb161bf2574cd15c24242e987e254a2590a5bb22f36423dae34714dbc44e7a2	spec/wasm_cross/declaration_forms.almd
 1140347f4261d1597518001278a65c96cd5d26a3b5efd02c8038c4c8304e6e8b	spec/wasm_cross/declaration_literal_domain.almd
 ff9054bfd89ab0e8ac7db89a2d90d03fae5704b875eafc3e795bfddca5d29406	spec/wasm_cross/deep_eq_heap.almd
+e7edab54a40b08327ce8949eca51e5fb39b5e387a76eb642d41a55225480cf24	spec/wasm_cross/deep_eq_nested_distinct.almd
 e534f623b0db5e0504cbb8a287ba746d11015b77f045f45359a3881b887a2075	spec/wasm_cross/default_param_ref.almd
 3c7dc7cbbe7811124b13d7b94882d332650abe75d32d9196de6e9780bafc3773	spec/wasm_cross/destructure_let_unwrap.almd
 a0e0ad208bd57530bbbc5ebad78e57ce1ea0f19880b8c6748988c93b92d1b36c	spec/wasm_cross/destructure_owned_tuple_release.almd
