@@ -575,6 +575,7 @@ call:option.map
 call:option.or_else
 call:option.to_list
 call:option.to_result__Int_LoadError
+call:option.to_result__Int_String
 call:option.to_result__Result_Int_String_String
 call:option.unwrap_or
 call:option.unwrap_or_else
