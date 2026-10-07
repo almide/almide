@@ -542,6 +542,13 @@ template = "{{ almide_stdout_flush(); let __almide_fan_go = almide_fan_group({co
 [fan_single]
 template = "{{ almide_stdout_flush(); {body} }}"
 
+# #3459: an arm that captures an Rc-backed value (a closure, a Bytes) cannot
+# be spawned. The arms run inline in arm order, each as its spawn closure
+# called in place, and every arm runs before the first join: the sequential
+# evaluation the threaded form reproduces. `join_expr` carries `?` / `.unwrap()`.
+[fan_inline]
+template = "{{ almide_stdout_flush(); {arms} {join_expr} }}"
+
 [loop_block]
 template = "loop {{\n{body}\n}}"
 

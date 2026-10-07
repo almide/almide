@@ -551,12 +551,14 @@ fn render_expr_rc_wrap(ctx: &RenderContext, inner: &IrExpr, cast_ty: &Option<Box
         render_expr(ctx, inner)
     };
     match wrap {
-        // fan.race/any/settle thunk: `Box<dyn Fn + Send + Sync>` is itself
+        // fan.race/settle thunk: `Box<dyn Fn + Send + Sync>` is itself
         // `Fn + Send + Sync`, so heterogeneous capturing thunks unify in the
-        // runtime's `Vec<impl Fn() -> _ + Send + Sync>` (fixes E0308).
-        almide_ir::FnBox::BoxSendSync => {
+        // runtime's `Vec<impl Fn() -> _ + Send + Sync>` (fixes E0308). A
+        // fan.any thunk is a plain `Box<dyn Fn>`: its runtime is sequential.
+        almide_ir::FnBox::BoxSendSync | almide_ir::FnBox::Box => {
             let ty = cast_ty.as_deref().expect("fan thunk RcWrap always carries a Fn cast_ty");
-            let box_type = super::helpers::render_type_box_fn(ctx, ty, "Send + Sync");
+            let bounds = if wrap == almide_ir::FnBox::Box { "'static" } else { "Send + Sync" };
+            let box_type = super::helpers::render_type_box_fn(ctx, ty, bounds);
             format!("(std::boxed::Box::new({}) as {})", s, box_type)
         }
         almide_ir::FnBox::Rc => {
@@ -766,7 +768,7 @@ fn render_expr_wrappers(ctx: &RenderContext, expr: &IrExpr) -> String {
         }
 
         // ── Fan (concurrency) — fully template-driven ──
-        IrExprKind::Fan { exprs } => render_fan(ctx, exprs),
+        IrExprKind::Fan { exprs } => render_fan(ctx, expr.span, exprs),
 
         // ── Iterator chain (Rust-only) ──
         IrExprKind::IterChain { source, consume, steps, collector } => {

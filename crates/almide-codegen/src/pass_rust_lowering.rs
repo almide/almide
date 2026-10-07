@@ -493,10 +493,11 @@ fn try_box_closure_literal(expr: &mut IrExpr) -> Option<bool> {
 /// capture-clone `{ …; <lambda> }` block carries it in its tail); a bare
 /// Lambda / FnRef is still accepted. Re-tag per fan API (fan is still a
 /// `Module{fan}` / `RuntimeCall{fan}` call here — FanLowering runs later):
-///   race/any/settle → `Box<dyn Fn + Send + Sync>`: distinct CAPTURING thunks
+///   race/settle → `Box<dyn Fn + Send + Sync>`: distinct CAPTURING thunks
 ///     cannot share one `impl Fn` type (E0308), but `Box<dyn Fn + Send + Sync>`
 ///     is itself `Fn + Send + Sync`, so they unify as one element type AND
 ///     satisfy the runtime's `Vec<impl Fn() -> _ + Send + Sync>` thunk bound.
+///   any → plain `Box<dyn Fn>`: its runtime is sequential and unbounded.
 ///   map → `Rc<dyn Fn>`: the runtime runs it SEQUENTIALLY over an `Rc<dyn Fn>`,
 ///     which also accepts a closure VALUE in a var — a `Send + Sync` box can't,
 ///     since the uniform repr of a stored closure is `Rc` (neither Send nor Sync).
@@ -512,8 +513,14 @@ fn try_box_fan_thunks(expr: &mut IrExpr) -> Option<bool> {
         _ => return Some(false),
     };
     Some(match method.as_str() {
-        "race" | "any" | "settle" => args.first_mut()
+        "race" | "settle" => args.first_mut()
             .map(|a| box_fan_thunk_list(a, FnBox::BoxSendSync))
+            .unwrap_or(false),
+        // `almide_rt_fan_any` runs its thunks in list order on the calling
+        // thread (`Vec<impl Fn>`, no Send bound): a plain box unifies them
+        // and accepts a capture that is not Send (#3459).
+        "any" => args.first_mut()
+            .map(|a| box_fan_thunk_list(a, FnBox::Box))
             .unwrap_or(false),
         // The T2-3 mapper forms ride the same sequential Rc<dyn Fn> mode as
         // fan.map (arg 1 is the item mapper, arg 0 the plain item list).

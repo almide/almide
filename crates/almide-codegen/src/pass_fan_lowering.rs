@@ -79,6 +79,79 @@ fn unit_placeholder() -> IrExpr {
     IrExpr { kind: IrExprKind::Unit, ty: almide_lang::types::Ty::Unit, span: None, def_id: None }
 }
 
+/// #3459: publish the `fan { … }` blocks whose arms must run inline
+/// (`CodegenAnnotations::inline_fans`). An arm that captures an `Rc`-backed
+/// value — a closure (`Rc<dyn Fn>`, or a borrowed `&dyn Fn` param), a `Bytes`
+/// / `Matrix` (`AlmideRcCow`), or a container or user type holding one —
+/// cannot move onto a spawned thread: the value is neither `Send` nor `Sync`
+/// and rustc refuses the spawn (E0277). Such a fan runs its arms in arm order
+/// on the calling thread, the sequential evaluation the threaded form
+/// reproduces. A one-arm fan already runs inline (#3341).
+pub fn mark_inline_fans(program: &mut IrProgram) {
+    use almide_ir::visit::{IrVisitor, walk_expr};
+    struct Scan<'a> { decls: Vec<&'a IrTypeDecl>, vt: &'a VarTable, out: std::collections::HashSet<(usize, usize, usize)> }
+    impl IrVisitor for Scan<'_> {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if let (IrExprKind::Fan { exprs }, Some(span)) = (&e.kind, e.span)
+                && exprs.len() > 1
+                && exprs.iter().any(|arm| self.arm_holds_rc(arm))
+            {
+                self.out.insert(almide_ir::annotations::CodegenAnnotations::fan_key(span));
+            }
+            walk_expr(self, e);
+        }
+    }
+    impl Scan<'_> {
+        fn arm_holds_rc(&self, arm: &IrExpr) -> bool {
+            almide_ir::free_vars::free_vars(arm, &std::collections::HashSet::new())
+                .into_iter()
+                .any(|v| ty_holds_rc(&self.vt.get(v).ty, &self.decls, &mut Vec::new()))
+        }
+    }
+    let decls: Vec<&IrTypeDecl> = program.type_decls.iter()
+        .chain(program.modules.iter().flat_map(|m| m.type_decls.iter()))
+        .collect();
+    let mut scan = Scan { decls, vt: &program.var_table, out: std::collections::HashSet::new() };
+    for func in program.functions.iter().chain(program.modules.iter().flat_map(|m| m.functions.iter())) {
+        scan.visit_expr(&func.body);
+    }
+    let out = scan.out;
+    program.codegen_annotations.inline_fans = out;
+}
+
+/// Does a value of `ty` hold an `Rc`-backed leaf on the native leg? A named
+/// type is looked through its declaration once per path (`seen`), so a
+/// recursive type terminates.
+fn ty_holds_rc(ty: &almide_lang::types::Ty, decls: &[&IrTypeDecl], seen: &mut Vec<almide_base::intern::Sym>) -> bool {
+    use almide_lang::types::{Ty, constructor::TypeConstructorId as TC};
+    match ty {
+        Ty::Fn { .. } | Ty::Bytes | Ty::Matrix | Ty::Applied(TC::Matrix, _) => true,
+        Ty::Tuple(args) | Ty::Applied(_, args) => args.iter().any(|t| ty_holds_rc(t, decls, seen)),
+        Ty::Record { fields } | Ty::OpenRecord { fields } => fields.iter().any(|(_, t)| ty_holds_rc(t, decls, seen)),
+        Ty::Named(name, args) => {
+            if args.iter().any(|t| ty_holds_rc(t, decls, seen)) { return true; }
+            if seen.contains(name) { return false; }
+            seen.push(*name);
+            let found = decls.iter().filter(|d| d.name == *name).any(|d| decl_holds_rc(&d.kind, decls, seen));
+            seen.pop();
+            found
+        }
+        _ => false,
+    }
+}
+
+fn decl_holds_rc(kind: &IrTypeDeclKind, decls: &[&IrTypeDecl], seen: &mut Vec<almide_base::intern::Sym>) -> bool {
+    match kind {
+        IrTypeDeclKind::Record { fields } => fields.iter().any(|f| ty_holds_rc(&f.ty, decls, seen)),
+        IrTypeDeclKind::Alias { target } => ty_holds_rc(target, decls, seen),
+        IrTypeDeclKind::Variant { cases, .. } => cases.iter().any(|c| match &c.kind {
+            IrVariantKind::Unit => false,
+            IrVariantKind::Tuple { fields } => fields.iter().any(|t| ty_holds_rc(t, decls, seen)),
+            IrVariantKind::Record { fields } => fields.iter().any(|f| ty_holds_rc(&f.ty, decls, seen)),
+        }),
+    }
+}
+
 // Note: fan.map/race/any come through as CallTarget::Module { module: "fan" }.
 // The walker renders these, but the lambda args may still have Try nodes.
 // This pass strips Try from lambdas that are arguments to fan.* calls.
