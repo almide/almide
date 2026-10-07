@@ -175,13 +175,17 @@ pub enum Mutability { Let, Var }
 /// into the runtime's existing `Vec<impl Fn() -> _ + Send + Sync>` thunk
 /// parameter with NO signature change. (`fan.map` keeps `Rc`: it runs
 /// sequentially over an `Rc<dyn Fn>`, which also accepts a closure VALUE that a
-/// `Send + Sync` box could not — an `Rc` is neither.)
+/// `Send + Sync` box could not — an `Rc` is neither.) `Box` is the plain
+/// `Box<dyn Fn>` for a thunk list the runtime runs on the calling thread
+/// (`fan.any`): the thunks unify without being `Send + Sync`, so one that
+/// captures a closure value or a `Bytes` still compiles (#3459).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum FnBox {
     #[default]
     Rc,
     BoxSendSync,
+    Box,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
