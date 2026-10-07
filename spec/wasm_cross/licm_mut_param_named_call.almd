@@ -1,0 +1,157 @@
+// @contract: C-226
+// almide#3452: a call to a SAME-MODULE fn that writes its `mut` parameter
+// makes every read of that argument's root variable loop-variant. Native LICM
+// consulted the callee's `mut` positions only for a module-qualified call
+// (`st.bump(s)`), so a bare `bump(s)` let `s.count` be hoisted above the loop
+// and every iteration read the value from before the loop: native printed
+// `0,0,0` where wasm printed `1,2,3`. Each shape below reads, inside the loop,
+// a value the loop's own call writes through a `mut` parameter.
+type St = { count: Int }
+
+type Wrap = { inner: St, tag: Int }
+
+fn bump(mut s: St) -> Unit = {
+  s.count = s.count + 1
+}
+
+effect fn bump_checked(mut s: St) -> Unit = {
+  s.count = s.count + int.parse("1")!
+}
+
+fn bump_get(mut s: St) -> Int = {
+  s.count = s.count + 1
+  s.count
+}
+
+fn bump_mid(mut s: St) -> Unit = {
+  bump(s)
+}
+
+fn bump_outer(mut s: St) -> Unit = {
+  bump_mid(s)
+}
+
+fn add_one(mut xs: List[Int]) -> Unit = {
+  list.push(xs, 1)
+}
+
+fn show(xs: List[Int]) -> String = xs |> list.map((x) => int.to_string(x)) |> list.join(",")
+
+fn for_in() -> String = {
+  var s = St { count: 0 }
+  var seen: List[Int] = []
+  for _k in [5, 6, 7] {
+    bump(s)
+    let c = s.count
+    seen = seen + [c]
+  }
+  show(seen)
+}
+
+fn while_loop() -> String = {
+  var s = St { count: 0 }
+  var seen: List[Int] = []
+  var i = 0
+  while i < 3 {
+    bump(s)
+    let c = s.count
+    seen = seen + [c]
+    i = i + 1
+  }
+  show(seen)
+}
+
+fn nested() -> String = {
+  var s = St { count: 0 }
+  var seen: List[Int] = []
+  for _a in [1, 2] {
+    for _b in [1, 2] {
+      bump(s)
+      let c = s.count
+      seen = seen + [c]
+    }
+    let c = s.count * 10
+    seen = seen + [c]
+  }
+  show(seen)
+}
+
+effect fn effect_fn() -> String = {
+  var s = St { count: 0 }
+  var seen: List[Int] = []
+  for _k in [1, 2, 3] {
+    bump_checked(s)!
+    let c = s.count
+    seen = seen + [c]
+  }
+  show(seen)
+}
+
+fn closure_in_loop() -> String = {
+  var s = St { count: 0 }
+  var seen: List[Int] = []
+  for k in [1, 2, 3] {
+    bump(s)
+    let base = s.count
+    let add = (x: Int) => x + base
+    let c = add(k * 100)
+    seen = seen + [c]
+  }
+  show(seen)
+}
+
+fn bump_and_return() -> String = {
+  var s = St { count: 0 }
+  var seen: List[Int] = []
+  for _k in [1, 2, 3] {
+    let r = bump_get(s)
+    let c = r * 10 + s.count
+    seen = seen + [c]
+  }
+  show(seen)
+}
+
+fn two_levels() -> String = {
+  var s = St { count: 0 }
+  var seen: List[Int] = []
+  for _k in [1, 2, 3] {
+    bump_outer(s)
+    let c = s.count
+    seen = seen + [c]
+  }
+  show(seen)
+}
+
+fn field_path() -> String = {
+  var w = Wrap { inner: St { count: 0 }, tag: 7 }
+  var seen: List[Int] = []
+  for _k in [1, 2, 3] {
+    bump(w.inner)
+    let c = w.inner.count + w.tag * 100
+    seen = seen + [c]
+  }
+  show(seen)
+}
+
+fn mut_list() -> String = {
+  var xs: List[Int] = [0]
+  var seen: List[Int] = []
+  for _k in [1, 2, 3] {
+    add_one(xs)
+    let grown = if xs == [0, 1] then 1 else 0
+    seen = seen + [grown, list.len(xs)]
+  }
+  show(seen)
+}
+
+effect fn main() -> Unit = {
+  println("for-in: ${for_in()}")
+  println("while: ${while_loop()}")
+  println("nested: ${nested()}")
+  println("effect: ${effect_fn()!}")
+  println("closure: ${closure_in_loop()}")
+  println("bump-and-return: ${bump_and_return()}")
+  println("two-levels: ${two_levels()}")
+  println("field-path: ${field_path()}")
+  println("mut-list: ${mut_list()}")
+}
