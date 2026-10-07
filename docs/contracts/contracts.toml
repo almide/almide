@@ -578,6 +578,7 @@ evidence  = [
   { path = "spec/wasm_cross/early_return_control_flow.almd", class = "fixture" },
   { path = "spec/wasm_cross/effect_main_guard_err.almd", class = "fixture" },
   { path = "spec/wasm_cross/effect_main_guard_ok.almd", class = "fixture" },
+  { path = "tests/main_typed_err_abort_test.rs", name = "main_returning_a_user_error", class = "fixture" },
 ]
 
 # ── RECORDS / VARIANTS / SIZED INTEGERS ──────────────────────────────
@@ -2646,6 +2647,7 @@ evidence  = [
   { path = "spec/wasm_cross/fan_block_rc_closure_capture.almd", class = "fixture" },
   { path = "tests/fan_arm_bang_test.rs", name = "arm_zero_fails_while_arm_one_prints", class = "fixture" },
   { path = "tests/fan_arm_bang_test.rs", name = "both_fail_and_the_lowest_index_err_wins", class = "fixture" },
+  { path = "tests/main_typed_err_abort_test.rs", name = "string_fn_fan_typed_bang_arms_run_every_arm", class = "fixture" },
 ]
 
 # ── FAN SIBLING TRAP ─

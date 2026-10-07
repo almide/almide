@@ -288,3 +288,275 @@ effect fn main() -> Unit = {
 }
 ", "loud 4\n", "Error: Bad(4)\n", 1);
 }
+
+// ── main returning a Result with a non-String error (#3474) ───────────
+//
+// `effect fn main() -> Result[Unit, E]` ending in `err(e)`: the same
+// `Error: <msg>` + exit 1, the message rendered as main's `!` abort renders
+// it. Before: rustc E0277 natively for a user type (the wrapper used
+// `Display`), and E082 `main-err-carrier:non-string-err` on wasm for every
+// error type but `String`.
+
+#[test]
+fn main_returning_a_user_error() {
+    check("ret-variant", "\
+effect fn main() -> Result[Unit, Bad] = {
+  println(\"start\")
+  err(Bad(3))
+}
+", "start\n", "Error: Bad(3)\n", 1);
+}
+
+#[test]
+fn main_returning_a_record_error() {
+    check("ret-record", "\
+type E = { code: Int, msg: String }
+
+effect fn main() -> Result[Unit, E] = {
+  println(\"start\")
+  err({ code: 7, msg: \"no \\\"way\\\"\" })
+}
+", "start\n", "Error: E { code: 7, msg: \"no \\\"way\\\"\" }\n", 1);
+}
+
+#[test]
+fn main_returning_an_int_error() {
+    check("ret-int", "\
+effect fn main() -> Result[Unit, Int] = {
+  println(\"start\")
+  err(3)
+}
+", "start\n", "Error: 3\n", 1);
+}
+
+#[test]
+fn main_returning_a_float_error() {
+    check("ret-float", "\
+effect fn main() -> Result[Unit, Float] = {
+  println(\"start\")
+  err(1.0)
+}
+", "start\n", "Error: 1\n", 1);
+}
+
+#[test]
+fn main_returning_a_list_of_strings_error_is_joined() {
+    check("ret-list-str", "\
+effect fn main() -> Result[Unit, List[String]] = {
+  println(\"start\")
+  err([\"a\", \"b\"])
+}
+", "start\n", "Error: a, b\n", 1);
+}
+
+#[test]
+fn main_returning_a_string_error_is_unchanged() {
+    check("ret-str", "\
+effect fn main() -> Result[Unit, String] = {
+  println(\"start\")
+  err(\"boom\")
+}
+", "start\n", "Error: boom\n", 1);
+}
+
+#[test]
+fn main_returning_a_user_error_from_its_own_bang() {
+    check("ret-variant-bang", "\
+effect fn main() -> Result[Unit, Bad] = {
+  println(\"start\")
+  let a = typed(5)!
+  println(\"${a}\")
+  ok(())
+}
+", "start\n", "Error: Bad(5)\n", 1);
+}
+
+#[test]
+fn main_returning_a_user_error_from_a_guard() {
+    check("ret-variant-guard", "\
+effect fn main() -> Result[Unit, Bad] = {
+  println(\"start\")
+  guard 1 > 2 else err(Bad(9))
+  println(\"unreached\")
+  ok(())
+}
+", "start\n", "Error: Bad(9)\n", 1);
+}
+
+#[test]
+fn main_returning_a_user_error_ok_path() {
+    check("ret-variant-ok", "\
+effect fn main() -> Result[Unit, Bad] = {
+  let a = typed(2)!
+  println(\"${a}\")
+  ok(())
+}
+", "2\n", "", 0);
+}
+
+// ── a fan block in a String-channel effect fn other than main ─────────
+//
+// A typed-error arm's `!` (or a bare typed-error Result arm) there is the
+// arm's marker, not an exit (C-199): every arm runs, and the lowest-index
+// Err is the block's, converted to the String channel by its repr exactly
+// as a direct `typed(5)!` there converts (ADR-0021 D2). Before: wasm left
+// the frame at the first arm's `!`, before a later arm ran, and walled a
+// bare typed arm (`fan-block-err-ty`).
+
+#[test]
+fn a_direct_typed_bang_in_a_string_fn_is_its_repr() {
+    check("sfn-direct", "\
+effect fn g() -> Result[Int, String] = {
+  let a = typed(5)!
+  ok(a)
+}
+
+effect fn main() -> Unit = {
+  let v = g()!
+  println(\"${v}\")
+}
+", "", "Error: Bad(5)\n", 1);
+}
+
+#[test]
+fn string_fn_fan_typed_bang_arms_run_every_arm() {
+    check("sfn-fan-bang", "\
+effect fn g() -> Result[Int, String] = {
+  let (a, b) = fan { typed(5)!, loud(1)! }
+  ok(a + b)
+}
+
+effect fn main() -> Unit = {
+  let v = g()!
+  println(\"${v}\")
+}
+", "loud 1\n", "Error: Bad(5)\n", 1);
+}
+
+#[test]
+fn string_fn_fan_typed_result_arms_run_every_arm() {
+    check("sfn-fan-typed", "\
+effect fn g() -> Result[Int, String] = {
+  let (a, b) = fan { typed(5), loud(1) }
+  ok(a + b)
+}
+
+effect fn main() -> Unit = {
+  let v = g()!
+  println(\"${v}\")
+}
+", "loud 1\n", "Error: Bad(5)\n", 1);
+}
+
+#[test]
+fn unit_effect_fn_fan_typed_bang_arms_run_every_arm() {
+    check("ufn-fan-bang", "\
+effect fn g() -> Unit = {
+  let (a, b) = fan { typed(5)!, loud(1)! }
+  println(\"${a + b}\")
+}
+
+effect fn main() -> Unit = {
+  g()!
+}
+", "loud 1\n", "Error: Bad(5)\n", 1);
+}
+
+#[test]
+fn string_fn_fan_a_string_err_before_a_typed_err_wins() {
+    check("sfn-fan-mixed", "\
+effect fn g() -> Result[Int, String] = {
+  let (a, b, c) = fan { loud(2), num(7)!, loud(5)! }
+  ok(a + b + c)
+}
+
+effect fn main() -> Unit = {
+  let v = g()!
+  println(\"${v}\")
+}
+", "loud 2\nloud 5\n", "Error: big 7\n", 1);
+}
+
+#[test]
+fn string_fn_fan_a_typed_err_before_a_string_err_wins() {
+    check("sfn-fan-typed-first", "\
+effect fn g() -> Result[Int, String] = {
+  let (a, b, c) = fan { loud(6)!, num(7)!, loud(1)! }
+  ok(a + b + c)
+}
+
+effect fn main() -> Unit = {
+  let v = g()!
+  println(\"${v}\")
+}
+", "loud 6\nloud 1\n", "Error: Bad(6)\n", 1);
+}
+
+#[test]
+fn string_fn_fan_a_list_of_strings_arm_is_joined() {
+    check("sfn-fan-list-str", "\
+effect fn many(n: Int) -> Result[Int, List[String]] = if n > 3 then err([\"x\", \"y\"]) else ok(n)
+
+effect fn g() -> Result[Int, String] = {
+  let (a, b) = fan { many(5)!, loud(1)! }
+  ok(a + b)
+}
+
+effect fn main() -> Unit = {
+  let v = g()!
+  println(\"${v}\")
+}
+", "loud 1\n", "Error: x, y\n", 1);
+}
+
+#[test]
+fn string_fn_fan_typed_arms_all_ok() {
+    check("sfn-fan-ok", "\
+effect fn g() -> Result[Int, String] = {
+  let (a, b) = fan { typed(2)!, loud(3)! }
+  ok(a + b)
+}
+
+effect fn main() -> Unit = {
+  let v = g()!
+  println(\"${v}\")
+}
+", "loud 3\n5\n", "", 0);
+}
+
+#[test]
+fn string_fn_fan_caught_by_the_caller() {
+    check("sfn-fan-caught", "\
+effect fn g() -> Result[Int, String] = {
+  let (a, b) = fan { typed(5)!, loud(1)! }
+  ok(a + b)
+}
+
+effect fn main() -> Unit = {
+  match g() {
+    ok(v) => println(\"ok ${v}\"),
+    err(e) => println(\"caught ${e}\"),
+  }
+}
+", "loud 1\ncaught Bad(5)\n", "", 0);
+}
+
+#[test]
+fn string_fn_fan_in_a_loop_with_a_bound_carrier() {
+    check("sfn-fan-loop", "\
+effect fn g(n: Int) -> Result[Int, String] = {
+  let r: Result[Int, Bad] = typed(n)
+  let (a, b) = fan { r!, loud(n + 1)! }
+  ok(a + b)
+}
+
+effect fn main() -> Unit = {
+  for i in [1, 2, 3, 4] {
+    match g(i) {
+      ok(v) => println(\"ok ${v}\"),
+      err(e) => println(\"err ${e}\"),
+    }
+  }
+}
+", "loud 2\nok 3\nloud 3\nok 5\nloud 4\nerr Bad(4)\nloud 5\nerr Bad(4)\n", "", 0);
+}
