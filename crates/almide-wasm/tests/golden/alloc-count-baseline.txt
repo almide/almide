@@ -37,7 +37,7 @@
 25	19	189	25	spec/wasm_cross/branch_lift_in_loop.almd
 36	12	286	36	spec/wasm_cross/branch_lift_stdlib_mut_arg.almd
 11	5	100	11	spec/wasm_cross/branch_lift_user_fn_named_like_stdlib.almd
-49	41	333	49	spec/wasm_cross/bundled_pure_modules.almd
+53	43	397	53	spec/wasm_cross/bundled_pure_modules.almd
 30	18	185	30	spec/wasm_cross/bytes_alloc_ceiling_domain.almd
 25	17	33061	25	spec/wasm_cross/bytes_array_count_domain.almd
 24	11	164	24	spec/wasm_cross/bytes_clear_mut_param.almd
