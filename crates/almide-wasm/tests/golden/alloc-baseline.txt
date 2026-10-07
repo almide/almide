@@ -210,6 +210,7 @@
 66144	spec/wasm_cross/fan_trap_waits_for_elements_below.almd
 66176	spec/wasm_cross/fan_var_thunk_list.almd
 65776	spec/wasm_cross/fan_worker_abort_keeps_stdout.almd
+115392	spec/wasm_cross/field_and_interp_accumulator.almd
 65952	spec/wasm_cross/filter_map_conditional_arm.almd
 66304	spec/wasm_cross/flat_map_aliased_field.almd
 65776	spec/wasm_cross/flight_pid_control.almd
