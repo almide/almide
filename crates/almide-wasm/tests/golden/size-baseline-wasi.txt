@@ -10,7 +10,7 @@
 1948	spec/wasm_cross/append_accumulator.almd
 2369	spec/wasm_cross/append_accumulator_heap.almd
 3931	spec/wasm_cross/append_accumulator_heap_linear.almd
-6106	spec/wasm_cross/args_surface.almd
+6886	spec/wasm_cross/args_surface.almd
 2844	spec/wasm_cross/as_pattern.almd
 974	spec/wasm_cross/assert_abort_eq.almd
 1888	spec/wasm_cross/assert_abort_msg.almd
@@ -37,7 +37,7 @@
 2063	spec/wasm_cross/branch_lift_in_loop.almd
 7084	spec/wasm_cross/branch_lift_stdlib_mut_arg.almd
 4299	spec/wasm_cross/branch_lift_user_fn_named_like_stdlib.almd
-7193	spec/wasm_cross/bundled_pure_modules.almd
+7670	spec/wasm_cross/bundled_pure_modules.almd
 3426	spec/wasm_cross/bytes_alloc_ceiling_domain.almd
 2372	spec/wasm_cross/bytes_array_count_domain.almd
 3841	spec/wasm_cross/bytes_clear_mut_param.almd
