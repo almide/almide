@@ -730,6 +730,9 @@ fn build_one_named_helper(
             crate::work::NamedOp::Eq => em.emit_named_eq(ti, &mut vec![ti]),
             // The cmp walk needs no path: every `Named` is a call already.
             crate::work::NamedOp::Cmp => em.emit_named_cmp(ti),
+            crate::work::NamedOp::EqTy => {
+                em.emit_val_eq_level(em.types.el(crate::ETy::from_index(ti as usize)), &mut Vec::new())
+            }
         }
     })
 }

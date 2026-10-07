@@ -17,6 +17,9 @@ use crate::*;
 pub(crate) enum NamedOp {
     Eq,
     Cmp,
+    /// #3450: `ti` is an `ETy` index, not a Named id — ONE inlined level of
+    /// that type's `==`, outlined when the caller's hold pool runs short.
+    EqTy,
 }
 
 /// A per-program emitted helper (assembled right after `main`, BEFORE the
