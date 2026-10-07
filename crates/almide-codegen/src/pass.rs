@@ -609,6 +609,7 @@ impl NanoPass for FanLoweringPass {
     fn depends_on(&self) -> Vec<&'static str> { vec!["ResultPropagation"] }
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         super::pass_fan_lowering::strip_fan_auto_try(&mut program);
+        super::pass_fan_lowering::mark_inline_fans(&mut program);
         PassResult { program, changed: true }
     }
 }
