@@ -101,6 +101,13 @@ pub fn op_caps(op: i32) -> &'static [u32] {
         35 => &[STDIN],
         43..=50 | 53..=59 | 70..=72 => &[NET],
         80..=90 => &[PROC],
+        // The instance-parallel fan offer (#3003, fan_par_lower.rs): the host
+        // runs the program's own exported `__fan_site_K` chunk on workers and
+        // writes scalars into the answer room; their output is captured and
+        // dropped. The op itself reaches nothing — what a chunk could reach is
+        // that function's, and the not-served fallback calls the same
+        // function from this frame, so the call graph already counts it.
+        74 => &[],
         _ => &[SENTINEL],
     }
 }
@@ -630,6 +637,7 @@ mod tests {
         assert_eq!(op_caps(34), &[cap::CLOCK]);
         assert_eq!(op_caps(35), &[cap::STDIN]);
         assert_eq!(op_caps(31), &[SENTINEL]);
+        assert!(op_caps(74).is_empty(), "the fan offer reaches no capability of its own");
         assert_eq!(op_caps(-1), &[SENTINEL]);
     }
 
