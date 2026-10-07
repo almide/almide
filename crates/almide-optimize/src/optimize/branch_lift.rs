@@ -336,6 +336,12 @@ impl<'a> IrMutVisitor for BranchLifter<'a> {
 /// keeps its in-place route, where the `!` still sits in the fn that owns it. A `Lambda`
 /// body is NOT descended — a `!` there propagates to the lambda's own result, which the
 /// lift carries along unchanged.
+///
+/// #3451: the same holds for every other exit that targets the enclosing fn or loop. A
+/// `guard … else err(..)` lowers to an early `return Err(..)` (rustc E0308 in the
+/// payload-returning helper), and a `break`/`continue` — bare or as a guard's `else` —
+/// would leave the helper with no loop to target (IR verify: "outside of loop"). A
+/// `Guard` statement or a `Break`/`Continue` anywhere in the branch declines the lift too.
 fn holds_error_op(e: &IrExpr) -> bool {
     struct V {
         found: bool,
@@ -345,11 +351,24 @@ fn holds_error_op(e: &IrExpr) -> bool {
             if self.found || matches!(e.kind, IrExprKind::Lambda { .. }) {
                 return;
             }
-            if matches!(e.kind, IrExprKind::Unwrap { .. } | IrExprKind::Try { .. }) {
+            if matches!(
+                e.kind,
+                IrExprKind::Unwrap { .. }
+                    | IrExprKind::Try { .. }
+                    | IrExprKind::Break
+                    | IrExprKind::Continue
+            ) {
                 self.found = true;
                 return;
             }
             visit::walk_expr(self, e);
+        }
+        fn visit_stmt(&mut self, s: &IrStmt) {
+            if matches!(s.kind, IrStmtKind::Guard { .. }) {
+                self.found = true;
+                return;
+            }
+            visit::walk_stmt(self, s);
         }
     }
     let mut v = V { found: false };
@@ -635,6 +654,38 @@ mod tests {
         assert_eq!(prog.var_table.get(fresh).ty, Ty::Bool);
         let IrExprKind::If { cond, .. } = &helper.body.kind else { panic!("helper body is the branch") };
         assert!(matches!(cond.kind, IrExprKind::Var { id } if id == fresh), "the body reads the fresh param");
+    }
+
+    /// #3451: a branch holding an exit that targets the enclosing fn or loop — a
+    /// `guard` (its `else err(..)` is an early `return Err`), a bare `break` /
+    /// `continue` — must stay inline: the payload-returning helper has no channel
+    /// for it (rustc E0308 / IR verify "outside of loop").
+    #[test]
+    fn declines_a_branch_holding_a_guard_break_or_continue() {
+        let exit = |kind: IrExprKind| IrExpr { kind, ty: Ty::Unit, span: None, def_id: None };
+        let guarded = |else_: IrExpr| IrStmt {
+            kind: IrStmtKind::Guard { cond: var(1, Ty::Bool), else_ },
+            span: None,
+        };
+        let shapes = [
+            vec![guarded(exit(IrExprKind::Continue))],
+            vec![IrStmt { kind: IrStmtKind::Expr { expr: exit(IrExprKind::Break) }, span: None }],
+            vec![IrStmt { kind: IrStmtKind::Expr { expr: exit(IrExprKind::Continue) }, span: None }],
+        ];
+        for stmts in shapes {
+            let then = IrExpr {
+                kind: IrExprKind::Block { stmts, expr: Some(Box::new(lit_str("a"))) },
+                ty: Ty::String,
+                span: None,
+                def_id: None,
+            };
+            let branch = iff(1, then, lit_str("b"), Ty::String);
+            let body = for_in(0, vec![bind(2, Ty::String, branch)]);
+            let mut prog = program_with_main(body, &[Ty::Unit, Ty::Bool, Ty::String]);
+            lift_heap_branch_binds(&mut prog);
+            assert!(matches!(main_bind_value_kind(&prog), IrExprKind::If { .. }), "exit branch stays inline");
+            assert_eq!(prog.functions.len(), 1, "no helper synthesized");
+        }
     }
 
     #[test]
