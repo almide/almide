@@ -111,13 +111,60 @@ pub(super) fn insert_clones_member(object: IrExpr, field: Sym, ty: Ty, span: Opt
 /// be an owned, uncaptured, non-always-clone binding: a borrowed param or a
 /// global cannot be moved from at all.
 pub(super) fn insert_clones_reassign(var: VarId, value: IrExpr, ctx: &mut CloneCtx) -> IrStmtKind {
-    let movable = ctx.owned.contains(&var) && !ctx.always.contains(&var) && !ctx.captured.contains(&var)
-        && reads_once_plainly(&value, var);
+    let local = ctx.owned.contains(&var) && !ctx.always.contains(&var) && !ctx.captured.contains(&var);
+    let value = if local { interp_as_append(value, var, None) } else { value };
+    let movable = local && reads_once_plainly(&value, var);
     let mut value = insert_clones_live(value, ctx);
     if movable {
         strip_var_clone(&mut value, var);
     }
     IrStmtKind::Assign { var, value }
+}
+
+/// `FieldAssign { target: b, field, value }` arm (#3454): the same
+/// interpolation-as-append rewrite as [`insert_clones_reassign`], keyed on the
+/// place `b.field`. The `Clone` the walk then puts on that read (it does not
+/// know the write kills the old value) is the borrow lowering's to replace
+/// with `std::mem::take(&mut b.field)`.
+pub(super) fn insert_clones_field_reassign(target: VarId, field: Sym, value: IrExpr, ctx: &mut CloneCtx) -> IrExpr {
+    let local = ctx.owned.contains(&target) && !ctx.always.contains(&target) && !ctx.captured.contains(&target);
+    let value = if local { interp_as_append(value, target, Some(field)) } else { value };
+    insert_clones_live(value, ctx)
+}
+
+/// #3454: `s = "${s}…"` → `s = s + "…"`, when the interpolation's FIRST piece
+/// is the place being overwritten (`s`, or `b.f` when `field` is set) and no
+/// later piece mentions its root. The two spell the same bytes — a `String`
+/// piece formats as itself — but the concat's left operand is a value the
+/// reassignment can move (or take) and extend in place, where `format!`
+/// rebuilds the whole accumulated string on every step. Any later piece
+/// reading the root keeps the interpolation, and with it the copy.
+fn interp_as_append(value: IrExpr, root: VarId, field: Option<Sym>) -> IrExpr {
+    let IrExprKind::StringInterp { parts } = &value.kind else { return value };
+    let is_place = |e: &IrExpr| match (&e.kind, field) {
+        (IrExprKind::Var { id }, None) => *id == root,
+        (IrExprKind::Member { object, field: f }, Some(want)) => *f == want
+            && matches!(object.kind, IrExprKind::Var { id } if id == root),
+        _ => false,
+    };
+    let first_is_place = matches!(parts.first(), Some(IrStringPart::Expr { expr }) if expr.ty == Ty::String && is_place(expr));
+    let rest_free = parts.iter().skip(1).all(|p| match p {
+        IrStringPart::Lit { .. } => true,
+        IrStringPart::Expr { expr } => !almide_ir::free_vars::free_vars(expr, &Default::default()).contains(&root),
+    });
+    if !first_is_place || parts.len() < 2 || !rest_free {
+        return value;
+    }
+    let IrExprKind::StringInterp { mut parts } = value.kind else { unreachable!() };
+    let rest: Vec<IrStringPart> = parts.split_off(1);
+    let Some(IrStringPart::Expr { expr: head }) = parts.pop() else { unreachable!() };
+    let tail_kind = match rest.as_slice() {
+        [IrStringPart::Lit { value: lit }] => IrExprKind::LitStr { value: lit.clone() },
+        _ => IrExprKind::StringInterp { parts: rest },
+    };
+    let tail = IrExpr { kind: tail_kind, ty: Ty::String, span: value.span, def_id: None };
+    let kind = IrExprKind::BinOp { op: BinOp::ConcatStr, left: Box::new(head), right: Box::new(tail) };
+    IrExpr { kind, ty: Ty::String, span: value.span, def_id: None }
 }
 
 fn reads_once_plainly(value: &IrExpr, var: VarId) -> bool {
