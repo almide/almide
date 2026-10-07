@@ -7,8 +7,20 @@ use crate::cli_args::{Commands, IdeCommand};
 use crate::{collect_almd_files, print_error_explanation, resolve_file, warn_no_verified_deprecated, DIAGNOSTIC_DOCS};
 use crate::{diagnostic_render, err, out, project, project_fetch};
 
-/// `dispatch`'s `Commands::Run` arm. Extracted verbatim.
-fn dispatch_run(file: Option<String>, no_check: bool, release: bool, target: Option<String>, no_verified: bool, time_report: bool, program_args: Vec<String>) {
+/// `Commands::Run`'s fields, carried as one value into [`dispatch_run`].
+struct RunCmd {
+    file: Option<String>,
+    no_check: bool,
+    release: bool,
+    target: Option<String>,
+    no_verified: bool,
+    time_report: bool,
+    program_args: Vec<String>,
+}
+
+/// `dispatch`'s `Commands::Run` arm.
+fn dispatch_run(args: RunCmd) {
+    let RunCmd { file, no_check, release, target, no_verified, time_report, program_args } = args;
     let file = resolve_file(file);
     if time_report {
         // The deterministic meter is the probe machinery: setting the env here
@@ -84,39 +96,30 @@ fn env_flag(name: &str) -> bool {
     std::env::var_os(name).is_some_and(|v| almide_base::env::is_on(&v))
 }
 
-/// `dispatch`'s `Commands::Check` arm. Extracted verbatim — `explain` still
-/// returns early into the caller via its own `bool` return (`true` = already
-/// handled, caller should return).
-fn dispatch_check(file: Option<String>, deny_warnings: bool, json: bool, explain: Option<String>, effects: bool, timings: bool, stamp: bool, profile: Option<String>, allow: Vec<String>, target: Option<String>) {
+/// `Commands::Check`'s fields, carried as one value into [`dispatch_check`].
+struct CheckCmd {
+    file: Option<String>,
+    deny_warnings: bool,
+    json: bool,
+    explain: Option<String>,
+    effects: bool,
+    timings: bool,
+    stamp: bool,
+    profile: Option<String>,
+    allow: Vec<String>,
+    target: Option<String>,
+}
+
+/// `dispatch`'s `Commands::Check` arm. `--explain` prints the code's text
+/// and nothing else runs.
+fn dispatch_check(args: CheckCmd) {
+    let CheckCmd { file, deny_warnings, json, explain, effects, timings, stamp, profile, allow, target } = args;
     if let Some(code) = explain {
         print_error_explanation(&code);
         return;
     }
-    // #567: `--profile critical` — validate the profile name and expand the
-    // capability grants to module names HERE, so the checker below the CLI
-    // never sees capability vocabulary.
-    let critical: Option<Vec<String>> = match profile.as_deref() {
-        None => {
-            if !allow.is_empty() {
-                eprintln!("error: --allow requires --profile critical");
-                std::process::exit(1);
-            }
-            None
-        }
-        Some("critical") => Some(expand_capability_grants(&allow)),
-        Some(other) => {
-            eprintln!("error: unknown profile `{other}` — the only profile is `critical`");
-            std::process::exit(1);
-        }
-    };
-    let wasm_target = match target.as_deref() {
-        None => false,
-        Some("wasm") => true,
-        Some(other) => {
-            eprintln!("error: `almide check --target` accepts only `wasm` (got `{other}`) — the native target is what `almide check` already judges");
-            std::process::exit(1);
-        }
-    };
+    let critical = critical_profile_grants(profile.as_deref(), &allow);
+    let wasm_target = check_wasm_target(target.as_deref());
     // #2165: the bare form inside a package judges EVERY entry under `src/`,
     // not the first one `resolve_file` happens to find. `--json` walks the
     // same entries in the same order (#2253): every row already names its
@@ -146,6 +149,39 @@ fn dispatch_check(file: Option<String>, deny_warnings: bool, json: bool, explain
         cli::cmd_check_package(&entries, deny_warnings, timings, stamp, critical.as_deref(), wasm_target);
     } else {
         cli::cmd_check(&file, deny_warnings, timings, stamp, critical.as_deref(), wasm_target);
+    }
+}
+
+/// #567: `--profile critical` — validate the profile name and expand the
+/// capability grants to module names HERE, so the checker below the CLI
+/// never sees capability vocabulary. `None` is the ordinary (unbounded) check.
+fn critical_profile_grants(profile: Option<&str>, allow: &[String]) -> Option<Vec<String>> {
+    match profile {
+        None => {
+            if !allow.is_empty() {
+                eprintln!("error: --allow requires --profile critical");
+                std::process::exit(1);
+            }
+            None
+        }
+        Some("critical") => Some(expand_capability_grants(allow)),
+        Some(other) => {
+            eprintln!("error: unknown profile `{other}` — the only profile is `critical`");
+            std::process::exit(1);
+        }
+    }
+}
+
+/// `almide check --target`: `wasm` adds the wasm build route's verdicts;
+/// nothing else is accepted.
+fn check_wasm_target(target: Option<&str>) -> bool {
+    match target {
+        None => false,
+        Some("wasm") => true,
+        Some(other) => {
+            eprintln!("error: `almide check --target` accepts only `wasm` (got `{other}`) — the native target is what `almide check` already judges");
+            std::process::exit(1);
+        }
     }
 }
 
@@ -364,15 +400,10 @@ fn dispatch_dep_path(name: String) {
     }
 }
 
-/// `dispatch`'s second half: the "tooling" commands (LSP, diagnostics
-/// explain, IDE queries, fmt, compile, clean, package management, self
-/// update, emit). Split out of `dispatch`'s single flat match — cyclomatic
-/// complexity counts one branch per match arm regardless of how thin the
-/// arm body is, and `Commands` has ~19 variants, so the single match alone
-/// tripped the threshold. Extracted verbatim; the split point is arbitrary
-/// (arm count, not domain semantics) — `other` is exhaustive over exactly
-/// the variants `dispatch`'s own match doesn't handle.
-fn dispatch_rest(command: Commands) {
+/// `dispatch`'s tooling commands: the editor and agent servers, diagnostics
+/// explain, IDE queries, fmt, compile, emit, verify and the survival checks.
+/// Everything else falls through to [`dispatch_packages`].
+fn dispatch_tooling(command: Commands) {
     match command {
         Commands::Lsp => {
             cli::lsp::run_lsp();
@@ -389,6 +420,25 @@ fn dispatch_rest(command: Commands) {
         Commands::Compile { module, json, dry_run, output } => {
             cli::cmd_compile(module.as_deref(), json, dry_run, output.as_deref());
         }
+        Commands::Verify { args } => std::process::exit(cli::cmd_verify(&args)),
+        Commands::Survive { file, with, as_kind, json, timeout } => {
+            cli::cmd_survive(cli::SurviveArgs { file, with, as_kind, json, timeout_secs: timeout });
+        }
+        Commands::Apply { file, with, as_kind, if_survives, force, json, timeout } => {
+            cli::cmd_apply(cli::SurviveArgs { file, with, as_kind, json, timeout_secs: timeout }, if_survives, force);
+        }
+        Commands::SurviveTestLeg { file } => cli::cmd_survive_test_leg(&file),
+        Commands::Emit { file, target, emit_ast, emit_ir, emit_dialect, no_check, repr_c, trace_map } => {
+            cli::cmd_emit(cli::EmitArgs { file: &file, target: &target, emit_ast, emit_ir, emit_dialect, no_check, repr_c, trace_map });
+        }
+        other => dispatch_packages(other),
+    }
+}
+
+/// `dispatch`'s package and toolchain management commands: caches,
+/// dependencies, installs and self-update.
+fn dispatch_packages(command: Commands) {
+    match command {
         Commands::Clean => cli::cmd_clean(),
         Commands::Add { pkg, git, tag, subdir } => dispatch_add(pkg, git, tag, subdir),
         Commands::Update { dep } => dispatch_update(dep),
@@ -407,23 +457,11 @@ fn dispatch_rest(command: Commands) {
         Commands::SelfUpdate { version } => {
             cli::cmd_self_update(version.as_deref());
         }
-        Commands::Verify { args } => std::process::exit(cli::cmd_verify(&args)),
-        Commands::Survive { file, with, as_kind, json, timeout } => {
-            cli::cmd_survive(cli::SurviveArgs { file, with, as_kind, json, timeout_secs: timeout });
-        }
-        Commands::Apply { file, with, as_kind, if_survives, force, json, timeout } => {
-            cli::cmd_apply(cli::SurviveArgs { file, with, as_kind, json, timeout_secs: timeout }, if_survives, force);
-        }
-        Commands::SurviveTestLeg { file } => cli::cmd_survive_test_leg(&file),
-        Commands::Emit { file, target, emit_ast, emit_ir, emit_dialect, no_check, repr_c, trace_map } => {
-            cli::cmd_emit(cli::EmitArgs { file: &file, target: &target, emit_ast, emit_ir, emit_dialect, no_check, repr_c, trace_map });
-        }
         // `command`'s static type is the full `Commands` enum — Rust can't
-        // narrow it to "one of the 12 variants `dispatch` doesn't handle"
-        // across the function boundary, so this match must stay exhaustive.
-        // `dispatch`'s own match already handles the other 7 variants
-        // before ever calling this function, so this arm is genuinely
-        // unreachable at runtime.
+        // narrow it to the variants `dispatch` and `dispatch_tooling` leave
+        // unhandled across the function boundary, so this match must stay
+        // exhaustive. Both handle every other variant before calling this
+        // function, so this arm is genuinely unreachable at runtime.
         _ => unreachable!("dispatch's match should have handled this Commands variant"),
     }
 }
@@ -499,7 +537,7 @@ pub(crate) fn dispatch(cli: crate::cli_args::Cli) {
     match command {
         Commands::Init => cli::cmd_init(),
         Commands::Run { file, no_check, release, target, verified: _, no_verified, time_report, program_args } =>
-            dispatch_run(file, no_check, release, target, no_verified, time_report, program_args),
+            dispatch_run(RunCmd { file, no_check, release, target, no_verified, time_report, program_args }),
         Commands::Bench { file, runs, target, program_args } => {
             let file = resolve_file(file);
             cli::cmd_bench(&file, runs, target.as_deref(), &program_args);
@@ -530,7 +568,9 @@ pub(crate) fn dispatch(cli: crate::cli_args::Cli) {
         Commands::Test { file, run, no_check, json, target, update_snapshots, ci, allow_no_tests, show_output } => {
             dispatch_test(TestArgs { file, run, no_check, json, target, update_snapshots, ci, allow_no_tests, show_output })
         }
-        Commands::Check { file, deny_warnings, json, explain, effects, timings, stamp, profile, allow, target } => dispatch_check(file, deny_warnings, json, explain, effects, timings, stamp, profile, allow, target),
+        Commands::Check { file, deny_warnings, json, explain, effects, timings, stamp, profile, allow, target } => {
+            dispatch_check(CheckCmd { file, deny_warnings, json, explain, effects, timings, stamp, profile, allow, target })
+        }
         Commands::Fix { file, dry_run, json } => {
             let file = resolve_file(file);
             cli::cmd_fix(&file, dry_run, json);
@@ -541,6 +581,6 @@ pub(crate) fn dispatch(cli: crate::cli_args::Cli) {
         Commands::Switches { md } => {
             print!("{}", if md { almide_base::env::markdown_table() } else { almide_base::env::plain_table() });
         }
-        other => dispatch_rest(other),
+        other => dispatch_tooling(other),
     }
 }
