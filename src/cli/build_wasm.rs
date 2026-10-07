@@ -53,15 +53,26 @@ fn js_host_requested(host: Option<&str>, component: bool) -> bool {
     js_host
 }
 
+/// The `--target wasm` flags of `almide build`, as `cmd_build` hands them on.
+pub(super) struct WasmBuild<'a> {
+    pub file: &'a str,
+    pub output: Option<&'a str>,
+    pub allow_unverified: bool,
+    pub verified: bool,
+    pub wasm_opt: bool,
+    pub component: bool,
+    pub host: Option<&'a str>,
+}
+
 /// Direct WASM emit: parse → check → lower → optimize → monomorphize → emit WASM binary.
-#[allow(clippy::too_many_arguments)]
-pub(super) fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check: bool, allow_unverified: bool, verified: bool, wasm_opt: bool, component: bool, host: Option<&str>) {
+pub(super) fn cmd_build_wasm_direct(req: &WasmBuild) {
+    let file = req.file;
     let default_output = format!("{}.wasm", file.strip_suffix(".almd").unwrap_or("a.out"));
-    let output = output.unwrap_or(&default_output);
+    let output = req.output.unwrap_or(&default_output);
     // `--host js` (#2265): the compiler writes the JS host next to the
     // module. The module exports its allocator + release under the guard,
     // and the emitter notes which exported params the callee owns.
-    let js_host = js_host_requested(host, component);
+    let js_host = js_host_requested(req.host, req.component);
     let _js_host = js_host.then(almide_wasm::host_exports::JsHostGuard::set);
 
     // The whole parse→check→lower→emit pipeline lives in `compile_to_wasm_bytes`
@@ -69,151 +80,18 @@ pub(super) fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check:
     // command writes — the cross-target equivalence guarantee depends on both
     // entry points sharing one code path. Any compile diagnostic was already
     // printed there; we just propagate the exit.
-    let (bytes, host_ops, surface) = match compile_to_wasm_bytes_surfaced(file, allow_unverified, verified, true, false) {
+    let (bytes, host_ops, surface) = match compile_to_wasm_bytes_surfaced(file, req.allow_unverified, req.verified, true, false) {
         Ok(b) => b,
         Err(()) => std::process::exit(1),
     };
-    // The module imports `almide.*` (the embedded host's surface). A BUILD artifact must run on stock runtimes, so it ships in
-    // the WASI form — same index space, shimmed imports, proc_exit on trap
-    // (the #1588 transform; the 578-fixture stock-wasmtime gate is its
-    // reproduction witness).
-    // `--component` (#1628 stage 1): the DIRECT p2 path — canonical-ABI
-    // imports straight off the almide.* module, no preview1 adapter (~25 KB
-    // lighter, and the only shape the stage-2 fan/async lowering can build
-    // on). `ALMIDE_COMPONENT_ADAPTER=1` is the switch back to the stage-0
-    // adapter wrap over the `to_wasi` module (#2752 keeps it: the adapter
-    // route is also what an fs program takes below).
-    // #2589 (ADR-0025): the subprocess family rides the private
-    // `almide:process/spawn` import, which the p1 core module carries and no
-    // component world declares — refuse the component build by name rather
-    // than let a transform fail on an import it cannot place.
-    let proc_op = host_ops.iter().copied().find(|op| (80..=90).contains(op));
-    if component && let Some(op) = proc_op {
-        err(&format!(
-            "error[E081]: process.* (host op {op}) needs the private almide:process/spawn capability, which no component world declares (ADR-0025)\n  \
-             hint: build the core module (drop --component) for a host that implements almide:process/spawn, or run it with `almide run {file} --target wasm`"
-        ));
-        std::process::exit(1);
-    }
-    // #2659 (C-375): a program that reaches `http.serve` (its main
-    // serve-shaped — checked in `compile_to_wasm_bytes_surfaced`) builds as
-    // the stock serve export, a `wasi:http/handler@0.3.0` component, with or
-    // without `--component`.
-    let serve_export = host_ops.iter().any(|op| (70..=72).contains(op));
-    if serve_export && js_host {
-        err("error[E081]: `http.serve` builds as a wasi:http/handler@0.3.0 component, which --host js does not write");
-        std::process::exit(1);
-    }
-    let component = component || serve_export;
-    let direct_p2 = component && !serve_export && !almide_base::env::flag("ALMIDE_COMPONENT_ADAPTER");
-    // `ALMIDE_COMPONENT_P3=1` (#1628 stage 2, experimental): the WASI 0.3
-    // component — stdio over component-model streams on the async
-    // canonical ABI. Needs a p3-capable runtime (wasmtime 46+); stays an
-    // env opt-in until the fan lowering lands on the same plumbing and
-    // the corpus gates cover it.
-    let direct_p3 = direct_p2 && almide_base::env::flag("ALMIDE_COMPONENT_P3");
-    // #2742: a WASI 0.2 component that reaches the p1 fs service keeps the
-    // stage-0 adapter route whenever the p1 shim serves its whole op set.
-    // Those programs used to reach that route through the incumbent (the
-    // p1 op audit rerouted every fs op there); the fs service plus the
-    // preview1 adapter now serve them from the structural module, so the
-    // direct shim's E081 must not claim a program that built before. An op
-    // set without an fs op keeps the direct shim's verdict (#2113).
-    let fs_via_adapter = direct_p2
-        && !direct_p3
-        && almide_wasm_run::component_availability::check(&host_ops, false).is_err()
-        && host_ops.iter().any(|op| almide_wasm_run::wasi::FS_SERVICE_OPS.iter().any(|(o, _, _)| o == op))
-        && host_ops.iter().all(|op| almide_wasm_run::wasi::P1_SERVED_OPS.contains(op));
-    let direct_p2 = direct_p2 && !fs_via_adapter;
-    if direct_p2
-        && let Err(message) = almide_wasm_run::component_availability::check(&host_ops, direct_p3)
-    {
-        err(&message);
-        std::process::exit(1);
-    }
-    let bytes = if serve_export {
-        match almide_wasm_run::wasi_p3::to_p3_service(&bytes, &host_ops) {
-            Ok(c) => c,
-            Err(e) => {
-                err(&format!("error: p3 serve export transform failed — this is an Almide bug: {e}"));
-                std::process::exit(1);
-            }
-        }
-    } else if direct_p3 {
-        match almide_wasm_run::wasi_p3::to_p3(&bytes, &host_ops) {
-            Ok(c) => c,
-            Err(e) => {
-                err(&format!("error: p3 component transform failed — this is an Almide bug: {e}"));
-                std::process::exit(1);
-            }
-        }
-    } else if direct_p2 {
-        match almide_wasm_run::wasi_p2::to_p2(&bytes) {
-            Ok(c) => c,
-            Err(e) => {
-                err(&format!("error: p2 component transform failed — this is an Almide bug: {e}"));
-                std::process::exit(1);
-            }
-        }
-    } else {
-        let wasi = match almide_wasm_run::wasi::to_wasi_mapped(&bytes, &host_ops) {
-            Ok(w) => w,
-            Err(e) => {
-                err(&format!("error: WASI transform failed — this is an Almide bug: {e}"));
-                std::process::exit(1);
-            }
-        };
-        let bytes = with_debug_lines(file, &bytes, wasi);
-        // Stage-0 adapter wrap: the WASI core module + the Cargo-pinned
-        // preview1 adapter. Packaging, not a rewrite.
-        if component {
-            match wrap_component(&bytes) {
-                Ok(c) => c,
-                Err(e) => {
-                    err(&format!("error: component encoding failed — this is an Almide bug: {e}"));
-                    std::process::exit(1);
-                }
-            }
-        } else {
-            bytes
-        }
-    };
+    let proc_op = refuse_unpackageable(file, &host_ops, req.component, js_host);
+    let shape = WasmPackage::decide(&host_ops, req.component);
+    let bytes = shape.package(file, &bytes, &host_ops);
 
-    let pre_size = bytes.len();
     if let Err(e) = std::fs::write(output, &bytes) {
         err(&format!("Failed to write {}: {}", output, e));
         std::process::exit(1);
     }
-    // The JS host is derived from the bytes that SHIP (#2276): after the
-    // optional `wasm-opt` rewrite below, never from the pre-opt module.
-    let host_from_shipped = |shipped: &[u8]| if js_host { write_js_host(output, file, shipped, &surface) } else { String::new() };
-
-    // The trust-spine ships the bytes ITS OWN rendering process produced —
-    // reachability DCE and the name-section trim already ran inside that
-    // pipeline (docs/wasm/WASM-OUTPUT.md). `wasm-opt` is a different kind of
-    // thing: an EXTERNAL, unverified transform applied to the renderer's
-    // finished output, so running it replaces bytes the trust-spine produced
-    // with bytes a separate, un-certified tool rewrote. That is why it stays
-    // an explicit, default-off opt-in (`--wasm-opt`) rather than automatic —
-    // see the wasm-opt parity leg (`tests/wasm_runtime_opt_parity.rs::wasm_opt_parity_spec`) for the
-    // differential-testing evidence backing this tier's own guarantee.
-    // Name the LEG in the one line every build prints: "which renderer
-    // produced these bytes" was invisible by default (the line said
-    // v1-verified even for structural output), and that opacity cost real
-    // diagnosis time — a "wasm doesn't work" report cannot be split
-    // between legs without it.
-    let leg = match component {
-        true if serve_export => "structural leg, WASI 0.3 wasi:http/handler export — serve it with `wasmtime serve`",
-        false => "structural leg",
-        true if direct_p3 => "structural leg, WASI 0.3 component (direct, async ABI)",
-        true if direct_p2 => "structural leg, WASI 0.2 component (direct)",
-        true => "structural leg, WASI 0.2 component (adapter)",
-    };
-    // The trust word belongs to what earned it: the structural leg is
-    // trusted end to end with its certificate PENDING (#1696,
-    // docs/contracts/proven-vs-trusted.md). `verified` on output no
-    // certificate covers is how #2154's run-time trap shipped (#2184).
-    let trust = "trusted, certificate pending";
     // The artifact needs a host that grants the subprocess capability: say
     // so at build time, since a stock runtime will refuse it at load.
     if proc_op.is_some() {
@@ -222,15 +100,172 @@ pub(super) fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check:
              it runs on a host that implements that import — `almide run {file} --target wasm` is one"
         ));
     }
+    // The JS host is derived from the bytes that SHIP (#2276): after the
+    // optional `wasm-opt` rewrite below, never from the pre-opt module.
+    let host_from_shipped = |shipped: &[u8]| if js_host { write_js_host(output, file, shipped, &surface) } else { String::new() };
+    report_built(output, &bytes, shape.leg(), req.wasm_opt, host_from_shipped);
+}
+
+/// Refuse the two host-op shapes no requested packaging can carry, before
+/// anything is written; returns the subprocess op the module imports, if any.
+///
+/// #2589 (ADR-0025): the subprocess family rides the private
+/// `almide:process/spawn` import, which the p1 core module carries and no
+/// component world declares — refuse the component build by name rather
+/// than let a transform fail on an import it cannot place.
+fn refuse_unpackageable(file: &str, host_ops: &[i32], component: bool, js_host: bool) -> Option<i32> {
+    let proc_op = host_ops.iter().copied().find(|op| (80..=90).contains(op));
+    if component && let Some(op) = proc_op {
+        err(&format!(
+            "error[E081]: process.* (host op {op}) needs the private almide:process/spawn capability, which no component world declares (ADR-0025)\n  \
+             hint: build the core module (drop --component) for a host that implements almide:process/spawn, or run it with `almide run {file} --target wasm`"
+        ));
+        std::process::exit(1);
+    }
+    if serves_http(host_ops) && js_host {
+        err("error[E081]: `http.serve` builds as a wasi:http/handler@0.3.0 component, which --host js does not write");
+        std::process::exit(1);
+    }
+    proc_op
+}
+
+/// #2659 (C-375): a program that reaches `http.serve` (its main
+/// serve-shaped — checked in `compile_to_wasm_bytes_surfaced`) builds as
+/// the stock serve export, a `wasi:http/handler@0.3.0` component, with or
+/// without `--component`.
+fn serves_http(host_ops: &[i32]) -> bool {
+    host_ops.iter().any(|op| (70..=72).contains(op))
+}
+
+/// Which artifact a build ships. The module imports `almide.*` (the embedded
+/// host's surface); a BUILD artifact must run on stock runtimes, so it ships in
+/// one of the forms below.
+struct WasmPackage {
+    component: bool,
+    serve_export: bool,
+    direct_p2: bool,
+    direct_p3: bool,
+}
+
+impl WasmPackage {
+    /// The packaging the op set and the flags call for. A direct p2/p3
+    /// component whose op set its shim cannot serve ends the run (E081).
+    ///
+    /// `--component` (#1628 stage 1): the DIRECT p2 path — canonical-ABI
+    /// imports straight off the almide.* module, no preview1 adapter (~25 KB
+    /// lighter, and the only shape the stage-2 fan/async lowering can build
+    /// on). `ALMIDE_COMPONENT_ADAPTER=1` is the switch back to the stage-0
+    /// adapter wrap over the `to_wasi` module (#2752 keeps it: the adapter
+    /// route is also what an fs program takes below).
+    fn decide(host_ops: &[i32], component: bool) -> Self {
+        let serve_export = serves_http(host_ops);
+        let component = component || serve_export;
+        let direct_p2 = component && !serve_export && !almide_base::env::flag("ALMIDE_COMPONENT_ADAPTER");
+        // `ALMIDE_COMPONENT_P3=1` (#1628 stage 2, experimental): the WASI 0.3
+        // component — stdio over component-model streams on the async
+        // canonical ABI. Needs a p3-capable runtime (wasmtime 46+); stays an
+        // env opt-in until the fan lowering lands on the same plumbing and
+        // the corpus gates cover it.
+        let direct_p3 = direct_p2 && almide_base::env::flag("ALMIDE_COMPONENT_P3");
+        let direct_p2 = direct_p2 && !fs_via_adapter(host_ops, direct_p2, direct_p3);
+        if direct_p2
+            && let Err(message) = almide_wasm_run::component_availability::check(host_ops, direct_p3)
+        {
+            err(&message);
+            std::process::exit(1);
+        }
+        WasmPackage { component, serve_export, direct_p2, direct_p3 }
+    }
+
+    /// Turn the renderer's `almide.*` module into the artifact that ships.
+    fn package(&self, file: &str, bytes: &[u8], host_ops: &[i32]) -> Vec<u8> {
+        use almide_wasm_run::{wasi, wasi_p2, wasi_p3};
+        if self.serve_export {
+            return or_almide_bug(wasi_p3::to_p3_service(bytes, host_ops), "p3 serve export transform");
+        }
+        if self.direct_p3 {
+            return or_almide_bug(wasi_p3::to_p3(bytes, host_ops), "p3 component transform");
+        }
+        if self.direct_p2 {
+            return or_almide_bug(wasi_p2::to_p2(bytes), "p2 component transform");
+        }
+        let wasi = or_almide_bug(wasi::to_wasi_mapped(bytes, host_ops), "WASI transform");
+        let bytes = with_debug_lines(file, bytes, wasi);
+        // Stage-0 adapter wrap: the WASI core module + the Cargo-pinned
+        // preview1 adapter. Packaging, not a rewrite.
+        if self.component {
+            return or_almide_bug(wrap_component(&bytes), "component encoding");
+        }
+        bytes
+    }
+
+    /// Name the LEG in the one line every build prints: "which renderer
+    /// produced these bytes" was invisible by default (the line said
+    /// v1-verified even for structural output), and that opacity cost real
+    /// diagnosis time — a "wasm doesn't work" report cannot be split
+    /// between legs without it.
+    fn leg(&self) -> &'static str {
+        match self.component {
+            true if self.serve_export => "structural leg, WASI 0.3 wasi:http/handler export — serve it with `wasmtime serve`",
+            false => "structural leg",
+            true if self.direct_p3 => "structural leg, WASI 0.3 component (direct, async ABI)",
+            true if self.direct_p2 => "structural leg, WASI 0.2 component (direct)",
+            true => "structural leg, WASI 0.2 component (adapter)",
+        }
+    }
+}
+
+/// #2742: a WASI 0.2 component that reaches the p1 fs service keeps the
+/// stage-0 adapter route whenever the p1 shim serves its whole op set.
+/// Those programs used to reach that route through the incumbent (the
+/// p1 op audit rerouted every fs op there); the fs service plus the
+/// preview1 adapter now serve them from the structural module, so the
+/// direct shim's E081 must not claim a program that built before. An op
+/// set without an fs op keeps the direct shim's verdict (#2113).
+fn fs_via_adapter(host_ops: &[i32], direct_p2: bool, direct_p3: bool) -> bool {
+    use almide_wasm_run::wasi::{FS_SERVICE_OPS, P1_SERVED_OPS};
+    direct_p2
+        && !direct_p3
+        && almide_wasm_run::component_availability::check(host_ops, false).is_err()
+        && host_ops.iter().any(|op| FS_SERVICE_OPS.iter().any(|(o, _, _)| o == op))
+        && host_ops.iter().all(|op| P1_SERVED_OPS.contains(op))
+}
+
+/// A packaging transform's result; its failure is a compiler defect, reported
+/// as one, and ends the run.
+fn or_almide_bug<T, E: std::fmt::Display>(result: Result<T, E>, what: &str) -> T {
+    result.unwrap_or_else(|e| {
+        err(&format!("error: {what} failed — this is an Almide bug: {e}"));
+        std::process::exit(1);
+    })
+}
+
+/// The `Built …` line, after the optional `--wasm-opt` rewrite.
+///
+/// The trust-spine ships the bytes ITS OWN rendering process produced —
+/// reachability DCE and the name-section trim already ran inside that
+/// pipeline (docs/wasm/WASM-OUTPUT.md). `wasm-opt` is a different kind of
+/// thing: an EXTERNAL, unverified transform applied to the renderer's
+/// finished output, so running it replaces bytes the trust-spine produced
+/// with bytes a separate, un-certified tool rewrote. That is why it stays
+/// an explicit, default-off opt-in (`--wasm-opt`) rather than automatic —
+/// see the wasm-opt parity leg (`tests/wasm_runtime_opt_parity.rs::wasm_opt_parity_spec`) for the
+/// differential-testing evidence backing this tier's own guarantee.
+fn report_built(output: &str, bytes: &[u8], leg: &str, wasm_opt: bool, host_from_shipped: impl Fn(&[u8]) -> String) {
+    let pre_size = bytes.len();
+    // The trust word belongs to what earned it: the structural leg is
+    // trusted end to end with its certificate PENDING (#1696,
+    // docs/contracts/proven-vs-trusted.md). `verified` on output no
+    // certificate covers is how #2154's run-time trap shipped (#2184).
+    let trust = "trusted, certificate pending";
     if !wasm_opt {
-        let host_note = host_from_shipped(&bytes);
+        let host_note = host_from_shipped(bytes);
         err(&format!(
             "Built {}{} ({} bytes, {}, {} — wasm-opt skipped; pass --wasm-opt for a smaller build rewritten outside the renderer)",
             output, host_note, pre_size, leg, trust
         ));
         return;
     }
-
     match run_wasm_opt(output) {
         Ok(post_size) => {
             let shipped = std::fs::read(output).unwrap_or_else(|e| { err(&format!("Failed to read back {}: {}", output, e)); std::process::exit(1); });
@@ -242,7 +277,7 @@ pub(super) fn cmd_build_wasm_direct(file: &str, output: Option<&str>, _no_check:
             ));
         }
         Err(why) => {
-            let host_note = host_from_shipped(&bytes);
+            let host_note = host_from_shipped(bytes);
             err(&format!(
                 "Built {}{} ({} bytes, {}, {}) — --wasm-opt requested but not applied: {}; shipped the renderer's own module unoptimized",
                 output, host_note, pre_size, leg, trust, why
