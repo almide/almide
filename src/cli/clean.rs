@@ -13,7 +13,7 @@ pub fn cmd_clean() {
     // stale rustc incremental session that failed one program shape forever)
     // and `almide build --target cdylib`'s. Each is emptied under its own
     // build lock, so a build in flight there finishes before its dir goes.
-    for dir in [super::run::shared_run_project_dir(), std::env::temp_dir().join("almide-build-cdylib")] {
+    for dir in [super::build_dir::shared_run_project_dir(), std::env::temp_dir().join("almide-build-cdylib")] {
         if dir.is_dir() && clear_locked_dir(&dir, "build cache") {
             err(&format!("Cleaned {}", dir.display()));
             cleaned = true;
@@ -35,13 +35,13 @@ pub fn cmd_clean() {
     // build lock of its own. A dir a running build resolved earlier falls
     // back to the self-contained cargo path — slower, never wrong.
     let temp = std::env::temp_dir();
-    let is_rtlib = |name: &str| name.starts_with(super::run::RTLIB_DIR_PREFIX);
+    let is_rtlib = |name: &str| name.starts_with(super::build_dir::RTLIB_DIR_PREFIX);
     let rtlibs = clear_locked_subdirs(&temp, is_rtlib, "runtime rlib cache");
     if rtlibs > 0 {
         err(&format!(
             "Cleaned {}/{}* ({} runtime rlib dir(s))",
             temp.display(),
-            super::run::RTLIB_DIR_PREFIX,
+            super::build_dir::RTLIB_DIR_PREFIX,
             rtlibs
         ));
         cleaned = true;
@@ -63,10 +63,10 @@ fn remove_cache_dir(dir: &std::path::Path, what: &str) -> bool {
     true
 }
 
-/// Empty one build dir under its own lock (`run::clear_build_dir`): true when
+/// Empty one build dir under its own lock (`build_dir::clear_build_dir`): true when
 /// something was removed. A failure ends the run, naming the cache as `what`.
 fn clear_locked_dir(dir: &std::path::Path, what: &str) -> bool {
-    match super::run::clear_build_dir(dir) {
+    match super::build_dir::clear_build_dir(dir) {
         Ok(cleared) => cleared,
         Err(e) => {
             err(&format!("Failed to clean {}: {}", what, e));

@@ -147,7 +147,7 @@ fn cmd_build_cdylib(rs_code: &str, crate_name: &str, dest: &std::path::Path, use
     // otherwise be corrupted by a concurrent `almide build`. The lock is held
     // through the install so the library copied out is this build's.
     let _ = std::fs::create_dir_all(&project_dir);
-    let _flock = super::run::BuildDirLock::acquire(&project_dir)
+    let _flock = super::build_dir::BuildDirLock::acquire(&project_dir)
         .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
     // Same stale-incremental-session recovery as the bin path (#2500), under
     // the lock just taken.
