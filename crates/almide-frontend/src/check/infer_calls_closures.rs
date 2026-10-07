@@ -508,7 +508,10 @@ impl Checker {
         self.env.auto_unwrap = false;
         let mut elems = Vec::with_capacity(arms.len());
         for arm in arms.iter_mut() {
-            let t = self.infer_expr(arm);
+            let t = match self.infer_settle_arm_scope(arm) {
+                Some(slot) => slot,
+                None => self.infer_expr(arm),
+            };
             let c = resolve_ty(&t, &self.uf);
             elems.push(match &c {
                 Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 => c.clone(),
