@@ -1,0 +1,79 @@
+// @contract: C-114
+// Reading a list's head through an Option with a heap payload (#3453): a
+// field read of `list.get(xs, i) ?? d` / `list.first(xs) ?? d`, a read-only
+// `let` of the same, `match list.first(xs)`, a list-pattern head `[h, ..]`
+// and `option.map` over the head. Native borrows the element in place and
+// clones only what escapes; the escaping cells (the head returned, stored,
+// or its field moved out) still own a copy, and the source list is intact
+// afterwards. Both targets print the same lines, the none side included.
+type Row = { id: Int, tags: List[String], name: String }
+
+fn blank() -> Row = Row { id: -1, tags: [], name: "blank" }
+
+fn tag_count(r: Row) -> Int = list.len(r.tags)
+
+fn field_read(rows: List[Row]) -> Int = (list.get(rows, 0) ?? blank()).id
+
+fn first_name(rows: List[Row]) -> String = (list.first(rows) ?? blank()).name
+
+fn let_read(rows: List[Row], i: Int) -> String = {
+  let h = list.get(rows, i) ?? blank()
+  "${h.name}:${list.len(h.tags)}"
+}
+
+fn borrowed_arg(rows: List[Row]) -> Int = {
+  let d = blank()
+  tag_count(list.first(rows) ?? d) + tag_count(list.get(rows, 1) ?? d)
+}
+
+fn first_match(rows: List[Row]) -> String = match list.first(rows) {
+  some(h) => h.name,
+  none => "-",
+}
+
+fn pattern_head(rows: List[Row]) -> Int = match rows {
+  [h, ..] => h.id + list.len(h.tags),
+  _ => 0,
+}
+
+fn mapped(rows: List[Row]) -> Int = list.get(rows, 0) |> option.map((h) => h.id * 10) ?? 0
+
+fn head_tags(rows: List[Row]) -> List[String]? = list.first(rows) |> option.map((h) => h.tags)
+
+fn take_head(rows: List[Row]) -> Row = list.first(rows) ?? blank()
+
+fn keep_heads(rows: List[Row]) -> List[Row] = {
+  let h = list.get(rows, 0) ?? blank()
+  [h, h]
+}
+
+fn pattern_take(rows: List[Row]) -> Row = match rows {
+  [h, ..] => h,
+  _ => blank(),
+}
+
+effect fn main() -> Unit = {
+  let rows = [
+    Row { id: 7, tags: ["a", "b"], name: "first" },
+    Row { id: 8, tags: ["c"], name: "second" }
+  ]
+  let empty: List[Row] = []
+  let d = blank()
+  let line1 = "${field_read(rows)} ${field_read(empty)} ${first_name(rows)} ${first_name(empty)}"
+  println(line1)
+  let line2 = "${let_read(rows, 0)} ${let_read(rows, 1)} ${let_read(rows, 5)} ${let_read(empty, 0)}"
+  println(line2)
+  let line3 = "${borrowed_arg(rows)} ${borrowed_arg(empty)} ${first_match(rows)} ${first_match(empty)}"
+  println(line3)
+  let line4 = "${pattern_head(rows)} ${pattern_head(empty)} ${mapped(rows)} ${mapped(empty)}"
+  println(line4)
+  let line5 = "${head_tags(rows)} ${head_tags(empty)}"
+  println(line5)
+  let taken = take_head(rows)
+  let kept = keep_heads(rows)
+  let held = pattern_take(rows)
+  let line6 = "${taken.name} ${list.len(kept)} ${kept[1].tags} ${held.id} ${pattern_take(empty).name}"
+  println(line6)
+  let line7 = "${rows[0].name} ${rows[0].tags} ${list.len(rows)} ${d.name}"
+  println(line7)
+}
