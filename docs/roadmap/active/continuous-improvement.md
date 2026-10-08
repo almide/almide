@@ -146,7 +146,31 @@ warning count against develop, not by the rounded grade.
   - **Emit & Format timeout:** the repo's Actions cache is over its 10 GB quota (10.7 GB measured), so develop's grammar-gate memo was evicted. Cold, the job ran ~20–21 min against a 20-min timeout (grammar step 459 s vs under 30 s warm). A cancelled run saves no memo, so every later run would start cold and be cancelled too. The timeout is now 35 min; this is a job limit, not a quality criterion.
   - **Other infra failures, re-run and not counted as passes:** GitHub not creating the jobs that depend on Build (2026-10-07 ~15:00 UTC); an abandoned solo shard; pushes failing with Internal Server Error.
 - **Hooks:** one agent pushed `fix-3451` with `LEFTHOOK=0` after an SSH timeout. The same commits had passed the pre-push hook on the push before; my own attempt to skip hooks was refused, and pushes since run the hooks.
-- **Next:** #3450 (wasm structural equality on deeply nested distinct types walled `hold-depth-i32`) is fixed on branch `fix-3450` and goes in batch 21. Its follow-up: `emit_val_cmp` in `list_sort.rs` inlines the same way and may have the same depth limit.
+- **Merged:** batch 20 = #3478. The dependabot bundle #3476 also merged.
+
+### 2026-10-08 (later) — batch 21 and the CI cache
+
+- **Batch 21 = #3479, merged:** #3450, plus the same limit in ordering and display.
+  - **Cause:** the wasm structural emitter inlined equality, compare (`list_sort.rs`) and display one type level at a time. Each level holds i32 slots from a 24-slot pool, so a chain of *distinct* nested types used up the pool and walled with `hold-depth-i32`. The program then ran through the native fallback, not on wasm.
+  - **Fix:** each emitter now computes the slots an inline expansion would need. When it would not fit, it calls an outlined per-type helper that starts with a fresh pool (`NamedOp::EqTy`, `NamedOp::CmpTy`, `DisplayNamed`, `Helper::DisplayTy`). Outlining only happens where the emitter used to wall: no existing fixture's size, alloc or witness row moved.
+  - **Walled before the fix, on wasm only:**
+    - `list.sort` / `max` / `min` / `sort_by` on 4–6-deep lists
+    - sorting 8-deep tuples
+    - `assert_eq` / `"${x}"` on 8–9-deep lists
+    - record chains
+  - **Evidence:** `spec/wasm_cross/deep_eq_nested_distinct.almd` (C-015), plus `tests/nested_distinct_{eq,cmp}_test.rs`, which assert the wasm build log says "structural leg" and that output is byte-identical to native.
+  - **Verification:** verify-trust 935/935 and output-parity 1046/1046. codopsy on almide-wasm stays A 90 with 47 warnings, unchanged.
+- **CI cache feedback loop:**
+  - **Cause:** the repo's Actions cache sat at its 10 GB quota (9.96–10.7 GB measured), so develop's entries were evicted. A job with no cache hit runs cold, a cold job can exceed its timeout, and a cancelled job saves nothing. So every later run started cold again.
+  - **Measured:** the non-required "Commissioned wasm gates (structural leg)" job took 26 min when it succeeded and was cancelled at 30 on four of seven runs on 2026-10-08. Every test in it was uniformly about 1.5× slower; there was no single hang. Emit & Format had the same loop through the grammar memo, fixed in batch 20.
+  - **What was filling the quota:** merge-queue and PR refs, whose caches nothing reads back, saved entries anyway; one shard-coverage entry was 1.9 GB.
+  - **Fix (this PR):** every rust-cache step saves from develop only, as the `build` job already did. The structural job timeout goes from 30 to 45 min, to cover the cold path.
+  - **Not changed:** the opam/elan `actions/cache` entries also save from PR refs. Fixing that needs a restore/save split, so it is left for later.
+- **Branch hygiene:** the owner deleted 381 remote branches that were fully landed (patch-equivalent in develop, or a merged PR whose head is the branch tip). A second list of 163 branches with closed, unmerged PRs is prepared for the owner. Those commits stay reachable on GitHub as `refs/pull/N/head`.
+- **Next:**
+  - #3333: audit compiler temporaries against user names (agent running).
+  - #3466: `almide check` speed.
+  - Re-measure the gramide edit loop.
 
 ## Edit loop on a real project: O6lvl4/gramide 0.2.11
 
