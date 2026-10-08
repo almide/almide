@@ -15,53 +15,6 @@ fn render_stmts(ctx: &RenderContext, stmts: &[IrStmt]) -> Vec<String> {
     stmts.iter().map(|s| render_stmt(ctx, s)).collect()
 }
 
-/// Mangle a type into the monomorphization suffix form (mirrors mono/utils.rs).
-fn mangle_ty_for_mono(ty: &Ty) -> String {
-    if let Some(name) = scalar_mono_name(ty) {
-        return name.into();
-    }
-    match ty {
-        Ty::Named(name, args) => mangle_applied_for_mono(&name.to_string(), args),
-        Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => {
-            format!("List_{}", mangle_ty_for_mono(&args[0]))
-        }
-        Ty::Applied(id, args) => mangle_applied_for_mono(&format!("{:?}", id), args),
-        _ => "Unknown".into(),
-    }
-}
-
-/// The scalar types' mono suffixes — a flat name table, `None` for anything
-/// that needs structural mangling.
-fn scalar_mono_name(ty: &Ty) -> Option<&'static str> {
-    let name = match ty {
-        Ty::Int => "Int",
-        Ty::Float => "Float",
-        Ty::String => "String",
-        Ty::Bool => "Bool",
-        Ty::Int8 => "Int8",
-        Ty::Int16 => "Int16",
-        Ty::Int32 => "Int32",
-        Ty::UInt8 => "UInt8",
-        Ty::UInt16 => "UInt16",
-        Ty::UInt32 => "UInt32",
-        Ty::UInt64 => "UInt64",
-        Ty::Float32 => "Float32",
-        Ty::Bytes => "Bytes",
-        Ty::Unit => "Unit",
-        _ => return None,
-    };
-    Some(name)
-}
-
-/// `Base` when there are no type arguments, `Base_A_B` when there are.
-fn mangle_applied_for_mono(base: &str, args: &[Ty]) -> String {
-    if args.is_empty() {
-        return base.to_string();
-    }
-    let inner = args.iter().map(mangle_ty_for_mono).collect::<Vec<_>>().join("_");
-    format!("{}_{}", base, inner)
-}
-
 /// Render an expression ensuring an owned value (not AlmideRcCow wrapper).
 /// For AlmideRcCow vars, produces `(*var).clone()` to yield the unwrapped T.
 /// Used at sites that need owned T: function args, record fields, concat operands.

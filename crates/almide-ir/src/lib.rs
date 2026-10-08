@@ -42,6 +42,7 @@ pub mod mut_args;
 pub mod top_let_storage;
 pub mod accum_tre;
 pub mod record_shape;
+pub mod mono_name;
 
 mod wasm_repr;
 
@@ -54,6 +55,7 @@ pub use wasm_repr::wasm_types_compatible;
 pub use visit::{IrVisitor, walk_expr, walk_stmt, walk_pattern};
 pub use visit_mut::{IrMutVisitor, walk_expr_mut, walk_stmt_mut, walk_pattern_mut};
 pub use substitute::{substitute_var_in_expr, substitute_var_in_stmt};
+pub use mono_name::{mono_instance_name, mono_instance_base, mono_base_or_self};
 
 // ── Identifiers ─────────────────────────────────────────────────
 

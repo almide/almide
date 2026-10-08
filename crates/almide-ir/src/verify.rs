@@ -379,8 +379,8 @@ fn collect_known_module_functions(
 /// `ceangal.cell.get` reported unknown while the non-generic `is_dirty` in the
 /// same module verified fine — and only when the module was reached through a
 /// consumer's import graph, which is what made it look import-order dependent).
-/// An instance is `<base>__<suffix>`, so the base is what a not-yet-rewritten
-/// call spells.
+/// An instance's name records its base ([`crate::mono_instance_base`]), and
+/// the base is what a not-yet-rewritten call spells.
 ///
 /// The EXPORTS are the module's DECLARED surface, captured at lowering — before
 /// monomorphization, which drops a generic fn that no reachable call
@@ -393,8 +393,7 @@ fn module_call_surface(m: &IrModule) -> std::collections::HashSet<String> {
         m.functions.iter().map(|f| f.name.to_string()).collect();
     let bases: Vec<String> = funcs
         .iter()
-        .filter_map(|n| n.split_once("__").map(|(b, _)| b.to_string()))
-        .filter(|b| !b.is_empty())
+        .filter_map(|n| crate::mono_instance_base(n).map(str::to_string))
         .collect();
     funcs.extend(bases);
     funcs.extend(m.exports.iter().filter_map(|e| match e {

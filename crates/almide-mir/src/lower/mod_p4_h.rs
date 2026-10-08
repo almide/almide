@@ -153,8 +153,8 @@ pub fn interp_str_desugarable(parts: &[IrStringPart], registry: &RecordLayouts) 
 /// → `list.map_str`, a DynListStr-result impl). The element repr (i64 vs i32 handle) demands a
 /// separate variant; the variant reads/writes via the heap-aware prim ops. Scalar-result lists keep
 /// the plain name. `module.func` is unchanged for everything else.
-/// The BASE name of a stdlib call: the monomorphizer suffixes a generic
-/// intrinsic's instantiation (`option.collect__Int`, `result.or_else__Int_String_String`),
+/// The BASE name of a stdlib call: the monomorphizer renames a generic
+/// intrinsic's instantiation to an instance name (`almide_ir::mono_instance_name`),
 /// and every name-keyed stdlib decision — registry routing, materialized-variant
 /// read-shape tracking — is about the BASE fn. The instantiation's types travel
 /// separately in `arg_tys`/`result_ty`, so the suffix carries no information any
@@ -163,18 +163,11 @@ pub fn interp_str_desugarable(parts: &[IrStringPart], registry: &RecordLayouts) 
 /// `is_self_host_option_module_fn` left a `match` over a mono-specialized
 /// `option.collect` result UNTRACKED, walling the whole function.
 ///
-/// #1144: a carrier name may itself BEGIN with `__` (the ADR-0006
-/// `__fallible_*` family — `fs.__fallible_fold_lines`). The mono suffix is a
-/// `__` strictly INSIDE the name, so the split must start AFTER a leading
-/// `__`; splitting at offset 0 returned the empty string, and every name-keyed
-/// decision (registry routing, read-shape tracking) then missed silently —
-/// walling the whole fn instead of routing it.
+/// The instance name records its base's length (#3492), so the base comes
+/// back exactly whatever it contains — a carrier that BEGINS with `__` (the
+/// ADR-0006 `__fallible_*` family, #1144) included.
 pub(crate) fn base_stdlib_fn_name(func: &str) -> &str {
-    let lead = if func.starts_with("__") { 2 } else { 0 };
-    match func[lead..].split_once("__") {
-        Some((base, _)) => &func[..lead + base.len()],
-        None => func,
-    }
+    almide_ir::mono_base_or_self(func)
 }
 
 /// The layout facts the routers cannot compute themselves (they are free fns
@@ -214,9 +207,9 @@ pub(crate) fn list_heap_call_name(module: &str, func: &str, arg_tys: &[Ty], resu
 /// (`tests/router_signature_gate.rs`), which drives it over a type lattice and
 /// counts how often the routers alone would have mislinked.
 pub fn routers_call_name(module: &str, func: &str, arg_tys: &[Ty], result_ty: &Ty, hints: RouterHints) -> String {
-    // A MONO-SPECIALIZED stdlib call name (`result.or_else__Int_String_String` —
-    // the optimizer suffixes a generic intrinsic's instantiation) must route by
-    // its BASE name: the registry links base names only, so the suffixed form
+    // A MONO-SPECIALIZED stdlib call name (`result.or_else`'s instance — the
+    // optimizer renames a generic intrinsic's instantiation) must route by
+    // its BASE name: the registry links base names only, so the instance name
     // fell through every router arm to an UNLINKED dotted name and walled the fn
     // (fuzz B-198's or_else). The instantiation's types are already in
     // `arg_tys`/`result_ty` — the suffix carries no information the router needs.

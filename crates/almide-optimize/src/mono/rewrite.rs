@@ -107,7 +107,7 @@ impl<'a> RewriteVisitor<'a> {
         if !bindings.is_empty() {
             let suffix = mangle_suffix(&bindings);
             if self.instances.contains_key(&(name.to_string(), suffix.clone())) {
-                *name = format!("{}__{}", name, suffix).into();
+                *name = almide_ir::mono_instance_name(name.as_str(), &suffix).into();
                 *expr_ty = substitute_ty(expr_ty, &bindings);
             }
         }
@@ -135,7 +135,7 @@ impl<'a> RewriteVisitor<'a> {
         if all_concrete {
             let suffix = mangle_suffix(&bindings);
             if self.instances.contains_key(&(method.to_string(), suffix.clone())) {
-                let mono_name = format!("{}__{}", method, suffix);
+                let mono_name = almide_ir::mono_instance_name(method.as_str(), &suffix);
                 let obj_expr = (**object).clone();
                 let mut new_args: Vec<IrExpr> = vec![obj_expr];
                 new_args.extend(args.drain(..));

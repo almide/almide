@@ -54,8 +54,8 @@ fn one_mapper_name_covers_all_nine_pairings_and_the_type_splits_them() {
 #[test]
 fn the_merged_name_set_survives_the_historical_name_mangling_incidents() {
     use crate::lower::is_self_host_materialized_result_fn;
-    // C-145: a mono-suffixed instantiation must resolve to its BASE name.
-    assert!(is_self_host_materialized_result_fn("result", "or_else__Int_String_String"));
+    // C-145: a mono instance must resolve to its BASE name.
+    assert!(is_self_host_materialized_result_fn("result", "__almd_mono7_or_else__Int_cString_cString"));
     // #1144: a carrier whose name BEGINS with `__` must not base to "".
     assert!(is_self_host_materialized_result_fn("fs", "__fallible_fold_lines"));
     // The Phase-1 moved family: ctor-built Result[Unit, String] producers are
