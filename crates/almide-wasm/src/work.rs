@@ -20,6 +20,9 @@ pub(crate) enum NamedOp {
     /// #3450: `ti` is an `ETy` index, not a Named id — ONE inlined level of
     /// that type's `==`, outlined when the caller's hold pool runs short.
     EqTy,
+    /// The ordering twin of `EqTy`: ONE inlined level of an `ETy`'s
+    /// total-order compare.
+    CmpTy,
 }
 
 /// A per-program emitted helper (assembled right after `main`, BEFORE the
@@ -111,6 +114,11 @@ pub(crate) enum Helper {
     /// with the same slot, so `Tree[UInt64]` and `Tree[Int]` share `ti` and
     /// only the IR arguments pick the leaves' digits (#3187).
     DisplayNamed { ti: u32, irk: u32 },
+    /// `$displayty_<ety>(block, cursor) -> cursor` — ONE inlined level of a
+    /// structural container's display, outlined when the caller's i32 hold
+    /// pool runs short (the display twin of `NamedOp::EqTy`). `irk` names
+    /// the use site's IR type (`FnWork::display_ir_key_any`).
+    DisplayTy { ety: u32, irk: u32 },
     /// The keyed-lookup index family (#1219 stage 2, map_index.rs): the
     /// address-keyed side table (`get` / `raw` / `set`), the per-class
     /// key hash, the index builder, the `$scan_*`-shaped `find` and the
@@ -300,6 +308,8 @@ pub(crate) struct FnWork {
     pub(crate) display_bodies: std::cell::RefCell<HashMap<(u32, u32), DisplayBuild>>,
     /// The generic-instance IR types `DisplayNamed::irk` names (`irk - 1`).
     pub(crate) display_irs: std::cell::RefCell<Vec<Ty>>,
+    /// `Helper::DisplayTy` bodies, keyed by `(ety, irk)`.
+    pub(crate) display_ty_bodies: std::cell::RefCell<HashMap<(u32, u32), DisplayBuild>>,
     /// `Helper::NamedOp` bodies, keyed by `(op, ti)` — ONE map for both
     /// ops, so neither the build loop nor assembly can learn about one and
     /// forget the other (#2172).
@@ -362,10 +372,16 @@ impl FnWork {
     /// tell `UInt64` from `Int` or `Float32` from `Float` — and every other
     /// type keeps the one helper per `ti` (0).
     pub(crate) fn display_ir_key(&self, ir: Option<&Ty>) -> u32 {
-        let Some(t @ Ty::Named(_, args)) = ir else { return 0 };
-        if args.is_empty() {
-            return 0;
+        match ir {
+            Some(Ty::Named(_, args)) if !args.is_empty() => self.display_ir_key_any(ir),
+            _ => 0,
         }
+    }
+
+    /// The key of ANY IR type (0 = none): a structural container's display
+    /// helper reads its leaves' digits from the whole use-site type.
+    pub(crate) fn display_ir_key_any(&self, ir: Option<&Ty>) -> u32 {
+        let Some(t) = ir else { return 0 };
         let mut irs = self.display_irs.borrow_mut();
         let pos = irs.iter().position(|x| x == t).unwrap_or_else(|| {
             irs.push(t.clone());
