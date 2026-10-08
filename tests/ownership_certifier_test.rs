@@ -54,20 +54,20 @@ const FIRST: &str = "fn first[T](xs: List[T]) -> T? = list.get(xs, 0)\nfn main()
 #[test]
 fn an_owned_param_the_body_only_borrows_is_a_c4_violation() {
     // With borrow inference ablated every eligible param is owned: the
-    // monomorphised `first__Int` takes its list owned though the body only
+    // monomorphised `first[Int]` (`__almd_mono5_first__Int`) takes its list owned though the body only
     // borrows it — every caller moves (or clones) a value the body never
     // needs. The certifier names it.
     let (ok, err) = certify_with("c4", FIRST, &[("ALMIDE_BORROW_OWN_ALL", "1")]);
     assert!(!ok, "the build must fail under ALMIDE_CERTIFY_OWNERSHIP=fail:\n{err}");
-    assert!(err.contains("[C4 owned-never-consumed] first__Int: param `xs"), "{err}");
+    assert!(err.contains("[C4 owned-never-consumed] __almd_mono5_first__Int: param `xs"), "{err}");
 }
 
 #[test]
 fn a_monomorphised_instance_borrows_and_certifies() {
-    // The same program with inference on (#2231 wave 2): `first__Int` takes
+    // The same program with inference on (#2231 wave 2): `first[Int]` takes
     // `&[i64]` and the body certifies clean.
     let (ok, err) = certify("c4-fixed", FIRST);
-    assert!(ok, "first__Int must certify once instances are inferred:\n{err}");
+    assert!(ok, "first[Int] must certify once instances are inferred:\n{err}");
 }
 
 #[test]
