@@ -671,7 +671,8 @@ fn source_var_name(ctx: &RenderContext, id: VarId) -> String {
     let mut cur = id;
     for _ in 0..8 {
         let name = ctx.var_table.get(cur).name.as_str();
-        let Some(origin) = name.strip_prefix("__cap_").and_then(|n| n.parse::<u32>().ok()) else {
+        let cap = ctx.is_temp_named(cur, "__cap_").then(|| name.strip_prefix("__cap_")).flatten();
+        let Some(origin) = cap.and_then(|n| n.parse::<u32>().ok()) else {
             return name.to_string();
         };
         if origin as usize >= ctx.var_table.len() {

@@ -130,7 +130,7 @@ fn a_non_escaping_read_only_bound_closure_borrows_what_it_captures() {
     ] {
         let s = fn_sig_and_body(&rust, name);
         assert!(s.starts_with(sig), "{name}:\n{s}");
-        assert!(s.contains(": _ = &|") && !s.contains("move |") && !s.contains("__cap_") && !s.contains("Rc::new"), "{name} must bind a borrowing scope closure:\n{s}");
+        assert!(s.contains(": _ = &|") && !s.contains("move |") && !s.contains("__almide_ir2_cap_") && !s.contains("Rc::new"), "{name} must bind a borrowing scope closure:\n{s}");
         assert!(!s.contains(".clone())("), "{name} must call the scope closure directly:\n{s}");
     }
     // Two closures sharing one capture both borrow it.

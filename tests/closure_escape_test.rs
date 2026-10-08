@@ -89,7 +89,7 @@ fn a_fn_typed_param_is_borrowed_unless_its_callable_escapes() {
     let s = fn_sig_and_body(&rust, "scaled");
     assert!(s.starts_with("pub fn scaled(xs: &[i64], k: i64)") && s.contains("apply(xs, &|x|") && !s.contains("move") && !s.contains("Rc::new"), "{s}");
     let s = fn_sig_and_body(&rust, "suffixed");
-    assert!(s.starts_with("pub fn suffixed(names: Vec<String>, tag: &str)") && s.contains("apply_str(names, &|n|") && !s.contains("__cap_") && !s.contains("Rc::new"), "{s}");
+    assert!(s.starts_with("pub fn suffixed(names: Vec<String>, tag: &str)") && s.contains("apply_str(names, &|n|") && !s.contains("__almide_ir2_cap_") && !s.contains("Rc::new"), "{s}");
     // A closure value is lent through its handle.
     let s = fn_sig_and_body(&rust, "via_value");
     assert!(s.contains("apply(xs, &(*g))"), "{s}");
