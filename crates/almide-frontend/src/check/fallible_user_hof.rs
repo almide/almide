@@ -34,10 +34,12 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use almide_base::intern::{sym, Sym};
 use almide_lang::ast::{self, Decl, Expr, ExprId, ExprKind, TypeExpr, Visibility};
 
-/// The twin's name for a user HOF. Double separator so a user fn named
-/// `fallible_x` can never collide with the twin of a fn named `x`.
+/// The twin's name for a user HOF. Spelled with the separator no identifier
+/// contains (#3483), so no user decl — `__fallible__x` included — can be the
+/// twin of `x`; lowering respells it `__fallible__x`, in the IR's `__` space
+/// that user fns are escaped out of.
 fn twin_name(hof: Sym) -> Sym {
-    sym(&format!("__fallible__{}", hof.as_str()))
+    sym(&format!("__fallible{}{}", almide_ir::AST_SYNTH_SEP, hof.as_str()))
 }
 
 /// A Cell-1-admissible HOF: the slot to retype plus WHERE its decl lives.
