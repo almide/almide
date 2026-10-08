@@ -128,8 +128,12 @@ impl Checker {
         // This arm returns before `resolve_module_member`, which is where the
         // import is normally marked used — so `import json` was reported
         // unused on a file whose very next token used it, and following the
-        // hint broke the build in a package (#1089).
-        if field == "encode" && arg_tys.len() == 1 {
+        // hint broke the build in a package (#1089). Only when `module`
+        // RESOLVES to the stdlib json: a user module's own `encode` is an
+        // ordinary call (#3493).
+        if field == "encode" && arg_tys.len() == 1
+            && self.env.import_table.resolves_to_stdlib(module, "json")
+        {
             let arg_concrete = resolve_ty(&arg_tys[0], &self.uf);
             if self.has_codec_encode(&arg_concrete) {
                 self.env.import_table.mark_used(module);

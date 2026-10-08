@@ -95,6 +95,16 @@ impl ImportTable {
         }
     }
 
+    /// Whether the written name `name` resolves to the STDLIB module
+    /// `stdlib_module` through this file's imports (`json`, or `j` under
+    /// `import json as j`). A user module or a `self.` import of the same
+    /// spelling does not: the decision is the import table's, not the
+    /// spelling's (#3493).
+    pub fn resolves_to_stdlib(&self, name: &str, stdlib_module: &str) -> bool {
+        let target = sym(stdlib_module);
+        self.resolve(name) == Some(target) && self.stdlib.contains(&target)
+    }
+
     /// The name this file writes for the canonical module `canonical`: its
     /// import alias (`import self.finish as fin` → `fin`), else the canonical
     /// name itself. For a diagnostic that tells the writer what to type.
