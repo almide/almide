@@ -63,11 +63,12 @@ pub(super) fn specialize_function(
     // (idempotent no-op here); module-scoped mono relies on this step
     // because its rewriter walks module bodies but does not re-discover
     // intra-fn recursive edges.
-    // The suffix arrives dot-free: `mangle_ty` sanitizes module-qualified
-    // type names at the mint point (#1496), so every consumer — this
+    // The suffix arrives dot-free: `mangle_ty` writes a module-qualified type
+    // name's `.` as `_d` at the mint point (#1496), so every consumer — this
     // definition, the module-call rewriter, top-level mono's rewrite_calls —
-    // agrees on the identifier spelling.
-    let spec_name = format!("{}__{}", orig.name, suffix);
+    // agrees on the identifier spelling. The instance is named in the
+    // compiler's `__almd_mono` space, which no user fn can spell (#3492).
+    let spec_name = almide_ir::mono_instance_name(orig.name.as_str(), suffix);
     rename_named_calls(&mut body, orig.name.as_str(), &spec_name);
 
     IrFunction {

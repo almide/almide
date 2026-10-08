@@ -206,12 +206,12 @@ impl Emitter<'_> {
             // Result and the FIRST err ends the walk (the file is already
             // in memory — C-220's streaming carve-out keeps reader
             // position out of the wasm observables).
-            (f, [p, init, cb]) if f.starts_with("__fallible_fold_lines") => {
+            (f, [p, init, cb]) if almide_ir::mono_base_or_self(f).starts_with("__fallible_fold_lines") => {
                 self.lower_fs_fallible_fold(p, init, cb)?
             }
             // The walk twin (#1806, family completeness): the callback
             // answers Result[Unit, String]; the first err ends the walk.
-            (f, [p, cb]) if f.starts_with("__fallible_for_each_line") => {
+            (f, [p, cb]) if almide_ir::mono_base_or_self(f).starts_with("__fallible_for_each_line") => {
                 self.lower_fs_fallible_for_each(p, cb)?
             }
             _ => return Ok(None),
