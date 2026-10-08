@@ -1461,7 +1461,13 @@ jobs:
     name: Emit & Format
     needs: build
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Sized for a COLD grammar-gate memo, not a warm one. When the repo's
+    # Actions cache passes its 10 GB quota, GitHub evicts develop's memo; the
+    # cold run then measured ~20–21 min (grammar step 459 s against <30 s
+    # warm; runs 37695989334 and the deps-2026-10-07 run were cancelled at
+    # 20). A cancelled run saves no memo, so every later run would start cold
+    # and be cancelled too. 35 leaves headroom over the measured cold path.
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v7
 
