@@ -852,7 +852,7 @@ PYEOF
 drill_structural_prop caps-transitive "#2759 call graph: file write from a plain fn"
 
 # ── #3041: DECLARATIONS the source implies but the synthesized fn does not
-# spell. `branch_lift_synth_0` is lifted out of an `effect fn`'s body and
+# spell. `__almd_lift_0` (the branch-lift helper, #3483) is lifted out of an `effect fn`'s body and
 # reads a file: it is bounded by its origin's `effect` (the `effect:origin`
 # marker, not the ABI flag). `heavy` is a plain fn run inside a
 # `fan.timeout` region: the fuel meter's deadline test reads the clock in
@@ -861,7 +861,7 @@ drill_structural_prop caps-transitive "#2759 call graph: file write from a plain
 # the synthesized fn bounded as the plain fn it is spelled as, and a clock
 # read that is the frame's own.
 FS=spec/wasm_cross/fs_read_text_utf8.almd
-run_structural_prop "$FS" caps branch_lift_synth_0 0
+run_structural_prop "$FS" caps __almd_lift_0 0
 sed 's/^[^|]*|/0|/' /tmp/structural.prop > /tmp/structural.tamper
 drill_structural_prop caps "#3041 synthesized fn declared plain"
 TO=spec/wasm_cross/fuel_timeout_ends.almd
