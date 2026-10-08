@@ -319,6 +319,19 @@ pub fn escape_user_fn_name(name: almide_base::intern::Sym) -> almide_base::inter
     }
 }
 
+/// #3483: the separator in the name of a fn the frontend synthesizes as
+/// SOURCE — an AST decl the checker types alongside the user's, like a
+/// fallible user-HOF twin `__fallible:f`. No identifier contains it, so the
+/// decl never meets a user fn in the checker's table; lowering respells it
+/// into the `__` space ([`ast_synth_ir_name`]).
+pub const AST_SYNTH_SEP: char = ':';
+
+/// The IR name of an AST-synthesized fn (`__fallible:f` → `__fallible__f`),
+/// or `None` for a name not spelled with [`AST_SYNTH_SEP`].
+pub fn ast_synth_ir_name(name: &str) -> Option<almide_base::intern::Sym> {
+    name.contains(AST_SYNTH_SEP).then(|| almide_base::intern::sym(&name.replace(AST_SYNTH_SEP, "__")))
+}
+
 /// The source spelling of an IR fn name — the inverse of
 /// [`escape_user_fn_name`]. Only an escaped user fn's IR name starts with
 /// [`USER_FN_ESCAPE`]; every other name comes back unchanged.
