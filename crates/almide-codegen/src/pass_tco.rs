@@ -150,7 +150,7 @@ fn strip_borrows_at_tco_calls(
 /// Returns true if the function is eligible for TCO:
 /// - Has at least one self-recursive call
 /// - ALL self-recursive calls are in tail position
-/// - Not a test helper (name starts with `__test_`)
+/// - Not a test block (`is_test`; #3483: not its name)
 /// - Return type can be default-initialized (primitives, tuples of primitives, etc.)
 /// - Every `mut` parameter is one the loop can keep borrowed
 ///
@@ -158,7 +158,7 @@ fn strip_borrows_at_tco_calls(
 /// functions will get (their params become loop state → owned), keeping callers'
 /// inferred borrows consistent with the post-TCO signature.
 pub fn is_tco_candidate(func: &IrFunction) -> bool {
-    if func.name.starts_with("__test_") {
+    if func.is_test {
         return false;
     }
     if !can_default_init(&func.ret_ty) {
