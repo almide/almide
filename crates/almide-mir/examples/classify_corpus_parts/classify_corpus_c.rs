@@ -145,7 +145,7 @@ fn classify_lowered_fn(
     // the loop-`!` flag rewrite the lowering applied, so its injected owned-copy
     // concat was a MIR op with no counted IR node (#1176). The unit-tail ok-wrap
     // half is registry-INDEPENDENT for a CAN-ERR declared-Unit effect fn — a
-    // post-registry `effect_cont_synth_*` continuation lowers through it, so the
+    // post-registry `__almd_cont_*` continuation lowers through it, so the
     // AUTO_WRAP retype alone re-opened the same false breach (fs_streaming).
     let abi_body = almide_mir::lower::abi_effective_body(func);
     let eff_body = almide_mir::lower::desugar_all(

@@ -32,7 +32,7 @@ fn read_views_witness_as_reads() {
     assert!(accepted(cert), "the portable checker must accept {cert:?}");
     assert_eq!(cert, "{ibbd|ibd}\n{|im}\n{|im}\nim\n");
     let w = witnesses("fs_read_directory_errno");
-    for name in ["branch_lift_synth_3", "branch_lift_synth_7", "branch_lift_synth_9"] {
+    for name in ["__almd_lift_3", "__almd_lift_7", "__almd_lift_9"] {
         let cert = w.get(name).unwrap_or_else(|| panic!("{name} is witnessed: {w:?}"));
         assert!(!cert.starts_with('!'), "{name} no longer declines: {cert:?}");
         assert!(accepted(cert), "{name}: the portable checker must accept {cert:?}");

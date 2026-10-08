@@ -335,7 +335,7 @@ pub const SCOPED_FN_ATTR: &str = "scoped:fn";
 /// runs it in the arena window.
 pub const SCOPED_BLOCK_ATTR: &str = "scoped:block";
 /// #3041: the marker on a fn the compiler SYNTHESIZED out of an `effect fn`'s
-/// body (a lifted heap branch `branch_lift_synth_*`, a metered region
+/// body (a lifted heap branch `__almd_lift_*`, a metered region
 /// `__almd_bounded_*`, an outlined result block `__almd_res_*`). Its own
 /// `is_effect` stays false — that flag is the ABI (a Result-wrapped return)
 /// — but its host reach is what its origin declared, and the capability
