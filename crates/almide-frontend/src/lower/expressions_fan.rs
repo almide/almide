@@ -62,7 +62,7 @@ fn outline_ir_as_fn(
     for fv in free {
         let info = ctx.var_table.get(fv);
         let (fv_ty, fv_name) = (info.ty.clone(), info.name);
-        let pv = ctx.var_table.alloc(fv_name, fv_ty.clone(), Mutability::Let, span);
+        let pv = ctx.var_table.alloc_like(fv, fv_ty.clone(), Mutability::Let);
         let pv_expr = ctx.mk(IrExprKind::Var { id: pv }, fv_ty.clone(), span);
         body = almide_ir::substitute::substitute_var_in_expr(&body, fv, &pv_expr);
         params.push(IrParam {
@@ -198,7 +198,7 @@ fn outline_metered_arm_ir(
             for fv in free {
                 let info = ctx.var_table.get(fv);
                 let (fv_ty, fv_name) = (info.ty.clone(), info.name);
-                let pv = ctx.var_table.alloc(fv_name, fv_ty.clone(), Mutability::Let, span);
+                let pv = ctx.var_table.alloc_like(fv, fv_ty.clone(), Mutability::Let);
                 let pv_expr = ctx.mk(IrExprKind::Var { id: pv }, fv_ty.clone(), span);
                 body = almide_ir::substitute::substitute_var_in_expr(&body, fv, &pv_expr);
                 params.push(IrParam {

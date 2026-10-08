@@ -401,7 +401,7 @@ pub(super) fn module_top_let_var(
     // are two top-lets, and every resolver that keys on this name must be
     // able to tell them apart.
     let origin = almide_base::names::module_ident(&mod_ident);
-    let var_id = ctx.var_table.alloc(field, ty.clone(), Mutability::Let, None);
+    let var_id = ctx.var_table.alloc_source(field, ty.clone(), Mutability::Let, None);
     ctx.var_table.entries[var_id.0 as usize].module_origin = Some(origin);
     let def_id = ctx.def_map.get(&sym(&qual_let_key)).copied();
     Some((var_id, def_id))

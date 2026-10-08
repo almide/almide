@@ -204,7 +204,15 @@ pub struct VarInfo {
     /// The IR name stays clean; the walker adds the prefix at render time.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub module_origin: Option<String>,
+    /// A compiler temp, not a source binder (#3333). The Rust walker spells
+    /// it in the reserved `__almide_` space, which no user name reaches, so a
+    /// user binding can never share its Rust identifier. Only
+    /// [`VarTable::alloc_source`] and [`VarTable::alloc_like`] clear it.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub synthetic: bool,
 }
+
+fn is_false(b: &bool) -> bool { !*b }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct VarTable {
@@ -217,7 +225,24 @@ impl VarTable {
     pub fn alloc(&mut self, name: Sym, ty: Ty, mutability: Mutability, span: Option<Span>) -> VarId {
         debug_assert!(self.entries.len() < u32::MAX as usize, "too many variables");
         let id = VarId(self.entries.len() as u32);
-        self.entries.push(VarInfo { name, ty, mutability, span, use_count: 0, module_origin: None });
+        self.entries.push(VarInfo { name, ty, mutability, span, use_count: 0, module_origin: None, synthetic: true });
+        id
+    }
+
+    /// Allocate a binder the SOURCE names (a `let`, param, pattern, top-let):
+    /// rendered under its own spelling. Every other allocation is a temp.
+    pub fn alloc_source(&mut self, name: Sym, ty: Ty, mutability: Mutability, span: Option<Span>) -> VarId {
+        let id = self.alloc(name, ty, mutability, span);
+        self.entries[id.0 as usize].synthetic = false;
+        id
+    }
+
+    /// A fresh var standing for `of` (a specialization, rebind or outlined
+    /// param): same name, span and source/temp kind, new type and mutability.
+    pub fn alloc_like(&mut self, of: VarId, ty: Ty, mutability: Mutability) -> VarId {
+        let VarInfo { name, span, synthetic, .. } = self.get(of).clone();
+        let id = self.alloc(name, ty, mutability, span);
+        self.entries[id.0 as usize].synthetic = synthetic;
         id
     }
 

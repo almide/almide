@@ -17,7 +17,7 @@ use almide_lang::types::Ty;
 /// returns the local.
 pub fn rebind_param_as_var(body: &mut IrExpr, vt: &mut VarTable, param: VarId) -> VarId {
     let info = vt.get(param).clone();
-    let local = vt.alloc(info.name, info.ty.clone(), Mutability::Var, info.span);
+    let local = vt.alloc_like(param, info.ty.clone(), Mutability::Var);
     vt.entries[local.0 as usize].module_origin = info.module_origin;
     Rename { from: param, to: local }.visit_expr_mut(body);
     prepend_bind(body, local, info.ty, param);

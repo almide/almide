@@ -437,7 +437,7 @@ impl<'a> BranchLifter<'a> {
             .iter()
             .map(|&vid| {
                 let info = self.vt.get(vid).clone();
-                let fresh = self.vt.alloc(info.name, info.ty.clone(), Mutability::Let, info.span);
+                let fresh = self.vt.alloc_like(vid, info.ty.clone(), Mutability::Let);
                 let read = IrExpr { kind: IrExprKind::Var { id: fresh }, ty: info.ty.clone(), span: info.span, def_id: None };
                 body = substitute_var_in_expr(&body, vid, &read);
                 IrParam {
