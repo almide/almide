@@ -157,7 +157,7 @@ fn loop_variable_captured_by_a_closure_moves_into_the_capture_bind() {
     assert!(body.contains("= v;"), "the capture bind MOVES the loop variable (it is loop-fresh):\n{body}");
     assert!(!body.contains("= v.clone();"), "the loop-fresh capture must not clone:\n{body}");
     assert!(!body.contains("v.clone().clone()"), "the double clone on the capture bind is back:\n{body}");
-    assert!(body.contains("keep(__cap_"), "the closure body must read its own capture, never the loop variable:\n{body}");
+    assert!(body.contains("keep(__almide_ir2_cap_"), "the closure body must read its own capture, never the loop variable:\n{body}");
 }
 
 #[test]

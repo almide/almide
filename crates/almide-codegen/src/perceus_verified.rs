@@ -179,8 +179,13 @@ fn bind_dec_check_exempt(var: VarId, value: &IrExpr, ctx: &VerifyCtx) -> bool {
     // class from the ANF move-out tails handled by `moved_out_vars`.
     // Replacing this name-prefix exclusion with scope-aware Dec
     // accounting is a tracked perceus-belt follow-up.
-    let vname = ctx.var_table.get(var).name.as_str();
+    let info = ctx.var_table.get(var);
+    let vname = info.name.as_str();
     // Single-condition decisions (MC/DC ledger, #566): || as early return.
+    // A user binding that spells the prefix is not a temp (#3333).
+    if !info.synthetic {
+        return false;
+    }
     if vname.starts_with("__tco_") {
         return true;
     }

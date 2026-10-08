@@ -10,7 +10,7 @@
 //! (`a()! - b()!` evaluated `b - b`), both silent native miscompiles while
 //! wasm, which keys locals by `VarId`, answered correctly.
 //!
-//! This check re-resolves every read of a synthesized (`__`-prefixed) var the
+//! This check re-resolves every read of a synthesized (`VarInfo::synthetic`) var the
 //! way rustc will — innermost enclosing binding of that NAME — and refuses the
 //! program when the binding found is a different `VarId`. It runs on the
 //! final IR of the Rust target, in debug and release, so the bug class aborts
@@ -39,8 +39,10 @@ impl std::fmt::Display for CapturedTemp {
     }
 }
 
-fn is_synthesized(name: &Sym) -> bool {
-    name.as_str().starts_with("__")
+/// A compiler temp by construction (`VarInfo::synthetic`, #3333) — not by
+/// spelling: a user `let __x` renders in the user space and cannot meet one.
+fn is_synthesized(info: &VarInfo) -> bool {
+    info.synthetic
 }
 
 struct Resolver<'a> {
@@ -53,7 +55,7 @@ struct Resolver<'a> {
 impl Resolver<'_> {
     fn bind(&mut self, id: VarId) {
         let Some(info) = self.vt.entries.get(id.0 as usize) else { return };
-        if !is_synthesized(&info.name) { return; }
+        if !is_synthesized(info) { return; }
         if let Some(top) = self.scopes.last_mut() {
             top.insert(info.name, id);
         }
@@ -79,7 +81,7 @@ impl Resolver<'_> {
 
     fn read(&mut self, id: VarId) {
         let Some(info) = self.vt.entries.get(id.0 as usize) else { return };
-        if !is_synthesized(&info.name) { return; }
+        if !is_synthesized(info) { return; }
         let found = self.scopes.iter().rev().find_map(|s| s.get(&info.name).copied());
         if let Some(shadow) = found && shadow != id {
             self.out.push(CapturedTemp { name: info.name.to_string(), func: self.func.clone(), read: id, shadow });
@@ -250,9 +252,20 @@ mod tests {
     #[test]
     fn user_names_are_out_of_scope() {
         let mut vt = VarTable::new();
-        let a = vt.alloc(sym("x"), Ty::Int, Mutability::Let, None);
-        let b = vt.alloc(sym("x"), Ty::Int, Mutability::Let, None);
+        let a = vt.alloc_source(sym("x"), Ty::Int, Mutability::Let, None);
+        let b = vt.alloc_source(sym("x"), Ty::Int, Mutability::Let, None);
         let body = block(vec![bind(a, lit(1)), bind(b, lit(0))], pair(var(a), var(b)));
+        assert!(collect_captured_temps(&program(vt, body)).is_empty());
+    }
+
+    /// A user binding that SPELLS a temp's name renders in the user space,
+    /// so a temp bound over it cannot capture its read (#3333).
+    #[test]
+    fn a_user_binding_spelling_a_temp_name_is_not_a_temp() {
+        let mut vt = VarTable::new();
+        let user = vt.alloc_source(sym("__lit_guard_0"), Ty::Int, Mutability::Let, None);
+        let temp = vt.alloc(sym("__lit_guard_0"), Ty::Int, Mutability::Let, None);
+        let body = block(vec![bind(user, lit(1)), bind(temp, lit(0))], pair(var(user), var(temp)));
         assert!(collect_captured_temps(&program(vt, body)).is_empty());
     }
 }

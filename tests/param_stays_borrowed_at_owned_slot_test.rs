@@ -80,7 +80,7 @@ fn a_param_kept_by_a_callee_stays_borrowed_and_clones_at_that_site() {
     // borrows its source whatever the combinator's slot says (#2287).
     let s = fn_sig_and_body(&rust, "captured");
     assert!(s.starts_with("pub fn captured(t: &Table)"), "{s}");
-    assert!(!s.contains("move |") && !s.contains("__cap_"), "the chain step borrows its capture:\n{s}");
+    assert!(!s.contains("move |") && !s.contains("__almide_ir2_cap_"), "the chain step borrows its capture:\n{s}");
     assert!(fn_sig_and_body(&rust, "mapped").starts_with("pub fn mapped(ns: &[i64])"), "{}", fn_sig_and_body(&rust, "mapped"));
     // A monomorphised stdlib instance's slot (`list.map` with a fallible
     // callback) at the param's last use: owned. A derived codec fn's slot

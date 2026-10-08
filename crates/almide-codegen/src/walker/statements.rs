@@ -152,7 +152,7 @@ fn try_render_bind_shared_mut(ctx: &RenderContext, var: &VarId, ty: &Ty, value: 
     // cell. Its value is a bare `Var` or a `Clone{Var}` (CloneInsertionPass
     // wraps non-Copy values) — either way emit a single `.clone()` of the
     // cell so the closure shares it rather than allocating a fresh one.
-    let cap_orig = if name_s.starts_with("__cap_") {
+    let cap_orig = if ctx.is_temp_named(*var, "__cap_") {
         match &value.kind {
             IrExprKind::Var { id } => Some(*id),
             IrExprKind::Clone { expr: inner } => match &inner.kind {
@@ -471,7 +471,7 @@ fn render_stmt_assign(ctx: &RenderContext, stmt: &IrStmt) -> String {
     // the legacy bare form is the correct one there.
     if ctx.ann.param_borrows.get(var) == Some(&almide_ir::ParamBorrow::RefMut) {
         let is_tco_rotation = matches!(&value.kind, IrExprKind::Var { id }
-            if ctx.var_name(*id).starts_with("__tco_tmp_"));
+            if ctx.is_temp_named(*id, "__tco_tmp_"));
         if !is_tco_rotation {
             return format!("*{} = {};", target_s, value_s);
         }
