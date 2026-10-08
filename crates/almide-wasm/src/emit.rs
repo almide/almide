@@ -567,7 +567,8 @@ fn emit_program_pass(
     let mut export_fns: Vec<(String, u32)> = Vec::new();
     let mut export_owners: Vec<String> = Vec::new();
     for (i, (f, qual, _space)) in program_fns.iter().enumerate() {
-        let name = f.name.as_str();
+        // The source spelling: an entry fn's IR name may be escaped (#3483).
+        let name = almide_ir::user_fn_source_name(f.name.as_str());
         let declared = f.export_attrs.iter().find(|a| a.target.as_str() == "wasm").map(|a| a.symbol.to_string());
         let skip_entry = !matches!(f.visibility, almide_ir::IrVisibility::Public);
         if name == "main"
