@@ -17,10 +17,10 @@ fn make_test_program() -> IrProgram {
     let mut var_table = VarTable::new();
 
     // fn find_price(products: List[Product], target: String) -> Int
-    let v_products = var_table.alloc("products".into(), Ty::list(Ty::String), Mutability::Let, None);
-    let v_target = var_table.alloc("target".into(), Ty::String, Mutability::Let, None);
-    let v_p = var_table.alloc("p".into(), Ty::String, Mutability::Let, None);
-    let v_x = var_table.alloc("x".into(), Ty::Int, Mutability::Let, None);
+    let v_products = var_table.alloc_source("products".into(), Ty::list(Ty::String), Mutability::Let, None);
+    let v_target = var_table.alloc_source("target".into(), Ty::String, Mutability::Let, None);
+    let v_p = var_table.alloc_source("p".into(), Ty::String, Mutability::Let, None);
+    let v_x = var_table.alloc_source("x".into(), Ty::Int, Mutability::Let, None);
 
     // Body: match list.find(products, (p) => p == target) { some(x) => x, none => 0 }
     let find_call = IrExpr {
@@ -152,7 +152,7 @@ fn test_walker_rust_output() {
 fn test_walker_option_some_divergence() {
     // The core test: same IR, different output for some(x)
     let mut var_table = VarTable::new();
-    let v = var_table.alloc("value".into(), Ty::Int, Mutability::Let, None);
+    let v = var_table.alloc_source("value".into(), Ty::Int, Mutability::Let, None);
 
     let some_expr = IrExpr {
         kind: IrExprKind::OptionSome {
@@ -177,7 +177,7 @@ fn test_walker_option_some_divergence() {
 #[test]
 fn test_walker_result_divergence() {
     let mut var_table = VarTable::new();
-    let v = var_table.alloc("data".into(), Ty::String, Mutability::Let, None);
+    let v = var_table.alloc_source("data".into(), Ty::String, Mutability::Let, None);
 
     let ok_expr = IrExpr {
         kind: IrExprKind::ResultOk {
@@ -203,8 +203,8 @@ fn test_walker_result_divergence() {
 #[test]
 fn test_walker_concat_type_dispatch() {
     let mut var_table = VarTable::new();
-    let a = var_table.alloc("a".into(), Ty::String, Mutability::Let, None);
-    let b = var_table.alloc("b".into(), Ty::String, Mutability::Let, None);
+    let a = var_table.alloc_source("a".into(), Ty::String, Mutability::Let, None);
+    let b = var_table.alloc_source("b".into(), Ty::String, Mutability::Let, None);
 
     let concat = IrExpr {
         kind: IrExprKind::BinOp {
@@ -229,7 +229,7 @@ fn test_walker_concat_type_dispatch() {
 #[test]
 fn test_walker_if_formatting() {
     let mut var_table = VarTable::new();
-    let x = var_table.alloc("x".into(), Ty::Int, Mutability::Let, None);
+    let x = var_table.alloc_source("x".into(), Ty::Int, Mutability::Let, None);
 
     let if_expr = IrExpr {
         kind: IrExprKind::If {

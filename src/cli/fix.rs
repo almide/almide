@@ -472,6 +472,17 @@ fn comparison_fn_to_operator(module: &str, func: &str) -> Option<&'static str> {
     almide::stdlib::comparison_operator_of(module, func)
 }
 
+/// Move a two-argument call's arguments out, first and second. `None` (and
+/// the arguments left in place) unless there are exactly two — callers check
+/// the arity first, so the rewrite never sees that case.
+fn take_two_args(args: &mut Vec<Expr>) -> Option<(Expr, Expr)> {
+    if args.len() != 2 {
+        return None;
+    }
+    let mut drained = std::mem::take(args).into_iter();
+    drained.next().zip(drained.next())
+}
+
 /// Walk the program and rewrite every `<m>.<op>(a, b)` call whose
 /// `(module, func)` resolves via `comparison_fn_to_operator` into a
 /// `Binary` expression. Returns the number of rewrites performed.
@@ -487,9 +498,7 @@ fn rewrite_comparison_calls(program: &mut ast::Program) -> usize {
                 let Some(op) = comparison_fn_to_operator(&module, &func) else { return };
                 // Take the args out of the Call without mutating yet —
                 // we'll rebuild the whole expr.kind below.
-                let mut drained = std::mem::take(args);
-                let right = drained.pop().unwrap();
-                let left = drained.pop().unwrap();
+                let Some((left, right)) = take_two_args(args) else { return };
                 (op, Box::new(left), Box::new(right))
             }
             _ => return,
@@ -524,9 +533,7 @@ fn rewrite_unwrap_or_calls(program: &mut ast::Program) -> usize {
                 if !named_args.is_empty() || type_args.is_some() || args.len() != 2 || !is_unwrap_or(callee) {
                     return;
                 }
-                let mut drained = std::mem::take(args);
-                let fallback = drained.pop().unwrap();
-                let value = drained.pop().unwrap();
+                let Some((value, fallback)) = take_two_args(args) else { return };
                 (value, fallback)
             }
             ExprKind::Pipe { left, right } => {
@@ -534,7 +541,7 @@ fn rewrite_unwrap_or_calls(program: &mut ast::Program) -> usize {
                 if !named_args.is_empty() || type_args.is_some() || args.len() != 1 || !is_unwrap_or(callee) {
                     return;
                 }
-                let fallback = std::mem::take(args).pop().unwrap();
+                let Some(fallback) = std::mem::take(args).pop() else { return };
                 let value = (**left).clone();
                 (value, fallback)
             }

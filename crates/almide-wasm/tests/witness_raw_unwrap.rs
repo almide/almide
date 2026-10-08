@@ -32,7 +32,8 @@ const FRAMES: [(&str, &str, Option<&str>); 10] = [
     ("mut_param_call_chain", "main", None),
     ("mut_param_closure_capture_write", "main", None),
     ("mut_param_effect_never_err", "main", None),
-    ("mut_param_effect_unpropagated", "main", Some("stmt:Expr:Var")),
+    // #2755: its later bucket, a Var read as a statement, is admitted too.
+    ("mut_param_effect_unpropagated", "main", None),
     ("mut_param_tail_recursion", "main", None),
 ];
 

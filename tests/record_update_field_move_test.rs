@@ -137,6 +137,44 @@ fn the_copy_stays_where_the_old_value_is_still_read() {
     assert!(!twice.contains("b = both(b, "), "a reassignment reading `b` twice must not move it:\n{twice}");
 }
 
+/// Rule 1 on a String accumulator: `s = s + piece` in a loop body moves `s`
+/// into the concat, which extends the owned buffer in place. Through 0.66.0
+/// it emitted `AlmideConcat::concat(s.clone(), …)`, copying the whole
+/// accumulated string per iteration: 200 000 appends took 0.69 s and doubled
+/// N cost about 3×. `s = s + s` reads `s` twice and must keep its copy.
+const STRING_PROGRAM: &str = r#"fn in_for(n: Int) -> String = { var s = ""; for i in 0..<n { s = s + "ab" }; s }
+fn in_while(n: Int) -> String = { var s = ""; var i = 0; while i < n { s = s + "ab"; i = i + 1 }; s }
+fn nested(n: Int) -> String = { var s = ""; for i in 0..<n { for j in 0..<2 { s = s + "c" } }; s }
+effect fn in_effect(n: Int) -> String = { var s = ""; for i in 0..<n { s = s + int.to_string(i) }; s }
+fn doubled(n: Int) -> String = { var s = "x"; for i in 0..<n { s = s + s }; s }
+effect fn main() -> Unit = {
+  println(in_for(2) + in_while(1) + nested(2) + in_effect(3)! + doubled(2))
+}
+"#;
+
+#[test]
+fn a_string_accumulator_moves_into_its_own_concat() {
+    if !tool_available() { return; }
+    let dir = std::env::temp_dir().join(format!("almide-string-append-move-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let src = dir.join("prog.almd");
+    std::fs::write(&src, STRING_PROGRAM).unwrap();
+    let emit = Command::new(almide_bin()).args([src.to_str().unwrap(), "--target", "rust"]).output().expect("spawn almide");
+    let run = Command::new(almide_bin()).args(["run", src.to_str().unwrap()]).output().expect("spawn almide run");
+    std::fs::remove_dir_all(&dir).ok();
+    assert!(emit.status.success(), "--target rust emit failed:\n{}", String::from_utf8_lossy(&emit.stderr));
+    let rust = String::from_utf8_lossy(&emit.stdout).to_string();
+    for name in ["in_for", "in_while", "nested", "in_effect"] {
+        let b = body(&rust, name);
+        assert!(b.contains("s = AlmideConcat::concat(s, "), "`{name}` must move `s` into the concat:\n{b}");
+        assert!(!b.contains("s.clone()"), "no copy of the accumulator in `{name}`:\n{b}");
+    }
+    let doubled = body(&rust, "doubled");
+    assert!(doubled.contains("s.clone()"), "`s = s + s` reads `s` twice and keeps one copy:\n{doubled}");
+    assert!(run.status.success(), "run failed:\n{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "abababcccc012xxxx\n");
+}
+
 #[test]
 fn the_program_prints_what_value_semantics_say() {
     if !tool_available() { return; }

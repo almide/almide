@@ -765,6 +765,21 @@ mod issue_3393_tests {
         assert_eq!(stable(braced), braced);
     }
 
+    /// #3448: a short `then` call that wraps for width ends `) else x` on the
+    /// call's last line. The own-line-`else` check compared `else` with the
+    /// line the call STARTS on, so the second run read that as a split and
+    /// moved `else` down — fmt was not idempotent. An `else` the author put
+    /// below the wrapped call still keeps its line.
+    #[test]
+    fn else_after_a_wrapped_then_call_is_stable() {
+        let a = "a".repeat(90);
+        let src = format!("fn g(x: Int, y: Int) -> Int = x\nfn f({a}: Int) -> Int = if {a} > 0 then g({a}, 1) else 0\n");
+        let out = stable(&src);
+        assert!(out.ends_with("    1,\n  ) else 0\n"), "got:\n{out}");
+        let split = out.replace("  ) else 0\n", "  )\n  else 0\n");
+        assert_eq!(stable(&split), split);
+    }
+
     /// A one-case-per-line variant stays that way, and a one-line variant
     /// that does not fit is broken into one; a short one-liner stays. No
     /// space is left after `=` when the cases start on the next line.

@@ -1,0 +1,66 @@
+// #3451: a `guard … else err(..)` inside a let-bound heap branch in a loop.
+//
+// `branch_lift` outlines an in-loop let-bound heap `if`/`match` into a
+// payload-returning helper `fn __almd_lift_N(..) -> String`. A guard's
+// `else err(..)` lowers to an early `return Err(..)` that targets the
+// ENCLOSING `T!` fn, so inside the helper it had no channel out: rustc E0308
+// natively. The lift now declines a branch that holds a guard (or a bare
+// `break`/`continue`), and the exit stays in the fn that owns it.
+fn pick(xs: List[String]) -> String! = {
+  var out = ""
+  for x in xs {
+    let r = if x != "" then {
+      guard x != "bad" else err("bad item")
+      x
+    } else "empty"
+    out = out + r
+  }
+  ok(out)
+}
+
+fn pick_match(xs: List[String]) -> String! = {
+  var out = ""
+  for x in xs {
+    let r = match x {
+      "" => "empty",
+      _ => {
+        guard x != "bad" else err("bad item")
+        x
+      },
+    }
+    out = out + r
+  }
+  ok(out)
+}
+
+test "guard err in a let-bound if branch inside a loop" {
+  assert_eq(pick(["a", "", "b"]), ok("aemptyb"))
+  assert_eq(pick(["a", "bad", "c"]), err("bad item"))
+}
+
+fn tag_all(xs: List[String], strict: Bool) -> String! = {
+  var out = ""
+  for x in xs {
+    let r = match x {
+      "a" => "A",
+      "b" => {
+        guard not strict else err("strict b")
+        "B"
+      },
+      _ => x + ".",
+    }
+    out = out + r
+  }
+  ok(out)
+}
+
+test "guard err in a let-bound match arm inside a loop" {
+  assert_eq(pick_match(["a", "", "b"]), ok("aemptyb"))
+  assert_eq(pick_match(["a", "bad"]), err("bad item"))
+}
+
+test "guard err in a middle literal arm of a let-bound match inside a loop" {
+  assert_eq(tag_all(["a", "b", "c"], false), ok("ABc."))
+  assert_eq(tag_all(["a", "b", "c"], true), err("strict b"))
+  assert_eq(tag_all(["c", "a"], true), ok("c.A"))
+}

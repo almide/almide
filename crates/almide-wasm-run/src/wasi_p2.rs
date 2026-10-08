@@ -278,6 +278,7 @@ pub fn to_p2(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
         &resolve,
         world,
         wit_component::StringEncoding::UTF8,
+        false,
     )
     .map_err(|e| anyhow::anyhow!("embed: {e}"))?;
     let component = wit_component::ComponentEncoder::default()

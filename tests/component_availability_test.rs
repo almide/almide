@@ -6,7 +6,7 @@ fn unsupported_component_args_are_named_before_writing_an_artifact() {
     let dir = tempfile::tempdir().expect("tempdir");
     let source = dir.path().join("args.almd");
     let artifact = dir.path().join("args.wasm");
-    std::fs::write(&source, "import args\neffect fn main() -> Unit = println(args.option(\"x\") ?? \"-\")\n").expect("source");
+    std::fs::write(&source, "import args\neffect fn main() -> Unit = println(args.option(\"x\")! ?? \"-\")\n").expect("source");
     // The p2 component refuses argv and env.set; the p3 one serves both —
     // argv over wasi:cli/environment (ADR-0023 step 3), env.set through the
     // guest-side overlay env.get reads first (#3223).

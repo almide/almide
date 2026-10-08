@@ -141,18 +141,6 @@ breaks = [
   "an unknown name in `[permissions].allow` (`\"FS.read\"`, `\"FS.write\"`) is refused on its manifest line (0.66.0 accepted it) — write only IO, Net, Env, Time, Rand, Fan (file access is IO)",
 ]
 
-# DEPRECATIONS — spellings accepted for a window, with the epoch that removes them
-# =============================================================
-
-[[deprecation]]
-id = "legacy-native-callback-names"
-issue = 3425
-since_epoch = 10
-since = "0.67.0"
-removal_epoch = 12
-summary = "A package's `native/*.rs` may still call the package's own fns by their spelling before #3338 (`almide_rt_tf_v0_entry`, `almide_rt_tf_v0_calc_double`), through a deprecated alias of the injective name (`almide_rt_tf_0v0_entry`, `almide_rt_tf_0v0_1calc_double`). The build warns once per old name it finds. A name that the old spelling made ambiguous (`a.b` and `a_b`) gets no alias."
-removal = "epoch 12 drops the aliases: a `native/*.rs` calling `crate::almide_rt_<pkg>_v<N>_<fn>` or `..._v<N>_<sub>_<fn>` gets rustc E0425 — write the injective name the warning prints (`_` in a segment is `_0`, a `.` is `_1`)"
-=======
 [[epoch]]
 n = 11
 since = "0.67.0"
@@ -162,4 +150,34 @@ breaks = [
   "an app passed to `http.serve` that reads a `let`, `var` or parameter of the fn that serves it (a handler lambda capturing a local of main, or `let app = http.router(…)!` in main) is E095; make the value a top-level `let` (`let app = http.router(…)` served as `http.serve(port, app!)!`) or compute it inside the handler",
 ]
 
+[[epoch]]
+n = 12
+since = "0.67.0"
+name = "mut-param-fn-is-not-a-value"
+summary = "A fn with a `mut` parameter is called, never used as a function value (#3456): a function type cannot carry the write-back, so a call through the value lost it on wasm and failed rustc E0596 natively. Measured impact: 0 of 4,497 programs across spec/, examples/, stdlib/, research/benchmark/exercises/ and tests/diagnostics/ (the new E096 fixture aside)."
+breaks = [
+  "a fn with a `mut` parameter used as a value (`let f = bump`, `list.map(xs, f)` where `f` takes `mut`, a record field, a list element, a return value, `module.fn`, `list.push`) is E096; call it directly (`bump(s)` with `var s`) or pass a lambda that names the `var` (`() => bump(s)`). It never built natively; on wasm only a fn that mutates its own copy ran correctly, and that fn drops `mut` and rebinds with `var` inside",
+]
+
+[[epoch]]
+n = 13
+since = "0.67.0"
+name = "argv-readers-are-effects"
+summary = "The `args` module's readers read argv, so they are `effect fn`s like `env.args` and `process.args` (#848, ADR-0022: a plain fn writes and aborts but never reads). They have Almide bodies, so a call is typed `Result[T, String]` like a user effect fn's. Measured impact: 4 of 4,507 programs across spec/, examples/, stdlib/, research/benchmark/exercises/ and tests/diagnostics/ (the new E006 fixtures aside), all 4 for the missing `!` (E001/E005/E041/E025) and 0 for E006."
+breaks = [
+  "`args.raw`, `args.flag`, `args.option`, `args.option_or`, `args.positional` and `args.positional_at` are `effect fn`s — a call from a plain fn is E006; mark the caller `effect fn`, or read the arguments in `effect fn main` and pass the value in",
+  "a call to an `args` reader is typed `Result[T, String]` and is propagated with `!` like any Almide-bodied effect fn's: `args.flag(\"verbose\")!`, `args.option(\"out\")! ?? \"-\"`; without it the value is a Result (E041 on a `let`, a type mismatch as an argument)",
+]
+
+# DEPRECATIONS — spellings accepted for a window, with the epoch that removes them
+# =============================================================
+
+[[deprecation]]
+id = "legacy-native-callback-names"
+issue = 3425
+since_epoch = 10
+since = "0.67.0"
+removal_epoch = 14
+summary = "A package's `native/*.rs` may still call the package's own fns by their spelling before #3338 (`almide_rt_tf_v0_entry`, `almide_rt_tf_v0_calc_double`), through a deprecated alias of the injective name (`almide_rt_tf_0v0_entry`, `almide_rt_tf_0v0_1calc_double`). The build warns once per old name it finds. A name that the old spelling made ambiguous (`a.b` and `a_b`) gets no alias."
+removal = "epoch 14 drops the aliases: a `native/*.rs` calling `crate::almide_rt_<pkg>_v<N>_<fn>` or `..._v<N>_<sub>_<fn>` gets rustc E0425 — write the injective name the warning prints (`_` in a segment is `_0`, a `.` is `_1`)"
 # ======================================================

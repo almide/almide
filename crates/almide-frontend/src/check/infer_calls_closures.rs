@@ -260,6 +260,8 @@ impl Checker {
             let ty = self.infer_expr(e);
             // Auto-unwrap Result: fan unwraps Result<T, E> to T
             let concrete = resolve_ty(&ty, &self.uf);
+            let is_effect_call = self.is_effect_call_expr(e);
+            self.check_fan_arm_channel(e, &concrete, is_effect_call);
             match &concrete {
                 Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(),
                 _ => ty,
@@ -506,7 +508,10 @@ impl Checker {
         self.env.auto_unwrap = false;
         let mut elems = Vec::with_capacity(arms.len());
         for arm in arms.iter_mut() {
-            let t = self.infer_expr(arm);
+            let t = match self.infer_settle_arm_scope(arm) {
+                Some(slot) => slot,
+                None => self.infer_expr(arm),
+            };
             let c = resolve_ty(&t, &self.uf);
             elems.push(match &c {
                 Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 => c.clone(),

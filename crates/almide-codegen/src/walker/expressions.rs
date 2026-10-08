@@ -15,53 +15,6 @@ fn render_stmts(ctx: &RenderContext, stmts: &[IrStmt]) -> Vec<String> {
     stmts.iter().map(|s| render_stmt(ctx, s)).collect()
 }
 
-/// Mangle a type into the monomorphization suffix form (mirrors mono/utils.rs).
-fn mangle_ty_for_mono(ty: &Ty) -> String {
-    if let Some(name) = scalar_mono_name(ty) {
-        return name.into();
-    }
-    match ty {
-        Ty::Named(name, args) => mangle_applied_for_mono(&name.to_string(), args),
-        Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => {
-            format!("List_{}", mangle_ty_for_mono(&args[0]))
-        }
-        Ty::Applied(id, args) => mangle_applied_for_mono(&format!("{:?}", id), args),
-        _ => "Unknown".into(),
-    }
-}
-
-/// The scalar types' mono suffixes — a flat name table, `None` for anything
-/// that needs structural mangling.
-fn scalar_mono_name(ty: &Ty) -> Option<&'static str> {
-    let name = match ty {
-        Ty::Int => "Int",
-        Ty::Float => "Float",
-        Ty::String => "String",
-        Ty::Bool => "Bool",
-        Ty::Int8 => "Int8",
-        Ty::Int16 => "Int16",
-        Ty::Int32 => "Int32",
-        Ty::UInt8 => "UInt8",
-        Ty::UInt16 => "UInt16",
-        Ty::UInt32 => "UInt32",
-        Ty::UInt64 => "UInt64",
-        Ty::Float32 => "Float32",
-        Ty::Bytes => "Bytes",
-        Ty::Unit => "Unit",
-        _ => return None,
-    };
-    Some(name)
-}
-
-/// `Base` when there are no type arguments, `Base_A_B` when there are.
-fn mangle_applied_for_mono(base: &str, args: &[Ty]) -> String {
-    if args.is_empty() {
-        return base.to_string();
-    }
-    let inner = args.iter().map(mangle_ty_for_mono).collect::<Vec<_>>().join("_");
-    format!("{}_{}", base, inner)
-}
-
 /// Render an expression ensuring an owned value (not AlmideRcCow wrapper).
 /// For AlmideRcCow vars, produces `(*var).clone()` to yield the unwrapped T.
 /// Used at sites that need owned T: function args, record fields, concat operands.
@@ -239,6 +192,12 @@ fn render_expr_while(ctx: &RenderContext, cond: &IrExpr, body: &[IrStmt]) -> Str
     let cond_str = render_expr(ctx, cond);
     let body_raw = render_stmts(ctx, body).join("\n");
     let body_str = indent_lines(&body_raw, 4);
+    // #3460: `while true` (the TCO loop, or a source `while true`) is `loop`,
+    // which rustc's `while_true` lint asks for.
+    if matches!(cond.kind, IrExprKind::LitBool { value: true }) {
+        return ctx.templates.render_with("loop_block", None, &[], &[("body", body_str.as_str())])
+            .unwrap_or_else(|| format!("loop {{\n{body_str}\n}}"));
+    }
     ctx.templates.render_with("while_loop", None, &[], &[("cond", cond_str.as_str()), ("body", body_str.as_str())])
         .unwrap_or_else(|| "while _ { }".to_string())
 }
@@ -545,12 +504,14 @@ fn render_expr_rc_wrap(ctx: &RenderContext, inner: &IrExpr, cast_ty: &Option<Box
         render_expr(ctx, inner)
     };
     match wrap {
-        // fan.race/any/settle thunk: `Box<dyn Fn + Send + Sync>` is itself
+        // fan.race/settle thunk: `Box<dyn Fn + Send + Sync>` is itself
         // `Fn + Send + Sync`, so heterogeneous capturing thunks unify in the
-        // runtime's `Vec<impl Fn() -> _ + Send + Sync>` (fixes E0308).
-        almide_ir::FnBox::BoxSendSync => {
+        // runtime's `Vec<impl Fn() -> _ + Send + Sync>` (fixes E0308). A
+        // fan.any thunk is a plain `Box<dyn Fn>`: its runtime is sequential.
+        almide_ir::FnBox::BoxSendSync | almide_ir::FnBox::Box => {
             let ty = cast_ty.as_deref().expect("fan thunk RcWrap always carries a Fn cast_ty");
-            let box_type = super::helpers::render_type_box_fn(ctx, ty, "Send + Sync");
+            let bounds = if wrap == almide_ir::FnBox::Box { "'static" } else { "Send + Sync" };
+            let box_type = super::helpers::render_type_box_fn(ctx, ty, bounds);
             format!("(std::boxed::Box::new({}) as {})", s, box_type)
         }
         almide_ir::FnBox::Rc => {
@@ -760,7 +721,7 @@ fn render_expr_wrappers(ctx: &RenderContext, expr: &IrExpr) -> String {
         }
 
         // ── Fan (concurrency) — fully template-driven ──
-        IrExprKind::Fan { exprs } => render_fan(ctx, exprs),
+        IrExprKind::Fan { exprs } => render_fan(ctx, expr.span, exprs),
 
         // ── Iterator chain (Rust-only) ──
         IrExprKind::IterChain { source, consume, steps, collector } => {

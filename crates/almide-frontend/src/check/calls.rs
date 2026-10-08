@@ -258,7 +258,10 @@ impl Checker {
             {
                 self.list_elem_expect = e.first().cloned();
             }
+            let slot = Self::fn_value_slot_for_arg(a, call_sig, i, &bindings);
+            let prev_fn_slot = std::mem::replace(&mut self.fn_value_slot, slot);
             let aty = self.infer_expr(a);
+            self.fn_value_slot = prev_fn_slot;
             self.list_elem_expect = prev_list_expect;
             self.swap_pending_lambda_source(prev_slot_source);
             self.lambda_ret_expect = prev_ret_expect;
@@ -275,6 +278,16 @@ impl Checker {
             tys.push(aty);
         }
         tys
+    }
+
+    /// #3469: the fn type of call slot `i` when arg `a` is a bare fn reference
+    /// (`grow`, `m.grow`) — what an E096 hint for that reference should fit.
+    fn fn_value_slot_for_arg(a: &ast::Expr, call_sig: &Option<crate::types::FnSig>, i: usize, bindings: &HashMap<Sym, Ty>) -> Option<Ty> {
+        if !matches!(a.kind, ExprKind::Ident { .. } | ExprKind::Member { .. }) {
+            return None;
+        }
+        let (_, pty) = call_sig.as_ref()?.params.get(i)?;
+        Some(crate::types::substitute(pty, bindings)).filter(|t| matches!(t, Ty::Fn { .. }))
     }
 
     /// Pin an unannotated lambda's params to the expected element types substituted with bindings learned from earlier args. A slot whose substituted type still mentions one of the CALLEE's OWN unbound generics (`A` when arg0 was itself an unresolved inference var) gets NO pin: writing the literal sig generic into the lambda param disconnects it from the union-find, so it never picks up the element type that flows in later and silently defaults to Int (nn variance_rows: `let sq = list.map(row, (x) => …)` inside a map lambda).
@@ -557,7 +570,7 @@ impl Checker {
             ),
             None => (
                 format!("cannot call effect function '{}' from a pure function", name),
-                "Mark the calling function as `effect fn`".to_string(),
+                argv_reader_hint(name).unwrap_or_else(|| "Mark the calling function as `effect fn`".to_string()),
             ),
         };
         let (msg, context) = match via {
@@ -788,6 +801,16 @@ impl Checker {
             if !ret.is_result() {
                 if self.env.functions.contains_key(&sym(name)) {
                     if !is_bundled_stdlib_call {
+                        return Ty::result(ret, Ty::String);
+                    }
+                    // Only a TEMPLATE-dispatched bundled effect fn
+                    // (`@intrinsic`, `@inline_rust`, `@wasm_intrinsic`,
+                    // `@extern`) keeps its raw `T`: its runtime fn returns the
+                    // value. One with an Almide BODY is lifted by both backends
+                    // like a user fn (codegen's ResultPropagation, the wasm
+                    // effect convention), so its call is a Result too (the
+                    // `args` readers, effect fns since dialect epoch 13).
+                    if bundled_call_is_lifted(name) {
                         return Ty::result(ret, Ty::String);
                     }
                 }
@@ -1334,4 +1357,36 @@ fn strip_ty_module(ty: &Ty) -> Ty {
         }
         _ => ty.map_children(&strip_ty_module),
     }
+}
+
+/// A bundled stdlib effect fn with an Almide body (`module.fn`): the backends
+/// lift it to `Result[T, String]`, so its call is typed that way too. Asked
+/// only for an effect callee whose declared return is not a Result.
+fn bundled_call_is_lifted(name: &str) -> bool {
+    name.split_once('.')
+        .is_some_and(|(m, f)| crate::bundled_sigs::bundled_effect_fn_has_body(m, f))
+}
+
+/// The E006 hint for a call to a reader of the program's arguments from a
+/// plain fn. argv is input (ADR-0022: a plain fn writes and aborts, never
+/// reads), so besides "mark the caller `effect fn`" there is a second fix
+/// that keeps the caller pure: read the arguments once in `main` and pass the
+/// value in. `None` for every other effect fn.
+fn argv_reader_hint(name: &str) -> Option<String> {
+    let reads_argv = matches!(
+        name.split_once('.'),
+        Some(("env" | "process", "args"))
+            | Some(("args", "raw" | "flag" | "option" | "option_or" | "positional" | "positional_at"))
+    );
+    // The `args` readers have Almide bodies, so their call is a Result
+    // propagated with `!`; `env.args` / `process.args` are runtime templates
+    // that return the list itself.
+    let call = if name.starts_with("args.") { format!("{name}(..)!") } else { format!("{name}()") };
+    reads_argv.then(|| {
+        format!(
+            "`{name}` reads the program's arguments, and a plain fn never reads input. \
+             Mark the calling function as `effect fn`, or call `{call}` in `effect fn main` \
+             and pass the value in as a parameter"
+        )
+    })
 }

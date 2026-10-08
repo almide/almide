@@ -39,7 +39,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-001 | Integer division/modulo by zero is total — it aborts, never traps | 0.24.0 | active | fixture | 5 |
 | C-002 | Signed MIN / -1 overflow aborts, at the TRUE per-width MIN | 0.24.0 | active | fixture | 3 |
 | C-003 | Non-aborting integer div/mod stay byte-identical | 0.24.0 | active | fixture | 1 |
-| C-004 | fan.any / fan.map / fan.settle are deterministic by list order | 0.24.0 | active | fixture | 8 |
+| C-004 | fan.any / fan.map / fan.settle are deterministic by list order | 0.24.0 | active | fixture | 9 |
 | C-005 | fan error propagation surfaces as the unified main-error abort | 0.24.0 | active | fixture | 5 |
 | C-006 | [fan.timeout does not exist — wall-clock deadlines live at the host boundary](C-006-fan-timeout-removed.md) | 0.29.0 | active | fixture | 0 |
 | C-007 | Abortable top-level lets evaluate eagerly at startup | 0.24.0 | active | fixture | 4 |
@@ -50,7 +50,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-012 | Const-folded non-finite floats emit named constants | 0.24.0 | active | fixture | 1 |
 | C-013 | Map is a compact-ordered-dict: iteration is insertion order | 0.24.0 | active | fixture | 10 |
 | C-014 | Set is insertion-ordered and deterministic | 0.24.0 | active | fixture | 3 |
-| C-015 | Structural deep equality for compound elements and heap values | 0.24.0 | active | fixture | 9 |
+| C-015 | Structural deep equality for compound elements and heap values | 0.24.0 | active | fixture | 10 |
 | C-016 | UTF-8 codepoint-aware string ops are byte-identical | 0.24.0 | active | fixture | 3 |
 | C-017 | Empty-pattern count / last_index_of follow native codepoint/byte semantics | 0.24.0 | active | fixture | 2 |
 | C-018 | Unicode string predicates match Rust char methods over the full domain | 0.24.0 | active | fixture | 1 |
@@ -140,7 +140,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-102 | List iteration, call-result element materialization, and tail-recursive list traversal byte-match native | 0.27.6 | active | fixture | 5 |
 | C-103 | Self-hosted dynamic Value model (merge, array/as_array roundtrip, tuple TCO) byte-matches native and is leak-free in a loop | 0.27.6 | active | fixture | 7 |
 | C-104 | Tail-recursive accumulator shapes lower to bounded-stack loops byte-matching native | 0.27.6 | active | fixture | 6 |
-| C-105 | var/append accumulator loops (scalar, owned-handle, cross-dep, mutual-recursion) byte-match native on wasm | 0.27.6 | active | fixture | 6 |
+| C-105 | var/append accumulator loops (scalar, owned-handle, cross-dep, mutual-recursion) byte-match native on wasm | 0.27.6 | active | fixture | 7 |
 | C-106 | Heap value bound from an if/match arm byte-matches native on the v1 wasm path | 0.27.6 | active | fixture | 17 |
 | C-107 | heap Result-of-tuple / Result-of-list Ok payloads round-trip and byte-match native | 0.27.6 | active | fixture | 4 |
 | C-108 | Unwrap `!` and let-unwrap desugaring byte-match native in every position | 0.27.6 | active | fixture | 10 |
@@ -149,7 +149,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-111 | Module-level const heap globals initialize and read identically on v1 wasm and native | 0.27.6 | active | fixture | 2 |
 | C-112 | random.int draws stay in-range identically under the WASI entropy floor on v1 wasm | 0.27.6 | active | fixture | 1 |
 | C-113 | Let-bound ADT/Result variant matched by tag byte-matches native on v1 wasm | 0.27.6 | active | fixture | 2 |
-| C-114 | Matching an Option with a heap payload byte-matches native on v1 wasm | 0.27.6 | active | fixture | 1 |
+| C-114 | Matching an Option with a heap payload byte-matches native on v1 wasm | 0.27.6 | active | fixture | 2 |
 | C-115 | Pipe into a block-bodied lambda producing a value byte-matches native on v1 wasm | 0.27.6 | active | fixture | 2 |
 | C-116 | v1 scalar-value lowering edges byte-match native (tail Bool literal, float.parse inf/nan) | 0.27.7 | active | fixture | 2 |
 | C-117 | In-loop let-bound heap if/match is lifted to a tail helper and renders on v1 | 0.27.7 | active | fixture | 3 |
@@ -184,7 +184,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-146 | A lifted closure returning a captured alias hands out a co-owned reference | 0.31.0 | active | fixture | 1 |
 | C-147 | list.unique_by routes by key repr — String keys dedupe by content | 0.31.0 | active | fixture | 1 |
 | C-148 | list.scan stores each intermediate at the accumulator's own width | 0.31.0 | active | fixture | 1 |
-| C-149 | unwrap_or_else hands back a co-owned heap Ok payload | 0.31.0 | active | fixture | 5 |
+| C-149 | unwrap_or_else hands back a co-owned heap Ok payload | 0.31.0 | active | fixture | 6 |
 | C-150 | Ctors over a heap var are value copies — the var stays live | 0.31.0 | active | fixture | 1 |
 | C-151 | Result combinators with a heap-Ok RESULT never link the scalar impl | 0.31.0 | active | fixture | 1 |
 | C-152 | An un-admitted heap call payload in a ctor walls, never zeroes | 0.31.0 | active | fixture | 1 |
@@ -234,7 +234,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-196 | Call-stack exhaustion is a defined abort at a per-target depth | 0.41.0 | active | fixture | 1 |
 | C-197 | Linear-memory exhaustion is a resource limit with a defined abort | 0.41.0 | active | fixture | 10 |
 | C-198 | A head count below 1 is a defined abort, identically on both targets | 0.42.0 | active | fixture | 1 |
-| C-199 | A fan block joins every sibling and reports the first Err in list order | 0.42.0 | active | fixture | 1 |
+| C-199 | A fan block joins every sibling and reports the first Err in list order | 0.42.0 | active | fixture | 2 |
 | C-200 | A trap in a fan sibling exits through the unified main-error abort, convergently | 0.42.0 | active | fixture | 2 |
 | C-201 | An Option combinator's tuple result is materializable as an owned element for every element-type combination | 0.44.0 | active | fixture | 1 |
 | C-202 | Time constructors guard their domain: negative aborts, overflow saturates | 0.47.0 | active | fixture | 3 |
@@ -261,7 +261,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-223 | Matrix transcendentals compute through the vendored musl-libm, not the platform one | 0.56.1 | active | fixture | 8 |
 | C-224 | if let / guard let bind and release heap payloads identically on both targets | 0.56.1 | active | fixture | 1 |
 | C-225 | fs.read_lines materializes a file's lines identically on both targets | 0.56.2 | active | fixture | 2 |
-| C-226 | A mut parameter crossing a call boundary mutates the caller's data on both targets | 0.56.2 | active | fixture | 12 |
+| C-226 | A mut parameter crossing a call boundary mutates the caller's data on both targets | 0.56.2 | active | fixture | 14 |
 | C-227 | The fs metadata and composition family answers identically on both targets | 0.56.2 | active | fixture | 1 |
 | C-228 | The fs composition family and the matrix row selectors answer identically on both targets | 0.56.2 | active | fixture | 4 |
 | C-229 | A selected row past the byte buffer is the all-zero row on both targets | 0.57.1 | active | fixture | 10 |
@@ -293,7 +293,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-255 | Record literals, member reads, and spread updates preserve value semantics identically on both targets | 0.57.1 | active | fixture | 2 |
 | C-256 | break and continue take effect at their statement position, identically on both targets and the interp | 0.57.1 | active | fixture | 2 |
 | C-257 | The scalar error operators evaluate identically on both targets | 0.57.1 | active | fixture | 1 |
-| C-258 | Named calls and lambdas evaluate identically on both targets | 0.57.1 | active | fixture | 2 |
+| C-258 | Named calls and lambdas evaluate identically on both targets | 0.57.1 | active | fixture | 3 |
 | C-259 | Variant constructor references build values eliminated identically by match on both targets | 0.57.1 | active | fixture | 1 |
 | C-260 | The declaration family compiles and runs identically on both targets | 0.57.1 | active | fixture | 5 |
 | C-261 | Canonical float values including the negative-zero sign display identically on both targets | 0.57.1 | active | fixture | 1 |

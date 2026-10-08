@@ -600,6 +600,7 @@ mod rest;
 #[path = "witness_gate.rs"]
 mod gate;
 pub use gate::{effect_subset, straightline_subset, top_let_subset};
+pub(crate) use gate::binds_a_local;
 
 // ── the collection sink (diagnostic channel, test-enabled) ──────────────
 
@@ -632,7 +633,6 @@ pub(crate) mod modes;
 /// (#2759, witness_decls.rs).
 #[path = "witness_decls.rs"]
 pub mod decls;
-pub(crate) use decls::argv_exception;
 
 /// Every frame the sweep collected, over EVERY emission pass (the pass
 /// markers are stripped).

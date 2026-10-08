@@ -202,11 +202,13 @@ fn lower_pipe(ctx: &mut LowerCtx, left: &ast::Expr, right: &ast::Expr, ty: Ty, s
                     ctx.env.functions.get(name).map(|f| f.ret.clone()).unwrap_or(ty)
                 } else { ty }
             } else { ty };
+            let target = ctx.ir_call_target(target);
             ctx.mk(IrExprKind::Call { target, args: all_args, type_args: ta }, resolved_ty, span)
         }
         ast::ExprKind::Ident { .. } | ast::ExprKind::Member { .. } => {
             let ir_left = lower_expr(ctx, left);
             let target = lower_call_target(ctx, right);
+            let target = ctx.ir_call_target(target);
             ctx.mk(IrExprKind::Call { target, args: vec![ir_left], type_args: vec![] }, ty, span)
         }
         // `a |> (n) => body` — INLINE the immediately-applied lambda to `{ let n = a; body }`.
@@ -401,7 +403,7 @@ pub(super) fn module_top_let_var(
     // are two top-lets, and every resolver that keys on this name must be
     // able to tell them apart.
     let origin = almide_base::names::module_ident(&mod_ident);
-    let var_id = ctx.var_table.alloc(field, ty.clone(), Mutability::Let, None);
+    let var_id = ctx.var_table.alloc_source(field, ty.clone(), Mutability::Let, None);
     ctx.var_table.entries[var_id.0 as usize].module_origin = Some(origin);
     let def_id = ctx.def_map.get(&sym(&qual_let_key)).copied();
     Some((var_id, def_id))

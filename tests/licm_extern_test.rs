@@ -85,7 +85,7 @@ fn pure_call_with_invariant_args_is_still_hoisted() {
     let body = fn_body(&out, "upload");
     let loop_at = body.find("for ").unwrap_or_else(|| panic!("no loop in:\n{body}"));
     assert!(
-        body[..loop_at].contains("__licm_") && body[..loop_at].contains("weight(7"),
+        body[..loop_at].contains("__almide_ir2_licm_") && body[..loop_at].contains("weight(7"),
         "`weight(7)` is pure and loop-invariant, and should be hoisted:\n{body}"
     );
 }

@@ -291,7 +291,7 @@ pub fn test_leg(file: &str, source: &str, overlay: Option<&OverlayEnv>, timeout:
         all("timeout", &mut out);
         return Ok(out);
     }
-    let Some(leg) = leg.filter(|l| l["compiled"] == true) else {
+    let Some(leg) = leg.filter(|l| l["compiled"].as_bool().unwrap_or(false)) else {
         all("compile_error", &mut out);
         return Ok(out);
     };

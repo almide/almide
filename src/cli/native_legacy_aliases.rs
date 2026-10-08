@@ -29,7 +29,7 @@ use almide_base::names::{legacy_module_ident, split_module_item};
 /// `[[deprecation]]` entry `legacy-native-callback-names` of
 /// `proofs/dialect-epochs.toml` (scripts/check-dialect-epochs.sh cross-checks
 /// the two).
-pub(super) const LEGACY_NATIVE_CALLBACK_REMOVAL_EPOCH: u32 = 12;
+pub(super) const LEGACY_NATIVE_CALLBACK_REMOVAL_EPOCH: u32 = 14;
 
 /// The old spellings resolved against one crate's code.
 #[derive(Debug, Default, PartialEq)]
@@ -224,7 +224,7 @@ pub fn almide_rt_tf_0v0_1solo_f() -> i64 { 5 }
         let text = "crate::almide_rt_tf_v0_entry(1) + crate::almide_rt_tf_v0_entry(2) + crate::almide_rt_tf_0v0_entry(3)";
         let w = warnings("native/host.rs", text, &a);
         assert_eq!(w.len(), 1, "{w:?}");
-        assert!(w[0].contains("`almide_rt_tf_0v0_entry`") && w[0].contains("dialect epoch 12"), "{}", w[0]);
+        assert!(w[0].contains("`almide_rt_tf_0v0_entry`") && w[0].contains("dialect epoch 14"), "{}", w[0]);
         assert!(warnings("native/host.rs", text, &a).is_empty());
     }
 }

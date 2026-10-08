@@ -566,6 +566,29 @@ echo "== structural leg, unwrap-or  ⊳  proven checker (#2755) =="
 run_structural spec/wasm_cross/witness_straightline.almd or_zero 0
 tamper_structural or_zero 's/^{|im}$/{|i}/' "#2755 unwrap-or fallback"
 
+# ── #3446: the same owned join over a FN payload. `choose` tails
+# `list.get(fs, i) ?? ((x) => x + i)`: the carrier is born, read and released
+# (`ibd`), the fallback closure's env likewise around its build, the fresh
+# closure moves into the join on the none arm (`{|im}`), the list's closure
+# shares and moves on the some arm (`{|am}`), the join moves out (`im`). The
+# join stayed borrowed for a fn type, so the fallback had no owner and the
+# frame declined (`unwrap-or:unowned-fresh-fallback`); on the wasm leg one
+# closure block per fallback taken was never released. Drill: the fallback
+# never reaches the join.
+echo
+echo "== structural leg, unwrap-or over a closure  ⊳  proven checker (#3446) =="
+run_structural spec/wasm_cross/unwrap_or_fresh_closure_fallback.almd choose 0
+run_structural spec/wasm_cross/unwrap_or_fresh_closure_fallback.almd main 0
+emit_structural spec/wasm_cross/unwrap_or_fresh_closure_fallback.almd choose | sed 's/^{|im}$/{|i}/' > /tmp/structural.tamper
+if cmp -s /tmp/structural.tamper <(emit_structural spec/wasm_cross/unwrap_or_fresh_closure_fallback.almd choose); then
+  echo "FAIL structural-tamper(#3446 closure fallback): the drill changed nothing (the witness shape moved)"; exit 1
+fi
+set +e; "$ROOT/proofs/checker" ownership /tmp/structural.tamper >/dev/null 2>&1; src_rc=$?; set -e
+if [ "$src_rc" -ne 1 ]; then echo "FAIL structural-tamper(#3446 closure fallback): a fallback closure that never reached the join was accepted"; exit 1; fi
+kernel_verify ownership /tmp/structural.tamper 1   || { echo "FAIL structural-tamper(#3446 closure fallback): the kernel accepted the leak"; exit 1; }
+portable_agrees ownership /tmp/structural.tamper 1 || { echo "FAIL structural-tamper(#3446 closure fallback): almide-verify accepted the leak"; exit 1; }
+echo "ok   structural-tamper(#3446 closure fallback): the leak is rejected by the binary AND the kernel"
+
 # ── #2758: an `err(e)` RAISED from an effect body, and a call through a record
 # FIELD. `raise`: the literal payload moves into the err block, the block
 # leaves on the raising arm, the ok carrier on the other (`{|im}` each).
@@ -662,6 +685,129 @@ echo "ok   structural-tamper(#2758 call modes): a site that lends where its call
 # in the proof). Drills: an index one past the function space (an undefined
 # callee), one past `shed`'s locals, a file write reached from the plain fn,
 # and the same write added to a plain fn's node of the call graph.
+# ── #2755: a match GUARD that binds a local. `seen()!` in a guard binds its
+# Result carrier, which stays in the local past the guard — on the arm's path
+# and on the path the false guard falls through to. The arm is recorded as
+# its verdict site (binds + guard ran, or the pattern failed) followed by its
+# select site (body, or the rest of the chain), so the carrier's release
+# reaches every path it runs on. The or-pattern's second alternative is line
+# 3. Drill: that carrier's release dropped on the path that goes on past it.
+tamper_fixture() { # fixture fn sed-expr label
+  emit_structural "$1" "$2" | sed "$3" > /tmp/structural.tamper
+  if cmp -s /tmp/structural.tamper <(emit_structural "$1" "$2"); then
+    echo "FAIL structural-tamper($4): the drill changed nothing (the witness shape moved)"; exit 1
+  fi
+  set +e; "$ROOT/proofs/checker" ownership /tmp/structural.tamper >/dev/null 2>&1; src_rc=$?; set -e
+  if [ "$src_rc" -ne 1 ]; then echo "FAIL structural-tamper($4): the leak was accepted"; exit 1; fi
+  kernel_verify ownership /tmp/structural.tamper 1   || { echo "FAIL structural-tamper($4): the kernel accepted the leak"; exit 1; }
+  portable_agrees ownership /tmp/structural.tamper 1 || { echo "FAIL structural-tamper($4): almide-verify accepted the leak"; exit 1; }
+  echo "ok   structural-tamper($4): the leak is rejected by the binary AND the kernel"
+}
+echo
+echo "== structural leg, binding match guard  ⊳  proven checker (#2755) =="
+GO=spec/wasm_cross/ref_gleam_or_pattern_alternatives.almd
+run_structural "$GO" guarded 0
+tamper_fixture "$GO" guarded '3s/{|ibd}$/{|ib}/' "#2755 guard-bound carrier"
+# A top-let initialized from ANOTHER global (`MESSAGE_2 = MESSAGE`, line 9)
+# borrows: the store's share moves into the new global (`am`, a view's — the
+# initializer lowers with main's locals hidden, so its source is a global or
+# a static). Drill: the share is taken and never handed to the global.
+GT=spec/wasm_cross/gleam_toplet_consts.almd
+run_structural "$GT" main 0
+tamper_fixture "$GT" main '9s/^am$/a/' "#2755 borrowed top-let"
+# A `let` of a top-let GLOBAL (`let snap = speeds`, line 3): the Bind route's
+# share is a view's (the global holds its own credit, a `var` one until a
+# writer replaces it), and the local owns it from there to its release
+# (`ad`). Drill: the snapshot never released.
+GV=spec/wasm_cross/module_var_alias_cow.almd
+run_structural "$GV" main 0
+tamper_fixture "$GV" main '3s/^ad$/a/' "#2755 bound global"
+# A `let` of a borrowed `if` over two bound locals (`if true then y0 else
+# y0`, the carrier arg_temps names for `??`): the share is a select site
+# after the `if`'s own, each arm aliasing the local to its own source, so
+# the alias's release lands on that source's line (`ibabdd`, line 16).
+# Drill: the alias never released.
+GI=spec/wasm_cross/ctor_scalar_call_payload.almd
+run_structural "$GI" main 0
+tamper_fixture "$GI" main '16s/^ibabdd$/ibabd/' "#2755 bound if"
+
+# ── #2755: `list.group_by`'s inlined key callback. One activation per
+# element: an owned key is born, released when its group is present and
+# moved into the new entry when absent (`{id|im}`, line 93 of the fixture's
+# `main`); the absent arm's first group list is born into the entry
+# (`{|im}`), and a handle element is shared into its group on both arms.
+# Drill: the present arm's key never released.
+echo
+echo "== structural leg, group_by key  ⊳  proven checker (#2755) =="
+GB=spec/wasm_cross/map_insertion_order.almd
+run_structural "$GB" main 0
+tamper_fixture "$GB" main '93s/^{id|im}$/{i|im}/' "#2755 group_by key"
+
+# ── #2755: an instance-parallel `fan.map` chunk (`fan.__par_K`, fan_par.rs) is
+# a branch site on the host's answer: the served arm copies the answer room
+# into the result list (a tuple element's block moving in), the other arm
+# runs the sequential `list.map` fallback. The request and answer rooms are
+# born before the site and freed after it — lines 48 and 49 of the
+# fixture's `main` are the chunk's request and answer rooms (`{|id}`: the
+# path that left the frame earlier never allocated them). Drill: the answer
+# room never freed.
+echo
+echo "== structural leg, fan par chunk  ⊳  proven checker (#2755) =="
+FP=spec/wasm_cross/fan_map_parallel_scalar.almd
+run_structural "$FP" main 0
+tamper_fixture "$FP" main '49s/^{|id}$/{|i}/' "#2755 fan par answer room"
+
+# ── #2755: the remaining shapes, one small fn each in a gate-only fixture.
+# `raised_map` / `raised_set`: a raising callback over a Map / a Set
+# instantiates the self-hosted `map.` / `set.__fallible_map`, an ordinary
+# call — the literal lambda's env is built here, lent and released (`id`,
+# line 2). `none_eq`: `none` read as an operand is the NULL address, no
+# block (the borrowed param's empty line). `or_fresh`: `none ?? s + "!"`
+# joins the fresh fallback, which moves out (`im`, line 2). Drills: an env
+# never released; a release of the block `none` does not have; the joined
+# fallback never leaving.
+echo
+echo "== structural leg, fallible collection HOFs and none  ⊳  proven checker (#2755) =="
+W5=proofs/fixtures/witness_2755.almd
+run_structural "$W5" raised_map 0
+run_structural "$W5" raised_set 0
+run_structural "$W5" none_eq 0
+run_structural "$W5" or_fresh 0
+tamper_fixture "$W5" raised_map '2s/^id$/i/' "#2755 fallible map env"
+tamper_fixture "$W5" raised_set '2s/^id$/i/' "#2755 fallible set env"
+tamper_fixture "$W5" none_eq '1s/^$/d/' "#2755 none operand"
+tamper_fixture "$W5" or_fresh '2s/^im$/i/' "#2755 none carrier fallback"
+# `byte_of`: a Bytes index reads a scalar byte; out of bounds aborts with
+# `b` held — a recorded abort site, whose path is a prefix of the returning
+# one (`ibd`, line 2). `tagged`: a literal omits a field whose declaration
+# default is a list of literals, a fresh block moving into the slot (`im`,
+# line 2). Drills: `b` never released; the default list never stored.
+run_structural "$W5" byte_of 0
+run_structural "$W5" tagged 0
+tamper_fixture "$W5" byte_of '2s/^ibd$/ib/' "#2755 bytes index"
+tamper_fixture "$W5" tagged '2s/^im$/i/' "#2755 list default"
+# `as_text`: a typed error `!`-ed into the String channel — its repr text is
+# born and moves into a fresh err block (`{|im}`, line 2), which leaves the
+# frame (line 3). `pick_text`: a borrowed `if` stored into a list slot is a
+# select site, each arm sharing its own source into the slot (`{|am}`, line
+# 1). `stmt_var`: a Var read as a statement is dropped (the borrowed
+# param's empty line). Drills: the repr text never stored; a source's share
+# never moved; a release of a block the frame never held.
+run_structural "$W5" as_text 0
+run_structural "$W5" pick_text 0
+run_structural "$W5" stmt_var 0
+tamper_fixture "$W5" as_text '2s/^{|im}$/{|i}/' "#2755 err repr"
+tamper_fixture "$W5" pick_text '1s/^{|am}$/{|a}/' "#2755 stored if"
+tamper_fixture "$W5" stmt_var '1s/^$/d/' "#2755 var statement"
+# A fallible line walker whose COMPOUND callback is called through its env
+# (fs_meta.rs / fs_fallible.rs closure routes): each line is an activation
+# where the walk's line is born, shared into the callee and released after
+# it (`{iamd|id}`, line 38 of the fixture's `main` — the second arm is a
+# line skipped after an err). Drill: the line's share never handed over.
+FW=spec/wasm_cross/fs_fallible_walker_call_head.almd
+run_structural "$FW" main 0
+tamper_fixture "$FW" main '38s/^{iamd|id}$/{iad|id}/' "#2755 closure-route line"
+
 echo
 echo "== structural leg, names + capabilities  ⊳  proven checker (#2759) =="
 WS=spec/wasm_cross/witness_straightline.almd
@@ -706,7 +852,7 @@ PYEOF
 drill_structural_prop caps-transitive "#2759 call graph: file write from a plain fn"
 
 # ── #3041: DECLARATIONS the source implies but the synthesized fn does not
-# spell. `branch_lift_synth_0` is lifted out of an `effect fn`'s body and
+# spell. `__almd_lift_0` (the branch-lift helper, #3483) is lifted out of an `effect fn`'s body and
 # reads a file: it is bounded by its origin's `effect` (the `effect:origin`
 # marker, not the ABI flag). `heavy` is a plain fn run inside a
 # `fan.timeout` region: the fuel meter's deadline test reads the clock in
@@ -715,13 +861,23 @@ drill_structural_prop caps-transitive "#2759 call graph: file write from a plain
 # the synthesized fn bounded as the plain fn it is spelled as, and a clock
 # read that is the frame's own.
 FS=spec/wasm_cross/fs_read_text_utf8.almd
-run_structural_prop "$FS" caps branch_lift_synth_0 0
+run_structural_prop "$FS" caps __almd_lift_0 0
 sed 's/^[^|]*|/0|/' /tmp/structural.prop > /tmp/structural.tamper
 drill_structural_prop caps "#3041 synthesized fn declared plain"
 TO=spec/wasm_cross/fuel_timeout_ends.almd
 run_structural_prop "$TO" caps heavy 0
 sed 's/$/5/' /tmp/structural.prop > /tmp/structural.tamper
 drill_structural_prop caps "#3041 a clock read of the frame's own"
+# #2755: the instance-parallel fan offer (op 74, fan_par_lower.rs) reaches
+# no capability of its own: the workers run the program's exported pure
+# chunk, which the not-served fallback also calls from the frame, so the call
+# graph counts whatever it reaches. `main` of a fixture with a qualifying
+# chunk is bounded by its `effect` declaration. Drill: the op counted as an
+# unknown host operation (the sentinel), as it was before the op was named.
+FPC=spec/wasm_cross/fan_map_parallel_scalar.almd
+run_structural_prop "$FPC" caps main 0
+sed 's/$/ 9/' /tmp/structural.prop > /tmp/structural.tamper
+drill_structural_prop caps "#2755 fan offer as an unknown host op"
 
 # ── #2152: almide-verify against the extracted checker on witnesses NO
 # producer wrote. The rows above only reach the shapes the emitters produce;

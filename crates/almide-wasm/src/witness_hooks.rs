@@ -32,6 +32,8 @@ use crate::SliceTy;
 pub(crate) mod witness_mut;
 #[path = "witness_inline.rs"]
 mod witness_inline;
+#[path = "witness_guard.rs"]
+mod witness_guard;
 
 /// A hooked node's identity for the module-call audit.
 fn node(e: &almide_ir::IrExpr) -> usize {
@@ -42,7 +44,7 @@ impl Emitter<'_> {
     /// The local whose object a value SHARES: a Var, read through block
     /// tails (`{ let t = …; t }` is `t`'s object — the routes' +1 lands on
     /// the tail's value, `rc_owned_result` reads through blocks the same way).
-    fn witness_src_local(&self, e: &almide_ir::IrExpr) -> Option<u32> {
+    pub(crate) fn witness_src_local(&self, e: &almide_ir::IrExpr) -> Option<u32> {
         if let almide_ir::IrExprKind::Var { id } = &crate::rc_ownership::rc_tail(e).kind {
             self.locals.get(id).map(|&(l, _)| l)
         } else {
@@ -61,7 +63,13 @@ impl Emitter<'_> {
     pub(crate) fn witness_bind(&mut self, idx: u32, _declared: SliceTy, value: &almide_ir::IrExpr) {
         let src_local = self.witness_src_local(value);
         let owned = self.rc_owned_result(value);
-        let view = crate::witness_unwrap::is_extraction_view(value);
+        // A top-let GLOBAL holds its own credit (a `var` one until a writer
+        // replaces it, which releases only the global's): the bind's share
+        // is a view's, the local its owner from here.
+        let view = crate::witness_unwrap::is_extraction_view(value) || self.witness_top_let_ty(value).is_some();
+        if !owned && self.witness_bind_select(idx, value) {
+            return;
+        }
         let Some(w) = self.witness.as_mut() else { return };
         if owned {
             w.bind_fresh(idx);
@@ -69,7 +77,7 @@ impl Emitter<'_> {
         }
         match src_local {
             Some(src) if w.bind_alias(idx, src) => {}
-            // #2758: a `!` payload read out of a bound carrier.
+            // #2758: a `!` payload read out of a bound carrier, or a global.
             None if view => w.bind_view(idx),
             // The frame withdraws; the local still gets an (opaque) object
             // so its later release or loop-back carry is attributed, not
@@ -110,6 +118,9 @@ impl Emitter<'_> {
         // A top-let GLOBAL holds its own credit for the program's life: a
         // share of it is a view's, like a slot read's.
         let view = crate::witness_unwrap::is_extraction_view(e) || self.witness_top_let_ty(e).is_some();
+        if !fresh && src_local.is_none() && !view && self.witness_share_select(e) {
+            return;
+        }
         let Some(w) = self.witness.as_mut() else { return };
         if fresh {
             w.temp_move();
@@ -224,10 +235,16 @@ impl Emitter<'_> {
     /// withdraws it.
     pub(crate) fn witness_record_default(&mut self, d: &almide_ir::IrExpr) {
         use almide_ir::IrExprKind as K;
-        if !matches!(
-            &d.kind,
-            K::LitInt { .. } | K::LitFloat { .. } | K::LitBool { .. } | K::LitStr { .. } | K::Unit | K::OptionNone
-        ) {
+        // A list of literals (`tags: List[String] = []`, `= [1, 2]`) is a
+        // fresh block whose element stores are the list literal's own hooks.
+        fn literal(d: &almide_ir::IrExpr) -> bool {
+            match &d.kind {
+                K::LitInt { .. } | K::LitFloat { .. } | K::LitBool { .. } | K::LitStr { .. } | K::Unit | K::OptionNone => true,
+                K::List { elements } => elements.iter().all(literal),
+                _ => false,
+            }
+        }
+        if !literal(d) {
             self.witness_decline("record:default");
         }
     }
@@ -277,7 +294,7 @@ impl Emitter<'_> {
     }
 
     /// The declared type of a top-let global `e` names (a Var no local maps).
-    fn witness_top_let_ty(&self, e: &almide_ir::IrExpr) -> Option<SliceTy> {
+    pub(crate) fn witness_top_let_ty(&self, e: &almide_ir::IrExpr) -> Option<SliceTy> {
         let almide_ir::IrExprKind::Var { id } = &e.kind else { return None };
         if self.locals.contains_key(id) {
             return None;
@@ -356,8 +373,10 @@ impl Emitter<'_> {
     /// initializer is born and released after the copy (`id`), the fresh
     /// copy moves into the global (`im`). Any other shape: an owned value
     /// moves into the global (`im`); a borrowed one takes a share at the
-    /// store (#2992) on a source object this frame does not track (another
-    /// global, a pool static) — not modelled, so it declines.
+    /// store (#2992) and the share moves into the global (`am`, a view's).
+    /// The initializer lowers with this frame's locals hidden (func.rs), so
+    /// what it borrows is held by another global or is a pool static —
+    /// never an object this frame holds a credit of.
     pub(crate) fn witness_top_let(&mut self, declared: SliceTy, owned: bool, copied: bool) {
         if !self.rc_droppable(declared) {
             return;
@@ -369,7 +388,7 @@ impl Emitter<'_> {
                 w.temp_move();
             }
             (true, false) | (false, true) => w.temp_move(),
-            (false, false) => w.decline("top-let:borrowed"),
+            (false, false) => w.view_share_move(),
         }
     }
 

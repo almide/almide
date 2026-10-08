@@ -42,6 +42,7 @@ pub mod mut_args;
 pub mod top_let_storage;
 pub mod accum_tre;
 pub mod record_shape;
+pub mod mono_name;
 
 mod wasm_repr;
 
@@ -54,6 +55,7 @@ pub use wasm_repr::wasm_types_compatible;
 pub use visit::{IrVisitor, walk_expr, walk_stmt, walk_pattern};
 pub use visit_mut::{IrMutVisitor, walk_expr_mut, walk_stmt_mut, walk_pattern_mut};
 pub use substitute::{substitute_var_in_expr, substitute_var_in_stmt};
+pub use mono_name::{mono_instance_name, mono_instance_base, mono_base_or_self};
 
 // ── Identifiers ─────────────────────────────────────────────────
 
@@ -175,13 +177,17 @@ pub enum Mutability { Let, Var }
 /// into the runtime's existing `Vec<impl Fn() -> _ + Send + Sync>` thunk
 /// parameter with NO signature change. (`fan.map` keeps `Rc`: it runs
 /// sequentially over an `Rc<dyn Fn>`, which also accepts a closure VALUE that a
-/// `Send + Sync` box could not — an `Rc` is neither.)
+/// `Send + Sync` box could not — an `Rc` is neither.) `Box` is the plain
+/// `Box<dyn Fn>` for a thunk list the runtime runs on the calling thread
+/// (`fan.any`): the thunks unify without being `Send + Sync`, so one that
+/// captures a closure value or a `Bytes` still compiles (#3459).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum FnBox {
     #[default]
     Rc,
     BoxSendSync,
+    Box,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -200,7 +206,15 @@ pub struct VarInfo {
     /// The IR name stays clean; the walker adds the prefix at render time.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub module_origin: Option<String>,
+    /// A compiler temp, not a source binder (#3333). The Rust walker spells
+    /// it in the reserved `__almide_` space, which no user name reaches, so a
+    /// user binding can never share its Rust identifier. Only
+    /// [`VarTable::alloc_source`] and [`VarTable::alloc_like`] clear it.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub synthetic: bool,
 }
+
+fn is_false(b: &bool) -> bool { !*b }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct VarTable {
@@ -213,7 +227,24 @@ impl VarTable {
     pub fn alloc(&mut self, name: Sym, ty: Ty, mutability: Mutability, span: Option<Span>) -> VarId {
         debug_assert!(self.entries.len() < u32::MAX as usize, "too many variables");
         let id = VarId(self.entries.len() as u32);
-        self.entries.push(VarInfo { name, ty, mutability, span, use_count: 0, module_origin: None });
+        self.entries.push(VarInfo { name, ty, mutability, span, use_count: 0, module_origin: None, synthetic: true });
+        id
+    }
+
+    /// Allocate a binder the SOURCE names (a `let`, param, pattern, top-let):
+    /// rendered under its own spelling. Every other allocation is a temp.
+    pub fn alloc_source(&mut self, name: Sym, ty: Ty, mutability: Mutability, span: Option<Span>) -> VarId {
+        let id = self.alloc(name, ty, mutability, span);
+        self.entries[id.0 as usize].synthetic = false;
+        id
+    }
+
+    /// A fresh var standing for `of` (a specialization, rebind or outlined
+    /// param): same name, span and source/temp kind, new type and mutability.
+    pub fn alloc_like(&mut self, of: VarId, ty: Ty, mutability: Mutability) -> VarId {
+        let VarInfo { name, span, synthetic, .. } = self.get(of).clone();
+        let id = self.alloc(name, ty, mutability, span);
+        self.entries[id.0 as usize].synthetic = synthetic;
         id
     }
 

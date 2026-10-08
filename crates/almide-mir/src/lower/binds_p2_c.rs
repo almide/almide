@@ -549,6 +549,12 @@ impl LowerCtx {
             self.ops.truncate(mark);
             self.live_heap_handles.truncate(lhh_mark);
         }
+        // A literal/binder chain (`match s { "" => "empty", _ => { guard …; s } }`): the
+        // heap-result `if` join `lower_bind_heap_if` uses (#3451).
+        if let Some(obj) = self.try_lower_heap_match_via_if(subject, arms, ty) {
+            self.seed_bound_heap_match_merge(var, ty, obj);
+            return Ok(());
+        }
         Err(LowerError::shaped(
             value.span,
             WallShape::HeapResultBind,

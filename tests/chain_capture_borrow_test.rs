@@ -77,7 +77,7 @@ fn an_inlined_chain_callback_borrows_the_param_it_reads() {
         let s = fn_sig_and_body(&rust, name);
         assert!(s.starts_with(sig), "{name}:\n{s}");
         assert!(!s.contains("move |"), "{name} step must not move:\n{s}");
-        assert!(!s.contains("__cap_"), "{name} step must not bind a capture:\n{s}");
+        assert!(!s.contains("__almide_ir2_cap_"), "{name} step must not bind a capture:\n{s}");
     }
     // A step that returns the param per element clones it there whether
     // the param is owned or not, so the param stays borrowed.

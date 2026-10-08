@@ -322,7 +322,7 @@ pub fn lower_module(
     type_map: &TypeMap,
     versioned_name: Option<String>,
 ) -> IrModule {
-    let mut ir_prog = lower_program_with_prefix(prog, env, type_map, Some(name));
+    let mut ir_prog = lower_program_with_prefix(prog, env, type_map, Some(name), Default::default());
     // An imported module's `test` blocks belong to that module's own test run,
     // never to the importer's build (#2550). Kept here, the native leg flattened
     // them into the importer's test binary as `almide_rt_<mod>___test_*` and
@@ -445,7 +445,7 @@ fn lower_fn(ctx: &mut LowerCtx, decl: &FnToLower<'_>) -> IrFunction {
     let mutated_params = resolve_mutated_params(params, attrs);
 
     IrFunction {
-        name: sym(name), params: ir_params, ret_ty, body: ir_body,
+        name: ctx.ir_fn_name(sym(name)), params: ir_params, ret_ty, body: ir_body,
         is_effect, is_test: false,
         generics: stripped_generics, extern_attrs: extern_attrs.to_vec(),
         export_attrs: export_attrs.to_vec(),

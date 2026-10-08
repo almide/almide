@@ -27,9 +27,11 @@
 //! ends, and the path ends in the checker's abort terminal (`t`, format v6),
 //! which discharges every credit still outstanding on it.
 //!
-//! The routes that convert the error on the way out (a typed error into a
-//! String channel, #2725) and a pure frame's `!` (a trap) have RC sites or
-//! trap edges this does not record: they decline.
+//! A typed error converted into a String channel on the way out (#2725) is
+//! recorded as its repr block moving into a fresh err block that leaves
+//! (`witness_repr_built`). The joined `List[String]` route and a pure
+//! frame's `!` (a trap) have RC sites or trap edges this does not record:
+//! they decline.
 
 use crate::emitter::Emitter;
 
@@ -156,6 +158,20 @@ impl Emitter<'_> {
         w.frame_replaced();
     }
 
+    /// #2755: a typed error `!`-ed into a String channel (err_channel.rs
+    /// `propagate_err_as_repr`), once its message is built: the repr text
+    /// is a fresh block moved into the fresh err block (`im`); an OWNED
+    /// carrier was released (`d`), a borrowed one is the exit's to release.
+    /// The exit is armed; the err block leaves at `witness_unwrap_exit`.
+    pub(crate) fn witness_repr_built(&mut self, c: WCarrier) {
+        let Some(w) = self.witness.as_mut() else { return };
+        w.temp_move();
+        if let WCarrier::Temp(o) = c {
+            w.temp_ops(o, "d");
+        }
+        w.arm_err_exit();
+    }
+
     /// A route that leaves the frame some other way (a converted error, an
     /// abort, a trap): withdraw. The exit such a route may still emit is armed, so it is attributed
     /// rather than mistaken for a hook disagreement.
@@ -195,6 +211,15 @@ impl Emitter<'_> {
         if self.rc_owned_result(m)
             && let Some(w) = self.witness.as_mut()
         {
+            w.temp_born();
+        }
+    }
+
+    /// #3470: main's abort message rendered from a non-String error (its
+    /// repr, or a joined `List[String]`) is a FRESH block born here that the
+    /// abort takes with it — born, then discharged by the abort terminal.
+    pub(crate) fn witness_abort_built(&mut self, fresh: bool) {
+        if fresh && let Some(w) = self.witness.as_mut() {
             w.temp_born();
         }
     }

@@ -13,6 +13,8 @@ const PROGRAM: &str = r#"fn get(i: Int) -> List[Int]? = if i > 0 then some([i]) 
 
 fn fresh(i: Int) -> Int = list.len(get(i) ?? [0])
 
+fn closure_or(fs: List[(Int) -> Int], i: Int) -> (Int) -> Int = list.get(fs, i) ?? ((x) => x + i)
+
 fn borrowed(i: Int, d: List[Int]) -> Int = {
   let xs = get(i) ?? d
   list.len(xs)
@@ -38,7 +40,8 @@ fn wordy(n: Int) -> Int = {
 effect fn main() -> Unit = {
   let a = fan.bounded(compute.ms(100)) { heavy(10) } ?? -1
   let b = fan.bounded(compute.ms(100)) { wordy(10) } ?? -1
-  println("${fresh(1)} ${fresh(0)} ${borrowed(1, [4])} ${a} ${b}")
+  let g = closure_or([(x) => x * 2], 1)
+  println("${fresh(1)} ${fresh(0)} ${borrowed(1, [4])} ${a} ${b} ${g(3)}")
 }
 "#;
 
@@ -63,6 +66,13 @@ fn unwrap_or_joins_and_meter_prims_witness_exactly() {
     // owned join is lent to `list.len` and released (`id`).
     assert_eq!(get("fresh"), "ibd\n{|im}\n{|am}\nid\n");
     assert!(accepted(&get("fresh")));
+    // #3446: a FN payload joins owned too. The carrier and the fallback
+    // closure's env are born, read and released (`ibd` each); the fresh
+    // closure moves into the join on the none arm, the list's closure shares
+    // and moves on the some arm, the join moves out. Borrowed, the fallback
+    // had no owner and the frame declined (`unwrap-or:unowned-fresh-fallback`).
+    assert_eq!(get("closure_or"), "ibd\nibd\n{|im}\n{|am}\nim\n");
+    assert!(accepted(&get("closure_or")));
     // A var fallback leaves the join a view of a bound carrier's payload or
     // of the fallback (#2755): the bind's share lands on that view and the
     // epilogue releases it (`ad`); the named carrier is born and released.

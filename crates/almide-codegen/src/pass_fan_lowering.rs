@@ -79,6 +79,79 @@ fn unit_placeholder() -> IrExpr {
     IrExpr { kind: IrExprKind::Unit, ty: almide_lang::types::Ty::Unit, span: None, def_id: None }
 }
 
+/// #3459: publish the `fan { … }` blocks whose arms must run inline
+/// (`CodegenAnnotations::inline_fans`). An arm that captures an `Rc`-backed
+/// value — a closure (`Rc<dyn Fn>`, or a borrowed `&dyn Fn` param), a `Bytes`
+/// / `Matrix` (`AlmideRcCow`), or a container or user type holding one —
+/// cannot move onto a spawned thread: the value is neither `Send` nor `Sync`
+/// and rustc refuses the spawn (E0277). Such a fan runs its arms in arm order
+/// on the calling thread, the sequential evaluation the threaded form
+/// reproduces. A one-arm fan already runs inline (#3341).
+pub fn mark_inline_fans(program: &mut IrProgram) {
+    use almide_ir::visit::{IrVisitor, walk_expr};
+    struct Scan<'a> { decls: Vec<&'a IrTypeDecl>, vt: &'a VarTable, out: std::collections::HashSet<(usize, usize, usize)> }
+    impl IrVisitor for Scan<'_> {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if let (IrExprKind::Fan { exprs }, Some(span)) = (&e.kind, e.span)
+                && exprs.len() > 1
+                && exprs.iter().any(|arm| self.arm_holds_rc(arm))
+            {
+                self.out.insert(almide_ir::annotations::CodegenAnnotations::fan_key(span));
+            }
+            walk_expr(self, e);
+        }
+    }
+    impl Scan<'_> {
+        fn arm_holds_rc(&self, arm: &IrExpr) -> bool {
+            almide_ir::free_vars::free_vars(arm, &std::collections::HashSet::new())
+                .into_iter()
+                .any(|v| ty_holds_rc(&self.vt.get(v).ty, &self.decls, &mut Vec::new()))
+        }
+    }
+    let decls: Vec<&IrTypeDecl> = program.type_decls.iter()
+        .chain(program.modules.iter().flat_map(|m| m.type_decls.iter()))
+        .collect();
+    let mut scan = Scan { decls, vt: &program.var_table, out: std::collections::HashSet::new() };
+    for func in program.functions.iter().chain(program.modules.iter().flat_map(|m| m.functions.iter())) {
+        scan.visit_expr(&func.body);
+    }
+    let out = scan.out;
+    program.codegen_annotations.inline_fans = out;
+}
+
+/// Does a value of `ty` hold an `Rc`-backed leaf on the native leg? A named
+/// type is looked through its declaration once per path (`seen`), so a
+/// recursive type terminates.
+fn ty_holds_rc(ty: &almide_lang::types::Ty, decls: &[&IrTypeDecl], seen: &mut Vec<almide_base::intern::Sym>) -> bool {
+    use almide_lang::types::{Ty, constructor::TypeConstructorId as TC};
+    match ty {
+        Ty::Fn { .. } | Ty::Bytes | Ty::Matrix | Ty::Applied(TC::Matrix, _) => true,
+        Ty::Tuple(args) | Ty::Applied(_, args) => args.iter().any(|t| ty_holds_rc(t, decls, seen)),
+        Ty::Record { fields } | Ty::OpenRecord { fields } => fields.iter().any(|(_, t)| ty_holds_rc(t, decls, seen)),
+        Ty::Named(name, args) => {
+            if args.iter().any(|t| ty_holds_rc(t, decls, seen)) { return true; }
+            if seen.contains(name) { return false; }
+            seen.push(*name);
+            let found = decls.iter().filter(|d| d.name == *name).any(|d| decl_holds_rc(&d.kind, decls, seen));
+            seen.pop();
+            found
+        }
+        _ => false,
+    }
+}
+
+fn decl_holds_rc(kind: &IrTypeDeclKind, decls: &[&IrTypeDecl], seen: &mut Vec<almide_base::intern::Sym>) -> bool {
+    match kind {
+        IrTypeDeclKind::Record { fields } => fields.iter().any(|f| ty_holds_rc(&f.ty, decls, seen)),
+        IrTypeDeclKind::Alias { target } => ty_holds_rc(target, decls, seen),
+        IrTypeDeclKind::Variant { cases, .. } => cases.iter().any(|c| match &c.kind {
+            IrVariantKind::Unit => false,
+            IrVariantKind::Tuple { fields } => fields.iter().any(|t| ty_holds_rc(t, decls, seen)),
+            IrVariantKind::Record { fields } => fields.iter().any(|f| ty_holds_rc(&f.ty, decls, seen)),
+        }),
+    }
+}
+
 // Note: fan.map/race/any come through as CallTarget::Module { module: "fan" }.
 // The walker renders these, but the lambda args may still have Try nodes.
 // This pass strips Try from lambdas that are arguments to fan.* calls.
@@ -91,8 +164,9 @@ fn rewrite_expr(expr: IrExpr, inside_fan: bool) -> IrExpr {
         // Fan block: mark children as inside_fan, strip top-level Try from each expr
         IrExprKind::Fan { exprs } => IrExprKind::Fan {
             exprs: exprs.into_iter().map(|e| {
-                let rewritten = rewrite_expr(e, true);
-                strip_try_top(rewritten)
+                let e = strip_try_top(e);
+                if is_arm_thunk(&e) { rewrite_expr(peel_arm_thunk(e), false) }
+                else { strip_try_top(rewrite_expr(e, true)) }
             }).collect(),
         },
 
@@ -177,6 +251,49 @@ fn rewrite_target(target: CallTarget, inside_fan: bool) -> CallTarget {
         },
         // No IrExpr children — total by construction (new variant = compile error).
         other @ (CallTarget::Named { .. } | CallTarget::Module { .. }) => other,
+    }
+}
+
+/// #3462: an arm the frontend scoped as the thunk `(() => ok(body))()` (its
+/// body propagates with `!`) runs as that thunk's body: the spawn / inline
+/// closure already IS a zero-arg closure, so the body's `?` ends the arm with
+/// its Err and the join's `?` reports the lowest-index one (C-199). Its
+/// markers stay — they are the arm's propagation, not the join's auto-try.
+fn is_arm_thunk(arm: &IrExpr) -> bool {
+    matches!(&arm.kind, IrExprKind::Call { target: CallTarget::Computed { callee }, args, .. }
+        if args.is_empty() && thunk_body(callee).is_some())
+}
+
+fn peel_arm_thunk(arm: IrExpr) -> IrExpr {
+    match arm.kind {
+        IrExprKind::Call { target: CallTarget::Computed { callee }, .. } => peel_thunk(*callee),
+        kind => IrExpr { kind, ..arm },
+    }
+}
+
+/// The zero-arg lambda a callee evaluates to, seen through the closure
+/// representation (`RcWrap`) and the capture binds `CaptureClone` puts in
+/// front of it (`{ let __cap_0 = x.clone(); RcWrap(lambda) }`).
+fn thunk_body(callee: &IrExpr) -> Option<&IrExpr> {
+    match &callee.kind {
+        IrExprKind::Lambda { params, body, .. } if params.is_empty() => Some(body),
+        IrExprKind::RcWrap { expr, .. } => thunk_body(expr),
+        IrExprKind::Block { expr: Some(tail), .. } => thunk_body(tail),
+        _ => None,
+    }
+}
+
+/// The callee with its lambda replaced by the lambda's body; the capture
+/// binds stay in front of it, so the body still reads them.
+fn peel_thunk(callee: IrExpr) -> IrExpr {
+    match callee.kind {
+        IrExprKind::Lambda { body, .. } => *body,
+        IrExprKind::RcWrap { expr, .. } => peel_thunk(*expr),
+        IrExprKind::Block { stmts, expr: Some(tail) } => {
+            let tail = peel_thunk(*tail);
+            IrExpr { ty: tail.ty.clone(), kind: IrExprKind::Block { stmts, expr: Some(Box::new(tail)) }, ..callee }
+        }
+        kind => IrExpr { kind, ..callee },
     }
 }
 

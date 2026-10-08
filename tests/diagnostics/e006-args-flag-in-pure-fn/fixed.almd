@@ -1,0 +1,5 @@
+import args
+
+effect fn verbose() -> Bool = args.flag("verbose")!
+
+effect fn main() -> Unit = if verbose()! then println("loud") else ()

@@ -548,7 +548,7 @@ fn specialize_discovered(
         // mangled symbol, rustc E0428. The module's own fn list is the ground
         // truth; a pre-existing instance only needs the rename entry so this
         // round's call-site rewrite still points at it.
-        let spec_name_probe = format!("{}__{}", fn_name, suffix);
+        let spec_name_probe = almide_ir::mono_instance_name(&fn_name, &suffix);
         if program.modules[mi].functions.iter().any(|f| f.name.as_str() == spec_name_probe) {
             rename.entry(key).or_insert(spec_name_probe);
             continue;

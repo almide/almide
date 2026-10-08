@@ -257,7 +257,7 @@ fn describe(e: &Value, leg: &str) -> String {
 }
 
 fn render_human(r: &Value) {
-    let verdict = if r["survives"] == true { "survives" } else { "does NOT survive" };
+    let verdict = if r["survives"].as_bool().unwrap_or(false) { "survives" } else { "does NOT survive" };
     err(&format!("{}: the edit {}", r["file"].as_str().unwrap_or(""), verdict));
     for leg in ["check", "tests", "contracts"] {
         let s = &r["summary"][leg];
@@ -287,7 +287,7 @@ pub fn cmd_survive(a: SurviveArgs) {
     } else {
         render_human(&report);
     }
-    std::process::exit(if report["survives"] == true { 0 } else { 1 });
+    std::process::exit(if report["survives"].as_bool().unwrap_or(false) { 0 } else { 1 });
 }
 
 /// Replace `path`'s contents with `text` atomically: a sibling temp file,
@@ -342,7 +342,7 @@ pub fn cmd_apply(a: SurviveArgs, if_survives: Option<String>, force: bool) {
     }
     let p = prepare(&a).unwrap_or_else(|e| fail(a.json, &e));
     let mut report = evaluate(&p, Duration::from_secs(a.timeout_secs)).unwrap_or_else(|e| fail(a.json, &e));
-    let survives = report["survives"] == true;
+    let survives = report["survives"].as_bool().unwrap_or(false);
     let write = survives || force;
     if write {
         // The verdict is about the bytes read at the start; refuse to write

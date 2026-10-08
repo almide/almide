@@ -23,10 +23,10 @@
 //! already renders for scalar and heap payloads:
 //!
 //! ```almide
-//! fn optional_chain_synth_0(s: Pt?) -> Int? = match s { some(x) => some(x.x), none => none }
+//! fn __almd_optchain_0(s: Pt?) -> Int? = match s { some(x) => some(x.x), none => none }
 //! // …
-//! let px = optional_chain_synth_0(p)          // bind position: proven heap call-result
-//! println(int.to_string(optional_chain_synth_0(np) ?? -9))  // arg position: proven ?? operand
+//! let px = __almd_optchain_0(p)          // bind position: proven heap call-result
+//! println(int.to_string(__almd_optchain_0(np) ?? -9))  // arg position: proven ?? operand
 //! ```
 //!
 //! A Named call is a proven shape in EVERY position (bind, call argument,
@@ -148,15 +148,12 @@ impl IrMutVisitor for ChainDesugarer<'_> {
         let res_ty = e.ty.clone();
         let span = e.span;
 
-        // Synthesize `fn optional_chain_synth_N(s: Option[P]) -> Option[F] =
-        //   match s { some(x) => some(x.field), none => none }`.
-        // NOT `__`-prefixed: the codegen builtin-lowering pass rewrites every
-        // `__`-prefixed Named CALL to a runtime intrinsic (`almide_rt_<name>`),
-        // which would mismatch this real user-fn definition on the native path
-        // (the branch_lift_synth naming precedent).
+        // Synthesize `fn __almd_optchain_N(s: Option[P]) -> Option[F] =
+        //   match s { some(x) => some(x.field), none => none }`, named in the
+        // compiler's `__` fn-name space, which no user fn shares (#3483).
         let id = *self.counter;
         *self.counter = id + 1;
-        let func_name = sym(&format!("optional_chain_synth_{}", id));
+        let func_name = sym(&format!("__almd_optchain_{}", id));
         let subj_var = self.vt.alloc(sym("ocs_subj"), subj_ty.clone(), Mutability::Let, span);
         let payload_var = self.vt.alloc(sym("ocs_payload"), payload_ty.clone(), Mutability::Let, span);
 
@@ -206,7 +203,7 @@ impl IrMutVisitor for ChainDesugarer<'_> {
             module_origin: None,
         });
 
-        // Replace the chain with `optional_chain_synth_N(<subject>)` — the
+        // Replace the chain with `__almd_optchain_N(<subject>)` — the
         // subject expression becomes the (single) argument, evaluated exactly
         // once in the same position it occupied before.
         let IrExprKind::OptionalChain { expr, .. } = std::mem::replace(

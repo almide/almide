@@ -633,8 +633,12 @@ fn insert_try_iterate(kind: IrExprKind, ty: &Ty, ctx: &mut TryCtx) -> Result<IrE
                 other => other,
             }).collect(),
         },
+        // #3468: a fan arm keeps its Result — the block's join unwraps it,
+        // after every arm ran (C-199). A `?` here went on a call arm but into
+        // a block arm's tail, a second shape that native's join read as a
+        // payload and wasm as an exit before the later arms.
         IrExprKind::Fan { exprs } => IrExprKind::Fan {
-            exprs: exprs.into_iter().map(|e| insert_try(e, false, ctx)).collect(),
+            exprs: exprs.into_iter().map(|e| insert_try(e, true, ctx)).collect(),
         },
         IrExprKind::Tuple { elements } => {
             // #555: per-position target-directed coercion (Result-typed tuple

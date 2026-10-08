@@ -588,6 +588,7 @@ impl NanoPass for BorrowInsertionPass {
         let sigs = super::pass_borrow_inference::infer_borrow_signatures(&mut program);
         let changed = !sigs.is_empty();
         if changed {
+            super::pass_borrow_inference::commit_scoped_closures(&mut program, &sigs);
             super::pass_borrow_inference::commit_chain_source_modes(&mut program, &sigs);
             super::pass_borrow_inference::insert_borrows_at_call_sites(&mut program, &sigs);
             super::pass_borrow_inference::hoist_conflicting_reads(&mut program);
@@ -609,6 +610,7 @@ impl NanoPass for FanLoweringPass {
     fn depends_on(&self) -> Vec<&'static str> { vec!["ResultPropagation"] }
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         super::pass_fan_lowering::strip_fan_auto_try(&mut program);
+        super::pass_fan_lowering::mark_inline_fans(&mut program);
         PassResult { program, changed: true }
     }
 }

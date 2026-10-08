@@ -1,0 +1,8 @@
+// E096: a stdlib fn whose first parameter is `mut` taken as a value (#3456).
+// `list.push` writes to the caller's `var`; as a function value it could not.
+effect fn main() -> Unit = {
+  var xs: List[Int] = []
+  let add = list.push
+  add(xs, 1)
+  println(int.to_string(list.len(xs)))
+}

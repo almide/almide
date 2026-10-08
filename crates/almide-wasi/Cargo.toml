@@ -13,8 +13,8 @@ description = "The stock-WASI (preview-1) transform of a structural almide modul
 # this crate as `almide_wasm_run::wasi`, so its callers are unchanged.
 [dependencies]
 almide-wasm = { path = "../almide-wasm" }
-wasm-encoder = { version = "0.259", features = ["wasmparser"] }
-wasmparser = "0.259"
+wasm-encoder = { version = "0.261", features = ["wasmparser"] }
+wasmparser = "0.261"
 anyhow = "1"
 wat = "1"
 almide-base = { path = "../almide-base" }

@@ -212,7 +212,7 @@ fn infer_function_borrows(func: &IrFunction, scope: &Scope) -> Vec<ParamBorrow> 
     if has_intrinsic {
         return func.params.iter().map(|p| intrinsic_borrow_mode(&p.ty, scope.round.records)).collect();
     }
-    let uses = UseSites::of_fn(func, scope);
+    let (_, uses) = scoped_uses(func, scope);
     func.params.iter().enumerate().map(|(slot, param)| param_borrow(slot, param, &uses, scope, &func.body)).collect()
 }
 
@@ -562,7 +562,9 @@ fn self_call_rebinds(body: &IrExpr, fn_name: &str, slot: usize, var: VarId) -> b
 /// borrowed slot: does not. Shared with the ownership certifier's C5, so the
 /// verdict and its check read one rule.
 pub(crate) fn fn_param_escapes(u: &Use) -> bool {
-    if u.depth > 0 {
+    // A fan arm is an implicit move closure (#2239): the callable is moved
+    // into it, as into a lambda, so the arm holds the `Rc` handle (#3459).
+    if u.depth > 0 || u.fan_arm.is_some() {
         return true;
     }
     !matches!(u.site, Site::Callee | Site::Arg(SlotMode::Borrow) | Site::Borrow { mutable: false } | Site::Clone)

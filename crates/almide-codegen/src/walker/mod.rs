@@ -208,8 +208,8 @@ impl<'a> RenderContext<'a> {
 
 
     pub(crate) fn var_name(&self, id: VarId) -> String {
-        let name = &self.var_table.get(id).name;
-        escape_rust_ident(name.as_str(), self.templates)
+        let info = self.var_table.get(id);
+        if info.synthetic { helpers::synthetic_ident(info.name.as_str()) } else { escape_rust_ident(info.name.as_str(), self.templates) }
     }
 
     /// The Rust spelling of a record / variant-payload field name (#2652).
@@ -304,7 +304,7 @@ fn render_fn_params_str(fn_ctx: &RenderContext, func: &IrFunction) -> String {
             // other emission site (var_name, fn call, fn definition), so a
             // param named e.g. `self`/`box`/`move` matches at its binding and
             // every use within the body (#659's rule, applied here too).
-            let mut param_name = escape_rust_ident(p.name.as_str(), fn_ctx.templates);
+            let mut param_name = fn_ctx.param_ident(p);
             // Mutable params (e.g. from TCO pass) — let the template decide
             // whether to emit a `mut` prefix via the {mut_prefix} variable.
             let mut_prefix = if fn_ctx.var_table.get(p.var).mutability == Mutability::Var {
@@ -335,7 +335,7 @@ fn render_fn_params_str(fn_ctx: &RenderContext, func: &IrFunction) -> String {
                 }
             };
             fn_ctx.templates.render_with("fn_param", None, &[], &[("name", param_name.as_str()), ("type", type_s.as_str())])
-                .unwrap_or_else(|| format!("{}: {}", p.name, type_s))
+                .unwrap_or_else(|| format!("{}: {}", param_name, type_s))
         })
         .collect::<Vec<_>>()
         .join(", ")
@@ -357,7 +357,7 @@ fn unwrap_block_tail_var(fn_ctx: &RenderContext, e: &IrExpr, expr_str: &mut Stri
         if let IrExprKind::Var { id } = &inner.kind {
             if fn_ctx.ann.is_rc_cow(id) {
                 // Re-render with unwrap: Ok(var.into_inner())
-                let var_name = fn_ctx.var_table.get(*id).name.to_string();
+                let var_name = fn_ctx.var_name(*id);
                 *expr_str = format!("Ok({}.into_inner())", var_name);
             }
         }
@@ -575,7 +575,31 @@ pub(crate) fn top_let_is_thread_local(ctx: &RenderContext, ty: &Ty) -> bool {
     stored_holds_rc(ctx, ty, expressions::rc_cow_needs_glue(ty), 0)
 }
 
-fn wrap_main_fn_code(fn_code: String, ctx: &RenderContext, is_rust_effect_main: bool, is_rust_plain_main_with_forces: bool) -> String {
+/// The text `effect fn main`'s wrapper prints after `Error: ` for main's own
+/// error type `E` (#3474, C-035) — the rendering main's `!` abort gives an
+/// error: a `String` as is (also the effect channel of a main not declared
+/// `Result`), a `List[String]` joined with `", "` (`map_err_join`), any other
+/// type its repr (`almide_repr`, the text `"${e}"` shows). A number or a
+/// `Bool` keeps the `Display` it always printed, which its repr is.
+fn main_err_message(ctx: &RenderContext, ret_ty: &Ty) -> &'static str {
+    let Some((_, err)) = ret_ty.inner2() else { return "__almide_err" };
+    let mut err = err;
+    for _ in 0..32 {
+        let Ty::Named(name, args) = err else { break };
+        match ctx.type_aliases.get(name) {
+            Some(t) if args.is_empty() => err = t,
+            _ => break,
+        }
+    }
+    match err {
+        Ty::String | Ty::Bool | Ty::Int | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
+        | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64 | Ty::Float | Ty::Float32 | Ty::Float64 => "__almide_err",
+        Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, a) if matches!(a.as_slice(), [Ty::String]) => "__almide_err.join(\", \")",
+        _ => "almide_repr(&__almide_err)",
+    }
+}
+
+fn wrap_main_fn_code(fn_code: String, ctx: &RenderContext, ret_ty: &Ty, is_rust_effect_main: bool, is_rust_plain_main_with_forces: bool) -> String {
     let force_lines: String = ctx.ann.global_init_order.iter()
         .filter_map(|v| ctx.ann.globals.get(v).map(|i| (v, i)))
         .filter(|(_, i)| matches!(i.storage, almide_ir::top_let_storage::TopLetStorage::Lazy { eager_force: true }))
@@ -586,7 +610,7 @@ fn wrap_main_fn_code(fn_code: String, ctx: &RenderContext, is_rust_effect_main: 
         })
         .collect();
     if is_rust_effect_main {
-        format!("{}\n\nfn main() {{\n{}{}{}{}    if let Err(__almide_err) = __almide_main() {{\n        almide_stdout_finish();\n        eprintln!(\"Error: {{}}\", __almide_err);\n        std::process::exit(1);\n    }}\n    almide_stdout_finish();\n}}", fn_code, MAIN_SIGPIPE_PRELUDE, MAIN_STACK_PRELUDE, MAIN_STDOUT_PRELUDE, force_lines)
+        format!("{}\n\nfn main() {{\n{}{}{}{}    if let Err(__almide_err) = __almide_main() {{\n        almide_stdout_finish();\n        eprintln!(\"Error: {{}}\", {});\n        std::process::exit(1);\n    }}\n    almide_stdout_finish();\n}}", fn_code, MAIN_SIGPIPE_PRELUDE, MAIN_STACK_PRELUDE, MAIN_STDOUT_PRELUDE, force_lines, main_err_message(ctx, ret_ty))
     } else if is_rust_plain_main_with_forces {
         format!("{}\n\nfn main() {{\n{}{}{}{}    __almide_main();\n    almide_stdout_finish();\n}}", fn_code, MAIN_SIGPIPE_PRELUDE, MAIN_STACK_PRELUDE, MAIN_STDOUT_PRELUDE, force_lines)
     } else {
@@ -642,7 +666,7 @@ fn render_function_inner(ctx: &RenderContext, func: &IrFunction) -> String {
     let fn_code = fn_ctx.templates.render_with(construct, None, &[], &[("name", safe_name.as_str()), ("params", params_str.as_str()), ("return_type", ret_str.as_str()), ("body", body_str.as_str())])
         .unwrap_or_else(|| format!("fn {}() {{ }}", func.name));
 
-    let fn_code = wrap_main_fn_code(fn_code, ctx, is_rust_effect_main, is_rust_plain_main_with_forces);
+    let fn_code = wrap_main_fn_code(fn_code, ctx, &func.ret_ty, is_rust_effect_main, is_rust_plain_main_with_forces);
 
     prepend_doc_comment(func.doc.as_deref(), fn_code)
 }

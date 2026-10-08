@@ -1,10 +1,19 @@
 // args — command-line argument parsing
 // Bundled stdlib module (written in Almide, auto multi-target)
+//
+// Every reader is an `effect fn` (dialect epoch 13): argv is input, and a
+// plain fn writes and aborts but never reads (ADR-0022), the rule
+// `process.args` already followed (#3248). The `__` helpers take the list as
+// a parameter and stay plain. `import env` lets the checker resolve
+// `env.args` here, so the effect rule judges this file (without it the call
+// was an unresolved name in the bundled context and E006 could not fire).
+import env
+
 /// Same as env.args; argv[0] excluded.
-fn raw() -> List[String] = env.args()
+effect fn raw() -> List[String] = env.args()
 
 /// True on --name or -<first letter of name>.
-fn flag(name: String) -> Bool = {
+effect fn flag(name: String) -> Bool = {
   // Recursion instead of `list.any` with a CAPTURING lambda: a capture inside
   // a BUNDLED module mislowers on wasm (#892 — the closure env held garbage,
   // so the result was a truncated string or an out-of-bounds trap). The
@@ -24,7 +33,7 @@ fn __flag_at(args: List[String], long: String, short: String, i: Int) -> Bool =
   }
 
 /// Value of --name=v or --name v; none if absent.
-fn option(name: String) -> String? = {
+effect fn option(name: String) -> String? = {
   let args = env.args()
   let long = "--" + name
   let eq_prefix = long + "="
@@ -48,13 +57,13 @@ fn __find_prefixed(args: List[String], prefix: String, i: Int) -> String? =
   else __find_prefixed(args, prefix, i + 1)
 
 /// option(name), or fallback when absent.
-fn option_or(name: String, fallback: String) -> String = match option(name) {
+effect fn option_or(name: String, fallback: String) -> String = match option(name)! {
   some(v) => v,
   none => fallback,
 }
 
 /// Args not starting with -; option values too.
-fn positional() -> List[String] = {
+effect fn positional() -> List[String] = {
   // `env.args()` ALREADY excludes argv[0] — it is the user's arguments, the
   // ones after `--`. Dropping one more here ate the FIRST real argument
   // (#891: `-- input.csv out.csv` gave `out.csv`).
@@ -62,4 +71,4 @@ fn positional() -> List[String] = {
 }
 
 /// i-th positional arg; none if out of range.
-fn positional_at(i: Int) -> String? = list.get(positional(), i)
+effect fn positional_at(i: Int) -> String? = list.get(positional()!, i)

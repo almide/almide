@@ -49,7 +49,6 @@ err() { echo "FAIL: $*" >&2; fail=1; }
 # absence from PURE_MODULES; enumerated HERE only so the completeness check can
 # tell "intentionally walled, justified" from "unclassified new module".
 declare -A IMPURE_PLAIN=(
-  [args]="raw() delegates to env.args() — reads process arguments"
   [mem]="save/restore the allocator arena — mutates global allocator state"
   [testing]="assert_* print failures / abort the process — Stdout + process effect"
   [datetime]="now()/monotonic_ns() read the wall clock — a nondeterministic host source"

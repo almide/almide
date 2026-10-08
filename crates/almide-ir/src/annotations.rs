@@ -59,6 +59,12 @@ pub struct CodegenAnnotations {
     /// walker reads that one off the `Borrow` node `BorrowInsertion` spells
     /// around it, so a zero-param lambda needs no entry here.)
     pub borrowed_lambda_params: HashSet<VarId>,
+    /// `let`-bound closures that are SCOPES (#3455): the closure cannot
+    /// outlive its fn and only reads what it captures, so the bind is the
+    /// non-`move` `&|..| ..` (`Borrow { Lambda }`) and the binder is a
+    /// reference to it — calling it needs no `Rc` handle and no clone.
+    /// Decided by BorrowInsertion (`commit_scoped_closures`).
+    pub scope_closure_binders: HashSet<VarId>,
     /// List-field loops whose owned root is dead after the head evaluation.
     /// The body needs owned elements, so move them with into_iter rather than clone.
     pub consumed_loop_vars: HashSet<VarId>,
@@ -221,6 +227,13 @@ pub struct CodegenAnnotations {
     /// by `BorrowLoweringPass` after TCO has forced its loop params owned, so
     /// the modes are the ones the signatures render with.
     pub param_borrows: HashMap<VarId, ParamBorrow>,
+    /// The `fan { … }` blocks whose arms run inline on the calling thread,
+    /// by source span (#3459): an arm captures an `Rc`-backed value (a
+    /// closure, a `Bytes` / `Matrix`), which cannot move onto a spawned
+    /// thread. Published by `FanLoweringPass`. A span shared by two fans (two
+    /// monomorphic copies, two modules) runs both inline, which is the
+    /// sequential evaluation and only gives up the overlap.
+    pub inline_fans: HashSet<(usize, usize, usize)>,
 }
 
 impl CodegenAnnotations {
@@ -251,6 +264,16 @@ impl CodegenAnnotations {
     /// cannot spell). The IR type stays real. (TailCallOptPass.)
     pub fn is_infer_binding(&self, var: &VarId) -> bool {
         self.infer_binding_tys.contains(var)
+    }
+
+    /// The key [`Self::inline_fans`] is indexed by.
+    pub fn fan_key(span: almide_base::span::Span) -> (usize, usize, usize) {
+        (span.line, span.col, span.end_col)
+    }
+
+    /// True if the fan at `span` runs its arms inline (#3459).
+    pub fn is_inline_fan(&self, span: Option<almide_base::span::Span>) -> bool {
+        span.is_some_and(|s| self.inline_fans.contains(&Self::fan_key(s)))
     }
 
     /// Alias-resolved global lookup — the ONLY way stage-2 consumers are

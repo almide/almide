@@ -79,14 +79,15 @@ use almide_ir::free_vars::free_vars;
 use almide_ir::substitute::substitute_var_in_expr;
 use almide_ir::visit_mut::{walk_expr_mut, walk_stmt_mut, IrMutVisitor};
 use almide_ir::*;
-use almide_base::intern::sym;
+use almide_base::intern::{sym, Sym};
+use almide_ir::mut_args::{place_root, CallWrites, MutParamTable};
 use almide_lang::types::{is_heap_ty, Ty};
 
 /// Lift every heap-typed `let`/`var`-bound `if`/`match` value into a fresh tail
 /// helper function, replacing the bind value with a call to that helper.
 pub fn lift_heap_branch_binds(program: &mut IrProgram) {
     let mut counter: u32 = 0;
-    let mut_params = MutParams::of(program);
+    let mut_params = MutParamTable::of(program);
 
     // Root program: function bodies + top-level let initializers all share the
     // program-wide `var_table`, so a helper synthesized from any of them resolves
@@ -118,7 +119,7 @@ pub fn lift_heap_branch_binds(program: &mut IrProgram) {
     for module in program.modules.iter_mut() {
         let IrModule { name, functions, top_lets, var_table, .. } = &mut *module;
         let globals: HashSet<VarId> = top_lets.iter().map(|tl| tl.var).collect();
-        let scope = Some(name.as_str().to_string());
+        let scope = Some(*name);
         let mut lifter = BranchLifter { vt: var_table, counter: &mut counter, new_funcs: Vec::new(), loop_depth: 0, dense_depth: 0, globals, mut_params: &mut_params, scope };
         for func in functions.iter_mut() {
             let before = lifter.new_funcs.len();
@@ -169,101 +170,39 @@ struct BranchLifter<'a> {
     /// lifted too: each bind becomes ONE helper call (chain-length immune, no 2^n
     /// duplication), the sound shape the try-lowered helper renders.
     dense_depth: u32,
-    /// Every user fn's `mut` parameter positions (see [`MutParams`]): an
+    /// Every fn's `mut` parameter positions (see [`MutParamTable`]): an
     /// argument passed there is WRITTEN by the call (#2907), exactly like an
     /// `Assign` to it.
-    mut_params: &'a MutParams,
+    mut_params: &'a MutParamTable,
     /// The module whose fns this lifter walks (`None` = the root program): a
     /// bare `Named` call resolves in this scope first.
-    scope: Option<String>,
-}
-
-/// The `mut` parameter positions of the USER fns (root program and user
-/// modules), by the scope they live in. A BUNDLED stdlib fn is never read from
-/// here, even when this leg lowered its module: its positions come from its
-/// declaration (`almide_ir::mut_args`), on every leg. The native leg lowers
-/// the bundled modules and the wasm leg does not, so a table built from the
-/// lowered modules answered differently per leg: wasm missed `list.pop`'s
-/// write (#2931), and native, keying `map.insert` under its bare name over a
-/// user's own `insert(tag, mut m)`, read position 0 for the user fn and lost
-/// its write (#2948).
-pub(crate) struct MutParams {
-    /// Root-program fns by bare name.
-    root: std::collections::HashMap<String, Vec<usize>>,
-    /// User-module fns by `(module, fn)`.
-    modules: std::collections::HashMap<(String, String), Vec<usize>>,
-    /// User-module fns by bare name, for a root call that names an imported
-    /// fn bare; ambiguous names (two modules) are dropped.
-    bare: std::collections::HashMap<String, Option<Vec<usize>>>,
-}
-
-impl MutParams {
-    fn of(program: &IrProgram) -> Self {
-        let mut root = std::collections::HashMap::new();
-        for f in program.functions.iter().filter(|f| !f.mutated_params.is_empty()) {
-            root.insert(f.name.as_str().to_string(), f.mutated_params.clone());
-        }
-        let mut modules = std::collections::HashMap::new();
-        let mut bare: std::collections::HashMap<String, Option<Vec<usize>>> = std::collections::HashMap::new();
-        for m in &program.modules {
-            if almide_lang::stdlib_info::is_bundled_module(m.name.as_str()) {
-                continue;
-            }
-            for f in m.functions.iter().filter(|f| !f.mutated_params.is_empty()) {
-                modules.insert((m.name.as_str().to_string(), f.name.as_str().to_string()), f.mutated_params.clone());
-                bare.entry(f.name.as_str().to_string())
-                    .and_modify(|e| if e.as_ref() != Some(&f.mutated_params) { *e = None })
-                    .or_insert_with(|| Some(f.mutated_params.clone()));
-            }
-        }
-        MutParams { root, modules, bare }
-    }
-
-    /// The positions `target` writes, called from `scope`.
-    fn of_call(&self, target: &CallTarget, scope: Option<&str>) -> Option<Vec<usize>> {
-        match target {
-            CallTarget::Module { module, func, .. } => {
-                if almide_lang::stdlib_info::is_bundled_module(module.as_str()) {
-                    almide_ir::mut_args::stdlib_mut_positions(module.as_str(), func.as_str())
-                } else {
-                    self.modules.get(&(module.as_str().to_string(), func.as_str().to_string())).cloned()
-                }
-            }
-            CallTarget::Named { name } => {
-                let name = name.as_str();
-                let own = match scope {
-                    Some(m) => self.modules.get(&(m.to_string(), name.to_string())),
-                    None => self.root.get(name),
-                };
-                own.cloned().or_else(|| self.bare.get(name).cloned().flatten())
-            }
-            _ => None,
-        }
-    }
+    scope: Option<Sym>,
 }
 
 /// The vars a call in `e` passes at a `mut` parameter position (as the
 /// argument itself or as the record a field argument is read from): the call
 /// writes them back, so outlining it into a helper that takes them by value
 /// would lose the write.
-fn collect_mut_arg_vars(e: &IrExpr, mut_params: &MutParams, scope: Option<&str>, out: &mut HashSet<u32>) {
+fn collect_mut_arg_vars(e: &IrExpr, mut_params: &MutParamTable, scope: Option<Sym>, out: &mut HashSet<u32>) {
     struct V<'m, 'o> {
-        mut_params: &'m MutParams,
-        scope: Option<&'m str>,
+        mut_params: &'m MutParamTable,
+        scope: Option<Sym>,
         out: &'o mut HashSet<u32>,
     }
     impl visit::IrVisitor for V<'_, '_> {
         fn visit_expr(&mut self, e: &IrExpr) {
             if let IrExprKind::Call { target, args, .. } = &e.kind {
-                if let Some(idxs) = self.mut_params.of_call(target, self.scope) {
-                    for i in idxs {
-                        let place = args.get(i).map(|a| match &a.kind {
-                            IrExprKind::Member { object, .. } => &object.kind,
-                            k => k,
-                        });
-                        if let Some(IrExprKind::Var { id }) = place {
-                            self.out.insert(id.0);
-                        }
+                // Only an identified callee counts here, as before the shared
+                // table (LICM, which can only lose by guessing, treats an
+                // unidentified one as writing every place argument).
+                if let CallWrites::Positions(idxs) = self.mut_params.writes(target, self.scope) {
+                    // The written place may be a field path of any depth
+                    // (`bump(o.mid.inner)`): its ROOT var is written. Reading
+                    // one `Member` level only lifted that call into a helper
+                    // taking `o` by value — a native rustc error and a lost
+                    // write on wasm.
+                    for id in idxs.iter().filter_map(|&i| args.get(i).and_then(place_root)) {
+                        self.out.insert(id.0);
                     }
                 }
             }
@@ -397,6 +336,12 @@ impl<'a> IrMutVisitor for BranchLifter<'a> {
 /// keeps its in-place route, where the `!` still sits in the fn that owns it. A `Lambda`
 /// body is NOT descended — a `!` there propagates to the lambda's own result, which the
 /// lift carries along unchanged.
+///
+/// #3451: the same holds for every other exit that targets the enclosing fn or loop. A
+/// `guard … else err(..)` lowers to an early `return Err(..)` (rustc E0308 in the
+/// payload-returning helper), and a `break`/`continue` — bare or as a guard's `else` —
+/// would leave the helper with no loop to target (IR verify: "outside of loop"). A
+/// `Guard` statement or a `Break`/`Continue` anywhere in the branch declines the lift too.
 fn holds_error_op(e: &IrExpr) -> bool {
     struct V {
         found: bool,
@@ -406,11 +351,24 @@ fn holds_error_op(e: &IrExpr) -> bool {
             if self.found || matches!(e.kind, IrExprKind::Lambda { .. }) {
                 return;
             }
-            if matches!(e.kind, IrExprKind::Unwrap { .. } | IrExprKind::Try { .. }) {
+            if matches!(
+                e.kind,
+                IrExprKind::Unwrap { .. }
+                    | IrExprKind::Try { .. }
+                    | IrExprKind::Break
+                    | IrExprKind::Continue
+            ) {
                 self.found = true;
                 return;
             }
             visit::walk_expr(self, e);
+        }
+        fn visit_stmt(&mut self, s: &IrStmt) {
+            if matches!(s.kind, IrStmtKind::Guard { .. }) {
+                self.found = true;
+                return;
+            }
+            visit::walk_stmt(self, s);
         }
     }
     let mut v = V { found: false };
@@ -428,7 +386,7 @@ impl<'a> BranchLifter<'a> {
         // Include write-only targets and specialized collection mutations too.
         let mut assigned = HashSet::new();
         almide_ir::collect_assigned_vars(value, &mut assigned);
-        collect_mut_arg_vars(value, self.mut_params, self.scope.as_deref(), &mut assigned);
+        collect_mut_arg_vars(value, self.mut_params, self.scope, &mut assigned);
         if !assigned.is_empty() {
             let locals = almide_ir::free_vars::bound_vars(value);
             if assigned.iter().any(|id| {
@@ -455,12 +413,10 @@ impl<'a> BranchLifter<'a> {
         // 2. Synthesize the helper name + take the branch expr out as the body.
         let id = *self.counter;
         *self.counter = id + 1;
-        // NOT `__`-prefixed: this is a real user-fn DEFINITION both backends emit, but the
-        // codegen builtin-lowering pass rewrites EVERY `__`-prefixed Named CALL to a runtime
-        // intrinsic (`almide_rt_<name>`) — which mismatches this definition on the native Rust
-        // path (cannot-find-fn `almide_rt___branch_lift_0`). A plain name keeps it a user fn
-        // everywhere; the v1 MIR renderer treats it as a let-bound call result (a proven shape).
-        let func_name = sym(&format!("branch_lift_synth_{}", id));
+        // In the compiler's `__` fn-name space (#3483): a user fn spelled there is
+        // renamed at lowering, so no user fn can share this name. (Builtin lowering
+        // rewrites only the `__encode_`/`__decode_`/`__err_at` families, #868.)
+        let func_name = sym(&format!("__almd_lift_{}", id));
         let body = std::mem::replace(value, IrExpr::default());
         let body_span = body.span;
 
@@ -479,7 +435,7 @@ impl<'a> BranchLifter<'a> {
             .iter()
             .map(|&vid| {
                 let info = self.vt.get(vid).clone();
-                let fresh = self.vt.alloc(info.name, info.ty.clone(), Mutability::Let, info.span);
+                let fresh = self.vt.alloc_like(vid, info.ty.clone(), Mutability::Let);
                 let read = IrExpr { kind: IrExprKind::Var { id: fresh }, ty: info.ty.clone(), span: info.span, def_id: None };
                 body = substitute_var_in_expr(&body, vid, &read);
                 IrParam {
@@ -669,18 +625,18 @@ mod tests {
         // The bind value is now a call to the synthesized helper.
         match main_bind_value_kind(&prog) {
             IrExprKind::Call { target: CallTarget::Named { name }, args, .. } => {
-                assert_eq!(name.as_str(), "branch_lift_synth_0", "deterministic helper name");
+                assert_eq!(name.as_str(), "__almd_lift_0", "deterministic helper name");
                 // Free var of the branch = the Bool cond v1 (the String literals are not vars).
                 assert_eq!(args.len(), 1, "captures exactly the one free var");
                 assert!(matches!(args[0].kind, IrExprKind::Var { id: VarId(1) }));
             }
             other => panic!("in-loop heap branch must be lifted to a Call, got {other:?}"),
         }
-        // A `__branch_lift_0` fn was synthesized, Private, returning String, body = the if.
+        // An `__almd_lift_0` fn was synthesized, Private, returning String, body = the if.
         let helper = prog
             .functions
             .iter()
-            .find(|f| f.name == sym("branch_lift_synth_0"))
+            .find(|f| f.name == sym("__almd_lift_0"))
             .expect("helper synthesized");
         assert_eq!(helper.visibility, IrVisibility::Private);
         assert_eq!(helper.ret_ty, Ty::String);
@@ -696,6 +652,38 @@ mod tests {
         assert_eq!(prog.var_table.get(fresh).ty, Ty::Bool);
         let IrExprKind::If { cond, .. } = &helper.body.kind else { panic!("helper body is the branch") };
         assert!(matches!(cond.kind, IrExprKind::Var { id } if id == fresh), "the body reads the fresh param");
+    }
+
+    /// #3451: a branch holding an exit that targets the enclosing fn or loop — a
+    /// `guard` (its `else err(..)` is an early `return Err`), a bare `break` /
+    /// `continue` — must stay inline: the payload-returning helper has no channel
+    /// for it (rustc E0308 / IR verify "outside of loop").
+    #[test]
+    fn declines_a_branch_holding_a_guard_break_or_continue() {
+        let exit = |kind: IrExprKind| IrExpr { kind, ty: Ty::Unit, span: None, def_id: None };
+        let guarded = |else_: IrExpr| IrStmt {
+            kind: IrStmtKind::Guard { cond: var(1, Ty::Bool), else_ },
+            span: None,
+        };
+        let shapes = [
+            vec![guarded(exit(IrExprKind::Continue))],
+            vec![IrStmt { kind: IrStmtKind::Expr { expr: exit(IrExprKind::Break) }, span: None }],
+            vec![IrStmt { kind: IrStmtKind::Expr { expr: exit(IrExprKind::Continue) }, span: None }],
+        ];
+        for stmts in shapes {
+            let then = IrExpr {
+                kind: IrExprKind::Block { stmts, expr: Some(Box::new(lit_str("a"))) },
+                ty: Ty::String,
+                span: None,
+                def_id: None,
+            };
+            let branch = iff(1, then, lit_str("b"), Ty::String);
+            let body = for_in(0, vec![bind(2, Ty::String, branch)]);
+            let mut prog = program_with_main(body, &[Ty::Unit, Ty::Bool, Ty::String]);
+            lift_heap_branch_binds(&mut prog);
+            assert!(matches!(main_bind_value_kind(&prog), IrExprKind::If { .. }), "exit branch stays inline");
+            assert_eq!(prog.functions.len(), 1, "no helper synthesized");
+        }
     }
 
     #[test]

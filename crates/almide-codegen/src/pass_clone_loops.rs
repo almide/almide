@@ -141,7 +141,7 @@ pub(crate) fn insert_clones_for_in(var: VarId, var_tuple: Option<Vec<VarId>>, it
     let fresh = loop_fresh_vars(Some(var), var_tuple.as_deref(), &body);
     ctx.loops.binders.insert(var);
     ctx.loops.binders.extend(var_tuple.iter().flatten().copied());
-    let mut loop_ctx = CloneCtx { always: ctx.always, eligible: ctx.eligible, remaining: ctx.remaining, in_loop: true, memo: ctx.memo, fresh: &fresh, owned: ctx.owned, loops: ctx.loops, captured: ctx.captured };
+    let mut loop_ctx = CloneCtx { ref_lets: ctx.ref_lets, always: ctx.always, eligible: ctx.eligible, remaining: ctx.remaining, in_loop: true, memo: ctx.memo, fresh: &fresh, owned: ctx.owned, loops: ctx.loops, captured: ctx.captured };
     let new_body = insert_clone_stmts_live(body, &mut loop_ctx);
     // With the body's clones and moves placed, a binder every use of which
     // sits under a shared borrow / field read / clone never needs an owned
@@ -176,7 +176,7 @@ fn only_borrowed_uses(body: &[IrStmt], v: VarId) -> bool {
 /// both in the loop.
 pub(crate) fn insert_clones_while(cond: IrExpr, body: Vec<IrStmt>, ctx: &mut CloneCtx) -> IrExprKind {
     let fresh = loop_fresh_vars(None, None, &body);
-    let mut loop_ctx = CloneCtx { always: ctx.always, eligible: ctx.eligible, remaining: ctx.remaining, in_loop: true, memo: ctx.memo, fresh: &fresh, owned: ctx.owned, loops: ctx.loops, captured: ctx.captured };
+    let mut loop_ctx = CloneCtx { ref_lets: ctx.ref_lets, always: ctx.always, eligible: ctx.eligible, remaining: ctx.remaining, in_loop: true, memo: ctx.memo, fresh: &fresh, owned: ctx.owned, loops: ctx.loops, captured: ctx.captured };
     let new_cond = insert_clones_live(cond, &mut loop_ctx);
     let new_body = insert_clone_stmts_live(body, &mut loop_ctx);
     IrExprKind::While { cond: Box::new(new_cond), body: new_body }

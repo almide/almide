@@ -78,34 +78,17 @@ impl Emitter<'_> {
         ert: SliceTy,
         err_ir: Option<&Ty>,
         owned_carrier: bool,
+        wc: crate::witness_unwrap::WCarrier,
     ) -> Result<(), EmitError> {
         let car = self.hold_i32()?;
         self.f.instructions().local_get(self.scr_i32_local).local_set(car);
-        // A one-part `"${e}"` build (the StringInterp capture, emitter.rs):
-        // start at the published cursor, append the display, capture.
-        let start = self.hold_i32()?;
-        self.f
-            .instructions()
-            .global_get(G_LINE_CURSOR)
-            .local_tee(start)
-            .local_set(self.cursor_local)
-            .local_get(car);
-        self.load_ty_slot(ert, almide_layout::SUM_FIELD);
-        self.build_depth += 1;
-        let shown = self.emit_display_value(ert, false, err_ir);
-        self.build_depth -= 1;
-        shown?;
+        self.emit_repr_message(ert, err_ir, |s| {
+            s.f.instructions().local_get(car);
+            s.load_ty_slot(ert, almide_layout::SUM_FIELD);
+        })?;
         let msg = self.hold_i32()?;
-        self.f
-            .instructions()
-            .local_get(start)
-            .local_get(self.cursor_local)
-            .call(F_BUF_TO_BLOCK)
-            .local_set(msg)
-            .local_get(start)
-            .global_set(G_LINE_CURSOR)
-            .local_get(start)
-            .local_set(self.cursor_local);
+        let start = self.hold_i32()?;
+        self.f.instructions().local_set(msg);
         // err(msg): the same 16-byte String-channel err block `none` builds.
         self.f
             .instructions()
@@ -121,13 +104,76 @@ impl Emitter<'_> {
             let dec = self.dec_fn_of(carrier_ty);
             self.f.instructions().local_get(car).call(dec);
         }
+        self.witness_repr_built(wc);
         let plan = self.exit_plan(crate::exit_plan::Continuation::ReturnError);
         self.emit_exit(&plan);
         self.f.instructions().local_get(start).return_();
+        self.witness_unwrap_exit(wc, crate::witness_unwrap::Leaves::Fresh);
         self.release_i32();
         self.release_i32();
         self.release_i32();
         Ok(())
+    }
+
+    /// The repr text of an error value (native's `almide_repr`, the text
+    /// `"${e}"` shows) as a FRESH String block, left on the stack. A
+    /// one-part `"${e}"` build (the StringInterp capture, emitter.rs): start
+    /// at the published cursor, append the display, capture, and hand the
+    /// line buffer back. `push` puts the value on the stack.
+    pub(crate) fn emit_repr_message(
+        &mut self,
+        ert: SliceTy,
+        err_ir: Option<&Ty>,
+        push: impl FnOnce(&mut Self),
+    ) -> Result<(), EmitError> {
+        let start = self.hold_i32()?;
+        self.f
+            .instructions()
+            .global_get(G_LINE_CURSOR)
+            .local_tee(start)
+            .local_set(self.cursor_local);
+        push(self);
+        self.build_depth += 1;
+        let shown = self.emit_display_value(ert, false, err_ir);
+        self.build_depth -= 1;
+        shown?;
+        self.f
+            .instructions()
+            .local_get(start)
+            .local_get(self.cursor_local)
+            .call(F_BUF_TO_BLOCK)
+            .local_get(start)
+            .global_set(G_LINE_CURSOR)
+            .local_get(start)
+            .local_set(self.cursor_local);
+        self.release_i32();
+        Ok(())
+    }
+
+    /// The message `main`'s abort prints for an error value of type `ert`
+    /// (#3470, C-035), left on the stack — native's rendering of the error at
+    /// the `fn main` wrapper: a `String` as is, a `List[String]` joined with
+    /// `", "` (`map_err_join`), any other type its repr. `push` puts the
+    /// value on the stack. Returns whether the message is a FRESH block (the
+    /// abort takes it with it).
+    pub(crate) fn emit_abort_message(
+        &mut self,
+        ert: SliceTy,
+        err_ir: Option<&Ty>,
+        push: impl FnOnce(&mut Self),
+    ) -> Result<bool, EmitError> {
+        if ert == STR {
+            push(self);
+            return Ok(false);
+        }
+        if self.is_str_list(ert) {
+            push(self);
+            let sep = self.pool.intern(", ");
+            self.f.instructions().i32_const(sep as i32).call(F_LIST_JOIN);
+            return Ok(true);
+        }
+        self.emit_repr_message(ert, err_ir, push)?;
+        Ok(true)
     }
 }
 
@@ -139,7 +185,9 @@ impl Emitter<'_> {
     /// fallthrough on ok. Discarding it swallowed the err (silent exit
     /// 0 — `effect fn main() -> Unit = err("boom")` on the released
     /// 0.61.0). Returns Ok(true) when this handled the expression.
-    /// A non-String err payload walls honestly (no message to print).
+    /// A non-String err payload (#3474) aborts with the message main's `!`
+    /// abort renders from it (`emit_abort_message`): its repr, or a
+    /// `List[String]` joined — native's wrapper prints the same.
     pub(crate) fn try_lower_main_err_carrier(&mut self, e: &IrExpr) -> Result<bool, EmitError> {
         use almide_types::types::{Ty, TypeConstructorId};
         if !self.in_main {
@@ -157,24 +205,28 @@ impl Emitter<'_> {
             self.f.instructions().drop();
             return Ok(true);
         };
-        if self.types.el(eh) != STR {
-            return Err(EmitError::Unsupported("main-err-carrier:non-string-err".into()));
-        }
+        let ert = self.types.el(eh);
+        let err_ir = crate::display::ir_arg(Some(&e.ty), 1).cloned();
         // #2969: an OWNED ok carrier (`effect fn main() -> Result[Unit,
         // String] = { … }` ends in a fresh `ok(())`) is main's last use of
         // it — released on the ok path, where the err path aborts.
         let owned_dec = (self.rc_droppable(got) && self.rc_owned_result(e)).then(|| self.dec_fn_of(got));
         // #2758: the err arm aborts (the checker's terminal), the ok arm
         // releases an owned carrier.
-        self.witness_main_carrier(owned_dec.is_some());
+        // A message rendered from a non-String error is a FRESH block the
+        // abort takes with it (`emit_abort_message`).
+        self.witness_main_carrier(owned_dec.is_some(), ert != STR);
         let hb = self.scr_i32_local;
-        let mut i = self.f.instructions();
-        i.local_set(hb);
-        i.local_get(hb)
+        self.f
+            .instructions()
+            .local_set(hb)
+            .local_get(hb)
             .i32_load(slot_memarg(almide_layout::SUM_TAG))
             .if_(BlockType::Empty);
-        i.local_get(hb).i32_load(slot_memarg(almide_layout::SUM_FIELD));
-        let _ = i;
+        self.emit_abort_message(ert, err_ir.as_ref(), |s| {
+            s.f.instructions().local_get(hb);
+            s.load_ty_slot(ert, almide_layout::SUM_FIELD);
+        })?;
         self.emit_error_frame_abort();
         if let Some(dec) = owned_dec {
             self.f.instructions().else_().local_get(hb).call(dec);

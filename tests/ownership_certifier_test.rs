@@ -54,20 +54,20 @@ const FIRST: &str = "fn first[T](xs: List[T]) -> T? = list.get(xs, 0)\nfn main()
 #[test]
 fn an_owned_param_the_body_only_borrows_is_a_c4_violation() {
     // With borrow inference ablated every eligible param is owned: the
-    // monomorphised `first__Int` takes its list owned though the body only
+    // monomorphised `first[Int]` (`__almd_mono5_first__Int`) takes its list owned though the body only
     // borrows it — every caller moves (or clones) a value the body never
     // needs. The certifier names it.
     let (ok, err) = certify_with("c4", FIRST, &[("ALMIDE_BORROW_OWN_ALL", "1")]);
     assert!(!ok, "the build must fail under ALMIDE_CERTIFY_OWNERSHIP=fail:\n{err}");
-    assert!(err.contains("[C4 owned-never-consumed] first__Int: param `xs"), "{err}");
+    assert!(err.contains("[C4 owned-never-consumed] __almd_mono5_first__Int: param `xs"), "{err}");
 }
 
 #[test]
 fn a_monomorphised_instance_borrows_and_certifies() {
-    // The same program with inference on (#2231 wave 2): `first__Int` takes
+    // The same program with inference on (#2231 wave 2): `first[Int]` takes
     // `&[i64]` and the body certifies clean.
     let (ok, err) = certify("c4-fixed", FIRST);
-    assert!(ok, "first__Int must certify once instances are inferred:\n{err}");
+    assert!(ok, "first[Int] must certify once instances are inferred:\n{err}");
 }
 
 #[test]
@@ -138,13 +138,15 @@ fn a_callable_the_callee_only_calls_certifies_borrowed() {
 /// DIFFERENT value each time and there is no second move of one value. Both
 /// the capture-move rule and the certifier's C3 previously tested a bare
 /// `in_loop` and so cloned (and could not report) exactly this shape: #2316.
+/// The closure is stored (`[f]`), so it is a closure VALUE with a capture
+/// bind — a closure only called would be a scope that captures nothing (#3455).
 const LOOP_FRESH_CAPTURE: &str = r#"fn main() -> Unit = {
   var sink = 0
   var i = 0
   while i < 3 {
     let s = "cap" + int.to_string(i)
     let f = (x) => string.len(s) + x
-    sink = sink + f(1)
+    sink = sink + list.fold([f], 0, (a, g) => a + g(1))
     i = i + 1
   }
   println(int.to_string(sink))
@@ -177,8 +179,8 @@ fn emit_rust(tag: &str, src: &str, env: &[(&str, &str)]) -> String {
 #[test]
 fn a_loop_fresh_capture_binds_by_move_in_the_emitted_rust() {
     let on = emit_rust("lf-on", LOOP_FRESH_CAPTURE, &[]);
-    let moved = on.contains("let __cap_2: String = s;");
-    let cloned = on.contains("let __cap_2: String = s.clone();");
+    let moved = on.contains("let __almide_ir2_cap_2: String = s;");
+    let cloned = on.contains("let __almide_ir2_cap_2: String = s.clone();");
     assert!(moved && !cloned, "the loop-fresh capture must bind by MOVE (moved={moved} cloned={cloned})");
 }
 

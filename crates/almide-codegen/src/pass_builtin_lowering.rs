@@ -593,6 +593,19 @@ fn rewrite_expr(expr: IrExpr) -> IrExpr {
                 CallTarget::Method { object, method } => {
                     rewrite_call_method(object, method, args, type_args, ty, span)
                 }
+                // A computed callee is an expression too: a lambda called in
+                // place (`(() => { println(…); … })()`, a #3462 fan arm thunk)
+                // kept its body's builtins as plain fn calls.
+                CallTarget::Computed { callee } => IrExpr {
+                    kind: IrExprKind::Call {
+                        target: CallTarget::Computed { callee: Box::new(rewrite_expr(*callee)) },
+                        args,
+                        type_args,
+                    },
+                    ty,
+                    span,
+                    def_id: None,
+                },
                 target => IrExpr {
                     kind: IrExprKind::Call { target, args, type_args },
                     ty,

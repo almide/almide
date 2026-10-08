@@ -5,14 +5,16 @@ use almide_ir::{IrExpr, IrExprKind};
 
 use super::{value_subset, Why};
 
-/// #2758: the fallible list HOFs (`list.__fallible_map__…`, the checker's
-/// instantiation of a callback that raises) are SELF-HOSTED: an ordinary call
+/// #2758: the fallible collection HOFs (`list.__fallible_map__…`,
+/// `map.` / `set.` / `option.__fallible_*`, the checker's instantiation of a
+/// callback that raises — stdlib/{list,map,set,option}.almd) are
+/// SELF-HOSTED: an ordinary call
 /// to a lifted stdlib body, no native arm inlines the lambda. The literal
 /// callback is then a closure VALUE — its env is built by the closure hooks
 /// and handed over under the callee's convention like any fresh argument.
 ///
-/// A MONO-SUFFIXED surface name (`result.filter__String_String`, the
-/// checker's instantiation reaching the registry under its suffixed name) is
+/// A MONO INSTANCE surface name (`result.filter`'s instance, the checker's
+/// instantiation reaching the registry under its instance name) is
 /// the same: no native arm matches it, so it lowers as the linked call.
 /// Were an arm to inline it after all, the callback node would carry no
 /// hook and the module-call audit would decline the frame.
@@ -21,8 +23,9 @@ use super::{value_subset, Why};
 /// (the linked self-host body calls the closure), and `list.push` stores the
 /// closure it is handed as an element (`lower_arg`, Retain).
 pub(super) fn is_self_hosted_hof(module: &str, func: &str) -> bool {
-    (module == "list" && func.starts_with("__fallible_"))
-        || (!func.starts_with("__") && func.contains("__"))
+    let base = almide_ir::mono_base_or_self(func);
+    (matches!(module, "list" | "map" | "set" | "option") && base.starts_with("__fallible_"))
+        || (base != func && !base.starts_with("__"))
         || matches!((module, func), ("bytes", "map_each") | ("list", "push"))
 }
 
@@ -47,7 +50,7 @@ pub(super) fn is_self_hosted_hof(module: &str, func: &str) -> bool {
 ///   enumerate lowering (list_fuse.rs, list_enumerate_fold.rs): one
 ///   activation per element over every inlined stage (#2755);
 /// - #2755: the other list arms (`sort_by`'s keys, `flat_map`, `filter_map`,
-///   `take_while`, `drop_while`, `unique_by`'s keys, `update`, `reduce`,
+///   `take_while`, `drop_while`, `unique_by`'s and `group_by`'s keys, `update`, `reduce`,
 ///   `scan`, `zip_with`), `matrix.map`, and the map / set arms (`fold`,
 ///   `find`, `filter`, the predicates, `map`, `update`, `upsert`), each
 ///   settling the body's value at the instruction that takes it
@@ -59,13 +62,14 @@ pub(super) fn is_self_hosted_hof(module: &str, func: &str) -> bool {
 ///   the other arm takes its share (`witness_payload_share`).
 ///
 /// A body that still PROPAGATES a `!` is not inlined at all (the fn-value
-/// route, list.rs), so it declines as `call-arg:Lambda:<arm>:propagating`.
+/// route, list.rs), so it declines as `call-arg:Lambda:<arm>:propagating` —
+/// except an fs walker's, whose closure route is recorded.
 /// Any other arm declines as `call-arg:Lambda:<module>.<fn>`.
 pub(super) fn inline_callback_subset(module: &str, func: &str, args: &[IrExpr]) -> Option<Why> {
     let here = |t: &str| Some(Why::Here(format!("Lambda:{module}.{func}{t}")).inside("call-arg"));
     let arity = match (module, func, args) {
         ("list", "map" | "filter" | "find" | "any" | "all" | "count", [_, _]) => 1,
-        ("list", "sort_by" | "flat_map" | "filter_map" | "take_while" | "drop_while" | "unique_by", [_, _]) | ("list", "update", [_, _, _]) => 1,
+        ("list", "sort_by" | "flat_map" | "filter_map" | "take_while" | "drop_while" | "unique_by" | "group_by", [_, _]) | ("list", "update", [_, _, _]) => 1,
         ("list", "reduce", [_, _]) | ("list", "scan" | "zip_with", [_, _, _]) => 2,
         ("matrix", "map", [_, _]) => 1,
         ("set", "filter" | "map", [_, _]) | ("map", "map", [_, _]) | ("map", "update", [_, _, _]) => 1,
@@ -90,8 +94,8 @@ pub(super) fn inline_callback_subset(module: &str, func: &str, args: &[IrExpr]) 
         ("fs", "fold_lines", [_, _, _]) | ("fs", "fold_lines_chunked", [_, _, _, _]) => 2,
         ("fs", "fold_lines_range", [_, _, _, _, _]) => 2,
         ("fs", "for_each_line", [_, _]) => 1,
-        ("fs", f, [_, _, _]) if f.starts_with("__fallible_fold_lines") => 2,
-        ("fs", f, [_, _]) if f.starts_with("__fallible_for_each_line") => 1,
+        ("fs", f, [_, _, _]) if almide_ir::mono_base_or_self(f).starts_with("__fallible_fold_lines") => 2,
+        ("fs", f, [_, _]) if almide_ir::mono_base_or_self(f).starts_with("__fallible_for_each_line") => 1,
         // A fold over a `list.*` chain may take the fused or enumerate
         // lowering (list_fuse.rs, list_enumerate_fold.rs): one activation per
         // element over every inlined stage, whose callbacks are the chain's
@@ -111,6 +115,13 @@ pub(super) fn inline_callback_subset(module: &str, func: &str, args: &[IrExpr]) 
     // that still propagates after the strip takes the closure route.
     let body = if module == "fan" { crate::fan::strip_callback_try(body) } else { body };
     if crate::fs_meta::expr_propagates(body) {
+        // #2755: an fs walker calls a compound callback as the closure value
+        // it is (fs_meta.rs / fs_fallible.rs closure routes): the env is an
+        // ordinary closure argument, each line an activation that shares the
+        // line (and a heap accumulator) into the callee (witness_walkers.rs).
+        if module == "fs" {
+            return args.iter().find_map(|a| value_subset(a).map(|w| w.inside("call-arg")));
+        }
         return here(":propagating");
     }
     rest.iter()

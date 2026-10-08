@@ -100,6 +100,7 @@ jobs:
           toolchain: "1.96.0"  # the workspace lock needs >= 1.96 (wasmtime 49, #2955)
       - uses: Swatinem/rust-cache@v2
         with:
+          save-if: ${{ github.ref == 'refs/heads/develop' }}
           workspaces: "."
           # Key the cache to this job so it doesn't collide with the main CI.
           prefix-key: "trust-spine"

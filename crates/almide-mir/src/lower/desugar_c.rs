@@ -11,12 +11,15 @@
 /// (the Computed-callee call is otherwise unanalyzable → deferred/walled). Each arg
 /// is bound ONCE (no duplication; call-count only DECREASES, so the caps gate's
 /// `mir ≤ ir` is preserved). Bottom-up over the whole body; `None` = no change.
+/// DECLINES a lambda whose own body propagates with `!` (`lambda_body_propagates`,
+/// #3465): inlined, that `!` would exit the ENCLOSING fn instead of the lambda, so
+/// the application stays a Computed call and walls honestly.
 pub fn desugar_beta_reduce(body: &IrExpr) -> Option<IrExpr> {
     fn rewrite(e: IrExpr, changed: &mut bool) -> IrExpr {
         let e = e.map_children(&mut |c| rewrite(c, changed));
         if let IrExprKind::Call { target: CallTarget::Computed { callee }, args, .. } = &e.kind {
             if let IrExprKind::Lambda { params, body, .. } = &callee.kind {
-                if params.len() == args.len() {
+                if params.len() == args.len() && !lambda_body_propagates(body) {
                     *changed = true;
                     let stmts: Vec<almide_ir::IrStmt> = params
                         .iter()

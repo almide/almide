@@ -142,6 +142,7 @@ evidence  = [
   { path = "spec/embedded_cross/fan_mapper_effect_callback_forms.almd", class = "fixture" },
   { path = "spec/wasm_cross/fan_map_parallel_scalar.almd", class = "fixture" },
   { path = "spec/wasm_cross/fan_map_nested_combinators.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fan_block_rc_closure_capture.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-005"
@@ -156,6 +157,7 @@ evidence  = [
   { path = "spec/wasm_cross/fan_map_err_runs_every_element.almd", class = "fixture" },
   { path = "spec/wasm_cross/fan_any_allfail.almd", class = "fixture" },
   { path = "spec/wasm_cross/option_none_unwrap_term.almd", class = "fixture" },
+  { path = "tests/fan_arm_bang_test.rs", name = "fan_map_callback_bang_runs_every_element", class = "fixture" },
 ]
 [[contract]]
 id        = "C-006"
@@ -307,6 +309,9 @@ evidence  = [
   { path = "spec/wasm_cross/map_rich_variant_key.almd", class = "fixture" },
   { path = "spec/wasm_cross/match_guard_eq_borrows_binding.almd", class = "fixture" },
   { path = "spec/wasm_cross/match_catchall_binder_eq.almd", class = "fixture" },
+  { path = "spec/wasm_cross/deep_eq_nested_distinct.almd", class = "fixture" },
+  { path = "tests/nested_distinct_eq_test.rs", class = "fixture", name = "nested_lists_five_and_seven_deep_compare_on_the_structural_leg" },
+  { path = "tests/nested_distinct_eq_test.rs", class = "fixture", name = "a_mixed_container_stack_compares_on_the_structural_leg" },
 ]
 
 # ── UNICODE STRING SURFACE ───────────────────────────────────────────
@@ -576,6 +581,7 @@ evidence  = [
   { path = "spec/wasm_cross/early_return_control_flow.almd", class = "fixture" },
   { path = "spec/wasm_cross/effect_main_guard_err.almd", class = "fixture" },
   { path = "spec/wasm_cross/effect_main_guard_ok.almd", class = "fixture" },
+  { path = "tests/main_typed_err_abort_test.rs", name = "main_returning_a_user_error", class = "fixture" },
 ]
 
 # ── RECORDS / VARIANTS / SIZED INTEGERS ──────────────────────────────
@@ -1509,6 +1515,7 @@ evidence  = [
   { path = "spec/wasm_cross/cross_dep_accumulator.almd", class = "fixture" },
   { path = "spec/wasm_cross/mutual_append.almd", class = "fixture" },
   { path = "spec/wasm_cross/block_line_collect.almd", class = "fixture" },
+  { path = "spec/wasm_cross/field_and_interp_accumulator.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-106"
@@ -1629,6 +1636,7 @@ since     = "0.27.6"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/option_match_heap_payload.almd", class = "fixture" },
+  { path = "spec/wasm_cross/list_head_read_borrows.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-115"
@@ -1991,6 +1999,7 @@ evidence  = [
   { path = "spec/wasm_cross/to_result_nested_share.almd", class = "fixture" },
   { path = "spec/wasm_cross/to_result_custom_e.almd", class = "fixture" },
   { path = "spec/wasm_cross/unwrap_or_option_payload.almd", class = "fixture" },
+  { path = "spec/wasm_cross/unwrap_or_fresh_closure_fallback.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-150"
@@ -2638,6 +2647,10 @@ since     = "0.42.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/fan_block_err_list_order.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fan_block_rc_closure_capture.almd", class = "fixture" },
+  { path = "tests/fan_arm_bang_test.rs", name = "arm_zero_fails_while_arm_one_prints", class = "fixture" },
+  { path = "tests/fan_arm_bang_test.rs", name = "both_fail_and_the_lowest_index_err_wins", class = "fixture" },
+  { path = "tests/main_typed_err_abort_test.rs", name = "string_fn_fan_typed_bang_arms_run_every_arm", class = "fixture" },
 ]
 
 # ── FAN SIBLING TRAP ─
@@ -3010,6 +3023,9 @@ evidence  = [
   { path = "spec/wasm_cross/mut_scalar_param_reassign.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_param_tail_recursion.almd", class = "fixture" },
   { path = "spec/wasm_cross/mut_list_param_read_by_range_ops.almd", class = "fixture" },
+  { path = "spec/wasm_cross/licm_mut_param_named_call.almd", class = "fixture" },
+  { path = "spec/integration/licm_module_mut_call/src/main.almd", class = "fixture" },
+  { path = "spec/wasm_cross/mut_param_fn_value_alternatives.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-227"
@@ -3362,6 +3378,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/call_lambda_ctor.almd", class = "fixture" },
   { path = "spec/wasm_cross/hof_fn_value_callbacks.almd", class = "fixture" },
+  { path = "spec/wasm_cross/let_bound_closure_scope.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-259"

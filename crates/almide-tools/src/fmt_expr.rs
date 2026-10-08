@@ -494,8 +494,11 @@ fn try_fmt_fan_block_resugar(out: &mut String, callee: &Expr, args: &[Expr], dep
 
 fn fmt_expr_if(out: &mut String, expr: &Expr, depth: usize) {
     let ExprKind::If { cond, then, else_, .. } = &expr.kind else { unreachable!() };
-    out.push_str("if "); fmt_expr(out, cond, depth); out.push_str(" then "); fmt_expr(out, then, depth);
-    if out.ends_with('}') || (is_short(then) && is_short(else_) && !else_on_own_line(then, else_)) {
+    out.push_str("if "); fmt_expr(out, cond, depth); out.push_str(" then ");
+    let then_start = out.len();
+    fmt_expr(out, then, depth);
+    let then_lines = out[then_start..].matches('\n').count();
+    if out.ends_with('}') || (is_short(then) && is_short(else_) && !else_on_own_line(then, then_lines, else_)) {
         out.push(' ');
     } else {
         out.push('\n'); out.push_str(&ind(depth));
@@ -506,8 +509,17 @@ fn fmt_expr_if(out: &mut String, expr: &Expr, depth: usize) {
 /// #3393: the author put `else` on its own line — keep the break (the output
 /// re-parses that way, so the choice is stable), as `members_span_lines`
 /// keeps a split argument list.
-fn else_on_own_line(then: &Expr, else_: &Expr) -> bool {
-    matches!((then.span, else_.span), (Some(t), Some(e)) if e.line > t.line)
+///
+/// "Its own line" means below the line the `then` branch ENDS on, not the one
+/// it starts on. A span records only its first line, so the end is taken from
+/// the printed branch: `then_lines` is how many line breaks it was printed
+/// with. Comparing against the start line made `f(\n  long,\n) else x` — the
+/// shape this function's own output takes when a short call wraps for width —
+/// read as a split on the next run and move `else` down, so fmt was not
+/// idempotent (#3448). Once the source is formatted, the printed branch IS
+/// the source text, so this end line is exact and the choice is a fixed point.
+fn else_on_own_line(then: &Expr, then_lines: usize, else_: &Expr) -> bool {
+    matches!((then.span, else_.span), (Some(t), Some(e)) if e.line > t.line + then_lines)
 }
 
 fn fmt_expr_iflet(out: &mut String, expr: &Expr, depth: usize) {

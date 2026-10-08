@@ -162,11 +162,14 @@ fn stmts_subset(stmts: &[almide_ir::IrStmt]) -> Option<String> {
             }
             // #2756: a statement-position branch; its arms are statement
             // bodies.
-            // #2757: loops and their jumps — also statement bodies.
+            // #2757: loops and their jumps — also statement bodies, as are a
+            // `()` and a Var read as a statement (#2755, dropped).
             IrStmtKind::Expr { expr }
                 if matches!(
                     expr.kind,
-                    IrExprKind::If { .. }
+                    IrExprKind::Unit
+                        | IrExprKind::Var { .. }
+                        | IrExprKind::If { .. }
                         | IrExprKind::Match { .. }
                         | IrExprKind::While { .. }
                         | IrExprKind::ForIn { .. }
@@ -362,13 +365,15 @@ fn value_subset(e: &IrExpr) -> Option<Why> {
 /// first): the element is a VIEW of the list's slot — a consumer that keeps
 /// it shares it (`is_extraction_view`), a reader spends nothing — and an
 /// out-of-bounds index aborts after the frame's owners are released, a
-/// recorded exit arm. A Bytes index has its own unrecorded abort.
+/// recorded exit arm. A Bytes index reads a scalar byte, and its abort is a
+/// recorded abort site of its own (bytes_rw.rs `lower_bytes_index`).
 fn index_subset(object: &IrExpr, index: &IrExpr) -> Option<Why> {
+    use almide_types::types::{constructor::TypeConstructorId as TC, Ty};
     let core = crate::rc_ownership::rc_tail(object);
     if !crate::witness_unwrap::slot_read_of_var(object) {
         return Some(Why::Here(format!("IndexAccess-object:{}", tag(&core.kind))));
     }
-    if !matches!(&core.ty, almide_types::types::Ty::Applied(almide_types::types::constructor::TypeConstructorId::List, _)) {
+    if !matches!(&core.ty, Ty::Applied(TC::List, _) | Ty::Bytes) {
         return Some(Why::Here("IndexAccess:non-list".into()));
     }
     value_subset(object).or_else(|| value_subset(index).map(|w| w.inside("index")))
@@ -405,8 +410,9 @@ fn extraction_or_rt_subset(e: &IrExpr) -> Option<Why> {
         // (arg_temps.rs names a produced one), the fallback runs on its arm.
         IrExprKind::UnwrapOr { expr, fallback } => {
             // #2755: a slot of a bound block (`r.f ?? x`) is a carrier view
-            // like a local's.
-            if !crate::witness_unwrap::slot_read_of_var(expr) {
+            // like a local's; a literal `none` is the NULL address (no block,
+            // the payload arm never runs).
+            if !crate::witness_unwrap::slot_read_of_var(expr) && !matches!(expr.kind, IrExprKind::OptionNone) {
                 return Some(Why::Here(format!("UnwrapOr-carrier:{}", tag(&crate::rc_ownership::rc_tail(expr).kind))));
             }
             value_subset(expr).or_else(|| value_subset(fallback).map(|w| w.inside("fallback")))
@@ -468,7 +474,8 @@ fn read_operand(x: &IrExpr, position: &str) -> Option<Why> {
         return value_subset(x).map(|w| w.inside(position));
     }
     match &x.kind {
-        IrExprKind::Var { .. } | IrExprKind::LitStr { .. } => None,
+        // `none` is the NULL address: no block at all.
+        IrExprKind::Var { .. } | IrExprKind::LitStr { .. } | IrExprKind::OptionNone => None,
         // An element read of a bound list: a view the reader spends nothing of.
         IrExprKind::IndexAccess { .. } | IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. } => {
             value_subset(x).map(|w| w.inside(position))
@@ -581,7 +588,9 @@ fn call_subset(e: &IrExpr) -> Option<Why> {
 /// block of admitted statements, a nested branch or loop, a jump, or nothing.
 fn stmt_body_subset(e: &IrExpr) -> Option<Why> {
     match &e.kind {
-        IrExprKind::Unit | IrExprKind::Break | IrExprKind::Continue => None,
+        // A Var read as a statement (a writeback block's tail) is dropped
+        // (one the discard route releases as an owned move declines there).
+        IrExprKind::Unit | IrExprKind::Break | IrExprKind::Continue | IrExprKind::Var { .. } => None,
         // A while condition runs at the head of every iteration, the last
         // one being a check that leaves (lower_while records it as such).
         IrExprKind::While { cond, body } => value_subset(cond)
@@ -624,7 +633,10 @@ fn stmt_body_subset(e: &IrExpr) -> Option<Why> {
 /// temporary born and released, a share moved into a callee): the path that
 /// falls through to the next arm leaves it in that same state, and the
 /// events checked on the guard's own arm are the ones that path ran. A guard
-/// that BINDS a local declines — the local outlives the guard.
+/// that BINDS a local keeps that local past the guard, on the arm's path and
+/// on every path it falls through to: the emitter records that arm as its
+/// verdict and select sites (witness_guard.rs), so the guard's events reach
+/// both.
 fn match_head_subset(subject: &IrExpr, arms: &[almide_ir::IrMatchArm]) -> Option<String> {
     // A tuple / record literal subject is a fresh block the match only
     // reads: no route owns or releases it (arg_temps.rs names a produced or
@@ -663,13 +675,8 @@ fn match_head_subset(subject: &IrExpr, arms: &[almide_ir::IrMatchArm]) -> Option
         if pattern_has_named_rest(&a.pattern, a.guard.is_none()) {
             return Some("pattern:list-rest".into());
         }
-        if let Some(g) = a.guard.as_ref().filter(|g| !rc_free(g)) {
-            if binds_a_local(g) {
-                return Some("match-guard:binds".into());
-            }
-            if let Some(w) = value_subset(g) {
-                return Some(w.at("match-guard"));
-            }
+        if let Some(w) = a.guard.as_ref().filter(|g| !rc_free(g)).and_then(value_subset) {
+            return Some(w.at("match-guard"));
         }
     }
     None
@@ -677,7 +684,7 @@ fn match_head_subset(subject: &IrExpr, arms: &[almide_ir::IrMatchArm]) -> Option
 
 /// Does `e` bind a local anywhere (a `let` in a block, a lambda param, a
 /// loop var, a pattern)? A guard that does keeps that local past the guard.
-fn binds_a_local(e: &IrExpr) -> bool {
+pub(crate) fn binds_a_local(e: &IrExpr) -> bool {
     struct V(bool);
     impl almide_ir::visit::IrVisitor for V {
         fn visit_expr(&mut self, e: &IrExpr) {

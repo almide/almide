@@ -24,6 +24,27 @@
 //! `matrix.sub`, and `m * k` / `k * m` → `matrix.scale(m, k)` with the
 //! Matrix first (an Int `k` is converted, as native's `as f64`). The
 //! incumbent makes the same rewrite (almide-mir `matrix_binop_rewrite`).
+//!
+//! 4. A `fan { … }` arm whose top-level node is a `!` (the writer's, or the
+//! one auto-try puts on a Result call arm of a tail or `let` fan) over a
+//! `Result[_, String]` is that arm's own marker, not an exit from the frame
+//! (C-199 / ADR-0024 D1, #3463): the arm IS its Result, and the block joins
+//! every arm, the lowest-index Err being the block's — the reading native's
+//! FanLowering takes (it strips the marker and joins). Lowered as a `!`, an
+//! early arm's Err left the frame (or aborted `main`) before a later arm ran.
+//!
+//!   fan { f(x)!, g(y) }   =>   fan { f(x), g(y) }
+//!
+//! A `!` over an Option has no Result arm to become and stays. In a frame
+//! whose error channel is `String` (`-> Result[_, String]`, or an effect fn
+//! not declared `Result`), a `!` over any other error — a typed `E` the
+//! channel carries as its repr (ADR-0021 D2), a `List[String]` it joins — is
+//! the marker too: the block converts the lowest-index Err on the way out,
+//! as that `!` would have (fan_block.rs). A `!` over
+//! the frame's own typed error `E` (`-> Result[_, E]`) is the marker too
+//! (#3467): the block's Err is returned whole, in that `E`. In `main`'s own
+//! frame every Result arm's `!` is the marker (#3470): the block aborts with
+//! the lowest-index Err after every arm ran, whatever its error type.
 
 use almide_base::intern::sym;
 use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
@@ -36,19 +57,29 @@ pub(crate) fn desugar(ir: &IrProgram) -> Option<IrProgram> {
     let mut out = ir.clone();
     let mut changed = false;
     {
-        let mut v = Rewriter { vars: &mut out.var_table, changed: &mut changed };
+        let mut v = Rewriter { vars: &mut out.var_table, changed: &mut changed, frame_err: None, in_main: false, string_channel: false };
         for f in out.functions.iter_mut() {
+            v.frame_err = f.ret_ty.result_err_ty();
+            v.in_main = f.name.as_str() == "main";
+            v.string_channel = string_channel(f);
             v.visit_expr_mut(&mut f.body);
         }
+        v.frame_err = None;
+        v.in_main = false;
+        v.string_channel = false;
         for tl in out.top_lets.iter_mut() {
             v.visit_expr_mut(&mut tl.value);
         }
     }
     for m in out.modules.iter_mut() {
-        let mut v = Rewriter { vars: &mut m.var_table, changed: &mut changed };
+        let mut v = Rewriter { vars: &mut m.var_table, changed: &mut changed, frame_err: None, in_main: false, string_channel: false };
         for f in m.functions.iter_mut() {
+            v.frame_err = f.ret_ty.result_err_ty();
+            v.string_channel = string_channel(f);
             v.visit_expr_mut(&mut f.body);
         }
+        v.frame_err = None;
+        v.string_channel = false;
         for tl in m.top_lets.iter_mut() {
             v.visit_expr_mut(&mut tl.value);
         }
@@ -59,14 +90,44 @@ pub(crate) fn desugar(ir: &IrProgram) -> Option<IrProgram> {
 struct Rewriter<'a> {
     vars: &'a mut VarTable,
     changed: &'a mut bool,
+    /// The error type of the fn being rewritten, when it returns a Result.
+    frame_err: Option<Ty>,
+    /// Lowering `main`'s own frame (not a lambda inside it), whose fan
+    /// block aborts with any error type.
+    in_main: bool,
+    /// Lowering the own frame (not a lambda inside it) of a non-main fn
+    /// whose error channel is `String`, which converts any arm's error.
+    string_channel: bool,
+}
+
+/// Is `f`'s error channel `String` — a `-> Result[_, String]` fn, or an
+/// effect fn not declared `Result` (its channel) — outside `main` (which
+/// aborts) and test blocks?
+fn string_channel(f: &almide_ir::IrFunction) -> bool {
+    if f.name.as_str() == "main" || f.is_test {
+        return false;
+    }
+    match f.ret_ty.result_err_ty() {
+        Some(err) => err == Ty::String,
+        None => f.is_effect,
+    }
 }
 
 impl IrMutVisitor for Rewriter<'_> {
     fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+        // A lambda is a frame of its own, never `main`'s.
+        let (in_main, string_channel) = (self.in_main, self.string_channel);
+        if matches!(e.kind, IrExprKind::Lambda { .. }) {
+            self.in_main = false;
+            self.string_channel = false;
+        }
         walk_expr_mut(self, e);
+        self.in_main = in_main;
+        self.string_channel = string_channel;
         self.optional_chain(e);
         self.map_loop(e);
         self.matrix_op(e);
+        self.fan_arm_markers(e);
     }
 }
 
@@ -83,6 +144,19 @@ fn module_call(module: &str, func: &str, args: Vec<IrExpr>) -> IrExprKind {
 }
 
 impl Rewriter<'_> {
+    fn fan_arm_markers(&mut self, e: &mut IrExpr) {
+        let IrExprKind::Fan { exprs } = &mut e.kind else { return };
+        for arm in exprs.iter_mut() {
+            if let IrExprKind::Try { expr } | IrExprKind::Unwrap { expr } = &mut arm.kind
+                && let Some(err) = expr.ty.result_err_ty()
+                && (err == Ty::String || self.in_main || self.string_channel || self.frame_err.as_ref() == Some(&err))
+            {
+                *arm = std::mem::take(&mut **expr);
+                *self.changed = true;
+            }
+        }
+    }
+
     fn matrix_op(&mut self, e: &mut IrExpr) {
         use almide_ir::BinOp as B;
         let IrExprKind::BinOp { op, left, right } = &mut e.kind else { return };

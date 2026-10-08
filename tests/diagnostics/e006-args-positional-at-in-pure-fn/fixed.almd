@@ -1,0 +1,5 @@
+import args
+
+fn input(first: String?) -> String = first ?? "-"
+
+effect fn main() -> Unit = println(input(args.positional_at(0)!))

@@ -152,7 +152,7 @@ fn try_render_bind_shared_mut(ctx: &RenderContext, var: &VarId, ty: &Ty, value: 
     // cell. Its value is a bare `Var` or a `Clone{Var}` (CloneInsertionPass
     // wraps non-Copy values) — either way emit a single `.clone()` of the
     // cell so the closure shares it rather than allocating a fresh one.
-    let cap_orig = if name_s.starts_with("__cap_") {
+    let cap_orig = if ctx.is_temp_named(*var, "__cap_") {
         match &value.kind {
             IrExprKind::Var { id } => Some(*id),
             IrExprKind::Clone { expr: inner } => match &inner.kind {
@@ -290,6 +290,13 @@ fn render_bind_value_str(ctx: &RenderContext, ty: &Ty, value: &IrExpr) -> String
     }
     match &value.kind {
         IrExprKind::Lambda { params, body, .. } if has_typed(params) => annotate_bind_lambda(ctx, params, body),
+        // A `let`-bound scope lambda (#3455, `BorrowInsertion` spelled it
+        // `&λ`): the non-`move` closure that borrows what it reads, its
+        // params typed as the boxed closure's were — no slot type infers them.
+        IrExprKind::Borrow { expr: inner, mutable: false, .. } => match &inner.kind {
+            IrExprKind::Lambda { params, body, .. } => format!("&{}", super::expressions::render_lambda_with(ctx, params, body, true, true)),
+            _ => render_expr(ctx, value),
+        },
         // Capture-clone-wrapped closure: a shared-mut-capturing raw closure
         // lowers to `{ let __cap = x.clone(); move |k| … }`. The wrapping
         // block hides the lambda from the bare-Lambda case above, so a typed
@@ -464,7 +471,7 @@ fn render_stmt_assign(ctx: &RenderContext, stmt: &IrStmt) -> String {
     // the legacy bare form is the correct one there.
     if ctx.ann.param_borrows.get(var) == Some(&almide_ir::ParamBorrow::RefMut) {
         let is_tco_rotation = matches!(&value.kind, IrExprKind::Var { id }
-            if ctx.var_name(*id).starts_with("__tco_tmp_"));
+            if ctx.is_temp_named(*id, "__tco_tmp_"));
         if !is_tco_rotation {
             return format!("*{} = {};", target_s, value_s);
         }

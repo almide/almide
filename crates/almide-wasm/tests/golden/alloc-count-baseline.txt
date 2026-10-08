@@ -37,7 +37,7 @@
 25	19	189	25	spec/wasm_cross/branch_lift_in_loop.almd
 36	12	286	36	spec/wasm_cross/branch_lift_stdlib_mut_arg.almd
 11	5	100	11	spec/wasm_cross/branch_lift_user_fn_named_like_stdlib.almd
-49	41	333	49	spec/wasm_cross/bundled_pure_modules.almd
+53	43	397	53	spec/wasm_cross/bundled_pure_modules.almd
 30	18	185	30	spec/wasm_cross/bytes_alloc_ceiling_domain.almd
 25	17	33061	25	spec/wasm_cross/bytes_array_count_domain.almd
 24	11	164	24	spec/wasm_cross/bytes_clear_mut_param.almd
@@ -135,6 +135,7 @@
 21	9	220	21	spec/wasm_cross/declaration_forms.almd
 48	22	986	48	spec/wasm_cross/declaration_literal_domain.almd
 8	0	88	8	spec/wasm_cross/deep_eq_heap.almd
+156	88	696	156	spec/wasm_cross/deep_eq_nested_distinct.almd
 1	0	4	1	spec/wasm_cross/default_param_ref.almd
 8	2	81	8	spec/wasm_cross/destructure_let_unwrap.almd
 28000	27986	742000	28000	spec/wasm_cross/destructure_owned_tuple_release.almd
@@ -191,6 +192,7 @@
 30	12	318	30	spec/wasm_cross/fan_any_early_winner.almd
 13	2	140	13	spec/wasm_cross/fan_arm_unwrap_or.almd
 5	2	70	2	spec/wasm_cross/fan_block_err_list_order.almd
+46	20	518	22	spec/wasm_cross/fan_block_rc_closure_capture.almd
 46	17	416	46	spec/wasm_cross/fan_deterministic.almd
 38	13	453	38	spec/wasm_cross/fan_effect_mapper.almd
 ~	spec/wasm_cross/fan_effect_mapper_capability.almd
@@ -210,6 +212,7 @@
 4	1	49	2	spec/wasm_cross/fan_trap_waits_for_elements_below.almd
 4	0	56	4	spec/wasm_cross/fan_var_thunk_list.almd
 0	0	0	0	spec/wasm_cross/fan_worker_abort_keeps_stdout.almd
+8069	8029	9868936	8069	spec/wasm_cross/field_and_interp_accumulator.almd
 12	5	76	12	spec/wasm_cross/filter_map_conditional_arm.almd
 22	6	142	22	spec/wasm_cross/flat_map_aliased_field.almd
 0	0	0	0	spec/wasm_cross/flight_pid_control.almd
@@ -392,12 +395,14 @@
 859	836	9479	859	spec/wasm_cross/leak_free_map_walk_exit.almd
 47	41	487	47	spec/wasm_cross/leak_free_propagating_literal_operand.almd
 63	26	670	63	spec/wasm_cross/leak_free_reader_temporaries.almd
-67	32	714	67	spec/wasm_cross/leak_free_result_option_carriers.almd
+67	34	714	67	spec/wasm_cross/leak_free_result_option_carriers.almd
 970	951	8131	970	spec/wasm_cross/leak_free_spread_produced_base.almd
+91	73	948	91	spec/wasm_cross/let_bound_closure_scope.almd
 7	2	111	7	spec/wasm_cross/let_unwrap_propagation.almd
 2	0	32	2	spec/wasm_cross/let_wildcard_discard.almd
 8	5	73	8	spec/wasm_cross/letbound_variant_match.almd
 36	26	299	36	spec/wasm_cross/letbound_variant_match_heap_payload.almd
+212	184	2280	212	spec/wasm_cross/licm_mut_param_named_call.almd
 1	0	0	1	spec/wasm_cross/licm_zero_trip_hoist.almd
 ~	spec/wasm_cross/line_endings_bare_cr.almd
 27393	27371	141800	27393	spec/wasm_cross/list_arg_map_view.almd
@@ -418,6 +423,7 @@
 24	13	294	24	spec/wasm_cross/list_float_equality_family.almd
 66	36	1013	66	spec/wasm_cross/list_float_total_order.almd
 7751	3618	6498155	7751	spec/wasm_cross/list_fold_fused_callback_result_ownership.almd
+47	23	411	47	spec/wasm_cross/list_head_read_borrows.almd
 85	41	882	85	spec/wasm_cross/list_heap_ops_release_temporaries.almd
 1833	1796	15324	1833	spec/wasm_cross/list_heap_tuple_return.almd
 236	193	1920	236	spec/wasm_cross/list_heapelem_rc.almd
@@ -557,6 +563,7 @@
 9	6	88	9	spec/wasm_cross/mut_param_effect_never_err.almd
 61	48	922	61	spec/wasm_cross/mut_param_effect_unpropagated.almd
 74	17	967	74	spec/wasm_cross/mut_param_err_write_visible.almd
+22	11	207	22	spec/wasm_cross/mut_param_fn_value_alternatives.almd
 54	38	832	54	spec/wasm_cross/mut_param_global_callee_sees_precall.almd
 34	21	800	34	spec/wasm_cross/mut_param_global_no_reach_in_place.almd
 25	7	228	25	spec/wasm_cross/mut_param_interpolated.almd
@@ -885,6 +892,7 @@
 11	4	115	11	spec/wasm_cross/unwrap_in_callarg.almd
 12	5	129	12	spec/wasm_cross/unwrap_in_if_arm.almd
 11	3	76	11	spec/wasm_cross/unwrap_in_recursion.almd
+652	641	6086	652	spec/wasm_cross/unwrap_or_fresh_closure_fallback.almd
 27	8	245	27	spec/wasm_cross/unwrap_or_heap_arg_and_subject.almd
 27	15	292	27	spec/wasm_cross/unwrap_or_heap_payload.almd
 16	11	104	16	spec/wasm_cross/unwrap_or_operand.almd

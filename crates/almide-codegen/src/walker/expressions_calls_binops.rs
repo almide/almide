@@ -442,10 +442,7 @@ fn render_method_call_full(ctx: &RenderContext, object: &IrExpr, method: &str, a
             let func_name = if type_args.is_empty() {
                 method.to_string()
             } else {
-                let suffix = type_args.iter()
-                    .map(|t| mangle_ty_for_mono(t))
-                    .collect::<Vec<_>>().join("_");
-                format!("{}__{}", method, suffix)
+                almide_ir::mono_instance_name(method, &almide_ir::mono_name::mangle_ty_list(type_args))
             };
             return Some(format!("{}({})", func_name, all_args.join(", ")));
         }

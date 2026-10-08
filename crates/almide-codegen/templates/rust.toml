@@ -533,7 +533,7 @@ template = "std::rc::Rc::new({inner})"
 template = "{{ almide_stdout_flush(); let __almide_fan_go = almide_fan_group({count}); let __almide_fan_g = &__almide_fan_go; std::thread::scope(|__almide_s| {{ {spawns} {join_expr} }}) }}"
 
 [fan_effect]
-template = "{{ almide_stdout_flush(); let __almide_fan_go = almide_fan_group({count}); let __almide_fan_g = &__almide_fan_go; std::thread::scope(|__almide_s| -> Result<_, String> {{ {spawns} Ok({join_expr}) }})? }}"
+template = "{{ almide_stdout_flush(); let __almide_fan_go = almide_fan_group({count}); let __almide_fan_g = &__almide_fan_go; std::thread::scope(|__almide_s| -> Result<_, {err_ty}> {{ {spawns} Ok({join_expr}) }})? }}"
 
 # #3341: a ONE-arm fan has nothing to overlap with — its arm runs inline,
 # after the same stdout flush (group head 0 writes straight through, and no
@@ -541,6 +541,13 @@ template = "{{ almide_stdout_flush(); let __almide_fan_go = almide_fan_group({co
 # the threaded form's). `body` carries the join's `?` / `.unwrap()`.
 [fan_single]
 template = "{{ almide_stdout_flush(); {body} }}"
+
+# #3459: an arm that captures an Rc-backed value (a closure, a Bytes) cannot
+# be spawned. The arms run inline in arm order, each as its spawn closure
+# called in place, and every arm runs before the first join: the sequential
+# evaluation the threaded form reproduces. `join_expr` carries `?` / `.unwrap()`.
+[fan_inline]
+template = "{{ almide_stdout_flush(); {arms} {join_expr} }}"
 
 [loop_block]
 template = "loop {{\n{body}\n}}"

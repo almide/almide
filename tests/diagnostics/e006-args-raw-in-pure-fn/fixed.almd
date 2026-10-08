@@ -1,0 +1,5 @@
+import args
+
+fn arg_count(argv: List[String]) -> Int = list.len(argv)
+
+effect fn main() -> Unit = println(int.to_string(arg_count(args.raw()!)))

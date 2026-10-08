@@ -171,6 +171,48 @@ impl Emitter<'_> {
         self.witness_loop_close();
     }
 
+    /// `list.group_by`'s element, per element (collections_hof.rs), right
+    /// after the key: the element joins its group on both arms of the
+    /// present/absent site (`share_handle_top` into the group list: the
+    /// view's share moves, `am`), the key is settled as `set.map`'s member
+    /// ([`Self::witness_member_step`]), and an absent key's first group list
+    /// `[x]` is born and moves into the new entry (`im`). The activation
+    /// closes after the site.
+    pub(crate) fn witness_group_step(&mut self, body: &almide_ir::IrExpr, kt: SliceTy, owned: bool, elem: (u32, SliceTy)) {
+        if self.witness.is_none() {
+            return;
+        }
+        if self.rc_droppable(elem.1) && !self.elem_is_handle(elem.1) {
+            self.witness_decline("group-elem:flat");
+            return;
+        }
+        let droppable = self.rc_droppable(kt);
+        let c = if droppable && owned { self.witness.as_mut().map(|w| w.temp_born()) } else { None };
+        self.witness_branch_open();
+        self.witness_branch_arm();
+        self.witness_view_shares(&[elem]);
+        if let (Some(o), Some(w)) = (c, self.witness.as_mut()) {
+            w.temp_ops(o, "d");
+        }
+        self.witness_branch_arm();
+        self.witness_view_shares(&[elem]);
+        if let Some(w) = self.witness.as_mut() {
+            w.temp_move();
+        }
+        match c {
+            Some(o) => {
+                if let Some(w) = self.witness.as_mut() {
+                    w.temp_ops(o, "m");
+                }
+            }
+            None if droppable && self.elem_is_handle(kt) => self.witness_share_or_move(body, "group-key:borrowed-temp"),
+            None if droppable => self.witness_decline("group-key:flat"),
+            None => {}
+        }
+        self.witness_branch_close();
+        self.witness_loop_close();
+    }
+
     /// A fused `src |> map* |> filter* |> fold` (list_fuse.rs), at the top
     /// of each iteration: the chain node is consumed whole (its stages are
     /// inlined, never built), one activation covers every stage, and a heap
@@ -301,11 +343,16 @@ impl Emitter<'_> {
     /// main's err channel (err_channel.rs): the carrier is read; its err arm
     /// ABORTS (the checker's terminal discharges what is held), its ok arm
     /// releases the carrier when main owns it — born here, released there.
-    pub(crate) fn witness_main_carrier(&mut self, owned: bool) {
+    /// `fresh`: the err arm builds its message (#3474), a block born there
+    /// that the abort takes with it.
+    pub(crate) fn witness_main_carrier(&mut self, owned: bool, fresh: bool) {
         let Some(w) = self.witness.as_mut() else { return };
         let c = owned.then(|| w.temp_born());
         w.branch_open();
         w.branch_arm();
+        if fresh {
+            w.temp_born();
+        }
         w.abort_end();
         w.branch_arm();
         if let Some(o) = c {

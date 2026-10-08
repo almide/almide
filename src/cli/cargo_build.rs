@@ -1,460 +1,18 @@
-/// Cargo/rustc build orchestration for generated Rust code: Cargo.toml
-/// templates, native-deps/native-module injection, the rlib fast paths, and
-/// the `cargo build` / `cargo test --no-run` drivers. Split out of `mod.rs`
-/// (which had grown past the max-lines threshold) — a pure text move, no
-/// behavior change. `cargo_build_cdylib`, `cargo_build_generated`,
+/// Cargo/rustc build orchestration for generated Rust code: the rlib fast
+/// paths and the `cargo build` / `cargo test --no-run` drivers. The Cargo.toml
+/// template lives in `cargo_toml.rs`, what a build copies into the crate and
+/// the environment cache key in `crate_inputs.rs`, and the stale-session
+/// recovery in `cargo_ice.rs`. `cargo_build_cdylib`, `cargo_build_generated`,
 /// `cargo_build_generated_with_native` and `cargo_build_test_with_native`
 /// are `pub(super)` because `build.rs`/`repl.rs`/`run.rs` (siblings under
 /// `cli`) call them via `super::cargo_build_*`; everything else here is
 /// used only within this file.
 
-/// Cargo.toml template for generated Rust projects (without HTTP/TLS).
-const GENERATED_CARGO_TOML: &str = r#"[package]
-name = "almide-out"
-version = "0.1.0"
-edition = "2021"
-
-# Self-isolate from any ENCLOSING cargo workspace: without this, running almide
-# with a project dir nested inside a Rust workspace (a repo's tools/ tree, the
-# fuzzer's .scratch) makes cargo resolve the parent workspace and refuse the
-# build ("current package believes it's in a workspace when it's not").
-[workspace]
-
-# `opt-level = 1` is LOAD-BEARING FOR CORRECTNESS, not a speed choice. Do not lower it.
-#
-# It was lowered to 0 once, for a real and large win: the cargo phase of `almide run` on a
-# 2,103-line program is 3,215ms at level 1 and 724ms at level 0 (4.4x), measured with a real
-# source edit each time and a phase trace inside the pipeline. It was reverted the same day
-# because `spec/wasm_cross/mutual_tail_recursion.almd` began overflowing the native stack:
-# **MUTUAL tail recursion is turned into a loop by LLVM's tail-call optimisation, which does
-# not run at opt-level 0.** Wasm is unaffected (it has `return_call`), so the two targets
-# diverged — a cross-target contract broken by a Cargo setting.
-#
-# What made the mistake possible: the pre-change check measured 200,000-deep SELF-recursion,
-# which Almide's own TCO already turns into a loop, so it passed at both levels and proved
-# nothing about the mutual case. A native semantic property must not depend on an
-# optimisation level; until the compiler eliminates mutual tail calls itself (#1043), this
-# line is what keeps the contract.
-[profile.dev]
-opt-level = 1
-overflow-checks = false
-
-[profile.release]
-opt-level = 3
-lto = true
-codegen-units = 1
-"#;
-
-/// Does the generated code use a runtime module whose source needs a crate?
-/// (The cdylib/bin/test fast paths that skip cargo ask exactly this.)
-pub(super) fn needs_runtime_crates(rs_code: &str) -> bool {
-    !almide_codegen::runtime_crate_deps(rs_code).is_empty()
-}
-
-/// Every crate dependency of a generated project, on EVERY build route (bin,
-/// `--cdylib`, `--repr-c`, test, `almide run`, #3346): `[native-deps]` first
-/// (the user's spelling of a crate wins), then the runtime's
-/// (`almide_codegen::runtime_crate_deps`) minus any crate the user already
-/// declared for every target — so declaring `flate2` yourself (the #3346
-/// workaround) never writes a second `flate2` key. A user crate declared only
-/// under `[target.'cfg(...)'.native-deps]` (#3350) does not stand in for the
-/// runtime's: the runtime needs it on every target, so both are written, one
-/// in `[dependencies]` and one in that target's table (Cargo merges them).
-pub(super) fn generated_crate_deps(rs_code: &str, native_deps: &[crate::project::NativeDep]) -> Vec<crate::project::NativeDep> {
-    let mut deps = native_deps.to_vec();
-    for (name, spec) in almide_codegen::runtime_crate_deps(rs_code) {
-        if !deps.iter().any(|d| d.name == name && d.target.is_none()) {
-            deps.push(crate::project::NativeDep { name: name.into(), spec: spec.into(), target: None });
-        }
-    }
-    deps
-}
-
-/// The Cargo.toml table a native dep is written under: `[dependencies]`, or
-/// `[target.<key>.dependencies]` for a `[target.<key>.native-deps]` entry
-/// (#3350). The key is quoted as a TOML literal string — a `cfg(...)` holds
-/// `"` — or as a basic string when it also holds `'`.
-fn dependency_table_header(target: Option<&str>) -> String {
-    match target {
-        None => "[dependencies]".to_string(),
-        Some(t) if !t.contains('\'') => format!("[target.'{t}'.dependencies]"),
-        Some(t) => format!("[target.\"{}\".dependencies]", t.replace('\\', "\\\\").replace('"', "\\\"")),
-    }
-}
-
-/// The byte range of the table `header` opens in `toml` — from just after
-/// the header line to the next table header (or the end) — or `None` when
-/// `toml` has no such table.
-fn table_body(toml: &str, header: &str) -> Option<std::ops::Range<usize>> {
-    let mut offset = 0;
-    let mut start = None;
-    for line in toml.split_inclusive('\n') {
-        let trimmed = line.trim();
-        if start.is_some() && trimmed.starts_with('[') {
-            return start.map(|s| s..offset);
-        }
-        offset += line.len();
-        if trimmed == header {
-            start = Some(offset);
-        }
-    }
-    start.map(|s| s..toml.len())
-}
-
-/// Does `body` (a table's lines) assign `name`?
-fn assigns(body: &str, name: &str) -> bool {
-    body.lines().any(|l| {
-        l.trim_start().strip_prefix(name).is_some_and(|rest| rest.trim_start().starts_with('='))
-    })
-}
-
-/// Write `dep` into its table of `toml` ([`dependency_table_header`]): at the
-/// end of the table, so deps keep the order they are given in; creating the
-/// table at the end of the file when absent. A crate the table already
-/// declares is left as it is — the base template may carry it (e.g. rayon in
-/// the ML profile), and a second key is a Cargo hard error (#646).
-fn insert_cargo_dep(toml: &mut String, dep: &crate::project::NativeDep) {
-    let header = dependency_table_header(dep.target.as_deref());
-    let line = if dep.spec.starts_with('{') {
-        format!("{} = {}\n", dep.name, dep.spec)
-    } else {
-        format!("{} = \"{}\"\n", dep.name, dep.spec)
-    };
-    if !toml.ends_with('\n') {
-        toml.push('\n');
-    }
-    match table_body(toml, &header) {
-        Some(body) if assigns(&toml[body.clone()], &dep.name) => {}
-        Some(body) => {
-            // After the table's last entry, before the blank lines that
-            // separate it from the next table.
-            let last = body.start + toml[body.clone()].trim_end().len();
-            let at = if last == body.start {
-                body.start
-            } else {
-                toml[last..].find('\n').map_or(toml.len(), |i| last + i + 1)
-            };
-            toml.insert_str(at, &line);
-        }
-        None => toml.push_str(&format!("\n{header}\n{line}")),
-    }
-}
-
-/// `--cfg almide_par` enables the rayon-backed parallel runtime paths. The cfg
-/// follows the DEPENDENCY: inject it only when the generated project's Cargo.toml
-/// declares rayon (e.g. via `[native-deps]` — the nn repos do) — the base template
-/// carries no external crates (#739), so an unconditional cfg would make ANY
-/// matrix-using program fail to resolve `rayon::prelude` (E0433). Without the cfg
-/// the runtime compiles its serial side, exactly like the raw-rustc test harness.
-fn inject_almide_par_if_rayon(cmd: &mut std::process::Command, project_dir: &std::path::Path) {
-    // Only an unconditional rayon counts: one under a `[target.…]` table
-    // (#3350) is absent on other targets, where the cfg would break the build.
-    let has_rayon = std::fs::read_to_string(project_dir.join("Cargo.toml"))
-        .map(|t| table_body(&t, "[dependencies]").is_some_and(|body| assigns(&t[body], "rayon")))
-        .unwrap_or(false);
-    if has_rayon {
-        cmd.env(
-            "RUSTFLAGS",
-            format!("{} --cfg almide_par", std::env::var("RUSTFLAGS").unwrap_or_default()),
-        );
-    }
-}
-
-/// Build a Cargo.toml string by writing each native dep into its table:
-/// `[dependencies]`, or `[target.<key>.dependencies]` for a target-specific
-/// one (#3350). See [`insert_cargo_dep`].
-fn build_cargo_toml(base_toml: &str, native_deps: &[crate::project::NativeDep]) -> String {
-    let mut toml = base_toml.to_string();
-    for dep in native_deps {
-        insert_cargo_dep(&mut toml, dep);
-    }
-    toml
-}
-
-/// Everything a build copies INTO the generated crate besides the generated
-/// source itself: the `native/` tree of the building package and of every
-/// dependency package reached through `almide.toml`, plus those dependency
-/// packages' `[native-deps]` (#3091).
-///
-/// It is collected ONCE, before the native build cache is consulted, and the
-/// same value is both hashed into the cache key ([`CrateInputs::cache_key`])
-/// and written into the crate ([`CrateInputs::apply`]). The key therefore
-/// covers exactly the bytes the build ships, by construction: there is no
-/// second list of "things that shape the binary" to keep in step with the
-/// copy. That second list is what #3091 was — the key hashed the building
-/// package's `native/` (#887) while the copy also pulled in every
-/// dependency's, so editing only a dependency's native module was a cache hit
-/// that shipped the previous binary.
-#[derive(Default, Debug)]
-pub(super) struct CrateInputs {
-    /// One entry per package, in injection order (the building package
-    /// first, then its dependencies depth-first).
-    packages: Vec<PackageNatives>,
-    /// The `[native-deps]` of dependency packages, in visit order. (The
-    /// building package's own are passed separately as `native_deps`.)
-    dep_native_deps: Vec<crate::project::NativeDep>,
-}
-
-#[derive(Default, Debug)]
-struct PackageNatives {
-    /// `(path under the crate's src/, contents)`, sorted by path.
-    files: Vec<(std::path::PathBuf, Vec<u8>)>,
-    /// The `native/*.rs` stems that get a `mod <stem>;`, sorted.
-    mod_stems: Vec<String>,
-    /// The package's `[package].name`, when it has `native/*.rs` modules:
-    /// whose items get their pre-#3338 aliases (#3425).
-    name: Option<String>,
-}
-
-impl CrateInputs {
-    /// Read the `native/` trees and dependency `[native-deps]` reachable from
-    /// `source_root`. Nothing is written.
-    ///
-    /// The dependency packages are the ones module resolution selected:
-    /// `project_fetch::fetch_all_deps`, the function the compiler resolves
-    /// `import`s through, honouring `almide.lock` and MVS. Each package's
-    /// `native/` is read from the same checkout its `.almd` sources came
-    /// from (#3094). This used to be a second walk that re-fetched each
-    /// manifest entry WITHOUT the lock, so a locked branch dependency built
-    /// the branch head's natives against the locked commit's `@extern`s, and
-    /// an MVS-raised package copied the natives of both versions.
-    pub(super) fn collect(source_root: Option<&std::path::Path>) -> Result<Self, String> {
-        let mut inputs = CrateInputs::default();
-        let Some(root) = source_root else { return Ok(inputs) };
-        inputs.packages.push(PackageNatives::read(root)?);
-        let toml_path = root.join("almide.toml");
-        if !toml_path.exists() { return Ok(inputs); }
-        let proj = crate::project::parse_toml(&toml_path).map_err(|e| format!("parse almide.toml: {}", e))?;
-        if proj.dependencies.is_empty() { return Ok(inputs); }
-        for dep in crate::project_fetch::fetch_all_deps(&proj)? {
-            inputs.packages.push(PackageNatives::read(&dep.package_dir)?);
-            let dep_toml = dep.package_dir.join("almide.toml");
-            if let Some(dep_proj) = dep_toml.exists().then(|| crate::project::parse_toml(&dep_toml).ok()).flatten() {
-                inputs.dep_native_deps.extend(dep_proj.native_deps);
-            }
-        }
-        Ok(inputs)
-    }
-
-    /// The cache-key component for these inputs: every file's crate path and
-    /// content digest, every `mod` declaration, every dependency native dep.
-    /// Empty when there is nothing to inject.
-    pub(super) fn cache_key(&self) -> String {
-        let mut acc = String::new();
-        for (i, pkg) in self.packages.iter().enumerate() {
-            acc.push_str(&format!("pkg{}[", i));
-            for (path, bytes) in &pkg.files {
-                acc.push_str(&format!("{}:{:016x};", path.display(), super::hash64(bytes)));
-            }
-            acc.push_str(&format!("mods={}", pkg.mod_stems.join(",")));
-            if let Some(name) = &pkg.name {
-                acc.push_str(&format!(";name={}", name));
-            }
-            acc.push(']');
-        }
-        for nd in &self.dep_native_deps {
-            acc.push_str(&format!("dep:{}={}@{};", nd.name, nd.spec, nd.target.as_deref().unwrap_or("")));
-        }
-        acc
-    }
-
-    /// The pre-#3338 aliases of the items of every package whose `native/`
-    /// modules this crate carries, resolved against `code` (#3425).
-    fn legacy_aliases(&self, code: &str) -> super::native_legacy_aliases::LegacyAliases {
-        let pkgs: Vec<String> = self.packages.iter().filter_map(|p| p.name.clone()).collect();
-        if pkgs.is_empty() {
-            return Default::default();
-        }
-        super::native_legacy_aliases::legacy_aliases(code, &pkgs)
-    }
-
-    /// Warn, once per name, for every pre-#3338 spelling a package's
-    /// `native/*.rs` names (#3425). Called before the build cache is
-    /// consulted, so a cache hit warns too.
-    pub(super) fn warn_legacy_callbacks(&self, code: &str) {
-        if crate::warnings_suppressed() || self.packages.iter().all(|p| p.name.is_none()) {
-            return;
-        }
-        let aliases = self.legacy_aliases(code);
-        for pkg in &self.packages {
-            let Some(name) = &pkg.name else { continue };
-            for (rel, bytes) in pkg.files.iter().filter(|(rel, _)| rel.extension().is_some_and(|e| e == "rs")) {
-                let file = format!("native/{} of package `{}`", rel.display(), name);
-                let text = String::from_utf8_lossy(bytes);
-                for w in super::native_legacy_aliases::warnings(&file, &text, &aliases) {
-                    crate::err(&w);
-                }
-            }
-        }
-    }
-
-    /// Write the collected files into `src_dir`, declare their modules in
-    /// `code`, and append the dependency native deps to `project_dir`'s
-    /// Cargo.toml.
-    fn apply(&self, code: &mut String, src_dir: &std::path::Path, project_dir: &std::path::Path) -> Result<(), String> {
-        for pkg in &self.packages {
-            pkg.apply(code, src_dir)?;
-        }
-        // The old spellings the packages' native code may still call (#3425).
-        // Nothing is added to a crate without a package `native/` module.
-        code.push_str(&super::native_legacy_aliases::render(&self.legacy_aliases(code)));
-        if !self.dep_native_deps.is_empty() {
-            let cargo_path = project_dir.join("Cargo.toml");
-            let mut cargo = std::fs::read_to_string(&cargo_path).unwrap_or_default();
-            for nd in &self.dep_native_deps {
-                insert_cargo_dep(&mut cargo, nd);
-            }
-            let _ = std::fs::write(&cargo_path, &cargo);
-        }
-        Ok(())
-    }
-}
-
-impl PackageNatives {
-    /// `<root>/native/*.rs` become modules; subdirectories (assets such as
-    /// `native/wgsl/*.wgsl`, `include_str!`d by the modules) travel with them
-    /// whole. Other plain files in `native/` are not copied.
-    fn read(root: &std::path::Path) -> Result<Self, String> {
-        let mut pkg = PackageNatives::default();
-        let native_dir = root.join("native");
-        if !native_dir.is_dir() { return Ok(pkg); }
-        for entry in sorted_entries(&native_dir)? {
-            let path = native_dir.join(&entry);
-            if path.extension().is_some_and(|e| e == "rs") && path.is_file() {
-                let stem = path.file_stem()
-                    .ok_or_else(|| format!("native module path has no file stem: {}", path.display()))?
-                    .to_string_lossy().to_string();
-                let content = std::fs::read(&path)
-                    .map_err(|e| format!("failed to read {}: {}", path.display(), e))?;
-                pkg.files.push((std::path::PathBuf::from(&entry), content));
-                pkg.mod_stems.push(stem);
-            } else if path.is_dir() {
-                read_tree(&path, std::path::Path::new(&entry), &mut pkg.files)?;
-            }
-        }
-        if !pkg.mod_stems.is_empty() {
-            pkg.name = crate::project::parse_toml(&root.join("almide.toml")).ok()
-                .map(|p| p.package.name)
-                .filter(|n| !n.is_empty());
-        }
-        Ok(pkg)
-    }
-
-    fn apply(&self, code: &mut String, src_dir: &std::path::Path) -> Result<(), String> {
-        for (rel, bytes) in &self.files {
-            let dst = src_dir.join(rel);
-            if let Some(parent) = dst.parent() {
-                std::fs::create_dir_all(parent).map_err(|e| format!("failed to create {}: {}", parent.display(), e))?;
-            }
-            std::fs::write(&dst, bytes).map_err(|e| format!("failed to write {}: {}", dst.display(), e))?;
-        }
-        if self.mod_stems.is_empty() { return Ok(()); }
-        let mod_decls: String = self.mod_stems.iter().map(|s| format!("mod {};\n", s)).collect();
-        if let Some(pos) = code.find("\nuse ") {
-            code.insert_str(pos, &format!("\n{}", mod_decls));
-        } else if let Some(pos) = code.find("\nfn ") {
-            code.insert_str(pos, &format!("\n{}", mod_decls));
-        } else {
-            *code = format!("{}\n{}", mod_decls, code);
-        }
-        Ok(())
-    }
-}
-
-/// The entry names of `dir`, sorted, so the collected inputs (and the key
-/// hashed from them) do not depend on the filesystem's listing order.
-fn sorted_entries(dir: &std::path::Path) -> Result<Vec<std::ffi::OsString>, String> {
-    let entries = std::fs::read_dir(dir).map_err(|e| format!("failed to read {}: {}", dir.display(), e))?;
-    let mut names: Vec<_> = entries.flatten().map(|e| e.file_name()).collect();
-    names.sort();
-    Ok(names)
-}
-
-/// Every file under `dir`, recorded at `rel/<path below dir>`.
-fn read_tree(dir: &std::path::Path, rel: &std::path::Path, out: &mut Vec<(std::path::PathBuf, Vec<u8>)>) -> Result<(), String> {
-    for name in sorted_entries(dir)? {
-        let src = dir.join(&name);
-        let dst = rel.join(&name);
-        if src.is_dir() {
-            read_tree(&src, &dst, out)?;
-        } else {
-            let bytes = std::fs::read(&src).map_err(|e| format!("failed to read {}: {}", src.display(), e))?;
-            out.push((dst, bytes));
-        }
-    }
-    Ok(())
-}
-
-/// Everything OUTSIDE the generated crate that shapes the binary cargo or
-/// rustc produces from it — the cache-key component for the build's
-/// environment, next to [`CrateInputs::cache_key`] for its contents (#3091).
-///
-/// - **The recipe**: this file and `native_target.rs` as compiled into this
-///   almide — the Cargo.toml templates (opt-level is load-bearing for
-///   correctness, see [`GENERATED_CARGO_TOML`]), the rustc/cargo invocations
-///   of every build path, the injection. The sources themselves are hashed,
-///   so an edit to any of them is a new key without anyone remembering to
-///   bump a revision.
-/// - **The toolchain**: `rustc -vV` (version, commit, host). A toolchain
-///   update that changes codegen is a new binary.
-/// - **Flags cargo and rustc read from the environment**: `RUSTFLAGS` and its
-///   spellings, `RUSTC`/`RUSTC_WRAPPER`, `CARGO_PROFILE_*` (which override the
-///   templates' profiles), per-target rustflags/linker, and
-///   `ALMIDE_NO_RTLIB` (which picks the build path).
-/// - **Cargo config files** cargo would read for a build in `project_dir`:
-///   `.cargo/config{,.toml}` in it and every ancestor, and in `CARGO_HOME`.
-pub(super) fn build_environment_key(project_dir: &std::path::Path) -> String {
-    let recipe = super::hash64(
-        concat!(include_str!("cargo_build.rs"), include_str!("native_target.rs"), include_str!("native_legacy_aliases.rs")).as_bytes(),
-    );
-    let mut acc = format!("recipe={:016x};rustc={};", recipe, toolchain_identity());
-    let mut vars: Vec<(String, String)> = std::env::vars()
-        .filter(|(k, _)| env_shapes_the_binary(k))
-        .collect();
-    vars.sort();
-    for (k, v) in vars {
-        acc.push_str(&format!("{}={};", k, v));
-    }
-    let cargo_home = std::env::var_os("CARGO_HOME")
-        .map(std::path::PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".cargo")));
-    let config_dirs = project_dir.ancestors().map(|d| d.join(".cargo")).chain(cargo_home);
-    for dir in config_dirs {
-        for name in ["config", "config.toml"] {
-            let path = dir.join(name);
-            if let Ok(bytes) = std::fs::read(&path) {
-                acc.push_str(&format!("{}:{:016x};", path.display(), super::hash64(&bytes)));
-            }
-        }
-    }
-    acc
-}
-
-/// Is `name` an environment variable that changes what cargo/rustc emit?
-fn env_shapes_the_binary(name: &str) -> bool {
-    matches!(
-        name,
-        "RUSTFLAGS" | "CARGO_ENCODED_RUSTFLAGS" | "CARGO_BUILD_RUSTFLAGS" | "RUSTC" | "RUSTC_WRAPPER"
-            | "CARGO_BUILD_RUSTC" | "CARGO_BUILD_RUSTC_WRAPPER" | "ALMIDE_NO_RTLIB"
-    ) || name.starts_with("CARGO_PROFILE_")
-        || (name.starts_with("CARGO_TARGET_") && (name.ends_with("_RUSTFLAGS") || name.ends_with("_LINKER")))
-}
-
-/// `rustc -vV` of the rustc on PATH, once per process. Empty when it cannot
-/// be run (the build then fails on its own).
-fn toolchain_identity() -> &'static str {
-    static ID: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    ID.get_or_init(|| {
-        std::process::Command::new(crate::find_rustc())
-            .arg("-vV")
-            .output()
-            .ok()
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().replace('\n', "|"))
-            .unwrap_or_default()
-    })
-}
-
-
+use super::cargo_toml::{
+    build_cargo_toml, generated_crate_deps, inject_almide_par_if_rayon, needs_runtime_crates,
+    GENERATED_CARGO_TOML,
+};
+use super::crate_inputs::{toolchain_identity, CrateInputs};
 /// Build generated Rust code as a cdylib shared library (.dylib/.so) in
 /// `project_dir` and return the built library's path there. `lib_name` is the
 /// Cargo crate name — a valid identifier, never the output path (#3349).
@@ -765,7 +323,7 @@ pub(super) fn cargo_build_generated_with_native(
 /// generated paths with placeholders and prepends a bug-report banner so
 /// users (and harness classifiers) don't mistake a compiler bug for a
 /// user-facing language error. No-op when the output is clean.
-fn wrap_codegen_leak(stderr: String) -> String {
+pub(super) fn wrap_codegen_leak(stderr: String) -> String {
     let mentions_main_rs = stderr.contains("src/main.rs");
     let leaks_rustc_code = contains_rustc_error_code(&stderr);
     if !(mentions_main_rs || leaks_rustc_code) {
@@ -801,14 +359,17 @@ fn wrap_codegen_leak(stderr: String) -> String {
 /// (so the linked runtime keeps full optimization). Each level is cached
 /// separately and built at most once per process.
 fn ensure_runtime_rlib(opt_level: &str) -> Result<std::path::PathBuf, String> {
-    use std::sync::{Mutex, OnceLock};
-    static CACHE: OnceLock<Mutex<std::collections::HashMap<String, Result<std::path::PathBuf, String>>>> = OnceLock::new();
-    let cache = CACHE.get_or_init(|| Mutex::new(std::collections::HashMap::new()));
-    {
-        let guard = cache.lock().unwrap();
-        if let Some(r) = guard.get(opt_level) {
-            return r.clone();
-        }
+    use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
+    type Memo = std::collections::HashMap<String, Result<std::path::PathBuf, String>>;
+    /// The per-process memo of built runtimes. The lock is held only across a
+    /// map lookup or insert, neither of which can leave the map half-written,
+    /// so a poisoned lock still guards a consistent memo.
+    fn memo() -> MutexGuard<'static, Memo> {
+        static CACHE: OnceLock<Mutex<Memo>> = OnceLock::new();
+        CACHE.get_or_init(|| Mutex::new(Memo::new())).lock().unwrap_or_else(PoisonError::into_inner)
+    }
+    if let Some(r) = memo().get(opt_level) {
+        return r.clone();
     }
     let result = build_runtime_rlib(opt_level);
     if let Ok(rlib) = &result {
@@ -817,12 +378,12 @@ fn ensure_runtime_rlib(opt_level: &str) -> Result<std::path::PathBuf, String> {
         // the rlib dirs of runtimes and toolchains nobody has linked for a
         // week (#2504). The touch comes first, so the sweep can never evict
         // the dir this process is about to link against.
-        super::run::touch_used(rlib);
+        super::build_dir::touch_used(rlib);
         if let Some(dir) = rlib.parent() {
-            super::run::sweep_rtlib_cache(dir);
+            super::build_dir::sweep_rtlib_cache(dir);
         }
     }
-    cache.lock().unwrap().insert(opt_level.to_string(), result.clone());
+    memo().insert(opt_level.to_string(), result.clone());
     result
 }
 
@@ -840,7 +401,7 @@ fn build_runtime_rlib(opt_level: &str) -> Result<std::path::PathBuf, String> {
         return Ok(rlib);
     }
     std::fs::create_dir_all(&dir).map_err(|e| format!("rtlib dir: {e}"))?;
-    let _lock = super::run::BuildDirLock::acquire(&dir)?;
+    let _lock = super::build_dir::BuildDirLock::acquire(&dir)?;
     if rlib.exists() {
         return Ok(rlib); // another builder won the race while we waited
     }
@@ -1034,96 +595,6 @@ pub(super) fn cargo_build_test_with_native(
     run_cargo_test_no_run_and_locate_binary(project_dir)
 }
 
-/// Does a failed build's output carry rustc's internal-compiler-error banner?
-///
-/// rustc prints `error: the compiler unexpectedly panicked. This is a bug.`
-/// (older / query-path ICEs say `internal compiler error`) through its
-/// diagnostic emitter, so the phrase survives cargo's `--message-format=json`
-/// re-rendering and the `wrap_codegen_leak` banner alike. This is the ONLY
-/// signal the stale-incremental-session recovery keys on (#2500): a build
-/// that merely fails to compile never matches, so a genuine error is never
-/// retried.
-pub(super) fn is_rustc_ice(stderr: &str) -> bool {
-    stderr.contains("the compiler unexpectedly panicked") || stderr.contains("internal compiler error")
-}
-
-/// Remove every NON-EMPTY `<project_dir>/target/<profile>/incremental`
-/// session store. Returns the directories that held a session and were
-/// removed. The CALLER holds the dir's `BuildDirLock`: a session store is
-/// rewritten by any build in the dir, so it is only ever touched under the
-/// same lock that serializes those builds.
-///
-/// Empty is not "cleared": cargo creates `target/<profile>/incremental/`
-/// even when incremental compilation is OFF (`CARGO_INCREMENTAL=0`, which
-/// this repo's own CI sets for every job). Counting that empty directory as
-/// something recovered would make the caller retry a genuine ICE once for
-/// nothing, in exactly the environment where no session can have gone stale.
-pub(super) fn clear_incremental_sessions(project_dir: &std::path::Path) -> Vec<std::path::PathBuf> {
-    let Ok(profiles) = std::fs::read_dir(project_dir.join("target")) else { return Vec::new() };
-    let mut cleared = Vec::new();
-    let mut clear = |inc: std::path::PathBuf| {
-        let holds_a_session = std::fs::read_dir(&inc).map(|mut rd| rd.next().is_some()).unwrap_or(false);
-        if holds_a_session && std::fs::remove_dir_all(&inc).is_ok() {
-            cleared.push(inc);
-        }
-    };
-    for entry in profiles.flatten() {
-        clear(entry.path().join("incremental"));
-        // A cross build (#2772) keeps its profiles one level down:
-        // `target/<triple>/<profile>/incremental`.
-        if let Ok(nested) = std::fs::read_dir(entry.path()) {
-            for sub in nested.flatten() {
-                clear(sub.path().join("incremental"));
-            }
-        }
-    }
-    cleared.sort();
-    cleared
-}
-
-/// Run `build` once and, if it failed with rustc's ICE banner, clear the
-/// dir's incremental session stores and run it once more (#2500).
-///
-/// An interrupted build (ENOSPC, a killed process) can leave a rustc
-/// incremental session with its `work-products.bin` naming a `*.pre-lto.bc`
-/// that was never written. rustc then panics on every later build that
-/// reuses the session — the same program shape fails forever, the message
-/// blames rustc and names a temp path, and nothing tells the user to delete
-/// it. The session store is a pure cache, so the recovery is to drop it and
-/// rebuild. Exactly one retry: if it also fails, the ORIGINAL error is
-/// reported (the retry's, if different, is not what the user's build said).
-/// A recovered build says so on stderr in one line.
-///
-/// The caller holds whatever lock serializes builds in `project_dir` (the
-/// `BuildDirLock` of `build_native_cached` / the cdylib build; the REPL's
-/// dir is private to its one interactive process).
-pub(super) fn build_recovering_from_ice(
-    project_dir: &std::path::Path,
-    mut build: impl FnMut() -> Result<std::path::PathBuf, String>,
-) -> Result<std::path::PathBuf, String> {
-    let first = build();
-    let Err(first_err) = &first else { return first };
-    if !is_rustc_ice(first_err) {
-        return first;
-    }
-    let cleared = clear_incremental_sessions(project_dir);
-    if cleared.is_empty() {
-        // Nothing stale to recover from: a genuine rustc ICE on this code.
-        return first;
-    }
-    match build() {
-        Ok(bin) => {
-            let names = cleared.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", ");
-            crate::err(&format!(
-                "note: rustc crashed on a stale incremental session; cleared {} and rebuilt successfully",
-                names
-            ));
-            Ok(bin)
-        }
-        Err(_) => first,
-    }
-}
-
 /// Detect rustc-style `error[E\d{4}]` codes leaking through our checker.
 /// Almide's diagnostic codes are 3 digits (E001..E099); rustc uses 4 digits
 /// (E0001..E9999). A 4-digit code in the output unambiguously means our
@@ -1155,7 +626,7 @@ fn contains_rustc_error_code(text: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_recovering_from_ice, clear_incremental_sessions, contains_rustc_error_code, defines_entry_point, is_rustc_ice};
+    use super::{contains_rustc_error_code, defines_entry_point};
 
     #[test]
     fn detects_4_digit_rustc_code() {
@@ -1222,198 +693,5 @@ mod tests {
     #[test]
     fn an_indented_main_is_not_the_crate_entry_point() {
         assert!(!defines_entry_point("mod inner {\n    pub fn main() {}\n}\n"));
-    }
-
-    // #2500: the stale-incremental-session recovery. The end-to-end shape (a
-    // real rustc ICE from a deleted `*.pre-lto.bc`) is `tests/run_cache_recovery_test.rs`;
-    // these pin the retry POLICY with a scripted build.
-
-    const ICE: &str = "thread 'rustc' panicked at compiler/rustc_codegen_ssa/src/back/write.rs:2290:29:\n\
-        failed to open bitcode file `.../incremental/almide_out-1/s-2-working/3.pre-lto.bc`: No such file or directory\n\
-        error: the compiler unexpectedly panicked. This is a bug\n";
-
-    #[test]
-    fn the_ice_banner_is_the_only_trigger() {
-        assert!(is_rustc_ice(ICE));
-        assert!(is_rustc_ice("error: internal compiler error: unexpected panic"));
-        // The codegen-bug wrapper keeps the banner inside its own text.
-        assert!(is_rustc_ice(&super::wrap_codegen_leak(format!("{ICE}\nerror: could not compile `almide-out`"))));
-        assert!(!is_rustc_ice("error[E0599]: no method named `foo`\nerror: could not compile `almide-out`"));
-        assert!(!is_rustc_ice("thread 'main' panicked at src/main.rs:3:5"));
-    }
-
-    fn scripted(outcomes: Vec<Result<&'static str, &'static str>>) -> (impl FnMut() -> Result<std::path::PathBuf, String>, std::rc::Rc<std::cell::Cell<usize>>) {
-        let calls = std::rc::Rc::new(std::cell::Cell::new(0));
-        let c = calls.clone();
-        let mut it = outcomes.into_iter();
-        (
-            move || {
-                c.set(c.get() + 1);
-                it.next().expect("more build calls than scripted")
-                    .map(std::path::PathBuf::from)
-                    .map_err(String::from)
-            },
-            calls,
-        )
-    }
-
-    #[test]
-    fn an_ice_clears_the_sessions_and_retries_once() {
-        let dir = tempfile::tempdir().unwrap();
-        let inc = dir.path().join("target/debug/incremental/almide_out-1/s-2-working");
-        std::fs::create_dir_all(&inc).unwrap();
-        std::fs::write(inc.join("work-products.bin"), b"x").unwrap();
-        let (build, calls) = scripted(vec![Err(ICE), Ok("bin")]);
-        let out = build_recovering_from_ice(dir.path(), build);
-        assert_eq!(out.as_deref().ok(), Some(std::path::Path::new("bin")));
-        assert_eq!(calls.get(), 2);
-        assert!(!dir.path().join("target/debug/incremental").exists(), "the session store must be gone");
-        assert!(dir.path().join("target/debug").is_dir(), "only the incremental store is cleared, not the profile dir");
-    }
-
-    #[test]
-    fn a_retry_that_also_fails_reports_the_original_error_and_never_loops() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join("target/debug/incremental/almide_out-1")).unwrap();
-        let (build, calls) = scripted(vec![Err(ICE), Err("error: the compiler unexpectedly panicked. This is a bug\n(second)")]);
-        let out = build_recovering_from_ice(dir.path(), build);
-        assert_eq!(out, Err(ICE.to_string()), "the user's build said the first error; that is what is reported");
-        assert_eq!(calls.get(), 2, "exactly one retry, even though the retry was itself an ICE");
-    }
-
-    #[test]
-    fn a_plain_compile_error_is_not_retried_and_keeps_its_sessions() {
-        let dir = tempfile::tempdir().unwrap();
-        let inc = dir.path().join("target/debug/incremental/almide_out-1");
-        std::fs::create_dir_all(&inc).unwrap();
-        let (build, calls) = scripted(vec![Err("error[E0308]: mismatched types")]);
-        let out = build_recovering_from_ice(dir.path(), build);
-        assert!(out.is_err());
-        assert_eq!(calls.get(), 1);
-        assert!(inc.is_dir(), "a genuine compile error must not throw the session store away");
-    }
-
-    #[test]
-    fn an_ice_with_no_session_store_is_a_genuine_ice_and_is_not_retried() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join("target/debug")).unwrap();
-        let (build, calls) = scripted(vec![Err(ICE)]);
-        let out = build_recovering_from_ice(dir.path(), build);
-        assert_eq!(out, Err(ICE.to_string()));
-        assert_eq!(calls.get(), 1);
-    }
-
-    /// `CARGO_INCREMENTAL=0` (what this repo's CI sets for every job) still
-    /// leaves an EMPTY `target/<profile>/incremental/` behind. Nothing there
-    /// can have gone stale, so an ICE under it is genuine and must not cost
-    /// a retry.
-    #[test]
-    fn an_empty_session_dir_is_not_something_to_recover_from() {
-        let dir = tempfile::tempdir().unwrap();
-        let inc = dir.path().join("target/debug/incremental");
-        std::fs::create_dir_all(&inc).unwrap();
-        assert!(clear_incremental_sessions(dir.path()).is_empty(), "an empty session dir is not a session");
-        assert!(inc.is_dir(), "and it is not removed either");
-        let (build, calls) = scripted(vec![Err(ICE)]);
-        assert_eq!(build_recovering_from_ice(dir.path(), build), Err(ICE.to_string()));
-        assert_eq!(calls.get(), 1, "no retry when there was no session to clear");
-    }
-
-    // ── #3350: target-specific native deps ──
-
-    use super::{build_cargo_toml, generated_crate_deps, insert_cargo_dep, GENERATED_CARGO_TOML};
-    use crate::project::NativeDep;
-
-    fn dep(name: &str, spec: &str, target: Option<&str>) -> NativeDep {
-        NativeDep { name: name.into(), spec: spec.into(), target: target.map(str::to_string) }
-    }
-
-    /// The `(table, name, spec)` triples of a generated manifest, read back as
-    /// TOML — what Cargo will see, not what the text looks like.
-    fn deps_of(manifest: &str) -> Vec<(String, String, String)> {
-        let doc: toml::Table = toml::from_str(manifest).unwrap_or_else(|e| panic!("not TOML ({e}):\n{manifest}"));
-        let mut out = Vec::new();
-        let mut push = |table: &str, deps: &toml::Value| {
-            for (name, spec) in deps.as_table().expect("a dependency table") {
-                out.push((table.to_string(), name.clone(), spec.to_string()));
-            }
-        };
-        if let Some(d) = doc.get("dependencies") {
-            push("dependencies", d);
-        }
-        for (key, platform) in doc.get("target").and_then(toml::Value::as_table).into_iter().flatten() {
-            if let Some(d) = platform.get("dependencies") {
-                push(key, d);
-            }
-        }
-        out
-    }
-
-    const ANDROID: &str = r#"cfg(target_os = "android")"#;
-    const DESKTOP: &str = r#"cfg(not(any(target_os = "android", target_os = "ios")))"#;
-
-    #[test]
-    fn a_target_specific_native_dep_lands_only_under_its_target_table() {
-        let manifest = build_cargo_toml(GENERATED_CARGO_TOML, &[
-            dep("anyhow", "1", None),
-            dep("arboard", "3", Some(DESKTOP)),
-            dep("jni", "0.21", Some(ANDROID)),
-            dep("ndk", "{ version = \"0.9\", default-features = false }", Some(ANDROID)),
-        ]);
-        let got = deps_of(&manifest);
-        let table_of = |name: &str| got.iter().filter(|(_, n, _)| n == name).map(|(t, _, _)| t.as_str()).collect::<Vec<_>>();
-        assert_eq!(table_of("anyhow"), ["dependencies"], "{manifest}");
-        assert_eq!(table_of("arboard"), [DESKTOP], "{manifest}");
-        assert_eq!(table_of("jni"), [ANDROID], "{manifest}");
-        assert_eq!(table_of("ndk"), [ANDROID], "{manifest}");
-        assert!(manifest.contains(&format!("[target.'{ANDROID}'.dependencies]\njni = \"0.21\"\nndk = ")), "file order within a table:\n{manifest}");
-    }
-
-    #[test]
-    fn a_triple_and_a_key_holding_a_quote_are_written_as_cargo_reads_them() {
-        let odd = r#"cfg(feature = "it's")"#;
-        let manifest = build_cargo_toml(GENERATED_CARGO_TOML, &[
-            dep("winapi", "0.3", Some("x86_64-pc-windows-gnu")),
-            dep("odd", "1", Some(odd)),
-        ]);
-        let got = deps_of(&manifest);
-        assert!(got.contains(&("x86_64-pc-windows-gnu".into(), "winapi".into(), "\"0.3\"".into())), "{manifest}");
-        assert!(got.contains(&(odd.into(), "odd".into(), "\"1\"".into())), "{manifest}");
-    }
-
-    /// The runtime's crates (#3346) compose with target tables: a user crate
-    /// declared only for one target does not stand in for the runtime's
-    /// unconditional one, while an unconditional user crate still does.
-    #[test]
-    fn a_runtime_crate_is_declared_for_every_target_even_when_the_user_gates_one() {
-        let code = "fn f() { almide_rt_zlib_deflate(); }";
-        let gated = generated_crate_deps(code, &[dep("flate2", "{ version = \"1\", features = [\"zlib\"] }", Some(ANDROID))]);
-        let got = deps_of(&build_cargo_toml(GENERATED_CARGO_TOML, &gated));
-        let flate: Vec<&str> = got.iter().filter(|(_, n, _)| n == "flate2").map(|(t, _, _)| t.as_str()).collect();
-        assert_eq!(flate, ["dependencies", ANDROID]);
-
-        let plain = generated_crate_deps(code, &[dep("flate2", "1.0.30", None)]);
-        let got = deps_of(&build_cargo_toml(GENERATED_CARGO_TOML, &plain));
-        let flate: Vec<&(String, String, String)> = got.iter().filter(|(_, n, _)| n == "flate2").collect();
-        assert_eq!(flate.len(), 1, "{got:?}");
-        assert_eq!(flate[0].2, "\"1.0.30\"", "the user's spelling wins");
-    }
-
-    /// A dependency package's native deps are written into the finished
-    /// manifest one at a time (`CrateInputs::apply`): into the right table,
-    /// never twice, and a name that merely CONTAINS a declared one (the old
-    /// `contains` check skipped `rand` because of `rand_core`) still lands.
-    #[test]
-    fn a_dependency_packages_native_deps_join_the_right_tables() {
-        let mut manifest = build_cargo_toml(GENERATED_CARGO_TOML, &[dep("rand_core", "0.6", None), dep("jni", "0.21", Some(ANDROID))]);
-        for d in [dep("rand", "0.8", None), dep("jni", "0.20", Some(ANDROID)), dep("ndk", "0.9", Some(ANDROID)), dep("objc2", "0.5", Some("cfg(target_os = \"ios\")"))] {
-            insert_cargo_dep(&mut manifest, &d);
-        }
-        let got = deps_of(&manifest);
-        assert!(got.contains(&("dependencies".into(), "rand".into(), "\"0.8\"".into())), "{manifest}");
-        assert!(got.contains(&(ANDROID.into(), "jni".into(), "\"0.21\"".into())), "the first declaration stays:\n{manifest}");
-        assert!(got.contains(&(ANDROID.into(), "ndk".into(), "\"0.9\"".into())), "{manifest}");
-        assert!(got.iter().any(|(t, n, _)| t == "cfg(target_os = \"ios\")" && n == "objc2"), "{manifest}");
-        assert_eq!(got.len(), 5, "{got:?}");
     }
 }

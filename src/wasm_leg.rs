@@ -485,14 +485,41 @@ pub fn infer_module_capturing(
     out: &mut Vec<(String, String, Vec<crate::diagnostic::Diagnostic>)>,
 ) {
     let Some((path, text)) = sources.get(name) else {
-        // Bundled stdlib: compiled in and CI-gated, no user file to blame.
-        // The flag is the module's ORIGIN for E085 (its `@intrinsic`s are
-        // the runtime boundary, not a user declaration) — the entry file's
-        // path is still in `source_file` and must not be judged.
+        // Bundled stdlib: compiled in, no user file. The flag is the module's
+        // ORIGIN for E085 (its `@intrinsic`s are the runtime boundary, not a
+        // user declaration) — the entry file's path is still in
+        // `source_file` and must not be judged.
+        //
+        // Its E006s are reported, against the embedded source. Every
+        // bundled diagnostic used to be dropped ("no user file to blame"),
+        // and that hid a bundled module breaking the effect rule the checker
+        // enforces on everyone (#848: `args.flag`, a plain fn, read argv).
+        // An E006 is context-free once the callee resolves (it reads only
+        // the callee's `effect` marker), so a bundled one is a stdlib bug
+        // and fails the build that reaches it; tests/bundled_module_effect_
+        // isolation_test.rs fails CI before that. The OTHER codes stay
+        // dropped: a bundled module inferred here is not in the context it
+        // was written for, and measured on 2026-10-07 `http` reports 48
+        // errors (its self-qualified `http.*` calls and types) and `json` 1
+        // (`JsonPath`) that are artifacts of that context, not defects. A
+        // cross-module call the checker cannot resolve here (args.almd had no
+        // `import env`, so `env.args` was E003, not E006) is caught by the
+        // context-free rule in scripts/check-cap-effect-consistency.sh.
         let saved_bundled = checker.in_bundled_module;
         checker.in_bundled_module = true;
+        let before = checker.diagnostics.len();
         checker.infer_module(mod_prog, name);
         checker.in_bundled_module = saved_bundled;
+        let file = format!("<bundled stdlib>/{name}.almd");
+        let e006: Vec<crate::diagnostic::Diagnostic> = checker.diagnostics[before..]
+            .iter()
+            .filter(|d| d.level == crate::diagnostic::Level::Error && d.code == Some("E006"))
+            .map(|d| crate::diagnostic::Diagnostic { file: Some(file.clone()), ..d.clone() })
+            .collect();
+        if !e006.is_empty() {
+            let text = crate::stdlib_info::bundled_source(name).unwrap_or("");
+            out.push((file, text.to_string(), e006));
+        }
         return;
     };
     let saved_file = checker.source_file.clone();
