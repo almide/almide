@@ -112,6 +112,9 @@ impl<'a> LowerCtx<'a> {
     /// The IR name of the entry program's fn spelled `name` — its definition
     /// and every call or reference lowered from source (#3483).
     pub(super) fn ir_fn_name(&self, name: Sym) -> Sym {
+        if let Some(synth) = almide_ir::ast_synth_ir_name(name.as_str()) {
+            return synth;
+        }
         if self.escaped_fns.contains(&name) { almide_ir::escape_user_fn_name(name) } else { name }
     }
 
