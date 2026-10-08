@@ -9,7 +9,7 @@
 /// (`cert_poisoned_excluded`, #1146).
 ///
 /// The lift outlines the continuation into a synthesized effect fn
-/// (`effect_cont_synth_*`) whose tail the parent calls with an explicit `!` —
+/// (`__almd_cont_*`) whose tail the parent calls with an explicit `!` —
 /// the err-check arm then holds a flat call, and the loop certifies at the
 /// TOP level of the synthesized fn (the proven `i(…)m` shape). The
 /// branch_lift discipline: no new cert / Coq machinery, just moving the
@@ -162,7 +162,7 @@ fn cl_oracle_says_poisoned(
 
 /// Split the fn-body block at the FIRST qualifying `!`-statement, returning
 /// the synthesized continuation fn (empty when a guard declines). The body's
-/// tail becomes `effect_cont_synth_N(free…)!`.
+/// tail becomes `__almd_cont_N(free…)!`.
 fn cl_lift_top_block(
     body: &mut almide_ir::IrExpr,
     ret_ty: &Ty,
@@ -198,10 +198,8 @@ fn cl_lift_top_block(
 
     let id = *counter;
     *counter = id + 1;
-    // Plain (non-`__`) name for the same reason as `branch_lift_synth_*`: a
-    // `__` prefix would be rewritten to a runtime-intrinsic call by v0
-    // codegen's builtin lowering.
-    let func_name = sym(&format!("effect_cont_synth_{}", id));
+    // In the compiler's `__` fn-name space, which no user fn shares (#3483).
+    let func_name = sym(&format!("__almd_cont_{}", id));
 
     let func_params: Vec<IrParam> = params
         .iter()

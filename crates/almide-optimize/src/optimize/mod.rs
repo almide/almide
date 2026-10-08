@@ -92,7 +92,7 @@ pub fn optimize_program(program: &mut IrProgram) {
     }
 
     // Pass 5a: optional-chain desugar — `p?.f` → a call to a synthesized tail-match
-    // helper (`optional_chain_synth_N`), the shape both backends prove out in every
+    // helper (`__almd_optchain_N`), the shape both backends prove out in every
     // position (bind, call argument, `??` operand). Runs AFTER DCE (only surviving
     // chains synthesize a helper) and BEFORE branch-lift (same shared-cut-point
     // discipline; the produced call is not a branch, so order is for clarity only).
