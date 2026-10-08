@@ -16,7 +16,7 @@ pub(super) struct BoundedParam {
 pub(super) fn mangle_suffix(bindings: &HashMap<String, Ty>) -> String {
     let mut entries: Vec<(&String, &Ty)> = bindings.iter().collect();
     entries.sort_by_key(|(k, _)| (*k).clone());
-    entries.iter().map(|(_, ty)| mangle_ty(ty)).collect::<Vec<_>>().join("_")
+    almide_ir::mono_name::mangle_ty_list(entries.iter().map(|(_, ty)| *ty))
 }
 
 /// The type component of a MODULE-level generic's mono key.
@@ -44,112 +44,14 @@ pub(super) fn module_mono_suffix(bounds: &[BoundedParam], bindings: &HashMap<Str
             .into_iter().collect();
     names.sort();
     names.iter()
-        .map(|n| bindings.get(n).map_or_else(|| "NA".to_string(), mangle_ty))
+        .map(|n| bindings.get(n).map_or_else(|| UNBOUND.to_string(), almide_ir::mono_name::mangle_ty))
         .collect::<Vec<_>>()
-        .join("_")
+        .join("_c")
 }
 
-pub(super) fn mangle_ty(ty: &Ty) -> String {
-    if let Some(name) = mangle_scalar_ty_name(ty) {
-        return name.to_string();
-    }
-    match ty {
-        Ty::Named(name, args) => {
-            // A mangled name is an IDENTIFIER SEGMENT, not a type spelling: a
-            // module-qualified type (`varlib.Pigment`) kept its dot here, and
-            // the consumers disagreed about it — the MIR-side
-            // `user_module_fn_name` replaces dots while the mono call
-            // rewriters do not, so a specialized fn over a dotted type was
-            // called by one spelling and defined under another (an unlinked
-            // wall misread as a registry gap, #1496). Sanitize at the single
-            // mint point every consumer shares.
-            let name = almide_base::names::qualified_ident(name);
-            if args.is_empty() { name }
-            else {
-                let arg_strs: Vec<String> = args.iter().map(mangle_ty).collect();
-                format!("{}_{}", name, arg_strs.join("_"))
-            }
-        }
-        // A structural record is its field names AND types (#3189): keyed by
-        // the sorted names alone, `id({ x: 1, y: "p" })` and `id({ x: 5, y: 6 })`
-        // shared one `id__x_y` and the second call site got the first's
-        // signature (rustc E0308 / a wasm ty-mismatch wall).
-        Ty::Record { fields } if !fields.is_empty() => {
-            let mut sorted: Vec<&(almide_base::intern::Sym, Ty)> = fields.iter().collect();
-            sorted.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
-            let parts: Vec<String> = sorted.iter().map(|(n, t)| format!("{}_{}", n, mangle_ty(t))).collect();
-            format!("Rec{}_{}", fields.len(), parts.join("_"))
-        }
-        Ty::Applied(almide_lang::types::TypeConstructorId::List, args) if args.len() == 1 => format!("List_{}", mangle_ty(&args[0])),
-        Ty::Applied(id, args) => {
-            let name = id.to_string();
-            if args.is_empty() { name } else {
-                let arg_strs: Vec<String> = args.iter().map(mangle_ty).collect();
-                format!("{}_{}", name, arg_strs.join("_"))
-            }
-        }
-        // A TUPLE and a FN type carry their components in the key. Falling to the
-        // `Unknown` catch-all below made every compound-payload instantiation share
-        // ONE key, so two calls at different types collapsed into a single
-        // monomorphized function: `result.filter` at `Result[(Bool, String), String]`
-        // and at `Result[Result[Float, String], String]` both keyed
-        // `Result_Unknown_String`, and the survivor's whole signature — closure
-        // parameter included — was emitted for both call sites (#905). Two SCALAR
-        // instantiations never collided, because scalars have real names; it took a
-        // compound payload to expose the hole.
-        Ty::Tuple(elems) => {
-            let parts: Vec<String> = elems.iter().map(mangle_ty).collect();
-            format!("Tup{}_{}", elems.len(), parts.join("_"))
-        }
-        Ty::Fn { params, ret, is_effect } => {
-            let ps: Vec<String> = params.iter().map(mangle_ty).collect();
-            let eff = if *is_effect { "Eff" } else { "" };
-            format!("{eff}Fn{}_{}_to_{}", params.len(), ps.join("_"), mangle_ty(ret))
-        }
-        // A mono key's ONE invariant is that two DIFFERENT types never share it: the
-        // key decides whether two call sites reuse one specialization, so a collision
-        // emits a single function for both and the second call site's whole signature
-        // — closure parameter included — is wrong. Every arm above yields a distinct
-        // name for a distinct type; anything that reaches here (an empty structural
-        // record, an unhandled constructor) used to collapse to a shared literal
-        // (`"Unknown"`, or `""` for a field-less record — which is how
-        // `result.filter` at `Result[(Bool, String), String]` and at
-        // `Result[Result[Float, String], String]` both keyed `_String` and became one
-        // function, #905). A structural digest keeps the invariant without pretending
-        // to name the type: it is stable within a build, and distinct debug forms give
-        // distinct keys.
-        other => {
-            use std::hash::{Hash, Hasher};
-            let mut h = std::collections::hash_map::DefaultHasher::new();
-            format!("{other:?}").hash(&mut h);
-            format!("Ty{:x}", h.finish())
-        }
-    }
-}
-
-/// Mangled name for a fixed-name scalar `Ty`. Returns `None` for the
-/// structural/compound variants (`Named`, `Record`, `Applied`, ...) that
-/// `mangle_ty` handles itself.
-fn mangle_scalar_ty_name(ty: &Ty) -> Option<&'static str> {
-    Some(match ty {
-        Ty::Int => "Int",
-        Ty::Float => "Float",
-        Ty::Int8 => "Int8",
-        Ty::Int16 => "Int16",
-        Ty::Int32 => "Int32",
-        Ty::UInt8 => "UInt8",
-        Ty::UInt16 => "UInt16",
-        Ty::UInt32 => "UInt32",
-        Ty::UInt64 => "UInt64",
-        Ty::Float32 => "Float32",
-        Ty::String => "String",
-        Ty::Bool => "Bool",
-        Ty::Bytes => "Bytes",
-        Ty::Matrix => "Matrix",
-        Ty::Unit => "Unit",
-        _ => return None,
-    })
-}
+/// The slot of a bounded variable with no binding: `_q` is no type's code
+/// (#3492, `almide_ir::mono_name`).
+const UNBOUND: &str = "_q";
 
 /// Extract the concrete type name from a Ty for protocol method rewriting.
 pub(super) fn ty_to_name(ty: &Ty) -> Option<String> {
@@ -226,9 +128,9 @@ mod tests {
             &bind(&[("A", result_of(Ty::Float)), ("E", Ty::String)]),
         );
         assert_ne!(tuple_site, nested_site, "two payload types shared one specialization");
-        for s in [&tuple_site, &nested_site] {
-            assert!(!s.starts_with('_'), "a binding dropped out of the key: {s:?}");
-        }
+        // Both slots are present: a dropped binding would leave one.
+        assert_eq!(tuple_site, "Tup_lBool_cString_r_cString");
+        assert_eq!(nested_site, "Result_lFloat_cString_r_cString");
     }
 
     /// A function type is a binding like any other: `list.map`-shaped generics
@@ -247,13 +149,13 @@ mod tests {
         assert_ne!(to_bool, to_string);
     }
 
-    /// Scalar bindings keep the names they always had, so this fix does not
-    /// churn the symbols of every existing specialization.
+    /// Scalar bindings keep their plain words; only the separator between
+    /// slots is the structural `_c` (#3492).
     #[test]
     fn scalar_bindings_keep_their_plain_names() {
         assert_eq!(
             module_mono_suffix(&bounds(&["A", "E"]), &bind(&[("A", Ty::Int), ("E", Ty::String)])),
-            "Int_String"
+            "Int_cString"
         );
     }
 
@@ -262,6 +164,6 @@ mod tests {
     #[test]
     fn an_unbound_variable_still_occupies_its_slot() {
         let s = module_mono_suffix(&bounds(&["A", "E"]), &bind(&[("E", Ty::String)]));
-        assert_eq!(s, "NA_String");
+        assert_eq!(s, "_q_cString");
     }
 }

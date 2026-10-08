@@ -652,10 +652,10 @@ fn apply_lambda_fn_ty_wrapper(
 
 fn resolve_call_lambdas(target: &CallTarget, args: &mut Vec<IrExpr>, vt: &mut VarTable) {
     let Some((module, name)) = resolve_call_target_module_method(target) else { return };
-    // Monomorphization rewrites e.g. `fold` → `fold__String_CollapseAcc`.
-    // Strip the `__suffix` so all the lookups below operate on the bare
-    // method name.
-    let bare_name = name.split("__").next().unwrap_or(&name).to_string();
+    // Monomorphization renames e.g. `fold` to its instance
+    // (`almide_ir::mono_instance_name`); read the instance as its generic so
+    // all the lookups below operate on the bare method name.
+    let bare_name = almide_ir::mono_base_or_self(&name).to_string();
     let name = bare_name.as_str();
 
     let Some((source, elem_param_indices)) = resolve_elem_source(module, name) else { return };
