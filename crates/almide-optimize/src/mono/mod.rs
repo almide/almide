@@ -29,7 +29,7 @@ use almide_base::Sym;
 
 use utils::{module_mono_suffix, BoundedParam, MonoKey, ty_contains_typevar};
 use almide_base::intern::sym;
-use discovery::{bind_from_conformances, collect_mono_bindings, discover_instances, discover_instances_in_frontier};
+use discovery::{bind_from_conformances, discover_instances, discover_instances_in_frontier, module_call_bindings, CallSite};
 use specialization::specialize_function;
 use rewrite::rewrite_calls;
 use propagation::propagate_concrete_types;
@@ -174,6 +174,10 @@ struct ModuleGeneric {
     mi: usize,
     fi: usize,
     name: String,
+    /// Every letter of the fn, in declaration order: positional explicit type
+    /// args and the return type bind the ones no param carries (#3494).
+    letters: Vec<String>,
+    ret_ty: Ty,
     bounds: Vec<BoundedParam>,
 }
 
@@ -284,10 +288,15 @@ fn collect_module_generics(program: &IrProgram) -> Vec<ModuleGeneric> {
                         }
                     }
                 }
-                if bounded.is_empty() {
-                    return None;
-                }
-                Some(ModuleGeneric { mi, fi, name: f.name.to_string(), bounds: bounded })
+                // A letter no param carries (`dekode[T](s: String) -> T?`) is
+                // pinned only by the call's explicit type args or its type; it
+                // still keys the instance. Its `param_idx` names no param, so
+                // the args never bind it; `module_call_bindings` does (#3494).
+                let unbound: Vec<String> = gs.iter().map(|g| g.name.to_string())
+                    .filter(|l| !bounded.iter().any(|b| b.type_var == *l)).collect();
+                bounded.extend(unbound.into_iter().map(|type_var| BoundedParam { param_idx: usize::MAX, type_var }));
+                let letters = gs.iter().map(|g| g.name.to_string()).collect();
+                Some(ModuleGeneric { mi, fi, name: f.name.to_string(), letters, ret_ty: f.ret_ty.clone(), bounds: bounded })
             })
         })
         .collect()
@@ -339,14 +348,17 @@ impl almide_ir::visit_mut::IrMutVisitor for Discover<'_> {
     fn visit_expr_mut(&mut self, expr: &mut almide_ir::IrExpr) {
         use almide_ir::{CallTarget, IrExprKind};
         almide_ir::visit_mut::walk_expr_mut(self, expr);
-        if let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &expr.kind {
-            self.record_flattened_call(*name, args);
-            self.record_bare_sibling_call(*name, args);
-        }
-        if let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } =
-            &expr.kind
-        {
-            self.record_module_call(module.as_str(), func.as_str(), args);
+        let IrExprKind::Call { target, args, type_args } = &expr.kind else { return };
+        let site = CallSite { args, type_args, ty: &expr.ty };
+        match target {
+            CallTarget::Named { name } => {
+                self.record_flattened_call(*name, &site);
+                self.record_bare_sibling_call(*name, &site);
+            }
+            CallTarget::Module { module, func, .. } => {
+                self.record_module_call(module.as_str(), func.as_str(), &site);
+            }
+            _ => {}
         }
     }
 }
@@ -357,12 +369,12 @@ impl Discover<'_> {
     /// cell): match the exact flatten spelling per generic (module list + fn name
     /// — no string parsing), so the call site instantiates exactly like a
     /// `Module { m, f }` one.
-    fn record_flattened_call(&mut self, name: Sym, args: &[almide_ir::IrExpr]) {
+    fn record_flattened_call(&mut self, name: Sym, site: &CallSite<'_>) {
         for gi in 0..self.generics.len() {
             if name != self.flat_names[gi] {
                 continue;
             }
-            self.record(gi, args, None);
+            self.record(gi, site, None);
             break;
         }
     }
@@ -372,18 +384,18 @@ impl Discover<'_> {
     /// unlike the bundled stdlib's flattened spelling). Only the CURRENT
     /// module's generics match, so an unrelated same-named generic in another
     /// module can never be instantiated from here.
-    fn record_bare_sibling_call(&mut self, name: Sym, args: &[almide_ir::IrExpr]) {
+    fn record_bare_sibling_call(&mut self, name: Sym, site: &CallSite<'_>) {
         let Some(mi) = self.current_mi else { return };
         for (gi, g) in self.generics.iter().enumerate() {
             if g.mi != mi || g.name != name.as_str() {
                 continue;
             }
-            self.record(gi, args, None);
+            self.record(gi, site, None);
             break;
         }
     }
 
-    fn record_module_call(&mut self, m: &str, f: &str, args: &[almide_ir::IrExpr]) {
+    fn record_module_call(&mut self, m: &str, f: &str, site: &CallSite<'_>) {
         for (gi, g) in self.generics.iter().enumerate() {
             if g.name != f {
                 continue;
@@ -397,7 +409,7 @@ impl Discover<'_> {
             if self.module_names[g.mi] != m {
                 continue;
             }
-            self.record(gi, args, Some((m, f)));
+            self.record(gi, site, Some((m, f)));
             break;
         }
     }
@@ -405,13 +417,13 @@ impl Discover<'_> {
     /// Bind generic `gi`'s type vars from `args` and, if every binding is
     /// concrete, queue the instance. `debug_call` names the call site for
     /// `ALMIDE_MONO_DEBUG`.
-    fn record(&mut self, gi: usize, args: &[almide_ir::IrExpr], debug_call: Option<(&str, &str)>) {
+    fn record(&mut self, gi: usize, site: &CallSite<'_>, debug_call: Option<(&str, &str)>) {
         let g = &self.generics[gi];
-        let bindings = collect_mono_bindings(&g.bounds, args, &self.param_types[gi]);
+        let bindings = module_call_bindings(g, &self.param_types[gi], site);
         let all_concrete = bindings_all_concrete(&bindings);
         if let Some((m, f)) = debug_call {
             if almide_base::env::flag("ALMIDE_MONO_DEBUG") {
-                let atys: Vec<_> = args.iter().map(|a| &a.ty).collect();
+                let atys: Vec<_> = site.args.iter().map(|a| &a.ty).collect();
                 let ptys = &self.param_types[gi];
                 eprintln!(
                     "[mono-debug] {m}.{f} args={atys:?} ptys={ptys:?} \
@@ -449,14 +461,17 @@ impl almide_ir::visit_mut::IrMutVisitor for Rewriter<'_> {
     fn visit_expr_mut(&mut self, expr: &mut almide_ir::IrExpr) {
         use almide_ir::{CallTarget, IrExprKind};
         almide_ir::visit_mut::walk_expr_mut(self, expr);
-        if let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &mut expr.kind {
-            self.rewrite_flattened_call(name, args);
-            self.rewrite_bare_sibling_call(name, args);
-        }
-        if let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } =
-            &mut expr.kind
-        {
-            self.rewrite_module_call(module.as_str(), func, args);
+        let IrExprKind::Call { target, args, type_args } = &mut expr.kind else { return };
+        let site = CallSite { args, type_args, ty: &expr.ty };
+        match target {
+            CallTarget::Named { name } => {
+                self.rewrite_flattened_call(name, &site);
+                self.rewrite_bare_sibling_call(name, &site);
+            }
+            CallTarget::Module { module, func, .. } => {
+                self.rewrite_module_call(module.as_str(), func, &site);
+            }
+            _ => {}
         }
     }
 }
@@ -465,9 +480,9 @@ impl Rewriter<'_> {
     /// The specialized name for generic `gi` at a call site with these args, if
     /// one was minted; `None` when the bindings are not concrete or the instance
     /// was never specialized.
-    fn specialized_name(&self, gi: usize, m: &str, args: &[almide_ir::IrExpr]) -> Option<&String> {
+    fn specialized_name(&self, gi: usize, m: &str, site: &CallSite<'_>) -> Option<&String> {
         let g = &self.generics[gi];
-        let bindings = collect_mono_bindings(&g.bounds, args, &self.param_types[gi]);
+        let bindings = module_call_bindings(g, &self.param_types[gi], site);
         if !bindings_all_concrete(&bindings) {
             return None;
         }
@@ -479,13 +494,13 @@ impl Rewriter<'_> {
     /// rewrite `Named { almide_rt_m_stash }` to the specialized instance's own
     /// flatten spelling (`almide_rt_m_stash__Int`) — the SAME name the module-fn
     /// flattening gives the pushed instance.
-    fn rewrite_flattened_call(&self, name: &mut Sym, args: &[almide_ir::IrExpr]) {
+    fn rewrite_flattened_call(&self, name: &mut Sym, site: &CallSite<'_>) {
         for (gi, g) in self.generics.iter().enumerate() {
             if *name != self.flat_names[gi] {
                 continue;
             }
             let m = &self.module_names[g.mi];
-            if let Some(new_name) = self.specialized_name(gi, m, args) {
+            if let Some(new_name) = self.specialized_name(gi, m, site) {
                 *name = sym(&flat_fn_name(m, new_name));
             }
             break;
@@ -496,27 +511,27 @@ impl Rewriter<'_> {
     /// rewrite `doubled(x)` inside its own module to the bare specialized name
     /// (`doubled__Cell`) — the instance lives in the same module, so the later
     /// module-fn flattening treats it like any sibling call.
-    fn rewrite_bare_sibling_call(&self, name: &mut Sym, args: &[almide_ir::IrExpr]) {
+    fn rewrite_bare_sibling_call(&self, name: &mut Sym, site: &CallSite<'_>) {
         let Some(mi) = self.current_mi else { return };
         for (gi, g) in self.generics.iter().enumerate() {
             if g.mi != mi || g.name != name.as_str() {
                 continue;
             }
             let m = &self.module_names[g.mi];
-            if let Some(new_name) = self.specialized_name(gi, m, args) {
+            if let Some(new_name) = self.specialized_name(gi, m, site) {
                 *name = sym(new_name);
             }
             break;
         }
     }
 
-    fn rewrite_module_call(&self, m: &str, func: &mut Sym, args: &[almide_ir::IrExpr]) {
+    fn rewrite_module_call(&self, m: &str, func: &mut Sym, site: &CallSite<'_>) {
         let f = *func;
         for (gi, g) in self.generics.iter().enumerate() {
             if g.name != f.as_str() || self.module_names[g.mi] != m {
                 continue;
             }
-            if let Some(new_name) = self.specialized_name(gi, m, args) {
+            if let Some(new_name) = self.specialized_name(gi, m, site) {
                 *func = sym(new_name);
             }
             break;
