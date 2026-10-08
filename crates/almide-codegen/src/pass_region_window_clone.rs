@@ -262,7 +262,7 @@ fn binders_in(body: &IrExpr) -> Vec<VarId> {
 
 fn fresh_var(vt: &mut VarTable, old: VarId, twins: &HashMap<Sym, Sym>) -> VarId {
     let info = vt.get(old).clone();
-    vt.alloc(info.name, subst_ty(&info.ty, twins), info.mutability, info.span)
+    vt.alloc_like(old, subst_ty(&info.ty, twins), info.mutability)
 }
 
 fn twin_fn(

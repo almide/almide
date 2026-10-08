@@ -32,8 +32,8 @@ pub(super) fn specialize_function(
     for old in &old_ids {
         if remap.contains_key(old) || globals.contains(old) { continue; }
         let info = vt.get(*old);
-        let new_ty = substitute_ty(&info.ty, bindings);
-        let new_id = vt.alloc(info.name.clone(), new_ty, info.mutability, info.span);
+        let (new_ty, mutability) = (substitute_ty(&info.ty, bindings), info.mutability);
+        let new_id = vt.alloc_like(*old, new_ty, mutability);
         remap.insert(*old, new_id);
     }
 

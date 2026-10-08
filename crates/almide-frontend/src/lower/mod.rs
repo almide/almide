@@ -165,7 +165,7 @@ impl<'a> LowerCtx<'a> {
 
     pub(super) fn define_var(&mut self, name: &str, ty: Ty, mutability: Mutability, span: Option<ast::Span>) -> VarId {
         let s = sym(name);
-        let id = self.var_table.alloc(s, ty, mutability, span);
+        let id = self.var_table.alloc_source(s, ty, mutability, span);
         if let Some(scope) = self.scopes.last_mut() {
             scope.insert(s, id);
         }
