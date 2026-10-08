@@ -668,7 +668,7 @@ fn lower_expr_type_name(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Opti
                 let var_id = if let Some(vid) = ctx.const_param_vars.get(&pname) {
                     *vid
                 } else {
-                    let vid = ctx.var_table.alloc(pname, *param_ty.clone(), Mutability::Let, None);
+                    let vid = ctx.var_table.alloc_source(pname, *param_ty.clone(), Mutability::Let, None);
                     ctx.const_param_vars.insert(pname, vid);
                     vid
                 };
