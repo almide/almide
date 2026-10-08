@@ -49,12 +49,13 @@ fn emit(dir: &Path, env: &[(&str, &str)]) -> Vec<String> {
     // The capture binds only — not the `thread::scope` line that names them.
     String::from_utf8_lossy(&out.stdout).lines()
         .map(|l| l.trim())
-        .filter(|l| l.strip_prefix("let ").map(|r| r.strip_prefix("mut ").unwrap_or(r)).is_some_and(|r| r.starts_with("__fan_cap_")))
+        .filter(|l| l.strip_prefix("let ").map(|r| r.strip_prefix("mut ").unwrap_or(r)).is_some_and(|r| r.starts_with("__almide_ir2_fan_cap_")))
         .map(|l| l.to_string())
         .collect()
 }
 
-/// `(captured var, moved?)` per `__fan_cap_*` bind, in emission order.
+/// `(captured var, moved?)` per `__fan_cap_*` bind, in emission order. The temp
+/// renders in the compiler-temp space as `__almide_ir2_fan_cap_*` (#3333).
 fn binds(lines: &[String]) -> Vec<(String, bool)> {
     lines.iter().map(|l| {
         let rhs = l.split('=').nth(1).unwrap().trim().trim_end_matches(';');
