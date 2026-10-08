@@ -383,7 +383,13 @@ fn lower_call_json_convenience(
     span: Option<ast::Span>,
 ) -> Option<IrExpr> {
     let ast::ExprKind::Member { object, field, .. } = &callee.kind else { return None };
-    let ast::ExprKind::Ident { name: module, .. } = &object.kind else { return None };
+    let ast::ExprKind::Ident { name: written, .. } = &object.kind else { return None };
+    // By RESOLUTION, not spelling (#3493): a local binding, a user module or
+    // a value's field named `encode`/`decode` is an ordinary call.
+    if ctx.lookup_var(written).is_some() || !ctx.env.import_table.resolves_to_stdlib(written, "json") {
+        return None;
+    }
+    let module = "json";
     if field == "encode" && args.len() == 1 {
         let arg_ty = ctx.expr_ty(&args[0]);
         if let Some(encode_fn) = ctx.find_convention_fn(&arg_ty, "encode") {
