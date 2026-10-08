@@ -179,8 +179,8 @@ fn emit_rust(tag: &str, src: &str, env: &[(&str, &str)]) -> String {
 #[test]
 fn a_loop_fresh_capture_binds_by_move_in_the_emitted_rust() {
     let on = emit_rust("lf-on", LOOP_FRESH_CAPTURE, &[]);
-    let moved = on.contains("let __cap_2: String = s;");
-    let cloned = on.contains("let __cap_2: String = s.clone();");
+    let moved = on.contains("let __almide_ir2_cap_2: String = s;");
+    let cloned = on.contains("let __almide_ir2_cap_2: String = s.clone();");
     assert!(moved && !cloned, "the loop-fresh capture must bind by MOVE (moved={moved} cloned={cloned})");
 }
 

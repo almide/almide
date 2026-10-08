@@ -40,5 +40,5 @@ effect fn main() -> Unit = {
     let rust = String::from_utf8(emitted.stdout).expect("UTF8");
     let row = rust.split("pub fn row(").nth(1).expect("row function")
         .split("\npub fn ").next().expect("body");
-    assert!(!row.contains("__cap_"), "scalar fold still clones its capture: {row}");
+    assert!(!row.contains("__almide_ir2_cap_"), "scalar fold still clones its capture: {row}");
 }

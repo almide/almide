@@ -127,7 +127,7 @@ fn an_invariant_read_no_mut_call_touches_is_still_hoisted() {
     for name in ["bare", "method", "let_bound", "while_cond"] {
         let (before, inside) = split_at_loop(&out, name);
         assert!(
-            before.contains("__licm_") && before.contains("cfg.scale"),
+            before.contains("__almide_ir2_licm_") && before.contains("cfg.scale"),
             "{name}: `cfg.scale * cfg.base` is loop-invariant and must still be hoisted:\n{before}{inside}"
         );
     }

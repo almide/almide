@@ -208,8 +208,8 @@ impl<'a> RenderContext<'a> {
 
 
     pub(crate) fn var_name(&self, id: VarId) -> String {
-        let name = &self.var_table.get(id).name;
-        escape_rust_ident(name.as_str(), self.templates)
+        let info = self.var_table.get(id);
+        if info.synthetic { helpers::synthetic_ident(info.name.as_str()) } else { escape_rust_ident(info.name.as_str(), self.templates) }
     }
 
     /// The Rust spelling of a record / variant-payload field name (#2652).
@@ -304,7 +304,7 @@ fn render_fn_params_str(fn_ctx: &RenderContext, func: &IrFunction) -> String {
             // other emission site (var_name, fn call, fn definition), so a
             // param named e.g. `self`/`box`/`move` matches at its binding and
             // every use within the body (#659's rule, applied here too).
-            let mut param_name = escape_rust_ident(p.name.as_str(), fn_ctx.templates);
+            let mut param_name = fn_ctx.param_ident(p);
             // Mutable params (e.g. from TCO pass) — let the template decide
             // whether to emit a `mut` prefix via the {mut_prefix} variable.
             let mut_prefix = if fn_ctx.var_table.get(p.var).mutability == Mutability::Var {
@@ -335,7 +335,7 @@ fn render_fn_params_str(fn_ctx: &RenderContext, func: &IrFunction) -> String {
                 }
             };
             fn_ctx.templates.render_with("fn_param", None, &[], &[("name", param_name.as_str()), ("type", type_s.as_str())])
-                .unwrap_or_else(|| format!("{}: {}", p.name, type_s))
+                .unwrap_or_else(|| format!("{}: {}", param_name, type_s))
         })
         .collect::<Vec<_>>()
         .join(", ")
@@ -357,7 +357,7 @@ fn unwrap_block_tail_var(fn_ctx: &RenderContext, e: &IrExpr, expr_str: &mut Stri
         if let IrExprKind::Var { id } = &inner.kind {
             if fn_ctx.ann.is_rc_cow(id) {
                 // Re-render with unwrap: Ok(var.into_inner())
-                let var_name = fn_ctx.var_table.get(*id).name.to_string();
+                let var_name = fn_ctx.var_name(*id);
                 *expr_str = format!("Ok({}.into_inner())", var_name);
             }
         }

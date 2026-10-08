@@ -56,10 +56,10 @@ const SRC: &str = "type Address: Codec = { city: String }\n\
 fn derived_decode_takes_its_input_by_reference() {
     if !tool_available() { eprintln!("skipping: almide binary not available"); return; }
     let rust = emitted(SRC, "sig");
-    assert!(rust.contains("pub fn User_decode(_v: &AlmideValue)"), "derived decode must borrow its AlmideValue input:\n{}", grep(&rust, "_decode("));
-    assert!(rust.contains("pub fn Address_decode(_v: &AlmideValue)"), "nested record decode must borrow too:\n{}", grep(&rust, "_decode("));
+    assert!(rust.contains("pub fn User_decode(__almide_ir1_v: &AlmideValue)"), "derived decode must borrow its AlmideValue input:\n{}", grep(&rust, "_decode("));
+    assert!(rust.contains("pub fn Address_decode(__almide_ir1_v: &AlmideValue)"), "nested record decode must borrow too:\n{}", grep(&rust, "_decode("));
     assert!(rust.contains("User_decode(&v)"), "the call site hands over a borrow, not a copy:\n{}", grep(&rust, "User_decode("));
-    assert!(rust.contains("Address_decode((almide_rt_value_field_ref_at(_v, \"address\", 2))?)"), "a nested field decodes a BORROW into the object — no copy of the field:\n{}", grep(&rust, "Address_decode("));
+    assert!(rust.contains("Address_decode((almide_rt_value_field_ref_at(__almide_ir1_v, \"address\", 2))?)"), "a nested field decodes a BORROW into the object — no copy of the field:\n{}", grep(&rust, "Address_decode("));
 }
 
 #[test]
@@ -67,9 +67,9 @@ fn every_field_read_is_a_borrowed_lookup() {
     if !tool_available() { eprintln!("skipping: almide binary not available"); return; }
     let rust = emitted(SRC, "field-ref");
     let decode = rust.lines().skip_while(|l| !l.starts_with("pub fn User_decode(")).take_while(|l| !l.starts_with('}')).collect::<Vec<_>>().join("\n");
-    assert!(decode.contains("almide_rt_value_as_string((almide_rt_value_field_ref_at(_v, \"name\", 0))?)"), "a primitive field is read straight off the borrowed lookup:\n{decode}");
-    assert!(decode.contains("almide_rt___decode_list_string((almide_rt_value_field_ref_at(_v, \"tags\", 1))?)"), "a List[String] field hands the primitive list decoder a borrow:\n{decode}");
-    assert!(!decode.contains("almide_rt_value_field(_v"), "an owned field lookup survived in the decode body — that is a copy nobody needs:\n{decode}");
+    assert!(decode.contains("almide_rt_value_as_string((almide_rt_value_field_ref_at(__almide_ir1_v, \"name\", 0))?)"), "a primitive field is read straight off the borrowed lookup:\n{decode}");
+    assert!(decode.contains("almide_rt___decode_list_string((almide_rt_value_field_ref_at(__almide_ir1_v, \"tags\", 1))?)"), "a List[String] field hands the primitive list decoder a borrow:\n{decode}");
+    assert!(!decode.contains("almide_rt_value_field(__almide_ir1_v"), "an owned field lookup survived in the decode body — that is a copy nobody needs:\n{decode}");
 }
 
 /// Slot-indexed lookup (#1679, `DecodeSlotHintPass`): every field a derived
@@ -84,11 +84,11 @@ fn derived_field_reads_carry_their_declaration_slot() {
     let rust = emitted(SRC, "slot");
     let decode = rust.lines().skip_while(|l| !l.starts_with("pub fn User_decode(")).take_while(|l| !l.starts_with('}')).collect::<Vec<_>>().join("\n");
     for (key, slot) in [("name", 0), ("tags", 1), ("address", 2), ("homes", 3)] {
-        assert!(decode.contains(&format!("(almide_rt_value_field_ref_at(_v, \"{key}\", {slot}))?")), "field `{key}` must carry slot {slot}:\n{decode}");
+        assert!(decode.contains(&format!("(almide_rt_value_field_ref_at(__almide_ir1_v, \"{key}\", {slot}))?")), "field `{key}` must carry slot {slot}:\n{decode}");
     }
-    assert!(!decode.contains("almide_rt_value_field_ref(_v"), "a derived field read without its slot hint:\n{decode}");
+    assert!(!decode.contains("almide_rt_value_field_ref(__almide_ir1_v"), "a derived field read without its slot hint:\n{decode}");
     let address = rust.lines().skip_while(|l| !l.starts_with("pub fn Address_decode(")).take_while(|l| !l.starts_with('}')).collect::<Vec<_>>().join("\n");
-    assert!(address.contains("(almide_rt_value_field_ref_at(_v, \"city\", 0))?"), "the nested record's own decode is hinted too:\n{address}");
+    assert!(address.contains("(almide_rt_value_field_ref_at(__almide_ir1_v, \"city\", 0))?"), "the nested record's own decode is hinted too:\n{address}");
 
     // A hand-written lookup on a Value stays on the plain path — the hint is
     // the derive's knowledge of the declaration, not a property of `value.field`.
@@ -108,10 +108,10 @@ fn derived_field_reads_carry_their_declaration_slot() {
 fn list_and_option_drivers_take_the_by_reference_twin() {
     if !tool_available() { eprintln!("skipping: almide binary not available"); return; }
     let rust = emitted(SRC, "drivers");
-    assert!(rust.contains("almide_rt_value_decode_list_ref((almide_rt_value_field_ref_at(_v, \"homes\", 3))?, Address_decode)"),
+    assert!(rust.contains("almide_rt_value_decode_list_ref((almide_rt_value_field_ref_at(__almide_ir1_v, \"homes\", 3))?, Address_decode)"),
         "a List[Record] field must route to the `&AlmideValue` list driver with the by-ref element decoder:\n{}", grep(&rust, "decode_list"));
     assert!(!rust.contains("almide_rt_value_decode_list(&"), "the by-value list driver must never receive a borrow:\n{}", grep(&rust, "decode_list"));
-    assert!(rust.contains("__decode_option_Address(_v: &AlmideValue, _key: String)"), "the derived option worker borrows its AlmideValue too:\n{}", grep(&rust, "__decode_option_Address"));
+    assert!(rust.contains("__decode_option_Address(__almide_ir1_v: &AlmideValue, __almide_ir1_key: String)"), "the derived option worker borrows its AlmideValue too:\n{}", grep(&rust, "__decode_option_Address"));
 }
 
 /// #2052: the primitive option/default helpers (`__decode_option_<prim>`,
@@ -136,23 +136,23 @@ fn primitive_option_and_default_helpers_borrow_the_document() {
     if !tool_available() { eprintln!("skipping: almide binary not available"); return; }
     let rust = emitted(OPT_MATRIX_SRC, "opt-matrix");
     for decode in ["WithDefault_decode", "Plain_decode", "Rec_decode"] {
-        assert!(rust.contains(&format!("pub fn {decode}(_v: &AlmideValue)")),
+        assert!(rust.contains(&format!("pub fn {decode}(__almide_ir1_v: &AlmideValue)")),
             "every derived decode borrows its document, defaulted fields or not (#2052):\n{}", grep(&rust, "_decode("));
     }
-    assert!(rust.contains("almide_rt_value_decode_option_custom_ref(_v, \"a\".to_string(), WithDefault_decode)"),
+    assert!(rust.contains("almide_rt_value_decode_option_custom_ref(__almide_ir1_v, \"a\".to_string(), WithDefault_decode)"),
         "an Option[record-with-default] field routes to the by-reference option driver:\n{}", grep(&rust, "decode_option_custom"));
-    assert!(rust.contains("almide_rt_value_decode_option_custom_ref(_v, \"b\".to_string(), Plain_decode)"),
+    assert!(rust.contains("almide_rt_value_decode_option_custom_ref(__almide_ir1_v, \"b\".to_string(), Plain_decode)"),
         "an Option[record] field routes to the by-reference option driver:\n{}", grep(&rust, "decode_option_custom"));
     assert!(!rust.contains("almide_rt_value_decode_option_custom("),
         "the by-value option driver must never be handed a borrowed document:\n{}", grep(&rust, "decode_option_custom"));
-    assert!(rust.contains("almide_rt___decode_option_int(_v, \"d\".to_string())"),
+    assert!(rust.contains("almide_rt___decode_option_int(__almide_ir1_v, \"d\".to_string())"),
         "a primitive Option field hands the helper the borrowed document, not a clone:\n{}", grep(&rust, "__decode_option_int"));
-    assert!(rust.contains("almide_rt___decode_default_string(_v, \"tag\".to_string()"),
+    assert!(rust.contains("almide_rt___decode_default_string(__almide_ir1_v, \"tag\".to_string()"),
         "a defaulted scalar field hands the helper the borrowed document:\n{}", grep(&rust, "__decode_default_string"));
-    assert!(rust.contains("almide_rt___decode_default_list_int(_v, \"xs\".to_string()"),
+    assert!(rust.contains("almide_rt___decode_default_list_int(__almide_ir1_v, \"xs\".to_string()"),
         "a defaulted list field hands the helper the borrowed document:\n{}", grep(&rust, "__decode_default_list_int"));
-    assert!(!rust.contains("_v.clone()"),
-        "no whole-document clone survives in a derived decode:\n{}", grep(&rust, "_v.clone()"));
+    assert!(!rust.contains("__almide_ir1_v.clone()"),
+        "no whole-document clone survives in a derived decode:\n{}", grep(&rust, "__almide_ir1_v.clone()"));
 }
 
 /// The lines of `rust` mentioning `needle` — a failure names the shapes that

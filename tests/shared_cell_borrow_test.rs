@@ -91,7 +91,7 @@ fn match_subject_read_is_hoisted_before_the_arms() {
     // The subject read is hoisted to its own bind (guard dies at the `;`),
     // then the arms take their mut borrows without overlap.
     assert!(
-        out.contains("__scb_subj"),
+        out.contains("__almide_ir2_scb_subj"),
         "expected the hoisted match subject bind:\n{out}"
     );
     assert!(

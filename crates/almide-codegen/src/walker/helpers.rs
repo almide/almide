@@ -5,6 +5,34 @@ use almide_ir::*;
 use almide_lang::types::Ty;
 use super::RenderContext;
 
+/// The sub-space of the reserved `__almide_` prefix ([`super::HYGIENE_PREFIX`])
+/// that compiler-temp IR vars render in (#3333). No template-spelled binder
+/// starts with it (pinned by a test), and no user name reaches `__almide_` at all.
+pub(crate) const SYNTHETIC_VAR_PREFIX: &str = "__almide_ir";
+
+/// The Rust spelling of a compiler-temp var: `__almide_ir{k}_{rest}`, where
+/// `k` counts the name's leading underscores. Injective (k and rest give the
+/// name back), and free of the inner `__` runs rustc's snake-case lint rejects.
+pub(crate) fn synthetic_ident(name: &str) -> String {
+    let rest = name.trim_start_matches('_');
+    format!("{SYNTHETIC_VAR_PREFIX}{}_{rest}", name.len() - rest.len())
+}
+
+impl RenderContext<'_> {
+    /// A fn param's Rust spelling: a source param keeps its escaped name, a
+    /// temp param (a synthesized fn's) is spelled like every read of its var.
+    pub(crate) fn param_ident(&self, p: &IrParam) -> String {
+        if self.var_table.get(p.var).synthetic { self.var_name(p.var) } else { super::escape_rust_ident(p.name.as_str(), self.templates) }
+    }
+
+    /// `id` is a compiler temp whose IR name starts with `prefix` — never a
+    /// user binding that merely spells it (`var __cap_0 = x`, #3333).
+    pub(crate) fn is_temp_named(&self, id: VarId, prefix: &str) -> bool {
+        let info = self.var_table.get(id);
+        info.synthetic && info.name.as_str().starts_with(prefix)
+    }
+}
+
 /// Try to render via template, fallback to default string.
 pub fn template_or(ctx: &RenderContext, construct: &str, attrs: &[&str], fallback: &str) -> String {
     ctx.templates.render_with(construct, None, attrs, &[])
@@ -248,5 +276,37 @@ pub fn render_type_field_fn(ctx: &RenderContext, ty: &Ty) -> String {
         // Other Fn-containing shapes (e.g. a user generic over a closure) are rare —
         // fall back to render_type, which at least keeps the container correct.
         _ => super::types::render_type(ctx, ty),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{synthetic_ident, SYNTHETIC_VAR_PREFIX};
+
+    #[test]
+    fn synthetic_idents_are_injective_and_snake_case() {
+        let names = ["x", "_x", "__x", "x_", "__tco_tmp_a", "_fn_arg0", "v0", "__cap_12"];
+        let rendered: std::collections::HashSet<String> = names.iter().map(|n| synthetic_ident(n)).collect();
+        assert_eq!(rendered.len(), names.len());
+        assert_eq!(synthetic_ident("__tco_tmp_a"), "__almide_ir2_tco_tmp_a");
+        assert!(rendered.iter().all(|r| !r.trim_start_matches('_').contains("__")));
+    }
+
+    /// The temp sub-space is the compiler's alone: no template or walker
+    /// literal spells a binder in it (#3333). A binder added there would
+    /// share an identifier with a temp.
+    #[test]
+    fn no_spelled_binder_enters_the_temp_space() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut stack = vec![root.join("src"), root.join("templates")];
+        while let Some(dir) = stack.pop() {
+            for entry in std::fs::read_dir(&dir).expect("read_dir") {
+                let path = entry.expect("entry").path();
+                if path.is_dir() { stack.push(path); continue; }
+                if path.ends_with("walker/helpers.rs") { continue; }
+                let text = std::fs::read_to_string(&path).unwrap_or_default();
+                assert!(!text.contains(SYNTHETIC_VAR_PREFIX), "{} spells the temp space", path.display());
+            }
+        }
     }
 }
