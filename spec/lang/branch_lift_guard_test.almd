@@ -1,7 +1,7 @@
 // #3451: a `guard … else err(..)` inside a let-bound heap branch in a loop.
 //
 // `branch_lift` outlines an in-loop let-bound heap `if`/`match` into a
-// payload-returning helper `fn branch_lift_synth_N(..) -> String`. A guard's
+// payload-returning helper `fn __almd_lift_N(..) -> String`. A guard's
 // `else err(..)` lowers to an early `return Err(..)` that targets the
 // ENCLOSING `T!` fn, so inside the helper it had no channel out: rustc E0308
 // natively. The lift now declines a branch that holds a guard (or a bare

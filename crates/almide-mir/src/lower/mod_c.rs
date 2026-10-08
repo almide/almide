@@ -437,7 +437,7 @@ fn unit_tail_result_abi_ty(func: &IrFunction, body: &IrExpr) -> Option<Ty> {
 /// fires it — the rewrite's injected owned-copy concats then become MIR ops with
 /// no counted IR node (a false `mir > ir` breach). The second retype's
 /// registry-independent arm (a CAN-ERR declared-Unit effect fn ∉ NEVER_ERR) is
-/// what the first alone misses: a `effect_cont_synth_*` continuation is
+/// what the first alone misses: a `__almd_cont_*` continuation is
 /// synthesized AFTER the registry fixpoint, so it sits in NEITHER set and the
 /// lowering wraps it through exactly that arm (the fs_streaming false breach).
 pub fn abi_effective_body(func: &IrFunction) -> Option<IrExpr> {

@@ -1,5 +1,5 @@
 // Optional chaining `p?.f` over SCALAR record fields — the shared-pipeline
-// optional_chain_synth helper route (crates/almide-optimize/src/optimize/
+// __almd_optchain helper route (crates/almide-optimize/src/optimize/
 // optional_chain.rs): some AND none paths, in bind position, call-argument
 // position, and over a call subject. All shapes run the wasm leg (previously
 // the "match over an UNTRACKED subject" wall). Heap (String) fields keep the

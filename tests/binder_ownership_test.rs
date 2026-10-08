@@ -119,9 +119,9 @@ fn main() -> Unit = {
     assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "2");
     let emitted = Command::new(env!("CARGO_BIN_EXE_almide")).arg(&src).arg("--target").arg("rust").output().expect("emit");
     let rust = String::from_utf8_lossy(&emitted.stdout);
-    let helper: Vec<&str> = rust.lines().filter(|l| l.contains("branch_lift_synth_")).collect();
+    let helper: Vec<&str> = rust.lines().filter(|l| l.contains("__almd_lift_")).collect();
     assert!(!helper.is_empty(), "the in-loop heap branch is lifted:\n{rust}");
-    assert!(helper.iter().any(|l| l.starts_with("pub fn branch_lift_synth_0(acc: Vec<R>, t: String)")), "the helper's params are plain owned values, not `mut` echoes of the loop's state:\n{}", helper.join("\n"));
-    assert!(helper.iter().any(|l| l.contains("branch_lift_synth_0(acc.clone(), t)")), "the loop binder moves into the call — its last use in the iteration:\n{}", helper.join("\n"));
+    assert!(helper.iter().any(|l| l.starts_with("pub fn __almd_lift_0(acc: Vec<R>, t: String)")), "the helper's params are plain owned values, not `mut` echoes of the loop's state:\n{}", helper.join("\n"));
+    assert!(helper.iter().any(|l| l.contains("__almd_lift_0(acc.clone(), t)")), "the loop binder moves into the call — its last use in the iteration:\n{}", helper.join("\n"));
     let _ = std::fs::remove_dir_all(&dir);
 }
