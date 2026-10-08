@@ -307,7 +307,8 @@ fn extract_functions(program: &IrProgram, cx: &ExtractCtx) -> Vec<FunctionExport
             (resolve_ty(&func.ret_ty, &record_names, &variant_names), None)
         };
 
-        let info = doc_info.get(&func.name.to_string());
+        let name = user_fn_source_name(func.name.as_str()).to_string(); // #3483: an escaped entry fn
+        let info = doc_info.get(&name);
         let import = func.extern_attrs.iter()
             .find(|a| a.target.as_str() == "wasm")
             .map(|a| ImportRef {
@@ -315,7 +316,7 @@ fn extract_functions(program: &IrProgram, cx: &ExtractCtx) -> Vec<FunctionExport
                 name: a.function.to_string(),
             });
         functions.push(FunctionExport {
-            name: func.name.to_string(),
+            name,
             params: func.params.iter().map(|p| ParamExport {
                 name: p.name.to_string(),
                 ty: resolve_ty(&p.ty, &record_names, &variant_names),
