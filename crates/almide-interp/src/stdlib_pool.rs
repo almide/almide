@@ -39,7 +39,7 @@ use std::sync::OnceLock;
 use almide_base::intern::{sym, Sym};
 use almide_frontend::canonicalize;
 use almide_frontend::check::Checker;
-use almide_frontend::lower::lower_program;
+use almide_frontend::lower::lower_stdlib_program;
 use almide_ir::IrFunction;
 use almide_lang::lexer::Lexer;
 use almide_lang::parser::Parser;
@@ -140,7 +140,7 @@ fn lower_registry_source(source: &str, module: Option<&str>) -> Option<Vec<IrFun
         if diags.iter().any(|d| d.level == almide_frontend::diagnostic::Level::Error) {
             return None;
         }
-        let ir = lower_program(&prog, &checker.env, &checker.type_map);
+        let ir = lower_stdlib_program(&prog, &checker.env, &checker.type_map);
         Some(ir.functions)
     })
     .ok()

@@ -270,13 +270,24 @@ impl<'a> LowerCtx<'a> {
 
 // ── Public API ──────────────────────────────────────────────────
 
+/// Lower an entry program. Its fns spelled in the compiler's `__` fn-name
+/// space are escaped (#3483) — unless the entry is a bundled stdlib module
+/// compiled on its own, whose `__` fns ARE that space.
 pub fn lower_program(prog: &ast::Program, env: &TypeEnv, type_map: &TypeMap) -> IrProgram {
-    lower_program_with_prefix(prog, env, type_map, None)
+    let escaped = if env.entry_bundled_module.is_none() { escaped_entry_fns(prog) } else { Default::default() };
+    lower_program_with_prefix(prog, env, type_map, None, escaped)
 }
 
-fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &TypeMap, module_prefix: Option<&str>) -> IrProgram {
+/// Lower a stdlib source (a self-host registry body) as an entry program,
+/// keeping its `__` fns — the compiler's own helpers — under their names.
+pub fn lower_stdlib_program(prog: &ast::Program, env: &TypeEnv, type_map: &TypeMap) -> IrProgram {
+    lower_program_with_prefix(prog, env, type_map, None, Default::default())
+}
+
+fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &TypeMap, module_prefix: Option<&str>, escaped_fns: std::collections::HashSet<Sym>) -> IrProgram {
     let mut ctx = LowerCtx::new(env, type_map);
     ctx.current_module = module_prefix.map(sym);
+    ctx.escaped_fns = escaped_fns;
 
     register_cross_package_top_lets(&mut ctx, env);
     collect_type_conventions(&mut ctx, prog);
@@ -288,9 +299,6 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
     let mut top_lets = Vec::new();
     let mut type_decls = Vec::new();
 
-    if module_prefix.is_none() {
-        ctx.escaped_fns = escaped_entry_fns(prog);
-    }
     preregister_top_lets(&mut ctx, prog, module_prefix);
     lower_decls(&mut ctx, prog, module_prefix, &mut functions, &mut top_lets, &mut type_decls);
     append_auto_derives(&mut ctx, &type_decls, &mut functions);
