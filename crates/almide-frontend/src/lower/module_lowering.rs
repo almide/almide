@@ -445,7 +445,7 @@ fn lower_fn(ctx: &mut LowerCtx, decl: &FnToLower<'_>) -> IrFunction {
     let mutated_params = resolve_mutated_params(params, attrs);
 
     IrFunction {
-        name: sym(name), params: ir_params, ret_ty, body: ir_body,
+        name: ctx.ir_fn_name(sym(name)), params: ir_params, ret_ty, body: ir_body,
         is_effect, is_test: false,
         generics: stripped_generics, extern_attrs: extern_attrs.to_vec(),
         export_attrs: export_attrs.to_vec(),

@@ -725,14 +725,14 @@ fn lower_expr_ident(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<c
                 }).collect();
                 let ret_ty = ret.as_ref().clone();
                 let body = ctx.mk(IrExprKind::Call {
-                    target: CallTarget::Named { name: sym(name) },
+                    target: CallTarget::Named { name: ctx.ir_fn_name(sym(name)) },
                     args: call_args, type_args: vec![],
                 }, ret_ty, span);
                 ctx.mk(IrExprKind::Lambda {
                     params, body: Box::new(body), lambda_id: None,
                 }, ty, span)
             } else if ctx.env.functions.contains_key(&sym(name)) {
-                ctx.mk(IrExprKind::FnRef { name: sym(name) }, ty, span)
+                ctx.mk(IrExprKind::FnRef { name: ctx.ir_fn_name(sym(name)) }, ty, span)
             } else {
                 ctx.mk(IrExprKind::Var { id: VarId(0) }, ty, span) // error recovery
             }

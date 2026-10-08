@@ -94,6 +94,7 @@ pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, call: CallArgs<
     }
 
     let ty = call_result_ty(&target, ty);
+    let target = ctx.ir_call_target(target);
     ctx.mk(IrExprKind::Call { target, args: ir_args, type_args: ta }, ty, span)
 }
 
