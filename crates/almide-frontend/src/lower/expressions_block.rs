@@ -202,11 +202,13 @@ fn lower_pipe(ctx: &mut LowerCtx, left: &ast::Expr, right: &ast::Expr, ty: Ty, s
                     ctx.env.functions.get(name).map(|f| f.ret.clone()).unwrap_or(ty)
                 } else { ty }
             } else { ty };
+            let target = ctx.ir_call_target(target);
             ctx.mk(IrExprKind::Call { target, args: all_args, type_args: ta }, resolved_ty, span)
         }
         ast::ExprKind::Ident { .. } | ast::ExprKind::Member { .. } => {
             let ir_left = lower_expr(ctx, left);
             let target = lower_call_target(ctx, right);
+            let target = ctx.ir_call_target(target);
             ctx.mk(IrExprKind::Call { target, args: vec![ir_left], type_args: vec![] }, ty, span)
         }
         // `a |> (n) => body` — INLINE the immediately-applied lambda to `{ let n = a; body }`.

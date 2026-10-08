@@ -292,6 +292,40 @@ pub struct IrFunction {
 /// All downstream passes see a pre-normalized, unique `func.name`.
 pub const TEST_NAME_PREFIX: &str = "__test_almd_";
 
+/// #3483: the prefix a user-declared fn's IR name gets when its source name
+/// falls in the compiler's fn-name space (see [`is_reserved_fn_name`]).
+///
+/// Every fn the compiler synthesizes (`__almd_scoped_N`, `__lambda_*`,
+/// `__test_almd_*`, the derive helpers, the stdlib-internal `__encode_*` /
+/// `__decode_*` helpers, …) is named in the `__` space, and passes recognise
+/// them there. Lowering renames a user fn spelled into that space — and, to
+/// keep the mapping injective, one spelled into this escape space — so no
+/// user fn shares an IR name with a synthesized one and no `__`-keyed decision
+/// can fire on user code. The rename is internal: the source name stays the
+/// user-visible one ([`user_fn_source_name`]).
+pub const USER_FN_ESCAPE: &str = "almide_fn_";
+
+/// Does a user fn named `name` need [`USER_FN_ESCAPE`]?
+pub fn is_reserved_fn_name(name: &str) -> bool {
+    name.starts_with("__") || name.starts_with(USER_FN_ESCAPE)
+}
+
+/// The IR name of a user-declared fn spelled `name` (#3483).
+pub fn escape_user_fn_name(name: almide_base::intern::Sym) -> almide_base::intern::Sym {
+    if is_reserved_fn_name(name.as_str()) {
+        almide_base::intern::sym(&format!("{USER_FN_ESCAPE}{}", name.as_str()))
+    } else {
+        name
+    }
+}
+
+/// The source spelling of an IR fn name — the inverse of
+/// [`escape_user_fn_name`]. Only an escaped user fn's IR name starts with
+/// [`USER_FN_ESCAPE`]; every other name comes back unchanged.
+pub fn user_fn_source_name(name: &str) -> &str {
+    name.strip_prefix(USER_FN_ESCAPE).unwrap_or(name)
+}
+
 /// #1997: the `IrFunction.attrs` marker lowering writes on a `scoped fn`.
 /// A `:` is not an identifier character, so no source attribute can forge it.
 pub const SCOPED_FN_ATTR: &str = "scoped:fn";

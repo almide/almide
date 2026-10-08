@@ -102,7 +102,8 @@ impl HostSurface {
     pub(crate) fn of(program: &IrProgram) -> Self {
         let mut s = HostSurface::default();
         for f in &program.functions {
-            let name = f.name.as_str();
+            // The source spelling: an entry fn's IR name may be escaped (#3483).
+            let name = almide_ir::user_fn_source_name(f.name.as_str());
             let sig = || HostFn {
                 name: name.to_string(),
                 params: f.params.iter().map(|p| (p.name.as_str().to_string(), p.ty.clone())).collect(),

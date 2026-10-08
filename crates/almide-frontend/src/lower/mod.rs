@@ -78,6 +78,10 @@ pub struct LowerCtx<'a> {
     pub synthesized_fns: Vec<almide_ir::IrFunction>,
     /// Counter for synthesized fan.bounded function names.
     pub bounded_counter: u32,
+    /// #3483: the source names of the entry program's fns whose IR name is
+    /// escaped out of the compiler's `__` fn-name space
+    /// ([`almide_ir::escape_user_fn_name`]); empty for a module.
+    escaped_fns: std::collections::HashSet<Sym>,
 }
 
 impl<'a> LowerCtx<'a> {
@@ -101,6 +105,23 @@ impl<'a> LowerCtx<'a> {
             annotated_result_vars: std::collections::HashSet::new(),
             synthesized_fns: Vec::new(),
             bounded_counter: 0,
+            escaped_fns: std::collections::HashSet::new(),
+        }
+    }
+
+    /// The IR name of the entry program's fn spelled `name` — its definition
+    /// and every call or reference lowered from source (#3483).
+    pub(super) fn ir_fn_name(&self, name: Sym) -> Sym {
+        if self.escaped_fns.contains(&name) { almide_ir::escape_user_fn_name(name) } else { name }
+    }
+
+    /// A call target resolved from source, with its fn named as
+    /// [`Self::ir_fn_name`] names it. Synthesized targets are built directly
+    /// and never pass through here.
+    pub(super) fn ir_call_target(&self, target: CallTarget) -> CallTarget {
+        match target {
+            CallTarget::Named { name } => CallTarget::Named { name: self.ir_fn_name(name) },
+            other => other,
         }
     }
 
@@ -264,6 +285,9 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
     let mut top_lets = Vec::new();
     let mut type_decls = Vec::new();
 
+    if module_prefix.is_none() {
+        ctx.escaped_fns = escaped_entry_fns(prog);
+    }
     preregister_top_lets(&mut ctx, prog, module_prefix);
     lower_decls(&mut ctx, prog, module_prefix, &mut functions, &mut top_lets, &mut type_decls);
     append_auto_derives(&mut ctx, &type_decls, &mut functions);
@@ -277,6 +301,20 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
 }
 
 include!("effect_fn_types.rs");
+
+/// #3483: the entry program's fns spelled into the compiler's fn-name space.
+/// A binding to a foreign symbol (`@extern`, `@inline_rust`,
+/// `@wasm_intrinsic`) keeps its spelling — the name is the binding.
+fn escaped_entry_fns(prog: &ast::Program) -> std::collections::HashSet<Sym> {
+    let binds_foreign = |attrs: &[ast::Attribute]| {
+        attrs.iter().any(|a| matches!(a.name.as_str(), "inline_rust" | "wasm_intrinsic"))
+    };
+    prog.decls.iter().filter_map(|d| match d {
+        ast::Decl::Fn { name, extern_attrs, attrs, .. }
+            if almide_ir::is_reserved_fn_name(name.as_str()) && extern_attrs.is_empty() && !binds_foreign(attrs) => Some(*name),
+        _ => None,
+    }).collect()
+}
 
 // Register cross-package top-level lets that weren't in register_decls
 // (dependency packages populate env.top_lets during project fetch).
@@ -531,7 +569,9 @@ fn build_ir_program(mut ctx: LowerCtx, functions: Vec<IrFunction>, top_lets: Vec
 
     let mut functions = functions;
     let mut effect_fn_names = effect_fn_names;
-    for f in &ctx.synthesized_fns {
+    // A synthesized fn, and a user fn under its escaped IR name (#3483), are
+    // absent from the TypeEnv's source-keyed table.
+    for f in functions.iter().chain(&ctx.synthesized_fns) {
         if f.is_effect {
             effect_fn_names.insert(f.name);
         }
@@ -574,7 +614,7 @@ fn finalize_ir_program(program: &mut IrProgram, env: &TypeEnv, annotated_result_
                 }
                 (None, format!("{}.{}", module.as_str(), func.as_str()))
             }
-            CallTarget::Named { name } => (Some(name.as_str()), name.as_str().to_string()),
+            CallTarget::Named { name } => (Some(name.as_str()), almide_ir::user_fn_source_name(name.as_str()).to_string()),
             _ => return None,
         };
         key.and_then(|k| own.get(k).cloned()).or_else(|| {
@@ -603,7 +643,7 @@ fn finalize_ir_program(program: &mut IrProgram, env: &TypeEnv, annotated_result_
     // set from the signature table instead of a hardcoded module-name list.
     // #1970: PER PARAMETER, not first-only — `fn show(tag: String, r: Result[..])`
     // consumes its SECOND argument as a Result, and the first-only skip unwrapped it.
-    let result_params: std::collections::HashMap<almide_base::intern::Sym, Vec<bool>> = env.functions.iter()
+    let mut result_params: std::collections::HashMap<almide_base::intern::Sym, Vec<bool>> = env.functions.iter()
         .filter_map(|(k, sig)| {
             let flags: Vec<bool> = sig.params.iter()
                 .map(|(_, t)| t.is_result() || matches!(t, almide_lang::types::Ty::Applied(almide_lang::types::TypeConstructorId::Option, _)))
@@ -611,6 +651,13 @@ fn finalize_ir_program(program: &mut IrProgram, env: &TypeEnv, annotated_result_
             if flags.iter().any(|f| *f) { Some((*k, flags)) } else { None }
         })
         .collect();
+    // An escaped user fn (#3483) is called under its IR name.
+    for f in &program.functions {
+        let src = almide_ir::user_fn_source_name(f.name.as_str());
+        if let Some(flags) = (src != f.name.as_str()).then(|| result_params.get(&sym(src)).cloned()).flatten() {
+            result_params.insert(f.name, flags);
+        }
+    }
     auto_try::insert_auto_try(program, annotated_result_vars, &result_params);
 
     // Collect stdlib modules used in root functions/top_lets.
