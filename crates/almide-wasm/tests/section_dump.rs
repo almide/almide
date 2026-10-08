@@ -8,7 +8,9 @@
 //!   leb_consts — i64 constants straddling the 1/2/3-byte (S)LEB128
 //!                boundaries, both signs;
 //!   fn_values  — the +1-biased funcref table, element segment, and
-//!                call_indirect type indices.
+//!                call_indirect type indices;
+//!   exports    — the export section of an entry `pub fn` (#457) and an
+//!                `@export(wasm, "sym")` declared export (#2752).
 //!
 //! Any byte-level encoding change decodes differently and drifts the
 //! dump. Ratify deliberately:
@@ -36,6 +38,18 @@ fn main() -> Unit = {
   var pick = 1
   let f = if pick == 1 then add1 else add2
   println(int.to_string(f(41)))
+}
+"#;
+
+const EXPORTS: &str = r#"pub fn double(x: Int) -> Int = x * 2
+
+@export(wasm, "render")
+fn draw(t: Int) -> Int = t + 1
+
+fn helper(x: Int) -> Int = x + 3
+
+fn main() -> Unit = {
+  println(int.to_string(helper(1)))
 }
 "#;
 
@@ -168,4 +182,91 @@ fn leb_boundary_constants_encode_stably() {
 #[test]
 fn fn_value_table_encodes_stably() {
     check("fn_values", FN_VALUES);
+}
+
+#[test]
+fn export_section_encodes_stably() {
+    check("exports", EXPORTS);
+}
+
+/// The emitter's refusal for `src`, which must not produce a module.
+fn refusal(name: &str, src: &str) -> String {
+    let ir = almide_spine::s5::lower_to_ir(&format!("{name}.almd"), src).expect("front");
+    match almide_wasm::emit_program(&ir) {
+        Ok(_) => panic!("{name}: the module must be refused, it emitted"),
+        Err(e) => format!("{e:?}"),
+    }
+}
+
+#[test]
+fn two_exports_of_one_name_are_refused() {
+    let err = refusal(
+        "dup_export",
+        "@export(wasm, \"f\")\nfn a(x: Int) -> Int = x\n\n@export(wasm, \"f\")\nfn b(x: Int) -> Int = x + 1\n\nfn main() -> Unit = println(int.to_string(a(1) + b(1)))\n",
+    );
+    assert!(err.contains("duplicate wasm export name `f` (fns `a` and `b`)"), "{err}");
+}
+
+#[test]
+fn an_export_claiming_a_module_owned_name_is_refused() {
+    let err = refusal(
+        "reserved_export",
+        "@export(wasm, \"memory\")\nfn m(x: Int) -> Int = x\n\nfn main() -> Unit = println(int.to_string(m(1)))\n",
+    );
+    assert!(err.contains("duplicate wasm export name `memory` (fn `m` and the module's own export)"), "{err}");
+}
+
+/// A fn whose body does not lower: the typed hole the leg refuses on purpose.
+const GROW: &str = "fn grow(n: Int) -> Int = if n > 100 then todo(\"big\") else n + 1\n";
+
+fn export_names(bytes: &[u8]) -> Vec<String> {
+    let mut names = Vec::new();
+    for payload in wasmparser::Parser::new(0).parse_all(bytes) {
+        if let wasmparser::Payload::ExportSection(r) = payload.expect("valid module") {
+            names.extend(r.into_iter().map(|e| e.expect("export").name.to_string()));
+        }
+    }
+    names
+}
+
+#[test]
+fn an_unlowered_fn_main_reaches_refuses_the_module_at_its_site() {
+    let err = refusal("reached_hole", &format!("{GROW}\nfn main() -> Unit = println(int.to_string(grow(1)))\n"));
+    assert!(err.contains("Unsupported"), "{err}");
+    let site = almide_wasm::decline_site::last().expect("the wall names its site");
+    assert_eq!(site.function, "grow", "{site:?}");
+}
+
+#[test]
+fn an_unlowered_fn_main_does_not_reach_is_not_exported() {
+    // #457: an entry fn exports only when its whole call closure lowers;
+    // one that does not is left out, never shipped as a trapping stub.
+    let ir = almide_spine::s5::lower_to_ir("unreached_hole.almd", &format!("{GROW}\nfn main() -> Unit = println(\"main\")\n"))
+        .expect("front");
+    let bytes = almide_wasm::emit_program(&ir).expect("main never reaches the hole");
+    let names = export_names(&bytes);
+    assert!(!names.iter().any(|n| n == "grow"), "{names:?}");
+}
+
+#[test]
+fn a_declared_export_that_does_not_lower_is_refused() {
+    let err = refusal("declared_hole", &format!("@export(wasm, \"grow\")\n{GROW}\nfn main() -> Unit = println(\"main\")\n"));
+    assert!(err.contains("exported function `grow` cannot be lowered"), "{err}");
+    let site = almide_wasm::decline_site::last().expect("the wall names its site");
+    assert_eq!(site.function, "grow", "{site:?}");
+}
+
+#[test]
+fn a_library_export_that_does_not_lower_is_refused() {
+    // Library ABI: every public fn must export, so the hole refuses the
+    // module where a program would only leave the fn out.
+    let ir = almide_spine::s5::lower_to_ir("library_hole.almd", GROW).expect("front");
+    let err = format!("{:?}", almide_wasm::emit_library_with_ops(&ir).expect_err("must refuse"));
+    assert!(err.contains("exported function `grow` cannot be lowered"), "{err}");
+}
+
+#[test]
+fn a_program_without_main_is_refused() {
+    let err = refusal("no_main", "fn f(x: Int) -> Int = x + 1\n");
+    assert!(err.contains("no main function"), "{err}");
 }
