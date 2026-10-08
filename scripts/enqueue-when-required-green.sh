@@ -33,13 +33,21 @@ required="$(gh api "repos/$REPO/branches/$BASE/protection" --jq '.required_statu
 
 verdict() {
   # prints: pending=<n> failed=<names> missing=<names>
-  gh pr view "$PR" --repo "$REPO" --json statusCheckRollup --jq '.statusCheckRollup[]|"\(.name // .context)\t\(.conclusion // .status // "?")"' \
+  # The rollup keeps EVERY run of a context: a re-run that went green sits
+  # next to the failure it superseded (#3497, 2026-10-09). Only the latest
+  # run per name counts, ordered by start time (a run not yet started has no
+  # time and loses, so the older verdict stands until it starts — conservative).
+  gh pr view "$PR" --repo "$REPO" --json statusCheckRollup --jq '.statusCheckRollup[]|"\(.name // .context)\t\(.conclusion // .status // "?")\t\(.startedAt // .createdAt // "")"' \
     | REQUIRED="$required" python3 -c '
 import os, sys
 want = set(l for l in os.environ["REQUIRED"].split("\n") if l)
-seen, bad, pend, bad_any = set(), [], 0, []
+latest = {}
 for line in sys.stdin:
-    name, _, state = line.rstrip("\n").partition("\t")
+    name, state, started = (line.rstrip("\n").split("\t") + ["", ""])[:3]
+    if name not in latest or started >= latest[name][1]:
+        latest[name] = (state, started)
+seen, bad, pend, bad_any = set(), [], 0, []
+for name, (state, _) in sorted(latest.items()):
     if name not in want:
         # a NON-required gate that FAILED still turns develop red after the
         # queue merges it (Coq/PCC, mutation): refuse those too, not only the 17
