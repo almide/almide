@@ -611,6 +611,14 @@ fn helper_body_b(h: &Helper, work: &FnWork, helper_snapshot: &[Helper]) -> Funct
             }
         }
     }
+    Helper::DisplayTy { ety, irk } => match work.display_ty_bodies.borrow_mut().remove(&(*ety, *irk)) {
+        Some(work::DisplayBuild::Built(f)) => f,
+        _ => {
+            let mut f = Function::new([]);
+            f.instructions().unreachable().end();
+            f
+        }
+    },
     Helper::NamedOp { op, ti } => match work.named_bodies.borrow_mut().remove(&(*op, *ti)) {
         Some(work::DisplayBuild::Built(f)) => f,
         _ => {

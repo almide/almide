@@ -28,7 +28,44 @@ impl Emitter<'_> {
     /// emit at all — `type Tree: Ord = { v: Int, kids: List[Tree] }` and the
     /// mutually recursive pair alike — and it is also why a record sorted in
     /// three places emits its field chain once instead of three times.
+    ///
+    /// A structural shape whose inlined holds would exceed what the i32
+    /// pool has left (nested lists/tuples/options, each level holding up to
+    /// five) becomes a CALL to an outlined `$named_cmpty_<ety>` helper on a
+    /// fresh pool — the equality doctrine of #3450 — so nesting depth is
+    /// bounded by nothing but the type itself.
     pub(crate) fn emit_val_cmp(&mut self, t: SliceTy) -> Result<(), EmitError> {
+        if self.hold_i32_depth + self.cmp_hold_need(t) <= crate::emitter::HOLD_I32_POOL {
+            return self.emit_val_cmp_level(t);
+        }
+        use crate::work::NamedOp;
+        let ti = self.types.intern(t).index() as u32;
+        if matches!(self.work.named_bodies.borrow().get(&(NamedOp::CmpTy, ti)), Some(crate::work::DisplayBuild::Failed)) {
+            return unsup("cmp-helper-failed");
+        }
+        let idx = self.work.helper(Helper::NamedOp { op: NamedOp::CmpTy, ti });
+        self.f.instructions().call(idx);
+        Ok(())
+    }
+
+    /// How many i32 holds inlining `t`'s compare keeps live at its deepest
+    /// point (mirrors the hold counts of `emit_val_cmp_level`; a `Named` is
+    /// always a call and holds none).
+    fn cmp_hold_need(&self, t: SliceTy) -> u32 {
+        match t {
+            BOOL => 2,
+            SliceTy::Tuple(ti) => {
+                3 + self.types.tuple_def(ti).fields.iter().map(|(f, _)| self.cmp_hold_need(*f)).max().unwrap_or(0)
+            }
+            SliceTy::List(h) => 5 + self.cmp_hold_need(self.types.el(h)),
+            SliceTy::Option(h) => 2 + self.cmp_hold_need(self.types.el(h)),
+            _ => 0,
+        }
+    }
+
+    /// One inlined level of `t`'s compare; every component recurses through
+    /// [`emit_val_cmp`](Emitter::emit_val_cmp) (which may outline it).
+    pub(crate) fn emit_val_cmp_level(&mut self, t: SliceTy) -> Result<(), EmitError> {
         match t {
             INT | FLOAT => {
                 let hb = self.hold_i64()?;

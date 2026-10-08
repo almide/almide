@@ -10,6 +10,7 @@ use crate::types_table::NamedDef;
 use crate::*;
 
 include!("display_map.rs");
+include!("display_depth.rs");
 
 impl Emitter<'_> {
     /// Append a static fragment to the line buffer.
@@ -98,7 +99,9 @@ impl Emitter<'_> {
         i.local_get(cur).local_get(x).call(F_APPEND_I64).local_set(cur);
     }
 
-    fn emit_display_at(
+    /// One inlined level of `got`'s display; components recurse through
+    /// `emit_display_at` (display_depth.rs), which may outline them.
+    fn emit_display_level(
         &mut self,
         got: SliceTy,
         nested: bool,
@@ -257,10 +260,11 @@ impl Emitter<'_> {
                 self.release_i32();
             }
             SliceTy::Named(ti) => {
-                if path.contains(&ti) {
-                    // Recursive type: cut the cycle with the runtime
-                    // helper `(block, cursor) -> cursor`. A body that
-                    // failed to build refuses THIS caller too.
+                if path.contains(&ti) || self.display_outlines(ti, path) {
+                    // Recursive type (or one too deep for the hold pool):
+                    // cut it with the runtime helper `(block, cursor) ->
+                    // cursor`. A body that failed to build refuses THIS
+                    // caller too.
                     let irk = self.work.display_ir_key(ir);
                     if matches!(
                         self.work.display_bodies.borrow().get(&(ti, irk)),
@@ -483,7 +487,8 @@ pub(crate) fn build_display_helpers(
                 })
                 .collect()
         };
-        if todo.is_empty() && todo_named.is_empty() && todo_scan.is_empty() {
+        let built_ty = build_display_ty_helpers(table, types, work, pool, &mut all_calls)?;
+        if todo.is_empty() && todo_named.is_empty() && todo_scan.is_empty() && !built_ty {
             return Ok(all_calls);
         }
         for key in todo {
@@ -733,6 +738,7 @@ fn build_one_named_helper(
             crate::work::NamedOp::EqTy => {
                 em.emit_val_eq_level(em.types.el(crate::ETy::from_index(ti as usize)), &mut Vec::new())
             }
+            crate::work::NamedOp::CmpTy => em.emit_val_cmp_level(em.types.el(crate::ETy::from_index(ti as usize))),
         }
     })
 }
