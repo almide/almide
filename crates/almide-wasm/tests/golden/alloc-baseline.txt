@@ -153,7 +153,7 @@
 88272	spec/wasm_cross/effect_fn_value_slot_family.almd
 65840	spec/wasm_cross/effect_main_guard_err.almd
 66112	spec/wasm_cross/effect_main_guard_ok.almd
-66144	spec/wasm_cross/effect_mut_generic_port.almd
+66112	spec/wasm_cross/effect_mut_generic_port.almd
 66000	spec/wasm_cross/effect_operand_unwrap_distinct.almd
 66624	spec/wasm_cross/effect_option_explicit_bang.almd
 66080	spec/wasm_cross/effect_slot_carrier.almd
@@ -212,7 +212,7 @@
 66144	spec/wasm_cross/fan_trap_waits_for_elements_below.almd
 66176	spec/wasm_cross/fan_var_thunk_list.almd
 65776	spec/wasm_cross/fan_worker_abort_keeps_stdout.almd
-115392	spec/wasm_cross/field_and_interp_accumulator.almd
+98976	spec/wasm_cross/field_and_interp_accumulator.almd
 65952	spec/wasm_cross/filter_map_conditional_arm.almd
 66304	spec/wasm_cross/flat_map_aliased_field.almd
 65776	spec/wasm_cross/flight_pid_control.almd
@@ -356,7 +356,7 @@
 65776	spec/wasm_cross/int_wrap_rotate_width.almd
 65776	spec/wasm_cross/interp_diverging_part.almd
 65952	spec/wasm_cross/interp_effect_unwrap_arg.almd
-66144	spec/wasm_cross/interp_mut_call_part_order.almd
+66128	spec/wasm_cross/interp_mut_call_part_order.almd
 66368	spec/wasm_cross/interp_operand_order.almd
 65888	spec/wasm_cross/io_write_ordering.almd
 69392	spec/wasm_cross/json_get_int_float.almd
@@ -559,10 +559,10 @@
 66000	spec/wasm_cross/mut_param_closure_capture_read.almd
 66368	spec/wasm_cross/mut_param_closure_capture_write.almd
 67344	spec/wasm_cross/mut_param_closure_field_path_write.almd
-67904	spec/wasm_cross/mut_param_effect_can_err.almd
+67888	spec/wasm_cross/mut_param_effect_can_err.almd
 65808	spec/wasm_cross/mut_param_effect_never_err.almd
 66448	spec/wasm_cross/mut_param_effect_unpropagated.almd
-68256	spec/wasm_cross/mut_param_err_write_visible.almd
+68240	spec/wasm_cross/mut_param_err_write_visible.almd
 66176	spec/wasm_cross/mut_param_fn_value_alternatives.almd
 66688	spec/wasm_cross/mut_param_global_callee_sees_precall.almd
 66512	spec/wasm_cross/mut_param_global_no_reach_in_place.almd
