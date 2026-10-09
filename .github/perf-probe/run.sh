@@ -35,6 +35,12 @@ ROWS=(
   "fasta_setat|$D/fasta_setat.almd|150000"
   "fasta_nowrite|$D/fasta_nowrite.almd|150000"
   "strchurn|$P/strchurn/strchurn.almd|"
+  "strchurn_parts|$D/strchurn_parts.almd|"
+  "strchurn_join|$D/strchurn_join.almd|"
+  "strchurn_split|$D/strchurn_split.almd|"
+  "onebrc|$P/onebrc/onebrc.almd|30000"
+  "onebrc_gen|$P/onebrc/onebrc.almd|gen 30000 /tmp/perf-probe-onebrc.txt"
+  "onebrc_agg|$P/onebrc/onebrc.almd|agg /tmp/perf-probe-onebrc.txt"
   "itoa_only|$D/itoa_only.almd|"
   "mapbuild|$P/mapbuild/mapbuild.almd|100000"
   "mapbuild_int|$D/mapbuild_int.almd|100000"
@@ -96,33 +102,36 @@ ir_of() { # callgrind Ir total of a command, or empty
 build_legs() { # name src -> $OUT/name.native, name.cwasm, name.inl.cwasm
   local name=$1 src=$2
   "$B" build "$src" -o "$OUT/$name.native" >/dev/null 2>&1 || echo "native build failed: $name" >&2
+  # `almide bench` times the CLASSIC codegen (try_compile); `almide build`
+  # renders v1 first. Build the classic one too so the Ir column matches TIME.
+  ALMIDE_NO_VERIFIED_OK=1 "$B" build --no-verified "$src" -o "$OUT/$name.v0" >/dev/null 2>&1 || echo "native v0 build failed: $name" >&2
   "$B" build "$src" --target wasm -o "$OUT/$name.wasm" >/dev/null 2>&1 || echo "wasm build failed: $name" >&2
   wasmtime compile "$OUT/$name.wasm" -o "$OUT/$name.cwasm" 2>/dev/null || echo "wasmtime compile failed: $name" >&2
   wasmtime compile -C inlining=y "$OUT/$name.wasm" -o "$OUT/$name.inl.cwasm" 2>"$OUT/$name.inl.err" || { echo "wasmtime compile -C inlining=y failed: $name: $(head -2 "$OUT/$name.inl.err")" >&2; rm -f "$OUT/$name.inl.cwasm"; }
 }
 if has ir && command -v valgrind >/dev/null && command -v wasmtime >/dev/null; then
   build_legs empty "$OUT/empty.almd"
-  base_n=$(ir_of "$OUT/empty.native"); base_w=$(ir_of wasmtime run --allow-precompiled "$OUT/empty.cwasm")
+  base_n=$(ir_of "$OUT/empty.native"); base_0=$(ir_of "$OUT/empty.v0"); base_w=$(ir_of wasmtime run --allow-precompiled "$OUT/empty.cwasm")
   base_i=""; [ -f "$OUT/empty.inl.cwasm" ] && base_i=$(ir_of wasmtime run -C inlining=y --allow-precompiled "$OUT/empty.inl.cwasm")
   echo
   echo "## IR (callgrind, millions of instructions, minus empty-program base: native ${base_n:-?}, wasm ${base_w:-?}, wasm+inl ${base_i:-?})"
-  printf '%-22s %10s %10s %10s %8s %8s\n' row native wasm wasm_inl w/n inl/n
+  printf '%-22s %10s %10s %10s %10s %8s %8s\n' row native native_v0 wasm wasm_inl w/v0 inl/v0
   for row in "${ROWS[@]}"; do
     IFS='|' read -r name src args <<<"$row"
     [ -n "$ONLY" ] && [[ ",$ONLY," != *",$name,"* ]] && continue
     build_legs "$name" "$src"
-    n=$(ir_of "$OUT/$name.native" $args)
+    n=$(ir_of "$OUT/$name.native" $args); z=$(ir_of "$OUT/$name.v0" $args)
     w=$(ir_of wasmtime run --allow-precompiled "$OUT/$name.cwasm" $args)
     i=""; [ -f "$OUT/$name.inl.cwasm" ] && i=$(ir_of wasmtime run -C inlining=y --allow-precompiled "$OUT/$name.inl.cwasm" $args)
-    python3 - "$name" "${n:-}" "${w:-}" "${i:-}" "${base_n:-0}" "${base_w:-0}" "${base_i:-0}" <<'PY'
+    python3 - "$name" "${n:-}" "${w:-}" "${i:-}" "${base_n:-0}" "${base_w:-0}" "${base_i:-0}" "${z:-}" "${base_0:-0}" <<'PY'
 import sys
-name, n, w, i, bn, bw, bi = sys.argv[1:8]
+name, n, w, i, bn, bw, bi, z, b0 = sys.argv[1:10]
 def m(x, b):
     return (int(x) - int(b or 0)) / 1e6 if x else None
-N, W, I = m(n, bn), m(w, bw), m(i, bi)
+N, W, I, Z = m(n, bn), m(w, bw), m(i, bi), m(z, b0)
 f = lambda v: f"{v:10.1f}" if v is not None else f"{'FAILED':>10}"
 r = lambda a, b: f"{a/b:8.2f}" if a is not None and b else f"{'-':>8}"
-print(f"{name:<22} {f(N)} {f(W)} {f(I)} {r(W, N)} {r(I, N)}")
+print(f"{name:<22} {f(N)} {f(Z)} {f(W)} {f(I)} {r(W, Z)} {r(I, Z)}")
 PY
   done
   # Stock-wasmtime wall time, default vs `-C inlining=y`, interleaved, whole

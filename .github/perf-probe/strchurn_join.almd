@@ -1,0 +1,17 @@
+// perf-probe ablation: strchurn stages 1-2 (to_string list, join).
+import env
+import int
+
+effect fn main() -> Unit = {
+  let args = env.args()
+  let n = match list.get(args, 0) {
+    some(s) => match int.parse(s) {
+      ok(v) => v,
+      err(_) => 1000000,
+    },
+    none => 1000000,
+  }
+  let parts = list.range(0, n) |> list.map((i) => int.to_string(i))
+  let joined = string.join(parts, ",")
+  println("n: ${n} chars: ${string.len(joined)}")
+}

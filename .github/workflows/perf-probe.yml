@@ -22,7 +22,7 @@ concurrency:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@v7
 
@@ -60,11 +60,33 @@ jobs:
           sudo mv wasmtime-*/wasmtime /usr/local/bin/
           wasmtime --version
 
+      # The branch carries two codegen changes whose exact-pin ledgers must be
+      # regenerated (the module-size ratchet; the native allocation ledger if
+      # it moves). Run the touched suites, regenerate, and upload the diff.
+      - name: Verify the branch's fixes and regenerate their ledgers
+        continue-on-error: true
+        run: |
+          set +e
+          mkdir -p /tmp/regen
+          ALMIDE_UPDATE_SIZES=1 cargo test --release -p almide-wasm --test size_ratchet 2>&1 | tail -20
+          cargo test --release --test codegen_snapshot_test --test literal_prefix_concat_alloc_test --test accumulate_in_place_test --test tco_accumulator_move_test --test codegen_v3_compare 2>&1 | grep -E "^test |test result|panicked|FAILED|error" | tail -60
+          cargo test --release --test native_borrow_oracle_test 2>&1 | grep -E "test result|FAILED|panicked" | tail -20
+          ALMIDE_UPDATE_ALLOC=1 cargo test --release --test native_borrow_oracle_test alloc 2>&1 | tail -5
+          git status --short
+          git diff --stat
+          git diff > /tmp/regen/ledgers.diff
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: regenerated-ledgers
+          path: /tmp/regen
+          retention-days: 7
+
       - name: Probe
         env:
-          PROBE_ONLY: ${{ github.event.inputs.only }}
+          PROBE_ONLY: ${{ github.event.inputs.only || 'listbuild_prealloc,listbuild_notrig,trig_only,fft,strchurn,strchurn_parts,strchurn_join,strchurn_split,itoa_only,mapbuild_str,onebrc,onebrc_gen,onebrc_agg' }}
           PROBE_OUT: /tmp/perf-probe
-          PROBE_SECTIONS: time
+          PROBE_SECTIONS: time,ir,alloc
         run: |
           nproc; uname -a; lscpu | grep -E 'Model name|MHz' || true
           bash .github/perf-probe/run.sh | tee /tmp/perf-probe-report.txt
