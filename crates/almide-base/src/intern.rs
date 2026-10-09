@@ -5,8 +5,11 @@
 ///
 /// Uses a global `ThreadedRodeo` so that `resolve()` returns `&'static str`.
 
-use lasso::{ThreadedRodeo, Spur};
+use lasso::{Key, ThreadedRodeo, Spur};
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::fmt;
+use std::hash::{BuildHasherDefault, Hasher};
 use std::sync::LazyLock;
 
 /// An interned identifier. Copy, Eq, Hash — zero-cost clone.
@@ -15,13 +18,75 @@ pub struct Sym(Spur);
 
 static INTERNER: LazyLock<ThreadedRodeo> = LazyLock::new(ThreadedRodeo::default);
 
+// Per-thread front caches (#3509). The shared interner takes a shard lock and
+// a SipHash on every call; nothing is ever removed from it, so a thread may
+// remember any answer it has seen and never consult the interner for it again.
+thread_local! {
+    static RESOLVED: RefCell<Vec<&'static str>> = const { RefCell::new(Vec::new()) };
+    static INTERNED: RefCell<HashMap<&'static str, Sym, BuildHasherDefault<WordHasher>>> =
+        RefCell::new(HashMap::default());
+}
+
+/// Multiply-rotate word hash for the per-thread cache: keys are short
+/// identifiers this process already holds, so no DoS resistance is needed.
+#[derive(Default)]
+struct WordHasher(u64);
+
+impl Hasher for WordHasher {
+    fn write(&mut self, bytes: &[u8]) {
+        let mut chunks = bytes.chunks_exact(8);
+        for c in &mut chunks {
+            self.add(u64::from_le_bytes(c.try_into().unwrap()));
+        }
+        let mut tail = [0u8; 8];
+        let rest = chunks.remainder();
+        tail[..rest.len()].copy_from_slice(rest);
+        self.add(u64::from_le_bytes(tail) ^ ((rest.len() as u64) << 56));
+    }
+    fn write_u8(&mut self, b: u8) {
+        self.add(b as u64);
+    }
+    fn finish(&self) -> u64 {
+        self.0
+    }
+}
+
+impl WordHasher {
+    fn add(&mut self, w: u64) {
+        self.0 = (self.0.rotate_left(5) ^ w).wrapping_mul(0x517c_c1b7_2722_0a95);
+    }
+}
+
 /// Intern a string, returning a `Sym` handle.
 pub fn sym(s: &str) -> Sym {
-    Sym(INTERNER.get_or_intern(s))
+    if let Some(hit) = INTERNED.with(|m| m.borrow().get(s).copied()) {
+        return hit;
+    }
+    let k = Sym(INTERNER.get_or_intern(s));
+    INTERNED.with(|m| m.borrow_mut().insert(resolve_shared(k), k));
+    k
 }
 
 /// Resolve a `Sym` back to `&'static str`.
 pub fn resolve(s: Sym) -> &'static str {
+    let i = s.0.into_usize();
+    if let Some(hit) = RESOLVED.with(|v| v.borrow().get(i).copied()) {
+        return hit;
+    }
+    let text = resolve_shared(s);
+    RESOLVED.with(|v| {
+        let mut v = v.borrow_mut();
+        // Fill every index up to `i` so the cache stays a dense prefix.
+        while v.len() < i {
+            let gap = Spur::try_from_usize(v.len()).expect("a smaller key of a live key exists");
+            v.push(resolve_shared(Sym(gap)));
+        }
+        v.push(text);
+    });
+    text
+}
+
+fn resolve_shared(s: Sym) -> &'static str {
     // SAFETY: INTERNER is a global static that lives for the entire program.
     // ThreadedRodeo never moves or deallocates interned strings.
     // The returned &str has the same lifetime as the interner: 'static.
