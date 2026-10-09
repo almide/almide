@@ -284,6 +284,18 @@ impl Emitter<'_> {
                 Ok(Some(Lowered::scalar(INT)))
             }
             ("ffrombits", [a]) => {
+                // A literal bit pattern (the self-hosted libm's constants,
+                // `prim.ffrombits(4586165620538955084)`) is an `f64.const` of
+                // those exact bits: wasm encodes the constant as raw IEEE
+                // bits, so nothing rounds. Cranelift does not fold
+                // `bitcast(iconst)`, and the reinterpret form cost a 64-bit
+                // integer materialization plus a GPR->FPR move per constant
+                // per call (5 instructions on aarch64, against one pooled
+                // load) — ~14 constants on every sin/cos call.
+                if let IrExprKind::LitInt { value } = &a.kind {
+                    self.f.instructions().f64_const(wasm_encoder::Ieee64::new(*value as u64));
+                    return Ok(Some(Lowered::scalar(FLOAT)));
+                }
                 self.lower_arg(a, Some(INT), ArgMode::Raw)?;
                 self.f.instructions().f64_reinterpret_i64();
                 Ok(Some(Lowered::scalar(FLOAT)))
