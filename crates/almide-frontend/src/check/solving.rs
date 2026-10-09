@@ -14,8 +14,10 @@ impl Checker {
         // either way). So ONE pass both unifies and reports; the former
         // second full pass re-unified every constraint just to find the
         // failures again (#1232's double-pass row, measured equivalent).
+        self.errored_slots.clear();
         for c in &constraints {
             if !self.unify_infer(&c.expected, &c.actual) {
+                self.note_errored_slots(c);
                 self.report_constraint_mismatch(c);
             }
         }
@@ -52,6 +54,15 @@ impl Checker {
             })
             .collect();
         if bindings.is_empty() { t.clone() } else { crate::types::substitute(t, &bindings) }
+    }
+
+    /// #3505: record the inference vars still open on either side of a
+    /// constraint that failed — the slots whose only source is an expression
+    /// the solve just rejected (`Checker::errored_slots`).
+    fn note_errored_slots(&mut self, c: &super::types::Constraint) {
+        for side in [&c.expected, &c.actual] {
+            collect_inference_vars(&resolve_ty(side, &self.uf), &mut self.errored_slots);
+        }
     }
 
     /// Emit the E001 for one constraint that could not be satisfied.
@@ -439,6 +450,16 @@ impl Checker {
             }
             _ => return None,
         })
+    }
+}
+
+/// Push every open inference var (`?N`) in `t` onto `out`.
+pub(crate) fn collect_inference_vars(t: &Ty, out: &mut Vec<Ty>) {
+    if is_inference_var(t).is_some() {
+        out.push(t.clone());
+    }
+    for child in t.children() {
+        collect_inference_vars(child, out);
     }
 }
 

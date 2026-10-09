@@ -322,6 +322,13 @@ pub struct Checker {
     /// defaulted. Without it the value passed `check` and then tripped the
     /// ConcretizeTypes COMPILER-BUG gate on BOTH targets (#662).
     pub(crate) deferred_unresolved_binding_checks: Vec<UnresolvedBindingSite>,
+    /// #3505: the inference vars a constraint the last solve could NOT
+    /// satisfy left open — the slot of an expression that already errored
+    /// (a `fan.map` callback that returns a bare value leaves its `ok` slot
+    /// unbound). Reset by every solve and read by the E025 validation that
+    /// follows it: a binding whose only undecidable slots are these is the
+    /// prior error's residue, not an undecidable program (the #2096 family).
+    pub(crate) errored_slots: Vec<Ty>,
     /// Generic calls whose type parameters must each be determined (#3495,
     /// E025's call edition) — see `uninferable_type_param.rs`.
     pub(crate) deferred_type_param_checks: Vec<TypeParamSite>,
@@ -685,6 +692,7 @@ impl Checker {
             deferred_float_overflow_checks: Vec::new(),
             deferred_numeric_narrowing_checks: Vec::new(),
             deferred_unresolved_binding_checks: Vec::new(),
+            errored_slots: Vec::new(),
             deferred_type_param_checks: Vec::new(),
             deferred_implicit_prop_checks: Vec::new(),
             effect_call_spans: std::collections::HashSet::new(),

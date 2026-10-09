@@ -1,0 +1,17 @@
+// silent (E097 near-miss): `pub` is accepted on a fn and a top-level let, and
+// a type narrows its visibility with `mod` / `local` — only `pub` before a
+// `type`, `protocol` or `test` is E097.
+pub let LIMIT = 10
+
+mod type Pair = { a: Int, b: Int }
+
+local type Tag = { name: String }
+
+pub fn total(p: Pair) -> Int = p.a + p.b
+
+fn label(t: Tag) -> String = t.name
+
+effect fn main() -> Unit = {
+  println(int.to_string(total(Pair { a: 1, b: LIMIT })))
+  println(label(Tag { name: "ok" }))
+}
