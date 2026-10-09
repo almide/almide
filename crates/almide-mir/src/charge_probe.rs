@@ -204,6 +204,13 @@ mod cert_tests {
         assert_eq!(native_charge_sites(rs), vec![42, 7]);
     }
 
+    /// The CLI names the probe's channel by [`PROBE_OUT_ENV`]; the shim that
+    /// writes to it spells the variable as a literal (#3489).
+    #[test]
+    fn the_probe_shim_reads_the_channel_the_cli_sets() {
+        assert!(crate::render_native_shims::CHARGE_SHIM.contains(&format!("\"{PROBE_OUT_ENV}\"")));
+    }
+
     #[test]
     fn first_occurrences_survives_duplication() {
         assert_eq!(first_occurrences(&[1, 2, 3, 2, 3]), vec![1, 2, 3]);
@@ -283,6 +290,14 @@ pub fn omega_record() -> bool {
 
 /// The counters start at i64::MAX and count DOWN; consumed = MAX - remaining.
 pub const FUEL_START: i64 = i64::MAX;
+
+/// #3489: when set, a probed native binary writes its `__ALMD_PROBE` line to
+/// the file this variable names instead of stderr. `--time-report` sets it so
+/// the meter reading travels on a channel of its own: reading it back out of
+/// the program's stderr took any line the PROGRAM printed in that spelling as
+/// the reading, and swallowed it from the program's output. The probe shim
+/// (`render_native_shims::CHARGE_SHIM`) spells the same name.
+pub const PROBE_OUT_ENV: &str = "ALMIDE_PROBE_OUT";
 
 /// CM-1: the single definition lives beside the unit tables in
 /// `almide_types::time_units` (the interp's budget prims read it there);

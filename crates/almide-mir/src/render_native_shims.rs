@@ -238,9 +238,13 @@ pub(crate) const CHARGE_SHIM: &str = "fn __almd_charge(site: i64, cost: i64, tra
 struct __AlmdProbeGuard;
 impl Drop for __AlmdProbeGuard {
     fn drop(&mut self) {
-        eprintln!(\"__ALMD_PROBE {} {}\",
+        let line = format!(\"__ALMD_PROBE {} {}\\n\",
             (i64::MAX.wrapping_sub(__ALMD_FUEL.with(|f| f.get()))) as u64,
             __ALMD_TRACE.with(|t| t.get()) as u64);
+        match std::env::var_os(\"ALMIDE_PROBE_OUT\") {
+            Some(path) => { let _ = std::fs::write(path, line); }
+            None => eprint!(\"{line}\"),
+        }
     }
 }";
 
