@@ -1213,8 +1213,7 @@ impl Checker {
         // real pass right after re-checks them and owns all reporting.
         self.refresh_top_lets(program, toplet_order::TopLetScope::Entry);
         self.validate_protocol_refs(program);
-        self.validate_bare_type_visibility(program);
-        self.validate_qualified_type_heads(program);
+        self.validate_type_spellings(program);
         self.validate_alias_cycles(&program.decls);
         self.body_diag_start = self.diagnostics.len();
         self.reject_user_prim_import(&program.imports);
@@ -1860,7 +1859,8 @@ impl Checker {
     /// other modules were in the program, and adding a same-named type
     /// anywhere changed or broke a file that never mentioned it. Now it is
     /// E029 naming the module to import and the qualified spelling.
-    pub(crate) fn validate_bare_type_visibility(&mut self, program: &mut ast::Program) {
+    /// `bare_types` is the file's `ImportSpellings::bare_types`.
+    fn validate_bare_type_visibility(&mut self, program: &mut ast::Program, bare_types: std::collections::HashSet<(Sym, TypeSpelling)>) {
         use crate::canonicalize::resolve::{FileTypeScope, TypeNameOrigin};
         let own: std::collections::HashSet<Sym> = program.decls.iter()
             .filter_map(|d| match d { ast::Decl::Type { name, .. } => Some(*name), _ => None })
@@ -1875,7 +1875,7 @@ impl Checker {
         let cur = self.current_module_prefix.clone();
         let names_a_case = |env: &crate::types::TypeEnv, n: Sym, sp: TypeSpelling|
             sp == TypeSpelling::RecordHead && env.lookup_ctor_in(&n, cur.as_deref()).is_some();
-        let spelled: Vec<(Sym, TypeSpelling)> = bare_type_spellings(program)
+        let spelled: Vec<(Sym, TypeSpelling)> = bare_types
             .into_iter().filter(|(n, sp)| !names_a_case(&self.env, *n, *sp)).collect();
         let names: std::collections::HashSet<Sym> = spelled.iter().map(|(n, _)| *n).collect();
         let scope = FileTypeScope::new(&self.env, self.current_module_prefix.as_deref(), own, &names);
