@@ -1,0 +1,26 @@
+// perf-probe ablation: listbuild's four sin/cos calls per element, no list,
+// no float.round. Isolates the transcendental cost of the listbuild/fft setup.
+import math
+import env
+import int
+import float
+
+effect fn main() -> Unit = {
+  let args = env.args()
+  let size = match list.get(args, 0) {
+    some(s) => match int.parse(s) {
+      ok(v) => v,
+      err(_) => 20,
+    },
+    none => 20,
+  }
+  let n = math.pow(2, size)
+  var acc = 0.0
+  for i in 0..<n {
+    let theta = float.from_int(i) / float.from_int(n) * math.pi()
+    let re = 1.0 * math.cos(10.0 * theta) + 0.5 * math.cos(25.0 * theta)
+    let im = 1.0 * math.sin(10.0 * theta) + 0.5 * math.sin(25.0 * theta)
+    acc = acc + re + im
+  }
+  println("trig checksum: ${float.to_fixed(acc, 6)}")
+}

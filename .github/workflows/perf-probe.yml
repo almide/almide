@@ -1,0 +1,77 @@
+name: Perf probe (wasm/native ratio rows)
+
+# A measurement, not a gate: builds almide on a standard ubuntu-latest runner
+# and prints the TIME / IR / ALLOC tables of .github/perf-probe/run.sh for the
+# wasm-runtime ledger's off-band rows (listbuild, fft, fasta, strchurn,
+# mapbuild) and their ablation variants. The `push` trigger is limited to the
+# probe branch so the file needs no presence on the default branch.
+on:
+  workflow_dispatch:
+    inputs:
+      only:
+        description: "comma-separated row names (empty = all)"
+        required: false
+        default: ""
+  push:
+    branches: [perf-ratio-probe]
+
+concurrency:
+  group: perf-probe-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.96.0"
+
+      # Read-only: ride develop's warm dependency cache, never write one.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci-build-1.96.0
+          save-if: false
+
+      - run: cargo build --release
+
+      - name: valgrind
+        run: sudo apt-get update -q && sudo apt-get install -y -q valgrind
+
+      - name: Cache wasmtime tarball
+        uses: actions/cache@v6
+        with:
+          path: wasmtime-v49.0.1-x86_64-linux.tar.xz
+          key: wasmtime-v49.0.1-x86_64-linux
+      - name: Install wasmtime
+        run: |
+          VERSION=v49.0.1
+          TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
+          if [ ! -s "$TARBALL" ]; then
+            for i in 1 2 3 4 5; do
+              curl -fLO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" && break
+              echo "wasmtime download failed, retry ${i}/5"; sleep 15; rm -f "$TARBALL"
+            done
+          fi
+          tar -xf "$TARBALL"
+          sudo mv wasmtime-*/wasmtime /usr/local/bin/
+          wasmtime --version
+
+      - name: Probe
+        env:
+          PROBE_ONLY: ${{ github.event.inputs.only }}
+          PROBE_OUT: /tmp/perf-probe
+        run: |
+          nproc; uname -a; lscpu | grep -E 'Model name|MHz' || true
+          bash .github/perf-probe/run.sh | tee /tmp/perf-probe-report.txt
+          { echo '```'; cat /tmp/perf-probe-report.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: perf-probe-report
+          path: /tmp/perf-probe-report.txt
+          retention-days: 7

@@ -1,0 +1,32 @@
+// perf-probe ablation: listbuild_prealloc with the four sin/cos calls replaced
+// by plain arithmetic. Same sized allocation, same float.round, same indexed
+// writes and checksum consumer — what is left is the build shape.
+import math
+import env
+import int
+import float
+
+effect fn main() -> Unit = {
+  let args = env.args()
+  let size = match list.get(args, 0) {
+    some(s) => match int.parse(s) {
+      ok(v) => v,
+      err(_) => 20,
+    },
+    none => 20,
+  }
+  let n = math.pow(2, size)
+  var data: List[Float] = list.repeat(0.0, 2 * n)
+  for i in 0..<n {
+    let theta = float.from_int(i) / float.from_int(n) * math.pi()
+    let re = 1.0 * (10.0 * theta) + 0.5 * (25.0 * theta)
+    let im = 1.0 * (10.0 * theta) - 0.5 * (25.0 * theta)
+    data[2 * i] = float.round(re * 100.0) / 100.0
+    data[2 * i + 1] = float.round(im * 100.0) / 100.0
+  }
+  var acc = 0.0
+  for i in 0..<(2 * n) {
+    acc = acc + data[i]
+  }
+  println("len: ${int.to_string(list.len(data))} checksum: ${float.to_fixed(acc, 6)}")
+}
