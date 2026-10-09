@@ -1,0 +1,3 @@
+# Both steps of the one-round repair (#3515): the marker and the `!`.
+Mark the calling function as `effect fn`
+`fs.read_text(..)!`

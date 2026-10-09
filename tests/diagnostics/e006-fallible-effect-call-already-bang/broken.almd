@@ -1,0 +1,5 @@
+import fs
+
+// Near miss of #3515: the call already carries its `!`, so the hint must not
+// ask for another — the one-round repair is the `effect fn` marker alone.
+pub fn read_config(path: String) -> String = fs.read_text(path)!

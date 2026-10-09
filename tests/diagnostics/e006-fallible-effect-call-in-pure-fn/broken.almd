@@ -1,0 +1,6 @@
+import fs
+
+// fs.read_text is a fallible effect fn: its call is a Result[String, String].
+// The repair is two edits in one round — mark the caller `effect fn` and
+// propagate the call's error with `!` (#3515).
+pub fn read_config(path: String) -> String = fs.read_text(path)
