@@ -583,6 +583,13 @@ fn render_expr_clone(ctx: &RenderContext, expr: &IrExpr) -> String {
             return rc_cow_result_glue(format!("{read}.clone()"), &inner.ty);
         }
     }
+    // `xs[i]` already renders as an owned copy of the element (`almide_index!`
+    // clones it out), so a clone the clone pass placed over the read is a
+    // second copy of a temporary nobody else holds — one extra allocation and
+    // one free per read of a heap element.
+    if matches!(inner.kind, IrExprKind::IndexAccess { .. }) {
+        return render_expr(ctx, inner);
+    }
     let expr_s = render_expr(ctx, inner);
     ctx.templates.render_with("clone_expr", None, &[], &[("expr", expr_s.as_str())])
         .unwrap_or_else(|| format!("{}.clone()", expr_s))
