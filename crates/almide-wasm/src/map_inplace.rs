@@ -232,7 +232,7 @@ impl Emitter<'_> {
         let oh = self.hold_i32()?;
         let eh = self.hold_i32()?;
         self.emit_map_scan_into(mh, kh, eh, (k, v), fns);
-        self.emit_map_set_judged_at(mh, kh, vh, (oh, eh), (k, v), fns)?;
+        self.emit_map_set_judged_at(MapSetHolds { mh, kh, eh, vh }, oh, (k, v), fns)?;
         self.release_i32(); // eh
         self.release_i32(); // oh
         Ok(())
@@ -257,10 +257,8 @@ impl Emitter<'_> {
     /// scratch hold.
     pub(crate) fn emit_map_set_judged_at(
         &mut self,
-        mh: u32,
-        kh: u32,
-        vh: u32,
-        (oh, eh): (u32, u32),
+        MapSetHolds { mh, kh, eh, vh }: MapSetHolds,
+        oh: u32,
         (k, v): (SliceTy, SliceTy),
         MapSetFns { append, reserve, drop_map, .. }: MapSetFns,
     ) -> Result<(), EmitError> {

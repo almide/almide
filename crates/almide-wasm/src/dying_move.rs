@@ -354,7 +354,7 @@ impl Emitter<'_> {
         }
         self.f.instructions().end();
         self.witness_once_close();
-        self.emit_map_set_judged_at(mh, kh, ih, (oh, eh), (k, v), fns)?;
+        self.emit_map_set_judged_at(super::MapSetHolds { mh, kh, eh, vh: ih }, oh, (k, v), fns)?;
         self.f.instructions().local_get(mh);
         self.release_i32(); // eh
         self.release_i32(); // oh
