@@ -123,10 +123,19 @@ pub const RUST_RESERVED_TYPE_NAMES: &[&str] = &[
     "Path", "Duration", "TcpStream", "Read", "Write", "Cell", "RefCell",
 ];
 
+/// The prefix of the struct the walker emits for each anonymous record shape
+/// (`AlmdRec_<sorted field names>`, `walker::declarations::collect_anon_records`).
+/// A user `type AlmdRec_x_y` was that struct's name: E0428 / E0107 at rustc
+/// (#3487), so the prefix is reserved as a family like `Almide*`.
+pub const ANON_RECORD_PREFIX: &str = "AlmdRec_";
+
 /// Would a top-level Rust item with this name shadow one the generated crate
 /// relies on? See [`RUST_RESERVED_TYPE_NAMES`].
 pub fn is_rust_reserved_type_name(name: &str) -> bool {
-    RUST_RESERVED_TYPE_NAMES.contains(&name) || name.starts_with("Almide") || name.starts_with("almide_")
+    RUST_RESERVED_TYPE_NAMES.contains(&name)
+        || name.starts_with("Almide")
+        || name.starts_with("almide_")
+        || name.starts_with(ANON_RECORD_PREFIX)
 }
 
 /// Record `td`'s origin when it is declared under a bare reserved name. The
