@@ -40,6 +40,7 @@ mod extern_abi_check;
 mod prim_wrappers;
 mod exhaustiveness;
 mod call_defaults;
+mod effect_isolation_cascade;
 
 use almide_lang::ast;
 use almide_base::diagnostic::Diagnostic;
@@ -345,6 +346,9 @@ pub struct Checker {
     /// whether its `!` repair is the spelling of the callee's own declared
     /// type (machine-applicable) or a choice among consumptions.
     pub(crate) effect_call_spans: std::collections::HashSet<(usize, usize, usize)>,
+    /// #3515: the E006s on fallible effect callees whose hint names the `!`,
+    /// and the cascade E001s they own (`effect_isolation_cascade.rs`).
+    pub(crate) isolation_cascade: effect_isolation_cascade::IsolationCascade,
     /// #2927: the expectation handed to the NEXT `infer_expr` (a tail
     /// position's), and the one of the expression being inferred now. See
     /// `arm_blame.rs`.
@@ -696,6 +700,7 @@ impl Checker {
             deferred_type_param_checks: Vec::new(),
             deferred_implicit_prop_checks: Vec::new(),
             effect_call_spans: std::collections::HashSet::new(),
+            isolation_cascade: Default::default(),
             tail_expect: None,
             expr_expect: None,
             fallible_marker_fns: std::collections::HashSet::new(),

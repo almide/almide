@@ -87,7 +87,9 @@ impl Checker {
         // children see one only where a tail position hands it on.
         let expect = self.tail_expect.take();
         let outer_expect = std::mem::replace(&mut self.expr_expect, expect);
+        let frame = self.enter_isolation_frame(expr);
         let ity = self.infer_expr_inner(expr);
+        self.leave_isolation_frame(expr, &ity, frame);
         self.expr_expect = outer_expect;
         self.type_map.insert(expr.id, ity.clone());
         // #662 extension (fuzz seed-20260718 index 145): a CALL's instantiated
