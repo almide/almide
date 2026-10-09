@@ -640,6 +640,11 @@ impl Checker {
     fn validate_unresolved_binding_types(&mut self) {
         let checks = std::mem::take(&mut self.deferred_unresolved_binding_checks);
         let mut reported: std::collections::HashSet<(Option<u32>, Option<u32>)> = std::collections::HashSet::new();
+        // #3505: the slots a failed constraint left open, by their current
+        // root — each already has the diagnostic of the expression it came from.
+        let errored: Vec<Ty> = self.errored_slots.iter()
+            .map(|v| resolve_ty(v, &self.uf))
+            .collect();
         for site in checks {
             let resolved = resolve_ty(&site.ty, &self.uf);
             // A WHOLLY-Unknown binding type is error-recovery (a prior error was
@@ -660,7 +665,19 @@ impl Checker {
                 _ => false,
             });
             if !undecidable { continue; }
-            let key = (site.span.map(|s| s.line as u32), site.span.map(|s| s.col as u32));
+            // Recovery residue out (#3505, the #2096 family on a SLOT): when
+            // every undecidable slot is one a rejected expression left open —
+            // a `fan.map` callback that returns a bare value never binds the
+            // `ok` slot — the E025 would point the reader at an annotation,
+            // which is not the fix; the error at the source already says what
+            // is. A slot with any other origin (or an `Unknown` leaf) still fires.
+            let genuine = resolved.any_child_recursive(&|t: &Ty| match t {
+                Ty::Unknown => true,
+                Ty::TypeVar(n) => n.as_str().starts_with('?') && !errored.contains(t),
+                _ => false,
+            });
+            if !genuine { continue; }
+            let key =(site.span.map(|s| s.line as u32), site.span.map(|s| s.col as u32));
             if !reported.insert(key) { continue; }
             self.emit_unresolved_binding_diagnostic(&site, &resolved);
         }

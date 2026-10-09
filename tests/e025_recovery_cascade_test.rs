@@ -15,8 +15,8 @@
 
 use std::process::Command;
 
-fn almide() -> &'static str {
-    env!("CARGO_BIN_EXE_almide")
+fn almide() -> String {
+    std::env::var("ALMIDE_BIN").unwrap_or_else(|_| env!("CARGO_BIN_EXE_almide").to_string())
 }
 
 fn check(dir: &std::path::Path, name: &str, source: &str) -> String {
@@ -97,4 +97,50 @@ fn a_genuine_unconstrained_slot_still_reports_e025() {
         out.contains("Rust E0282"),
         "the hint's deliberate citation must survive:\n{out}"
     );
+}
+
+/// #3505: the #2096 family on a SLOT. A `fan.map` callback that returns a bare
+/// value is E001 at the callback, and the `ok` slot it should have bound stays
+/// open; `fan.map`'s `Result[List[?N], String]` then reached the post-solve
+/// validator as an undecidable expression and drew an E025 whose hint says to
+/// annotate a binding, which is not the fix. The slot's only source is the
+/// expression that already errored.
+#[test]
+fn a_slot_left_open_by_a_rejected_fan_map_callback_reports_no_e025() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let out = check(
+        dir.path(),
+        "fan_map.almd",
+        "pub fn par(xs: List[Int]) -> List[Int] = fan.map(xs, (x) => x * 2)\n\n\
+         effect fn main() -> Unit = println(\"x\")\n",
+    );
+    assert_eq!(
+        count(&out, "fan.map callback must return Result"),
+        1,
+        "the callback's own error must still be reported:\n{out}"
+    );
+    assert_eq!(
+        count(&out, "error[E025]"),
+        0,
+        "E025 fired on the slot the rejected callback left open:\n{out}"
+    );
+}
+
+/// The other direction for #3505: a genuinely unconstrained slot in a program
+/// that ALSO has an unrelated failed constraint still reports E025 — the
+/// suppression keys on the slot, not on "some error happened".
+#[test]
+fn a_genuine_slot_beside_an_unrelated_error_still_reports_e025() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let out = check(
+        dir.path(),
+        "both.almd",
+        "pub fn par(xs: List[Int]) -> List[Int] = fan.map(xs, (x) => x * 2)\n\n\
+         fn main() -> Unit = {\n\
+        \x20 let xs = []\n\
+        \x20 println(\"${list.len(xs)}\")\n\
+         }\n",
+    );
+    assert_eq!(count(&out, "fan.map callback must return Result"), 1, "{out}");
+    assert_eq!(count(&out, "error[E025]"), 1, "the independent slot must still be refused:\n{out}");
 }
