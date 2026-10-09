@@ -23,6 +23,9 @@
 # Unsupported histogram is the coverage roadmap: the biggest buckets name the
 # next language-surface features to admit (step 2).
 set -euo pipefail
+# Private scratch dir per run: fixed /tmp paths let two concurrent runs overwrite each
+# other's witnesses and tamper files, and a drill then fails on the other run's bytes.
+GATE_TMP="$(mktemp -d "${TMPDIR:-/tmp}/almide-corpus-wall.XXXXXX")"; export GATE_TMP; trap 'rm -rf "$GATE_TMP"' EXIT
 cd "$(dirname "$0")"
 ROOT="$(cd .. && pwd)"
 # F6-2: identity of the evidence — stamp + verify the toolchain (see proofs/lib/stamp.sh).
@@ -203,10 +206,10 @@ echo "== PCC chain: the proven checker re-verifies EVERY in-profile witness (3 p
 # Ownership: a single fold over all heap objects (the checker splits by line).
 OWN_N=$(wc -l < "$OUTDIR/ownership.cert" | tr -d ' ')
 set +e
-./checker ownership "$OUTDIR/ownership.cert" >/tmp/corpus-wall.checker.out 2>&1
+./checker ownership "$OUTDIR/ownership.cert" >$GATE_TMP/corpus-wall.checker.out 2>&1
 OWN_RC=$?
 set -e
-echo "  [ownership] $OWN_N heap object(s) (no double-free / no leak): $(cat /tmp/corpus-wall.checker.out) (exit $OWN_RC)"
+echo "  [ownership] $OWN_N heap object(s) (no double-free / no leak): $(cat $GATE_TMP/corpus-wall.checker.out) (exit $OWN_RC)"
 if [ "$OWN_RC" -ne 0 ]; then
   echo "WALL GATE FAIL: proven checker REJECTED an in-profile [ownership] witness (accept ⟹ safe violated)." >&2
   cleanup; exit 1
@@ -271,12 +274,12 @@ for prop, cert in [("names", "names"), ("caps", "caps"), ("caps-transitive", "ca
             rec(prop, f"{cert}:{i + 1}", line + b"\n")
 PYEOF
 set +e
-"$VERIFY" bundle "$OUTDIR/corpus.bundle" > /tmp/corpus-wall.verify.out 2>&1
+"$VERIFY" bundle "$OUTDIR/corpus.bundle" > $GATE_TMP/corpus-wall.verify.out 2>&1
 VRC=$?
 set -e
-tail -1 /tmp/corpus-wall.verify.out | sed 's/^/  /'
+tail -1 $GATE_TMP/corpus-wall.verify.out | sed 's/^/  /'
 if [ "$VRC" -ne 0 ]; then
-  grep -E '^REJECT' /tmp/corpus-wall.verify.out | head -5 >&2
+  grep -E '^REJECT' $GATE_TMP/corpus-wall.verify.out | head -5 >&2
   echo "WALL GATE FAIL: almide-verify did not certify a corpus witness set the proven checker accepted (exit $VRC)." >&2
   cleanup; exit 1
 fi

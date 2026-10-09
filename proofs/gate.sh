@@ -20,6 +20,9 @@
 #    (trusted), NOT the proven checker — so even a real program's WASM bytes are
 #    not yet gated; only its MIR-level witness is.
 set -euo pipefail
+# Private scratch dir per run: fixed /tmp paths let two concurrent runs overwrite each
+# other's witnesses and tamper files, and a drill then fails on the other run's bytes.
+GATE_TMP="$(mktemp -d "${TMPDIR:-/tmp}/almide-gate.XXXXXX")"; export GATE_TMP; trap 'rm -rf "$GATE_TMP"' EXIT
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # F6-2: identity of the evidence — stamp + verify the toolchain (see proofs/lib/stamp.sh).
 source "$ROOT/proofs/lib/stamp.sh"
@@ -94,18 +97,18 @@ run() { # scenario property expected_exit
 # The call-modes witness (`modes`) is checked by the `call-modes` checker mode —
 # emit property and checker mode differ, hence this variant.
 run_mode() { # scenario emit-property checker-mode expected_exit
-  emit "$1" "$2" > /tmp/compiler.witness
+  emit "$1" "$2" > $GATE_TMP/compiler.witness
   set +e
-  "$ROOT/proofs/checker" "$3" /tmp/compiler.witness >/tmp/gate.out 2>&1; local rc=$?
+  "$ROOT/proofs/checker" "$3" $GATE_TMP/compiler.witness >$GATE_TMP/gate.out 2>&1; local rc=$?
   set -e
   if [ "$rc" -ne "$4" ]; then
-    echo "FAIL [$2] $1: got exit $rc want $4 ($(cat /tmp/gate.out))"; exit 1
+    echo "FAIL [$2] $1: got exit $rc want $4 ($(cat $GATE_TMP/gate.out))"; exit 1
   fi
-  kernel_verify "$3" /tmp/compiler.witness "$4" \
+  kernel_verify "$3" $GATE_TMP/compiler.witness "$4" \
     || { echo "FAIL [$2] $1: KERNEL oracle disagrees with the binary verdict"; exit 1; }
-  portable_agrees "$3" /tmp/compiler.witness "$4" \
+  portable_agrees "$3" $GATE_TMP/compiler.witness "$4" \
     || { echo "FAIL [$2] $1: almide-verify disagrees with the proven checker"; exit 1; }
-  echo "ok   [$2] $1: witness '$(cat /tmp/compiler.witness | tr '\n' '|')' -> $(cat /tmp/gate.out) (kernel + almide-verify agree)"
+  echo "ok   [$2] $1: witness '$(cat $GATE_TMP/compiler.witness | tr '\n' '|')' -> $(cat $GATE_TMP/gate.out) (kernel + almide-verify agree)"
 }
 
 # REAL .almd → frontend → MIR → witness, then the proven checker re-verifies it.
@@ -120,18 +123,18 @@ run_src() { # fixture function emit-property expected_exit  (checker mode == emi
 # re-verified by the SAME proven subset checker as `caps` — emit property and
 # checker MODE differ, hence this variant.
 run_src_mode() { # fixture function emit-property checker-mode expected_exit
-  emit_src "$1" "$2" "$3" > /tmp/real.witness
+  emit_src "$1" "$2" "$3" > $GATE_TMP/real.witness
   set +e
-  "$ROOT/proofs/checker" "$4" /tmp/real.witness >/tmp/gate.out 2>&1; local rc=$?
+  "$ROOT/proofs/checker" "$4" $GATE_TMP/real.witness >$GATE_TMP/gate.out 2>&1; local rc=$?
   set -e
   if [ "$rc" -ne "$5" ]; then
-    echo "FAIL [$3] $1::$2 (real source): got exit $rc want $5 ($(cat /tmp/gate.out))"; exit 1
+    echo "FAIL [$3] $1::$2 (real source): got exit $rc want $5 ($(cat $GATE_TMP/gate.out))"; exit 1
   fi
-  kernel_verify "$4" /tmp/real.witness "$5" \
+  kernel_verify "$4" $GATE_TMP/real.witness "$5" \
     || { echo "FAIL [$3] $1::$2: KERNEL oracle disagrees with the binary verdict"; exit 1; }
-  portable_agrees "$4" /tmp/real.witness "$5" \
+  portable_agrees "$4" $GATE_TMP/real.witness "$5" \
     || { echo "FAIL [$3] $1::$2: almide-verify disagrees with the proven checker"; exit 1; }
-  echo "ok   [$3] $1::$2 (real source): witness '$(cat /tmp/real.witness | tr '\n' '|')' -> $(cat /tmp/gate.out) (kernel + almide-verify agree)"
+  echo "ok   [$3] $1::$2 (real source): witness '$(cat $GATE_TMP/real.witness | tr '\n' '|')' -> $(cat $GATE_TMP/gate.out) (kernel + almide-verify agree)"
 }
 
 echo "== compiler output  ⊳  proven checker =="
@@ -204,11 +207,11 @@ echo "-- property: ownership, format v6 (the arm-terminal ABORT) --"
 # before the abort is a fault; the surviving path still owes its balance; a
 # `t` outside a branch has no survivor. Three verdicts on each row.
 run_raw() { # certificate expected_exit label
-  printf '%s\n' "$1" > /tmp/raw.witness
-  set +e; "$ROOT/proofs/checker" ownership /tmp/raw.witness >/tmp/gate.out 2>&1; local rc=$?; set -e
+  printf '%s\n' "$1" > $GATE_TMP/raw.witness
+  set +e; "$ROOT/proofs/checker" ownership $GATE_TMP/raw.witness >$GATE_TMP/gate.out 2>&1; local rc=$?; set -e
   if [ "$rc" -ne "$2" ]; then echo "FAIL [ownership v6] $3 '$1': got exit $rc want $2"; exit 1; fi
-  kernel_verify ownership /tmp/raw.witness "$2"   || { echo "FAIL [ownership v6] $3: KERNEL oracle disagrees"; exit 1; }
-  portable_agrees ownership /tmp/raw.witness "$2" || { echo "FAIL [ownership v6] $3: almide-verify disagrees"; exit 1; }
+  kernel_verify ownership $GATE_TMP/raw.witness "$2"   || { echo "FAIL [ownership v6] $3: KERNEL oracle disagrees"; exit 1; }
+  portable_agrees ownership $GATE_TMP/raw.witness "$2" || { echo "FAIL [ownership v6] $3: almide-verify disagrees"; exit 1; }
   echo "ok   [ownership v6] $3 '$1': exit $rc (kernel + almide-verify agree)"
 }
 run_raw 'i{t|d}'  0 "abort discharges what the arm holds"
@@ -249,18 +252,18 @@ run_src      two_functions.almd  main names     0
 # (used {Stdout} ⊆ declared) and REJECTs under allow=["Rand"].
 run_src_manifest() { # fixture function property manifest expected_exit
   (cd "$ROOT" && cargo run -q -p almide-mir --example emit_cert_from_source \
-    -- "proofs/fixtures/$1" "$2" "$3" "proofs/fixtures/$4") > /tmp/real.witness
+    -- "proofs/fixtures/$1" "$2" "$3" "proofs/fixtures/$4") > $GATE_TMP/real.witness
   set +e
-  "$ROOT/proofs/checker" "$3" /tmp/real.witness >/tmp/gate.out 2>&1; local rc=$?
+  "$ROOT/proofs/checker" "$3" $GATE_TMP/real.witness >$GATE_TMP/gate.out 2>&1; local rc=$?
   set -e
   if [ "$rc" -ne "$5" ]; then
-    echo "FAIL [$3 ⊳ $4] $1::$2 (real source): got exit $rc want $5 ($(cat /tmp/gate.out))"; exit 1
+    echo "FAIL [$3 ⊳ $4] $1::$2 (real source): got exit $rc want $5 ($(cat $GATE_TMP/gate.out))"; exit 1
   fi
-  kernel_verify "$3" /tmp/real.witness "$5" \
+  kernel_verify "$3" $GATE_TMP/real.witness "$5" \
     || { echo "FAIL [$3 ⊳ $4] $1::$2: KERNEL oracle disagrees with the binary verdict"; exit 1; }
-  portable_agrees "$3" /tmp/real.witness "$5" \
+  portable_agrees "$3" $GATE_TMP/real.witness "$5" \
     || { echo "FAIL [$3 ⊳ $4] $1::$2: almide-verify disagrees with the proven checker"; exit 1; }
-  echo "ok   [$3 ⊳ $4] $1::$2 (real source): witness '$(cat /tmp/real.witness | tr '\n' '|')' -> $(cat /tmp/gate.out) (kernel + almide-verify agree)"
+  echo "ok   [$3 ⊳ $4] $1::$2 (real source): witness '$(cat $GATE_TMP/real.witness | tr '\n' '|')' -> $(cat $GATE_TMP/gate.out) (kernel + almide-verify agree)"
 }
 run_src_manifest manifest_print.almd main caps manifest_io.toml   0
 run_src_manifest manifest_print.almd main caps manifest_rand.toml 1
@@ -297,19 +300,19 @@ run_src_mode closure_heap_capture.almd main    modes call-modes 0
 echo "-- kernel-oracle TAMPER DRILL (the extraction-divergence detector, every build) --"
 # (i) a CORRUPTED witness (one extra release byte → double-free) must be rejected
 # by BOTH the extracted binary and the kernel — agreement on the reject side.
-emit balanced ownership > /tmp/tamper.witness
-printf 'd' >> /tmp/tamper.witness
-set +e; "$ROOT/proofs/checker" ownership /tmp/tamper.witness >/dev/null 2>&1; trc=$?; set -e
+emit balanced ownership > $GATE_TMP/tamper.witness
+printf 'd' >> $GATE_TMP/tamper.witness
+set +e; "$ROOT/proofs/checker" ownership $GATE_TMP/tamper.witness >/dev/null 2>&1; trc=$?; set -e
 if [ "$trc" -ne 1 ]; then echo "FAIL tamper(i): the binary accepted a corrupted witness"; exit 1; fi
-kernel_verify ownership /tmp/tamper.witness 1 \
+kernel_verify ownership $GATE_TMP/tamper.witness 1 \
   || { echo "FAIL tamper(i): the kernel accepted a corrupted witness"; exit 1; }
-portable_agrees ownership /tmp/tamper.witness 1 \
+portable_agrees ownership $GATE_TMP/tamper.witness 1 \
   || { echo "FAIL tamper(i): almide-verify accepted a corrupted witness"; exit 1; }
 echo "ok   tamper(i): a corrupted witness is rejected by the binary, the kernel AND almide-verify"
 # (ii) a SIMULATED DIVERGENT VERDICT: hand the kernel the reject witness but claim
 # the binary said ACCEPT — the kernel twin must FAIL. This proves the oracle has
 # teeth: a generator that vacuously passed everything would slip through here.
-set +e; kernel_verify ownership /tmp/tamper.witness 0; krc=$?; set -e
+set +e; kernel_verify ownership $GATE_TMP/tamper.witness 0; krc=$?; set -e
 if [ "$krc" -eq 0 ]; then
   echo "FAIL tamper(ii): the kernel oracle certified a WRONG verdict (drill broken)"; exit 1
 fi
@@ -328,27 +331,27 @@ emit_structural() { # fixture-rel fn-name
   (cd "$ROOT" && cargo run -q -p almide-wasm --example emit_structural_witness -- "$1" "$2")
 }
 run_structural() { # fixture-rel fn-name expected_exit
-  emit_structural "$1" "$2" > /tmp/structural.witness
+  emit_structural "$1" "$2" > $GATE_TMP/structural.witness
   set +e
-  "$ROOT/proofs/checker" ownership /tmp/structural.witness >/tmp/gate.out 2>&1; local rc=$?
+  "$ROOT/proofs/checker" ownership $GATE_TMP/structural.witness >$GATE_TMP/gate.out 2>&1; local rc=$?
   set -e
   if [ "$rc" -ne "$3" ]; then
-    echo "FAIL [structural] $1::$2: got exit $rc want $3 ($(cat /tmp/gate.out))"; exit 1
+    echo "FAIL [structural] $1::$2: got exit $rc want $3 ($(cat $GATE_TMP/gate.out))"; exit 1
   fi
-  kernel_verify ownership /tmp/structural.witness "$3"     || { echo "FAIL [structural] $1::$2: KERNEL oracle disagrees"; exit 1; }
-  portable_agrees ownership /tmp/structural.witness "$3" \
+  kernel_verify ownership $GATE_TMP/structural.witness "$3"     || { echo "FAIL [structural] $1::$2: KERNEL oracle disagrees"; exit 1; }
+  portable_agrees ownership $GATE_TMP/structural.witness "$3" \
     || { echo "FAIL [structural] $1::$2: almide-verify disagrees with the proven checker"; exit 1; }
-  echo "ok   [structural] $1::$2: witness '$(cat /tmp/structural.witness | tr '\n' '|')' accepted (kernel + almide-verify agree)"
+  echo "ok   [structural] $1::$2: witness '$(cat $GATE_TMP/structural.witness | tr '\n' '|')' accepted (kernel + almide-verify agree)"
 }
 run_structural spec/wasm_cross/witness_straightline.almd shed 0
 run_structural spec/wasm_cross/witness_straightline.almd tag 0
 run_structural spec/wasm_cross/r5_lowmisc_param_try_err.almd id_list 0
 # Corruption drill: strip one release — the checker must see the leak.
-emit_structural spec/wasm_cross/witness_straightline.almd shed | sed 's/dd$/d/' > /tmp/structural.tamper
-set +e; "$ROOT/proofs/checker" ownership /tmp/structural.tamper >/dev/null 2>&1; src_rc=$?; set -e
+emit_structural spec/wasm_cross/witness_straightline.almd shed | sed 's/dd$/d/' > $GATE_TMP/structural.tamper
+set +e; "$ROOT/proofs/checker" ownership $GATE_TMP/structural.tamper >/dev/null 2>&1; src_rc=$?; set -e
 if [ "$src_rc" -ne 1 ]; then echo "FAIL structural-tamper: a leaked structural witness was accepted"; exit 1; fi
-kernel_verify ownership /tmp/structural.tamper 1   || { echo "FAIL structural-tamper: the kernel accepted the leak"; exit 1; }
-portable_agrees ownership /tmp/structural.tamper 1 || { echo "FAIL structural-tamper: almide-verify accepted the leak"; exit 1; }
+kernel_verify ownership $GATE_TMP/structural.tamper 1   || { echo "FAIL structural-tamper: the kernel accepted the leak"; exit 1; }
+portable_agrees ownership $GATE_TMP/structural.tamper 1 || { echo "FAIL structural-tamper: almide-verify accepted the leak"; exit 1; }
 echo "ok   structural-tamper: a leaked structural witness is rejected by the binary AND the kernel"
 
 # ── #1696 phase B1: the CALL BOUNDARY through the same checker. A droppable
@@ -363,21 +366,21 @@ echo "== structural leg, call boundary  ⊳  proven checker (#1696 phase B1) =="
 run_structural spec/wasm_cross/witness_straightline.almd take 0
 run_structural spec/wasm_cross/witness_straightline.almd pass 0
 run_structural spec/wasm_cross/witness_straightline.almd bind_then_pass 0
-emit_structural spec/wasm_cross/witness_straightline.almd pass | sed 's/^ibamd$/ibam/' > /tmp/structural.tamper
-set +e; "$ROOT/proofs/checker" ownership /tmp/structural.tamper >/dev/null 2>&1; src_rc=$?; set -e
+emit_structural spec/wasm_cross/witness_straightline.almd pass | sed 's/^ibamd$/ibam/' > $GATE_TMP/structural.tamper
+set +e; "$ROOT/proofs/checker" ownership $GATE_TMP/structural.tamper >/dev/null 2>&1; src_rc=$?; set -e
 if [ "$src_rc" -ne 1 ]; then echo "FAIL structural-tamper(B1): a return_call that skips its param release was accepted"; exit 1; fi
-kernel_verify ownership /tmp/structural.tamper 1   || { echo "FAIL structural-tamper(B1): the kernel accepted the unreleased param"; exit 1; }
-portable_agrees ownership /tmp/structural.tamper 1 || { echo "FAIL structural-tamper(B1): almide-verify accepted the unreleased param"; exit 1; }
+kernel_verify ownership $GATE_TMP/structural.tamper 1   || { echo "FAIL structural-tamper(B1): the kernel accepted the unreleased param"; exit 1; }
+portable_agrees ownership $GATE_TMP/structural.tamper 1 || { echo "FAIL structural-tamper(B1): almide-verify accepted the unreleased param"; exit 1; }
 echo "ok   structural-tamper(B1): an unreleased tail-site param is rejected by the binary AND the kernel"
 # #3259: every read of a droppable local is the `b` probe (`pass` reads its
 # param as the argument: `ibamd`). A read after the release — the same
 # witness with one more read at its end — must be rejected.
-emit_structural spec/wasm_cross/witness_straightline.almd pass | sed 's/^ibamd$/ibamdb/' > /tmp/structural.tamper
-grep -qx 'ibamdb' /tmp/structural.tamper || { echo "FAIL structural-tamper(read): pass's witness is no longer 'ibamd' — re-aim the drill"; exit 1; }
-set +e; "$ROOT/proofs/checker" ownership /tmp/structural.tamper >/dev/null 2>&1; src_rc=$?; set -e
+emit_structural spec/wasm_cross/witness_straightline.almd pass | sed 's/^ibamd$/ibamdb/' > $GATE_TMP/structural.tamper
+grep -qx 'ibamdb' $GATE_TMP/structural.tamper || { echo "FAIL structural-tamper(read): pass's witness is no longer 'ibamd' — re-aim the drill"; exit 1; }
+set +e; "$ROOT/proofs/checker" ownership $GATE_TMP/structural.tamper >/dev/null 2>&1; src_rc=$?; set -e
 if [ "$src_rc" -ne 1 ]; then echo "FAIL structural-tamper(read): a read after the release was accepted"; exit 1; fi
-kernel_verify ownership /tmp/structural.tamper 1   || { echo "FAIL structural-tamper(read): the kernel accepted the read after the release"; exit 1; }
-portable_agrees ownership /tmp/structural.tamper 1 || { echo "FAIL structural-tamper(read): almide-verify accepted the read after the release"; exit 1; }
+kernel_verify ownership $GATE_TMP/structural.tamper 1   || { echo "FAIL structural-tamper(read): the kernel accepted the read after the release"; exit 1; }
+portable_agrees ownership $GATE_TMP/structural.tamper 1 || { echo "FAIL structural-tamper(read): almide-verify accepted the read after the release"; exit 1; }
 echo "ok   structural-tamper(read): a read after the release is rejected by the binary AND the kernel"
 
 # ── #1696 step 4: STATEMENT CALLS and MODULE CALLS through the same checker.
@@ -395,11 +398,11 @@ run_structural spec/wasm_cross/witness_straightline.almd discard 0
 run_structural spec/wasm_cross/witness_straightline.almd stamp 0
 run_structural spec/wasm_cross/witness_straightline.almd shout 0
 run_structural spec/wasm_cross/witness_straightline.almd say 0
-emit_structural spec/wasm_cross/witness_straightline.almd discard | sed '2s/^id$/i/' > /tmp/structural.tamper
-set +e; "$ROOT/proofs/checker" ownership /tmp/structural.tamper >/dev/null 2>&1; src_rc=$?; set -e
+emit_structural spec/wasm_cross/witness_straightline.almd discard | sed '2s/^id$/i/' > $GATE_TMP/structural.tamper
+set +e; "$ROOT/proofs/checker" ownership $GATE_TMP/structural.tamper >/dev/null 2>&1; src_rc=$?; set -e
 if [ "$src_rc" -ne 1 ]; then echo "FAIL structural-tamper(step4): a discarded result that was never released was accepted"; exit 1; fi
-kernel_verify ownership /tmp/structural.tamper 1   || { echo "FAIL structural-tamper(step4): the kernel accepted the unreleased discard"; exit 1; }
-portable_agrees ownership /tmp/structural.tamper 1 || { echo "FAIL structural-tamper(step4): almide-verify accepted the unreleased discard"; exit 1; }
+kernel_verify ownership $GATE_TMP/structural.tamper 1   || { echo "FAIL structural-tamper(step4): the kernel accepted the unreleased discard"; exit 1; }
+portable_agrees ownership $GATE_TMP/structural.tamper 1 || { echo "FAIL structural-tamper(step4): almide-verify accepted the unreleased discard"; exit 1; }
 echo "ok   structural-tamper(step4): an unreleased statement-call result is rejected by the binary AND the kernel"
 
 # ── #2755: TEMPORARIES on the flat alphabet through the same checker. `nest`
@@ -415,14 +418,14 @@ run_structural spec/wasm_cross/witness_straightline.almd nest 0
 run_structural spec/wasm_cross/witness_straightline.almd greet 0
 run_structural spec/wasm_cross/witness_straightline.almd wrap 0
 tamper_structural() { # fn sed-expr label
-  emit_structural spec/wasm_cross/witness_straightline.almd "$1" | sed "$2" > /tmp/structural.tamper
-  if cmp -s /tmp/structural.tamper <(emit_structural spec/wasm_cross/witness_straightline.almd "$1"); then
+  emit_structural spec/wasm_cross/witness_straightline.almd "$1" | sed "$2" > $GATE_TMP/structural.tamper
+  if cmp -s $GATE_TMP/structural.tamper <(emit_structural spec/wasm_cross/witness_straightline.almd "$1"); then
     echo "FAIL structural-tamper($3): the drill changed nothing (the witness shape moved)"; exit 1
   fi
-  set +e; "$ROOT/proofs/checker" ownership /tmp/structural.tamper >/dev/null 2>&1; src_rc=$?; set -e
+  set +e; "$ROOT/proofs/checker" ownership $GATE_TMP/structural.tamper >/dev/null 2>&1; src_rc=$?; set -e
   if [ "$src_rc" -ne 1 ]; then echo "FAIL structural-tamper($3): a leaked temporary was accepted"; exit 1; fi
-  kernel_verify ownership /tmp/structural.tamper 1   || { echo "FAIL structural-tamper($3): the kernel accepted the leak"; exit 1; }
-  portable_agrees ownership /tmp/structural.tamper 1 || { echo "FAIL structural-tamper($3): almide-verify accepted the leak"; exit 1; }
+  kernel_verify ownership $GATE_TMP/structural.tamper 1   || { echo "FAIL structural-tamper($3): the kernel accepted the leak"; exit 1; }
+  portable_agrees ownership $GATE_TMP/structural.tamper 1 || { echo "FAIL structural-tamper($3): almide-verify accepted the leak"; exit 1; }
   echo "ok   structural-tamper($3): the leak is rejected by the binary AND the kernel"
 }
 tamper_structural nest 's/^im$/i/' "#2755 nested call"
@@ -579,14 +582,14 @@ echo
 echo "== structural leg, unwrap-or over a closure  ⊳  proven checker (#3446) =="
 run_structural spec/wasm_cross/unwrap_or_fresh_closure_fallback.almd choose 0
 run_structural spec/wasm_cross/unwrap_or_fresh_closure_fallback.almd main 0
-emit_structural spec/wasm_cross/unwrap_or_fresh_closure_fallback.almd choose | sed 's/^{|im}$/{|i}/' > /tmp/structural.tamper
-if cmp -s /tmp/structural.tamper <(emit_structural spec/wasm_cross/unwrap_or_fresh_closure_fallback.almd choose); then
+emit_structural spec/wasm_cross/unwrap_or_fresh_closure_fallback.almd choose | sed 's/^{|im}$/{|i}/' > $GATE_TMP/structural.tamper
+if cmp -s $GATE_TMP/structural.tamper <(emit_structural spec/wasm_cross/unwrap_or_fresh_closure_fallback.almd choose); then
   echo "FAIL structural-tamper(#3446 closure fallback): the drill changed nothing (the witness shape moved)"; exit 1
 fi
-set +e; "$ROOT/proofs/checker" ownership /tmp/structural.tamper >/dev/null 2>&1; src_rc=$?; set -e
+set +e; "$ROOT/proofs/checker" ownership $GATE_TMP/structural.tamper >/dev/null 2>&1; src_rc=$?; set -e
 if [ "$src_rc" -ne 1 ]; then echo "FAIL structural-tamper(#3446 closure fallback): a fallback closure that never reached the join was accepted"; exit 1; fi
-kernel_verify ownership /tmp/structural.tamper 1   || { echo "FAIL structural-tamper(#3446 closure fallback): the kernel accepted the leak"; exit 1; }
-portable_agrees ownership /tmp/structural.tamper 1 || { echo "FAIL structural-tamper(#3446 closure fallback): almide-verify accepted the leak"; exit 1; }
+kernel_verify ownership $GATE_TMP/structural.tamper 1   || { echo "FAIL structural-tamper(#3446 closure fallback): the kernel accepted the leak"; exit 1; }
+portable_agrees ownership $GATE_TMP/structural.tamper 1 || { echo "FAIL structural-tamper(#3446 closure fallback): almide-verify accepted the leak"; exit 1; }
 echo "ok   structural-tamper(#3446 closure fallback): the leak is rejected by the binary AND the kernel"
 
 # ── #2758: an `err(e)` RAISED from an effect body, and a call through a record
@@ -643,14 +646,14 @@ tamper_structural tagged_at '2s/^{|ibd}$/{|ib}/' "#2755 abort-path release"
 echo
 echo "== structural leg, module-space lets  ⊳  proven checker (#2758) =="
 run_structural spec/wasm_cross/module_global_const.almd main 0
-emit_structural spec/wasm_cross/module_global_const.almd main | sed '3s/^id$/i/' > /tmp/structural.tamper
-if cmp -s /tmp/structural.tamper <(emit_structural spec/wasm_cross/module_global_const.almd main); then
+emit_structural spec/wasm_cross/module_global_const.almd main | sed '3s/^id$/i/' > $GATE_TMP/structural.tamper
+if cmp -s $GATE_TMP/structural.tamper <(emit_structural spec/wasm_cross/module_global_const.almd main); then
   echo "FAIL structural-tamper(#2758 top-let): the drill changed nothing"; exit 1
 fi
-set +e; "$ROOT/proofs/checker" ownership /tmp/structural.tamper >/dev/null 2>&1; src_rc=$?; set -e
+set +e; "$ROOT/proofs/checker" ownership $GATE_TMP/structural.tamper >/dev/null 2>&1; src_rc=$?; set -e
 if [ "$src_rc" -ne 1 ]; then echo "FAIL structural-tamper(#2758 top-let): an unreleased initializer was accepted"; exit 1; fi
-kernel_verify ownership /tmp/structural.tamper 1   || { echo "FAIL structural-tamper(#2758 top-let): the kernel accepted the leak"; exit 1; }
-portable_agrees ownership /tmp/structural.tamper 1 || { echo "FAIL structural-tamper(#2758 top-let): almide-verify accepted the leak"; exit 1; }
+kernel_verify ownership $GATE_TMP/structural.tamper 1   || { echo "FAIL structural-tamper(#2758 top-let): the kernel accepted the leak"; exit 1; }
+portable_agrees ownership $GATE_TMP/structural.tamper 1 || { echo "FAIL structural-tamper(#2758 top-let): almide-verify accepted the leak"; exit 1; }
 echo "ok   structural-tamper(#2758 top-let): an initializer the copy left behind is rejected by the binary AND the kernel"
 
 # ── #2758: the CALL-MODE witness of the structural leg. Per-frame
@@ -662,18 +665,18 @@ echo "ok   structural-tamper(#2758 top-let): an initializer the copy left behind
 # borrow against its callee's signature.
 echo
 echo "== structural leg, call modes  ⊳  proven checker (#2758) =="
-(cd "$ROOT" && cargo run -q -p almide-wasm --example emit_call_modes -- spec/wasm_cross/witness_straightline.almd) > /tmp/structural.modes
-set +e; "$ROOT/proofs/checker" call-modes /tmp/structural.modes >/tmp/gate.out 2>&1; src_rc=$?; set -e
-if [ "$src_rc" -ne 0 ]; then echo "FAIL [structural] call-modes: rejected ($(cat /tmp/gate.out))"; exit 1; fi
-kernel_verify call-modes /tmp/structural.modes 0   || { echo "FAIL [structural] call-modes: KERNEL oracle disagrees"; exit 1; }
-portable_agrees call-modes /tmp/structural.modes 0 || { echo "FAIL [structural] call-modes: almide-verify disagrees"; exit 1; }
+(cd "$ROOT" && cargo run -q -p almide-wasm --example emit_call_modes -- spec/wasm_cross/witness_straightline.almd) > $GATE_TMP/structural.modes
+set +e; "$ROOT/proofs/checker" call-modes $GATE_TMP/structural.modes >$GATE_TMP/gate.out 2>&1; src_rc=$?; set -e
+if [ "$src_rc" -ne 0 ]; then echo "FAIL [structural] call-modes: rejected ($(cat $GATE_TMP/gate.out))"; exit 1; fi
+kernel_verify call-modes $GATE_TMP/structural.modes 0   || { echo "FAIL [structural] call-modes: KERNEL oracle disagrees"; exit 1; }
+portable_agrees call-modes $GATE_TMP/structural.modes 0 || { echo "FAIL [structural] call-modes: almide-verify disagrees"; exit 1; }
 echo "ok   [structural] call-modes: every site of witness_straightline agrees with its callee (kernel + almide-verify agree)"
-sed -E 's/\|([0-9]+) 1/|\1 0/' /tmp/structural.modes > /tmp/structural.modes.tamper
-if cmp -s /tmp/structural.modes /tmp/structural.modes.tamper; then echo "FAIL structural-tamper(#2758 call modes): the drill changed nothing"; exit 1; fi
-set +e; "$ROOT/proofs/checker" call-modes /tmp/structural.modes.tamper >/dev/null 2>&1; src_rc=$?; set -e
+sed -E 's/\|([0-9]+) 1/|\1 0/' $GATE_TMP/structural.modes > $GATE_TMP/structural.modes.tamper
+if cmp -s $GATE_TMP/structural.modes $GATE_TMP/structural.modes.tamper; then echo "FAIL structural-tamper(#2758 call modes): the drill changed nothing"; exit 1; fi
+set +e; "$ROOT/proofs/checker" call-modes $GATE_TMP/structural.modes.tamper >/dev/null 2>&1; src_rc=$?; set -e
 if [ "$src_rc" -ne 1 ]; then echo "FAIL structural-tamper(#2758 call modes): a mode mismatch was accepted"; exit 1; fi
-kernel_verify call-modes /tmp/structural.modes.tamper 1   || { echo "FAIL structural-tamper(#2758 call modes): the kernel accepted the mismatch"; exit 1; }
-portable_agrees call-modes /tmp/structural.modes.tamper 1 || { echo "FAIL structural-tamper(#2758 call modes): almide-verify accepted the mismatch"; exit 1; }
+kernel_verify call-modes $GATE_TMP/structural.modes.tamper 1   || { echo "FAIL structural-tamper(#2758 call modes): the kernel accepted the mismatch"; exit 1; }
+portable_agrees call-modes $GATE_TMP/structural.modes.tamper 1 || { echo "FAIL structural-tamper(#2758 call modes): almide-verify accepted the mismatch"; exit 1; }
 echo "ok   structural-tamper(#2758 call modes): a site that lends where its callee takes a credit is rejected by the binary AND the kernel"
 
 # ── #2759: NAME TOTALITY and CAPABILITIES of the structural build, projected
@@ -693,14 +696,14 @@ echo "ok   structural-tamper(#2758 call modes): a site that lends where its call
 # reaches every path it runs on. The or-pattern's second alternative is line
 # 3. Drill: that carrier's release dropped on the path that goes on past it.
 tamper_fixture() { # fixture fn sed-expr label
-  emit_structural "$1" "$2" | sed "$3" > /tmp/structural.tamper
-  if cmp -s /tmp/structural.tamper <(emit_structural "$1" "$2"); then
+  emit_structural "$1" "$2" | sed "$3" > $GATE_TMP/structural.tamper
+  if cmp -s $GATE_TMP/structural.tamper <(emit_structural "$1" "$2"); then
     echo "FAIL structural-tamper($4): the drill changed nothing (the witness shape moved)"; exit 1
   fi
-  set +e; "$ROOT/proofs/checker" ownership /tmp/structural.tamper >/dev/null 2>&1; src_rc=$?; set -e
+  set +e; "$ROOT/proofs/checker" ownership $GATE_TMP/structural.tamper >/dev/null 2>&1; src_rc=$?; set -e
   if [ "$src_rc" -ne 1 ]; then echo "FAIL structural-tamper($4): the leak was accepted"; exit 1; fi
-  kernel_verify ownership /tmp/structural.tamper 1   || { echo "FAIL structural-tamper($4): the kernel accepted the leak"; exit 1; }
-  portable_agrees ownership /tmp/structural.tamper 1 || { echo "FAIL structural-tamper($4): almide-verify accepted the leak"; exit 1; }
+  kernel_verify ownership $GATE_TMP/structural.tamper 1   || { echo "FAIL structural-tamper($4): the kernel accepted the leak"; exit 1; }
+  portable_agrees ownership $GATE_TMP/structural.tamper 1 || { echo "FAIL structural-tamper($4): almide-verify accepted the leak"; exit 1; }
   echo "ok   structural-tamper($4): the leak is rejected by the binary AND the kernel"
 }
 echo
@@ -815,35 +818,35 @@ bundle_one() { # fixture property function
   (cd "$ROOT" && cargo run -q -p almide-wasm --example emit_structural_bundle -- "$1" --only "$2" "$3")
 }
 run_structural_prop() { # fixture property function expected_exit
-  bundle_one "$1" "$2" "$3" > /tmp/structural.prop
-  set +e; "$ROOT/proofs/checker" "$2" /tmp/structural.prop >/tmp/gate.out 2>&1; local rc=$?; set -e
-  if [ "$rc" -ne "$4" ]; then echo "FAIL [structural $2] $1::$3: got exit $rc want $4 ($(cat /tmp/gate.out))"; exit 1; fi
-  kernel_verify "$2" /tmp/structural.prop "$4"   || { echo "FAIL [structural $2] $1::$3: KERNEL oracle disagrees"; exit 1; }
-  portable_agrees "$2" /tmp/structural.prop "$4" || { echo "FAIL [structural $2] $1::$3: almide-verify disagrees"; exit 1; }
-  echo "ok   [structural $2] $1::$3: witness '$(head -c 120 /tmp/structural.prop | tr '\n' '|')…' accepted (kernel + almide-verify agree)"
+  bundle_one "$1" "$2" "$3" > $GATE_TMP/structural.prop
+  set +e; "$ROOT/proofs/checker" "$2" $GATE_TMP/structural.prop >$GATE_TMP/gate.out 2>&1; local rc=$?; set -e
+  if [ "$rc" -ne "$4" ]; then echo "FAIL [structural $2] $1::$3: got exit $rc want $4 ($(cat $GATE_TMP/gate.out))"; exit 1; fi
+  kernel_verify "$2" $GATE_TMP/structural.prop "$4"   || { echo "FAIL [structural $2] $1::$3: KERNEL oracle disagrees"; exit 1; }
+  portable_agrees "$2" $GATE_TMP/structural.prop "$4" || { echo "FAIL [structural $2] $1::$3: almide-verify disagrees"; exit 1; }
+  echo "ok   [structural $2] $1::$3: witness '$(head -c 120 $GATE_TMP/structural.prop | tr '\n' '|')…' accepted (kernel + almide-verify agree)"
 }
-drill_structural_prop() { # property label — /tmp/structural.prop is the honest witness, /tmp/structural.tamper the drill
-  if cmp -s /tmp/structural.prop /tmp/structural.tamper; then echo "FAIL structural-tamper($2): the drill changed nothing"; exit 1; fi
-  set +e; "$ROOT/proofs/checker" "$1" /tmp/structural.tamper >/dev/null 2>&1; local rc=$?; set -e
+drill_structural_prop() { # property label — $GATE_TMP/structural.prop is the honest witness, $GATE_TMP/structural.tamper the drill
+  if cmp -s $GATE_TMP/structural.prop $GATE_TMP/structural.tamper; then echo "FAIL structural-tamper($2): the drill changed nothing"; exit 1; fi
+  set +e; "$ROOT/proofs/checker" "$1" $GATE_TMP/structural.tamper >/dev/null 2>&1; local rc=$?; set -e
   if [ "$rc" -ne 1 ]; then echo "FAIL structural-tamper($2): the binary accepted it"; exit 1; fi
-  kernel_verify "$1" /tmp/structural.tamper 1   || { echo "FAIL structural-tamper($2): the kernel accepted it"; exit 1; }
-  portable_agrees "$1" /tmp/structural.tamper 1 || { echo "FAIL structural-tamper($2): almide-verify accepted it"; exit 1; }
+  kernel_verify "$1" $GATE_TMP/structural.tamper 1   || { echo "FAIL structural-tamper($2): the kernel accepted it"; exit 1; }
+  portable_agrees "$1" $GATE_TMP/structural.tamper 1 || { echo "FAIL structural-tamper($2): almide-verify accepted it"; exit 1; }
   echo "ok   structural-tamper($2): rejected by the binary, the kernel AND almide-verify"
 }
 # Append the first id past the defined range to the used side.
 past_defined() { python3 -c 'import sys; d,u=sys.stdin.read().split("|",1); print(d+"|"+u.strip()+" "+str(len(d.split())), end="")'; }
 run_structural_prop "$WS" names '(module:funcs)' 0
-past_defined < /tmp/structural.prop > /tmp/structural.tamper
+past_defined < $GATE_TMP/structural.prop > $GATE_TMP/structural.tamper
 drill_structural_prop names "#2759 undefined callee"
 run_structural_prop "$WS" names 'locals:shed' 0
-past_defined < /tmp/structural.prop > /tmp/structural.tamper
+past_defined < $GATE_TMP/structural.prop > $GATE_TMP/structural.tamper
 drill_structural_prop names "#2759 undefined local"
 run_structural_prop "$WS" caps shed 0
-sed 's/$/ 4/' /tmp/structural.prop > /tmp/structural.tamper
+sed 's/$/ 4/' $GATE_TMP/structural.prop > $GATE_TMP/structural.tamper
 drill_structural_prop caps "#2759 file write from a plain fn"
 run_structural_prop "$WS" caps-transitive '(program)' 0
-python3 - > /tmp/structural.tamper <<'PYEOF'
-nodes = open("/tmp/structural.prop").read().split(";")
+python3 - > $GATE_TMP/structural.tamper <<'PYEOF'
+nodes = open(__import__("os").environ["GATE_TMP"] + "/structural.prop").read().split(";")
 k = next(i for i, n in enumerate(nodes) if n.split("|")[0] == "0")  # a plain fn's node: the console only (#3248 dropped stdin)
 d, direct, callees = nodes[k].split("|")
 nodes[k] = "|".join([d, (direct + " 4").strip(), callees])
@@ -862,11 +865,11 @@ drill_structural_prop caps-transitive "#2759 call graph: file write from a plain
 # read that is the frame's own.
 FS=spec/wasm_cross/fs_read_text_utf8.almd
 run_structural_prop "$FS" caps __almd_lift_0 0
-sed 's/^[^|]*|/0|/' /tmp/structural.prop > /tmp/structural.tamper
+sed 's/^[^|]*|/0|/' $GATE_TMP/structural.prop > $GATE_TMP/structural.tamper
 drill_structural_prop caps "#3041 synthesized fn declared plain"
 TO=spec/wasm_cross/fuel_timeout_ends.almd
 run_structural_prop "$TO" caps heavy 0
-sed 's/$/5/' /tmp/structural.prop > /tmp/structural.tamper
+sed 's/$/5/' $GATE_TMP/structural.prop > $GATE_TMP/structural.tamper
 drill_structural_prop caps "#3041 a clock read of the frame's own"
 # #2755: the instance-parallel fan offer (op 74, fan_par_lower.rs) reaches
 # no capability of its own: the workers run the program's exported pure
@@ -876,7 +879,7 @@ drill_structural_prop caps "#3041 a clock read of the frame's own"
 # unknown host operation (the sentinel), as it was before the op was named.
 FPC=spec/wasm_cross/fan_map_parallel_scalar.almd
 run_structural_prop "$FPC" caps main 0
-sed 's/$/ 9/' /tmp/structural.prop > /tmp/structural.tamper
+sed 's/$/ 9/' $GATE_TMP/structural.prop > $GATE_TMP/structural.tamper
 drill_structural_prop caps "#2755 fan offer as an unknown host op"
 
 # ── #2152: almide-verify against the extracted checker on witnesses NO
@@ -890,7 +893,7 @@ drill_structural_prop caps "#2755 fan offer as an unknown host op"
 # certificate bundle — which also exercises the bundle reader on every shape.
 echo
 echo "== almide-verify  ⊳  extracted checker: seeded random differential (#2152) =="
-set +e; portable_agrees ownership /tmp/tamper.witness 0; prc=$?; set -e
+set +e; portable_agrees ownership $GATE_TMP/tamper.witness 0; prc=$?; set -e
 if [ "$prc" -eq 0 ]; then echo "FAIL tamper(iii): the almide-verify leg certified a WRONG verdict (drill broken)"; exit 1; fi
 echo "ok   tamper(iii): a simulated almide-verify divergence is CAUGHT by the agreement leg"
 python3 - "$ROOT/proofs/checker" "$VERIFY" <<'PYEOF'
