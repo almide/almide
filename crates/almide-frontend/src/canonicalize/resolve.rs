@@ -361,7 +361,7 @@ fn canonical_user_type_sym_qualified(name: &str, types: &HashMap<Sym, Ty>) -> Op
     // (#1955). Resolve by unique dotted suffix instead.
     let suffix = format!(".{}", name);
     let mut owners = types.iter().filter(|(k, v)| {
-        k.as_str().ends_with(&suffix) && matches!(v, Ty::Record { .. } | Ty::Variant { .. })
+        matches!(v, Ty::Record { .. } | Ty::Variant { .. }) && k.as_str().ends_with(&suffix)
     });
     let first = owners.next()?;
     if owners.next().is_none() {
@@ -393,7 +393,9 @@ fn canonical_user_type_sym_bare(name: &str, types: &HashMap<Sym, Ty>, cur_mod: O
     };
     if cur_mod.is_none() {
         if let Some(bare) = types.get(&sym(name)) {
-            let is_alias_of_a_qualified = || types.iter().any(|(k, v)| user_module_owner(k) && v == bare);
+            // The value test first: it rejects almost every entry without
+            // resolving the key's text (#3509).
+            let is_alias_of_a_qualified = || types.iter().any(|(k, v)| v == bare && user_module_owner(k));
             match bare {
                 Ty::Record { .. } | Ty::Variant { .. } if !is_alias_of_a_qualified() => return Some(sym(name)),
                 // The entry program's own ALIAS of the name (#3401): not
@@ -419,7 +421,7 @@ fn canonical_user_type_sym_bare(name: &str, types: &HashMap<Sym, Ty>, cur_mod: O
         return Some(*k);
     }
     let mut owners = types.iter().filter(|(k, v)| {
-        user_module_owner(k) && matches!(v, Ty::Record { .. } | Ty::Variant { .. })
+        matches!(v, Ty::Record { .. } | Ty::Variant { .. }) && user_module_owner(k)
     });
     if let Some((k, _)) = owners.next() {
         if owners.next().is_none() {
