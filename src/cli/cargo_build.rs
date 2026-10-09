@@ -155,15 +155,19 @@ pub(super) fn cargo_build_generated(rs_code: &str, project_dir: &std::path::Path
 /// its compilation is amortized. Net: shipping builds drop from ~27-33s to
 /// ~1-2s (~20x).
 ///
-/// Tradeoff: because the runtime is a separate crate (no LTO), non-generic
-/// non-#[inline] runtime fns (e.g. string.trim/split) aren't inlined across
-/// the crate boundary, costing up to ~10% runtime on string/list-heavy hot
-/// loops (typically 2-5%). ThinLTO would recover it but erases the build win
-/// (it re-optimizes the runtime at link time). The planned fix is #[inline]
-/// on the hot runtime fns — see docs/roadmap. `ALMIDE_NO_RTLIB=1` forces the
-/// monolithic cargo build (full cross-crate inlining) when a shipped binary
-/// must squeeze out that last few percent (checked by the caller, before
-/// this is even invoked).
+/// `--release` links with fat LTO and one codegen unit — the profile the
+/// cargo path below writes (`lto = true`, `codegen-units = 1`) and the flags
+/// the handwritten Rust references are measured with. Without it the runtime
+/// and std sit behind a crate boundary nothing inlines across: measured
+/// 2026-10-09 (arm64 macOS, best-of-7 medians), `onebrc agg` over 2M lines
+/// ran 0.245 s without LTO against 0.203 s with it (thin LTO: 0.204 s;
+/// `codegen-units=1` alone: 0.242 s — the boundary, not the unit count, is
+/// the cost), `strchurn 4000000` 0.211 s against 0.194 s. A
+/// `#[inline]` on the runtime wrappers would not recover it: a monolithic
+/// non-LTO build of the same source measured the same as the rlib build.
+/// The price is link time on release builds only — ~0.3 s → ~2.2 s for
+/// these programs; the debug / `almide run` builds keep the fast link.
+/// `ALMIDE_NO_RTLIB=1` still forces the monolithic cargo build.
 ///
 /// Returns `None` on ANY failure (a `?`-propagated missing rlib/slim-main,
 /// a write failure, or a nonzero rustc exit) — the caller falls through to
@@ -171,6 +175,10 @@ pub(super) fn cargo_build_generated(rs_code: &str, project_dir: &std::path::Path
 /// regresses, only the speedup is forfeited. Extracted verbatim (the
 /// original's `if let (Ok(_), Some(_))` tuple-match + nested `if`s become
 /// this function's `?` chain — same "either piece missing → skip" semantics).
+/// The link profile a `--release` fast-path build adds: the cargo path's
+/// `[profile.release]` (`lto = true`, `codegen-units = 1`), spelled for rustc.
+const FAST_PATH_RELEASE_ARGS: [&str; 4] = ["-C", "lto=fat", "-C", "codegen-units=1"];
+
 fn try_rlib_fast_build(rs_code: &str, project_dir: &std::path::Path, release: bool) -> Option<std::path::PathBuf> {
     let opt_level = if release { "3" } else { "1" };
     let rlib = ensure_runtime_rlib(opt_level).ok()?;
@@ -190,6 +198,9 @@ fn try_rlib_fast_build(rs_code: &str, project_dir: &std::path::Path, release: bo
         .arg("--extern").arg(format!("almide_rt={}", rlib.display()))
         .arg("-L").arg(rlib_dir)
         .arg("-A").arg("warnings");
+    if release {
+        cmd.args(FAST_PATH_RELEASE_ARGS);
+    }
     let output = cmd.output().ok()?;
     if output.status.success() {
         Some(bin_path)
@@ -626,7 +637,7 @@ fn contains_rustc_error_code(text: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{contains_rustc_error_code, defines_entry_point};
+    use super::{contains_rustc_error_code, defines_entry_point, FAST_PATH_RELEASE_ARGS, GENERATED_CARGO_TOML};
 
     #[test]
     fn detects_4_digit_rustc_code() {
@@ -693,5 +704,15 @@ mod tests {
     #[test]
     fn an_indented_main_is_not_the_crate_entry_point() {
         assert!(!defines_entry_point("mod inner {\n    pub fn main() {}\n}\n"));
+    }
+
+    /// The fast path short-circuits the cargo build; a `--release` binary it
+    /// links must carry the profile the cargo path would have written.
+    #[test]
+    fn the_release_fast_path_links_with_the_cargo_release_profile() {
+        let release = GENERATED_CARGO_TOML.split("[profile.release]").nth(1).expect("a release profile");
+        assert!(release.contains("lto = true") && release.contains("codegen-units = 1"), "{release}");
+        assert!(FAST_PATH_RELEASE_ARGS.contains(&"lto=fat"), "{FAST_PATH_RELEASE_ARGS:?}");
+        assert!(FAST_PATH_RELEASE_ARGS.contains(&"codegen-units=1"), "{FAST_PATH_RELEASE_ARGS:?}");
     }
 }
