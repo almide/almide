@@ -474,6 +474,20 @@ where K: std::borrow::Borrow<Q> { m.contains_key(k) }
 pub fn almide_rt_map_keys<K: Clone, V>(m: &AlmideMap<K, V>) -> Vec<K> { m.keys().cloned().collect() }
 pub fn almide_rt_map_values<K, V: Clone>(m: &AlmideMap<K, V>) -> Vec<V> { m.values().cloned().collect() }
 pub fn almide_rt_map_entries<K: Clone, V: Clone>(m: &AlmideMap<K, V>) -> Vec<(K, V)> { m.iter().map(|(k, v)| (k.clone(), v.clone())).collect() }
+// The OWNED twins of the whole-map reads (`owned_source.rs`, the #3398
+// mechanism the list range ops use). Where the source map is not read again
+// — its last use, or a temporary such as `list.group_by(..)`'s result —
+// BorrowLowering hands it over by value and the twin MOVES every key and
+// value out instead of cloning it. `map_values_owned` also keeps the source's
+// key index: the keys and their order are unchanged, so the hashes and the
+// slot table stay valid as they are and nothing is rehashed.
+pub fn almide_rt_map_keys_owned<K, V>(m: AlmideMap<K, V>) -> Vec<K> { m.entries.into_iter().map(|(k, _)| k).collect() }
+pub fn almide_rt_map_values_owned<K, V>(m: AlmideMap<K, V>) -> Vec<V> { m.entries.into_iter().map(|(_, v)| v).collect() }
+pub fn almide_rt_map_entries_owned<K, V>(m: AlmideMap<K, V>) -> Vec<(K, V)> { m.entries }
+pub fn almide_rt_map_map_values_owned<K, V, W>(m: AlmideMap<K, V>, f: std::rc::Rc<dyn Fn(V) -> W>) -> AlmideMap<K, W> {
+    let AlmideMap { entries, lookup } = m;
+    AlmideMap { entries: entries.into_iter().map(|(k, v)| (k, f(v))).collect(), lookup }
+}
 pub fn almide_rt_map_merge<K: PartialEq + Clone + 'static, V: Clone>(a: &AlmideMap<K, V>, b: &AlmideMap<K, V>) -> AlmideMap<K, V> { let mut r = a.clone(); for (k, v) in b.iter() { r.insert(k.clone(), v.clone()); } r }
 
 pub fn almide_rt_map_filter<K: PartialEq + Clone + 'static, V: Clone>(m: &AlmideMap<K, V>, f: std::rc::Rc<dyn Fn(K, V) -> bool>) -> AlmideMap<K, V> {
