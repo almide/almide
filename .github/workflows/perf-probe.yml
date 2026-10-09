@@ -68,10 +68,9 @@ jobs:
         run: |
           set +e
           mkdir -p /tmp/regen
-          ALMIDE_UPDATE_SIZES=1 cargo test --release -p almide-wasm --test size_ratchet 2>&1 | tail -20
+          cargo test --release -p almide-wasm --test size_ratchet 2>&1 | tail -20
           cargo test --release --test codegen_snapshot_test --test literal_prefix_concat_alloc_test --test accumulate_in_place_test --test tco_accumulator_move_test --test codegen_v3_compare 2>&1 | grep -E "^test |test result|panicked|FAILED|error" | tail -60
           cargo test --release --test native_borrow_oracle_test 2>&1 | grep -E "test result|FAILED|panicked" | tail -20
-          ALMIDE_UPDATE_ALLOC=1 cargo test --release --test native_borrow_oracle_test alloc 2>&1 | tail -5
           git status --short
           git diff --stat
           git diff > /tmp/regen/ledgers.diff
@@ -86,7 +85,7 @@ jobs:
         env:
           PROBE_ONLY: ${{ github.event.inputs.only || 'listbuild_prealloc,listbuild_notrig,trig_only,fft,strchurn,strchurn_parts,strchurn_join,strchurn_split,itoa_only,mapbuild_str,onebrc,onebrc_gen,onebrc_agg' }}
           PROBE_OUT: /tmp/perf-probe
-          PROBE_SECTIONS: time,ir,alloc
+          PROBE_SECTIONS: alloc
         run: |
           nproc; uname -a; lscpu | grep -E 'Model name|MHz' || true
           bash .github/perf-probe/run.sh | tee /tmp/perf-probe-report.txt
