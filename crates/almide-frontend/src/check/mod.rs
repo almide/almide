@@ -1194,7 +1194,7 @@ impl Checker {
         // post-solve flush below can upgrade it. Pre-solve the entry's
         // top-lets in the same isolated bracket the module refresh uses; the
         // real pass right after re-checks them and owns all reporting.
-        self.refresh_module_top_lets(program, "__entry");
+        self.refresh_top_lets(program, toplet_order::TopLetScope::Entry);
         self.validate_protocol_refs(program);
         self.validate_bare_type_visibility(program);
         self.validate_qualified_type_heads(program);

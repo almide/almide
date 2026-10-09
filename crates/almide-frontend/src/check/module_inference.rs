@@ -128,6 +128,13 @@ impl Checker {
     /// bracket as `infer_module`; decls are cloned so the module AST stays
     /// pristine for the real inference later.
     pub fn refresh_module_top_lets(&mut self, prog: &ast::Program, module_name: &str) {
+        self.refresh_top_lets(prog, toplet_order::TopLetScope::Module(module_name));
+    }
+
+    /// The top-let pre-pass, for a module or — reached only from
+    /// `infer_program` — the entry program (#3485).
+    fn refresh_top_lets(&mut self, prog: &ast::Program, scope: toplet_order::TopLetScope<'_>) {
+        let module_name = scope.module_name();
         if !prog.decls.iter().any(|d| matches!(d, ast::Decl::TopLet { .. })) {
             return;
         }
@@ -223,8 +230,9 @@ impl Checker {
         // #3164: the ENTRY program has no prefixed key to carry the result —
         // its bare keys are the real ones — so the refreshed types go back
         // onto them, where the main pass reads them. (A module's prefixed keys
-        // survive the restore; `infer_module` adopts them.)
-        if module_name == "__entry" {
+        // survive the restore; `infer_module` adopts them.) The entry is
+        // known by the scope tag, not by a name a user module can take (#3485).
+        if matches!(scope, toplet_order::TopLetScope::Entry) {
             toplet_order::adopt_top_lets(&mut self.env, toplet_order::unqualify_entry(refreshed));
         }
     }
