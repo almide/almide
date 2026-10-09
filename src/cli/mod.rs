@@ -232,7 +232,12 @@ fn incremental_cache_dir() -> std::path::PathBuf {
 /// `cmd_build`'s native path (`build.rs`) and `compile_to_binary_with`
 /// (`run.rs`), which had identical copies of this try/fallback logic gated
 /// behind their own (different) `native_verified` conditions.
-pub(crate) fn render_v1_native_or_fallback(file: &str, rs_code: String) -> String {
+///
+/// `uses_metered_prims` is read from the program's IR
+/// (`almide_ir::runtime_use::uses_metered_prims`), never from `rs_code`: a
+/// user string literal is emitted into that text verbatim, and
+/// `println("almide_rt_prim_budget_x")` was refused here (#3486).
+pub(crate) fn render_v1_native_or_fallback(file: &str, rs_code: String, uses_metered_prims: bool) -> String {
     let source_text = almide::source_overlay::read_to_string(file).unwrap_or_default();
     match almide_mir::pipeline::try_render_rust_source(&source_text) {
         Ok(v1_code) => {
@@ -257,7 +262,7 @@ pub(crate) fn render_v1_native_or_fallback(file: &str, rs_code: String) -> Strin
             // that do not exist, so the fallback would die later as an opaque
             // rustc E0425 in generated code. Refuse with the wall reason
             // instead (same honesty rule as the probe above).
-            if rs_code.contains("almide_rt_prim_budget_") || rs_code.contains("almide_rt_prim_timeout_") {
+            if uses_metered_prims {
                 err(&format!(
                     "error: fan.bounded / fan.race require the v1 native render, but it walled\n  reason: {e}\n  hint: budgets are metered on the trust spine only; simplify the program to the v1 subset or build for --target wasm"
                 ));
