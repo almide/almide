@@ -656,7 +656,7 @@ impl Emitter<'_> {
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
         self.hof_elem_into(elem, bh, ch, ih, x_p);
         self.witness_callback_open(cb, Some(acc_p));
-        self.lower(body, Some(b))?;
+        self.lower_fold_body(cb, body, b)?;
         // The accumulator OWNS one credit on every step: a borrowed body
         // result (a captured var, the accumulator itself) takes its share,
         // and the previous accumulator is released before the rebind

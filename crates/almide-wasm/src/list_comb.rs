@@ -481,7 +481,7 @@ impl Emitter<'_> {
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
         self.hof_elem_into(elem, bh, ch, ih, params[1]);
         self.witness_callback_open(cb, Some(params[0]));
-        self.lower(body, Some(elem))?;
+        self.lower_fold_body(cb, body, elem)?;
         self.rc_share_guard(body, elem);
         if let Some(dec) = self.elem_is_handle(elem).then(|| self.dec_fn_of(elem)) {
             self.f.instructions().local_get(params[0]).call(dec);

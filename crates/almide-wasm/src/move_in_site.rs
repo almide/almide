@@ -132,6 +132,15 @@ pub(super) fn move_in_site(stmts: &[IrStmt], tail: Option<&IrExpr>, i: usize) ->
     (!at.is_empty()).then_some(MoveIn { at, subject, last })
 }
 
+/// The move-in sites of a fold body: the fold rebinds the accumulator
+/// `acc` to the body's value right after it, so the body is the value of
+/// an `acc = body` statement.
+pub(super) fn fold_site(body: &IrExpr, acc: VarId) -> Option<MoveIn> {
+    let mut at = Vec::new();
+    exit_calls(body, &[Place::Var(acc)], &mut at);
+    (!at.is_empty()).then_some(MoveIn { at, subject: None, last: usize::MAX })
+}
+
 /// The index of the statement after `i` that rebinds `var` (`var = …` not
 /// reading it) with nothing between that reads it or may leave the block —
 /// or, past the last statement, a tail that rebinds it first on every path
