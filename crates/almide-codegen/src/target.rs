@@ -46,6 +46,7 @@ use super::pass_top_let_storage::TopLetStoragePass;
 use super::pass_var_storage::VarStoragePass;
 use super::pass_borrow_lowering::BorrowLoweringPass;
 use super::pass_slice_binders::SliceBindersPass;
+use super::pass_str_map_key::StrMapKeyPass;
 use super::pass_ir_link_flatten::IrLinkFlattenPass;
 use super::template::TemplateSet;
 
@@ -212,6 +213,9 @@ fn build_pipeline(target: Target) -> Pipeline {
                 // of the subject (`split_once` / `strip_prefix` /
                 // `strip_suffix`'s `_ref` twins) — reads the final spellings.
                 .add(SliceBindersPass)
+                // A String-keyed `map.set` / `map.upsert` whose key is
+                // `k.to_string()` takes `k` borrowed (copied on insert only).
+                .add(StrMapKeyPass)
         }
 
         Target::Wgsl => Pipeline::new()
