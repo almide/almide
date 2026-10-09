@@ -176,6 +176,10 @@ pub struct TypeEnv {
     /// whether its body reaches a `var` — computed over the resolved module
     /// set at canonicalization, read by every program's reach check.
     pub concurrent_summaries: crate::concurrent_reach::Summaries,
+    /// No fn of the compilation carries `@pure`, so the call graph E092
+    /// judges is never read and the checker does not record it (#3509).
+    /// Set only by a canonicalization that saw every program it will check.
+    pub pure_fns_absent: bool,
     /// The package's own module name (set when `register_module` is called with `is_self: true`).
     /// Used to resolve `import self` in the main file.
     pub self_module_name: Option<Sym>,
@@ -336,6 +340,7 @@ impl TypeEnv {
             user_modules: std::collections::HashSet::new(),
             dep_root_modules: std::collections::HashSet::new(),
             concurrent_summaries: std::collections::HashMap::new(),
+            pure_fns_absent: false,
             self_module_name: None,
             import_table: ImportTable::new(),
             fn_visibility: std::collections::HashMap::new(),
@@ -729,13 +734,13 @@ impl TypeEnv {
         }
     }
 
-    /// #3274: the effect fn the local `name` currently resolves to holding —
-    /// `None` when the visible binding holds no effect fn value.
-    pub fn effect_alias(&self, name: &str) -> Option<Sym> {
-        let key = sym(name);
+    /// #3274: the effect fn the local `key` currently resolves to holding —
+    /// `None` when no local is named `key`, `Some(None)` when the visible
+    /// binding holds no effect fn value. One scope walk answers both.
+    pub fn binding_effect_alias(&self, key: Sym) -> Option<Option<Sym>> {
         self.scopes.iter().zip(self.effect_aliases.iter()).rev()
             .find(|(scope, _)| scope.contains_key(&key))
-            .and_then(|(_, aliases)| aliases.get(&key).copied())
+            .map(|(_, aliases)| aliases.get(&key).copied())
     }
 
     pub fn define_var_at(&mut self, name: &str, ty: Ty, line: usize, col: usize) {
@@ -748,12 +753,9 @@ impl TypeEnv {
     }
 
     pub fn lookup_var(&self, name: &str) -> Option<&Ty> {
-        for scope in self.scopes.iter().rev() {
-            if let Some(ty) = scope.get(&sym(name)) {
-                return Some(ty);
-            }
-        }
-        None
+        // Interned once, not once per scope (#3509).
+        let key = sym(name);
+        self.scopes.iter().rev().find_map(|scope| scope.get(&key))
     }
 
     /// Collect all visible names (variables, top_lets, functions, builtins) for "did you mean?" suggestions.
