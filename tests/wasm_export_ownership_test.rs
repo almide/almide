@@ -10,16 +10,12 @@
 //!    one now gets the emitter's `duplicate wasm export name` wall; an
 //!    undeclared pub fn of that name is simply not exported.
 //!
-//! Runs the `almide` binary (`ALMIDE_BIN`, else `target/release/almide`).
+//! Runs the `almide` binary (`ALMIDE_BIN`, else the one cargo built).
 
-use std::path::Path;
 use std::process::{Command, Output};
 
 fn almide_bin() -> String {
-    if let Ok(bin) = std::env::var("ALMIDE_BIN") {
-        return bin;
-    }
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("target/release/almide").to_string_lossy().into_owned()
+    std::env::var("ALMIDE_BIN").unwrap_or_else(|_| env!("CARGO_BIN_EXE_almide").to_string())
 }
 
 /// `almide build <source> --target wasm`, as (output, artifact bytes if any).

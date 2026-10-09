@@ -7,16 +7,13 @@
 //! program's stderr). The count now comes from the set of tests the runner is
 //! synthesized over, and the meter reading travels on its own channel.
 //!
-//! Runs the `almide` binary (`ALMIDE_BIN`, else `target/release/almide`).
+//! Runs the `almide` binary (`ALMIDE_BIN`, else the one cargo built).
 
 use std::path::Path;
 use std::process::{Command, Output};
 
 fn almide_bin() -> String {
-    if let Ok(bin) = std::env::var("ALMIDE_BIN") {
-        return bin;
-    }
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("target/release/almide").to_string_lossy().into_owned()
+    std::env::var("ALMIDE_BIN").unwrap_or_else(|_| env!("CARGO_BIN_EXE_almide").to_string())
 }
 
 fn almide(dir: &Path, args: &[&str]) -> Output {
