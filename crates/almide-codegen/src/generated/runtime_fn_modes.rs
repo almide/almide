@@ -19,7 +19,8 @@ pub fn takes_raw_fn_last_arg(name: &str) -> bool {
         "almide_rt_value_decode_option_custom_ref" |
         "almide_rt_value_decode_with_default" |
         "almide_rt_value_encode_list" |
-        "almide_rt_value_option_encode"
+        "almide_rt_value_option_encode" |
+        "upsert_with"
     )
 }
 
@@ -421,6 +422,7 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_list_get" => &[false, false],
         "almide_rt_list_get_or" => &[false, false, false],
         "almide_rt_list_group_by" => &[false, false],
+        "almide_rt_list_group_count" => &[false, false],
         "almide_rt_list_index_of" => &[false, false],
         "almide_rt_list_insert" => &[false, false, false],
         "almide_rt_list_intersperse" => &[false, false],
@@ -484,6 +486,7 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_map_delete" => &[true, false],
         "almide_rt_map_each" => &[false, false],
         "almide_rt_map_entries" => &[false],
+        "almide_rt_map_entries_owned" => &[false],
         "almide_rt_map_filter" => &[false, false],
         "almide_rt_map_find" => &[false, false],
         "almide_rt_map_fold" => &[false, false, false],
@@ -497,8 +500,10 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_map_is_empty" => &[false],
         "almide_rt_map_key_hash" => &[false],
         "almide_rt_map_keys" => &[false],
+        "almide_rt_map_keys_owned" => &[false],
         "almide_rt_map_len" => &[false],
         "almide_rt_map_map_values" => &[false, false],
+        "almide_rt_map_map_values_owned" => &[false, false],
         "almide_rt_map_merge" => &[false, false],
         "almide_rt_map_mix64" => &[false],
         "almide_rt_map_new" => &[],
@@ -507,6 +512,7 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_map_update" => &[false, false, false],
         "almide_rt_map_upsert" => &[false, false, false, false],
         "almide_rt_map_values" => &[false],
+        "almide_rt_map_values_owned" => &[false],
         "almide_rt_math_abs" => &[false],
         "almide_rt_math_acos" => &[false],
         "almide_rt_math_asin" => &[false],
