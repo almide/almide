@@ -584,6 +584,9 @@ fn render_stmt_index_assign(ctx: &RenderContext, stmt: &IrStmt) -> String {
 
 fn render_stmt_map_insert(ctx: &RenderContext, stmt: &IrStmt) -> String {
     let IrStmtKind::MapInsert { target, key, value } = &stmt.kind else { unreachable!() };
+    if let Some(fused) = try_render_map_upsert(ctx, *target, key, value) {
+        return fused;
+    }
     let key_str = render_expr(ctx, key);
     let val_str = render_expr(ctx, value);
     // A plain-var key: the clone pass counted the value's uses FIRST (so the
@@ -706,3 +709,4 @@ fn render_stmt_bind_destructure(ctx: &RenderContext, stmt: &IrStmt) -> String {
 }
 
 include!("statements_box_patterns.rs");
+include!("statements_map_upsert.rs");
