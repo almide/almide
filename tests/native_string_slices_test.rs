@@ -184,11 +184,42 @@ effect fn main() -> Unit = {
     assert!(!main.contains(")).clone()") && !main.contains("i64)).clone()"), "`almide_index!` already copies the element; no second clone:\n{main}");
 }
 
+const INDEX_READS: &str = r#"
+effect fn main() -> Unit = {
+  let names = ["a", "bb", "ccc"]
+  for i in 0..<5 {
+    let name = names[i % 3]
+    let next = names[(i + 1) % 3]
+    println("${name}>${next}")
+  }
+}
+"#;
+
+#[test]
+fn a_let_of_an_arithmetic_index_only_printed_borrows_into_the_list() {
+    if !tool_available() { eprintln!("skipping: almide binary not available"); return; }
+    let rust = emitted(INDEX_READS, "index_ref");
+    let main = fn_body(&rust, "__almide_main");
+    assert!(main.contains("let name: _ = almide_index_ref!(names, almide_mod!(i, 3i64));"), "`names[i % 3]` read only by an interpolation borrows:\n{main}");
+    assert!(main.contains("almide_index_ref!(names, almide_mod!((i).wrapping_add(1i64), 3i64))"), "a compound arithmetic index borrows too:\n{main}");
+    assert!(!main.contains("almide_index!(names"), "no element is copied:\n{main}");
+    with_program(INDEX_READS, "index_ref_run", |src| {
+        let expected = "a>bb\nbb>ccc\nccc>a\na>bb\nbb>ccc\n";
+        assert_eq!(run(src, false), expected, "native");
+        assert_eq!(run(src, true), expected, "wasm");
+    });
+}
+
+/// Run on wasm, or natively through the codegen these rewrites live in: the
+/// default native `run` renders the v1 MIR first where it lowers, so the
+/// codegen leg is pinned with the retired-flag override.
 fn run(src: &Path, wasm: bool) -> String {
     let mut cmd = Command::new(almide_bin());
     cmd.arg("run").arg(src);
     if wasm {
         cmd.args(["--target", "wasm"]);
+    } else {
+        cmd.arg("--no-verified").env("ALMIDE_NO_VERIFIED_OK", "1");
     }
     let output = cmd.output().expect("failed to spawn almide");
     assert!(output.status.success(), "run failed (wasm={wasm}):\n{}", String::from_utf8_lossy(&output.stderr));
