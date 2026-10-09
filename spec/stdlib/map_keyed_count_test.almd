@@ -5,7 +5,6 @@
 // short length (the 1..=7-byte tail is read with overlapping loads). Every
 // case is past the 16-entry index threshold, and every answer is the one the
 // unfused spelling gives — on both legs.
-
 fn word(i: Int) -> String = {
   let len = i % 21
   let letters = list.range(0, len) |> list.map((j) => string.from_codepoint(97 + (i * 7 + j * 3) % 26))
@@ -14,8 +13,10 @@ fn word(i: Int) -> String = {
 
 fn draws(n: Int) -> List[String] = list.range(0, n) |> list.map((i) => word((i * 37) % 300))
 
-fn count_two_step(ws: List[String]) -> Map[String, Int] =
-  ws |> list.fold(map.new(), (m, w) => map.set(m, w, (map.get(m, w) ?? 0) + 1))
+fn count_two_step(ws: List[String]) -> Map[String, Int] = ws |> list.fold(
+  map.new(),
+  (m, w) => map.set(m, w, (map.get(m, w) ?? 0) + 1),
+)
 
 test "the one-probe update counts like the two-step fold" {
   let ws = draws(3000)
@@ -98,8 +99,7 @@ test "whole-map reads at the last use and before it agree" {
 
 test "String keys of every short length stay distinct" {
   // Keys sharing their first and last four bytes, and every length 0..20.
-  let keys = list.range(0, 21)
-    |> list.flat_map((n) => ["abcd", "abce", "bbcd", "abzd"] |> list.map((p) => string.take(string.repeat(p, 6), n)))
+  let keys = list.range(0, 21) |> list.flat_map((n) => ["abcd", "abce", "bbcd", "abzd"] |> list.map((p) => string.take(string.repeat(p, 6), n)))
   var m: Map[String, Int] = map.new()
   for k in keys {
     m[k] = map.get_or(m, k, 0) + 1
