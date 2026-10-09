@@ -578,7 +578,7 @@ impl Emitter<'_> {
                 self.f.instructions().local_set(x_p);
                 // #2755: the list.fold activation (`witness_fold_step`).
                 self.witness_callback_open(cb, Some(acc_p));
-                self.lower(body, Some(b))?;
+                self.lower_fold_body(cb, body, b)?;
                 // Same three-part change as `map.fold` (`collections.rs`) and the
                 // staged `list.fold` (`list.rs:647`): share the borrowed body
                 // result, release the PREVIOUS accumulator before the rebind, and

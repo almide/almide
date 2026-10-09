@@ -154,7 +154,7 @@ impl Emitter<'_> {
             i.memory_copy(0, 0);
         }
         let line = self.witness_line_open(cb, crate::fs::witness_walkers::WalkAcc::Carried(Some(params[0])));
-        self.lower(body, Some(acc_ty))?;
+        self.lower_fold_body(cb, body, acc_ty)?;
         // The list.fold discipline: the accumulator owns one credit on every
         // step — a borrowed body result takes its share, and the previous
         // accumulator is released before the rebind.

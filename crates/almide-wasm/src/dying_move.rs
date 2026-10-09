@@ -44,11 +44,12 @@ use crate::types_table::NamedDef;
 use crate::*;
 
 /// The Var read a consuming `value` would move, if it is one: the
-/// receiver of `map.set`, or the base of a spread.
+/// receiver of `map.set` / `map.upsert`, or the base of a spread.
 fn consumed_read(value: &IrExpr) -> Option<&IrExpr> {
     let read = match &value.kind {
         IrExprKind::Call { target: almide_ir::CallTarget::Module { module, func, .. }, args, .. }
-            if module.as_str() == "map" && func.as_str() == "set" && args.len() == 3 =>
+            if module.as_str() == "map"
+                && matches!((func.as_str(), args.len()), ("set", 3) | ("upsert", 4)) =>
         {
             &args[0]
         }
@@ -56,6 +57,52 @@ fn consumed_read(value: &IrExpr) -> Option<&IrExpr> {
         _ => return None,
     };
     matches!(read.kind, IrExprKind::Var { .. }).then_some(read)
+}
+
+/// An expression whose evaluation cannot trap, print or diverge — a
+/// literal, a read, or a record / tuple / list built of such — so building
+/// it later, or not at all, is unobservable.
+fn inert(e: &IrExpr) -> bool {
+    match &e.kind {
+        IrExprKind::LitInt { .. }
+        | IrExprKind::LitFloat { .. }
+        | IrExprKind::LitStr { .. }
+        | IrExprKind::LitBool { .. }
+        | IrExprKind::Unit
+        | IrExprKind::Var { .. } => true,
+        IrExprKind::Record { fields, .. } => fields.iter().all(|(_, f)| inert(f)),
+        IrExprKind::Tuple { elements } | IrExprKind::List { elements } => elements.iter().all(inert),
+        _ => false,
+    }
+}
+
+/// The consumed Var reads ([`consumed_read`]) at the result leaves of `e`.
+/// A match whose subject reads the var is not seen through: its bindings
+/// are views into that block, which an in-place write would change under
+/// them.
+fn tail_consumed_reads<'e>(e: &'e IrExpr, subjects: &mut Vec<&'e IrExpr>, out: &mut Vec<&'e IrExpr>) {
+    match &e.kind {
+        IrExprKind::Block { expr: Some(t), .. } => tail_consumed_reads(t, subjects, out),
+        IrExprKind::If { then, else_, .. } => {
+            tail_consumed_reads(then, subjects, out);
+            tail_consumed_reads(else_, subjects, out);
+        }
+        IrExprKind::Match { subject, arms } => {
+            subjects.push(subject.as_ref());
+            for a in arms {
+                tail_consumed_reads(&a.body, subjects, out);
+            }
+            subjects.pop();
+        }
+        _ => {
+            if let Some(read) = consumed_read(e)
+                && let IrExprKind::Var { id } = &read.kind
+                && !subjects.iter().any(|s| crate::rc_ownership::rc_mentions_var(s, *id))
+            {
+                out.push(read);
+            }
+        }
+    }
 }
 
 /// How the spread's field values read the base `b`: `None` when anything
@@ -191,6 +238,22 @@ impl Emitter<'_> {
         }
     }
 
+    /// The tail form of [`Self::note_dying`] — the frame's tail (`var`
+    /// `None`), or a fold body whose accumulator `var` is rebound to its
+    /// value: every result leaf of `body` (a block's tail, both arms of an
+    /// `if`, each arm of a `match`) is a last read.
+    pub(crate) fn note_dying_tail(&mut self, body: &IrExpr, var: Option<VarId>, on: bool) {
+        let mut reads = Vec::new();
+        tail_consumed_reads(body, &mut Vec::new(), &mut reads);
+        for read in reads {
+            if let IrExprKind::Var { id } = &read.kind
+                && var.is_none_or(|v| v == *id)
+            {
+                self.owned_call_marks.set_dying(read, on);
+            }
+        }
+    }
+
     /// The local of the var `read` names when the read was noted dying and
     /// the frame holds the var's credit in a plain local — consuming the
     /// note. `None`: the read shares as before.
@@ -209,25 +272,102 @@ impl Emitter<'_> {
         self.witness_move_and_empty(id, false);
     }
 
-    /// `map.set(m, k, v)` over a receiver whose credit the op may take
-    /// (see the module doc); `None` keeps the borrowed-receiver copy.
-    pub(crate) fn try_map_set_owned(&mut self, m: &IrExpr, key: &IrExpr, value: &IrExpr) -> Result<Option<Lowered>, EmitError> {
+    /// The receiver `m` of a consuming map op whose credit the op may take:
+    /// `Some(dying)` — the dying var whose local the op empties, if the
+    /// receiver is one — or `None` when `m` is borrowed (the op copies). A
+    /// dying var one of the op's other `operands` still reads is not moved.
+    fn owned_receiver(&mut self, m: &IrExpr, operands: &[&IrExpr]) -> Option<Option<(VarId, u32, SliceTy)>> {
         if self.metered {
-            return Ok(None);
+            return None;
         }
         let dying = if self.owned_call_marks.is_dying(m) {
             let dying = self.dying_local(m);
-            let mentioned = dying.is_some_and(|(id, ..)| {
-                crate::rc_ownership::rc_mentions_var(key, id) || crate::rc_ownership::rc_mentions_var(value, id)
-            });
+            let mentioned =
+                dying.is_some_and(|(id, ..)| operands.iter().any(|o| crate::rc_ownership::rc_mentions_var(o, id)));
             if mentioned { None } else { dying }
         } else {
             None
         };
         // An owned temporary, or a moved slot (owned once lowered).
         if dying.is_none() && !self.rc_owned_result(m) && !self.owned_call_marks.has_take(m) {
-            return Ok(None);
+            return None;
         }
+        Some(dying)
+    }
+
+    /// `map.upsert(m, k, init, cb)` over a receiver whose credit the op may
+    /// take: one scan, the callback over the present value (or `init`), then
+    /// the judged write of map.set — in place when the credit is the block's
+    /// only one. `None` keeps the borrowed-receiver copy (collections_hof.rs).
+    pub(crate) fn try_map_upsert_owned(&mut self, m: &IrExpr, ops: [&IrExpr; 3]) -> Result<Option<Lowered>, EmitError> {
+        let [key, init, cb] = ops;
+        let (params, body) = self.hof_lambda(cb, 1)?;
+        let Some(dying) = self.owned_receiver(m, &ops) else { return Ok(None) };
+        self.owned_call_marks.set_moving(m, dying.is_some());
+        let got = self.lower_arg(m, None, ArgMode::Retain)?;
+        self.owned_call_marks.set_moving(m, false);
+        let SliceTy::Map(kt, vt) = got else {
+            return unsup(&format!("map-op-of:{got:?}"));
+        };
+        let (k, v) = (self.types.el(kt), self.types.el(vt));
+        let mh = self.hold_i32()?;
+        self.f.instructions().local_set(mh);
+        if let Some((id, idx, _)) = dying {
+            self.empty_dying(id, idx);
+        }
+        let fns = self.map_set_fns(k, v)?;
+        let kh = self.hold_for(k)?;
+        self.lower_arg(key, Some(k), ArgMode::Retain)?;
+        self.f.instructions().local_set(kh);
+        // `ih` ends up holding the value stored: init, or the callback's.
+        let ih = self.hold_for(v)?;
+        // An inert init (literals, reads, constructors of them) cannot trap
+        // or print, so it is built only where it is stored: the absent arm.
+        let lazy = inert(init);
+        if !lazy {
+            self.lower_arg(init, Some(v), ArgMode::Retain)?;
+            self.f.instructions().local_set(ih);
+        }
+        let (oh, eh) = (self.hold_i32()?, self.hold_i32()?);
+        self.emit_map_scan_into(mh, kh, eh, (k, v), fns);
+        // present: the callback over the entry's value (a view); an eager
+        // init's unused Retain credit goes back.
+        let voff = crate::collections::entry_layout(k, v).1 as i32;
+        self.f.instructions().local_get(eh).if_(BlockType::Empty);
+        self.f.instructions().local_get(eh).i32_const(voff).i32_add();
+        self.load_ty_slot_at(v);
+        self.f.instructions().local_set(params[0]);
+        // #2755: a present key runs the callback once.
+        self.witness_once_open(cb);
+        self.lower(body, Some(v))?;
+        self.rc_share_guard(body, v);
+        self.witness_store(body, v);
+        if !lazy {
+            self.emit_release_hold(ih, v);
+        }
+        self.f.instructions().local_set(ih);
+        self.witness_once_arm();
+        if lazy {
+            self.f.instructions().else_();
+            self.lower_arg(init, Some(v), ArgMode::Retain)?;
+            self.f.instructions().local_set(ih);
+        }
+        self.f.instructions().end();
+        self.witness_once_close();
+        self.emit_map_set_judged_at(mh, kh, ih, (oh, eh), (k, v), fns)?;
+        self.f.instructions().local_get(mh);
+        self.release_i32(); // eh
+        self.release_i32(); // oh
+        self.release_for(v);
+        self.release_for(k);
+        self.release_i32(); // mh
+        Ok(Some(Lowered::owned(got)))
+    }
+
+    /// `map.set(m, k, v)` over a receiver whose credit the op may take
+    /// (see the module doc); `None` keeps the borrowed-receiver copy.
+    pub(crate) fn try_map_set_owned(&mut self, m: &IrExpr, key: &IrExpr, value: &IrExpr) -> Result<Option<Lowered>, EmitError> {
+        let Some(dying) = self.owned_receiver(m, &[key, value]) else { return Ok(None) };
         self.owned_call_marks.set_moving(m, dying.is_some());
         let got = self.lower_arg(m, None, ArgMode::Retain)?;
         self.owned_call_marks.set_moving(m, false);

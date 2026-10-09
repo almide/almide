@@ -228,18 +228,44 @@ impl Emitter<'_> {
         (k, v): (SliceTy, SliceTy),
         MapSetFns { scan, append, reserve, drop_map }: MapSetFns,
     ) -> Result<(), EmitError> {
-        let lay = crate::collections::entry_layout(k, v);
-        let (koff, voff, esz) = (lay.0 as i32, lay.1 as i32, lay.2 as i32);
+        let fns = MapSetFns { scan, append, reserve, drop_map };
         let oh = self.hold_i32()?;
         let eh = self.hold_i32()?;
+        self.emit_map_scan_into(mh, kh, eh, (k, v), fns);
+        self.emit_map_set_judged_at(mh, kh, vh, (oh, eh), (k, v), fns)?;
+        self.release_i32(); // eh
+        self.release_i32(); // oh
+        Ok(())
+    }
+
+    /// The keyed scan of a judged set: the ABSOLUTE address of `kh`'s
+    /// entry in `mh` (0 = absent) into `eh`.
+    pub(crate) fn emit_map_scan_into(&mut self, mh: u32, kh: u32, eh: u32, (k, v): (SliceTy, SliceTy), fns: MapSetFns) {
+        let lay = crate::collections::entry_layout(k, v);
         self.f
             .instructions()
             .local_get(mh)
-            .i32_const(esz)
-            .i32_const(koff)
+            .i32_const(lay.2 as i32)
+            .i32_const(lay.0 as i32)
             .local_get(kh)
-            .call(scan)
+            .call(fns.scan)
             .local_set(eh);
+    }
+
+    /// [`Self::emit_map_set_judged`] once the scan has run: `eh` is the
+    /// entry address it found (the block has not changed since), `oh` a
+    /// scratch hold.
+    pub(crate) fn emit_map_set_judged_at(
+        &mut self,
+        mh: u32,
+        kh: u32,
+        vh: u32,
+        (oh, eh): (u32, u32),
+        (k, v): (SliceTy, SliceTy),
+        MapSetFns { append, reserve, drop_map, .. }: MapSetFns,
+    ) -> Result<(), EmitError> {
+        let lay = crate::collections::entry_layout(k, v);
+        let (koff, voff, esz) = (lay.0 as i32, lay.1 as i32, lay.2 as i32);
         let rc = MemArg { offset: u64::from(almide_layout::RC.offset), align: 2, memory_index: 0 };
         {
             let mut i = self.f.instructions();
@@ -297,8 +323,6 @@ impl Emitter<'_> {
         self.f.instructions().local_get(mh).call(drop_map);
         self.f.instructions().local_get(oh).local_set(mh);
         self.f.instructions().end();
-        self.release_i32(); // eh
-        self.release_i32(); // oh
         Ok(())
     }
 }
