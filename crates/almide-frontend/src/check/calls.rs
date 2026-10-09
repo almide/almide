@@ -174,6 +174,9 @@ impl Checker {
             }
             // Module call: string.trim(s), list.map(xs, f), etc.
             ExprKind::Member { object, field, .. } => {
+                // #3495: `util.tag[Int](..)` — the explicit type args reach the
+                // module fn's instantiation, as they do for a bare `tag[Int](..)`.
+                self.member_call_type_args = type_args.map(<[Ty]>::to_vec);
                 self.check_call_target_member(object, field, args, &arg_tys, callee_span_snapshot)
             }
             _ => {
