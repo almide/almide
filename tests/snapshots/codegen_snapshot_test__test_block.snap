@@ -10,7 +10,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn __test_almd_addition() {
+    fn __test_almd_0000_addition() {
         assert_eq!(add(1i64, 2i64), 3i64, "{}", "at line 5")
     }
 }

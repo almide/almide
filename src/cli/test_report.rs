@@ -547,25 +547,23 @@ fn join_field(lines: &[&str], key: &str) -> String {
 
 // ── Test-name recovery ──────────────────────────────────────────────────────
 
-/// `(mangled, original)` for every `test "…"` in the source. Lowering prefixes
-/// test fns with `__test_almd_` and the Rust walker then sanitizes the name, so
-/// the mapping is only invertible by mangling FORWARD from the source.
+/// `(mangled, original)` for every test fn the source lowers to: the emitted
+/// Rust name and the `test "…"` label (`"<test> / <case>"` per `where` case).
+///
+/// Read from the PARSED program through the enumeration lowering names its test
+/// fns from (`lower::test_fn_names`), never from source lines: each name
+/// carries its test's ordinal (#3488), so a line scan that mistook a heredoc
+/// line for a test, or missed a `where` case, would shift every later
+/// ordinal. The mangle is applied to the whole IR name, prefix and ordinal
+/// included, exactly as the walker does — the #1721 hash suffix is computed
+/// over it.
 pub(super) fn test_name_map(source: &str) -> Vec<(String, String)> {
-    let mut out = Vec::new();
-    for line in source.lines() {
-        let t = line.trim_start();
-        let Some(rest) = t.strip_prefix("test ") else { continue };
-        let Some(rest) = rest.trim_start().strip_prefix('"') else { continue };
-        let Some(end) = rest.find('"') else { continue };
-        let name = &rest[..end];
-        // Mangle the PREFIXED spelling, exactly as the walker does — the
-        // #1721 hash suffix is computed over the whole raw fn name, prefix
-        // included, so mangling only the bare name would derive a different
-        // hash for every non-ASCII test. ASCII names are unaffected (the
-        // prefix sanitizes to itself).
-        out.push((mangle(&format!("__test_almd_{name}")), name.to_string()));
-    }
-    out
+    let tokens = almide::lexer::Lexer::tokenize(source);
+    let Ok(program) = almide::parser::Parser::new(tokens).parse() else { return Vec::new() };
+    almide::lower::test_fn_names(&program)
+        .into_iter()
+        .map(|(ir_name, label)| (mangle(&ir_name), label))
+        .collect()
 }
 
 /// The Rust walker's fn-name sanitizer, forward-applied — THE walker's own
@@ -584,7 +582,7 @@ pub(super) fn display_name(names: &[(String, String)], raw: &str) -> String {
         .iter()
         .find(|(m, _)| m == tail)
         .map(|(_, orig)| orig.clone())
-        .unwrap_or_else(|| tail.trim_start_matches("__test_almd_").to_string())
+        .unwrap_or_else(|| almide::ir::test_label(tail).to_string())
 }
 
 // ── Diffing ─────────────────────────────────────────────────────────────────
@@ -996,8 +994,8 @@ mod tests {
     fn mangled_names_round_trip_through_the_walker_sanitizer() {
         let src = "test \"a + b (fast)\" {\n}\n";
         let names = test_name_map(src);
-        assert_eq!(names[0].0, "__test_almd_a__plus__b_fast");
-        assert_eq!(display_name(&names, "tests::__test_almd_a__plus__b_fast"), "a + b (fast)");
+        assert_eq!(names[0].0, "__test_almd_0000_a__plus__b_fast");
+        assert_eq!(display_name(&names, "tests::__test_almd_0000_a__plus__b_fast"), "a + b (fast)");
         // #1721: a non-ASCII name round-trips through the injective mangle
         // (hash computed over the PREFIXED spelling, matching the walker).
         let jp = "test \"b: 失敗表示は日本語名で出る\" {\n}\n";

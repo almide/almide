@@ -309,7 +309,7 @@ Split across submodules:
 
 Function names are sanitized for target compatibility: spaces, dots, hyphens become underscores. Special characters (`+`, `/`, `*`, `(`, `)`, etc.) are replaced with descriptive names (`_plus_`, `_div_`, `_mul_`, etc.). Target-specific keywords are escaped via the `keyword_escape` template (Rust: `r#name`).
 
-Test functions are prefixed with `__test_almd_` to avoid collision with real functions.
+Test functions are named `__test_almd_<NNNN>_<label>` (`almide_ir::test_fn_name`): the prefix keeps them apart from real functions, and the declaration-order ordinal keeps two tests apart whose labels sanitize to one spelling (`"a b"` / `"a_b"`, #3488).
 
 ## 6. Rust Target Specifics
 
