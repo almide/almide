@@ -117,6 +117,20 @@ pub fn almide_rt_list_group_by<A: Clone, B: PartialEq + Clone + 'static>(xs: Vec
     }
     m
 }
+// `map.map(list.group_by(xs, f), (g) => list.len(g))`, fused by PeepholePass:
+// the same keys in the same first-seen order with each group's size, without
+// building the groups (Kotlin's `groupingBy(f).eachCount()`, Java's
+// `groupingBy(f, counting())`). `f` runs once per element in order, as in
+// `group_by`; the element is handed to it by value — nothing keeps it — so
+// it is never cloned, and no group `Vec` is grown, kept or freed.
+pub fn almide_rt_list_group_count<A, B: PartialEq + 'static>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> B>) -> AlmideMap<B, i64> {
+    let f = move |a| f(a);
+    let mut m: AlmideMap<B, i64> = AlmideMap::new();
+    for x in xs {
+        m.upsert_with(f(x), 0, |c| c + 1);
+    }
+    m
+}
 pub fn almide_rt_list_slice<T: Clone>(xs: &[T], start: i64, end: i64) -> Vec<T> { let s = start as usize; let e = (end as usize).min(xs.len()); if s >= e { vec![] } else { xs[s..e].to_vec() } }
 pub fn almide_rt_list_insert<T>(mut xs: Vec<T>, i: i64, x: T) -> Vec<T> { let idx = (i as usize).min(xs.len()); xs.insert(idx, x); xs }
 pub fn almide_rt_list_remove_at<T>(mut xs: Vec<T>, i: i64) -> Vec<T> { if (i as usize) < xs.len() { xs.remove(i as usize); } xs }
