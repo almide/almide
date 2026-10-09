@@ -29,10 +29,18 @@ pub const RUNTIME_MODULE_CRATES: &[(&str, &[(&str, &str)])] = &[
 
 /// The crates.io dependencies (name, Cargo spec) generated Rust `rs_code`
 /// needs for its inlined runtime modules, each crate once, in table order.
+///
+/// A module is in use when an IDENTIFIER spells one of its symbols
+/// ([`crate::rust_idents`]): a user string literal `"almide_rt_zlib_"` is
+/// emitted verbatim and must not add flate2 to the manifest (#3486).
 pub fn runtime_crate_deps(rs_code: &str) -> Vec<(&'static str, &'static str)> {
+    let reserved: Vec<&str> = crate::rust_idents::identifiers(rs_code)
+        .filter(|id| id.starts_with("almide_rt_"))
+        .collect();
     let mut out: Vec<(&'static str, &'static str)> = Vec::new();
     for (module, crates) in RUNTIME_MODULE_CRATES {
-        if !rs_code.contains(&format!("almide_rt_{module}_")) {
+        let prefix = format!("almide_rt_{module}_");
+        if !reserved.iter().any(|id| id.starts_with(&prefix)) {
             continue;
         }
         for &(name, spec) in crates.iter() {

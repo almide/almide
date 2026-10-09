@@ -700,6 +700,7 @@ fn rust_runtime_modules(needed: &std::collections::HashSet<&str>) -> String {
 
 mod runtime_crates;
 pub use runtime_crates::{runtime_crate_deps, RUNTIME_MODULE_CRATES};
+pub mod rust_idents;
 
 /// Emit the full `almide_rt` runtime crate source: the prelude (pub items +
 /// exported macros) plus every std-only runtime module. Built once into an
@@ -759,12 +760,16 @@ fn emit_source(program: &mut IrProgram, target: Target, config: &target::TargetC
             // A few operators lower to a runtime call (not a CallTarget::Module),
             // so the IR's used-module set misses them — e.g. float `**` renders
             // `almide_rt_math_fpow(..)` via the power_expr template. Union in any
-            // module whose `almide_rt_<module>_` symbol literally appears in the
-            // emitted user code so the body (and its transitive deps) is included.
+            // module whose `almide_rt_<module>_` symbol appears as an IDENTIFIER
+            // in the emitted user code so the body (and its transitive deps) is
+            // included. Identifier tokens only (#3486): a user string literal
+            // spelling `almide_rt_zlib_` is not a reference to zlib.
+            let reserved_idents: Vec<&str> = rust_idents::identifiers(&user_code)
+                .filter(|id| id.starts_with("almide_rt_") || id.starts_with("Almide"))
+                .collect();
             for (name, _) in crate::generated::rust_runtime::RUST_RUNTIME_MODULES {
-                if !needed.contains(name)
-                    && user_code.contains(&format!("almide_rt_{}_", name))
-                {
+                let prefix = format!("almide_rt_{}_", name);
+                if !needed.contains(name) && reserved_idents.iter().any(|id| id.starts_with(&prefix)) {
                     needed.insert(name);
                 }
             }
@@ -773,7 +778,7 @@ fn emit_source(program: &mut IrProgram, target: Target, config: &target::TargetC
             // without calling a `bytes.*` fn, and the call-driven set above
             // left the module out. The reserved spelling in the user code is
             // the reference — see `walker::runtime_owned::modules_spelled_in`.
-            needed.extend(walker::runtime_owned::modules_spelled_in(&user_code));
+            needed.extend(walker::runtime_owned::modules_spelled_in(&reserved_idents));
             resolve_runtime_deps(&mut needed);
             output.push_str(&rust_runtime_modules(&needed));
             // matrix.rs calls `almide_kernel::…`; when matrix is included, drop the
