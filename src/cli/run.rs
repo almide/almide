@@ -373,36 +373,37 @@ fn cmd_run_native(args: &RunArgs) -> i32 {
     }
 }
 
-/// Run `cmd` with stderr captured (stdout stays inherited), swallow the raw
-/// `__ALMD_PROBE` line, and print the ADR-0001 D5 dual-time line: the
+/// Run `cmd` and print the ADR-0001 D5 dual-time line after it: the
 /// deterministic time (consumed charge units × CM-1) next to the measured
 /// wall clock. The two never claim to be the same quantity — the declared
 /// band between them is D5's ratio-only contract.
+///
+/// The meter reading comes back on a channel of its own (#3489): the probed
+/// binary writes its `__ALMD_PROBE` line to the file
+/// [`almide_mir::charge_probe::PROBE_OUT_ENV`] names, and the program's
+/// stdout and stderr are both inherited untouched. Reading the line back out
+/// of the program's stderr took a line the PROGRAM printed in that spelling
+/// as the reading — and swallowed it from the program's output.
 fn run_with_time_report(mut cmd: Command) -> i32 {
+    let probe_out = probe_out_path();
+    let _ = std::fs::remove_file(&probe_out);
+    cmd.env(almide_mir::charge_probe::PROBE_OUT_ENV, &probe_out);
     let t0 = std::time::Instant::now();
-    let child = match cmd.stderr(std::process::Stdio::piped()).spawn() {
-        Ok(c) => c,
-        Err(e) => {
-            err(&format!("Failed to execute: {}", e));
-            return 1;
-        }
-    };
-    let out = match child.wait_with_output() {
-        Ok(o) => o,
+    let status = match cmd.status() {
+        Ok(s) => s,
         Err(e) => {
             err(&format!("Failed to execute: {}", e));
             return 1;
         }
     };
     let wall_ns = t0.elapsed().as_nanos() as i64;
-    let mut consumed: Option<i64> = None;
-    for line in String::from_utf8_lossy(&out.stderr).lines() {
-        if let Some(rest) = line.strip_prefix("__ALMD_PROBE ") {
-            consumed = rest.split_whitespace().next().and_then(|s| s.parse().ok());
-        } else {
-            eprintln!("{line}");
-        }
-    }
+    let reading = std::fs::read_to_string(&probe_out).ok();
+    let _ = std::fs::remove_file(&probe_out);
+    let consumed: Option<i64> = reading
+        .as_deref()
+        .and_then(|r| r.strip_prefix("__ALMD_PROBE "))
+        .and_then(|rest| rest.split_whitespace().next())
+        .and_then(|s| s.parse().ok());
     match consumed {
         Some(units) => {
             let det_ms =
@@ -414,7 +415,15 @@ fn run_with_time_report(mut cmd: Command) -> i32 {
             eprintln!("time: no deterministic meter in this run (probe line missing)");
         }
     }
-    out.status.code().unwrap_or(1)
+    status.code().unwrap_or(1)
+}
+
+/// A path no other run uses: this process's id plus a clock reading.
+fn probe_out_path() -> std::path::PathBuf {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    std::env::temp_dir().join(format!("almide-probe-{}-{nanos}.txt", std::process::id()))
 }
 
 /// Flags for [`cmd_run`] — bundled into one struct (was 7 positional
