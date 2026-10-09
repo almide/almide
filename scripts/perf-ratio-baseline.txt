@@ -33,7 +33,12 @@ nbody 0.997
 # (2026-09-24, median of 9); the runner read 1.66-1.75 at 2M. Anchored at 1.90
 # between the two so the +40% ceiling (2.66) and the 50% floor (0.95) hold on
 # both; re-anchor from the first runner reading at 4M if it sits far off.
-wordfreq 1.90
+# Re-anchored 2026-10-09 (was 1.90) after #3507 (batch 28: one-probe upsert_with,
+# owned map twins, single-copy index reads, hash-tail loads and slot tags). The
+# runner read 0.948 on PR #3510 (job 113838303631), UNDER the old 0.95 floor;
+# GCE bench.py --runs 9 on develop 50d19563e read 0.98 (c3-standard-8 x86) and
+# 0.92 (c4a-standard-8 arm). Anchored at 0.97: ceiling 1.36, floor 0.485.
+wordfreq 0.97
 spectralnorm 1.001
 # VICTORY rows (#1330): `binarytrees` (#1991) and `treealloc` (#2028) against
 # their same-shape `Box` references — the ordinary Rust for the program. The
