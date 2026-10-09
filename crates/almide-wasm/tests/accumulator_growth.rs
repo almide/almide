@@ -76,6 +76,7 @@ fn field_and_interpolation_accumulators_grow_linearly() {
 /// native leg's, recorded with `almide run`.
 const ALIASING: &str = r#"type Buf = { text: String, xs: List[Int], n: Int }
 type Outer = { tag: Int, buf: Buf }
+type Names = { all: List[String], keep: String }
 
 fn record_copy(n: Int) -> String = {
   var b = Buf { text: "r", xs: [7], n: 0 }
@@ -144,7 +145,24 @@ fn var_interp(n: Int) -> String = {
   "${keep} ${s} ${t}"
 }
 
+fn tag(i: Int) -> String = "<${i}>"
+
+fn produced_parts(n: Int) -> String = {
+  var s = "s"
+  var b = Buf { text: "b", xs: [], n: 0 }
+  var nm = Names { all: [], keep: "k" }
+  let first = nm
+  for i in 0..<n {
+    s = "${s}${tag(i)}-${string.repeat("z", i)}"
+    b.text = "${b.text}${tag(i)}"
+    b.text = b.text + tag(i + 10)
+    nm.all = nm.all + [tag(i)]
+  }
+  "${s} ${b.text} ${nm.all} ${first.all}"
+}
+
 effect fn main() -> Unit = {
+  println(produced_parts(3))
   println(record_copy(3))
   println(field_copy(3))
   println(copy_inside(3))
@@ -154,7 +172,8 @@ effect fn main() -> Unit = {
 }
 "#;
 
-const ALIASING_NATIVE: &str = "r [7] r+0+1+2 [7, 0, 1, 2]
+const ALIASING_NATIVE: &str = "s<0>-<1>-z<2>-zz b<0><10><1><11><2><12> [\"<0>\", \"<1>\", \"<2>\"] []
+r [7] r+0+1+2 [7, 0, 1, 2]
 f [1] f012 [1, 0, 1, 2]
 c|c0|c01| c012
 <<xx0xx><xx0xx>1<xx0xx><xx0xx>> [2, 2, 2, 2]
@@ -176,7 +195,7 @@ fn the_window_frames_certify() {
     almide_wasm::witness::start_collecting();
     let _ = almide_wasm::emit_program(&ir).expect("the structural leg lowers the probe");
     let w: std::collections::BTreeMap<String, String> = almide_wasm::witness::take().into_iter().collect();
-    for name in ["record_copy", "field_copy", "copy_inside", "rereads", "nested", "var_interp"] {
+    for name in ["produced_parts", "record_copy", "field_copy", "copy_inside", "rereads", "nested", "var_interp"] {
         let cert = w.get(name).unwrap_or_else(|| panic!("{name} must be witnessed; got {:?}", w.keys()));
         assert!(
             almide_verify::check(almide_verify::Property::Ownership, cert.as_bytes()),
