@@ -1,0 +1,4 @@
+expects_code = "E097"
+expects_error = "`pub` does not apply to `type`"
+hint_substring = "public by default"
+expects_line_col = "4:1"

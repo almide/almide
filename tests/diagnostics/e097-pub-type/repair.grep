@@ -1,0 +1,4 @@
+# The repair is the deletion of `pub`; the message and the hint both say so.
+remove `pub`
+mod type
+local type

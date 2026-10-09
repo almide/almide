@@ -1,0 +1,3 @@
+expects_code = "E097"
+expects_error = "`pub` does not apply to `protocol`"
+hint_substring = "public by default"
