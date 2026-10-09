@@ -35,8 +35,10 @@ struct WordHasher(u64);
 impl Hasher for WordHasher {
     fn write(&mut self, bytes: &[u8]) {
         let mut chunks = bytes.chunks_exact(8);
+        let mut word = [0u8; 8];
         for c in &mut chunks {
-            self.add(u64::from_le_bytes(c.try_into().unwrap()));
+            word.copy_from_slice(c);
+            self.add(u64::from_le_bytes(word));
         }
         let mut tail = [0u8; 8];
         let rest = chunks.remainder();
