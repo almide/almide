@@ -539,7 +539,7 @@ impl Emitter<'_> {
                 let acc_dec = self.elem_is_handle(acc_ty).then(|| self.dec_fn_of(acc_ty));
                 self.fs_frames_foreach_borrowed(hraw, hlen, Some((cb, crate::fs::witness_walkers::WalkAcc::Carried(Some(params[0])))), |em, _| {
                     em.f.instructions().local_set(params[1]);
-                    em.lower(body, Some(acc_ty))?;
+                    em.lower_fold_body(cb, body, acc_ty)?;
                     em.rc_share_guard(body, acc_ty);
                     if let Some(dec) = acc_dec {
                         em.f.instructions().local_get(params[0]).call(dec);

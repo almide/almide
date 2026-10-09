@@ -307,7 +307,10 @@ impl Emitter<'_> {
             // map's insertion order, so a straight walk is exact.
             ("find", [m, cb]) => self.lower_map_find(m, cb),
             ("update", [m, key, cb]) => self.lower_map_update(m, key, cb),
-            ("upsert", [m, key, init, cb]) => self.lower_map_upsert(m, key, init, cb),
+            ("upsert", [m, key, init, cb]) => match self.try_map_upsert_owned(m, [key, init, cb])? {
+                Some(owned) => Ok(Some(owned)),
+                None => self.lower_map_upsert(m, key, init, cb),
+            },
             ("filter", [m, cb]) => self.lower_map_filter(m, cb),
             ("all" | "any" | "count", [m, cb]) => self.lower_map_pred(func, m, cb),
             ("map", [m, cb]) => self.lower_map_map(m, cb),
@@ -519,7 +522,7 @@ impl Emitter<'_> {
                 self.f.instructions().local_set(v_p);
                 // #2755: the list.fold activation (`witness_fold_step`).
                 self.witness_callback_open(cb, Some(acc_p));
-                self.lower(body, Some(b))?;
+                self.lower_fold_body(cb, body, b)?;
                 // The accumulator OWNS one credit on every step, as in the staged
                 // `list.fold` (`list.rs:647`): a borrowed body result takes its
                 // share, and the PREVIOUS accumulator is released before the
