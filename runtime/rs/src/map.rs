@@ -488,12 +488,41 @@ pub fn almide_rt_map_set<K: PartialEq + Clone + 'static, V: Clone>(mut m: Almide
 // through the index-aware `position`/`insert` — a raw `entries.push` here
 // would leave a present key out of the index, and a later probe would
 // wrongly report it absent.
-pub fn almide_rt_map_upsert<K: PartialEq + 'static, V: Clone>(mut m: AlmideMap<K, V>, k: K, init: V, f: std::rc::Rc<dyn Fn(V) -> V>) -> AlmideMap<K, V> {
+//
+// The present arm hands the old value to `f` by MOVING it out (the unused
+// `init` takes its slot for the call's duration) — a `clone` there copied a
+// String / List value on every update only to drop the original.
+pub fn almide_rt_map_upsert<K: PartialEq + 'static, V: Clone>(m: AlmideMap<K, V>, k: K, init: V, f: std::rc::Rc<dyn Fn(V) -> V>) -> AlmideMap<K, V> {
+    almide_rt_map_upsert_fn(m, k, init, move |v| f(v))
+}
+// The same op with the update fn as a static `F`: RustLowering routes a call
+// whose closure is a lambda literal here, so the closure is neither boxed into
+// a fresh `Rc` per call nor called through a vtable.
+pub fn almide_rt_map_upsert_fn<K: PartialEq + 'static, V: Clone, F: Fn(V) -> V>(mut m: AlmideMap<K, V>, k: K, init: V, f: F) -> AlmideMap<K, V> {
     if let Some(v) = m.get_mut(&k) {
-        let old = v.clone();
+        let old = std::mem::replace(v, init);
         *v = f(old);
     } else {
         m.insert(k, init);
+    }
+    m
+}
+// String-keyed twins whose key arrives BORROWED (`StrMapKey`, the final-IR
+// rewrite of `k.to_string()` at the key slot): the key is copied only when it
+// is inserted, never when it is found.
+pub fn almide_rt_map_upsert_str_fn<V: Clone, F: Fn(V) -> V>(mut m: AlmideMap<String, V>, k: &str, init: V, f: F) -> AlmideMap<String, V> {
+    if let Some(v) = m.get_mut(k) {
+        let old = std::mem::replace(v, init);
+        *v = f(old);
+    } else {
+        m.insert(k.to_string(), init);
+    }
+    m
+}
+pub fn almide_rt_map_set_str<V: Clone>(mut m: AlmideMap<String, V>, k: &str, v: V) -> AlmideMap<String, V> {
+    match m.get_mut(k) {
+        Some(slot) => *slot = v,
+        None => m.insert(k.to_string(), v),
     }
     m
 }
