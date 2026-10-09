@@ -31,13 +31,15 @@ impl Emitter<'_> {
         let is_var = |e: &IrExpr| matches!(&e.kind, IrExprKind::Var { id } if id == var);
         // #3501: `s = "${s}…"` appends its later pieces, built as one
         // fresh string, exactly as `s = s + "…"` appends its right side.
+        // The built tail is pinned (node_marks.rs): its nodes carry the
+        // ownership marks their lowering sets, which only a live tree may.
         let tail;
         let right = match concat_operands(value, almide_ir::BinOp::ConcatStr) {
             Some((left, right)) if is_var(left) => right,
             _ => match interp_tail(value, *var, is_var) {
                 Some((_, t)) => {
-                    tail = t;
-                    &tail
+                    tail = self.owned_call_marks.pin(t);
+                    &*tail
                 }
                 None => return Ok(false),
             },
@@ -176,9 +178,12 @@ struct FieldPlace {
     leaf: (SliceTy, u32),
 }
 
-/// What the field window appends: a string operand, or one list element.
+/// What the field window appends: a string operand of the program, the
+/// later pieces of an interpolation built as a tree the node marks pin
+/// (node_marks.rs — its lowering may mark its nodes), or one list element.
 enum Appended<'a> {
-    Str(std::borrow::Cow<'a, IrExpr>),
+    Str(&'a IrExpr),
+    Built(std::rc::Rc<IrExpr>),
     Elem(&'a IrExpr),
 }
 
@@ -218,10 +223,10 @@ impl Emitter<'_> {
         let (head, appended) = match place.leaf.0 {
             SliceTy::Scalar(Scalar::Str) => match concat_operands(value, almide_ir::BinOp::ConcatStr) {
                 Some((left, right)) if is_place(left) && free_of_root(right) => {
-                    (left, Appended::Str(std::borrow::Cow::Borrowed(right)))
+                    (left, Appended::Str(right))
                 }
                 _ => match interp_tail(value, *target, is_place) {
-                    Some((head, tail)) => (head, Appended::Str(std::borrow::Cow::Owned(tail))),
+                    Some((head, tail)) => (head, Appended::Built(self.owned_call_marks.pin(tail))),
                     None => return Ok(false),
                 },
             },
@@ -291,13 +296,8 @@ impl Emitter<'_> {
         self.f.instructions().local_tee(hp).local_get(hp);
         self.load_ty_slot(lty, loff);
         match appended {
-            Appended::Str(right) => {
-                self.lower(&right, Some(STR))?;
-                let release = self.hold_owned_operand(&right)?;
-                self.f.instructions().call(F_STR_APPEND);
-                self.store_ty_slot(lty, loff);
-                self.release_owned_operand(release);
-            }
+            Appended::Str(right) => self.append_str_to_slot(right, loff)?,
+            Appended::Built(right) => self.append_str_to_slot(&right, loff)?,
             Appended::Elem(elem) => {
                 let SliceTy::List(h) = lty else { return unsup("field-append:leaf") };
                 let el = self.types.el(h);
@@ -313,6 +313,18 @@ impl Emitter<'_> {
             }
         }
         self.release_i32();
+        Ok(())
+    }
+
+    /// `[record, field]` on the stack: append `right` (borrowed by
+    /// `$str_append`; an owned operand is released right after, as in
+    /// [`Self::try_str_append_assign`]) and store the result into the slot.
+    fn append_str_to_slot(&mut self, right: &IrExpr, off: u32) -> Result<(), EmitError> {
+        self.lower(right, Some(STR))?;
+        let release = self.hold_owned_operand(right)?;
+        self.f.instructions().call(F_STR_APPEND);
+        self.store_ty_slot(STR, off);
+        self.release_owned_operand(release);
         Ok(())
     }
 }
