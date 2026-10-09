@@ -757,28 +757,11 @@ fn emit_source(program: &mut IrProgram, target: Target, config: &target::TargetC
             for m in &program.used_stdlib_modules {
                 needed.insert(m.as_str());
             }
-            // A few operators lower to a runtime call (not a CallTarget::Module),
-            // so the IR's used-module set misses them — e.g. float `**` renders
-            // `almide_rt_math_fpow(..)` via the power_expr template. Union in any
-            // module whose `almide_rt_<module>_` symbol appears as an IDENTIFIER
-            // in the emitted user code so the body (and its transitive deps) is
-            // included. Identifier tokens only (#3486): a user string literal
-            // spelling `almide_rt_zlib_` is not a reference to zlib.
-            let reserved_idents: Vec<&str> = rust_idents::identifiers(&user_code)
-                .filter(|id| id.starts_with("almide_rt_") || id.starts_with("Almide"))
-                .collect();
-            for (name, _) in crate::generated::rust_runtime::RUST_RUNTIME_MODULES {
-                let prefix = format!("almide_rt_{}_", name);
-                if !needed.contains(name) && reserved_idents.iter().any(|id| id.starts_with(&prefix)) {
-                    needed.insert(name);
-                }
-            }
-            // A TYPE reference is a use of the module that defines the type
-            // (#1829): `let e: Endian = BigEndian` names bytes.rs's enum
-            // without calling a `bytes.*` fn, and the call-driven set above
-            // left the module out. The reserved spelling in the user code is
-            // the reference — see `walker::runtime_owned::modules_spelled_in`.
-            needed.extend(walker::runtime_owned::modules_spelled_in(&reserved_idents));
+            // The call-driven set misses an operator's runtime call (float `**`
+            // → `almide_rt_math_fpow`) and a runtime-owned TYPE reference
+            // (#1829): union in the modules the user code's IDENTIFIERS name,
+            // never its literals (#3486) — `rust_idents::referenced_runtime_modules`.
+            needed.extend(rust_idents::referenced_runtime_modules(&user_code));
             resolve_runtime_deps(&mut needed);
             output.push_str(&rust_runtime_modules(&needed));
             // matrix.rs calls `almide_kernel::…`; when matrix is included, drop the
