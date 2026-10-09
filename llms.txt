@@ -247,7 +247,7 @@ fn isqrt(n: Int) -> Int = {
 | E003 | Undefined variable | Missing explicit `import json` / `import fs` / etc |
 | E004 | Arg count mismatch | Signature placeholder in try: shows `<name: Type>` |
 | E005 | Arg type mismatch | Often needs explicit conversion (`int.to_string(n)` etc) |
-| E006 | Pure fn calls effect fn | Mark the caller `effect fn` |
+| E006 | Pure fn calls effect fn | Mark the caller `effect fn`, and propagate the call's error with `!` (`f(x)!`) unless a `!` / `??` / `match` already consumes its Result |
 | E007/E008 | Fan block misuse | See `docs/specs/fan.md` |
 | E009 | Reassign immutable | `let` → `var` |
 | E010 | Non-exhaustive match | Add the missing arm(s) or `_ => ...` |
