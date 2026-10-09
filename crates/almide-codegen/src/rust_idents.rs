@@ -17,6 +17,34 @@
 //! `almide_ir::is_reserved_fn_name`), and a user type spelled `Almide…` is
 //! qualified and mangled (`is_rust_reserved_type_name`).
 
+/// The runtime modules the rendered user code references by an identifier,
+/// beyond the IR's call-driven `used_stdlib_modules`:
+///
+/// - a module whose `almide_rt_<module>_` symbol the code names — a few
+///   operators lower to a runtime call, not a `CallTarget::Module` (float `**`
+///   renders `almide_rt_math_fpow(..)` via the power_expr template);
+/// - the module that defines a runtime-owned type the code names (#1829):
+///   `let e: Endian = BigEndian` names bytes.rs's `AlmideEndian` without
+///   calling a `bytes.*` fn (`walker::runtime_owned::modules_spelled_in`).
+///
+/// Identifier tokens only (#3486): a user string literal spelling
+/// `almide_rt_zlib_` or `AlmideHttpRequest` is not a reference.
+pub fn referenced_runtime_modules(user_code: &str) -> Vec<&'static str> {
+    let reserved: Vec<&str> = identifiers(user_code)
+        .filter(|id| id.starts_with("almide_rt_") || id.starts_with("Almide"))
+        .collect();
+    let mut out: Vec<&'static str> = crate::generated::rust_runtime::RUST_RUNTIME_MODULES
+        .iter()
+        .map(|(name, _)| *name)
+        .filter(|name| {
+            let prefix = format!("almide_rt_{name}_");
+            reserved.iter().any(|id| id.starts_with(&prefix))
+        })
+        .collect();
+    out.extend(crate::walker::runtime_owned::modules_spelled_in(&reserved));
+    out
+}
+
 /// Every identifier token of `code`, in order, outside literals and comments.
 /// A raw identifier `r#name` yields `name`.
 pub fn identifiers(code: &str) -> Identifiers<'_> {
