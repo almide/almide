@@ -1,4 +1,4 @@
-> Last updated: 2026-10-04
+> Last updated: 2026-10-10
 
 # Effect System
 
@@ -525,7 +525,7 @@ Test: Effect inference unit tests in `crates/almide-codegen/src/pass_effect_infe
 
 | Code | Name | Trigger | Fix |
 |------|------|---------|-----|
-| E006 | Effect isolation violation | Pure `fn` calls an `effect fn` | Mark the caller as `effect fn` |
+| E006 | Effect isolation violation | Pure `fn` calls an `effect fn` | Mark the caller as `effect fn`; a call whose Result is not already consumed (`!` / `??` / `?` / `match`) also takes `!` — the hint names both steps, and the same expression's `expected T but got Result[T, String]` is not reported separately (#3515, test: `tests/e006_fallible_cascade_test.rs`) |
 | E007 | Fan block in pure function | `fan { ... }` used outside effect context | Mark the enclosing function as `effect fn` |
 | E008 | Mutable variable capture in fan | `fan` block references a `var` binding | Change `var` to `let`, or copy the value into a `let` before the `fan` |
 | E092 | `@pure` fn is not pure | A `@pure` fn reaches output, an abort, a categorised stdlib call or an `@extern` | Move the call to a caller, or remove `@pure` |
