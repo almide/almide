@@ -435,7 +435,9 @@ pub fn collect_anon_records(program: &IrProgram, named: &RecordShapeIndex) -> Ha
     for key in seen {
         // Derive struct name from sorted field names to prevent cross-crate
         // collisions. Two records with different fields must never share a name.
-        let name = format!("AlmdRec_{}", key.join("_"));
+        // The prefix is reserved: a user type spelled with it is qualified
+        // and mangled before it reaches here (#3487).
+        let name = format!("{}{}", crate::pass_ir_link_flatten::ANON_RECORD_PREFIX, key.join("_"));
         map.insert(key, name);
     }
     map
