@@ -189,7 +189,7 @@ A user-declared effect fn is **always fallible**: a call yields
 `Result[T, String]`, even when the body cannot fail. `-> T` is the canonical
 spelling — the `effect` already says it can fail.
 
-A pure `fn` may still call `println`, `eprintln`, `panic` and `assert` / `assert_eq` / `assert_ne`: they write or abort, never read, and do not make the fn `effect` (ADR-0022). Every other effect (`fs`, `env`, `io.*`, `http`, `fan`, …) from a pure fn is E006. The stdlib readers are effect fns too: `io.read_byte`, `io.read_n_bytes` and `process.args` read stdin or argv, so they need an `effect fn` caller like `io.read_line` and `env.args` do (dialect epoch 8; a pure fn calling one is E006).
+A pure `fn` may still call `println`, `eprintln`, `panic` and `assert` / `assert_eq` / `assert_ne`: they write or abort, never read, and do not make the fn `effect` (ADR-0022). Every other effect (`fs`, `env`, `io.*`, `http`, `fan`, …) from a pure fn is E006. The stdlib readers are effect fns too: `io.read_byte`, `io.read_n_bytes`, `process.args` and the `args` readers (`args.flag`, `args.option`, `args.option_or`, `args.positional`, `args.positional_at`, `args.raw`) read stdin or argv, so they need an `effect fn` caller like `io.read_line` and `env.args` do (dialect epoch 8; a pure fn calling one is E006).
 
 Read the `!` on an effect call like Swift's `await`: it marks the point where
 the world is touched, whether or not this particular call can fail (Almide has
