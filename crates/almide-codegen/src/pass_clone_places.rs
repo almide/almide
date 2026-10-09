@@ -79,7 +79,7 @@ pub(super) fn insert_clones_member(object: IrExpr, field: Sym, ty: Ty, span: Opt
             && ctx.remaining.get(&id).copied().unwrap_or(1) <= 1);
     let object = if let IrExprKind::IndexAccess { object: base, index } = &object.kind
         && super::pass_clone_projection::root(base).is_some()
-        && matches!(index.kind, IrExprKind::Var { .. } | IrExprKind::LitInt { .. })
+        && super::pass_clone_projection::borrowable_index(index)
     {
         IrExpr { ty: object.ty.clone(), span: object.span, def_id: None,
             kind: IrExprKind::Borrow { expr: Box::new(object), as_str: false, mutable: false } }
