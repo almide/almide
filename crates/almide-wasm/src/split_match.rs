@@ -5,13 +5,16 @@
 //! the tuple — around the two pieces, and a `match` that immediately takes
 //! the pieces apart released both blocks again: four allocations per call
 //! where the pieces are the only values the program ever reads (onebrc's
-//! `step` / `parse_tenths`: 8 of its 17 allocations per line). The shape is
-//! the scalar replacement of an immediately-scrutinised constructor result
-//! — the case-of-known-constructor / unboxed-sum return of GHC's worker /
-//! wrapper split and Koka's and Lean's value-type returns (references
-//! `../almide-references/`: Koka passes small value types in registers,
-//! Lean's IR `ctor`-elimination on a projected result) — done here at the
-//! one call whose constructor this leg knows statically:
+//! `step` / `parse_tenths`: 8 of its 17 allocations per line). Native keeps
+//! both on the stack; Koka gets the same from its value representation
+//! (`dataReprIsValue`, ../almide-references/koka/src/Backend/C/FromCore.hs:
+//! a small sum or tuple is a C struct, never a heap cell). This leg has no
+//! value representation for sums — Lean's `[unbox]` result attribute is the
+//! cautionary twin, declared and "currently has no effect"
+//! (lean4/src/Lean/Compiler/IR/UnboxResult.lean) — so the case is resolved
+//! at the one call whose constructor the leg knows statically, the
+//! case-of-known-constructor step of Lean's simplifier (`simpCasesOnCtor?`,
+//! lean4/src/Lean/Compiler/LCNF/Simp/Main.lean) applied through the callee:
 //!
 //!   match string.split_once(s, sep) { some((a, b)) => A, none => B }
 //!   =>
