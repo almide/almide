@@ -77,6 +77,11 @@ impl Checker {
         if exp == Ty::Unknown || act == Ty::Unknown {
             return;
         }
+        // #3515: the `Result` an E006-flagged fallible call produced, met
+        // where its `ok` type was wanted — that E006's hint already says `!`.
+        if self.is_isolation_cascade(c.span, &exp, &act) {
+            return;
+        }
         if self.report_erased_err_arm(c, &exp) {
             return;
         }

@@ -575,7 +575,7 @@ impl Checker {
             ),
             None => (
                 format!("cannot call effect function '{}' from a pure function", name),
-                argv_reader_hint(name).unwrap_or_else(|| "Mark the calling function as `effect fn`".to_string()),
+                argv_reader_hint(name).unwrap_or_else(|| super::effect_isolation_cascade::GENERIC_HINT.to_string()),
             ),
         };
         let (msg, context) = match via {
@@ -587,6 +587,11 @@ impl Checker {
             diag = diag.with_secondary(line, Some(col), format!("'{}' declared as effect fn here", name));
         }
         self.emit(diag);
+        // #3515: a fallible callee's `!` step is added once the call's type is
+        // known — in a fn body, the one place both the marker and `!` can go.
+        if self.env.metered_region.is_none() && self.env.lambda_depth == 0 && self.current_fn.is_some() {
+            self.defer_isolation_hint(self.diagnostics.len() - 1, via.unwrap_or(name));
+        }
     }
     /// Validate argument count, emitting a placeholder-signature E004 on mismatch. Verbatim text move out of [`Self::check_named_call_with_type_args`].
     fn check_arg_count(&mut self, name: &str, sig: &crate::types::FnSig, arg_tys: &[Ty]) {
