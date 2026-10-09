@@ -44,8 +44,9 @@ read here is what the current compiler accepts.
   aborts, never reads — ADR-0022), so a `main` that only prints is
   `fn main() -> Unit`; write `effect fn main()` when it reads or propagates.
   Every stdlib reader is an effect fn — `io.read_line`, `io.read_byte`,
-  `io.read_n_bytes`, `process.args`, `env.args` — so reading stdin or argv
-  needs an effect fn (dialect epoch 8).
+  `io.read_n_bytes`, `process.args`, `env.args`, and the `args` module's
+  `args.flag` / `option` / `option_or` / `positional` / `positional_at` /
+  `raw` — so reading stdin or argv needs an effect fn (dialect epoch 8).
   A user-declared effect fn is always fallible, so write `f()!` on every
   effect call — read the `!` like Swift `await` (it marks where the world is
   touched); it is Swift `try`, never `try!`. On a stdlib effect fn that cannot

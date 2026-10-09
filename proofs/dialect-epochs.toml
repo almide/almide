@@ -117,7 +117,7 @@ since = "0.67.0"
 name = "readers-are-effects"
 summary = "A plain fn writes and aborts but never reads (ADR-0022): the stdlib readers that were plain fns are effect fns, `@pure` is checked, and `[permissions]` sees the categories the stdlib and externs really touch (#3245, #3246, #3248, #3250)."
 breaks = [
-  "`io.read_byte`, `io.read_n_bytes` and `process.args` are `effect fn`s — a call from a plain fn is E006; mark the caller `effect fn`, or read in the caller and pass the value in",
+  "`io.read_byte`, `io.read_n_bytes`, `process.args` and the `args` readers (`args.flag`, `args.option`, `args.option_or`, `args.positional`, `args.positional_at`, `args.raw`) are `effect fn`s — a call from a plain fn is E006; mark the caller `effect fn`, or read in the caller and pass the value in",
   "`@pure` is checked — a `@pure` fn that is an effect fn or an extern, or that reaches `println` / `eprintln` / `panic` / `assert*`, a stdlib call with an effect category, or an `@extern`, is E092; move that call to a caller, or remove `@pure`",
   "`[permissions].allow` counts `random` as `Rand` and `io` as `IO`, and an `@extern` fn as every category — a project whose allow list omits one of those now fails `almide build` with a capability violation; add the category it names (an extern needs all six until a bound can be declared)",
 ]
