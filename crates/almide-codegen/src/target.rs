@@ -45,6 +45,7 @@ use super::pass_unify_var_tables::UnifyVarTablesPass;
 use super::pass_top_let_storage::TopLetStoragePass;
 use super::pass_var_storage::VarStoragePass;
 use super::pass_borrow_lowering::BorrowLoweringPass;
+use super::pass_slice_binders::SliceBindersPass;
 use super::pass_ir_link_flatten::IrLinkFlattenPass;
 use super::template::TemplateSet;
 
@@ -207,6 +208,10 @@ fn build_pipeline(target: Target) -> Pipeline {
                 // storage attribute it consults; the walker renders what it
                 // sees.
                 .add(BorrowLoweringPass)
+                // Substring binders that are only read become `&str` slices
+                // of the subject (`split_once` / `strip_prefix` /
+                // `strip_suffix`'s `_ref` twins) — reads the final spellings.
+                .add(SliceBindersPass)
         }
 
         Target::Wgsl => Pipeline::new()
