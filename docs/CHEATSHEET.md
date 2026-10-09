@@ -126,6 +126,7 @@ fn parse_opt(s: String) -> Int?!               // Result[Option[Int], String]
 - `fn f()` — public (default)
 - `mod fn f()` — same project only (`pub(crate)` in Rust)
 - `local fn f()` — this file only (private)
+- Types take the same prefixes (`mod type T = …`, `local type T = …`); a bare `type` is public. There is no `pub type` (E097: delete `pub`)
 
 ### Modifiers (order matters): `[local|mod]? effect? fn`
 
