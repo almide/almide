@@ -1,4 +1,4 @@
-# oracle: almide 0.67.0 (dev) at 86e4ecc88 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.67.0 (dev) at 50d999f16 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/churn/closure_env_churn.almd
 44c083433349ffafa9cefe935628110b83a3774af436938fa5001df6f63bd421	0	spec/churn/construct_from_temp_churn.almd
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/churn/enumerate_rich_churn.almd
@@ -685,6 +685,7 @@ e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/stdlib/m
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/stdlib/map_generic_test.almd
 e4f73dee3be13aae0a90469128eb9f03b75682dc91567aed0179d3fc3e96c4bb	0	spec/stdlib/map_higher_order_test.almd
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/stdlib/map_index_test.almd
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/stdlib/map_keyed_count_test.almd
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/stdlib/map_mutable_test.almd
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/stdlib/map_semantics_manifest_test.almd
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/stdlib/map_upsert_test.almd
@@ -751,7 +752,7 @@ e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/stdlib/s
 0359073ae10f42f08131d504d750ad346a3ec76a9c50a03b998927af5fdb1365	0	spec/stdlib/string_semantics_manifest_test.almd
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/stdlib/string_slice_test.almd
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/stdlib/string_split_once_test.almd
-10f60d71420e41bec21f04d2ccb22679a8173b6fee204dac0e22528c66d9c8db	0	spec/stdlib/string_test.almd
+ffc4b6551e267d02a1a2d33143a5c5bbcd17e739ace7b33c8c51327dcaf49bb4	0	spec/stdlib/string_test.almd
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/stdlib/string_unicode_predicates_test.almd
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/stdlib/testing_polarity_test.almd
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855	0	spec/stdlib/testing_result_layout_test.almd
