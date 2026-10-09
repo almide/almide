@@ -356,8 +356,11 @@ pub fn is_reserved_fn_name(name: &str) -> bool {
 /// record of who made the fn — unlike the source spelling, which a user can
 /// choose. The one user fn left there is a foreign binding (`@extern`,
 /// `@inline_rust`, `@wasm_intrinsic`), whose name is the binding and which
-/// has no body of the program's to export either. Not meaningful for a
-/// linked module's fns: module fns are not escaped.
+/// has no body of the program's to export either. Since #3504 a user
+/// module's fns are escaped the same way, so the space records origin there
+/// too; the stdlib's own modules spell their internal helpers in it. The
+/// export rule needs it for the entry only: a linked module's fn exports only
+/// when it DECLARES `@export`, and no synthesized fn carries one.
 pub fn is_synthesized_entry_fn(ir_name: &str) -> bool {
     ir_name.starts_with("__")
 }
@@ -389,6 +392,19 @@ pub fn ast_synth_ir_name(name: &str) -> Option<almide_base::intern::Sym> {
 /// [`USER_FN_ESCAPE`]; every other name comes back unchanged.
 pub fn user_fn_source_name(name: &str) -> &str {
     name.strip_prefix(USER_FN_ESCAPE).unwrap_or(name)
+}
+
+/// [`user_fn_source_name`] for a name that may be module-qualified
+/// (`util.almide_fn___x` → `util.__x`, #3504): the escape is on the fn's own
+/// segment, after the last `.`.
+pub fn user_fn_source_qualified(name: &str) -> std::borrow::Cow<'_, str> {
+    match name.rsplit_once('.') {
+        Some((module, func)) if func.starts_with(USER_FN_ESCAPE) => {
+            std::borrow::Cow::Owned(format!("{module}.{}", user_fn_source_name(func)))
+        }
+        Some(_) => std::borrow::Cow::Borrowed(name),
+        None => std::borrow::Cow::Borrowed(user_fn_source_name(name)),
+    }
 }
 
 /// #1997: the `IrFunction.attrs` marker lowering writes on a `scoped fn`.

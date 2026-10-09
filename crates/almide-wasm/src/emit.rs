@@ -590,7 +590,7 @@ fn emit_program_pass(
         {
             continue;
         }
-        let owner = qual.clone().unwrap_or_else(|| name.to_string());
+        let owner = qual.as_deref().map_or_else(|| name.to_string(), |q| almide_ir::user_fn_source_qualified(q).into_owned());
         let export_name = declared.clone().unwrap_or_else(|| name.to_string());
         let (sub, err, site) = reach(vec![i], Vec::new());
         if let Some(reason) = &err

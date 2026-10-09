@@ -422,6 +422,14 @@ fn register_decl_fn(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, seen_f
     if !extern_attrs.is_empty() {
         env.extern_fns.insert(sym(&fn_key));
     }
+    // #3504: a user module's fn spelled into the compiler's fn-name space is
+    // escaped at lowering; recorded here so an importer lowered before or
+    // after the module names it the same way.
+    if prefix.is_some_and(crate::lower::is_user_module)
+        && crate::lower::user_fn_needs_escape(name, extern_attrs, attrs)
+    {
+        env.escaped_module_fns.insert(sym(&fn_key));
+    }
     // An EXPLICIT `fn Type.method` with a body, recorded on the shared env so
     // another module can find it. Lowering's own set only ever holds the
     // program being lowered, so a custom `repr` was silently ignored across an
