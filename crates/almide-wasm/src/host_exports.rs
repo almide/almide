@@ -145,6 +145,26 @@ pub fn set_string_abi(on: bool) {
 pub const ALLOC_EXPORT: &str = "__alloc";
 /// The export name of the flat release (`(block: i32)`).
 pub const RELEASE_EXPORT: &str = "__release";
+/// The WASI command entry `to_wasi` adds (the `main` export, re-exported).
+pub const START_EXPORT: &str = "_start";
+/// The canonical-ABI allocator `to_wasi` adds when a host op lands a list.
+pub const REALLOC_EXPORT: &str = "cabi_realloc";
+
+/// #3490: is `name` an export the toolchain itself writes into an artifact,
+/// so a fn of the program may not claim it? The emitter's own (`memory`,
+/// `main`, and the `__` runtime space: `__heap`, [`ALLOC_EXPORT`], the
+/// alloc counters, the fan chunk sites) and the ones the p1 transform adds
+/// ([`START_EXPORT`], [`REALLOC_EXPORT`]). The p2/p3 component transforms
+/// write a fresh export section of their own and carry no program export, so
+/// they add nothing a program export can meet.
+///
+/// A DECLARED export of one of these names is refused by name in the
+/// emitter, as `duplicate wasm export name` (when `_start` was missing here it
+/// reached the transform instead and surfaced as an "Almide bug"); an
+/// undeclared pub fn of one of these names is simply not exported.
+pub fn is_reserved_export(name: &str) -> bool {
+    matches!(name, "memory" | "main" | START_EXPORT | REALLOC_EXPORT) || name.starts_with("__")
+}
 
 /// Record which params of an exported function the CALLEE owns (releases
 /// at its exit plan) — `false` means borrowed, the caller keeps its credit.

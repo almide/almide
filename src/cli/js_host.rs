@@ -123,19 +123,22 @@ impl HostSurface {
                 s.has_main = true;
                 continue;
             }
-            // The same set the structural emitter exports (#457): entry-program
-            // pub fns, monomorphic, not tests, not compiler-internal.
-            if name.starts_with("__")
-                || f.is_test
-                || f.generics.as_ref().is_some_and(|g| !g.is_empty())
-                || !matches!(f.visibility, almide_ir::IrVisibility::Public)
-            {
+            // The same set the structural emitter exports (#457, #3490): a
+            // declared export whatever the fn is spelled, else entry-program
+            // pub fns not synthesized by the compiler and not named into the
+            // toolchain's own export space; monomorphic, not tests.
+            let declared = f.export_attrs.iter().find(|a| a.target.as_str() == "wasm");
+            let exports = declared.is_some()
+                || (matches!(f.visibility, almide_ir::IrVisibility::Public)
+                    && !almide_ir::is_synthesized_entry_fn(f.name.as_str())
+                    && !almide_wasm::host_exports::is_reserved_export(name));
+            if !exports || f.is_test || f.generics.as_ref().is_some_and(|g| !g.is_empty()) {
                 continue;
             }
             // `@export(wasm, "sym")` (#2752) renames the module's export,
             // and the wrapper is the host's name for it.
             let mut exported = sig();
-            if let Some(a) = f.export_attrs.iter().find(|a| a.target.as_str() == "wasm") {
+            if let Some(a) = declared {
                 exported.name = a.symbol.to_string();
             }
             s.exports.push(exported);
@@ -148,7 +151,6 @@ impl HostSurface {
         for f in program.modules.iter().flat_map(|m| &m.functions) {
             if let Some(a) = f.export_attrs.iter().find(|a| a.target.as_str() == "wasm")
                 && !f.is_test
-                && !f.name.as_str().starts_with("__")
                 && !f.generics.as_ref().is_some_and(|g| !g.is_empty())
             {
                 s.exports.push(HostFn {
