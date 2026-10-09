@@ -206,12 +206,7 @@ fn synthesize(ir: &mut IrProgram, run_filter: Option<&str>, module_reinit: Modul
         if !f.is_test {
             continue;
         }
-        let display = f
-            .name
-            .as_str()
-            .strip_prefix(almide_ir::TEST_NAME_PREFIX)
-            .unwrap_or(f.name.as_str())
-            .to_string();
+        let display = f.display_name().to_string();
         // Raw test names carry spaces/parens/unicode no WAT identifier admits — rename
         // to a mechanical id and drop `is_test` so the render loop lowers it like any
         // other effect fn (nothing else references a test fn by name).

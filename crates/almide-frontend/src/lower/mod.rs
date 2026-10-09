@@ -423,6 +423,8 @@ fn lower_decls(
     let file_test_wheres: Vec<ast::TestWhere> = prog.decls.iter().filter_map(|d| {
         if let ast::Decl::TestWhereDef { clauses, .. } = d { Some(clauses.clone()) } else { None }
     }).flatten().collect();
+    // Test fns are named from THE enumeration the native report reads (#3488).
+    let mut test_names = test_fn_names(prog).into_iter().map(|(ir_name, _)| ir_name);
 
     for (decl_idx, decl) in prog.decls.iter().enumerate() {
         let doc = prog.doc_map.get(decl_idx).cloned().flatten();
@@ -526,23 +528,24 @@ fn lower_decls(
                 top_lets.push(IrTopLet { var, ty: val_ty, value: ir_value, kind, mutable: *mutable, doc, blank_lines_before: blank_lines, def_id: tl_def_id });
             }
             ast::Decl::TestWhereDef { .. } => {} // collected in pre-pass below
-            ast::Decl::Test { name, body, where_clauses, .. } => {
+            ast::Decl::Test { body, where_clauses, .. } => {
                 let cases: Vec<_> = where_clauses.iter()
-                    .filter_map(|wc| match wc { ast::TestWhere::Case { name, bindings } => Some((name.clone(), bindings.clone())), _ => None })
+                    .filter_map(|wc| match wc { ast::TestWhere::Case { bindings, .. } => Some(bindings.clone()), _ => None })
                     .collect();
                 let mut top_binds: Vec<_> = file_test_wheres.clone();
                 top_binds.extend(where_clauses.iter()
                     .filter(|wc| !matches!(wc, ast::TestWhere::Case { .. }))
                     .cloned());
                 if cases.is_empty() {
-                    let test_fn = lower_test_with_where(ctx, name, body, &top_binds);
+                    let ir_name = test_names.next().expect("test_fn_names enumerates every test");
+                    let test_fn = lower_test_with_where(ctx, &ir_name, body, &top_binds);
                     functions.push(test_fn);
                 } else {
-                    for (case_name, case_binds) in &cases {
-                        let full_name = format!("{} / {}", name, case_name);
+                    for case_binds in &cases {
+                        let ir_name = test_names.next().expect("test_fn_names enumerates every case");
                         let mut merged = top_binds.clone();
                         merged.extend(case_binds.iter().cloned());
-                        let test_fn = lower_test_with_where(ctx, &full_name, body, &merged);
+                        let test_fn = lower_test_with_where(ctx, &ir_name, body, &merged);
                         functions.push(test_fn);
                     }
                 }

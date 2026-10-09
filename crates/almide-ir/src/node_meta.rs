@@ -292,6 +292,34 @@ pub struct IrFunction {
 /// All downstream passes see a pre-normalized, unique `func.name`.
 pub const TEST_NAME_PREFIX: &str = "__test_almd_";
 
+/// #3488: the IR name of the `ordinal`-th test fn of a program (declaration
+/// order, `where` cases expanded): `__test_almd_<NNNN>_<label>`.
+///
+/// The ordinal is what makes the name injective. Every backend has to spell
+/// the label into an identifier, and that fold is lossy (`"a b"`, `"a_b"` and
+/// `"a-b"` all become `a_b`), so two distinct labels used to meet on one Rust
+/// fn (E0428). Two tests never share an ordinal, and the ordinal sits between
+/// the fixed prefix and the first `_` the label can contribute, so no label
+/// spelling can reach another test's name. The label stays a substring of the
+/// emitted name, so `--run <part of the label>` still selects by label on both
+/// legs; zero-padding keeps libtest's name-sorted run order the declaration
+/// order the wasm runner uses.
+pub fn test_fn_name(ordinal: usize, label: &str) -> String {
+    format!("{TEST_NAME_PREFIX}{ordinal:04}_{label}")
+}
+
+/// The `test "…"` label of a test fn's IR name — the inverse of
+/// [`test_fn_name`]. A name without the ordinal comes back without the prefix
+/// only; a name outside the test space comes back unchanged.
+pub fn test_label(ir_name: &str) -> &str {
+    let Some(rest) = ir_name.strip_prefix(TEST_NAME_PREFIX) else { return ir_name };
+    let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
+    match rest[digits..].strip_prefix('_') {
+        Some(label) if digits > 0 => label,
+        _ => rest,
+    }
+}
+
 /// #3483: the prefix a user-declared fn's IR name gets when its source name
 /// falls in the compiler's fn-name space (see [`is_reserved_fn_name`]).
 ///
@@ -412,12 +440,12 @@ impl IrFunction {
     }
 
     /// Source-visible name. For test blocks this strips the
-    /// `TEST_NAME_PREFIX` so reporters (test runner output, diagnostics)
-    /// show the user's original `test "name"` string.
+    /// `TEST_NAME_PREFIX` and the ordinal ([`test_label`]) so reporters (test
+    /// runner output, diagnostics) show the user's original `test "name"`.
     pub fn display_name(&self) -> &str {
         let n = self.name.as_str();
         if self.is_test {
-            n.strip_prefix(TEST_NAME_PREFIX).unwrap_or(n)
+            test_label(n)
         } else {
             n
         }

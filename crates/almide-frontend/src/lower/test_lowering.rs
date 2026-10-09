@@ -162,7 +162,30 @@ fn where_override_name(path: &[Sym]) -> String {
     format!("__where_{}", path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("_"))
 }
 
-fn lower_test_with_where(ctx: &mut LowerCtx, name: &str, body: &ast::Expr, where_clauses: &[ast::TestWhere]) -> IrFunction {
+/// `(IR fn name, label)` of every test fn `prog` lowers to, in the order
+/// lowering emits them: one per `test`, or one per `where` case
+/// (`"<test> / <case>"`) when it has cases. THE one enumeration — lowering
+/// names its test fns from it and the native report maps libtest's names back
+/// to labels from it (#3488), so the two cannot disagree on an ordinal.
+pub fn test_fn_names(prog: &ast::Program) -> Vec<(String, String)> {
+    let labels = prog.decls.iter().flat_map(|d| match d {
+        ast::Decl::Test { name, where_clauses, .. } => {
+            let cases: Vec<String> = where_clauses
+                .iter()
+                .filter_map(|wc| match wc {
+                    ast::TestWhere::Case { name: case, .. } => Some(format!("{} / {}", name, case)),
+                    _ => None,
+                })
+                .collect();
+            if cases.is_empty() { vec![name.to_string()] } else { cases }
+        }
+        _ => Vec::new(),
+    });
+    labels.enumerate().map(|(k, label)| (almide_ir::test_fn_name(k, &label), label)).collect()
+}
+
+/// Lower one test fn named `ir_name` (from [`test_fn_names`]).
+fn lower_test_with_where(ctx: &mut LowerCtx, ir_name: &str, body: &ast::Expr, where_clauses: &[ast::TestWhere]) -> IrFunction {
     ctx.push_scope();
     let mut stmts: Vec<IrStmt> = Vec::new();
     let mut overrides: Vec<(Vec<Sym>, String)> = Vec::new();
@@ -195,7 +218,7 @@ fn lower_test_with_where(ctx: &mut LowerCtx, name: &str, body: &ast::Expr, where
     };
     ctx.pop_scope();
     IrFunction {
-        name: sym(&format!("{}{}", almide_ir::TEST_NAME_PREFIX, name)),
+        name: sym(ir_name),
         params: vec![], ret_ty: Ty::Unit, body: final_body,
         is_effect: true, is_test: true,
         generics: None, extern_attrs: vec![], export_attrs: vec![], attrs: vec![],

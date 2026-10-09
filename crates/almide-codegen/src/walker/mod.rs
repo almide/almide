@@ -476,8 +476,9 @@ fn render_fn_safe_name(
     is_rust_plain_main_with_forces: bool,
 ) -> String {
     // Sanitize function name: spaces/dots/hyphens → underscores.
-    // Test blocks already carry `TEST_NAME_PREFIX` from lowering so they
-    // cannot collide with user fns here — no conditional prefixing needed.
+    // Test blocks already carry `TEST_NAME_PREFIX` and their ordinal from
+    // lowering (`almide_ir::test_fn_name`), so they cannot collide with user
+    // fns or with each other here, however their labels fold (#3488).
     let raw_name = if is_rust_effect_main || is_rust_plain_main_with_forces {
         "__almide_main".to_string()
     } else {
