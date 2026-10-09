@@ -300,7 +300,9 @@ pub(super) fn cargo_build_generated_with_native(
     source_root: Option<&std::path::Path>,
     inputs: &CrateInputs,
 ) -> Result<std::path::PathBuf, String> {
-    let uses_matrix = rs_code.contains("almide_rt_matrix_");
+    // An identifier, not a substring: a user literal spelling the prefix is
+    // emitted verbatim and must not route the build off the fast path (#3486).
+    let uses_matrix = almide_codegen::rust_idents::has_ident_with_prefix(rs_code, "almide_rt_matrix_");
 
     // The rlib fast path links a HOST-built runtime with a bare host rustc, so a
     // cross build (#2772) always takes the cargo path.
@@ -445,7 +447,7 @@ fn cargo_build_test_fast_path(rs_code: &str, project_dir: &std::path::Path) -> R
             ensure_runtime_rlib("1"),
             crate::codegen::slim_main_with_external_runtime(rs_code),
         ) {
-            if !slim.contains("fn main(") && !slim.contains("fn almide_main(") {
+            if !defines_entry_point(&slim) {
                 slim.push_str("\nfn main() {}\n");
             }
             let rlib_dir = rlib.parent().unwrap_or_else(|| std::path::Path::new("."));
@@ -478,7 +480,7 @@ fn cargo_build_test_fast_path(rs_code: &str, project_dir: &std::path::Path) -> R
     }
 
     let mut final_code = rs_code.to_string();
-    if !final_code.contains("fn main(") && !final_code.contains("fn almide_main(") {
+    if !defines_entry_point(&final_code) {
         final_code.push_str("\nfn main() {}\n");
     }
     let rs_path = project_dir.join("almide_test_main.rs");
