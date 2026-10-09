@@ -322,7 +322,11 @@ pub fn lower_module(
     type_map: &TypeMap,
     versioned_name: Option<String>,
 ) -> IrModule {
-    let mut ir_prog = lower_program_with_prefix(prog, env, type_map, Some(name), Default::default());
+    // #3504: a user module's fns spelled into the compiler's fn-name space are
+    // escaped as the entry program's are (#3483); registration recorded them
+    // under this module's key.
+    let escaped = escaped_module_fns(env, name);
+    let mut ir_prog = lower_program_with_prefix(prog, env, type_map, Some(name), escaped);
     // An imported module's `test` blocks belong to that module's own test run,
     // never to the importer's build (#2550). Kept here, the native leg flattened
     // them into the importer's test binary as `almide_rt_<mod>___test_*` and
@@ -363,6 +367,15 @@ pub fn lower_module(
         exports,
         imports: Vec::new(), // populated during import resolution (future)
     }
+}
+
+/// The bare source names of module `name`'s fns that registration marked for
+/// the #3483 escape (`TypeEnv::escaped_module_fns`, #3504).
+fn escaped_module_fns(env: &TypeEnv, name: &str) -> std::collections::HashSet<Sym> {
+    env.escaped_module_fns
+        .iter()
+        .filter_map(|k| k.as_str().strip_prefix(name)?.strip_prefix('.').filter(|b| !b.contains('.')).map(sym))
+        .collect()
 }
 
 // ── Function lowering ───────────────────────────────────────────

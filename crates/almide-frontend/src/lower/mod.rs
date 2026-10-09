@@ -78,9 +78,10 @@ pub struct LowerCtx<'a> {
     pub synthesized_fns: Vec<almide_ir::IrFunction>,
     /// Counter for synthesized fan.bounded function names.
     pub bounded_counter: u32,
-    /// #3483: the source names of the entry program's fns whose IR name is
-    /// escaped out of the compiler's `__` fn-name space
-    /// ([`almide_ir::escape_user_fn_name`]); empty for a module.
+    /// #3483: the source names of the program's fns whose IR name is escaped
+    /// out of the compiler's `__` fn-name space
+    /// ([`almide_ir::escape_user_fn_name`]) — the entry program's, or a user
+    /// module's (#3504); empty for the stdlib.
     escaped_fns: std::collections::HashSet<Sym>,
 }
 
@@ -119,11 +120,17 @@ impl<'a> LowerCtx<'a> {
     }
 
     /// A call target resolved from source, with its fn named as
-    /// [`Self::ir_fn_name`] names it. Synthesized targets are built directly
-    /// and never pass through here.
+    /// [`Self::ir_fn_name`] names it — or, for a user module's fn, as that
+    /// module's lowering names it (#3504). Synthesized targets are built
+    /// directly and never pass through here.
     pub(super) fn ir_call_target(&self, target: CallTarget) -> CallTarget {
         match target {
             CallTarget::Named { name } => CallTarget::Named { name: self.ir_fn_name(name) },
+            CallTarget::Module { module, func, def_id }
+                if self.env.escaped_module_fns.contains(&sym(&format!("{module}.{func}"))) =>
+            {
+                CallTarget::Module { module, func: almide_ir::escape_user_fn_name(func), def_id }
+            }
             other => other,
         }
     }
@@ -314,17 +321,32 @@ fn lower_program_with_prefix(prog: &ast::Program, env: &TypeEnv, type_map: &Type
 include!("effect_fn_types.rs");
 
 /// #3483: the entry program's fns spelled into the compiler's fn-name space.
-/// A binding to a foreign symbol (`@extern`, `@inline_rust`,
-/// `@wasm_intrinsic`) keeps its spelling — the name is the binding.
 fn escaped_entry_fns(prog: &ast::Program) -> std::collections::HashSet<Sym> {
-    let binds_foreign = |attrs: &[ast::Attribute]| {
-        attrs.iter().any(|a| matches!(a.name.as_str(), "inline_rust" | "wasm_intrinsic"))
-    };
     prog.decls.iter().filter_map(|d| match d {
-        ast::Decl::Fn { name, extern_attrs, attrs, .. }
-            if almide_ir::is_reserved_fn_name(name.as_str()) && extern_attrs.is_empty() && !binds_foreign(attrs) => Some(*name),
+        ast::Decl::Fn { name, extern_attrs, attrs, .. } if user_fn_needs_escape(name.as_str(), extern_attrs, attrs) => Some(*name),
         _ => None,
     }).collect()
+}
+
+/// Does a user-declared fn spelled `name` get its IR name escaped
+/// ([`almide_ir::escape_user_fn_name`])? Every fn spelled into the compiler's
+/// fn-name space does — the entry program's (#3483) and a user module's
+/// (#3504) — except a binding to a foreign symbol (`@extern`,
+/// `@inline_rust`, `@wasm_intrinsic`), which keeps its spelling: the name is
+/// the binding.
+pub(crate) fn user_fn_needs_escape(name: &str, extern_attrs: &[ast::ExternAttr], attrs: &[ast::Attribute]) -> bool {
+    almide_ir::is_reserved_fn_name(name)
+        && extern_attrs.is_empty()
+        && !attrs.iter().any(|a| matches!(a.name.as_str(), "inline_rust" | "wasm_intrinsic"))
+}
+
+/// #3504: is the module keyed `name` the user's — a sibling `import self.x`
+/// or a dependency package's module — rather than the compiler's own (a
+/// bundled stdlib module, a linked self-host body `__selfhost_N`), whose `__`
+/// fns ARE the compiler's fn-name space? Judged by the key: a user module
+/// that takes a bundled module's name keeps its fns' spelling unescaped.
+pub(crate) fn is_user_module(name: &str) -> bool {
+    !name.starts_with("__") && !crate::stdlib::is_any_stdlib(name)
 }
 
 // Register cross-package top-level lets that weren't in register_decls

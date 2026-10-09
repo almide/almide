@@ -329,6 +329,8 @@ fn eta_expand_module_fn(
     } else {
         CallTarget::Named { name: sym(&format!("{}.{}", module, field)) }
     };
+    // #3504: a user module's fn spelled `__x` is named as its module names it.
+    let target = ctx.ir_call_target(target);
     let call = ctx.mk(IrExprKind::Call {
         target, args, type_args: vec![],
     }, ret_ty.clone(), span.clone());
