@@ -232,6 +232,45 @@ warning count against develop, not by the rounded grade.
   - Unboxing onebrc's small returns.
   - The final v0.67.0 once soak and CI are clean.
 
+### 2026-10-09 (later) — batches 26–29, release blockers back to 0
+
+- **Merged:**
+  - #3503 (batch 26): #3485–#3491 and #3495, plus a private scratch dir for each trust-gate run.
+  - #3507 (batch 28):
+    - #3504 (I-miscompile): a module fn `__fan_site_0` merged with the wasm parallel chunk of that name and printed 3 instead of 101 on wasm.
+    - #3505: E097 for `pub type` / `pub protocol` / `pub test`, and no cascading E025.
+    - The native-vs-Rust work. Release fast-path builds use fat LTO and one codegen unit (owner ruling 2026-10-09).
+    - The two ratio fixes from #3506. #3506 conflicted with develop after #3503 landed and was closed as superseded.
+- **Release blockers:** 0, after #3504 closed.
+- **Native vs Rust:**
+  - Measured on GCE: x86 c3-standard-8 (Xeon 8481C) and arm c4a-standard-8 (Neoverse-V2), rustc 1.99.0.
+  - The figure is `bench.py --legs native,rust --runs 9`, the min of 2 rounds, as the ratio Almide/Rust (x86 / arm).
+
+  | bench | before | after |
+  |---|---|---|
+  | onebrc | 1.76 / 1.78 | 1.00 / 1.01 |
+  | wordfreq | 1.89 / 1.80 | 1.02 / 0.96 |
+  | wordfreq-group | 6.05 / 4.38 | 1.97 / 1.59 |
+  | fasta | 1.38 / 1.20 | 1.16 / 1.10 |
+  | strchurn | 1.20 / 1.16 | 1.13 / 1.13 |
+
+  - **Slower:** binarytrees on arm, 0.297 → 0.311 (+4.7%).
+  - **Cost:** `--release` builds take about 3 s longer (x86 7.0 → 10.7 s, arm 5.4 → 8.2 s, cold, onebrc).
+  - **Refuted:** the glibc mmap-threshold hypothesis for strchurn.
+- **Native allocation ledger, develop → batch 28:** −12% to −20% on all 8 programs (str 485→389, recs 893→766), with allocs == deallocs in every row.
+- **The 10-07 FmtInstability finding is confirmed fixed.** `xtarget-fuzz replay --seed 601605808738 --index 15` reports a FINDING at 8ee196dbe and CLEAN on develop.
+- **codopsy:** every touched crate is unchanged in score and warning count.
+  - `runtime/rs/src` is B (83) and is not a workspace member. It was already B on develop; recorded on #3152.
+- **Process lesson:** regen.sh does not cover the CI `checks` (Emit & Format) job, which cost three CI round trips. The causes were an unregistered `ALMIDE_*` switch, the stale cli.md switch table, and a quoted `"ALMIDE_…"` literal in a test. Run that job's step list locally before every push.
+- **Written, not merged (batch 29):** #3501. Wasm field / interpolation accumulators are extended in place when unique. Bytes requested per doubling of n went from about 4× to about 2×, and the 8 affected modules grow by 13–297 B.
+- **Next:**
+  - Land batch 29.
+  - Re-measure the native-vs-Rust table and the wasm ledger on GCE for develop after batch 28.
+  - Re-measure the gramide edit loop on GCE against v0.66.0.
+  - Wasmtime inlining.
+  - Unboxing onebrc's small returns on wasm.
+  - The final v0.67.0.
+
 ## Edit loop on a real project: O6lvl4/gramide 0.2.11
 
 gramide has 19 files and 8,106 lines of Almide. It is measured on a copy (`git archive HEAD`) with one line added: `import self.lex` in `src/keystrokes.almd`.
