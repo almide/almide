@@ -322,6 +322,9 @@ pub struct Checker {
     /// defaulted. Without it the value passed `check` and then tripped the
     /// ConcretizeTypes COMPILER-BUG gate on BOTH targets (#662).
     pub(crate) deferred_unresolved_binding_checks: Vec<UnresolvedBindingSite>,
+    /// Generic calls whose type parameters must each be determined (#3495,
+    /// E025's call edition) — see `uninferable_type_param.rs`.
+    pub(crate) deferred_type_param_checks: Vec<TypeParamSite>,
     /// #1123 / ADR-0008 N+1: sites where the pre-switch implementation
     /// inserted implicit propagation (auto-`?`). Post-solve, every site whose
     /// type resolved to Result is a hard error — E042 (must-use: a discarded
@@ -682,6 +685,7 @@ impl Checker {
             deferred_float_overflow_checks: Vec::new(),
             deferred_numeric_narrowing_checks: Vec::new(),
             deferred_unresolved_binding_checks: Vec::new(),
+            deferred_type_param_checks: Vec::new(),
             deferred_implicit_prop_checks: Vec::new(),
             effect_call_spans: std::collections::HashSet::new(),
             tail_expect: None,
