@@ -356,6 +356,22 @@ impl<K: PartialEq + 'static, V> AlmideMap<K, V> {
         self.entries.push((k, v));
         self.note_push(h);
     }
+    /// `m[k] = f(map.get_or(m, k, init))` in ONE probe (the walker's
+    /// `map_upsert` form): present → the slot becomes `f(old)` in place,
+    /// absent → `(k, f(init))` is appended. The same hash and position the
+    /// two-step `get_or` + `insert` computed twice. `f` runs before the
+    /// append, so an `f` that aborts leaves no half-inserted key behind.
+    pub fn upsert_with<F: FnOnce(V) -> V>(&mut self, k: K, init: V, f: F) where V: Clone {
+        let h = self.lookup.hash_for(&k);
+        if let Some(i) = self.position_with(&k, h) {
+            let slot = &mut self.entries[i].1;
+            *slot = f(slot.clone());
+            return;
+        }
+        let v = f(init);
+        self.entries.push((k, v));
+        self.note_push(h);
+    }
     /// Remove, keeping the order of the remaining entries.
     pub fn remove(&mut self, k: &K) {
         if let Some(i) = self.position(k) {
