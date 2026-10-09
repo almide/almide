@@ -615,9 +615,9 @@ pub fn to_wasi_mapped(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<(Vec<u8>
         let idx = if *kind == ExportKind::Func { *idx + shift } else { *idx };
         exports.export(name, *kind, idx);
     }
-    exports.export("_start", ExportKind::Func, main_index + shift);
+    exports.export(almide_wasm::host_exports::START_EXPORT, ExportKind::Func, main_index + shift);
     f_realloc.into_iter().for_each(|f| {
-        exports.export("cabi_realloc", ExportKind::Func, f);
+        exports.export(almide_wasm::host_exports::REALLOC_EXPORT, ExportKind::Func, f);
     });
 
     let mut code = CodeSection::new();

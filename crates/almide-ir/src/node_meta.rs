@@ -338,6 +338,19 @@ pub fn is_reserved_fn_name(name: &str) -> bool {
     name.starts_with("__") || name.starts_with(USER_FN_ESCAPE)
 }
 
+/// Did the compiler synthesize the ENTRY program fn whose IR name is
+/// `ir_name`? (#3490) Every synthesized fn is named in the `__` space and
+/// lowering escapes every entry fn the user spelled there
+/// ([`escape_user_fn_name`]), so on an entry IR name the space is the
+/// record of who made the fn — unlike the source spelling, which a user can
+/// choose. The one user fn left there is a foreign binding (`@extern`,
+/// `@inline_rust`, `@wasm_intrinsic`), whose name is the binding and which
+/// has no body of the program's to export either. Not meaningful for a
+/// linked module's fns: module fns are not escaped.
+pub fn is_synthesized_entry_fn(ir_name: &str) -> bool {
+    ir_name.starts_with("__")
+}
+
 /// The IR name of a user-declared fn spelled `name` (#3483).
 pub fn escape_user_fn_name(name: almide_base::intern::Sym) -> almide_base::intern::Sym {
     if is_reserved_fn_name(name.as_str()) {
