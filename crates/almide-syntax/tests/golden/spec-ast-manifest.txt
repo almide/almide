@@ -1,4 +1,4 @@
-# oracle: almide 0.67.0 (dev) at 9c57f3818 — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
+# oracle: almide 0.67.0 (dev) at 233a1db2c — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)
 9e174e6cc9ab173d59b961cc661eb5ad49ebf240e8099edca409c3a40db9f4d4	spec/churn/closure_env_churn.almd
 2b1c42676caca20af04e182941d53484f93c88e08fb03a09efc07e94ec37f895	spec/churn/construct_from_temp_churn.almd
 5d02cd41ef410020f099769da494465fd8141da0fd1068072ee3e94df9d143d3	spec/churn/enumerate_rich_churn.almd
@@ -685,6 +685,7 @@ b3fe26db783f56de07717c546cb71d8e57a3e6c27d70d7a722fc7be09367ea14	spec/stdlib/map
 64d0dce6a23b3e4ad3c186db28a8d222ab09e9b8b5c59f38c2f91ab50783f5ff	spec/stdlib/map_generic_test.almd
 78c1702ad8d1b928be64d1ecb57f6a26f2550235e4f6e69940c9bdd91184914e	spec/stdlib/map_higher_order_test.almd
 c72df52a7cae9577d0e32f1323812b5070f0d37b5a7132e844aab9dc96320fd5	spec/stdlib/map_index_test.almd
+648ec7147f98ebad38812cfa2ca26ef7cfbd1f5bce4fd0c783ceb3a3bc1d2278	spec/stdlib/map_keyed_count_test.almd
 97c00c3e3d088ce4a0f461f69fce640b52ee4c845ff8e67e861348b976f1df5f	spec/stdlib/map_mutable_test.almd
 256caef7f2577c5b54bca0194f535e036a06eeea0d58aeb18561b47730917885	spec/stdlib/map_semantics_manifest_test.almd
 fb1b603a787c6a0a78c59df6d6de8e4718bc55426401dc37445deb8eddd0ffc8	spec/stdlib/map_upsert_test.almd
