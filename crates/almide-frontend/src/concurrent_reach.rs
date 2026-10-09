@@ -35,6 +35,9 @@ use almide_lang::ast::{self, Decl, Expr, ExprKind, Pattern, Program, Span, Stmt}
 #[path = "concurrent_reach_closed.rs"]
 mod closed;
 pub use closed::ClosureFinding;
+#[path = "concurrent_reach_shape.rs"]
+mod shape;
+pub use shape::may_have_sites;
 
 /// The `fan` surfaces whose fn-valued arguments are concurrent slots.
 /// `__any_block` is the parser's spelling of `fan.any { … }`.
@@ -252,64 +255,6 @@ impl<'a> Analyzer<'a> {
         a.has_dotted_fns = a.fns.keys().any(|k| k.as_str().contains('.'));
         a.shape = a.scan_shape(prog);
         a
-    }
-
-    /// The pre-scan behind `Shape` (#3340).
-    fn scan_shape(&self, prog: &Program) -> Shape {
-        let mut shape = Shape { may_have_sites: !self.slots.is_empty(), may_reach: !self.top_vars.is_empty() };
-        // A module this program can name (`import m` / `import m.{f}`)
-        // carries facts the walk reads through `ext` (`call_slots`,
-        // `ext_ref`); every such read starts from these two maps.
-        for &m in self.w.aliases.values().chain(self.w.direct.values()) {
-            if self.module_has_slots(m) {
-                shape.may_have_sites = true;
-            }
-            if self.w.ext.get(&m).is_some_and(|fs| fs.values().any(|s| s.reach.is_some())) {
-                shape.may_reach = true;
-            }
-        }
-        let heads = slot_heads();
-        let mut see = |e: &Expr| match &e.kind {
-            ExprKind::Fan { .. }
-            | ExprKind::FanSettle { .. }
-            | ExprKind::FanRace { .. }
-            | ExprKind::FanBounded { .. }
-            | ExprKind::FanTimeout { .. }
-            | ExprKind::FanRaceMap { .. } => {
-                shape.may_have_sites = true;
-                shape.may_reach = true;
-            }
-            // `fan.map(…)`, `http.serve(…)`: a callee head spelled as the
-            // module itself, which `resolve_callee` honours with no import.
-            ExprKind::Ident { name } => {
-                if heads.contains(name) {
-                    shape.may_have_sites = true;
-                }
-            }
-            ExprKind::Block { stmts, .. } | ExprKind::ForIn { body: stmts, .. } | ExprKind::While { body: stmts, .. } => {
-                if stmts.iter().any(|s| matches!(s, Stmt::Var { .. })) {
-                    shape.may_reach = true;
-                }
-            }
-            _ => {}
-        };
-        for d in &prog.decls {
-            match d {
-                Decl::Fn { body: Some(body), .. } => ast::visit_expr(body, &mut see),
-                Decl::TopLet { value, .. } => ast::visit_expr(value, &mut see),
-                Decl::Test { body, .. } => ast::visit_expr(body, &mut see),
-                _ => {}
-            }
-        }
-        shape
-    }
-
-    /// Whether a call resolved into module `m` can have concurrent slots:
-    /// `fan`, a stdlib module that declares `@concurrent`, or a user module
-    /// with a fn whose slots are known.
-    fn module_has_slots(&self, m: Sym) -> bool {
-        slot_heads().contains(&m)
-            || self.w.ext.get(&m).is_some_and(|fs| fs.values().any(|s| !s.slots.is_empty()))
     }
 
     /// Run slot inference to a fixpoint, then collect every site that
