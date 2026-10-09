@@ -349,20 +349,15 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
     }
     let mut sigs = build_native_sig_table(&ir, &functions, &record_layouts, &variant_layouts)?;
     // Stage 1 probe: same insertion point in pass order as the wasm leg.
-    crate::charge_probe::insert_probe_charges(&mut functions);
     // T1-2 metered clones carry their base fn's declared signature — copy the
-    // sig entry so a call to `heavy__fuel` types exactly like `heavy` (without
-    // this the repr fallback typed a Result-returning clone as String).
-    {
-        let cloned: Vec<(String, _)> = functions
-            .iter()
-            .filter_map(|f| {
-                let base = f.name.strip_suffix("__fuel")?;
-                Some((f.name.as_str().to_string(), sigs.get(base)?.clone()))
-            })
-            .collect();
-        for (name, sig) in cloned {
-            sigs.insert(name, sig);
+    // sig entry so a call to `__fuel__heavy` types exactly like `heavy` (without
+    // this the repr fallback typed a Result-returning clone as String). The
+    // clone→base pairs come from the pass that made the clones, never from a
+    // name's spelling: a `__fuel` suffix test gave a user fn `heavy__fuel`
+    // `heavy`'s signature (#3491).
+    for (clone, base) in crate::charge_probe::insert_probe_charges(&mut functions) {
+        if let Some(sig) = sigs.get(base.as_str()).cloned() {
+            sigs.insert(clone, sig);
         }
     }
     // #824: see the wasm leg's call above — `Op::MakeUnique` already renders to
