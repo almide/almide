@@ -35,21 +35,33 @@ pub fn probe_enabled() -> bool {
 ///  - PROBE (`ALMIDE_FUEL_PROBE`): every function is metered — the probe
 ///    measures the whole program, unchanged.
 ///  - BUDGET-ONLY: metered-clone specialization (T1-2) — only the outlined
-///    region fns and `__fuel` CLONES of their transitive callees carry
+///    region fns and `__fuel__` CLONES of their transitive callees carry
 ///    charges, so a program's non-region paths pay ZERO metering cost.
 ///    Region spends are unchanged (every in-region callee IS a metered
 ///    clone), and out-of-region spend is unobservable (verdicts read only
 ///    the enter/exit delta), so no fixture flip point moves.
-pub fn insert_probe_charges(functions: &mut Vec<MirFunction>) {
+///
+/// Returns every metered clone as `(clone, base)`: the pass that made the
+/// clones is the one that knows them, so a consumer never recovers the base
+/// by parsing a clone's name (#3491).
+pub fn insert_probe_charges(functions: &mut Vec<MirFunction>) -> Vec<(String, String)> {
     if probe_enabled() {
         for f in functions.iter_mut() {
             charge_fn(f);
         }
-        return;
+        return Vec::new();
     }
     if budget_used() || timeout_used() {
-        specialize_metered_clones(functions);
+        return specialize_metered_clones(functions);
     }
+    Vec::new()
+}
+
+/// The name of `base`'s metered clone. It sits in the compiler's `__` fn-name
+/// space, which a user fn never occupies (#3483 escapes one spelled there), so
+/// no user fn can share it — a `<base>__fuel` suffix could (#3491).
+fn metered_clone_name(base: &str) -> String {
+    format!("__fuel__{base}")
 }
 
 /// Entry + loop-head charges for one fn, in place (the W1 placement).
@@ -90,12 +102,13 @@ fn charge_fn(f: &mut MirFunction) {
     f.ops = out;
 }
 
-/// T1-2: clone the region-reachable call graph into `__fuel` variants and
+/// T1-2: clone the region-reachable call graph into `__fuel__` variants and
 /// meter ONLY those (plus the region fns themselves). Lifted lambdas cannot
 /// be cloned (table dispatch indexes by name-sorted position), so when a
 /// region reaches a `FuncRef` every `__lambda_*` fn stays metered globally —
 /// the one documented remainder of "zero metering outside regions".
-fn specialize_metered_clones(functions: &mut Vec<MirFunction>) {
+/// Returns the clones as `(clone, base)`.
+fn specialize_metered_clones(functions: &mut Vec<MirFunction>) -> Vec<(String, String)> {
     use std::collections::{BTreeMap, BTreeSet, VecDeque};
     let names: BTreeSet<String> = functions
         .iter()
@@ -134,24 +147,26 @@ fn specialize_metered_clones(functions: &mut Vec<MirFunction>) {
         }
     }
 
-    // Clone each reachable fn as `<name>__fuel`, retargeting region-internal
+    // Clone each reachable fn as `__fuel__<name>`, retargeting region-internal
     // calls to the clone family (recursion included).
     let retarget = |f: &mut MirFunction, reachable: &BTreeSet<String>| {
         for op in f.ops.iter_mut() {
             if let Op::CallFn { name, .. } = op {
                 if reachable.contains(name.as_str()) {
-                    *name = format!("{name}__fuel");
+                    *name = metered_clone_name(name);
                 }
             }
         }
     };
     let mut clones: Vec<MirFunction> = Vec::with_capacity(reachable.len());
+    let mut clone_of: Vec<(String, String)> = Vec::with_capacity(reachable.len());
     for n in &reachable {
         let i = by_name[n];
         let mut c = functions[i].clone();
-        c.name = format!("{n}__fuel");
+        c.name = metered_clone_name(n);
         retarget(&mut c, &reachable);
         charge_fn(&mut c);
+        clone_of.push((c.name.clone(), n.clone()));
         clones.push(c);
     }
     for f in functions.iter_mut() {
@@ -164,6 +179,7 @@ fn specialize_metered_clones(functions: &mut Vec<MirFunction>) {
         }
     }
     functions.extend(clones);
+    clone_of
 }
 
 // ───────────────────── charge certificate (static preservation) ─────────────────────
