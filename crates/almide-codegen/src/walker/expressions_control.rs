@@ -583,6 +583,15 @@ fn render_expr_clone(ctx: &RenderContext, expr: &IrExpr) -> String {
             return rc_cow_result_glue(format!("{read}.clone()"), &inner.ty);
         }
     }
+    // The clone pass models `xs[i]` / `m[k]` as PLACES and wraps them in
+    // `Clone` to take an owned value out — but their templates already hand
+    // back an owned value (`almide_index!` clones the element, `map_get`
+    // ends in `.cloned()`). A second `.clone()` copied every element twice:
+    // one allocation per String read, freed on the spot (`let w = vocab[i]`
+    // in a 2M-draw loop paid 2 allocations instead of 1).
+    if matches!(inner.kind, IrExprKind::IndexAccess { .. } | IrExprKind::MapAccess { .. }) {
+        return render_expr(ctx, inner);
+    }
     let expr_s = render_expr(ctx, inner);
     ctx.templates.render_with("clone_expr", None, &[], &[("expr", expr_s.as_str())])
         .unwrap_or_else(|| format!("{}.clone()", expr_s))
