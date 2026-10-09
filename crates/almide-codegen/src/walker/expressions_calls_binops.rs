@@ -10,7 +10,13 @@ fn render_iter_chain(ctx: &RenderContext, source: &IrExpr, consume: bool, steps:
         && almide_ir::source_element_receivers(steps, collector)
             .and_then(|r| r.first().map(|(v, _)| *v))
             .is_some_and(|v| ctx.ann.borrowed_loop_vars.contains(&v));
-    let mut chain = if consume {
+    // A `list.range(a, b)` source yields owned `Int`s either way: iterate the
+    // range itself instead of building the `Vec<i64>` to walk it once. A
+    // borrowing chain (`&i64` binders) keeps the list it reads from.
+    let counted = (!by_ref).then(|| list_range_bounds(ctx, source)).flatten();
+    let mut chain = if let Some((s, e)) = counted {
+        format!("({s}..{e})")
+    } else if consume {
         format!("({}).into_iter()", src)
     } else if by_ref {
         format!("({}).iter()", src)
