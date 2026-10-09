@@ -502,6 +502,8 @@ impl Checker {
         for g in &sig.generics {
             bindings.entry(*g).or_insert_with(|| self.fresh_var());
         }
+        // #3495: a parameter nothing determines is E025, judged post-solve.
+        self.defer_type_param_check(name, &sig.generics, &bindings, arg_tys);
 
         // #2496: a generic USER fn's instantiation is judged post-solve
         // against what its body interpolates (`interp_string_form.rs`).

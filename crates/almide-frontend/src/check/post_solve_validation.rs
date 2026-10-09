@@ -272,6 +272,7 @@ impl Checker {
 }
 
 include!("post_solve_checks.rs");
+include!("uninferable_type_param.rs");
 
 /// Resolve inferred TypeVars in the type map after constraint solving.
 fn resolve_type_map(type_map: &mut crate::types::TypeMap, uf: &UnionFind) {
