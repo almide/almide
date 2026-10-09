@@ -299,6 +299,9 @@ impl Emitter<'_> {
     /// take: one scan, the callback over the present value (or `init`), then
     /// the judged write of map.set — in place when the credit is the block's
     /// only one. `None` keeps the borrowed-receiver copy (collections_hof.rs).
+    /// The functional-but-in-place update of Koka's Perceus and Lean's
+    /// reset/reuse (../almide-references/lean4/src/Lean/Compiler/LCNF/
+    /// ResetReuse.lean): a value whose last owner is the update is updated.
     pub(crate) fn try_map_upsert_owned(&mut self, m: &IrExpr, ops: [&IrExpr; 3]) -> Result<Option<Lowered>, EmitError> {
         let [key, init, cb] = ops;
         let (params, body) = self.hof_lambda(cb, 1)?;
