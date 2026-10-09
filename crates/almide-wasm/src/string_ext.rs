@@ -11,6 +11,9 @@ use crate::emitter::Emitter;
 use crate::string_scan::str_byte;
 use crate::*;
 
+#[path = "string_split_at.rs"]
+mod string_split_at;
+
 impl Emitter<'_> {
     pub(crate) fn lower_string_ext(
         &mut self,
@@ -397,6 +400,10 @@ impl Emitter<'_> {
             ("strip_prefix" | "strip_suffix", [s, p]) => {
                 self.lower_string_strip(s, p, func == "strip_prefix")
             }
+            // split_match.rs: the destructured split_once, cut in three.
+            (crate::emit::front_desugar::SPLIT_AT, [s, sep]) => self.lower_split_at(s, sep),
+            (crate::emit::front_desugar::SPLIT_HEAD, [s, at]) => self.lower_split_piece(s, None, at),
+            (crate::emit::front_desugar::SPLIT_TAIL, [s, sep, at]) => self.lower_split_piece(s, Some(sep), at),
             // Rust str::replace / replace_first byte-for-byte via the
             // shared helper (the `first` flag selects the form). The
             // empty-pattern char-boundary rule (C-100) lives in the helper.
