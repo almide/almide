@@ -1141,10 +1141,11 @@ impl Checker {
     /// #3274: the effect fn a binding named `name` holds — the local that
     /// `name` resolves to, else the top-level `let` of that name.
     pub(crate) fn effect_alias_of_binding(&self, name: &str) -> Option<Sym> {
-        if self.env.lookup_var(name).is_some() {
-            return self.env.effect_alias(name);
+        let key = sym(name);
+        match self.env.binding_effect_alias(key) {
+            Some(alias) => alias,
+            None => self.env.top_effect_aliases.get(&key).copied(),
         }
-        self.env.top_effect_aliases.get(&sym(name)).copied()
     }
 
     /// #3274: the effect fn a bare VALUE expression names — `rd`,

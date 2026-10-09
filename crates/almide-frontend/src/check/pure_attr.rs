@@ -84,7 +84,7 @@ struct Witness {
 impl Checker {
     /// Record a named call the checker is resolving, for the `@pure` check.
     pub(crate) fn record_purity_call(&mut self, name: &str) {
-        if self.env.lookup_var(name).is_some() {
+        if self.env.pure_fns_absent || self.env.lookup_var(name).is_some() {
             return; // a fn-typed local or parameter: transparent
         }
         let callee = match OUTPUT_ABORT_BUILTINS.iter().find(|(b, _)| *b == name) {
@@ -130,6 +130,7 @@ impl Checker {
         for d in &program.decls {
             let ast::Decl::Fn { name, effect, attrs, extern_attrs, span, .. } = d else { continue };
             let Some(attr) = attrs.iter().find(|a| a.name.as_str() == "pure") else { continue };
+            debug_assert!(!self.env.pure_fns_absent, "a @pure fn in a compilation canonicalized as having none");
             let at = Site { file: self.source_file.clone(), span: attr.span.or(*span) };
             let message = if effect.unwrap_or(false) {
                 format!("`@pure` fn `{name}` is an `effect fn`")
