@@ -64,6 +64,7 @@ jobs:
         env:
           PROBE_ONLY: ${{ github.event.inputs.only }}
           PROBE_OUT: /tmp/perf-probe
+          PROBE_SECTIONS: time
         run: |
           nproc; uname -a; lscpu | grep -E 'Model name|MHz' || true
           bash .github/perf-probe/run.sh | tee /tmp/perf-probe-report.txt

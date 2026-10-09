@@ -41,6 +41,9 @@ ROWS=(
   "mapbuild_str|$D/mapbuild_str.almd|100000"
 )
 ONLY="${PROBE_ONLY:-}"
+SECTIONS="${PROBE_SECTIONS:-time,ir,alloc}"
+has() { [[ ",$SECTIONS," == *",$1,"* ]]; }
+export NO_COLOR=1
 
 cat > "$OUT/empty.almd" <<'EOF'
 effect fn main() -> Unit = {
@@ -50,8 +53,9 @@ EOF
 
 # ── 1. TIME ──────────────────────────────────────────────────────────────
 # The FIRST "(min" / "median" on the line is main()'s; the cold-start column repeats both words.
-min_of() { sed -n 's/^[^(]*(min \([0-9.]*\),.*/\1/p' | head -1; }
-med_of() { sed -n 's/^[^(]*: median \([0-9.]*\) ms.*/\1/p' | head -1; }
+min_of() { sed -n 's/^[^:]*\]: median [0-9.]* ms (min \([0-9.]*\),.*/\1/p' | head -1; }
+med_of() { sed -n 's/^[^:]*\]: median \([0-9.]*\) ms.*/\1/p' | head -1; }
+if has time; then
 echo "## TIME (almide bench, ms, main() only; $ROUNDS interleaved rounds x $RUNS runs)"
 printf '%-22s %10s %10s %10s %10s %8s %8s\n' row nat_min wasm_min nat_med wasm_med r_min r_med
 for row in "${ROWS[@]}"; do
@@ -59,9 +63,11 @@ for row in "${ROWS[@]}"; do
   [ -n "$ONLY" ] && [[ ",$ONLY," != *",$name,"* ]] && continue
   nmins=(); wmins=(); nmeds=(); wmeds=()
   for _ in $(seq "$ROUNDS"); do
-    o=$("$B" bench "$src" --runs "$RUNS" ${args:+-- $args} 2>&1 </dev/null | grep '^bench ' | head -1)
+    raw=$("$B" bench "$src" --runs "$RUNS" ${args:+-- $args} 2>&1 </dev/null | sed 's/\x1b\[[0-9;]*m//g')
+    o=$(grep 'median' <<<"$raw" | head -1); [ -z "$o" ] && echo "[$name native bench output] $(tail -5 <<<"$raw")" >&2
     nmins+=("$(min_of <<<"$o")"); nmeds+=("$(med_of <<<"$o")")
-    o=$("$B" bench "$src" --target wasm --runs "$RUNS" ${args:+-- $args} 2>&1 </dev/null | grep '^bench ' | head -1)
+    raw=$("$B" bench "$src" --target wasm --runs "$RUNS" ${args:+-- $args} 2>&1 </dev/null | sed 's/\x1b\[[0-9;]*m//g')
+    o=$(grep 'median' <<<"$raw" | head -1); [ -z "$o" ] && echo "[$name wasm bench output] $(tail -5 <<<"$raw")" >&2
     wmins+=("$(min_of <<<"$o")"); wmeds+=("$(med_of <<<"$o")")
   done
   python3 - "$name" "${nmins[*]}" "${wmins[*]}" "${nmeds[*]}" "${wmeds[*]}" <<'PY'
@@ -78,6 +84,7 @@ spread = lambda xs: f"{min(xs):.2f}-{max(xs):.2f}"
 print(f"{name:<22} {a:10.2f} {b:10.2f} {c:10.2f} {d:10.2f} {b/a:8.2f} {d/c:8.2f}   (med spread nat {spread(nd)} wasm {spread(wd)})")
 PY
 done
+fi
 
 # ── 2. IR ────────────────────────────────────────────────────────────────
 ir_of() { # callgrind Ir total of a command, or empty
@@ -93,7 +100,7 @@ build_legs() { # name src -> $OUT/name.native, name.cwasm, name.inl.cwasm
   wasmtime compile "$OUT/$name.wasm" -o "$OUT/$name.cwasm" 2>/dev/null || echo "wasmtime compile failed: $name" >&2
   wasmtime compile -C inlining=y "$OUT/$name.wasm" -o "$OUT/$name.inl.cwasm" 2>"$OUT/$name.inl.err" || { echo "wasmtime compile -C inlining=y failed: $name: $(head -2 "$OUT/$name.inl.err")" >&2; rm -f "$OUT/$name.inl.cwasm"; }
 }
-if command -v valgrind >/dev/null && command -v wasmtime >/dev/null; then
+if has ir && command -v valgrind >/dev/null && command -v wasmtime >/dev/null; then
   build_legs empty "$OUT/empty.almd"
   base_n=$(ir_of "$OUT/empty.native"); base_w=$(ir_of wasmtime run --allow-precompiled "$OUT/empty.cwasm")
   base_i=""; [ -f "$OUT/empty.inl.cwasm" ] && base_i=$(ir_of wasmtime run -C inlining=y --allow-precompiled "$OUT/empty.inl.cwasm")
@@ -150,6 +157,7 @@ fi
 
 # ── 3. ALLOC ─────────────────────────────────────────────────────────────
 echo
+if has alloc; then
 echo "## ALLOC (deterministic counters)"
 for row in "${ROWS[@]}"; do
   IFS='|' read -r name src args <<<"$row"
@@ -158,3 +166,4 @@ for row in "${ROWS[@]}"; do
   w=$(ALMIDE_WASM_ALLOC_COUNT=1 "$B" run "$src" --target wasm ${args:+-- $args} 2>&1 >/dev/null </dev/null | grep '__ALMD_WASM_ALLOC' | tail -1)
   printf '%-22s native: %s\n%-22s wasm:   %s\n' "$name" "${n#__ALMD_ALLOC }" "" "${w#__ALMD_WASM_ALLOC }"
 done
+fi
