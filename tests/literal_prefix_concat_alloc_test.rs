@@ -46,25 +46,16 @@ fn a_literal_left_operand_is_emitted_as_a_bare_str() {
     assert!(!rust.contains("AlmideConcat::concat(\"k\".to_string()"), "the literal was materialized as a String");
 }
 
+// The allocation effect is pinned corpus-wide by the native borrow oracle's
+// exact ledger (tests/golden/native-borrow-oracle-alloc.txt moved 10-17% down
+// with this change). It is not asserted here: `almide run` renders this
+// program through the v1 native renderer, which has its own concat lowering;
+// the classic codegen this change touches is what `almide bench` times.
 #[test]
-fn the_literal_prefix_loop_allocates_once_per_key() {
+fn the_prepended_strings_read_what_value_semantics_say() {
     let (_dir, source) = write_program();
-    let native = Command::new(almide()).arg("run").arg(&source).env("ALMIDE_ALLOC_COUNT", "1").output().unwrap();
+    let native = Command::new(almide()).arg("run").arg(&source).output().unwrap();
     let stderr = String::from_utf8_lossy(&native.stderr).to_string();
     assert!(native.status.success(), "native run failed:\n{stderr}");
     assert_eq!(String::from_utf8_lossy(&native.stdout), "3890 k999 héllo, 42!\n");
-    let line = stderr
-        .lines()
-        .find(|l| l.starts_with("__ALMD_ALLOC"))
-        .unwrap_or_else(|| panic!("no `__ALMD_ALLOC` line — the allocation lane did not arm:\n{stderr}"));
-    let field = |name: &str| -> u64 {
-        line.split_whitespace()
-            .find_map(|f| f.strip_prefix(name))
-            .and_then(|n| n.parse().ok())
-            .unwrap_or_else(|| panic!("unparsable allocation report: {line}"))
-    };
-    // One `int.to_string` buffer per key (the prepend fits its 19-byte
-    // reservation); the old shape made ~2,000 allocations and ~1,000 reallocs.
-    assert!(field("allocs=") < 1_100, "native made too many allocations: {line}");
-    assert!(field("reallocs=") < 10, "the prepend reallocated per key: {line}");
 }
