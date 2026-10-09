@@ -269,6 +269,15 @@ pub struct TypeEnv {
     /// at registration — before any body is inferred — so the `@pure` check
     /// (E092, #3250) knows a foreign callee in a file inferred later.
     pub extern_fns: std::collections::HashSet<Sym>,
+    /// #3504: every USER module fn whose source name falls in the compiler's
+    /// fn-name space, by its qualified key (`util.__encode_list_int`). Its IR
+    /// name is escaped ([`almide_ir::escape_user_fn_name`]) — at its
+    /// definition by `lower_module`, at every cross-module call by lowering's
+    /// `ir_call_target` — so it never shares an IR name with a helper the
+    /// compiler synthesizes into the same module (a derived Codec's
+    /// `__encode_list_int`). Recorded at registration, before any importer is
+    /// lowered.
+    pub escaped_module_fns: std::collections::HashSet<Sym>,
     /// Types' declared protocol conformances: type name → set of protocol names
     pub type_protocols: std::collections::HashMap<Sym, std::collections::HashSet<Sym>>,
     /// Type arguments of an explicit conformance to a GENERIC protocol
@@ -356,6 +365,7 @@ impl TypeEnv {
             module_import_aliases: std::collections::HashMap::new(),
             explicit_convention_fns: std::collections::HashSet::new(),
             extern_fns: std::collections::HashSet::new(),
+            escaped_module_fns: std::collections::HashSet::new(),
             protocols: std::collections::HashMap::new(),
             type_protocols: std::collections::HashMap::new(),
             type_protocol_args: std::collections::HashMap::new(),

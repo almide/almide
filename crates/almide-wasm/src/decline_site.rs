@@ -45,7 +45,7 @@ pub struct DeclineSite {
 impl std::fmt::Display for DeclineSite {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let kind = if self.top_let { "top-level let" } else { "fn" };
-        write!(f, "{kind} `{}`", almide_ir::user_fn_source_name(&self.function))?;
+        write!(f, "{kind} `{}`", almide_ir::user_fn_source_qualified(&self.function))?;
         match (&self.module, self.line) {
             (Some(m), Some(l)) => write!(f, " (module `{m}`, line {l})"),
             (Some(m), None) => write!(f, " (module `{m}`)"),
