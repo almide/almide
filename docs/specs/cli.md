@@ -1089,6 +1089,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_PASS_EDGES=value` | harness | extra `A<B` pass-order edges (comma-separated) the shuffle honours — the bisection instrument that names the pair a shuffle divergence needs declared |
 | `ALMIDE_PROBE_DUMP=value` | harness | the path the heap probe writes its emitted wasm to |
 | `ALMIDE_PROBE_IR=value` | harness | the path the heap probe writes its lowered IR to |
+| `ALMIDE_PROBE_OUT=value` | harness | the file a charge-probed native program writes its `__ALMD_PROBE` meter line to; `almide run --time-report` sets it to a fresh temp path so the program's own stderr is never read as the reading (#3489). Unset = the line goes to stderr |
 | `ALMIDE_PROBE_SRC=value` | harness | the source file the heap probe compiles (unset = the probe is skipped) |
 | `ALMIDE_PROFILE` | debug | print per-pass and per-phase timings of the native pipeline |
 | `ALMIDE_RC_TRAP_DOUBLE_FREE` | trap | arm the structural leg's double-free trap: releasing a block already at rc 0 traps instead of wrapping |
