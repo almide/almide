@@ -373,6 +373,35 @@ warning count against develop, not by the rounded grade.
   - Investigate the arm RSS increase.
   - Then the release path for v0.67.0.
 
+### 2026-10-10 (later) — batch 31 merged, a race it introduced fixed, rc2 prep
+
+- **Merged:**
+  - #3511 (batch 31): closes #3509.
+  - #3513: closes #3512.
+    - #3511's per-thread `Sym` resolve cache filled a dense prefix of keys. Under concurrent interning, a smaller key can be handed out before it is inserted, so develop 0e53ddba6 panicked with `Key out of bounds` in 2 stdlib wasm files.
+    - The PR, merge-queue and local runs had all passed by timing.
+    - Fix: resolve only the requested key.
+    - Stress test: `crates/almide-base/tests/intern_threads.rs` (8 threads × 20k names). It panics 3 out of 3 runs on the broken code and passes 3 out of 3 on the fix.
+    - Same PR: the edit-loop phase shares were re-anchored at 0.129 / 0.139 / 0.732. They returned to their 2026-08-14 values once the check cost was gone.
+  - #3514: dialect epoch 8, the cheatsheet and llms.txt now name the six `args` readers that became effect fns. They had named only `io.read_byte` / `io.read_n_bytes` / `process.args`.
+    - Found from the v0.66.0 → develop interface diff: 9 signatures removed, all readers turned effect fns.
+- **Arm RSS, measured after the fact.**
+  - Setup: GCE c4a-standard-8, cached `almide test src/` on gramide, 5 interleaved rounds, max RSS median (range):
+
+    | build | median RSS | range | wall |
+    |---|---|---|---|
+    | develop 67a39bb4a | 540 MiB | 529–544 | 1.61 s |
+    | interner cache alone | 546 MiB (+1.1%) | 509–559 | 1.18 s |
+    | check-reach alone | 526 MiB | 507–535 | 1.53 s |
+    | batch 31 | 552 MiB (+2.2%) | 469–558 | 1.15 s |
+
+  - Within one binary the rounds spread 15–90 MiB, so the +4–6% seen on 10-09 was mostly that spread.
+- **Batch 32 (#3515), written by an agent.**
+  - E006 on a callee that returns a `Result` now names `!` in its hint, and the cascading E001 on the same expression is dropped.
+  - `fn body() -> String = fs.read_text("x")` now repairs in one round instead of two (E006, then E041).
+  - Corpus `check` over 4519 files: 17 diagnostics fixtures differ. 15 show the hint text change, 7 have a cascading E001 removed, and no exit code changes.
+- **Next:** land batch 32, then cut rc2.
+
 ## Edit loop on a real project: O6lvl4/gramide 0.2.11
 
 gramide has 19 files and 8,106 lines of Almide. It is measured on a copy (`git archive HEAD`) with one line added: `import self.lex` in `src/keystrokes.almd`.
