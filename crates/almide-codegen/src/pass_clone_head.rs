@@ -115,7 +115,7 @@ fn mk(kind: IrExprKind, ty: Ty, span: Option<almide_base::Span>) -> IrExpr {
 pub(super) fn head_source(e: &IrExpr) -> Option<VarId> {
     match &e.kind {
         IrExprKind::RuntimeCall { symbol, args } => match (symbol.as_str(), args.as_slice()) {
-            ("almide_rt_list_get", [xs, i]) if matches!(i.kind, IrExprKind::Var { .. } | IrExprKind::LitInt { .. }) => root(xs),
+            ("almide_rt_list_get", [xs, i]) if super::pass_clone_projection::borrowable_index(i) => root(xs),
             ("almide_rt_list_first", [xs]) => root(xs),
             _ => None,
         },
@@ -366,7 +366,7 @@ impl Heads<'_> {
             IrExprKind::Clone { expr: inner } => self.let_source(inner).filter(|(_, d)| d.is_none()),
             IrExprKind::IndexAccess { object, index }
                 if matches!(object.ty, Ty::Applied(TypeConstructorId::List, _))
-                    && matches!(index.kind, IrExprKind::Var { .. } | IrExprKind::LitInt { .. }) =>
+                    && super::pass_clone_projection::borrowable_index(index) =>
                 root(object).map(|xs| (xs, None)),
             _ => None,
         }
