@@ -64,6 +64,7 @@ equal to the set of codes the compiler emits.
 | [E094](E094.md) | Type aliases form a cycle: an alias leads back to itself through other aliases or a type argument (`type A = B` / `type B = A`, `type Tree = List[Tree]`) |
 | [E095](E095.md) | The app passed to `http.serve` reads a local of the fn that serves it (a `let`, `var` or parameter of main): the app must be closed over top-level items |
 | [E096](E096.md) | A fn with a `mut` parameter used as a function value (a `let`, an argument, a record field, a list element, a return, `module.fn`): a function type cannot carry the write-back |
+| [E097](E097.md) | `pub` before a `type`, `protocol` or `test` — those are public by default (or have no visibility); delete `pub` (machine-applicable fix-it + `almide fix`) |
 | [E420](E420.md) | Function visibility violation (placeholder code, renumber candidate) |
 
 Retired codes: **E039** (the result.collect/collect_map deprecation window — the fns are removed, `result.partition` is the substance) and **E040** (the json.*/value.* alias deprecation window) each fired
