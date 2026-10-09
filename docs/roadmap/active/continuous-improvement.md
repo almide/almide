@@ -329,6 +329,50 @@ warning count against develop, not by the rounded grade.
   - Wasmtime inlining.
   - The final v0.67.0, probably after an rc2.
 
+### 2026-10-10 — batch 30 merged, batch 31 takes the edit loop below v0.66.0 (#3509)
+
+- **Merged:**
+  - #3510 (batch 30): onebrc wasm is 1.8× faster.
+  - It also re-anchored the wordfreq native/Rust perf ratchet at 0.97. The ratchet had gone red on develop since #3507 because wordfreq beat the old 0.95 floor (runner 0.948).
+- **Batch 31: the #3509 fix, from two branches.**
+  - `perf-check-reach` (agent work):
+    - Skip the module-set E008 summaries when no program can have a concurrent site.
+    - Do one type-spellings walk for both E029 checks.
+    - Record the E092 call graph only when some `@pure` exists.
+    - Test a types-map entry's value before resolving its key text (#3401's scan).
+    - Corpus `almide check` over 4511 files: 0 differences in stdout, stderr and exit code.
+    - Left as is: the second `refresh_top_lets` (#3164). Skipping it is not provably identical, because the entry and earlier modules can refine a dependency's top-lets in between.
+  - `perf-intern-cache`:
+    - `Sym` resolve and intern are answered from per-thread caches in front of the shared `ThreadedRodeo`. The interner never frees, so a cached answer never goes stale.
+    - The Linux profile of `test src/parser.almd` had 8.7% of samples in the interner's `DashMap<Spur,&str>::_get`, plus 2.8% in `Sym::as_str` and 3.2% in interning.
+    - macOS shows no change (ratio 0.999–1.006), so the gain is specific to the Linux lock and hash cost.
+- **GCE A/B, `perf-intern-cache` alone vs develop 67a39bb4a.**
+  - Method: `perf stat -r 5` task-clock, 5 interleaved rounds, median.
+  - x86: check cli 0.906, test cli 0.924, test parser 0.882.
+  - arm: 0.852, 0.871, 0.836.
+- **GCE A/B, `perf-check-reach` 81ef33697 alone vs v0.66.0, check cli:**
+  - x86: 1.036, where develop is 1.120.
+  - arm: 1.032, where develop is 1.128.
+- **Edit loop, batch 31 vs v0.66.0.**
+  - Setup: same harness as 10-09; gramide dbc8e9e with the two patches, 5 interleaved rounds, medians.
+  - Ratios, batch 31 / v0.66.0 (x86 c3-standard-8 and arm c4a-standard-8):
+
+    | step | x86 | arm |
+    |---|---|---|
+    | clean test | 1.009 | 0.979 |
+    | cached test | 0.905 | 0.777 |
+    | comment-only edit | 0.918 | 0.783 |
+    | one-line code edit | 0.918 | 0.796 |
+    | check | 0.938 | 0.923 |
+
+  - **Not better:**
+    - x86 clean test is still 0.9% slower than v0.66.0.
+    - Max RSS on arm rose by 4–6% in the cached and edit rows (531–538 → 550–570 MiB). The likely cause is the per-thread caches; this is not yet measured per thread.
+- **Next:**
+  - Land batch 31 and close #3509.
+  - Investigate the arm RSS increase.
+  - Then the release path for v0.67.0.
+
 ## Edit loop on a real project: O6lvl4/gramide 0.2.11
 
 gramide has 19 files and 8,106 lines of Almide. It is measured on a copy (`git archive HEAD`) with one line added: `import self.lex` in `src/keystrokes.almd`.
