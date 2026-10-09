@@ -153,8 +153,15 @@ fn render_binop(ctx: &RenderContext, op: BinOp, left: &IrExpr, right: &IrExpr, _
     // minutes at 100% CPU on exactly that shape; found 2026-08-03).
     if matches!(op, BinOp::ConcatStr | BinOp::ConcatList) {
         let ty_tag = if op == BinOp::ConcatStr { "String" } else { "List" };
-        // Unwrap AlmideRcCow operands to owned T for concat
-        let lo = render_expr_owned(ctx, left);
+        // Unwrap AlmideRcCow operands to owned T for concat — except a string
+        // LITERAL on the left, which stays a bare `&str`: the `&str + String`
+        // impl prepends it into the right operand's own buffer, so
+        // `"k" + int.to_string(i)` no longer allocates a 1-byte String, grows
+        // it with a realloc and frees the right operand on every evaluation.
+        let lo = match &left.kind {
+            IrExprKind::LitStr { value } if op == BinOp::ConcatStr => format!("\"{}\"", escape_rust_str(value)),
+            _ => render_expr_owned(ctx, left),
+        };
         let ro = render_expr_owned(ctx, right);
         return ctx
             .templates
