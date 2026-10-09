@@ -12,6 +12,8 @@ pub fn takes_raw_fn_last_arg(name: &str) -> bool {
         "almide_rt_list_par_any" |
         "almide_rt_list_par_filter" |
         "almide_rt_list_par_map" |
+        "almide_rt_map_upsert_fn" |
+        "almide_rt_map_upsert_str_fn" |
         "almide_rt_value_decode_list" |
         "almide_rt_value_decode_list_ref" |
         "almide_rt_value_decode_option" |
@@ -504,8 +506,11 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_map_new" => &[],
         "almide_rt_map_remove" => &[false, false],
         "almide_rt_map_set" => &[false, false, false],
+        "almide_rt_map_set_str" => &[false, false, false],
         "almide_rt_map_update" => &[false, false, false],
         "almide_rt_map_upsert" => &[false, false, false, false],
+        "almide_rt_map_upsert_fn" => &[false, false, false, false],
+        "almide_rt_map_upsert_str_fn" => &[false, false, false, false],
         "almide_rt_map_values" => &[false],
         "almide_rt_math_abs" => &[false],
         "almide_rt_math_acos" => &[false],
@@ -751,9 +756,12 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_string_slice" => &[false, false, false],
         "almide_rt_string_split" => &[false, false],
         "almide_rt_string_split_once" => &[false, false],
+        "almide_rt_string_split_once_ref" => &[false, false],
         "almide_rt_string_starts_with" => &[false, false],
         "almide_rt_string_strip_prefix" => &[false, false],
+        "almide_rt_string_strip_prefix_ref" => &[false, false],
         "almide_rt_string_strip_suffix" => &[false, false],
+        "almide_rt_string_strip_suffix_ref" => &[false, false],
         "almide_rt_string_take" => &[false, false],
         "almide_rt_string_take_end" => &[false, false],
         "almide_rt_string_to_bytes" => &[false],
