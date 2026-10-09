@@ -22,7 +22,7 @@ static INTERNER: LazyLock<ThreadedRodeo> = LazyLock::new(ThreadedRodeo::default)
 // a SipHash on every call; nothing is ever removed from it, so a thread may
 // remember any answer it has seen and never consult the interner for it again.
 thread_local! {
-    static RESOLVED: RefCell<Vec<&'static str>> = const { RefCell::new(Vec::new()) };
+    static RESOLVED: RefCell<Vec<Option<&'static str>>> = const { RefCell::new(Vec::new()) };
     static INTERNED: RefCell<HashMap<&'static str, Sym, BuildHasherDefault<WordHasher>>> =
         RefCell::new(HashMap::default());
 }
@@ -72,18 +72,19 @@ pub fn sym(s: &str) -> Sym {
 /// Resolve a `Sym` back to `&'static str`.
 pub fn resolve(s: Sym) -> &'static str {
     let i = s.0.into_usize();
-    if let Some(hit) = RESOLVED.with(|v| v.borrow().get(i).copied()) {
+    if let Some(hit) = RESOLVED.with(|v| v.borrow().get(i).copied().flatten()) {
         return hit;
     }
     let text = resolve_shared(s);
     RESOLVED.with(|v| {
         let mut v = v.borrow_mut();
-        // Fill every index up to `i` so the cache stays a dense prefix.
-        while v.len() < i {
-            let gap = Spur::try_from_usize(v.len()).expect("a smaller key of a live key exists");
-            v.push(resolve_shared(Sym(gap)));
+        // Only `s` itself is resolved here: a smaller key can be handed out
+        // to another thread before the interner can resolve it, so the gaps
+        // stay empty until this thread asks for them (#3512).
+        if v.len() <= i {
+            v.resize(i + 1, None);
         }
-        v.push(text);
+        v[i] = Some(text);
     });
     text
 }
