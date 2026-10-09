@@ -30,8 +30,13 @@
 /// fns below, which is what RUNTIME_DEPS keys on).
 pub const ALMIDE_MAP_INDEX_THRESHOLD: usize = 16;
 
-/// Empty slot marker in `AlmideKeyIndex::slots`.
-pub const ALMIDE_MAP_SLOT_EMPTY: u32 = u32::MAX;
+/// Empty slot marker in `AlmideKeyIndex::slots`. A live slot is never all
+/// ones: its low half is an entry position, and positions stay below
+/// `u32::MAX`.
+pub const ALMIDE_MAP_SLOT_EMPTY: u64 = u64::MAX;
+
+/// The half of a slot that holds the upper 32 bits of the entry's hash.
+pub const ALMIDE_MAP_SLOT_TAG: u64 = 0xFFFF_FFFF_0000_0000;
 
 /// Odd 64-bit multiplier (the golden-ratio constant) shared by the hashers.
 pub const ALMIDE_MAP_HASH_MUL: u64 = 0x9E37_79B9_7F4A_7C15;
@@ -48,6 +53,12 @@ pub fn almide_rt_map_mix64(x: u64) -> u64 {
 
 /// Multiply-fold over 8-byte words (the FxHash step) with the length mixed
 /// in and a splitmix finalizer — one multiply per word, no per-byte loop.
+/// The 1..=7-byte tail is read with fixed-width loads (two overlapping
+/// `u32`s, or first/middle/last byte — wyhash's small-input read) instead
+/// of a variable-length copy into a zeroed buffer, which compiled to a
+/// `memcpy` call on every short key (#2157: a word-count key is 3..8 bytes,
+/// so the call ran once per lookup). The length is already in `h`, so the
+/// overlapping reads cannot make two different lengths collide.
 #[inline]
 pub fn almide_rt_map_hash_bytes(b: &[u8]) -> u64 {
     let mut h: u64 = (b.len() as u64).wrapping_mul(ALMIDE_MAP_HASH_MUL);
@@ -59,11 +70,22 @@ pub fn almide_rt_map_hash_bytes(b: &[u8]) -> u64 {
     }
     let rest = words.remainder();
     if !rest.is_empty() {
-        let mut buf = [0u8; 8];
-        buf[..rest.len()].copy_from_slice(rest);
-        h = (h ^ u64::from_le_bytes(buf)).wrapping_mul(ALMIDE_MAP_HASH_MUL).rotate_left(29);
+        h = (h ^ almide_map_hash_tail(rest)).wrapping_mul(ALMIDE_MAP_HASH_MUL).rotate_left(29);
     }
     almide_rt_map_mix64(h)
+}
+
+/// The 1..=7 bytes after the last whole word, as one `u64` (see above).
+#[inline]
+fn almide_map_hash_tail(b: &[u8]) -> u64 {
+    let n = b.len();
+    if n >= 4 {
+        let lo = u32::from_le_bytes([b[0], b[1], b[2], b[3]]) as u64;
+        let hi = u32::from_le_bytes([b[n - 4], b[n - 3], b[n - 2], b[n - 1]]) as u64;
+        lo | (hi << 32)
+    } else {
+        (b[0] as u64) | ((b[n / 2] as u64) << 8) | ((b[n - 1] as u64) << 16)
+    }
 }
 
 /// Order-sensitive pair combine: `(a, b)` and `(b, a)` hash differently.
@@ -156,14 +178,18 @@ impl AlmideMapKey for str {
 
 /// The hash index beside an insertion-ordered entry vector: `hashes[p]` is
 /// the full hash of entry `p`, `slots` is a power-of-two linear-probe table
-/// of entry positions (load ≤ 3/4). Shared by `AlmideMap` and `AlmideSet`.
+/// (load ≤ 3/4) whose slots each carry an entry position (low 32 bits) AND
+/// the upper 32 bits of that entry's hash. A probe rejects a slot on the tag
+/// it already loaded — it never reads `hashes[p]` (a second, dependent load
+/// into another array) — and touches the entry only on a tag match. Shared
+/// by `AlmideMap` and `AlmideSet`.
 /// No tombstones: a removal shifts the entry vector, so the table is rebuilt
 /// from the cached hashes (O(n), no key access) — the same order the old
 /// sidecar paid, and removal is not the hot path the index exists for.
 #[derive(Clone, Debug, Default)]
 pub struct AlmideKeyIndex {
     hashes: Vec<u64>,
-    slots: Vec<u32>,
+    slots: Vec<u64>,
 }
 
 impl AlmideKeyIndex {
@@ -177,14 +203,17 @@ impl AlmideKeyIndex {
     pub fn find(&self, h: u64, mut eq: impl FnMut(usize) -> bool) -> Option<usize> {
         let mask = self.slots.len() - 1;
         let mut i = (h as usize) & mask;
+        let tag = h & ALMIDE_MAP_SLOT_TAG;
         loop {
-            let p = self.slots[i];
-            if p == ALMIDE_MAP_SLOT_EMPTY {
+            let s = self.slots[i];
+            if s == ALMIDE_MAP_SLOT_EMPTY {
                 return None;
             }
-            let p = p as usize;
-            if self.hashes[p] == h && eq(p) {
-                return Some(p);
+            if s & ALMIDE_MAP_SLOT_TAG == tag {
+                let p = (s & !ALMIDE_MAP_SLOT_TAG) as usize;
+                if eq(p) {
+                    return Some(p);
+                }
             }
             i = (i + 1) & mask;
         }
@@ -223,7 +252,7 @@ impl AlmideKeyIndex {
         while self.slots[i] != ALMIDE_MAP_SLOT_EMPTY {
             i = (i + 1) & mask;
         }
-        self.slots[i] = p;
+        self.slots[i] = (h & ALMIDE_MAP_SLOT_TAG) | p as u64;
     }
 }
 
