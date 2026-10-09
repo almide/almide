@@ -97,8 +97,7 @@ impl Checker {
             Some(module_name.to_string()),
         );
         self.validate_protocol_refs(prog);
-        self.validate_bare_type_visibility(prog);
-        self.validate_qualified_type_heads(prog);
+        self.validate_type_spellings(prog);
         self.validate_alias_cycles(&prog.decls);
         self.body_diag_start = self.diagnostics.len();
         self.reject_user_prim_import(&prog.imports);

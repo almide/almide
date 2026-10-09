@@ -17,11 +17,20 @@ enum QualifiedTypeMiss {
 }
 
 impl Checker {
+    /// The two E029 checks of a file's type spellings — the bare names out of
+    /// scope, then the qualified ones — from one walk of the file (#3509).
+    /// Both read only `ty_name`'s sets, which the types-only walk fills alike.
+    pub(crate) fn validate_type_spellings(&mut self, program: &mut ast::Program) {
+        let s = spellings(program, true);
+        self.validate_bare_type_visibility(program, s.bare_types);
+        self.validate_qualified_type_heads(program, s.qualified_types);
+    }
+
     /// E029 for every qualified type spelling (`m.T` in an annotation, a
     /// field, a payload, an alias target or a type argument) whose qualifier
-    /// is not a module in scope, or whose module declares no `T`.
-    pub(crate) fn validate_qualified_type_heads(&mut self, program: &mut ast::Program) {
-        let spelled = import_spellings(program).qualified_types;
+    /// is not a module in scope, or whose module declares no `T`. `spelled`
+    /// is the file's `ImportSpellings::qualified_types`.
+    fn validate_qualified_type_heads(&mut self, program: &mut ast::Program, spelled: std::collections::HashSet<Sym>) {
         if !spelled.iter().any(|n| self.qualified_type_miss(*n).is_some()) {
             return;
         }
@@ -37,7 +46,7 @@ impl Checker {
                 ast::Decl::Module { .. } | ast::Decl::Import { .. } => continue,
             };
             shell.decls = vec![decl.clone()];
-            let mut here: Vec<Sym> = import_spellings(&mut shell).qualified_types.into_iter().collect();
+            let mut here: Vec<Sym> = spellings(&mut shell, true).qualified_types.into_iter().collect();
             here.sort_by(|a, b| a.as_str().cmp(b.as_str()));
             for name in here {
                 let Some(miss) = self.qualified_type_miss(name) else { continue };
