@@ -271,6 +271,64 @@ warning count against develop, not by the rounded grade.
   - Unboxing onebrc's small returns on wasm.
   - The final v0.67.0.
 
+### 2026-10-09 (evening) — batch 29 merged, the edit-loop step found, onebrc wasm 1.8×
+
+- **Merged:** #3508 (batch 29) closes #3501. Wasm field and interpolation accumulators are now linear.
+- **Edit loop on GCE, measured again (the lead from 2026-10-07 is now confirmed).**
+  - Setup:
+    - gramide dbc8e9e, v0.66.0 819bbc74f vs develop 50d19563e. Both are built with `cargo build --release` on the same VM.
+    - 5 interleaved rounds. Each round uses a fresh TMPDIR and no `.almide/`. Measured with `/usr/bin/time -f "%e %M"`.
+    - Machines: c3-standard-8 x86 and c4a-standard-8 arm, rustc 1.99.0.
+    - The script is `scratchpad/gce-edit-loop.sh`. It runs `almide test src/`; `ci/compat-client` is out of scope because it fails to compile on both builds.
+  - **Two gramide patches, applied the same way for both builds:**
+    - `let num` → `var num` at `src/incremental.almd:1270`. v0.66.0 already rejects passing a `let` to a `mut` parameter with E032. gramide's CI pins almide `dff9a458f`, so its CI never saw this.
+    - `import self.lex` in `src/keystrokes.almd`, for epoch 10.
+  - Medians, develop / v0.66.0, x86 and arm:
+
+    | step | x86 | arm |
+    |---|---|---|
+    | clean test | 1.061 | 1.057 |
+    | cached test | 1.070 | 1.092 |
+    | comment-only edit | 1.082 | 1.107 |
+    | one-line code edit | 1.097 | 1.099 |
+    | check | 1.125 | 1.071 |
+
+    - x86 absolute times: clean 7.41 → 7.86 s, cached 1.99 → 2.13 s, check 0.16 → 0.18 s.
+  - `perf stat -r 10` task-clock on x86:
+    - `check src/cli.almd`: 166.8 → 185.5 ms (±0.2%).
+    - `test src/cli.almd`: 1135 → 1216 ms elapsed.
+    - The `perf record` profile is flat. The new symbols are `concurrent_reach` `scan_shape`, `check::spellings`, and SipHash `write` (0.7 → 2.3%).
+  - **Commit curve.** 13 first-parent commits from v0.66.0 to develop (every 65th). `check` on cli.almd, relative to v0.66.0:
+    - jumps to 1.124 within the first 65 commits;
+    - peaks at 1.18;
+    - comes back to 1.09 at the #3340 Shape pre-scan;
+    - drifts back up to 1.12.
+    
+    `test src/parser.almd` drifts more gradually, 1.02 → 1.087.
+  - **Bisect** (threshold 170 ms, `perf stat -r 15`): the first bad commit is be61ee66f, "Generalize E008 to any var reachable from a concurrent body". 466cac59b measures 160.1 ms and be61ee66f 181.1 ms.
+    - gramide has no `fan` or `http.serve`, so the analysis should cost close to nothing here.
+    - Filed as #3509 (`regression`). Written, not merged: an agent is working on the fix (branch `perf-check-reach`).
+- **Onebrc on wasm: small returns unboxed** (branch `perf-wasm-small-returns`, 164de8941). Becomes batch 30.
+  - **Upsert:** a `map.upsert` on an owned receiver writes in place, and the fold accumulator moves into its step.
+  - **split_once:** a match that destructures `string.split_once` builds no option cell and no tuple.
+  - **Parsing:** `int.parse` / `int.from_hex` parse in place when there is nothing to trim.
+  - **Allocations,** onebrc agg (30k lines): 510,152 → 270,181 allocations, 11.27 → 3.27 MB.
+  - GCE A/B: `almide bench --runs 5`, 3 interleaved rounds, min of the main() medians, branch/develop.
+
+    | program | x86 | arm |
+    |---|---|---|
+    | onebrc wasm | **0.553** | **0.546** |
+    | onebrc native | 1.002 | 0.998 |
+    | wordfreq / wordfreq_group / mapbuild / decode, both legs | 0.99–1.007 | 0.955–1.019 |
+
+    - Cold start (which includes compile) on arm: decode wasm 1.069, mapbuild wasm 1.026. The cause is the +165 B ASCII-ends test in every module that links `int.parse`.
+- **Next:**
+  - Land batch 30.
+  - Land the `check` fix.
+  - Wasm listbuild in-place grow.
+  - Wasmtime inlining.
+  - The final v0.67.0, probably after an rc2.
+
 ## Edit loop on a real project: O6lvl4/gramide 0.2.11
 
 gramide has 19 files and 8,106 lines of Almide. It is measured on a copy (`git archive HEAD`) with one line added: `import self.lex` in `src/keystrokes.almd`.
@@ -307,6 +365,7 @@ Reading:
 - develop is not faster than 0.66.0 on this loop.
 - It is about 3–10% slower in every row, and its RSS is about 5% higher.
 - The spread is close to the run-to-run noise at 2–3 runs, so the gap is recorded as a lead to investigate, not a confirmed regression.
+- **Update, 2026-10-09:** confirmed on GCE at 6–12%, and bisected to be61ee66f. See the log entry for that day.
 - The first single run showed 1.24 s for an edit; repeated runs did not reproduce it.
 
 ## Gramide observations from 0.62, re-checked on 2026-10-07
