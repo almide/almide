@@ -134,9 +134,14 @@ pub(crate) fn variant_ctors() -> impl Iterator<Item = (&'static str, &'static st
 /// renders as `Almide*` — so its presence in the rendered user code IS the
 /// reference, the same text-level union `emit_source` already performs for
 /// the `almide_rt_<module>_` symbols an operator lowers to.
-pub(crate) fn modules_spelled_in(user_code: &str) -> Vec<&'static str> {
+///
+/// `idents` are the user code's IDENTIFIER tokens (`crate::rust_idents`), not
+/// its text: a user string literal `"AlmideHttpRequest"` is emitted verbatim
+/// and spliced the http module — and its TLS crates — into a program that
+/// never names the type (#3486).
+pub(crate) fn modules_spelled_in(idents: &[&str]) -> Vec<&'static str> {
     TABLE.iter()
-        .filter(|e| user_code.contains(e.rust))
+        .filter(|e| idents.iter().any(|id| id.starts_with(e.rust)))
         .map(|e| e.module)
         .collect()
 }
