@@ -128,6 +128,10 @@ pub struct Checker {
     /// rewrite the whole call (UFCS `x.to_uppercase()` →
     /// `string.to_upper(x)`) can target the full range.
     pub(crate) call_span_hint: Option<crate::ast::Span>,
+    /// Explicit type args of a `module.fn[T](..)` call, handed from the
+    /// Member callee arm to the static module resolution that names the fn
+    /// (#3495). `None` outside that window.
+    pub(crate) member_call_type_args: Option<Vec<Ty>>,
     /// `mut` parameter indices from the last resolved function signature.
     /// Set by `check_named_call_with_type_args`, consumed by callers
     /// that have access to argument expressions for mutability validation.
@@ -647,6 +651,7 @@ impl Checker {
             postfix_inner_spans: std::collections::HashMap::new(),
             callee_span_hint: None,
             call_span_hint: None,
+            member_call_type_args: None,
             last_mut_params: Vec::new(),
             arg_spans: Vec::new(),
             shadowed_receiver: None,

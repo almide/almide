@@ -451,7 +451,8 @@ impl Checker {
         // before lowering the call — the key now lives in
         // `env.fn_visibility` thanks to registration.
         self.check_fn_visibility(&m, field, &key);
-        Some(self.check_named_call(&key, arg_tys))
+        let type_args = self.member_call_type_args.take();
+        Some(self.check_named_call_with_type_args(&key, arg_tys, type_args.as_deref()))
     }
 
     /// Resolve a nested Member chain to a dotted module path.

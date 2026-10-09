@@ -16,6 +16,8 @@ impl Checker {
         callee_span_snapshot: Option<ast::Span>,
     ) -> Ty {
         self.arg_spans = args.iter().map(|a| a.span).collect();
+        // Only the static `module.fn` resolution below consumes these.
+        let type_args = self.member_call_type_args.take();
         // SHADOWING FIRST (#2345) — the rule the `Ident` arm of
         // `check_call_with_type_args` already applies, stated there at length
         // for almide#1441. A local binding of the OBJECT's name is called
@@ -49,11 +51,13 @@ impl Checker {
         // Try static resolution: module.func, alias.func, TypeName.method, codec.encode Thread the callee's span so `E002` can emit a mechanically-applicable `try_replace` when the stdlib alias map supplies a clean rename target.
         let prev = self.callee_span_hint.take();
         self.callee_span_hint = callee_span_snapshot;
+        self.member_call_type_args = type_args;
         let resolved = if shadowed_by_local {
             None
         } else {
             self.resolve_static_member(object, field, arg_tys)
         };
+        self.member_call_type_args = None;
         self.callee_span_hint = prev;
         if let Some(result) = resolved {
             let arg_refs: Vec<&ast::Expr> = args.iter().collect();
