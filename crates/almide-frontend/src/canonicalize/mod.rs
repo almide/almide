@@ -126,6 +126,9 @@ fn canonicalize_program_with<'a>(
         register_module(&mut env, &mut diagnostics, name, mod_prog, is_self);
     }
     compute_concurrent_summaries(&mut env, &modules, check_only.then_some(program));
+    // E092's call graph is read only from a `@pure` fn (#3509).
+    let has_pure = |p: &ast::Program| p.decls.iter().any(|d| matches!(d, ast::Decl::Fn { attrs, .. } if attrs.iter().any(|a| a.name.as_str() == "pure")));
+    env.pure_fns_absent = !has_pure(program) && !modules.iter().any(|(_, p, _)| has_pure(p));
 
     // 2b. The file's dialect stamp, if it carries one. Program-level and
     // resolution-independent, so it runs before any name is resolved: a file
