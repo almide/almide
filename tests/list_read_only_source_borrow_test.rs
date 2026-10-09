@@ -225,8 +225,12 @@ fn stdlib_return_type(op: &str) -> String {
 
 #[test]
 fn every_sub_list_range_op_has_an_owned_twin_that_takes_the_source_by_value() {
-    let twin_ops: Vec<&str> = OWNED_SOURCE_TWINS.iter()
-        .map(|(b, _)| b.strip_prefix("almide_rt_list_").expect("a list op"))
+    // The map twins (`almide_rt_map_*`) are gated by map_owned_twin_test.rs.
+    let list_twins: Vec<&(&str, &str)> = OWNED_SOURCE_TWINS.iter()
+        .filter(|(b, _)| b.starts_with("almide_rt_list_"))
+        .collect();
+    let twin_ops: Vec<&str> = list_twins.iter()
+        .map(|(b, _)| b.strip_prefix("almide_rt_list_").unwrap())
         .collect();
     for &(op, _) in RANGE_OPS {
         let sub_list = stdlib_return_type(op) == "List[A]";
@@ -238,7 +242,7 @@ fn every_sub_list_range_op_has_an_owned_twin_that_takes_the_source_by_value() {
         );
     }
     let src = std::fs::read_to_string(format!("{}/runtime/rs/src/list.rs", root())).unwrap();
-    for (borrowed, owned) in OWNED_SOURCE_TWINS {
+    for (borrowed, owned) in list_twins {
         assert_eq!(*owned, format!("{borrowed}_owned"), "the twin of {borrowed} is named `{borrowed}_owned`");
         let op = borrowed.strip_prefix("almide_rt_list_").unwrap();
         assert!(RANGE_OPS.iter().any(|(o, _)| *o == op), "{borrowed} has a twin but is not a RANGE op");
@@ -318,7 +322,7 @@ fn fn_body<'a>(rust: &'a str, name: &str) -> &'a str {
 fn a_range_op_at_its_sources_last_use_moves_it_into_the_owned_twin() {
     let (_dir, src, rust) = emit_rust("last_use.almd", &last_use_program());
     let main = fn_body(&rust, "__almide_main");
-    for (_, owned) in OWNED_SOURCE_TWINS {
+    for (_, owned) in OWNED_SOURCE_TWINS.iter().filter(|(b, _)| b.starts_with("almide_rt_list_")) {
         let op = owned.strip_prefix("almide_rt_list_").unwrap().strip_suffix("_owned").unwrap();
         let moved = format!("{owned}(s_{op}");
         // `find` with a lambda may fuse into an iterator chain that consumes
