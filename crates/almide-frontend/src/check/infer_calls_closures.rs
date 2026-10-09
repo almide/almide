@@ -34,7 +34,12 @@ impl Checker {
             ExprKind::Call { .. } => self.infer_expr_g3_call(expr),
 
             ExprKind::Pipe { left, right, .. } => {
-                self.infer_pipe(left, right)
+                // `x |> f` is the call `f(x)`: its span is this expression's,
+                // not an enclosing call's (#3495 reports at it).
+                let prev_call = std::mem::replace(&mut self.call_span_hint, expr.span);
+                let ty = self.infer_pipe(left, right);
+                self.call_span_hint = prev_call;
+                ty
             }
 
             ExprKind::Compose { left, right, .. } => {
