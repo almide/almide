@@ -233,5 +233,7 @@ fn the_string_key_probe_reads_no_variable_length_tail_and_no_side_array() {
     let find = section("    pub fn find(");
     let find = find.split("\n    }\n").next().unwrap();
     assert!(!find.contains("self.hashes["), "a probe reads the side hash array per slot again:\n{find}");
-    assert!(find.contains("ALMIDE_MAP_SLOT_TAG"), "a probe no longer rejects a slot on its tag:\n{find}");
+    // The probe expression, not the bare constant name: a quoted `"ALMIDE_…"`
+    // literal reads as an environment switch to scripts/check-env-switches.sh.
+    assert!(find.contains("s & ALMIDE_MAP_SLOT_TAG == tag"), "a probe no longer rejects a slot on its tag:\n{find}");
 }
