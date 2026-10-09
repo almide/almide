@@ -20,7 +20,7 @@ TailCallOpt → CaptureClone → CloneInsertion → MatchSubject → EffectInfer
 StdlibLowering → StreamFusion → ResultPropagation → BuiltinLowering →
 DecodeSlotHint → DecodeErrFrame → Peephole → RustLowering → FanLowering → NormalizeRuntimeCalls →
 IrLinkFlatten → SharedCellBorrow → VarStorage → RangeCountingVars → TopLetStorage → BorrowLowering →
-SliceBinders
+SliceBinders → StrMapKey
 
 - Each pass: `impl NanoPass { fn run(&self, program, target) -> PassResult }`
 
