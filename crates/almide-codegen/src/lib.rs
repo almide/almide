@@ -342,10 +342,8 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     // string builder amortized O(n) instead of reallocating every step.
     s.push_str("impl AlmideConcat<String> for String { type Output = String; #[inline(always)] fn concat(self, rhs: String) -> String { let mut s = self; s.push_str(&rhs); s } }\n");
     s.push_str("impl AlmideConcat<&str> for String { type Output = String; #[inline(always)] fn concat(self, rhs: &str) -> String { let mut s = self; s.push_str(rhs); s } }\n");
-    // A literal left operand (`"k" + x`, rendered as a bare `&str`) prepends
-    // into the owned right operand's buffer: no allocation when its capacity
-    // already covers both (`int.to_string` reserves 19 bytes), one grow
-    // otherwise — never the old fresh String for the literal plus a realloc.
+    // A literal left operand (`"k" + x`) prepends into the owned right operand's buffer: no allocation
+    // when its capacity covers both (`int.to_string` reserves 19 bytes), else one grow — never a fresh String.
     s.push_str("impl AlmideConcat<String> for &str { type Output = String; #[inline(always)] fn concat(self, rhs: String) -> String { let mut r = rhs; r.insert_str(0, self); r } }\n");
     s.push_str("impl AlmideConcat<&str> for &str { type Output = String; #[inline(always)] fn concat(self, rhs: &str) -> String { format!(\"{}{}\", self, rhs) } }\n");
     s.push_str("impl<T: Clone> AlmideConcat<Vec<T>> for Vec<T> { type Output = Vec<T>; #[inline(always)] fn concat(self, rhs: Vec<T>) -> Vec<T> { let mut r = self; r.extend(rhs); r } }\n");
