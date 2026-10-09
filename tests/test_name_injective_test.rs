@@ -8,16 +8,12 @@
 //! ordinal (`almide_ir::test_fn_name`), and the label is recovered for the
 //! report from the same enumeration lowering names the fns from.
 //!
-//! Runs the `almide` binary (`ALMIDE_BIN`, else `target/release/almide`).
+//! Runs the `almide` binary (`ALMIDE_BIN`, else the one cargo built).
 
-use std::path::Path;
 use std::process::Command;
 
 fn almide_bin() -> String {
-    if let Ok(bin) = std::env::var("ALMIDE_BIN") {
-        return bin;
-    }
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("target/release/almide").to_string_lossy().into_owned()
+    std::env::var("ALMIDE_BIN").unwrap_or_else(|_| env!("CARGO_BIN_EXE_almide").to_string())
 }
 
 /// `almide test <file>` on `source`, as (exit code, stdout + stderr).

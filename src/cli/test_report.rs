@@ -808,7 +808,7 @@ mod counts_tests {
 mod tests {
     use super::*;
 
-    const LIBTEST: &str = "\nrunning 1 test\ntest tests::__test_almd_string_mismatch ... FAILED\n\nfailures:\n\n---- tests::__test_almd_string_mismatch stdout ----\n\nthread 'tests::__test_almd_string_mismatch' panicked at /tmp/x/almide_test_main.rs:1372:9:\nassertion `left == right` failed: at line 4\n  left: \"a\\nb\"\n right: \"a\\nB\"\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n\nfailures:\n    tests::__test_almd_string_mismatch\n\ntest result: FAILED. 0 passed; 1 failed\n";
+    const LIBTEST: &str = "\nrunning 1 test\ntest tests::__test_almd_0000_string_mismatch ... FAILED\n\nfailures:\n\n---- tests::__test_almd_0000_string_mismatch stdout ----\n\nthread 'tests::__test_almd_0000_string_mismatch' panicked at /tmp/x/almide_test_main.rs:1372:9:\nassertion `left == right` failed: at line 4\n  left: \"a\\nb\"\n right: \"a\\nB\"\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\n\nfailures:\n    tests::__test_almd_0000_string_mismatch\n\ntest result: FAILED. 0 passed; 1 failed\n";
 
     #[test]
     fn libtest_block_yields_a_structured_record() {
