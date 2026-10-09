@@ -72,9 +72,25 @@ else {
 // v0 trims UNICODE whitespace (`s.trim()`), not just ASCII — route through the
 // (now Unicode) string.trim self-host first; the internal ASCII skip below is
 // then a no-op kept for the raw path's self-containment. (C-021.)
-fn string_to_int(s: String) -> Result[Int, String] = {
+fn string_to_int(s: String) -> Result[Int, String] = if __sti_bare(s) then __sti_raw(s)
+else {
   let t = string.trim(s)
   __sti_raw(t)
+}
+
+// Does the text start AND end with a visible ASCII byte (33..=126)? Then the
+// Unicode trim strips nothing — every Unicode whitespace is an ASCII byte
+// <= 32 or a multi-byte sequence, whose first and last bytes are >= 128 — and
+// the text is parsed in place instead of through a trimmed copy.
+fn __sti_bare(s: String) -> Bool = {
+  let h = prim.handle(s)
+  let n = prim.load32(h + 4)
+  if n == 0 then false
+  else {
+    let b0 = prim.load8(h + 12)
+    let b1 = prim.load8(h + 12 + n - 1)
+    b0 > 32 and b0 < 127 and b1 > 32 and b1 < 127
+  }
 }
 
 fn __sti_raw(s: String) -> Result[Int, String] = {
@@ -168,7 +184,8 @@ else {
   __hex_val(data, pos + 1, end, neg, acc2)
 }
 
-fn int_from_hex(s: String) -> Result[Int, String] = {
+fn int_from_hex(s: String) -> Result[Int, String] = if __sti_bare(s) then __hex_raw(s)
+else {
   let t = string.trim(s)
   __hex_raw(t)
 }
