@@ -21,7 +21,7 @@ mod eta;
 /// #2747: surface forms rewritten to ones the arms lower (map-pair
 /// loops, `?.`).
 #[path = "front_desugar.rs"]
-mod front_desugar;
+pub(crate) mod front_desugar;
 /// #1315: source lines of the emitted code, and their DWARF form.
 #[path = "debug_lines.rs"]
 pub mod debug_lines;
