@@ -172,6 +172,66 @@ warning count against develop, not by the rounded grade.
   - #3466: `almide check` speed.
   - Re-measure the gramide edit loop.
 
+### 2026-10-08/09 — batches 22–26, v0.67.0-rc1, GCE measurements
+
+- **Merged to develop:**
+  - #3482 (batch 22) for #3333.
+  - #3484 (batch 23) for #3483.
+  - #3496 (batch 24) for #3492 and #3493.
+  - #3498: emit.rs coverage, 91.54% against a floor of 87.94%.
+  - #3497 (batch 25) for #3494.
+  - #3500: the enqueue script now judges only the latest run of each check name. It had refused #3497 over a superseded failure.
+- **Released (prerelease) — v0.67.0-rc1:**
+  - Release PR #3499 was merged with a merge commit; the tag is on 277cf7cff.
+  - `release.yml` published five archives plus checksums.
+  - The macOS arm64 archive checksum matches, and the binary reports `0.67.0 (release, 277cf7cff)` and prints the same output on native and wasm.
+  - Release blockers: 0.
+  - Interface diff against v0.66.0: breaking, with every break declared in dialect epochs 7–13.
+- **rc1 soak:** `fuzz-nightly` was dispatched on the tag: 8/8 shards, 480 min, 86,699 programs, 1 finding (#3501).
+  - #3501 is not a hang. The wasm leg is quadratic for a list-field append and for interpolation into a field. Native has been linear since #3454.
+  - Measured with the rc1 binary: the wasm time grows about 4x per doubling of n, and the output is identical on both legs.
+  - Correct output, so not a blocker. It is labelled `A-perf`.
+- **The 10-07 nightly finding:** a FmtInstability, posted only as a comment on #3448.
+  - The rc1 and v0.66.0 CLI `fmt` are both idempotent on the minimized repro, so a CLI A/B cannot prove the fix. The fuzzer's own replay is still to be run.
+- **Written and pushed, not merged (batch 26, branch `batch-2026-10-09b`):**
+  - #3495: E025 for a type parameter nothing determines. Module fn explicit type args now reach the checker.
+  - #3485 and #3491: the entry program and metered clones are identified by a flag or map, not by a spelling.
+  - #3486 and #3487: user `almide_rt_*` fns and `AlmdRec_*` types are escaped. Runtime and crate inclusion read identifiers only, never string literals.
+  - #3488, #3489 and #3490:
+    - test fn names are injective;
+    - verdicts and the time probe come from structured channels, not program output;
+    - a declared `@export` is honoured whatever its spelling, and `_start` / `cabi_realloc` are reserved.
+  - `proofs/{gate,build-checker,corpus-wall}.sh` use a private temp dir per run. Concurrent runs had failed each other's tamper drills through fixed `/tmp` paths.
+  - Each fix has tests that fail on the pre-fix binary. `spec/` passes 4416/4416 (503 files via wasm, 8 via native fallback), verify-trust and output-parity are green, and every touched crate stays at codopsy A.
+- **GCE measurement harness:**
+  - Project `almide-perf`, with a monthly budget alert of ¥1500.
+  - A single-use Spot VM is deleted on exit, and by `--max-run-duration=3h` as a backstop.
+  - Every measurement records the ref, sha, machine type, CPU model, rustc and wasmtime.
+  - `docs/benchmarks/wasm-runtime.txt` was re-measured (`--measure`) at v0.66.0 and rc1 on c3-standard-4 (Xeon 8481C) and c4a-standard-4 (Neoverse-V2), with rustc 1.99.0 and wasmtime 49.0.1. Results:
+    - listbuild (1.3–1.9x), fft (1.3–1.5x) and strchurn (0.81–0.86) reproduce on both architectures.
+    - fasta and mapbuild do not.
+    - onebrc is about 2.1x at both v0.66.0 and rc1, so it is not a regression since 0.66.
+- **Native fasta slowdown, #3502:**
+  - native 26→44 ms (x86) and 15→34 ms (arm); locally 2.26→3.95 s.
+  - Bisected on GCE to ed1cfef52: #3417's line-buffered stdout, which costs one write syscall per line when stdout is a pipe. The Rust reference pays the same per line.
+  - **Owner ruling (2026-10-09):** keep line buffering and accept the cost. #3502 is closed and does not block the release.
+  - A gap found along the way: no gate caught a 1.75x native slowdown. The native/Rust ratio stayed inside its 40% budget, and the wasm ratio moved in the "good" direction.
+- **Perf investigation (branch `perf-ratio-probe`, not merged), instruction and allocation counts:**
+  - listbuild and fft on wasm: libm constants are emitted as int→float reinterprets, about 14 extra instructions per sin/cos call. Fixed on the branch (62a6ff3fe); output is bit-identical.
+  - Each trig call is a chain of calls that Cranelift does not inline.
+  - The wasm list-push grow never extends in place.
+  - strchurn native: the cost is the system allocator. SipHash and clones were refuted as causes.
+  - onebrc wasm: the aggregate phase makes about 2.6x more heap blocks than native (Option, tuple and closure environments).
+  - mapbuild native: `"k" + int.to_string(i)` reallocated each time. Fixed on the branch (648ff9993): itoa 975M→469M instructions, and the native alloc ledger is down 10–17%.
+  - An A/B of both fixes, plus onebrc v0.65.1 vs rc1, is running on GCE (x86 and arm).
+- **Next:**
+  - Land batch 26.
+  - Land the two perf fixes once the A/B confirms them.
+  - The #3501 windows (variable interpolation first).
+  - Wasmtime inlining in the embedded host.
+  - Unboxing onebrc's small returns.
+  - The final v0.67.0 once soak and CI are clean.
+
 ## Edit loop on a real project: O6lvl4/gramide 0.2.11
 
 gramide has 19 files and 8,106 lines of Almide. It is measured on a copy (`git archive HEAD`) with one line added: `import self.lex` in `src/keystrokes.almd`.
