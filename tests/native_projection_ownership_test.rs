@@ -216,8 +216,10 @@ fn head_reads_borrow_the_element_and_clone_only_what_escapes() {
         assert_eq!(body(name).matches(".clone()").count(), usize::from(name == "escape_moved"), "{name}: {}", body(name));
     }
     assert!(body("escape_moved").contains("b.data.clone()"), "{}", body("escape_moved"));
-    assert_eq!(body("escape_pattern").matches(".clone()").count(), 1, "{}", body("escape_pattern"));
-    assert!(body("escape_pattern").contains("almide_index!(xs, 0i64).clone()"), "{}", body("escape_pattern"));
+    // The pattern binder's one copy is `almide_index!` itself (it returns an
+    // owned element); a `.clone()` after it would be a second copy.
+    assert_eq!(body("escape_pattern").matches(".clone()").count(), 0, "{}", body("escape_pattern"));
+    assert!(body("escape_pattern").contains("almide_index!(xs, 0i64)"), "{}", body("escape_pattern"));
     assert_eq!(body("escape_field").matches(".clone()").count(), 1, "{}", body("escape_field"));
     assert!(body("escape_field").contains(".data.clone()") && body("escape_field").contains("almide_list_get_ref!"), "{}", body("escape_field"));
 
