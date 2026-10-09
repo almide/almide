@@ -244,8 +244,9 @@ pub fn cmd_build(args: BuildArgs) {
     let output = compute_output_path(file, output, is_wasm);
 
     let opts = crate::codegen::CodegenOptions { repr_c, allow_unverified: false, trace: false };
-    let (rs_code, _ir) = crate::try_compile_with_ir(file, no_check, &opts)
+    let (rs_code, ir) = crate::try_compile_with_ir(file, no_check, &opts)
         .unwrap_or_else(|_| std::process::exit(1));
+    let uses_metered_prims = ir.as_ref().is_some_and(almide::ir::runtime_use::uses_metered_prims);
 
     // WASI target: use bare rustc (no external crate deps needed for WASM)
     if is_wasm {
@@ -263,7 +264,7 @@ pub fn cmd_build(args: BuildArgs) {
     // falls back to the v0 source above — honest-wall discipline: a v1-rendered
     // program is never wrong.
     let rs_code = if native_verified && !repr_c && !cdylib {
-        super::render_v1_native_or_fallback(file, rs_code)
+        super::render_v1_native_or_fallback(file, rs_code, uses_metered_prims)
     } else {
         rs_code
     };

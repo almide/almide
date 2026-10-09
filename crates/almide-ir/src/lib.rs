@@ -43,6 +43,7 @@ pub mod top_let_storage;
 pub mod accum_tre;
 pub mod record_shape;
 pub mod mono_name;
+pub mod runtime_use;
 
 mod wasm_repr;
 
