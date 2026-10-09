@@ -222,11 +222,16 @@ impl WasmTestRunner {
     }
 }
 
-/// A finished run's verdict from what it printed and whether it exited 0 —
-/// shared by both runners so the classification is one rule.
-fn wasm_run_outcome(test_file: &str, declared_tests: usize, bytes_len: usize, success: bool, stdout: &str, stderr: &str) -> WasmTestOutcome {
+/// A finished run's verdict from whether it exited 0 — shared by both runners
+/// so the classification is one rule. `selected` is how many tests the runner
+/// was synthesized over ([`almide_driver::test_runner::runs_test`]): the runner
+/// runs them in order and any failure ends the run non-zero, so a run that
+/// exited 0 ran all of them. The count is NOT read off stdout (#3489): the
+/// runner's `ok` line shares stdout with the tests, and a test that printed
+/// `ok` counted as a test.
+fn wasm_run_outcome(test_file: &str, (declared_tests, selected): (usize, usize), bytes_len: usize, success: bool, stdout: &str, stderr: &str) -> WasmTestOutcome {
     if success {
-        let ran = stdout.matches("ok\n").count();
+        let ran = selected;
         return WasmTestOutcome::Pass {
             file: test_file.to_string(),
             count: ran,
@@ -393,6 +398,11 @@ pub(super) fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::P
     if declared_tests == 0 && !ir_program.functions.iter().any(|f| f.name.as_str() == "main") {
         return WasmTestOutcome::Empty { file: test_file.to_string() };
     }
+    // Counted over the lowered test fns (`where` cases expanded), the set the
+    // runner is synthesized from (#3489).
+    let lowered_tests = ir_program.functions.iter().filter(|f| f.is_test).count();
+    let selected = ir_program.functions.iter().filter(|f| almide_driver::test_runner::runs_test(f, run_filter)).count();
+    let counts = (lowered_tests, selected);
     // The ONE driver — see the note in src/cli/build.rs. This is the site whose order the
     // migration FLIPPED (ir_link first → last), so its acceptance check is byte-identity of
     // spec/wasm_cross against the pre-migration capture, not merely a green suite.
@@ -419,10 +429,10 @@ pub(super) fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::P
             // real environment and cwd, which `-S inherit-env=y` and the
             // ALMIDE_CWD pin gave the CLI route.
             return match almide_wasm_run::run_wasm_unbounded(&module.almide) {
-                Ok(r) => wasm_run_outcome(test_file, declared_tests, module.wasi.len(), r.exit == 0, &r.stdout, &r.stderr),
+                Ok(r) => wasm_run_outcome(test_file, counts, module.wasi.len(), r.exit == 0, &r.stdout, &r.stderr),
                 // A module the host cannot instantiate FAILS, as the CLI's
                 // non-zero exit did — it is not a benign skip.
-                Err(e) => wasm_run_outcome(test_file, declared_tests, module.wasi.len(), false, "", &format!("Error: embedded wasm host: {e:#}\n")),
+                Err(e) => wasm_run_outcome(test_file, counts, module.wasi.len(), false, "", &format!("Error: embedded wasm host: {e:#}\n")),
             };
         }
         // `ALMIDE_TEST_WASM_RUNNER=wasmtime`: write the stock artifact and run
@@ -446,7 +456,7 @@ pub(super) fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::P
         match cmd.arg(&wasm_path).output() {
             Ok(result) => wasm_run_outcome(
                 test_file,
-                declared_tests,
+                counts,
                 module.wasi.len(),
                 result.status.success(),
                 &String::from_utf8_lossy(&result.stdout),
