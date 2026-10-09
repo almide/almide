@@ -1,0 +1,7 @@
+// #3495, cross-module: the same undetermined `T`, one `import` away. It used
+// to pass `check` and then panic in ResolveCalls (native) / wall E082 (wasm).
+import self.util
+
+effect fn main() -> Unit = {
+  println(int.to_string(util.tag("abc")))
+}

@@ -1,0 +1,8 @@
+// #3495: no argument mentions `T` and the result (`Int`) cannot pin it, so
+// nothing at the call determines it — Rust E0282. It used to pass `check`
+// and then fail the build on both targets.
+fn tag[T](s: String) -> Int = string.len(s)
+
+effect fn main() -> Unit = {
+  println(int.to_string(tag("abc")))
+}

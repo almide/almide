@@ -1,0 +1,3 @@
+// A generic fn in another module whose type parameter no argument mentions:
+// `T` is undetermined at the call, so it is E025 here too.
+fn tag[T](s: String) -> Int = string.len(s)
