@@ -305,9 +305,20 @@ pub const TEST_NAME_PREFIX: &str = "__test_almd_";
 /// user-visible one ([`user_fn_source_name`]).
 pub const USER_FN_ESCAPE: &str = "almide_fn_";
 
-/// Does a user fn named `name` need [`USER_FN_ESCAPE`]?
+/// The prefix of every runtime symbol (`almide_rt_<module>_<fn>`, the
+/// `almide_rt_prim_*` prims). A `Named` call spelled with it is collapsed into
+/// a `RuntimeCall` (`NormalizeRuntimeCallsPass`), and the native runtime is
+/// spliced into the same Rust module as the user's fns — so it is the
+/// compiler's spelling, never a user fn's (#3487).
+pub const RUNTIME_SYMBOL_PREFIX: &str = "almide_rt_";
+
+/// Does a user fn named `name` need [`USER_FN_ESCAPE`]? The compiler's
+/// spaces are `__` (synthesized fns, #3483) and [`RUNTIME_SYMBOL_PREFIX`]
+/// (runtime symbols, #3487): a user fn `almide_rt_list_len` was collapsed into
+/// the runtime's `almide_rt_list_len` call and defined twice beside it (rustc
+/// E0428 / E0308 on the native fallback).
 pub fn is_reserved_fn_name(name: &str) -> bool {
-    name.starts_with("__") || name.starts_with(USER_FN_ESCAPE)
+    name.starts_with("__") || name.starts_with(USER_FN_ESCAPE) || name.starts_with(RUNTIME_SYMBOL_PREFIX)
 }
 
 /// The IR name of a user-declared fn spelled `name` (#3483).
