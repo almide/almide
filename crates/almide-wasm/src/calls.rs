@@ -322,6 +322,7 @@ impl Emitter<'_> {
                     let self_tail = append_window_ok;
                     if self.tail_str_append_arg(k, a, want, self_tail)?
                         || self.tail_list_append_arg(k, a, want, self_tail)?
+                        || self.tail_list_prepend_arg(k, a, want, self_tail)?
                     {
                         self.modes_arg(want, true);
                         continue;
