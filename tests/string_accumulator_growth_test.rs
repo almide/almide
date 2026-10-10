@@ -232,3 +232,79 @@ effect fn main() -> Unit = {
     assert!(want.contains("[100, 200] [12, 9, 6, 3, 0, 100, 200]"), "{want}");
     assert_eq!(run(&core, true), want, "core wasm");
 }
+
+/// The assign twin (#3519): `acc = [[i]] + acc` in a loop took the same
+/// `$concat` copy per step as the tail call did — 3.94 s and 1.30 GB for
+/// 30,000 steps on wasm. It now pushes through the append window and shifts.
+#[test]
+fn an_assign_prepend_onto_a_list_of_lists_grows_in_place() {
+    let dir = tempfile::tempdir().expect("scratch");
+    let source = dir.path().join("assign_prepend.almd");
+    std::fs::write(
+        &source,
+        r#"effect fn main() -> Unit = {
+  var acc: List[List[Int]] = []
+  var i = 0
+  while i < 30000 {
+    acc = [[i]] + acc
+    i = i + 1
+  }
+  println("len=${list.len(acc)} head=${list.get(acc, 0) ?? []} last=${list.get(acc, list.len(acc) - 1) ?? []}")
+}
+"#,
+    )
+    .expect("source");
+    let cap = ["--heap-cap", "33554432"];
+    let native = build(dir.path(), &source, "native", &cap);
+    let core = build(dir.path(), &source, "core.wasm", &[&cap[..], &["--target", "wasm"]].concat());
+    let expected = "len=30000 head=[29999] last=[0]\n";
+    assert_eq!(run(&native, false), expected, "native");
+    assert_eq!(run(&core, true), expected, "core wasm");
+}
+
+/// The assign window keeps value semantics: an alias taken before the loop
+/// keeps the old list (the `$cow` copy), an element that reads the var sees
+/// the pre-assign value, and a handle element shared with another var keeps
+/// its own count.
+#[test]
+fn the_assign_prepend_window_agrees_with_native_on_aliases_and_self_reads() {
+    let dir = tempfile::tempdir().expect("scratch");
+    let source = dir.path().join("assign_kinds.almd");
+    std::fs::write(
+        &source,
+        r#"type P = { x: Int, s: String }
+
+effect fn main() -> Unit = {
+  var a: List[Int] = [9]
+  let snap = a
+  var i = 0
+  while i < 5 {
+    a = [list.len(a) * 10] + a
+    i = i + 1
+  }
+  println("${snap} ${a}")
+  var ps: List[P] = []
+  for k in 0..<4 {
+    ps = [{ x: k, s: "p${k}" }] + ps
+  }
+  println("${ps}")
+  var ls: List[List[String]] = [["z"]]
+  let inner = ["q"]
+  for k in 0..<3 {
+    ls = [inner] + ls
+    ls = [["k${k}"]] + ls
+  }
+  println("${inner} ${ls}")
+  var fs: List[Float] = []
+  for k in 0..<4 { fs = [int.to_float(k) + 0.5] + fs }
+  println("${fs}")
+}
+"#,
+    )
+    .expect("source");
+    let native = build(dir.path(), &source, "native", &[]);
+    let core = build(dir.path(), &source, "core.wasm", &["--target", "wasm"]);
+    let want = run(&native, false);
+    assert!(want.starts_with("[9] [50, 40, 30, 20, 10, 9]\n"), "{want}");
+    assert_eq!(run(&core, true), want, "core wasm");
+}
