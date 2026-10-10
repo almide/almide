@@ -16,7 +16,7 @@ in `target.rs::build_pipeline`. The Rust pipeline (in order): UnifyVarTables →
 ListPatternLowering → LambdaTypeResolve → ConcretizeTypes →
 PatternLiteralGuard → ResolveCalls → RegionWindow → BoxDeref → LICM → EggSaturation →
 MatrixShapeSpec → ConstFold → IntrinsicLowering → BorrowInsertion →
-TailCallOpt → CaptureClone → CloneInsertion → MatchSubject → EffectInference →
+OwnedSourceHoist → TailCallOpt → CaptureClone → CloneInsertion → MatchSubject → EffectInference →
 StdlibLowering → StreamFusion → ResultPropagation → BuiltinLowering →
 DecodeSlotHint → DecodeErrFrame → Peephole → RustLowering → FanLowering → NormalizeRuntimeCalls →
 IrLinkFlatten → SharedCellBorrow → VarStorage → RangeCountingVars → TopLetStorage → BorrowLowering →

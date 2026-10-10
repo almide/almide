@@ -95,6 +95,12 @@ impl almide_ir::visit::IrVisitor for OwnedReadCensusVisitor<'_> {
                     _ => walk_expr(self, e),
                 }
             }
+            // `{ let t = list.len(p); op(&p, …, t) }` (OwnedSourceHoist, #3519):
+            // the lets read `p` only as a scalar, and every other read in the
+            // block is of a scalar var — the op's source is its one read.
+            IrExprKind::Block { .. } if let Some(id) = crate::owned_source::hoisted_source(e).filter(|id| self.tracked.contains(id)) => {
+                self.note_source(id);
+            }
             IrExprKind::Lambda { body, .. } => {
                 self.lambda_depth += 1;
                 self.visit_expr(body);
@@ -131,13 +137,7 @@ impl almide_ir::visit::IrVisitor for OwnedReadCensusVisitor<'_> {
 
 /// The var a range op's source `Borrow` reads (`&p`), if that is its shape.
 fn either_way_source(arg: &IrExpr) -> Option<VarId> {
-    match &arg.kind {
-        IrExprKind::Borrow { expr, as_str: false, mutable: false } => match &expr.kind {
-            IrExprKind::Var { id } => Some(*id),
-            _ => None,
-        },
-        _ => None,
-    }
+    crate::owned_source::borrowed_var(arg)
 }
 
 /// Drop the source `Borrow` of every range op in `expr` that reads one of
