@@ -428,6 +428,22 @@ warning count against develop, not by the rounded grade.
   - The issue had measured develop at 1.106.
 - **Next:** land #3520, ship v0.67.1, then #3519 (batch 33, an agent is on it) and #3518. The two Slow seeds were replayed: shard 2 is #3003, shard 5 is #3519.
 
+### 2026-10-10 (late night) — v0.67.1 released, canary before the tag
+
+- **Merged:** #3521 (the #3520 fix plus the v0.67.0 seal) as f539070c7, and #3524 (version 0.67.1) as d1b15a115. develop push CI on both was green on every workflow.
+  - The bump needed more than `Cargo.toml`: the spec manifests carry the version in their oracle header (the `run_parity` pre-push hook refuses a mismatch), and `docs-gen --check` wants the version named in `llms.txt`. The first push of #3524 failed Emit & Format and Test Rust shard 4 on the second.
+- **Canary before the tag** (the lesson from v0.67.0): run 38027328898, f539070c7 vs v0.67.0, 44 projects. hew and ctxgate went from build FAIL to ok. No command fails on the candidate that passed on the baseline. The 6 known-good-earlier rows fail on both sides: 4 declared epoch breaks, and gramide / gramide-cli on their own E032.
+- **Released:** release PR #3526 (129 checks passed) merged into main as 92cde0867, tagged `v0.67.1`, published as latest.
+  - 5 archives, the checksums file and the dossier. All checksums verify; the macOS arm64 binary reports `0.67.1 (release, 92cde0867)`.
+  - Release blockers: 0. Interface diff v0.67.0 → v0.67.1: identical. Trust Spine on the tag: green (run 38041085370).
+  - Fuzz on the same tree (nightly run 38040279550): 8/8 shards, 41.0 of 40 planned minutes, 6,996 programs, 0 findings.
+  - Playground lock: almide/playground#12 merged (f8a0edd95). Seal: `proofs/releases/v0.67.1.toml`.
+- **Environment:** the disk filled during the push hooks (ENOSPC in rustc; 120 MB free). Deleting the `target/` caches of six finished worktrees freed 91 GB.
+- **Written, not merged:** PR #3527 batches #3519 row 1 and #3522, and now also #3523.
+  - CI found that the #3522 repair, declared machine-applicable, did not round-trip through `almide fix` (`diagnostic_coverage_test`). The cause is #3523: `fix` canonicalized the entry with no imported modules, so a call such as `args.positional_at` stayed unresolved and its fix-it never reached the engine.
+  - `fix` now resolves imports as `check` does; an import that does not resolve falls back to the old single-file check. The coverage test and the fix tests pass, and codopsy `src` is unchanged (A 93, 11 warnings).
+- **Next:** land #3527, then #3519 row 2 and #3518.
+
 ## Edit loop on a real project: O6lvl4/gramide 0.2.11
 
 gramide has 19 files and 8,106 lines of Almide. It is measured on a copy (`git archive HEAD`) with one line added: `import self.lex` in `src/keystrokes.almd`.
