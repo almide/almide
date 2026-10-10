@@ -156,18 +156,30 @@ impl Emitter<'_> {
         self.rc_share_guard(elem, el);
         self.witness_store(elem, el);
         let push = if stride == 8 { F_LIST_PUSH_8 } else { F_LIST_PUSH_4 };
+        self.f.instructions().call(push);
+        self.shift_pushed_to_front(stride)?;
+        self.witness_arg_moved(right, want);
+        self.tail_consumed.insert(idx);
+        Ok(true)
+    }
+
+    /// With the block a `$list_push_*` just answered on the stack, move the
+    /// pushed element from the last slot to the first: the old slots shift
+    /// one stride right (`memory.copy` is overlap-safe). Slots move, credits
+    /// do not. Leaves the block on the stack. Shared by the tail-call window
+    /// and the `acc = [e] + acc` assign window (#3519).
+    pub(crate) fn shift_pushed_to_front(&mut self, stride: u32) -> Result<(), EmitError> {
         let blk = self.hold_i32()?;
         let last = self.hold_i32()?;
         let v = if stride == 8 { self.hold_i64()? } else { self.hold_i32()? };
         let payload = almide_layout::PAYLOAD as i32;
         let mut i = self.f.instructions();
-        i.call(push).local_set(blk);
+        i.local_set(blk);
         // `last` = the byte offset of the pushed slot: old len.
         i.local_get(blk).i32_load(len_memarg()).i32_const(stride as i32).i32_sub().local_set(last);
         i.local_get(blk).local_get(last).i32_add();
         if stride == 8 { i.i64_load(slot_memarg(0)) } else { i.i32_load(slot_memarg(0)) };
         i.local_set(v);
-        // shift slots [0, last) one stride right
         i.local_get(blk).i32_const(payload + stride as i32).i32_add();
         i.local_get(blk).i32_const(payload).i32_add();
         i.local_get(last);
@@ -178,16 +190,14 @@ impl Emitter<'_> {
         if stride == 8 { self.release_i64() } else { self.release_i32() };
         self.release_i32();
         self.release_i32();
-        self.witness_arg_moved(right, want);
-        self.tail_consumed.insert(idx);
-        Ok(true)
+        Ok(())
     }
 }
 
 /// `[e] + acc` as lowering hands it over: the bare `BinOp`, or the literal
 /// bound to a temp first — `{ let t = [e]; t + acc }` — which is the shape a
-/// self tail call's argument arrives in.
-fn prepend_operands(a: &IrExpr) -> Option<(&IrExpr, &IrExpr)> {
+/// self tail call's argument (and an assign's value) arrives in.
+pub(crate) fn prepend_operands(a: &IrExpr) -> Option<(&IrExpr, &IrExpr)> {
     let op = almide_ir::BinOp::ConcatList;
     match &a.kind {
         IrExprKind::BinOp { op: o, left, right } if *o == op => Some((left, right)),
