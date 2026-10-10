@@ -402,6 +402,32 @@ warning count against develop, not by the rounded grade.
   - Corpus `check` over 4519 files: 17 diagnostics fixtures differ. 15 show the hint text change, 7 have a cascading E001 removed, and no exit code changes.
 - **Next:** land batch 32, then cut rc2.
 
+### 2026-10-10 (night) — batch 32 merged, v0.67.0-rc2, soak, v0.67.0 tagged
+
+- **Merged:** #3516 (batch 32), closes #3515. Merge commit c8a814398. develop push CI was green on all five workflows: CI, Cross-Target, Acceptance Ring, Trust Spine and the Mutation sweep.
+- **rc2:**
+  - Release PR #3517 passed 127 checks (13 skipped) and was merged into main as e2cb6c3b4. Its tree is identical to c8a814398.
+  - The release workflow published 5 archives and the checksums file. All checksums verify, and the macOS arm64 binary reports `0.67.0 (release, e2cb6c3b4)`.
+- **Soak:** fuzz-nightly run 38010058439 on `v0.67.0-rc2`, 60 minutes, 8 shards.
+  - All 8 shards delivered their full budget, 480.5 of 480 planned minutes, and generated 90,096 programs.
+  - Correctness findings: 0. Leaks: 0. Walls: 36. Skipped: 236.
+  - Slow: 2. Both are wasm runs that completed within the 10× confirm budget, byte-identical to native: seed 608160935026 index 6585 (shard 2) and seed 608160935029 index 3635 (shard 5).
+  - The verdict printed `findings=1`. Two same-named finding directories collide in the aggregation, and the Slow route posts to the newest open `fuzz-perf` issue (#2393, 8 reports since 09-20), not the ledger #2302. Both are filed as #3518.
+- **Final:** `v0.67.0` was tagged on e2cb6c3b4, the rc2 commit.
+  - Release blockers: 0.
+  - Interface diff v0.66.0 → v0.67.0-rc2: breaking, added 11, removed 9. All 9 removals are readers turned into effect fns and are declared in epoch 8.
+  - The downstream canary was dispatched after the tag, not before as in v0.66.0: run 38015230745, v0.66.0 → v0.67.0, 44 projects.
+    - 6 regressions. 4 are declared epoch breaks: almide-dojo (epoch 13), parsegen and porta (epoch 10), comide (epoch 8).
+    - The other 2 are a real codegen regression, #3520. hew and ctxgate fail with rustc E0308: inside a loop, a borrowed head match got `Some(h) => h.clone()` beside `None => &d`. The clone walk's loop rule cloned a reference binder.
+    - Fix: `insert_clones_var` never clones a binder bound by reference, and the head-match binders are now registered as such. The test fails on v0.67.0 and passes on the fix. With the fix, hew and ctxgate build again.
+    - The owner approved v0.67.1 as a patch release without an rc.
+    - Lesson: run the canary before the final tag.
+- **#3466 and #3340 closed with a re-measurement.**
+  - Setup: macOS arm64, gramide dbc8e9e with both patches, release binaries, `almide check`, median of 25 interleaved runs, every run exit 0.
+  - Result, v0.67.0 / v0.66.0: `src/cli.almd` 65.6 / 71.9 ms (0.912), `src/keystrokes.almd` 0.912, `src/about.almd` 0.929.
+  - The issue had measured develop at 1.106.
+- **Next:** land #3520, ship v0.67.1, then #3519 (batch 33, an agent is on it) and #3518. The two Slow seeds were replayed: shard 2 is #3003, shard 5 is #3519.
+
 ## Edit loop on a real project: O6lvl4/gramide 0.2.11
 
 gramide has 19 files and 8,106 lines of Almide. It is measured on a copy (`git archive HEAD`) with one line added: `import self.lex` in `src/keystrokes.almd`.

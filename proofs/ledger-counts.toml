@@ -11,25 +11,25 @@
 #           whenever the nightly scripts/check-ledger-counts.sh reports drift).
 # A fixture or contract PR must NOT refresh it. Measurement recipes:
 # scripts/lib/ledger-counts.sh.
-date                       = "2026-10-03"
-contracts                  = 372
-contracts_active           = 372
+date                       = "2026-10-10"
+contracts                  = 376
+contracts_active           = 376
 contracts_flagged          = 0
-contracts_spec_keyed       = 372
-wasm_cross_fixtures        = 890
+contracts_spec_keyed       = 376
+wasm_cross_fixtures        = 939
 interp_abstains            = 21
 conformance_sections       = 134
-conformance_fixtures       = 990
-stdlib_functions           = 1029
+conformance_fixtures       = 1049
+stdlib_functions           = 1031
 stdlib_modules             = 45
-spec_test_files            = 486
-scalar_read_arms           = 62
+spec_test_files            = 512
+scalar_read_arms           = 64
 scalar_read_unguarded      = 0
 libm_sites                 = 5
 als_elements               = 73
 als_elements_unwritten     = 0
-release_seals              = 17
-verification_gates         = 121
+release_seals              = 18
+verification_gates         = 122
 verification_unverified    = 0
 tor_rows                   = 10
 fuzz_green_streak_days     = 0
