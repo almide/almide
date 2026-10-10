@@ -358,26 +358,9 @@ jobs:
       - name: Aggregate findings
         id: agg
         run: |
-          # Any depth (#2611): when exactly ONE shard uploaded, its artifact is
-          # extracted flat (`shards/tools/...`, no per-artifact directory), and
-          # the old `shards/*/tools/...` glob found nothing there. Run
-          # 36051987508 (v0.63.1-rc2 gate) concluded success with a correctness
-          # finding sitting in its only artifact.
-          mkdir -p night-findings
-          find shards -type d -path '*/tools/xtarget-fuzz/findings/*' -prune -print | while IFS= read -r d; do
-            cp -R "$d" "night-findings/$(basename "$d")" 2>/dev/null || true
-          done
-          COUNT=$(find night-findings -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
-          SLOW=$(find night-findings -mindepth 1 -maxdepth 1 -type d -name 'Slow__*' | wc -l | tr -d ' ')
-          # LeakAtExit (the live-heap rung): wasm heap blocks live at exit.
-          # Its own class like Slow — tracked, not fatal; the corpus
-          # live-at-exit ledger (crates/almide-wasm/tests/alloc_ledger.rs)
-          # is the red gate for leaks.
-          LEAK=$(find night-findings -mindepth 1 -maxdepth 1 -type d -name 'LeakAtExit__*' | wc -l | tr -d ' ')
-          echo "findings=$COUNT" >> "$GITHUB_OUTPUT"
-          echo "slow=$SLOW" >> "$GITHUB_OUTPUT"
-          echo "leak=$LEAK" >> "$GITHUB_OUTPUT"
-          echo "correctness=$((COUNT - SLOW - LEAK))" >> "$GITHUB_OUTPUT"
+          # Any depth (#2611), and a second instance of a name is kept beside
+          # the first rather than copied over it (#3518) — see the script.
+          bash scripts/fuzz-night-aggregate.sh shards night-findings | tee -a "$GITHUB_OUTPUT"
 
       # A night where NO shard uploaded output has no evidence, and green
       # would be vacuous (the #976 class — with `continue-on-error` on the

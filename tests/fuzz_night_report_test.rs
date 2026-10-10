@@ -663,8 +663,11 @@ fn a_lone_shard_extracted_flat_still_names_itself_and_the_rest_are_recovered() {
 #[test]
 fn the_findings_aggregate_does_not_assume_a_per_artifact_directory() {
     let wf = fs::read_to_string(repo_root().join(".github/workflows/fuzz-nightly.yml")).unwrap();
+    let agg = fs::read_to_string(repo_root().join("scripts/fuzz-night-aggregate.sh")).unwrap();
     assert!(!wf.contains("shards/*/tools/xtarget-fuzz/findings"), "the one-level glob is back");
-    assert!(wf.contains("find shards -type d -path '*/tools/xtarget-fuzz/findings/*' -prune"), "aggregate");
+    assert!(!agg.contains("shards/*/tools/xtarget-fuzz/findings"), "the one-level glob is back");
+    assert!(wf.contains("bash scripts/fuzz-night-aggregate.sh shards night-findings"), "aggregate");
+    assert!(agg.contains("find \"$SHARDS\" -type d -path '*/tools/xtarget-fuzz/findings/*' -prune"), "aggregate");
     assert!(wf.contains("echo \"fuzz-shard: ${{ matrix.shard }}\" > fuzz-output.txt"), "shard header");
     assert!(wf.contains("| tee -a fuzz-output.txt"), "the fuzzer output must APPEND after the header");
 }
@@ -823,5 +826,115 @@ esac
     let body = fs::read_to_string(&posted).expect("nothing was posted");
     assert!(body.contains("recorded **1** unique finding(s)"), "{body}");
     assert!(body.contains("stdout differs (OutputDivergence__a)"), "{body}");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// #3518: two shards that produce the same finding NAME from different
+/// programs. The night still counts unique names (that is the dedup the
+/// aggregate exists for), but the second instance used to be `cp`'d over the
+/// first: the v0.67.0-rc2 soak's two Slow findings (shards 2 and 5, the
+/// generic Slow summary) were two different gaps, and one reproduction
+/// vanished from the artifact and the issue body. Both are kept, counted as
+/// instances, and each one's replay line reaches the body.
+#[test]
+fn a_name_seen_on_two_shards_keeps_both_instances_and_lists_both_replays() {
+    let dir = scratch("same-name");
+    let shards = dir.join("shards");
+    let slow = "Slow__wasm_run_outlived_the_budget";
+    finding(&shards.join("fuzz-shard-1-2/tools/xtarget-fuzz/findings"), slow, "Slow", 6585);
+    finding(&shards.join("fuzz-shard-1-5/tools/xtarget-fuzz/findings"), slow, "Slow", 3635);
+    finding(&shards.join("fuzz-shard-1-7/tools/xtarget-fuzz/findings"), slow, "Slow", 17);
+    finding(&shards.join("fuzz-shard-1-5/tools/xtarget-fuzz/findings"), "OutputDivergence__x", "OutputDivergence", 9);
+    let out = dir.join("night-findings");
+    let r = bash(&["scripts/fuzz-night-aggregate.sh", shards.to_str().unwrap(), out.to_str().unwrap()], &[]);
+    assert_eq!(r.code, Some(0), "{}{}", r.stdout, r.stderr);
+    for kv in ["findings=2", "slow=1", "leak=0", "correctness=1", "instances=4"] {
+        assert!(r.stdout.lines().any(|l| l == kv), "missing {kv}: {}", r.stdout);
+    }
+    let indexes: Vec<String> = [out.join(slow), out.join(slow).join("instances/2"), out.join(slow).join("instances/3")]
+        .iter()
+        .map(|d| fs::read_to_string(d.join("meta.txt")).unwrap())
+        .map(|m| m.lines().find(|l| l.starts_with("index")).unwrap().to_string())
+        .collect();
+    let mut sorted = indexes.clone();
+    sorted.sort();
+    sorted.dedup();
+    assert_eq!(sorted.len(), 3, "an instance was overwritten: {indexes:?}");
+
+    let r = bash(
+        &["scripts/fuzz-night-issue-body.sh", out.to_str().unwrap(), "slow", "https://example/run/1", "8", "8", "none"],
+        &[],
+    );
+    assert_eq!(r.code, Some(0), "{}{}", r.stdout, r.stderr);
+    assert!(r.stdout.contains("**1** perf-class Slow finding(s) (3 instances"), "{}", r.stdout);
+    assert_eq!(r.stdout.matches("reproduce").count(), 3, "every instance's replay line: {}", r.stdout);
+    assert_eq!(r.stdout.matches("  also: reproduce").count(), 2, "{}", r.stdout);
+    let _ = fs::remove_dir_all(&dir);
+}
+
+/// #3518: a class's reports go to its LEDGER — the open issue this route
+/// filed, titled "Nightly fuzz: …" — never to a newer specific issue that
+/// carries the same label. `.[0]` of `gh issue list` is the newest, and eight
+/// nights of Slow findings went to #2393 (a Map-accumulation issue) instead of
+/// the ledger #2302. The forged gh applies the route's own `--jq` with jq.
+#[cfg(unix)]
+#[test]
+fn a_report_goes_to_the_ledger_not_the_newest_issue_with_the_label() {
+    let dir = scratch("route-ledger");
+    let bin = dir.join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    finding(&dir.join("findings"), "Slow__a", "Slow", 1);
+    let target = dir.join("target.txt");
+    let issues = dir.join("issues.json");
+    let gh = format!(
+        r#"#!/bin/bash
+case "$1 $2" in
+  "issue list")
+    q=""; while [ $# -gt 0 ]; do [ "$1" = --jq ] && q="$2"; shift; done
+    jq -r "$q" '{issues}' ;;
+  "label create") ;;
+  "issue comment") echo "comment $3" > '{target}' ;;
+  "issue create") echo "create" > '{target}' ;;
+  *) echo "fake gh: unexpected $*" >&2; exit 2 ;;
+esac
+"#,
+        issues = issues.display(),
+        target = target.display()
+    );
+    fs::write(bin.join("gh"), gh).unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(bin.join("gh"), fs::Permissions::from_mode(0o755)).unwrap();
+    let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default());
+    let findings = dir.join("findings");
+    let args = [
+        "scripts/fuzz-night-route.sh",
+        findings.to_str().unwrap(),
+        "slow",
+        "1",
+        "https://example/run/1",
+        "8",
+        "8",
+        "none",
+        "fuzz-findings-1",
+    ];
+    // `gh issue list` answers newest first.
+    for (listing, want) in [
+        (
+            r#"[{"number":2393,"title":"Accumulating into a Map in a loop is quadratic on native"},{"number":2302,"title":"Nightly fuzz: 1 slow finding(s) (perf-class)"}]"#,
+            "comment 2302",
+        ),
+        (
+            r#"[{"number":2500,"title":"Nightly fuzz: 3 slow finding(s) (perf-class)"},{"number":2302,"title":"Nightly fuzz: 1 slow finding(s) (perf-class)"}]"#,
+            "comment 2302",
+        ),
+        (r#"[{"number":2393,"title":"Accumulating into a Map in a loop is quadratic on native"}]"#, "create"),
+        ("[]", "create"),
+    ] {
+        fs::write(&issues, listing).unwrap();
+        let _ = fs::remove_file(&target);
+        let r = bash(&args, &[("PATH", &path)]);
+        assert_eq!(r.code, Some(0), "{listing}: {}{}", r.stdout, r.stderr);
+        assert_eq!(fs::read_to_string(&target).unwrap().trim(), want, "{listing}");
+    }
     let _ = fs::remove_dir_all(&dir);
 }

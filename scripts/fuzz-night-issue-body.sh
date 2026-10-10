@@ -61,6 +61,17 @@ case "$CLASS" in
   *) echo "fuzz-night-issue-body.sh: class must be correctness, slow or leak, got '$CLASS'" >&2; exit 2 ;;
 esac
 COUNT=${#DIRS[@]}
+# Further instances of a name live in `<name>/instances/<k>/` (#3518): the
+# count stays unique-by-name, and the instances are said and listed.
+EXTRA=0
+for d in "${DIRS[@]}"; do
+  [ -d "$d/instances" ] && EXTRA=$((EXTRA + $(find "$d/instances" -mindepth 1 -maxdepth 1 -type d | wc -l)))
+done
+if [ "$EXTRA" -gt 0 ]; then
+  ALSO=" ($((COUNT + EXTRA)) instances: the same name from more than one program; each instance's replay line is listed)"
+else
+  ALSO=""
+fi
 SHOWN=$COUNT
 [ "$SHOWN" -le "$CAP" ] || SHOWN=$CAP
 
@@ -76,18 +87,18 @@ fi
 
 case "$CLASS" in
   correctness)
-    echo "The nightly generative differential fuzzer recorded **$COUNT** unique finding(s)"
+    echo "The nightly generative differential fuzzer recorded **$COUNT** unique finding(s)$ALSO"
     echo "collected from $FROM."
     ;;
   slow)
-    echo "The nightly fuzzer recorded **$COUNT** perf-class Slow finding(s): a leg"
+    echo "The nightly fuzzer recorded **$COUNT** perf-class Slow finding(s)$ALSO: a leg"
     echo "outran the per-program budget but completed byte-identical at the 10x"
     echo "confirm re-run. Not correctness — the night stays green — but each is a"
     echo "real order-of-magnitude perf gap (the #1229 class). Collected from"
     echo "$FROM."
     ;;
   leak)
-    echo "The nightly fuzzer recorded **$COUNT** LeakAtExit finding(s): both legs agreed"
+    echo "The nightly fuzzer recorded **$COUNT** LeakAtExit finding(s)$ALSO: both legs agreed"
     echo "and exited 0, but the wasm leg ended with heap blocks still live (native drops"
     echo "them; the wasm leg releases by hand). Measured with ALMIDE_WASM_ALLOC_COUNT=1 on"
     echo "the embedded host. Not fatal to the night — the corpus live-at-exit ledger is the"
@@ -158,6 +169,16 @@ for ((i = 0; i < SHOWN; i++)); do
   meta="${DIRS[$i]}/meta.txt"
   [ -f "$meta" ] || { echo "kind        = ? (no meta.txt in $(basename "${DIRS[$i]}"))"; continue; }
   meta_fields "$meta"
+  # #3518: the other programs that produced the same name, by replay line.
+  if [ -d "${DIRS[$i]}/instances" ]; then
+    while IFS= read -r inst; do
+      if [ -f "$inst/meta.txt" ]; then
+        tail -c "$META_CAP" "$inst/meta.txt" | grep -aE '^reproduce' | sed 's/^/  also: /' | cut_lines || true
+      else
+        echo "  also: ? (no meta.txt in instance $(basename "$inst"))"
+      fi
+    done < <(find "${DIRS[$i]}/instances" -mindepth 1 -maxdepth 1 -type d | sort -V)
+  fi
 done
 if [ "$SHOWN" -lt "$COUNT" ]; then
   echo "... $((COUNT - SHOWN)) more finding(s) not shown (showing $SHOWN of $COUNT)"

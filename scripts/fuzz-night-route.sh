@@ -116,7 +116,14 @@ else
   fi
 fi
 
-EXISTING=$(gh issue list --label "$LABEL" --state open --json number --jq '.[0].number' || echo "")
+# The class's LEDGER is the issue this script filed: its title starts with
+# "Nightly fuzz:". A specific issue split out of the ledger keeps the class
+# label but gets its own title, and it must not capture the night's reports —
+# `.[0]` (the newest open issue with the label) sent 8 nights of Slow findings
+# to #2393, a Map-accumulation issue, instead of the ledger #2302 (#3518).
+# The oldest open ledger wins, so a duplicate ledger never splits the record.
+EXISTING=$(gh issue list --label "$LABEL" --state open --limit 200 --json number,title \
+  --jq '[.[] | select(.title | startswith("Nightly fuzz:"))] | sort_by(.number) | .[0].number // empty' || echo "")
 if [ -n "$EXISTING" ]; then
   gh issue comment "$EXISTING" --body-file "$BODY"
 else
