@@ -493,6 +493,9 @@ impl Checker {
         if sig.is_effect && !sig.ret.is_result() && let Some(s) = self.current_span {
             self.effect_call_spans.insert((s.line, s.col, s.end_col));
         }
+        if sig.is_effect && sig.ret.option_inner().is_some() {
+            self.note_effect_option_call();
+        }
         self.check_arg_count(name, &sig, arg_tys);
 
         let (mut bindings, concrete_args, aligned_raw) = self.build_call_bindings(&sig, arg_tys, type_args);
