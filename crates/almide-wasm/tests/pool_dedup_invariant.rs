@@ -54,6 +54,10 @@ const DECLARED_COW_CALLERS: &[(&str, &str)] = &[
         "a record var's Bytes field — the pool holds strings, nullary variant cases and \
          closure blocks, never a record with a field or a Bytes",
     ),
+    (
+        "concat_dying.rs",
+        "$list_push on a dying var whose slice type is a List (#3530) — lists are never pooled",
+    ),
     ("emitter_vars.rs", "reads a `mut` var — only a Str is a reachable static"),
     ("stmts_append.rs", "$list_push — lists are never pooled"),
     ("stmts_index.rs", "element slot — lists are never pooled"),
