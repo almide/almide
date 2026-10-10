@@ -233,6 +233,76 @@ fn head_reads_borrow_the_element_and_clone_only_what_escapes() {
     }
 }
 
+/// #3520: inside a loop the clone walk counts every read as one of many, so
+/// a borrowed head match whose `some` binder it took for an owned value got
+/// `Some(h) => h.clone()` beside `None => &d` — an owned and a borrowed arm,
+/// rustc E0308 (v0.67.0; O6lvl4/hew and O6lvl4/ctxgate stopped building).
+const LOOP_HEAD_SOURCE: &str = r#"type Tok = { kind: Int, start: Int }
+fn resumes(opener: Tok) -> Bool = opener.start > 0
+fn for_arg(ks: List[Int]) -> Int = {
+  var brackets: List[Tok] = []
+  var n = 0
+  for k in ks {
+    let t = Tok { kind: k, start: k }
+    if k == 1 then {
+      brackets = [t] + brackets
+    } else {
+      if resumes(list.get(brackets, 0) ?? t) then { n = n + 1 } else { () }
+    }
+  }
+  n
+}
+fn while_arg(brackets: List[Tok]) -> Int = {
+  var n = 0
+  var i = 0
+  while i < 3 {
+    let t = Tok { kind: i, start: i }
+    if resumes(list.get(brackets, 0) ?? t) then { n = n + 1 } else { () }
+    i = i + 1
+  }
+  n
+}
+fn for_let(ks: List[Int], brackets: List[Tok]) -> Int = {
+  var n = 0
+  for k in ks {
+    let t = Tok { kind: k, start: k }
+    let h = list.get(brackets, 0) ?? t
+    n = n + h.start + k
+  }
+  n
+}
+fn for_field(ks: List[Int], brackets: List[Tok]) -> Int = {
+  var n = 0
+  for k in ks {
+    let t = Tok { kind: k, start: k }
+    n = n + (list.get(brackets, 0) ?? t).kind
+  }
+  n
+}
+effect fn main() -> Unit = {
+  let one = [Tok { kind: 4, start: 5 }]
+  println("${for_arg([1, 2, 0])} ${while_arg([])} ${while_arg(one)} ${for_let([1, 2], one)} ${for_let([1, 2], [])} ${for_field([1, 2], one)} ${for_field([1, 2], [])}")
+}
+"#;
+
+#[test]
+fn head_reads_in_a_loop_borrow_both_arms() {
+    let rust = emit_fn_bodies(LOOP_HEAD_SOURCE);
+    for name in ["for_arg", "while_arg", "for_let", "for_field"] {
+        let body = fn_body(&rust, name);
+        assert!(body.contains("almide_list_get_ref!"), "{name} must borrow the head: {body}");
+        assert!(!body.contains("__almide_ir2_head.clone()"), "{name} must not copy the borrowed head: {body}");
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("main.almd");
+    std::fs::write(&source, LOOP_HEAD_SOURCE).unwrap();
+    for target in ["rust", "wasm"] {
+        let out = Command::new(almide_bin()).arg("run").arg(&source).args(["--target", target]).output().unwrap();
+        assert!(out.status.success(), "{target}: {}", String::from_utf8_lossy(&out.stderr));
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "2 2 3 13 6 8 3", "{target}");
+    }
+}
+
 /// #3453 perf cell: 20k head reads per shape. With the element borrowed the
 /// time does not grow with the element; before, every read copied it, so a
 /// 16x larger element took several times longer. One release binary, two

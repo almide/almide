@@ -78,8 +78,8 @@ struct Heads<'a> {
     ref_lets: HashSet<VarId>,
 }
 
-/// Rewrite every head read of `func`'s body; returns the `let` binders now
-/// bound by reference.
+/// Rewrite every head read of `func`'s body; returns the binders now bound
+/// by reference: the `let`s and the `some` binders of borrowed head matches.
 pub(super) fn rewrite(func: &mut IrFunction, vt: &mut VarTable, top_lets: &HashSet<VarId>) -> HashSet<VarId> {
     use super::use_kind::{ExplicitBorrows, Site, UseSites};
     let owned_params: HashSet<VarId> = func.params.iter()
@@ -246,6 +246,9 @@ impl Heads<'_> {
             &moved
         } else { fallback };
         let v = self.fresh("__head", &elem);
+        // A borrowed match binds the element by reference: no owned value of
+        // the clone walk, which would clone it in a loop (#3520).
+        if borrowed { self.ref_lets.insert(v); }
         let var = mk(IrExprKind::Var { id: v }, elem.clone(), chain.span);
         let borrow = |e: IrExpr| mk(IrExprKind::Borrow { expr: Box::new(e), as_str: false, mutable: false }, chain.ty.clone(), chain.span);
         let (some, none, subject) = match (borrowed, whole) {
@@ -378,6 +381,7 @@ impl Heads<'_> {
         match value.kind {
             IrExprKind::UnwrapOr { expr: src, fallback } => {
                 let v = self.fresh("__head", ty);
+                self.ref_lets.insert(v);
                 let subject = super::pass_clone_projection::borrowed_subject(*src);
                 let some = some_arm(v, ty, mk(IrExprKind::Var { id: v }, ty.clone(), span));
                 mk(IrExprKind::Match { subject: Box::new(subject), arms: vec![some, none_arm(borrow(*fallback))] }, ty.clone(), span)

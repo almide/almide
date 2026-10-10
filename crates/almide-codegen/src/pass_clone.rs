@@ -480,6 +480,15 @@ fn make_clone(id: VarId, ty: Ty, span: Option<Span>) -> IrExpr {
 /// unchanged, same as the exhaustive `other` catch-all's no-op on a
 /// childless node.
 fn insert_clones_var(id: VarId, ty: Ty, span: Option<Span>, ctx: &mut CloneCtx) -> IrExpr {
+    // A binder bound by reference (a head read, #3453) is no owned value: a
+    // clone would turn its `&T` into a `T` beside the other arm's `&d`, which
+    // a loop's every-read-repeats count used to do (#3520).
+    if ctx.ref_lets.contains(&id) {
+        if let Some(r) = ctx.remaining.get_mut(&id) {
+            *r = r.saturating_sub(1);
+        }
+        return IrExpr { kind: IrExprKind::Var { id }, ty, span, def_id: None };
+    }
     if ctx.always.contains(&id) {
         // Still a syntactic use: an id here may be an ELIGIBLE var only
         // temporarily forced into `always` by the E0505 call guard (its
