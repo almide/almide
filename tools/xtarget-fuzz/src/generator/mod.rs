@@ -263,6 +263,15 @@ impl Engine {
         if self.focus.is_some() { Ok(self) } else { Err(format!("--focus {focus}: not in the generator's catalogue")) }
     }
 
+    /// `module.fn` of every catalogued signature — the functions `--focus`
+    /// and `inspect` can reach (the inspection ledger's coverage).
+    pub fn catalogue_names(&self) -> Vec<String> {
+        let mut v: Vec<String> = self.catalogue.iter().map(|s| format!("{}.{}", s.module, s.func)).collect();
+        v.sort();
+        v.dedup();
+        v
+    }
+
     /// Number of catalogued stdlib signatures (diagnostics).
     pub fn catalogue_len(&self) -> usize {
         self.catalogue.len()
