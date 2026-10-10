@@ -139,3 +139,96 @@ effect fn main() -> Unit = {
     assert_eq!(run(&native, false), expected, "native");
     assert_eq!(run(&core, true), expected, "core wasm");
 }
+
+/// #3519 row 2, the prepend twin: `go(i + 1, n, [[i]] + acc)` took `$concat`'s
+/// full copy per iteration — a +1 on every element of the copy, a -1 on every
+/// element of the released `acc` — and each outgrown block was stranded between
+/// the inner lists allocated since, so 30,000 prepends reached 1.27 GB and 4 s
+/// on wasm (native 0.45 s). The block now grows in place and the old slots
+/// shift right; the live list stays under 1 MiB, so the 32 MiB ceiling only
+/// the stranded copies could reach is the assertion.
+#[test]
+fn a_tail_recursive_prepend_onto_a_list_of_lists_grows_in_place() {
+    let dir = tempfile::tempdir().expect("scratch");
+    let source = dir.path().join("prepend.almd");
+    std::fs::write(
+        &source,
+        r#"fn go(i: Int, n: Int, acc: List[List[Int]]) -> List[List[Int]] =
+  if i >= n then acc else go(i + 1, n, [[i]] + acc)
+
+effect fn main() -> Unit = {
+  let xs = go(0, 30000, [])
+  println("len=${list.len(xs)} head=${list.get(xs, 0) ?? []} last=${list.get(xs, list.len(xs) - 1) ?? []}")
+}
+"#,
+    )
+    .expect("source");
+    let cap = ["--heap-cap", "33554432"];
+    let native = build(dir.path(), &source, "native", &cap);
+    let core = build(dir.path(), &source, "core.wasm", &[&cap[..], &["--target", "wasm"]].concat());
+    let expected = "len=30000 head=[29999] last=[0]\n";
+    assert_eq!(run(&native, false), expected, "native");
+    assert_eq!(run(&core, true), expected, "core wasm");
+}
+
+/// The prepend window moves slots, not credits: every element type the layout
+/// gives a slot (8-byte Int/Float, 4-byte String/Bool/list/record/variant
+/// handles), an element shared with the caller, an `acc` the caller still
+/// holds (the `$cow` copy), and an element that reads `acc` itself — each
+/// printed by both legs and compared.
+#[test]
+fn the_prepend_window_agrees_with_native_on_every_slot_kind_and_on_shared_values() {
+    let dir = tempfile::tempdir().expect("scratch");
+    let source = dir.path().join("kinds.almd");
+    std::fs::write(
+        &source,
+        r#"type P = { x: Int, s: String }
+type T = | Leaf | Node(Int, String)
+
+fn ints(i: Int, n: Int, acc: List[Int]) -> List[Int] =
+  if i >= n then acc else ints(i + 1, n, [i * 3] + acc)
+fn floats(i: Int, n: Int, acc: List[Float]) -> List[Float] =
+  if i >= n then acc else floats(i + 1, n, [int.to_float(i) / 2.0] + acc)
+fn strs(i: Int, n: Int, acc: List[String]) -> List[String] =
+  if i >= n then acc else strs(i + 1, n, ["s${i}"] + acc)
+fn bools(i: Int, n: Int, acc: List[Bool]) -> List[Bool] =
+  if i >= n then acc else bools(i + 1, n, [i % 3 == 0] + acc)
+fn lists(i: Int, n: Int, acc: List[List[Int]]) -> List[List[Int]] =
+  if i >= n then acc else lists(i + 1, n, [[i, i + 1]] + acc)
+fn recs(i: Int, n: Int, acc: List[P]) -> List[P] =
+  if i >= n then acc else recs(i + 1, n, [{ x: i, s: "r${i}" }] + acc)
+fn vars(i: Int, n: Int, acc: List[T]) -> List[T] =
+  if i >= n then acc else vars(i + 1, n, [if i % 2 == 0 then Leaf else Node(i, "n${i}")] + acc)
+fn shared_elem(i: Int, n: Int, e: List[Int], acc: List[List[Int]]) -> List[List[Int]] =
+  if i >= n then acc else shared_elem(i + 1, n, e, [e] + acc)
+fn reads_acc(i: Int, n: Int, acc: List[Int]) -> List[Int] =
+  if i >= n then acc else reads_acc(i + 1, n, [list.len(acc)] + acc)
+
+effect fn main() -> Unit = {
+  println("${ints(0, 40, [])}")
+  println("${floats(0, 9, [0.25])}")
+  println("${strs(0, 20, ["z"])}")
+  println("${bools(0, 10, [])}")
+  println("${lists(0, 12, [[9]])}")
+  println("${recs(0, 5, [])}")
+  println("${vars(0, 7, [])}")
+  let base = [100, 200]
+  let grown = ints(0, 5, base)
+  println("${base} ${grown}")
+  let inner = [7, 8]
+  let s = shared_elem(0, 4, inner, [])
+  println("${inner} ${s}")
+  let ll = [[1], [2]]
+  let g2 = lists(0, 3, ll)
+  println("${ll} ${g2}")
+  println("${reads_acc(0, 8, [])}")
+}
+"#,
+    )
+    .expect("source");
+    let native = build(dir.path(), &source, "native", &[]);
+    let core = build(dir.path(), &source, "core.wasm", &["--target", "wasm"]);
+    let want = run(&native, false);
+    assert!(want.contains("[100, 200] [12, 9, 6, 3, 0, 100, 200]"), "{want}");
+    assert_eq!(run(&core, true), want, "core wasm");
+}
