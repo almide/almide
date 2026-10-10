@@ -1,0 +1,6236 @@
+# STDLIB INSPECTION LEDGER — one row per public stdlib function, and an
+# `inspected` stamp on each function that has passed every criterion below on
+# both legs. Requested by the owner on 2026-10-11, after #3519, #3520, #3530 and
+# #2393 were all found by use-shape on one leg only: correct per-function
+# tests had passed while a rebind, a tail call or a fold copied the whole value.
+#
+# Enforced by tests/stdlib_inspection_test.rs: every public function has
+# exactly one row, no row is stale, a row's `sig` is the function's current
+# signature (a signature change voids the stamp), an `inspected` row carries
+# every evidence field, and the uninspected count only falls.
+#
+# CRITERIA — a function is stamped `inspected` only when all five hold:
+#
+#   1. SAME BEHAVIOUR ON RUST AND WASM. Native and wasm (and the interpreter,
+#      where it runs the function) agree byte for byte on stdout, stderr and
+#      exit code, including the error path. Evidence: `parity`.
+#   2. NO WASTED ORDER. The per-call cost matches the declared `order`, and
+#      no use-shape — a plain call, the var's own rebind in a loop, a self tail
+#      call, a fold callback, a pipe stage — adds a copy the shape does not need.
+#      Measured on both legs at n, 2n and 4n from built artifacts, never
+#      `almide run`. Evidence: `complexity`, plus `alloc`: the wasm leg leaves 0
+#      live blocks at exit, and an accumulation shape allocates linearly
+#      (canon law 10, ../almide-references/RESEARCH-stdlib.md).
+#   3. CODOPSY A HOLDS. Any change the inspection makes keeps every scored
+#      crate at A under codopsy HEAD, measured the way CI measures. Recorded
+#      in `stamp`.
+#   4. FUZZY COMBINATIONS EVERY RUN. Each inspection runs freshly generated
+#      differential programs centred on the function — the function composed
+#      with others, at generated arguments — and the native/wasm/interpreter
+#      verdicts must agree. Evidence: `parity` names the seed and program count.
+#   5. MODULE DIAMONDS. The function called through a diamond of user
+#      modules (base wraps it; left and right import base; main imports both
+#      and also calls it directly) behaves exactly as the in-module call, on
+#      both legs. Evidence: `diamond`.
+#
+# A defect found during an inspection is filed as its own issue and fixed;
+# the row stays `uninspected` until the fix lands and the run is repeated.
+#
+# ROW FIELDS
+#   name, sig, class   generated (`pure` | `effect`); `effect` rows need the
+#                      host capability on wasm, and their parity is judged on
+#                      the embedded host and a stock WASI runtime both
+#   status             `uninspected` | `inspected`
+#   stamp              "<version> @ <commit> <date>; codopsy <scores>"
+#   order              declared per-call cost, in the size of the named param
+#   parity, complexity, diamond, alloc
+#                      the evidence, with the command, the seed or sizes, the
+#                      machine, and the measured result
+#
+# uninspected_ceiling = "1031"
+
+[[fn]]
+name = "args.flag"
+sig = "effect (name: String) -> Bool ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "args.option"
+sig = "effect (name: String) -> Option[String] ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "args.option_or"
+sig = "effect (name: String, fallback: String) -> String ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "args.positional"
+sig = "effect () -> List[String] ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "args.positional_at"
+sig = "effect (i: Int) -> Option[String] ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "args.raw"
+sig = "effect () -> List[String] ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "base64.decode"
+sig = "(s: String) -> Result[Bytes, String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "base64.decode_url"
+sig = "(s: String) -> Result[Bytes, String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "base64.encode"
+sig = "(b: Bytes) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "base64.encode_url"
+sig = "(b: Bytes) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.append_f32_be"
+sig = "(b: Bytes, val: Float) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.append_f32_le"
+sig = "(b: Bytes, val: Float) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.append_f64_be"
+sig = "(b: Bytes, val: Float) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.append_f64_le"
+sig = "(b: Bytes, val: Float) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.append_i16_be"
+sig = "(b: Bytes, val: Int) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.append_i16_le"
+sig = "(b: Bytes, val: Int) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.append_i32_be"
+sig = "(b: Bytes, val: Int) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.append_i32_le"
+sig = "(b: Bytes, val: Int) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.append_i64_be"
+sig = "(b: Bytes, val: Int) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.append_i64_le"
+sig = "(b: Bytes, val: Int) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.append_u16_be"
+sig = "(b: Bytes, val: Int) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.append_u16_le"
+sig = "(b: Bytes, val: Int) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.append_u32_be"
+sig = "(b: Bytes, val: Int) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.append_u32_le"
+sig = "(b: Bytes, val: Int) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.append_u8"
+sig = "(b: Bytes, val: Int) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.as_mut_ptr"
+sig = "(b: Bytes) -> RawPtr"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.as_ptr"
+sig = "(b: Bytes) -> RawPtr"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.chunks"
+sig = "(b: Bytes, size: Int) -> List[Bytes]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.clear"
+sig = "(b: Bytes) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.cmp"
+sig = "(a: Bytes, b: Bytes) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.concat"
+sig = "(a: Bytes, b: Bytes) -> Bytes"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.contains"
+sig = "(b: Bytes, pattern: Bytes) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.copy_from"
+sig = "(dst: Bytes, src: Bytes, dst_off: Int, src_off: Int, len: Int) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.copy_to_ptr"
+sig = "(b: Bytes, ptr: RawPtr, cap: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.copy_within"
+sig = "(b: Bytes, src_start: Int, src_end: Int, dst: Int) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.data_ptr"
+sig = "(b: Bytes) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.ends_with"
+sig = "(b: Bytes, suffix: Bytes) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.eof"
+sig = "(b: Bytes, pos: Int) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.fill"
+sig = "(b: Bytes, val: Int) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.from_list"
+sig = "(xs: List[Int]) -> Bytes"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.from_raw_ptr"
+sig = "(ptr: RawPtr, len: Int) -> Bytes"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.from_string"
+sig = "(s: String) -> Bytes"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.get"
+sig = "(b: Bytes, i: Int) -> Option[Int]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.get_or"
+sig = "(b: Bytes, i: Int, default: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.heap_restore"
+sig = "(checkpoint: Int) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.heap_save"
+sig = "() -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.index_of"
+sig = "(b: Bytes, pattern: Bytes) -> Option[Int]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.insert"
+sig = "(b: Bytes, pos: Int, val: Int) -> Bytes"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.is_empty"
+sig = "(b: Bytes) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.is_valid_utf8"
+sig = "(b: Bytes) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.len"
+sig = "(b: Bytes) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.lines"
+sig = "(b: Bytes) -> List[Bytes]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.map_each"
+sig = "(b: Bytes, f: (Int) -> Int) -> Bytes"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.new"
+sig = "(len: Int) -> Bytes"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.pad_left"
+sig = "(b: Bytes, target_len: Int, val: Int) -> Bytes"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.pad_right"
+sig = "(b: Bytes, target_len: Int, val: Int) -> Bytes"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.push"
+sig = "(b: Bytes, val: Int) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_bool"
+sig = "(b: Bytes, pos: Int) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_bool_at"
+sig = "(b: Bytes, pos: Int) -> (Int, Option[Bool])"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_f16_le"
+sig = "(b: Bytes, pos: Int) -> Float"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_f16_le_array"
+sig = "(b: Bytes, pos: Int, count: Int) -> List[Float]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_f16_le_at"
+sig = "(b: Bytes, pos: Int) -> (Int, Option[Float])"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_f32_be"
+sig = "(b: Bytes, pos: Int) -> Float"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_f32_be_array"
+sig = "(b: Bytes, pos: Int, count: Int) -> List[Float]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_f32_be_at"
+sig = "(b: Bytes, pos: Int) -> (Int, Option[Float])"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_f32_le"
+sig = "(b: Bytes, pos: Int) -> Float"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_f32_le_array"
+sig = "(b: Bytes, pos: Int, count: Int) -> List[Float]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_f32_le_at"
+sig = "(b: Bytes, pos: Int) -> (Int, Option[Float])"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_f64_be"
+sig = "(b: Bytes, pos: Int) -> Float"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_f64_be_array"
+sig = "(b: Bytes, pos: Int, count: Int) -> List[Float]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_f64_be_at"
+sig = "(b: Bytes, pos: Int) -> (Int, Option[Float])"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_f64_le"
+sig = "(b: Bytes, pos: Int) -> Float"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_f64_le_array"
+sig = "(b: Bytes, pos: Int, count: Int) -> List[Float]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_f64_le_at"
+sig = "(b: Bytes, pos: Int) -> (Int, Option[Float])"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_float32"
+sig = "(b: Bytes, offset: Int, endian: Endian) -> Float32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_i16_be"
+sig = "(b: Bytes, pos: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_i16_be_array"
+sig = "(b: Bytes, pos: Int, count: Int) -> List[Int]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_i16_be_at"
+sig = "(b: Bytes, pos: Int) -> (Int, Option[Int])"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_i16_le"
+sig = "(b: Bytes, pos: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_i16_le_array"
+sig = "(b: Bytes, pos: Int, count: Int) -> List[Int]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_i16_le_at"
+sig = "(b: Bytes, pos: Int) -> (Int, Option[Int])"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_i32_be"
+sig = "(b: Bytes, pos: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_i32_be_array"
+sig = "(b: Bytes, pos: Int, count: Int) -> List[Int]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_i32_be_at"
+sig = "(b: Bytes, pos: Int) -> (Int, Option[Int])"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_i32_le"
+sig = "(b: Bytes, pos: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_i32_le_array"
+sig = "(b: Bytes, pos: Int, count: Int) -> List[Int]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_i32_le_at"
+sig = "(b: Bytes, pos: Int) -> (Int, Option[Int])"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_i64_be"
+sig = "(b: Bytes, pos: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_i64_be_array"
+sig = "(b: Bytes, pos: Int, count: Int) -> List[Int]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_i64_be_at"
+sig = "(b: Bytes, pos: Int) -> (Int, Option[Int])"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_i64_le"
+sig = "(b: Bytes, pos: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_i64_le_array"
+sig = "(b: Bytes, pos: Int, count: Int) -> List[Int]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_i64_le_at"
+sig = "(b: Bytes, pos: Int) -> (Int, Option[Int])"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_int32"
+sig = "(b: Bytes, offset: Int, endian: Endian) -> Int32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_length_prefixed_strings_le"
+sig = "(b: Bytes, pos: Int, count: Int) -> List[String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_string_at"
+sig = "(b: Bytes, pos: Int, len: Int) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_string_be"
+sig = "(b: Bytes, pos: Int) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_string_be_at"
+sig = "(b: Bytes, pos: Int) -> (Int, Option[String])"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_u16_be"
+sig = "(b: Bytes, pos: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_u16_be_array"
+sig = "(b: Bytes, pos: Int, count: Int) -> List[Int]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_u16_be_at"
+sig = "(b: Bytes, pos: Int) -> (Int, Option[Int])"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_u16_le"
+sig = "(b: Bytes, pos: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_u16_le_array"
+sig = "(b: Bytes, pos: Int, count: Int) -> List[Int]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_u16_le_at"
+sig = "(b: Bytes, pos: Int) -> (Int, Option[Int])"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_u32_be"
+sig = "(b: Bytes, pos: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_u32_be_array"
+sig = "(b: Bytes, pos: Int, count: Int) -> List[Int]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_u32_be_at"
+sig = "(b: Bytes, pos: Int) -> (Int, Option[Int])"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_u32_le"
+sig = "(b: Bytes, pos: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_u32_le_array"
+sig = "(b: Bytes, pos: Int, count: Int) -> List[Int]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_u32_le_at"
+sig = "(b: Bytes, pos: Int) -> (Int, Option[Int])"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_u8"
+sig = "(b: Bytes, pos: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_u8_at"
+sig = "(b: Bytes, pos: Int) -> (Int, Option[Int])"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_uint16"
+sig = "(b: Bytes, offset: Int, endian: Endian) -> UInt16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.read_uint32"
+sig = "(b: Bytes, offset: Int, endian: Endian) -> UInt32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.remove_at"
+sig = "(b: Bytes, pos: Int) -> Bytes"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.repeat"
+sig = "(b: Bytes, n: Int) -> Bytes"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.reverse"
+sig = "(b: Bytes) -> Bytes"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.set"
+sig = "(b: Bytes, i: Int, val: Int) -> Bytes"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.set_at"
+sig = "(b: Bytes, i: Int, val: Int) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.set_f32_be"
+sig = "(b: Bytes, pos: Int, val: Float) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.set_f32_le"
+sig = "(b: Bytes, pos: Int, val: Float) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.set_f64_be"
+sig = "(b: Bytes, pos: Int, val: Float) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.set_f64_le"
+sig = "(b: Bytes, pos: Int, val: Float) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.set_float32"
+sig = "(b: Bytes, offset: Int, value: Float32, endian: Endian) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.set_i16_be"
+sig = "(b: Bytes, pos: Int, val: Int) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.set_i16_le"
+sig = "(b: Bytes, pos: Int, val: Int) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.set_i32_be"
+sig = "(b: Bytes, pos: Int, val: Int) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.set_i32_le"
+sig = "(b: Bytes, pos: Int, val: Int) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.set_i64_be"
+sig = "(b: Bytes, pos: Int, val: Int) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.set_i64_le"
+sig = "(b: Bytes, pos: Int, val: Int) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.set_int32"
+sig = "(b: Bytes, offset: Int, value: Int32, endian: Endian) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.set_u16_be"
+sig = "(b: Bytes, pos: Int, val: Int) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.set_u16_le"
+sig = "(b: Bytes, pos: Int, val: Int) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.set_u32_be"
+sig = "(b: Bytes, pos: Int, val: Int) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.set_u32_le"
+sig = "(b: Bytes, pos: Int, val: Int) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.set_u8"
+sig = "(b: Bytes, pos: Int, val: Int) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.set_uint16"
+sig = "(b: Bytes, offset: Int, value: UInt16, endian: Endian) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.set_uint32"
+sig = "(b: Bytes, offset: Int, value: UInt32, endian: Endian) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.skip"
+sig = "(b: Bytes, pos: Int, n: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.skip_length_prefixed_le"
+sig = "(b: Bytes, pos: Int, count: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.slice"
+sig = "(b: Bytes, start: Int, end: Int) -> Bytes"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.split"
+sig = "(b: Bytes, sep: Bytes) -> List[Bytes]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.starts_with"
+sig = "(b: Bytes, prefix: Bytes) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.take_at"
+sig = "(b: Bytes, pos: Int, n: Int) -> (Int, Option[Bytes])"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.to_list"
+sig = "(b: Bytes) -> List[Int]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.to_string"
+sig = "(b: Bytes) -> Result[String, String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.to_string_lossy"
+sig = "(b: Bytes) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.write_bool"
+sig = "(b: Bytes, val: Bool) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.write_f64_be"
+sig = "(b: Bytes, val: Float) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.write_float32"
+sig = "(b: Bytes, value: Float32, endian: Endian) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.write_i64_be"
+sig = "(b: Bytes, val: Int) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.write_int32"
+sig = "(b: Bytes, value: Int32, endian: Endian) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.write_string_be"
+sig = "(b: Bytes, s: String) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.write_u32_be"
+sig = "(b: Bytes, val: Int) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.write_u8"
+sig = "(b: Bytes, val: Int) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.write_uint16"
+sig = "(b: Bytes, value: UInt16, endian: Endian) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.write_uint32"
+sig = "(b: Bytes, value: UInt32, endian: Endian) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "bytes.xor"
+sig = "(a: Bytes, b: Bytes) -> Bytes"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "compute.h"
+sig = "(n: Int) -> Compute"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "compute.min"
+sig = "(n: Int) -> Compute"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "compute.ms"
+sig = "(n: Int) -> Compute"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "compute.ns"
+sig = "(n: Int) -> Compute"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "compute.s"
+sig = "(n: Int) -> Compute"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "compute.us"
+sig = "(n: Int) -> Compute"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "datetime.add_days"
+sig = "(ts: Int, n: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "datetime.add_hours"
+sig = "(ts: Int, n: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "datetime.add_minutes"
+sig = "(ts: Int, n: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "datetime.add_seconds"
+sig = "(ts: Int, n: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "datetime.day"
+sig = "(ts: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "datetime.diff_seconds"
+sig = "(a: Int, b: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "datetime.format"
+sig = "(ts: Int, pattern: String) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "datetime.from_parts"
+sig = "(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "datetime.from_unix"
+sig = "(seconds: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "datetime.hour"
+sig = "(ts: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "datetime.is_after"
+sig = "(a: Int, b: Int) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "datetime.is_before"
+sig = "(a: Int, b: Int) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "datetime.minute"
+sig = "(ts: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "datetime.monotonic_ns"
+sig = "effect () -> Int ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "datetime.month"
+sig = "(ts: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "datetime.now"
+sig = "effect () -> Int ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "datetime.parse_iso"
+sig = "(s: String) -> Result[Int, String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "datetime.second"
+sig = "(ts: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "datetime.to_iso"
+sig = "(ts: Int) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "datetime.to_unix"
+sig = "(ts: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "datetime.weekday"
+sig = "(ts: Int) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "datetime.year"
+sig = "(ts: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "duration.h"
+sig = "(n: Int) -> Duration"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "duration.min"
+sig = "(n: Int) -> Duration"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "duration.ms"
+sig = "(n: Int) -> Duration"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "duration.ns"
+sig = "(n: Int) -> Duration"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "duration.s"
+sig = "(n: Int) -> Duration"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "duration.us"
+sig = "(n: Int) -> Duration"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "env.args"
+sig = "effect () -> List[String] ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "env.cwd"
+sig = "effect () -> String ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "env.get"
+sig = "effect (name: String) -> Option[String] ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "env.millis"
+sig = "effect () -> Int ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "env.os"
+sig = "() -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "env.set"
+sig = "effect (name: String, value: String) -> Unit ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "env.sleep_ms"
+sig = "effect (ms: Int) -> Unit ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "env.temp_dir"
+sig = "effect () -> String ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "env.unix_timestamp"
+sig = "effect () -> Int ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "error.chain"
+sig = "(outer: String, cause: String) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "error.context"
+sig = "(r: Result[T, String], msg: String) -> Result[T, String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "error.message"
+sig = "(r: Result[T, String]) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float.abs"
+sig = "(n: Float) -> Float"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float.ceil"
+sig = "(n: Float) -> Float"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float.clamp"
+sig = "(n: Float, lo: Float, hi: Float) -> Float"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float.floor"
+sig = "(n: Float) -> Float"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float.from_float32"
+sig = "(n: Float32) -> Float"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float.from_float64"
+sig = "(n: Float64) -> Float"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float.from_int"
+sig = "(n: Int) -> Float"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float.is_infinite"
+sig = "(n: Float) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float.is_nan"
+sig = "(n: Float) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float.max"
+sig = "(a: Float, b: Float) -> Float"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float.min"
+sig = "(a: Float, b: Float) -> Float"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float.parse"
+sig = "(s: String) -> Result[Float, String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float.round"
+sig = "(n: Float) -> Float"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float.sign"
+sig = "(n: Float) -> Float"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float.sqrt"
+sig = "(n: Float) -> Float"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float.to_bits"
+sig = "(f: Float) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float.to_fixed"
+sig = "(n: Float, decimals: Int) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float.to_float32"
+sig = "(n: Float) -> Float32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float.to_float32_checked"
+sig = "(n: Float) -> Option[Float32]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float.to_float64"
+sig = "(n: Float) -> Float64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float.to_int"
+sig = "(n: Float) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float.to_int16"
+sig = "(n: Float) -> Int16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float.to_int16_checked"
+sig = "(n: Float) -> Option[Int16]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float.to_int16_saturating"
+sig = "(n: Float) -> Int16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float.to_int32"
+sig = "(n: Float) -> Int32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float.to_int32_checked"
+sig = "(n: Float) -> Option[Int32]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float.to_int32_saturating"
+sig = "(n: Float) -> Int32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float.to_int64"
+sig = "(n: Float) -> Int64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float.to_int64_checked"
+sig = "(n: Float) -> Option[Int64]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float.to_int64_saturating"
+sig = "(n: Float) -> Int64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float.to_int8"
+sig = "(n: Float) -> Int8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float.to_int8_checked"
+sig = "(n: Float) -> Option[Int8]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float.to_int8_saturating"
+sig = "(n: Float) -> Int8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float.to_string"
+sig = "(n: Float) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float.to_uint16"
+sig = "(n: Float) -> UInt16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float.to_uint16_checked"
+sig = "(n: Float) -> Option[UInt16]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float.to_uint16_saturating"
+sig = "(n: Float) -> UInt16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float.to_uint32"
+sig = "(n: Float) -> UInt32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float.to_uint32_checked"
+sig = "(n: Float) -> Option[UInt32]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float.to_uint32_saturating"
+sig = "(n: Float) -> UInt32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float.to_uint64"
+sig = "(n: Float) -> UInt64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float.to_uint64_checked"
+sig = "(n: Float) -> Option[UInt64]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float.to_uint64_saturating"
+sig = "(n: Float) -> UInt64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float.to_uint8"
+sig = "(n: Float) -> UInt8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float.to_uint8_checked"
+sig = "(n: Float) -> Option[UInt8]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float.to_uint8_saturating"
+sig = "(n: Float) -> UInt8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float32.to_float64"
+sig = "(x: Float32) -> Float64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float32.to_int16"
+sig = "(x: Float32) -> Int16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float32.to_int32"
+sig = "(x: Float32) -> Int32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float32.to_int64"
+sig = "(x: Float32) -> Int64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float32.to_int8"
+sig = "(x: Float32) -> Int8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float32.to_string"
+sig = "(x: Float32) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float32.to_uint16"
+sig = "(x: Float32) -> UInt16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float32.to_uint32"
+sig = "(x: Float32) -> UInt32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float32.to_uint64"
+sig = "(x: Float32) -> UInt64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float32.to_uint8"
+sig = "(x: Float32) -> UInt8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float64.to_float32"
+sig = "(x: Float64) -> Float32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float64.to_int16"
+sig = "(x: Float64) -> Int16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float64.to_int32"
+sig = "(x: Float64) -> Int32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float64.to_int64"
+sig = "(x: Float64) -> Int64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float64.to_int8"
+sig = "(x: Float64) -> Int8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float64.to_string"
+sig = "(x: Float64) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float64.to_uint16"
+sig = "(x: Float64) -> UInt16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float64.to_uint32"
+sig = "(x: Float64) -> UInt32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float64.to_uint64"
+sig = "(x: Float64) -> UInt64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float64.to_uint8"
+sig = "(x: Float64) -> UInt8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "fs.append"
+sig = "effect (path: String, content: String) -> Unit ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "fs.copy"
+sig = "effect (src: String, dst: String) -> Unit ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "fs.create_temp_dir"
+sig = "effect (prefix: String) -> String ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "fs.create_temp_file"
+sig = "effect (prefix: String) -> String ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "fs.exists"
+sig = "effect (path: String) -> Bool ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "fs.file_size"
+sig = "effect (path: String) -> Int ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "fs.fold_lines"
+sig = "effect (path: String, init: A, f: (A, String) -> A) -> A ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "fs.fold_lines_chunked"
+sig = "effect (path: String, workers: Int, init: A, f: (A, String) -> A) -> List[A] ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "fs.fold_lines_range"
+sig = "effect (path: String, start: Int, end: Int, init: A, f: (A, String) -> A) -> A ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "fs.for_each_line"
+sig = "effect (path: String, f: (String) -> Unit) -> Unit ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "fs.glob"
+sig = "effect (pattern: String) -> List[String] ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "fs.is_dir"
+sig = "effect (path: String) -> Bool ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "fs.is_file"
+sig = "effect (path: String) -> Bool ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "fs.is_symlink"
+sig = "effect (path: String) -> Bool ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "fs.list_dir"
+sig = "effect (path: String) -> List[String] ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "fs.mkdir_p"
+sig = "effect (path: String) -> Unit ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "fs.modified_at"
+sig = "effect (path: String) -> Int ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "fs.read_bytes"
+sig = "effect (path: String) -> List[Int] ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "fs.read_bytes_if_exists"
+sig = "effect (path: String) -> Option[List[Int]] ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "fs.read_bytes_raw"
+sig = "effect (path: String) -> Bytes ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "fs.read_bytes_raw_if_exists"
+sig = "effect (path: String) -> Option[Bytes] ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "fs.read_lines"
+sig = "effect (path: String) -> List[String] ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "fs.read_lines_if_exists"
+sig = "effect (path: String) -> Option[List[String]] ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "fs.read_text"
+sig = "effect (path: String) -> String ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "fs.read_text_if_exists"
+sig = "effect (path: String) -> Option[String] ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "fs.remove"
+sig = "effect (path: String) -> Unit ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "fs.remove_all"
+sig = "effect (path: String) -> Unit ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "fs.rename"
+sig = "effect (src: String, dst: String) -> Unit ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "fs.stat"
+sig = "effect (path: String) -> FileStat ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "fs.temp_dir"
+sig = "effect () -> String ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "fs.walk"
+sig = "effect (dir: String) -> List[String] ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "fs.write"
+sig = "effect (path: String, content: String) -> Unit ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "fs.write_bytes"
+sig = "effect (path: String, bytes: List[Int]) -> Unit ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "fs.write_bytes_raw"
+sig = "effect (path: String, data: Bytes) -> Unit ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "hash.fnv1a32"
+sig = "(s: String) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "hash.fnv1a32_bytes"
+sig = "(b: Bytes) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "hash.sha256"
+sig = "(b: Bytes) -> Bytes"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "hash.sha256_hex"
+sig = "(s: String) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "hex.decode"
+sig = "(s: String) -> Result[Bytes, String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "hex.encode"
+sig = "(b: Bytes) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "hex.encode_upper"
+sig = "(b: Bytes) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "html.concat"
+sig = "(a: SafeHtml, b: SafeHtml) -> SafeHtml"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "html.empty"
+sig = "() -> SafeHtml"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "html.escape"
+sig = "(s: String) -> SafeHtml"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "html.raw"
+sig = "(s: String) -> SafeHtml"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "html.to_string"
+sig = "(h: SafeHtml) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "http.anthropic_streaming_call"
+sig = "effect (api_key: String, body_json: String, on_text_delta: (String) -> Unit) -> String ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "http.anthropic_streaming_call_with_limits"
+sig = "effect (api_key: String, body_json: String, limits: HttpLimits, on_text_delta: (String) -> Unit) -> String ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "http.body"
+sig = "(resp: HttpResponse) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "http.cancel"
+sig = "effect (c: HttpCall) -> Unit ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "http.decode_json"
+sig = "(req: HttpRequest, decode: (Value) -> Result[T, String]) -> Result[T, HttpResponse]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "http.delete"
+sig = "effect (url: String) -> String ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "http.delete_response"
+sig = "effect (url: String) -> HttpResponse ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "http.get"
+sig = "effect (url: String) -> String ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "http.get_bytes"
+sig = "effect (url: String) -> Bytes ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "http.get_header"
+sig = "(resp: HttpResponse, key: String) -> Option[String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "http.get_response"
+sig = "effect (url: String) -> HttpResponse ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "http.get_status"
+sig = "effect (url: String) -> (Int, String) ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "http.header_values"
+sig = "(resp: HttpResponse, key: String) -> List[String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "http.headers"
+sig = "(resp: HttpResponse) -> Map[String, String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "http.json"
+sig = "(status: Int, body: String) -> HttpResponse"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "http.mount"
+sig = "(prefix: String, sub: (HttpRequest) -> Result[HttpResponse, String]) -> HttpRoute"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "http.new_request"
+sig = "(method: String, target: String, body: String, headers: Map[String, String]) -> HttpRequest"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "http.openai_streaming_call"
+sig = "effect (base_url: String, api_key: String, body_json: String, on_text_delta: (String) -> Unit) -> String ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "http.openai_streaming_call_with_limits"
+sig = "effect (base_url: String, api_key: String, body_json: String, limits: HttpLimits, on_text_delta: (String) -> Unit) -> String ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "http.param"
+sig = "(req: HttpRequest, name: String) -> Option[String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "http.patch"
+sig = "effect (url: String, body: String) -> String ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "http.patch_response"
+sig = "effect (url: String, body: String) -> HttpResponse ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "http.poll"
+sig = "effect (c: HttpCall) -> Option[Result[HttpResponse, String]] ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "http.post"
+sig = "effect (url: String, body: String) -> String ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "http.post_response"
+sig = "effect (url: String, body: String) -> HttpResponse ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "http.put"
+sig = "effect (url: String, body: String) -> String ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "http.put_response"
+sig = "effect (url: String, body: String) -> HttpResponse ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "http.query_params"
+sig = "(req: HttpRequest) -> Map[String, String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "http.read_new"
+sig = "effect (c: HttpCall) -> String ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "http.redirect"
+sig = "(url: String) -> HttpResponse"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "http.req_body"
+sig = "(req: HttpRequest) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "http.req_header"
+sig = "(req: HttpRequest, key: String) -> Option[String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "http.req_method"
+sig = "(req: HttpRequest) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "http.req_path"
+sig = "(req: HttpRequest) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "http.request"
+sig = "effect (method: String, url: String, body: String, headers: Map[String, String]) -> String ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "http.request_bytes"
+sig = "effect (method: String, url: String, body: String, headers: Map[String, String]) -> Bytes ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "http.request_response"
+sig = "effect (method: String, url: String, body: String, headers: Map[String, String]) -> HttpResponse ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "http.request_status"
+sig = "effect (method: String, url: String, body: String, headers: Map[String, String]) -> (Int, String) ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "http.request_stream"
+sig = "effect (method: String, url: String, body: String, headers: Map[String, String], on_chunk: (String) -> Unit) -> Unit ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "http.request_stream_with_limits"
+sig = "effect (method: String, url: String, body: String, headers: Map[String, String], limits: HttpLimits, on_chunk: (String) -> Unit) -> Unit ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "http.response"
+sig = "(status: Int, body: String) -> HttpResponse"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "http.route"
+sig = "(pattern: String, handler: (HttpRequest) -> Result[HttpResponse, String]) -> HttpRoute"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "http.router"
+sig = "(routes: List[HttpRoute]) -> Result[(HttpRequest) -> Result[HttpResponse, String], String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "http.serve"
+sig = "effect (port: Int, f: (HttpRequest) -> Result[HttpResponse, String]) -> Unit ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "http.set_header"
+sig = "(resp: HttpResponse, key: String, value: String) -> HttpResponse"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "http.start"
+sig = "effect (method: String, url: String, body: String, headers: Map[String, String], limits: HttpLimits) -> HttpCall ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "http.status"
+sig = "(resp: HttpResponse, code: Int) -> HttpResponse"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "http.status_code"
+sig = "(resp: HttpResponse) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "http.url_decode"
+sig = "(s: String) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "http.wait"
+sig = "effect (c: HttpCall) -> HttpResponse ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "http.with_headers"
+sig = "(status: Int, body: String, headers: Map[String, String]) -> HttpResponse"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "http.wrap"
+sig = "(handler: (HttpRequest) -> Result[HttpResponse, String], middleware: List[((HttpRequest) -> Result[HttpResponse, String]) -> (HttpRequest) -> Result[HttpResponse, String]]) -> (HttpRequest) -> Result[HttpResponse, String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.abs"
+sig = "(n: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.band"
+sig = "(a: Int, b: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.bit_reverse"
+sig = "(n: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.bit_width"
+sig = "(n: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.bits_to_f32"
+sig = "(bits: Int) -> Float"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.bits_to_float"
+sig = "(bits: Int) -> Float"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.bnot"
+sig = "(a: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.bor"
+sig = "(a: Int, b: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.bshl"
+sig = "(a: Int, n: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.bshr"
+sig = "(a: Int, n: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.bxor"
+sig = "(a: Int, b: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.byte_swap"
+sig = "(n: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.clamp"
+sig = "(n: Int, lo: Int, hi: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.count_leading_zeros"
+sig = "(n: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.count_trailing_zeros"
+sig = "(n: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.from_hex"
+sig = "(s: String) -> Result[Int, String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.from_int16"
+sig = "(n: Int16) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.from_int32"
+sig = "(n: Int32) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.from_int64"
+sig = "(n: Int64) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.from_int8"
+sig = "(n: Int8) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.from_uint16"
+sig = "(n: UInt16) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.from_uint32"
+sig = "(n: UInt32) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.from_uint64"
+sig = "(n: UInt64) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.from_uint64_checked"
+sig = "(n: UInt64) -> Option[Int]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.from_uint64_saturating"
+sig = "(n: UInt64) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.from_uint8"
+sig = "(n: UInt8) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.is_even"
+sig = "(n: Int) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.is_odd"
+sig = "(n: Int) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.log2_ceil"
+sig = "(n: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.log2_floor"
+sig = "(n: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.max"
+sig = "(a: Int, b: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.max_value"
+sig = "() -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.min"
+sig = "(a: Int, b: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.min_value"
+sig = "() -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.next_power_of_two"
+sig = "(n: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.parse"
+sig = "(s: String) -> Result[Int, String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.pop_count"
+sig = "(n: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.prev_power_of_two"
+sig = "(n: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.rotate_left"
+sig = "(a: Int, n: Int, bits: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.rotate_right"
+sig = "(a: Int, n: Int, bits: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.to_float"
+sig = "(n: Int) -> Float"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.to_float32"
+sig = "(n: Int) -> Float32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.to_float32_checked"
+sig = "(n: Int) -> Option[Float32]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.to_float64"
+sig = "(n: Int) -> Float64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.to_hex"
+sig = "(n: Int) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.to_int16"
+sig = "(n: Int) -> Int16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.to_int16_checked"
+sig = "(n: Int) -> Option[Int16]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.to_int16_saturating"
+sig = "(n: Int) -> Int16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.to_int32"
+sig = "(n: Int) -> Int32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.to_int32_checked"
+sig = "(n: Int) -> Option[Int32]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.to_int32_saturating"
+sig = "(n: Int) -> Int32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.to_int64"
+sig = "(n: Int) -> Int64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.to_int8"
+sig = "(n: Int) -> Int8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.to_int8_checked"
+sig = "(n: Int) -> Option[Int8]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.to_int8_saturating"
+sig = "(n: Int) -> Int8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.to_string"
+sig = "(n: Int) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.to_u32"
+sig = "(a: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.to_u8"
+sig = "(a: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.to_uint16"
+sig = "(n: Int) -> UInt16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.to_uint16_checked"
+sig = "(n: Int) -> Option[UInt16]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.to_uint16_saturating"
+sig = "(n: Int) -> UInt16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.to_uint32"
+sig = "(n: Int) -> UInt32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.to_uint32_checked"
+sig = "(n: Int) -> Option[UInt32]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.to_uint32_saturating"
+sig = "(n: Int) -> UInt32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.to_uint64"
+sig = "(n: Int) -> UInt64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.to_uint64_checked"
+sig = "(n: Int) -> Option[UInt64]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.to_uint64_saturating"
+sig = "(n: Int) -> UInt64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.to_uint8"
+sig = "(n: Int) -> UInt8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.to_uint8_checked"
+sig = "(n: Int) -> Option[UInt8]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.to_uint8_saturating"
+sig = "(n: Int) -> UInt8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.wrap_add"
+sig = "(a: Int, b: Int, bits: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int.wrap_mul"
+sig = "(a: Int, b: Int, bits: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int16.max_value"
+sig = "() -> Int16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int16.min_value"
+sig = "() -> Int16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int16.to_float32"
+sig = "(x: Int16) -> Float32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int16.to_float64"
+sig = "(x: Int16) -> Float64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int16.to_int32"
+sig = "(x: Int16) -> Int32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int16.to_int64"
+sig = "(x: Int16) -> Int64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int16.to_int8"
+sig = "(x: Int16) -> Int8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int16.to_int8_checked"
+sig = "(x: Int16) -> Option[Int8]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int16.to_int8_saturating"
+sig = "(x: Int16) -> Int8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int16.to_string"
+sig = "(x: Int16) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int16.to_uint16"
+sig = "(x: Int16) -> UInt16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int16.to_uint16_checked"
+sig = "(x: Int16) -> Option[UInt16]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int16.to_uint16_saturating"
+sig = "(x: Int16) -> UInt16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int16.to_uint32"
+sig = "(x: Int16) -> UInt32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int16.to_uint32_checked"
+sig = "(x: Int16) -> Option[UInt32]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int16.to_uint32_saturating"
+sig = "(x: Int16) -> UInt32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int16.to_uint64"
+sig = "(x: Int16) -> UInt64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int16.to_uint64_checked"
+sig = "(x: Int16) -> Option[UInt64]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int16.to_uint64_saturating"
+sig = "(x: Int16) -> UInt64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int16.to_uint8"
+sig = "(x: Int16) -> UInt8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int16.to_uint8_checked"
+sig = "(x: Int16) -> Option[UInt8]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int16.to_uint8_saturating"
+sig = "(x: Int16) -> UInt8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int32.max_value"
+sig = "() -> Int32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int32.min_value"
+sig = "() -> Int32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int32.to_float32"
+sig = "(x: Int32) -> Float32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int32.to_float64"
+sig = "(x: Int32) -> Float64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int32.to_int16"
+sig = "(x: Int32) -> Int16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int32.to_int16_checked"
+sig = "(x: Int32) -> Option[Int16]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int32.to_int16_saturating"
+sig = "(x: Int32) -> Int16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int32.to_int64"
+sig = "(x: Int32) -> Int64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int32.to_int8"
+sig = "(x: Int32) -> Int8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int32.to_int8_checked"
+sig = "(x: Int32) -> Option[Int8]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int32.to_int8_saturating"
+sig = "(x: Int32) -> Int8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int32.to_string"
+sig = "(x: Int32) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int32.to_uint16"
+sig = "(x: Int32) -> UInt16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int32.to_uint16_checked"
+sig = "(x: Int32) -> Option[UInt16]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int32.to_uint16_saturating"
+sig = "(x: Int32) -> UInt16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int32.to_uint32"
+sig = "(x: Int32) -> UInt32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int32.to_uint32_checked"
+sig = "(x: Int32) -> Option[UInt32]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int32.to_uint32_saturating"
+sig = "(x: Int32) -> UInt32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int32.to_uint64"
+sig = "(x: Int32) -> UInt64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int32.to_uint64_checked"
+sig = "(x: Int32) -> Option[UInt64]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int32.to_uint64_saturating"
+sig = "(x: Int32) -> UInt64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int32.to_uint8"
+sig = "(x: Int32) -> UInt8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int32.to_uint8_checked"
+sig = "(x: Int32) -> Option[UInt8]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int32.to_uint8_saturating"
+sig = "(x: Int32) -> UInt8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.max_value"
+sig = "() -> Int64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.min_value"
+sig = "() -> Int64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.to_float32"
+sig = "(x: Int64) -> Float32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.to_float64"
+sig = "(x: Int64) -> Float64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.to_int16"
+sig = "(x: Int64) -> Int16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.to_int16_checked"
+sig = "(x: Int64) -> Option[Int16]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.to_int16_saturating"
+sig = "(x: Int64) -> Int16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.to_int32"
+sig = "(x: Int64) -> Int32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.to_int32_checked"
+sig = "(x: Int64) -> Option[Int32]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.to_int32_saturating"
+sig = "(x: Int64) -> Int32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.to_int8"
+sig = "(x: Int64) -> Int8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.to_int8_checked"
+sig = "(x: Int64) -> Option[Int8]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.to_int8_saturating"
+sig = "(x: Int64) -> Int8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.to_string"
+sig = "(x: Int64) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.to_uint16"
+sig = "(x: Int64) -> UInt16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.to_uint16_checked"
+sig = "(x: Int64) -> Option[UInt16]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.to_uint16_saturating"
+sig = "(x: Int64) -> UInt16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.to_uint32"
+sig = "(x: Int64) -> UInt32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.to_uint32_checked"
+sig = "(x: Int64) -> Option[UInt32]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.to_uint32_saturating"
+sig = "(x: Int64) -> UInt32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.to_uint64"
+sig = "(x: Int64) -> UInt64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.to_uint64_checked"
+sig = "(x: Int64) -> Option[UInt64]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.to_uint64_saturating"
+sig = "(x: Int64) -> UInt64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.to_uint8"
+sig = "(x: Int64) -> UInt8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.to_uint8_checked"
+sig = "(x: Int64) -> Option[UInt8]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.to_uint8_saturating"
+sig = "(x: Int64) -> UInt8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int8.max_value"
+sig = "() -> Int8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int8.min_value"
+sig = "() -> Int8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int8.to_float32"
+sig = "(x: Int8) -> Float32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int8.to_float64"
+sig = "(x: Int8) -> Float64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int8.to_int16"
+sig = "(x: Int8) -> Int16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int8.to_int32"
+sig = "(x: Int8) -> Int32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int8.to_int64"
+sig = "(x: Int8) -> Int64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int8.to_string"
+sig = "(x: Int8) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int8.to_uint16"
+sig = "(x: Int8) -> UInt16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int8.to_uint16_checked"
+sig = "(x: Int8) -> Option[UInt16]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int8.to_uint16_saturating"
+sig = "(x: Int8) -> UInt16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int8.to_uint32"
+sig = "(x: Int8) -> UInt32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int8.to_uint32_checked"
+sig = "(x: Int8) -> Option[UInt32]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int8.to_uint32_saturating"
+sig = "(x: Int8) -> UInt32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int8.to_uint64"
+sig = "(x: Int8) -> UInt64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int8.to_uint64_checked"
+sig = "(x: Int8) -> Option[UInt64]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int8.to_uint64_saturating"
+sig = "(x: Int8) -> UInt64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int8.to_uint8"
+sig = "(x: Int8) -> UInt8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int8.to_uint8_checked"
+sig = "(x: Int8) -> Option[UInt8]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int8.to_uint8_saturating"
+sig = "(x: Int8) -> UInt8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "io.print"
+sig = "effect (s: String) -> Unit ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "io.read_all"
+sig = "effect () -> String ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "io.read_byte"
+sig = "effect () -> Int ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "io.read_line"
+sig = "effect () -> String ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "io.read_line_opt"
+sig = "effect () -> Option[String] ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "io.read_n_bytes"
+sig = "effect (n: Int) -> List[Int] ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "io.write"
+sig = "(data: Bytes) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "io.write_bytes"
+sig = "(data: List[Int]) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "json.field"
+sig = "(path: JsonPath, name: String) -> JsonPath"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "json.get_array"
+sig = "(j: Value, key: String) -> Option[List[Value]]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "json.get_bool"
+sig = "(j: Value, key: String) -> Option[Bool]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "json.get_float"
+sig = "(j: Value, key: String) -> Option[Float]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "json.get_int"
+sig = "(j: Value, key: String) -> Option[Int]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "json.get_path"
+sig = "(j: Value, path: JsonPath) -> Option[Value]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "json.get_string"
+sig = "(j: Value, key: String) -> Option[String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "json.index"
+sig = "(path: JsonPath, i: Int) -> JsonPath"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "json.parse"
+sig = "(text: String) -> Result[Value, String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "json.remove_path"
+sig = "(j: Value, path: JsonPath) -> Value"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "json.root"
+sig = "() -> JsonPath"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "json.set_path"
+sig = "(j: Value, path: JsonPath, value: Value) -> Result[Value, String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "json.stringify"
+sig = "(v: Value) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "json.stringify_pretty"
+sig = "(j: Value) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "json.to_map"
+sig = "(j: Value) -> Option[Map[String, String]]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.all"
+sig = "(xs: List[A], f: (A) -> Bool) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.any"
+sig = "(xs: List[A], f: (A) -> Bool) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.binary_search"
+sig = "(xs: List[Int], target: Int) -> Option[Int]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.bundled_probe"
+sig = "(n: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.chunk"
+sig = "(xs: List[A], n: Int) -> List[List[A]]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.clear"
+sig = "(xs: List[A]) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.contains"
+sig = "(xs: List[A], x: A) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.count"
+sig = "(xs: List[A], f: (A) -> Bool) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.dedup"
+sig = "(xs: List[A]) -> List[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.drop"
+sig = "(xs: List[A], n: Int) -> List[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.drop_end"
+sig = "(xs: List[A], n: Int) -> List[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.drop_while"
+sig = "(xs: List[A], f: (A) -> Bool) -> List[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.enumerate"
+sig = "(xs: List[A]) -> List[(Int, A)]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.filter"
+sig = "(xs: List[A], f: (A) -> Bool) -> List[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.filter_map"
+sig = "(xs: List[A], f: (A) -> Option[B]) -> List[B]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.find"
+sig = "(xs: List[A], f: (A) -> Bool) -> Option[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.find_index"
+sig = "(xs: List[A], f: (A) -> Bool) -> Option[Int]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.find_map"
+sig = "(xs: List[A], f: (A) -> Option[B]) -> Option[B]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.first"
+sig = "(xs: List[A]) -> Option[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.flat_map"
+sig = "(xs: List[A], f: (A) -> List[B]) -> List[B]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.flatten"
+sig = "(xss: List[List[T]]) -> List[T]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.fold"
+sig = "(xs: List[A], init: B, f: (B, A) -> B) -> B"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.get"
+sig = "(xs: List[A], i: Int) -> Option[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.get_or"
+sig = "(xs: List[A], i: Int, default: A) -> A"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.group_by"
+sig = "(xs: List[A], f: (A) -> B) -> Map[B, List[A]]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.index_of"
+sig = "(xs: List[A], x: A) -> Option[Int]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.insert"
+sig = "(xs: List[A], i: Int, val: A) -> List[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.intersperse"
+sig = "(xs: List[A], sep: A) -> List[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.is_empty"
+sig = "(xs: List[A]) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.iterate"
+sig = "(seed: T, f: (T) -> T, n: Int) -> List[T]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.join"
+sig = "(xs: List[String], sep: String) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.last"
+sig = "(xs: List[A]) -> Option[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.len"
+sig = "(xs: List[A]) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.length"
+sig = "(xs: List[A]) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.map"
+sig = "(xs: List[A], f: (A) -> B) -> List[B]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.max"
+sig = "(xs: List[A]) -> Option[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.min"
+sig = "(xs: List[A]) -> Option[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.partition"
+sig = "(xs: List[A], f: (A) -> Bool) -> (List[A], List[A])"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.pop"
+sig = "(xs: List[A]) -> Option[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.product"
+sig = "(xs: List[Int]) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.push"
+sig = "(xs: List[A], x: A) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.range"
+sig = "(start: Int, end: Int) -> List[Int]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.reduce"
+sig = "(xs: List[A], f: (A, A) -> A) -> Option[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.remove_at"
+sig = "(xs: List[A], i: Int) -> List[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.repeat"
+sig = "(val: A, n: Int) -> List[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.reverse"
+sig = "(xs: List[A]) -> List[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.scan"
+sig = "(xs: List[A], init: B, f: (B, A) -> B) -> List[B]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.set"
+sig = "(xs: List[A], i: Int, val: A) -> List[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.shuffle"
+sig = "(xs: List[A]) -> List[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.slice"
+sig = "(xs: List[A], start: Int, end: Int) -> List[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.sort"
+sig = "(xs: List[A]) -> List[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.sort_by"
+sig = "(xs: List[A], f: (A) -> B) -> List[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.split_at"
+sig = "(xs: List[T], n: Int) -> (List[T], List[T])"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.sum"
+sig = "(xs: List[Int]) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.swap"
+sig = "(xs: List[A], i: Int, j: Int) -> List[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.tail"
+sig = "(xs: List[A]) -> List[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.take"
+sig = "(xs: List[A], n: Int) -> List[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.take_end"
+sig = "(xs: List[A], n: Int) -> List[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.take_while"
+sig = "(xs: List[A], f: (A) -> Bool) -> List[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.unique"
+sig = "(xs: List[A]) -> List[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.unique_by"
+sig = "(xs: List[A], f: (A) -> K) -> List[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.update"
+sig = "(xs: List[A], i: Int, f: (A) -> A) -> List[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.window"
+sig = "(xs: List[A], n: Int) -> List[List[A]]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.windows"
+sig = "(xs: List[A], n: Int) -> List[List[A]]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.with_capacity"
+sig = "(cap: Int) -> List[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.zip"
+sig = "(xs: List[A], ys: List[B]) -> List[(A, B)]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.zip_with"
+sig = "(xs: List[A], ys: List[B], f: (A, B) -> C) -> List[C]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "map.all"
+sig = "(m: Map[K, V], f: (K, V) -> Bool) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "map.any"
+sig = "(m: Map[K, V], f: (K, V) -> Bool) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "map.clear"
+sig = "(m: Map[K, V]) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "map.contains"
+sig = "(m: Map[K, V], key: K) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "map.count"
+sig = "(m: Map[K, V], f: (K, V) -> Bool) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "map.delete"
+sig = "(m: Map[K, V], key: K) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "map.entries"
+sig = "(m: Map[K, V]) -> List[(K, V)]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "map.filter"
+sig = "(m: Map[K, V], f: (K, V) -> Bool) -> Map[K, V]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "map.find"
+sig = "(m: Map[K, V], f: (K, V) -> Bool) -> Option[(K, V)]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "map.fold"
+sig = "(m: Map[K, V], init: A, f: (A, K, V) -> A) -> A"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "map.from_list"
+sig = "(pairs: List[(K, V)]) -> Map[K, V]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "map.get"
+sig = "(m: Map[K, V], key: K) -> Option[V]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "map.get_or"
+sig = "(m: Map[K, V], key: K, default: V) -> V"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "map.insert"
+sig = "(m: Map[K, V], key: K, value: V) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "map.is_empty"
+sig = "(m: Map[K, V]) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "map.keys"
+sig = "(m: Map[K, V]) -> List[K]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "map.len"
+sig = "(m: Map[K, V]) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "map.map"
+sig = "(m: Map[K, V], f: (V) -> B) -> Map[K, B]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "map.merge"
+sig = "(a: Map[K, V], b: Map[K, V]) -> Map[K, V]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "map.new"
+sig = "() -> Map[K, V]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "map.remove"
+sig = "(m: Map[K, V], key: K) -> Map[K, V]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "map.set"
+sig = "(m: Map[K, V], key: K, value: V) -> Map[K, V]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "map.update"
+sig = "(m: Map[K, V], key: K, f: (V) -> V) -> Map[K, V]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "map.upsert"
+sig = "(m: Map[K, V], key: K, init: V, f: (V) -> V) -> Map[K, V]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "map.values"
+sig = "(m: Map[K, V]) -> List[V]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "math.abs"
+sig = "(n: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "math.atan"
+sig = "(x: Float) -> Float"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "math.choose"
+sig = "(n: Int, k: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "math.cos"
+sig = "(x: Float) -> Float"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "math.e"
+sig = "() -> Float"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "math.exp"
+sig = "(x: Float) -> Float"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "math.factorial"
+sig = "(n: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "math.fmax"
+sig = "(a: Float, b: Float) -> Float"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "math.fmin"
+sig = "(a: Float, b: Float) -> Float"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "math.fpow"
+sig = "(base: Float, exp: Float) -> Float"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "math.log"
+sig = "(x: Float) -> Float"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "math.log10"
+sig = "(x: Float) -> Float"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "math.log2"
+sig = "(x: Float) -> Float"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "math.log_gamma"
+sig = "(x: Float) -> Float"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "math.max"
+sig = "(a: Int, b: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "math.min"
+sig = "(a: Int, b: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "math.pi"
+sig = "() -> Float"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "math.pow"
+sig = "(base: Int, exp: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "math.sign"
+sig = "(n: Int) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "math.sin"
+sig = "(x: Float) -> Float"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "math.sqrt"
+sig = "(x: Float) -> Float"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "math.tan"
+sig = "(x: Float) -> Float"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "math.tanh"
+sig = "(x: Float) -> Float"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.add"
+sig = "(a: Matrix, b: Matrix) -> Matrix"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.append_rows"
+sig = "(base: Matrix, extra: Matrix) -> Matrix"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.attention_weights"
+sig = "(q: Matrix, kt: Matrix, scale: Float) -> Matrix"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.broadcast_add_row"
+sig = "(m: Matrix, bias: List[Float]) -> Matrix"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.causal_mask_add"
+sig = "(m: Matrix, mask_val: Float) -> Matrix"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.cols"
+sig = "(m: Matrix) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.concat_cols"
+sig = "(matrices: List[Matrix]) -> Matrix"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.concat_cols_many"
+sig = "(matrices: List[Matrix]) -> Matrix"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.conv1d"
+sig = "(input: Matrix, weight: Matrix, bias: List[Float], kernel: Int, stride: Int, padding: Int) -> Matrix"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.div"
+sig = "(a: Matrix, b: Matrix) -> Matrix"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.dot_row"
+sig = "(m: Matrix, r: Int, vec: List[Float]) -> Float"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.fma"
+sig = "(a: Matrix, ka: Float, b: Matrix, kb: Float) -> Matrix"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.fma3"
+sig = "(a: Matrix, ka: Float, b: Matrix, kb: Float, c: Matrix, kc: Float) -> Matrix"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.from_bytes_f16_le"
+sig = "(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.from_bytes_f32_le"
+sig = "(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.from_bytes_f64_le"
+sig = "(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.from_lists"
+sig = "(rows: List[List[Float]]) -> Matrix"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.from_q1_0_bytes"
+sig = "(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.fused_gemm_bias_scale_gelu"
+sig = "(a: Matrix, b: Matrix, bias: Matrix, alpha: Float) -> Matrix"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.gather_rows"
+sig = "(m: Matrix, indices: List[Int]) -> Matrix"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.gelu"
+sig = "(m: Matrix) -> Matrix"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.get"
+sig = "(m: Matrix, row: Int, col: Int) -> Float"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.layer_norm_rows"
+sig = "(m: Matrix, gamma: List[Float], beta: List[Float], eps: Float) -> Matrix"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.linear_f32_row_no_bias"
+sig = "(x: Matrix, w_bytes: Bytes, w_offset: Int, w_rows: Int, w_cols: Int) -> Matrix"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.linear_q1_0_row_no_bias"
+sig = "(x: Matrix, w_bytes: Bytes, w_offset: Int, w_rows: Int, w_cols: Int) -> Matrix"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.linear_q8_0_row_no_bias"
+sig = "(x: Matrix, w_bytes: Bytes, w_offset: Int, w_rows: Int, w_cols: Int) -> Matrix"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.linear_row"
+sig = "(x: Matrix, weight: Matrix, bias: List[Float]) -> Matrix"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.linear_row_gelu"
+sig = "(x: Matrix, weight: Matrix, bias: List[Float]) -> Matrix"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.linear_row_no_bias"
+sig = "(x: Matrix, weight: Matrix) -> Matrix"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.map"
+sig = "(m: Matrix, f: (Float) -> Float) -> Matrix"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.masked_multi_head_attention"
+sig = "(q: Matrix, k: Matrix, v: Matrix, n_heads: Int) -> Matrix"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.mul"
+sig = "(a: Matrix, b: Matrix) -> Matrix"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.mul_f32"
+sig = "(a: Matrix[Float32], b: Matrix[Float32]) -> Matrix[Float32]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.mul_f32_scaled"
+sig = "(a: Matrix[Float32], alpha: Float, b: Matrix[Float32]) -> Matrix[Float32]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.mul_f32_t"
+sig = "(a: Matrix[Float32], b: Matrix[Float32]) -> Matrix[Float32]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.mul_f32_t_scaled"
+sig = "(a: Matrix[Float32], alpha: Float, b: Matrix[Float32]) -> Matrix[Float32]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.mul_scaled"
+sig = "(a: Matrix, alpha: Float, b: Matrix) -> Matrix"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.multi_head_attention"
+sig = "(q: Matrix, k: Matrix, v: Matrix, n_heads: Int) -> Matrix"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.neg"
+sig = "(m: Matrix) -> Matrix"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.ones"
+sig = "(rows: Int, cols: Int) -> Matrix"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.ones_f32"
+sig = "(rows: Int, cols: Int) -> Matrix[Float32]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.pow"
+sig = "(m: Matrix, exp: Float) -> Matrix"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.pre_norm_linear"
+sig = "(x: Matrix, gamma: List[Float], beta: List[Float], eps: Float, weight: Matrix, bias: List[Float]) -> Matrix"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.qwen3_block_f32_kv"
+sig = "(h: Matrix, k_cache: Matrix, v_cache: Matrix, w: Bytes, gamma_offs: List[Int], weight_offs: List[Int], start_pos: Int, n_q_heads: Int, n_kv_heads: Int, head_dim: Int, ffn_hidden: Int, rope_theta: Float, eps: Float) -> (Matrix, Matrix, Matrix)"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.qwen3_block_q1_0_kv"
+sig = "(h: Matrix, k_cache: Matrix, v_cache: Matrix, w: Bytes, gamma_offs: List[Int], weight_offs: List[Int], start_pos: Int, n_q_heads: Int, n_kv_heads: Int, head_dim: Int, ffn_hidden: Int, rope_theta: Float, eps: Float) -> (Matrix, Matrix, Matrix)"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.qwen3_block_q8_0_kv"
+sig = "(h: Matrix, k_cache: Matrix, v_cache: Matrix, w: Bytes, gamma_offs: List[Int], weight_offs: List[Int], start_pos: Int, n_q_heads: Int, n_kv_heads: Int, head_dim: Int, ffn_hidden: Int, rope_theta: Float, eps: Float) -> (Matrix, Matrix, Matrix)"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.rms_norm_rows"
+sig = "(m: Matrix, gamma: List[Float], eps: Float) -> Matrix"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.rope_rotate"
+sig = "(x: Matrix, n_heads: Int, head_dim: Int, theta_base: Float) -> Matrix"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.rope_rotate_at"
+sig = "(x: Matrix, n_heads: Int, head_dim: Int, theta_base: Float, start_pos: Int) -> Matrix"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.rope_rotate_neox_at"
+sig = "(x: Matrix, n_heads: Int, head_dim: Int, theta_base: Float, start_pos: Int) -> Matrix"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.row_dot"
+sig = "(m: Matrix, r: Int, vec: List[Float]) -> Float"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.rows"
+sig = "(m: Matrix) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.scale"
+sig = "(m: Matrix, s: Float) -> Matrix"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.scaled_dot_product_attention"
+sig = "(q: Matrix, kt: Matrix, v: Matrix, scale: Float) -> Matrix"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.select_rows"
+sig = "(m: Matrix, row_ids: List[Int]) -> Matrix"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.select_rows_f32"
+sig = "(data: Bytes, offset: Int, cols: Int, row_ids: List[Int]) -> Matrix"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.select_rows_q1_0"
+sig = "(data: Bytes, offset: Int, cols: Int, row_ids: List[Int]) -> Matrix"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.select_rows_q8_0_dq"
+sig = "(data: Bytes, offset: Int, cols: Int, row_ids: List[Int]) -> Matrix"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.shape"
+sig = "(m: Matrix) -> (Int, Int)"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.silu_mul"
+sig = "(a: Matrix, b: Matrix) -> Matrix"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.slice_rows"
+sig = "(m: Matrix, start: Int, end: Int) -> Matrix"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.softmax_rows"
+sig = "(m: Matrix) -> Matrix"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.split_cols_even"
+sig = "(m: Matrix, n: Int) -> List[Matrix]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.sub"
+sig = "(a: Matrix, b: Matrix) -> Matrix"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.swiglu_gate"
+sig = "(x: Matrix, w_gate: Matrix, w_up: Matrix) -> Matrix"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.to_bytes_f32_le"
+sig = "(m: Matrix) -> Bytes"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.to_bytes_f64_le"
+sig = "(m: Matrix) -> Bytes"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.to_lists"
+sig = "(m: Matrix) -> List[List[Float]]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.transpose"
+sig = "(m: Matrix) -> Matrix"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.zeros"
+sig = "(rows: Int, cols: Int) -> Matrix"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "matrix.zeros_f32"
+sig = "(rows: Int, cols: Int) -> Matrix[Float32]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "mem.restore"
+sig = "(mark: Int) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "mem.save"
+sig = "() -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "net.shm_create"
+sig = "effect (size: Int) -> Int ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "net.shm_read"
+sig = "effect (fd: Int, offset: Int, len: Int) -> Bytes ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "net.shm_resize"
+sig = "effect (fd: Int, size: Int) -> Unit ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "net.shm_write"
+sig = "effect (fd: Int, offset: Int, data: Bytes) -> Unit ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "net.tcp_accept"
+sig = "effect (listener: Int) -> Int ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "net.tcp_available"
+sig = "effect (stream: Int) -> Int ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "net.tcp_close"
+sig = "effect (stream: Int) -> Unit ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "net.tcp_close_listener"
+sig = "effect (listener: Int) -> Unit ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "net.tcp_connect"
+sig = "effect (host: String, port: Int) -> Int ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "net.tcp_is_open"
+sig = "(stream: Int) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "net.tcp_listen"
+sig = "effect (host: String, port: Int) -> Int ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "net.tcp_read"
+sig = "effect (stream: Int, len: Int) -> Bytes ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "net.tcp_read_exact"
+sig = "effect (stream: Int, len: Int) -> Bytes ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "net.tcp_read_timeout"
+sig = "effect (stream: Int, len: Int, timeout_ms: Int) -> Bytes ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "net.tcp_set_timeout"
+sig = "effect (stream: Int, timeout_ms: Int) -> Unit ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "net.tcp_write"
+sig = "effect (stream: Int, data: Bytes) -> Unit ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "net.unix_accept"
+sig = "effect (listener: Int) -> Int ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "net.unix_close"
+sig = "effect (fd: Int) -> Unit ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "net.unix_connect"
+sig = "effect (path: String) -> Int ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "net.unix_listen"
+sig = "effect (path: String) -> Int ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "net.unix_poll"
+sig = "effect (fd: Int, timeout_ms: Int) -> Bool ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "net.unix_recv"
+sig = "effect (sock: Int, max: Int) -> Bytes ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "net.unix_send"
+sig = "effect (sock: Int, data: Bytes, fds: List[Int]) -> Unit ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "net.unix_take_fds"
+sig = "effect (sock: Int) -> List[Int] ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "net.unix_wait"
+sig = "effect (fds: List[Int], timeout_ms: Int) -> List[Int] ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "option.collect"
+sig = "(xs: List[Option[T]]) -> Option[List[T]]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "option.collect_map"
+sig = "(xs: List[T], f: (T) -> Option[U]) -> Option[List[U]]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "option.filter"
+sig = "(o: Option[A], f: (A) -> Bool) -> Option[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "option.flat_map"
+sig = "(o: Option[A], f: (A) -> Option[B]) -> Option[B]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "option.flatten"
+sig = "(o: Option[Option[A]]) -> Option[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "option.is_none"
+sig = "(o: Option[A]) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "option.is_some"
+sig = "(o: Option[A]) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "option.map"
+sig = "(o: Option[A], f: (A) -> B) -> Option[B]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "option.or_else"
+sig = "(o: Option[A], f: () -> Option[A]) -> Option[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "option.to_list"
+sig = "(o: Option[A]) -> List[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "option.to_result"
+sig = "(o: Option[A], e: E) -> Result[A, E]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "option.unwrap_or"
+sig = "(o: Option[A], default: A) -> A"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "option.unwrap_or_else"
+sig = "(o: Option[A], f: () -> A) -> A"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "option.zip"
+sig = "(a: Option[A], b: Option[B]) -> Option[(A, B)]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "path.basename"
+sig = "(p: String) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "path.dirname"
+sig = "(p: String) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "path.extension"
+sig = "(p: String) -> Option[String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "path.from_string"
+sig = "(s: String) -> Result[SafePath, String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "path.is_absolute"
+sig = "(p: String) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "path.join"
+sig = "(base: String, child: String) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "path.normalize"
+sig = "(p: String) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "path.stem"
+sig = "(p: String) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "path.to_string"
+sig = "(p: SafePath) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "path.trusted"
+sig = "(s: String) -> SafePath"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "process.args"
+sig = "effect () -> List[String] ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "process.env"
+sig = "(key: String) -> Option[String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "process.exec"
+sig = "effect (cmd: String, args: List[String]) -> String ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "process.exec_attached"
+sig = "effect (cmd: String, args: List[String]) -> Int ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "process.exec_in"
+sig = "effect (dir: String, cmd: String, args: List[String]) -> String ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "process.exec_status"
+sig = "effect (cmd: String, args: List[String]) -> ProcessStatus ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "process.exec_status_timeout"
+sig = "effect (cmd: String, args: List[String], timeout_ms: Int) -> ProcessStatus ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "process.exec_with_stdin"
+sig = "effect (cmd: String, args: List[String], input: String) -> String ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "process.exit"
+sig = "effect (code: Int) -> Never ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "process.is_alive"
+sig = "(pid: Int) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "process.kill"
+sig = "effect (pid: Int, signal: Int) -> Unit ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "process.pid"
+sig = "() -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "process.run"
+sig = "effect (cmd: String, args: List[String]) -> Int ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "process.run_in"
+sig = "effect (dir: String, cmd: String, args: List[String]) -> Int ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "process.sleep"
+sig = "(ms: Int) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "process.spawn"
+sig = "effect (cmd: String, args: List[String]) -> Int ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "process.stdin_lines"
+sig = "effect () -> List[String] ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "random.choice"
+sig = "effect (xs: List[T]) -> Option[T] ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "random.float"
+sig = "effect () -> Float ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "random.int"
+sig = "effect (min: Int, max: Int) -> Int ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "random.shuffle"
+sig = "effect (xs: List[T]) -> List[T] ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "regex.captures"
+sig = "(pat: String, s: String) -> Option[List[String]]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "regex.find"
+sig = "(pat: String, s: String) -> Option[String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "regex.find_all"
+sig = "(pat: String, s: String) -> List[String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "regex.full_match"
+sig = "(pat: String, s: String) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "regex.is_match"
+sig = "(pat: String, s: String) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "regex.replace"
+sig = "(pat: String, s: String, rep: String) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "regex.replace_first"
+sig = "(pat: String, s: String, rep: String) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "regex.split"
+sig = "(pat: String, s: String) -> List[String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "result.filter"
+sig = "(r: Result[A, E], pred: (A) -> Bool, err_val: E) -> Result[A, E]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "result.flat_map"
+sig = "(r: Result[A, E], f: (A) -> Result[B, E]) -> Result[B, E]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "result.flatten"
+sig = "(r: Result[Result[A, E], E]) -> Result[A, E]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "result.is_err"
+sig = "(r: Result[A, E]) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "result.is_ok"
+sig = "(r: Result[A, E]) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "result.map"
+sig = "(r: Result[A, E], f: (A) -> B) -> Result[B, E]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "result.map_err"
+sig = "(r: Result[A, E], f: (E) -> F) -> Result[A, F]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "result.or_else"
+sig = "(r: Result[A, E], f: (E) -> Result[A, F]) -> Result[A, F]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "result.partition"
+sig = "(rs: List[Result[T, E]]) -> (List[T], List[E])"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "result.to_err_option"
+sig = "(r: Result[A, E]) -> Option[E]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "result.to_list"
+sig = "(r: Result[A, E]) -> List[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "result.to_option"
+sig = "(r: Result[A, E]) -> Option[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "result.unwrap_or"
+sig = "(r: Result[A, E], default: A) -> A"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "result.unwrap_or_else"
+sig = "(r: Result[A, E], f: (E) -> A) -> A"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "result.zip"
+sig = "(a: Result[A, E], b: Result[B, E]) -> Result[(A, B), E]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "set.all"
+sig = "(s: Set[A], f: (A) -> Bool) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "set.any"
+sig = "(s: Set[A], f: (A) -> Bool) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "set.contains"
+sig = "(s: Set[A], value: A) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "set.difference"
+sig = "(a: Set[A], b: Set[A]) -> Set[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "set.filter"
+sig = "(s: Set[A], f: (A) -> Bool) -> Set[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "set.fold"
+sig = "(s: Set[A], init: B, f: (B, A) -> B) -> B"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "set.from_list"
+sig = "(xs: List[A]) -> Set[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "set.insert"
+sig = "(s: Set[A], value: A) -> Set[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "set.intersection"
+sig = "(a: Set[A], b: Set[A]) -> Set[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "set.is_disjoint"
+sig = "(a: Set[A], b: Set[A]) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "set.is_empty"
+sig = "(s: Set[A]) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "set.is_subset"
+sig = "(a: Set[A], b: Set[A]) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "set.len"
+sig = "(s: Set[A]) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "set.map"
+sig = "(s: Set[A], f: (A) -> B) -> Set[B]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "set.new"
+sig = "() -> Set[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "set.remove"
+sig = "(s: Set[A], value: A) -> Set[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "set.symmetric_difference"
+sig = "(a: Set[A], b: Set[A]) -> Set[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "set.to_list"
+sig = "(s: Set[A]) -> List[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "set.union"
+sig = "(a: Set[A], b: Set[A]) -> Set[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.byte_slice"
+sig = "(s: String, start: Int, end: Int) -> Option[String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.capitalize"
+sig = "(s: String) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.chars"
+sig = "(s: String) -> List[String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.clear"
+sig = "(s: String) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.codepoint"
+sig = "(s: String) -> Option[Int]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.contains"
+sig = "(s: String, sub: String) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.count"
+sig = "(s: String, sub: String) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.drop"
+sig = "(s: String, n: Int) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.drop_end"
+sig = "(s: String, n: Int) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.ends_with"
+sig = "(s: String, suffix: String) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.first"
+sig = "(s: String) -> Option[String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.from_bytes"
+sig = "(bytes: List[Int]) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.from_codepoint"
+sig = "(n: Int) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.get"
+sig = "(s: String, i: Int) -> Option[String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.index_of"
+sig = "(s: String, needle: String) -> Option[Int]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.is_alpha"
+sig = "(s: String) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.is_alphanumeric"
+sig = "(s: String) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.is_digit"
+sig = "(s: String) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.is_empty"
+sig = "(s: String) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.is_lower"
+sig = "(s: String) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.is_upper"
+sig = "(s: String) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.is_whitespace"
+sig = "(s: String) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.join"
+sig = "(list: List[String], sep: String) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.last"
+sig = "(s: String) -> Option[String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.last_index_of"
+sig = "(s: String, needle: String) -> Option[Int]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.len"
+sig = "(s: String) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.length"
+sig = "(s: String) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.lines"
+sig = "(s: String) -> List[String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.pad_end"
+sig = "(s: String, n: Int, ch: String) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.pad_start"
+sig = "(s: String, n: Int, ch: String) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.push"
+sig = "(s: String, suffix: String) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.repeat"
+sig = "(s: String, n: Int) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.replace"
+sig = "(s: String, from: String, to: String) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.replace_first"
+sig = "(s: String, from: String, to: String) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.reverse"
+sig = "(s: String) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.run_length_encode"
+sig = "(s: String) -> List[(String, Int)]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.slice"
+sig = "(s: String, start: Int, end: Int) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.split"
+sig = "(s: String, sep: String) -> List[String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.split_once"
+sig = "(s: String, sep: String) -> Option[(String, String)]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.starts_with"
+sig = "(s: String, prefix: String) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.strip_prefix"
+sig = "(s: String, prefix: String) -> Option[String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.strip_suffix"
+sig = "(s: String, suffix: String) -> Option[String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.take"
+sig = "(s: String, n: Int) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.take_end"
+sig = "(s: String, n: Int) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.to_bytes"
+sig = "(s: String) -> List[Int]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.to_lower"
+sig = "(s: String) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.to_upper"
+sig = "(s: String) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.trim"
+sig = "(s: String) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.trim_end"
+sig = "(s: String) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.trim_start"
+sig = "(s: String) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "testing.assert_approx"
+sig = "(a: Float, b: Float, tolerance: Float) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "testing.assert_contains"
+sig = "(haystack: String, needle: String) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "testing.assert_err"
+sig = "(result: Result[A, B]) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "testing.assert_gt"
+sig = "(a: Int, b: Int) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "testing.assert_lt"
+sig = "(a: Int, b: Int) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "testing.assert_none"
+sig = "(opt: Option[A]) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "testing.assert_ok"
+sig = "(result: Result[A, B]) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "testing.assert_snapshot"
+sig = "(actual: String, expected: String) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "testing.assert_some"
+sig = "(opt: Option[A]) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "testing.assert_throws"
+sig = "(f: () -> Unit, expected: String) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint16.max_value"
+sig = "() -> UInt16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint16.min_value"
+sig = "() -> UInt16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint16.to_float32"
+sig = "(x: UInt16) -> Float32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint16.to_float64"
+sig = "(x: UInt16) -> Float64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint16.to_int16"
+sig = "(x: UInt16) -> Int16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint16.to_int16_checked"
+sig = "(x: UInt16) -> Option[Int16]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint16.to_int16_saturating"
+sig = "(x: UInt16) -> Int16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint16.to_int32"
+sig = "(x: UInt16) -> Int32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint16.to_int64"
+sig = "(x: UInt16) -> Int64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint16.to_int8"
+sig = "(x: UInt16) -> Int8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint16.to_int8_checked"
+sig = "(x: UInt16) -> Option[Int8]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint16.to_int8_saturating"
+sig = "(x: UInt16) -> Int8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint16.to_string"
+sig = "(x: UInt16) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint16.to_uint32"
+sig = "(x: UInt16) -> UInt32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint16.to_uint64"
+sig = "(x: UInt16) -> UInt64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint16.to_uint8"
+sig = "(x: UInt16) -> UInt8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint16.to_uint8_checked"
+sig = "(x: UInt16) -> Option[UInt8]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint16.to_uint8_saturating"
+sig = "(x: UInt16) -> UInt8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint32.max_value"
+sig = "() -> UInt32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint32.min_value"
+sig = "() -> UInt32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint32.to_float32"
+sig = "(x: UInt32) -> Float32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint32.to_float64"
+sig = "(x: UInt32) -> Float64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint32.to_int16"
+sig = "(x: UInt32) -> Int16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint32.to_int16_checked"
+sig = "(x: UInt32) -> Option[Int16]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint32.to_int16_saturating"
+sig = "(x: UInt32) -> Int16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint32.to_int32"
+sig = "(x: UInt32) -> Int32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint32.to_int32_checked"
+sig = "(x: UInt32) -> Option[Int32]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint32.to_int32_saturating"
+sig = "(x: UInt32) -> Int32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint32.to_int64"
+sig = "(x: UInt32) -> Int64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint32.to_int8"
+sig = "(x: UInt32) -> Int8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint32.to_int8_checked"
+sig = "(x: UInt32) -> Option[Int8]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint32.to_int8_saturating"
+sig = "(x: UInt32) -> Int8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint32.to_string"
+sig = "(x: UInt32) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint32.to_uint16"
+sig = "(x: UInt32) -> UInt16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint32.to_uint16_checked"
+sig = "(x: UInt32) -> Option[UInt16]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint32.to_uint16_saturating"
+sig = "(x: UInt32) -> UInt16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint32.to_uint64"
+sig = "(x: UInt32) -> UInt64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint32.to_uint8"
+sig = "(x: UInt32) -> UInt8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint32.to_uint8_checked"
+sig = "(x: UInt32) -> Option[UInt8]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint32.to_uint8_saturating"
+sig = "(x: UInt32) -> UInt8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint64.max_value"
+sig = "() -> UInt64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint64.min_value"
+sig = "() -> UInt64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint64.to_float32"
+sig = "(x: UInt64) -> Float32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint64.to_float64"
+sig = "(x: UInt64) -> Float64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint64.to_int16"
+sig = "(x: UInt64) -> Int16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint64.to_int16_checked"
+sig = "(x: UInt64) -> Option[Int16]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint64.to_int16_saturating"
+sig = "(x: UInt64) -> Int16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint64.to_int32"
+sig = "(x: UInt64) -> Int32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint64.to_int32_checked"
+sig = "(x: UInt64) -> Option[Int32]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint64.to_int32_saturating"
+sig = "(x: UInt64) -> Int32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint64.to_int64"
+sig = "(x: UInt64) -> Int64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint64.to_int64_checked"
+sig = "(x: UInt64) -> Option[Int64]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint64.to_int64_saturating"
+sig = "(x: UInt64) -> Int64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint64.to_int8"
+sig = "(x: UInt64) -> Int8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint64.to_int8_checked"
+sig = "(x: UInt64) -> Option[Int8]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint64.to_int8_saturating"
+sig = "(x: UInt64) -> Int8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint64.to_string"
+sig = "(x: UInt64) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint64.to_uint16"
+sig = "(x: UInt64) -> UInt16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint64.to_uint16_checked"
+sig = "(x: UInt64) -> Option[UInt16]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint64.to_uint16_saturating"
+sig = "(x: UInt64) -> UInt16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint64.to_uint32"
+sig = "(x: UInt64) -> UInt32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint64.to_uint32_checked"
+sig = "(x: UInt64) -> Option[UInt32]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint64.to_uint32_saturating"
+sig = "(x: UInt64) -> UInt32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint64.to_uint8"
+sig = "(x: UInt64) -> UInt8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint64.to_uint8_checked"
+sig = "(x: UInt64) -> Option[UInt8]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint64.to_uint8_saturating"
+sig = "(x: UInt64) -> UInt8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint8.max_value"
+sig = "() -> UInt8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint8.min_value"
+sig = "() -> UInt8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint8.to_float32"
+sig = "(x: UInt8) -> Float32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint8.to_float64"
+sig = "(x: UInt8) -> Float64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint8.to_int16"
+sig = "(x: UInt8) -> Int16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint8.to_int32"
+sig = "(x: UInt8) -> Int32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint8.to_int64"
+sig = "(x: UInt8) -> Int64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint8.to_int8"
+sig = "(x: UInt8) -> Int8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint8.to_int8_checked"
+sig = "(x: UInt8) -> Option[Int8]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint8.to_int8_saturating"
+sig = "(x: UInt8) -> Int8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint8.to_string"
+sig = "(x: UInt8) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint8.to_uint16"
+sig = "(x: UInt8) -> UInt16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint8.to_uint32"
+sig = "(x: UInt8) -> UInt32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint8.to_uint64"
+sig = "(x: UInt8) -> UInt64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "url.build_query"
+sig = "(pairs: List[(String, String)]) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "url.decode_component"
+sig = "(s: String) -> Result[String, String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "url.encode_component"
+sig = "(s: String) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "url.parse"
+sig = "(s: String) -> Result[Url, String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "url.query_pairs"
+sig = "(query: String) -> List[(String, String)]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "url.to_string"
+sig = "(u: Url) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "value.array"
+sig = "(items: List[Value]) -> Value"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "value.as_array"
+sig = "(v: Value) -> Result[List[Value], String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "value.as_bool"
+sig = "(v: Value) -> Result[Bool, String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "value.as_float"
+sig = "(v: Value) -> Result[Float, String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "value.as_int"
+sig = "(v: Value) -> Result[Int, String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "value.as_string"
+sig = "(v: Value) -> Result[String, String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "value.bool"
+sig = "(b: Bool) -> Value"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "value.field"
+sig = "(v: Value, key: String) -> Result[Value, String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "value.float"
+sig = "(f: Float) -> Value"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "value.int"
+sig = "(n: Int) -> Value"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "value.keys"
+sig = "(v: Value) -> List[String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "value.merge"
+sig = "(a: Value, b: Value) -> Value"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "value.null"
+sig = "() -> Value"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "value.object"
+sig = "(pairs: List[(String, Value)]) -> Value"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "value.omit"
+sig = "(v: Value, keys: List[String]) -> Value"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "value.pick"
+sig = "(v: Value, keys: List[String]) -> Value"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "value.str"
+sig = "(s: String) -> Value"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "value.stringify"
+sig = "(v: Value) -> String"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "value.to_camel_case"
+sig = "(v: Value) -> Value"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "value.to_snake_case"
+sig = "(v: Value) -> Value"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "zlib.adler32"
+sig = "(data: Bytes) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "zlib.compress"
+sig = "effect (data: Bytes) -> Bytes ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "zlib.compress_level"
+sig = "effect (data: Bytes, level: Int) -> Bytes ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "zlib.crc32"
+sig = "(data: Bytes) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "zlib.decompress"
+sig = "effect (data: Bytes) -> Bytes ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "zlib.deflate"
+sig = "effect (data: Bytes) -> Bytes ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "zlib.deflate_level"
+sig = "effect (data: Bytes, level: Int) -> Bytes ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "zlib.gunzip"
+sig = "effect (data: Bytes) -> Bytes ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "zlib.gzip"
+sig = "effect (data: Bytes) -> Bytes ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "zlib.inflate"
+sig = "effect (data: Bytes) -> Bytes ! String"
+class = "effect"
+status = "uninspected"
