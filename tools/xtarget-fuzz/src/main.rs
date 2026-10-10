@@ -216,7 +216,19 @@ fn cmd_run(args: &[String]) {
         _ => {}
     }
 
-    let engine = Arc::new(Engine::with_family(&repo, family));
+    let focus = flag_value(args, "--focus").map(String::from);
+    let engine = Engine::with_family(&repo, family);
+    let engine = match &focus {
+        Some(f) => engine.focus(f).unwrap_or_else(|e| {
+            eprintln!("{e}");
+            std::process::exit(2);
+        }),
+        None => engine,
+    };
+    if let Some(f) = &focus {
+        eprintln!("  focus    = {f} (weight x{})", generator::FOCUS_BOOST);
+    }
+    let engine = Arc::new(engine);
     eprintln!(
         "  catalogue= {} stdlib signatures, {} corpus programs\n",
         engine.catalogue_len(),
@@ -260,6 +272,7 @@ fn cmd_run(args: &[String]) {
             deadline,
             max_count,
             dump_walls: dump_walls.clone(),
+            focus: focus.clone(),
         };
         handles.push(std::thread::spawn(move || {
             worker_loop(engine, sink, tc, work_dir, next_index, stop, stats, cfg);
@@ -300,6 +313,8 @@ struct WorkerCfg {
     max_count: Option<u64>,
     /// `--dump-walls`: where walled programs' sources land, if anywhere.
     dump_walls: Option<PathBuf>,
+    /// `--focus module.fn`: count the programs that call it.
+    focus: Option<String>,
 }
 
 /// One worker: pull program indices, generate, run the ladder, minimize
@@ -363,6 +378,10 @@ fn worker_loop(
         };
 
         stats.generated.fetch_add(1, Ordering::Relaxed);
+        let calls_focus = cfg.focus.as_ref().is_some_and(|f| ladder_source.contains(&format!("{f}(")));
+        if calls_focus {
+            stats.focus_hits.fetch_add(1, Ordering::Relaxed);
+        }
         if gen.expected_stdout.is_some() {
             stats.self_checked.fetch_add(1, Ordering::Relaxed);
         }
@@ -395,6 +414,9 @@ fn worker_loop(
         match outcome {
             Outcome::Clean { native } => {
                 stats.clean.fetch_add(1, Ordering::Relaxed);
+                if calls_focus {
+                    stats.focus_clean.fetch_add(1, Ordering::Relaxed);
+                }
                 // Metamorphic rung (#515): binding-shape variants of clean
                 // SYNTHESIZED programs must be accepted and byte-identical.
                 if matches!(gen.origin, crate::generator::Origin::Synthesis) {
@@ -783,6 +805,10 @@ struct Stats {
     /// only differentially. This is the campaign's honest answer to "how
     /// much of tonight could have caught a bug both backends share".
     self_checked: AtomicU64,
+    /// `--focus`: generated programs that call the focus function, and the
+    /// ones among them every leg agreed on (the Clean outcome).
+    focus_hits: AtomicU64,
+    focus_clean: AtomicU64,
 }
 
 fn report_progress(
@@ -860,6 +886,13 @@ fn print_summary(stats: &Stats, sink: &FindingSink, elapsed: Duration, out_dir: 
         eprintln!("  unique findings  = {}", sink.count());
     }
     eprintln!("  throughput       = {:.1} programs/min", g as f64 / secs * 60.0);
+    let hits = stats.focus_hits.load(Ordering::Relaxed);
+    if hits > 0 {
+        eprintln!(
+            "  focus            = {hits} program(s) call it, {} of them clean on every leg",
+            stats.focus_clean.load(Ordering::Relaxed)
+        );
+    }
     if walls > 0 {
         let reasons = stats.wall_reasons.lock().unwrap();
         let mut top: Vec<(&String, &u64)> = reasons.iter().collect();

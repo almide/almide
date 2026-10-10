@@ -204,11 +204,16 @@ pub enum Origin {
     Shape { files: usize },
 }
 
+/// The weight multiplier `--focus` applies to its function.
+pub const FOCUS_BOOST: u32 = 100;
+
 /// Everything the generator needs that is constant across the campaign.
 pub struct Engine {
     catalogue: Vec<Signature>,
     corpus: Vec<mutate::CorpusEntry>,
     family: Family,
+    /// `--focus`: the catalogue index every synthesized program calls first.
+    focus: Option<usize>,
 }
 
 impl Engine {
@@ -224,11 +229,27 @@ impl Engine {
             catalogue: build_catalogue(),
             corpus: mutate::load_corpus(corpus_root),
             family,
+            focus: None,
         }
     }
 
     pub fn family(&self) -> Family {
         self.family
+    }
+
+    /// Centre the campaign on one stdlib function (`module.fn`, the stdlib
+    /// inspection ledger's criterion 4): its selection weight is multiplied
+    /// by [`FOCUS_BOOST`], so most synthesized and composed programs call it
+    /// beside the functions they draw around it. `Err` names a function the
+    /// catalogue does not hold — a focus run must not silently fuzz nothing.
+    pub fn focus(mut self, focus: &str) -> Result<Self, String> {
+        for (i, sig) in self.catalogue.iter_mut().enumerate() {
+            if format!("{}.{}", sig.module, sig.func) == focus {
+                sig.weight = sig.weight.saturating_mul(FOCUS_BOOST);
+                self.focus.get_or_insert(i);
+            }
+        }
+        if self.focus.is_some() { Ok(self) } else { Err(format!("--focus {focus}: not in the generator's catalogue")) }
     }
 
     /// Number of catalogued stdlib signatures (diagnostics).
@@ -257,7 +278,7 @@ impl Engine {
             Family::Shape => return Self::shape(&mut shape_rng, seed, index),
             Family::Synthesis => {
                 let mut rng = SplitMix64::for_program(seed, index);
-                return program::synthesize(&mut rng, &self.catalogue);
+                return program::synthesize_focused(&mut rng, &self.catalogue, self.focus);
             }
             Family::All => {
                 if alt.pick_weighted(&[SYNTHESIS_WEIGHT + MUTATION_WEIGHT, IDENTITY_WEIGHT]) == 1 {
@@ -291,7 +312,7 @@ impl Engine {
             // Fall through to synthesis on mutation failure.
         }
 
-        program::synthesize(&mut rng, &self.catalogue)
+        program::synthesize_focused(&mut rng, &self.catalogue, self.focus)
     }
 
     /// One program of the self-checking identity family, carrying both its
