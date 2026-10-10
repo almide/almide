@@ -32,6 +32,14 @@ pub struct Target {
 
 const SIZE_LIKE_INT: &[&str] = &["n", "count", "times", "len", "size", "end", "width"];
 
+/// Element-typed parameters a search compares against: given a value no
+/// sized input holds, so the search scans to the end (its worst case).
+const SEARCH_PARAMS: &[&str] = &["x", "value", "elem", "item", "needle", "target"];
+
+/// Functions that stop at the first `true` from their predicate: given a
+/// predicate that is always `false`, so they visit every element.
+const STOPS_ON_TRUE: &[&str] = &["any", "find", "find_index", "position", "find_map", "index_where"];
+
 impl Target {
     pub fn new(sig: &Signature) -> Result<Target, String> {
         let name = format!("{}.{}", sig.module, sig.func);
@@ -76,6 +84,7 @@ impl Target {
             SigType::Fn(ps, r) => self.lambda(ps, r),
             SigType::Int if Some(i) == self.size_param => n.to_string(),
             SigType::Int => small_int(pname).into(),
+            _ if SEARCH_PARAMS.contains(&pname.as_str()) => self.ty(i).map(|g| absent(&g)).unwrap_or_else(|| "()".into()),
             _ => match self.ty(i) {
                 Some(g) if Some(i) == self.size_param => sized(&g, n),
                 Some(g) => small(&g),
@@ -94,7 +103,13 @@ impl Target {
             .zip(&names)
             .find(|(p, _)| p.instantiate(&self.subst) == want)
             .map(|(_, n)| n.clone())
-            .unwrap_or_else(|| want.as_ref().map(small).unwrap_or_else(|| "()".into()));
+            .unwrap_or_else(|| match want {
+                // The worst case scans everything: a search that never hits,
+                // a filter that is evaluated on every element.
+                Some(GenType::Bool) if STOPS_ON_TRUE.contains(&self.func()) => "false".into(),
+                Some(ref g) => small(g),
+                None => "()".into(),
+            });
         format!("({}) => {body}", names.join(", "))
     }
 
@@ -117,7 +132,7 @@ impl Target {
             let _ = writeln!(s, "    x = {}", vary("x", &self.ty(i).unwrap_or(GenType::Int), n));
         }
         if with_call {
-            let _ = writeln!(s, "    let r = {}", self.call(n, slot));
+            let _ = writeln!(s, "    let r: {} = {}", self.ret.render(), self.call(n, slot));
             let _ = writeln!(s, "    acc = acc + {}", digest("r", &self.ret));
         }
         let _ = writeln!(s, "    acc = acc + 1\n    i = i + 1\n  }}");
@@ -176,7 +191,7 @@ impl Target {
             let _ = writeln!(main, "  let a{i}: {} = {}", self.render_param(i), self.arg(i, n));
         }
         let args = names.join(", ");
-        let _ = writeln!(main, "  let d = {}({args})\n  let l = left.call({args})\n  let r = right.call({args})", self.name);
+        let _ = writeln!(main, "  let d: {ret} = {}({args})\n  let l = left.call({args})\n  let r = right.call({args})", self.name);
         for v in ["d", "l", "r"] {
             let _ = writeln!(main, "  {}", render_print(v, &self.ret));
         }
@@ -189,6 +204,10 @@ impl Target {
             ("app/src/main.almd".to_string(), main),
         ];
         Project { files, entry: "app/src/main.almd".to_string() }
+    }
+
+    fn func(&self) -> &str {
+        self.name.rsplit('.').next().unwrap_or("")
     }
 
     pub fn ret_is_observable(&self) -> bool {
@@ -231,6 +250,16 @@ fn small(t: &GenType) -> String {
         GenType::Result(e) => format!("ok({})", small(e)),
         GenType::Tuple2(a, b) => format!("({}, {})", small(a), small(b)),
         GenType::Map(v) => format!("[\"k\": {}]", small(v)),
+    }
+}
+
+/// A value of `t` no sized input holds (`elem` makes Ints >= 0, strings
+/// `s<i>`): the miss that makes a search scan everything.
+fn absent(t: &GenType) -> String {
+    match t {
+        GenType::Int => "-1".into(),
+        GenType::String => "\"absent\"".into(),
+        other => small(other),
     }
 }
 
