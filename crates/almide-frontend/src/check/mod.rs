@@ -40,6 +40,7 @@ mod extern_abi_check;
 mod prim_wrappers;
 mod exhaustiveness;
 mod call_defaults;
+mod effect_isolation_cascade;
 
 use almide_lang::ast;
 use almide_base::diagnostic::Diagnostic;
@@ -128,6 +129,10 @@ pub struct Checker {
     /// rewrite the whole call (UFCS `x.to_uppercase()` →
     /// `string.to_upper(x)`) can target the full range.
     pub(crate) call_span_hint: Option<crate::ast::Span>,
+    /// Explicit type args of a `module.fn[T](..)` call, handed from the
+    /// Member callee arm to the static module resolution that names the fn
+    /// (#3495). `None` outside that window.
+    pub(crate) member_call_type_args: Option<Vec<Ty>>,
     /// `mut` parameter indices from the last resolved function signature.
     /// Set by `check_named_call_with_type_args`, consumed by callers
     /// that have access to argument expressions for mutability validation.
@@ -318,6 +323,16 @@ pub struct Checker {
     /// defaulted. Without it the value passed `check` and then tripped the
     /// ConcretizeTypes COMPILER-BUG gate on BOTH targets (#662).
     pub(crate) deferred_unresolved_binding_checks: Vec<UnresolvedBindingSite>,
+    /// #3505: the inference vars a constraint the last solve could NOT
+    /// satisfy left open — the slot of an expression that already errored
+    /// (a `fan.map` callback that returns a bare value leaves its `ok` slot
+    /// unbound). Reset by every solve and read by the E025 validation that
+    /// follows it: a binding whose only undecidable slots are these is the
+    /// prior error's residue, not an undecidable program (the #2096 family).
+    pub(crate) errored_slots: Vec<Ty>,
+    /// Generic calls whose type parameters must each be determined (#3495,
+    /// E025's call edition) — see `uninferable_type_param.rs`.
+    pub(crate) deferred_type_param_checks: Vec<TypeParamSite>,
     /// #1123 / ADR-0008 N+1: sites where the pre-switch implementation
     /// inserted implicit propagation (auto-`?`). Post-solve, every site whose
     /// type resolved to Result is a hard error — E042 (must-use: a discarded
@@ -331,6 +346,9 @@ pub struct Checker {
     /// whether its `!` repair is the spelling of the callee's own declared
     /// type (machine-applicable) or a choice among consumptions.
     pub(crate) effect_call_spans: std::collections::HashSet<(usize, usize, usize)>,
+    /// #3515: the E006s on fallible effect callees whose hint names the `!`,
+    /// and the cascade E001s they own (`effect_isolation_cascade.rs`).
+    pub(crate) isolation_cascade: effect_isolation_cascade::IsolationCascade,
     /// #2927: the expectation handed to the NEXT `infer_expr` (a tail
     /// position's), and the one of the expression being inferred now. See
     /// `arm_blame.rs`.
@@ -647,6 +665,7 @@ impl Checker {
             postfix_inner_spans: std::collections::HashMap::new(),
             callee_span_hint: None,
             call_span_hint: None,
+            member_call_type_args: None,
             last_mut_params: Vec::new(),
             arg_spans: Vec::new(),
             shadowed_receiver: None,
@@ -677,8 +696,11 @@ impl Checker {
             deferred_float_overflow_checks: Vec::new(),
             deferred_numeric_narrowing_checks: Vec::new(),
             deferred_unresolved_binding_checks: Vec::new(),
+            errored_slots: Vec::new(),
+            deferred_type_param_checks: Vec::new(),
             deferred_implicit_prop_checks: Vec::new(),
             effect_call_spans: std::collections::HashSet::new(),
+            isolation_cascade: Default::default(),
             tail_expect: None,
             expr_expect: None,
             fallible_marker_fns: std::collections::HashSet::new(),
@@ -1194,10 +1216,9 @@ impl Checker {
         // post-solve flush below can upgrade it. Pre-solve the entry's
         // top-lets in the same isolated bracket the module refresh uses; the
         // real pass right after re-checks them and owns all reporting.
-        self.refresh_module_top_lets(program, "__entry");
+        self.refresh_top_lets(program, toplet_order::TopLetScope::Entry);
         self.validate_protocol_refs(program);
-        self.validate_bare_type_visibility(program);
-        self.validate_qualified_type_heads(program);
+        self.validate_type_spellings(program);
         self.validate_alias_cycles(&program.decls);
         self.body_diag_start = self.diagnostics.len();
         self.reject_user_prim_import(&program.imports);
@@ -1843,7 +1864,8 @@ impl Checker {
     /// other modules were in the program, and adding a same-named type
     /// anywhere changed or broke a file that never mentioned it. Now it is
     /// E029 naming the module to import and the qualified spelling.
-    pub(crate) fn validate_bare_type_visibility(&mut self, program: &mut ast::Program) {
+    /// `bare_types` is the file's `ImportSpellings::bare_types`.
+    fn validate_bare_type_visibility(&mut self, program: &mut ast::Program, bare_types: std::collections::HashSet<(Sym, TypeSpelling)>) {
         use crate::canonicalize::resolve::{FileTypeScope, TypeNameOrigin};
         let own: std::collections::HashSet<Sym> = program.decls.iter()
             .filter_map(|d| match d { ast::Decl::Type { name, .. } => Some(*name), _ => None })
@@ -1858,7 +1880,7 @@ impl Checker {
         let cur = self.current_module_prefix.clone();
         let names_a_case = |env: &crate::types::TypeEnv, n: Sym, sp: TypeSpelling|
             sp == TypeSpelling::RecordHead && env.lookup_ctor_in(&n, cur.as_deref()).is_some();
-        let spelled: Vec<(Sym, TypeSpelling)> = bare_type_spellings(program)
+        let spelled: Vec<(Sym, TypeSpelling)> = bare_types
             .into_iter().filter(|(n, sp)| !names_a_case(&self.env, *n, *sp)).collect();
         let names: std::collections::HashSet<Sym> = spelled.iter().map(|(n, _)| *n).collect();
         let scope = FileTypeScope::new(&self.env, self.current_module_prefix.as_deref(), own, &names);

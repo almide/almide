@@ -23,6 +23,7 @@ test "string.split single char" {
 
 test "string.split multi char separator" {
   assert_eq(string.split("a::b::c", "::"), ["a", "b", "c"])
+  assert_eq(string.split("x→y→", "→"), ["x", "y", ""])
 }
 
 test "string.split no match" {

@@ -34443,9 +34443,25 @@ else {
 
 
 
-fn string_to_int(s: String) -> Result[Int, String] = {
+fn string_to_int(s: String) -> Result[Int, String] = if __sti_bare(s) then __sti_raw(s)
+else {
   let t = string.trim(s)
   __sti_raw(t)
+}
+
+
+
+
+
+fn __sti_bare(s: String) -> Bool = {
+  let h = prim.handle(s)
+  let n = prim.load32(h + 4)
+  if n == 0 then false
+  else {
+    let b0 = prim.load8(h + 12)
+    let b1 = prim.load8(h + 12 + n - 1)
+    b0 > 32 and b0 < 127 and b1 > 32 and b1 < 127
+  }
 }
 
 fn __sti_raw(s: String) -> Result[Int, String] = {
@@ -34539,7 +34555,8 @@ else {
   __hex_val(data, pos + 1, end, neg, acc2)
 }
 
-fn int_from_hex(s: String) -> Result[Int, String] = {
+fn int_from_hex(s: String) -> Result[Int, String] = if __sti_bare(s) then __hex_raw(s)
+else {
   let t = string.trim(s)
   __hex_raw(t)
 }

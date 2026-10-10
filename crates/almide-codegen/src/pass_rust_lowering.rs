@@ -38,6 +38,11 @@ impl NanoPass for RustLoweringPass {
         //     and un-boxes the closure, which is what keeps the per-element
         //     call static. See `lower_flat_map_arrays`.
         if lower_flat_map_arrays(&mut program) { changed = true; }
+        // (A0b) A callback runtime op whose closure argument is a literal →
+        //     its static-closure twin (`F: Fn` last arg), so the closure is
+        //     not boxed into a fresh `Rc<dyn Fn>` per call. Before boxing,
+        //     like A0. See `route_static_closure_twins`.
+        if route_static_closure_twins(&mut program) { changed = true; }
         // (A1, #2044) `fan.map` / list ops UNDER a `fan { … }` block with a pure
         //     lambda over Send-safe scalars → the thread-per-core runtime
         //     twins. Also BEFORE boxing, for the same reason as A0: the fan
@@ -246,6 +251,54 @@ fn lower_flat_map_arrays(program: &mut IrProgram) -> bool {
         for tl in m.top_lets.iter_mut() { l.visit_expr_mut(&mut tl.value); }
     }
     l.changed
+}
+
+/// The twin of a callback runtime op that takes its closure as a static
+/// `F: Fn` (the generated `takes_raw_fn_last_arg` registry then keeps the
+/// closure un-boxed). `map.upsert` runs its closure once per call, usually in
+/// a fold over every input line: the boxed form allocated an `Rc` per call
+/// and called through a vtable.
+fn static_closure_twin(symbol: &str) -> Option<&'static str> {
+    match symbol {
+        "almide_rt_map_upsert" => Some("almide_rt_map_upsert_fn"),
+        _ => None,
+    }
+}
+
+/// A closure LITERAL — what `unbox_consumed` hands over un-boxed: a lambda,
+/// a fn item, or CaptureClone's `{ let __cap = v.clone(); <lambda> }`.
+fn is_closure_literal(e: &IrExpr) -> bool {
+    match &e.kind {
+        IrExprKind::Lambda { .. } | IrExprKind::FnRef { .. } => true,
+        IrExprKind::Block { expr: Some(tail), .. } => is_closure_literal(tail),
+        _ => false,
+    }
+}
+
+fn route_static_closure_twins(program: &mut IrProgram) -> bool {
+    use almide_ir::visit_mut::{IrMutVisitor, walk_expr_mut};
+
+    struct Route { changed: bool }
+    impl IrMutVisitor for Route {
+        fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
+            walk_expr_mut(self, expr);
+            let IrExprKind::RuntimeCall { symbol, args } = &mut expr.kind else { return };
+            let Some(twin) = static_closure_twin(symbol.as_str()) else { return };
+            if args.last().is_some_and(is_closure_literal) {
+                *symbol = sym(twin);
+                self.changed = true;
+            }
+        }
+    }
+
+    let mut r = Route { changed: false };
+    for f in program.functions.iter_mut() { r.visit_expr_mut(&mut f.body); }
+    for tl in program.top_lets.iter_mut() { r.visit_expr_mut(&mut tl.value); }
+    for m in program.modules.iter_mut() {
+        for f in m.functions.iter_mut() { r.visit_expr_mut(&mut f.body); }
+        for tl in m.top_lets.iter_mut() { r.visit_expr_mut(&mut tl.value); }
+    }
+    r.changed
 }
 
 /// Rewrite ONE `almide_rt_list_flat_map` node whose lambda tail is a

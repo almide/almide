@@ -19,6 +19,10 @@ test "empty sides survive" {
 
 test "multi-byte separator" {
   assert_eq(string.split_once("a::b::c", "::"), some(("a", "b::c")))
+  // A one-character separator outside ASCII is several bytes: it takes the
+  // substring search, not the one-byte fast path, and splits the same way.
+  assert_eq(string.split_once("a→b→c", "→"), some(("a", "b→c")))
+  assert_eq(string.split_once("é;x", ";"), some(("é", "x")))
 }
 
 test "agrees with split's first piece" {

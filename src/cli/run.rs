@@ -1,5 +1,4 @@
 use std::process::Command;
-use crate::try_compile;
 use crate::err;
 use super::{hash64, cargo_build_generated_with_native, cargo_build_test_with_native};
 use super::build_dir::{evict_stale_artifacts, shared_run_project_dir, touch_used, BuildDirLock};
@@ -16,19 +15,20 @@ pub fn compile_to_binary(file: &str, no_check: bool, test_mode: bool, release: b
 /// fall back to the v0 source on a WALL — a v1-rendered program is never wrong.
 pub fn compile_to_binary_with(file: &str, no_check: bool, test_mode: bool, release: bool, project_dir_override: Option<&std::path::Path>, native_verified: bool) -> Result<std::path::PathBuf, String> {
     let t = PhaseTimer::start();
-    let rs_code = try_compile(file, no_check).map_err(|_| "compile failed".to_string())?;
+    let (rs_code, ir) = crate::try_compile_with_ir(file, no_check, &crate::codegen::CodegenOptions::default())
+        .map_err(|_| "compile failed".to_string())?;
+    // From the IR, not the text: a user literal spelled like a prim is
+    // emitted into `rs_code` verbatim (#3486).
+    let uses_metered_prims = ir.as_ref().is_some_and(almide::ir::runtime_use::uses_metered_prims);
     t.lap("frontend+emit");
     let rs_code = if native_verified && !test_mode {
-        super::render_v1_native_or_fallback(file, rs_code)
+        super::render_v1_native_or_fallback(file, rs_code, uses_metered_prims)
     } else {
         // The NATIVE TEST harness rides v0, which has no deterministic meter:
         // a budget/timeout prim reaching it would die later as an opaque
         // rustc E0425 in generated code. Refuse with the real reason instead
         // (the wasm test leg is the metered one; it runs first by default).
-        if test_mode
-            && (rs_code.contains("almide_rt_prim_budget_")
-                || rs_code.contains("almide_rt_prim_timeout_"))
-        {
+        if test_mode && uses_metered_prims {
             return Err(
                 "fan.bounded / fan.race / fan.timeout tests run on the WASM test leg \
                  (the native test harness has no deterministic meter). This file fell \
@@ -373,36 +373,37 @@ fn cmd_run_native(args: &RunArgs) -> i32 {
     }
 }
 
-/// Run `cmd` with stderr captured (stdout stays inherited), swallow the raw
-/// `__ALMD_PROBE` line, and print the ADR-0001 D5 dual-time line: the
+/// Run `cmd` and print the ADR-0001 D5 dual-time line after it: the
 /// deterministic time (consumed charge units × CM-1) next to the measured
 /// wall clock. The two never claim to be the same quantity — the declared
 /// band between them is D5's ratio-only contract.
+///
+/// The meter reading comes back on a channel of its own (#3489): the probed
+/// binary writes its `__ALMD_PROBE` line to the file
+/// [`almide_mir::charge_probe::PROBE_OUT_ENV`] names, and the program's
+/// stdout and stderr are both inherited untouched. Reading the line back out
+/// of the program's stderr took a line the PROGRAM printed in that spelling
+/// as the reading — and swallowed it from the program's output.
 fn run_with_time_report(mut cmd: Command) -> i32 {
+    let probe_out = probe_out_path();
+    let _ = std::fs::remove_file(&probe_out);
+    cmd.env(almide_mir::charge_probe::PROBE_OUT_ENV, &probe_out);
     let t0 = std::time::Instant::now();
-    let child = match cmd.stderr(std::process::Stdio::piped()).spawn() {
-        Ok(c) => c,
-        Err(e) => {
-            err(&format!("Failed to execute: {}", e));
-            return 1;
-        }
-    };
-    let out = match child.wait_with_output() {
-        Ok(o) => o,
+    let status = match cmd.status() {
+        Ok(s) => s,
         Err(e) => {
             err(&format!("Failed to execute: {}", e));
             return 1;
         }
     };
     let wall_ns = t0.elapsed().as_nanos() as i64;
-    let mut consumed: Option<i64> = None;
-    for line in String::from_utf8_lossy(&out.stderr).lines() {
-        if let Some(rest) = line.strip_prefix("__ALMD_PROBE ") {
-            consumed = rest.split_whitespace().next().and_then(|s| s.parse().ok());
-        } else {
-            eprintln!("{line}");
-        }
-    }
+    let reading = std::fs::read_to_string(&probe_out).ok();
+    let _ = std::fs::remove_file(&probe_out);
+    let consumed: Option<i64> = reading
+        .as_deref()
+        .and_then(|r| r.strip_prefix("__ALMD_PROBE "))
+        .and_then(|rest| rest.split_whitespace().next())
+        .and_then(|s| s.parse().ok());
     match consumed {
         Some(units) => {
             let det_ms =
@@ -414,7 +415,15 @@ fn run_with_time_report(mut cmd: Command) -> i32 {
             eprintln!("time: no deterministic meter in this run (probe line missing)");
         }
     }
-    out.status.code().unwrap_or(1)
+    status.code().unwrap_or(1)
+}
+
+/// A path no other run uses: this process's id plus a clock reading.
+fn probe_out_path() -> std::path::PathBuf {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    std::env::temp_dir().join(format!("almide-probe-{}-{nanos}.txt", std::process::id()))
 }
 
 /// Flags for [`cmd_run`] — bundled into one struct (was 7 positional

@@ -21,7 +21,7 @@ mod eta;
 /// #2747: surface forms rewritten to ones the arms lower (map-pair
 /// loops, `?.`).
 #[path = "front_desugar.rs"]
-mod front_desugar;
+pub(crate) mod front_desugar;
 /// #1315: source lines of the emitted code, and their DWARF form.
 #[path = "debug_lines.rs"]
 pub mod debug_lines;
@@ -570,16 +570,27 @@ fn emit_program_pass(
         // The source spelling: an entry fn's IR name may be escaped (#3483).
         let name = almide_ir::user_fn_source_name(f.name.as_str());
         let declared = f.export_attrs.iter().find(|a| a.target.as_str() == "wasm").map(|a| a.symbol.to_string());
-        let skip_entry = !matches!(f.visibility, almide_ir::IrVisibility::Public);
-        if name == "main"
-            || name.starts_with("__")
+        // #3490: decided by what the IR records, never by how the fn is
+        // spelled. A declared export is the user's — no synthesized fn carries
+        // one — and an obligation whatever the fn is called (a user fn spelled
+        // `__x` is legal since #3483). An undeclared one exports from the
+        // entry program only, pub, and not compiler-synthesized — and not
+        // under a name the toolchain writes itself: an implicit export is no
+        // obligation, so a user fn named `__helper` or `_start` simply stays
+        // internal, where a DECLARED one of those names is refused below.
+        let exports = declared.is_some()
+            || (qual.is_none()
+                && matches!(f.visibility, almide_ir::IrVisibility::Public)
+                && !almide_ir::is_synthesized_entry_fn(f.name.as_str())
+                && !crate::host_exports::is_reserved_export(name));
+        if (qual.is_none() && f.name.as_str() == "main")
             || f.is_test
             || f.generics.as_ref().is_some_and(|g| !g.is_empty())
-            || if qual.is_some() { declared.is_none() } else { skip_entry }
+            || !exports
         {
             continue;
         }
-        let owner = qual.clone().unwrap_or_else(|| name.to_string());
+        let owner = qual.as_deref().map_or_else(|| name.to_string(), |q| almide_ir::user_fn_source_qualified(q).into_owned());
         let export_name = declared.clone().unwrap_or_else(|| name.to_string());
         let (sub, err, site) = reach(vec![i], Vec::new());
         if let Some(reason) = &err
@@ -590,10 +601,9 @@ fn emit_program_pass(
         }
         if err.is_none() {
             // A second export of one name is an invalid module — a wall,
-            // never a silent dedup (the name is the host's contract).
-            // `memory`, `main` and the `__`-prefixed runtime exports are the
-            // module's own.
-            let reserved = matches!(export_name.as_str(), "memory" | "main") || export_name.starts_with("__");
+            // never a silent dedup (the name is the host's contract). The
+            // names the toolchain writes itself are the module's own.
+            let reserved = crate::host_exports::is_reserved_export(&export_name);
             let prior = export_fns.iter().position(|(e, _)| *e == export_name);
             if reserved || prior.is_some() {
                 let claimants = match prior {

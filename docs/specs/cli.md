@@ -231,10 +231,13 @@ FAILED: e.almd
 テスト: `tests/imported_module_tests_not_rerun_test.rs`
 
 `--run <pattern>` は **生成された関数名に対する大文字小文字を区別する部分文字列一致**で、
-`test "…"` のラベルそのものではない。ラベルは `__test_almd_` を前置し、空白・記号を `_` に
-畳んだ綴りになる（`crates/almide-base/src/names.rs`）。したがって `test "beta fails"` は
-`--run beta` と `--run beta_fails` では選ばれるが、`--run "beta fails"`（空白のまま）では
-選ばれない。`--run __test_almd_` は全件を選ぶ。
+`test "…"` のラベルそのものではない。関数名は `__test_almd_` とそのファイル内での宣言順の
+4 桁の序数（`where` の case は 1 件ずつ数える）を前置し、ラベルの空白・記号を `_` に畳んだ
+綴りになる（`almide_ir::test_fn_name` と `crates/almide-base/src/names.rs`）。序数があるので
+畳むと同じ綴りになるラベル（`"a b"` と `"a_b"`）も別の関数になる（#3488）。したがって 2 件目の
+`test "beta fails"` は `__test_almd_0001_beta_fails` で、`--run beta` と `--run beta_fails`
+では選ばれるが、`--run "beta fails"`（空白のまま）では選ばれない。`--run __test_almd_` は
+全件を選ぶ。
 
 この規則は **native レグと wasm レグで同一**である（#2085）。native はパターンを Rust の
 テストハーネスに渡し、wasm はランナー合成の時点で同じ述語で絞る。どちらのレグでも、
@@ -1086,6 +1089,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_PASS_EDGES=value` | harness | extra `A<B` pass-order edges (comma-separated) the shuffle honours — the bisection instrument that names the pair a shuffle divergence needs declared |
 | `ALMIDE_PROBE_DUMP=value` | harness | the path the heap probe writes its emitted wasm to |
 | `ALMIDE_PROBE_IR=value` | harness | the path the heap probe writes its lowered IR to |
+| `ALMIDE_PROBE_OUT=value` | harness | the file a charge-probed native program writes its `__ALMD_PROBE` meter line to; `almide run --time-report` sets it to a fresh temp path so the program's own stderr is never read as the reading (#3489). Unset = the line goes to stderr |
 | `ALMIDE_PROBE_SRC=value` | harness | the source file the heap probe compiles (unset = the probe is skipped) |
 | `ALMIDE_PROFILE` | debug | print per-pass and per-phase timings of the native pipeline |
 | `ALMIDE_RC_TRAP_DOUBLE_FREE` | trap | arm the structural leg's double-free trap: releasing a block already at rc 0 traps instead of wrapping |

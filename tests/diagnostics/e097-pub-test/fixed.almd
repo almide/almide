@@ -1,0 +1,6 @@
+// #3505: `pub test` — a test block has no visibility at all.
+fn double(n: Int) -> Int = n * 2
+
+test "double doubles" {
+  assert_eq(double(21), 42)
+}

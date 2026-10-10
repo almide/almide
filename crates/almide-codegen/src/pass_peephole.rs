@@ -89,6 +89,7 @@ impl Peephole {
     fn local_rewrite(&mut self, expr: &mut IrExpr) {
         // ── Fusion: unwrap_or(map.get(m, k), default) → map.get_or(m, k, default) ──
         if self.try_fuse_map_get_or(expr) { return; }
+        if self.try_fuse_group_count(expr) { return; }
         // Detect: for i in 0..n { xs[i] = ys[i] } → ListCopySlice
         self.try_rewrite_copy_loop(expr);
     }
@@ -132,6 +133,32 @@ impl Peephole {
             span: expr.span,
             def_id: None,
         };
+        self.changed = true;
+        true
+    }
+
+    /// `map.map(list.group_by(xs, f), (g) => list.len(g))` →
+    /// `almide_rt_list_group_count(xs, f)`: count per key without building
+    /// the groups. Same keys, same first-seen order, same sizes; `f` runs
+    /// once per element in order either way, and the counting lambda is pure
+    /// and total, so dropping it is unobservable. The group map is a
+    /// temporary of the outer call — nothing else can read it. Fires only on
+    /// a lambda whose whole body is `list.len` of its one parameter.
+    fn try_fuse_group_count(&mut self, expr: &mut IrExpr) -> bool {
+        let IrExprKind::RuntimeCall { symbol, args } = &mut expr.kind else { return false };
+        if symbol.as_str() != "almide_rt_map_map_values" || args.len() != 2 || !is_len_of_param(&args[1]) {
+            return false;
+        }
+        let source = match &mut args[0].kind {
+            IrExprKind::Borrow { expr, mutable: false, .. } => expr.as_mut(),
+            _ => &mut args[0],
+        };
+        let IrExprKind::RuntimeCall { symbol: inner, args: group_args } = &mut source.kind else { return false };
+        if inner.as_str() != "almide_rt_list_group_by" || group_args.len() != 2 {
+            return false;
+        }
+        let group_args = std::mem::take(group_args);
+        expr.kind = IrExprKind::RuntimeCall { symbol: almide_base::intern::sym("almide_rt_list_group_count"), args: group_args };
         self.changed = true;
         true
     }
@@ -498,6 +525,24 @@ fn try_detect_copy_loop(loop_var: VarId, iterable: &IrExpr, body_stmt: &IrStmt) 
         ty: almide_lang::types::Ty::Unit,
         span: None, def_id: None,
     })
+}
+
+/// `(g) => list.len(g)`: a one-parameter lambda whose body is the length of
+/// that parameter (through the `&` / clone the passes may have wrapped it in).
+fn is_len_of_param(lambda: &IrExpr) -> bool {
+    let IrExprKind::Lambda { params, body, .. } = &lambda.kind else { return false };
+    let [(param, _)] = params.as_slice() else { return false };
+    let IrExprKind::RuntimeCall { symbol, args } = &body.kind else { return false };
+    let [arg] = args.as_slice() else { return false };
+    symbol.as_str() == "almide_rt_list_len" && read_var_through_wrappers(arg) == Some(*param)
+}
+
+fn read_var_through_wrappers(e: &IrExpr) -> Option<VarId> {
+    match &e.kind {
+        IrExprKind::Var { id } => Some(*id),
+        IrExprKind::Borrow { expr, .. } | IrExprKind::Clone { expr } => read_var_through_wrappers(expr),
+        _ => None,
+    }
 }
 
 /// May `fallback` — the lazy right side of `call ?? fallback` — become an

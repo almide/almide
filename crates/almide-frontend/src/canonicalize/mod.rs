@@ -50,11 +50,17 @@ pub fn register_module(
 /// import table → main program registration.
 ///
 /// After this, `env` is fully populated and ready for `Checker::from_env`.
+///
+/// The module-set E008 summaries are skipped when no program of the
+/// compilation can have a concurrent site (#3509): the checker reads them only
+/// from a site's walk. An interface consumer (`Checker::concurrent_fn_facts`)
+/// reads them from every fn, so it goes through [`canonicalize_program_in`],
+/// which always computes them.
 pub fn canonicalize_program<'a>(
     program: &ast::Program,
     modules: impl Iterator<Item = (&'a str, &'a ast::Program, bool)>,
 ) -> CanonicalizationResult {
-    canonicalize_program_in(program, modules, None)
+    canonicalize_program_with(program, modules, None, true)
 }
 
 /// [`canonicalize_program`] with the entry program's IDENTITY: when the
@@ -68,6 +74,15 @@ pub fn canonicalize_program_in<'a>(
     program: &ast::Program,
     modules: impl Iterator<Item = (&'a str, &'a ast::Program, bool)>,
     entry_bundled_module: Option<&str>,
+) -> CanonicalizationResult {
+    canonicalize_program_with(program, modules, entry_bundled_module, false)
+}
+
+fn canonicalize_program_with<'a>(
+    program: &ast::Program,
+    modules: impl Iterator<Item = (&'a str, &'a ast::Program, bool)>,
+    entry_bundled_module: Option<&str>,
+    check_only: bool,
 ) -> CanonicalizationResult {
     let mut env = TypeEnv::new();
     env.entry_bundled_module = entry_bundled_module
@@ -110,7 +125,10 @@ pub fn canonicalize_program_in<'a>(
         crate::dialect_check::check_dialect_stamp_in(Some(name), mod_prog, &mut diagnostics);
         register_module(&mut env, &mut diagnostics, name, mod_prog, is_self);
     }
-    compute_concurrent_summaries(&mut env, &modules);
+    compute_concurrent_summaries(&mut env, &modules, check_only.then_some(program));
+    // E092's call graph is read only from a `@pure` fn (#3509).
+    let has_pure = |p: &ast::Program| p.decls.iter().any(|d| matches!(d, ast::Decl::Fn { attrs, .. } if attrs.iter().any(|a| a.name.as_str() == "pure")));
+    env.pure_fns_absent = !has_pure(program) && !modules.iter().any(|(_, p, _)| has_pure(p));
 
     // 2b. The file's dialect stamp, if it carries one. Program-level and
     // resolution-independent, so it runs before any name is resolved: a file
@@ -180,14 +198,25 @@ pub fn canonicalize_modules_env<'a>(
         crate::dialect_check::check_dialect_stamp_in(Some(name), mod_prog, &mut diagnostics);
         register_module(&mut env, &mut diagnostics, name, mod_prog, is_self);
     }
-    compute_concurrent_summaries(&mut env, &modules);
+    compute_concurrent_summaries(&mut env, &modules, None);
     CanonicalizationResult { env, diagnostics }
 }
 
 /// E008 (ADR-0020 §3): each user module fn's inferred concurrent slots and
 /// whether its body reaches a `var`, so a program that calls it across a
 /// module or package boundary is judged by the callee's facts.
-fn compute_concurrent_summaries(env: &mut TypeEnv, modules: &[(&str, &ast::Program, bool)]) {
+///
+/// `check_entry` is the entry program when the facts are read only by the
+/// reach check: then a compilation where neither it nor any module can put an
+/// argument in a concurrent slot skips them (#3509). Without a site every
+/// inferred slot is empty and no walk reads a reach, so the empty map reads
+/// exactly as the computed one would.
+fn compute_concurrent_summaries(
+    env: &mut TypeEnv,
+    modules: &[(&str, &ast::Program, bool)],
+    check_entry: Option<&ast::Program>,
+) {
+    use crate::concurrent_reach::may_have_sites;
     let tables: Vec<_> = modules
         .iter()
         .filter(|(name, _, _)| !almide_lang::stdlib_info::is_stdlib_module(name))
@@ -198,6 +227,17 @@ fn compute_concurrent_summaries(env: &mut TypeEnv, modules: &[(&str, &ast::Progr
         .collect();
     if tables.is_empty() {
         return;
+    }
+    if let Some(entry) = check_entry {
+        // The entry's table is the one step 3 builds: the same inputs.
+        let none = crate::concurrent_reach::Summaries::new();
+        let self_name = env.self_module_name.map(|s| s.to_string());
+        let (t, _) = build_import_table(entry, self_name.as_deref(), &env.user_modules);
+        let quiet = !may_have_sites(entry, &t.aliases, &t.direct, &none)
+            && tables.iter().all(|(_, p, a, d)| !may_have_sites(p, a, d, &none));
+        if quiet {
+            return;
+        }
     }
     let summaries = {
         let env_ref = &*env;

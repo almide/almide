@@ -174,7 +174,7 @@ fn timeout_deterministic_ends_and_replay() {
 }
 
 /// T1-2: in BUDGET-ONLY mode (no probe), every charge in the native artifact sits
-/// inside a region fn (`__almd_bounded_*`) or a `__fuel` clone — the
+/// inside a region fn (`__almd_bounded_*`) or a `__fuel__` clone — the
 /// non-region paths of a budget-using program pay ZERO metering.
 fn metered_clones_keep_nonregion_paths_charge_free() {
     // Budget-only mode: the probe env must be OFF for these in-process
@@ -182,7 +182,7 @@ fn metered_clones_keep_nonregion_paths_charge_free() {
     // combined-test SAFETY note).
     unsafe { std::env::remove_var("ALMIDE_FUEL_PROBE") };
     let source = std::fs::read_to_string(fixture_path("bounded")).unwrap();
-    let metered_fn = |name: &str| name.contains("__almd_bounded_") || name.contains("__fuel");
+    let metered_fn = |name: &str| name.contains("__almd_bounded_") || name.contains("__fuel__");
 
     let rs = almide_mir::pipeline::try_render_rust_source(&source)
         .expect("bounded: native render failed");

@@ -519,7 +519,7 @@ impl Emitter<'_> {
                 self.f.instructions().local_set(v_p);
                 // #2755: the list.fold activation (`witness_fold_step`).
                 self.witness_callback_open(cb, Some(acc_p));
-                self.lower(body, Some(b))?;
+                self.lower_fold_body(cb, body, b)?;
                 // The accumulator OWNS one credit on every step, as in the staged
                 // `list.fold` (`list.rs:647`): a borrowed body result takes its
                 // share, and the PREVIOUS accumulator is released before the

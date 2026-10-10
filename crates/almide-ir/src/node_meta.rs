@@ -292,6 +292,34 @@ pub struct IrFunction {
 /// All downstream passes see a pre-normalized, unique `func.name`.
 pub const TEST_NAME_PREFIX: &str = "__test_almd_";
 
+/// #3488: the IR name of the `ordinal`-th test fn of a program (declaration
+/// order, `where` cases expanded): `__test_almd_<NNNN>_<label>`.
+///
+/// The ordinal is what makes the name injective. Every backend has to spell
+/// the label into an identifier, and that fold is lossy (`"a b"`, `"a_b"` and
+/// `"a-b"` all become `a_b`), so two distinct labels used to meet on one Rust
+/// fn (E0428). Two tests never share an ordinal, and the ordinal sits between
+/// the fixed prefix and the first `_` the label can contribute, so no label
+/// spelling can reach another test's name. The label stays a substring of the
+/// emitted name, so `--run <part of the label>` still selects by label on both
+/// legs; zero-padding keeps libtest's name-sorted run order the declaration
+/// order the wasm runner uses.
+pub fn test_fn_name(ordinal: usize, label: &str) -> String {
+    format!("{TEST_NAME_PREFIX}{ordinal:04}_{label}")
+}
+
+/// The `test "…"` label of a test fn's IR name — the inverse of
+/// [`test_fn_name`]. A name without the ordinal comes back without the prefix
+/// only; a name outside the test space comes back unchanged.
+pub fn test_label(ir_name: &str) -> &str {
+    let Some(rest) = ir_name.strip_prefix(TEST_NAME_PREFIX) else { return ir_name };
+    let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
+    match rest[digits..].strip_prefix('_') {
+        Some(label) if digits > 0 => label,
+        _ => rest,
+    }
+}
+
 /// #3483: the prefix a user-declared fn's IR name gets when its source name
 /// falls in the compiler's fn-name space (see [`is_reserved_fn_name`]).
 ///
@@ -305,9 +333,36 @@ pub const TEST_NAME_PREFIX: &str = "__test_almd_";
 /// user-visible one ([`user_fn_source_name`]).
 pub const USER_FN_ESCAPE: &str = "almide_fn_";
 
-/// Does a user fn named `name` need [`USER_FN_ESCAPE`]?
+/// The prefix of every runtime symbol (`almide_rt_<module>_<fn>`, the
+/// `almide_rt_prim_*` prims). A `Named` call spelled with it is collapsed into
+/// a `RuntimeCall` (`NormalizeRuntimeCallsPass`), and the native runtime is
+/// spliced into the same Rust module as the user's fns — so it is the
+/// compiler's spelling, never a user fn's (#3487).
+pub const RUNTIME_SYMBOL_PREFIX: &str = "almide_rt_";
+
+/// Does a user fn named `name` need [`USER_FN_ESCAPE`]? The compiler's
+/// spaces are `__` (synthesized fns, #3483) and [`RUNTIME_SYMBOL_PREFIX`]
+/// (runtime symbols, #3487): a user fn `almide_rt_list_len` was collapsed into
+/// the runtime's `almide_rt_list_len` call and defined twice beside it (rustc
+/// E0428 / E0308 on the native fallback).
 pub fn is_reserved_fn_name(name: &str) -> bool {
-    name.starts_with("__") || name.starts_with(USER_FN_ESCAPE)
+    name.starts_with("__") || name.starts_with(USER_FN_ESCAPE) || name.starts_with(RUNTIME_SYMBOL_PREFIX)
+}
+
+/// Did the compiler synthesize the ENTRY program fn whose IR name is
+/// `ir_name`? (#3490) Every synthesized fn is named in the `__` space and
+/// lowering escapes every entry fn the user spelled there
+/// ([`escape_user_fn_name`]), so on an entry IR name the space is the
+/// record of who made the fn — unlike the source spelling, which a user can
+/// choose. The one user fn left there is a foreign binding (`@extern`,
+/// `@inline_rust`, `@wasm_intrinsic`), whose name is the binding and which
+/// has no body of the program's to export either. Since #3504 a user
+/// module's fns are escaped the same way, so the space records origin there
+/// too; the stdlib's own modules spell their internal helpers in it. The
+/// export rule needs it for the entry only: a linked module's fn exports only
+/// when it DECLARES `@export`, and no synthesized fn carries one.
+pub fn is_synthesized_entry_fn(ir_name: &str) -> bool {
+    ir_name.starts_with("__")
 }
 
 /// The IR name of a user-declared fn spelled `name` (#3483).
@@ -337,6 +392,19 @@ pub fn ast_synth_ir_name(name: &str) -> Option<almide_base::intern::Sym> {
 /// [`USER_FN_ESCAPE`]; every other name comes back unchanged.
 pub fn user_fn_source_name(name: &str) -> &str {
     name.strip_prefix(USER_FN_ESCAPE).unwrap_or(name)
+}
+
+/// [`user_fn_source_name`] for a name that may be module-qualified
+/// (`util.almide_fn___x` → `util.__x`, #3504): the escape is on the fn's own
+/// segment, after the last `.`.
+pub fn user_fn_source_qualified(name: &str) -> std::borrow::Cow<'_, str> {
+    match name.rsplit_once('.') {
+        Some((module, func)) if func.starts_with(USER_FN_ESCAPE) => {
+            std::borrow::Cow::Owned(format!("{module}.{}", user_fn_source_name(func)))
+        }
+        Some(_) => std::borrow::Cow::Borrowed(name),
+        None => std::borrow::Cow::Borrowed(user_fn_source_name(name)),
+    }
 }
 
 /// #1997: the `IrFunction.attrs` marker lowering writes on a `scoped fn`.
@@ -401,12 +469,12 @@ impl IrFunction {
     }
 
     /// Source-visible name. For test blocks this strips the
-    /// `TEST_NAME_PREFIX` so reporters (test runner output, diagnostics)
-    /// show the user's original `test "name"` string.
+    /// `TEST_NAME_PREFIX` and the ordinal ([`test_label`]) so reporters (test
+    /// runner output, diagnostics) show the user's original `test "name"`.
     pub fn display_name(&self) -> &str {
         let n = self.name.as_str();
         if self.is_test {
-            n.strip_prefix(TEST_NAME_PREFIX).unwrap_or(n)
+            test_label(n)
         } else {
             n
         }

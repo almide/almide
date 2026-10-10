@@ -79,7 +79,7 @@ pub(super) fn insert_clones_member(object: IrExpr, field: Sym, ty: Ty, span: Opt
             && ctx.remaining.get(&id).copied().unwrap_or(1) <= 1);
     let object = if let IrExprKind::IndexAccess { object: base, index } = &object.kind
         && super::pass_clone_projection::root(base).is_some()
-        && matches!(index.kind, IrExprKind::Var { .. } | IrExprKind::LitInt { .. })
+        && super::pass_clone_projection::borrowable_index(index)
     {
         IrExpr { ty: object.ty.clone(), span: object.span, def_id: None,
             kind: IrExprKind::Borrow { expr: Box::new(object), as_str: false, mutable: false } }
@@ -147,12 +147,7 @@ fn interp_as_append(value: IrExpr, root: VarId, field: Option<Sym>) -> IrExpr {
             && matches!(object.kind, IrExprKind::Var { id } if id == root),
         _ => false,
     };
-    let first_is_place = matches!(parts.first(), Some(IrStringPart::Expr { expr }) if expr.ty == Ty::String && is_place(expr));
-    let rest_free = parts.iter().skip(1).all(|p| match p {
-        IrStringPart::Lit { .. } => true,
-        IrStringPart::Expr { expr } => !almide_ir::free_vars::free_vars(expr, &Default::default()).contains(&root),
-    });
-    if !first_is_place || parts.len() < 2 || !rest_free {
+    if !almide_ir::free_vars::interp_extends_place(parts, root, is_place) {
         return value;
     }
     let IrExprKind::StringInterp { mut parts } = value.kind else { unreachable!() };

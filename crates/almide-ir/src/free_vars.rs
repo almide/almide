@@ -37,6 +37,31 @@ pub fn free_vars(expr: &IrExpr, bound: &HashSet<VarId>) -> Vec<VarId> {
     v
 }
 
+/// #3454 / #3501 — the ONE admissibility rule for extending an
+/// interpolation's target in place: `place = "${place}…"` is the append
+/// `place = place + "…"` when the FIRST piece is the overwritten place itself
+/// (`is_place`, a `String`), at least one piece follows, and no later piece
+/// mentions the place's `root` var. Both legs ask this: the native clone pass
+/// rewrites the interpolation to a concat it can extend by move
+/// (codegen pass_clone_places.rs), the wasm emitter appends the later pieces
+/// to the place's block through `$str_append` (stmts_append.rs). Any later
+/// piece reading the root keeps the whole-value rebuild, so it observes the
+/// value before the write on both.
+pub fn interp_extends_place(
+    parts: &[crate::IrStringPart],
+    root: VarId,
+    is_place: impl Fn(&IrExpr) -> bool,
+) -> bool {
+    let first_is_place = matches!(parts.first(),
+        Some(crate::IrStringPart::Expr { expr }) if expr.ty == almide_lang::types::Ty::String && is_place(expr));
+    first_is_place
+        && parts.len() >= 2
+        && parts.iter().skip(1).all(|p| match p {
+            crate::IrStringPart::Lit { .. } => true,
+            crate::IrStringPart::Expr { expr } => !free_vars(expr, &HashSet::new()).contains(&root),
+        })
+}
+
 /// Every `VarId` *bound* anywhere within `expr` — by a `let`/destructure (`Bind`/`BindDestructure`),
 /// a `match`-arm pattern, or a `for-in` loop variable. The dual of [`free_vars`]: where `free_vars`
 /// asks "which enclosing locals does this reference", `bound_vars` asks "which locals does this

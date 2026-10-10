@@ -325,7 +325,7 @@ impl Lower<'_> {
             && let Some(root) = place_root(object)
             && self.ann.global(root).is_none()
             && !self.ann.is_shared_mut(&root)
-            && matches!(index.kind, IrExprKind::Var { .. } | IrExprKind::LitInt { .. })
+            && super::pass_clone_projection::borrowable_index(index)
         {
             let IrExprKind::IndexAccess { object, index } = std::mem::replace(&mut inner.kind, IrExprKind::Unit) else { unreachable!() };
             expr.kind = IrExprKind::RuntimeCall { symbol: sym("almide_index_ref!"), args: vec![*object, *index] };

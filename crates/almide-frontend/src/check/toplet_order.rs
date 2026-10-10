@@ -69,13 +69,44 @@ pub(super) fn concrete_top_lets(env: &TypeEnv, decls: &[ast::Decl], prefix: Opti
         .collect()
 }
 
-/// The entry program's pre-pass runs under the pseudo-module `__entry`, so the
-/// user types in what it inferred are spelled `__entry.Op`; the entry's real
+/// Whose top-level `let`s a refresh pre-pass reads (#3485).
+///
+/// The entry program is told apart from a module by this tag, never by a
+/// module name: a user module file `__entry.almd` is a module named `__entry`,
+/// and while the name was the test, that module's refreshed types were
+/// adopted onto the entry's same-named lets.
+#[derive(Clone, Copy)]
+pub(super) enum TopLetScope<'a> {
+    /// The entry program: its bare keys are the real ones.
+    Entry,
+    /// A user module, by its canonical name.
+    Module(&'a str),
+}
+
+impl<'a> TopLetScope<'a> {
+    /// The module the pre-pass checks under: the module itself, or for the
+    /// entry the pseudo-module [`ENTRY_PSEUDO_MODULE`].
+    pub(super) fn module_name(self) -> &'a str {
+        match self {
+            TopLetScope::Entry => ENTRY_PSEUDO_MODULE,
+            TopLetScope::Module(m) => m,
+        }
+    }
+}
+
+/// The pseudo-module the entry's pre-pass runs under. A module name is an
+/// identifier (`import m`), so neither a user module nor a qualified type a
+/// user writes can be spelled with it (#3485; it was `__entry`).
+const ENTRY_PSEUDO_MODULE: &str = "<entry>";
+
+/// The entry program's pre-pass runs under [`ENTRY_PSEUDO_MODULE`], so the
+/// user types in what it inferred are spelled `<entry>.Op`; the entry's real
 /// pass names them `Op`. Strip the pseudo-qualifier before the types are read
-/// as the entry's own (a `List[__entry.Op]` is a type nothing else spells —
+/// as the entry's own (a `List[<entry>.Op]` is a type nothing else spells —
 /// it routed a closure-holding `let` to the wrong storage, #3164).
 pub(super) fn unqualify_entry(refreshed: Vec<(Sym, Ty)>) -> Vec<(Sym, Ty)> {
-    refreshed.into_iter().map(|(n, t)| (n, strip_qualifier(&t, "__entry."))).collect()
+    let pfx = format!("{ENTRY_PSEUDO_MODULE}.");
+    refreshed.into_iter().map(|(n, t)| (n, strip_qualifier(&t, &pfx))).collect()
 }
 
 fn strip_qualifier(t: &Ty, pfx: &str) -> Ty {

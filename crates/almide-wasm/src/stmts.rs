@@ -775,6 +775,9 @@ impl Emitter<'_> {
         value: &IrExpr,
     ) -> Result<(), EmitError> {
         let moved = self.take_moved_temp(value);
+        if moved.is_none() && self.try_field_append_assign(target, path, value)? {
+            return Ok(());
+        }
         let spends_var = self.assign_rhs_spends_var(value, *target);
         self.field_assign_with(target, path, spends_var, |s, fty| {
             s.lower(value, Some(fty))?;

@@ -271,6 +271,9 @@ impl Parser {
                 self.advance();
                 return self.parse_top_let(Visibility::Public, true);
             }
+            if let Some(decl) = self.parse_pub_on_unmodified_decl() {
+                return decl;
+            }
         }
         if self.check(TokenType::Local) || self.check(TokenType::Mod) {
             // local test where { ... } / mod test where { ... }
@@ -288,6 +291,61 @@ impl Parser {
             }
         }
         self.parse_fn_decl()
+    }
+
+    /// E097 (#3505): `pub` before a `type`, `protocol` or `test` — the Rust /
+    /// TypeScript reflex for an exported type. `pub` is only ever an explicit
+    /// spelling of a fn's or top-level let's default visibility; a type and a
+    /// protocol are public without a modifier and a test block has none, so
+    /// the `pub` adds nothing and the parser used to stop at it with "Expected
+    /// Fn (got Type 'type')". Reported with a machine-applicable deletion of
+    /// the keyword, then the declaration parses as if it were absent — the
+    /// program without `pub` is the one the author wrote. `None` when the
+    /// token after `pub` is none of the three.
+    fn parse_pub_on_unmodified_decl(&mut self) -> Option<Result<Decl, String>> {
+        let kw = match self.peek_at(1).map(|t| &t.token_type) {
+            Some(TokenType::Type) => "type",
+            Some(TokenType::Protocol) => "protocol",
+            Some(TokenType::Test) => "test",
+            _ => return None,
+        };
+        let hint = match kw {
+            "test" => "A `test` block has no visibility. Remove `pub`.".to_string(),
+            _ => format!(
+                "A `{kw}` is public by default — importers see it without a modifier. Remove `pub`; \
+                 to narrow it, write `mod {kw}` (this project) or `local {kw}` (this file)."
+            ),
+        };
+        let diag = self
+            .diag_error(format!("`pub` does not apply to `{kw}` — remove `pub`"), hint, format!("pub {kw}"))
+            .with_code("E097");
+        let diag = match self.pub_deletion_span() {
+            // Machine-applicable: the declaration means the same with and
+            // without the keyword, so the deletion decides nothing.
+            Some((line, col, end_col)) => diag.with_machine_fix(line, col, end_col, ""),
+            None => diag.with_try(format!("{kw} ...")),
+        };
+        self.errors.push(diag);
+        self.advance(); // `pub`
+        Some(match kw {
+            "type" => self.parse_type_decl(),
+            "protocol" => self.parse_protocol_decl(),
+            _ => self.parse_test_decl(),
+        })
+    }
+
+    /// The range `almide fix` deletes from `pub type …`: the `pub` keyword
+    /// plus the blanks up to the next token on the same line, from the
+    /// lexer's token positions only (the [`Self::letin_deletion_span`] rule).
+    fn pub_deletion_span(&self) -> Option<(usize, usize, usize)> {
+        let tok = self.current();
+        if tok.token_type != TokenType::Pub || tok.line == 0 || tok.col == 0 || tok.end_col <= tok.col {
+            return None;
+        }
+        match self.peek_at(1) {
+            Some(next) if next.line == tok.line && next.col > tok.end_col => Some((tok.line, tok.col, next.col)),
+            _ => None,
+        }
     }
 
     /// The "not a declaration" diagnostic, with the top-level hint table's

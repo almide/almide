@@ -13,10 +13,35 @@ pub fn almide_rt_string_trim_end(s: &str) -> String { s.trim_end().to_string() }
 pub fn almide_rt_string_contains(s: &str, sub: &str) -> bool { s.contains(sub) }
 pub fn almide_rt_string_starts_with(s: &str, prefix: &str) -> bool { s.starts_with(prefix) }
 pub fn almide_rt_string_ends_with(s: &str, suffix: &str) -> bool { s.ends_with(suffix) }
-pub fn almide_rt_string_split(s: &str, sep: &str) -> Vec<String> { s.split(sep).map(|x| x.to_string()).collect() }
+// A one-byte ASCII separator is searched as a `char` (a memchr scan) rather
+// than as a `&str`, whose `StrSearcher` set-up is paid on every call and
+// outweighs the scan of a short line — measured 2026-10-09: `split_once` over
+// a 2M-line `station;12.3` file, 0.163 s → 0.145 s. Both find the same
+// matches: an ASCII byte is a whole UTF-8 character.
+fn almide_string_ascii_sep(sep: &str) -> Option<char> {
+    match sep.as_bytes() {
+        [c] if c.is_ascii() => Some(*c as char),
+        _ => None,
+    }
+}
+pub fn almide_rt_string_split(s: &str, sep: &str) -> Vec<String> {
+    match almide_string_ascii_sep(sep) {
+        Some(c) => s.split(c).map(|x| x.to_string()).collect(),
+        None => s.split(sep).map(|x| x.to_string()).collect(),
+    }
+}
 // Two allocations and no Vec — the hot-loop form when only the first
 // separator matters (`station;temp` parsing). None ⇔ sep absent.
-pub fn almide_rt_string_split_once(s: &str, sep: &str) -> Option<(String, String)> { s.split_once(sep).map(|(a, b)| (a.to_string(), b.to_string())) }
+pub fn almide_rt_string_split_once(s: &str, sep: &str) -> Option<(String, String)> { almide_rt_string_split_once_ref(s, sep).map(|(a, b)| (a.to_string(), b.to_string())) }
+// The borrowing twin (codegen-only, `SliceBindersPass`): a `match` whose
+// payload binders are only read takes the halves as slices of `s` — the same
+// bytes, no copy. Not an Almide-visible function.
+pub fn almide_rt_string_split_once_ref<'a>(s: &'a str, sep: &str) -> Option<(&'a str, &'a str)> {
+    match almide_string_ascii_sep(sep) {
+        Some(c) => s.split_once(c),
+        None => s.split_once(sep),
+    }
+}
 pub fn almide_rt_string_replace(s: &str, from: &str, to: &str) -> String { s.replace(from, to) }
 pub fn almide_rt_string_join(parts: &[String], sep: &str) -> String { parts.join(sep) }
 // Negative counts clamp to 0 (C-054 discipline; `n as usize` on a negative
@@ -143,6 +168,9 @@ pub fn almide_rt_string_replace_first(s: &str, from: &str, to: &str) -> String {
 
 pub fn almide_rt_string_strip_prefix(s: &str, prefix: &str) -> Option<String> { s.strip_prefix(prefix).map(|r| r.to_string()) }
 pub fn almide_rt_string_strip_suffix(s: &str, suffix: &str) -> Option<String> { s.strip_suffix(suffix).map(|r| r.to_string()) }
+// Borrowing twins of the two above (codegen-only, `SliceBindersPass`).
+pub fn almide_rt_string_strip_prefix_ref<'a>(s: &'a str, prefix: &str) -> Option<&'a str> { s.strip_prefix(prefix) }
+pub fn almide_rt_string_strip_suffix_ref<'a>(s: &'a str, suffix: &str) -> Option<&'a str> { s.strip_suffix(suffix) }
 
 
 pub fn almide_rt_string_first(s: &str) -> Option<String> {

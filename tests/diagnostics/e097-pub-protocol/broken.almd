@@ -1,0 +1,11 @@
+// #3505: `pub protocol` — a protocol is visible to importers without a
+// modifier, the same as a type.
+pub protocol Shape {
+  fn area(self) -> Int
+}
+
+type Square: Shape = { side: Int }
+
+fn Square.area(self) -> Int = self.side * self.side
+
+effect fn main() -> Unit = println(int.to_string(Square { side: 3 }.area()))

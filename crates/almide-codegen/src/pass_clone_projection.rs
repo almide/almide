@@ -1,7 +1,7 @@
 //! Proofs for reading projections without copying their containing values.
 use std::collections::HashSet;
 use almide_ir::*;
-use super::use_kind::{ExplicitBorrows, Site, UseSites};
+use super::use_kind::{Ctor, ExplicitBorrows, Site, UseSites};
 
 pub(super) fn root(e: &IrExpr) -> Option<VarId> {
     match &e.kind {
@@ -12,18 +12,37 @@ pub(super) fn root(e: &IrExpr) -> Option<VarId> {
     }
 }
 
+/// An index a read may borrow INTO the list at (`&xs[i]`, `almide_index_ref!`):
+/// a variable, a literal, or integer arithmetic over them (`i + 1`,
+/// `seed % n`, `n - 1 - i`). No call and no closure, so evaluating it cannot
+/// touch the list the reference points into; it is evaluated exactly once,
+/// where the copying read evaluated it, and aborts (`/ 0`) exactly as that
+/// read did.
+pub(super) fn borrowable_index(e: &IrExpr) -> bool {
+    match &e.kind {
+        IrExprKind::Var { .. } | IrExprKind::LitInt { .. } => true,
+        IrExprKind::Deref { expr } => matches!(expr.kind, IrExprKind::Var { .. }),
+        IrExprKind::UnOp { op: UnOp::NegInt, operand } => borrowable_index(operand),
+        IrExprKind::BinOp { op: BinOp::AddInt | BinOp::SubInt | BinOp::MulInt | BinOp::DivInt | BinOp::ModInt, left, right } => {
+            borrowable_index(left) && borrowable_index(right)
+        }
+        _ => false,
+    }
+}
+
 pub(super) fn mentions(e: &IrExpr, v: VarId) -> bool {
     almide_ir::free_vars::free_vars(e, &HashSet::new()).contains(&v)
 }
 
 /// Does every occurrence of `var` in `e` read it through a borrow the walker
 /// renders identically for a `&T` binding — a shared `Borrow`, a `Clone`, a
-/// field read? A bare occurrence, a write, anything under a `&mut`, and any
+/// field read, an interpolation part (`{}` / `almide_repr(&…)` print a
+/// reference as they print the value)? A bare occurrence, a write, anything under a `&mut`, and any
 /// use a closure or fused chain captures says no.
 pub(super) fn reads_binding(e: &IrExpr, var: VarId) -> bool {
     UseSites::of_expr(e, Site::Result, &ExplicitBorrows).of(var).all(|u| {
         u.depth == 0 && !u.in_chain && !u.in_mut
-            && matches!(u.site, Site::Borrow { mutable: false } | Site::Clone | Site::Member)
+            && matches!(u.site, Site::Borrow { mutable: false } | Site::Clone | Site::Member | Site::Construct(Ctor::Interp))
     })
 }
 

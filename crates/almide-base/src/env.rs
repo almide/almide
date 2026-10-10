@@ -173,6 +173,7 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_PASS_EDGES", Value, Harness, "extra `A<B` pass-order edges (comma-separated) the shuffle honours — the bisection instrument that names the pair a shuffle divergence needs declared"),
     sw("ALMIDE_PROBE_DUMP", Value, Harness, "the path the heap probe writes its emitted wasm to"),
     sw("ALMIDE_PROBE_IR", Value, Harness, "the path the heap probe writes its lowered IR to"),
+    sw("ALMIDE_PROBE_OUT", Value, Harness, "the file a charge-probed native program writes its `__ALMD_PROBE` meter line to; `almide run --time-report` sets it to a fresh temp path so the program's own stderr is never read as the reading (#3489). Unset = the line goes to stderr"),
     sw("ALMIDE_PROBE_SRC", Value, Harness, "the source file the heap probe compiles (unset = the probe is skipped)"),
     sw("ALMIDE_PROFILE", Flag, Dbg, "print per-pass and per-phase timings of the native pipeline"),
     sw("ALMIDE_RC_TRAP_DOUBLE_FREE", Flag, Trap, "arm the structural leg's double-free trap: releasing a block already at rc 0 traps instead of wrapping"),

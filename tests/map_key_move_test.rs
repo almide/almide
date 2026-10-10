@@ -90,17 +90,16 @@ fn word_count_loop_borrows_the_lookup_key_and_moves_it_into_the_insert() {
         return;
     }
     let body = emitted_fn(COUNT_LOOP, "count", "loop");
-    assert!(
-        body.contains("almide_rt_map_get_or(&counts, &w, 0i64)"),
-        "expected the lookup to BORROW its key (`&w`):\n{body}"
-    );
+    // Since the one-probe update (keyed_count_native_shape_test.rs) the
+    // read and the write are ONE call: the key is moved into it, never
+    // cloned, and the map is not read separately.
     assert!(
         !body.contains("w.clone()"),
         "the word-count loop clones its key again:\n{body}"
     );
     assert!(
-        body.contains("counts.insert(w, __almide_mv)"),
-        "expected the value bound first and the key MOVED into the insert:\n{body}"
+        body.contains("counts.upsert_with(w, 0i64, |__almide_old|"),
+        "expected the key MOVED into the one-probe update:\n{body}"
     );
 }
 
@@ -128,7 +127,7 @@ fn key_still_used_after_the_insert_keeps_its_clone() {
         "after",
     );
     assert!(
-        body.contains("counts.insert(w.clone(), __almide_mv)"),
+        body.contains("counts.upsert_with(w.clone(), 0i64, |__almide_old|"),
         "a key read after the insert must still be CLONED into it:\n{body}"
     );
 }

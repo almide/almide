@@ -1,0 +1,4 @@
+expects_code = "E025"
+expects_error = "cannot infer type of the type parameter `T` declared on the function `util.tag`"
+hint_substring = "util.tag[Int](...)"
+expects_line_col = "6:25"

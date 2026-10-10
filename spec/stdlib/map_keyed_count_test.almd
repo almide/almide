@@ -1,0 +1,116 @@
+// Keyed counting, the shapes the native leg renders specially (#2157): the
+// one-probe update `m[k] = e(map.get_or(m, k, d))`, the group-and-count
+// fusion `map.map(list.group_by(xs, f), (g) => list.len(g))`, the owned
+// whole-map reads at a map's last use, and the String-key hash over every
+// short length (the 1..=7-byte tail is read with overlapping loads). Every
+// case is past the 16-entry index threshold, and every answer is the one the
+// unfused spelling gives — on both legs.
+fn word(i: Int) -> String = {
+  let len = i % 21
+  let letters = list.range(0, len) |> list.map((j) => string.from_codepoint(97 + (i * 7 + j * 3) % 26))
+  list.join(letters, "")
+}
+
+fn draws(n: Int) -> List[String] = list.range(0, n) |> list.map((i) => word((i * 37) % 300))
+
+fn count_two_step(ws: List[String]) -> Map[String, Int] = ws |> list.fold(
+  map.new(),
+  (m, w) => map.set(m, w, (map.get(m, w) ?? 0) + 1),
+)
+
+test "the one-probe update counts like the two-step fold" {
+  let ws = draws(3000)
+  var m: Map[String, Int] = map.new()
+  for w in ws {
+    m[w] = map.get_or(m, w, 0) + 1
+  }
+  let want = count_two_step(ws)
+  assert_eq(map.len(m), map.len(want))
+  assert_eq(map.entries(m), map.entries(want))
+}
+
+test "the update reads a default variable and a step variable" {
+  let ws = draws(500)
+  let start = 10
+  let step = 3
+  var m: Map[String, Int] = map.new()
+  for w in ws {
+    m[w] = step * 2 + map.get_or(m, w, start) - step
+  }
+  for (w, c) in map.entries(count_two_step(ws)) {
+    assert_eq(map.get(m, w), some(10 + 3 * c))
+  }
+}
+
+test "an update that is not plain arithmetic keeps its order" {
+  let ws = draws(400)
+  var m: Map[String, Int] = map.new()
+  var calls = 0
+  for w in ws {
+    m[w] = map.get_or(m, w, 0) + string.len(w) + map.get_or(m, "a", 0)
+    calls = calls + 1
+  }
+  assert_eq(calls, 400)
+  assert_eq(map.len(m), map.len(count_two_step(ws)))
+}
+
+test "a String value accumulates in place" {
+  var m: Map[Int, String] = map.new()
+  for i in list.range(0, 200) {
+    let k = i % 40
+    m[k] = map.get_or(m, k, "") + "x"
+  }
+  assert_eq(map.len(m), 40)
+  assert_eq(map.get(m, 0), some("xxxxx"))
+  assert_eq(map.get(m, 39), some("xxxxx"))
+}
+
+test "group-and-count matches the groups' sizes" {
+  let ws = draws(2000)
+  let counts = ws |> list.group_by((w) => w) |> map.map((g) => list.len(g))
+  let groups = list.group_by(ws, (w) => w)
+  assert_eq(map.keys(counts), map.keys(groups))
+  for (w, g) in map.entries(groups) {
+    assert_eq(map.get(counts, w), some(list.len(g)))
+  }
+  assert_eq(map.entries(counts), map.entries(count_two_step(ws)))
+}
+
+test "group-and-count by a derived key" {
+  let counts = list.range(0, 1000) |> list.group_by((i) => i % 37) |> map.map((g) => list.len(g))
+  assert_eq(map.len(counts), 37)
+  assert_eq(map.get(counts, 0), some(28))
+  assert_eq(map.get(counts, 36), some(27))
+  assert_eq(map.keys(counts) |> list.take(3), [0, 1, 2])
+}
+
+test "whole-map reads at the last use and before it agree" {
+  let ws = draws(600)
+  let a = count_two_step(ws)
+  let b = count_two_step(ws)
+  let kept = map.entries(a)
+  let doubled = map.map(a, (c) => c * 2)
+  let moved_entries = map.entries(b)
+  assert_eq(kept, moved_entries)
+  assert_eq(map.keys(doubled), map.keys(count_two_step(ws)))
+  assert_eq(map.values(doubled), map.values(count_two_step(ws)) |> list.map((c) => c * 2))
+  assert_eq(map.get(doubled, word(0)), some(2 * (map.get(count_two_step(ws), word(0)) ?? 0)))
+}
+
+test "String keys of every short length stay distinct" {
+  // Keys sharing their first and last four bytes, and every length 0..20.
+  let keys = list.range(0, 21) |> list.flat_map((n) => ["abcd", "abce", "bbcd", "abzd"] |> list.map((p) => string.take(string.repeat(p, 6), n)))
+  var m: Map[String, Int] = map.new()
+  for k in keys {
+    m[k] = map.get_or(m, k, 0) + 1
+  }
+  let distinct = keys |> list.unique_by((k) => k)
+  assert_eq(map.len(m), list.len(distinct))
+  for k in distinct {
+    assert_eq(map.get(m, k), some(list.len(list.filter(keys, (x) => x == k))))
+  }
+  assert_eq(map.get(m, "abcdab"), some(1))
+  assert_eq(map.get(m, "abceab"), some(1))
+  assert_eq(map.get(m, "abc"), some(2))
+  assert_eq(map.get(m, "abz"), some(1))
+}

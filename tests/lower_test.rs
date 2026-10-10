@@ -44,8 +44,32 @@ fn lower_test_block() {
     assert_eq!(ir.functions.len(), 1);
     assert!(ir.functions[0].is_test);
     // Test names carry TEST_NAME_PREFIX upstream; display_name() strips it.
-    assert_eq!(ir.functions[0].name, "__test_almd_basic");
+    assert_eq!(ir.functions[0].name, "__test_almd_0000_basic");
     assert_eq!(ir.functions[0].display_name(), "basic");
+}
+
+/// #3488: the test fns lowering emits are exactly `test_fn_names`' list —
+/// the enumeration the native report maps libtest's names back from — and
+/// labels that sanitize alike get distinct identifiers.
+#[test]
+fn lowered_test_names_are_the_shared_enumeration_and_injective() {
+    let src = "test \"a b\" {\n  assert(true)\n}\n\n\
+test \"s\" where [\n  \"one\" [n = 1],\n  \"two\" [n = 2],\n] {\n  assert(n > 0)\n}\n\n\
+test \"a_b\" {\n  assert(true)\n}\n";
+    let ir = lower(src);
+    let lowered: Vec<(String, String)> = ir
+        .functions
+        .iter()
+        .filter(|f| f.is_test)
+        .map(|f| (f.name.to_string(), f.display_name().to_string()))
+        .collect();
+    let prog = Parser::new(Lexer::tokenize(src)).parse().expect("parse");
+    assert_eq!(lowered, almide::lower::test_fn_names(&prog));
+    let labels: Vec<&str> = lowered.iter().map(|(_, l)| l.as_str()).collect();
+    assert_eq!(labels, ["a b", "s / one", "s / two", "a_b"]);
+    let emitted: std::collections::HashSet<String> =
+        lowered.iter().map(|(n, _)| almide_base::names::rust_safe_fn_name(n)).collect();
+    assert_eq!(emitted.len(), 4, "every test gets its own Rust identifier: {emitted:?}");
 }
 
 #[test]

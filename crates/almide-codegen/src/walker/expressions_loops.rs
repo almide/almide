@@ -30,6 +30,11 @@ fn render_expr_for_in(ctx: &RenderContext, expr: &IrExpr) -> String {
             let op = if *inclusive { "..=" } else { ".." };
             format!("{}{}{}", s, op, e)
         }
+        // `for i in list.range(a, b)` counts the same way as `for i in a..b`:
+        // the head was a 16-byte-per-element `Vec<i64>` built only to be
+        // walked once (2M draws = a 16 MB throwaway buffer). Same values in
+        // the same order — `a..b` is empty when `b <= a`, as `list.range` is.
+        _ if let Some((s, e)) = list_range_bounds(ctx, iterable) => format!("{s}..{e}"),
         // #1857: a `let`-bound range whose every read is a head was bound as
         // a bare `Range<i64>` (`try_render_bind_counting_range`); iterate a
         // clone of the two scalars so a second, nested, or captured head
@@ -55,4 +60,13 @@ fn render_expr_for_in(ctx: &RenderContext, expr: &IrExpr) -> String {
     let body_str = indent_lines(&body_raw, 4);
     ctx.templates.render_with("for_loop", None, &[], &[("var", var_name.as_str()), ("iter", iter.as_str()), ("body", body_str.as_str())])
         .unwrap_or_else(|| format!("for _ in _ {{ }}"))
+}
+
+/// `list.range(a, b)` as the rendered bounds `(a, b)`, for a consumer that
+/// iterates the range once and never holds the list: a `for` head or an
+/// iterator chain's source.
+fn list_range_bounds(ctx: &RenderContext, e: &IrExpr) -> Option<(String, String)> {
+    let IrExprKind::RuntimeCall { symbol, args } = &e.kind else { return None };
+    let [start, end] = args.as_slice() else { return None };
+    (symbol.as_str() == "almide_rt_list_range").then(|| (render_expr(ctx, start), render_expr(ctx, end)))
 }

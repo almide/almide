@@ -58,7 +58,13 @@ fn a_bang_over_a_move_mode_effect_call_witnesses_its_abi_carrier_as_owned() {
     assert_eq!(by_fixture["mut_param_call_chain"]["g"], "{id|im}\n{|im}\n");
     // `Mem.put` (effect_mut_generic_port) and Tally's `main`
     // (mut_param_effect_never_err) carry the buffer the call hands back.
-    assert_eq!(by_fixture["effect_mut_generic_port"]["Mem.put"], "ibd\nam\nibd\nim\nibamd\nim\n");
+    // `self.ks = self.ks + [k]` is the field accumulator window (#3501): the
+    // element shares straight into the pushed slot, so the one-element list
+    // literal and the concat result (`ibd`, `im`) are never born; the old
+    // record's line (`ibd`) is the unique judge's read and rebind, and the
+    // rebound record's line gains one read (`b`): the append reads the place
+    // through it.
+    assert_eq!(by_fixture["effect_mut_generic_port"]["Mem.put"], "ibd\nam\nibbamd\nim\n");
     // Tally's `t` and `u` are rebound by the writeback before any read, so
     // the mut-param move-in (writeback_move.rs) hands their block to the
     // callee and stores NULL in the var: `i b m` — no share (`a`) at the

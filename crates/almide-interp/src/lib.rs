@@ -428,8 +428,9 @@ fn index_newtype_ctors(program: &IrProgram) -> HashSet<Sym> {
 
 /// A module's `__`-prefixed PRIVATE helpers also join the flat table:
 /// the module's own bodies call them as bare Named targets (`flag` →
-/// `__flag_at`), and #868 rejects the prefix in user code, so a program
-/// fn can never collide. Only a name defined in EXACTLY ONE module is
+/// `__flag_at`), and lowering escapes a user fn spelled with the prefix out
+/// of it — an entry fn (#3483) or a user module's (#3504) — so no user fn
+/// reaches this index. Only a name defined in EXACTLY ONE module is
 /// indexed — a shared helper name across two modules stays module-keyed
 /// and abstains honestly rather than resolving from the wrong source
 /// (the #1087 class).

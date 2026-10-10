@@ -45,6 +45,13 @@
 //! (#3467): the block's Err is returned whole, in that `E`. In `main`'s own
 //! frame every Result arm's `!` is the marker (#3470): the block aborts with
 //! the lowest-index Err after every arm ran, whatever its error type.
+//!
+//! 5. A `match` that takes `string.split_once`'s pair apart in place
+//! never builds the pair (split_match.rs).
+
+#[path = "split_match.rs"]
+mod split_match;
+pub(crate) use split_match::{AT as SPLIT_AT, HEAD as SPLIT_HEAD, TAIL as SPLIT_TAIL};
 
 use almide_base::intern::sym;
 use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
@@ -128,6 +135,7 @@ impl IrMutVisitor for Rewriter<'_> {
         self.map_loop(e);
         self.matrix_op(e);
         self.fan_arm_markers(e);
+        *self.changed |= split_match::rewrite(self.vars, e);
     }
 }
 

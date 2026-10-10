@@ -12,6 +12,11 @@ impl Checker {
             let env = &self.env;
             let aliases = &env.import_table.aliases;
             let direct = &env.import_table.direct;
+            // No site: `run` records nothing — said without building the
+            // analyzer's tables (#3509).
+            if !crate::concurrent_reach::may_have_sites(program, aliases, direct, &env.concurrent_summaries) {
+                return;
+            }
             let type_map = &self.type_map;
             let arg_is_fn = |e: &ast::Expr| -> Option<bool> {
                 type_map.get(&e.id).map(|t| crate::concurrent_reach_types::ty_is_fn_valued(env, t))

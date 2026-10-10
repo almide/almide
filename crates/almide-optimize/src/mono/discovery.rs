@@ -22,6 +22,49 @@ pub(super) fn collect_mono_bindings(
         .collect()
 }
 
+/// A call site of a module generic, as the module mono reads it: the args
+/// bind the letters the params carry; the explicit type args and the call's
+/// own type bind the rest.
+pub(super) struct CallSite<'a> {
+    pub(super) args: &'a [IrExpr],
+    pub(super) type_args: &'a [Ty],
+    pub(super) ty: &'a Ty,
+}
+
+/// A module generic's bindings at one call site. A letter that appears only in
+/// the return type (`dekode[T](s: String) -> T?`) is never carried by an arg;
+/// it is pinned by the call's checked type against the declared return type,
+/// or, when that type says nothing, by the explicit `[Int]` (positional against
+/// the declaration). The checked type goes first: inside a generic caller it
+/// still reads `Option[U]` and so waits for the caller's own specialization,
+/// whereas the lowered type arg `U` cannot be told from a user type `U`.
+/// Without this the instance was never discovered, the generic was pruned,
+/// and the call stayed unresolved (#3494).
+pub(super) fn module_call_bindings(
+    g: &super::ModuleGeneric,
+    param_types: &[Ty],
+    site: &CallSite<'_>,
+) -> HashMap<String, Ty> {
+    let mut bindings = collect_mono_bindings(&g.bounds, site.args, param_types);
+    let open = |b: &HashMap<String, Ty>, l: &str| b.get(l).is_none_or(|t| matches!(t, Ty::Unknown));
+    for l in &g.letters {
+        if open(&bindings, l) {
+            let from_ret = extract_typevar_binding(&g.ret_ty, site.ty, l);
+            if !matches!(from_ret, Ty::Unknown) {
+                bindings.insert(l.clone(), from_ret);
+            }
+        }
+    }
+    if site.type_args.len() == g.letters.len() {
+        for (l, ta) in g.letters.iter().zip(site.type_args) {
+            if open(&bindings, l) {
+                bindings.insert(l.clone(), ta.clone());
+            }
+        }
+    }
+    bindings
+}
+
 /// Discover all concrete instantiations of structurally-bounded functions.
 /// Scans all functions and top-level lets.
 pub(super) fn discover_instances(

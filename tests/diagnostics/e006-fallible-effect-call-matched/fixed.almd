@@ -1,0 +1,9 @@
+import fs
+
+// Near miss of #3515: the `match` already consumes the call's Result, so the
+// one-round repair is the `effect fn` marker alone — no `!`, which would hand
+// the `ok(..)` / `err(..)` arms a String.
+pub effect fn read_or_empty(path: String) -> String = match fs.read_text(path) {
+  ok(text) => text,
+  err(_) => "",
+}

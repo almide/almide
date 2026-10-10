@@ -185,6 +185,39 @@ impl Emitter<'_> {
         Ok(())
     }
 
+    /// A fold body over the accumulator param of the literal callback `cb`:
+    /// the fold rebinds the accumulator to the body's value right after it,
+    /// so the body's last reads of it MOVE exactly as an `acc = body`
+    /// statement's do — into an owned param of the calls the body ends in,
+    /// and into a consuming map op / spread at its tail (dying_move.rs).
+    /// The accumulator's local holds the fold's one credit for the body's
+    /// duration; after a move it is empty, and the fold's release of the
+    /// replaced accumulator is a release of NULL.
+    pub(crate) fn lower_fold_body(&mut self, cb: &IrExpr, body: &IrExpr, want: crate::SliceTy) -> Result<(), crate::EmitError> {
+        let acc = match &cb.kind {
+            IrExprKind::Lambda { params, .. } => params.first().map(|(v, _)| *v),
+            _ => None,
+        };
+        let local = acc.and_then(|v| self.locals.get(&v).map(|&(idx, _)| (v, idx)));
+        let Some((acc, idx)) = local.filter(|&(v, idx)| {
+            !self.metered && !self.cells.contains(&v) && idx >= self.rc_param_ceiling && self.elem_is_handle(want)
+        }) else {
+            self.lower(body, Some(want))?;
+            return Ok(());
+        };
+        let outer = self.moves.move_in.take();
+        self.moves.move_in = MoveIn::joined(move_in_site::fold_site(body, acc), &outer);
+        let fresh = self.rc_owned.insert(idx);
+        self.note_dying_tail(body, Some(acc), true);
+        let got = self.lower(body, Some(want));
+        self.note_dying_tail(body, Some(acc), false);
+        if fresh {
+            self.rc_owned.remove(&idx);
+        }
+        self.moves.move_in = outer;
+        got.map(|_| ())
+    }
+
     /// #3337: release the destructured call result right after its
     /// write-backs took their own credits on the buffers, so the next call
     /// on the same var meets the buffer unshared. Every OTHER slot must be a

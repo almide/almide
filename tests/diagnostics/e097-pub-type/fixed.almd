@@ -1,0 +1,8 @@
+// #3505: `pub type` — the Rust / TypeScript reflex for an exported type. A
+// type is public without a modifier; the parser used to stop at `type` with
+// "Expected Fn".
+type Point = { x: Int, y: Int }
+
+fn norm1(p: Point) -> Int = int.abs(p.x) + int.abs(p.y)
+
+effect fn main() -> Unit = println(int.to_string(norm1(Point { x: 3, y: -4 })))

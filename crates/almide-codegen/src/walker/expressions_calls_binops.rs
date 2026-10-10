@@ -10,7 +10,13 @@ fn render_iter_chain(ctx: &RenderContext, source: &IrExpr, consume: bool, steps:
         && almide_ir::source_element_receivers(steps, collector)
             .and_then(|r| r.first().map(|(v, _)| *v))
             .is_some_and(|v| ctx.ann.borrowed_loop_vars.contains(&v));
-    let mut chain = if consume {
+    // A `list.range(a, b)` source yields owned `Int`s either way: iterate the
+    // range itself instead of building the `Vec<i64>` to walk it once. A
+    // borrowing chain (`&i64` binders) keeps the list it reads from.
+    let counted = (!by_ref).then(|| list_range_bounds(ctx, source)).flatten();
+    let mut chain = if let Some((s, e)) = counted {
+        format!("({s}..{e})")
+    } else if consume {
         format!("({}).into_iter()", src)
     } else if by_ref {
         format!("({}).iter()", src)
@@ -153,8 +159,15 @@ fn render_binop(ctx: &RenderContext, op: BinOp, left: &IrExpr, right: &IrExpr, _
     // minutes at 100% CPU on exactly that shape; found 2026-08-03).
     if matches!(op, BinOp::ConcatStr | BinOp::ConcatList) {
         let ty_tag = if op == BinOp::ConcatStr { "String" } else { "List" };
-        // Unwrap AlmideRcCow operands to owned T for concat
-        let lo = render_expr_owned(ctx, left);
+        // Unwrap AlmideRcCow operands to owned T for concat — except a string
+        // LITERAL on the left, which stays a bare `&str`: the `&str + String`
+        // impl prepends it into the right operand's own buffer, so
+        // `"k" + int.to_string(i)` no longer allocates a 1-byte String, grows
+        // it with a realloc and frees the right operand on every evaluation.
+        let lo = match &left.kind {
+            IrExprKind::LitStr { value } if op == BinOp::ConcatStr => format!("\"{}\"", escape_rust_str(value)),
+            _ => render_expr_owned(ctx, left),
+        };
         let ro = render_expr_owned(ctx, right);
         return ctx
             .templates

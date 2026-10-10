@@ -226,7 +226,7 @@ impl Emitter<'_> {
         self.f.instructions().local_set(fold_params[1]);
         self.witness_stage_param(fold_params[1], cur_ty, pending.is_some());
         owners.extend(pending.take().map(|t| (fold_params[1], t)));
-        self.lower(fold_body, Some(acc_ty))?;
+        self.lower_fold_body(cb, fold_body, acc_ty)?;
         // The accumulator OWNS one credit on every step, exactly as the
         // staged `lower_list_fold` has since 10fed0494: a borrowed body
         // result — the element itself (`(n, y) => y`), a captured var —

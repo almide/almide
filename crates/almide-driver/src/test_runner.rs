@@ -38,6 +38,15 @@ pub fn has_tests(ir: &IrProgram) -> bool {
     ir.functions.iter().any(|f| f.is_test)
 }
 
+/// Does the runner run `f` under `--run <run_filter>`? The ONE selection
+/// predicate: the synthesis below keeps exactly these tests, and the harness
+/// counts a passing run's tests from it (#3489) instead of from anything the
+/// run printed — a program can print the runner's `ok` itself.
+pub fn runs_test(f: &almide_ir::IrFunction, run_filter: Option<&str>) -> bool {
+    f.is_test
+        && run_filter.is_none_or(|pattern| almide_lang::almide_base::names::test_name_matches_filter(f.name.as_str(), pattern))
+}
+
 /// Promote a test file's `test` fns to ordinary effect fns and synthesize the
 /// runner `main` (the `__test_runner` protocol). `run_filter` is `almide test
 /// --run <pattern>`; it selects with the SAME predicate the native leg's
@@ -195,10 +204,7 @@ fn synthesize(ir: &mut IrProgram, run_filter: Option<&str>, module_reinit: Modul
     // emitted fn name comes from: the two legs must select the same tests, and
     // when this leg selected all of them regardless, no gate could see it.
     if let Some(pattern) = run_filter {
-        ir.functions.retain(|f| {
-            !f.is_test
-                || almide_lang::almide_base::names::test_name_matches_filter(f.name.as_str(), pattern)
-        });
+        ir.functions.retain(|f| !f.is_test || runs_test(f, Some(pattern)));
     }
     let mut stmts: Vec<IrStmt> = Vec::new();
     let mut idx = 0usize;
@@ -206,12 +212,7 @@ fn synthesize(ir: &mut IrProgram, run_filter: Option<&str>, module_reinit: Modul
         if !f.is_test {
             continue;
         }
-        let display = f
-            .name
-            .as_str()
-            .strip_prefix(almide_ir::TEST_NAME_PREFIX)
-            .unwrap_or(f.name.as_str())
-            .to_string();
+        let display = f.display_name().to_string();
         // Raw test names carry spaces/parens/unicode no WAT identifier admits — rename
         // to a mechanical id and drop `is_test` so the render loop lowers it like any
         // other effect fn (nothing else references a test fn by name).

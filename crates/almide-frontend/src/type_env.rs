@@ -176,6 +176,10 @@ pub struct TypeEnv {
     /// whether its body reaches a `var` — computed over the resolved module
     /// set at canonicalization, read by every program's reach check.
     pub concurrent_summaries: crate::concurrent_reach::Summaries,
+    /// No fn of the compilation carries `@pure`, so the call graph E092
+    /// judges is never read and the checker does not record it (#3509).
+    /// Set only by a canonicalization that saw every program it will check.
+    pub pure_fns_absent: bool,
     /// The package's own module name (set when `register_module` is called with `is_self: true`).
     /// Used to resolve `import self` in the main file.
     pub self_module_name: Option<Sym>,
@@ -269,6 +273,15 @@ pub struct TypeEnv {
     /// at registration — before any body is inferred — so the `@pure` check
     /// (E092, #3250) knows a foreign callee in a file inferred later.
     pub extern_fns: std::collections::HashSet<Sym>,
+    /// #3504: every USER module fn whose source name falls in the compiler's
+    /// fn-name space, by its qualified key (`util.__encode_list_int`). Its IR
+    /// name is escaped ([`almide_ir::escape_user_fn_name`]) — at its
+    /// definition by `lower_module`, at every cross-module call by lowering's
+    /// `ir_call_target` — so it never shares an IR name with a helper the
+    /// compiler synthesizes into the same module (a derived Codec's
+    /// `__encode_list_int`). Recorded at registration, before any importer is
+    /// lowered.
+    pub escaped_module_fns: std::collections::HashSet<Sym>,
     /// Types' declared protocol conformances: type name → set of protocol names
     pub type_protocols: std::collections::HashMap<Sym, std::collections::HashSet<Sym>>,
     /// Type arguments of an explicit conformance to a GENERIC protocol
@@ -327,6 +340,7 @@ impl TypeEnv {
             user_modules: std::collections::HashSet::new(),
             dep_root_modules: std::collections::HashSet::new(),
             concurrent_summaries: std::collections::HashMap::new(),
+            pure_fns_absent: false,
             self_module_name: None,
             import_table: ImportTable::new(),
             fn_visibility: std::collections::HashMap::new(),
@@ -356,6 +370,7 @@ impl TypeEnv {
             module_import_aliases: std::collections::HashMap::new(),
             explicit_convention_fns: std::collections::HashSet::new(),
             extern_fns: std::collections::HashSet::new(),
+            escaped_module_fns: std::collections::HashSet::new(),
             protocols: std::collections::HashMap::new(),
             type_protocols: std::collections::HashMap::new(),
             type_protocol_args: std::collections::HashMap::new(),
@@ -719,13 +734,13 @@ impl TypeEnv {
         }
     }
 
-    /// #3274: the effect fn the local `name` currently resolves to holding —
-    /// `None` when the visible binding holds no effect fn value.
-    pub fn effect_alias(&self, name: &str) -> Option<Sym> {
-        let key = sym(name);
+    /// #3274: the effect fn the local `key` currently resolves to holding —
+    /// `None` when no local is named `key`, `Some(None)` when the visible
+    /// binding holds no effect fn value. One scope walk answers both.
+    pub fn binding_effect_alias(&self, key: Sym) -> Option<Option<Sym>> {
         self.scopes.iter().zip(self.effect_aliases.iter()).rev()
             .find(|(scope, _)| scope.contains_key(&key))
-            .and_then(|(_, aliases)| aliases.get(&key).copied())
+            .map(|(_, aliases)| aliases.get(&key).copied())
     }
 
     pub fn define_var_at(&mut self, name: &str, ty: Ty, line: usize, col: usize) {
@@ -738,12 +753,9 @@ impl TypeEnv {
     }
 
     pub fn lookup_var(&self, name: &str) -> Option<&Ty> {
-        for scope in self.scopes.iter().rev() {
-            if let Some(ty) = scope.get(&sym(name)) {
-                return Some(ty);
-            }
-        }
-        None
+        // Interned once, not once per scope (#3509).
+        let key = sym(name);
+        self.scopes.iter().rev().find_map(|scope| scope.get(&key))
     }
 
     /// Collect all visible names (variables, top_lets, functions, builtins) for "did you mean?" suggestions.

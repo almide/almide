@@ -44,8 +44,9 @@ read here is what the current compiler accepts.
   aborts, never reads — ADR-0022), so a `main` that only prints is
   `fn main() -> Unit`; write `effect fn main()` when it reads or propagates.
   Every stdlib reader is an effect fn — `io.read_line`, `io.read_byte`,
-  `io.read_n_bytes`, `process.args`, `env.args` — so reading stdin or argv
-  needs an effect fn (dialect epoch 8).
+  `io.read_n_bytes`, `process.args`, `env.args`, and the `args` module's
+  `args.flag` / `option` / `option_or` / `positional` / `positional_at` /
+  `raw` — so reading stdin or argv needs an effect fn (dialect epoch 8).
   A user-declared effect fn is always fallible, so write `f()!` on every
   effect call — read the `!` like Swift `await` (it marks where the world is
   touched); it is Swift `try`, never `try!`. On a stdlib effect fn that cannot
@@ -247,7 +248,7 @@ fn isqrt(n: Int) -> Int = {
 | E003 | Undefined variable | Missing explicit `import json` / `import fs` / etc |
 | E004 | Arg count mismatch | Signature placeholder in try: shows `<name: Type>` |
 | E005 | Arg type mismatch | Often needs explicit conversion (`int.to_string(n)` etc) |
-| E006 | Pure fn calls effect fn | Mark the caller `effect fn` |
+| E006 | Pure fn calls effect fn | Mark the caller `effect fn`, and propagate the call's error with `!` (`f(x)!`) unless a `!` / `??` / `match` already consumes its Result |
 | E007/E008 | Fan block misuse | See `docs/specs/fan.md` |
 | E009 | Reassign immutable | `let` → `var` |
 | E010 | Non-exhaustive match | Add the missing arm(s) or `_ => ...` |
@@ -327,6 +328,7 @@ fn isqrt(n: Int) -> Int = {
 | E094 | Type aliases form a cycle — `type A = B` with `type B = A`, or `type Tree = List[Tree]` through a type argument | Give the cycle a nominal type: a record or variant may refer to itself (`type Tree = { kids: List[Tree] }`) |
 | E095 | The app passed to `http.serve` reads a local of the fn that serves it — `let boot = random.int(1, 9)` in main read by the handler, or `let app = http.router(…)!` in main passed to `serve` | Make the value a top-level `let` (`let app = http.router(…)` at top level, served as `http.serve(8080, app!)!`), or compute it inside the handler per request |
 | E096 | A fn with a `mut` parameter used as a function value — `let f = bump`, `list.map(xs, bump)`, a record field, a list element, a return, `counter.bump` — a function type cannot carry the write-back to the caller's `var` | Call it directly (`bump(s)` with `var s`), or pass a lambda that names the `var` (`() => bump(s)`); as a callback argument, a lambda of the slot's arity that copies into a local `var` (`(item) => { var copy = item; bump(copy); copy }`); a fn that only changes its own copy drops `mut` and returns the new value |
+| E097 | `pub` before a `type`, `protocol` or `test` — `pub type Point = { … }`; a type and a protocol are public by default and a test has no visibility | Delete `pub` (machine-applicable, `almide fix`); narrow a type with `mod type` (project) or `local type` (file) |
 | E420 | Function visibility violation (callee is private) | Make the callee public, or add a public shim |
 
 A rustc 4-digit code (`error[E0XXX]`) leaking through always indicates

@@ -48,6 +48,8 @@ mod pass_clone_record_fields;
 pub mod pass_top_let_storage;
 pub mod pass_var_storage;
 pub mod pass_borrow_lowering;
+pub mod pass_slice_binders;
+pub mod pass_str_map_key;
 pub mod owned_source;
 pub mod pass_fan_lowering;
 pub mod pass_list_pattern;
@@ -340,7 +342,9 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     // string builder amortized O(n) instead of reallocating every step.
     s.push_str("impl AlmideConcat<String> for String { type Output = String; #[inline(always)] fn concat(self, rhs: String) -> String { let mut s = self; s.push_str(&rhs); s } }\n");
     s.push_str("impl AlmideConcat<&str> for String { type Output = String; #[inline(always)] fn concat(self, rhs: &str) -> String { let mut s = self; s.push_str(rhs); s } }\n");
-    s.push_str("impl AlmideConcat<String> for &str { type Output = String; #[inline(always)] fn concat(self, rhs: String) -> String { format!(\"{}{}\", self, rhs) } }\n");
+    // A literal left operand (`"k" + x`) prepends into the owned right operand's buffer: no allocation
+    // when its capacity covers both (`int.to_string` reserves 19 bytes), else one grow — never a fresh String.
+    s.push_str("impl AlmideConcat<String> for &str { type Output = String; #[inline(always)] fn concat(self, rhs: String) -> String { let mut r = rhs; r.insert_str(0, self); r } }\n");
     s.push_str("impl AlmideConcat<&str> for &str { type Output = String; #[inline(always)] fn concat(self, rhs: &str) -> String { format!(\"{}{}\", self, rhs) } }\n");
     s.push_str("impl<T: Clone> AlmideConcat<Vec<T>> for Vec<T> { type Output = Vec<T>; #[inline(always)] fn concat(self, rhs: Vec<T>) -> Vec<T> { let mut r = self; r.extend(rhs); r } }\n");
     // ONE stdout buffer (#2245). `println` used to lower to Rust's `println!`,
@@ -700,6 +704,7 @@ fn rust_runtime_modules(needed: &std::collections::HashSet<&str>) -> String {
 
 mod runtime_crates;
 pub use runtime_crates::{runtime_crate_deps, RUNTIME_MODULE_CRATES};
+pub mod rust_idents;
 
 /// Emit the full `almide_rt` runtime crate source: the prelude (pub items +
 /// exported macros) plus every std-only runtime module. Built once into an
@@ -756,24 +761,11 @@ fn emit_source(program: &mut IrProgram, target: Target, config: &target::TargetC
             for m in &program.used_stdlib_modules {
                 needed.insert(m.as_str());
             }
-            // A few operators lower to a runtime call (not a CallTarget::Module),
-            // so the IR's used-module set misses them — e.g. float `**` renders
-            // `almide_rt_math_fpow(..)` via the power_expr template. Union in any
-            // module whose `almide_rt_<module>_` symbol literally appears in the
-            // emitted user code so the body (and its transitive deps) is included.
-            for (name, _) in crate::generated::rust_runtime::RUST_RUNTIME_MODULES {
-                if !needed.contains(name)
-                    && user_code.contains(&format!("almide_rt_{}_", name))
-                {
-                    needed.insert(name);
-                }
-            }
-            // A TYPE reference is a use of the module that defines the type
-            // (#1829): `let e: Endian = BigEndian` names bytes.rs's enum
-            // without calling a `bytes.*` fn, and the call-driven set above
-            // left the module out. The reserved spelling in the user code is
-            // the reference — see `walker::runtime_owned::modules_spelled_in`.
-            needed.extend(walker::runtime_owned::modules_spelled_in(&user_code));
+            // The call-driven set misses an operator's runtime call (float `**`
+            // → `almide_rt_math_fpow`) and a runtime-owned TYPE reference
+            // (#1829): union in the modules the user code's IDENTIFIERS name,
+            // never its literals (#3486) — `rust_idents::referenced_runtime_modules`.
+            needed.extend(rust_idents::referenced_runtime_modules(&user_code));
             resolve_runtime_deps(&mut needed);
             output.push_str(&rust_runtime_modules(&needed));
             // matrix.rs calls `almide_kernel::…`; when matrix is included, drop the

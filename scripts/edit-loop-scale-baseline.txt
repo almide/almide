@@ -76,13 +76,25 @@ ratio 4.403
 # check cost is recorded here, not excused: re-anchoring is what the gate asks
 # for on a deliberate cost, and the half-band warning (#3328) is what should
 # have surfaced the first two steps.
-share_lex 0.1111
+# 2026-10-10 (#3511, #3509): share_lex/parse/check moved 0.1111/0.1201/0.7682
+# -> 0.1290/0.1386/0.7324. #3511 removed most of the check cost recorded above
+# (be61ee66f's E008 summaries skipped when no site can exist, one spellings walk,
+# E092 recording only with a @pure) and answered Sym resolve/intern from
+# per-thread caches; `almide check` on a real project measured 0.92-0.94x
+# v0.66.0 on GCE. The shares returned to the 2026-08-14 values (0.1340/0.1355/
+# 0.7320). Anchored at the median of the three Perf ratchet jobs since #3511:
+#     PR 5c77b9f20 job 113921652368     0.1290 0.1386 0.7324
+#     queue 0e53ddba6 job 113934453541  0.1241 0.1326 0.7433
+#     develop 0e53ddba6 job 113947299701 0.1340 0.1436 0.7224 (OVER 0.1333)
+# Three readings, not the 45-job window above: re-anchor again from a wider
+# window if the band proves tight.
+share_lex 0.1290
 #     share_parse  0.1334 0.1339 0.1341 0.1347 0.1363 0.1369 0.1371 0.1378
 #                  median 0.1355, 3.2% spread (2026-08-14, M4 Pro)
-share_parse 0.1201
+share_parse 0.1386
 #     share_check  0.7268 0.7269 0.7280 0.7290 0.7349 0.7351 0.7352 0.7352
 #                  median 0.7320, 1.2% spread (2026-08-14, M4 Pro)
-share_check 0.7682
+share_check 0.7324
 # slope_check — `slope` localized to the phase that owns it. The aggregate reads
 #   1.15; the split shows lex 1.00 and parse 1.03 flat and the checker carrying
 #   all of the superlinearity. Anchoring it separately means a checker going

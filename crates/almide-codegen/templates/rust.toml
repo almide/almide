@@ -432,6 +432,10 @@ template = "{object}.get(&{key}).cloned()"
 [map_insert]
 template = "{target}.insert({key}, {value});"
 
+# `m[k] = e(map.get_or(m, k, d))` in one probe (walker/statements_map_upsert.rs).
+[map_upsert]
+template = "{target}.upsert_with({key}, {default}, |{old}| {value});"
+
 [index_assign]
 template = "{target}[{index} as usize] = {value};"
 

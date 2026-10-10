@@ -1,0 +1,9 @@
+import fs
+
+// The annotated `let` wants the call's `ok` type. Its E001 (`expected String
+// but got Result[String, String]`) is the E006's residue and is not reported
+// separately: the E006 hint names the `!` (#3515).
+pub fn first_word(path: String) -> String = {
+  let text: String = fs.read_text(path)
+  string.trim(text)
+}

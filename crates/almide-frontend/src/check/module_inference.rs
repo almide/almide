@@ -29,6 +29,7 @@ impl Checker {
         self.validate_float_overflow_literals();
         self.validate_numeric_narrowing();
         self.validate_unresolved_binding_types();
+        self.validate_type_param_inference();
         self.validate_implicit_propagation();
         self.lint_error_surface(program);
         self.check_bounded_profile(program);
@@ -96,8 +97,7 @@ impl Checker {
             Some(module_name.to_string()),
         );
         self.validate_protocol_refs(prog);
-        self.validate_bare_type_visibility(prog);
-        self.validate_qualified_type_heads(prog);
+        self.validate_type_spellings(prog);
         self.validate_alias_cycles(&prog.decls);
         self.body_diag_start = self.diagnostics.len();
         self.reject_user_prim_import(&prog.imports);
@@ -128,6 +128,13 @@ impl Checker {
     /// bracket as `infer_module`; decls are cloned so the module AST stays
     /// pristine for the real inference later.
     pub fn refresh_module_top_lets(&mut self, prog: &ast::Program, module_name: &str) {
+        self.refresh_top_lets(prog, toplet_order::TopLetScope::Module(module_name));
+    }
+
+    /// The top-let pre-pass, for a module or — reached only from
+    /// `infer_program` — the entry program (#3485).
+    fn refresh_top_lets(&mut self, prog: &ast::Program, scope: toplet_order::TopLetScope<'_>) {
+        let module_name = scope.module_name();
         if !prog.decls.iter().any(|d| matches!(d, ast::Decl::TopLet { .. })) {
             return;
         }
@@ -163,6 +170,7 @@ impl Checker {
             self.deferred_generic_calls.len(),
             self.deferred_eq_checks.len(),
             self.deferred_cascade_diags.len(),
+            self.deferred_type_param_checks.len(),
         );
 
         let self_name = self.env.self_module_name.map(|s| s.to_string());
@@ -220,11 +228,13 @@ impl Checker {
         self.deferred_generic_calls.truncate(saved_deferred_lens.12);
         self.deferred_eq_checks.truncate(saved_deferred_lens.13);
         self.deferred_cascade_diags.truncate(saved_deferred_lens.14);
+        self.deferred_type_param_checks.truncate(saved_deferred_lens.15);
         // #3164: the ENTRY program has no prefixed key to carry the result —
         // its bare keys are the real ones — so the refreshed types go back
         // onto them, where the main pass reads them. (A module's prefixed keys
-        // survive the restore; `infer_module` adopts them.)
-        if module_name == "__entry" {
+        // survive the restore; `infer_module` adopts them.) The entry is
+        // known by the scope tag, not by a name a user module can take (#3485).
+        if matches!(scope, toplet_order::TopLetScope::Entry) {
             toplet_order::adopt_top_lets(&mut self.env, toplet_order::unqualify_entry(refreshed));
         }
     }
