@@ -299,6 +299,25 @@ fn gen_call(b: &mut Builder, goal: &GenType) -> Option<String> {
     Some(format!("{}.{}({})", sig.module, sig.func, args.join(", ")))
 }
 
+/// A direct call of catalogue entry `idx` at generated arguments, with the
+/// concrete type it returns — the `--focus` binding every focused program
+/// starts with. `None` when the instantiated return type cannot be printed.
+pub fn gen_focus_call(b: &mut Builder, idx: usize) -> Option<(String, GenType)> {
+    let sig = b.catalogue[idx].clone();
+    let mut subst = sig.forced_bindings();
+    bind_free_vars(b, &sig, &mut subst)?;
+    let ret = sig.ret.instantiate(&subst)?;
+    if !ret.is_observable() {
+        return None;
+    }
+    let mut args = Vec::with_capacity(sig.params.len());
+    for (i, p) in sig.params.iter().enumerate() {
+        let name = sig.param_names.get(i).map(String::as_str).unwrap_or("");
+        args.push(gen_arg(b, p, name, &subst)?);
+    }
+    Some((format!("{}.{}({})", sig.module, sig.func, args.join(", ")), ret))
+}
+
 /// Parameter names that denote a count/size/index and so must receive a
 /// SMALL value, never a boundary `INT_POOL` extreme: a `repeat`/`pad`
 /// count of `u32::MAX` (or a negative one) would exhaust memory or panic

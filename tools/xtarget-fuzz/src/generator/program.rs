@@ -9,7 +9,7 @@
 
 use crate::rng::SplitMix64;
 
-use super::term::{gen_expr, Builder, ScopeVar, MAX_GOAL_DEPTH, START_FUEL};
+use super::term::{gen_expr, gen_focus_call, Builder, ScopeVar, MAX_GOAL_DEPTH, START_FUEL};
 use super::types::{render_print, GenType};
 use super::{Generated, Origin, Signature};
 
@@ -91,7 +91,14 @@ fn pick_elem(rng: &mut SplitMix64) -> GenType {
 }
 
 /// Synthesize one complete program from the current RNG state.
+#[cfg(test)]
 pub fn synthesize(rng: &mut SplitMix64, catalogue: &[Signature]) -> Generated {
+    synthesize_focused(rng, catalogue, None)
+}
+
+/// [`synthesize`], and with `focus` (a catalogue index) the first binding is a
+/// direct call of that function; the bindings after it may consume it.
+pub fn synthesize_focused(rng: &mut SplitMix64, catalogue: &[Signature], focus: Option<usize>) -> Generated {
     let n_bindings = rng.in_range(MIN_BINDINGS, MAX_BINDINGS) as usize;
 
     let mut builder = Builder {
@@ -105,6 +112,17 @@ pub fn synthesize(rng: &mut SplitMix64, catalogue: &[Signature]) -> Generated {
 
     // The observables: (binding name, type) we will println at the end.
     let mut observables: Vec<(String, GenType)> = Vec::new();
+
+    if let Some(idx) = focus {
+        builder.fuel = START_FUEL;
+        if let Some((call, ty)) = gen_focus_call(&mut builder, idx) {
+            let name = format!("r{}", builder.fresh);
+            builder.fresh += 1;
+            builder.stmts.push(format!("let {name}: {} = {call}", ty.render()));
+            builder.scope.push(ScopeVar { name: name.clone(), ty: ty.clone() });
+            observables.push((name, ty));
+        }
+    }
 
     for _ in 0..n_bindings {
         let goal = pick_goal(builder.rng);
