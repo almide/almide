@@ -118,6 +118,19 @@ fn parity(ctx: &Ctx, name: &str, args: &[String]) -> String {
     format!("{verdict}: seed {seed}, {count} programs; {focus}; unique findings {findings}")
 }
 
+/// A rebind step that multiplies the value (`flat_map`, `intersperse`)
+/// cannot run k steps; it is reported, not timed. Judged on the loop shape
+/// at size 16: the digest after 4 steps against the start.
+fn grows_per_step(ctx: &Ctx, t: &Target) -> Option<String> {
+    let at = |k: u64| -> Option<i64> {
+        let src = t.rebind_programs(16, k).into_iter().find(|(s, _)| *s == "loop")?.1;
+        let art = build(ctx, &src, Leg::Native).ok()?;
+        run_artifact(ctx, &art, Leg::Native).ok()?.trim().parse().ok()
+    };
+    let (Some(a), Some(b)) = (at(0), at(4)) else { return None };
+    (b > 2 * a + 8).then(|| format!("the value grows geometrically per step ({a} -> {b} after 4 steps)"))
+}
+
 fn expected_ratio(order: &str) -> Option<f64> {
     Some(match order {
         "1" => 1.0,
@@ -144,6 +157,10 @@ fn complexity(ctx: &Ctx, t: &Target, n: u64, order: Option<&str>, order_rebind: 
             ok = false;
             parts.push(s)
         }
+    }
+    if let Some(why) = t.rebind_param.and_then(|_| grows_per_step(ctx, t)) {
+        parts.push(format!("rebind shapes not timed: {why}"));
+        return format!("{}: {}", if ok { "PASS" } else { "FAIL" }, parts.join("; "));
     }
     for shape in ["loop", "tail", "fold"] {
         if t.rebind_param.is_none() {
@@ -177,8 +194,12 @@ fn judge(
     let mut k = 1u64;
     loop {
         let (p, b) = programs(n, k);
-        let d = delta(ctx, &p, &b, Leg::Native).map_err(|e| format!("{label} {e}"))?;
-        if d >= CALIBRATE_TARGET || k >= MAX_K {
+        // Both legs: a call one leg optimizes away must not drive k so high
+        // that the other leg runs for hours (eight list.* runs hit the
+        // 30-minute cap that way).
+        let dn = delta(ctx, &p, &b, Leg::Native).map_err(|e| format!("{label} {e}"))?;
+        let dw = delta(ctx, &p, &b, Leg::Wasm).map_err(|e| format!("{label} {e}"))?;
+        if dn.max(dw) >= CALIBRATE_TARGET || k >= MAX_K {
             break;
         }
         k = (k * 4).min(MAX_K);
@@ -278,12 +299,34 @@ fn build(ctx: &Ctx, src: &str, leg: Leg) -> Result<PathBuf, String> {
     Ok(art)
 }
 
+/// One run of a timing program may take this long; past it the run is
+/// killed and reported as a timeout, never as a time.
+const RUN_CAP: Duration = Duration::from_secs(60);
+
 fn run_artifact(ctx: &Ctx, art: &Path, leg: Leg) -> Result<String, String> {
-    let out = match leg {
-        Leg::Native => Command::new(art).output(),
-        Leg::Wasm => Command::new(&ctx.wasmtime).arg("run").arg(art).output(),
+    let mut cmd = match leg {
+        Leg::Native => Command::new(art),
+        Leg::Wasm => {
+            let mut c = Command::new(&ctx.wasmtime);
+            c.arg("run").arg(art);
+            c
+        }
+    };
+    let mut child = cmd
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    let start = Instant::now();
+    while child.try_wait().map_err(|e| e.to_string())?.is_none() {
+        if start.elapsed() > RUN_CAP {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(format!("timed out ({}s cap)", RUN_CAP.as_secs()));
+        }
+        std::thread::sleep(Duration::from_millis(5));
     }
-    .map_err(|e| e.to_string())?;
+    let out = child.wait_with_output().map_err(|e| e.to_string())?;
     if !out.status.success() {
         return Err(format!("exit {:?}: {}", out.status.code(), first_error(&out.stderr)));
     }

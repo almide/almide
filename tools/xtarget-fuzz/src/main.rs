@@ -56,6 +56,7 @@ fn main() {
         "ladder" => cmd_ladder(&args[2..]),
         "gen" => cmd_gen(&args[2..]),
         "stats" => cmd_stats(),
+        "catalogue" => Engine::new(&resolve_repo(&args[2..])).catalogue_names().iter().for_each(|n| println!("{n}")),
         "inspect" => inspect::cmd_inspect(&args[2..]),
         "-h" | "--help" | "help" => print_usage(),
         other => {
@@ -75,6 +76,7 @@ fn print_usage() {
          \x20 xtarget-fuzz ladder <file.almd> [--timeout S]\n\
          \x20 xtarget-fuzz gen    --seed N --index I [--family F]\n\
          \x20 xtarget-fuzz stats\n\
+         \x20 xtarget-fuzz catalogue   (the `module.fn` names --focus and inspect can reach)\n\
          \x20 xtarget-fuzz inspect <module.fn> [--order O] [--order-rebind O] [--n N] [--count C] [--seed S]\n\
          \x20   the stdlib inspection ledger's harness (proofs/stdlib-inspection.toml); O = 1|log|n|nlogn|n2\n\n\
          --family all|identity|synthesis|composition|shape  (default: all)\n\
