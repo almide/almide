@@ -51,6 +51,7 @@ pub mod pass_borrow_lowering;
 pub mod pass_slice_binders;
 pub mod pass_str_map_key;
 pub mod owned_source;
+pub mod pass_owned_source_hoist;
 pub mod pass_fan_lowering;
 pub mod pass_list_pattern;
 mod pass_list_pattern_nested;

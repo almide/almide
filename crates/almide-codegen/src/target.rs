@@ -29,6 +29,7 @@ use super::pass_match_subject::MatchSubjectPass;
 use super::pass_pattern_literal_guard::PatternLiteralGuardPass;
 use super::pass_effect_inference::EffectInferencePass;
 use super::pass_tco::TailCallOptPass;
+use super::pass_owned_source_hoist::OwnedSourceHoistPass;
 use super::pass_licm::LICMPass;
 use super::pass_peephole::PeepholePass;
 use super::pass_range_counting::RangeCountingVarsPass;
@@ -144,6 +145,10 @@ fn build_pipeline(target: Target) -> Pipeline {
                 // a `&T` param the step only reads stays `&T` (#2278).
                 .add(StreamFusionPass)
         .add(BorrowInsertionPass)
+        // OwnedSourceHoist (#3519): `list.slice(xs, 1, list.len(xs))` binds
+        // its scalar later arguments first, so the source can be the call's
+        // last read — before the two passes that decide its move.
+        .add(OwnedSourceHoistPass)
         // TCO: convert self-recursive tail calls to loops AFTER BorrowInsertion
         // (so that param types are already finalized — avoids String/&str mismatch)
         .add(TailCallOptPass)
