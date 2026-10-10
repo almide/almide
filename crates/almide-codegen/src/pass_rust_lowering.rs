@@ -25,7 +25,11 @@ impl NanoPass for RustLoweringPass {
     fn targets(&self) -> Option<Vec<Target>> { Some(vec![Target::Rust]) }
 
     /// Routes `fan` shapes before the fan lowering strips their auto-try.
-    fn depends_on(&self) -> Vec<&'static str> { vec!["CloneInsertion"] }
+    /// After StdlibLowering: the list-push rewrite reads the call shapes that
+    /// pass leaves; run before it, the emitted appends differ
+    /// (`almide_rt_list_push(xs, ..)` against `xs.push(..)` — found by
+    /// pass-shuffle seed 3 once OwnedSourceHoist, #3519, shifted its draws).
+    fn depends_on(&self) -> Vec<&'static str> { vec!["CloneInsertion", "StdlibLowering"] }
     fn run_before(&self) -> Vec<&'static str> { vec!["FanLowering"] }
     fn postconditions(&self) -> Vec<Postcondition> { vec![Postcondition::Custom(verify_push_targets_are_places)] }
 
