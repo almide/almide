@@ -357,6 +357,55 @@ fn a_range_op_at_its_sources_last_use_moves_it_into_the_owned_twin() {
     );
 }
 
+/// #3519: a later argument that reads the source only as a scalar
+/// (`list.len(xs)`, `list.is_empty(xs)`) is bound first, so a source dead
+/// after the call still moves into the owned twin — in a loop param (`walk`,
+/// the issue's 7× head/tail recursion) and in a local (`dead`). `kept` reads
+/// its source again after the call, so it must still borrow; `other` reads it
+/// in a later argument through a non-scalar op, which is not bound early and
+/// keeps today's borrow.
+fn scalar_later_arg_program() -> String {
+    "fn walk(xs: List[List[Int]], k: Int) -> Int =\n\
+     \x20 if list.len(xs) == 0 then k else walk(list.slice(xs, 1, list.len(xs)), k + 1)\n\
+     \n\
+     fn mk() -> List[List[Int]] = list.map(list.range(0, 6), (i) => [i, i])\n\
+     \n\
+     effect fn main() -> Unit = {\n\
+     \x20 let dead = mk()\n\
+     \x20 let d = list.take(dead, if list.is_empty(dead) then 0 else list.len(dead) - 2)\n\
+     \x20 let kept = mk()\n\
+     \x20 let k = list.slice(kept, 1, list.len(kept))\n\
+     \x20 let other = mk()\n\
+     \x20 let o = list.slice(other, 1, list.len(list.reverse(other)))\n\
+     \x20 println(\"${walk(mk(), 0)} ${list.len(d)} ${list.len(k)} ${list.len(kept)} ${list.len(o)}\")\n\
+     }\n"
+        .to_string()
+}
+
+#[test]
+fn a_scalar_read_of_the_source_in_a_later_argument_still_lets_it_move() {
+    let (_dir, src, rust) = emit_rust("scalar_later_arg.almd", &scalar_later_arg_program());
+    let walk = fn_body(&rust, "walk");
+    assert!(
+        walk.contains("almide_rt_list_slice_owned(xs, 1i64, "),
+        "the loop param of `walk` is dead after `list.slice(xs, 1, list.len(xs))` but is not moved (#3519)\n{walk}"
+    );
+    assert!(!walk.contains("almide_rt_list_slice(&xs"), "`walk` still clones the kept elements (#3519)\n{walk}");
+    let main = fn_body(&rust, "__almide_main");
+    assert!(main.contains("almide_rt_list_take_owned(dead, "), "a dead local read by `list.len` in a later argument is not moved (#3519)\n{main}");
+    assert!(main.contains("almide_rt_list_slice(&kept, 1i64, "), "a source read again after the call must stay borrowed\n{main}");
+    assert!(!main.contains("almide_rt_list_slice_owned(kept"), "a source read again after the call is moved\n{main}");
+    assert!(main.contains("almide_rt_list_slice(&other, "), "a later argument that is not a scalar read of the source must keep the borrow\n{main}");
+
+    let run = Command::new(almide()).args(["run", src.to_str().unwrap()]).output().unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout).trim(),
+        "6 4 5 6 5",
+        "native run disagrees:\n{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+}
+
 /// The tail recursion of #3398 over 4000 strings, timed against its own
 /// control in the same binary: `moved` drops at the source's last use (the
 /// owned twin, no element cloned), `kept` reads the source once more after the
