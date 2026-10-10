@@ -50,7 +50,10 @@ read here is what the current compiler accepts.
   A user-declared effect fn is always fallible, so write `f()!` on every
   effect call — read the `!` like Swift `await` (it marks where the world is
   touched); it is Swift `try`, never `try!`. On a stdlib effect fn that cannot
-  fail the `!` is a no-op.
+  fail the `!` is a no-op. An effect fn returning `Option[T]` (`args.option`,
+  `args.positional_at`) takes the `!` before a default:
+  `args.positional_at(0)! ?? "in.txt"` — `!` propagates the error, `??`
+  defaults the none (without the `!`, `??` wants an `Option[T]`: E001).
 - Generics use `[T]` (not `<T>`). Variants use leading `|`.
 - `match` is exhaustive; missing arms emit a warning.
 - Multiple lets chain by newline (no `in`). No `let rec`, no `head :: tail`
