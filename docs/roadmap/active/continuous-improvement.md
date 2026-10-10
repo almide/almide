@@ -443,6 +443,56 @@ warning count against develop, not by the rounded grade.
   - CI found that the #3522 repair, declared machine-applicable, did not round-trip through `almide fix` (`diagnostic_coverage_test`). The cause is #3523: `fix` canonicalized the entry with no imported modules, so a call such as `args.positional_at` stayed unresolved and its fix-it never reached the engine.
   - `fix` now resolves imports as `check` does; an import that does not resolve falls back to the old single-file check. The coverage test and the fix tests pass, and codopsy `src` is unchanged (A 93, 11 warnings).
 - **Next:** land #3527, then #3519 row 2 and #3518.
+- **Later the same night:** #3527 merged (a8b6ea442), closing #3522 and #3523; the seal PR #3528 merged (69f3ce972). #3519 stays open for row 2.
+
+### 2026-10-10 (overnight) — #3519 row 2 (wasm prepend), #3518 (fuzz aggregate and route), Gramide re-check on v0.67.1
+
+- **#3519 row 2, written and tested:** a self tail call's `[e] + acc`, for the parameter it rebinds, grows the block in place on wasm.
+  - Cause, read from the emitted module (develop a8b6ea442, `wasm-tools print`): `$concat` made a full copy every step. On a list of handles that meant +1 on every element of the copy and −1 on every element of the released `acc`.
+  - Each outgrown block also sat between the inner lists allocated since, so the large-block list (#3348) could neither coalesce it nor fit the next, bigger request.
+  - Measured (macOS arm64, wasmtime, wall time, n = 30,000): 4.16 s and 1.27 GB peak RSS, against native 0.45 s. At n = 7,500 / 15,000 / 30,000 the times were 0.06 / 0.25 / 3.98 s, and RSS jumped from 9 MB to 1.27 GB at the last step.
+  - Fix: `tail_list_prepend_arg` (`crates/almide-wasm/src/tail_append.rs`) takes the append window's path, `$cow` plus `$list_push_*` with the same Dup discipline. It then shifts the old slots right with `memory.copy` and moves the pushed element to slot 0. Slots move, credits do not.
+  - Lowering hands the argument over as `{ let t = [e]; t + acc }`, so the window has its own operand matcher.
+  - After (same machine and settings):
+
+    | case | before | after |
+    |---|---|---|
+    | nested prepend, n = 30,000 | 4.16 s, 1.27 GB | 0.02 s, 17 MB |
+    | soak shard-5 repro (`slow5/r.almd`) on wasm | 8.24 s | 0.66 s (native 1.07 s; outputs byte-identical) |
+    | flat `[i] + acc` | 0.05 s, 9.3 MB | 0.05 s, 16.2 MB |
+
+    The flat case now takes this path too; its peak RSS is the cost.
+  - Tests in `tests/string_accumulator_growth_test.rs`:
+    - 30,000 nested prepends under a 32 MiB `--heap-cap`. The develop binary prints `Error: out of memory`; the fix completes.
+    - A native/wasm comparison over every slot kind (Int, Float, String, Bool, list, record, variant), an element shared with the caller, an `acc` the caller still holds (the `$cow` copy), and an element that reads `acc`.
+  - Heap blocks live at exit: 0 before and after. Allocations 3,331 → 1,123.
+  - Corpus ledgers that moved:
+
+    | fixture | allocations | bytes allocated | heap peak |
+    |---|---|---|---|
+    | `grain_gc_shapes` | 4,544 → 553 | 16.0 MB → 37 KB | 131,264 → 98,496 |
+    | `koka_hqueens` | 4,626 → 4,371 | 68,252 → 65,016 | 71,088 → 70,800 |
+    | `ref_gleam_tail_deep` | 18 → 11 | — | — |
+    | `koka_186_reused_names` | 133 → 130 | — | — |
+
+    Module size grows 35–338 bytes in those four, because the shift is emitted inline at the call site.
+  - codopsy `crates/almide-wasm/src` A 91, 37 warnings, unchanged.
+- **#3518, written and tested:** the aggregate moved into `scripts/fuzz-night-aggregate.sh`.
+  - The count stays unique-by-name, the documented design that keeps one bug from filing twice.
+  - A second instance of a name is now kept in `<name>/instances/<k>/` instead of being `cp`'d over. `instances=` counts them, and the issue body lists every instance's replay line.
+  - `fuzz-night-route.sh` posts to the oldest open issue of the class whose title starts with "Nightly fuzz:", not the newest open issue carrying the label.
+  - Two tests added; both fail on the old scripts and pass here.
+- **Gramide observations, re-checked on the v0.67.1 release binary** (macOS arm64, `almide run` / `build`, both legs where it applies):
+
+  | # | Observation | Result |
+  |---|---|---|
+  | 1 | loop-state read through a `mut` param | `[1, 2, 3]` on both legs |
+  | 2 | read-only closure capture | `count_big(xs: &[i64], …)` borrows; 300 calls over 100,000 elements take 0.00 s user |
+  | 3 | head read via `??`, a list pattern and `option.map` | all three take `&[Vec<i64>]`; 600,000 head reads of 2,000-element lists take 0.06 s user |
+  | 4 | field accumulate and interpolation, 200,000 steps each | 0.01 s user |
+  | 5 | `json.stringify` of control characters | `\u0000 \u0001 \u0008 \u000c \u001b \u001f` on both legs |
+
+  None reproduces on v0.67.1.
 
 ## Edit loop on a real project: O6lvl4/gramide 0.2.11
 

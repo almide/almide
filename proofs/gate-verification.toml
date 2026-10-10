@@ -301,6 +301,16 @@ varies = "run 31515916427: correctness=1 rendered a red verdict; PR #1238's 3-mo
 blind = "whether anyone acts on a finding: the verdict ends in the step summary and a fuzz-findings issue, and nothing measures the hand-off (#2379) -> UNCOMPENSATED (#3033); defect shapes the generator cannot produce -> UNCOMPENSATED"
 
 [[gate]]
+path = "scripts/fuzz-night-aggregate.sh"
+reads = "scalar"
+wired_by = ".github/workflows/fuzz-nightly.yml, tests/fuzz_night_report_test.rs"
+class = "NEGATIVE_TESTED"
+evidence = "#3518 (2026-10-10), the aggregate moved out of the workflow's inline step: tests/fuzz_night_report_test.rs forges three shards that produce one Slow name (indexes 6585, 3635, 17) beside one OutputDivergence, and asserts findings=2 slow=1 correctness=1 instances=4 with three distinct meta.txt kept. Run against the old inline shape (`cp -R` to the basename), the same forge fails: the second and third instances are copied over the first and only one replay line reaches the issue body — the v0.67.0-rc2 soak (run 38010058439) lost its shard-5 Slow reproduction that way. Before the move, #2611 forged the lone-shard flat layout the any-depth find exists for (run 36051987508 had concluded green with a correctness finding in its only artifact)"
+measures = "unique finding names per class (findings, slow, leak, correctness) and finding instances, read from the shards' tools/xtarget-fuzz/findings directories in the downloaded artifacts"
+varies = "run 38010058439 (v0.67.0-rc2 soak): findings=1 slow=1 from two Slow instances; run 38040279550 (nightly on d1b15a115): findings=0"
+blind = "two different bugs whose findings share one name count once, by design (the dedup keeps one bug from filing twice) -> scripts/fuzz-night-issue-body.sh (it lists every instance's replay line); a shard that uploaded nothing has no findings directory to aggregate -> scripts/fuzz-night-verdict.sh"
+
+[[gate]]
 path = "proofs/check-wasm-fallback.sh"
 reads = "UNCLASSIFIED"
 wired_by = ".github/workflows/ci.yml"
