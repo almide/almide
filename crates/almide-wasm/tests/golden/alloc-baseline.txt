@@ -307,7 +307,7 @@
 68912	spec/wasm_cross/hash_digests.almd
 68640	spec/wasm_cross/heap_arena.almd
 65888	spec/wasm_cross/heap_result_err_interp.almd
-65888	spec/wasm_cross/heap_result_if_append.almd
+65872	spec/wasm_cross/heap_result_if_append.almd
 87104	spec/wasm_cross/heap_result_if_bind.almd
 66160	spec/wasm_cross/heap_result_if_bind_chain.almd
 86832	spec/wasm_cross/heap_result_if_eq_cond.almd
@@ -365,7 +365,7 @@
 69152	spec/wasm_cross/json_number_unicode.almd
 67904	spec/wasm_cross/json_parse_lenient_edges.almd
 71328	spec/wasm_cross/json_path_edges.almd
-70064	spec/wasm_cross/json_path_index_domain.almd
+70032	spec/wasm_cross/json_path_index_domain.almd
 68224	spec/wasm_cross/json_string_span.almd
 69408	spec/wasm_cross/json_stringify_control_chars.almd
 70432	spec/wasm_cross/json_stringify_nonfinite.almd
@@ -701,7 +701,7 @@
 66208	spec/wasm_cross/ref_rust_or_pattern_heap_subject.almd
 70768	spec/wasm_cross/regex_captures_accumulator_release.almd
 74384	spec/wasm_cross/regex_engine.almd
-93856	spec/wasm_cross/regex_fuzz_batch.almd
+93728	spec/wasm_cross/regex_fuzz_batch.almd
 67840244	spec/wasm_cross/regex_repetition_depth.almd
 ~	spec/wasm_cross/repeat_size_ceiling.almd
 65920	spec/wasm_cross/replace_empty_pat.almd
