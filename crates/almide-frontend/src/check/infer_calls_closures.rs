@@ -933,6 +933,10 @@ impl Checker {
         let t = self.infer_expr(inner);
         let ft = self.infer_expr(fallback);
         let resolved = resolve_ty(&t, &self.uf);
+        // #3522: an effect fn's `Option[T]` call with a `T` fallback wants `!`.
+        if let Some(payload) = self.report_qq_missing_bang(inner, fallback, &resolved, &ft) {
+            return payload;
+        }
         let inner_ty = if let Some(ty) = resolved.option_inner().or_else(|| resolved.result_ok_ty()) {
             ty
         } else if matches!(&resolved, Ty::Unknown | Ty::TypeVar(_)) {

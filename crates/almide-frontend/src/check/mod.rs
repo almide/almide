@@ -41,6 +41,7 @@ mod prim_wrappers;
 mod exhaustiveness;
 mod call_defaults;
 mod effect_isolation_cascade;
+mod qq_effect_bang;
 
 use almide_lang::ast;
 use almide_base::diagnostic::Diagnostic;
@@ -349,6 +350,9 @@ pub struct Checker {
     /// #3515: the E006s on fallible effect callees whose hint names the `!`,
     /// and the cascade E001s they own (`effect_isolation_cascade.rs`).
     pub(crate) isolation_cascade: effect_isolation_cascade::IsolationCascade,
+    /// #3522: the calls to effect fns declared `-> Option[T]`, for the `??`
+    /// whose fallback is that `T` (`qq_effect_bang.rs`).
+    pub(crate) effect_option_calls: qq_effect_bang::EffectOptionCalls,
     /// #2927: the expectation handed to the NEXT `infer_expr` (a tail
     /// position's), and the one of the expression being inferred now. See
     /// `arm_blame.rs`.
@@ -701,6 +705,7 @@ impl Checker {
             deferred_implicit_prop_checks: Vec::new(),
             effect_call_spans: std::collections::HashSet::new(),
             isolation_cascade: Default::default(),
+            effect_option_calls: Default::default(),
             tail_expect: None,
             expr_expect: None,
             fallible_marker_fns: std::collections::HashSet::new(),
