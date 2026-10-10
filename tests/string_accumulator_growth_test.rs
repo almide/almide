@@ -308,3 +308,79 @@ effect fn main() -> Unit = {
     assert!(want.starts_with("[9] [50, 40, 30, 20, 10, 9]\n"), "{want}");
     assert_eq!(run(&core, true), want, "core wasm");
 }
+
+
+/// #3530: a `list.fold` callback that pushes onto its accumulator — either
+/// end — took `$concat`'s copy per step (30,000 steps: 3.7 s and 1.28 GB on
+/// wasm, 0.3 s native): the callback's `a` is not rebound by its own
+/// expression, so only the fold body's DYING note can hand the concat its
+/// credit. Both directions run under the 32 MiB ceiling.
+#[test]
+fn a_fold_that_pushes_onto_its_accumulator_grows_in_place() {
+    let dir = tempfile::tempdir().expect("scratch");
+    let source = dir.path().join("fold_push.almd");
+    std::fs::write(
+        &source,
+        r#"effect fn main() -> Unit = {
+  let front = list.range(0, 30000) |> list.fold([], (a, i) => [[i]] + a)
+  let back = list.range(0, 30000) |> list.fold([], (a, i) => a + [[i]])
+  println("front=${list.len(front)} ${list.get(front, 0) ?? []} back=${list.len(back)} ${list.get(back, 0) ?? []}")
+}
+"#,
+    )
+    .expect("source");
+    let cap = ["--heap-cap", "33554432"];
+    let native = build(dir.path(), &source, "native", &cap);
+    let core = build(dir.path(), &source, "core.wasm", &[&cap[..], &["--target", "wasm"]].concat());
+    let expected = "front=30000 [29999] back=30000 [0]\n";
+    assert_eq!(run(&native, false), expected, "native");
+    assert_eq!(run(&core, true), expected, "core wasm");
+}
+
+/// The fold window takes the accumulator's credit only where the body's
+/// last read of it is the push: an arm that returns the accumulator as is, an
+/// element that reads it, a shared `init` (the `$cow` copy keeps `base`), a
+/// `match` on it, and a handle element shared by every step — each printed by
+/// both legs and compared.
+#[test]
+fn the_fold_push_window_agrees_with_native() {
+    let dir = tempfile::tempdir().expect("scratch");
+    let source = dir.path().join("fold_kinds.almd");
+    std::fs::write(
+        &source,
+        r#"type P = { x: Int, s: String }
+
+fn keep_small(xs: List[Int]) -> List[List[Int]] =
+  xs |> list.fold([], (a, i) => if list.len(a) >= 3 then a else [[i]] + a)
+
+effect fn main() -> Unit = {
+  let xs = list.range(0, 8)
+  println("${keep_small(xs)}")
+  println("${xs |> list.fold([], (a, i) => [list.len(a)] + a)}")
+  let base = [[100]]
+  let grown = xs |> list.fold(base, (a, i) => [[i]] + a)
+  println("${base} ${grown}")
+  let grown2 = xs |> list.fold(base, (a, i) => a + [[i * 2]])
+  println("${base} ${grown2}")
+  let m = xs |> list.fold([], (a, i) => match a {
+    [] => [i],
+    _ => [i * 10] + a,
+  })
+  println("${m}")
+  let ps = xs |> list.fold([], (a, i) => [{ x: i, s: "p${i}" }] + a)
+  println("${ps}")
+  let shared = ["s"]
+  let ss = xs |> list.fold([], (a, i) => [shared] + a)
+  println("${shared} ${list.len(ss)} ${ss}")
+  let fs = xs |> list.fold([], (a, i) => a + [int.to_float(i) * 0.5])
+  println("${fs}")
+}
+"#,
+    )
+    .expect("source");
+    let native = build(dir.path(), &source, "native", &[]);
+    let core = build(dir.path(), &source, "core.wasm", &["--target", "wasm"]);
+    let want = run(&native, false);
+    assert!(want.contains("[[100]] [[7], [6], [5], [4], [3], [2], [1], [0], [100]]"), "{want}");
+    assert_eq!(run(&core, true), want, "core wasm");
+}
