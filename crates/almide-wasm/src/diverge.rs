@@ -62,7 +62,10 @@ impl Emitter<'_> {
                 }
                 Ok(w)
             }
-            _ => self.lower_node(e, want),
+            _ => match self.try_concat_dying(e)? {
+                Some(t) => Ok(t),
+                None => self.lower_node(e, want),
+            },
         }
     }
 }

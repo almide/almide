@@ -54,7 +54,8 @@ fn consumed_read(value: &IrExpr) -> Option<&IrExpr> {
             &args[0]
         }
         IrExprKind::SpreadRecord { base, .. } => base.as_ref(),
-        _ => return None,
+        // #3530: a one-element push onto the var, at either end.
+        _ => return crate::concat_dying::concat_read(value),
     };
     matches!(read.kind, IrExprKind::Var { .. }).then_some(read)
 }
@@ -82,7 +83,17 @@ fn inert(e: &IrExpr) -> bool {
 /// them.
 fn tail_consumed_reads<'e>(e: &'e IrExpr, subjects: &mut Vec<&'e IrExpr>, out: &mut Vec<&'e IrExpr>) {
     match &e.kind {
-        IrExprKind::Block { expr: Some(t), .. } => tail_consumed_reads(t, subjects, out),
+        // A temp-bound concat (#3530) is judged as a whole, before its tail.
+        IrExprKind::Block { expr: Some(t), .. } => match crate::concat_dying::concat_read(e) {
+            Some(read) => {
+                if let IrExprKind::Var { id } = &read.kind
+                    && !subjects.iter().any(|s| crate::rc_ownership::rc_mentions_var(s, *id))
+                {
+                    out.push(read);
+                }
+            }
+            None => tail_consumed_reads(t, subjects, out),
+        },
         IrExprKind::If { then, else_, .. } => {
             tail_consumed_reads(then, subjects, out);
             tail_consumed_reads(else_, subjects, out);
@@ -257,7 +268,7 @@ impl Emitter<'_> {
     /// The local of the var `read` names when the read was noted dying and
     /// the frame holds the var's credit in a plain local — consuming the
     /// note. `None`: the read shares as before.
-    fn dying_local(&mut self, read: &IrExpr) -> Option<(VarId, u32, SliceTy)> {
+    pub(crate) fn dying_local(&mut self, read: &IrExpr) -> Option<(VarId, u32, SliceTy)> {
         if !self.owned_call_marks.take_dying(read) || self.metered {
             return None;
         }
@@ -267,7 +278,7 @@ impl Emitter<'_> {
     }
 
     /// The dying var's credit has moved out: empty its local.
-    fn empty_dying(&mut self, id: VarId, idx: u32) {
+    pub(crate) fn empty_dying(&mut self, id: VarId, idx: u32) {
         self.f.instructions().i32_const(0).local_set(idx);
         self.witness_move_and_empty(id, false);
     }
