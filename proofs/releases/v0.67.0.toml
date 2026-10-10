@@ -1,0 +1,27 @@
+# Release evidence seal — v0.67.0. IMMUTABLE: every [derived] field is
+# re-measured from the tag's tree by `scripts/release-seal.sh check`;
+# an edit that disagrees with the tag fails CI. [recorded] fields are
+# facts the tag cannot re-derive (fill them in before committing).
+
+[release]
+version = "0.67.0"
+tag = "v0.67.0"
+tag_commit = "e2cb6c3b4474620f3da8af84b7fa60e36cbe2211"
+date = "2026-10-10"
+url = "https://github.com/almide/almide/releases/tag/v0.67.0"
+
+[derived]
+cargo_version = "0.67.0"
+contracts_sha256 = "eb41b56ee906c4ff4b15aa477c3687b26aac221c131eb86cdc0dc27ff93dfdea"
+contracts_total = "376"
+contracts_flagged = "0"
+abstain_ledger_sha256 = "c953796d0ce50c8afc764afe3e111606e03935378bbdb141948ddd963bbfd797"
+abstain_ledger_entries = "21"
+wasm_cross_fixtures = "939"
+rust_toolchain = "1.96.0"
+wasmtime = "v49.0.1"
+
+[recorded]
+release_gate = "Minor release through the rc channel (#1484), rc1-rc2; the final is tagged on the rc2 commit (e2cb6c3b4, release PR #3517, tree of develop c8a814398). rc1 (277cf7cff) canary found the epoch-10 breaks (almide/parsegen, O6lvl4/gramide types; almide/porta permissions), declared in proofs/dialect-epochs.toml; between rc1 and rc2 the I-miscompile/I-divergence #3504 and regressions #3509/#3512 were fixed (#3507, #3511, #3513). Release-gate fuzz soak on v0.67.0-rc2 = the tag commit (fuzz-nightly run 38010058439): shards 8/8, 480.5 of 480 planned minutes delivered, 90,096 programs generated, 0 correctness findings, 0 leak, 2 Slow findings (wasm completed within the 10x confirm budget, byte-identical to native: seed 608160935026 index 6585 = known wasm fan gap #3003/#3331; seed 608160935029 index 3635 reduced to #3519) — the verdict printed findings=1 because same-named finding dirs collide (#3518). Blocker gate at the tag: 0 (#1482). Interface diff v0.66.0 -> v0.67.0: breaking (added=11 removed=9; #1488), every removal a reader turned effect fn, declared in epochs 8 and 13 (--allow-breaking). Trust spine on the tag green (run 38015125621, dossier attached). Downstream canary v0.66.0 -> v0.67.0 ran AFTER the tag (run 38015230745): 44 projects, 6 REGRESSION + 2 known-good-earlier; 4 are declared epoch breaks (almide-dojo: epoch 13 args readers; almide/parsegen and almide/porta: epoch 10; O6lvl4/comide: epoch 8 io.read_byte), 2 are the codegen regression #3520 (O6lvl4/hew, O6lvl4/ctxgate: rustc E0308), fixed for v0.67.1."
+assets = "7: almide-linux-x86_64.tar.gz, almide-linux-aarch64.tar.gz, almide-macos-x86_64.tar.gz, almide-macos-aarch64.tar.gz, almide-windows-x86_64.zip, almide-checksums.sha256 (all five verify), almide-dossier-v0.67.0.md"
+known_problems = "Release-blocking after the fact: #3520 (regression, A-codegen) — a `list.get(xs, i) ?? d` passed to a borrowed param inside a loop renders `Some(h) => h.clone(), None => &d` (rustc E0308); O6lvl4/hew and O6lvl4/ctxgate do not build natively on v0.67.0; fixed in v0.67.1. Open at the tag, not blocking: (1) #3519 (A-perf) — native `list.slice(xs, 1, list.len(xs))` deep-clones a dead source (7x slower than wasm on a list of lists); (2) #3518 (A-ci) — the nightly fuzz verdict counts same-named findings once and posts Slow findings to the newest fuzz-perf issue; (3) the args-reader epoch diagnostic: `args.positional_at(0) ?? \"x\"` reports E001 on the fallback without naming the missing `!` (seen in almide-dojo)."
