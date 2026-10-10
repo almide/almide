@@ -1,0 +1,4 @@
+expects_code = "E001"
+expects_error = "type mismatch in ?? fallback: expected Option[String] but got String"
+hint_substring = "is an effect fn"
+expects_line_col = "7:41"

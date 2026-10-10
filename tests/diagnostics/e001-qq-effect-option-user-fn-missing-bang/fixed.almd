@@ -1,0 +1,9 @@
+// `load` is an effect fn declared `-> String?`: its call is a
+// Result[Option[String], String]. `!` propagates the Err, then `??` defaults
+// the none (#3522).
+effect fn load(path: String) -> String? = if path == "" then none else some(path)
+
+effect fn main() -> Unit = {
+  let config = load("app.toml")! ?? "none"
+  println(config)
+}

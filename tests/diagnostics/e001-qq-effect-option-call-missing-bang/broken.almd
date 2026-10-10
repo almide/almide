@@ -1,0 +1,9 @@
+import args
+
+// args.positional_at is an effect fn declared `-> String?`: its call is a
+// Result[Option[String], String], so `??` here defaults the Err and wants an
+// Option[String]. The repair is `!` before `??` (#3522).
+effect fn main() -> Unit = {
+  let ledger = args.positional_at(0) ?? "ledger.toml"
+  println(ledger)
+}
