@@ -100,13 +100,16 @@ impl Emitter<'_> {
         let Some(&(idx, SliceTy::List(h))) = self.locals.get(var) else {
             return Ok(false);
         };
-        let Some((left, right)) = concat_operands(value, almide_ir::BinOp::ConcatList) else {
-            return Ok(false);
+        let is_var = |e: &IrExpr| matches!(&e.kind, IrExprKind::Var { id } if id == var);
+        // `data + [e]` appends; `[e] + data` (#3519) pushes, then shifts.
+        let (lit, front) = match concat_operands(value, almide_ir::BinOp::ConcatList) {
+            Some((left, right)) if is_var(left) => (right, false),
+            _ => match crate::tail_append::prepend_operands(value) {
+                Some((left, right)) if is_var(right) => (left, true),
+                _ => return Ok(false),
+            },
         };
-        if !matches!(&left.kind, IrExprKind::Var { id } if id == var) {
-            return Ok(false);
-        }
-        let IrExprKind::List { elements } = &right.kind else {
+        let IrExprKind::List { elements } = &lit.kind else {
             return Ok(false);
         };
         let [elem] = &elements[..] else {
@@ -131,7 +134,11 @@ impl Emitter<'_> {
         self.rc_share_guard(elem, el);
         self.witness_store(elem, el);
         let push = if el.slot_size() == 8 { F_LIST_PUSH_8 } else { F_LIST_PUSH_4 };
-        self.f.instructions().call(push).local_set(idx);
+        self.f.instructions().call(push);
+        if front {
+            self.shift_pushed_to_front(el.slot_size())?;
+        }
+        self.f.instructions().local_set(idx);
         self.rc_own(idx, SliceTy::List(h));
         Ok(true)
     }
