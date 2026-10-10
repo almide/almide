@@ -21,6 +21,7 @@ mod catalogue;
 pub mod composition;
 mod denylist;
 pub mod identity;
+pub mod inspect_gen;
 mod mutate;
 mod pools;
 /// The shape vocabulary of the multi-module matrix gate (#3309), shared
@@ -235,6 +236,16 @@ impl Engine {
 
     pub fn family(&self) -> Family {
         self.family
+    }
+
+    /// The inspection target for `module.fn` (`xtarget-fuzz inspect`).
+    pub fn inspect_target(&self, name: &str) -> Result<inspect_gen::Target, String> {
+        let sig = self
+            .catalogue
+            .iter()
+            .find(|s| format!("{}.{}", s.module, s.func) == name)
+            .ok_or_else(|| format!("{name}: not in the generator's catalogue"))?;
+        inspect_gen::Target::new(sig)
     }
 
     /// Centre the campaign on one stdlib function (`module.fn`, the stdlib

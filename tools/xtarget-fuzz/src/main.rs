@@ -21,6 +21,7 @@
 mod availability;
 mod findings;
 mod generator;
+mod inspect;
 mod metamorph;
 mod minimize;
 mod oracle;
@@ -55,6 +56,7 @@ fn main() {
         "ladder" => cmd_ladder(&args[2..]),
         "gen" => cmd_gen(&args[2..]),
         "stats" => cmd_stats(),
+        "inspect" => inspect::cmd_inspect(&args[2..]),
         "-h" | "--help" | "help" => print_usage(),
         other => {
             eprintln!("unknown subcommand: {other}\n");
@@ -72,7 +74,9 @@ fn print_usage() {
          \x20 xtarget-fuzz replay --seed N --index I [--family F]\n\
          \x20 xtarget-fuzz ladder <file.almd> [--timeout S]\n\
          \x20 xtarget-fuzz gen    --seed N --index I [--family F]\n\
-         \x20 xtarget-fuzz stats\n\n\
+         \x20 xtarget-fuzz stats\n\
+         \x20 xtarget-fuzz inspect <module.fn> [--order O] [--order-rebind O] [--n N] [--count C] [--seed S]\n\
+         \x20   the stdlib inspection ledger's harness (proofs/stdlib-inspection.toml); O = 1|log|n|nlogn|n2\n\n\
          --family all|identity|synthesis|composition|shape  (default: all)\n\
          \x20 `shape` runs ONLY the multi-module family (#3309): projects of sibling\n\
          \x20 modules and path-dependency packages with top-level lets of every kind,\n\
