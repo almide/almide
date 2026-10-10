@@ -1,0 +1,8 @@
+// Near miss of #3522: `first_word` is a PURE fn returning Option[String], so
+// `??` unwraps the Option and the fallback must be a String — no `!` involved.
+fn first_word(s: String) -> String? = list.get(string.split(s, " "), 0)
+
+effect fn main() -> Unit = {
+  let w = first_word("hello world") ?? 0
+  println(w)
+}
