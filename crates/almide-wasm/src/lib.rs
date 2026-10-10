@@ -535,7 +535,6 @@ impl SliceTy {
     }
 }
 
-
 // ── literal pool ────────────────────────────────────────────────────────
 
 fn len_memarg() -> MemArg {
