@@ -493,6 +493,18 @@ warning count against develop, not by the rounded grade.
   | 5 | `json.stringify` of control characters | `\u0000 \u0001 \u0008 \u000c \u001b \u001f` on both legs |
 
   None reproduces on v0.67.1.
+- **#3529 merged** (7a479e4b6), closing #3518 and #3519.
+- **The rest of the push/prepend family, written and tested** (branch `prepend-assign-3519`, #3530):
+  - **Assignment.** `acc = [[i]] + acc` in a `while` loop went from 3.94 s / 1.30 GB to 0.02 s / 18 MB on wasm. Native takes 0.17 s.
+  - **Fold.** `list.fold([], (a, i) => [[i]] + a)` went from 3.66 s / 1.27 GB to 0.02 s / 18 MB, and `a + [[i]]` from 3.91 s to 0.00 s. Native takes 0.31 s.
+  - **Why the fold needed its own path.** The callback parameter `a` is never reassigned by the callback itself; the fold reassigns its accumulator afterwards. The fold already marks the callback's last read of `a` as dying (#3406), so in `concat_dying.rs` a dying list variable's `+ [e]` / `[e] +` takes over the accumulator's reference and grows the block in place.
+  - **Corpus allocations** went down in every fixture that moved, and none went up:
+    - `json_path_edges` 781 → 681;
+    - `regex_fuzz_batch` 1,663 → 1,601.
+
+    Module size moved by −219 to +217 bytes. The size-ladder total went from 178,393 to 178,318.
+  - **First full gate run.** It found that the #2344 pool-deduplication invariant needed the new `$cow`-then-write site declared: it writes only list blocks, and lists are never pooled. That premise is itself checked by the same test file. All other gates passed.
+  - **codopsy** `crates/almide-wasm/src` stays at A 91 with 37 warnings. The crate root went to 801 lines at first, which produced one `max-lines` warning; removing a duplicate blank line brought it back under the 800-line budget.
 
 ## Edit loop on a real project: O6lvl4/gramide 0.2.11
 
