@@ -292,7 +292,7 @@
 65776	spec/wasm_cross/global_in_both_arms.almd
 65696	spec/wasm_cross/global_in_shortcircuit_operand.almd
 65840	spec/wasm_cross/grain_functions.almd
-131264	spec/wasm_cross/grain_gc_shapes.almd
+98496	spec/wasm_cross/grain_gc_shapes.almd
 66000	spec/wasm_cross/grain_pattern_destructure.almd
 65920	spec/wasm_cross/grain_pattern_guards.almd
 66160	spec/wasm_cross/grain_records_enums.almd
@@ -374,7 +374,7 @@
 66096	spec/wasm_cross/kernel_conformance.almd
 66496	spec/wasm_cross/koka_186_reused_names.almd
 66016	spec/wasm_cross/koka_beans_pairs.almd
-71088	spec/wasm_cross/koka_hqueens.almd
+70800	spec/wasm_cross/koka_hqueens.almd
 66048	spec/wasm_cross/koka_inline4_joinsep.almd
 65952	spec/wasm_cross/koka_inline_ctor_reuse.almd
 66272	spec/wasm_cross/koka_issue894_seq_match.almd
@@ -688,7 +688,7 @@
 65760	spec/wasm_cross/ref_gleam_div_zero_abort.almd
 65872	spec/wasm_cross/ref_gleam_fnvalue_shadow.almd
 65888	spec/wasm_cross/ref_gleam_or_pattern_alternatives.almd
-65984	spec/wasm_cross/ref_gleam_tail_deep.almd
+65888	spec/wasm_cross/ref_gleam_tail_deep.almd
 66624	spec/wasm_cross/ref_grain_nan_struct.almd
 65840	spec/wasm_cross/ref_grain_or_pattern_alias_match.almd
 65760	spec/wasm_cross/ref_int_min_div_abort.almd
