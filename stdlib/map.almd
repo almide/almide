@@ -26,6 +26,7 @@ fn get_or[K, V](m: Map[K, V], key: K, default: V) -> V = _
 
 /// Copy with key -> value; existing keys stay put.
 @intrinsic("almide_rt_map_set")
+@reuse(m)
 @consume(m)
 fn set[K, V](m: Map[K, V], key: K, value: V) -> Map[K, V] = _
 
@@ -40,10 +41,12 @@ fn remove[K, V](m: Map[K, V], key: K) -> Map[K, V] = _
 
 /// Every key, in insertion order.
 @intrinsic("almide_rt_map_keys")
+@reuse(m)
 fn keys[K, V](m: Map[K, V]) -> List[K] = _
 
 /// Every value, in key insertion order.
 @intrinsic("almide_rt_map_values")
+@reuse(m)
 fn values[K, V](m: Map[K, V]) -> List[V] = _
 
 /// Entry count; 0 for an empty map.
@@ -52,6 +55,7 @@ fn len[K, V](m: Map[K, V]) -> Int = _
 
 /// (key, value) pairs in insertion order.
 @intrinsic("almide_rt_map_entries")
+@reuse(m)
 fn entries[K, V](m: Map[K, V]) -> List[(K, V)] = _
 
 /// a plus b's entries; b wins on shared keys.
@@ -71,6 +75,7 @@ fn from_list[K, V](pairs: List[(K, V)]) -> Map[K, V] = _
 // ── closure-bearing (direct runtime dispatch — map has no IterChain) ──
 /// Same keys and order, values replaced by f(v).
 @intrinsic("almide_rt_map_map_values")
+@reuse(m)
 fn map[K, V, B](m: Map[K, V], f: (V) -> B) -> Map[K, B] = _
 
 /// Entries where f(k, v) holds, order kept.
@@ -106,6 +111,7 @@ fn update[K, V](m: Map[K, V], key: K, f: (V) -> V) -> Map[K, V] = _
 // lookups and a cloned-out V; upsert does one walk in place.
 /// key -> f(old) if present, else init appended.
 @intrinsic("almide_rt_map_upsert")
+@reuse(m)
 @consume(m)
 fn upsert[K, V](m: Map[K, V], key: K, init: V, f: (V) -> V) -> Map[K, V] = _
 

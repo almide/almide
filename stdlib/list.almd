@@ -73,10 +73,12 @@ fn flatten[T](xss: List[List[T]]) -> List[T] = _
 // tests/list_read_only_source_borrow_test.rs.
 /// First n elements; all if n >= len or n < 0.
 @intrinsic("almide_rt_list_take")
+@reuse(xs)
 fn take[A](xs: List[A], n: Int) -> List[A] = _
 
 /// All but the first n; [] if n >= len or n < 0.
 @intrinsic("almide_rt_list_drop")
+@reuse(xs)
 fn drop[A](xs: List[A], n: Int) -> List[A] = _
 
 /// All but the first element; [] when empty.
@@ -142,6 +144,7 @@ fn filter[A](xs: List[A], f: (A) -> Bool) -> List[A] = _
 
 /// First element where f holds, or none.
 @intrinsic("almide_rt_list_find")
+@reuse(xs)
 fn find[A](xs: List[A], f: (A) -> Bool) -> A? = _
 
 /// true if f holds for some x; false when empty.
@@ -179,10 +182,12 @@ fn sort_by[A, B](xs: List[A], f: (A) -> B) -> List[A] = _
 
 /// Longest prefix where f holds.
 @intrinsic("almide_rt_list_take_while")
+@reuse(xs)
 fn take_while[A](xs: List[A], f: (A) -> Bool) -> List[A] = _
 
 /// Rest after the longest prefix where f holds.
 @intrinsic("almide_rt_list_drop_while")
+@reuse(xs)
 fn drop_while[A](xs: List[A], f: (A) -> Bool) -> List[A] = _
 
 /// (where f holds, the rest), order kept.
@@ -231,6 +236,7 @@ fn range(start: Int, end: Int) -> List[Int] = _
 
 /// Indices start..<end, clamped; [] if start >= end.
 @intrinsic("almide_rt_list_slice")
+@reuse(xs)
 fn slice[A](xs: List[A], start: Int, end: Int) -> List[A] = _
 
 /// Copy with val at i; i >= len or i < 0 appends.
@@ -262,10 +268,12 @@ fn dedup[A](xs: List[A]) -> List[A] = _
 
 /// Last n elements; all if n >= len or n < 0.
 @intrinsic("almide_rt_list_take_end")
+@reuse(xs)
 fn take_end[A](xs: List[A], n: Int) -> List[A] = _
 
 /// All but the last n; [] if n >= len or n < 0.
 @intrinsic("almide_rt_list_drop_end")
+@reuse(xs)
 fn drop_end[A](xs: List[A], n: Int) -> List[A] = _
 
 /// Random permutation; unseeded, differs per run.
