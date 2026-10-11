@@ -176,8 +176,12 @@ const WEIGHT_OVERRIDES: &[(&str, &str, u32)] = &[
 ];
 
 /// Build the full catalogue: parse every bundled module, admit the
-/// usable signatures, attach weights. Done once at startup.
+/// usable signatures, attach weights. Done once at startup. A function no
+/// wasm build path serves is left out: a program that calls it fails the
+/// wasm build with the documented E081 every time, which is a finding about
+/// the generator, not about either leg.
 pub fn build() -> Vec<Signature> {
+    let unavailable = wasm_unavailable(TARGET_AVAILABILITY);
     let mut out = Vec::new();
     for &(module, source) in BUNDLED_MODULES {
         let program = match parse(source) {
@@ -186,11 +190,57 @@ pub fn build() -> Vec<Signature> {
         };
         for decl in &program.decls {
             if let Some(sig) = signature_from_decl(module, decl) {
-                out.push(sig);
+                if !unavailable.contains(&format!("{}.{}", sig.module, sig.func)) {
+                    out.push(sig);
+                }
             }
         }
     }
     out
+}
+
+/// The declared availability matrix (#1423), the same file the E081
+/// check-time diagnostic reads.
+const TARGET_AVAILABILITY: &str = include_str!("../../../../proofs/target-availability.toml");
+
+/// `module.fn` of every row whose `legs` include `stock-p1`: the default
+/// `build --target wasm` serves it on no path (E081).
+fn wasm_unavailable(toml: &str) -> std::collections::HashSet<String> {
+    let mut out = std::collections::HashSet::new();
+    let mut current: Option<String> = None;
+    for line in toml.lines().map(str::trim) {
+        if let Some(v) = line.strip_prefix("fn = ") {
+            current = Some(v.trim_matches('"').to_string());
+        } else if line.starts_with("legs = ") && line.contains("\"stock-p1\"") {
+            if let Some(f) = current.take() {
+                out.insert(f);
+            }
+        } else if line.starts_with('[') {
+            current = None;
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod availability_tests {
+    use super::*;
+
+    #[test]
+    fn native_only_functions_are_left_out_of_the_catalogue() {
+        let unavailable = wasm_unavailable(TARGET_AVAILABILITY);
+        assert!(unavailable.contains("matrix.linear_q1_0_row_no_bias"));
+        let cat = build();
+        assert!(!cat.iter().any(|s| unavailable.contains(&format!("{}.{}", s.module, s.func))));
+        assert!(cat.iter().any(|s| s.module == "matrix" && s.func == "dot_row"), "a served matrix fn stays");
+    }
+
+    #[test]
+    fn only_stock_p1_rows_count() {
+        let t = "[[unavailable]]\nfn = \"a.x\"\nlegs = [\"structural\"]\n[[unavailable]]\nfn = \"a.y\"\nlegs = [\"structural\", \"stock-p1\"]\n";
+        let u = wasm_unavailable(t);
+        assert!(!u.contains("a.x") && u.contains("a.y"));
+    }
 }
 
 /// Parse `.almd` source into a `Program`, tolerating the parser's
