@@ -203,6 +203,7 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_UPDATE_ALLOC", Flag, Harness, "regenerate the structural leg's allocation baseline"),
     sw("ALMIDE_UPDATE_DUMPS", Flag, Harness, "regenerate the structural leg's section-dump goldens"),
     sw("ALMIDE_UPDATE_GAUNTLET", Flag, Harness, "regenerate the gauntlet manifest"),
+    sw("ALMIDE_UPDATE_INSPECTION", Flag, Harness, "add the missing rows to the stdlib inspection ledger and reset the stale ones"),
     sw("ALMIDE_UPDATE_INTERP_LEDGER", Flag, Harness, "regenerate the interpreter abstain and bridge-fallback ledgers"),
     sw("ALMIDE_UPDATE_NATIVE_OWN", Flag, Harness, "regenerate the native result-ownership ledger"),
     sw("ALMIDE_UPDATE_SIZES", Flag, Harness, "regenerate the structural leg's size baselines"),

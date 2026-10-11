@@ -10,7 +10,7 @@
 //! clears the stamp and the function goes back to the queue. The number of
 //! uninspected rows may only fall (`uninspected_ceiling`).
 //!
-//! `ALMIDE_INSPECTION_BLESS=1` appends a skeleton row for each function the
+//! `ALMIDE_UPDATE_INSPECTION=1` appends a skeleton row for each function the
 //! ledger lacks and rewrites stale signatures as uninspected, then fails, so
 //! the change is reviewed rather than silently accepted.
 use std::collections::BTreeMap;
@@ -169,7 +169,7 @@ fn every_public_stdlib_function_has_one_ledger_row_and_stamps_carry_evidence() {
         problems.push(format!("{uninspected} uninspected rows over the ceiling {ceiling} — the ceiling only falls"));
     }
 
-    if std::env::var("ALMIDE_INSPECTION_BLESS").is_ok() && (!missing.is_empty() || !stale_sig.is_empty()) {
+    if std::env::var("ALMIDE_UPDATE_INSPECTION").is_ok() && (!missing.is_empty() || !stale_sig.is_empty()) {
         let mut out = text.clone();
         for n in &stale_sig {
             // A changed signature voids the stamp: the row is rewritten whole.
