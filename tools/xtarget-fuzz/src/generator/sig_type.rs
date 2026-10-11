@@ -81,7 +81,10 @@ impl SigType {
                     ("List", 1) => {
                         Some(SigType::List(Box::new(Self::from_type_expr(&args[0])?)))
                     }
-                    ("Option", 1) => {
+                    // `A?` parses as `Generic { name: "?" }`: without this arm
+                    // every `option.*` and every `A?`-returning `list.get` /
+                    // `first` / `find` was outside the catalogue.
+                    ("Option" | "?", 1) => {
                         Some(SigType::Option(Box::new(Self::from_type_expr(&args[0])?)))
                     }
                     ("Result", 2) => Some(SigType::Result(
