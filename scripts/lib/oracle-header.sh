@@ -4,21 +4,19 @@
 # goldens from the same commit's release binary in CI and fails on any diff.
 #
 # `oracle_header` prints the one `# oracle:` line each manifest starts with —
-# the generator's `almide --version` and the git HEAD it ran at. The SHA is
-# informational: a rebase changes it, so the gate diffs the ROWS and ignores
-# the line (`git diff -I '^# oracle: '`). The VERSION and build kind in it are
+# the generator's `almide --version` with any stamped build SHA dropped. No
+# commit is written (2026-10-12): it was informational (the gate diffs the ROWS and
+# ignores the line, `git diff -I '^# oracle: '`), and as the one line every
+# regeneration changed it made any two PRs that regenerated the manifests
+# conflict, each needing a replay. The VERSION and build kind in it are
 # not: every parity test reads them back through
 # `almide_corpus::verify_oracle_header` and refuses a manifest recorded by a
 # binary that is not `almide <Cargo.toml version> (dev…)` (#2405). Requires
 # $ORACLE to be set.
-#
-# HEAD is read where the script is sourced (the repo root) — the run generator
-# later cd's into the judge mount, whose HEAD is a different repository's.
 export LC_ALL=C   # the refusal below sorts (#1031); every sourcing script pins it too
-ORACLE_HEAD="$(git rev-parse --short=9 HEAD 2>/dev/null || printf 'unknown')"
 oracle_header() {
-  printf '# oracle: %s at %s — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)\n' \
-    "$("$ORACLE" --version | head -1)" "$ORACLE_HEAD"
+  printf '# oracle: %s — the CLI built from this tree; informational (scripts/check-parity-goldens.sh regenerates the rows and diffs them)\n' \
+    "$("$ORACLE" --version | head -1 | sed 's/(\([a-z]*\), [0-9a-f]*)/(\1)/')"
 }
 
 # Prepend the header to a finished (sorted) manifest in place.

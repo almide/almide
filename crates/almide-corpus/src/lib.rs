@@ -98,7 +98,8 @@ pub fn manifest_rows(text: &str) -> impl Iterator<Item = &str> {
 
 /// What the `# oracle:` header of a parity manifest records: the
 /// `almide --version` line of the binary that produced the rows, split into
-/// the parts the tests can check, and the git HEAD the generator ran at.
+/// the parts the tests can check. Headers written before 2026-10-12 also named
+/// the generator's git HEAD; it is parsed when present and never required.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OracleHeader {
     /// `0.63.0` — the `[package]` version the binary was built with.
@@ -107,12 +108,14 @@ pub struct OracleHeader {
     pub kind: String,
     /// The commit `make install` stamped into the binary, when it did.
     pub build_sha: Option<String>,
-    /// The generator's HEAD — informational: a rebase changes it.
-    pub head: String,
+    /// The generator's HEAD, on headers written before 2026-10-12. It was
+    /// informational (the gate never compared it), and it made two PRs that
+    /// regenerated the manifests conflict on this one line every time.
+    pub head: Option<String>,
 }
 
 /// Parse the first line of a manifest as its `# oracle:` header:
-/// `# oracle: almide <version> (<kind>[, <sha>]) at <head> — …`.
+/// `# oracle: almide <version> (<kind>[, <sha>])[ at <head>] — …`.
 pub fn oracle_header(text: &str) -> Result<OracleHeader, String> {
     let line = text.lines().next().unwrap_or("");
     let rest = line
@@ -127,12 +130,8 @@ pub fn oracle_header(text: &str) -> Result<OracleHeader, String> {
         Some((k, s)) => (k.to_string(), Some(s.to_string())),
         None => (paren.to_string(), None),
     };
-    let head = rest
-        .trim_start()
-        .strip_prefix("at ")
-        .and_then(|r| r.split_whitespace().next())
-        .ok_or("no `at <head>` after the build kind")?;
-    Ok(OracleHeader { version: version.to_string(), kind, build_sha, head: head.to_string() })
+    let head = rest.trim_start().strip_prefix("at ").and_then(|r| r.split_whitespace().next()).map(String::from);
+    Ok(OracleHeader { version: version.to_string(), kind, build_sha, head })
 }
 
 /// The `[package]` version of the root `Cargo.toml` — what `almide --version`
@@ -220,7 +219,9 @@ mod oracle_header_tests {
         assert_eq!(h.version, "0.63.0");
         assert_eq!(h.kind, "dev");
         assert_eq!(h.build_sha, None);
-        assert_eq!(h.head, "e8c95e285");
+        assert_eq!(h.head.as_deref(), Some("e8c95e285"));
+        let current = oracle_header("# oracle: almide 0.63.0 (dev) — the CLI built from this tree\n").expect("the current header parses");
+        assert_eq!((current.version.as_str(), current.kind.as_str(), current.head), ("0.63.0", "dev", None));
         let stamped = oracle_header("# oracle: almide 0.63.0 (dev, ac10929aa) at ac10929aa — x\n").expect("a stamped header parses");
         assert_eq!(stamped.build_sha.as_deref(), Some("ac10929aa"));
     }
