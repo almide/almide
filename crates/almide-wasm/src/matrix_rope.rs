@@ -88,6 +88,13 @@ impl Emitter<'_> {
         let hsin = self.hold_f64()?;
         let hcos = self.hold_f64()?;
         let mut i = self.f.instructions();
+        // #3575: head_dim < 2 leaves no pair, so every head is a no-op and none
+        // is walked — the geometry guard admits any head count when head_dim
+        // is 0, and 2^63 empty heads never finished. The guards above have
+        // already run on the caller's value.
+        i.local_get(hhd).i64_const(2).i64_lt_s().if_(BlockType::Empty);
+        i.i64_const(0).local_set(hnh);
+        i.end();
         // copy-through the whole payload once
         i.local_get(ho).i32_const(almide_layout::PAYLOAD as i32 + 8).i32_add();
         i.local_get(hm).i32_const(almide_layout::PAYLOAD as i32 + 8).i32_add();
@@ -258,6 +265,11 @@ impl Emitter<'_> {
         {
             let mut i = self.f.instructions();
             i.local_get(hdm).i64_extend_i32_u().local_get(hnh).i64_div_s().local_set(hdh);
+            // #3575: dh = 0 (more heads than columns) — no head covers a
+            // column or writes a cell, so none is walked.
+            i.local_get(hdh).i64_eqz().if_(BlockType::Empty);
+            i.i64_const(0).local_set(hnh);
+            i.end();
             i.f64_const(1.0f64.into());
             i.local_get(hdh).f64_convert_i64_s().f64_sqrt();
             i.f64_div().local_set(hscale);
