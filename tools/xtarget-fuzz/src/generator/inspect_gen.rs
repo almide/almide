@@ -34,7 +34,7 @@ const SIZE_LIKE_INT: &[&str] = &["n", "count", "times", "len", "size", "end", "w
 
 /// Element-typed parameters a search compares against: given a value no
 /// sized input holds, so the search scans to the end (its worst case).
-const SEARCH_PARAMS: &[&str] = &["x", "value", "elem", "item", "needle", "target"];
+const SEARCH_PARAMS: &[&str] = &["x", "value", "elem", "item", "needle", "target", "sub", "pattern", "from"];
 
 /// Functions that stop at the first `true` from their predicate: given a
 /// predicate that is always `false`, so they visit every element.

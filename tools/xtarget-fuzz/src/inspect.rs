@@ -348,7 +348,11 @@ fn hash(s: &str) -> u64 {
 /// every rebind shape at size n.
 fn alloc(ctx: &Ctx, t: &Target, n: u64) -> String {
     let mut progs = vec![("call", t.direct_program(n, 3, true))];
-    progs.extend(t.rebind_programs(n, 50));
+    // A rebind that multiplies the value cannot take 50 steps: it runs out
+    // of memory, and the count read off a trapped run is not a leak.
+    if t.rebind_param.is_some() && grows_per_step(ctx, t).is_none() {
+        progs.extend(t.rebind_programs(n, 50));
+    }
     let mut parts = Vec::new();
     let mut ok = true;
     for (label, src) in progs {
