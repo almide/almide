@@ -1121,6 +1121,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_UPDATE_GAUNTLET` | harness | regenerate the gauntlet manifest |
 | `ALMIDE_UPDATE_INSPECTION` | harness | add the missing rows to the stdlib inspection ledger and reset the stale ones |
 | `ALMIDE_UPDATE_INTERP_LEDGER` | harness | regenerate the interpreter abstain and bridge-fallback ledgers |
+| `ALMIDE_UPDATE_NAME_SITES` | harness | remove stale rows from the name-keyed property ledger and append the new sites (each still needs its `why`) |
 | `ALMIDE_UPDATE_NATIVE_OWN` | harness | regenerate the native result-ownership ledger |
 | `ALMIDE_UPDATE_SIZES` | harness | regenerate the structural leg's size baselines |
 | `ALMIDE_UPDATE_SIZE_LADDER` | harness | regenerate the stdlib-linking size ladder ledger (#2141) |
