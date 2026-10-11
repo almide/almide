@@ -12071,10 +12071,12 @@ fn flatten[T](xss: List[List[T]]) -> List[T] = _
 
 /// First n elements; all if n >= len or n < 0.
 @intrinsic("almide_rt_list_take")
+@reuse(xs)
 fn take[A](xs: List[A], n: Int) -> List[A] = _
 
 /// All but the first n; [] if n >= len or n < 0.
 @intrinsic("almide_rt_list_drop")
+@reuse(xs)
 fn drop[A](xs: List[A], n: Int) -> List[A] = _
 
 /// All but the first element; [] when empty.
@@ -12140,6 +12142,7 @@ fn filter[A](xs: List[A], f: (A) -> Bool) -> List[A] = _
 
 /// First element where f holds, or none.
 @intrinsic("almide_rt_list_find")
+@reuse(xs)
 fn find[A](xs: List[A], f: (A) -> Bool) -> A? = _
 
 /// true if f holds for some x; false when empty.
@@ -12177,10 +12180,12 @@ fn sort_by[A, B](xs: List[A], f: (A) -> B) -> List[A] = _
 
 /// Longest prefix where f holds.
 @intrinsic("almide_rt_list_take_while")
+@reuse(xs)
 fn take_while[A](xs: List[A], f: (A) -> Bool) -> List[A] = _
 
 /// Rest after the longest prefix where f holds.
 @intrinsic("almide_rt_list_drop_while")
+@reuse(xs)
 fn drop_while[A](xs: List[A], f: (A) -> Bool) -> List[A] = _
 
 /// (where f holds, the rest), order kept.
@@ -12229,6 +12234,7 @@ fn range(start: Int, end: Int) -> List[Int] = _
 
 /// Indices start..<end, clamped; [] if start >= end.
 @intrinsic("almide_rt_list_slice")
+@reuse(xs)
 fn slice[A](xs: List[A], start: Int, end: Int) -> List[A] = _
 
 /// Copy with val at i; i >= len or i < 0 appends.
@@ -12260,10 +12266,12 @@ fn dedup[A](xs: List[A]) -> List[A] = _
 
 /// Last n elements; all if n >= len or n < 0.
 @intrinsic("almide_rt_list_take_end")
+@reuse(xs)
 fn take_end[A](xs: List[A], n: Int) -> List[A] = _
 
 /// All but the last n; [] if n >= len or n < 0.
 @intrinsic("almide_rt_list_drop_end")
+@reuse(xs)
 fn drop_end[A](xs: List[A], n: Int) -> List[A] = _
 
 /// Random permutation; unseeded, differs per run.
@@ -17729,6 +17737,7 @@ fn get_or[K, V](m: Map[K, V], key: K, default: V) -> V = _
 
 /// Copy with key -> value; existing keys stay put.
 @intrinsic("almide_rt_map_set")
+@reuse(m)
 @consume(m)
 fn set[K, V](m: Map[K, V], key: K, value: V) -> Map[K, V] = _
 
@@ -17743,10 +17752,12 @@ fn remove[K, V](m: Map[K, V], key: K) -> Map[K, V] = _
 
 /// Every key, in insertion order.
 @intrinsic("almide_rt_map_keys")
+@reuse(m)
 fn keys[K, V](m: Map[K, V]) -> List[K] = _
 
 /// Every value, in key insertion order.
 @intrinsic("almide_rt_map_values")
+@reuse(m)
 fn values[K, V](m: Map[K, V]) -> List[V] = _
 
 /// Entry count; 0 for an empty map.
@@ -17755,6 +17766,7 @@ fn len[K, V](m: Map[K, V]) -> Int = _
 
 /// (key, value) pairs in insertion order.
 @intrinsic("almide_rt_map_entries")
+@reuse(m)
 fn entries[K, V](m: Map[K, V]) -> List[(K, V)] = _
 
 /// a plus b's entries; b wins on shared keys.
@@ -17774,6 +17786,7 @@ fn from_list[K, V](pairs: List[(K, V)]) -> Map[K, V] = _
 
 /// Same keys and order, values replaced by f(v).
 @intrinsic("almide_rt_map_map_values")
+@reuse(m)
 fn map[K, V, B](m: Map[K, V], f: (V) -> B) -> Map[K, B] = _
 
 /// Entries where f(k, v) holds, order kept.
@@ -17809,6 +17822,7 @@ fn update[K, V](m: Map[K, V], key: K, f: (V) -> V) -> Map[K, V] = _
 
 /// key -> f(old) if present, else init appended.
 @intrinsic("almide_rt_map_upsert")
+@reuse(m)
 @consume(m)
 fn upsert[K, V](m: Map[K, V], key: K, init: V, f: (V) -> V) -> Map[K, V] = _
 
