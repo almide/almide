@@ -26253,18 +26253,16 @@ fn to_list[A](o: A?) -> List[A] = _
 
 
 
+
+
+
+
+
+
 /// some(values) if no element is none, else none.
-fn collect[T](xs: List[T?]) -> List[T]? = list.fold(
-  xs,
-  some([]),
-  (acc, item) => match acc {
-    some(vals) => match item {
-      some(v) => some(vals + [v]),
-      none => none,
-    },
-    none => none,
-  },
-)
+fn collect[T](xs: List[T?]) -> List[T]? =
+  if list.any(xs, (o) => option.is_none(o)) then none
+  else some(list.filter_map(xs, (o) => o))
 
 /// some of all f(x), or none; f runs on every x.
 fn collect_map[T, U](xs: List[T], f: (T) -> U?) -> List[U]? = option.collect(list.map(xs, f))
