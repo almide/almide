@@ -205,6 +205,7 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_UPDATE_GAUNTLET", Flag, Harness, "regenerate the gauntlet manifest"),
     sw("ALMIDE_UPDATE_INSPECTION", Flag, Harness, "add the missing rows to the stdlib inspection ledger and reset the stale ones"),
     sw("ALMIDE_UPDATE_INTERP_LEDGER", Flag, Harness, "regenerate the interpreter abstain and bridge-fallback ledgers"),
+    sw("ALMIDE_UPDATE_NAME_SITES", Flag, Harness, "remove stale rows from the name-keyed property ledger and append the new sites (each still needs its `why`)"),
     sw("ALMIDE_UPDATE_NATIVE_OWN", Flag, Harness, "regenerate the native result-ownership ledger"),
     sw("ALMIDE_UPDATE_SIZES", Flag, Harness, "regenerate the structural leg's size baselines"),
     sw("ALMIDE_UPDATE_SIZE_LADDER", Flag, Harness, "regenerate the stdlib-linking size ladder ledger (#2141)"),
