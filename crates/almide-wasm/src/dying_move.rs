@@ -420,6 +420,34 @@ impl Emitter<'_> {
         Ok(Some(Lowered::owned(got)))
     }
 
+    /// `set.insert(s, x)` over a receiver whose credit the op may take
+    /// (#3552, the set twin of [`Self::try_map_set_owned`]); `None` keeps
+    /// the borrowed-receiver copy.
+    pub(crate) fn try_set_insert_owned(&mut self, s: &IrExpr, x: &IrExpr) -> Result<Option<Lowered>, EmitError> {
+        let Some(dying) = self.owned_receiver(s, &[x]) else { return Ok(None) };
+        self.owned_call_marks.set_moving(s, dying.is_some());
+        let got = self.lower_arg(s, None, ArgMode::Retain)?;
+        self.owned_call_marks.set_moving(s, false);
+        let SliceTy::Set(eh) = got else {
+            return unsup(&format!("set-op-of:{got:?}"));
+        };
+        let e = self.types.el(eh);
+        let sh = self.hold_i32()?;
+        self.f.instructions().local_set(sh);
+        if let Some((id, idx, _)) = dying {
+            self.empty_dying(id, idx);
+        }
+        let fns = self.set_insert_fns(e)?;
+        let xh = self.hold_for(e)?;
+        self.lower_arg(x, Some(e), ArgMode::Retain)?;
+        self.f.instructions().local_set(xh);
+        self.emit_set_insert_judged(sh, xh, e, fns)?;
+        self.f.instructions().local_get(sh);
+        self.release_for(e);
+        self.release_i32(); // sh
+        Ok(Some(Lowered::owned(got)))
+    }
+
     /// `{ ...b, f: e, … }` where `b` dies here: the rebuild in place of the
     /// module doc. `None` keeps the copy-then-overwrite route.
     pub(crate) fn try_spread_dying(

@@ -323,4 +323,86 @@ impl Emitter<'_> {
         self.f.instructions().end();
         Ok(())
     }
+
+    /// The helpers a judged `set.insert` calls (the set twin of
+    /// [`Self::map_set_fns`]): the member is the key, at offset 0.
+    pub(crate) fn set_insert_fns(&mut self, e: SliceTy) -> Result<MapSetFns, EmitError> {
+        let scan = self.keyed_find(e)?;
+        let append = self.keyed_append(e);
+        let reserve = self.work.helper(Helper::MapReserve);
+        let drop_map = self.dec_fn_of(SliceTy::Set(self.types.intern(e)));
+        Ok(MapSetFns { scan, append, reserve, drop_map })
+    }
+
+    /// `set.insert` over a receiver block `sh` whose ONE credit the caller
+    /// holds, the member `xh` under a Retain credit (#3552): the set twin
+    /// of [`Self::emit_map_set_judged`]. A present member leaves the block
+    /// as it is and gives the member's credit back. An absent one is
+    /// appended in place when the credit is the block's only one (through
+    /// `$map_reserve`'s growth and the index hook), else into the
+    /// functional copy, and the credit on the shared original goes. `sh`
+    /// holds the result.
+    pub(crate) fn emit_set_insert_judged(
+        &mut self,
+        sh: u32,
+        xh: u32,
+        e: SliceTy,
+        MapSetFns { scan, append, reserve, drop_map }: MapSetFns,
+    ) -> Result<(), EmitError> {
+        let esz = e.slot_size() as i32;
+        let rc = MemArg { offset: u64::from(almide_layout::RC.offset), align: 2, memory_index: 0 };
+        let oh = self.hold_i32()?;
+        let eh = self.hold_i32()?;
+        self.f.instructions().local_get(sh).i32_const(esz).i32_const(0).local_get(xh).call(scan).local_set(eh);
+        self.f.instructions().local_get(eh).if_(BlockType::Empty);
+        self.emit_release_hold(xh, e);
+        {
+            let mut i = self.f.instructions();
+            i.else_();
+            // the judge: a heap block whose only holder is this credit
+            i.local_get(sh).global_get(G_LINE_END).i32_ge_u();
+            i.local_get(sh).i32_load(rc).i32_const(1).i32_eq();
+            i.i32_and().if_(BlockType::Empty);
+            i.local_get(sh).local_set(oh);
+            i.local_get(sh).i32_const(esz).call(reserve).local_set(sh);
+            i.local_get(sh)
+                .i32_const(almide_layout::PAYLOAD as i32)
+                .i32_add()
+                .local_get(sh)
+                .i32_load(len_memarg())
+                .i32_add()
+                .local_get(xh);
+        }
+        self.store_ty_slot_raw(e);
+        {
+            let mut i = self.f.instructions();
+            i.local_get(sh).local_get(sh).i32_load(len_memarg()).i32_const(esz).i32_add().i32_store(len_memarg());
+            // the index follows the member (and the block, if it moved)
+            if let Some(append) = append {
+                i.local_get(oh).local_get(sh).i32_const(esz).i32_const(0).call(append).drop();
+            }
+            i.else_();
+        }
+        // shared (or a static): the functional copy grown by the member,
+        // and the holder's credit on the shared original goes with it
+        let (len_h, rh) = self.emit_copy_grow(sh, esz as u32)?;
+        let st = SliceTy::Set(self.types.intern(e));
+        self.emit_inc_entries(rh, st, Some(len_h));
+        self.f
+            .instructions()
+            .local_get(rh)
+            .i32_const(almide_layout::PAYLOAD as i32)
+            .i32_add()
+            .local_get(len_h)
+            .i32_add()
+            .local_get(xh);
+        self.store_ty_slot_raw(e);
+        self.f.instructions().local_get(sh).call(drop_map).local_get(rh).local_set(sh);
+        self.release_i32();
+        self.release_i32();
+        self.f.instructions().end().end();
+        self.release_i32(); // eh
+        self.release_i32(); // oh
+        Ok(())
+    }
 }
