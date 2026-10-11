@@ -594,11 +594,23 @@ fn counted(ctx: &Ctx, src: &str, leg: Leg) -> Result<(u64, Duration), String> {
     Ok(best)
 }
 
+/// glibc copies and fills large blocks with `rep movsb` / `rep stosb`, which
+/// retire as ONE instruction whatever the length: on c4-standard-4, copying
+/// 20 x 16 MB counted the same 56.1M instructions as 20 x 1 MB. A quadratic
+/// built from copies would count as linear. Raising the thresholds makes
+/// glibc copy with vector loops, whose count grows with the bytes moved
+/// (measured: +0.57M instructions per extra 300 MB, which a fit separates).
+/// Both legs reach glibc's memmove for bulk moves (wasmtime's
+/// `memory.copy` included), so both are counted the same way.
+const GLIBC_COUNTABLE_COPIES: &str =
+    "glibc.cpu.x86_rep_movsb_threshold=0xffffffffffffffff:glibc.cpu.x86_rep_stosb_threshold=0xffffffffffffffff";
+
 /// One run under `perf stat -x, -e instructions:u`: stdout, the count, and
 /// wall time. The count goes to a file so the program's stderr stays its own.
 fn run_counted(ctx: &Ctx, art: &Path, leg: Leg) -> Result<(String, u64, Duration), String> {
     let stat = ctx.dir.join(format!("stat-{}.csv", std::process::id()));
     let mut cmd = Command::new("perf");
+    cmd.env("GLIBC_TUNABLES", GLIBC_COUNTABLE_COPIES);
     cmd.args(["stat", "-x", ",", "-e", "instructions:u", "-o"]).arg(&stat).arg("--");
     match leg {
         Leg::Native => cmd.arg(art),
