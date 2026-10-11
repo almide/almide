@@ -655,7 +655,13 @@ pub(super) fn rc_cow_result_glue(expr_str: String, ty: &Ty) -> String {
         return expr_str;
     }
     match ty {
-        Ty::Bytes | Ty::Matrix | Ty::Applied(TC::Matrix, _) => {
+        // The value type is named: inferred, `AlmideRcCow::from(x)` leaves
+        // `x`'s type to the surrounding call, and a generic runtime result
+        // (`almide_rt_option_unwrap_or_else(…)`) then has nothing to fix it
+        // (E0282, found by the inspection's parity campaign).
+        Ty::Bytes => format!("AlmideRcCow::<Vec<u8>>::from({expr_str})"),
+        Ty::Matrix => format!("AlmideRcCow::<AlmideMatrix>::from({expr_str})"),
+        Ty::Applied(TC::Matrix, _) => {
             format!("AlmideRcCow::from({expr_str})")
         }
         Ty::Applied(TC::List, args) => {
