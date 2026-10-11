@@ -316,7 +316,7 @@
 65952	spec/wasm_cross/heap_result_if_record_arm.almd
 66112	spec/wasm_cross/heap_result_if_some_user_call_temps.almd
 65984	spec/wasm_cross/heap_result_if_str_int.almd
-66368	spec/wasm_cross/heap_result_tuple_return.almd
+66352	spec/wasm_cross/heap_result_tuple_return.almd
 65840	spec/wasm_cross/hex_two_module_link.almd
 66480	spec/wasm_cross/hof_closure_string_tail.almd
 87248	spec/wasm_cross/hof_fn_value_callbacks.almd
