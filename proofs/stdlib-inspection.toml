@@ -57,7 +57,8 @@
 #                      fresh stamp and demotes a row whose fingerprint moved.
 #                      NOT covered: a dedicated lowering arm inside
 #                      crates/almide-wasm (it cannot be cut per function) —
-#                      every stamped row is re-inspected on a schedule for that
+#                      every stamped row is to be re-inspected before each final
+#                      release for that (a manual GCE run: no credentials in CI)
 #
 # uninspected_ceiling = "821"
 
