@@ -257,7 +257,11 @@ pub fn almide_rt_matrix_rope_rotate_at(
         // (`0.0` vs `1.0`, both legs exit 0: the silent-wrong class). Exact
         // geometry writes every column, so this is invisible there.
         let mut new_row = row.to_vec();
-        for h in 0..n_heads_u {
+        // #3575: with no pair to rotate (head_dim 0 or 1) every head is a
+        // no-op, so no head is walked: the geometry rule admits any head count
+        // when head_dim is 0, and walking 2^63 empty heads only finished
+        // because LLVM deleted the loop (the wasm self-host ran it).
+        for h in 0..if half == 0 { 0 } else { n_heads_u } {
             let head_start = h * head_dim_u;
             for i in 0..half {
                 let j0 = head_start + 2 * i;
@@ -814,7 +818,11 @@ pub fn almide_rt_matrix_rope_rotate_neox_at(
         let row = &x[p];
         // #1419: copy through — see rope_rotate_at.
         let mut new_row = row.to_vec();
-        for h in 0..n_heads_u {
+        // #3575: with no pair to rotate (head_dim 0 or 1) every head is a
+        // no-op, so no head is walked: the geometry rule admits any head count
+        // when head_dim is 0, and walking 2^63 empty heads only finished
+        // because LLVM deleted the loop (the wasm self-host ran it).
+        for h in 0..if half == 0 { 0 } else { n_heads_u } {
             let head_start = h * head_dim_u;
             for j in 0..half {
                 let j0 = head_start + j;

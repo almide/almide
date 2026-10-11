@@ -304,8 +304,10 @@ fn __mx_head_geometry(nh: Int, head_dim: Int, rows: Int, cols: Int) -> Int = {
   nh
 }
 
+// #3575: a head with no pair (half == 0) is a no-op, and the geometry rule
+// admits any head count when head_dim is 0: stop instead of walking them all.
 fn __rope_heads(dh: Int, sh: Int, pos_f: Float, head_dim_f: Float, theta: Float, n_heads: Int, head_dim: Int, half: Int, h: Int) -> Int =
-  if h >= n_heads then 0
+  if h >= n_heads or half == 0 then 0
   else {
     let _p = __rope_pairs(dh, sh, pos_f, head_dim_f, theta, h, head_dim, half, 0)
     __rope_heads(dh, sh, pos_f, head_dim_f, theta, n_heads, head_dim, half, h + 1)
@@ -356,7 +358,7 @@ fn __rope_neox_pairs(dh: Int, sh: Int, pos_f: Float, head_dim_f: Float, theta: F
   }
 
 fn __rope_neox_heads(dh: Int, sh: Int, pos_f: Float, head_dim_f: Float, theta: Float, n_heads: Int, head_dim: Int, half: Int, h: Int) -> Int =
-  if h >= n_heads then 0
+  if h >= n_heads or half == 0 then 0
   else {
     let _p = __rope_neox_pairs(dh, sh, pos_f, head_dim_f, theta, h, head_dim, half, 0)
     __rope_neox_heads(dh, sh, pos_f, head_dim_f, theta, n_heads, head_dim, half, h + 1)
@@ -525,8 +527,9 @@ fn __mha_out(oh: Int, sch: Int, vmat: List[List[Float]], col0: Int, dh: Int, sk:
     __mha_out(oh, sch, vmat, col0, dh, sk, inv, j + 1)
   }
 
+// #3575: dh = 0 (more heads than columns) writes no cell: no head is walked.
 fn __mha_heads(oh: Int, qh: Int, kmat: List[List[Float]], vmat: List[List[Float]], nh: Int, dh: Int, sk: Int, sq: Int, i: Int, scale: Float, causal: Bool, h: Int) -> Int =
-  if h >= nh then 0
+  if h >= nh or dh == 0 then 0
   else {
     let col0 = h * dh
     let scores = prim.alloc_list_f64(sk)
