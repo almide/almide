@@ -349,7 +349,7 @@ pub fn gen_focus_call(b: &mut Builder, idx: usize) -> Option<(String, GenType)> 
     let mut subst = sig.forced_bindings();
     bind_free_vars(b, &sig, &mut subst)?;
     let ret = sig.ret.instantiate(&subst)?;
-    if !ret.is_observable() {
+    if ret.observe("v", 0).is_none() {
         return None;
     }
     let mut args = Vec::with_capacity(sig.params.len());

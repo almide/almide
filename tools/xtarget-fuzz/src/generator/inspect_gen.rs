@@ -253,7 +253,7 @@ impl Target {
     /// The return value can be printed: an observable type, or a top-level
     /// `Bytes` (printed as its byte list, see [`render_print`]).
     pub fn ret_is_observable(&self) -> bool {
-        self.ret.is_observable() || matches!(self.ret, GenType::Bytes | GenType::Matrix)
+        self.ret.observe("v", 0).is_some()
     }
 
     fn render_param(&self, i: usize) -> String {
