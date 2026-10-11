@@ -36,6 +36,10 @@ struct Ctx {
     /// `perf stat -e instructions:u` works here (a PMU is exposed): the
     /// complexity criterion counts instructions instead of timing.
     icount: bool,
+    /// The LD_PRELOAD byte counter ([`MEMSHIM_C`], compiled at start), or
+    /// None when no C compiler is here: then a counted verdict is reported
+    /// but not stampable, since bulk copies are invisible to instructions.
+    memshim: Option<PathBuf>,
 }
 
 #[derive(Clone, Copy)]
@@ -50,13 +54,16 @@ pub fn cmd_inspect(args: &[String]) {
         std::process::exit(2);
     };
     let repo = super::resolve_repo(args);
+    let dir = std::env::temp_dir().join(format!("xtarget-inspect-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    let icount = icount_available();
     let ctx = Ctx {
         almide: super::resolve_almide(&repo, args),
         wasmtime: super::resolve_wasmtime(),
-        dir: std::env::temp_dir().join(format!("xtarget-inspect-{}", std::process::id())),
-        icount: icount_available(),
+        memshim: if icount { build_memshim(&dir) } else { None },
+        dir,
+        icount,
     };
-    let _ = std::fs::create_dir_all(&ctx.dir);
     let target = Engine::with_family(&repo, Family::Synthesis).inspect_target(&name).unwrap_or_else(|e| {
         eprintln!("{e}");
         std::process::exit(2);
@@ -490,35 +497,44 @@ fn judge_counted(
         let (p, b) = programs(n, k);
         let dn = counted_delta(ctx, &p, &b, Leg::Native).map_err(|e| format!("{label} {e}"))?;
         let dw = counted_delta(ctx, &p, &b, Leg::Wasm).map_err(|e| format!("{label} {e}"))?;
-        if dn.0.max(dw.0) >= CALIBRATE_INSTRUCTIONS || k >= MAX_K {
+        if dn.instructions.max(dw.instructions) >= CALIBRATE_INSTRUCTIONS || k >= MAX_K {
             break;
         }
         k = (k * 4).min(MAX_K);
     }
     let sizes: Vec<u64> = (0..5).map(|i| n << i).collect();
-    let mut line = format!("{label} k={k} meter=instructions:u n={n}..{}", n << 4);
+    let mut line = format!("{label} k={k} meter=instructions:u+bytes-moved n={n}..{}", n << 4);
     let mut worst = 0usize;
     for leg in [Leg::Native, Leg::Wasm] {
         let mut ys = Vec::new();
+        let mut bs = Vec::new();
         let mut ts = Vec::new();
         for &m in &sizes {
             let (p, b) = programs(m, k);
-            let (y, t) = counted_delta(ctx, &p, &b, leg).map_err(|e| format!("{label} {e}"))?;
-            ys.push(y);
-            ts.push(t);
+            let d = counted_delta(ctx, &p, &b, leg).map_err(|e| format!("{label} {e}"))?;
+            ys.push(d.instructions);
+            bs.push(d.moved);
+            ts.push(d.wall);
         }
         let (class, rms) = fit_class(&sizes, &ys);
-        worst = worst.max(class);
+        let (bclass, brms) = fit_class(&sizes, &bs);
+        worst = worst.max(class).max(bclass);
         let tag = if matches!(leg, Leg::Native) { "native" } else { "wasm" };
-        let counts: Vec<String> = ys.iter().map(|y| format!("{:.3e}", y)).collect();
+        let sci = |v: &[f64]| v.iter().map(|y| format!("{:.3e}", y)).collect::<Vec<_>>().join("/");
         let times: Vec<String> = ts.iter().map(|t| format!("{:.3}", t.as_secs_f64())).collect();
         line.push_str(&format!(
-            " {tag} {} fit {} (rms {:.1}%) wall {}s",
-            counts.join("/"),
+            " {tag} {} fit {} (rms {:.1}%) moved {}B fit {} (rms {:.1}%) wall {}s",
+            sci(&ys),
             CLASSES[class].0,
             rms * 100.0,
+            sci(&bs),
+            CLASSES[bclass].0,
+            brms * 100.0,
             times.join("/")
         ));
+    }
+    if ctx.memshim.is_none() {
+        return Err(format!("{line} [meter=instructions only, no bytes-moved meter: not stampable]"));
     }
     let measured = CLASSES[worst].0;
     match order.and_then(|o| CLASSES.iter().position(|(c, _)| *c == o)) {
@@ -563,24 +579,45 @@ fn fit_rms(xs: &[f64], ys: &[f64], floor: f64) -> f64 {
     (sq / n).sqrt()
 }
 
-/// (program - baseline) user-space instructions on one leg, and the same
-/// difference in wall time for the record.
-fn counted_delta(ctx: &Ctx, prog: &str, base: &str, leg: Leg) -> Result<(f64, Duration), String> {
-    let (cp, tp) = counted(ctx, prog, leg)?;
-    let (cb, tb) = counted(ctx, base, leg)?;
-    Ok(((cp as f64 - cb as f64).max(0.0), tp.saturating_sub(tb)))
+/// One leg's (program - baseline) difference under both meters, and wall
+/// time for the record.
+struct Delta {
+    instructions: f64,
+    moved: f64,
+    wall: Duration,
 }
 
-/// The fewer instructions of two runs (they repeat to ~0.05%; the minimum
-/// drops a rare interrupt-path outlier), with the same output checks the
-/// timed judge makes: deterministic, and equal across legs.
-fn counted(ctx: &Ctx, src: &str, leg: Leg) -> Result<(u64, Duration), String> {
+fn counted_delta(ctx: &Ctx, prog: &str, base: &str, leg: Leg) -> Result<Delta, String> {
+    let p = counted(ctx, prog, leg)?;
+    let b = counted(ctx, base, leg)?;
+    Ok(Delta {
+        instructions: (p.instructions as f64 - b.instructions as f64).max(0.0),
+        moved: (p.moved as f64 - b.moved as f64).max(0.0),
+        wall: p.wall.saturating_sub(b.wall),
+    })
+}
+
+/// One run's meters.
+struct Counts {
+    instructions: u64,
+    moved: u64,
+    wall: Duration,
+}
+
+/// The smaller counts of two runs (instructions repeat to ~0.05%; the
+/// minimum drops a rare interrupt-path outlier), with the same output checks
+/// the timed judge makes: deterministic, and equal across legs.
+fn counted(ctx: &Ctx, src: &str, leg: Leg) -> Result<Counts, String> {
     let art = build(ctx, src, leg)?;
-    let mut best = (u64::MAX, Duration::MAX);
+    let mut best = Counts { instructions: u64::MAX, moved: u64::MAX, wall: Duration::MAX };
     let mut first: Option<String> = None;
     for _ in 0..2 {
-        let (out, count, wall) = run_counted(ctx, &art, leg)?;
-        best = (best.0.min(count), best.1.min(wall));
+        let (out, c) = run_counted(ctx, &art, leg)?;
+        best = Counts {
+            instructions: best.instructions.min(c.instructions),
+            moved: best.moved.min(c.moved),
+            wall: best.wall.min(c.wall),
+        };
         if first.get_or_insert_with(|| out.clone()) != &out {
             return Err("nondeterministic output".into());
         }
@@ -594,24 +631,46 @@ fn counted(ctx: &Ctx, src: &str, leg: Leg) -> Result<(u64, Duration), String> {
     Ok(best)
 }
 
-/// glibc copies and fills large blocks with `rep movsb` / `rep stosb`, which
-/// retire as ONE instruction whatever the length: on c4-standard-4, copying
-/// 20 x 16 MB counted the same 56.1M instructions as 20 x 1 MB. A quadratic
-/// built from copies would count as linear. Raising the thresholds makes
-/// glibc copy with vector loops, whose count grows with the bytes moved
-/// (measured: +0.57M instructions per extra 300 MB, which a fit separates).
-/// Both legs reach glibc's memmove for bulk moves (wasmtime's
-/// `memory.copy` included), so both are counted the same way.
-const GLIBC_COUNTABLE_COPIES: &str =
-    "glibc.cpu.x86_rep_movsb_threshold=0xffffffffffffffff:glibc.cpu.x86_rep_stosb_threshold=0xffffffffffffffff";
+/// The second meter. glibc copies and fills large blocks with `rep movsb` /
+/// `rep stosb`, which retire as ONE instruction whatever the length, and
+/// wasm's `memory.copy` / `memory.fill` reach the same glibc routines through
+/// wasmtime: on c4-standard-4, 20 `memory.copy`s of 1 MB and of 16 MB both
+/// counted 6.27M instructions, so a quadratic built from copies would count
+/// as constant. (Raising glibc's rep thresholds did not help: +0.57M per
+/// 300 MB.) This shim counts the bytes each memcpy / memmove / memset is
+/// asked to move — the same probe read 21.6M / 84.5M / 336M bytes for 1 / 4
+/// / 16 MB — and the judge fits that series as well.
+const MEMSHIM_C: &str = include_str!("memshim.c");
 
-/// One run under `perf stat -x, -e instructions:u`: stdout, the count, and
-/// wall time. The count goes to a file so the program's stderr stays its own.
-fn run_counted(ctx: &Ctx, art: &Path, leg: Leg) -> Result<(String, u64, Duration), String> {
+fn build_memshim(dir: &Path) -> Option<PathBuf> {
+    let src = dir.join("memshim.c");
+    let so = dir.join("memshim.so");
+    std::fs::write(&src, MEMSHIM_C).ok()?;
+    let ok = Command::new("cc")
+        .args(["-O2", "-shared", "-fPIC", "-o"])
+        .arg(&so)
+        .arg(&src)
+        .arg("-ldl")
+        .output()
+        .is_ok_and(|o| o.status.success());
+    ok.then_some(so)
+}
+
+/// One run under `perf stat -x, -e instructions:u`: stdout and the counts.
+/// The count goes to a file so the program's stderr stays its own. The shim
+/// is preloaded through `env`, which execs the program, so perf's own copies
+/// are not counted and only the program's exit writes the byte total.
+fn run_counted(ctx: &Ctx, art: &Path, leg: Leg) -> Result<(String, Counts), String> {
     let stat = ctx.dir.join(format!("stat-{}.csv", std::process::id()));
+    let moved_file = ctx.dir.join(format!("moved-{}.txt", std::process::id()));
+    let _ = std::fs::remove_file(&moved_file);
     let mut cmd = Command::new("perf");
-    cmd.env("GLIBC_TUNABLES", GLIBC_COUNTABLE_COPIES);
     cmd.args(["stat", "-x", ",", "-e", "instructions:u", "-o"]).arg(&stat).arg("--");
+    if let Some(shim) = &ctx.memshim {
+        cmd.arg("env")
+            .arg(format!("LD_PRELOAD={}", shim.display()))
+            .arg(format!("MEMSHIM_OUT={}", moved_file.display()));
+    }
     match leg {
         Leg::Native => cmd.arg(art),
         Leg::Wasm => cmd.arg(&ctx.wasmtime).arg("run").arg(art),
@@ -635,9 +694,16 @@ fn run_counted(ctx: &Ctx, art: &Path, leg: Leg) -> Result<(String, u64, Duration
     if !out.status.success() {
         return Err(format!("exit {:?}: {}", out.status.code(), first_error(&out.stderr)));
     }
-    let count = parse_instructions(&std::fs::read_to_string(&stat).unwrap_or_default())
+    let instructions = parse_instructions(&std::fs::read_to_string(&stat).unwrap_or_default())
         .ok_or_else(|| "perf reported no instructions:u count".to_string())?;
-    Ok((String::from_utf8_lossy(&out.stdout).into_owned(), count, wall))
+    let moved = match &ctx.memshim {
+        None => 0,
+        Some(_) => std::fs::read_to_string(&moved_file)
+            .ok()
+            .and_then(|t| t.trim().parse().ok())
+            .ok_or_else(|| "the bytes-moved shim wrote no count (is the binary dynamically linked?)".to_string())?,
+    };
+    Ok((String::from_utf8_lossy(&out.stdout).into_owned(), Counts { instructions, moved, wall }))
 }
 
 /// The count of the `instructions:u` row of `perf stat -x,` output.
