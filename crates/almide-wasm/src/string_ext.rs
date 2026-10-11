@@ -247,6 +247,21 @@ impl Emitter<'_> {
         p: &IrExpr,
         prefix: bool,
     ) -> ArmResult {
+        self.lower_string_affix(s, p, prefix, false)
+    }
+
+    /// The affix compare behind `strip_prefix` / `strip_suffix` and, with
+    /// `verdict`, `ends_with`: the bytes at the affix's place compared with
+    /// the affix. `verdict` answers the match as a Bool and builds nothing —
+    /// `ends_with` used to build the stripped string, an O(len) copy on every
+    /// hit, and drop it again (#3540).
+    fn lower_string_affix(
+        &mut self,
+        s: &IrExpr,
+        p: &IrExpr,
+        prefix: bool,
+        verdict: bool,
+    ) -> ArmResult {
         self.lower_arg(s, Some(STR), ArgMode::Borrow)?;
         let hs = self.hold_i32()?;
         self.f.instructions().local_set(hs);
@@ -282,6 +297,15 @@ impl Emitter<'_> {
         i.end();
         i.local_get(hk).i32_const(1).i32_add().local_set(hk);
         i.br(0).end().end();
+        if verdict {
+            i.local_get(hr);
+            i.end();
+            let _ = i;
+            for _ in 0..6 {
+                self.release_i32();
+            }
+            return Ok(Some(Lowered::scalar(BOOL)));
+        }
         i.local_get(hr).if_(BlockType::Result(ValType::I32));
         // some(rest): the bytes OUTSIDE the affix
         i.local_get(hs).i32_load(len_memarg()).local_get(hn).i32_sub();
@@ -381,22 +405,8 @@ impl Emitter<'_> {
     ) -> Result<Option<Option<Lowered>>, EmitError> {
         match (func, args) {
             ("starts_with", [s, p]) => self.lower_string_starts_with(s, p),
-            // ends_with = the strip_suffix compare with a Bool verdict.
-            ("ends_with", [s, p]) => {
-                let got = self.lower_string_strip(s, p, false)?;
-                // The verdict is whether the strip answered `some`; that
-                // Option and the stripped string in it are this arm's own
-                // and go right after (#2977 — every hit kept both; a `none`
-                // is NULL_ADDR, which the drop no-ops).
-                let dec = match got {
-                    Some(l) => self.dec_fn_of(l.ty),
-                    None => return unsup("string-ends-with-strip"),
-                };
-                let h = self.hold_i32()?;
-                self.f.instructions().local_tee(h).i32_const(0).i32_ne().local_get(h).call(dec);
-                self.release_i32();
-                Ok(Some(Lowered::scalar(BOOL)))
-            }
+            // ends_with = the strip_suffix compare, answered as a Bool.
+            ("ends_with", [s, p]) => self.lower_string_affix(s, p, false, true),
             ("strip_prefix" | "strip_suffix", [s, p]) => {
                 self.lower_string_strip(s, p, func == "strip_prefix")
             }
