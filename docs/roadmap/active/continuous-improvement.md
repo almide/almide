@@ -652,3 +652,26 @@ Builds compared: 0.62.0, 0.66.0 (release 819bbc74f) and develop 974c00ea0.
 ### #3534 (wasm flatten quadratic)
 - Two-pass flatten: 160 GB → 5.6 MB allocated for 200k inner lists, and 32.5 s → 0.04 s for 800k.
 - PR #3536; local gates all green. Status: CI / merge queue.
+
+### 2026-10-11 (later): harness widening and what it found
+- **Harness** (PR #3551, then branch `harness-set`):
+  - the inspection grammar builds `Int8` … `UInt64`, `Float32` / `Float64`, `Bytes` and `Set` values;
+  - a top-level `Bytes` is printed as its byte list;
+  - `Bytes` and `Set` count as size parameters.
+  - A GCE batch of the 397 sized / int-float conversion / bytes functions runs against `harness-sized-bytes`: 6 × c3-standard-4 Spot VMs, asia-northeast1-b.
+  - Excluded and reported as skipped: 7 raw-pointer / heap-address bytes functions (`as_ptr`, `as_mut_ptr`, `data_ptr`, `from_raw_ptr`, `copy_to_ptr`, `heap_save`, `heap_restore`). They are not deterministic across legs.
+  - Still not covered: functions taking `mut` params (skipped by the catalogue), Matrix / Value / Json.
+- **#3549** (I-divergence; native crash, wasm fine): a tail-recursive fn returning a record, a variant, a `Set` or `Bytes` was never loop-converted on native, because `can_default_init` limited the rewrite to types with a placeholder value.
+  - Fix (branch `fix-tco-deferred-result`): the TCO result is declared without a value (`let mut r: T;`, annotation `deferred_init`), and rustc's definite-init check proves the assignment. The type list is gone.
+  - Evidence: `tests/tco_any_return_type_test.rs` (depth 1M, both legs); the TCO tests, the codegen crate tests and the full spec are green.
+  - Status: written, tested locally, not pushed.
+- **#3550** (I-divergence, filed only): on the v1 native render, a self tail call's freshly built heap argument is `Drop`ped after the `CallFn`, so the recursion is not a tail call and overflows. It reproduces on 0.64.0.
+- **#3552** (quadratic Set build): measured on `almide build` artifacts, macOS arm64.
+  - Before: `s = set.insert(s, x)` and a fold insert were quadratic on both legs (n=100k: native 3.5 s, wasm 1.9 s). wasm `set.from_list` was quadratic (n=200k: 7.3 s).
+  - Fix (branch `fix-3552-set-build`, stacked on `reuse-attr-b`):
+    - `@reuse(s) @consume(s)` on `set.insert`, with the native intrinsic taking the set by value;
+    - a judged in-place insert on wasm (`emit_set_insert_judged`, the set twin of the map window);
+    - `set.from_list` built through it.
+  - After: all three shapes are linear on wasm (n=200k: 0.031 s). Native stays at its ~0.3 s new-binary start-up floor.
+  - `tests/set_build_in_place_test.rs`: 4.0 GB before, under 40 MB required. The full spec is green.
+- **Measurement pitfall:** a freshly built native binary on macOS spends ~0.3 s before `main` on its first runs. Native curves below ~0.5 s are therefore read as flat, not as timings.
