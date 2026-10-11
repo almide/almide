@@ -624,6 +624,12 @@ impl TypeEnv {
             Ty::Float | Ty::Float32 | Ty::Float64 | Ty::Fn { .. } => false,
             Ty::Applied(almide_lang::types::TypeConstructorId::Map, _) => false,
             Ty::Applied(almide_lang::types::TypeConstructorId::Set, _) => false,
+            // #3588: a Matrix is a grid of f64 and a Value can hold one, so both
+            // are a Float inside a compound — no order. Neither has children to
+            // walk, so the structural default below said yes while rustc
+            // rejected the monomorph (`AlmideMatrix: Ord`) and wasm walled.
+            Ty::Matrix => false,
+            Ty::Named(name, _) if name.as_str() == "Value" && !self.types.contains_key(name) => false,
             Ty::Variant { name, .. } => {
                 if !seen.insert(*name) {
                     return true;

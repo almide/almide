@@ -50,7 +50,8 @@ impl Checker {
                     "A record or variant orders too \u{2014} by field declaration order, by case ",
                     "order \u{2014} but only when it DECLARES the derive: `type T: Ord = { ... }`. ",
                     "Map, Set and function values have no order, and a Float INSIDE a compound has ",
-                    "none either (native's derive cannot order f64) \u{2014} compare via an explicit key instead.",
+                    "none either (native's derive cannot order f64; a Matrix and a Value hold Floats) ",
+                    "\u{2014} compare via an explicit key instead.",
                 )
                 .to_string(),
                 format!("call to {}", fn_name),
