@@ -551,9 +551,13 @@ impl Emitter<'_> {
                 Ok(Some(Lowered::owned(b)))
             }
             ("from_list", [pairs]) => {
-                // Insertion-ordered upsert over (K, V) pairs. The result
-                // is freshly built and uniquely owned, so the overwrite
-                // case may store IN PLACE; the append case copy-grows.
+                // Insertion-ordered upsert over (K, V) pairs through the
+                // judged in-place set (map_inplace.rs): the result is
+                // freshly built and uniquely owned, so an overwrite stores in
+                // place and an append grows through `$map_reserve` (amortized)
+                // with the key index kept by its append hook. The old body
+                // scanned the result linearly and copy-grew it on every
+                // append — O(n²) on wasm where native is linear (#3544).
                 let (k, v, pair_ti) = match self.lower_arg(pairs, None, ArgMode::Borrow)? {
                     SliceTy::List(h) => match self.types.el(h) {
                         SliceTy::Tuple(ti) => {
@@ -572,15 +576,14 @@ impl Emitter<'_> {
                 }
                 let pair_def = self.types.tuple_def(pair_ti);
                 let (koff_p, voff_p) = (pair_def.fields[0].1, pair_def.fields[1].1);
-                let lay = entry_layout(k, v);
-                let scan = self.scan_helper(k)?;
+                let fns = self.map_set_fns(k, v)?;
                 let bh = self.hold_i32()?;
                 let ch = self.hold_i32()?;
                 let ih = self.hold_i32()?;
                 let rh = self.hold_i32()?;
                 let ph = self.hold_i32()?; // current pair base
                 let kh = self.hold_for(k)?;
-                let eh = self.hold_i32()?;
+                let vh = self.hold_for(v)?;
                 self.f.instructions().local_tee(bh);
                 self.f
                     .instructions()
@@ -605,63 +608,18 @@ impl Emitter<'_> {
                     .i32_add()
                     .i32_load(slot_memarg(0))
                     .local_set(ph);
-                // key (field addr = pair base + PAYLOAD + field offset)
+                // Key and value: each copied out of its pair is a SHARE
+                // (+1) the map holds — the pairs list keeps its own, and an
+                // overwrite gives back the unstored key's and the replaced
+                // value's (#2010 Map stage b).
                 self.f
                     .instructions()
                     .local_get(ph)
                     .i32_const((almide_layout::PAYLOAD + koff_p) as i32)
                     .i32_add();
                 self.load_ty_slot_at(k);
-                self.f.instructions().local_set(kh);
-                // scan result map
-                self.f
-                    .instructions()
-                    .local_get(rh)
-                    .i32_const(lay.2 as i32)
-                    .i32_const(lay.0 as i32)
-                    .local_get(kh)
-                    .call(scan)
-                    .local_set(eh);
-                self.f.instructions().local_get(eh).i32_const(0).i32_ne().if_(BlockType::Empty);
-                // overwrite value in place (uniquely owned): the replaced
-                // value's credit goes with it
-                self.f.instructions().local_get(eh).i32_const(lay.1 as i32).i32_add();
-                self.emit_release_slot_at(v);
-                self.f.instructions().local_get(eh).i32_const(lay.1 as i32).i32_add();
-                self.f
-                    .instructions()
-                    .local_get(ph)
-                    .i32_const((almide_layout::PAYLOAD + voff_p) as i32)
-                    .i32_add();
-                self.load_ty_slot_at(v);
-                // Handles copied out of the pairs into the map take +1:
-                // the map releases them through its typed drop, the pairs
-                // list through its own (#2010 Map stage b).
-                self.share_handle_top(v);
-                self.store_ty_slot_raw(v);
-                self.f.instructions().else_();
-                let (len_h, nh) = self.emit_copy_grow(rh, lay.2)?;
-                self.f
-                    .instructions()
-                    .local_get(nh)
-                    .i32_const(almide_layout::PAYLOAD as i32)
-                    .i32_add()
-                    .local_get(len_h)
-                    .i32_add()
-                    .i32_const(lay.0 as i32)
-                    .i32_add()
-                    .local_get(kh);
                 self.share_handle_top(k);
-                self.store_ty_slot_raw(k);
-                self.f
-                    .instructions()
-                    .local_get(nh)
-                    .i32_const(almide_layout::PAYLOAD as i32)
-                    .i32_add()
-                    .local_get(len_h)
-                    .i32_add()
-                    .i32_const(lay.1 as i32)
-                    .i32_add();
+                self.f.instructions().local_set(kh);
                 self.f
                     .instructions()
                     .local_get(ph)
@@ -669,13 +627,8 @@ impl Emitter<'_> {
                     .i32_add();
                 self.load_ty_slot_at(v);
                 self.share_handle_top(v);
-                self.store_ty_slot_raw(v);
-                // the outgrown block is ours alone and its entries moved
-                self.f.instructions().local_get(rh).call(F_FREE);
-                self.f.instructions().local_get(nh).local_set(rh);
-                self.release_i32();
-                self.release_i32();
-                self.f.instructions().end();
+                self.f.instructions().local_set(vh);
+                self.emit_map_set_judged(rh, kh, vh, (k, v), fns)?;
                 self.f
                     .instructions()
                     .local_get(ih)
@@ -686,7 +639,7 @@ impl Emitter<'_> {
                     .end()
                     .end();
                 self.f.instructions().local_get(rh);
-                self.release_i32(); // eh
+                self.release_for(v); // vh
                 self.release_for(k); // kh
                 self.release_i32(); // ph
                 self.release_i32(); // rh

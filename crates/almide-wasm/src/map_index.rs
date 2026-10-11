@@ -32,7 +32,7 @@
 //!
 //! 1. A block is indexed on its SECOND lookup, never its first. The
 //!    functional builders (`s = set.insert(s, x)`, a shared `map.set`
-//!    rebind, `from_list`'s copy-grow) yield a fresh address per step
+//!    rebind) yield a fresh address per step
 //!    that is probed exactly once, so they stay on the linear scan and
 //!    never pay for an index they would throw away.
 //! 2. A stale index can never answer. Map and Set blocks leave the
@@ -508,8 +508,9 @@ impl Emitter<'_> {
     /// The keyed lookup for a STABLE block (one that outlives the loop
     /// probing it): the index lane for the matrix's indexed classes, the
     /// plain `$scan_*` for the rest. Same signature as `scan_helper`.
-    /// Blocks rebuilt per step (`from_list`'s copy-grow, the set-map
-    /// accumulator) keep `scan_helper` — see invariant 1 in the module doc.
+    /// Blocks rebuilt per step (the set-map accumulator) keep
+    /// `scan_helper` — see invariant 1 in the module doc. `map.from_list`
+    /// builds through the in-place window, so it takes this lane (#3544).
     pub(crate) fn keyed_find(&mut self, k: SliceTy) -> Result<u32, EmitError> {
         let Some(key) = index_key(k) else {
             return self.scan_helper(k);
