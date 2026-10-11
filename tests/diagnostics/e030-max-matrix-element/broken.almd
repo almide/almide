@@ -1,0 +1,9 @@
+// E030 (#3588): list.max over Matrix elements — a Matrix is a grid of Float,
+// and a Float inside a compound has no ordering. Check used to accept it while
+// native rustc rejected the monomorph (AlmideMatrix: Ord) and wasm walled.
+fn main() -> Unit = {
+  let a = matrix.from_lists([[1.0], [1.0]])
+  let b = matrix.from_lists([[0.1]])
+  let m = list.max([a, b]) ?? a
+  println("${matrix.rows(m)}")
+}

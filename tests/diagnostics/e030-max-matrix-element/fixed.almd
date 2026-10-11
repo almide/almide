@@ -1,0 +1,6 @@
+fn main() -> Unit = {
+  let a = matrix.from_lists([[1.0], [1.0]])
+  let b = matrix.from_lists([[0.1]])
+  let m = list.last(list.sort_by([a, b], (x) => matrix.rows(x))) ?? a
+  println("${matrix.rows(m)}")
+}
