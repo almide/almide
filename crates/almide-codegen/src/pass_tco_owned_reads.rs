@@ -337,20 +337,3 @@ fn wrap_owned_reads_stmt(stmt: IrStmt, owned: &HashSet<VarId>) -> IrStmt {
     let except = HashSet::new();
     stmt.map_exprs(&mut |e| wrap_owned_reads_except(e, owned, &except))
 }
-
-/// Returns true if we can produce a valid default value for this type.
-/// Types that fail this check should not be TCO'd (the result variable
-/// cannot be initialized without unsafe code).
-fn can_default_init(ty: &Ty) -> bool {
-    match ty {
-        Ty::Int | Ty::Float | Ty::Bool | Ty::String | Ty::Unit => true,
-        Ty::Applied(TypeConstructorId::Result, args) => {
-            args.first().map_or(true, |inner| can_default_init(inner))
-        }
-        Ty::Applied(TypeConstructorId::Option, _) => true,
-        Ty::Applied(TypeConstructorId::List, _) => true,
-        Ty::Applied(TypeConstructorId::Map, _) => true,
-        Ty::Tuple(elems) => elems.iter().all(|t| can_default_init(t)),
-        _ => false,
-    }
-}
