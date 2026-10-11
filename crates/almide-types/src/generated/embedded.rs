@@ -34281,15 +34281,6 @@ fn __td_skip(addr: Int, end: Int) -> Int = if addr >= end then addr
 else if prim.load8(addr) / 64 == 2 then __td_skip(addr + 1, end) else addr
 
 
-fn __td_cpcount(addr: Int, end: Int, n: Int) -> Int = if addr >= end then n
-else {
-  let b = prim.load8(addr)
-  let step = if b / 64 == 2 then 0 else 1
-
-  __td_cpcount(addr + 1, end, n + step)
-}
-
-
 fn __td_offset(addr: Int, end: Int, k: Int) -> Int = if k <= 0 then addr
 else if addr >= end then addr
 else {
@@ -34303,51 +34294,59 @@ else {
   __td_copy(src + 1, dst + 1, len - 1)
 }
 
-fn __td_count(s: String) -> Int = {
-  let h = prim.handle(s)
-  let blen = prim.load32(h + 4)
-  __td_cpcount(h + 12, h + 12 + blen, 0)
+
+
+
+
+fn __td_back(base: Int, addr: Int, k: Int) -> Int = if k <= 0 then addr
+else if addr <= base then base
+else {
+  let p = addr - 1
+  if prim.load8(p) / 64 == 2 then __td_back(base, p, k)
+  else __td_back(base, p, k - 1)
 }
 
 
-fn __td_slice(s: String, lo: Int, hi: Int) -> String = {
-  let h = prim.handle(s)
-  let blen = prim.load32(h + 4)
-  let base = h + 12
-  let byte_lo = __td_offset(base, base + blen, lo)
-  let byte_hi = __td_offset(base, base + blen, hi)
-  let nbytes = if byte_hi > byte_lo then byte_hi - byte_lo else 0
+fn __td_bytes(lo: Int, hi: Int) -> String = {
+  let nbytes = if hi > lo then hi - lo else 0
   let buf = prim.alloc_str(nbytes)
-  let _e = __td_copy(byte_lo, prim.handle(buf) + 12, nbytes)
+  let _e = __td_copy(lo, prim.handle(buf) + 12, nbytes)
   buf
 }
 
+
+
+
 fn string_take(s: String, n: Int) -> String = {
-  let count = __td_count(s)
-  let k = if n < 0 then count
-  else (if n > count then count else n)
-  __td_slice(s, 0, k)
+  let h = prim.handle(s)
+  let base = h + 12
+  let end = base + prim.load32(h + 4)
+  let cut = if n < 0 then end else __td_offset(base, end, n)
+  __td_bytes(base, cut)
 }
 
 fn string_drop(s: String, n: Int) -> String = {
-  let count = __td_count(s)
-  let k = if n < 0 then count
-  else (if n > count then count else n)
-  __td_slice(s, k, count)
+  let h = prim.handle(s)
+  let base = h + 12
+  let end = base + prim.load32(h + 4)
+  let cut = if n < 0 then end else __td_offset(base, end, n)
+  __td_bytes(cut, end)
 }
 
 fn string_take_end(s: String, n: Int) -> String = {
-  let count = __td_count(s)
-  let start = if n < 0 then 0
-  else (if n >= count then 0 else count - n)
-  __td_slice(s, start, count)
+  let h = prim.handle(s)
+  let base = h + 12
+  let end = base + prim.load32(h + 4)
+  let cut = if n < 0 then base else __td_back(base, end, n)
+  __td_bytes(cut, end)
 }
 
 fn string_drop_end(s: String, n: Int) -> String = {
-  let count = __td_count(s)
-  let endi = if n < 0 then 0
-  else (if n >= count then 0 else count - n)
-  __td_slice(s, 0, endi)
+  let h = prim.handle(s)
+  let base = h + 12
+  let end = base + prim.load32(h + 4)
+  let cut = if n < 0 then base else __td_back(base, end, n)
+  __td_bytes(base, cut)
 }
 "#;
 pub const SRC_STRING_TO_BYTES: &str = r#"
