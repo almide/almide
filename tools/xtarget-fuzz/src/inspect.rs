@@ -528,8 +528,8 @@ fn judge_counted(
             bs.push(d.moved);
             ts.push(d.wall);
         }
-        let (class, rms) = fit_class(&sizes, &ys);
-        let (bclass, brms) = fit_class(&sizes, &bs);
+        let (class, rms) = fit_series(&sizes, &ys, k);
+        let (bclass, brms) = fit_series(&sizes, &bs, k);
         worst = worst.max(class).max(bclass);
         unexplained |= rms > FIT_TOLERANCE || brms > FIT_TOLERANCE;
         let tag = if matches!(leg, Leg::Native) { "native" } else { "wasm" };
@@ -567,6 +567,18 @@ fn judge_counted(
 /// point within [`FIT_TOLERANCE`] (relative RMS), else the best-fitting one
 /// with its residual above the tolerance (the caller refuses to pass it).
 /// Counts that never leave a few thousand instructions are O(1) outright.
+/// A series that never reaches one unit per call (one instruction, one byte)
+/// at any size is O(1): the call does no per-element work, and what is left
+/// is the run's own jitter. Measured: `int.to_int16_saturating` at k = 1M
+/// read 7.8e5 / 147 / 579 / 82 / 48 instructions, which a relative fit
+/// called 1789% off every class.
+fn fit_series(sizes: &[u64], ys: &[f64], k: u64) -> (usize, f64) {
+    if ys.iter().all(|&y| y < k as f64) {
+        return (0, 0.0);
+    }
+    fit_class(sizes, ys)
+}
+
 fn fit_class(sizes: &[u64], ys: &[f64]) -> (usize, f64) {
     let top = ys.iter().cloned().fold(0.0f64, f64::max);
     if top < 5.0e3 {
@@ -798,6 +810,14 @@ mod fit_tests {
         // must see that rather than a best-fit class.
         let ys = [2.617e5, 2.409e5, 2.015e5, 1.213e5, 0.0];
         assert!(fit_class(&sizes(), &ys).1 > FIT_TOLERANCE);
+    }
+
+    #[test]
+    fn under_one_unit_per_call_is_constant() {
+        let ys = [7.811e5, 1.47e2, 5.79e2, 8.2e1, 4.8e1];
+        assert_eq!(fit_series(&sizes(), &ys, 1 << 20), (0, 0.0));
+        // The same series over fewer calls is real work and is fitted.
+        assert!(fit_series(&sizes(), &ys, 1024).1 > FIT_TOLERANCE);
     }
 
     #[test]
