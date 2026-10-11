@@ -46,6 +46,9 @@ pub enum SigType {
     Map(Box<SigType>, Box<SigType>),
     /// `(p...) -> r` — a function/closure parameter (HOF position).
     Fn(Vec<SigType>, Box<SigType>),
+    /// A fixed-width number type (`Int8` … `Float64`).
+    Sized(&'static str),
+    Bytes,
 }
 
 /// Single-letter (or short) names the stdlib uses for generic type
@@ -69,10 +72,13 @@ impl SigType {
                     "String" => Some(SigType::String),
                     "Bool" => Some(SigType::Bool),
                     "Unit" => Some(SigType::Unit),
-                    // Width-specific integers and other nominal types are
-                    // intentionally rejected (value grammar does not cover
-                    // them; they enter via mutation).
-                    _ => None,
+                    "Bytes" => Some(SigType::Bytes),
+                    // The fixed-width numbers the value grammar builds; other
+                    // nominal types enter via mutation.
+                    other => match GenType::sized(other) {
+                        Some(GenType::Sized(s)) => Some(SigType::Sized(s)),
+                        _ => None,
+                    },
                 }
             }
             TypeExpr::Generic { name, args } => {
@@ -194,6 +200,8 @@ impl SigType {
             SigType::String => Some(GenType::String),
             SigType::Bool => Some(GenType::Bool),
             SigType::Unit => Some(GenType::Unit),
+            SigType::Sized(s) => Some(GenType::Sized(s)),
+            SigType::Bytes => Some(GenType::Bytes),
             SigType::Var(n) => subst.get(n).cloned(),
             SigType::List(e) => Some(GenType::List(Box::new(e.instantiate(subst)?))),
             SigType::Option(e) => Some(GenType::Option(Box::new(e.instantiate(subst)?))),
@@ -225,7 +233,9 @@ impl SigType {
             | (SigType::Float, GenType::Float)
             | (SigType::String, GenType::String)
             | (SigType::Bool, GenType::Bool)
-            | (SigType::Unit, GenType::Unit) => true,
+            | (SigType::Unit, GenType::Unit)
+            | (SigType::Bytes, GenType::Bytes) => true,
+            (SigType::Sized(a), GenType::Sized(b)) => a == b,
             (SigType::Var(n), g) => match subst.get(n) {
                 Some(bound) => bound == g,
                 None => {
