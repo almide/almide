@@ -34321,7 +34321,8 @@ fn string_take(s: String, n: Int) -> String = {
   let h = prim.handle(s)
   let base = h + 12
   let end = base + prim.load32(h + 4)
-  let cut = if n < 0 then end else __td_offset(base, end, n)
+  let cut = if n < 0 then end
+  else __td_offset(base, end, n)
   __td_bytes(base, cut)
 }
 
@@ -34329,7 +34330,8 @@ fn string_drop(s: String, n: Int) -> String = {
   let h = prim.handle(s)
   let base = h + 12
   let end = base + prim.load32(h + 4)
-  let cut = if n < 0 then end else __td_offset(base, end, n)
+  let cut = if n < 0 then end
+  else __td_offset(base, end, n)
   __td_bytes(cut, end)
 }
 
@@ -34337,7 +34339,8 @@ fn string_take_end(s: String, n: Int) -> String = {
   let h = prim.handle(s)
   let base = h + 12
   let end = base + prim.load32(h + 4)
-  let cut = if n < 0 then base else __td_back(base, end, n)
+  let cut = if n < 0 then base
+  else __td_back(base, end, n)
   __td_bytes(cut, end)
 }
 
@@ -34345,7 +34348,8 @@ fn string_drop_end(s: String, n: Int) -> String = {
   let h = prim.handle(s)
   let base = h + 12
   let end = base + prim.load32(h + 4)
-  let cut = if n < 0 then base else __td_back(base, end, n)
+  let cut = if n < 0 then base
+  else __td_back(base, end, n)
   __td_bytes(base, cut)
 }
 "#;
