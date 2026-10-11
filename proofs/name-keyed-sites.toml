@@ -1,0 +1,1190 @@
+# Name-keyed property sites (tests/name_keyed_sites_test.rs): items in the
+# compiler that group stdlib names instead of reading a declaration.
+# `names` is how many stdlib names the item groups. A `legacy` row predates
+# the gate (2026-10-11): its count may only fall, and the row goes when the
+# site does. A new site needs `class = "legacy"` and a `why`.
+
+[[site]]
+id = "crates/almide-codegen/src/owned_source.rs::OWNED_SOURCE_TWINS::table"
+class = "legacy"
+names = 24
+
+[[site]]
+id = "crates/almide-codegen/src/owned_source.rs::SCALAR_SOURCE_READS::table"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "crates/almide-codegen/src/pass_borrow_inference.rs::alias_float_variant_sigs::table"
+class = "legacy"
+names = 8
+
+[[site]]
+id = "crates/almide-codegen/src/pass_borrow_inference.rs::seed_codec_helper_sigs::table"
+class = "legacy"
+names = 4
+
+[[site]]
+id = "crates/almide-codegen/src/pass_builtin_lowering.rs::rewrite_call_list_codec::table"
+class = "legacy"
+names = 4
+
+[[site]]
+id = "crates/almide-codegen/src/pass_builtin_lowering.rs::rewrite_call_method::or-chain"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "crates/almide-codegen/src/pass_builtin_lowering.rs::rewrite_call_rename::table"
+class = "legacy"
+names = 4
+
+[[site]]
+id = "crates/almide-codegen/src/pass_clone_projection.rs::borrowed_subject::or-pattern"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "crates/almide-codegen/src/pass_concretize_types_call_ret.rs::resolve_list_poly_ret_ty_aggregate::or-pattern"
+class = "legacy"
+names = 5
+
+[[site]]
+id = "crates/almide-codegen/src/pass_concretize_types_call_ret.rs::resolve_list_poly_ret_ty_lambda::or-pattern"
+class = "legacy"
+names = 6
+
+[[site]]
+id = "crates/almide-codegen/src/pass_concretize_types_call_ret.rs::resolve_list_poly_ret_ty_structural::or-pattern"
+class = "legacy"
+names = 10
+
+[[site]]
+id = "crates/almide-codegen/src/pass_concretize_types_signatures.rs::is_fold_like_call::or-pattern"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "crates/almide-codegen/src/pass_lambda_type_lookup.rs::compute_stdlib_call_ret_inner::or-pattern"
+class = "legacy"
+names = 22
+
+[[site]]
+id = "crates/almide-codegen/src/pass_lambda_type_lookup.rs::resolve_call_target_module_method::or-chain"
+class = "legacy"
+names = 3
+
+[[site]]
+id = "crates/almide-codegen/src/pass_lambda_type_lookup.rs::resolve_fold_acc_ty::or-chain"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "crates/almide-codegen/src/pass_lambda_type_resolve.rs::LIST_ELEM_FIRST_METHODS::table"
+class = "legacy"
+names = 14
+
+[[site]]
+id = "crates/almide-codegen/src/pass_lambda_type_resolve.rs::LIST_ELEM_SECOND_METHODS::table"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "crates/almide-codegen/src/pass_lambda_type_resolve.rs::OPTION_INNER_METHODS::table"
+class = "legacy"
+names = 3
+
+[[site]]
+id = "crates/almide-codegen/src/pass_lambda_type_resolve.rs::RESULT_ERR_METHODS::table"
+class = "legacy"
+names = 3
+
+[[site]]
+id = "crates/almide-codegen/src/pass_lambda_type_resolve.rs::RESULT_OK_METHODS::table"
+class = "legacy"
+names = 3
+
+[[site]]
+id = "crates/almide-codegen/src/pass_lambda_type_resolve.rs::compute_stdlib_call_ret_inner::or-pattern"
+class = "legacy"
+names = 22
+
+[[site]]
+id = "crates/almide-codegen/src/pass_lambda_type_resolve.rs::resolve_call_target_module_method::or-chain"
+class = "legacy"
+names = 3
+
+[[site]]
+id = "crates/almide-codegen/src/pass_lambda_type_resolve.rs::resolve_fold_acc_ty::or-chain"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "crates/almide-codegen/src/pass_licm.rs::is_inplace_mutator::or-pattern"
+class = "legacy"
+names = 16
+
+[[site]]
+id = "crates/almide-codegen/src/pass_matrix_shape_spec.rs::infer_shape::or-pattern"
+class = "legacy"
+names = 13
+
+[[site]]
+id = "crates/almide-codegen/src/pass_region_window.rs::SCALAR_MODULES::table"
+class = "legacy"
+names = 4
+
+[[site]]
+id = "crates/almide-codegen/src/pass_rust_lowering_fan.rs::is_pure_call::or-pattern"
+class = "legacy"
+names = 4
+
+[[site]]
+id = "crates/almide-codegen/src/pass_rust_lowering_fan.rs::is_pure_runtime_call::or-pattern"
+class = "legacy"
+names = 4
+
+[[site]]
+id = "crates/almide-codegen/src/pass_stream_fusion.rs::rewrite::or-pattern"
+class = "legacy"
+names = 12
+
+[[site]]
+id = "crates/almide-codegen/src/pass_stream_fusion.rs::single_stage::or-pattern"
+class = "legacy"
+names = 3
+
+[[site]]
+id = "crates/almide-codegen/src/runtime_crates.rs::RUNTIME_MODULE_CRATES::table"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "crates/almide-codegen/src/walker/expressions.rs::render_expr_index_access::table"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "crates/almide-codegen/src/walker/expressions.rs::render_expr_tuple_index::table"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "crates/almide-codegen/src/walker/expressions_calls_binops.rs::LEGACY_RUNTIME_SYMBOL_MODULES::table"
+class = "legacy"
+names = 3
+
+[[site]]
+id = "crates/almide-codegen/src/walker/expressions_calls_binops.rs::render_generic_call_method::or-pattern"
+class = "legacy"
+names = 8
+
+[[site]]
+id = "crates/almide-codegen/src/walker/expressions_calls_binops.rs::render_method_call_full::or-pattern"
+class = "legacy"
+names = 40
+
+[[site]]
+id = "crates/almide-codegen/src/walker/expressions_calls_binops.rs::try_render_numeric_cast::or-pattern"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "crates/almide-codegen/src/walker/runtime_owned.rs::TABLE::table"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "crates/almide-frontend/src/canonicalize/protocols.rs::BUILTIN_PROTOCOLS::table"
+class = "legacy"
+names = 4
+
+[[site]]
+id = "crates/almide-frontend/src/check/bounded.rs::BOUNDED_ALLOC_CALLS::table"
+class = "legacy"
+names = 9
+
+[[site]]
+id = "crates/almide-frontend/src/check/bounded.rs::BOUNDED_DENIED_MODULES::table"
+class = "legacy"
+names = 13
+
+[[site]]
+id = "crates/almide-frontend/src/check/bounded.rs::BOUNDED_PURE_MODULES::table"
+class = "legacy"
+names = 31
+
+[[site]]
+id = "crates/almide-frontend/src/check/bounded.rs::BOUNDED_SIZED_CTORS::table"
+class = "legacy"
+names = 8
+
+[[site]]
+id = "crates/almide-frontend/src/check/bounded.rs::CAPABILITY_GRANTS::table"
+class = "legacy"
+names = 8
+
+[[site]]
+id = "crates/almide-frontend/src/check/calls.rs::argv_reader_hint::or-pattern"
+class = "legacy"
+names = 9
+
+[[site]]
+id = "crates/almide-frontend/src/check/calls.rs::defer_ord_elem_check::or-pattern"
+class = "legacy"
+names = 3
+
+[[site]]
+id = "crates/almide-frontend/src/check/calls_arg.rs::unwrap_family_hint::or-pattern"
+class = "legacy"
+names = 4
+
+[[site]]
+id = "crates/almide-frontend/src/check/infer.rs::dead_spelling::or-pattern"
+class = "legacy"
+names = 9
+
+[[site]]
+id = "crates/almide-frontend/src/check/infer.rs::dead_try_machine_rewrite::or-pattern"
+class = "legacy"
+names = 4
+
+[[site]]
+id = "crates/almide-frontend/src/check/infer_calls_closures.rs::normalize_fallible_hof_callback::FALLIBLE_HOF_FS::table"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "crates/almide-frontend/src/check/mod.rs::find_stdlib_reimpl::or-pattern"
+class = "legacy"
+names = 21
+
+[[site]]
+id = "crates/almide-frontend/src/check/scoped.rs::SCOPED_SCALAR_MODULES::table"
+class = "legacy"
+names = 4
+
+[[site]]
+id = "crates/almide-frontend/src/check/static_dispatch.rs::resolve_module_call_member::or-chain"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "crates/almide-frontend/src/concurrent_reach.rs::FAN_OPS::table"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "crates/almide-frontend/src/lower/auto_try.rs::insert_try_control::or-chain"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "crates/almide-frontend/src/stdlib.rs::ALIASES::table"
+class = "legacy"
+names = 42
+
+[[site]]
+id = "crates/almide-frontend/src/stdlib.rs::MODULE_DESCRIPTIONS::table"
+class = "legacy"
+names = 43
+
+[[site]]
+id = "crates/almide-frontend/src/stdlib.rs::comparison_operator_of::or-pattern"
+class = "legacy"
+names = 4
+
+[[site]]
+id = "crates/almide-interp/src/bridge.rs::dispatch::or-pattern"
+class = "legacy"
+names = 9
+
+[[site]]
+id = "crates/almide-interp/src/bridge.rs::float_sized_conv::or-pattern"
+class = "legacy"
+names = 4
+
+[[site]]
+id = "crates/almide-interp/src/bridge.rs::int_fn::or-pattern"
+class = "legacy"
+names = 8
+
+[[site]]
+id = "crates/almide-interp/src/bridge.rs::int_fn_b::or-pattern"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "crates/almide-interp/src/bridge.rs::math_vendored_libm::or-pattern"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "crates/almide-interp/src/bridge.rs::string_fn_slice::or-pattern"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "crates/almide-interp/src/bridge.rs::string_fn_whole::or-pattern"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "crates/almide-interp/src/dispatch.rs::is_hof::or-pattern"
+class = "legacy"
+names = 43
+
+[[site]]
+id = "crates/almide-interp/src/dispatch_heap.rs::heap_prim_alloc::or-pattern"
+class = "legacy"
+names = 9
+
+[[site]]
+id = "crates/almide-interp/src/dispatch_heap.rs::heap_prim_slot_io::or-pattern"
+class = "legacy"
+names = 4
+
+[[site]]
+id = "crates/almide-interp/src/dispatch_vfs.rs::vfs_prim::or-pattern"
+class = "legacy"
+names = 16
+
+[[site]]
+id = "crates/almide-interp/src/hofs_fallible.rs::eval_try_list::or-pattern"
+class = "legacy"
+names = 3
+
+[[site]]
+id = "crates/almide-interp/src/hofs_fallible_containers.rs::eval_try_option::or-pattern"
+class = "legacy"
+names = 5
+
+[[site]]
+id = "crates/almide-interp/src/hofs_fallible_containers.rs::eval_try_set::or-pattern"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "crates/almide-interp/src/hofs_list_ops.rs::eval_container_op_list::or-pattern"
+class = "legacy"
+names = 4
+
+[[site]]
+id = "crates/almide-interp/src/hofs_list_ops.rs::is_inplace_mutating_op::or-pattern"
+class = "legacy"
+names = 12
+
+[[site]]
+id = "crates/almide-interp/src/hofs_map_set_ops.rs::eval_container_op_map::or-pattern"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "crates/almide-interp/src/hofs_map_set_ops.rs::eval_container_op_set::or-pattern"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "crates/almide-interp/src/inplace.rs::writes_back::or-pattern"
+class = "legacy"
+names = 9
+
+[[site]]
+id = "crates/almide-ir/src/effect.rs::HOST_FREE_EFFECT_FNS::table"
+class = "legacy"
+names = 8
+
+[[site]]
+id = "crates/almide-ir/src/effect.rs::RUNTIME_PREFIX_ALIASES::table"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "crates/almide-ir/src/effect.rs::STDLIB_MODULE_EFFECTS::table"
+class = "legacy"
+names = 43
+
+[[site]]
+id = "crates/almide-ir/src/fusion.rs::EFFECT_MODULES::table"
+class = "legacy"
+names = 12
+
+[[site]]
+id = "crates/almide-ir/src/fusion.rs::TOTAL_MODULES::table"
+class = "legacy"
+names = 4
+
+[[site]]
+id = "crates/almide-ir/src/runtime_use.rs::METERED_PRIM_PREFIXES::table"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "crates/almide-mir/src/alias_safety.rs::TRUSTED_FRESH_ALLOCATORS::table"
+class = "legacy"
+names = 3
+
+[[site]]
+id = "crates/almide-mir/src/coown_names.rs::COOWN_DROPS::table"
+class = "legacy"
+names = 8
+
+[[site]]
+id = "crates/almide-mir/src/coown_names.rs::COOWN_PRODUCERS::table"
+class = "legacy"
+names = 56
+
+[[site]]
+id = "crates/almide-mir/src/coown_names.rs::COOWN_SET_REPLACE::table"
+class = "legacy"
+names = 6
+
+[[site]]
+id = "crates/almide-mir/src/host_ops.rs::CAP_MODULES::table"
+class = "legacy"
+names = 12
+
+[[site]]
+id = "crates/almide-mir/src/host_ops.rs::WALLED::table"
+class = "legacy"
+names = 13
+
+[[site]]
+id = "crates/almide-mir/src/lower/binds_p2_c.rs::seed_call_module_heap_read_shape::or-pattern"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "crates/almide-mir/src/lower/calls.rs::borrow_release_roots::visit_expr::or-pattern"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "crates/almide-mir/src/lower/calls.rs::is_inplace_mutator::or-pattern"
+class = "legacy"
+names = 4
+
+[[site]]
+id = "crates/almide-mir/src/lower/cells.rs::inplace_mutated_receiver::or-pattern"
+class = "legacy"
+names = 11
+
+[[site]]
+id = "crates/almide-mir/src/lower/control_p2_b.rs::krec_call_name_map::or-pattern"
+class = "legacy"
+names = 4
+
+[[site]]
+id = "crates/almide-mir/src/lower/control_p2_b.rs::krec_call_name_set::or-pattern"
+class = "legacy"
+names = 3
+
+[[site]]
+id = "crates/almide-mir/src/lower/defunc_hof.rs::defunc_call_shape::or-pattern"
+class = "legacy"
+names = 5
+
+[[site]]
+id = "crates/almide-mir/src/lower/defunc_hof.rs::defunc_heap_elem_result::or-pattern"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "crates/almide-mir/src/lower/defunc_hof.rs::defunc_result_gate::or-pattern"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "crates/almide-mir/src/lower/defunc_hof.rs::defunc_str_acc_result::or-pattern"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "crates/almide-mir/src/lower/defunc_hof_inner.rs::setup_defunc_state::or-pattern"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "crates/almide-mir/src/lower/desugar_b.rs::desugar_offtype_testing_asserts::visit_expr_mut::or-pattern"
+class = "legacy"
+names = 4
+
+[[site]]
+id = "crates/almide-mir/src/lower/desugar_b_tail.rs::desugar_hof_chain_anf::is_unwrap_or_call::or-pattern"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "crates/almide-mir/src/lower/desugar_c.rs::desugar_result_combinator_to_match::visit_expr_mut::or-pattern"
+class = "legacy"
+names = 3
+
+[[site]]
+id = "crates/almide-mir/src/lower/desugar_call_arg_anf.rs::mutates_its_receiver::or-pattern"
+class = "legacy"
+names = 8
+
+[[site]]
+id = "crates/almide-mir/src/lower/loop_slot_rebind.rs::collect_heap_reassign_vars_from::visit_expr::or-pattern"
+class = "legacy"
+names = 3
+
+[[site]]
+id = "crates/almide-mir/src/lower/mod_d.rs::is_identity_int_widening::or-pattern"
+class = "legacy"
+names = 9
+
+[[site]]
+id = "crates/almide-mir/src/lower/mod_p3_b.rs::BYTES_INPLACE_APPENDS::table"
+class = "legacy"
+names = 26
+
+[[site]]
+id = "crates/almide-mir/src/lower/mod_p3_b.rs::rewrite_bytes_append::or-pattern"
+class = "legacy"
+names = 3
+
+[[site]]
+id = "crates/almide-mir/src/lower/mod_p3_b.rs::rewrite_clear::or-pattern"
+class = "legacy"
+names = 4
+
+[[site]]
+id = "crates/almide-mir/src/lower/mod_p3_b.rs::rewrite_map_mutation::or-pattern"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "crates/almide-mir/src/lower/mod_p3_b.rs::rewrite_push_concat::or-pattern"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "crates/almide-mir/src/lower/mod_p4.rs::is_numeric_module::or-pattern"
+class = "legacy"
+names = 12
+
+[[site]]
+id = "crates/almide-mir/src/lower/mod_p4.rs::is_self_host_option_module_fn::or-pattern"
+class = "legacy"
+names = 40
+
+[[site]]
+id = "crates/almide-mir/src/lower/mod_p4_c.rs::random_call_name::or-pattern"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "crates/almide-mir/src/lower/mod_p4_c.rs::result_call_name::or-pattern"
+class = "legacy"
+names = 13
+
+[[site]]
+id = "crates/almide-mir/src/lower/mod_p4_c.rs::result_call_name_heap_ok_input::or-pattern"
+class = "legacy"
+names = 3
+
+[[site]]
+id = "crates/almide-mir/src/lower/mod_p4_d.rs::list_accessor_heap_share_name::or-pattern"
+class = "legacy"
+names = 5
+
+[[site]]
+id = "crates/almide-mir/src/lower/mod_p4_d.rs::list_call_name_accessors_option_result::or-pattern"
+class = "legacy"
+names = 4
+
+[[site]]
+id = "crates/almide-mir/src/lower/mod_p4_d.rs::list_call_name_closure_passthrough::or-pattern"
+class = "legacy"
+names = 4
+
+[[site]]
+id = "crates/almide-mir/src/lower/mod_p4_d.rs::list_call_name_element_modifiers::or-pattern"
+class = "legacy"
+names = 5
+
+[[site]]
+id = "crates/almide-mir/src/lower/mod_p4_d.rs::list_call_name_preserving_combinators::or-pattern"
+class = "legacy"
+names = 8
+
+[[site]]
+id = "crates/almide-mir/src/lower/mod_p4_d.rs::list_call_name_search::or-pattern"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "crates/almide-mir/src/lower/mod_p4_d.rs::set_call_name_passthrough::or-pattern"
+class = "legacy"
+names = 3
+
+[[site]]
+id = "crates/almide-mir/src/lower/mod_p4_d.rs::set_call_name_result_keyed::or-pattern"
+class = "legacy"
+names = 10
+
+[[site]]
+id = "crates/almide-mir/src/lower/mod_p4_d.rs::set_call_name_srec_tuple::or-pattern"
+class = "legacy"
+names = 3
+
+[[site]]
+id = "crates/almide-mir/src/lower/mod_p4_e.rs::SKV_FUNCS::table"
+class = "legacy"
+names = 20
+
+[[site]]
+id = "crates/almide-mir/src/lower/mod_p4_e.rs::map_heap_val_construction_route::or-pattern"
+class = "legacy"
+names = 7
+
+[[site]]
+id = "crates/almide-mir/src/lower/mod_p4_e.rs::map_heap_val_named_and_typechange_route::or-pattern"
+class = "legacy"
+names = 4
+
+[[site]]
+id = "crates/almide-mir/src/lower/mod_p4_e.rs::map_heap_val_nested_route::or-pattern"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "crates/almide-mir/src/lower/mod_p4_e.rs::map_variant_heap_key::or-pattern"
+class = "legacy"
+names = 19
+
+[[site]]
+id = "crates/almide-mir/src/lower/mod_p4_e.rs::map_variant_other_scalar_key::or-pattern"
+class = "legacy"
+names = 5
+
+[[site]]
+id = "crates/almide-mir/src/lower/mod_p4_e.rs::map_variant_vkey_rows::or-pattern"
+class = "legacy"
+names = 5
+
+[[site]]
+id = "crates/almide-mir/src/lower/mod_p4_e.rs::set_call_name_arg_membership::or-pattern"
+class = "legacy"
+names = 3
+
+[[site]]
+id = "crates/almide-mir/src/lower/mod_p4_f.rs::list_call_name_drop_end::or-pattern"
+class = "legacy"
+names = 3
+
+[[site]]
+id = "crates/almide-mir/src/lower/mod_p4_f.rs::list_call_name_heap_elem_combinators::or-pattern"
+class = "legacy"
+names = 6
+
+[[site]]
+id = "crates/almide-mir/src/lower/mod_p4_f.rs::list_call_name_ordering::or-pattern"
+class = "legacy"
+names = 3
+
+[[site]]
+id = "crates/almide-mir/src/lower/mod_p4_f.rs::list_call_name_shuffle_choice::or-pattern"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "crates/almide-mir/src/lower/mod_p4_f.rs::list_call_name_str_elem_combinators::or-pattern"
+class = "legacy"
+names = 6
+
+[[site]]
+id = "crates/almide-mir/src/lower/mod_p4_h.rs::list_heap_call_name_module_routed::or-pattern"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "crates/almide-mir/src/lower/mod_p4_h.rs::list_heap_call_name_special_cases::or-pattern"
+class = "legacy"
+names = 8
+
+[[site]]
+id = "crates/almide-mir/src/lower/mod_p5.rs::is_self_host_result_module_fn::or-pattern"
+class = "legacy"
+names = 25
+
+[[site]]
+id = "crates/almide-mir/src/lower/mod_p5.rs::is_self_host_result_str_module_fn::or-pattern"
+class = "legacy"
+names = 58
+
+[[site]]
+id = "crates/almide-mir/src/lower/tests_result_family.rs::every_registry_result_fn_is_in_the_materialized_set::NOT_YET::table"
+class = "legacy"
+names = 10
+
+[[site]]
+id = "crates/almide-mir/src/lower/tests_result_family.rs::the_merged_name_set_survives_the_historical_name_mangling_incidents::table"
+class = "legacy"
+names = 9
+
+[[site]]
+id = "crates/almide-mir/src/purity.rs::PURE_MODULES::table"
+class = "legacy"
+names = 145
+
+[[site]]
+id = "crates/almide-mir/src/purity.rs::is_pure_fn_in_impure_module::or-pattern"
+class = "legacy"
+names = 67
+
+[[site]]
+id = "crates/almide-mir/src/render_native_shims.rs::SHIMS::table"
+class = "legacy"
+names = 15
+
+[[site]]
+id = "crates/almide-spine/src/s2.rs::fingerprint_decl::table"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "crates/almide-types/src/fallible_hofs.rs::FALLIBLE_HOFS::table"
+class = "legacy"
+names = 28
+
+[[site]]
+id = "crates/almide-types/src/fallible_hofs.rs::TOTAL_ONLY_HOFS::table"
+class = "legacy"
+names = 9
+
+[[site]]
+id = "crates/almide-types/src/self_host_fn_tables.rs::BYTES_CORE_FNS::table"
+class = "legacy"
+names = 99
+
+[[site]]
+id = "crates/almide-types/src/self_host_fn_tables.rs::BYTES_MUTATE_FNS::table"
+class = "legacy"
+names = 40
+
+[[site]]
+id = "crates/almide-types/src/self_host_fn_tables.rs::INT_SIZED_FNS::table"
+class = "legacy"
+names = 46
+
+[[site]]
+id = "crates/almide-types/src/self_host_registry.rs::self_host_runtime::table"
+class = "legacy"
+names = 1831
+
+[[site]]
+id = "crates/almide-types/src/stdlib_info.rs::AUTO_IMPORT_BUNDLED::table"
+class = "legacy"
+names = 22
+
+[[site]]
+id = "crates/almide-types/src/stdlib_info.rs::BUNDLED_MODULES::table"
+class = "legacy"
+names = 43
+
+[[site]]
+id = "crates/almide-types/src/stdlib_info.rs::RUNTIME_BACKED_TYPES::table"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "crates/almide-types/src/stdlib_info.rs::STDLIB_MODULES::table"
+class = "legacy"
+names = 39
+
+[[site]]
+id = "crates/almide-types/src/stdlib_info.rs::STDLIB_OWNED_TYPES::table"
+class = "legacy"
+names = 10
+
+[[site]]
+id = "crates/almide-types/src/stdlib_info.rs::TIER1_ALWAYS_ACCESSIBLE::table"
+class = "legacy"
+names = 11
+
+[[site]]
+id = "crates/almide-types/src/stdlib_info.rs::resolve_ufcs_ambiguous_container::or-pattern"
+class = "legacy"
+names = 16
+
+[[site]]
+id = "crates/almide-types/src/stdlib_info.rs::resolve_ufcs_ambiguous_container::table"
+class = "legacy"
+names = 9
+
+[[site]]
+id = "crates/almide-types/src/stdlib_info.rs::resolve_ufcs_ambiguous_string_list::or-pattern"
+class = "legacy"
+names = 6
+
+[[site]]
+id = "crates/almide-types/src/stdlib_info.rs::resolve_ufcs_ambiguous_string_list::table"
+class = "legacy"
+names = 4
+
+[[site]]
+id = "crates/almide-types/src/stdlib_info.rs::resolve_ufcs_exclusive::or-pattern"
+class = "legacy"
+names = 104
+
+[[site]]
+id = "crates/almide-types/src/stdlib_info.rs::resolve_ufcs_exclusive::table"
+class = "legacy"
+names = 4
+
+[[site]]
+id = "crates/almide-types/src/stdlib_info.rs::resolve_ufcs_sized_numeric::or-pattern"
+class = "legacy"
+names = 11
+
+[[site]]
+id = "crates/almide-types/src/stdlib_info.rs::resolve_ufcs_sized_numeric::table"
+class = "legacy"
+names = 12
+
+[[site]]
+id = "crates/almide-types/src/time_units.rs::TIME_MODULES::table"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "crates/almide-wasi/src/fs_service.rs::BASE_IMPORTS::table"
+class = "legacy"
+names = 3
+
+[[site]]
+id = "crates/almide-wasi/src/fs_service.rs::FS_OP_NAMES::table"
+class = "legacy"
+names = 29
+
+[[site]]
+id = "crates/almide-wasm-run/src/component_availability.rs::operation_name::NAMES::table"
+class = "legacy"
+names = 33
+
+[[site]]
+id = "crates/almide-wasm-run/src/wasi_p3_emit.rs::base_import_list::table"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "crates/almide-wasm/src/bytes.rs::lower_bytes_call::or-pattern"
+class = "legacy"
+names = 20
+
+[[site]]
+id = "crates/almide-wasm/src/bytes_append.rs::shape::or-pattern"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "crates/almide-wasm/src/bytes_rw.rs::lower_bytes_rw::or-pattern"
+class = "legacy"
+names = 32
+
+[[site]]
+id = "crates/almide-wasm/src/calls.rs::resolve_qualified::VERIFIED::table"
+class = "legacy"
+names = 20
+
+[[site]]
+id = "crates/almide-wasm/src/calls.rs::resolve_qualified::VERIFIED_SUM_BUILDERS::table"
+class = "legacy"
+names = 7
+
+[[site]]
+id = "crates/almide-wasm/src/calls_modules.rs::lower_module_call_b::or-chain"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "crates/almide-wasm/src/calls_modules.rs::lower_module_call_b::or-pattern"
+class = "legacy"
+names = 5
+
+[[site]]
+id = "crates/almide-wasm/src/calls_modules.rs::lower_module_call_c::or-pattern"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "crates/almide-wasm/src/calls_modules.rs::lower_module_call_dispatch::or-pattern"
+class = "legacy"
+names = 4
+
+[[site]]
+id = "crates/almide-wasm/src/collections.rs::lower_map_call::or-pattern"
+class = "legacy"
+names = 5
+
+[[site]]
+id = "crates/almide-wasm/src/collections_set.rs::lower_set_call::or-pattern"
+class = "legacy"
+names = 5
+
+[[site]]
+id = "crates/almide-wasm/src/dying_move.rs::consumed_read::or-pattern"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "crates/almide-wasm/src/eta.rs::HOF_MODULES::table"
+class = "legacy"
+names = 7
+
+[[site]]
+id = "crates/almide-wasm/src/fan.rs::lower_fan_call::or-pattern"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "crates/almide-wasm/src/fan_par.rs::PURE_MODULES::table"
+class = "legacy"
+names = 10
+
+[[site]]
+id = "crates/almide-wasm/src/fs.rs::lower_fs_call::or-pattern"
+class = "legacy"
+names = 3
+
+[[site]]
+id = "crates/almide-wasm/src/fs_meta.rs::PROC_LEAVES::table"
+class = "legacy"
+names = 11
+
+[[site]]
+id = "crates/almide-wasm/src/fs_meta.rs::lower_fs_meta_call::or-pattern"
+class = "legacy"
+names = 4
+
+[[site]]
+id = "crates/almide-wasm/src/host_env.rs::lower_host_call::or-pattern"
+class = "legacy"
+names = 6
+
+[[site]]
+id = "crates/almide-wasm/src/http_call.rs::lower_http_call_leaf::or-pattern"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "crates/almide-wasm/src/inline_calls.rs::PURE_PRIMS::table"
+class = "legacy"
+names = 29
+
+[[site]]
+id = "crates/almide-wasm/src/list.rs::lower_list_call::or-pattern"
+class = "legacy"
+names = 41
+
+[[site]]
+id = "crates/almide-wasm/src/list_order.rs::lower_list_order_call::or-pattern"
+class = "legacy"
+names = 4
+
+[[site]]
+id = "crates/almide-wasm/src/matrix.rs::lower_matrix_call::or-pattern"
+class = "legacy"
+names = 19
+
+[[site]]
+id = "crates/almide-wasm/src/matrix_ops.rs::lower_matrix_call_b::or-pattern"
+class = "legacy"
+names = 4
+
+[[site]]
+id = "crates/almide-wasm/src/matrix_ops.rs::lower_matrix_call_c::or-pattern"
+class = "legacy"
+names = 4
+
+[[site]]
+id = "crates/almide-wasm/src/prim.rs::lower_prim_call::or-pattern"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "crates/almide-wasm/src/prim.rs::lower_prim_call_b::or-pattern"
+class = "legacy"
+names = 33
+
+[[site]]
+id = "crates/almide-wasm/src/prim.rs::lower_prim_float::or-pattern"
+class = "legacy"
+names = 4
+
+[[site]]
+id = "crates/almide-wasm/src/prim.rs::lower_prim_float_b::or-pattern"
+class = "legacy"
+names = 6
+
+[[site]]
+id = "crates/almide-wasm/src/random.rs::lower_random_call::or-pattern"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "crates/almide-wasm/src/region.rs::SCALAR_MODULES::table"
+class = "legacy"
+names = 4
+
+[[site]]
+id = "crates/almide-wasm/src/scalar_ext.rs::lower_int_bitops::or-pattern"
+class = "legacy"
+names = 7
+
+[[site]]
+id = "crates/almide-wasm/src/scalar_ext.rs::lower_scalar_ext::or-pattern"
+class = "legacy"
+names = 18
+
+[[site]]
+id = "crates/almide-wasm/src/string_ext.rs::lower_string_ext::or-pattern"
+class = "legacy"
+names = 4
+
+[[site]]
+id = "crates/almide-wasm/src/string_ext.rs::lower_string_ext_b::or-pattern"
+class = "legacy"
+names = 4
+
+[[site]]
+id = "crates/almide-wasm/src/sums.rs::lower_sum_combinator::or-pattern"
+class = "legacy"
+names = 8
+
+[[site]]
+id = "crates/almide-wasm/src/sums.rs::lower_sum_combinator_b::or-pattern"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "crates/almide-wasm/src/testing.rs::lower_testing_assert::or-pattern"
+class = "legacy"
+names = 6
+
+[[site]]
+id = "crates/almide-wasm/src/value.rs::lower_value_call::or-pattern"
+class = "legacy"
+names = 4
+
+[[site]]
+id = "crates/almide-wasm/src/whitelist.rs::BYTES_FAMILY_SUM::table"
+class = "legacy"
+names = 88
+
+[[site]]
+id = "crates/almide-wasm/src/whitelist.rs::BYTES_FAMILY_VERIFIED::table"
+class = "legacy"
+names = 46
+
+[[site]]
+id = "crates/almide-wasm/src/whitelist.rs::CODEC_ENCODE_VERIFIED::table"
+class = "legacy"
+names = 24
+
+[[site]]
+id = "crates/almide-wasm/src/whitelist.rs::HTTP_CALL_SUM::table"
+class = "legacy"
+names = 6
+
+[[site]]
+id = "crates/almide-wasm/src/whitelist.rs::HTTP_CLIENT_SUM::table"
+class = "legacy"
+names = 5
+
+[[site]]
+id = "crates/almide-wasm/src/whitelist.rs::HTTP_SERVE_SUM::table"
+class = "legacy"
+names = 6
+
+[[site]]
+id = "crates/almide-wasm/src/whitelist.rs::MATH_VERIFIED::table"
+class = "legacy"
+names = 23
+
+[[site]]
+id = "crates/almide-wasm/src/whitelist.rs::MATRIX_COMPOSITIONS::table"
+class = "legacy"
+names = 16
+
+[[site]]
+id = "crates/almide-wasm/src/whitelist.rs::PROCESS_SUM::table"
+class = "legacy"
+names = 11
+
+[[site]]
+id = "crates/almide-wasm/src/whitelist.rs::SCALAR_TEXT_SUM_BUILDERS::table"
+class = "legacy"
+names = 5
+
+[[site]]
+id = "crates/almide-wasm/src/whitelist.rs::SCALAR_TEXT_VERIFIED::table"
+class = "legacy"
+names = 62
+
+[[site]]
+id = "crates/almide-wasm/src/whitelist.rs::SIZED_CONVERT_SUM_BUILDERS::table"
+class = "legacy"
+names = 54
+
+[[site]]
+id = "crates/almide-wasm/src/whitelist.rs::SIZED_CONVERT_VERIFIED::table"
+class = "legacy"
+names = 179
+
+[[site]]
+id = "crates/almide-wasm/src/witness_gate.rs::METER_PRIMS::table"
+class = "legacy"
+names = 7
+
+[[site]]
+id = "crates/almide-wasm/src/witness_gate_callbacks.rs::inline_callback_subset::or-pattern"
+class = "legacy"
+names = 27
+
+[[site]]
+id = "crates/almide-wasm/src/witness_gate_callbacks.rs::is_self_hosted_hof::or-pattern"
+class = "legacy"
+names = 7
+
+[[site]]
+id = "src/cargo_cfg.rs::expr::or-pattern"
+class = "legacy"
+names = 2
+
+[[site]]
+id = "src/cli/docs_gen.rs::check_numeric_conversion_matrix::CARRIERS::table"
+class = "legacy"
+names = 8
+
+[[site]]
+id = "src/cli/ide.rs::DEFAULT_SNAPSHOT_MODULES::table"
+class = "legacy"
+names = 7
+
+[[site]]
+id = "src/cli/js_host.rs::WASI_SHIMS::table"
+class = "legacy"
+names = 3
+
+[[site]]
+id = "src/cli/lsp_code_actions.rs::code_action_for_e003::table"
+class = "legacy"
+names = 12
+
+[[site]]
+id = "src/cli/mod.rs::PROC_SPAWNING::table"
+class = "legacy"
+names = 9
+
+[[site]]
+id = "src/cli/wasm_compile.rs::check_wasm_availability::table"
+class = "legacy"
+names = 10
+
+[[site]]
+id = "src/wasm_leg.rs::link_self_host::scan_expr::or-chain"
+class = "legacy"
+names = 2
