@@ -333,8 +333,14 @@ fn run_artifact(ctx: &Ctx, art: &Path, leg: Leg) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
+/// The first `error` line of a failed run's stderr, else its first line: a
+/// warning printed ahead of the error (a deprecated call's E052) must not
+/// stand in for the reason.
 fn first_error(stderr: &[u8]) -> String {
-    String::from_utf8_lossy(stderr).lines().find(|l| !l.trim().is_empty()).unwrap_or("").chars().take(200).collect()
+    let text = String::from_utf8_lossy(stderr);
+    let mut lines = text.lines().filter(|l| !l.trim().is_empty());
+    let first = lines.clone().next().unwrap_or("");
+    lines.find(|l| l.contains("error")).unwrap_or(first).chars().take(200).collect()
 }
 
 fn hash(s: &str) -> u64 {

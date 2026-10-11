@@ -67,17 +67,6 @@ impl Target {
         self.params[i].1.instantiate(&self.subst)
     }
 
-    /// The call, with `slot` overriding parameter `i`'s argument text.
-    fn call(&self, n: u64, slot: Option<(usize, &str)>) -> String {
-        let args: Vec<String> = (0..self.params.len())
-            .map(|i| match slot {
-                Some((j, text)) if j == i => text.to_string(),
-                _ => self.arg(i, n),
-            })
-            .collect();
-        format!("{}({})", self.name, args.join(", "))
-    }
-
     fn arg(&self, i: usize, n: u64) -> String {
         let (pname, t) = &self.params[i];
         match t {
@@ -123,16 +112,23 @@ impl Target {
         // guard like `i < 0` was provable and hoisted through) and the step's
         // own cost cancels out of the difference. Alternating two inputs was
         // worse: native cloned the chosen list on every iteration (#3532).
+        // A string has no O(1) in-place step, and `x = x` is not free on
+        // every leg: it is bound once and left alone.
         let slot = self.size_param.map(|i| {
-            let _ = writeln!(s, "  var x: {} = {}", self.render_param(i), self.arg(i, n));
-            (i, "x")
+            let varies = !matches!(self.ty(i), Some(GenType::String));
+            let kw = if varies { "var" } else { "let" };
+            let _ = writeln!(s, "  {kw} x: {} = {}", self.render_param(i), self.arg(i, n));
+            (i, varies)
         });
+        // Every other value argument is bound to a typed `let` first: a bare
+        // `ok(2)` leaves its error type unconstrained (E025).
+        s.push_str(&self.arg_lets(n, self.size_param));
         let _ = writeln!(s, "  var acc = 0\n  var i = 0\n  while i < {k} {{");
-        if let Some((i, _)) = slot {
+        if let Some((i, true)) = slot {
             let _ = writeln!(s, "    x = {}", vary("x", &self.ty(i).unwrap_or(GenType::Int), n));
         }
         if with_call {
-            let _ = writeln!(s, "    let r: {} = {}", self.ret.render(), self.call(n, slot));
+            let _ = writeln!(s, "    let r: {} = {}", self.ret.render(), self.bound_call(slot.map(|(i, _)| i)));
             let _ = writeln!(s, "    acc = acc + {}", digest("r", &self.ret));
         }
         let _ = writeln!(s, "    acc = acc + 1\n    i = i + 1\n  }}");
@@ -151,9 +147,25 @@ impl Target {
         let Some(p) = self.rebind_param else { return Vec::new() };
         let ty = self.ret.render();
         let init = if Some(p) == self.size_param { self.arg(p, n) } else { sized(&self.ret, n) };
-        let step = |v: &str| self.call(1, Some((p, v)));
+        // The other value arguments come from typed top-level fns, which the
+        // tail shape's `go` can see as well as `main` (an inline `ok(2)`
+        // leaves its error type unconstrained, E025).
+        let mut consts = String::new();
+        for i in (0..self.params.len()).filter(|i| *i != p && !self.is_fn(*i)) {
+            let _ = writeln!(consts, "fn a{i}() -> {} = {}\n", self.render_param(i), self.arg(i, 1));
+        }
+        let step = |v: &str| {
+            let args: Vec<String> = (0..self.params.len())
+                .map(|i| match i {
+                    _ if i == p => v.to_string(),
+                    _ if self.is_fn(i) => self.arg(i, 1),
+                    _ => format!("a{i}()"),
+                })
+                .collect();
+            format!("{}({})", self.name, args.join(", "))
+        };
         let d = digest("x", &self.ret);
-        vec![
+        let programs = vec![
             (
                 "loop",
                 format!(
@@ -164,18 +176,19 @@ impl Target {
             (
                 "tail",
                 format!(
-                    "fn go(x: {ty}, i: Int) -> {ty} = if i <= 0 then x else go({}, i - 1)\n\neffect fn main() -> Unit = {{\n  let x = go({init}, {k})\n  println(\"${{{d}}}\")\n}}\n",
+                    "fn go(x: {ty}, i: Int) -> {ty} = if i <= 0 then x else go({}, i - 1)\n\neffect fn main() -> Unit = {{\n  let x0: {ty} = {init}\n  let x: {ty} = go(x0, {k})\n  println(\"${{{d}}}\")\n}}\n",
                     step("x")
                 ),
             ),
             (
                 "fold",
                 format!(
-                    "effect fn main() -> Unit = {{\n  let x = list.range(0, {k}) |> list.fold({init}, (x, i) => {})\n  println(\"${{{d}}}\")\n}}\n",
+                    "effect fn main() -> Unit = {{\n  let x0: {ty} = {init}\n  let x: {ty} = list.range(0, {k}) |> list.fold(x0, (x, i) => {})\n  println(\"${{{d}}}\")\n}}\n",
                     step("x")
                 ),
             ),
-        ]
+        ];
+        programs.into_iter().map(|(label, src)| (label, format!("{consts}{src}"))).collect()
     }
 
     /// Criterion 5: `base` wraps the call, `left` and `right` each import
@@ -191,7 +204,7 @@ impl Target {
             let _ = writeln!(main, "  let a{i}: {} = {}", self.render_param(i), self.arg(i, n));
         }
         let args = names.join(", ");
-        let _ = writeln!(main, "  let d: {ret} = {}({args})\n  let l = left.call({args})\n  let r = right.call({args})", self.name);
+        let _ = writeln!(main, "  let d: {ret} = {}({args})\n  let l: {ret} = left.call({args})\n  let r: {ret} = right.call({args})", self.name);
         for v in ["d", "l", "r"] {
             let _ = writeln!(main, "  {}", render_print(v, &self.ret));
         }
@@ -204,6 +217,33 @@ impl Target {
             ("app/src/main.almd".to_string(), main),
         ];
         Project { files, entry: "app/src/main.almd".to_string() }
+    }
+
+    /// `let a<i>: T = <arg>` for every value parameter other than `skip`
+    /// (callbacks stay inline: they are not values a `let` can type here).
+    fn arg_lets(&self, n: u64, skip: Option<usize>) -> String {
+        let mut s = String::new();
+        for i in (0..self.params.len()).filter(|i| Some(*i) != skip && !self.is_fn(*i)) {
+            let _ = writeln!(s, "  let a{i}: {} = {}", self.render_param(i), self.arg(i, n));
+        }
+        s
+    }
+
+    /// The call over the `let`-bound arguments of [`Self::arg_lets`], `x` in
+    /// the `slot` position and callbacks inline.
+    fn bound_call(&self, slot: Option<usize>) -> String {
+        let args: Vec<String> = (0..self.params.len())
+            .map(|i| match i {
+                _ if Some(i) == slot => "x".to_string(),
+                _ if self.is_fn(i) => self.arg(i, 0),
+                _ => format!("a{i}"),
+            })
+            .collect();
+        format!("{}({})", self.name, args.join(", "))
+    }
+
+    fn is_fn(&self, i: usize) -> bool {
+        matches!(self.params[i].1, SigType::Fn(..))
     }
 
     fn func(&self) -> &str {
