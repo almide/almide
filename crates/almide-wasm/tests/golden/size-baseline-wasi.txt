@@ -43,7 +43,7 @@
 3841	spec/wasm_cross/bytes_clear_mut_param.almd
 5090	spec/wasm_cross/bytes_copy_from_negative_len.almd
 4411	spec/wasm_cross/bytes_copy_within_offset_domain.almd
-10822	spec/wasm_cross/bytes_cursor_read_domain.almd
+11293	spec/wasm_cross/bytes_cursor_read_domain.almd
 1777	spec/wasm_cross/bytes_data_ptr_identity.almd
 1557	spec/wasm_cross/bytes_equality_call_operands.almd
 6424	spec/wasm_cross/bytes_f16.almd
@@ -65,7 +65,7 @@
 17472	spec/wasm_cross/bytes_search_edit_family.almd
 7487	spec/wasm_cross/bytes_set_on_record_field.almd
 4418	spec/wasm_cross/bytes_set_value_semantics.almd
-5537	spec/wasm_cross/bytes_string_window_domain.almd
+5525	spec/wasm_cross/bytes_string_window_domain.almd
 7983	spec/wasm_cross/bytes_temp_receiver.almd
 5201	spec/wasm_cross/bytes_to_string_err_release.almd
 10939	spec/wasm_cross/bytes_writer_family.almd
@@ -548,7 +548,7 @@
 9544	spec/wasm_cross/mut_call_nested_read_before.almd
 6195	spec/wasm_cross/mut_call_two_mut_args_read.almd
 5038	spec/wasm_cross/mut_heap_param.almd
-4677	spec/wasm_cross/mut_list_param_read_by_range_ops.almd
+4691	spec/wasm_cross/mut_list_param_read_by_range_ops.almd
 4669	spec/wasm_cross/mut_map_param.almd
 13121	spec/wasm_cross/mut_param_alias_cow.almd
 11050	spec/wasm_cross/mut_param_alias_in_place_mutators.almd
@@ -570,7 +570,7 @@
 2912	spec/wasm_cross/mut_param_loop_stays_in_place.almd
 11291	spec/wasm_cross/mut_param_move_mode_gaps.almd
 16963	spec/wasm_cross/mut_param_nested_place_writeback.almd
-49308	spec/wasm_cross/mut_param_reassign_from_hof.almd
+49319	spec/wasm_cross/mut_param_reassign_from_hof.almd
 2314	spec/wasm_cross/mut_param_spread_reassign.almd
 5192	spec/wasm_cross/mut_param_tail_recursion.almd
 3080	spec/wasm_cross/mut_param_writeback_growth.almd
@@ -928,7 +928,7 @@
 3255	spec/wasm_cross/variant_result_credit_shapes.almd
 2049	spec/wasm_cross/variant_result_one_credit_churn.almd
 555	spec/wasm_cross/while_loops.almd
-2624	spec/wasm_cross/whilep_str.almd
+2696	spec/wasm_cross/whilep_str.almd
 5707	spec/wasm_cross/wide_function_body.almd
 34294	spec/wasm_cross/witness_straightline.almd
 7023	spec/wasm_cross/zip_view_shape.almd
