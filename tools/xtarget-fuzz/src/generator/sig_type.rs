@@ -50,6 +50,7 @@ pub enum SigType {
     /// A fixed-width number type (`Int8` … `Float64`).
     Sized(&'static str),
     Bytes,
+    Matrix,
 }
 
 /// Single-letter (or short) names the stdlib uses for generic type
@@ -74,6 +75,7 @@ impl SigType {
                     "Bool" => Some(SigType::Bool),
                     "Unit" => Some(SigType::Unit),
                     "Bytes" => Some(SigType::Bytes),
+                    "Matrix" => Some(SigType::Matrix),
                     // The fixed-width numbers the value grammar builds; other
                     // nominal types enter via mutation.
                     other => match GenType::sized(other) {
@@ -201,6 +203,7 @@ impl SigType {
             SigType::Unit => Some(GenType::Unit),
             SigType::Sized(s) => Some(GenType::Sized(s)),
             SigType::Bytes => Some(GenType::Bytes),
+            SigType::Matrix => Some(GenType::Matrix),
             SigType::Var(n) => subst.get(n).cloned(),
             SigType::List(e) => Some(GenType::List(Box::new(e.instantiate(subst)?))),
             SigType::Option(e) => Some(GenType::Option(Box::new(e.instantiate(subst)?))),
@@ -234,7 +237,8 @@ impl SigType {
             | (SigType::String, GenType::String)
             | (SigType::Bool, GenType::Bool)
             | (SigType::Unit, GenType::Unit)
-            | (SigType::Bytes, GenType::Bytes) => true,
+            | (SigType::Bytes, GenType::Bytes)
+            | (SigType::Matrix, GenType::Matrix) => true,
             (SigType::Sized(a), GenType::Sized(b)) => a == b,
             (SigType::Var(n), g) => match subst.get(n) {
                 Some(bound) => bound == g,
