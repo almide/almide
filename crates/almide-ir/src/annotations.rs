@@ -208,6 +208,14 @@ pub struct CodegenAnnotations {
     /// ConcretizeTypes postcondition rightly refuses. Populated by
     /// `TailCallOptPass`.
     pub infer_binding_tys: BTreeSet<VarId>,
+    /// Bindings declared without a value (`let mut r: T;`) and assigned on
+    /// every path before they are read — the TCO loop's result variable, whose
+    /// every exit assigns it and then `break`s. rustc's definite-initialisation
+    /// check proves the assignment, so the binding needs no default value of
+    /// `T` and the rewrite applies to every return type (a record, a variant, a
+    /// `Set`, `Bytes`, …). The IR value is an unspanned `Hole` the walker never
+    /// renders. Populated by `TailCallOptPass`.
+    pub deferred_init: BTreeSet<VarId>,
     /// TCO loop params whose clone/move decisions the `TailCallOptPass` made
     /// ITSELF: every consuming read in the rewritten loop body is either
     /// explicitly `Clone`-wrapped by the pass or a deliberate bare move at a
@@ -264,6 +272,12 @@ impl CodegenAnnotations {
     /// cannot spell). The IR type stays real. (TailCallOptPass.)
     pub fn is_infer_binding(&self, var: &VarId) -> bool {
         self.infer_binding_tys.contains(var)
+    }
+
+    /// True if `var` is declared without a value and assigned before every
+    /// read (see [`Self::deferred_init`]). (TailCallOptPass.)
+    pub fn is_deferred_init(&self, var: &VarId) -> bool {
+        self.deferred_init.contains(var)
     }
 
     /// The key [`Self::inline_fans`] is indexed by.

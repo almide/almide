@@ -368,6 +368,10 @@ fn rc_cow_clone_bind_type_value(ctx: &RenderContext, value: &IrExpr, type_s: Str
 
 fn render_stmt_bind(ctx: &RenderContext, stmt: &IrStmt) -> String {
     let IrStmtKind::Bind { var, ty, value, mutability } = &stmt.kind else { unreachable!() };
+    // Declared now, assigned on every path before a read (the TCO result).
+    if ctx.ann.is_deferred_init(var) {
+        return format!("let mut {}: {};", ctx.var_name(*var), render_type(ctx, &erase_bind_ty(ctx, ty)));
+    }
     if let Some(rendered) = try_render_bind_shared_mut(ctx, var, ty, value) {
         return rendered;
     }
