@@ -44,6 +44,7 @@ pub enum SigType {
     Result(Box<SigType>, Box<SigType>),
     Tuple2(Box<SigType>, Box<SigType>),
     Map(Box<SigType>, Box<SigType>),
+    Set(Box<SigType>),
     /// `(p...) -> r` — a function/closure parameter (HOF position).
     Fn(Vec<SigType>, Box<SigType>),
     /// A fixed-width number type (`Int8` … `Float64`).
@@ -101,11 +102,9 @@ impl SigType {
                         Box::new(Self::from_type_expr(&args[0])?),
                         Box::new(Self::from_type_expr(&args[1])?),
                     )),
-                    // Set is in the generator's call surface but NOT in
-                    // its goal-type universe (a Set value is built only
-                    // via set.* calls, never as a literal), so a Set
-                    // *parameter* cannot be synthesized from scratch —
-                    // reject signatures that take one.
+                    // A Set is built with `set.from_list`; its element
+                    // must be hashable (checked at `instantiate`).
+                    ("Set", 1) => Some(SigType::Set(Box::new(Self::from_type_expr(&args[0])?))),
                     _ => None,
                 }
             }
@@ -134,7 +133,7 @@ impl SigType {
                     out.push(n.clone());
                 }
             }
-            SigType::List(e) | SigType::Option(e) => e.collect_vars(out),
+            SigType::List(e) | SigType::Option(e) | SigType::Set(e) => e.collect_vars(out),
             SigType::Result(a, b) | SigType::Tuple2(a, b) | SigType::Map(a, b) => {
                 a.collect_vars(out);
                 b.collect_vars(out);
@@ -172,7 +171,7 @@ impl SigType {
                 bind_slot_to_string(err, out);
                 ok.collect_forced_bindings(out);
             }
-            SigType::List(e) | SigType::Option(e) => e.collect_forced_bindings(out),
+            SigType::List(e) | SigType::Option(e) | SigType::Set(e) => e.collect_forced_bindings(out),
             SigType::Tuple2(a, b) => {
                 a.collect_forced_bindings(out);
                 b.collect_forced_bindings(out);
@@ -215,6 +214,7 @@ impl SigType {
                 Box::new(b.instantiate(subst)?),
             )),
             SigType::Map(_k, v) => Some(GenType::Map(Box::new(v.instantiate(subst)?))),
+            SigType::Set(e) => Some(e.instantiate(subst)?).filter(GenType::is_set_elem).map(|e| GenType::Set(Box::new(e))),
             // A function type is not a producible value.
             SigType::Fn(_, _) => None,
         }
@@ -252,6 +252,7 @@ impl SigType {
                 a.unify_with_goal(ga, subst) && b.unify_with_goal(gb, subst)
             }
             (SigType::Map(_k, v), GenType::Map(gv)) => v.unify_with_goal(gv, subst),
+            (SigType::Set(e), GenType::Set(g)) => e.unify_with_goal(g, subst),
             _ => false,
         }
     }

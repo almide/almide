@@ -41,6 +41,9 @@ pub enum GenType {
     Sized(&'static str),
     /// `Bytes`, built with `bytes.from_list` (or `bytes.new(n)` when sized).
     Bytes,
+    /// `Set[elem]`, built with `set.from_list`; the element is a hashable
+    /// scalar ([`GenType::is_set_elem`]).
+    Set(Box<GenType>),
 }
 
 /// The fixed-width number types the value grammar builds.
@@ -89,7 +92,22 @@ impl GenType {
                 out.push(']');
             }
             GenType::Sized(name) => out.push_str(name),
+            GenType::Set(e) => {
+                out.push_str("Set[");
+                e.render_into(out);
+                out.push(']');
+            }
             GenType::Bytes => out.push_str("Bytes"),
+        }
+    }
+
+    /// A type a `Set` can hold: hashable and equal by value (no Float — a
+    /// `Set[Float]` is refused by the checker).
+    pub fn is_set_elem(&self) -> bool {
+        match self {
+            GenType::Int | GenType::String | GenType::Bool => true,
+            GenType::Sized(name) => !name.starts_with("Float"),
+            _ => false,
         }
     }
 
@@ -117,6 +135,7 @@ impl GenType {
             GenType::Tuple2(a, b) => a.is_observable() && b.is_observable(),
             GenType::Map(v) => v.is_observable(),
             GenType::Sized(_) => true,
+            GenType::Set(e) => e.is_observable(),
             // A Bytes value has no string form (E089).
             GenType::Bytes => false,
         }
@@ -133,7 +152,11 @@ impl GenType {
             | GenType::Unit
             | GenType::Sized(_)
             | GenType::Bytes => 1,
-            GenType::List(e) | GenType::Option(e) | GenType::Result(e) | GenType::Map(e) => {
+            GenType::List(e)
+            | GenType::Option(e)
+            | GenType::Result(e)
+            | GenType::Map(e)
+            | GenType::Set(e) => {
                 1 + e.depth()
             }
             GenType::Tuple2(a, b) => 1 + a.depth().max(b.depth()),
