@@ -476,7 +476,7 @@
 65840	spec/wasm_cross/map_fold_heap_accumulator.almd
 66336	spec/wasm_cross/map_get_fallback_key_and_lazy.almd
 80704	spec/wasm_cross/map_index_order.almd
-87248	spec/wasm_cross/map_index_released_with_block.almd
+83920	spec/wasm_cross/map_index_released_with_block.almd
 66528	spec/wasm_cross/map_index_string_key_shapes.almd
 73184	spec/wasm_cross/map_insertion_order.almd
 68720	spec/wasm_cross/map_interp_string_value.almd
@@ -487,7 +487,7 @@
 66656	spec/wasm_cross/map_set_eq.almd
 267680	spec/wasm_cross/map_set_in_place.almd
 141392	spec/wasm_cross/map_set_index_threshold.almd
-66960	spec/wasm_cross/map_set_ops.almd
+66896	spec/wasm_cross/map_set_ops.almd
 67744	spec/wasm_cross/map_set_typechange.almd
 66592	spec/wasm_cross/map_upsert_str.almd
 65952	spec/wasm_cross/map_wide_int_key.almd
@@ -570,7 +570,7 @@
 83168	spec/wasm_cross/mut_param_loop_stays_in_place.almd
 67248	spec/wasm_cross/mut_param_move_mode_gaps.almd
 68704	spec/wasm_cross/mut_param_nested_place_writeback.almd
-90368	spec/wasm_cross/mut_param_reassign_from_hof.almd
+90400	spec/wasm_cross/mut_param_reassign_from_hof.almd
 65760	spec/wasm_cross/mut_param_spread_reassign.almd
 74448	spec/wasm_cross/mut_param_tail_recursion.almd
 66256	spec/wasm_cross/mut_param_writeback_growth.almd
@@ -667,7 +667,7 @@
 65648	spec/wasm_cross/range_first_class.almd
 65760	spec/wasm_cross/range_inclusive_end_at_max.almd
 65856	spec/wasm_cross/range_materialize_oom.almd
-88544	spec/wasm_cross/rc_alloc_stress.almd
+88288	spec/wasm_cross/rc_alloc_stress.almd
 65808	spec/wasm_cross/rc_reclaim_churn.almd
 66144	spec/wasm_cross/record_default_field_omitted.almd
 71600	spec/wasm_cross/record_field_rust_keyword.almd
@@ -732,8 +732,8 @@
 98320	spec/wasm_cross/scoped_region_value.almd
 66240	spec/wasm_cross/scoped_worker_in_and_out.almd
 66512	spec/wasm_cross/self_call_swapped_params.almd
-66624	spec/wasm_cross/set_entries_reclaim.almd
-76480	spec/wasm_cross/set_index_order.almd
+66608	spec/wasm_cross/set_entries_reclaim.almd
+77472	spec/wasm_cross/set_index_order.almd
 66864	spec/wasm_cross/set_insertion_order.almd
 74768	spec/wasm_cross/sized_display_matrix.almd
 67504	spec/wasm_cross/sized_field_default_matrix.almd
