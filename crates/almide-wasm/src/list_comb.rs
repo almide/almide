@@ -428,34 +428,31 @@ impl Emitter<'_> {
         xs: &IrExpr,
         cb: &IrExpr,
     ) -> ArmResult {
+        // Scan for the prefix length first, then copy the prefix in ONE
+        // `memory.copy` the way `list.take` does. Pushing element by element
+        // regrew the result by doubling: up to twice the prefix's bytes
+        // copied, and how much of that the allocator could extend in place
+        // depended on the heap, so the inspection's bytes-moved meter read a
+        // different constant per size (c4-standard-4, n=20000: one doubling
+        // step short of the copy the larger sizes paid).
         let (params, body) = self.hof_lambda(cb, 1)?;
         let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
-        let hacc = self.hold_i32()?;
-        self.f.instructions().i32_const(0).call(F_ALLOC).local_set(hacc);
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
         self.hof_elem_into(elem, bh, ch, ih, params[0]);
-        self.witness_callback_open(cb, None);
-        self.lower(body, Some(BOOL))?;
-        // #2755: a false verdict leaves the walk; a true one shares the
-        // element into the prefix.
-        self.witness_filter_skip();
-        self.witness_view_shares(&[(params[0], elem)]);
-        self.witness_loop_close();
+        self.lower_inlined_predicate(cb, body)?;
         self.f.instructions().i32_eqz().br_if(1);
-        self.f.instructions().local_get(hacc).local_get(params[0]);
-        if elem.val_type() == ValType::F64 {
-            self.f.instructions().i64_reinterpret_f64();
-        }
-        let push = match elem.slot_size() {
-            8 => F_LIST_PUSH_8,
-            _ => F_LIST_PUSH_4,
-        };
-        // The pushed element is a COPY of the source's handle: the result
-        // takes its share (#2010).
-        self.share_handle_top(elem);
-        self.f.instructions().call(push).local_set(hacc);
         self.hof_step(ih);
-        self.f.instructions().local_get(hacc);
+        // ih = the prefix length; copy that many slots and share each one.
+        let ho = self.hold_i32()?;
+        let mut i = self.f.instructions();
+        i.local_get(ih).i32_const(elem.slot_size() as i32).i32_mul().call(F_ALLOC).local_set(ho);
+        i.local_get(ho).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+        i.local_get(bh).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+        i.local_get(ih).i32_const(elem.slot_size() as i32).i32_mul();
+        i.memory_copy(0, 0);
+        let _ = i;
+        self.emit_inc_elems(ho, elem);
+        self.f.instructions().local_get(ho);
         for _ in 0..4 {
             self.release_i32();
         }
