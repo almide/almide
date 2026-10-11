@@ -903,7 +903,7 @@
 2521	spec/wasm_cross/unwrap_or_tuple_payload_extract.almd
 26499	spec/wasm_cross/unwrap_or_unwrap_fallback.almd
 21608	spec/wasm_cross/unwrap_or_value_fn_named_parse.almd
-5731	spec/wasm_cross/uoe_heap_ok_share.almd
+5739	spec/wasm_cross/uoe_heap_ok_share.almd
 10150	spec/wasm_cross/url_authority_edges.almd
 2969	spec/wasm_cross/user_box_recursive_enum.almd
 2935	spec/wasm_cross/value_array_leak_loop.almd
