@@ -3,6 +3,7 @@ fn rewrite_to_loop(
     func: &mut IrFunction,
     var_table: &mut VarTable,
     infer_bindings: &mut std::collections::BTreeSet<VarId>,
+    deferred_init: &mut std::collections::BTreeSet<VarId>,
     tco_owned_params: &mut HashSet<VarId>,
     always_clone_vars: &HashSet<VarId>,
 ) -> HashSet<usize> {
@@ -135,16 +136,20 @@ fn rewrite_to_loop(
     );
     tco_owned_params.extend(owned_params.iter().copied());
 
-    // Build the default value for the result variable
-    let default_val = default_for_type(&ret_ty);
-
-    // Construct: { var __tco_result = default; while true { rewritten_body }; __tco_result }
+    // Construct: { var __tco_result; while true { rewritten_body }; __tco_result }
+    // The result is declared WITHOUT a value: every exit of the loop assigns it
+    // and then breaks, which rustc's definite-initialisation check proves, so
+    // the rewrite needs no default value of the return type and applies to all
+    // of them. (It once did, and a function returning a record, a variant, a
+    // `Set` or `Bytes` stayed recursive on native — a stack overflow at a depth
+    // the wasm leg runs in constant stack.)
+    deferred_init.insert(result_var);
     let bind_result = IrStmt {
         kind: IrStmtKind::Bind {
             var: result_var,
             mutability: Mutability::Var,
             ty: ret_ty.clone(),
-            value: default_val,
+            value: IrExpr { kind: IrExprKind::Hole, ty: ret_ty.clone(), span: None, def_id: None },
         },
         span: None,
     };
@@ -760,47 +765,6 @@ fn emit_base_case(expr: IrExpr, result_var: VarId, dec_params: &[VarId], owned_p
             expr: Some(Box::new(break_expr)),
         },
         ty: Ty::Unit,
-        span: None, def_id: None,
-    }
-}
-
-/// Produce a default value for a given type (used to initialize the result variable).
-/// The value is never observed — every control path assigns before reading — but
-/// Rust's type checker requires a valid expression of the correct type.
-fn default_for_type(ty: &Ty) -> IrExpr {
-    let kind = match ty {
-        Ty::Int => IrExprKind::LitInt { value: 0 },
-        Ty::Float => IrExprKind::LitFloat { value: 0.0 },
-        Ty::Bool => IrExprKind::LitBool { value: false },
-        Ty::String => IrExprKind::LitStr { value: String::new() },
-        Ty::Unit => IrExprKind::Unit,
-        Ty::Applied(TypeConstructorId::Result, args) => {
-            let inner_ty = args.first().cloned().unwrap_or(Ty::Unit);
-            let inner = default_for_type(&inner_ty);
-            IrExprKind::ResultOk { expr: Box::new(inner) }
-        }
-        Ty::Applied(TypeConstructorId::Option, _) => {
-            IrExprKind::OptionNone
-        }
-        Ty::Applied(TypeConstructorId::List, _) => {
-            IrExprKind::List { elements: vec![] }
-        }
-        Ty::Applied(TypeConstructorId::Map, _) => {
-            IrExprKind::MapLiteral { entries: vec![] }
-        }
-        Ty::Tuple(elems) => {
-            IrExprKind::Tuple {
-                elements: elems.iter().map(|t| default_for_type(t)).collect(),
-            }
-        }
-        // Named types and other complex types: cannot synthesize a default value.
-        // TCO should not be applied to functions returning these types.
-        // Return Unit as unreachable placeholder (guarded by can_default_init check).
-        _ => IrExprKind::Unit,
-    };
-    IrExpr {
-        kind,
-        ty: ty.clone(),
         span: None, def_id: None,
     }
 }

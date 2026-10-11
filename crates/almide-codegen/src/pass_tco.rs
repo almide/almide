@@ -50,10 +50,11 @@ impl NanoPass for TailCallOptPass {
         // signature — otherwise a &str arg is passed where String is expected.
         let mut reverted: HashMap<almide_base::intern::Sym, HashSet<usize>> = HashMap::new();
         let IrProgram { functions, modules, var_table, codegen_annotations, .. } = &mut program;
-        let almide_ir::annotations::CodegenAnnotations { infer_binding_tys, tco_owned_params, always_clone_vars, .. } = codegen_annotations;
+        let almide_ir::annotations::CodegenAnnotations { infer_binding_tys, deferred_init, tco_owned_params, always_clone_vars, .. } = codegen_annotations;
         let mut run = TcoRun {
             reverted: &mut reverted,
             infer_bindings: infer_binding_tys,
+            deferred_init,
             tco_owned_params,
             always_clone_vars,
         };
@@ -69,11 +70,12 @@ impl NanoPass for TailCallOptPass {
 }
 
 /// The state one TCO sweep accumulates across every function it rewrites: the
-/// reverted-borrow map the caller uses to fix external call sites, the two
+/// reverted-borrow map the caller uses to fix external call sites, the three
 /// codegen-annotation sets the rewrite feeds, and the read-only always-clone set.
 struct TcoRun<'a> {
     reverted: &'a mut HashMap<almide_base::intern::Sym, HashSet<usize>>,
     infer_bindings: &'a mut std::collections::BTreeSet<VarId>,
+    deferred_init: &'a mut std::collections::BTreeSet<VarId>,
     tco_owned_params: &'a mut HashSet<VarId>,
     always_clone_vars: &'a HashSet<VarId>,
 }
@@ -86,6 +88,7 @@ fn run_tco(functions: &mut [IrFunction], var_table: &mut VarTable, run: &mut Tco
                 func,
                 var_table,
                 run.infer_bindings,
+                run.deferred_init,
                 run.tco_owned_params,
                 run.always_clone_vars,
             );
@@ -151,7 +154,6 @@ fn strip_borrows_at_tco_calls(
 /// - Has at least one self-recursive call
 /// - ALL self-recursive calls are in tail position
 /// - Not a test block (`is_test`; #3483: not its name)
-/// - Return type can be default-initialized (primitives, tuples of primitives, etc.)
 /// - Every `mut` parameter is one the loop can keep borrowed
 ///
 /// `pub` so borrow inference can pre-bake the owned-param signature these
@@ -159,9 +161,6 @@ fn strip_borrows_at_tco_calls(
 /// inferred borrows consistent with the post-TCO signature.
 pub fn is_tco_candidate(func: &IrFunction) -> bool {
     if func.is_test {
-        return false;
-    }
-    if !can_default_init(&func.ret_ty) {
         return false;
     }
     let (has_any, all_in_tail) = all_self_calls_in_tail_pos(&func.body, &func.name, func.is_effect);
