@@ -306,6 +306,9 @@ impl Emitter<'_> {
                 let move_in = self.take_move_in(args, save.is_none(), tail && Some(index) != self.self_index);
                 let mut moved_in = Vec::new();
                 let site = crate::witness::modes::site_begin();
+                if append_window_ok {
+                    self.note_tail_reuse_args(args, true);
+                }
                 for (k, (a, want)) in args.iter().zip(params).enumerate() {
                     // #2117: `build(acc + s, …)` at a self tail call in loop
                     // form is the growing accumulator one position over from
@@ -347,6 +350,9 @@ impl Emitter<'_> {
                     if owned_pos && param_mut.get(k).copied().unwrap_or(false) {
                         self.detach_global_mut_arg(a, i)?;
                     }
+                }
+                if append_window_ok {
+                    self.note_tail_reuse_args(args, false);
                 }
                 self.empty_moved_in(&moved_in)?;
                 crate::witness::modes::site_end(site, index);
