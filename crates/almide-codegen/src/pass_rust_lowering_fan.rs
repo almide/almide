@@ -28,10 +28,10 @@
 //! list order on the sequential runtime) AND every type that would cross a
 //! thread is Send-safe: the element type, the result type, and the type of each
 //! captured variable (from `var_table`). Send-safe = Int/Float/Bool/Unit, the
-//! sized numerics, and tuples / records / Option of those; anything with an
-//! `Rc` in its native repr (List/Map/Set/Bytes/String — String is excluded
-//! ahead of ADR-0013's refcounted repr — closure values) falls back to the
-//! sequential twin. The parallel runtime joins by index and reports the first
+//! sized numerics, `String`, and tuples / records / Option / Result / List /
+//! Set / Map of those (#2044); anything with an `Rc` in its native repr
+//! (`Bytes` / `Matrix`, which are `AlmideRcCow`, and closure values) falls
+//! back to the sequential twin. The parallel runtime joins by index and reports the first
 //! Err in list order, so the output is byte-identical to the sequential one.
 //!
 //! Rust target only. Uses `std::thread::scope` in the runtime — no external crates.
@@ -171,6 +171,16 @@ fn is_send_safe_ty(ty: &Ty, decls: &[IrTypeDecl], depth: u32) -> bool {
         | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
         | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
         | Ty::Float32 | Ty::Float64 => true,
+        // The native `String` is a Rust `String`, and a List / Set / Map is a
+        // `Vec` / `AlmideSet` / `AlmideMap` of its elements — all `Send` when
+        // their elements are (#2044). rustc re-checks every one at the
+        // `std::thread::scope` boundary, so a wrong verdict here is a compile
+        // error, never a silent race. When ADR-0013 stage 2 gives `String` a
+        // non-atomic shared buffer, it must take the thread-shared flip the
+        // 2026-09-08 ruling chose (one type, atomic only across the boundary),
+        // not drop out of this set: `tests/fan_heap_parallel_test.rs` pins it.
+        Ty::String => true,
+        Ty::Applied(TC::List | TC::Set | TC::Map | TC::Result, args) => args.iter().all(safe),
         Ty::Tuple(elems) => elems.iter().all(safe),
         Ty::Record { fields } | Ty::OpenRecord { fields } => fields.iter().all(|(_, t)| safe(t)),
         Ty::Applied(TC::Option, args) | Ty::Applied(TC::Tuple, args) => args.iter().all(safe),
@@ -527,15 +537,27 @@ fn rewrite_list_op(name: Sym, args: Vec<IrExpr>, ctx: &ParCtx) -> (Sym, Vec<IrEx
 }
 
 /// The lambda literal in a callback slot, looking through the `Clone`
-/// CloneInsertionPass may have wrapped it in.
+/// CloneInsertionPass may have wrapped it in, and through the capture
+/// prologue CaptureClone puts in front of a lambda that captures a heap value
+/// (`{ let k2 = k; (w) => … k2 … }`, #2044). The prologue's bindings are the
+/// captured values themselves, so the body's free variables, which
+/// [`fan_qualifies`] type-checks, are exactly what crosses the thread.
 fn lambda_literal(arg: &IrExpr) -> Option<(&[(VarId, Ty)], &IrExpr)> {
-    let kind = match &arg.kind {
-        IrExprKind::Clone { expr } => &expr.kind,
-        other => other,
-    };
-    match kind {
+    match &arg.kind {
+        IrExprKind::Clone { expr } => lambda_literal(expr),
         IrExprKind::Lambda { params, body, .. } => Some((params, body)),
+        IrExprKind::Block { stmts, expr: Some(tail) } if stmts.iter().all(is_capture_bind) => lambda_literal(tail),
         _ => None,
+    }
+}
+
+/// `let k2 = k` (or a clone / borrow of `k`): a capture prologue binding.
+fn is_capture_bind(stmt: &IrStmt) -> bool {
+    let IrStmtKind::Bind { value, mutability: Mutability::Let, .. } = &stmt.kind else { return false };
+    match &value.kind {
+        IrExprKind::Var { .. } => true,
+        IrExprKind::Clone { expr } | IrExprKind::Borrow { expr, .. } => matches!(expr.kind, IrExprKind::Var { .. }),
+        _ => false,
     }
 }
 
