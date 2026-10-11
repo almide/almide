@@ -611,7 +611,11 @@ impl Emitter<'_> {
             }
             ("from_list", [xs]) => {
                 // the members are shared one by one below; the list itself
-                // is only read (a born-here literal is released after)
+                // is only read (a born-here literal is released after).
+                // #3552: each member goes through the judged insert over the
+                // fresh block this op owns — in place, amortized growth, the
+                // member index — where a linear scan and a copy-grow per new
+                // member made the build O(n²).
                 let e = match self.lower_arg(xs, None, ArgMode::Borrow)? {
                     SliceTy::List(h) => self.types.el(h),
                     other => return unsup(&format!("set-from-of:{other:?}")),
@@ -623,7 +627,7 @@ impl Emitter<'_> {
                     return unsup("set-elem-nonscalar");
                 }
                 let stride = e.slot_size();
-                let scan = self.scan_helper(e)?;
+                let fns = self.set_insert_fns(e)?;
                 let bh = self.hold_i32()?;
                 let ch = self.hold_i32()?;
                 let ih = self.hold_i32()?;
@@ -651,36 +655,12 @@ impl Emitter<'_> {
                     .i32_mul()
                     .i32_add();
                 self.load_ty_slot(e, 0);
-                self.f.instructions().local_set(xh);
-                // dedup: append only when absent
-                self.f
-                    .instructions()
-                    .local_get(rh)
-                    .i32_const(stride as i32)
-                    .i32_const(0)
-                    .local_get(xh)
-                    .call(scan)
-                    .i32_eqz()
-                    .if_(BlockType::Empty);
-                let (len_h, nh) = self.emit_copy_grow(rh, stride)?;
-                self.f
-                    .instructions()
-                    .local_get(nh)
-                    .i32_const(almide_layout::PAYLOAD as i32)
-                    .i32_add()
-                    .local_get(len_h)
-                    .i32_add()
-                    .local_get(xh);
-                // The member handle copied into the set takes +1: the set
-                // releases it through its typed drop (#2010 Map stage b).
+                // The member the set may keep takes +1: the set releases it
+                // through its typed drop (#2010 Map stage b), and the judged
+                // insert gives it back when the member is already present.
                 self.share_handle_top(e);
-                self.store_ty_slot_raw(e);
-                // the outgrown block is ours alone and its members moved
-                self.f.instructions().local_get(rh).call(F_FREE);
-                self.f.instructions().local_get(nh).local_set(rh);
-                self.release_i32();
-                self.release_i32();
-                self.f.instructions().end();
+                self.f.instructions().local_set(xh);
+                self.emit_set_insert_judged(rh, xh, e, fns)?;
                 self.f
                     .instructions()
                     .local_get(ih)
