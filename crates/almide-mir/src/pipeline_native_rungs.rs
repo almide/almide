@@ -123,6 +123,31 @@ fn native_sig_subset_check(
     Ok(())
 }
 
+
+/// #3550: a self call left in tail position after lowering — the MIR loop
+/// conversion (`try_tco_rewrite`) declined the shape — with a heap argument.
+/// The argument is released AFTER the call (`CallFn`, then `Drop`), so the
+/// call is not a jump and the function recurses frame by frame, overflowing
+/// at a depth the wasm leg runs in constant stack. The standard codegen
+/// loop-converts it (`TailCallOptPass`), so the program walls onto it.
+/// A self call whose result is used further (non-tail recursion) is not
+/// refused: no leg turns that into a loop.
+fn recurses_on_a_heap_arg(f: &crate::MirFunction) -> bool {
+    use crate::{CallArg, Op};
+    f.ops.iter().enumerate().any(|(i, op)| {
+        let Op::CallFn { name, args, dst: Some(d), .. } = op else { return false };
+        if *name != f.name || !args.iter().any(|a| matches!(a, CallArg::Handle(_))) {
+            return false;
+        }
+        let rest = f.ops[i + 1..].iter().find(|o| !matches!(o, Op::Consume { .. } | Op::Drop { .. }));
+        match rest {
+            None => f.ret == Some(*d),
+            Some(Op::Else { val } | Op::EndIf { val }) => *val == Some(*d),
+            Some(_) => false,
+        }
+    })
+}
+
 /// T1-3: rewrite the stereotyped Result block windows onto the native
 /// carrier prims (NTy::Res). Native-leg only — the wasm renderer never sees
 /// these ops. Runs BEFORE verification/render (both are downstream).
@@ -340,6 +365,12 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
             LowerError::Unsupported(format!("native: fn `{}`: {e:?}", func.name))
         })?;
         functions.extend(all);
+    }
+    if let Some(f) = functions.iter().find(|f| recurses_on_a_heap_arg(f)) {
+        return Err(LowerError::Unsupported(format!(
+            "native: fn `{}` passes a heap value to its own tail call — no loop conversion on this render (#3550)",
+            f.name
+        )));
     }
     rewrite_native_result_windows(&ir, &mut functions);
     if !functions.iter().any(|f| f.name == "main") {
