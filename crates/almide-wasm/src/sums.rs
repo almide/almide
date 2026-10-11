@@ -223,7 +223,10 @@ impl Emitter<'_> {
             i.local_get(hok).local_get(hwo).i32_add();
             i.local_get(hr);
         }
+        // Each payload copied out is a SHARE (+1), as in `option.zip`: the
+        // output lists' drops release them, the input results keep their own.
         self.load_ty_slot(t, almide_layout::SUM_FIELD);
+        self.share_handle_top(t);
         self.store_ty_slot(t, 0);
         {
             let mut i = self.f.instructions();
@@ -233,6 +236,7 @@ impl Emitter<'_> {
             i.local_get(hr);
         }
         self.load_ty_slot(e, almide_layout::SUM_FIELD);
+        self.share_handle_top(e);
         self.store_ty_slot(e, 0);
         {
             let mut i = self.f.instructions();
@@ -546,11 +550,17 @@ impl Emitter<'_> {
                     i.i32_const(size as i32).call(F_ALLOC).local_tee(hp);
                     let _ = i;
                 }
+                // Each payload copied into the tuple is a SHARE (+1), as in
+                // `to_list`: the tuple's drop releases it and the inputs keep
+                // their own. Without it a temporary input freed its string
+                // under the tuple, and a let-bound one was released twice.
                 self.f.instructions().local_get(hla);
                 self.load_ty_slot(a, almide_layout::OPTION_FIELD);
+                self.share_handle_top(a);
                 self.store_ty_slot(a, aoff);
                 self.f.instructions().local_get(hp).local_get(hlb);
                 self.load_ty_slot(b, almide_layout::OPTION_FIELD);
+                self.share_handle_top(b);
                 self.store_ty_slot(b, boff);
                 // the tuple base doubles as the some-payload: a tuple-typed
                 // some stores the BLOCK ADDRESS at OPTION_FIELD
