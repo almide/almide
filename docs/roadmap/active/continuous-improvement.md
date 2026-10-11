@@ -582,3 +582,73 @@ Builds compared: 0.62.0, 0.66.0 (release 819bbc74f) and develop 974c00ea0.
     - Recognising `#[test]`/`#[cfg(test)]` in codopsy would correct a misclassification. Exempting `tests/` by path, or exempting println, goes beyond clippy and changes the criterion. Both are the owner's call.
 - **crates/almide-edit-belt: B 88** (a Lean 4 project). Not started.
 
+
+## 2026-10-11: stdlib inspection ledger, the name-keyed gate, @reuse, #3533/#3534
+
+### Stdlib inspection ledger
+- **What:** `proofs/stdlib-inspection.toml` has one row per public stdlib function (1031 rows), and an `inspected` stamp only where the evidence fields are filled in. Branch `stdlib-inspection`.
+  - The five criteria are in the ledger header.
+  - Enforced by `tests/stdlib_inspection_test.rs`: rows match the surface, `sig` matches the current signature, and the uninspected ceiling may only fall.
+- **Harness:** `tools/xtarget-fuzz inspect <fn>`. It measures:
+  - parity, from a fuzz campaign centred on the function (`--focus`);
+  - complexity on both legs, as (program − baseline) at n / 2n / 4n with k calibrated on both legs;
+  - rebind shapes (loop, tail, fold);
+  - wasm `live=0`;
+  - a diamond-import project.
+- **Pilot:** 40 `list` functions stamped.
+  - Not stampable: set, swap, update and drop_end (#3533), flatten (#3534), unique and unique_by (#3535).
+- **Batch 2:** 189 functions on 6 GCE Spot VMs.
+  - Setup: c3-standard-4, asia-northeast1-b, ubuntu-2404, rustc 1.99.0, wasmtime 49.0.1, ref `stdlib-inspection` 56ae07e6b.
+  - Script: `gce-inspect.sh`. Each VM inspects one function at a time, and is deleted by a trap and by `--max-run-duration=6h`.
+  - A smoke run on 2 functions passed.
+  - **Result:** 189 inspected, **144 stamped**, so 847 remain uninspected. One shard's VM was first refused by the C3 quota (24 CPUs) while the smoke VM was still being deleted; it was rerun.
+  - **45 not stampable**, by cause:
+    - **1 real use-after-free:** `option.zip`, 5 parity findings. The sweep also caught `result.partition`. Filed as #3538 (I-unsound, I-divergence), fixed on `fix-option-zip-share`.
+    - **Wasm complexity leads, to confirm:**
+      - `string.ends_with` grows with n where order 1 is declared;
+      - `string.strip_prefix` / `strip_suffix` grow by about ×3.9 per doubling;
+      - `list.find` ×3.15;
+      - `string.take_end` is linear on both legs.
+    - **map family rebind shapes:** map.set / upsert / remove / merge / map / update. Related to #3537.
+    - **Harness gaps, not function verdicts:**
+      - Result-typed programs fail to compile (diamond E041, rebind E005, call E025);
+      - a deprecation warning is counted as a failure (`result.unwrap_or`);
+      - 60 s call timeouts on string predicates and getters, plus `map.from_list` and `option.collect`, which still need telling apart from real slowness.
+
+### Name-keyed property gate
+- **What:** `tests/name_keyed_sites_test.rs` and `proofs/name-keyed-sites.toml`.
+  - It finds, with `syn`, every compiler item that groups two or more stdlib names: an or-pattern, a `||` chain of comparisons, or a table.
+  - 237 pre-gate sites are `legacy`, and their name counts may only fall. A new site is refused unless it is `justified` with a `why`.
+- **Why:** the user flagged a #3533 draft that answered "may this op reuse its source" with `matches!(func, "set" | "swap" | …)`. Such a list is a second copy of a property, and a function added later is silently missing from it.
+- **Negative controls:**
+  - adding a row to `OWNED_SOURCE_TWINS` (24 → 26 names) fails;
+  - adding a `point_edit` or-pattern fn fails.
+- **Rule** added to `crates/CLAUDE.md`.
+
+### `@reuse(p)` (ruling ○, 2026-10-11)
+- **What:** one stdlib attribute is the single declaration of "when `p` is at its last use, the result may take over its storage".
+  - `crates/almide-types/buildscript/reuse.rs` generates the `reuse::REUSE` table.
+  - A declaration with neither `@consume(p)` nor an `<intrinsic>_owned` runtime twin fails the build, naming the twin to write.
+  - `crates/almide-codegen/tests/reuse_decl_test.rs` checks the scan against the real parser.
+- **PR1 (no behaviour change):**
+  - native `OWNED_SOURCE_TWINS` and the wasm `consumed_read` name list now derive from the declaration;
+  - two legacy rows are removed from the name-keyed ledger;
+  - A/B against the develop compiler over all 1097 `spec/` main programs: emitted Rust, wasm bytes and exit codes are identical. A 1-in-20 sample confirmed every program built, so the comparison was not passing because both sides failed.
+- **Prior art:** the existing `@consume` / `@borrow_ref` declarations (`pass_borrow_inference.rs`), and the declaration-driven-stdlib rule in `crates/almide-codegen/CLAUDE.md`. Alternative rejected: extending the name lists (the reason the gate exists).
+
+### #3533 (set / swap / update / drop_end copied per step in rebind shapes)
+- **Fix:** `@reuse(xs)` on set, swap and update (drop_end already had it).
+  - native: `set_owned` / `swap_owned` twins, and the reassign move extended to an either-way source.
+  - wasm:
+    - the four edits take a dying var's credit, or lower a non-var source retained and let `$cow` judge by count;
+    - `drop_end` truncates in place;
+    - self tail calls note a `@reuse` argument chain dying.
+- **Found on the way:** the per-function inspection passed while nested chains (`drop_end(swap(acc, …))`) still copied. The cause is that `rc_owned_result` reads a module call's ownership mark, which only the call's own lowering sets, so a pre-lowering judgement always says "borrowed". Unrolled loop copies hit the leftover mark, which made the cost depend on the trip count. Filed for `map.set` as #3537.
+- **Evidence:**
+  - `tests/list_point_edit_reuse_test.rs` pins the values of the shared, captured, match-binder, container, operand-reads-source and other-argument-reads-source shapes. The expected outputs come from the pre-change compiler; native = wasm = pre-change.
+  - Over 2000 steps × 100k elements in every shape, wasm allocates 2.4 MB, against 11.1 GB before.
+  - `xtarget-fuzz inspect`: all four functions pass every criterion (call O(n); loop, tail and fold O(1)).
+
+### #3534 (wasm flatten quadratic)
+- Two-pass flatten: 160 GB → 5.6 MB allocated for 200k inner lists, and 32.5 s → 0.04 s for 800k.
+- PR #3536; local gates all green. Status: CI / merge queue.
