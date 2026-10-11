@@ -178,6 +178,7 @@ fn gen_leaf(b: &mut Builder, goal: &GenType) -> String {
         GenType::Bool => format!("{}", b.rng.pick(pools::BOOL_POOL)),
         GenType::Unit => "()".to_string(),
         GenType::Sized(_) | GenType::Bytes => sized_or_bytes(b, goal),
+        GenType::Matrix => matrix_literal(b),
         // Compound goals: construct (and hoist if ambiguous).
         GenType::List(_)
         | GenType::Option(_)
@@ -202,6 +203,18 @@ fn sized_or_bytes(b: &mut Builder, goal: &GenType) -> String {
     }
 }
 
+/// A small non-empty rectangular `Matrix` from Float literals.
+fn matrix_literal(b: &mut Builder) -> String {
+    let (r, c) = (1 + *b.rng.pick(&[0usize, 1, 2]), 1 + *b.rng.pick(&[0usize, 1, 2]));
+    let rows: Vec<String> = (0..r)
+        .map(|_| {
+            let cells: Vec<String> = (0..c).map(|_| render_float_literal(*b.rng.pick(pools::FLOAT_POOL))).collect();
+            format!("[{}]", cells.join(", "))
+        })
+        .collect();
+    format!("matrix.from_lists([{}])", rows.join(", "))
+}
+
 /// Construct a compound value. Ambiguous shapes (empty list/map, `none`,
 /// `ok`/`err`) are hoisted into an annotated `let` so they type-check;
 /// the function returns the *reference* to that binding. Unambiguous
@@ -214,7 +227,8 @@ fn gen_construct(b: &mut Builder, goal: &GenType) -> String {
         | GenType::Bool
         | GenType::Unit
         | GenType::Sized(_)
-        | GenType::Bytes => gen_leaf(b, goal),
+        | GenType::Bytes
+        | GenType::Matrix => gen_leaf(b, goal),
         GenType::Set(elem) => {
             let n = *b.rng.pick(pools::SMALL_COUNT_POOL) as usize;
             if n == 0 {
@@ -506,6 +520,7 @@ fn gen_lambda_body(b: &mut Builder, goal: &GenType) -> String {
             format!("[\"k\": {}]", gen_lambda_body(b, v))
         }
         GenType::Sized(_) | GenType::Bytes => sized_or_bytes(b, goal),
+        GenType::Matrix => matrix_literal(b),
         GenType::Set(e) => format!("set.from_list([{}])", gen_lambda_body(b, e)),
     }
 }

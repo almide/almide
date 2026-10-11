@@ -83,9 +83,9 @@ impl Signature {
 /// Bundled stdlib modules the generator draws from, paired with their
 /// embedded source. Only the deterministic, side-effect-free, in-scope
 /// modules are listed — no `fs`/`http`/`process`/`random`/`datetime`
-/// (effects or non-determinism), no `matrix`/`value`/`json` (outside the
-/// generator's value universe). The fixed-width numbers and `bytes` are in:
-/// the value grammar builds them (`GenType::Sized`, `GenType::Bytes`).
+/// (effects or non-determinism), no `value`/`json` (outside the generator's
+/// value universe). The fixed-width numbers, `bytes` and `matrix` are in:
+/// the value grammar builds them (`GenType::Sized`, `Bytes`, `Matrix`).
 ///
 /// `(module_name, source_text)`.
 const BUNDLED_MODULES: &[(&str, &str)] = &[
@@ -109,6 +109,7 @@ const BUNDLED_MODULES: &[(&str, &str)] = &[
     ("float32", include_str!("../../../../stdlib/float32.almd")),
     ("float64", include_str!("../../../../stdlib/float64.almd")),
     ("bytes", include_str!("../../../../stdlib/bytes.almd")),
+    ("matrix", include_str!("../../../../stdlib/matrix.almd")),
 ];
 
 /// Default selection weight for a function not named in

@@ -41,6 +41,9 @@ pub enum GenType {
     Sized(&'static str),
     /// `Bytes`, built with `bytes.from_list` (or `bytes.new(n)` when sized).
     Bytes,
+    /// `Matrix` (Float elements), built with `matrix.from_lists` (or
+    /// `matrix.zeros(n, 2)` when sized).
+    Matrix,
     /// `Set[elem]`, built with `set.from_list`; the element is a hashable
     /// scalar ([`GenType::is_set_elem`]).
     Set(Box<GenType>),
@@ -98,6 +101,7 @@ impl GenType {
                 out.push(']');
             }
             GenType::Bytes => out.push_str("Bytes"),
+            GenType::Matrix => out.push_str("Matrix"),
         }
     }
 
@@ -136,8 +140,8 @@ impl GenType {
             GenType::Map(v) => v.is_observable(),
             GenType::Sized(_) => true,
             GenType::Set(e) => e.is_observable(),
-            // A Bytes value has no string form (E089).
-            GenType::Bytes => false,
+            // A Bytes or Matrix value has no string form (E089).
+            GenType::Bytes | GenType::Matrix => false,
         }
     }
 
@@ -151,7 +155,8 @@ impl GenType {
             | GenType::Bool
             | GenType::Unit
             | GenType::Sized(_)
-            | GenType::Bytes => 1,
+            | GenType::Bytes
+            | GenType::Matrix => 1,
             GenType::List(e)
             | GenType::Option(e)
             | GenType::Result(e)
@@ -173,9 +178,12 @@ impl GenType {
 /// want to differential-test. For non-directly-interpolable shapes the
 /// generator wraps them so the printed form is still deterministic.
 pub fn render_print(name: &str, ty: &GenType) -> String {
-    // A top-level Bytes has no string form (E089); its byte list does.
+    // A top-level Bytes or Matrix has no string form (E089); its list does.
     if *ty == GenType::Bytes {
         return format!("println(\"{name} = ${{bytes.to_list({name})}}\")");
+    }
+    if *ty == GenType::Matrix {
+        return format!("println(\"{name} = ${{matrix.to_lists({name})}}\")");
     }
     // Every other printable shape interpolates via `${...}`, so the type is
     // not needed to render — the parameter documents the contract that only
