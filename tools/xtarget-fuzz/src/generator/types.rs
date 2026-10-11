@@ -36,7 +36,15 @@ pub enum GenType {
     /// `Map[String, value]` — keys fixed to `String` (the common,
     /// hashable, byte-comparable case).
     Map(Box<GenType>),
+    /// A fixed-width number (`Int8` … `UInt64`, `Float32`, `Float64`), built
+    /// from a small Int through its `int.to_<width>` conversion.
+    Sized(&'static str),
+    /// `Bytes`, built with `bytes.from_list` (or `bytes.new(n)` when sized).
+    Bytes,
 }
+
+/// The fixed-width number types the value grammar builds.
+pub const SIZED: &[&str] = &["Int8", "Int16", "Int32", "Int64", "UInt8", "UInt16", "UInt32", "UInt64", "Float32", "Float64"];
 
 impl GenType {
     /// Render as an Almide type annotation.
@@ -80,7 +88,19 @@ impl GenType {
                 v.render_into(out);
                 out.push(']');
             }
+            GenType::Sized(name) => out.push_str(name),
+            GenType::Bytes => out.push_str("Bytes"),
         }
+    }
+
+    /// The fixed-width type named `name`, if it is one the grammar builds.
+    pub fn sized(name: &str) -> Option<GenType> {
+        SIZED.iter().find(|s| **s == name).map(|s| GenType::Sized(s))
+    }
+
+    /// A value of the fixed-width type `name` from the Int expression `n`.
+    pub fn sized_literal(name: &str, n: &str) -> String {
+        format!("int.to_{}({n})", name.to_lowercase())
     }
 
     /// `true` if a value of this type can be compared with `==` and
@@ -96,6 +116,7 @@ impl GenType {
             GenType::List(e) | GenType::Option(e) | GenType::Result(e) => e.is_observable(),
             GenType::Tuple2(a, b) => a.is_observable() && b.is_observable(),
             GenType::Map(v) => v.is_observable(),
+            GenType::Sized(_) | GenType::Bytes => true,
         }
     }
 
@@ -107,7 +128,9 @@ impl GenType {
             | GenType::Float
             | GenType::String
             | GenType::Bool
-            | GenType::Unit => 1,
+            | GenType::Unit
+            | GenType::Sized(_)
+            | GenType::Bytes => 1,
             GenType::List(e) | GenType::Option(e) | GenType::Result(e) | GenType::Map(e) => {
                 1 + e.depth()
             }
