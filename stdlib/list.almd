@@ -29,10 +29,12 @@ fn get_or[A](xs: List[A], i: Int, default: A) -> A = _
 
 /// Copy with slot i = val; no-op if i out of range.
 @intrinsic("almide_rt_list_set")
+@reuse(xs)
 fn set[A](xs: List[A], i: Int, val: A) -> List[A] = _
 
 /// Copy with i and j swapped; no-op if either OOB.
 @intrinsic("almide_rt_list_swap")
+@reuse(xs)
 fn swap[A](xs: List[A], i: Int, j: Int) -> List[A] = _
 
 /// Ascending copy; Floats in IEEE totalOrder.
@@ -211,6 +213,7 @@ fn find_index[A](xs: List[A], f: (A) -> Bool) -> Int? = _
 
 /// Copy with slot i = f(old); no-op if i out of range.
 @intrinsic("almide_rt_list_update")
+@reuse(xs)
 @consume(xs)
 fn update[A](xs: List[A], i: Int, f: (A) -> A) -> List[A] = _
 
