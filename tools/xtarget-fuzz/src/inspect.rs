@@ -505,6 +505,7 @@ fn judge_counted(
     let sizes: Vec<u64> = (0..5).map(|i| n << i).collect();
     let mut line = format!("{label} k={k} meter=instructions:u+bytes-moved n={n}..{}", n << 4);
     let mut worst = 0usize;
+    let mut unexplained = false;
     for leg in [Leg::Native, Leg::Wasm] {
         let mut ys = Vec::new();
         let mut bs = Vec::new();
@@ -519,6 +520,7 @@ fn judge_counted(
         let (class, rms) = fit_class(&sizes, &ys);
         let (bclass, brms) = fit_class(&sizes, &bs);
         worst = worst.max(class).max(bclass);
+        unexplained |= rms > FIT_TOLERANCE || brms > FIT_TOLERANCE;
         let tag = if matches!(leg, Leg::Native) { "native" } else { "wasm" };
         let sci = |v: &[f64]| v.iter().map(|y| format!("{:.3e}", y)).collect::<Vec<_>>().join("/");
         let times: Vec<String> = ts.iter().map(|t| format!("{:.3}", t.as_secs_f64())).collect();
@@ -533,6 +535,12 @@ fn judge_counted(
             times.join("/")
         ));
     }
+    // A series no class explains within tolerance has no order to compare:
+    // the best-fitting class of such a series can be anything, O(1)
+    // included, so it never passes.
+    if unexplained {
+        return Err(format!("{line} (unexplained: a series fits no class within {:.0}%)", FIT_TOLERANCE * 100.0));
+    }
     if ctx.memshim.is_none() {
         return Err(format!("{line} [meter=instructions only, no bytes-moved meter: not stampable]"));
     }
@@ -545,7 +553,8 @@ fn judge_counted(
 }
 
 /// The cheapest class whose `a + c·f(n)` least-squares fit leaves every
-/// point within [`FIT_TOLERANCE`] (relative RMS), else the best-fitting one.
+/// point within [`FIT_TOLERANCE`] (relative RMS), else the best-fitting one
+/// with its residual above the tolerance (the caller refuses to pass it).
 /// Counts that never leave a few thousand instructions are O(1) outright.
 fn fit_class(sizes: &[u64], ys: &[f64]) -> (usize, f64) {
     let top = ys.iter().cloned().fold(0.0f64, f64::max);
@@ -673,7 +682,12 @@ fn run_counted(ctx: &Ctx, art: &Path, leg: Leg) -> Result<(String, Counts), Stri
     }
     match leg {
         Leg::Native => cmd.arg(art),
-        Leg::Wasm => cmd.arg(&ctx.wasmtime).arg("run").arg(art),
+        // Compile on every run, single-threaded: wasmtime's compile cache
+        // makes a module's first run count ~10x its later ones (c4-standard-4:
+        // 41.7M against 4.46M), and parallel compilation adds worker-thread
+        // spinning. A fresh compile is the same work at every n, so the fit's
+        // intercept absorbs it.
+        Leg::Wasm => cmd.arg(&ctx.wasmtime).args(["run", "-C", "cache=n", "-C", "parallel-compilation=n"]).arg(art),
     };
     let start = Instant::now();
     let mut child = cmd
@@ -764,6 +778,15 @@ mod fit_tests {
             .map(|(i, &n)| 40.0 * n as f64 * if i >= 2 { 1.05 } else { 1.0 })
             .collect();
         assert_eq!(CLASSES[fit_class(&sizes(), &ys).0].0, "n");
+    }
+
+    #[test]
+    fn a_series_no_class_explains_reports_its_residual_above_tolerance() {
+        // Measured on wasm list.drop: a (program - baseline) difference that
+        // shrinks to zero as n grows. No class explains it, and the judge
+        // must see that rather than a best-fit class.
+        let ys = [2.617e5, 2.409e5, 2.015e5, 1.213e5, 0.0];
+        assert!(fit_class(&sizes(), &ys).1 > FIT_TOLERANCE);
     }
 
     #[test]
