@@ -45,6 +45,17 @@ fn render_iter_chain(ctx: &RenderContext, source: &IrExpr, consume: bool, steps:
 fn render_iter_collector(ctx: &RenderContext, chain: &str, collector: &IterCollector) -> String {
     match collector {
         IterCollector::Collect => format!("{}.collect::<Vec<_>>()", chain),
+        // #3555: a Bytes / Matrix accumulator is an `AlmideRcCow`, and rustc
+        // infers `fold`'s accumulator type from the expected type first — as
+        // a by-reference argument that is the raw `Vec<u8>`, which the init
+        // then mismatches (E0308). Name the accumulator type outright.
+        IterCollector::Fold { init, lambda } if rc_cow_needs_glue(&init.ty) => format!(
+            "{}.fold::<{}, _>({}, {})",
+            chain,
+            render_type(ctx, &init.ty),
+            render_expr(ctx, init),
+            render_expr(ctx, lambda)
+        ),
         IterCollector::Fold { init, lambda } => format!("{}.fold({}, {})", chain, render_expr(ctx, init), render_expr(ctx, lambda)),
         IterCollector::Any { lambda } => format!("{}.any({})", chain, render_expr(ctx, lambda)),
         IterCollector::All { lambda } => format!("{}.all({})", chain, render_expr(ctx, lambda)),
