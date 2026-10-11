@@ -1,0 +1,7 @@
+// E030 (#3588): list.sort over Value elements — a Value can hold a Float, and
+// a Float inside a compound has no ordering. Check used to accept it while
+// native rustc rejected the monomorph (AlmideValue: Ord) and wasm walled.
+fn main() -> Unit = {
+  let xs = [value.int(2), value.str("a")]
+  println("${list.len(list.sort(xs))}")
+}
