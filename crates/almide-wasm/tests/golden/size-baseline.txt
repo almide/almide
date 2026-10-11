@@ -321,7 +321,7 @@
 2952	spec/wasm_cross/hof_closure_string_tail.almd
 28547	spec/wasm_cross/hof_fn_value_callbacks.almd
 4709	spec/wasm_cross/host_floor_string_alloc.almd
-10189	spec/wasm_cross/http_response_headers.almd
+10248	spec/wasm_cross/http_response_headers.almd
 743	spec/wasm_cross/i64_min_literal.almd
 1217	spec/wasm_cross/if_block_forms.almd
 1591	spec/wasm_cross/if_let_forms.almd
@@ -432,7 +432,7 @@
 2324	spec/wasm_cross/list_insert_clamp.almd
 3163	spec/wasm_cross/list_iter_tco.almd
 2667	spec/wasm_cross/list_minmax_str.almd
-7548	spec/wasm_cross/list_modify_heap.almd
+7591	spec/wasm_cross/list_modify_heap.almd
 3528	spec/wasm_cross/list_of_maps_loop_build.almd
 1840	spec/wasm_cross/list_of_tuples_equality.almd
 2567	spec/wasm_cross/list_pattern_in_option_payload.almd
@@ -453,7 +453,7 @@
 18039	spec/wasm_cross/list_total_order.almd
 8855	spec/wasm_cross/list_unique_by_nonscalar_key.almd
 3538	spec/wasm_cross/list_unique_by_str_key.almd
-7960	spec/wasm_cross/list_update_callback_result_ownership.almd
+7943	spec/wasm_cross/list_update_callback_result_ownership.almd
 8343	spec/wasm_cross/list_update_heap.almd
 2033	spec/wasm_cross/list_window_zero.almd
 2073	spec/wasm_cross/list_windows_zero.almd
@@ -570,7 +570,7 @@
 2885	spec/wasm_cross/mut_param_loop_stays_in_place.almd
 11230	spec/wasm_cross/mut_param_move_mode_gaps.almd
 16887	spec/wasm_cross/mut_param_nested_place_writeback.almd
-48915	spec/wasm_cross/mut_param_reassign_from_hof.almd
+48919	spec/wasm_cross/mut_param_reassign_from_hof.almd
 2348	spec/wasm_cross/mut_param_spread_reassign.almd
 5152	spec/wasm_cross/mut_param_tail_recursion.almd
 3032	spec/wasm_cross/mut_param_writeback_growth.almd
@@ -587,7 +587,7 @@
 1541	spec/wasm_cross/mutual_tail_recursion.almd
 2120	spec/wasm_cross/nan_canonical_bytes_write.almd
 1726	spec/wasm_cross/nan_canonical_observation.almd
-5334	spec/wasm_cross/native_wall_shapes.almd
+5328	spec/wasm_cross/native_wall_shapes.almd
 4708	spec/wasm_cross/negative_float_literal_sized.almd
 8727	spec/wasm_cross/negative_offset_and_width_totality.almd
 3230	spec/wasm_cross/nested_box_guard_binder.almd
@@ -780,7 +780,7 @@
 14961	spec/wasm_cross/string_whitespace.almd
 3897	spec/wasm_cross/tail_bang_over_declared_result_callee.almd
 1744	spec/wasm_cross/tco_let_bound_if.almd
-6722	spec/wasm_cross/tco_map_acc_seed.almd
+7503	spec/wasm_cross/tco_map_acc_seed.almd
 1719	spec/wasm_cross/tco_multi_concat.almd
 1962	spec/wasm_cross/tco_nested_list_accumulator.almd
 2620	spec/wasm_cross/tco_over_match_result.almd

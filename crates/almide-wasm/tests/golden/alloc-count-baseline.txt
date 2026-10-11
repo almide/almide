@@ -321,7 +321,7 @@
 60	46	582	60	spec/wasm_cross/hof_closure_string_tail.almd
 64	48	651	64	spec/wasm_cross/hof_fn_value_callbacks.almd
 ~	spec/wasm_cross/host_floor_string_alloc.almd
-1376	1324	6282	1376	spec/wasm_cross/http_response_headers.almd
+1375	1323	6266	1375	spec/wasm_cross/http_response_headers.almd
 0	0	0	0	spec/wasm_cross/i64_min_literal.almd
 0	0	0	0	spec/wasm_cross/if_block_forms.almd
 1	0	8	1	spec/wasm_cross/if_let_forms.almd
@@ -432,7 +432,7 @@
 16	7	166	16	spec/wasm_cross/list_insert_clamp.almd
 53	44	285	53	spec/wasm_cross/list_iter_tco.almd
 9	3	60	9	spec/wasm_cross/list_minmax_str.almd
-29	22	316	29	spec/wasm_cross/list_modify_heap.almd
+27	20	300	27	spec/wasm_cross/list_modify_heap.almd
 8	3	64	8	spec/wasm_cross/list_of_maps_loop_build.almd
 4	0	32	4	spec/wasm_cross/list_of_tuples_equality.almd
 23	18	212	23	spec/wasm_cross/list_pattern_in_option_payload.almd
@@ -453,7 +453,7 @@
 158	100	2602	158	spec/wasm_cross/list_total_order.almd
 104	79	1438	104	spec/wasm_cross/list_unique_by_nonscalar_key.almd
 20	11	271	20	spec/wasm_cross/list_unique_by_str_key.almd
-65	41	560	65	spec/wasm_cross/list_update_callback_result_ownership.almd
+53	29	456	53	spec/wasm_cross/list_update_callback_result_ownership.almd
 39	25	460	39	spec/wasm_cross/list_update_heap.almd
 5	0	80	1	spec/wasm_cross/list_window_zero.almd
 2	0	59	0	spec/wasm_cross/list_windows_zero.almd
@@ -570,7 +570,7 @@
 23	11	19880	23	spec/wasm_cross/mut_param_loop_stays_in_place.almd
 78	43	824	78	spec/wasm_cross/mut_param_move_mode_gaps.almd
 182	93	1818	182	spec/wasm_cross/mut_param_nested_place_writeback.almd
-381	302	3667	381	spec/wasm_cross/mut_param_reassign_from_hof.almd
+380	301	3655	380	spec/wasm_cross/mut_param_reassign_from_hof.almd
 2	0	32	2	spec/wasm_cross/mut_param_spread_reassign.almd
 26	12	8304	26	spec/wasm_cross/mut_param_tail_recursion.almd
 13	3	327	13	spec/wasm_cross/mut_param_writeback_growth.almd
@@ -780,7 +780,7 @@
 67	27	343	67	spec/wasm_cross/string_whitespace.almd
 10	1	130	10	spec/wasm_cross/tail_bang_over_declared_result_callee.almd
 8	2	36	8	spec/wasm_cross/tco_let_bound_if.almd
-31	20	296	31	spec/wasm_cross/tco_map_acc_seed.almd
+30	19	264	30	spec/wasm_cross/tco_map_acc_seed.almd
 6	1	21	6	spec/wasm_cross/tco_multi_concat.almd
 12	6	272	12	spec/wasm_cross/tco_nested_list_accumulator.almd
 17	10	237	17	spec/wasm_cross/tco_over_match_result.almd
