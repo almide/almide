@@ -2970,6 +2970,7 @@ pub const SRC_BYTES_STRING: &str = r#"
 
 
 
+
 fn __bs_copy(dst: Int, src: Int, n: Int, i: Int) -> Int = if i >= n then 0
 else {
   prim.store8(dst + i, prim.load8(src + i))
@@ -3002,9 +3003,7 @@ fn bytes_read_string_at(b: Bytes, pos: Int, len: Int) -> String = {
   let n = if pos < 0 then 0
   else if len < 0 then 0
   else if pos > blen - len then 0 else len
-  let out = prim.alloc_str(n)
-  let _x = __bs_copy(prim.handle(out) + 12, h + 12 + pos, n, 0)
-  out
+  bytes.to_string_lossy(bytes.slice(b, pos, pos + n))
 }
 
 
@@ -3032,9 +3031,7 @@ fn bytes_read_string_be(b: Bytes, pos: Int) -> String = {
   let slen = if hdr_ok then __bs_be32(h + 12 + pos) else 0
   let n = if hdr_ok then (if slen > blen - 4 - pos then 0 else slen)
   else 0
-  let out = prim.alloc_str(n)
-  let _x = __bs_copy(prim.handle(out) + 12, h + 12 + pos + 4, n, 0)
-  out
+  bytes.to_string_lossy(bytes.slice(b, pos + 4, pos + 4 + n))
 }
 "#;
 pub const SRC_BYTES_TYPED: &str = r#"
