@@ -116,7 +116,9 @@ impl GenType {
             GenType::List(e) | GenType::Option(e) | GenType::Result(e) => e.is_observable(),
             GenType::Tuple2(a, b) => a.is_observable() && b.is_observable(),
             GenType::Map(v) => v.is_observable(),
-            GenType::Sized(_) | GenType::Bytes => true,
+            GenType::Sized(_) => true,
+            // A Bytes value has no string form (E089).
+            GenType::Bytes => false,
         }
     }
 
@@ -147,9 +149,13 @@ impl GenType {
 /// lowers to each type's `Display`/`Debug` — exactly the surface we
 /// want to differential-test. For non-directly-interpolable shapes the
 /// generator wraps them so the printed form is still deterministic.
-pub fn render_print(name: &str, _ty: &GenType) -> String {
-    // All printable shapes interpolate via `${...}`, so the type is not
-    // needed to render — the parameter documents the contract that only
+pub fn render_print(name: &str, ty: &GenType) -> String {
+    // A top-level Bytes has no string form (E089); its byte list does.
+    if *ty == GenType::Bytes {
+        return format!("println(\"{name} = ${{bytes.to_list({name})}}\")");
+    }
+    // Every other printable shape interpolates via `${...}`, so the type is
+    // not needed to render — the parameter documents the contract that only
     // observable types reach here (enforced by the caller). The label
     // keeps multi-statement programs' outputs aligned to their producing
     // binding for triage.

@@ -22,7 +22,7 @@ pub struct Target {
     params: Vec<(String, SigType)>,
     subst: HashMap<String, GenType>,
     ret: GenType,
-    /// The parameter scaled to `n` (the first List / Map / String one, else a
+    /// The parameter scaled to `n` (the first List / Map / String / Bytes one, else a
     /// size-like Int); `None`: the function has no size to scale.
     pub size_param: Option<usize>,
     /// A parameter of the return type: the function can rebind it in a loop,
@@ -57,7 +57,7 @@ impl Target {
         let concrete = |t: &SigType| t.instantiate(&subst);
         let size_param = params
             .iter()
-            .position(|(_, t)| matches!(concrete(t), Some(GenType::List(_) | GenType::Map(_) | GenType::String)))
+            .position(|(_, t)| matches!(concrete(t), Some(GenType::List(_) | GenType::Map(_) | GenType::String | GenType::Bytes)))
             .or_else(|| params.iter().position(|(n, t)| *t == SigType::Int && SIZE_LIKE_INT.contains(&n.as_str())));
         let rebind_param = params.iter().position(|(_, t)| concrete(t).as_ref() == Some(&ret));
         Ok(Target { name, params, subst, ret, size_param, rebind_param })
@@ -250,8 +250,10 @@ impl Target {
         self.name.rsplit('.').next().unwrap_or("")
     }
 
+    /// The return value can be printed: an observable type, or a top-level
+    /// `Bytes` (printed as its byte list, see [`render_print`]).
     pub fn ret_is_observable(&self) -> bool {
-        self.ret.is_observable()
+        self.ret.is_observable() || self.ret == GenType::Bytes
     }
 
     fn render_param(&self, i: usize) -> String {
@@ -290,6 +292,8 @@ fn small(t: &GenType) -> String {
         GenType::Result(e) => format!("ok({})", small(e)),
         GenType::Tuple2(a, b) => format!("({}, {})", small(a), small(b)),
         GenType::Map(v) => format!("[\"k\": {}]", small(v)),
+        GenType::Sized(name) => GenType::sized_literal(name, "2"),
+        GenType::Bytes => "bytes.from_list([1, 2])".into(),
     }
 }
 
@@ -313,6 +317,7 @@ fn elem(t: &GenType) -> String {
         GenType::List(e) => format!("[{}]", elem(e)),
         GenType::Option(e) => format!("some({})", elem(e)),
         GenType::Tuple2(a, b) => format!("({}, {})", elem(a), elem(b)),
+        GenType::Sized(name) => GenType::sized_literal(name, "i % 100"),
         other => small(other),
     }
 }
@@ -324,6 +329,7 @@ fn sized(t: &GenType, n: u64) -> String {
         GenType::String => format!("string.repeat(\"aé\", {n})"),
         GenType::List(e) => format!("list.range(0, {n}) |> list.map((i) => {})", elem(e)),
         GenType::Map(v) => format!("list.range(0, {n}) |> list.fold(map.new(), (m, i) => map.set(m, \"k${{i}}\", {}))", elem(v)),
+        GenType::Bytes => format!("bytes.new({n})"),
         other => small(other),
     }
 }
@@ -353,5 +359,10 @@ fn digest(v: &str, t: &GenType) -> String {
         GenType::Option(_) => format!("(if option.is_some({v}) then 1 else 0)"),
         GenType::Result(_) => format!("(if result.is_ok({v}) then 1 else 0)"),
         GenType::Tuple2(..) => "1".into(),
+        GenType::Sized(name) if name.starts_with("Float") => {
+            format!("(if float.from_{}({v}) > 0.0 then 1 else 0)", name.to_lowercase())
+        }
+        GenType::Sized(name) => format!("int.from_{}({v})", name.to_lowercase()),
+        GenType::Bytes => format!("bytes.len({v})"),
     }
 }

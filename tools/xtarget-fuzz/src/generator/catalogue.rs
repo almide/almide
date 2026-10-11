@@ -83,8 +83,9 @@ impl Signature {
 /// Bundled stdlib modules the generator draws from, paired with their
 /// embedded source. Only the deterministic, side-effect-free, in-scope
 /// modules are listed — no `fs`/`http`/`process`/`random`/`datetime`
-/// (effects or non-determinism), no `bytes`/`matrix` (outside the
-/// generator's value universe).
+/// (effects or non-determinism), no `matrix`/`value`/`json` (outside the
+/// generator's value universe). The fixed-width numbers and `bytes` are in:
+/// the value grammar builds them (`GenType::Sized`, `GenType::Bytes`).
 ///
 /// `(module_name, source_text)`.
 const BUNDLED_MODULES: &[(&str, &str)] = &[
@@ -97,6 +98,17 @@ const BUNDLED_MODULES: &[(&str, &str)] = &[
     ("option", include_str!("../../../../stdlib/option.almd")),
     ("result", include_str!("../../../../stdlib/result.almd")),
     ("math", include_str!("../../../../stdlib/math.almd")),
+    ("int8", include_str!("../../../../stdlib/int8.almd")),
+    ("int16", include_str!("../../../../stdlib/int16.almd")),
+    ("int32", include_str!("../../../../stdlib/int32.almd")),
+    ("int64", include_str!("../../../../stdlib/int64.almd")),
+    ("uint8", include_str!("../../../../stdlib/uint8.almd")),
+    ("uint16", include_str!("../../../../stdlib/uint16.almd")),
+    ("uint32", include_str!("../../../../stdlib/uint32.almd")),
+    ("uint64", include_str!("../../../../stdlib/uint64.almd")),
+    ("float32", include_str!("../../../../stdlib/float32.almd")),
+    ("float64", include_str!("../../../../stdlib/float64.almd")),
+    ("bytes", include_str!("../../../../stdlib/bytes.almd")),
 ];
 
 /// Default selection weight for a function not named in
