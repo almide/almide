@@ -177,6 +177,7 @@ fn gen_leaf(b: &mut Builder, goal: &GenType) -> String {
         GenType::String => render_string_literal(b.rng.pick(pools::STRING_POOL)),
         GenType::Bool => format!("{}", b.rng.pick(pools::BOOL_POOL)),
         GenType::Unit => "()".to_string(),
+        GenType::Sized(_) | GenType::Bytes => sized_or_bytes(b, goal),
         // Compound goals: construct (and hoist if ambiguous).
         GenType::List(_)
         | GenType::Option(_)
@@ -186,15 +187,33 @@ fn gen_leaf(b: &mut Builder, goal: &GenType) -> String {
     }
 }
 
+/// A fixed-width number through its `int.to_<width>` conversion (from a
+/// non-negative Int, so every width holds it), or `Bytes` from a short list.
+fn sized_or_bytes(b: &mut Builder, goal: &GenType) -> String {
+    const SMALL: &[i64] = &[0, 1, 2, 7, 100];
+    match goal {
+        GenType::Sized(name) => GenType::sized_literal(name, &b.rng.pick(SMALL).to_string()),
+        _ => {
+            let n = *b.rng.pick(pools::SMALL_COUNT_POOL) as usize;
+            let items: Vec<String> = (0..n).map(|_| b.rng.pick(SMALL).to_string()).collect();
+            format!("bytes.from_list([{}])", items.join(", "))
+        }
+    }
+}
+
 /// Construct a compound value. Ambiguous shapes (empty list/map, `none`,
 /// `ok`/`err`) are hoisted into an annotated `let` so they type-check;
 /// the function returns the *reference* to that binding. Unambiguous
 /// shapes (non-empty list, tuple, `some(x)`) are returned inline.
 fn gen_construct(b: &mut Builder, goal: &GenType) -> String {
     match goal {
-        GenType::Int | GenType::Float | GenType::String | GenType::Bool | GenType::Unit => {
-            gen_leaf(b, goal)
-        }
+        GenType::Int
+        | GenType::Float
+        | GenType::String
+        | GenType::Bool
+        | GenType::Unit
+        | GenType::Sized(_)
+        | GenType::Bytes => gen_leaf(b, goal),
         GenType::List(elem) => {
             let n = *b.rng.pick(pools::SMALL_COUNT_POOL) as usize;
             if n == 0 {
@@ -477,6 +496,7 @@ fn gen_lambda_body(b: &mut Builder, goal: &GenType) -> String {
             // Single-entry map literal is inline-safe.
             format!("[\"k\": {}]", gen_lambda_body(b, v))
         }
+        GenType::Sized(_) | GenType::Bytes => sized_or_bytes(b, goal),
     }
 }
 
