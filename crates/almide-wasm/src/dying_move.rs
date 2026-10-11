@@ -43,21 +43,32 @@ use crate::emitter::Emitter;
 use crate::types_table::NamedDef;
 use crate::*;
 
-/// The Var read a consuming `value` would move, if it is one: the
-/// receiver of `map.set` / `map.upsert`, or the base of a spread.
+/// The Var read a consuming `value` would move, if it is one: the source
+/// of a stdlib call declared `@reuse(p)` (crates/almide-types `reuse` — the
+/// receiver of `map.set` / `map.upsert` among them), or the base of a
+/// spread. A read only moves where a lowering takes the dying note
+/// (`dying_local`); a declared op with no such lowering yet leaves the note
+/// unread and shares as before.
 fn consumed_read(value: &IrExpr) -> Option<&IrExpr> {
     let read = match &value.kind {
-        IrExprKind::Call { target: almide_ir::CallTarget::Module { module, func, .. }, args, .. }
-            if module.as_str() == "map"
-                && matches!((func.as_str(), args.len()), ("set", 3) | ("upsert", 4)) =>
-        {
-            &args[0]
-        }
+        _ if let Some(source) = reused_source(value) => source,
         IrExprKind::SpreadRecord { base, .. } => base.as_ref(),
         // #3530: a one-element push onto the var, at either end.
         _ => return crate::concat_dying::concat_read(value),
     };
     matches!(read.kind, IrExprKind::Var { .. }).then_some(read)
+}
+
+/// The argument a call declared `@reuse(p)` may take over.
+fn reused_source(value: &IrExpr) -> Option<&IrExpr> {
+    let IrExprKind::Call { target: almide_ir::CallTarget::Module { module, func, .. }, args, .. } = &value.kind else {
+        return None;
+    };
+    let r = almide_types::reuse::of(module.as_str(), func.as_str())?;
+    if args.len() != r.arity {
+        return None;
+    }
+    args.get(r.param)
 }
 
 /// An expression whose evaluation cannot trap, print or diverge — a

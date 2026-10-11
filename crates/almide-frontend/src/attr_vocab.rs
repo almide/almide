@@ -34,6 +34,8 @@ pub const KNOWN_ATTRS: &[&str] = &[
     "mutating",
     "consume",
     "borrow_ref",
+    // May take over a dying source's storage (crates/almide-types: `reuse`)
+    "reuse",
     // A parameter that runs concurrently (ADR-0020 §3.1, E008)
     "concurrent",
     // The empty effect set, checked (E092, #3250)

@@ -2,12 +2,7 @@
 # compiler that group stdlib names instead of reading a declaration.
 # `names` is how many stdlib names the item groups. A `legacy` row predates
 # the gate (2026-10-11): its count may only fall, and the row goes when the
-# site does. A new site needs `class = "legacy"` and a `why`.
-
-[[site]]
-id = "crates/almide-codegen/src/owned_source.rs::OWNED_SOURCE_TWINS::table"
-class = "legacy"
-names = 24
+# site does. A new site needs `class = "justified"` and a `why`.
 
 [[site]]
 id = "crates/almide-codegen/src/owned_source.rs::SCALAR_SOURCE_READS::table"
@@ -923,11 +918,6 @@ names = 5
 id = "crates/almide-wasm/src/collections_set.rs::lower_set_call::or-pattern"
 class = "legacy"
 names = 5
-
-[[site]]
-id = "crates/almide-wasm/src/dying_move.rs::consumed_read::or-pattern"
-class = "legacy"
-names = 2
 
 [[site]]
 id = "crates/almide-wasm/src/eta.rs::HOF_MODULES::table"

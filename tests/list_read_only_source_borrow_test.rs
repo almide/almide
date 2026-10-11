@@ -209,7 +209,7 @@ fn range_ops_emit_a_borrow_of_a_used_afterwards_source() {
 // at most and the nested-list ops (`window`, `windows`, `chunk`) copy elements
 // into several results anyway: neither gains from a move, so neither has one.
 
-use almide_codegen::owned_source::OWNED_SOURCE_TWINS;
+use almide_codegen::owned_source::owned_twins;
 
 /// Ops with a twin beyond the sub-list rule.
 const TWIN_EXTRA: &[&str] = &["find"];
@@ -226,7 +226,7 @@ fn stdlib_return_type(op: &str) -> String {
 #[test]
 fn every_sub_list_range_op_has_an_owned_twin_that_takes_the_source_by_value() {
     // The map twins (`almide_rt_map_*`) are gated by map_owned_twin_test.rs.
-    let list_twins: Vec<&(&str, &str)> = OWNED_SOURCE_TWINS.iter()
+    let list_twins: Vec<(&str, &str)> = owned_twins()
         .filter(|(b, _)| b.starts_with("almide_rt_list_"))
         .collect();
     let twin_ops: Vec<&str> = list_twins.iter()
@@ -322,7 +322,7 @@ fn fn_body<'a>(rust: &'a str, name: &str) -> &'a str {
 fn a_range_op_at_its_sources_last_use_moves_it_into_the_owned_twin() {
     let (_dir, src, rust) = emit_rust("last_use.almd", &last_use_program());
     let main = fn_body(&rust, "__almide_main");
-    for (_, owned) in OWNED_SOURCE_TWINS.iter().filter(|(b, _)| b.starts_with("almide_rt_list_")) {
+    for (_, owned) in owned_twins().filter(|(b, _)| b.starts_with("almide_rt_list_")) {
         let op = owned.strip_prefix("almide_rt_list_").unwrap().strip_suffix("_owned").unwrap();
         let moved = format!("{owned}(s_{op}");
         // `find` with a lambda may fuse into an iterator chain that consumes

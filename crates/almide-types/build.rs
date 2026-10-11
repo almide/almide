@@ -80,7 +80,11 @@ fn main() {
     .expect("write to String");
 
     in_checkout::write_if_changed(&manifest.join("src/generated/embedded.rs"), &out);
+    reuse::generate(&root, &files, &manifest.join("src/generated/reuse.rs"));
 }
+
+#[path = "buildscript/reuse.rs"]
+mod reuse;
 
 /// Blank every WHOLE-LINE `//` comment, keeping the line itself so line
 /// numbers are unchanged. Trailing comments after code are left alone, and

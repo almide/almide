@@ -19,3 +19,38 @@ pub mod fallible_hofs;
 // Re-export almide-base for convenience
 pub use almide_base;
 pub use almide_base::intern;
+
+/// The stdlib's `@reuse(p)` declarations (ruling 2026-10-11): when the
+/// argument for parameter `param` is at its last use, the result may take
+/// over its storage. ONE table, generated from the declarations
+/// (`buildscript/reuse.rs`) and committed (#3361), that the native twin
+/// selection and the wasm dying-read moves both read — never a name list.
+pub mod reuse {
+    /// One `@reuse` declaration.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct Reuse {
+        pub module: &'static str,
+        pub func: &'static str,
+        /// The index of the reused parameter.
+        pub param: usize,
+        /// The declared parameter count.
+        pub arity: usize,
+        /// The native runtime symbol (`@intrinsic`).
+        pub intrinsic: &'static str,
+        /// The runtime fn that takes the source by value, where the intrinsic
+        /// borrows it; `None` when the intrinsic itself consumes (`@consume`).
+        pub owned_twin: Option<&'static str>,
+    }
+
+    include!("generated/reuse.rs");
+
+    /// The declaration of `module.func`, if it reuses a parameter.
+    pub fn of(module: &str, func: &str) -> Option<&'static Reuse> {
+        REUSE.iter().find(|r| r.module == module && r.func == func)
+    }
+
+    /// The declaration whose native intrinsic is `symbol`.
+    pub fn of_intrinsic(symbol: &str) -> Option<&'static Reuse> {
+        REUSE.iter().find(|r| r.intrinsic == symbol)
+    }
+}
