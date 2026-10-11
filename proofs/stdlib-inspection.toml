@@ -20,8 +20,17 @@
 #   2. NO WASTED ORDER. The per-call cost matches the declared `order`, and
 #      no use-shape — a plain call, the var's own rebind in a loop, a self tail
 #      call, a fold callback, a pipe stage — adds a copy the shape does not need.
-#      Measured on both legs at n, 2n and 4n from built artifacts, never
-#      `almide run`. Evidence: `complexity`, plus `alloc`: the wasm leg leaves 0
+#      Measured on both legs from built artifacts, never `almide run`. Since
+#      2026-10-11 (owner ruling) the meter is COUNTED, not timed: user-space
+#      instructions (`perf stat -e instructions:u`, a PMU host such as GCE
+#      c4-standard-4) plus the bytes memcpy / memmove / memset are asked to
+#      move (an LD_PRELOAD shim — bulk copies retire as one instruction), at
+#      n..16n; each series is fitted to O(1)/log/n/nlogn/n2/n3 within 3% RMS
+#      and the dearer fit must not exceed `order`. A series no class explains
+#      fails; wall time is recorded, never judged; a host without a PMU or the
+#      shim reports a verdict that is not stampable. Rows stamped before the
+#      ruling keep their timed evidence (n, 2n, 4n per-doubling ratios).
+#      Evidence: `complexity`, plus `alloc`: the wasm leg leaves 0
 #      live blocks at exit, and an accumulation shape allocates linearly
 #      (canon law 10, ../almide-references/RESEARCH-stdlib.md).
 #   3. CODOPSY A HOLDS. Any change the inspection makes keeps every scored
