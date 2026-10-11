@@ -183,7 +183,8 @@ fn gen_leaf(b: &mut Builder, goal: &GenType) -> String {
         | GenType::Option(_)
         | GenType::Result(_)
         | GenType::Tuple2(_, _)
-        | GenType::Map(_) => gen_construct(b, goal),
+        | GenType::Map(_)
+        | GenType::Set(_) => gen_construct(b, goal),
     }
 }
 
@@ -214,6 +215,14 @@ fn gen_construct(b: &mut Builder, goal: &GenType) -> String {
         | GenType::Unit
         | GenType::Sized(_)
         | GenType::Bytes => gen_leaf(b, goal),
+        GenType::Set(elem) => {
+            let n = *b.rng.pick(pools::SMALL_COUNT_POOL) as usize;
+            if n == 0 {
+                return b.hoist(goal, "set.new()".to_string());
+            }
+            let items: Vec<String> = (0..n).map(|_| gen_expr(b, elem)).collect();
+            format!("set.from_list([{}])", items.join(", "))
+        }
         GenType::List(elem) => {
             let n = *b.rng.pick(pools::SMALL_COUNT_POOL) as usize;
             if n == 0 {
@@ -497,6 +506,7 @@ fn gen_lambda_body(b: &mut Builder, goal: &GenType) -> String {
             format!("[\"k\": {}]", gen_lambda_body(b, v))
         }
         GenType::Sized(_) | GenType::Bytes => sized_or_bytes(b, goal),
+        GenType::Set(e) => format!("set.from_list([{}])", gen_lambda_body(b, e)),
     }
 }
 
