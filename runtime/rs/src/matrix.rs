@@ -676,7 +676,10 @@ pub fn almide_rt_matrix_mha_core(q: &AlmideMatrix, k: &AlmideMatrix, v: &AlmideM
 
     let mut out = vec![vec![0.0f64; d]; sq];
 
-    for h in 0..n_heads {
+    // #3575: a head count above the width leaves dh = 0 — every head covers no
+    // column and writes nothing, so none is walked (each one still built and
+    // normalised a full score matrix, 2^63 times for a huge count).
+    for h in 0..if dh == 0 { 0 } else { n_heads } {
         let col0 = h * dh;
         let col1 = col0 + dh;
 
