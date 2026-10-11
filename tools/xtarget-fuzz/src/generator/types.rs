@@ -129,6 +129,36 @@ impl GenType {
     /// printed deterministically across both targets. Used to gate
     /// which goal types may appear as the program's *final observable*
     /// (we never make a bare closure the observable, for instance).
+    /// Statements and an expression that turn a value of this type into one
+    /// [`is_observable`](Self::is_observable) accepts: a Bytes becomes its
+    /// byte list and a Matrix its row lists, through any list, option, result
+    /// or tuple around them. `None` for a shape with no such image here (a Map
+    /// holding Bytes). `depth` keeps nested lambda and binding names apart.
+    pub fn observe(&self, v: &str, depth: usize) -> Option<(String, String)> {
+        if self.is_observable() {
+            return Some((String::new(), v.to_string()));
+        }
+        let x = format!("o{depth}");
+        let inner = |e: &GenType| -> Option<String> {
+            let (pre, expr) = e.observe(&x, depth + 1)?;
+            pre.is_empty().then(|| format!("(({x}) => {expr})"))
+        };
+        match self {
+            GenType::Bytes => Some((String::new(), format!("bytes.to_list({v})"))),
+            GenType::Matrix => Some((String::new(), format!("matrix.to_lists({v})"))),
+            GenType::List(e) => Some((String::new(), format!("list.map({v}, {})", inner(e)?))),
+            GenType::Option(e) => Some((String::new(), format!("option.map({v}, {})", inner(e)?))),
+            GenType::Result(e) => Some((String::new(), format!("result.map({v}, {})", inner(e)?))),
+            GenType::Tuple2(a, b) => {
+                let (l, r) = (format!("{x}a"), format!("{x}b"));
+                let (pa, ea) = a.observe(&l, depth + 1)?;
+                let (pb, eb) = b.observe(&r, depth + 1)?;
+                Some((format!("let ({l}, {r}) = {v}\n  {pa}{pb}"), format!("({ea}, {eb})")))
+            }
+            _ => None,
+        }
+    }
+
     pub fn is_observable(&self) -> bool {
         match self {
             GenType::Int | GenType::String | GenType::Bool | GenType::Unit => true,
@@ -178,12 +208,12 @@ impl GenType {
 /// want to differential-test. For non-directly-interpolable shapes the
 /// generator wraps them so the printed form is still deterministic.
 pub fn render_print(name: &str, ty: &GenType) -> String {
-    // A top-level Bytes or Matrix has no string form (E089); its list does.
-    if *ty == GenType::Bytes {
-        return format!("println(\"{name} = ${{bytes.to_list({name})}}\")");
-    }
-    if *ty == GenType::Matrix {
-        return format!("println(\"{name} = ${{matrix.to_lists({name})}}\")");
+    // A Bytes or Matrix has no string form (E089), at the top level or inside
+    // a list, option, result or tuple: print its observable image instead.
+    if !ty.is_observable() {
+        if let Some((pre, expr)) = ty.observe(name, 0) {
+            return format!("{pre}println(\"{name} = ${{{expr}}}\")");
+        }
     }
     // Every other printable shape interpolates via `${...}`, so the type is
     // not needed to render — the parameter documents the contract that only
