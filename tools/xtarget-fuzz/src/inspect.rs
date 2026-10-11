@@ -4,8 +4,11 @@
 //! lines for its row:
 //!
 //!   parity      a focused differential campaign (criteria 1 and 4)
-//!   complexity  the plain call and each rebind use-shape, timed from built
-//!               artifacts on both legs at n, 2n and 4n (criterion 2)
+//!   complexity  the plain call and each rebind use-shape, from built
+//!               artifacts on both legs (criterion 2): user-space
+//!               instructions (`perf stat -e instructions:u`) at n .. 16n,
+//!               fitted to the lowest order class that explains them; wall
+//!               time where no PMU counts (reported, never stampable)
 //!   alloc       0 live wasm blocks at exit for every timing program
 //!   diamond     the call through a module diamond equals the direct call,
 //!               on both legs (criterion 5)
@@ -30,6 +33,9 @@ struct Ctx {
     almide: PathBuf,
     wasmtime: PathBuf,
     dir: PathBuf,
+    /// `perf stat -e instructions:u` works here (a PMU is exposed): the
+    /// complexity criterion counts instructions instead of timing.
+    icount: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -48,6 +54,7 @@ pub fn cmd_inspect(args: &[String]) {
         almide: super::resolve_almide(&repo, args),
         wasmtime: super::resolve_wasmtime(),
         dir: std::env::temp_dir().join(format!("xtarget-inspect-{}", std::process::id())),
+        icount: icount_available(),
     };
     let _ = std::fs::create_dir_all(&ctx.dir);
     let target = Engine::with_family(&repo, Family::Synthesis).inspect_target(&name).unwrap_or_else(|e| {
@@ -63,7 +70,14 @@ pub fn cmd_inspect(args: &[String]) {
     // at exactly 2^18 Int elements (2 MiB) wasm list.map ran 4x slower than
     // at 262,000 or 2^19 with identical allocation counts — a placement
     // effect of two blocks exactly 2 MiB apart, not an order.
-    let default_n = if order == Some("n2") { 2000 } else { 200_000 };
+    // Counted instructions see no cache tier at all, so the counted judge
+    // starts small (n .. 16n); the timed fallback keeps the past-L2 sizes.
+    let default_n = match (order == Some("n2"), ctx.icount) {
+        (true, true) => 500,
+        (true, false) => 2000,
+        (false, true) => 20_000,
+        (false, false) => 200_000,
+    };
     let n: u64 = super::flag_value(args, "--n").and_then(|s| s.parse().ok()).unwrap_or(default_n);
     let order_rebind = super::flag_value(args, "--order-rebind");
 
@@ -182,9 +196,26 @@ fn complexity(ctx: &Ctx, t: &Target, n: u64, order: Option<&str>, order_rebind: 
     format!("{}: {}", if ok { "PASS" } else { "FAIL" }, parts.join("; "))
 }
 
-/// Calibrate `k` at size `n`, then time (program - baseline) at n, 2n, 4n on
-/// both legs; the growth per doubling must fit the declared order.
+/// Criterion 2's judge, dispatched on the meter this host offers.
 fn judge(
+    ctx: &Ctx,
+    label: &str,
+    order: Option<&str>,
+    n: u64,
+    programs: &dyn Fn(u64, u64) -> (String, String),
+) -> Result<String, String> {
+    if ctx.icount {
+        return judge_counted(ctx, label, order, n, programs);
+    }
+    judge_timed(ctx, label, order, n, programs).map_err(|e| format!("{e} [meter=wall-time, no PMU: not stampable]"))
+        .and_then(|ok| Err(format!("{ok} [meter=wall-time, no PMU: not stampable]")))
+}
+
+/// The wall-time judge: calibrate `k` at size `n`, then time (program -
+/// baseline) at n, 2n and 4n on both legs; the growth per doubling must fit
+/// the declared order. Kept for hosts without a PMU, where it reports but
+/// never passes: a cache tier crossed between two sizes reads as an order.
+fn judge_timed(
     ctx: &Ctx,
     label: &str,
     order: Option<&str>,
@@ -415,5 +446,251 @@ fn diamond(ctx: &Ctx, t: &Target, n: u64) -> String {
         (true, true) => format!("PASS: direct = via left = via right on both legs ({} line(s) each)", thirds),
         (false, _) => format!("FAIL: the three calls differ on native: {a:?}"),
         (true, false) => format!("FAIL: native {a:?} vs wasm {b:?}"),
+    }
+}
+
+// ── The counted judge ───────────────────────────────────────────────────
+//
+// Wall time on a shared VM crosses cache tiers between sizes: a linear
+// `list.drop` read x3.1 from 200k to 400k Ints (L2) and x3.5 from 2M to 4M
+// (L3) while every other doubling read x2.0. Retired instructions see no
+// tier and repeat to the instruction (`/bin/true` 135,023-135,024 over three
+// runs on c4-standard-4). This is rustc-perf's primary metric
+// (`instructions:u`); the class is chosen the way Google Benchmark's `oAuto`
+// chooses one, by least squares over the candidate curves, here with an
+// intercept for the program-shape constant the baseline does not cancel.
+
+/// The order classes, cheapest first, and their curves.
+const CLASSES: &[(&str, fn(f64) -> f64)] = &[
+    ("1", |_| 1.0),
+    ("log", |n| n.ln()),
+    ("n", |n| n),
+    ("nlogn", |n| n * n.ln()),
+    ("n2", |n| n * n),
+    ("n3", |n| n * n * n),
+];
+
+/// Relative residual a class must stay within to explain the counts. Counts
+/// repeat to ~0.05%, so 3% is far above measurement and far below the 20%+
+/// a wrong class leaves over a 16x size range.
+const FIT_TOLERANCE: f64 = 0.03;
+
+/// Calibrate `k` until the call's own instructions at size `n` dominate,
+/// then count (program - baseline) at n, 2n, 4n, 8n and 16n on both legs.
+fn judge_counted(
+    ctx: &Ctx,
+    label: &str,
+    order: Option<&str>,
+    n: u64,
+    programs: &dyn Fn(u64, u64) -> (String, String),
+) -> Result<String, String> {
+    const CALIBRATE_INSTRUCTIONS: f64 = 2.0e7;
+    let mut k = 1u64;
+    loop {
+        let (p, b) = programs(n, k);
+        let dn = counted_delta(ctx, &p, &b, Leg::Native).map_err(|e| format!("{label} {e}"))?;
+        let dw = counted_delta(ctx, &p, &b, Leg::Wasm).map_err(|e| format!("{label} {e}"))?;
+        if dn.0.max(dw.0) >= CALIBRATE_INSTRUCTIONS || k >= MAX_K {
+            break;
+        }
+        k = (k * 4).min(MAX_K);
+    }
+    let sizes: Vec<u64> = (0..5).map(|i| n << i).collect();
+    let mut line = format!("{label} k={k} meter=instructions:u n={n}..{}", n << 4);
+    let mut worst = 0usize;
+    for leg in [Leg::Native, Leg::Wasm] {
+        let mut ys = Vec::new();
+        let mut ts = Vec::new();
+        for &m in &sizes {
+            let (p, b) = programs(m, k);
+            let (y, t) = counted_delta(ctx, &p, &b, leg).map_err(|e| format!("{label} {e}"))?;
+            ys.push(y);
+            ts.push(t);
+        }
+        let (class, rms) = fit_class(&sizes, &ys);
+        worst = worst.max(class);
+        let tag = if matches!(leg, Leg::Native) { "native" } else { "wasm" };
+        let counts: Vec<String> = ys.iter().map(|y| format!("{:.3e}", y)).collect();
+        let times: Vec<String> = ts.iter().map(|t| format!("{:.3}", t.as_secs_f64())).collect();
+        line.push_str(&format!(
+            " {tag} {} fit {} (rms {:.1}%) wall {}s",
+            counts.join("/"),
+            CLASSES[class].0,
+            rms * 100.0,
+            times.join("/")
+        ));
+    }
+    let measured = CLASSES[worst].0;
+    match order.and_then(|o| CLASSES.iter().position(|(c, _)| *c == o)) {
+        None => Err(format!("{line} (order undeclared: measured {measured})")),
+        Some(declared) if worst <= declared => Ok(format!("{line} (order {} ok)", CLASSES[declared].0)),
+        Some(declared) => Err(format!("{line} (order {} exceeded: measured {measured})", CLASSES[declared].0)),
+    }
+}
+
+/// The cheapest class whose `a + c·f(n)` least-squares fit leaves every
+/// point within [`FIT_TOLERANCE`] (relative RMS), else the best-fitting one.
+/// Counts that never leave a few thousand instructions are O(1) outright.
+fn fit_class(sizes: &[u64], ys: &[f64]) -> (usize, f64) {
+    let top = ys.iter().cloned().fold(0.0f64, f64::max);
+    if top < 5.0e3 {
+        return (0, 0.0);
+    }
+    let floor = top * 0.01;
+    let mut best = (0usize, f64::MAX);
+    for (i, (_, f)) in CLASSES.iter().enumerate() {
+        let xs: Vec<f64> = sizes.iter().map(|&m| f(m as f64)).collect();
+        let rms = fit_rms(&xs, ys, floor);
+        if rms <= FIT_TOLERANCE {
+            return (i, rms);
+        }
+        if rms < best.1 {
+            best = (i, rms);
+        }
+    }
+    best
+}
+
+/// Relative RMS residual of the least-squares line `y = a + c·x`.
+fn fit_rms(xs: &[f64], ys: &[f64], floor: f64) -> f64 {
+    let n = xs.len() as f64;
+    let (mx, my) = (xs.iter().sum::<f64>() / n, ys.iter().sum::<f64>() / n);
+    let sxx: f64 = xs.iter().map(|x| (x - mx) * (x - mx)).sum();
+    let sxy: f64 = xs.iter().zip(ys).map(|(x, y)| (x - mx) * (y - my)).sum();
+    let c = if sxx > 0.0 { sxy / sxx } else { 0.0 };
+    let a = my - c * mx;
+    let sq: f64 = xs.iter().zip(ys).map(|(x, y)| ((y - (a + c * x)) / y.abs().max(floor)).powi(2)).sum();
+    (sq / n).sqrt()
+}
+
+/// (program - baseline) user-space instructions on one leg, and the same
+/// difference in wall time for the record.
+fn counted_delta(ctx: &Ctx, prog: &str, base: &str, leg: Leg) -> Result<(f64, Duration), String> {
+    let (cp, tp) = counted(ctx, prog, leg)?;
+    let (cb, tb) = counted(ctx, base, leg)?;
+    Ok(((cp as f64 - cb as f64).max(0.0), tp.saturating_sub(tb)))
+}
+
+/// The fewer instructions of two runs (they repeat to ~0.05%; the minimum
+/// drops a rare interrupt-path outlier), with the same output checks the
+/// timed judge makes: deterministic, and equal across legs.
+fn counted(ctx: &Ctx, src: &str, leg: Leg) -> Result<(u64, Duration), String> {
+    let art = build(ctx, src, leg)?;
+    let mut best = (u64::MAX, Duration::MAX);
+    let mut first: Option<String> = None;
+    for _ in 0..2 {
+        let (out, count, wall) = run_counted(ctx, &art, leg)?;
+        best = (best.0.min(count), best.1.min(wall));
+        if first.get_or_insert_with(|| out.clone()) != &out {
+            return Err("nondeterministic output".into());
+        }
+    }
+    if matches!(leg, Leg::Wasm) {
+        let native = run_artifact(ctx, &build(ctx, src, Leg::Native)?, Leg::Native)?;
+        if first.as_deref() != Some(native.as_str()) {
+            return Err(format!("native and wasm differ: {native:?} vs {first:?}"));
+        }
+    }
+    Ok(best)
+}
+
+/// One run under `perf stat -x, -e instructions:u`: stdout, the count, and
+/// wall time. The count goes to a file so the program's stderr stays its own.
+fn run_counted(ctx: &Ctx, art: &Path, leg: Leg) -> Result<(String, u64, Duration), String> {
+    let stat = ctx.dir.join(format!("stat-{}.csv", std::process::id()));
+    let mut cmd = Command::new("perf");
+    cmd.args(["stat", "-x", ",", "-e", "instructions:u", "-o"]).arg(&stat).arg("--");
+    match leg {
+        Leg::Native => cmd.arg(art),
+        Leg::Wasm => cmd.arg(&ctx.wasmtime).arg("run").arg(art),
+    };
+    let start = Instant::now();
+    let mut child = cmd
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    while child.try_wait().map_err(|e| e.to_string())?.is_none() {
+        if start.elapsed() > RUN_CAP {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(format!("timed out ({}s cap)", RUN_CAP.as_secs()));
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let wall = start.elapsed();
+    let out = child.wait_with_output().map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(format!("exit {:?}: {}", out.status.code(), first_error(&out.stderr)));
+    }
+    let count = parse_instructions(&std::fs::read_to_string(&stat).unwrap_or_default())
+        .ok_or_else(|| "perf reported no instructions:u count".to_string())?;
+    Ok((String::from_utf8_lossy(&out.stdout).into_owned(), count, wall))
+}
+
+/// The count of the `instructions:u` row of `perf stat -x,` output.
+fn parse_instructions(csv: &str) -> Option<u64> {
+    csv.lines()
+        .find(|l| l.contains("instructions"))
+        .and_then(|l| l.split(',').next())
+        .and_then(|c| c.trim().parse().ok())
+}
+
+/// Whether this host counts user-space instructions (a PMU is exposed and
+/// `perf_event_paranoid` lets an unprivileged process read it).
+fn icount_available() -> bool {
+    let dir = std::env::temp_dir().join(format!("xtarget-icount-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    let stat = dir.join("probe.csv");
+    let ok = Command::new("perf")
+        .args(["stat", "-x", ",", "-e", "instructions:u", "-o"])
+        .arg(&stat)
+        .args(["--", "true"])
+        .output()
+        .is_ok_and(|o| o.status.success())
+        && parse_instructions(&std::fs::read_to_string(&stat).unwrap_or_default()).is_some_and(|c| c > 0);
+    let _ = std::fs::remove_dir_all(&dir);
+    ok
+}
+
+#[cfg(test)]
+mod fit_tests {
+    use super::*;
+
+    fn sizes() -> Vec<u64> {
+        (0..5).map(|i| 20_000u64 << i).collect()
+    }
+
+    fn class_of(f: impl Fn(f64) -> f64) -> &'static str {
+        let ys: Vec<f64> = sizes().iter().map(|&n| 1.0e6 + f(n as f64)).collect();
+        CLASSES[fit_class(&sizes(), &ys).0].0
+    }
+
+    #[test]
+    fn each_curve_is_classified_as_itself_or_cheaper_never_dearer() {
+        assert_eq!(class_of(|_| 3.0e7), "1");
+        assert_eq!(class_of(|n| 40.0 * n), "n");
+        assert_eq!(class_of(|n| 0.05 * n * n), "n2");
+        assert_eq!(class_of(|n| 1.0e-6 * n * n * n), "n3");
+        // n log n over a 16x range is within tolerance of a line with an
+        // intercept: it reads as n or nlogn, never as n2.
+        assert!(matches!(class_of(|n| 40.0 * n * n.ln()), "n" | "nlogn"));
+    }
+
+    #[test]
+    fn a_single_cache_step_does_not_read_as_a_higher_order() {
+        // The wall-time failure this judge replaces: linear, with one x1.5
+        // jump between two sizes. Counted instructions never show it, but
+        // the fit must not over-read a modest bump either.
+        let ys: Vec<f64> = sizes().iter().enumerate()
+            .map(|(i, &n)| 40.0 * n as f64 * if i >= 2 { 1.05 } else { 1.0 })
+            .collect();
+        assert_eq!(CLASSES[fit_class(&sizes(), &ys).0].0, "n");
+    }
+
+    #[test]
+    fn perf_csv_is_parsed() {
+        assert_eq!(parse_instructions("135023,,instructions:u,362206,100.00,,\n"), Some(135023));
+        assert_eq!(parse_instructions("<not counted>,,instructions:u,0,0.00,,\n"), None);
     }
 }
