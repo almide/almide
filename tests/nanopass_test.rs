@@ -1047,28 +1047,57 @@ mod fan_parallel_routing {
     }
 
     #[test]
-    fn fan_map_string_result_stays_sequential() {
-        // fan.map([1], (x) => ok("s")) — String crosses the thread: declined.
+    fn fan_map_string_result_goes_parallel() {
+        // fan.map([1], (x) => ok("s")) — the native String is a Rust `String`,
+        // which is Send: parallel (#2044).
         let mut vt = VarTable::new();
         let lambda = ok_lambda(&mut vt, |_| mk_expr(IrExprKind::LitStr { value: "s".into() }, Ty::String));
         let program = mk_program(vec![mk_fn("main", vec![], Ty::Unit, fan_map(lambda), true)], vt);
         let out = route(program);
-        assert_eq!(fan_func_name(&out), "map");
+        assert_eq!(fan_func_name(&out), "map_par");
     }
 
-    #[test]
-    fn fan_map_list_capture_stays_sequential() {
-        // let ls: List[Int]; fan.map([1], (x) => ok(x)) whose body reads `ls`
-        // (an Rc-shaped capture): declined even though the lambda is pure.
-        let mut vt = VarTable::new();
-        let ls = vt.alloc(sym("ls"), list_ty(Ty::Int), Mutability::Let, None);
-        let lambda = ok_lambda(&mut vt, |x| mk_expr(
+    /// `(x) => ok({ <cap>; x })`: a pure lambda whose body reads `cap`.
+    fn reads_capture(vt: &mut VarTable, name: &str, ty: Ty) -> IrExpr {
+        let cap = vt.alloc(sym(name), ty.clone(), Mutability::Let, None);
+        ok_lambda(vt, |x| mk_expr(
             IrExprKind::Block {
-                stmts: vec![IrStmt { kind: IrStmtKind::Expr { expr: mk_expr(IrExprKind::Var { id: ls }, list_ty(Ty::Int)) }, span: None }],
+                stmts: vec![IrStmt { kind: IrStmtKind::Expr { expr: mk_expr(IrExprKind::Var { id: cap }, ty) }, span: None }],
                 expr: Some(Box::new(mk_expr(IrExprKind::Var { id: x }, Ty::Int))),
             },
             Ty::Int,
-        ));
+        ))
+    }
+
+    #[test]
+    fn fan_map_list_capture_goes_parallel() {
+        // A List[Int] capture is a `Vec<i64>` on native, which is Send (#2044).
+        let mut vt = VarTable::new();
+        let lambda = reads_capture(&mut vt, "ls", list_ty(Ty::Int));
+        let program = mk_program(vec![mk_fn("main", vec![], Ty::Unit, fan_map(lambda), true)], vt);
+        let out = route(program);
+        assert_eq!(fan_func_name(&out), "map_par");
+    }
+
+    #[test]
+    fn fan_map_rc_shaped_capture_stays_sequential() {
+        // Bytes and Matrix are `AlmideRcCow` (an `Rc`) on native, not Send:
+        // a capture of either is declined even though the lambda is pure.
+        for ty in [Ty::Bytes, Ty::Matrix, list_ty(Ty::Bytes)] {
+            let mut vt = VarTable::new();
+            let lambda = reads_capture(&mut vt, "b", ty.clone());
+            let program = mk_program(vec![mk_fn("main", vec![], Ty::Unit, fan_map(lambda), true)], vt);
+            let out = route(program);
+            assert_eq!(fan_func_name(&out), "map", "a {ty:?} capture must stay sequential");
+        }
+    }
+
+    #[test]
+    fn fan_map_rc_shaped_result_stays_sequential() {
+        // fan.map([1], (x) => ok(b)) with `b: Bytes` — an Rc result is declined.
+        let mut vt = VarTable::new();
+        let b = vt.alloc(sym("b"), Ty::Bytes, Mutability::Let, None);
+        let lambda = ok_lambda(&mut vt, |_| mk_expr(IrExprKind::Var { id: b }, Ty::Bytes));
         let program = mk_program(vec![mk_fn("main", vec![], Ty::Unit, fan_map(lambda), true)], vt);
         let out = route(program);
         assert_eq!(fan_func_name(&out), "map");
@@ -1233,10 +1262,18 @@ mod fan_nested_closure_boxing {
 
     #[test]
     fn nested_combinator_closure_is_boxed_under_sequential_fan_map() {
-        // fan.map([1], (x) => ok(list.map([1], (y) => y))) — List result: sequential twin.
+        // fan.map([1], (x) => ok({ list.map([1], (y) => y); b })) with
+        // `b: Bytes` — an Rc-shaped (not Send) result: sequential twin.
         let mut vt = VarTable::new();
         let inner = nested_list_map(&mut vt);
-        let lambda = ok_lambda(&mut vt, |_| inner);
+        let b = vt.alloc(sym("b"), Ty::Bytes, Mutability::Let, None);
+        let lambda = ok_lambda(&mut vt, |_| mk_expr(
+            IrExprKind::Block {
+                stmts: vec![IrStmt { kind: IrStmtKind::Expr { expr: inner }, span: None }],
+                expr: Some(Box::new(mk_expr(IrExprKind::Var { id: b }, Ty::Bytes))),
+            },
+            Ty::Bytes,
+        ));
         let program = mk_program(vec![mk_fn("main", vec![], Ty::Unit, fan_map(lambda), true)], vt);
         let out = lower(program);
         let (func, mapper) = fan_call(&out);
