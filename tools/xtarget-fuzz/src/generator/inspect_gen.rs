@@ -314,7 +314,7 @@ fn elem(t: &GenType) -> String {
     match t {
         GenType::Int => "i".into(),
         GenType::Float => "int.to_float(i) * 0.5".into(),
-        GenType::String => "\"s${i}\"".into(),
+        GenType::String => "\"s${100000000 + i}\"".into(),
         GenType::Bool => "i % 2 == 0".into(),
         GenType::List(e) => format!("[{}]", elem(e)),
         GenType::Option(e) => format!("some({})", elem(e)),
@@ -331,7 +331,7 @@ fn sized(t: &GenType, n: u64) -> String {
         GenType::Int => n.to_string(),
         GenType::String => format!("string.repeat(\"aé\", {n})"),
         GenType::List(e) => format!("list.range(0, {n}) |> list.map((i) => {})", elem(e)),
-        GenType::Map(v) => format!("list.range(0, {n}) |> list.fold(map.new(), (m, i) => map.set(m, \"k${{i}}\", {}))", elem(v)),
+        GenType::Map(v) => format!("list.range(0, {n}) |> list.fold(map.new(), (m, i) => map.set(m, \"k${{100000000 + i}}\", {}))", elem(v)),
         GenType::Bytes => format!("bytes.new({n})"),
         GenType::Matrix => format!("matrix.zeros({n}, 2)"),
         GenType::Set(e) => format!("list.range(0, {n}) |> list.map((i) => {}) |> set.from_list", elem(e)),
