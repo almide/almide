@@ -483,7 +483,17 @@ const CLASSES: &[(&str, fn(f64) -> f64)] = &[
 const FIT_TOLERANCE: f64 = 0.03;
 
 /// Calibrate `k` until the call's own instructions at size `n` dominate,
-/// then count (program - baseline) at n, 2n, 4n, 8n and 16n on both legs.
+/// then count the MARGINAL cost of k more calls — the program at 2k calls
+/// minus the same program at k — at n, 2n, 4n, 8n and 16n on both legs.
+///
+/// Not (program at k) - (baseline at 0): that difference also holds every
+/// one-off cost the call's presence changes — a final copy, a teardown walk,
+/// the first call's reallocation into a fresh heap — and an O(n) one-off
+/// grows with n like an O(n) call would. Measured on reuse-attr (c4-standard-4):
+/// three rebind shapes read `log` from a one-off whose step doubled with n,
+/// and a list builder's moved bytes left a linear fit by 9-28% at the
+/// smallest size only. Between k and 2k calls every one-off cancels and the
+/// series is the steady per-call cost (times k).
 fn judge_counted(
     ctx: &Ctx,
     label: &str,
@@ -492,9 +502,10 @@ fn judge_counted(
     programs: &dyn Fn(u64, u64) -> (String, String),
 ) -> Result<String, String> {
     const CALIBRATE_INSTRUCTIONS: f64 = 2.0e7;
+    let marginal = |m: u64, k: u64| (programs(m, 2 * k).0, programs(m, k).0);
     let mut k = 1u64;
     loop {
-        let (p, b) = programs(n, k);
+        let (p, b) = marginal(n, k);
         let dn = counted_delta(ctx, &p, &b, Leg::Native).map_err(|e| format!("{label} {e}"))?;
         let dw = counted_delta(ctx, &p, &b, Leg::Wasm).map_err(|e| format!("{label} {e}"))?;
         if dn.instructions.max(dw.instructions) >= CALIBRATE_INSTRUCTIONS || k >= MAX_K {
@@ -503,7 +514,7 @@ fn judge_counted(
         k = (k * 4).min(MAX_K);
     }
     let sizes: Vec<u64> = (0..5).map(|i| n << i).collect();
-    let mut line = format!("{label} k={k} meter=instructions:u+bytes-moved n={n}..{}", n << 4);
+    let mut line = format!("{label} k={k}..{} meter=instructions:u+bytes-moved n={n}..{}", 2 * k, n << 4);
     let mut worst = 0usize;
     let mut unexplained = false;
     for leg in [Leg::Native, Leg::Wasm] {
@@ -511,7 +522,7 @@ fn judge_counted(
         let mut bs = Vec::new();
         let mut ts = Vec::new();
         for &m in &sizes {
-            let (p, b) = programs(m, k);
+            let (p, b) = marginal(m, k);
             let d = counted_delta(ctx, &p, &b, leg).map_err(|e| format!("{label} {e}"))?;
             ys.push(d.instructions);
             bs.push(d.moved);
