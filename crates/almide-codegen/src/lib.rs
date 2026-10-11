@@ -460,6 +460,11 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     s.push_str("impl<T: PartialEq> PartialEq for AlmideRcCow<T> { fn eq(&self, other: &Self) -> bool { *self.0 == *other.0 } }\n");
     s.push_str("impl<T: PartialEq> PartialEq<T> for AlmideRcCow<T> { fn eq(&self, other: &T) -> bool { *self.0 == *other } }\n");
     s.push_str("impl PartialEq<&str> for AlmideRcCow<String> { fn eq(&self, other: &&str) -> bool { self.0.as_str() == *other } }\n");
+    // #3555: ordering is the value's own (`list.min` / `sort` over `Bytes`
+    // or `Matrix` require `Ord`), exactly as equality is.
+    s.push_str("impl<T: Eq> Eq for AlmideRcCow<T> {}\n");
+    s.push_str("impl<T: PartialOrd> PartialOrd for AlmideRcCow<T> { fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> { (*self.0).partial_cmp(&*other.0) } }\n");
+    s.push_str("impl<T: Ord> Ord for AlmideRcCow<T> { fn cmp(&self, other: &Self) -> std::cmp::Ordering { (*self.0).cmp(&*other.0) } }\n");
     s.push_str("impl<T> std::ops::Deref for AlmideRcCow<T> { type Target = T; fn deref(&self) -> &T { &self.0 } }\n");
     // Every in-place write (`bytes.set_*`, `list.push`, ...) goes through here.
     // `Rc::make_mut` does not inline, so the common case — the value is not
