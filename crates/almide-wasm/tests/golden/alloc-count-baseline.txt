@@ -548,7 +548,7 @@
 34	13	358	34	spec/wasm_cross/mut_call_nested_read_before.almd
 31	19	350	31	spec/wasm_cross/mut_call_two_mut_args_read.almd
 94	52	1115	94	spec/wasm_cross/mut_heap_param.almd
-71	40	684	71	spec/wasm_cross/mut_list_param_read_by_range_ops.almd
+70	39	668	70	spec/wasm_cross/mut_list_param_read_by_range_ops.almd
 18	8	176	18	spec/wasm_cross/mut_map_param.almd
 170	71	75134	170	spec/wasm_cross/mut_param_alias_cow.almd
 44	25	1303	44	spec/wasm_cross/mut_param_alias_in_place_mutators.almd
@@ -570,7 +570,7 @@
 23	11	19880	23	spec/wasm_cross/mut_param_loop_stays_in_place.almd
 78	43	824	78	spec/wasm_cross/mut_param_move_mode_gaps.almd
 182	93	1818	182	spec/wasm_cross/mut_param_nested_place_writeback.almd
-378	299	3651	378	spec/wasm_cross/mut_param_reassign_from_hof.almd
+378	299	3655	378	spec/wasm_cross/mut_param_reassign_from_hof.almd
 2	0	32	2	spec/wasm_cross/mut_param_spread_reassign.almd
 26	12	8304	26	spec/wasm_cross/mut_param_tail_recursion.almd
 13	3	327	13	spec/wasm_cross/mut_param_writeback_growth.almd
@@ -928,7 +928,7 @@
 25750	25659	405100	25750	spec/wasm_cross/variant_result_credit_shapes.almd
 1638000	1629810	104832000	1638000	spec/wasm_cross/variant_result_one_credit_churn.almd
 0	0	0	0	spec/wasm_cross/while_loops.almd
-12	6	70	12	spec/wasm_cross/whilep_str.almd
+11	5	62	11	spec/wasm_cross/whilep_str.almd
 140	0	1120	140	spec/wasm_cross/wide_function_body.almd
 91	59	978	91	spec/wasm_cross/witness_straightline.almd
 15	1	643	15	spec/wasm_cross/zip_view_shape.almd
