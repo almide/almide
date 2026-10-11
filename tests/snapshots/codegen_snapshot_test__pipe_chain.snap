@@ -384,6 +384,10 @@ pub fn almide_rt_list_find_owned<A: Clone>(mut xs: Vec<A>, f: std::rc::Rc<dyn Fn
 pub fn almide_rt_list_slice_owned<T>(mut xs: Vec<T>, start: i64, end: i64) -> Vec<T> { let s = start as usize; let e = (end as usize).min(xs.len()); if s >= e { return Vec::new(); } xs.truncate(e); xs.drain(..s); xs }
 pub fn almide_rt_list_take_end_owned<T>(mut xs: Vec<T>, n: i64) -> Vec<T> { let start = if n as usize >= xs.len() { 0 } else { xs.len() - n as usize }; xs.drain(..start); xs }
 pub fn almide_rt_list_drop_end_owned<T>(mut xs: Vec<T>, n: i64) -> Vec<T> { let end = if n as usize >= xs.len() { 0 } else { xs.len() - n as usize }; xs.truncate(end); xs }
+// The point writes (#3533): `xs = list.set(xs, i, v)` wrote into a copy of the
+// whole list every step; the twin writes into the source it owns.
+pub fn almide_rt_list_set_owned<T>(mut xs: Vec<T>, i: i64, x: T) -> Vec<T> { if let Some(s) = xs.get_mut(i as usize) { *s = x; } xs }
+pub fn almide_rt_list_swap_owned<T>(mut xs: Vec<T>, i: i64, j: i64) -> Vec<T> { let (a, b) = (i as usize, j as usize); if a < xs.len() && b < xs.len() { xs.swap(a, b); } xs }
 // Keep the FIRST element of each distinct key, in first-occurrence order.
 // The key bound is `PartialEq` (not `Eq + Hash`) so a record, variant, tuple,
 // Option or Float key dedups exactly as the wasm leg's generic-equality scan
