@@ -173,8 +173,12 @@ fn http_get_bytes_bang_binding_is_glued_into_the_rc_cow_shape() {
         .lines()
         .find(|l| l.trim_start().starts_with("let ") && l.contains("almide_http_get_bytes("))
         .unwrap_or_else(|| panic!("no binding line calls almide_http_get_bytes:\n{rust}"));
+    // The glue names its value type since the generic-producer fix
+    // (`AlmideRcCow::<Vec<u8>>::from(..)`); the bare spelling is the same glue.
     assert!(
-        bind.contains("AlmideRcCow::from") || bind.contains("AlmideRcCow::new"),
+        bind.contains("AlmideRcCow::from")
+            || bind.contains("AlmideRcCow::<Vec<u8>>::from")
+            || bind.contains("AlmideRcCow::new"),
         "the `?`-unwrapped Vec<u8> must be glued into the AlmideRcCow binding (#2497), got:\n{bind}"
     );
 }
