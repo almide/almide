@@ -172,6 +172,9 @@ fn reads_once_plainly(value: &IrExpr, var: VarId) -> bool {
 }
 
 /// `Clone(Var x)` → `Var x` (the single occurrence `reads_once_plainly` found).
+/// The source of a runtime op with an owned twin is kept as `&x` rather than
+/// cloned when it is not the last use; that borrow becomes `x` too, so
+/// `x = list.swap(x, i, j)` calls the twin and writes in place (#3533).
 fn strip_var_clone(e: &mut IrExpr, var: VarId) {
     use almide_ir::visit_mut::{IrMutVisitor, walk_expr_mut};
     struct Strip(VarId);
@@ -182,6 +185,15 @@ fn strip_var_clone(e: &mut IrExpr, var: VarId) {
             {
                 e.kind = IrExprKind::Var { id: self.0 };
                 return;
+            }
+            if let IrExprKind::RuntimeCall { symbol, args } = &mut e.kind
+                && crate::owned_source::takes_source_either_way(symbol.as_str())
+                && let Some(src) = args.first_mut()
+                && crate::owned_source::borrowed_var(src) == Some(self.0)
+                && let IrExprKind::Borrow { expr, .. } = &mut src.kind
+            {
+                let var = std::mem::replace(&mut **expr, IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None });
+                *src = var;
             }
             walk_expr_mut(self, e);
         }

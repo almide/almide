@@ -51,7 +51,7 @@ use crate::*;
 /// unread and shares as before.
 fn consumed_read(value: &IrExpr) -> Option<&IrExpr> {
     let read = match &value.kind {
-        _ if let Some(source) = reused_source(value) => source,
+        _ if let Some(source) = reuse_root(value) => source,
         IrExprKind::SpreadRecord { base, .. } => base.as_ref(),
         // #3530: a one-element push onto the var, at either end.
         _ => return crate::concat_dying::concat_read(value),
@@ -69,6 +69,22 @@ fn reused_source(value: &IrExpr) -> Option<&IrExpr> {
         return None;
     }
     args.get(r.param)
+}
+
+/// The var at the bottom of a chain of `@reuse` sources — `x` in
+/// `list.drop_end(list.swap(x, 0, 1), 1)` — whose read the innermost op may
+/// take. An outer op's other arguments are lowered after the inner op took
+/// the var's credit, so a chain where one of them reads the var has no root.
+fn reuse_root(value: &IrExpr) -> Option<&IrExpr> {
+    let src = reused_source(value)?;
+    if matches!(src.kind, IrExprKind::Var { .. }) {
+        return Some(src);
+    }
+    let root = reuse_root(src)?;
+    let IrExprKind::Var { id } = &root.kind else { return None };
+    let IrExprKind::Call { args, .. } = &value.kind else { return None };
+    let outer_reads = args.iter().any(|a| !std::ptr::eq(a, src) && crate::rc_ownership::rc_mentions_var(a, *id));
+    (!outer_reads).then_some(root)
 }
 
 /// An expression whose evaluation cannot trap, print or diverge — a
@@ -276,6 +292,31 @@ impl Emitter<'_> {
         }
     }
 
+    /// #3533: at a self tail call in loop form, an argument `f(p, …)` whose
+    /// callee is declared `@reuse` over `p` — a frame parameter no other
+    /// argument reads — is `p`'s last read, exactly as the rhs of
+    /// `p = f(p, …)` is. Noting it dying lets the op take `p`'s credit and
+    /// empty the local, so the loop-back's release of `p` is a release of
+    /// NULL. `on: false` withdraws whatever the lowering did not take.
+    pub(crate) fn note_tail_reuse_args(&mut self, args: &[IrExpr], on: bool) {
+        if self.metered {
+            return;
+        }
+        for (k, a) in args.iter().enumerate() {
+            let Some(read) = reuse_root(a) else { continue };
+            let IrExprKind::Var { id } = &read.kind else { continue };
+            let Some(&(idx, _)) = self.locals.get(id) else { continue };
+            if self.cells.contains(id) || !self.rc_frame_params.contains(&idx) {
+                continue;
+            }
+            let mut others = args.iter().enumerate().filter(|(k2, _)| *k2 != k);
+            if others.any(|(_, o)| crate::rc_ownership::rc_mentions_var(o, *id)) {
+                continue;
+            }
+            self.owned_call_marks.set_dying(read, on);
+        }
+    }
+
     /// The local of the var `read` names when the read was noted dying and
     /// the frame holds the var's credit in a plain local — consuming the
     /// note. `None`: the read shares as before.
@@ -298,7 +339,7 @@ impl Emitter<'_> {
     /// `Some(dying)` — the dying var whose local the op empties, if the
     /// receiver is one — or `None` when `m` is borrowed (the op copies). A
     /// dying var one of the op's other `operands` still reads is not moved.
-    fn owned_receiver(&mut self, m: &IrExpr, operands: &[&IrExpr]) -> Option<Option<(VarId, u32, SliceTy)>> {
+    pub(crate) fn owned_receiver(&mut self, m: &IrExpr, operands: &[&IrExpr]) -> Option<Option<(VarId, u32, SliceTy)>> {
         if self.metered {
             return None;
         }
