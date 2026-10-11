@@ -675,3 +675,53 @@ Builds compared: 0.62.0, 0.66.0 (release 819bbc74f) and develop 974c00ea0.
   - After: all three shapes are linear on wasm (n=200k: 0.031 s). Native stays at its ~0.3 s new-binary start-up floor.
   - `tests/set_build_in_place_test.rs`: 4.0 GB before, under 40 MB required. The full spec is green.
 - **Measurement pitfall:** a freshly built native binary on macOS spends ~0.3 s before `main` on its first runs. Native curves below ~0.5 s are therefore read as flat, not as timings.
+
+## 2026-10-12: the counted complexity judge, fan parallelism, and the first counted stamps
+
+### Counted complexity judge (owner ruling ○, 2026-10-11; PR #3568)
+- **Problem.** The timed judge (per-doubling wall-time ratios at n, 2n, 4n) failed `list.drop` because of cache-level steps: L2 between 200k and 400k, L3 between 2M and 4M.
+- **Reference.** rustc-perf uses `instructions:u` as its primary metric; Google Benchmark fits complexity classes (`oAuto`). Both are recorded in the ruling memo.
+- **Meters,** measured on GCE c4-standard-4 (INTEL XEON PLATINUM 8581C, PMU `architectural`, Ubuntu 24.04, Linux 7.0.0-1011-gcp, rustc 1.99.0, wasmtime 49.0.1):
+  - **Instructions:** `perf stat -e instructions:u` repeats to within 1 instruction (`/bin/true`: 135,023–135,024).
+  - **Bytes moved:** bulk copies retire as one instruction (`rep movsb`, and wasm `memory.copy` through glibc). Twenty `memory.copy` calls of 1 MB and of 16 MB both counted 6.27M instructions. An LD_PRELOAD shim counting memcpy / memmove / memset bytes read 21.6M / 84.5M / 336M for 1 / 4 / 16 MB, so the judge fits both meters and takes the dearer class. Raising glibc's rep thresholds was measured first and rejected: +0.57M instructions per 300 MB.
+- **Pitfalls found while validating, each fixed in the PR:**
+  - **wasmtime's compile cache:** a module's first run counted about 10× its later runs (41.7M against 4.46M). wasm runs now use `-C cache=n -C parallel-compilation=n`.
+  - **One-off costs read as order:** `(program at k) − (baseline at 0)` mixed in one-off costs; three rebind shapes read `log` from a one-off that grew with n. The series is now the marginal cost between k and 2k calls.
+  - **Element size grew with n:** map keys `"k${i}"` got longer with n, so `map.keys` / `map.entries` read `nlogn` in bytes. Keys and strings are now fixed width (`100000000 + i`), and `map.entries` reads `n` exactly (8.0e5 → 1.28e7 bytes).
+  - **Fits that explain nothing:** a series that no class fits within 3% is refused, not given its best-fit class.
+  - **Native-only functions:** the synthesis catalogue called them, so wasm E081 build failures showed up as parity findings (`matrix.linear_q1_0_row_no_bias`). The catalogue now reads `proofs/target-availability.toml` and leaves out every `stock-p1` row.
+- **Smoke test** (ref insp-rab):
+  - `list.drop`: wasm instructions read O(1) and bytes moved read n. With the instruction meter alone it would have passed as O(1).
+  - `set.from_list`: n² on wasm on both meters (#3552, the fix not yet on that ref).
+  - `list.take`: O(1).
+
+### fan runs in parallel on native (#2044, PR #3569, MERGED)
+- String and List / Set / Map / Result values of Send-safe types go to `map_par`. Bytes and Matrix are `AlmideRcCow` (an `Rc`) on native and stay sequential.
+- The routing tests in `tests/nanopass_test.rs` asserted the old conservative rule. They now assert parallel for String / List, and keep the sequential guard on Bytes, Matrix and `List[Bytes]` captures and on Bytes results.
+- `tests/fan_heap_parallel_test.rs` checks that parallel = sequential = wasm.
+
+### Other landings and open PRs
+- MERGED:
+  - #3563: TCO for every return type (#3549), and the v1 wall for a self tail call with a heap argument (#3550).
+  - #3562: harness Set / Matrix values.
+  - #3566: lossy byte readers on wasm (#3565).
+- #3573: regenerates develop's ledgers. #3566 regenerated before its embedded-table commit, so develop's committed allocation baseline measured the old self-host: `bytes_string_window_domain` 51 allocs committed, 58 measured. Every queued PR would fail `alloc_ledger` until this lands.
+- #3570 (#3555, Bytes / Matrix fold accumulator) and #3571 (typed `AlmideRcCow` wrap of a runtime result) were replayed after conflicts. They need another replay once #3573 lands.
+- `reuse-attr-c` (the @reuse attribute work, replayed onto develop, no PR yet) also carries wasm `list.take_while`, now built by scanning the prefix length and doing one `memory.copy`:
+  - 1000 Ints in, 900 out: 10 allocs / 24,120 bytes before, 2 / 15,200 after. `tests/list_take_while_single_copy_test.rs` fails on the old lowering.
+  - Regenerated ledger: `mut_param_reassign_from_hof` allocates **4 bytes more** with the same allocation count, and `whilep_str` / `mut_list_param_read_by_range_ops` allocate less.
+
+### Inspection progress
+- PR #3572 stamps 96 functions measured under the counted judge (ref `fix-3555-c` 67e7c0668 = develop facd52d78 + the #3555 fix). Inspected 210 → 306, uninspected 821 → 725.
+  - `bytes.read_string_at` passed but is not stamped: its self-host file changed in #3566 after the measurement.
+- GCE quota limits: C4 family 24 CPUs per region; 8 in-use addresses in asia-northeast1; **32 CPUs globally (8 × c4-standard-4)**. Batch 3b ran on 5 VMs; 7 shards failed creation and were re-queued across us-central1 / us-east1. Raising the quota is a billing change and was not requested.
+- **Not stampable yet** (reported, not counted):
+  - 45 batch-3b functions that failed on harness eed8c455a (39 parity, 6 complexity). Most parity findings are the E081 generator defect; they are re-queued on the fixed harness.
+  - The 10 @reuse functions on `reuse-attr-c`: parity found the #3555 Bytes-fold native build failure, because that ref lacks #3570. They are re-queued on `insp-rac` (= reuse-attr-c + #3555).
+
+### Next
+1. #3573 lands.
+2. Replay #3570 / #3571.
+3. Stamp the re-queued batches.
+4. Open the `reuse-attr-c` PR once its 10 functions are stamped, then #3533's edit-site PR and #3552's set build.
+5. Wasm `read_string_at` could decode straight from its window and drop the extra allocation per read.
