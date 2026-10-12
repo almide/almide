@@ -406,21 +406,22 @@ fn alloc(ctx: &Ctx, t: &Target, n: u64) -> String {
         }
         let out = Command::new(&ctx.almide).arg("run").arg(&file).args(["--target", "wasm"]).env("ALMIDE_WASM_ALLOC_COUNT", "1").output();
         let Ok(out) = out else { return "SKIP: could not run almide".into() };
-        let err = String::from_utf8_lossy(&out.stderr);
-        let live = err.lines().find_map(|l| l.split_whitespace().find_map(|w| w.strip_prefix("live=")).map(String::from));
-        match live.as_deref() {
-            Some("0") => parts.push(format!("{label} live=0")),
-            Some(v) => {
-                ok = false;
-                parts.push(format!("{label} live={v}"))
-            }
-            None => {
-                ok = false;
-                parts.push(format!("{label} no count ({})", first_error(&out.stderr)))
-            }
-        }
+        let (pass, part) = alloc_part(label, &out);
+        ok &= pass;
+        parts.push(part);
     }
     format!("{}: {}", if ok { "PASS" } else { "FAIL" }, parts.join(", "))
+}
+
+/// One alloc probe's verdict from its `almide run` output: `live=0` passes.
+fn alloc_part(label: &str, out: &std::process::Output) -> (bool, String) {
+    let err = String::from_utf8_lossy(&out.stderr);
+    let live = err.lines().find_map(|l| l.split_whitespace().find_map(|w| w.strip_prefix("live=")).map(String::from));
+    match live.as_deref() {
+        Some("0") => (true, format!("{label} live=0")),
+        Some(v) => (false, format!("{label} live={v}")),
+        None => (false, format!("{label} no count ({})", first_error(&out.stderr))),
+    }
 }
 
 /// Criterion 5: the three lines (direct, via left, via right) agree, and the
@@ -441,6 +442,11 @@ fn diamond(ctx: &Ctx, t: &Target, n: u64) -> String {
         c.output()
     };
     let (Ok(nat), Ok(was)) = (run(false), run(true)) else { return "SKIP: could not run almide".into() };
+    diamond_verdict(&nat, &was)
+}
+
+/// Criterion 5's verdict from the diamond project's run on each leg.
+fn diamond_verdict(nat: &std::process::Output, was: &std::process::Output) -> String {
     if !nat.status.success() || !was.status.success() {
         return format!("FAIL: native exit {:?} ({}), wasm exit {:?} ({})", nat.status.code(), first_error(&nat.stderr), was.status.code(), first_error(&was.stderr));
     }
@@ -783,6 +789,33 @@ fn icount_available() -> bool {
         && parse_instructions(&std::fs::read_to_string(&stat).unwrap_or_default()).is_some_and(|c| c > 0);
     let _ = std::fs::remove_dir_all(&dir);
     ok
+}
+
+#[cfg(test)]
+mod verdict_tests {
+    use super::*;
+    use std::os::unix::process::ExitStatusExt;
+
+    fn output(code: i32, stdout: &str, stderr: &str) -> std::process::Output {
+        std::process::Output {
+            status: std::process::ExitStatus::from_raw(code << 8),
+            stdout: stdout.as_bytes().to_vec(),
+            stderr: stderr.as_bytes().to_vec(),
+        }
+    }
+
+    /// #3636: a probe that exited non-zero is a failed run, not a leak count:
+    /// the allocator's exit report is printed whatever the exit, and a
+    /// `live=` read off an aborted run counts blocks the abort left behind.
+    #[test]
+    fn alloc_reports_the_exit_of_a_failed_run_not_its_live_count() {
+        let (ok, part) = alloc_part("call", &output(1, "", "error: matrix shape mismatch\nalloc: live=3 peak=9\n"));
+        assert!(!ok);
+        assert!(!part.contains("live="), "{part}");
+        assert!(part.contains("exit Some(1)") && part.contains("matrix shape mismatch"), "{part}");
+        assert_eq!(alloc_part("call", &output(0, "1\n", "alloc: live=0 peak=9\n")), (true, "call live=0".to_string()));
+        assert_eq!(alloc_part("loop", &output(0, "1\n", "alloc: live=2 peak=9\n")), (false, "loop live=2".to_string()));
+    }
 }
 
 #[cfg(test)]
