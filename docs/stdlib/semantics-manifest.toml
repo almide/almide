@@ -2855,6 +2855,19 @@ tcp_connect to 8792 succeeds — the Int is the port actually bound.
 """
 
 [[net.fn]]
+name = "tcp_local_port"
+index_unit = "port"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability). The Int PARAMETER is a LISTENER
+handle; the Ok Int is a TCP port. Measured natively by
+tests/net_tcp_native_core_test.rs (2026-10-13): a listener bound to port 0
+reports a port above 0, and a connect to that port reaches it — the port the
+OS chose, the one a program passes to tcp_connect.
+"""
+
+[[net.fn]]
 name = "tcp_accept"
 index_unit = "handle"
 probe = "1"
