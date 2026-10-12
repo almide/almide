@@ -1023,13 +1023,20 @@ fn render_runtime_call_arg_owned(ctx: &RenderContext, symbol: &almide_base::inte
     {
         return format!("(&*{})", render_expr(ctx, inner));
     }
-    let r = render_expr_owned(ctx, a);
     // #617: a concrete container-of-raw runtime param cannot deref-coerce
     // through AlmideRcCow ELEMENTS — clone them out at this (rare) boundary. The
     // closure param is EXPLICITLY typed: the producer side may itself be
     // result glue ending in `collect::<Vec<_>>()`, whose `_` only resolves
-    // from this consumer.
+    // from this consumer. The param is a slice, so the collected Vec is
+    // borrowed here whatever the argument's own shape: a local arrives as
+    // a `Borrow` (whose `&` would otherwise bind to the chain by accident), a
+    // fn parameter does not (#3638).
     if rc_cow_arg_needs_raw_elems(symbol.as_str()) && rc_cow_needs_glue(&a.ty) {
+        let src = match &a.kind {
+            IrExprKind::Borrow { expr: inner, as_str: false, .. } => inner.as_ref(),
+            _ => a,
+        };
+        let s = render_expr(ctx, src);
         let elem = match &a.ty {
             Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, es)
                 if es.len() == 1 =>
@@ -1038,9 +1045,9 @@ fn render_runtime_call_arg_owned(ctx: &RenderContext, symbol: &almide_base::inte
             }
             _ => "_".to_string(),
         };
-        format!("{r}.iter().map(|__e: &{elem}| (**__e).clone()).collect::<Vec<_>>()")
+        format!("&({s}).iter().map(|__e: &{elem}| (**__e).clone()).collect::<Vec<_>>()")
     } else {
-        r
+        render_expr_owned(ctx, a)
     }
 }
 
