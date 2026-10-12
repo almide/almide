@@ -621,11 +621,21 @@ pub fn almide_rt_bytes_append_i32_be(b: &mut Vec<u8>, val: i64) {
 pub fn almide_rt_bytes_append_i64_be(b: &mut Vec<u8>, val: i64) {
     b.extend_from_slice(&val.to_be_bytes());
 }
+// The `append_f*` family is a NaN observation boundary (C-210): a NaN writes
+// the one canonical pattern, as `float.to_bits` reads it, never its raw
+// sign/payload bits (#3647: x86 arithmetic sets the NaN sign where aarch64 does
+// not, and `int.bits_to_float` smuggles any payload).
+fn canonical_f64(val: f64) -> f64 {
+    if val.is_nan() { f64::from_bits(0x7FF8_0000_0000_0000) } else { val }
+}
+fn canonical_f32(val: f64) -> f32 {
+    if val.is_nan() { f32::from_bits(0x7FC0_0000) } else { val as f32 }
+}
 pub fn almide_rt_bytes_append_f32_be(b: &mut Vec<u8>, val: f64) {
-    b.extend_from_slice(&(val as f32).to_be_bytes());
+    b.extend_from_slice(&canonical_f32(val).to_be_bytes());
 }
 pub fn almide_rt_bytes_append_f64_be(b: &mut Vec<u8>, val: f64) {
-    b.extend_from_slice(&val.to_be_bytes());
+    b.extend_from_slice(&canonical_f64(val).to_be_bytes());
 }
 
 // ── Big-endian bulk readers ──
@@ -948,11 +958,11 @@ pub fn almide_rt_bytes_heap_save() -> i64 { 0 }
 pub fn almide_rt_bytes_heap_restore(_checkpoint: i64) {}
 
 pub fn almide_rt_bytes_append_f64_le(b: &mut Vec<u8>, val: f64) {
-    b.extend_from_slice(&val.to_le_bytes());
+    b.extend_from_slice(&canonical_f64(val).to_le_bytes());
 }
 
 pub fn almide_rt_bytes_append_f32_le(b: &mut Vec<u8>, val: f64) {
-    b.extend_from_slice(&(val as f32).to_le_bytes());
+    b.extend_from_slice(&canonical_f32(val).to_le_bytes());
 }
 
 pub fn almide_rt_bytes_append_u8(b: &mut Vec<u8>, val: i64) {
@@ -1042,10 +1052,15 @@ pub fn almide_rt_bytes_write_int32(b: &mut Vec<u8>, value: i32, e: AlmideEndian)
         AlmideEndian::BigEndian => almide_rt_bytes_append_i32_be(b, value as i64),
     }
 }
+// Writes the NaN bits raw, as before and as the wasm leg does — C-210 does not
+// name `write_float32` an observation boundary, so it keeps its own write
+// rather than the canonicalizing `append_f32_*` (#3647). The f64 round trip is
+// the historical write, kept bit for bit.
 pub fn almide_rt_bytes_write_float32(b: &mut Vec<u8>, value: f32, e: AlmideEndian) {
+    let raw = (value as f64) as f32;
     match e {
-        AlmideEndian::LittleEndian => almide_rt_bytes_append_f32_le(b, value as f64),
-        AlmideEndian::BigEndian => almide_rt_bytes_append_f32_be(b, value as f64),
+        AlmideEndian::LittleEndian => b.extend_from_slice(&raw.to_le_bytes()),
+        AlmideEndian::BigEndian => b.extend_from_slice(&raw.to_be_bytes()),
     }
 }
 
