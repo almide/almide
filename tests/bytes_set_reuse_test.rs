@@ -2,8 +2,9 @@
 //! the rhs of `b = bytes.set(b, …)`, a fold's accumulator, a self tail call's
 //! argument — is written in place on both legs instead of copied whole on
 //! every step. Native calls the owned twin `almide_rt_bytes_set_owned` with the
-//! binding's buffer (`AlmideRcCow::into_inner`: moved when it is the only
-//! holder, copied when shared); wasm hands the dying block to `$cow`.
+//! binding moved in (the twin takes `impl Into<Vec<u8>>`: the wrapper hands
+//! its buffer over, moved when it is the only holder, copied when shared), and
+//! a temporary source goes in as is; wasm hands the dying block to `$cow`.
 //!
 //! VALUES: the shapes that must still copy — a source shared with another
 //! binding, captured by a closure, held in a container, read again by another
@@ -130,7 +131,7 @@ fn native_bytes_set_rebind_calls_the_owned_twin() {
         .expect("emit");
     let rust = String::from_utf8_lossy(&out.stdout);
     assert!(
-        rust.contains("almide_rt_bytes_set_owned(AlmideRcCow::into_inner(g)"),
+        rust.contains("almide_rt_bytes_set_owned(g, "),
         "the loop rebind should hand its buffer to the owned twin"
     );
 }
