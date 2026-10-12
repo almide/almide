@@ -252,6 +252,30 @@ impl Emitter<'_> {
         Ok(true)
     }
 
+    /// #3639: `string.push(b.text, x)` is the field window's
+    /// `b.text = b.text + x` — the same place, the same admission (the
+    /// pushed operand must not read the root), the same in-place append.
+    /// The receiver is the window's head and `x` its appended operand, both
+    /// the call's own nodes. `false` = not admitted; the caller keeps the
+    /// copy-on-write field write.
+    pub(crate) fn try_field_push_str(&mut self, recv: &IrExpr, x: &IrExpr) -> Result<bool, EmitError> {
+        let Some((target, path)) = crate::list_mut::record_field_receiver(recv) else {
+            return Ok(false);
+        };
+        let Some(place) = self.field_append_place(&target, &path) else {
+            return Ok(false);
+        };
+        if place.leaf.0 != STR || almide_ir::free_vars::free_vars(x, &Default::default()).contains(&target) {
+            return Ok(false);
+        }
+        self.emit_field_append(&target, recv, &place, Appended::Str(x))?;
+        // The window lowered `x` itself (its own sites recorded the operand's
+        // birth and release), not through `lower_arg`: name it to the
+        // module-call audit as the arm's own argument.
+        self.witness_inline_arg(x);
+        Ok(true)
+    }
+
     /// The place `target.path` when the field window may write it: a plain
     /// droppable record local, every inner step a record (each one judged
     /// unique by `make_mut_place_unique`), the leaf a String or a List.
