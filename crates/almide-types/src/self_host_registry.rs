@@ -15,8 +15,16 @@
 //! It lives here, beside `crate::embedded`'s sources, because the mapping is a
 //! property of the stdlib itself, not of any one backend.
 
-pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, &'static str)])] {
-    &[
+/// One registry row: an embedded source and its (impl fn, call name) pairs.
+pub type SelfHostRow = (&'static str, &'static [(&'static str, &'static str)]);
+
+/// The rows below, then the bodies that declare themselves with
+/// `@implements("m.f")` (`crate::implements`, #3620). A new self-hosted body
+/// is registered by that declaration; the table below is the pre-declaration
+/// registry, held to shrinking by tests/name_keyed_sites_test.rs.
+pub fn self_host_runtime() -> &'static [SelfHostRow] {
+    static ALL: std::sync::OnceLock<Vec<SelfHostRow>> = std::sync::OnceLock::new();
+    ALL.get_or_init(|| with_declared(&[
         (crate::embedded::SRC_INT_TO_STRING, &[("int_to_string", "int.to_string")]),
         (crate::embedded::SRC_RANDOM_INT, &[("random_int", "random.int")]),
         (crate::embedded::SRC_RANDOM_FLOAT, &[("random_float", "random.float")]),
@@ -304,7 +312,6 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         (crate::embedded::SRC_RESULT_COLLECT, &[("result_partition", "result.partition")]),
         (crate::embedded::SRC_VALUE_UTILS, &[("value_pick", "value.pick"), ("value_omit", "value.omit"), ("value_to_camel_case", "value.to_camel_case"), ("value_to_snake_case", "value.to_snake_case")]),
         (crate::embedded::SRC_HTTP_URL_DECODE, &[("http_url_decode", "http.url_decode"), ("http_query_params", "http.query_params")]),
-        (crate::embedded::SRC_HTTP_FRAMED, &[("__request_impl", "http.request"), ("__request_status_impl", "http.request_status"), ("__get_status_impl", "http.get_status"), ("__request_bytes_impl", "http.request_bytes"), ("__get_bytes_impl", "http.get_bytes")]),
         // The http call handle (#2633): `__call_start` / `__request_stream_limited` are
         // http.almd's private leaves (bare dunder demand keys, the codec-splice
         // convention); poll / read_new / wait / cancel are its public intrinsics.
@@ -825,7 +832,11 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
                 ("string_last_index_of", "string.last_index_of"),
             ],
         ),
-    ]
+    ]))
+}
+
+fn with_declared(legacy: &[SelfHostRow]) -> Vec<SelfHostRow> {
+    legacy.iter().chain(crate::implements::DECLARED).copied().collect()
 }
 
 include!("self_host_fn_tables.rs");

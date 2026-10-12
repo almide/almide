@@ -13,6 +13,21 @@ pub mod dialect;
 pub mod types;
 pub mod stdlib_info;
 pub mod self_host_registry;
+
+/// The stdlib's `@implements("m.f")` declarations (#3620): the self-hosted
+/// bodies that name the stdlib function they implement, generated from the
+/// sources (`buildscript/implements.rs`) and committed (#3361).
+/// `self_host_registry::self_host_runtime()` serves `DECLARED` beside its
+/// hand-written table; `PRIM_FREE` names the declared bodies whose file never
+/// reaches `prim.`, which the wasm emitter admits without a list entry.
+pub mod implements {
+    include!("generated/implements.rs");
+
+    /// Is `impl_fn` a declared body whose file never reaches `prim.`?
+    pub fn prim_free(impl_fn: &str) -> bool {
+        PRIM_FREE.contains(&impl_fn)
+    }
+}
 pub mod time_units;
 pub mod fallible_hofs;
 
