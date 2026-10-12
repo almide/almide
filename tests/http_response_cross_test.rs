@@ -5,7 +5,10 @@
 //! the lowercased header set (`headers`) and the body — for a 200, a 404 and
 //! an unfollowed 302, and the same err text for a closed port. That is C-328's
 //! p3 comparison: the header SET, lowercased, since wasi:http fields need not
-//! keep the wire spelling or the order across names.
+//! keep the wire spelling or the order across names. The set leaves out the
+//! fields the client manages (C-370's nine): a stock wasi:http host withholds
+//! them from a response from wasmtime 49 on, so every lane drops them, and the
+//! `/ok` reply carries `Keep-Alive` beside `Connection` to show it.
 //!
 //! The server is a loopback listener with canned replies, so no network is
 //! needed. The embedded lane gets the family at ADR-0023 step 7.
@@ -55,7 +58,7 @@ fn reply(first: &str, body: &str, x_echo: &str) -> Vec<u8> {
     let path = first.split_whitespace().nth(1).unwrap_or("/");
     let method = first.split_whitespace().next().unwrap_or("");
     let (status, extra, payload) = match path {
-        "/ok" => ("200 OK", "X-A: 1\r\nSet-Cookie: a=1\r\nset-cookie: b=2\r\nX-Multi: v\r\n", "héllo\nworld".to_string()),
+        "/ok" => ("200 OK", "X-A: 1\r\nSet-Cookie: a=1\r\nset-cookie: b=2\r\nX-Multi: v\r\nKeep-Alive: timeout=5\r\n", "héllo\nworld".to_string()),
         "/missing" => ("404 Not Found", "X-Why: gone\r\n", "nope".to_string()),
         "/redir" => ("302 Found", "Location: /ok\r\n", String::new()),
         _ => ("200 OK", "", format!("{method}|{body}|{x_echo}")),
@@ -178,11 +181,11 @@ fn the_full_response_family_reads_the_same_on_native_and_the_p3_component() {
     assert_eq!(native.2, Some(0), "native failed: {}", native.1);
     // The native answer is the reference; pin its shape so a native change
     // cannot pass by moving both legs.
-    assert!(native.0.contains("get 200 a=1 loc=- cookies=a=1,b=2 "), "{}", native.0);
+    assert!(native.0.contains("get 200 a=1 loc=- cookies=a=1,b=2 keys=content-length,set-cookie,x-a,x-multi "), "{}", native.0);
     assert!(native.0.contains("redir 302 a=- loc=/ok "), "{}", native.0);
     assert!(native.0.contains("request 200 ") && native.0.contains("body=[OPTIONS|r-body|λ v]"), "{}", native.0);
     assert!(native.0.contains("closed err: "), "{}", native.0);
-    assert!(native.0.contains("patch 200 a=- loc=- cookies= keys=connection,content-length body=[PATCH||]"), "{}", native.0);
+    assert!(native.0.contains("patch 200 a=- loc=- cookies= keys=content-length body=[PATCH||]"), "{}", native.0);
     assert!(native.0.contains("plain-patch [PATCH||]"), "{}", native.0);
     let p3 = p3(&file, dir.path());
     assert_eq!((&p3.0, p3.2), (&native.0, native.2), "the p3 component diverged: {}", p3.1);
