@@ -403,9 +403,14 @@ pub fn almide_rt_matrix_mul(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMatrix 
     // over Almide's tiled-scalar, used where BLAS isn't linked: wasm, etc.).
     // Either way it's the fastest available — BLAS for dense, almide-kernel for
     // BLAS's blind spots (quant/fused/attention/data-movement).
+    // #3651: a 0-row operand's stored width is unobservable (`shape` and `cols`
+    // report 0), so the kernel reads the observable width too. Its own
+    // `mk(0, n)` result kept `cols = n`, and that hidden width then failed the
+    // inner-dimension check below as a right operand — C-278 exempts empty
+    // operands on every entry, and the wasm leg answered r×0.
     let m = a.rows;
-    let k = a.cols;
-    let n = b.cols;
+    let k = if m == 0 { 0 } else { a.cols };
+    let n = if b.rows == 0 { 0 } else { b.cols };
     if m == 0 || k == 0 || n == 0 {
         return mk(m, n, vec![0.0f64; m * n]);
     }
