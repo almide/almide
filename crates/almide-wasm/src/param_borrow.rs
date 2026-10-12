@@ -101,6 +101,7 @@ pub(crate) fn infer(
             scan.visit_expr(&f.body);
             scan.tail_fresh(&f.body);
             scan.tail_spread_base(&f.body);
+            scan.dying_var_rebinds(&f.body);
             let Scan { mark, cross, .. } = scan;
             for k in mark {
                 if crate::rc_ownership::rc_droppable_ty(types, table.infos[i].params[k])
@@ -190,6 +191,19 @@ impl Scan<'_> {
         {
             self.mark.push(k);
         }
+    }
+
+    /// #3661: a param whose last read is a `var` rebind is CONSUMED there —
+    /// the var takes its credit (rebind_move.rs) and writes the block in
+    /// place, which a borrowed block (the caller's) never is.
+    fn dying_var_rebinds(&mut self, body: &IrExpr) {
+        let mut found = Vec::new();
+        crate::rebind_move::dying_rebinds(body, |read, m| {
+            if m == almide_ir::Mutability::Var {
+                found.extend(self.param_of(read));
+            }
+        });
+        self.mark.extend(found);
     }
 
     /// May this argument reach a BORROWED param from a true tail site? The

@@ -246,6 +246,8 @@ impl Emitter<'_> {
         let Some(&(idx, declared)) = self.locals.get(var) else {
             return unsup("bind:unmapped");
         };
+        // #3661: a source that dies here hands its credit over (rebind_move.rs).
+        let moved = if self.cells.contains(var) { None } else { self.take_rebind_move(value, declared) };
         self.lower(value, Some(declared))?;
         // RC-5: Lists and Bytes SHARE at bind — the COW judge at every
         // in-place mutation entry moved the value-semantics copy from
@@ -259,7 +261,7 @@ impl Emitter<'_> {
         // in-place `map.set` window judges `rc == 1` exactly, and every
         // other mutation is a functional rebind — the bind-time copy
         // (which left a fresh rhs at rc 1 forever) is gone.
-        if self.rc_droppable(declared) && !self.rc_owned_result(value) {
+        if self.rc_droppable(declared) && !self.rc_owned_result(value) && moved.is_none() {
             self.rc_inc_top();
         }
         if self.cells.contains(var) {
@@ -293,11 +295,14 @@ impl Emitter<'_> {
                 let dec = self.dec_fn_of(declared);
                 self.f.instructions().local_get(idx).call(dec);
                 self.rc_own(idx, declared);
-                if self.witness.is_some() {
+                if self.witness.is_some() && moved.is_none() {
                     self.witness_bind(idx, declared, value);
                 }
             }
             self.f.instructions().local_set(idx);
+            if let Some((_, src)) = moved {
+                self.empty_rebound(idx, src);
+            }
         }
         Ok(())
     }

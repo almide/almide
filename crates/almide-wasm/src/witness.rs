@@ -285,6 +285,19 @@ impl WitnessRecorder {
         true
     }
 
+    /// A bind that takes over the object of a source dying there (#3661,
+    /// rebind_move.rs): no share; `src` is emptied right after.
+    pub fn bind_moved(&mut self, local: u32, src: u32) -> bool {
+        if !self.bound.contains_key(&src) {
+            return false;
+        }
+        self.log(Ev::DecOld(local));
+        self.log(Ev::Alias { local, src, owner: true });
+        let d = self.loop_depth;
+        self.bound.insert(local, d);
+        true
+    }
+
     /// `local` was set to NULL (#3104): it holds nothing from here, so a
     /// later release through it is a release of NULL (skipped).
     pub fn empty_local(&mut self, local: u32) {
