@@ -2942,6 +2942,7 @@ evidence  = [
   { path = "spec/wasm_cross/line_endings_bare_cr.almd", class = "fixture" },
   { path = "tests/component_p3_fs_cross_test.rs", class = "fixture", name = "p3_component_fs_fixtures_match_native" },
   { path = "spec/wasm_cross/statement_after_tail_walker_bang.almd", class = "fixture" },
+  { path = "tests/fs_fold_lines_chunked_rc_acc_test.rs", name = "chunked_fold_over_rc_accumulators_matches_on_both_legs", class = "fixture" },
 ]
 [[contract]]
 id        = "C-221"
