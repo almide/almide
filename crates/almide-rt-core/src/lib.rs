@@ -21,3 +21,6 @@ pub mod http_server_core;
 /// The subprocess family (#2589, ADR-0025): `runtime/rs/src/process.rs`
 /// includes it, the embedded host serves `almide:process/spawn` with it.
 pub mod process_core;
+/// The tcp family (#3620): `runtime/rs/src/net.rs` includes it, the embedded
+/// host serves its net ops with it.
+pub mod net_core;

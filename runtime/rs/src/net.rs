@@ -4,214 +4,70 @@
 // NOTE: No top-level `use` for std::io / std::net — avoids duplicate
 // import errors when both `net` and `http` runtimes are linked.
 
-use std::cell::RefCell;
-#[allow(unused_imports)]
-use std::io::{Read as _, Write as _};
-use std::time::Duration;
+// The tcp family's bodies live in the shared core (#3620), which the embedded
+// wasm host links too — so a tcp call answers the same handle, bytes and err
+// text on native and on `almide run --target wasm`. Native keeps one table per
+// thread; the OS closes what is left at exit.
+include!("../../../crates/almide-rt-core/src/net_core.rs");
 
 thread_local! {
-    static ALMIDE_STREAMS: RefCell<Vec<Option<std::net::TcpStream>>> = RefCell::new(Vec::new());
-    static ALMIDE_LISTENERS: RefCell<Vec<Option<std::net::TcpListener>>> = RefCell::new(Vec::new());
+    static ALMIDE_NET: std::cell::RefCell<AlmideNetTables> = std::cell::RefCell::new(AlmideNetTables::default());
 }
 
-fn alloc_stream(s: std::net::TcpStream) -> i64 {
-    ALMIDE_STREAMS.with(|cell| {
-        let mut v = cell.borrow_mut();
-        // Reuse freed slots
-        for (i, slot) in v.iter_mut().enumerate() {
-            if slot.is_none() {
-                *slot = Some(s);
-                return i as i64;
-            }
-        }
-        let idx = v.len();
-        v.push(Some(s));
-        idx as i64
-    })
+fn almide_net<R>(f: impl FnOnce(&mut AlmideNetTables) -> R) -> R {
+    ALMIDE_NET.with(|t| f(&mut t.borrow_mut()))
 }
-
-fn alloc_listener(l: std::net::TcpListener) -> i64 {
-    ALMIDE_LISTENERS.with(|cell| {
-        let mut v = cell.borrow_mut();
-        for (i, slot) in v.iter_mut().enumerate() {
-            if slot.is_none() {
-                *slot = Some(l);
-                return i as i64;
-            }
-        }
-        let idx = v.len();
-        v.push(Some(l));
-        idx as i64
-    })
-}
-
-fn with_stream<F, R>(handle: i64, f: F) -> Result<R, String>
-where F: FnOnce(&mut std::net::TcpStream) -> Result<R, String>
-{
-    ALMIDE_STREAMS.with(|cell| {
-        let mut v = cell.borrow_mut();
-        let idx = handle as usize;
-        if idx >= v.len() {
-            return Err(format!("invalid TcpStream handle: {}", handle));
-        }
-        match v.get_mut(idx) {
-            Some(Some(stream)) => f(stream),
-            _ => Err(format!("TcpStream handle {} is closed", handle)),
-        }
-    })
-}
-
-// ── Connect ──
 
 pub fn almide_rt_net_tcp_connect(host: &str, port: i64) -> Result<i64, String> {
-    let addr = format!("{}:{}", host, port);
-    let stream = std::net::TcpStream::connect(&addr)
-        .map_err(|e| format!("tcp_connect({}): {}", addr, e))?;
-    Ok(alloc_stream(stream))
+    almide_net(|t| t.tcp_connect(host, port))
 }
 
-// ── Read / Write ──
-
 pub fn almide_rt_net_tcp_read(handle: i64, len: i64) -> Result<Vec<u8>, String> {
-    with_stream(handle, |stream| {
-        let mut buf = vec![0u8; len as usize];
-        let n = stream.read(&mut buf)
-            .map_err(|e| format!("tcp_read: {}", e))?;
-        buf.truncate(n);
-        Ok(buf)
-    })
+    almide_net(|t| t.tcp_read(handle, len))
 }
 
 pub fn almide_rt_net_tcp_write(handle: i64, data: &[u8]) -> Result<(), String> {
-    with_stream(handle, |stream| {
-        stream.write_all(data)
-            .map_err(|e| format!("tcp_write: {}", e))?;
-        stream.flush()
-            .map_err(|e| format!("tcp_write flush: {}", e))?;
-        Ok(())
-    })
+    almide_net(|t| t.tcp_write(handle, data))
 }
 
 pub fn almide_rt_net_tcp_read_exact(handle: i64, len: i64) -> Result<Vec<u8>, String> {
-    with_stream(handle, |stream| {
-        let mut buf = vec![0u8; len as usize];
-        stream.read_exact(&mut buf)
-            .map_err(|e| format!("tcp_read_exact: {}", e))?;
-        Ok(buf)
-    })
+    almide_net(|t| t.tcp_read_exact(handle, len))
 }
-
-// ── Close ──
 
 pub fn almide_rt_net_tcp_close(handle: i64) -> Result<(), String> {
-    ALMIDE_STREAMS.with(|cell| {
-        let mut v = cell.borrow_mut();
-        let idx = handle as usize;
-        if idx >= v.len() {
-            return Err(format!("invalid TcpStream handle: {}", handle));
-        }
-        if let Some(stream) = v[idx].take() {
-            let _ = stream.shutdown(std::net::Shutdown::Both);
-        }
-        Ok(())
-    })
+    almide_net(|t| t.tcp_close(handle))
 }
-
-// ── Status ──
 
 pub fn almide_rt_net_tcp_is_open(handle: i64) -> bool {
-    ALMIDE_STREAMS.with(|cell| {
-        let v = cell.borrow();
-        let idx = handle as usize;
-        idx < v.len() && v[idx].is_some()
-    })
+    almide_net(|t| t.tcp_is_open(handle))
 }
-
-// ── Timeout ──
 
 pub fn almide_rt_net_tcp_read_timeout(handle: i64, len: i64, timeout_ms: i64) -> Result<Vec<u8>, String> {
-    with_stream(handle, |stream| {
-        // A negative duration is an elapsed one (#2486, the env.sleep_ms rule):
-        // `timeout_ms as u64` made -1 into u64::MAX milliseconds, a read that
-        // never gave up. Clamped to 0 it takes the zero-duration refusal below.
-        stream.set_read_timeout(Some(Duration::from_millis(timeout_ms.max(0) as u64)))
-            .map_err(|e| format!("tcp_read_timeout: {}", e))?;
-        let mut buf = vec![0u8; len as usize];
-        let result = stream.read(&mut buf);
-        // Reset timeout
-        let _ = stream.set_read_timeout(None);
-        let n = result.map_err(|e| format!("tcp_read_timeout: {}", e))?;
-        buf.truncate(n);
-        Ok(buf)
-    })
+    almide_net(|t| t.tcp_read_timeout(handle, len, timeout_ms))
 }
-
-// ── Available bytes ──
 
 pub fn almide_rt_net_tcp_available(handle: i64) -> Result<i64, String> {
-    with_stream(handle, |stream| {
-        // Peek with a zero-length read isn't portable; use nonblocking peek
-        stream.set_nonblocking(true)
-            .map_err(|e| format!("tcp_available: {}", e))?;
-        let mut buf = [0u8; 65536];
-        let result = stream.peek(&mut buf);
-        let _ = stream.set_nonblocking(false);
-        match result {
-            Ok(n) => Ok(n as i64),
-            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => Ok(0),
-            Err(e) => Err(format!("tcp_available: {}", e)),
-        }
-    })
+    almide_net(|t| t.tcp_available(handle))
 }
 
-// ── Server ──
-
 pub fn almide_rt_net_tcp_listen(host: &str, port: i64) -> Result<i64, String> {
-    let addr = format!("{}:{}", host, port);
-    let listener = std::net::TcpListener::bind(&addr)
-        .map_err(|e| format!("tcp_listen({}): {}", addr, e))?;
-    Ok(alloc_listener(listener))
+    almide_net(|t| t.tcp_listen(host, port))
+}
+
+pub fn almide_rt_net_tcp_local_port(handle: i64) -> Result<i64, String> {
+    almide_net(|t| t.tcp_local_port(handle))
 }
 
 pub fn almide_rt_net_tcp_accept(handle: i64) -> Result<i64, String> {
-    ALMIDE_LISTENERS.with(|cell| {
-        let v = cell.borrow();
-        let idx = handle as usize;
-        if idx >= v.len() {
-            return Err(format!("invalid TcpListener handle: {}", handle));
-        }
-        match &v[idx] {
-            Some(listener) => {
-                let (stream, _addr) = listener.accept()
-                    .map_err(|e| format!("tcp_accept: {}", e))?;
-                Ok(alloc_stream(stream))
-            }
-            None => Err(format!("TcpListener handle {} is closed", handle)),
-        }
-    })
+    almide_net(|t| t.tcp_accept(handle))
 }
 
 pub fn almide_rt_net_tcp_close_listener(handle: i64) -> Result<(), String> {
-    ALMIDE_LISTENERS.with(|cell| {
-        let mut v = cell.borrow_mut();
-        let idx = handle as usize;
-        if idx >= v.len() {
-            return Err(format!("invalid TcpListener handle: {}", handle));
-        }
-        v[idx].take();
-        Ok(())
-    })
+    almide_net(|t| t.tcp_close_listener(handle))
 }
 
-// ── Set timeout ──
-
 pub fn almide_rt_net_tcp_set_timeout(handle: i64, timeout_ms: i64) -> Result<(), String> {
-    with_stream(handle, |stream| {
-        let dur = if timeout_ms <= 0 { None } else { Some(Duration::from_millis(timeout_ms as u64)) };
-        stream.set_read_timeout(dur).map_err(|e| format!("set_timeout: {}", e))?;
-        stream.set_write_timeout(dur).map_err(|e| format!("set_timeout: {}", e))?;
-        Ok(())
-    })
+    almide_net(|t| t.tcp_set_timeout(handle, timeout_ms))
 }
 
 // ══════════════════════════════════════════════════════════════════════════
