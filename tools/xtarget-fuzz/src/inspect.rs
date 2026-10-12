@@ -23,7 +23,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
-use crate::generator::{inspect_gen::Target, Engine, Family};
+use crate::generator::{
+    inspect_gen::{Target, ERR_PATH},
+    Engine, Family,
+};
 
 const NOISE_FLOOR: Duration = Duration::from_millis(60);
 const CALIBRATE_TARGET: Duration = Duration::from_millis(250);
@@ -371,9 +374,20 @@ fn run_artifact(ctx: &Ctx, art: &Path, leg: Leg) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
-/// Why a probe run failed: its exit and its first error line.
+/// Why a probe run failed: its exit and its first error line — or, when the
+/// program stopped because the probed call returned `err` ([`ERR_PATH`]),
+/// that it took the error path (#3666). Every verdict reads a failed run
+/// through this, so an error-path run is never timed, counted or matched.
 fn run_failure(out: &std::process::Output) -> String {
-    format!("exit {:?}: {}", out.status.code(), first_error(&out.stderr))
+    format!("exit {:?}: {}", out.status.code(), failure_reason(&out.stderr))
+}
+
+fn failure_reason(stderr: &[u8]) -> String {
+    let text = String::from_utf8_lossy(stderr);
+    match text.lines().find_map(|l| l.split_once(ERR_PATH).map(|(_, rest)| rest.trim_start_matches(':').trim())) {
+        Some(why) => format!("took the error path (the probed call returned err: {})", why.chars().take(160).collect::<String>()),
+        None => first_error(stderr),
+    }
 }
 
 /// The first `error` line of a failed run's stderr, else its first line: a
@@ -423,7 +437,7 @@ fn alloc(ctx: &Ctx, t: &Target, n: u64) -> String {
 /// reports its exit: blocks an abort left behind are not a leak (#3636).
 fn alloc_part(label: &str, out: &std::process::Output) -> (bool, String) {
     if !out.status.success() {
-        return (false, format!("{label} exit {:?} ({})", out.status.code(), first_error(&out.stderr)));
+        return (false, format!("{label} exit {:?} ({})", out.status.code(), failure_reason(&out.stderr)));
     }
     let err = String::from_utf8_lossy(&out.stderr);
     let live = err.lines().find_map(|l| l.split_whitespace().find_map(|w| w.strip_prefix("live=")).map(String::from));
@@ -460,7 +474,7 @@ fn diamond(ctx: &Ctx, t: &Target, n: u64) -> String {
 /// compare (#3636) — reported as a SKIP once both legs exited 0, never a PASS.
 fn diamond_verdict(prints: bool, nat: &std::process::Output, was: &std::process::Output) -> String {
     if !nat.status.success() || !was.status.success() {
-        return format!("FAIL: native exit {:?} ({}), wasm exit {:?} ({})", nat.status.code(), first_error(&nat.stderr), was.status.code(), first_error(&was.stderr));
+        return format!("FAIL: native exit {:?} ({}), wasm exit {:?} ({})", nat.status.code(), failure_reason(&nat.stderr), was.status.code(), failure_reason(&was.stderr));
     }
     if !prints {
         return "SKIP: nothing to compare — a Unit return and no mut parameter (the three calls ran to exit 0 on both legs)".into();
@@ -837,7 +851,6 @@ mod verdict_tests {
     /// the alloc probe and the diamond alike — never as a count or a match.
     #[test]
     fn a_run_that_took_the_error_path_is_reported_as_such() {
-        use crate::generator::inspect_gen::ERR_PATH;
         let stderr = format!("PANIC: {ERR_PATH}: invalid base64 character\nalloc: live=0 peak=9\n");
         let want = "took the error path (the probed call returned err: invalid base64 character)";
         assert_eq!(run_failure(&output(1, "", &stderr)), format!("exit Some(1): {want}"));
