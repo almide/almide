@@ -136,7 +136,7 @@ impl Target {
             let _ = writeln!(s, "  acc = acc + {}", digest("x", &self.ty(i).unwrap_or(GenType::Int)));
         }
         s.push_str("  println(\"${acc}\")\n}\n");
-        s
+        format!("{}{s}", super::catalogue::imports_for(&s))
     }
 
     /// Criterion 2, the use-shapes: `k` steps that rebind the return-typed
@@ -188,7 +188,13 @@ impl Target {
                 ),
             ),
         ];
-        programs.into_iter().map(|(label, src)| (label, format!("{consts}{src}"))).collect()
+        programs
+            .into_iter()
+            .map(|(label, src)| {
+                let body = format!("{consts}{src}");
+                (label, format!("{}{body}", super::catalogue::imports_for(&body)))
+            })
+            .collect()
     }
 
     /// Criterion 5: `base` wraps the call, `left` and `right` each import
@@ -209,9 +215,11 @@ impl Target {
             let _ = writeln!(main, "  {}", render_print(v, &self.ret));
         }
         main.push_str("}\n");
+        let main = format!("{}{main}", super::catalogue::imports_for(&main));
+        let base = wrap(&self.name);
         let files = vec![
             ("app/almide.toml".to_string(), "[package]\nname = \"app\"\nversion = \"0.1.0\"\n".to_string()),
-            ("app/src/base.almd".to_string(), wrap(&self.name)),
+            ("app/src/base.almd".to_string(), format!("{}{base}", super::catalogue::imports_for(&base))),
             ("app/src/left.almd".to_string(), format!("import self.base\n\n{}", wrap("base.call"))),
             ("app/src/right.almd".to_string(), format!("import self.base\n\n{}", wrap("base.call"))),
             ("app/src/main.almd".to_string(), main),
