@@ -1,0 +1,71 @@
+// net tcp failure texts (#3620): every failure is errno-free text from one
+// table, identical on native, the embedded lane and the stock WASI 0.3
+// component. Connect and listen read `<fn>(<host>:<port>): <class text>`,
+// the rest `<fn>: <class text>`, and the Almide-local texts (handles,
+// argument domains, an early EOF under read_exact) are decided before any
+// transport call. The OS-assigned port differs per run, so it is masked as
+// `<port>` before printing. Staged in one program on 127.0.0.1: an occupied
+// port (address in use) and a port whose listener was closed (connection
+// refused). No name lookup: a literal IP needs only the network grant.
+import net
+
+fn show_int(r: Result[Int, String]) -> String = match r {
+  ok(v) => "ok ${v}",
+  err(e) => "err ${e}",
+}
+
+fn show_masked(r: Result[Int, String], port: Int) -> String = match r {
+  ok(_) => "ok",
+  err(e) => "err ${string.replace(e, int.to_string(port), "<port>")}",
+}
+
+fn show_bytes(r: Result[Bytes, String]) -> String = match r {
+  ok(b) => "ok ${bytes.len(b)} [${bytes.to_string(b) ?? "<not utf-8>"}]",
+  err(e) => "err ${e}",
+}
+
+fn show_unit(r: Result[Unit, String]) -> String = match r {
+  ok(_) => "ok",
+  err(e) => "err ${e}",
+}
+
+effect fn main() -> Unit = {
+  // Handles that were never issued, and argument domains.
+  println(show_bytes(net.tcp_read(7, 1)))
+  println(show_bytes(net.tcp_read(-1, 1)))
+  println(show_unit(net.tcp_write(7, bytes.from_string("x"))))
+  println(show_unit(net.tcp_close(99)))
+  println(show_int(net.tcp_accept(5)))
+  println(show_unit(net.tcp_close_listener(99)))
+  println(show_int(net.tcp_local_port(5)))
+  println(show_int(net.tcp_connect("127.0.0.1", 70000)))
+  println(show_int(net.tcp_listen("127.0.0.1", -1)))
+  let l = net.tcp_listen("127.0.0.1", 0)!
+  let port = net.tcp_local_port(l)!
+  let c = net.tcp_connect("127.0.0.1", port)!
+  let s = net.tcp_accept(l)!
+  println("handles: listener=${l} client=${c} accepted=${s}")
+  println(show_bytes(net.tcp_read(c, -1)))
+  println(show_bytes(net.tcp_read_exact(c, -3)))
+  println(show_bytes(net.tcp_read_timeout(c, -2, 50)))
+  println(show_bytes(net.tcp_read_timeout(c, 4, 0)))
+  println(show_bytes(net.tcp_read_timeout(c, 4, -5)))
+  // An occupied port.
+  println(show_masked(net.tcp_listen("127.0.0.1", port), port))
+  // The peer closes after 3 of the 5 bytes read_exact waits for.
+  net.tcp_write(c, bytes.from_string("abc"))!
+  println("close client: ${show_unit(net.tcp_close(c))}")
+  println(show_bytes(net.tcp_read_exact(s, 5)))
+  // Closed stream handles.
+  println(show_bytes(net.tcp_read(c, 1)))
+  println(show_unit(net.tcp_write(c, bytes.from_string("x"))))
+  println(show_int(net.tcp_available(c)))
+  println(show_unit(net.tcp_set_timeout(c, 10)))
+  println("close accepted: ${show_unit(net.tcp_close(s))}")
+  // A port nobody listens on any more, and a closed listener handle.
+  println("close listener: ${show_unit(net.tcp_close_listener(l))}")
+  println(show_masked(net.tcp_connect("127.0.0.1", port), port))
+  println(show_int(net.tcp_accept(l)))
+  println(show_int(net.tcp_local_port(l)))
+  println("done")
+}
