@@ -277,6 +277,7 @@ evidence  = [
   { path = "spec/wasm_cross/map_set_index_threshold.almd", class = "fixture" },
   { path = "spec/wasm_cross/map_entry_loop.almd", class = "fixture" },
   { path = "spec/wasm_cross/stdlib_call_temporaries_release.almd", class = "fixture" },
+  { path = "spec/wasm_cross/map_merge_in_place.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-014"
@@ -547,6 +548,7 @@ evidence  = [
   { path = "spec/wasm_cross/mut_param_nested_place_writeback.almd", class = "fixture" },
   { path = "spec/wasm_cross/record_map_field_update.almd", class = "fixture" },
   { path = "spec/wasm_cross/tuple_bound_list_mapped_in_loop.almd", class = "fixture" },
+  { path = "spec/wasm_cross/map_merge_in_place.almd", class = "fixture" },
 ]
 
 # ── LIST BOUNDS GRACEFULNESS ─────────────────────────────────────────
