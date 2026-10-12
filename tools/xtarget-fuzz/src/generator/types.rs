@@ -168,6 +168,24 @@ impl GenType {
         }
     }
 
+    /// The type of [`observe`](Self::observe)'s expression.
+    pub fn observed(&self) -> Option<GenType> {
+        if self.is_observable() {
+            return Some(self.clone());
+        }
+        let inner = |e: &GenType| e.observed().map(Box::new);
+        Some(match self {
+            GenType::Bytes => GenType::List(Box::new(GenType::Int)),
+            GenType::Matrix => GenType::List(Box::new(GenType::List(Box::new(GenType::Float)))),
+            GenType::Value => GenType::String,
+            GenType::List(e) => GenType::List(inner(e)?),
+            GenType::Option(e) => GenType::Option(inner(e)?),
+            GenType::Result(e) => GenType::Result(inner(e)?),
+            GenType::Tuple2(a, b) => GenType::Tuple2(inner(a)?, inner(b)?),
+            _ => return None,
+        })
+    }
+
     pub fn is_observable(&self) -> bool {
         match self {
             GenType::Int | GenType::String | GenType::Bool | GenType::Unit => true,
@@ -224,9 +242,11 @@ impl GenType {
 pub fn render_print(name: &str, ty: &GenType) -> String {
     // A Bytes or Matrix has no string form (E089), at the top level or inside
     // a list, option, result or tuple: print its observable image instead.
+    // The image is a call, bound to a typed `let` first: a call interpolated
+    // in `${…}` whose type is a Result is E041 (ADR-0008), #3636.
     if !ty.is_observable() {
-        if let Some((pre, expr)) = ty.observe(name, 0) {
-            return format!("{pre}println(\"{name} = ${{{expr}}}\")");
+        if let (Some((pre, expr)), Some(seen)) = (ty.observe(name, 0), ty.observed()) {
+            return format!("{pre}let {name}_o: {} = {expr}\n  println(\"{name} = ${{{name}_o}}\")", seen.render());
         }
     }
     // Every other printable shape interpolates via `${...}`, so the type is

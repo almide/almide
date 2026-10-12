@@ -439,7 +439,7 @@ mod tests {
         let main = file("main.almd");
         for v in ["d", "l", "r"] {
             assert!(main.contains(&format!("  var {v}m: Bytes = bytes.new(1000)")), "{main}");
-            assert!(main.contains(&format!("println(\"{v}m = ${{bytes.to_list({v}m)}}\")")), "{main}");
+            assert!(main.contains(&format!("let {v}m_o: List[Int] = bytes.to_list({v}m)\n  println(\"{v}m = ${{{v}m_o}}\")")), "{main}");
         }
         assert!(!main.contains("println(\"d = "), "a Unit return is not printed (E089): {main}");
         if let Ok(dir) = std::env::var("XF_DUMP") {
