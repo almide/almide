@@ -77,7 +77,7 @@ fn print_usage() {
          \x20 xtarget-fuzz gen    --seed N --index I [--family F]\n\
          \x20 xtarget-fuzz stats\n\
          \x20 xtarget-fuzz catalogue   (the `module.fn` names --focus and inspect can reach)\n\
-         \x20 xtarget-fuzz inspect <module.fn> [--order O] [--order-rebind O] [--n N] [--count C] [--seed S]\n\
+         \x20 xtarget-fuzz inspect <module.fn> [--order O] [--order-rebind O] [--n N] [--count C] [--seed S] [--emit DIR]\n\
          \x20   the stdlib inspection ledger's harness (proofs/stdlib-inspection.toml); O = 1|log|n|nlogn|n2\n\n\
          --family all|identity|synthesis|composition|shape  (default: all)\n\
          \x20 `shape` runs ONLY the multi-module family (#3309): projects of sibling\n\

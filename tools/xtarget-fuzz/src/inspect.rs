@@ -53,7 +53,7 @@ enum Leg {
 
 pub fn cmd_inspect(args: &[String]) {
     let Some(name) = args.iter().find(|a| !a.starts_with("--") && a.contains('.')).cloned() else {
-        eprintln!("usage: xtarget-fuzz inspect <module.fn> [--order 1|log|n|nlogn|n2] [--order-rebind ..] [--n N] [--count C] [--seed S]");
+        eprintln!("usage: xtarget-fuzz inspect <module.fn> [--order 1|log|n|nlogn|n2] [--order-rebind ..] [--n N] [--count C] [--seed S] [--emit DIR]");
         std::process::exit(2);
     };
     let repo = super::resolve_repo(args);
@@ -90,6 +90,20 @@ pub fn cmd_inspect(args: &[String]) {
     };
     let n: u64 = super::flag_value(args, "--n").and_then(|s| s.parse().ok()).unwrap_or(default_n);
     let order_rebind = super::flag_value(args, "--order-rebind");
+    // `--emit DIR`: write the probe programs at size n and stop, so a row's
+    // evidence can be re-run by hand on both legs (#3666's audit).
+    if let Some(out) = super::flag_value(args, "--emit") {
+        let root = Path::new(out);
+        for (path, src) in probe_files(&target, n) {
+            let file = root.join(path);
+            if let Err(e) = file.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|_| std::fs::write(&file, src)) {
+                eprintln!("{}: {e}", file.display());
+                std::process::exit(2);
+            }
+        }
+        let _ = std::fs::remove_dir_all(&ctx.dir);
+        return;
+    }
 
     let mut verdicts = Vec::new();
     verdicts.push(("parity", parity(&ctx, &name, args)));
@@ -106,6 +120,16 @@ pub fn cmd_inspect(args: &[String]) {
     if !all_pass {
         std::process::exit(1);
     }
+}
+
+/// The programs the criteria run at size `n`, as files: the plain call
+/// (3 calls), each rebind shape (3 steps) and the diamond project (at
+/// `n.min(64)`, as [`diamond`] runs it).
+fn probe_files(t: &Target, n: u64) -> Vec<(String, String)> {
+    let mut files = vec![("call.almd".to_string(), t.direct_program(n, 3, true))];
+    files.extend(t.rebind_programs(n, 3).into_iter().map(|(shape, src)| (format!("{shape}.almd"), src)));
+    files.extend(t.diamond_project(n.min(64)).files.into_iter().map(|(p, src)| (format!("diamond/{p}"), src)));
+    files
 }
 
 fn toml_str(s: &str) -> String {
@@ -860,6 +884,18 @@ mod verdict_tests {
         assert!(v.starts_with("FAIL: ") && v.contains(want), "{v}");
         // Any other failure keeps its own first error line.
         assert_eq!(run_failure(&output(2, "", "warning: x\nerror: boom\n")), "exit Some(2): error: boom");
+    }
+
+    /// `--emit` writes every program a verdict runs: the plain call, each
+    /// rebind shape, and the diamond project.
+    #[test]
+    fn emit_writes_every_probe_program() {
+        let t = crate::generator::inspect_gen::tests::target("result.map");
+        let files = probe_files(&t, 100);
+        let paths: Vec<&str> = files.iter().map(|(p, _)| p.as_str()).collect();
+        for want in ["call.almd", "loop.almd", "tail.almd", "fold.almd", "diamond/app/almide.toml", "diamond/app/src/main.almd"] {
+            assert!(paths.contains(&want), "{want}: {paths:?}");
+        }
     }
 
     /// #3636: a Unit function with no `mut` parameter (bytes.heap_restore)
