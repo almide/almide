@@ -46,6 +46,10 @@ pub enum GenType {
     Matrix,
     /// `bytes.Endian`: `LittleEndian` or `BigEndian`. Only ever an argument.
     Endian,
+    /// `Value` (the dynamic JSON-shaped value), built with `value.int` /
+    /// `str` / `bool` / `null` / `array` / `object` (an object of n keys when
+    /// sized).
+    Value,
     /// `Set[elem]`, built with `set.from_list`; the element is a hashable
     /// scalar ([`GenType::is_set_elem`]).
     Set(Box<GenType>),
@@ -105,6 +109,7 @@ impl GenType {
             GenType::Bytes => out.push_str("Bytes"),
             GenType::Matrix => out.push_str("Matrix"),
             GenType::Endian => out.push_str("Endian"),
+            GenType::Value => out.push_str("Value"),
         }
     }
 
@@ -149,6 +154,7 @@ impl GenType {
         match self {
             GenType::Bytes => Some((String::new(), format!("bytes.to_list({v})"))),
             GenType::Matrix => Some((String::new(), format!("matrix.to_lists({v})"))),
+            GenType::Value => Some((String::new(), format!("value.stringify({v})"))),
             GenType::List(e) => Some((String::new(), format!("list.map({v}, {})", inner(e)?))),
             GenType::Option(e) => Some((String::new(), format!("option.map({v}, {})", inner(e)?))),
             GenType::Result(e) => Some((String::new(), format!("result.map({v}, {})", inner(e)?))),
@@ -177,6 +183,9 @@ impl GenType {
             GenType::Endian => false,
             // A Bytes or Matrix value has no string form (E089).
             GenType::Bytes | GenType::Matrix => false,
+            // A Bytes or Matrix value has no string form (E089); a Value is
+            // observed through `value.stringify`.
+            GenType::Bytes | GenType::Matrix | GenType::Value => false,
         }
     }
 
@@ -192,7 +201,8 @@ impl GenType {
             | GenType::Sized(_)
             | GenType::Bytes
             | GenType::Matrix
-            | GenType::Endian => 1,
+            | GenType::Endian
+            | GenType::Value => 1,
             GenType::List(e)
             | GenType::Option(e)
             | GenType::Result(e)

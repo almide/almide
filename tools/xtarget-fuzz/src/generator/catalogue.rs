@@ -96,13 +96,14 @@ impl Signature {
 /// Bundled stdlib modules the generator draws from, paired with their
 /// embedded source. Only the deterministic, side-effect-free, in-scope
 /// modules are listed — no `fs`/`http`/`process`/`random`/`datetime`
-/// (effects or non-determinism), no `value`/`json` (outside the generator's
-/// value universe). The fixed-width numbers, `bytes` and `matrix` are in:
-/// the value grammar builds them (`GenType::Sized`, `Bytes`, `Matrix`).
+/// (effects or non-determinism). The fixed-width numbers, `bytes`, `matrix`
+/// and `value` are in: the value grammar builds them (`GenType::Sized`,
+/// `Bytes`, `Matrix`, `Value`).
 ///
 /// `base64` / `hex` / `hash` / `zlib` / `path` / `url` / `regex` are pure but
 /// not auto-imported: a program that calls one starts with `import <module>`
-/// ([`imports_for`]). `error` is auto-imported.
+/// ([`imports_for`]); so is `json`, whose functions over a `Value` or a
+/// `String` the grammar reaches. `error` and `value` are auto-imported.
 ///
 /// `(module_name, source_text, needs_import)`.
 const BUNDLED_MODULES: &[(&str, &str, bool)] = &[
@@ -128,6 +129,7 @@ const BUNDLED_MODULES: &[(&str, &str, bool)] = &[
     ("bytes", include_str!("../../../../stdlib/bytes.almd"), false),
     ("matrix", include_str!("../../../../stdlib/matrix.almd"), false),
     ("error", include_str!("../../../../stdlib/error.almd"), false),
+    ("value", include_str!("../../../../stdlib/value.almd"), false),
     ("base64", include_str!("../../../../stdlib/base64.almd"), true),
     ("hex", include_str!("../../../../stdlib/hex.almd"), true),
     ("hash", include_str!("../../../../stdlib/hash.almd"), true),
@@ -135,6 +137,7 @@ const BUNDLED_MODULES: &[(&str, &str, bool)] = &[
     ("path", include_str!("../../../../stdlib/path.almd"), true),
     ("url", include_str!("../../../../stdlib/url.almd"), true),
     ("regex", include_str!("../../../../stdlib/regex.almd"), true),
+    ("json", include_str!("../../../../stdlib/json.almd"), true),
 ];
 
 /// Default selection weight for a function not named in
@@ -278,6 +281,16 @@ mod availability_tests {
         let cat = build();
         assert!(!cat.iter().any(|s| unavailable.contains(&format!("{}.{}", s.module, s.func))));
         assert!(cat.iter().any(|s| s.module == "matrix" && s.func == "dot_row"), "a served matrix fn stays");
+    }
+
+    #[test]
+    fn value_and_json_functions_over_the_grammar_are_catalogued() {
+        let names: Vec<String> = build().iter().map(|s| format!("{}.{}", s.module, s.func)).collect();
+        for want in ["value.field", "value.pick", "value.to_camel_case", "value.stringify", "json.parse", "json.stringify", "json.to_map"] {
+            assert!(names.iter().any(|n| n == want), "{want} is not in the catalogue");
+        }
+        let src = "fn main() -> Unit = {\n  let s = json.stringify(value.null())\n}\n";
+        assert_eq!(imports_for(src), "import json\n");
     }
 
     #[test]

@@ -22,7 +22,7 @@ pub struct Target {
     params: Vec<(String, SigType)>,
     subst: HashMap<String, GenType>,
     ret: GenType,
-    /// The parameter scaled to `n` (the first List / Map / Set / String / Bytes / Matrix one, else a
+    /// The parameter scaled to `n` (the first List / Map / Set / String / Bytes / Matrix / Value one, else a
     /// size-like Int); `None`: the function has no size to scale.
     pub size_param: Option<usize>,
     /// A parameter of the return type: the function can rebind it in a loop,
@@ -60,7 +60,7 @@ impl Target {
         let concrete = |t: &SigType| t.instantiate(&subst);
         let size_param = params
             .iter()
-            .position(|(_, t)| matches!(concrete(t), Some(GenType::List(_) | GenType::Map(_) | GenType::Set(_) | GenType::String | GenType::Bytes | GenType::Matrix)))
+            .position(|(_, t)| matches!(concrete(t), Some(GenType::List(_) | GenType::Map(_) | GenType::Set(_) | GenType::String | GenType::Bytes | GenType::Matrix | GenType::Value)))
             .or_else(|| params.iter().position(|(n, t)| *t == SigType::Int && SIZE_LIKE_INT.contains(&n.as_str())));
         let rebind_param = params.iter().position(|(_, t)| concrete(t).as_ref() == Some(&ret));
         Ok(Target { name, params, subst, ret, size_param, rebind_param, mut_param: sig.mut_param })
@@ -328,6 +328,7 @@ fn small(t: &GenType) -> String {
         GenType::Bytes => "bytes.from_list([1, 2])".into(),
         GenType::Matrix => "matrix.from_lists([[1.5, 2.0], [0.5, 3.0]])".into(),
         GenType::Endian => "BigEndian".into(),
+        GenType::Value => "value.object([(\"a\", value.int(1)), (\"snake_case\", value.str(\"x\"))])".into(),
         GenType::Set(e) => format!("set.from_list([{}])", small(e)),
     }
 }
@@ -367,6 +368,9 @@ fn sized(t: &GenType, n: u64) -> String {
         GenType::Map(v) => format!("list.range(0, {n}) |> list.fold(map.new(), (m, i) => map.set(m, \"k${{100000000 + i}}\", {}))", elem(v)),
         GenType::Bytes => format!("bytes.new({n})"),
         GenType::Matrix => format!("matrix.zeros({n}, 2)"),
+        // An object of n keys: what `field` / `keys` / `pick` / `omit` /
+        // `merge` and the case converters walk.
+        GenType::Value => format!("value.object(list.range(0, {n}) |> list.map((i) => (\"k${{100000000 + i}}\", value.int(i))))"),
         GenType::Set(e) => format!("list.range(0, {n}) |> list.map((i) => {}) |> set.from_list", elem(e)),
         other => small(other),
     }
@@ -404,6 +408,7 @@ fn digest(v: &str, t: &GenType) -> String {
         GenType::Bytes => format!("bytes.len({v})"),
         GenType::Matrix => format!("matrix.rows({v})"),
         GenType::Endian => "1".into(),
+        GenType::Value => format!("string.len(value.stringify({v}))"),
         GenType::Set(_) => format!("set.len({v})"),
     }
 }

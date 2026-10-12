@@ -52,6 +52,7 @@ pub enum SigType {
     Bytes,
     Matrix,
     Endian,
+    Value,
 }
 
 /// Single-letter (or short) names the stdlib uses for generic type
@@ -78,6 +79,7 @@ impl SigType {
                     "Bytes" => Some(SigType::Bytes),
                     "Matrix" => Some(SigType::Matrix),
                     "Endian" => Some(SigType::Endian),
+                    "Value" => Some(SigType::Value),
                     // The fixed-width numbers the value grammar builds; other
                     // nominal types enter via mutation.
                     other => match GenType::sized(other) {
@@ -207,6 +209,7 @@ impl SigType {
             SigType::Bytes => Some(GenType::Bytes),
             SigType::Matrix => Some(GenType::Matrix),
             SigType::Endian => Some(GenType::Endian),
+            SigType::Value => Some(GenType::Value),
             SigType::Var(n) => subst.get(n).cloned(),
             SigType::List(e) => Some(GenType::List(Box::new(e.instantiate(subst)?))),
             SigType::Option(e) => Some(GenType::Option(Box::new(e.instantiate(subst)?))),
@@ -242,7 +245,8 @@ impl SigType {
             | (SigType::Unit, GenType::Unit)
             | (SigType::Bytes, GenType::Bytes)
             | (SigType::Matrix, GenType::Matrix)
-            | (SigType::Endian, GenType::Endian) => true,
+            | (SigType::Endian, GenType::Endian)
+            | (SigType::Value, GenType::Value) => true,
             (SigType::Sized(a), GenType::Sized(b)) => a == b,
             (SigType::Var(n), g) => match subst.get(n) {
                 Some(bound) => bound == g,
