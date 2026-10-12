@@ -34320,18 +34320,41 @@ fn string_drop(s: String, n: Int) -> String = {
   __td_slice(s, k, count)
 }
 
+
+fn __td_lead(base: Int, addr: Int) -> Int = if addr <= base then base
+else if prim.load8(addr) / 64 == 2 then __td_lead(base, addr - 1) else addr
+
+
+
+
+fn __td_back(base: Int, addr: Int, k: Int) -> Int = if k <= 0 then addr
+else if addr <= base then base
+else __td_back(base, __td_lead(base, addr - 1), k - 1)
+
+
+fn __td_bytes(lo: Int, hi: Int) -> String = {
+  let nbytes = if hi > lo then hi - lo else 0
+  let buf = prim.alloc_str(nbytes)
+  let _e = __td_copy(lo, prim.handle(buf) + 12, nbytes)
+  buf
+}
+
 fn string_take_end(s: String, n: Int) -> String = {
-  let count = __td_count(s)
-  let start = if n < 0 then 0
-  else (if n >= count then 0 else count - n)
-  __td_slice(s, start, count)
+  let h = prim.handle(s)
+  let base = h + 12
+  let end = base + prim.load32(h + 4)
+  let start = if n < 0 then base
+  else __td_back(base, end, n)
+  __td_bytes(start, end)
 }
 
 fn string_drop_end(s: String, n: Int) -> String = {
-  let count = __td_count(s)
-  let endi = if n < 0 then 0
-  else (if n >= count then 0 else count - n)
-  __td_slice(s, 0, endi)
+  let h = prim.handle(s)
+  let base = h + 12
+  let end = base + prim.load32(h + 4)
+  let cut = if n < 0 then base
+  else __td_back(base, end, n)
+  __td_bytes(base, cut)
 }
 "#;
 pub const SRC_STRING_TO_BYTES: &str = r#"

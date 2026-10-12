@@ -182,18 +182,24 @@ pub fn almide_rt_string_last(s: &str) -> Option<String> {
 pub fn almide_rt_string_take(s: &str, n: i64) -> String {
     s.chars().take(n as usize).collect()
 }
+/// Byte offset where the last `n` codepoints start (`0` when the string has
+/// no more than `n`; a negative `n` is a huge count, as `n as usize` makes
+/// it). Walks back from the end, so finding it costs O(n), not O(len).
+fn almide_string_tail_start(s: &str, n: i64) -> usize {
+    let k = n as usize;
+    if k == 0 {
+        return s.len();
+    }
+    s.char_indices().rev().nth(k - 1).map_or(0, |(i, _)| i)
+}
 pub fn almide_rt_string_take_end(s: &str, n: i64) -> String {
-    let chars: Vec<char> = s.chars().collect();
-    let start = if n as usize >= chars.len() { 0 } else { chars.len() - n as usize };
-    chars[start..].iter().collect()
+    s[almide_string_tail_start(s, n)..].to_string()
 }
 pub fn almide_rt_string_drop(s: &str, n: i64) -> String {
     s.chars().skip(n as usize).collect()
 }
 pub fn almide_rt_string_drop_end(s: &str, n: i64) -> String {
-    let chars: Vec<char> = s.chars().collect();
-    let end = if n as usize >= chars.len() { 0 } else { chars.len() - n as usize };
-    chars[..end].iter().collect()
+    s[..almide_string_tail_start(s, n)].to_string()
 }
 
 // ── Algorithmic primitives (Phase 3 stdlib expansion) ──

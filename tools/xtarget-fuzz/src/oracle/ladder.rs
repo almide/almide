@@ -574,6 +574,20 @@ fn compare_runs(
         });
     }
 
+    // The sandbox each leg ran in (tier E1): a write that landed differently
+    // is a divergence even when stdout agrees.
+    if let (Some(nt), Some(wt)) = (&native.tree, &wasm.tree) {
+        if nt != wt {
+            return Outcome::Finding(Finding {
+                rung: Rung::Run,
+                kind: FindingKind::OutputDivergence,
+                summary: format!("the files left in the sandbox differ ({})", first_line_diff(nt, wt)),
+                native: Some(nat_ev),
+                wasm: Some(wasm_ev),
+            });
+        }
+    }
+
     // Optional future rung: compare both against a reference interpreter.
     if let Some(reference) = reference {
         if let Some(expected) = reference.evaluate(source) {
@@ -954,6 +968,7 @@ mod resource_class_tests {
             timed_out: false,
             spawn_failed: false,
             duration: std::time::Duration::from_millis(5),
+            tree: None,
         }
     }
 
@@ -1117,7 +1132,25 @@ mod compare_runs_tests {
             timed_out: false,
             spawn_failed: false,
             duration: std::time::Duration::from_millis(5),
+            tree: None,
         }
+    }
+
+    #[test]
+    fn the_same_stdout_with_different_files_left_behind_is_a_divergence() {
+        let mut nat = run("ok\n", "", 0);
+        let mut was = run("ok\n", "", 0);
+        nat.tree = Some("f data.txt 27 aa\nf out.txt 1 bb\n".into());
+        was.tree = Some("f data.txt 27 aa\n".into());
+        match compare_runs("fn main() -> Unit = ()", &nat, &was, None, None) {
+            Outcome::Finding(f) => {
+                assert!(matches!(f.kind, FindingKind::OutputDivergence));
+                assert!(f.summary.contains("sandbox"), "{}", f.summary);
+            }
+            _ => panic!("a different tree must be a finding"),
+        }
+        was.tree = nat.tree.clone();
+        assert!(matches!(compare_runs("fn main() -> Unit = ()", &nat, &was, None, None), Outcome::Clean { .. }));
     }
 
     #[test]
