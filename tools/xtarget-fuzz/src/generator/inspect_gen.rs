@@ -28,6 +28,9 @@ pub struct Target {
     /// A parameter of the return type: the function can rebind it in a loop,
     /// a tail call and a fold (criterion 2's use-shapes).
     pub rebind_param: Option<usize>,
+    /// The `mut` parameter: bound with `var`, and in the diamond each path
+    /// mutates its own copy and prints it.
+    mut_param: Option<usize>,
 }
 
 const SIZE_LIKE_INT: &[&str] = &["n", "count", "times", "len", "size", "end", "width"];
@@ -60,7 +63,7 @@ impl Target {
             .position(|(_, t)| matches!(concrete(t), Some(GenType::List(_) | GenType::Map(_) | GenType::Set(_) | GenType::String | GenType::Bytes | GenType::Matrix | GenType::Value)))
             .or_else(|| params.iter().position(|(n, t)| *t == SigType::Int && SIZE_LIKE_INT.contains(&n.as_str())));
         let rebind_param = params.iter().position(|(_, t)| concrete(t).as_ref() == Some(&ret));
-        Ok(Target { name, params, subst, ret, size_param, rebind_param })
+        Ok(Target { name, params, subst, ret, size_param, rebind_param, mut_param: sig.mut_param })
     }
 
     fn ty(&self, i: usize) -> Option<GenType> {
@@ -116,7 +119,7 @@ impl Target {
         // every leg: it is bound once and left alone.
         let slot = self.size_param.map(|i| {
             let varies = !matches!(self.ty(i), Some(GenType::String));
-            let kw = if varies { "var" } else { "let" };
+            let kw = if varies || Some(i) == self.mut_param { "var" } else { "let" };
             let _ = writeln!(s, "  {kw} x: {} = {}", self.render_param(i), self.arg(i, n));
             (i, varies)
         });
@@ -201,18 +204,38 @@ impl Target {
     /// `base` and wrap it again, and `main` imports both and also calls the
     /// function directly — three lines that must print the same value.
     pub fn diamond_project(&self, n: u64) -> Project {
-        let sig: Vec<String> = (0..self.params.len()).map(|i| format!("a{i}: {}", self.render_param(i))).collect();
+        let sig: Vec<String> = (0..self.params.len())
+            .map(|i| format!("{}a{i}: {}", if Some(i) == self.mut_param { "mut " } else { "" }, self.render_param(i)))
+            .collect();
         let names: Vec<String> = (0..self.params.len()).map(|i| format!("a{i}")).collect();
         let ret = self.ret.render();
         let wrap = |inner: &str| format!("pub fn call({}) -> {ret} = {inner}({})\n", sig.join(", "), names.join(", "));
         let mut main = String::from("import self.left\nimport self.right\n\neffect fn main() -> Unit = {\n");
-        for i in 0..self.params.len() {
+        for i in (0..self.params.len()).filter(|i| Some(*i) != self.mut_param) {
             let _ = writeln!(main, "  let a{i}: {} = {}", self.render_param(i), self.arg(i, n));
         }
-        let args = names.join(", ");
-        let _ = writeln!(main, "  let d: {ret} = {}({args})\n  let l: {ret} = left.call({args})\n  let r: {ret} = right.call({args})", self.name);
+        // Each path mutates its own var, so the three must agree on the
+        // mutated value as well as on the return.
+        let path_args = |path: &str| -> String {
+            (0..self.params.len())
+                .map(|i| if Some(i) == self.mut_param { format!("{path}m") } else { format!("a{i}") })
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        for (v, callee) in [("d", self.name.as_str()), ("l", "left.call"), ("r", "right.call")] {
+            if let Some(m) = self.mut_param {
+                let _ = writeln!(main, "  var {v}m: {} = {}", self.render_param(m), self.arg(m, n));
+            }
+            let _ = writeln!(main, "  let {v}: {ret} = {callee}({})", path_args(v));
+        }
         for v in ["d", "l", "r"] {
-            let _ = writeln!(main, "  {}", render_print(v, &self.ret));
+            // A Unit return has no string form (E089) and nothing to compare.
+            if self.ret != GenType::Unit {
+                let _ = writeln!(main, "  {}", render_print(v, &self.ret));
+            }
+            if let Some(m) = self.mut_param {
+                let _ = writeln!(main, "  {}", render_print(&format!("{v}m"), &self.ty(m).unwrap_or(GenType::Unit)));
+            }
         }
         main.push_str("}\n");
         let main = format!("{}{main}", super::catalogue::imports_for(&main));
@@ -232,7 +255,8 @@ impl Target {
     fn arg_lets(&self, n: u64, skip: Option<usize>) -> String {
         let mut s = String::new();
         for i in (0..self.params.len()).filter(|i| Some(*i) != skip && !self.is_fn(*i)) {
-            let _ = writeln!(s, "  let a{i}: {} = {}", self.render_param(i), self.arg(i, n));
+            let kw = if Some(i) == self.mut_param { "var" } else { "let" };
+            let _ = writeln!(s, "  {kw} a{i}: {} = {}", self.render_param(i), self.arg(i, n));
         }
         s
     }
@@ -384,5 +408,45 @@ fn digest(v: &str, t: &GenType) -> String {
         GenType::Matrix => format!("matrix.rows({v})"),
         GenType::Value => format!("string.len(value.stringify({v}))"),
         GenType::Set(_) => format!("set.len({v})"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn target(name: &str) -> Target {
+        let sig = crate::generator::catalogue::build()
+            .into_iter()
+            .find(|s| format!("{}.{}", s.module, s.func) == name)
+            .unwrap_or_else(|| panic!("{name} not catalogued"));
+        Target::new(&sig).expect("target")
+    }
+
+    /// A `mut`-parameter mutator: its sized input is a `var` the loop calls
+    /// it on, and each diamond path mutates its own `var` and prints it.
+    #[test]
+    fn a_mutator_is_called_on_a_var_and_each_diamond_path_prints_its_own_copy() {
+        let t = target("bytes.push");
+        let direct = t.direct_program(1000, 4, true);
+        assert!(direct.contains("  var x: Bytes = bytes.new(1000)"), "{direct}");
+        assert!(direct.contains("let r: Unit = bytes.push(x, "), "{direct}");
+        let project = t.diamond_project(1000);
+        let file = |suffix: &str| project.files.iter().find(|(p, _)| p.ends_with(suffix)).map(|(_, s)| s.clone()).unwrap();
+        assert!(file("base.almd").contains("pub fn call(mut a0: Bytes, a1: Int) -> Unit = bytes.push(a0, a1)"), "{}", file("base.almd"));
+        let main = file("main.almd");
+        for v in ["d", "l", "r"] {
+            assert!(main.contains(&format!("  var {v}m: Bytes = bytes.new(1000)")), "{main}");
+            assert!(main.contains(&format!("println(\"{v}m = ${{bytes.to_list({v}m)}}\")")), "{main}");
+        }
+        assert!(!main.contains("println(\"d = "), "a Unit return is not printed (E089): {main}");
+        if let Ok(dir) = std::env::var("XF_DUMP") {
+            std::fs::write(format!("{dir}/direct.almd"), &direct).unwrap();
+            for (p, s) in &project.files {
+                let path = std::path::Path::new(&dir).join(p);
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(path, s).unwrap();
+            }
+        }
     }
 }
