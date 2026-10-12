@@ -19,23 +19,38 @@ use almide_ir::{CallTarget, IrExpr, IrExprKind, IrStmt, IrStmtKind, VarId};
 
 #[derive(Default)]
 struct Scan {
-    in_lambda: u32,
+    /// Per enclosing lambda, innermost last: the vars it binds itself (its
+    /// params and every binding form in its body). A var one of them binds
+    /// is that lambda's own local, fresh per call — referencing it there is
+    /// no capture (#3661: `(acc, x) => { var a = acc; list.push(a, x); a }`
+    /// made `a` a cell, so the push wrote through the cell).
+    own: Vec<HashSet<VarId>>,
     captured: HashSet<VarId>,
     mutated: HashSet<VarId>,
+}
+
+impl Scan {
+    /// A reference to `v` here captures it: inside a lambda that does not
+    /// bind it itself.
+    fn capture(&mut self, v: VarId) {
+        if self.own.last().is_some_and(|own| !own.contains(&v)) {
+            self.captured.insert(v);
+        }
+    }
 }
 
 impl IrVisitor for Scan {
     fn visit_expr(&mut self, e: &IrExpr) {
         match &e.kind {
-            IrExprKind::Lambda { .. } => {
-                self.in_lambda += 1;
+            IrExprKind::Lambda { params, body, .. } => {
+                let mut own = bound_within(body);
+                own.extend(params.iter().map(|(v, _)| *v));
+                self.own.push(own);
                 walk_expr(self, e);
-                self.in_lambda -= 1;
+                self.own.pop();
                 return;
             }
-            IrExprKind::Var { id } if self.in_lambda > 0 => {
-                self.captured.insert(*id);
-            }
+            IrExprKind::Var { id } => self.capture(*id),
             IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } => {
                 // Which args a stdlib call writes comes from the callee's
                 // DECLARATION (`mut` params), the source native's borrow
@@ -63,9 +78,7 @@ impl IrVisitor for Scan {
         // lambda it is a capture too (`() => { xs[5] = 1 }` reads nothing).
         if let Some(v) = write_target(s) {
             self.mutated.insert(v);
-            if self.in_lambda > 0 {
-                self.captured.insert(v);
-            }
+            self.capture(v);
         }
         walk_stmt(self, s);
     }

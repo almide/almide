@@ -172,6 +172,7 @@ mod stmts;
 mod stmts_index;
 mod stmts_append;
 mod writeback_move;
+mod rebind_move;
 mod tail_append;
 mod concat_dying;
 mod string_ext;
