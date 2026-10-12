@@ -304,7 +304,7 @@ pub fn self_host_runtime() -> &'static [(&'static str, &'static [(&'static str, 
         (crate::embedded::SRC_RESULT_COLLECT, &[("result_partition", "result.partition")]),
         (crate::embedded::SRC_VALUE_UTILS, &[("value_pick", "value.pick"), ("value_omit", "value.omit"), ("value_to_camel_case", "value.to_camel_case"), ("value_to_snake_case", "value.to_snake_case")]),
         (crate::embedded::SRC_HTTP_URL_DECODE, &[("http_url_decode", "http.url_decode"), ("http_query_params", "http.query_params")]),
-        (crate::embedded::SRC_HTTP_FRAMED, &[("__request_impl", "http.request"), ("__request_status_impl", "http.request_status"), ("__get_status_impl", "http.get_status"), ("__request_bytes_impl", "http.request_bytes"), ("__get_bytes_impl", "http.get_bytes")]),
+        (crate::embedded::SRC_HTTP_FRAMED, &[("__request_impl", "http.request"), ("__request_status_impl", "http.request_status"), ("__get_status_impl", "http.get_status"), ("__request_bytes_impl", "http.request_bytes"), ("__get_bytes_impl", "http.get_bytes"), ("__request_response_impl", "http.request_response"), ("__get_response_impl", "http.get_response"), ("__post_response_impl", "http.post_response"), ("__put_response_impl", "http.put_response"), ("__patch_response_impl", "http.patch_response"), ("__delete_response_impl", "http.delete_response")]),
         // The http call handle (#2633): `__call_start` / `__request_stream_limited` are
         // http.almd's private leaves (bare dunder demand keys, the codec-splice
         // convention); poll / read_new / wait / cancel are its public intrinsics.

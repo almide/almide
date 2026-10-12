@@ -8962,6 +8962,12 @@ pub const SRC_HTTP_FRAMED: &str = r#"
 
 
 
+
+
+
+
+
+
 fn __http_cell(s: String) -> String = "${string.len(s)}\n${s}"
 
 fn __http_frame(method: String, body: String, headers: Map[String, String]) -> String = map.entries(headers) |> list.map(((k, v)) => "${__http_cell(k)}${__http_cell(v)}") |> list.fold(
@@ -9004,6 +9010,42 @@ effect fn __get_bytes_impl(url: String) -> Result[Bytes, String] = __request_byt
   "",
   map.new(),
 )
+
+effect fn __http_framed_response(url: String, frame: String) -> Result[String, String] = _
+
+
+fn __http_take_cell(f: String) -> (String, String) = {
+  let cut = string.index_of(f, "\n") ?? 0
+  let n = int.parse(string.take(f, cut)) ?? 0
+  let rest = string.drop(f, cut + 1)
+  (string.take(rest, n), string.drop(rest, n))
+}
+
+fn __http_cells(f: String, acc: List[String]) -> List[String] = if f == "" then acc
+else {
+  let (cell, rest) = __http_take_cell(f)
+  __http_cells(rest, acc + [cell])
+}
+
+effect fn __request_response_impl(method: String, url: String, body: String, headers: Map[String, String]) -> Result[List[String], String] = {
+  let f = __http_framed_response(url, __http_frame(method, body, headers))!
+  let c1 = string.index_of(f, "\n") ?? 0
+  let after_code = string.drop(f, c1 + 1)
+  let c2 = string.index_of(after_code, "\n") ?? 0
+  let hlen = int.parse(string.take(after_code, c2)) ?? 0
+  let rest = string.drop(after_code, c2 + 1)
+  ok([string.take(f, c1), string.drop(rest, hlen)] + __http_cells(string.take(rest, hlen), []))
+}
+
+effect fn __get_response_impl(url: String) -> Result[List[String], String] = __request_response_impl("GET", url, "", map.new())
+
+effect fn __post_response_impl(url: String, body: String) -> Result[List[String], String] = __request_response_impl("POST", url, body, map.new())
+
+effect fn __put_response_impl(url: String, body: String) -> Result[List[String], String] = __request_response_impl("PUT", url, body, map.new())
+
+effect fn __patch_response_impl(url: String, body: String) -> Result[List[String], String] = __request_response_impl("PATCH", url, body, map.new())
+
+effect fn __delete_response_impl(url: String) -> Result[List[String], String] = __request_response_impl("DELETE", url, "", map.new())
 "#;
 pub const SRC_HTTP_REQUEST: &str = r#"
 

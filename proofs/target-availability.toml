@@ -377,56 +377,44 @@ issue = "#1423"
 
 [[unavailable]]
 fn = "http.get_response"
-legs = ["structural", "stock-p1", "embedded"]
+legs = ["stock-p1"]
 class = "pending-port"
-reason-embedded = "no wasm host binding for the full-response client (the framed ops 43..=50 serve the body / status / bytes shapes only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
-reason-stock-p1 = "no wasm host binding for the full-response client (the framed ops 43..=50 serve the body / status / bytes shapes only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
-reason-structural = "host-surface"
+reason = "embedded-lane-served (#3620, the framed op 65): `almide run --target wasm` serves the full-response family through the http_framed splice and the shared rt-core client; the DEFAULT stock artifact still refuses at build via the op audit — run natively, with `almide run --target wasm`, or wait for the wasi:http@0.3 port (#1710)"
 issue = "#1710"
 
 [[unavailable]]
 fn = "http.post_response"
-legs = ["structural", "stock-p1", "embedded"]
+legs = ["stock-p1"]
 class = "pending-port"
-reason-embedded = "no wasm host binding for the full-response client (the framed ops 43..=50 serve the body / status / bytes shapes only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
-reason-stock-p1 = "no wasm host binding for the full-response client (the framed ops 43..=50 serve the body / status / bytes shapes only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
-reason-structural = "host-surface"
+reason = "embedded-lane-served (#3620, the framed op 65): `almide run --target wasm` serves the full-response family through the http_framed splice and the shared rt-core client; the DEFAULT stock artifact still refuses at build via the op audit — run natively, with `almide run --target wasm`, or wait for the wasi:http@0.3 port (#1710)"
 issue = "#1710"
 
 [[unavailable]]
 fn = "http.put_response"
-legs = ["structural", "stock-p1", "embedded"]
+legs = ["stock-p1"]
 class = "pending-port"
-reason-embedded = "no wasm host binding for the full-response client (the framed ops 43..=50 serve the body / status / bytes shapes only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
-reason-stock-p1 = "no wasm host binding for the full-response client (the framed ops 43..=50 serve the body / status / bytes shapes only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
-reason-structural = "host-surface"
+reason = "embedded-lane-served (#3620, the framed op 65): `almide run --target wasm` serves the full-response family through the http_framed splice and the shared rt-core client; the DEFAULT stock artifact still refuses at build via the op audit — run natively, with `almide run --target wasm`, or wait for the wasi:http@0.3 port (#1710)"
 issue = "#1710"
 
 [[unavailable]]
 fn = "http.patch_response"
-legs = ["structural", "stock-p1", "embedded"]
+legs = ["stock-p1"]
 class = "pending-port"
-reason-embedded = "no wasm host binding for the full-response client (the framed ops 43..=50 serve the body / status / bytes shapes only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
-reason-stock-p1 = "no wasm host binding for the full-response client (the framed ops 43..=50 serve the body / status / bytes shapes only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
-reason-structural = "host-surface"
+reason = "embedded-lane-served (#3620, the framed op 65): `almide run --target wasm` serves the full-response family through the http_framed splice and the shared rt-core client; the DEFAULT stock artifact still refuses at build via the op audit — run natively, with `almide run --target wasm`, or wait for the wasi:http@0.3 port (#1710)"
 issue = "#1710"
 
 [[unavailable]]
 fn = "http.delete_response"
-legs = ["structural", "stock-p1", "embedded"]
+legs = ["stock-p1"]
 class = "pending-port"
-reason-embedded = "no wasm host binding for the full-response client (the framed ops 43..=50 serve the body / status / bytes shapes only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
-reason-stock-p1 = "no wasm host binding for the full-response client (the framed ops 43..=50 serve the body / status / bytes shapes only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
-reason-structural = "host-surface"
+reason = "embedded-lane-served (#3620, the framed op 65): `almide run --target wasm` serves the full-response family through the http_framed splice and the shared rt-core client; the DEFAULT stock artifact still refuses at build via the op audit — run natively, with `almide run --target wasm`, or wait for the wasi:http@0.3 port (#1710)"
 issue = "#1710"
 
 [[unavailable]]
 fn = "http.request_response"
-legs = ["structural", "stock-p1", "embedded"]
+legs = ["stock-p1"]
 class = "pending-port"
-reason-embedded = "no wasm host binding for the full-response client (the framed ops 43..=50 serve the body / status / bytes shapes only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
-reason-stock-p1 = "no wasm host binding for the full-response client (the framed ops 43..=50 serve the body / status / bytes shapes only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
-reason-structural = "host-surface"
+reason = "embedded-lane-served (#3620, the framed op 65): `almide run --target wasm` serves the full-response family through the http_framed splice and the shared rt-core client; the DEFAULT stock artifact still refuses at build via the op audit — run natively, with `almide run --target wasm`, or wait for the wasi:http@0.3 port (#1710)"
 issue = "#1710"
 
 [[unavailable]]

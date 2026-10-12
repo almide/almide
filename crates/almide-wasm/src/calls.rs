@@ -186,12 +186,8 @@ impl Emitter<'_> {
                 // in a, the method/body/headers frame in b). They carry
                 // no table body, so they intercept BEFORE resolution.
                 match name {
-                    "__http_framed_text" => {
-                        self.fs_call_str2(&args[0], &args[1], crate::fs_meta::OP_HTTP_FRAMED_TEXT)?;
-                        return Ok(Some(self.fs_result_string()?));
-                    }
-                    "__http_framed_status" => {
-                        self.fs_call_str2(&args[0], &args[1], crate::fs_meta::OP_HTTP_FRAMED_STATUS)?;
+                    n if let Some(op) = crate::fs_meta::http_framed_text_op(n) => {
+                        self.fs_call_str2(&args[0], &args[1], op)?;
                         return Ok(Some(self.fs_result_string()?));
                     }
                     "__http_framed_bytes" => {

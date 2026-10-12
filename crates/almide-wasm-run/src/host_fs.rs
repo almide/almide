@@ -445,7 +445,7 @@ fn fs_dispatch_host(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     match op {
         // Decomposed by op family (codopsy cc 38 -> per-family fns): the
         // http and env arms live in `fs_dispatch_http` / `fs_dispatch_env`.
-        43..=50 => fs_dispatch_http(op, a, b),
+        43..=50 | 65 => fs_dispatch_http(op, a, b),
         26 | 27 | 28 | 29 | 33 | 37 => fs_dispatch_env(op, a, b),
         // incremental stdin (op 35) — same empty answer in the harness.
         35 => (pack(0, 0), Vec::new()),
@@ -469,10 +469,10 @@ fn fs_dispatch_host(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     }
 }
 
-/// The http op family (43..=50) of `fs_dispatch_host`, verbatim.
+/// The http op family (43..=50, 65) of `fs_dispatch_host`, verbatim.
 fn fs_dispatch_http(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     match op {
-        48..=50 => fs_http_framed(op, a, b),
+        48..=50 | 65 => fs_http_framed(op, a, b),
         43..=47 => fs_http_plain(op, a, b),
         // env.set (#1423 bucket C ruling): key in a, value in b.
         _ => fs_err(format!("unknown fs op {op}")),
@@ -507,7 +507,8 @@ fn fs_http_plain(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
 /// decimal CHAR-length frame in b — method cell, body cell, then header
 /// key/value cells, `<len>\n<payload>` each, exactly as
 /// stdlib/http_framed.almd builds it. 48 answers the body text, 49 answers
-/// `<status>\n<body>`, 50 raw bytes.
+/// `<status>\n<body>`, 50 raw bytes, 65 the whole response
+/// (`http_response_frame`).
 fn fs_http_framed(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     use almide_rt_core::http_client_core as client;
     let frame = String::from_utf8_lossy(b).to_string();
@@ -518,11 +519,22 @@ fn fs_http_framed(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     match op {
         48 => fs_text_or_err(client::request(&method, a, &body, &headers)),
         49 => fs_text_or_err(client::request_status(&method, a, &body, &headers).map(|(code, text)| format!("{code}\n{text}"))),
+        65 => fs_text_or_err(client::request_response(&method, a, &body, &headers).map(|(code, hs, text)| http_response_frame(code, &hs, &text))),
         _ => match client::request_bytes(&method, a, &body, &headers) {
             Ok(bytes) => (pack(0, bytes.len()), bytes),
             Err(m) => fs_err(m),
         },
     }
+}
+
+/// Op 65's answer (#3620): `<status>\n<hlen>\n`, then hlen chars of header
+/// cells — name then value, `<len>\n<payload>` each in CHAR counts, wire order,
+/// repeats kept — then the body. The guest cuts the body off with one split
+/// (stdlib/http_framed.almd), so the body is copied once whatever the count.
+fn http_response_frame(code: i64, headers: &[(String, String)], body: &str) -> String {
+    let cell = |s: &str| format!("{}\n{s}", s.chars().count());
+    let cells: String = headers.iter().map(|(k, v)| cell(k) + &cell(v)).collect();
+    format!("{code}\n{}\n{cells}{body}", cells.chars().count())
 }
 
 /// The env op family (26/27/28/29/33/37) of `fs_dispatch_host`, verbatim.

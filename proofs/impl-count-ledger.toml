@@ -3,7 +3,7 @@
 # definitions in crates/almide-wasm/src, `<mod>.<fn>[_shape]` rows in
 # self_host_registry.rs), re-derived by scripts/lib/impl-count-enumerate.py.
 # Gated by tools/almide-gates impl-count: a total may not grow without its row.
-# holes = 858  implementations = 1999
+# holes = 859  implementations = 2011
 [[hole]]
 module   = "base64"
 name     = "encode"
@@ -1948,43 +1948,43 @@ module   = "http"
 name     = "get"
 native   = 1
 emitter  = 0
-selfhost = 3
-total    = 4
+selfhost = 4
+total    = 5
 [[hole]]
 module   = "http"
 name     = "post"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "http"
 name     = "put"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "http"
 name     = "patch"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "http"
 name     = "delete"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "http"
 name     = "request"
 native   = 1
 emitter  = 0
-selfhost = 3
-total    = 4
+selfhost = 4
+total    = 5
 [[hole]]
 module   = "http"
 name     = "get_status"
@@ -2004,43 +2004,43 @@ module   = "http"
 name     = "get_response"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "http"
 name     = "post_response"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "http"
 name     = "put_response"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "http"
 name     = "patch_response"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "http"
 name     = "delete_response"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "http"
 name     = "request_response"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "http"
 name     = "get_bytes"
@@ -2233,6 +2233,13 @@ total    = 0
 [[hole]]
 module   = "http"
 name     = "__http_framed_bytes"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "http"
+name     = "__http_framed_response"
 native   = 0
 emitter  = 0
 selfhost = 0

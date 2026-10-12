@@ -275,6 +275,10 @@ pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
 pub(crate) const HTTP_CLIENT_SUM: &[&str] = &[
     "__request_impl", "__request_status_impl", "__get_status_impl",
     "__request_bytes_impl", "__get_bytes_impl",
+    // The full-response family (#3620): the op-65 leaf, string index/take/
+    // drop and int.parse, a recursive cell walk, list concat, ok().
+    "__request_response_impl", "__get_response_impl", "__post_response_impl",
+    "__put_response_impl", "__patch_response_impl", "__delete_response_impl",
 ];
 
 /// The http call handle (#2633, audited 2026-09-26): stdlib/http_call.almd

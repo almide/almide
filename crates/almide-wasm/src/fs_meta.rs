@@ -66,9 +66,22 @@ pub(crate) const OP_HTTP_DELETE: i32 = 47;
 /// `<len>\n<payload>`, built by stdlib/http_framed.almd and parsed by the
 /// embedded host with the same char arithmetic. 48 answers the body text,
 /// 49 answers `<status>\n<body>` (split guest-side), 50 answers raw bytes.
+/// 65 answers the whole response (#3620): `<status>\n<hlen>\n`, then hlen
+/// chars of header cells (name, value, wire order, repeats kept), then the body.
 pub(crate) const OP_HTTP_FRAMED_TEXT: i32 = 48;
 pub(crate) const OP_HTTP_FRAMED_STATUS: i32 = 49;
 pub(crate) const OP_HTTP_FRAMED_BYTES: i32 = 50;
+pub(crate) const OP_HTTP_FRAMED_RESPONSE: i32 = 65;
+
+/// The framed leaves whose answer is one text: the leaf's host op.
+pub(crate) fn http_framed_text_op(leaf: &str) -> Option<i32> {
+    match leaf {
+        "__http_framed_text" => Some(OP_HTTP_FRAMED_TEXT),
+        "__http_framed_status" => Some(OP_HTTP_FRAMED_STATUS),
+        "__http_framed_response" => Some(OP_HTTP_FRAMED_RESPONSE),
+        _ => None,
+    }
+}
 /// http.serve (#2650, C-367): the guest-owned serve loop's three host
 /// ops, served by the embedded host through the native runtime's own
 /// server core. 70 binds (port in a), 71 answers the next request as

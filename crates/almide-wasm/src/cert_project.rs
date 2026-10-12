@@ -99,7 +99,7 @@ pub fn op_caps(op: i32) -> &'static [u32] {
         32 => &[ENTROPY],
         34 | 36 | 60 => &[CLOCK],
         35 => &[STDIN],
-        43..=50 | 53..=59 | 70..=72 => &[NET],
+        43..=50 | 53..=59 | 65 | 70..=72 => &[NET],
         80..=90 => &[PROC],
         // The instance-parallel fan offer (#3003, fan_par_lower.rs): the host
         // runs the program's own exported `__fan_site_K` chunk on workers and
