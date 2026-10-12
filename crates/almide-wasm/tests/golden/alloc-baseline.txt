@@ -533,7 +533,7 @@
 74448	spec/wasm_cross/matrix_select_rows_wrapped_rid.almd
 68592	spec/wasm_cross/matrix_shape_family.almd
 68448	spec/wasm_cross/matrix_shape_precondition_activations.almd
-68736	spec/wasm_cross/matrix_shape_precondition_family.almd
+68944	spec/wasm_cross/matrix_shape_precondition_family.almd
 68832	spec/wasm_cross/matrix_slice_rows_domain.almd
 67664	spec/wasm_cross/matrix_softmax_fastexp.almd
 68896	spec/wasm_cross/matrix_softmax_nonfinite_rows.almd
@@ -585,7 +585,7 @@
 65872	spec/wasm_cross/mutual_append.almd
 66048	spec/wasm_cross/mutual_recursive_types.almd
 65728	spec/wasm_cross/mutual_tail_recursion.almd
-65856	spec/wasm_cross/nan_canonical_bytes_write.almd
+66832	spec/wasm_cross/nan_canonical_bytes_write.almd
 65968	spec/wasm_cross/nan_canonical_observation.almd
 66576	spec/wasm_cross/native_wall_shapes.almd
 66352	spec/wasm_cross/negative_float_literal_sized.almd
@@ -726,7 +726,7 @@
 66960	spec/wasm_cross/result_value_int_tuple.almd
 66976	spec/wasm_cross/result_wall_escalations.almd
 68976	spec/wasm_cross/rope_at_family.almd
-68144	spec/wasm_cross/rope_geometry_family.almd
+68352	spec/wasm_cross/rope_geometry_family.almd
 65744	spec/wasm_cross/scalar_if_arm_effects.almd
 66240	spec/wasm_cross/scan_heap_acc.almd
 98320	spec/wasm_cross/scoped_region_value.almd
