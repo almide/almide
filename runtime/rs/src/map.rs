@@ -550,6 +550,10 @@ pub fn almide_rt_map_map_values_owned<K, V, W>(m: AlmideMap<K, V>, f: std::rc::R
     AlmideMap { entries: entries.into_iter().map(|(k, v)| (k, f(v))).collect(), lookup }
 }
 pub fn almide_rt_map_merge<K: PartialEq + Clone + 'static, V: Clone>(a: &AlmideMap<K, V>, b: &AlmideMap<K, V>) -> AlmideMap<K, V> { let mut r = a.clone(); for (k, v) in b.iter() { r.insert(k.clone(), v.clone()); } r }
+// The owned twin (`@reuse(a)`, #3643): a left map at its last use is extended
+// in place instead of cloned — b's keys a has take b's value where they are,
+// b's new keys append in b's order (`insert`).
+pub fn almide_rt_map_merge_owned<K: PartialEq + Clone + 'static, V: Clone>(mut a: AlmideMap<K, V>, b: &AlmideMap<K, V>) -> AlmideMap<K, V> { for (k, v) in b.iter() { a.insert(k.clone(), v.clone()); } a }
 
 pub fn almide_rt_map_filter<K: PartialEq + Clone + 'static, V: Clone>(m: &AlmideMap<K, V>, f: std::rc::Rc<dyn Fn(K, V) -> bool>) -> AlmideMap<K, V> {
     let f = move |a, b| f(a, b);
