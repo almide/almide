@@ -1,0 +1,117 @@
+// net_wasm — the WASM lowering of the tcp family (#3620, the net/tcp design
+// step 2). Native keeps its direct intrinsics (runtime/rs/src/net.rs); this
+// file only ever links on the wasm legs through the self-host registry.
+//
+// Every operation is one host op (91..=103): two text operands, the handle,
+// lengths, port and milliseconds as decimal text, and an ok / err answer. The
+// embedded host serves them with the SAME core native runs
+// (crates/almide-rt-core/src/net_core.rs), so handle numbers, bytes and every
+// err text agree with native by construction (the judge's tcp contracts,
+// almide/als#134). A stock artifact keeps the defined refusal until the p3
+// route (design step 3).
+effect fn __net_listen(host: String, port: String) -> Result[String, String] = _
+
+effect fn __net_accept(listener: String, unused: String) -> Result[String, String] = _
+
+effect fn __net_connect(host: String, port: String) -> Result[String, String] = _
+
+effect fn __net_read(stream: String, len: String) -> Result[Bytes, String] = _
+
+effect fn __net_read_exact(stream: String, len: String) -> Result[Bytes, String] = _
+
+// `len_ms` is `<len>\n<ms>`.
+effect fn __net_read_timeout(stream: String, len_ms: String) -> Result[Bytes, String] = _
+
+effect fn __net_write(stream: String, data: Bytes) -> Result[String, String] = _
+
+effect fn __net_available(stream: String, unused: String) -> Result[String, String] = _
+
+effect fn __net_set_timeout(stream: String, ms: String) -> Result[String, String] = _
+
+effect fn __net_close(stream: String, unused: String) -> Result[String, String] = _
+
+effect fn __net_close_listener(listener: String, unused: String) -> Result[String, String] = _
+
+effect fn __net_local_port(listener: String, unused: String) -> Result[String, String] = _
+
+// The plain-fn surface keeps a plain leaf: its impl returns the raw type at
+// the call site, as process's `is_alive` does.
+fn __net_is_open(stream: String, unused: String) -> Result[String, String] = _
+
+@implements("net.tcp_listen")
+effect fn __net_tcp_listen_impl(host: String, port: Int) -> Result[Int, String] = {
+  let t = __net_listen(host, int.to_string(port))!
+  ok(int.parse(t) ?? -1)
+}
+
+@implements("net.tcp_accept")
+effect fn __net_tcp_accept_impl(listener: Int) -> Result[Int, String] = {
+  let t = __net_accept(int.to_string(listener), "")!
+  ok(int.parse(t) ?? -1)
+}
+
+@implements("net.tcp_connect")
+effect fn __net_tcp_connect_impl(host: String, port: Int) -> Result[Int, String] = {
+  let t = __net_connect(host, int.to_string(port))!
+  ok(int.parse(t) ?? -1)
+}
+
+@implements("net.tcp_local_port")
+effect fn __net_tcp_local_port_impl(listener: Int) -> Result[Int, String] = {
+  let t = __net_local_port(int.to_string(listener), "")!
+  ok(int.parse(t) ?? -1)
+}
+
+@implements("net.tcp_read")
+effect fn __net_tcp_read_impl(stream: Int, len: Int) -> Result[Bytes, String] = __net_read(
+  int.to_string(stream),
+  int.to_string(len),
+)
+
+@implements("net.tcp_read_exact")
+effect fn __net_tcp_read_exact_impl(stream: Int, len: Int) -> Result[Bytes, String] = __net_read_exact(
+  int.to_string(stream),
+  int.to_string(len),
+)
+
+@implements("net.tcp_read_timeout")
+effect fn __net_tcp_read_timeout_impl(stream: Int, len: Int, timeout_ms: Int) -> Result[Bytes, String] = __net_read_timeout(
+  int.to_string(stream),
+  "${len}\n${timeout_ms}",
+)
+
+@implements("net.tcp_write")
+effect fn __net_tcp_write_impl(stream: Int, data: Bytes) -> Result[Unit, String] = {
+  let _ = __net_write(int.to_string(stream), data)!
+  ok(())
+}
+
+@implements("net.tcp_available")
+effect fn __net_tcp_available_impl(stream: Int) -> Result[Int, String] = {
+  let t = __net_available(int.to_string(stream), "")!
+  ok(int.parse(t) ?? -1)
+}
+
+@implements("net.tcp_set_timeout")
+effect fn __net_tcp_set_timeout_impl(stream: Int, timeout_ms: Int) -> Result[Unit, String] = {
+  let _ = __net_set_timeout(int.to_string(stream), int.to_string(timeout_ms))!
+  ok(())
+}
+
+@implements("net.tcp_close")
+effect fn __net_tcp_close_impl(stream: Int) -> Result[Unit, String] = {
+  let _ = __net_close(int.to_string(stream), "")!
+  ok(())
+}
+
+@implements("net.tcp_close_listener")
+effect fn __net_tcp_close_listener_impl(listener: Int) -> Result[Unit, String] = {
+  let _ = __net_close_listener(int.to_string(listener), "")!
+  ok(())
+}
+
+@implements("net.tcp_is_open")
+fn __net_tcp_is_open_impl(stream: Int) -> Bool = match __net_is_open(int.to_string(stream), "") {
+  ok("1") => true,
+  _ => false,
+}

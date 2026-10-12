@@ -123,6 +123,23 @@ pub(crate) const PROC_LEAVES: &[(&str, i32)] = &[
     // #3379: appended, so the earlier ops keep their numbers.
     ("__proc_run_in", 90),
 ];
+/// The tcp family (#3620, the net/tcp design step 2): ops 91..=103, one per
+/// `__net_*` leaf in stdlib/net_wasm.almd, two operands and an ok / err
+/// answer. The embedded host serves them (net_host.rs) with native's core; a
+/// stock artifact does not (the p1 op set omits them), until the p3 route.
+pub(crate) const OP_NET_LISTEN: i32 = 91;
+pub(crate) const OP_NET_ACCEPT: i32 = 92;
+pub(crate) const OP_NET_CONNECT: i32 = 93;
+pub(crate) const OP_NET_READ: i32 = 94;
+pub(crate) const OP_NET_READ_EXACT: i32 = 95;
+pub(crate) const OP_NET_READ_TIMEOUT: i32 = 96;
+pub(crate) const OP_NET_WRITE: i32 = 97;
+pub(crate) const OP_NET_AVAILABLE: i32 = 98;
+pub(crate) const OP_NET_SET_TIMEOUT: i32 = 99;
+pub(crate) const OP_NET_CLOSE: i32 = 100;
+pub(crate) const OP_NET_CLOSE_LISTENER: i32 = 101;
+pub(crate) const OP_NET_IS_OPEN: i32 = 102;
+pub(crate) const OP_NET_LOCAL_PORT: i32 = 103;
 pub(crate) const OP_STAT: i32 = 38;
 pub(crate) const OP_GLOB: i32 = 39;
 /// `read_bytes_raw` / `read_bytes_raw_if_exists`: ops 14 / 25's bodies under

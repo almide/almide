@@ -119,6 +119,7 @@ mod witness_hooks;
 mod witness_unwrap;
 mod calls;
 mod http_call;
+mod net_call;
 mod calls_modules;
 pub mod cells;
 mod global_reach;
