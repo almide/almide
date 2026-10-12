@@ -16,6 +16,7 @@
 mod interp;
 mod ladder;
 mod runner;
+mod sandbox;
 
 pub use interp::InterpOracle;
 pub use ladder::{leak_at_exit, run_ladder, Finding, FindingKind, Outcome, RunEvidence, Rung};

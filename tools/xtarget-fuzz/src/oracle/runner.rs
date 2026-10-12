@@ -34,6 +34,9 @@ pub struct ProcResult {
     /// timeout). The hang-vs-slow split (#1235) reports this, so a Slow
     /// finding carries its measured time instead of just "over budget".
     pub duration: Duration,
+    /// The sandbox tree after the run ([`super::sandbox::snapshot`]), for a
+    /// leg that ran in one; `None` for a build or check.
+    pub tree: Option<String>,
 }
 
 impl ProcResult {
@@ -157,54 +160,83 @@ impl Toolchain {
     /// grandchild `almide run` used to exec — same stdout, same abort forms,
     /// same exit code — with the timeout now covering ONLY the program.
     pub fn run_native_bin(&self, bin: &Path) -> ProcResult {
-        let mut cmd = Command::new(bin);
-        cmd.env("NO_COLOR", "1");
-        // The address-space cap (#2611). A corpus mutation can raise a loop
-        // bound to 4294967295 around an allocation (seed 578090231173 index
-        // 4323: a fresh Map pushed per iteration). Native then allocates at
-        // GB/s for the whole 30 s budget, well past the runner's 16 GB, and the
-        // hosted runner is shut down ("The runner has received a shutdown
-        // signal", exit 143) with the shard's campaign and upload lost. That
-        // was the shard-loss mechanism on the aarch64 runners, measured with
-        // the in-step sampler: mem_used went from ~1.3 GB to 13.5-15.6 GB with
-        // mem_avail at 297-343 MB in the last sample before every kill.
-        // The wasm leg already has this ceiling (wasm32's 4 GiB), so the cap
-        // gives native the same one, and a program that reaches it is skipped
-        // by the ladder (`native_hit_memory_cap`), never compared.
-        #[cfg(unix)]
-        unsafe {
-            use std::os::unix::process::CommandExt;
-            cmd.pre_exec(|| {
-                let lim = libc::rlimit {
-                    rlim_cur: NATIVE_MEMORY_CAP_BYTES as libc::rlim_t,
-                    rlim_max: NATIVE_MEMORY_CAP_BYTES as libc::rlim_t,
-                };
-                // Best effort: an OS that refuses the cap runs the program
-                // uncapped, exactly as before.
-                let _ = libc::setrlimit(libc::RLIMIT_AS, &lim);
-                Ok(())
-            });
-        }
-        self.spawn_timed(cmd)
+        let bin = absolute(bin);
+        self.run_sandboxed(|_| {
+            let mut cmd = Command::new(&bin);
+            cmd.args(super::sandbox::ARGS);
+            cmd.env("NO_COLOR", "1");
+            native_memory_cap(&mut cmd);
+            cmd
+        })
     }
+}
 
+/// The native address-space cap, applied before exec.
+fn native_memory_cap(cmd: &mut Command) {
+    // The address-space cap (#2611). A corpus mutation can raise a loop
+    // bound to 4294967295 around an allocation (seed 578090231173 index
+    // 4323: a fresh Map pushed per iteration). Native then allocates at
+    // GB/s for the whole 30 s budget, well past the runner's 16 GB, and the
+    // hosted runner is shut down ("The runner has received a shutdown
+    // signal", exit 143) with the shard's campaign and upload lost. That
+    // was the shard-loss mechanism on the aarch64 runners, measured with
+    // the in-step sampler: mem_used went from ~1.3 GB to 13.5-15.6 GB with
+    // mem_avail at 297-343 MB in the last sample before every kill.
+    // The wasm leg already has this ceiling (wasm32's 4 GiB), so the cap
+    // gives native the same one, and a program that reaches it is skipped
+    // by the ladder (`native_hit_memory_cap`), never compared.
+    #[cfg(unix)]
+    unsafe {
+        use std::os::unix::process::CommandExt;
+        cmd.pre_exec(|| {
+            let lim = libc::rlimit {
+                rlim_cur: NATIVE_MEMORY_CAP_BYTES as libc::rlim_t,
+                rlim_max: NATIVE_MEMORY_CAP_BYTES as libc::rlim_t,
+            };
+            // Best effort: an OS that refuses the cap runs the program
+            // uncapped, exactly as before.
+            let _ = libc::setrlimit(libc::RLIMIT_AS, &lim);
+            Ok(())
+        });
+    }
+}
+
+/// `p` resolved against the current directory: a sandboxed child runs in
+/// another cwd, where a relative program or module path would not resolve.
+fn absolute(p: &Path) -> PathBuf {
+    if p.is_absolute() { p.to_path_buf() } else { std::env::current_dir().map(|d| d.join(p)).unwrap_or_else(|_| p.to_path_buf()) }
+}
+
+impl Toolchain {
     /// `ALMIDE_WASM_ALLOC_COUNT=1 almide run <file> --target wasm` — the
     /// structural leg on the embedded host with the allocation counters
     /// armed; the `__ALMD_WASM_ALLOC … live=N` line lands on stderr.
     pub fn run_wasm_counted(&self, file: &Path) -> ProcResult {
-        let mut cmd = Command::new(&self.almide);
-        cmd.args(["run", &file.to_string_lossy(), "--target", "wasm"]);
-        cmd.env("ALMIDE_RUN_PROJECT_DIR", &self.scratch);
-        cmd.env("NO_COLOR", "1");
-        cmd.env("ALMIDE_WASM_ALLOC_COUNT", "1");
-        self.spawn_timed(cmd)
+        let file = absolute(file);
+        self.run_sandboxed(|_| {
+            let mut cmd = Command::new(&self.almide);
+            cmd.args(["run", &file.to_string_lossy(), "--target", "wasm", "--"]);
+            cmd.args(super::sandbox::ARGS);
+            cmd.env("ALMIDE_RUN_PROJECT_DIR", &self.scratch);
+            cmd.env("NO_COLOR", "1");
+            cmd.env("ALMIDE_WASM_ALLOC_COUNT", "1");
+            cmd
+        })
     }
 
     /// `wasmtime <wasm>` — execute the WASM build.
     pub fn run_wasm(&self, wasm: &Path) -> ProcResult {
-        let mut cmd = Command::new(&self.wasmtime);
-        cmd.arg(wasm);
-        self.spawn_timed(cmd)
+        let wasm = absolute(wasm);
+        self.run_sandboxed(|dir| {
+            let mut cmd = Command::new(&self.wasmtime);
+            cmd.arg(format!("--dir={}::.", dir.display()));
+            for (k, v) in super::sandbox::ENV {
+                cmd.arg(format!("--env={k}={v}"));
+            }
+            cmd.arg(&wasm);
+            cmd.args(super::sandbox::ARGS);
+            cmd
+        })
     }
 
     /// Spawn `almide` with the given args under this worker's isolated
@@ -229,8 +261,13 @@ impl Toolchain {
     /// Spawn a command, capture stdout/stderr on dedicated reader
     /// threads (so a child that fills a pipe buffer never deadlocks),
     /// and enforce the timeout by polling, killing on overrun.
-    fn spawn_timed(&self, mut cmd: Command) -> ProcResult {
-        cmd.stdin(Stdio::null());
+    fn spawn_timed(&self, cmd: Command) -> ProcResult {
+        self.spawn_timed_with(cmd, None)
+    }
+
+    /// [`Self::spawn_timed`] with stdin read from `stdin` (null when `None`).
+    fn spawn_timed_with(&self, mut cmd: Command, stdin: Option<std::fs::File>) -> ProcResult {
+        cmd.stdin(stdin.map(Stdio::from).unwrap_or_else(Stdio::null));
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
         // Make the child its own process-GROUP leader, so a timeout kill can
@@ -256,6 +293,7 @@ impl Toolchain {
                     timed_out: false,
                     spawn_failed: true,
                     duration: Duration::ZERO,
+                    tree: None,
                 };
             }
         };
@@ -322,7 +360,27 @@ impl Toolchain {
             timed_out,
             spawn_failed: false,
             duration,
+            tree: None,
         }
+    }
+
+    /// Run `cmd` in a fresh sandbox (docs/roadmap/active/effect-inspection-harness.md,
+    /// tier E1): cwd = the seeded tree, the fixed env, stdin from the fixed
+    /// file. `build` makes the command for the sandbox it is given and places
+    /// the program arguments itself. The tree after the run is kept.
+    fn run_sandboxed(&self, build: impl FnOnce(&Path) -> Command) -> ProcResult {
+        let Ok((dir, stdin)) = super::sandbox::create(&self.scratch) else {
+            return self.spawn_timed(build(&self.scratch));
+        };
+        let mut cmd = build(&dir);
+        cmd.current_dir(&dir);
+        for (k, v) in super::sandbox::ENV {
+            cmd.env(k, v);
+        }
+        let mut res = self.spawn_timed_with(cmd, std::fs::File::open(&stdin).ok());
+        res.tree = Some(super::sandbox::snapshot(&dir));
+        super::sandbox::remove(&dir, &stdin);
+        res
     }
 }
 
@@ -381,6 +439,7 @@ mod tests {
             timed_out: false,
             spawn_failed: false,
             duration: Duration::ZERO,
+            tree: None,
         };
         assert!(native_hit_memory_cap(&run("memory allocation of 4294967296 bytes failed\n")));
         assert!(!native_hit_memory_cap(&run("thread 'main' panicked at 'index out of bounds'\n")));
