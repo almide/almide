@@ -444,6 +444,54 @@ pub(crate) mod tests {
         assert!(!s.contains("value.int(i)"), "{s}");
     }
 
+    /// #3637: matrix functions with head or kernel geometry got
+    /// `matrix.zeros(n, 2)` with every other operand 2×2 and 2 for every
+    /// count, so heads × dim = 4 overran the 2 columns and the q/k/v and
+    /// conv1d shapes did not line up — every shape exited 1. Each gets
+    /// operands that agree, with n on an axis the function accepts, in the
+    /// plain call, the rebind shapes and the diamond alike.
+    #[test]
+    fn head_and_kernel_geometry_functions_get_operands_that_agree() {
+        for name in ["matrix.rope_rotate", "matrix.rope_rotate_at", "matrix.rope_rotate_neox_at"] {
+            let t = target(name);
+            let direct = t.direct_program(1000, 4, true);
+            // 2 heads × head_dim 2 = the 4 columns.
+            assert!(direct.contains("  var x: Matrix = matrix.zeros(1000, 4)"), "{direct}");
+            assert!(direct.contains("  let a1: Int = 2\n  let a2: Int = 2\n"), "{direct}");
+            let tail = &t.rebind_programs(1000, 4)[1].1;
+            assert!(tail.contains("let x0: Matrix = matrix.zeros(1000, 4)") && tail.contains("fn a1() -> Int = 2"), "{tail}");
+        }
+        // Causal attention needs rows(q) <= rows(k): n is the key/value
+        // length (a KV cache), q a fixed 2 rows, all 4 wide over 2 heads.
+        let t = target("matrix.masked_multi_head_attention");
+        let direct = t.direct_program(1000, 4, true);
+        assert!(direct.contains("  var x: Matrix = matrix.zeros(1000, 4)"), "{direct}");
+        assert!(direct.contains("  let a0: Matrix = matrix.zeros(2, 4)"), "{direct}");
+        assert!(direct.contains("  let a2: Matrix = matrix.zeros(1000, 4)"), "{direct}");
+        assert!(direct.contains("  let a3: Int = 2"), "{direct}");
+        assert!(direct.contains("matrix.masked_multi_head_attention(a0, x, a2, a3)"), "{direct}");
+        let fold = &t.rebind_programs(1000, 4)[2].1;
+        assert!(fold.contains("let x0: Matrix = matrix.zeros(2, 4)"), "{fold}");
+        assert!(fold.contains("fn a1() -> Matrix = matrix.zeros(1000, 4)") && fold.contains("fn a2() -> Matrix = matrix.zeros(1000, 4)"), "{fold}");
+        // conv1d: (T, in_ch) input, (out_ch, in_ch × kernel) weight, one
+        // bias per out_ch; kernel 3, stride 1, padding 1 keep T rows out.
+        let t = target("matrix.conv1d");
+        let direct = t.direct_program(1000, 4, true);
+        for want in [
+            "  var x: Matrix = matrix.zeros(1000, 2)",
+            "  let a1: Matrix = matrix.zeros(2, 6)",
+            "  let a2: List[Float] = [0.5, 1.5]",
+            "  let a3: Int = 3",
+            "  let a4: Int = 1",
+            "  let a5: Int = 1",
+        ] {
+            assert!(direct.contains(want), "{want}: {direct}");
+        }
+        let project = t.diamond_project(64);
+        let main = &project.files.iter().find(|(p, _)| p.ends_with("main.almd")).unwrap().1;
+        assert!(main.contains("let a0: Matrix = matrix.zeros(64, 2)") && main.contains("let a1: Matrix = matrix.zeros(2, 6)"), "{main}");
+    }
+
     /// A `mut`-parameter mutator: its sized input is a `var` the loop calls
     /// it on, and each diamond path mutates its own `var` and prints it.
     #[test]
