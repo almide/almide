@@ -232,6 +232,7 @@ impl Target {
         if with_call {
             let _ = writeln!(s, "    let r: {} = {}", self.ret.render(), self.bound_call(slot.map(|(i, _)| i)));
             let _ = writeln!(s, "    acc = acc + {}", digest("r", &self.ret));
+            s.push_str(&err_guard("r", &self.ret, "    "));
         }
         let _ = writeln!(s, "    acc = acc + 1\n    i = i + 1\n  }}");
         if let Some(i) = self.size_param {
@@ -269,25 +270,31 @@ impl Target {
             format!("{}({})", self.name, args.join(", "))
         };
         let d = digest("x", &self.ret);
+        // The value each shape ends with must be ok. Checked once, after the
+        // steps: a check inside them would change what they time (the
+        // in-place rebind). Every shape starts from an `ok` (`small` and the
+        // recipes build no `err`), so a step that took the error path leaves
+        // an `err` unless a later step turns it back into an `ok`.
+        let end = format!("{}  println(\"${{{d}}}\")\n", err_guard("x", &self.ret, "  "));
         let programs = vec![
             (
                 "loop",
                 format!(
-                    "effect fn main() -> Unit = {{\n  var x: {ty} = {init}\n  var i = 0\n  while i < {k} {{\n    x = {}\n    i = i + 1\n  }}\n  println(\"${{{d}}}\")\n}}\n",
+                    "effect fn main() -> Unit = {{\n  var x: {ty} = {init}\n  var i = 0\n  while i < {k} {{\n    x = {}\n    i = i + 1\n  }}\n{end}}}\n",
                     step("x")
                 ),
             ),
             (
                 "tail",
                 format!(
-                    "fn go(x: {ty}, i: Int) -> {ty} = if i <= 0 then x else go({}, i - 1)\n\neffect fn main() -> Unit = {{\n  let x0: {ty} = {init}\n  let x: {ty} = go(x0, {k})\n  println(\"${{{d}}}\")\n}}\n",
+                    "fn go(x: {ty}, i: Int) -> {ty} = if i <= 0 then x else go({}, i - 1)\n\neffect fn main() -> Unit = {{\n  let x0: {ty} = {init}\n  let x: {ty} = go(x0, {k})\n{end}}}\n",
                     step("x")
                 ),
             ),
             (
                 "fold",
                 format!(
-                    "effect fn main() -> Unit = {{\n  let x0: {ty} = {init}\n  let x: {ty} = list.range(0, {k}) |> list.fold(x0, (x, i) => {})\n  println(\"${{{d}}}\")\n}}\n",
+                    "effect fn main() -> Unit = {{\n  let x0: {ty} = {init}\n  let x: {ty} = list.range(0, {k}) |> list.fold(x0, (x, i) => {})\n{end}}}\n",
                     step("x")
                 ),
             ),
@@ -328,6 +335,10 @@ impl Target {
                 let _ = writeln!(main, "  var {v}m: {} = {}", self.render_param(m), self.arg(m, n));
             }
             let _ = writeln!(main, "  let {v}: {ret} = {callee}({})", path_args(v));
+        }
+        // Three paths agreeing on an `err` agree on the error path.
+        for v in ["d", "l", "r"] {
+            main.push_str(&err_guard(v, &self.ret, "  "));
         }
         for v in ["d", "l", "r"] {
             // A Unit return has no string form (E089) and nothing to compare.
@@ -494,6 +505,16 @@ fn vary(v: &str, t: &GenType, n: u64) -> String {
         // A string has no O(1) in-place edit; the same value is rebound.
         _ => v.to_string(),
     }
+}
+
+/// For a Result `t`, the statement that stops the program with [`ERR_PATH`]
+/// when `v` is an `err`; nothing for any other type. The error slot is
+/// pinned to String (see the module doc), so `e` interpolates.
+fn err_guard(v: &str, t: &GenType, indent: &str) -> String {
+    if !matches!(t, GenType::Result(_)) {
+        return String::new();
+    }
+    format!("{indent}match {v} {{\n{indent}  ok(_) => (),\n{indent}  err(e) => panic(\"{ERR_PATH}: ${{e}}\"),\n{indent}}}\n")
 }
 
 /// An Int that depends on the whole of `v`, so no call is dead.
