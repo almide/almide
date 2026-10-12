@@ -186,6 +186,10 @@ impl Emitter<'_> {
     /// `h.f = h.f + x` through `lower_field_assign`'s copy-on-write rebind,
     /// the route `list.push(h.f, v)` takes (#2411).
     fn lower_string_push(&mut self, v: &IrExpr, x: &IrExpr) -> ArmResult {
+        // #3639: a field the append window admits grows in place.
+        if self.try_field_push_str(v, x)? {
+            return Ok(None);
+        }
         if let Some((id, path)) = crate::list_mut::record_field_receiver(v) {
             // Built here, not as a synthesized `h.f + x` expression: a
             // fresh `x` (`int.to_string(i)`) is then a borrowed argument
@@ -213,6 +217,22 @@ impl Emitter<'_> {
         }
         self.emit_read_mut_var(id, var_idx, var_ty, vglob);
         self.lower_arg(x, Some(STR), ArgMode::Borrow)?;
+        // #3639: a plain local appends through `$str_append` — the window
+        // `s = s + x` already takes (stmts_append.rs): in place when the
+        // block is owned outright (rc == 1) and its capacity holds the grown
+        // length, else a fresh geometric block with the outgrown one
+        // released. It consumes the var's credit and answers the block the
+        // var now holds, so a shared receiver (an alias bound before the
+        // push) is copied and the alias keeps its text. F_CONCAT copied the
+        // whole string on every push: a builder loop was quadratic. A global
+        // or a C-319 cell keeps the concat rebind: a call in `x` may rebind
+        // that outer holder under the block read above.
+        if !vglob && !self.cells.contains(id) {
+            self.f.instructions().call(F_STR_APPEND);
+            self.emit_store_mut_var(*id, var_idx, var_ty, vglob)?;
+            self.witness_mut_rebind(*id, vglob);
+            return Ok(None);
+        }
         self.f.instructions().call(F_CONCAT);
         self.emit_rebind_mut_var_fresh(*id, var_idx, var_ty, vglob)?;
         Ok(None)

@@ -321,7 +321,14 @@ fn render_fn(
         line!("let __almd_probe_guard = __AlmdProbeGuard;");
         line!("let _ = &__almd_probe_guard;");
     }
-    for op in &func.ops {
+    let mut ops = func.ops.iter().enumerate();
+    while let Some((i, op)) = ops.next() {
+        // #3639: `s = s + x` / `string.push(s, x)` grows `s` in place.
+        if let Some(append) = crate::render_native_append::str_self_append(func, i, &tys) {
+            line!("{append}");
+            ops.nth(1);
+            continue;
+        }
         match op {
             Op::Prim {
                 kind: crate::PrimKind::Handle,
