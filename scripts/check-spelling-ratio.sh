@@ -44,9 +44,16 @@
 #   x86_64  (Xeon 8581C)    imperative 1.00   indexed 0.91   enumerate 1.00
 #   aarch64 (Neoverse-V2)   imperative 1.43   indexed 0.81   enumerate 1.22
 #
+# and on the CI runners that hold the verdict (PR #3608, 5 samples):
+#
+#   x86_64  ubuntu-latest       imperative 1.00   indexed 0.94   enumerate 1.00
+#   aarch64 ubuntu-24.04-arm    imperative 1.14   indexed 0.86   enumerate 1.13
+#
 # opt-level 3 + LTO slower than opt-level 1 is a pessimization whatever its
-# cause. The aarch64 budget is a RATCHET at today's figure, not the goal: the
-# goal is <= 1.05 on both arches (#3604). Lower it as #3604 lands.
+# cause. The aarch64 budget is a RATCHET over the CI runner's figure (1.14x,
+# Neoverse-N2), not the goal: the goal is <= 1.05 on both arches (#3604).
+# Lower it as #3604 lands. A Neoverse-V2 machine reads 1.43x today, so a local
+# run there needs SPELLING_RELEASE_BUDGET=1.50 until the fix lands.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -57,7 +64,7 @@ BUDGET="${SPELLING_RATIO_BUDGET:-2.0}"
 # `profile`: it has no wasmtime, and the spelling leg already runs on x86_64.
 LEGS="${SPELLING_RATIO_LEGS:-spelling,profile}"
 case "$(uname -m)" in
-  aarch64|arm64) RELEASE_DEFAULT_BUDGET=1.50 ;;
+  aarch64|arm64) RELEASE_DEFAULT_BUDGET=1.25 ;;
   *)             RELEASE_DEFAULT_BUDGET=1.10 ;;
 esac
 RELEASE_BUDGET="${SPELLING_RELEASE_BUDGET:-$RELEASE_DEFAULT_BUDGET}"
