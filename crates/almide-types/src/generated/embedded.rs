@@ -34343,7 +34343,8 @@ fn string_take_end(s: String, n: Int) -> String = {
   let h = prim.handle(s)
   let base = h + 12
   let end = base + prim.load32(h + 4)
-  let start = if n < 0 then base else __td_back(base, end, n)
+  let start = if n < 0 then base
+  else __td_back(base, end, n)
   __td_bytes(start, end)
 }
 
@@ -34351,7 +34352,8 @@ fn string_drop_end(s: String, n: Int) -> String = {
   let h = prim.handle(s)
   let base = h + 12
   let end = base + prim.load32(h + 4)
-  let cut = if n < 0 then base else __td_back(base, end, n)
+  let cut = if n < 0 then base
+  else __td_back(base, end, n)
   __td_bytes(base, cut)
 }
 "#;
