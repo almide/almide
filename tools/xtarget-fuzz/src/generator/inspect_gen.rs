@@ -31,6 +31,8 @@ pub struct Target {
     /// The `mut` parameter: bound with `var`, and in the diamond each path
     /// mutates its own copy and prints it.
     mut_param: Option<usize>,
+    /// The function's [`SHAPE_RECIPES`] entry, if it has one.
+    recipe: Option<&'static Recipe>,
 }
 
 const SIZE_LIKE_INT: &[&str] = &["n", "count", "times", "len", "size", "end", "width"];
@@ -38,6 +40,51 @@ const SIZE_LIKE_INT: &[&str] = &["n", "count", "times", "len", "size", "end", "w
 /// Element-typed parameters a search compares against: given a value no
 /// sized input holds, so the search scans to the end (its worst case).
 const SEARCH_PARAMS: &[&str] = &["x", "value", "elem", "item", "needle", "target", "sub", "pattern", "from"];
+
+/// The arguments of a function whose operands must agree in shape (#3637):
+/// each named parameter takes its expression, `{n}` standing for the size,
+/// and `size` is the parameter the size is measured in. The generic values
+/// (`matrix.zeros(n, 2)`, 2×2 operands, 2 for every count) violate these
+/// functions' preconditions, so every shape exited 1.
+#[derive(Debug)]
+struct Recipe {
+    func: &'static str,
+    size: &'static str,
+    args: &'static [(&'static str, &'static str)],
+}
+
+/// Rope: 2 heads × head_dim 2 fill the 4 columns; n is the row (position)
+/// count.
+const ROPE: &[(&str, &str)] = &[("x", "matrix.zeros({n}, 4)"), ("n_heads", "2"), ("head_dim", "2")];
+
+const SHAPE_RECIPES: &[Recipe] = &[
+    Recipe { func: "matrix.rope_rotate", size: "x", args: ROPE },
+    Recipe { func: "matrix.rope_rotate_at", size: "x", args: ROPE },
+    Recipe { func: "matrix.rope_rotate_neox_at", size: "x", args: ROPE },
+    // Causal attention needs rows(q) <= rows(k), and k / v as wide as q:
+    // n is the key/value length (a KV cache) against 2 query rows, 4 wide
+    // over 2 heads. The rebound q keeps its 2 × 4 shape.
+    Recipe {
+        func: "matrix.masked_multi_head_attention",
+        size: "k",
+        args: &[("q", "matrix.zeros(2, 4)"), ("k", "matrix.zeros({n}, 4)"), ("v", "matrix.zeros({n}, 4)"), ("n_heads", "2")],
+    },
+    // A (T, in_ch) input, an (out_ch, in_ch × kernel) weight, one bias per
+    // out_ch; kernel 3, stride 1, padding 1 give T output rows of out_ch =
+    // in_ch, so the rebound input keeps its shape. n is T.
+    Recipe {
+        func: "matrix.conv1d",
+        size: "input",
+        args: &[
+            ("input", "matrix.zeros({n}, 2)"),
+            ("weight", "matrix.zeros(2, 6)"),
+            ("bias", "[0.5, 1.5]"),
+            ("kernel", "3"),
+            ("stride", "1"),
+            ("padding", "1"),
+        ],
+    },
+];
 
 /// Functions that stop at the first `true` from their predicate: given a
 /// predicate that is always `false`, so they visit every element.
@@ -58,12 +105,38 @@ impl Target {
         let ret = sig.ret.instantiate(&subst).ok_or_else(|| format!("{name}: return type has no value form"))?;
         let params: Vec<(String, SigType)> = sig.param_names.iter().cloned().zip(sig.params.iter().cloned()).collect();
         let concrete = |t: &SigType| t.instantiate(&subst);
-        let size_param = params
-            .iter()
-            .position(|(_, t)| matches!(concrete(t), Some(GenType::List(_) | GenType::Map(_) | GenType::Set(_) | GenType::String | GenType::Bytes | GenType::Matrix | GenType::Value)))
-            .or_else(|| params.iter().position(|(n, t)| *t == SigType::Int && SIZE_LIKE_INT.contains(&n.as_str())));
+        let recipe = SHAPE_RECIPES.iter().find(|r| r.func == name);
+        let param_at = |p: &str| params.iter().position(|(n, _)| n == p);
+        if let Some(r) = recipe {
+            // A recipe naming a parameter the signature no longer has would
+            // silently fall back to the generic values that violate it.
+            if let Some((p, _)) = r.args.iter().find(|(p, _)| param_at(p).is_none()) {
+                return Err(format!("{name}: shape recipe names `{p}`, which is not a parameter"));
+            }
+            if !r.args.iter().any(|(p, e)| *p == r.size && e.contains("{n}")) {
+                return Err(format!("{name}: shape recipe's size `{}` does not take n", r.size));
+            }
+        }
+        let size_param = match recipe {
+            Some(r) => param_at(r.size),
+            None => params
+                .iter()
+                .position(|(_, t)| matches!(concrete(t), Some(GenType::List(_) | GenType::Map(_) | GenType::Set(_) | GenType::String | GenType::Bytes | GenType::Matrix | GenType::Value)))
+                .or_else(|| params.iter().position(|(n, t)| *t == SigType::Int && SIZE_LIKE_INT.contains(&n.as_str()))),
+        };
         let rebind_param = params.iter().position(|(_, t)| concrete(t).as_ref() == Some(&ret));
-        Ok(Target { name, params, subst, ret, size_param, rebind_param, mut_param: sig.mut_param })
+        Ok(Target { name, params, subst, ret, size_param, rebind_param, mut_param: sig.mut_param, recipe })
+    }
+
+    /// The recipe's expression for parameter `i`, if it names it.
+    fn recipe_arg(&self, i: usize) -> Option<&'static str> {
+        let pname = &self.params[i].0;
+        self.recipe?.args.iter().find(|(p, _)| p == pname).map(|(_, e)| *e)
+    }
+
+    /// Parameter `i`'s value grows with n.
+    fn scales(&self, i: usize) -> bool {
+        Some(i) == self.size_param || self.recipe_arg(i).is_some_and(|e| e.contains("{n}"))
     }
 
     fn ty(&self, i: usize) -> Option<GenType> {
@@ -72,6 +145,9 @@ impl Target {
 
     fn arg(&self, i: usize, n: u64) -> String {
         let (pname, t) = &self.params[i];
+        if let Some(e) = self.recipe_arg(i) {
+            return e.replace("{n}", &n.to_string());
+        }
         match t {
             SigType::Fn(ps, r) => self.lambda(ps, r),
             SigType::Int if Some(i) == self.size_param => n.to_string(),
@@ -149,13 +225,15 @@ impl Target {
     pub fn rebind_programs(&self, n: u64, k: u64) -> Vec<(&'static str, String)> {
         let Some(p) = self.rebind_param else { return Vec::new() };
         let ty = self.ret.render();
-        let init = if Some(p) == self.size_param { self.arg(p, n) } else { sized(&self.ret, n) };
+        let init = if Some(p) == self.size_param || self.recipe_arg(p).is_some() { self.arg(p, n) } else { sized(&self.ret, n) };
         // The other value arguments come from typed top-level fns, which the
         // tail shape's `go` can see as well as `main` (an inline `ok(2)`
-        // leaves its error type unconstrained, E025).
+        // leaves its error type unconstrained, E025). They are small, except
+        // a recipe's operand that must keep its shape against the others.
         let mut consts = String::new();
         for i in (0..self.params.len()).filter(|i| *i != p && !self.is_fn(*i)) {
-            let _ = writeln!(consts, "fn a{i}() -> {} = {}\n", self.render_param(i), self.arg(i, 1));
+            let m = if self.recipe_arg(i).is_some() && self.scales(i) { n } else { 1 };
+            let _ = writeln!(consts, "fn a{i}() -> {} = {}\n", self.render_param(i), self.arg(i, m));
         }
         let step = |v: &str| {
             let args: Vec<String> = (0..self.params.len())
@@ -490,6 +568,16 @@ pub(crate) mod tests {
         let project = t.diamond_project(64);
         let main = &project.files.iter().find(|(p, _)| p.ends_with("main.almd")).unwrap().1;
         assert!(main.contains("let a0: Matrix = matrix.zeros(64, 2)") && main.contains("let a1: Matrix = matrix.zeros(2, 6)"), "{main}");
+    }
+
+    /// A recipe that drifted from its function's signature is an error, not
+    /// a silent fall-back to the shapes that function refuses.
+    #[test]
+    fn every_shape_recipe_names_a_catalogued_function_and_its_parameters() {
+        for r in SHAPE_RECIPES {
+            let t = target(r.func);
+            assert!(t.recipe.is_some() && t.size_param.is_some(), "{}", r.func);
+        }
     }
 
     /// A `mut`-parameter mutator: its sized input is a `var` the loop calls
