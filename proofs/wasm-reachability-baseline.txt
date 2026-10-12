@@ -137,7 +137,6 @@ net.unix_recv :: HOST_CAPABILITY :: native-only-forever: stock WASI has no Unix-
 net.unix_send :: HOST_CAPABILITY :: native-only-forever: stock WASI has no Unix-domain sockets, descriptor passing or shared-memory files (proofs/target-availability.toml, #1423)
 net.unix_take_fds :: HOST_CAPABILITY :: native-only-forever: stock WASI has no Unix-domain sockets, descriptor passing or shared-memory files (proofs/target-availability.toml, #1423)
 net.unix_wait :: HOST_CAPABILITY :: native-only-forever: stock WASI has no Unix-domain sockets, descriptor passing or shared-memory files (proofs/target-availability.toml, #1423)
-process.stdin_lines :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call process.stdin_lines needs a declared capability not in this brick
 result.flat_map :: UNPROBEABLE :: no candidate shape builds natively
 result.flatten :: UNPROBEABLE :: no candidate shape builds natively
 result.is_err :: UNPROBEABLE :: no candidate shape builds natively
