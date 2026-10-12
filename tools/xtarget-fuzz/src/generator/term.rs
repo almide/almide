@@ -179,6 +179,7 @@ fn gen_leaf(b: &mut Builder, goal: &GenType) -> String {
         GenType::Unit => "()".to_string(),
         GenType::Sized(_) | GenType::Bytes => sized_or_bytes(b, goal),
         GenType::Matrix => matrix_literal(b),
+        GenType::Value => value_literal(b, 0),
         // Compound goals: construct (and hoist if ambiguous).
         GenType::List(_)
         | GenType::Option(_)
@@ -215,6 +216,36 @@ fn matrix_literal(b: &mut Builder) -> String {
     format!("matrix.from_lists([{}])", rows.join(", "))
 }
 
+/// A `Value`: a scalar, or (above depth 2, never) an array or object of up
+/// to two children. Object keys mix snake_case and camelCase, so `pick` /
+/// `omit` hit and miss and the case converters have something to rewrite.
+fn value_literal(b: &mut Builder, depth: u32) -> String {
+    const KEYS: &[&str] = &["a", "k", "snake_case", "camelCase", "ünï"];
+    let kinds: &[u8] = if depth >= 2 { &[0, 1, 2, 3, 4] } else { &[0, 1, 2, 3, 4, 5, 6] };
+    match *b.rng.pick(kinds) {
+        0 => format!("value.int({})", b.rng.pick(pools::INT_POOL)),
+        1 => format!("value.float({})", render_float_literal(*b.rng.pick(pools::FLOAT_POOL))),
+        2 => format!("value.str({})", render_string_literal(b.rng.pick(pools::STRING_POOL))),
+        3 => format!("value.bool({})", b.rng.pick(pools::BOOL_POOL)),
+        4 => "value.null()".to_string(),
+        5 => {
+            let n = *b.rng.pick(&[0usize, 1, 2]);
+            let items: Vec<String> = (0..n).map(|_| value_literal(b, depth + 1)).collect();
+            if n == 0 { "value.array(list.drop([value.null()], 1))".to_string() } else { format!("value.array([{}])", items.join(", ")) }
+        }
+        _ => {
+            let n = *b.rng.pick(&[0usize, 1, 2]);
+            let pairs: Vec<String> = (0..n)
+                .map(|_| {
+                    let k = render_string_literal(b.rng.pick(KEYS));
+                    format!("({k}, {})", value_literal(b, depth + 1))
+                })
+                .collect();
+            if n == 0 { "value.object(list.drop([(\"a\", value.null())], 1))".to_string() } else { format!("value.object([{}])", pairs.join(", ")) }
+        }
+    }
+}
+
 /// Construct a compound value. Ambiguous shapes (empty list/map, `none`,
 /// `ok`/`err`) are hoisted into an annotated `let` so they type-check;
 /// the function returns the *reference* to that binding. Unambiguous
@@ -228,7 +259,8 @@ fn gen_construct(b: &mut Builder, goal: &GenType) -> String {
         | GenType::Unit
         | GenType::Sized(_)
         | GenType::Bytes
-        | GenType::Matrix => gen_leaf(b, goal),
+        | GenType::Matrix
+        | GenType::Value => gen_leaf(b, goal),
         GenType::Set(elem) => {
             let n = *b.rng.pick(pools::SMALL_COUNT_POOL) as usize;
             if n == 0 {
@@ -521,6 +553,7 @@ fn gen_lambda_body(b: &mut Builder, goal: &GenType) -> String {
         }
         GenType::Sized(_) | GenType::Bytes => sized_or_bytes(b, goal),
         GenType::Matrix => matrix_literal(b),
+        GenType::Value => value_literal(b, 0),
         GenType::Set(e) => format!("set.from_list([{}])", gen_lambda_body(b, e)),
     }
 }
