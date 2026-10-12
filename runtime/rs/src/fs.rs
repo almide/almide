@@ -360,7 +360,17 @@ pub fn almide_rt_fs_remove_all(path: &str) -> Result<(), String> {
 
 // Copy / Rename
 pub fn almide_rt_fs_copy(src: &str, dst: &str) -> Result<(), String> {
-    std::fs::copy(src, dst).map(|_| ()).map_err(|e| io_err("fs.copy", &format!("{}, {}", fs_q(src), fs_q(dst)), e))
+    let args = format!("{}, {}", fs_q(src), fs_q(dst));
+    // A directory source fails as READING it does (EISDIR, C-215): the stock
+    // wasm leg's self-hosted copy reads its source first, and std::fs::copy's
+    // own InvalidInput text carries no errno. The embedded host's twin is
+    // host_fs.rs `fs_copy_or_rename`.
+    if Path::new(src).is_dir() {
+        if let Err(e) = std::fs::read(src) {
+            return Err(io_err("fs.copy", &args, e));
+        }
+    }
+    std::fs::copy(src, dst).map(|_| ()).map_err(|e| io_err("fs.copy", &args, e))
 }
 pub fn almide_rt_fs_rename(src: &str, dst: &str) -> Result<(), String> {
     std::fs::rename(src, dst).map_err(|e| io_err("fs.rename", &format!("{}, {}", fs_q(src), fs_q(dst)), e))
