@@ -447,11 +447,11 @@ fn diamond(ctx: &Ctx, t: &Target, n: u64) -> String {
         c.output()
     };
     let (Ok(nat), Ok(was)) = (run(false), run(true)) else { return "SKIP: could not run almide".into() };
-    diamond_verdict(&nat, &was)
+    diamond_verdict(t.diamond_prints(), &nat, &was)
 }
 
 /// Criterion 5's verdict from the diamond project's run on each leg.
-fn diamond_verdict(nat: &std::process::Output, was: &std::process::Output) -> String {
+fn diamond_verdict(_prints: bool, nat: &std::process::Output, was: &std::process::Output) -> String {
     if !nat.status.success() || !was.status.success() {
         return format!("FAIL: native exit {:?} ({}), wasm exit {:?} ({})", nat.status.code(), first_error(&nat.stderr), was.status.code(), first_error(&was.stderr));
     }
@@ -820,6 +820,23 @@ mod verdict_tests {
         assert!(part.contains("exit Some(1)") && part.contains("matrix shape mismatch"), "{part}");
         assert_eq!(alloc_part("call", &output(0, "1\n", "alloc: live=0 peak=9\n")), (true, "call live=0".to_string()));
         assert_eq!(alloc_part("loop", &output(0, "1\n", "alloc: live=2 peak=9\n")), (false, "loop live=2".to_string()));
+    }
+
+    /// #3636: a Unit function with no `mut` parameter (bytes.heap_restore)
+    /// prints nothing in the diamond, and 0 lines is not "the three calls
+    /// differ". It is a SKIP — never a PASS — once both legs ran to exit 0;
+    /// a failed leg is still a FAIL.
+    #[test]
+    fn a_diamond_with_nothing_to_print_is_a_skip_not_a_mismatch() {
+        let t = crate::generator::inspect_gen::tests::target("bytes.heap_restore");
+        assert!(!t.diamond_prints());
+        let v = diamond_verdict(t.diamond_prints(), &output(0, "", ""), &output(0, "", ""));
+        assert!(v.starts_with("SKIP: "), "{v}");
+        let v = diamond_verdict(t.diamond_prints(), &output(1, "", "error: boom"), &output(0, "", ""));
+        assert!(v.starts_with("FAIL: "), "{v}");
+        // A function that prints and printed nothing still fails.
+        let v = diamond_verdict(true, &output(0, "", ""), &output(0, "", ""));
+        assert!(v.starts_with("FAIL: "), "{v}");
     }
 }
 
