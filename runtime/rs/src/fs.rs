@@ -112,7 +112,7 @@ pub fn almide_rt_fs_fold_lines<A>(path: &str, init: A, f: std::rc::Rc<dyn Fn(A, 
 // exactly once: start>0 seeks to start-1 and discards through the first \n
 // (if byte start-1 IS \n the discard consumes just it), then lines fold while
 // their start offset is < end — the final line may read past end to finish.
-fn fold_lines_range_impl<A, F: Fn(A, String) -> A>(path: &str, start: i64, end: i64, init: A, f: &F) -> Result<A, String> {
+fn fold_lines_range_impl<A, F: Fn(A, String) -> A + ?Sized>(path: &str, start: i64, end: i64, init: A, f: &F) -> Result<A, String> {
     use std::io::{BufRead, Seek};
     let mut file = std::fs::File::open(path).map_err(|e| io_err("fs.fold_lines_range", &fs_q(path), e))?;
     // #3652: a directory opens but fails its first read, and the empty range
@@ -170,20 +170,11 @@ pub fn almide_rt_fs_fold_lines_range<A, F: Fn(A, String) -> A>(path: &str, start
 // their byte-range partition (fold_lines_range_impl's ownership rule makes
 // the partition exact) on a scoped thread; the per-chunk partials return in
 // CHUNK ORDER and merging stays with the caller, so results are
-// deterministic whatever the thread schedule. The Send + Sync bounds are
-// enforced by rustc on the emitted program: a callback capturing non-Send
-// state is a loud compile error, never a data race.
+// deterministic whatever the thread schedule. The Send + Sync bounds hold
+// only for an accumulator and callback with no `Rc` inside: RustLowering
+// routes every other call to the `_seq` twin below (#3649).
 pub fn almide_rt_fs_fold_lines_chunked<A: Clone + Send, F: Fn(A, String) -> A + Send + Sync>(path: &str, workers: i64, init: A, f: F) -> Result<Vec<A>, String> {
-    let size = std::fs::metadata(path).map_err(|e| io_err("fs.fold_lines_chunked", &fs_q(path), e))?.len() as i64;
-    let w = workers.max(1);
-    let chunk = size / w + 1;
-    let mut ranges: Vec<(i64, i64)> = Vec::new();
-    for i in 0..w {
-        let s = i * chunk;
-        if s < size {
-            ranges.push((s, (s + chunk).min(size)));
-        }
-    }
+    let ranges = fold_lines_chunk_ranges(path, workers)?;
     // Flush first: a worker's abort cannot reach this thread's buffer (C-197).
     almide_stdout_flush();
     std::thread::scope(|scope| {
@@ -203,6 +194,26 @@ pub fn almide_rt_fs_fold_lines_chunked<A: Clone + Send, F: Fn(A, String) -> A + 
             .map(|h| h.join().map_err(|_| "fold_lines_chunked: worker panicked".to_string())?)
             .collect()
     })
+}
+// The sequential twin (#3649): the same chunk partition, folded chunk by chunk
+// on the calling thread. The stdlib signature `fold_lines_chunked[A]` bounds
+// nothing, so a Matrix or Bytes accumulator, or a callback that captures one or
+// is a closure VALUE (`Rc<dyn Fn>`), is a legal program that cannot cross a
+// thread. Each chunk still folds from its own `init` and the partials return
+// in chunk order, so the result is the one the threaded form gives. The
+// callback is the uniform `Rc<dyn Fn>`, which a closure value already is.
+// build.rs pairs a `Send`-bounded runtime fn with its `_seq` twin by name.
+pub fn almide_rt_fs_fold_lines_chunked_seq<A: Clone>(path: &str, workers: i64, init: A, f: std::rc::Rc<dyn Fn(A, String) -> A>) -> Result<Vec<A>, String> {
+    let ranges = fold_lines_chunk_ranges(path, workers)?;
+    ranges.iter().map(|&(s, e)| fold_lines_range_impl(path, s, e, init.clone(), &*f)).collect()
+}
+// The byte-range partition both chunked forms walk: `workers` (clamped to 1)
+// equal chunks of [0, size), the empty tail chunks dropped.
+fn fold_lines_chunk_ranges(path: &str, workers: i64) -> Result<Vec<(i64, i64)>, String> {
+    let size = std::fs::metadata(path).map_err(|e| io_err("fs.fold_lines_chunked", &fs_q(path), e))?.len() as i64;
+    let w = workers.max(1);
+    let chunk = size / w + 1;
+    Ok((0..w).map(|i| i * chunk).filter(|&s| s < size).map(|s| (s, (s + chunk).min(size))).collect())
 }
 pub fn almide_rt_fs_for_each_line(path: &str, f: std::rc::Rc<dyn Fn(String)>) -> Result<(), String> {
     use std::io::BufRead;

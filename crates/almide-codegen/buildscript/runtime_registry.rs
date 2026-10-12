@@ -208,11 +208,16 @@ fn build_kernel_inline(workspace_root: &Path) -> io::Result<String> {
 fn write_runtime_fn_modes(rust_entries: &[fs::DirEntry], out_dir: &Path) -> io::Result<()> {
     let mut raw_fn_helpers: Vec<String> = Vec::new();
     let mut mut_params: Vec<(String, Vec<bool>)> = Vec::new();
+    let mut generics: Vec<(String, String)> = Vec::new();
     for entry in rust_entries {
         let content = read_with_includes(&entry.path())?;
         raw_fn_helpers.extend(extract_raw_fn_last_arg_helpers(&content));
         mut_params.extend(extract_runtime_param_mutability(&content));
+        generics.extend(extract_runtime_generics(&content));
     }
+    let mut twins = send_twins(&generics);
+    twins.sort();
+    twins.dedup();
     raw_fn_helpers.sort();
     raw_fn_helpers.dedup();
     mut_params.sort();
@@ -253,6 +258,15 @@ fn write_runtime_fn_modes(rust_entries: &[fs::DirEntry], out_dir: &Path) -> io::
         modes_out.push_str("    })\n");
     }
     modes_out.push_str("}\n");
+
+    modes_out.push_str("\n/// The `Send`-free `_seq` twin of a threaded runtime helper (#3649) —\n");
+    modes_out.push_str("/// paired from the signatures: the helper has a `Send` bound, the twin none.\n");
+    modes_out.push_str("pub fn send_free_twin(name: &str) -> Option<&'static str> {\n");
+    modes_out.push_str("    match name {\n");
+    for (threaded, twin) in &twins {
+        modes_out.push_str(&format!("        \"{}\" => Some(\"{}\"),\n", threaded, twin));
+    }
+    modes_out.push_str("        _ => None,\n    }\n}\n");
     fs::write(out_dir.join("runtime_fn_modes.rs"), &modes_out)
 }
 
@@ -303,6 +317,46 @@ fn extract_runtime_param_mutability(content: &str) -> Vec<(String, Vec<bool>)> {
         out.push((name, modes));
     }
     out
+}
+
+/// The generic clause of every `pub fn almide_rt_*` (empty when it has none),
+/// keyed by name — the input `send_twins` pairs threaded helpers from.
+fn extract_runtime_generics(content: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let mut cursor = 0;
+    while let Some(rel) = content[cursor..].find("pub fn almide_rt_") {
+        let name_start = cursor + rel + "pub fn ".len();
+        let name_end = content[name_start..]
+            .find(|c: char| !(c.is_alphanumeric() || c == '_'))
+            .map_or(content.len(), |i| name_start + i);
+        cursor = name_end;
+        let rest = &content[name_end..];
+        let generics = if rest.starts_with('<') {
+            balanced(rest, '<', '>').map_or("", |end| &rest[..=end])
+        } else {
+            ""
+        };
+        out.push((content[name_start..name_end].to_string(), generics.to_string()));
+    }
+    out
+}
+
+/// #3649: a runtime helper with a `Send` bound runs its work on threads, so a
+/// value holding an `Rc` cannot reach it. Its twin is the same name with a
+/// `_seq` suffix and no `Send` bound; RustLowering routes such a value there.
+/// Pairs `(threaded, twin)`, derived from the signatures alone.
+fn send_twins(generics: &[(String, String)]) -> Vec<(String, String)> {
+    generics
+        .iter()
+        .filter(|(_, g)| g.contains("Send"))
+        .filter_map(|(name, _)| {
+            let twin = format!("{name}_seq");
+            generics
+                .iter()
+                .any(|(n, g)| *n == twin && !g.contains("Send"))
+                .then(|| (name.clone(), twin))
+        })
+        .collect()
 }
 
 /// Names of `pub fn`s whose declared generics include a `<G>: Fn(...)` bound and

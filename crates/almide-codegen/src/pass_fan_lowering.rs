@@ -119,6 +119,55 @@ pub fn mark_inline_fans(program: &mut IrProgram) {
     program.codegen_annotations.inline_fans = out;
 }
 
+/// #3649: route a call to a threaded runtime helper (a `Send` bound) to its
+/// `Send`-free `_seq` twin when an argument holds an `Rc`: a Matrix / Bytes /
+/// closure-valued argument, or a closure literal capturing one. The stdlib
+/// signature (`fs.fold_lines_chunked[A]`) bounds nothing, so the checker admits
+/// these, and the threaded form is rustc E0277. The pairs are derived from the
+/// runtime signatures (`runtime_fn_modes::send_free_twin`). Runs in
+/// RustLowering before boxing, so the twin's `Rc<dyn Fn>` slot is boxed.
+pub fn route_send_free_twins(program: &mut IrProgram) -> bool {
+    use almide_ir::visit_mut::{IrMutVisitor, walk_expr_mut};
+    struct Route<'a> { decls: Vec<&'a IrTypeDecl>, vt: &'a VarTable, changed: bool }
+    impl IrMutVisitor for Route<'_> {
+        fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
+            walk_expr_mut(self, expr);
+            let IrExprKind::RuntimeCall { symbol, args } = &mut expr.kind else { return };
+            let Some(twin) = crate::generated::runtime_fn_modes::send_free_twin(symbol.as_str()) else { return };
+            if args.iter().any(|a| self.arg_holds_rc(a)) {
+                *symbol = almide_base::intern::sym(twin);
+                self.changed = true;
+            }
+        }
+    }
+    impl Route<'_> {
+        /// A closure literal is judged by its captures (its own `Fn` type is
+        /// the raw closure, which is `Send` when they are); any other argument
+        /// by its type — a closure VALUE is an `Rc<dyn Fn>`.
+        fn arg_holds_rc(&self, arg: &IrExpr) -> bool {
+            if !super::pass_rust_lowering::is_closure_literal(arg) {
+                return ty_holds_rc(&arg.ty, &self.decls, &mut Vec::new());
+            }
+            almide_ir::free_vars::free_vars(arg, &std::collections::HashSet::new())
+                .into_iter()
+                .any(|v| ty_holds_rc(&self.vt.get(v).ty, &self.decls, &mut Vec::new()))
+        }
+    }
+    let decls: Vec<IrTypeDecl> = program.type_decls.iter()
+        .chain(program.modules.iter().flat_map(|m| m.type_decls.iter()))
+        .cloned()
+        .collect();
+    let IrProgram { functions, top_lets, modules, var_table, .. } = program;
+    let mut r = Route { decls: decls.iter().collect(), vt: var_table, changed: false };
+    for f in functions.iter_mut() { r.visit_expr_mut(&mut f.body); }
+    for tl in top_lets.iter_mut() { r.visit_expr_mut(&mut tl.value); }
+    for m in modules.iter_mut() {
+        for f in m.functions.iter_mut() { r.visit_expr_mut(&mut f.body); }
+        for tl in m.top_lets.iter_mut() { r.visit_expr_mut(&mut tl.value); }
+    }
+    r.changed
+}
+
 /// Does a value of `ty` hold an `Rc`-backed leaf on the native leg? A named
 /// type is looked through its declaration once per path (`seen`), so a
 /// recursive type terminates.
