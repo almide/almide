@@ -28387,6 +28387,42 @@ pub const SRC_PROCESS_ARGS: &str = r#"
 
 effect fn process_args() -> List[String] = prim.args_get_list_full()
 "#;
+pub const SRC_PROCESS_STDIN_LINES: &str = r#"
+
+
+
+
+
+
+
+
+
+
+import io
+
+effect fn process_stdin_lines() -> Result[List[String], String] = {
+  var buf = bytes.new(0)
+  var n = 1
+  while n > 0 {
+    let chunk = io.read_n_bytes(4096)
+    n = list.len(chunk)
+    for v in chunk {
+      bytes.push(buf, v)
+    }
+  }
+  if not bytes.is_valid_utf8(buf) then err("process.stdin_lines(): stream did not contain valid UTF-8")
+  else {
+
+
+
+    let parts = string.split(bytes.to_string_lossy(buf), "\n")
+    let cut = list.len(parts) - 1
+    let terminated = list.take(parts, cut) |> list.map((l) => string.strip_suffix(l, "\r") ?? l)
+    let tail = list.drop(parts, cut)
+    ok(if tail == [""] then terminated else terminated + tail)
+  }
+}
+"#;
 pub const SRC_PROCESS_WASM: &str = r#"
 
 
@@ -38858,6 +38894,7 @@ pub fn source_of(stem: &str) -> Option<&'static str> {
         "print_str" => Some(SRC_PRINT_STR),
         "process" => Some(SRC_PROCESS),
         "process_args" => Some(SRC_PROCESS_ARGS),
+        "process_stdin_lines" => Some(SRC_PROCESS_STDIN_LINES),
         "process_wasm" => Some(SRC_PROCESS_WASM),
         "random" => Some(SRC_RANDOM),
         "random_choice" => Some(SRC_RANDOM_CHOICE),
