@@ -880,6 +880,12 @@ mod verdict_tests {
         assert_eq!(run_failure(&output(1, "", &stderr)), format!("exit Some(1): {want}"));
         let (ok, part) = alloc_part("call", &output(1, "", &stderr));
         assert!(!ok && part.contains(want) && !part.contains("live="), "{part}");
+        // On wasm the allocator's exit report follows the panic message on
+        // the same line (measured: `...string__ALMD_WASM_ALLOC allocs=5 ...
+        // live=3`); it is not part of the reason.
+        let wasm = format!("PANIC: {ERR_PATH}: invalid base64 character__ALMD_WASM_ALLOC allocs=5 reused=0 live=3\n");
+        let (ok, part) = alloc_part("call", &output(1, "", &wasm));
+        assert!(!ok && part.ends_with(&format!("({want})")) && !part.contains("live="), "{part}");
         let v = diamond_verdict(true, &output(1, "", &stderr), &output(1, "", &stderr));
         assert!(v.starts_with("FAIL: ") && v.contains(want), "{v}");
         // Any other failure keeps its own first error line.
