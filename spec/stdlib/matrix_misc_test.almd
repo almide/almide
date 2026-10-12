@@ -56,9 +56,20 @@ test "concat_cols is the inverse of split_cols_even" {
 fn concat_param(xs: List[Matrix]) -> Matrix = matrix.concat_cols(xs)
 
 test "concat_cols of a fn parameter" {
-  let xs = [matrix.from_lists([[1.5, 2.0]]), matrix.from_lists([[0.5, 3.0]])]
-  assert_eq(matrix.to_lists(concat_param(xs)), [[1.5, 2.0, 0.5, 3.0]])
-  assert_eq(matrix.to_lists(matrix.concat_cols(xs)), [[1.5, 2.0, 0.5, 3.0]])
+  let xs = [
+    matrix.from_lists([
+      [1.5, 2.0]
+    ]),
+    matrix.from_lists([
+      [0.5, 3.0]
+    ])
+  ]
+  assert_eq(matrix.to_lists(concat_param(xs)), [
+    [1.5, 2.0, 0.5, 3.0]
+  ])
+  assert_eq(matrix.to_lists(matrix.concat_cols(xs)), [
+    [1.5, 2.0, 0.5, 3.0]
+  ])
 }
 
 test "concat_cols_many (deprecated alias) works the same" {
