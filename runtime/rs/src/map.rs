@@ -527,6 +527,9 @@ pub fn almide_rt_map_set_str<V: Clone>(mut m: AlmideMap<String, V>, k: &str, v: 
     m
 }
 pub fn almide_rt_map_remove<K: PartialEq + Clone + 'static, V: Clone>(m: &AlmideMap<K, V>, k: K) -> AlmideMap<K, V> { let mut r = m.clone(); r.remove(&k); r }
+// The owned twin (`@reuse(m)`, #3640): a source at its last use is edited in
+// place instead of cloned.
+pub fn almide_rt_map_remove_owned<K: PartialEq + Clone + 'static, V: Clone>(mut m: AlmideMap<K, V>, k: K) -> AlmideMap<K, V> { m.remove(&k); m }
 pub fn almide_rt_map_contains<K: PartialEq + 'static, V, Q: ?Sized + PartialEq + AlmideMapKey>(m: &AlmideMap<K, V>, k: &Q) -> bool
 where K: std::borrow::Borrow<Q> { m.contains_key(k) }
 pub fn almide_rt_map_keys<K: Clone, V>(m: &AlmideMap<K, V>) -> Vec<K> { m.keys().cloned().collect() }
