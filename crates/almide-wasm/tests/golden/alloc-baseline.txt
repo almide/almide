@@ -726,7 +726,7 @@
 66960	spec/wasm_cross/result_value_int_tuple.almd
 66976	spec/wasm_cross/result_wall_escalations.almd
 68976	spec/wasm_cross/rope_at_family.almd
-68352	spec/wasm_cross/rope_geometry_family.almd
+68224	spec/wasm_cross/rope_geometry_family.almd
 65744	spec/wasm_cross/scalar_if_arm_effects.almd
 66240	spec/wasm_cross/scan_heap_acc.almd
 98320	spec/wasm_cross/scoped_region_value.almd
