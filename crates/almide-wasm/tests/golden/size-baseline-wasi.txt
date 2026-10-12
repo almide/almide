@@ -543,7 +543,7 @@
 5636	spec/wasm_cross/mg_rebuild_two_phase.almd
 2223	spec/wasm_cross/module_global_const.almd
 5177	spec/wasm_cross/module_var_alias_cow.almd
-8407	spec/wasm_cross/mut_call_hoisted_args_distinct.almd
+8316	spec/wasm_cross/mut_call_hoisted_args_distinct.almd
 3743	spec/wasm_cross/mut_call_hoisted_args_in_branch.almd
 9544	spec/wasm_cross/mut_call_nested_read_before.almd
 6195	spec/wasm_cross/mut_call_two_mut_args_read.almd
@@ -554,8 +554,8 @@
 11050	spec/wasm_cross/mut_param_alias_in_place_mutators.almd
 3156	spec/wasm_cross/mut_param_branch_forward.almd
 4354	spec/wasm_cross/mut_param_call_chain.almd
-12141	spec/wasm_cross/mut_param_cell_tail_capture_read.almd
-6430	spec/wasm_cross/mut_param_cell_tail_capture_write.almd
+11263	spec/wasm_cross/mut_param_cell_tail_capture_read.almd
+6177	spec/wasm_cross/mut_param_cell_tail_capture_write.almd
 3917	spec/wasm_cross/mut_param_closure_capture_read.almd
 6671	spec/wasm_cross/mut_param_closure_capture_write.almd
 7863	spec/wasm_cross/mut_param_closure_field_path_write.almd
@@ -572,7 +572,7 @@
 16963	spec/wasm_cross/mut_param_nested_place_writeback.almd
 49323	spec/wasm_cross/mut_param_reassign_from_hof.almd
 2314	spec/wasm_cross/mut_param_spread_reassign.almd
-5192	spec/wasm_cross/mut_param_tail_recursion.almd
+5084	spec/wasm_cross/mut_param_tail_recursion.almd
 3080	spec/wasm_cross/mut_param_writeback_growth.almd
 5088	spec/wasm_cross/mut_scalar_param_reassign.almd
 5566	spec/wasm_cross/mutable_global_bytes_arena.almd
@@ -932,7 +932,7 @@
 5707	spec/wasm_cross/wide_function_body.almd
 34294	spec/wasm_cross/witness_straightline.almd
 7023	spec/wasm_cross/zip_view_shape.almd
-25388	spec/wasm_cross/zlib_selfhost.almd
+25386	spec/wasm_cross/zlib_selfhost.almd
 4437	spec/wasm_fail/effect_err_aborts_both_legs.almd
 4593	spec/wasm_fail/int_parse_err_propagates.almd
 3201	spec/wasm_fail/matrix_concat_cols_rows_aborts.almd
