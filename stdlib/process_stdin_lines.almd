@@ -8,9 +8,11 @@
 // UTF-8; a stream is valid UTF-8 iff every line is (the `\n` byte never sits
 // inside a multi-byte sequence), so one check over the buffer gives the same
 // verdict, with native's text. Every Result is built by ok()/err() and no
-// block is touched raw (the PROCESS_SUM audit, crates/almide-wasm/src/whitelist.rs).
+// block is touched raw: the file calls no prim op, so the wasm leg admits
+// it from the @implements declaration alone.
 import io
 
+@implements("process.stdin_lines")
 effect fn process_stdin_lines() -> Result[List[String], String] = {
   var buf = bytes.new(0)
   var n = 1

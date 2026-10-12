@@ -20,6 +20,7 @@ pub use almide_types::stdlib_info;
 /// source) — one table read by the wasm renderer AND the interp oracle.
 pub use almide_types::self_host_registry;
 pub use almide_types::reuse;
+pub use almide_types::implements;
 /// ADR-0001 time-unit surface (closed unit set, clocks, S4 clock column) —
 /// single source for checker, lowering, and the matrix gates.
 pub use almide_types::time_units;
