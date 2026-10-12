@@ -43,11 +43,6 @@ pub fn owned_twins() -> impl Iterator<Item = (&'static str, &'static str)> {
     almide_lang::reuse::REUSE.iter().filter_map(|r| Some((r.intrinsic, r.owned_twin?)))
 }
 
-/// Is `symbol` one of those owned twins (it takes its source by value)?
-pub fn is_owned_twin(symbol: &str) -> bool {
-    owned_twins().any(|(_, twin)| twin == symbol)
-}
-
 /// Is `symbol` a range op whose first argument may be moved instead of
 /// borrowed?
 pub fn takes_source_either_way(symbol: &str) -> bool {

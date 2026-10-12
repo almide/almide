@@ -472,6 +472,10 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     s.push_str("impl<T: Clone> std::ops::DerefMut for AlmideRcCow<T> { #[inline(always)] fn deref_mut(&mut self) -> &mut T { if std::rc::Rc::get_mut(&mut self.0).is_none() { return std::rc::Rc::make_mut(&mut self.0); } std::rc::Rc::get_mut(&mut self.0).unwrap() } }\n");
     s.push_str(&format!("impl<T> AlmideRcCow<T> {{ {vis}fn new(v: T) -> Self {{ AlmideRcCow(std::rc::Rc::new(v)) }} {vis}fn make_mut(&mut self) -> &mut T where T: Clone {{ std::rc::Rc::make_mut(&mut self.0) }} {vis}fn into_inner(self) -> T where T: Clone {{ std::rc::Rc::try_unwrap(self.0).unwrap_or_else(|rc| (*rc).clone()) }} }}\n"));
     s.push_str("impl<T> From<T> for AlmideRcCow<T> { fn from(v: T) -> Self { AlmideRcCow::new(v) } }\n");
+    // #3577: a runtime twin that takes its Bytes source by value
+    // (`impl Into<Vec<u8>>`) gets the buffer out of the wrapper — moved when
+    // this is the only holder, copied when shared.
+    s.push_str("impl From<AlmideRcCow<Vec<u8>>> for Vec<u8> { fn from(v: AlmideRcCow<Vec<u8>>) -> Self { v.into_inner() } }\n");
     s.push_str("impl<T: std::fmt::Display> std::fmt::Display for AlmideRcCow<T> { fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { self.0.fmt(f) } }\n");
     s.push_str("impl<T: std::hash::Hash> std::hash::Hash for AlmideRcCow<T> { fn hash<H: std::hash::Hasher>(&self, state: &mut H) { self.0.hash(state) } }\n");
     // Blanket AlmideConcat: AlmideRcCow<T> + Rhs and AlmideRcCow<T> + Val<U> — 2 impls cover all combos.
