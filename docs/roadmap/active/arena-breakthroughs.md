@@ -49,6 +49,8 @@ MSR ハーネスを名指しで移植済み: 付録 A-5）。
 
 ### 1.1 アリーナ（§13/§14、M4 Pro、出力照合済み、median 9）
 
+> **注（2026-10-12）**: この表の Almide native 列は `almide build` を `--release` なしで計測しており、opt-level=1・LTO なしの値になっている（`src/cli/cargo_build.rs` の rlib 高速経路）。比較相手は Zig が ReleaseFast、Rust が `-O`。`--release` で取り直した値は §1.1a にある。
+
 **native、ms**（低いほど良い）
 
 | | hello | fib(35) | binarytrees d19×12 | spectralnorm n=1200 |
@@ -79,6 +81,36 @@ MSR ハーネスを名指しで移植済み: 付録 A-5）。
 **native バイナリ、KB**: Swift 51（動的リンク）· **Jacquard 53** · MoonBit 196–219 · Zig 387–404 · Rust 455–475 · **Almide 457–495** · Aver 467–557 · Go 2,373。
 
 **コンパイル、ms（cache を確実に外した 1 ファイル）**: Aver→Rust source 6 · **Almide→Rust source 23** · **Almide→wasm 33** · vibe→wasm 56 · rustc -O 59 · MoonBit→wasm 61 · go build 92 · **Almide→native 134** · swiftc 135 · Wado 183 · MoonBit→native 304 · Jacquard 682 · Gleam 728 · Grain 1,918 · Zig 3,612。
+
+### 1.1a 対 Zig 再計測（2026-10-12、GCE、Almide `--release`）
+
+develop `3763aea`（#3592 fusion と #3597 region handle を含む）で計測。Almide native は `--release`（opt 3、fat LTO、codegen-units=1）、Zig 0.17.0 は ReleaseFast、Rust 1.99 は `-O`、wasm は wasmtime 49。hyperfine 21 runs の mean で、全セルの出力を照合済み。x86 は c4-standard-8（Xeon 8581C）、ARM は c4a-standard-8（Neoverse-V2）。
+
+**native、ms**
+
+| | x86 Almide | x86 Zig | x86 Rust | ARM Almide | ARM Zig | ARM Rust |
+|---|---:|---:|---:|---:|---:|---:|
+| hello | 0.41 | **0.22** | 0.40 | 0.37 | **0.30** | — |
+| fib(35) | 19.80 | **18.92** | 21.26 | 17.64 | **17.25** | 17.86 |
+| binarytrees | **61.3** | 212.9 | 232.6 | **66.4** | 232.7 | 224.3 |
+| spectralnorm 命令形 | **48.40** | 59.49 | 59.77 | 50.14 | **49.81** | 50.16 |
+| spectralnorm イディオム C / D / E | 58.7 / 58.9 / 59.8 | | | 76.9 / 76.9 / 76.9 | | |
+
+**stock-WASI（wasmtime）、ms**
+
+| | x86 Almide | x86 Zig | ARM Almide | ARM Zig |
+|---|---:|---:|---:|---:|
+| hello | **2.53** | 3.64 | | |
+| fib | **31.79** | 32.72 | **43.98** | 49.94 |
+| binarytrees | **73.8** | 137.1 | **89.7** | 173.4 |
+| spectralnorm 命令形 | 67.21 | **63.82** | 91.05 | **85.84** |
+| spectralnorm イディオム C / D / E | 73.5 / 108.7 / 111.8 | | 106.0 / 130.1 / 131.0 | |
+
+**strip 後のサイズ（x86）**: native は Almide 293–337 KB、Zig 546–565 KB、Rust 337–363 KB。wasm（`wasm-tools strip`）は Almide hello 325 B / fib 495 B / binarytrees 1,741 B / spectralnorm 8,289 B、Zig 67–84 KB。
+
+読み:
+- binarytrees で Zig が遅いのは、時間の 80% を std の `ArenaAllocator` が使っているため。言語の速さの差ではなく、使った allocator の差。
+- `--release` の ARM では、spectralnorm のイディオム 3 綴りが命令形の 1.53× 遅い。原因は LLVM のループベクトル化で、汎用 aarch64 のコストモデルが i64 乗算をレーンごとに移し替える形にベクトル化してしまう。opt-level=1 ではこの差は出ない（#3604）。
 
 ### 1.2 工学的性質（championship 18 項目、2026-09-13 再検証）
 
@@ -126,8 +158,9 @@ MSR ハーネスを名指しで移植済み: 付録 A-5）。
 | 行 | 相手 | 差 | 原因（実測） | issue |
 |---|---|---|---|---|
 | native binarytrees | 手書き Rust arena 31.3 ms | 1.6× | 推論 arena は区間を 1 回巻き戻すだけ。手書きは `Vec<u32>` インデックス | region-inference.md Phase 3（on-hold）; #1997 `scoped:` |
-| native spectralnorm（推奨形） | Go 54.0 | 1.16× | 捕獲 list の per-closure clone + `enumerate` の tuple 実体化（#2098、解消済 — **再計測未**） | T5 |
-| wasm fib | Zig 41–45 ms | 1.2–1.3× | 呼び出しコスト。構造レッグの call/return 形 | #2150 |
+| native spectralnorm（推奨形） | Go 54.0 | 1.16× | 捕獲 list の per-closure clone + `enumerate` の tuple 実体化（#2098、解消済）。10-12 の `--release` 再計測では、x86 で 1.21×、ARM で 1.53×（どちらも自分の命令形との比、§1.1a） | T5; #3604 |
+| native spectralnorm 推奨形（aarch64 `--release`） | 自分の命令形 50.1 ms | 1.53× | LLVM のループベクトル化による悪化。ベクトル化を切ると 53–54 ms、`target-cpu=native` で 52.9 ms | #3604 |
+| wasm fib | ~~Zig 41–45 ms~~ | — | 10-12 に再計測し Almide が速い（x86 31.8 対 32.7、ARM 44.0 対 49.9、§1.1a）。行を残すのは経緯を示すため | #2150 |
 | wasm spectralnorm bytes | Wado `-Os` 7,185 | 1.19× | **float printer が +3,531 B**（§16）。math は `f64.sqrt` で無料 | #2099 |
 | wasm fib bytes（own-host 級） | vibe 823 | 1.39× | 級が違う（own host import）。ただし差の中身は未分解 | #2150（級差の分解は T6） |
 | native バイナリ | Jacquard 53 KB | 7–9× | backend 由来（bare rustc hello 466 KB）。`strip`/`panic=abort`/`opt-level=z` 未設定 | #2092（P-low → 昇格） |
