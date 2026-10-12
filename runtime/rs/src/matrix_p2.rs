@@ -240,6 +240,12 @@ pub fn almide_rt_matrix_rope_rotate_at(
     let n_heads_u = almide_rt_matrix_head_count(n_heads);
     let head_dim_u = head_dim.max(0) as usize;
     almide_rt_matrix_head_geometry(n_heads_u, head_dim_u, rows, cols);
+    // #3650: the empty matrix copies through (C-278) before any per-head work —
+    // a `head_dim` too large to allocate the frequency table for was a raw
+    // capacity-overflow panic here while wasm answered the empty matrix.
+    if rows == 0 {
+        return Vec::<Vec<f64>>::new().into();
+    }
     let start = start_pos.max(0) as usize;
     let half = head_dim_u / 2;
     let mut inv_freqs = Vec::<f64>::with_capacity(half);
@@ -805,6 +811,10 @@ pub fn almide_rt_matrix_rope_rotate_neox_at(
     let n_heads_u = almide_rt_matrix_head_count(n_heads);
     let head_dim_u = head_dim.max(0) as usize;
     almide_rt_matrix_head_geometry(n_heads_u, head_dim_u, rows, cols);
+    // #3650: the empty matrix copies through first — see rope_rotate_at.
+    if rows == 0 {
+        return Vec::<Vec<f64>>::new().into();
+    }
     let start = start_pos.max(0) as usize;
     let half = head_dim_u / 2;
     let mut inv_freqs = Vec::<f64>::with_capacity(half);
