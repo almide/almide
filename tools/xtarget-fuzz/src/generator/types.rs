@@ -48,6 +48,8 @@ pub enum GenType {
     /// `str` / `bool` / `null` / `array` / `object` (an object of n keys when
     /// sized).
     Value,
+    /// `bytes.Endian`: `LittleEndian` or `BigEndian`. Only ever an argument.
+    Endian,
     /// `Set[elem]`, built with `set.from_list`; the element is a hashable
     /// scalar ([`GenType::is_set_elem`]).
     Set(Box<GenType>),
@@ -107,6 +109,7 @@ impl GenType {
             GenType::Bytes => out.push_str("Bytes"),
             GenType::Matrix => out.push_str("Matrix"),
             GenType::Value => out.push_str("Value"),
+            GenType::Endian => out.push_str("Endian"),
         }
     }
 
@@ -179,6 +182,8 @@ impl GenType {
             // A Bytes or Matrix value has no string form (E089); a Value is
             // observed through `value.stringify`.
             GenType::Bytes | GenType::Matrix | GenType::Value => false,
+            // Only ever an argument: never printed.
+            GenType::Endian => false,
         }
     }
 
@@ -195,6 +200,7 @@ impl GenType {
             | GenType::Bytes
             | GenType::Matrix
             | GenType::Value => 1,
+            | GenType::Endian => 1,
             GenType::List(e)
             | GenType::Option(e)
             | GenType::Result(e)
