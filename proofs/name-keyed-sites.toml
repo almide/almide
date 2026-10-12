@@ -270,11 +270,6 @@ class = "legacy"
 names = 2
 
 [[site]]
-id = "crates/almide-frontend/src/lower/auto_try.rs::insert_try_control::or-chain"
-class = "legacy"
-names = 2
-
-[[site]]
 id = "crates/almide-frontend/src/stdlib.rs::ALIASES::table"
 class = "legacy"
 names = 42
