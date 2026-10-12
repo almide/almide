@@ -61,6 +61,10 @@ effect fn main() -> Unit = {
   let e = bytes.set(list.get(l, 0) ?? bytes.new(0), 0, 3)
   l = list.set(l, 1, e)
   println("${list.map(l, (b) => bytes.to_list(b))}")
+  // 7. a temporary source: a call's result goes to the owned twin as is
+  println("${bytes.to_list(bytes.set(bytes.from_list([2, 2, 100]), 0, -1))}")
+  let tb = bytes.from_list([1, 2])
+  println("${bytes.to_list(bytes.set(bytes.concat(tb, tb), 3, 7))} ${bytes.to_list(tb)}")
 }
 "#;
 
@@ -71,6 +75,8 @@ const EXPECTED: &str = r#"100000 199 100000 1 207
 [6, 2, 3]
 [1, 44]
 [[1], [3]]
+[255, 2, 100]
+[1, 2, 1, 7] [1, 2]
 "#;
 
 fn write_source() -> (tempfile::TempDir, std::path::PathBuf) {
