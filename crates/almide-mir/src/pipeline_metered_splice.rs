@@ -94,21 +94,36 @@ fn meter_prim_exports(body: &str) -> Vec<(String, String)> {
         .collect()
 }
 
+/// The module's own `std`: the real one, except that `std::process::exit`
+/// flushes the host's buffered stdout first. The region render exits through
+/// `std::process::exit` (a division by zero, an index out of bounds) and
+/// prints unbuffered; the standard codegen buffers stdout, and an exit that
+/// skipped the flush would lose the lines the program printed before the
+/// region. Shadowing the path, not rewriting the text, leaves a string
+/// literal that spells it untouched.
+const SPLICE_STD: &str = "mod std {
+    pub use ::std::*;
+    pub mod process {
+        pub use ::std::process::*;
+        pub fn exit(code: i32) -> ! { super::super::super::almide_stdout_flush(); ::std::process::exit(code) }
+    }
+}
+";
+
 /// Wrap the rendered region items in their module. The region fns are
-/// exported under their own names, the meter prims under the runtime names the
-/// standard codegen calls, and a shim's `process::exit` flushes the host's
-/// buffered stdout first — the region render prints unbuffered, the standard
-/// codegen does not, and an exit that skipped the flush would lose lines the
-/// program printed before the region.
+/// exported under their own names and the meter prims under the runtime
+/// names the standard codegen calls.
 fn wrap_metered_splice(items: &str, roots: &[String]) -> String {
     let module = almide_ir::runtime_use::METERED_SPLICE_MODULE;
-    let mut body = items.replace("std::process::exit(", "__almd_host_exit(");
+    let mut body = items.to_string();
     for r in roots {
+        // A rendered fn starts its own line; a string literal cannot (the
+        // render escapes every newline it emits).
         let m = crate::render_native::mangle(r);
         body = body.replace(&format!("\nfn {m}("), &format!("\npub(super) fn {m}("));
     }
     let mut out = format!("\n// The metered regions, rendered by the v1 trust spine (#3669).\nmod {module} {{\n{body}\n");
-    out.push_str("fn __almd_host_exit(code: i32) -> ! { super::almide_stdout_flush(); std::process::exit(code) }\n");
+    out.push_str(SPLICE_STD);
     for r in roots {
         out.push_str(&format!("pub(super) use self::{} as {r};\n", crate::render_native::mangle(r)));
     }
