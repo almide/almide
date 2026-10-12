@@ -913,3 +913,25 @@ Builds compared: 0.62.0, 0.66.0 (release 819bbc74f) and develop 974c00ea0.
 2. Stamp the passes from the 184-function rerun, and triage what still fails (E041 rejections of generated programs, matrix shape errors, complexity and alloc).
 3. TCP step 3 (the p3 shim over `wasi:sockets@0.3`) and step 4 (route net programs to the component by default).
 4. unix / fd / shm through Almide's own host interface.
+
+### Later on 2026-10-13: the rerun's results and what they found
+- **Rerun result** (184 functions, develop 7ba9f194b; 6 × c4-standard-4 in us-central1-a; 200 programs per function; wasmtime 49.0.1; all VMs deleted):
+  - 111 passed and 73 did not. Of the 73: parity 49, complexity 22, diamond 14, alloc 5 (overlapping).
+  - #3635 stamps the 111, plus batch 4c's 20 whose fingerprint inputs did not change. Uninspected: 458 → 327 (written, test green, not merged).
+- **Parity rerun by seed** (49 functions, same setup, findings brought back):
+  - 37 of the 40 native build failures were one bug, #3646. Inside an effect fn, a Result call passed to a generic parameter got an implicit `?`. It is in released 0.67.1.
+  - The fix is #3653: never auto-`?` a call argument. With it, 38 of the 49 functions' repros build and match on both legs (macOS arm64 replay).
+  - The C-345 wording is widened in als#136.
+- **Remaining causes, one issue each:**
+  - inspection harness: #3636 (diamond/alloc/fit false failures), #3637 (matrix head/kernel geometry);
+  - native build: #3638 → #3645 (concat_cols on a fn parameter), #3648 → #3655 (fused count/len passed by reference), #3649 (fold_lines_chunked with a Matrix or Bytes accumulator, Rc not Send);
+  - native divergences: #3647 (raw NaN bits in bytes float appends, C-210), #3650 (rope panic on an empty matrix), #3651 (mul with a hidden-width empty operand), #3652 (fold_lines_range on a directory). One agent branch is fixing all four.
+  - complexity: #3639 (string.push copies the whole string, both legs), #3640 → #3656 (wasm map.delete), #3641 → #3654 (wasm bytes.copy_within / fill / clear), #3642 (wasm value.merge quadratic), #3643 (map.merge clones the dying left), #3644 (wasm matrix.fma); set.remove is noted on #3552.
+- **Lesson:** a `test` block does not reach every `almide run` shape. #3648 passes inside `almide test` and fails under `almide run`, so its regression test runs the CLI.
+- **Lesson:** run `regen.sh` and the fmt gate before every push, including one-line spec edits. #3645 went red on both.
+
+### Next (replaces the list above)
+1. Owner merges: #3633, #3634, #3635; als#134, als#135, als#136. Then advance the pin, sync the C-328 / C-345 statements and the TCP contracts, and open the TCP step 1+2 PR.
+2. Land #3645, #3653, #3654, #3655, #3656 and the native-divergence branch. Then re-inspect the functions they touch, plus the 73 not-stampable ones once #3636 and #3637 fix the harness.
+3. #3639 (string.push), #3642, #3643, #3649.
+4. TCP step 3 (p3 shim over `wasi:sockets@0.3`) and step 4. Then unix / fd / shm through Almide's own host interface.
