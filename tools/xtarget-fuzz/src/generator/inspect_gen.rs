@@ -288,6 +288,12 @@ impl Target {
         self.ret.observe("v", 0).is_some()
     }
 
+    /// The diamond prints something: a non-Unit return, or a `mut`
+    /// parameter's mutated copy.
+    pub fn diamond_prints(&self) -> bool {
+        self.ret != GenType::Unit || self.mut_param.is_some()
+    }
+
     fn render_param(&self, i: usize) -> String {
         render_sig(&self.params[i].1, &self.subst)
     }
@@ -414,10 +420,11 @@ fn digest(v: &str, t: &GenType) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
-    fn target(name: &str) -> Target {
+    /// The catalogued function `name`, instantiated (for tests elsewhere too).
+    pub(crate) fn target(name: &str) -> Target {
         let sig = crate::generator::catalogue::build()
             .into_iter()
             .find(|s| format!("{}.{}", s.module, s.func) == name)
