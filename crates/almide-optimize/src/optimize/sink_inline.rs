@@ -1,21 +1,20 @@
-//! Fusing through a user-fn sink (#3584): `xs |> list.map(f) |> total`, where
-//! `total`'s whole body is one chain over its only parameter, fuses exactly
-//! as `xs |> list.map(f) |> list.fold(…)` written inline does.
+//! Inline a list SINK into a call whose argument is a list chain (#3584,
+//! #3590): `v |> list.map(f) |> total`, where `total(xs) = xs |> list.fold(…)`,
+//! becomes `list.fold(list.map(v, f), …)` — the shape each leg's own fusion
+//! already fuses (native `StreamFusion`, the structural leg's fused fold), and
+//! decides under its own purity / totality rule. Where a leg declines, the
+//! inlined form is evaluated exactly as the call was: the argument first, once.
 //!
-//! A SINK is a function whose body is ONE fused chain that ends in a
-//! non-`Collect` collector and whose source is its only parameter, with no
-//! other free variable — so the call `total(<chain>.collect())` means "run
-//! `total`'s chain over these elements", and substituting the argument for
-//! the source is the whole of the call's meaning. The shape is read off the
-//! body after `StreamFusion` has fused it; no function is named.
+//! A SINK is a root fn whose whole body is ONE `list.*` call with its only
+//! parameter as the first argument, read nowhere else, and no other free
+//! variable — so substituting the argument for the parameter is the call's
+//! whole meaning. The shape is read off the body; no function is named. A
+//! call is rewritten only when its argument is itself a `list.*` call, the
+//! one case where the inlined form can fuse.
 //!
-//! At a call whose argument is a `Collect`-ending chain, the sink's body is
-//! copied with every variable it binds renamed to a fresh `VarId` (the
-//! program has one var table, and one binding site per id), the argument is
-//! put in the source slot, and the result is handed to the same `merge` an
-//! inline chain gets: the purity / totality rule that decides whether the
-//! interleaved order is unobservable is not restated here. When `merge`
-//! refuses, the call is left as it was — the copy is never emitted nested.
+//! The copy's bound variables get fresh `VarId`s: the root program has one
+//! var table and one binding site per id. Module fns keep their own tables
+//! here (`UnifyVarTables` runs later, in codegen), so only root fns take part.
 
 use std::collections::{HashMap, HashSet};
 
@@ -24,37 +23,40 @@ use almide_ir::visit::{walk_expr, walk_stmt, IrVisitor};
 use almide_ir::visit_mut::{walk_expr_mut, walk_pattern_mut, walk_stmt_mut, IrMutVisitor};
 use almide_ir::*;
 
-/// A sink's parameter and its (fused) body chain.
-pub(super) struct Sink {
-    param: VarId,
-    body: IrExpr,
+pub fn inline_list_sinks(program: &mut IrProgram) {
+    let sinks: HashMap<Sym, (VarId, IrExpr)> = program.functions.iter()
+        .filter_map(|f| Some((f.name, sink(f)?)))
+        .collect();
+    if sinks.is_empty() {
+        return;
+    }
+    let IrProgram { functions, top_lets, var_table, .. } = program;
+    let mut v = Inliner { sinks: &sinks, vt: var_table };
+    for f in functions.iter_mut() { v.visit_expr_mut(&mut f.body); }
+    for tl in top_lets.iter_mut() { v.visit_expr_mut(&mut tl.value); }
 }
 
-/// The sinks among `functions`, keyed by the name a `CallTarget::Named`
-/// call carries.
-pub(super) fn sinks<'f>(functions: impl Iterator<Item = &'f IrFunction>) -> HashMap<Sym, Sink> {
-    functions.filter_map(|f| Some((f.name, sink(f)?))).collect()
-}
-
-fn sink(f: &IrFunction) -> Option<Sink> {
+fn sink(f: &IrFunction) -> Option<(VarId, IrExpr)> {
     let [p] = f.params.as_slice() else { return None };
-    if f.is_effect || f.is_test || p.is_mut || f.generics.as_ref().is_some_and(|g| !g.is_empty()) {
+    if f.is_effect || f.is_test || p.is_mut || f.name.as_str() == "main"
+        || f.generics.as_ref().is_some_and(|g| !g.is_empty())
+    {
         return None;
     }
     let body = tail(&f.body);
-    let IrExprKind::IterChain { source, collector, .. } = &body.kind else { return None };
-    if matches!(collector, IterCollector::Collect) || source_var(source) != Some(p.var) {
+    let IrExprKind::Call { args, .. } = &body.kind else { return None };
+    if !is_list_call(body) || !matches!(args.first().map(|a| &a.kind), Some(IrExprKind::Var { id }) if *id == p.var) {
         return None;
     }
-    // `p` is read by the source slot and nowhere else, and nothing else is
-    // free: the argument is evaluated once, where the source is.
-    if free_vars::free_vars(body, &HashSet::new()) != [p.var] || occurrences(body, p.var) != 1 {
+    // `p` is the first argument and nothing else; nothing else is free.
+    if free_vars::free_vars(body, &HashSet::new()) != [p.var] || occurrences(body, p.var) != 1 || !renamable(body) {
         return None;
     }
-    if !renamable(body) {
-        return None;
-    }
-    Some(Sink { param: p.var, body: body.clone() })
+    Some((p.var, body.clone()))
+}
+
+fn is_list_call(e: &IrExpr) -> bool {
+    matches!(&e.kind, IrExprKind::Call { target: CallTarget::Module { module, .. }, .. } if module.as_str() == "list")
 }
 
 /// A body is the tail of an empty block as much as it is itself.
@@ -62,14 +64,6 @@ fn tail(e: &IrExpr) -> &IrExpr {
     match &e.kind {
         IrExprKind::Block { stmts, expr: Some(t) } if stmts.is_empty() => tail(t),
         _ => e,
-    }
-}
-
-fn source_var(source: &IrExpr) -> Option<VarId> {
-    match &source.kind {
-        IrExprKind::Var { id } => Some(*id),
-        IrExprKind::Borrow { expr, .. } => source_var(expr),
-        _ => None,
     }
 }
 
@@ -88,10 +82,10 @@ fn occurrences(e: &IrExpr, var: VarId) -> usize {
     c.n
 }
 
-/// Every place a `VarId` can sit in the body is one `Rename` rewrites: the
+/// Every place a `VarId` can sit in the body is one `Rename` rewrites:
 /// statements that name a variable by id other than `let` (assignments, the
-/// list-mutation forms) and the closure-converted forms are refused rather
-/// than listed twice. A pure chain body never holds them anyway.
+/// list-mutation forms) and closure-converted forms are refused rather than
+/// listed twice.
 fn renamable(e: &IrExpr) -> bool {
     struct Scan { ok: bool }
     impl IrVisitor for Scan {
@@ -113,6 +107,31 @@ fn renamable(e: &IrExpr) -> bool {
     let mut s = Scan { ok: true };
     s.visit_expr(e);
     s.ok
+}
+
+struct Inliner<'a> {
+    sinks: &'a HashMap<Sym, (VarId, IrExpr)>,
+    vt: &'a mut VarTable,
+}
+
+impl IrMutVisitor for Inliner<'_> {
+    fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
+        walk_expr_mut(self, expr);
+        let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &expr.kind else { return };
+        let (Some((param, body)), [arg]) = (self.sinks.get(name), args.as_slice()) else { return };
+        if !is_list_call(arg) {
+            return;
+        }
+        let mut copy = body.clone();
+        Rename { vt: self.vt, map: HashMap::new() }.visit_expr_mut(&mut copy);
+        if let IrExprKind::Call { args, .. } = &mut copy.kind {
+            debug_assert!(matches!(args[0].kind, IrExprKind::Var { id } if id == *param));
+            args[0] = arg.clone();
+        }
+        copy.ty = expr.ty.clone();
+        copy.span = expr.span;
+        *expr = copy;
+    }
 }
 
 /// Gives every variable the copy binds a fresh id. Binding sites are met
@@ -167,16 +186,4 @@ impl IrMutVisitor for Rename<'_> {
         }
         walk_pattern_mut(self, p);
     }
-}
-
-/// The sink's chain with `arg` in the source slot and every bound variable
-/// renamed — not yet merged.
-pub(super) fn instantiate(sink: &Sink, arg: IrExpr, vt: &mut VarTable) -> IrExpr {
-    let mut body = sink.body.clone();
-    Rename { vt, map: HashMap::new() }.visit_expr_mut(&mut body);
-    if let IrExprKind::IterChain { source, .. } = &mut body.kind {
-        debug_assert_eq!(source_var(source), Some(sink.param));
-        **source = arg;
-    }
-    body
 }
