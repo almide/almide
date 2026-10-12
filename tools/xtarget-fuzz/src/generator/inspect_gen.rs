@@ -432,6 +432,17 @@ pub(crate) mod tests {
         Target::new(&sig).expect("target")
     }
 
+    /// #3636: the sized Value's stringified length must be a·n + b. With
+    /// `value.int(i)` the digit width grew across the sweep (crossing 99999
+    /// between 20k and 320k), so json.stringify / value.stringify /
+    /// value.omit fit n at 2.9–3.8% rms against a declared n.
+    #[test]
+    fn the_sized_value_holds_fixed_width_ints() {
+        let s = sized(&GenType::Value, 1000);
+        assert!(s.contains("value.int(100000000 + i)"), "{s}");
+        assert!(!s.contains("value.int(i)"), "{s}");
+    }
+
     /// A `mut`-parameter mutator: its sized input is a `var` the loop calls
     /// it on, and each diamond path mutates its own `var` and prints it.
     #[test]
