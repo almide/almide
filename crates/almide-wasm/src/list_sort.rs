@@ -19,7 +19,8 @@ impl Emitter<'_> {
     /// Type-directed total-order compare: consumes (a, b) of `t`'s wasm
     /// type, leaves an i32 whose SIGN is the verdict (only <0 / 0 / >0
     /// is promised). Tuples chain fields, lists are lexicographic with
-    /// the shorter-first prefix tiebreak, none < some; floats order by
+    /// the shorter-first prefix tiebreak, none < some, ok < err; Bytes
+    /// compare as String blocks do and Unit is always equal; floats order by
     /// the sign-flipped bit key (the total order the scalar path uses).
     ///
     /// Structural shapes INLINE (they are a finite DAG), and a user `Named`
@@ -48,6 +49,39 @@ impl Emitter<'_> {
         Ok(())
     }
 
+    /// `Result` as native derives it: `Ok < Err` (the ok tag is 0), then the
+    /// active side's payload. Consumes (a, b), leaves the signed verdict.
+    fn emit_result_cmp(&mut self, o: ETy, er: ETy) -> Result<(), EmitError> {
+        let (ot, et) = (self.types.el(o), self.types.el(er));
+        let hb = self.hold_i32()?;
+        let ha = self.hold_i32()?;
+        let tag = slot_memarg(almide_layout::SUM_TAG);
+        {
+            let mut i = self.f.instructions();
+            i.local_set(hb).local_set(ha);
+            i.local_get(ha).i32_load(tag).local_get(hb).i32_load(tag).i32_ne();
+            i.if_(BlockType::Result(ValType::I32));
+            i.i32_const(-1).i32_const(1);
+            i.local_get(ha).i32_load(tag).local_get(hb).i32_load(tag).i32_lt_u().select();
+            i.else_();
+            i.local_get(ha).i32_load(tag).i32_eqz().if_(BlockType::Result(ValType::I32));
+        }
+        for (side, ty) in [(0, ot), (1, et)] {
+            if side == 1 {
+                self.f.instructions().else_();
+            }
+            self.f.instructions().local_get(ha);
+            self.load_ty_slot(ty, almide_layout::SUM_FIELD);
+            self.f.instructions().local_get(hb);
+            self.load_ty_slot(ty, almide_layout::SUM_FIELD);
+            self.emit_val_cmp(ty)?;
+        }
+        self.f.instructions().end().end();
+        self.release_i32();
+        self.release_i32();
+        Ok(())
+    }
+
     /// How many i32 holds inlining `t`'s compare keeps live at its deepest
     /// point (mirrors the hold counts of `emit_val_cmp_level`; a `Named` is
     /// always a call and holds none).
@@ -59,6 +93,9 @@ impl Emitter<'_> {
             }
             SliceTy::List(h) => 5 + self.cmp_hold_need(self.types.el(h)),
             SliceTy::Option(h) => 2 + self.cmp_hold_need(self.types.el(h)),
+            SliceTy::Result(o, e) => {
+                2 + self.cmp_hold_need(self.types.el(o)).max(self.cmp_hold_need(self.types.el(e)))
+            }
             _ => 0,
         }
     }
@@ -106,9 +143,18 @@ impl Emitter<'_> {
                 self.release_i32();
                 self.release_i32();
             }
-            STR => {
+            // Bytes is native `Vec<u8>`: unsigned byte-lexicographic, a strict
+            // prefix first — exactly the String block compare (same layout).
+            STR | SliceTy::Scalar(Scalar::Bytes) => {
                 self.f.instructions().call(F_STR_CMP);
             }
+            // `()` orders equal to itself.
+            SliceTy::Unit => {
+                self.f.instructions().drop();
+                self.f.instructions().drop();
+                self.f.instructions().i32_const(0);
+            }
+            SliceTy::Result(o, er) => self.emit_result_cmp(o, er)?,
             SliceTy::Tuple(ti) => {
                 let fields = self.types.tuple_def(ti).fields;
                 let hb = self.hold_i32()?;
