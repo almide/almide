@@ -158,13 +158,27 @@ fn move_either_way_sources(expr: IrExpr, moved: &HashSet<VarId>) -> IrExpr {
     expr
 }
 
+/// A statement that rebinds `p` whole into a var — `var a = p`, `a = p`
+/// (wrapped `Clone(p)` as a non-terminal read) — keeping the wrapped value.
+fn rebind_of(stmt: &mut IrStmt, p: VarId) -> Option<&mut IrExpr> {
+    let value = match &mut stmt.kind {
+        IrStmtKind::Bind { value, .. } | IrStmtKind::Assign { value, .. } => value,
+        _ => return None,
+    };
+    let IrExprKind::Clone { expr } = &value.kind else { return None };
+    matches!(&expr.kind, IrExprKind::Var { id } if *id == p).then_some(value)
+}
+
 /// The leading statements of a block whose tail is a self-call: a param's
 /// range-op source in statement `k` moves when that is its only read in `k`,
 /// nothing after `k` (later statements, the call's arguments) reads it, and
 /// the call reassigns it (#3398 — `[x, ..rest] => go(rest)` lowers `rest` to
 /// `list.drop(xs, 1)` in a statement before the call). Reads BEFORE `k` are
 /// over: a `let` binds an owned value, and the param is proven lambda-free.
-fn move_statement_sources(stmts: Vec<IrStmt>, tail: &IrExpr, f: &TailFrame<'_>) -> Vec<IrStmt> {
+/// The same final read as a whole rebind into a var (`var a = p`, #3661)
+/// moves too: the var takes the param's buffer, so its first in-place write
+/// does not copy it.
+fn move_statement_sources(mut stmts: Vec<IrStmt>, tail: &IrExpr, f: &TailFrame<'_>) -> Vec<IrStmt> {
     let Some(args) = tail_self_call_args(tail, f.fn_name) else { return stmts };
     let reassigned: HashSet<VarId> = f.params.iter().zip(args)
         .filter(|((p, _), arg)| carried_var(arg) != Some(*p))
@@ -176,12 +190,18 @@ fn move_statement_sources(stmts: Vec<IrStmt>, tail: &IrExpr, f: &TailFrame<'_>) 
         census_owned_reads(arg, &reassigned, false, &mut later);
     }
     let mut moves: Vec<HashSet<VarId>> = vec![HashSet::new(); stmts.len()];
-    for (k, stmt) in stmts.iter().enumerate().rev() {
+    for k in (0..stmts.len()).rev() {
         let mut here: HashMap<VarId, OwnedReadCensus> = HashMap::new();
-        census_owned_reads_stmt(stmt, &reassigned, &mut here);
+        census_owned_reads_stmt(&stmts[k], &reassigned, &mut here);
         for (p, c) in &here {
             if c.only_source() && !later.contains_key(p) {
                 moves[k].insert(*p);
+            }
+            if c.only_bare() && !later.contains_key(p)
+                && let Some(value) = rebind_of(&mut stmts[k], *p)
+                && let IrExprKind::Clone { expr } = std::mem::replace(&mut value.kind, IrExprKind::Unit)
+            {
+                *value = *expr;
             }
         }
         for (p, _) in here {
