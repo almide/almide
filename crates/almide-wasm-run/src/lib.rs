@@ -6,6 +6,7 @@ mod host;
 mod http_call_host;
 mod host_process;
 mod host_serve;
+mod net_host;
 #[cfg(test)]
 #[path = "tests/http_host_test.rs"]
 mod http_host_test;
