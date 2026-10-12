@@ -35,7 +35,7 @@
 
 use std::collections::HashMap;
 
-use almide::ast::{Decl, Program};
+use almide::ast::{Decl, ExprKind, Program};
 use almide::intern::Sym;
 
 use super::denylist::NamedDenylist;
@@ -65,15 +65,37 @@ pub struct Signature {
     /// `Unit` return means the mutated value is the call's observable
     /// result ([`Signature::effective_ret`]).
     pub mut_param: Option<usize>,
+    /// An `effect fn` from a module the sandbox makes reproducible
+    /// ([`SANDBOXED_EFFECT_MODULES`]): the program's `main` becomes an
+    /// `effect fn`, and its arguments name things the sandbox holds.
+    pub effect: bool,
+    /// An effect fn with an Almide body: its call is lifted to
+    /// `Result[T, String]` (the checker's view; the ledger writes the
+    /// signature `-> T ! String`). An `= _` intrinsic keeps its declared type.
+    pub lifted: bool,
 }
+
+/// Effect modules whose functions are reproducible inside the fuzzer's
+/// sandbox (`oracle/sandbox.rs`: a seeded tree, fixed argv, env and stdin),
+/// so their effect functions are catalogued (tier E1,
+/// docs/roadmap/active/effect-inspection-harness.md). Every other effect
+/// function stays out.
+pub const SANDBOXED_EFFECT_MODULES: &[&str] = &["fs", "env", "io", "args"];
 
 impl Signature {
     /// The type a call yields to the generator: a `Unit`-returning mutator
-    /// yields its mutated `var`, every other function its return value.
-    pub fn effective_ret(&self) -> &SigType {
+    /// yields its mutated `var`; a bodied effect function ([`Self::lifted`])
+    /// yields `Result[T, String]` (its declared `T` unless that is already a
+    /// Result); every other function its declared return.
+    pub fn effective_ret(&self) -> SigType {
         match self.mut_param {
-            Some(m) if self.ret == SigType::Unit => &self.params[m],
-            _ => &self.ret,
+            Some(m) if self.ret == SigType::Unit => return self.params[m].clone(),
+            _ => {}
+        }
+        match &self.ret {
+            SigType::Result(..) => self.ret.clone(),
+            r if self.lifted => SigType::Result(Box::new(r.clone()), Box::new(SigType::String)),
+            r => r.clone(),
         }
     }
 
@@ -138,6 +160,10 @@ const BUNDLED_MODULES: &[(&str, &str, bool)] = &[
     ("url", include_str!("../../../../stdlib/url.almd"), true),
     ("regex", include_str!("../../../../stdlib/regex.almd"), true),
     ("json", include_str!("../../../../stdlib/json.almd"), true),
+    ("fs", include_str!("../../../../stdlib/fs.almd"), true),
+    ("env", include_str!("../../../../stdlib/env.almd"), true),
+    ("io", include_str!("../../../../stdlib/io.almd"), true),
+    ("args", include_str!("../../../../stdlib/args.almd"), true),
 ];
 
 /// Default selection weight for a function not named in
@@ -337,6 +363,7 @@ fn signature_from_decl(module: &'static str, decl: &Decl) -> Option<Signature> {
     let Decl::Fn {
         name,
         effect,
+        body,
         params,
         return_type,
         ..
@@ -345,8 +372,10 @@ fn signature_from_decl(module: &'static str, decl: &Decl) -> Option<Signature> {
         return None;
     };
 
-    // Skip effectful functions — they can read clocks/files/etc.
-    if effect.unwrap_or(false) {
+    // Effect functions only from the sandboxed modules: a clock, a socket or
+    // a process is not reproducible across legs.
+    let effect = effect.unwrap_or(false);
+    if effect && !SANDBOXED_EFFECT_MODULES.contains(&module) {
         return None;
     }
 
@@ -395,6 +424,8 @@ fn signature_from_decl(module: &'static str, decl: &Decl) -> Option<Signature> {
         ret,
         weight,
         mut_param,
+        effect,
+        lifted: effect && !matches!(body.as_ref().map(|b| &b.kind), None | Some(ExprKind::Hole)),
     })
 }
 

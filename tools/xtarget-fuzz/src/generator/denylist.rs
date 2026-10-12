@@ -58,6 +58,19 @@ const NONDETERMINISTIC_FUNCTIONS: &[(&str, &str)] = &[
     ("fan", "race"),     // first-to-finish — scheduling-order-dependent
     ("fan", "any"),      // first-success — scheduling-order-dependent
     ("fan", "timeout"),  // wall-clock deadline — nondeterministic
+    // Inside the sandboxed effect modules (tier E1), what the sandbox does
+    // not fix: the host's own paths, the target's name, the clock, and
+    // random names.
+    ("env", "cwd"),              // the sandbox's host path — differs per leg
+    ("env", "os"),               // the target's OS name — differs per leg by design
+    ("env", "temp_dir"),         // the host's temp dir — differs per leg
+    ("fs", "temp_dir"),          // the host's temp dir — differs per leg
+    ("env", "millis"),           // wall clock
+    ("env", "unix_timestamp"),   // wall clock
+    ("env", "sleep_ms"),         // wall clock
+    ("fs", "modified_at"),       // file timestamp
+    ("fs", "create_temp_dir"),   // random name
+    ("fs", "create_temp_file"),  // random name
 ];
 
 /// Functions whose Int result is a **host address** — the semantics

@@ -96,6 +96,19 @@ impl ReferenceOracle for InterpOracle {
     fn evaluate(&self, source: &str) -> Option<String> {
         use almide::interp::RunStatus;
 
+        // A program over the sandboxed effect modules (tier E1) reads the
+        // seeded tree, argv, env and stdin each leg runs in. The interpreter
+        // cannot be given that world: its fs overlay falls back to the
+        // host's real files, relative to the fuzzer's own cwd. It abstains
+        // rather than vote on a different world; native and wasm are still
+        // compared with each other, files included.
+        if crate::generator::SANDBOXED_EFFECT_MODULES
+            .iter()
+            .any(|m| source.contains(&format!("{m}.")) && source.contains(&format!("import {m}")))
+        {
+            return None;
+        }
+
         // The frontend is panic-free on the fuzz corpus by its own gates,
         // but the oracle must never kill the campaign: a panic = abstain
         // (and the shape will surface through the panic-fuzz lane instead).
