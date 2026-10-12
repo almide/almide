@@ -180,54 +180,13 @@ impl Emitter<'_> {
                 if let Some((ti, ci)) = ctor {
                     return self.lower_variant_ctor(name, ti, ci, args);
                 }
-                // The http_framed op leaves (#1710 increment 3): the
-                // splice's bodyless `= _` leaves, lowered as host ops —
-                // the intra-module twins of the host_env http arms (url
-                // in a, the method/body/headers frame in b). They carry
-                // no table body, so they intercept BEFORE resolution.
-                match name {
-                    "__http_framed_text" => {
-                        self.fs_call_str2(&args[0], &args[1], crate::fs_meta::OP_HTTP_FRAMED_TEXT)?;
-                        return Ok(Some(self.fs_result_string()?));
-                    }
-                    "__http_framed_status" => {
-                        self.fs_call_str2(&args[0], &args[1], crate::fs_meta::OP_HTTP_FRAMED_STATUS)?;
-                        return Ok(Some(self.fs_result_string()?));
-                    }
-                    "__http_framed_bytes" => {
-                        self.fs_call_str2(&args[0], &args[1], crate::fs_meta::OP_HTTP_FRAMED_BYTES)?;
-                        return Ok(Some(self.fs_result_bytes()?));
-                    }
-                    // The subprocess leaves (#2589, ADR-0025): two text
-                    // operands in a/b, a Result[String, String] answer.
-                    n if n.starts_with("__proc_") => {
-                        if let Some(&(_, op)) = crate::fs_meta::PROC_LEAVES.iter().find(|(l, _)| *l == n) {
-                            self.fs_call_str2(&args[0], &args[1], op)?;
-                            return Ok(Some(self.fs_result_string()?));
-                        }
-                    }
-                    // The http call handle's leaves (#2633, http_call.rs).
-                    n if n.starts_with("__http_call_") => {
-                        if let Some(t) = self.lower_http_call_leaf(n, args)? {
-                            return Ok(Some(t));
-                        }
-                    }
-                    // The http.serve loop's leaves (#2650): bind (port
-                    // text), next (the request as a List[String] of
-                    // frames), reply (the response's cells in a).
-                    "__http_serve_bind" => {
-                        self.fs_call_1(&args[0], crate::fs_meta::OP_HTTP_SERVE_BIND)?;
-                        return Ok(Some(self.fs_result_unit()?));
-                    }
-                    "__http_serve_next" => {
-                        self.fs_call_0(crate::fs_meta::OP_HTTP_SERVE_NEXT)?;
-                        return Ok(Some(self.fs_result_string_list()?));
-                    }
-                    "__http_serve_reply" => {
-                        self.fs_call_1(&args[0], crate::fs_meta::OP_HTTP_SERVE_REPLY)?;
-                        return Ok(Some(self.fs_result_unit()?));
-                    }
-                    _ => {}
+                // The splice's bodyless `= _` host-op leaves (http_framed,
+                // http.serve, subprocess, http call — http_call.rs). They
+                // carry no table body, so they intercept BEFORE resolution;
+                // each answer is fresh, so the call is OWNED (#3623).
+                if let Some(t) = self.lower_host_leaf(name, args)? {
+                    self.mark_owned_call(target);
+                    return Ok(Some(t));
                 }
                 // Entry fns resolve by name; a miss falls back to the
                 // module-fn simple-name index (intra-module calls arrive
