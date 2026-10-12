@@ -40,9 +40,9 @@
 53	43	397	53	spec/wasm_cross/bundled_pure_modules.almd
 30	18	185	30	spec/wasm_cross/bytes_alloc_ceiling_domain.almd
 25	17	33061	25	spec/wasm_cross/bytes_array_count_domain.almd
-24	11	164	24	spec/wasm_cross/bytes_clear_mut_param.almd
+19	6	164	19	spec/wasm_cross/bytes_clear_mut_param.almd
 54	45	1984	54	spec/wasm_cross/bytes_copy_from_negative_len.almd
-162	154	4625	162	spec/wasm_cross/bytes_copy_within_offset_domain.almd
+127	119	4442	127	spec/wasm_cross/bytes_copy_within_offset_domain.almd
 734	686	25358	734	spec/wasm_cross/bytes_cursor_read_domain.almd
 2	0	5	2	spec/wasm_cross/bytes_data_ptr_identity.almd
 4	1	36	4	spec/wasm_cross/bytes_equality_call_operands.almd
@@ -66,10 +66,10 @@
 105	65	1081	105	spec/wasm_cross/bytes_set_on_record_field.almd
 44	28	361	44	spec/wasm_cross/bytes_set_value_semantics.almd
 58	30	485	58	spec/wasm_cross/bytes_string_window_domain.almd
-60122	60089	3842858	60122	spec/wasm_cross/bytes_temp_receiver.almd
+60120	60087	3842853	60120	spec/wasm_cross/bytes_temp_receiver.almd
 98	82	2927	98	spec/wasm_cross/bytes_to_string_err_release.almd
-99	73	2648	99	spec/wasm_cross/bytes_writer_family.almd
-131	107	1684	131	spec/wasm_cross/bytes_writer_mut_from_declaration.almd
+95	70	2637	95	spec/wasm_cross/bytes_writer_family.almd
+130	106	1678	130	spec/wasm_cross/bytes_writer_mut_from_declaration.almd
 5	0	35	5	spec/wasm_cross/call_closure_lambda_param.almd
 1	0	32	1	spec/wasm_cross/call_lambda_ctor.almd
 14	7	98	14	spec/wasm_cross/callee_shadowing_family.almd
@@ -331,9 +331,9 @@
 5	1	114	2	spec/wasm_cross/index_bounds_loop_invariant.almd
 2	0	34	0	spec/wasm_cross/index_bounds_write_heap.almd
 2	0	34	0	spec/wasm_cross/index_bounds_write_only_var.almd
-62	13	652	62	spec/wasm_cross/inplace_clear_alias.almd
+61	12	655	61	spec/wasm_cross/inplace_clear_alias.almd
 75	44	616	75	spec/wasm_cross/inplace_clear_alias_field.almd
-125	82	1216	125	spec/wasm_cross/inplace_clear_family.almd
+124	81	1220	124	spec/wasm_cross/inplace_clear_family.almd
 8	3	133	8	spec/wasm_cross/inplace_mutator_statement.almd
 0	0	0	0	spec/wasm_cross/int8_div_overflow.almd
 268	241	6268	268	spec/wasm_cross/int_bit_family.almd
@@ -523,7 +523,7 @@
 50	34	1704	50	spec/wasm_cross/matrix_pow_libm.almd
 132	114	2217	122	spec/wasm_cross/matrix_product_family.almd
 79	52	96005721	79	spec/wasm_cross/matrix_q1_full_loader_cols_beyond_buffer.almd
-122	93	46175	122	spec/wasm_cross/matrix_q1_full_loader_wrapped_offset.almd
+121	93	45975	121	spec/wasm_cross/matrix_q1_full_loader_wrapped_offset.almd
 32	9	2580	10	spec/wasm_cross/matrix_q_dims_guard.almd
 232	183	44345	232	spec/wasm_cross/matrix_q_fp16_scale_domain.almd
 30	11	1385	30	spec/wasm_cross/matrix_select_rows.almd
@@ -551,7 +551,7 @@
 70	39	668	70	spec/wasm_cross/mut_list_param_read_by_range_ops.almd
 18	8	176	18	spec/wasm_cross/mut_map_param.almd
 170	71	75134	170	spec/wasm_cross/mut_param_alias_cow.almd
-44	25	1303	44	spec/wasm_cross/mut_param_alias_in_place_mutators.almd
+43	24	1289	43	spec/wasm_cross/mut_param_alias_in_place_mutators.almd
 3	0	0	3	spec/wasm_cross/mut_param_branch_forward.almd
 10110	10102	163568	10110	spec/wasm_cross/mut_param_call_chain.almd
 266	221	2830	266	spec/wasm_cross/mut_param_cell_tail_capture_read.almd
@@ -581,7 +581,7 @@
 30	19	612	30	spec/wasm_cross/mutable_global_mut_arg_callee_touches_global.almd
 4	1	32	4	spec/wasm_cross/mutable_global_repeat_writes.almd
 1	0	16	1	spec/wasm_cross/mutable_global_scalar_assign.almd
-150	93	1274	150	spec/wasm_cross/mutator_writeback_releases_old_block.almd
+145	88	1246	145	spec/wasm_cross/mutator_writeback_releases_old_block.almd
 37	31	116	37	spec/wasm_cross/mutual_append.almd
 10	0	120	10	spec/wasm_cross/mutual_recursive_types.almd
 0	0	0	0	spec/wasm_cross/mutual_tail_recursion.almd
