@@ -16,7 +16,7 @@
 //! composed lambdas by substitution, duplicating a callback's side effects.
 //! Both are gone.)
 //!
-//! Two rewrites, bottom-up:
+//! Three rewrites, bottom-up:
 //!
 //! 1. **Single stage** — one `almide_rt_list_{map,filter,flat_map,filter_map,
 //!    fold,find,any,all,count,find_index,find_map}` call whose callback is a lambda LITERAL
@@ -46,6 +46,11 @@
 //!    `Vec` per stage, exactly the spec order. The fallible `!` form never
 //!    reaches here (it lowers to the self-hosted `__fallible_*` twins).
 //!
+//! 3. **Sink** — a call to a user fn whose whole body is one chain over its
+//!    only parameter, with a `Collect`-ending chain as the argument, becomes
+//!    the sink's chain over the argument's elements, through the same merge
+//!    rule (#3584, `pass_stream_fusion_sink`).
+//!
 //! A chain's source starts CONSUMED; whether it stays so is decided by what
 //! the steps do with each element, not by the twin's `@consume(xs)` slot
 //! (#2287): `BorrowInsertion` reads `chain_elements_consumed` — a `Copy`
@@ -68,6 +73,7 @@ use almide_ir::*;
 use super::pass::{NanoPass, PassResult, Target};
 use super::pass_rust_lowering::rewrite_tail_list_to_array;
 use super::pass_stdlib_lowering::prepare_lambda_borrowed;
+use super::pass_stream_fusion_sink as sink;
 
 /// Ablation knob: set to skip the pass (the win is then attributable).
 pub const ABLATION_ENV: &str = "ALMIDE_STREAM_FUSION_OFF";
@@ -98,6 +104,16 @@ impl NanoPass for StreamFusionPass {
         for m in &mut program.modules {
             for f in &mut m.functions { v.visit_expr_mut(&mut f.body); }
             for tl in &mut m.top_lets { v.visit_expr_mut(&mut tl.value); }
+        }
+        // A user fn whose body is one chain over its parameter is a sink a
+        // `Collect`-ending argument chain fuses into (#3584). Root fns only:
+        // a module fn's `Named` call shares its spelling with root names.
+        let sinks = sink::sinks(program.functions.iter());
+        if !sinks.is_empty() {
+            let IrProgram { functions, top_lets, var_table, .. } = &mut program;
+            let mut s = SinkFuser { fuser: &mut v, sinks: &sinks, vt: var_table };
+            for f in functions.iter_mut() { s.visit_expr_mut(&mut f.body); }
+            for tl in top_lets.iter_mut() { s.visit_expr_mut(&mut tl.value); }
         }
         let changed = v.changed;
         program.codegen_annotations.borrowed_lambda_params.extend(v.chain_params);
@@ -400,6 +416,48 @@ impl<'a> IrMutVisitor for Fuser<'a> {
             }
         }
         self.in_fan = enclosing_fan;
+    }
+}
+
+/// Second sweep (#3584): `sink(<chain>.collect())` → the sink's chain over
+/// the argument's elements, when `merge` accepts the interleaving.
+struct SinkFuser<'a, 'b> {
+    fuser: &'b mut Fuser<'a>,
+    sinks: &'b std::collections::HashMap<Sym, sink::Sink>,
+    vt: &'b mut VarTable,
+}
+
+impl IrMutVisitor for SinkFuser<'_, '_> {
+    fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
+        walk_expr_mut(self, expr);
+        let IrExprKind::Call { target: CallTarget::Named { name }, args, .. } = &expr.kind else { return };
+        let (Some(s), [arg]) = (self.sinks.get(name), args.as_slice()) else { return };
+        if !matches!(arg.kind, IrExprKind::IterChain { collector: IterCollector::Collect, .. }) {
+            return;
+        }
+        let steps_in = |e: &IrExpr| match &e.kind { IrExprKind::IterChain { steps, .. } => steps.len(), _ => 0 };
+        let mut inst = sink::instantiate(s, arg.clone(), self.vt);
+        inst.ty = expr.ty.clone();
+        let want = steps_in(arg) + steps_in(&inst);
+        let merged = self.fuser.merge(inst);
+        // `merge` either flattens (the argument's steps join the sink's) or
+        // returns the nested chain, which the call already is.
+        if steps_in(&merged) != want || matches!(&merged.kind,
+            IrExprKind::IterChain { source, .. } if matches!(source.kind, IrExprKind::IterChain { .. }))
+        {
+            return;
+        }
+        if let IrExprKind::IterChain { steps, collector, .. } = &merged.kind {
+            for lam in steps.iter().filter_map(IterStep::lambda).chain(collector.lambda()) {
+                if let IrExprKind::Lambda { params, .. } = &lam.kind
+                    && let Some((first, _)) = params.first()
+                {
+                    self.fuser.chain_params.insert(*first);
+                }
+            }
+        }
+        *expr = merged;
+        self.fuser.changed = true;
     }
 }
 
