@@ -40,6 +40,7 @@ pub mod native_result_rewrite;
 pub mod pipeline;
 pub mod purity;
 pub mod render_native;
+mod render_native_append;
 mod render_native_op_families;
 mod render_native_shims;
 
