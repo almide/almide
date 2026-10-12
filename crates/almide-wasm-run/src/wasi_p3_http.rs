@@ -221,9 +221,14 @@ fn shim_http(g: P3Globals, h: &HttpAbi, t: &HttpErrTexts, fns: HttpErrFns) -> Fu
     i.br(0).end().end();
     i.end();
     // content-length for a non-empty body (decimal, back to front —
-    // the op-49 status rendering's shape). A host that refuses the name
-    // answers header-error, which is ignored like any other rejection.
-    i.local_get(b_len).i32_const(0).i32_gt_s().if_(BlockType::Empty);
+    // the op-49 status rendering's shape), and `0` for an empty one unless
+    // the method is GET or HEAD: without a length the host frames the
+    // request body chunked, so an empty PATCH or DELETE went out as
+    // `0\r\n\r\n` where native sends no content at all (RFC 9110 §8.6 lets a
+    // client send the 0). A host that refuses the name answers
+    // header-error, which is ignored like any other rejection.
+    req_is_get_or_head(&mut i, op, (m_ptr, m_len), rl.v);
+    i.local_get(b_len).i32_const(0).i32_gt_s().local_get(rl.v).i32_eqz().i32_or().if_(BlockType::Empty);
     i.local_get(b_len).local_set(tmp);
     i.i32_const(1).local_set(digit);
     i.local_get(tmp).local_set(cell_len);
