@@ -66,3 +66,38 @@ fn error_message_payload_survives_its_source_on_both_legs() {
     assert_eq!(run(false), EXPECTED, "native");
     assert_eq!(run(true), EXPECTED, "wasm");
 }
+
+/// Every block the error trio allocates is released by exit on wasm.
+/// `context`'s Err arm built "{msg}: " as an intermediate block, concatenated
+/// the payload onto it, and never released it: one block per Err call.
+#[test]
+fn error_trio_leaves_no_block_live_at_exit_on_wasm() {
+    const LIVE: &str = r#"fn main() -> Unit = {
+  let x1: Result[Int, String] = err("D" + int.to_string(1))
+  let c = error.context(x1, "hello")
+  println("${c}")
+  println(error.message(error.context(c, "top")))
+  let m = error.message(x1)
+  println(m)
+  println(error.chain(m, "cause"))
+}
+"#;
+    let dir = tempfile::tempdir().expect("scratch");
+    let file = dir.path().join("error_live.almd");
+    std::fs::write(&file, LIVE).expect("source");
+    let out = Command::new(env!("CARGO_BIN_EXE_almide"))
+        .arg("run")
+        .arg(&file)
+        .args(["--target", "wasm"])
+        .env("ALMIDE_WASM_ALLOC_COUNT", "1")
+        .output()
+        .expect("almide run");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let err = String::from_utf8_lossy(&out.stderr);
+    let line = err.lines().find(|l| l.contains("__ALMD_WASM_ALLOC")).expect("the alloc count line");
+    assert!(line.contains(" live=0 "), "blocks left live at exit: {line}");
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        "err(\"hello: D1\")\ntop: hello: D1\nD1\nD1\ncaused by: cause\n"
+    );
+}
