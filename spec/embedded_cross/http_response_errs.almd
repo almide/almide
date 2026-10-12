@@ -1,0 +1,46 @@
+// @contract: C-328
+// The full-response family (#1791) on the embedded lane (#3620, op 65): every
+// probe is deterministic — closed local ports and malformed urls, no live
+// network — and the err texts must match native byte-for-byte (the shared
+// rt-core client guarantees it by construction; this net catches a
+// frame-protocol drift between the splice and the host).
+import http
+
+effect fn main() -> Unit = {
+  match http.get_response("http://127.0.0.1:1/") {
+    ok(_) => println("get:unexpected-ok"),
+    err(e) => println("get:${e}"),
+  }
+  match http.post_response("http://127.0.0.1:1/x", "body") {
+    ok(_) => println("post:unexpected-ok"),
+    err(e) => println("post:${e}"),
+  }
+  match http.put_response("http://127.0.0.1:1/x", "12345") {
+    ok(_) => println("put:unexpected-ok"),
+    err(e) => println("put:${e}"),
+  }
+  match http.patch_response("http://127.0.0.1:1/x", "") {
+    ok(_) => println("patch:unexpected-ok"),
+    err(e) => println("patch:${e}"),
+  }
+  match http.delete_response("http://127.0.0.1:1/x") {
+    ok(_) => println("delete:unexpected-ok"),
+    err(e) => println("delete:${e}"),
+  }
+  match http.request_response("OPTIONS", "http://127.0.0.1:1/x", "b", ["K": "v"]) {
+    ok(_) => println("request:unexpected-ok"),
+    err(e) => println("request:${e}"),
+  }
+  match http.get_response("not-a-url") {
+    ok(_) => println("badurl:unexpected-ok"),
+    err(e) => println("badurl:${e}"),
+  }
+  match http.get_response("ftp://127.0.0.1:1/") {
+    ok(_) => println("scheme:unexpected-ok"),
+    err(e) => println("scheme:${e}"),
+  }
+  match http.request_response("GET", "http://127.0.0.1:1/x", "", ["X-A": "1\r\nX-B: 2"]) {
+    ok(_) => println("inject:unexpected-ok"),
+    err(e) => println("inject:${e}"),
+  }
+}
