@@ -725,3 +725,52 @@ Builds compared: 0.62.0, 0.66.0 (release 819bbc74f) and develop 974c00ea0.
 3. Stamp the re-queued batches.
 4. Open the `reuse-attr-c` PR once its 10 functions are stamped, then #3533's edit-site PR and #3552's set build.
 5. Wasm `read_string_at` could decode straight from its window and drop the extra allocation per read.
+
+## 2026-10-12 (day): @reuse PR1 landed, GCE runs under a service account, four correctness fixes from the inspection
+
+### Landed / open
+- **MERGED:** #3581 (#3555), #3582 (typed `AlmideRcCow` glue), #3583 (#3575), and #3587, @reuse PR1:
+  - the ten list / map functions are declared `@reuse`;
+  - native owned twins and wasm dying-read moves are derived from the declaration;
+  - the name-keyed gate;
+  - wasm `take_while` builds its result with one copy;
+  - the ten rows are re-stamped from GCE (insp-rac 5f069ee8e, harness 6abbc79c2, c4-standard-4, us-east1-b).
+- **Open, auto-merge on:**
+  - **#3589 (#3588):** `list.sort` / `min` / `max` over Matrix or Value elements passed check, then failed rustc E0277 natively and walled on wasm. `is_ord` now treats both as holding Floats, and the call is E030 at check time. No program that built before is refused.
+  - **#3593:** wasm orders Bytes, Result and Unit elements the way native's derived `Ord` does, instead of walling `list-cmp-elem`.
+  - **#3594 (#3591):** in an effect fn, `x = list.set(x, i, v)` with a Result element hoisted `v` into a synthetic bind, and `auto_try` unwrapped it (`let v: i64 = (Ok(2))?`, rustc E0308; wasm ty-mismatch). The bug was already in v0.64.0. The synthetic bind now keeps its Result.
+- **reuse-edits-c (PR2 of the @reuse ruling, #3533 + #3577):**
+  - `list.set` / `swap` / `update` are declared `@reuse`.
+  - `bytes.set` gets `@reuse(b)` and the twin `almide_rt_bytes_set_owned`. The call site hands it `AlmideRcCow::into_inner(b)`: moved when unshared, copied when shared.
+  - On wasm, a dying Bytes source goes through `$cow`.
+  - Measured on macOS arm64 with built artifacts and n = 1,000,000 bytes:
+    - native `b = bytes.set(b, …)`: k = 20,000 / 80,000 steps took 0.46 / 1.33 s before, 0.30 / 0.29 s after;
+    - wasm: 80,001 allocations (80 GB requested) before, 1 allocation (1 MB) after.
+  - The value-semantics program prints the same on old / new × native / wasm (`tests/bytes_set_reuse_test.rs`).
+  - codopsy for codegen / wasm / types: A 90 / 90 / 95, warnings unchanged.
+  - The 5 functions are being inspected on GCE at the branch sha before the PR.
+
+### Measurement setup change
+- The owner created the service account `almide-insp-runner` (project `compute.instanceAdmin.v1` plus `serviceAccountUser` on the default compute SA). Its key lives outside the repo.
+- Inspection scripts pass `--account` explicitly. The owner's account stays the default.
+- **Why:** the Workspace re-auth window had stopped a run mid-way, and the failed delete left 3 VMs billing from 03:20 until they were found and deleted.
+- Auto mode refused to create the SA itself; the owner ran the script.
+
+### Re-inspection of 109 previously failed functions (develop 595a37476, GCE c4-standard-4)
+- Spot preemption took 3 of 6 VMs; their 54 functions were re-run in us-central1-a.
+- A second project's c4-standard-16 holds 16 of the 32 global CPUs, so at most 4 inspection VMs fit.
+- **So far:** 14 stampable, 13 not stampable. The rest are still running.
+- **Not stampable, with cause:**
+  - parity, `bytes.read_string_at` and `bytes.lines`: both are `list.sort` over Matrix, i.e. #3588, fixed in #3589.
+  - `result.partition`: the complexity probe hit #3591, fixed in #3594.
+  - `list.unique`: n² on both legs. The native runtime is `contains`-based, because the element has only `PartialEq` (Float included). A hashed path needs a per-type design. Recorded, not changed.
+  - `result.filter`: native moves n bytes per call in the plain-call shape. Returning the input's String payload while the input stays live needs a copy, because native Strings are not shared. wasm moves 0. This is the ADR-0018 / AlmideStr question. Recorded.
+  - `map.set` / `remove` / `update` / `upsert`: n per call on both legs (measured; the reason is still to be read).
+  - `list.flat_map`, `list.intersperse`: the wasm bytes-moved series does not fit one class (`n = 20000` is low). Same doubling-regrowth artifact that `take_while` had; `flat_map` has three lowering paths, so it is deferred.
+  - `bytes.insert` (instructions rms 6.3%) and `int.to_uint16_checked` (wasm series): the known allocator / odd-series artifacts.
+
+### Next
+1. Stamp the 14 (and the rest when the run finishes) on a develop-based branch.
+2. Finish the PR2 inspection, stamp the 5 rows, and open the PR (Closes #3533, #3577).
+3. Read why the map writes are n per call.
+4. `flat_map` / `intersperse` single-copy lowering.
