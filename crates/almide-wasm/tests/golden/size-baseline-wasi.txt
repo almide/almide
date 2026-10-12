@@ -445,7 +445,7 @@
 2121	spec/wasm_cross/list_repeat_size_ceiling.almd
 3363	spec/wasm_cross/list_rest_pattern.almd
 6526	spec/wasm_cross/list_set_value.almd
-4782	spec/wasm_cross/list_slice_oob.almd
+4690	spec/wasm_cross/list_slice_oob.almd
 2578	spec/wasm_cross/list_sort_short.almd
 3366	spec/wasm_cross/list_sort_str.almd
 3105	spec/wasm_cross/list_string_param_join_len.almd
