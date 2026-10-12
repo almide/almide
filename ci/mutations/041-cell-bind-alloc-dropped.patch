@@ -2,8 +2,8 @@ diff --git a/crates/almide-wasm/src/stmts.rs b/crates/almide-wasm/src/stmts.rs
 index 284820541..0d1fe372c 100644
 --- a/crates/almide-wasm/src/stmts.rs
 +++ b/crates/almide-wasm/src/stmts.rs
-@@ -263,7 +263,7 @@ impl Emitter<'_> {
-         if self.rc_droppable(declared) && !self.rc_owned_result(value) {
+@@ -264,7 +264,7 @@ impl Emitter<'_> {
+         if self.rc_droppable(declared) && !self.rc_owned_result(value) && moved.is_none() {
              self.rc_inc_top();
          }
 -        if self.cells.contains(var) {
