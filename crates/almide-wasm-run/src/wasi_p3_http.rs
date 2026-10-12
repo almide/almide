@@ -534,7 +534,7 @@ fn shim_http(g: P3Globals, h: &HttpAbi, t: &HttpErrTexts, fns: HttpErrFns) -> Fu
     i.i32_const(0).local_set(total);
     // op 65: `<status>\n<hlen>\n<header cells>` ahead of the body.
     i.local_get(op).i32_const(65).i32_eq().if_(BlockType::Empty);
-    resp_write_prefix(&mut i, f_alloc, tmp, (buf, cap, total), rl);
+    resp_write_prefix(&mut i, (f_alloc, fns.check), tmp, (buf, cap, total), rl);
     i.end();
     // op 49 (`request_status`): `<status>\n` precedes the body — the host
     // lane's `format!("{code}\n{text}")`. Decimal, no padding: count the

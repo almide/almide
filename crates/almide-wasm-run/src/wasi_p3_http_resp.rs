@@ -6,6 +6,9 @@
 // response BEFORE consume-body moves it; the prefix is written into the body
 // buffer before the drain appends the body behind it. Lengths count chars the
 // way `string.len` does: every byte that is not a UTF-8 continuation byte.
+// An entry whose name is one of the fields the client manages (C-370's nine,
+// the same table the request check reads) is left out: a stock host from
+// wasmtime 49 on withholds them anyway, and native drops them too.
 
 /// The scratch locals op 65 needs, beyond `shim_http`'s own.
 #[derive(Clone, Copy)]
@@ -76,10 +79,18 @@ fn resp_headers_copy(i: &mut wasm_encoder::InstructionSink<'_>, response: u32, r
 /// Each cell of entry `l.entry`: name at +0/+4, value at +8/+12.
 const RESP_CELLS: [(u64, u64); 2] = [(0, 4), (8, 12)];
 
+/// Open an `if` that runs when entry `l.entry`'s name is not a managed field:
+/// the header check (`check`) answers 3 for one, given an empty value.
+fn resp_if_kept(i: &mut wasm_encoder::InstructionSink<'_>, check: u32, l: RespLocals) {
+    i.local_get(l.entry).i32_load(mem(0)).local_get(l.entry).i32_load(mem(4));
+    i.local_get(l.entry).i32_load(mem(0)).i32_const(0).call(check);
+    i.i32_const(3).i32_ne().if_(BlockType::Empty);
+}
+
 /// After the body buffer exists: write `<status>\n<hlen>\n<cells>` at its
 /// start (growing it first if the prefix exceeds `cap`), leaving `total` at
 /// the prefix length. `(buf, cap, total)` are shim_http's body-buffer locals.
-fn resp_write_prefix(i: &mut wasm_encoder::InstructionSink<'_>, f_alloc: u32, status: u32, (buf, cap, total): (u32, u32, u32), l: RespLocals) {
+fn resp_write_prefix(i: &mut wasm_encoder::InstructionSink<'_>, (f_alloc, check): (u32, u32), status: u32, (buf, cap, total): (u32, u32, u32), l: RespLocals) {
     // hlen in chars, and the bytes the cells take.
     i.i32_const(0).local_set(l.hlen);
     i.i32_const(0).local_set(l.bytes);
@@ -87,6 +98,7 @@ fn resp_write_prefix(i: &mut wasm_encoder::InstructionSink<'_>, f_alloc: u32, st
     i.block(BlockType::Empty).loop_(BlockType::Empty);
     i.local_get(l.k).local_get(l.n).i32_ge_u().br_if(1);
     i.local_get(l.list).local_get(l.k).i32_const(16).i32_mul().i32_add().local_set(l.entry);
+    resp_if_kept(i, check, l);
     for (p, n) in RESP_CELLS {
         i.local_get(l.entry).i32_load(mem(p)).local_set(l.s);
         i.local_get(l.entry).i32_load(mem(n)).local_set(l.c);
@@ -96,6 +108,7 @@ fn resp_write_prefix(i: &mut wasm_encoder::InstructionSink<'_>, f_alloc: u32, st
         i.local_get(l.bytes).local_get(l.d).i32_add().i32_const(1).i32_add();
         i.local_get(l.entry).i32_load(mem(n)).i32_add().local_set(l.bytes);
     }
+    i.end();
     i.local_get(l.k).i32_const(1).i32_add().local_set(l.k);
     i.br(0).end().end();
     // The two decimal lines take at most 24 bytes; grow past the prefix.
@@ -110,6 +123,8 @@ fn resp_write_prefix(i: &mut wasm_encoder::InstructionSink<'_>, f_alloc: u32, st
     i.i32_const(0).local_set(l.k);
     i.block(BlockType::Empty).loop_(BlockType::Empty);
     i.local_get(l.k).local_get(l.n).i32_ge_u().br_if(1);
+    i.local_get(l.list).local_get(l.k).i32_const(16).i32_mul().i32_add().local_set(l.entry);
+    resp_if_kept(i, check, l);
     for (p, n) in RESP_CELLS {
         i.local_get(l.list).local_get(l.k).i32_const(16).i32_mul().i32_add().local_set(l.entry);
         i.local_get(l.entry).i32_load(mem(p)).local_set(l.bytes);
@@ -119,6 +134,7 @@ fn resp_write_prefix(i: &mut wasm_encoder::InstructionSink<'_>, f_alloc: u32, st
         i.local_get(buf).local_get(total).i32_add().local_get(l.bytes).local_get(l.hlen).memory_copy(0, 0);
         i.local_get(total).local_get(l.hlen).i32_add().local_set(total);
     }
+    i.end();
     i.local_get(l.k).i32_const(1).i32_add().local_set(l.k);
     i.br(0).end().end();
 }

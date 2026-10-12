@@ -289,14 +289,20 @@ fn http_request_raw(
 /// header list. Redirects are NEVER followed: the 3xx and its `Location` are
 /// the answer, so the final URL is always the URL the caller passed. `Err`
 /// is a refused request (URL, method, header) or a transport failure
-/// (connection / proxy / TLS / timeout / size cap / framing).
+/// (connection / proxy / TLS / timeout / size cap / framing). The header list
+/// leaves out the fields the client manages (`HTTP_FORBIDDEN_HEADERS`, C-370):
+/// a stock wasi:http host withholds them from a response, so no lane shows
+/// them (C-328).
 pub fn request_response(
     method: &str,
     url: &str,
     body: &str,
     headers: &[(String, String)],
 ) -> Result<HttpTextResponse, String> {
-    http_request_raw(method, url, body, headers).map(|(c, h, b)| (c, h, String::from_utf8_lossy(&b).into_owned()))
+    http_request_raw(method, url, body, headers).map(|(c, mut h, b)| {
+        h.retain(|(k, _)| !HTTP_FORBIDDEN_HEADERS.iter().any(|f| f.eq_ignore_ascii_case(k)));
+        (c, h, String::from_utf8_lossy(&b).into_owned())
+    })
 }
 
 /// The String client: `Ok(body)` for any complete response, `Err` for
