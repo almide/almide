@@ -47,6 +47,10 @@ impl NanoPass for RustLoweringPass {
         //     not boxed into a fresh `Rc<dyn Fn>` per call. Before boxing,
         //     like A0. See `route_static_closure_twins`.
         if route_static_closure_twins(&mut program) { changed = true; }
+        // (A0c, #3649) A threaded runtime helper whose argument holds an `Rc`
+        //     → its `Send`-free `_seq` twin. Before boxing, like A0: the
+        //     twin takes the uniform `Rc<dyn Fn>`, which boxing then supplies.
+        if super::pass_fan_lowering::route_send_free_twins(&mut program) { changed = true; }
         // (A1, #2044) `fan.map` / list ops UNDER a `fan { … }` block with a pure
         //     lambda over Send-safe scalars → the thread-per-core runtime
         //     twins. Also BEFORE boxing, for the same reason as A0: the fan
@@ -271,7 +275,7 @@ fn static_closure_twin(symbol: &str) -> Option<&'static str> {
 
 /// A closure LITERAL — what `unbox_consumed` hands over un-boxed: a lambda,
 /// a fn item, or CaptureClone's `{ let __cap = v.clone(); <lambda> }`.
-fn is_closure_literal(e: &IrExpr) -> bool {
+pub(super) fn is_closure_literal(e: &IrExpr) -> bool {
     match &e.kind {
         IrExprKind::Lambda { .. } | IrExprKind::FnRef { .. } => true,
         IrExprKind::Block { expr: Some(tail), .. } => is_closure_literal(tail),
