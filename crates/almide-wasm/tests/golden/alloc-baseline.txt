@@ -482,6 +482,7 @@
 69232	spec/wasm_cross/map_interp_string_value.almd
 66144	spec/wasm_cross/map_literal_borrowed_if_arg.almd
 67344	spec/wasm_cross/map_literal_ctor_values.almd
+79632	spec/wasm_cross/map_merge_in_place.almd
 65792	spec/wasm_cross/map_of_maps_value.almd
 65872	spec/wasm_cross/map_rich_variant_key.almd
 66656	spec/wasm_cross/map_set_eq.almd
@@ -919,6 +920,7 @@
 70272	spec/wasm_cross/value_keys_non_object.almd
 67376	spec/wasm_cross/value_merge.almd
 67552	spec/wasm_cross/value_merge_duplicate_keys.almd
+364992	spec/wasm_cross/value_merge_wide_left.almd
 66480	spec/wasm_cross/value_object_leak_loop.almd
 69184	spec/wasm_cross/value_object_ops_share.almd
 68320	spec/wasm_cross/value_repr.almd
