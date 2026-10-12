@@ -68,7 +68,7 @@
 66880	spec/wasm_cross/bytes_string_window_domain.almd
 68592	spec/wasm_cross/bytes_temp_receiver.almd
 67024	spec/wasm_cross/bytes_to_string_err_release.almd
-68128	spec/wasm_cross/bytes_writer_family.almd
+68112	spec/wasm_cross/bytes_writer_family.almd
 66944	spec/wasm_cross/bytes_writer_mut_from_declaration.almd
 65936	spec/wasm_cross/call_closure_lambda_param.almd
 65824	spec/wasm_cross/call_lambda_ctor.almd
@@ -523,7 +523,7 @@
 67616	spec/wasm_cross/matrix_pow_libm.almd
 68160	spec/wasm_cross/matrix_product_family.almd
 48073284	spec/wasm_cross/matrix_q1_full_loader_cols_beyond_buffer.almd
-100384	spec/wasm_cross/matrix_q1_full_loader_wrapped_offset.almd
+100128	spec/wasm_cross/matrix_q1_full_loader_wrapped_offset.almd
 71040	spec/wasm_cross/matrix_q_dims_guard.almd
 75984	spec/wasm_cross/matrix_q_fp16_scale_domain.almd
 69232	spec/wasm_cross/matrix_select_rows.almd
