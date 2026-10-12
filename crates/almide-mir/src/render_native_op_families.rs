@@ -197,6 +197,14 @@ pub(crate) fn render_native_result_op(op: &Op, s: OpSink<'_>) -> Result<bool, Lo
             line!("let {}: Result<i64, String> = Err({});", var(*d), src);
         }
         Op::Prim {
+            kind: crate::PrimKind::ResCopy,
+            dst: Some(d),
+            args,
+        } => {
+            tys.insert(*d, NTy::Res);
+            line!("let {}: Result<i64, String> = {}.clone();", var(*d), var(args[0]));
+        }
+        Op::Prim {
             kind: crate::PrimKind::ResTag,
             dst: Some(d),
             args,

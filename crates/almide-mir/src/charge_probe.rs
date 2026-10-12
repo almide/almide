@@ -119,7 +119,7 @@ fn specialize_metered_clones(functions: &mut Vec<MirFunction>) -> Vec<(String, S
         .enumerate()
         .map(|(i, f)| (f.name.as_str().to_string(), i))
         .collect();
-    let is_root = |n: &str| n.starts_with("__almd_bounded_");
+    let is_root = almide_ir::runtime_use::is_metered_region;
 
     // Transitive CallFn closure from the region roots (user fns only), plus
     // whether any region-reachable fn takes a FuncRef (a table-dispatched

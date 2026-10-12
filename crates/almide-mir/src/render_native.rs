@@ -202,7 +202,18 @@ pub fn try_render_native_program(
     if !user_fns.contains_key("main") {
         return Err(wall("native: no main in the MIR program"));
     }
+    render_native_items(prog, sigs)
+}
 
+/// [`try_render_native_program`] without the `main` requirement: the shims,
+/// every fn and the closure dispatch tables. The metered-region splice
+/// (#3669) renders its region fns through here, with no `main` of its own.
+pub fn render_native_items(prog: &MirProgram, sigs: &NativeSigs) -> Result<String, LowerError> {
+    let user_fns: BTreeMap<&str, &MirFunction> = prog
+        .functions
+        .iter()
+        .map(|f| (f.name.as_str(), f))
+        .collect();
     let mut used_shims: Vec<&'static str> = Vec::new();
     let mut bodies = String::new();
     let mut fn_rets: BTreeMap<String, Option<NTy>> = BTreeMap::new();

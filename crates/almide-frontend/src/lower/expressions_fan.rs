@@ -156,7 +156,7 @@ fn outline_metered_arm_ir(
     };
 
     ctx.bounded_counter += 1;
-    let fn_name = format!("__almd_bounded_{}", ctx.bounded_counter);
+    let fn_name = format!("{}{}", almide_ir::runtime_use::METERED_REGION_PREFIX, ctx.bounded_counter);
 
     let budget_param = ctx.var_table.alloc(sym("__b_budget"), Ty::Int, Mutability::Let, span);
     let mut params = vec![IrParam {
