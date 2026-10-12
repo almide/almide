@@ -139,6 +139,7 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_FLOAT_SWEEP_N", Value, Harness, "how many xorshift64 bit patterns the float printer sweep prints and compares with Rust `format!` on each leg (default 100000; tests/float_to_string_cross_target_test.rs)"),
     sw("ALMIDE_FMOD_SWEEP_N", Value, Harness, "how many xorshift64 bit-pattern pairs the float `%` sweep compares with Rust `%` on each leg, as Float and as Float32 (default 20000; tests/float_fmod_cross_target_test.rs)"),
     sw("ALMIDE_FN_ESCAPE_OFF", Flag, Ablation, "make BorrowInsertion borrow EVERY fn-typed param as `&dyn Fn`, escaping or not (#2288) — the ablation the ownership certifier's C5 sensitivity test drives"),
+    sw("ALMIDE_FORCE_METER_SPLICE", Flag, Route, "build a metered (fan.bounded / fan.race / fan.timeout) native program through the standard codegen with the v1-rendered regions linked in, even when the whole program renders on v1 — the differential that holds the two routes' spends equal (#3669)"),
     sw("ALMIDE_FUEL_PROBE", Flag, Route,"insert fuel charges into the native render (the charge probe); `almide run --time-report` sets it internally. Native-only: the wasm leg carries no charge trace (#2752)"),
     sw("ALMIDE_FUZZ_BASE", Value, Harness, "the first seed of the differential fuzz's fixed seed range (default 0)"),
     sw("ALMIDE_FUZZ_HOST_ORACLE", Flag, Harness, "run the differential fuzz in host-oracle mode (arm selection is deterministic per seed and mode)"),

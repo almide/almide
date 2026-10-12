@@ -24,20 +24,15 @@ pub fn compile_to_binary_with(file: &str, no_check: bool, test_mode: bool, relea
     let rs_code = if native_verified && !test_mode {
         super::render_v1_native_or_fallback(file, rs_code, uses_metered_prims)
     } else {
-        // The NATIVE TEST harness rides v0, which has no deterministic meter:
-        // a budget/timeout prim reaching it would die later as an opaque
-        // rustc E0425 in generated code. Refuse with the real reason instead
-        // (the wasm test leg is the metered one; it runs first by default).
+        // The NATIVE TEST harness rides the standard codegen, which has no
+        // deterministic meter of its own: link the v1-rendered regions in,
+        // exactly as the run path does when the whole program walls (#3669).
         if test_mode && uses_metered_prims {
-            return Err(
-                "fan.bounded / fan.race / fan.timeout tests run on the WASM test leg \
-                 (the native test harness has no deterministic meter). This file fell \
-                 back to the native harness, so its wasm render declined — fix that \
-                 wall (run with ALMIDE_WALL_REASON=1 to see it)"
-                    .to_string(),
-            );
+            let source_text = almide::source_overlay::read_to_string(file).unwrap_or_default();
+            super::link_metered_regions(&source_text, rs_code, "the native test harness rides the standard codegen")?
+        } else {
+            rs_code
         }
-        rs_code
     };
     t.lap("v1-native-render");
     // ALMIDE_ALLOC_COUNT (#2228): the counting allocator, when armed.

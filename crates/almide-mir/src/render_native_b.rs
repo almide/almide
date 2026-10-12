@@ -751,7 +751,7 @@ pub(crate) fn render_int_binop(
 }
 
 /// A user fn name that is a valid Rust identifier (dots from module paths).
-fn mangle(name: &str) -> String {
+pub(crate) fn mangle(name: &str) -> String {
     format!("almd_{}", name.replace(['.', '$'], "_"))
 }
 

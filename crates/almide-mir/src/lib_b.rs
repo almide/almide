@@ -80,6 +80,11 @@ pub enum PrimKind {
     /// `dst = &err String` — a BORROW of the Result's Err payload (the
     /// verifier aliases dst to the Result's object, like `Handle`).
     ResErrStr,
+    /// `dst = args[0].clone()` — a copy of a carrier `ResMakeOk` /
+    /// `ResMakeErrStr` minted (the `Dup` the shared lowering emits when a
+    /// Result outlives a statement, #3669). The minted carrier has no object,
+    /// so the copy is no ownership event, and neither is its release.
+    ResCopy,
     /// `process.exit(code)` — the WASI `proc_exit` host call with a USER exit
     /// code (`args = [code]`, i64 wrapped to i32; no message line, unlike
     /// [`PrimKind::Die`]'s fixed exit-1 + stderr). Never returns; carries no
