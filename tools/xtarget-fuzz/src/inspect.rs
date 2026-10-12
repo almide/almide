@@ -566,18 +566,35 @@ fn judge_counted(
 /// The cheapest class whose `a + c·f(n)` least-squares fit leaves every
 /// point within [`FIT_TOLERANCE`] (relative RMS), else the best-fitting one
 /// with its residual above the tolerance (the caller refuses to pass it).
-/// Counts that never leave a few thousand instructions are O(1) outright.
-/// A series that never reaches one unit per call (one instruction, one byte)
-/// at any size is O(1): the call does no per-element work, and what is left
-/// is the run's own jitter. Measured: `int.to_int16_saturating` at k = 1M
-/// read 7.8e5 / 147 / 579 / 82 / 48 instructions, which a relative fit
-/// called 1789% off every class.
+/// A series that stays under [`COUNT_FLOOR_DIVISOR`]'s per-call floor at
+/// every size is O(1) outright: it cannot hold a linear term, and what is
+/// left is the run's own jitter, which a relative fit reads as no class at
+/// all. Measured:
+/// - `int.to_int16_saturating` at k = 1M read 7.8e5 / 147 / 579 / 82 / 48
+///   instructions, which a relative fit called 1789% off every class.
+/// - wasm `string.drop`'s loop at k = 16 read 177 / 159 / 127 / 243 / 335
+///   per call (rms 17.5%).
+/// - native `string.drop_end`'s loop at k = 64 read 566 / 625 / 607 / 585 /
+///   632 per call (rms 3.5%).
 fn fit_series(sizes: &[u64], ys: &[f64], k: u64) -> (usize, f64) {
-    if ys.iter().all(|&y| y < k as f64) {
+    let floor = sizes[0] as f64 / COUNT_FLOOR_DIVISOR * k as f64;
+    if ys.iter().all(|&y| y < floor) {
         return (0, 0.0);
     }
     fit_class(sizes, ys)
 }
+
+/// The per-call floor is `n / 16` at the smallest size `n`, held at every
+/// size. Work linear in the input touches every element; even at 64 bytes
+/// per instruction (one AVX-512 load), m elements cost at least m / 64 per
+/// call. Across the judge's 16x range, a linear term therefore adds at least
+/// (16n - n) / 64 ≈ 0.23n per call between the first and last point. A
+/// series that stays below n / 16 ≈ 0.06n at every point has no room for
+/// that rise, so the floor sits about 3.75x under the smallest linear term
+/// it could hide. The same floor applies to bytes moved, where a linear copy
+/// moves at least m bytes per call. Owner ruling 2026-10-12: the counted
+/// twin of the timed judge's [`NOISE_FLOOR`].
+const COUNT_FLOOR_DIVISOR: f64 = 16.0;
 
 fn fit_class(sizes: &[u64], ys: &[f64]) -> (usize, f64) {
     let top = ys.iter().cloned().fold(0.0f64, f64::max);
@@ -813,11 +830,33 @@ mod fit_tests {
     }
 
     #[test]
-    fn under_one_unit_per_call_is_constant() {
+    fn under_the_per_call_floor_is_constant() {
         let ys = [7.811e5, 1.47e2, 5.79e2, 8.2e1, 4.8e1];
         assert_eq!(fit_series(&sizes(), &ys, 1 << 20), (0, 0.0));
-        // The same series over fewer calls is real work and is fitted.
-        assert!(fit_series(&sizes(), &ys, 1024).1 > FIT_TOLERANCE);
+        // 763 per call at the first size, ~0 after: under n / 16 = 1250
+        // everywhere, so constant.
+        assert_eq!(fit_series(&sizes(), &ys, 1024), (0, 0.0));
+        // The same shape at 64 calls is 12,205 per call at the first size:
+        // above the floor, so it is fitted, and no class explains it.
+        assert!(fit_series(&sizes(), &ys, 64).1 > FIT_TOLERANCE);
+        // The tiny flat series the floor exists for: wasm string.drop's loop
+        // (k = 16) and native string.drop_end's loop (k = 64).
+        let drop = [2.826e3, 2.550e3, 2.036e3, 3.894e3, 5.355e3];
+        assert_eq!(fit_series(&sizes(), &drop, 16), (0, 0.0));
+        let drop_end = [3.622e4, 4.002e4, 3.883e4, 3.743e4, 4.045e4];
+        assert_eq!(fit_series(&sizes(), &drop_end, 64), (0, 0.0));
+    }
+
+    #[test]
+    fn the_floor_never_hides_a_linear_series() {
+        // The cheapest linear series physically possible: m / 64 per call
+        // (64 bytes per instruction), plus a constant. It crosses the floor
+        // and is fitted as n.
+        for k in [1u64, 64, 1 << 20] {
+            let ys: Vec<f64> = sizes().iter().map(|&m| (m as f64 / 64.0 + 100.0) * k as f64).collect();
+            assert_ne!(fit_series(&sizes(), &ys, k), (0, 0.0), "k = {k}");
+            assert_eq!(CLASSES[fit_series(&sizes(), &ys, k).0].0, "n", "k = {k}");
+        }
     }
 
     #[test]
