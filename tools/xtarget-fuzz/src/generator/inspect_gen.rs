@@ -84,6 +84,24 @@ const SHAPE_RECIPES: &[Recipe] = &[
             ("padding", "1"),
         ],
     },
+    // Decoders must be timed on input they accept (#3666): the generic
+    // `string.repeat("aé", n)` is refused at its first character, so every
+    // shape measured the early-error exit. n bytes of every value, encoded;
+    // the encoding runs once, outside the timed calls.
+    Recipe { func: "base64.decode", size: "s", args: &[("s", "base64.encode(bytes.from_list(list.range(0, {n}) |> list.map((i) => i % 256)))")] },
+    Recipe {
+        func: "base64.decode_url",
+        size: "s",
+        args: &[("s", "base64.encode_url(bytes.from_list(list.range(0, {n}) |> list.map((i) => i % 256)))")],
+    },
+    // 2n hex digits.
+    Recipe { func: "hex.decode", size: "s", args: &[("s", "hex.encode(bytes.from_list(list.range(0, {n}) |> list.map((i) => i % 256)))")] },
+    // A JSON array of n fixed-width ints: its length is a·n + b.
+    Recipe {
+        func: "json.parse",
+        size: "text",
+        args: &[("text", "\"[\" + (list.range(0, {n}) |> list.map((i) => int.to_string(100000000 + i)) |> list.join(\",\")) + \"]\"")],
+    },
 ];
 
 /// Functions that stop at the first `true` from their predicate: given a
