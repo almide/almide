@@ -778,6 +778,14 @@ fn cmd_gen(args: &[String]) {
         .and_then(|s| s.parse().ok())
         .unwrap_or(0);
     let engine = Engine::with_family(&repo, resolve_family(args));
+    // `--focus module.fn`: the program `run --focus` would generate.
+    let engine = match flag_value(args, "--focus") {
+        Some(f) => engine.focus(f).unwrap_or_else(|e| {
+            eprintln!("xtarget-fuzz gen: {e}");
+            std::process::exit(2);
+        }),
+        None => engine,
+    };
     let gen = engine.generate(seed, index);
     print!("{}", gen.source);
 }

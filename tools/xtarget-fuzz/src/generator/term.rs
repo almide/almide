@@ -99,6 +99,43 @@ impl<'a> Builder<'a> {
         });
         name
     }
+
+    /// Hoist `value_src` into a fresh `var v: ty = value_src` for a `mut`
+    /// parameter, and return the name. The var is in scope afterwards like a
+    /// `let` (reading it later observes the mutation).
+    fn hoist_var(&mut self, ty: &GenType, value_src: String) -> String {
+        let name = self.fresh_name();
+        self.stmts.push(format!("var {name}: {} = {value_src}", ty.render()));
+        self.scope.push(ScopeVar { name: name.clone(), ty: ty.clone() });
+        name
+    }
+}
+
+/// Render a call of `sig` at generated arguments, as an expression of its
+/// [`Signature::effective_ret`]. A `mut` argument is hoisted into a fresh
+/// `var` (from a generated value, so the original value it was built from
+/// must stay unchanged: value semantics is part of what is tested); a
+/// `Unit`-returning mutator runs as a statement and the expression is the
+/// mutated var.
+fn render_call(b: &mut Builder, sig: &Signature, subst: &HashMap<String, GenType>) -> Option<String> {
+    let mut args = Vec::with_capacity(sig.params.len());
+    for (i, p) in sig.params.iter().enumerate() {
+        let name = sig.param_names.get(i).map(String::as_str).unwrap_or("");
+        args.push(gen_arg(b, p, name, subst)?);
+    }
+    let Some(m) = sig.mut_param else {
+        return Some(format!("{}.{}({})", sig.module, sig.func, args.join(", ")));
+    };
+    let ty = sig.params[m].instantiate(subst)?;
+    let var = b.hoist_var(&ty, args[m].clone());
+    args[m] = var.clone();
+    let call = format!("{}.{}({})", sig.module, sig.func, args.join(", "));
+    if sig.ret == SigType::Unit {
+        b.stmts.push(call);
+        Some(var)
+    } else {
+        Some(call)
+    }
 }
 
 /// Produce an expression of `goal` type, valid in bare expression
@@ -316,7 +353,7 @@ fn gen_call(b: &mut Builder, goal: &GenType) -> Option<String> {
     let mut candidates: Vec<(usize, HashMap<String, GenType>, u32)> = Vec::new();
     for (i, sig) in b.catalogue.iter().enumerate() {
         let mut subst = sig.forced_bindings();
-        if sig.ret.unify_with_goal(goal, &mut subst) {
+        if sig.effective_ret().unify_with_goal(goal, &mut subst) {
             candidates.push((i, subst, sig.weight));
         }
     }
@@ -331,14 +368,7 @@ fn gen_call(b: &mut Builder, goal: &GenType) -> Option<String> {
 
     let mut subst = subst;
     bind_free_vars(b, &sig, &mut subst)?;
-
-    let mut args = Vec::with_capacity(sig.params.len());
-    for (i, p) in sig.params.iter().enumerate() {
-        let name = sig.param_names.get(i).map(String::as_str).unwrap_or("");
-        args.push(gen_arg(b, p, name, &subst)?);
-    }
-
-    Some(format!("{}.{}({})", sig.module, sig.func, args.join(", ")))
+    render_call(b, &sig, &subst)
 }
 
 /// A direct call of catalogue entry `idx` at generated arguments, with the
@@ -348,16 +378,11 @@ pub fn gen_focus_call(b: &mut Builder, idx: usize) -> Option<(String, GenType)> 
     let sig = b.catalogue[idx].clone();
     let mut subst = sig.forced_bindings();
     bind_free_vars(b, &sig, &mut subst)?;
-    let ret = sig.ret.instantiate(&subst)?;
+    let ret = sig.effective_ret().instantiate(&subst)?;
     if ret.observe("v", 0).is_none() {
         return None;
     }
-    let mut args = Vec::with_capacity(sig.params.len());
-    for (i, p) in sig.params.iter().enumerate() {
-        let name = sig.param_names.get(i).map(String::as_str).unwrap_or("");
-        args.push(gen_arg(b, p, name, &subst)?);
-    }
-    Some((format!("{}.{}({})", sig.module, sig.func, args.join(", ")), ret))
+    Some((render_call(b, &sig, &subst)?, ret))
 }
 
 /// Parameter names that denote a count/size/index and so must receive a
