@@ -187,19 +187,23 @@ pub(crate) fn emit_value_merge_helper(key_off: u32, val_off: u32) -> Function {
     ins.local_get(j).i32_const(4).i32_add().local_set(j);
     ins.br(0).end().end();
     ins.local_get(la).local_get(w).i32_add().call(F_ALLOC).local_set(out);
-    // pass A: value overridden where B has the key (first A pair of it only)
+    // pass A: value overridden where B has the key (first A pair of it only).
+    // B is asked first (#3642): the scan of A's prefix for an earlier pair
+    // of the key runs only for a key B has, so the pass is O(|A|·|B|), not
+    // O(|A|²). `w` (free until the fresh pair below) keeps B's offset.
     ins.i32_const(0).local_set(i);
     ins.block(BlockType::Empty).loop_(BlockType::Empty);
     ins.local_get(i).local_get(la).i32_ge_u().br_if(1);
     ins.local_get(pa).local_get(i).i32_add().i32_load(slot_memarg(0)).local_set(fd);
     ins.local_get(fd).i32_load(slot_memarg(key_off)).local_set(ka);
     ins.i32_const(0).local_set(fv);
-    scan_first(&mut ins, key_off, [pa, i, ka, idx, res]);
-    ins.local_get(res).i32_const(0).i32_lt_s().if_(BlockType::Empty);
     scan_last(&mut ins, key_off, [pb, lb, ka, idx, res]);
     ins.local_get(res).i32_const(0).i32_ge_s().if_(BlockType::Empty);
+    ins.local_get(res).local_set(w);
+    scan_first(&mut ins, key_off, [pa, i, ka, idx, res]);
+    ins.local_get(res).i32_const(0).i32_lt_s().if_(BlockType::Empty);
     ins.local_get(pb)
-        .local_get(res)
+        .local_get(w)
         .i32_add()
         .i32_load(slot_memarg(0))
         .i32_load(slot_memarg(val_off))
