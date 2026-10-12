@@ -294,6 +294,11 @@ pub(crate) const PROCESS_SUM: &[&str] = &[
     "__process_exec_status_impl", "__process_exec_status_timeout_impl",
     "__process_run_impl", "__process_run_in_impl", "__process_spawn_impl",
     "__process_kill_impl", "__process_is_alive_impl", "__process_pid_impl",
+    // stdlib/process_stdin_lines.almd (#3620): io.read_n_bytes chunks, bytes
+    // push / is_valid_utf8 / to_string_lossy, string.split / strip_suffix,
+    // list take/map, ok()/err(). Parity evidence:
+    // tests/process_stdin_lines_cross_test.rs.
+    "process_stdin_lines",
 ];
 
 /// The vendored-libm family (C-305): every body is a FAITHFUL
