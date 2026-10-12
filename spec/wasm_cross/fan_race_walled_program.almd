@@ -1,0 +1,59 @@
+// @contract: C-205, C-204
+// #3669: the metered regions keep their spend when the REST of the program is
+// outside the whole-program native v1 render (here `string.split`, a map, an
+// empty-list fallback). The winner boundary, the budget verdicts, heap and
+// Bool arms, and an inline `err`/`ok` mapper body are the same on both
+// targets — native used to refuse the whole program.
+fn heavy(n: Int) -> Int = {
+  var i = 0
+  var acc = 0
+  while i < n {
+    acc = (acc + i * 7) % 999983
+    i = i + 1
+  }
+  acc
+}
+
+fn greet(s: String) -> String = "hi " + s
+
+fn even(n: Int) -> Bool = n % 2 == 0
+
+effect fn main() -> Unit = {
+  let words = string.split("a,b,c", ",")
+  println(list.join(words, "-"))
+  let m = map.from_list([("k", 1)])
+  println(int.to_string(map.get(m, "k") ?? 0))
+  // heavy(500) spends 502 units = 1506ns: no winner through 1505ns
+  var ns = 1503
+  while ns < 1509 {
+    let r = fan.race(compute.ns(ns)) {
+      heavy(1000)
+      heavy(500)
+    } ?? -1
+    println(int.to_string(ns * 10 + (if r == -1 then 1 else 0)))
+    ns = ns + 1
+  }
+  let greeting = fan.race {
+    greet("ab")
+    greet("c")
+  } ?? "none"
+  println(greeting)
+  let picked = fan.race {
+    [1, 2, 3]
+    [4]
+  } ?? []
+  println(int.to_string(list.len(picked)))
+  let flag = fan.race {
+    even(3)
+    even(4)
+  } ?? false
+  println("${flag}")
+  println(int.to_string(fan.bounded(compute.ns(30)) { heavy(100) } ?? -1))
+  println(int.to_string(fan.bounded(compute.ns(100000)) { heavy(100) } ?? -1))
+  println(int.to_string(fan.race([-1, 8], (x) => if x < 0 then err("neg") else ok(x)) ?? -1))
+  let w = fan.race {
+    heavy(20)
+    heavy(10)
+  }!
+  println(int.to_string(w))
+}
