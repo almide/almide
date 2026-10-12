@@ -7,7 +7,7 @@
 
 ## Active
 
-95 items
+96 items
 
 | Item | Description |
 |------|-------------|
@@ -33,6 +33,7 @@
 | [The Determinism / Purity Belt](active/determinism-belt.md) | Determinism/Purity Belt — a Perceus-analog that makes the compiler deterministic & target-portable by construction |
 | [Deterministic Bounds — legalising a bound on computation under byte-identity](active/deterministic-bounds.md) | Legalising fan.timeout under byte-identity — fuel, deterministic allocation, winner order, effect isolation |
 | [edit-locality theory — the theorem Almide exists to prove](active/edit-locality-theory.md) | Turn bounded edit blast radius from design instinct into a proven theorem |
+| [Effect inspection harness](active/effect-inspection-harness.md) |  |
 | [Capability-Based Effect System](active/effect-system-capability.md) | Capability-based effect system for sandboxed AI agent containers |
 | [Blueprint — making the ~27 effectful / raw-pointer stdlib fns FUNCTIONAL in v1](active/effectful-27-blueprint.md) | Blueprint for making the ~27 effectful / raw-pointer stdlib fns functional on the v1 leg, split by real cause |
 | [Execution Inception — as-if 規則を、並行と target の向こうまで完成させる](active/execution-inception.md) | The execution inception: the as-if rule completed across concurrency and targets |
