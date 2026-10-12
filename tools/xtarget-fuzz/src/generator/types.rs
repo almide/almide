@@ -181,8 +181,6 @@ impl GenType {
             GenType::Set(e) => e.is_observable(),
             // Only ever an argument: never printed.
             GenType::Endian => false,
-            // A Bytes or Matrix value has no string form (E089).
-            GenType::Bytes | GenType::Matrix => false,
             // A Bytes or Matrix value has no string form (E089); a Value is
             // observed through `value.stringify`.
             GenType::Bytes | GenType::Matrix | GenType::Value => false,
