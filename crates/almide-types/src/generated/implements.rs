@@ -2,6 +2,7 @@
 
 pub const DECLARED: &[(&str, &[(&str, &str)])] = &[
     (crate::embedded::SRC_HTTP_FRAMED, &[("__request_impl", "http.request"), ("__request_status_impl", "http.request_status"), ("__get_status_impl", "http.get_status"), ("__request_bytes_impl", "http.request_bytes"), ("__get_bytes_impl", "http.get_bytes")]),
+    (crate::embedded::SRC_PROCESS_STDIN_LINES, &[("process_stdin_lines", "process.stdin_lines")]),
 ];
 
 /// The declared impl fns whose file never reaches `prim.`.
@@ -11,4 +12,5 @@ pub const PRIM_FREE: &[&str] = &[
     "__get_status_impl",
     "__request_bytes_impl",
     "__get_bytes_impl",
+    "process_stdin_lines",
 ];

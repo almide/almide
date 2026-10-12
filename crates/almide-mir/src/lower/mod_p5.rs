@@ -325,10 +325,15 @@ pub(crate) fn result_family(ty: &Ty) -> ResultFamily {
 /// declaration returns a `Result` (`HostOp::returns_result`, checked against
 /// the stdlib by the contract test) — an Option- or scalar-returning host op
 /// (`random.choice`, `env.millis`) must not be read as a Result block.
+///
+/// A body declared with `@implements` whose file never reaches `prim.` is a
+/// member too (#3620): it builds its Result through the ok()/err() ctors, the
+/// first case above, so the declaration answers what a table row would.
 pub(crate) fn is_self_host_materialized_result_fn(module: &str, func: &str) -> bool {
     is_self_host_result_module_fn(module, func)
         || is_self_host_result_str_module_fn(module, func)
         || crate::host_ops::host_op(module, func).is_some_and(|o| o.returns_result)
+        || almide_lang::implements::surface_prim_free(module, func)
 }
 
 /// Is `ty` a `Result[Unit, String]` (the fs.write/fs.copy shape — no Ok payload, a String

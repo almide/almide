@@ -27,6 +27,15 @@ pub mod implements {
     pub fn prim_free(impl_fn: &str) -> bool {
         PRIM_FREE.contains(&impl_fn)
     }
+
+    /// Is the stdlib call `module.func` implemented by a declared body whose
+    /// file never reaches `prim.`? Such a body builds every value, a Result
+    /// included, through constructors the backends lower themselves.
+    pub fn surface_prim_free(module: &str, func: &str) -> bool {
+        DECLARED.iter().flat_map(|(_, pairs)| pairs.iter()).any(|(impl_fn, call)| {
+            call.split_once('.') == Some((module, func)) && prim_free(impl_fn)
+        })
+    }
 }
 pub mod time_units;
 pub mod fallible_hofs;

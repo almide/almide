@@ -28398,8 +28398,10 @@ pub const SRC_PROCESS_STDIN_LINES: &str = r#"
 
 
 
+
 import io
 
+@implements("process.stdin_lines")
 effect fn process_stdin_lines() -> Result[List[String], String] = {
   var buf = bytes.new(0)
   var n = 1
