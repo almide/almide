@@ -115,6 +115,14 @@ pub fn almide_rt_fs_fold_lines<A>(path: &str, init: A, f: std::rc::Rc<dyn Fn(A, 
 fn fold_lines_range_impl<A, F: Fn(A, String) -> A>(path: &str, start: i64, end: i64, init: A, f: &F) -> Result<A, String> {
     use std::io::{BufRead, Seek};
     let mut file = std::fs::File::open(path).map_err(|e| io_err("fs.fold_lines_range", &fs_q(path), e))?;
+    // #3652: a directory opens but fails its first read, and the empty range
+    // (start 0, end <= 0) never reads — it answered ok(init) where every other
+    // range, `fs.fold_lines` and the wasm leg give the read's err. Take that
+    // same read's err up front, so the message is the one the other ranges give.
+    if file.metadata().map(|m| m.is_dir()).unwrap_or(false) {
+        use std::io::Read;
+        file.read(&mut [0u8; 1]).map_err(|e| io_err("fs.fold_lines_range", &fs_q(path), e))?;
+    }
     let mut pos: u64 = if start > 0 { (start - 1) as u64 } else { 0 };
     file.seek(std::io::SeekFrom::Start(pos)).map_err(|e| io_err("fs.fold_lines_range", &fs_q(path), e))?;
     let mut reader = std::io::BufReader::new(file);
