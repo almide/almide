@@ -333,7 +333,7 @@
 2183	spec/wasm_cross/index_bounds_write_only_var.almd
 5982	spec/wasm_cross/inplace_clear_alias.almd
 5185	spec/wasm_cross/inplace_clear_alias_field.almd
-8552	spec/wasm_cross/inplace_clear_family.almd
+8734	spec/wasm_cross/inplace_clear_family.almd
 4757	spec/wasm_cross/inplace_mutator_statement.almd
 835	spec/wasm_cross/int8_div_overflow.almd
 9513	spec/wasm_cross/int_bit_family.almd
@@ -467,7 +467,7 @@
 2900	spec/wasm_cross/loop_outer_inplace_mutate_rc.almd
 1876	spec/wasm_cross/loop_push_trailing_increment.almd
 5701	spec/wasm_cross/map_core_trio.almd
-9477	spec/wasm_cross/map_entries_reclaim.almd
+9584	spec/wasm_cross/map_entries_reclaim.almd
 7123	spec/wasm_cross/map_entry_loop.almd
 4721	spec/wasm_cross/map_filter.almd
 8575	spec/wasm_cross/map_fold.almd
@@ -475,7 +475,7 @@
 5600	spec/wasm_cross/map_fold_heap_acc_skv.almd
 4004	spec/wasm_cross/map_fold_heap_accumulator.almd
 7133	spec/wasm_cross/map_get_fallback_key_and_lazy.almd
-7507	spec/wasm_cross/map_index_order.almd
+7705	spec/wasm_cross/map_index_order.almd
 6228	spec/wasm_cross/map_index_released_with_block.almd
 8196	spec/wasm_cross/map_index_string_key_shapes.almd
 15118	spec/wasm_cross/map_insertion_order.almd
