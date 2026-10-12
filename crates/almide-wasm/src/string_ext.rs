@@ -463,6 +463,11 @@ impl Emitter<'_> {
                     .if_(BlockType::Result(ValType::I32));
                 i.i32_const(empty as i32);
                 i.else_();
+                // `r` is borrowed, so the payload handed out as owned needs
+                // its own reference: without it a temporary `r` frees it
+                // after the call, and a live `r` loses it when the message
+                // is dropped.
+                i.local_get(hr).i32_load(slot_memarg(almide_layout::SUM_FIELD)).call(F_INC);
                 i.local_get(hr).i32_load(slot_memarg(almide_layout::SUM_FIELD));
                 i.end();
                 let _ = i;
