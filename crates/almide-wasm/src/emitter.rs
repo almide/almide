@@ -617,15 +617,7 @@ impl Emitter<'_> {
             }
             _ => self.lower_data(e, want)?,
         };
-        if let Some(w) = want
-            && got != w
-        {
-            if w == SliceTy::Unit && self.unit_from_carrier(e, got) {
-                return Ok(SliceTy::Unit);
-            }
-            return unsup(&format!("ty-mismatch:{got:?}-vs-{w:?}"));
-        }
-        Ok(got)
+        self.settle_want(e, got, want)
     }
 
     /// Data-shaped values: sum constructors, unwraps, records, lists.
