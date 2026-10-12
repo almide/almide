@@ -231,7 +231,7 @@ pub const CAP_MODULES: &[&str] =
 /// `"*"` covers the rest of a module (a row or a pure admission still wins).
 pub const WALLED: &[(&str, &str, &str)] = &[
     ("net", "*", "sockets, unix sockets and shared memory: native-only, no WASI floor (the native-FFI class)"),
-    ("process", "*", "child processes, signals, stdin_lines and the exit / sleep / pid / env family: native-only; `exit` lowers as the ProcExit prim"),
+    ("process", "*", "child processes, signals and the exit / sleep / pid / env family: native-only; `exit` lowers as the ProcExit prim; stdin_lines runs on wasm through a self-host body, outside this subset"),
     ("http", "serve", "the listener: native-only, and its handler is a closure the host invokes"),
     ("http", "request_stream", "a callback the host invokes per chunk; its limited twin is the admitted form"),
     ("http", "openai_streaming_call", "a callback the host invokes per delta; not admitted"),
