@@ -61,9 +61,22 @@ pub struct Signature {
     pub ret: SigType,
     /// Selection weight (relative). Higher ⇒ generated more often.
     pub weight: u32,
+    /// The one `mut` parameter, if any: the call needs a `var` there, and a
+    /// `Unit` return means the mutated value is the call's observable
+    /// result ([`Signature::effective_ret`]).
+    pub mut_param: Option<usize>,
 }
 
 impl Signature {
+    /// The type a call yields to the generator: a `Unit`-returning mutator
+    /// yields its mutated `var`, every other function its return value.
+    pub fn effective_ret(&self) -> &SigType {
+        match self.mut_param {
+            Some(m) if self.ret == SigType::Unit => &self.params[m],
+            _ => &self.ret,
+        }
+    }
+
     /// The type-variable bindings the value grammar *pins* regardless of
     /// the goal: every `Map` key slot and `Result` error slot lowers to
     /// `String` in [`SigType::instantiate`]. Seeding these into the
@@ -353,12 +366,13 @@ fn signature_from_decl(module: &'static str, decl: &Decl) -> Option<Signature> {
         return None;
     }
 
-    // Skip `mut`-parameter functions: they require a `var` binding and
-    // model in-place mutation, which the type-directed value grammar
-    // does not produce. (They reach the corpus via mutation instead.)
-    if params.iter().any(|p| p.is_mut) {
+    // A `mut` parameter needs a `var` at the call: the generator hoists one
+    // (term.rs). Two `mut` parameters are left to the mutation path.
+    let muts: Vec<usize> = params.iter().enumerate().filter(|(_, p)| p.is_mut).map(|(i, _)| i).collect();
+    if muts.len() > 1 {
         return None;
     }
+    let mut_param = muts.first().copied();
     // Skip functions with default parameters in non-trailing form is
     // unnecessary — Almide allows omitting trailing defaults — but we
     // require *every* parameter to be a synthesizable type regardless.
@@ -380,6 +394,7 @@ fn signature_from_decl(module: &'static str, decl: &Decl) -> Option<Signature> {
         params: param_types,
         ret,
         weight,
+        mut_param,
     })
 }
 
