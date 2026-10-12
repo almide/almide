@@ -211,7 +211,7 @@ almide test
 
 When adding or modifying stdlib functions (the stdlib is self-hosted — `stdlib/defs/*.toml` and `runtime/rust/` no longer exist):
 - Write the implementation in pure Almide in `stdlib/<module>[_<part>].almd`
-- For WASM/v1 coverage, register it in `crates/almide-types/src/self_host_registry.rs` (add `(crate::embedded::SRC_<STEM>, &[("impl_fn", "module.fn")])` to `self_host_runtime()`); adjust `crates/almide-mir/src/purity.rs` if needed. Unlinked stdlib calls are a wall error in the wasm renderer
+- For WASM/v1 coverage, declare the body: `@implements("module.fn")` directly above its `fn` in `stdlib/<module>_<part>.almd`. The build generates the registry row (`crates/almide-types/src/generated/implements.rs`), and a body whose file never reaches `prim.` is admitted on the wasm leg without a list entry. Do NOT add rows to `self_host_registry.rs` or names to `crates/almide-wasm/src/whitelist.rs`: both are legacy name lists that only shrink (`tests/name_keyed_sites_test.rs`). Adjust `crates/almide-mir/src/purity.rs` if needed. Unlinked stdlib calls are a wall error in the wasm renderer
 - Only if a native intrinsic is required: implement `almide_rt_*` in `runtime/rs/src/<module>.rs` and declare it with `@intrinsic("almide_rt_*")` in the module's `.almd`
 - New modules: update `STDLIB_MODULES` / `BUNDLED_MODULES` / `bundled_source()` (and `AUTO_IMPORT_BUNDLED` if auto-imported) in `crates/almide-types/src/stdlib_info.rs`
 - Write a test in `spec/stdlib/` (as `*_test.almd` or inline `test` block); add the almide-interp bridge glue so the 3-way oracle covers it
