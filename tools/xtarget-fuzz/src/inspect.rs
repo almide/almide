@@ -451,9 +451,14 @@ fn diamond(ctx: &Ctx, t: &Target, n: u64) -> String {
 }
 
 /// Criterion 5's verdict from the diamond project's run on each leg.
-fn diamond_verdict(_prints: bool, nat: &std::process::Output, was: &std::process::Output) -> String {
+/// `prints` false: a Unit return and no `mut` parameter leave nothing to
+/// compare (#3636) — reported as a SKIP once both legs exited 0, never a PASS.
+fn diamond_verdict(prints: bool, nat: &std::process::Output, was: &std::process::Output) -> String {
     if !nat.status.success() || !was.status.success() {
         return format!("FAIL: native exit {:?} ({}), wasm exit {:?} ({})", nat.status.code(), first_error(&nat.stderr), was.status.code(), first_error(&was.stderr));
+    }
+    if !prints {
+        return "SKIP: nothing to compare — a Unit return and no mut parameter (the three calls ran to exit 0 on both legs)".into();
     }
     let (a, b) = (String::from_utf8_lossy(&nat.stdout).into_owned(), String::from_utf8_lossy(&was.stdout).into_owned());
     // `render_print` writes `<name> = <value>`: compare the values.
