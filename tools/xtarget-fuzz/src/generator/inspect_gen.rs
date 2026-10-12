@@ -375,8 +375,9 @@ fn sized(t: &GenType, n: u64) -> String {
         GenType::Bytes => format!("bytes.new({n})"),
         GenType::Matrix => format!("matrix.zeros({n}, 2)"),
         // An object of n keys: what `field` / `keys` / `pick` / `omit` /
-        // `merge` and the case converters walk.
-        GenType::Value => format!("value.object(list.range(0, {n}) |> list.map((i) => (\"k${{100000000 + i}}\", value.int(i))))"),
+        // `merge` and the case converters walk. Keys and values are fixed
+        // width, so its stringified length is a·n + b (#3636).
+        GenType::Value => format!("value.object(list.range(0, {n}) |> list.map((i) => (\"k${{100000000 + i}}\", value.int(100000000 + i))))"),
         GenType::Set(e) => format!("list.range(0, {n}) |> list.map((i) => {}) |> set.from_list", elem(e)),
         other => small(other),
     }
