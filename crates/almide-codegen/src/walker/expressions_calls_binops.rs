@@ -62,12 +62,15 @@ fn render_iter_collector(ctx: &RenderContext, chain: &str, collector: &IterColle
         IterCollector::Find { lambda } => format!("{}.find({})", chain, render_expr(ctx, lambda)),
         IterCollector::FindIndex { lambda } => format!("{}.position({}).map(|i| i as i64)", chain, render_expr(ctx, lambda)),
         IterCollector::FindMap { lambda } => format!("{}.find_map({})", chain, render_expr(ctx, lambda)),
-        IterCollector::Count { lambda } => format!("{}.filter({}).count() as i64", chain, render_expr(ctx, lambda)),
+        // #3648: parenthesized, so a template that borrows its argument
+        // (`&{x}`) borrows the cast Int, not the chain (`&c.count() as i64`
+        // parses as `(&c.count()) as i64`: E0606).
+        IterCollector::Count { lambda } => format!("({}.filter({}).count() as i64)", chain, render_expr(ctx, lambda)),
         // Same law as `almide_rt_list_sum` (C-056): two's-complement wrapping,
         // never the profile-dependent `Iterator::sum` overflow check.
         IterCollector::Sum { float: false } => format!("{}.fold(0i64, |a: i64, b: i64| a.wrapping_add(b))", chain),
         IterCollector::Sum { float: true } => format!("{}.sum::<f64>()", chain),
-        IterCollector::Len => format!("{}.count() as i64", chain),
+        IterCollector::Len => format!("({}.count() as i64)", chain),
     }
 }
 
