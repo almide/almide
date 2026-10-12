@@ -1,0 +1,39 @@
+// @contract: C-345
+// A Result-returning call passed where a TYPE-VARIABLE parameter is
+// instantiated at Result keeps its Result, as a declared Result parameter's
+// argument does (result_param_not_first). The auto-`?` desugar kept an
+// argument's Result only where the callee DECLARED the parameter Result /
+// Option, so in an effect fn `id(int.parse("7"))`, a fold seeded with a
+// Result call, or `map.get_or(m, k, int.parse(s))` lowered with a `?` on
+// the argument — rustc E0308 natively, an E082 ty-mismatch wall on wasm —
+// though `almide check` accepted the program. Found by the counted stdlib
+// inspection (#3646).
+fn id[T](x: T) -> T = x
+
+fn mk(n: Int) -> Result[Int, String] = if n > 0 then ok(n) else err("neg ${n}")
+
+effect fn step(n: Int) -> Int = if n < 0 then err("neg ${n}")!
+else n
+
+fn show(tag: String, r: Result[Int, String]) -> String = match r {
+  ok(v) => "${tag}=ok ${v}",
+  err(e) => "${tag}=err ${e}",
+}
+
+effect fn main() -> Unit = {
+  let a: Result[Int, String] = id(int.parse("7"))
+  println(show("id", a))
+  let b: Result[Int, String] = id(mk(-1))
+  println(show("id-err", b))
+  let c: Result[Int, String] = list.fold([1, 2], mk(5), (acc, x) => acc)
+  println(show("fold", c))
+  let m: Map[String, Result[Int, String]] = map.new()
+  let d: Result[Int, String] = map.get_or(m, "k", int.parse("x"))
+  println(show("map.get_or", d))
+  let e: Result[Int, String] = list.get_or([mk(1)], 3, mk(9))
+  println(show("get_or", e))
+  let f: Result[Int, String] = id(step(-2))
+  println(show("id-effect", f))
+  let g: Result[Int, String] = list.fold([1], step(4), (acc, x) => acc)
+  println(show("fold-effect", g))
+}
