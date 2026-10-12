@@ -39,4 +39,12 @@ fn main() -> Unit = {
   let re = matrix.rope_rotate(e, 7, 9, 10000.0)
   let (er, ec) = matrix.shape(re)
   println("empty=${int.to_string(er)}x${int.to_string(ec)}")
+  // #3650: no per-head work before the rows are known — an empty matrix with
+  // a head_dim too large to allocate a frequency table for still copies
+  // through, on every spelling.
+  let e4 = matrix.zeros(0, 4)
+  let huge = 9223372036854775807
+  println("empty_huge=${matrix.shape(matrix.rope_rotate(e4, 1, huge, 10000.0))}")
+  println("empty_huge_at=${matrix.shape(matrix.rope_rotate_at(e4, 1, huge, 10000.0, 3))}")
+  println("empty_huge_neox=${matrix.shape(matrix.rope_rotate_neox_at(e4, 1, huge, 10000.0, 0))}")
 }
