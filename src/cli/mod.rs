@@ -239,7 +239,13 @@ fn incremental_cache_dir() -> std::path::PathBuf {
 /// `println("almide_rt_prim_budget_x")` was refused here (#3486).
 pub(crate) fn render_v1_native_or_fallback(file: &str, rs_code: String, uses_metered_prims: bool) -> String {
     let source_text = almide::source_overlay::read_to_string(file).unwrap_or_default();
+    // ALMIDE_FORCE_METER_SPLICE=1 takes the region-splice route even when the
+    // whole program renders — the differential that holds the two routes'
+    // spends equal (tests/fan_meter_splice_test.rs).
+    let force_splice = uses_metered_prims && almide_base::env::flag("ALMIDE_FORCE_METER_SPLICE");
     match almide_mir::pipeline::try_render_rust_source(&source_text) {
+        Ok(_) if force_splice => link_metered_regions(&source_text, rs_code, "forced by ALMIDE_FORCE_METER_SPLICE")
+            .unwrap_or_else(|e| { err(&e); std::process::exit(1) }),
         Ok(v1_code) => {
             if almide_base::env::flag("ALMIDE_VERIFIED_DEBUG") {
                 err(&format!("native: v1 trust-spine render"));
@@ -257,16 +263,13 @@ pub(crate) fn render_v1_native_or_fallback(file: &str, rs_code: String, uses_met
                 ));
                 std::process::exit(1);
             }
-            // Budget semantics (fan.bounded / fan.race) exist only on the v1
-            // trust spine — the v0 pipeline emits calls to budget runtime fns
-            // that do not exist, so the fallback would die later as an opaque
-            // rustc E0425 in generated code. Refuse with the wall reason
-            // instead (same honesty rule as the probe above).
+            // Budget semantics (fan.bounded / fan.race / fan.timeout) are
+            // metered on the v1 trust spine only. The program walled there,
+            // so the standard codegen builds it and links the v1-rendered
+            // regions in (#3669); only a region outside the v1 subset refuses.
             if uses_metered_prims {
-                err(&format!(
-                    "error: fan.bounded / fan.race require the v1 native render, but it walled\n  reason: {e}\n  hint: budgets are metered on the trust spine only; simplify the program to the v1 subset or build for --target wasm"
-                ));
-                std::process::exit(1);
+                return link_metered_regions(&source_text, rs_code, &e.to_string())
+                    .unwrap_or_else(|msg| { err(&msg); std::process::exit(1) });
             }
             // #931 made this note loud because verified was an explicit
             // opt-in; #1074 makes it opt-in again because verified is now the
@@ -282,6 +285,25 @@ pub(crate) fn render_v1_native_or_fallback(file: &str, rs_code: String, uses_met
             }
             rs_code
         }
+    }
+}
+
+/// #3669: link the v1-rendered metered regions of `source_text` into the
+/// standard codegen's `rs_code` (whose region fns already delegate to them —
+/// `MeteredRegionDelegatePass`). `whole_wall` is why the whole-program render
+/// was not used. `Err` is the refusal to print: a region itself is outside
+/// the v1 subset, and building without its meter would change which arm wins.
+pub(crate) fn link_metered_regions(source_text: &str, rs_code: String, whole_wall: &str) -> Result<String, String> {
+    match almide_mir::pipeline::try_render_metered_splice(source_text) {
+        Ok(splice) => {
+            if almide_base::env::flag("ALMIDE_VERBOSE") || almide_base::env::flag("ALMIDE_VERIFIED_DEBUG") {
+                err(&format!("note: metered program built via the standard codegen, its regions rendered by the trust spine\n  reason: {whole_wall}"));
+            }
+            Ok(rs_code + &splice)
+        }
+        Err(e) => Err(format!(
+            "error: a fan.bounded / fan.race / fan.timeout region is outside the v1 native render, which meters it\n  reason: {e}\n  hint: budgets are metered on the trust spine only; keep the region's arms inside the v1 subset or build for --target wasm"
+        )),
     }
 }
 

@@ -33,6 +33,7 @@ use super::pass_owned_source_hoist::OwnedSourceHoistPass;
 use super::pass_licm::LICMPass;
 use super::pass_peephole::PeepholePass;
 use super::pass_range_counting::RangeCountingVarsPass;
+use super::pass_metered_region_delegate::MeteredRegionDelegatePass;
 use super::pass_egg_saturation::EggSaturationPass;
 use super::pass_matrix_shape_spec::MatrixShapeSpecPass;
 use super::pass_const_fold::ConstFoldPass;
@@ -103,6 +104,9 @@ fn build_pipeline(target: Target) -> Pipeline {
                 // Wgsl/Wasm arms have their own single invocation.)
                 .add(LambdaTypeResolvePass)
                 .add(ConcretizeTypesPass)
+                // #3669: a metered region becomes a delegate into the
+                // v1-rendered region module the CLI links in.
+                .add(MeteredRegionDelegatePass)
                 // Hoist payload-nested string literals (`ok("x")`, `Word("hi")`)
                 // into Bind + `==` guards BEFORE MatchSubject so the as_deref /
                 // &* subject deref only ever sees top-level / already-handled
