@@ -2,7 +2,7 @@
 1371	spec/wasm_cross/accum_recursion_int.almd
 3436	spec/wasm_cross/adr0005_operator_equivalence.almd
 5150	spec/wasm_cross/alias_combinator_rc.almd
-7840	spec/wasm_cross/alias_cow.almd
+8096	spec/wasm_cross/alias_cow.almd
 2100	spec/wasm_cross/allocation_within_limits.almd
 4007	spec/wasm_cross/anon_record_structural_identity.almd
 2604	spec/wasm_cross/anon_record_variant_payloads.almd
@@ -35,7 +35,7 @@
 2238	spec/wasm_cross/bounded_kernel.almd
 2238	spec/wasm_cross/bounded_kernel_plain.almd
 2103	spec/wasm_cross/branch_lift_in_loop.almd
-7000	spec/wasm_cross/branch_lift_stdlib_mut_arg.almd
+7256	spec/wasm_cross/branch_lift_stdlib_mut_arg.almd
 4310	spec/wasm_cross/branch_lift_user_fn_named_like_stdlib.almd
 6987	spec/wasm_cross/bundled_pure_modules.almd
 3445	spec/wasm_cross/bytes_alloc_ceiling_domain.almd
@@ -332,9 +332,9 @@
 2295	spec/wasm_cross/index_bounds_write_heap.almd
 2219	spec/wasm_cross/index_bounds_write_only_var.almd
 5993	spec/wasm_cross/inplace_clear_alias.almd
-5193	spec/wasm_cross/inplace_clear_alias_field.almd
-8520	spec/wasm_cross/inplace_clear_family.almd
-4710	spec/wasm_cross/inplace_mutator_statement.almd
+5517	spec/wasm_cross/inplace_clear_alias_field.almd
+8768	spec/wasm_cross/inplace_clear_family.almd
+4958	spec/wasm_cross/inplace_mutator_statement.almd
 942	spec/wasm_cross/int8_div_overflow.almd
 9484	spec/wasm_cross/int_bit_family.almd
 951	spec/wasm_cross/int_clamp_inverted.almd
@@ -464,7 +464,7 @@
 825	spec/wasm_cross/loop_break_continue.almd
 2467	spec/wasm_cross/loop_buffer_churn.almd
 2522	spec/wasm_cross/loop_effect_match_stmt.almd
-2914	spec/wasm_cross/loop_outer_inplace_mutate_rc.almd
+3170	spec/wasm_cross/loop_outer_inplace_mutate_rc.almd
 1915	spec/wasm_cross/loop_push_trailing_increment.almd
 5666	spec/wasm_cross/map_core_trio.almd
 9475	spec/wasm_cross/map_entries_reclaim.almd
@@ -547,10 +547,10 @@
 3772	spec/wasm_cross/mut_call_hoisted_args_in_branch.almd
 9491	spec/wasm_cross/mut_call_nested_read_before.almd
 6080	spec/wasm_cross/mut_call_two_mut_args_read.almd
-5034	spec/wasm_cross/mut_heap_param.almd
+5290	spec/wasm_cross/mut_heap_param.almd
 4709	spec/wasm_cross/mut_list_param_read_by_range_ops.almd
 4677	spec/wasm_cross/mut_map_param.almd
-13054	spec/wasm_cross/mut_param_alias_cow.almd
+13310	spec/wasm_cross/mut_param_alias_cow.almd
 10988	spec/wasm_cross/mut_param_alias_in_place_mutators.almd
 2951	spec/wasm_cross/mut_param_branch_forward.almd
 4305	spec/wasm_cross/mut_param_call_chain.almd
@@ -566,10 +566,10 @@
 4021	spec/wasm_cross/mut_param_fn_value_alternatives.almd
 4827	spec/wasm_cross/mut_param_global_callee_sees_precall.almd
 3084	spec/wasm_cross/mut_param_global_no_reach_in_place.almd
-9506	spec/wasm_cross/mut_param_interpolated.almd
+9762	spec/wasm_cross/mut_param_interpolated.almd
 2885	spec/wasm_cross/mut_param_loop_stays_in_place.almd
 11230	spec/wasm_cross/mut_param_move_mode_gaps.almd
-16887	spec/wasm_cross/mut_param_nested_place_writeback.almd
+17143	spec/wasm_cross/mut_param_nested_place_writeback.almd
 49302	spec/wasm_cross/mut_param_reassign_from_hof.almd
 2348	spec/wasm_cross/mut_param_spread_reassign.almd
 5152	spec/wasm_cross/mut_param_tail_recursion.almd
@@ -581,7 +581,7 @@
 6019	spec/wasm_cross/mutable_global_mut_arg_callee_touches_global.almd
 2340	spec/wasm_cross/mutable_global_repeat_writes.almd
 1845	spec/wasm_cross/mutable_global_scalar_assign.almd
-8692	spec/wasm_cross/mutator_writeback_releases_old_block.almd
+8940	spec/wasm_cross/mutator_writeback_releases_old_block.almd
 2657	spec/wasm_cross/mutual_append.almd
 2235	spec/wasm_cross/mutual_recursive_types.almd
 1541	spec/wasm_cross/mutual_tail_recursion.almd
@@ -592,7 +592,7 @@
 8727	spec/wasm_cross/negative_offset_and_width_totality.almd
 3230	spec/wasm_cross/nested_box_guard_binder.almd
 2666	spec/wasm_cross/nested_ctor_pattern.almd
-12032	spec/wasm_cross/nested_field_path_mut.almd
+12343	spec/wasm_cross/nested_field_path_mut.almd
 5809	spec/wasm_cross/nested_hof_lambda_inference.almd
 4608	spec/wasm_cross/nested_list_list_int.almd
 4812	spec/wasm_cross/nested_list_list_string.almd

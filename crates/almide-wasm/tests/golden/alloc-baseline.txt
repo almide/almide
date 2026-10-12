@@ -35,7 +35,7 @@
 65760	spec/wasm_cross/bounded_kernel.almd
 65760	spec/wasm_cross/bounded_kernel_plain.almd
 65920	spec/wasm_cross/branch_lift_in_loop.almd
-66688	spec/wasm_cross/branch_lift_stdlib_mut_arg.almd
+66672	spec/wasm_cross/branch_lift_stdlib_mut_arg.almd
 65968	spec/wasm_cross/branch_lift_user_fn_named_like_stdlib.almd
 66272	spec/wasm_cross/bundled_pure_modules.almd
 66080	spec/wasm_cross/bytes_alloc_ceiling_domain.almd
@@ -547,7 +547,7 @@
 66096	spec/wasm_cross/mut_call_hoisted_args_in_branch.almd
 67376	spec/wasm_cross/mut_call_nested_read_before.almd
 66224	spec/wasm_cross/mut_call_two_mut_args_read.almd
-67296	spec/wasm_cross/mut_heap_param.almd
+67232	spec/wasm_cross/mut_heap_param.almd
 66992	spec/wasm_cross/mut_list_param_read_by_range_ops.almd
 66080	spec/wasm_cross/mut_map_param.almd
 135184	spec/wasm_cross/mut_param_alias_cow.almd
