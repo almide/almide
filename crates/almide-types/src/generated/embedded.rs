@@ -17723,6 +17723,7 @@ fn contains[K, V](m: Map[K, V], key: K) -> Bool = _
 
 /// Copy without key; unchanged if absent.
 @intrinsic("almide_rt_map_remove")
+@reuse(m)
 fn remove[K, V](m: Map[K, V], key: K) -> Map[K, V] = _
 
 /// Every key, in insertion order.

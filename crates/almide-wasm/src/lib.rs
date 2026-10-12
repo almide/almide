@@ -129,6 +129,7 @@ mod collections_hof;
 mod collections_set;
 mod map_inplace;
 mod map_index;
+mod map_remove;
 mod emit;
 pub use emit::{debug_lines, emit_library_with_ops, emit_program, emit_program_with_ops, package_keys};
 mod emitter;

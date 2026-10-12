@@ -513,6 +513,7 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_map_mix64" => &[false],
         "almide_rt_map_new" => &[],
         "almide_rt_map_remove" => &[false, false],
+        "almide_rt_map_remove_owned" => &[false, false],
         "almide_rt_map_set" => &[false, false, false],
         "almide_rt_map_set_str" => &[false, false, false],
         "almide_rt_map_update" => &[false, false, false],

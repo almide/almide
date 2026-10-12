@@ -46,7 +46,12 @@
 //!    overwrite keeps every key (index valid), an append inserts the new
 //!    ordinal into the index or, when the load would pass 1/2, drops the
 //!    index (`val = 1`) so the next lookup rebuilds it at double size —
-//!    amortized O(1) per insert, geometric like the block itself.
+//!    amortized O(1) per insert, geometric like the block itself. An
+//!    in-place delete (map_remove.rs, #3640) shifts every later ordinal,
+//!    so it frees the index and resets the record to 0 (`$mapidx_forget`):
+//!    the block is new again, and a loop of deletes rides the linear scan
+//!    (each delete is O(n) by its shift already) instead of rebuilding an
+//!    index per step; a lookup run after it re-indexes on its second probe.
 //!
 //! # The key-class matrix (`IdxKey`)
 //!
@@ -526,6 +531,13 @@ impl Emitter<'_> {
         let key = index_key(k)?;
         let fns = self.idx_fns(key);
         Some(self.work.helper(Helper::MapIdxAppend { key, fns }))
+    }
+
+    /// The in-place delete's hook (`None` for a key class with no index
+    /// lane): `$mapidx_forget`, called with 0 — see invariant 3.
+    pub(crate) fn keyed_remove(&mut self, k: SliceTy) -> Option<u32> {
+        let IdxFns { side_get, side_set, .. } = self.idx_fns(index_key(k)?);
+        Some(self.work.helper(Helper::MapIdxForget { side_get, side_set }))
     }
 }
 
