@@ -6,7 +6,9 @@
 //! - Result derives `Ok < Err`, then the active side's payload.
 //! - Unit values are all equal, so a stable sort keeps the input order.
 //!
-//! Each program runs on both legs and must print the same lines.
+//! Each program runs on both legs and must print the same lines. The nested
+//! shapes (Result inside Option, Result of Result) reach the compare through
+//! its recursion.
 use std::process::Command;
 
 const SOURCE: &str = r#"fn main() -> Unit = {
@@ -25,6 +27,11 @@ const SOURCE: &str = r#"fn main() -> Unit = {
   println("${list.len(list.sort(us))}")
   let ps = [((), 3), ((), 1), ((), 2)]
   println("${list.map(list.sort(ps), ((u, n)) => n)}")
+  let a: List[Option[Result[Bytes, Unit]]] = [some(err(())), none, some(ok(bytes.from_list([3]))), some(ok(bytes.from_list([])))]
+  println("${list.map(list.sort(a), (x) => match x { none => "n", some(ok(b)) => "o${bytes.to_list(b)}", some(err(_)) => "e" })}")
+  let c: List[Result[Result[Int, String], Option[Bytes]]] = [err(none), ok(err("q")), ok(ok(5)), err(some(bytes.from_list([9]))), ok(ok(-5))]
+  let show = (r: Result[Result[Int, String], Option[Bytes]]) => match r { ok(ok(n)) => "oo${n}", ok(err(s)) => "oe${s}", err(none) => "en", err(some(b)) => "es${bytes.to_list(b)}" }
+  println("${list.map(list.sort(c), show)}")
 }
 "#;
 
@@ -37,6 +44,8 @@ some(err("b")) some(ok(-1))
 ["[0, 5]:9", "[1]:1", "[1]:2"]
 3
 [1, 2, 3]
+["n", "o[]", "o[3]", "e"]
+["oo-5", "oo5", "oeq", "en", "es[9]"]
 "#;
 
 fn run(wasm: bool) -> String {
