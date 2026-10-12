@@ -366,6 +366,8 @@ impl Emitter<'_> {
                 i.i64_store(slot_memarg(0));
                 i.local_get(hk).i32_const(1).i32_add().local_set(hk);
                 i.br(0).end().end();
+                // The staging block is this arm's own: decoded, it goes.
+                i.local_get(hraw).call(F_DEC_FLAT);
                 i.local_get(hout);
                 i.end();
                 let _ = i;
