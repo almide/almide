@@ -712,6 +712,7 @@
 1927	spec/wasm_cross/result_default_and_passthrough.almd
 1837	spec/wasm_cross/result_eq.almd
 3431	spec/wasm_cross/result_filter_heap_ok.almd
+6754	spec/wasm_cross/result_generic_param_arg.almd
 2227	spec/wasm_cross/result_heap_err_match.almd
 1893	spec/wasm_cross/result_heap_ok_match.almd
 2653	spec/wasm_cross/result_list_str_int_tuple.almd

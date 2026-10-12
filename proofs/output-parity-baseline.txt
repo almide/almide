@@ -811,6 +811,7 @@ spec/wasm_cross/result_ctor_call_payload.almd
 spec/wasm_cross/result_default_and_passthrough.almd
 spec/wasm_cross/result_eq.almd
 spec/wasm_cross/result_filter_heap_ok.almd
+spec/wasm_cross/result_generic_param_arg.almd
 spec/wasm_cross/result_heap_err_match.almd
 spec/wasm_cross/result_heap_ok_match.almd
 spec/wasm_cross/result_list_str_int_tuple.almd
