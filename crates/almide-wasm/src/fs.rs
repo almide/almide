@@ -228,11 +228,17 @@ impl Emitter<'_> {
 
     /// (path, content) both strings → fs_call(op, path, content).
     pub(crate) fn fs_call_str2(&mut self, p: &IrExpr, c: &IrExpr, op: i32) -> Result<(), EmitError> {
+        self.fs_call_two((p, STR), (c, STR), op)
+    }
+
+    /// Two operands of the text block layout (String or Bytes) →
+    /// fs_call(op, a, b).
+    pub(crate) fn fs_call_two(&mut self, (p, pt): (&IrExpr, SliceTy), (c, ct): (&IrExpr, SliceTy), op: i32) -> Result<(), EmitError> {
         self.note_host_op(op);
-        self.lower_arg(p, Some(STR), ArgMode::Borrow)?;
+        self.lower_arg(p, Some(pt), ArgMode::Borrow)?;
         let hp = self.hold_i32()?;
         self.f.instructions().local_set(hp);
-        self.lower_arg(c, Some(STR), ArgMode::Borrow)?;
+        self.lower_arg(c, Some(ct), ArgMode::Borrow)?;
         let hc = self.hold_i32()?;
         let mut i = self.f.instructions();
         i.local_set(hc);
