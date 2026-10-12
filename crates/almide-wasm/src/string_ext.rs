@@ -309,10 +309,22 @@ impl Emitter<'_> {
 
     /// Byte-prefix compare (native str::starts_with): for valid UTF-8
     /// the byte test IS the char test.
-    fn lower_string_starts_with(
+    fn lower_string_starts_with(&mut self, s: &IrExpr, prefix: &IrExpr) -> ArmResult {
+        self.lower_string_affix(s, prefix, false)
+    }
+
+    fn lower_string_ends_with(&mut self, s: &IrExpr, suffix: &IrExpr) -> ArmResult {
+        self.lower_string_affix(s, suffix, true)
+    }
+
+    /// `starts_with` / `ends_with` (`at_end`): `affix`'s bytes against the
+    /// same number of bytes at the start or the end of `s`, Rust's byte-wise
+    /// `str` compare.
+    fn lower_string_affix(
         &mut self,
         s: &IrExpr,
         prefix: &IrExpr,
+        at_end: bool,
     ) -> ArmResult {
         self.lower_arg(s, Some(STR), ArgMode::Borrow)?;
         let hs = self.hold_i32()?;
@@ -329,6 +341,10 @@ impl Emitter<'_> {
         i.if_(BlockType::Result(ValType::I32));
         i.i32_const(0);
         i.else_();
+        if at_end {
+            // Compare from len(s) − len(affix): move the base by that much.
+            i.local_get(hs).local_get(hs).i32_load(len_memarg()).local_get(hn).i32_sub().i32_add().local_set(hs);
+        }
         i.i32_const(1).local_set(hr);
         i.i32_const(0).local_set(hk);
         i.block(BlockType::Empty).loop_(BlockType::Empty);
@@ -381,22 +397,10 @@ impl Emitter<'_> {
     ) -> Result<Option<Option<Lowered>>, EmitError> {
         match (func, args) {
             ("starts_with", [s, p]) => self.lower_string_starts_with(s, p),
-            // ends_with = the strip_suffix compare with a Bool verdict.
-            ("ends_with", [s, p]) => {
-                let got = self.lower_string_strip(s, p, false)?;
-                // The verdict is whether the strip answered `some`; that
-                // Option and the stripped string in it are this arm's own
-                // and go right after (#2977 — every hit kept both; a `none`
-                // is NULL_ADDR, which the drop no-ops).
-                let dec = match got {
-                    Some(l) => self.dec_fn_of(l.ty),
-                    None => return unsup("string-ends-with-strip"),
-                };
-                let h = self.hold_i32()?;
-                self.f.instructions().local_tee(h).i32_const(0).i32_ne().local_get(h).call(dec);
-                self.release_i32();
-                Ok(Some(Lowered::scalar(BOOL)))
-            }
+            // ends_with compares the suffix's bytes in place. It used to build
+            // strip_suffix's stripped string — nearly a copy of `s` — only to
+            // drop it, so every call cost O(len(s)).
+            ("ends_with", [s, p]) => self.lower_string_ends_with(s, p),
             ("strip_prefix" | "strip_suffix", [s, p]) => {
                 self.lower_string_strip(s, p, func == "strip_prefix")
             }
