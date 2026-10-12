@@ -832,8 +832,17 @@ pub(crate) fn element_top_consumes(top: Site) -> bool {
 /// Does a fused chain need its source's elements OWNED — is some lambda the
 /// source element reaches not a pure read of it, or does the element leave
 /// the chain as a value (`source_element_receivers`)?
+///
+/// A `Copy` element is decided before the receivers are traced: reading one
+/// out of a borrow is the same copy as moving it out of an owned list, so
+/// no adapter between the source and a lambda (`enumerate` pairing it with
+/// an index, #3585) and no collector that yields it can make ownership buy
+/// anything.
 pub fn chain_elements_consumed(source_ty: &Ty, steps: &[IterStep], collector: &IterCollector, oracle: &dyn SlotOracle) -> bool {
     let Some(elem) = list_element_ty(source_ty) else { return true };
+    if !heap(elem) {
+        return false;
+    }
     let Some(receivers) = almide_ir::source_element_receivers(steps, collector) else { return true };
     receivers.iter().any(|(binder, lambda)| {
         let IrExprKind::Lambda { body, .. } = &lambda.kind else { return true };
