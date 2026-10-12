@@ -123,3 +123,20 @@ fn resp_write_prefix(i: &mut wasm_encoder::InstructionSink<'_>, f_alloc: u32, st
     i.br(0).end().end();
 }
 
+/// `out` = 1 when the request's method is GET or HEAD: op 43, or a framed op
+/// (≥ 48) whose method cell spells either.
+fn req_is_get_or_head(i: &mut wasm_encoder::InstructionSink<'_>, op: u32, (m_ptr, m_len): (u32, u32), out: u32) {
+    i.local_get(op).i32_const(43).i32_eq().local_set(out);
+    for name in [&b"GET"[..], &b"HEAD"[..]] {
+        i.local_get(op).i32_const(48).i32_ge_s().local_get(m_len).i32_const(name.len() as i32).i32_eq().i32_and();
+        i.if_(BlockType::Empty);
+        for (k, ch) in name.iter().enumerate() {
+            i.local_get(m_ptr).i32_load8_u(mem8(k as u64)).i32_const(*ch as i32).i32_eq();
+            if k > 0 {
+                i.i32_and();
+            }
+        }
+        i.local_get(out).i32_or().local_set(out);
+        i.end();
+    }
+}
