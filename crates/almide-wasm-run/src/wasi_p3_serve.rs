@@ -45,25 +45,24 @@ const S_BP_DEC: u32 = IMPORTS_HTTP + 1; // $root [backpressure-dec]
 const S_GET_METHOD: u32 = IMPORTS_HTTP + 2; // [method]request.get-method (retptr)
 const S_GET_PATH: u32 = IMPORTS_HTTP + 3; // [method]request.get-path-with-query (retptr)
 const S_GET_HEADERS: u32 = IMPORTS_HTTP + 4; // [method]request.get-headers
-const S_COPY_ALL: u32 = IMPORTS_HTTP + 5; // [method]fields.copy-all (retptr)
-const S_REQ_CONSUME: u32 = IMPORTS_HTTP + 6; // [static]request.consume-body (retptr)
-const S_REQ_CB_FNEW: u32 = IMPORTS_HTTP + 7; // [future-new-0] of request.consume-body
-const S_REQ_CB_FWRITE: u32 = IMPORTS_HTTP + 8; // [async-lower][future-write-0]
-const S_REQ_CB_FDROPW: u32 = IMPORTS_HTTP + 9; // [future-drop-writable-0]
-const S_REQ_BODY_READ: u32 = IMPORTS_HTTP + 10; // [async-lower][stream-read-1]
-const S_REQ_BODY_DROPR: u32 = IMPORTS_HTTP + 11; // [stream-drop-readable-1]
-const S_REQ_TRL_DROPR: u32 = IMPORTS_HTTP + 12; // [future-drop-readable-2]
-const S_RESP_NEW: u32 = IMPORTS_HTTP + 13; // [static]response.new (retptr)
-const S_RESP_SNEW: u32 = IMPORTS_HTTP + 14; // [stream-new-0] of response.new
-const S_RESP_SWRITE: u32 = IMPORTS_HTTP + 15; // [async-lower][stream-write-0]
-const S_RESP_SDROPW: u32 = IMPORTS_HTTP + 16; // [stream-drop-writable-0]
-const S_RESP_FNEW: u32 = IMPORTS_HTTP + 17; // [future-new-1] (trailers)
-const S_RESP_FWRITE: u32 = IMPORTS_HTTP + 18; // [async-lower][future-write-1]
-const S_RESP_FDROPW: u32 = IMPORTS_HTTP + 19; // [future-drop-writable-1]
-const S_RESP_RFUT_DROPR: u32 = IMPORTS_HTTP + 20; // [future-drop-readable-2] (the response's result)
-const S_SET_STATUS: u32 = IMPORTS_HTTP + 21; // [method]response.set-status-code
-const S_TASK_RETURN: u32 = IMPORTS_HTTP + 22; // [export]wasi:http/handler [task-return]handle
-const IMPORTS_SERVE: u32 = IMPORTS_HTTP + 23;
+const S_REQ_CONSUME: u32 = IMPORTS_HTTP + 5; // [static]request.consume-body (retptr)
+const S_REQ_CB_FNEW: u32 = IMPORTS_HTTP + 6; // [future-new-0] of request.consume-body
+const S_REQ_CB_FWRITE: u32 = IMPORTS_HTTP + 7; // [async-lower][future-write-0]
+const S_REQ_CB_FDROPW: u32 = IMPORTS_HTTP + 8; // [future-drop-writable-0]
+const S_REQ_BODY_READ: u32 = IMPORTS_HTTP + 9; // [async-lower][stream-read-1]
+const S_REQ_BODY_DROPR: u32 = IMPORTS_HTTP + 10; // [stream-drop-readable-1]
+const S_REQ_TRL_DROPR: u32 = IMPORTS_HTTP + 11; // [future-drop-readable-2]
+const S_RESP_NEW: u32 = IMPORTS_HTTP + 12; // [static]response.new (retptr)
+const S_RESP_SNEW: u32 = IMPORTS_HTTP + 13; // [stream-new-0] of response.new
+const S_RESP_SWRITE: u32 = IMPORTS_HTTP + 14; // [async-lower][stream-write-0]
+const S_RESP_SDROPW: u32 = IMPORTS_HTTP + 15; // [stream-drop-writable-0]
+const S_RESP_FNEW: u32 = IMPORTS_HTTP + 16; // [future-new-1] (trailers)
+const S_RESP_FWRITE: u32 = IMPORTS_HTTP + 17; // [async-lower][future-write-1]
+const S_RESP_FDROPW: u32 = IMPORTS_HTTP + 18; // [future-drop-writable-1]
+const S_RESP_RFUT_DROPR: u32 = IMPORTS_HTTP + 19; // [future-drop-readable-2] (the response's result)
+const S_SET_STATUS: u32 = IMPORTS_HTTP + 20; // [method]response.set-status-code
+const S_TASK_RETURN: u32 = IMPORTS_HTTP + 21; // [export]wasi:http/handler [task-return]handle
+const IMPORTS_SERVE: u32 = IMPORTS_HTTP + 22;
 
 /// Native's server limits (almide-rt-core's http_server_core): the request
 /// and header line (8 KiB, `414` / `431` beyond, the CRLF counted), the
@@ -226,7 +225,6 @@ fn serve_import_list(t: &P3Types, t_bp: u32, t_tr: u32) -> Vec<(u32, &'static st
         (S_GET_METHOD, ht, "[method]request.get-method", t.ws_join),
         (S_GET_PATH, ht, "[method]request.get-path-with-query", t.ws_join),
         (S_GET_HEADERS, ht, "[method]request.get-headers", t.call),
-        (S_COPY_ALL, ht, "[method]fields.copy-all", t.ws_join),
         (S_REQ_CONSUME, ht, "[static]request.consume-body", t.consume),
         (S_REQ_CB_FNEW, ht, "[future-new-0][static]request.consume-body", t.new),
         (S_REQ_CB_FWRITE, ht, "[async-lower][future-write-0][static]request.consume-body", t.fut_read),
@@ -468,7 +466,7 @@ fn serve_read_request(i: &mut wasm_encoder::InstructionSink<'_>, g: P3Globals, a
     i.end();
     // The headers: copied out, the fields resource dropped.
     i.local_get(L::REQ).call(S_GET_HEADERS).local_set(L::FIELDS);
-    i.local_get(L::FIELDS).i32_const(ret).call(S_COPY_ALL);
+    i.local_get(L::FIELDS).i32_const(ret).call(I_HTTP_COPY_ALL);
     i.i32_const(ret).i32_load(mem(0)).local_set(L::H_LIST);
     i.i32_const(ret).i32_load(mem(4)).local_set(L::H_N);
     i.local_get(L::FIELDS).call(I_HTTP_FIELDS_DROP);

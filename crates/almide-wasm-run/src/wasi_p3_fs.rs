@@ -131,7 +131,9 @@ fn shim_fs_call(g: P3Globals, abi: &FsAbi, (f_self, f_http, f_serve): (u32, Opti
     if let Some(h) = f_http {
         i.local_get(op).i32_const(43).i32_ge_s();
         i.local_get(op).i32_const(50).i32_le_s();
-        i.i32_and().if_(BlockType::Empty);
+        i.i32_and();
+        // op 65: the full-response family (ADR-0023 step 4).
+        i.local_get(op).i32_const(65).i32_eq().i32_or().if_(BlockType::Empty);
         for pidx in 0..5u32 {
             i.local_get(pidx);
         }
