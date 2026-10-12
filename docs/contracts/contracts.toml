@@ -4545,6 +4545,7 @@ since     = "0.63.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/result_param_not_first.almd", class = "fixture" },
+  { path = "spec/wasm_cross/result_generic_param_arg.almd", class = "fixture" },
   { path = "spec/wasm_cross/fallible_hof_option_effect_callback.almd", class = "fixture" },
 ]
 [[contract]]
