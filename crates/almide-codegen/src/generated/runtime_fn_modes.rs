@@ -645,6 +645,7 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_net_tcp_connect" => &[false, false],
         "almide_rt_net_tcp_is_open" => &[false],
         "almide_rt_net_tcp_listen" => &[false, false],
+        "almide_rt_net_tcp_local_port" => &[false],
         "almide_rt_net_tcp_read" => &[false, false],
         "almide_rt_net_tcp_read_exact" => &[false, false],
         "almide_rt_net_tcp_read_timeout" => &[false, false, false],
