@@ -366,9 +366,14 @@ fn run_artifact(ctx: &Ctx, art: &Path, leg: Leg) -> Result<String, String> {
     }
     let out = child.wait_with_output().map_err(|e| e.to_string())?;
     if !out.status.success() {
-        return Err(format!("exit {:?}: {}", out.status.code(), first_error(&out.stderr)));
+        return Err(run_failure(&out));
     }
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// Why a probe run failed: its exit and its first error line.
+fn run_failure(out: &std::process::Output) -> String {
+    format!("exit {:?}: {}", out.status.code(), first_error(&out.stderr))
 }
 
 /// The first `error` line of a failed run's stderr, else its first line: a
@@ -762,7 +767,7 @@ fn run_counted(ctx: &Ctx, art: &Path, leg: Leg) -> Result<(String, Counts), Stri
     let wall = start.elapsed();
     let out = child.wait_with_output().map_err(|e| e.to_string())?;
     if !out.status.success() {
-        return Err(format!("exit {:?}: {}", out.status.code(), first_error(&out.stderr)));
+        return Err(run_failure(&out));
     }
     let instructions = parse_instructions(&std::fs::read_to_string(&stat).unwrap_or_default())
         .ok_or_else(|| "perf reported no instructions:u count".to_string())?;
@@ -825,6 +830,23 @@ mod verdict_tests {
         assert!(part.contains("exit Some(1)") && part.contains("matrix shape mismatch"), "{part}");
         assert_eq!(alloc_part("call", &output(0, "1\n", "alloc: live=0 peak=9\n")), (true, "call live=0".to_string()));
         assert_eq!(alloc_part("loop", &output(0, "1\n", "alloc: live=2 peak=9\n")), (false, "loop live=2".to_string()));
+    }
+
+    /// #3666: a probe that stopped because the probed call returned `err`
+    /// is reported as the error path it took — in the timed / counted runs,
+    /// the alloc probe and the diamond alike — never as a count or a match.
+    #[test]
+    fn a_run_that_took_the_error_path_is_reported_as_such() {
+        use crate::generator::inspect_gen::ERR_PATH;
+        let stderr = format!("PANIC: {ERR_PATH}: invalid base64 character\nalloc: live=0 peak=9\n");
+        let want = "took the error path (the probed call returned err: invalid base64 character)";
+        assert_eq!(run_failure(&output(1, "", &stderr)), format!("exit Some(1): {want}"));
+        let (ok, part) = alloc_part("call", &output(1, "", &stderr));
+        assert!(!ok && part.contains(want) && !part.contains("live="), "{part}");
+        let v = diamond_verdict(true, &output(1, "", &stderr), &output(1, "", &stderr));
+        assert!(v.starts_with("FAIL: ") && v.contains(want), "{v}");
+        // Any other failure keeps its own first error line.
+        assert_eq!(run_failure(&output(2, "", "warning: x\nerror: boom\n")), "exit Some(2): error: boom");
     }
 
     /// #3636: a Unit function with no `mut` parameter (bytes.heap_restore)
