@@ -1848,6 +1848,36 @@ jobs:
       - name: The documented spelling's tax stays bounded (#2098)
         run: ALMIDE_BIN=/tmp/almide-bin/almide scripts/check-spelling-ratio.sh
 
+  perf-profile-arm:
+    name: Perf ratchet (aarch64 release/default, #3604)
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
+    # The release profile's pessimization is arch-conditional: on generic
+    # aarch64 LLVM vectorizes spectralnorm's inner loop into NEON lane
+    # shuffles and `--release` runs 1.43x SLOWER than the default profile,
+    # while x86_64 reads 1.00x (#3604). The x86 job above cannot see it, so
+    # this leg runs where it happens. ubuntu-24.04-arm is free for public
+    # repos (fuzz-nightly already rides it). It builds its own compiler: the
+    # `build` artifact is x86_64. Stable toolchain for the same reason as
+    # perf-ratchet — the claim is about the generated code.
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: perf-profile-arm
+          save-if: ${{ github.ref == 'refs/heads/develop' }}
+          cache-on-failure: true
+
+      - run: cargo build --release --bin almide
+
+      - name: --release is not slower than the default profile on aarch64 (#3604)
+        run: ALMIDE_BIN=target/release/almide SPELLING_RATIO_LEGS=profile scripts/check-spelling-ratio.sh
+
   # ═══════════════════════════════════════════════
   # Full CI — cross-platform (PRs to main only)
   # ═══════════════════════════════════════════════
