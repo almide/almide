@@ -154,6 +154,10 @@ pub fn almide_rt_set_new<T>() -> AlmideSet<T> { AlmideSet::new() }
 pub fn almide_rt_set_from_list<T: PartialEq + Clone + 'static>(xs: &[T]) -> AlmideSet<T> { xs.iter().cloned().collect() }
 pub fn almide_rt_set_insert<T: PartialEq + Clone + 'static>(s: &AlmideSet<T>, value: T) -> AlmideSet<T> { let mut s = s.clone(); s.insert(value); s }
 pub fn almide_rt_set_remove<T: PartialEq + Clone + 'static>(s: &AlmideSet<T>, value: T) -> AlmideSet<T> { let mut s = s.clone(); s.remove(&value); s }
+// Owned twins (`@reuse(s)` in stdlib/set.almd): a source at its last use is
+// edited in place instead of cloned whole.
+pub fn almide_rt_set_insert_owned<T: PartialEq + Clone + 'static>(mut s: AlmideSet<T>, value: T) -> AlmideSet<T> { s.insert(value); s }
+pub fn almide_rt_set_remove_owned<T: PartialEq + Clone + 'static>(mut s: AlmideSet<T>, value: T) -> AlmideSet<T> { s.remove(&value); s }
 // Borrowed member (`@borrow_ref(value)` in stdlib/set.almd), as map.get is.
 pub fn almide_rt_set_contains<T: PartialEq + 'static, Q: ?Sized + PartialEq + AlmideMapKey>(s: &AlmideSet<T>, value: &Q) -> bool
 where T: std::borrow::Borrow<Q> { s.contains(value) }
