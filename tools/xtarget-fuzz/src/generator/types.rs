@@ -238,3 +238,27 @@ pub fn render_print(name: &str, ty: &GenType) -> String {
     let _ = write!(out, "println(\"{name} = ${{{name}}}\")");
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #3636: the observed image of a non-printable value is a call, and a
+    /// call interpolated inside `${…}` whose type is a Result is E041
+    /// (base64.decode, hex.decode, json.parse, value.field, value.as_array in
+    /// the inspection diamond). It is bound to a typed `let` first.
+    #[test]
+    fn a_non_printable_value_is_bound_to_a_typed_let_before_it_is_printed() {
+        let p = render_print("d", &GenType::Result(Box::new(GenType::Bytes)));
+        assert_eq!(
+            p,
+            "let d_o: Result[List[Int], String] = result.map(d, ((o0) => bytes.to_list(o0)))\n  println(\"d = ${d_o}\")"
+        );
+        let p = render_print("v", &GenType::Option(Box::new(GenType::Matrix)));
+        assert!(p.starts_with("let v_o: Option[List[List[Float]]] = option.map(v, "), "{p}");
+        let p = render_print("w", &GenType::Value);
+        assert_eq!(p, "let w_o: String = value.stringify(w)\n  println(\"w = ${w_o}\")");
+        // A printable value is interpolated as it is.
+        assert_eq!(render_print("x", &GenType::Int), "println(\"x = ${x}\")");
+    }
+}
