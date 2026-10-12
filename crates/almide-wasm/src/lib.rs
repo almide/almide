@@ -106,6 +106,7 @@ pub mod decline_site;
 mod imports;
 mod param_borrow;
 mod bytes_rw;
+mod bytes_in_place;
 mod bytes_recv;
 mod bytes_split;
 pub mod alloc_count;
