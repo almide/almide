@@ -143,3 +143,19 @@ fn main() -> Unit = println(h(["a", "b"]))
 fn a_heap_enumerate_chain_into_a_sink_runs() {
     assert_eq!(run(HEAP_ENUM).trim(), "0a1b");
 }
+
+/// #3648: a fused `count` / `len(filter)` collector rendered as an unparenthesized
+/// `chain.count() as i64`, so a template that borrows its argument
+/// (`set.contains`'s `&{x}`) produced `&chain.count() as i64` (E0308 / E0606).
+const BORROWED_COUNT: &str = r#"fn main() -> Unit = {
+  let s: Set[Int] = set.from_list([2])
+  let xs = [1, 2, 3]
+  println("${set.contains(s, list.count(xs, (y) => y > 1))}")
+  println("${set.contains(s, list.len(list.filter(xs, (y) => y > 1)))}")
+}
+"#;
+
+#[test]
+fn a_fused_count_passed_by_reference_builds() {
+    assert_eq!(run(BORROWED_COUNT), "true\ntrue\n");
+}
