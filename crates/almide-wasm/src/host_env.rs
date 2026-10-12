@@ -447,3 +447,20 @@ impl Emitter<'_> {
         Ok(())
     }
 }
+
+impl Emitter<'_> {
+    /// A Unit effect intrinsic (`env.set`, `io.print`, `env.sleep_ms`) hands
+    /// back the always-ok `Result[Unit, String]` carrier. Where a Unit is
+    /// wanted (`let n: Unit = env.set(…)`) the carrier `ty` on the stack is
+    /// released as a statement-position result is and replaced by the Unit;
+    /// `false` (nothing emitted) for any other type.
+    pub(crate) fn unit_from_carrier(&mut self, e: &IrExpr, ty: SliceTy) -> bool {
+        let SliceTy::Result(u, s) = ty else { return false };
+        if self.types.el(u) != SliceTy::Unit || self.types.el(s) != STR {
+            return false;
+        }
+        self.discard_result(e, ty);
+        self.f.instructions().i32_const(0);
+        true
+    }
+}

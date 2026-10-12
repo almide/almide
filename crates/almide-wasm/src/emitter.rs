@@ -620,24 +620,12 @@ impl Emitter<'_> {
         if let Some(w) = want
             && got != w
         {
-            // A Unit effect intrinsic (`env.set`, `io.print`, `env.sleep_ms`)
-            // hands back the always-ok `Result[Unit, String]` carrier; where a
-            // Unit is wanted (`let n: Unit = env.set(…)`) the carrier is
-            // released as a statement-position result is, and the value is
-            // the Unit.
-            if w == SliceTy::Unit && self.is_unit_carrier(got) {
-                self.discard_result(e, got);
-                self.f.instructions().i32_const(0);
+            if w == SliceTy::Unit && self.unit_from_carrier(e, got) {
                 return Ok(SliceTy::Unit);
             }
             return unsup(&format!("ty-mismatch:{got:?}-vs-{w:?}"));
         }
         Ok(got)
-    }
-
-    /// `Result[Unit, String]`: the carrier a Unit effect intrinsic returns.
-    fn is_unit_carrier(&self, ty: SliceTy) -> bool {
-        matches!(ty, SliceTy::Result(u, s) if self.types.el(u) == SliceTy::Unit && self.types.el(s) == STR)
     }
 
     /// Data-shaped values: sum constructors, unwraps, records, lists.
