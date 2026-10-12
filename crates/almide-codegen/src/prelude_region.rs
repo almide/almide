@@ -13,7 +13,12 @@
 //! the prelude, not the user code, so the rlib split
 //! (`slim_main_with_external_runtime`) keeps it.
 //!
-//! The handle's `Deref` is `unsafe { &*self.0 }` over memory the window has
+//! The handle is a `NonNull`, so a twin enum's leaf case rides the null niche
+//! instead of a tag word: `Leaf | Node(AlmideRgn, AlmideRgn)` is 16 bytes, not
+//! 24, and the arena a window fills is a third smaller (#3586 — on x86-64 the
+//! node stores were 46% of binarytrees' time, the leg's own wasm form beat it).
+//!
+//! The handle's `Deref` is `unsafe { self.0.as_ref() }` over memory the window has
 //! rewound: rustc cannot see a handle that outlives its window, so a wrong
 //! region-pure verdict in `pass_region_window.rs` is a SILENT use-after-rewind
 //! — the slot still holds the old bytes until the next window overwrites it.
@@ -53,20 +58,20 @@ pub fn region_arena_prelude_source(trap: bool) -> String {
 /// `AlmideRgn<T>` and its by-value forwarding impls.
 fn push_handle(s: &mut String, vis: &str, trap: bool) {
     if trap {
-        s.push_str(&format!("{vis}struct AlmideRgn<T>({vis}*const T, {vis}u64);\n"));
+        s.push_str(&format!("{vis}struct AlmideRgn<T>({vis}std::ptr::NonNull<T>, {vis}u64);\n"));
         s.push_str(&format!("{vis}const ALMIDE_RGN_POISON: u64 = u64::MAX;\n"));
         // The cold half is out of line so the check itself stays a load and a compare.
         s.push_str(&format!("#[cold] #[inline(never)] {vis}fn almide_rgn_stale(stamp: u64, hdr: u64) -> ! {{ let slot = if hdr == ALMIDE_RGN_POISON {{ String::from(\"poisoned by a rewind\") }} else {{ format!(\"re-allocated under generation {{hdr}}\") }}; panic!(\"almide: region window trap (ALMIDE_REGION_TRAP_STALE): a region handle allocated under generation {{stamp}} was read after its window rewound the arena (slot {{slot}}); pass_region_window's region-pure verdict was wrong — report it\") }}\n"));
         s.push_str(&format!("#[inline(always)] {vis}fn almide_rgn_check(p: *const u8, stamp: u64) {{ let hdr = unsafe {{ *(p.sub(8) as *const u64) }}; if hdr != stamp {{ almide_rgn_stale(stamp, hdr) }} }}\n"));
     } else {
-        s.push_str(&format!("{vis}struct AlmideRgn<T>({vis}*const T);\n"));
+        s.push_str(&format!("{vis}struct AlmideRgn<T>({vis}std::ptr::NonNull<T>);\n"));
     }
     s.push_str("impl<T> Clone for AlmideRgn<T> { #[inline(always)] fn clone(&self) -> Self { *self } }\n");
     s.push_str("impl<T> Copy for AlmideRgn<T> {}\n");
     if trap {
-        s.push_str("impl<T> std::ops::Deref for AlmideRgn<T> { type Target = T; #[inline(always)] fn deref(&self) -> &T { almide_rgn_check(self.0 as *const u8, self.1); unsafe { &*self.0 } } }\n");
+        s.push_str("impl<T> std::ops::Deref for AlmideRgn<T> { type Target = T; #[inline(always)] fn deref(&self) -> &T { almide_rgn_check(self.0.as_ptr() as *const u8, self.1); unsafe { self.0.as_ref() } } }\n");
     } else {
-        s.push_str("impl<T> std::ops::Deref for AlmideRgn<T> { type Target = T; #[inline(always)] fn deref(&self) -> &T { unsafe { &*self.0 } } }\n");
+        s.push_str("impl<T> std::ops::Deref for AlmideRgn<T> { type Target = T; #[inline(always)] fn deref(&self) -> &T { unsafe { self.0.as_ref() } } }\n");
     }
     s.push_str("impl<T: std::fmt::Debug> std::fmt::Debug for AlmideRgn<T> { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { (**self).fmt(f) } }\n");
     s.push_str("impl<T: PartialEq> PartialEq for AlmideRgn<T> { fn eq(&self, other: &Self) -> bool { **self == **other } }\n");
@@ -118,11 +123,11 @@ fn push_arena(s: &mut String, vis: &str, trap: bool) {
         // The header sits in the 8 bytes before the value: the block is
         // over-aligned to `max(align, 8)` and the value placed one alignment
         // unit in, so both the header and the value keep their alignment.
-        s.push_str(&format!("#[inline(always)] {vis}fn almide_rgn_alloc<T: Copy>(v: T) -> AlmideRgn<T> {{ ALMIDE_ARENA.with(|a| {{ let a = unsafe {{ &mut *a.get() }}; let align = std::mem::align_of::<T>().max(8); let p = a.alloc(std::mem::size_of::<T>() + align, align); let hdr = unsafe {{ p.add(align - 8) }} as *mut u64; unsafe {{ hdr.write(a.gen) }}; a.hdrs.push(hdr); let vp = unsafe {{ p.add(align) }} as *mut T; unsafe {{ vp.write(v) }}; AlmideRgn(vp, a.gen) }}) }}\n"));
+        s.push_str(&format!("#[inline(always)] {vis}fn almide_rgn_alloc<T: Copy>(v: T) -> AlmideRgn<T> {{ ALMIDE_ARENA.with(|a| {{ let a = unsafe {{ &mut *a.get() }}; let align = std::mem::align_of::<T>().max(8); let p = a.alloc(std::mem::size_of::<T>() + align, align); let hdr = unsafe {{ p.add(align - 8) }} as *mut u64; unsafe {{ hdr.write(a.gen) }}; a.hdrs.push(hdr); let vp = unsafe {{ p.add(align) }} as *mut T; unsafe {{ vp.write(v) }}; AlmideRgn(unsafe {{ std::ptr::NonNull::new_unchecked(vp) }}, a.gen) }}) }}\n"));
         s.push_str(&format!("#[inline(always)] {vis}fn almide_region_save() -> (usize, usize, usize) {{ ALMIDE_ARENA.with(|a| {{ let a = unsafe {{ &*a.get() }}; (a.cur, a.off, a.hdrs.len()) }}) }}\n"));
         s.push_str(&format!("#[inline(always)] {vis}fn almide_region_restore(mark: (usize, usize, usize)) {{ ALMIDE_ARENA.with(|a| {{ let a = unsafe {{ &mut *a.get() }}; for h in a.hdrs.drain(mark.2..) {{ unsafe {{ h.write(ALMIDE_RGN_POISON) }} }} a.gen += 1; a.cur = mark.0; a.off = mark.1; }}) }}\n"));
     } else {
-        s.push_str(&format!("#[inline(always)] {vis}fn almide_rgn_alloc<T: Copy>(v: T) -> AlmideRgn<T> {{ ALMIDE_ARENA.with(|a| {{ let a = unsafe {{ &mut *a.get() }}; let p = a.alloc(std::mem::size_of::<T>(), std::mem::align_of::<T>()) as *mut T; unsafe {{ p.write(v) }}; AlmideRgn(p) }}) }}\n"));
+        s.push_str(&format!("#[inline(always)] {vis}fn almide_rgn_alloc<T: Copy>(v: T) -> AlmideRgn<T> {{ ALMIDE_ARENA.with(|a| {{ let a = unsafe {{ &mut *a.get() }}; let p = a.alloc(std::mem::size_of::<T>(), std::mem::align_of::<T>()) as *mut T; unsafe {{ p.write(v) }}; AlmideRgn(unsafe {{ std::ptr::NonNull::new_unchecked(p) }}) }}) }}\n"));
         s.push_str(&format!("#[inline(always)] {vis}fn almide_region_save() -> (usize, usize) {{ ALMIDE_ARENA.with(|a| {{ let a = unsafe {{ &*a.get() }}; (a.cur, a.off) }}) }}\n"));
         s.push_str(&format!("#[inline(always)] {vis}fn almide_region_restore(mark: (usize, usize)) {{ ALMIDE_ARENA.with(|a| {{ let a = unsafe {{ &mut *a.get() }}; a.cur = mark.0; a.off = mark.1; }}) }}\n"));
     }
