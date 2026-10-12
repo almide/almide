@@ -767,7 +767,7 @@ names = 46
 [[site]]
 id = "crates/almide-types/src/self_host_registry.rs::self_host_runtime::table"
 class = "legacy"
-names = 1831
+names = 1826
 
 [[site]]
 id = "crates/almide-types/src/stdlib_info.rs::AUTO_IMPORT_BUNDLED::table"
@@ -1078,11 +1078,6 @@ names = 24
 id = "crates/almide-wasm/src/whitelist.rs::HTTP_CALL_SUM::table"
 class = "legacy"
 names = 6
-
-[[site]]
-id = "crates/almide-wasm/src/whitelist.rs::HTTP_CLIENT_SUM::table"
-class = "legacy"
-names = 5
 
 [[site]]
 id = "crates/almide-wasm/src/whitelist.rs::HTTP_SERVE_SUM::table"
