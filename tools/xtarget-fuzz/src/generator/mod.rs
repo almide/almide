@@ -34,7 +34,7 @@ mod sig_type;
 mod term;
 mod types;
 
-pub use catalogue::{build as build_catalogue, Signature};
+pub use catalogue::{build as build_catalogue, Signature, SANDBOXED_EFFECT_MODULES};
 
 use crate::rng::SplitMix64;
 

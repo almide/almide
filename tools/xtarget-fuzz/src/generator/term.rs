@@ -55,6 +55,8 @@ pub struct Builder<'a> {
     pub fuel: i32,
     /// Monotonic counter for fresh binding names (`v0`, `v1`, …).
     pub fresh: u32,
+    /// Set once an effect function is called: `main` must be an `effect fn`.
+    pub effect: bool,
 }
 
 /// The maximum nesting fuel a single top-level expression starts with.
@@ -121,7 +123,24 @@ fn render_call(b: &mut Builder, sig: &Signature, subst: &HashMap<String, GenType
     let mut args = Vec::with_capacity(sig.params.len());
     for (i, p) in sig.params.iter().enumerate() {
         let name = sig.param_names.get(i).map(String::as_str).unwrap_or("");
-        args.push(gen_arg(b, p, name, subst)?);
+        match sandbox_arg(b, sig, p) {
+            Some(a) => args.push(a),
+            None => args.push(gen_arg(b, p, name, subst)?),
+        }
+    }
+    if sig.effect {
+        // Bound to an annotated `let`: an effect call's Result is then a
+        // value (an un-annotated bind is E041), and its error path is
+        // observed instead of propagated.
+        b.effect = true;
+        let ty = sig.effective_ret().instantiate(subst)?;
+        let call = format!("{}.{}({})", sig.module, sig.func, args.join(", "));
+        // A `Unit` effect (`env.set`, `io.print`) is a statement; its value is `()`.
+        if ty == GenType::Unit {
+            b.stmts.push(call);
+            return Some("()".to_string());
+        }
+        return Some(b.hoist(&ty, call));
     }
     let Some(m) = sig.mut_param else {
         return Some(format!("{}.{}({})", sig.module, sig.func, args.join(", ")));
@@ -136,6 +155,28 @@ fn render_call(b: &mut Builder, sig: &Signature, subst: &HashMap<String, GenType
     } else {
         Some(call)
     }
+}
+
+/// A String argument of a sandboxed effect function names something the
+/// sandbox holds (`oracle/sandbox.rs`), or misses it: a path in the seeded
+/// tree, an env var of the fixed env, an argv flag. `None`: generate as usual.
+fn sandbox_arg(b: &mut Builder, sig: &Signature, param: &SigType) -> Option<String> {
+    const PATHS: &[&str] = &[
+        "data.txt", "empty.txt", "bin.dat", "sub/nested.txt", "sub", "sub/deeper", "empty_dir",
+        "missing.txt", "out.txt", "sub/new.txt", "made/inner", "*.txt", "sub/*",
+    ];
+    const ENV_NAMES: &[&str] = &["XF_GREETING", "XF_EMPTY", "XF_UNSET"];
+    const ARG_NAMES: &[&str] = &["flag", "opt", "alpha", "beta", "missing"];
+    if !sig.effect || *param != SigType::String {
+        return None;
+    }
+    let pool = match sig.module {
+        "fs" => PATHS,
+        "env" => ENV_NAMES,
+        "args" => ARG_NAMES,
+        _ => return None,
+    };
+    Some(render_string_literal(b.rng.pick(pool)))
 }
 
 /// Produce an expression of `goal` type, valid in bare expression

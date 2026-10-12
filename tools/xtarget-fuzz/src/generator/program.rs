@@ -108,6 +108,7 @@ pub fn synthesize_focused(rng: &mut SplitMix64, catalogue: &[Signature], focus: 
         stmts: Vec::new(),
         fuel: 0,
         fresh: 0,
+        effect: false,
     };
 
     // The observables: (binding name, type) we will println at the end.
@@ -115,12 +116,23 @@ pub fn synthesize_focused(rng: &mut SplitMix64, catalogue: &[Signature], focus: 
 
     if let Some(idx) = focus {
         builder.fuel = START_FUEL;
-        if let Some((call, ty)) = gen_focus_call(&mut builder, idx) {
-            let name = format!("r{}", builder.fresh);
-            builder.fresh += 1;
-            builder.stmts.push(format!("let {name}: {} = {call}", ty.render()));
-            builder.scope.push(ScopeVar { name: name.clone(), ty: ty.clone() });
-            observables.push((name, ty));
+        match gen_focus_call(&mut builder, idx) {
+            // A `Unit` call (`env.set`, `io.print`) runs as a statement: a
+            // Unit has no string form to print (E089).
+            // (an effect call already ran as one and left `()`).
+            Some((call, GenType::Unit)) => {
+                if call != "()" {
+                    builder.stmts.push(call)
+                }
+            }
+            Some((call, ty)) => {
+                let name = format!("r{}", builder.fresh);
+                builder.fresh += 1;
+                builder.stmts.push(format!("let {name}: {} = {call}", ty.render()));
+                builder.scope.push(ScopeVar { name: name.clone(), ty: ty.clone() });
+                observables.push((name, ty));
+            }
+            None => {}
         }
     }
 
@@ -154,14 +166,14 @@ pub fn synthesize_focused(rng: &mut SplitMix64, catalogue: &[Signature], focus: 
         body.push(render_print(name, ty));
     }
 
-    let source = render_main(&body);
+    let source = render_main(&body, builder.effect);
 
     Generated::plain(source, Origin::Synthesis)
 }
 
 /// Wrap a list of statement lines into a complete `fn main` program.
-fn render_main(body: &[String]) -> String {
-    let mut main = String::from("fn main() -> Unit = {\n");
+fn render_main(body: &[String], effect: bool) -> String {
+    let mut main = String::from(if effect { "effect fn main() -> Unit = {\n" } else { "fn main() -> Unit = {\n" });
     for line in body {
         main.push_str("  ");
         main.push_str(line);
