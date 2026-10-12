@@ -9037,15 +9037,40 @@ effect fn __request_response_impl(method: String, url: String, body: String, hea
   ok([string.take(f, c1), string.drop(rest, hlen)] + __http_cells(string.take(rest, hlen), []))
 }
 
-effect fn __get_response_impl(url: String) -> Result[List[String], String] = __request_response_impl("GET", url, "", map.new())
+effect fn __get_response_impl(url: String) -> Result[List[String], String] = __request_response_impl(
+  "GET",
+  url,
+  "",
+  map.new(),
+)
 
-effect fn __post_response_impl(url: String, body: String) -> Result[List[String], String] = __request_response_impl("POST", url, body, map.new())
+effect fn __post_response_impl(url: String, body: String) -> Result[List[String], String] = __request_response_impl(
+  "POST",
+  url,
+  body,
+  map.new(),
+)
 
-effect fn __put_response_impl(url: String, body: String) -> Result[List[String], String] = __request_response_impl("PUT", url, body, map.new())
+effect fn __put_response_impl(url: String, body: String) -> Result[List[String], String] = __request_response_impl(
+  "PUT",
+  url,
+  body,
+  map.new(),
+)
 
-effect fn __patch_response_impl(url: String, body: String) -> Result[List[String], String] = __request_response_impl("PATCH", url, body, map.new())
+effect fn __patch_response_impl(url: String, body: String) -> Result[List[String], String] = __request_response_impl(
+  "PATCH",
+  url,
+  body,
+  map.new(),
+)
 
-effect fn __delete_response_impl(url: String) -> Result[List[String], String] = __request_response_impl("DELETE", url, "", map.new())
+effect fn __delete_response_impl(url: String) -> Result[List[String], String] = __request_response_impl(
+  "DELETE",
+  url,
+  "",
+  map.new(),
+)
 "#;
 pub const SRC_HTTP_REQUEST: &str = r#"
 
