@@ -30934,10 +30934,12 @@ fn from_list[A](xs: List[A]) -> Set[A] = _
 
 /// Copy with value appended; unchanged if present.
 @intrinsic("almide_rt_set_insert")
+@reuse(s)
 fn insert[A](s: Set[A], value: A) -> Set[A] = _
 
 /// Copy without value; unchanged if absent.
 @intrinsic("almide_rt_set_remove")
+@reuse(s)
 fn remove[A](s: Set[A], value: A) -> Set[A] = _
 
 /// true when value is a member.
