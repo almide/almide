@@ -1,0 +1,66 @@
+// net tcp loopback inside one program (#3620): listen on 127.0.0.1 port 0,
+// read the OS-assigned port with `net.tcp_local_port`, connect, accept,
+// write, read, close. `connect` completes against the listen backlog before
+// `accept` runs, so one sequential program stages both ends on every leg.
+// Every line is a value native, the embedded lane (`almide run --target
+// wasm`) and the stock WASI 0.3 component (`wasmtime run -S inherit-network`)
+// print byte for byte: the port itself differs per run, so it is printed only
+// as predicates. Handles are plain Ints from two tables (streams, listeners),
+// each numbered from 0, a new handle taking the lowest free slot, so the
+// numbers below are part of the transcript. Payloads stay far below 8 KiB:
+// a large write before the peer reads can stall a single-threaded program.
+import net
+
+fn show_bytes(r: Result[Bytes, String]) -> String = match r {
+  ok(b) => "ok ${bytes.len(b)} [${bytes.to_string(b) ?? "<not utf-8>"}]",
+  err(e) => "err ${e}",
+}
+
+fn show_unit(r: Result[Unit, String]) -> String = match r {
+  ok(_) => "ok",
+  err(e) => "err ${e}",
+}
+
+effect fn main() -> Unit = {
+  let l0 = net.tcp_listen("127.0.0.1", 0)!
+  println("listener l0=${l0}")
+  let port = net.tcp_local_port(l0)!
+  println("l0 port in 1..=65535: ${port >= 1 and port <= 65535}")
+  let c0 = net.tcp_connect("127.0.0.1", port)!
+  let s1 = net.tcp_accept(l0)!
+  println("client c0=${c0} accepted s1=${s1}")
+  println("open: c0=${net.tcp_is_open(c0)} s1=${net.tcp_is_open(s1)}")
+  net.tcp_write(c0, bytes.from_string("hello"))!
+  println("s1 read_exact 5: ${show_bytes(net.tcp_read_exact(s1, 5))}")
+  net.tcp_write(s1, bytes.from_string("world!"))!
+  println("c0 read_exact 6: ${show_bytes(net.tcp_read_exact(c0, 6))}")
+  println("c0 read 0: ${show_bytes(net.tcp_read(c0, 0))}")
+  // EOF reads as empty bytes, every time; a peer close is not seen by is_open.
+  println("close c0: ${show_unit(net.tcp_close(c0))}")
+  println("s1 read after peer close: ${show_bytes(net.tcp_read(s1, 16))}")
+  println("s1 read again: ${show_bytes(net.tcp_read(s1, 16))}")
+  println("open after peer close: s1=${net.tcp_is_open(s1)}")
+  println("open after own close: c0=${net.tcp_is_open(c0)}")
+  println("close c0 twice: ${show_unit(net.tcp_close(c0))}")
+  // Stream slot 0 is free again: the next stream takes it, the one after takes 2.
+  let c2 = net.tcp_connect("127.0.0.1", port)!
+  let s3 = net.tcp_accept(l0)!
+  println("reused: client=${c2} accepted=${s3}")
+  net.tcp_write(s3, bytes.from_string("again"))!
+  println("client read_exact 5: ${show_bytes(net.tcp_read_exact(c2, 5))}")
+  // Listener numbering: a second listener is 1; after closing 0 the next is 0.
+  let l1 = net.tcp_listen("127.0.0.1", 0)!
+  let port1 = net.tcp_local_port(l1)!
+  println("listener l1=${l1} distinct port: ${port1 != port and port1 >= 1}")
+  println("close l0: ${show_unit(net.tcp_close_listener(l0))}")
+  println("close l0 twice: ${show_unit(net.tcp_close_listener(l0))}")
+  let l2 = net.tcp_listen("127.0.0.1", 0)!
+  println("listener after close: ${l2}")
+  println("open(-1)=${net.tcp_is_open(-1)} open(99)=${net.tcp_is_open(99)}")
+  println("close s1: ${show_unit(net.tcp_close(s1))}")
+  println("close c2: ${show_unit(net.tcp_close(c2))}")
+  println("close s3: ${show_unit(net.tcp_close(s3))}")
+  println("close l1: ${show_unit(net.tcp_close_listener(l1))}")
+  println("close l2: ${show_unit(net.tcp_close_listener(l2))}")
+  println("done")
+}
