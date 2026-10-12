@@ -776,6 +776,7 @@
 "net.tcp_connect" = "<=0.20.0"
 "net.tcp_is_open" = "<=0.20.0"
 "net.tcp_listen" = "<=0.20.0"
+"net.tcp_local_port" = "unreleased"
 "net.tcp_read" = "<=0.20.0"
 "net.tcp_read_exact" = "<=0.20.0"
 "net.tcp_read_timeout" = "<=0.20.0"

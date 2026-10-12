@@ -163,14 +163,14 @@ effect fn share() -> Unit = {
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (25 functions)
+## Signature index (26 functions)
 
 ```
 // Connected stream handle; err if refused.
 // @since 0.20.0 or earlier
 effect net.tcp_connect(host: String, port: Int) -> Int
 
-// Up to len bytes; empty once the peer closed.
+// Up to len bytes; empty once the peer closed; err if len < 0.
 // @since 0.20.0 or earlier
 effect net.tcp_read(stream: Int, len: Int) -> Bytes
 
@@ -178,7 +178,7 @@ effect net.tcp_read(stream: Int, len: Int) -> Bytes
 // @since 0.20.0 or earlier
 effect net.tcp_write(stream: Int, data: Bytes) -> Unit
 
-// Exactly len bytes; err on early EOF.
+// Exactly len bytes; err on early EOF, naming how many arrived.
 // @since 0.20.0 or earlier
 effect net.tcp_read_exact(stream: Int, len: Int) -> Bytes
 
@@ -190,7 +190,7 @@ effect net.tcp_close(stream: Int) -> Unit
 // @since 0.20.0 or earlier
 net.tcp_is_open(stream: Int) -> Bool
 
-// Up to len bytes; err on timeout or 0 ms.
+// Up to len bytes within timeout_ms (> 0); the stream's own timeout holds again after.
 // @since 0.20.0 or earlier
 effect net.tcp_read_timeout(stream: Int, len: Int, timeout_ms: Int) -> Bytes
 
@@ -205,6 +205,10 @@ effect net.tcp_available(stream: Int) -> Int
 // Listener bound to host:port; err if in use.
 // @since 0.20.0 or earlier
 effect net.tcp_listen(host: String, port: Int) -> Int
+
+// The port a listener is bound to: the one the OS chose when it listened on port 0.
+// @since unreleased
+effect net.tcp_local_port(listener: Int) -> Int
 
 // Blocks for the next client; its stream handle.
 // @since 0.20.0 or earlier
