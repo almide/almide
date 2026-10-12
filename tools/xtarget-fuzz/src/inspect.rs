@@ -414,7 +414,12 @@ fn alloc(ctx: &Ctx, t: &Target, n: u64) -> String {
 }
 
 /// One alloc probe's verdict from its `almide run` output: `live=0` passes.
+/// The counters are printed at exit whatever the exit, so a run that failed
+/// reports its exit: blocks an abort left behind are not a leak (#3636).
 fn alloc_part(label: &str, out: &std::process::Output) -> (bool, String) {
+    if !out.status.success() {
+        return (false, format!("{label} exit {:?} ({})", out.status.code(), first_error(&out.stderr)));
+    }
     let err = String::from_utf8_lossy(&out.stderr);
     let live = err.lines().find_map(|l| l.split_whitespace().find_map(|w| w.strip_prefix("live=")).map(String::from));
     match live.as_deref() {
