@@ -614,12 +614,13 @@ impl Emitter<'_> {
         if self.is_variant_ctor(name, e) {
             return true;
         }
-        // The http call handle's host-op leaves (#2633, http_call.rs) build
-        // every answer fresh at rc 1 — the HttpCall block and its carrier
-        // included. Classed borrowed (they have no table entry), the +1 kept
-        // the carrier alive forever, so the handle it holds never reached its
-        // drop glue and dropping the last copy never cancelled the call.
-        if name.starts_with("__http_call_") {
+        // A bodyless host-op leaf (http_call.rs `lower_host_leaf`) builds
+        // every answer fresh at rc 1, and its intercept marks the call.
+        // Classed borrowed (a leaf has no table entry), the +1 kept the
+        // carrier alive forever: an http call handle never reached its drop
+        // glue (#2633), and every framed-http / subprocess Result leaked
+        // with its payload (#3623).
+        if self.owned_call_marks.is_target_marked(target) {
             return true;
         }
         self.cur_module
