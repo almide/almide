@@ -268,6 +268,12 @@ mod availability_tests {
     }
 
     #[test]
+    fn private_helpers_are_left_out_of_the_catalogue() {
+        let private: Vec<String> = build().iter().filter(|s| s.func.starts_with("__")).map(|s| format!("{}.{}", s.module, s.func)).collect();
+        assert!(private.is_empty(), "private helpers in the catalogue: {private:?}");
+    }
+
+    #[test]
     fn a_program_calling_an_import_only_module_gets_its_import() {
         let src = "fn main() -> Unit = {\n  let a = base64.encode(bytes.new(2))\n  let b = regex.is_match(\"a\", \"a\")\n}\n";
         assert_eq!(imports_for(src), "import base64\nimport regex\n");
@@ -319,6 +325,13 @@ fn signature_from_decl(module: &'static str, decl: &Decl) -> Option<Signature> {
     }
 
     let func = sym_str(*name).to_string();
+
+    // A `__`-prefixed fn is a module's private helper (the stdlib inspection
+    // ledger's rule, tests/stdlib_inspection_test.rs): not public surface, so
+    // a program calling it is a finding about the generator.
+    if func.starts_with("__") {
+        return None;
+    }
 
     // Skip non-deterministic functions (the `effect` flag misses these).
     // Sourced from the shared `NamedDenylist` so the synthesis and
