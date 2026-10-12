@@ -4194,53 +4194,19 @@ fn error_chain(outer: String, cause: String) -> String = {
 
 
 
-fn __ectx_err(ch: Int, clen: Int, msg_h: Int) -> Result[Int, String] = {
-  let mlen = prim.load32(msg_h + 4)
-  let total = clen + 2 + mlen
-  let out = prim.alloc_str(total)
-  let d0 = prim.handle(out) + 12
-  let _1 = __echain_copy(d0, ch + 12, clen, 0)
-  let d1 = d0 + clen
-  prim.store8(d1, 58)
-  prim.store8(d1 + 1, 32)
-  let d2 = d1 + 2
-  let _3 = __echain_copy(d2, msg_h + 12, mlen, 0)
-  err(out)
-}
-
-fn error_context(r: Result[Int, String], ctx: String) -> Result[Int, String] = {
-  let h = prim.handle(r)
-  let len = prim.load32(h + 4)
-  let v = prim.load64(h + 12)
-  let ch = prim.handle(ctx)
-  let clen = prim.load32(ch + 4)
-  if len == 0 then ok(v)
-  else __ectx_err(ch, clen, v)
+fn error_context(r: Result[Int, String], ctx: String) -> Result[Int, String] = match r {
+  ok(v) => ok(v),
+  err(e) => err(ctx + ": " + e),
 }
 "#;
 pub const SRC_ERROR_MESSAGE: &str = r#"
 
 
 
-fn __emsg_copy(blen: Int, src: Int, dst: Int, i: Int) -> Int = if i >= blen then 0
-else {
-  prim.store8(dst + i, prim.load8(src + i))
-  __emsg_copy(blen, src, dst, i + 1)
-}
 
-fn __emsg_err(msg_h: Int) -> String = {
-  let blen = prim.load32(msg_h + 4)
-  let out = prim.alloc_str(blen)
-  let dh = prim.handle(out) + 12
-  let _c = __emsg_copy(blen, msg_h + 12, dh, 0)
-  out
-}
-
-fn error_message(r: Result[Int, String]) -> String = {
-  let h = prim.handle(r)
-  let len = prim.load32(h + 4)
-  let msg_h = prim.load64(h + 12)
-  if len == 0 then "" else __emsg_err(msg_h)
+fn error_message(r: Result[Int, String]) -> String = match r {
+  ok(_) => "",
+  err(e) => e,
 }
 "#;
 pub const SRC_FAN_ANY: &str = r#"
