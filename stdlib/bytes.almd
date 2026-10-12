@@ -422,6 +422,7 @@ fn reverse(b: Bytes) -> Bytes = _
 
 /// Copy with byte i set to val; as-is if out of range.
 @intrinsic("almide_rt_bytes_set")
+@reuse(b)
 fn set(b: Bytes, i: Int, val: Int) -> Bytes = _
 
 /// Writes f32 BE at pos; no-op out of range.

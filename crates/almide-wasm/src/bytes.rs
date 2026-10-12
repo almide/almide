@@ -95,8 +95,12 @@ impl Emitter<'_> {
     }
 
     fn lower_bytes_set_arm(&mut self, b: &IrExpr, idx: &IrExpr, v: &IrExpr) -> ArmResult {
-        self.lower_arg(b, Some(BYTES), ArgMode::Borrow)?;
-        self.f.instructions().call(F_BLOCK_COPY);
+        // `@reuse(b)` (#3577): a dying source is written in place; a live one
+        // is copied first, as before.
+        if self.owned_reuse_source(b, &[idx, v], Some(BYTES))?.is_none() {
+            self.lower_arg(b, Some(BYTES), ArgMode::Borrow)?;
+            self.f.instructions().call(F_BLOCK_COPY);
+        }
         let bh = self.hold_i32()?;
         self.f.instructions().local_set(bh);
         self.lower_arg(idx, Some(INT), ArgMode::Borrow)?;

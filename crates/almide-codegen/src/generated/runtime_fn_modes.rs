@@ -164,6 +164,7 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_bytes_set_i64_be" => &[true, false, false],
         "almide_rt_bytes_set_i64_le" => &[true, false, false],
         "almide_rt_bytes_set_int32" => &[true, false, false, false],
+        "almide_rt_bytes_set_owned" => &[false, false, false],
         "almide_rt_bytes_set_u16_be" => &[true, false, false],
         "almide_rt_bytes_set_u16_le" => &[true, false, false],
         "almide_rt_bytes_set_u32_be" => &[true, false, false],
