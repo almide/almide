@@ -36,8 +36,11 @@ pub fn almide_rt_bytes_is_empty(b: &Vec<u8>) -> bool { b.is_empty() }
 #[inline(always)] pub fn almide_rt_bytes_get_or(b: &Vec<u8>, i: i64, default: i64) -> i64 { b.get(i as usize).map(|&x| x as i64).unwrap_or(default) }
 pub fn almide_rt_bytes_set(b: &Vec<u8>, i: i64, val: i64) -> Vec<u8> { let mut b = b.clone(); if (i as usize) < b.len() { b[i as usize] = val as u8; } b }
 // The point write (#3577): `b = bytes.set(b, i, v)` copied the whole buffer
-// every step; the twin writes into the source it owns.
-pub fn almide_rt_bytes_set_owned(mut b: Vec<u8>, i: i64, val: i64) -> Vec<u8> { if (i as usize) < b.len() { b[i as usize] = val as u8; } b }
+// every step; the twin writes into the source it owns. A Bytes value is an
+// `AlmideRcCow` in generated code, so the source arrives as whatever becomes
+// the raw buffer: the wrapper hands its buffer over (moved when it is the
+// only holder, copied when shared), a raw `Vec<u8>` is itself.
+pub fn almide_rt_bytes_set_owned(b: impl Into<Vec<u8>>, i: i64, val: i64) -> Vec<u8> { let mut b = b.into(); if (i as usize) < b.len() { b[i as usize] = val as u8; } b }
 pub fn almide_rt_bytes_slice(b: &Vec<u8>, start: i64, end: i64) -> Vec<u8> {
     let s = (start as usize).min(b.len());
     let e = (end as usize).min(b.len());

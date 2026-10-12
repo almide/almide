@@ -994,20 +994,7 @@ fn try_render_mutating_runtime_call(ctx: &RenderContext, symbol: &almide_base::i
 fn render_runtime_call_args_owned(ctx: &RenderContext, symbol: &almide_base::intern::Sym, args: &[IrExpr]) -> String {
     args
         .iter()
-        .enumerate()
-        .map(|(i, a)| match (&a.kind, &a.ty) {
-            // An `@reuse` owned twin takes its source as the RAW value (#3577):
-            // a dying Bytes / Matrix binding is an `AlmideRcCow`, so it hands
-            // over its buffer — moved when it is the only holder, copied only
-            // when shared. Only the source: a later argument stays wrapped (a
-            // `List[Bytes]` element is an `AlmideRcCow`).
-            (IrExprKind::Var { .. }, Ty::Bytes | Ty::Matrix)
-                if i == 0 && crate::owned_source::is_owned_twin(symbol.as_str()) =>
-            {
-                rc_cow_unglue(render_expr(ctx, a), &a.ty)
-            }
-            _ => render_runtime_call_arg_owned(ctx, symbol, a),
-        })
+        .map(|a| render_runtime_call_arg_owned(ctx, symbol, a))
         .collect::<Vec<_>>()
         .join(", ")
 }
