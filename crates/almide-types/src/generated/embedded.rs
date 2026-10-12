@@ -36924,7 +36924,10 @@ fn __vmerge_fill_a(a: Value, b: Value, dst: Value, i: Int, na: Int, nb: Int) -> 
     let dh = prim.handle(dst)
     let key = prim.load64(ah + 12 + (2 * i) * 8)
     let ak: String = prim.load_handle(ah + 12 + (2 * i) * 8)
-    let bidx = if __vobj_find(a, ak, 0, i) < 0 then __vobj_find_last(b, ak, nb)
+
+    let last_b = __vobj_find_last(b, ak, nb)
+    let bidx = if last_b < 0 then last_b
+    else if __vobj_find(a, ak, 0, i) < 0 then last_b
     else 0 - 1
     let val = if bidx < 0 then prim.load64(ah + 12 + (2 * i + 1) * 8) else prim.load64(prim.handle(b) + 12 + (2 * bidx + 1) * 8)
     prim.rc_inc(key)
