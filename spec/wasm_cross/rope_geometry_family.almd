@@ -14,6 +14,8 @@
 // geometry.
 fn row_str(m: Matrix, r: Int, cols: Int) -> String = list.range(0, cols) |> list.map((c) => float.to_string(matrix.get(m, r, c))) |> list.join(",")
 
+fn dims(m: Matrix) -> String = int.to_string(matrix.rows(m)) + "x" + int.to_string(matrix.cols(m))
+
 fn main() -> Unit = {
   // Exact geometry, ODD head_dim (2 heads x dim 3 = 6 columns): each head's
   // last column is a non-pair element that must copy through on both legs.
@@ -44,7 +46,7 @@ fn main() -> Unit = {
   // through, on every spelling.
   let e4 = matrix.zeros(0, 4)
   let huge = 9223372036854775807
-  println("empty_huge=${matrix.shape(matrix.rope_rotate(e4, 1, huge, 10000.0))}")
-  println("empty_huge_at=${matrix.shape(matrix.rope_rotate_at(e4, 1, huge, 10000.0, 3))}")
-  println("empty_huge_neox=${matrix.shape(matrix.rope_rotate_neox_at(e4, 1, huge, 10000.0, 0))}")
+  println("empty_huge=" + dims(matrix.rope_rotate(e4, 1, huge, 10000.0)))
+  println("empty_huge_at=" + dims(matrix.rope_rotate_at(e4, 1, huge, 10000.0, 3)))
+  println("empty_huge_neox=" + dims(matrix.rope_rotate_neox_at(e4, 1, huge, 10000.0, 0)))
 }
