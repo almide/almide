@@ -1165,11 +1165,6 @@ class = "legacy"
 names = 9
 
 [[site]]
-id = "src/cli/wasm_compile.rs::check_wasm_availability::table"
-class = "legacy"
-names = 10
-
-[[site]]
 id = "src/wasm_leg.rs::link_self_host::scan_expr::or-chain"
 class = "legacy"
 names = 2
