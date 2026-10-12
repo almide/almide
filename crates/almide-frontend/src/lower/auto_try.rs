@@ -589,14 +589,17 @@ fn insert_try_construct(kind: IrExprKind, ty: &Ty, ctx: &mut TryCtx) -> Result<I
                     .collect(),
             }
         }
+        // The payload keeps a Result when the constructor's own type says it
+        // is one (`some(int.parse(s))` : Option[Result[Int, String]]), as a
+        // list element does above; anything else takes the `?`.
         IrExprKind::OptionSome { expr: inner } => IrExprKind::OptionSome {
-            expr: Box::new(insert_try(*inner, false, ctx)),
+            expr: Box::new(insert_try(*inner, ctor_payload_is_result(ty, TypeConstructorId::Option, 0), ctx)),
         },
         IrExprKind::ResultOk { expr: inner } => IrExprKind::ResultOk {
-            expr: Box::new(insert_try(*inner, false, ctx)),
+            expr: Box::new(insert_try(*inner, ctor_payload_is_result(ty, TypeConstructorId::Result, 0), ctx)),
         },
         IrExprKind::ResultErr { expr: inner } => IrExprKind::ResultErr {
-            expr: Box::new(insert_try(*inner, false, ctx)),
+            expr: Box::new(insert_try(*inner, ctor_payload_is_result(ty, TypeConstructorId::Result, 1), ctx)),
         },
         IrExprKind::Member { object, field } => IrExprKind::Member {
             object: Box::new(insert_try(*object, false, ctx)),
@@ -670,3 +673,8 @@ fn insert_try_iterate(kind: IrExprKind, ty: &Ty, ctx: &mut TryCtx) -> Result<IrE
 }
 
 include!("auto_try_wrap.rs");
+
+/// Is type argument `at` of `ty` (an `Option[..]` / `Result[..]`) itself a Result?
+fn ctor_payload_is_result(ty: &Ty, ctor: TypeConstructorId, at: usize) -> bool {
+    matches!(ty, Ty::Applied(c, args) if *c == ctor && args.get(at).is_some_and(|a| a.is_result()))
+}
