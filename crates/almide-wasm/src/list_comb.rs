@@ -684,35 +684,44 @@ impl Emitter<'_> {
         self.lower_arg(sep, Some(elem), ArgMode::Borrow)?;
         let hx = self.hold_val(elem)?;
         self.f.instructions().local_set(hx);
+        // The result's length is known: 2·len − 1 slots (none for an empty
+        // list). Allocate it once and store each slot into place. Pushing slot
+        // by slot regrew by doubling — 11 allocations for 1000 Ints, and a
+        // bytes-moved count that depended on how much of the regrowth the
+        // allocator could extend in place.
         let hc = self.hold_i32()?;
         let hacc = self.hold_i32()?;
-        let push = match elem.slot_size() {
-            8 => F_LIST_PUSH_8,
-            _ => F_LIST_PUSH_4,
-        };
+        let hn = self.hold_i32()?;
+        let ho = self.hold_i32()?;
         {
             let mut i = self.f.instructions();
-            i.i32_const(0).call(F_ALLOC).local_set(hacc);
-            i.i32_const(0).local_set(hc);
-            i.block(BlockType::Empty).loop_(BlockType::Empty);
-            i.local_get(hc).local_get(hb).i32_load(len_memarg()).i32_ge_u().br_if(1);
-            i.local_get(hc).if_(BlockType::Empty);
-            i.local_get(hacc).local_get(hx);
-            if elem.val_type() == ValType::F64 {
-                i.i64_reinterpret_f64();
-            }
-            i.call(push).local_set(hacc);
+            i.local_get(hb).i32_load(len_memarg()).local_tee(hn);
+            i.i32_eqz().if_(BlockType::Result(ValType::I32));
+            i.i32_const(0);
+            i.else_();
+            i.local_get(hn).i32_const(2).i32_mul().i32_const(stride).i32_sub();
             i.end();
-            i.local_get(hacc);
+            i.call(F_ALLOC).local_set(hacc);
+            i.i32_const(0).local_set(hc);
+            i.i32_const(0).local_set(ho);
+            i.block(BlockType::Empty).loop_(BlockType::Empty);
+            i.local_get(hc).local_get(hn).i32_ge_u().br_if(1);
+            i.local_get(hc).if_(BlockType::Empty);
+            i.local_get(hacc).local_get(ho).i32_add().local_get(hx);
+        }
+        self.store_ty_slot(elem, 0);
+        {
+            let mut i = self.f.instructions();
+            i.local_get(ho).i32_const(stride).i32_add().local_set(ho);
+            i.end();
+            i.local_get(hacc).local_get(ho).i32_add();
             i.local_get(hb).local_get(hc).i32_add();
         }
         self.load_ty_slot(elem, 0);
+        self.store_ty_slot(elem, 0);
         {
             let mut i = self.f.instructions();
-            if elem.val_type() == ValType::F64 {
-                i.i64_reinterpret_f64();
-            }
-            i.call(push).local_set(hacc);
+            i.local_get(ho).i32_const(stride).i32_add().local_set(ho);
             i.local_get(hc).i32_const(stride).i32_add().local_set(hc);
             i.br(0).end().end();
         }
@@ -720,6 +729,8 @@ impl Emitter<'_> {
         // separator — holds its own credit.
         self.emit_inc_elems(hacc, elem);
         self.f.instructions().local_get(hacc);
+        self.release_i32();
+        self.release_i32();
         self.release_i32();
         self.release_i32();
         self.release_val(elem);
