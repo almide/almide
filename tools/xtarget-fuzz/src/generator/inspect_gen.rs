@@ -570,6 +570,29 @@ pub(crate) mod tests {
         assert!(main.contains("let a0: Matrix = matrix.zeros(64, 2)") && main.contains("let a1: Matrix = matrix.zeros(2, 6)"), "{main}");
     }
 
+    /// #3666: the decoders' sized String was `string.repeat("aé", n)`, which
+    /// none of them accepts, so every shape timed the early-error exit (flat,
+    /// ×1.0 per doubling). Each gets valid input of size n — encoded bytes,
+    /// 2n hex digits, a JSON array of n fixed-width ints — in the plain call
+    /// and the diamond alike.
+    #[test]
+    fn decoders_are_sized_with_input_they_accept() {
+        for (name, want) in [
+            ("base64.decode", "base64.encode(bytes.from_list(list.range(0, 1000) |> list.map((i) => i % 256)))"),
+            ("base64.decode_url", "base64.encode_url(bytes.from_list(list.range(0, 1000) |> list.map((i) => i % 256)))"),
+            ("hex.decode", "hex.encode(bytes.from_list(list.range(0, 1000) |> list.map((i) => i % 256)))"),
+            ("json.parse", "\"[\" + (list.range(0, 1000) |> list.map((i) => int.to_string(100000000 + i)) |> list.join(\",\")) + \"]\""),
+        ] {
+            let t = target(name);
+            let direct = t.direct_program(1000, 4, true);
+            assert!(direct.contains(&format!("  let x: String = {want}\n")), "{name}: {direct}");
+            assert!(!direct.contains("string.repeat"), "{name}: {direct}");
+            let project = t.diamond_project(1000);
+            let main = &project.files.iter().find(|(p, _)| p.ends_with("main.almd")).unwrap().1;
+            assert!(main.contains(&format!("  let a0: String = {want}\n")), "{name}: {main}");
+        }
+    }
+
     /// A recipe that drifted from its function's signature is an error, not
     /// a silent fall-back to the shapes that function refuses.
     #[test]
