@@ -140,6 +140,10 @@ with open(os.path.join(root, "crates", "almide-types", "src", "stdlib_info.rs"),
     _stdlib_info = f.read()
 with open(os.path.join(root, "crates", "almide-types", "src", "self_host_registry.rs"), encoding="utf-8") as f:
     _registry = f.read()
+# The `@implements` rows (#3620) are generated in the registry's own row
+# syntax, so they count exactly as a hand-written row does.
+with open(os.path.join(root, "crates", "almide-types", "src", "generated", "implements.rs"), encoding="utf-8") as f:
+    _registry += f.read()
 holes = enumerate_holes(os.path.join(root, "stdlib"), module_map(_stdlib_info, _registry))
 
 # 2. emitter lowerings: every `fn lower_*` name in the wasm crate.

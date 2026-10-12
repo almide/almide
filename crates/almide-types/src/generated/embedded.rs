@@ -8975,17 +8975,20 @@ effect fn __http_framed_status(url: String, frame: String) -> Result[String, Str
 
 effect fn __http_framed_bytes(url: String, frame: String) -> Result[Bytes, String] = _
 
+@implements("http.request")
 effect fn __request_impl(method: String, url: String, body: String, headers: Map[String, String]) -> Result[String, String] = __http_framed_text(
   url,
   __http_frame(method, body, headers),
 )
 
+@implements("http.request_status")
 effect fn __request_status_impl(method: String, url: String, body: String, headers: Map[String, String]) -> Result[(Int, String), String] = {
   let f = __http_framed_status(url, __http_frame(method, body, headers))!
   let cut = string.index_of(f, "\n") ?? 0
   ok((int.parse(string.take(f, cut)) ?? 0, string.drop(f, cut + 1)))
 }
 
+@implements("http.get_status")
 effect fn __get_status_impl(url: String) -> Result[(Int, String), String] = __request_status_impl(
   "GET",
   url,
@@ -8993,11 +8996,13 @@ effect fn __get_status_impl(url: String) -> Result[(Int, String), String] = __re
   map.new(),
 )
 
+@implements("http.request_bytes")
 effect fn __request_bytes_impl(method: String, url: String, body: String, headers: Map[String, String]) -> Result[Bytes, String] = __http_framed_bytes(
   url,
   __http_frame(method, body, headers),
 )
 
+@implements("http.get_bytes")
 effect fn __get_bytes_impl(url: String) -> Result[Bytes, String] = __request_bytes_impl(
   "GET",
   url,

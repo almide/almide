@@ -259,24 +259,6 @@ pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
     "zlib_gzip",
 ];
 
-/// The vendored-libm family (C-305): every body is a FAITHFUL
-/// transcription of libm 0.2.16 with constants via prim.ffrombits —
-/// pure scalar prims throughout; math_trig's coefficient tables go
-/// through prim-MEDIATED alloc_list_f64 with 8-byte Float slot stores
-/// (the one list class both layouts share). One vendored libm on every
-/// target is the bit-parity mechanism itself.
-/// The framed http client family (#1710 increment 3, audited 2026-09-02):
-/// stdlib/http_framed.almd — PURE language surface end to end (string
-/// interpolation, list.map/fold, map.entries, string.take/drop,
-/// int.parse, ok()/tuple ctors); the only leaves are the op-48/49/50
-/// host calls the emitter lowers itself (host_env arms). Result returns
-/// and the Map[String, String] headers param trip the coupled proxy;
-/// the bodies never touch a raw layout.
-pub(crate) const HTTP_CLIENT_SUM: &[&str] = &[
-    "__request_impl", "__request_status_impl", "__get_status_impl",
-    "__request_bytes_impl", "__get_bytes_impl",
-];
-
 /// The http call handle (#2633, audited 2026-09-26): stdlib/http_call.almd
 /// — language surface only (string interpolation and slicing, list.map/fold,
 /// map.entries, int.parse, `??`, ok()/err()/some()/none ctors, a callback
@@ -314,6 +296,12 @@ pub(crate) const PROCESS_SUM: &[&str] = &[
     "__process_kill_impl", "__process_is_alive_impl", "__process_pid_impl",
 ];
 
+/// The vendored-libm family (C-305): every body is a FAITHFUL
+/// transcription of libm 0.2.16 with constants via prim.ffrombits —
+/// pure scalar prims throughout; math_trig's coefficient tables go
+/// through prim-MEDIATED alloc_list_f64 with 8-byte Float slot stores
+/// (the one list class both layouts share). One vendored libm on every
+/// target is the bit-parity mechanism itself.
 pub(crate) const MATH_VERIFIED: &[&str] = &[
     "math_abs", "math_atan", "math_choose", "math_cos", "math_e", "math_exp",
     "math_factorial", "math_fmax", "math_fmin", "math_fpow", "math_log", "math_log10",
@@ -374,7 +362,6 @@ const TIERS: &[(&[&str], bool)] = &[
     (CODEC_ENCODE_VERIFIED, true),
     (BYTES_FAMILY_VERIFIED, false),
     (BYTES_FAMILY_SUM, true),
-    (HTTP_CLIENT_SUM, true),
     (HTTP_CALL_SUM, true),
     (HTTP_SERVE_SUM, true),
     (PROCESS_SUM, true),
@@ -383,8 +370,14 @@ const TIERS: &[(&[&str], bool)] = &[
 
 /// The admission of a registry impl through the tiers above: `None` when
 /// no tier lists it, else `Some(exempt)` — exempt when ANY listing tier is.
+/// A body declared with `@implements` whose file never reaches `prim.` is
+/// admitted, exempt, without a tier (#3620): it builds every value through
+/// surface this emitter lowers on its own layout, which is what each tier's
+/// audit establishes by hand. The tiers are legacy lists that only shrink.
 pub(crate) fn tier_of(impl_fn: &str) -> Option<bool> {
     let mut hits = TIERS.iter().filter(|(members, _)| members.contains(&impl_fn)).peekable();
-    hits.peek()?;
+    if hits.peek().is_none() {
+        return almide_types::implements::prim_free(impl_fn).then_some(true);
+    }
     Some(hits.any(|(_, exempt)| *exempt))
 }
