@@ -19,6 +19,22 @@ impl Emitter<'_> {
     /// source was lowered (a module call's ownership mark is set only by its
     /// own lowering, so a pre-lowering `rc_owned_result` misses it).
     fn owned_edit_source(&mut self, xs: &IrExpr, operands: &[&IrExpr]) -> Result<Option<ETy>, EmitError> {
+        match self.owned_reuse_source(xs, operands, None)? {
+            None => Ok(None),
+            Some(SliceTy::List(h)) => Ok(Some(h)),
+            Some(got) => unsup(&format!("list-edit-of:{got:?}")),
+        }
+    }
+
+    /// [`Self::owned_edit_source`] for any block type `expect` (a list, or the
+    /// flat Bytes block, #3577): the source on the stack at one credit this op
+    /// holds alone, or `None` when it is a live var the caller copies.
+    pub(crate) fn owned_reuse_source(
+        &mut self,
+        xs: &IrExpr,
+        operands: &[&IrExpr],
+        expect: Option<SliceTy>,
+    ) -> Result<Option<SliceTy>, EmitError> {
         if self.metered {
             return Ok(None);
         }
@@ -27,17 +43,14 @@ impl Emitter<'_> {
             return Ok(None);
         }
         self.owned_call_marks.set_moving(xs, dying.is_some());
-        let got = self.lower_arg(xs, None, ArgMode::Retain)?;
+        let got = self.lower_arg(xs, expect, ArgMode::Retain)?;
         self.owned_call_marks.set_moving(xs, false);
-        let SliceTy::List(h) = got else {
-            return unsup(&format!("list-edit-of:{got:?}"));
-        };
         if let Some((id, idx, _)) = dying {
             self.empty_dying(id, idx);
         }
         let cow = self.cow_fn_of(got);
         self.f.instructions().call(cow);
-        Ok(Some(h))
+        Ok(Some(got))
     }
 
     /// The edited block on the stack, owned by this op: the dying source
