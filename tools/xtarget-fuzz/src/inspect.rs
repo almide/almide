@@ -408,7 +408,10 @@ fn run_failure(out: &std::process::Output) -> String {
 
 fn failure_reason(stderr: &[u8]) -> String {
     let text = String::from_utf8_lossy(stderr);
-    match text.lines().find_map(|l| l.split_once(ERR_PATH).map(|(_, rest)| rest.trim_start_matches(':').trim())) {
+    // The wasm allocator's exit report (`__ALMD_WASM_ALLOC ...`) can follow
+    // the panic message on the same line.
+    let reason = |rest: &str| rest.split("__ALMD_").next().unwrap_or("").trim_start_matches(':').trim().to_string();
+    match text.lines().find_map(|l| l.split_once(ERR_PATH).map(|(_, rest)| reason(rest))) {
         Some(why) => format!("took the error path (the probed call returned err: {})", why.chars().take(160).collect::<String>()),
         None => first_error(stderr),
     }
