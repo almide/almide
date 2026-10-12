@@ -12,11 +12,11 @@ pub const PRIM_FREE: &[&str] = &[
     "__get_status_impl",
     "__request_bytes_impl",
     "__get_bytes_impl",
-    "process_stdin_lines",
     "__request_response_impl",
     "__get_response_impl",
     "__post_response_impl",
     "__put_response_impl",
     "__patch_response_impl",
     "__delete_response_impl",
+    "process_stdin_lines",
 ];
