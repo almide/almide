@@ -104,6 +104,11 @@ const SHAPE_RECIPES: &[Recipe] = &[
     },
 ];
 
+/// The panic a probe program stops with when the probed call returned `err`:
+/// it took the error path, and a run that did is a failed run, never a
+/// measurement (#3666). `src/inspect.rs` reads it off the run's stderr.
+pub const ERR_PATH: &str = "inspect: the probed call returned err";
+
 /// Functions that stop at the first `true` from their predicate: given a
 /// predicate that is always `false`, so they visit every element.
 const STOPS_ON_TRUE: &[&str] = &["any", "find", "find_index", "position", "find_map", "index_where"];
@@ -609,6 +614,41 @@ pub(crate) mod tests {
             let main = &project.files.iter().find(|(p, _)| p.ends_with("main.almd")).unwrap().1;
             assert!(main.contains(&format!("  let a0: String = {want}\n")), "{name}: {main}");
         }
+    }
+
+    /// #3666: a call that returns `err` took the error path, and its cost is
+    /// not the function's. Every program of a Result-returning function stops
+    /// with [`ERR_PATH`] on an `err` — the plain call on every result, each
+    /// rebind shape on its final value, the diamond on all three paths — so a
+    /// run that measured the error path fails instead of being timed. The
+    /// check comes from the return type, not from a list of names.
+    #[test]
+    fn a_result_returning_call_stops_on_err_in_every_program() {
+        let stop = format!("err(e) => panic(\"{ERR_PATH}: ${{e}}\")");
+        let guard = |v: &str| (format!("match {v} {{"), stop.clone());
+        let has = |src: &str, v: &str| {
+            let (head, arm) = guard(v);
+            src.lines().map(str::trim).collect::<Vec<_>>().windows(3).any(|w| w[0] == head && w[1] == "ok(_) => ()," && w[2] == format!("{arm},"))
+        };
+        let t = target("base64.decode");
+        let direct = t.direct_program(1000, 4, true);
+        assert!(has(&direct, "r"), "{direct}");
+        // The baseline (no call) has no result to check.
+        assert!(!t.direct_program(1000, 4, false).contains(ERR_PATH));
+        let project = t.diamond_project(64);
+        let main = &project.files.iter().find(|(p, _)| p.ends_with("main.almd")).unwrap().1;
+        for v in ["d", "l", "r"] {
+            assert!(has(main, v), "{v}: {main}");
+        }
+        // A rebind shape checks the value it ends with.
+        let t = target("result.map");
+        for (shape, src) in t.rebind_programs(1000, 4) {
+            assert!(has(&src, "x"), "{shape}: {src}");
+        }
+        // A function whose return is not a Result has nothing to check.
+        let t = target("list.map");
+        assert!(!t.direct_program(1000, 4, true).contains(ERR_PATH));
+        assert!(t.rebind_programs(1000, 4).iter().all(|(_, s)| !s.contains(ERR_PATH)));
     }
 
     /// A recipe that drifted from its function's signature is an error, not
