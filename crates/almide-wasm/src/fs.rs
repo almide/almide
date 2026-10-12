@@ -316,6 +316,9 @@ impl Emitter<'_> {
         {
             let mut i = self.f.instructions();
             i.local_get(herr).if_(BlockType::Result(ValType::I32));
+            // The Ok list was allocated before the status was known: on the
+            // err path it is empty and nothing holds it.
+            i.local_get(hlist).call(F_DEC_FLAT);
             i.local_get(herr);
             i.else_();
             i.i32_const(16).call(F_ALLOC).local_tee(hs).i32_const(0).i32_store(slot_memarg(almide_layout::SUM_TAG));
