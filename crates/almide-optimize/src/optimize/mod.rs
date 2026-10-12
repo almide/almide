@@ -10,6 +10,7 @@ mod branch_lift;
 mod dce;
 mod optional_chain;
 mod propagate;
+mod sink_inline;
 
 use almide_ir::*;
 
@@ -40,8 +41,8 @@ pub fn optimize_program(program: &mut IrProgram) {
     // is a hard error, not a silent full pipeline.
     let only = almide_base::env::var("ALMIDE_ONLY_PASS");
     if let Some(name) = only.as_deref() {
-        if !matches!(name, "fold" | "dce" | "propagate") {
-            panic!("ALMIDE_ONLY_PASS={name} names no pass (fold | dce | propagate)");
+        if !matches!(name, "fold" | "dce" | "propagate" | "sink") {
+            panic!("ALMIDE_ONLY_PASS={name} names no pass (fold | dce | propagate | sink)");
         }
     }
     let run = |pass: &str| -> bool {
@@ -53,6 +54,12 @@ pub fn optimize_program(program: &mut IrProgram) {
             None => true,
         }
     };
+
+    if run("sink") {
+        // Pass 0: inline a list sink into a call whose argument is a list
+        // chain (#3584 / #3590), so each leg's fusion sees one chain.
+        sink_inline::inline_list_sinks(program);
+    }
 
     if run("fold") {
         // Pass 1: constant folding (bottom-up rewrite)

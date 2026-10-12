@@ -253,13 +253,14 @@ Which leg runs what:
 ### A. Shared, pre-split — `almide-driver::link_ir` (`crates/almide-optimize`)
 
 The ONE stage order every leg and the interp oracle consume (`tests/one_driver_test.rs`
-fails on a second spelling). `optimize_half` = rows 1–7; `link_half` = rows 8–9.
-`ALMIDE_DISABLE_OPT=1` skips the three perf rows (the ablation leg of the perf
-ratchet); `ALMIDE_ONLY_PASS=fold|dce|propagate` runs exactly one of them
+fails on a second spelling). `optimize_half` = rows 0–7; `link_half` = rows 8–9.
+`ALMIDE_DISABLE_OPT=1` skips the four perf rows (the ablation leg of the perf
+ratchet); `ALMIDE_ONLY_PASS=sink|fold|dce|propagate` runs exactly one of them
 (`scripts/check-pass-isolated.sh` over `spec/pass_isolated/`, run by the CI `checks` job).
 
 | # | Pass | Module | Kind | Does |
 |---|---|---|---|---|
+| 0 | `sink` | `optimize/sink_inline.rs` | opt (perf) | a root fn whose whole body is one `list.*` call with its only parameter as the first argument (read once, nothing else free) is inlined into a call whose argument is a `list.*` call, bound vars renamed fresh — so each leg's own fusion sees one chain (#3584, #3590); a leg that declines evaluates it exactly as the call |
 | 1 | `fold` | `optimize/mod.rs` (`constant_fold`) | opt (perf) | evaluate literal arithmetic bottom-up, wrapping; substitutes earlier immutable scalar top-lets (#809) |
 | 2 | `dce` | `optimize/dce.rs` | opt (perf) | drop unused bindings whose value is pure; runs again after propagation |
 | 3 | `propagate` | `optimize/propagate.rs` | opt (perf) | replace vars bound to literals with the literal |
@@ -300,7 +301,7 @@ The Wgsl arm is the four rows marked W. Class:
 | 11 | `MatrixShapeSpec` | `pass_matrix_shape_spec.rs` | Rust | Rust by design | small-shape matmul → fully unrolled `InlineRust` | n/a (hand-written kernels, `matrix_kernels.rs`) |
 | 12 | `ConstFold` | `pass_const_fold.rs` | all | optimizer | fold literal arithmetic left by rows 10–11 | superseded by A.1 (`fold`) — see E |
 | 13 | `IntrinsicLowering` | `pass_intrinsic_lowering.rs` | all | enabler | `@intrinsic` stdlib calls → `RuntimeCall { symbol }` | self-host registry link (`src/wasm_leg.rs`); intrinsics are walls |
-| 13b | `StreamFusion` | `pass_stream_fusion.rs`, `pass_stream_fusion_sink.rs` | Rust | optimizer | `RuntimeCall { almide_rt_list_* }` with a lambda literal → `IterChain`, BEFORE `BorrowInsertion` — a chain lambda is a scope the borrow / capture-clone / clone passes never see as a closure, so it borrows what it reads and renders without `move`; the source starts consumed and `BorrowInsertion` decides its mode from what the steps do with each element, not from the twin's `@consume` slot (#2287: `element_reads_only` — a `Copy` element or a heap element every receiving lambda only reads leaves the source `&[T]`, bound `&T` off `.iter()` by the clone pass); a `\|>` chain flattens into one iterator expression only when every callback is pure and the interleaving is unobservable (#2045), and continues into a user fn whose whole body is one chain over its only parameter under the same rule (#3584); `ALMIDE_STREAM_FUSION_OFF` ablates | **no equivalent** — the spec order is stage-by-stage; see E |
+| 13b | `StreamFusion` | `pass_stream_fusion.rs` | Rust | optimizer | `RuntimeCall { almide_rt_list_* }` with a lambda literal → `IterChain`, BEFORE `BorrowInsertion` — a chain lambda is a scope the borrow / capture-clone / clone passes never see as a closure, so it borrows what it reads and renders without `move`; the source starts consumed and `BorrowInsertion` decides its mode from what the steps do with each element, not from the twin's `@consume` slot (#2287: `element_reads_only` — a `Copy` element or a heap element every receiving lambda only reads leaves the source `&[T]`, bound `&T` off `.iter()` by the clone pass); a `\|>` chain flattens into one iterator expression only when every callback is pure and the interleaving is unobservable (#2045); `ALMIDE_STREAM_FUSION_OFF` ablates | **no equivalent** — the spec order is stage-by-stage; see E |
 | 14 | `BorrowInsertion` | `pass_borrow_inference.rs`, `pass_borrow_inference_call_sites.rs`, `pass_borrow_inference_ownership.rs`, `pass_borrow_inference_scoped_closures.rs`, `pass_borrow_inference_seq_hoist.rs` (wrapper in `pass.rs`) | Rust | Rust by design | Roc-style borrow-by-default signatures, `Borrow` nodes at call sites; an iteration's source follows what its body does with the element (#2287); a fn-typed param is `&dyn Fn` unless its callable escapes, and a lambda literal at such a slot is a scope spelled `&(lambda)` (#2288); an operand read before a nested `mut`-arg call (an interpolation part, a nested call's argument) is hoisted, left to right (#3230) | RC-3 borrow/fresh classifier (`rc_ownership.rs`) |
 | 14b | `OwnedSourceHoist` | `pass_owned_source_hoist.rs` | Rust | optimizer | a range op whose later arguments read its source only as a scalar (`list.slice(xs, 1, list.len(xs))`) binds them first, so TailCallOpt / CloneInsertion can move a dead source into the `_owned` twin (#3519) | n/a |
 | 15 | `TailCallOpt` | `pass_tco.rs`, `pass_tco_loop_rewrite.rs`, `pass_tco_owned_reads.rs` | all | optimizer | self-recursive tail calls → loop | equivalent: `tco.rs` (`loop_convert` over the encoded body; `return_call` otherwise) |

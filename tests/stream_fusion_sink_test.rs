@@ -3,9 +3,10 @@
 //! imperative twin.
 //!
 //! - #3584: a chain ending in a call to a user fn whose whole body is one
-//!   chain over its only parameter (`fsum`, `total`) collected a `Vec` and
-//!   passed it, where the same fold written inline fused. The sink's chain
-//!   now continues the argument's, under the same merge rule.
+//!   list call over its only parameter (`fsum`, `total`) collected a `Vec`
+//!   and passed it, where the same fold written inline fused. The optimizer
+//!   now inlines such a sink into a chain argument (`sink_inline.rs`), and
+//!   `StreamFusion` fuses the result under its usual merge rule.
 //! - #3585: an `enumerate`-sourced chain rendered its list param owned, so
 //!   every caller cloned the list. A `Copy` element needs no ownership
 //!   whatever the adapters between it and a lambda.
@@ -111,7 +112,7 @@ fn a_fn_that_reads_its_param_twice_is_not_a_sink() {
 
 /// A sink whose stage can abort, after an argument stage that can abort too:
 /// fusing would decide which abort fires first per element instead of per
-/// stage, so `merge` refuses and the call stays.
+/// stage, so `merge` refuses: the sink is inlined, the stages stay staged.
 const TWO_ABORTS: &str = r#"
 fn inv_sum(xs: List[Int]) -> Int = xs |> list.fold(0, (a, x) => a + 100 / x)
 
@@ -121,10 +122,10 @@ fn main() -> Unit = println("${g([1, 2, 3])}")
 "#;
 
 #[test]
-fn a_sink_the_merge_rule_refuses_stays_a_call() {
+fn a_sink_the_merge_rule_refuses_stays_staged() {
     let rust = emit(TWO_ABORTS);
     let body = emitted_fn(&rust, "g");
-    assert!(body.contains("inv_sum(") && body.contains("collect"), "{body}");
+    assert!(body.contains("collect"), "two aborting stages were fused:\n{body}");
     assert_eq!(run(TWO_ABORTS).trim(), "9");
 }
 
