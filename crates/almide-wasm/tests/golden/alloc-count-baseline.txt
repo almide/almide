@@ -120,7 +120,7 @@
 3	2	21	3	spec/wasm_cross/const_fold_nonfinite_float.almd
 9	2	49	9	spec/wasm_cross/container_alias_return.almd
 1	0	32	1	spec/wasm_cross/control_flow.almd
-29	14	239	17	spec/wasm_cross/count_domain_nonbytes.almd
+29	15	239	19	spec/wasm_cross/count_domain_nonbytes.almd
 12	7	54	12	spec/wasm_cross/cross_dep_accumulator.almd
 22	3	1252	22	spec/wasm_cross/cross_module_spread.almd
 28	12	316	28	spec/wasm_cross/ctor_fn_value.almd
