@@ -868,3 +868,48 @@ Builds compared: 0.62.0, 0.66.0 (release 819bbc74f) and develop 974c00ea0.
 2. #3627 → the queued 204-function inspection on 8 GCE VMs starts automatically; stamp the passes.
 3. ADR-0023 step 4: the six `*_response`, `request_stream` and the call handle in the p3 shim.
 4. TCP once the owner rules on the embedded route; then unix sockets / fd passing / shm (Almide's own host interface).
+
+## 2026-10-13: inspection root causes, ADR-0023 step 4, TCP steps 0–2
+
+### Merged
+- #3626 (`@implements`), #3627 (effect catalogue, linear replacement of #3618), #3628 (log).
+- **#3629: `process.stdin_lines` on every wasm leg** through `@implements`, with `io.read_n_bytes`'s staging block released.
+- **#3631: `io.read_byte` leaked its one-byte staging block per call on wasm.** The effect catalogue (#3627) puts `io.read_byte` into every generated program, so this one leak failed the parity criterion for about a hundred unrelated functions in batch 4c.
+- **#3632: auto-try inserted `Try` under `some`/`ok`/`err` against the wrong payload type**, which gave native E0308 on generated programs. `error.message`'s campaign went to 0 findings.
+- almide/als#133 (C-328's p3 full-response clause).
+
+### Inspection (counted judge)
+- **Batch 4c** (develop f4dfcbf3f, 204 functions): 20 pass, 133 fail, about 51 not run because 2 of 8 VMs failed to create. The regional `CPUS_PER_VM_FAMILY` (c4) quota in us-central1 is 24, so at most 6 × c4-standard-4.
+- **Root causes of the failures:** the three leaks and the auto-try bug above, each confirmed by replaying a recorded seed (hex.encode, path.dirname, error.message, regex.find_all) to 0 findings after the fix.
+- **Rerun:** the 184 functions that did not pass, on 6 VMs at develop 7ba9f, launched 02:27 once #3629/#3631/#3632 merged. The stamp count is unchanged until it reports: 573 inspected, 458 uninspected.
+
+### Open
+- **#3633: ADR-0023 step 4 for the six `*_response` functions on the stock WASI 0.3 component** (replaces #3630, rebased linearly).
+  - CI found that wasmtime 49 (CI's pin) withholds the nine client-managed fields from a response's fields; 47 passed them through.
+  - Every lane now leaves them out of the header set, from the one `HTTP_FORBIDDEN_HEADERS` table. The test failed on native first and passes against 49.0.1 and 47.0.2.
+  - The C-328 amendment is almide/als#135.
+- **almide/als#134: three TCP contracts (loopback, handles and `tcp_local_port`; classified error texts; guest-enforced timeouts and `tcp_available`).** Fixtures are in `spec/embedded_cross/`: the stock harness runs wasmtime without network permission, so a wasm_cross fixture would be a permanent false divergence.
+
+### Local, waiting for the als pin
+- **`net-tcp-core` (TCP step 1):** native tcp moves into `almide-rt-core/src/net_core.rs` with one classified error table.
+  - New errs for a negative length or a non-positive read timeout; the earlier timeout restored after `read_timeout`; `net.tcp_local_port`.
+  - Before, on the develop binary: `tcp_read(c, -1)` panicked (`capacity overflow`); errors read `Resource temporarily unavailable (os error 35)`, `Connection refused (os error 61)`, `failed to fill whole buffer`, `invalid port value`.
+  - The three als fixtures run natively to `done` and match the contract text.
+- **`net-tcp-embedded` (TCP step 2):** ops 91..=103 served on the embedded host from the same `net_core`, held per run.
+  - The three fixtures print identically on native and `almide run --target wasm`, 3 runs each; before, every tcp fn was E081 on wasm.
+  - codopsy 85ac6cdcda79: almide-wasm A 90 → A 90, almide-wasm-run A 94 → A 95, almide-rt-core A 97 → A 98.
+  - Not yet covered: `spec/stdlib/net_test.almd` still passes only through the native fallback, because `almide test`'s wasm leg builds to the stock p1 standard. That waits for step 4 (route net programs to the p3 component).
+
+### Lessons
+- **A local wasmtime older than CI's pin hides host changes.** Keep a copy of CI's wasmtime (49.0.1) for p3 tests.
+- **A rebase that takes one side of a generated ledger must regenerate it.** impl-count is now part of the local pre-push checks.
+- **A green check that only compares stdout and exit code passes two legs that fail the same way.** The embedded cross test requires each program to reach its closing `done` line.
+
+### Blocked
+- Merging (`gh pr merge`, als and almide) is refused by the session's permission classifier as "merge without review". als#134, als#135 and #3633 wait for the owner's merge or a permission rule.
+
+### Next
+1. After als#134 and als#135 merge: advance the pin, copy C-328's amended statement and the three TCP contracts into the ledger, move the TCP fixtures into `spec/embedded_cross/`, open the TCP step 1+2 PR.
+2. Stamp the passes from the 184-function rerun, and triage what still fails (E041 rejections of generated programs, matrix shape errors, complexity and alloc).
+3. TCP step 3 (the p3 shim over `wasi:sockets@0.3`) and step 4 (route net programs to the component by default).
+4. unix / fd / shm through Almide's own host interface.
