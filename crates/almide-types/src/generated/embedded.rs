@@ -26249,6 +26249,124 @@ effect fn shm_write(fd: Int, offset: Int, data: Bytes) -> Result[Unit, String] =
 @intrinsic("almide_rt_net_shm_read")
 effect fn shm_read(fd: Int, offset: Int, len: Int) -> Result[Bytes, String] = _
 "#;
+pub const SRC_NET_WASM: &str = r#"
+
+
+
+
+
+
+
+
+
+
+effect fn __net_listen(host: String, port: String) -> Result[String, String] = _
+
+effect fn __net_accept(listener: String, unused: String) -> Result[String, String] = _
+
+effect fn __net_connect(host: String, port: String) -> Result[String, String] = _
+
+effect fn __net_read(stream: String, len: String) -> Result[Bytes, String] = _
+
+effect fn __net_read_exact(stream: String, len: String) -> Result[Bytes, String] = _
+
+
+effect fn __net_read_timeout(stream: String, len_ms: String) -> Result[Bytes, String] = _
+
+effect fn __net_write(stream: String, data: Bytes) -> Result[String, String] = _
+
+effect fn __net_available(stream: String, unused: String) -> Result[String, String] = _
+
+effect fn __net_set_timeout(stream: String, ms: String) -> Result[String, String] = _
+
+effect fn __net_close(stream: String, unused: String) -> Result[String, String] = _
+
+effect fn __net_close_listener(listener: String, unused: String) -> Result[String, String] = _
+
+effect fn __net_local_port(listener: String, unused: String) -> Result[String, String] = _
+
+
+
+fn __net_is_open(stream: String, unused: String) -> Result[String, String] = _
+
+@implements("net.tcp_listen")
+effect fn __net_tcp_listen_impl(host: String, port: Int) -> Result[Int, String] = {
+  let t = __net_listen(host, int.to_string(port))!
+  ok(int.parse(t) ?? -1)
+}
+
+@implements("net.tcp_accept")
+effect fn __net_tcp_accept_impl(listener: Int) -> Result[Int, String] = {
+  let t = __net_accept(int.to_string(listener), "")!
+  ok(int.parse(t) ?? -1)
+}
+
+@implements("net.tcp_connect")
+effect fn __net_tcp_connect_impl(host: String, port: Int) -> Result[Int, String] = {
+  let t = __net_connect(host, int.to_string(port))!
+  ok(int.parse(t) ?? -1)
+}
+
+@implements("net.tcp_local_port")
+effect fn __net_tcp_local_port_impl(listener: Int) -> Result[Int, String] = {
+  let t = __net_local_port(int.to_string(listener), "")!
+  ok(int.parse(t) ?? -1)
+}
+
+@implements("net.tcp_read")
+effect fn __net_tcp_read_impl(stream: Int, len: Int) -> Result[Bytes, String] = __net_read(
+  int.to_string(stream),
+  int.to_string(len),
+)
+
+@implements("net.tcp_read_exact")
+effect fn __net_tcp_read_exact_impl(stream: Int, len: Int) -> Result[Bytes, String] = __net_read_exact(
+  int.to_string(stream),
+  int.to_string(len),
+)
+
+@implements("net.tcp_read_timeout")
+effect fn __net_tcp_read_timeout_impl(stream: Int, len: Int, timeout_ms: Int) -> Result[Bytes, String] = __net_read_timeout(
+  int.to_string(stream),
+  "${len}\n${timeout_ms}",
+)
+
+@implements("net.tcp_write")
+effect fn __net_tcp_write_impl(stream: Int, data: Bytes) -> Result[Unit, String] = {
+  let _ = __net_write(int.to_string(stream), data)!
+  ok(())
+}
+
+@implements("net.tcp_available")
+effect fn __net_tcp_available_impl(stream: Int) -> Result[Int, String] = {
+  let t = __net_available(int.to_string(stream), "")!
+  ok(int.parse(t) ?? -1)
+}
+
+@implements("net.tcp_set_timeout")
+effect fn __net_tcp_set_timeout_impl(stream: Int, timeout_ms: Int) -> Result[Unit, String] = {
+  let _ = __net_set_timeout(int.to_string(stream), int.to_string(timeout_ms))!
+  ok(())
+}
+
+@implements("net.tcp_close")
+effect fn __net_tcp_close_impl(stream: Int) -> Result[Unit, String] = {
+  let _ = __net_close(int.to_string(stream), "")!
+  ok(())
+}
+
+@implements("net.tcp_close_listener")
+effect fn __net_tcp_close_listener_impl(listener: Int) -> Result[Unit, String] = {
+  let _ = __net_close_listener(int.to_string(listener), "")!
+  ok(())
+}
+
+@implements("net.tcp_is_open")
+fn __net_tcp_is_open_impl(stream: Int) -> Bool = match __net_is_open(int.to_string(stream), "") {
+  ok("1") => true,
+  _ => false,
+}
+"#;
 pub const SRC_OPTION: &str = r#"
 
 
@@ -38957,6 +39075,7 @@ pub fn source_of(stem: &str) -> Option<&'static str> {
         "mem" => Some(SRC_MEM),
         "mem_checkpoint" => Some(SRC_MEM_CHECKPOINT),
         "net" => Some(SRC_NET),
+        "net_wasm" => Some(SRC_NET_WASM),
         "option" => Some(SRC_OPTION),
         "option_collect" => Some(SRC_OPTION_COLLECT),
         "option_collect_map" => Some(SRC_OPTION_COLLECT_MAP),

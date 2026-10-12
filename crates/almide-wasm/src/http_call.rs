@@ -76,8 +76,14 @@ impl Emitter<'_> {
                 self.fs_call_1(r, OP_HTTP_SERVE_REPLY)?;
                 self.fs_result_unit()?
             }
-            // The http call handle's leaves (#2633).
-            _ => return self.lower_http_call_leaf(name, args),
+            // The http call handle's leaves (#2633), then the tcp family's
+            // (#3620).
+            _ => {
+                return match self.lower_http_call_leaf(name, args)? {
+                    Some(t) => Ok(Some(t)),
+                    None => self.lower_net_leaf(name, args),
+                };
+            }
         };
         Ok(Some(t))
     }
