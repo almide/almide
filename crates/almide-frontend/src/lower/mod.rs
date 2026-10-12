@@ -673,28 +673,12 @@ fn finalize_ir_program(program: &mut IrProgram, env: &TypeEnv, annotated_result_
     // `-> Result[..]` fn returning a Result-valued arm beside a plain-value arm,
     // a `-> T!` marker fn's lifted tail — where the wrap/ok-strip is the
     // declared return, not a propagation the writer left out.
-    // #558: callees whose FIRST parameter is Result/Option must NOT have that
-    // arg auto-?'d (it would unwrap the very value the callee consumes —
-    // `error.context(inner(), msg)`, `result.unwrap_or(r, d)`, …). Derive the
-    // set from the signature table instead of a hardcoded module-name list.
-    // #1970: PER PARAMETER, not first-only — `fn show(tag: String, r: Result[..])`
-    // consumes its SECOND argument as a Result, and the first-only skip unwrapped it.
-    let mut result_params: std::collections::HashMap<almide_base::intern::Sym, Vec<bool>> = env.functions.iter()
-        .filter_map(|(k, sig)| {
-            let flags: Vec<bool> = sig.params.iter()
-                .map(|(_, t)| t.is_result() || matches!(t, almide_lang::types::Ty::Applied(almide_lang::types::TypeConstructorId::Option, _)))
-                .collect();
-            if flags.iter().any(|f| *f) { Some((*k, flags)) } else { None }
-        })
-        .collect();
-    // An escaped user fn (#3483) is called under its IR name.
-    for f in &program.functions {
-        let src = almide_ir::user_fn_source_name(f.name.as_str());
-        if let Some(flags) = (src != f.name.as_str()).then(|| result_params.get(&sym(src)).cloned()).flatten() {
-            result_params.insert(f.name, flags);
-        }
-    }
-    auto_try::insert_auto_try(program, annotated_result_vars, &result_params);
+    // #558 / #1970 / #3646: a call argument is never auto-?'d. The checker
+    // constrains every argument against its parameter (a Result where `Int`
+    // is expected is E005, propagation is the explicit `!`), so an argument
+    // still Result-typed here is one its parameter accepts — declared
+    // Result/Option, or a type variable instantiated at Result.
+    auto_try::insert_auto_try(program, annotated_result_vars);
 
     // Collect stdlib modules used in root functions/top_lets.
     // ir_link extends this with modules from dependencies.
