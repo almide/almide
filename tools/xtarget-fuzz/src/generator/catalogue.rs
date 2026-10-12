@@ -87,29 +87,41 @@ impl Signature {
 /// value universe). The fixed-width numbers, `bytes` and `matrix` are in:
 /// the value grammar builds them (`GenType::Sized`, `Bytes`, `Matrix`).
 ///
-/// `(module_name, source_text)`.
-const BUNDLED_MODULES: &[(&str, &str)] = &[
-    ("string", include_str!("../../../../stdlib/string.almd")),
-    ("int", include_str!("../../../../stdlib/int.almd")),
-    ("float", include_str!("../../../../stdlib/float.almd")),
-    ("list", include_str!("../../../../stdlib/list.almd")),
-    ("map", include_str!("../../../../stdlib/map.almd")),
-    ("set", include_str!("../../../../stdlib/set.almd")),
-    ("option", include_str!("../../../../stdlib/option.almd")),
-    ("result", include_str!("../../../../stdlib/result.almd")),
-    ("math", include_str!("../../../../stdlib/math.almd")),
-    ("int8", include_str!("../../../../stdlib/int8.almd")),
-    ("int16", include_str!("../../../../stdlib/int16.almd")),
-    ("int32", include_str!("../../../../stdlib/int32.almd")),
-    ("int64", include_str!("../../../../stdlib/int64.almd")),
-    ("uint8", include_str!("../../../../stdlib/uint8.almd")),
-    ("uint16", include_str!("../../../../stdlib/uint16.almd")),
-    ("uint32", include_str!("../../../../stdlib/uint32.almd")),
-    ("uint64", include_str!("../../../../stdlib/uint64.almd")),
-    ("float32", include_str!("../../../../stdlib/float32.almd")),
-    ("float64", include_str!("../../../../stdlib/float64.almd")),
-    ("bytes", include_str!("../../../../stdlib/bytes.almd")),
-    ("matrix", include_str!("../../../../stdlib/matrix.almd")),
+/// `base64` / `hex` / `hash` / `zlib` / `path` / `url` / `regex` are pure but
+/// not auto-imported: a program that calls one starts with `import <module>`
+/// ([`imports_for`]). `error` is auto-imported.
+///
+/// `(module_name, source_text, needs_import)`.
+const BUNDLED_MODULES: &[(&str, &str, bool)] = &[
+    ("string", include_str!("../../../../stdlib/string.almd"), false),
+    ("int", include_str!("../../../../stdlib/int.almd"), false),
+    ("float", include_str!("../../../../stdlib/float.almd"), false),
+    ("list", include_str!("../../../../stdlib/list.almd"), false),
+    ("map", include_str!("../../../../stdlib/map.almd"), false),
+    ("set", include_str!("../../../../stdlib/set.almd"), false),
+    ("option", include_str!("../../../../stdlib/option.almd"), false),
+    ("result", include_str!("../../../../stdlib/result.almd"), false),
+    ("math", include_str!("../../../../stdlib/math.almd"), false),
+    ("int8", include_str!("../../../../stdlib/int8.almd"), false),
+    ("int16", include_str!("../../../../stdlib/int16.almd"), false),
+    ("int32", include_str!("../../../../stdlib/int32.almd"), false),
+    ("int64", include_str!("../../../../stdlib/int64.almd"), false),
+    ("uint8", include_str!("../../../../stdlib/uint8.almd"), false),
+    ("uint16", include_str!("../../../../stdlib/uint16.almd"), false),
+    ("uint32", include_str!("../../../../stdlib/uint32.almd"), false),
+    ("uint64", include_str!("../../../../stdlib/uint64.almd"), false),
+    ("float32", include_str!("../../../../stdlib/float32.almd"), false),
+    ("float64", include_str!("../../../../stdlib/float64.almd"), false),
+    ("bytes", include_str!("../../../../stdlib/bytes.almd"), false),
+    ("matrix", include_str!("../../../../stdlib/matrix.almd"), false),
+    ("error", include_str!("../../../../stdlib/error.almd"), false),
+    ("base64", include_str!("../../../../stdlib/base64.almd"), true),
+    ("hex", include_str!("../../../../stdlib/hex.almd"), true),
+    ("hash", include_str!("../../../../stdlib/hash.almd"), true),
+    ("zlib", include_str!("../../../../stdlib/zlib.almd"), true),
+    ("path", include_str!("../../../../stdlib/path.almd"), true),
+    ("url", include_str!("../../../../stdlib/url.almd"), true),
+    ("regex", include_str!("../../../../stdlib/regex.almd"), true),
 ];
 
 /// Default selection weight for a function not named in
@@ -183,7 +195,7 @@ const WEIGHT_OVERRIDES: &[(&str, &str, u32)] = &[
 pub fn build() -> Vec<Signature> {
     let unavailable = wasm_unavailable(TARGET_AVAILABILITY);
     let mut out = Vec::new();
-    for &(module, source) in BUNDLED_MODULES {
+    for &(module, source, _) in BUNDLED_MODULES {
         let program = match parse(source) {
             Some(p) => p,
             None => continue, // a malformed bundled file is a stdlib bug, not ours
@@ -194,6 +206,26 @@ pub fn build() -> Vec<Signature> {
                     out.push(sig);
                 }
             }
+        }
+    }
+    out
+}
+
+/// The `import` lines a generated program needs: one per catalogue module
+/// that is not auto-imported and that `src` calls (`<module>.` after a
+/// non-identifier character).
+pub fn imports_for(src: &str) -> String {
+    let mut out = String::new();
+    for &(module, _, needs_import) in BUNDLED_MODULES {
+        if !needs_import {
+            continue;
+        }
+        let call = format!("{module}.");
+        let used = src.match_indices(&call).any(|(i, _)| {
+            !src[..i].chars().next_back().is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '.')
+        });
+        if used {
+            out.push_str(&format!("import {module}\n"));
         }
     }
     out
@@ -233,6 +265,22 @@ mod availability_tests {
         let cat = build();
         assert!(!cat.iter().any(|s| unavailable.contains(&format!("{}.{}", s.module, s.func))));
         assert!(cat.iter().any(|s| s.module == "matrix" && s.func == "dot_row"), "a served matrix fn stays");
+    }
+
+    #[test]
+    fn a_program_calling_an_import_only_module_gets_its_import() {
+        let src = "fn main() -> Unit = {\n  let a = base64.encode(bytes.new(2))\n  let b = regex.is_match(\"a\", \"a\")\n}\n";
+        assert_eq!(imports_for(src), "import base64\nimport regex\n");
+        // auto-imported modules and look-alike identifiers need none
+        assert_eq!(imports_for("let x = error.chain(\"a\", \"b\")\nlet y = mypath.x"), "");
+        // A match inside a string literal still imports: an unused import is
+        // only a warning, while a call inside an interpolation
+        // (`"${base64.encode(b)}"`) that the scan skipped would be an E003.
+        assert_eq!(imports_for("let z = string.len(\"url.\")"), "import url\n");
+        let cat = build();
+        for m in ["base64", "hex", "hash", "zlib", "path", "url", "regex", "error"] {
+            assert!(cat.iter().any(|s| s.module == m), "{m} has a synthesizable function in the catalogue");
+        }
     }
 
     #[test]
