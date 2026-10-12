@@ -449,6 +449,19 @@ impl Emitter<'_> {
 }
 
 impl Emitter<'_> {
+    /// `lower`'s shared tail: the value of type `got` is what `want` asked
+    /// for, or a Unit effect's carrier where a Unit is wanted
+    /// ([`Self::unit_from_carrier`]); anything else is a wall.
+    pub(crate) fn settle_want(&mut self, e: &IrExpr, got: SliceTy, want: Option<SliceTy>) -> Result<SliceTy, EmitError> {
+        match want {
+            Some(w) if got != w && !(w == SliceTy::Unit && self.unit_from_carrier(e, got)) => {
+                unsup(&format!("ty-mismatch:{got:?}-vs-{w:?}"))
+            }
+            Some(w) => Ok(w),
+            None => Ok(got),
+        }
+    }
+
     /// A Unit effect intrinsic (`env.set`, `io.print`, `env.sleep_ms`) hands
     /// back the always-ok `Result[Unit, String]` carrier. Where a Unit is
     /// wanted (`let n: Unit = env.set(…)`) the carrier `ty` on the stack is
