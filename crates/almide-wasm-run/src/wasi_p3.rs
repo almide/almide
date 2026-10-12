@@ -174,7 +174,12 @@ const I_HTTP_OPT_NEW: u32 = 69; // [constructor]request-options
 const I_HTTP_OPT_CONNECT: u32 = 70; // [method]request-options.set-connect-timeout (retptr)
 const I_HTTP_OPT_FIRST: u32 = 71; // [method]request-options.set-first-byte-timeout (retptr)
 const I_HTTP_OPT_BETWEEN: u32 = 72; // [method]request-options.set-between-bytes-timeout (retptr)
-const IMPORTS_HTTP: u32 = 73;
+// The full-response family (op 65, ADR-0023 step 4): the response's header
+// fields, copied out before consume-body moves the response. The serve
+// export reads its request's fields through the same copy-all.
+const I_HTTP_RESP_HEADERS: u32 = 73; // [method]response.get-headers
+const I_HTTP_COPY_ALL: u32 = 74; // [method]fields.copy-all (retptr)
+const IMPORTS_HTTP: u32 = 75;
 
 // Park offsets past the shared ones: retptr / future-payload scratch.
 const RET: u64 = 32;
@@ -368,6 +373,7 @@ include!("wasi_p3_fs_service.rs");
 
 // The http shim (shim_http + its frame/body helpers): wasi_p3_http.rs.
 include!("wasi_p3_http.rs");
+include!("wasi_p3_http_resp.rs");
 
 // Its error classes, texts and helper functions (ADR-0023 step 2).
 include!("wasi_p3_http_err.rs");

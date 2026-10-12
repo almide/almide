@@ -15,7 +15,7 @@ pub fn serves(op: i32, p3: bool) -> bool {
     // both component shims — the guest then runs its chunks sequentially.
     let common = matches!(op, 30..=32 | 34..=35 | 60 | 73 | 74);
     let extra = p3
-        && (matches!(op, 26 | 29 | 36 | 37 | 40..=50)
+        && (matches!(op, 26 | 29 | 36 | 37 | 40..=50 | 65)
             || crate::wasi::FS_SERVICE_OPS.iter().any(|(o, _, _)| *o == op));
     common || extra
 }
@@ -104,7 +104,7 @@ fn operation_name(op: i32) -> &'static str {
             40..=42 => "filesystem fan prefetch",
             43 => "http.get", 44 => "http.post", 45 => "http.put",
             46 => "http.patch", 47 => "http.delete",
-            48..=50 => "http.request framed response",
+            48..=50 | 65 => "the framed http client (http.request, its status / bytes shapes, the *_response family)",
             51 => "fs.fold_lines", 52 => "fs.for_each_line",
             53..=59 => "the http call handle (http.start / poll / read_new / wait / cancel)",
             60 => "datetime.monotonic_ns",

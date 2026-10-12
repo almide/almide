@@ -16,7 +16,7 @@ pub fn to_p3_service(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> 
 }
 
 fn to_p3_shaped(bytes: &[u8], host_ops: &[i32], service: bool) -> anyhow::Result<Vec<u8>> {
-    let wants_http = host_ops.iter().any(|op| (43..=50).contains(op));
+    let wants_http = host_ops.iter().any(|op| (43..=50).contains(op) || *op == 65);
     let http_types = wants_http || service;
     // The vendored WIT first: the fs shim's layout facts derive from it,
     // so a WIT/shim drift refuses to emit instead of corrupting stores.
@@ -635,6 +635,8 @@ fn http_import_list(t: &P3Types) -> Vec<(u32, &'static str, &'static str, u32)> 
         (I_HTTP_OPT_CONNECT, http_types, "[method]request-options.set-connect-timeout", t.opt_set),
         (I_HTTP_OPT_FIRST, http_types, "[method]request-options.set-first-byte-timeout", t.opt_set),
         (I_HTTP_OPT_BETWEEN, http_types, "[method]request-options.set-between-bytes-timeout", t.opt_set),
+        (I_HTTP_RESP_HEADERS, http_types, "[method]response.get-headers", t.call),
+        (I_HTTP_COPY_ALL, http_types, "[method]fields.copy-all", t.ws_join),
     ];
     assert_eq!(IMPORTS + list.len() as u32, IMPORTS_HTTP, "IMPORTS_HTTP count drift");
     list
