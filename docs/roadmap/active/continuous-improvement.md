@@ -774,3 +774,61 @@ Builds compared: 0.62.0, 0.66.0 (release 819bbc74f) and develop 974c00ea0.
 2. Finish the PR2 inspection, stamp the 5 rows, and open the PR (Closes #3533, #3577).
 3. Read why the map writes are n per call.
 4. `flat_map` / `intersperse` single-copy lowering.
+
+## 2026-10-12 (afternoon): @reuse PR2 landed, set edits, harness catalogue
+
+### Merged
+- #3589 (#3588), #3593, #3594 (#3591), #3596 (wasm `intersperse` allocates once).
+- **#3598, PR2 of the @reuse ruling (Closes #3533, #3577):**
+  - The final twin is `almide_rt_bytes_set_owned(b: impl Into<Vec<u8>>, …)`, with a prelude `From<AlmideRcCow<Vec<u8>>> for Vec<u8>`.
+  - The call-site `into_inner` described above broke on a temporary source (rustc E0308). The inspection's parity campaign found it at cee1bfee5 (20 of 200 programs clean), and `tests/bytes_set_reuse_test.rs` now pins a temporary source.
+  - All 5 criteria PASS for `list.set` / `swap` / `update` / `drop_end` and `bytes.set` at e544abde7 (GCE c4-standard-4, us-east1-b, rustc 1.99.0, wasmtime 49.0.1). Stamped; uninspected 503 → 498.
+
+### Merged later the same day
+- **#3601 (replaces #3600): stamps 35 rows** (24 re-inspected at 595a37476, plus 11 set rows at 6ccadcdaf).
+  - #3600 conflicted on `uninspected_ceiling`, and a merge commit with develop is refused by ratchet-separation, so the two ledger-only commits were cherry-picked onto develop d50432b46 instead.
+  - Ceiling 463 = 503 − 5 − 35. `stdlib_inspection_test` passes with no row demoted.
+- **#3602: the generator catalogue gains `base64` / `hex` / `hash` / `zlib` / `path` / `url` / `regex` / `error`,** and each program imports what it calls. Before this, batch 4 was entirely "not in catalogue". xtarget-fuzz unit tests: 90/90. The 36 blocked functions ran on GCE (code d50432b46, harness 1d418b4dd, us-central1-a, 4 × c4-standard-4).
+- **#3603 (refs #3552): `set.insert` / `remove` are declared `@reuse(s)`,** with native owned twins.
+  - Measured on macOS arm64 with `almide build --release`, a 20,000-element set and k remove+insert rebinds, user time (3 runs each, ±0.01 s):
+    - k = 2,000: 0.23 s before, 0.07 s after;
+    - k = 8,000: 0.49 s before, 0.27 s after.
+  - "Before" is the installed 0.64.0 (5555cb251), not a clean A/B.
+  - Values are pinned on both legs (`tests/set_edit_reuse_test.rs`). The alloc ledger is unchanged, so wasm already edited in place.
+
+### Open (auto-merge on)
+- #3606, #3607, #3609, #3610 (below), and the rebuilt suffix PR.
+- **#3599 is rebuilt as `string-suffix-ops-b`.**
+  - Its code commits were cherry-picked onto develop: a merge commit with develop is refused by ratchet-separation.
+  - `take` / `take_end` / `ends_with` are stamped from the f30e9fa4e inspection; the sources are byte-identical.
+  - `drop` / `drop_end` are demoted: their series fit no class within 3% (tiny, flat series). Calibrating the judge is an owner question, and the criterion was not changed.
+  - uninspected stays at 463.
+
+### Batch 4b (36 functions, import-only modules + set.fold) at develop d50432b46, harness 1d418b4dd, GCE us-central1-a
+- **5 stamped (#3607):** `base64.encode`, `hash.fnv1a32`, `hash.fnv1a32_bytes`, `set.fold`, `url.build_query`. uninspected 463 → 458.
+- **6 complexity failures were my orders file:** it declared no rebind order (`-`) for String → String functions, and the judge fails an undeclared order. They will be re-run with orders derived from each function's own output: n for `basename` / `stem` / `normalize` / `join`, 1 for `dirname` / `sha256_hex`.
+- **25 parity failures.** Re-run with their seeds on GCE (`gce-parity.sh`, findings kept); every one reproduced. All 51 + 8 + 16 findings trace to these defects:
+  - **#3610:**
+    - wasm `error.message` returned a borrowed payload as owned. A temporary source printed freed memory, and a live Result lost its payload after one `println(error.message(r))`.
+    - wasm `error.context` leaked its `"{msg}: "` block. All 16 LeakAtExit findings: develop `live=1`, fix `live=0`.
+    - The interpreter ran the type-punned self-hosted error bodies (`ok(false)` → `ok(0)`, `message(ok("café"))` → `"café"`); they now `match`.
+  - **#3609:** native Bytes `if` / `match` argument to an Almide-compiled callee → rustc E0308 (8 functions, and any user fn with a Bytes param). The emitted Rust for all 1,734 spec files is byte-identical to develop's.
+  - **#3606:** the generator called private `url.__*` helpers. User code can call them too; that is a surface question, recorded, not changed.
+
+### Measurement correction
+- The PR2 native timings in the entry above were built without `--release`. A bare `almide build` compiles at opt-level 1.
+- #3603's numbers use `--release`. The PR2 numbers stand as opt-level-1 measurements; they were not re-run.
+
+### Still open from the inspection (unchanged)
+- `list.unique` / `unique_by` n²; `result.filter` native payload copy.
+- wasm bytes series for `option.collect` / `collect_map` / `flat_map`; wasm `map.*` loop series.
+- Allocator artifacts for `bytes.new` / `concat` / `insert`.
+- `set.map` / `union` time out (#3552); `set.remove` O(n) from the layout.
+- 54 functions outside the catalogue (Bytes `mut` mutators, Endian readers); `datetime` (module denied).
+
+### Next
+1. Land #3606 / #3609 / #3610 and the rebuilt suffix PR; close #3599 for the rebuild.
+2. Re-inspect the 31 unstamped batch-4b functions at a develop that contains them, the 6 String → String functions with their derived rebind orders.
+3. Re-inspect `list.intersperse` at a ref containing #3596.
+4. Read why the map writes are n per call; `set.map` / `union` timeouts; `set.remove` O(n) (#3552).
+5. The 54 functions still outside the catalogue (Bytes `mut` mutators, Endian readers) and `datetime`.
