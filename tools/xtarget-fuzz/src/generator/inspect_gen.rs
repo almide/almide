@@ -327,6 +327,7 @@ fn small(t: &GenType) -> String {
         GenType::Sized(name) => GenType::sized_literal(name, "2"),
         GenType::Bytes => "bytes.from_list([1, 2])".into(),
         GenType::Matrix => "matrix.from_lists([[1.5, 2.0], [0.5, 3.0]])".into(),
+        GenType::Endian => "BigEndian".into(),
         GenType::Set(e) => format!("set.from_list([{}])", small(e)),
     }
 }
@@ -402,6 +403,7 @@ fn digest(v: &str, t: &GenType) -> String {
         GenType::Sized(name) => format!("int.from_{}({v})", name.to_lowercase()),
         GenType::Bytes => format!("bytes.len({v})"),
         GenType::Matrix => format!("matrix.rows({v})"),
+        GenType::Endian => "1".into(),
         GenType::Set(_) => format!("set.len({v})"),
     }
 }

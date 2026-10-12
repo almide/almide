@@ -44,6 +44,8 @@ pub enum GenType {
     /// `Matrix` (Float elements), built with `matrix.from_lists` (or
     /// `matrix.zeros(n, 2)` when sized).
     Matrix,
+    /// `bytes.Endian`: `LittleEndian` or `BigEndian`. Only ever an argument.
+    Endian,
     /// `Set[elem]`, built with `set.from_list`; the element is a hashable
     /// scalar ([`GenType::is_set_elem`]).
     Set(Box<GenType>),
@@ -102,6 +104,7 @@ impl GenType {
             }
             GenType::Bytes => out.push_str("Bytes"),
             GenType::Matrix => out.push_str("Matrix"),
+            GenType::Endian => out.push_str("Endian"),
         }
     }
 
@@ -170,6 +173,8 @@ impl GenType {
             GenType::Map(v) => v.is_observable(),
             GenType::Sized(_) => true,
             GenType::Set(e) => e.is_observable(),
+            // Only ever an argument: never printed.
+            GenType::Endian => false,
             // A Bytes or Matrix value has no string form (E089).
             GenType::Bytes | GenType::Matrix => false,
         }
@@ -186,7 +191,8 @@ impl GenType {
             | GenType::Unit
             | GenType::Sized(_)
             | GenType::Bytes
-            | GenType::Matrix => 1,
+            | GenType::Matrix
+            | GenType::Endian => 1,
             GenType::List(e)
             | GenType::Option(e)
             | GenType::Result(e)

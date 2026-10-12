@@ -216,6 +216,7 @@ fn gen_leaf(b: &mut Builder, goal: &GenType) -> String {
         GenType::Unit => "()".to_string(),
         GenType::Sized(_) | GenType::Bytes => sized_or_bytes(b, goal),
         GenType::Matrix => matrix_literal(b),
+        GenType::Endian => b.rng.pick(&["LittleEndian", "BigEndian"]).to_string(),
         // Compound goals: construct (and hoist if ambiguous).
         GenType::List(_)
         | GenType::Option(_)
@@ -265,7 +266,8 @@ fn gen_construct(b: &mut Builder, goal: &GenType) -> String {
         | GenType::Unit
         | GenType::Sized(_)
         | GenType::Bytes
-        | GenType::Matrix => gen_leaf(b, goal),
+        | GenType::Matrix
+        | GenType::Endian => gen_leaf(b, goal),
         GenType::Set(elem) => {
             let n = *b.rng.pick(pools::SMALL_COUNT_POOL) as usize;
             if n == 0 {
@@ -546,6 +548,7 @@ fn gen_lambda_body(b: &mut Builder, goal: &GenType) -> String {
         }
         GenType::Sized(_) | GenType::Bytes => sized_or_bytes(b, goal),
         GenType::Matrix => matrix_literal(b),
+        GenType::Endian => b.rng.pick(&["LittleEndian", "BigEndian"]).to_string(),
         GenType::Set(e) => format!("set.from_list([{}])", gen_lambda_body(b, e)),
     }
 }
