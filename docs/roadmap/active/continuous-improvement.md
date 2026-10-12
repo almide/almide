@@ -832,3 +832,39 @@ Builds compared: 0.62.0, 0.66.0 (release 819bbc74f) and develop 974c00ea0.
 3. Re-inspect `list.intersperse` at a ref containing #3596.
 4. Read why the map writes are n per call; `set.map` / `union` timeouts; `set.remove` O(n) (#3552).
 5. The 54 functions still outside the catalogue (Bytes `mut` mutators, Endian readers) and `datetime`.
+
+## 2026-10-12 (evening): effect harness E1, wasm ports, the @implements registry
+
+### Merged
+- #3606, #3609, #3610, #3612, #3613 (the counted judge's n/16 floor), #3614 (Value in the generator grammar), #3616 (the effect-harness design), #3617 (every fuzzed program runs in a seeded sandbox).
+- **#3621: three cross-target effect defects** the first sandboxed (E1) campaign found, each with a test that failed first:
+  - wasm leaked an empty list per failed `fs.read_lines` / `list_dir` / `walk`;
+  - `fs.copy` of a directory gave native a text without errno while the stock leg gave EISDIR;
+  - `let n: Unit = env.set(…)` walled on wasm.
+- **#3624 (Closes #3623): every self-hosted body that calls a bodyless host leaf leaked 2–3 blocks per call on wasm.** This covered the framed http client, the subprocess family, serve and the call handle.
+  - Cause: the leaf's fresh Result counted as borrowed, and an inline temporary argument was parked in a scope nobody opened.
+  - The fix covers every such leaf at once. Eight probes went from `live=2/3` to `live=0`; `spec/` passes 4,430 tests.
+
+### Open (auto-merge on)
+- **#3626: `@implements("m.f")` registers a self-hosted body where it is written.**
+  - The name-keyed gate (2026-10-11) froze the self-host registry and the wasm admission tiers as shrink-only name lists, which blocked every new wasm port.
+  - A declared body whose file never reaches `prim.` is admitted on the wasm leg without a list entry.
+  - The `http_framed` row migrated as proof: registry 1831 → 1826, `HTTP_CLIENT_SUM` removed.
+- **#3622: `process.stdin_lines` on every wasm leg,** and `io.read_n_bytes`'s staging block released.
+  - CI found three things my push checks miss: the frozen lists, a MIR materialized-set test, and a stale `wasm-reachability-baseline.txt` row. It moves onto `@implements` once #3626 lands.
+- **#3627 replaces #3618** (the effect catalogue, Bytes mutators, Endian). The merge queue rebases, so a branch carrying merge commits is dropped with `merge_conflict`; #3627 is the same change as a linear series.
+
+### Withdrawn
+- **#3625 (closed) and almide/als#131 (reverted by als#132).** They served the http `*_response` family on the embedded host as a new host-served op 65.
+- ADR-0023 decided against exactly that (decision 1, and Alternatives). The family belongs in the p3 shim (step 4), and the embedded lane gets it by running the component (step 7).
+- The guest splice and the loopback test are reusable for step 4. The judge's C-328 is back to its pre-#131 text, and develop's als pin never moved.
+
+### Design
+- **TCP over `wasi:sockets@0.3`** (draft, not in the repo): stock builds of `net` programs become p3 components, and p1 cannot serve the family.
+- An owner decision is pending: interim embedded host ops (91..=102) versus waiting for ADR-0023 step 7. Four further questions follow it: the native errno text, `tcp_available` lookahead, fixture ports, IPv6-only.
+
+### Next
+1. #3626 → move #3622 onto `@implements` (plus the MIR `NOT_YET` row and the stale reachability row).
+2. #3627 → the queued 204-function inspection on 8 GCE VMs starts automatically; stamp the passes.
+3. ADR-0023 step 4: the six `*_response`, `request_stream` and the call handle in the p3 shim.
+4. TCP once the owner rules on the embedded route; then unix sockets / fd passing / shm (Almide's own host interface).
