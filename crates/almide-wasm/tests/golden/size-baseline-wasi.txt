@@ -928,7 +928,7 @@
 3255	spec/wasm_cross/variant_result_credit_shapes.almd
 2049	spec/wasm_cross/variant_result_one_credit_churn.almd
 555	spec/wasm_cross/while_loops.almd
-2696	spec/wasm_cross/whilep_str.almd
+2723	spec/wasm_cross/whilep_str.almd
 5707	spec/wasm_cross/wide_function_body.almd
 34294	spec/wasm_cross/witness_straightline.almd
 7023	spec/wasm_cross/zip_view_shape.almd
