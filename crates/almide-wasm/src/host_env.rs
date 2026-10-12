@@ -185,6 +185,9 @@ impl Emitter<'_> {
                     .i32_add()
                     .call(F_HOST_READ);
                 i.local_get(hb).i64_load8_u(crate::bytes::byte_k(0));
+                // The staging block is this arm's own: the byte is on the
+                // stack now, so the block goes.
+                i.local_get(hb).call(F_DEC_FLAT);
                 i.end();
                 let _ = i;
                 self.release_i32();
