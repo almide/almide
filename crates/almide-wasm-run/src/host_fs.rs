@@ -238,7 +238,16 @@ fn fs_mtime(op: i32, a: &str) -> (i64, Vec<u8>) {
 /// ops 19 / 20: copy / rename `a` to the path in `b`.
 fn fs_copy_or_rename(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     let to = String::from_utf8_lossy(b);
-    let r = if op == 19 { std::fs::copy(a, to.as_ref()).map(|_| ()) } else { std::fs::rename(a, to.as_ref()) };
+    // fs.copy of a directory fails as reading it does (EISDIR, C-215): the
+    // twin of runtime/rs/src/fs.rs `almide_rt_fs_copy`.
+    let r = if op == 19 {
+        match std::path::Path::new(a).is_dir().then(|| std::fs::read(a)) {
+            Some(Err(e)) => Err(e),
+            _ => std::fs::copy(a, to.as_ref()).map(|_| ()),
+        }
+    } else {
+        std::fs::rename(a, to.as_ref())
+    };
     match r {
         Ok(()) => (pack(0, 0), Vec::new()),
         Err(e) => fs_err(io_err(fs_op_name(op), &format!("{}, {}", q(a), q(&to)), e)),
