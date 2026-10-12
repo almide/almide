@@ -28,6 +28,7 @@ effect fn main() -> Unit = {
   println(match fs.read_text("nope.txt") { ok(v) => "ok(${v})", err(m) => m })
   println(match fs.read_text("adir") { ok(v) => "ok(${v})", err(m) => m })
   println(match fs.write("adir", "z") { ok(_) => "ok", err(m) => m })
+  println(match fs.copy("adir", "copied") { ok(_) => "ok", err(m) => m })
 }
 "#;
 
@@ -102,6 +103,10 @@ fn every_leg_spells_the_table_byte_for_byte() {
         format!("fs.read_text(\"nope.txt\"): {}", ENOENT.text),
         format!("fs.read_text(\"adir\"): {}", EISDIR.text),
         format!("fs.write(\"adir\"): {}", EISDIR.text),
+        // A directory source fails as reading it does (the stock leg's
+        // self-hosted copy reads first), not with std::fs::copy's own
+        // errno-less InvalidInput text.
+        format!("fs.copy(\"adir\", \"copied\"): {}", EISDIR.text),
     ]
     .join("\n")
         + "\n";
