@@ -100,6 +100,24 @@ impl Emitter<'_> {
         }
     }
 
+    /// The source under an `enumerate` the first stage can read in place
+    /// (see the call site): a scalar-element list and a map whose param is
+    /// read by projection only.
+    fn enumerate_adapter<'e>(&self, cur: &'e IrExpr, first: &Stage) -> Option<&'e IrExpr> {
+        let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } = &cur.kind else { return None };
+        if module.as_str() != "list" || func.as_str() != "enumerate" || args.len() != 1 {
+            return None;
+        }
+        let Stage::Map(f) = first else { return None };
+        let IrExprKind::Lambda { params, body, .. } = &f.kind else { return None };
+        let [(pair, _)] = params.as_slice() else { return None };
+        if !crate::list_enumerate_fold::projections_only(body, *pair) {
+            return None;
+        }
+        let Some(SliceTy::List(h)) = slice_ty_of(&args[0].ty, self.types) else { return None };
+        matches!(self.types.el(h), INT | FLOAT | BOOL).then_some(&args[0])
+    }
+
     pub(crate) fn lower_list_fold_fused(
         &mut self,
         xs: &IrExpr,
@@ -155,6 +173,13 @@ impl Emitter<'_> {
             return Ok(None);
         }
         let stages: Vec<&Stage> = stages_rev.iter().rev().collect();
+        // `list.enumerate(src)` under the first map is an ADAPTER, not a list
+        // to build (#3590): a scalar element and a map that reads its pair by
+        // projection only (`p.0`, `p.1`, or the `((j, x)) =>` destructure)
+        // get one private pair slot refilled per element, exactly as the
+        // scalar enumerate/fold does. The stages are pure, so nothing can
+        // write the source while it is walked and no snapshot is taken.
+        let enumerated = self.enumerate_adapter(cur, stages[0]);
 
         // fold acc setup
         let (fold_params, fold_body) = self.hof_lambda(cb, 2)?;
@@ -164,7 +189,18 @@ impl Emitter<'_> {
         self.lower_arg(init, Some(acc_ty), ArgMode::Retain)?;
         self.f.instructions().local_set(fold_params[0]);
 
-        let (elem0, bh, ch, ih) = self.hof_loop_open(cur)?;
+        let (elem0, bh, ch, ih) = self.hof_loop_open(enumerated.unwrap_or(cur))?;
+        let pair = match enumerated {
+            Some(_) => {
+                let ti = self.types.tuple(vec![INT, elem0]);
+                let def = self.types.tuple_def(ti);
+                let (io, vo, size) = (def.fields[0].1, def.fields[1].1, def.size);
+                let p = self.hold_i32()?;
+                self.f.instructions().i32_const(size as i32).call(F_ALLOC).local_set(p);
+                Some((p, SliceTy::Tuple(ti), io, vo))
+            }
+            None => None,
+        };
         // element value rides a typed hold between stages.
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
         self.f.instructions().local_get(ih).local_get(ch).i32_ge_u().br_if(1);
@@ -175,6 +211,11 @@ impl Emitter<'_> {
         // caught the push-then-open draft immediately). Filter's br_if
         // targets this block to drop the element and still step.
         self.f.instructions().block(BlockType::Empty);
+        if let Some((p, ..)) = pair {
+            // The pair's address goes under the element: the load below then
+            // stores straight into its value field.
+            self.f.instructions().local_get(p);
+        }
         self.f
             .instructions()
             .local_get(bh)
@@ -184,6 +225,16 @@ impl Emitter<'_> {
             .i32_add();
         self.load_ty_slot(elem0, 0);
         let mut cur_ty = elem0;
+        if let Some((p, pair_ty, io, vo)) = pair {
+            // `pair, element` are on the stack: park the element, then the
+            // index, and hand the pair to the first map as a view.
+            self.witness_inline_arg(cur);
+            self.store_ty_slot(elem0, vo);
+            self.f.instructions().local_get(p).local_get(ih).i64_extend_i32_u();
+            self.store_ty_slot(INT, io);
+            self.f.instructions().local_get(p);
+            cur_ty = pair_ty;
+        }
         // #2977: a map stage whose body hands back an OWNED handle (a fresh
         // string, a record) makes the element this iteration's credit. The
         // local it lands in is an owner, released once the element is done
@@ -248,6 +299,10 @@ impl Emitter<'_> {
         self.witness_loop_close();
         self.f.instructions().end(); // skip-block
         self.hof_step(ih);
+        if let Some((p, ..)) = pair {
+            self.f.instructions().local_get(p).call(F_DEC_FLAT);
+            self.release_i32();
+        }
         self.f.instructions().local_get(fold_params[0]);
         let _ = cur_ty;
         self.release_i32();

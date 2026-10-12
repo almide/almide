@@ -9,11 +9,21 @@ use wasm_encoder::BlockType;
 use crate::emitter::Emitter;
 use crate::*;
 
-fn projections_only(body: &IrExpr, pair: VarId) -> bool {
+pub(crate) fn projections_only(body: &IrExpr, pair: VarId) -> bool {
     struct Scan { pair: VarId, ok: bool }
     impl IrVisitor for Scan {
         fn visit_stmt(&mut self, s: &almide_ir::IrStmt) {
-            use almide_ir::IrStmtKind;
+            use almide_ir::{IrPattern, IrStmtKind};
+            // A tuple-pattern lambda param (`((j, x)) => …`, #1060) is the
+            // pair destructured on entry: binding each field by name is the
+            // same field read `p.0` / `p.1` is, and binds no alias of it.
+            if let IrStmtKind::BindDestructure { pattern: IrPattern::Tuple { elements }, value } = &s.kind
+                && matches!(value.kind, IrExprKind::Var { id } if id == self.pair)
+                && elements.len() == 2
+                && elements.iter().all(|e| matches!(e, IrPattern::Bind { .. } | IrPattern::Wildcard))
+            {
+                return;
+            }
             if matches!(&s.kind,
                 IrStmtKind::Assign { var, .. } if *var == self.pair)
                 || matches!(&s.kind,
