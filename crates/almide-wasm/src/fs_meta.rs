@@ -69,6 +69,9 @@ pub(crate) const OP_HTTP_DELETE: i32 = 47;
 pub(crate) const OP_HTTP_FRAMED_TEXT: i32 = 48;
 pub(crate) const OP_HTTP_FRAMED_STATUS: i32 = 49;
 pub(crate) const OP_HTTP_FRAMED_BYTES: i32 = 50;
+/// The full-response leaf (ADR-0023 step 4): `<status>\n<hlen>\n`, hlen chars
+/// of header cells (name, value), then the body. Served by the p3 shim only.
+pub(crate) const OP_HTTP_FRAMED_RESPONSE: i32 = 65;
 /// http.serve (#2650, C-367): the guest-owned serve loop's three host
 /// ops, served by the embedded host through the native runtime's own
 /// server core. 70 binds (port in a), 71 answers the next request as
