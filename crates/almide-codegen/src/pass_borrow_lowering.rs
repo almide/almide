@@ -49,13 +49,26 @@ impl NanoPass for BorrowLoweringPass {
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         let mut param_borrows: HashMap<VarId, ParamBorrow> = HashMap::new();
         let mut ref_binders: HashSet<VarId> = HashSet::new();
+        // Functions compiled from Almide (user code and self-hosted stdlib),
+        // by the symbol a call to them carries (a module fn's
+        // `almide_rt_<module>_<fn>`, the walker's own spelling): their Bytes /
+        // Matrix params are `&AlmideRcCow<T>`, unlike a runtime intrinsic's
+        // raw `&T`. A declaration dispatched to the runtime has no Almide body.
+        let ir_fns: HashSet<Sym> = program.functions.iter()
+            .chain(program.modules.iter().flat_map(|m| m.functions.iter()))
+            .filter(|f| !f.attrs.iter().any(|a| matches!(a.name.as_str(), "inline_rust" | "wasm_intrinsic" | "intrinsic")))
+            .map(|f| match &f.module_origin {
+                Some(origin) => sym(&super::walker::module_fn_symbol(f.name.as_str(), origin)),
+                None => f.name,
+            })
+            .collect();
         let IrProgram { functions, modules, codegen_annotations, .. } = &mut program;
         let module_fns = modules.iter_mut().flat_map(|m| m.functions.iter_mut());
         for func in functions.iter_mut().chain(module_fns) {
             for p in &func.params {
                 param_borrows.insert(p.var, p.borrow);
             }
-            let mut lower = Lower { params: &func.params, ann: codegen_annotations, counting_binders: HashSet::new(), ref_binders: HashSet::new() };
+            let mut lower = Lower { params: &func.params, ann: codegen_annotations, ir_fns: &ir_fns, counting_binders: HashSet::new(), ref_binders: HashSet::new() };
             lower.visit_expr_mut(&mut func.body);
             lower.own_consumed_ref_mut(body_tail(&mut func.body));
             ref_binders.extend(lower.ref_binders);
@@ -69,7 +82,7 @@ impl NanoPass for BorrowLoweringPass {
         let top_lets = program.top_lets.iter_mut()
             .chain(program.modules.iter_mut().flat_map(|m| m.top_lets.iter_mut()));
         for tl in top_lets {
-            let mut lower = Lower { params: &[], ann: &program.codegen_annotations, counting_binders: HashSet::new(), ref_binders: HashSet::new() };
+            let mut lower = Lower { params: &[], ann: &program.codegen_annotations, ir_fns: &ir_fns, counting_binders: HashSet::new(), ref_binders: HashSet::new() };
             lower.visit_expr_mut(&mut tl.value);
             ref_binders.extend(lower.ref_binders);
         }
@@ -108,6 +121,8 @@ impl almide_ir::visit::IrVisitor for GuardReads {
 struct Lower<'a> {
     params: &'a [IrParam],
     ann: &'a CodegenAnnotations,
+    /// The names of the functions compiled from Almide ([`BorrowLoweringPass::run`]).
+    ir_fns: &'a HashSet<Sym>,
     /// Loop binders in `borrowed_loop_vars` whose head is a let-bound range
     /// the walker keeps as a bare `Range<i64>` (`range_counting_vars`,
     /// #1857): the head counts and binds an OWNED scalar, not `&T` (#2256).
@@ -351,6 +366,28 @@ impl Lower<'_> {
             let ty = value.ty.clone();
             let span = value.span;
             *inner.as_mut() = mk(IrExprKind::Deref { expr: Box::new(value) }, ty, span);
+        }
+    }
+
+    /// An Almide-compiled callee takes a Bytes / Matrix param as
+    /// `&AlmideRcCow<T>`, so the `&*(…)` [`Self::lower_borrow`] spelled over a
+    /// propagating argument for a runtime intrinsic's raw `&T` is undone
+    /// there: `&(if …)` borrows the `AlmideRcCow` the arms build.
+    fn keep_rc_cow_args(&self, expr: &mut IrExpr) {
+        let args = match &mut expr.kind {
+            IrExprKind::Call { target: CallTarget::Named { name }, args, .. }
+            | IrExprKind::TailCall { target: CallTarget::Named { name }, args } if self.ir_fns.contains(name) => args,
+            IrExprKind::RuntimeCall { symbol, args } if self.ir_fns.contains(symbol) => args,
+            _ => return,
+        };
+        for arg in args {
+            if let IrExprKind::Borrow { expr: inner, as_str: false, mutable: false } = &mut arg.kind
+                && let IrExprKind::Deref { expr: value } = &mut inner.kind
+                && propagating_rc_cow_value(value)
+            {
+                let value = std::mem::replace(value.as_mut(), mk(IrExprKind::Unit, Ty::Unit, None));
+                **inner = value;
+            }
         }
     }
 
@@ -673,6 +710,7 @@ impl IrMutVisitor for Lower<'_> {
             IrExprKind::MapAccess { .. } => self.lower_map_access(expr),
             _ => {}
         }
+        self.keep_rc_cow_args(expr);
     }
 
     fn visit_stmt_mut(&mut self, stmt: &mut IrStmt) {
