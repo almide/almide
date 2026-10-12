@@ -311,7 +311,12 @@ impl Emitter<'_> {
             ("filter", [m, cb]) => self.lower_map_filter(m, cb),
             ("all" | "any" | "count", [m, cb]) => self.lower_map_pred(func, m, cb),
             ("map", [m, cb]) => self.lower_map_map(m, cb),
-            ("merge", [a, b]) => self.lower_map_merge(a, b),
+            // #3643: a left operand whose credit the op holds is extended
+            // in place (map_merge.rs); a borrowed one is copied.
+            ("merge", [a, b]) => match self.try_map_merge_owned(a, b)? {
+                Some(owned) => Ok(Some(owned)),
+                None => self.lower_map_merge(a, b),
+            },
             // Functional remove: the map minus the entry (a plain copy
             // when the key is absent), insertion order preserved.
             ("remove", [m, key]) => {

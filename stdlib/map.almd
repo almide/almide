@@ -60,6 +60,7 @@ fn entries[K, V](m: Map[K, V]) -> List[(K, V)] = _
 
 /// a plus b's entries; b wins on shared keys.
 @intrinsic("almide_rt_map_merge")
+@reuse(a)
 fn merge[K, V](a: Map[K, V], b: Map[K, V]) -> Map[K, V] = _
 
 /// true iff m has no entries.
