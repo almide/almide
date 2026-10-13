@@ -327,6 +327,9 @@ impl Emitter<'_> {
         }
         {
             let mut i = self.f.instructions();
+            // #3677: the 32-byte stat scratch is read out; it goes before
+            // its hold is reused for the Result block.
+            i.local_get(hb).call(F_DEC_FLAT);
             i.i32_const(16).call(F_ALLOC).local_set(hb);
             i.local_get(hb).i32_const(0).i32_store(slot_memarg(almide_layout::SUM_TAG));
             i.local_get(hb).local_get(hr).i32_store(slot_memarg(almide_layout::SUM_FIELD));
@@ -451,9 +454,28 @@ impl Emitter<'_> {
         Ok(SliceTy::Result(oh, self.types.intern(STR)))
     }
 
+    /// The one decode of a host-staged byte block (`hraw`, `hlen` bytes)
+    /// into a fresh `List[Int]` in `hout`, one i64 slot per byte. The
+    /// staging block is the caller's own scratch: once decoded it goes
+    /// (#3629, #3677 — each copy of this loop had to remember it apart).
+    pub(crate) fn emit_decode_staged_bytes(&mut self, hraw: u32, hlen: u32, hout: u32, hk: u32) {
+        let mut i = self.f.instructions();
+        i.local_get(hlen).i32_const(3).i32_shl().call(F_ALLOC).local_set(hout);
+        i.i32_const(0).local_set(hk);
+        i.block(BlockType::Empty).loop_(BlockType::Empty);
+        i.local_get(hk).local_get(hlen).i32_ge_u().br_if(1);
+        i.local_get(hout).local_get(hk).i32_const(3).i32_shl().i32_add();
+        i.local_get(hraw).local_get(hk).i32_add();
+        i.i64_load8_u(crate::bytes::byte_k(0));
+        i.i64_store(slot_memarg(0));
+        i.local_get(hk).i32_const(1).i32_add().local_set(hk);
+        i.br(0).end().end();
+        i.local_get(hraw).call(F_DEC_FLAT);
+    }
+
     /// ret on stack → Result[List[Int], String] (the read_bytes decode,
     /// shared with the if-exists twin).
-    fn fs_decode_byte_list(&mut self) -> Result<(), EmitError> {
+    pub(crate) fn fs_decode_byte_list(&mut self) -> Result<(), EmitError> {
         let hret = self.hold_i64()?;
         let hraw = self.hold_i32()?;
         let hlen = self.hold_i32()?;
@@ -475,16 +497,9 @@ impl Emitter<'_> {
             i.local_get(hout).local_get(hraw).i32_store(slot_memarg(almide_layout::SUM_FIELD));
             i.local_get(hout);
             i.else_();
-            i.local_get(hlen).i32_const(3).i32_shl().call(F_ALLOC).local_set(hout);
-            i.i32_const(0).local_set(hk);
-            i.block(BlockType::Empty).loop_(BlockType::Empty);
-            i.local_get(hk).local_get(hlen).i32_ge_u().br_if(1);
-            i.local_get(hout).local_get(hk).i32_const(3).i32_shl().i32_add();
-            i.local_get(hraw).local_get(hk).i32_add();
-            i.i64_load8_u(crate::bytes::byte_k(0));
-            i.i64_store(slot_memarg(0));
-            i.local_get(hk).i32_const(1).i32_add().local_set(hk);
-            i.br(0).end().end();
+            let _ = i;
+            self.emit_decode_staged_bytes(hraw, hlen, hout, hk);
+            let mut i = self.f.instructions();
             let hs = self.tmp_i32_local;
             i.i32_const(16).call(F_ALLOC).local_set(hs);
             i.local_get(hs).i32_const(0).i32_store(slot_memarg(almide_layout::SUM_TAG));
