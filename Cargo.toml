@@ -109,7 +109,7 @@ almide-corpus = { path = "crates/almide-corpus" }
 # it — `almide verify` execs the separate almide-verify binary, no fallback.
 almide-verify = { path = "crates/almide-verify" }
 # The name-keyed-site gate parses the compiler's own source (tests/name_keyed_sites_test.rs).
-syn = { version = "2", default-features = false, features = ["full", "visit", "parsing"] }
+syn = { version = "3", default-features = false, features = ["full", "visit", "parsing"] }
 
 # The root build.rs (docs/diagnostics) and almide-types (stdlib/) re-embed repo
 # content on any mtime bump — git pull/checkout triggers a full opt-3 recompile
