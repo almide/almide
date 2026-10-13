@@ -271,6 +271,7 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_fs_file_size" => &[false],
         "almide_rt_fs_fold_lines" => &[false, false, false],
         "almide_rt_fs_fold_lines_chunked" => &[false, false, false, false],
+        "almide_rt_fs_fold_lines_chunked_seq" => &[false, false, false, false],
         "almide_rt_fs_fold_lines_effect" => &[false, false, false],
         "almide_rt_fs_fold_lines_range" => &[false, false, false, false, false],
         "almide_rt_fs_for_each_line" => &[false, false],
@@ -840,4 +841,13 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_zlib_inflate" => &[false],
         _ => return None,
     })
+}
+
+/// The `Send`-free `_seq` twin of a threaded runtime helper (#3649) —
+/// paired from the signatures: the helper has a `Send` bound, the twin none.
+pub fn send_free_twin(name: &str) -> Option<&'static str> {
+    match name {
+        "almide_rt_fs_fold_lines_chunked" => Some("almide_rt_fs_fold_lines_chunked_seq"),
+        _ => None,
+    }
 }
