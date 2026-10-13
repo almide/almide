@@ -548,11 +548,15 @@ pub(crate) mod tests {
 
     /// The catalogued function `name`, instantiated (for tests elsewhere too).
     pub(crate) fn target(name: &str) -> Target {
-        let sig = crate::generator::catalogue::build()
-            .into_iter()
-            .find(|s| format!("{}.{}", s.module, s.func) == name)
-            .unwrap_or_else(|| panic!("{name} not catalogued"));
-        Target::new(&sig).expect("target")
+        let catalogue = crate::generator::catalogue::build();
+        let sig = catalogue.iter().find(|s| format!("{}.{}", s.module, s.func) == name).unwrap_or_else(|| panic!("{name} not catalogued"));
+        Target::new(sig, &catalogue).expect("target")
+    }
+
+    /// Every catalogued function the probes give an in-domain input.
+    pub(crate) fn in_domain_targets() -> Vec<Target> {
+        let catalogue = crate::generator::catalogue::build();
+        catalogue.iter().filter_map(|s| Target::new(s, &catalogue).ok()).filter(Target::in_domain).collect()
     }
 
     /// #3636: the sized Value's stringified length must be a·n + b. With
@@ -670,6 +674,172 @@ pub(crate) mod tests {
         let t = target("list.map");
         assert!(!t.direct_program(1000, 4, true).contains(ERR_PATH));
         assert!(t.rebind_programs(1000, 4).iter().all(|(_, s)| !s.contains(ERR_PATH)));
+    }
+
+    /// #3671: `float.to_*_checked` got the constant 1.5, which every one of
+    /// them refuses as non-integral, and `int.to_int8_checked` /
+    /// `to_uint8_checked` got the size-like `n` (20000..320000), past their
+    /// range — every stamped run measured `none`. A narrowing conversion is
+    /// recognised by its type (an Int or Float to `Option[<fixed width>]`),
+    /// and gets 2, which every fixed-width type holds, as a constant: its
+    /// cost has no size.
+    #[test]
+    fn a_narrowing_conversion_gets_a_value_every_fixed_width_type_holds() {
+        for (name, ty, want) in [
+            ("int.to_int8_checked", "Int", "2"),
+            ("int.to_uint8_checked", "Int", "2"),
+            ("int.to_int16_checked", "Int", "2"),
+            ("int.to_uint64_checked", "Int", "2"),
+            ("float.to_int8_checked", "Float", "2.0"),
+            ("float.to_uint8_checked", "Float", "2.0"),
+            ("float.to_int64_checked", "Float", "2.0"),
+            ("float.to_uint64_checked", "Float", "2.0"),
+        ] {
+            let t = target(name);
+            assert!(t.in_domain() && t.size_param.is_none(), "{name}");
+            let direct = t.direct_program(1000, 4, true);
+            assert!(direct.contains(&format!("  let a0: {ty} = {want}\n")), "{name}: {direct}");
+            assert!(!direct.contains("1000"), "{name}: the value is not a size: {direct}");
+        }
+    }
+
+    /// #3671: a decoder is given what its module's own producer of its input
+    /// makes — the inverse it declares by type — instead of the generic
+    /// value it refuses: `int.parse` / `int.from_hex` / `float.parse` got
+    /// "aéaé…" and returned `err`; `value.as_*` got an object. A numeral
+    /// scales by leading zeros; a payload with a size is sized.
+    #[test]
+    fn a_decoder_gets_what_its_module_encodes() {
+        for (name, want) in [
+            ("int.parse", "string.repeat(\"0\", 1000) + int.to_string(2)"),
+            ("int.from_hex", "string.repeat(\"0\", 1000) + int.to_hex(2)"),
+            ("float.parse", "string.repeat(\"0\", 1000) + float.to_string(1.5)"),
+            ("value.as_string", "value.str(string.repeat(\"aé\", 1000))"),
+            ("value.as_array", "value.array(list.range(0, 1000) |> list.map((i) => "),
+            ("url.decode_component", "url.encode_component(string.repeat(\"aé\", 1000))"),
+        ] {
+            let t = target(name);
+            assert!(t.in_domain() && t.size_param == Some(0), "{name}");
+            let direct = t.direct_program(1000, 4, true);
+            assert!(direct.contains(&format!(" x: {} = {want}", t.render_param(0))), "{name}: {direct}");
+            let project = t.diamond_project(64);
+            let main = &project.files.iter().find(|(p, _)| p.ends_with("main.almd")).unwrap().1;
+            assert!(main.contains(&format!("  let a0: {} = {}", t.render_param(0), want.replace("1000", "64"))), "{name}: {main}");
+        }
+        // A payload with no size: a constant input, not a size.
+        for (name, want) in [("value.as_float", "value.float(1.5)"), ("value.as_int", "value.int(2)"), ("value.as_bool", "value.bool(true)")] {
+            let t = target(name);
+            assert!(t.in_domain() && t.size_param.is_none(), "{name}");
+            assert!(t.direct_program(1000, 4, true).contains(&format!("  let a0: Value = {want}\n")), "{name}");
+        }
+        // `string.from_codepoint` makes a String from an Int, but a
+        // character: it is not padded like a numeral.
+        let t = target("string.codepoint");
+        assert!(t.direct_program(1000, 4, true).contains("  let a0: String = string.from_codepoint(2)\n"));
+    }
+
+    /// #3671: a function whose input is in-domain (a recipe or a derived
+    /// domain) stops every probe on a `none` or `false`, as a Result-typed
+    /// one stops on `err`: a run that measured the refusal fails instead of
+    /// being counted. Without an in-domain input a `none` / `false` stays a
+    /// result — a search's miss is its worst case.
+    #[test]
+    fn an_in_domain_input_stops_every_probe_on_none_or_false() {
+        let none = format!("none => panic(\"{OFF_DOMAIN}: none\")");
+        let t = target("int.to_int8_checked");
+        assert!(t.direct_program(1000, 4, true).contains(&none));
+        let project = t.diamond_project(64);
+        let main = &project.files.iter().find(|(p, _)| p.ends_with("main.almd")).unwrap().1;
+        assert_eq!(main.matches(&none).count(), 3, "{main}");
+        let falsy = format!("if r then () else panic(\"{OFF_DOMAIN}: false\")");
+        assert!(target("string.is_digit").direct_program(1000, 4, true).contains(&falsy));
+        // A search over generic values: its miss is the measurement.
+        for name in ["list.find", "list.contains", "string.is_empty"] {
+            let t = target(name);
+            assert!(!t.in_domain(), "{name}");
+            assert!(!t.direct_program(1000, 4, true).contains(OFF_DOMAIN), "{name}");
+        }
+    }
+
+    /// The functions whose stamps were voided because the probe measured a
+    /// refusal (#3671, and value.as_float / as_string after it), and the
+    /// not-stampable ones whose probe refused or truncated its input, all
+    /// get an in-domain input now — by recipe or by derivation. A change
+    /// that drops one back to the generic values fails here.
+    #[test]
+    fn every_function_found_measuring_a_refusal_gets_an_in_domain_input() {
+        let covered: std::collections::BTreeSet<String> = in_domain_targets().into_iter().map(|t| t.name).collect();
+        for name in [
+            // voided by #3671
+            "int.parse",
+            "float.parse",
+            "int.from_hex",
+            "string.byte_slice",
+            "int.to_int8_checked",
+            "int.to_uint8_checked",
+            "float.to_int8_checked",
+            "float.to_int16_checked",
+            "float.to_int32_checked",
+            "float.to_int64_checked",
+            "float.to_uint8_checked",
+            "float.to_uint16_checked",
+            "float.to_uint32_checked",
+            "float.to_uint64_checked",
+            "string.is_digit",
+            "string.is_whitespace",
+            "string.is_upper",
+            // voided after it
+            "value.as_float",
+            "value.as_string",
+            // not stampable, the probe refused or truncated its input
+            "value.as_array",
+            "value.as_bool",
+            "value.as_int",
+            "value.field",
+            "json.get_int",
+            "map.delete",
+            "matrix.sub",
+            "matrix.fma",
+            "matrix.fma3",
+            "bytes.copy_within",
+            "bytes.copy_from",
+            "regex.full_match",
+        ] {
+            assert!(covered.contains(name), "{name} has no in-domain input");
+        }
+    }
+
+    /// Every in-domain probe takes the success path when it runs: the plain
+    /// call of every function [`in_domain_targets`] holds, at n = 64, built
+    /// and run natively by the workspace `almide`, exits 0 — the in-domain
+    /// guards turn an `err`, `none` or `false` into a failed exit, so a
+    /// recipe or a derivation that drifted to the refusal fails here. A
+    /// no-op without a built `almide` (as `composition_programs_pass_almide_check`);
+    /// fuzz-nightly builds one and runs it.
+    #[test]
+    fn every_in_domain_probe_takes_the_success_path() {
+        let bin = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/release/almide");
+        if !bin.exists() {
+            eprintln!("skipping: no workspace almide binary");
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("xtarget-in-domain-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut failed = Vec::new();
+        let targets = in_domain_targets();
+        assert!(!targets.is_empty());
+        for t in &targets {
+            let file = dir.join(format!("{}.almd", t.name.replace('.', "_")));
+            std::fs::write(&file, t.direct_program(64, 1, true)).unwrap();
+            let out = std::process::Command::new(&bin).arg("run").arg(&file).current_dir(&dir).output().expect("spawn almide");
+            if !out.status.success() {
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                let why = stderr.lines().find(|l| l.contains("inspect:") || l.contains("error")).unwrap_or("").to_string();
+                failed.push(format!("{}: exit {:?} {why}", t.name, out.status.code()));
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(failed.is_empty(), "in-domain probes that did not take the success path:\n{}", failed.join("\n"));
     }
 
     /// A recipe that drifted from its function's signature is an error, not

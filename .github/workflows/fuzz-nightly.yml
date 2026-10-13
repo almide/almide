@@ -119,6 +119,14 @@ jobs:
         working-directory: tools/xtarget-fuzz
         run: cargo test --release generator::denylist
 
+      # The inspection harness's in-domain inputs (#3671): every recipe or
+      # derived domain must still make its probe take the success path. The
+      # test builds and runs each plain-call probe with the almide built
+      # above, so a recipe that drifts to an err / none / false fails here.
+      - name: Inspection probes take the success path
+        working-directory: tools/xtarget-fuzz
+        run: cargo test --release generator::inspect_gen
+
       - name: Upload binaries
         uses: actions/upload-artifact@v7
         with:
