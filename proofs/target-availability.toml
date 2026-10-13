@@ -280,7 +280,13 @@ pending_self_host_ceiling = 5
 # self-hosted body (stdlib/process_stdin_lines.almd) reads fd 0 through the
 # io.read_all floor and splits as native BufRead::lines does. Evidence:
 # tests/process_stdin_lines_cross_test.rs (native, embedded, stock wasmtime).
-pending_port_ceiling = 39
+# 39 → 40 (2026-10-13, #3679): one NEW public fn, net.tcp_local_port (the
+# owner's tcp ruling 5), joins its twelve tcp siblings as a stock-p1
+# pending-port row: the stock p1 standard has no sockets, the embedded lane
+# serves it (ops 91..=103), and TCP design step 4 routes the stock artifact to
+# the p3 component, retiring all thirteen rows together. Not a relaxation:
+# no existing row moved, the count names one more function honestly.
+pending_port_ceiling = 40
 
 # The unprobed class (#1827), per leg. Empty since #2588: the five
 # HttpRequest readers (http.query_params / req_body / req_header / req_method /
