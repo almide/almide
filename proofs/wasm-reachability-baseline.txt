@@ -40,7 +40,6 @@
 # the ratchet can see, so it is listed and ratcheted too.
 bytes.copy_to_ptr :: UNPROBEABLE :: parameter type outside the synthesizer
 bytes.from_raw_ptr :: UNPROBEABLE :: parameter type outside the synthesizer
-fs.fold_lines_range :: UNPROBEABLE :: no candidate shape builds natively
 http.anthropic_streaming_call :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call http.anthropic_streaming_call needs a declared capability not in this brick
 http.anthropic_streaming_call_with_limits :: UNPROBEABLE :: parameter type outside the synthesizer
 http.body :: UNPROBEABLE :: parameter type outside the synthesizer
