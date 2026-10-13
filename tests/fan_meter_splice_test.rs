@@ -75,8 +75,12 @@ fn the_region_splice_meters_like_the_whole_program_render() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
+/// #3673: a region outside the v1 subset is no longer refused — the standard
+/// codegen meters it itself — and the verbose note says which meter ran and
+/// why the splice could not (fan_region_floor_test.rs holds its charges to
+/// the wasm leg's).
 #[test]
-fn a_region_outside_the_v1_subset_is_refused_by_name() {
+fn a_region_outside_the_v1_subset_is_metered_by_the_standard_codegen() {
     let dir = std::env::temp_dir().join(format!("almide-fan-meter-splice-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("split_in_arm.almd");
@@ -86,11 +90,13 @@ fn a_region_outside_the_v1_subset_is_refused_by_name() {
          effect fn main() -> Unit = println(int.to_string(fan.race { parts(\"a,b\"), parts(\"c\") } ?? 0))\n",
     )
     .unwrap();
-    let (code, out, err, _) = run_native(&path, false);
+    let out = Command::new(almide_bin()).arg("run").arg(&path).env("ALMIDE_VERBOSE", "1").output().expect("spawn almide");
     let _ = std::fs::remove_dir_all(&dir);
-    assert_eq!(code, Some(1), "stdout={out:?} stderr={err:?}");
+    let (stdout, stderr) = (String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    assert_eq!(out.status.code(), Some(0), "stdout={stdout:?} stderr={stderr:?}");
+    assert_eq!(stdout, "2\n");
     assert!(
-        err.contains("region is outside the v1 native render") && err.contains("string.split"),
-        "the refusal must say the REGION walls, and on what: {err}"
+        stderr.contains("its regions metered by the standard codegen") && stderr.contains("string.split"),
+        "the note must name the meter that ran, and why the region splice could not: {stderr}"
     );
 }
