@@ -24,6 +24,7 @@ NOT_FRAMES=(
   runtime.rs runtime_alloc.rs runtime_str.rs runtime_line.rs
   runtime_large.rs   # the >64 KiB free-list half of $alloc/$free (#3348)
   json_path_helpers.rs map_index.rs matrix_scalars.rs
+  map_holes.rs   # map_index.rs's tombstone helpers ($mapidx_kill/grow/settle/dead), split out for the file budget (#3691)
   utf8_helpers.rs value_helpers.rs   # decoder / Value-equality helper bodies
   display.rs   # display/eq/scan helper bodies: no RC frame of their own
   fuel.rs      # the deterministic-budget unwind (BudgetUnwind): the run terminates
