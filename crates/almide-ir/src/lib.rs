@@ -45,6 +45,7 @@ pub mod accum_tre;
 pub mod record_shape;
 pub mod mono_name;
 pub mod runtime_use;
+pub mod meter_plan;
 
 mod wasm_repr;
 
