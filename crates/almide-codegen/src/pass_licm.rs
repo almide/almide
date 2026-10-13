@@ -35,6 +35,12 @@ impl NanoPass for LICMPass {
     fn run_before(&self) -> Vec<&'static str> { vec!["EggSaturation", "BorrowInsertion", "CloneInsertion"] }
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
+        // #3673: a metered program keeps every evaluation where it was — a
+        // hoisted call to a metered fn would charge once, not once per
+        // iteration, and move a region's spend.
+        if program.codegen_annotations.meter_in_codegen {
+            return PassResult { program, changed: false };
+        }
         // Every VarId this pass allocates is a `__licm_*` hoist binding (one
         // alloc site); snapshot + mark, replacing the name-prefix test in
         // CloneInsertion.

@@ -139,6 +139,81 @@ fn wrap_metered_splice(items: &str, roots: &[String]) -> String {
     out
 }
 
+/// The charge-site entry points of the standard codegen's own meter (#3673,
+/// `MeterChargePass`) and the `for`-head adapter: a charge, then the cut test
+/// the v1 render's charge sites run (fuel below zero, else the deadline). The
+/// unwind flag carries a cut in an inline stdlib callback out to the fn that
+/// made the call, which is where the wasm leg's cut returns from.
+const METER_ENTRY_POINTS: &str = "pub(super) fn __almd_meter_tick(cost: i64) -> bool {
+    __almd_charge(0, cost, false);
+    __almd_fuel_lt0() || __almd_wall_hit()
+}
+pub(super) fn __almd_meter_tick_len(len: usize) -> bool {
+    __almd_charge_dyn(0, len as i64, false);
+    __almd_fuel_lt0() || __almd_wall_hit()
+}
+pub(super) fn __almd_meter_pending() -> bool {
+    __almd_fuel_lt0() || __ALMD_T_HIT.with(|h| h.get())
+}
+thread_local! {
+    static __ALMD_UNWIND: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+pub(super) fn __almd_meter_unwind() {
+    __ALMD_UNWIND.with(|u| u.set(true));
+}
+pub(super) fn __almd_meter_unwinding() -> bool {
+    __ALMD_UNWIND.with(|u| u.get())
+}
+pub(super) fn __almd_meter_unwind_take() -> bool {
+    __ALMD_UNWIND.with(|u| u.replace(false))
+}
+pub(super) struct __AlmdMeterIter<I>(I);
+impl<I: Iterator> Iterator for __AlmdMeterIter<I> {
+    type Item = I::Item;
+    fn next(&mut self) -> Option<I::Item> {
+        __almd_charge(0, 1, false);
+        if !__almd_fuel_lt0() {
+            __almd_wall_hit();
+        }
+        self.0.next()
+    }
+}
+pub(super) fn __almd_meter_iter<I: IntoIterator>(it: I) -> __AlmdMeterIter<I::IntoIter> {
+    __AlmdMeterIter(it.into_iter())
+}
+";
+
+/// The deterministic meter the standard codegen's own charges call (#3673):
+/// the v1 render's meter shims — the same fuel, budget and deadline
+/// arithmetic its regions run — and the charge-site entry points, in a module
+/// the CLI appends to the codegen's output. The meter prims the region
+/// desugars call are exported under their runtime names.
+pub fn native_meter_runtime() -> String {
+    use crate::render_native_shims::{BUDGET_SHIM, CHARGE_DYN_SHIM, CHARGE_SHIM, COUNTER_SHIM, FUEL_LT0_SHIM, TIMEOUT_SHIM};
+    let shims = [COUNTER_SHIM, CHARGE_SHIM, CHARGE_DYN_SHIM, FUEL_LT0_SHIM, BUDGET_SHIM.as_str(), TIMEOUT_SHIM.as_str()].join("\n\n");
+    let module = "__almd_meter";
+    let mut out = format!(
+        "\n// The deterministic meter of the standard codegen's own charges (#3673).\nmod {module} {{\n#![allow(unused_variables, unused_mut, dead_code, non_snake_case, non_upper_case_globals)]\n{shims}\n{METER_ENTRY_POINTS}"
+    );
+    let prims = meter_prim_exports(&shims);
+    for (prim, sig_and_body) in &prims {
+        out.push_str(&format!("pub(super) fn {prim}{sig_and_body}\n"));
+    }
+    out.push_str("}\n");
+    let entry_points = [
+        "__almd_meter_tick",
+        "__almd_meter_tick_len",
+        "__almd_meter_pending",
+        "__almd_meter_iter",
+        "__almd_meter_unwind",
+        "__almd_meter_unwinding",
+        "__almd_meter_unwind_take",
+    ];
+    let names: Vec<&str> = prims.iter().map(|(p, _)| p.as_str()).chain(entry_points).collect();
+    out.push_str(&format!("use self::{module}::{{{}}};\n", names.join(", ")));
+    out
+}
+
 /// Render the metered regions of `source` as a module the standard codegen's
 /// output links (#3669). Refuses — a wall the caller reports — when a region,
 /// or a fn a region reaches, is outside the native render's subset.
