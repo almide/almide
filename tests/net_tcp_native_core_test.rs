@@ -6,6 +6,10 @@
 //! on port 0 reports the port the OS chose. The embedded and p3 legs reuse
 //! these texts, so this pins the side they copy.
 use std::process::Command;
+use std::time::Duration;
+
+#[path = "support/capped_run.rs"]
+mod capped_run;
 
 const PROGRAM: &str = r#"import net
 
@@ -59,12 +63,10 @@ fn native_tcp_answers_from_the_shared_core() {
     let dir = tempfile::tempdir().expect("scratch");
     let file = dir.path().join("tcp.almd");
     std::fs::write(&file, PROGRAM).expect("source");
-    let out = Command::new(env!("CARGO_BIN_EXE_almide"))
-        .arg("run")
-        .arg(&file)
-        .current_dir(dir.path())
-        .output()
-        .expect("almide run");
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_almide"));
+    cmd.arg("run").arg(&file).current_dir(dir.path());
+    // Seconds normally; a hang fails by name instead of holding the job.
+    let out = capped_run::output_capped(cmd, Duration::from_secs(120)).unwrap_or_else(|e| panic!("native tcp program: {e}"));
     let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
     assert!(out.status.success(), "stdout:\n{stdout}\nstderr:\n{}", String::from_utf8_lossy(&out.stderr));
     // The refused connect names the port the OS chose, which varies per run.
