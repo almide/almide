@@ -15,8 +15,9 @@
 //!   which carries every user string literal verbatim. `"almide_rt_prim_budget_x"`
 //!   refused a working program (run) and failed a passing test file (test);
 //!   `"AlmideHttpRequest almide_rt_zlib_ almide_rt_matrix_"` spliced 98
-//!   runtime fns and declared rustls / flate2. The metered-prim refusal is now
-//!   read from the IR's `RuntimeCall`s, and module / crate inclusion from the
+//!   runtime fns and declared rustls / flate2. The metered-prim route (a
+//!   refusal then, the region splice since #3669) is now read from the IR's
+//!   `RuntimeCall`s, and module / crate inclusion from the
 //!   code's identifier tokens.
 //!
 //! Every colliding program is checked against a twin whose user spelling is
@@ -46,6 +47,20 @@ fn almide(name: &str, program: &str, args: &[&str]) -> std::process::Output {
         .args(args)
         .arg(&source)
         .env_remove("ALMIDE_COMPONENT_P3")
+        .output()
+        .expect("almide")
+}
+
+/// [`almide`] with `ALMIDE_VERBOSE` set, so the native route's note is printed.
+fn almide_verbose(name: &str, program: &str, args: &[&str]) -> std::process::Output {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let source = dir.path().join(name);
+    std::fs::write(&source, program).expect("source");
+    Command::new(almide_bin())
+        .args(args)
+        .arg(&source)
+        .env_remove("ALMIDE_COMPONENT_P3")
+        .env("ALMIDE_VERBOSE", "1")
         .output()
         .expect("almide")
 }
@@ -174,10 +189,14 @@ fn a_literal_spelled_like_a_metered_prim_does_not_fail_the_native_test_harness()
     }
 }
 
-/// The negative control: a program that DOES call the metered prims still
-/// gets the honest refusal on both native routes when the v1 render walls.
+/// The negative control: a program that DOES call the metered prims takes
+/// the metered route on both native routes when the v1 render walls — its
+/// regions are rendered by the trust spine and linked in (#3669) — while the
+/// literal twin above takes the plain fallback. A region that is itself
+/// outside the v1 subset is still refused, never run unmetered.
 #[test]
-fn a_real_metered_prim_is_still_refused_on_the_native_fallback() {
+fn a_real_metered_prim_takes_the_metered_route_on_the_native_fallback() {
+    const SPLICE_NOTE: &str = "its regions rendered by the trust spine";
     let program = r#"@extern(rs, "std::cmp", "max")
 fn my_max(a: Int, b: Int) -> Int
 
@@ -189,14 +208,26 @@ effect fn main() -> Unit = {
   println(int.to_string(r))
 }
 "#;
-    let out = almide("main.almd", program, &["run", "--target", "rust"]);
-    assert!(!out.status.success(), "a metered program ran on v0:\n{}", log(&out));
-    assert!(log(&out).contains("fan.bounded / fan.race require the v1 native render"), "{}", log(&out));
+    let out = almide_verbose("main.almd", program, &["run", "--target", "rust"]);
+    assert!(out.status.success(), "a metered program was refused natively:\n{}", log(&out));
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "2\n55\n");
+    assert!(log(&out).contains(SPLICE_NOTE), "the metered program did not take the splice route:\n{}", log(&out));
+    let out = almide_verbose("main.almd", PRIM_LITERAL, &["run", "--target", "rust"]);
+    assert!(out.status.success(), "{}", log(&out));
+    assert!(!log(&out).contains(SPLICE_NOTE), "a literal took the metered route:\n{}", log(&out));
+
+    let walled = program
+        .replace("fn heavy(n: Int) -> Int = if n <= 0 then 0 else n + heavy(n - 1)", "fn heavy(n: Int) -> Int = list.len(string.split(\"a,b,c\", \",\")) + n")
+        .replace("heavy(10) }", "heavy(52) }");
+    let out = almide("main.almd", &walled, &["run", "--target", "rust"]);
+    assert!(!out.status.success(), "a region outside the v1 subset ran unmetered:\n{}", log(&out));
+    assert!(log(&out).contains("region is outside the v1 native render"), "{}", log(&out));
+    assert!(log(&out).contains("string.split"), "{}", log(&out));
 
     let test = "// wasm:skip\nfn heavy(n: Int) -> Int = if n <= 0 then 0 else n + heavy(n - 1)\n\ntest \"a\" {\n  let r = fan.bounded(compute.ns(1000000)) { heavy(10) } ?? -1\n  assert_eq(r, 55)\n}\n";
-    let out = almide("main_test.almd", test, &["test"]);
-    assert!(!out.status.success(), "a metered test ran on the native harness:\n{}", log(&out));
-    assert!(log(&out).contains("run on the WASM test leg"), "{}", log(&out));
+    let out = almide_verbose("main_test.almd", test, &["test"]);
+    assert!(out.status.success(), "a metered test failed on the native harness:\n{}", log(&out));
+    assert!(log(&out).contains(SPLICE_NOTE), "the metered test did not take the splice route:\n{}", log(&out));
 }
 
 // ── #3486.2: a literal spelled like a runtime module or type ─────────────
