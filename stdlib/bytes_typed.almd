@@ -97,10 +97,19 @@ fn bytes_write_uint32(b: Bytes, v: Int, e: Endian) -> Bytes = __bt_append(
 
 fn bytes_write_int32(b: Bytes, v: Int, e: Endian) -> Bytes = __bt_append(b, v, 4, __endian_is_le(e))
 
-fn bytes_write_float32(b: Bytes, v: Float32, e: Endian) -> Bytes = {
+// The Float32 writers are NaN-OBSERVATION boundaries like every bytes float
+// writer (C-210, #3658): a NaN of any sign or payload writes 0x7FC00000.
+fn __bt_f32_obs_bits(v: Float32) -> Int = {
   let f = float.from_float32(v)
-  __bt_append(b, prim.f32bits(prim.f2f32(f)), 4, __endian_is_le(e))
+  if float.is_nan(f) then 0x7FC00000 else prim.f32bits(prim.f2f32(f))
 }
+
+fn bytes_write_float32(b: Bytes, v: Float32, e: Endian) -> Bytes = __bt_append(
+  b,
+  __bt_f32_obs_bits(v),
+  4,
+  __endian_is_le(e),
+)
 
 // In-place splice of k bytes of `bits` at `offset`, with bytes_mutate's window
 // rule (a negative offset, or a window past the end, is a silent no-op; the room
@@ -148,7 +157,10 @@ fn bytes_set_int32(b: Bytes, offset: Int, v: Int, e: Endian) -> Unit = __bt_set(
   __endian_is_le(e),
 )
 
-fn bytes_set_float32(b: Bytes, offset: Int, v: Float32, e: Endian) -> Unit = {
-  let f = float.from_float32(v)
-  __bt_set(b, offset, prim.f32bits(prim.f2f32(f)), 4, __endian_is_le(e))
-}
+fn bytes_set_float32(b: Bytes, offset: Int, v: Float32, e: Endian) -> Unit = __bt_set(
+  b,
+  offset,
+  __bt_f32_obs_bits(v),
+  4,
+  __endian_is_le(e),
+)

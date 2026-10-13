@@ -16,11 +16,11 @@
 //! exists to drift from list.push's.
 //!
 //! Byte values are the twins' exactly: integers are the i64's two's-complement
-//! bytes (`band(bshr_u(bits, 8i), 255)`), `append_f32_*` / `append_f64_*`
-//! canonicalize NaN first (C-210: 0x7FC00000 / `float.to_bits`), the BE
-//! writer's `write_f64_be` and the typed `write_float32` keep their raw
-//! reinterpret, and the typed writers read the byte order off the `Endian`
-//! value's tag at run time.
+//! bytes (`band(bshr_u(bits, 8i), 255)`), every float member — `append_f32_*`,
+//! `append_f64_*`, `write_f64_be`, `write_float32` — canonicalizes NaN first
+//! through `emit_float_obs_bits` (C-210: 0x7FC00000 / `float.to_bits`; the
+//! in-place `set_f*` of bytes_rw.rs share it, #3658), and the typed writers
+//! read the byte order off the `Endian` value's tag at run time.
 
 use almide_ir::IrExpr;
 use wasm_encoder::{BlockType, MemArg, ValType};
@@ -35,12 +35,8 @@ pub(crate) enum Bits {
     Bool,
     /// f64 bits, NaN collapsed to 0x7FF8000000000000 (`float.to_bits`).
     F64Canon,
-    /// f64 bits as they are (`write_f64_be`).
-    F64Raw,
     /// f32 bits of the demoted value, NaN collapsed to 0x7FC00000.
     F32Canon,
-    /// f32 bits of the demoted value as they are (`write_float32`).
-    F32Raw,
 }
 
 /// The byte order: fixed, or read from the trailing `Endian` argument.
@@ -80,10 +76,10 @@ pub(crate) fn shape(func: &str) -> Option<(u32, Bits, Order)> {
         "write_u16_be" => (2, Bits::Int, Order::Be),
         "write_u32_be" => (4, Bits::Int, Order::Be),
         "write_i64_be" => (8, Bits::Int, Order::Be),
-        "write_f64_be" => (8, Bits::F64Raw, Order::Be),
+        "write_f64_be" => (8, Bits::F64Canon, Order::Be),
         "write_uint16" => (2, Bits::Int, Order::Endian),
         "write_uint32" | "write_int32" => (4, Bits::Int, Order::Endian),
-        "write_float32" => (4, Bits::F32Raw, Order::Endian),
+        "write_float32" => (4, Bits::F32Canon, Order::Endian),
         _ => return None,
     })
 }
@@ -200,32 +196,33 @@ impl Emitter<'_> {
                 self.lower_arg(v, Some(BOOL), ArgMode::Borrow)?;
                 self.f.instructions().i64_extend_i32_u();
             }
-            Bits::F64Raw => {
-                self.lower_arg(v, Some(FLOAT), ArgMode::Borrow)?;
-                self.f.instructions().i64_reinterpret_f64();
-            }
-            Bits::F32Raw => {
+            Bits::F64Canon | Bits::F32Canon => {
                 // A Float32 rides the Float (f64) carrier on this leg.
                 self.lower_arg(v, Some(FLOAT), ArgMode::Borrow)?;
-                self.f.instructions().f32_demote_f64().i32_reinterpret_f32().i64_extend_i32_u();
-            }
-            Bits::F64Canon | Bits::F32Canon => {
-                self.lower_arg(v, Some(FLOAT), ArgMode::Borrow)?;
-                let h = self.hold_f64()?;
-                let mut i = self.f.instructions();
-                i.local_set(h);
-                i.local_get(h).local_get(h).f64_ne().if_(BlockType::Result(ValType::I64));
-                if bits == Bits::F64Canon {
-                    i.i64_const(0x7FF8_0000_0000_0000_u64 as i64).else_();
-                    i.local_get(h).i64_reinterpret_f64();
-                } else {
-                    i.i64_const(0x7FC0_0000).else_();
-                    i.local_get(h).f32_demote_f64().i32_reinterpret_f32().i64_extend_i32_u();
-                }
-                i.end();
-                self.release_f64();
+                self.emit_float_obs_bits(if bits == Bits::F64Canon { 8 } else { 4 })?;
             }
         }
+        Ok(())
+    }
+
+    /// The f64 on the stack as the i64 of its observed bits, `width` 8 (f64)
+    /// or 4 (the demoted f32, zero-extended). The ONE NaN rule of every bytes
+    /// float writer on this leg — append, write and set alike (C-210, #3658):
+    /// a NaN of any sign or payload becomes 0x7FF8000000000000 / 0x7FC00000.
+    pub(crate) fn emit_float_obs_bits(&mut self, width: u32) -> Result<(), EmitError> {
+        let h = self.hold_f64()?;
+        let mut i = self.f.instructions();
+        i.local_set(h);
+        i.local_get(h).local_get(h).f64_ne().if_(BlockType::Result(ValType::I64));
+        if width == 8 {
+            i.i64_const(0x7FF8_0000_0000_0000_u64 as i64).else_();
+            i.local_get(h).i64_reinterpret_f64();
+        } else {
+            i.i64_const(0x7FC0_0000).else_();
+            i.local_get(h).f32_demote_f64().i32_reinterpret_f32().i64_extend_i32_u();
+        }
+        i.end();
+        self.release_f64();
         Ok(())
     }
 
@@ -266,6 +263,9 @@ mod tests {
         }
         assert_eq!(shape("append_f32_le").map(|s| s.1), Some(Bits::F32Canon));
         assert_eq!(shape("append_f64_be").map(|s| s.1), Some(Bits::F64Canon));
+        // C-210 (#3658): the cursor and typed float writers canonicalize too.
+        assert_eq!(shape("write_f64_be").map(|s| s.1), Some(Bits::F64Canon));
+        assert_eq!(shape("write_float32").map(|s| s.1), Some(Bits::F32Canon));
         for (f, k) in [("write_u8", 1), ("write_bool", 1), ("write_u16_be", 2), ("write_u32_be", 4), ("write_i64_be", 8), ("write_f64_be", 8)] {
             assert_eq!(shape(f).map(|s| (s.0, s.2)), Some((k, Order::Be)), "{f}");
         }

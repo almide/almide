@@ -233,8 +233,8 @@ fn encode(enc: Enc, v: &Value) -> Option<Vec<u8>> {
             // `val as f32` is the native cast — it ROUNDS, and the rounded
             // value is what lands in the buffer.
             //
-            // NaN is CANONICALIZED first (C-210). A byte-buffer append is an
-            // OBSERVATION boundary: the raw sign/payload bits are the one place
+            // NaN is CANONICALIZED first (C-210). Every byte-buffer float
+            // write — append, set, write (#3658) — is an OBSERVATION boundary: the raw sign/payload bits are the one place
             // the byte-identical law leaks host state — x86 arithmetic produces
             // sign-set NaNs where aarch64 does not — so both backends collapse
             // NaN to one pattern before the reinterpret hits the buffer
