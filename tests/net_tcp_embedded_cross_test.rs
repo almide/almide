@@ -1,11 +1,10 @@
 //! The tcp family on the embedded wasm lane (`almide run --target wasm`)
 //! answers what native answers (the judge's three tcp contracts, almide/als
-//! #134; the net/tcp design step 2). The programs under tests/net_tcp are
-//! the judge's fixtures without their contract header line, until the pin
-//! advances and they land verbatim in spec/embedded_cross. That sweep
-//! compares stdout and the exit code only, so two legs that fail alike pass
-//! it; this test also requires each program to run to its closing `done`
-//! line on both legs.
+//! #134; the net/tcp design step 2): C-377, C-378 and C-379, whose fixtures
+//! are the judge's own, verbatim, in spec/embedded_cross. That directory's
+//! sweep compares stdout and the exit code only, so two legs that fail alike
+//! pass it; this test also requires each program to run to its closing
+//! `done` line on both legs.
 use std::path::Path;
 use std::process::Command;
 
@@ -25,7 +24,7 @@ fn run(path: &Path, extra: &[&str]) -> (String, Option<i32>, String) {
 
 #[test]
 fn tcp_fixtures_run_to_the_end_alike_on_native_and_the_embedded_lane() {
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/net_tcp");
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("spec/embedded_cross");
     for name in ["net_tcp_loopback", "net_tcp_errors", "net_tcp_timeouts"] {
         let path = dir.join(format!("{name}.almd"));
         let native = run(&path, &[]);
