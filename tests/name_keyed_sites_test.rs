@@ -127,6 +127,8 @@ fn pat_names(p: &Pat, names: &Names, out: &mut BTreeSet<String>) {
         Pat::TupleStruct(t) => t.elems.iter().for_each(|c| pat_names(c, names, out)),
         Pat::Slice(s) => s.elems.iter().for_each(|c| pat_names(c, names, out)),
         Pat::Paren(x) => pat_names(&x.pat, names, out),
+        // syn 3 carries an arm's `if` guard on its pattern (`Pat::Guard`).
+        Pat::Guard(g) => pat_names(&g.pat, names, out),
         Pat::Reference(x) => pat_names(&x.pat, names, out),
         Pat::Ident(i) => {
             if let Some((_, sub)) = &i.subpat {
@@ -162,6 +164,7 @@ fn or_groups(p: &Pat, names: &Names, out: &mut Vec<BTreeSet<String>>) {
         Pat::TupleStruct(t) => t.elems.iter().for_each(|c| or_groups(c, names, out)),
         Pat::Slice(s) => s.elems.iter().for_each(|c| or_groups(c, names, out)),
         Pat::Paren(x) => or_groups(&x.pat, names, out),
+        Pat::Guard(g) => or_groups(&g.pat, names, out),
         Pat::Reference(x) => or_groups(&x.pat, names, out),
         Pat::Ident(i) => {
             if let Some((_, sub)) = &i.subpat {
