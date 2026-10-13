@@ -236,8 +236,8 @@
 3501	spec/wasm_cross/float_to_int_edges.almd
 2527	spec/wasm_cross/fold_heap_acc.almd
 2020	spec/wasm_cross/for_in_forms.almd
-12897	spec/wasm_cross/fs_call_head_family.almd
-13676	spec/wasm_cross/fs_composition_family.almd
+12901	spec/wasm_cross/fs_call_head_family.almd
+13684	spec/wasm_cross/fs_composition_family.almd
 9286	spec/wasm_cross/fs_fallible_stream_callback.almd
 8502	spec/wasm_cross/fs_fallible_walker_call_head.almd
 7132	spec/wasm_cross/fs_glob_segments.almd
@@ -245,9 +245,9 @@
 6375	spec/wasm_cross/fs_metadata_family.almd
 3110	spec/wasm_cross/fs_preopen_resolve.almd
 5438	spec/wasm_cross/fs_read_bytes_raw_call_head.almd
-9313	spec/wasm_cross/fs_read_directory_errno.almd
+9320	spec/wasm_cross/fs_read_directory_errno.almd
 5598	spec/wasm_cross/fs_read_lines.almd
-8303	spec/wasm_cross/fs_read_text_utf8.almd
+8306	spec/wasm_cross/fs_read_text_utf8.almd
 2619	spec/wasm_cross/fs_relative_path.almd
 7567	spec/wasm_cross/fs_write_errno.almd
 2995	spec/wasm_cross/fuel_bare_result.almd
