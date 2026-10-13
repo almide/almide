@@ -19,7 +19,7 @@
 3	1	16	3	spec/wasm_cross/assign_alias_rc.almd
 32	23	800	32	spec/wasm_cross/assign_concat_operand_release.almd
 21	7	824	21	spec/wasm_cross/assign_mut_callee_consumes_var.almd
-31	23	703	31	spec/wasm_cross/assign_nested_call_release.almd
+31	24	703	31	spec/wasm_cross/assign_nested_call_release.almd
 26	16	560	26	spec/wasm_cross/assign_nested_mut_writeback_release.almd
 14036	14002	34222229	14036	spec/wasm_cross/assign_self_call_release.almd
 9	0	121	9	spec/wasm_cross/autotry_construction.almd
@@ -596,7 +596,7 @@
 58578	58465	939208	58578	spec/wasm_cross/nested_field_path_mut.almd
 22	10	248	22	spec/wasm_cross/nested_hof_lambda_inference.almd
 90	58	687	90	spec/wasm_cross/nested_list_list_int.almd
-65	30	374	65	spec/wasm_cross/nested_list_list_string.almd
+65	36	374	65	spec/wasm_cross/nested_list_list_string.almd
 25	6	243	25	spec/wasm_cross/nested_list_option_result.almd
 14	9	104	14	spec/wasm_cross/nested_map_list_values.almd
 16	12	155	16	spec/wasm_cross/nested_match_heap_arm.almd
@@ -645,7 +645,7 @@
 10	2	164	10	spec/wasm_cross/place_assign_ascription.almd
 12	4	193	12	spec/wasm_cross/place_mutation.almd
 147	101	2521	147	spec/wasm_cross/playground_default.almd
-4	0	24	4	spec/wasm_cross/pop_heap_element.almd
+3	0	16	3	spec/wasm_cross/pop_heap_element.almd
 22	16	327	22	spec/wasm_cross/positional_variant_field_literal.almd
 2	0	36	1	spec/wasm_cross/prim_alloc_count_domain.almd
 ~	spec/wasm_cross/process_args.almd
