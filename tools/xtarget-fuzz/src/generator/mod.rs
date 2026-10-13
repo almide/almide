@@ -245,7 +245,7 @@ impl Engine {
             .iter()
             .find(|s| format!("{}.{}", s.module, s.func) == name)
             .ok_or_else(|| format!("{name}: not in the generator's catalogue"))?;
-        inspect_gen::Target::new(sig)
+        inspect_gen::Target::new(sig, &self.catalogue)
     }
 
     /// Centre the campaign on one stdlib function (`module.fn`, the stdlib
