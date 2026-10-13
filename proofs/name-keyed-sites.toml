@@ -762,7 +762,7 @@ names = 46
 [[site]]
 id = "crates/almide-types/src/self_host_registry.rs::self_host_runtime::table"
 class = "legacy"
-names = 1826
+names = 1821
 
 [[site]]
 id = "crates/almide-types/src/stdlib_info.rs::AUTO_IMPORT_BUNDLED::table"
@@ -913,11 +913,6 @@ names = 5
 id = "crates/almide-wasm/src/collections_set.rs::lower_set_call::or-pattern"
 class = "legacy"
 names = 5
-
-[[site]]
-id = "crates/almide-wasm/src/eta.rs::HOF_MODULES::table"
-class = "legacy"
-names = 7
 
 [[site]]
 id = "crates/almide-wasm/src/fan.rs::lower_fan_call::or-pattern"
@@ -1163,3 +1158,9 @@ names = 9
 id = "src/wasm_leg.rs::link_self_host::scan_expr::or-chain"
 class = "legacy"
 names = 2
+
+[[site]]
+id = "crates/almide-ir/src/meter_plan.rs::INLINED_CALLBACK_MODULES::table"
+class = "justified"
+names = 7
+why = "The legacy eta.rs HOF_MODULES list, moved (#3673), not a new property: which stdlib modules the wasm emitter lowers with an inline-callback arm is a fact about that emitter, not about the functions, and the native codegen's meter must charge a hop exactly where that emitter does. One list both legs read replaces the copy a second leg would need."
