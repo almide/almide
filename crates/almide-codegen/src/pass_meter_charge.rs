@@ -125,7 +125,7 @@ impl Cut {
     }
 
     fn stmt(&self, check: &str) -> IrStmt {
-        expr_stmt(self.guarded(check))
+        stmt_of(self.guarded(check))
     }
 
     /// `{ let __almd_s = <concat>; <cut on its byte length>; __almd_s }`.
@@ -224,7 +224,7 @@ impl Metering<'_> {
                 body.insert(0, self.cut.stmt("__almd_meter_pending()"));
                 let for_in = std::mem::take(e);
                 let span = for_in.span;
-                let stmts = vec![expr_stmt(for_in), self.cut.stmt("__almd_meter_pending()")];
+                let stmts = vec![stmt_of(for_in), self.cut.stmt("__almd_meter_pending()")];
                 *e = IrExpr { kind: IrExprKind::Block { stmts, expr: None }, ty: Ty::Unit, span, def_id: None };
             }
             IrExprKind::BinOp { op: BinOp::ConcatStr, .. } => {
@@ -236,7 +236,9 @@ impl Metering<'_> {
     }
 }
 
-fn expr_stmt(expr: IrExpr) -> IrStmt {
+/// `expr` as a statement. A constructor, not a walker, so it does not take
+/// the `*_stmt` name the traversal-totality lint reads as a descent.
+fn stmt_of(expr: IrExpr) -> IrStmt {
     let span = expr.span;
     IrStmt { kind: IrStmtKind::Expr { expr }, span }
 }
