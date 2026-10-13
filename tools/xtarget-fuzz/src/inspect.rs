@@ -895,6 +895,21 @@ mod verdict_tests {
         assert_eq!(run_failure(&output(2, "", "warning: x\nerror: boom\n")), "exit Some(2): error: boom");
     }
 
+    /// #3671: a probe that stopped because a call given an in-domain input
+    /// returned `none` / `false` is reported as the refusal it measured, in
+    /// every verdict, never as a count or a match.
+    #[test]
+    fn a_run_that_refused_its_in_domain_input_is_reported_as_such() {
+        let stderr = format!("PANIC: {OFF_DOMAIN}: none\nalloc: live=0 peak=9\n");
+        let want = "refused its in-domain input (the probed call returned none)";
+        assert_eq!(run_failure(&output(1, "", &stderr)), format!("exit Some(1): {want}"));
+        let wasm = format!("PANIC: {OFF_DOMAIN}: false__ALMD_WASM_ALLOC allocs=5 reused=0 live=3\n");
+        let (ok, part) = alloc_part("call", &output(1, "", &wasm));
+        assert!(!ok && part.ends_with("(refused its in-domain input (the probed call returned false))") && !part.contains("live="), "{part}");
+        let v = diamond_verdict(true, &output(1, "", &stderr), &output(1, "", &stderr));
+        assert!(v.starts_with("FAIL: ") && v.contains(want), "{v}");
+    }
+
     /// `--emit` writes every program a verdict runs: the plain call, each
     /// rebind shape, and the diamond project.
     #[test]
