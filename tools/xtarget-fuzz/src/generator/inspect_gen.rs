@@ -33,6 +33,99 @@ pub struct Target {
     mut_param: Option<usize>,
     /// The function's [`SHAPE_RECIPES`] entry, if it has one.
     recipe: Option<&'static Recipe>,
+    /// An in-domain argument derived from the declaration ([`Domain`]),
+    /// for the parameter at the index, when no recipe names the function.
+    domain: Option<(usize, Domain)>,
+}
+
+/// An argument inside the function's domain, derived from its declaration
+/// rather than from its name (#3671): the generic values made the parsers
+/// return `err`, the checked conversions `none`, and those runs measured the
+/// refusal instead of the function.
+#[derive(Debug, Clone, PartialEq)]
+enum Domain {
+    /// A narrowing conversion (an Int or Float to `Option[<fixed width>]`):
+    /// the integral value 2, which every fixed-width type holds. The generic
+    /// 1.5 is refused as non-integral, and a size-like `n` leaves Int8 / UInt8
+    /// past 127.
+    Narrow(GenType),
+    /// The inverse of a decoder `X -> Result[P]` / `Option[P]`: what its
+    /// module's own producer `P -> X` makes of a payload — a payload of size
+    /// n when P has a size. A numeral (an Int or Float printed by its own
+    /// module) has no size of its own, so it scales by n leading zero digits,
+    /// which every positional numeral reads as the same number.
+    Inverse { producer: String, payload: GenType, numeral: bool },
+}
+
+impl Domain {
+    fn expr(&self, n: u64) -> String {
+        match self {
+            Domain::Narrow(GenType::Float) => "2.0".into(),
+            Domain::Narrow(_) => "2".into(),
+            Domain::Inverse { producer, payload, numeral: true } => format!("string.repeat(\"0\", {n}) + {producer}({})", small(payload)),
+            Domain::Inverse { producer, payload, numeral: false } if has_size(payload) => format!("{producer}({})", sized(payload, n)),
+            Domain::Inverse { producer, payload, .. } => format!("{producer}({})", small(payload)),
+        }
+    }
+
+    /// The argument grows with n.
+    fn scales(&self) -> bool {
+        matches!(self, Domain::Inverse { numeral: true, .. }) || matches!(self, Domain::Inverse { payload, .. } if has_size(payload))
+    }
+
+    /// The domain of a one-parameter function returning a Result or an
+    /// Option, from its signature and its module's catalogued functions.
+    fn derive(sig: &Signature, x: &GenType, ret: &GenType, catalogue: &[Signature]) -> Option<Domain> {
+        let payload = match ret {
+            GenType::Result(p) | GenType::Option(p) => (**p).clone(),
+            _ => return None,
+        };
+        if matches!((ret, &payload, x), (GenType::Option(_), GenType::Sized(_), GenType::Int | GenType::Float)) {
+            return Some(Domain::Narrow(x.clone()));
+        }
+        // Producers are matched on closed types only: a generic one has no
+        // fixed `P -> X` to invert.
+        let closed = HashMap::new();
+        let producers: Vec<&Signature> = catalogue
+            .iter()
+            .filter(|g| g.module == sig.module && g.func != sig.func && !g.effect && g.mut_param.is_none() && g.params.len() == 1)
+            .filter(|g| g.params[0].instantiate(&closed).as_ref() == Some(&payload) && g.ret.instantiate(&closed).as_ref() == Some(x))
+            .collect();
+        let producer = match producers.as_slice() {
+            [g] => *g,
+            many => {
+                let dual = inverse_name(&sig.func)?;
+                *many.iter().find(|g| g.func == dual)?
+            }
+        };
+        // A numeral is what the number type's own module prints it as
+        // (`int.to_string`, `float.to_string`); `string.from_codepoint` also
+        // makes a String from an Int, but a character, not a numeral.
+        let numeral = *x == GenType::String && matches!((&payload, producer.module), (GenType::Int, "int") | (GenType::Float, "float"));
+        Some(Domain::Inverse { producer: format!("{}.{}", producer.module, producer.func), payload, numeral })
+    }
+}
+
+/// The function a decoder undoes, when its module has more than one
+/// producer of the decoder's input (`int.to_string` and `int.to_hex` both
+/// print an Int): by the stdlib's naming convention `from_X` undoes `to_X`,
+/// `decode..` undoes `encode..`, and `parse` undoes `to_string`. A
+/// convention over name SHAPES, not a list of functions: a decoder that
+/// follows it is covered when it is added, and one that does not is left to
+/// the generic values (and to [`SHAPE_RECIPES`]).
+fn inverse_name(f: &str) -> Option<String> {
+    if let Some(x) = f.strip_prefix("from_") {
+        return Some(format!("to_{x}"));
+    }
+    if f.contains("decode") {
+        return Some(f.replace("decode", "encode"));
+    }
+    (f == "parse").then(|| "to_string".to_string())
+}
+
+/// A value of `t` has a size [`sized`] can grow.
+fn has_size(t: &GenType) -> bool {
+    matches!(t, GenType::List(_) | GenType::Map(_) | GenType::Set(_) | GenType::String | GenType::Bytes | GenType::Matrix | GenType::Value)
 }
 
 const SIZE_LIKE_INT: &[&str] = &["n", "count", "times", "len", "size", "end", "width"];
@@ -43,9 +136,14 @@ const SEARCH_PARAMS: &[&str] = &["x", "value", "elem", "item", "needle", "target
 
 /// The arguments of a function whose operands must agree in shape (#3637):
 /// each named parameter takes its expression, `{n}` standing for the size,
-/// and `size` is the parameter the size is measured in. The generic values
-/// (`matrix.zeros(n, 2)`, 2×2 operands, 2 for every count) violate these
-/// functions' preconditions, so every shape exited 1.
+/// and `size` is the parameter the size is measured in (when the recipe
+/// gives it no expression it takes the generic sized value). The generic
+/// values (`matrix.zeros(n, 2)`, 2×2 operands, 2 for every count) violate
+/// these functions' preconditions, so every shape exited 1.
+///
+/// A recipe also declares its input in-domain: every probe of the function
+/// stops with [`OFF_DOMAIN`] when the call still returns `none` or `false`
+/// (and with [`ERR_PATH`] on `err`, as every Result-returning call does).
 #[derive(Debug)]
 struct Recipe {
     func: &'static str,
@@ -102,7 +200,57 @@ const SHAPE_RECIPES: &[Recipe] = &[
         size: "text",
         args: &[("text", "\"[\" + (list.range(0, {n}) |> list.map((i) => int.to_string(100000000 + i)) |> list.join(\",\")) + \"]\"")],
     },
+    // The entries below are keyed by name because what makes their input
+    // valid is stated only in the doc comment, and no type separates it
+    // (#3671). `String -> Bool` is the type of every validator: the class of
+    // characters each accepts ("All ASCII 0-9", "All whitespace", "Has
+    // letters, all uppercase") is prose, and the generic "aéaé…" is refused
+    // at its first character, so the full scan was never measured.
+    Recipe { func: "string.is_digit", size: "s", args: &[("s", "string.repeat(\"0123456789\", {n})")] },
+    Recipe { func: "string.is_whitespace", size: "s", args: &[("s", "string.repeat(\" \\t\", {n})")] },
+    // Uppercase, with the two-byte letter the generic string carries.
+    Recipe { func: "string.is_upper", size: "s", args: &[("s", "string.repeat(\"AÉ\", {n})")] },
+    // UTF-8 byte offsets "none if bad or mid-char": the generic end 2 lands
+    // inside `é`. 3 is the end of one whole "aé".
+    Recipe { func: "string.byte_slice", size: "s", args: &[("s", "string.repeat(\"aé\", {n})"), ("start", "0"), ("end", "3")] },
+    // A lookup "err / none if missing": the key the sized object holds last
+    // (its keys are `k<100000000 + i>`), so the hit scans the whole object.
+    Recipe { func: "value.field", size: "v", args: &[("key", "\"k${100000000 + {n} - 1}\"")] },
+    Recipe { func: "json.get_int", size: "j", args: &[("key", "\"k${100000000 + {n} - 1}\"")] },
+    // Deleting an absent key is a no-op. The plain call's per-iteration
+    // step re-sets "k0" (see `vary`), so deleting "k0" hits on every call,
+    // and the map holds "k0" from the start for the diamond.
+    Recipe {
+        func: "map.delete",
+        size: "m",
+        args: &[("m", "map.set(list.range(0, {n}) |> list.fold(map.new(), (m, i) => map.set(m, \"k${100000000 + i}\", i)), \"k0\", 0)"), ("key", "\"k0\"")],
+    },
+    // Elementwise operands "truncate to overlap": against the generic 2×2
+    // operand the result is 2×2 whatever n is, so the order measured was the
+    // truncation's. Every operand takes the n × 2 shape of the sized one.
+    Recipe { func: "matrix.add", size: "a", args: &[("b", "matrix.zeros({n}, 2)")] },
+    Recipe { func: "matrix.sub", size: "a", args: &[("b", "matrix.zeros({n}, 2)")] },
+    Recipe { func: "matrix.fma", size: "a", args: &[("b", "matrix.zeros({n}, 2)")] },
+    Recipe { func: "matrix.fma3", size: "a", args: &[("b", "matrix.zeros({n}, 2)"), ("c", "matrix.zeros({n}, 2)")] },
+    // "No-op if it won't fit" / "clamped to fit": the generic 2 for every
+    // offset copied an empty range (2..2) and read past a 2-byte source.
+    // Distinct byte values, so the diamond shows the copy.
+    Recipe {
+        func: "bytes.copy_within",
+        size: "b",
+        args: &[("b", "bytes.from_list(list.range(0, {n}) |> list.map((i) => i % 256))"), ("src_start", "0"), ("src_end", "2"), ("dst", "2")],
+    },
+    Recipe { func: "bytes.copy_from", size: "dst", args: &[("src_off", "0")] },
+    // A pattern the sized "aéaé…" matches whole; the generic pattern was
+    // the sized string and the subject 2 characters, so it never matched.
+    Recipe { func: "regex.full_match", size: "s", args: &[("pat", "\"(aé)*\"")] },
 ];
+
+/// The panic a probe program stops with when a call whose input is
+/// in-domain (a [`SHAPE_RECIPES`] entry or a derived [`Domain`]) returned
+/// `none` or `false`: it refused the input, and that run measured the
+/// refusal (#3671). `src/inspect.rs` reads it off the run's stderr.
+pub const OFF_DOMAIN: &str = "inspect: the probed call refused its in-domain input";
 
 /// The panic a probe program stops with when the probed call returned `err`:
 /// it took the error path, and a run that did is a failed run, never a
@@ -114,7 +262,8 @@ pub const ERR_PATH: &str = "inspect: the probed call returned err";
 const STOPS_ON_TRUE: &[&str] = &["any", "find", "find_index", "position", "find_map", "index_where"];
 
 impl Target {
-    pub fn new(sig: &Signature) -> Result<Target, String> {
+    /// `catalogue` is where a decoder's inverse is looked up ([`Domain`]).
+    pub fn new(sig: &Signature, catalogue: &[Signature]) -> Result<Target, String> {
         let name = format!("{}.{}", sig.module, sig.func);
         let mut subst = sig.forced_bindings();
         let mut vars = Vec::new();
@@ -136,19 +285,36 @@ impl Target {
             if let Some((p, _)) = r.args.iter().find(|(p, _)| param_at(p).is_none()) {
                 return Err(format!("{name}: shape recipe names `{p}`, which is not a parameter"));
             }
-            if !r.args.iter().any(|(p, e)| *p == r.size && e.contains("{n}")) {
+            if param_at(r.size).is_none() {
+                return Err(format!("{name}: shape recipe's size `{}` is not a parameter", r.size));
+            }
+            if r.args.iter().any(|(p, e)| *p == r.size && !e.contains("{n}")) {
                 return Err(format!("{name}: shape recipe's size `{}` does not take n", r.size));
             }
         }
-        let size_param = match recipe {
-            Some(r) => param_at(r.size),
-            None => params
+        // Effect functions name things the sandbox holds; their domain is
+        // the sandbox's, not a value the harness derives.
+        let domain = match (recipe, params.as_slice()) {
+            (None, [(_, p)]) if !sig.effect => concrete(p).and_then(|x| Domain::derive(sig, &x, &ret, catalogue)).map(|d| (0, d)),
+            _ => None,
+        };
+        let size_param = match (recipe, &domain) {
+            (Some(r), _) => param_at(r.size),
+            (None, Some((i, d))) => d.scales().then_some(*i),
+            (None, None) => params
                 .iter()
                 .position(|(_, t)| matches!(concrete(t), Some(GenType::List(_) | GenType::Map(_) | GenType::Set(_) | GenType::String | GenType::Bytes | GenType::Matrix | GenType::Value)))
                 .or_else(|| params.iter().position(|(n, t)| *t == SigType::Int && SIZE_LIKE_INT.contains(&n.as_str()))),
         };
         let rebind_param = params.iter().position(|(_, t)| concrete(t).as_ref() == Some(&ret));
-        Ok(Target { name, params, subst, ret, size_param, rebind_param, mut_param: sig.mut_param, recipe })
+        Ok(Target { name, params, subst, ret, size_param, rebind_param, mut_param: sig.mut_param, recipe, domain })
+    }
+
+    /// The probes give this function an input inside its domain (a recipe
+    /// or a derived [`Domain`]), so a `none` / `false` from it is a refusal
+    /// the probe stops on ([`OFF_DOMAIN`]), not a result to measure.
+    pub fn in_domain(&self) -> bool {
+        self.recipe.is_some() || self.domain.is_some()
     }
 
     /// The recipe's expression for parameter `i`, if it names it.
@@ -157,9 +323,14 @@ impl Target {
         self.recipe?.args.iter().find(|(p, _)| p == pname).map(|(_, e)| *e)
     }
 
+    /// The derived in-domain argument for parameter `i`, if there is one.
+    fn domain_arg(&self, i: usize) -> Option<&Domain> {
+        self.domain.as_ref().filter(|(at, _)| *at == i).map(|(_, d)| d)
+    }
+
     /// Parameter `i`'s value grows with n.
     fn scales(&self, i: usize) -> bool {
-        Some(i) == self.size_param || self.recipe_arg(i).is_some_and(|e| e.contains("{n}"))
+        Some(i) == self.size_param || self.recipe_arg(i).is_some_and(|e| e.contains("{n}")) || self.domain_arg(i).is_some_and(Domain::scales)
     }
 
     fn ty(&self, i: usize) -> Option<GenType> {
@@ -170,6 +341,9 @@ impl Target {
         let (pname, t) = &self.params[i];
         if let Some(e) = self.recipe_arg(i) {
             return e.replace("{n}", &n.to_string());
+        }
+        if let Some(d) = self.domain_arg(i) {
+            return d.expr(n);
         }
         match t {
             SigType::Fn(ps, r) => self.lambda(ps, r),
@@ -232,7 +406,7 @@ impl Target {
         if with_call {
             let _ = writeln!(s, "    let r: {} = {}", self.ret.render(), self.bound_call(slot.map(|(i, _)| i)));
             let _ = writeln!(s, "    acc = acc + {}", digest("r", &self.ret));
-            s.push_str(&err_guard("r", &self.ret, "    "));
+            s.push_str(&outcome_guard("r", &self.ret, self.in_domain(), "    "));
         }
         let _ = writeln!(s, "    acc = acc + 1\n    i = i + 1\n  }}");
         if let Some(i) = self.size_param {
@@ -249,7 +423,7 @@ impl Target {
     pub fn rebind_programs(&self, n: u64, k: u64) -> Vec<(&'static str, String)> {
         let Some(p) = self.rebind_param else { return Vec::new() };
         let ty = self.ret.render();
-        let init = if Some(p) == self.size_param || self.recipe_arg(p).is_some() { self.arg(p, n) } else { sized(&self.ret, n) };
+        let init = if Some(p) == self.size_param || self.recipe_arg(p).is_some() || self.domain_arg(p).is_some() { self.arg(p, n) } else { sized(&self.ret, n) };
         // The other value arguments come from typed top-level fns, which the
         // tail shape's `go` can see as well as `main` (an inline `ok(2)`
         // leaves its error type unconstrained, E025). They are small, except
@@ -270,12 +444,13 @@ impl Target {
             format!("{}({})", self.name, args.join(", "))
         };
         let d = digest("x", &self.ret);
-        // The value each shape ends with must be ok. Checked once, after the
-        // steps: a check inside them would change what they time (the
-        // in-place rebind). Every shape starts from an `ok` (`small` and the
-        // recipes build no `err`), so a step that took the error path leaves
-        // an `err` unless a later step turns it back into an `ok`.
-        let end = format!("{}  println(\"${{{d}}}\")\n", err_guard("x", &self.ret, "  "));
+        // The value each shape ends with must be ok (and, from an in-domain
+        // input, not `none` / `false`). Checked once, after the steps: a
+        // check inside them would change what they time (the in-place
+        // rebind). Every shape starts from an `ok` (`small` and the recipes
+        // build no `err`), so a step that took the error path leaves an `err`
+        // unless a later step turns it back into an `ok`.
+        let end = format!("{}  println(\"${{{d}}}\")\n", outcome_guard("x", &self.ret, self.in_domain(), "  "));
         let programs = vec![
             (
                 "loop",
@@ -338,7 +513,7 @@ impl Target {
         }
         // Three paths agreeing on an `err` agree on the error path.
         for v in ["d", "l", "r"] {
-            main.push_str(&err_guard(v, &self.ret, "  "));
+            main.push_str(&outcome_guard(v, &self.ret, self.in_domain(), "  "));
         }
         for v in ["d", "l", "r"] {
             // A Unit return has no string form (E089) and nothing to compare.
@@ -507,14 +682,23 @@ fn vary(v: &str, t: &GenType, n: u64) -> String {
     }
 }
 
-/// For a Result `t`, the statement that stops the program with [`ERR_PATH`]
-/// when `v` is an `err`; nothing for any other type. The error slot is
+/// The statement that stops the program when `v` (of type `t`) is a
+/// refusal: an `err` always ([`ERR_PATH`]); with the input `in_domain`, a
+/// `none` or a `false` as well ([`OFF_DOMAIN`]). Without an in-domain
+/// input a `none` / `false` is a legitimate answer — a search's miss is its
+/// worst case ([`SEARCH_PARAMS`]) — so nothing is checked. The error slot is
 /// pinned to String (see the module doc), so `e` interpolates.
-fn err_guard(v: &str, t: &GenType, indent: &str) -> String {
-    if !matches!(t, GenType::Result(_)) {
-        return String::new();
+fn outcome_guard(v: &str, t: &GenType, in_domain: bool, indent: &str) -> String {
+    match t {
+        GenType::Result(_) => {
+            format!("{indent}match {v} {{\n{indent}  ok(_) => (),\n{indent}  err(e) => panic(\"{ERR_PATH}: ${{e}}\"),\n{indent}}}\n")
+        }
+        GenType::Option(_) if in_domain => {
+            format!("{indent}match {v} {{\n{indent}  some(_) => (),\n{indent}  none => panic(\"{OFF_DOMAIN}: none\"),\n{indent}}}\n")
+        }
+        GenType::Bool if in_domain => format!("{indent}if {v} then () else panic(\"{OFF_DOMAIN}: false\")\n"),
+        _ => String::new(),
     }
-    format!("{indent}match {v} {{\n{indent}  ok(_) => (),\n{indent}  err(e) => panic(\"{ERR_PATH}: ${{e}}\"),\n{indent}}}\n")
 }
 
 /// An Int that depends on the whole of `v`, so no call is dead.

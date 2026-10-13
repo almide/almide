@@ -24,7 +24,7 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 use crate::generator::{
-    inspect_gen::{Target, ERR_PATH},
+    inspect_gen::{Target, ERR_PATH, OFF_DOMAIN},
     Engine, Family,
 };
 
@@ -400,8 +400,10 @@ fn run_artifact(ctx: &Ctx, art: &Path, leg: Leg) -> Result<String, String> {
 
 /// Why a probe run failed: its exit and its first error line — or, when the
 /// program stopped because the probed call returned `err` ([`ERR_PATH`]),
-/// that it took the error path (#3666). Every verdict reads a failed run
-/// through this, so an error-path run is never timed, counted or matched.
+/// that it took the error path (#3666), or, when a call given an in-domain
+/// input returned `none` / `false` ([`OFF_DOMAIN`]), that it refused it
+/// (#3671). Every verdict reads a failed run through this, so such a run is
+/// never timed, counted or matched.
 fn run_failure(out: &std::process::Output) -> String {
     format!("exit {:?}: {}", out.status.code(), failure_reason(&out.stderr))
 }
@@ -411,9 +413,13 @@ fn failure_reason(stderr: &[u8]) -> String {
     // The wasm allocator's exit report (`__ALMD_WASM_ALLOC ...`) can follow
     // the panic message on the same line.
     let reason = |rest: &str| rest.split("__ALMD_").next().unwrap_or("").trim_start_matches(':').trim().to_string();
-    match text.lines().find_map(|l| l.split_once(ERR_PATH).map(|(_, rest)| reason(rest))) {
-        Some(why) => format!("took the error path (the probed call returned err: {})", why.chars().take(160).collect::<String>()),
-        None => first_error(stderr),
+    let marked = |marker: &str| text.lines().find_map(|l| l.split_once(marker).map(|(_, rest)| reason(rest).chars().take(160).collect::<String>()));
+    if let Some(why) = marked(ERR_PATH) {
+        format!("took the error path (the probed call returned err: {why})")
+    } else if let Some(what) = marked(OFF_DOMAIN) {
+        format!("refused its in-domain input (the probed call returned {what})")
+    } else {
+        first_error(stderr)
     }
 }
 
