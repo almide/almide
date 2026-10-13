@@ -976,3 +976,40 @@ Builds compared: 0.62.0, 0.66.0 (release 819bbc74f) and develop 974c00ea0.
 1. Land #3679 and #3678. Then bundle #3667, #3672 and #3674 once each is green.
 2. Valid-input recipes for the voided rows (decimal / float / hex strings, in-range checked inputs, char-boundary ranges, all-digit / whitespace / upper strings, Float / Str Values), then re-inspect them, plus the 73 not stampable in batch 4d.
 3. TCP step 3 (p3 shim over `wasi:sockets@0.3`) and step 4. Then unix / fd / shm through Almide's own host interface.
+
+## 2026-10-13 (evening): every open bug has a green PR or a ruling
+
+### Merged
+- **#3680** (closes #3677, the wasm `fs.read_bytes` staging leak), **#3681** (#3649), **#3682** (#3661), **#3683** (#3669: native `fan.race` regions spliced from v1; it replaced #3672).
+
+### Green, waiting for the owner's enqueue (written + tested on CI, not merged)
+- **#3684: tcp steps 1+2.** It replaces #3679, which conflicted with develop.
+  - The cancelled shards on #3679 were a real hang. Linux `recv` on a zero-length buffer waits for data; macOS returns at once. The core now answers a zero-length read empty without the syscall. This was reproduced and confirmed on a GCE c4-standard-4 VM.
+  - Cross-target fixture runs are now capped at 120 s and kill their process group, so a hang fails by name.
+  - CI shard 1/4 ran `net_tcp_native_core_test` (0.8 s) and `net_tcp_embedded_cross_test` (11 s) to PASS.
+- **#3685** (closes #3668, release blocker): a closure *value* passed to a runtime raw `F: Fn` slot is passed as `&(*f)`. A literal stays un-boxed. Tested with a two-leg test (7 call shapes), failing first.
+- **#3686** (closes #3673, release blocker): when the v1 region splice refuses, native meters the program in codegen, sharing the wasm leg's meter plan (`almide-ir/src/meter_plan.rs`).
+  - Arms that call stdlib outside v1's floor now run natively, and so do record / variant / tuple / `List[String]` / Option signatures. `--target rust` output now builds standalone.
+  - Charge verdicts agree between legs on everything measured. Cases with no writable zero cut at the caller's next charge point; that is listed in the PR.
+  - A traversal-totality lint false positive (the `expr_stmt` name read as a walker) was fixed by renaming the constructor, not by an allowlist.
+- **#3687** (closes #3664): measured at depth 100k on wasmtime 47 with `-W tail-call=y`.
+  - Before the fix, effect-fn and multi-`mut` tail calls exhausted the stack.
+  - The fold now covers every move-mode form, and a self-loop owner-param leak (20k levels → 200 MB) is fixed.
+  - `mut_param_call_chain :: g` now has an event-free witness, and the test expecting the old one was updated with the reason.
+- **#3658 (owner ruling 2026-10-13: canonicalize every float writer).**
+  - als#140 (C-210 widened to all 11 bytes float writers, plus a fixture) is green and waiting for merge.
+  - The almide branch `fix-3658-float-writer-nan` is pushed.
+  - The 15 stamps it voided were re-inspected on GCE (3 × c4-standard-4, asia-northeast1-b, at dbe2b73c6). All passed and were restamped; the uninspected count is unchanged at 347.
+
+### codopsy (as CI measures, `.codopsyrc.json` copied into the crate)
+- almide-wasm A 90, almide-codegen A 90, almide-mir A 90 (all at the boundary, unchanged).
+- almide-ir A 94, almide-interp A 96, almide-wasm-run A 95, almide-rt-core A 98.
+
+### Lessons
+- **A test that pins a witness string pins the old code shape.** When a fix removes events, update the expectation and say why. The portable checker's acceptance stays the real gate.
+- **A name-heuristic lint can misread a helper.** Rename the helper so its name tells the truth, rather than teaching the lint an exception.
+
+### Next
+1. Owner: enqueue #3684–#3687 and merge als#140. Then advance `proofs/als-pin.txt` on `fix-3658-float-writer-nan` and open its PR.
+2. Valid-input recipes for the voided rows, then re-inspect them in small batches.
+3. TCP step 3 (p3 shim over `wasi:sockets@0.3`) and step 4.
