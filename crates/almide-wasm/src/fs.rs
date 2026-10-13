@@ -152,61 +152,12 @@ impl Emitter<'_> {
 
     /// fs.read_bytes: raw host bytes → List[Int] (one i64 slot per byte).
     fn lower_fs_read_bytes(&mut self, p: &IrExpr) -> Result<SliceTy, EmitError> {
-        Ok({
-
-                self.fs_call_1(p, OP_READ_BYTES)?;
-                // raw bytes → List[Int] (one i64 slot per byte)
-                let hret = self.hold_i64()?;
-                let hraw = self.hold_i32()?;
-                let hlen = self.hold_i32()?;
-                let hout = self.hold_i32()?;
-                let hk = self.hold_i32()?;
-                {
-                    let mut i = self.f.instructions();
-                    i.local_set(hret);
-                    i.local_get(hret).i64_const(0xFFFF_FFFF).i64_and().i32_wrap_i64().local_set(hlen);
-                    i.local_get(hlen).call(F_ALLOC).local_set(hraw);
-                    i.local_get(hraw).i32_const(almide_layout::PAYLOAD as i32).i32_add().call(F_HOST_READ);
-                    i.local_get(hret).i64_const(32).i64_shr_s().i32_wrap_i64().i32_const(1).i32_eq();
-                    i.if_(BlockType::Result(ValType::I32));
-                    // err(msg): hraw IS the message string
-                    i.i32_const(16)
-                        .call(F_ALLOC)
-                        .local_tee(hout)
-                        .i32_const(1)
-                        .i32_store(slot_memarg(almide_layout::SUM_TAG));
-                    i.local_get(hout).local_get(hraw).i32_store(slot_memarg(almide_layout::SUM_FIELD));
-                    i.local_get(hout);
-                    i.else_();
-                    // decode: n bytes → n i64 slots
-                    i.local_get(hlen).i32_const(3).i32_shl().call(F_ALLOC).local_set(hout);
-                    i.i32_const(0).local_set(hk);
-                    i.block(BlockType::Empty).loop_(BlockType::Empty);
-                    i.local_get(hk).local_get(hlen).i32_ge_u().br_if(1);
-                    i.local_get(hout).local_get(hk).i32_const(3).i32_shl().i32_add();
-                    i.local_get(hraw).local_get(hk).i32_add();
-                    i.i32_load8_u(byte_memarg()).i64_extend_i32_u();
-                    i.i64_store(slot_memarg(0));
-                    i.local_get(hk).i32_const(1).i32_add().local_set(hk);
-                    i.br(0).end().end();
-                    // ok(list)
-                    let hs = self.tmp_i32_local;
-                    i.i32_const(16)
-                        .call(F_ALLOC)
-                        .local_set(hs);
-                    i.local_get(hs).i32_const(0).i32_store(slot_memarg(almide_layout::SUM_TAG));
-                    i.local_get(hs).local_get(hout).i32_store(slot_memarg(almide_layout::SUM_FIELD));
-                    i.local_get(hs);
-                    i.end();
-                }
-                for _ in 0..4 {
-                    self.release_i32();
-                }
-                self.release_i64();
-                let ih = self.types.intern(INT);
-                let lh = self.types.intern(SliceTy::List(ih));
-                SliceTy::Result(lh, self.types.intern(STR))
-        })
+        self.fs_call_1(p, OP_READ_BYTES)?;
+        // The decode shared with the if-exists twin (fs_meta).
+        self.fs_decode_byte_list()?;
+        let ih = self.types.intern(INT);
+        let lh = self.types.intern(SliceTy::List(ih));
+        Ok(SliceTy::Result(lh, self.types.intern(STR)))
     }
 
     /// path → fs_call(op, path, 0, 0): the i64 ret is on the stack.
@@ -457,10 +408,6 @@ impl Emitter<'_> {
         self.release_i32();
         Ok(())
     }
-}
-
-fn byte_memarg() -> wasm_encoder::MemArg {
-    wasm_encoder::MemArg { offset: u64::from(almide_layout::PAYLOAD), align: 0, memory_index: 0 }
 }
 
 impl Emitter<'_> {
