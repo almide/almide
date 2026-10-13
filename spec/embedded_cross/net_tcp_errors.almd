@@ -1,3 +1,4 @@
+// @contract: C-378
 // net tcp failure texts (#3620): every failure is errno-free text from one
 // table, identical on native, the embedded lane and the stock WASI 0.3
 // component. Connect and listen read `<fn>(<host>:<port>): <class text>`,
