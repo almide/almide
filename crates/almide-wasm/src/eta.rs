@@ -26,8 +26,9 @@ use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
 use almide_ir::{CallTarget, IrExpr, IrExprKind, IrProgram, Mutability, VarTable};
 use almide_types::types::Ty;
 
-/// The stdlib families whose arms inline a callback (`hof_lambda`).
-const HOF_MODULES: &[&str] = &["list", "map", "set", "option", "result", "fan", "fs", "matrix"];
+/// The stdlib families whose arms inline a callback (`hof_lambda`) — the
+/// one list the native codegen's meter reads too (#3673).
+use almide_ir::meter_plan::INLINED_CALLBACK_MODULES as HOF_MODULES;
 
 /// The eta-expanded program, or `None` when no callback needed it (the
 /// common case: no clone).
