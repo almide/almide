@@ -207,6 +207,7 @@
 4471	spec/wasm_cross/fan_prefetch_fs.almd
 3324	spec/wasm_cross/fan_pure_thunks.almd
 5884	spec/wasm_cross/fan_race_mapper.almd
+9762	spec/wasm_cross/fan_race_walled_program.almd
 3239	spec/wasm_cross/fan_settle_tuple.almd
 4749	spec/wasm_cross/fan_sibling_trap.almd
 4953	spec/wasm_cross/fan_trap_waits_for_elements_below.almd
