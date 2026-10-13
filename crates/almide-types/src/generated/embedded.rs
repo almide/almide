@@ -2609,8 +2609,13 @@ fn bytes_fill(b: Bytes, val: Int) -> Unit = {
 fn bytes_clear(b: Bytes) -> Unit = prim.store32(prim.handle(b) + 4, 0)
 
 
+
+
+fn __bm_f32_obs_bits(v: Float) -> Int = if float.is_nan(v) then 0x7FC00000 else prim.f32bits(prim.f2f32(v))
+
+
 fn bytes_set_f64_be(b: Bytes, pos: Int, val: Float) -> Unit = {
-  let bits = prim.fbits(val)
+  let bits = float.to_bits(val)
   let n = prim.load32(prim.handle(b) + 4)
   let base = prim.handle(b) + 12
   let _ = if pos >= 0 then (if pos <= n - 8 then __s64be(base + pos, bits) else 0)
@@ -2618,7 +2623,7 @@ fn bytes_set_f64_be(b: Bytes, pos: Int, val: Float) -> Unit = {
 }
 
 fn bytes_set_f64_le(b: Bytes, pos: Int, val: Float) -> Unit = {
-  let bits = prim.fbits(val)
+  let bits = float.to_bits(val)
   let n = prim.load32(prim.handle(b) + 4)
   let base = prim.handle(b) + 12
   let _ = if pos >= 0 then (if pos <= n - 8 then __s64le(base + pos, bits) else 0)
@@ -2627,8 +2632,7 @@ fn bytes_set_f64_le(b: Bytes, pos: Int, val: Float) -> Unit = {
 
 
 fn bytes_set_f32_be(b: Bytes, pos: Int, val: Float) -> Unit = {
-  let f = prim.f2f32(val)
-  let bits = prim.f32bits(f)
+  let bits = __bm_f32_obs_bits(val)
   let n = prim.load32(prim.handle(b) + 4)
   let base = prim.handle(b) + 12
   let _ = if pos >= 0 then (if pos <= n - 4 then __s32be(base + pos, bits) else 0)
@@ -2636,8 +2640,7 @@ fn bytes_set_f32_be(b: Bytes, pos: Int, val: Float) -> Unit = {
 }
 
 fn bytes_set_f32_le(b: Bytes, pos: Int, val: Float) -> Unit = {
-  let f = prim.f2f32(val)
-  let bits = prim.f32bits(f)
+  let bits = __bm_f32_obs_bits(val)
   let n = prim.load32(prim.handle(b) + 4)
   let base = prim.handle(b) + 12
   let _ = if pos >= 0 then (if pos <= n - 4 then __s32le(base + pos, bits) else 0)
@@ -3134,10 +3137,19 @@ fn bytes_write_uint32(b: Bytes, v: Int, e: Endian) -> Bytes = __bt_append(
 
 fn bytes_write_int32(b: Bytes, v: Int, e: Endian) -> Bytes = __bt_append(b, v, 4, __endian_is_le(e))
 
-fn bytes_write_float32(b: Bytes, v: Float32, e: Endian) -> Bytes = {
+
+
+fn __bt_f32_obs_bits(v: Float32) -> Int = {
   let f = float.from_float32(v)
-  __bt_append(b, prim.f32bits(prim.f2f32(f)), 4, __endian_is_le(e))
+  if float.is_nan(f) then 0x7FC00000 else prim.f32bits(prim.f2f32(f))
 }
+
+fn bytes_write_float32(b: Bytes, v: Float32, e: Endian) -> Bytes = __bt_append(
+  b,
+  __bt_f32_obs_bits(v),
+  4,
+  __endian_is_le(e),
+)
 
 
 
@@ -3185,10 +3197,13 @@ fn bytes_set_int32(b: Bytes, offset: Int, v: Int, e: Endian) -> Unit = __bt_set(
   __endian_is_le(e),
 )
 
-fn bytes_set_float32(b: Bytes, offset: Int, v: Float32, e: Endian) -> Unit = {
-  let f = float.from_float32(v)
-  __bt_set(b, offset, prim.f32bits(prim.f2f32(f)), 4, __endian_is_le(e))
-}
+fn bytes_set_float32(b: Bytes, offset: Int, v: Float32, e: Endian) -> Unit = __bt_set(
+  b,
+  offset,
+  __bt_f32_obs_bits(v),
+  4,
+  __endian_is_le(e),
+)
 "#;
 pub const SRC_CLOCK_NOW: &str = r#"
 
