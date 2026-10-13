@@ -123,8 +123,11 @@ impl Emitter<'_> {
                     // Loop form: the params are rebound by the loop-back,
                     // the locals live on into the next iteration. An arm
                     // rest does not (#3377): no rebind releases it, and the
-                    // arguments already took their own credit of it.
-                    params.iter().copied().chain(self.arm_rests.locals()).collect()
+                    // arguments already took their own credit of it. A param
+                    // an Assign route made an owner (a write-back in another
+                    // arm, #3664) is rebound too: its old block goes here.
+                    let rebound = owned.iter().filter(|&&i| i < self.rc_param_ceiling && !self.tail_consumed.contains(&i));
+                    params.iter().chain(rebound).copied().chain(self.arm_rests.locals()).collect()
                 }
             }
         };
