@@ -60,13 +60,16 @@ impl Emitter<'_> {
     /// The shared probe: `key_mode` is what the CALLER does with the key
     /// afterwards — `set` stores it on append (Retain); `get`, `contains`,
     /// `get_or` and `remove` only compare (Borrow).
+    /// `raw`: a pure probe (`get` / `get_or` / `contains`) reads a
+    /// tombstone var without settling it (#3691) — the index lane steps
+    /// over holes; a copying caller (`set`, `remove`) settles.
     fn map_scan(
         &mut self,
         m: &IrExpr,
         key: &IrExpr,
-        key_mode: ArgMode,
+        (key_mode, raw): (ArgMode, bool),
     ) -> Result<(u32, u32, u32, SliceTy, SliceTy, (u32, u32, u32)), EmitError> {
-        let (k, v) = match self.lower_arg(m, None, ArgMode::Borrow)? {
+        let (k, v) = match self.lower_map_receiver(m, raw)? {
             SliceTy::Map(kh, vh) => (self.types.el(kh), self.types.el(vh)),
             other => return unsup(&format!("map-op-of:{other:?}")),
         };
@@ -126,32 +129,37 @@ impl Emitter<'_> {
                 self.f.instructions().i32_const(0).call(F_ALLOC);
                 Ok(Some(Lowered::owned(ty)))
             }
+            // A tombstone var (#3691) is read raw: its holes are subtracted.
             ("len", [m]) => {
-                let (k, v) = match self.lower_arg(m, None, ArgMode::Borrow)? {
+                let holed = self.tomb_receiver(m);
+                let (k, v) = match self.lower_map_receiver(m, holed)? {
                     SliceTy::Map(kh, vh) => (self.types.el(kh), self.types.el(vh)),
                     other => return unsup(&format!("map-op-of:{other:?}")),
                 };
-                let stride = entry_layout(k, v).2;
-                self.f
-                    .instructions()
-                    .i32_load(len_memarg())
-                    .i32_const(stride as i32)
-                    .i32_div_u()
-                    .i64_extend_i32_u();
+                self.emit_map_live_count(entry_layout(k, v).2, holed)?;
+                self.f.instructions().i64_extend_i32_u();
                 Ok(Some(Lowered::scalar(INT)))
             }
             // #1423 stage 4: is_empty = the len slot at zero — stride-free
             // (0 entries is 0 bytes whatever the entry layout), semantics
             // verbatim from stdlib/map_core.almd's load32(handle+4) == 0.
+            // A tombstone var's holes count as empty.
             ("is_empty", [m]) => {
-                if !matches!(self.lower_arg(m, None, ArgMode::Borrow)?, SliceTy::Map(..)) {
+                let holed = self.tomb_receiver(m);
+                let SliceTy::Map(kh, vh) = self.lower_map_receiver(m, holed)? else {
                     return unsup("map-op-of:non-map");
+                };
+                if holed {
+                    let (k, v) = (self.types.el(kh), self.types.el(vh));
+                    self.emit_map_live_count(entry_layout(k, v).2, true)?;
+                    self.f.instructions().i32_eqz();
+                } else {
+                    self.f.instructions().i32_load(len_memarg()).i32_eqz();
                 }
-                self.f.instructions().i32_load(len_memarg()).i32_eqz();
                 Ok(Some(Lowered::scalar(BOOL)))
             }
             ("contains", [m, key]) => {
-                let (_mh, _kh, eh, k, ..) = self.map_scan(m, key, ArgMode::Borrow)?;
+                let (_mh, _kh, eh, k, ..) = self.map_scan(m, key, (ArgMode::Borrow, true))?;
                 self.f.instructions().local_get(eh).i32_const(0).i32_ne();
                 self.release_i32(); // eh
                 self.release_for(k);
@@ -159,7 +167,7 @@ impl Emitter<'_> {
                 Ok(Some(Lowered::scalar(BOOL)))
             }
             ("get", [m, key]) => {
-                let (_mh, _kh, eh, k, v, lay) = self.map_scan(m, key, ArgMode::Borrow)?;
+                let (_mh, _kh, eh, k, v, lay) = self.map_scan(m, key, (ArgMode::Borrow, true))?;
                 // none, or a fresh some-block holding the value slot.
                 self.f
                     .instructions()
@@ -189,7 +197,10 @@ impl Emitter<'_> {
                 Ok(Some(Lowered::owned(SliceTy::Option(self.types.intern(v)))))
             }
             ("get_or", [m, key, default]) => {
-                let (_mh, _kh, eh, k, v, lay) = self.map_scan(m, key, ArgMode::Borrow)?;
+                // the default lowers after the probe: one that reads the
+                // var would settle (move) the entry the probe found
+                let raw = !matches!(&m.kind, IrExprKind::Var { id } if crate::rc_ownership::rc_mentions_var(default, *id));
+                let (_mh, _kh, eh, k, v, lay) = self.map_scan(m, key, (ArgMode::Borrow, raw))?;
                 // The default ALWAYS evaluates (native argument order,
                 // #1919) — see list.get_or; the entry handle is already a
                 // held local.
@@ -227,7 +238,7 @@ impl Emitter<'_> {
                 if let Some(owned) = self.try_map_set_owned(m, key, value)? {
                     return Ok(Some(owned));
                 }
-                let (mh, kh_local, eh, k, v, lay) = self.map_scan(m, key, ArgMode::Retain)?;
+                let (mh, kh_local, eh, k, v, lay) = self.map_scan(m, key, (ArgMode::Retain, false))?;
                 let vh = self.hold_for(v)?;
                 self.lower_arg(value, Some(v), ArgMode::Retain)?;
                 self.f.instructions().local_set(vh);
@@ -328,7 +339,7 @@ impl Emitter<'_> {
                 if let Some(owned) = self.try_map_remove_owned(m, key)? {
                     return Ok(Some(owned));
                 }
-                let (mh, _kh, eh, k, v, _) = self.map_scan(m, key, ArgMode::Borrow)?;
+                let (mh, _kh, eh, k, v, _) = self.map_scan(m, key, (ArgMode::Borrow, false))?;
                 self.emit_map_remove_copy(crate::map_remove::RemoveHolds { mh, eh }, k, v)?;
                 self.release_i32(); // eh
                 self.release_for(k);
