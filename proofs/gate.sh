@@ -347,7 +347,11 @@ run_structural spec/wasm_cross/witness_straightline.almd shed 0
 run_structural spec/wasm_cross/witness_straightline.almd tag 0
 run_structural spec/wasm_cross/r5_lowmisc_param_try_err.almd id_list 0
 # Corruption drill: strip one release — the checker must see the leak.
-emit_structural spec/wasm_cross/witness_straightline.almd shed | sed 's/dd$/d/' > $GATE_TMP/structural.tamper
+# `shed`'s `b = a` takes over the dying `a` (#3661, rebind_move.rs), so its
+# witness is `ibbamd` with ONE release; the drill strips that release, and
+# refuses to run on any other witness (a no-op sed would "pass" a valid one).
+emit_structural spec/wasm_cross/witness_straightline.almd shed | sed 's/^ibbamd$/ibbam/' > $GATE_TMP/structural.tamper
+grep -qx 'ibbam' $GATE_TMP/structural.tamper || { echo "FAIL structural-tamper: shed's witness is no longer 'ibbamd' — re-aim the drill"; exit 1; }
 set +e; "$ROOT/proofs/checker" ownership $GATE_TMP/structural.tamper >/dev/null 2>&1; src_rc=$?; set -e
 if [ "$src_rc" -ne 1 ]; then echo "FAIL structural-tamper: a leaked structural witness was accepted"; exit 1; fi
 kernel_verify ownership $GATE_TMP/structural.tamper 1   || { echo "FAIL structural-tamper: the kernel accepted the leak"; exit 1; }
