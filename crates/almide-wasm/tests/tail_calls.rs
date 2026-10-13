@@ -126,3 +126,157 @@ effect fn main() -> Unit = {
 "#;
     assert_constant_stack("mut_tail_mutual.almd", src, "50000\n50000\n");
 }
+
+/// #3664: an EFFECT fn's self tail call forwarding its `mut` param. A
+/// never-err value fn binds the call under `!` before the write-back; the
+/// fold keeps the `!` on the tail call.
+#[test]
+fn effect_self_tail_call_forwarding_a_mut_param_is_constant_stack() {
+    let src = r#"effect fn go(mut s: String, i: Int) -> String = {
+  if i == 0 then s
+  else {
+    string.push(s, "b")
+    go(s, i - 1)!
+  }
+}
+
+effect fn main() -> Unit = {
+  var s = string.repeat("a", 10)
+  let r = go(s, 100000)!
+  println(int.to_string(string.len(r)))
+  println(int.to_string(string.len(s)))
+}
+"#;
+    assert_constant_stack("mut_tail_effect.almd", src, "100010\n100010\n");
+}
+
+/// #3664: the was-Unit effect twin, whose body is a braced block (phase 3
+/// folds only a bare terminal `if` / `match`).
+#[test]
+fn effect_unit_self_tail_call_forwarding_a_mut_param_is_constant_stack() {
+    let src = r#"effect fn go(mut xs: List[Int], i: Int) -> Unit = {
+  if i == 0 then ()
+  else {
+    list.push(xs, i)
+    go(xs, i - 1)!
+  }
+}
+
+effect fn main() -> Unit = {
+  var xs: List[Int] = []
+  go(xs, 100000)!
+  println(int.to_string(list.len(xs)))
+}
+"#;
+    assert_constant_stack("mut_tail_effect_unit.almd", src, "100000\n");
+}
+
+/// #3664: a CAN-ERR effect fn carries its buffer on the err arm. The err
+/// raised 60000 levels down must reach the caller with every push made
+/// before it (native's `&mut`); then a full-depth ok run.
+#[test]
+fn can_err_effect_tail_call_forwarding_a_mut_param_keeps_the_err_path() {
+    let src = r#"effect fn go(mut xs: List[Int], i: Int, stop: Int) -> Int = {
+  if i == stop then err("stopped at ${int.to_string(i)}")!
+  else if i == 0 then list.len(xs)
+  else {
+    list.push(xs, i)
+    go(xs, i - 1, stop)!
+  }
+}
+
+effect fn main() -> Unit = {
+  var xs: List[Int] = []
+  match go(xs, 100000, 40000) {
+    ok(n) => println("ok ${int.to_string(n)}"),
+    err(e) => println(e),
+  }
+  println(int.to_string(list.len(xs)))
+  var ys: List[Int] = []
+  let n = go(ys, 100000, -1)!
+  println(int.to_string(n))
+  println(int.to_string(list.len(ys)))
+}
+"#;
+    assert_constant_stack("mut_tail_can_err.almd", src, "stopped at 40000\n60000\n100000\n100000\n");
+}
+
+/// #3664: a fn with SEVERAL `mut` params forwarding all of them, with a
+/// value return and a was-Unit return.
+#[test]
+fn tail_call_forwarding_several_mut_params_is_constant_stack() {
+    let src = r#"fn go(mut a: List[Int], mut b: String, i: Int) -> Int =
+  if i == 0 then list.len(a) + string.len(b)
+  else {
+    list.push(a, i)
+    string.push(b, "x")
+    go(a, b, i - 1)
+  }
+
+fn go_unit(mut a: List[Int], mut b: String, i: Int) -> Unit =
+  if i == 0 then ()
+  else {
+    list.push(a, i)
+    string.push(b, "x")
+    go_unit(a, b, i - 1)
+  }
+
+effect fn main() -> Unit = {
+  var a: List[Int] = []
+  var b = ""
+  let n = go(a, b, 100000)
+  println(int.to_string(n))
+  println(int.to_string(list.len(a)))
+  println(int.to_string(string.len(b)))
+  var c: List[Int] = []
+  var d = ""
+  go_unit(c, d, 100000)
+  println(int.to_string(list.len(c)))
+  println(int.to_string(string.len(d)))
+}
+"#;
+    assert_constant_stack("mut_tail_multi.almd", src, "200000\n100000\n100000\n100000\n100000\n");
+}
+
+/// #3664: the buffer is READ after a non-tail call in another arm. The
+/// non-tail write-back stays where it is; the tail arms still loop, and each
+/// loop-back must release the param block that write-back made an owner
+/// (it leaked one copy per level: 100k levels ran out of memory).
+#[test]
+fn mut_param_read_after_a_non_tail_call_keeps_its_value() {
+    let src = r#"fn go(mut s: String, i: Int) -> Int =
+  if i == 0 then string.len(s)
+  else if i % 1000 == 0 then {
+    let n = go(s, i - 1)
+    n + string.len(s)
+  }
+  else {
+    string.push(s, "x")
+    go(s, i - 1)
+  }
+
+fn go2(mut a: List[Int], mut b: String, i: Int) -> Int =
+  if i == 0 then list.len(a)
+  else if i % 1000 == 0 then {
+    let n = go2(a, b, i - 1)
+    n + list.len(a) + string.len(b)
+  }
+  else {
+    list.push(a, i)
+    string.push(b, "y")
+    go2(a, b, i - 1)
+  }
+
+effect fn main() -> Unit = {
+  var s = ""
+  println(int.to_string(go(s, 100000)))
+  println(int.to_string(string.len(s)))
+  var a: List[Int] = []
+  var b = ""
+  println(int.to_string(go2(a, b, 100000)))
+  println(int.to_string(list.len(a)))
+  println(int.to_string(string.len(b)))
+}
+"#;
+    assert_constant_stack("mut_tail_read_after.almd", src, "10089900\n99900\n20079900\n99900\n99900\n");
+}
