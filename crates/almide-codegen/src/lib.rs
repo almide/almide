@@ -71,6 +71,7 @@ pub mod pass_licm;
 pub mod pass_peephole;
 pub mod pass_range_counting;
 pub mod pass_metered_region_delegate;
+pub mod pass_meter_charge;
 pub mod pass_region_window;
 pub mod pass_region_window_clone;
 mod prelude_region;
@@ -121,6 +122,11 @@ pub struct CodegenOptions {
     /// not user code), so the default is a hard error; this flag exists only as
     /// an explicit, recorded escape hatch for shipping despite a known leak.
     pub allow_unverified: bool,
+    /// Meter the `fan.bounded` / `fan.race` / `fan.timeout` regions in this
+    /// codegen (#3673, `MeterChargePass`) instead of delegating them to the
+    /// v1-rendered region module. The caller links the meter's runtime
+    /// (`almide_mir::pipeline::native_meter_runtime`).
+    pub meter_in_codegen: bool,
 }
 
 /// Marker the Rust emitter inserts between the inlined runtime preamble and the
@@ -260,6 +266,7 @@ pub fn codegen_with(program: &mut IrProgram, target: Target, options: &CodegenOp
     // 2. gate — refuse whatever is still bare-with-qualified-decl (genuinely
     //    ambiguous), turning the silent E0425 / wasm-trap class into a
     //    structured compiler-bug report.
+    program.codegen_annotations.meter_in_codegen = options.meter_in_codegen;
     verify_names::repair_bare_type_names(program);
     verify_names::assert_names_resolvable(program);
 

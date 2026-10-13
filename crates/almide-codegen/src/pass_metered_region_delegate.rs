@@ -32,6 +32,10 @@ impl NanoPass for MeteredRegionDelegatePass {
     fn run_before(&self) -> Vec<&'static str> { vec!["BorrowInsertion"] }
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
+        // #3673: this codegen meters the regions itself (`MeterChargePass`).
+        if program.codegen_annotations.meter_in_codegen {
+            return PassResult { program, changed: false };
+        }
         let mut changed = false;
         for func in program.functions.iter_mut() {
             if runtime_use::is_metered_region(func.name.as_str()) && metered_region_crosses(func) {

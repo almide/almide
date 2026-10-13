@@ -18,6 +18,17 @@ pub enum VarStorage {
 /// Annotations populated by Nanopass passes, read by the walker.
 #[derive(Debug, Clone, Default)]
 pub struct CodegenAnnotations {
+    /// The standard native codegen meters the program's `fan.bounded` /
+    /// `fan.race` / `fan.timeout` regions itself (#3673): `MeterChargePass`
+    /// places the deterministic charges, and `MeteredRegionDelegatePass`
+    /// leaves the regions in place. Set from `CodegenOptions` before the
+    /// pipeline runs — the CLI chooses it when a region is outside the v1
+    /// render's subset.
+    pub meter_in_codegen: bool,
+    /// `for` binders whose head `MeterChargePass` metered (#3673): the walker
+    /// iterates `__almd_meter_iter(<iterable>)`, which charges every head
+    /// evaluation, the exhausting one included.
+    pub metered_loop_vars: HashSet<VarId>,
     /// Unified variable storage classification.
     /// Keyed by VarId for local vars (RcCow) and module vars with known ids.
     pub var_storage: HashMap<VarId, VarStorage>,
