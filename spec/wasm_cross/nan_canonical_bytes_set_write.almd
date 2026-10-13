@@ -1,0 +1,35 @@
+// @contract: C-210
+// The SET and WRITE half of C-210's bytes float-writer family (#3658): every
+// writer, not only the appends, is a NaN-observation boundary. `set_f64_le/be`,
+// `set_f32_le/be`, `write_f64_be`, `write_float32` and `set_float32` all write
+// the canonical pattern (f64 0x7FF8000000000000, f32 0x7FC00000) for every NaN,
+// however produced: 0.0/0.0, a from_bits payload NaN (sign set, low payload), a
+// negated NaN, an arithmetic NaN. The last row is a non-NaN: its bits stay raw,
+// so the rule never over-reaches.
+effect fn main() -> Unit = {
+  let z = 0.0
+  let nan_div = z / z
+  let payload = int.bits_to_float(0 - 256)
+  let arith = 0.0 - nan_div
+  let rows = [("div", nan_div), ("payload", payload), ("negated", -nan_div), ("arith", arith), ("half", 1.5)]
+  for (name, x) in rows {
+    var s = bytes.new(24)
+    bytes.set_f64_le(s, 0, x)
+    bytes.set_f64_be(s, 8, x)
+    bytes.set_f32_le(s, 16, x)
+    bytes.set_f32_be(s, 20, x)
+    println("${name} set=${bytes.to_list(s)}")
+    var w = bytes.new(0)
+    bytes.write_f64_be(w, x)
+    println("${name} write_f64_be=${bytes.to_list(w)}")
+    let x32 = float.to_float32(x)
+    var t = bytes.new(0)
+    bytes.write_float32(t, x32, LittleEndian)
+    bytes.write_float32(t, x32, BigEndian)
+    println("${name} write_float32=${bytes.to_list(t)}")
+    var u = bytes.new(8)
+    bytes.set_float32(u, 0, x32, LittleEndian)
+    bytes.set_float32(u, 4, x32, BigEndian)
+    println("${name} set_float32=${bytes.to_list(u)}")
+  }
+}
