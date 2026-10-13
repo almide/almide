@@ -135,7 +135,14 @@ pub(crate) enum Helper {
     MapIdxHash { key: crate::map_index::IdxKey },
     MapIdxBuild { key: crate::map_index::IdxKey, hash: u32 },
     MapIdxFind { key: crate::map_index::IdxKey, fns: crate::map_index::IdxFns, build: u32 },
-    MapIdxAppend { key: crate::map_index::IdxKey, fns: crate::map_index::IdxFns },
+    MapIdxAppend { key: crate::map_index::IdxKey, fns: crate::map_index::IdxFns, grow: u32 },
+    /// The hole family (#3691, map_index.rs "Holes"): the index doubled with
+    /// its tombstones dropped, the delete's tombstone, the in-place
+    /// compaction and the hole count.
+    MapIdxGrow { key: crate::map_index::IdxKey, hash: u32 },
+    MapIdxKill { key: crate::map_index::IdxKey, fns: crate::map_index::IdxFns, build: u32 },
+    MapIdxSettle { key: crate::map_index::IdxKey, fns: crate::map_index::IdxFns },
+    MapIdxDead { side_get: u32 },
     /// `$drop_list(block)` — the typed drop of a List whose elements are
     /// heap HANDLES (#2010 stage 2b): the spine's credit down; at zero
     /// every element released through `elem_dec` (`$dec_flat` for a

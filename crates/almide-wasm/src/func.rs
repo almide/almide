@@ -245,6 +245,7 @@ pub(crate) fn lower_fn(
     // C-319: shared-cell LOCALS (captured ∩ mutated; never a global, #3317)
     // hold the CELL ADDRESS (i32); env-captured cells arrive pre-flagged.
     let mut cell_vars = crate::cells::cell_vars_of(body);
+    let tomb_vars = crate::map_remove::tomb_vars_of(body);
     let mut binds: Vec<(VarId, SliceTy)> = Vec::new();
     if let Some(caps) = &env_captures {
         for (var, ty, _, is_cell) in caps {
@@ -395,6 +396,8 @@ pub(crate) fn lower_fn(
             deferred_ranges: &deferred_ranges,
             metered,
             cells: &cell_vars,
+            tomb_vars: &tomb_vars,
+            raw_map_read: false,
             moves: Default::default(),
             region_repair: region_saved_var.and_then(|v| {
                 let saved = locals.get(&v)?.0;

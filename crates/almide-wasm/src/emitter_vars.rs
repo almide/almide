@@ -79,6 +79,10 @@ impl Emitter<'_> {
             self.f.instructions().local_get(scr);
             self.witness_mut_rebind(*id, global);
         } else {
+            // a tombstone var hands its callee a block without holes
+            if !global {
+                self.settle_tomb_read(id, ty);
+            }
             self.witness_mut_read(*id, global);
         }
         Ok(())

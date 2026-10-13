@@ -128,6 +128,7 @@ mod collections;
 mod collections_hof;
 mod collections_set;
 mod map_inplace;
+mod map_holes;
 mod map_index;
 mod map_merge;
 mod map_remove;

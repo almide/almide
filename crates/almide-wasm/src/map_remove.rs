@@ -13,15 +13,37 @@
 //!   rc 1) — the entry's key and value credits are released, the later
 //!   entries shift down one (insertion order kept, as native's
 //!   `Vec::remove`), `len` drops by one entry and an indexed block's index
-//!   is retired (map_index.rs invariant 3) — native rebuilds its own
-//!   (`remove_at`); either way a present delete is O(n), as on native.
+//!   is retired (map_index.rs invariant 3). That shift is O(n), so the
+//!   `map.delete` of a TOMBSTONE var (below) leaves a hole instead.
 //! * **present key, shared** (an alias, a holder, a pool static) — the
 //!   functional copy without the entry, and the op's credit on the shared
 //!   original goes: every other holder keeps the pre-delete map (C-033).
 //!
 //! A borrowed receiver keeps the functional copy, as `map.set` does.
+//!
+//! # Tombstone vars (#3691)
+//!
+//! The `map.delete(m, k)` of a local `m` with an indexed key class (Int or
+//! String) past the index threshold tombstones the entry instead of
+//! shifting (map_index.rs "Holes": `$mapidx_kill`, then `$mapidx_settle`
+//! compacts once the holes outnumber the live entries) — native's
+//! `AlmideMap::remove` holes the same way, so a delete is amortized O(1) on
+//! both legs. The holes must not reach anything that walks the block, so
+//! they stay inside the var: `tomb_vars_of` names, per frame, every var a
+//! `map.delete` receives, and each read of one SETTLES the block (compacts
+//! it, a no-op without holes) before the value goes anywhere — the read
+//! hook in emitter.rs and the `mut`-param pass (`emit_read_mut_var_cow`).
+//! Only the reads that look through the index read it raw: `get`,
+//! `get_or`, `contains`, `len` / `is_empty` (which subtract the holes) and
+//! the in-place set and delete windows. Holes only ever sit in a block at
+//! rc 1 — every holder takes its credit through a settling read — so a
+//! shared block's functional copy never copies one. A param, a global and
+//! a C-319 cell keep the shift.
 
-use almide_ir::{IrExpr, VarId};
+use std::collections::HashSet;
+
+use almide_ir::visit::{walk_expr, IrVisitor};
+use almide_ir::{CallTarget, IrExpr, IrExprKind, VarId};
 use wasm_encoder::{BlockType, MemArg};
 
 use crate::arm::{ArgMode, Lowered};
@@ -29,11 +51,34 @@ use crate::emitter::Emitter;
 use crate::*;
 
 /// The helpers a judged delete calls, resolved before its operands lower.
+/// `tomb` = `($mapidx_kill, $mapidx_settle)` for a tombstone var's delete.
 #[derive(Clone, Copy)]
 struct RemoveFns {
     scan: u32,
     forget: Option<u32>,
     drop_map: u32,
+    tomb: Option<(u32, u32)>,
+}
+
+/// Every var a `map.delete` in `body` receives — the frame's candidate
+/// tombstone vars (an over-approximation is only a no-op settle per read).
+pub(crate) fn tomb_vars_of(body: &IrExpr) -> HashSet<VarId> {
+    struct Scan(HashSet<VarId>);
+    impl IrVisitor for Scan {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } = &e.kind
+                && module.as_str() == "map"
+                && func.as_str() == "delete"
+                && let Some(IrExprKind::Var { id }) = args.first().map(|a| &a.kind)
+            {
+                self.0.insert(*id);
+            }
+            walk_expr(self, e);
+        }
+    }
+    let mut s = Scan(HashSet::new());
+    s.visit_expr(body);
+    s.0
 }
 
 /// The holds a judged delete works on: the receiver block (its result,
@@ -49,7 +94,83 @@ impl Emitter<'_> {
         let scan = self.keyed_find(k)?;
         let forget = self.keyed_remove(k);
         let drop_map = self.dec_fn_of(SliceTy::Map(self.types.intern(k), self.types.intern(v)));
-        Ok(RemoveFns { scan, forget, drop_map })
+        Ok(RemoveFns { scan, forget, drop_map, tomb: None })
+    }
+
+    /// A read of tombstone var `id` (type `ty`, its value on the stack)
+    /// settles the block first — unless a keyed read asked for it raw.
+    pub(crate) fn settle_tomb_read(&mut self, id: &VarId, ty: SliceTy) {
+        if self.raw_map_read || !self.tomb_vars.contains(id) || self.cells.contains(id) {
+            return;
+        }
+        let SliceTy::Map(kt, vt) = ty else { return };
+        let (k, v) = (self.types.el(kt), self.types.el(vt));
+        let Some(settle) = self.keyed_settle(k) else { return };
+        let (koff, _, esz) = crate::collections::entry_layout(k, v);
+        self.f.instructions().i32_const(esz as i32).i32_const(koff as i32).i32_const(1).call(settle);
+    }
+
+    /// Lower a keyed read's receiver `m`: a plain var is read raw (no
+    /// settle) — the index lane steps over holes. Anything else lowers as
+    /// usual.
+    pub(crate) fn lower_map_receiver(&mut self, m: &IrExpr, raw: bool) -> Result<SliceTy, EmitError> {
+        self.raw_map_read = raw && matches!(m.kind, IrExprKind::Var { .. });
+        let got = self.lower_arg(m, None, ArgMode::Borrow);
+        self.raw_map_read = false;
+        got
+    }
+
+    /// `m` is a plain read of a tombstone var: its block may hold holes.
+    pub(crate) fn tomb_receiver(&self, m: &IrExpr) -> bool {
+        matches!(&m.kind, IrExprKind::Var { id } if self.tomb_vars.contains(id) && !self.cells.contains(id))
+    }
+
+    /// The live entry count (i32) of the map block on the stack, `stride`
+    /// bytes per entry; `holed` subtracts a tombstone var's holes.
+    pub(crate) fn emit_map_live_count(&mut self, stride: u32, holed: bool) -> Result<(), EmitError> {
+        if !holed {
+            self.f.instructions().i32_load(len_memarg()).i32_const(stride as i32).i32_div_u();
+            return Ok(());
+        }
+        let mh = self.hold_i32()?;
+        let dead = self.map_dead_fn();
+        let mut i = self.f.instructions();
+        i.local_tee(mh).i32_load(len_memarg()).i32_const(stride as i32).i32_div_u();
+        i.local_get(mh).call(dead).i32_sub();
+        self.release_i32();
+        Ok(())
+    }
+
+    /// Release the handle in the slot `off` bytes into entry `eh` and leave
+    /// NULL there, so a later walk of the hole releases nothing.
+    fn emit_release_and_clear(&mut self, eh: u32, off: u32, ty: SliceTy) {
+        if !self.elem_is_handle(ty) {
+            return;
+        }
+        self.f.instructions().local_get(eh).i32_const(off as i32).i32_add();
+        self.emit_release_slot_at(ty);
+        let at = MemArg { offset: u64::from(off), align: 2, memory_index: 0 };
+        self.f.instructions().local_get(eh).i32_const(almide_layout::NULL_ADDR as i32).i32_store(at);
+    }
+
+    /// The in-place delete of a tombstone var: `$mapidx_kill` holes the
+    /// entry (its value's — and a String key's — credit released, the slot
+    /// cleared; an Int key stays for the liveness probe), then
+    /// `$mapidx_settle` compacts once the holes outnumber the live entries.
+    /// Under the threshold the kill declines and the shift runs.
+    fn emit_map_remove_hole(&mut self, h: RemoveHolds, k: SliceTy, v: SliceTy, fns: RemoveFns, (kill, settle): (u32, u32)) {
+        let RemoveHolds { mh, eh } = h;
+        let (koff, voff, esz) = crate::collections::entry_layout(k, v);
+        let mut i = self.f.instructions();
+        i.local_get(mh).i32_const(esz as i32).i32_const(koff as i32).local_get(eh).call(kill);
+        i.if_(BlockType::Empty);
+        self.emit_release_and_clear(eh, voff, v);
+        self.emit_release_and_clear(eh, koff, k);
+        let mut i = self.f.instructions();
+        i.local_get(mh).i32_const(esz as i32).i32_const(koff as i32).i32_const(0).call(settle).drop();
+        i.else_();
+        self.emit_map_remove_shift(h, k, v, fns.forget);
+        self.f.instructions().end();
     }
 
     /// The functional remove's result, left on the stack: a copy of `mh`
@@ -126,7 +247,10 @@ impl Emitter<'_> {
             i.local_get(mh).i32_load(rc).i32_const(1).i32_eq();
             i.i32_and().if_(BlockType::Empty);
         }
-        self.emit_map_remove_shift(h, k, v, fns.forget);
+        match fns.tomb {
+            Some(tomb) => self.emit_map_remove_hole(h, k, v, fns, tomb),
+            None => self.emit_map_remove_shift(h, k, v, fns.forget),
+        }
         self.f.instructions().else_();
         self.emit_map_remove_copy(RemoveHolds { mh, eh }, k, v)?;
         let mut i = self.f.instructions();
@@ -171,7 +295,10 @@ impl Emitter<'_> {
             return Ok(false);
         };
         let (k, v) = (self.types.el(kt), self.types.el(vt));
-        let fns = self.map_remove_fns(k, v)?;
+        let mut fns = self.map_remove_fns(k, v)?;
+        if !global && self.tomb_vars.contains(id) {
+            fns.tomb = self.keyed_kill(k);
+        }
         let kh = self.hold_for(k)?;
         self.lower_arg(key, Some(k), ArgMode::Borrow)?;
         self.f.instructions().local_set(kh);

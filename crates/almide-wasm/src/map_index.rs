@@ -24,9 +24,11 @@
 //!     1/2 (the outgrown table is freed). `val` is 0 = no record (a
 //!     tombstone), 1 = SEEN ONCE, else the index block's address.
 //!   index block (one per indexed map/set):
-//!     `[hdr][stamp][mask][slot × (mask+1)]` — slot = entry ordinal + 1,
-//!     0 = empty; capacity is the power of two ≥ 2·entries (min 32);
-//!     `stamp` is the block's `len` when the index last agreed with it.
+//!     `[hdr][stamp][mask][dead][slot × (mask+1)]` — slot = entry ordinal
+//!     + 1, 0 = empty, `TOMB` (all ones) = a deleted entry's slot (#3691);
+//!     capacity is the power of two ≥ 2·entries (min 32); `stamp` is the
+//!     block's `len` when the index last agreed with it; `dead` counts the
+//!     block's holes.
 //!
 //! # The three invariants that make an address a sound key
 //!
@@ -47,11 +49,28 @@
 //!    ordinal into the index or, when the load would pass 1/2, drops the
 //!    index (`val = 1`) so the next lookup rebuilds it at double size —
 //!    amortized O(1) per insert, geometric like the block itself. An
-//!    in-place delete (map_remove.rs, #3640) shifts every later ordinal,
-//!    so it frees the index and resets the record to 0 (`$mapidx_forget`):
-//!    the block is new again, and a loop of deletes rides the linear scan
-//!    (each delete is O(n) by its shift already) instead of rebuilding an
-//!    index per step; a lookup run after it re-indexes on its second probe.
+//!    in-place delete (map_remove.rs, #3640) of a block under the
+//!    threshold shifts every later ordinal, so it frees the index and
+//!    resets the record to 0 (`$mapidx_forget`). Past the threshold, the
+//!    delete of a TOMBSTONE var (#3691, below) leaves a hole instead.
+//!
+//! # Holes (#3691)
+//!
+//! `$mapidx_kill` turns the deleted entry's slot into `TOMB` (a probe
+//! steps over it, an insert never claims it) and counts the hole in
+//! `dead`; the entry stays in the block with its handle slots released and
+//! zeroed (a drop walk releases NULL), its Int key kept for the liveness
+//! probe. Every entry, live or dead, owns one non-empty slot, so `len` is
+//! still the occupancy the load check reads, and an append past the load
+//! with holes re-places the live slots into a doubled index
+//! (`$mapidx_grow`) instead of dropping it — a dropped index would forget
+//! which entries are holes. `$mapidx_settle` compacts the block in place
+//! (the live entries move down, insertion order kept, the index retired to
+//! "seen once"): the delete calls it once the holes outnumber the live
+//! entries, so a delete is amortized O(1) where the shift was O(n). Holes
+//! never leave the var whose deletes made them — map_remove.rs's
+//! `tomb_vars_of` and the read hook in emitter.rs: every read of the var
+//! settles first, except the keyed reads that look through the index.
 //!
 //! # The key-class matrix (`IdxKey`)
 //!
@@ -108,16 +127,21 @@ impl IdxKey {
     }
 }
 
-fn w(offset: u32) -> MemArg {
+pub(crate) fn w(offset: u32) -> MemArg {
     MemArg { offset: u64::from(offset), align: 2, memory_index: 0 }
 }
 
 /// Side-table pair `i` sits at `table + PAIRS + i*8`; index slot `h` at
-/// `index + SLOTS + h*4`. Both structures spend their first two payload
-/// words on `[mask|stamp][count|mask]`.
+/// `index + SLOTS + h*4`. The side table spends its first two payload
+/// words on `[mask][count]`, an index its first three on
+/// `[stamp][mask][dead]`.
 const PAIRS: u32 = almide_layout::PAYLOAD + 8;
-const SLOTS: u32 = almide_layout::PAYLOAD + 8;
+pub(crate) const SLOTS: u32 = almide_layout::PAYLOAD + 12;
+pub(crate) const DEAD: u32 = almide_layout::PAYLOAD + 8;
 const HDR_WORDS: i32 = 8;
+pub(crate) const IDX_HDR: i32 = 12;
+/// A deleted entry's slot.
+pub(crate) const TOMB: i32 = -1;
 const FIRST_SIDE_CAP: i32 = 64;
 
 /// `h = fib(addr >> 2) ^ (h >> 15)` — the side table's address hash;
@@ -278,7 +302,7 @@ pub(crate) fn emit_hash_str() -> Function {
 }
 
 /// Load the key slot at the absolute address on the stack.
-fn load_key(i: &mut wasm_encoder::InstructionSink<'_>, key: IdxKey) {
+pub(crate) fn load_key(i: &mut wasm_encoder::InstructionSink<'_>, key: IdxKey) {
     match key {
         IdxKey::Int => i.i64_load(w(0)),
         IdxKey::Str => i.i32_load(w(0)),
@@ -287,7 +311,7 @@ fn load_key(i: &mut wasm_encoder::InstructionSink<'_>, key: IdxKey) {
 
 /// Probe `index` for an EMPTY slot starting at `h` (masked); leaves the
 /// slot's absolute address in `q`.
-fn probe_empty(i: &mut wasm_encoder::InstructionSink<'_>, index: u32, mask: u32, h: u32, q: u32) {
+pub(crate) fn probe_empty(i: &mut wasm_encoder::InstructionSink<'_>, index: u32, mask: u32, h: u32, q: u32) {
     i.block(BlockType::Empty).loop_(BlockType::Empty);
     i.local_get(index).local_get(h).i32_const(2).i32_shl().i32_add().local_tee(q);
     i.i32_load(w(SLOTS)).i32_eqz().br_if(1);
@@ -310,8 +334,9 @@ pub(crate) fn emit_build(key: IdxKey, hash: u32) -> Function {
     i.local_get(cap).local_get(len).local_get(esz).i32_div_u().i32_const(1).i32_shl().i32_ge_u().br_if(1);
     i.local_get(cap).i32_const(1).i32_shl().local_set(cap);
     i.br(0).end().end();
-    i.i32_const(HDR_WORDS).local_get(cap).i32_const(2).i32_shl().i32_add().call(F_ALLOC).local_set(idx);
+    i.i32_const(IDX_HDR).local_get(cap).i32_const(2).i32_shl().i32_add().call(F_ALLOC).local_set(idx);
     i.local_get(idx).i32_const(SLOTS as i32).i32_add().i32_const(0).local_get(cap).i32_const(2).i32_shl().memory_fill(0);
+    i.local_get(idx).i32_const(0).i32_store(w(DEAD));
     i.local_get(idx).local_get(len).i32_store(w(almide_layout::PAYLOAD));
     i.local_get(cap).i32_const(1).i32_sub().local_set(mask);
     i.local_get(idx).local_get(mask).i32_store(w(almide_layout::PAYLOAD + 4));
@@ -398,6 +423,7 @@ pub(crate) fn emit_find(key: IdxKey, fns: IdxFns, build: u32) -> Function {
     i.i32_eqz().if_(BlockType::Empty);
     i.i32_const(almide_layout::NULL_ADDR as i32).return_();
     i.end();
+    i.local_get(s).i32_const(TOMB).i32_ne().if_(BlockType::Empty);
     i.local_get(block).i32_const(almide_layout::PAYLOAD as i32).i32_add();
     i.local_get(s).i32_const(1).i32_sub().local_get(esz).i32_mul().i32_add().local_tee(e);
     i.local_get(koff).i32_add();
@@ -409,6 +435,7 @@ pub(crate) fn emit_find(key: IdxKey, fns: IdxFns, build: u32) -> Function {
     };
     i.if_(BlockType::Empty);
     i.local_get(e).return_();
+    i.end();
     i.end();
     i.local_get(h).i32_const(1).i32_add().local_get(mask).i32_and().local_set(h);
     i.br(0);
@@ -422,13 +449,15 @@ pub(crate) fn emit_find(key: IdxKey, fns: IdxFns, build: u32) -> Function {
 /// appended one entry (len already bumped) — and may have relocated the
 /// block from `old` to `new`. Retire the old address, then either insert
 /// the new ordinal or, past load 1/2 (or a stale stamp), drop the index
-/// so the next lookup rebuilds it at the doubled size.
-pub(crate) fn emit_append(key: IdxKey, fns: IdxFns) -> Function {
+/// so the next lookup rebuilds it at the doubled size — or, when the
+/// block has holes the index alone remembers, double it in place
+/// (`$mapidx_grow`).
+pub(crate) fn emit_append(key: IdxKey, fns: IdxFns, grow: u32) -> Function {
     // params: 0=old, 1=new, 2=esz, 3=koff; locals: 4=v, 5=len, 6=mask,
-    // 7=h, 8=q
+    // 7=h, 8=q, 9=v0
     let (old, new, esz, koff) = (0u32, 1u32, 2u32, 3u32);
-    let (v, len, mask, h, q) = (4u32, 5u32, 6u32, 7u32, 8u32);
-    let mut f = Function::new([(5, ValType::I32)]);
+    let (v, len, mask, h, q, v0) = (4u32, 5u32, 6u32, 7u32, 8u32, 9u32);
+    let mut f = Function::new([(6, ValType::I32)]);
     let mut i = f.instructions();
     i.local_get(old).call(fns.side_get).local_tee(v).i32_eqz().if_(BlockType::Empty);
     i.i32_const(0).return_();
@@ -442,15 +471,21 @@ pub(crate) fn emit_append(key: IdxKey, fns: IdxFns) -> Function {
     i.end();
     i.i32_const(0).return_();
     i.end();
+    i.local_get(v).local_set(v0);
     i.local_get(new).i32_load(len_memarg()).local_set(len);
     i.local_get(v).i32_load(w(almide_layout::PAYLOAD + 4)).local_set(mask);
-    // stale stamp, or the load would pass 1/2: drop and rebuild lazily
+    // stale stamp, or the load would pass 1/2: drop and rebuild lazily —
+    // or, with holes, grow now
     i.local_get(v).i32_load(w(almide_layout::PAYLOAD)).local_get(len).local_get(esz).i32_sub().i32_ne();
     i.local_get(len).local_get(esz).i32_div_u().i32_const(1).i32_shl().local_get(mask).i32_const(1).i32_add().i32_gt_u();
     i.i32_or().if_(BlockType::Empty);
+    i.local_get(v).i32_load(w(DEAD)).i32_eqz().if_(BlockType::Empty);
     i.local_get(v).call(F_FREE);
     i.local_get(new).i32_const(1).call(fns.side_set).drop();
     i.i32_const(0).return_();
+    i.end();
+    i.local_get(new).local_get(v).local_get(esz).local_get(koff).call(grow).local_tee(v);
+    i.i32_load(w(almide_layout::PAYLOAD + 4)).local_set(mask);
     i.end();
     // insert ordinal len/esz - 1 (slot value = ordinal + 1 = len/esz)
     i.local_get(new).i32_const(almide_layout::PAYLOAD as i32).i32_add();
@@ -460,7 +495,7 @@ pub(crate) fn emit_append(key: IdxKey, fns: IdxFns) -> Function {
     probe_empty(&mut i, v, mask, h, q);
     i.local_get(q).local_get(len).local_get(esz).i32_div_u().i32_store(w(SLOTS));
     i.local_get(v).local_get(len).i32_store(w(almide_layout::PAYLOAD));
-    i.local_get(new).local_get(old).i32_ne().if_(BlockType::Empty);
+    i.local_get(new).local_get(old).i32_ne().local_get(v).local_get(v0).i32_ne().i32_or().if_(BlockType::Empty);
     i.local_get(new).local_get(v).call(fns.side_set).drop();
     i.end();
     i.i32_const(0);
@@ -477,7 +512,11 @@ pub(crate) fn helper_params(h: &Helper) -> Option<Vec<ValType>> {
         Helper::MapIdxHash { key } => vec![key.needle()],
         Helper::MapIdxBuild { .. } => vec![ValType::I32, ValType::I32, ValType::I32],
         Helper::MapIdxFind { key, .. } => vec![ValType::I32, ValType::I32, ValType::I32, key.needle()],
-        Helper::MapIdxAppend { .. } => vec![ValType::I32, ValType::I32, ValType::I32, ValType::I32],
+        Helper::MapIdxAppend { .. } | Helper::MapIdxGrow { .. } | Helper::MapIdxSettle { .. } => {
+            vec![ValType::I32, ValType::I32, ValType::I32, ValType::I32]
+        }
+        Helper::MapIdxKill { .. } => vec![ValType::I32, ValType::I32, ValType::I32, ValType::I32],
+        Helper::MapIdxDead { .. } => vec![ValType::I32],
         _ => return None,
     })
 }
@@ -495,7 +534,11 @@ pub(crate) fn helper_body(h: &Helper) -> Option<Function> {
         },
         Helper::MapIdxBuild { key, hash } => emit_build(*key, *hash),
         Helper::MapIdxFind { key, fns, build } => emit_find(*key, *fns, *build),
-        Helper::MapIdxAppend { key, fns } => emit_append(*key, *fns),
+        Helper::MapIdxAppend { key, fns, grow } => emit_append(*key, *fns, *grow),
+        Helper::MapIdxGrow { key, hash } => crate::map_holes::emit_grow(*key, *hash),
+        Helper::MapIdxKill { key, fns, build } => crate::map_holes::emit_kill(*key, *fns, *build),
+        Helper::MapIdxSettle { key, fns } => crate::map_holes::emit_settle(*key, *fns),
+        Helper::MapIdxDead { side_get } => crate::map_holes::emit_dead(*side_get),
         _ => return None,
     })
 }
@@ -530,7 +573,31 @@ impl Emitter<'_> {
     pub(crate) fn keyed_append(&mut self, k: SliceTy) -> Option<u32> {
         let key = index_key(k)?;
         let fns = self.idx_fns(key);
-        Some(self.work.helper(Helper::MapIdxAppend { key, fns }))
+        let grow = self.work.helper(Helper::MapIdxGrow { key, hash: fns.hash });
+        Some(self.work.helper(Helper::MapIdxAppend { key, fns, grow }))
+    }
+
+    /// The tombstoning delete's helpers for a key class with an index
+    /// lane: `($mapidx_kill, $mapidx_settle)` (#3691).
+    pub(crate) fn keyed_kill(&mut self, k: SliceTy) -> Option<(u32, u32)> {
+        let key = index_key(k)?;
+        let fns = self.idx_fns(key);
+        let build = self.work.helper(Helper::MapIdxBuild { key, hash: fns.hash });
+        let kill = self.work.helper(Helper::MapIdxKill { key, fns, build });
+        Some((kill, self.work.helper(Helper::MapIdxSettle { key, fns })))
+    }
+
+    /// `$mapidx_settle` for a key class with an index lane.
+    pub(crate) fn keyed_settle(&mut self, k: SliceTy) -> Option<u32> {
+        let key = index_key(k)?;
+        let fns = self.idx_fns(key);
+        Some(self.work.helper(Helper::MapIdxSettle { key, fns }))
+    }
+
+    /// `$mapidx_dead`.
+    pub(crate) fn map_dead_fn(&mut self) -> u32 {
+        let side_get = self.work.helper(Helper::MapIdxSideGet);
+        self.work.helper(Helper::MapIdxDead { side_get })
     }
 
     /// The in-place delete's hook (`None` for a key class with no index
