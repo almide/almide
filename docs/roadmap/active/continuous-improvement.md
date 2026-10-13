@@ -935,3 +935,44 @@ Builds compared: 0.62.0, 0.66.0 (release 819bbc74f) and develop 974c00ea0.
 2. Land #3645, #3653, #3654, #3655, #3656 and the native-divergence branch. Then re-inspect the functions they touch, plus the 73 not-stampable ones once #3636 and #3637 fix the harness.
 3. #3639 (string.push), #3642, #3643, #3649.
 4. TCP step 3 (p3 shim over `wasi:sockets@0.3`) and step 4. Then unix / fd / shm through Almide's own host interface.
+
+## 2026-10-13 (late): landing in one integration PR
+
+### Merged
+- **#3675, the integration of 15 green PRs** (76 commits, linear), merged 02:45 UTC. It carries:
+  - the progress log (#3634);
+  - 131 stamps (#3635), and 17 stamps voided because their evidence came from an error path (#3671);
+  - native build fixes #3645 and #3655, and the never-auto-`?`-a-call-argument fix (#3653, which closes #3646);
+  - four native divergences (#3657);
+  - mut-param tail calls stay tail calls on wasm (#3663);
+  - in-place `bytes` (#3654), `map.delete` (#3656), `value.merge` / `map.merge` (#3659) and `string.push` (#3660);
+  - the inspection harness fixes #3665 and #3670;
+  - ADR-0023 step 4 (#3633).
+  - The source PRs are closed with a pointer, and the 15 issues they named are closed.
+- **als:** #134 (the three tcp contracts), #137 (C-328 managed fields) and #139 (C-345 generic parameters). The pin is advanced to af5fcca9 inside #3675.
+
+### What the integration taught
+- **Each PR was green alone, and the merge still failed three gates.**
+  - file discipline: `almide-wasm/src/lib.rs` reached 802 lines because three PRs each added a `mod`;
+  - a mutation patch went stale after a function moved;
+  - the inspection ledger: 11 stamped functions had their implementation changed by the bundled fixes.
+  - Run file discipline and the mutation-patch check on the integration head before pushing, not only `regen.sh`.
+- **The 11 changed functions were re-inspected on GCE in the same change** (c4-standard-4 × 4, us-central1-a, integration head). 8 were restamped and 3 voided:
+  - `value.as_float` and `value.as_string`: their probe took the error path, which the #3670 check now refuses;
+  - `value.array`: one finding, which was in fact a `fs.read_bytes` leak → #3677 → #3678.
+  - The uninspected ceiling is now 347; each voided row says why.
+- **Merging goes through the owner.** The session's classifier refuses `gh pr merge`, and als has no auto-merge, so every als merge waits for its `gates` on the up-to-date base. Bundling cut fifteen merges to one.
+
+### Open
+- **#3679:** tcp steps 1+2, rebuilt on develop after #3675; it replaces #3676.
+- **#3678:** wasm `fs.read_bytes` / `read_bytes_if_exists` / `fs.stat` staging-block leak, one shared release.
+- **Not green yet, for the next bundle:**
+  - #3667 (`fold_lines_chunked` with an Rc accumulator);
+  - #3672 (native `fan.race` regions spliced from v1);
+  - #3674 (a dying var at a rebind moves instead of copying).
+- **Follow-ups filed:** #3658, #3661 → #3674, #3664, #3668, #3669 → #3672, #3673.
+
+### Next
+1. Land #3679 and #3678. Then bundle #3667, #3672 and #3674 once each is green.
+2. Valid-input recipes for the voided rows (decimal / float / hex strings, in-range checked inputs, char-boundary ranges, all-digit / whitespace / upper strings, Float / Str Values), then re-inspect them, plus the 73 not stampable in batch 4d.
+3. TCP step 3 (p3 shim over `wasi:sockets@0.3`) and step 4. Then unix / fd / shm through Almide's own host interface.
