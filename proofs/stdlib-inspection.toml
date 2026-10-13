@@ -69,7 +69,7 @@
 #                      every stamped row is to be re-inspected before each final
 #                      release for that (a manual GCE run: no credentials in CI)
 #
-# uninspected_ceiling = "347"
+# uninspected_ceiling = "348"
 
 [[fn]]
 name = "args.flag"
@@ -10340,5 +10340,11 @@ status = "uninspected"
 [[fn]]
 name = "zlib.inflate"
 sig = "effect (data: Bytes) -> Bytes ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "net.tcp_local_port"
+sig = "effect (listener: Int) -> Int ! String"
 class = "effect"
 status = "uninspected"

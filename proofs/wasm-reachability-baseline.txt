@@ -123,6 +123,7 @@ net.tcp_close_listener :: HOST_CAPABILITY :: main is outside the MIR-lowering su
 net.tcp_connect :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_connect needs a declared capability not in this brick
 net.tcp_is_open :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: scalar binding outside the value subset cannot be faithfully computed in this brick (the permissive caps-counting path 
 net.tcp_listen :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_listen needs a declared capability not in this brick
+net.tcp_local_port :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_local_port needs a declared capability not in this brick
 net.tcp_read :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_read needs a declared capability not in this brick
 net.tcp_read_exact :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_read_exact needs a declared capability not in this brick
 net.tcp_read_timeout :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_read_timeout needs a declared capability not in this brick
