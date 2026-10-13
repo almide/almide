@@ -220,11 +220,11 @@ pub fn almide_rt_bytes_set_i64_be(b: &mut Vec<u8>, pos: i64, val: i64) {
     if let Some(p) = window(pos, 8, b.len()) { b[p..p+8].copy_from_slice(&bytes); }
 }
 pub fn almide_rt_bytes_set_f32_be(b: &mut Vec<u8>, pos: i64, val: f64) {
-    let bytes = (val as f32).to_be_bytes();
+    let bytes = canonical_f32(val).to_be_bytes();
     if let Some(p) = window(pos, 4, b.len()) { b[p..p+4].copy_from_slice(&bytes); }
 }
 pub fn almide_rt_bytes_set_f64_be(b: &mut Vec<u8>, pos: i64, val: f64) {
-    let bytes = val.to_be_bytes();
+    let bytes = canonical_f64(val).to_be_bytes();
     if let Some(p) = window(pos, 8, b.len()) { b[p..p+8].copy_from_slice(&bytes); }
 }
 
@@ -423,7 +423,7 @@ pub fn almide_rt_bytes_is_valid_utf8(b: &Vec<u8>) -> bool {
 // ── Bridge protocol: big-endian pack/unpack ──
 
 pub fn almide_rt_bytes_write_i64_be(b: &mut Vec<u8>, val: i64) { b.extend_from_slice(&val.to_be_bytes()); }
-pub fn almide_rt_bytes_write_f64_be(b: &mut Vec<u8>, val: f64) { b.extend_from_slice(&val.to_be_bytes()); }
+pub fn almide_rt_bytes_write_f64_be(b: &mut Vec<u8>, val: f64) { almide_rt_bytes_append_f64_be(b, val); }
 pub fn almide_rt_bytes_write_u32_be(b: &mut Vec<u8>, val: i64) { b.extend_from_slice(&(val as u32).to_be_bytes()); }
 pub fn almide_rt_bytes_write_u8(b: &mut Vec<u8>, val: i64) { b.push(val as u8); }
 pub fn almide_rt_bytes_write_string_be(b: &mut Vec<u8>, s: &str) {
@@ -490,7 +490,7 @@ pub fn almide_rt_bytes_copy_to_ptr(b: &Vec<u8>, ptr: *mut u8, cap: i64) -> i64 {
 // ── In-place little-endian writes & data pointer ──
 
 pub fn almide_rt_bytes_set_f32_le(b: &mut Vec<u8>, pos: i64, val: f64) {
-    let bytes = (val as f32).to_le_bytes();
+    let bytes = canonical_f32(val).to_le_bytes();
     if let Some(p) = window(pos, 4, b.len()) { b[p..p+4].copy_from_slice(&bytes); }
 }
 pub fn almide_rt_bytes_set_u16_le(b: &mut Vec<u8>, pos: i64, val: i64) {
@@ -514,7 +514,7 @@ pub fn almide_rt_bytes_set_i64_le(b: &mut Vec<u8>, pos: i64, val: i64) {
     if let Some(p) = window(pos, 8, b.len()) { b[p..p+8].copy_from_slice(&bytes); }
 }
 pub fn almide_rt_bytes_set_f64_le(b: &mut Vec<u8>, pos: i64, val: f64) {
-    let bytes = val.to_le_bytes();
+    let bytes = canonical_f64(val).to_le_bytes();
     if let Some(p) = window(pos, 8, b.len()) { b[p..p+8].copy_from_slice(&bytes); }
 }
 
@@ -621,10 +621,12 @@ pub fn almide_rt_bytes_append_i32_be(b: &mut Vec<u8>, val: i64) {
 pub fn almide_rt_bytes_append_i64_be(b: &mut Vec<u8>, val: i64) {
     b.extend_from_slice(&val.to_be_bytes());
 }
-// The `append_f*` family is a NaN observation boundary (C-210): a NaN writes
-// the one canonical pattern, as `float.to_bits` reads it, never its raw
-// sign/payload bits (#3647: x86 arithmetic sets the NaN sign where aarch64 does
-// not, and `int.bits_to_float` smuggles any payload).
+// Every bytes float writer — `append_f*`, `set_f*`, `set_float32`,
+// `write_f64_be`, `write_float32` — is a NaN observation boundary (C-210): a
+// NaN writes the one canonical pattern, as `float.to_bits` reads it, never its
+// raw sign/payload bits (#3647: x86 arithmetic sets the NaN sign where aarch64
+// does not, and `int.bits_to_float` smuggles any payload; #3658: the sets and
+// writes too). Every writer takes its value through these two helpers.
 fn canonical_f64(val: f64) -> f64 {
     if val.is_nan() { f64::from_bits(0x7FF8_0000_0000_0000) } else { val }
 }
@@ -1052,15 +1054,13 @@ pub fn almide_rt_bytes_write_int32(b: &mut Vec<u8>, value: i32, e: AlmideEndian)
         AlmideEndian::BigEndian => almide_rt_bytes_append_i32_be(b, value as i64),
     }
 }
-// Writes the NaN bits raw, as before and as the wasm leg does — C-210 does not
-// name `write_float32` an observation boundary, so it keeps its own write
-// rather than the canonicalizing `append_f32_*` (#3647). The f64 round trip is
-// the historical write, kept bit for bit.
+// The canonicalizing `append_f32_*` — a NaN observation boundary like every
+// bytes float writer (C-210, #3658). A non-NaN f32 round-trips through f64
+// exactly, so its bits are unchanged.
 pub fn almide_rt_bytes_write_float32(b: &mut Vec<u8>, value: f32, e: AlmideEndian) {
-    let raw = (value as f64) as f32;
     match e {
-        AlmideEndian::LittleEndian => b.extend_from_slice(&raw.to_le_bytes()),
-        AlmideEndian::BigEndian => b.extend_from_slice(&raw.to_be_bytes()),
+        AlmideEndian::LittleEndian => almide_rt_bytes_append_f32_le(b, value as f64),
+        AlmideEndian::BigEndian => almide_rt_bytes_append_f32_be(b, value as f64),
     }
 }
 
