@@ -653,7 +653,7 @@ fn box_node_unbox_consumed(expr: &mut IrExpr) -> bool {
         IrExprKind::Call { target: CallTarget::Named { name }, args, .. }
             if crate::generated::runtime_fn_modes::takes_raw_fn_last_arg(name.as_str()) =>
         {
-            args.last_mut().map(unbox_consumed).unwrap_or(false)
+            args.last_mut().map(fill_raw_fn_slot).unwrap_or(false)
         }
         // Same set, RuntimeCall spelling: an intrinsic-lowered stdlib call
         // (`fs.fold_lines_range` → `almide_rt_fs_fold_lines_range`) reaches
@@ -663,10 +663,45 @@ fn box_node_unbox_consumed(expr: &mut IrExpr) -> bool {
         IrExprKind::RuntimeCall { symbol, args }
             if crate::generated::runtime_fn_modes::takes_raw_fn_last_arg(symbol.as_str()) =>
         {
-            args.last_mut().map(unbox_consumed).unwrap_or(false)
+            args.last_mut().map(fill_raw_fn_slot).unwrap_or(false)
         }
         _ => false,
     }
+}
+
+/// Fill a runtime helper's raw `F: Fn` last slot (#3668). A closure literal is
+/// un-boxed and stays a static call. A closure VALUE — a `let`-bound lambda or
+/// fn item, a field, a join of closures — is an `Rc<dyn Fn>`, which does not
+/// implement `Fn`; it is passed as `&*f`, a `&dyn Fn`, which does. The slot is
+/// read off the runtime signature (`takes_raw_fn_last_arg`), so every helper
+/// with such a slot gets the same treatment. A `Send`-bounded slot never sees
+/// a value: its `Rc`-holding calls are routed to the `_seq` twin first (A0c),
+/// and the `par_*` / `fan` routes take literals only.
+fn fill_raw_fn_slot(slot: &mut IrExpr) -> bool {
+    if unbox_consumed(slot) {
+        return true;
+    }
+    if is_closure_literal(slot)
+        || !matches!(slot.ty, almide_lang::types::Ty::Fn { .. })
+        || matches!(slot.kind, IrExprKind::Borrow { .. })
+    {
+        return false;
+    }
+    let (ty, span) = (slot.ty.clone(), slot.span);
+    // The slot only borrows the value for the call, so CloneInsertion's
+    // refcount bump on it is dropped: `&*f`, not `&*(f.clone())`.
+    let value = match std::mem::replace(slot, unit_ir()) {
+        IrExpr { kind: IrExprKind::Clone { expr }, .. } => *expr,
+        v => v,
+    };
+    let deref = IrExpr { kind: IrExprKind::Deref { expr: Box::new(value) }, ty: ty.clone(), span, def_id: None };
+    *slot = IrExpr {
+        kind: IrExprKind::Borrow { expr: Box::new(deref), as_str: false, mutable: false },
+        ty,
+        span,
+        def_id: None,
+    };
+    true
 }
 
 /// Wrap a single closure value in `RcWrap` as `Rc<dyn Fn>`. Only fresh closure
