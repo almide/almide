@@ -317,13 +317,10 @@ impl Emitter<'_> {
         let ih = self.hold_i64()?;
         self.f.instructions().local_set(ih);
         if float {
+            // A float set is a NaN-observation boundary like every bytes
+            // float writer: the append family's one NaN rule (C-210, #3658).
             self.lower_arg(v, Some(FLOAT), ArgMode::Borrow)?;
-            let mut i = self.f.instructions();
-            if width == 4 {
-                i.f32_demote_f64().i32_reinterpret_f32().i64_extend_i32_u();
-            } else {
-                i.i64_reinterpret_f64();
-            }
+            self.emit_float_obs_bits(u32::from(width))?;
         } else {
             self.lower_arg(v, Some(INT), ArgMode::Borrow)?;
         }
