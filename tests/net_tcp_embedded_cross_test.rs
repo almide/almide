@@ -7,14 +7,19 @@
 //! `done` line on both legs.
 use std::path::Path;
 use std::process::Command;
+use std::time::Duration;
 
+#[path = "support/capped_run.rs"]
+mod capped_run;
+
+/// Each fixture finishes in seconds; 120 s per run (build included) turns a
+/// hang into a named failure instead of a cancelled job.
 fn run(path: &Path, extra: &[&str]) -> (String, Option<i32>, String) {
-    let out = Command::new(env!("CARGO_BIN_EXE_almide"))
-        .arg("run")
-        .arg(path)
-        .args(extra)
-        .output()
-        .expect("almide run");
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_almide"));
+    cmd.arg("run").arg(path).args(extra);
+    let leg = if extra.is_empty() { "native" } else { "embedded" };
+    let out = capped_run::output_capped(cmd, Duration::from_secs(120))
+        .unwrap_or_else(|e| panic!("{} ({leg}): {e}", path.display()));
     (
         String::from_utf8_lossy(&out.stdout).into_owned(),
         out.status.code(),

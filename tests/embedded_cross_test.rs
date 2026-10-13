@@ -10,6 +10,10 @@
 
 use std::path::Path;
 use std::process::Command;
+use std::time::Duration;
+
+#[path = "support/capped_run.rs"]
+mod capped_run;
 
 fn almide_bin() -> String {
     if let Ok(bin) = std::env::var("ALMIDE_BIN") {
@@ -41,10 +45,13 @@ fn embedded_lane_fixtures_match_native_byte_for_byte() {
         if path.extension().and_then(|e| e.to_str()) != Some("almd") {
             continue;
         }
+        // A fixture that never returns fails here by name (120 s per run,
+        // build included) instead of holding the job until its timeout.
         let run = |extra: &[&str]| {
             let mut c = Command::new(almide_bin());
             c.arg("run").arg(&path).args(extra);
-            c.output().expect("almide runs")
+            capped_run::output_capped(c, Duration::from_secs(120))
+                .unwrap_or_else(|e| panic!("{} {:?}: {e}", path.display(), extra))
         };
         let native = run(&[]);
         let wasm = run(&["--target", "wasm"]);
