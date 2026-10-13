@@ -15,8 +15,9 @@
 //! unit on either leg changes a printed line. The two legs must agree byte for
 //! byte on stdout and on the exit code.
 //!
-//! The last test holds the standard codegen's own meter to the whole-program
-//! v1 render on the unit-exact boundary fixtures: with
+//! `almide app.almd --target rust` of a metered program builds on its own
+//! (item 3). The last test holds the standard codegen's own meter to the
+//! whole-program v1 render on the unit-exact boundary fixtures: with
 //! `ALMIDE_FORCE_METER_CODEGEN=1` a program that renders whole is metered by
 //! the standard codegen instead, and every observable must stay the same.
 
@@ -427,6 +428,46 @@ fn a_cut_returns_the_zero_of_any_return_type() {
 #[test]
 fn a_cut_in_an_inline_stdlib_callback_leaves_the_calling_fn() {
     assert_two_legs_agree("inline_callback_cut", INLINE_CALLBACK_CUT);
+}
+
+fn rustc_available() -> bool {
+    Command::new("rustc").arg("--version").output().is_ok_and(|o| o.status.success())
+}
+
+/// Item 3: `almide app.almd --target rust` stands alone for a metered
+/// program — it carries the codegen's meter and its runtime instead of
+/// region delegates into a module only the CLI appends. The emitted Rust
+/// compiles warning-free under plain rustc (`unused_comparisons` is the
+/// `compute.ns` clamp in `main`, emitted for every budget, metered or not),
+/// and the binary prints what the wasm leg prints.
+#[test]
+fn the_emitted_rust_of_a_metered_program_builds_and_runs_on_its_own() {
+    if !wasmtime_available() || !rustc_available() {
+        eprintln!("SKIP: rustc or wasmtime is not installed");
+        return;
+    }
+    for (name, src) in [("emit_stdlib_arms", STDLIB_ARMS), ("emit_region_shapes", REGION_SHAPES)] {
+        let dir = scratch(name);
+        let almd = dir.join("main.almd");
+        std::fs::write(&almd, src).unwrap();
+        let mut emit = Command::new(almide());
+        emit.current_dir(&dir).arg(&almd).args(["--target", "rust"]);
+        let (code, rust, err) = run_limited(emit);
+        assert_eq!(code, Some(0), "{name}: emit failed\n{err}");
+        let rs = dir.join("main.rs");
+        std::fs::write(&rs, &rust).unwrap();
+        let bin = dir.join("main");
+        let mut rustc = Command::new("rustc");
+        rustc.args(["--edition", "2021", "-O", "-D", "warnings", "-A", "non_snake_case", "-A", "unused_macros", "-A", "unused_comparisons", "-o"]).arg(&bin).arg(&rs);
+        let (code, _, err) = run_limited(rustc);
+        assert_eq!(code, Some(0), "{name}: the emitted Rust does not compile warning-free on its own:\n{err}");
+        let (b_code, b_out, b_err) = run_limited(Command::new(&bin));
+        let mut wasm = Command::new(almide());
+        wasm.current_dir(&dir).arg("run").arg(&almd).args(["--target", "wasm"]);
+        let (w_code, w_out, _) = run_limited(wasm);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!((b_code, &b_out), (w_code, &w_out), "{name}: the standalone binary and wasm disagree\n{b_err}");
+    }
 }
 
 /// The announcement an inherited route switch prints.
