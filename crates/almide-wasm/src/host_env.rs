@@ -359,18 +359,9 @@ impl Emitter<'_> {
                     .i32_const(almide_layout::PAYLOAD as i32)
                     .i32_add()
                     .call(F_HOST_READ);
-                i.local_get(hlen).i32_const(3).i32_shl().call(F_ALLOC).local_set(hout);
-                i.i32_const(0).local_set(hk);
-                i.block(BlockType::Empty).loop_(BlockType::Empty);
-                i.local_get(hk).local_get(hlen).i32_ge_u().br_if(1);
-                i.local_get(hout).local_get(hk).i32_const(3).i32_shl().i32_add();
-                i.local_get(hraw).local_get(hk).i32_add();
-                i.i64_load8_u(crate::bytes::byte_k(0));
-                i.i64_store(slot_memarg(0));
-                i.local_get(hk).i32_const(1).i32_add().local_set(hk);
-                i.br(0).end().end();
-                // The staging block is this arm's own: decoded, it goes.
-                i.local_get(hraw).call(F_DEC_FLAT);
+                let _ = i;
+                self.emit_decode_staged_bytes(hraw, hlen, hout, hk);
+                let mut i = self.f.instructions();
                 i.local_get(hout);
                 i.end();
                 let _ = i;
