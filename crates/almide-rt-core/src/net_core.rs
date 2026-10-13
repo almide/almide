@@ -198,7 +198,13 @@ impl AlmideNetTables {
 }
 
 /// One `read` of at most `n` bytes; 0 bytes is EOF (or `n == 0`).
+/// A zero-length read answers empty WITHOUT the syscall: Linux's `recv` on
+/// a zero-length buffer waits for data where macOS returns at once, so
+/// `tcp_read(c, 0)` on an idle stream hung on Linux (#3679's CI).
 fn almide_net_read_once(s: &mut std::net::TcpStream, n: usize, f: &str) -> Result<Vec<u8>, String> {
+    if n == 0 {
+        return Ok(Vec::new());
+    }
     let mut buf = vec![0u8; n];
     loop {
         match std::io::Read::read(s, &mut buf) {
