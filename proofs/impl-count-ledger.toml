@@ -3,7 +3,7 @@
 # definitions in crates/almide-wasm/src, `<mod>.<fn>[_shape]` rows in
 # self_host_registry.rs), re-derived by scripts/lib/impl-count-enumerate.py.
 # Gated by tools/almide-gates impl-count: a total may not grow without its row.
-# holes = 859  implementations = 2013
+# holes = 873  implementations = 2030
 [[hole]]
 module   = "base64"
 name     = "encode"
@@ -4069,85 +4069,92 @@ module   = "net"
 name     = "tcp_connect"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "tcp_read"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 3
+total    = 4
 [[hole]]
 module   = "net"
 name     = "tcp_write"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "tcp_read_exact"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "tcp_close"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 2
+total    = 3
 [[hole]]
 module   = "net"
 name     = "tcp_is_open"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "tcp_read_timeout"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "tcp_set_timeout"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "tcp_available"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "tcp_listen"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "net"
+name     = "tcp_local_port"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "tcp_accept"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "tcp_close_listener"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "unix_connect"
@@ -4239,6 +4246,97 @@ native   = 1
 emitter  = 0
 selfhost = 0
 total    = 1
+[[hole]]
+module   = "net"
+name     = "__net_listen"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__net_accept"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__net_connect"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__net_read"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__net_read_exact"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__net_read_timeout"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__net_write"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__net_available"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__net_set_timeout"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__net_close"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__net_close_listener"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__net_local_port"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__net_is_open"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
 [[hole]]
 module   = "option"
 name     = "map"
