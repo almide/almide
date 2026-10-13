@@ -265,6 +265,145 @@ effect fn main() -> Unit = {
 }
 "#;
 
+/// A cut inside a fn that returns a record, a recursive variant, a variant
+/// with a payload, `Option`, `List[String]`, a map or a tuple: the cut
+/// returns that type's zero, and the region's fallback is what prints. The
+/// roomy budget prints the computed values.
+const CUT_ZEROS: &str = r#"type P = { x: Int, y: Int }
+
+type Tree = Leaf | Node(Tree, Int, Tree)
+
+type Tag = Named(String) | Anon
+
+fn loop_to(n: Int) -> Int = {
+  var i = 0
+  while i < n {
+    i = i + 1
+  }
+  i
+}
+
+fn rec_of(n: Int) -> P = {
+  var i = 0
+  while i < n {
+    i = i + 1
+  }
+  { x: i, y: n }
+}
+
+fn tree_of(n: Int) -> Tree = {
+  var t = Leaf
+  for i in 0..<n {
+    t = Node(t, i, Leaf)
+  }
+  t
+}
+
+fn tag_of(n: Int) -> Tag = {
+  var s = ""
+  for _i in 0..<n {
+    s = s + "t"
+  }
+  if n > 0 then Named(s) else Anon
+}
+
+fn opt_of(n: Int) -> Option[String] = {
+  var s = ""
+  for _i in 0..<n {
+    s = s + "o"
+  }
+  if n > 2 then some(s) else none
+}
+
+fn words_of(n: Int) -> List[String] = {
+  var out: List[String] = []
+  for i in 0..<n {
+    out = out + ["w${i}"]
+  }
+  out
+}
+
+fn counts_of(n: Int) -> Map[String, Int] = {
+  var m: Map[String, Int] = [:]
+  for i in 0..<n {
+    m = map.set(m, "k${i}", i)
+  }
+  m
+}
+
+fn pair_of(n: Int) -> (Int, Float) = {
+  var f = 0.0
+  for _i in 0..<n {
+    f = f + 0.5
+  }
+  (loop_to(n), f)
+}
+
+fn depth(t: Tree) -> Int = match t {
+  Leaf => 0,
+  Node(l, _, _) => 1 + depth(l),
+}
+
+fn show_tag(t: Tag) -> String = match t {
+  Named(s) => "named ${s}",
+  Anon => "anon",
+}
+
+effect fn main() -> Unit = {
+  for ns in [6, 30, 300000] {
+    let r = fan.bounded(compute.ns(ns)) { rec_of(20) } ?? { x: -1, y: -1 }
+    let t = fan.bounded(compute.ns(ns)) { tree_of(20) } ?? Leaf
+    let g = fan.bounded(compute.ns(ns)) { tag_of(20) } ?? Anon
+    let o = fan.bounded(compute.ns(ns)) { opt_of(20) } ?? none
+    let w = fan.bounded(compute.ns(ns)) { words_of(20) } ?? []
+    let c = fan.bounded(compute.ns(ns)) { counts_of(20) } ?? [:]
+    let p = fan.bounded(compute.ns(ns)) { pair_of(20) } ?? (-1, -1.0)
+    println("${ns}: ${r.x} ${depth(t)} ${show_tag(g)} ${o ?? "none"} ${list.len(w)} ${map.len(c)} ${p.0} ${p.1}")
+  }
+  let winner = fan.race {
+    tree_of(30)
+    tree_of(4)
+  } ?? Leaf
+  println("race depth ${depth(winner)}")
+}
+"#;
+
+/// Where a cut returns from. On the wasm leg a lambda written at a stdlib
+/// combinator is the combinator's loop body, so a cut at a charge site in
+/// that callback leaves the fn that made the call — the later elements, a
+/// division by zero among them, never run. A cut inside a CALLEE of the
+/// callback returns from the callee only, and the combinator runs on.
+const INLINE_CALLBACK_CUT: &str = r#"fn spin(n: Int) -> Int = {
+  var i = 0
+  while i < n {
+    i = i + 1
+  }
+  i
+}
+
+// A cut at the loop head INSIDE a callback written at list.map: the wasm leg
+// runs that callback as the map's loop body, so the cut returns from `crunch`
+// and the second element (a division by zero) never runs.
+fn crunch(xs: List[Int]) -> Int = list.sum(list.map(xs, (x) => {
+  let q = 100 / x
+  var i = 0
+  while i < 50 {
+    i = i + 1
+  }
+  q + i
+}))
+
+// A cut inside a CALLEE of the callback returns from the callee only: the
+// map runs on, element by element, on both legs.
+fn crunch_callee(xs: List[Int]) -> Int = list.sum(list.map(xs, (x) => spin(x * 20) + x))
+
+effect fn main() -> Unit = {
+  println(int.to_string(fan.bounded(compute.ns(30)) { crunch([5, 0, 2]) } ?? -1))
+  println(int.to_string(fan.bounded(compute.ns(100000)) { crunch([5, 4, 2]) } ?? -1))
+  println(int.to_string(fan.bounded(compute.ns(30)) { crunch_callee([5, 3, 2]) } ?? -1))
+}
+"#;
+
 #[test]
 fn an_arm_calling_a_stdlib_fn_outside_the_v1_floor_runs_metered_on_native() {
     assert_two_legs_agree("stdlib_arms", STDLIB_ARMS);
@@ -278,6 +417,16 @@ fn a_region_with_a_record_variant_tuple_list_or_option_signature_runs_metered_on
 #[test]
 fn closure_hops_and_concat_charges_match_the_wasm_leg() {
     assert_two_legs_agree("closures_and_concat", CLOSURES_AND_CONCAT);
+}
+
+#[test]
+fn a_cut_returns_the_zero_of_any_return_type() {
+    assert_two_legs_agree("cut_zeros", CUT_ZEROS);
+}
+
+#[test]
+fn a_cut_in_an_inline_stdlib_callback_leaves_the_calling_fn() {
+    assert_two_legs_agree("inline_callback_cut", INLINE_CALLBACK_CUT);
 }
 
 /// The announcement an inherited route switch prints.
