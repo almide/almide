@@ -15,23 +15,24 @@ pub fn compile_to_binary(file: &str, no_check: bool, test_mode: bool, release: b
 /// fall back to the v0 source on a WALL — a v1-rendered program is never wrong.
 pub fn compile_to_binary_with(file: &str, no_check: bool, test_mode: bool, release: bool, project_dir_override: Option<&std::path::Path>, native_verified: bool) -> Result<std::path::PathBuf, String> {
     let t = PhaseTimer::start();
-    let (rs_code, ir) = crate::try_compile_with_ir(file, no_check, &crate::codegen::CodegenOptions::default())
+    let opts = crate::codegen::CodegenOptions::default();
+    // `metered`: from the IR, not the text — a user literal spelled like a
+    // prim is emitted into `rs_code` verbatim (#3486).
+    let (rs_code, metered) = crate::try_compile_with_ir(file, no_check, &opts)
         .map_err(|_| "compile failed".to_string())?;
-    // From the IR, not the text: a user literal spelled like a prim is
-    // emitted into `rs_code` verbatim (#3486).
-    let uses_metered_prims = ir.as_ref().is_some_and(almide::ir::runtime_use::uses_metered_prims);
     t.lap("frontend+emit");
     let rs_code = if native_verified && !test_mode {
-        super::render_v1_native_or_fallback(file, rs_code, uses_metered_prims)
+        super::render_v1_native_or_fallback(file, rs_code, metered, &opts)
     } else {
-        // The NATIVE TEST harness rides the standard codegen, which has no
-        // deterministic meter of its own: link the v1-rendered regions in,
-        // exactly as the run path does when the whole program walls (#3669).
-        if test_mode && uses_metered_prims {
-            let source_text = almide::source_overlay::read_to_string(file).unwrap_or_default();
-            super::link_metered_regions(&source_text, rs_code, "the native test harness rides the standard codegen")?
-        } else {
-            rs_code
+        // The NATIVE TEST harness rides the standard codegen: link the
+        // v1-rendered regions in, exactly as the run path does when the whole
+        // program walls (#3669), or meter them in the codegen (#3673).
+        match metered {
+            Some(ir) if test_mode => {
+                let source_text = almide::source_overlay::read_to_string(file).unwrap_or_default();
+                super::link_metered_regions(&source_text, rs_code, "the native test harness rides the standard codegen", ir, &opts)
+            }
+            _ => rs_code,
         }
     };
     t.lap("v1-native-render");

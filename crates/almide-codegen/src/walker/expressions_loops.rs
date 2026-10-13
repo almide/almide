@@ -1,9 +1,11 @@
 // Loop rendering consumes ownership decisions recorded by nanopasses.
 fn render_expr_for_in(ctx: &RenderContext, expr: &IrExpr) -> String {
     let IrExprKind::ForIn { var, var_tuple, iterable, body } = &expr.kind else { unreachable!() };
+    // A metered head (#3673) is charged even when it finds nothing.
+    let metered = ctx.ann.metered_loop_vars.contains(var);
     // Optimize: for loop over empty list literal → skip entirely
     if let IrExprKind::List { elements } = &iterable.kind {
-        if elements.is_empty() {
+        if elements.is_empty() && !metered {
             return "{}".to_string();
         }
     }
@@ -55,6 +57,11 @@ fn render_expr_for_in(ctx: &RenderContext, expr: &IrExpr) -> String {
                 _ => base,
             }
         }
+    };
+    let iter = if metered {
+        ctx.templates.render_with("metered_iter", None, &[], &[("iter", iter.as_str())]).unwrap_or(iter)
+    } else {
+        iter
     };
     let body_raw = render_stmts(ctx, body).join("\n");
     let body_str = indent_lines(&body_raw, 4);

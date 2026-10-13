@@ -297,6 +297,11 @@ template = "std::rc::Rc<dyn Fn({params}) -> {return}>"
 [for_loop]
 template = "for {var} in {iter} {{\n{body}\n}}"
 
+# #3673: a metered `for` head (`MeterChargePass`) — the adapter charges each
+# head evaluation, the exhausting one included, as the wasm leg's loop head does.
+[metered_iter]
+template = "__almd_meter_iter({iter})"
+
 [while_loop]
 template = "while {cond} {{\n{body}\n}}"
 

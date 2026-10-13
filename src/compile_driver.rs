@@ -369,6 +369,11 @@ fn optimize_verify_and_link(ir_program: &mut Option<almide::ir::IrProgram>, pars
     }
 }
 
+/// The generated Rust, and — for a program that calls the deterministic-meter
+/// prims (`fan.bounded` / `fan.race` / `fan.timeout`) — its linked IR as it
+/// stood before codegen, so the native route can build it again with the
+/// codegen's own meter ([`codegen_metered`], #3673) without a second
+/// type-check.
 pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &codegen::CodegenOptions) -> Result<(String, Option<almide::ir::IrProgram>), String> {
     let (mut program, source_text, parse_errors, has_parse_errors, mut resolved, parsed_project, self_versioned) = parse_and_resolve_for_compile(file)?;
 
@@ -381,11 +386,22 @@ pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &cod
 
     optimize_verify_and_link(&mut ir_program, &parsed_project)?;
 
+    let metered = ir_program.as_ref().filter(|ir| almide::ir::runtime_use::uses_metered_prims(ir)).cloned();
     // Codegen v3: three-layer pipeline (Nanopass + Templates)
     let ir = ir_program.as_mut().expect("IR required for codegen");
     let code = match codegen::codegen_with(ir, codegen::pass::Target::Rust, codegen_opts) {
         codegen::CodegenOutput::Source(s) => s,
         codegen::CodegenOutput::Binary(_) => unreachable!(),
     };
-    Ok((code, ir_program))
+    Ok((code, metered))
+}
+
+/// #3673: build a metered program's linked IR with the codegen's own
+/// deterministic meter (`MeterChargePass`), its runtime appended.
+pub(crate) fn codegen_metered(mut ir: almide::ir::IrProgram, codegen_opts: &codegen::CodegenOptions) -> String {
+    let opts = codegen::CodegenOptions { meter_in_codegen: true, ..codegen_opts.clone() };
+    match codegen::codegen_with(&mut ir, codegen::pass::Target::Rust, &opts) {
+        codegen::CodegenOutput::Source(s) => s + &almide_mir::pipeline::native_meter_runtime(),
+        codegen::CodegenOutput::Binary(_) => unreachable!(),
+    }
 }
