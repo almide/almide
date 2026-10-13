@@ -1,3 +1,4 @@
+// @contract: C-379
 // net tcp timeouts and `tcp_available` (#3620). Both are guest-enforced on
 // the stock WASI 0.3 component (WASI has no SO_RCVTIMEO, no peek and no
 // FIONREAD), and the transcript below is the same on native, the embedded
