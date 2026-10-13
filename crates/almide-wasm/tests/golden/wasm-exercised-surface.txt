@@ -126,6 +126,7 @@ call:bytes.set_f32_be
 call:bytes.set_f32_le
 call:bytes.set_f64_be
 call:bytes.set_f64_le
+call:bytes.set_float32
 call:bytes.set_i16_be
 call:bytes.set_i16_le
 call:bytes.set_i32_be

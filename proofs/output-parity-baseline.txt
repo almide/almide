@@ -686,6 +686,7 @@ spec/wasm_cross/mutator_writeback_releases_old_block.almd
 spec/wasm_cross/mutual_append.almd
 spec/wasm_cross/mutual_recursive_types.almd
 spec/wasm_cross/mutual_tail_recursion.almd
+spec/wasm_cross/nan_canonical_bytes_set_write.almd
 spec/wasm_cross/nan_canonical_bytes_write.almd
 spec/wasm_cross/nan_canonical_observation.almd
 spec/wasm_cross/native_wall_shapes.almd

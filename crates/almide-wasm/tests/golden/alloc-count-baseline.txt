@@ -587,6 +587,7 @@
 37	31	116	37	spec/wasm_cross/mutual_append.almd
 10	0	120	10	spec/wasm_cross/mutual_recursive_types.almd
 0	0	0	0	spec/wasm_cross/mutual_tail_recursion.almd
+76	57	3570	76	spec/wasm_cross/nan_canonical_bytes_set_write.almd
 21	10	1106	21	spec/wasm_cross/nan_canonical_bytes_write.almd
 0	0	0	0	spec/wasm_cross/nan_canonical_observation.almd
 21	10	265	21	spec/wasm_cross/native_wall_shapes.almd
