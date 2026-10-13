@@ -69,7 +69,7 @@
 #                      every stamped row is to be re-inspected before each final
 #                      release for that (a manual GCE run: no credentials in CI)
 #
-# uninspected_ceiling = "321"
+# uninspected_ceiling = "320"
 
 [[fn]]
 name = "args.flag"
@@ -6453,18 +6453,24 @@ diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 name = "map.delete"
 sig = "(m: Map[K, V], key: K) -> Unit"
 class = "pure"
-status = "uninspected"
-
+status = "inspected"
+impl = "fnv1a:2d9491b1bdb24b26"
+stamp = "almide 0.67.1 (dev) at fix-3691-map-delete-o1 a7ed1d2f7 (develop 13508d8dd plus the #3691 tombstone map; the implementation changed under #3691, so re-inspected in the same change); xtarget-fuzz inspect at insp-valid-recipes aa5c85017 (counted judge: instructions:u + bytes moved, marginal k..2k, n..16n; a probe that returns err, none or false on an in-domain input is a failed run; fixed-width sized keys), 200 programs per fn; GCE c4-standard-4 (PMU architectural, one fn at a time per VM, asia-northeast1-b), Ubuntu 24.04, wasmtime 49.0.1; 2026-10-14; codopsy: no code change by this inspection"
+order = "1"
+parity = "PASS: seed 1791901061, 200 programs; 200 program(s) call it, 193 of them clean on every leg; unique findings 0"
+complexity = "PASS: call k=1024..2048 meter=instructions:u+bytes-moved n=20000..320000 native 1.457e8/1.381e8/1.373e8/1.408e8/1.384e8 fit 1 (rms 2.1%) moved 0.000e0/0.000e0/0.000e0/0.000e0/0.000e0B fit 1 (rms 0.0%) wall 0.010/0.005/0.005/0.010/0.010s wasm 1.080e8/1.074e8/1.034e8/1.025e8/1.087e8 fit 1 (rms 2.4%) moved 0.000e0/0.000e0/0.000e0/0.000e0/0.000e0B fit 1 (rms 0.0%) wall 0.010/0.005/0.005/0.005/0.010s (order 1 ok)"
+alloc = "PASS: call live=0"
+diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 [[fn]]
 name = "map.entries"
 sig = "(m: Map[K, V]) -> List[(K, V)]"
 class = "pure"
 status = "inspected"
-impl = "fnv1a:161a42ea96f7e141"
-stamp = "almide 0.67.1 (dev) at insp-rac 5f069ee8e (develop 350c54ace plus this branch's @reuse declaration and wasm take_while single-copy commits plus the #3555 native fold fix; the list / map stdlib, the native runtime and the wasm emitter paths of these fns are identical to this branch's head); xtarget-fuzz inspect at harness-icount-b 6abbc79c2 (counted judge: instructions:u + bytes moved, marginal k..2k, n..16n; native-only fns out of the catalogue; fixed-width sized keys), 200 programs per fn; GCE c4-standard-4 (INTEL XEON PLATINUM 8581C, 4 vCPU, PMU architectural, one fn at a time per VM, us-east1-b), Ubuntu 24.04 Linux 7.0.0-1011-gcp, rustc 1.99.0, wasmtime 49.0.1; 2026-10-12; codopsy: measured on the branch head in the PR"
+impl = "fnv1a:eaa80cdac682ea31"
+stamp = "almide 0.67.1 (dev) at fix-3691-map-delete-o1 a7ed1d2f7 (develop 13508d8dd plus the #3691 tombstone map; the implementation changed under #3691, so re-inspected in the same change); xtarget-fuzz inspect at insp-valid-recipes aa5c85017 (counted judge: instructions:u + bytes moved, marginal k..2k, n..16n; a probe that returns err, none or false on an in-domain input is a failed run; fixed-width sized keys), 200 programs per fn; GCE c4-standard-4 (PMU architectural, one fn at a time per VM, asia-northeast1-b), Ubuntu 24.04, wasmtime 49.0.1; 2026-10-14; codopsy: no code change by this inspection"
 order = "n; rebind (loop, tail, fold) 1"
-parity = "PASS: seed 1791743645, 200 programs; 200 program(s) call it, 165 of them clean on every leg; unique findings 0"
-complexity = "PASS: call k=4..8 meter=instructions:u+bytes-moved n=20000..320000 native 3.497e7/6.993e7/1.398e8/2.797e8/5.594e8 fit n (rms 0.0%) moved 8.000e5/1.600e6/3.200e6/6.400e6/1.280e7B fit n (rms 0.0%) wall 0.005/0.005/0.005/0.025/0.051s wasm 1.529e7/3.057e7/6.113e7/1.222e8/2.445e8 fit n (rms 0.0%) moved 0.000e0/0.000e0/4.000e0/0.000e0/0.000e0B fit 1 (rms 0.0%) wall 0.000/0.000/0.005/0.005/0.010s (order n ok)"
+parity = "PASS: seed 1791900983, 200 programs; 200 program(s) call it, 187 of them clean on every leg; unique findings 0"
+complexity = "PASS: call k=4..8 meter=instructions:u+bytes-moved n=20000..320000 native 3.938e7/7.763e7/1.575e8/3.105e8/6.249e8 fit n (rms 0.6%) moved 8.000e5/1.600e6/3.200e6/6.400e6/1.280e7B fit n (rms 0.0%) wall 0.005/0.005/0.015/0.020/0.051s wasm 1.529e7/3.057e7/6.113e7/1.222e8/2.445e8 fit n (rms 0.0%) moved 4.000e0/1.000e2/5.200e1/1.500e2/1.480e2B fit 1 (rms 0.0%) wall 0.005/0.000/0.000/0.005/0.010s (order n ok)"
 alloc = "PASS: call live=0"
 diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 [[fn]]
@@ -6557,16 +6563,17 @@ parity = "PASS: seed 1791689234, 200 programs; 200 program(s) call it, 172 of th
 complexity = "PASS: call k=4194304 native 0.005/0.005/0.010s x1.00 x2.01 wasm 0.000/0.010/0.005s x101.43 x0.50 (under the 60ms floor at every size: <= 14.3 ns/call) (order 1 ok)"
 alloc = "PASS: call live=0"
 diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
+
 [[fn]]
 name = "map.keys"
 sig = "(m: Map[K, V]) -> List[K]"
 class = "pure"
 status = "inspected"
-impl = "fnv1a:f620a97057024a9b"
-stamp = "almide 0.67.1 (dev) at insp-rac 5f069ee8e (develop 350c54ace plus this branch's @reuse declaration and wasm take_while single-copy commits plus the #3555 native fold fix; the list / map stdlib, the native runtime and the wasm emitter paths of these fns are identical to this branch's head); xtarget-fuzz inspect at harness-icount-b 6abbc79c2 (counted judge: instructions:u + bytes moved, marginal k..2k, n..16n; native-only fns out of the catalogue; fixed-width sized keys), 200 programs per fn; GCE c4-standard-4 (INTEL XEON PLATINUM 8581C, 4 vCPU, PMU architectural, one fn at a time per VM, us-east1-b), Ubuntu 24.04 Linux 7.0.0-1011-gcp, rustc 1.99.0, wasmtime 49.0.1; 2026-10-12; codopsy: measured on the branch head in the PR"
+impl = "fnv1a:997084ad7bb25865"
+stamp = "almide 0.67.1 (dev) at fix-3691-map-delete-o1 a7ed1d2f7 (develop 13508d8dd plus the #3691 tombstone map; the implementation changed under #3691, so re-inspected in the same change); xtarget-fuzz inspect at insp-valid-recipes aa5c85017 (counted judge: instructions:u + bytes moved, marginal k..2k, n..16n; a probe that returns err, none or false on an in-domain input is a failed run; fixed-width sized keys), 200 programs per fn; GCE c4-standard-4 (PMU architectural, one fn at a time per VM, asia-northeast1-b), Ubuntu 24.04, wasmtime 49.0.1; 2026-10-14; codopsy: no code change by this inspection"
 order = "n; rebind (loop, tail, fold) 1"
-parity = "PASS: seed 1791743609, 200 programs; 200 program(s) call it, 177 of them clean on every leg; unique findings 0"
-complexity = "PASS: call k=4..8 meter=instructions:u+bytes-moved n=20000..320000 native 3.480e7/6.961e7/1.392e8/2.784e8/5.569e8 fit n (rms 0.0%) moved 8.000e5/1.600e6/3.200e6/6.400e6/1.280e7B fit n (rms 0.0%) wall 0.005/0.005/0.015/0.025/0.050s wasm 4.646e6/9.286e6/1.856e7/3.713e7/7.425e7 fit n (rms 0.0%) moved 5.200e1/5.200e1/0.000e0/1.020e2/0.000e0B fit 1 (rms 0.0%) wall 0.005/0.000/0.000/0.000/0.000s (order n ok)"
+parity = "PASS: seed 1791900992, 200 programs; 200 program(s) call it, 186 of them clean on every leg; unique findings 0"
+complexity = "PASS: call k=4..8 meter=instructions:u+bytes-moved n=20000..320000 native 3.888e7/7.772e7/1.554e8/3.107e8/6.214e8 fit n (rms 0.0%) moved 8.000e5/1.600e6/3.200e6/6.400e6/1.280e7B fit n (rms 0.0%) wall 0.005/0.010/0.015/0.030/0.066s wasm 4.646e6/9.285e6/1.856e7/3.712e7/7.425e7 fit n (rms 0.0%) moved 0.000e0/0.000e0/4.000e0/6.000e0/1.000e2B fit 1 (rms 0.0%) wall 0.005/0.000/0.000/0.005/0.000s (order n ok)"
 alloc = "PASS: call live=0"
 diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 [[fn]]
@@ -6581,16 +6588,17 @@ parity = "PASS: seed 1791690505, 200 programs; 200 program(s) call it, 177 of th
 complexity = "PASS: call k=4194304 native 0.005/0.005/0.005s x0.99 x1.01 wasm 0.000/0.000/0.000s x0.31 x0.11 (under the 60ms floor at every size: <= 14.3 ns/call) (order 1 ok)"
 alloc = "PASS: call live=0"
 diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
+
 [[fn]]
 name = "map.map"
 sig = "(m: Map[K, V], f: (V) -> B) -> Map[K, B]"
 class = "pure"
 status = "inspected"
-impl = "fnv1a:5c1a248238bb8165"
-stamp = "almide 0.67.1 (dev) at develop 7ba9f194b (after #3629 / #3631 / #3632); xtarget-fuzz inspect at the same sha (counted judge: instructions:u + bytes moved, marginal k..2k, n..16n; native-only fns out of the catalogue; fixed-width sized keys), 200 programs per fn; GCE c4-standard-4 (INTEL XEON PLATINUM 8581C, 4 vCPU, PMU architectural, one fn at a time per VM, us-central1-a), Ubuntu 24.04 Linux 7.0.0-1011-gcp, rustc 1.99.0, wasmtime 49.0.1; 2026-10-13; codopsy: no code change by this inspection"
+impl = "fnv1a:59a46c524413c602"
+stamp = "almide 0.67.1 (dev) at fix-3691-map-delete-o1 a7ed1d2f7 (develop 13508d8dd plus the #3691 tombstone map; the implementation changed under #3691, so re-inspected in the same change); xtarget-fuzz inspect at insp-valid-recipes aa5c85017 (counted judge: instructions:u + bytes moved, marginal k..2k, n..16n; a probe that returns err, none or false on an in-domain input is a failed run; fixed-width sized keys), 200 programs per fn; GCE c4-standard-4 (PMU architectural, one fn at a time per VM, asia-northeast1-b), Ubuntu 24.04, wasmtime 49.0.1; 2026-10-14; codopsy: no code change by this inspection"
 order = "n; rebind (loop, tail, fold) n"
-parity = "PASS: seed 1791829552, 200 programs; 200 program(s) call it, 190 of them clean on every leg; unique findings 0"
-complexity = "PASS: call k=4..8 meter=instructions:u+bytes-moved n=20000..320000 native 6.160e7/1.233e8/2.466e8/4.930e8/9.860e8 fit n (rms 0.0%) moved 3.536e6/7.073e6/1.415e7/2.830e7/5.659e7B fit n (rms 0.0%) wall 0.010/0.010/0.036/0.061/0.147s wasm 4.967e6/9.925e6/1.985e7/3.969e7/7.937e7 fit n (rms 0.0%) moved 5.200e1/4.000e0/1.000e2/1.020e2/5.200e1B fit 1 (rms 0.0%) wall 0.000/0.000/0.000/0.005/0.010s (order n ok); loop k=16..32 meter=instructions:u+bytes-moved n=20000..320000 native 9.285e6/1.856e7/3.713e7/7.424e7/1.485e8 fit n (rms 0.0%) moved 0.000e0/0.000e0/0.000e0/0.000e0/0.000e0B fit 1 (rms 0.0%) wall 0.005/0.005/0.000/0.000/0.010s wasm 2.017e7/4.033e7/8.065e7/1.613e8/3.226e8 fit n (rms 0.0%) moved 1.920e2/0.000e0/0.000e0/4.800e1/0.000e0B fit 1 (rms 0.0%) wall 0.000/0.005/0.005/0.010/0.025s (order n ok); tail k=64..128 meter=instructions:u+bytes-moved n=20000..320000 native 3.714e7/7.426e7/1.485e8/2.970e8/5.939e8 fit n (rms 0.0%) moved 0.000e0/0.000e0/0.000e0/0.000e0/0.000e0B fit 1 (rms 0.0%) wall 0.000/0.010/0.010/0.015/0.051s wasm 7.811e7/1.562e8/3.124e8/6.247e8/1.249e9 fit n (rms 0.0%) moved 0.000e0/0.000e0/0.000e0/4.800e1/0.000e0B fit 1 (rms 0.0%) wall 0.005/0.010/0.020/0.046/0.091s (order n ok); fold k=16..32 meter=instructions:u+bytes-moved n=20000..320000 native 9.286e6/1.857e7/3.713e7/7.425e7/1.485e8 fit n (rms 0.0%) moved 0.000e0/0.000e0/0.000e0/0.000e0/0.000e0B fit 1 (rms 0.0%) wall 0.000/0.005/0.005/0.005/0.005s wasm 2.017e7/4.033e7/8.065e7/1.613e8/3.226e8 fit n (rms 0.0%) moved 0.000e0/0.000e0/0.000e0/0.000e0/4.800e1B fit 1 (rms 0.0%) wall 0.005/0.005/0.010/0.010/0.020s (order n ok)"
+parity = "PASS: seed 1791901085, 200 programs; 200 program(s) call it, 187 of them clean on every leg; unique findings 0"
+complexity = "PASS: call k=4..8 meter=instructions:u+bytes-moved n=20000..320000 native 6.296e7/1.261e8/2.521e8/5.041e8/1.008e9 fit n (rms 0.0%) moved 3.536e6/7.073e6/1.415e7/2.830e7/5.659e7B fit n (rms 0.0%) wall 0.005/0.015/0.030/0.081/0.182s wasm 4.965e6/9.929e6/1.985e7/3.969e7/7.937e7 fit n (rms 0.0%) moved 0.000e0/5.200e1/4.000e0/0.000e0/1.960e2B fit 1 (rms 0.0%) wall 0.005/0.000/0.000/0.000/0.000s (order n ok); loop k=16..32 meter=instructions:u+bytes-moved n=20000..320000 native 1.057e7/2.112e7/4.225e7/8.449e7/1.690e8 fit n (rms 0.0%) moved 0.000e0/0.000e0/0.000e0/0.000e0/0.000e0B fit 1 (rms 0.0%) wall 0.005/0.000/0.000/0.005/0.020s wasm 2.017e7/4.033e7/8.065e7/1.613e8/3.226e8 fit n (rms 0.0%) moved 4.800e1/9.600e1/4.800e1/4.800e1/4.800e1B fit 1 (rms 0.0%) wall 0.005/0.005/0.000/0.010/0.025s (order n ok); tail k=64..128 meter=instructions:u+bytes-moved n=20000..320000 native 4.226e7/8.450e7/1.690e8/3.379e8/6.759e8 fit n (rms 0.0%) moved 0.000e0/0.000e0/0.000e0/0.000e0/0.000e0B fit 1 (rms 0.0%) wall 0.005/0.005/0.015/0.020/0.066s wasm 7.811e7/1.562e8/3.124e8/6.247e8/1.249e9 fit n (rms 0.0%) moved 0.000e0/0.000e0/4.800e1/0.000e0/0.000e0B fit 1 (rms 0.0%) wall 0.010/0.010/0.025/0.040/0.086s (order n ok); fold k=16..32 meter=instructions:u+bytes-moved n=20000..320000 native 1.056e7/2.113e7/4.224e7/8.449e7/1.690e8 fit n (rms 0.0%) moved 0.000e0/0.000e0/0.000e0/0.000e0/0.000e0B fit 1 (rms 0.0%) wall 0.005/0.000/0.005/0.010/0.010s wasm 2.017e7/4.033e7/8.065e7/1.613e8/3.226e8 fit n (rms 0.0%) moved 0.000e0/0.000e0/0.000e0/0.000e0/0.000e0B fit 1 (rms 0.0%) wall 0.000/0.005/0.005/0.004/0.025s (order n ok)"
 alloc = "PASS: call live=0, loop live=0, tail live=0, fold live=0"
 diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 [[fn]]
@@ -6635,16 +6643,17 @@ sig = "(m: Map[K, V], key: K, init: V, f: (V) -> V) -> Map[K, V]"
 class = "pure"
 status = "uninspected"
 
+
 [[fn]]
 name = "map.values"
 sig = "(m: Map[K, V]) -> List[V]"
 class = "pure"
 status = "inspected"
-impl = "fnv1a:f32f55de58ae9d68"
-stamp = "almide 0.67.1 (dev) at insp-rac 5f069ee8e (develop 350c54ace plus this branch's @reuse declaration and wasm take_while single-copy commits plus the #3555 native fold fix; the list / map stdlib, the native runtime and the wasm emitter paths of these fns are identical to this branch's head); xtarget-fuzz inspect at harness-icount-b 6abbc79c2 (counted judge: instructions:u + bytes moved, marginal k..2k, n..16n; native-only fns out of the catalogue; fixed-width sized keys), 200 programs per fn; GCE c4-standard-4 (INTEL XEON PLATINUM 8581C, 4 vCPU, PMU architectural, one fn at a time per VM, us-east1-b), Ubuntu 24.04 Linux 7.0.0-1011-gcp, rustc 1.99.0, wasmtime 49.0.1; 2026-10-12; codopsy: measured on the branch head in the PR"
+impl = "fnv1a:f1f4dc5b28f394b2"
+stamp = "almide 0.67.1 (dev) at fix-3691-map-delete-o1 a7ed1d2f7 (develop 13508d8dd plus the #3691 tombstone map; the implementation changed under #3691, so re-inspected in the same change); xtarget-fuzz inspect at insp-valid-recipes aa5c85017 (counted judge: instructions:u + bytes moved, marginal k..2k, n..16n; a probe that returns err, none or false on an in-domain input is a failed run; fixed-width sized keys), 200 programs per fn; GCE c4-standard-4 (PMU architectural, one fn at a time per VM, asia-northeast1-b), Ubuntu 24.04, wasmtime 49.0.1; 2026-10-14; codopsy: no code change by this inspection"
 order = "n; rebind (loop, tail, fold) 1"
-parity = "PASS: seed 1791743854, 200 programs; 200 program(s) call it, 171 of them clean on every leg; unique findings 0"
-complexity = "PASS: call k=256..512 meter=instructions:u+bytes-moved n=20000..320000 native 1.560e7/3.096e7/6.168e7/1.231e8/2.460e8 fit n (rms 0.0%) moved 2.000e0/0.000e0/0.000e0/0.000e0/2.000e0B fit 1 (rms 0.0%) wall 0.000/0.000/0.020/0.046/0.096s wasm 4.629e7/9.234e7/1.845e8/3.688e8/7.375e8 fit n (rms 0.0%) moved 1.460e2/4.800e1/0.000e0/4.800e1/2.000e0B fit 1 (rms 0.0%) wall 0.005/0.005/0.010/0.035/0.051s (order n ok)"
+parity = "PASS: seed 1791901057, 200 programs; 200 program(s) call it, 182 of them clean on every leg; unique findings 0"
+complexity = "PASS: call k=64..128 meter=instructions:u+bytes-moved n=20000..320000 native 2.463e7/4.896e7/9.762e7/1.949e8/3.895e8 fit n (rms 0.0%) moved 0.000e0/0.000e0/2.000e0/0.000e0/0.000e0B fit 1 (rms 0.0%) wall 0.000/0.000/0.010/0.015/0.025s wasm 1.157e7/2.309e7/4.612e7/9.221e7/1.844e8 fit n (rms 0.0%) moved 0.000e0/0.000e0/1.490e2/0.000e0/3.000e0B fit 1 (rms 0.0%) wall 0.000/0.000/0.000/0.005/0.005s (order n ok)"
 alloc = "PASS: call live=0"
 diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 [[fn]]
