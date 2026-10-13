@@ -52,10 +52,12 @@ fn a_bang_over_a_move_mode_effect_call_witnesses_its_abi_carrier_as_owned() {
             None => assert!(accepted(cert), "{f}/{name}: the portable checker must accept {cert:?}"),
         }
     }
-    // `effect fn g(mut a: Int) = { h(a)! }`: h's carrier is born at the site,
-    // released on the ok path and moving out on the propagating one
-    // (`{id|im}`); g's own Unit result wrap is the last line.
-    assert_eq!(by_fixture["mut_param_call_chain"]["g"], "{id|im}\n{|im}\n");
+    // `effect fn g(mut a: Int) = { h(a)! }`: since #3664 the mut-param
+    // write-back folds into the tail, so g returns h's Result block as its
+    // own — no carrier is born at the site and none is released or rewrapped.
+    // The certificate is empty of events, and the FRAMES loop above still
+    // requires the portable checker to accept it.
+    assert_eq!(by_fixture["mut_param_call_chain"]["g"], "\n");
     // `Mem.put` (effect_mut_generic_port) and Tally's `main`
     // (mut_param_effect_never_err) carry the buffer the call hands back.
     // `self.ks = self.ks + [k]` is the field accumulator window (#3501): the
