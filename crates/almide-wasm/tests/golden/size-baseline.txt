@@ -113,7 +113,7 @@
 27065	spec/wasm_cross/codec_whitespace_tolerance.almd
 5853	spec/wasm_cross/collection_literals.almd
 3169	spec/wasm_cross/composition_fuzz_batch.almd
-11383	spec/wasm_cross/compound_eq.almd
+11381	spec/wasm_cross/compound_eq.almd
 18434	spec/wasm_cross/compound_repr_interp.almd
 16583	spec/wasm_cross/compound_repr_records_interp.almd
 8391	spec/wasm_cross/compound_repr_recursive_interp.almd
@@ -460,7 +460,7 @@
 2033	spec/wasm_cross/list_window_zero.almd
 2073	spec/wasm_cross/list_windows_zero.almd
 3838	spec/wasm_cross/list_with_capacity.almd
-6979	spec/wasm_cross/list_zip_with_typed.almd
+6977	spec/wasm_cross/list_zip_with_typed.almd
 981	spec/wasm_cross/literal_int_forms.almd
 866	spec/wasm_cross/literal_unit.almd
 825	spec/wasm_cross/loop_break_continue.almd
@@ -738,8 +738,8 @@
 2949	spec/wasm_cross/scoped_worker_in_and_out.almd
 4334	spec/wasm_cross/self_call_swapped_params.almd
 7862	spec/wasm_cross/set_entries_reclaim.almd
-8584	spec/wasm_cross/set_index_order.almd
-10506	spec/wasm_cross/set_insertion_order.almd
+8626	spec/wasm_cross/set_index_order.almd
+10422	spec/wasm_cross/set_insertion_order.almd
 62619	spec/wasm_cross/sized_display_matrix.almd
 6895	spec/wasm_cross/sized_field_default_matrix.almd
 3088	spec/wasm_cross/sized_int_overflow_wrap.almd
