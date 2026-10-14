@@ -430,6 +430,66 @@ impl Emitter<'_> {
         Ok(Some(Lowered::owned(got)))
     }
 
+    /// `map.update(m, k, cb)` over a receiver whose credit the op may take
+    /// (#3707): `try_map_upsert_owned` without the insert — a present key's
+    /// value is replaced through the judged write (in place when the credit
+    /// is the block's only one), an absent key leaves the block as it came
+    /// and gives back the key's unstored credit. `None` keeps the
+    /// borrowed-receiver copy (collections_hof.rs).
+    pub(crate) fn try_map_update_owned(&mut self, m: &IrExpr, ops: [&IrExpr; 2]) -> Result<Option<Lowered>, EmitError> {
+        let [key, cb] = ops;
+        let (params, body) = self.hof_lambda(cb, 1)?;
+        let Some(dying) = self.owned_receiver(m, &ops) else { return Ok(None) };
+        self.owned_call_marks.set_moving(m, dying.is_some());
+        let got = self.lower_arg(m, None, ArgMode::Retain)?;
+        self.owned_call_marks.set_moving(m, false);
+        let SliceTy::Map(kt, vt) = got else {
+            return unsup(&format!("map-op-of:{got:?}"));
+        };
+        let (k, v) = (self.types.el(kt), self.types.el(vt));
+        let mh = self.hold_i32()?;
+        self.f.instructions().local_set(mh);
+        if let Some((id, idx, _)) = dying {
+            self.empty_dying(id, idx);
+        }
+        let fns = self.map_set_fns(k, v)?;
+        let kh = self.hold_for(k)?;
+        self.lower_arg(key, Some(k), ArgMode::Retain)?;
+        self.f.instructions().local_set(kh);
+        let ih = self.hold_for(v)?;
+        let (oh, eh) = (self.hold_i32()?, self.hold_i32()?);
+        self.emit_map_scan_into(mh, kh, eh, (k, v), fns);
+        // present: the callback over the entry's value (a view)
+        let voff = crate::collections::entry_layout(k, v).1 as i32;
+        self.f.instructions().local_get(eh).if_(BlockType::Empty);
+        self.f.instructions().local_get(eh).i32_const(voff).i32_add();
+        self.load_ty_slot_at(v);
+        self.f.instructions().local_set(params[0]);
+        // #2755: a present key runs the callback once.
+        self.witness_once_open(cb);
+        self.lower(body, Some(v))?;
+        self.rc_share_guard(body, v);
+        self.witness_store(body, v);
+        self.f.instructions().local_set(ih);
+        self.witness_once_arm();
+        self.f.instructions().end();
+        self.witness_once_close();
+        // the write only where the key was present; an absent key's
+        // credit goes back and the block is returned as it came
+        self.f.instructions().local_get(eh).if_(BlockType::Empty);
+        self.emit_map_set_judged_at(super::MapSetHolds { mh, kh, eh, vh: ih }, oh, (k, v), fns)?;
+        self.f.instructions().else_();
+        self.emit_release_hold(kh, k);
+        self.f.instructions().end();
+        self.f.instructions().local_get(mh);
+        self.release_i32(); // eh
+        self.release_i32(); // oh
+        self.release_for(v);
+        self.release_for(k);
+        self.release_i32(); // mh
+        Ok(Some(Lowered::owned(got)))
+    }
+
     /// `map.set(m, k, v)` over a receiver whose credit the op may take
     /// (see the module doc); `None` keeps the borrowed-receiver copy.
     pub(crate) fn try_map_set_owned(&mut self, m: &IrExpr, key: &IrExpr, value: &IrExpr) -> Result<Option<Lowered>, EmitError> {

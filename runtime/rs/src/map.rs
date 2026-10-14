@@ -652,8 +652,12 @@ pub fn almide_rt_map_find<K: Clone + PartialEq + 'static, V: Clone>(m: &AlmideMa
     m.iter().find(|&(k, v)| f(k.clone(), v.clone())).map(|(k, v)| (k.clone(), v.clone()))
 }
 pub fn almide_rt_map_update<K: PartialEq + Clone + 'static, V: Clone>(m: &AlmideMap<K, V>, key: K, f: std::rc::Rc<dyn Fn(V) -> V>) -> AlmideMap<K, V> {
+    almide_rt_map_update_owned(m.clone(), key, f)
+}
+// `@reuse(m)` (#3707): `m = map.update(m, k, f)` over a dying `m` updates
+// the map it is handed instead of a copy of it.
+pub fn almide_rt_map_update_owned<K: PartialEq + Clone + 'static, V: Clone>(mut m: AlmideMap<K, V>, key: K, f: std::rc::Rc<dyn Fn(V) -> V>) -> AlmideMap<K, V> {
     let f = move |a| f(a);
-    let mut m = m.clone();
     if let Some(v) = m.get(&key).cloned() { m.insert(key, f(v)); }
     m
 }

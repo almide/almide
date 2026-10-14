@@ -408,6 +408,10 @@ impl Emitter<'_> {
         key: &IrExpr,
         cb: &IrExpr,
     ) -> ArmResult {
+        // A receiver whose credit the op holds is written in place (dying_move.rs, #3707).
+        if let Some(owned) = self.try_map_update_owned(m, [key, cb])? {
+            return Ok(Some(owned));
+        }
         let (params, body) = self.hof_lambda(cb, 1)?;
         let (mh, k, v) = self.map_hof_open(m)?;
         let scan = self.map_scan_fn(k)?;
