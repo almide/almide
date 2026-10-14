@@ -4,8 +4,8 @@ expression: code
 ---
 pub fn to_string(c: &Color) -> AlmideString {
     match c {
-        Color::Red => "red".to_string(),
-        Color::Green => "green".to_string(),
-        Color::Blue => "blue".to_string(),
+        Color::Red => AlmideString::from("red"),
+        Color::Green => AlmideString::from("green"),
+        Color::Blue => AlmideString::from("blue"),
     }
 }

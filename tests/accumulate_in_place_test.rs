@@ -212,7 +212,7 @@ fn a_field_accumulator_takes_the_field_and_extends_it() {
     if !tool_available() { return; }
     let rust = emitted();
     let fields = body(&rust, "fields");
-    assert!(fields.contains("b.text = AlmideConcat::concat(std::mem::take(&mut b.text), \"ab\""),
+    assert!(fields.contains("b.text = AlmideConcat::concat(std::mem::take(&mut b.text), AlmideString::from(\"ab\")"),
         "`b.text = b.text + \"ab\"` must take the field:\n{fields}");
     assert!(fields.contains("b.xs = AlmideConcat::concat(std::mem::take(&mut b.xs), vec![i])"),
         "`b.xs = b.xs + [i]` must take the field:\n{fields}");
@@ -231,7 +231,7 @@ fn an_interpolation_led_by_the_accumulator_appends() {
     let interp = body(&rust, "interp");
     assert!(interp.contains("s = AlmideConcat::concat(s, format!(\"[{}]\", i))"),
         "`s = \"${{s}}[${{i}}]\"` must move `s` and append:\n{interp}");
-    assert!(interp.contains("s = AlmideConcat::concat(s, \".\""),
+    assert!(interp.contains("s = AlmideConcat::concat(s, AlmideString::from(\".\")"),
         "`s = \"${{s}}.\"` must move `s` and append:\n{interp}");
     assert!(!interp.contains("format!(\"{}"), "no interpolation re-formats `s`:\n{interp}");
 }
