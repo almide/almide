@@ -1053,3 +1053,37 @@ Builds compared: 0.62.0, 0.66.0 (release 819bbc74f) and develop 974c00ea0.
 2. `set.insert` / `set.union` / `set.map` timeouts and the `list.unique` quadratic: reproduce, then fix in the compiler or runtime.
 3. Re-inspect `map.upsert` after #3700. Then valid-input recipes and the effect harness for the 134 effect rows.
 4. TCP step 3 (p3 shim over `wasi:sockets@0.3`) and step 4.
+
+## 2026-10-14 (afternoon): the quadratic collection builders
+
+### Merged
+- **#3702** closes #3700: json.to_map, one entry per key, on wasm and through a self-hosted body for the interpreter. It also carries the 42 stamps; uninspected went to 278.
+- **#3703**, refs #3552:
+  - wasm `set.from_list` now goes through the key index with in-place growth. A 60,000-member build allocated 2.4 GB before and 2.6 MB after.
+  - native `list.unique` / `list.unique_by` now go through an `AlmideMap` seen set. 500k elements took 30.2 s before and a few seconds after.
+
+### In this change (#3706, closes #3704)
+- **wasm `list.unique` / `list.unique_by` over Int or String** use the key index.
+  - 300k elements: 15.3 s → 0.08 s.
+  - The output's side-table record is retired before it leaves as a List, because a List drop never retires one.
+- **wasm `set.map` with an Int or String result** grows through the key index. 400k members: 9.7 s → about 1 s.
+- **One shared helper.** All three paths use `emit_keyed_push`.
+- **Costs:**
+  - wasm code size +0.6 to +2.3 KB on fixtures that link the index helpers;
+  - one more allocation per `unique` call.
+- **`map.upsert` is stamped.** The re-inspection at develop 0aaf3b1c5 (2 × c4-standard-4, asia-northeast1-b) passed it. Its earlier parity finding was #3700. Uninspected: 278 → 277.
+
+### Still not stampable, and why
+- **`set.insert` / `set.union`.** On GCE, the counted judge's plain-call shape hits the 60 s cap. Locally, the timed judge measures that same shape as order n in 0.07–0.4 s.
+  - This points at the counted harness (perf + memshim) at 16n, not at the functions. It is a harness follow-up.
+- **`io.write` / `io.write_bytes`.** Two harness problems:
+  - the probe writes n bytes to stdout per call, which the harness captures;
+  - the batch's order rows for both were malformed (a signature where the order should be).
+  - They need a probe that discards stdout before they can be inspected.
+- **`list.flat_map`, `option.collect`, `option.collect_map`, `json.get_int`.** A wasm bytes-moved series fits no class within 3%. It is the same class as the 3 deferred earlier.
+- **`result.filter`, `bytes.concat`, `map.update`.** O(n) bytes moved per call where O(1) was declared. To investigate next.
+
+### Next
+1. Owner: enqueue #3706.
+2. Investigate `result.filter` / `bytes.concat` / `map.update` per-call copies, and the counted harness's call-shape timeout.
+3. Valid-input recipes and the effect harness for the 134 effect rows.
