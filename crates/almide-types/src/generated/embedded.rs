@@ -12056,6 +12056,31 @@ fn __jpr_items(j: Value, path: List[String], k: Int, tgt: Int, last: Bool, i: In
     } else __jpr_items(j, path, k, tgt, last, i + 1, n, acc + [ev])
   }
 "#;
+pub const SRC_JSON_TO_MAP: &str = r#"
+
+
+
+
+
+
+
+
+
+@implements("json.to_map")
+fn json_to_map(j: Value) -> Map[String, String]? = if prim.load32(prim.handle(j) + 4) == 6 then some(__tomap_fold(j, 0, prim.load32(prim.handle(j) + 8) / 2, map.new()))
+else none
+
+fn __tomap_fold(v: Value, i: Int, n: Int, acc: Map[String, String]) -> Map[String, String] = if i >= n then acc
+else {
+  let h = prim.handle(v)
+  let k: String = prim.load_handle(h + 12 + (2 * i) * 8)
+  let x: Value = prim.load_handle(h + 12 + (2 * i + 1) * 8)
+  __tomap_fold(v, i + 1, n, map.set(acc, k, __tomap_text(x)))
+}
+
+fn __tomap_text(x: Value) -> String = if prim.load32(prim.handle(x) + 4) == 4 then prim.load_str(prim.handle(x) + 12)
+else value.stringify(x)
+"#;
 pub const SRC_LIST: &str = r#"
 
 
@@ -38990,6 +39015,7 @@ pub fn source_of(stem: &str) -> Option<&'static str> {
         "json_get_typed" => Some(SRC_JSON_GET_TYPED),
         "json_parse" => Some(SRC_JSON_PARSE),
         "json_path" => Some(SRC_JSON_PATH),
+        "json_to_map" => Some(SRC_JSON_TO_MAP),
         "list" => Some(SRC_LIST),
         "list_anyall" => Some(SRC_LIST_ANYALL),
         "list_chunk" => Some(SRC_LIST_CHUNK),

@@ -2,6 +2,7 @@
 
 pub const DECLARED: &[(&str, &[(&str, &str)])] = &[
     (crate::embedded::SRC_HTTP_FRAMED, &[("__request_impl", "http.request"), ("__request_status_impl", "http.request_status"), ("__get_status_impl", "http.get_status"), ("__request_bytes_impl", "http.request_bytes"), ("__get_bytes_impl", "http.get_bytes"), ("__request_response_impl", "http.request_response"), ("__get_response_impl", "http.get_response"), ("__post_response_impl", "http.post_response"), ("__put_response_impl", "http.put_response"), ("__patch_response_impl", "http.patch_response"), ("__delete_response_impl", "http.delete_response")]),
+    (crate::embedded::SRC_JSON_TO_MAP, &[("json_to_map", "json.to_map")]),
     (crate::embedded::SRC_NET_WASM, &[("__net_tcp_listen_impl", "net.tcp_listen"), ("__net_tcp_accept_impl", "net.tcp_accept"), ("__net_tcp_connect_impl", "net.tcp_connect"), ("__net_tcp_local_port_impl", "net.tcp_local_port"), ("__net_tcp_read_impl", "net.tcp_read"), ("__net_tcp_read_exact_impl", "net.tcp_read_exact"), ("__net_tcp_read_timeout_impl", "net.tcp_read_timeout"), ("__net_tcp_write_impl", "net.tcp_write"), ("__net_tcp_available_impl", "net.tcp_available"), ("__net_tcp_set_timeout_impl", "net.tcp_set_timeout"), ("__net_tcp_close_impl", "net.tcp_close"), ("__net_tcp_close_listener_impl", "net.tcp_close_listener"), ("__net_tcp_is_open_impl", "net.tcp_is_open")]),
     (crate::embedded::SRC_PROCESS_STDIN_LINES, &[("process_stdin_lines", "process.stdin_lines")]),
 ];
