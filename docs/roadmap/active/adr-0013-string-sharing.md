@@ -53,7 +53,18 @@ Inventory at develop 0d93660ea:
 
 Open design points, to settle before writing code:
 
-1. **The type.** `Rc<str>` copies a `String` into a new allocation on conversion. `Rc<String>` moves it, at the cost of one extra indirection. A Koka-style single block (count + bytes) avoids both, but has to be written by hand. Measure all three on strchurn / decode before choosing.
+1. **The type.** First measurement: a Rust microbenchmark, macOS arm64, best of 5, 2026-10-15. Prototypes are in the session scratchpad; re-measure on GCE before choosing.
+
+   | Operation | `String` (today) | `Rc<str>` | `Rc<String>` | One block `[rc, len, cap \| bytes]` |
+   |---|---:|---:|---:|---:|
+   | Build 2M short strings | 28.1 ms | 34.5 (+21%) | 56.7 (+100%) | 31.0 (+10%) |
+   | Share a 100 KB string 20k times | 25.3 ms | 0.00 | 0.00 | 0.00 |
+   | Push 2M chars into a unique string | 0.72 ms | quadratic (no capacity) | 1.47 (2×) | 3.18 (4.4×) |
+   | Equality scan over 2M | 0.57 ms | 0.51 | 1.05 | 0.73 |
+
+   - **`Rc<str>`** has no capacity, so `string.push` would rebuild the string on every call. It is out.
+   - **`Rc<String>`** pays two allocations and a second indirection.
+   - **The single block** is the wasm leg's layout. It wins on building and sharing. Its unique push is 4.4× slower in this unoptimized prototype, which checks the count on every push with no inlined fast path. That number must come down to within strbuild's ratchet before stage 2 can land.
 2. **The `mut` surface.** `string.push` / `string.clear` use RcCow (`Rc::make_mut` semantics): in place when unique, copy when shared. This is the same rule List / Map already follow.
 3. **The fan boundary.** Use the Koka thread-shared flip, so only values captured into a scoped thread become atomic. The stage 2 ratchet is the judge: a strchurn regression from the flip stops the stage.
 4. **The ABI.** Runtime functions keep taking `&str`, which works through `Deref`. Functions that return `String` return the shared type, converted once at their boundary.
