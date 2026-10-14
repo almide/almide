@@ -1,0 +1,11 @@
+[package]
+name = "almide-str"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "ADR-0013's shared immutable string buffer for the native runtime: one block [rc, len, cap | bytes], edited through a unique view"
+
+# No `[lints] workspace = true`: the workspace forbids unsafe code, and this
+# crate is the raw allocation boundary. Every unsafe block carries a SAFETY
+# line, and CI runs the tests under Miri (the `miri-almide-str` job).
