@@ -179,7 +179,7 @@ template = "{value}i64"
 template = "{value}f64"
 
 [string_literal]
-template = "\"{value}\".to_string()"
+template = "AlmideString::from(\"{value}\")"
 
 [bool_literal_true]
 template = "true"

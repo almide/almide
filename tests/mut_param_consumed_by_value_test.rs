@@ -119,7 +119,7 @@ fn every_by_value_position_of_a_mut_param_owns_the_read() {
         ("into_list", "vec![t.clone()]"),
         ("into_tuple", "(t.clone(), 7i64)"),
         ("into_let", "let u: Table = t.clone();"),
-        ("concat_str", "concat(s.to_string(), \"!\""),
+        ("concat_str", "concat(s.to_string(), AlmideString::from(\"!\")"),
         ("concat_list", "concat(xs.to_vec(), vec![10i64])"),
     ] {
         let body = fn_body(&rust, name);
