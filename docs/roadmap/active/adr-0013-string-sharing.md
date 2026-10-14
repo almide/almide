@@ -1,6 +1,6 @@
 # ADR-0013: native String as a shared buffer — implementation
 
-**Status:** stage 1 landed (2026-10-15); stage 2 next.
+**Status:** stage 1 landed (#3715, 2026-10-15). Stage 2 in progress: step 1 (the alias) landed in #3716. The literals (#3719) and the type (#3717) are in review.
 **Decision:** [ADR-0013](../../adr/0013-string-shared-immutable-buffer.md) (accepted 2026-09-04).
 **Owner ruling 2026-10-15:** implement this right after the stdlib inspection's individual fixes. Do not change borrow inference for conditionally consumed parameters instead.
 
@@ -73,3 +73,70 @@ Open design points, to settle before writing code:
 4. **The ABI.** Runtime functions keep taking `&str`, which works through `Deref`. Functions that return `String` return the shared type, converted once at their boundary.
 
 Stage 3 (seamless slices for `split` / `slice` / `trim` / `lines`) follows stage 2. Stage 4 (inline small strings) is out of scope here.
+
+## Stage 2: the migration plan
+
+The surface was mapped at develop 0d93660ea; file:line references are from that commit.
+
+**Two native renderers, chosen per program.**
+- `src/cli/mod.rs:240` (`render_v1_native_or_fallback`) tries MIR v1 for the whole program. On any wall it falls back to the v0 walker.
+  - v1 walls on multi-module programs, top-level lets, heap tail recursion and Codec / `Value` programs, so the walker renders most real programs.
+  - `almide test` and `install` always use v0.
+- Metered programs can **splice** v1 regions into v0 code (`mod.rs:323-328`). There, both renderers' String representations must be the same type.
+- v1 output does not include `runtime/rs` or the codegen prelude. It has its own header (`render_native.rs:229`) and shims (`render_native_shims.rs`).
+
+**Steps.** Each step lands on its own and keeps every gate green.
+
+1. **The alias, with no behaviour change.**
+   - `type AlmideString = String;` goes in `rust_runtime_prelude` (`crates/almide-codegen/src/lib.rs:343`) and once in the v1 header. The metered splice must end up with exactly one definition.
+   - Every site that spells the Almide String type emits the alias:
+     - walker: `walker/types.rs:138`, `templates/rust.toml:242`, the error-type defaults (`types.rs:172`, `expressions_calls_binops.rs:549`);
+     - v1: `NTy::Str` renderings in `render_native*.rs`.
+   - The runtime compiles unchanged because the alias is transparent.
+   - Gate: a test that greps the generated Rust of the spec corpus for a bare `String` in a type position and finds none.
+2. **The type, behind a flag.**
+   - `AlmideStr`: the single block `[rc, len, cap | bytes]`, with `Deref<Target = str>`, `From<String>`, `From<&str>`, `Display`, `PartialEq` / `Ord` / `Hash` by bytes, `Clone` = count + 1, and `unique()` returning the view measured above.
+   - Unit tests plus a Miri run over the type alone.
+   - The flag `ALMIDE_SHARED_STR=1` flips the alias. Default off.
+3. **The construction sites.**
+   - Literals become `AlmideStr::from("..")`, or better a static immortal block, as Swift does with literals.
+   - Concatenation goes through `AlmideConcat` for `AlmideStr`, using the unique view when the left operand is unique.
+   - `format!` results are converted at the boundary with `From<String>`.
+   - Error payloads (`Result<T, AlmideStr>`).
+4. **The runtime ABI.**
+   - `&str` parameters (140) keep working through `Deref`. Returns (`-> String`, 51; `Vec<String>`, 16; `Option<String>`, 13; `Result<_, String>`, 124) convert at the function's boundary.
+   - The `&mut String` four (`string.push` / `clear`, `value.rs:411`) take `&mut AlmideStr` and use `unique()`.
+   - `buildscript/runtime_registry.rs:314` parses modes from the runtime's source text, so its patterns must learn the new spelling.
+5. **The in-place windows. This is a correctness step, not a speed step.**
+   - MIR v1's append window (`render_native_append.rs:28-45`) renders `s = __str_concat(s, x)` as `s.push_str(x)`. Its stated soundness argument is "every `Dup` is a deep `.clone()`" (its comment, lines 15-20). Under a shared buffer that is false, and the window must go through `unique()`.
+   - The walker's `AlmideConcat<String> for String` (`lib.rs:348-353`) has the same obligation.
+   - Gate: an alias fixture on both legs, in which `let t = s; s = s + "x"` must leave `t` unchanged.
+6. **`AlmideValue::Str`** (`value.rs:18`) becomes `Str(AlmideStr)`. This is ADR-0018 / #1679's stage.
+7. **Flip the default.** Run `gce_ab.sh` against the stage 1 baseline: strchurn and fasta must not be 5% or more slower. Then the alias flag goes away.
+
+**What keeps observable behaviour unchanged:**
+- Every step runs the full spec corpus on both legs, plus the cross-target contracts.
+- Steps 2–6 are behind the flag until step 7, so a regression is a flag flip away from the old representation.
+
+**The step 3–4 ratchet (measured 2026-10-15).**
+- **The census:** with the alias pointed at `AlmideStr` (probe flag), emit every `spec/lang` and `spec/stdlib` file (463), compile each with `rustc --test`, and count the errors.
+  - With the flag off, the same harness gives 0 errors, except 10 http files whose standalone rustc cannot link rustls. Those are environmental and excluded from both counts.
+- **The migration rule:** every construction site moves to a spelling that is the identity while the alias is `String` and a conversion once it is `AlmideStr`. That is `AlmideString::from(..)` / `.into()`. Behaviour with the flag off cannot change, and the census can only fall.
+
+| State | Errors with the flag on |
+|---|---:|
+| alias only (#3716) | 8,924 |
+| + literals as `AlmideString::from("..")` | 7,326 |
+| + `int.to_string` / `float.to_string` returning `AlmideString` (probe) | 3,657 |
+
+From here on the census also counts **distinct sites** (an error inside the runtime repeats in all 463 files):
+
+| State (probe, flag on) | Errors | Distinct sites |
+|---|---:|---:|
+| literals + `AlmideConcat` impls for `AlmideStr` | 6,664 | 1,421 |
+| + 46 runtime `-> String` functions return `AlmideString` | 2,631 | 1,193 |
+| + 137 runtime `Result<_, String>` signatures spell `AlmideString` | 9,501 | 1,137 |
+
+The raw count rose at the last step because some errors moved into the runtime itself, where each one repeats per file. Distinct sites fell. Flag off, every step stays at 0.
+
+**The runtime ABI steps void inspection stamps.** Changing a runtime function's text changes its implementation hash, and `tests/stdlib_inspection_test.rs` then requires re-inspection. The `-> String` step alone voided 38 stamped functions. So the ABI steps (returns, `Result`, `Vec`, `Option`) are collected on one branch and re-inspected once on GCE before they are proposed.

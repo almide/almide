@@ -1168,3 +1168,42 @@ Order agreed with the owner: real defects first (result.filter → list.flat_map
 2. The doubling meter, as a design proposal.
 3. The harness gaps: bytes.heap_restore (diamond has nothing to compare), io.write* (kernel copies), value.as_array (noise on a constant series).
 4. Then ADR-0013, starting with its stage 1 ratchets.
+
+## 2026-10-15 (later): ADR-0013 stage 2 begins, the meter's fixed allocator, sixteen advisories
+
+### Landed (MERGED)
+- **#3718:** wasmtime 49.0.2 → 49.0.3 and rustls 0.23.45 → 0.23.46. RustSec published sixteen advisories on 2026-10-14 (RUSTSEC-2026-0346..0349 and 0353..0364), and `cargo audit` failed on every PR until this merged.
+- **#3714:** wasm flat_map reserve, 8-byte string compare, and stamps.
+- **#3715:** the GCE A/B procedure and its noise floor.
+- **#3716:** ADR-0013 stage 2 step 1, the `AlmideString` alias. Native spec 513 files / 4,432 tests pass.
+
+### In review
+- **#3717:** `crates/almide-str`, the `[rc, len, cap | bytes]` block with a unique view.
+  - Miri runs its 11 tests in the new `miri-almide-str` CI job.
+  - Measured against `String`, macOS arm64:
+    - sharing 100 KB 20k times: 0.03 ms vs 25 ms;
+    - building short strings: +20% (the 24-byte header);
+    - an equality scan: +25%.
+- **#3719:** literals as `AlmideString::from("..")`.
+- **The flag-on census:** distinct sites 1,421 → 1,137 across the probe steps. Flag off, it stays at 0. The plan is in adr-0013-string-sharing.md.
+
+### Owner rulings (2026-10-15)
+- **Growth policy.** Measured in Rust, Swift, Java, Python and Go:
+  - results whose count is known on success reserve exactly n;
+  - dedup builders keep doubling;
+  - the earlier "reserve the upper bound, then shrink" proposal is withdrawn, because no measured language does that.
+- **The meter's allocator.** The doubling misfits were not about sampling phase. The meter already samples at 20000·2^k.
+  - The cause is wasm allocator state: a reused block, or a large block that keeps a remainder under 64 KiB, skips a growth copy.
+  - The local checkouts of Rust, Swift, Roc, Lean 4 and Koka never fit a complexity curve. They assert the growth policy, or count against a test-scoped fixed allocator.
+  - Ruling: the complexity criterion counts wasm under `ALMIDE_WASM_CANONICAL_ALLOC` (no reuse; the shipped module is unchanged).
+
+### Measured (branch growth-third-option, GCE c4-standard-4)
+- **Pass:** option.collect, option.collect_map, set.map, map.from_list, json.to_map and json.parse now pass every criterion. Every bytes-moved series fits at rms 0.0%. Stamped; uninspected 253 on that branch.
+- **Still failing:** set.from_list and list.unique, on the wasm instruction series (3.2% against 3%; bytes moved fits at 0.0%). This is a separate cause, probably the hash index's rehash phase. Not stamped.
+
+### Next
+1. PR for growth-third-option.
+2. Investigate set.from_list / list.unique instructions.
+3. The ADR-0013 runtime ABI batch: `Vec<String>` and `Option<String>`, then one GCE re-inspection.
+4. option.collect's exact reserve on the generic path.
+5. Then heap_restore, io.write and value.as_array, one at a time, researched across languages first.
