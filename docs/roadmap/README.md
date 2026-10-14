@@ -7,10 +7,11 @@
 
 ## Active
 
-96 items
+97 items
 
 | Item | Description |
 |------|-------------|
+| [ADR-0013: native String as a shared buffer — implementation](active/adr-0013-string-sharing.md) |  |
 | [AlmidePerceusBelt](active/almide-perceus-belt.md) | AlmidePerceusBelt — formal memory safety guarantee for Almide |
 | [全軸制覇への突破点 — アリーナと近隣比較から導いた設計指針](active/arena-breakthroughs.md) | 全軸制覇への突破点台帳 — 近隣アリーナの実測と 18 近隣コンパイラの機構読みから、どの軸で負けていて何を突破すれば世界一かを、勝利条件・ゲート・順序つきで固定する |
 | [Async Inception — logical time as the language's time base](active/async-inception.md) | The async inception: thesis, grammar, semantics, proofs, claim and plan in one charter |
