@@ -488,6 +488,11 @@ pub(crate) fn compile_to_wasm_bytes_surfaced(file: &str, allow_unverified: bool,
     // guard scopes the thread-local to this build; off, nothing is emitted.
     let _alloc_count = almide_base::env::flag("ALMIDE_WASM_ALLOC_COUNT")
         .then(almide_wasm::alloc_count::CountGuard::set);
+    // ALMIDE_WASM_CANONICAL_ALLOC: the inspection meter's fixed allocator —
+    // `$alloc` bumps every request, so a measured copy series depends on the
+    // requests alone, not on what the free lists hold (canonical_alloc.rs).
+    let _canonical_alloc = almide_base::env::flag("ALMIDE_WASM_CANONICAL_ALLOC")
+        .then(almide_wasm::canonical_alloc::CanonicalGuard::set);
 
     // The route resolves the module list itself (once, off disk, through the
     // same resolver) and hands the FRESH un-inferred programs to whichever
