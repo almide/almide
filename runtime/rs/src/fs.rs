@@ -177,22 +177,33 @@ pub fn almide_rt_fs_fold_lines_chunked<A: Clone + Send, F: Fn(A, String) -> A + 
     let ranges = fold_lines_chunk_ranges(path, workers)?;
     // Flush first: a worker's abort cannot reach this thread's buffer (C-197).
     almide_stdout_flush();
+    // One thread per chunk was one thread per BYTE once `workers` passed the
+    // file size, and the OS refusing the 4097th spawn crashed the run where
+    // wasm answered ok. The chunks stay as they were; at most one thread per
+    // core folds them, thread t taking chunks t, t+T, …, and each partial
+    // lands back in its chunk's slot.
+    let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
+    let threads = ranges.len().min(cores);
+    let ranges = &ranges;
     std::thread::scope(|scope| {
         let f = &f;
-        let handles: Vec<_> = ranges
-            .iter()
-            .map(|&(s, e)| {
-                let init = init.clone();
-                scope.spawn(move || {
-                    almide_stack_guard_register();
-                    fold_lines_range_impl(path, s, e, init, f)
-                })
-            })
-            .collect();
-        handles
-            .into_iter()
-            .map(|h| h.join().map_err(|_| "fold_lines_chunked: worker panicked".to_string())?)
-            .collect()
+        let mut handles = Vec::with_capacity(threads);
+        for t in 0..threads {
+            let init = init.clone();
+            let spawned = std::thread::Builder::new().spawn_scoped(scope, move || {
+                almide_stack_guard_register();
+                ranges.iter().skip(t).step_by(threads).map(|&(s, e)| fold_lines_range_impl(path, s, e, init.clone(), f)).collect::<Vec<_>>()
+            });
+            handles.push(spawned.map_err(|e| format!("fold_lines_chunked: cannot start a worker: {e}"))?);
+        }
+        let mut slots: Vec<Option<Result<A, String>>> = (0..ranges.len()).map(|_| None).collect();
+        for (t, h) in handles.into_iter().enumerate() {
+            let parts = h.join().map_err(|_| "fold_lines_chunked: worker panicked".to_string())?;
+            for (k, part) in parts.into_iter().enumerate() {
+                slots[t + k * threads] = Some(part);
+            }
+        }
+        slots.into_iter().map(|p| p.expect("every chunk folded")).collect()
     })
 }
 // The sequential twin (#3649): the same chunk partition, folded chunk by chunk
@@ -208,12 +219,15 @@ pub fn almide_rt_fs_fold_lines_chunked_seq<A: Clone>(path: &str, workers: i64, i
     ranges.iter().map(|&(s, e)| fold_lines_range_impl(path, s, e, init.clone(), &*f)).collect()
 }
 // The byte-range partition both chunked forms walk: `workers` (clamped to 1)
-// equal chunks of [0, size), the empty tail chunks dropped.
+// equal chunks of [0, size), the empty tail chunks dropped. The non-empty
+// count is computed, not filtered out of all `workers` candidates (2^31 of
+// them for `workers = int.MAX`).
 fn fold_lines_chunk_ranges(path: &str, workers: i64) -> Result<Vec<(i64, i64)>, String> {
     let size = std::fs::metadata(path).map_err(|e| io_err("fs.fold_lines_chunked", &fs_q(path), e))?.len() as i64;
     let w = workers.max(1);
     let chunk = size / w + 1;
-    Ok((0..w).map(|i| i * chunk).filter(|&s| s < size).map(|s| (s, (s + chunk).min(size))).collect())
+    let count = (size + chunk - 1) / chunk;
+    Ok((0..count).map(|i| i * chunk).map(|s| (s, (s + chunk).min(size))).collect())
 }
 pub fn almide_rt_fs_for_each_line(path: &str, f: std::rc::Rc<dyn Fn(String)>) -> Result<(), String> {
     use std::io::BufRead;
