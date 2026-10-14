@@ -346,9 +346,22 @@ fn best_time(ctx: &Ctx, src: &str, leg: Leg) -> Result<Duration, String> {
 }
 
 fn build(ctx: &Ctx, src: &str, leg: Leg) -> Result<PathBuf, String> {
+    build_as(ctx, src, leg, false)
+}
+
+/// `canonical`: build the wasm leg with the meter's fixed allocator
+/// (`ALMIDE_WASM_CANONICAL_ALLOC`, owner ruling 2026-10-15). `$alloc` then
+/// never reuses a freed block, so a copy series depends on the program's
+/// requests and not on the free lists' state. The native leg ignores it.
+fn build_as(ctx: &Ctx, src: &str, leg: Leg, canonical: bool) -> Result<PathBuf, String> {
     let file = ctx.dir.join(format!("p{:016x}.almd", hash(src)));
     std::fs::write(&file, src).map_err(|e| e.to_string())?;
-    let art = file.with_extension(if matches!(leg, Leg::Wasm) { "wasm" } else { "bin" });
+    let canonical = canonical && matches!(leg, Leg::Wasm);
+    let art = file.with_extension(match leg {
+        Leg::Wasm if canonical => "canonical.wasm",
+        Leg::Wasm => "wasm",
+        _ => "bin",
+    });
     if art.is_file() {
         return Ok(art);
     }
@@ -356,6 +369,9 @@ fn build(ctx: &Ctx, src: &str, leg: Leg) -> Result<PathBuf, String> {
     c.arg("build").arg(&file).arg("-o").arg(&art);
     if matches!(leg, Leg::Wasm) {
         c.args(["--target", "wasm"]);
+    }
+    if canonical {
+        c.env("ALMIDE_WASM_CANONICAL_ALLOC", "1");
     }
     let out = c.output().map_err(|e| e.to_string())?;
     if !out.status.success() {
@@ -609,7 +625,7 @@ fn judge_counted(
         k = (k * 4).min(MAX_K);
     }
     let sizes: Vec<u64> = (0..5).map(|i| n << i).collect();
-    let mut line = format!("{label} k={k}..{} meter=instructions:u+bytes-moved n={n}..{}", 2 * k, n << 4);
+    let mut line = format!("{label} k={k}..{} meter=instructions:u+bytes-moved alloc=canonical(wasm) n={n}..{}", 2 * k, n << 4);
     let mut worst = 0usize;
     let mut unexplained = false;
     for leg in [Leg::Native, Leg::Wasm] {
@@ -766,7 +782,7 @@ struct Counts {
 /// minimum drops a rare interrupt-path outlier), with the same output checks
 /// the timed judge makes: deterministic, and equal across legs.
 fn counted(ctx: &Ctx, src: &str, leg: Leg) -> Result<Counts, String> {
-    let art = build(ctx, src, leg)?;
+    let art = build_as(ctx, src, leg, true)?;
     let mut best = Counts { instructions: u64::MAX, moved: u64::MAX, wall: Duration::MAX };
     let mut first: Option<String> = None;
     for _ in 0..2 {
