@@ -8,9 +8,9 @@
 //!
 //! The crate does not opt into the workspace's `unsafe_code = "forbid"`. The
 //! block is raw allocation, and every `unsafe` block states its invariant on
-//! a `SAFETY:` line. `almide_str.rs` is written to the same splice discipline
+//! a `SAFETY:` line, and the crate's own `[lints]` deny
+//! `unsafe_op_in_unsafe_fn`. `almide_str.rs` is written to the same splice discipline
 //! as almide-rt-core, so the runtime can `include!` it verbatim.
-#![deny(unsafe_op_in_unsafe_fn)]
 
 mod almide_str;
 
