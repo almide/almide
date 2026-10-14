@@ -12055,8 +12055,8 @@ fn __jpr_items(j: Value, path: List[String], k: Int, tgt: Int, last: Bool, i: In
       }
     } else __jpr_items(j, path, k, tgt, last, i + 1, n, acc + [ev])
   }
-"#;
-pub const SRC_JSON_TO_MAP: &str = r#"
+
+
 
 
 
@@ -39023,7 +39023,6 @@ pub fn source_of(stem: &str) -> Option<&'static str> {
         "json_get_typed" => Some(SRC_JSON_GET_TYPED),
         "json_parse" => Some(SRC_JSON_PARSE),
         "json_path" => Some(SRC_JSON_PATH),
-        "json_to_map" => Some(SRC_JSON_TO_MAP),
         "list" => Some(SRC_LIST),
         "list_anyall" => Some(SRC_LIST_ANYALL),
         "list_chunk" => Some(SRC_LIST_CHUNK),
