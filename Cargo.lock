@@ -230,6 +230,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "almide-str"
+version = "0.12.2"
+
+[[package]]
 name = "almide-syntax"
 version = "0.12.2"
 dependencies = [
