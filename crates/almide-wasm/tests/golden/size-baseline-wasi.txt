@@ -738,7 +738,7 @@
 2916	spec/wasm_cross/scoped_worker_in_and_out.almd
 4312	spec/wasm_cross/self_call_swapped_params.almd
 7856	spec/wasm_cross/set_entries_reclaim.almd
-8688	spec/wasm_cross/set_index_order.almd
+8776	spec/wasm_cross/set_index_order.almd
 10429	spec/wasm_cross/set_insertion_order.almd
 62684	spec/wasm_cross/sized_display_matrix.almd
 6920	spec/wasm_cross/sized_field_default_matrix.almd
