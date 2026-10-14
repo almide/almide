@@ -113,7 +113,7 @@
 27065	spec/wasm_cross/codec_whitespace_tolerance.almd
 5853	spec/wasm_cross/collection_literals.almd
 3169	spec/wasm_cross/composition_fuzz_batch.almd
-10386	spec/wasm_cross/compound_eq.almd
+11383	spec/wasm_cross/compound_eq.almd
 18434	spec/wasm_cross/compound_repr_interp.almd
 16583	spec/wasm_cross/compound_repr_records_interp.almd
 8391	spec/wasm_cross/compound_repr_recursive_interp.almd
@@ -183,7 +183,7 @@
 8591	spec/wasm_cross/fallible_hof_effect_callback_family.almd
 7918	spec/wasm_cross/fallible_hof_large_input.almd
 25118	spec/wasm_cross/fallible_hof_matrix_containers.almd
-19700	spec/wasm_cross/fallible_hof_matrix_list.almd
+20314	spec/wasm_cross/fallible_hof_matrix_list.almd
 14221	spec/wasm_cross/fallible_hof_option_effect_callback.almd
 8157	spec/wasm_cross/fallible_hof_recursive_callee.almd
 12993	spec/wasm_cross/fallible_hof_release_matrix.almd
@@ -426,7 +426,7 @@
 8789	spec/wasm_cross/list_float_total_order.almd
 7445	spec/wasm_cross/list_fold_fused_callback_result_ownership.almd
 6582	spec/wasm_cross/list_head_read_borrows.almd
-5673	spec/wasm_cross/list_heap_ops_release_temporaries.almd
+7225	spec/wasm_cross/list_heap_ops_release_temporaries.almd
 8748	spec/wasm_cross/list_heap_tuple_return.almd
 10325	spec/wasm_cross/list_heapelem_rc.almd
 6619	spec/wasm_cross/list_index_element_append.almd
@@ -452,15 +452,15 @@
 3410	spec/wasm_cross/list_sort_str.almd
 3129	spec/wasm_cross/list_string_param_join_len.almd
 2097	spec/wasm_cross/list_swap_oob.almd
-18039	spec/wasm_cross/list_total_order.almd
-8855	spec/wasm_cross/list_unique_by_nonscalar_key.almd
-3538	spec/wasm_cross/list_unique_by_str_key.almd
+19475	spec/wasm_cross/list_total_order.almd
+11229	spec/wasm_cross/list_unique_by_nonscalar_key.almd
+5842	spec/wasm_cross/list_unique_by_str_key.almd
 7943	spec/wasm_cross/list_update_callback_result_ownership.almd
 8343	spec/wasm_cross/list_update_heap.almd
 2033	spec/wasm_cross/list_window_zero.almd
 2073	spec/wasm_cross/list_windows_zero.almd
 3838	spec/wasm_cross/list_with_capacity.almd
-5407	spec/wasm_cross/list_zip_with_typed.almd
+6979	spec/wasm_cross/list_zip_with_typed.almd
 981	spec/wasm_cross/literal_int_forms.almd
 866	spec/wasm_cross/literal_unit.almd
 825	spec/wasm_cross/loop_break_continue.almd
@@ -573,7 +573,7 @@
 2885	spec/wasm_cross/mut_param_loop_stays_in_place.almd
 11230	spec/wasm_cross/mut_param_move_mode_gaps.almd
 17158	spec/wasm_cross/mut_param_nested_place_writeback.almd
-50032	spec/wasm_cross/mut_param_reassign_from_hof.almd
+50028	spec/wasm_cross/mut_param_reassign_from_hof.almd
 2348	spec/wasm_cross/mut_param_spread_reassign.almd
 5059	spec/wasm_cross/mut_param_tail_recursion.almd
 3032	spec/wasm_cross/mut_param_writeback_growth.almd
