@@ -480,7 +480,26 @@ pub(crate) fn emit_str_eq() -> Function {
     i.local_get(la).local_get(b).i32_load(len_memarg()).i32_ne().if_(BlockType::Empty);
     i.i32_const(0).return_();
     i.end();
+    // The same block is equal to itself.
+    i.local_get(a).local_get(b).i32_eq().if_(BlockType::Empty);
+    i.i32_const(1).return_();
+    i.end();
     i.i32_const(0).local_set(idx);
+    // Eight bytes at a time while a whole word is left (wasm loads need no
+    // alignment), then the tail byte by byte. A byte loop cost about ten
+    // instructions per byte, and where it stopped depended on how long a
+    // prefix the two strings shared.
+    let word = MemArg { offset: u64::from(almide_layout::PAYLOAD), align: 0, memory_index: 0 };
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(idx).i32_const(8).i32_add().local_get(la).i32_gt_u().br_if(1);
+    i.local_get(a).local_get(idx).i32_add().i64_load(word);
+    i.local_get(b).local_get(idx).i32_add().i64_load(word);
+    i.i64_ne().if_(BlockType::Empty);
+    i.i32_const(0).return_();
+    i.end();
+    i.local_get(idx).i32_const(8).i32_add().local_set(idx);
+    i.br(0);
+    i.end().end();
     i.loop_(BlockType::Empty);
     i.local_get(idx).local_get(la).i32_ge_u().if_(BlockType::Empty);
     i.i32_const(1).return_();
