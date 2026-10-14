@@ -19,6 +19,7 @@ pub const REUSE: &[Reuse] = &[
     Reuse { module: "map", func: "merge", param: 0, arity: 2, intrinsic: "almide_rt_map_merge", owned_twin: Some("almide_rt_map_merge_owned") },
     Reuse { module: "map", func: "remove", param: 0, arity: 2, intrinsic: "almide_rt_map_remove", owned_twin: Some("almide_rt_map_remove_owned") },
     Reuse { module: "map", func: "set", param: 0, arity: 3, intrinsic: "almide_rt_map_set", owned_twin: None },
+    Reuse { module: "map", func: "update", param: 0, arity: 3, intrinsic: "almide_rt_map_update", owned_twin: Some("almide_rt_map_update_owned") },
     Reuse { module: "map", func: "upsert", param: 0, arity: 4, intrinsic: "almide_rt_map_upsert", owned_twin: None },
     Reuse { module: "map", func: "values", param: 0, arity: 1, intrinsic: "almide_rt_map_values", owned_twin: Some("almide_rt_map_values_owned") },
     Reuse { module: "set", func: "insert", param: 0, arity: 2, intrinsic: "almide_rt_set_insert", owned_twin: Some("almide_rt_set_insert_owned") },
