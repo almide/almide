@@ -519,6 +519,7 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_map_set" => &[false, false, false],
         "almide_rt_map_set_str" => &[false, false, false],
         "almide_rt_map_update" => &[false, false, false],
+        "almide_rt_map_update_owned" => &[false, false, false],
         "almide_rt_map_upsert" => &[false, false, false, false],
         "almide_rt_map_upsert_fn" => &[false, false, false, false],
         "almide_rt_map_upsert_str_fn" => &[false, false, false, false],
