@@ -51,7 +51,19 @@ pub fn almide_rt_list_max<T: Ord + Clone>(xs: &[T]) -> Option<T> { xs.iter().max
 pub fn almide_rt_list_chunk<T: Clone>(xs: &[T], n: i64) -> Vec<Vec<T>> { if n == 0 { almide_abort("chunk size must be positive"); } xs.chunks(n as usize).map(|c| c.to_vec()).collect() }
 pub fn almide_rt_list_windows<T: Clone>(xs: &[T], n: i64) -> Vec<Vec<T>> { if n == 0 { almide_abort("window size must be positive"); } if (n as usize) > xs.len() { return vec![]; } xs.windows(n as usize).map(|w| w.to_vec()).collect() }
 pub fn almide_rt_list_dedup<T: Clone + PartialEq>(xs: &[T]) -> Vec<T> { let mut r = Vec::new(); for x in xs { if r.last() != Some(x) { r.push(x.clone()); } } r }
-pub fn almide_rt_list_unique<T: Clone + PartialEq>(xs: &[T]) -> Vec<T> { let mut r = Vec::new(); for x in xs { if !r.contains(x) { r.push(x.clone()); } } r }
+// The seen set is an `AlmideMap` (#3704): it hashes only the exact-equality
+// key types (Int, String, Bool, their pairs, List[Int] / List[String]) and
+// probes every other type by `PartialEq`, so the answer is the old
+// `r.contains` scan's — Float `-0.0 == 0.0`, NaN never matches — in O(n)
+// for the hashed types where the scan was O(n^2).
+pub fn almide_rt_list_unique<T: Clone + PartialEq + 'static>(xs: &[T]) -> Vec<T> {
+    let mut seen: AlmideMap<T, ()> = AlmideMap::new();
+    let mut r = Vec::new();
+    for x in xs {
+        if !seen.contains_key(x) { seen.insert(x.clone(), ()); r.push(x.clone()); }
+    }
+    r
+}
 pub fn almide_rt_list_set<T: Clone>(xs: &[T], i: i64, x: T) -> Vec<T> { let mut r = xs.to_vec(); if let Some(s) = r.get_mut(i as usize) { *s = x; } r }
 pub fn almide_rt_list_swap<T: Clone>(xs: &[T], i: i64, j: i64) -> Vec<T> { let mut r = xs.to_vec(); let (a, b) = (i as usize, j as usize); if a < r.len() && b < r.len() { r.swap(a, b); } r }
 
@@ -212,13 +224,15 @@ pub fn almide_rt_list_swap_owned<T>(mut xs: Vec<T>, i: i64, j: i64) -> Vec<T> { 
 // does (#1812): user types derive `Clone, Debug, PartialEq` only, so the old
 // `HashSet` seen set was a check-passes/build-fails gap (rustc E0277), and a
 // Float key follows `PartialEq` — `-0.0 == 0.0` collapses, NaN never matches.
-pub fn almide_rt_list_unique_by<T: Clone, K: PartialEq>(xs: Vec<T>, f: std::rc::Rc<dyn Fn(T) -> K>) -> Vec<T> {
+// The seen keys live in an `AlmideMap` (#3704), with the same answers as
+// the old `Vec` scan for the reason `almide_rt_list_unique` gives.
+pub fn almide_rt_list_unique_by<T: Clone, K: PartialEq + 'static>(xs: Vec<T>, f: std::rc::Rc<dyn Fn(T) -> K>) -> Vec<T> {
     let f = move |a| f(a);
-    let mut seen: Vec<K> = Vec::new();
+    let mut seen: AlmideMap<K, ()> = AlmideMap::new();
     let mut result = Vec::new();
     for x in xs {
         let k = f(x.clone());
-        if !seen.iter().any(|s| *s == k) { seen.push(k); result.push(x); }
+        if !seen.contains_key(&k) { seen.insert(k, ()); result.push(x); }
     }
     result
 }
