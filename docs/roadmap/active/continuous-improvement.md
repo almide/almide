@@ -1134,3 +1134,37 @@ Builds compared: 0.62.0, 0.66.0 (release 819bbc74f) and develop 974c00ea0.
 1. Owner: enqueue #3711, this PR, and the set.remove PR.
 2. Re-stamp string.push after #3711.
 3. A meter for amortized growth that does not loosen the 3% fit.
+
+## 2026-10-15: the individual inspection failures, in the agreed order
+
+Order agreed with the owner: real defects first (result.filter → list.flat_map → value.field / json.get_int), then the doubling meter, then the harness gaps. After that, ADR-0013.
+
+### result.filter: native caller clone. Not fixed here; awaits ADR-0013
+- The call shape passes a live String as `err_val`, and native renders `x.clone()` at the call site, an O(n) copy even when the predicate passes.
+- Measured the same shape in 6 languages (macOS arm64, µs per call at n = 20k / 320k):
+  - Rust owned-param + caller clone: 0.22 / 4.25.
+  - Rust borrow + clone-on-consume, Rust Rc<str>, Swift, Go, Python, Node, Ruby: flat.
+- Only the owned-copy model pays for the argument's size. That is ADR-0013's finding (2026-09-04), already ratified and not yet implemented.
+- **Owner ruling 2026-10-15:** do NOT change borrow inference (it keeps O(n) on the consuming branch and adds a clone on the dying-move path). Implement ADR-0013 after this queue.
+
+### list.flat_map: wasm grew by doubling a result whose length it knew
+- With a list-literal tail of L scalars the result is exactly len(xs) · L slots. It is now reserved up front.
+- Before: 13.4 MB allocated for a 4.8 MB working set. After: under 6 MB (`tests/flat_map_literal_reserve_test.rs`).
+
+### value.field / json.get_int: the wasm string compare
+- The 7.5% misfit was not noise. `$str_eq` compared byte by byte, about 10 instructions per byte, and stopped at the first difference.
+- The generator's keys share a prefix whose length depends on n, so the per-call cost was not a + c·n.
+- `$str_eq` now compares 8 bytes at a time and short-circuits the same block. 60M comparisons of 20-byte keys: 0.386 s → 0.152 s (wasmtime, median of 3).
+- Equality is unchanged at every length 0..40 and every difference position on both legs (`tests/str_eq_word_compare_test.rs`).
+- GCE re-measure pending.
+
+### Stamped
+- **string.push:** passes at develop e499d7a68, and its old failing seed 1791975162 replays with 0 findings.
+- **set.remove:** passes at develop 0d93660ea. The wasm rebind loop is now flat at 4.44e7 instructions, where it was O(n).
+- **Uninspected:** 259 → 257.
+
+### Next
+1. GCE: re-run list.flat_map, value.field, json.get_int on this branch.
+2. The doubling meter, as a design proposal.
+3. The harness gaps: bytes.heap_restore (diamond has nothing to compare), io.write* (kernel copies), value.as_array (noise on a constant series).
+4. Then ADR-0013, starting with its stage 1 ratchets.
