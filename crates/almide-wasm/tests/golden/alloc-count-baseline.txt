@@ -201,7 +201,7 @@
 11	4	207	8	spec/wasm_cross/fan_map_err_runs_every_element.almd
 10	3	153	5	spec/wasm_cross/fan_map_inline_err.almd
 71	29	814	71	spec/wasm_cross/fan_map_inline_lambda.almd
-96	41	1371	96	spec/wasm_cross/fan_map_nested_combinators.almd
+92	37	1387	92	spec/wasm_cross/fan_map_nested_combinators.almd
 201	113	5290	201	spec/wasm_cross/fan_map_parallel_scalar.almd
 10	4	152	7	spec/wasm_cross/fan_map_worker_abort_keeps_stdout.almd
 ~	spec/wasm_cross/fan_prefetch_fs.almd
@@ -411,7 +411,7 @@
 10	5	52	10	spec/wasm_cross/list_call_element.almd
 17	10	168	17	spec/wasm_cross/list_chunk_windows.almd
 2	0	58	0	spec/wasm_cross/list_chunk_zero.almd
-87	21	1435	87	spec/wasm_cross/list_comprehensive.almd
+86	20	1451	86	spec/wasm_cross/list_comprehensive.almd
 291	236	3276	291	spec/wasm_cross/list_count_index_truncation.almd
 108	76	1082	108	spec/wasm_cross/list_count_stride_product_wrap.almd
 9	2	102	9	spec/wasm_cross/list_cross_module_variant.almd
