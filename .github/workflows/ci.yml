@@ -928,6 +928,30 @@ jobs:
           printf '\n[workspace]\n' >> crates/almide-kernel/Cargo.toml
           cargo test --release --manifest-path crates/almide-kernel/Cargo.toml
 
+  miri-almide-str:
+    name: Miri (almide-str)
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
+    # almide-str (ADR-0013) manages its own [rc, len, cap | bytes] heap block, so
+    # unlike the greenfield crates it cannot take the workspace's
+    # `unsafe_code = "forbid"`. Its tests run here under Miri, which checks every raw access:
+    # use-after-free, double free, leaks, out-of-bounds reads and writes, and
+    # Stacked Borrows aliasing. The crate is std-only, so this job builds
+    # nothing else. Miri needs nightly, so this is the one nightly job.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri, rust-src
+
+      - name: Run almide-str's tests under Miri
+        run: |
+          cargo miri setup
+          cargo miri test -p almide-str
+
   test-wasm:
     name: Test WASM
     needs: [changes, build]
