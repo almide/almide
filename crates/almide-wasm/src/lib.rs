@@ -110,6 +110,7 @@ mod bytes_in_place;
 mod bytes_recv;
 mod bytes_split;
 pub mod alloc_count;
+pub mod canonical_alloc;
 mod alloc_inline;
 pub mod heap_cap;
 pub mod host_exports;

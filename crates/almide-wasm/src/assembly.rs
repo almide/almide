@@ -65,7 +65,7 @@ fn static_helpers(lit: &HelperLits, counters: Option<u32>) -> Vec<(u32, Function
         (F_ITOA, emit_itoa()),
         (F_APPEND_I64, emit_append_i64()),
         (F_APPEND_BOOL, emit_append_bool(lit.true_base, lit.false_base)),
-        (F_ALLOC, emit_alloc(lit.oom_msg, counters)),
+        (F_ALLOC, emit_alloc(lit.oom_msg, counters, crate::canonical_alloc::armed())),
         (F_INT_TO_STRING, emit_int_to_string()),
         (F_CONCAT, emit_concat()),
         (F_STR_EQ, emit_str_eq()),
