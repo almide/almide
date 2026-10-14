@@ -1086,4 +1086,23 @@ Builds compared: 0.62.0, 0.66.0 (release 819bbc74f) and develop 974c00ea0.
 ### Next
 1. Owner: enqueue #3706.
 2. Investigate `result.filter` / `bytes.concat` / `map.update` per-call copies, and the counted harness's call-shape timeout.
+## 2026-10-14 (evening): two inspection-harness defects and a native build failure
+
+### Harness (tools/xtarget-fuzz)
+- **The counted judge's k grew on instructions alone.** A call whose cost is one large copy retires a handful of instructions (`rep movsb`), so k kept growing by 4x until each run copied gigabytes at 16n and hit the 60 s cap. This is why set.insert and set.union's call shape "timed out" on GCE while a local timed run measured order n in 0.07–0.4 s.
+  - Now k stops on either meter (2e7 instructions or 2e8 bytes moved).
+  - With that fix, set.insert and set.union pass every criterion and are stamped. Uninspected: 278 → 276 on this branch.
+- **Probe pipes were read only after exit.** A probe that writes more than 64 KiB blocked on the full pipe until the cap fired. That is what io.write / io.write_bytes' "timeouts" were.
+  - Now both run paths drain stdout and stderr while waiting (`wait_capped`).
+  - io.write* now finish, but stay unstamped. Their native bytes-moved series collapses at large n, because the kernel copies large writes and the memcpy shim never sees them. This is a limit of the meter, not a defect.
+
+### Found by the diamond criterion
+- **`io.write_bytes(xs)` with a borrow-inferred `List[Int]` parameter did not build natively.** rustc E0308: the runtime fn took `&Vec<i64>` and the borrowed parameter renders as `&[i64]`.
+  - `random.choice` had the same signature.
+  - Both now take a slice. A two-leg test covers both.
+- **Swept the runtime:** every other `&Vec<T>` parameter is `Bytes` (`&Vec<u8>`), which renders as `&Vec<u8>` and passes the diamond criterion.
+
+### Next
+1. Owner: enqueue this PR.
+2. The 4 rows whose bytes-moved series fits no class within 3%: decide whether the meter can explain amortized growth.
 3. Valid-input recipes and the effect harness for the 134 effect rows.
