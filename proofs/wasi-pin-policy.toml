@@ -64,6 +64,7 @@ evidence = [
   "wasm-tools 0.258.0 release (wasmparser/wasm-encoder/wit-parser/wit-component lockstep, 2026-08; the 0.3.1 WIT-language train)",
   "wasmtime v49.0.1 release 2026-09-24 (crates.io publish time) — the security release fixing RUSTSEC-2026-0315/-0316 (#2955); rust-version 1.96.0; the embedded host compiled unchanged and the p3 legs pass with no feature flag on the 49.0.1 CLI",
   "wasmtime crate 49.0.2 2026-10-02 — the security release fixing RUSTSEC-2026-0325/-0326/-0327 (GC rooting and tag-import typing, and an unvalidated async-lifted callback result count); the embedded host compiles unchanged, and the CI CLI stays v49.0.1",
+  "wasmtime crate 49.0.3 and rustls 0.23.46, both 2026-10-14 — the security releases for RUSTSEC-2026-0346/-0347/-0348/-0349 (rustls: TLS secrets in client-session Debug output, ECH-rejection data leak, pre-auth brotli 1 GiB allocation, ServerHello key-exchange downgrade) and RUSTSEC-2026-0353..0364 (wasmtime 49.0.2, 12 advisories, including a host panic on yield in a component start function and on pending calls after a trap); cranelift 0.136.3 and pulley 49.0.3 come with it; the CI CLI stays v49.0.1",
   "wasm-tools 0.259.0 release 2026-09-10 (crates.io publish time of wasmparser 0.259.0); `SizeAlign::fill` became fallible, the only API change this tree touches",
   "wasm-tools 0.261.0 release 2026-10-02 (crates.io publish time of wasmparser 0.261.0); `wit_component::embed_component_metadata` gained a `canonical_names: bool` argument, the only API change this tree touches",
 ]

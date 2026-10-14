@@ -30,7 +30,7 @@ almide-wasm-run = { path = "../almide-wasm-run" }
 almide-wasm-vm = { path = "../almide-wasm-vm" }
 almide = { path = "../.." }
 wasmparser = "0.261"
-wasmtime = "49.0.2"
+wasmtime = "49.0.3"
 sha2 = "0.11"
 gimli = { version = "0.34", default-features = false, features = ["read", "std"] }
 
