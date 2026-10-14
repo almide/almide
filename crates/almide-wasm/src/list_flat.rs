@@ -22,21 +22,10 @@ impl Emitter<'_> {
     /// accumulator is not reachable from the callback, and an abort ends the
     /// run). Returns the result list's type when it took the body.
     fn try_flat_map_literal_tail(&mut self, body: &IrExpr, hacc: u32) -> Result<Option<ETy>, EmitError> {
-        let (stmts, tail): (&[almide_ir::IrStmt], &IrExpr) = match &body.kind {
-            almide_ir::IrExprKind::Block { stmts, expr: Some(t) } => (stmts, t),
-            almide_ir::IrExprKind::List { .. } => (&[], body),
-            _ => return Ok(None),
-        };
-        let almide_ir::IrExprKind::List { elements } = &tail.kind else {
-            return Ok(None);
-        };
-        let SliceTy::List(bi) = self.infer(tail)? else {
+        let Some((stmts, elements, bi)) = self.flat_map_literal_tail(body)? else {
             return Ok(None);
         };
         let el = self.types.el(bi);
-        if !matches!(el, SliceTy::Scalar(Scalar::Int | Scalar::Float)) {
-            return Ok(None);
-        }
         for s in stmts {
             self.lower_stmt(s)?;
         }
@@ -52,12 +41,44 @@ impl Emitter<'_> {
         Ok(Some(bi))
     }
 
+    /// The body's statements, its tail list literal's elements and the
+    /// literal's type, when the tail is a list literal of Int / Float.
+    #[allow(clippy::type_complexity)]
+    fn flat_map_literal_tail<'b>(&mut self, body: &'b IrExpr) -> Result<Option<(&'b [almide_ir::IrStmt], &'b [IrExpr], ETy)>, EmitError> {
+        let (stmts, tail): (&[almide_ir::IrStmt], &IrExpr) = match &body.kind {
+            almide_ir::IrExprKind::Block { stmts, expr: Some(t) } => (stmts, t),
+            almide_ir::IrExprKind::List { .. } => (&[], body),
+            _ => return Ok(None),
+        };
+        let almide_ir::IrExprKind::List { elements } = &tail.kind else {
+            return Ok(None);
+        };
+        let SliceTy::List(bi) = self.infer(tail)? else {
+            return Ok(None);
+        };
+        let scalar = matches!(self.types.el(bi), SliceTy::Scalar(Scalar::Int | Scalar::Float));
+        Ok(scalar.then_some((stmts, elements.as_slice(), bi)))
+    }
+
     pub(crate) fn lower_list_flat_map(&mut self, xs: &IrExpr, cb: &IrExpr) -> ArmResult {
         let (params, body) = self.hof_lambda(cb, 1)?;
         let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
         let hs = self.hold_i32()?;
         let hacc = self.hold_i32()?;
-        self.f.instructions().i32_const(0).call(F_ALLOC).local_set(hacc);
+        // A literal tail of L scalars makes the result exactly len(xs) * L
+        // slots: reserve them (`$alloc` sets cap; len starts at 0) so the
+        // pushes never regrow — growth by doubling from empty allocated and
+        // copied about twice the result.
+        match self.flat_map_literal_tail(body)? {
+            Some((_, elements, _)) => {
+                let mut i = self.f.instructions();
+                i.local_get(ch).i32_const(8 * elements.len() as i32).i32_mul().call(F_ALLOC).local_tee(hacc);
+                i.i32_const(0).i32_store(len_memarg());
+            }
+            None => {
+                self.f.instructions().i32_const(0).call(F_ALLOC).local_set(hacc);
+            }
+        }
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
         self.hof_elem_into(elem, bh, ch, ih, params[0]);
         self.witness_callback_open(cb, None);
@@ -146,7 +167,20 @@ impl Emitter<'_> {
         let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
         let hr = self.hold_i32()?;
         let hacc = self.hold_i32()?;
-        self.f.instructions().i32_const(0).call(F_ALLOC).local_set(hacc);
+        // A literal tail of L scalars makes the result exactly len(xs) * L
+        // slots: reserve them (`$alloc` sets cap; len starts at 0) so the
+        // pushes never regrow — growth by doubling from empty allocated and
+        // copied about twice the result.
+        match self.flat_map_literal_tail(body)? {
+            Some((_, elements, _)) => {
+                let mut i = self.f.instructions();
+                i.local_get(ch).i32_const(8 * elements.len() as i32).i32_mul().call(F_ALLOC).local_tee(hacc);
+                i.i32_const(0).i32_store(len_memarg());
+            }
+            None => {
+                self.f.instructions().i32_const(0).call(F_ALLOC).local_set(hacc);
+            }
+        }
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
         self.hof_elem_into(elem, bh, ch, ih, params[0]);
         self.witness_callback_open(cb, None);
