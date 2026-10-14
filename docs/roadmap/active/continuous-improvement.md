@@ -1013,3 +1013,43 @@ Builds compared: 0.62.0, 0.66.0 (release 819bbc74f) and develop 974c00ea0.
 1. Owner: enqueue #3684–#3687 and merge als#140. Then advance `proofs/als-pin.txt` on `fix-3658-float-writer-nan` and open its PR.
 2. Valid-input recipes for the voided rows, then re-inspect them in small batches.
 3. TCP step 3 (p3 shim over `wasi:sockets@0.3`) and step 4.
+
+## 2026-10-14: the backlog merged, a json.to_map divergence, 42 stamps
+
+### Merged
+- **#3693**, which integrated #3684–#3687, #3689, #3690 and #3692. It closes #3664, #3668, #3673 and #3691. All four are confirmed CLOSED.
+- **#3701**: every bytes float writer writes the canonical NaN on both legs. It closes #3658, after als#140 and the pin advance.
+- **als#141**: C-380.
+- **#3699** is queued behind #3701. It bundles five dependabot bumps.
+  - syn 3 wraps a match arm's guarded pattern in `Pat::Guard`, and the name-keyed-sites gate stopped seeing six guarded or-patterns.
+  - The gate now descends into the guard. The six ledger rows were kept, not deleted.
+
+### Found and fixed in this change (#3700, I-divergence; also present in released 0.64.0)
+- **The defect.** On wasm, `json.to_map` wrote one map entry per object field, so a repeated key landed twice. `len`, `get`, iteration and `==` then disagreed with native.
+- **How it was found.** The parity re-run for this batch: `xtarget-fuzz --focus json.to_map --seed 1014`, two findings.
+- **The judge first.** als#141 adds C-380 (ALS-C1): one entry per key, at the first position, with the last value.
+  - The reference evaluator was also wrong: it answered `none` for any non-Str value and did not deduplicate.
+- **The fix.** Each pair goes through the judged map set that `map.from_list` uses. The fixture is byte-identical on native, wasm and the reference evaluator.
+- **Gates.** The witness floor certifies 940 of 940 fixtures. codopsy (`codo-ci.sh`, 85ac6cdcda79) gives almide-wasm A 90, unchanged.
+
+### Inspection
+- **Parity re-run** of the 43 uninspected functions that failed parity in batch 4d (seed 1014, local macOS):
+  - 42 had zero findings;
+  - `json.to_map` led to #3700.
+- **GCE batch at bec04155a** (develop with #3693 and the #3658 fix): 57 functions, 4 × c4-standard-4 in asia-northeast1-b, 200 programs per function, wasmtime 49.0.1, Linux 7.0.0-1014-gcp; every VM deleted.
+  - 42 passed every criterion and are stamped. Uninspected: 320 → 278 (written, test green, not merged).
+  - 15 did not pass:
+    - complexity, a wasm bytes-moved series that fits no class within 3%: `list.flat_map`, `option.collect`, `option.collect_map`, `json.get_int`;
+    - measured quadratic: `list.unique`, `list.unique_by`;
+    - O(n) bytes moved per call where O(1) was expected: `result.filter`, `bytes.concat`, `map.update`;
+    - 60 s timeouts: `set.insert`, `set.union`, `set.map`, `io.write`, `io.write_bytes`;
+    - one parity finding on `map.upsert`. The same seed is clean with the #3700 fix, so it is probably the same duplicate-key defect. Re-inspect after #3700 lands.
+- **The first launch of this batch ran nothing.** GitHub fetches a commit only by its full sha. Given a short sha, all four VMs failed the fetch and still printed `exit 0` per function.
+  - No stamp came of it, because stamping needs an all-PASS block.
+  - The harness now resolves full shas before starting and stops with FATAL when a fetch or build fails.
+
+### Next
+1. Owner: enqueue #3699 and the #3700 PR.
+2. `set.insert` / `set.union` / `set.map` timeouts and the `list.unique` quadratic: reproduce, then fix in the compiler or runtime.
+3. Re-inspect `map.upsert` after #3700. Then valid-input recipes and the effect harness for the 134 effect rows.
+4. TCP step 3 (p3 shim over `wasi:sockets@0.3`) and step 4.
