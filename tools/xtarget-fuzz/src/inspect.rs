@@ -854,6 +854,55 @@ fn icount_available() -> bool {
 }
 
 #[cfg(test)]
+mod run_tests {
+    use super::*;
+
+    /// A probe that writes more than a pipe buffer holds (64 KiB on Linux)
+    /// must finish, not block on a full pipe until the cap reads it as a
+    /// timeout: `io.write` / `io.write_bytes` were "timed out (60s cap)" on
+    /// every call shape this way.
+    #[test]
+    fn a_run_that_writes_more_than_a_pipe_holds_finishes() {
+        let child = Command::new("sh")
+            .args(["-c", "head -c 300000 /dev/zero; head -c 200000 /dev/zero >&2"])
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("sh");
+        let (out, _) = wait_capped(child, Duration::from_secs(20)).expect("finishes under the cap");
+        assert!(out.status.success());
+        assert_eq!(out.stdout.len(), 300_000);
+        assert_eq!(out.stderr.len(), 200_000);
+    }
+
+    #[test]
+    fn a_run_past_the_cap_is_a_timeout() {
+        let child = Command::new("sh")
+            .args(["-c", "sleep 5"])
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("sh");
+        let e = wait_capped(child, Duration::from_millis(200)).expect_err("killed at the cap");
+        assert!(e.contains("timed out"), "{e}");
+    }
+
+    /// The counted judge's k stops growing on EITHER meter: a call whose
+    /// cost is one large copy retires a handful of instructions (`rep
+    /// movsb`), so an instructions-only target drove k up by 4x until each
+    /// run copied gigabytes and hit the 60 s cap (set.insert / set.union's
+    /// call shape on GCE).
+    #[test]
+    fn calibration_stops_on_bytes_moved_as_well_as_instructions() {
+        let d = |instructions: f64, moved: f64| Delta { instructions, moved, wall: Duration::ZERO };
+        assert!(!counted_calibrated(&d(1e3, 1e3), &d(1e3, 1e3)));
+        assert!(counted_calibrated(&d(3e7, 0.0), &d(1e3, 0.0)));
+        assert!(counted_calibrated(&d(1e3, 3e8), &d(1e3, 0.0)));
+        assert!(counted_calibrated(&d(1e3, 0.0), &d(1e3, 3e8)));
+    }
+}
+
+#[cfg(test)]
 mod verdict_tests {
     use super::*;
     use std::os::unix::process::ExitStatusExt;
