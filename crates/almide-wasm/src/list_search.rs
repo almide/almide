@@ -246,13 +246,22 @@ impl Emitter<'_> {
         let SliceTy::Scalar(_) = kt else {
             return self.lower_list_unique_by_deep(kt, elem, (bh, ch, ih), cb, body);
         };
-        let scan = self.scan_helper(kt)?;
+        // An Int / String key probes the seen block through the key index
+        // and grows it in place, the index's append hook following each
+        // key (#3704: the seen-list scan was O(n²)); the other scalar keys
+        // keep the scan family, so a Float key's `-0.0 == 0.0` and
+        // `NaN != NaN` answers are unchanged.
+        let indexed = crate::map_index::index_key(kt).is_some();
+        let scan = if indexed { self.keyed_find(kt)? } else { self.scan_helper(kt)? };
+        let (append, forget) = if indexed { (self.keyed_append(kt), self.keyed_remove(kt)) } else { (None, None) };
+        let reserve = self.work.helper(crate::work::Helper::MapReserve);
         let kstride = kt.slot_size() as i32;
         let stride = elem.slot_size() as i32;
         let push = match kt.slot_size() {
             8 => F_LIST_PUSH_8,
             _ => F_LIST_PUSH_4,
         };
+        let hold = self.hold_i32()?;
         let hseen = self.hold_i32()?;
         let hout = self.hold_i32()?;
         let hkept = self.hold_i32()?;
@@ -281,11 +290,44 @@ impl Emitter<'_> {
             i.local_set(hkey);
             i.local_get(hseen).i32_const(kstride).i32_const(0).local_get(hkey);
             i.call(scan).i32_eqz().if_(BlockType::Empty);
+        }
+        if indexed {
+            // room for one key, the key at the old end, the index told
+            self.f
+                .instructions()
+                .local_get(hseen)
+                .local_set(hold)
+                .local_get(hseen)
+                .i32_const(kstride)
+                .call(reserve)
+                .local_tee(hseen)
+                .i32_const(almide_layout::PAYLOAD as i32)
+                .i32_add()
+                .local_get(hseen)
+                .i32_load(len_memarg())
+                .i32_add()
+                .local_get(hkey);
+            self.store_ty_slot_raw(kt);
+            let mut i = self.f.instructions();
+            i.local_get(hseen)
+                .local_get(hseen)
+                .i32_load(len_memarg())
+                .i32_const(kstride)
+                .i32_add()
+                .i32_store(len_memarg());
+            if let Some(append) = append {
+                i.local_get(hold).local_get(hseen).i32_const(kstride).i32_const(0).call(append).drop();
+            }
+        } else {
+            let mut i = self.f.instructions();
             i.local_get(hseen).local_get(hkey);
             if kt.val_type() == ValType::F64 {
                 i.i64_reinterpret_f64();
             }
             i.call(push).local_set(hseen);
+        }
+        {
+            let mut i = self.f.instructions();
             i.local_get(hout).local_get(hkept).i32_const(stride).i32_mul().i32_add();
             i.local_get(params[0]);
         }
@@ -305,7 +347,11 @@ impl Emitter<'_> {
             i.local_get(hout).local_get(hkept).i32_const(stride).i32_mul().i32_store(len_memarg());
             // The seen-keys scratch block is this arm's own: released
             // here, with the keys it holds (it was never, #2005 — 64 B per
-            // call).
+            // call). An indexed seen block's side-table record is retired
+            // first: a List drop never does (map_index.rs invariant 2).
+            if let Some(forget) = forget {
+                i.local_get(hseen).i32_const(0).call(forget).drop();
+            }
             i.local_get(hseen).call(seen_dec);
         }
         // The kept slots are COPIES of the source's handles (after LEN is
@@ -313,7 +359,7 @@ impl Emitter<'_> {
         self.emit_inc_elems(hout, elem);
         self.f.instructions().local_get(hout);
         self.release_for(kt);
-        for _ in 0..6 {
+        for _ in 0..7 {
             self.release_i32();
         }
         Ok(Some(Lowered::owned(SliceTy::List(self.types.intern(elem)))))
@@ -444,5 +490,86 @@ impl Emitter<'_> {
         self.release_i32();
         self.release_i32();
         Ok(())
+    }
+}
+
+impl Emitter<'_> {
+    /// `list.unique`'s path for an Int or String element (#3704; called from
+    /// `lower_list_unique`, list_comb.rs): the output is
+    /// built the way `set.from_list` builds a set — each element probed
+    /// through the key index, appended in place through `$map_reserve`
+    /// with the index's append hook following it — so the dedup is O(n)
+    /// where the walk of the output was O(n²). A List block is not a
+    /// Map / Set block (its drop never retires a side-table record,
+    /// map_index.rs invariant 2), so the record is retired here
+    /// (`$mapidx_forget`) before the block leaves as a List. The source
+    /// is on the stack.
+    pub(crate) fn emit_indexed_dedup(&mut self, h: ETy, elem: SliceTy) -> ArmResult {
+        let stride = elem.slot_size() as i32;
+        let find = self.keyed_find(elem)?;
+        let append = self.keyed_append(elem);
+        let forget = self.keyed_remove(elem);
+        let reserve = self.work.helper(crate::work::Helper::MapReserve);
+        let hb = self.hold_i32()?;
+        let hc = self.hold_i32()?;
+        let hacc = self.hold_i32()?;
+        let ho = self.hold_i32()?;
+        let hx = self.hold_val(elem)?;
+        {
+            let mut i = self.f.instructions();
+            i.local_set(hb);
+            i.i32_const(0).call(F_ALLOC).local_set(hacc);
+            i.i32_const(0).local_set(hc);
+            i.block(BlockType::Empty).loop_(BlockType::Empty);
+            i.local_get(hc).local_get(hb).i32_load(len_memarg()).i32_ge_u().br_if(1);
+            i.local_get(hb).local_get(hc).i32_add();
+        }
+        self.load_ty_slot(elem, 0);
+        {
+            let mut i = self.f.instructions();
+            i.local_set(hx);
+            // seen? one keyed probe of the output
+            i.local_get(hacc).i32_const(stride).i32_const(0).local_get(hx).call(find);
+            i.i32_eqz().if_(BlockType::Empty);
+            // room for one element (in place under class slack, else the
+            // doubled block), then the element at the old end
+            i.local_get(hacc).local_set(ho);
+            i.local_get(hacc).i32_const(stride).call(reserve).local_set(hacc);
+            i.local_get(hacc)
+                .i32_const(almide_layout::PAYLOAD as i32)
+                .i32_add()
+                .local_get(hacc)
+                .i32_load(len_memarg())
+                .i32_add()
+                .local_get(hx);
+        }
+        self.store_ty_slot_raw(elem);
+        {
+            let mut i = self.f.instructions();
+            i.local_get(hacc)
+                .local_get(hacc)
+                .i32_load(len_memarg())
+                .i32_const(stride)
+                .i32_add()
+                .i32_store(len_memarg());
+            if let Some(append) = append {
+                i.local_get(ho).local_get(hacc).i32_const(stride).i32_const(0).call(append).drop();
+            }
+            i.end();
+            i.local_get(hc).i32_const(stride).i32_add().local_set(hc);
+            i.br(0).end().end();
+            // the output leaves as a List: retire its side-table record
+            if let Some(forget) = forget {
+                i.local_get(hacc).i32_const(0).call(forget).drop();
+            }
+        }
+        // The kept elements are COPIES of the source's handles.
+        self.emit_inc_elems(hacc, elem);
+        self.f.instructions().local_get(hacc);
+        self.release_val(elem);
+        for _ in 0..4 {
+            self.release_i32();
+        }
+        Ok(Some(Lowered::owned(SliceTy::List(h))))
     }
 }

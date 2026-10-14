@@ -584,6 +584,9 @@ impl Emitter<'_> {
         ) {
             return unsup(&format!("list-unique-elem:{elem:?}"));
         }
+        if crate::map_index::index_key(elem).is_some() {
+            return self.emit_indexed_dedup(h, elem);
+        }
         let stride = elem.slot_size() as i32;
         let hb = self.hold_i32()?;
         let hc = self.hold_i32()?;
