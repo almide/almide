@@ -619,12 +619,20 @@ impl Emitter<'_> {
                 ) {
                     return unsup("set-elem-nonscalar");
                 }
+                // The result is fresh and ours alone, so it grows in place
+                // through `$map_reserve` (amortized) and dedups through the
+                // key index its append hook keeps — the `map.from_list`
+                // shape (#3544). The old body scanned the result linearly
+                // and copy-grew it per member: O(n²) on wasm (#3552).
                 let stride = e.slot_size();
-                let scan = self.scan_helper(e)?;
+                let scan = self.keyed_find(e)?;
+                let append = self.keyed_append(e);
+                let reserve = self.work.helper(crate::work::Helper::MapReserve);
                 let bh = self.hold_i32()?;
                 let ch = self.hold_i32()?;
                 let ih = self.hold_i32()?;
                 let rh = self.hold_i32()?;
+                let oh = self.hold_i32()?;
                 let xh = self.hold_for(e)?;
                 self.f.instructions().local_tee(bh);
                 self.f
@@ -659,25 +667,40 @@ impl Emitter<'_> {
                     .call(scan)
                     .i32_eqz()
                     .if_(BlockType::Empty);
-                let (len_h, nh) = self.emit_copy_grow(rh, stride)?;
+                // room for one member (in place under class slack, else the
+                // doubled block), then the member at the old end
                 self.f
                     .instructions()
-                    .local_get(nh)
+                    .local_get(rh)
+                    .local_set(oh)
+                    .local_get(rh)
+                    .i32_const(stride as i32)
+                    .call(reserve)
+                    .local_tee(rh)
                     .i32_const(almide_layout::PAYLOAD as i32)
                     .i32_add()
-                    .local_get(len_h)
+                    .local_get(rh)
+                    .i32_load(len_memarg())
                     .i32_add()
                     .local_get(xh);
                 // The member handle copied into the set takes +1: the set
                 // releases it through its typed drop (#2010 Map stage b).
                 self.share_handle_top(e);
                 self.store_ty_slot_raw(e);
-                // the outgrown block is ours alone and its members moved
-                self.f.instructions().local_get(rh).call(F_FREE);
-                self.f.instructions().local_get(nh).local_set(rh);
-                self.release_i32();
-                self.release_i32();
-                self.f.instructions().end();
+                {
+                    let mut i = self.f.instructions();
+                    i.local_get(rh)
+                        .local_get(rh)
+                        .i32_load(len_memarg())
+                        .i32_const(stride as i32)
+                        .i32_add()
+                        .i32_store(len_memarg());
+                    // the index follows the member (and the block, if it moved)
+                    if let Some(append) = append {
+                        i.local_get(oh).local_get(rh).i32_const(stride as i32).i32_const(0).call(append).drop();
+                    }
+                    i.end();
+                }
                 self.f
                     .instructions()
                     .local_get(ih)
@@ -689,6 +712,7 @@ impl Emitter<'_> {
                     .end();
                 self.f.instructions().local_get(rh);
                 self.release_for(e);
+                self.release_i32(); // oh
                 self.release_i32();
                 self.release_i32();
                 self.release_i32();
