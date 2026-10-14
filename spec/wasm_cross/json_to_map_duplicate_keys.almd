@@ -22,8 +22,20 @@ fn show(label: String, v: Value) -> Unit = {
 
 fn main() -> Unit = {
   show("twice", value.object([("k", value.int(1)), ("k", value.int(2))]))
-  show("first-position", value.object([("a", value.str("x")), ("b", value.bool(true)), ("a", value.str("y"))]))
-  show("mixed", value.object([("s", value.str("plain")), ("n", value.null()), ("f", value.float(1.5)), ("arr", value.array([value.int(1)])), ("s", value.array([]))]))
+  show(
+    "first-position",
+    value.object([("a", value.str("x")), ("b", value.bool(true)), ("a", value.str("y"))]),
+  )
+  show(
+    "mixed",
+    value.object([
+      ("s", value.str("plain")),
+      ("n", value.null()),
+      ("f", value.float(1.5)),
+      ("arr", value.array([value.int(1)])),
+      ("s", value.array([]))
+    ]),
+  )
   show("parsed", json.parse("{\"k\":1,\"j\":\"two\",\"k\":{\"x\":3}}") ?? value.null())
   show("empty", value.object([]))
   show("not-object", value.array([value.int(1)]))
