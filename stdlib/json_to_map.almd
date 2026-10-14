@@ -1,0 +1,24 @@
+// json_to_map — SELF-HOSTED `json.to_map(j)` (#3700, C-380): an object's fields
+// folded into a Map[String, String] one `map.set` at a time, so a key the object
+// repeats keeps its first position and takes its last value; a Str field is
+// taken verbatim, any other value is its `value.stringify` text; a non-object
+// is none. Native answers from its intrinsic and wasm from its emitter
+// lowering (crates/almide-wasm/src/value.rs); this body is the one the
+// reference interpreter evaluates, the third vote on the C-380 fixture.
+//
+// The object walk reads value_core's block layout (tag 6 at @4, the slot
+// count at @8, (key, value) handle pairs from @12), as value_keys does.
+@implements("json.to_map")
+fn json_to_map(j: Value) -> Map[String, String]? = if prim.load32(prim.handle(j) + 4) == 6 then some(__tomap_fold(j, 0, prim.load32(prim.handle(j) + 8) / 2, map.new()))
+else none
+
+fn __tomap_fold(v: Value, i: Int, n: Int, acc: Map[String, String]) -> Map[String, String] = if i >= n then acc
+else {
+  let h = prim.handle(v)
+  let k: String = prim.load_handle(h + 12 + (2 * i) * 8)
+  let x: Value = prim.load_handle(h + 12 + (2 * i + 1) * 8)
+  __tomap_fold(v, i + 1, n, map.set(acc, k, __tomap_text(x)))
+}
+
+fn __tomap_text(x: Value) -> String = if prim.load32(prim.handle(x) + 4) == 4 then prim.load_str(prim.handle(x) + 12)
+else value.stringify(x)
