@@ -106,6 +106,7 @@ fn find[K, V](m: Map[K, V], f: (K, V) -> Bool) -> (K, V)? = _
 
 /// Copy with key's value f(v); no-op if absent.
 @intrinsic("almide_rt_map_update")
+@reuse(m)
 fn update[K, V](m: Map[K, V], key: K, f: (V) -> V) -> Map[K, V] = _
 
 // Single-lookup insert-or-update — the aggregation hot-loop form (present →
