@@ -377,25 +377,53 @@ fn run_artifact(ctx: &Ctx, art: &Path, leg: Leg) -> Result<String, String> {
             c
         }
     };
-    let mut child = cmd
+    let child = cmd
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
         .map_err(|e| e.to_string())?;
-    let start = Instant::now();
-    while child.try_wait().map_err(|e| e.to_string())?.is_none() {
-        if start.elapsed() > RUN_CAP {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(format!("timed out ({}s cap)", RUN_CAP.as_secs()));
-        }
-        std::thread::sleep(Duration::from_millis(5));
-    }
-    let out = child.wait_with_output().map_err(|e| e.to_string())?;
+    let (out, _) = wait_capped(child, RUN_CAP)?;
     if !out.status.success() {
         return Err(run_failure(&out));
     }
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// Wait for `child` under `cap`, draining its stdout and stderr WHILE it
+/// runs. Reading them only after exit deadlocked any probe that wrote more
+/// than a pipe buffer holds (64 KiB on Linux): the child blocked on the full
+/// pipe, and the cap reported the block as a timeout (`io.write` /
+/// `io.write_bytes`, every call shape). Returns the output and the wall time.
+fn wait_capped(mut child: std::process::Child, cap: Duration) -> Result<(std::process::Output, Duration), String> {
+    use std::io::Read;
+    let drain = |pipe: Option<Box<dyn Read + Send>>| {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(mut p) = pipe {
+                let _ = p.read_to_end(&mut buf);
+            }
+            buf
+        })
+    };
+    let out_t = drain(child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
+    let err_t = drain(child.stderr.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
+    let start = Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
+            break status;
+        }
+        if start.elapsed() > cap {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = (out_t.join(), err_t.join());
+            return Err(format!("timed out ({}s cap)", cap.as_secs()));
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    };
+    let wall = start.elapsed();
+    let stdout = out_t.join().map_err(|_| "stdout reader panicked".to_string())?;
+    let stderr = err_t.join().map_err(|_| "stderr reader panicked".to_string())?;
+    Ok((std::process::Output { status, stdout, stderr }, wall))
 }
 
 /// Why a probe run failed: its exit and its first error line — or, when the
@@ -569,14 +597,13 @@ fn judge_counted(
     n: u64,
     programs: &dyn Fn(u64, u64) -> (String, String),
 ) -> Result<String, String> {
-    const CALIBRATE_INSTRUCTIONS: f64 = 2.0e7;
     let marginal = |m: u64, k: u64| (programs(m, 2 * k).0, programs(m, k).0);
     let mut k = 1u64;
     loop {
         let (p, b) = marginal(n, k);
         let dn = counted_delta(ctx, &p, &b, Leg::Native).map_err(|e| format!("{label} {e}"))?;
         let dw = counted_delta(ctx, &p, &b, Leg::Wasm).map_err(|e| format!("{label} {e}"))?;
-        if dn.instructions.max(dw.instructions) >= CALIBRATE_INSTRUCTIONS || k >= MAX_K {
+        if counted_calibrated(&dn, &dw) || k >= MAX_K {
             break;
         }
         k = (k * 4).min(MAX_K);
@@ -629,6 +656,20 @@ fn judge_counted(
         Some(declared) if worst <= declared => Ok(format!("{line} (order {} ok)", CLASSES[declared].0)),
         Some(declared) => Err(format!("{line} (order {} exceeded: measured {measured})", CLASSES[declared].0)),
     }
+}
+
+/// Whether the counted judge's k is large enough: either meter, on either
+/// leg, past its target. Instructions alone undercount a call whose cost is
+/// one large copy — `rep movsb` retires as one instruction whatever the
+/// length (see `MEMSHIM_C`) — so an instructions-only target drove k up by
+/// 4x until each run copied gigabytes at 16n and hit the 60 s cap
+/// (set.insert / set.union's call shape on GCE, 2026-10-14). 2e8 bytes is
+/// about 20 ms of copying on c4-standard-4, the same order as 2e7
+/// instructions.
+fn counted_calibrated(native: &Delta, wasm: &Delta) -> bool {
+    const CALIBRATE_INSTRUCTIONS: f64 = 2.0e7;
+    const CALIBRATE_BYTES: f64 = 2.0e8;
+    native.instructions.max(wasm.instructions) >= CALIBRATE_INSTRUCTIONS || native.moved.max(wasm.moved) >= CALIBRATE_BYTES
 }
 
 /// The cheapest class whose `a + c·f(n)` least-squares fit leaves every
@@ -797,22 +838,12 @@ fn run_counted(ctx: &Ctx, art: &Path, leg: Leg) -> Result<(String, Counts), Stri
         // intercept absorbs it.
         Leg::Wasm => cmd.arg(&ctx.wasmtime).args(["run", "-C", "cache=n", "-C", "parallel-compilation=n"]).arg(art),
     };
-    let start = Instant::now();
-    let mut child = cmd
+    let child = cmd
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
         .map_err(|e| e.to_string())?;
-    while child.try_wait().map_err(|e| e.to_string())?.is_none() {
-        if start.elapsed() > RUN_CAP {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(format!("timed out ({}s cap)", RUN_CAP.as_secs()));
-        }
-        std::thread::sleep(Duration::from_millis(5));
-    }
-    let wall = start.elapsed();
-    let out = child.wait_with_output().map_err(|e| e.to_string())?;
+    let (out, wall) = wait_capped(child, RUN_CAP)?;
     if !out.status.success() {
         return Err(run_failure(&out));
     }
