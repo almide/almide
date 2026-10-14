@@ -371,6 +371,7 @@
 69408	spec/wasm_cross/json_stringify_control_chars.almd
 70432	spec/wasm_cross/json_stringify_nonfinite.almd
 68368	spec/wasm_cross/json_stringify_pretty.almd
+68368	spec/wasm_cross/json_to_map_duplicate_keys.almd
 69952	spec/wasm_cross/json_value.almd
 66096	spec/wasm_cross/kernel_conformance.almd
 66496	spec/wasm_cross/koka_186_reused_names.almd
