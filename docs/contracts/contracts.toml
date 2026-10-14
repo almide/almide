@@ -4973,3 +4973,13 @@ status    = "active"
 evidence  = [
   { path = "spec/embedded_cross/net_tcp_timeouts.almd", class = "fixture" },
 ]
+[[contract]]
+id        = "C-380"
+spec      = "ALS-C1"
+title     = "json.to_map holds one entry per key: a repeated object key keeps its first position and takes its last value, on every leg"
+statement = "ALS-C1 (almide/almide#3700): `json.to_map(v)` of an object answers `some(map)` whose entries are the object's fields folded as one upsert each, in field order. A key the object repeats keeps the POSITION of its first occurrence and takes the VALUE of its last, so the map holds that key exactly once, the same rule as re-assigning an existing key (ALS-C1). A Str field value is taken verbatim, and any other value is its `value.stringify` text (null, Bool, numbers, arrays and objects alike). A non-object is `none`. An object can carry a repeated key: `value.object` accepts one and `json.parse` keeps one. Before this contract the wasm leg wrote every field as its own entry: `len` counted the key twice, `get` answered the first value, iteration listed both, and `==` against the deduplicated map was false, while native answered with one entry. The reference evaluator answered `none` for any non-Str value and did not deduplicate either."
+since     = "0.68.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/json_to_map_duplicate_keys.almd", class = "fixture" },
+]

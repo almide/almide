@@ -415,4 +415,5 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-377 | net tcp: loopback, handle numbering, EOF, close, is_open and tcp_local_port agree on native, the embedded wasm lane and the stock WASI 0.3 component | 0.68.0 | active | fixture | 0 |
 | C-378 | net tcp: every failure reads as errno-free classified text from one table, identical on native, the embedded wasm lane and the stock WASI 0.3 component | 0.68.0 | active | fixture | 0 |
 | C-379 | net tcp: timeouts and tcp_available are guest-enforced on the stock WASI 0.3 component and answer what native and the embedded wasm lane answer | 0.68.0 | active | fixture | 0 |
+| C-380 | json.to_map holds one entry per key: a repeated object key keeps its first position and takes its last value, on every leg | 0.68.0 | active | fixture | 1 |
 
