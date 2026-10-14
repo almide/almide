@@ -292,32 +292,7 @@ impl Emitter<'_> {
             i.call(scan).i32_eqz().if_(BlockType::Empty);
         }
         if indexed {
-            // room for one key, the key at the old end, the index told
-            self.f
-                .instructions()
-                .local_get(hseen)
-                .local_set(hold)
-                .local_get(hseen)
-                .i32_const(kstride)
-                .call(reserve)
-                .local_tee(hseen)
-                .i32_const(almide_layout::PAYLOAD as i32)
-                .i32_add()
-                .local_get(hseen)
-                .i32_load(len_memarg())
-                .i32_add()
-                .local_get(hkey);
-            self.store_ty_slot_raw(kt);
-            let mut i = self.f.instructions();
-            i.local_get(hseen)
-                .local_get(hseen)
-                .i32_load(len_memarg())
-                .i32_const(kstride)
-                .i32_add()
-                .i32_store(len_memarg());
-            if let Some(append) = append {
-                i.local_get(hold).local_get(hseen).i32_const(kstride).i32_const(0).call(append).drop();
-            }
+            self.emit_keyed_push(KeyedPush { acc: hseen, old: hold, val: hkey, ty: kt, share: false, append, reserve });
         } else {
             let mut i = self.f.instructions();
             i.local_get(hseen).local_get(hkey);
@@ -531,30 +506,10 @@ impl Emitter<'_> {
             // seen? one keyed probe of the output
             i.local_get(hacc).i32_const(stride).i32_const(0).local_get(hx).call(find);
             i.i32_eqz().if_(BlockType::Empty);
-            // room for one element (in place under class slack, else the
-            // doubled block), then the element at the old end
-            i.local_get(hacc).local_set(ho);
-            i.local_get(hacc).i32_const(stride).call(reserve).local_set(hacc);
-            i.local_get(hacc)
-                .i32_const(almide_layout::PAYLOAD as i32)
-                .i32_add()
-                .local_get(hacc)
-                .i32_load(len_memarg())
-                .i32_add()
-                .local_get(hx);
         }
-        self.store_ty_slot_raw(elem);
+        self.emit_keyed_push(KeyedPush { acc: hacc, old: ho, val: hx, ty: elem, share: false, append, reserve });
         {
             let mut i = self.f.instructions();
-            i.local_get(hacc)
-                .local_get(hacc)
-                .i32_load(len_memarg())
-                .i32_const(stride)
-                .i32_add()
-                .i32_store(len_memarg());
-            if let Some(append) = append {
-                i.local_get(ho).local_get(hacc).i32_const(stride).i32_const(0).call(append).drop();
-            }
             i.end();
             i.local_get(hc).i32_const(stride).i32_add().local_set(hc);
             i.br(0).end().end();
@@ -571,5 +526,51 @@ impl Emitter<'_> {
             self.release_i32();
         }
         Ok(Some(Lowered::owned(SliceTy::List(h))))
+    }
+}
+
+/// One append through the in-place growth the key index follows: `old`
+/// keeps the pre-growth block, `$map_reserve` makes room for one slot (in
+/// place under class slack, else the doubled block, which `acc` then
+/// holds), the value from `val` is stored at the old end (`share`: it
+/// takes +1 first), `len` grows, and the index's append hook is told the
+/// block may have moved. The caller probed `acc` for the value and found
+/// it absent.
+pub(crate) struct KeyedPush {
+    pub(crate) acc: u32,
+    pub(crate) old: u32,
+    pub(crate) val: u32,
+    pub(crate) ty: SliceTy,
+    pub(crate) share: bool,
+    pub(crate) append: Option<u32>,
+    pub(crate) reserve: u32,
+}
+
+impl Emitter<'_> {
+    pub(crate) fn emit_keyed_push(&mut self, KeyedPush { acc, old, val, ty, share, append, reserve }: KeyedPush) {
+        let stride = ty.slot_size() as i32;
+        self.f
+            .instructions()
+            .local_get(acc)
+            .local_set(old)
+            .local_get(acc)
+            .i32_const(stride)
+            .call(reserve)
+            .local_tee(acc)
+            .i32_const(almide_layout::PAYLOAD as i32)
+            .i32_add()
+            .local_get(acc)
+            .i32_load(len_memarg())
+            .i32_add()
+            .local_get(val);
+        if share {
+            self.share_handle_top(ty);
+        }
+        self.store_ty_slot_raw(ty);
+        let mut i = self.f.instructions();
+        i.local_get(acc).local_get(acc).i32_load(len_memarg()).i32_const(stride).i32_add().i32_store(len_memarg());
+        if let Some(append) = append {
+            i.local_get(old).local_get(acc).i32_const(stride).i32_const(0).call(append).drop();
+        }
     }
 }

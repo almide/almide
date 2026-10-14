@@ -355,9 +355,16 @@ impl Emitter<'_> {
         };
         let b_ty = self.infer(body)?;
         let SliceTy::Scalar(_) = b_ty else { return unsup("set-map-elem-nonscalar") };
-        let scan = self.scan_helper(b_ty)?;
+        // An Int / String member probes the result through the key index
+        // and grows it in place (#3704 family: the scan made set.map O(n²));
+        // the result is a Set, so its own drop retires the index.
+        let indexed = crate::map_index::index_key(b_ty).is_some();
+        let scan = if indexed { self.keyed_find(b_ty)? } else { self.scan_helper(b_ty)? };
+        let append = if indexed { self.keyed_append(b_ty) } else { None };
+        let reserve = self.work.helper(crate::work::Helper::MapReserve);
         let stride = e.slot_size() as i32;
         let bstride = b_ty.slot_size() as i32;
+        let hold = self.hold_i32()?;
         let sh = self.hold_i32()?;
         self.f.instructions().local_set(sh);
         let hcur = self.hold_i32()?;
@@ -394,27 +401,32 @@ impl Emitter<'_> {
             self.emit_release_hold(hv, b_ty);
         }
         self.f.instructions().else_();
-        self.f.instructions().local_get(hacc).local_get(hv);
-        if !owned {
-            self.share_handle_top(b_ty);
+        if indexed {
+            let push = crate::list_search::KeyedPush { acc: hacc, old: hold, val: hv, ty: b_ty, share: !owned, append, reserve };
+            self.emit_keyed_push(push);
+        } else {
+            self.f.instructions().local_get(hacc).local_get(hv);
+            if !owned {
+                self.share_handle_top(b_ty);
+            }
+            if b_ty.val_type() == wasm_encoder::ValType::F64 {
+                self.f.instructions().i64_reinterpret_f64();
+            }
+            let push = match b_ty.slot_size() {
+                8 => F_LIST_PUSH_8,
+                _ => F_LIST_PUSH_4,
+            };
+            self.f.instructions().call(push).local_set(hacc);
         }
-        if b_ty.val_type() == wasm_encoder::ValType::F64 {
-            self.f.instructions().i64_reinterpret_f64();
-        }
-        let push = match b_ty.slot_size() {
-            8 => F_LIST_PUSH_8,
-            _ => F_LIST_PUSH_4,
-        };
         {
             let mut i = self.f.instructions();
-            i.call(push).local_set(hacc);
             i.end();
             i.local_get(hcur).i32_const(stride).i32_add().local_set(hcur);
             i.br(0).end().end();
             i.local_get(hacc);
         }
         self.release_for(b_ty);
-        for _ in 0..4 {
+        for _ in 0..5 {
             self.release_i32();
         }
         Ok(Some(Lowered::owned(SliceTy::Set(self.types.intern(b_ty)))))
