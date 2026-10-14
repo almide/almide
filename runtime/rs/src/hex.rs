@@ -21,13 +21,9 @@ fn hex_from_nibble(c: u8) -> Option<u8> {
     }
 }
 
-pub fn almide_rt_hex_encode(b: &Vec<u8>) -> String {
-    hex_encode_with(b, ALMIDE_LOWER)
-}
+pub fn almide_rt_hex_encode(b: &Vec<u8>) -> AlmideString { let __almide_out: String = hex_encode_with(b, ALMIDE_LOWER); __almide_out.into() }
 
-pub fn almide_rt_hex_encode_upper(b: &Vec<u8>) -> String {
-    hex_encode_with(b, ALMIDE_UPPER)
-}
+pub fn almide_rt_hex_encode_upper(b: &Vec<u8>) -> AlmideString { let __almide_out: String = hex_encode_with(b, ALMIDE_UPPER); __almide_out.into() }
 
 pub fn almide_rt_hex_decode(s: &str) -> Result<Vec<u8>, String> {
     let bytes = s.as_bytes();

@@ -92,18 +92,19 @@ fn almide_rt_value_kind(v: &AlmideValue) -> &'static str {
 /// parent segments prepend (`city` -> `address.city`), index segments join
 /// bracket-style (`tags[1]`). The wasm leg's `__err_at` twin composes the
 /// same bytes.
-pub fn almide_rt___err_at(e: String, seg: String) -> String {
-    match e.split_once(", at ") {
-        Some((head, path)) if path.starts_with('[') => format!("{head}, at {seg}{path}"),
-        Some((head, path)) => format!("{head}, at {seg}.{path}"),
-        None => format!("{e}, at {seg}"),
-    }
+pub fn almide_rt___err_at(e: String, seg: String) -> AlmideString {
+    let __almide_out: String = {
+        match e.split_once(", at ") {
+            Some((head, path)) if path.starts_with('[') => format!("{head}, at {seg}{path}"),
+            Some((head, path)) => format!("{head}, at {seg}.{path}"),
+            None => format!("{e}, at {seg}"),
+        }
+    };
+    __almide_out.into()
 }
 
 /// #1675: the list-element frame — `[i]` joins the path bracket-style.
-pub fn almide_rt___err_at_index(e: String, i: i64) -> String {
-    almide_rt___err_at(e, format!("[{i}]"))
-}
+pub fn almide_rt___err_at_index(e: String, i: i64) -> AlmideString { almide_rt___err_at(e, format!("[{i}]")) }
 
 pub fn almide_rt_value_field(v: &AlmideValue, key: &str) -> Result<AlmideValue, String> {
     if let AlmideValue::Object(pairs) = v {
@@ -435,24 +436,27 @@ pub fn almide_rt_value_json_quote(s: &str) -> String {
     out.push('"');
     out
 }
-pub fn almide_rt_value_stringify(v: &AlmideValue) -> String {
-    match v {
-        AlmideValue::Null => "null".to_string(),
-        AlmideValue::Bool(b) => if *b { "true".to_string() } else { "false".to_string() },
-        AlmideValue::Int(n) => n.to_string(),
-        AlmideValue::Float(f) => almide_rt_value_float_json(*f),
-        AlmideValue::Str(s) => almide_rt_value_json_quote(s),
-        AlmideValue::Array(items) => {
-            let inner: Vec<String> = items.iter().map(almide_rt_value_stringify).collect();
-            format!("[{}]", inner.join(","))
+pub fn almide_rt_value_stringify(v: &AlmideValue) -> AlmideString {
+    let __almide_out: String = {
+        match v {
+            AlmideValue::Null => "null".to_string(),
+            AlmideValue::Bool(b) => if *b { "true".to_string() } else { "false".to_string() },
+            AlmideValue::Int(n) => n.to_string(),
+            AlmideValue::Float(f) => almide_rt_value_float_json(*f),
+            AlmideValue::Str(s) => almide_rt_value_json_quote(s),
+            AlmideValue::Array(items) => {
+                let inner: Vec<String> = items.iter().map(|x| String::from(almide_rt_value_stringify(x))).collect();
+                format!("[{}]", inner.join(","))
+            }
+            AlmideValue::Object(pairs) => {
+                let inner: Vec<String> = pairs.iter().map(|(k, v)| {
+                    format!("{}:{}", almide_rt_value_json_quote(k), almide_rt_value_stringify(v))
+                }).collect();
+                format!("{{{}}}", inner.join(","))
+            }
         }
-        AlmideValue::Object(pairs) => {
-            let inner: Vec<String> = pairs.iter().map(|(k, v)| {
-                format!("{}:{}", almide_rt_value_json_quote(k), almide_rt_value_stringify(v))
-            }).collect();
-            format!("{{{}}}", inner.join(","))
-        }
-    }
+    };
+    __almide_out.into()
 }
 
 // `AlmideValue` participates in derived `Repr` and string interpolation like any
@@ -464,7 +468,7 @@ pub fn almide_rt_value_stringify(v: &AlmideValue) -> String {
 // consistently across every path — and byte-identically to wasm, which reprs a
 // `AlmideValue` through the same JSON serializer (see `emit_repr_value`).
 impl AlmideRepr for AlmideValue {
-    fn almide_repr(&self) -> String { almide_rt_value_stringify(self) }
+    fn almide_repr(&self) -> String { String::from(almide_rt_value_stringify(self)) }
 }
 
 impl std::fmt::Display for AlmideValue {
