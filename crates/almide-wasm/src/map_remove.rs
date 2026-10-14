@@ -340,4 +340,69 @@ impl Emitter<'_> {
         self.release_i32(); // mh
         Ok(Some(Lowered::owned(got)))
     }
+
+    /// `set.remove(s, x)` over a receiver whose credit the op holds — the
+    /// map judge above with members for entries (`@reuse(s)`; native's
+    /// `almide_rt_set_remove_owned`). An absent member returns the receiver
+    /// itself; a present one at rc 1 shifts out in place and retires the
+    /// index; a shared block takes the functional copy and drops the op's
+    /// credit on the original. `None` keeps the borrowed-receiver copy.
+    pub(crate) fn try_set_remove_owned(&mut self, s: &IrExpr, x: &IrExpr) -> Result<Option<Lowered>, EmitError> {
+        let Some(dying) = self.owned_receiver(s, &[x]) else { return Ok(None) };
+        self.owned_call_marks.set_moving(s, dying.is_some());
+        let got = self.lower_arg(s, None, ArgMode::Retain)?;
+        self.owned_call_marks.set_moving(s, false);
+        let SliceTy::Set(h) = got else {
+            return unsup(&format!("set-op-of:{got:?}"));
+        };
+        let e = self.types.el(h);
+        let sh = self.hold_i32()?;
+        self.f.instructions().local_set(sh);
+        if let Some((id, idx, _)) = dying {
+            self.empty_dying(id, idx);
+        }
+        let scan = self.keyed_find(e)?;
+        let forget = self.keyed_remove(e);
+        let drop_set = self.dec_fn_of(got);
+        let xh = self.hold_for(e)?;
+        self.lower_arg(x, Some(e), ArgMode::Borrow)?;
+        self.f.instructions().local_set(xh);
+        let eh = self.hold_i32()?;
+        let oh = self.hold_i32()?;
+        let rc = MemArg { offset: u64::from(almide_layout::RC.offset), align: 2, memory_index: 0 };
+        let stride = e.slot_size() as i32;
+        {
+            let mut i = self.f.instructions();
+            i.local_get(sh).i32_const(stride).i32_const(0).local_get(xh).call(scan).local_tee(eh);
+            i.if_(BlockType::Empty);
+            i.local_get(sh).global_get(G_LINE_END).i32_ge_u();
+            i.local_get(sh).i32_load(rc).i32_const(1).i32_eq();
+            i.i32_and().if_(BlockType::Empty);
+            i.local_get(eh);
+        }
+        self.emit_release_slot_at(e);
+        {
+            let mut i = self.f.instructions();
+            // memmove(eh, eh + stride, end - (eh + stride)), end = sh + PAYLOAD + len
+            i.local_get(eh).local_get(eh).i32_const(stride).i32_add();
+            i.local_get(sh).i32_const(almide_layout::PAYLOAD as i32).i32_add().local_get(sh).i32_load(len_memarg()).i32_add();
+            i.local_get(eh).i32_sub().i32_const(stride).i32_sub();
+            i.memory_copy(0, 0);
+            i.local_get(sh).local_get(sh).i32_load(len_memarg()).i32_const(stride).i32_sub().i32_store(len_memarg());
+            if let Some(forget) = forget {
+                i.local_get(sh).i32_const(0).call(forget).drop();
+            }
+            i.else_();
+        }
+        self.emit_set_remove_copy(sh, eh, e)?;
+        let mut i = self.f.instructions();
+        i.local_set(oh).local_get(sh).call(drop_set).local_get(oh).local_set(sh);
+        i.end().end();
+        i.local_get(sh);
+        self.release_i32(); // oh
+        self.release_i32(); // eh
+        self.release_for(e);
+        self.release_i32(); // sh
+        Ok(Some(Lowered::owned(got)))
+    }
 }

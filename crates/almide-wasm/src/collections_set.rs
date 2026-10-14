@@ -222,7 +222,22 @@ impl Emitter<'_> {
 
     /// remove: the set minus one member (a plain copy when absent).
     fn lower_set_remove(&mut self, s: &IrExpr, x: &IrExpr) -> ArmResult {
+        if let Some(owned) = self.try_set_remove_owned(s, x)? {
+            return Ok(Some(owned));
+        }
         let (sh, _xh, eh, e) = self.set_scan(s, x, ArgMode::Borrow)?;
+        self.emit_set_remove_copy(sh, eh, e)?;
+        self.release_i32(); // eh
+        self.release_for(e);
+        self.release_i32(); // sh
+        Ok(Some(Lowered::owned(SliceTy::Set(self.types.intern(e)))))
+    }
+
+    /// The functional remove's result, left on the stack: a copy of set
+    /// `sh` without the member at `eh` (a whole copy when `eh` is 0),
+    /// holding its own member credits — the removed member's stays with
+    /// the input.
+    pub(crate) fn emit_set_remove_copy(&mut self, sh: u32, eh: u32, e: SliceTy) -> Result<(), EmitError> {
         let stride = e.slot_size() as i32;
         let ho = self.hold_i32()?;
         let hp = self.hold_i32()?;
@@ -264,10 +279,7 @@ impl Emitter<'_> {
         self.f.instructions().local_get(ho);
         self.release_i32();
         self.release_i32();
-        self.release_i32(); // eh
-        self.release_for(e);
-        self.release_i32(); // sh
-        Ok(Some(Lowered::owned(st)))
+        Ok(())
     }
 
     /// (a - b) ++ (b - a): the two filters are DISJOINT, so the
