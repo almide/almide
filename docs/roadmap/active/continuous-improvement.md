@@ -1106,3 +1106,31 @@ Builds compared: 0.62.0, 0.66.0 (release 819bbc74f) and develop 974c00ea0.
 1. Owner: enqueue this PR.
 2. The 4 rows whose bytes-moved series fits no class within 3%: decide whether the meter can explain amortized growth.
 3. Valid-input recipes and the effect harness for the 134 effect rows.
+
+## 2026-10-14 (night): the copy meter, 16 stamps, and two defects the inspection found
+
+### Meter (tools/xtarget-fuzz/src/memshim.c)
+- **A linear copy's instruction count stepped.** The shim counted bytes but forwarded each copy to glibc, which picks a strategy by length (vector loop, `rep movsb`, non-temporal stores). So native `bytes.insert`'s call shape read 4.89e5 / 7.31e5 / 1.37e6 / 2.17e6 / 4.09e6 instructions at n = 20000..320000. That is 6.3% off linear, while its bytes moved fit n exactly.
+  - The shim now copies with plain loops (built with `-fno-tree-loop-distribute-patterns -fno-builtin`; no `<string.h>`), so both meters see the same linear work.
+  - Same function, same develop fb63b0239, harness meter-plain-copy 34e71e98e: 4.632e7 … 7.375e8, rms 0.1%.
+  - wasmtime's `memory.copy` reaches the same shim, so wasm instruction series smooth too.
+  - The tolerance (3%) is unchanged.
+- **Re-run of the 19 rows b8 left unstamped** (GCE c4-standard-4, 4 VMs). 5 pass every criterion. 3 are stamped: bytes.concat, bytes.insert and list.unique_by.
+  - **Not stamped despite PASS:**
+    - **string.push:** b8's parity failure on a program calling it was the `fs.fold_lines_chunked` crash, whose fix (#3711) is not merged yet.
+    - **value.as_array:** its wasm series is a constant ~2e4 instructions that failed at 4.6% jitter in b8. One passing re-roll of a noisy criterion is not evidence.
+- **The 13 b8 passes are stamped:** base64.decode / decode_url, hex.decode, map.merge, map.update, the five matrix rows, value.merge / omit / stringify.
+- **Uninspected: 275 → 259.**
+
+### Found by the complexity criterion
+- **wasm `s = set.remove(s, x)` copied the whole set per step.** The rebind loop measured O(1) natively and O(n) on wasm. Fix on its own branch (fix-set-remove-wasm-reuse): `try_set_remove_owned` takes the `@reuse(s)` receiver and shifts the member out in place at rc 1.
+- **Native `fs.fold_lines_chunked` spawned one thread per chunk** and crashed when `workers` exceeded the file size (parity, seed 1791975162). Fix: #3711.
+
+### Remaining 14 of the 19 (all wasm-leg series)
+- **Bytes-moved series that step with amortized doubling:** map.from_list 8.1%, option.collect 9.5%, json.parse 31%, and others. This is a meter limit, not a defect; the tolerance stays.
+- **wasm instruction jitter on small constant series:** value.field 7.5%, option.collect 4.0%.
+
+### Next
+1. Owner: enqueue #3711, this PR, and the set.remove PR.
+2. Re-stamp string.push after #3711.
+3. A meter for amortized growth that does not loosen the 3% fit.
