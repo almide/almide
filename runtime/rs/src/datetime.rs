@@ -24,22 +24,28 @@ pub fn almide_rt_datetime_hour(ts: i64) -> i64 { ((ts % 86400 + 86400) % 86400) 
 pub fn almide_rt_datetime_minute(ts: i64) -> i64 { ((ts % 3600 + 3600) % 3600) / 60 }
 pub fn almide_rt_datetime_second(ts: i64) -> i64 { ((ts % 60) + 60) % 60 }
 
-pub fn almide_rt_datetime_weekday(ts: i64) -> String {
-    let days = ["Thursday", "Friday", "Saturday", "Sunday", "Monday", "Tuesday", "Wednesday"];
-    let d = almide_rt_days_from_epoch(ts).rem_euclid(7);
-    days[d as usize].to_string()
+pub fn almide_rt_datetime_weekday(ts: i64) -> AlmideString {
+    let __almide_out: String = {
+        let days = ["Thursday", "Friday", "Saturday", "Sunday", "Monday", "Tuesday", "Wednesday"];
+        let d = almide_rt_days_from_epoch(ts).rem_euclid(7);
+        days[d as usize].to_string()
+    };
+    __almide_out.into()
 }
 
 pub fn almide_rt_datetime_from_parts(y: i64, m: i64, d: i64, h: i64, min: i64, s: i64) -> i64 {
     almide_rt_epoch_from_civil(y, m, d) + h * 3600 + min * 60 + s
 }
 
-pub fn almide_rt_datetime_to_iso(ts: i64) -> String {
-    let (y, m, d) = almide_rt_civil_from_epoch(ts);
-    let h = almide_rt_datetime_hour(ts);
-    let mi = almide_rt_datetime_minute(ts);
-    let s = almide_rt_datetime_second(ts);
-    format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", y, m, d, h, mi, s)
+pub fn almide_rt_datetime_to_iso(ts: i64) -> AlmideString {
+    let __almide_out: String = {
+        let (y, m, d) = almide_rt_civil_from_epoch(ts);
+        let h = almide_rt_datetime_hour(ts);
+        let mi = almide_rt_datetime_minute(ts);
+        let s = almide_rt_datetime_second(ts);
+        format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", y, m, d, h, mi, s)
+    };
+    __almide_out.into()
 }
 
 /// `YYYY-MM-DDTHH:MM:SS` followed by `Z`, `+HH:MM`, `-HH:MM` or nothing (UTC).
@@ -113,22 +119,25 @@ fn almide_rt_days_in_month(y: i64, m: i64) -> i64 {
     else { 31 }
 }
 
-pub fn almide_rt_datetime_format(ts: i64, pattern: &str) -> String {
-    let (y, m, d) = almide_rt_civil_from_epoch(ts);
-    let h = almide_rt_datetime_hour(ts);
-    let mi = almide_rt_datetime_minute(ts);
-    let s = almide_rt_datetime_second(ts);
-    // strftime-style specifiers, substituted sequentially. The wasm + self-hosted
-    // backends run the identical sequence, so datetime.format is byte-identical
-    // across targets. `%` is special only before one of these specifiers; there is
-    // no `%%` escape (see docs/stdlib/datetime.md).
-    pattern
-        .replace("%Y", &format!("{:04}", y))
-        .replace("%m", &format!("{:02}", m))
-        .replace("%d", &format!("{:02}", d))
-        .replace("%H", &format!("{:02}", h))
-        .replace("%M", &format!("{:02}", mi))
-        .replace("%S", &format!("{:02}", s))
+pub fn almide_rt_datetime_format(ts: i64, pattern: &str) -> AlmideString {
+    let __almide_out: String = {
+        let (y, m, d) = almide_rt_civil_from_epoch(ts);
+        let h = almide_rt_datetime_hour(ts);
+        let mi = almide_rt_datetime_minute(ts);
+        let s = almide_rt_datetime_second(ts);
+        // strftime-style specifiers, substituted sequentially. The wasm + self-hosted
+        // backends run the identical sequence, so datetime.format is byte-identical
+        // across targets. `%` is special only before one of these specifiers; there is
+        // no `%%` escape (see docs/stdlib/datetime.md).
+        pattern
+            .replace("%Y", &format!("{:04}", y))
+            .replace("%m", &format!("{:02}", m))
+            .replace("%d", &format!("{:02}", d))
+            .replace("%H", &format!("{:02}", h))
+            .replace("%M", &format!("{:02}", mi))
+            .replace("%S", &format!("{:02}", s))
+    };
+    __almide_out.into()
 }
 
 pub fn almide_rt_datetime_add_days(ts: i64, n: i64) -> i64 { ts + n * 86400 }

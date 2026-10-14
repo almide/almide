@@ -436,9 +436,7 @@ pub fn almide_rt_fs_stat(path: &str) -> Result<AlmideFileStat, String> {
 }
 
 // Temp
-pub fn almide_rt_fs_temp_dir() -> String {
-    std::env::temp_dir().to_string_lossy().replace('\\', "/")
-}
+pub fn almide_rt_fs_temp_dir() -> AlmideString { let __almide_out: String = std::env::temp_dir().to_string_lossy().replace('\\', "/"); __almide_out.into() }
 pub fn almide_rt_fs_create_temp_file(prefix: &str) -> Result<String, String> {
     let dir = std::env::temp_dir();
     let name = format!("{}{}", prefix, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos());
