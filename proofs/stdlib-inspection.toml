@@ -69,7 +69,7 @@
 #                      every stamped row is to be re-inspected before each final
 #                      release for that (a manual GCE run: no credentials in CI)
 #
-# uninspected_ceiling = "278"
+# uninspected_ceiling = "276"
 
 [[fn]]
 name = "args.flag"
@@ -8719,8 +8719,14 @@ status = "uninspected"
 name = "set.insert"
 sig = "(s: Set[A], value: A) -> Set[A]"
 class = "pure"
-status = "uninspected"
-
+status = "inspected"
+impl = "fnv1a:797a04ec6e9fad48"
+stamp = "almide 0.67.1 (dev) at develop 0aaf3b1c5; xtarget-fuzz inspect at fix-inspect-harness-k-and-pipes a5397f94c (counted judge: instructions:u + bytes moved, marginal k..2k, n..16n; k calibrated on either meter, probe pipes drained while running), 200 programs per fn; GCE c4-standard-4 (INTEL XEON PLATINUM 8581C, 4 vCPU, PMU architectural, one fn at a time per VM, asia-northeast1-b), Ubuntu 24.04 Linux 7.0.0-1014-gcp, rustc 1.99.0, wasmtime 49.0.1; 2026-10-14; codopsy: no code change by this inspection"
+order = "n; rebind (loop, tail, fold) 1"
+parity = "PASS: seed 1791970577, 200 programs; 200 program(s) call it, 197 of them clean on every leg; unique findings 0"
+complexity = "PASS: call k=1024..2048 meter=instructions:u+bytes-moved n=20000..320000 native 3.981e6/4.254e6/4.805e6/5.868e6/7.973e6 fit n (rms 0.2%) moved 7.600e8/1.520e9/3.040e9/6.080e9/1.216e10B fit n (rms 0.0%) wall 0.248/0.592/1.252/2.554/5.228s wasm 6.132e5/6.040e5/6.118e5/6.221e5/6.230e5 fit 1 (rms 0.0%) moved 1.638e8/3.277e8/6.554e8/1.311e9/2.621e9B fit n (rms 0.0%) wall 0.000/0.005/0.015/0.076/0.180s (order n ok); loop k=262144..524288 meter=instructions:u+bytes-moved n=20000..320000 native 2.359e7/2.359e7/2.648e7/2.648e7/2.359e7 fit 1 (rms 0.0%) moved 0.000e0/0.000e0/0.000e0/0.000e0/0.000e0B fit 1 (rms 0.0%) wall 0.005/0.000/0.000/0.000/0.000s wasm 5.344e7/5.345e7/5.345e7/5.581e7/5.345e7 fit 1 (rms 0.0%) moved 0.000e0/0.000e0/0.000e0/0.000e0/0.000e0B fit 1 (rms 0.0%) wall 0.005/0.000/0.005/0.000/0.000s (order 1 ok); tail k=262144..524288 meter=instructions:u+bytes-moved n=20000..320000 native 2.359e7/2.359e7/2.648e7/2.648e7/2.359e7 fit 1 (rms 0.0%) moved 0.000e0/0.000e0/0.000e0/0.000e0/0.000e0B fit 1 (rms 0.0%) wall 0.005/0.000/0.000/0.000/0.000s wasm 5.531e7/5.531e7/5.531e7/5.767e7/5.531e7 fit 1 (rms 0.0%) moved 0.000e0/9.600e1/0.000e0/4.800e1/9.600e1B fit 1 (rms 0.0%) wall 0.005/0.000/0.005/0.005/0.000s (order 1 ok); fold k=262144..524288 meter=instructions:u+bytes-moved n=20000..320000 native 2.464e7/2.464e7/2.753e7/2.753e7/2.464e7 fit 1 (rms 0.0%) moved 0.000e0/0.000e0/0.000e0/0.000e0/0.000e0B fit 1 (rms 0.0%) wall 0.005/0.000/0.000/0.000/0.000s wasm 5.820e7/5.820e7/5.820e7/6.291e7/5.348e7 fit 1 (rms 0.0%) moved 0.000e0/0.000e0/0.000e0/0.000e0/4.800e1B fit 1 (rms 0.0%) wall 0.005/0.005/0.005/0.000/0.000s (order 1 ok)"
+alloc = "PASS: call live=0, loop live=0, tail live=0, fold live=0"
+diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 [[fn]]
 name = "set.intersection"
 sig = "(a: Set[A], b: Set[A]) -> Set[A]"
@@ -8833,8 +8839,14 @@ diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 name = "set.union"
 sig = "(a: Set[A], b: Set[A]) -> Set[A]"
 class = "pure"
-status = "uninspected"
-
+status = "inspected"
+impl = "fnv1a:4d6843f994913d76"
+stamp = "almide 0.67.1 (dev) at develop 0aaf3b1c5; xtarget-fuzz inspect at fix-inspect-harness-k-and-pipes a5397f94c (counted judge: instructions:u + bytes moved, marginal k..2k, n..16n; k calibrated on either meter, probe pipes drained while running), 200 programs per fn; GCE c4-standard-4 (INTEL XEON PLATINUM 8581C, 4 vCPU, PMU architectural, one fn at a time per VM, asia-northeast1-b), Ubuntu 24.04 Linux 7.0.0-1014-gcp, rustc 1.99.0, wasmtime 49.0.1; 2026-10-14; codopsy: no code change by this inspection"
+order = "n; rebind (loop, tail, fold) n"
+parity = "PASS: seed 1791970592, 200 programs; 200 program(s) call it, 194 of them clean on every leg; unique findings 0"
+complexity = "PASS: call k=1024..2048 meter=instructions:u+bytes-moved n=20000..320000 native 2.539e6/2.731e6/3.104e6/3.847e6/5.330e6 fit n (rms 0.1%) moved 7.600e8/1.520e9/3.040e9/6.080e9/1.216e10B fit n (rms 0.0%) wall 0.162/0.394/0.854/1.723/3.523s wasm 7.098e5/6.997e5/7.040e5/7.194e5/7.102e5 fit 1 (rms 0.0%) moved 1.638e8/3.277e8/6.554e8/1.311e9/2.621e9B fit n (rms 0.0%) wall 0.005/0.005/0.020/0.066/0.177s (order n ok); loop k=64..128 meter=instructions:u+bytes-moved n=20000..320000 native 1.551e5/1.548e5/1.560e5/1.542e5/1.551e5 fit 1 (rms 0.4%) moved 4.750e7/9.499e7/1.900e8/3.800e8/7.600e8B fit n (rms 0.0%) wall 0.000/0.005/0.015/0.026/0.045s wasm 4.435e7/8.840e7/1.760e8/3.493e8/6.882e8 fit n (rms 1.9%) moved 2.702e7/5.403e7/1.081e8/2.161e8/4.323e8B fit n (rms 0.0%) wall 0.005/0.005/0.010/0.050/0.101s (order n ok); tail k=64..128 meter=instructions:u+bytes-moved n=20000..320000 native 1.561e5/1.564e5/1.551e5/1.537e5/1.543e5 fit 1 (rms 0.7%) moved 4.750e7/9.499e7/1.900e8/3.800e8/7.600e8B fit n (rms 0.0%) wall 0.005/0.005/0.015/0.025/0.056s wasm 4.435e7/8.840e7/1.760e8/3.493e8/6.882e8 fit n (rms 1.9%) moved 2.702e7/5.403e7/1.081e8/2.161e8/4.323e8B fit n (rms 0.0%) wall 0.005/0.005/0.010/0.046/0.101s (order n ok); fold k=64..128 meter=instructions:u+bytes-moved n=20000..320000 native 1.555e5/1.555e5/1.547e5/1.546e5/1.556e5 fit 1 (rms 0.3%) moved 4.750e7/9.499e7/1.900e8/3.800e8/7.600e8B fit n (rms 0.0%) wall 0.005/0.005/0.015/0.025/0.056s wasm 4.435e7/8.841e7/1.760e8/3.493e8/6.882e8 fit n (rms 1.9%) moved 2.702e7/5.403e7/1.081e8/2.161e8/4.323e8B fit n (rms 0.0%) wall 0.000/0.005/0.010/0.051/0.108s (order n ok)"
+alloc = "PASS: call live=0, loop live=0, tail live=0, fold live=0"
+diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 [[fn]]
 name = "string.byte_slice"
 sig = "(s: String, start: Int, end: Int) -> Option[String]"
