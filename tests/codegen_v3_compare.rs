@@ -196,7 +196,7 @@ fn test_walker_result_divergence() {
     // call leaves it unconstrained, e.g. `result.unwrap_or(ok(..), default)`).
     let rust_templates = template::rust_templates();
     let rust_ctx = RenderContext::new(&rust_templates, &var_table);
-    assert_eq!(walker::render_expr(&rust_ctx, &ok_expr), "Ok::<String, String>(data)");
+    assert_eq!(walker::render_expr(&rust_ctx, &ok_expr), "Ok::<AlmideString, AlmideString>(data)");
 
 }
 

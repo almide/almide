@@ -344,6 +344,11 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     let vis = if for_crate { "pub " } else { "" };
     let macro_attr = if for_crate { "#[macro_export]\n" } else { "" };
     let mut s = String::new();
+    // ADR-0013 stage 2, step 1: the Almide `String` is spelled `AlmideString`
+    // in generated code. Today it is `String` itself, so the runtime and every
+    // `@extern(rust)` host compile unchanged; the shared buffer replaces it
+    // here, in one place (docs/roadmap/active/adr-0013-string-sharing.md).
+    s.push_str(&format!("{vis}type AlmideString = String;\n"));
     s.push_str(&format!("{vis}trait AlmideConcat<Rhs> {{ type Output; fn concat(self, rhs: Rhs) -> Self::Output; }}\n"));
     // The owned-String impls extend in place (`push_str`) instead of
     // `format!`: byte-identical output, but an owned accumulator keeps its

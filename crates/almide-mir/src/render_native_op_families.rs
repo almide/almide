@@ -174,7 +174,7 @@ pub(crate) fn render_native_result_op(op: &Op, s: OpSink<'_>) -> Result<bool, Lo
         } => {
             tys.insert(*d, NTy::Res);
             line!(
-                "let {}: Result<i64, String> = Ok({});",
+                "let {}: Result<i64, AlmideString> = Ok({});",
                 var(*d),
                 var(args[0])
             );
@@ -194,7 +194,7 @@ pub(crate) fn render_native_result_op(op: &Op, s: OpSink<'_>) -> Result<bool, Lo
                 }
             };
             tys.insert(*d, NTy::Res);
-            line!("let {}: Result<i64, String> = Err({});", var(*d), src);
+            line!("let {}: Result<i64, AlmideString> = Err({});", var(*d), src);
         }
         Op::Prim {
             kind: crate::PrimKind::ResCopy,
@@ -202,7 +202,7 @@ pub(crate) fn render_native_result_op(op: &Op, s: OpSink<'_>) -> Result<bool, Lo
             args,
         } => {
             tys.insert(*d, NTy::Res);
-            line!("let {}: Result<i64, String> = {}.clone();", var(*d), var(args[0]));
+            line!("let {}: Result<i64, AlmideString> = {}.clone();", var(*d), var(args[0]));
         }
         Op::Prim {
             kind: crate::PrimKind::ResTag,
@@ -332,7 +332,7 @@ pub(crate) fn render_native_scalar_op(op: &Op, s: OpSink<'_>) -> Result<bool, Lo
                 // bidi controls today, but one rule for every native renderer
                 // keeps that a property of the code, not of std's Debug tables.
                 let lit = almide_base::rust_lit::escape_rust_str(s);
-                line!("let mut {}: String = String::from(\"{lit}\");", var(*dst));
+                line!("let mut {}: AlmideString = String::from(\"{lit}\");", var(*dst));
             }
             other => {
                 return Err(wall(format!(

@@ -546,8 +546,8 @@ fn result_turbofish_args(ctx: &RenderContext, ty: &Ty) -> Option<(String, String
                 _ => render_type(ctx, &args[0]),
             };
             let err_s = match &args[1] {
-                Ty::Unknown => "String".to_string(),
-                Ty::TypeVar(n) if n.starts_with('?') => "String".to_string(),
+                Ty::Unknown => "AlmideString".to_string(),
+                Ty::TypeVar(n) if n.starts_with('?') => "AlmideString".to_string(),
                 _ => render_type(ctx, &args[1]),
             };
             Some((ok_s, err_s))

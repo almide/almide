@@ -2,6 +2,6 @@
 source: tests/codegen_snapshot_test.rs
 expression: code
 ---
-pub fn greet(name: String) -> String {
+pub fn greet(name: AlmideString) -> AlmideString {
     AlmideConcat::concat("Hello, ", name)
 }
