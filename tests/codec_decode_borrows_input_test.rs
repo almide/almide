@@ -111,7 +111,7 @@ fn list_and_option_drivers_take_the_by_reference_twin() {
     assert!(rust.contains("almide_rt_value_decode_list_ref((almide_rt_value_field_ref_at(__almide_ir1_v, \"homes\", 3))?, Address_decode)"),
         "a List[Record] field must route to the `&AlmideValue` list driver with the by-ref element decoder:\n{}", grep(&rust, "decode_list"));
     assert!(!rust.contains("almide_rt_value_decode_list(&"), "the by-value list driver must never receive a borrow:\n{}", grep(&rust, "decode_list"));
-    assert!(rust.contains("__decode_option_Address(__almide_ir1_v: &AlmideValue, __almide_ir1_key: String)"), "the derived option worker borrows its AlmideValue too:\n{}", grep(&rust, "__decode_option_Address"));
+    assert!(rust.contains("__decode_option_Address(__almide_ir1_v: &AlmideValue, __almide_ir1_key: AlmideString)"), "the derived option worker borrows its AlmideValue too:\n{}", grep(&rust, "__decode_option_Address"));
 }
 
 /// #2052: the primitive option/default helpers (`__decode_option_<prim>`,

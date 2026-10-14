@@ -85,7 +85,7 @@ fn a_param_kept_by_a_callee_stays_borrowed_and_clones_at_that_site() {
     // A monomorphised stdlib instance's slot (`list.map` with a fallible
     // callback) at the param's last use: owned. A derived codec fn's slot
     // followed by another read (`p.r`): borrowed, the site clones.
-    assert!(fn_sig_and_body(&rust, "heads").starts_with("pub fn heads(xs: Vec<String>)"), "{}", fn_sig_and_body(&rust, "heads"));
+    assert!(fn_sig_and_body(&rust, "heads").starts_with("pub fn heads(xs: Vec<AlmideString>)"), "{}", fn_sig_and_body(&rust, "heads"));
     let s = fn_sig_and_body(&rust, "shown");
     assert!(s.starts_with("pub fn shown(p: &Pigment)") && s.contains("Pigment_encode(p.clone())"), "{s}");
     // Callers pass a borrow to the borrowed fns: no clone at the call site.

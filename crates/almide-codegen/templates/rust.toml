@@ -240,7 +240,7 @@ template = "i64"
 template = "f64"
 
 [type_string]
-template = "String"
+template = "AlmideString"
 
 [type_bool]
 template = "bool"

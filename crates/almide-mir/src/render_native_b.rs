@@ -323,10 +323,10 @@ fn bind_user_fn_result(
             };
             tys.insert(*d, t);
             let ty_name = match t {
-                NTy::Str => "String",
+                NTy::Str => "AlmideString",
                 NTy::Vec => "Vec<i64>",
                 NTy::F64 => "f64",
-                NTy::Res => "Result<i64, String>",
+                NTy::Res => "Result<i64, AlmideString>",
                 _ => "i64",
             };
             line!("let mut {}: {} = {};", var(*d), ty_name, rendered);
@@ -373,7 +373,7 @@ fn render_closed_shim_call(
         (Some(d), Some(t)) => {
             tys.insert(*d, t);
             let ty_name = match t {
-                NTy::Str => "String",
+                NTy::Str => "AlmideString",
                 NTy::Vec => "Vec<i64>",
                 _ => "i64",
             };
@@ -609,12 +609,12 @@ fn render_else(
                 var(v),
             ),
             NTy::Str => (
-                format!("let mut {}: String = String::new();", var(*d)),
+                format!("let mut {}: AlmideString = String::new();", var(*d)),
                 NTy::Str,
                 format!("{}.clone()", var(v)),
             ),
             NTy::StrRef => (
-                format!("let mut {}: String = String::new();", var(*d)),
+                format!("let mut {}: AlmideString = String::new();", var(*d)),
                 NTy::Str,
                 format!("{}.to_string()", var(v)),
             ),
@@ -634,7 +634,7 @@ fn render_else(
                 var(v),
             ),
             NTy::Res => (
-                format!("let mut {}: Result<i64, String> = Ok(0);", var(*d)),
+                format!("let mut {}: Result<i64, AlmideString> = Ok(0);", var(*d)),
                 NTy::Res,
                 format!("{}.clone()", var(v)),
             ),

@@ -72,7 +72,7 @@ fn an_inlined_chain_callback_borrows_the_param_it_reads() {
         ("folded", "pub fn folded(t: &Table)"),
         ("any_long", "pub fn any_long(t: &Table, k: i64)"),
         ("sliced", "pub fn sliced(xs: &[i64], ys: &[i64])"),
-        ("prefixed", "pub fn prefixed(p: &str, xs: Vec<String>)"),
+        ("prefixed", "pub fn prefixed(p: &str, xs: Vec<AlmideString>)"),
     ] {
         let s = fn_sig_and_body(&rust, name);
         assert!(s.starts_with(sig), "{name}:\n{s}");
