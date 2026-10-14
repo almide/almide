@@ -471,6 +471,7 @@ spec/wasm_cross/json_string_span.almd
 spec/wasm_cross/json_stringify_control_chars.almd
 spec/wasm_cross/json_stringify_nonfinite.almd
 spec/wasm_cross/json_stringify_pretty.almd
+spec/wasm_cross/json_to_map_duplicate_keys.almd
 spec/wasm_cross/json_value.almd
 spec/wasm_cross/kernel_conformance.almd
 spec/wasm_cross/koka_186_reused_names.almd

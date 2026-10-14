@@ -348,6 +348,7 @@ call:json.root
 call:json.set_path
 call:json.stringify
 call:json.stringify_pretty
+call:json.to_map
 call:list.__almd_mono14___fallible_all__Int_cString
 call:list.__almd_mono14___fallible_any__Int_cString
 call:list.__almd_mono14___fallible_map__Int_cInt_cString
