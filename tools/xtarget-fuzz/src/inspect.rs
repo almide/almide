@@ -797,7 +797,9 @@ fn counted(ctx: &Ctx, src: &str, leg: Leg) -> Result<Counts, String> {
 /// as constant. (Raising glibc's rep thresholds did not help: +0.57M per
 /// 300 MB.) This shim counts the bytes each memcpy / memmove / memset is
 /// asked to move — the same probe read 21.6M / 84.5M / 336M bytes for 1 / 4
-/// / 16 MB — and the judge fits that series as well.
+/// / 16 MB — and the judge fits that series as well. The shim also replaces
+/// the copies with plain loops, so a copy's instruction count no longer steps
+/// where glibc changes strategy by length (see the shim's header).
 const MEMSHIM_C: &str = include_str!("memshim.c");
 
 fn build_memshim(dir: &Path) -> Option<PathBuf> {
@@ -805,7 +807,7 @@ fn build_memshim(dir: &Path) -> Option<PathBuf> {
     let so = dir.join("memshim.so");
     std::fs::write(&src, MEMSHIM_C).ok()?;
     let ok = Command::new("cc")
-        .args(["-O2", "-shared", "-fPIC", "-o"])
+        .args(["-O2", "-fno-tree-loop-distribute-patterns", "-fno-builtin", "-shared", "-fPIC", "-o"])
         .arg(&so)
         .arg(&src)
         .arg("-ldl")
