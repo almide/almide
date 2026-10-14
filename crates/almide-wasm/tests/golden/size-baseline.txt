@@ -489,7 +489,7 @@
 2929	spec/wasm_cross/map_rich_variant_key.almd
 10910	spec/wasm_cross/map_set_eq.almd
 14970	spec/wasm_cross/map_set_in_place.almd
-20831	spec/wasm_cross/map_set_index_threshold.almd
+21065	spec/wasm_cross/map_set_index_threshold.almd
 7470	spec/wasm_cross/map_set_ops.almd
 15116	spec/wasm_cross/map_set_typechange.almd
 7383	spec/wasm_cross/map_upsert_str.almd
