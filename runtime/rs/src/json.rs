@@ -3,7 +3,7 @@
 
 // ── Parse + Stringify ──
 
-pub fn almide_rt_json_stringify(v: &AlmideValue) -> String { almide_rt_value_stringify(v) }
+pub fn almide_rt_json_stringify(v: &AlmideValue) -> AlmideString { almide_rt_value_stringify(v) }
 
 pub fn almide_rt_json_parse(text: &str) -> Result<AlmideValue, String> {
     // Byte-offset recursive descent (#1678). The first version collected the
@@ -272,7 +272,7 @@ pub fn almide_json_to_map(j: &AlmideValue) -> Option<AlmideMap<String, String>> 
             let map: AlmideMap<String, String> = entries.iter().map(|(k, v)| {
                 let s = match v {
                     AlmideValue::Str(s) => s.clone(),
-                    _ => almide_rt_value_stringify(v),
+                    _ => String::from(almide_rt_value_stringify(v)),
                 };
                 (k.to_string(), s)
             }).collect();

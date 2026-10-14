@@ -412,9 +412,7 @@ pub fn almide_rt_bytes_to_string(b: &Vec<u8>) -> Result<String, String> {
         .map_err(|e| format!("invalid UTF-8: {}", e))
 }
 
-pub fn almide_rt_bytes_to_string_lossy(b: &Vec<u8>) -> String {
-    String::from_utf8_lossy(b).into_owned()
-}
+pub fn almide_rt_bytes_to_string_lossy(b: &Vec<u8>) -> AlmideString { let __almide_out: String = String::from_utf8_lossy(b).into_owned(); __almide_out.into() }
 
 pub fn almide_rt_bytes_is_valid_utf8(b: &Vec<u8>) -> bool {
     std::str::from_utf8(b).is_ok()
@@ -454,11 +452,14 @@ pub fn almide_rt_bytes_read_u8(b: &Vec<u8>, pos: i64) -> i64 {
 pub fn almide_rt_bytes_read_bool(b: &Vec<u8>, pos: i64) -> bool {
     b.get(pos as usize).map(|&x| x != 0).unwrap_or(false)
 }
-pub fn almide_rt_bytes_read_string_be(b: &Vec<u8>, pos: i64) -> String {
-    let Some(p) = window(pos, 4, b.len()) else { return String::new(); };
-    let slen = u32::from_be_bytes(b[p..p + 4].try_into().unwrap()) as usize;
-    let Some(q) = window(pos + 4, slen, b.len()) else { return String::new(); };
-    String::from_utf8_lossy(&b[q..q + slen]).into_owned()
+pub fn almide_rt_bytes_read_string_be(b: &Vec<u8>, pos: i64) -> AlmideString {
+    let __almide_out: String = {
+        let Some(p) = window(pos, 4, b.len()) else { return (String::new()).into(); };
+        let slen = u32::from_be_bytes(b[p..p + 4].try_into().unwrap()) as usize;
+        let Some(q) = window(pos + 4, slen, b.len()) else { return (String::new()).into(); };
+        String::from_utf8_lossy(&b[q..q + slen]).into_owned()
+    };
+    __almide_out.into()
 }
 // An EMPTY buffer has no data region, so both return NULL (which every bridge
 // consumer already treats as "move nothing"): `Vec::as_ptr` on an empty Vec is a
@@ -779,10 +780,13 @@ pub fn almide_rt_bytes_read_f16_le(b: &Vec<u8>, pos: i64) -> f64 {
 // checked_add then failed. That is a guard whose correctness lives in a cast three lines
 // away — the reader cannot see the rule, and neither could the other leg, which read the
 // same window with a plain `pos + len > blen` and returned the cap field as text.
-pub fn almide_rt_bytes_read_string_at(b: &Vec<u8>, pos: i64, len: i64) -> String {
-    let Ok(n) = usize::try_from(len) else { return String::new(); };
-    let Some(p) = window(pos, n, b.len()) else { return String::new(); };
-    String::from_utf8_lossy(&b[p..p + n]).into_owned()
+pub fn almide_rt_bytes_read_string_at(b: &Vec<u8>, pos: i64, len: i64) -> AlmideString {
+    let __almide_out: String = {
+        let Ok(n) = usize::try_from(len) else { return (String::new()).into(); };
+        let Some(p) = window(pos, n, b.len()) else { return (String::new()).into(); };
+        String::from_utf8_lossy(&b[p..p + n]).into_owned()
+    };
+    __almide_out.into()
 }
 
 // Bulk array reads: avoid per-element Almide-side loops.
