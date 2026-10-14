@@ -41,7 +41,7 @@ pub fn almide_rt_random_float() -> f64 {
     almide_float_from_u64(next_u64())
 }
 
-pub fn almide_rt_random_choice<T: Clone>(xs: &Vec<T>) -> Option<T> {
+pub fn almide_rt_random_choice<T: Clone>(xs: &[T]) -> Option<T> {
     if xs.is_empty() { return None; }
     let idx = (next_u64() as usize) % xs.len();
     Some(xs[idx].clone())

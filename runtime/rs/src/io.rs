@@ -100,7 +100,7 @@ pub fn almide_rt_io_read_n_bytes(n: i64) -> Vec<i64> {
 // Byte writes share the buffer with `println` (#2245), so they interleave in
 // PROGRAM order without a flush per call (the C-162 fixture pins the order on
 // both legs); a terminal still sees each write as it happens.
-pub fn almide_rt_io_write_bytes(data: &Vec<i64>) {
+pub fn almide_rt_io_write_bytes(data: &[i64]) {
     let bytes: Vec<u8> = data.iter().map(|&b| b as u8).collect();
     almide_stdout_write_bytes(&bytes);
 }
