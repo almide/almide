@@ -1091,7 +1091,7 @@ Builds compared: 0.62.0, 0.66.0 (release 819bbc74f) and develop 974c00ea0.
 ### Harness (tools/xtarget-fuzz)
 - **The counted judge's k grew on instructions alone.** A call whose cost is one large copy retires a handful of instructions (`rep movsb`), so k kept growing by 4x until each run copied gigabytes at 16n and hit the 60 s cap. This is why set.insert and set.union's call shape "timed out" on GCE while a local timed run measured order n in 0.07–0.4 s.
   - Now k stops on either meter (2e7 instructions or 2e8 bytes moved).
-  - With that fix, set.insert and set.union pass every criterion and are stamped. Uninspected: 278 → 276 on this branch.
+  - With that fix, set.insert and set.union pass every criterion and are stamped. Uninspected: 277 → 275.
 - **Probe pipes were read only after exit.** A probe that writes more than 64 KiB blocked on the full pipe until the cap fired. That is what io.write / io.write_bytes' "timeouts" were.
   - Now both run paths drain stdout and stderr while waiting (`wait_capped`).
   - io.write* now finish, but stay unstamped. Their native bytes-moved series collapses at large n, because the kernel copies large writes and the memcpy shim never sees them. This is a limit of the meter, not a defect.
