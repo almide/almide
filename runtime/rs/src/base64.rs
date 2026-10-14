@@ -144,13 +144,9 @@ fn nibble(c: u8) -> Result<u8, String> {
     decode_char(c).ok_or_else(|| ALMIDE_ERR_CHAR.to_string())
 }
 
-pub fn almide_rt_base64_encode(b: &Vec<u8>) -> String {
-    encode_with(b, &ALMIDE_STD_ALPHABET)
-}
+pub fn almide_rt_base64_encode(b: &Vec<u8>) -> AlmideString { let __almide_out: String = encode_with(b, &ALMIDE_STD_ALPHABET); __almide_out.into() }
 
-pub fn almide_rt_base64_encode_url(b: &Vec<u8>) -> String {
-    encode_with(b, &ALMIDE_URL_ALPHABET)
-}
+pub fn almide_rt_base64_encode_url(b: &Vec<u8>) -> AlmideString { let __almide_out: String = encode_with(b, &ALMIDE_URL_ALPHABET); __almide_out.into() }
 
 pub fn almide_rt_base64_decode(s: &str) -> Result<Vec<u8>, String> {
     decode_str(s)

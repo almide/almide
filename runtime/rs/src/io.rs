@@ -16,11 +16,14 @@ pub fn almide_rt_io_print(s: &str) {
     almide_stdout_flush();
 }
 
-pub fn almide_rt_io_read_line() -> String {
-    almide_stdout_flush();
-    let mut buf = String::new();
-    std::io::stdin().read_line(&mut buf).unwrap_or(0);
-    buf.trim_end_matches('\n').trim_end_matches('\r').to_string()
+pub fn almide_rt_io_read_line() -> AlmideString {
+    let __almide_out: String = {
+        almide_stdout_flush();
+        let mut buf = String::new();
+        std::io::stdin().read_line(&mut buf).unwrap_or(0);
+        buf.trim_end_matches('\n').trim_end_matches('\r').to_string()
+    };
+    __almide_out.into()
 }
 
 // `read_line` answers "" both for an empty line and at end of input, so a loop
@@ -42,12 +45,15 @@ pub fn almide_rt_io_read_line_opt() -> Option<String> {
     }
 }
 
-pub fn almide_rt_io_read_all() -> String {
-    almide_stdout_flush();
-    use std::io::Read;
-    let mut buf = String::new();
-    std::io::stdin().read_to_string(&mut buf).unwrap_or(0);
-    buf
+pub fn almide_rt_io_read_all() -> AlmideString {
+    let __almide_out: String = {
+        almide_stdout_flush();
+        use std::io::Read;
+        let mut buf = String::new();
+        std::io::stdin().read_to_string(&mut buf).unwrap_or(0);
+        buf
+    };
+    __almide_out.into()
 }
 
 pub fn almide_rt_io_read_byte() -> i64 {
