@@ -65,6 +65,9 @@ Open design points, to settle before writing code:
    - **`Rc<str>`** has no capacity, so `string.push` would rebuild the string on every call. It is out.
    - **`Rc<String>`** pays two allocations and a second indirection.
    - **The single block** is the wasm leg's layout. It wins on building and sharing. Its unique push is 4.4× slower in this unoptimized prototype, which checks the count on every push with no inlined fast path. That number must come down to within strbuild's ratchet before stage 2 can land.
+   - **The push gap is aliasing, not the count check.** The byte store goes through a pointer the compiler cannot separate from the header, so `rc`, `len` and `cap` reload on every push. Inlining the fast path did not help (3.21 ms).
+   - A **unique view** fixes it: the count is checked once, then len and cap are kept in locals and written back when the view ends. That reaches **0.76 ms**, against String's 0.72.
+   - So the single block can match `String` everywhere, provided codegen takes one unique view for a run of pushes on the same `var`. The in-place append window for `var s` is already that run.
 2. **The `mut` surface.** `string.push` / `string.clear` use RcCow (`Rc::make_mut` semantics): in place when unique, copy when shared. This is the same rule List / Map already follow.
 3. **The fan boundary.** Use the Koka thread-shared flip, so only values captured into a scoped thread become atomic. The stage 2 ratchet is the judge: a strchurn regression from the flip stops the stage.
 4. **The ABI.** Runtime functions keep taking `&str`, which works through `Deref`. Functions that return `String` return the shared type, converted once at their boundary.
