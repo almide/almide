@@ -32,17 +32,20 @@ pub fn almide_rt_io_read_line() -> AlmideString {
 // The line is decoded lossily (as io.read_all's twin does), so a stray invalid
 // byte costs one U+FFFD instead of the whole line — the wasm self-host
 // (stdlib/io_read_line_opt.almd) decodes the same way.
-pub fn almide_rt_io_read_line_opt() -> Option<String> {
-    use std::io::BufRead;
-    almide_stdout_flush();
-    let mut buf: Vec<u8> = Vec::new();
-    match std::io::stdin().lock().read_until(b'\n', &mut buf) {
-        Ok(0) | Err(_) => None,
-        Ok(_) => {
-            let line = String::from_utf8_lossy(&buf);
-            Some(line.trim_end_matches('\n').trim_end_matches('\r').to_string())
+pub fn almide_rt_io_read_line_opt() -> Option<AlmideString> {
+    let __almide_v: Option<String> = {
+        use std::io::BufRead;
+        almide_stdout_flush();
+        let mut buf: Vec<u8> = Vec::new();
+        match std::io::stdin().lock().read_until(b'\n', &mut buf) {
+            Ok(0) | Err(_) => None,
+            Ok(_) => {
+                let line = String::from_utf8_lossy(&buf);
+                Some(line.trim_end_matches('\n').trim_end_matches('\r').to_string())
+            }
         }
-    }
+    };
+    __almide_v.into_almide()
 }
 
 pub fn almide_rt_io_read_all() -> AlmideString {

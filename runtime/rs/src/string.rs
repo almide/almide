@@ -24,15 +24,18 @@ fn almide_string_ascii_sep(sep: &str) -> Option<char> {
         _ => None,
     }
 }
-pub fn almide_rt_string_split(s: &str, sep: &str) -> Vec<String> {
-    match almide_string_ascii_sep(sep) {
-        Some(c) => s.split(c).map(|x| x.to_string()).collect(),
-        None => s.split(sep).map(|x| x.to_string()).collect(),
-    }
+pub fn almide_rt_string_split(s: &str, sep: &str) -> Vec<AlmideString> {
+    let __almide_v: Vec<String> = {
+        match almide_string_ascii_sep(sep) {
+            Some(c) => s.split(c).map(|x| x.to_string()).collect(),
+            None => s.split(sep).map(|x| x.to_string()).collect(),
+        }
+    };
+    __almide_v.into_almide()
 }
 // Two allocations and no Vec — the hot-loop form when only the first
 // separator matters (`station;temp` parsing). None ⇔ sep absent.
-pub fn almide_rt_string_split_once(s: &str, sep: &str) -> Option<(String, String)> { almide_rt_string_split_once_ref(s, sep).map(|(a, b)| (a.to_string(), b.to_string())) }
+pub fn almide_rt_string_split_once(s: &str, sep: &str) -> Option<(AlmideString, AlmideString)> { let __almide_v: Option<(String, String)> = { almide_rt_string_split_once_ref(s, sep).map(|(a, b)| (a.to_string(), b.to_string())) }; __almide_v.into_almide() }
 // The borrowing twin (codegen-only, `SliceBindersPass`): a `match` whose
 // payload binders are only read takes the halves as slices of `s` — the same
 // bytes, no copy. Not an Almide-visible function.
@@ -65,16 +68,19 @@ pub fn almide_rt_string_repeat(s: &str, n: i64) -> AlmideString {
     __almide_out.into()
 }
 pub fn almide_rt_string_reverse(s: &str) -> AlmideString { let __almide_out: String = s.chars().rev().collect(); __almide_out.into() }
-pub fn almide_rt_string_chars(s: &str) -> Vec<String> { s.chars().map(|c| c.to_string()).collect() }
-pub fn almide_rt_string_char_at(s: &str, i: i64) -> Option<String> {
-    if i < 0 { return None; }
-    s.chars().nth(i as usize).map(|c| c.to_string())
+pub fn almide_rt_string_chars(s: &str) -> Vec<AlmideString> { let __almide_v: Vec<String> = { s.chars().map(|c| c.to_string()).collect() }; __almide_v.into_almide() }
+pub fn almide_rt_string_char_at(s: &str, i: i64) -> Option<AlmideString> {
+    let __almide_v: Option<String> = {
+        if i < 0 { return None; }
+        s.chars().nth(i as usize).map(|c| c.to_string())
+    };
+    __almide_v.into_almide()
 }
 pub fn almide_rt_string_char_count(s: &str) -> i64 { s.chars().count() as i64 }
 pub fn almide_rt_string_index_of(s: &str, sub: &str) -> Option<i64> { s.find(sub).map(|b| s[..b].chars().count() as i64) }
 pub fn almide_rt_string_last_index_of(s: &str, sub: &str) -> Option<i64> { s.rfind(sub).map(|b| s[..b].chars().count() as i64) }
 pub fn almide_rt_string_count(s: &str, sub: &str) -> i64 { s.matches(sub).count() as i64 }
-pub fn almide_rt_string_lines(s: &str) -> Vec<String> { s.lines().map(|l| l.to_string()).collect() }
+pub fn almide_rt_string_lines(s: &str) -> Vec<AlmideString> { let __almide_v: Vec<String> = { s.lines().map(|l| l.to_string()).collect() }; __almide_v.into_almide() }
 pub fn almide_rt_string_is_empty(s: &str) -> bool { s.is_empty() }
 pub fn almide_rt_string_is_whitespace(s: &str) -> bool { s.chars().all(|c| c.is_whitespace()) }
 pub fn almide_rt_string_is_alpha(s: &str) -> bool { !s.is_empty() && s.chars().all(|c| c.is_alphabetic()) }
@@ -118,10 +124,13 @@ pub fn almide_rt_string_slice(s: &str, start: i64, end: i64) -> AlmideString {
 }
 
 // str::get checks UTF-8 boundaries without scanning or copying the source.
-pub fn almide_rt_string_byte_slice(s: &str, start: i64, end: i64) -> Option<String> {
-    let start = usize::try_from(start).ok()?;
-    let end = usize::try_from(end).ok()?;
-    s.get(start..end).map(str::to_owned)
+pub fn almide_rt_string_byte_slice(s: &str, start: i64, end: i64) -> Option<AlmideString> {
+    let __almide_v: Option<String> = {
+        let start = usize::try_from(start).ok()?;
+        let end = usize::try_from(end).ok()?;
+        s.get(start..end).map(str::to_owned)
+    };
+    __almide_v.into_almide()
 }
 
 // A NEGATIVE width means "no padding needed" — the SAME answer the wasm self-host
@@ -177,19 +186,15 @@ pub fn almide_rt_string_pad_right(s: &str, width: i64, pad: &str) -> AlmideStrin
 
 pub fn almide_rt_string_replace_first(s: &str, from: &str, to: &str) -> AlmideString { let __almide_out: String = if let Some(pos) = s.find(from) { format!("{}{}{}", &s[..pos], to, &s[pos + from.len()..]) } else { s.to_string() }; __almide_out.into() }
 
-pub fn almide_rt_string_strip_prefix(s: &str, prefix: &str) -> Option<String> { s.strip_prefix(prefix).map(|r| r.to_string()) }
-pub fn almide_rt_string_strip_suffix(s: &str, suffix: &str) -> Option<String> { s.strip_suffix(suffix).map(|r| r.to_string()) }
+pub fn almide_rt_string_strip_prefix(s: &str, prefix: &str) -> Option<AlmideString> { let __almide_v: Option<String> = { s.strip_prefix(prefix).map(|r| r.to_string()) }; __almide_v.into_almide() }
+pub fn almide_rt_string_strip_suffix(s: &str, suffix: &str) -> Option<AlmideString> { let __almide_v: Option<String> = { s.strip_suffix(suffix).map(|r| r.to_string()) }; __almide_v.into_almide() }
 // Borrowing twins of the two above (codegen-only, `SliceBindersPass`).
 pub fn almide_rt_string_strip_prefix_ref<'a>(s: &'a str, prefix: &str) -> Option<&'a str> { s.strip_prefix(prefix) }
 pub fn almide_rt_string_strip_suffix_ref<'a>(s: &'a str, suffix: &str) -> Option<&'a str> { s.strip_suffix(suffix) }
 
 
-pub fn almide_rt_string_first(s: &str) -> Option<String> {
-    s.chars().next().map(|c| c.to_string())
-}
-pub fn almide_rt_string_last(s: &str) -> Option<String> {
-    s.chars().last().map(|c| c.to_string())
-}
+pub fn almide_rt_string_first(s: &str) -> Option<AlmideString> { let __almide_v: Option<String> = { s.chars().next().map(|c| c.to_string()) }; __almide_v.into_almide() }
+pub fn almide_rt_string_last(s: &str) -> Option<AlmideString> { let __almide_v: Option<String> = { s.chars().last().map(|c| c.to_string()) }; __almide_v.into_almide() }
 pub fn almide_rt_string_take(s: &str, n: i64) -> AlmideString { let __almide_out: String = s.chars().take(n as usize).collect(); __almide_out.into() }
 /// Byte offset where the last `n` codepoints start (`0` when the string has
 /// no more than `n`; a negative `n` is a huge count, as `n as usize` makes
@@ -207,20 +212,23 @@ pub fn almide_rt_string_drop_end(s: &str, n: i64) -> AlmideString { let __almide
 
 // ── Algorithmic primitives (Phase 3 stdlib expansion) ──
 
-pub fn almide_rt_string_run_length_encode(s: &str) -> Vec<(String, i64)> {
-    let mut result: Vec<(String, i64)> = Vec::new();
-    for c in s.chars() {
-        let cs: String = c.to_string();
-        match result.last_mut() {
-            Some((prev, count)) if *prev == cs => { *count += 1; }
-            _ => { result.push((cs, 1)); }
+pub fn almide_rt_string_run_length_encode(s: &str) -> Vec<(AlmideString, i64)> {
+    let __almide_v: Vec<(String, i64)> = {
+        let mut result: Vec<(String, i64)> = Vec::new();
+        for c in s.chars() {
+            let cs: String = c.to_string();
+            match result.last_mut() {
+                Some((prev, count)) if *prev == cs => { *count += 1; }
+                _ => { result.push((cs, 1)); }
+            }
         }
-    }
-    result
+        result
+    };
+    __almide_v.into_almide()
 }
 
 // ── Mutable string operations ──
 
-pub fn almide_rt_string_push(s: &mut String, suffix: &str) { s.push_str(suffix); }
-pub fn almide_rt_string_push_char(s: &mut String, ch: &str) { s.push_str(ch); }
-pub fn almide_rt_string_clear(s: &mut String) { s.clear(); }
+pub fn almide_rt_string_push(s: &mut AlmideString, suffix: &str) { s.push_str(suffix); }
+pub fn almide_rt_string_push_char(s: &mut AlmideString, ch: &str) { s.push_str(ch); }
+pub fn almide_rt_string_clear(s: &mut AlmideString) { s.clear(); }
