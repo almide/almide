@@ -77,11 +77,14 @@ fn to_list[A](o: A?) -> List[A] = _
 // read out of the `some` accumulator — a binder it could not move, so every
 // step copied the whole list (O(n²) on both legs, #3543). The elements are
 // values, so checking them all is unobservable next to stopping at the
-// first `none`.
+// first `none`. The second pass is a `map`, not a `filter_map`: once every
+// element is known to be `some`, the result has exactly as many values as the
+// input, so it is reserved once (the growth ruling, 2026-10-15). A
+// `filter_map` grew it by doubling, about twice its size allocated and copied.
 /// some(values) if no element is none, else none.
 fn collect[T](xs: List[T?]) -> List[T]? =
   if list.any(xs, (o) => option.is_none(o)) then none
-  else some(list.filter_map(xs, (o) => o))
+  else some(list.map(xs, (o) => match o { some(v) => v, none => panic("option.collect: unreachable, every element was checked") }))
 
 /// some of all f(x), or none; f runs on every x.
 fn collect_map[T, U](xs: List[T], f: (T) -> U?) -> List[U]? = option.collect(list.map(xs, f))
