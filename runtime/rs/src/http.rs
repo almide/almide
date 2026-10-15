@@ -410,6 +410,97 @@ pub fn almide_http_request_stream_impl(
     }
 }
 
+/// What a streamed response has read but not yet delivered, and where in the
+/// head / chunked framing it is.
+#[derive(Default)]
+struct AlmideHttpStreamParse {
+    acc: Vec<u8>,
+    headers_done: bool,
+    chunked: bool,
+    chunk_remaining: usize,
+    awaiting_size: bool,
+    // Body bytes not yet delivered because they end in an incomplete UTF-8
+    // sequence (at most 3 bytes).
+    utf8_tail: Vec<u8>,
+}
+
+impl AlmideHttpStreamParse {
+    fn deliver<F: FnMut(&str)>(&mut self, bytes: &[u8], at_end: bool, on_chunk: &mut F) {
+        self.utf8_tail.extend_from_slice(bytes);
+        let keep = if at_end { 0 } else { http_stream_incomplete_utf8_tail(&self.utf8_tail) };
+        let ready = self.utf8_tail.len() - keep;
+        if ready > 0 {
+            let drained: Vec<u8> = self.utf8_tail.drain(..ready).collect();
+            on_chunk(&String::from_utf8_lossy(&drained));
+        }
+    }
+
+    /// The response head, once its end has arrived: `None` while more bytes
+    /// are needed, else the non-2xx status line to report (if any).
+    fn take_head(&mut self, url: &str) -> Result<Option<Option<String>>, String> {
+        // A 1xx interim head (`100 Continue`) is dropped and the final
+        // one awaited (#2824) — several may arrive in one read.
+        while let Some(idx) = self.acc.windows(4).position(|w| w == b"\r\n\r\n") {
+            if !http_is_interim(http_status_of(&self.acc[..idx])) {
+                break;
+            }
+            self.acc.drain(..idx + 4);
+        }
+        let Some(idx) = self.acc.windows(4).position(|w| w == b"\r\n\r\n") else {
+            if self.acc.len() > HTTP_MAX_HEAD_BYTES {
+                return Err(http_head_too_large(url));
+            }
+            return Ok(None);
+        };
+        let header_section = String::from_utf8_lossy(&self.acc[..idx]).to_string();
+        let status_line = header_section.lines().next().unwrap_or("");
+        let code: i64 = status_line
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        let error_status = (!(200..300).contains(&code))
+            .then(|| format!("HTTP {}: {}", code, status_line.splitn(3, ' ').nth(2).unwrap_or("")));
+        self.chunked = http_fields_chunked(&http_head_fields(&header_section));
+        self.acc.drain(..idx + 4);
+        self.headers_done = true;
+        Ok(Some(error_status))
+    }
+
+    /// Deliver every complete chunk read so far: `true` at the terminating
+    /// zero-size chunk, `false` when more bytes are needed.
+    fn drain_chunked<F: FnMut(&str)>(&mut self, url: &str, on_chunk: &mut F) -> Result<bool, String> {
+        loop {
+            if self.awaiting_size {
+                // The \r\n that terminates the size line, or wait for more.
+                let Some(nl) = self.acc.windows(2).position(|w| w == b"\r\n") else { return Ok(false) };
+                let size = http_chunk_size(&self.acc[..nl]).map_err(|_| http_error_text(HttpErrorClass::Protocol, url))?;
+                self.acc.drain(..nl + 2);
+                if size == 0 {
+                    self.deliver(&[], true, on_chunk);
+                    return Ok(true);
+                }
+                self.chunk_remaining = size;
+                self.awaiting_size = false;
+            }
+            let take = self.chunk_remaining.min(self.acc.len());
+            if take > 0 {
+                let drained: Vec<u8> = self.acc.drain(..take).collect();
+                self.deliver(&drained, false, on_chunk);
+                self.chunk_remaining -= take;
+            }
+            // Mid-chunk, or the trailing CRLF has not arrived: wait for more.
+            if self.chunk_remaining != 0 || self.acc.len() < 2 {
+                return Ok(false);
+            }
+            if self.acc.starts_with(b"\r\n") {
+                self.acc.drain(..2);
+            }
+            self.awaiting_size = true;
+        }
+    }
+}
+
 fn http_exchange_stream<S: Read + Write, F: FnMut(&str)>(
     stream: &mut S,
     url: &str,
@@ -419,30 +510,12 @@ fn http_exchange_stream<S: Read + Write, F: FnMut(&str)>(
     stream.write_all(request).map_err(|e| http_io_error_text(url, &e))?;
 
     let mut buf = vec![0u8; 8192];
-    let mut acc: Vec<u8> = Vec::new();
-    let mut headers_done = false;
-    let mut chunked = false;
-    let mut chunk_remaining: usize = 0;
-    let mut awaiting_size = true;
-    let mut error_status: Option<String> = None;
-    // Body bytes not yet delivered because they end in an incomplete UTF-8
-    // sequence (at most 3 bytes).
-    let mut utf8_tail: Vec<u8> = Vec::new();
-    let mut deliver = |bytes: &[u8], at_end: bool, on_chunk: &mut F| {
-        utf8_tail.extend_from_slice(bytes);
-        let keep = if at_end { 0 } else { http_stream_incomplete_utf8_tail(&utf8_tail) };
-        let ready = utf8_tail.len() - keep;
-        if ready > 0 {
-            let drained: Vec<u8> = utf8_tail.drain(..ready).collect();
-            on_chunk(&String::from_utf8_lossy(&drained));
-        }
-    };
-
+    let mut st = AlmideHttpStreamParse { awaiting_size: true, ..Default::default() };
     loop {
         let n = match stream.read(&mut buf) {
             Ok(n) => n,
             Err(e) => {
-                if acc.is_empty() && !headers_done {
+                if st.acc.is_empty() && !st.headers_done {
                     return Err(http_io_error_text(url, &e));
                 }
                 break;
@@ -451,104 +524,33 @@ fn http_exchange_stream<S: Read + Write, F: FnMut(&str)>(
         if n == 0 {
             break;
         }
-        acc.extend_from_slice(&buf[..n]);
-
-        if !headers_done {
-            // A 1xx interim head (`100 Continue`) is dropped and the final
-            // one awaited (#2824) — several may arrive in one read.
-            while let Some(idx) = acc.windows(4).position(|w| w == b"\r\n\r\n") {
-                if !http_is_interim(http_status_of(&acc[..idx])) {
-                    break;
+        st.acc.extend_from_slice(&buf[..n]);
+        if !st.headers_done {
+            match st.take_head(url)? {
+                None => continue,
+                Some(Some(msg)) => {
+                    // Drain remaining body for error message context.
+                    let body_text = String::from_utf8_lossy(&st.acc).to_string();
+                    return Err(format!("{}: {}", msg, body_text.chars().take(500).collect::<String>()));
                 }
-                acc.drain(..idx + 4);
-            }
-            if let Some(idx) = acc.windows(4).position(|w| w == b"\r\n\r\n") {
-                let header_section = String::from_utf8_lossy(&acc[..idx]).to_string();
-                let status_line = header_section.lines().next().unwrap_or("");
-                let code: i64 = status_line
-                    .split_whitespace()
-                    .nth(1)
-                    .and_then(|s| s.parse().ok())
-                    .unwrap_or(0);
-                if !(200..300).contains(&code) {
-                    error_status = Some(format!(
-                        "HTTP {}: {}",
-                        code,
-                        status_line.splitn(3, ' ').nth(2).unwrap_or("")
-                    ));
-                }
-                chunked = http_fields_chunked(&http_head_fields(&header_section));
-                acc.drain(..idx + 4);
-                headers_done = true;
-            } else if acc.len() > HTTP_MAX_HEAD_BYTES {
-                return Err(http_head_too_large(url));
-            } else {
-                continue;
+                Some(None) => {}
             }
         }
-
-        if let Some(ref msg) = error_status {
-            // Drain remaining body for error message context.
-            let body_text = String::from_utf8_lossy(&acc).to_string();
-            return Err(format!("{}: {}", msg, body_text.chars().take(500).collect::<String>()));
-        }
-
-        if chunked {
-            'outer: loop {
-                if awaiting_size {
-                    // Look for \r\n that terminates the size line.
-                    let mut nl = None;
-                    for i in 0..acc.len().saturating_sub(1) {
-                        if acc[i] == b'\r' && acc[i + 1] == b'\n' {
-                            nl = Some(i);
-                            break;
-                        }
-                    }
-                    let nl = match nl {
-                        Some(i) => i,
-                        None => break 'outer, // need more bytes
-                    };
-                    let size = http_chunk_size(&acc[..nl]).map_err(|_| http_error_text(HttpErrorClass::Protocol, url))?;
-                    acc.drain(..nl + 2);
-                    if size == 0 {
-                        deliver(&[], true, on_chunk);
-                        return Ok(());
-                    }
-                    chunk_remaining = size;
-                    awaiting_size = false;
-                }
-                let take = chunk_remaining.min(acc.len());
-                if take > 0 {
-                    let drained: Vec<u8> = acc.drain(..take).collect();
-                    deliver(&drained, false, on_chunk);
-                    chunk_remaining -= take;
-                }
-                if chunk_remaining == 0 {
-                    if acc.len() < 2 {
-                        // Need the trailing CRLF; wait for more bytes.
-                        break 'outer;
-                    }
-                    if acc.starts_with(b"\r\n") {
-                        acc.drain(..2);
-                    }
-                    awaiting_size = true;
-                } else {
-                    break 'outer;
-                }
+        if st.chunked {
+            if st.drain_chunked(url, on_chunk)? {
+                return Ok(());
             }
-        } else {
+        } else if !st.acc.is_empty() {
             // Plain body — surface as-is.
-            if !acc.is_empty() {
-                let drained: Vec<u8> = acc.drain(..).collect();
-                deliver(&drained, false, on_chunk);
-            }
+            let drained: Vec<u8> = st.acc.drain(..).collect();
+            st.deliver(&drained, false, on_chunk);
         }
     }
 
-    if !headers_done {
+    if !st.headers_done {
         return Err(http_error_text(HttpErrorClass::Protocol, url));
     }
-    deliver(&[], true, on_chunk);
+    st.deliver(&[], true, on_chunk);
     Ok(())
 }
 
@@ -659,8 +661,7 @@ pub fn almide_http_stream_limited_impl(
     url: &str,
     body: &str,
     headers: &AlmideMap<String, String>,
-    total_ms: i64,
-    idle_ms: i64,
+    (total_ms, idle_ms): (i64, i64),
     mut on_chunk: impl FnMut(String),
 ) -> Result<(), String> {
     let call = almide_http_call_start(method, url, body, headers, total_ms, idle_ms)?;
@@ -683,7 +684,7 @@ pub fn almide_rt_http___request_stream_limited(
     total_ms: i64,
     idle_ms: i64,
     on_chunk: std::rc::Rc<dyn Fn(AlmideString)>,
-) -> Result<(), AlmideString> { let __almide_r: Result<(), String> = (|| { almide_http_stream_limited_impl(method, url, body, headers, total_ms, idle_ms, |chunk| on_chunk(chunk)) })(); __almide_r.map_err(Into::into) }
+) -> Result<(), AlmideString> { let __almide_r: Result<(), String> = (|| { almide_http_stream_limited_impl(method, url, body, headers, (total_ms, idle_ms), |chunk| on_chunk(chunk)) })(); __almide_r.map_err(Into::into) }
 
 /// The one entry the SSE helpers stream through: no limits = the classic
 /// `request_stream` path (ALMIDE_HTTP_TIMEOUT_SECS / 120 s), limits = the
@@ -698,7 +699,7 @@ pub fn almide_http_stream_dispatch(
 ) -> Result<(), String> {
     match limits {
         None => almide_http_request_stream_impl(method, url, body, headers, on_chunk),
-        Some((total_ms, idle_ms)) => almide_http_stream_limited_impl(method, url, body, headers, total_ms, idle_ms, on_chunk),
+        Some(limits) => almide_http_stream_limited_impl(method, url, body, headers, limits, on_chunk),
     }
 }
 
