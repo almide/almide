@@ -19,9 +19,11 @@
 //! Qualification (all must hold, else the arm is left as it was):
 //! - one lambda param of scalar type (Int / Float / Bool);
 //! - the element result is a scalar or a tuple of scalars;
-//! - every capture is an immutable local of scalar type — never a
-//!   top-level let (a child instance never runs `main`, so its globals are
-//!   unset), never a `var`;
+//! - every capture is an immutable local of scalar type, or a `List` of
+//!   scalars (#3331: the host copies its payload into each worker once per
+//!   offer — a row kernel reading a captured vector) — never a top-level
+//!   let (a child instance never runs `main`, so its globals are unset),
+//!   never a `var`;
 //! - the body and every user fn it reaches are free of effects: no effect
 //!   fn, no builtin outside the scalar/collection stdlib (no `println`, no
 //!   `fs`, no `random`), no fn VALUE call, no top-level let read or write,
@@ -54,6 +56,16 @@ const PURE_MODULES: &[&str] = &["list", "int", "float", "math", "string", "optio
 
 fn scalar(t: &Ty) -> bool {
     matches!(t, Ty::Int | Ty::Float | Ty::Bool)
+}
+
+/// A capture the offer can carry: a scalar's raw bits, or a scalar list's
+/// payload bytes (`fan_par_lower.rs` documents the request tail).
+pub(crate) fn capture_ok(t: &Ty) -> bool {
+    scalar(t) || scalar_list(t)
+}
+
+pub(crate) fn scalar_list(t: &Ty) -> bool {
+    matches!(t, Ty::Applied(TC::List, args) if matches!(args.as_slice(), [e] if scalar(e)))
 }
 
 fn result_ok(t: &Ty) -> bool {
@@ -108,6 +120,16 @@ pub(crate) fn site_exports(
         .filter(|(i, (f, _, _))| f.name.as_str().starts_with(SITE_PREFIX) && visited.contains(i))
         .map(|(i, (f, _, _))| (f.name.as_str().to_string(), table.infos[i].wasm_index))
         .collect()
+}
+
+/// Whether a reached chunk takes a list capture: the host then builds the
+/// list in each worker through the module's own allocator, exported as
+/// [`crate::host_exports::ALLOC_EXPORT`]. A scalar-only program keeps its
+/// export section as it was.
+pub(crate) fn needs_alloc_export(program_fns: &[(&IrFunction, Option<String>, u32)], visited: &HashSet<usize>) -> bool {
+    program_fns.iter().enumerate().any(|(i, (f, _, _))| {
+        f.name.as_str().starts_with(SITE_PREFIX) && visited.contains(&i) && f.params.iter().any(|p| scalar_list(&p.ty))
+    })
 }
 
 fn has_fan(ir: &IrProgram) -> bool {
@@ -172,7 +194,7 @@ impl Rewriter<'_> {
         let caps = almide_ir::free_vars::free_vars(body, &bound);
         for c in &caps {
             let info = self.vt.get(*c);
-            if self.tl.contains(c) || info.module_origin.is_some() || info.mutability != Mutability::Let || !scalar(&info.ty) {
+            if self.tl.contains(c) || info.module_origin.is_some() || info.mutability != Mutability::Let || !capture_ok(&info.ty) {
                 return None;
             }
         }

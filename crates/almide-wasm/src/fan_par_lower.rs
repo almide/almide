@@ -13,6 +13,14 @@
 //!   0 i64 / 1 f64 / 2 i32, and `off` is the field's ABSOLUTE offset from a
 //!   tuple block's base, so the host reads a child's tuple without knowing
 //!   the layout.
+//! - a request with a LIST capture (#3331: a scalar list, `fan_par.rs`)
+//!   carries a tail after the elements: `capkind × m` (0 = the slot holds a
+//!   scalar's bits, 1 = the slot holds the list's payload length in bytes),
+//!   then each list's payload bytes in capture order, each padded to 8. The
+//!   host builds the list in every worker through the exported allocator.
+//!   A scalar-only request has no tail, so its bytes are what they were; a
+//!   host that predates the tail sees a length it does not expect and
+//!   answers 0.
 //! - `b` is the answer room: `n × max(r, 1)` i64 slots, element-major.
 //! - the result is 1 when the host filled `b` (every element ran on some
 //!   instance in its own heap), anything else when it did not. Only 1
@@ -78,6 +86,10 @@ impl Emitter<'_> {
         let elem = self.types.el(eh);
         let hb = self.hold_i32()?;
         self.f.instructions().local_set(hb);
+        // #3331: which captures are scalar lists (their slot carries the
+        // payload length, their bytes ride in the request tail).
+        let list_caps: Vec<bool> = caps.iter().map(|c| crate::fan_par::scalar_list(&c.ty)).collect();
+        let heap = list_caps.contains(&true);
         let mut cap_holds = Vec::with_capacity(caps.len());
         for c in caps {
             let t = self.lower_arg(c, None, ArgMode::Borrow)?;
@@ -110,13 +122,30 @@ impl Emitter<'_> {
         let hi = self.hold_i32()?;
         let hacc = self.hold_i32()?;
         let ht = self.hold_i32()?;
+        // only a request with a tail needs its running size
+        let htail = if heap { Some(self.hold_i32()?) } else { None };
         let estride = elem.slot_size() as i32;
         let rstride = rty.slot_size() as i32;
         {
             let mut i = self.f.instructions();
             i.local_get(hb).i32_load(len_memarg()).i32_const(estride).i32_div_u().local_set(hn);
+            if let Some(htail) = htail {
+                // the tail: the kinds, then every list's payload padded to 8
+                i.i32_const(8 * m as i32).local_set(htail);
+                for (j, &h) in cap_holds.iter().enumerate() {
+                    if list_caps[j] {
+                        i.local_get(htail);
+                        i.local_get(h).i32_wrap_i64().i32_load(len_memarg()).i32_const(7).i32_add().i32_const(-8).i32_and();
+                        i.i32_add().local_set(htail);
+                    }
+                }
+            }
             // the request block
-            i.i32_const(elems_at as i32).local_get(hn).i32_const(8).i32_mul().i32_add().call(F_ALLOC).local_set(ha);
+            i.i32_const(elems_at as i32).local_get(hn).i32_const(8).i32_mul().i32_add();
+            if let Some(htail) = htail {
+                i.local_get(htail).i32_add();
+            }
+            i.call(F_ALLOC).local_set(ha);
         }
         let request = self.witness_par_room();
         {
@@ -135,7 +164,12 @@ impl Emitter<'_> {
                 i.i64_store(slot_memarg(8 * j as u32));
             }
             for (j, &h) in cap_holds.iter().enumerate() {
-                i.local_get(ha).local_get(h).i64_store(slot_memarg(8 * (4 + 2 * r + j as u32)));
+                i.local_get(ha).local_get(h);
+                if list_caps[j] {
+                    // a list's slot: its payload length (the pointer means nothing to the host)
+                    i.i32_wrap_i64().i32_load(len_memarg()).i64_extend_i32_u();
+                }
+                i.i64_store(slot_memarg(8 * (4 + 2 * r + j as u32)));
             }
             i.i32_const(0).local_set(hi);
             i.block(BlockType::Empty).loop_(BlockType::Empty);
@@ -149,6 +183,27 @@ impl Emitter<'_> {
             let mut i = self.f.instructions();
             i.i64_store(slot_memarg(elems_at));
             i.local_get(hi).i32_const(1).i32_add().local_set(hi).br(0).end().end();
+            if heap {
+                // the tail starts after the elements: `ht` = its base (payload-relative)
+                i.local_get(ha).local_get(hn).i32_const(8).i32_mul().i32_add().local_set(ht);
+                for (j, &kind) in list_caps.iter().enumerate() {
+                    i.local_get(ht).i64_const(i64::from(kind)).i64_store(slot_memarg(elems_at + 8 * j as u32));
+                }
+                // `ht` walks the payloads: memory.copy(dst, src, len) per list
+                i.local_get(ht).i32_const((elems_at + 8 * m) as i32).i32_add().local_set(ht);
+                for (j, &h) in cap_holds.iter().enumerate() {
+                    if !list_caps[j] {
+                        continue;
+                    }
+                    i.local_get(ht).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+                    i.local_get(h).i32_wrap_i64().i32_const(almide_layout::PAYLOAD as i32).i32_add();
+                    i.local_get(h).i32_wrap_i64().i32_load(len_memarg());
+                    i.memory_copy(0, 0);
+                    i.local_get(ht);
+                    i.local_get(h).i32_wrap_i64().i32_load(len_memarg()).i32_const(7).i32_add().i32_const(-8).i32_and();
+                    i.i32_add().local_set(ht);
+                }
+            }
             // the answer room
             i.local_get(hn).i32_const(width as i32).i32_mul().call(F_ALLOC).local_set(ho);
         }
@@ -204,7 +259,7 @@ impl Emitter<'_> {
             i.local_get(ho).call(F_FREE);
         }
         self.witness_par_close([request, answer]);
-        for _ in 0..6 {
+        for _ in 0..6 + usize::from(htail.is_some()) {
             self.release_i32();
         }
         for _ in &cap_holds {
