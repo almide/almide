@@ -52,6 +52,12 @@ pub(super) const OP_FAN_PAR: i32 = 74;
 /// than pooled (the reset invariant above).
 const RESET_BYTES: usize = 64 << 20;
 
+/// The rc a list capture's block is built with (#3331): far above any count
+/// the chunks' retains and releases can reach, so the block is never freed
+/// and never unique — a chunk that writes to it copies it first, exactly as
+/// it would a list the caller still holds.
+const PINNED_RC: u32 = 1 << 30;
+
 /// The fan cost model (#3341) — the SAME formula and constants as the native
 /// runtime's `almide_rt_fan_plan` (runtime/rs/src/list.rs), pinned to
 /// docs/benchmarks/fan-cost-model.txt by tests/fan_cost_model_test.rs. A
@@ -136,18 +142,43 @@ struct Request {
     fields: Vec<(i64, u32)>,
     caps: Vec<i64>,
     elems: Vec<i64>,
+    /// #3331: `(capture index, payload bytes)` of every list capture — each
+    /// worker gets its own copy, and the capture's argument is that copy.
+    lists: Vec<(usize, Vec<u8>)>,
 }
 
 fn parse(a: &[u8]) -> Option<Request> {
     let slot = |j: usize| -> Option<i64> { Some(i64::from_le_bytes(a.get(8 * j..8 * j + 8)?.try_into().ok()?)) };
     let (k, n, m, r) = (slot(0)?, usize::try_from(slot(1)?).ok()?, usize::try_from(slot(2)?).ok()?, usize::try_from(slot(3)?).ok()?);
-    if a.len() != 8 * (4 + 2 * r + m + n) {
+    let base = 8 * (4 + 2 * r + m + n);
+    if a.len() < base {
         return None;
     }
     let fields = (0..r).map(|j| Some((slot(4 + 2 * j)?, u32::try_from(slot(5 + 2 * j)?).ok()?))).collect::<Option<Vec<_>>>()?;
     let caps = (0..m).map(|j| slot(4 + 2 * r + j)).collect::<Option<Vec<_>>>()?;
     let elems = (0..n).map(|j| slot(4 + 2 * r + m + j)).collect::<Option<Vec<_>>>()?;
-    Some(Request { site: format!("__fan_site_{k}"), fields, caps, elems })
+    let lists = if a.len() == base { Vec::new() } else { parse_tail(a, base, &caps)? };
+    Some(Request { site: format!("__fan_site_{k}"), fields, caps, elems, lists })
+}
+
+/// The tail after the elements (`fan_par_lower.rs`): one kind per capture,
+/// then each list's payload padded to 8. It must account for every byte.
+fn parse_tail(a: &[u8], base: usize, caps: &[i64]) -> Option<Vec<(usize, Vec<u8>)>> {
+    let mut at = base + 8 * caps.len();
+    let mut lists = Vec::new();
+    for (j, &cap) in caps.iter().enumerate() {
+        let kind = i64::from_le_bytes(a.get(base + 8 * j..base + 8 * j + 8)?.try_into().ok()?);
+        match kind {
+            0 => {}
+            1 => {
+                let len = usize::try_from(cap).ok()?;
+                lists.push((j, a.get(at..at + len)?.to_vec()));
+                at += len.div_ceil(8) * 8;
+            }
+            _ => return None,
+        }
+    }
+    (at == a.len() && !lists.is_empty()).then_some(lists)
 }
 
 /// Serve the offer: 1 = the answer room holds every element's result.
@@ -298,7 +329,8 @@ impl Deal<'_> {
         }
         .and_then(|mut w| {
             let (func, params) = self.arm(&mut w)?;
-            self.drain(w, func, &params)
+            let caps = self.place_lists(&mut w)?;
+            self.drain(w, func, &params, &caps)
         });
         if got.is_none() {
             self.failed.store(true, Ordering::SeqCst);
@@ -324,10 +356,34 @@ impl Deal<'_> {
         (params.len() == 1 + self.req.caps.len() && ty.results().len() == 1).then_some((func, params))
     }
 
+    /// This worker's capture arguments: the request's, with every list
+    /// capture (#3331) replaced by a block built in the worker's own memory —
+    /// allocated by the module's exported allocator, the payload copied in,
+    /// and its rc set to [`PINNED_RC`] so no chunk's release ever frees it
+    /// and any write to it copies first. It is never freed: the reset
+    /// invariant's memory bound drops a worker whose heap these grew.
+    fn place_lists(&self, w: &mut Worker) -> Option<Vec<i64>> {
+        let mut caps = self.req.caps.clone();
+        if self.req.lists.is_empty() {
+            return Some(caps);
+        }
+        let alloc = w.instance.get_typed_func::<i32, i32>(&mut w.store, "__alloc").ok()?;
+        for (j, bytes) in &self.req.lists {
+            let block = alloc.call(&mut w.store, i32::try_from(bytes.len()).ok()?).ok()? as u32 as usize;
+            let data = w.memory.data_mut(&mut w.store);
+            let payload = block + almide_layout::PAYLOAD as usize;
+            data.get_mut(payload..payload + bytes.len())?.copy_from_slice(bytes);
+            let rc = block + almide_layout::RC.offset as usize;
+            data.get_mut(rc..rc + 4)?.copy_from_slice(&PINNED_RC.to_le_bytes());
+            caps[*j] = block as i64;
+        }
+        Some(caps)
+    }
+
     /// Element `i` on worker `w`: its result slots, read out before the
     /// worker's next chunk allocates.
-    fn one(&self, w: &mut Worker, func: wasmtime::Func, params: &[wasmtime::ValType], i: usize) -> Option<Vec<i64>> {
-        let bits = std::iter::once(self.req.elems[i]).chain(self.req.caps.iter().copied());
+    fn one(&self, w: &mut Worker, (func, params): (wasmtime::Func, &[wasmtime::ValType]), caps: &[i64], i: usize) -> Option<Vec<i64>> {
+        let bits = std::iter::once(self.req.elems[i]).chain(caps.iter().copied());
         let args: Vec<wasmtime::Val> = params.iter().zip(bits).map(|(p, b)| to_val(p, b)).collect();
         let mut ret = [wasmtime::Val::I32(0)];
         func.call(&mut w.store, &args, &mut ret).ok()?;
@@ -338,7 +394,7 @@ impl Deal<'_> {
     }
 
     /// Take unclaimed elements on `w` until none is left (or a chunk failed).
-    fn drain(&self, mut w: Worker, func: wasmtime::Func, params: &[wasmtime::ValType]) -> Option<(Worker, Vec<(usize, Vec<i64>)>)> {
+    fn drain(&self, mut w: Worker, func: wasmtime::Func, params: &[wasmtime::ValType], caps: &[i64]) -> Option<(Worker, Vec<(usize, Vec<i64>)>)> {
         let mut done = Vec::new();
         let mut t0 = cpu_ns();
         loop {
@@ -349,7 +405,7 @@ impl Deal<'_> {
             if i >= self.req.elems.len() {
                 break;
             }
-            let vals = self.one(&mut w, func, params, i)?;
+            let vals = self.one(&mut w, (func, params), caps, i)?;
             done.push((i, vals));
             if done.len() == 1 {
                 let t1 = cpu_ns();
@@ -434,5 +490,51 @@ fn from_val(v: &wasmtime::Val) -> Option<i64> {
         wasmtime::Val::F64(x) => Some(*x as i64),
         wasmtime::Val::I32(x) => Some(i64::from(*x as u32)),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn slots(v: &[i64]) -> Vec<u8> {
+        v.iter().flat_map(|x| x.to_le_bytes()).collect()
+    }
+
+    /// `[K, n, m, r, cap × m, elem × n]`, then the tail when given.
+    fn request(caps: &[i64], elems: &[i64], tail: &[u8]) -> Vec<u8> {
+        let mut a = slots(&[7, elems.len() as i64, caps.len() as i64, 0]);
+        a.extend(slots(caps));
+        a.extend(slots(elems));
+        a.extend_from_slice(tail);
+        a
+    }
+
+    #[test]
+    fn a_scalar_request_has_no_tail() {
+        let req = parse(&request(&[5], &[1, 2], &[])).expect("parses");
+        assert_eq!((req.site.as_str(), req.caps, req.elems), ("__fan_site_7", vec![5], vec![1, 2]));
+        assert!(req.lists.is_empty());
+    }
+
+    #[test]
+    fn a_list_capture_rides_in_the_tail_padded_to_8() {
+        // capture 0 a scalar, capture 1 a 12-byte list (padded to 16)
+        let mut tail = slots(&[0, 1]);
+        tail.extend((1..=12).collect::<Vec<u8>>());
+        tail.extend([0u8; 4]);
+        let req = parse(&request(&[9, 12], &[3], &tail)).expect("parses");
+        assert_eq!(req.lists, vec![(1, (1..=12).collect::<Vec<u8>>())]);
+    }
+
+    #[test]
+    fn a_tail_that_does_not_account_for_every_byte_is_not_served() {
+        let short = parse(&request(&[12], &[3], &slots(&[1]))); // kind says 12 bytes, none follow
+        assert!(short.is_none());
+        let mut extra = slots(&[1]);
+        extra.extend([0u8; 24]); // 12 bytes padded to 16, plus 8 more
+        assert!(parse(&request(&[12], &[3], &extra)).is_none());
+        assert!(parse(&request(&[12], &[3], &slots(&[2]))).is_none(), "unknown kind");
+        assert!(parse(&request(&[4], &[3], &slots(&[0]))).is_none(), "a tail with no list is malformed");
     }
 }

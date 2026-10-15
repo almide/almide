@@ -307,6 +307,7 @@ name = "almide-wasm-run"
 version = "0.12.2"
 dependencies = [
  "almide-base",
+ "almide-layout",
  "almide-rt-core",
  "almide-wasi",
  "almide-wasm",
