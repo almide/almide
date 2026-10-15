@@ -48,7 +48,7 @@ pub fn check(ctx: &HintContext) -> Option<HintResult> {
     None
 }
 
-fn check_rejected_ident(name: &str) -> Option<HintResult> {
+pub(crate) fn check_rejected_ident(name: &str) -> Option<HintResult> {
     match name {
         "loop" => Some(HintResult {
             message: Some("'loop' is not valid in Almide".into()),
@@ -102,7 +102,7 @@ fn check_rejected_ident(name: &str) -> Option<HintResult> {
             hint: "Use 'match' for pattern matching. Example: match value { pattern -> result }".into(),
         }),
         "elif" | "elsif" | "elseif" => Some(HintResult {
-            message: Some(format!("'{}' is not valid in Almide", name)),
+            message: Some(format!("'{}' is not valid in Almide: use 'else if'", name)),
             hint: "Use nested 'if/then/else'. Example: if a then x else if b then y else z".into(),
         }),
         "extends" | "implements" | "inherit" | "inherits" => Some(HintResult {
