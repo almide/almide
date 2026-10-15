@@ -397,7 +397,7 @@
 7195	spec/wasm_cross/leak_free_map_walk_exit.almd
 6475	spec/wasm_cross/leak_free_propagating_literal_operand.almd
 13367	spec/wasm_cross/leak_free_reader_temporaries.almd
-8072	spec/wasm_cross/leak_free_result_option_carriers.almd
+8700	spec/wasm_cross/leak_free_result_option_carriers.almd
 3271	spec/wasm_cross/leak_free_spread_produced_base.almd
 7479	spec/wasm_cross/let_bound_closure_scope.almd
 2637	spec/wasm_cross/let_unwrap_propagation.almd
@@ -478,7 +478,7 @@
 4079	spec/wasm_cross/map_fold_heap_accumulator.almd
 7705	spec/wasm_cross/map_get_fallback_key_and_lazy.almd
 8054	spec/wasm_cross/map_index_order.almd
-6318	spec/wasm_cross/map_index_released_with_block.almd
+6938	spec/wasm_cross/map_index_released_with_block.almd
 8768	spec/wasm_cross/map_index_string_key_shapes.almd
 15549	spec/wasm_cross/map_insertion_order.almd
 13614	spec/wasm_cross/map_interp_string_value.almd
@@ -487,9 +487,9 @@
 15644	spec/wasm_cross/map_merge_in_place.almd
 3425	spec/wasm_cross/map_of_maps_value.almd
 2948	spec/wasm_cross/map_rich_variant_key.almd
-10942	spec/wasm_cross/map_set_eq.almd
+11470	spec/wasm_cross/map_set_eq.almd
 15047	spec/wasm_cross/map_set_in_place.almd
-21140	spec/wasm_cross/map_set_index_threshold.almd
+21216	spec/wasm_cross/map_set_index_threshold.almd
 7527	spec/wasm_cross/map_set_ops.almd
 15203	spec/wasm_cross/map_set_typechange.almd
 7593	spec/wasm_cross/map_upsert_str.almd
@@ -573,7 +573,7 @@
 2912	spec/wasm_cross/mut_param_loop_stays_in_place.almd
 11351	spec/wasm_cross/mut_param_move_mode_gaps.almd
 17299	spec/wasm_cross/mut_param_nested_place_writeback.almd
-50108	spec/wasm_cross/mut_param_reassign_from_hof.almd
+50181	spec/wasm_cross/mut_param_reassign_from_hof.almd
 2314	spec/wasm_cross/mut_param_spread_reassign.almd
 5099	spec/wasm_cross/mut_param_tail_recursion.almd
 3080	spec/wasm_cross/mut_param_writeback_growth.almd
@@ -671,7 +671,7 @@
 667	spec/wasm_cross/range_first_class.almd
 1469	spec/wasm_cross/range_inclusive_end_at_max.almd
 2135	spec/wasm_cross/range_materialize_oom.almd
-7716	spec/wasm_cross/rc_alloc_stress.almd
+8233	spec/wasm_cross/rc_alloc_stress.almd
 2632	spec/wasm_cross/rc_reclaim_churn.almd
 2402	spec/wasm_cross/record_default_field_omitted.almd
 36835	spec/wasm_cross/record_field_rust_keyword.almd
@@ -738,7 +738,7 @@
 2916	spec/wasm_cross/scoped_worker_in_and_out.almd
 4312	spec/wasm_cross/self_call_swapped_params.almd
 7916	spec/wasm_cross/set_entries_reclaim.almd
-8776	spec/wasm_cross/set_index_order.almd
+8974	spec/wasm_cross/set_index_order.almd
 10489	spec/wasm_cross/set_insertion_order.almd
 62744	spec/wasm_cross/sized_display_matrix.almd
 6920	spec/wasm_cross/sized_field_default_matrix.almd
@@ -785,7 +785,7 @@
 14978	spec/wasm_cross/string_whitespace.almd
 3955	spec/wasm_cross/tail_bang_over_declared_result_callee.almd
 1679	spec/wasm_cross/tco_let_bound_if.almd
-8563	spec/wasm_cross/tco_map_acc_seed.almd
+8629	spec/wasm_cross/tco_map_acc_seed.almd
 1654	spec/wasm_cross/tco_multi_concat.almd
 1902	spec/wasm_cross/tco_nested_list_accumulator.almd
 2602	spec/wasm_cross/tco_over_match_result.almd
