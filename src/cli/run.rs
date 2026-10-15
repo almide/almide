@@ -130,12 +130,9 @@ pub(crate) fn build_native_cached(
     // And what shapes the binary from OUTSIDE the crate (#3091): the build
     // recipe, the toolchain, the flags and cargo config it reads.
     let env_key = super::crate_inputs::build_environment_key(&project_dir);
-    // The release CPU tuning (#3604): a `--target-cpu portable` build of the
-    // same code is a different binary from the default `native` one.
-    let cpu = release.then(super::native_target::release_target_cpu).flatten().unwrap_or_default();
     let hash_input = format!(
-        "{}:test={}:release={}:deps={}:root={:?}:native={}:target={}:cpu={}:env={}",
-        &rs_code, use_test_harness, release, dep_key, source_root, native_key, triple, cpu, env_key
+        "{}:test={}:release={}:deps={}:root={:?}:native={}:target={}:env={}",
+        &rs_code, use_test_harness, release, dep_key, source_root, native_key, triple, env_key
     );
     let code_hash = format!("{:016x}", hash64(hash_input.as_bytes()));
     let profile_dir = if release { "release" } else { "debug" };

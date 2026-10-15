@@ -13,8 +13,6 @@ pub struct BuildArgs<'a> {
     pub target: Option<&'a str>,
     pub release: bool,
     pub fast: bool,
-    /// `--target-cpu` (#3604): the CPU a native `--release` build is tuned for.
-    pub target_cpu: Option<&'a str>,
     pub unchecked_index: bool,
     pub no_check: bool,
     pub repr_c: bool,
@@ -197,17 +195,13 @@ pub fn cmd_build(args: BuildArgs) {
     // Destructured immediately so the function body below is untouched
     // (verbatim) — this is purely a call-site params bundling.
     let BuildArgs {
-        file, output, target, release, fast, target_cpu, unchecked_index: _unchecked_index,
+        file, output, target, release, fast, unchecked_index: _unchecked_index,
         no_check, repr_c, cdylib, emit_unverified, verified, native_verified, wasm_opt, component, heap_cap, host, debug,
     } = args;
     reject_removed_target(target);
     let is_wasm = matches!(target, Some("wasm" | "wasm32" | "wasi"));
     let is_wasm_direct = matches!(target, Some("wasm"));
     let heap_cap = heap_cap.filter(|n| *n > 0);
-    if is_wasm && target_cpu.is_some() {
-        err("error: --target-cpu tunes a native --release build; a wasm module is CPU-independent");
-        std::process::exit(2);
-    }
 
     // Direct WASM emit: .almd → IR → WASM binary (no rustc)
     if is_wasm_direct {
@@ -238,21 +232,13 @@ pub fn cmd_build(args: BuildArgs) {
     let _cross = (!is_wasm).then(|| {
         let env_target = std::env::var("CARGO_BUILD_TARGET").ok();
         match super::native_target::resolve_native_target(target, env_target.as_deref(), std::env::consts::ARCH) {
-            Ok(triple) => {
-                if let Err(e) = super::native_target::validate_target_cpu(target_cpu, triple.as_deref()) {
-                    err(&e);
-                    std::process::exit(2);
-                }
-                super::native_target::CrossTargetGuard::set(triple)
-            }
+            Ok(triple) => super::native_target::CrossTargetGuard::set(triple),
             Err(e) => {
                 err(&e);
                 std::process::exit(2);
             }
         }
     });
-    // #3604: scoped like the triple; read by every native release build path.
-    let _cpu = super::native_target::TargetCpuGuard::set(target_cpu.map(str::to_string));
 
     let requested_output = output;
     let output = compute_output_path(file, output, is_wasm);
