@@ -34,6 +34,11 @@ impl Parser {
                 else_: Box::new(else_),
             }));
         }
+        self.parse_if_rest(span)
+    }
+
+    /// The condition, the branches and the `else` chain after `if`.
+    fn parse_if_rest(&mut self, span: Option<crate::ast::Span>) -> Result<Expr, String> {
         let cond = self.parse_expr()?;
         self.skip_newlines();
         // `if (c) { a } else { b }` (C / Rust / JS): one error naming `then`,
@@ -56,12 +61,31 @@ impl Parser {
             self.advance();
             self.skip_newlines();
             self.parse_if_branch()?
+        } else if let Some(kw) = self.elif_keyword() {
+            // `elif` / `elsif` / `elseif` (Python / Ruby / PHP): one error
+            // naming `else if`, and the chain goes on as the `else if` it
+            // means — stopping here lost the parse and the fn's type with it.
+            let diag = self.diag_error(
+                format!("'{kw}' is not Almide: use 'else if'"),
+                "Almide chains conditions with `else if`; for many cases a `match` reads better.",
+                "if",
+            ).with_try("if x > 0 then 1 else if x < 0 then 2 else 3");
+            self.errors.push(diag);
+            let elif_span = Some(self.current_span());
+            self.advance();
+            self.skip_newlines();
+            self.parse_if_rest(elif_span)?
         } else {
             Expr::new(self.next_id(), span.clone(), ExprKind::Unit)
         };
         Ok(Expr::new(self.next_id(), span, ExprKind::If {
             cond: Box::new(cond), then: Box::new(then), else_: Box::new(else_),
         }))
+    }
+
+    fn elif_keyword(&self) -> Option<&'static str> {
+        if !self.check(TokenType::Ident) { return None; }
+        ["elif", "elsif", "elseif"].into_iter().find(|k| self.current().value == *k)
     }
 
     fn parse_if_branch(&mut self) -> Result<Expr, String> {
