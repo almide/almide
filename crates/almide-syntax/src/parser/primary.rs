@@ -25,6 +25,9 @@ impl Parser {
         if let Some(r) = self.parse_primary_grouping() {
             return r;
         }
+        if let Some(r) = self.parse_primary_return(&tok) {
+            return r;
+        }
         // Check hint system for rejected operators/keywords
         if let Some(result) = self.check_hint(None, super::hints::HintScope::Expression) {
             let msg = result.message.unwrap_or_else(|| format!("'{}' is not valid here", tok.value));
@@ -37,6 +40,33 @@ impl Parser {
         }
 
         self.parse_primary_error(&tok)
+    }
+
+    /// `return EXPR`: Almide has no `return` (the last expression is the
+    /// value), so it is an error — reported ONCE, with the hint, and the parse
+    /// continues with EXPR as the value it was meant to be. Stopping here
+    /// dropped the rest of the statement: a tail `return x + 1` also reported
+    /// `expected Int but got Unit`, and one inside a loop lost the parser's
+    /// place (`Expected top-level declaration`), three errors for one mistake.
+    /// A bare `return` (nothing after it on the line) keeps the plain error.
+    fn parse_primary_return(&mut self, tok: &crate::lexer::Token) -> Option<Result<Expr, String>> {
+        if tok.token_type != TokenType::Ident || tok.value != "return" {
+            return None;
+        }
+        let next = self.tokens.get(self.pos + 1)?;
+        let ends = matches!(
+            next.token_type,
+            TokenType::Newline | TokenType::RBrace | TokenType::RParen | TokenType::RBracket | TokenType::Comma | TokenType::EOF
+        );
+        if ends || next.line != tok.line {
+            return None;
+        }
+        let hint = self.check_hint(None, super::hints::HintScope::Expression)?;
+        let msg = hint.message.unwrap_or_else(|| "'return' is not needed in Almide".to_string());
+        let diag = self.diag_error(msg, hint.hint, "return-keyword");
+        self.errors.push(diag);
+        self.advance();
+        Some(self.parse_expr())
     }
 
     /// Literal tokens: one token in, one leaf node out.
