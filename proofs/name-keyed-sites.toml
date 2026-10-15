@@ -1164,3 +1164,9 @@ id = "crates/almide-ir/src/meter_plan.rs::INLINED_CALLBACK_MODULES::table"
 class = "justified"
 names = 7
 why = "The legacy eta.rs HOF_MODULES list, moved (#3673), not a new property: which stdlib modules the wasm emitter lowers with an inline-callback arm is a fact about that emitter, not about the functions, and the native codegen's meter must charge a hop exactly where that emitter does. One list both legs read replaces the copy a second leg would need."
+
+[[site]]
+id = "crates/almide-syntax/src/parser/types.rs::FOREIGN_BUILTIN_TYPES::table"
+class = "justified"
+names = 5
+why = "A syntax table, not a property of stdlib functions: the C / Rust / Python / TS spellings of the builtin types (`int`, `string`, `bool`, `f64`, …) and the Almide type each means, read only by the parser's one-error recovery. The names that collide with stdlib module names (`int`, `float`, `string`, `bool`, `str`) are type spellings here, not calls; no leg reads the table."
