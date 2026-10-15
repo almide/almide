@@ -478,7 +478,7 @@
 65840	spec/wasm_cross/map_fold_heap_accumulator.almd
 66464	spec/wasm_cross/map_get_fallback_key_and_lazy.almd
 81216	spec/wasm_cross/map_index_order.almd
-87248	spec/wasm_cross/map_index_released_with_block.almd
+83920	spec/wasm_cross/map_index_released_with_block.almd
 66560	spec/wasm_cross/map_index_string_key_shapes.almd
 73440	spec/wasm_cross/map_insertion_order.almd
 69232	spec/wasm_cross/map_interp_string_value.almd
@@ -671,7 +671,7 @@
 65648	spec/wasm_cross/range_first_class.almd
 65760	spec/wasm_cross/range_inclusive_end_at_max.almd
 65856	spec/wasm_cross/range_materialize_oom.almd
-88544	spec/wasm_cross/rc_alloc_stress.almd
+88288	spec/wasm_cross/rc_alloc_stress.almd
 65808	spec/wasm_cross/rc_reclaim_churn.almd
 66144	spec/wasm_cross/record_default_field_omitted.almd
 71600	spec/wasm_cross/record_field_rust_keyword.almd
@@ -738,7 +738,7 @@
 66240	spec/wasm_cross/scoped_worker_in_and_out.almd
 66512	spec/wasm_cross/self_call_swapped_params.almd
 66608	spec/wasm_cross/set_entries_reclaim.almd
-77504	spec/wasm_cross/set_index_order.almd
+77472	spec/wasm_cross/set_index_order.almd
 66864	spec/wasm_cross/set_insertion_order.almd
 74768	spec/wasm_cross/sized_display_matrix.almd
 67504	spec/wasm_cross/sized_field_default_matrix.almd
