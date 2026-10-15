@@ -96,20 +96,12 @@ pub(crate) enum Commands {
         /// Without it, an inherited CARGO_BUILD_TARGET is honoured.
         #[arg(long)]
         target: Option<String>,
-        /// Optimize for performance: opt-level=3, fat LTO, one codegen unit,
-        /// tuned for THIS machine's CPU (see --target-cpu)
+        /// Optimize for performance (opt-level=2)
         #[arg(long)]
         release: bool,
-        /// Same as --release (kept for compatibility)
+        /// Maximum performance: native CPU, fast-math, opt-level=3, LTO
         #[arg(long)]
         fast: bool,
-        /// The CPU a native --release build is tuned for (#3604). Default:
-        /// `native` (this machine) for a host build, rustc's generic baseline
-        /// for a cross --target. `portable` = the generic baseline, for a
-        /// binary that ships to other machines; any other value is a rustc
-        /// CPU name (`x86-64-v3`, `neoverse-n1`, ...).
-        #[arg(long = "target-cpu")]
-        target_cpu: Option<String>,
         /// Use unchecked index access (unsafe, no bounds checking)
         #[arg(long)]
         unchecked_index: bool,
