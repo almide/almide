@@ -13,9 +13,13 @@
 //! goes parallel — capped by the available parallelism and
 //! `ALMIDE_FAN_THREADS`; when a parallel offer would cost more than it
 //! saves, one worker runs the whole map on the calling thread. Parallel
-//! elements are dealt dynamically (each worker takes the next unclaimed
-//! index), so a worker slowed by a busy core does less of the work instead
-//! of holding the offer back.
+//! elements are dealt dynamically in BLOCKS of consecutive indices (about
+//! four per worker), so a worker slowed by a busy core does less of the work
+//! instead of holding the offer back. A block is ONE call into the worker:
+//! its elements are built there as a sub-list and the site maps over it
+//! (#3331) — a call per element made every worker take wasmtime's
+//! engine-wide type lock (`Func::call` → `load_ty`), and the workers
+//! serialized on it (1.56 µs per element on one worker, 4.99 µs on eight).
 //!
 //! **The reset invariant.** A pooled worker carries ONLY its heap from one
 //! chunk to the next — the allocator state and whatever blocks earlier
@@ -135,13 +139,24 @@ struct Worker {
     memory: wasmtime::Memory,
 }
 
-/// The parsed request.
+/// The block-form request's first slot (crates/almide-wasm `FAN_MAGIC`).
+const FAN_MAGIC: i64 = 0x4641_4e32;
+
+/// The parsed request (`crates/almide-wasm/src/fan_par_lower.rs` documents
+/// the layout).
 struct Request {
     site: String,
+    /// The element count, and each element's width in the list payload.
+    n: usize,
+    estride: usize,
+    /// The result element's kind (3 = a tuple pointer) and width.
+    rkind: i64,
+    rstride: usize,
     /// `(kind, absolute offset)` per tuple field; empty = a scalar result.
     fields: Vec<(i64, u32)>,
     caps: Vec<i64>,
-    elems: Vec<i64>,
+    /// The list's payload: `n × estride` bytes.
+    elems: Vec<u8>,
     /// #3331: `(capture index, payload bytes)` of every list capture — each
     /// worker gets its own copy, and the capture's argument is that copy.
     lists: Vec<(usize, Vec<u8>)>,
@@ -149,36 +164,36 @@ struct Request {
 
 fn parse(a: &[u8]) -> Option<Request> {
     let slot = |j: usize| -> Option<i64> { Some(i64::from_le_bytes(a.get(8 * j..8 * j + 8)?.try_into().ok()?)) };
-    let (k, n, m, r) = (slot(0)?, usize::try_from(slot(1)?).ok()?, usize::try_from(slot(2)?).ok()?, usize::try_from(slot(3)?).ok()?);
-    let base = 8 * (4 + 2 * r + m + n);
-    if a.len() < base {
+    let size = |j: usize| -> Option<usize> { usize::try_from(slot(j)?).ok() };
+    if slot(0)? != FAN_MAGIC {
         return None;
     }
-    let fields = (0..r).map(|j| Some((slot(4 + 2 * j)?, u32::try_from(slot(5 + 2 * j)?).ok()?))).collect::<Option<Vec<_>>>()?;
-    let caps = (0..m).map(|j| slot(4 + 2 * r + j)).collect::<Option<Vec<_>>>()?;
-    let elems = (0..n).map(|j| slot(4 + 2 * r + m + j)).collect::<Option<Vec<_>>>()?;
-    let lists = if a.len() == base { Vec::new() } else { parse_tail(a, base, &caps)? };
-    Some(Request { site: format!("__fan_site_{k}"), fields, caps, elems, lists })
-}
-
-/// The tail after the elements (`fan_par_lower.rs`): one kind per capture,
-/// then each list's payload padded to 8. It must account for every byte.
-fn parse_tail(a: &[u8], base: usize, caps: &[i64]) -> Option<Vec<(usize, Vec<u8>)>> {
-    let mut at = base + 8 * caps.len();
+    let (k, n, m, r) = (slot(1)?, size(2)?, size(3)?, size(4)?);
+    let (estride, rkind, rstride) = (size(6)?, slot(7)?, size(8)?);
+    if !matches!(estride, 4 | 8) || !matches!((rkind, rstride), (0 | 1, 8) | (2 | 3, 4)) || (rkind == 3) != (r > 0) {
+        return None;
+    }
+    let fields = (0..r).map(|j| Some((slot(9 + 2 * j)?, u32::try_from(slot(10 + 2 * j)?).ok()?))).collect::<Option<Vec<_>>>()?;
+    let pairs = (0..m).map(|j| Some((slot(9 + 2 * r + 2 * j)?, slot(10 + 2 * r + 2 * j)?))).collect::<Option<Vec<_>>>()?;
+    // the blobs: the list's payload, then every list capture's, each padded to 8
+    let mut at = 8 * (9 + 2 * r + 2 * m);
+    let mut blob = |len: usize| -> Option<Vec<u8>> {
+        let bytes = a.get(at..at + len)?.to_vec();
+        at += len.div_ceil(8) * 8;
+        Some(bytes)
+    };
+    let elems = blob(n.checked_mul(estride)?)?;
+    let mut caps = Vec::with_capacity(m);
     let mut lists = Vec::new();
-    for (j, &cap) in caps.iter().enumerate() {
-        let kind = i64::from_le_bytes(a.get(base + 8 * j..base + 8 * j + 8)?.try_into().ok()?);
+    for (j, (kind, cap)) in pairs.into_iter().enumerate() {
         match kind {
             0 => {}
-            1 => {
-                let len = usize::try_from(cap).ok()?;
-                lists.push((j, a.get(at..at + len)?.to_vec()));
-                at += len.div_ceil(8) * 8;
-            }
+            1 => lists.push((j, blob(usize::try_from(cap).ok()?)?)),
             _ => return None,
         }
+        caps.push(cap);
     }
-    (at == a.len() && !lists.is_empty()).then_some(lists)
+    (at == a.len()).then_some(Request { site: format!("__fan_site_{k}"), n, estride, rkind, rstride, fields, caps, elems, lists })
 }
 
 /// Serve the offer: 1 = the answer room holds every element's result.
@@ -193,7 +208,7 @@ pub(super) fn serve(
     mem.read(&*caller, a_ptr as u32 as usize, &mut a)?;
     let Some(req) = parse(&a) else { return Ok(0) };
     let width = req.fields.len().max(1);
-    if b_len as u32 as usize != 8 * width * req.elems.len() {
+    if b_len as u32 as usize != 8 * width * req.n {
         return Ok(0);
     }
     let Some((results, workers)) = run_all(&ctx, &req) else {
@@ -204,9 +219,9 @@ pub(super) fn serve(
     };
     if almide_base::env::flag("ALMIDE_DBG_FAN") {
         if workers >= 2 {
-            eprintln!("[fan-dbg] {}: served on separate instances ({} elements, {workers} workers)", req.site, req.elems.len());
+            eprintln!("[fan-dbg] {}: served on separate instances ({} elements, {workers} workers)", req.site, req.n);
         } else {
-            eprintln!("[fan-dbg] {}: served on one instance, the cost model kept it sequential ({} elements)", req.site, req.elems.len());
+            eprintln!("[fan-dbg] {}: served on one instance, the cost model kept it sequential ({} elements)", req.site, req.n);
         }
     }
     let mut b = Vec::with_capacity(b_len as u32 as usize);
@@ -229,7 +244,7 @@ fn worker_count(n: usize) -> usize {
 /// Every element's result slots, element-major, and the worker count — `None`
 /// if any chunk failed.
 fn run_all(ctx: &ParCtx, req: &Request) -> Option<(Vec<i64>, usize)> {
-    let n = req.elems.len();
+    let n = req.n;
     let width = req.fields.len().max(1);
     let mut out = vec![0i64; n * width];
     if n == 0 {
@@ -240,7 +255,9 @@ fn run_all(ctx: &ParCtx, req: &Request) -> Option<(Vec<i64>, usize)> {
     let next = AtomicUsize::new(0);
     let failed = AtomicBool::new(false);
     let (warm, cold) = ([AtomicU64::new(0), AtomicU64::new(0)], [AtomicU64::new(0), AtomicU64::new(0)]);
-    let deal = Deal { ctx, req, next: &next, failed: &failed, warm: &warm, cold: &cold };
+    // a few blocks per worker, so a worker slowed by a busy core does less
+    let block = if workers < 2 { n } else { n.div_ceil(workers * 4).max(1) };
+    let deal = Deal { ctx, req, block, next: &next, failed: &failed, warm: &warm, cold: &cold };
     let mut taken = take(ctx, workers);
     let parts: Vec<Option<(Worker, Vec<(usize, Vec<i64>)>)>> = if workers < 2 {
         vec![deal.run(taken.pop())]
@@ -304,15 +321,17 @@ fn reusable(w: &Worker) -> bool {
     !exited && quiet(&h.out) && quiet(&h.err) && w.memory.data_size(&w.store) <= RESET_BYTES
 }
 
-/// The shared state of one offer: elements are dealt by index.
+/// The shared state of one offer: elements are dealt in blocks of `block`
+/// consecutive indices.
 struct Deal<'a> {
     ctx: &'a ParCtx,
     req: &'a Request,
+    block: usize,
     next: &'a AtomicUsize,
     failed: &'a AtomicBool,
     /// `[ns, count]` of the elements' compute (thread CPU time), split as
     /// the native runtime's `AlmideFanClock` splits it: a worker's FIRST
-    /// element is its warm-up (a fresh thread's and instance's first call —
+    /// block is its warm-up (a fresh thread's and instance's first call —
     /// that cost belongs to the offer's `WORKER` term, not to `t`) and goes
     /// to `cold`; the rest go to `warm`.
     warm: &'a [AtomicU64; 2],
@@ -321,16 +340,16 @@ struct Deal<'a> {
 
 impl Deal<'_> {
     /// One thread: its worker (pooled, or instantiated now) takes the next
-    /// unclaimed element until none is left or another chunk failed.
+    /// unclaimed block until none is left or another block failed.
     fn run(&self, pooled: Option<Worker>) -> Option<(Worker, Vec<(usize, Vec<i64>)>)> {
         let got = match pooled {
             Some(w) => Some(w),
             None => instantiate(self.ctx).ok(),
         }
         .and_then(|mut w| {
-            let (func, params) = self.arm(&mut w)?;
+            let func = self.arm(&mut w)?;
             let caps = self.place_lists(&mut w)?;
-            self.drain(w, func, &params, &caps)
+            self.drain(w, func, &caps)
         });
         if got.is_none() {
             self.failed.store(true, Ordering::SeqCst);
@@ -338,10 +357,10 @@ impl Deal<'_> {
         got
     }
 
-    /// Ready a worker for this offer: its deadline, the site's export and
-    /// its parameter types — `None` when the watchdog already fired or the
-    /// export does not have the offer's shape.
-    fn arm(&self, w: &mut Worker) -> Option<(wasmtime::Func, Vec<wasmtime::ValType>)> {
+    /// Ready a worker for this offer: its deadline and the site's export —
+    /// `None` when the watchdog already fired or the export does not have
+    /// the offer's shape (the list, then the captures; one list back).
+    fn arm(&self, w: &mut Worker) -> Option<wasmtime::Func> {
         if let Some(t) = &self.ctx.ticked {
             // deadline first, then the check: a tick after the check still
             // lands on this deadline
@@ -352,93 +371,107 @@ impl Deal<'_> {
         }
         let func = w.instance.get_func(&mut w.store, &self.req.site)?;
         let ty = func.ty(&w.store);
-        let params: Vec<wasmtime::ValType> = ty.params().collect();
-        (params.len() == 1 + self.req.caps.len() && ty.results().len() == 1).then_some((func, params))
+        let shape = ty.params().len() == 1 + self.req.caps.len()
+            && ty.params().next().is_some_and(|p| matches!(p, wasmtime::ValType::I32))
+            && matches!(ty.results().collect::<Vec<_>>().as_slice(), [wasmtime::ValType::I32]);
+        shape.then_some(func)
+    }
+
+    /// A list block in the worker's memory holding `bytes` as its payload,
+    /// allocated by the module's exported allocator, with its rc set to
+    /// [`PINNED_RC`] so no release frees it and any write copies it first.
+    /// It is never freed: the reset invariant's memory bound drops a worker
+    /// whose heap these grew.
+    fn place(w: &mut Worker, alloc: &wasmtime::TypedFunc<i32, i32>, bytes: &[u8]) -> Option<i32> {
+        let block = alloc.call(&mut w.store, i32::try_from(bytes.len()).ok()?).ok()?;
+        let at = block as u32 as usize;
+        let data = w.memory.data_mut(&mut w.store);
+        let payload = at + almide_layout::PAYLOAD as usize;
+        data.get_mut(payload..payload + bytes.len())?.copy_from_slice(bytes);
+        let rc = at + almide_layout::RC.offset as usize;
+        data.get_mut(rc..rc + 4)?.copy_from_slice(&PINNED_RC.to_le_bytes());
+        Some(block)
+    }
+
+    fn alloc(w: &mut Worker) -> Option<wasmtime::TypedFunc<i32, i32>> {
+        w.instance.get_typed_func::<i32, i32>(&mut w.store, "__alloc").ok()
     }
 
     /// This worker's capture arguments: the request's, with every list
-    /// capture (#3331) replaced by a block built in the worker's own memory —
-    /// allocated by the module's exported allocator, the payload copied in,
-    /// and its rc set to [`PINNED_RC`] so no chunk's release ever frees it
-    /// and any write to it copies first. It is never freed: the reset
-    /// invariant's memory bound drops a worker whose heap these grew.
+    /// capture (#3331) replaced by its block in the worker — built once per
+    /// offer, read by every block of elements.
     fn place_lists(&self, w: &mut Worker) -> Option<Vec<i64>> {
         let mut caps = self.req.caps.clone();
         if self.req.lists.is_empty() {
             return Some(caps);
         }
-        let alloc = w.instance.get_typed_func::<i32, i32>(&mut w.store, "__alloc").ok()?;
+        let alloc = Self::alloc(w)?;
         for (j, bytes) in &self.req.lists {
-            let block = alloc.call(&mut w.store, i32::try_from(bytes.len()).ok()?).ok()? as u32 as usize;
-            let data = w.memory.data_mut(&mut w.store);
-            let payload = block + almide_layout::PAYLOAD as usize;
-            data.get_mut(payload..payload + bytes.len())?.copy_from_slice(bytes);
-            let rc = block + almide_layout::RC.offset as usize;
-            data.get_mut(rc..rc + 4)?.copy_from_slice(&PINNED_RC.to_le_bytes());
-            caps[*j] = block as i64;
+            caps[*j] = i64::from(Self::place(w, &alloc, bytes)? as u32);
         }
         Some(caps)
     }
 
-    /// Element `i` on worker `w`: its result slots, read out before the
-    /// worker's next chunk allocates.
-    fn one(&self, w: &mut Worker, (func, params): (wasmtime::Func, &[wasmtime::ValType]), caps: &[i64], i: usize) -> Option<Vec<i64>> {
-        let bits = std::iter::once(self.req.elems[i]).chain(caps.iter().copied());
-        let args: Vec<wasmtime::Val> = params.iter().zip(bits).map(|(p, b)| to_val(p, b)).collect();
+    /// Elements `lo..hi` on worker `w` in ONE call: their sub-list built in
+    /// the worker, the site mapped over it, and each result's slots read
+    /// out of the returned list before the worker's next block allocates.
+    fn block_call(&self, w: &mut Worker, func: wasmtime::Func, caps: &[i64], (lo, hi): (usize, usize)) -> Option<Vec<Vec<i64>>> {
+        let alloc = Self::alloc(w)?;
+        let xs = Self::place(w, &alloc, self.req.elems.get(lo * self.req.estride..hi * self.req.estride)?)?;
+        let ty = func.ty(&w.store);
+        let args: Vec<wasmtime::Val> =
+            std::iter::once(wasmtime::Val::I32(xs)).chain(ty.params().skip(1).zip(caps).map(|(p, &b)| to_val(&p, b))).collect();
         let mut ret = [wasmtime::Val::I32(0)];
         func.call(&mut w.store, &args, &mut ret).ok()?;
         if w.store.data().exit.lock().map_or(true, |e| e.is_some()) {
             return None;
         }
-        self.read_result(w, &ret[0])
+        let list = ret[0].i32()? as u32 as usize;
+        let data = w.memory.data(&w.store);
+        let word = |at: usize| -> Option<u32> { Some(u32::from_le_bytes(data.get(at..at + 4)?.try_into().ok()?)) };
+        let len = word(list + almide_layout::LEN.offset as usize)? as usize;
+        if len != (hi - lo) * self.req.rstride {
+            return None;
+        }
+        let payload = list + almide_layout::PAYLOAD as usize;
+        (0..hi - lo).map(|e| self.read_result(data, payload + e * self.req.rstride)).collect()
     }
 
-    /// Take unclaimed elements on `w` until none is left (or a chunk failed).
-    fn drain(&self, mut w: Worker, func: wasmtime::Func, params: &[wasmtime::ValType], caps: &[i64]) -> Option<(Worker, Vec<(usize, Vec<i64>)>)> {
+    /// Take unclaimed blocks on `w` until none is left (or a block failed).
+    fn drain(&self, mut w: Worker, func: wasmtime::Func, caps: &[i64]) -> Option<(Worker, Vec<(usize, Vec<i64>)>)> {
         let mut done = Vec::new();
-        let mut t0 = cpu_ns();
+        let mut first = true;
         loop {
             if self.failed.load(Ordering::SeqCst) {
                 return None;
             }
-            let i = self.next.fetch_add(1, Ordering::SeqCst);
-            if i >= self.req.elems.len() {
+            let lo = self.next.fetch_add(self.block, Ordering::SeqCst);
+            if lo >= self.req.n {
                 break;
             }
-            let vals = self.one(&mut w, (func, params), caps, i)?;
-            done.push((i, vals));
-            if done.len() == 1 {
-                let t1 = cpu_ns();
-                add(self.cold, t1.wrapping_sub(t0), 1);
-                t0 = t1;
-            }
-        }
-        if done.len() > 1 {
-            add(self.warm, cpu_ns().wrapping_sub(t0), done.len() as u64 - 1);
+            let hi = (lo + self.block).min(self.req.n);
+            let t0 = cpu_ns();
+            let vals = self.block_call(&mut w, func, caps, (lo, hi))?;
+            add(if first { self.cold } else { self.warm }, cpu_ns().wrapping_sub(t0), (hi - lo) as u64);
+            first = false;
+            done.extend((lo..hi).zip(vals));
         }
         Some((w, done))
     }
 
-    /// The element's result slots: the scalar itself, or the tuple's fields
-    /// read out of the worker's memory now — before its next chunk allocates.
-    fn read_result(&self, w: &Worker, ret: &wasmtime::Val) -> Option<Vec<i64>> {
-        if self.req.fields.is_empty() {
-            return from_val(ret).map(|v| vec![v]);
+    /// One result element's slots, from its slot in the returned list: the
+    /// scalar itself, or the tuple's fields read through its pointer.
+    fn read_result(&self, data: &[u8], at: usize) -> Option<Vec<i64>> {
+        let word = |at: usize| -> Option<i64> { Some(i64::from(u32::from_le_bytes(data.get(at..at + 4)?.try_into().ok()?))) };
+        let dword = |at: usize| -> Option<i64> { Some(i64::from_le_bytes(data.get(at..at + 8)?.try_into().ok()?)) };
+        match self.req.rkind {
+            0 | 1 => Some(vec![dword(at)?]),
+            2 => Some(vec![word(at)?]),
+            _ => {
+                let base = word(at)? as usize;
+                self.req.fields.iter().map(|&(kind, off)| if kind == 2 { word(base + off as usize) } else { dword(base + off as usize) }).collect()
+            }
         }
-        let base = ret.i32()? as u32 as usize;
-        let data = w.memory.data(&w.store);
-        self.req
-            .fields
-            .iter()
-            .map(|&(kind, off)| {
-                let at = base + off as usize;
-                if kind == 2 {
-                    Some(i64::from(u32::from_le_bytes(data.get(at..at + 4)?.try_into().ok()?)))
-                } else {
-                    Some(i64::from_le_bytes(data.get(at..at + 8)?.try_into().ok()?))
-                }
-            })
-            .collect()
     }
 }
 
@@ -484,15 +517,6 @@ fn to_val(ty: &wasmtime::ValType, bits: i64) -> wasmtime::Val {
     }
 }
 
-fn from_val(v: &wasmtime::Val) -> Option<i64> {
-    match v {
-        wasmtime::Val::I64(x) => Some(*x),
-        wasmtime::Val::F64(x) => Some(*x as i64),
-        wasmtime::Val::I32(x) => Some(i64::from(*x as u32)),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -501,40 +525,36 @@ mod tests {
         v.iter().flat_map(|x| x.to_le_bytes()).collect()
     }
 
-    /// `[K, n, m, r, cap × m, elem × n]`, then the tail when given.
-    fn request(caps: &[i64], elems: &[i64], tail: &[u8]) -> Vec<u8> {
-        let mut a = slots(&[7, elems.len() as i64, caps.len() as i64, 0]);
-        a.extend(slots(caps));
-        a.extend(slots(elems));
-        a.extend_from_slice(tail);
+    /// A block-form request over Int elements with a Float result:
+    /// `[MAGIC, K, n, m, r=0, ekind, estride, rkind, rstride, (capkind, cap) × m]`
+    /// then the blobs given.
+    fn request(n: i64, caps: &[(i64, i64)], blobs: &[u8]) -> Vec<u8> {
+        let mut a = slots(&[FAN_MAGIC, 7, n, caps.len() as i64, 0, 0, 8, 1, 8]);
+        for &(k, c) in caps {
+            a.extend(slots(&[k, c]));
+        }
+        a.extend_from_slice(blobs);
         a
     }
 
     #[test]
-    fn a_scalar_request_has_no_tail() {
-        let req = parse(&request(&[5], &[1, 2], &[])).expect("parses");
-        assert_eq!((req.site.as_str(), req.caps, req.elems), ("__fan_site_7", vec![5], vec![1, 2]));
-        assert!(req.lists.is_empty());
-    }
-
-    #[test]
-    fn a_list_capture_rides_in_the_tail_padded_to_8() {
-        // capture 0 a scalar, capture 1 a 12-byte list (padded to 16)
-        let mut tail = slots(&[0, 1]);
-        tail.extend((1..=12).collect::<Vec<u8>>());
-        tail.extend([0u8; 4]);
-        let req = parse(&request(&[9, 12], &[3], &tail)).expect("parses");
+    fn the_elements_and_a_list_capture_ride_as_blobs_padded_to_8() {
+        let mut blobs = slots(&[10, 20]); // the two elements' payload
+        blobs.extend((1..=12).collect::<Vec<u8>>()); // capture 1: a 12-byte list
+        blobs.extend([0u8; 4]);
+        let req = parse(&request(2, &[(0, 9), (1, 12)], &blobs)).expect("parses");
+        assert_eq!((req.site.as_str(), req.n, req.caps.clone()), ("__fan_site_7", 2, vec![9, 12]));
+        assert_eq!(req.elems, slots(&[10, 20]));
         assert_eq!(req.lists, vec![(1, (1..=12).collect::<Vec<u8>>())]);
     }
 
     #[test]
-    fn a_tail_that_does_not_account_for_every_byte_is_not_served() {
-        let short = parse(&request(&[12], &[3], &slots(&[1]))); // kind says 12 bytes, none follow
-        assert!(short.is_none());
-        let mut extra = slots(&[1]);
-        extra.extend([0u8; 24]); // 12 bytes padded to 16, plus 8 more
-        assert!(parse(&request(&[12], &[3], &extra)).is_none());
-        assert!(parse(&request(&[12], &[3], &slots(&[2]))).is_none(), "unknown kind");
-        assert!(parse(&request(&[4], &[3], &slots(&[0]))).is_none(), "a tail with no list is malformed");
+    fn a_request_that_does_not_account_for_every_byte_is_not_served() {
+        assert!(parse(&request(2, &[], &slots(&[10]))).is_none(), "short elements");
+        assert!(parse(&request(2, &[], &slots(&[10, 20, 30]))).is_none(), "extra bytes");
+        assert!(parse(&request(1, &[(2, 0)], &slots(&[10]))).is_none(), "unknown capture kind");
+        let mut stale = request(1, &[], &slots(&[10]));
+        stale[0..8].copy_from_slice(&3i64.to_le_bytes());
+        assert!(parse(&stale).is_none(), "the per-element form (no magic)");
     }
 }

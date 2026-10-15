@@ -5,16 +5,20 @@
 //!
 //! ```text
 //! { let __fan_xs = xs
-//!   fan.__par_K(__fan_xs, list.map(__fan_xs, (x2) => __fan_site_K(x2, c…)), c…) }
+//!   fan.__par_K(__fan_xs, __fan_site_K(__fan_xs, c…), c…) }
 //! ```
 //!
-//! and `fn __fan_site_K(x, c…) -> R = body` (the lambda body, its captures
-//! turned into fresh params) joins the same container. The emitter
+//! and `fn __fan_site_K(xs, c…) -> List[R] = list.map(xs, (x) => body)` (the
+//! lambda, its captures turned into fresh params) joins the same container.
+//! The site maps a whole LIST (#3331): the host hands each worker a BLOCK of
+//! elements as a sub-list and makes one call per block — a call per element
+//! serialized the workers on wasmtime's per-call type check. The emitter
 //! (`fan_par_lower.rs`) exports every `__fan_site_K` and lowers `__par_K` as
-//! one host op: a host that can run the chunks on separate instances
+//! one host op: a host that can run the blocks on separate instances
 //! (the embedded host) fills the results; any other answers "not served"
-//! and the second argument — the plain sequential `list.map` — runs, so
-//! every other host and artifact form behaves exactly as before.
+//! and the second argument — the site over the whole list, in this
+//! instance — runs, so every other host and artifact form observes exactly
+//! what the plain `list.map` did.
 //!
 //! Qualification (all must hold, else the arm is left as it was):
 //! - one lambda param of scalar type (Int / Float / Bool);
@@ -122,14 +126,12 @@ pub(crate) fn site_exports(
         .collect()
 }
 
-/// Whether a reached chunk takes a list capture: the host then builds the
-/// list in each worker through the module's own allocator, exported as
-/// [`crate::host_exports::ALLOC_EXPORT`]. A scalar-only program keeps its
-/// export section as it was.
+/// Whether a chunk site is reached: the host then builds each worker's
+/// block of elements (and any list capture) in the worker through the
+/// module's own allocator, exported as [`crate::host_exports::ALLOC_EXPORT`].
+/// A program without a site keeps its export section as it was.
 pub(crate) fn needs_alloc_export(program_fns: &[(&IrFunction, Option<String>, u32)], visited: &HashSet<usize>) -> bool {
-    program_fns.iter().enumerate().any(|(i, (f, _, _))| {
-        f.name.as_str().starts_with(SITE_PREFIX) && visited.contains(&i) && f.params.iter().any(|p| scalar_list(&p.ty))
-    })
+    program_fns.iter().enumerate().any(|(i, (f, _, _))| f.name.as_str().starts_with(SITE_PREFIX) && visited.contains(&i))
 }
 
 fn has_fan(ir: &IrProgram) -> bool {
@@ -208,19 +210,34 @@ impl Rewriter<'_> {
         let span = arm.span;
         let mk = |kind: IrExprKind, ty: Ty| IrExpr { kind, ty, span, def_id: None };
 
-        // The site fn: the lambda param, then one fresh param per capture.
-        let mut site_body = (**body).clone();
-        let mut site_params = vec![param(*p, pty.clone(), self.vt.get(*p).name)];
+        // The site fn: the list, then one fresh param per capture; its body
+        // is the map itself, the lambda's captures read from those params.
+        let xs = &args[0];
+        let mut lambda_body = (**body).clone();
+        let site_xs = self.vt.alloc_fresh("__fan_xs", xs.ty.clone(), Mutability::Let, span);
+        let mut site_params = vec![param(site_xs, xs.ty.clone(), self.vt.get(site_xs).name)];
         for c in &caps {
             let info = self.vt.get(*c).clone();
             let pv = self.vt.alloc(info.name, info.ty.clone(), Mutability::Let, span);
-            site_body = almide_ir::substitute::substitute_var_in_expr(&site_body, *c, &mk(IrExprKind::Var { id: pv }, info.ty.clone()));
+            lambda_body = almide_ir::substitute::substitute_var_in_expr(&lambda_body, *c, &mk(IrExprKind::Var { id: pv }, info.ty.clone()));
             site_params.push(param(pv, info.ty, info.name));
         }
+        let lambda_ty = Ty::Fn { params: vec![pty.clone()], ret: Box::new(ret.clone()), is_effect: false };
+        let site_body = mk(
+            IrExprKind::Call {
+                target: CallTarget::Module { module: sym("list"), func: sym("map"), def_id: None },
+                args: vec![
+                    mk(IrExprKind::Var { id: site_xs }, xs.ty.clone()),
+                    mk(IrExprKind::Lambda { params: vec![(*p, pty.clone())], body: Box::new(lambda_body), lambda_id: None }, lambda_ty),
+                ],
+                type_args: vec![],
+            },
+            arm.ty.clone(),
+        );
         self.sites.push(IrFunction {
             name: sym(&site_name),
             params: site_params,
-            ret_ty: ret.clone(),
+            ret_ty: arm.ty.clone(),
             body: site_body,
             is_effect: false,
             is_test: false,
@@ -232,31 +249,18 @@ impl Rewriter<'_> {
             doc: None,
             blank_lines_before: 0,
             def_id: None,
-            mutated_params: Vec::new(), // fresh-fn: a synthesized pure chunk export whose params are scalars, so nothing is written back
+            mutated_params: Vec::new(), // fresh-fn: a synthesized pure chunk export; its list and captures are read, never written back
             module_origin: None,
         });
 
-        // The rewritten site.
-        let xs = &args[0];
+        // The rewritten site: the offer, and the site over the whole list as
+        // its not-served fallback.
         let xs_var = self.vt.alloc_fresh("__fan_xs", xs.ty.clone(), Mutability::Let, span);
-        let x2 = self.vt.alloc_fresh("__fan_x", pty.clone(), Mutability::Let, span);
         let cap_args: Vec<IrExpr> = caps.iter().map(|c| mk(IrExprKind::Var { id: *c }, self.vt.get(*c).ty.clone())).collect();
-        let mut site_args = vec![mk(IrExprKind::Var { id: x2 }, pty.clone())];
+        let mut site_args = vec![mk(IrExprKind::Var { id: xs_var }, xs.ty.clone())];
         site_args.extend(cap_args.iter().cloned());
-        let site_call = mk(
-            IrExprKind::Call { target: CallTarget::Named { name: sym(&site_name) }, args: site_args, type_args: vec![] },
-            ret.clone(),
-        );
-        let lambda_ty = Ty::Fn { params: vec![pty.clone()], ret: Box::new(ret.clone()), is_effect: false };
         let fallback = mk(
-            IrExprKind::Call {
-                target: CallTarget::Module { module: sym("list"), func: sym("map"), def_id: None },
-                args: vec![
-                    mk(IrExprKind::Var { id: xs_var }, xs.ty.clone()),
-                    mk(IrExprKind::Lambda { params: vec![(x2, pty.clone())], body: Box::new(site_call), lambda_id: None }, lambda_ty),
-                ],
-                type_args: vec![],
-            },
+            IrExprKind::Call { target: CallTarget::Named { name: sym(&site_name) }, args: site_args, type_args: vec![] },
             arm.ty.clone(),
         );
         let mut par_args = vec![mk(IrExprKind::Var { id: xs_var }, xs.ty.clone()), fallback];
