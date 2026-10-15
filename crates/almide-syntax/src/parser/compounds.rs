@@ -207,9 +207,12 @@ impl Parser {
     /// are one error each, and the arm goes on as `=>` — stopping here lost
     /// the parse and failed the fn's type too.
     fn expect_arm_arrow(&mut self) -> Result<(), String> {
+        // `head :: tail` (a Haskell / OCaml cons pattern) is its own hint,
+        // not an arm arrow.
+        let cons = self.peek_at(1).is_some_and(|t| t.token_type == TokenType::Colon);
         let got = match self.current().token_type {
             TokenType::Arrow => "->",
-            TokenType::Colon => ":",
+            TokenType::Colon if !cons => ":",
             _ => return self.expect(TokenType::FatArrow).map(|_| ()),
         };
         let diag = self.diag_error(
