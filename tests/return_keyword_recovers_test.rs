@@ -44,3 +44,12 @@ fn a_return_in_a_loop_does_not_lose_the_parse() {
     assert!(errs[0].contains("'return' is not needed"), "{errs:#?}");
     assert!(!errs.iter().any(|e| e.contains("Expected top-level declaration")), "the parser keeps its place: {errs:#?}");
 }
+
+/// `let mut x = …` (Rust) is reported once and binds as the `var` it means,
+/// so a later read of `x` is not also `undefined variable 'x'`.
+#[test]
+fn let_mut_is_one_error_and_binds_the_var() {
+    let errs = errors(&format!("fn f(x: Int) -> Int = {{\n  let mut y = x\n  y = y + 1\n  y\n}}\n{MAIN}"));
+    assert_eq!(errs.len(), 1, "{errs:#?}");
+    assert!(errs[0].contains("'let mut' is not valid"), "{errs:#?}");
+}
