@@ -1306,3 +1306,46 @@ Order agreed with the owner: real defects first (result.filter → list.flat_map
 2. #3532's borrow on the v1 lowering.
 3. set.from_list's wasm reserve under the growth ruling (to ask).
 4. heap_restore, io.write and value.as_array, one at a time, researched across languages first.
+
+## 2026-10-15 (late night): nightly gates repaired, parser recovery for six foreign idioms
+
+### Merged
+- #3723, #3725, #3728 (closes #3688), #3729 (closes #3537), #3731 (partial #3532), #3733.
+- #3726 was closed unmerged: it could no longer merge onto develop. Its rebase, with rust_runtime.rs regenerated, is #3741.
+
+### Written, tested, CI green, waiting for the merge queue
+- **#3735 (#3216).** A for binder that a fused chain lambda only reads iterates by reference.
+- **#3736 (first half of #3217).** An owned list consumed at its last use as a for head moves (`into_iter()`) instead of being copied. `for_in_clone_elision_test`'s expectation changed to the move. That failure was found only after the related tests were really run: zsh had not word-split the test list, so they had never run.
+- **#3738 (closes #3737). Three red nightly gates.**
+  - **Conformance mutations.** Mutant m1 was stale. It masked m3, which survived: the corpus prints a constant per arm, so an `Ok(0)` mutant changes no output. m3 now flips the lifted `Ok` to an `Err`, and 28 of 48 programs kill it.
+  - **Clippy baseline:** 1457.
+  - **Shard balance.** A docs-only run, whose steps were all skipped, was picked as the latest run. The new `scripts/lib/latest-built-develop-run.sh` picks the newest run whose test step actually succeeded. The weights were refreshed from run 38686385214.
+- **#3741.** ADR-0013 stage 2 step 4, rebased.
+- **#3742 (#3552).** Inserting into an owned set happens in place on wasm. 200k inserts: 6.89 → 0.01 s.
+
+### Written, tested, PR open (CI pending)
+- **#3743.** `return EXPR`, `let mut` and a brace-style `if (c) { … }` each give one error, and the parse continues with what was meant. Before, each gave 2–3 errors, the later ones caused by the lost parse (a type error in the enclosing fn, or "Expected top-level declaration").
+
+### Written and tested locally, not pushed (branch foreign-idioms-2, stacked on #3743)
+- One error each, and the parse continues:
+  - `===` / `!==` (before: 2 errors);
+  - `elif` / `elsif` / `elseif` (before: 2);
+  - `c ? a : b` (before: 3), read as `if c then a else b`.
+- The postfix `?` (Result → Option) keeps its meaning wherever no operand follows it on the same line. No program in spec/, stdlib/ or the exercises has the changed shape.
+- `throw` was already one error, so it was not changed.
+- **Checks:**
+  - `return_keyword_recovers_test`: 8/8.
+  - almide-syntax tests and `diagnostic_harness_test`: pass.
+  - regen.sh: all gates green.
+  - codopsy 85ac6cdcda79: almide-syntax A (94).
+  - `almide fmt --check` over 2,089 files: no parse errors (28 files are unformatted).
+
+### Issues filed
+- **#3739: the x86 release timing gate is slower only on the GitHub x86 runner.** `-C target-cpu=native` makes the gate depend on the runner. A GCE A/B is in the issue. A decision is needed: a portable target-cpu, or a per-runner baseline.
+
+### Next
+1. Rebase foreign-idioms-2 onto develop and open its PR once #3743 merges.
+2. Once the PRs merge, close #3216, #3552 and #3737 by their `Closes` lines.
+3. #3217's second half: borrow inference and the clone pass must agree.
+4. #3532: the borrow on the v1 lowering.
+5. #3739: the target-cpu decision.
