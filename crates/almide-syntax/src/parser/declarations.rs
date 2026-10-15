@@ -228,7 +228,37 @@ impl Parser {
         {
             return self.parse_qualified_top_decl();
         }
+        if self.respell_foreign_decl_keyword() {
+            return self.parse_top_decl();
+        }
         Err(self.top_decl_error())
+    }
+
+    /// A function head spelled `def` / `function` / `func` / `fun` / `proc`
+    /// (Python / JS / Go / Kotlin / Nim), or a constant spelled `const` /
+    /// `val`, followed by its name: one error with the top-level hint table's
+    /// suggestion, and the keyword reads as `fn` / `let` so the declaration
+    /// is kept — dropping it failed every use of it as well.
+    fn respell_foreign_decl_keyword(&mut self) -> bool {
+        let tok = self.current();
+        if tok.token_type != TokenType::Ident { return false; }
+        let (tt, word) = match tok.value.as_str() {
+            "def" | "function" | "func" | "fun" | "proc" => (TokenType::Fn, "fn"),
+            "const" | "val" => (TokenType::Let, "let"),
+            _ => return false,
+        };
+        let named = self.peek_at(1).is_some_and(|n| n.line == tok.line
+            && matches!(n.token_type, TokenType::Ident | TokenType::TypeName));
+        let Some(hint) = self.check_hint(None, super::hints::HintScope::TopLevel) else { return false };
+        if !named { return false; }
+        let message = hint.message.unwrap_or_else(|| format!("'{}' is not a keyword in Almide", tok.value));
+        let diag = self.diag_error(message, hint.hint, "declaration")
+            .with_try(if word == "fn" { "fn f(x: Int) -> Int = x + 1" } else { "let K = 3" });
+        self.errors.push(diag);
+        let tok = &mut self.tokens[self.pos];
+        tok.token_type = tt;
+        tok.value = word.to_string();
+        true
     }
 
     /// The declarations a SINGLE leading keyword selects outright. `None` means
