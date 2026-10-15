@@ -1,4 +1,4 @@
-//! #3537 — a chained `map.set` / `map.upsert` writes in place on the wasm leg.
+//! #3537 — a chained `map.set` / `map.upsert` / `map.update` writes in place on the wasm leg.
 //!
 //! `m = map.set(map.set(m, j, 1), j + 1, 2)` in a loop copied the whole map
 //! once or twice per step, where a single `m = map.set(m, k, v)` writes in
@@ -23,7 +23,9 @@ fn counts(src: &str) -> (String, u64, u64, u64) {
         almide_wasm::emit_program(&ir).expect("the structural leg lowers the probe")
     };
     let r = run_wasm(&bytes).expect("run");
-    let c = r.alloc_count.expect("the armed module exports the counters");
+    let c = r
+        .alloc_count
+        .expect("the armed module exports the counters");
     (r.stdout, c.bytes, c.allocs, c.frees)
 }
 
@@ -50,6 +52,7 @@ fn program(step: &str, n: u32, k: u32) -> String {
 
 const SET: &str = "map.set(map.set(m, j, 1), j + 1, 2)";
 const UPSERT: &str = "map.upsert(map.set(m, j, 1), j + 1, 0, (v) => v + 10)";
+const UPDATE: &str = "map.update(map.set(m, j, 1), j + 1, (v) => v + 10)";
 
 fn step_bytes(step: &str, n: u32) -> (u64, String) {
     let (out, full, a, f) = counts(&program(step, n, 400));
@@ -62,7 +65,11 @@ fn step_bytes(step: &str, n: u32) -> (u64, String) {
 #[test]
 fn a_chained_set_does_not_copy_the_map_per_step() {
     // The expected lines are the native leg's (`almide run`, 400 steps).
-    for (step, out_small, out_large) in [(SET, "2000 1 2\n", "8000 1 2\n"), (UPSERT, "2000 1 410\n", "8000 1 410\n")] {
+    for (step, out_small, out_large) in [
+        (SET, "2000 1 2\n", "8000 1 2\n"),
+        (UPSERT, "2000 1 410\n", "8000 1 410\n"),
+        (UPDATE, "2000 1 410\n", "8000 1 410\n"),
+    ] {
         let (small, out_s) = step_bytes(step, 2000);
         let (large, out_l) = step_bytes(step, 8000);
         assert_eq!(out_s, out_small, "{step}");
