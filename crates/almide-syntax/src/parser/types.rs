@@ -66,8 +66,44 @@ impl Parser {
             let qualified = sym(&format!("{}.{}", path, type_name));
             return self.parse_type_name_suffix(qualified);
         }
-        let name = self.expect_type_name()?;
+        let name = match self.respell_foreign_builtin_type() {
+            Some(name) => name,
+            None => self.expect_type_name()?,
+        };
         self.parse_type_name_suffix(name)
+    }
+
+    /// A builtin type spelled the C / Rust / Python / TS way (`int`, `i64`,
+    /// `string`, `bool`, `f64`, `u8`, …): one error naming the Almide type,
+    /// which the position then reads as — before, the param's or binding's
+    /// type error dropped the declaration and failed every use of it.
+    fn respell_foreign_builtin_type(&mut self) -> Option<Sym> {
+        let tok = self.current();
+        if tok.token_type != TokenType::Ident { return None; }
+        let almide = match tok.value.as_str() {
+            "int" | "integer" | "long" | "i64" | "isize" | "usize" | "number" => "Int",
+            "i8" => "Int8",
+            "i16" => "Int16",
+            "i32" => "Int32",
+            "u8" => "UInt8",
+            "u16" => "UInt16",
+            "u32" => "UInt32",
+            "u64" => "UInt64",
+            "float" | "double" | "f64" => "Float",
+            "f32" => "Float32",
+            "string" | "str" => "String",
+            "bool" | "boolean" => "Bool",
+            "void" | "unit" => "Unit",
+            _ => return None,
+        };
+        let diag = self.diag_error(
+            format!("'{}' is not an Almide type: use '{almide}'", tok.value),
+            "Almide type names start with an uppercase letter: Int, Float, String, Bool, Unit, Int32, UInt8, ….",
+            "type",
+        ).with_try(format!("x: {almide}"));
+        self.errors.push(diag);
+        self.advance();
+        Some(sym(almide))
     }
 
     /// ADR-0009 D1 (#1108 Phase 2b): a fn TYPE's return may carry the
