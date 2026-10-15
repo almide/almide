@@ -53,3 +53,15 @@ fn let_mut_is_one_error_and_binds_the_var() {
     assert_eq!(errs.len(), 1, "{errs:#?}");
     assert!(errs[0].contains("'let mut' is not valid"), "{errs:#?}");
 }
+
+/// A brace-style `if` (`if (c) { a } else { b }`, C / Rust / JS) is reported
+/// once — Almide's `if` takes `then` — and the braces parse as the branches,
+/// instead of losing the parse at `else` and also failing the fn's type.
+#[test]
+fn a_brace_style_if_is_one_error() {
+    for body in ["if (x > 0) { 1 } else { 2 }", "if x > 0 { 1 } else { 2 }"] {
+        let errs = errors(&format!("fn f(x: Int) -> Int = {{\n  {body}\n}}\n{MAIN}"));
+        assert_eq!(errs.len(), 1, "{body}: {errs:#?}");
+        assert!(errs[0].contains("then"), "{body}: the error names `then`: {errs:#?}");
+    }
+}
