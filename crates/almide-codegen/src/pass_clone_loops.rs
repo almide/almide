@@ -124,19 +124,26 @@ fn borrowed_element_is_heap(ty: &Ty) -> bool {
     list_elem(ty).is_some_and(super::pass_clone::needs_clone)
 }
 
-fn owns_final_field_read(iterable: &IrExpr, body: &[IrStmt], ctx: &CloneCtx) -> bool {
-    if ctx.in_loop || !matches!(iterable.kind, IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }) {
+/// Is the loop head the LAST read of a value this fn owns — an owned field
+/// read, or the owned list var itself (#3217) — so the loop may consume it
+/// and move each element out? A head the body still reads or writes, one in
+/// a loop or a closure (it runs again), or an always-cloned var is not.
+fn owns_final_read(iterable: &IrExpr, body: &[IrStmt], ctx: &CloneCtx) -> bool {
+    if ctx.in_loop
+        || !matches!(iterable.kind, IrExprKind::Var { .. } | IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. })
+    {
         return false;
     }
     let Some(root) = iterable_root(iterable) else { return false; };
-    ctx.owned.contains(&root) && !ctx.always.contains(&root) && ctx.remaining.get(&root).copied().unwrap_or(1) <= 1
+    ctx.owned.contains(&root) && !ctx.always.contains(&root) && !ctx.captured.contains(&root)
+        && ctx.remaining.get(&root).copied().unwrap_or(1) <= 1
         && !body_writes_var(body, root)
 }
 
 /// `ForIn { var, var_tuple, iterable, body }` arm of [`insert_clones_live`]:
 /// the iterable is NOT in the loop, the body IS.
 pub(crate) fn insert_clones_for_in(var: VarId, var_tuple: Option<Vec<VarId>>, iterable: IrExpr, body: Vec<IrStmt>, ctx: &mut CloneCtx) -> IrExprKind {
-    let owns_field = owns_final_field_read(&iterable, &body, ctx);
+    let owns_head = owns_final_read(&iterable, &body, ctx);
     let new_iterable = strip_list_iterable_clone(insert_clones_live(iterable, ctx), &body);
     let fresh = loop_fresh_vars(Some(var), var_tuple.as_deref(), &body);
     ctx.loops.binders.insert(var);
@@ -153,7 +160,7 @@ pub(crate) fn insert_clones_for_in(var: VarId, var_tuple: Option<Vec<VarId>>, it
     let by_ref_head = is_list && !matches!(new_iterable.kind, IrExprKind::Range { .. });
     if by_ref_head && var_tuple.is_none() && only_borrowed_uses(&new_body, var) {
         ctx.loops.borrowed.insert(var);
-    } else if is_list && owns_field {
+    } else if is_list && owns_head {
         ctx.loops.consumed.insert(var);
     }
     IrExprKind::ForIn { var, var_tuple, iterable: Box::new(new_iterable), body: new_body }
