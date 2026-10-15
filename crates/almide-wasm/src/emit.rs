@@ -628,7 +628,7 @@ fn emit_program_pass(
 
     // #3003: every reached instance-parallel chunk is a host-callable export.
     export_fns.extend(crate::fan_par::site_exports(&program_fns, &visited, &table));
-    // #3331: a chunk with a list capture needs the allocator host-callable
+    // #3331: a reached chunk site needs the allocator host-callable
     // (the JS host's String ABI exports it already).
     if crate::fan_par::needs_alloc_export(&program_fns, &visited) && !crate::host_exports::string_abi() {
         export_fns.push((crate::host_exports::ALLOC_EXPORT.to_string(), F_ALLOC));
