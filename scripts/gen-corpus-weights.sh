@@ -65,24 +65,12 @@ gh_escape_flag() {
   fi
 }
 
-# The newest green develop run that HAS the ten solo jobs. Not simply the
-# newest: `gh run list --limit 1` has handed back a months-old run id once
-# here (an eventually-consistent read), and a docs-only run carries the jobs
-# with every step skipped. Either would turn the weekly ratchet red for
-# something nobody can act on, so the candidate is chosen by what it contains.
-# $VIEW_ESC must be set by the caller.
+# The newest green develop run whose solo jobs RAN their corpus slice
+# (scripts/lib/latest-built-develop-run.sh says why a green run is not enough).
+# shellcheck source=lib/latest-built-develop-run.sh
+. "$(dirname "$0")/lib/latest-built-develop-run.sh"
 latest_green_develop() {
-  local id
-  for id in $(gh run list --workflow ci.yml --branch develop --status success --limit 6 --json databaseId --jq '.[].databaseId'); do
-    # shellcheck disable=SC2086
-    if gh run view $VIEW_ESC "$id" --json jobs --jq '.jobs[].name' 2>/dev/null | grep -q 'Test Rust (solo '; then
-      echo "$id"
-      return 0
-    fi
-    echo "skipping run $id: no 'Test Rust (solo …)' jobs" >&2
-  done
-  echo "::error::none of the last 6 green develop ci.yml runs has the solo corpus jobs" >&2
-  return 1
+  latest_built_develop 'Test Rust \\(solo ' '^Cargo test \\(solo '
 }
 
 # render <dir> [measured-on]
