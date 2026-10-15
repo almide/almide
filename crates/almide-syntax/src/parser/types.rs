@@ -2,6 +2,20 @@ use crate::lexer::TokenType;
 use crate::ast::*;
 use crate::intern::{Sym, sym};
 use super::Parser;
+
+/// Builtin type spellings from C / Rust / Python / TS and the Almide type
+/// each means: a syntax table read by the parser's recovery, not a property
+/// of any stdlib function.
+const FOREIGN_BUILTIN_TYPES: &[(&str, &str)] = &[
+    ("int", "Int"), ("integer", "Int"), ("long", "Int"), ("i64", "Int"),
+    ("isize", "Int"), ("usize", "Int"), ("number", "Int"),
+    ("i8", "Int8"), ("i16", "Int16"), ("i32", "Int32"),
+    ("u8", "UInt8"), ("u16", "UInt16"), ("u32", "UInt32"), ("u64", "UInt64"),
+    ("float", "Float"), ("double", "Float"), ("f64", "Float"), ("f32", "Float32"),
+    ("string", "String"), ("str", "String"),
+    ("bool", "Bool"), ("boolean", "Bool"),
+    ("void", "Unit"), ("unit", "Unit"),
+];
 impl Parser {
     pub(crate) fn parse_type_expr(&mut self) -> Result<TypeExpr, String> {
         self.enter_depth()?;
@@ -80,22 +94,7 @@ impl Parser {
     fn respell_foreign_builtin_type(&mut self) -> Option<Sym> {
         let tok = self.current();
         if tok.token_type != TokenType::Ident { return None; }
-        let almide = match tok.value.as_str() {
-            "int" | "integer" | "long" | "i64" | "isize" | "usize" | "number" => "Int",
-            "i8" => "Int8",
-            "i16" => "Int16",
-            "i32" => "Int32",
-            "u8" => "UInt8",
-            "u16" => "UInt16",
-            "u32" => "UInt32",
-            "u64" => "UInt64",
-            "float" | "double" | "f64" => "Float",
-            "f32" => "Float32",
-            "string" | "str" => "String",
-            "bool" | "boolean" => "Bool",
-            "void" | "unit" => "Unit",
-            _ => return None,
-        };
+        let almide = FOREIGN_BUILTIN_TYPES.iter().find(|(foreign, _)| *foreign == tok.value)?.1;
         let diag = self.diag_error(
             format!("'{}' is not an Almide type: use '{almide}'", tok.value),
             "Almide type names start with an uppercase letter: Int, Float, String, Bool, Unit, Int32, UInt8, ….",

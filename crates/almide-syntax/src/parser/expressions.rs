@@ -119,6 +119,8 @@ impl Parser {
     /// The postfix `??` opens a line too, in `parse_postfix`.
     pub(crate) const INFIX_TOKENS: &'static [TokenType] = &[
         TokenType::Or, TokenType::And,
+        // not Almide, reported once and read as `or` / `and`
+        TokenType::PipePipe, TokenType::AmpAmp,
         TokenType::EqEq, TokenType::BangEq, TokenType::LtEq, TokenType::GtEq,
         TokenType::LAngle, TokenType::RAngle,
         TokenType::PipeArrow, TokenType::ComposeArrow,
