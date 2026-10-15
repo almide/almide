@@ -93,7 +93,7 @@ fn binary_family() -> Vec<String> {
 /// does, so the family can only grow WITH its continuation check.
 const CELLS: &[&str] = &[
     "or", "and", "==", "!=", "<", "<=", ">", ">=", "|>", ">>", "..<", "...", "..", "..=", "+", "-",
-    "++", "*", "/", "%", "^", "**", "??",
+    "++", "*", "/", "%", "^", "**", "??", "&&", "||",
 ];
 
 /// The one family member that may NOT open a line, and why.
@@ -164,6 +164,10 @@ cells! {
     caret_continues => "^",
     star_star_continues => "**",
     unwrap_or_continues => "??",
+    // `&&` / `||` are not Almide; they are reported once and read as `and` /
+    // `or`, so a line opened by one recovers the same way.
+    amp_amp_continues => "&&",
+    pipe_pipe_continues => "||",
 }
 
 /// `??`'s own line rule (E038, #1112) is untouched: the FALLBACK must still
