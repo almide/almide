@@ -83,8 +83,13 @@ pub(crate) fn emit_ltake(
     i: &mut InstructionSink<'_>,
     (want, len): (u32, u32),
     (pp, p, q, z, r): (u32, u32, u32, u32, u32),
+    canonical: bool,
     reused: impl Fn(&mut InstructionSink<'_>),
 ) {
+    // The meter's fixed allocator never takes a freed block (canonical_alloc.rs).
+    if canonical {
+        return;
+    }
     i.i32_const(0).i32_load(word(LARGE_HEAD)).local_set(q);
     walk(i, (pp, p, q), |i| {
         i.local_get(q).i32_const(0).i32_ne();

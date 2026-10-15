@@ -19,6 +19,8 @@
 
 use std::cell::Cell;
 
+use wasm_encoder::{InstructionSink, MemArg};
+
 thread_local! {
     static ARMED: Cell<bool> = const { Cell::new(false) };
 }
@@ -43,5 +45,16 @@ impl CanonicalGuard {
 impl Drop for CanonicalGuard {
     fn drop(&mut self) {
         ARMED.with(|c| c.set(self.0));
+    }
+}
+
+/// `$alloc`'s class-slot head, the value its pop test reads: the slot's
+/// first word, or under the switch a constant 0 (an empty list), so the
+/// request takes the bump path.
+pub(crate) fn emit_class_head<'a, 'b>(i: &'a mut InstructionSink<'b>, canonical: bool, slot: u32) -> &'a mut InstructionSink<'b> {
+    if canonical {
+        i.i32_const(0)
+    } else {
+        i.local_get(slot).i32_load(MemArg { offset: 0, align: 2, memory_index: 0 })
     }
 }

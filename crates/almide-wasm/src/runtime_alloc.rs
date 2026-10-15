@@ -16,11 +16,7 @@ use crate::*;
 /// `counters` (#2407): the first of the four `alloc_count` globals when
 /// the counter switch is armed — every call bumps `__alloc_count` and adds
 /// `len` to `__alloc_bytes`, a free-list pop bumps `__alloc_reused`. `None`
-/// (the shipped module) emits none of it.
-///
-/// `canonical` (the meter's fixed allocator, canonical_alloc.rs): neither
-/// free list is consulted, so every request bumps. False for the shipped
-/// module, whose bytes are then those of a build without the switch.
+/// (the shipped module) emits none of it. `canonical`: see canonical_alloc.rs.
 pub(crate) fn emit_alloc(oom_msg: u32, counters: Option<u32>, canonical: bool) -> Function {
     // params: 0=len i32; locals: 1=base i32, 2=next i32 (class scratch
     // before the bump path claims it), 3=want i32, 4=head i32, 5..=9 the
@@ -55,12 +51,7 @@ pub(crate) fn emit_alloc(oom_msg: u32, counters: Option<u32>, canonical: bool) -
         .i32_const(FREELIST_BASE as i32)
         .i32_add()
         .local_set(next); // next = the class slot ADDRESS now
-    if canonical {
-        // No pop: an empty head takes the bump path below.
-        i.i32_const(0).local_tee(head).if_(BlockType::Empty);
-    } else {
-        i.local_get(next).i32_load(word(0)).local_tee(head).if_(BlockType::Empty);
-    }
+    crate::canonical_alloc::emit_class_head(&mut i, canonical, next).local_tee(head).if_(BlockType::Empty);
     // pop: slot = head.payload[0]; headers rc=1/len/cap=len; done.
     if let Some(c) = counters {
         bump_counter(&mut i, c + crate::alloc_count::REUSED);
@@ -93,13 +84,11 @@ pub(crate) fn emit_alloc(oom_msg: u32, counters: Option<u32>, canonical: bool) -
     i.i32_const(16).local_get(next).i32_shl().local_set(want);
     // Above the ceiling (#3348): the exact-size large list first.
     i.else_();
-    if !canonical {
-        crate::runtime_large::emit_ltake(&mut i, (want, len), (5, 6, 7, 8, 9), |i| {
-            if let Some(c) = counters {
-                bump_counter(i, c + crate::alloc_count::REUSED);
-            }
-        });
-    }
+    crate::runtime_large::emit_ltake(&mut i, (want, len), (5, 6, 7, 8, 9), canonical, |i| {
+        if let Some(c) = counters {
+            bump_counter(i, c + crate::alloc_count::REUSED);
+        }
+    });
     i.end();
     // base = G_HEAP; next = base + want (class-rounded; huge stays exact)
     i.global_get(G_HEAP).local_set(base);
