@@ -12,6 +12,33 @@ impl Parser {
         result
     }
 
+    /// `println!(…)` / `panic!(…)` / `assert_eq!(…)` (a Rust macro whose
+    /// name is also an Almide builtin): one error naming the plain call, and
+    /// the `!` is skipped so the call parses — read as error propagation on
+    /// a function value, it cascaded into three errors. Only these names,
+    /// written with no space before the `!` or its `(`, can mean it.
+    fn rust_macro_bang(&mut self, callee: &Expr) -> bool {
+        let ExprKind::Ident { name } = &callee.kind else { return false };
+        let name = name.as_str();
+        if !matches!(name, "println" | "eprintln" | "panic" | "assert" | "assert_eq") {
+            return false;
+        }
+        let bang = self.current();
+        let adjacent = |a: &crate::lexer::Token, b: &crate::lexer::Token| a.line == b.line && a.end_col == b.col;
+        let opens = self.peek_at(1).is_some_and(|n| n.token_type == TokenType::LParen && adjacent(bang, n));
+        if bang.token_type != TokenType::Bang || self.pos == 0 || !adjacent(&self.tokens[self.pos - 1], bang) || !opens {
+            return false;
+        }
+        let diag = self.diag_error(
+            format!("'{name}!' is a Rust macro, not Almide: write {name}(…)"),
+            "Almide has no macros: call the function directly. `!` after a call propagates an error in an `effect fn`.",
+            "call",
+        ).with_try("println(\"hi\")");
+        self.errors.push(diag);
+        self.advance();
+        true
+    }
+
     /// `c ? a : b` (C / JS / Java): one error naming `if … then … else`, and
     /// the parse goes on as that `if`. The postfix `?` steps aside for it
     /// (`ternary_follows`), so `c` here is the whole condition, not its last
@@ -512,6 +539,9 @@ impl Parser {
     /// (Result→Option). Returns `(expr, consumed)`; `consumed = false` hands
     /// the unchanged expr back to the caller's loop to break.
     fn parse_postfix_unwrap_op(&mut self, expr: Expr) -> Result<(Expr, bool), String> {
+        if self.rust_macro_bang(&expr) {
+            return Ok((expr, true));
+        }
         if self.check(TokenType::Bang) && !self.newline_before_current() {
             // expr! — unwrap with error propagation
             let span = Some(self.current_span());

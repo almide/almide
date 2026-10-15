@@ -5,7 +5,7 @@ use super::Parser;
 
 impl Parser {
     pub(crate) fn parse_stmt(&mut self) -> Result<Stmt, String> {
-        if self.check(TokenType::Let) { return self.parse_let_stmt(); }
+        if self.check(TokenType::Let) || self.respell_local_const() { return self.parse_let_stmt(); }
         if self.check(TokenType::Var) { return self.parse_var_stmt(); }
         if self.check(TokenType::Guard) { return self.parse_guard_stmt(); }
 
@@ -307,5 +307,28 @@ impl Parser {
         }
         self.expect(TokenType::RParen)?;
         Ok(Pattern::Tuple { elements })
+    }
+
+    /// `const y = …` / `val y = …` (JS / Kotlin / Scala) in a body: one error
+    /// naming `let`, and the token reads as `let`, so `y` is bound — before,
+    /// `const` read as an undefined variable and `y = …` as an assignment to
+    /// an undefined binding.
+    fn respell_local_const(&mut self) -> bool {
+        let tok = self.current();
+        if tok.token_type != TokenType::Ident || !matches!(tok.value.as_str(), "const" | "val") { return false; }
+        let named = self.peek_at(1).is_some_and(|n| n.line == tok.line && n.token_type == TokenType::Ident);
+        let bound = self.peek_at(2).is_some_and(|n| matches!(n.token_type, TokenType::Eq | TokenType::Colon));
+        if !named || !bound { return false; }
+        let kw = tok.value.clone();
+        let diag = self.diag_error(
+            format!("'{kw}' is not Almide: use 'let'"),
+            "Bind with `let name = value` (`var` for one you reassign).",
+            "let",
+        ).with_try("let y = x + 1");
+        self.errors.push(diag);
+        let tok = &mut self.tokens[self.pos];
+        tok.token_type = TokenType::Let;
+        tok.value = "let".to_string();
+        true
     }
 }
