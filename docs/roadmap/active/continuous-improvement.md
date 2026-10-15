@@ -1252,3 +1252,57 @@ Order agreed with the owner: real defects first (result.filter → list.flat_map
 2. Re-measure option.collect's exact reserve now that the binder copy is gone.
 3. Finish the ABI batch: snapshots, then one GCE re-inspection, then the PR.
 4. set.from_list's wasm reserve under the growth ruling.
+
+## 2026-10-15 (night): eight PRs, three issues closed as already fixed
+
+### Merged
+- **#3721:** the canonical-allocator meter.
+- **#3722:** the Int index hash ruling.
+
+### Written, tested, CI green, waiting for the merge queue
+- **#3723 (option.is_some / is_none borrow; a chain lambda's own match binder moves).**
+  - The workspace test: 686 binaries ok.
+  - codopsy: almide-codegen A (90), almide-ir A (94).
+- **#3725 (option.collect reserves its result once).**
+  - On wasm, `collect`'s instructions fall 75% and its bytes moved go from 4.19 MB to 0. collect_map's bytes moved go from 1.05 MB to 0.
+  - Wall clock at 200k strings × 200: wasm 0.20 → 0.13 s, native unchanged.
+  - GCE re-inspection: PASS.
+  - The witness floor 173882 → 171053: admitted functions fell by the same 2,829 (filter_map's callback frames), and no certification was lost.
+- **#3726 (ADR-0013 stage 2 step 4: the runtime ABI spelled `AlmideString`).**
+  - No behaviour change while the alias is `String`.
+  - 72 stamps were re-inspected on GCE, all PASS: 52 in asia-northeast1, 16 in us-east1 after the regional CPU quota of 24 refused two VMs, and 4 more that had been stamped on develop after the first list was taken.
+- **#3728 (#3688, nightly fuzz NativeBuildFailure).**
+  - ConcretizeTypes keyed every module's top-let types by bare name, so `m0.cell` took `m1.cell`'s Matrix type.
+  - The table is now keyed by `(module_origin, name)`.
+- **#3729 (#3537): a chained `map.set` / `upsert` / `update` writes in place on wasm.**
+  - The repro: 2,031 allocations / 585 MB → 26 / 1.6 MB.
+  - Module size: +6.4 KB over 12 of 951 fixtures, because the judged path links the map-set helpers. In empty_collection_fold that is 40 → 44 functions.
+
+### Written, tested, PR open (CI pending)
+- **#3731 (partial #3532): v1 native render.**
+  - **Route finding.** The default native build renders through the v1 trust spine. `--target rust` prints the v0 codegen, so the v0 output had hidden the v1 render's double copy at every heap if-as-value join.
+  - An arm's own temporary now moves into the join.
+  - The repro: user 0.12 → 0.08 s.
+  - **Still open on #3532:** each arm still copies once. The acceptance there is a borrow.
+
+### Written and tested, waiting for #3729 (branch fix-3552-set-insert-in-place)
+- **#3552 on wasm: `set.insert` into a set the op owns goes in place** (the rc judge that set.remove uses).
+  - 200k inserts: 6.89 → 0.01 s.
+  - Allocations fell in all 8 fixtures that moved, for example rc_alloc_stress 353,887 → 190,807 bytes.
+  - Native was already linear.
+
+### Closed as already fixed, with evidence
+- **#3636:** all six inspection-harness false failures have merged fixes.
+- **#3540 and #3542:** fixed by 2bb4cade1. Their wasm series fit O(1) for ends_with / take_end / take, and O(n) for drop_end / drop (the size of what they return).
+
+### Process
+- **A miss, now guarded.** regen.sh had printed `not formatted: stdlib/option.almd` for #3725, and the output check missed it, so CI went red once.
+  - regen.sh now exits non-zero on a red gate line.
+  - Formatting changes a stdlib implementation's fingerprint, so option.collect was inspected a third time.
+  - **Candidate improvement:** fingerprint the formatted or parsed body, so a format-only change does not void a stamp.
+
+### Next
+1. #3552's PR once #3729 merges.
+2. #3532's borrow on the v1 lowering.
+3. set.from_list's wasm reserve under the growth ruling (to ask).
+4. heap_restore, io.write and value.as_array, one at a time, researched across languages first.
