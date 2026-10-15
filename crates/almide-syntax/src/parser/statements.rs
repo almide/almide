@@ -45,6 +45,20 @@ impl Parser {
         let span = self.current_span();
         self.expect(TokenType::Let)?;
 
+        // `let mut x = …` (Rust): one error, then the binding parses as the
+        // `var` it means — dropped, every later read of `x` was also an
+        // `undefined variable`.
+        if self.check(TokenType::Mut) && self.peek_at(1).is_some_and(|t| t.token_type == TokenType::Ident) {
+            let diag = self.diag_error(
+                "'let mut' is not valid in Almide",
+                "Use 'var' for mutable variables. Example: var x = 0",
+                "let mut",
+            ).with_try("var x = 0");
+            self.errors.push(diag);
+            self.advance();
+            return self.parse_var_rest(span);
+        }
+
         // Detect `let rec name(args) = ...` (OCaml / SML / F#). Almide
         // doesn't need `rec` — top-level fns are recursive by default.
         // Only when a name follows: `let rec = …` / `let rec: T = …` bind a
@@ -151,6 +165,11 @@ impl Parser {
         }
         let span = self.current_span();
         self.expect(TokenType::Var)?;
+        self.parse_var_rest(span)
+    }
+
+    /// A `var` binding after its keyword: `name[: T] = value`.
+    fn parse_var_rest(&mut self, span: Span) -> Result<Stmt, String> {
         let name = self.expect_ident()?;
         let ty = if self.check(TokenType::Colon) {
             self.advance();
