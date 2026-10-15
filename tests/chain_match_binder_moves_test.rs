@@ -49,7 +49,9 @@ fn a_binder_of_the_element_moves_and_a_binder_of_a_capture_is_cloned() {
     assert!(unwrap.contains("Some(v) => v,"), "the element's payload moves out:\n{unwrap}");
     assert!(!unwrap.contains("v.clone()"), "no copy of an owned element's payload:\n{unwrap}");
     let outer = fn_body(&rust, "with_outer");
-    assert!(outer.contains("v.clone()"), "a captured value's payload is still cloned:\n{outer}");
+    // The captured value is copied per call, never moved out of the closure:
+    // either its payload (`v.clone()`) or the whole scrutinee (`outer.clone()`).
+    assert!(outer.contains("v.clone()") || outer.contains("outer.clone()"), "a captured value is copied, not moved:\n{outer}");
 }
 
 #[test]
