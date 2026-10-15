@@ -31,6 +31,9 @@ impl Parser {
         if let Some(r) = self.parse_primary_triple_equals(&tok) {
             return r;
         }
+        if let Some(r) = self.parse_primary_pipe_closure() {
+            return r;
+        }
         // Check hint system for rejected operators/keywords
         if let Some(result) = self.check_hint(None, super::hints::HintScope::Expression) {
             let msg = result.message.unwrap_or_else(|| format!("'{}' is not valid here", tok.value));
@@ -76,6 +79,43 @@ impl Parser {
     /// `=` right after it, which reached the "Assignments return Unit" error —
     /// sending the reader to look for an assignment — and lost the comparison.
     /// One error naming the operator Almide has, then the right operand parses.
+    /// A Rust closure `|a, b| body` / `|| body`: one error with the hint
+    /// table's suggestion, then the params and body parse as the
+    /// `(a, b) => body` it means — before, the binding it initialised was
+    /// dropped and every call of it failed too.
+    fn parse_primary_pipe_closure(&mut self) -> Option<Result<Expr, String>> {
+        let empty = self.check(TokenType::PipePipe);
+        let opens = self.check(TokenType::Pipe)
+            && self.peek_at(1).is_some_and(|t| matches!(t.token_type, TokenType::Ident | TokenType::Underscore));
+        if !empty && !opens { return None; }
+        let span = Some(self.current_span());
+        let message = if empty { "'||' closure syntax is not valid in Almide".to_string() } else {
+            self.check_hint(None, super::hints::HintScope::Expression)
+                .and_then(|h| h.message)
+                .unwrap_or_else(|| "'|x|' closure syntax is not valid in Almide".to_string())
+        };
+        let diag = self.diag_error(message, "Write a lambda as `(x) => expr`: list.map(xs, (x) => x + 1).", "lambda")
+            .with_try("(x) => x + 1");
+        self.errors.push(diag);
+        self.advance();
+        Some(self.parse_pipe_closure_rest(empty, span))
+    }
+
+    fn parse_pipe_closure_rest(&mut self, empty: bool, span: Option<Span>) -> Result<Expr, String> {
+        let mut params = Vec::new();
+        if !empty {
+            params.push(self.parse_lambda_param()?);
+            while self.check(TokenType::Comma) {
+                self.advance();
+                params.push(self.parse_lambda_param()?);
+            }
+            self.expect(TokenType::Pipe)?;
+        }
+        self.skip_newlines();
+        let body = self.parse_expr()?;
+        Ok(Expr::new(self.next_id(), span, ExprKind::Lambda { params, body: Box::new(body) }))
+    }
+
     fn parse_primary_triple_equals(&mut self, tok: &crate::lexer::Token) -> Option<Result<Expr, String>> {
         if tok.token_type != TokenType::Eq || self.pos == 0 {
             return None;

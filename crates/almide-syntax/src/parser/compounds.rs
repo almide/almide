@@ -234,7 +234,7 @@ impl Parser {
     }
 
 
-    fn parse_lambda_param(&mut self) -> Result<LambdaParam, String> {
+    pub(crate) fn parse_lambda_param(&mut self) -> Result<LambdaParam, String> {
         if self.check(TokenType::LParen) {
             self.advance();
             let mut names = Vec::new();
