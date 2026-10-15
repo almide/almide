@@ -330,6 +330,13 @@ pub(crate) fn spawn_guest_thread<'scope, 'env, T: Send + 'scope>(
         .expect("failed to spawn the embedded wasm guest thread")
 }
 
+/// [`spawn_guest_thread`] for a thread that outlives the call spawning it —
+/// the fan's resident threads (`host_fan.rs` `Crew`). A refused spawn is the
+/// caller's to handle.
+pub(crate) fn spawn_resident_guest_thread(f: impl FnOnce() + Send + 'static) -> std::io::Result<std::thread::JoinHandle<()>> {
+    std::thread::Builder::new().name("almide-wasm-fan".to_string()).stack_size(EMBEDDED_HOST_THREAD_STACK).spawn(f)
+}
+
 /// Run the guest on its own host thread sized for [`EMBEDDED_WASM_STACK`]
 /// (the caller's thread may be any size: a test harness worker, the CLI's
 /// driver). Everything a run touches — stdout/stderr, the exit code, the
