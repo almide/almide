@@ -60,15 +60,9 @@ impl AlmideRepr for AlmideFileStat {
 }
 
 // Read
-pub fn almide_rt_fs_read_text(path: &str) -> Result<String, String> {
-    std::fs::read_to_string(path).map_err(|e| io_err("fs.read_text", &fs_q(path), e))
-}
-pub fn almide_rt_fs_read_bytes(path: &str) -> Result<Vec<i64>, String> {
-    std::fs::read(path).map(|b| b.into_iter().map(|x| x as i64).collect()).map_err(|e| io_err("fs.read_bytes", &fs_q(path), e))
-}
-pub fn almide_rt_fs_read_lines(path: &str) -> Result<Vec<String>, String> {
-    std::fs::read_to_string(path).map(|s| s.lines().map(|l| l.to_string()).collect()).map_err(|e| io_err("fs.read_lines", &fs_q(path), e))
-}
+pub fn almide_rt_fs_read_text(path: &str) -> Result<String, AlmideString> { let __almide_r: Result<String, String> = (|| { std::fs::read_to_string(path).map_err(|e| io_err("fs.read_text", &fs_q(path), e)) })(); __almide_r.map_err(Into::into) }
+pub fn almide_rt_fs_read_bytes(path: &str) -> Result<Vec<i64>, AlmideString> { let __almide_r: Result<Vec<i64>, String> = (|| { std::fs::read(path).map(|b| b.into_iter().map(|x| x as i64).collect()).map_err(|e| io_err("fs.read_bytes", &fs_q(path), e)) })(); __almide_r.map_err(Into::into) }
+pub fn almide_rt_fs_read_lines(path: &str) -> Result<Vec<String>, AlmideString> { let __almide_r: Result<Vec<String>, String> = (|| { std::fs::read_to_string(path).map(|s| s.lines().map(|l| l.to_string()).collect()).map_err(|e| io_err("fs.read_lines", &fs_q(path), e)) })(); __almide_r.map_err(Into::into) }
 
 // Streaming line readers: fold/each over a BufReader, never materializing the
 // file — peak memory is O(longest line), not O(file). Line semantics MUST
@@ -77,34 +71,37 @@ pub fn almide_rt_fs_read_lines(path: &str) -> Result<Vec<String>, String> {
 // yielded. One deliberate divergence from read_lines: a mid-file read error
 // (e.g. invalid UTF-8) surfaces AFTER the callbacks for earlier lines have
 // already run — inherent to streaming.
-pub fn almide_rt_fs_fold_lines<A>(path: &str, init: A, f: std::rc::Rc<dyn Fn(A, String) -> A>) -> Result<A, String> {
-    use std::io::BufRead;
-    // The `open` and the per-line `read_line` are INNER steps of one call, so
-    // both report `fs.fold_lines` — the walker the writer actually invoked.
-    // Naming `read_line`, which they never called, would be worse than errno.
-    let mut reader = std::io::BufReader::new(std::fs::File::open(path).map_err(|e| io_err("fs.fold_lines", &fs_q(path), e))?);
-    let mut acc = init;
-    let mut buf = String::new();
-    loop {
-        buf.clear();
-        if reader.read_line(&mut buf).map_err(|e| io_err("fs.fold_lines", &fs_q(path), e))? == 0 {
-            return Ok(acc);
-        }
-        if buf.ends_with('\n') {
-            buf.pop();
-            if buf.ends_with('\r') {
-                buf.pop();
+pub fn almide_rt_fs_fold_lines<A>(path: &str, init: A, f: std::rc::Rc<dyn Fn(A, String) -> A>) -> Result<A, AlmideString> {
+    let __almide_r: Result<A, String> = (|| {
+        use std::io::BufRead;
+        // The `open` and the per-line `read_line` are INNER steps of one call, so
+        // both report `fs.fold_lines` — the walker the writer actually invoked.
+        // Naming `read_line`, which they never called, would be worse than errno.
+        let mut reader = std::io::BufReader::new(std::fs::File::open(path).map_err(|e| io_err("fs.fold_lines", &fs_q(path), e))?);
+        let mut acc = init;
+        let mut buf = String::new();
+        loop {
+            buf.clear();
+            if reader.read_line(&mut buf).map_err(|e| io_err("fs.fold_lines", &fs_q(path), e))? == 0 {
+                return Ok(acc);
             }
+            if buf.ends_with('\n') {
+                buf.pop();
+                if buf.ends_with('\r') {
+                    buf.pop();
+                }
+            }
+            // MEASURED (#1232, 2026-08-14): `clone` here beats `std::mem::take`, which
+            // the ledger proposed as a free memcpy saving. `take` steals the String's
+            // CAPACITY, so `read_line` regrows the buffer from zero every line (several
+            // doublings for an ~80-byte line) where `clone` allocates one right-sized
+            // copy and leaves `buf`'s capacity intact to reuse. 2M lines / 162 MB,
+            // best-of-15, interleaved: 137 ms clone vs 143-146 ms take — the "saving"
+            // is a 4-6% REGRESSION. Do not re-apply without re-measuring.
+            acc = f(acc, buf.clone());
         }
-        // MEASURED (#1232, 2026-08-14): `clone` here beats `std::mem::take`, which
-        // the ledger proposed as a free memcpy saving. `take` steals the String's
-        // CAPACITY, so `read_line` regrows the buffer from zero every line (several
-        // doublings for an ~80-byte line) where `clone` allocates one right-sized
-        // copy and leaves `buf`'s capacity intact to reuse. 2M lines / 162 MB,
-        // best-of-15, interleaved: 137 ms clone vs 143-146 ms take — the "saving"
-        // is a 4-6% REGRESSION. Do not re-apply without re-measuring.
-        acc = f(acc, buf.clone());
-    }
+    })();
+    __almide_r.map_err(Into::into)
 }
 // Range-scoped fold: the chunk-parallel worker's walker. A line is owned by
 // the chunk containing the byte BEFORE its first byte (line 0 by the chunk
@@ -161,9 +158,7 @@ fn fold_lines_range_impl<A, F: Fn(A, String) -> A + ?Sized>(path: &str, start: i
 }
 // Raw `F: Fn` last arg (NOT `Rc<dyn Fn>`): build.rs derives the
 // takes_raw_fn_last_arg set from this signature, so callbacks render unboxed.
-pub fn almide_rt_fs_fold_lines_range<A, F: Fn(A, String) -> A>(path: &str, start: i64, end: i64, init: A, f: F) -> Result<A, String> {
-    fold_lines_range_impl(path, start, end, init, &f)
-}
+pub fn almide_rt_fs_fold_lines_range<A, F: Fn(A, String) -> A>(path: &str, start: i64, end: i64, init: A, f: F) -> Result<A, AlmideString> { let __almide_r: Result<A, String> = (|| { fold_lines_range_impl(path, start, end, init, &f) })(); __almide_r.map_err(Into::into) }
 // Chunk-parallel fold: the threads live HERE, inside the runtime — the fan
 // machinery's purity gate keeps effectful bodies sequential, so file
 // parallelism is the fs module's own intrinsic instead. Workers each fold
@@ -173,38 +168,41 @@ pub fn almide_rt_fs_fold_lines_range<A, F: Fn(A, String) -> A>(path: &str, start
 // deterministic whatever the thread schedule. The Send + Sync bounds hold
 // only for an accumulator and callback with no `Rc` inside: RustLowering
 // routes every other call to the `_seq` twin below (#3649).
-pub fn almide_rt_fs_fold_lines_chunked<A: Clone + Send, F: Fn(A, String) -> A + Send + Sync>(path: &str, workers: i64, init: A, f: F) -> Result<Vec<A>, String> {
-    let ranges = fold_lines_chunk_ranges(path, workers)?;
-    // Flush first: a worker's abort cannot reach this thread's buffer (C-197).
-    almide_stdout_flush();
-    // One thread per chunk was one thread per BYTE once `workers` passed the
-    // file size, and the OS refusing the 4097th spawn crashed the run where
-    // wasm answered ok. The chunks stay as they were; at most one thread per
-    // core folds them, thread t taking chunks t, t+T, …, and each partial
-    // lands back in its chunk's slot.
-    let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
-    let threads = ranges.len().min(cores);
-    let ranges = &ranges;
-    std::thread::scope(|scope| {
-        let f = &f;
-        let mut handles = Vec::with_capacity(threads);
-        for t in 0..threads {
-            let init = init.clone();
-            let spawned = std::thread::Builder::new().spawn_scoped(scope, move || {
-                almide_stack_guard_register();
-                ranges.iter().skip(t).step_by(threads).map(|&(s, e)| fold_lines_range_impl(path, s, e, init.clone(), f)).collect::<Vec<_>>()
-            });
-            handles.push(spawned.map_err(|e| format!("fold_lines_chunked: cannot start a worker: {e}"))?);
-        }
-        let mut slots: Vec<Option<Result<A, String>>> = (0..ranges.len()).map(|_| None).collect();
-        for (t, h) in handles.into_iter().enumerate() {
-            let parts = h.join().map_err(|_| "fold_lines_chunked: worker panicked".to_string())?;
-            for (k, part) in parts.into_iter().enumerate() {
-                slots[t + k * threads] = Some(part);
+pub fn almide_rt_fs_fold_lines_chunked<A: Clone + Send, F: Fn(A, String) -> A + Send + Sync>(path: &str, workers: i64, init: A, f: F) -> Result<Vec<A>, AlmideString> {
+    let __almide_r: Result<Vec<A>, String> = (|| {
+        let ranges = fold_lines_chunk_ranges(path, workers)?;
+        // Flush first: a worker's abort cannot reach this thread's buffer (C-197).
+        almide_stdout_flush();
+        // One thread per chunk was one thread per BYTE once `workers` passed the
+        // file size, and the OS refusing the 4097th spawn crashed the run where
+        // wasm answered ok. The chunks stay as they were; at most one thread per
+        // core folds them, thread t taking chunks t, t+T, …, and each partial
+        // lands back in its chunk's slot.
+        let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
+        let threads = ranges.len().min(cores);
+        let ranges = &ranges;
+        std::thread::scope(|scope| {
+            let f = &f;
+            let mut handles = Vec::with_capacity(threads);
+            for t in 0..threads {
+                let init = init.clone();
+                let spawned = std::thread::Builder::new().spawn_scoped(scope, move || {
+                    almide_stack_guard_register();
+                    ranges.iter().skip(t).step_by(threads).map(|&(s, e)| fold_lines_range_impl(path, s, e, init.clone(), f)).collect::<Vec<_>>()
+                });
+                handles.push(spawned.map_err(|e| format!("fold_lines_chunked: cannot start a worker: {e}"))?);
             }
-        }
-        slots.into_iter().map(|p| p.expect("every chunk folded")).collect()
-    })
+            let mut slots: Vec<Option<Result<A, String>>> = (0..ranges.len()).map(|_| None).collect();
+            for (t, h) in handles.into_iter().enumerate() {
+                let parts = h.join().map_err(|_| "fold_lines_chunked: worker panicked".to_string())?;
+                for (k, part) in parts.into_iter().enumerate() {
+                    slots[t + k * threads] = Some(part);
+                }
+            }
+            slots.into_iter().map(|p| p.expect("every chunk folded")).collect()
+        })
+    })();
+    __almide_r.map_err(Into::into)
 }
 // The sequential twin (#3649): the same chunk partition, folded chunk by chunk
 // on the calling thread. The stdlib signature `fold_lines_chunked[A]` bounds
@@ -214,9 +212,12 @@ pub fn almide_rt_fs_fold_lines_chunked<A: Clone + Send, F: Fn(A, String) -> A + 
 // in chunk order, so the result is the one the threaded form gives. The
 // callback is the uniform `Rc<dyn Fn>`, which a closure value already is.
 // build.rs pairs a `Send`-bounded runtime fn with its `_seq` twin by name.
-pub fn almide_rt_fs_fold_lines_chunked_seq<A: Clone>(path: &str, workers: i64, init: A, f: std::rc::Rc<dyn Fn(A, String) -> A>) -> Result<Vec<A>, String> {
-    let ranges = fold_lines_chunk_ranges(path, workers)?;
-    ranges.iter().map(|&(s, e)| fold_lines_range_impl(path, s, e, init.clone(), &*f)).collect()
+pub fn almide_rt_fs_fold_lines_chunked_seq<A: Clone>(path: &str, workers: i64, init: A, f: std::rc::Rc<dyn Fn(A, String) -> A>) -> Result<Vec<A>, AlmideString> {
+    let __almide_r: Result<Vec<A>, String> = (|| {
+        let ranges = fold_lines_chunk_ranges(path, workers)?;
+        ranges.iter().map(|&(s, e)| fold_lines_range_impl(path, s, e, init.clone(), &*f)).collect()
+    })();
+    __almide_r.map_err(Into::into)
 }
 // The byte-range partition both chunked forms walk: `workers` (clamped to 1)
 // equal chunks of [0, size), the empty tail chunks dropped. The non-empty
@@ -229,30 +230,33 @@ fn fold_lines_chunk_ranges(path: &str, workers: i64) -> Result<Vec<(i64, i64)>, 
     let count = (size + chunk - 1) / chunk;
     Ok((0..count).map(|i| i * chunk).map(|s| (s, (s + chunk).min(size))).collect())
 }
-pub fn almide_rt_fs_for_each_line(path: &str, f: std::rc::Rc<dyn Fn(String)>) -> Result<(), String> {
-    use std::io::BufRead;
-    let mut reader = std::io::BufReader::new(std::fs::File::open(path).map_err(|e| io_err("fs.for_each_line", &fs_q(path), e))?);
-    let mut buf = String::new();
-    loop {
-        buf.clear();
-        if reader.read_line(&mut buf).map_err(|e| io_err("fs.for_each_line", &fs_q(path), e))? == 0 {
-            return Ok(());
-        }
-        if buf.ends_with('\n') {
-            buf.pop();
-            if buf.ends_with('\r') {
-                buf.pop();
+pub fn almide_rt_fs_for_each_line(path: &str, f: std::rc::Rc<dyn Fn(String)>) -> Result<(), AlmideString> {
+    let __almide_r: Result<(), String> = (|| {
+        use std::io::BufRead;
+        let mut reader = std::io::BufReader::new(std::fs::File::open(path).map_err(|e| io_err("fs.for_each_line", &fs_q(path), e))?);
+        let mut buf = String::new();
+        loop {
+            buf.clear();
+            if reader.read_line(&mut buf).map_err(|e| io_err("fs.for_each_line", &fs_q(path), e))? == 0 {
+                return Ok(());
             }
+            if buf.ends_with('\n') {
+                buf.pop();
+                if buf.ends_with('\r') {
+                    buf.pop();
+                }
+            }
+            // MEASURED (#1232, 2026-08-14): `clone` here beats `std::mem::take`, which
+            // the ledger proposed as a free memcpy saving. `take` steals the String's
+            // CAPACITY, so `read_line` regrows the buffer from zero every line (several
+            // doublings for an ~80-byte line) where `clone` allocates one right-sized
+            // copy and leaves `buf`'s capacity intact to reuse. 2M lines / 162 MB,
+            // best-of-15, interleaved: 137 ms clone vs 143-146 ms take — the "saving"
+            // is a 4-6% REGRESSION. Do not re-apply without re-measuring.
+            f(buf.clone());
         }
-        // MEASURED (#1232, 2026-08-14): `clone` here beats `std::mem::take`, which
-        // the ledger proposed as a free memcpy saving. `take` steals the String's
-        // CAPACITY, so `read_line` regrows the buffer from zero every line (several
-        // doublings for an ~80-byte line) where `clone` allocates one right-sized
-        // copy and leaves `buf`'s capacity intact to reuse. 2M lines / 162 MB,
-        // best-of-15, interleaved: 137 ms clone vs 143-146 ms take — the "saving"
-        // is a 4-6% REGRESSION. Do not re-apply without re-measuring.
-        f(buf.clone());
-    }
+    })();
+    __almide_r.map_err(Into::into)
 }
 
 // The ADR-0006 FALLIBLE forms of the two callback-driven walkers (#1144, the
@@ -264,56 +268,62 @@ pub fn almide_rt_fs_for_each_line(path: &str, f: std::rc::Rc<dyn Fn(String)>) ->
 // exactly through the failing line (plus its buffered readahead, which is not
 // an observable). The checker routes `fs.fold_lines(p, z, (a, l) => g(a, l)!)`
 // here by rewriting the callee to `fs.__fallible_fold_lines`.
-pub fn almide_rt_fs_fold_lines_effect<A>(path: &str, init: A, f: std::rc::Rc<dyn Fn(A, String) -> Result<A, String>>) -> Result<A, String> {
-    use std::io::BufRead;
-    let mut reader = std::io::BufReader::new(std::fs::File::open(path).map_err(|e| io_err("fs.fold_lines", &fs_q(path), e))?);
-    let mut acc = init;
-    let mut buf = String::new();
-    loop {
-        buf.clear();
-        if reader.read_line(&mut buf).map_err(|e| io_err("fs.fold_lines", &fs_q(path), e))? == 0 {
-            return Ok(acc);
-        }
-        if buf.ends_with('\n') {
-            buf.pop();
-            if buf.ends_with('\r') {
-                buf.pop();
+pub fn almide_rt_fs_fold_lines_effect<A>(path: &str, init: A, f: std::rc::Rc<dyn Fn(A, String) -> Result<A, AlmideString>>) -> Result<A, AlmideString> {
+    let __almide_r: Result<A, String> = (|| {
+        use std::io::BufRead;
+        let mut reader = std::io::BufReader::new(std::fs::File::open(path).map_err(|e| io_err("fs.fold_lines", &fs_q(path), e))?);
+        let mut acc = init;
+        let mut buf = String::new();
+        loop {
+            buf.clear();
+            if reader.read_line(&mut buf).map_err(|e| io_err("fs.fold_lines", &fs_q(path), e))? == 0 {
+                return Ok(acc);
             }
+            if buf.ends_with('\n') {
+                buf.pop();
+                if buf.ends_with('\r') {
+                    buf.pop();
+                }
+            }
+            // MEASURED (#1232, 2026-08-14): `clone` here beats `std::mem::take`, which
+            // the ledger proposed as a free memcpy saving. `take` steals the String's
+            // CAPACITY, so `read_line` regrows the buffer from zero every line (several
+            // doublings for an ~80-byte line) where `clone` allocates one right-sized
+            // copy and leaves `buf`'s capacity intact to reuse. 2M lines / 162 MB,
+            // best-of-15, interleaved: 137 ms clone vs 143-146 ms take — the "saving"
+            // is a 4-6% REGRESSION. Do not re-apply without re-measuring.
+            acc = f(acc, buf.clone())?;
         }
-        // MEASURED (#1232, 2026-08-14): `clone` here beats `std::mem::take`, which
-        // the ledger proposed as a free memcpy saving. `take` steals the String's
-        // CAPACITY, so `read_line` regrows the buffer from zero every line (several
-        // doublings for an ~80-byte line) where `clone` allocates one right-sized
-        // copy and leaves `buf`'s capacity intact to reuse. 2M lines / 162 MB,
-        // best-of-15, interleaved: 137 ms clone vs 143-146 ms take — the "saving"
-        // is a 4-6% REGRESSION. Do not re-apply without re-measuring.
-        acc = f(acc, buf.clone())?;
-    }
+    })();
+    __almide_r.map_err(Into::into)
 }
-pub fn almide_rt_fs_for_each_line_effect(path: &str, f: std::rc::Rc<dyn Fn(String) -> Result<(), String>>) -> Result<(), String> {
-    use std::io::BufRead;
-    let mut reader = std::io::BufReader::new(std::fs::File::open(path).map_err(|e| io_err("fs.for_each_line", &fs_q(path), e))?);
-    let mut buf = String::new();
-    loop {
-        buf.clear();
-        if reader.read_line(&mut buf).map_err(|e| io_err("fs.for_each_line", &fs_q(path), e))? == 0 {
-            return Ok(());
-        }
-        if buf.ends_with('\n') {
-            buf.pop();
-            if buf.ends_with('\r') {
-                buf.pop();
+pub fn almide_rt_fs_for_each_line_effect(path: &str, f: std::rc::Rc<dyn Fn(String) -> Result<(), AlmideString>>) -> Result<(), AlmideString> {
+    let __almide_r: Result<(), String> = (|| {
+        use std::io::BufRead;
+        let mut reader = std::io::BufReader::new(std::fs::File::open(path).map_err(|e| io_err("fs.for_each_line", &fs_q(path), e))?);
+        let mut buf = String::new();
+        loop {
+            buf.clear();
+            if reader.read_line(&mut buf).map_err(|e| io_err("fs.for_each_line", &fs_q(path), e))? == 0 {
+                return Ok(());
             }
+            if buf.ends_with('\n') {
+                buf.pop();
+                if buf.ends_with('\r') {
+                    buf.pop();
+                }
+            }
+            // MEASURED (#1232, 2026-08-14): `clone` here beats `std::mem::take`, which
+            // the ledger proposed as a free memcpy saving. `take` steals the String's
+            // CAPACITY, so `read_line` regrows the buffer from zero every line (several
+            // doublings for an ~80-byte line) where `clone` allocates one right-sized
+            // copy and leaves `buf`'s capacity intact to reuse. 2M lines / 162 MB,
+            // best-of-15, interleaved: 137 ms clone vs 143-146 ms take — the "saving"
+            // is a 4-6% REGRESSION. Do not re-apply without re-measuring.
+            f(buf.clone())?;
         }
-        // MEASURED (#1232, 2026-08-14): `clone` here beats `std::mem::take`, which
-        // the ledger proposed as a free memcpy saving. `take` steals the String's
-        // CAPACITY, so `read_line` regrows the buffer from zero every line (several
-        // doublings for an ~80-byte line) where `clone` allocates one right-sized
-        // copy and leaves `buf`'s capacity intact to reuse. 2M lines / 162 MB,
-        // best-of-15, interleaved: 137 ms clone vs 143-146 ms take — the "saving"
-        // is a 4-6% REGRESSION. Do not re-apply without re-measuring.
-        f(buf.clone())?;
-    }
+    })();
+    __almide_r.map_err(Into::into)
 }
 
 // Absence-as-Option content readers (#1106 / ADR-0004 D4): `Ok(None)` ⇔ the
@@ -321,93 +331,117 @@ pub fn almide_rt_fs_for_each_line_effect(path: &str, f: std::rc::Rc<dyn Fn(Strin
 // directory at the path, IO) keeps the err path with the same message the
 // plain reader produces. Only the runtime can classify — the String error
 // has already erased ErrorKind, and a `fs.exists` pre-check races (TOCTOU).
-pub fn almide_rt_fs_read_text_if_exists(path: &str) -> Result<Option<String>, String> {
-    match std::fs::read_to_string(path) {
-        Ok(s) => Ok(Some(s)),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(io_err("fs.read_text_if_exists", &fs_q(path), e)),
-    }
+pub fn almide_rt_fs_read_text_if_exists(path: &str) -> Result<Option<String>, AlmideString> {
+    let __almide_r: Result<Option<String>, String> = (|| {
+        match std::fs::read_to_string(path) {
+            Ok(s) => Ok(Some(s)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(io_err("fs.read_text_if_exists", &fs_q(path), e)),
+        }
+    })();
+    __almide_r.map_err(Into::into)
 }
-pub fn almide_rt_fs_read_bytes_if_exists(path: &str) -> Result<Option<Vec<i64>>, String> {
-    match std::fs::read(path) {
-        Ok(b) => Ok(Some(b.into_iter().map(|x| x as i64).collect())),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(io_err("fs.read_bytes_if_exists", &fs_q(path), e)),
-    }
+pub fn almide_rt_fs_read_bytes_if_exists(path: &str) -> Result<Option<Vec<i64>>, AlmideString> {
+    let __almide_r: Result<Option<Vec<i64>>, String> = (|| {
+        match std::fs::read(path) {
+            Ok(b) => Ok(Some(b.into_iter().map(|x| x as i64).collect())),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(io_err("fs.read_bytes_if_exists", &fs_q(path), e)),
+        }
+    })();
+    __almide_r.map_err(Into::into)
 }
-pub fn almide_rt_fs_read_lines_if_exists(path: &str) -> Result<Option<Vec<String>>, String> {
-    match std::fs::read_to_string(path) {
-        Ok(s) => Ok(Some(s.lines().map(|l| l.to_string()).collect())),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(io_err("fs.read_lines_if_exists", &fs_q(path), e)),
-    }
+pub fn almide_rt_fs_read_lines_if_exists(path: &str) -> Result<Option<Vec<String>>, AlmideString> {
+    let __almide_r: Result<Option<Vec<String>>, String> = (|| {
+        match std::fs::read_to_string(path) {
+            Ok(s) => Ok(Some(s.lines().map(|l| l.to_string()).collect())),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(io_err("fs.read_lines_if_exists", &fs_q(path), e)),
+        }
+    })();
+    __almide_r.map_err(Into::into)
 }
-pub fn almide_rt_fs_read_bytes_raw_if_exists(path: &str) -> Result<Option<Vec<u8>>, String> {
-    match std::fs::read(path) {
-        Ok(b) => Ok(Some(b)),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(io_err("fs.read_bytes_raw_if_exists", &fs_q(path), e)),
-    }
+pub fn almide_rt_fs_read_bytes_raw_if_exists(path: &str) -> Result<Option<Vec<u8>>, AlmideString> {
+    let __almide_r: Result<Option<Vec<u8>>, String> = (|| {
+        match std::fs::read(path) {
+            Ok(b) => Ok(Some(b)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(io_err("fs.read_bytes_raw_if_exists", &fs_q(path), e)),
+        }
+    })();
+    __almide_r.map_err(Into::into)
 }
 
 // Write
-pub fn almide_rt_fs_write(path: &str, content: &str) -> Result<(), String> {
-    std::fs::write(path, content).map_err(|e| io_err("fs.write", &fs_q(path), e))
+pub fn almide_rt_fs_write(path: &str, content: &str) -> Result<(), AlmideString> { let __almide_r: Result<(), String> = (|| { std::fs::write(path, content).map_err(|e| io_err("fs.write", &fs_q(path), e)) })(); __almide_r.map_err(Into::into) }
+pub fn almide_rt_fs_write_bytes(path: &str, bytes: &[i64]) -> Result<(), AlmideString> {
+    let __almide_r: Result<(), String> = (|| {
+        let data: Vec<u8> = bytes.iter().map(|&b| b as u8).collect();
+        std::fs::write(path, &data).map_err(|e| io_err("fs.write_bytes", &fs_q(path), e))
+    })();
+    __almide_r.map_err(Into::into)
 }
-pub fn almide_rt_fs_write_bytes(path: &str, bytes: &[i64]) -> Result<(), String> {
-    let data: Vec<u8> = bytes.iter().map(|&b| b as u8).collect();
-    std::fs::write(path, &data).map_err(|e| io_err("fs.write_bytes", &fs_q(path), e))
-}
-pub fn almide_rt_fs_append(path: &str, content: &str) -> Result<(), String> {
-    use std::io::Write;
-    let mut f = std::fs::OpenOptions::new().append(true).create(true).open(path).map_err(|e| io_err("fs.append", &fs_q(path), e))?;
-    f.write_all(content.as_bytes()).map_err(|e| io_err("fs.append", &fs_q(path), e))
+pub fn almide_rt_fs_append(path: &str, content: &str) -> Result<(), AlmideString> {
+    let __almide_r: Result<(), String> = (|| {
+        use std::io::Write;
+        let mut f = std::fs::OpenOptions::new().append(true).create(true).open(path).map_err(|e| io_err("fs.append", &fs_q(path), e))?;
+        f.write_all(content.as_bytes()).map_err(|e| io_err("fs.append", &fs_q(path), e))
+    })();
+    __almide_r.map_err(Into::into)
 }
 
 // Directory
-pub fn almide_rt_fs_mkdir_p(path: &str) -> Result<(), String> {
-    std::fs::create_dir_all(path).map_err(|e| io_err("fs.mkdir_p", &fs_q(path), e))
-}
-pub fn almide_rt_fs_list_dir(path: &str) -> Result<Vec<String>, String> {
-    let entries = std::fs::read_dir(path).map_err(|e| io_err("fs.list_dir", &fs_q(path), e))?;
-    let mut names = Vec::new();
-    for entry in entries {
-        let e = entry.map_err(|e| io_err("fs.list_dir", &fs_q(path), e))?;
-        names.push(e.file_name().to_string_lossy().to_string());
-    }
-    names.sort();
-    Ok(names)
+pub fn almide_rt_fs_mkdir_p(path: &str) -> Result<(), AlmideString> { let __almide_r: Result<(), String> = (|| { std::fs::create_dir_all(path).map_err(|e| io_err("fs.mkdir_p", &fs_q(path), e)) })(); __almide_r.map_err(Into::into) }
+pub fn almide_rt_fs_list_dir(path: &str) -> Result<Vec<String>, AlmideString> {
+    let __almide_r: Result<Vec<String>, String> = (|| {
+        let entries = std::fs::read_dir(path).map_err(|e| io_err("fs.list_dir", &fs_q(path), e))?;
+        let mut names = Vec::new();
+        for entry in entries {
+            let e = entry.map_err(|e| io_err("fs.list_dir", &fs_q(path), e))?;
+            names.push(e.file_name().to_string_lossy().to_string());
+        }
+        names.sort();
+        Ok(names)
+    })();
+    __almide_r.map_err(Into::into)
 }
 
 // Delete
-pub fn almide_rt_fs_remove(path: &str) -> Result<(), String> {
-    let p = Path::new(path);
-    if p.is_dir() { std::fs::remove_dir(path).map_err(|e| io_err("fs.remove", &fs_q(path), e)) }
-    else { std::fs::remove_file(path).map_err(|e| io_err("fs.remove", &fs_q(path), e)) }
+pub fn almide_rt_fs_remove(path: &str) -> Result<(), AlmideString> {
+    let __almide_r: Result<(), String> = (|| {
+        let p = Path::new(path);
+        if p.is_dir() { std::fs::remove_dir(path).map_err(|e| io_err("fs.remove", &fs_q(path), e)) }
+        else { std::fs::remove_file(path).map_err(|e| io_err("fs.remove", &fs_q(path), e)) }
+    })();
+    __almide_r.map_err(Into::into)
 }
-pub fn almide_rt_fs_remove_all(path: &str) -> Result<(), String> {
-    let p = Path::new(path);
-    if p.is_dir() { std::fs::remove_dir_all(path).map_err(|e| io_err("fs.remove_all", &fs_q(path), e)) }
-    else { std::fs::remove_file(path).map_err(|e| io_err("fs.remove_all", &fs_q(path), e)) }
+pub fn almide_rt_fs_remove_all(path: &str) -> Result<(), AlmideString> {
+    let __almide_r: Result<(), String> = (|| {
+        let p = Path::new(path);
+        if p.is_dir() { std::fs::remove_dir_all(path).map_err(|e| io_err("fs.remove_all", &fs_q(path), e)) }
+        else { std::fs::remove_file(path).map_err(|e| io_err("fs.remove_all", &fs_q(path), e)) }
+    })();
+    __almide_r.map_err(Into::into)
 }
 
 // Copy / Rename
-pub fn almide_rt_fs_copy(src: &str, dst: &str) -> Result<(), String> {
-    let args = format!("{}, {}", fs_q(src), fs_q(dst));
-    // A directory source fails as READING it does (EISDIR, C-215): the stock
-    // wasm leg's self-hosted copy reads its source first, and std::fs::copy's
-    // own InvalidInput text carries no errno. The embedded host's twin is
-    // host_fs.rs `fs_copy_or_rename`.
-    if Path::new(src).is_dir() {
-        if let Err(e) = std::fs::read(src) {
-            return Err(io_err("fs.copy", &args, e));
+pub fn almide_rt_fs_copy(src: &str, dst: &str) -> Result<(), AlmideString> {
+    let __almide_r: Result<(), String> = (|| {
+        let args = format!("{}, {}", fs_q(src), fs_q(dst));
+        // A directory source fails as READING it does (EISDIR, C-215): the stock
+        // wasm leg's self-hosted copy reads its source first, and std::fs::copy's
+        // own InvalidInput text carries no errno. The embedded host's twin is
+        // host_fs.rs `fs_copy_or_rename`.
+        if Path::new(src).is_dir() {
+            if let Err(e) = std::fs::read(src) {
+                return Err(io_err("fs.copy", &args, e));
+            }
         }
-    }
-    std::fs::copy(src, dst).map(|_| ()).map_err(|e| io_err("fs.copy", &args, e))
+        std::fs::copy(src, dst).map(|_| ()).map_err(|e| io_err("fs.copy", &args, e))
+    })();
+    __almide_r.map_err(Into::into)
 }
-pub fn almide_rt_fs_rename(src: &str, dst: &str) -> Result<(), String> {
-    std::fs::rename(src, dst).map_err(|e| io_err("fs.rename", &format!("{}, {}", fs_q(src), fs_q(dst)), e))
-}
+pub fn almide_rt_fs_rename(src: &str, dst: &str) -> Result<(), AlmideString> { let __almide_r: Result<(), String> = (|| { std::fs::rename(src, dst).map_err(|e| io_err("fs.rename", &format!("{}, {}", fs_q(src), fs_q(dst)), e)) })(); __almide_r.map_err(Into::into) }
 
 // Predicates
 pub fn almide_rt_fs_exists(path: &str) -> bool { Path::new(path).exists() }
@@ -416,48 +450,61 @@ pub fn almide_rt_fs_is_file(path: &str) -> bool { Path::new(path).is_file() }
 pub fn almide_rt_fs_is_symlink(path: &str) -> bool { Path::new(path).is_symlink() }
 
 // Metadata
-pub fn almide_rt_fs_file_size(path: &str) -> Result<i64, String> {
-    std::fs::metadata(path).map(|m| m.len() as i64).map_err(|e| io_err("fs.file_size", &fs_q(path), e))
+pub fn almide_rt_fs_file_size(path: &str) -> Result<i64, AlmideString> { let __almide_r: Result<i64, String> = (|| { std::fs::metadata(path).map(|m| m.len() as i64).map_err(|e| io_err("fs.file_size", &fs_q(path), e)) })(); __almide_r.map_err(Into::into) }
+pub fn almide_rt_fs_modified_at(path: &str) -> Result<i64, AlmideString> {
+    let __almide_r: Result<i64, String> = (|| {
+        let meta = std::fs::metadata(path).map_err(|e| io_err("fs.modified_at", &fs_q(path), e))?;
+        let modified = meta.modified().map_err(|e| io_err("fs.modified_at", &fs_q(path), e))?;
+        Ok(modified.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64)
+    })();
+    __almide_r.map_err(Into::into)
 }
-pub fn almide_rt_fs_modified_at(path: &str) -> Result<i64, String> {
-    let meta = std::fs::metadata(path).map_err(|e| io_err("fs.modified_at", &fs_q(path), e))?;
-    let modified = meta.modified().map_err(|e| io_err("fs.modified_at", &fs_q(path), e))?;
-    Ok(modified.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64)
-}
-pub fn almide_rt_fs_stat(path: &str) -> Result<AlmideFileStat, String> {
-    let meta = std::fs::metadata(path).map_err(|e| io_err("fs.stat", &fs_q(path), e))?;
-    let size = meta.len() as i64;
-    let is_dir = meta.is_dir();
-    let is_file = meta.is_file();
-    let modified = meta.modified().ok()
-        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| d.as_secs() as i64).unwrap_or(0);
-    Ok(AlmideFileStat { size, is_dir, is_file, modified })
+pub fn almide_rt_fs_stat(path: &str) -> Result<AlmideFileStat, AlmideString> {
+    let __almide_r: Result<AlmideFileStat, String> = (|| {
+        let meta = std::fs::metadata(path).map_err(|e| io_err("fs.stat", &fs_q(path), e))?;
+        let size = meta.len() as i64;
+        let is_dir = meta.is_dir();
+        let is_file = meta.is_file();
+        let modified = meta.modified().ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs() as i64).unwrap_or(0);
+        Ok(AlmideFileStat { size, is_dir, is_file, modified })
+    })();
+    __almide_r.map_err(Into::into)
 }
 
 // Temp
 pub fn almide_rt_fs_temp_dir() -> AlmideString { let __almide_out: String = std::env::temp_dir().to_string_lossy().replace('\\', "/"); __almide_out.into() }
-pub fn almide_rt_fs_create_temp_file(prefix: &str) -> Result<String, String> {
-    let dir = std::env::temp_dir();
-    let name = format!("{}{}", prefix, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos());
-    let path = dir.join(&name);
-    std::fs::write(&path, "").map_err(|e| io_err("fs.create_temp_file", &fs_q(&path.to_string_lossy()), e))?;
-    Ok(path.to_string_lossy().replace('\\', "/"))
+pub fn almide_rt_fs_create_temp_file(prefix: &str) -> Result<String, AlmideString> {
+    let __almide_r: Result<String, String> = (|| {
+        let dir = std::env::temp_dir();
+        let name = format!("{}{}", prefix, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos());
+        let path = dir.join(&name);
+        std::fs::write(&path, "").map_err(|e| io_err("fs.create_temp_file", &fs_q(&path.to_string_lossy()), e))?;
+        Ok(path.to_string_lossy().replace('\\', "/"))
+    })();
+    __almide_r.map_err(Into::into)
 }
-pub fn almide_rt_fs_create_temp_dir(prefix: &str) -> Result<String, String> {
-    let dir = std::env::temp_dir();
-    let name = format!("{}{}", prefix, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos());
-    let path = dir.join(&name);
-    std::fs::create_dir_all(&path).map_err(|e| io_err("fs.create_temp_dir", &fs_q(&path.to_string_lossy()), e))?;
-    Ok(path.to_string_lossy().replace('\\', "/"))
+pub fn almide_rt_fs_create_temp_dir(prefix: &str) -> Result<String, AlmideString> {
+    let __almide_r: Result<String, String> = (|| {
+        let dir = std::env::temp_dir();
+        let name = format!("{}{}", prefix, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos());
+        let path = dir.join(&name);
+        std::fs::create_dir_all(&path).map_err(|e| io_err("fs.create_temp_dir", &fs_q(&path.to_string_lossy()), e))?;
+        Ok(path.to_string_lossy().replace('\\', "/"))
+    })();
+    __almide_r.map_err(Into::into)
 }
 
 // Walk (recursive)
-pub fn almide_rt_fs_walk(dir: &str) -> Result<Vec<String>, String> {
-    let mut results = Vec::new();
-    walk_recursive(Path::new(dir), &mut results)?;
-    results.sort();
-    Ok(results)
+pub fn almide_rt_fs_walk(dir: &str) -> Result<Vec<String>, AlmideString> {
+    let __almide_r: Result<Vec<String>, String> = (|| {
+        let mut results = Vec::new();
+        walk_recursive(Path::new(dir), &mut results)?;
+        results.sort();
+        Ok(results)
+    })();
+    __almide_r.map_err(Into::into)
 }
 
 fn walk_recursive(dir: &Path, results: &mut Vec<String>) -> Result<(), String> {
@@ -485,30 +532,33 @@ fn walk_recursive(dir: &Path, results: &mut Vec<String>) -> Result<(), String> {
 // when the base is empty, and byte-order sorted. The walk is depth-bounded to
 // the pattern's segment count when it holds no `**`. The wasm twin
 // (stdlib/fs_walk.almd `fs_glob`) transcribes this algorithm step for step.
-pub fn almide_rt_fs_glob(pattern: &str) -> Result<Vec<String>, String> {
-    let absolute = pattern.starts_with('/');
-    let segs: Vec<&str> = pattern.split('/').filter(|s| !s.is_empty()).collect();
-    let k = segs.iter().take_while(|s| !s.contains('*')).count();
-    let pats = &segs[k..];
-    let base = format!("{}{}", if absolute { "/" } else { "" }, segs[..k].join("/"));
-    if pats.is_empty() {
-        let hit = !base.is_empty() && Path::new(&base).exists();
-        return Ok(if hit { vec![base] } else { Vec::new() });
-    }
-    if !base.is_empty() && !Path::new(&base).is_dir() { return Ok(Vec::new()); }
-    let root = if base.is_empty() { "." } else { base.as_str() };
-    let prefix = if base.is_empty() || base == "/" { base.clone() } else { format!("{}/", base) };
-    let depth = if pats.iter().any(|p| *p == "**") { None } else { Some(pats.len()) };
-    let mut results = Vec::new();
-    if !base.is_empty() && glob_segs_match(pats, &[]) { results.push(base.clone()); }
-    let mut rels = Vec::new();
-    glob_walk(Path::new(root), "", depth, &mut rels)?;
-    for rel in rels {
-        let rsegs: Vec<&str> = rel.split('/').collect();
-        if glob_segs_match(pats, &rsegs) { results.push(format!("{}{}", prefix, rel)); }
-    }
-    results.sort();
-    Ok(results)
+pub fn almide_rt_fs_glob(pattern: &str) -> Result<Vec<String>, AlmideString> {
+    let __almide_r: Result<Vec<String>, String> = (|| {
+        let absolute = pattern.starts_with('/');
+        let segs: Vec<&str> = pattern.split('/').filter(|s| !s.is_empty()).collect();
+        let k = segs.iter().take_while(|s| !s.contains('*')).count();
+        let pats = &segs[k..];
+        let base = format!("{}{}", if absolute { "/" } else { "" }, segs[..k].join("/"));
+        if pats.is_empty() {
+            let hit = !base.is_empty() && Path::new(&base).exists();
+            return Ok(if hit { vec![base] } else { Vec::new() });
+        }
+        if !base.is_empty() && !Path::new(&base).is_dir() { return Ok(Vec::new()); }
+        let root = if base.is_empty() { "." } else { base.as_str() };
+        let prefix = if base.is_empty() || base == "/" { base.clone() } else { format!("{}/", base) };
+        let depth = if pats.iter().any(|p| *p == "**") { None } else { Some(pats.len()) };
+        let mut results = Vec::new();
+        if !base.is_empty() && glob_segs_match(pats, &[]) { results.push(base.clone()); }
+        let mut rels = Vec::new();
+        glob_walk(Path::new(root), "", depth, &mut rels)?;
+        for rel in rels {
+            let rsegs: Vec<&str> = rel.split('/').collect();
+            if glob_segs_match(pats, &rsegs) { results.push(format!("{}{}", prefix, rel)); }
+        }
+        results.sort();
+        Ok(results)
+    })();
+    __almide_r.map_err(Into::into)
 }
 
 // Collects every entry below `dir` as a `/`-joined path relative to the walk
@@ -554,10 +604,6 @@ fn glob_star_match(pat: &str, seg: &str) -> bool {
     true
 }
 
-pub fn almide_rt_fs_read_bytes_raw(path: &str) -> Result<Vec<u8>, String> {
-    std::fs::read(path).map_err(|e| io_err("fs.read_bytes_raw", &fs_q(path), e))
-}
+pub fn almide_rt_fs_read_bytes_raw(path: &str) -> Result<Vec<u8>, AlmideString> { let __almide_r: Result<Vec<u8>, String> = (|| { std::fs::read(path).map_err(|e| io_err("fs.read_bytes_raw", &fs_q(path), e)) })(); __almide_r.map_err(Into::into) }
 
-pub fn almide_rt_fs_write_bytes_raw(path: &str, data: &Vec<u8>) -> Result<(), String> {
-    std::fs::write(path, data).map_err(|e| io_err("fs.write_bytes_raw", &fs_q(path), e))
-}
+pub fn almide_rt_fs_write_bytes_raw(path: &str, data: &Vec<u8>) -> Result<(), AlmideString> { let __almide_r: Result<(), String> = (|| { std::fs::write(path, data).map_err(|e| io_err("fs.write_bytes_raw", &fs_q(path), e)) })(); __almide_r.map_err(Into::into) }

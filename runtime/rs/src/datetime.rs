@@ -61,51 +61,54 @@ pub fn almide_rt_datetime_to_iso(ts: i64) -> AlmideString {
 /// (`00+09` failed to parse and vanished), and month 13 / day 45 / hour 99
 /// were "ok" — February of the next year. The self-host twin is
 /// stdlib/datetime_parse_iso.almd; the two must answer the same bytes.
-pub fn almide_rt_datetime_parse_iso(s: &str) -> Result<i64, String> {
-    let t = s.trim();
-    let mut halves = t.split('T');
-    let (Some(date), Some(time_raw), None) = (halves.next(), halves.next(), halves.next()) else {
-        return Err("expected YYYY-MM-DDTHH:MM:SSZ".into());
-    };
-    // Digits-only fields: one refused part refuses the whole string.
-    fn fields(half: &str, sep: char) -> Option<Vec<i64>> {
-        half.split(sep)
-            .map(|p| if almide_rt_iso_digits(p) { p.parse::<i64>().ok() } else { None })
-            .collect()
-    }
-    let (time_z, had_z) = match time_raw.strip_suffix('Z') {
-        Some(x) => (x, true),
-        None => (time_raw, false),
-    };
-    let sign_at = time_z.find(['+', '-']);
-    // `Z` and an offset are exclusive spellings of the same thing.
-    if had_z && sign_at.is_some() { return Err("invalid datetime format".into()); }
-    let hms = sign_at.map_or(time_z, |i| &time_z[..i]);
-    let (Some(d), Some(tm)) = (fields(date, '-'), fields(hms, ':')) else {
-        return Err("invalid datetime format".into());
-    };
-    if d.len() != 3 || tm.len() != 3 { return Err("invalid datetime format".into()); }
-    let offset = match sign_at {
-        None => 0,
-        Some(i) => {
-            let raw = &time_z[i..];
-            match fields(&time_z[i + 1..], ':').as_deref() {
-                Some([oh, om]) if (0..=23).contains(oh) && (0..=59).contains(om) => {
-                    let secs = oh * 3600 + om * 60;
-                    if raw.starts_with('-') { -secs } else { secs }
-                }
-                _ => return Err(format!("invalid offset: {raw}")),
-            }
+pub fn almide_rt_datetime_parse_iso(s: &str) -> Result<i64, AlmideString> {
+    let __almide_r: Result<i64, String> = (|| {
+        let t = s.trim();
+        let mut halves = t.split('T');
+        let (Some(date), Some(time_raw), None) = (halves.next(), halves.next(), halves.next()) else {
+            return Err("expected YYYY-MM-DDTHH:MM:SSZ".into());
+        };
+        // Digits-only fields: one refused part refuses the whole string.
+        fn fields(half: &str, sep: char) -> Option<Vec<i64>> {
+            half.split(sep)
+                .map(|p| if almide_rt_iso_digits(p) { p.parse::<i64>().ok() } else { None })
+                .collect()
         }
-    };
-    let (y, mo, dd) = (d[0], d[1], d[2]);
-    let (h, mi, sec) = (tm[0], tm[1], tm[2]);
-    if !(1..=12).contains(&mo) { return Err(format!("month out of range: {mo}")); }
-    if dd < 1 || dd > almide_rt_days_in_month(y, mo) { return Err(format!("day out of range: {dd}")); }
-    if !(0..=23).contains(&h) { return Err(format!("hour out of range: {h}")); }
-    if !(0..=59).contains(&mi) { return Err(format!("minute out of range: {mi}")); }
-    if !(0..=59).contains(&sec) { return Err(format!("second out of range: {sec}")); }
-    Ok(almide_rt_datetime_from_parts(y, mo, dd, h, mi, sec) - offset)
+        let (time_z, had_z) = match time_raw.strip_suffix('Z') {
+            Some(x) => (x, true),
+            None => (time_raw, false),
+        };
+        let sign_at = time_z.find(['+', '-']);
+        // `Z` and an offset are exclusive spellings of the same thing.
+        if had_z && sign_at.is_some() { return Err("invalid datetime format".into()); }
+        let hms = sign_at.map_or(time_z, |i| &time_z[..i]);
+        let (Some(d), Some(tm)) = (fields(date, '-'), fields(hms, ':')) else {
+            return Err("invalid datetime format".into());
+        };
+        if d.len() != 3 || tm.len() != 3 { return Err("invalid datetime format".into()); }
+        let offset = match sign_at {
+            None => 0,
+            Some(i) => {
+                let raw = &time_z[i..];
+                match fields(&time_z[i + 1..], ':').as_deref() {
+                    Some([oh, om]) if (0..=23).contains(oh) && (0..=59).contains(om) => {
+                        let secs = oh * 3600 + om * 60;
+                        if raw.starts_with('-') { -secs } else { secs }
+                    }
+                    _ => return Err(format!("invalid offset: {raw}")),
+                }
+            }
+        };
+        let (y, mo, dd) = (d[0], d[1], d[2]);
+        let (h, mi, sec) = (tm[0], tm[1], tm[2]);
+        if !(1..=12).contains(&mo) { return Err(format!("month out of range: {mo}")); }
+        if dd < 1 || dd > almide_rt_days_in_month(y, mo) { return Err(format!("day out of range: {dd}")); }
+        if !(0..=23).contains(&h) { return Err(format!("hour out of range: {h}")); }
+        if !(0..=59).contains(&mi) { return Err(format!("minute out of range: {mi}")); }
+        if !(0..=59).contains(&sec) { return Err(format!("second out of range: {sec}")); }
+        Ok(almide_rt_datetime_from_parts(y, mo, dd, h, mi, sec) - offset)
+    })();
+    __almide_r.map_err(Into::into)
 }
 
 // `string.is_digit`'s rule (runtime/rs/src/string.rs): non-empty, ASCII digits only.

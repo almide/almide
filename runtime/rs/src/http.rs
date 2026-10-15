@@ -627,9 +627,7 @@ pub fn almide_rt_http___call_start(
     headers: &AlmideMap<String, String>,
     total_ms: i64,
     idle_ms: i64,
-) -> Result<AlmideHttpCall, String> {
-    almide_http_call_start(method, url, body, headers, total_ms, idle_ms)
-}
+) -> Result<AlmideHttpCall, AlmideString> { let __almide_r: Result<AlmideHttpCall, String> = (|| { almide_http_call_start(method, url, body, headers, total_ms, idle_ms) })(); __almide_r.map_err(Into::into) }
 
 /// Never blocks: `None` while the call runs, the result once it ended.
 pub fn almide_http_call_poll(c: &AlmideHttpCall) -> Option<Result<AlmideHttpResponse, String>> {
@@ -685,9 +683,7 @@ pub fn almide_rt_http___request_stream_limited(
     total_ms: i64,
     idle_ms: i64,
     on_chunk: std::rc::Rc<dyn Fn(String)>,
-) -> Result<(), String> {
-    almide_http_stream_limited_impl(method, url, body, headers, total_ms, idle_ms, |chunk| on_chunk(chunk))
-}
+) -> Result<(), AlmideString> { let __almide_r: Result<(), String> = (|| { almide_http_stream_limited_impl(method, url, body, headers, total_ms, idle_ms, |chunk| on_chunk(chunk)) })(); __almide_r.map_err(Into::into) }
 
 /// The one entry the SSE helpers stream through: no limits = the classic
 /// `request_stream` path (ALMIDE_HTTP_TIMEOUT_SECS / 120 s), limits = the
@@ -919,11 +915,14 @@ fn almide_http_signals_disarm(_: ()) {}
 // `Result<Response, String>` contract (future error-in-handler support).
 pub fn almide_rt_http_serve(
     port: i64,
-    handler: std::rc::Rc<dyn Fn(AlmideHttpRequest) -> Result<AlmideHttpResponse, String>>,
-) -> Result<(), String> {
-    // #1055: the handler slot is effect-typed, so the checker already hands
-    // us the carrier shape — a handler `Err` becomes the listener loop's 500.
-    almide_http_serve(port, handler)
+    handler: std::rc::Rc<dyn Fn(AlmideHttpRequest) -> Result<AlmideHttpResponse, AlmideString>>,
+) -> Result<(), AlmideString> {
+    let __almide_r: Result<(), String> = (|| {
+        // #1055: the handler slot is effect-typed, so the checker already hands
+        // us the carrier shape — a handler `Err` becomes the listener loop's 500.
+        almide_http_serve(port, handler)
+    })();
+    __almide_r.map_err(Into::into)
 }
 
 // ── Helpers ──

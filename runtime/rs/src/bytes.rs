@@ -406,10 +406,13 @@ pub fn almide_rt_bytes_cmp(a: &Vec<u8>, b: &Vec<u8>) -> i64 {
     }
 }
 
-pub fn almide_rt_bytes_to_string(b: &Vec<u8>) -> Result<String, String> {
-    std::str::from_utf8(b)
-        .map(|s| s.to_string())
-        .map_err(|e| format!("invalid UTF-8: {}", e))
+pub fn almide_rt_bytes_to_string(b: &Vec<u8>) -> Result<String, AlmideString> {
+    let __almide_r: Result<String, String> = (|| {
+        std::str::from_utf8(b)
+            .map(|s| s.to_string())
+            .map_err(|e| format!("invalid UTF-8: {}", e))
+    })();
+    __almide_r.map_err(Into::into)
 }
 
 pub fn almide_rt_bytes_to_string_lossy(b: &Vec<u8>) -> AlmideString { let __almide_out: String = String::from_utf8_lossy(b).into_owned(); __almide_out.into() }

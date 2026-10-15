@@ -83,8 +83,8 @@ pub fn almide_rt_string_is_alphanumeric(s: &str) -> bool { !s.is_empty() && s.ch
 pub fn almide_rt_string_is_upper(s: &str) -> bool { !s.is_empty() && s.chars().any(|c| c.is_alphabetic()) && s.chars().all(|c| !c.is_alphabetic() || c.is_uppercase()) }
 pub fn almide_rt_string_is_lower(s: &str) -> bool { !s.is_empty() && s.chars().any(|c| c.is_alphabetic()) && s.chars().all(|c| !c.is_alphabetic() || c.is_lowercase()) }
 pub fn almide_rt_string_capitalize(s: &str) -> AlmideString { let __almide_out: String = { let mut c = s.chars(); match c.next() { Some(f) => format!("{}{}", f.to_uppercase(), c.collect::<String>()), None => String::new() } }; __almide_out.into() }
-pub fn almide_rt_string_to_int(s: &str) -> Result<i64, String> { s.trim().parse::<i64>().map_err(|e| e.to_string()) }
-pub fn almide_rt_string_to_float(s: &str) -> Result<f64, String> { s.trim().parse::<f64>().map_err(|e| e.to_string()) }
+pub fn almide_rt_string_to_int(s: &str) -> Result<i64, AlmideString> { let __almide_r: Result<i64, String> = (|| { s.trim().parse::<i64>().map_err(|e| e.to_string()) })(); __almide_r.map_err(Into::into) }
+pub fn almide_rt_string_to_float(s: &str) -> Result<f64, AlmideString> { let __almide_r: Result<f64, String> = (|| { s.trim().parse::<f64>().map_err(|e| e.to_string()) })(); __almide_r.map_err(Into::into) }
 pub fn almide_rt_string_to_bytes(s: &str) -> Vec<i64> { s.bytes().map(|b| b as i64).collect() }
 // UTF-8 lossy decode — the inverse of `to_bytes` (which emits UTF-8), matching
 // Almide's `bytes.to_string_lossy` and every other language's bytes→string. (Was
