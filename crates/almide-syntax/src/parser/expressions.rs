@@ -124,22 +124,28 @@ impl Parser {
         gap
     }
 
-    /// `||` / `&&` are not Almide spellings — reject them with the hint table's
-    /// suggestion rather than letting them fall through as unknown operators.
-    fn reject_c_style_boolean_operator(&mut self) -> Result<(), String> {
-        if self.check(TokenType::PipePipe) {
-            return Err(self.check_hint_or_err(
-                None, super::hints::HintScope::Expression,
-                "'||' is not valid in Almide",
-            ));
-        }
-        if self.check(TokenType::AmpAmp) {
-            return Err(self.check_hint_or_err(
-                None, super::hints::HintScope::Expression,
-                "'&&' is not valid in Almide",
-            ));
-        }
-        Ok(())
+    /// `||` / `&&` / prefix `!` are not Almide spellings: one error with the
+    /// hint table's suggestion, then the token reads as the word it stands
+    /// for (`or` / `and` / `not`), so the rest of the expression parses —
+    /// stopping here lost the parse and failed the enclosing fn's type too.
+    fn respell_c_style_boolean_operator(&mut self) {
+        let (word, tt) = match self.current().token_type {
+            TokenType::PipePipe => ("or", TokenType::Or),
+            TokenType::AmpAmp => ("and", TokenType::And),
+            TokenType::Bang => ("not", TokenType::Not),
+            _ => return,
+        };
+        let op = self.current().value.clone();
+        let hint = self.check_hint(None, super::hints::HintScope::Expression);
+        let (message, hint) = match hint {
+            Some(h) => (h.message.unwrap_or_else(|| format!("'{op}' is not valid in Almide")), h.hint),
+            None => (format!("'{op}' is not valid in Almide"), format!("Use '{word}'.")),
+        };
+        let diag = self.diag_error(message, hint, "operator").with_try(format!("a {word} b"));
+        self.errors.push(diag);
+        let tok = &mut self.tokens[self.pos];
+        tok.token_type = tt;
+        tok.value = word.to_string();
     }
 
     /// Reject chained comparisons: `a < b < c`.
@@ -170,7 +176,9 @@ impl Parser {
             if !gap.is_empty() {
                 self.pending_gap = Some((self.pos, gap));
             }
-            self.reject_c_style_boolean_operator()?;
+            if matches!(self.current().token_type, TokenType::PipePipe | TokenType::AmpAmp) {
+                self.respell_c_style_boolean_operator();
+            }
 
             let tt = self.current().token_type.clone();
             let Some((l_bp, r_bp)) = Self::infix_bp(&tt) else { break };
@@ -331,11 +339,8 @@ impl Parser {
             }));
         }
         if self.check(TokenType::Bang) {
-            let tok = self.current();
-            return Err(format!(
-                "'!' is not valid in Almide at line {}:{}\n  Hint: Use 'not' for boolean negation. Write: not x",
-                tok.line, tok.col
-            ));
+            self.respell_c_style_boolean_operator();
+            return self.parse_unary();
         }
         self.parse_postfix()
     }

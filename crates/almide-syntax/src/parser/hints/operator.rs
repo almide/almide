@@ -61,7 +61,7 @@ fn check_standalone(ctx: &HintContext) -> Option<HintResult> {
         // `!x` → `not x`
         (TokenType::Bang, _) => Some(HintResult {
             message: Some("'!' is not valid in Almide".into()),
-            hint: "Use 'not x' for boolean negation, not '!x'.".into(),
+            hint: "Use 'not' for boolean negation. Write: not x".into(),
         }),
         // `|x|` closure syntax — detected via lookahead
         (TokenType::Pipe, _) => {

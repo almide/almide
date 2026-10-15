@@ -85,7 +85,7 @@ pub fn all_hints() -> Vec<HintEntry> {
             module: "operator",
             trigger: "'!' in expression",
             message: "'!' is not valid in Almide",
-            hint: "Use 'not x' for boolean negation, not '!x'.",
+            hint: "Use 'not' for boolean negation. Write: not x",
         },
         HintEntry {
             module: "operator",
