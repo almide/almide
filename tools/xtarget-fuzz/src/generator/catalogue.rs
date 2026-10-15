@@ -117,8 +117,11 @@ impl Signature {
 
 /// Bundled stdlib modules the generator draws from, paired with their
 /// embedded source. Only the deterministic, side-effect-free, in-scope
-/// modules are listed — no `fs`/`http`/`process`/`random`
-/// (effects or non-determinism). `datetime` is in: a calendar over Int
+/// modules are listed — no `process`/`random`/`net`
+/// (effects or non-determinism). `http` is in for its pure surface only —
+/// the response and request builders and readers over
+/// `GenType::HttpResponse` / `HttpRequest`; its effect functions (the
+/// network) are dropped like every non-sandboxed module's. `datetime` is in: a calendar over Int
 /// timestamps, its two clocks (`now`, `monotonic_ns`) denied by name. The fixed-width numbers, `bytes`, `matrix`
 /// and `value` are in: the value grammar builds them (`GenType::Sized`,
 /// `Bytes`, `Matrix`, `Value`).
@@ -166,6 +169,8 @@ const BUNDLED_MODULES: &[(&str, &str, bool)] = &[
     ("io", include_str!("../../../../stdlib/io.almd"), true),
     ("args", include_str!("../../../../stdlib/args.almd"), true),
     ("datetime", include_str!("../../../../stdlib/datetime.almd"), false),
+    ("http", include_str!("../../../../stdlib/http.almd"), true),
+    ("html", include_str!("../../../../stdlib/html.almd"), true),
 ];
 
 /// Default selection weight for a function not named in
