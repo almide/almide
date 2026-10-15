@@ -75,8 +75,10 @@ fn sse_openai_chat_run(
                 continue;
             }
             if data_payload.trim() == "[DONE]" {
+                // The stream is over: nothing after it is applied, in this
+                // chunk or a later one.
                 done = true;
-                continue;
+                break;
             }
             handle_sse_data(&data_payload, &mut acc, &on_text_delta);
         }
