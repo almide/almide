@@ -40,6 +40,7 @@ impl Parser {
     /// The condition, the branches and the `else` chain after `if`.
     fn parse_if_rest(&mut self, span: Option<crate::ast::Span>) -> Result<Expr, String> {
         let cond = self.parse_expr()?;
+        let branch_on_next_line = self.check(TokenType::Newline);
         self.skip_newlines();
         // `if (c) { a } else { b }` (C / Rust / JS): one error naming `then`,
         // and the braces parse as the branches — stopping here lost the parse
@@ -48,6 +49,15 @@ impl Parser {
             let diag = self.diag_error(
                 "if requires 'then', not a brace block",
                 "Write `if cond then a else b`. Braces make a block value: `if cond then { … } else { … }`.",
+                "if",
+            ).with_try("if x > 0 then 1 else 2");
+            self.errors.push(diag);
+        } else if branch_on_next_line && !self.check(TokenType::Then) {
+            // `if c` with the branch on the next line (Python / Ruby): one
+            // error, and the branch parses as the `then` it means.
+            let diag = self.diag_error(
+                "if requires 'then' before its branch",
+                "Write `if cond then a else b`; the branch may go on the next line after `then`.",
                 "if",
             ).with_try("if x > 0 then 1 else 2");
             self.errors.push(diag);
