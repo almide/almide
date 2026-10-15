@@ -6,7 +6,10 @@
 //! atomics exist) — and writes the results back in list order.
 //!
 //! Workers are pooled per run: instantiated once, reused by every later
-//! offer of the run, from any fan site. The cost model (#3341, [`plan`] —
+//! offer of the run, from any fan site. So are the threads they run on (the
+//! [`Crew`]): spawned by the first offer that needs them, parked between
+//! offers, and joined when the run ends — spawning a thread per worker per
+//! offer cost about 200 µs of an offer's fixed cost on eight workers. The cost model (#3341, [`plan`] —
 //! the native runtime's `almide_rt_fan_plan` with the same constants, pinned
 //! to docs/benchmarks/fan-cost-model.txt) picks the worker count from the
 //! site's last measured compute time per element — a site's first offer
@@ -45,7 +48,7 @@
 //! the observation it always did.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 
 use super::{Host, StdinSource};
 
@@ -117,6 +120,7 @@ pub(super) struct ParCtx {
     ticked: Option<Arc<AtomicBool>>,
     args: Vec<String>,
     pool: Mutex<Vec<Worker>>,
+    crew: Mutex<Crew>,
     /// Per site: the last measured compute time per element (ns).
     history: Mutex<std::collections::HashMap<String, u128>>,
 }
@@ -128,7 +132,7 @@ impl ParCtx {
         ticked: Option<Arc<AtomicBool>>,
         args: Vec<String>,
     ) -> Self {
-        ParCtx { engine, module, linker, max_memory_bytes, ticked, args, pool: Mutex::new(Vec::new()), history: Mutex::default() }
+        ParCtx { engine, module, linker, max_memory_bytes, ticked, args, pool: Mutex::new(Vec::new()), crew: Mutex::default(), history: Mutex::default() }
     }
 }
 
@@ -137,6 +141,83 @@ struct Worker {
     store: wasmtime::Store<Host>,
     instance: wasmtime::Instance,
     memory: wasmtime::Memory,
+}
+
+/// What one worker of an offer hands back: the worker, for the pool, and
+/// its elements' results — `None` when its chunk failed.
+type Part = Option<(Worker, Vec<(usize, Vec<i64>)>)>;
+
+/// One offer's work for one resident thread: the shared deal, the pooled
+/// worker it starts with (or none: it instantiates one), and where its part
+/// goes.
+type Job = (Arc<Deal>, Option<Worker>, mpsc::Sender<Part>);
+
+/// The run's resident fan threads. Each waits on its own channel; an offer
+/// sends one [`Job`] to each of the first `w` threads. Dropping the crew (the
+/// run's [`ParCtx`] going with its store) closes every channel, and each
+/// thread, parked between offers, exits and is joined.
+#[derive(Default)]
+struct Crew {
+    hands: Vec<(mpsc::Sender<Job>, std::thread::JoinHandle<()>)>,
+}
+
+impl Crew {
+    /// Send every job to its own thread, spawning threads the crew is short
+    /// of. A job no thread took is handed back — the offer counts it as a
+    /// failed part.
+    fn dispatch(&mut self, jobs: Vec<Job>) -> Vec<Job> {
+        let mut refused = Vec::new();
+        for (i, job) in jobs.into_iter().enumerate() {
+            let job = match self.hands.get(i) {
+                Some((tx, _)) => match tx.send(job) {
+                    Ok(()) => continue,
+                    // the thread is gone (it cannot be: a part's panic is
+                    // caught); replace it below
+                    Err(mpsc::SendError(job)) => job,
+                },
+                None => job,
+            };
+            let (tx, rx) = mpsc::channel::<Job>();
+            match crate::host::spawn_resident_guest_thread(move || hand(&rx)) {
+                Ok(handle) => {
+                    let _ = tx.send(job);
+                    if i < self.hands.len() {
+                        self.hands[i] = (tx, handle);
+                    } else {
+                        self.hands.push((tx, handle));
+                    }
+                }
+                Err(_) => refused.push(job),
+            }
+        }
+        refused
+    }
+}
+
+impl Drop for Crew {
+    fn drop(&mut self) {
+        let me = std::thread::current().id();
+        for (tx, handle) in self.hands.drain(..) {
+            drop(tx);
+            if handle.thread().id() != me {
+                let _ = handle.join();
+            }
+        }
+    }
+}
+
+/// A resident thread: run each job's deal on its worker and send the part
+/// back. The deal is dropped BEFORE the part is sent, so when the offer has
+/// every part no thread still holds the run's context.
+fn hand(rx: &mpsc::Receiver<Job>) {
+    while let Ok((deal, worker, back)) = rx.recv() {
+        let part = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| deal.run(worker))).ok().flatten();
+        if part.is_none() {
+            deal.failed.store(true, Ordering::SeqCst);
+        }
+        drop(deal);
+        let _ = back.send(part);
+    }
 }
 
 /// The block-form request's first slot (crates/almide-wasm `FAN_MAGIC`).
@@ -211,17 +292,19 @@ pub(super) fn serve(
     if b_len as u32 as usize != 8 * width * req.n {
         return Ok(0);
     }
-    let Some((results, workers)) = run_all(&ctx, &req) else {
+    let site = req.site.clone();
+    let n = req.n;
+    let Some((results, workers)) = run_all(&ctx, req) else {
         if almide_base::env::flag("ALMIDE_DBG_FAN") {
-            eprintln!("[fan-dbg] {}: not served (a chunk failed), sequential", req.site);
+            eprintln!("[fan-dbg] {site}: not served (a chunk failed), sequential");
         }
         return Ok(0);
     };
     if almide_base::env::flag("ALMIDE_DBG_FAN") {
         if workers >= 2 {
-            eprintln!("[fan-dbg] {}: served on separate instances ({} elements, {workers} workers)", req.site, req.n);
+            eprintln!("[fan-dbg] {site}: served on separate instances ({n} elements, {workers} workers)");
         } else {
-            eprintln!("[fan-dbg] {}: served on one instance, the cost model kept it sequential ({} elements)", req.site, req.n);
+            eprintln!("[fan-dbg] {site}: served on one instance, the cost model kept it sequential ({n} elements)");
         }
     }
     let mut b = Vec::with_capacity(b_len as u32 as usize);
@@ -243,7 +326,7 @@ fn worker_count(n: usize) -> usize {
 
 /// Every element's result slots, element-major, and the worker count — `None`
 /// if any chunk failed.
-fn run_all(ctx: &ParCtx, req: &Request) -> Option<(Vec<i64>, usize)> {
+fn run_all(ctx: &Arc<ParCtx>, req: Request) -> Option<(Vec<i64>, usize)> {
     let n = req.n;
     let width = req.fields.len().max(1);
     let mut out = vec![0i64; n * width];
@@ -252,30 +335,41 @@ fn run_all(ctx: &ParCtx, req: &Request) -> Option<(Vec<i64>, usize)> {
     }
     let estimate = ctx.history.lock().ok().and_then(|h| h.get(&req.site).copied());
     let workers = plan(n, estimate);
-    let next = AtomicUsize::new(0);
-    let failed = AtomicBool::new(false);
-    let (warm, cold) = ([AtomicU64::new(0), AtomicU64::new(0)], [AtomicU64::new(0), AtomicU64::new(0)]);
     // a few blocks per worker, so a worker slowed by a busy core does less
     let block = if workers < 2 { n } else { n.div_ceil(workers * 4).max(1) };
-    let deal = Deal { ctx, req, block, next: &next, failed: &failed, warm: &warm, cold: &cold };
+    let deal = Arc::new(Deal {
+        ctx: Arc::clone(ctx),
+        req,
+        block,
+        next: AtomicUsize::new(0),
+        failed: AtomicBool::new(false),
+        warm: [AtomicU64::new(0), AtomicU64::new(0)],
+        cold: [AtomicU64::new(0), AtomicU64::new(0)],
+    });
     let mut taken = take(ctx, workers);
-    let parts: Vec<Option<(Worker, Vec<(usize, Vec<i64>)>)>> = if workers < 2 {
-        vec![deal.run(taken.pop())]
+    let mut parts: Vec<Part> = Vec::with_capacity(workers);
+    if workers < 2 {
+        parts.push(deal.run(taken.pop()));
     } else {
-        std::thread::scope(|s| {
-            let handles: Vec<_> = (0..workers)
-                .map(|_| {
-                    let w = taken.pop();
-                    let deal = &deal;
-                    // #3435: a fan worker calls into a guest of the same
-                    // EMBEDDED_WASM_STACK engine, so it needs the same stack.
-                    crate::host::spawn_guest_thread(s, move || deal.run(w))
-                })
-                .collect();
-            handles.into_iter().map(|h| h.join().ok().flatten()).collect()
-        })
-    };
-    let mut ok = !failed.load(Ordering::SeqCst);
+        let (back, parts_rx) = mpsc::channel();
+        let jobs = (0..workers).map(|_| (Arc::clone(&deal), taken.pop(), back.clone())).collect();
+        drop(back);
+        // #3435: a fan worker calls into a guest of the same
+        // EMBEDDED_WASM_STACK engine, so its thread has the same stack.
+        let refused = ctx.crew.lock().map_or_else(|_| Vec::new(), |mut crew| crew.dispatch(jobs));
+        if !refused.is_empty() {
+            deal.failed.store(true, Ordering::SeqCst);
+        }
+        drop(refused);
+        // every sender is a job's: the iteration ends once each job's thread
+        // sent its part (or a job was dropped unrun)
+        parts.extend(parts_rx.iter());
+        if parts.len() < workers {
+            deal.failed.store(true, Ordering::SeqCst);
+        }
+    }
+    let Deal { failed, warm, cold, req, .. } = Arc::into_inner(deal)?;
+    let mut ok = !failed.into_inner();
     let mut back = Vec::new();
     for part in parts {
         let Some((w, done)) = part else {
@@ -300,7 +394,7 @@ fn run_all(ctx: &ParCtx, req: &Request) -> Option<(Vec<i64>, usize)> {
         eprintln!("[fan-dbg] {}: measured {} ns per element (warm {w} ns / {wn}, warm-up {c} ns / {cn})", req.site, ns / k.max(1));
     }
     if ok && k > 0 && let Ok(mut h) = ctx.history.lock() {
-        h.insert(req.site.clone(), u128::from(ns) / u128::from(k));
+        h.insert(req.site, u128::from(ns) / u128::from(k));
     }
     ok.then_some((out, workers))
 }
@@ -323,28 +417,28 @@ fn reusable(w: &Worker) -> bool {
 
 /// The shared state of one offer: elements are dealt in blocks of `block`
 /// consecutive indices.
-struct Deal<'a> {
-    ctx: &'a ParCtx,
-    req: &'a Request,
+struct Deal {
+    ctx: Arc<ParCtx>,
+    req: Request,
     block: usize,
-    next: &'a AtomicUsize,
-    failed: &'a AtomicBool,
+    next: AtomicUsize,
+    failed: AtomicBool,
     /// `[ns, count]` of the elements' compute (thread CPU time), split as
     /// the native runtime's `AlmideFanClock` splits it: a worker's FIRST
     /// block is its warm-up (a fresh thread's and instance's first call —
     /// that cost belongs to the offer's `WORKER` term, not to `t`) and goes
     /// to `cold`; the rest go to `warm`.
-    warm: &'a [AtomicU64; 2],
-    cold: &'a [AtomicU64; 2],
+    warm: [AtomicU64; 2],
+    cold: [AtomicU64; 2],
 }
 
-impl Deal<'_> {
+impl Deal {
     /// One thread: its worker (pooled, or instantiated now) takes the next
     /// unclaimed block until none is left or another block failed.
-    fn run(&self, pooled: Option<Worker>) -> Option<(Worker, Vec<(usize, Vec<i64>)>)> {
+    fn run(&self, pooled: Option<Worker>) -> Part {
         let got = match pooled {
             Some(w) => Some(w),
-            None => instantiate(self.ctx).ok(),
+            None => instantiate(&self.ctx).ok(),
         }
         .and_then(|mut w| {
             let func = self.arm(&mut w)?;
@@ -438,7 +532,7 @@ impl Deal<'_> {
     }
 
     /// Take unclaimed blocks on `w` until none is left (or a block failed).
-    fn drain(&self, mut w: Worker, func: wasmtime::Func, caps: &[i64]) -> Option<(Worker, Vec<(usize, Vec<i64>)>)> {
+    fn drain(&self, mut w: Worker, func: wasmtime::Func, caps: &[i64]) -> Part {
         let mut done = Vec::new();
         let mut first = true;
         loop {
@@ -452,7 +546,7 @@ impl Deal<'_> {
             let hi = (lo + self.block).min(self.req.n);
             let t0 = cpu_ns();
             let vals = self.block_call(&mut w, func, caps, (lo, hi))?;
-            add(if first { self.cold } else { self.warm }, cpu_ns().wrapping_sub(t0), (hi - lo) as u64);
+            add(if first { &self.cold } else { &self.warm }, cpu_ns().wrapping_sub(t0), (hi - lo) as u64);
             first = false;
             done.extend((lo..hi).zip(vals));
         }
