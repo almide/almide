@@ -23,6 +23,7 @@ mod denylist;
 pub mod identity;
 pub mod inspect_gen;
 mod mutate;
+mod nominal;
 mod pools;
 /// The shape vocabulary of the multi-module matrix gate (#3309), shared
 /// verbatim with `tests/shape_matrix_test.rs` so the random hunt and the

@@ -53,6 +53,9 @@ pub enum GenType {
     /// `Set[elem]`, built with `set.from_list`; the element is a hashable
     /// scalar ([`GenType::is_set_elem`]).
     Set(Box<GenType>),
+    /// A stdlib nominal type (`HttpResponse`, `SafeHtml`, …), built and
+    /// observed through its module's pure functions ([`super::nominal`]).
+    Nominal(&'static str),
 }
 
 /// The fixed-width number types the value grammar builds.
@@ -110,6 +113,7 @@ impl GenType {
             GenType::Matrix => out.push_str("Matrix"),
             GenType::Value => out.push_str("Value"),
             GenType::Endian => out.push_str("Endian"),
+            GenType::Nominal(k) => out.push_str(k),
         }
     }
 
@@ -155,6 +159,7 @@ impl GenType {
             GenType::Bytes => Some((String::new(), format!("bytes.to_list({v})"))),
             GenType::Matrix => Some((String::new(), format!("matrix.to_lists({v})"))),
             GenType::Value => Some((String::new(), format!("value.stringify({v})"))),
+            GenType::Nominal(k) => Some((String::new(), super::nominal::fill(super::nominal::get(k)?.observe, v, 0))),
             GenType::List(e) => Some((String::new(), format!("list.map({v}, {})", inner(e)?))),
             GenType::Option(e) => Some((String::new(), format!("option.map({v}, {})", inner(e)?))),
             GenType::Result(e) => Some((String::new(), format!("result.map({v}, {})", inner(e)?))),
@@ -178,6 +183,7 @@ impl GenType {
             GenType::Bytes => GenType::List(Box::new(GenType::Int)),
             GenType::Matrix => GenType::List(Box::new(GenType::List(Box::new(GenType::Float)))),
             GenType::Value => GenType::String,
+            GenType::Nominal(k) => (super::nominal::get(k)?.observed)(),
             GenType::List(e) => GenType::List(inner(e)?),
             GenType::Option(e) => GenType::Option(inner(e)?),
             GenType::Result(e) => GenType::Result(inner(e)?),
@@ -202,6 +208,8 @@ impl GenType {
             GenType::Bytes | GenType::Matrix | GenType::Value => false,
             // Only ever an argument: never printed.
             GenType::Endian => false,
+            // No string form of its own: observed through its readers.
+            GenType::Nominal(_) => false,
         }
     }
 
@@ -218,7 +226,8 @@ impl GenType {
             | GenType::Bytes
             | GenType::Matrix
             | GenType::Value => 1,
-            | GenType::Endian => 1,
+            | GenType::Endian
+            | GenType::Nominal(_) => 1,
             GenType::List(e)
             | GenType::Option(e)
             | GenType::Result(e)
