@@ -109,3 +109,19 @@ fn a_ternary_is_one_error_and_reads_as_if() {
     let (ok, errs) = check(&format!("fn f(x: Int) -> Int = int.parse(int.to_string(x))? ?? 0\n{MAIN}"));
     assert!(ok && errs.is_empty(), "{errs:#?}");
 }
+
+/// `&&`, `||` and prefix `!` (C / JS / Rust) are reported once each and read
+/// as `and` / `or` / `not` — before, the parse stopped at the operator and
+/// the fn's type failed too.
+#[test]
+fn c_style_boolean_operators_are_one_error_and_read_as_words() {
+    for (body, op) in [
+        ("if x > 0 && x < 9 then 1 else 0", "&&"),
+        ("if x > 0 || x < -9 then 1 else 0", "||"),
+        ("if !(x > 0) then 1 else 0", "!"),
+    ] {
+        let errs = errors(&format!("fn f(x: Int) -> Int = {{\n  {body}\n}}\n{MAIN}"));
+        assert_eq!(errs.len(), 1, "{op}: {errs:#?}");
+        assert!(errs[0].contains(&format!("'{op}' is not valid")), "{op}: {errs:#?}");
+    }
+}
