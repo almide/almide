@@ -714,11 +714,7 @@ pub(crate) fn insert_clones_live(mut expr: IrExpr, ctx: &mut CloneCtx) -> IrExpr
         // nothing the enclosing loop rebinds is.
         IrExprKind::Lambda { params, body, lambda_id } => {
             let param_ids: Vec<VarId> = params.iter().map(|(v, _)| *v).collect();
-            let top: &[IrStmt] = match &body.kind {
-                IrExprKind::Block { stmts, .. } => stmts,
-                _ => &[],
-            };
-            let fresh = super::pass_clone_loops::loop_fresh_vars(None, Some(&param_ids), top);
+            let fresh = super::pass_clone_loops::lambda_fresh_vars(&param_ids, &body);
             let param_set: HashSet<VarId> = param_ids.iter().copied().collect();
             let captured: HashSet<VarId> = almide_ir::free_vars::free_vars(&body, &param_set).into_iter().collect();
             let e = IrExpr { kind: IrExprKind::Lambda { params, body, lambda_id }, ty: ty.clone(), span, def_id: None };

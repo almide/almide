@@ -206,10 +206,11 @@ fn count_uses_in_string_interp(parts: &[IrStringPart], table: &mut VarTable) {
 /// default, so a var used inside the lambda body is used once per call).
 fn count_uses_in_lambda(params: &[(VarId, Ty)], body: &IrExpr, table: &mut VarTable) {
     count_uses_in_expr(body, table);
+    // Everything the body binds is local to one call, wherever it binds it:
+    // a block's statements, its tail, and the pattern of a `match` (a body
+    // that is a bare `match o { some(v) => v }` binds `v` per call too).
     let mut lambda_locals: HashSet<u32> = params.iter().map(|(v, _)| v.0).collect();
-    if let IrExprKind::Block { stmts, .. } = &body.kind {
-        lambda_locals.extend(collect_bound_vars(stmts));
-    }
+    collect_bound_vars_in_expr(body, &mut lambda_locals);
     bump_vars_in_expr(body, &lambda_locals, table);
 }
 

@@ -216,6 +216,21 @@ fn iterable_root(expr: &IrExpr) -> Option<VarId> {
 /// nested loop or lambda belongs to THAT scope's freshness, and a `let`
 /// inside an `if`/`match` arm is left conservative (cloned) rather than
 /// reasoned about here.
+/// [`loop_fresh_vars`] for a lambda: its params, its body's statements, and
+/// its body's tail expression, where a `match` on a param binds fresh values
+/// (`(o) => match o { some(v) => v }`).
+pub(crate) fn lambda_fresh_vars(params: &[VarId], body: &IrExpr) -> HashSet<VarId> {
+    let (stmts, tail): (&[IrStmt], Option<&IrExpr>) = match &body.kind {
+        IrExprKind::Block { stmts, expr } => (stmts, expr.as_deref()),
+        _ => (&[], Some(body)),
+    };
+    let mut fresh = loop_fresh_vars(None, Some(params), stmts);
+    if let Some(tail) = tail {
+        almide_ir::visit::IrVisitor::visit_expr(&mut FreshBinds { fresh: &mut fresh }, tail);
+    }
+    fresh
+}
+
 pub(crate) fn loop_fresh_vars(var: Option<VarId>, var_tuple: Option<&[VarId]>, body: &[IrStmt]) -> HashSet<VarId> {
     let mut fresh: HashSet<VarId> = var.into_iter().collect();
     fresh.extend(var_tuple.into_iter().flatten().copied());
@@ -249,6 +264,19 @@ impl almide_ir::visit::IrVisitor for FreshBinds<'_> {
     fn visit_expr(&mut self, expr: &IrExpr) {
         if matches!(expr.kind, IrExprKind::Lambda { .. }) {
             return;
+        }
+        // A match on a fresh variable binds fresh values too: each
+        // iteration's `o` is its own, so moving `v` out of `match o {
+        // some(v) => v }` moves out of nothing the next iteration reads. A
+        // match on anything else (a captured or outer value) binds into
+        // a value that outlives the iteration, and stays cloned.
+        if let IrExprKind::Match { subject, arms } = &expr.kind
+            && let IrExprKind::Var { id } = &subject.kind
+            && self.fresh.contains(id)
+        {
+            for arm in arms {
+                almide_ir::free_vars::collect_pattern_bindings(&arm.pattern, self.fresh);
+            }
         }
         almide_ir::visit::walk_expr(self, expr);
     }
