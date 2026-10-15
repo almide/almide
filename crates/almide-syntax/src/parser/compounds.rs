@@ -36,7 +36,19 @@ impl Parser {
         }
         let cond = self.parse_expr()?;
         self.skip_newlines();
-        self.expect(TokenType::Then)?;
+        // `if (c) { a } else { b }` (C / Rust / JS): one error naming `then`,
+        // and the braces parse as the branches — stopping here lost the parse
+        // at `else` and failed the enclosing fn's type as well.
+        if self.check(TokenType::LBrace) {
+            let diag = self.diag_error(
+                "Almide's `if` takes `then`, not a brace block",
+                "Write `if cond then a else b`. Braces make a block value: `if cond then { … } else { … }`.",
+                "if",
+            ).with_try("if x > 0 then 1 else 2");
+            self.errors.push(diag);
+        } else {
+            self.expect(TokenType::Then)?;
+        }
         self.skip_newlines();
         let then = self.parse_if_branch()?;
         self.skip_newlines();
