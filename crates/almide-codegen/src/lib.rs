@@ -349,6 +349,9 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     // `@extern(rust)` host compile unchanged; the shared buffer replaces it
     // here, in one place (docs/roadmap/active/adr-0013-string-sharing.md).
     s.push_str(&format!("{vis}type AlmideString = String;\n"));
+    // A runtime function converts what it returns once, at its boundary:
+    // the identity while the alias is `String`.
+    s.push_str(&format!("{vis}trait IntoAlmideStr {{ type Out; fn into_almide(self) -> Self::Out; }}\nimpl<T> IntoAlmideStr for T {{ type Out = T; #[inline(always)] fn into_almide(self) -> T {{ self }} }}\n"));
     s.push_str(&format!("{vis}trait AlmideConcat<Rhs> {{ type Output; fn concat(self, rhs: Rhs) -> Self::Output; }}\n"));
     // The owned-String impls extend in place (`push_str`) instead of
     // `format!`: byte-identical output, but an owned accumulator keeps its
