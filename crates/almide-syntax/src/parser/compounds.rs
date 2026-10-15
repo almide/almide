@@ -150,6 +150,7 @@ impl Parser {
     }
 
     pub(crate) fn parse_match_arm(&mut self) -> Result<MatchArm, String> {
+        self.skip_case_prefix();
         let pattern = self.parse_pattern()?;
         // #1461: or-pattern alternatives — `a | b | c => body`.
         let pattern = if self.check(TokenType::Pipe) {
@@ -169,10 +170,46 @@ impl Parser {
         } else {
             None
         };
-        self.expect(TokenType::FatArrow)?;
+        self.expect_arm_arrow()?;
         self.skip_newlines();
         let body = self.parse_expr()?;
         Ok(MatchArm { pattern, guard, body, comments: Vec::new() })
+    }
+
+    /// `case p => e` (Scala / Swift): one error, and the arm parses without
+    /// the `case`. A pattern that binds the name `case` (`case => …`) is not
+    /// a prefix and stays.
+    fn skip_case_prefix(&mut self) {
+        if !self.check_ident("case") { return; }
+        let binds_case = self.peek_at(1).is_some_and(|t| matches!(t.token_type,
+            TokenType::FatArrow | TokenType::If | TokenType::Pipe | TokenType::Comma | TokenType::Newline));
+        if binds_case { return; }
+        let diag = self.diag_error(
+            "'case' is not Almide: a match arm is 'pattern => expr'",
+            "Drop the `case`: `match x { 1 => \"one\", _ => \"other\" }`.",
+            "match",
+        ).with_try("match x { 1 => 2, _ => 3 }");
+        self.errors.push(diag);
+        self.advance();
+    }
+
+    /// The arm's `=>`. `->` (Haskell / OCaml / Kotlin) and `:` (Python dicts)
+    /// are one error each, and the arm goes on as `=>` — stopping here lost
+    /// the parse and failed the fn's type too.
+    fn expect_arm_arrow(&mut self) -> Result<(), String> {
+        let got = match self.current().token_type {
+            TokenType::Arrow => "->",
+            TokenType::Colon => ":",
+            _ => return self.expect(TokenType::FatArrow).map(|_| ()),
+        };
+        let diag = self.diag_error(
+            format!("'{got}' is not a match arm arrow: use '=>'"),
+            "A match arm is `pattern => expr`. `->` is the return type arrow in `fn f(x: Int) -> Int`.",
+            "match",
+        ).with_try("match x { 1 => 2, _ => 3 }");
+        self.errors.push(diag);
+        self.advance();
+        Ok(())
     }
 
     pub(crate) fn parse_paren_lambda(&mut self) -> Result<Expr, String> {
