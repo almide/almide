@@ -185,3 +185,25 @@ fn a_rust_macro_call_is_one_error_and_reads_as_the_call() {
     assert_eq!(errs.len(), 1, "{errs:#?}");
     assert!(errs[0].contains("println("), "names the plain call: {errs:#?}");
 }
+
+/// A lowercase or Rust-style builtin type (`int`, `i64`, `string`, `bool`,
+/// `f64`, `u8`) is reported once, naming the Almide type, and read as it —
+/// before, a param's type error dropped the fn and a let's dropped the bind,
+/// so every use failed too.
+#[test]
+fn a_foreign_builtin_type_is_one_error_naming_the_almide_type() {
+    for (src, almide) in [
+        ("fn f(x: int) -> int = x + 1", "Int"),
+        ("fn f(x: i64) -> Int = x + 1", "Int"),
+        ("fn f(x: Int) -> Int = {\n  let y: int = x\n  y\n}", "Int"),
+        ("fn g(s: string) -> Bool = s == \"\"\nfn f(x: Int) -> Int = x", "String"),
+        ("fn g(b: bool) -> Bool = b\nfn f(x: Int) -> Int = x", "Bool"),
+        ("fn g(v: f64) -> Float = v\nfn f(x: Int) -> Int = x", "Float"),
+        ("fn g(v: u8) -> UInt8 = v\nfn f(x: Int) -> Int = x", "UInt8"),
+    ] {
+        let errs = errors(&format!("{src}\n{MAIN}"));
+        let want = if src.contains("int) -> int") { 2 } else { 1 };
+        assert_eq!(errs.len(), want, "{src}: one per spelling: {errs:#?}");
+        assert!(errs.iter().all(|e| e.contains(&format!("'{almide}'"))), "{src}: names `{almide}`: {errs:#?}");
+    }
+}
