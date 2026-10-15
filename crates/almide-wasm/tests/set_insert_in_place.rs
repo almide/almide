@@ -61,10 +61,17 @@ fn inserting_into_an_owned_set_does_not_copy_it() {
     let (large, out_l) = step_bytes(8000);
     assert_eq!(out_s, "2400 2800 true\n");
     assert_eq!(out_l, "8400 8800 true\n");
-    assert!(
-        large <= small + small / 4,
-        "the last 200 steps requested {small} bytes at n=2000 and {large} at n=8000 — a per-insert copy grows with the set"
-    );
+    // A per-insert copy requests the whole set on each of the 200 steps; an
+    // in-place append requests at most an amortized doubling of the block
+    // inside the window. The bound is four copies of the final set (8-byte
+    // members), which the copy exceeds fifty-fold.
+    for (n, got) in [(2000u64, small), (8000, large)] {
+        let four_copies = 4 * 8 * (n + 2 * 400);
+        assert!(
+            got < four_copies,
+            "the last 200 steps requested {got} bytes at n={n}, over four copies of the set ({four_copies}) — a per-insert copy"
+        );
+    }
 }
 
 #[test]
