@@ -38,7 +38,6 @@ const DENIED_MODULES: &[&str] = &[
     "io",       // stdin and other stream I/O — host state
     "env",      // environment variables — host state
     "clock",    // wall-clock time — nondeterministic
-    "datetime", // current time / now() — nondeterministic
     "random",   // RNG — nondeterministic by definition
 ];
 
@@ -58,6 +57,9 @@ const NONDETERMINISTIC_FUNCTIONS: &[(&str, &str)] = &[
     ("fan", "race"),     // first-to-finish — scheduling-order-dependent
     ("fan", "any"),      // first-success — scheduling-order-dependent
     ("fan", "timeout"),  // wall-clock deadline — nondeterministic
+    // `datetime` is a pure calendar over Int timestamps except its clocks.
+    ("datetime", "now"),          // wall clock
+    ("datetime", "monotonic_ns"), // monotonic clock
     // Inside the sandboxed effect modules (tier E1), what the sandbox does
     // not fix: the host's own paths, the target's name, the clock, and
     // random names.
@@ -136,13 +138,13 @@ impl NamedDenylist {
                 return Some(m);
             }
         }
-        // Fan: deny only the nondeterministic combinators (`fan.race(`,
-        // `fan.any(`, `fan.timeout(`), NOT `fan.map` / `fan.settle` / a
-        // bare `fan { }` block — those are deterministic and a valid
-        // mutation seed.
+        // A module that is otherwise in-universe: deny only its named
+        // nondeterministic functions (`fan.race(`, `datetime.now(`, …), NOT
+        // `fan.map` / `fan.settle` / a bare `fan { }` block or the calendar
+        // functions — those are deterministic and a valid mutation seed.
         for &(m, f) in NONDETERMINISTIC_FUNCTIONS {
-            if m == "fan" && contains_token_call(src, &format!("{m}.{f}")) {
-                return Some("fan");
+            if !DENIED_MODULES.contains(&m) && contains_token_call(src, &format!("{m}.{f}")) {
+                return Some(m);
             }
         }
         for &tok in NONDETERMINISTIC_TOKENS {
@@ -245,6 +247,9 @@ mod tests {
         assert!(NamedDenylist::source_references_denied_surface("env.get(\"X\")").is_some());
         assert!(NamedDenylist::source_references_denied_surface("datetime.now()").is_some());
         assert!(NamedDenylist::source_references_denied_surface("random.int(0, 9)").is_some());
+        assert!(NamedDenylist::source_references_denied_surface("datetime.monotonic_ns()").is_some());
+        // the calendar over Int timestamps is deterministic and a valid seed
+        assert!(NamedDenylist::source_references_denied_surface("datetime.year(datetime.from_unix(0))").is_none());
     }
 
     #[test]

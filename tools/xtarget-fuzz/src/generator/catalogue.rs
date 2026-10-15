@@ -117,8 +117,9 @@ impl Signature {
 
 /// Bundled stdlib modules the generator draws from, paired with their
 /// embedded source. Only the deterministic, side-effect-free, in-scope
-/// modules are listed — no `fs`/`http`/`process`/`random`/`datetime`
-/// (effects or non-determinism). The fixed-width numbers, `bytes`, `matrix`
+/// modules are listed — no `fs`/`http`/`process`/`random`
+/// (effects or non-determinism). `datetime` is in: a calendar over Int
+/// timestamps, its two clocks (`now`, `monotonic_ns`) denied by name. The fixed-width numbers, `bytes`, `matrix`
 /// and `value` are in: the value grammar builds them (`GenType::Sized`,
 /// `Bytes`, `Matrix`, `Value`).
 ///
@@ -164,6 +165,7 @@ const BUNDLED_MODULES: &[(&str, &str, bool)] = &[
     ("env", include_str!("../../../../stdlib/env.almd"), true),
     ("io", include_str!("../../../../stdlib/io.almd"), true),
     ("args", include_str!("../../../../stdlib/args.almd"), true),
+    ("datetime", include_str!("../../../../stdlib/datetime.almd"), false),
 ];
 
 /// Default selection weight for a function not named in
