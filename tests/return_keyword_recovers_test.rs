@@ -79,3 +79,15 @@ fn a_triple_equals_is_one_error_naming_double_equals() {
         assert!(!errs[0].contains("Assignments"), "{op}: {errs:#?}");
     }
 }
+
+/// `elif` / `elsif` / `elseif` (Python / Ruby / PHP) is reported once and read
+/// as the `else if` it means — before, the chain stopped there, the `then`
+/// branch's type had no `else` to agree with, and the fn's type failed too.
+#[test]
+fn an_elif_is_one_error_and_reads_as_else_if() {
+    for kw in ["elif", "elsif", "elseif"] {
+        let errs = errors(&format!("fn f(x: Int) -> Int = {{\n  if x > 0 then 1 {kw} x < 0 then 2 else 3\n}}\n{MAIN}"));
+        assert_eq!(errs.len(), 1, "{kw}: {errs:#?}");
+        assert!(errs[0].contains("else if"), "{kw}: names `else if`: {errs:#?}");
+    }
+}
