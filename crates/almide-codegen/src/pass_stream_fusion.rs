@@ -709,13 +709,33 @@ mod tests {
         param.name = sym("param");
         param.params.push(IrParam { var: VarId(0), ty: Ty::Int, name: sym("n"),
             borrow: ParamBorrow::Own, is_mut: true, open_record: None, default: None, attrs: vec![] });
-        let program = IrProgram { functions: vec![local, effect, external, param], ..Default::default() };
+        // A heap parameter beside the scalar loop-local (spectralnorm's row
+        // kernel: `v: List[Float]` read, `var s: Float` written) is admitted:
+        // a scalar binding holds no storage the parameter could share.
+        let list_ty = Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, vec![Ty::Float]);
+        let heap_param = |f: &IrFunction, name: &str| {
+            let mut f = f.clone();
+            f.name = sym(name);
+            f.params.push(IrParam { var: VarId(9), ty: list_ty.clone(), name: sym("v"),
+                borrow: ParamBorrow::Own, is_mut: false, open_record: None, default: None, attrs: vec![] });
+            f
+        };
+        let heap_scalar = heap_param(&local, "heap_scalar");
+        // The same write to a heap-typed local stays unproven: with a heap
+        // parameter in scope that local may share the parameter's storage.
+        let mut heap_local = heap_param(&local, "heap_local");
+        if let IrExprKind::Block { stmts, .. } = &mut heap_local.body.kind {
+            let IrStmtKind::Bind { ty, .. } = &mut stmts[0].kind else { panic!("bind") };
+            *ty = list_ty.clone();
+        }
+        let program = IrProgram { functions: vec![local, effect, external, param, heap_scalar, heap_local], ..Default::default() };
         let fusion = Purity::of(&program);
         let fan = Purity::for_fan(&program);
         assert!(!fusion.pure.contains(&sym("local")), "fusion keeps its original admission rule");
         assert!(fan.pure.contains(&sym("local")));
+        assert!(fan.pure.contains(&sym("heap_scalar")), "a scalar local beside a heap param is invocation-owned");
         assert!(fan.total.is_empty(), "local state is not a termination proof");
-        for name in ["effect", "external", "param"] {
+        for name in ["effect", "external", "param", "heap_local"] {
             assert!(!fan.pure.contains(&sym(name)), "unproven function: {name}");
         }
     }

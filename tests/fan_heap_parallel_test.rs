@@ -77,3 +77,50 @@ fn heap_shaped_fans_route_to_the_parallel_runtime_and_print_what_the_sequential_
     assert_eq!(parallel, sequential, "parallel vs sequential");
     assert_eq!(parallel, wasm, "native vs wasm");
 }
+
+/// A callee that reads a heap parameter and loops over scalar locals —
+/// spectralnorm's row kernel. Before, any heap parameter switched off the
+/// local-state admission, so the `var` loop made the callee "impure" and the
+/// fan ran sequentially (57.0 ms parallel vs 57.4 ms sequential, 8 vCPU).
+/// A heap local written beside a heap parameter still declines.
+const ROW_KERNEL: &str = r#"fn row(v: List[Float], n: Int, i: Int) -> Float = {
+  var s = 0.0
+  var j = 0
+  while j < n { s = s + v[j] * int.to_float(i + j); j = j + 1 }
+  s
+}
+
+fn grow(v: List[Float], i: Int) -> Float = {
+  var w = v
+  w = w + [int.to_float(i)]
+  list.len(w) |> int.to_float
+}
+
+effect fn rows(v: List[Float], n: Int) -> List[Float] =
+  fan { list.map(list.range(0, n), (i) => row(v, n, i)) }
+
+effect fn grown(v: List[Float], n: Int) -> List[Float] =
+  fan { list.map(list.range(0, n), (i) => grow(v, i)) }
+
+effect fn main() -> Unit = {
+  let v = list.map(list.range(0, 64), (i) => int.to_float(i) * 0.5)
+  println("${rows(v, 64)!}")
+  println("${grown(v, 4)!}")
+}
+"#;
+
+#[test]
+fn a_scalar_loop_beside_a_heap_parameter_routes_parallel_and_a_heap_local_write_does_not() {
+    let dir = tempfile::tempdir().expect("scratch");
+    let file = dir.path().join("fan_row.almd");
+    std::fs::write(&file, ROW_KERNEL).expect("source");
+    let rust = almide(&["--target", "rust"], &file, None);
+    let body = |name: &str| rust.split(&format!("pub fn {name}(")).nth(1).and_then(|b| b.split("\npub fn ").next()).expect("emitted").to_string();
+    assert!(body("rows").contains("almide_rt_list_par_map("), "the scalar-local kernel routes parallel:\n{}", body("rows"));
+    assert!(!body("grown").contains("almide_rt_list_par_map("), "a heap local write stays sequential:\n{}", body("grown"));
+    let parallel = almide(&["run"], &file, None);
+    let sequential = almide(&["run"], &file, Some(("ALMIDE_FAN_SEQUENTIAL", "1")));
+    let wasm = almide(&["run", "--target", "wasm"], &file, None);
+    assert_eq!(parallel, sequential, "parallel vs sequential");
+    assert_eq!(parallel, wasm, "native vs wasm");
+}
