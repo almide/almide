@@ -61,15 +61,12 @@ impl Parser {
             self.advance();
             self.skip_newlines();
             self.parse_if_branch()?
-        } else if let Some(kw) = self.elif_keyword() {
+        } else if let Some(guide) = self.elif_guide() {
             // `elif` / `elsif` / `elseif` (Python / Ruby / PHP): one error
             // naming `else if`, and the chain goes on as the `else if` it
             // means — stopping here lost the parse and the fn's type with it.
-            let diag = self.diag_error(
-                format!("'{kw}' is not Almide: use 'else if'"),
-                "Almide chains conditions with `else if`; for many cases a `match` reads better.",
-                "if",
-            ).with_try("if x > 0 then 1 else if x < 0 then 2 else 3");
+            let diag = self.diag_error(guide.message.unwrap_or_default(), guide.hint, "if")
+                .with_try("if x > 0 then 1 else if x < 0 then 2 else 3");
             self.errors.push(diag);
             let elif_span = Some(self.current_span());
             self.advance();
@@ -83,9 +80,13 @@ impl Parser {
         }))
     }
 
-    fn elif_keyword(&self) -> Option<&'static str> {
-        if !self.check(TokenType::Ident) { return None; }
-        ["elif", "elsif", "elseif"].into_iter().find(|k| self.current().value == *k)
+    /// The syntax guide's diagnosis of an `elif` / `elsif` / `elseif` here.
+    fn elif_guide(&self) -> Option<super::hints::HintResult> {
+        let tok = self.current();
+        if tok.token_type != TokenType::Ident || !matches!(tok.value.as_str(), "elif" | "elsif" | "elseif") {
+            return None;
+        }
+        super::hints::syntax_guide::check_rejected_ident(tok.value.as_str())
     }
 
     fn parse_if_branch(&mut self) -> Result<Expr, String> {

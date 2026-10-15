@@ -246,8 +246,20 @@ pub fn all_hints() -> Vec<HintEntry> {
         HintEntry {
             module: "syntax_guide",
             trigger: "'elif'/'elsif'/'elseif' in expression",
-            message: "'elif'/'elsif' is not valid in Almide",
+            message: "'elif'/'elsif' is not valid in Almide: use 'else if'",
             hint: "Use nested 'if/then/else'.",
+        },
+        HintEntry {
+            module: "primary",
+            trigger: "'===' / '!==' in expression",
+            message: "'===' is not Almide: use '=='",
+            hint: "Almide has one equality, structural `==` (and `!=`); the comparison is parsed on.",
+        },
+        HintEntry {
+            module: "expressions",
+            trigger: "'c ? a : b' (a value after a postfix '?')",
+            message: "'c ? a : b' is not Almide: use 'if c then a else b'",
+            hint: "Almide's conditional is an expression; the ternary is parsed on as that `if`.",
         },
         HintEntry {
             module: "syntax_guide",
