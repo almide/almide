@@ -1207,3 +1207,48 @@ Order agreed with the owner: real defects first (result.filter → list.flat_map
 3. The ADR-0013 runtime ABI batch: `Vec<String>` and `Option<String>`, then one GCE re-inspection.
 4. option.collect's exact reserve on the generic path.
 5. Then heap_restore, io.write and value.as_array, one at a time, researched across languages first.
+
+## 2026-10-15 (evening): the Int index hash stays, two copies removed from native
+
+### Owner ruling (2026-10-15): set.from_list and list.unique stay unstamped
+**What fails.** Both fail only the wasm instruction series, by 3.2% against the 3% tolerance. Their bytes-moved series fits at 0.0%.
+
+**The cause, found.** `$mapidx_hash_int` takes the high word of the Fibonacci product, then its low bits through the mask. Its probe count depends on n and on the key spacing:
+- consecutive keys: 4.2 probes per key at n = 20k, 6.2 at 320k;
+- keys spaced by 7919: 3.2 at 20k, 2.7 at 320k.
+
+**The fix that was tried, and why it was dropped.** fmix64 made the probe count stable in n (3.67) and passed the instruction meter. But it ran 1.7× slower on wall clock in wasmtime, and up to 2.2× slower in a Rust replica: 5.9 → 13.2 ns per insert at n = 320k. The current hash keeps structured keys close together in the table, so its extra probes hit the cache. The instruction meter cannot see locality.
+
+**Ruling (option A):**
+- the current hash stays;
+- both functions stay `uninspected`, for the reason above;
+- the tolerance stays at 3%;
+- the fmix64 branch (fix-mapidx-int-hash) stays local and is not proposed.
+
+**Still open:**
+- **set.from_list's wasm reserve.** set_core.almd reserves the full input length, an upper bound. The growth ruling says dedup builders double. This is a separate change; it is not made yet.
+- **A small n-variation in the probe loop.** It remains under canonical allocation plus fmix64, and is unexplained.
+
+### Written, tested locally, not yet in a PR: two needless native copies (branch option-is-some-borrows)
+**1. option.is_some / is_none take their argument by reference** (`@borrow_ref(o)`, `&Option<T>` in the runtime).
+- Measured with `list.any(xs, is_none)` over 20 × 200k strings: 65–71 ms → 9.7 ms, maxrss 17.2 → 9.4 MB.
+- Both functions were re-stamped on GCE: all PASS.
+
+**2. A match binder in a chain lambda is no longer cloned.** In `list.map(xs, (o) => match o { some(v) => v, … })`, `use_count` counted the lambda's own binder `v` as captured, so every element's payload was copied. A match on a captured value still copies (moving out of it would be E0507).
+
+**Status:** native spec 513 files pass; the workspace test is running.
+
+### Written, not pushed: the ADR-0013 runtime ABI batch (branch adr0013-runtime-returns)
+- What changed: runtime `-> String`, `Result<_, String>`, and nested String spellings now use `AlmideString`; the prelude trait is renamed `AlmideIntoStr`.
+- Native spec 513 files pass.
+- Workspace failures, all expected:
+  - 5 snapshots (the runtime text changed);
+  - the inspection ledger (implementation hashes changed, so the stamps are void until a GCE re-inspection);
+  - the prefix rule (fixed by the rename, not yet re-run);
+  - a sigint test (to re-run on its own).
+
+### Next
+1. Land option-is-some-borrows.
+2. Re-measure option.collect's exact reserve now that the binder copy is gone.
+3. Finish the ABI batch: snapshots, then one GCE re-inspection, then the PR.
+4. set.from_list's wasm reserve under the growth ruling.
