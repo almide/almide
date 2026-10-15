@@ -36,8 +36,12 @@ fi
 
 RUN_ID="${1:-}"
 if [ -z "$RUN_ID" ]; then
-  RUN_ID=$(gh run list --workflow ci.yml --branch develop --status success --limit 1 --json databaseId --jq '.[0].databaseId')
-  echo "using latest green develop ci.yml run: $RUN_ID"
+  # The newest green develop run whose shards RAN their tests: a docs-only
+  # run skips them and read as "shard skew inf" (2026-10-12).
+  # shellcheck source=lib/latest-built-develop-run.sh
+  . "$(dirname "$0")/lib/latest-built-develop-run.sh"
+  RUN_ID="$(latest_built_develop 'Test Rust \\(shard' '^Cargo tests$')" || exit 2
+  echo "using the latest green develop ci.yml run whose shards ran: $RUN_ID"
 fi
 
 # The shard logs carry cargo's ANSI colour, and a newer `gh` (the one on
