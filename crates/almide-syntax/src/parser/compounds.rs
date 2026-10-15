@@ -41,7 +41,7 @@ impl Parser {
         // at `else` and failed the enclosing fn's type as well.
         if self.check(TokenType::LBrace) {
             let diag = self.diag_error(
-                "Almide's `if` takes `then`, not a brace block",
+                "if requires 'then', not a brace block",
                 "Write `if cond then a else b`. Braces make a block value: `if cond then { … } else { … }`.",
                 "if",
             ).with_try("if x > 0 then 1 else 2");
