@@ -166,9 +166,11 @@ pub(crate) fn insert_clones_for_in(var: VarId, var_tuple: Option<Vec<VarId>>, it
 /// a match subject, an interpolation, or any use inside a closure / fused
 /// iterator chain (whose captures must own) says no.
 fn only_borrowed_uses(body: &[IrStmt], v: VarId) -> bool {
+    // A fused chain's lambda runs inside the iteration and never outlives it
+    // (`scope_lambda`: depth stays 0), so a read there is a borrow like any
+    // other (#3216); a chain that keeps the binder uses it at an owning site.
     UseSites::of_stmts(body, &ExplicitBorrows).of(v).all(|u| {
-        u.depth == 0 && !u.in_chain
-            && matches!(u.site, Site::Borrow { mutable: false } | Site::Member | Site::Clone)
+        u.depth == 0 && matches!(u.site, Site::Borrow { mutable: false } | Site::Member | Site::Clone)
     })
 }
 
