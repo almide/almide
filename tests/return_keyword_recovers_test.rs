@@ -224,3 +224,13 @@ fn a_rust_closure_is_one_error_and_reads_as_a_lambda() {
         assert!(errs[0].contains("closure"), "{body}: {errs:#?}");
     }
 }
+
+/// An `if` whose `then` is missing (`if c` and the branch on the next line,
+/// Python / Ruby habit) is reported once and the branches parse — before,
+/// the parse stopped there and the fn's type failed too.
+#[test]
+fn an_if_without_then_is_one_error_and_keeps_the_branches() {
+    let errs = errors(&format!("fn f(x: Int) -> Int = {{\n  if x > 0\n    1\n  else 2\n}}\n{MAIN}"));
+    assert_eq!(errs.len(), 1, "{errs:#?}");
+    assert!(errs[0].contains("if requires 'then'"), "{errs:#?}");
+}
