@@ -28,6 +28,9 @@ impl Parser {
         if let Some(r) = self.parse_primary_return(&tok) {
             return r;
         }
+        if let Some(r) = self.parse_primary_triple_equals(&tok) {
+            return r;
+        }
         // Check hint system for rejected operators/keywords
         if let Some(result) = self.check_hint(None, super::hints::HintScope::Expression) {
             let msg = result.message.unwrap_or_else(|| format!("'{}' is not valid here", tok.value));
@@ -67,6 +70,33 @@ impl Parser {
         self.errors.push(diag);
         self.advance();
         Some(self.parse_expr())
+    }
+
+    /// `a === b` / `a !== b` (JavaScript) lexes as `==` / `!=` and a stray
+    /// `=` right after it, which reached the "Assignments return Unit" error —
+    /// sending the reader to look for an assignment — and lost the comparison.
+    /// One error naming the operator Almide has, then the right operand parses.
+    fn parse_primary_triple_equals(&mut self, tok: &crate::lexer::Token) -> Option<Result<Expr, String>> {
+        if tok.token_type != TokenType::Eq || self.pos == 0 {
+            return None;
+        }
+        let prev = &self.tokens[self.pos - 1];
+        let (js, almide) = match prev.token_type {
+            TokenType::EqEq => ("===", "=="),
+            TokenType::BangEq => ("!==", "!="),
+            _ => return None,
+        };
+        if prev.line != tok.line || prev.end_col != tok.col {
+            return None;
+        }
+        let diag = self.diag_error(
+            format!("'{js}' is not Almide: use '{almide}'"),
+            "Almide has one equality, structural `==` (and `!=`) — there is no separate strict form.",
+            "equality",
+        ).with_try(format!("x {almide} 3"));
+        self.errors.push(diag);
+        self.advance();
+        Some(self.parse_primary())
     }
 
     /// Literal tokens: one token in, one leaf node out.
