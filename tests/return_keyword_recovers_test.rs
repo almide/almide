@@ -207,3 +207,20 @@ fn a_foreign_builtin_type_is_one_error_naming_the_almide_type() {
         assert!(errs.iter().all(|e| e.contains(&format!("'{almide}'"))), "{src}: names `{almide}`: {errs:#?}");
     }
 }
+
+/// A Rust closure (`|a| a + 1`, `|a, b| a + b`, `|| 0`) is reported once and
+/// parsed as the `(a) => a + 1` it means — before, the binding it initialised
+/// was dropped and every call of it failed too.
+#[test]
+fn a_rust_closure_is_one_error_and_reads_as_a_lambda() {
+    for body in [
+        "let g = |a| a + 1\n  g(x)",
+        "let g = |a, b| a + b\n  g(x, 1)",
+        "let g = || 7\n  g() + x",
+        "list.map([x], |a| a * 2) |> list.sum",
+    ] {
+        let errs = errors(&format!("fn f(x: Int) -> Int = {{\n  {body}\n}}\n{MAIN}"));
+        assert_eq!(errs.len(), 1, "{body}: {errs:#?}");
+        assert!(errs[0].contains("closure"), "{body}: {errs:#?}");
+    }
+}
