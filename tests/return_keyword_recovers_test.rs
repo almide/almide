@@ -142,3 +142,23 @@ fn a_foreign_match_arm_is_one_error_and_reads_as_fat_arrow() {
         assert!(errs.iter().all(|e| e.contains(needle)), "{body}: names `{needle}`: {errs:#?}");
     }
 }
+
+/// A top-level `def` / `function` / `func` / `fun` (Python / JS / Go /
+/// Kotlin) heading a function, or `const` / `val` heading a constant, is
+/// reported once and the declaration parses as the `fn` / `let` it means —
+/// before, the declaration was dropped and every use of it failed too.
+#[test]
+fn a_foreign_declaration_keyword_is_one_error_and_keeps_the_declaration() {
+    for src in [
+        "def f(x: Int) -> Int = x + 1",
+        "function f(x: Int) -> Int = x + 1",
+        "func f(x: Int) -> Int = x + 1",
+        "fun f(x: Int) -> Int = x + 1",
+        "const K = 3\nfn f(x: Int) -> Int = x + K",
+        "val K = 3\nfn f(x: Int) -> Int = x + K",
+    ] {
+        let errs = errors(&format!("{src}\n{MAIN}"));
+        assert_eq!(errs.len(), 1, "{src}: {errs:#?}");
+        assert!(errs[0].contains("is not a keyword in Almide"), "{src}: {errs:#?}");
+    }
+}
