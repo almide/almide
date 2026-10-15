@@ -32,9 +32,7 @@ pub fn almide_rt_sse_openai_chat(
     api_key: &str,
     body_json: &str,
     on_text_delta: std::rc::Rc<dyn Fn(String)>,
-) -> Result<String, String> {
-    sse_openai_chat_run(base_url, api_key, body_json, None, on_text_delta)
-}
+) -> Result<String, AlmideString> { let __almide_r: Result<String, String> = (|| { sse_openai_chat_run(base_url, api_key, body_json, None, on_text_delta) })(); __almide_r.map_err(Into::into) }
 
 /// `openai_streaming_call_with_limits` (#2631): the same helper streaming
 /// through the call handle, so `total_ms` / `idle_ms` bound it.
@@ -45,9 +43,7 @@ pub fn almide_rt_http___openai_streaming_limited(
     total_ms: i64,
     idle_ms: i64,
     on_text_delta: std::rc::Rc<dyn Fn(String)>,
-) -> Result<String, String> {
-    sse_openai_chat_run(base_url, api_key, body_json, Some((total_ms, idle_ms)), on_text_delta)
-}
+) -> Result<String, AlmideString> { let __almide_r: Result<String, String> = (|| { sse_openai_chat_run(base_url, api_key, body_json, Some((total_ms, idle_ms)), on_text_delta) })(); __almide_r.map_err(Into::into) }
 
 fn sse_openai_chat_run(
     base_url: &str,
@@ -276,9 +272,7 @@ pub fn almide_rt_sse_anthropic_messages(
     api_key: &str,
     body_json: &str,
     on_text_delta: std::rc::Rc<dyn Fn(String)>,
-) -> Result<String, String> {
-    sse_anthropic_messages_run(api_key, body_json, None, on_text_delta)
-}
+) -> Result<String, AlmideString> { let __almide_r: Result<String, String> = (|| { sse_anthropic_messages_run(api_key, body_json, None, on_text_delta) })(); __almide_r.map_err(Into::into) }
 
 /// `anthropic_streaming_call_with_limits` (#2631): the same helper streaming
 /// through the call handle, so `total_ms` / `idle_ms` bound it.
@@ -288,9 +282,7 @@ pub fn almide_rt_http___anthropic_streaming_limited(
     total_ms: i64,
     idle_ms: i64,
     on_text_delta: std::rc::Rc<dyn Fn(String)>,
-) -> Result<String, String> {
-    sse_anthropic_messages_run(api_key, body_json, Some((total_ms, idle_ms)), on_text_delta)
-}
+) -> Result<String, AlmideString> { let __almide_r: Result<String, String> = (|| { sse_anthropic_messages_run(api_key, body_json, Some((total_ms, idle_ms)), on_text_delta) })(); __almide_r.map_err(Into::into) }
 
 fn sse_anthropic_messages_run(
     api_key: &str,

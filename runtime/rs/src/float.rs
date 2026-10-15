@@ -24,7 +24,7 @@ pub fn almide_rt_float32_to_string(n: f32) -> AlmideString {
     };
     __almide_out.into()
 }
-pub fn almide_rt_float_parse(s: &str) -> Result<f64, String> { s.trim().parse::<f64>().map_err(|e| e.to_string()) }
+pub fn almide_rt_float_parse(s: &str) -> Result<f64, AlmideString> { let __almide_r: Result<f64, String> = (|| { s.trim().parse::<f64>().map_err(|e| e.to_string()) })(); __almide_r.map_err(Into::into) }
 pub fn almide_rt_float_abs(n: f64) -> f64 { n.abs() }
 pub fn almide_rt_float_ceil(n: f64) -> f64 { n.ceil() }
 pub fn almide_rt_float_floor(n: f64) -> f64 { n.floor() }
