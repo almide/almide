@@ -11,13 +11,18 @@
 use std::process::Command;
 
 fn errors(src: &str) -> Vec<String> {
+    let (ok, errs) = check(src);
+    assert!(!ok, "a `return` is still an error");
+    errs
+}
+
+fn check(src: &str) -> (bool, Vec<String>) {
     let dir = tempfile::tempdir().expect("scratch");
     let file = dir.path().join("ret.almd");
     std::fs::write(&file, src).expect("source");
     let out = Command::new(env!("CARGO_BIN_EXE_almide")).arg("check").arg(&file).output().expect("check");
-    assert!(!out.status.success(), "a `return` is still an error");
     let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
-    text.lines().filter(|l| l.starts_with("error")).map(str::to_string).collect()
+    (out.status.success(), text.lines().filter(|l| l.starts_with("error")).map(str::to_string).collect())
 }
 
 const MAIN: &str = "\neffect fn main() -> Unit = println(int.to_string(f(3)))\n";
@@ -90,4 +95,17 @@ fn an_elif_is_one_error_and_reads_as_else_if() {
         assert_eq!(errs.len(), 1, "{kw}: {errs:#?}");
         assert!(errs[0].contains("else if"), "{kw}: names `else if`: {errs:#?}");
     }
+}
+
+/// `c ? a : b` (C / JS / Java) is reported once and read as
+/// `if c then a else b` — before, `?` took the last operand as a Result→Option
+/// conversion, the parse stopped at the `a`, and the fn's type failed too.
+#[test]
+fn a_ternary_is_one_error_and_reads_as_if() {
+    let errs = errors(&format!("fn f(x: Int) -> Int = x > 0 ? 1 : 2\n{MAIN}"));
+    assert_eq!(errs.len(), 1, "{errs:#?}");
+    assert!(errs[0].contains("if") && errs[0].contains("then"), "names `if … then … else`: {errs:#?}");
+    // the postfix `?` that IS Almide keeps its meaning
+    let (ok, errs) = check(&format!("fn f(x: Int) -> Int = int.parse(int.to_string(x))? ?? 0\n{MAIN}"));
+    assert!(ok && errs.is_empty(), "{errs:#?}");
 }
