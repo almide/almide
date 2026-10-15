@@ -207,8 +207,11 @@ fn binder_that_is_consumed_or_matched_keeps_the_element_copy() {
           for u in us {{ t = t + (match u {{ U {{ a }} => a }}) }}\
           println(\"${{t}}\")\
         }}\n"), "consumed-binder");
-    assert!(body.contains("for v in data.iter().cloned() {") && body.contains("keep(v)"), "an owned-arg call consumes the element — it must be copied out of the list, then moved:\n{body}");
-    assert!(body.contains("for u in us.iter().cloned() {"), "a match subject binds payloads by value — the element stays owned:\n{body}");
+    // Each list is at its last use here, so the loop consumes it and moves
+    // every element out (#3217); a list still read after its loop is copied
+    // element by element instead (tests/loop_consumes_owned_list_at_last_use_test.rs).
+    assert!(body.contains("for v in data.into_iter() {") && body.contains("keep(v)"), "an owned-arg call consumes the element — it must be owned in the loop, moved out of the dying list:\n{body}");
+    assert!(body.contains("for u in us.into_iter() {"), "a match subject binds payloads by value — the element stays owned:\n{body}");
 }
 
 #[test]
