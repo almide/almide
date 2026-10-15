@@ -533,6 +533,9 @@ impl Emitter<'_> {
                 Ok(Some(Lowered::scalar(BOOL)))
             }
             ("insert", [s, x]) => {
+                if let Some(owned) = self.try_set_insert_owned(s, x)? {
+                    return Ok(Some(owned));
+                }
                 let (sh, xh, eh, e) = self.set_scan(s, x, ArgMode::Retain)?;
                 self.f
                     .instructions()
