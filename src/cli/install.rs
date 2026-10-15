@@ -112,6 +112,7 @@ pub fn cmd_install(
         target,
         release: true,
         fast: false,
+        target_cpu: None,
         unchecked_index: false,
         no_check: false,
         repr_c: false,

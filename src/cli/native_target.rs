@@ -56,6 +56,57 @@ pub(crate) fn cross_target() -> Option<String> {
     CROSS_TARGET.with(|c| c.borrow().clone())
 }
 
+thread_local! {
+    static TARGET_CPU: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+/// Scope `almide build --target-cpu <cpu>` to the current build, the same way
+/// [`CrossTargetGuard`] scopes the triple. Restores the previous value on drop.
+pub(crate) struct TargetCpuGuard(Option<String>);
+
+impl TargetCpuGuard {
+    pub(crate) fn set(cpu: Option<String>) -> Self {
+        TargetCpuGuard(TARGET_CPU.with(|c| c.replace(cpu)))
+    }
+}
+
+impl Drop for TargetCpuGuard {
+    fn drop(&mut self) {
+        let prev = self.0.take();
+        TARGET_CPU.with(|c| *c.borrow_mut() = prev);
+    }
+}
+
+/// The `-C target-cpu` a `--release` build passes (#3604), or `None` for
+/// rustc's generic default.
+///
+/// A host build defaults to `native`: the binary is tuned for the machine that
+/// built it, as Zig's `ReleaseFast` is by default. Measured 2026-10-15 on x86
+/// (spectralnorm, runtime `n`): 57.1 ms generic, 47.1 native, and a `fan` row
+/// kernel 19.2 → 13.8 ms; aarch64 Neoverse-V2 idiomatic spellings 76.9 → 52.9.
+/// A cross build defaults to generic, since `native` names this machine's CPU,
+/// not the target's. `--target-cpu portable` asks for the generic default on
+/// a host build (a binary to ship elsewhere); any other value is passed to
+/// rustc as is (`x86-64-v3`, `neoverse-n1`, …).
+pub(crate) fn release_target_cpu() -> Option<String> {
+    match TARGET_CPU.with(|c| c.borrow().clone()) {
+        Some(cpu) => (cpu != "portable").then_some(cpu),
+        None => cross_target().is_none().then(|| "native".to_string()),
+    }
+}
+
+/// `--target-cpu native` on a cross build would tune for this machine's CPU,
+/// which the target may not have.
+pub(crate) fn validate_target_cpu(cpu: Option<&str>, triple: Option<&str>) -> Result<(), String> {
+    match (cpu, triple) {
+        (Some("native"), Some(t)) => Err(format!(
+            "error: --target-cpu native tunes for THIS machine, but the build targets {t}\n  \
+             hint: name the target's CPU (`--target-cpu x86-64-v3`), or omit the flag for the generic baseline"
+        )),
+        _ => Ok(()),
+    }
+}
+
 /// Resolve `almide build --target <flag>` (already known not to be a wasm
 /// target) plus the inherited `CARGO_BUILD_TARGET` into the triple to build
 /// for, `None` meaning the host. `host_arch` is `std::env::consts::ARCH`,
@@ -285,5 +336,24 @@ mod tests {
             assert_eq!(cross_target().as_deref(), Some("x86_64-unknown-linux-musl"));
         }
         assert_eq!(cross_target(), None);
+    }
+
+    #[test]
+    fn a_host_release_tunes_for_this_cpu_and_a_cross_build_does_not() {
+        assert_eq!(release_target_cpu().as_deref(), Some("native"));
+        {
+            let _g = CrossTargetGuard::set(Some("x86_64-unknown-linux-musl".into()));
+            assert_eq!(release_target_cpu(), None, "native names this machine, not the target");
+            let _c = TargetCpuGuard::set(Some("x86-64-v3".into()));
+            assert_eq!(release_target_cpu().as_deref(), Some("x86-64-v3"), "a named CPU passes through");
+        }
+        {
+            let _c = TargetCpuGuard::set(Some("portable".into()));
+            assert_eq!(release_target_cpu(), None, "portable is rustc's generic default");
+        }
+        assert_eq!(release_target_cpu().as_deref(), Some("native"));
+        assert!(validate_target_cpu(Some("native"), Some("aarch64-unknown-linux-musl")).is_err());
+        assert!(validate_target_cpu(Some("native"), None).is_ok());
+        assert!(validate_target_cpu(Some("x86-64-v3"), Some("x86_64-unknown-linux-musl")).is_ok());
     }
 }
