@@ -3,9 +3,7 @@
 
 pub fn almide_rt_int_to_string(n: i64) -> AlmideString { let __almide_out: String = n.to_string(); __almide_out.into() }
 
-pub fn almide_rt_int_from_string(s: String) -> Result<i64, String> {
-    s.trim().parse::<i64>().map_err(|e| format!("invalid integer: {}", e))
-}
+pub fn almide_rt_int_from_string(s: String) -> Result<i64, AlmideString> { let __almide_r: Result<i64, String> = (|| { s.trim().parse::<i64>().map_err(|e| format!("invalid integer: {}", e)) })(); __almide_r.map_err(Into::into) }
 
 #[inline(always)] pub fn almide_rt_int_abs(n: i64) -> i64 { n.abs() }
 #[inline(always)] pub fn almide_rt_int_min(a: i64, b: i64) -> i64 { a.min(b) }
@@ -19,8 +17,8 @@ pub fn almide_rt_int_from_string(s: String) -> Result<i64, String> {
 #[inline(always)] pub fn almide_rt_int_to_float(n: i64) -> f64 { n as f64 }
 pub fn almide_rt_int_to_hex(n: i64) -> AlmideString { let __almide_out: String = format!("{:x}", n); __almide_out.into() }
 #[inline(always)] pub fn almide_rt_int_to_u(n: i64) -> i64 { n.unsigned_abs() as i64 }
-pub fn almide_rt_int_parse(s: &str) -> Result<i64, String> { s.trim().parse::<i64>().map_err(|e| e.to_string()) }
-pub fn almide_rt_int_parse_hex(s: &str) -> Result<i64, String> { i64::from_str_radix(s.trim().trim_start_matches("0x"), 16).map_err(|e| e.to_string()) }
+pub fn almide_rt_int_parse(s: &str) -> Result<i64, AlmideString> { let __almide_r: Result<i64, String> = (|| { s.trim().parse::<i64>().map_err(|e| e.to_string()) })(); __almide_r.map_err(Into::into) }
+pub fn almide_rt_int_parse_hex(s: &str) -> Result<i64, AlmideString> { let __almide_r: Result<i64, String> = (|| { i64::from_str_radix(s.trim().trim_start_matches("0x"), 16).map_err(|e| e.to_string()) })(); __almide_r.map_err(Into::into) }
 #[inline(always)] pub fn almide_rt_int_band(a: i64, b: i64) -> i64 { a & b }
 #[inline(always)] pub fn almide_rt_int_bor(a: i64, b: i64) -> i64 { a | b }
 #[inline(always)] pub fn almide_rt_int_bxor(a: i64, b: i64) -> i64 { a ^ b }

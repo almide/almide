@@ -148,10 +148,6 @@ pub fn almide_rt_base64_encode(b: &Vec<u8>) -> AlmideString { let __almide_out: 
 
 pub fn almide_rt_base64_encode_url(b: &Vec<u8>) -> AlmideString { let __almide_out: String = encode_with(b, &ALMIDE_URL_ALPHABET); __almide_out.into() }
 
-pub fn almide_rt_base64_decode(s: &str) -> Result<Vec<u8>, String> {
-    decode_str(s)
-}
+pub fn almide_rt_base64_decode(s: &str) -> Result<Vec<u8>, AlmideString> { let __almide_r: Result<Vec<u8>, String> = (|| { decode_str(s) })(); __almide_r.map_err(Into::into) }
 
-pub fn almide_rt_base64_decode_url(s: &str) -> Result<Vec<u8>, String> {
-    decode_str(s)
-}
+pub fn almide_rt_base64_decode_url(s: &str) -> Result<Vec<u8>, AlmideString> { let __almide_r: Result<Vec<u8>, String> = (|| { decode_str(s) })(); __almide_r.map_err(Into::into) }

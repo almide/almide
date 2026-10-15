@@ -18,10 +18,13 @@ pub fn almide_rt_env_set(name: &str, value: &str) {
     std::env::set_var(name, value);
 }
 
-pub fn almide_rt_env_cwd() -> Result<String, String> {
-    std::env::current_dir()
-        .map(|p| p.to_string_lossy().to_string())
-        .map_err(|e| e.to_string())
+pub fn almide_rt_env_cwd() -> Result<String, AlmideString> {
+    let __almide_r: Result<String, String> = (|| {
+        std::env::current_dir()
+            .map(|p| p.to_string_lossy().to_string())
+            .map_err(|e| e.to_string())
+    })();
+    __almide_r.map_err(Into::into)
 }
 
 pub fn almide_rt_env_unix_timestamp() -> i64 {

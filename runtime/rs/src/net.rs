@@ -18,57 +18,33 @@ fn almide_net<R>(f: impl FnOnce(&mut AlmideNetTables) -> R) -> R {
     ALMIDE_NET.with(|t| f(&mut t.borrow_mut()))
 }
 
-pub fn almide_rt_net_tcp_connect(host: &str, port: i64) -> Result<i64, String> {
-    almide_net(|t| t.tcp_connect(host, port))
-}
+pub fn almide_rt_net_tcp_connect(host: &str, port: i64) -> Result<i64, AlmideString> { let __almide_r: Result<i64, String> = (|| { almide_net(|t| t.tcp_connect(host, port)) })(); __almide_r.map_err(Into::into) }
 
-pub fn almide_rt_net_tcp_read(handle: i64, len: i64) -> Result<Vec<u8>, String> {
-    almide_net(|t| t.tcp_read(handle, len))
-}
+pub fn almide_rt_net_tcp_read(handle: i64, len: i64) -> Result<Vec<u8>, AlmideString> { let __almide_r: Result<Vec<u8>, String> = (|| { almide_net(|t| t.tcp_read(handle, len)) })(); __almide_r.map_err(Into::into) }
 
-pub fn almide_rt_net_tcp_write(handle: i64, data: &[u8]) -> Result<(), String> {
-    almide_net(|t| t.tcp_write(handle, data))
-}
+pub fn almide_rt_net_tcp_write(handle: i64, data: &[u8]) -> Result<(), AlmideString> { let __almide_r: Result<(), String> = (|| { almide_net(|t| t.tcp_write(handle, data)) })(); __almide_r.map_err(Into::into) }
 
-pub fn almide_rt_net_tcp_read_exact(handle: i64, len: i64) -> Result<Vec<u8>, String> {
-    almide_net(|t| t.tcp_read_exact(handle, len))
-}
+pub fn almide_rt_net_tcp_read_exact(handle: i64, len: i64) -> Result<Vec<u8>, AlmideString> { let __almide_r: Result<Vec<u8>, String> = (|| { almide_net(|t| t.tcp_read_exact(handle, len)) })(); __almide_r.map_err(Into::into) }
 
-pub fn almide_rt_net_tcp_close(handle: i64) -> Result<(), String> {
-    almide_net(|t| t.tcp_close(handle))
-}
+pub fn almide_rt_net_tcp_close(handle: i64) -> Result<(), AlmideString> { let __almide_r: Result<(), String> = (|| { almide_net(|t| t.tcp_close(handle)) })(); __almide_r.map_err(Into::into) }
 
 pub fn almide_rt_net_tcp_is_open(handle: i64) -> bool {
     almide_net(|t| t.tcp_is_open(handle))
 }
 
-pub fn almide_rt_net_tcp_read_timeout(handle: i64, len: i64, timeout_ms: i64) -> Result<Vec<u8>, String> {
-    almide_net(|t| t.tcp_read_timeout(handle, len, timeout_ms))
-}
+pub fn almide_rt_net_tcp_read_timeout(handle: i64, len: i64, timeout_ms: i64) -> Result<Vec<u8>, AlmideString> { let __almide_r: Result<Vec<u8>, String> = (|| { almide_net(|t| t.tcp_read_timeout(handle, len, timeout_ms)) })(); __almide_r.map_err(Into::into) }
 
-pub fn almide_rt_net_tcp_available(handle: i64) -> Result<i64, String> {
-    almide_net(|t| t.tcp_available(handle))
-}
+pub fn almide_rt_net_tcp_available(handle: i64) -> Result<i64, AlmideString> { let __almide_r: Result<i64, String> = (|| { almide_net(|t| t.tcp_available(handle)) })(); __almide_r.map_err(Into::into) }
 
-pub fn almide_rt_net_tcp_listen(host: &str, port: i64) -> Result<i64, String> {
-    almide_net(|t| t.tcp_listen(host, port))
-}
+pub fn almide_rt_net_tcp_listen(host: &str, port: i64) -> Result<i64, AlmideString> { let __almide_r: Result<i64, String> = (|| { almide_net(|t| t.tcp_listen(host, port)) })(); __almide_r.map_err(Into::into) }
 
-pub fn almide_rt_net_tcp_local_port(handle: i64) -> Result<i64, String> {
-    almide_net(|t| t.tcp_local_port(handle))
-}
+pub fn almide_rt_net_tcp_local_port(handle: i64) -> Result<i64, AlmideString> { let __almide_r: Result<i64, String> = (|| { almide_net(|t| t.tcp_local_port(handle)) })(); __almide_r.map_err(Into::into) }
 
-pub fn almide_rt_net_tcp_accept(handle: i64) -> Result<i64, String> {
-    almide_net(|t| t.tcp_accept(handle))
-}
+pub fn almide_rt_net_tcp_accept(handle: i64) -> Result<i64, AlmideString> { let __almide_r: Result<i64, String> = (|| { almide_net(|t| t.tcp_accept(handle)) })(); __almide_r.map_err(Into::into) }
 
-pub fn almide_rt_net_tcp_close_listener(handle: i64) -> Result<(), String> {
-    almide_net(|t| t.tcp_close_listener(handle))
-}
+pub fn almide_rt_net_tcp_close_listener(handle: i64) -> Result<(), AlmideString> { let __almide_r: Result<(), String> = (|| { almide_net(|t| t.tcp_close_listener(handle)) })(); __almide_r.map_err(Into::into) }
 
-pub fn almide_rt_net_tcp_set_timeout(handle: i64, timeout_ms: i64) -> Result<(), String> {
-    almide_net(|t| t.tcp_set_timeout(handle, timeout_ms))
-}
+pub fn almide_rt_net_tcp_set_timeout(handle: i64, timeout_ms: i64) -> Result<(), AlmideString> { let __almide_r: Result<(), String> = (|| { almide_net(|t| t.tcp_set_timeout(handle, timeout_ms)) })(); __almide_r.map_err(Into::into) }
 
 // ══════════════════════════════════════════════════════════════════════════
 // Unix-domain sockets and shared-memory files
@@ -197,168 +173,183 @@ mod almide_net_unix {
 }
 
 /// Connect a stream socket to the listener at `path`; its descriptor.
-pub fn almide_rt_net_unix_connect(path: &str) -> Result<i64, String> {
-    #[cfg(unix)]
-    {
-        std::os::unix::net::UnixStream::connect(path)
-            .map(almide_net_unix::stream_fd)
-            .map_err(|e| format!("unix_connect({path}): {e}"))
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = (path,);
-        Err("unix_connect: Unix-domain sockets and shared-memory files need a Unix platform".to_string())
-    }
+pub fn almide_rt_net_unix_connect(path: &str) -> Result<i64, AlmideString> {
+    let __almide_r: Result<i64, String> = (|| {
+        #[cfg(unix)]
+        {
+            std::os::unix::net::UnixStream::connect(path)
+                .map(almide_net_unix::stream_fd)
+                .map_err(|e| format!("unix_connect({path}): {e}"))
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = (path,);
+            Err("unix_connect: Unix-domain sockets and shared-memory files need a Unix platform".to_string())
+        }
+    })();
+    __almide_r.map_err(Into::into)
 }
 
 /// Listen for stream connections at `path` (which must not exist yet).
-pub fn almide_rt_net_unix_listen(path: &str) -> Result<i64, String> {
-    #[cfg(unix)]
-    {
-        std::os::unix::net::UnixListener::bind(path)
-            .map(almide_net_unix::listener_fd)
-            .map_err(|e| format!("unix_listen({path}): {e}"))
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = (path,);
-        Err("unix_listen: Unix-domain sockets and shared-memory files need a Unix platform".to_string())
-    }
+pub fn almide_rt_net_unix_listen(path: &str) -> Result<i64, AlmideString> {
+    let __almide_r: Result<i64, String> = (|| {
+        #[cfg(unix)]
+        {
+            std::os::unix::net::UnixListener::bind(path)
+                .map(almide_net_unix::listener_fd)
+                .map_err(|e| format!("unix_listen({path}): {e}"))
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = (path,);
+            Err("unix_listen: Unix-domain sockets and shared-memory files need a Unix platform".to_string())
+        }
+    })();
+    __almide_r.map_err(Into::into)
 }
 
 /// Wait for the next connection on `listener`; the connected descriptor.
-pub fn almide_rt_net_unix_accept(listener: i64) -> Result<i64, String> {
-    #[cfg(unix)]
-    {
-        let fd = almide_net_unix::raw(listener, "unix_accept")?;
-        almide_net_unix::with_listener(fd, |l| l.accept())
-            .map(|(s, _)| almide_net_unix::stream_fd(s))
-            .map_err(|e| format!("unix_accept: {e}"))
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = (listener,);
-        Err("unix_accept: Unix-domain sockets and shared-memory files need a Unix platform".to_string())
-    }
+pub fn almide_rt_net_unix_accept(listener: i64) -> Result<i64, AlmideString> {
+    let __almide_r: Result<i64, String> = (|| {
+        #[cfg(unix)]
+        {
+            let fd = almide_net_unix::raw(listener, "unix_accept")?;
+            almide_net_unix::with_listener(fd, |l| l.accept())
+                .map(|(s, _)| almide_net_unix::stream_fd(s))
+                .map_err(|e| format!("unix_accept: {e}"))
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = (listener,);
+            Err("unix_accept: Unix-domain sockets and shared-memory files need a Unix platform".to_string())
+        }
+    })();
+    __almide_r.map_err(Into::into)
 }
 
 /// Send all of `data`, the descriptors `fds` riding with its first byte.
-pub fn almide_rt_net_unix_send(sock: i64, data: &[u8], fds: &[i64]) -> Result<(), String> {
-    #[cfg(unix)]
-    {
-        use almide_net_unix as u;
-        let fd = u::raw(sock, "unix_send")?;
-        if fds.len() > u::MAX_FDS {
-            return Err(format!("unix_send: {} descriptors in one message (at most {})", fds.len(), u::MAX_FDS));
-        }
-        if fds.is_empty() && data.is_empty() {
-            return Ok(());
-        }
-        let mut raw_fds = Vec::with_capacity(fds.len());
-        for &f in fds {
-            raw_fds.push(u::raw(f, "unix_send")?);
-        }
-        let mut sent = 0usize;
-        let mut first = true;
-        while sent < data.len() || first {
-            let rest = &data[sent..];
-            let mut iov = u::IoVec { base: rest.as_ptr() as *mut u8, len: rest.len() };
-            let mut control = vec![0u8; if first && !raw_fds.is_empty() { u::cmsg_space(raw_fds.len()) } else { 0 }];
-            if !control.is_empty() {
-                let len = (u::CMSG_HDR + raw_fds.len() * 4) as u::CmsgLen;
-                let w = std::mem::size_of::<u::CmsgLen>();
-                control[..w].copy_from_slice(&len.to_ne_bytes());
-                control[w..w + 4].copy_from_slice(&u::SOL_SOCKET.to_ne_bytes());
-                control[w + 4..w + 8].copy_from_slice(&u::SCM_RIGHTS.to_ne_bytes());
-                for (i, f) in raw_fds.iter().enumerate() {
-                    let at = u::CMSG_HDR + i * 4;
-                    control[at..at + 4].copy_from_slice(&f.to_ne_bytes());
+pub fn almide_rt_net_unix_send(sock: i64, data: &[u8], fds: &[i64]) -> Result<(), AlmideString> {
+    let __almide_r: Result<(), String> = (|| {
+        #[cfg(unix)]
+        {
+            use almide_net_unix as u;
+            let fd = u::raw(sock, "unix_send")?;
+            if fds.len() > u::MAX_FDS {
+                return Err(format!("unix_send: {} descriptors in one message (at most {})", fds.len(), u::MAX_FDS));
+            }
+            if fds.is_empty() && data.is_empty() {
+                return Ok(());
+            }
+            let mut raw_fds = Vec::with_capacity(fds.len());
+            for &f in fds {
+                raw_fds.push(u::raw(f, "unix_send")?);
+            }
+            let mut sent = 0usize;
+            let mut first = true;
+            while sent < data.len() || first {
+                let rest = &data[sent..];
+                let mut iov = u::IoVec { base: rest.as_ptr() as *mut u8, len: rest.len() };
+                let mut control = vec![0u8; if first && !raw_fds.is_empty() { u::cmsg_space(raw_fds.len()) } else { 0 }];
+                if !control.is_empty() {
+                    let len = (u::CMSG_HDR + raw_fds.len() * 4) as u::CmsgLen;
+                    let w = std::mem::size_of::<u::CmsgLen>();
+                    control[..w].copy_from_slice(&len.to_ne_bytes());
+                    control[w..w + 4].copy_from_slice(&u::SOL_SOCKET.to_ne_bytes());
+                    control[w + 4..w + 8].copy_from_slice(&u::SCM_RIGHTS.to_ne_bytes());
+                    for (i, f) in raw_fds.iter().enumerate() {
+                        let at = u::CMSG_HDR + i * 4;
+                        control[at..at + 4].copy_from_slice(&f.to_ne_bytes());
+                    }
                 }
+                let msg = u::MsgHdr {
+                    name: std::ptr::null_mut(), namelen: 0,
+                    iov: &mut iov, iovlen: 1,
+                    control: if control.is_empty() { std::ptr::null_mut() } else { control.as_mut_ptr() },
+                    controllen: control.len() as _,
+                    flags: 0,
+                };
+                let n = unsafe { u::sendmsg(fd, &msg, u::SEND_FLAGS) };
+                if n < 0 {
+                    let e = std::io::Error::last_os_error();
+                    if e.kind() == std::io::ErrorKind::Interrupted { continue; }
+                    return Err(format!("unix_send: {e}"));
+                }
+                sent += n as usize;
+                first = false;
             }
-            let msg = u::MsgHdr {
-                name: std::ptr::null_mut(), namelen: 0,
-                iov: &mut iov, iovlen: 1,
-                control: if control.is_empty() { std::ptr::null_mut() } else { control.as_mut_ptr() },
-                controllen: control.len() as _,
-                flags: 0,
-            };
-            let n = unsafe { u::sendmsg(fd, &msg, u::SEND_FLAGS) };
-            if n < 0 {
-                let e = std::io::Error::last_os_error();
-                if e.kind() == std::io::ErrorKind::Interrupted { continue; }
-                return Err(format!("unix_send: {e}"));
-            }
-            sent += n as usize;
-            first = false;
+            Ok(())
         }
-        Ok(())
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = (sock, data, fds);
-        Err("unix_send: Unix-domain sockets and shared-memory files need a Unix platform".to_string())
-    }
+        #[cfg(not(unix))]
+        {
+            let _ = (sock, data, fds);
+            Err("unix_send: Unix-domain sockets and shared-memory files need a Unix platform".to_string())
+        }
+    })();
+    __almide_r.map_err(Into::into)
 }
 
 /// Up to `max` bytes (blocking until some arrive); empty once the peer
 /// closed. Descriptors that came with them wait for `unix_take_fds`.
-pub fn almide_rt_net_unix_recv(sock: i64, max: i64) -> Result<Vec<u8>, String> {
-    #[cfg(unix)]
-    {
-        use almide_net_unix as u;
-        let fd = u::raw(sock, "unix_recv")?;
-        let mut buf = vec![0u8; max.max(0) as usize];
-        let mut control = vec![0u8; u::cmsg_space(u::MAX_FDS)];
-        loop {
-            let mut iov = u::IoVec { base: buf.as_mut_ptr(), len: buf.len() };
-            let mut msg = u::MsgHdr {
-                name: std::ptr::null_mut(), namelen: 0,
-                iov: &mut iov, iovlen: 1,
-                control: control.as_mut_ptr(), controllen: control.len() as _,
-                flags: 0,
-            };
-            let n = unsafe { u::recvmsg(fd, &mut msg, u::RECV_FLAGS) };
-            if n < 0 {
-                let e = std::io::Error::last_os_error();
-                if e.kind() == std::io::ErrorKind::Interrupted { continue; }
-                return Err(format!("unix_recv: {e}"));
-            }
-            // Walk the control messages for SCM_RIGHTS.
-            let total = msg.controllen as usize;
-            let w = std::mem::size_of::<u::CmsgLen>();
-            let mut at = 0usize;
-            let mut got = Vec::new();
-            while at + u::CMSG_HDR <= total {
-                let mut lb = [0u8; 8];
-                lb[..w].copy_from_slice(&control[at..at + w]);
-                let len = if w == 8 { u64::from_ne_bytes(lb) as usize } else { u32::from_ne_bytes([lb[0], lb[1], lb[2], lb[3]]) as usize };
-                if len < u::CMSG_HDR || at + len > total { break; }
-                let level = i32::from_ne_bytes(control[at + w..at + w + 4].try_into().unwrap());
-                let kind = i32::from_ne_bytes(control[at + w + 4..at + w + 8].try_into().unwrap());
-                if level == u::SOL_SOCKET && kind == u::SCM_RIGHTS {
-                    let count = (len - u::CMSG_HDR) / 4;
-                    for i in 0..count {
-                        let p = at + u::CMSG_HDR + i * 4;
-                        let f = i32::from_ne_bytes(control[p..p + 4].try_into().unwrap());
-                        // Where MSG_CMSG_CLOEXEC does not exist, set it here.
-                        unsafe { u::fcntl(f, u::F_SETFD, u::FD_CLOEXEC) };
-                        got.push(i64::from(f));
-                    }
+pub fn almide_rt_net_unix_recv(sock: i64, max: i64) -> Result<Vec<u8>, AlmideString> {
+    let __almide_r: Result<Vec<u8>, String> = (|| {
+        #[cfg(unix)]
+        {
+            use almide_net_unix as u;
+            let fd = u::raw(sock, "unix_recv")?;
+            let mut buf = vec![0u8; max.max(0) as usize];
+            let mut control = vec![0u8; u::cmsg_space(u::MAX_FDS)];
+            loop {
+                let mut iov = u::IoVec { base: buf.as_mut_ptr(), len: buf.len() };
+                let mut msg = u::MsgHdr {
+                    name: std::ptr::null_mut(), namelen: 0,
+                    iov: &mut iov, iovlen: 1,
+                    control: control.as_mut_ptr(), controllen: control.len() as _,
+                    flags: 0,
+                };
+                let n = unsafe { u::recvmsg(fd, &mut msg, u::RECV_FLAGS) };
+                if n < 0 {
+                    let e = std::io::Error::last_os_error();
+                    if e.kind() == std::io::ErrorKind::Interrupted { continue; }
+                    return Err(format!("unix_recv: {e}"));
                 }
-                at += (len + u::CMSG_ALIGN - 1) & !(u::CMSG_ALIGN - 1);
+                // Walk the control messages for SCM_RIGHTS.
+                let total = msg.controllen as usize;
+                let w = std::mem::size_of::<u::CmsgLen>();
+                let mut at = 0usize;
+                let mut got = Vec::new();
+                while at + u::CMSG_HDR <= total {
+                    let mut lb = [0u8; 8];
+                    lb[..w].copy_from_slice(&control[at..at + w]);
+                    let len = if w == 8 { u64::from_ne_bytes(lb) as usize } else { u32::from_ne_bytes([lb[0], lb[1], lb[2], lb[3]]) as usize };
+                    if len < u::CMSG_HDR || at + len > total { break; }
+                    let level = i32::from_ne_bytes(control[at + w..at + w + 4].try_into().unwrap());
+                    let kind = i32::from_ne_bytes(control[at + w + 4..at + w + 8].try_into().unwrap());
+                    if level == u::SOL_SOCKET && kind == u::SCM_RIGHTS {
+                        let count = (len - u::CMSG_HDR) / 4;
+                        for i in 0..count {
+                            let p = at + u::CMSG_HDR + i * 4;
+                            let f = i32::from_ne_bytes(control[p..p + 4].try_into().unwrap());
+                            // Where MSG_CMSG_CLOEXEC does not exist, set it here.
+                            unsafe { u::fcntl(f, u::F_SETFD, u::FD_CLOEXEC) };
+                            got.push(i64::from(f));
+                        }
+                    }
+                    at += (len + u::CMSG_ALIGN - 1) & !(u::CMSG_ALIGN - 1);
+                }
+                if !got.is_empty() {
+                    u::RECEIVED.with(|r| r.borrow_mut().entry(sock).or_default().extend(got));
+                }
+                buf.truncate(n as usize);
+                return Ok(buf);
             }
-            if !got.is_empty() {
-                u::RECEIVED.with(|r| r.borrow_mut().entry(sock).or_default().extend(got));
-            }
-            buf.truncate(n as usize);
-            return Ok(buf);
         }
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = (sock, max);
-        Err("unix_recv: Unix-domain sockets and shared-memory files need a Unix platform".to_string())
-    }
+        #[cfg(not(unix))]
+        {
+            let _ = (sock, max);
+            Err("unix_recv: Unix-domain sockets and shared-memory files need a Unix platform".to_string())
+        }
+    })();
+    __almide_r.map_err(Into::into)
 }
 
 /// The descriptors received on `sock` so far and not yet taken, oldest first.
@@ -379,28 +370,31 @@ pub fn almide_rt_net_unix_take_fds(sock: i64) -> Vec<i64> {
 /// Whether `fd` has something to read (data, a connection, or the peer's
 /// close) within `timeout_ms` milliseconds; 0 checks without waiting, a
 /// negative timeout waits as long as it takes.
-pub fn almide_rt_net_unix_poll(fd: i64, timeout_ms: i64) -> Result<bool, String> {
-    #[cfg(unix)]
-    {
-        use almide_net_unix as u;
-        let raw = u::raw(fd, "unix_poll")?;
-        let timeout = if timeout_ms < 0 { -1 } else { timeout_ms.min(i64::from(i32::MAX)) as i32 };
-        loop {
-            let mut p = u::PollFd { fd: raw, events: u::POLLIN, revents: 0 };
-            let n = unsafe { u::poll(&mut p, 1, timeout) };
-            if n < 0 {
-                let e = std::io::Error::last_os_error();
-                if e.kind() == std::io::ErrorKind::Interrupted { continue; }
-                return Err(format!("unix_poll: {e}"));
+pub fn almide_rt_net_unix_poll(fd: i64, timeout_ms: i64) -> Result<bool, AlmideString> {
+    let __almide_r: Result<bool, String> = (|| {
+        #[cfg(unix)]
+        {
+            use almide_net_unix as u;
+            let raw = u::raw(fd, "unix_poll")?;
+            let timeout = if timeout_ms < 0 { -1 } else { timeout_ms.min(i64::from(i32::MAX)) as i32 };
+            loop {
+                let mut p = u::PollFd { fd: raw, events: u::POLLIN, revents: 0 };
+                let n = unsafe { u::poll(&mut p, 1, timeout) };
+                if n < 0 {
+                    let e = std::io::Error::last_os_error();
+                    if e.kind() == std::io::ErrorKind::Interrupted { continue; }
+                    return Err(format!("unix_poll: {e}"));
+                }
+                return Ok(n > 0 && (p.revents & (u::POLLIN | u::POLLHUP)) != 0);
             }
-            return Ok(n > 0 && (p.revents & (u::POLLIN | u::POLLHUP)) != 0);
         }
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = (fd, timeout_ms);
-        Err("unix_poll: Unix-domain sockets and shared-memory files need a Unix platform".to_string())
-    }
+        #[cfg(not(unix))]
+        {
+            let _ = (fd, timeout_ms);
+            Err("unix_poll: Unix-domain sockets and shared-memory files need a Unix platform".to_string())
+        }
+    })();
+    __almide_r.map_err(Into::into)
 }
 
 /// The descriptors among `fds` that have something to read (data, a
@@ -408,151 +402,169 @@ pub fn almide_rt_net_unix_poll(fd: i64, timeout_ms: i64) -> Result<bool, String>
 /// order given; empty when none did. 0 checks without waiting, a negative
 /// timeout waits for the first. One wait for many sources: a Wayland socket
 /// and a compositor's event socket together, with no busy loop.
-pub fn almide_rt_net_unix_wait(fds: &[i64], timeout_ms: i64) -> Result<Vec<i64>, String> {
-    #[cfg(unix)]
-    {
-        use almide_net_unix as u;
-        let mut polls = Vec::with_capacity(fds.len());
-        for &f in fds {
-            polls.push(u::PollFd { fd: u::raw(f, "unix_wait")?, events: u::POLLIN, revents: 0 });
-        }
-        let timeout = if timeout_ms < 0 { -1 } else { timeout_ms.min(i64::from(i32::MAX)) as i32 };
-        loop {
-            for p in polls.iter_mut() { p.revents = 0; }
-            let n = unsafe { u::poll(polls.as_mut_ptr(), polls.len() as u::NFds, timeout) };
-            if n < 0 {
-                let e = std::io::Error::last_os_error();
-                if e.kind() == std::io::ErrorKind::Interrupted { continue; }
-                return Err(format!("unix_wait: {e}"));
+pub fn almide_rt_net_unix_wait(fds: &[i64], timeout_ms: i64) -> Result<Vec<i64>, AlmideString> {
+    let __almide_r: Result<Vec<i64>, String> = (|| {
+        #[cfg(unix)]
+        {
+            use almide_net_unix as u;
+            let mut polls = Vec::with_capacity(fds.len());
+            for &f in fds {
+                polls.push(u::PollFd { fd: u::raw(f, "unix_wait")?, events: u::POLLIN, revents: 0 });
             }
-            return Ok(polls.iter().zip(fds)
-                .filter(|(p, _)| (p.revents & (u::POLLIN | u::POLLHUP)) != 0)
-                .map(|(_, &f)| f)
-                .collect());
+            let timeout = if timeout_ms < 0 { -1 } else { timeout_ms.min(i64::from(i32::MAX)) as i32 };
+            loop {
+                for p in polls.iter_mut() { p.revents = 0; }
+                let n = unsafe { u::poll(polls.as_mut_ptr(), polls.len() as u::NFds, timeout) };
+                if n < 0 {
+                    let e = std::io::Error::last_os_error();
+                    if e.kind() == std::io::ErrorKind::Interrupted { continue; }
+                    return Err(format!("unix_wait: {e}"));
+                }
+                return Ok(polls.iter().zip(fds)
+                    .filter(|(p, _)| (p.revents & (u::POLLIN | u::POLLHUP)) != 0)
+                    .map(|(_, &f)| f)
+                    .collect());
+            }
         }
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = (fds, timeout_ms);
-        Err("unix_wait: Unix-domain sockets and shared-memory files need a Unix platform".to_string())
-    }
+        #[cfg(not(unix))]
+        {
+            let _ = (fds, timeout_ms);
+            Err("unix_wait: Unix-domain sockets and shared-memory files need a Unix platform".to_string())
+        }
+    })();
+    __almide_r.map_err(Into::into)
 }
 
 /// Close a descriptor this module opened or received.
-pub fn almide_rt_net_unix_close(fd: i64) -> Result<(), String> {
-    #[cfg(unix)]
-    {
-        use almide_net_unix as u;
-        let raw = u::raw(fd, "unix_close")?;
-        u::RECEIVED.with(|r| r.borrow_mut().remove(&fd));
-        if unsafe { u::close(raw) } != 0 {
-            return Err(format!("unix_close: {}", std::io::Error::last_os_error()));
+pub fn almide_rt_net_unix_close(fd: i64) -> Result<(), AlmideString> {
+    let __almide_r: Result<(), String> = (|| {
+        #[cfg(unix)]
+        {
+            use almide_net_unix as u;
+            let raw = u::raw(fd, "unix_close")?;
+            u::RECEIVED.with(|r| r.borrow_mut().remove(&fd));
+            if unsafe { u::close(raw) } != 0 {
+                return Err(format!("unix_close: {}", std::io::Error::last_os_error()));
+            }
+            Ok(())
         }
-        Ok(())
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = (fd,);
-        Err("unix_close: Unix-domain sockets and shared-memory files need a Unix platform".to_string())
-    }
+        #[cfg(not(unix))]
+        {
+            let _ = (fd,);
+            Err("unix_close: Unix-domain sockets and shared-memory files need a Unix platform".to_string())
+        }
+    })();
+    __almide_r.map_err(Into::into)
 }
 
 /// A new shared-memory file of `size` bytes, zero-filled, with no name left
 /// in any directory: its descriptor, to write into and pass to a peer.
-pub fn almide_rt_net_shm_create(size: i64) -> Result<i64, String> {
-    #[cfg(unix)]
-    {
-        if size < 0 {
-            return Err(format!("shm_create: negative size {size}"));
-        }
-        // Where the session keeps its runtime files (a tmpfs on Linux), else the
-        // system temp dir. The name exists only between create and unlink.
-        let dir = std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from)
-            .filter(|d| d.is_dir())
-            .unwrap_or_else(std::env::temp_dir);
-        let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
-        for attempt in 0..16u32 {
-            let path = dir.join(format!("almide-shm-{}-{}-{}", std::process::id(), stamp, attempt));
-            match std::fs::OpenOptions::new().read(true).write(true).create_new(true).open(&path) {
-                Ok(file) => {
-                    let _ = std::fs::remove_file(&path);
-                    file.set_len(size as u64).map_err(|e| format!("shm_create({size}): {e}"))?;
-                    return Ok(almide_net_unix::into_fd(file));
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(e) => return Err(format!("shm_create({size}): {e}")),
+pub fn almide_rt_net_shm_create(size: i64) -> Result<i64, AlmideString> {
+    let __almide_r: Result<i64, String> = (|| {
+        #[cfg(unix)]
+        {
+            if size < 0 {
+                return Err(format!("shm_create: negative size {size}"));
             }
+            // Where the session keeps its runtime files (a tmpfs on Linux), else the
+            // system temp dir. The name exists only between create and unlink.
+            let dir = std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from)
+                .filter(|d| d.is_dir())
+                .unwrap_or_else(std::env::temp_dir);
+            let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+            for attempt in 0..16u32 {
+                let path = dir.join(format!("almide-shm-{}-{}-{}", std::process::id(), stamp, attempt));
+                match std::fs::OpenOptions::new().read(true).write(true).create_new(true).open(&path) {
+                    Ok(file) => {
+                        let _ = std::fs::remove_file(&path);
+                        file.set_len(size as u64).map_err(|e| format!("shm_create({size}): {e}"))?;
+                        return Ok(almide_net_unix::into_fd(file));
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                    Err(e) => return Err(format!("shm_create({size}): {e}")),
+                }
+            }
+            Err(format!("shm_create({size}): no free name"))
         }
-        Err(format!("shm_create({size}): no free name"))
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = (size,);
-        Err("shm_create: Unix-domain sockets and shared-memory files need a Unix platform".to_string())
-    }
+        #[cfg(not(unix))]
+        {
+            let _ = (size,);
+            Err("shm_create: Unix-domain sockets and shared-memory files need a Unix platform".to_string())
+        }
+    })();
+    __almide_r.map_err(Into::into)
 }
 
 /// Grow or shrink the shared-memory file `fd` to `size` bytes.
-pub fn almide_rt_net_shm_resize(fd: i64, size: i64) -> Result<(), String> {
-    #[cfg(unix)]
-    {
-        let raw = almide_net_unix::raw(fd, "shm_resize")?;
-        if size < 0 {
-            return Err(format!("shm_resize: negative size {size}"));
+pub fn almide_rt_net_shm_resize(fd: i64, size: i64) -> Result<(), AlmideString> {
+    let __almide_r: Result<(), String> = (|| {
+        #[cfg(unix)]
+        {
+            let raw = almide_net_unix::raw(fd, "shm_resize")?;
+            if size < 0 {
+                return Err(format!("shm_resize: negative size {size}"));
+            }
+            almide_net_unix::with_file(raw, |f| f.set_len(size as u64)).map_err(|e| format!("shm_resize: {e}"))
         }
-        almide_net_unix::with_file(raw, |f| f.set_len(size as u64)).map_err(|e| format!("shm_resize: {e}"))
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = (fd, size);
-        Err("shm_resize: Unix-domain sockets and shared-memory files need a Unix platform".to_string())
-    }
+        #[cfg(not(unix))]
+        {
+            let _ = (fd, size);
+            Err("shm_resize: Unix-domain sockets and shared-memory files need a Unix platform".to_string())
+        }
+    })();
+    __almide_r.map_err(Into::into)
 }
 
 /// Write `data` into the shared-memory file `fd` at byte `offset`.
-pub fn almide_rt_net_shm_write(fd: i64, offset: i64, data: &[u8]) -> Result<(), String> {
-    #[cfg(unix)]
-    {
-        let raw = almide_net_unix::raw(fd, "shm_write")?;
-        if offset < 0 {
-            return Err(format!("shm_write: negative offset {offset}"));
+pub fn almide_rt_net_shm_write(fd: i64, offset: i64, data: &[u8]) -> Result<(), AlmideString> {
+    let __almide_r: Result<(), String> = (|| {
+        #[cfg(unix)]
+        {
+            let raw = almide_net_unix::raw(fd, "shm_write")?;
+            if offset < 0 {
+                return Err(format!("shm_write: negative offset {offset}"));
+            }
+            almide_net_unix::with_file(raw, |f| std::os::unix::fs::FileExt::write_all_at(f, data, offset as u64)).map_err(|e| format!("shm_write: {e}"))
         }
-        almide_net_unix::with_file(raw, |f| std::os::unix::fs::FileExt::write_all_at(f, data, offset as u64)).map_err(|e| format!("shm_write: {e}"))
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = (fd, offset, data);
-        Err("shm_write: Unix-domain sockets and shared-memory files need a Unix platform".to_string())
-    }
+        #[cfg(not(unix))]
+        {
+            let _ = (fd, offset, data);
+            Err("shm_write: Unix-domain sockets and shared-memory files need a Unix platform".to_string())
+        }
+    })();
+    __almide_r.map_err(Into::into)
 }
 
 /// Up to `len` bytes of the file `fd` from byte `offset` (fewer at its end).
-pub fn almide_rt_net_shm_read(fd: i64, offset: i64, len: i64) -> Result<Vec<u8>, String> {
-    #[cfg(unix)]
-    {
-        let raw = almide_net_unix::raw(fd, "shm_read")?;
-        if offset < 0 || len < 0 {
-            return Err(format!("shm_read: negative offset or length ({offset}, {len})"));
-        }
-        let mut buf = vec![0u8; len as usize];
-        let mut got = 0usize;
-        almide_net_unix::with_file(raw, |f| -> Result<(), String> {
-            while got < buf.len() {
-                match std::os::unix::fs::FileExt::read_at(f, &mut buf[got..], offset as u64 + got as u64) {
-                    Ok(0) => break,
-                    Ok(n) => got += n,
-                    Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
-                    Err(e) => return Err(format!("shm_read: {e}")),
-                }
+pub fn almide_rt_net_shm_read(fd: i64, offset: i64, len: i64) -> Result<Vec<u8>, AlmideString> {
+    let __almide_r: Result<Vec<u8>, String> = (|| {
+        #[cfg(unix)]
+        {
+            let raw = almide_net_unix::raw(fd, "shm_read")?;
+            if offset < 0 || len < 0 {
+                return Err(format!("shm_read: negative offset or length ({offset}, {len})"));
             }
-            Ok(())
-        })?;
-        buf.truncate(got);
-        Ok(buf)
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = (fd, offset, len);
-        Err("shm_read: Unix-domain sockets and shared-memory files need a Unix platform".to_string())
-    }
+            let mut buf = vec![0u8; len as usize];
+            let mut got = 0usize;
+            almide_net_unix::with_file(raw, |f| -> Result<(), String> {
+                while got < buf.len() {
+                    match std::os::unix::fs::FileExt::read_at(f, &mut buf[got..], offset as u64 + got as u64) {
+                        Ok(0) => break,
+                        Ok(n) => got += n,
+                        Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+                        Err(e) => return Err(format!("shm_read: {e}")),
+                    }
+                }
+                Ok(())
+            })?;
+            buf.truncate(got);
+            Ok(buf)
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = (fd, offset, len);
+            Err("shm_read: Unix-domain sockets and shared-memory files need a Unix platform".to_string())
+        }
+    })();
+    __almide_r.map_err(Into::into)
 }
