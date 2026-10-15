@@ -566,21 +566,27 @@ pub fn almide_rt_map_upsert_fn<K: PartialEq + 'static, V: Clone, F: Fn(V) -> V>(
 // String-keyed twins whose key arrives BORROWED (`StrMapKey`, the final-IR
 // rewrite of `k.to_string()` at the key slot): the key is copied only when it
 // is inserted, never when it is found.
-pub fn almide_rt_map_upsert_str_fn<V: Clone, F: Fn(V) -> V>(mut m: AlmideMap<String, V>, k: &str, init: V, f: F) -> AlmideMap<String, V> {
-    if let Some(v) = m.get_mut(k) {
-        let old = std::mem::replace(v, init);
-        *v = f(old);
-    } else {
-        m.insert(k.to_string(), init);
-    }
-    m
+pub fn almide_rt_map_upsert_str_fn<V: Clone, F: Fn(V) -> V>(mut m: AlmideMap<AlmideString, V>, k: &str, init: V, f: F) -> AlmideMap<AlmideString, V> {
+    let __almide_v: AlmideMap<String, V> = {
+        if let Some(v) = m.get_mut(k) {
+            let old = std::mem::replace(v, init);
+            *v = f(old);
+        } else {
+            m.insert(k.to_string(), init);
+        }
+        m
+    };
+    __almide_v.into_almide()
 }
-pub fn almide_rt_map_set_str<V: Clone>(mut m: AlmideMap<String, V>, k: &str, v: V) -> AlmideMap<String, V> {
-    match m.get_mut(k) {
-        Some(slot) => *slot = v,
-        None => m.insert(k.to_string(), v),
-    }
-    m
+pub fn almide_rt_map_set_str<V: Clone>(mut m: AlmideMap<AlmideString, V>, k: &str, v: V) -> AlmideMap<AlmideString, V> {
+    let __almide_v: AlmideMap<String, V> = {
+        match m.get_mut(k) {
+            Some(slot) => *slot = v,
+            None => m.insert(k.to_string(), v),
+        }
+        m
+    };
+    __almide_v.into_almide()
 }
 pub fn almide_rt_map_remove<K: PartialEq + Clone + 'static, V: Clone>(m: &AlmideMap<K, V>, k: K) -> AlmideMap<K, V> { let mut r = m.clone(); r.remove(&k); r }
 // The owned twin (`@reuse(m)`, #3640): a source at its last use is edited in

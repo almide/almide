@@ -3,7 +3,7 @@
 
 pub fn almide_rt_int_to_string(n: i64) -> AlmideString { let __almide_out: String = n.to_string(); __almide_out.into() }
 
-pub fn almide_rt_int_from_string(s: String) -> Result<i64, AlmideString> { let __almide_r: Result<i64, String> = (|| { s.trim().parse::<i64>().map_err(|e| format!("invalid integer: {}", e)) })(); __almide_r.map_err(Into::into) }
+pub fn almide_rt_int_from_string(s: AlmideString) -> Result<i64, AlmideString> { let __almide_r: Result<i64, String> = (|| { s.trim().parse::<i64>().map_err(|e| format!("invalid integer: {}", e)) })(); __almide_r.map_err(Into::into) }
 
 #[inline(always)] pub fn almide_rt_int_abs(n: i64) -> i64 { n.abs() }
 #[inline(always)] pub fn almide_rt_int_min(a: i64, b: i64) -> i64 { a.min(b) }
