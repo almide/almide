@@ -162,3 +162,26 @@ fn a_foreign_declaration_keyword_is_one_error_and_keeps_the_declaration() {
         assert!(errs[0].contains("is not a keyword in Almide"), "{src}: {errs:#?}");
     }
 }
+
+/// Inside a body, `const y = …` / `val y = …` is reported once and binds `y`
+/// as the `let` it means — before, `const` read as an undefined variable and
+/// `y` as an assignment to an undefined binding, three errors in all.
+#[test]
+fn a_local_const_is_one_error_and_binds() {
+    for kw in ["const", "val"] {
+        let errs = errors(&format!("fn f(x: Int) -> Int = {{\n  {kw} y = x + 1\n  y\n}}\n{MAIN}"));
+        assert_eq!(errs.len(), 1, "{kw}: {errs:#?}");
+        assert!(errs[0].contains(kw) && errs[0].contains("let"), "{kw}: names `let`: {errs:#?}");
+    }
+}
+
+/// A Rust macro call (`println!(…)`, `format!(…)`, `panic!(…)`) is reported
+/// once, naming the plain call — before, the `!` read as error propagation
+/// on a function value and three errors followed.
+#[test]
+fn a_rust_macro_call_is_one_error_and_reads_as_the_call() {
+    let src = "effect fn main() -> Unit = {\n  println!(\"hi\")\n}\n";
+    let errs = errors(src);
+    assert_eq!(errs.len(), 1, "{errs:#?}");
+    assert!(errs[0].contains("println("), "names the plain call: {errs:#?}");
+}
