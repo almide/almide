@@ -65,3 +65,17 @@ fn a_brace_style_if_is_one_error() {
         assert!(errs[0].contains("then"), "{body}: the error names `then`: {errs:#?}");
     }
 }
+
+/// `===` / `!==` (JavaScript) lexes as `==` / `!=` and a stray `=`; the stray
+/// `=` was reported as "Assignments return Unit", which sends the reader to
+/// look for an assignment, and the comparison was lost. It is now one error
+/// naming `==` / `!=`, and the comparison parses.
+#[test]
+fn a_triple_equals_is_one_error_naming_double_equals() {
+    for (op, want) in [("===", "=="), ("!==", "!=")] {
+        let errs = errors(&format!("fn f(x: Int) -> Int = {{\n  if x {op} 3 then 1 else 2\n}}\n{MAIN}"));
+        assert_eq!(errs.len(), 1, "{op}: {errs:#?}");
+        assert!(errs[0].contains(&format!("'{want}'")), "{op}: names {want}: {errs:#?}");
+        assert!(!errs[0].contains("Assignments"), "{op}: {errs:#?}");
+    }
+}
