@@ -125,3 +125,20 @@ fn c_style_boolean_operators_are_one_error_and_read_as_words() {
         assert!(errs[0].contains(&format!("'{op}' is not valid")), "{op}: {errs:#?}");
     }
 }
+
+/// A match arm written `p -> e` (Haskell / OCaml / Kotlin `when`), `p: e`
+/// (Python dicts, YAML) or `case p => e` (Scala / Swift) is reported once per
+/// arm — each is a place to edit — and parsed as `p => e`. Before, the parse
+/// stopped at the first arm and the fn's type failed too.
+#[test]
+fn a_foreign_match_arm_is_one_error_and_reads_as_fat_arrow() {
+    for (body, needle) in [
+        ("match x { 1 -> 2, _ -> 3 }", "=>"),
+        ("match x {\n    1: 2,\n    _: 3,\n  }", "=>"),
+        ("match x { case 1 => 2, case _ => 3 }", "case"),
+    ] {
+        let errs = errors(&format!("fn f(x: Int) -> Int = {{\n  {body}\n}}\n{MAIN}"));
+        assert_eq!(errs.len(), 2, "one per arm: {body}: {errs:#?}");
+        assert!(errs.iter().all(|e| e.contains(needle)), "{body}: names `{needle}`: {errs:#?}");
+    }
+}
