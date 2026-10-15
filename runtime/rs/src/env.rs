@@ -6,25 +6,24 @@
 // binary run as `./p a -- b` answered ["b"] where both wasm legs answered
 // ["a", "--", "b"] (#2485). The wasm legs build the same list from WASI
 // args_get with argv[0] skipped (stdlib/env_args.almd).
-pub fn almide_rt_env_args() -> Vec<String> {
-    std::env::args().skip(1).collect()
-}
+pub fn almide_rt_env_args() -> Vec<AlmideString> { let __almide_v: Vec<String> = { std::env::args().skip(1).collect() }; __almide_v.into_almide() }
 
-pub fn almide_rt_env_get(name: &str) -> Option<String> {
-    std::env::var(name).ok()
-}
+pub fn almide_rt_env_get(name: &str) -> Option<AlmideString> { let __almide_v: Option<String> = { std::env::var(name).ok() }; __almide_v.into_almide() }
 
 pub fn almide_rt_env_set(name: &str, value: &str) {
     std::env::set_var(name, value);
 }
 
-pub fn almide_rt_env_cwd() -> Result<String, AlmideString> {
-    let __almide_r: Result<String, String> = (|| {
-        std::env::current_dir()
-            .map(|p| p.to_string_lossy().to_string())
-            .map_err(|e| e.to_string())
-    })();
-    __almide_r.map_err(Into::into)
+pub fn almide_rt_env_cwd() -> Result<AlmideString, AlmideString> {
+    let __almide_v: Result<String, AlmideString> = {
+        let __almide_r: Result<String, String> = (|| {
+            std::env::current_dir()
+                .map(|p| p.to_string_lossy().to_string())
+                .map_err(|e| e.to_string())
+        })();
+        __almide_r.map_err(Into::into)
+    };
+    __almide_v.into_almide()
 }
 
 pub fn almide_rt_env_unix_timestamp() -> i64 {

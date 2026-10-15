@@ -406,13 +406,16 @@ pub fn almide_rt_bytes_cmp(a: &Vec<u8>, b: &Vec<u8>) -> i64 {
     }
 }
 
-pub fn almide_rt_bytes_to_string(b: &Vec<u8>) -> Result<String, AlmideString> {
-    let __almide_r: Result<String, String> = (|| {
-        std::str::from_utf8(b)
-            .map(|s| s.to_string())
-            .map_err(|e| format!("invalid UTF-8: {}", e))
-    })();
-    __almide_r.map_err(Into::into)
+pub fn almide_rt_bytes_to_string(b: &Vec<u8>) -> Result<AlmideString, AlmideString> {
+    let __almide_v: Result<String, AlmideString> = {
+        let __almide_r: Result<String, String> = (|| {
+            std::str::from_utf8(b)
+                .map(|s| s.to_string())
+                .map_err(|e| format!("invalid UTF-8: {}", e))
+        })();
+        __almide_r.map_err(Into::into)
+    };
+    __almide_v.into_almide()
 }
 
 pub fn almide_rt_bytes_to_string_lossy(b: &Vec<u8>) -> AlmideString { let __almide_out: String = String::from_utf8_lossy(b).into_owned(); __almide_out.into() }
@@ -593,12 +596,15 @@ pub fn almide_rt_bytes_read_bool_at(b: &Vec<u8>, pos: i64) -> (i64, Option<bool>
 /// Cursor form of `read_string_be` — u32 big-endian length prefix + UTF-8 body.
 /// Returns `(pos, None)` without advancing when either the prefix or the body
 /// runs off the end.
-pub fn almide_rt_bytes_read_string_be_at(b: &Vec<u8>, pos: i64) -> (i64, Option<String>) {
-    let Some(p) = window(pos, 4, b.len()) else { return (pos, None); };
-    let slen = u32::from_be_bytes([b[p], b[p+1], b[p+2], b[p+3]]) as usize;
-    let Some(q) = window(pos + 4, slen, b.len()) else { return (pos, None); };
-    let s = String::from_utf8_lossy(&b[q..q + slen]).into_owned();
-    (pos + 4 + slen as i64, Some(s))
+pub fn almide_rt_bytes_read_string_be_at(b: &Vec<u8>, pos: i64) -> (i64, Option<AlmideString>) {
+    let __almide_v: (i64, Option<String>) = {
+        let Some(p) = window(pos, 4, b.len()) else { return (pos, None); };
+        let slen = u32::from_be_bytes([b[p], b[p+1], b[p+2], b[p+3]]) as usize;
+        let Some(q) = window(pos + 4, slen, b.len()) else { return (pos, None); };
+        let s = String::from_utf8_lossy(&b[q..q + slen]).into_owned();
+        (pos + 4 + slen as i64, Some(s))
+    };
+    __almide_v.into_almide()
 }
 
 // Same window rule as the cursor macros above. This one was already correct,
@@ -944,22 +950,25 @@ fn f16_bits_to_f64(bits: u16) -> f32 {
 // The reserve is additionally capped by what the buffer COULD hold — each entry costs at
 // least its 4-byte prefix — because `Vec::with_capacity(count as usize)` turned a negative
 // count into an immediate allocation abort on this leg while the self-host answered `[]`.
-pub fn almide_rt_bytes_read_length_prefixed_strings_le(b: &Vec<u8>, pos: i64, count: i64) -> Vec<String> {
-    if count <= 0 { return Vec::new(); }
-    let buf = b.as_slice();
-    let mut p = pos;
-    // Each entry costs at least its 4-byte prefix, so the buffer caps how many can
-    // exist. `Vec::with_capacity(count as usize)` alone turned a huge count into an
-    // allocation abort on this leg while the other answered `[]`.
-    let mut out = Vec::with_capacity((count as usize).min(buf.len() / 4 + 1));
-    for _ in 0..count {
-        let Some(q) = window(p, 4, buf.len()) else { break; };
-        let len = u32::from_le_bytes([buf[q], buf[q+1], buf[q+2], buf[q+3]]) as usize;
-        let Some(r) = window(q as i64 + 4, len, buf.len()) else { break; };
-        out.push(String::from_utf8_lossy(&buf[r..r + len]).into_owned());
-        p = (r + len) as i64;
-    }
-    out
+pub fn almide_rt_bytes_read_length_prefixed_strings_le(b: &Vec<u8>, pos: i64, count: i64) -> Vec<AlmideString> {
+    let __almide_v: Vec<String> = {
+        if count <= 0 { return Vec::new(); }
+        let buf = b.as_slice();
+        let mut p = pos;
+        // Each entry costs at least its 4-byte prefix, so the buffer caps how many can
+        // exist. `Vec::with_capacity(count as usize)` alone turned a huge count into an
+        // allocation abort on this leg while the other answered `[]`.
+        let mut out = Vec::with_capacity((count as usize).min(buf.len() / 4 + 1));
+        for _ in 0..count {
+            let Some(q) = window(p, 4, buf.len()) else { break; };
+            let len = u32::from_le_bytes([buf[q], buf[q+1], buf[q+2], buf[q+3]]) as usize;
+            let Some(r) = window(q as i64 + 4, len, buf.len()) else { break; };
+            out.push(String::from_utf8_lossy(&buf[r..r + len]).into_owned());
+            p = (r + len) as i64;
+        }
+        out
+    };
+    __almide_v.into_almide()
 }
 
 // Arena memory management — no-op on native (only meaningful in WASM bump allocator).
