@@ -7,9 +7,43 @@ use super::Parser;
 impl Parser {
     pub(crate) fn parse_expr(&mut self) -> Result<Expr, String> {
         self.enter_depth()?;
-        let result = self.parse_expr_bp(0);
+        let result = self.parse_expr_bp(0).and_then(|cond| self.parse_ternary_rest(cond));
         self.exit_depth();
         result
+    }
+
+    /// `c ? a : b` (C / JS / Java): one error naming `if … then … else`, and
+    /// the parse goes on as that `if`. The postfix `?` steps aside for it
+    /// (`ternary_follows`), so `c` here is the whole condition, not its last
+    /// operand.
+    fn parse_ternary_rest(&mut self, cond: Expr) -> Result<Expr, String> {
+        if !self.ternary_follows() { return Ok(cond); }
+        let span = cond.span;
+        let diag = self.diag_error(
+            "'c ? a : b' is not Almide: use 'if c then a else b'",
+            "Almide's conditional is an expression: `if c then a else b`. A postfix `?` converts a Result to an Option.",
+            "if",
+        ).with_try("if x > 0 then 1 else 2");
+        self.errors.push(diag);
+        self.advance();
+        let then = self.parse_expr_bp(0)?;
+        self.expect(TokenType::Colon)?;
+        let else_ = self.parse_expr()?;
+        Ok(Expr::new(self.next_id(), span, ExprKind::If {
+            cond: Box::new(cond), then: Box::new(then), else_: Box::new(else_),
+        }))
+    }
+
+    /// A `?` on the condition's line followed, on the same line, by the
+    /// start of an operand — never the Result→Option postfix, which a value
+    /// does not follow.
+    pub(crate) fn ternary_follows(&self) -> bool {
+        if !self.check(TokenType::Question) || self.newline_before_current() { return false; }
+        let q = self.current();
+        self.peek_at(1).is_some_and(|t| t.line == q.line && matches!(t.token_type,
+            TokenType::Int | TokenType::Float | TokenType::String | TokenType::InterpolatedString
+            | TokenType::Ident | TokenType::TypeName | TokenType::True | TokenType::False
+            | TokenType::LParen | TokenType::LBracket))
     }
 
     /// Kept as public entry point for callers that expect parse_or level
@@ -493,7 +527,7 @@ impl Parser {
                 expr: Box::new(expr), field,
             }), true));
         }
-        if self.check(TokenType::Question) && !self.newline_before_current() {
+        if self.check(TokenType::Question) && !self.newline_before_current() && !self.ternary_follows() {
             // expr? — convert to Option
             let span = Some(self.current_span());
             self.advance();
