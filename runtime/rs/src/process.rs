@@ -44,9 +44,12 @@ impl AlmideRepr for AlmideProcessStatus {
 // which the core may not hold).
 include!("../../../crates/almide-rt-core/src/process_core.rs");
 
-pub fn almide_rt_process_exec(cmd: &str, args: &[String]) -> Result<String, String> {
-    almide_stdout_flush();
-    almide_proc_exec(cmd, args)
+pub fn almide_rt_process_exec(cmd: &str, args: &[String]) -> Result<String, AlmideString> {
+    let __almide_r: Result<String, String> = (|| {
+        almide_stdout_flush();
+        almide_proc_exec(cmd, args)
+    })();
+    __almide_r.map_err(Into::into)
 }
 
 // Inside a `fan` element the exit waits for the elements below it, exactly as a
@@ -62,36 +65,48 @@ pub fn almide_rt_process_args() -> Vec<String> {
     std::env::args().collect()
 }
 
-pub fn almide_rt_process_stdin_lines() -> Result<Vec<String>, String> {
-    almide_stdout_flush();
-    use std::io::BufRead;
-    std::io::stdin()
-        .lock()
-        .lines()
-        .collect::<Result<Vec<String>, _>>()
-        // No identifying operand — stdin is the one the writer did not name —
-        // so the call alone is what this can add, and it is still the
-        // difference between "which of my host calls failed" and errno alone.
-        .map_err(|e| call_err("process.stdin_lines", "", e))
+pub fn almide_rt_process_stdin_lines() -> Result<Vec<String>, AlmideString> {
+    let __almide_r: Result<Vec<String>, String> = (|| {
+        almide_stdout_flush();
+        use std::io::BufRead;
+        std::io::stdin()
+            .lock()
+            .lines()
+            .collect::<Result<Vec<String>, _>>()
+            // No identifying operand — stdin is the one the writer did not name —
+            // so the call alone is what this can add, and it is still the
+            // difference between "which of my host calls failed" and errno alone.
+            .map_err(|e| call_err("process.stdin_lines", "", e))
+    })();
+    __almide_r.map_err(Into::into)
 }
 
-pub fn almide_rt_process_exec_in(dir: &str, cmd: &str, args: &[String]) -> Result<String, String> {
-    almide_stdout_flush();
-    almide_proc_exec_in(dir, cmd, args)
+pub fn almide_rt_process_exec_in(dir: &str, cmd: &str, args: &[String]) -> Result<String, AlmideString> {
+    let __almide_r: Result<String, String> = (|| {
+        almide_stdout_flush();
+        almide_proc_exec_in(dir, cmd, args)
+    })();
+    __almide_r.map_err(Into::into)
 }
 
-pub fn almide_rt_process_exec_with_stdin(cmd: &str, args: &[String], input: &str) -> Result<String, String> {
-    almide_stdout_flush();
-    almide_proc_exec_with_stdin(cmd, args, input)
+pub fn almide_rt_process_exec_with_stdin(cmd: &str, args: &[String], input: &str) -> Result<String, AlmideString> {
+    let __almide_r: Result<String, String> = (|| {
+        almide_stdout_flush();
+        almide_proc_exec_with_stdin(cmd, args, input)
+    })();
+    __almide_r.map_err(Into::into)
 }
 
 fn almide_process_status((code, stdout, stderr): (i64, String, String)) -> AlmideProcessStatus {
     AlmideProcessStatus { code, stdout, stderr }
 }
 
-pub fn almide_rt_process_exec_status(cmd: &str, args: &[String]) -> Result<AlmideProcessStatus, String> {
-    almide_stdout_flush();
-    almide_proc_exec_status(cmd, args).map(almide_process_status)
+pub fn almide_rt_process_exec_status(cmd: &str, args: &[String]) -> Result<AlmideProcessStatus, AlmideString> {
+    let __almide_r: Result<AlmideProcessStatus, String> = (|| {
+        almide_stdout_flush();
+        almide_proc_exec_status(cmd, args).map(almide_process_status)
+    })();
+    __almide_r.map_err(Into::into)
 }
 
 /// #1040: the timeout twin of `exec_status` (C-214) — the core's loop with
@@ -102,9 +117,12 @@ pub fn almide_rt_process_exec_status_timeout(
     cmd: &str,
     args: &[String],
     timeout_ms: i64,
-) -> Result<AlmideProcessStatus, String> {
-    almide_stdout_flush();
-    almide_proc_exec_status_timeout(cmd, args, timeout_ms, almide_process_poll_child).map(almide_process_status)
+) -> Result<AlmideProcessStatus, AlmideString> {
+    let __almide_r: Result<AlmideProcessStatus, String> = (|| {
+        almide_stdout_flush();
+        almide_proc_exec_status_timeout(cmd, args, timeout_ms, almide_process_poll_child).map(almide_process_status)
+    })();
+    __almide_r.map_err(Into::into)
 }
 
 /// `try_wait` that ALSO reports a child stopped for touching the terminal
@@ -145,14 +163,20 @@ fn almide_process_poll_child(child: &mut std::process::Child) -> std::io::Result
     Ok(AlmideChildPoll::Running)
 }
 
-pub fn almide_rt_process_run(cmd: &str, args: &[String]) -> Result<i64, String> {
-    almide_stdout_flush();
-    almide_proc_run(cmd, args)
+pub fn almide_rt_process_run(cmd: &str, args: &[String]) -> Result<i64, AlmideString> {
+    let __almide_r: Result<i64, String> = (|| {
+        almide_stdout_flush();
+        almide_proc_run(cmd, args)
+    })();
+    __almide_r.map_err(Into::into)
 }
 
-pub fn almide_rt_process_run_in(dir: &str, cmd: &str, args: &[String]) -> Result<i64, String> {
-    almide_stdout_flush();
-    almide_proc_run_in(dir, cmd, args)
+pub fn almide_rt_process_run_in(dir: &str, cmd: &str, args: &[String]) -> Result<i64, AlmideString> {
+    let __almide_r: Result<i64, String> = (|| {
+        almide_stdout_flush();
+        almide_proc_run_in(dir, cmd, args)
+    })();
+    __almide_r.map_err(Into::into)
 }
 
 pub fn almide_rt_process_pid() -> i64 {
@@ -163,13 +187,9 @@ pub fn almide_rt_process_env(key: &str) -> Option<String> {
     std::env::var(key).ok()
 }
 
-pub fn almide_rt_process_spawn(cmd: &str, args: &[String]) -> Result<i64, String> {
-    almide_proc_spawn(cmd, args)
-}
+pub fn almide_rt_process_spawn(cmd: &str, args: &[String]) -> Result<i64, AlmideString> { let __almide_r: Result<i64, String> = (|| { almide_proc_spawn(cmd, args) })(); __almide_r.map_err(Into::into) }
 
-pub fn almide_rt_process_kill(pid: i64, signal: i64) -> Result<(), String> {
-    almide_proc_kill(pid, signal)
-}
+pub fn almide_rt_process_kill(pid: i64, signal: i64) -> Result<(), AlmideString> { let __almide_r: Result<(), String> = (|| { almide_proc_kill(pid, signal) })(); __almide_r.map_err(Into::into) }
 
 pub fn almide_rt_process_sleep(ms: i64) {
     std::thread::sleep(std::time::Duration::from_millis(ms.max(0) as u64));
