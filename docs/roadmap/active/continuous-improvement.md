@@ -1346,6 +1346,6 @@ Order agreed with the owner: real defects first (result.filter → list.flat_map
 ### Next
 1. Rebase foreign-idioms-2 onto develop and open its PR once #3743 merges.
 2. Once the PRs merge, close #3216, #3552 and #3737 by their `Closes` lines.
-3. #3217's second half: borrow inference and the clone pass must agree.
+3. #3217: closes with #3736. The "read after the loop" shape I had thought remained already renders `xs: &[T]` (borrow inference's `cloned_anyway`). That was measured on #3736's branch and the issue comment corrected. Still open in general: C4 reads use_kind's model, not the render.
 4. #3532: the borrow on the v1 lowering.
 5. #3739: the target-cpu decision.
