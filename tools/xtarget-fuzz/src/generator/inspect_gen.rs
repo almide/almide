@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::fmt::Write;
 
 use super::catalogue::Signature;
+use super::nominal;
 use super::sig_type::SigType;
 use super::types::{render_print, GenType};
 use super::Project;
@@ -125,7 +126,17 @@ fn inverse_name(f: &str) -> Option<String> {
 
 /// A value of `t` has a size [`sized`] can grow.
 fn has_size(t: &GenType) -> bool {
-    matches!(t, GenType::List(_) | GenType::Map(_) | GenType::Set(_) | GenType::String | GenType::Bytes | GenType::Matrix | GenType::Value)
+    matches!(
+        t,
+        GenType::List(_)
+            | GenType::Map(_)
+            | GenType::Set(_)
+            | GenType::String
+            | GenType::Bytes
+            | GenType::Matrix
+            | GenType::Value
+            | GenType::Nominal(_)
+    )
 }
 
 const SIZE_LIKE_INT: &[&str] = &["n", "count", "times", "len", "size", "end", "width"];
@@ -217,6 +228,19 @@ const SHAPE_RECIPES: &[Recipe] = &[
     // (its keys are `k<100000000 + i>`), so the hit scans the whole object.
     Recipe { func: "value.field", size: "v", args: &[("key", "\"k${100000000 + {n} - 1}\"")] },
     Recipe { func: "json.get_int", size: "j", args: &[("key", "\"k${100000000 + {n} - 1}\"")] },
+    // The header lookups "none / empty if missing": the sized response and
+    // request carry n headers keyed the same way (nominal.rs).
+    Recipe { func: "http.get_header", size: "resp", args: &[("key", "\"k${100000000 + {n} - 1}\"")] },
+    Recipe { func: "http.header_values", size: "resp", args: &[("key", "\"k${100000000 + {n} - 1}\"")] },
+    Recipe { func: "http.req_header", size: "req", args: &[("key", "\"k${100000000 + {n} - 1}\"")] },
+    // The path lookups "none / err if the path is missing": the last key of
+    // the sized object, so the hit walks it whole.
+    Recipe { func: "json.get_path", size: "j", args: &[("path", "json.field(json.root(), \"k${100000000 + {n} - 1}\")")] },
+    Recipe { func: "json.set_path", size: "j", args: &[("path", "json.field(json.root(), \"k${100000000 + {n} - 1}\")")] },
+    Recipe { func: "json.remove_path", size: "j", args: &[("path", "json.field(json.root(), \"k${100000000 + {n} - 1}\")")] },
+    // Percent-escapes and `+` to decode, n of each: the generic "aéaé…" has
+    // nothing to decode.
+    Recipe { func: "http.url_decode", size: "s", args: &[("s", "string.repeat(\"a%C3%A9+\", {n})")] },
     // Deleting an absent key is a no-op. The plain call's per-iteration
     // step re-sets "k0" (see `vary`), so deleting "k0" hits on every call,
     // and the map holds "k0" from the start for the diamond.
@@ -303,7 +327,7 @@ impl Target {
             (None, Some((i, d))) => d.scales().then_some(*i),
             (None, None) => params
                 .iter()
-                .position(|(_, t)| matches!(concrete(t), Some(GenType::List(_) | GenType::Map(_) | GenType::Set(_) | GenType::String | GenType::Bytes | GenType::Matrix | GenType::Value)))
+                .position(|(_, t)| concrete(t).as_ref().is_some_and(has_size))
                 .or_else(|| params.iter().position(|(n, t)| *t == SigType::Int && SIZE_LIKE_INT.contains(&n.as_str()))),
         };
         let rebind_param = params.iter().position(|(_, t)| concrete(t).as_ref() == Some(&ret));
@@ -623,6 +647,7 @@ fn small(t: &GenType) -> String {
         GenType::Value => "value.object([(\"a\", value.int(1)), (\"snake_case\", value.str(\"x\"))])".into(),
         GenType::Endian => "BigEndian".into(),
         GenType::Set(e) => format!("set.from_list([{}])", small(e)),
+        GenType::Nominal(k) => nominal::get(k).map_or_else(|| "()".into(), |d| d.small.to_string()),
     }
 }
 
@@ -666,6 +691,7 @@ fn sized(t: &GenType, n: u64) -> String {
         // width, so its stringified length is a·n + b (#3636).
         GenType::Value => format!("value.object(list.range(0, {n}) |> list.map((i) => (\"k${{100000000 + i}}\", value.int(100000000 + i))))"),
         GenType::Set(e) => format!("list.range(0, {n}) |> list.map((i) => {}) |> set.from_list", elem(e)),
+        GenType::Nominal(k) => nominal::get(k).map_or_else(|| "()".into(), |d| nominal::fill(d.sized, "", n)),
         other => small(other),
     }
 }
@@ -723,6 +749,7 @@ fn digest(v: &str, t: &GenType) -> String {
         GenType::Value => format!("string.len(value.stringify({v}))"),
         GenType::Endian => "1".into(),
         GenType::Set(_) => format!("set.len({v})"),
+        GenType::Nominal(k) => nominal::get(k).map_or_else(|| "1".into(), |d| nominal::fill(d.digest, v, 0)),
     }
 }
 

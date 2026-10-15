@@ -53,6 +53,8 @@ pub enum SigType {
     Matrix,
     Value,
     Endian,
+    /// A stdlib nominal type the grammar builds ([`super::nominal`]).
+    Nominal(&'static str),
 }
 
 /// Single-letter (or short) names the stdlib uses for generic type
@@ -84,7 +86,7 @@ impl SigType {
                     // nominal types enter via mutation.
                     other => match GenType::sized(other) {
                         Some(GenType::Sized(s)) => Some(SigType::Sized(s)),
-                        _ => None,
+                        _ => super::nominal::get(other).map(|k| SigType::Nominal(k.name)),
                     },
                 }
             }
@@ -210,6 +212,7 @@ impl SigType {
             SigType::Matrix => Some(GenType::Matrix),
             SigType::Value => Some(GenType::Value),
             SigType::Endian => Some(GenType::Endian),
+            SigType::Nominal(k) => Some(GenType::Nominal(k)),
             SigType::Var(n) => subst.get(n).cloned(),
             SigType::List(e) => Some(GenType::List(Box::new(e.instantiate(subst)?))),
             SigType::Option(e) => Some(GenType::Option(Box::new(e.instantiate(subst)?))),
@@ -247,6 +250,7 @@ impl SigType {
             | (SigType::Matrix, GenType::Matrix)
             | (SigType::Value, GenType::Value) => true,
             | (SigType::Endian, GenType::Endian) => true,
+            (SigType::Nominal(a), GenType::Nominal(b)) => a == b,
             (SigType::Sized(a), GenType::Sized(b)) => a == b,
             (SigType::Var(n), g) => match subst.get(n) {
                 Some(bound) => bound == g,

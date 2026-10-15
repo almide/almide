@@ -259,6 +259,7 @@ fn gen_leaf(b: &mut Builder, goal: &GenType) -> String {
         GenType::Matrix => matrix_literal(b),
         GenType::Value => value_literal(b, 0),
         GenType::Endian => b.rng.pick(&["LittleEndian", "BigEndian"]).to_string(),
+        GenType::Nominal(k) => nominal_literal(b, k),
         // Compound goals: construct (and hoist if ambiguous).
         GenType::List(_)
         | GenType::Option(_)
@@ -284,6 +285,12 @@ fn sized_or_bytes(b: &mut Builder, goal: &GenType) -> String {
 }
 
 /// A small non-empty rectangular `Matrix` from Float literals.
+/// A random leaf of a nominal type, from its declared constructors.
+fn nominal_literal(b: &mut Builder, k: &str) -> String {
+    let leaves = super::nominal::get(k).map_or(&[][..], |n| n.leaves);
+    b.rng.pick(leaves).to_string()
+}
+
 fn matrix_literal(b: &mut Builder) -> String {
     let (r, c) = (1 + *b.rng.pick(&[0usize, 1, 2]), 1 + *b.rng.pick(&[0usize, 1, 2]));
     let rows: Vec<String> = (0..r)
@@ -340,7 +347,8 @@ fn gen_construct(b: &mut Builder, goal: &GenType) -> String {
         | GenType::Bytes
         | GenType::Matrix
         | GenType::Value => gen_leaf(b, goal),
-        | GenType::Endian => gen_leaf(b, goal),
+        | GenType::Endian
+        | GenType::Nominal(_) => gen_leaf(b, goal),
         GenType::Set(elem) => {
             let n = *b.rng.pick(pools::SMALL_COUNT_POOL) as usize;
             if n == 0 {
@@ -623,6 +631,7 @@ fn gen_lambda_body(b: &mut Builder, goal: &GenType) -> String {
         GenType::Matrix => matrix_literal(b),
         GenType::Value => value_literal(b, 0),
         GenType::Endian => b.rng.pick(&["LittleEndian", "BigEndian"]).to_string(),
+        GenType::Nominal(k) => nominal_literal(b, k),
         GenType::Set(e) => format!("set.from_list([{}])", gen_lambda_body(b, e)),
     }
 }
