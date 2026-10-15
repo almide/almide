@@ -308,7 +308,7 @@ fn render_fn(
     let mut indent = 1usize;
     // Each open if-as-value join: (marker, dst) — the decl is patched in once the
     // first arm yield reveals the join type.
-    let mut if_stack: Vec<Option<(String, ValueId)>> = Vec::new();
+    let mut if_stack: Vec<Option<IfJoin>> = Vec::new();
 
     macro_rules! line {
         ($($arg:tt)*) => {{
@@ -660,7 +660,7 @@ fn render_native_flow_op(
     tys: &mut BTreeMap<ValueId, NTy>,
     out: &mut String,
     indent: &mut usize,
-    if_stack: &mut Vec<Option<(String, ValueId)>>,
+    if_stack: &mut Vec<Option<IfJoin>>,
 ) -> Result<bool, LowerError> {
     macro_rules! line {
         ($($arg:tt)*) => {{
@@ -674,7 +674,7 @@ fn render_native_flow_op(
         }
         // Pure ownership bookkeeping — no native code.
         Op::Consume { .. } | Op::Borrow { .. } | Op::MakeUnique { .. } => {}
-        Op::IfThen { cond, dst } => render_if_then(cond, dst, out, indent, if_stack),
+        Op::IfThen { cond, dst } => render_if_then(cond, dst, tys, out, indent, if_stack),
         Op::Else { val } => render_else(val, tys, out, indent, if_stack)?,
         Op::EndIf { val } => render_end_if(val, tys, out, indent, if_stack)?,
         Op::LoopStart => {
