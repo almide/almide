@@ -36,8 +36,10 @@ pub fn almide_rt_json_parse(text: &str) -> Result<AlmideValue, String> {
             if c < 0x80 {
                 if (c as char).is_whitespace() { *pos += 1; } else { break; }
             } else {
-                let ch = t[*pos..].chars().next().unwrap();
-                if ch.is_whitespace() { *pos += ch.len_utf8(); } else { break; }
+                match t[*pos..].chars().next() {
+                    Some(ch) if ch.is_whitespace() => *pos += ch.len_utf8(),
+                    _ => break,
+                }
             }
         }
     }
@@ -53,7 +55,7 @@ pub fn almide_rt_json_parse(text: &str) -> Result<AlmideValue, String> {
             b'n' => parse_null(t, pos),
             c if c == b'-' || c.is_ascii_digit() => parse_number(t, pos),
             _ => {
-                let ch = t[*pos..].chars().next().unwrap();
+                let ch = t[*pos..].chars().next().unwrap_or('\u{FFFD}');
                 Err(format!("unexpected char '{}' at pos {}", ch, t[..*pos].chars().count()))
             }
         }
@@ -73,51 +75,52 @@ pub fn almide_rt_json_parse(text: &str) -> Result<AlmideValue, String> {
             if *pos >= b.len() { return Ok(s); }
             if b[*pos] == b'"' { *pos += 1; return Ok(s); }
             *pos += 1; // past the backslash
-            match b.get(*pos) {
-                Some(b'n') => { s.push('\n'); *pos += 1; }
-                Some(b't') => { s.push('\t'); *pos += 1; }
-                Some(b'r') => { s.push('\r'); *pos += 1; }
-                Some(b'b') => { s.push('\u{0008}'); *pos += 1; }
-                Some(b'f') => { s.push('\u{000c}'); *pos += 1; }
-                Some(b'"') => { s.push('"'); *pos += 1; }
-                Some(b'\\') => { s.push('\\'); *pos += 1; }
-                Some(b'/') => { s.push('/'); *pos += 1; }
-                Some(b'u') => {
-                    // Four chars of hex as a UTF-16 unit; a high surrogate
-                    // (D800..=DBFF) immediately followed by a "\uYYYY" low
-                    // surrogate (DC00..=DFFF) joins into one astral code point,
-                    // matching serde_json and the wasm parser. #651. The four
-                    // chars are consumed whether or not they were hex.
-                    *pos += 1;
-                    let hs = *pos;
-                    step_chars(t, pos, 4);
-                    let hex = &t[hs..*pos];
-                    if hex.len() == 4 {
-                        if let Ok(unit) = u32::from_str_radix(hex, 16) {
-                            if (0xD800..=0xDBFF).contains(&unit)
-                                && b.get(*pos) == Some(&b'\\')
-                                && b.get(*pos + 1) == Some(&b'u')
-                            {
-                                let ls = *pos + 2;
-                                let mut le = ls;
-                                step_chars(t, &mut le, 4);
-                                if let Ok(low) = u32::from_str_radix(&t[ls..le], 16) {
-                                    if (0xDC00..=0xDFFF).contains(&low) {
-                                        let cp = 0x10000 + ((unit - 0xD800) << 10) + (low - 0xDC00);
-                                        if let Some(ch) = char::from_u32(cp) { s.push(ch); }
-                                        *pos += 6; // consumed "\uYYYY"
-                                    }
-                                }
-                            } else if let Some(ch) = char::from_u32(unit) {
-                                s.push(ch);
-                            }
-                        }
-                    }
-                }
-                Some(_) => step_char(t, pos), // unknown escape: consumed, writes nothing
-                None => {}                    // backslash at end of input
-            }
+            parse_escape(t, pos, &mut s);
         }
+    }
+    /// The escape after a backslash: a one-char escape, `\u` and four hex digits, an unknown
+    /// escape (consumed, writes nothing), or nothing at end of input.
+    fn parse_escape(t: &str, pos: &mut usize, s: &mut String) {
+        match t.as_bytes().get(*pos) {
+            Some(b'u') => { *pos += 1; parse_unicode_escape(t, pos, s); }
+            Some(&c) => match simple_escape(c) {
+                Some(ch) => { s.push(ch); *pos += 1; }
+                None => step_char(t, pos),
+            },
+            None => {}
+        }
+    }
+    fn simple_escape(c: u8) -> Option<char> {
+        Some(match c {
+            b'n' => '\n', b't' => '\t', b'r' => '\r', b'b' => '\u{0008}', b'f' => '\u{000c}',
+            b'"' => '"', b'\\' => '\\', b'/' => '/',
+            _ => return None,
+        })
+    }
+    /// Four chars of hex as a UTF-16 unit; a high surrogate (D800..=DBFF)
+    /// immediately followed by a "\uYYYY" low surrogate (DC00..=DFFF) joins
+    /// into one astral code point, matching serde_json and the wasm parser.
+    /// #651. The four chars are consumed whether or not they were hex.
+    fn parse_unicode_escape(t: &str, pos: &mut usize, s: &mut String) {
+        let b = t.as_bytes();
+        let hs = *pos;
+        step_chars(t, pos, 4);
+        let hex = &t[hs..*pos];
+        if hex.len() != 4 { return; }
+        let Ok(unit) = u32::from_str_radix(hex, 16) else { return };
+        let low_follows = b.get(*pos) == Some(&b'\\') && b.get(*pos + 1) == Some(&b'u');
+        if !(0xD800..=0xDBFF).contains(&unit) || !low_follows {
+            if let Some(ch) = char::from_u32(unit) { s.push(ch); }
+            return;
+        }
+        let ls = *pos + 2;
+        let mut le = ls;
+        step_chars(t, &mut le, 4);
+        let Ok(low) = u32::from_str_radix(&t[ls..le], 16) else { return };
+        if !(0xDC00..=0xDFFF).contains(&low) { return; }
+        let cp = 0x10000 + ((unit - 0xD800) << 10) + (low - 0xDC00);
+        if let Some(ch) = char::from_u32(cp) { s.push(ch); }
+        *pos += 6; // consumed "\uYYYY"
     }
     /// An object key: the escape-free run is interned straight from the input
     /// slice (no `String` in between); anything with an escape takes the
