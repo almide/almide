@@ -8,7 +8,12 @@
 # The mutants (proofs/conformance-mutations/):
 #   m1  swap Ok/Err match-arm patterns in native codegen (wrong arm taken)
 #   m2  drop the Err turbofish (reintroduces almide#1428 — invalid Rust)
-#   m3  disable the v1 ok-lift return override (reintroduces almide#1429)
+#   m3  flip the v1 native ok-lift's carrier to Err (`ResMakeOk`, the
+#       lifted effect fn's ok path — the live successor of the almide#1429
+#       return override, which no program reaches since the lowering builds
+#       the carrier in MIR, #3737). The corpus prints a constant per arm, so a
+#       mutant must change WHICH arm runs to be observable: a lost ok VALUE
+#       (`Ok(0)`) survives by construction.
 #   m4  reverse statement render order (trace order flips)
 #   m5  emit every wasm print twice in the STRUCTURAL emitter (wasm-only
 #       divergence — needs a wasm runtime present, hence the hard

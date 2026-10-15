@@ -1,0 +1,13 @@
+diff --git a/crates/almide-mir/src/render_native_op_families.rs b/crates/almide-mir/src/render_native_op_families.rs
+index 9e95b83dd..f536a47dd 100644
+--- a/crates/almide-mir/src/render_native_op_families.rs
++++ b/crates/almide-mir/src/render_native_op_families.rs
+@@ -174,7 +174,7 @@ pub(crate) fn render_native_result_op(op: &Op, s: OpSink<'_>) -> Result<bool, Lo
+         } => {
+             tys.insert(*d, NTy::Res);
+             line!(
+-                "let {}: Result<i64, AlmideString> = Ok({});",
++                "let {}: Result<i64, AlmideString> = Err(AlmideString::new()); let _ = {};",
+                 var(*d),
+                 var(args[0])
+             );
