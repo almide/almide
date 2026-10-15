@@ -1332,12 +1332,25 @@ Order agreed with the owner: real defects first (result.filter → list.flat_map
   - `elif` / `elsif` / `elseif` (before: 2);
   - `c ? a : b` (before: 3), read as `if c then a else b`.
 - The postfix `?` (Result → Option) keeps its meaning wherever no operand follows it on the same line. No program in spec/, stdlib/ or the exercises has the changed shape.
+- Added later on the same branch, each one error that keeps the parse:
+  - `&&`, `||` and prefix `!`, read as `and`, `or` and `not` (before: 2 each);
+  - match arms written `p -> e`, `p: e` or `case p => e`, one error per arm (before: 3);
+  - top-level `def` / `function` / `func` / `fun` / `proc` / `const` / `val` (before: 2, because the declaration was dropped);
+  - a local `const` / `val` (before: 3);
+  - `println!` / `eprintln!` / `panic!` / `assert!` / `assert_eq!` (before: 3);
+  - builtin type spellings such as `int`, `i64`, `string`, `bool`, `f64` and `u8`, read as the Almide type;
+  - Rust closures `|a| e` and `|| e`.
+- The `elif` and `!` messages come from the existing hint tables, and the hint catalog lists the new recoveries.
+- Not changed: a bare `a => e` lambda. A match guard `if flag => …` has the same tokens.
 - `throw` was already one error, so it was not changed.
+- **Two tests outside my set had pinned old wording.**
+  - `if_then_diag_test` and the ALS spec (`docs/specs/als/expressions.md`) cite `if requires 'then'`. #3743 renamed that message, which turned CI shard 4 red. The wording is restored in 16855014b.
+  - Now every diagnostic, parser and hint test binary (36 of them) runs before a push.
 - **Checks:**
   - `return_keyword_recovers_test`: 8/8.
   - almide-syntax tests and `diagnostic_harness_test`: pass.
   - regen.sh: all gates green.
-  - codopsy 85ac6cdcda79: almide-syntax A (94).
+  - codopsy 85ac6cdcda79: almide-syntax A (94), and A (93) after the later additions at 928d498be.
   - `almide fmt --check` over 2,089 files: no parse errors (28 files are unformatted).
 
 ### Issues filed
