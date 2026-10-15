@@ -134,7 +134,7 @@ pub fn almide_rt_string_pad_left(s: &str, width: i64, pad: &str) -> String {
         .checked_mul(p.len_utf8())
         .and_then(|x| x.checked_add(s.len()));
     let mut out = String::new();
-    if need.is_none() || out.try_reserve_exact(need.unwrap()).is_err() {
+    if !need.is_some_and(|n| out.try_reserve_exact(n).is_ok()) {
         almide_abort("out of memory");
     }
     for _ in 0..(w - len) { out.push(p); }
@@ -154,7 +154,7 @@ pub fn almide_rt_string_pad_right(s: &str, width: i64, pad: &str) -> String {
         .checked_mul(p.len_utf8())
         .and_then(|x| x.checked_add(s.len()));
     let mut out = String::new();
-    if need.is_none() || out.try_reserve_exact(need.unwrap()).is_err() {
+    if !need.is_some_and(|n| out.try_reserve_exact(n).is_ok()) {
         almide_abort("out of memory");
     }
     out.push_str(s);

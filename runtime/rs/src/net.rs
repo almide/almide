@@ -300,6 +300,13 @@ pub fn almide_rt_net_unix_send(sock: i64, data: &[u8], fds: &[i64]) -> Result<()
     }
 }
 
+/// The native-endian `i32` at `at` of a control-message buffer whose
+/// bounds the caller checked.
+#[cfg(unix)]
+fn net_i32_at(b: &[u8], at: usize) -> i32 {
+    i32::from_ne_bytes([b[at], b[at + 1], b[at + 2], b[at + 3]])
+}
+
 /// Up to `max` bytes (blocking until some arrive); empty once the peer
 /// closed. Descriptors that came with them wait for `unix_take_fds`.
 pub fn almide_rt_net_unix_recv(sock: i64, max: i64) -> Result<Vec<u8>, String> {
@@ -333,13 +340,13 @@ pub fn almide_rt_net_unix_recv(sock: i64, max: i64) -> Result<Vec<u8>, String> {
                 lb[..w].copy_from_slice(&control[at..at + w]);
                 let len = if w == 8 { u64::from_ne_bytes(lb) as usize } else { u32::from_ne_bytes([lb[0], lb[1], lb[2], lb[3]]) as usize };
                 if len < u::CMSG_HDR || at + len > total { break; }
-                let level = i32::from_ne_bytes(control[at + w..at + w + 4].try_into().unwrap());
-                let kind = i32::from_ne_bytes(control[at + w + 4..at + w + 8].try_into().unwrap());
+                let level = net_i32_at(&control, at + w);
+                let kind = net_i32_at(&control, at + w + 4);
                 if level == u::SOL_SOCKET && kind == u::SCM_RIGHTS {
                     let count = (len - u::CMSG_HDR) / 4;
                     for i in 0..count {
                         let p = at + u::CMSG_HDR + i * 4;
-                        let f = i32::from_ne_bytes(control[p..p + 4].try_into().unwrap());
+                        let f = net_i32_at(&control, p);
                         // Where MSG_CMSG_CLOEXEC does not exist, set it here.
                         unsafe { u::fcntl(f, u::F_SETFD, u::FD_CLOEXEC) };
                         got.push(i64::from(f));

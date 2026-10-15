@@ -7,6 +7,15 @@
 // guard in this file is `checked_add`, so an out-of-range read takes its
 // documented default on both targets instead.
 
+/// The `N` bytes at `p` as an array, for `from_le_bytes` / `from_be_bytes`.
+/// Every caller has checked `p + N <= b.len()` first.
+#[inline(always)]
+fn bytes_fixed<const N: usize>(b: &[u8], p: usize) -> [u8; N] {
+    let mut a = [0u8; N];
+    a.copy_from_slice(&b[p..p + N]);
+    a
+}
+
 #[inline(always)] /// The byte window `[pos, pos + width)` inside a buffer of `len`, or `None`
 /// when it does not fit — **including when `pos` is negative** (#1408).
 ///
@@ -436,17 +445,17 @@ pub fn almide_rt_bytes_write_bool(b: &mut Vec<u8>, val: bool) { b.push(if val { 
 pub fn almide_rt_bytes_read_i64_be(b: &Vec<u8>, pos: i64) -> i64 {
     let p = pos as usize;
     if p.checked_add(8).is_none_or(|__e| __e > b.len()) { return 0; }
-    i64::from_be_bytes(b[p..p+8].try_into().unwrap())
+    i64::from_be_bytes(bytes_fixed::<8>(b, p))
 }
 pub fn almide_rt_bytes_read_f64_be(b: &Vec<u8>, pos: i64) -> f64 {
     let p = pos as usize;
     if p.checked_add(8).is_none_or(|__e| __e > b.len()) { return 0.0; }
-    f64::from_be_bytes(b[p..p+8].try_into().unwrap())
+    f64::from_be_bytes(bytes_fixed::<8>(b, p))
 }
 pub fn almide_rt_bytes_read_u32_be(b: &Vec<u8>, pos: i64) -> i64 {
     let p = pos as usize;
     if p.checked_add(4).is_none_or(|__e| __e > b.len()) { return 0; }
-    u32::from_be_bytes(b[p..p+4].try_into().unwrap()) as i64
+    u32::from_be_bytes(bytes_fixed::<4>(b, p)) as i64
 }
 pub fn almide_rt_bytes_read_u8(b: &Vec<u8>, pos: i64) -> i64 {
     b.get(pos as usize).map(|&x| x as i64).unwrap_or(0)
@@ -456,7 +465,7 @@ pub fn almide_rt_bytes_read_bool(b: &Vec<u8>, pos: i64) -> bool {
 }
 pub fn almide_rt_bytes_read_string_be(b: &Vec<u8>, pos: i64) -> String {
     let Some(p) = window(pos, 4, b.len()) else { return String::new(); };
-    let slen = u32::from_be_bytes(b[p..p + 4].try_into().unwrap()) as usize;
+    let slen = u32::from_be_bytes(bytes_fixed::<4>(b, p)) as usize;
     let Some(q) = window(pos + 4, slen, b.len()) else { return String::new(); };
     String::from_utf8_lossy(&b[q..q + slen]).into_owned()
 }
@@ -737,38 +746,38 @@ pub fn almide_rt_bytes_data_ptr(b: &Vec<u8>) -> i64 {
 pub fn almide_rt_bytes_read_i32_le(b: &Vec<u8>, pos: i64) -> i64 {
     let p = pos as usize;
     if p.checked_add(4).is_none_or(|__e| __e > b.len()) { return 0; }
-    i32::from_le_bytes(b[p..p+4].try_into().unwrap()) as i64
+    i32::from_le_bytes(bytes_fixed::<4>(b, p)) as i64
 }
 pub fn almide_rt_bytes_read_u32_le(b: &Vec<u8>, pos: i64) -> i64 {
     let p = pos as usize;
     if p.checked_add(4).is_none_or(|__e| __e > b.len()) { return 0; }
-    u32::from_le_bytes(b[p..p+4].try_into().unwrap()) as i64
+    u32::from_le_bytes(bytes_fixed::<4>(b, p)) as i64
 }
 pub fn almide_rt_bytes_read_u16_le(b: &Vec<u8>, pos: i64) -> i64 {
     let p = pos as usize;
     if p.checked_add(2).is_none_or(|__e| __e > b.len()) { return 0; }
-    u16::from_le_bytes(b[p..p+2].try_into().unwrap()) as i64
+    u16::from_le_bytes(bytes_fixed::<2>(b, p)) as i64
 }
 pub fn almide_rt_bytes_read_i64_le(b: &Vec<u8>, pos: i64) -> i64 {
     let p = pos as usize;
     if p.checked_add(8).is_none_or(|__e| __e > b.len()) { return 0; }
-    i64::from_le_bytes(b[p..p+8].try_into().unwrap())
+    i64::from_le_bytes(bytes_fixed::<8>(b, p))
 }
 pub fn almide_rt_bytes_read_f32_le(b: &Vec<u8>, pos: i64) -> f64 {
     let p = pos as usize;
     if p.checked_add(4).is_none_or(|__e| __e > b.len()) { return 0.0; }
-    f32::from_le_bytes(b[p..p+4].try_into().unwrap()) as f64
+    f32::from_le_bytes(bytes_fixed::<4>(b, p)) as f64
 }
 pub fn almide_rt_bytes_read_f64_le(b: &Vec<u8>, pos: i64) -> f64 {
     let p = pos as usize;
     if p.checked_add(8).is_none_or(|__e| __e > b.len()) { return 0.0; }
-    f64::from_le_bytes(b[p..p+8].try_into().unwrap())
+    f64::from_le_bytes(bytes_fixed::<8>(b, p))
 }
 // F16 → F32: reassemble the u16 bits and expand.
 pub fn almide_rt_bytes_read_f16_le(b: &Vec<u8>, pos: i64) -> f64 {
     let p = pos as usize;
     if p.checked_add(2).is_none_or(|__e| __e > b.len()) { return 0.0; }
-    let bits = u16::from_le_bytes(b[p..p+2].try_into().unwrap());
+    let bits = u16::from_le_bytes(bytes_fixed::<2>(b, p));
     f16_bits_to_f64(bits) as f64
 }
 

@@ -372,11 +372,10 @@ pub fn almide_rt_value_to_snake_case(v: &AlmideValue) -> AlmideValue {
 pub fn almide_rt_value_tagged_variant(v: AlmideValue) -> Result<(String, AlmideValue), String> {
     match v {
         AlmideValue::Object(pairs) => {
-            if pairs.len() == 1 {
-                let (tag, payload) = pairs.into_iter().next().unwrap();
-                Ok((tag.into_owned(), payload))
-            } else {
-                Err(format!("expected object with exactly 1 key for variant, got {} keys", pairs.len()))
+            let n = pairs.len();
+            match (n, pairs.into_iter().next()) {
+                (1, Some((tag, payload))) => Ok((tag.into_owned(), payload)),
+                _ => Err(format!("expected object with exactly 1 key for variant, got {} keys", n)),
             }
         }
         _ => Err("expected Object for variant decode".to_string()),

@@ -68,7 +68,7 @@ fn encode_with(b: &[u8], alphabet: &[u8; 64]) -> String {
         _ => {}
     }
     // All alphabet bytes are ASCII, so this is always valid UTF-8.
-    String::from_utf8(out).unwrap()
+    out.into_iter().map(char::from).collect()
 }
 
 /// Map a single Base64 character to its 0..63 value, accepting both the
