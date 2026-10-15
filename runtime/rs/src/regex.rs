@@ -51,7 +51,7 @@ fn rx_parse_alts(chars: &[char], pos: &mut usize, ncap: &mut usize, in_group: bo
             continue;
         }
         let piece = rx_parse_piece(chars, pos, ncap);
-        alts.last_mut().unwrap().push(piece);
+        if let Some(last) = alts.last_mut() { last.push(piece); }
     }
     alts
 }

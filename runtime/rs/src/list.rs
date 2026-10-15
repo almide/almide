@@ -517,7 +517,7 @@ pub fn almide_rt_list_par_filter<A: Send + Sync + Clone, F: Fn(A) -> bool + Send
             }));
         }
         for (i, handle) in handles.into_iter().enumerate() {
-            results[i] = Some(handle.join().unwrap());
+            results[i] = Some(handle.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic)));
         }
     });
     clock.record(site);
