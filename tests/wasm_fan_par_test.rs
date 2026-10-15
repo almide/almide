@@ -373,8 +373,8 @@ fn a_chunk_reading_captured_scalar_lists_is_served() {
   s + int.to_float(list.len(w))
 }
 
-effect fn rows(v: List[Float], w: List[Int], none: List[Int], n: Int) -> List[Float] =
-  fan { list.map(list.range(0, n), (i) => row(v, w, n, i) + int.to_float(list.len(none))) }
+effect fn rows(v: List[Float], w: List[Int], empty: List[Int], n: Int) -> List[Float] =
+  fan { list.map(list.range(0, n), (i) => row(v, w, n, i) + int.to_float(list.len(empty))) }
 
 effect fn main() -> Unit = {
   let v = list.map(list.range(0, 40), (i) => int.to_float(i) * 0.25)
