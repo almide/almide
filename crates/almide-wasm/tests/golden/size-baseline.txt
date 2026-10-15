@@ -2,7 +2,7 @@
 1371	spec/wasm_cross/accum_recursion_int.almd
 3436	spec/wasm_cross/adr0005_operator_equivalence.almd
 5210	spec/wasm_cross/alias_combinator_rc.almd
-8412	spec/wasm_cross/alias_cow.almd
+8531	spec/wasm_cross/alias_cow.almd
 2100	spec/wasm_cross/allocation_within_limits.almd
 4007	spec/wasm_cross/anon_record_structural_identity.almd
 2604	spec/wasm_cross/anon_record_variant_payloads.almd
@@ -83,8 +83,8 @@
 3082	spec/wasm_cross/closure_captured_list_mutation.almd
 6708	spec/wasm_cross/closure_captured_map_key_write.almd
 5427	spec/wasm_cross/closure_captured_map_records.almd
-7506	spec/wasm_cross/closure_captured_record_field_mutation.almd
-4848	spec/wasm_cross/closure_mut_arg_in_nested_match.almd
+8193	spec/wasm_cross/closure_captured_record_field_mutation.almd
+5668	spec/wasm_cross/closure_mut_arg_in_nested_match.almd
 4663	spec/wasm_cross/closure_reads_var_written_by_mut_call.almd
 5654	spec/wasm_cross/closure_rich_list_capture.almd
 5509	spec/wasm_cross/closure_scalar_captures.almd
@@ -165,7 +165,7 @@
 4659	spec/wasm_cross/effect_unit_yields_result.almd
 5442	spec/wasm_cross/effect_unwrap_in_loop.almd
 3744	spec/wasm_cross/empty_collection_annotated.almd
-6538	spec/wasm_cross/empty_collection_fold.almd
+7396	spec/wasm_cross/empty_collection_fold.almd
 5881	spec/wasm_cross/empty_from_list_mono.almd
 5441	spec/wasm_cross/encoding_base64.almd
 9317	spec/wasm_cross/endian_auto_import.almd
@@ -439,7 +439,7 @@
 1900	spec/wasm_cross/list_of_tuples_equality.almd
 2567	spec/wasm_cross/list_pattern_in_option_payload.almd
 2321	spec/wasm_cross/list_pattern_variant_element.almd
-9093	spec/wasm_cross/list_pop_map_insert_on_record_field.almd
+10179	spec/wasm_cross/list_pop_map_insert_on_record_field.almd
 2532	spec/wasm_cross/list_product_overflow.almd
 7203	spec/wasm_cross/list_push_on_record_field.almd
 26529	spec/wasm_cross/list_reduce_fused_fold_release.almd
@@ -492,8 +492,8 @@
 21125	spec/wasm_cross/map_set_index_threshold.almd
 7530	spec/wasm_cross/map_set_ops.almd
 15176	spec/wasm_cross/map_set_typechange.almd
-7443	spec/wasm_cross/map_upsert_str.almd
-4190	spec/wasm_cross/map_wide_int_key.almd
+7573	spec/wasm_cross/map_upsert_str.almd
+4305	spec/wasm_cross/map_wide_int_key.almd
 8807	spec/wasm_cross/match_binder_stored_owned.almd
 1787	spec/wasm_cross/match_box_pattern_backstop.almd
 5706	spec/wasm_cross/match_catchall_binder_eq.almd
@@ -546,7 +546,7 @@
 5655	spec/wasm_cross/mg_rebuild_two_phase.almd
 2239	spec/wasm_cross/module_global_const.almd
 5160	spec/wasm_cross/module_var_alias_cow.almd
-8303	spec/wasm_cross/mut_call_hoisted_args_distinct.almd
+9123	spec/wasm_cross/mut_call_hoisted_args_distinct.almd
 3772	spec/wasm_cross/mut_call_hoisted_args_in_branch.almd
 9491	spec/wasm_cross/mut_call_nested_read_before.almd
 6080	spec/wasm_cross/mut_call_two_mut_args_read.almd
@@ -580,7 +580,7 @@
 5066	spec/wasm_cross/mut_scalar_param_reassign.almd
 5660	spec/wasm_cross/mutable_global_bytes_arena.almd
 3116	spec/wasm_cross/mutable_global_bytes_copy_from.almd
-6025	spec/wasm_cross/mutable_global_field_mut_arg.almd
+6845	spec/wasm_cross/mutable_global_field_mut_arg.almd
 6010	spec/wasm_cross/mutable_global_mut_arg_callee_touches_global.almd
 2340	spec/wasm_cross/mutable_global_repeat_writes.almd
 1845	spec/wasm_cross/mutable_global_scalar_assign.almd
@@ -596,7 +596,7 @@
 8727	spec/wasm_cross/negative_offset_and_width_totality.almd
 3230	spec/wasm_cross/nested_box_guard_binder.almd
 2666	spec/wasm_cross/nested_ctor_pattern.almd
-12418	spec/wasm_cross/nested_field_path_mut.almd
+13105	spec/wasm_cross/nested_field_path_mut.almd
 5809	spec/wasm_cross/nested_hof_lambda_inference.almd
 4668	spec/wasm_cross/nested_list_list_int.almd
 4868	spec/wasm_cross/nested_list_list_string.almd
@@ -676,7 +676,7 @@
 2438	spec/wasm_cross/record_default_field_omitted.almd
 36709	spec/wasm_cross/record_field_rust_keyword.almd
 1786	spec/wasm_cross/record_forms.almd
-11207	spec/wasm_cross/record_map_field_update.almd
+11344	spec/wasm_cross/record_map_field_update.almd
 10681	spec/wasm_cross/record_option_none_cells.almd
 7282	spec/wasm_cross/record_pair_result_return.almd
 3315	spec/wasm_cross/record_scalar_field_assign_alias.almd
@@ -785,7 +785,7 @@
 14961	spec/wasm_cross/string_whitespace.almd
 3897	spec/wasm_cross/tail_bang_over_declared_result_callee.almd
 1744	spec/wasm_cross/tco_let_bound_if.almd
-8384	spec/wasm_cross/tco_map_acc_seed.almd
+8507	spec/wasm_cross/tco_map_acc_seed.almd
 1719	spec/wasm_cross/tco_multi_concat.almd
 1962	spec/wasm_cross/tco_nested_list_accumulator.almd
 2620	spec/wasm_cross/tco_over_match_result.almd
