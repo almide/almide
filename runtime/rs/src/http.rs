@@ -98,7 +98,7 @@ pub fn almide_rt_http_json(status: i64, body: &str) -> AlmideHttpResponse {
     AlmideHttpResponse::json(status, body.to_string())
 }
 
-pub fn almide_rt_http_with_headers(status: i64, body: &str, headers: &AlmideMap<String, String>) -> AlmideHttpResponse {
+pub fn almide_rt_http_with_headers(status: i64, body: &str, headers: &AlmideMap<AlmideString, AlmideString>) -> AlmideHttpResponse {
     AlmideHttpResponse::from_headers(status, body.to_string(), headers)
 }
 
@@ -174,7 +174,7 @@ pub struct AlmideHttpRequest {
 /// `http.new_request` (#2588): a request built in code, so a handler or a
 /// router can be exercised without a socket. `target` is the request-target
 /// as it appears on the wire — path plus any `?query`.
-pub fn almide_rt_http_new_request(method: &str, target: &str, body: &str, headers: &AlmideMap<String, String>) -> AlmideHttpRequest {
+pub fn almide_rt_http_new_request(method: &str, target: &str, body: &str, headers: &AlmideMap<AlmideString, AlmideString>) -> AlmideHttpRequest {
     AlmideHttpRequest {
         method: method.to_string(),
         path: target.to_string(),
@@ -624,7 +624,7 @@ pub fn almide_rt_http___call_start(
     method: &str,
     url: &str,
     body: &str,
-    headers: &AlmideMap<String, String>,
+    headers: &AlmideMap<AlmideString, AlmideString>,
     total_ms: i64,
     idle_ms: i64,
 ) -> Result<AlmideHttpCall, AlmideString> { let __almide_r: Result<AlmideHttpCall, String> = (|| { almide_http_call_start(method, url, body, headers, total_ms, idle_ms) })(); __almide_r.map_err(Into::into) }
@@ -679,10 +679,10 @@ pub fn almide_rt_http___request_stream_limited(
     method: &str,
     url: &str,
     body: &str,
-    headers: &AlmideMap<String, String>,
+    headers: &AlmideMap<AlmideString, AlmideString>,
     total_ms: i64,
     idle_ms: i64,
-    on_chunk: std::rc::Rc<dyn Fn(String)>,
+    on_chunk: std::rc::Rc<dyn Fn(AlmideString)>,
 ) -> Result<(), AlmideString> { let __almide_r: Result<(), String> = (|| { almide_http_stream_limited_impl(method, url, body, headers, total_ms, idle_ms, |chunk| on_chunk(chunk)) })(); __almide_r.map_err(Into::into) }
 
 /// The one entry the SSE helpers stream through: no limits = the classic
