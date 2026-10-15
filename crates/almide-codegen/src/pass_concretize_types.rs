@@ -150,47 +150,50 @@ fn concretize_top_lets(program: &mut IrProgram, prog_vt: &mut VarTable, symbols:
     }
 }
 
-/// Phase 1b: Propagate top_let types by name into VarTable entries
-/// that are cross-module synthetic references (different VarId, same name).
-/// The use-site synthetic Var carries the declaration's SOURCE spelling
-/// (`lower/expressions_block.rs` `module_top_let_var`, #3316), so the name
-/// is inserted exactly as declared: folding case here would hand `BUF`'s
-/// type to a use of `buf`.
-fn insert_top_let_ty(name: String, ty: &Ty, map: &mut std::collections::HashMap<String, Ty>) {
-    map.insert(name, ty.clone());
-}
+/// A top-let's identity: its declaring module (`module_origin`, None for the
+/// entry program) and its name in the exact SOURCE spelling. The use-site
+/// synthetic Var carries both (`lower/expressions_block.rs`
+/// `module_top_let_var`, #3316): folding case would hand `BUF`'s type to a
+/// use of `buf`, and dropping the module handed one module's `cell` type to
+/// a use of another module's `cell` (#3688).
+type TopLetKey = (Option<String>, String);
 
 /// Collect every resolved top-let's type (top-level and per-module), keyed
-/// by name (the exact spelling — see [`insert_top_let_ty`]).
+/// by [`TopLetKey`].
 /// Extracted from `propagate_top_let_types_by_name` (cog>25 decomposition).
-fn collect_top_let_types(program: &IrProgram, prog_vt: &VarTable) -> std::collections::HashMap<String, Ty> {
-    let mut top_let_types: std::collections::HashMap<String, Ty> = std::collections::HashMap::new();
-    for tl in &program.top_lets {
-        if !tl.ty.has_unresolved_deep() {
-            let name = prog_vt.get(tl.var).name.to_string();
-            insert_top_let_ty(name, &tl.ty, &mut top_let_types);
-        }
-    }
-    for module in &program.modules {
-        for tl in &module.top_lets {
-            if !tl.ty.has_unresolved_deep() {
-                let name = prog_vt.get(tl.var).name.to_string();
-                insert_top_let_ty(name, &tl.ty, &mut top_let_types);
-            }
-        }
+fn collect_top_let_types(program: &IrProgram, prog_vt: &VarTable) -> std::collections::HashMap<TopLetKey, Ty> {
+    let mut top_let_types = std::collections::HashMap::new();
+    let lets = program.top_lets.iter().chain(program.modules.iter().flat_map(|m| m.top_lets.iter()));
+    for tl in lets.filter(|tl| !tl.ty.has_unresolved_deep()) {
+        let info = prog_vt.get(tl.var);
+        top_let_types.insert((info.module_origin.clone(), info.name.to_string()), tl.ty.clone());
     }
     top_let_types
 }
 
+/// The type a use-site entry takes: its own top-let's, found by module and
+/// name. A use whose module spelling matches no declaration falls back to
+/// the name only when exactly one top-let carries it, so it can never take
+/// another module's type.
+fn top_let_type_for<'a>(types: &'a std::collections::HashMap<TopLetKey, Ty>, origin: &Option<String>, name: &str) -> Option<&'a Ty> {
+    if let Some(ty) = types.get(&(origin.clone(), name.to_string())) {
+        return Some(ty);
+    }
+    let mut same_name = types.iter().filter(|((_, n), _)| n == name).map(|(_, ty)| ty);
+    match (same_name.next(), same_name.next()) {
+        (Some(ty), None) => Some(ty),
+        _ => None,
+    }
+}
+
 fn propagate_top_let_types_by_name(program: &IrProgram, prog_vt: &mut VarTable) {
     let top_let_types = collect_top_let_types(program, prog_vt);
-    if !top_let_types.is_empty() {
-        for entry in &mut prog_vt.entries {
-            if entry.ty.has_unresolved_deep() {
-                if let Some(ty) = top_let_types.get(entry.name.as_str()) {
-                    entry.ty = ty.clone();
-                }
-            }
+    if top_let_types.is_empty() {
+        return;
+    }
+    for entry in prog_vt.entries.iter_mut().filter(|e| e.ty.has_unresolved_deep()) {
+        if let Some(ty) = top_let_type_for(&top_let_types, &entry.module_origin, entry.name.as_str()) {
+            entry.ty = ty.clone();
         }
     }
 }
