@@ -4,21 +4,24 @@ expression: code
 ---
 pub fn almide_rt_fan_map<A, B>(
     items: Vec<A>,
-    f: std::rc::Rc<dyn Fn(A) -> Result<B, String>>,
-) -> Result<Vec<B>, String> {
-    let mut out = Vec::with_capacity(items.len());
-    let mut first_err: Option<String> = None;
-    for item in items {
-        match (f(item), &first_err) {
-            (Ok(v), None) => out.push(v),
-            (Err(e), None) => first_err = Some(e),
-            _ => {}
+    f: std::rc::Rc<dyn Fn(A) -> Result<B, AlmideString>>,
+) -> Result<Vec<B>, AlmideString> {
+    let __almide_r: Result<Vec<B>, String> = (|| {
+        let mut out = Vec::with_capacity(items.len());
+        let mut first_err: Option<String> = None;
+        for item in items {
+            match (f(item), &first_err) {
+                (Ok(v), None) => out.push(v),
+                (Err(e), None) => first_err = Some(e),
+                _ => {}
+            }
         }
-    }
-    match first_err {
-        Some(e) => Err(e),
-        None => Ok(out),
-    }
+        match first_err {
+            Some(e) => Err(e),
+            None => Ok(out),
+        }
+    })();
+    __almide_r.map_err(Into::into)
 }
 
 // `fan.map`'s PARALLEL twin (#2044). RustLowering's fan routing (native only) routes a
@@ -41,54 +44,57 @@ pub fn almide_rt_fan_map<A, B>(
 // Every element writes into its own output timeline (ADR-0024 D5), flushed in
 // list order. Every element runs, so no Err cuts the group: a trap in element k
 // waits for the elements below it and discards everything above (ADR-0024 D6).
-pub fn almide_rt_fan_map_par<A: Send + Sync + Clone, B: Send, F: Fn(A) -> Result<B, String> + Send + Sync>(
+pub fn almide_rt_fan_map_par<A: Send + Sync + Clone, B: Send, F: Fn(A) -> Result<B, AlmideString> + Send + Sync>(
     items: Vec<A>,
     f: F,
-) -> Result<Vec<B>, String> {
-    let mut slots: Vec<Option<Result<B, String>>> = (0..items.len()).map(|_| None).collect();
-    if items.len() < 2 || almide_rt_list_par_sequential() {
-        for (slot, item) in slots.iter_mut().zip(items) {
-            *slot = Some(f(item));
-        }
-        return almide_fan_map_settle_slots(slots);
-    }
-    // #3341: the cost model (list.rs `almide_rt_fan_plan`) decides from the
-    // site's last measured time per element whether this offer is worth a
-    // parallel run; every offer records what its elements took.
-    let site = almide_rt_fan_map_par::<A, B, F> as fn(Vec<A>, F) -> Result<Vec<B>, String> as usize;
-    let n = items.len();
-    let workers = almide_rt_fan_plan(n, almide_fan_estimate(site));
-    let clock = AlmideFanClock::new();
-    if workers < 2 {
-        clock.calling(|| {
+) -> Result<Vec<B>, AlmideString> {
+    let __almide_r: Result<Vec<B>, String> = (|| {
+        let mut slots: Vec<Option<Result<B, String>>> = (0..items.len()).map(|_| None).collect();
+        if items.len() < 2 || almide_rt_list_par_sequential() {
             for (slot, item) in slots.iter_mut().zip(items) {
                 *slot = Some(f(item));
             }
-            ((), n)
+            return almide_fan_map_settle_slots(slots);
+        }
+        // #3341: the cost model (list.rs `almide_rt_fan_plan`) decides from the
+        // site's last measured time per element whether this offer is worth a
+        // parallel run; every offer records what its elements took.
+        let site = almide_rt_fan_map_par::<A, B, F> as fn(Vec<A>, F) -> Result<Vec<B>, String> as usize;
+        let n = items.len();
+        let workers = almide_rt_fan_plan(n, almide_fan_estimate(site));
+        let clock = AlmideFanClock::new();
+        if workers < 2 {
+            clock.calling(|| {
+                for (slot, item) in slots.iter_mut().zip(items) {
+                    *slot = Some(f(item));
+                }
+                ((), n)
+            });
+            clock.record(site);
+            return almide_fan_map_settle_slots(slots);
+        }
+        let chunk_size = n.div_ceil(workers);
+        // The group flushes this thread's stdout first: a runtime abort on a worker
+        // exits without reaching this thread's buffer (C-197, see rust.toml fan_expr).
+        let group = almide_fan_group(n);
+        std::thread::scope(|s| {
+            for (chunk_idx, (chunk, out)) in items.chunks(chunk_size).zip(slots.chunks_mut(chunk_size)).enumerate() {
+                let (f, clock) = (&f, &clock);
+                let group = &group;
+                let base = chunk_idx * chunk_size;
+                s.spawn(move || {
+                    clock.worker(out.iter_mut().zip(chunk).enumerate(), |(i, (slot, item))| {
+                        let _elem = almide_fan_enter(group, base + i);
+                        *slot = Some(f(item.clone()));
+                        Some(true)
+                    });
+                });
+            }
         });
         clock.record(site);
-        return almide_fan_map_settle_slots(slots);
-    }
-    let chunk_size = n.div_ceil(workers);
-    // The group flushes this thread's stdout first: a runtime abort on a worker
-    // exits without reaching this thread's buffer (C-197, see rust.toml fan_expr).
-    let group = almide_fan_group(n);
-    std::thread::scope(|s| {
-        for (chunk_idx, (chunk, out)) in items.chunks(chunk_size).zip(slots.chunks_mut(chunk_size)).enumerate() {
-            let (f, clock) = (&f, &clock);
-            let group = &group;
-            let base = chunk_idx * chunk_size;
-            s.spawn(move || {
-                clock.worker(out.iter_mut().zip(chunk).enumerate(), |(i, (slot, item))| {
-                    let _elem = almide_fan_enter(group, base + i);
-                    *slot = Some(f(item.clone()));
-                    Some(true)
-                });
-            });
-        }
-    });
-    clock.record(site);
-    almide_fan_map_settle_slots(slots)
+        almide_fan_map_settle_slots(slots)
+    })();
+    __almide_r.map_err(Into::into)
 }
 
 // The map's result from its filled slots: the ok values in list order, or the
@@ -116,12 +122,15 @@ fn almide_fan_map_settle_slots<B>(slots: Vec<Option<Result<B, String>>>) -> Resu
 // a defined Err, never a panic. EFFECTFUL: the caller's auto-`?` routes a head
 // Err to the unified main-error exit, byte-identical to the wasm path.
 pub fn almide_rt_fan_race<T>(
-    thunks: Vec<impl Fn() -> Result<T, String>>,
-) -> Result<T, String> {
-    match thunks.into_iter().next() {
-        Some(thunk) => thunk(),
-        None => Err("fan.race: no candidates".to_string()),
-    }
+    thunks: Vec<impl Fn() -> Result<T, AlmideString>>,
+) -> Result<T, AlmideString> {
+    let __almide_r: Result<T, String> = (|| {
+        match thunks.into_iter().next() {
+            Some(thunk) => thunk(),
+            None => Err("fan.race: no candidates".to_string()),
+        }
+    })();
+    __almide_r.map_err(Into::into)
 }
 
 // `fan.any` tries the thunks in LIST ORDER and returns the FIRST `Ok`
@@ -129,14 +138,17 @@ pub fn almide_rt_fan_race<T>(
 // a defined `Err`, never panicking or trapping. This is intentionally NOT
 // `fan.race` (which is parallel + wall-clock nondeterministic and stays as-is).
 pub fn almide_rt_fan_any<T>(
-    thunks: Vec<impl Fn() -> Result<T, String>>,
-) -> Result<T, String> {
-    for thunk in &thunks {
-        if let Ok(val) = thunk() {
-            return Ok(val);
+    thunks: Vec<impl Fn() -> Result<T, AlmideString>>,
+) -> Result<T, AlmideString> {
+    let __almide_r: Result<T, String> = (|| {
+        for thunk in &thunks {
+            if let Ok(val) = thunk() {
+                return Ok(val);
+            }
         }
-    }
-    Err("fan.any: all candidates failed".to_string())
+        Err("fan.any: all candidates failed".to_string())
+    })();
+    __almide_r.map_err(Into::into)
 }
 
 // `fan.any_map` -- the T2-3 MAPPER form: apply `f` to the items IN LIST ORDER
@@ -145,22 +157,25 @@ pub fn almide_rt_fan_any<T>(
 // the early cut is structural (later elements are never evaluated).
 pub fn almide_rt_fan_any_map<A, B>(
     items: Vec<A>,
-    f: std::rc::Rc<dyn Fn(A) -> Result<B, String>>,
-) -> Result<B, String> {
-    for item in items {
-        if let Ok(v) = f(item) {
-            return Ok(v);
+    f: std::rc::Rc<dyn Fn(A) -> Result<B, AlmideString>>,
+) -> Result<B, AlmideString> {
+    let __almide_r: Result<B, String> = (|| {
+        for item in items {
+            if let Ok(v) = f(item) {
+                return Ok(v);
+            }
         }
-    }
-    Err("fan.any: all candidates failed".to_string())
+        Err("fan.any: all candidates failed".to_string())
+    })();
+    __almide_r.map_err(Into::into)
 }
 
 // One output timeline per thunk, flushed in list order (ADR-0024 D5). The
 // group flushes this thread's stdout first: a runtime abort on a worker exits
 // without reaching this thread's buffer (C-197, see rust.toml fan_expr).
 pub fn almide_rt_fan_settle<T: Send + 'static>(
-    thunks: Vec<impl Fn() -> Result<T, String> + Send + Sync>,
-) -> Vec<Result<T, String>> {
+    thunks: Vec<impl Fn() -> Result<T, AlmideString> + Send + Sync>,
+) -> Vec<Result<T, AlmideString>> {
     let group = almide_fan_group(thunks.len());
     let group = &group;
     std::thread::scope(|s| {
@@ -294,7 +309,7 @@ pub fn almide_rt_list_flat_map_arr<A, B, const N: usize, F: Fn(A) -> [B; N]>(xs:
     for x in xs { out.extend(f(x)); }
     out
 }
-pub fn almide_rt_list_flat_map_effect<A, B>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> Result<Vec<B>, String>>) -> Result<Vec<B>, String> { let f = move |a| f(a); let mut r = Vec::new(); for x in xs { r.extend(f(x)?); } Ok(r) }
+pub fn almide_rt_list_flat_map_effect<A, B>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> Result<Vec<B>, AlmideString>>) -> Result<Vec<B>, AlmideString> { let __almide_r: Result<Vec<B>, String> = (|| { let f = move |a| f(a); let mut r = Vec::new(); for x in xs { r.extend(f(x)?); } Ok(r) })(); __almide_r.map_err(Into::into) }
 pub fn almide_rt_list_filter_map<A, B>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> Option<B>>) -> Vec<B> { let f = move |a| f(a); xs.into_iter().filter_map(f).collect() }
 pub fn almide_rt_list_find_index<A: Clone>(xs: &[A], f: std::rc::Rc<dyn Fn(A) -> bool>) -> Option<i64> { let f = move |a| f(a); xs.iter().position(|x| f(x.clone())).map(|i| i as i64) }
 pub fn almide_rt_list_take<T: Clone>(xs: &[T], n: i64) -> Vec<T> { xs.iter().take(n as usize).cloned().collect() }
@@ -370,8 +385,8 @@ pub fn almide_rt_list_range(start: i64, end: i64) -> Vec<i64> {
 pub fn almide_rt_list_reduce<A: Clone>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A, A) -> A>) -> Option<A> { let f = move |a, b| f(a, b); xs.into_iter().reduce(f) }
 pub fn almide_rt_list_scan<A: Clone, B: Clone>(xs: Vec<A>, init: B, f: std::rc::Rc<dyn Fn(B, A) -> B>) -> Vec<B> { let f = move |a, b| f(a, b); let mut r = Vec::new(); let mut a = init; for x in xs { a = f(a, x); r.push(a.clone()); } r }
 pub fn almide_rt_list_sort_by<A: Clone, B: Ord>(mut xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> B>) -> Vec<A> { let f = move |a| f(a); xs.sort_by_cached_key(|x| f(x.clone())); xs }  // #560: cached_key calls the key fn ONCE PER ELEMENT (n), matching the wasm precomputed-key array + the key-extraction intent; sort_by_key called it per COMPARISON (n log n), an observable native!=wasm divergence for side-effectful keys.
-pub fn almide_rt_list_fold_effect<A, B>(xs: Vec<A>, init: B, f: std::rc::Rc<dyn Fn(B, A) -> Result<B, String>>) -> Result<B, String> { let f = move |a, b| f(a, b); let mut a = init; for x in xs { a = f(a, x)?; } Ok(a) }
-pub fn almide_rt_list_map_effect<A, B>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> Result<B, String>>) -> Result<Vec<B>, String> { let f = move |a| f(a); xs.into_iter().map(f).collect() }
+pub fn almide_rt_list_fold_effect<A, B>(xs: Vec<A>, init: B, f: std::rc::Rc<dyn Fn(B, A) -> Result<B, AlmideString>>) -> Result<B, AlmideString> { let __almide_r: Result<B, String> = (|| { let f = move |a, b| f(a, b); let mut a = init; for x in xs { a = f(a, x)?; } Ok(a) })(); __almide_r.map_err(Into::into) }
+pub fn almide_rt_list_map_effect<A, B>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> Result<B, AlmideString>>) -> Result<Vec<B>, AlmideString> { let __almide_r: Result<Vec<B>, String> = (|| { let f = move |a| f(a); xs.into_iter().map(f).collect() })(); __almide_r.map_err(Into::into) }
 
 pub fn almide_rt_list_take_end<T: Clone>(xs: &[T], n: i64) -> Vec<T> {
     let start = if n as usize >= xs.len() { 0 } else { xs.len() - n as usize };
@@ -699,7 +714,7 @@ pub fn almide_rt_list_par_filter<A: Send + Sync + Clone, F: Fn(A) -> bool + Send
             }));
         }
         for (i, handle) in handles.into_iter().enumerate() {
-            results[i] = Some(handle.join().unwrap());
+            results[i] = Some(handle.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic)));
         }
     });
     clock.record(site);
