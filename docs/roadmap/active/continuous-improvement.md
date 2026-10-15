@@ -1353,6 +1353,28 @@ Order agreed with the owner: real defects first (result.filter → list.flat_map
   - codopsy 85ac6cdcda79: almide-syntax A (94), and A (93) after the later additions at 928d498be.
   - `almide fmt --check` over 2,089 files: no parse errors (28 files are unformatted).
 
+### Native runtime to codopsy A (#3745, CI pending; Refs #3152)
+- **What and how.** `runtime/rs/src` is spliced into every native program, but no CI quality job measures it. Measured with codopsy 85ac6cdcda79 (the CI build) and the repo `.codopsyrc.json`, on the directory itself:
+  - develop 2ded9e10c: B (83), 56 issues;
+  - this branch: **A (91)**, 21 issues.
+- **Changes, none of which change a result:**
+  - 22 unwraps replaced by bounds-checked reads and let-else;
+  - the JSON escape parser split into helpers;
+  - the SSE handlers' nine `&mut` parameters replaced by one accumulator struct;
+  - the streaming HTTP reader made into one parse state.
+- **Evidence:**
+  - an old/new native A/B probe and an old/new SSE A/B against a loopback server, both byte-identical;
+  - 66 runtime test binaries;
+  - the chunked/multibyte streaming tests, which build native binaries.
+  - Not evidence: `almide test spec/stdlib/` ran 164 of its 169 files on wasm.
+- **Left:** the libm kernels (determinism-audited) and the max-lines splits of `bytes.rs` / `http.rs`, which are cited by path.
+- **Found on the way: OpenAI `[DONE]` ended only the next chunk,** so an event after it in the same chunk was still applied. The fix and its loopback test are on branch sse-done-ends-stream, stacked on #3745.
+
+### tests/ is B (82): a decision, not a refactor
+- 3,022 files. The file average is 97.4, but 2,132 issues reach the density-penalty cap of 15. A needs about 87 issues or fewer.
+- 1,665 of the issues are `no-unwrap` in integration tests. codopsy exempts unwrap only inside `mod tests`, and `tests/*.rs` files are not modules of that kind.
+- The two ways out are to rewrite 1,665 unwraps, or to have codopsy count `tests/` as test code. The second changes the evaluator, so it is the owner's call and has not been done.
+
 ### Issues filed
 - **#3739: the x86 release timing gate is slower only on the GitHub x86 runner.** `-C target-cpu=native` makes the gate depend on the runner. A GCE A/B is in the issue. A decision is needed: a portable target-cpu, or a per-runner baseline.
 
