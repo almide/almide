@@ -59,13 +59,7 @@ fn sse_openai_chat_run(
     headers.insert("Accept".to_string(), "text/event-stream".to_string());
 
     let mut sse_buffer = String::new();
-    let mut content = String::new();
-    let mut tool_calls: Vec<AlmideToolCallAcc> = Vec::new();
-    let mut prompt_tokens: i64 = 0;
-    let mut completion_tokens: i64 = 0;
-    let mut total_tokens: i64 = 0;
-    let mut finish_reason = String::new();
-    let mut model_id = String::new();
+    let mut acc = AlmideSseAcc::default();
     let mut done = false;
 
     almide_http_stream_dispatch("POST", &url, body_json, &headers, limits, |chunk: String| {
@@ -76,16 +70,7 @@ fn sse_openai_chat_run(
         while let Some(idx) = sse_buffer.find("\n\n") {
             let event_block: String = sse_buffer.drain(..idx + 2).collect();
             // Each block can have multiple `data:` lines; merge into one payload.
-            let mut data_payload = String::new();
-            for line in event_block.lines() {
-                if let Some(rest) = line.strip_prefix("data:") {
-                    let trimmed = rest.trim_start();
-                    if !data_payload.is_empty() {
-                        data_payload.push('\n');
-                    }
-                    data_payload.push_str(trimmed);
-                }
-            }
+            let (_, data_payload) = sse_event_parts(&event_block);
             if data_payload.is_empty() {
                 continue;
             }
@@ -93,43 +78,10 @@ fn sse_openai_chat_run(
                 done = true;
                 continue;
             }
-            handle_sse_data(
-                &data_payload,
-                &mut content,
-                &mut tool_calls,
-                &mut prompt_tokens,
-                &mut completion_tokens,
-                &mut total_tokens,
-                &mut finish_reason,
-                &mut model_id,
-                &on_text_delta,
-            );
+            handle_sse_data(&data_payload, &mut acc, &on_text_delta);
         }
     })?;
-
-    let tool_calls_json: String = tool_calls
-        .iter()
-        .map(|tc| {
-            format!(
-                "{{\"id\":\"{}\",\"name\":\"{}\",\"arguments\":\"{}\"}}",
-                json_escape(&tc.id),
-                json_escape(&tc.name),
-                json_escape(&tc.arguments),
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(",");
-    let final_json = format!(
-        "{{\"content\":\"{}\",\"model\":\"{}\",\"usage\":{{\"prompt_tokens\":{},\"completion_tokens\":{},\"total_tokens\":{}}},\"finish_reason\":\"{}\",\"tool_calls\":[{}]}}",
-        json_escape(&content),
-        json_escape(&model_id),
-        prompt_tokens,
-        completion_tokens,
-        if total_tokens != 0 { total_tokens } else { prompt_tokens + completion_tokens },
-        json_escape(&finish_reason),
-        tool_calls_json,
-    );
-    Ok(final_json)
+    Ok(acc.final_json())
 }
 
 // ── SSE event handler ──
@@ -141,82 +93,117 @@ struct AlmideToolCallAcc {
     arguments: String,
 }
 
-fn handle_sse_data(
-    payload: &str,
-    content: &mut String,
-    tool_calls: &mut Vec<AlmideToolCallAcc>,
-    prompt_tokens: &mut i64,
-    completion_tokens: &mut i64,
-    total_tokens: &mut i64,
-    finish_reason: &mut String,
-    model_id: &mut String,
-    on_text_delta: &std::rc::Rc<dyn Fn(String)>,
-) {
-    let parsed = match almide_rt_json_parse(payload) {
-        Ok(v) => v,
-        Err(_) => return,
-    };
-    if let Some(m) = get_string(&parsed, "model") {
-        if !m.is_empty() {
-            *model_id = m;
+/// What one streamed reply has accumulated so far, in either wire shape.
+#[derive(Default)]
+struct AlmideSseAcc {
+    content: String,
+    tool_calls: Vec<AlmideToolCallAcc>,
+    prompt_tokens: i64,
+    completion_tokens: i64,
+    total_tokens: i64,
+    finish_reason: String,
+    model_id: String,
+}
+
+impl AlmideSseAcc {
+    /// The tool call at `index`, growing the list to reach it.
+    fn tool(&mut self, index: usize) -> &mut AlmideToolCallAcc {
+        if self.tool_calls.len() <= index {
+            self.tool_calls.resize_with(index + 1, AlmideToolCallAcc::default);
         }
+        &mut self.tool_calls[index]
     }
-    if let Some(usage) = get_field(&parsed, "usage") {
-        if let Some(p) = get_int(&usage, "prompt_tokens") {
-            *prompt_tokens = p;
-        }
-        if let Some(c) = get_int(&usage, "completion_tokens") {
-            *completion_tokens = c;
-        }
-        if let Some(t) = get_int(&usage, "total_tokens") {
-            *total_tokens = t;
-        }
-    }
-    let choices = match get_field(&parsed, "choices") {
-        Some(AlmideValue::Array(a)) => a,
-        _ => return,
-    };
-    let first = match choices.first() {
-        Some(c) => c,
-        None => return,
-    };
-    if let Some(fr) = get_string(first, "finish_reason") {
-        if !fr.is_empty() {
-            *finish_reason = fr;
-        }
-    }
-    let delta = match get_field(first, "delta") {
-        Some(d) => d,
-        None => return,
-    };
-    if let Some(text) = get_string(&delta, "content") {
-        if !text.is_empty() {
+
+    /// A text delta: shown live through the callback and kept.
+    fn text(&mut self, text: Option<String>, on_text_delta: &std::rc::Rc<dyn Fn(String)>) {
+        if let Some(text) = text.filter(|t| !t.is_empty()) {
             on_text_delta(text.clone());
-            content.push_str(&text);
+            self.content.push_str(&text);
         }
     }
+
+    /// The LLMResponse-shaped JSON both transports return. A stream that
+    /// reported no total (Anthropic never does) totals the two counts.
+    fn final_json(&self) -> String {
+        let tool_calls_json: String = self
+            .tool_calls
+            .iter()
+            .map(|tc| {
+                format!(
+                    "{{\"id\":\"{}\",\"name\":\"{}\",\"arguments\":\"{}\"}}",
+                    json_escape(&tc.id),
+                    json_escape(&tc.name),
+                    json_escape(&tc.arguments),
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        let total = if self.total_tokens != 0 { self.total_tokens } else { self.prompt_tokens + self.completion_tokens };
+        format!(
+            "{{\"content\":\"{}\",\"model\":\"{}\",\"usage\":{{\"prompt_tokens\":{},\"completion_tokens\":{},\"total_tokens\":{}}},\"finish_reason\":\"{}\",\"tool_calls\":[{}]}}",
+            json_escape(&self.content),
+            json_escape(&self.model_id),
+            self.prompt_tokens,
+            self.completion_tokens,
+            total,
+            json_escape(&self.finish_reason),
+            tool_calls_json,
+        )
+    }
+}
+
+/// Overwrite `slot` with `value` when it is present and non-empty.
+fn sse_set_nonempty(slot: &mut String, value: Option<String>) {
+    if let Some(v) = value.filter(|v| !v.is_empty()) {
+        *slot = v;
+    }
+}
+
+/// An SSE event block's `event:` name and its `data:` lines joined by `\n`.
+fn sse_event_parts(event_block: &str) -> (String, String) {
+    let mut event_name = String::new();
+    let mut data_payload = String::new();
+    for line in event_block.lines() {
+        if let Some(rest) = line.strip_prefix("event:") {
+            event_name = rest.trim().to_string();
+        } else if let Some(rest) = line.strip_prefix("data:") {
+            if !data_payload.is_empty() { data_payload.push('\n'); }
+            data_payload.push_str(rest.trim_start());
+        }
+    }
+    (event_name, data_payload)
+}
+
+/// One OpenAI Chat Completions `data:` payload.
+fn handle_sse_data(payload: &str, acc: &mut AlmideSseAcc, on_text_delta: &std::rc::Rc<dyn Fn(String)>) {
+    let Ok(parsed) = almide_rt_json_parse(payload) else { return };
+    sse_set_nonempty(&mut acc.model_id, get_string(&parsed, "model"));
+    if let Some(usage) = get_field(&parsed, "usage") {
+        if let Some(p) = get_int(&usage, "prompt_tokens") { acc.prompt_tokens = p; }
+        if let Some(c) = get_int(&usage, "completion_tokens") { acc.completion_tokens = c; }
+        if let Some(t) = get_int(&usage, "total_tokens") { acc.total_tokens = t; }
+    }
+    let Some(AlmideValue::Array(choices)) = get_field(&parsed, "choices") else { return };
+    let Some(first) = choices.first() else { return };
+    sse_set_nonempty(&mut acc.finish_reason, get_string(first, "finish_reason"));
+    let Some(delta) = get_field(first, "delta") else { return };
+    acc.text(get_string(&delta, "content"), on_text_delta);
     if let Some(AlmideValue::Array(tcs)) = get_field(&delta, "tool_calls") {
         for tc in tcs {
-            let idx = get_int(&tc, "index").unwrap_or(0) as usize;
-            while tool_calls.len() <= idx {
-                tool_calls.push(AlmideToolCallAcc::default());
-            }
-            let acc = &mut tool_calls[idx];
-            if let Some(id) = get_string(&tc, "id") {
-                if !id.is_empty() {
-                    acc.id = id;
-                }
-            }
-            if let Some(func) = get_field(&tc, "function") {
-                if let Some(name) = get_string(&func, "name") {
-                    if !name.is_empty() {
-                        acc.name = name;
-                    }
-                }
-                if let Some(args) = get_string(&func, "arguments") {
-                    acc.arguments.push_str(&args);
-                }
-            }
+            openai_tool_call_delta(acc, &tc);
+        }
+    }
+}
+
+/// One entry of an OpenAI delta's `tool_calls`: id and name arrive once,
+/// the arguments in fragments.
+fn openai_tool_call_delta(acc: &mut AlmideSseAcc, tc: &AlmideValue) {
+    let call = acc.tool(get_int(tc, "index").unwrap_or(0) as usize);
+    sse_set_nonempty(&mut call.id, get_string(tc, "id"));
+    if let Some(func) = get_field(tc, "function") {
+        sse_set_nonempty(&mut call.name, get_string(&func, "name"));
+        if let Some(args) = get_string(&func, "arguments") {
+            call.arguments.push_str(&args);
         }
     }
 }
@@ -298,164 +285,81 @@ fn sse_anthropic_messages_run(
     headers.insert("Accept".to_string(), "text/event-stream".to_string());
 
     let mut sse_buffer = String::new();
-    let mut content = String::new();
     // Tool blocks accumulate by `index` across content_block_start / delta.
-    let mut tool_calls: Vec<AlmideToolCallAcc> = Vec::new();
-    let mut prompt_tokens: i64 = 0;
-    let mut completion_tokens: i64 = 0;
-    let mut finish_reason = String::new();
-    let mut model_id = String::new();
+    let mut acc = AlmideSseAcc::default();
 
     almide_http_stream_dispatch("POST", &url, body_json, &headers, limits, |chunk: String| {
         sse_buffer.push_str(&chunk);
         while let Some(idx) = sse_buffer.find("\n\n") {
             let event_block: String = sse_buffer.drain(..idx + 2).collect();
-            // Parse the event block into (event_name, data_payload).
-            let mut event_name = String::new();
-            let mut data_payload = String::new();
-            for line in event_block.lines() {
-                if let Some(rest) = line.strip_prefix("event:") {
-                    event_name = rest.trim().to_string();
-                } else if let Some(rest) = line.strip_prefix("data:") {
-                    let trimmed = rest.trim_start();
-                    if !data_payload.is_empty() { data_payload.push('\n'); }
-                    data_payload.push_str(trimmed);
-                }
-            }
+            let (event_name, data_payload) = sse_event_parts(&event_block);
             if data_payload.is_empty() { continue; }
-            let parsed = match almide_rt_json_parse(&data_payload) {
-                Ok(v) => v,
-                Err(_) => continue,
-            };
-            handle_anthropic_event(
-                &event_name,
-                &parsed,
-                &mut content,
-                &mut tool_calls,
-                &mut prompt_tokens,
-                &mut completion_tokens,
-                &mut finish_reason,
-                &mut model_id,
-                &on_text_delta,
-            );
+            let Ok(parsed) = almide_rt_json_parse(&data_payload) else { continue };
+            handle_anthropic_event(&event_name, &parsed, &mut acc, &on_text_delta);
         }
     })?;
-
-    let tool_calls_json: String = tool_calls
-        .iter()
-        .map(|tc| {
-            format!(
-                "{{\"id\":\"{}\",\"name\":\"{}\",\"arguments\":\"{}\"}}",
-                json_escape(&tc.id),
-                json_escape(&tc.name),
-                json_escape(&tc.arguments),
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(",");
-    let total = prompt_tokens + completion_tokens;
-    let final_json = format!(
-        "{{\"content\":\"{}\",\"model\":\"{}\",\"usage\":{{\"prompt_tokens\":{},\"completion_tokens\":{},\"total_tokens\":{}}},\"finish_reason\":\"{}\",\"tool_calls\":[{}]}}",
-        json_escape(&content),
-        json_escape(&model_id),
-        prompt_tokens,
-        completion_tokens,
-        total,
-        json_escape(&finish_reason),
-        tool_calls_json,
-    );
-    Ok(final_json)
+    Ok(acc.final_json())
 }
 
-fn handle_anthropic_event(
-    event_name: &str,
-    parsed: &AlmideValue,
-    content: &mut String,
-    tool_calls: &mut Vec<AlmideToolCallAcc>,
-    prompt_tokens: &mut i64,
-    completion_tokens: &mut i64,
-    finish_reason: &mut String,
-    model_id: &mut String,
-    on_text_delta: &std::rc::Rc<dyn Fn(String)>,
-) {
+/// One Anthropic Messages event, by its `event:` name.
+fn handle_anthropic_event(event_name: &str, parsed: &AlmideValue, acc: &mut AlmideSseAcc, on_text_delta: &std::rc::Rc<dyn Fn(String)>) {
     match event_name {
-        "message_start" => {
-            // {"type":"message_start","message":{"id","model","usage":{"input_tokens","output_tokens"}}}
-            if let Some(msg) = get_field(parsed, "message") {
-                if let Some(m) = get_string(&msg, "model") {
-                    if !m.is_empty() { *model_id = m; }
-                }
-                if let Some(usage) = get_field(&msg, "usage") {
-                    if let Some(p) = get_int(&usage, "input_tokens") { *prompt_tokens = p; }
-                    if let Some(c) = get_int(&usage, "output_tokens") { *completion_tokens = c; }
-                }
-            }
-        }
-        "content_block_start" => {
-            // {"index":N,"content_block":{"type":"text"|"tool_use","id?","name?","input?":{}}}
-            let index = get_int(parsed, "index").unwrap_or(0) as usize;
-            if let Some(block) = get_field(parsed, "content_block") {
-                let btype = get_string(&block, "type").unwrap_or_default();
-                if btype == "tool_use" {
-                    while tool_calls.len() <= index {
-                        tool_calls.push(AlmideToolCallAcc::default());
-                    }
-                    let acc = &mut tool_calls[index];
-                    if let Some(id) = get_string(&block, "id") {
-                        if !id.is_empty() { acc.id = id; }
-                    }
-                    if let Some(name) = get_string(&block, "name") {
-                        if !name.is_empty() { acc.name = name; }
-                    }
-                    // Anthropic occasionally inlines a complete `input` object on start.
-                    if let Some(_input) = get_field(&block, "input") {
-                        // Leave args as "" — input_json_delta will populate.
-                    }
-                }
-            }
-        }
-        "content_block_delta" => {
-            // {"index":N,"delta":{"type":"text_delta"|"input_json_delta","text"|"partial_json"}}
-            let index = get_int(parsed, "index").unwrap_or(0) as usize;
-            if let Some(delta) = get_field(parsed, "delta") {
-                let dtype = get_string(&delta, "type").unwrap_or_default();
-                if dtype == "text_delta" {
-                    if let Some(text) = get_string(&delta, "text") {
-                        if !text.is_empty() {
-                            on_text_delta(text.clone());
-                            content.push_str(&text);
-                        }
-                    }
-                } else if dtype == "input_json_delta" {
-                    if let Some(partial) = get_string(&delta, "partial_json") {
-                        while tool_calls.len() <= index {
-                            tool_calls.push(AlmideToolCallAcc::default());
-                        }
-                        tool_calls[index].arguments.push_str(&partial);
-                    }
-                }
-            }
-        }
+        // {"type":"message_start","message":{"id","model","usage":{"input_tokens","output_tokens"}}}
+        "message_start" => anthropic_message_start(parsed, acc),
+        // {"index":N,"content_block":{"type":"text"|"tool_use","id?","name?","input?":{}}}
+        "content_block_start" => anthropic_block_start(parsed, acc),
+        // {"index":N,"delta":{"type":"text_delta"|"input_json_delta","text"|"partial_json"}}
+        "content_block_delta" => anthropic_block_delta(parsed, acc, on_text_delta),
+        // {"delta":{"stop_reason":"end_turn"|"tool_use"|...},"usage":{"output_tokens":N}}
         "message_delta" => {
-            // {"delta":{"stop_reason":"end_turn"|"tool_use"|...},"usage":{"output_tokens":N}}
             if let Some(delta) = get_field(parsed, "delta") {
-                if let Some(reason) = get_string(&delta, "stop_reason") {
-                    if !reason.is_empty() { *finish_reason = reason; }
-                }
+                sse_set_nonempty(&mut acc.finish_reason, get_string(&delta, "stop_reason"));
             }
-            if let Some(usage) = get_field(parsed, "usage") {
-                if let Some(c) = get_int(&usage, "output_tokens") {
-                    *completion_tokens = c;
-                }
+            if let Some(c) = get_field(parsed, "usage").and_then(|u| get_int(&u, "output_tokens")) {
+                acc.completion_tokens = c;
             }
         }
+        // SSE error event — surface via text_delta so the user sees something.
         "error" => {
-            // SSE error event — surface via text_delta so the user sees something.
             if let Some(err) = get_field(parsed, "error") {
                 let msg = get_string(&err, "message").unwrap_or_default();
                 if !msg.is_empty() {
                     on_text_delta(format!("[anthropic stream error] {}", msg));
                 }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn anthropic_message_start(parsed: &AlmideValue, acc: &mut AlmideSseAcc) {
+    let Some(msg) = get_field(parsed, "message") else { return };
+    sse_set_nonempty(&mut acc.model_id, get_string(&msg, "model"));
+    if let Some(usage) = get_field(&msg, "usage") {
+        if let Some(p) = get_int(&usage, "input_tokens") { acc.prompt_tokens = p; }
+        if let Some(c) = get_int(&usage, "output_tokens") { acc.completion_tokens = c; }
+    }
+}
+
+/// A `tool_use` block opens its call with id and name; its arguments
+/// arrive through input_json_delta (an inlined `input` is not read).
+fn anthropic_block_start(parsed: &AlmideValue, acc: &mut AlmideSseAcc) {
+    let index = get_int(parsed, "index").unwrap_or(0) as usize;
+    let Some(block) = get_field(parsed, "content_block") else { return };
+    if get_string(&block, "type").unwrap_or_default() != "tool_use" { return; }
+    let call = acc.tool(index);
+    sse_set_nonempty(&mut call.id, get_string(&block, "id"));
+    sse_set_nonempty(&mut call.name, get_string(&block, "name"));
+}
+
+fn anthropic_block_delta(parsed: &AlmideValue, acc: &mut AlmideSseAcc, on_text_delta: &std::rc::Rc<dyn Fn(String)>) {
+    let index = get_int(parsed, "index").unwrap_or(0) as usize;
+    let Some(delta) = get_field(parsed, "delta") else { return };
+    match get_string(&delta, "type").unwrap_or_default().as_str() {
+        "text_delta" => acc.text(get_string(&delta, "text"), on_text_delta),
+        "input_json_delta" => {
+            if let Some(partial) = get_string(&delta, "partial_json") {
+                acc.tool(index).arguments.push_str(&partial);
             }
         }
         _ => {}
