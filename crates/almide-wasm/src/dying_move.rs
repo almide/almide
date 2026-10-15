@@ -358,6 +358,21 @@ impl Emitter<'_> {
         Some(dying)
     }
 
+    /// [`Self::owned_receiver`] for an op whose write is JUDGED by count
+    /// (map_inplace.rs: in place at `rc == 1`, else a copy that drops the
+    /// op's credit). Only a live var stays on the caller's copy path: any
+    /// other receiver — an inner `map.set`'s result above all (#3537) — is
+    /// lowered retained, so the op holds one credit whatever it was, and the
+    /// judge decides. A module call's ownership mark is set only by its own
+    /// lowering, so deciding before lowering read a fresh result as borrowed
+    /// and copied the map on every chained step (as list edits did, #3533).
+    pub(crate) fn judged_receiver(&mut self, m: &IrExpr, operands: &[&IrExpr]) -> Option<Option<(VarId, u32, SliceTy)>> {
+        match self.owned_receiver(m, operands) {
+            None if !self.metered && !matches!(m.kind, almide_ir::IrExprKind::Var { .. }) => Some(None),
+            got => got,
+        }
+    }
+
     /// `map.upsert(m, k, init, cb)` over a receiver whose credit the op may
     /// take: one scan, the callback over the present value (or `init`), then
     /// the judged write of map.set — in place when the credit is the block's
@@ -368,7 +383,7 @@ impl Emitter<'_> {
     pub(crate) fn try_map_upsert_owned(&mut self, m: &IrExpr, ops: [&IrExpr; 3]) -> Result<Option<Lowered>, EmitError> {
         let [key, init, cb] = ops;
         let (params, body) = self.hof_lambda(cb, 1)?;
-        let Some(dying) = self.owned_receiver(m, &ops) else { return Ok(None) };
+        let Some(dying) = self.judged_receiver(m, &ops) else { return Ok(None) };
         self.owned_call_marks.set_moving(m, dying.is_some());
         let got = self.lower_arg(m, None, ArgMode::Retain)?;
         self.owned_call_marks.set_moving(m, false);
@@ -439,7 +454,7 @@ impl Emitter<'_> {
     pub(crate) fn try_map_update_owned(&mut self, m: &IrExpr, ops: [&IrExpr; 2]) -> Result<Option<Lowered>, EmitError> {
         let [key, cb] = ops;
         let (params, body) = self.hof_lambda(cb, 1)?;
-        let Some(dying) = self.owned_receiver(m, &ops) else { return Ok(None) };
+        let Some(dying) = self.judged_receiver(m, &ops) else { return Ok(None) };
         self.owned_call_marks.set_moving(m, dying.is_some());
         let got = self.lower_arg(m, None, ArgMode::Retain)?;
         self.owned_call_marks.set_moving(m, false);
@@ -493,7 +508,7 @@ impl Emitter<'_> {
     /// `map.set(m, k, v)` over a receiver whose credit the op may take
     /// (see the module doc); `None` keeps the borrowed-receiver copy.
     pub(crate) fn try_map_set_owned(&mut self, m: &IrExpr, key: &IrExpr, value: &IrExpr) -> Result<Option<Lowered>, EmitError> {
-        let Some(dying) = self.owned_receiver(m, &[key, value]) else { return Ok(None) };
+        let Some(dying) = self.judged_receiver(m, &[key, value]) else { return Ok(None) };
         self.owned_call_marks.set_moving(m, dying.is_some());
         let got = self.lower_arg(m, None, ArgMode::Retain)?;
         self.owned_call_marks.set_moving(m, false);
