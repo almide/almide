@@ -26447,10 +26447,12 @@ fn unwrap_or_else[A](o: A?, f: () -> A) -> A = _
 
 /// true for some(_), false for none.
 @intrinsic("almide_rt_option_is_some")
+@borrow_ref(o)
 fn is_some[A](o: A?) -> Bool = _
 
 /// true for none, false for some(_).
 @intrinsic("almide_rt_option_is_none")
+@borrow_ref(o)
 fn is_none[A](o: A?) -> Bool = _
 
 
