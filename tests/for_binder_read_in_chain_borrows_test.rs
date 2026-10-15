@@ -55,9 +55,12 @@ fn a_binder_read_in_a_chain_is_iterated_by_reference() {
     let out = Command::new(env!("CARGO_BIN_EXE_almide")).arg(&file).args(["--target", "rust"]).output().expect("emit");
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let rust = String::from_utf8_lossy(&out.stdout);
-    for name in ["hits", "pairs"] {
+    // `hits` only reads `j`; `pairs` and `keeps` copy it where the chain
+    // needs an owned value (`j.clone()` inside the lambda), so the loop need
+    // not copy each element first either.
+    for name in ["hits", "pairs", "keeps"] {
         let body = fn_body(&rust, name);
-        assert!(!body.contains(".iter().cloned()"), "{name}: a read-only binder is not cloned per element:\n{body}");
+        assert!(body.contains("for j in js.iter() {"), "{name}: the binder is iterated by reference:\n{body}");
     }
 }
 
