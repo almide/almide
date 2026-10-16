@@ -52,14 +52,19 @@ pub(super) fn match_binders(subject: &IrExpr, arms: &[IrMatchArm]) -> Option<Has
         return None;
     }
     let root = match &subject.kind {
+        // A live variable is matched through `&x` as its fields are: the
+        // clone copied the whole value to test which case it holds.
+        IrExprKind::Var { id } => *id,
         IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. } => root(subject)?,
         IrExprKind::RuntimeCall { .. } => super::pass_clone_head::head_source(subject)?,
         _ => return None,
     };
     let mut all = HashSet::new();
     for arm in arms {
-        // No arm may mutate or move the source while its fields are borrowed.
-        if mentions(&arm.body, root) || arm.guard.as_ref().is_some_and(|g| mentions(g, root)) {
+        // No arm may mutate or move the source while its fields are borrowed;
+        // a shared read (an interpolation, a field) beside the borrow is fine.
+        let held = |e: &IrExpr| mentions(e, root) && !reads_binding(e, root);
+        if held(&arm.body) || arm.guard.as_ref().is_some_and(held) {
             return None;
         }
         let mut vars = HashSet::new();
