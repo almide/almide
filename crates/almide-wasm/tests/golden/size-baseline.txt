@@ -237,10 +237,10 @@
 3501	spec/wasm_cross/float_to_int_edges.almd
 2527	spec/wasm_cross/fold_heap_acc.almd
 2020	spec/wasm_cross/for_in_forms.almd
-14768	spec/wasm_cross/fs_call_head_family.almd
+17527	spec/wasm_cross/fs_call_head_family.almd
 13684	spec/wasm_cross/fs_composition_family.almd
-9361	spec/wasm_cross/fs_fallible_stream_callback.almd
-8577	spec/wasm_cross/fs_fallible_walker_call_head.almd
+10021	spec/wasm_cross/fs_fallible_stream_callback.almd
+9633	spec/wasm_cross/fs_fallible_walker_call_head.almd
 7132	spec/wasm_cross/fs_glob_segments.almd
 5929	spec/wasm_cross/fs_list_dir_multipass.almd
 6375	spec/wasm_cross/fs_metadata_family.almd
@@ -406,7 +406,7 @@
 5223	spec/wasm_cross/letbound_variant_match_heap_payload.almd
 12071	spec/wasm_cross/licm_mut_param_named_call.almd
 2306	spec/wasm_cross/licm_zero_trip_hoist.almd
-7438	spec/wasm_cross/line_endings_bare_cr.almd
+7946	spec/wasm_cross/line_endings_bare_cr.almd
 23152	spec/wasm_cross/list_arg_map_view.almd
 2466	spec/wasm_cross/list_call_element.almd
 3459	spec/wasm_cross/list_chunk_windows.almd
@@ -753,7 +753,7 @@
 3000	spec/wasm_cross/split_empty_sep.almd
 5932	spec/wasm_cross/spread_record_share.almd
 12040	spec/wasm_cross/sql_highlight_tokens.almd
-5098	spec/wasm_cross/statement_after_tail_walker_bang.almd
+5860	spec/wasm_cross/statement_after_tail_walker_bang.almd
 7823	spec/wasm_cross/stdlib_call_temporaries_release.almd
 24890	spec/wasm_cross/stdlib_opaque_shadow.almd
 29911	spec/wasm_cross/stdlib_type_shadow.almd
