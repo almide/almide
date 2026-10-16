@@ -303,11 +303,20 @@ fn decl_block(src: &str, func: &str) -> Option<String> {
     Some(lines[start..end].iter().filter(|l| !l.starts_with("///")).copied().collect::<Vec<_>>().join("\n"))
 }
 
+/// The sources a checker-surface constructor is made of: it has no stdlib
+/// declaration — the checker resolves it from the unit table and the
+/// lowering erases it to `n * factor` — so a change to either voids its stamp.
+const CHECKER_SURFACE_SOURCES: &[&str] = &["crates/almide-types/src/time_units.rs", "crates/almide-frontend/src/lower/calls_time.rs"];
+
 /// FNV-1a 64 over the function's sources ([`Sources`]): stable across
 /// toolchains, unlike `DefaultHasher`. `None` when the function has no
-/// declaration to read (the checker-surface `compute` / `duration` rows).
+/// declaration to read.
 fn impl_fingerprint(src: &Sources, name: &str) -> Option<String> {
     let (module, func) = name.split_once('.')?;
+    if CHECKER_SURFACE.iter().any(|(m, _)| *m == module) {
+        let parts: Vec<String> = CHECKER_SURFACE_SOURCES.iter().map(|p| std::fs::read_to_string(root().join(p)).unwrap_or_default()).collect();
+        return Some(fnv1a(&parts));
+    }
     let decl = decl_block(&std::fs::read_to_string(root().join(format!("stdlib/{module}.almd"))).ok()?, func)?;
     let mut parts = vec![decl.clone()];
     if let Some(sym) = decl.lines().find_map(|l| l.strip_prefix("@intrinsic(\"")?.split('"').next()) {
@@ -320,10 +329,14 @@ fn impl_fingerprint(src: &Sources, name: &str) -> Option<String> {
     if let Some(stem) = src.self_host.get(name) {
         parts.push(std::fs::read_to_string(root().join(format!("stdlib/{stem}.almd"))).unwrap_or_default());
     }
+    Some(fnv1a(&parts))
+}
+
+fn fnv1a(parts: &[String]) -> String {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for b in parts.join("\u{0}").bytes() {
         h ^= u64::from(b);
         h = h.wrapping_mul(0x0000_0100_0000_01b3);
     }
-    Some(format!("fnv1a:{h:016x}"))
+    format!("fnv1a:{h:016x}")
 }
