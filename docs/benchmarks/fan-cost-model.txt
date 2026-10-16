@@ -15,8 +15,9 @@
 # out of t (it is the WORKER term's), unless no worker ran a second one.
 # A site's FIRST offer goes parallel, as
 # before #3341. A later offer of n elements on W workers costs
-#   offer_ns + W * worker_ns   (thread spawn and join, the fan group's
-# bookkeeping; on wasm, the request round trip and the worker calls) and
+#   offer_ns + W * worker_ns   (waking the resident crew and waiting for
+# it, the fan group's bookkeeping; on wasm, the request round trip and the
+# worker calls) and
 # saves   t * (n - ceil(n / W)).   The W in 2..=workers with the largest
 # positive net saving wins; none = the offer runs on the calling thread
 # (wasm: on one pooled instance), sequentially. Output is the same on every
@@ -98,3 +99,54 @@ worker_ns = 5_000
 # end is the site's first offer, which always goes parallel.
 # fannkuchredux (args=10, one offer of 10 chunks of ~18 ms) is unchanged:
 # its first offer goes parallel exactly as before.
+
+# ── Recalibrated 2026-10-16: the resident crews (#3748 wasm, #3759 native) ─
+# Both legs now keep their fan threads resident for the run and deal blocks
+# to them, and both read the available parallelism ONCE (on Linux
+# `available_parallelism` reads the cgroup quota files on every call — it
+# had cost every offer, sequential ones included, 11 us on the Intel VM and
+# 48 us on the AMD one). Measured on GCE, the probe above (an empty 10-element
+# chunk map), (t(3000 offers) - t(300 offers)) / 2700, best of 9, us per
+# offer, ALMIDE_FAN_COST_OFF + ALMIDE_FAN_THREADS pinning W:
+#
+#                       W=1   W=2   W=3   W=4   W=6   W=8
+#   Intel 8581C native   0.5   6.6   7.2   8.7  19.8  22.5   (c4-standard-8)
+#   Intel 8581C wasm     1.0  37.3  27.3  35.8  37.9  40.6
+#   AMD EPYC 7B13 native 1.8  17.1  17.1  19.6  27.4  35.3   (n2d-standard-8,
+#   AMD EPYC 7B13 wasm   6.5  27.2  40.3  36.9  47.0  69.1    Milan: CI's x86)
+#
+# Before the crews, the same probe on the AMD VM read 140 / 250 / 299 us
+# native and 85 / 112 / 161 us wasm at W = 2 / 4 / 8 — 3x the model's
+# 30 + 9W there. offer_ns = 30 us, worker_ns = 5 us (30 + 5W = 40 .. 70 us
+# at W = 2 .. 8) is the envelope over all four rows: the model still errs
+# toward sequential, on the slowest leg measured.
+#
+# The crossover sweep: 100 offers x 10 elements, ms per run, as
+# t(110 offers) - t(10 offers) (min of 7) so build and startup cancel; seq =
+# ALMIDE_FAN_SEQUENTIAL / ALMIDE_FAN_PAR_OFF, par = ALMIDE_FAN_COST_OFF,
+# old = the crews with 30 + 9W and the per-call parallelism read, new = this.
+# The wasm leg's difference carries +-3 ms of build-time noise.
+#
+#   Intel 8581C     native                       wasm
+#   iters   seq    old    new    par  |   seq    old    new    par
+#   0        0.0    1.26   0.04   2.30 |   1.0    3.5   -0.6    2.7
+#   100      0.42   1.64   0.46   2.38 |   1.5    1.0   -1.6    3.2
+#   1000     4.05   5.43   4.22   3.53 |   5.2    7.8    4.2    4.1
+#   3000    12.41   6.02   5.20   5.19 |  15.1    7.7    9.6   12.0
+#   5000    20.48   8.48   7.55   7.23 |  18.4    9.0    9.7    5.5
+#   10000   41.18  12.89  11.99  11.50 |  42.1   15.2   12.8   11.9
+#   30000  124.25  30.47  29.72  28.64 | 126.0   31.9   30.2   30.6
+#
+#   AMD EPYC 7B13   native                       wasm
+#   iters   seq    old    new    par  |   seq    old    new    par
+#   0        0.01   5.25   0.22   3.94 |   4.0   12.1   -2.2    7.1
+#   100      0.47   5.79   0.57   4.18 |  -1.0    7.5    1.0    6.9
+#   1000     4.90  10.11   5.02   4.58 |   3.8   11.3    2.6    9.6
+#   3000    14.86  12.59   5.78   6.47 |  17.3   16.5   16.2    8.0
+#   5000    24.61  15.92   8.75   7.96 |  27.6   16.0   16.3    9.6
+#   10000   49.52  20.97  14.34  14.23 |  50.0   21.4   15.1   13.9
+#   30000  148.26  42.85  35.34  35.01 | 151.4   43.4   38.6   32.9
+#
+# The cheap end is now at seq on both machines (the old residue was the
+# per-offer parallelism read, not the first offer), and native tracks
+# min(seq, par) throughout.
