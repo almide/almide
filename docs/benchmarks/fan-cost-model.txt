@@ -203,6 +203,6 @@ wasm_worker_ns   = 5_000
 # Native also stops timing a site's cheap sequential offers: the per-offer
 # residue over seq at the cheap end (0.4 us Intel, 1.7 us AMD at 0
 # iterations) is the two thread-CPU-clock reads that time the offer. A site
-# whose estimate stays sequential even at 8x its measured work re-measures
+# whose estimate stays sequential even at 4x its measured work re-measures
 # one sequential offer in 16 (list.rs `ALMIDE_FAN_RESAMPLE`); a site whose
 # work grows past that is seen within 16 offers.
