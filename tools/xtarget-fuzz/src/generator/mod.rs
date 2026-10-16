@@ -241,12 +241,22 @@ impl Engine {
 
     /// The inspection target for `module.fn` (`xtarget-fuzz inspect`).
     pub fn inspect_target(&self, name: &str) -> Result<inspect_gen::Target, String> {
+        self.inspect_target_filled(name, types::GenType::Int)
+    }
+
+    /// [`Self::inspect_target`] with every free type variable at String, the
+    /// heap instantiation a generic function is also inspected at.
+    pub fn inspect_target_heap(&self, name: &str) -> Result<inspect_gen::Target, String> {
+        self.inspect_target_filled(name, types::GenType::String)
+    }
+
+    fn inspect_target_filled(&self, name: &str, fill: types::GenType) -> Result<inspect_gen::Target, String> {
         let sig = self
             .catalogue
             .iter()
             .find(|s| format!("{}.{}", s.module, s.func) == name)
             .ok_or_else(|| format!("{name}: not in the generator's catalogue"))?;
-        inspect_gen::Target::new(sig, &self.catalogue)
+        inspect_gen::Target::new_filled(sig, &self.catalogue, fill)
     }
 
     /// Centre the campaign on one stdlib function (`module.fn`, the stdlib
