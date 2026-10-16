@@ -69,7 +69,7 @@
 #                      every stamped row is to be re-inspected before each final
 #                      release for that (a manual GCE run: no credentials in CI)
 #
-# uninspected_ceiling = "151"
+# uninspected_ceiling = "150"
 
 [[fn]]
 name = "args.flag"
@@ -3930,7 +3930,14 @@ diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 name = "http.route"
 sig = "(pattern: String, handler: (HttpRequest) -> Result[HttpResponse, String]) -> HttpRoute"
 class = "pure"
-status = "uninspected"
+status = "inspected"
+impl = "fnv1a:e5b66591e4e77a8d"
+stamp = "almide 0.67.1 (dev) at insp-pure-2 2123b7cc7 (develop plus the nominal-type grammar, the #3752 to #3758 and #3760 fixes, the if-arm effect adapter, the self-host rebind move-in, the zlib err texts, the fold-init move and the rebind shapes' size-1 foreign operand, the runtime-bound Eq/Ord check and the arm-by-arm effect adapter, the unrolled-loop rebind move-in, the inflater's early header check, the mut-call result slot release, the effect type handed down through data, the frame-tail move-in, the router linear in the path length, eta only at declared callbacks, the Unit-tailed assert desugar, the C-381 testing asserts, assert operands read in place and a live match subject borrowed on native; the counted judge checks the legs agree once per size at the smaller leg's k; the dedup builders measured over scattered distinct elements (owner ruling 2026-10-16 superseding the 2026-10-15 one for these two rows); recipes with instantiation-aware operands, scattered map keys, flat header names, a nominal-error Result, a routed param probe and writes sized past the native stdout buffer); the diamond prints a Unit return's one value on each path; xtarget-fuzz inspect at the same sha, every type variable measured at Int AND at String (the 10-16 heap-element ruling; complexity, alloc and diamond each carry both instantiations) (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC, no free-list reuse), 200 programs per fn; GCE c4-standard-4 (INTEL XEON PLATINUM 8581C, 4 vCPU, PMU architectural, one fn at a time per VM, asia-northeast1-b), Ubuntu 24.04 Linux 7.0.0-1014-gcp, rustc 1.99.1, wasmtime 49.0.1; 2026-10-16; codopsy: no crate code changed by this inspection (tools/xtarget-fuzz is not a gated crate)"
+order = "n"
+parity = "PASS: seed 1792164504, 200 programs; 200 program(s) call it, 23 of them clean on every leg; unique findings 0"
+complexity = "PASS: call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=4096..8192 5.791e7/5.791e7/5.792e7/5.791e7/5.791e7 fit 1 (rms 0.0%) moved 1.663e6/1.663e6/1.663e6/1.663e6/1.663e6B fit 1 (rms 0.0%) wall 0.005/0.005/0.000/0.005/0.005s wasm k=4096..8192 4.977e7/4.977e7/4.977e7/4.977e7/4.976e7 fit 1 (rms 0.0%) moved 7.043e5/7.046e5/7.046e5/7.046e5/7.044e5B fit 1 (rms 0.0%) wall 0.000/0.010/0.005/0.010/0.005s (order n ok)"
+alloc = "PASS: call live=0"
+diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 
 [[fn]]
 name = "http.router"
