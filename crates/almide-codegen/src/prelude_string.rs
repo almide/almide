@@ -67,8 +67,8 @@ fn shared_prelude(vis: &str) -> String {
     // Built straight into one exact block. Rendering a `String` and converting
     // it pays a second allocation, copy and free per result, which cost
     // strchurn 41% on the step 7 A/B.
-    s.push_str(&format!("{vis}#[inline] fn almide_str_from_i64(n: i64) -> AlmideStr {{ AlmideStr::from_i64(n) }}\n"));
-    s.push_str(&format!("{vis}#[inline] fn almide_str_join(parts: &[AlmideStr], sep: &str) -> AlmideStr {{ AlmideStr::join(parts, sep) }}\n"));
+    s.push_str(&format!("#[inline] {vis}fn almide_str_from_i64(n: i64) -> AlmideStr {{ AlmideStr::from_i64(n) }}\n"));
+    s.push_str(&format!("#[inline] {vis}fn almide_str_join(parts: &[AlmideStr], sep: &str) -> AlmideStr {{ AlmideStr::join(parts, sep) }}\n"));
     s.push_str(SHARED_INTO_IMPLS);
     s.push_str(&concat_trait(vis));
     s.push_str(SHARED_CONCAT_IMPLS);
@@ -123,3 +123,21 @@ impl AlmideConcat<&str> for &str { type Output = AlmideStr; #[inline(always)] fn
 impl AlmideConcat<String> for String { type Output = String; #[inline(always)] fn concat(self, rhs: String) -> String { let mut s = self; s.push_str(&rhs); s } }
 impl AlmideConcat<&str> for String { type Output = String; #[inline(always)] fn concat(self, rhs: &str) -> String { let mut s = self; s.push_str(rhs); s } }
 ";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The runtime crate (`--release`'s rlib fast path) renders the prelude
+    /// with `vis = "pub "`. An attribute after the visibility (`pub #[inline]
+    /// fn`) does not parse, so the rlib build fails and every shared-buffer
+    /// release build silently falls back to the monolithic cargo build.
+    #[test]
+    fn a_pub_prelude_puts_attributes_before_the_visibility() {
+        for (mode, s) in [("owned", owned_prelude("pub ")), ("shared", shared_prelude("pub "))] {
+            for line in s.lines() {
+                assert!(!line.contains("pub #["), "{mode} prelude line does not parse as an item: {line}");
+            }
+        }
+    }
+}
