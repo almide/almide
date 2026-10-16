@@ -1,0 +1,27 @@
+fn work(s: Int, i: Int, iters: Int) -> Int = {
+  var acc = s + i
+  var j = 0
+  while j < iters { acc = (acc * 31 + j) % 1000003; j = j + 1 }
+  acc
+}
+
+effect fn step(s: Int, iters: Int) -> List[Int] =
+  fan { list.map(list.range(0, 10), (i) => work(s, i, iters)) }
+
+effect fn lane(seed: Int, offers: Int, iters: Int) -> Result[Int, String] = {
+  var s = seed
+  var k = 0
+  while k < offers {
+    let xs = step(s, iters)!
+    s = (s + list.fold(xs, 0, (a, x) => a + x)) % 1000003
+    k = k + 1
+  }
+  ok(s)
+}
+
+effect fn main() -> Unit = {
+  let one = 1
+  let iters = __IT__ + one - 1
+  let (a, b) = fan { lane(1, __OFF__, iters)!, lane(2, __OFF__, iters)! }
+  println("${a} ${b}")
+}
