@@ -40,6 +40,11 @@ pub struct Target {
     /// A type variable was free (not pinned by the signature): the function
     /// is inspected at a heap instantiation too ([`Self::new_filled`]).
     pub generic: bool,
+    /// An `effect fn` (a hostless one, catalogue.rs): the diamond's paths
+    /// are effect functions too.
+    effect: bool,
+    /// The decoder the result is observed through ([`super::catalogue::LEG_DEPENDENT_ENCODERS`]).
+    observe: Option<&'static str>,
 }
 
 /// An argument inside the function's domain, derived from its declaration
@@ -173,6 +178,9 @@ struct Recipe {
 /// count.
 const ROPE: &[(&str, &str)] = &[("x", "matrix.zeros({n}, 4)"), ("n_heads", "2"), ("head_dim", "2")];
 
+/// n bytes with no short period, for the zlib codecs.
+const CODEC_BYTES: &str = "bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251))";
+
 const SHAPE_RECIPES: &[Recipe] = &[
     Recipe { func: "matrix.rope_rotate", size: "x", args: ROPE },
     Recipe { func: "matrix.rope_rotate_at", size: "x", args: ROPE },
@@ -301,6 +309,17 @@ const SHAPE_RECIPES: &[Recipe] = &[
     // one long string twice.
     Recipe { func: "list.repeat", size: "n", args: &[("n", "{n}")] },
     Recipe { func: "list.iterate", size: "n", args: &[("n", "{n}")] },
+    // The codecs over n bytes that do not repeat in any short period (a run
+    // of zeros is one LZ77 match on native); a decoder's input is its own
+    // encoder's output, so the run decodes successfully on both legs.
+    Recipe { func: "zlib.compress", size: "data", args: &[("data", CODEC_BYTES)] },
+    Recipe { func: "zlib.compress_level", size: "data", args: &[("data", CODEC_BYTES), ("level", "6")] },
+    Recipe { func: "zlib.deflate", size: "data", args: &[("data", CODEC_BYTES)] },
+    Recipe { func: "zlib.deflate_level", size: "data", args: &[("data", CODEC_BYTES), ("level", "6")] },
+    Recipe { func: "zlib.gzip", size: "data", args: &[("data", CODEC_BYTES)] },
+    Recipe { func: "zlib.decompress", size: "data", args: &[("data", "zlib.compress(bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251)))!")] },
+    Recipe { func: "zlib.inflate", size: "data", args: &[("data", "zlib.deflate(bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251)))!")] },
+    Recipe { func: "zlib.gunzip", size: "data", args: &[("data", "zlib.gzip(bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251)))!")] },
     // zip / zip_with stop at the shorter list: against the generic 2-element
     // partner the result had 2 elements whatever n was, so the order measured
     // was the truncation's. The partner takes the sized one's length.
@@ -404,7 +423,20 @@ impl Target {
             let forced = sig.forced_bindings();
             subst.keys().any(|k| !forced.contains_key(k))
         };
-        Ok(Target { name, params, subst, ret, size_param, rebind_param, mut_param: sig.mut_param, recipe, domain, generic })
+        Ok(Target {
+            name,
+            params,
+            subst,
+            ret,
+            size_param,
+            rebind_param,
+            mut_param: sig.mut_param,
+            recipe,
+            domain,
+            generic,
+            effect: sig.effect,
+            observe: sig.observed_through,
+        })
     }
 
     /// The probes give this function an input inside its domain (a recipe
@@ -449,6 +481,13 @@ impl Target {
             .replace("{small}", &small_v)
             .replace("{n}", &n.to_string())
             .replace("{i}", counter)
+    }
+
+    /// Parameter `i` is built by an encoder whose bytes differ by leg
+    /// (a decoder's input): its own digest would differ by leg too.
+    fn leg_dependent_input(&self, i: usize) -> bool {
+        self.recipe_arg(i)
+            .is_some_and(|e| super::catalogue::LEG_DEPENDENT_ENCODERS.iter().any(|(enc, _)| e.contains(&format!("{enc}("))))
     }
 
     /// Parameter `i`'s recipe names the loop counter `{i}`: the direct
@@ -552,7 +591,7 @@ impl Target {
             s.push_str(&outcome_guard("r", &self.ret, self.in_domain(), "    "));
         }
         let _ = writeln!(s, "    acc = acc + 1\n    i = i + 1\n  }}");
-        if let Some(i) = self.size_param {
+        if let Some(i) = self.size_param.filter(|i| !self.leg_dependent_input(*i)) {
             let _ = writeln!(s, "  acc = acc + {}", digest("x", &self.ty(i).unwrap_or(GenType::Int)));
         }
         s.push_str("  println(\"${acc}\")\n}\n");
@@ -638,7 +677,8 @@ impl Target {
             .collect();
         let names: Vec<String> = (0..self.params.len()).map(|i| format!("a{i}")).collect();
         let ret = self.ret.render();
-        let wrap = |inner: &str| format!("pub fn call({}) -> {ret} = {inner}({})\n", sig.join(", "), names.join(", "));
+        let kw = if self.effect { "effect fn" } else { "fn" };
+        let wrap = |inner: &str| format!("pub {kw} call({}) -> {ret} = {inner}({})\n", sig.join(", "), names.join(", "));
         let mut main = String::from("import self.left\nimport self.right\n\neffect fn main() -> Unit = {\n");
         for i in (0..self.params.len()).filter(|i| Some(*i) != self.mut_param) {
             let _ = writeln!(main, "  let a{i}: {} = {}", self.render_param(i), self.arg(i, n));
@@ -663,8 +703,16 @@ impl Target {
         }
         for v in ["d", "l", "r"] {
             // A Unit return has no string form (E089) and nothing to compare.
-            if self.ret != GenType::Unit {
-                let _ = writeln!(main, "  {}", render_print(v, &self.ret));
+            match self.observe {
+                // Encoded bytes differ by leg by contract: compare what decodes.
+                Some(dec) => {
+                    let _ = writeln!(main, "  let {v}_o: {ret} = match {v} {{\n    ok(c) => {dec}(c),\n    err(e) => err(e),\n  }}");
+                    let _ = writeln!(main, "  {}", render_print(&format!("{v}_o"), &self.ret));
+                }
+                None if self.ret != GenType::Unit => {
+                    let _ = writeln!(main, "  {}", render_print(v, &self.ret));
+                }
+                None => {}
             }
             if let Some(m) = self.mut_param {
                 let _ = writeln!(main, "  {}", render_print(&format!("{v}m"), &self.ty(m).unwrap_or(GenType::Unit)));

@@ -135,6 +135,11 @@ fn render_call(b: &mut Builder, sig: &Signature, subst: &HashMap<String, GenType
         b.effect = true;
         let ty = sig.effective_ret().instantiate(subst)?;
         let call = format!("{}.{}({})", sig.module, sig.func, args.join(", "));
+        // An encoder whose bytes differ by leg is observed decoded.
+        let call = match sig.observed_through {
+            Some(dec) => format!("match {call} {{ ok(zc) => {dec}(zc), err(ze) => err(ze) }}"),
+            None => call,
+        };
         // A `Unit` effect (`env.set`, `io.print`) is a statement; its value is `()`.
         if ty == GenType::Unit {
             b.stmts.push(call);
