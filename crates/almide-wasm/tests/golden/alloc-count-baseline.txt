@@ -2,7 +2,7 @@
 0	0	0	0	spec/wasm_cross/accum_recursion_int.almd
 13	3	88	13	spec/wasm_cross/adr0005_operator_equivalence.almd
 27	12	206	27	spec/wasm_cross/alias_combinator_rc.almd
-168	114	1460	168	spec/wasm_cross/alias_cow.almd
+166	112	1428	166	spec/wasm_cross/alias_cow.almd
 16	0	2096456	16	spec/wasm_cross/allocation_within_limits.almd
 10	1	176	10	spec/wasm_cross/anon_record_structural_identity.almd
 9	6	104	9	spec/wasm_cross/anon_record_variant_payloads.almd
@@ -35,7 +35,7 @@
 12	10	184	12	spec/wasm_cross/bounded_kernel.almd
 12	10	184	12	spec/wasm_cross/bounded_kernel_plain.almd
 25	19	189	25	spec/wasm_cross/branch_lift_in_loop.almd
-35	12	282	35	spec/wasm_cross/branch_lift_stdlib_mut_arg.almd
+32	9	262	32	spec/wasm_cross/branch_lift_stdlib_mut_arg.almd
 11	5	100	11	spec/wasm_cross/branch_lift_user_fn_named_like_stdlib.almd
 53	43	397	53	spec/wasm_cross/bundled_pure_modules.almd
 30	18	185	30	spec/wasm_cross/bytes_alloc_ceiling_domain.almd
@@ -411,7 +411,7 @@
 10	5	52	10	spec/wasm_cross/list_call_element.almd
 17	10	168	17	spec/wasm_cross/list_chunk_windows.almd
 2	0	58	0	spec/wasm_cross/list_chunk_zero.almd
-86	20	1451	86	spec/wasm_cross/list_comprehensive.almd
+85	19	1435	85	spec/wasm_cross/list_comprehensive.almd
 291	236	3276	291	spec/wasm_cross/list_count_index_truncation.almd
 108	76	1082	108	spec/wasm_cross/list_count_stride_product_wrap.almd
 9	2	102	9	spec/wasm_cross/list_cross_module_variant.almd
@@ -542,7 +542,7 @@
 135	95	3551	135	spec/wasm_cross/matrix_softmax_nonfinite_rows.almd
 103	77	1394	103	spec/wasm_cross/matrix_zero_cols_rows.almd
 266	249	77161	266	spec/wasm_cross/mem_checkpoint.almd
-346	177	14591	346	spec/wasm_cross/memory_stress.almd
+335	166	13199	335	spec/wasm_cross/memory_stress.almd
 26	15	235	26	spec/wasm_cross/mg_rebuild_two_phase.almd
 8	2	57	8	spec/wasm_cross/module_global_const.almd
 5	2	100	5	spec/wasm_cross/module_var_alias_cow.almd
@@ -554,7 +554,7 @@
 70	39	668	70	spec/wasm_cross/mut_list_param_read_by_range_ops.almd
 18	8	176	18	spec/wasm_cross/mut_map_param.almd
 170	71	75134	170	spec/wasm_cross/mut_param_alias_cow.almd
-43	24	1289	43	spec/wasm_cross/mut_param_alias_in_place_mutators.almd
+42	23	1257	42	spec/wasm_cross/mut_param_alias_in_place_mutators.almd
 3	0	0	3	spec/wasm_cross/mut_param_branch_forward.almd
 10109	10101	163552	10109	spec/wasm_cross/mut_param_call_chain.almd
 266	221	2830	266	spec/wasm_cross/mut_param_cell_tail_capture_read.almd
@@ -571,20 +571,20 @@
 34	21	800	34	spec/wasm_cross/mut_param_global_no_reach_in_place.almd
 24	7	236	24	spec/wasm_cross/mut_param_interpolated.almd
 23	11	19880	23	spec/wasm_cross/mut_param_loop_stays_in_place.almd
-78	43	824	78	spec/wasm_cross/mut_param_move_mode_gaps.almd
+73	37	776	73	spec/wasm_cross/mut_param_move_mode_gaps.almd
 182	93	1818	182	spec/wasm_cross/mut_param_nested_place_writeback.almd
 372	293	3619	372	spec/wasm_cross/mut_param_reassign_from_hof.almd
 2	0	32	2	spec/wasm_cross/mut_param_spread_reassign.almd
 22	8	8240	22	spec/wasm_cross/mut_param_tail_recursion.almd
 13	3	327	13	spec/wasm_cross/mut_param_writeback_growth.almd
 1	0	1	1	spec/wasm_cross/mut_scalar_param_reassign.almd
-15	8	169	15	spec/wasm_cross/mutable_global_bytes_arena.almd
+14	8	153	14	spec/wasm_cross/mutable_global_bytes_arena.almd
 5	1	36	5	spec/wasm_cross/mutable_global_bytes_copy_from.almd
 54	36	748	54	spec/wasm_cross/mutable_global_field_mut_arg.almd
 30	19	612	30	spec/wasm_cross/mutable_global_mut_arg_callee_touches_global.almd
 4	1	32	4	spec/wasm_cross/mutable_global_repeat_writes.almd
 1	0	16	1	spec/wasm_cross/mutable_global_scalar_assign.almd
-141	84	1232	141	spec/wasm_cross/mutator_writeback_releases_old_block.almd
+139	82	1192	139	spec/wasm_cross/mutator_writeback_releases_old_block.almd
 37	31	116	37	spec/wasm_cross/mutual_append.almd
 10	0	120	10	spec/wasm_cross/mutual_recursive_types.almd
 0	0	0	0	spec/wasm_cross/mutual_tail_recursion.almd
@@ -648,7 +648,7 @@
 10	2	164	10	spec/wasm_cross/place_assign_ascription.almd
 12	4	193	12	spec/wasm_cross/place_mutation.almd
 147	101	2521	147	spec/wasm_cross/playground_default.almd
-3	0	16	3	spec/wasm_cross/pop_heap_element.almd
+2	0	12	2	spec/wasm_cross/pop_heap_element.almd
 22	16	327	22	spec/wasm_cross/positional_variant_field_literal.almd
 2	0	36	1	spec/wasm_cross/prim_alloc_count_domain.almd
 ~	spec/wasm_cross/process_args.almd
