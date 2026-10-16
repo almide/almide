@@ -58,7 +58,21 @@ const OPS: &[(&str, &str)] = &[
     ("lt", "list.any(list.zip(xs, xs), ((a, b)) => a < b)"),
     ("eq", "list.any(list.zip(xs, xs), ((a, b)) => a == b)"),
     ("set", "list.any(xs, (x) => set.contains(set.from_list(xs), x))"),
+    // The equality-only list ops: no Set or Map type appears, so the
+    // Set-element / Map-key sweeps never see the element (an HttpRoute holds
+    // a handler closure — `list.dedup(routes)` passed check, rustc refused
+    // `HttpRoute: PartialEq`).
+    ("contains", "list.any(xs, (x) => list.contains(xs, x))"),
+    ("index_of", "list.any(xs, (x) => option.is_some(list.index_of(xs, x)))"),
+    ("dedup", "list.len(list.dedup(xs)) > 0"),
+    ("unique", "list.len(list.unique(xs)) > 0"),
+    ("unique_by", "list.len(list.unique_by(xs, (x) => x)) > 0"),
 ];
+
+/// Entry-file element types probed beside the stdlib ones: the user-written
+/// shape the stdlib's fn-holding types share (a record with a function
+/// field), so a stdlib type is held to exactly what a user type is.
+const LOCAL_TYPES: &[(&str, &str)] = &[("FnRec", "local type FnRec = { f: (Int) -> Int }")];
 
 struct Cell {
     label: String,
@@ -92,6 +106,17 @@ fn cells() -> Vec<Cell> {
             });
         }
     }
+    for (ty, decl) in LOCAL_TYPES {
+        for (op, body) in OPS {
+            cells.push(Cell {
+                label: format!("local {ty} {op}"),
+                import: String::new(),
+                decls: decl.to_string(),
+                elem: ty.to_string(),
+                body: body.to_string(),
+            });
+        }
+    }
     cells
 }
 
@@ -101,7 +126,7 @@ fn almide() -> Command {
 
 /// The program for a set of cells: one probe fn each, all called from `main`.
 fn program(cells: &[&Cell]) -> String {
-    let imports: BTreeSet<&str> = cells.iter().map(|c| c.import.as_str()).collect();
+    let imports: BTreeSet<&str> = cells.iter().map(|c| c.import.as_str()).filter(|i| !i.is_empty()).collect();
     let decls: BTreeSet<&str> = cells.iter().map(|c| c.decls.as_str()).filter(|d| !d.is_empty()).collect();
     let mut src = String::new();
     for i in &imports {
