@@ -238,6 +238,9 @@ const SHAPE_RECIPES: &[Recipe] = &[
     Recipe { func: "json.get_path", size: "j", args: &[("path", "json.field(json.root(), \"k${100000000 + {n} - 1}\")")] },
     Recipe { func: "json.set_path", size: "j", args: &[("path", "json.field(json.root(), \"k${100000000 + {n} - 1}\")")] },
     Recipe { func: "json.remove_path", size: "j", args: &[("path", "json.field(json.root(), \"k${100000000 + {n} - 1}\")")] },
+    // The Float32 constructors take their size as a row count.
+    Recipe { func: "matrix.zeros_f32", size: "rows", args: &[("rows", "{n}"), ("cols", "2")] },
+    Recipe { func: "matrix.ones_f32", size: "rows", args: &[("rows", "{n}"), ("cols", "2")] },
     // Percent-escapes and `+` to decode, n of each: the generic "aéaé…" has
     // nothing to decode.
     Recipe { func: "http.url_decode", size: "s", args: &[("s", "string.repeat(\"a%C3%A9+\", {n})")] },

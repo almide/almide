@@ -124,6 +124,16 @@ pub const NOMINALS: &[Nominal] = &[
         observed: || GenType::Option(Box::new(GenType::String)),
         digest: "(if option.is_some(json.get_path(value.object([(\"a\", value.int(1))]), {v})) then 1 else 0)",
     },
+    // n rows of 2: the operands of the products agree with a 2 × 2 partner.
+    Nominal {
+        name: "Matrix[Float32]",
+        small: "matrix.ones_f32(2, 2)",
+        sized: "matrix.zeros_f32({n}, 2)",
+        leaves: &["matrix.ones_f32(2, 2)", "matrix.zeros_f32(1, 2)", "matrix.mul_f32_scaled(matrix.ones_f32(2, 2), 0.5, matrix.ones_f32(2, 2))"],
+        observe: "matrix.to_lists({v})",
+        observed: || GenType::List(Box::new(GenType::List(Box::new(GenType::Float)))),
+        digest: "matrix.rows({v})",
+    },
 ];
 
 /// The nominal named `name`, if the grammar builds it.
