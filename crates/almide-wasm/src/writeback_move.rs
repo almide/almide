@@ -280,6 +280,14 @@ impl Emitter<'_> {
     /// var (#3342): nothing in this frame reads it after the call, and the
     /// exit plan's release of the emptied local is a release of NULL — the
     /// `if c then grow(xs, x) else ()` arm a write-back folds into the tail.
+    /// The frame's tail-leaf move-in sites (`move_in_site::frame_tail_sites`),
+    /// with the dying notes of its tail ops: what a frame whose exit releases
+    /// its locals may hand over instead of sharing.
+    pub(crate) fn note_dying_frame_tail(&mut self, body: &IrExpr) {
+        self.note_dying_tail(body, None, true);
+        self.moves.move_in = move_in_site::frame_tail_sites(body);
+    }
+
     pub(crate) fn take_move_in(&mut self, args: &[IrExpr], open: bool, tail: bool) -> MoveSet {
         match &self.moves.move_in {
             Some(m) if open && let Some(vars) = m.vars_at(args) => MoveSet::Vars(vars),
