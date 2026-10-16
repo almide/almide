@@ -89,7 +89,7 @@ pub fn almide_rt_fan_map_par<A: Send + Sync + Clone, B: Send, F: Fn(A) -> Result
         // The group flushes this thread's stdout first: a runtime abort on a worker
         // exits without reaching this thread's buffer (C-197, see rust.toml fan_expr).
         let group = almide_fan_group(n);
-        // dealt in blocks to the resident crew (list.rs `almide_fan_deal`)
+        // dealt in blocks to this thread and the resident pool (list.rs `almide_fan_deal`)
         let blocks: Vec<_> = items.chunks(block).zip(slots.chunks_mut(block)).enumerate().collect();
         almide_fan_panic_if_any(almide_fan_deal(blocks, workers, |blocks| {
             let elems = blocks.flat_map(|(b, (chunk, out))| out.iter_mut().zip(chunk.iter()).enumerate().map(move |(i, e)| (b * block + i, e)));

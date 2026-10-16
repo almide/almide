@@ -496,103 +496,21 @@ impl AlmideFanClock {
     }
 }
 
-// The RESIDENT fan crew: the threads a parallel offer's chunks run on, spawned
-// by the first offers that need them and parked between offers for the rest of
-// the process. A thread per chunk per offer (`std::thread::scope`) cost
-// 117 us per offer on eight workers on an Intel 8581C and 299 us on an AMD
-// EPYC 7B13 (2026-10-16, an empty 10-element chunk map) — a fixed cost the
-// cost model above must charge every offer. The wasm host keeps its crew the
-// same way (crates/almide-wasm-run/src/host_fan.rs `Crew`).
+// The RESIDENT fan pool (`almide_fan_pool`, below `almide_fan_deal`): the
+// threads that help a parallel offer take its blocks, spawned by the first
+// offers that need them and parked between offers for the rest of the
+// process. A thread per chunk per offer (`std::thread::scope`) cost 117 us
+// per offer on eight workers on an Intel 8581C and 299 us on an AMD EPYC
+// 7B13 (2026-10-16, an empty 10-element chunk map) — a fixed cost the cost
+// model above must charge every offer. The wasm host keeps resident workers
+// too (crates/almide-wasm-run/src/host_fan.rs `Crew`).
 //
-// A crew thread runs one chunk per offer and then leaves nothing of it behind:
-// its stdout buffer is flushed (a scoped thread flushed it as it exited) and its
-// fan sink is cleared (a `list.par_*` chunk adopts its element's sink). A chunk
-// may itself start a parallel offer, and two `fan { }` arms may start offers at
-// once: the crew serves one offer at a time, never from its own threads, and an
-// offer it cannot serve spawns its threads as before — so no offer ever waits
-// for a crew thread that is waiting for it.
-type AlmideFanTask<'a> = Box<dyn FnOnce() + Send + 'a>;
-type AlmideFanJob = Box<dyn FnOnce() + Send + 'static>;
-
-thread_local! {
-    static ALMIDE_FAN_IN_CREW: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-}
-
-fn almide_fan_crew() -> &'static std::sync::Mutex<Vec<std::sync::mpsc::Sender<AlmideFanJob>>> {
-    static CREW: std::sync::OnceLock<std::sync::Mutex<Vec<std::sync::mpsc::Sender<AlmideFanJob>>>> = std::sync::OnceLock::new();
-    CREW.get_or_init(Default::default)
-}
-
-fn almide_fan_crew_hand() -> Option<std::sync::mpsc::Sender<AlmideFanJob>> {
-    let (tx, rx) = std::sync::mpsc::channel::<AlmideFanJob>();
-    std::thread::Builder::new()
-        .spawn(move || {
-            ALMIDE_FAN_IN_CREW.with(|c| c.set(true));
-            while let Ok(job) = rx.recv() {
-                job();
-            }
-        })
-        .ok()?;
-    Some(tx)
-}
-
-/// Run every task on a thread of its own and return once ALL of them have
-/// finished — the `std::thread::scope` contract — with each task's outcome
-/// in task order (`Err` = it panicked).
-fn almide_fan_run_tasks(tasks: Vec<AlmideFanTask<'_>>) -> Vec<std::thread::Result<()>> {
-    let crew = if ALMIDE_FAN_IN_CREW.with(|c| c.get()) { None } else { almide_fan_crew().try_lock().ok() };
-    let Some(mut crew) = crew else {
-        return std::thread::scope(|s| {
-            let handles: Vec<_> = tasks.into_iter().map(|t| s.spawn(t)).collect();
-            handles.into_iter().map(|h| h.join()).collect()
-        });
-    };
-    while crew.len() < tasks.len() {
-        match almide_fan_crew_hand() {
-            Some(tx) => crew.push(tx),
-            None => break,
-        }
-    }
-    let n = tasks.len();
-    let done: std::sync::Arc<(std::sync::Mutex<Vec<Option<std::thread::Result<()>>>>, std::sync::Condvar)> =
-        std::sync::Arc::new((std::sync::Mutex::new((0..n).map(|_| None).collect()), std::sync::Condvar::new()));
-    let finish = |done: &(std::sync::Mutex<Vec<Option<std::thread::Result<()>>>>, std::sync::Condvar), i: usize, r: std::thread::Result<()>| {
-        let mut slots = done.0.lock().unwrap_or_else(|e| e.into_inner());
-        slots[i] = Some(r);
-        drop(slots);
-        done.1.notify_all();
-    };
-    for (i, task) in tasks.into_iter().enumerate() {
-        let d = std::sync::Arc::clone(&done);
-        let job: AlmideFanTask<'_> = Box::new(move || {
-            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(task));
-            if ALMIDE_FAN_IN_CREW.with(|c| c.get()) {
-                almide_fan_adopt(None);
-                almide_stdout_flush();
-            }
-            finish(&d, i, r);
-        });
-        // SAFETY: the job borrows from the caller's frame for `'_`; this
-        // function does not return until every job has reported its outcome,
-        // and a job reports only after its task (and with it every borrow)
-        // has been consumed or dropped — so no borrow outlives its frame.
-        let job: AlmideFanJob = unsafe { std::mem::transmute::<AlmideFanTask<'_>, AlmideFanJob>(job) };
-        let job = match crew.get(i) {
-            Some(tx) => match tx.send(job) {
-                Ok(()) => continue,
-                Err(std::sync::mpsc::SendError(job)) => job,
-            },
-            None => job,
-        };
-        // No crew thread took it (one could not be spawned): run it here —
-        // it adopts the sink this thread already has, and leaves it.
-        job();
-    }
-    let slots = done.0.lock().unwrap_or_else(|e| e.into_inner());
-    let mut slots = done.1.wait_while(slots, |s| s.iter().any(Option::is_none)).unwrap_or_else(|e| e.into_inner());
-    std::mem::take(&mut *slots).into_iter().map(|r| r.expect("every fan task reported")).collect()
-}
-
+// A pool thread leaves nothing of an offer behind: its stdout buffer is
+// flushed (a scoped thread flushed it as it exited) and its fan sink is
+// cleared (a `list.par_*` chunk adopts its element's sink). A chunk may
+// itself start a parallel offer, and two `fan { }` arms may start offers at
+// once: every offer posts to the same pool and takes its own blocks too, so
+// none waits for a helper that is busy elsewhere.
 /// The `std::thread::scope` panic: once every task has finished, a panicked
 /// one panics the offer.
 fn almide_fan_panic_if_any(outcomes: Vec<std::thread::Result<()>>) {
@@ -607,25 +525,147 @@ fn almide_fan_block(n: usize, workers: usize) -> usize {
     n.div_ceil(workers * 4).max(1)
 }
 
-/// Deal `blocks`, in order, to `workers` crew threads: each takes the next
+/// Deal `blocks`, in order, to `workers` threads: each takes the next
 /// block until none is left, and `work` runs on each thread over the blocks
 /// it took. A thread the OS left waiting (or placed on a busy core) takes
 /// fewer blocks instead of holding the offer back — with a fixed chunk per
 /// thread, resident threads made spectralnorm 1.3x slower on an Intel 8581C.
 /// Blocks are dealt in list order, so every block below one being run was
 /// already taken by a running thread (the ADR-0024 D6 trap wait relies on it).
+///
+/// The calling thread is one of the takers, and the other `workers - 1` are
+/// HELPERS from the shared fan pool (`almide_fan_pool`), which every offer —
+/// from any thread, a pool thread or a `fan { }` arm included — posts to. A
+/// helper that starts after the blocks ran out takes none, so the offer
+/// never waits for a helper that has not started: once its own taking is
+/// done the caller closes the offer's gate and waits only for the helpers
+/// already inside it. Before, an offer made while another held the resident
+/// crew spawned a thread per worker per offer: two `fan { }` arms each
+/// running a 10-element map paid 54-124 us per offer (GCE Intel / AMD,
+/// 2026-10-16) where Rayon paid 3-4.
 fn almide_fan_deal<'a, T: Send + 'a>(blocks: Vec<T>, workers: usize, work: impl Fn(&mut dyn Iterator<Item = T>) + Sync + 'a) -> Vec<std::thread::Result<()>> {
     let queue = std::sync::Mutex::new(blocks.into_iter());
-    let (queue, work) = (&queue, &work);
-    let tasks: Vec<AlmideFanTask<'_>> = (0..workers)
-        .map(|_| {
-            Box::new(move || {
-                let mut next = std::iter::from_fn(|| queue.lock().unwrap_or_else(|e| e.into_inner()).next());
-                work(&mut next);
-            }) as AlmideFanTask<'_>
-        })
-        .collect();
-    almide_fan_run_tasks(tasks)
+    let take = || {
+        let mut next = std::iter::from_fn(|| queue.lock().unwrap_or_else(|e| e.into_inner()).next());
+        work(&mut next);
+    };
+    let take: &(dyn Fn() + Sync + '_) = &take;
+    // SAFETY (the lifetime erasure): the gate keeps `take` as a raw pointer,
+    // and a helper calls it only after entering the gate while it is open;
+    // this function closes the gate and waits until no helper is inside
+    // before it returns — so no call outlives the borrow.
+    let erased = unsafe { std::mem::transmute::<*const (dyn Fn() + Sync + '_), *const (dyn Fn() + Sync + 'static)>(take as *const _) };
+    let gate = std::sync::Arc::new(AlmideFanGate {
+        state: std::sync::Mutex::new(AlmideFanGateState { open: true, inside: 0, outcomes: Vec::new() }),
+        left: std::sync::Condvar::new(),
+        take: erased,
+    });
+    almide_fan_pool_post(workers.saturating_sub(1), &gate);
+    let mine = std::panic::catch_unwind(std::panic::AssertUnwindSafe(take));
+    // the elements this thread ran printed into its own buffer: out before
+    // the offer returns, as a helper's are
+    almide_stdout_flush();
+    let mut state = gate.state.lock().unwrap_or_else(|e| e.into_inner());
+    state.open = false;
+    let mut state = gate.left.wait_while(state, |s| s.inside > 0).unwrap_or_else(|e| e.into_inner());
+    let mut outcomes = vec![mine];
+    outcomes.append(&mut state.outcomes);
+    outcomes
+}
+
+/// One offer's door for its pool helpers (see `almide_fan_deal`).
+struct AlmideFanGate {
+    state: std::sync::Mutex<AlmideFanGateState>,
+    left: std::sync::Condvar,
+    /// The offer's taking loop, borrowed from `almide_fan_deal`'s frame:
+    /// called only while the gate is open (see the SAFETY note there).
+    take: *const (dyn Fn() + Sync),
+}
+
+// SAFETY: `take` points at a `Sync` closure, called from other threads only
+// under the gate protocol above.
+unsafe impl Send for AlmideFanGate {}
+unsafe impl Sync for AlmideFanGate {}
+
+struct AlmideFanGateState {
+    open: bool,
+    inside: usize,
+    outcomes: Vec<std::thread::Result<()>>,
+}
+
+impl AlmideFanGate {
+    /// A pool thread helps: enter if the offer is still open, take blocks,
+    /// leave its outcome.
+    fn help(&self) {
+        {
+            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            if !state.open {
+                return;
+            }
+            state.inside += 1;
+        }
+        // SAFETY: this helper is inside the open gate, so the offer has not
+        // returned and the closure is alive.
+        let take = unsafe { &*self.take };
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(take));
+        almide_fan_adopt(None);
+        almide_stdout_flush();
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        state.inside -= 1;
+        state.outcomes.push(outcome);
+        drop(state);
+        self.left.notify_all();
+    }
+}
+
+/// The shared fan pool: resident threads that help offers (`almide_fan_deal`),
+/// spawned as offers first need them, at most one fewer than the cores.
+struct AlmideFanPool {
+    jobs: std::sync::Mutex<(std::collections::VecDeque<std::sync::Arc<AlmideFanGate>>, usize)>,
+    ready: std::sync::Condvar,
+}
+
+fn almide_fan_pool() -> &'static AlmideFanPool {
+    static POOL: std::sync::OnceLock<AlmideFanPool> = std::sync::OnceLock::new();
+    POOL.get_or_init(|| AlmideFanPool { jobs: std::sync::Mutex::new((std::collections::VecDeque::new(), 0)), ready: std::sync::Condvar::new() })
+}
+
+/// Post `helpers` helper calls of `gate` to the pool, growing it to that many
+/// threads (within the cores) first.
+fn almide_fan_pool_post(helpers: usize, gate: &std::sync::Arc<AlmideFanGate>) {
+    if helpers == 0 {
+        return;
+    }
+    let pool = almide_fan_pool();
+    let want = helpers.min(almide_rt_list_par_workers(usize::MAX).saturating_sub(1).max(1));
+    let mut jobs = pool.jobs.lock().unwrap_or_else(|e| e.into_inner());
+    while jobs.1 < want {
+        let spawned = std::thread::Builder::new().spawn(|| {
+            let pool = almide_fan_pool();
+            loop {
+                let gate = {
+                    let jobs = pool.jobs.lock().unwrap_or_else(|e| e.into_inner());
+                    let mut jobs = pool.ready.wait_while(jobs, |j| j.0.is_empty()).unwrap_or_else(|e| e.into_inner());
+                    jobs.0.pop_front()
+                };
+                if let Some(gate) = gate {
+                    gate.help();
+                }
+            }
+        });
+        if spawned.is_err() {
+            break;
+        }
+        jobs.1 += 1;
+    }
+    let posted = helpers.min(jobs.1);
+    for _ in 0..posted {
+        jobs.0.push_back(std::sync::Arc::clone(gate));
+    }
+    drop(jobs);
+    for _ in 0..posted {
+        pool.ready.notify_one();
+    }
 }
 
 pub fn almide_rt_list_par_map<A: Send + Sync + Clone, B: Send, F: Fn(A) -> B + Send + Sync>(xs: Vec<A>, f: F) -> Vec<B> {
