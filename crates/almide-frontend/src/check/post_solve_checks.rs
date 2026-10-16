@@ -16,15 +16,9 @@ impl Checker {
         let mut reported: HashSet<String> = HashSet::new();
         let checks = std::mem::take(&mut self.deferred_ord_elem_checks);
         for (subject_ty, span, fn_name) in checks {
-            let resolved = resolve_ty(&subject_ty, &self.uf);
-            // list.sort/min/max enqueue the LIST subject; sort_by enqueues the
-            // key type directly. Extract the element when it is a List.
-            let elem = match &resolved {
-                Ty::Applied(almide_lang::types::TypeConstructorId::List, a) if a.len() == 1 => {
-                    a[0].clone()
-                }
-                _ => resolved.clone(),
-            };
+            // The ORDERED type itself: the binding of the runtime's `Ord`-bounded
+            // parameter (`capability_bounds`), not the list holding it.
+            let elem = resolve_ty(&subject_ty, &self.uf);
             // An unresolved slot is E025's business; a BARE Float rides the
             // `_float` twins.
             if matches!(elem, Ty::Unknown | Ty::TypeVar(_) | Ty::Float) {

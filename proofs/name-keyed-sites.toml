@@ -225,11 +225,6 @@ class = "legacy"
 names = 9
 
 [[site]]
-id = "crates/almide-frontend/src/check/calls.rs::defer_ord_elem_check::or-pattern"
-class = "legacy"
-names = 3
-
-[[site]]
 id = "crates/almide-frontend/src/check/calls_arg.rs::unwrap_family_hint::or-pattern"
 class = "legacy"
 names = 4
