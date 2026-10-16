@@ -57,6 +57,13 @@ fn time_abort_expr(
     )
 }
 
+/// A clock type of ADR-0001 S1 (`Compute`, `Duration`), from the single
+/// source `time_units::TIME_MODULES`.
+pub(super) fn is_time_ty(t: &Ty) -> bool {
+    matches!(t, Ty::Named(n, args) if args.is_empty()
+        && almide_lang::time_units::TIME_MODULES.iter().any(|(_, c)| *c == n.as_str()))
+}
+
 /// ADR-0001 S3 erasure for the time-type operator algebra: `T + T` and
 /// `T * Int` saturate at i64::MAX, `T - T` saturates at 0 (the ≥0 invariant),
 /// and a NEGATIVE scale factor is the same deterministic §13 abort as a
@@ -73,6 +80,15 @@ pub(super) fn lower_time_binop(
 ) -> Option<IrExpr> {
     if !matches!(op, "+" | "-" | "*") {
         return None;
+    }
+    // An operand read from an annotated binding (`fn twice(x: Duration)`,
+    // #3752) still carries the checker's clock tag; its value is the erased
+    // i64, which is what the Int arithmetic below reads.
+    let (mut l, mut r) = (l, r);
+    for e in [&mut l, &mut r] {
+        if is_time_ty(&e.ty) {
+            e.ty = Ty::Int;
+        }
     }
     let bind = |ctx: &mut LowerCtx, name: &str, e: IrExpr| {
         let v = ctx.define_var(name, Ty::Int, Mutability::Let, None);
