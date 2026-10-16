@@ -15,6 +15,7 @@ pub use almide_lang::ast;
 pub use almide_lang::lexer;
 pub use almide_lang::parser;
 pub use almide_lang::stdlib_info;
+pub use almide_lang::time_units;
 
 // ── IR (almide-ir) ──
 pub use almide_ir as ir;

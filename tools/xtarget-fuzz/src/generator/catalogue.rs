@@ -173,6 +173,32 @@ const BUNDLED_MODULES: &[(&str, &str, bool)] = &[
     ("html", include_str!("../../../../stdlib/html.almd"), true),
 ];
 
+/// The ADR-0001 clock constructors (`duration.ms(n)`, `compute.s(n)`, …):
+/// resolved by the checker from `time_units`, with no `.almd` declaration
+/// to parse, so their signatures come from the same table — 2 clocks × 6
+/// units. Their values are observed through `Repr` (ADR-0001 S7 omits
+/// accessors; `nominal.rs`).
+fn clock_constructors() -> Vec<Signature> {
+    let mut out = Vec::new();
+    for (module, ty) in almide::time_units::TIME_MODULES {
+        let Some(nominal) = super::nominal::get(ty) else { continue };
+        for (unit, _) in almide::time_units::TIME_UNITS {
+            out.push(Signature {
+                module,
+                func: unit.to_string(),
+                param_names: vec!["n".to_string()],
+                params: vec![SigType::Int],
+                ret: SigType::Nominal(nominal.name),
+                weight: weight_for(module, unit),
+                mut_param: None,
+                effect: false,
+                lifted: false,
+            });
+        }
+    }
+    out
+}
+
 /// Default selection weight for a function not named in
 /// [`WEIGHT_OVERRIDES`].
 const DEFAULT_WEIGHT: u32 = 4;
@@ -243,7 +269,7 @@ const WEIGHT_OVERRIDES: &[(&str, &str, u32)] = &[
 /// the generator, not about either leg.
 pub fn build() -> Vec<Signature> {
     let unavailable = wasm_unavailable(TARGET_AVAILABILITY);
-    let mut out = Vec::new();
+    let mut out = clock_constructors();
     for &(module, source, _) in BUNDLED_MODULES {
         let program = match parse(source) {
             Some(p) => p,
