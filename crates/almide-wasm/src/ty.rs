@@ -53,6 +53,11 @@ fn bare_named_of(name: &str, types: &TypeTable) -> Option<SliceTy> {
         .get(name)
         .map(|&i| SliceTy::Named(i))
         .or_else(|| (name == "Value").then_some(SliceTy::Value))
+        // The ADR-0001 clock types are an i64 of nanoseconds; an annotated
+        // binding keeps the checker's tag (#3752).
+        .or_else(|| {
+            almide_types::time_units::TIME_MODULES.iter().any(|(_, t)| *t == name).then_some(SliceTy::Scalar(Scalar::Int))
+        })
         .or_else(|| match name {
             // stdlib/http_response.almd / http_request.almd / json_path.almd
             // own these reps; the eraser publishes them as List[String].

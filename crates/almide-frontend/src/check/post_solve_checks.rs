@@ -165,9 +165,11 @@ impl Checker {
             collect_named(&resolved, &mut names);
             for s in names {
                 // `Value` is the BUILT-IN dynamic type (json/codec surface) —
-                // nominal by name but never declared in env.types.
+                // nominal by name but never declared in env.types; so are the
+                // ADR-0001 clock types, which exist only in the checker (#3752).
                 // A builtin applied to the wrong count carries its E093 (#3408).
-                if s.as_str() == "Value" || self.env.types.contains_key(&s) || rooted.contains(&s) || !reported.insert(s) {
+                let clock = almide_lang::time_units::TIME_MODULES.iter().any(|(_, t)| *t == s.as_str());
+                if s.as_str() == "Value" || clock || self.env.types.contains_key(&s) || rooted.contains(&s) || !reported.insert(s) {
                     continue;
                 }
                 // Its qualified spelling already carries the root E029 (#3336).
