@@ -38551,7 +38551,10 @@ else if sym == 16 then 2
 else if sym == 17 then 3 else 4
 
 
-fn zli_codes(pos: Int, buf: Int, cnt: Int, inp: Bytes, mut out: Bytes, lencode: List[Int], distcode: List[Int]) -> (Int, Int, Int, Int) = {
+
+
+
+fn zli_codes(pos: Int, buf: Int, cnt: Int, inp: Bytes, mut out: Bytes, base: Int, lencode: List[Int], distcode: List[Int]) -> (Int, Int, Int, Int) = {
   let lbase = zli_lbase()
   let lext = zli_lext()
   let dbase = zli_dbase()
@@ -38598,7 +38601,9 @@ fn zli_codes(pos: Int, buf: Int, cnt: Int, inp: Bytes, mut out: Bytes, lencode: 
     }
     var k = 0
     while k < clen {
-      bytes.push(out, bytes.get_or(out, bytes.len(out) - dist, 0))
+      let src = bytes.len(out) - dist
+      bytes.push(out, if src < base then 0
+      else bytes.get_or(out, src, 0))
       k = k + 1
     }
   }
@@ -38659,7 +38664,7 @@ fn zli_read_lengths(pos: Int, buf: Int, cnt: Int, inp: Bytes, lencode: List[Int]
 }
 
 
-fn zli_dynamic(pos: Int, buf: Int, cnt: Int, inp: Bytes, mut out: Bytes) -> (Int, Int, Int, Int) = {
+fn zli_dynamic(pos: Int, buf: Int, cnt: Int, inp: Bytes, mut out: Bytes, base: Int) -> (Int, Int, Int, Int) = {
   let order = [
     16,
     17,
@@ -38715,7 +38720,16 @@ fn zli_dynamic(pos: Int, buf: Int, cnt: Int, inp: Bytes, mut out: Bytes) -> (Int
     let dlens = list.slice(lengths, nlen, nlen + ndis)
     if status != 0 then (status, p5, b5, c5)
     else if not zli_code_ok(lengths, nlen, true) or not zli_code_ok(dlens, ndis, true) then (0 - 1, p5, b5, c5)
-    else zli_codes(p5, b5, c5, inp, out, zli_construct(lengths, nlen), zli_construct(dlens, ndis))
+    else zli_codes(
+      p5,
+      b5,
+      c5,
+      inp,
+      out,
+      base,
+      zli_construct(lengths, nlen),
+      zli_construct(dlens, ndis),
+    )
   }
 }
 
@@ -38744,6 +38758,7 @@ fn zli_inflate_stream(pos: Int, inp: Bytes, mut out: Bytes) -> (Int, Int) = {
 
 
   let fdist = zli_construct(list.repeat(5, 32), 32)
+  let base = bytes.len(out)
   var p = pos
   var b = 0
   var c = 0
@@ -38755,8 +38770,8 @@ fn zli_inflate_stream(pos: Int, inp: Bytes, mut out: Bytes) -> (Int, Int) = {
     last = l
     let (s, p3, b3, c3) = match int.band(kind, 3) {
       0 => zli_stored(p2, inp, out),
-      1 => zli_codes(p2, b2, c2, inp, out, flit, fdist),
-      2 => zli_dynamic(p2, b2, c2, inp, out),
+      1 => zli_codes(p2, b2, c2, inp, out, base, flit, fdist),
+      2 => zli_dynamic(p2, b2, c2, inp, out, base),
       _ => (0 - 1, p2, b2, c2),
     }
     status = s
@@ -38823,12 +38838,27 @@ fn zli_skip_zstr(b: Bytes, p: Int) -> Int = if bytes.get_or(b, p, 0) == 0 then p
 )
 
 
-fn zli_header_end(inp: Bytes, pos: Int) -> Int = {
-  if bytes.get_or(inp, pos, 0) != 31 or bytes.get_or(inp, pos + 1, 0) != 139 or bytes.get_or(
-    inp,
-    pos + 2,
-    0,
-  ) != 8 then 0 - 1
+fn zli_gzip_magic(i: Int) -> Int = match i {
+  0 => 31,
+  1 => 139,
+  2 => 8,
+  _ => 0 - 1,
+}
+
+
+fn zli_magic_prefix(inp: Bytes, pos: Int, i: Int) -> Bool =
+  if i >= 3 or pos + i >= bytes.len(inp) then true
+  else if bytes.get_or(inp, pos + i, 0) != zli_gzip_magic(i) then false
+  else zli_magic_prefix(inp, pos, i + 1)
+
+
+
+
+
+fn zli_header_end(t: List[Int], inp: Bytes, pos: Int) -> Int = {
+  let n = bytes.len(inp)
+  if not zli_magic_prefix(inp, pos, 0) then 0 - 1
+  else if pos + 10 > n then 0 - 2
   else {
     let flg = bytes.get_or(inp, pos + 3, 0)
     let p0 = pos + 10
@@ -38839,10 +38869,19 @@ fn zli_header_end(inp: Bytes, pos: Int) -> Int = {
     else p0
     let p2 = if int.band(flg, 8) != 0 then zli_skip_zstr(inp, p1) else p1
     let p3 = if int.band(flg, 16) != 0 then zli_skip_zstr(inp, p2) else p2
-    if int.band(flg, 2) != 0 then p3 + 2 else p3
+    let end = if int.band(flg, 2) != 0 then p3 + 2 else p3
+    if int.band(flg, 224) != 0 then 0 - 1
+    else if end > n then 0 - 2
+    else if int.band(flg, 2) != 0 and int.band(
+      zli_crc32_from(t, bytes.slice(inp, pos, p3), 0),
+      65535,
+    ) != int.bor(
+      bytes.get_or(inp, p3, 0),
+      int.bshl(bytes.get_or(inp, p3 + 1, 0), 8),
+    ) then 0 - 3
+    else end
   }
 }
-
 
 
 
@@ -38854,27 +38893,38 @@ fn zli_gunzip_members(inp: Bytes, mut out: Bytes) -> Int = {
   var pos = 0
   var code = if bytes.len(inp) == 0 then 5 else 0
   while pos < bytes.len(inp) and code == 0 {
-    let start = zli_header_end(inp, pos)
-    let member_start = bytes.len(out)
-    let (status, after) = zli_inflate_stream(if start < 0 then pos else start, inp, out)
-    let stored_crc = zli_u32_le(inp, after)
-    let isize = zli_u32_le(inp, after + 4)
-    pos = after + 8
-    code = if start < 0 then 1
-    else if status == 0 - 2 then 6
-    else if status != 0 then 2
-    else if after + 8 > bytes.len(inp) then 5
-    else if zli_crc32_from(t, out, member_start) != stored_crc then 3
-    else if int.band(bytes.len(out) - member_start, 4294967295) != isize then 4 else 0
+    let start = zli_header_end(t, inp, pos)
+    code = match start {
+      -1 => 1,
+      -2 => 5,
+      -3 => 7,
+      _ => {
+        let member_start = bytes.len(out)
+        let (status, after) = zli_inflate_stream(start, inp, out)
+        pos = after + 8
+        if status == 0 - 2 then 6
+        else if status != 0 then 2
+        else if after + 8 > bytes.len(inp) then 5
+        else if zli_crc32_from(t, out, member_start) != zli_u32_le(inp, after) then 3
+        else if int.band(bytes.len(out) - member_start, 4294967295) != zli_u32_le(inp, after + 4) then 4 else 0
+      },
+    }
   }
   code
 }
 
-fn zli_gunzip_error(code: Int) -> String = if code == 1 then "not gzip"
-else if code == 2 then "corrupt deflate stream"
-else if code == 3 then "crc mismatch"
-else if code == 5 then "unexpected end of file"
-else if code == 6 then "incomplete deflate stream" else "size mismatch"
+
+
+
+fn zli_gunzip_error(code: Int) -> String = match code {
+  1 => "invalid gzip header",
+  2 => "corrupt deflate stream",
+  3 => "crc mismatch",
+  5 => "unexpected end of file",
+  6 => "incomplete deflate stream",
+  7 => "header crc mismatch",
+  _ => "size mismatch",
+}
 
 
 effect fn zlib_gunzip(data: Bytes) -> Result[Bytes, String] = {
@@ -38891,10 +38941,14 @@ effect fn zlib_inflate(data: Bytes) -> Result[Bytes, String] = {
   else if status == 0 - 2 then err("zlib.inflate: incomplete deflate stream") else err("zlib.inflate: corrupt deflate stream")
 }
 
+
+
+
 effect fn zlib_decompress(data: Bytes) -> Result[Bytes, String] = {
   let cmf = bytes.get_or(data, 0, 0)
   let flg = bytes.get_or(data, 1, 0)
-  if bytes.len(data) < 6 or int.band(cmf, 15) != 8 or (cmf * 256 + flg) % 31 != 0 then err("zlib.decompress: not a zlib stream")
+  if bytes.len(data) < 2 then err("zlib.decompress: unexpected end of file")
+  else if int.band(cmf, 15) != 8 or int.bshr(cmf, 4) > 7 or (cmf * 256 + flg) % 31 != 0 then err("zlib.decompress: invalid zlib header")
   else if int.band(flg, 32) != 0 then err("zlib.decompress: preset dictionary unsupported")
   else {
     var out = bytes.new(0)
@@ -38906,8 +38960,9 @@ effect fn zlib_decompress(data: Bytes) -> Result[Bytes, String] = {
         int.bor(int.bshl(bytes.get_or(data, after + 2, 0), 8), bytes.get_or(data, after + 3, 0)),
       ),
     )
-    if status == 0 - 2 or (status == 0 and after + 4 > bytes.len(data)) then err("zlib.decompress: incomplete deflate stream")
+    if status == 0 - 2 then err("zlib.decompress: incomplete deflate stream")
     else if status != 0 then err("zlib.decompress: corrupt deflate stream")
+    else if after + 4 > bytes.len(data) then err("zlib.decompress: unexpected end of file")
     else if zli_adler32_from(out, 0) != stored then err("zlib.decompress: adler32 mismatch") else ok(out)
   }
 }
