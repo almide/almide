@@ -95,7 +95,10 @@ fn collect_mutable_var_ids(program: &IrProgram) -> std::collections::HashSet<Var
 pub fn route_fan_parallel(program: &mut IrProgram) -> bool {
     let purity = super::pass_stream_fusion::Purity::for_fan(program);
     // Collect effect function names for purity analysis
-    let effect_fns = collect_effect_fn_names(program);
+    // An effect fn the fan view proves (its only effect is a fan over proven
+    // work, #2594) is not an effect for routing purposes.
+    let mut effect_fns = collect_effect_fn_names(program);
+    effect_fns.retain(|name| !purity.proves(*name));
     // Collect mutable variable IDs from var_table
     let mutable_vars = collect_mutable_var_ids(program);
     // Record decls from the root AND every module: a module's `type P = {…}`
