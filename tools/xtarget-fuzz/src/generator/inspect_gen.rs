@@ -304,6 +304,9 @@ const SHAPE_RECIPES: &[Recipe] = &[
         size: "m",
         args: &[("m", "map.set({sized}, \"k0\", {small_elem})"), ("key", "\"k0\"")],
     },
+    // Dedup builders over scattered elements (see `{sized_scattered}`).
+    Recipe { func: "set.from_list", size: "xs", args: &[("xs", "{sized_scattered}")] },
+    Recipe { func: "list.unique", size: "xs", args: &[("xs", "{sized_scattered}")] },
     // The minimum's comparisons at a cost independent of n (`{sized_flat}`).
     Recipe { func: "list.min", size: "xs", args: &[("xs", "{sized_flat}")] },
     // A lookup's key walks the present keys, one per step: a single fixed
@@ -490,7 +493,18 @@ impl Target {
             }
             _ => sized_v.clone(),
         };
+        // `{sized_scattered}`: as `{sized}`, n distinct elements in no run of
+        // consecutive numerals (`i * 7919 mod 1000003`), for an index keyed
+        // on them: consecutive keys under a multiplicative hash cluster by n.
+        let scattered_v = match &ty {
+            Some(GenType::List(e)) if **e == GenType::Int => format!("list.range(0, {n}) |> list.map((i) => i * 7919 % 1000003)"),
+            Some(GenType::List(e)) if **e == GenType::String => {
+                format!("list.range(0, {n}) |> list.map((i) => \"s${{i * 7919 % 1000003}}\")")
+            }
+            _ => sized_v.clone(),
+        };
         e.replace("{sized_flat}", &flat_v)
+            .replace("{sized_scattered}", &scattered_v)
             .replace("{sized}", &sized_v)
             .replace("{small_elem}", &elem_v)
             .replace("{small}", &small_v)
