@@ -100,3 +100,52 @@ test "the range twin matrix: every accumulator type folds the same lines" {
   assert_eq(map.len(m), 4)
   assert_eq(map.get(m, "delta") ?? -1, 5)
 }
+
+// #3758: a range validates UTF-8 only in what it reads — the lines it folds
+// and the prefix it discards — as native's per-line `read_line` does.
+test "invalid UTF-8 outside the walked part does not fail the range" {
+  let d = tmp()!
+  let p = d + "/mix.txt"
+  // "a\nb\n" ++ [0xFF, 0xFE] ++ "\nc\n"
+  fs.write_bytes(p, [
+    97,
+    10,
+    98,
+    10,
+    255,
+    254,
+    10,
+    99,
+    10
+  ])!
+  assert_eq(fs.fold_lines_range(p, 0, 2, [], (acc, line) => acc + [line])!, ["a"])
+  assert_eq(fs.fold_lines_range(p, 0, 2, 0, (acc: Int, line) => acc + 1)!, 1)
+  assert_eq(fs.fold_lines_range(p, 9, 11, [], (acc, line) => acc + [line])!, [])
+  // the range that reads the invalid line errs
+  let r: Result[List[String], String] = fs.fold_lines_range(
+    p,
+    0,
+    5,
+    [],
+    (acc, line) => acc + [line],
+  )
+  assert_eq(r, err("fs.fold_lines_range(\"${p}\"): stream did not contain valid UTF-8"))
+  // a binary file with an empty range reads nothing
+  let b = d + "/bin.dat"
+  fs.write_bytes(
+    b,
+    [
+      0,
+      1,
+      2,
+      127,
+      128,
+      254,
+      255,
+      10,
+      13,
+      0
+    ],
+  )!
+  assert_eq(fs.fold_lines_range(b, 0, 0, [], (acc, line) => acc + [line])!, [])
+}
