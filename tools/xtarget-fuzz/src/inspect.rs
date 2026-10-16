@@ -655,6 +655,10 @@ fn judge_counted(
     };
     let ks = [(Leg::Native, calibrate(Leg::Native)?), (Leg::Wasm, calibrate(Leg::Wasm)?)];
     let sizes: Vec<u64> = (0..5).map(|i| n << i).collect();
+    let k_both = ks[0].1.min(ks[1].1);
+    for &m in &sizes {
+        legs_agree(ctx, &programs(m, k_both).0).map_err(|e| format!("{label} k={k_both} n={m}: {e}"))?;
+    }
     let mut line = format!("{label} meter=instructions:u+bytes-moved alloc=canonical(wasm) n={n}..{}", n << 4);
     let mut worst = 0usize;
     let mut unexplained = false;
@@ -833,13 +837,21 @@ fn counted(ctx: &Ctx, src: &str, leg: Leg) -> Result<Counts, String> {
             return Err("nondeterministic output".into());
         }
     }
-    if matches!(leg, Leg::Wasm) {
-        let native = run_artifact(ctx, &build(ctx, src, Leg::Native)?, Leg::Native)?;
-        if first.as_deref() != Some(native.as_str()) {
-            return Err(format!("native and wasm differ: {native:?} vs {first:?}"));
-        }
-    }
     Ok(best)
+}
+
+/// The two legs print the same for `src`. Run once per size by the counted
+/// judge at the smaller of the two legs' k: checked inside every wasm count,
+/// it ran native at the WASM leg's k, which for an O(1)-on-wasm call over an
+/// O(n)-on-native one is no k native can afford (value.as_array: native took
+/// 102 s at k = 65536 and the run hit the 60 s cap as a "wasm" timeout).
+fn legs_agree(ctx: &Ctx, src: &str) -> Result<(), String> {
+    let native = run_artifact(ctx, &build(ctx, src, Leg::Native)?, Leg::Native)?;
+    let wasm = run_artifact(ctx, &build_as(ctx, src, Leg::Wasm, true)?, Leg::Wasm)?;
+    if native != wasm {
+        return Err(format!("native and wasm differ: {native:?} vs {wasm:?}"));
+    }
+    Ok(())
 }
 
 /// The second meter. glibc copies and fills large blocks with `rep movsb` /
