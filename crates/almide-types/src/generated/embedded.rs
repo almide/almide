@@ -9294,16 +9294,17 @@ fn __hr_all(resp: List[String], i: Int, key: String, acc: List[String]) -> List[
 fn __hr_lower(s: String) -> String = string.chars(s) |> list.map((c) => __hr_fold(c)) |> list.join("")
 
 
-fn http_headers(resp: List[String]) -> Map[String, String] = __hr_map(resp, 2, map.new())
 
-fn __hr_map(resp: List[String], i: Int, acc: Map[String, String]) -> Map[String, String] =
-  if i >= list.len(resp) then acc
-  else {
-    let k = __hr_lower(list.get(resp, i) ?? "")
-    let next = if map.contains(acc, k) then acc
-    else map.set(acc, k, list.get(resp, i + 1) ?? "")
-    __hr_map(resp, i + 2, next)
-  }
+
+
+fn http_headers(resp: List[String]) -> Map[String, String] = list.range(0, (list.len(resp) - 2) / 2) |> list.fold(
+  map.new(),
+  (acc, j) => {
+    let k = __hr_lower(list.get(resp, 2 + 2 * j) ?? "")
+    if map.contains(acc, k) then acc
+    else map.set(acc, k, list.get(resp, 3 + 2 * j) ?? "")
+  },
+)
 
 
 fn http_set_body(resp: List[String], body: String) -> List[String] = list.set(resp, 1, body)
