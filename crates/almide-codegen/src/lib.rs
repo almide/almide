@@ -77,6 +77,7 @@ pub mod pass_region_window_clone;
 mod prelude_region;
 mod prelude_fan;
 mod prelude_stack;
+mod prelude_rem;
 pub use prelude_region::region_arena_prelude_source;
 pub mod perceus_verified;
 pub mod pass_egg_saturation;
@@ -441,6 +442,7 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     // (`Error: <msg>\n` + exit 1) and to the WASM div/mod trap.
     s.push_str(&format!("{macro_attr}macro_rules! almide_div {{ ($a:expr, $b:expr) => {{{{ let (__a, __b) = ($a, $b); match __a.checked_div(__b) {{ Some(__v) => __v, None => {{ $crate::almide_abort(if __b == 0 {{ \"division by zero\" }} else {{ \"integer overflow\" }}); }} }} }}}}; }}\n"));
     s.push_str(&format!("{macro_attr}macro_rules! almide_mod {{ ($a:expr, $b:expr) => {{{{ let (__a, __b) = ($a, $b); match __a.checked_rem(__b) {{ Some(__v) => __v, None => {{ $crate::almide_abort(if __b == 0 {{ \"division by zero\" }} else {{ \"integer overflow\" }}); }} }} }}}}; }}\n"));
+    s.push_str(&prelude_rem::rem_const_prelude(vis));
     // almide_pow!: integer `^`. A CALL form, not `{left}.pow({right} as u32)`, for
     // two reasons that were both live divergences (#895):
     //   * PRECEDENCE — `-3i64.pow(2)` parses as `-(3.pow(2))` == -9, because Rust
