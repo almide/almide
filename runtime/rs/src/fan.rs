@@ -90,20 +90,24 @@ pub fn almide_rt_fan_map_par<A: Send + Sync + Clone, B: Send, F: Fn(A) -> Result
         // The group flushes this thread's stdout first: a runtime abort on a worker
         // exits without reaching this thread's buffer (C-197, see rust.toml fan_expr).
         let group = almide_fan_group(n);
-        std::thread::scope(|s| {
-            for (chunk_idx, (chunk, out)) in items.chunks(chunk_size).zip(slots.chunks_mut(chunk_size)).enumerate() {
-                let (f, clock) = (&f, &clock);
-                let group = &group;
+        let (f_ref, clock_ref, group_ref) = (&f, &clock, &group);
+        // on the resident crew (list.rs `almide_fan_run_tasks`)
+        let tasks: Vec<AlmideFanTask<'_>> = items
+            .chunks(chunk_size)
+            .zip(slots.chunks_mut(chunk_size))
+            .enumerate()
+            .map(|(chunk_idx, (chunk, out))| {
                 let base = chunk_idx * chunk_size;
-                s.spawn(move || {
-                    clock.worker(out.iter_mut().zip(chunk).enumerate(), |(i, (slot, item))| {
-                        let _elem = almide_fan_enter(group, base + i);
-                        *slot = Some(f(item.clone()));
+                Box::new(move || {
+                    clock_ref.worker(out.iter_mut().zip(chunk).enumerate(), |(i, (slot, item))| {
+                        let _elem = almide_fan_enter(group_ref, base + i);
+                        *slot = Some(f_ref(item.clone()));
                         Some(true)
                     });
-                });
-            }
-        });
+                }) as AlmideFanTask<'_>
+            })
+            .collect();
+        almide_fan_run_scoped(tasks);
         clock.record(site);
         almide_fan_map_settle_slots(slots)
     })();
