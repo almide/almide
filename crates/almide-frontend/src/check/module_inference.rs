@@ -505,6 +505,8 @@ impl Checker {
             generics.as_ref().map(|gs| gs.iter().map(|g| sym(&g.name)).collect()).unwrap_or_default(),
         ));
         self.expect_lambda(body, &ret_ty);
+        self.lambda_expect.clear();
+        self.expect_expr(body, &ret_ty);
         // ADR-0002 Phase 1b (#1103): a `-> T!` fn's body gets the SAME
         // value-tail acceptance an effect fn's lifted body has — the
         // lowering wraps the T-typed exits in ok(...).

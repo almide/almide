@@ -261,6 +261,12 @@ impl Checker {
             {
                 self.list_elem_expect = e.first().cloned();
             }
+            // #3749: the slot's type, with the generics earlier args bound,
+            // shapes the lambdas inside the arg (`some((req) => …)`, a
+            // callback returning a handler).
+            if let Some((_, pty)) = call_sig.as_ref().and_then(|sig| sig.params.get(i)) {
+                self.expect_expr(a, &crate::types::substitute(pty, &bindings));
+            }
             let slot = Self::fn_value_slot_for_arg(a, call_sig, i, &bindings);
             let prev_fn_slot = std::mem::replace(&mut self.fn_value_slot, slot);
             let aty = self.infer_expr(a);
