@@ -1,0 +1,15 @@
+// @contract: C-381
+// ALS-T18 (#3747): a failing `testing.assert_approx` OUTSIDE a test block aborts with
+// the T18 block (`Error: assertion failed` / `at: line N` / `expected:` /
+// `found:`) on stderr and exit 1, byte-identical on both targets. Before:
+// native leaked the raw Rust panic (exit 101) and wasm printed a value-less
+// `assert_approx failed` line. The passing calls above it print nothing.
+import testing
+
+fn main() -> Unit = {
+  testing.assert_approx(1.0, 1.1, 0.25)
+  testing.assert_approx(-0.5, -0.45, 0.1)
+  println("before")
+  testing.assert_approx(1.0, 1.25, 0.25)
+  println("unreachable")
+}

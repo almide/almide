@@ -1,0 +1,14 @@
+// @contract: C-381
+// ALS-T18 (#3747): a failing `testing.assert_none` OUTSIDE a test block aborts with
+// the T18 block (`Error: assertion failed` / `at: line N` / `expected:` /
+// `found:`) on stderr and exit 1, byte-identical on both targets. Before:
+// native leaked the raw Rust panic (exit 101) and wasm printed a value-less
+// `assert_none failed` line. The passing calls above it print nothing.
+import testing
+
+fn main() -> Unit = {
+  testing.assert_none((none: String?))
+  println("before")
+  testing.assert_none(some(["a", "b"]))
+  println("unreachable")
+}
