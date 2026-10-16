@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let fs = [(n: Int) => n + 1, (n: Int) => n * 2]
+  println("${list.len(fs)}")
+}

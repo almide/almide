@@ -434,6 +434,7 @@ impl Checker {
                 }
             }
         }
+        self.validate_set_elem_types();
     }
 
     /// The unhashable-Map-key diagnostic, coded by CAUSE (#1518: this error
