@@ -65,6 +65,7 @@ impl<'a> Interpreter<'a> {
                 for a in args {
                     evaled.push(val!(self.eval_expr(a, scope)));
                 }
+                self.container_arg_tys = Some(std::iter::once(object.ty.clone()).chain(args.iter().map(|a| a.ty.clone())).collect());
                 self.dispatch_module_resolved(module, *method, evaled)
             }
             CallTarget::Computed { callee } => {
@@ -119,6 +120,7 @@ impl<'a> Interpreter<'a> {
                     for a in args {
                         evaled.push(val!(self.eval_expr(a, scope)));
                     }
+                    self.container_arg_tys = Some(args.iter().map(|a| a.ty.clone()).collect());
                     return self.eval_named_stdlib_impl(func, m, f, evaled);
                 }
             }
