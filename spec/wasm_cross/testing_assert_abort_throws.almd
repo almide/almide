@@ -1,0 +1,14 @@
+// @contract: C-381
+// ALS-T18 (#3747): `testing.assert_throws(f, expected)` OUTSIDE a test block
+// can only fail — a `panic` there is the uncatchable C-219 abort. So the thunk
+// runs once and, when it returns normally, the call aborts with the T18 block
+// (`expected: panic containing <expected>` / `found: returned normally`) and
+// exit 1, byte-identical on both targets. Before: native leaked the raw Rust
+// panic (exit 101) and wasm refused the program (E081).
+import testing
+
+fn main() -> Unit = {
+  println("before")
+  testing.assert_throws(() => println("thunk ran"), "boom")
+  println("unreachable")
+}

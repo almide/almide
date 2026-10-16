@@ -1,0 +1,15 @@
+// @contract: C-381
+// ALS-T18 (#3747): a failing `testing.assert_lt` OUTSIDE a test block aborts with
+// the T18 block (`Error: assertion failed` / `at: line N` / `expected:` /
+// `found:`) on stderr and exit 1, byte-identical on both targets. Before:
+// native leaked the raw Rust panic (exit 101) and wasm printed a value-less
+// `assert_lt failed` line. The passing calls above it print nothing.
+import testing
+
+fn main() -> Unit = {
+  testing.assert_lt(1, 2)
+  testing.assert_lt(-9223372036854775807, 9223372036854775807)
+  println("before")
+  testing.assert_lt(7, -7)
+  println("unreachable")
+}

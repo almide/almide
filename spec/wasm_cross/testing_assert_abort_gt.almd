@@ -1,0 +1,20 @@
+// @contract: C-381
+// ALS-T18 (#3747): a failing `testing.assert_gt` OUTSIDE a test block aborts with
+// the T18 block (`Error: assertion failed` / `at: line N` / `expected:` /
+// `found:`) on stderr and exit 1, byte-identical on both targets. Before:
+// native leaked the raw Rust panic (exit 101) and wasm printed a value-less
+// `assert_gt failed` line. The passing calls above it print nothing.
+import testing
+
+fn tick(n: Int) -> Int = {
+  println("eval ${n}")
+  n
+}
+
+fn main() -> Unit = {
+  testing.assert_gt(tick(3), tick(2))
+  testing.assert_gt(-1, -2)
+  println("before")
+  testing.assert_gt(tick(2), tick(2))
+  println("unreachable")
+}

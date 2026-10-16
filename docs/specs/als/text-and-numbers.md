@@ -1,6 +1,6 @@
 # ALS §T — Text and Number Semantics (normative)
 
-> Last updated: 2026-10-06
+> Last updated: 2026-10-16
 
 > **Status**: normative. これらの節は実装から独立した**規範**であり、v0（native）と
 > v1（MIR/wasm）の両実装がこの節に適合する義務を負う。適合の証拠は
@@ -283,6 +283,30 @@ v0-wasm / 自己ホストの 3 バックエンドが同一の逐次 `string.repl
 v1-wasm / interp の全系統が同じ IR を継ぐ。
 Fixtures: `spec/wasm_cross/assert_abort_eq.almd`, `assert_abort_ne.almd`,
 `assert_abort_msg.almd`, `assert_abort_multiline.almd`。Contracts: C-153。
+
+`testing` モジュールの assert も、`test` ブロック外の直接呼び出しでは同じブロック
+（見出しは `Error: assertion failed`、`at:` → `expected:` → `found:`）と exit code 1
+で停止する。`expected:` には関係を、`found:` には被演算子を書く:
+
+- `testing.assert_gt(a, b)` → `expected: > <b>`、`found: <a>`
+- `testing.assert_lt(a, b)` → `expected: < <b>`、`found: <a>`
+- `testing.assert_approx(a, b, t)` → `expected: within <t> of <b>`、`found: <a>`
+  （合格は |a − b| < t のときだけ。NaN は不合格）
+- `testing.assert_contains(h, n)` → `expected: contains <n>`、`found: <h>`
+  （空の `n` は合格）
+- `testing.assert_some(o)` → `expected: some(_)`、`found: none`
+- `testing.assert_none(o)` → `expected: none`、`found: <o>`
+- `testing.assert_ok(r)` → `expected: ok(_)`、`found: <r>`
+- `testing.assert_err(r)` → `expected: err(_)`、`found: <r>`
+- `testing.assert_throws(f, s)` → `expected: panic containing <s>`、
+  `found: returned normally`
+
+`test` ブロック外の `panic` は C-219 の abort であり、捕捉されない。したがって
+`test` ブロック外の `assert_throws` は合格しない。thunk を一度だけ呼び、`panic` すれば
+その abort で停止し、戻れば上のブロックで停止する。関数値として渡した呼び出しは
+直接呼び出しではなく、本節の対象外である。
+Fixtures: `spec/wasm_cross/testing_assert_abort_gt.almd`、`_lt`、`_approx`、
+`_contains`、`_some`、`_none`、`_ok`、`_err`、`_throws`。Contracts: C-381。
 
 ## ALS-T19 数値決定性ファミリー
 
