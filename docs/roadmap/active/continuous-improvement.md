@@ -1384,3 +1384,43 @@ Order agreed with the owner: real defects first (result.filter → list.flat_map
 3. #3217: closes with #3736. The "read after the loop" shape I had thought remained already renders `xs: &[T]` (borrow inference's `cloned_anyway`). That was measured on #3736's branch and the issue comment corrected. Still open in general: C4 reads use_kind's model, not the render.
 4. #3532: the borrow on the v1 lowering.
 5. #3739: the target-cpu decision.
+
+## 2026-10-16 — the pure remainder of the stdlib inspection (PR #3751)
+
+### Inspection
+- **Starting point:** develop had 248 uninspected rows. #3751 brings it to 193 before batch 4.
+- **Batches:** five GCE c4-standard-4 batches (asia-northeast1-b, PMU on). Each stamp records its sha and environment.
+- **Grammar:** the generator now builds the stdlib's opaque types from one nominal table (`tools/xtarget-fuzz/src/generator/nominal.rs`): HttpResponse/Request/Handler/Route/Middleware, SafeHtml, SafePath, Url, JsonPath, `Matrix[Float32]`, Duration and Compute.
+- **Clock constructors:** inspected through `Repr`. Owner ruling 2026-10-16: no accessors, since ADR-0001 S7 keeps them omitted.
+- **Harness fixes:**
+  - The counted judge's `k` is now calibrated on each leg. With one shared `k`, a cheap leg's marginal sat under jitter and read as O(1). No stamped row rested on such a series; `value.as_array` had one and was never stamped.
+  - The diamond's path files import the modules of the types they name.
+  - A `Result` with a non-String error type is out of the generator's universe.
+  - `parse_X` is read as the inverse of `to_X`.
+
+### Defects the probes found (all fixed in #3751, each test-first)
+- **`http.wrap`:** O(n²); each recursion step copied the rest of the middleware list. Now a fold.
+- **`http.with_headers`:** O(n²) on both legs (a scan per entry). Now an index of lowercased names. A/B on case-variant input is identical to 0.64.0; 80k headers on wasm take 0.10 s (before: out of memory).
+- **`http.headers` (wasm):** O(n²); the self-host recursion copied the map on every header. Now a fold: 197 s → 2.6 s at 160k.
+- **Reference interpreter:** pool-built Strings reached native container ops as block addresses, so `query_params` kept duplicate keys. The ops now read their arguments back under static types.
+- **Compiler bugs:**
+  - **#3752:** Duration/Compute could not be named in an annotation.
+  - **#3753:** an unrolled small matmul passed as an argument failed the native build (E0308).
+  - **#3754:** a mut-param call on a captured var panicked on native with "RefCell already mutably borrowed".
+  - **#3755:** about 100 cells of ordering and equality over opaque/runtime-backed types passed check and then failed the native build.
+
+### Filed, not fixed here
+- **#3749:** an expected effect-closure type does not reach a nested lambda, so the documented middleware spelling is refused. One variant check-passes and then fails to build.
+- **#3750:** `json.field` / `json.index` copy the whole path on every wasm call; 100k steps run out of memory. Both stay uninspected.
+- **#3754 (comment):** a user fn whose mut param and closure argument name the same var still panics on native.
+
+### Left uninspected, by cause
+- `value.as_array`: the probe has no O(1) way to vary a Value, so the wasm call can be lifted out of the loop.
+- `http.param` and `http.decode_json`: `param` binds only inside a router, and `decode_json` has a non-String `Result` error type.
+- Native-only kernels (quantized matrix, qwen3): the native-only stamp approved on 10-12 is not implemented yet.
+- Host, random and address functions (process, net, mem, bytes pointers, `list.shuffle`).
+- #3747 (testing asserts) and `result.filter` (native copy).
+- The 2026-10-15 ruling leaves `set.from_list` and `list.unique` uninspected.
+
+### Machine
+The disk filled up and three agents died together. A worktree audit removed 335 clean, merged, idle worktrees, and the temp caches went too: 59 → 168 GiB free. The procedure is in memory (worktree-target-dirs-fill-the-disk).
