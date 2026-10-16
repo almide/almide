@@ -141,3 +141,53 @@ fn top_level_wrapped_router_runs_on_the_structural_leg() {
         assert_eq!(String::from_utf8(out.stdout).unwrap(), expected, "{leg}: {stderr}");
     }
 }
+
+/// A stdlib call slot typed by an ALIAS of an effect fn type (`http.wrap`'s
+/// `handler: HttpHandler`) receiving a pure lambda through an `if`, a `match`
+/// or a block. A lambda written straight in the slot is checked as an effect
+/// body; one reached through a branch types pure and needs the call-site
+/// `ok(...)` adapter, which matched the slot only when it was spelled as a
+/// literal `effect (A) -> B` — the alias kept native rustc and the wasm leg
+/// on two different closure types.
+const BRANCHED_HANDLER_ARGS: &str = r#"import http
+
+effect fn hit(h: HttpHandler) -> String = http.body(h(http.new_request("GET", "/", "", [:]))!)
+
+effect fn run(flag: Bool) -> String = {
+  let a = http.wrap(if flag then (req) => http.response(200, "a") else (req) => http.response(201, "b"), [])
+  let m = http.wrap(match flag {
+    true => (req) => http.response(200, "c"),
+    false => (req) => http.response(201, "d"),
+  }, [])
+  let k = http.wrap({
+    let s = "e"
+    (req) => http.response(200, s)
+  }, [])
+  hit(a)! + hit(m)! + hit(k)!
+}
+
+effect fn main() -> Unit = {
+  println(run(false)!)
+  println(run(true)!)
+}
+"#;
+
+#[test]
+fn branched_lambdas_into_an_aliased_effect_slot_run_on_both_legs() {
+    let bin = std::env::var("ALMIDE_BIN").unwrap_or_else(|_| env!("CARGO_BIN_EXE_almide").to_string());
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("app.almd");
+    std::fs::write(&src, BRANCHED_HANDLER_ARGS).unwrap();
+    let expected = "bde\nace\n";
+    for leg in ["native", "structural"] {
+        let mut cmd = Command::new(&bin);
+        cmd.arg("run").arg(&src).env_remove("ALMIDE_WASM_SKIP_STOCK_AUDIT");
+        if leg == "structural" {
+            cmd.args(["--target", "wasm"]).env("ALMIDE_WASM_SKIP_STOCK_AUDIT", "1");
+        }
+        let out = cmd.output().unwrap();
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(out.status.success(), "{leg}: {stderr}");
+        assert_eq!(String::from_utf8(out.stdout).unwrap(), expected, "{leg}: {stderr}");
+    }
+}
