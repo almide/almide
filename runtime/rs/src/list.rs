@@ -308,7 +308,8 @@ pub fn almide_rt_list_par_workers(len: usize) -> usize {
 // a site records the compute time its elements took (`AlmideFanClock`: the
 // threads' CPU time inside the elements, so spawn latency and the time a
 // thread sat descheduled are not counted, and each worker's first element —
-// its warm-up — is kept out of the mean). A site's FIRST offer goes parallel, as
+// its warm-up — is kept out of the mean; a site far below the crossover is
+// timed on one sequential offer in `ALMIDE_FAN_RESAMPLE`). A site's FIRST offer goes parallel, as
 // before #3341; later offers estimate each element at the site's last
 // measured time `t`. A parallel offer on W workers COSTS `OFFER + W·WORKER`
 // (thread spawn, join, the group's bookkeeping — measured) and SAVES
@@ -339,15 +340,22 @@ pub fn almide_rt_fan_plan(n: usize, per_elem: Option<u128>) -> usize {
     best.0
 }
 
-fn almide_fan_history() -> &'static std::sync::Mutex<std::collections::HashMap<usize, u128>> {
-    static H: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<usize, u128>>> = std::sync::OnceLock::new();
+/// Per site: its last measured time per element, and how many more offers
+/// may run sequentially without being measured (see `AlmideFanClock::record`).
+fn almide_fan_history() -> &'static std::sync::Mutex<std::collections::HashMap<usize, (u128, u32)>> {
+    static H: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<usize, (u128, u32)>>> = std::sync::OnceLock::new();
     H.get_or_init(Default::default)
 }
 
-/// The site's last measured time per element, if it has run before.
-fn almide_fan_estimate(site: usize) -> Option<u128> {
-    almide_fan_history().lock().ok()?.get(&site).copied()
-}
+/// A site far below the crossover re-measures one sequential offer in this
+/// many: timing an offer reads the thread CPU clock twice, a syscall
+/// (~0.3 us on the GCE Intel VM, ~1.1 us on the AMD one) that a cheap
+/// sequential offer otherwise pays every time.
+const ALMIDE_FAN_RESAMPLE: u32 = 16;
+/// "Far below": the offer stays sequential even at this many times its
+/// measured work per element, so the skipped offers cannot hide a win
+/// unless the work per element grows that much within one resample period.
+const ALMIDE_FAN_RESAMPLE_MARGIN: u128 = 8;
 
 /// The calling thread's CPU time in ns — the clock an offer's elements are
 /// measured on (the wasm host's copy is host_fan.rs `cpu_ns`). Wall time
@@ -383,12 +391,33 @@ fn almide_fan_cpu_ns() -> u64 {
 struct AlmideFanClock {
     warm: [std::sync::atomic::AtomicU64; 2],
     cold: [std::sync::atomic::AtomicU64; 2],
+    site: usize,
+    n: usize,
+    /// `false` = an unmeasured sequential offer: no clock reads, no record.
+    measure: bool,
 }
 
 impl AlmideFanClock {
-    fn new() -> Self {
+    /// Plan an offer of `n` elements at `site`: its worker count, and the
+    /// clock that measures it.
+    fn offer(site: usize, n: usize) -> (usize, Self) {
         let z = || std::sync::atomic::AtomicU64::new(0);
-        AlmideFanClock { warm: [z(), z()], cold: [z(), z()] }
+        let (workers, measure) = match almide_fan_history().lock() {
+            Ok(mut h) => match h.get_mut(&site) {
+                Some((t, skip)) => {
+                    let workers = almide_rt_fan_plan(n, Some(*t));
+                    if workers < 2 && *skip > 0 {
+                        *skip -= 1;
+                        (1, false)
+                    } else {
+                        (workers, true)
+                    }
+                }
+                None => (almide_rt_fan_plan(n, None), true),
+            },
+            Err(_) => (almide_rt_fan_plan(n, None), true),
+        };
+        (workers, AlmideFanClock { warm: [z(), z()], cold: [z(), z()], site, n, measure })
     }
 
     fn add(cell: &[std::sync::atomic::AtomicU64; 2], ns: u64, n: u64) {
@@ -399,6 +428,9 @@ impl AlmideFanClock {
     /// The calling thread runs the offer: `g` returns its result and how
     /// many elements it evaluated.
     fn calling<R>(&self, g: impl FnOnce() -> (R, usize)) -> R {
+        if !self.measure {
+            return g().0;
+        }
         let t0 = almide_fan_cpu_ns();
         let (r, n) = g();
         Self::add(&self.warm, almide_fan_cpu_ns().wrapping_sub(t0), n as u64);
@@ -432,14 +464,22 @@ impl AlmideFanClock {
         Self::add(&self.warm, almide_fan_cpu_ns().wrapping_sub(t1), n);
     }
 
-    /// Record the offer as the site's estimate: ns per element.
-    fn record(self, site: usize) {
+    /// Record the offer as the site's estimate: ns per element — and, when
+    /// even `ALMIDE_FAN_RESAMPLE_MARGIN` times that would stay sequential,
+    /// let the site's next `ALMIDE_FAN_RESAMPLE - 1` sequential offers run
+    /// unmeasured.
+    fn record(self) {
+        if !self.measure {
+            return;
+        }
         let [w, wn] = self.warm.map(|a| a.into_inner());
         let [c, cn] = self.cold.map(|a| a.into_inner());
         let (ns, n) = if wn > 0 { (w, wn) } else { (c, cn) };
         if n > 0 {
+            let t = u128::from(ns) / u128::from(n);
+            let far = almide_rt_fan_plan(self.n, Some(t.saturating_mul(ALMIDE_FAN_RESAMPLE_MARGIN))) < 2;
             if let Ok(mut h) = almide_fan_history().lock() {
-                h.insert(site, u128::from(ns) / u128::from(n));
+                h.insert(self.site, (t, if far { ALMIDE_FAN_RESAMPLE - 1 } else { 0 }));
             }
         }
     }
@@ -583,11 +623,10 @@ pub fn almide_rt_list_par_map<A: Send + Sync + Clone, B: Send, F: Fn(A) -> B + S
     }
     let site = almide_rt_list_par_map::<A, B, F> as fn(Vec<A>, F) -> Vec<B> as usize;
     let n = xs.len();
-    let workers = almide_rt_fan_plan(n, almide_fan_estimate(site));
-    let clock = AlmideFanClock::new();
+    let (workers, clock) = AlmideFanClock::offer(site, n);
     if workers < 2 {
         let out = clock.calling(|| (xs.into_iter().map(&f).collect(), n));
-        clock.record(site);
+        clock.record();
         return out;
     }
     let block = almide_fan_block(n, workers);
@@ -605,7 +644,7 @@ pub fn almide_rt_list_par_map<A: Send + Sync + Clone, B: Send, F: Fn(A) -> B + S
             Some(true)
         });
     }));
-    clock.record(site);
+    clock.record();
     slots.into_iter().map(|b| b.expect("list.par_map: every slot is written by its worker")).collect()
 }
 
@@ -615,11 +654,10 @@ pub fn almide_rt_list_par_filter<A: Send + Sync + Clone, F: Fn(A) -> bool + Send
     }
     let site = almide_rt_list_par_filter::<A, F> as fn(Vec<A>, F) -> Vec<A> as usize;
     let n = xs.len();
-    let workers = almide_rt_fan_plan(n, almide_fan_estimate(site));
-    let clock = AlmideFanClock::new();
+    let (workers, clock) = AlmideFanClock::offer(site, n);
     if workers < 2 {
         let out = clock.calling(|| (xs.into_iter().filter(|x| f(x.clone())).collect(), n));
-        clock.record(site);
+        clock.record();
         return out;
     }
     let block = almide_fan_block(n, workers);
@@ -645,16 +683,15 @@ pub fn almide_rt_list_par_filter<A: Send + Sync + Clone, F: Fn(A) -> bool + Send
     {
         std::panic::resume_unwind(panic);
     }
-    clock.record(site);
+    clock.record();
     xs.into_iter().zip(keep).filter_map(|(x, k)| k.then_some(x)).collect()
 }
 
 /// `any` (`stop_on` = true) / `all` (`stop_on` = false): does some element's
 /// verdict equal `stop_on`. Records the elements it actually evaluated.
 fn almide_fan_search<A: Send + Sync + Clone, F: Fn(A) -> bool + Send + Sync>(site: usize, xs: &[A], f: &F, stop_on: bool) -> bool {
-    let clock = AlmideFanClock::new();
+    let (workers, clock) = AlmideFanClock::offer(site, xs.len());
     let look = |x: &A| f(x.clone()) == stop_on;
-    let workers = almide_rt_fan_plan(xs.len(), almide_fan_estimate(site));
     let hit = if workers < 2 {
         clock.calling(|| {
             let mut seen = 0usize;
@@ -686,7 +723,7 @@ fn almide_fan_search<A: Send + Sync + Clone, F: Fn(A) -> bool + Send + Sync>(sit
         }));
         hit.load(std::sync::atomic::Ordering::Relaxed)
     };
-    clock.record(site);
+    clock.record();
     hit
 }
 
