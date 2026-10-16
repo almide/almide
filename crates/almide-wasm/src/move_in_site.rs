@@ -63,18 +63,30 @@ impl Place {
     }
 }
 
+/// The tuple a write-back destructured (`let t = f(…); let (r, b) = t`,
+/// arg_temps.rs names it), settled right after the last write-back.
+#[derive(Clone)]
+pub(super) struct Subject {
+    /// The tuple's local.
+    pub(super) var: VarId,
+    /// Its binds that are NOT written back — views the frame may still read.
+    pub(super) others: Vec<VarId>,
+    /// The tuple positions whose bind IS written back into a place: the
+    /// write-back took its own credit on that block, so the tuple's credit
+    /// on it is surplus once the write-backs ran.
+    pub(super) written: Vec<usize>,
+}
+
 /// One statement's move-in sites.
 #[derive(Clone)]
 pub(super) struct MoveIn {
     /// Each candidate call's argument slice (its identity) and the vars it
     /// may take.
     at: Vec<(usize, Vec<Place>)>,
-    /// The tuple the call answered (`let t = f(…); let (r, b) = t`,
-    /// arg_temps.rs names it) and its binds that are NOT written back: its
-    /// slots keep a credit on each buffer until the frame releases it —
-    /// released right after the last write-back instead
-    /// (`settle_subject`), when nothing else reads it.
-    pub(super) subject: Option<(VarId, Vec<VarId>)>,
+    /// The tuple the call answered: its slots keep a credit on each buffer
+    /// until the frame releases it — settled right after the last
+    /// write-back instead (`settle_subject`), when nothing else reads it.
+    pub(super) subject: Option<Subject>,
     /// The index of the last statement of the site (the last write-back).
     pub(super) last: usize,
 }
@@ -190,7 +202,7 @@ fn write_backs(
     tail: Option<&IrExpr>,
     i: usize,
     bound: VarId,
-) -> Option<(Vec<VarId>, Option<(VarId, Vec<VarId>)>, usize)> {
+) -> Option<(Vec<VarId>, Option<Subject>, usize)> {
     let (bufs, subject, first) = match stmts.get(i + 1).map(|s| &s.kind) {
         Some(IrStmtKind::BindDestructure { pattern: IrPattern::Tuple { elements }, value })
             if matches!(&value.kind, IrExprKind::Var { id } if *id == bound) =>
@@ -225,7 +237,12 @@ fn write_backs(
     let subject = subject.and_then(|(t, binds)| {
         let once = reads_in_block(stmts, tail, t) == 1
             && backs.iter().all(|&(_, b)| reads_in_block(stmts, tail, b) == 1);
-        once.then(|| (t, binds.into_iter().filter(|b| !backs.iter().any(|&(_, w)| w == *b)).collect()))
+        let written_back = |b: &VarId| backs.iter().any(|&(_, w)| w == *b);
+        once.then(|| Subject {
+            var: t,
+            others: binds.iter().copied().filter(|b| !written_back(b)).collect(),
+            written: binds.iter().enumerate().filter(|(_, b)| written_back(b)).map(|(k, _)| k).collect(),
+        })
     });
     Some((backs.iter().map(|&(v, _)| v).collect(), subject, first + backs.len() - 1))
 }
