@@ -1,0 +1,8 @@
+// E030 (#3755): list.min over a runtime-backed handle. A JsonPath has no
+// declaration and no order; check used to accept it while native rustc
+// rejected the monomorph (AlmideJsonPath: Ord).
+import json
+fn main() -> Unit = {
+  let ps = [json.field(json.root(), "b"), json.field(json.root(), "a")]
+  println("${option.is_some(list.min(ps))}")
+}

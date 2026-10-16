@@ -39,8 +39,20 @@ fn render_type_decl_alias(ctx: &RenderContext, td: &IrTypeDecl, target: &Ty) -> 
     // Opaque (mod/local) aliases → newtype struct
     if matches!(td.visibility, IrVisibility::Mod | IrVisibility::Private) {
         let type_s = render_type(ctx, target);
+        // #3755: lowering marks the newtype `Eq` / `Ord` exactly when the
+        // checker finds its target comparable / orderable — what the wasm
+        // leg (which erases the newtype) already does. Without the `Ord`
+        // derive, `list.min` over `path.SafePath` passed check and rustc
+        // refused `SafePath: Ord`; with an unconditional `PartialEq`, a
+        // newtype over a closure-bearing type failed to compile at all.
+        let derives_conv = |c: &str| td.deriving.as_ref().is_some_and(|d| d.iter().any(|s| s.as_str() == c));
+        let derives = match (derives_conv("Eq"), derives_conv("Ord")) {
+            (true, true) => "Clone, Debug, PartialEq, Eq, PartialOrd, Ord",
+            (true, false) => "Clone, Debug, PartialEq",
+            (false, _) => "Clone",
+        };
         let decl = format!(
-            "#[derive(Clone, Debug, PartialEq)]\npub struct {}({});",
+            "#[derive({derives})]\npub struct {}({});",
             td.name, type_s
         );
         // #2496: a newtype's string form is its TARGET's, at every position.
