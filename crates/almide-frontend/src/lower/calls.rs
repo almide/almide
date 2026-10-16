@@ -92,6 +92,9 @@ pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, call: CallArgs<
     if let Some(desugared) = desugar_snapshot_assert(ctx, &target, &ir_args, span) {
         return desugared;
     }
+    if let Some(desugared) = desugar_testing_assert_outside_test(ctx, &target, &ir_args, span) {
+        return desugared;
+    }
 
     let ty = call_result_ty(&target, ty);
     let target = ctx.ir_call_target(target);
@@ -619,17 +622,7 @@ fn desugar_assert_abort(
     ir_args: Vec<IrExpr>,
     span: Option<ast::Span>,
 ) -> IrExpr {
-    let mut stmts: Vec<IrStmt> = Vec::new();
-    let mut vars: Vec<IrExpr> = Vec::new();
-    for (i, a) in ir_args.into_iter().enumerate() {
-        let a_ty = a.ty.clone();
-        let v = ctx.define_var(&format!("__assert_{i}"), a_ty.clone(), Mutability::Let, None);
-        stmts.push(IrStmt {
-            kind: IrStmtKind::Bind { var: v, mutability: Mutability::Let, ty: a_ty.clone(), value: a },
-            span: None,
-        });
-        vars.push(ctx.mk(IrExprKind::Var { id: v }, a_ty, span));
-    }
+    let (mut stmts, vars) = bind_assert_operands(ctx, ir_args, span);
     let cond = match name {
         "assert_eq" | "assert_snapshot" => ctx.mk(
             IrExprKind::BinOp {
@@ -693,41 +686,7 @@ fn desugar_assert_abort(
         }
         _ => vec![IrStringPart::Lit { value: format!("Error: assertion failed{at}") }],
     };
-    let msg = ctx.mk(IrExprKind::StringInterp { parts }, Ty::String, span);
-    let eprint = ctx.mk(
-        IrExprKind::Call {
-            target: CallTarget::Named { name: sym("eprintln") },
-            args: vec![msg],
-            type_args: vec![],
-        },
-        Ty::Unit,
-        span,
-    );
-    let one = ctx.mk(IrExprKind::LitInt { value: 1 }, Ty::Int, span);
-    let exit = ctx.mk(
-        IrExprKind::Call {
-            target: CallTarget::Module {
-                module: sym("process"),
-                func: sym("exit"),
-                def_id: ctx.def_map.get(&sym("process.exit")).copied(),
-            },
-            args: vec![one],
-            type_args: vec![],
-        },
-        Ty::Unit,
-        span,
-    );
-    let fail = ctx.mk(
-        IrExprKind::Block {
-            stmts: vec![
-                IrStmt { kind: IrStmtKind::Expr { expr: eprint }, span: None },
-                IrStmt { kind: IrStmtKind::Expr { expr: exit }, span: None },
-            ],
-            expr: None,
-        },
-        Ty::Unit,
-        span,
-    );
+    let fail = t18_abort_block(ctx, parts, span);
     let ok = ctx.mk(IrExprKind::Block { stmts: vec![], expr: None }, Ty::Unit, span);
     let guard = ctx.mk(
         IrExprKind::If { cond: Box::new(cond), then: Box::new(ok), else_: Box::new(fail) },
@@ -750,3 +709,5 @@ fn desugar_assert_abort(
 include!("calls_target.rs");
 
 include!("calls_time.rs");
+
+include!("calls_testing_assert.rs");

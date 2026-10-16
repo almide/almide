@@ -1,0 +1,232 @@
+// The T18 abort form, shared by the prelude asserts (C-153), the snapshot
+// assert (C-339) and the `testing.assert_*` library asserts (C-381).
+// `include!`d by calls.rs (the 800-line file budget); it shares that
+// module's scope and imports.
+
+/// Bind every operand to a `__assert_<i>` temp, in order, so each is
+/// evaluated exactly once: the failure block re-references the temps and
+/// never re-runs the operand expressions.
+fn bind_assert_operands(
+    ctx: &mut LowerCtx,
+    ir_args: Vec<IrExpr>,
+    span: Option<ast::Span>,
+) -> (Vec<IrStmt>, Vec<IrExpr>) {
+    let mut stmts: Vec<IrStmt> = Vec::new();
+    let mut vars: Vec<IrExpr> = Vec::new();
+    for (i, a) in ir_args.into_iter().enumerate() {
+        let a_ty = a.ty.clone();
+        let v = ctx.define_var(&format!("__assert_{i}"), a_ty.clone(), Mutability::Let, None);
+        stmts.push(IrStmt {
+            kind: IrStmtKind::Bind { var: v, mutability: Mutability::Let, ty: a_ty.clone(), value: a },
+            span: None,
+        });
+        vars.push(ctx.mk(IrExprKind::Var { id: v }, a_ty, span));
+    }
+    (stmts, vars)
+}
+
+/// `{ eprintln("<parts>"); process.exit(1) }` — the failure arm every T18
+/// desugar shares, so every consumer (native, both wasm legs, the interp)
+/// inherits the same bytes.
+fn t18_abort_block(ctx: &mut LowerCtx, parts: Vec<IrStringPart>, span: Option<ast::Span>) -> IrExpr {
+    let msg = ctx.mk(IrExprKind::StringInterp { parts }, Ty::String, span);
+    let eprint = ctx.mk(
+        IrExprKind::Call {
+            target: CallTarget::Named { name: sym("eprintln") },
+            args: vec![msg],
+            type_args: vec![],
+        },
+        Ty::Unit,
+        span,
+    );
+    let one = ctx.mk(IrExprKind::LitInt { value: 1 }, Ty::Int, span);
+    let exit = ctx.mk(
+        IrExprKind::Call {
+            target: CallTarget::Module {
+                module: sym("process"),
+                func: sym("exit"),
+                def_id: ctx.def_map.get(&sym("process.exit")).copied(),
+            },
+            args: vec![one],
+            type_args: vec![],
+        },
+        Ty::Unit,
+        span,
+    );
+    ctx.mk(
+        IrExprKind::Block {
+            stmts: vec![
+                IrStmt { kind: IrStmtKind::Expr { expr: eprint }, span: None },
+                IrStmt { kind: IrStmtKind::Expr { expr: exit }, span: None },
+            ],
+            expr: None,
+        },
+        Ty::Unit,
+        span,
+    )
+}
+
+/// How a `testing.assert_*` decides pass.
+enum TestingVerdict {
+    /// A Bool condition over the bound operands.
+    Cond(IrExpr),
+    /// The first operand matches this pattern.
+    Arm(IrPattern),
+    /// Never passes here: call the thunk, then fail (`assert_throws`).
+    AfterCall(IrExpr),
+}
+
+/// The arity of a `testing` assert this desugar owns, or None. One name
+/// per arm: this is each function's own lowering, chosen by its name.
+fn testing_assert_arity(func: &str) -> Option<usize> {
+    match func {
+        "assert_some" => Some(1),
+        "assert_none" => Some(1),
+        "assert_ok" => Some(1),
+        "assert_err" => Some(1),
+        "assert_gt" => Some(2),
+        "assert_lt" => Some(2),
+        "assert_contains" => Some(2),
+        "assert_throws" => Some(2),
+        "assert_approx" => Some(3),
+        _ => None,
+    }
+}
+
+/// `testing.assert_gt` / `assert_lt` / `assert_approx` / `assert_contains` /
+/// `assert_some` / `assert_none` / `assert_ok` / `assert_err` /
+/// `assert_throws` OUTSIDE a test block (#3747) desugar to the T18 abort
+/// form, the same way `assert_eq` does (C-153), so every target prints
+/// one block and exits 1:
+/// ```text
+/// Error: assertion failed
+///   at: line <N>
+///   expected: <the relation, e.g. `> 2`, `contains "x"`, `ok(_)`>
+///   found: <the operand>
+/// ```
+/// Inside a test block the call stays a call: the harness reports it, and
+/// `assert_throws` must be able to catch it there.
+///
+/// `assert_throws` outside a test can only fail — a `panic` there is the
+/// uncatchable C-219 abort — so it calls the thunk and then fails with
+/// `found: returned normally`. The thunk's own panic is that abort, on
+/// every target, so the desugared call builds on wasm too; the E081
+/// availability refusal still holds for a call inside a test block.
+fn desugar_testing_assert_outside_test(
+    ctx: &mut LowerCtx,
+    target: &CallTarget,
+    ir_args: &[IrExpr],
+    span: Option<ast::Span>,
+) -> Option<IrExpr> {
+    if ctx.in_test {
+        return None;
+    }
+    let CallTarget::Module { module, func, .. } = target else { return None };
+    let f = func.as_str();
+    if module.as_str() != "testing" || testing_assert_arity(f) != Some(ir_args.len()) {
+        return None;
+    }
+    // `assert_throws`'s thunk is called in place, never bound: the structural
+    // wasm leg has no slot for a fn-typed `let` whose body diverges, and the
+    // thunk is read once either way. The expected text binds first.
+    let (callee, bound) = match ir_args.split_first() {
+        Some((thunk, rest)) if f == "assert_throws" => (Some(thunk.clone()), rest.to_vec()),
+        _ => (None, ir_args.to_vec()),
+    };
+    let (mut stmts, v) = bind_assert_operands(ctx, bound, span);
+    let at = span.as_ref().map(|s| format!("\n  at: line {}", s.line)).unwrap_or_default();
+    let head = |rel: &str| IrStringPart::Lit { value: format!("Error: assertion failed{at}\n  expected: {rel}") };
+    let lit = |s: &str| IrStringPart::Lit { value: s.to_string() };
+    let val = |e: &IrExpr| IrStringPart::Expr { expr: e.clone() };
+    let found = || lit("\n  found: ");
+    let (parts, verdict) = match f {
+        "assert_gt" => {
+            let cond = testing_binop(ctx, BinOp::Gt, &v[0], &v[1], span);
+            (vec![head("> "), val(&v[1]), found(), val(&v[0])], TestingVerdict::Cond(cond))
+        }
+        "assert_lt" => {
+            let cond = testing_binop(ctx, BinOp::Lt, &v[0], &v[1], span);
+            (vec![head("< "), val(&v[1]), found(), val(&v[0])], TestingVerdict::Cond(cond))
+        }
+        // `abs(a - b) < tolerance`, strict, as `a - b < t and b - a < t`:
+        // IEEE subtraction negates exactly, and a NaN fails both halves.
+        "assert_approx" => {
+            let ab = testing_binop(ctx, BinOp::SubFloat, &v[0], &v[1], span);
+            let ba = testing_binop(ctx, BinOp::SubFloat, &v[1], &v[0], span);
+            let lo = testing_binop(ctx, BinOp::Lt, &ab, &v[2], span);
+            let hi = testing_binop(ctx, BinOp::Lt, &ba, &v[2], span);
+            let cond = testing_binop(ctx, BinOp::And, &lo, &hi, span);
+            let parts = vec![head("within "), val(&v[2]), lit(" of "), val(&v[1]), found(), val(&v[0])];
+            (parts, TestingVerdict::Cond(cond))
+        }
+        "assert_contains" => {
+            let call = IrExprKind::Call {
+                target: CallTarget::Module {
+                    module: sym("string"),
+                    func: sym("contains"),
+                    def_id: ctx.def_map.get(&sym("string.contains")).copied(),
+                },
+                args: vec![v[0].clone(), v[1].clone()],
+                type_args: vec![],
+            };
+            let cond = ctx.mk(call, Ty::Bool, span);
+            (vec![head("contains "), val(&v[1]), found(), val(&v[0])], TestingVerdict::Cond(cond))
+        }
+        "assert_some" => {
+            let pat = IrPattern::Some { inner: Box::new(IrPattern::Wildcard) };
+            (vec![head("some(_)"), found(), lit("none")], TestingVerdict::Arm(pat))
+        }
+        "assert_none" => (vec![head("none"), found(), val(&v[0])], TestingVerdict::Arm(IrPattern::None)),
+        "assert_ok" => {
+            let pat = IrPattern::Ok { inner: Box::new(IrPattern::Wildcard) };
+            (vec![head("ok(_)"), found(), val(&v[0])], TestingVerdict::Arm(pat))
+        }
+        "assert_err" => {
+            let pat = IrPattern::Err { inner: Box::new(IrPattern::Wildcard) };
+            (vec![head("err(_)"), found(), val(&v[0])], TestingVerdict::Arm(pat))
+        }
+        _ => {
+            // Typed at the parameter's `() -> Unit`: a lambda whose body
+            // diverges (`() => panic(..)`) infers `() -> Never`, a shape the
+            // structural wasm leg has no slot for.
+            let mut thunk = callee.expect("assert_throws carries its thunk");
+            thunk.ty = Ty::Fn { params: vec![], ret: Box::new(Ty::Unit), is_effect: false };
+            let call = IrExprKind::Call {
+                target: CallTarget::Computed { callee: Box::new(thunk) },
+                args: vec![],
+                type_args: vec![],
+            };
+            let call = ctx.mk(call, Ty::Unit, span);
+            let parts = vec![head("panic containing "), val(&v[0]), found(), lit("returned normally")];
+            (parts, TestingVerdict::AfterCall(call))
+        }
+    };
+    let fail = t18_abort_block(ctx, parts, span);
+    let ok = ctx.mk(IrExprKind::Block { stmts: vec![], expr: None }, Ty::Unit, span);
+    let guard = match verdict {
+        TestingVerdict::Cond(cond) => IrExprKind::If { cond: Box::new(cond), then: Box::new(ok), else_: Box::new(fail) },
+        TestingVerdict::Arm(pattern) => IrExprKind::Match {
+            subject: Box::new(v[0].clone()),
+            arms: vec![
+                IrMatchArm { pattern, guard: None, body: ok },
+                IrMatchArm { pattern: IrPattern::Wildcard, guard: None, body: fail },
+            ],
+        },
+        TestingVerdict::AfterCall(call) => IrExprKind::Block {
+            stmts: vec![
+                IrStmt { kind: IrStmtKind::Expr { expr: call }, span: None },
+                IrStmt { kind: IrStmtKind::Expr { expr: fail }, span: None },
+            ],
+            expr: None,
+        },
+    };
+    let guard = ctx.mk(guard, Ty::Unit, span);
+    stmts.push(IrStmt { kind: IrStmtKind::Expr { expr: guard }, span: None });
+    Some(ctx.mk(IrExprKind::Block { stmts, expr: None }, Ty::Unit, span))
+}
+
+/// `l <op> r` typed by the operator (Bool for comparisons, Float for `SubFloat`).
+fn testing_binop(ctx: &LowerCtx, op: BinOp, l: &IrExpr, r: &IrExpr, span: Option<ast::Span>) -> IrExpr {
+    let ty = op.result_ty().unwrap_or(Ty::Bool);
+    ctx.mk(IrExprKind::BinOp { op, left: Box::new(l.clone()), right: Box::new(r.clone()) }, ty, span)
+}
