@@ -9225,17 +9225,25 @@ fn __hr_ci_eq(x: String, y: String) -> Bool = {
 
 
 
-fn __hr_hdrs(headers: Map[String, String], ks: List[String], i: Int, acc: List[String]) -> List[String] =
-  if i >= list.len(ks) then acc
-  else {
-    let k = list.get(ks, i) ?? ""
-    let v = map.get(headers, k) ?? ""
-    __hr_hdrs(headers, ks, i + 1, __hr_set(acc, 2, k, v))
-  }
+
 
 fn http_with_headers(status: Int, body: String, headers: Map[String, String]) -> List[String] = {
   let st = int.to_string(status)
-  __hr_hdrs(headers, map.keys(headers), 0, [st, body])
+  let named = map.keys(headers) |> list.enumerate |> list.map(((i, k)) => (i, __hr_lower(k), k))
+  let last = named |> list.fold(
+    map.new(),
+    (m, (_, low, k)) => map.set(m, low, map.get(headers, k) ?? ""),
+  )
+  let first = named |> list.fold(
+    map.new(),
+    (m, (i, low, _)) => if map.contains(m, low) then m
+    else map.set(m, low, i),
+  )
+  [st, body] + (named |> list.flat_map(((i, low, k)) => if map.get(first, low) == some(i) then [
+    k,
+    map.get(last, low) ?? ""
+  ]
+  else []))
 }
 
 fn http_status(resp: List[String], code: Int) -> List[String] = {
