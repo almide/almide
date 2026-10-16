@@ -153,6 +153,104 @@ pub(super) fn fold_site(body: &IrExpr, acc: VarId) -> Option<MoveIn> {
     (!at.is_empty()).then_some(MoveIn { at, subject: None, last: usize::MAX })
 }
 
+/// The frame-tail move-in sites: a call nested in one of the body's result
+/// leaves (`go(st(x, c), i - 1)`, `{ ...r, xs: f(x) }`) whose Var argument
+/// that leaf mentions nowhere else. The frame ends with that leaf, so the
+/// var is never read after the inner call: it hands its credit over instead
+/// of sharing it, and the callee's in-place op meets the block at its true
+/// count (the exit's release of the emptied local is a release of NULL).
+/// The leaf's own call is left out: the tail transfer already releases the
+/// frame before it runs. A var an enclosing `match` subject or destructure
+/// mentions is never taken (its bindings are views into the block), nor a
+/// call under a loop or a lambda (it may run more than once).
+pub(super) fn frame_tail_sites(body: &IrExpr) -> Option<MoveIn> {
+    let mut at = Vec::new();
+    tail_leaves(body, &mut Vec::new(), &mut at);
+    (!at.is_empty()).then_some(MoveIn { at, subject: None, last: usize::MAX })
+}
+
+fn tail_leaves<'e>(e: &'e IrExpr, views: &mut Vec<&'e IrExpr>, out: &mut Vec<(usize, Vec<Place>)>) {
+    match &e.kind {
+        IrExprKind::Block { stmts, expr: Some(t) } => {
+            let n = views.len();
+            views.extend(stmts.iter().filter_map(|s| match &s.kind {
+                IrStmtKind::BindDestructure { value, .. } => Some(value),
+                _ => None,
+            }));
+            tail_leaves(t, views, out);
+            views.truncate(n);
+        }
+        IrExprKind::If { then, else_, .. } => {
+            tail_leaves(then, views, out);
+            tail_leaves(else_, views, out);
+        }
+        IrExprKind::Match { subject, arms } => {
+            views.push(subject);
+            arms.iter().for_each(|a| tail_leaves(&a.body, views, out));
+            views.pop();
+        }
+        IrExprKind::Try { expr } | IrExprKind::Unwrap { expr } => tail_leaves(expr, views, out),
+        _ => {
+            let mut inner = Vec::new();
+            let own = match &e.kind {
+                IrExprKind::Call { args, .. } => Some(args.as_ptr() as usize),
+                _ => None,
+            };
+            nested_calls(e, &mut inner);
+            for (ptr, places) in inner.into_iter().filter(|(p, _)| Some(*p) != own) {
+                let free: Vec<Place> = places
+                    .into_iter()
+                    .filter(|p| mentions(e, p.root()) == 1 && !views.iter().any(|v| reads(v, p.root())))
+                    .collect();
+                if !free.is_empty() {
+                    out.push((ptr, free));
+                }
+            }
+        }
+    }
+}
+
+/// The table calls inside `e` that run at most once (not under a loop or a
+/// lambda), each with its place arguments.
+fn nested_calls(e: &IrExpr, out: &mut Vec<(usize, Vec<Place>)>) {
+    struct Calls<'o>(&'o mut Vec<(usize, Vec<Place>)>);
+    impl IrVisitor for Calls<'_> {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            match &e.kind {
+                IrExprKind::While { .. } | IrExprKind::ForIn { .. } | IrExprKind::Lambda { .. } => return,
+                IrExprKind::Call { target, args, .. } if table_call(target) => {
+                    self.0.push((args.as_ptr() as usize, args.iter().filter_map(Place::of).collect()));
+                }
+                _ => {}
+            }
+            walk_expr(self, e);
+        }
+    }
+    Calls(out).visit_expr(e);
+}
+
+/// How many times `e` mentions `var`: a read, or an in-place statement's target.
+fn mentions(e: &IrExpr, var: VarId) -> usize {
+    struct Count(VarId, usize);
+    impl IrVisitor for Count {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if matches!(&e.kind, IrExprKind::Var { id } if *id == self.0) {
+                self.1 += 1;
+            }
+            walk_expr(self, e);
+        }
+        fn visit_stmt(&mut self, s: &IrStmt) {
+            if stmt_targets(s, self.0) {
+                self.1 += 1;
+            }
+            walk_stmt(self, s);
+        }
+    }
+    let mut c = Count(var, 0);
+    c.visit_expr(e);
+    c.1
+}
+
 /// The index of the statement after `i` that rebinds `var` (`var = …` not
 /// reading it) with nothing between that reads it or may leave the block —
 /// or, past the last statement, a tail that rebinds it first on every path
@@ -425,22 +523,25 @@ impl IrVisitor for Finder {
         }
     }
     fn visit_stmt(&mut self, s: &IrStmt) {
-        let hit = match &s.kind {
-            IrStmtKind::IndexAssign { target, .. }
-            | IrStmtKind::MapInsert { target, .. }
-            | IrStmtKind::FieldAssign { target, .. }
-            | IrStmtKind::ListSwap { target, .. }
-            | IrStmtKind::ListReverse { target, .. }
-            | IrStmtKind::ListRotateLeft { target, .. }
-            | IrStmtKind::RcInc { var: target }
-            | IrStmtKind::RcDec { var: target } => *target == self.0,
-            IrStmtKind::ListCopySlice { dst, src, .. } => *dst == self.0 || *src == self.0,
-            _ => false,
-        };
-        self.1 |= hit;
+        self.1 |= stmt_targets(s, self.0);
         if !self.1 {
             walk_stmt(self, s);
         }
     }
 }
 
+/// Is `var` the target of an in-place statement (`var[i] = …`, `var.f = …`, …)?
+fn stmt_targets(s: &IrStmt, var: VarId) -> bool {
+    match &s.kind {
+        IrStmtKind::IndexAssign { target, .. }
+        | IrStmtKind::MapInsert { target, .. }
+        | IrStmtKind::FieldAssign { target, .. }
+        | IrStmtKind::ListSwap { target, .. }
+        | IrStmtKind::ListReverse { target, .. }
+        | IrStmtKind::ListRotateLeft { target, .. }
+        | IrStmtKind::RcInc { var: target }
+        | IrStmtKind::RcDec { var: target } => *target == var,
+        IrStmtKind::ListCopySlice { dst, src, .. } => *dst == var || *src == var,
+        _ => false,
+    }
+}
