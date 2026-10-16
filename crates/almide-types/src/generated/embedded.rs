@@ -8630,10 +8630,14 @@ fn __decode_part(s: String) -> String = http.url_decode(string.replace(s, "+", "
 fn __is_hex(c: String) -> Bool = c != "" and string.contains("0123456789abcdefABCDEF", c)
 
 
-fn __bad_escape(cs: List[String]) -> Bool = match list.first(cs) {
-  none => false,
-  some(c) => if c != "%" then __bad_escape(list.drop(cs, 1))
-  else if __is_hex(list.get(cs, 1) ?? "") and __is_hex(list.get(cs, 2) ?? "") then __bad_escape(list.drop(cs, 3)) else true,
+
+
+
+fn __bad_escape(path: String) -> Bool = string.split(path, "%") |> list.drop(1) |> list.any((p) => not __hex_pair(p))
+
+fn __hex_pair(p: String) -> Bool = {
+  let cs = string.chars(string.take(p, 2))
+  list.len(cs) == 2 and list.all(cs, __is_hex)
 }
 
 fn __is_rest(s: String) -> Bool = string.starts_with(s, "{") and string.ends_with(s, "...}")
@@ -8682,33 +8686,32 @@ fn __mounted(sub: HttpHandler) -> HttpHandler = (req) => {
 }
 
 
-fn __bind(segs: List[String], parts: List[String]) -> List[String]? = __bind_into(segs, parts, [])
 
 
-fn __bind_into(segs: List[String], parts: List[String], bound: List[String]) -> List[String]? = match list.first(segs) {
-  none => if list.is_empty(parts) then some(bound) else none,
-  some(s) => if __is_rest(s) then {
-    let name = __name_of(s)
-    some(bound + [
-      name,
-      if name == "" then list.join(parts, "/")
-      else parts |> list.map(__decode_part) |> list.join("/")
-    ])
-  } else match list.first(parts) {
-    none => none,
-    some(part) => if __is_param(s) then __bind_into(
-      list.drop(segs, 1),
-      list.drop(parts, 1),
-      bound + [__name_of(s), __decode_part(part)],
-    )
-    else if __decode_part(part) == s then __bind_into(
-      list.drop(segs, 1),
-      list.drop(parts, 1),
-      bound,
-    )
-    else none,
-  },
+
+fn __bind(segs: List[String], parts: List[String]) -> List[String]? = {
+  let fixed = segs |> list.take_while((s) => not __is_rest(s))
+  let n = list.len(fixed)
+  let rest = list.get(segs, n)
+  let pairs = list.zip(fixed, parts)
+  let fits = if rest == none then list.len(parts) == n else list.len(parts) >= n
+  if not fits or not list.all(pairs, ((s, part)) => __is_param(s) or __decode_part(part) == s) then none
+  else {
+    let bound = pairs |> list.filter(((s, _)) => __is_param(s)) |> list.flat_map(((s, part)) => [__name_of(s), __decode_part(part)])
+    match rest {
+      none => some(bound),
+      some(r) => some(bound + __bind_rest(__name_of(r), list.drop(parts, n))),
+    }
+  }
 }
+
+
+
+fn __bind_rest(name: String, parts: List[String]) -> List[String] = [
+  name,
+  if name == "" then list.join(parts, "/")
+  else parts |> list.map(__decode_part) |> list.join("/")
+]
 
 
 fn __covers(a: List[String], b: List[String]) -> Bool = {
@@ -8793,7 +8796,7 @@ effect fn __dispatch(hits: List[(HttpRoute, List[String])], req: HttpRequest) ->
     400,
     "Bad Request: the request target must start with /",
   )
-  else if __bad_escape(string.chars(path)) then http.response(
+  else if __bad_escape(path) then http.response(
     400,
     "Bad Request: malformed percent-encoding in the path",
   )
