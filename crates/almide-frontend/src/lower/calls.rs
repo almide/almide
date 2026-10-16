@@ -699,7 +699,9 @@ fn desugar_assert_abort(
                 stmts.push(IrStmt { kind: IrStmtKind::Expr { expr: guard }, span: None });
                 stmts
             },
-            expr: None,
+            // A Unit tail: bound to a `let`, a tail-less block is no value
+            // the wasm leg lowers (E082 `expr:Block-no-tail`).
+            expr: Some(Box::new(ctx.mk(IrExprKind::Unit, Ty::Unit, span))),
         },
         Ty::Unit,
         span,
