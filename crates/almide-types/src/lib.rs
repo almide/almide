@@ -78,3 +78,37 @@ pub mod reuse {
         REUSE.iter().find(|r| r.intrinsic == symbol)
     }
 }
+
+/// Which type parameters of a native-intrinsic stdlib function need equality
+/// or ordering, read off the runtime fn's generic bounds
+/// (`almide_rt_list_dedup<T: Clone + PartialEq>`) by
+/// `buildscript/capability_bounds.rs` and committed (#3361). The checker
+/// refuses a call whose binding cannot meet the bound (E016 / E030) — the
+/// native leg would otherwise fail in rustc after check passed.
+pub mod capability_bounds {
+    /// The capability a runtime bound demands.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum Cap {
+        /// `PartialEq` / `Eq`.
+        Eq,
+        /// `Ord` / `PartialOrd`.
+        Ord,
+    }
+
+    /// One bounded type parameter.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct Bound {
+        pub module: &'static str,
+        pub func: &'static str,
+        /// The index into the stdlib signature's generic list.
+        pub generic: usize,
+        pub cap: Cap,
+    }
+
+    include!("generated/capability_bounds.rs");
+
+    /// The bounded type parameters of `module.func`.
+    pub fn of<'a>(module: &'a str, func: &'a str) -> impl Iterator<Item = &'static Bound> + 'a {
+        BOUNDS.iter().filter(move |b| b.module == module && b.func == func)
+    }
+}

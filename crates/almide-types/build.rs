@@ -82,7 +82,11 @@ fn main() {
     in_checkout::write_if_changed(&manifest.join("src/generated/embedded.rs"), &out);
     reuse::generate(&root, &files, &manifest.join("src/generated/reuse.rs"));
     implements::generate(&root, &files, &manifest.join("src/generated/implements.rs"));
+    capability_bounds::generate(&root, &files, &manifest.join("src/generated/capability_bounds.rs"));
 }
+
+#[path = "buildscript/capability_bounds.rs"]
+mod capability_bounds;
 
 #[path = "buildscript/reuse.rs"]
 mod reuse;
