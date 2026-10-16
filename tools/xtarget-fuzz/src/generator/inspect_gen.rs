@@ -110,7 +110,8 @@ impl Domain {
 /// The function a decoder undoes, when its module has more than one
 /// producer of the decoder's input (`int.to_string` and `int.to_hex` both
 /// print an Int): by the stdlib's naming convention `from_X` undoes `to_X`,
-/// `decode..` undoes `encode..`, and `parse` undoes `to_string`. A
+/// `decode..` undoes `encode..`, `parse_X` undoes `to_X`, and `parse`
+/// undoes `to_string`. A
 /// convention over name SHAPES, not a list of functions: a decoder that
 /// follows it is covered when it is added, and one that does not is left to
 /// the generic values (and to [`SHAPE_RECIPES`]).
@@ -120,6 +121,9 @@ fn inverse_name(f: &str) -> Option<String> {
     }
     if f.contains("decode") {
         return Some(f.replace("decode", "encode"));
+    }
+    if let Some(x) = f.strip_prefix("parse_") {
+        return Some(format!("to_{x}"));
     }
     (f == "parse").then(|| "to_string".to_string())
 }
@@ -249,6 +253,8 @@ const SHAPE_RECIPES: &[Recipe] = &[
     },
     // n pass-through middleware: what `wrap` composes.
     Recipe { func: "http.wrap", size: "middleware", args: &[("middleware", "list.range(0, {n}) |> list.map((i) => (next) => next)")] },
+    // A pattern is not a needle (SEARCH_PARAMS): n copies of every directive.
+    Recipe { func: "datetime.format", size: "pattern", args: &[("pattern", "string.repeat(\"%Y-%m-%d %H:%M:%S|\", {n})")] },
     // The Float32 constructors take their size as a row count.
     Recipe { func: "matrix.zeros_f32", size: "rows", args: &[("rows", "{n}"), ("cols", "2")] },
     Recipe { func: "matrix.ones_f32", size: "rows", args: &[("rows", "{n}"), ("cols", "2")] },

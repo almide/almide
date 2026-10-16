@@ -225,8 +225,12 @@ impl SigType {
             SigType::Option(e) => Some(GenType::Option(Box::new(e.instantiate(subst)?))),
             // The error slot is fixed to String regardless of the bound
             // variable: the value grammar only ever builds String errors.
-            SigType::Result(ok, _err) => {
-                Some(GenType::Result(Box::new(ok.instantiate(subst)?)))
+            // A concrete error type other than String (`Result[T, HttpResponse]`)
+            // is outside the universe: rendered as `Result[T, String]` it
+            // would be a type error, not a program.
+            SigType::Result(ok, err) => {
+                let pinned = matches!(**err, SigType::Var(_) | SigType::String);
+                pinned.then(|| ok.instantiate(subst)).flatten().map(|g| GenType::Result(Box::new(g)))
             }
             SigType::Tuple2(a, b) => Some(GenType::Tuple2(
                 Box::new(a.instantiate(subst)?),
