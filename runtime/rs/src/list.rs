@@ -292,7 +292,11 @@ pub fn almide_rt_list_par_workers(len: usize) -> usize {
     let cap = *CAP.get_or_init(|| {
         std::env::var("ALMIDE_FAN_THREADS").ok().and_then(|v| v.parse::<usize>().ok()).filter(|&n| n > 0).unwrap_or(usize::MAX)
     });
-    let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
+    // Read once too: on Linux `available_parallelism` reads the cgroup quota
+    // files on every call, which cost every offer 11-48 us on GCE (#3341's
+    // fixed cost, paid even by the offers the model keeps sequential).
+    static CPUS: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    let cpus = *CPUS.get_or_init(|| std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1));
     cpus.max(1).min(cap).min(len.max(1))
 }
 

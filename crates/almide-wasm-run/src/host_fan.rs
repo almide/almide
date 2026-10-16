@@ -320,7 +320,10 @@ pub(super) fn serve(
 /// more than `n`.
 fn worker_count(n: usize) -> usize {
     let cap = almide_base::env::var("ALMIDE_FAN_THREADS").and_then(|v| v.parse::<usize>().ok()).filter(|&c| c > 0);
-    let cpus = std::thread::available_parallelism().map_or(1, |p| p.get());
+    // read once: on Linux it reads the cgroup quota files on every call (the
+    // native runtime's `almide_rt_list_par_workers` caches it the same way)
+    static CPUS: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    let cpus = *CPUS.get_or_init(|| std::thread::available_parallelism().map_or(1, |p| p.get()));
     cpus.min(cap.unwrap_or(usize::MAX)).min(n).max(1)
 }
 
