@@ -124,3 +124,40 @@ fn an_alias_taken_before_the_call_keeps_its_content() {
     assert_eq!(out, "0/4/0s 4/8/4s 8/12/8s \n");
     assert_eq!(allocs, frees, "leaked {} block(s)", allocs.abs_diff(frees));
 }
+
+/// The returned heap value may itself hold the buffer (a tuple or a record
+/// carrying `out`): it keeps the content it had when it was returned, and the
+/// buffer's next push copies rather than writing under it.
+const RETURNED_ALIAS: &str = r#"type Box = { b: Bytes, n: Int }
+
+fn grab(mut out: Bytes, v: Int) -> (Bytes, Int) = {
+  bytes.push(out, v)
+  (out, bytes.len(out))
+}
+
+fn boxed(mut out: Bytes, v: Int) -> Box = {
+  bytes.push(out, v)
+  Box { b: out, n: v }
+}
+
+fn main() -> Unit = {
+  var out = bytes.new(0)
+  var keep: List[Bytes] = []
+  var i = 0
+  while i < 3 {
+    let (snap, _) = grab(out, i)
+    keep = keep + [snap]
+    let bx = boxed(out, 10 + i)
+    keep = keep + [bx.b]
+    i = i + 1
+  }
+  println("${keep |> list.map((k) => bytes.len(k))} ${bytes.to_list(out)}")
+}
+"#;
+
+#[test]
+fn a_returned_value_holding_the_buffer_keeps_its_content() {
+    let (out, _, allocs, frees) = counts(RETURNED_ALIAS);
+    assert_eq!(out, "[1, 2, 3, 4, 5, 6] [0, 10, 1, 11, 2, 12]\n");
+    assert_eq!(allocs, frees, "leaked {} block(s)", allocs.abs_diff(frees));
+}
