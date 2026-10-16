@@ -269,6 +269,7 @@ fn gen_leaf(b: &mut Builder, goal: &GenType) -> String {
         GenType::List(_)
         | GenType::Option(_)
         | GenType::Result(_)
+        | GenType::ResultNom(..)
         | GenType::Tuple2(_, _)
         | GenType::Map(_)
         | GenType::Set(_) => gen_construct(b, goal),
@@ -387,6 +388,16 @@ fn gen_construct(b: &mut Builder, goal: &GenType) -> String {
             } else {
                 let s = render_string_literal(b.rng.pick(pools::STRING_POOL));
                 b.hoist(goal, format!("err({s})"))
+            }
+        }
+        // The error arm is a value of the nominal, from its own leaves.
+        GenType::ResultNom(ok, k) => {
+            if b.rng.chance(2, 3) {
+                let v = gen_expr(b, ok);
+                b.hoist(goal, format!("ok({v})"))
+            } else {
+                let e = nominal_literal(b, k);
+                b.hoist(goal, format!("err({e})"))
             }
         }
         GenType::Tuple2(a, b2) => {
@@ -614,7 +625,7 @@ fn gen_lambda_body(b: &mut Builder, goal: &GenType) -> String {
             // `some(x)` is inline-safe; build x inline.
             format!("some({})", gen_lambda_body(b, inner))
         }
-        GenType::Result(ok) => {
+        GenType::Result(ok) | GenType::ResultNom(ok, _) => {
             // `ok(x)` alone cannot fix E inline, so only safe to use when
             // the HOF pins E (e.g. result.map's closure returns B, and
             // the surrounding Result[B, E] context fixes E). It does, so

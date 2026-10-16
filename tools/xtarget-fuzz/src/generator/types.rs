@@ -30,6 +30,11 @@ pub enum GenType {
     /// is the overwhelmingly common stdlib shape (`int.parse`,
     /// `float.parse`, `value.as_*`), keeping the universe finite.
     Result(Box<GenType>),
+    /// `Result[ok, <nominal>]` — an error arm of a stdlib nominal type
+    /// (`http.decode_json`'s `Result[T, HttpResponse]`). Built from the
+    /// nominal's own constructors, observed with the error side taken through
+    /// the nominal's own readers ([`super::nominal`]).
+    ResultNom(Box<GenType>, &'static str),
     /// `(a, b)` — pairs only; wider tuples add little divergence value
     /// for a lot of grammar surface.
     Tuple2(Box<GenType>, Box<GenType>),
@@ -90,6 +95,13 @@ impl GenType {
                 out.push_str("Result[");
                 e.render_into(out);
                 out.push_str(", String]");
+            }
+            GenType::ResultNom(e, k) => {
+                out.push_str("Result[");
+                e.render_into(out);
+                out.push_str(", ");
+                out.push_str(k);
+                out.push(']');
             }
             GenType::Tuple2(a, b) => {
                 out.push('(');
@@ -174,6 +186,26 @@ impl GenType {
                 ));
             }
         }
+        // The error side becomes the String of what the nominal's readers see
+        // (bound first: a call interpolated in `${…}` can be E041), so the
+        // image is an ordinary `Result[_, String]`.
+        if let GenType::ResultNom(e, k) = self {
+            let nom = super::nominal::get(k)?;
+            if nom.observe_calls_effect {
+                return None;
+            }
+            let (pre, expr) = e.observe(&x, depth + 1)?;
+            if !pre.is_empty() {
+                return None;
+            }
+            let ev = format!("e{depth}");
+            let seen = (nom.observed)().render();
+            let eo = super::nominal::fill(nom.observe, &ev, 0);
+            return Some((
+                String::new(),
+                format!("match {v} {{ ok({x}) => ok({expr}), err({ev}) => {{\n    let {ev}o: {seen} = {eo}\n    err(\"${{{ev}o}}\")\n  }} }}"),
+            ));
+        }
         match self {
             GenType::Bytes => Some((String::new(), format!("bytes.to_list({v})"))),
             GenType::Matrix => Some((String::new(), format!("matrix.to_lists({v})"))),
@@ -196,6 +228,7 @@ impl GenType {
     pub fn observe_calls_effect(&self) -> bool {
         match self {
             GenType::Nominal(k) => super::nominal::get(k).is_some_and(|n| n.observe_calls_effect),
+            GenType::ResultNom(e, k) => e.observe_calls_effect() || GenType::Nominal(k).observe_calls_effect(),
             GenType::List(e) | GenType::Option(e) | GenType::Result(e) | GenType::Map(e) | GenType::Set(e) => e.observe_calls_effect(),
             GenType::Tuple2(a, b) => a.observe_calls_effect() || b.observe_calls_effect(),
             _ => false,
@@ -206,6 +239,7 @@ impl GenType {
     pub fn refuses_var(&self) -> bool {
         match self {
             GenType::Nominal(k) => super::nominal::get(k).is_some_and(|n| n.refuses_var),
+            GenType::ResultNom(e, k) => e.refuses_var() || GenType::Nominal(k).refuses_var(),
             GenType::List(e) | GenType::Option(e) | GenType::Result(e) | GenType::Map(e) | GenType::Set(e) => e.refuses_var(),
             GenType::Tuple2(a, b) => a.refuses_var() || b.refuses_var(),
             _ => false,
@@ -225,7 +259,7 @@ impl GenType {
             GenType::Nominal(k) => (super::nominal::get(k)?.observed)(),
             GenType::List(e) => GenType::List(inner(e)?),
             GenType::Option(e) => GenType::Option(inner(e)?),
-            GenType::Result(e) => GenType::Result(inner(e)?),
+            GenType::Result(e) | GenType::ResultNom(e, _) => GenType::Result(inner(e)?),
             GenType::Tuple2(a, b) => GenType::Tuple2(inner(a)?, inner(b)?),
             _ => return None,
         })
@@ -248,7 +282,7 @@ impl GenType {
             // Only ever an argument: never printed.
             GenType::Endian => false,
             // No string form of its own: observed through its readers.
-            GenType::Nominal(_) => false,
+            GenType::Nominal(_) | GenType::ResultNom(..) => false,
         }
     }
 
@@ -270,6 +304,7 @@ impl GenType {
             GenType::List(e)
             | GenType::Option(e)
             | GenType::Result(e)
+            | GenType::ResultNom(e, _)
             | GenType::Map(e)
             | GenType::Set(e) => {
                 1 + e.depth()
