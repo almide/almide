@@ -352,6 +352,10 @@ fn almide_fan_history() -> &'static std::sync::Mutex<std::collections::HashMap<u
 /// (~0.3 us on the GCE Intel VM, ~1.1 us on the AMD one) that a cheap
 /// sequential offer otherwise pays every time.
 const ALMIDE_FAN_RESAMPLE: u32 = 16;
+/// Any other sequential site re-measures one offer in this many: at ~1.5 us
+/// per element (AMD, 10 elements) the two clock reads were 14% of the
+/// offer, and a missed crossover costs at most this many offers.
+const ALMIDE_FAN_RESAMPLE_NEAR: u32 = 4;
 /// "Far below": the offer stays sequential even at this many times its
 /// measured work per element, so the skipped offers cannot hide a win
 /// unless the work per element grows that much within one resample period.
@@ -465,9 +469,10 @@ impl AlmideFanClock {
     }
 
     /// Record the offer as the site's estimate: ns per element — and, when
-    /// even `ALMIDE_FAN_RESAMPLE_MARGIN` times that would stay sequential,
-    /// let the site's next `ALMIDE_FAN_RESAMPLE - 1` sequential offers run
-    /// unmeasured.
+    /// the site would stay sequential, let its next sequential offers run
+    /// unmeasured: `ALMIDE_FAN_RESAMPLE - 1` of them when it would at
+    /// `ALMIDE_FAN_RESAMPLE_MARGIN` times that, `ALMIDE_FAN_RESAMPLE_NEAR - 1`
+    /// otherwise.
     fn record(self) {
         if !self.measure {
             return;
@@ -477,9 +482,15 @@ impl AlmideFanClock {
         let (ns, n) = if wn > 0 { (w, wn) } else { (c, cn) };
         if n > 0 {
             let t = u128::from(ns) / u128::from(n);
-            let far = almide_rt_fan_plan(self.n, Some(t.saturating_mul(ALMIDE_FAN_RESAMPLE_MARGIN))) < 2;
+            let skip = if almide_rt_fan_plan(self.n, Some(t.saturating_mul(ALMIDE_FAN_RESAMPLE_MARGIN))) < 2 {
+                ALMIDE_FAN_RESAMPLE - 1
+            } else if almide_rt_fan_plan(self.n, Some(t)) < 2 {
+                ALMIDE_FAN_RESAMPLE_NEAR - 1
+            } else {
+                0
+            };
             if let Ok(mut h) = almide_fan_history().lock() {
-                h.insert(self.site, (t, if far { ALMIDE_FAN_RESAMPLE - 1 } else { 0 }));
+                h.insert(self.site, (t, skip));
             }
         }
     }
