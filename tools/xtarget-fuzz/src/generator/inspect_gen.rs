@@ -612,13 +612,16 @@ impl Target {
 
     /// `body` (a `main` body, its value the handler's answer) inside the
     /// handler of the one-route router [`Routed`] declares, and the `main`
-    /// that routes a size-`n` request to it and prints what it answered.
-    fn in_handler(&self, r: &Routed, body: &str, n: u64) -> String {
+    /// that routes a size-`n` request to it and, with `print_body`, prints
+    /// what it answered (the diamond's handler prints its own lines, and an
+    /// extra empty one would break their three-way comparison).
+    fn in_handler(&self, r: &Routed, body: &str, n: u64, print_body: bool) -> String {
         let inner: String = body.lines().map(|l| if l.is_empty() { "\n".to_string() } else { format!("  {l}\n") }).collect();
         let target = r.target.replace("{n}", &n.to_string());
         format!(
-            "effect fn main() -> Unit = {{\n  let h: HttpHandler = match http.router([http.route(\"{}\", (req) => {{\n{inner}  }})]) {{\n    ok(t) => t,\n    err(e) => panic(e),\n  }}\n  let res: HttpResponse = h(http.new_request(\"GET\", {target}, \"\", map.new()))!\n  if http.status_code(res) == 200 then () else panic(\"{OFF_DOMAIN}: the router answered ${{http.status_code(res)}}\")\n  println(http.body(res))\n}}\n",
-            r.pattern
+            "effect fn main() -> Unit = {{\n  let h: HttpHandler = match http.router([http.route(\"{}\", (req) => {{\n{inner}  }})]) {{\n    ok(t) => t,\n    err(e) => panic(e),\n  }}\n  let res: HttpResponse = h(http.new_request(\"GET\", {target}, \"\", map.new()))!\n  if http.status_code(res) == 200 then () else panic(\"{OFF_DOMAIN}: the router answered ${{http.status_code(res)}}\")\n{}}}\n",
+            r.pattern,
+            if print_body { "  println(http.body(res))\n" } else { "" }
         )
     }
 
@@ -725,7 +728,7 @@ impl Target {
             let _ = writeln!(s, "  acc = acc + {}", digest("x", &self.ty(i).unwrap_or(GenType::Int)));
         }
         let s = match self.routed {
-            Some(r) => self.in_handler(r, &format!("{}  http.response(200, \"${{acc}}\")\n", &s["effect fn main() -> Unit = {\n".len()..]), n),
+            Some(r) => self.in_handler(r, &format!("{}  http.response(200, \"${{acc}}\")\n", &s["effect fn main() -> Unit = {\n".len()..]), n, true),
             None => s + "  println(\"${acc}\")\n}\n",
         };
         format!("{}{s}", super::catalogue::imports_for(&s))
@@ -861,7 +864,7 @@ impl Target {
             Some(r) => {
                 let (head, body) = main.split_at(main.find("effect fn main").unwrap_or(0));
                 let body = &body["effect fn main() -> Unit = {\n".len()..];
-                format!("{head}{}", self.in_handler(r, &format!("{body}  http.response(200, \"\")\n"), n))
+                format!("{head}{}", self.in_handler(r, &format!("{body}  http.response(200, \"\")\n"), n, false))
             }
             None => main + "}\n",
         };
@@ -1440,6 +1443,7 @@ pub(crate) mod tests {
         assert!(main.starts_with("import http\nimport self.left\nimport self.right\n\neffect fn main() -> Unit = {\n  let h: HttpHandler = "), "{main}");
         assert!(main.contains("    let a0: HttpRequest = req\n") && main.contains("    let l: Option[String] = left.call(a0, a1)\n"), "{main}");
         assert_eq!(main.matches(&format!("none => panic(\"{OFF_DOMAIN}: none\")")).count(), 3, "{main}");
+        assert!(!main.contains("println(http.body(res))"), "the diamond prints only its three lines: {main}");
     }
 
     /// A recipe that drifted from its function's signature is an error, not
