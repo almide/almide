@@ -75,8 +75,17 @@ fn sig(f: &Value) -> String {
     format!("{effect}({params}) -> {}{err}", ty(&f["return"]))
 }
 
-/// `module.fn` -> (signature, class) for every public stdlib function.
-fn surface() -> BTreeMap<String, (String, &'static str)> {
+/// A type variable anywhere in the interface type `t`.
+fn has_type_var(t: &Value) -> bool {
+    match t {
+        Value::Object(o) => o.get("kind").and_then(|k| k.as_str()) == Some("type_var") || o.values().any(has_type_var),
+        Value::Array(a) => a.iter().any(has_type_var),
+        _ => false,
+    }
+}
+
+/// `module.fn` -> (signature, class, generic) for every public stdlib function.
+fn surface() -> BTreeMap<String, (String, &'static str, bool)> {
     let mut out = BTreeMap::new();
     let mut modules: Vec<String> = std::fs::read_dir(root().join("docs/stdlib"))
         .expect("docs/stdlib")
@@ -101,18 +110,22 @@ fn surface() -> BTreeMap<String, (String, &'static str)> {
                 continue;
             }
             let class = if f["effect"].as_bool() == Some(true) { "effect" } else { "pure" };
-            out.insert(format!("{m}.{name}"), (sig(f), class));
+            let generic = has_type_var(&f["params"]) || has_type_var(&f["return"]);
+            out.insert(format!("{m}.{name}"), (sig(f), class, generic));
         }
     }
     for (m, t) in CHECKER_SURFACE {
         for u in UNITS {
-            out.insert(format!("{m}.{u}"), (format!("(n: Int) -> {t}"), "pure"));
+            out.insert(format!("{m}.{u}"), (format!("(n: Int) -> {t}"), "pure", false));
         }
     }
     out
 }
 
 const EVIDENCE: &[&str] = &["stamp", "order", "parity", "complexity", "diamond", "alloc"];
+
+/// The criteria the harness measures once per instantiation of a generic.
+const HEAP_EVIDENCE: &[&str] = &["complexity", "alloc", "diamond"];
 
 #[test]
 fn every_public_stdlib_function_has_one_ledger_row_and_stamps_carry_evidence() {
@@ -137,7 +150,7 @@ fn every_public_stdlib_function_has_one_ledger_row_and_stamps_carry_evidence() {
         let row_sig = r.get("sig").and_then(|v| v.as_str()).unwrap_or("");
         match want.get(&name) {
             None => problems.push(format!("{name}: no such public function (stale row)")),
-            Some((s, _)) if s != row_sig => {
+            Some((s, ..)) if s != row_sig => {
                 problems.push(format!("{name}: sig {row_sig:?} is now {s:?} — re-inspect"));
                 stale_sig.push(name.clone());
             }
@@ -149,6 +162,17 @@ fn every_public_stdlib_function_has_one_ledger_row_and_stamps_carry_evidence() {
                 for k in EVIDENCE {
                     if r.get(*k).and_then(|v| v.as_str()).is_none_or(|s| s.trim().is_empty()) {
                         problems.push(format!("{name}: inspected without `{k}`"));
+                    }
+                }
+                // A generic function is measured with its type variables at
+                // Int AND at String (the 10-16 ruling): the heap-element path
+                // is a different lowering from Int's, and an Int-only stamp
+                // never ran it (wasm list.flat_map was O(n^2) bytes there).
+                if want.get(&name).is_some_and(|w| w.2) {
+                    for k in HEAP_EVIDENCE {
+                        if !r.get(*k).and_then(|v| v.as_str()).is_some_and(|s| s.contains("[vars=String]")) {
+                            problems.push(format!("{name}: generic, but `{k}` has no [vars=String] measurement"));
+                        }
                     }
                 }
                 // The stamp names the implementation it inspected: a change to
@@ -201,11 +225,11 @@ fn every_public_stdlib_function_has_one_ledger_row_and_stamps_carry_evidence() {
             let start = out.find(&format!("name = \"{n}\"")).expect("row");
             let head = out[..start].rfind("[[fn]]").expect("row head");
             let end = out[start..].find("\n[[fn]]").map(|e| start + e + 1).unwrap_or(out.len());
-            let (s, class) = &want[n];
+            let (s, class, _) = &want[n];
             out.replace_range(head..end, &row(n, s, class));
         }
         for n in &missing {
-            let (s, class) = &want[*n];
+            let (s, class, _) = &want[*n];
             out.push_str(&row(n, s, class));
         }
         std::fs::write(&path, out).expect("bless");
