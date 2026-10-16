@@ -38664,36 +38664,49 @@ fn zli_read_lengths(pos: Int, buf: Int, cnt: Int, inp: Bytes, lencode: List[Int]
 }
 
 
+fn zli_cl_order() -> List[Int] = [
+  16,
+  17,
+  18,
+  0,
+  8,
+  7,
+  9,
+  6,
+  10,
+  5,
+  11,
+  4,
+  12,
+  3,
+  13,
+  2,
+  14,
+  1,
+  15
+]
+
+
 fn zli_dynamic(pos: Int, buf: Int, cnt: Int, inp: Bytes, mut out: Bytes, base: Int) -> (Int, Int, Int, Int) = {
-  let order = [
-    16,
-    17,
-    18,
-    0,
-    8,
-    7,
-    9,
-    6,
-    10,
-    5,
-    11,
-    4,
-    12,
-    3,
-    13,
-    2,
-    14,
-    1,
-    15
-  ]
   let (nlit, p1, b1, c1) = zli_bits(pos, buf, cnt, inp, 5)
   let (ndist, p2, b2, c2) = zli_bits(p1, b1, c1, inp, 5)
   let (ncode, p3, b3, c3) = zli_bits(p2, b2, c2, inp, 4)
   let nlen = nlit + 257
   let ndis = ndist + 1
-  var p = p3
-  var b = b3
-  var c = c3
+
+
+
+  if nlen > 286 or ndis > 30 then (0 - 1, p3, b3, c3)
+  else zli_dynamic_tables(p3, b3, c3, inp, out, base, nlen, ndis, ncode)
+}
+
+
+
+fn zli_dynamic_tables(pos: Int, buf: Int, cnt: Int, inp: Bytes, mut out: Bytes, base: Int, nlen: Int, ndis: Int, ncode: Int) -> (Int, Int, Int, Int) = {
+  let order = zli_cl_order()
+  var p = pos
+  var b = buf
+  var c = cnt
   var cl = list.repeat(0, 19)
   var i = 0
   while i < ncode + 4 {
@@ -38707,7 +38720,7 @@ fn zli_dynamic(pos: Int, buf: Int, cnt: Int, inp: Bytes, mut out: Bytes, base: I
 
 
 
-  if nlen > 286 or ndis > 30 or not zli_code_ok(cl, 19, false) then (0 - 1, p, b, c)
+  if not zli_code_ok(cl, 19, false) then (0 - 1, p, b, c)
   else {
     let (status, p5, b5, c5, lengths) = zli_read_lengths(
       p,
