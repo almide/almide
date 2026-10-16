@@ -844,7 +844,6 @@ impl Target {
             main.push_str(&outcome_guard(v, &self.ret, self.in_domain(), "  "));
         }
         for v in ["d", "l", "r"] {
-            // A Unit return has no string form (E089) and nothing to compare.
             match self.observe {
                 // Encoded bytes differ by leg by contract: compare what decodes.
                 Some(dec) => {
@@ -854,7 +853,11 @@ impl Target {
                 None if self.ret != GenType::Unit => {
                     let _ = writeln!(main, "  {}", render_print(v, &self.ret));
                 }
-                None => {}
+                // A Unit return has no string form (E089); its one value is
+                // printed literally, so each path shows it returned.
+                None => {
+                    let _ = writeln!(main, "  println(\"{v} = ()\")");
+                }
             }
             if let Some(m) = self.mut_param {
                 let _ = writeln!(main, "  {}", render_print(&format!("{v}m"), &self.ty(m).unwrap_or(GenType::Unit)));
@@ -920,12 +923,6 @@ impl Target {
     /// `Bytes` (printed as its byte list, see [`render_print`]).
     pub fn ret_is_observable(&self) -> bool {
         self.ret.observe("v", 0).is_some()
-    }
-
-    /// The diamond prints something: a non-Unit return, or a `mut`
-    /// parameter's mutated copy.
-    pub fn diamond_prints(&self) -> bool {
-        self.ret != GenType::Unit || self.mut_param.is_some()
     }
 
     fn render_param(&self, i: usize) -> String {
@@ -1472,7 +1469,7 @@ pub(crate) mod tests {
             assert!(main.contains(&format!("  var {v}m: Bytes = bytes.new(1000)")), "{main}");
             assert!(main.contains(&format!("let {v}m_o: List[Int] = bytes.to_list({v}m)\n  println(\"{v}m = ${{{v}m_o}}\")")), "{main}");
         }
-        assert!(!main.contains("println(\"d = "), "a Unit return is not printed (E089): {main}");
+        assert!(main.contains("println(\"d = ()\")"), "a Unit return prints its one value, not its string form (E089): {main}");
         if let Ok(dir) = std::env::var("XF_DUMP") {
             std::fs::write(format!("{dir}/direct.almd"), &direct).unwrap();
             for (p, s) in &project.files {
