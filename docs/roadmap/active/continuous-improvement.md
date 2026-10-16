@@ -1424,3 +1424,24 @@ Order agreed with the owner: real defects first (result.filter → list.flat_map
 
 ### Machine
 The disk filled up and three agents died together. A worktree audit removed 335 clean, merged, idle worktrees, and the temp caches went too: 59 → 168 GiB free. The procedure is in memory (worktree-target-dirs-fill-the-disk).
+
+### Generic re-inspection and the second wave (2026-10-16, afternoon)
+- **Heap-element ruling applied:** the harness measures every generic at Int AND String. Of the 132 Int-only stamps, 115 passed at both and were restamped; the rest were voided, fixed or re-measured, then restamped. The ledger test now refuses a generic row whose complexity, alloc or diamond lacks a `[vars=String]` measurement.
+- **Measurement fixes (no criterion relaxed):**
+  - zip / zip_with get a partner of the sized length (the 2-element partner truncated the result);
+  - map lookups walk scattered keys, one per step (one fixed key measured one probe path, and consecutive numerals drifted the wasm index's probe length by 20%);
+  - repeat / iterate scale the count, not the element;
+  - list.min and the header lookups compare strings that meet at a position independent of n;
+  - a rebind shape builds a foreign-typed size operand at size 1;
+  - a counted-judge failure names its leg, k and size.
+- **zlib in scope:** the hostless effect module is catalogued; the leg-dependent encoders (C-331) are observed through their decoders.
+- **Defects found and fixed (test-first, GCE-confirmed unless noted):**
+  - wasm `list.pop` O(n) per call (#3760);
+  - wasm `fold_lines` family validated UTF-8 over the whole file (#3758);
+  - native inline `list.fold` cloned a dying String accumulator;
+  - zlib decoders' error texts differed on both legs, and the inflater's dynamic-header precedence;
+  - wasm `x = selfhosted(x, …)` copied: no move-in into module calls, and the unrolled `while` lane skipped the move-in walk (also fixed #3750 json.field / json.index);
+  - wasm `mut`-buffer calls returning a heap value copied the buffer per call;
+  - check-accepted native build failures: Eq/Ord over fn-holding values (now E016/E030 from the runtime bounds), and pure lambdas reaching an effect slot through if-arms, data or callback returns (part of #3749).
+- **Filed, waiting on ADR-0013:** #3761 (`option/result.unwrap_or` clone a live String default on native), #3762 (fallible `list.fold` clones the accumulator per element).
+- **#3747:** a new contract for the testing asserts is in almide/als#142 (awaiting merge); the almide implementation waits for the pin.
