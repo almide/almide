@@ -322,6 +322,68 @@ impl Emitter<'_> {
         Ok((hraw, hlen, herr))
     }
 
+    /// `fs_frames_or_err` for the streaming walkers (ops 51/52, #3758):
+    /// native reads line by line, so an invalid UTF-8 line errs only AFTER
+    /// the callbacks for the lines before it ran (C-220). The host answers
+    /// such a file with status 3 — those lines' frames, then the err message
+    /// as the LAST frame. This cuts that frame off the walk (`hlen` stops
+    /// before it) into a fresh String block in the fourth hold (0 = none);
+    /// [`Self::fs_stream_land_err`] answers it once the walk is done.
+    pub(crate) fn fs_stream_frames_or_err(&mut self) -> Result<(u32, u32, u32, u32), EmitError> {
+        let hst = self.hold_i64()?;
+        self.f.instructions().local_tee(hst);
+        let (hraw, hlen, herr) = self.fs_frames_or_err()?;
+        let hmsg = self.hold_i32()?;
+        let hoff = self.hold_i32()?;
+        let hfl = self.hold_i32()?;
+        let pay = almide_layout::PAYLOAD as i32;
+        let mut i = self.f.instructions();
+        i.i32_const(0).local_set(hmsg);
+        i.local_get(hst).i64_const(32).i64_shr_s().i32_wrap_i64().i32_const(3).i32_eq();
+        i.if_(BlockType::Empty);
+        i.i32_const(0).local_set(hoff);
+        i.block(BlockType::Empty).loop_(BlockType::Empty);
+        i.local_get(hraw).local_get(hoff).i32_add().i32_load(slot_memarg(0)).local_set(hfl);
+        i.local_get(hoff).i32_const(4).i32_add().local_get(hfl).i32_add();
+        i.local_get(hlen).i32_ge_u().br_if(1);
+        i.local_get(hoff).i32_const(4).i32_add().local_get(hfl).i32_add().local_set(hoff);
+        i.br(0).end().end();
+        i.local_get(hfl).call(F_ALLOC).local_tee(hmsg).i32_const(pay).i32_add();
+        i.local_get(hraw).i32_const(pay).i32_add().local_get(hoff).i32_add().i32_const(4).i32_add();
+        i.local_get(hfl).memory_copy(0, 0);
+        i.local_get(hoff).local_set(hlen);
+        i.end();
+        self.release_i32();
+        self.release_i32();
+        self.release_i64();
+        Ok((hraw, hlen, herr, hmsg))
+    }
+
+    /// After the walk (and `fs_frames_release_raw`): a deferred UTF-8 err
+    /// from [`Self::fs_stream_frames_or_err`] becomes `err(msg)` in `slot`.
+    /// `keep_first`: `slot` is a fallible walk's callback err, and one that
+    /// landed first is the answer — the walk stopped before the bad line, as
+    /// native's did — so the message is released instead.
+    pub(crate) fn fs_stream_land_err(&mut self, hmsg: u32, slot: u32, keep_first: bool) {
+        let dec_str = self.dec_fn_of(STR);
+        let hs = self.tmp_i32_local;
+        let mut i = self.f.instructions();
+        i.local_get(hmsg).if_(BlockType::Empty);
+        if keep_first {
+            i.local_get(slot).if_(BlockType::Empty);
+            i.local_get(hmsg).call(dec_str);
+            i.else_();
+        }
+        i.i32_const(16).call(F_ALLOC).local_set(hs);
+        i.local_get(hs).i32_const(1).i32_store(slot_memarg(almide_layout::SUM_TAG));
+        i.local_get(hs).local_get(hmsg).i32_store(slot_memarg(almide_layout::SUM_FIELD));
+        i.local_get(hs).local_set(slot);
+        if keep_first {
+            i.end();
+        }
+        i.end();
+    }
+
     /// After a frames walk: the raw buffer `fs_frames_or_err` pulled is
     /// scratch once every frame is copied out, unless it became the err
     /// payload (#2977 — every `env.args` / `fs.read_lines` / … call kept it).
@@ -487,7 +549,7 @@ impl Emitter<'_> {
                 self.lower_arg(init, Some(acc_ty), ArgMode::Retain)?;
                 self.f.instructions().local_set(params[0]);
                 self.fs_call_1(p, OP_FOLD_LINES)?;
-                let (hraw, hlen, herr) = self.fs_frames_or_err()?;
+                let (hraw, hlen, herr, hmsg) = self.fs_stream_frames_or_err()?;
                 // walk the frames, folding — the list.fold discipline: the
                 // accumulator owns one credit on every step, a borrowed body
                 // result takes its share, and the replaced accumulator is
@@ -505,6 +567,7 @@ impl Emitter<'_> {
                     Ok(())
                 })?;
                 self.fs_frames_release_raw(hraw, herr);
+                self.fs_stream_land_err(hmsg, herr, false);
                 self.witness_walk_result(acc_ty);
                 // ok(acc) / err passthrough (the read failed before any
                 // line: the init's credit is released with it)
@@ -526,22 +589,22 @@ impl Emitter<'_> {
                 }
                 self.store_ty_slot(acc_ty, almide_layout::SUM_FIELD);
                 self.f.instructions().local_get(hs).end();
-                self.release_i32();
-                self.release_i32();
-                self.release_i32();
-                self.release_i32();
+                for _ in 0..5 {
+                    self.release_i32();
+                }
                 SliceTy::Result(self.types.intern(acc_ty), self.types.intern(STR))
             }
             ("for_each_line", [p, cb]) => {
                 let (params, body) = self.hof_lambda(cb, 1)?;
                 self.fs_call_1(p, OP_FOR_EACH_LINE)?;
-                let (hraw, hlen, herr) = self.fs_frames_or_err()?;
+                let (hraw, hlen, herr, hmsg) = self.fs_stream_frames_or_err()?;
                 self.fs_frames_foreach_borrowed(hraw, hlen, Some((cb, crate::fs::witness_walkers::WalkAcc::Carried(None))), |em, _| {
                     em.f.instructions().local_set(params[0]);
                     em.lower_stmt_expr(body)?;
                     Ok(())
                 })?;
                 self.fs_frames_release_raw(hraw, herr);
+                self.fs_stream_land_err(hmsg, herr, false);
                 let hs = self.hold_i32()?;
                 {
                     let mut i = self.f.instructions();
@@ -557,10 +620,9 @@ impl Emitter<'_> {
                     i.local_get(hs);
                     i.end();
                 }
-                self.release_i32();
-                self.release_i32();
-                self.release_i32();
-                self.release_i32();
+                for _ in 0..5 {
+                    self.release_i32();
+                }
                 SliceTy::Result(self.types.intern(SliceTy::Unit), self.types.intern(STR))
             }
             // #2744: the byte-range walkers (fs_range.rs).
