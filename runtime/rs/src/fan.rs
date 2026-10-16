@@ -86,28 +86,20 @@ pub fn almide_rt_fan_map_par<A: Send + Sync + Clone, B: Send, F: Fn(A) -> Result
             clock.record(site);
             return almide_fan_map_settle_slots(slots);
         }
-        let chunk_size = n.div_ceil(workers);
+        let block = almide_fan_block(n, workers);
         // The group flushes this thread's stdout first: a runtime abort on a worker
         // exits without reaching this thread's buffer (C-197, see rust.toml fan_expr).
         let group = almide_fan_group(n);
-        let (f_ref, clock_ref, group_ref) = (&f, &clock, &group);
-        // on the resident crew (list.rs `almide_fan_run_tasks`)
-        let tasks: Vec<AlmideFanTask<'_>> = items
-            .chunks(chunk_size)
-            .zip(slots.chunks_mut(chunk_size))
-            .enumerate()
-            .map(|(chunk_idx, (chunk, out))| {
-                let base = chunk_idx * chunk_size;
-                Box::new(move || {
-                    clock_ref.worker(out.iter_mut().zip(chunk).enumerate(), |(i, (slot, item))| {
-                        let _elem = almide_fan_enter(group_ref, base + i);
-                        *slot = Some(f_ref(item.clone()));
-                        Some(true)
-                    });
-                }) as AlmideFanTask<'_>
-            })
-            .collect();
-        almide_fan_run_scoped(tasks);
+        // dealt in blocks to the resident crew (list.rs `almide_fan_deal`)
+        let blocks: Vec<_> = items.chunks(block).zip(slots.chunks_mut(block)).enumerate().collect();
+        almide_fan_panic_if_any(almide_fan_deal(blocks, workers, |blocks| {
+            let elems = blocks.flat_map(|(b, (chunk, out))| out.iter_mut().zip(chunk.iter()).enumerate().map(move |(i, e)| (b * block + i, e)));
+            clock.worker(elems, |(index, (slot, item))| {
+                let _elem = almide_fan_enter(&group, index);
+                *slot = Some(f(item.clone()));
+                Some(true)
+            });
+        }));
         clock.record(site);
         almide_fan_map_settle_slots(slots)
     })();

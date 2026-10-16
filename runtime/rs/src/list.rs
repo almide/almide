@@ -540,10 +540,37 @@ fn almide_fan_run_tasks(tasks: Vec<AlmideFanTask<'_>>) -> Vec<std::thread::Resul
 
 /// The `std::thread::scope` panic: once every task has finished, a panicked
 /// one panics the offer.
-fn almide_fan_run_scoped(tasks: Vec<AlmideFanTask<'_>>) {
-    if almide_fan_run_tasks(tasks).iter().any(Result::is_err) {
+fn almide_fan_panic_if_any(outcomes: Vec<std::thread::Result<()>>) {
+    if outcomes.iter().any(Result::is_err) {
         panic!("a scoped thread panicked");
     }
+}
+
+/// The block size an offer of `n` elements on `workers` threads is dealt in:
+/// about four blocks per worker, the wasm host's `run_all` split.
+fn almide_fan_block(n: usize, workers: usize) -> usize {
+    n.div_ceil(workers * 4).max(1)
+}
+
+/// Deal `blocks`, in order, to `workers` crew threads: each takes the next
+/// block until none is left, and `work` runs on each thread over the blocks
+/// it took. A thread the OS left waiting (or placed on a busy core) takes
+/// fewer blocks instead of holding the offer back — with a fixed chunk per
+/// thread, resident threads made spectralnorm 1.3x slower on an Intel 8581C.
+/// Blocks are dealt in list order, so every block below one being run was
+/// already taken by a running thread (the ADR-0024 D6 trap wait relies on it).
+fn almide_fan_deal<'a, T: Send + 'a>(blocks: Vec<T>, workers: usize, work: impl Fn(&mut dyn Iterator<Item = T>) + Sync + 'a) -> Vec<std::thread::Result<()>> {
+    let queue = std::sync::Mutex::new(blocks.into_iter());
+    let (queue, work) = (&queue, &work);
+    let tasks: Vec<AlmideFanTask<'_>> = (0..workers)
+        .map(|_| {
+            Box::new(move || {
+                let mut next = std::iter::from_fn(|| queue.lock().unwrap_or_else(|e| e.into_inner()).next());
+                work(&mut next);
+            }) as AlmideFanTask<'_>
+        })
+        .collect();
+    almide_fan_run_tasks(tasks)
 }
 
 pub fn almide_rt_list_par_map<A: Send + Sync + Clone, B: Send, F: Fn(A) -> B + Send + Sync>(xs: Vec<A>, f: F) -> Vec<B> {
@@ -559,29 +586,21 @@ pub fn almide_rt_list_par_map<A: Send + Sync + Clone, B: Send, F: Fn(A) -> B + S
         clock.record(site);
         return out;
     }
-    let chunk_size = n.div_ceil(workers);
+    let block = almide_fan_block(n, workers);
     let mut slots: Vec<Option<B>> = (0..n).map(|_| None).collect();
     // Flush first: a worker's abort cannot reach this thread's buffer (C-197).
     almide_stdout_flush();
     // The workers work for the enclosing fan element: a trap on one waits for
     // the elements below it (ADR-0024 D6).
     let sink = almide_fan_current();
-    let (f_ref, clock_ref) = (&f, &clock);
-    let tasks: Vec<AlmideFanTask<'_>> = xs
-        .chunks(chunk_size)
-        .zip(slots.chunks_mut(chunk_size))
-        .map(|(chunk, out)| {
-            let sink = sink.clone();
-            Box::new(move || {
-                almide_fan_adopt(sink);
-                clock_ref.worker(out.iter_mut().zip(chunk), |(slot, x)| {
-                    *slot = Some(f_ref(x.clone()));
-                    Some(true)
-                });
-            }) as AlmideFanTask<'_>
-        })
-        .collect();
-    almide_fan_run_scoped(tasks);
+    let blocks: Vec<_> = xs.chunks(block).zip(slots.chunks_mut(block)).collect();
+    almide_fan_panic_if_any(almide_fan_deal(blocks, workers, |blocks| {
+        almide_fan_adopt(sink.clone());
+        clock.worker(blocks.flat_map(|(chunk, out)| out.iter_mut().zip(chunk.iter())), |(slot, x)| {
+            *slot = Some(f(x.clone()));
+            Some(true)
+        });
+    }));
     clock.record(site);
     slots.into_iter().map(|b| b.expect("list.par_map: every slot is written by its worker")).collect()
 }
@@ -599,39 +618,31 @@ pub fn almide_rt_list_par_filter<A: Send + Sync + Clone, F: Fn(A) -> bool + Send
         clock.record(site);
         return out;
     }
-    let chunk_size = n.div_ceil(workers);
-    let chunks: Vec<&[A]> = xs.chunks(chunk_size).collect();
-    let mut results: Vec<Option<Vec<A>>> = (0..chunks.len()).map(|_| None).collect();
+    let block = almide_fan_block(n, workers);
+    // each element's verdict by index; the kept elements are then taken in
+    // list order
+    let mut keep = vec![false; n];
     // Flush first: a worker's abort cannot reach this thread's buffer (C-197).
     almide_stdout_flush();
     // The workers work for the enclosing fan element: a trap on one waits for
     // the elements below it (ADR-0024 D6).
     let sink = almide_fan_current();
-    let (f_ref, clock_ref) = (&f, &clock);
-    let tasks: Vec<AlmideFanTask<'_>> = chunks
-        .iter()
-        .zip(results.iter_mut())
-        .map(|(chunk, result)| {
-            let sink = sink.clone();
-            Box::new(move || {
-                almide_fan_adopt(sink);
-                let mut kept = Vec::new();
-                clock_ref.worker(chunk.iter(), |x| {
-                    if f_ref(x.clone()) {
-                        kept.push(x.clone());
-                    }
-                    Some(true)
-                });
-                *result = Some(kept);
-            }) as AlmideFanTask<'_>
-        })
-        .collect();
-    // the lowest chunk's panic, as joining the handles in order resumed it
-    if let Some(Err(panic)) = almide_fan_run_tasks(tasks).into_iter().find(Result::is_err) {
+    let blocks: Vec<_> = xs.chunks(block).zip(keep.chunks_mut(block)).collect();
+    // the lowest thread's panic, as joining the handles in order resumed it
+    if let Some(Err(panic)) = almide_fan_deal(blocks, workers, |blocks| {
+        almide_fan_adopt(sink.clone());
+        clock.worker(blocks.flat_map(|(chunk, out)| out.iter_mut().zip(chunk.iter())), |(k, x)| {
+            *k = f(x.clone());
+            Some(true)
+        });
+    })
+    .into_iter()
+    .find(Result::is_err)
+    {
         std::panic::resume_unwind(panic);
     }
     clock.record(site);
-    results.into_iter().flatten().flatten().collect()
+    xs.into_iter().zip(keep).filter_map(|(x, k)| k.then_some(x)).collect()
 }
 
 /// `any` (`stop_on` = true) / `all` (`stop_on` = false): does some element's
@@ -650,32 +661,25 @@ fn almide_fan_search<A: Send + Sync + Clone, F: Fn(A) -> bool + Send + Sync>(sit
             (hit, seen)
         })
     } else {
-        let chunk_size = xs.len().div_ceil(workers);
+        let block = almide_fan_block(xs.len(), workers);
         let hit = std::sync::atomic::AtomicBool::new(false);
         // Flush first: a worker's abort cannot reach this thread's buffer (C-197).
         almide_stdout_flush();
         // The workers work for the enclosing fan element: a trap on one waits for
         // the elements below it (ADR-0024 D6).
         let sink = almide_fan_current();
-        let (hit_ref, clock_ref, look_ref) = (&hit, &clock, &look);
-        let tasks: Vec<AlmideFanTask<'_>> = xs
-            .chunks(chunk_size)
-            .map(|chunk| {
-                let sink = sink.clone();
-                Box::new(move || {
-                    almide_fan_adopt(sink);
-                    clock_ref.worker(chunk, |x| {
-                        if hit_ref.load(std::sync::atomic::Ordering::Relaxed) { return None; }
-                        if look_ref(x) {
-                            hit_ref.store(true, std::sync::atomic::Ordering::Relaxed);
-                            return Some(false);
-                        }
-                        Some(true)
-                    });
-                }) as AlmideFanTask<'_>
-            })
-            .collect();
-        almide_fan_run_scoped(tasks);
+        let blocks: Vec<&[A]> = xs.chunks(block).collect();
+        almide_fan_panic_if_any(almide_fan_deal(blocks, workers, |blocks| {
+            almide_fan_adopt(sink.clone());
+            clock.worker(blocks.flat_map(|chunk| chunk.iter()), |x| {
+                if hit.load(std::sync::atomic::Ordering::Relaxed) { return None; }
+                if look(x) {
+                    hit.store(true, std::sync::atomic::Ordering::Relaxed);
+                    return Some(false);
+                }
+                Some(true)
+            });
+        }));
         hit.load(std::sync::atomic::Ordering::Relaxed)
     };
     clock.record(site);
