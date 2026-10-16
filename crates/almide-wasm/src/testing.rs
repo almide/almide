@@ -8,13 +8,17 @@
 //! unlinkable name). The arms below read the tag through THIS emitter's
 //! layout and take any payload type.
 //!
-//! The failure bytes are the self-host bodies' `prim.die` lines, verbatim —
-//! the bytes the wasm lane has always printed for these asserts. Native
-//! panics through libtest with the operand values in the message instead;
-//! no contract pins the failure text of this family (the pass path is
+//! A direct call OUTSIDE a test block never reaches here: the frontend
+//! desugars it to the T18 abort block (C-381, `calls_testing_assert.rs`),
+//! the same bytes on every target. These arms serve the rest — calls inside
+//! a test block, where the harness reports, and first-class uses of the fn
+//! value. Their failure bytes are the self-host bodies' `prim.die` lines,
+//! verbatim; native panics through libtest with the operand values in the
+//! message instead, and no contract pins that text (the pass path is
 //! silent on every target, and that is the observable the test lane
-//! compares). `assert_throws` stays native-only (an uncatchable trap), and
-//! `assert_snapshot` is desugared by the frontend before it reaches here.
+//! compares). `assert_throws` inside a test block stays native-only (an
+//! uncatchable trap), and `assert_snapshot` is desugared by the frontend
+//! before it reaches here.
 
 use almide_ir::IrExpr;
 use wasm_encoder::BlockType;
