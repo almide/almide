@@ -567,18 +567,15 @@ fn diamond(ctx: &Ctx, t: &Target, n: u64) -> String {
         c.output()
     };
     let (Ok(nat), Ok(was)) = (run(false), run(true)) else { return "SKIP: could not run almide".into() };
-    diamond_verdict(t.diamond_prints(), &nat, &was)
+    diamond_verdict(&nat, &was)
 }
 
-/// Criterion 5's verdict from the diamond project's run on each leg.
-/// `prints` false: a Unit return and no `mut` parameter leave nothing to
-/// compare (#3636) — reported as a SKIP once both legs exited 0, never a PASS.
-fn diamond_verdict(prints: bool, nat: &std::process::Output, was: &std::process::Output) -> String {
+/// Criterion 5's verdict from the diamond project's run on each leg. Every
+/// path prints a line: its return, `()` for a Unit return (#3636), and a
+/// `mut` parameter's mutated copy — so no output is a failure.
+fn diamond_verdict(nat: &std::process::Output, was: &std::process::Output) -> String {
     if !nat.status.success() || !was.status.success() {
         return format!("FAIL: native exit {:?} ({}), wasm exit {:?} ({})", nat.status.code(), failure_reason(&nat.stderr), was.status.code(), failure_reason(&was.stderr));
-    }
-    if !prints {
-        return "SKIP: nothing to compare — a Unit return and no mut parameter (the three calls ran to exit 0 on both legs)".into();
     }
     let (a, b) = (String::from_utf8_lossy(&nat.stdout).into_owned(), String::from_utf8_lossy(&was.stdout).into_owned());
     // `render_print` writes `<name> = <value>`: compare the values.
@@ -1041,7 +1038,7 @@ mod verdict_tests {
         let wasm = format!("PANIC: {ERR_PATH}: invalid base64 character__ALMD_WASM_ALLOC allocs=5 reused=0 live=3\n");
         let (ok, part) = alloc_part("call", &output(1, "", &wasm));
         assert!(!ok && part.ends_with(&format!("({want})")) && !part.contains("live="), "{part}");
-        let v = diamond_verdict(true, &output(1, "", &stderr), &output(1, "", &stderr));
+        let v = diamond_verdict(&output(1, "", &stderr), &output(1, "", &stderr));
         assert!(v.starts_with("FAIL: ") && v.contains(want), "{v}");
         // Any other failure keeps its own first error line.
         assert_eq!(run_failure(&output(2, "", "warning: x\nerror: boom\n")), "exit Some(2): error: boom");
@@ -1058,7 +1055,7 @@ mod verdict_tests {
         let wasm = format!("PANIC: {OFF_DOMAIN}: false__ALMD_WASM_ALLOC allocs=5 reused=0 live=3\n");
         let (ok, part) = alloc_part("call", &output(1, "", &wasm));
         assert!(!ok && part.ends_with("(refused its in-domain input (the probed call returned false))") && !part.contains("live="), "{part}");
-        let v = diamond_verdict(true, &output(1, "", &stderr), &output(1, "", &stderr));
+        let v = diamond_verdict(&output(1, "", &stderr), &output(1, "", &stderr));
         assert!(v.starts_with("FAIL: ") && v.contains(want), "{v}");
     }
 
@@ -1074,20 +1071,23 @@ mod verdict_tests {
         }
     }
 
-    /// #3636: a Unit function with no `mut` parameter (bytes.heap_restore)
-    /// prints nothing in the diamond, and 0 lines is not "the three calls
-    /// differ". It is a SKIP — never a PASS — once both legs ran to exit 0;
-    /// a failed leg is still a FAIL.
+    /// #3636: a Unit function with no `mut` parameter prints `()` on each
+    /// path, so 0 lines is never "nothing to compare": it is a FAIL, as is a
+    /// failed leg.
     #[test]
-    fn a_diamond_with_nothing_to_print_is_a_skip_not_a_mismatch() {
+    fn a_unit_diamond_prints_its_value_on_each_path() {
         let t = crate::generator::inspect_gen::tests::target("bytes.heap_restore");
-        assert!(!t.diamond_prints());
-        let v = diamond_verdict(t.diamond_prints(), &output(0, "", ""), &output(0, "", ""));
-        assert!(v.starts_with("SKIP: "), "{v}");
-        let v = diamond_verdict(t.diamond_prints(), &output(1, "", "error: boom"), &output(0, "", ""));
+        let project = t.diamond_project(10);
+        let main = project.files.iter().find(|(p, _)| p.ends_with("main.almd")).map(|(_, s)| s.clone()).unwrap();
+        for v in ["d", "l", "r"] {
+            assert!(main.contains(&format!("println(\"{v} = ()\")")), "{main}");
+        }
+        let three = "d = ()\nl = ()\nr = ()\n";
+        let v = diamond_verdict(&output(0, three, ""), &output(0, three, ""));
+        assert!(v.starts_with("PASS: "), "{v}");
+        let v = diamond_verdict(&output(1, "", "error: boom"), &output(0, three, ""));
         assert!(v.starts_with("FAIL: "), "{v}");
-        // A function that prints and printed nothing still fails.
-        let v = diamond_verdict(true, &output(0, "", ""), &output(0, "", ""));
+        let v = diamond_verdict(&output(0, "", ""), &output(0, "", ""));
         assert!(v.starts_with("FAIL: "), "{v}");
     }
 }
