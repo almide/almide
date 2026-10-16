@@ -178,6 +178,18 @@ struct Recipe {
 /// count.
 const ROPE: &[(&str, &str)] = &[("x", "matrix.zeros({n}, 4)"), ("n_heads", "2"), ("head_dim", "2")];
 
+/// n keys `k<i * 7919 mod 1000003>`: distinct (7919 is invertible mod the
+/// prime) and in no run of consecutive numerals.
+const SCATTERED_MAP: &str = "list.range(0, {n}) |> list.fold(map.new(), (m, i) => map.set(m, \"k${i * 7919 % 1000003}\", {small_elem}))";
+/// The present key of the map's `({i} * 7919 mod n)`-th entry.
+const SCATTERED_KEY: &str = "\"k${{i} * 7919 % {n} * 7919 % 1000003}\"";
+
+/// A response of n headers named `k` + the digits of `100000000 + i` least
+/// significant first: two names meet at a position independent of n.
+const FLAT_NAMED_RESPONSE: &str = "http.with_headers(200, \"aé\", (list.range(0, {n}) |> list.fold(map.new(), (m, i) => map.set(m, \"k\" + string.reverse(\"${100000000 + i}\"), \"v\"))))";
+/// The last of those names.
+const FLAT_LAST_NAME: &str = "\"k\" + string.reverse(\"${100000000 + {n} - 1}\")";
+
 /// n bytes with no short period, for the zlib codecs.
 const CODEC_BYTES: &str = "bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251))";
 
@@ -245,7 +257,7 @@ const SHAPE_RECIPES: &[Recipe] = &[
     Recipe { func: "json.get_int", size: "j", args: &[("key", "\"k${100000000 + {n} - 1}\"")] },
     // The header lookups "none / empty if missing": the sized response and
     // request carry n headers keyed the same way (nominal.rs).
-    Recipe { func: "http.get_header", size: "resp", args: &[("key", "\"k${100000000 + {n} - 1}\"")] },
+    Recipe { func: "http.get_header", size: "resp", args: &[("resp", FLAT_NAMED_RESPONSE), ("key", FLAT_LAST_NAME)] },
     // header_values compares every name with the key: names whose digits run
     // least significant first meet the key's at a position independent of n
     // (see `{sized_flat}`); "k1000xxxxx" against the last key drifted the
@@ -253,12 +265,13 @@ const SHAPE_RECIPES: &[Recipe] = &[
     Recipe {
         func: "http.header_values",
         size: "resp",
-        args: &[
-            ("resp", "http.with_headers(200, \"aé\", (list.range(0, {n}) |> list.fold(map.new(), (m, i) => map.set(m, \"k\" + string.reverse(\"${100000000 + i}\"), \"v\"))))"),
-            ("key", "\"k\" + string.reverse(\"${100000000 + {n} - 1}\")"),
-        ],
+        args: &[("resp", FLAT_NAMED_RESPONSE), ("key", FLAT_LAST_NAME)],
     },
-    Recipe { func: "http.req_header", size: "req", args: &[("key", "\"k${100000000 + {n} - 1}\"")] },
+    Recipe {
+        func: "http.req_header",
+        size: "req",
+        args: &[("req", "http.new_request(\"GET\", \"/p/1\", \"aé\", (list.range(0, {n}) |> list.fold(map.new(), (m, i) => map.set(m, \"k\" + string.reverse(\"${100000000 + i}\"), \"v\"))))"), ("key", FLAT_LAST_NAME)],
+    },
     // The path lookups "none / err if the path is missing": the last key of
     // the sized object, so the hit walks it whole.
     Recipe { func: "json.get_path", size: "j", args: &[("path", "json.field(json.root(), \"k${100000000 + {n} - 1}\")")] },
@@ -295,14 +308,16 @@ const SHAPE_RECIPES: &[Recipe] = &[
     Recipe { func: "list.min", size: "xs", args: &[("xs", "{sized_flat}")] },
     // A lookup's key walks the present keys, one per step: a single fixed
     // key measured one probe path (see `per_step`), and a hit is the
-    // success path the stamp claims.
-    Recipe { func: "map.get", size: "m", args: &[("m", "{sized}"), ("key", "\"k${100000000 + {i} * 7919 % {n}}\"")] },
-    Recipe { func: "map.get_or", size: "m", args: &[("m", "{sized}"), ("key", "\"k${100000000 + {i} * 7919 % {n}}\"")] },
-    Recipe { func: "map.contains", size: "m", args: &[("m", "{sized}"), ("key", "\"k${100000000 + {i} * 7919 % {n}}\"")] },
+    // success path the stamp claims. The keys are scattered (SCATTERED_MAP):
+    // with n consecutive numerals the wasm index's mean probe fell by 20%
+    // from n = 20000 to 80000 and then held, a series no class fits.
+    Recipe { func: "map.get", size: "m", args: &[("m", SCATTERED_MAP), ("key", SCATTERED_KEY)] },
+    Recipe { func: "map.get_or", size: "m", args: &[("m", SCATTERED_MAP), ("key", SCATTERED_KEY)] },
+    Recipe { func: "map.contains", size: "m", args: &[("m", SCATTERED_MAP), ("key", SCATTERED_KEY)] },
     Recipe {
         func: "map.insert",
         size: "m",
-        args: &[("m", "{sized}"), ("key", "\"k${100000000 + {i} * 7919 % {n}}\""), ("value", "{small}")],
+        args: &[("m", SCATTERED_MAP), ("key", SCATTERED_KEY), ("value", "{small}")],
     },
     // The count is the size, whatever the element: at String the element
     // is otherwise the first sized parameter, and the probe measured copying
