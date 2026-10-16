@@ -238,7 +238,18 @@ const SHAPE_RECIPES: &[Recipe] = &[
     // The header lookups "none / empty if missing": the sized response and
     // request carry n headers keyed the same way (nominal.rs).
     Recipe { func: "http.get_header", size: "resp", args: &[("key", "\"k${100000000 + {n} - 1}\"")] },
-    Recipe { func: "http.header_values", size: "resp", args: &[("key", "\"k${100000000 + {n} - 1}\"")] },
+    // header_values compares every name with the key: names whose digits run
+    // least significant first meet the key's at a position independent of n
+    // (see `{sized_flat}`); "k1000xxxxx" against the last key drifted the
+    // per-name cost on both legs (rms 8%, no class).
+    Recipe {
+        func: "http.header_values",
+        size: "resp",
+        args: &[
+            ("resp", "http.with_headers(200, \"aé\", (list.range(0, {n}) |> list.fold(map.new(), (m, i) => map.set(m, \"k\" + string.reverse(\"${100000000 + i}\"), \"v\"))))"),
+            ("key", "\"k\" + string.reverse(\"${100000000 + {n} - 1}\")"),
+        ],
+    },
     Recipe { func: "http.req_header", size: "req", args: &[("key", "\"k${100000000 + {n} - 1}\"")] },
     // The path lookups "none / err if the path is missing": the last key of
     // the sized object, so the hit walks it whole.
