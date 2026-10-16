@@ -355,7 +355,7 @@ const ALMIDE_FAN_RESAMPLE: u32 = 16;
 /// "Far below": the offer stays sequential even at this many times its
 /// measured work per element, so the skipped offers cannot hide a win
 /// unless the work per element grows that much within one resample period.
-const ALMIDE_FAN_RESAMPLE_MARGIN: u128 = 8;
+const ALMIDE_FAN_RESAMPLE_MARGIN: u128 = 4;
 
 /// The calling thread's CPU time in ns — the clock an offer's elements are
 /// measured on (the wasm host's copy is host_fan.rs `cpu_ns`). Wall time
