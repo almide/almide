@@ -240,13 +240,41 @@ fn place_root(e: &IrExpr) -> Option<VarId> {
 /// Their value convention is `AlmideRcCow<T>` while the runtime signature
 /// takes the raw `&T`, and the deref coercion `&var` relies on does not reach
 /// through a propagating expression (#1210, #617): the borrow must deref
-/// explicitly.
+/// explicitly. An `InlineRust` whose template IS a Rust block propagates the
+/// same way (#3753: `MatrixShapeSpec`'s unrolled small matmul,
+/// `{ let __almide_sa = ..; AlmideRcCow::from(..) }`, at a runtime arg slot).
 fn propagating_rc_cow_value(e: &IrExpr) -> bool {
     let rc_cow = matches!(e.ty, Ty::Bytes | Ty::Matrix | Ty::Applied(TypeConstructorId::Matrix, _));
-    rc_cow && matches!(
-        e.kind,
-        IrExprKind::If { .. } | IrExprKind::Match { .. } | IrExprKind::Block { .. } | IrExprKind::UnwrapOr { .. }
-    )
+    rc_cow && match &e.kind {
+        IrExprKind::If { .. } | IrExprKind::Match { .. } | IrExprKind::Block { .. } | IrExprKind::UnwrapOr { .. } => true,
+        IrExprKind::InlineRust { template, .. } => template_renders_as_block(template.as_str()),
+        _ => false,
+    }
+}
+
+/// Does an `InlineRust` template render as one Rust block expression — a
+/// `{` opening it (not a `{name}` placeholder: a block's brace is followed by
+/// whitespace) whose matching `}` closes the whole template?
+fn template_renders_as_block(template: &str) -> bool {
+    let t = template.trim();
+    let mut chars = t.chars();
+    if chars.next() != Some('{') || !chars.next().is_some_and(char::is_whitespace) {
+        return false;
+    }
+    let mut depth = 0usize;
+    for (i, c) in t.char_indices() {
+        match c {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return i + 1 == t.len();
+                }
+            }
+            _ => {}
+        }
+    }
+    false
 }
 
 /// A list value no binding holds — a call's result, a collected chain, a
