@@ -10,7 +10,7 @@
 //! [`Crew`]): spawned by the first offer that needs them, parked between
 //! offers, and joined when the run ends — spawning a thread per worker per
 //! offer cost about 200 µs of an offer's fixed cost on eight workers. The cost model (#3341, [`plan`] —
-//! the native runtime's `almide_rt_fan_plan` with the same constants, pinned
+//! the native runtime's `almide_rt_fan_plan` formula with this leg's own constants, pinned
 //! to docs/benchmarks/fan-cost-model.txt) picks the worker count from the
 //! site's last measured compute time per element — a site's first offer
 //! goes parallel — capped by the available parallelism and
@@ -65,9 +65,10 @@ const RESET_BYTES: usize = 64 << 20;
 /// it would a list the caller still holds.
 const PINNED_RC: u32 = 1 << 30;
 
-/// The fan cost model (#3341) — the SAME formula and constants as the native
-/// runtime's `almide_rt_fan_plan` (runtime/rs/src/list.rs), pinned to
-/// docs/benchmarks/fan-cost-model.txt by tests/fan_cost_model_test.rs. A
+/// The fan cost model (#3341) — the SAME formula as the native runtime's
+/// `almide_rt_fan_plan` (runtime/rs/src/list.rs), with the wasm leg's own
+/// constants (`wasm_*`), pinned to docs/benchmarks/fan-cost-model.txt by
+/// tests/fan_cost_model_test.rs. A
 /// parallel offer of `n` elements on W workers costs `OFFER + W·WORKER` and
 /// saves `t·(n − ⌈n/W⌉)`, `t` the site's last measured time per element;
 /// the largest positive net saving wins.
