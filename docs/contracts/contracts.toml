@@ -4984,3 +4984,21 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/json_to_map_duplicate_keys.almd", class = "fixture" },
 ]
+[[contract]]
+id        = "C-381"
+spec      = "ALS-T18"
+title     = "The testing asserts' failures outside test blocks abort in the T18 form on both targets"
+statement = "ALS-T18 (almide/almide#3747): a failing direct call of `testing.assert_gt`, `assert_lt`, `assert_approx`, `assert_contains`, `assert_some`, `assert_none`, `assert_ok`, `assert_err` or `assert_throws` OUTSIDE a test block aborts with the C-153 STRUCTURED stderr block + exit code 1, byte-identical across targets: `Error: assertion failed`, `  at: line <N>`, `  expected: <relation>`, `  found: <operand>`. The relations: `assert_gt(a, b)` -> `> <b>` / found `<a>`; `assert_lt(a, b)` -> `< <b>` / found `<a>`; `assert_approx(a, b, t)` (passes iff |a - b| < t, strict, so a NaN fails) -> `within <t> of <b>` / found `<a>`; `assert_contains(h, n)` (the empty needle passes) -> `contains <n>` / found `<h>`; `assert_some(o)` -> `some(_)` / found `none`; `assert_none(o)` -> `none` / found `<o>`; `assert_ok(r)` -> `ok(_)` / found `<r>`; `assert_err(r)` -> `err(_)` / found `<r>`; `assert_throws(f, s)` -> `panic containing <s>` / found `returned normally`. Operand display per ALS-R2 (a String verbatim, an Option or Result in its literal form such as `some([1, 2])`); operands evaluated exactly once, left to right; a passing call prints nothing. Field order and the `at:` rule are C-153's. `assert_throws` outside a test block can only fail: a `panic` there is the C-219 abort, which nothing catches, so the thunk runs once and its panic aborts the program, or it returns and the block follows. Inside a test block the calls keep the harness reporting form, as C-153's asserts do (out of scope here), and a first-class use of the fn value is not a direct call. Implemented as the C-153 frontend-lowering desugar (if or match + eprintln + process.exit(1)) applied to the `testing` targets. Before it, native leaked the raw Rust panic (exit 101 and the panic banner) and wasm printed a value-less `<name> failed` line with exit 1, or refused `assert_throws` at build time (E081)."
+since     = "0.68.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/testing_assert_abort_gt.almd", class = "fixture" },
+  { path = "spec/wasm_cross/testing_assert_abort_lt.almd", class = "fixture" },
+  { path = "spec/wasm_cross/testing_assert_abort_approx.almd", class = "fixture" },
+  { path = "spec/wasm_cross/testing_assert_abort_contains.almd", class = "fixture" },
+  { path = "spec/wasm_cross/testing_assert_abort_some.almd", class = "fixture" },
+  { path = "spec/wasm_cross/testing_assert_abort_none.almd", class = "fixture" },
+  { path = "spec/wasm_cross/testing_assert_abort_ok.almd", class = "fixture" },
+  { path = "spec/wasm_cross/testing_assert_abort_err.almd", class = "fixture" },
+  { path = "spec/wasm_cross/testing_assert_abort_throws.almd", class = "fixture" },
+]
