@@ -210,6 +210,16 @@
 
   (func $fail (param $op i32) (param $a i32) (param $al i32) (param $b i32) (param $bl i32)
               (param $two i32) (param $tp i32) (param $tl i32) (result i64)
+    (local $m i32) (local $l i32)
+    (call $fail_text (local.get $op) (local.get $a) (local.get $al) (local.get $b) (local.get $bl)
+                     (local.get $two) (local.get $tp) (local.get $tl))
+    (local.set $l) (local.set $m)
+    (call $stage (local.get $m) (local.get $l))
+    (call $pack (i32.const 1) (local.get $l)))
+
+  ;; The message `$fail` answers, as (ptr, len) in the arena.
+  (func $fail_text (param $op i32) (param $a i32) (param $al i32) (param $b i32) (param $bl i32)
+                   (param $two i32) (param $tp i32) (param $tl i32) (result i32 i32)
     (local $np i32) (local $nl i32) (local $m i32) (local $w i32)
     (call $op_name (local.get $op)) (local.set $nl) (local.set $np)
     (local.set $m (call $alloc (i32.add (i32.add (i32.add (local.get $nl) (local.get $al))
@@ -233,8 +243,8 @@
     (i32.store8 offset=1 (local.get $w) (i32.const 58))
     (i32.store8 offset=2 (local.get $w) (i32.const 32))
     (local.set $w (call $put (i32.add (local.get $w) (i32.const 3)) (local.get $tp) (local.get $tl)))
-    (call $stage (local.get $m) (i32.sub (local.get $w) (local.get $m)))
-    (call $pack (i32.const 1) (i32.sub (local.get $w) (local.get $m))))
+    (local.get $m)
+    (i32.sub (local.get $w) (local.get $m)))
 
   ;; The errno's native Display text, or the bounded fallback.
   (func $errtext (param $e i32) (result i32 i32)
@@ -491,6 +501,11 @@
 
   ;; Rust's `str::from_utf8` acceptance (the incumbent's #1506 loop).
   (func $utf8_ok (param $p i32) (param $n i32) (result i32)
+    (i32.eq (call $utf8_upto (local.get $p) (local.get $n)) (local.get $n)))
+
+  ;; Rust's `Utf8Error::valid_up_to`: the length of the longest valid prefix
+  ;; (`n` when all of it is valid).
+  (func $utf8_upto (param $p i32) (param $n i32) (result i32)
     (local $i i32) (local $b0 i32) (local $b1 i32) (local $w i32) (local $lo i32) (local $hi i32) (local $k i32)
     (block $done (loop $next
       (br_if $done (i32.ge_u (local.get $i) (local.get $n)))
@@ -498,11 +513,11 @@
       (if (i32.lt_u (local.get $b0) (i32.const 128))
         (then (local.set $i (i32.add (local.get $i) (i32.const 1))) (br $next)))
       (if (i32.or (i32.lt_u (local.get $b0) (i32.const 194)) (i32.gt_u (local.get $b0) (i32.const 244)))
-        (then (return (i32.const 0))))
+        (then (return (local.get $i))))
       (local.set $w (select (i32.const 2)
                             (select (i32.const 3) (i32.const 4) (i32.lt_u (local.get $b0) (i32.const 240)))
                             (i32.lt_u (local.get $b0) (i32.const 224))))
-      (if (i32.gt_u (i32.add (local.get $i) (local.get $w)) (local.get $n)) (then (return (i32.const 0))))
+      (if (i32.gt_u (i32.add (local.get $i) (local.get $w)) (local.get $n)) (then (return (local.get $i))))
       (local.set $lo (i32.const 128))
       (local.set $hi (i32.const 191))
       (if (i32.eq (local.get $b0) (i32.const 224)) (then (local.set $lo (i32.const 160))))
@@ -511,19 +526,19 @@
       (if (i32.eq (local.get $b0) (i32.const 244)) (then (local.set $hi (i32.const 143))))
       (local.set $b1 (i32.load8_u (i32.add (local.get $p) (i32.add (local.get $i) (i32.const 1)))))
       (if (i32.or (i32.lt_u (local.get $b1) (local.get $lo)) (i32.gt_u (local.get $b1) (local.get $hi)))
-        (then (return (i32.const 0))))
+        (then (return (local.get $i))))
       (local.set $k (i32.const 2))
       (block $cdone (loop $cnext
         (br_if $cdone (i32.ge_u (local.get $k) (local.get $w)))
         (if (i32.ne (i32.and (i32.load8_u (i32.add (local.get $p) (i32.add (local.get $i) (local.get $k))))
                              (i32.const 192))
                     (i32.const 128))
-          (then (return (i32.const 0))))
+          (then (return (local.get $i))))
         (local.set $k (i32.add (local.get $k) (i32.const 1)))
         (br $cnext)))
       (local.set $i (i32.add (local.get $i) (local.get $w)))
       (br $next)))
-    (i32.const 1))
+    (local.get $i))
 
   ;; `str::lines` as frames: split on '\n', a '\r' before the '\n' dropped,
   ;; no phantom line after a trailing newline (C-225).
@@ -561,20 +576,50 @@
   ;; The text readers: `mode` 0 = the text, 1 = its lines; `absent_none`
   ;; answers ok-none on ENOENT (the *_if_exists twins, C-215).
   (func $read_text_as (param $op i32) (param $a i32) (param $al i32) (param $mode i32) (param $absent_none i32) (result i64)
-    (local $p i32) (local $l i32) (local $e i32) (local $tp i32) (local $tl i32)
+    (local $p i32) (local $l i32) (local $e i32) (local $tp i32) (local $tl i32) (local $k i32)
     (call $read_all (local.get $a) (local.get $al)) (local.set $e) (local.set $l) (local.set $p)
     (if (local.get $e)
       (then
         (if (i32.and (local.get $absent_none) (i32.eq (local.get $e) (i32.const 44))) (then (return (call $none))))
         (return (call $fail_e (local.get $op) (local.get $a) (local.get $al) (i32.const 0) (i32.const 0)
                               (i32.const 0) (local.get $e)))))
-    (if (i32.eqz (call $utf8_ok (local.get $p) (local.get $l)))
+    (local.set $k (call $utf8_upto (local.get $p) (local.get $l)))
+    (if (i32.ne (local.get $k) (local.get $l))
       (then
         (call $s_utf8) (local.set $tl) (local.set $tp)
+        ;; The streaming walkers (51 fold_lines / 52 for_each_line) read
+        ;; line by line natively: the lines before the invalid one are
+        ;; folded first (C-220, #3758).
+        (if (i32.or (i32.eq (local.get $op) (i32.const 51)) (i32.eq (local.get $op) (i32.const 52)))
+          (then (return (call $stream_partial (local.get $op) (local.get $a) (local.get $al)
+                                              (local.get $p) (local.get $k) (local.get $tp) (local.get $tl)))))
         (return (call $fail (local.get $op) (local.get $a) (local.get $al) (i32.const 0) (i32.const 0)
                             (i32.const 0) (local.get $tp) (local.get $tl)))))
     (if (local.get $mode) (then (call $lines (local.get $p) (local.get $l)) (local.set $l) (local.set $p)))
     (call $ok (local.get $p) (local.get $l)))
+
+  ;; Status 3 for the streaming walkers (the embedded host's
+  ;; `stream_line_frames`): the frames of every line before the first invalid
+  ;; one — the line holding byte `k`, `valid_up_to` — then the err message as
+  ;; the LAST frame, which the guest answers after folding the others.
+  (func $stream_partial (param $op i32) (param $a i32) (param $al i32) (param $p i32) (param $k i32)
+                        (param $tp i32) (param $tl i32) (result i64)
+    (local $s i32) (local $fp i32) (local $fl i32) (local $mp i32) (local $ml i32) (local $out i32) (local $w i32)
+    (local.set $s (local.get $k))
+    (block $d (loop $c
+      (br_if $d (i32.eqz (local.get $s)))
+      (br_if $d (i32.eq (i32.load8_u (i32.add (local.get $p) (i32.sub (local.get $s) (i32.const 1)))) (i32.const 10)))
+      (local.set $s (i32.sub (local.get $s) (i32.const 1)))
+      (br $c)))
+    (call $lines (local.get $p) (local.get $s)) (local.set $fl) (local.set $fp)
+    (call $fail_text (local.get $op) (local.get $a) (local.get $al) (i32.const 0) (i32.const 0)
+                     (i32.const 0) (local.get $tp) (local.get $tl))
+    (local.set $ml) (local.set $mp)
+    (local.set $out (call $alloc (i32.add (i32.add (local.get $fl) (local.get $ml)) (i32.const 4))))
+    (local.set $w (call $put (local.get $out) (local.get $fp) (local.get $fl)))
+    (local.set $w (call $frame (local.get $w) (local.get $mp) (local.get $ml)))
+    (call $stage (local.get $out) (i32.sub (local.get $w) (local.get $out)))
+    (call $pack (i32.const 3) (i32.sub (local.get $w) (local.get $out))))
 
   (func $op_read_text (param $op i32) (param $a i32) (param $al i32) (param $b i32) (param $bl i32) (result i64)
     (call $read_text_as (local.get $op) (local.get $a) (local.get $al) (i32.const 0) (i32.const 0)))

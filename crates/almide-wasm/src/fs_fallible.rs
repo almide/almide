@@ -35,7 +35,7 @@ impl Emitter<'_> {
             (params, Some(body), None, None)
         };
         self.fs_call_1(p, crate::fs::OP_FOR_EACH_LINE)?;
-        let (hraw, hlen, herr) = self.fs_frames_or_err()?;
+        let (hraw, hlen, herr, hmsg) = self.fs_stream_frames_or_err()?;
         let hr = self.hold_i32()?;
         self.f.instructions().i32_const(0).local_set(hr);
         // #3137: a called closure and an owned inline body hand the walk the
@@ -88,6 +88,7 @@ impl Emitter<'_> {
         self.release_i32();
         self.release_i32();
         self.fs_frames_release_raw(hraw, herr);
+        self.fs_stream_land_err(hmsg, hr, true);
         let hs = self.hold_i32()?;
         {
             let mut i = self.f.instructions();
@@ -106,7 +107,7 @@ impl Emitter<'_> {
             i.local_get(hs);
             i.end().end();
         }
-        for _ in 0..5 {
+        for _ in 0..6 {
             self.release_i32();
         }
         if compound {

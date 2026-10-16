@@ -178,5 +178,23 @@ fn utf8_is_validated_per_line_read_on_every_walker_and_leg() {
         let got = run_leg(&dir, args);
         assert_eq!(got, want, "the {label} leg: UTF-8 must be validated per line read (#3758, C-220)");
     }
+    // The stock-runtime artifact: the same host ops answered by the spliced
+    // p1 fs service (crates/almide-wasi/src/fs_service.wat), not the
+    // embedded host — a second implementation of ops 51/52/61.
+    if Command::new("wasmtime").arg("--version").output().is_ok() {
+        let built = Command::new(almide_bin())
+            .args(["build", "probe.almd", "--target", "wasm", "-o", "probe.wasm"])
+            .current_dir(&dir)
+            .output()
+            .expect("spawn almide build");
+        assert!(built.status.success(), "build failed:\n{}", String::from_utf8_lossy(&built.stderr));
+        let o = Command::new("wasmtime")
+            .args(["run", "--dir", ".", "probe.wasm"])
+            .current_dir(&dir)
+            .output()
+            .expect("spawn wasmtime");
+        assert!(o.status.success(), "wasmtime failed:\n{}", String::from_utf8_lossy(&o.stderr));
+        assert_eq!(String::from_utf8(o.stdout).expect("utf8"), want, "the stock-p1 artifact: UTF-8 must be validated per line read (#3758)");
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }
