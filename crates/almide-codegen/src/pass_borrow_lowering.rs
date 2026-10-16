@@ -319,10 +319,13 @@ impl Lower<'_> {
         // which does not coerce to `&dyn Fn`: `&*g` reaches the callable
         // through the handle. A lambda literal and a fn item borrow as they
         // are (`&|x| …`, `&dbl` — both coerce to `&dyn Fn`), and a
-        // by-reference fn param already IS the reference (handled above).
+        // by-reference fn param already IS the reference (handled above). A
+        // block yields the handle too — its tail lambda renders boxed, only a
+        // lambda written straight in the slot borrows bare — and `&{ ..; h }`
+        // does not reach the callable either (rustc E0277), so it derefs.
         if !as_str && !mutable
             && matches!(inner.ty, Ty::Fn { .. })
-            && !matches!(inner.kind, IrExprKind::Lambda { .. } | IrExprKind::FnRef { .. } | IrExprKind::Deref { .. } | IrExprKind::Block { .. })
+            && !matches!(inner.kind, IrExprKind::Lambda { .. } | IrExprKind::FnRef { .. } | IrExprKind::Deref { .. })
         {
             let value = std::mem::replace(inner.as_mut(), mk(IrExprKind::Unit, Ty::Unit, None));
             let ty = value.ty.clone();
