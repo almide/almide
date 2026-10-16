@@ -263,6 +263,15 @@ pub fn build() -> Vec<Signature> {
 /// The `import` lines a generated program needs: one per catalogue module
 /// that is not auto-imported and that `src` calls (`<module>.` after a
 /// non-identifier character).
+/// `src` spells the type `name` as a whole word (`HttpRequest`, not
+/// `HttpRequestX`).
+fn names_type(src: &str, name: &str) -> bool {
+    let word = |c: char| c.is_alphanumeric() || c == '_';
+    src.match_indices(name).any(|(i, _)| {
+        !src[..i].chars().next_back().is_some_and(word) && !src[i + name.len()..].chars().next().is_some_and(word)
+    })
+}
+
 pub fn imports_for(src: &str) -> String {
     let mut out = String::new();
     for &(module, _, needs_import) in BUNDLED_MODULES {
@@ -272,7 +281,7 @@ pub fn imports_for(src: &str) -> String {
         let call = format!("{module}.");
         let used = src.match_indices(&call).any(|(i, _)| {
             !src[..i].chars().next_back().is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '.')
-        });
+        }) || super::nominal::NOMINALS.iter().any(|n| n.module == module && names_type(src, n.name));
         if used {
             out.push_str(&format!("import {module}\n"));
         }

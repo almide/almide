@@ -574,11 +574,15 @@ impl Target {
         main.push_str("}\n");
         let main = format!("{}{main}", super::catalogue::imports_for(&main));
         let base = wrap(&self.name);
+        // A path names the types in its signature, so it imports their
+        // modules as well as `base`.
+        let path = wrap("base.call");
+        let path = format!("{}import self.base\n\n{path}", super::catalogue::imports_for(&path));
         let files = vec![
             ("app/almide.toml".to_string(), "[package]\nname = \"app\"\nversion = \"0.1.0\"\n".to_string()),
             ("app/src/base.almd".to_string(), format!("{}{base}", super::catalogue::imports_for(&base))),
-            ("app/src/left.almd".to_string(), format!("import self.base\n\n{}", wrap("base.call"))),
-            ("app/src/right.almd".to_string(), format!("import self.base\n\n{}", wrap("base.call"))),
+            ("app/src/left.almd".to_string(), path.clone()),
+            ("app/src/right.almd".to_string(), path),
             ("app/src/main.almd".to_string(), main),
         ];
         Project { files, entry: "app/src/main.almd".to_string() }

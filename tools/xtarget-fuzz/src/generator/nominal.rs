@@ -14,6 +14,9 @@ use super::types::GenType;
 pub struct Nominal {
     /// The type name as signatures spell it.
     pub name: &'static str,
+    /// The module that declares it: a file that only names the type (a
+    /// diamond path's `pub fn call(a0: HttpResponse)`) still imports it.
+    pub module: &'static str,
     /// A small, fixed value.
     pub small: &'static str,
     /// A value of size `{n}`; its size is what the module's readers walk.
@@ -52,6 +55,7 @@ fn string_map() -> GenType {
 pub const NOMINALS: &[Nominal] = &[
     Nominal {
         name: "HttpResponse",
+        module: "http",
         small: "http.with_headers(200, \"aé\", [\"k\": \"v\"])",
         sized: "http.with_headers(200, \"aé\", (list.range(0, {n}) |> list.fold(map.new(), (m, i) => map.set(m, \"k${100000000 + i}\", \"v\"))))",
         leaves: &[
@@ -69,6 +73,7 @@ pub const NOMINALS: &[Nominal] = &[
     },
     Nominal {
         name: "HttpRequest",
+        module: "http",
         small: "http.new_request(\"GET\", \"/p/1?a=1\", \"aé\", [\"k\": \"v\"])",
         sized: "http.new_request(\"GET\", \"/p/1?\" + (list.range(0, {n}) |> list.map((i) => \"q${100000000 + i}=v\") |> list.join(\"&\")), \"aé\", (list.range(0, {n}) |> list.fold(map.new(), (m, i) => map.set(m, \"k${100000000 + i}\", \"v\"))))",
         leaves: &[
@@ -85,6 +90,7 @@ pub const NOMINALS: &[Nominal] = &[
     },
     Nominal {
         name: "SafeHtml",
+        module: "html",
         small: "html.raw(\"<b>aé</b>\")",
         sized: "html.escape(string.repeat(\"<aé>&\", {n}))",
         leaves: &[
@@ -101,6 +107,7 @@ pub const NOMINALS: &[Nominal] = &[
     },
     Nominal {
         name: "SafePath",
+        module: "path",
         small: "path.trusted(\"a/b.txt\")",
         sized: "path.trusted(string.repeat(\"ab/\", {n}) + \"f.txt\")",
         leaves: &["path.trusted(\"/\")", "path.trusted(\"x/../y\")", "path.trusted(\"é.d/f\")", "path.trusted(\"\")"],
@@ -113,6 +120,7 @@ pub const NOMINALS: &[Nominal] = &[
     // `url.parse` is the only constructor; these inputs parse.
     Nominal {
         name: "Url",
+        module: "url",
         small: "(match url.parse(\"https://h.example:8080/a?x=1#t\") { ok(u) => u, err(e) => panic(e) })",
         sized: "(match url.parse(\"https://h.example/\" + string.repeat(\"aé\", {n}) + \"?q=1\") { ok(u) => u, err(e) => panic(e) })",
         leaves: &[
@@ -126,11 +134,15 @@ pub const NOMINALS: &[Nominal] = &[
         observe_calls_effect: false,
         refuses_var: false,
     },
-    // A path of n steps; observed by where it leads in a fixed value.
+    // Observed by where it leads in a fixed value. The sized path is ONE
+    // step whose key is n long: a path n steps deep is a structure n deep,
+    // and at the judge's 16n (320k) its recursive teardown overflowed the
+    // stack on both legs before any call was timed.
     Nominal {
         name: "JsonPath",
+        module: "json",
         small: "json.field(json.root(), \"a\")",
-        sized: "(list.range(0, {n}) |> list.fold(json.root(), (p, i) => json.field(p, \"k${100000000 + i}\")))",
+        sized: "json.field(json.root(), string.repeat(\"k\", {n}))",
         leaves: &[
             "json.root()",
             "json.field(json.root(), \"a\")",
@@ -146,6 +158,7 @@ pub const NOMINALS: &[Nominal] = &[
     // n rows of 2: the operands of the products agree with a 2 × 2 partner.
     Nominal {
         name: "Matrix[Float32]",
+        module: "matrix",
         small: "matrix.ones_f32(2, 2)",
         sized: "matrix.zeros_f32({n}, 2)",
         leaves: &["matrix.ones_f32(2, 2)", "matrix.zeros_f32(1, 2)", "matrix.mul_f32_scaled(matrix.ones_f32(2, 2), 0.5, matrix.ones_f32(2, 2))"],
@@ -160,6 +173,7 @@ pub const NOMINALS: &[Nominal] = &[
     // closure (a lambda nested in another is not lifted, #3749).
     Nominal {
         name: "HttpHandler",
+        module: "http",
         small: "((req) => http.response(200, http.req_path(req) + \"|\" + (http.param(req, \"id\") ?? \"-\")))",
         sized: "((req) => http.response(200, http.req_path(req) + \"|\" + (http.param(req, \"id\") ?? \"-\")))",
         leaves: &[
@@ -177,6 +191,7 @@ pub const NOMINALS: &[Nominal] = &[
     // pattern has n literal segments before its parameter.
     Nominal {
         name: "HttpRoute",
+        module: "http",
         small: "http.route(\"GET /p/{id}\", (req) => http.response(200, http.param(req, \"id\") ?? \"-\"))",
         sized: "http.route(\"GET /\" + (list.range(0, {n}) |> list.map((i) => \"s${100000000 + i}\") |> list.join(\"/\")) + \"/{id}\", (req) => http.response(200, http.param(req, \"id\") ?? \"-\"))",
         leaves: &[
@@ -196,6 +211,7 @@ pub const NOMINALS: &[Nominal] = &[
     // (#3749).
     Nominal {
         name: "HttpMiddleware",
+        module: "http",
         small: "((next) => next)",
         sized: "((next) => next)",
         leaves: &["((next) => next)", "((next) => http.wrap(next, []))"],
