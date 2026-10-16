@@ -222,6 +222,14 @@ fn render_binop(ctx: &RenderContext, op: BinOp, left: &IrExpr, right: &IrExpr, _
             ctx.templates.render_with("div_int", None, &[], &[("left", l.as_str()), ("right", r.as_str())])
                 .unwrap_or_else(|| format!("almide_div!({}, {})", l, r))
         }
+        // `x % <literal>` on Int: the magic-number remainder (prelude_rem.rs).
+        // A literal divisor >= 3 cannot be 0 or -1, so it never aborts.
+        BinOp::ModInt if matches!(left.ty, Ty::Int)
+            && matches!(right.kind, IrExprKind::LitInt { value } if crate::prelude_rem::rem_const_applies(value)) =>
+        {
+            let IrExprKind::LitInt { value } = right.kind else { unreachable!() };
+            format!("almide_rem_const::<{value}>({l})")
+        }
         BinOp::ModInt => {
             ctx.templates.render_with("mod_int", None, &[], &[("left", l.as_str()), ("right", r.as_str())])
                 .unwrap_or_else(|| format!("almide_mod!({}, {})", l, r))
