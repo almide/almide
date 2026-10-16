@@ -212,101 +212,121 @@ impl Emitter<'_> {
         Ok(true)
     }
 
-    /// mut pop: some(last) + shrunken-copy write-back. The receiver is a
-    /// plain var, or a record var's field (#2908) — read borrowed, the
+    /// mut pop: `some(last)` or `none`. A plain var receiver shrinks in
+    /// place (#3760); a record var's field (#2908) is read borrowed and the
     /// shrunken copy written back through `field_assign_with`.
     fn lower_list_pop(&mut self, xs: &IrExpr) -> ArmResult {
-        {
-                let field = record_field_receiver(xs);
-                let var = match (&xs.kind, &field) {
-                    (_, Some(_)) => None,
-                    (IrExprKind::Var { id }, None) => {
-                        let Some(v) = self.mut_var(id) else {
-                            return unsup("var:unmapped");
-                        };
-                        Some((*id, v))
-                    }
-                    _ => return unsup("list-pop-nonvar"),
-                };
-                let list_ty = match &var {
-                    Some((_, (_, t, _))) => *t,
-                    None => self.infer(xs)?,
-                };
-                let SliceTy::List(h) = list_ty else {
-                    return unsup(&format!("list-pop-of:{list_ty:?}"));
-                };
-                let elem = self.types.el(h);
-                let stride = elem.slot_size() as i32;
-                let inc_elems = self.inc_elems_fn(elem);
-                let hb = self.hold_i32()?;
-                let hlen = self.hold_i32()?;
-                let hres = self.hold_i32()?;
-                let hnew = self.hold_i32()?;
-                match &var {
-                    Some((id, (var_idx, var_ty, vglob))) => {
-                        self.emit_read_mut_var_cow(id, *var_idx, *var_ty, *vglob)?
-                    }
-                    None => {
-                        self.lower_arg(xs, Some(list_ty), ArgMode::Borrow)?;
-                    }
-                }
-                {
-                    let mut i = self.f.instructions();
-                    i.local_set(hb);
-                    i.local_get(hb).i32_load(len_memarg()).local_set(hlen);
-                    i.local_get(hlen).i32_eqz().if_(BlockType::Empty);
-                    i.i32_const(0).local_set(hres);
-                    i.else_();
-                    // some(last)
-                    i.i32_const(stride).call(F_ALLOC).local_set(hres);
-                    i.local_get(hres);
-                    i.local_get(hb).local_get(hlen).i32_add().i32_const(stride).i32_sub();
-                }
-                self.load_ty_slot(elem, 0);
-                self.store_ty_slot(elem, almide_layout::OPTION_FIELD);
-                {
-                    let mut i = self.f.instructions();
-                    // shrunken copy, write-back
-                    i.local_get(hlen).i32_const(stride).i32_sub().call(F_ALLOC).local_set(hnew);
-                    i.local_get(hnew).i32_const(almide_layout::PAYLOAD as i32).i32_add();
-                    i.local_get(hb).i32_const(almide_layout::PAYLOAD as i32).i32_add();
-                    i.local_get(hlen).i32_const(stride).i32_sub();
-                    i.memory_copy(0, 0);
-                    if let Some(inc) = inc_elems {
-                        // The popped element moves out with one credit of
-                        // its own; the shrunken copy takes the rest.
-                        i.local_get(hnew).call(inc);
-                        i.local_get(hres).i32_load(slot_memarg(almide_layout::OPTION_FIELD)).call(F_INC);
-                    }
-                }
-                match (&var, field) {
-                    (Some((id, (var_idx, var_ty, vglob))), _) => {
-                        self.f.instructions().local_get(hnew);
-                        self.emit_store_mut_var(*id, *var_idx, *var_ty, *vglob)?;
-                        // The var held one credit on the block it no longer
-                        // names: the shrunken copy and the popped element
-                        // took their own above, so the old block goes with
-                        // the typed drop (#2968 — every pop leaked it).
-                        let dec = self.dec_fn_of(list_ty);
-                        self.f.instructions().local_get(hb).call(dec);
-                        self.witness_mut_rebind(*id, *vglob);
-                    }
-                    (None, Some((id, path))) => self.field_assign_with(&id, &path, false, |s, _| {
-                        s.f.instructions().local_get(hnew);
-                        Ok(())
-                    })?,
-                    (None, None) => return unsup("list-pop-nonvar"),
-                }
-                {
-                    let mut i = self.f.instructions();
-                    i.end();
-                    i.local_get(hres);
-                }
-                for _ in 0..4 {
-                    self.release_i32();
-                }
-                Ok(Some(Lowered::owned(SliceTy::Option(self.types.intern(elem)))))
+        if let Some((id, path)) = record_field_receiver(xs) {
+            return self.lower_field_list_pop(xs, id, &path);
         }
+        let IrExprKind::Var { id } = &xs.kind else {
+            return unsup("list-pop-nonvar");
+        };
+        let Some((var_idx, var_ty, vglob)) = self.mut_var(id) else {
+            return unsup("var:unmapped");
+        };
+        let SliceTy::List(h) = var_ty else {
+            return unsup(&format!("list-pop-of:{var_ty:?}"));
+        };
+        let elem = self.types.el(h);
+        // The copy-on-write judge leaves the block the var's alone (a copy
+        // when an alias holds it, which the var is rebound to), so the pop
+        // is the length decrement `Vec::pop` is (#3760): the last slot moves
+        // into the `some` block with the credit it holds, and the slot
+        // beyond the new length is spare capacity the typed drop never
+        // reads. Every pop copied the whole list here before.
+        self.emit_read_mut_var_cow(id, var_idx, var_ty, vglob)?;
+        let hb = self.hold_i32()?;
+        let hlen = self.hold_i32()?;
+        let hres = self.hold_i32()?;
+        self.f.instructions().local_set(hb);
+        self.emit_pop_last_into_option(hb, hlen, hres, elem);
+        let stride = elem.slot_size() as i32;
+        {
+            let mut i = self.f.instructions();
+            i.local_get(hb).local_get(hlen).i32_const(stride).i32_sub().i32_store(len_memarg());
+            i.end();
+            i.local_get(hres);
+        }
+        for _ in 0..3 {
+            self.release_i32();
+        }
+        Ok(Some(Lowered::owned(SliceTy::Option(self.types.intern(elem)))))
+    }
+
+    /// Reads the length of the list in `hb` into `hlen` and opens
+    /// `if len == 0 { hres = none } else { hres = some(last) …`: the else
+    /// arm is left open for the caller's write-back, which closes it. The
+    /// `some` block holds the last slot's bits; the caller settles who
+    /// takes the credit those bits carry.
+    fn emit_pop_last_into_option(&mut self, hb: u32, hlen: u32, hres: u32, elem: SliceTy) {
+        let stride = elem.slot_size() as i32;
+        {
+            let mut i = self.f.instructions();
+            i.local_get(hb).i32_load(len_memarg()).local_set(hlen);
+            i.local_get(hlen).i32_eqz().if_(BlockType::Empty);
+            i.i32_const(0).local_set(hres);
+            i.else_();
+            i.i32_const(stride).call(F_ALLOC).local_set(hres);
+            i.local_get(hres);
+            i.local_get(hb).local_get(hlen).i32_add().i32_const(stride).i32_sub();
+        }
+        self.load_ty_slot(elem, 0);
+        self.store_ty_slot(elem, almide_layout::OPTION_FIELD);
+    }
+
+    /// `list.pop(h.f)` on a record var's field (#2908): the field is read
+    /// borrowed, and the shrunken copy is written back through the record's
+    /// copy-on-write rebind (`field_assign_with`), so an alias of the record
+    /// keeps its list.
+    fn lower_field_list_pop(
+        &mut self,
+        xs: &IrExpr,
+        id: almide_ir::VarId,
+        path: &[almide_base::intern::Sym],
+    ) -> ArmResult {
+        let list_ty = self.infer(xs)?;
+        let SliceTy::List(h) = list_ty else {
+            return unsup(&format!("list-pop-of:{list_ty:?}"));
+        };
+        let elem = self.types.el(h);
+        let stride = elem.slot_size() as i32;
+        let inc_elems = self.inc_elems_fn(elem);
+        let hb = self.hold_i32()?;
+        let hlen = self.hold_i32()?;
+        let hres = self.hold_i32()?;
+        let hnew = self.hold_i32()?;
+        self.lower_arg(xs, Some(list_ty), ArgMode::Borrow)?;
+        self.f.instructions().local_set(hb);
+        self.emit_pop_last_into_option(hb, hlen, hres, elem);
+        {
+            let mut i = self.f.instructions();
+            // shrunken copy, write-back
+            i.local_get(hlen).i32_const(stride).i32_sub().call(F_ALLOC).local_set(hnew);
+            i.local_get(hnew).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+            i.local_get(hb).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+            i.local_get(hlen).i32_const(stride).i32_sub();
+            i.memory_copy(0, 0);
+            if let Some(inc) = inc_elems {
+                // The popped element moves out with one credit of
+                // its own; the shrunken copy takes the rest.
+                i.local_get(hnew).call(inc);
+                i.local_get(hres).i32_load(slot_memarg(almide_layout::OPTION_FIELD)).call(F_INC);
+            }
+        }
+        self.field_assign_with(&id, path, false, |s, _| {
+            s.f.instructions().local_get(hnew);
+            Ok(())
+        })?;
+        {
+            let mut i = self.f.instructions();
+            i.end();
+            i.local_get(hres);
+        }
+        for _ in 0..4 {
+            self.release_i32();
+        }
+        Ok(Some(Lowered::owned(SliceTy::Option(self.types.intern(elem)))))
     }
 
     pub(crate) fn lower_list_mut_call(
