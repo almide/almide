@@ -614,21 +614,27 @@ fn judge_counted(
     programs: &dyn Fn(u64, u64) -> (String, String),
 ) -> Result<String, String> {
     let marginal = |m: u64, k: u64| (programs(m, 2 * k).0, programs(m, k).0);
-    let mut k = 1u64;
-    loop {
-        let (p, b) = marginal(n, k);
-        let dn = counted_delta(ctx, &p, &b, Leg::Native).map_err(|e| format!("{label} {e}"))?;
-        let dw = counted_delta(ctx, &p, &b, Leg::Wasm).map_err(|e| format!("{label} {e}"))?;
-        if counted_calibrated(&dn, &dw) || k >= MAX_K {
-            break;
+    // Each leg is calibrated on its own: a k one leg's cost reaches can
+    // leave the other's marginal under its run-to-run jitter, and a
+    // difference under the jitter clips to 0 and reads as O(1) at every
+    // size (value.as_array: native O(n) at k = 1, wasm 0 / 0 / 0 / 0 / 0).
+    let calibrate = |leg: Leg| -> Result<u64, String> {
+        let mut k = 1u64;
+        loop {
+            let (p, b) = marginal(n, k);
+            let d = counted_delta(ctx, &p, &b, leg).map_err(|e| format!("{label} {e}"))?;
+            if counted_calibrated(&d) || k >= MAX_K {
+                return Ok(k);
+            }
+            k = (k * 4).min(MAX_K);
         }
-        k = (k * 4).min(MAX_K);
-    }
+    };
+    let ks = [(Leg::Native, calibrate(Leg::Native)?), (Leg::Wasm, calibrate(Leg::Wasm)?)];
     let sizes: Vec<u64> = (0..5).map(|i| n << i).collect();
-    let mut line = format!("{label} k={k}..{} meter=instructions:u+bytes-moved alloc=canonical(wasm) n={n}..{}", 2 * k, n << 4);
+    let mut line = format!("{label} meter=instructions:u+bytes-moved alloc=canonical(wasm) n={n}..{}", n << 4);
     let mut worst = 0usize;
     let mut unexplained = false;
-    for leg in [Leg::Native, Leg::Wasm] {
+    for (leg, k) in ks {
         let mut ys = Vec::new();
         let mut bs = Vec::new();
         let mut ts = Vec::new();
@@ -647,7 +653,8 @@ fn judge_counted(
         let sci = |v: &[f64]| v.iter().map(|y| format!("{:.3e}", y)).collect::<Vec<_>>().join("/");
         let times: Vec<String> = ts.iter().map(|t| format!("{:.3}", t.as_secs_f64())).collect();
         line.push_str(&format!(
-            " {tag} {} fit {} (rms {:.1}%) moved {}B fit {} (rms {:.1}%) wall {}s",
+            " {tag} k={k}..{} {} fit {} (rms {:.1}%) moved {}B fit {} (rms {:.1}%) wall {}s",
+            2 * k,
             sci(&ys),
             CLASSES[class].0,
             rms * 100.0,
@@ -674,18 +681,18 @@ fn judge_counted(
     }
 }
 
-/// Whether the counted judge's k is large enough: either meter, on either
-/// leg, past its target. Instructions alone undercount a call whose cost is
+/// Whether the counted judge's k is large enough for one leg: either meter
+/// past its target. Instructions alone undercount a call whose cost is
 /// one large copy — `rep movsb` retires as one instruction whatever the
 /// length (see `MEMSHIM_C`) — so an instructions-only target drove k up by
 /// 4x until each run copied gigabytes at 16n and hit the 60 s cap
 /// (set.insert / set.union's call shape on GCE, 2026-10-14). 2e8 bytes is
 /// about 20 ms of copying on c4-standard-4, the same order as 2e7
 /// instructions.
-fn counted_calibrated(native: &Delta, wasm: &Delta) -> bool {
+fn counted_calibrated(d: &Delta) -> bool {
     const CALIBRATE_INSTRUCTIONS: f64 = 2.0e7;
     const CALIBRATE_BYTES: f64 = 2.0e8;
-    native.instructions.max(wasm.instructions) >= CALIBRATE_INSTRUCTIONS || native.moved.max(wasm.moved) >= CALIBRATE_BYTES
+    d.instructions >= CALIBRATE_INSTRUCTIONS || d.moved >= CALIBRATE_BYTES
 }
 
 /// The cheapest class whose `a + c·f(n)` least-squares fit leaves every
@@ -944,10 +951,9 @@ mod run_tests {
     #[test]
     fn calibration_stops_on_bytes_moved_as_well_as_instructions() {
         let d = |instructions: f64, moved: f64| Delta { instructions, moved, wall: Duration::ZERO };
-        assert!(!counted_calibrated(&d(1e3, 1e3), &d(1e3, 1e3)));
-        assert!(counted_calibrated(&d(3e7, 0.0), &d(1e3, 0.0)));
-        assert!(counted_calibrated(&d(1e3, 3e8), &d(1e3, 0.0)));
-        assert!(counted_calibrated(&d(1e3, 0.0), &d(1e3, 3e8)));
+        assert!(!counted_calibrated(&d(1e3, 1e3)));
+        assert!(counted_calibrated(&d(3e7, 0.0)));
+        assert!(counted_calibrated(&d(1e3, 3e8)));
     }
 }
 
