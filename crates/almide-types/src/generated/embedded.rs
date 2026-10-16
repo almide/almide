@@ -8832,18 +8832,13 @@ fn router(routes: List[HttpRoute]) -> Result[HttpHandler, String] = {
 /// Applies middleware; the first is the outermost.
 @concurrent(handler, middleware)
 fn wrap(handler: HttpHandler, middleware: List[HttpMiddleware]) -> HttpHandler =
-  if list.is_empty(middleware) then handler
-  else wrap(
-    __apply(list.last(middleware) ?? __no_middleware, handler),
-    list.take(middleware, list.len(middleware) - 1),
-  )
+  list.reverse(middleware) |> list.fold(handler, (inner, mw) => __apply(mw, inner))
+
 
 
 
 
 fn __apply(mw: HttpMiddleware, inner: HttpHandler) -> HttpHandler = mw(inner)
-
-fn __no_middleware(next: HttpHandler) -> HttpHandler = next
 
 /// JSON body through decode; err is a 400 response.
 fn decode_json[T](req: HttpRequest, decode: (Value) -> Result[T, String]) -> Result[T, HttpResponse] = match json.parse(http.req_body(req)) {
