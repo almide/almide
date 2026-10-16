@@ -1444,4 +1444,20 @@ The disk filled up and three agents died together. A worktree audit removed 335 
   - wasm `mut`-buffer calls returning a heap value copied the buffer per call;
   - check-accepted native build failures: Eq/Ord over fn-holding values (now E016/E030 from the runtime bounds), and pure lambdas reaching an effect slot through if-arms, data or callback returns (part of #3749).
 - **Filed, waiting on ADR-0013:** #3761 (`option/result.unwrap_or` clone a live String default on native), #3762 (fallible `list.fold` clones the accumulator per element).
-- **#3747:** a new contract for the testing asserts is in almide/als#142 (awaiting merge); the almide implementation waits for the pin.
+- **#3747:** the testing-assert contract merged in almide/als#142; the pin advanced and the asserts desugar outside test blocks on every leg.
+
+### The third wave (2026-10-16 evening to 10-17)
+- **Stamped:** http.decode_json, http.param, http.wrap, http.router and 17 of the 22 rows of the fifteenth batch, which re-measured the rows the helper-closure fingerprint voided. The uninspected count is 164.
+- **Ledger:** a stamped fn's impl fingerprint covers the closure of its same-file helpers, self-host impls and runtime helpers, so editing a helper voids exactly the fns that reach it.
+- **Owner ruling (10-16):** set.from_list and list.unique are measured over scattered distinct elements and stamped.
+- **Generator:** a Result with a nominal error (decode_json), and the http.param probe runs inside a routed handler.
+- **Defects found and fixed (test-first):**
+  - the router was O(L²) in the path length (`__bad_escape` rescanned, `__bind` re-indexed);
+  - `http.wrap` grew one closure layer per pass on wasm (eta now applies only at declared callbacks);
+  - a `let`-bound assert walled on wasm (E082, no Unit tail);
+  - native testing asserts copied their operand per call, and more generally a `match` on a variable used after it cloned the variable. Operands are now read in place, and a live variable is matched through a borrow.
+- **Measurement fixes:**
+  - **Unit return:** the diamond prints a Unit return's one value (`()`) on each path, so the three paths are compared. It used to report SKIP.
+  - **io.write / io.write_bytes:** the probes write 4n bytes. Native stdout is a 64 KiB BufWriter, and n bytes straddled it: a shorter write is copied into the buffer, a longer one goes straight to the kernel, which neither meter counts.
+  - **regex.replace / replace_first:** the batch declared no rebind order, and the shapes measured O(1) against it. The order is now declared as their earlier stamps had it.
+- **CI:** the availability gate saw testing.assert_throws serve on the embedded leg outside test blocks, so its row is gone. Inside a test block the wasm test lane still declines it.
