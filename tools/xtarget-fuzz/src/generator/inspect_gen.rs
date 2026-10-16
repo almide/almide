@@ -238,6 +238,17 @@ const SHAPE_RECIPES: &[Recipe] = &[
     Recipe { func: "json.get_path", size: "j", args: &[("path", "json.field(json.root(), \"k${100000000 + {n} - 1}\")")] },
     Recipe { func: "json.set_path", size: "j", args: &[("path", "json.field(json.root(), \"k${100000000 + {n} - 1}\")")] },
     Recipe { func: "json.remove_path", size: "j", args: &[("path", "json.field(json.root(), \"k${100000000 + {n} - 1}\")")] },
+    // A router refuses two routes with one pattern: n distinct patterns.
+    Recipe {
+        func: "http.router",
+        size: "routes",
+        args: &[(
+            "routes",
+            "list.range(0, {n}) |> list.map((i) => http.route(\"GET /r${100000000 + i}/{id}\", (req) => http.response(200, http.param(req, \"id\") ?? \"-\")))",
+        )],
+    },
+    // n pass-through middleware: what `wrap` composes.
+    Recipe { func: "http.wrap", size: "middleware", args: &[("middleware", "list.range(0, {n}) |> list.map((i) => (next) => next)")] },
     // The Float32 constructors take their size as a row count.
     Recipe { func: "matrix.zeros_f32", size: "rows", args: &[("rows", "{n}"), ("cols", "2")] },
     Recipe { func: "matrix.ones_f32", size: "rows", args: &[("rows", "{n}"), ("cols", "2")] },
@@ -418,7 +429,7 @@ impl Target {
         // A string has no O(1) in-place step, and `x = x` is not free on
         // every leg: it is bound once and left alone.
         let slot = self.size_param.map(|i| {
-            let varies = !matches!(self.ty(i), Some(GenType::String));
+            let varies = !matches!(self.ty(i), Some(GenType::String)) && !self.ty(i).is_some_and(|t| t.refuses_var());
             let kw = if varies || Some(i) == self.mut_param { "var" } else { "let" };
             let _ = writeln!(s, "  {kw} x: {} = {}", self.render_param(i), self.arg(i, n));
             (i, varies)
@@ -478,6 +489,8 @@ impl Target {
         // build no `err`), so a step that took the error path leaves an `err`
         // unless a later step turns it back into an `ok`.
         let end = format!("{}  println(\"${{{d}}}\")\n", outcome_guard("x", &self.ret, self.in_domain(), "  "));
+        // A handler-holding value has no `var` form (E008), so no loop.
+        let loop_ok = !self.ret.refuses_var();
         let programs = vec![
             (
                 "loop",
@@ -503,6 +516,7 @@ impl Target {
         ];
         programs
             .into_iter()
+            .filter(|(label, _)| loop_ok || *label != "loop")
             .map(|(label, src)| {
                 let body = format!("{consts}{src}");
                 (label, format!("{}{body}", super::catalogue::imports_for(&body)))
