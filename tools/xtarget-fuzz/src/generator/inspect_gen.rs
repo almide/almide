@@ -270,8 +270,31 @@ const SHAPE_RECIPES: &[Recipe] = &[
     Recipe {
         func: "map.delete",
         size: "m",
-        args: &[("m", "map.set(list.range(0, {n}) |> list.fold(map.new(), (m, i) => map.set(m, \"k${100000000 + i}\", i)), \"k0\", 0)"), ("key", "\"k0\"")],
+        args: &[("m", "map.set({sized}, \"k0\", {small_elem})"), ("key", "\"k0\"")],
     },
+    // The minimum's comparisons at a cost independent of n (`{sized_flat}`).
+    Recipe { func: "list.min", size: "xs", args: &[("xs", "{sized_flat}")] },
+    // A lookup's key walks the present keys, one per step: a single fixed
+    // key measured one probe path (see `per_step`), and a hit is the
+    // success path the stamp claims.
+    Recipe { func: "map.get", size: "m", args: &[("m", "{sized}"), ("key", "\"k${100000000 + {i} * 7919 % {n}}\"")] },
+    Recipe { func: "map.get_or", size: "m", args: &[("m", "{sized}"), ("key", "\"k${100000000 + {i} * 7919 % {n}}\"")] },
+    Recipe { func: "map.contains", size: "m", args: &[("m", "{sized}"), ("key", "\"k${100000000 + {i} * 7919 % {n}}\"")] },
+    Recipe {
+        func: "map.insert",
+        size: "m",
+        args: &[("m", "{sized}"), ("key", "\"k${100000000 + {i} * 7919 % {n}}\""), ("value", "{small}")],
+    },
+    // The count is the size, whatever the element: at String the element
+    // is otherwise the first sized parameter, and the probe measured copying
+    // one long string twice.
+    Recipe { func: "list.repeat", size: "n", args: &[("n", "{n}")] },
+    Recipe { func: "list.iterate", size: "n", args: &[("n", "{n}")] },
+    // zip / zip_with stop at the shorter list: against the generic 2-element
+    // partner the result had 2 elements whatever n was, so the order measured
+    // was the truncation's. The partner takes the sized one's length.
+    Recipe { func: "list.zip", size: "xs", args: &[("ys", "{sized}")] },
+    Recipe { func: "list.zip_with", size: "xs", args: &[("ys", "{sized}")] },
     // Elementwise operands "truncate to overlap": against the generic 2×2
     // operand the result is 2×2 whatever n is, so the order measured was the
     // truncation's. Every operand takes the n × 2 shape of the sized one.
@@ -347,7 +370,7 @@ impl Target {
             if param_at(r.size).is_none() {
                 return Err(format!("{name}: shape recipe's size `{}` is not a parameter", r.size));
             }
-            if r.args.iter().any(|(p, e)| *p == r.size && !e.contains("{n}")) {
+            if r.args.iter().any(|(p, e)| *p == r.size && !e.contains("{n}") && !e.contains("{sized")) {
                 return Err(format!("{name}: shape recipe's size `{}` does not take n", r.size));
             }
         }
@@ -391,9 +414,43 @@ impl Target {
         self.domain.as_ref().filter(|(at, _)| *at == i).map(|(_, d)| d)
     }
 
+    /// Parameter `i`'s recipe expression at size `n`, `{i}` read as `counter`.
+    fn recipe_expr(&self, i: usize, n: u64, counter: &str) -> String {
+        let e = self.recipe_arg(i).unwrap_or_default();
+        let ty = self.ty(i);
+        let sized_v = ty.as_ref().map(|g| sized(g, n)).unwrap_or_default();
+        let elem_v = ty.as_ref().and_then(elem_of).map(|g| small(&g)).unwrap_or_default();
+        let small_v = ty.as_ref().map(small).unwrap_or_default();
+        // `{sized_flat}`: as `{sized}`, but a String element's digits run
+        // least significant first, so two elements' common prefix does not
+        // lengthen as n shrinks — "s100000000" against "s1000xxxxx" compares
+        // more bytes at n = 20000 than at 320000, a per-element drift a
+        // byte-wise comparison shows as sublinear growth.
+        let flat_v = match &ty {
+            Some(GenType::List(e)) if **e == GenType::String => {
+                format!("list.range(0, {n}) |> list.map((i) => string.reverse(\"${{100000000 + i}}\"))")
+            }
+            _ => sized_v.clone(),
+        };
+        e.replace("{sized_flat}", &flat_v)
+            .replace("{sized}", &sized_v)
+            .replace("{small_elem}", &elem_v)
+            .replace("{small}", &small_v)
+            .replace("{n}", &n.to_string())
+            .replace("{i}", counter)
+    }
+
+    /// Parameter `i`'s recipe names the loop counter `{i}`: the direct
+    /// program binds it inside the loop, every other program at `{i}` = 0.
+    fn per_step(&self, i: usize) -> bool {
+        self.recipe_arg(i).is_some_and(|e| e.contains("{i}"))
+    }
+
     /// Parameter `i`'s value grows with n.
     fn scales(&self, i: usize) -> bool {
-        Some(i) == self.size_param || self.recipe_arg(i).is_some_and(|e| e.contains("{n}")) || self.domain_arg(i).is_some_and(Domain::scales)
+        Some(i) == self.size_param
+            || self.recipe_arg(i).is_some_and(|e| e.contains("{n}") || e.contains("{sized"))
+            || self.domain_arg(i).is_some_and(Domain::scales)
     }
 
     fn ty(&self, i: usize) -> Option<GenType> {
@@ -402,8 +459,12 @@ impl Target {
 
     fn arg(&self, i: usize, n: u64) -> String {
         let (pname, t) = &self.params[i];
-        if let Some(e) = self.recipe_arg(i) {
-            return e.replace("{n}", &n.to_string());
+        // A recipe spells its operands in the target's own instantiation:
+        // `{sized}` is this parameter's sized value, `{small}` a small one,
+        // `{small_elem}` a small element of it (a generic recipe holds at Int
+        // and at String alike).
+        if self.recipe_arg(i).is_some() {
+            return self.recipe_expr(i, n, "0");
         }
         if let Some(d) = self.domain_arg(i) {
             return d.expr(n);
@@ -461,8 +522,16 @@ impl Target {
         });
         // Every other value argument is bound to a typed `let` first: a bare
         // `ok(2)` leaves its error type unconstrained (E025).
-        s.push_str(&self.arg_lets(n, self.size_param));
+        let per_step: Vec<usize> = (0..self.params.len()).filter(|i| self.per_step(*i)).collect();
+        s.push_str(&self.arg_lets(n, self.size_param, &per_step));
         let _ = writeln!(s, "  var acc = 0\n  var i = 0\n  while i < {k} {{");
+        // A per-step operand is rebuilt every iteration in BOTH programs (its
+        // cost cancels): one fixed key measures one probe path, and a hash
+        // index's single path is that key's neighbourhood at this n, not the
+        // order (map.get's String series moved ±15% between sizes).
+        for &p in &per_step {
+            let _ = writeln!(s, "    let a{p}: {} = {}", self.render_param(p), self.recipe_expr(p, n, "i"));
+        }
         if let Some((i, true)) = slot {
             let _ = writeln!(s, "    x = {}", vary("x", &self.ty(i).unwrap_or(GenType::Int), n));
         }
@@ -609,9 +678,9 @@ impl Target {
 
     /// `let a<i>: T = <arg>` for every value parameter other than `skip`
     /// (callbacks stay inline: they are not values a `let` can type here).
-    fn arg_lets(&self, n: u64, skip: Option<usize>) -> String {
+    fn arg_lets(&self, n: u64, skip: Option<usize>, later: &[usize]) -> String {
         let mut s = String::new();
-        for i in (0..self.params.len()).filter(|i| Some(*i) != skip && !self.is_fn(*i)) {
+        for i in (0..self.params.len()).filter(|i| Some(*i) != skip && !self.is_fn(*i) && !later.contains(i)) {
             let kw = if Some(i) == self.mut_param { "var" } else { "let" };
             let _ = writeln!(s, "  {kw} a{i}: {} = {}", self.render_param(i), self.arg(i, n));
         }
@@ -694,6 +763,14 @@ fn small(t: &GenType) -> String {
         GenType::Endian => "BigEndian".into(),
         GenType::Set(e) => format!("set.from_list([{}])", small(e)),
         GenType::Nominal(k) => nominal::get(k).map_or_else(|| "()".into(), |d| d.small.to_string()),
+    }
+}
+
+/// The element type of a container (a Map's value).
+fn elem_of(t: &GenType) -> Option<GenType> {
+    match t {
+        GenType::List(e) | GenType::Set(e) | GenType::Map(e) | GenType::Option(e) => Some((**e).clone()),
+        _ => None,
     }
 }
 
