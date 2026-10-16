@@ -38,9 +38,9 @@ pub enum SigType {
     Var(String),
     List(Box<SigType>),
     Option(Box<SigType>),
-    /// `Result[ok, E]` — the error type is erased to its own slot but
-    /// always concretizes to `String` (the only error type the value
-    /// grammar produces); see [`SigType::instantiate`].
+    /// `Result[ok, E]` — the error type is erased to its own slot and
+    /// concretizes to `String`, or to a nominal when the signature names one
+    /// (`Result[T, HttpResponse]`); see [`SigType::instantiate`].
     Result(Box<SigType>, Box<SigType>),
     Tuple2(Box<SigType>, Box<SigType>),
     Map(Box<SigType>, Box<SigType>),
@@ -224,14 +224,15 @@ impl SigType {
             SigType::List(e) => Some(GenType::List(Box::new(e.instantiate(subst)?))),
             SigType::Option(e) => Some(GenType::Option(Box::new(e.instantiate(subst)?))),
             // The error slot is fixed to String regardless of the bound
-            // variable: the value grammar only ever builds String errors.
-            // A concrete error type other than String (`Result[T, HttpResponse]`)
-            // is outside the universe: rendered as `Result[T, String]` it
-            // would be a type error, not a program.
-            SigType::Result(ok, err) => {
-                let pinned = matches!(**err, SigType::Var(_) | SigType::String);
-                pinned.then(|| ok.instantiate(subst)).flatten().map(|g| GenType::Result(Box::new(g)))
-            }
+            // variable, or is the nominal the signature names
+            // (`Result[T, HttpResponse]`, GenType::ResultNom). Any other
+            // concrete error type is outside the universe: rendered as
+            // `Result[T, String]` it would be a type error, not a program.
+            SigType::Result(ok, err) => match **err {
+                SigType::Var(_) | SigType::String => Some(GenType::Result(Box::new(ok.instantiate(subst)?))),
+                SigType::Nominal(k) => Some(GenType::ResultNom(Box::new(ok.instantiate(subst)?), k)),
+                _ => None,
+            },
             SigType::Tuple2(a, b) => Some(GenType::Tuple2(
                 Box::new(a.instantiate(subst)?),
                 Box::new(b.instantiate(subst)?),
@@ -273,8 +274,10 @@ impl SigType {
             (SigType::List(e), GenType::List(g)) => e.unify_with_goal(g, subst),
             (SigType::Option(e), GenType::Option(g)) => e.unify_with_goal(g, subst),
             // Result error slot: goal carries no error type (fixed
-            // String), so only the ok arm is unified.
-            (SigType::Result(ok, _), GenType::Result(g)) => ok.unify_with_goal(g, subst),
+            // String), so only the ok arm is unified — unless the slot
+            // names a nominal, whose goal is a ResultNom of that nominal.
+            (SigType::Result(ok, err), GenType::Result(g)) => !matches!(**err, SigType::Nominal(_)) && ok.unify_with_goal(g, subst),
+            (SigType::Result(ok, err), GenType::ResultNom(g, k)) => matches!(**err, SigType::Nominal(e) if e == *k) && ok.unify_with_goal(g, subst),
             (SigType::Tuple2(a, b), GenType::Tuple2(ga, gb)) => {
                 a.unify_with_goal(ga, subst) && b.unify_with_goal(gb, subst)
             }

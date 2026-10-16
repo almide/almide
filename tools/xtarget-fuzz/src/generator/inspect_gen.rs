@@ -34,6 +34,9 @@ pub struct Target {
     mut_param: Option<usize>,
     /// The function's [`SHAPE_RECIPES`] entry, if it has one.
     recipe: Option<&'static Recipe>,
+    /// The function's [`ROUTED`] entry: its probes run inside a handler the
+    /// router called, the routed request filling that parameter.
+    routed: Option<&'static Routed>,
     /// An in-domain argument derived from the declaration ([`Domain`]),
     /// for the parameter at the index, when no recipe names the function.
     domain: Option<(usize, Domain)>,
@@ -286,6 +289,21 @@ const SHAPE_RECIPES: &[Recipe] = &[
             "list.range(0, {n}) |> list.map((i) => http.route(\"GET /r${100000000 + i}/{id}\", (req) => http.response(200, http.param(req, \"id\") ?? \"-\")))",
         )],
     },
+    // A body of n fixed-width ints the decode callback accepts (`ok` of its
+    // length, `{as_t}` making the length a T), so the parse and the decode
+    // both run whole and the call returns ok: the 400 responses are its
+    // refusals.
+    Recipe {
+        func: "http.decode_json",
+        size: "req",
+        args: &[
+            ("req", "http.new_request(\"POST\", \"/j\", \"[\" + (list.range(0, {n}) |> list.map((i) => int.to_string(100000000 + i)) |> list.join(\",\")) + \"]\", map.new())"),
+            ("decode", "(v) => match value.as_array(v) { ok(xs) => ok({as_t}(list.len(xs))), err(e) => err(e) }"),
+        ],
+    },
+    // The name the route binds: the probes run inside its handler, the
+    // routed request filling `req` ([`ROUTED`]), so the lookup hits.
+    Recipe { func: "http.param", size: "req", args: &[("name", "\"id\"")] },
     // n pass-through middleware: what `wrap` composes.
     Recipe { func: "http.wrap", size: "middleware", args: &[("middleware", "list.range(0, {n}) |> list.map((i) => (next) => next)")] },
     // A pattern is not a needle (SEARCH_PARAMS): n copies of every directive.
@@ -376,6 +394,35 @@ const SHAPE_RECIPES: &[Recipe] = &[
     Recipe { func: "regex.full_match", size: "s", args: &[("pat", "\"(aé)*\"")] },
 ];
 
+/// A function whose in-domain input exists only inside a request handler
+/// the router called: `http.param` answers `some` only for a request the
+/// router bound path parameters into, and the binding (`http.__with_params`)
+/// is private to the router. Every probe of the function runs inside the
+/// handler of a one-route router, the routed request filling `param`; the
+/// program calls the router once with a request to `target` (`{n}` the
+/// size) and prints what the handler answered. The routing runs in the
+/// probe and in its baseline alike, so its cost cancels out of the
+/// difference: the timed calls are the function's own. A router that did
+/// not route the request (any status but 200) stops the probe with
+/// [`OFF_DOMAIN`].
+#[derive(Debug)]
+struct Routed {
+    func: &'static str,
+    /// The parameter the routed request fills.
+    param: &'static str,
+    /// The route's pattern.
+    pattern: &'static str,
+    /// The request target, `{n}` standing for the size.
+    target: &'static str,
+}
+
+/// `{id}` bound to n percent-escaped `aé` (3n bytes decoded): param's cost
+/// is the copy of the value it finds. One routing of a path of length L
+/// costs O(L²) on both legs (the router's escape check walks the path's
+/// characters with `list.drop`), outside the timed difference but inside
+/// the run cap: the probe is run at a reduced `--n`.
+const ROUTED: &[Routed] = &[Routed { func: "http.param", param: "req", pattern: "GET /p/{id}", target: "\"/p/\" + string.repeat(\"a%C3%A9\", {n})" }];
+
 /// The panic a probe program stops with when a call whose input is
 /// in-domain (a [`SHAPE_RECIPES`] entry or a derived [`Domain`]) returned
 /// `none` or `false`: it refused the input, and that run measured the
@@ -420,7 +467,16 @@ impl Target {
         let params: Vec<(String, SigType)> = sig.param_names.iter().cloned().zip(sig.params.iter().cloned()).collect();
         let concrete = |t: &SigType| t.instantiate(&subst);
         let recipe = SHAPE_RECIPES.iter().find(|r| r.func == name);
+        let routed = ROUTED.iter().find(|r| r.func == name);
         let param_at = |p: &str| params.iter().position(|(n, _)| n == p);
+        if let Some(r) = routed {
+            if param_at(r.param).is_none_or(|i| concrete(&params[i].1) != Some(GenType::Nominal("HttpRequest"))) {
+                return Err(format!("{name}: routed `{}` is not an HttpRequest parameter", r.param));
+            }
+            if recipe.is_none() {
+                return Err(format!("{name}: a routed function needs a shape recipe (its in-domain input)"));
+            }
+        }
         if let Some(r) = recipe {
             // A recipe naming a parameter the signature no longer has would
             // silently fall back to the generic values that violate it.
@@ -464,6 +520,7 @@ impl Target {
             rebind_param,
             mut_param: sig.mut_param,
             recipe,
+            routed,
             domain,
             generic,
             effect: sig.effect,
@@ -518,12 +575,19 @@ impl Target {
             }
             _ => sized_v.clone(),
         };
+        // `{as_t}`: the conversion of an Int to the instantiated `T` (a
+        // generic recipe's callback returns a T at Int and at String alike).
+        let as_t = match self.subst.get("T") {
+            Some(GenType::String) => "int.to_string",
+            _ => "",
+        };
         e.replace("{sized_flat}", &flat_v)
             .replace("{sized_scattered}", &scattered_v)
             .replace("{sized}", &sized_v)
             .replace("{small_elem}", &elem_v)
             .replace("{sized_elem}", &sized_elem_v)
             .replace("{small}", &small_v)
+            .replace("{as_t}", as_t)
             .replace("{n}", &n.to_string())
             .replace("{i}", counter)
     }
@@ -541,6 +605,23 @@ impl Target {
         self.recipe_arg(i).is_some_and(|e| e.contains("{i}"))
     }
 
+    /// Parameter `i` is the routed request ([`Routed`]).
+    fn is_routed(&self, i: usize) -> bool {
+        self.routed.is_some_and(|r| self.params[i].0 == r.param)
+    }
+
+    /// `body` (a `main` body, its value the handler's answer) inside the
+    /// handler of the one-route router [`Routed`] declares, and the `main`
+    /// that routes a size-`n` request to it and prints what it answered.
+    fn in_handler(&self, r: &Routed, body: &str, n: u64) -> String {
+        let inner: String = body.lines().map(|l| if l.is_empty() { "\n".to_string() } else { format!("  {l}\n") }).collect();
+        let target = r.target.replace("{n}", &n.to_string());
+        format!(
+            "effect fn main() -> Unit = {{\n  let h: HttpHandler = match http.router([http.route(\"{}\", (req) => {{\n{inner}  }})]) {{\n    ok(t) => t,\n    err(e) => panic(e),\n  }}\n  let res: HttpResponse = h(http.new_request(\"GET\", {target}, \"\", map.new()))!\n  if http.status_code(res) == 200 then () else panic(\"{OFF_DOMAIN}: the router answered ${{http.status_code(res)}}\")\n  println(http.body(res))\n}}\n",
+            r.pattern
+        )
+    }
+
     /// Parameter `i`'s value grows with n.
     fn scales(&self, i: usize) -> bool {
         Some(i) == self.size_param
@@ -554,6 +635,10 @@ impl Target {
 
     fn arg(&self, i: usize, n: u64) -> String {
         let (pname, t) = &self.params[i];
+        // The routed request is the handler's own parameter.
+        if self.is_routed(i) {
+            return "req".into();
+        }
         // A recipe spells its operands in the target's own instantiation:
         // `{sized}` is this parameter's sized value, `{small}` a small one,
         // `{small_elem}` a small element of it (a generic recipe holds at Int
@@ -610,7 +695,7 @@ impl Target {
         // A string has no O(1) in-place step, and `x = x` is not free on
         // every leg: it is bound once and left alone.
         let slot = self.size_param.map(|i| {
-            let varies = !matches!(self.ty(i), Some(GenType::String)) && !self.ty(i).is_some_and(|t| t.refuses_var());
+            let varies = !matches!(self.ty(i), Some(GenType::String)) && !self.ty(i).is_some_and(|t| t.refuses_var()) && !self.is_routed(i);
             let kw = if varies || Some(i) == self.mut_param { "var" } else { "let" };
             let _ = writeln!(s, "  {kw} x: {} = {}", self.render_param(i), self.arg(i, n));
             (i, varies)
@@ -639,7 +724,10 @@ impl Target {
         if let Some(i) = self.size_param.filter(|i| !self.leg_dependent_input(*i)) {
             let _ = writeln!(s, "  acc = acc + {}", digest("x", &self.ty(i).unwrap_or(GenType::Int)));
         }
-        s.push_str("  println(\"${acc}\")\n}\n");
+        let s = match self.routed {
+            Some(r) => self.in_handler(r, &format!("{}  http.response(200, \"${{acc}}\")\n", &s["effect fn main() -> Unit = {\n".len()..]), n),
+            None => s + "  println(\"${acc}\")\n}\n",
+        };
         format!("{}{s}", super::catalogue::imports_for(&s))
     }
 
@@ -769,7 +857,14 @@ impl Target {
                 let _ = writeln!(main, "  {}", render_print(&format!("{v}m"), &self.ty(m).unwrap_or(GenType::Unit)));
             }
         }
-        main.push_str("}\n");
+        let main = match self.routed {
+            Some(r) => {
+                let (head, body) = main.split_at(main.find("effect fn main").unwrap_or(0));
+                let body = &body["effect fn main() -> Unit = {\n".len()..];
+                format!("{head}{}", self.in_handler(r, &format!("{body}  http.response(200, \"\")\n"), n))
+            }
+            None => main + "}\n",
+        };
         let main = format!("{}{main}", super::catalogue::imports_for(&main));
         let base = wrap(&self.name);
         // A path names the types in its signature, so it imports their
@@ -863,7 +958,7 @@ fn small(t: &GenType) -> String {
         GenType::Unit => "()".into(),
         GenType::List(e) => format!("[{}, {}]", small(e), small(e)),
         GenType::Option(e) => format!("some({})", small(e)),
-        GenType::Result(e) => format!("ok({})", small(e)),
+        GenType::Result(e) | GenType::ResultNom(e, _) => format!("ok({})", small(e)),
         GenType::Tuple2(a, b) => format!("({}, {})", small(a), small(b)),
         GenType::Map(v) => format!("[\"k\": {}]", small(v)),
         GenType::Sized(name) => GenType::sized_literal(name, "2"),
@@ -946,11 +1041,21 @@ fn vary(v: &str, t: &GenType, n: u64) -> String {
 /// `none` or a `false` as well ([`OFF_DOMAIN`]). Without an in-domain
 /// input a `none` / `false` is a legitimate answer — a search's miss is its
 /// worst case ([`SEARCH_PARAMS`]) — so nothing is checked. The error slot is
-/// pinned to String (see the module doc), so `e` interpolates.
+/// pinned to String (see the module doc), so `e` interpolates; a nominal
+/// error is shown through the nominal's own readers.
 fn outcome_guard(v: &str, t: &GenType, in_domain: bool, indent: &str) -> String {
     match t {
         GenType::Result(_) => {
             format!("{indent}match {v} {{\n{indent}  ok(_) => (),\n{indent}  err(e) => panic(\"{ERR_PATH}: ${{e}}\"),\n{indent}}}\n")
+        }
+        GenType::ResultNom(_, k) => {
+            let (seen, shown) = match nominal::get(k).filter(|d| !d.observe_calls_effect) {
+                Some(d) => ((d.observed)().render(), nominal::fill(d.observe, "e", 0)),
+                None => ("String".to_string(), "\"\"".to_string()),
+            };
+            format!(
+                "{indent}match {v} {{\n{indent}  ok(_) => (),\n{indent}  err(e) => {{\n{indent}    let eo: {seen} = {shown}\n{indent}    panic(\"{ERR_PATH}: ${{eo}}\")\n{indent}  }},\n{indent}}}\n"
+            )
         }
         GenType::Option(_) if in_domain => {
             format!("{indent}match {v} {{\n{indent}  some(_) => (),\n{indent}  none => panic(\"{OFF_DOMAIN}: none\"),\n{indent}}}\n")
@@ -971,7 +1076,7 @@ fn digest(v: &str, t: &GenType) -> String {
         GenType::List(_) => format!("list.len({v})"),
         GenType::Map(_) => format!("map.len({v})"),
         GenType::Option(_) => format!("(if option.is_some({v}) then 1 else 0)"),
-        GenType::Result(_) => format!("(if result.is_ok({v}) then 1 else 0)"),
+        GenType::Result(_) | GenType::ResultNom(..) => format!("(if result.is_ok({v}) then 1 else 0)"),
         GenType::Tuple2(..) => "1".into(),
         GenType::Sized(name) if name.starts_with("Float") => {
             format!("(if float.from_{}({v}) > 0.0 then 1 else 0)", name.to_lowercase())
@@ -1248,6 +1353,10 @@ pub(crate) mod tests {
             "bytes.copy_within",
             "bytes.copy_from",
             "regex.full_match",
+            // outside the model until a Result could carry a nominal error,
+            // and until a probe could run inside a routed handler
+            "http.decode_json",
+            "http.param",
         ] {
             assert!(covered.contains(name), "{name} has no in-domain input");
         }
@@ -1284,6 +1393,53 @@ pub(crate) mod tests {
         }
         let _ = std::fs::remove_dir_all(&dir);
         assert!(failed.is_empty(), "in-domain probes that did not take the success path:\n{}", failed.join("\n"));
+    }
+
+    /// `http.decode_json` is sized by a JSON body its decode callback accepts
+    /// (n ints, decoded to their count), so the call takes the ok path; its
+    /// `Result[T, HttpResponse]` stops every probe on `err` with the
+    /// response shown through HttpResponse's readers. At String the callback
+    /// returns the count as a String.
+    #[test]
+    fn decode_json_is_sized_with_a_body_its_callback_accepts() {
+        let t = target("http.decode_json");
+        assert!(t.in_domain() && t.size_param == Some(0) && t.rebind_param.is_none());
+        let direct = t.direct_program(1000, 4, true);
+        assert!(direct.contains("  var x: HttpRequest = http.new_request(\"POST\", \"/j\", \"[\" + (list.range(0, 1000) |> list.map((i) => int.to_string(100000000 + i))"), "{direct}");
+        assert!(direct.contains("let r: Result[Int, HttpResponse] = http.decode_json(x, (v) => match value.as_array(v) { ok(xs) => ok((list.len(xs))), err(e) => err(e) })"), "{direct}");
+        assert!(direct.contains("err(e) => {\n        let eo: (Int, (String, Map[String, String])) = (http.status_code(e), (http.body(e), http.headers(e)))\n        panic(\"inspect: the probed call returned err: ${eo}\")"), "{direct}");
+        let catalogue = crate::generator::catalogue::build();
+        let sig = catalogue.iter().find(|s| s.module == "http" && s.func == "decode_json").unwrap();
+        let heap = Target::new_filled(sig, &catalogue, GenType::String).expect("heap target");
+        assert!(heap.direct_program(1000, 4, true).contains("ok(int.to_string(list.len(xs)))"));
+        let project = t.diamond_project(64);
+        let main = &project.files.iter().find(|(p, _)| p.ends_with("main.almd")).unwrap().1;
+        assert!(main.contains("let d_o: Result[Int, String] = match d { ok(o0) => ok(o0), err(e0) => {"), "{main}");
+    }
+
+    /// `http.param` answers `some` only for a request the router bound path
+    /// parameters into: every probe runs inside the handler of a one-route
+    /// router, the routed request filling `req`, and the size is the bound
+    /// value's. The plain call and its baseline both route (the routing
+    /// cancels out of their difference); a router that answered anything but
+    /// 200 stops the probe as off-domain.
+    #[test]
+    fn param_is_probed_inside_a_routed_handler() {
+        let t = target("http.param");
+        assert!(t.in_domain() && t.size_param == Some(0));
+        for with_call in [true, false] {
+            let direct = t.direct_program(1000, 4, with_call);
+            assert!(direct.contains("  let h: HttpHandler = match http.router([http.route(\"GET /p/{id}\", (req) => {\n    let x: HttpRequest = req\n    let a1: String = \"id\"\n"), "{direct}");
+            assert!(direct.contains("h(http.new_request(\"GET\", \"/p/\" + string.repeat(\"a%C3%A9\", 1000), \"\", map.new()))!"), "{direct}");
+            assert!(direct.contains(&format!("if http.status_code(res) == 200 then () else panic(\"{OFF_DOMAIN}: the router answered")), "{direct}");
+            assert!(direct.contains("    http.response(200, \"${acc}\")\n  })]) {"), "{direct}");
+            assert_eq!(direct.contains("let r: Option[String] = http.param(x, a1)"), with_call, "{direct}");
+        }
+        let project = t.diamond_project(64);
+        let main = &project.files.iter().find(|(p, _)| p.ends_with("main.almd")).unwrap().1;
+        assert!(main.starts_with("import http\nimport self.left\nimport self.right\n\neffect fn main() -> Unit = {\n  let h: HttpHandler = "), "{main}");
+        assert!(main.contains("    let a0: HttpRequest = req\n") && main.contains("    let l: Option[String] = left.call(a0, a1)\n"), "{main}");
+        assert_eq!(main.matches(&format!("none => panic(\"{OFF_DOMAIN}: none\")")).count(), 3, "{main}");
     }
 
     /// A recipe that drifted from its function's signature is an error, not

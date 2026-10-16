@@ -81,6 +81,8 @@ pub const NOMINALS: &[Nominal] = &[
             "http.new_request(\"POST\", \"/users/42\", \"aé\", [\"content-type\": \"text/plain\"])",
             "http.new_request(\"PUT\", \"/a/b?x=1&y=two\", \"\", [\"x-a\": \"1\", \"X-B\": \"two\"])",
             "http.new_request(\"DELETE\", \"/s?q=a%20b&q=c&e=\", \"z\", map.new())",
+            // A JSON body: `http.decode_json` reaches its decode callback.
+            "http.new_request(\"POST\", \"/j\", \"[1, \\\"aé\\\", {\\\"k\\\": null}]\", [\"content-type\": \"application/json\"])",
         ],
         observe: "((http.req_method({v}), http.req_path({v})), (http.req_body({v}), http.query_params({v})))",
         observed: || pair(pair(string(), string()), pair(string(), string_map())),
