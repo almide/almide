@@ -6,6 +6,12 @@
 /// Bind every operand to a `__assert_<i>` temp, in order, so each is
 /// evaluated exactly once: the failure block re-references the temps and
 /// never re-runs the operand expressions.
+///
+/// A literal is evaluated in place: reading it twice reads the same value.
+/// A variable operand is read in place too: a temp would be a second owner,
+/// and the native leg cloned the whole value into it on every call. It is
+/// read in place only when no operand can write it between the reads — the
+/// binding is a `let`, or every operand is a variable or a literal.
 fn bind_assert_operands(
     ctx: &mut LowerCtx,
     ir_args: Vec<IrExpr>,
@@ -13,7 +19,22 @@ fn bind_assert_operands(
 ) -> (Vec<IrStmt>, Vec<IrExpr>) {
     let mut stmts: Vec<IrStmt> = Vec::new();
     let mut vars: Vec<IrExpr> = Vec::new();
+    let literal = |a: &IrExpr| {
+        matches!(
+            a.kind,
+            IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. } | IrExprKind::LitStr { .. } | IrExprKind::LitBool { .. } | IrExprKind::Unit
+        )
+    };
+    let inert = ir_args.iter().all(|a| literal(a) || matches!(a.kind, IrExprKind::Var { .. }));
     for (i, a) in ir_args.into_iter().enumerate() {
+        let in_place = match a.kind {
+            IrExprKind::Var { id } => inert || ctx.var_table.get(id).mutability == Mutability::Let,
+            _ => literal(&a),
+        };
+        if in_place {
+            vars.push(a);
+            continue;
+        }
         let a_ty = a.ty.clone();
         let v = ctx.define_var(&format!("__assert_{i}"), a_ty.clone(), Mutability::Let, None);
         stmts.push(IrStmt {
