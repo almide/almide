@@ -69,7 +69,7 @@
 #                      every stamped row is to be re-inspected before each final
 #                      release for that (a manual GCE run: no credentials in CI)
 #
-# uninspected_ceiling = "193"
+# uninspected_ceiling = "190"
 
 [[fn]]
 name = "args.flag"
@@ -6037,7 +6037,14 @@ diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 name = "json.remove_path"
 sig = "(j: Value, path: JsonPath) -> Value"
 class = "pure"
-status = "uninspected"
+status = "inspected"
+impl = "fnv1a:0bfafff4e2999ece"
+stamp = "almide 0.67.1 (dev) at insp-pure-2 5d23f9b22 (develop plus the nominal-type grammar and the #3752 to #3755 fixes); xtarget-fuzz inspect at the same sha (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC, no free-list reuse), 200 programs per fn; GCE c4-standard-4 (INTEL XEON PLATINUM 8581C, 4 vCPU, PMU architectural, one fn at a time per VM, asia-northeast1-b), Ubuntu 24.04 Linux 7.0.0-1014-gcp, rustc 1.99.1, wasmtime 49.0.1; 2026-10-16; codopsy: no crate code changed by this inspection (tools/xtarget-fuzz is not a gated crate)"
+order = "n; rebind (loop, tail, fold) n"
+parity = "PASS: seed 1792123880, 200 programs; 200 program(s) call it, 191 of them clean on every leg; unique findings 0"
+complexity = "PASS: call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=1..2 6.440e7/1.294e8/2.593e8/5.191e8/1.039e9 fit n (rms 0.0%) moved 1.710e6/3.430e6/6.870e6/1.375e7/2.751e7B fit n (rms 0.0%) wall 0.005/0.010/0.015/0.036/0.086s wasm k=1..2 2.903e7/5.809e7/1.162e8/2.325e8/4.649e8 fit n (rms 0.0%) moved 4.599e5/9.201e5/1.840e6/3.680e6/7.360e6B fit n (rms 0.0%) wall 0.005/0.000/0.010/0.015/0.030s (order n ok); loop meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=4..8 5.260e7/1.072e8/2.165e8/4.351e8/8.722e8 fit n (rms 0.0%) moved 7.591e5/1.559e6/3.159e6/6.359e6/1.276e7B fit n (rms 0.0%) wall 0.005/0.005/0.010/0.025/0.051s wasm k=16..32 3.494e7/6.982e7/1.396e8/2.791e8/5.581e8 fit n (rms 0.0%) moved 3.560e2/1.160e2/2.120e2/2.120e2/3.560e2B fit 1 (rms 0.0%) wall 0.005/0.005/0.010/0.020/0.046s (order n ok); tail meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=4..8 5.260e7/1.072e8/2.165e8/4.360e8/8.722e8 fit n (rms 0.1%) moved 7.591e5/1.559e6/3.159e6/6.359e6/1.276e7B fit n (rms 0.0%) wall 0.000/0.005/0.015/0.025/0.046s wasm k=16..32 3.494e7/6.982e7/1.396e8/2.791e8/5.581e8 fit n (rms 0.0%) moved 2.110e2/1.900e1/1.900e1/6.700e1/1.150e2B fit 1 (rms 0.0%) wall 0.005/0.005/0.010/0.020/0.046s (order n ok); fold meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=4..8 5.260e7/1.072e8/2.165e8/4.360e8/8.722e8 fit n (rms 0.1%) moved 7.591e5/1.559e6/3.159e6/6.359e6/1.276e7B fit n (rms 0.0%) wall 0.005/0.005/0.010/0.025/0.056s wasm k=16..32 3.494e7/6.982e7/1.396e8/2.791e8/5.581e8 fit n (rms 0.0%) moved 1.660e2/1.180e2/1.660e2/1.660e2/2.620e2B fit 1 (rms 0.0%) wall 0.005/0.005/0.015/0.020/0.051s (order n ok)"
+alloc = "PASS: call live=0, loop live=0, tail live=0, fold live=0"
+diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 
 [[fn]]
 name = "json.root"
@@ -7848,7 +7855,14 @@ diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 name = "matrix.mul_f32"
 sig = "(a: Matrix[Float32], b: Matrix[Float32]) -> Matrix[Float32]"
 class = "pure"
-status = "uninspected"
+status = "inspected"
+impl = "fnv1a:04c9dd8cfdb57b70"
+stamp = "almide 0.67.1 (dev) at insp-pure-2 5d23f9b22 (develop plus the nominal-type grammar and the #3752 to #3755 fixes); xtarget-fuzz inspect at the same sha (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC, no free-list reuse), 200 programs per fn; GCE c4-standard-4 (INTEL XEON PLATINUM 8581C, 4 vCPU, PMU architectural, one fn at a time per VM, asia-northeast1-b), Ubuntu 24.04 Linux 7.0.0-1014-gcp, rustc 1.99.1, wasmtime 49.0.1; 2026-10-16; codopsy: no crate code changed by this inspection (tools/xtarget-fuzz is not a gated crate)"
+order = "n; rebind (loop, tail, fold) n"
+parity = "PASS: seed 1792123938, 200 programs; 200 program(s) call it, 192 of them clean on every leg; unique findings 0"
+complexity = "PASS: call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=16..32 3.841e7/7.681e7/1.536e8/3.072e8/6.144e8 fit n (rms 0.0%) moved 0.000e0/2.000e0/0.000e0/0.000e0/2.000e0B fit 1 (rms 0.0%) wall 0.000/0.005/0.005/0.015/0.030s wasm k=16..32 4.865e7/9.729e7/1.946e8/3.891e8/7.783e8 fit n (rms 0.0%) moved 5.120e6/1.024e7/2.048e7/4.096e7/8.192e7B fit n (rms 0.0%) wall 0.005/0.010/0.020/0.041/0.086s (order n ok); loop meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=16..32 3.844e7/7.684e7/1.536e8/3.072e8/6.144e8 fit n (rms 0.0%) moved 0.000e0/0.000e0/0.000e0/0.000e0/0.000e0B fit 1 (rms 0.0%) wall 0.000/0.000/0.005/0.015/0.020s wasm k=16..32 4.866e7/9.730e7/1.946e8/3.891e8/7.783e8 fit n (rms 0.0%) moved 5.120e6/1.024e7/2.048e7/4.096e7/8.192e7B fit n (rms 0.0%) wall 0.005/0.005/0.020/0.041/0.091s (order n ok); tail meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=16..32 3.844e7/7.684e7/1.536e8/3.072e8/6.144e8 fit n (rms 0.0%) moved 0.000e0/0.000e0/0.000e0/0.000e0/0.000e0B fit 1 (rms 0.0%) wall 0.000/0.000/0.005/0.010/0.025s wasm k=16..32 4.866e7/9.730e7/1.946e8/3.891e8/7.783e8 fit n (rms 0.0%) moved 5.120e6/1.024e7/2.048e7/4.096e7/8.192e7B fit n (rms 0.0%) wall 0.000/0.005/0.015/0.020/0.071s (order n ok); fold meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=16..32 3.844e7/7.684e7/1.536e8/3.072e8/6.144e8 fit n (rms 0.0%) moved 0.000e0/0.000e0/0.000e0/0.000e0/0.000e0B fit 1 (rms 0.0%) wall 0.000/0.005/0.005/0.015/0.025s wasm k=16..32 4.865e7/9.729e7/1.946e8/3.891e8/7.783e8 fit n (rms 0.0%) moved 5.120e6/1.024e7/2.048e7/4.096e7/8.192e7B fit n (rms 0.0%) wall 0.005/0.010/0.015/0.036/0.061s (order n ok)"
+alloc = "PASS: call live=0, loop live=0, tail live=0, fold live=0"
+diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 
 [[fn]]
 name = "matrix.mul_f32_scaled"
@@ -8725,7 +8739,14 @@ diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 name = "path.to_string"
 sig = "(p: SafePath) -> String"
 class = "pure"
-status = "uninspected"
+status = "inspected"
+impl = "fnv1a:a744b99395907329"
+stamp = "almide 0.67.1 (dev) at insp-pure-2 5d23f9b22 (develop plus the nominal-type grammar and the #3752 to #3755 fixes); xtarget-fuzz inspect at the same sha (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC, no free-list reuse), 200 programs per fn; GCE c4-standard-4 (INTEL XEON PLATINUM 8581C, 4 vCPU, PMU architectural, one fn at a time per VM, asia-northeast1-b), Ubuntu 24.04 Linux 7.0.0-1014-gcp, rustc 1.99.1, wasmtime 49.0.1; 2026-10-16; codopsy: no crate code changed by this inspection (tools/xtarget-fuzz is not a gated crate)"
+order = "n"
+parity = "PASS: seed 1792123958, 200 programs; 200 program(s) call it, 186 of them clean on every leg; unique findings 0"
+complexity = "PASS: call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=64..128 2.184e7/4.365e7/8.726e7/1.745e8/3.489e8 fit n (rms 0.0%) moved 3.840e6/7.680e6/1.536e7/3.072e7/6.144e7B fit n (rms 0.0%) wall 0.000/0.005/0.005/0.010/0.015s wasm k=64..128 3.841e7/7.682e7/1.536e8/3.072e8/6.144e8 fit n (rms 0.0%) moved 3.000e0/5.000e0/3.000e0/0.000e0/0.000e0B fit 1 (rms 0.0%) wall 0.000/0.005/0.010/0.015/0.030s (order n ok)"
+alloc = "PASS: call live=0"
+diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 
 [[fn]]
 name = "path.trusted"
