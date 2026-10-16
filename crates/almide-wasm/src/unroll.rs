@@ -142,10 +142,13 @@ impl Emitter<'_> {
         // One iteration of the fast lane is K copies of the body: one
         // activation for the witness (#2757).
         self.witness_loop_open();
+        // Each copy goes through the block walk the rolled body takes
+        // (`lower_loop_body`): it finds the rebinds that MOVE their dying var
+        // into the call (`x = f(x, …)`, writeback_move.rs). Lowered statement by
+        // statement, the lane shared `x` into the call instead, and the
+        // callee's in-place op copied the whole buffer on every iteration.
         for _ in 0..UNROLL {
-            for st in body {
-                self.lower_stmt(st)?;
-            }
+            self.lower_block_stmts(body, None)?;
         }
         self.witness_loop_close();
         self.f.instructions().br(0).end().end();
