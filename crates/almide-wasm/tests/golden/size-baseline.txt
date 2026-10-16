@@ -789,6 +789,15 @@
 1719	spec/wasm_cross/tco_multi_concat.almd
 1962	spec/wasm_cross/tco_nested_list_accumulator.almd
 2620	spec/wasm_cross/tco_over_match_result.almd
+5271	spec/wasm_cross/testing_assert_abort_approx.almd
+2663	spec/wasm_cross/testing_assert_abort_contains.almd
+2866	spec/wasm_cross/testing_assert_abort_err.almd
+2277	spec/wasm_cross/testing_assert_abort_gt.almd
+1393	spec/wasm_cross/testing_assert_abort_lt.almd
+2824	spec/wasm_cross/testing_assert_abort_none.almd
+5715	spec/wasm_cross/testing_assert_abort_ok.almd
+2235	spec/wasm_cross/testing_assert_abort_some.almd
+1940	spec/wasm_cross/testing_assert_abort_throws.almd
 1353	spec/wasm_cross/time_negative_scale.almd
 1228	spec/wasm_cross/time_negative_trap.almd
 3715	spec/wasm_cross/time_ops_algebra.almd
