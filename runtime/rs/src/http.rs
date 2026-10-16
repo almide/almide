@@ -160,7 +160,9 @@ pub fn almide_http_set_cookie(mut resp: AlmideHttpResponse, name: &str, value: &
 
 // ── Request accessors ──
 
-#[derive(Clone, Debug, Default)]
+// `PartialEq` (#3755): a request is a plain value — `==`, a Set element and
+// a Map key compare it by content, as the wasm leg's representation does.
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct AlmideHttpRequest {
     pub method: String,
     pub path: String,

@@ -1,0 +1,6 @@
+import json
+fn main() -> Unit = {
+  let names = ["b", "a"]
+  let first = list.min(names) ?? "a"
+  println("${json.field(json.root(), first)}")
+}
