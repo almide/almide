@@ -113,6 +113,13 @@ impl SigType {
                     // A Set is built with `set.from_list`; its element
                     // must be hashable (checked at `instantiate`).
                     ("Set", 1) => Some(SigType::Set(Box::new(Self::from_type_expr(&args[0])?))),
+                    // A nominal spelled with arguments (`Matrix[Float32]`).
+                    (_, 1) => match &args[0] {
+                        TypeExpr::Simple { name: arg } => {
+                            super::nominal::get(&format!("{n}[{}]", arg.as_str())).map(|k| SigType::Nominal(k.name))
+                        }
+                        _ => None,
+                    },
                     _ => None,
                 }
             }
