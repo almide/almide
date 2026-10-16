@@ -792,8 +792,8 @@
 66592	spec/wasm_cross/testing_assert_abort_approx.almd
 66048	spec/wasm_cross/testing_assert_abort_contains.almd
 66240	spec/wasm_cross/testing_assert_abort_err.almd
-65952	spec/wasm_cross/testing_assert_abort_gt.almd
-65904	spec/wasm_cross/testing_assert_abort_lt.almd
+65888	spec/wasm_cross/testing_assert_abort_gt.almd
+65776	spec/wasm_cross/testing_assert_abort_lt.almd
 66224	spec/wasm_cross/testing_assert_abort_none.almd
 66576	spec/wasm_cross/testing_assert_abort_ok.almd
 66096	spec/wasm_cross/testing_assert_abort_some.almd
