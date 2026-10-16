@@ -37,6 +37,9 @@ pub struct Target {
     /// An in-domain argument derived from the declaration ([`Domain`]),
     /// for the parameter at the index, when no recipe names the function.
     domain: Option<(usize, Domain)>,
+    /// A type variable was free (not pinned by the signature): the function
+    /// is inspected at a heap instantiation too ([`Self::new_filled`]).
+    pub generic: bool,
 }
 
 /// An argument inside the function's domain, derived from its declaration
@@ -307,7 +310,19 @@ const STOPS_ON_TRUE: &[&str] = &["any", "find", "find_index", "position", "find_
 
 impl Target {
     /// `catalogue` is where a decoder's inverse is looked up ([`Domain`]).
+    /// Every free type variable is Int; [`Self::new_filled`] picks another.
+    #[cfg(test)]
     pub fn new(sig: &Signature, catalogue: &[Signature]) -> Result<Target, String> {
+        Self::new_filled(sig, catalogue, GenType::Int)
+    }
+
+    /// The function with every free type variable bound to `fill`. A
+    /// generic function is inspected at Int AND at a heap type (String):
+    /// its heap-element path — refcounts, slot copies — is a different
+    /// lowering from Int's, and an Int-only measurement never ran it
+    /// (wasm `list.flat_map` over Strings allocated O(n²) bytes while its
+    /// Int stamp was clean, 2026-10-16).
+    pub fn new_filled(sig: &Signature, catalogue: &[Signature], fill: GenType) -> Result<Target, String> {
         let name = format!("{}.{}", sig.module, sig.func);
         let mut subst = sig.forced_bindings();
         let mut vars = Vec::new();
@@ -316,7 +331,7 @@ impl Target {
         }
         sig.ret.collect_vars(&mut vars);
         for v in vars {
-            subst.entry(v).or_insert(GenType::Int);
+            subst.entry(v).or_insert_with(|| fill.clone());
         }
         let ret = sig.ret.instantiate(&subst).ok_or_else(|| format!("{name}: return type has no value form"))?;
         let params: Vec<(String, SigType)> = sig.param_names.iter().cloned().zip(sig.params.iter().cloned()).collect();
@@ -351,7 +366,11 @@ impl Target {
                 .or_else(|| params.iter().position(|(n, t)| *t == SigType::Int && SIZE_LIKE_INT.contains(&n.as_str()))),
         };
         let rebind_param = params.iter().position(|(_, t)| concrete(t).as_ref() == Some(&ret));
-        Ok(Target { name, params, subst, ret, size_param, rebind_param, mut_param: sig.mut_param, recipe, domain })
+        let generic = {
+            let forced = sig.forced_bindings();
+            subst.keys().any(|k| !forced.contains_key(k))
+        };
+        Ok(Target { name, params, subst, ret, size_param, rebind_param, mut_param: sig.mut_param, recipe, domain, generic })
     }
 
     /// The probes give this function an input inside its domain (a recipe
