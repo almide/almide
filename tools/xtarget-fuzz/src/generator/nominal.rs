@@ -26,6 +26,13 @@ pub struct Nominal {
     pub observed: fn() -> GenType,
     /// An Int that depends on `{v}` (the inspection's anti-dead-code sink).
     pub digest: &'static str,
+    /// [`observe`](Self::observe) and [`digest`](Self::digest) call an
+    /// effect closure (`h(req)!`): only an effect body may hold them.
+    pub observe_calls_effect: bool,
+    /// A value of this type holds a request handler, and a handler may not
+    /// reach a `var` (E008: handlers run concurrently): it is never bound
+    /// with `var`, so it has no loop-rebind shape.
+    pub refuses_var: bool,
 }
 
 fn string() -> GenType {
@@ -57,6 +64,8 @@ pub const NOMINALS: &[Nominal] = &[
         observe: "(http.status_code({v}), (http.body({v}), http.headers({v})))",
         observed: || pair(GenType::Int, pair(string(), string_map())),
         digest: "map.len(http.headers({v}))",
+        observe_calls_effect: false,
+        refuses_var: false,
     },
     Nominal {
         name: "HttpRequest",
@@ -71,6 +80,8 @@ pub const NOMINALS: &[Nominal] = &[
         observe: "((http.req_method({v}), http.req_path({v})), (http.req_body({v}), http.query_params({v})))",
         observed: || pair(pair(string(), string()), pair(string(), string_map())),
         digest: "map.len(http.query_params({v}))",
+        observe_calls_effect: false,
+        refuses_var: false,
     },
     Nominal {
         name: "SafeHtml",
@@ -85,6 +96,8 @@ pub const NOMINALS: &[Nominal] = &[
         observe: "html.to_string({v})",
         observed: string,
         digest: "string.len(html.to_string({v}))",
+        observe_calls_effect: false,
+        refuses_var: false,
     },
     Nominal {
         name: "SafePath",
@@ -94,6 +107,8 @@ pub const NOMINALS: &[Nominal] = &[
         observe: "path.to_string({v})",
         observed: string,
         digest: "string.len(path.to_string({v}))",
+        observe_calls_effect: false,
+        refuses_var: false,
     },
     // `url.parse` is the only constructor; these inputs parse.
     Nominal {
@@ -108,6 +123,8 @@ pub const NOMINALS: &[Nominal] = &[
         observe: "url.to_string({v})",
         observed: string,
         digest: "string.len(url.to_string({v}))",
+        observe_calls_effect: false,
+        refuses_var: false,
     },
     // A path of n steps; observed by where it leads in a fixed value.
     Nominal {
@@ -123,6 +140,8 @@ pub const NOMINALS: &[Nominal] = &[
         observe: "option.map(json.get_path(value.object([(\"a\", value.array([value.int(1), value.str(\"x\")]))]), {v}), (jp) => value.stringify(jp))",
         observed: || GenType::Option(Box::new(GenType::String)),
         digest: "(if option.is_some(json.get_path(value.object([(\"a\", value.int(1))]), {v})) then 1 else 0)",
+        observe_calls_effect: false,
+        refuses_var: false,
     },
     // n rows of 2: the operands of the products agree with a 2 × 2 partner.
     Nominal {
@@ -133,6 +152,58 @@ pub const NOMINALS: &[Nominal] = &[
         observe: "matrix.to_lists({v})",
         observed: || GenType::List(Box::new(GenType::List(Box::new(GenType::Float)))),
         digest: "matrix.rows({v})",
+        observe_calls_effect: false,
+        refuses_var: false,
+    },
+    // A request handler; observed by what it answers a fixed request. Its
+    // values are one-level lambdas, which the checker lifts to the effect
+    // closure (a lambda nested in another is not lifted, #3749).
+    Nominal {
+        name: "HttpHandler",
+        small: "((req) => http.response(200, http.req_path(req) + \"|\" + (http.param(req, \"id\") ?? \"-\")))",
+        sized: "((req) => http.response(200, http.req_path(req) + \"|\" + (http.param(req, \"id\") ?? \"-\")))",
+        leaves: &[
+            "((req) => http.response(200, http.req_path(req) + \"|\" + (http.param(req, \"id\") ?? \"-\")))",
+            "((req) => http.with_headers(201, http.req_body(req), [\"x-m\": http.req_method(req)]))",
+            "((req) => http.redirect(\"/r\"))",
+        ],
+        observe: "http.body({v}(http.new_request(\"POST\", \"/p/7?x=1\", \"b\", map.new()))!)",
+        observed: string,
+        digest: "string.len(http.body({v}(http.new_request(\"POST\", \"/p/7?x=1\", \"b\", map.new()))!))",
+        observe_calls_effect: true,
+        refuses_var: true,
+    },
+    // A route row; observed by what a one-row router answers. The sized
+    // pattern has n literal segments before its parameter.
+    Nominal {
+        name: "HttpRoute",
+        small: "http.route(\"GET /p/{id}\", (req) => http.response(200, http.param(req, \"id\") ?? \"-\"))",
+        sized: "http.route(\"GET /\" + (list.range(0, {n}) |> list.map((i) => \"s${100000000 + i}\") |> list.join(\"/\")) + \"/{id}\", (req) => http.response(200, http.param(req, \"id\") ?? \"-\"))",
+        leaves: &[
+            "http.route(\"GET /p/{id}\", (req) => http.response(200, http.param(req, \"id\") ?? \"-\"))",
+            "http.route(\"POST /p/{rest...}\", (req) => http.response(201, http.param(req, \"rest\") ?? \"-\"))",
+            "http.mount(\"/p\", (req) => http.response(202, http.req_path(req)))",
+        ],
+        observe: "(match http.router([{v}]) { ok(t) => http.body(t(http.new_request(\"GET\", \"/p/7\", \"\", map.new()))!), err(e) => e })",
+        observed: string,
+        digest: "string.len(match http.router([{v}]) { ok(t) => http.body(t(http.new_request(\"GET\", \"/p/7\", \"\", map.new()))!), err(e) => e })",
+        observe_calls_effect: true,
+        refuses_var: true,
+    },
+    // A middleware; observed by what it makes of a fixed handler. Only
+    // spellings that build no closure of their own: one that does is a
+    // nested lambda in an effect-closure position, refused or miscompiled
+    // (#3749).
+    Nominal {
+        name: "HttpMiddleware",
+        small: "((next) => next)",
+        sized: "((next) => next)",
+        leaves: &["((next) => next)", "((next) => http.wrap(next, []))"],
+        observe: "http.body(http.wrap((req) => http.response(200, \"base\"), [{v}])(http.new_request(\"GET\", \"/\", \"\", map.new()))!)",
+        observed: string,
+        digest: "string.len(http.body(http.wrap((req) => http.response(200, \"base\"), [{v}])(http.new_request(\"GET\", \"/\", \"\", map.new()))!))",
+        observe_calls_effect: true,
+        refuses_var: true,
     },
 ];
 
