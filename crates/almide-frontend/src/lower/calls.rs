@@ -536,12 +536,16 @@ fn lower_call_coerce_from_sig(ctx: &mut LowerCtx, ir_args: &mut Vec<IrExpr>, sig
         if let Some(arg) = ir_args.get_mut(i) {
             super::statements::coerce_literal_to_sized(arg, param_ty, ctx.env);
             // A PURE fn value into an `effect (A) -> B` param slot gets the
-            // ok(...) wrap here, same as the let-annotation site (#1148).
-            let needs_effect_wrap = matches!(param_ty, Ty::Fn { is_effect: true, .. })
+            // ok(...) wrap here, same as the let-annotation site (#1148). The
+            // slot is read through its alias: a stdlib sig keeps `HttpHandler`
+            // as written, and a lambda reached through an `if`/`match`/block
+            // arm (not checked as an effect body) arrived pure and unwrapped.
+            let slot_ty = ctx.env.resolve_named(param_ty);
+            let needs_effect_wrap = matches!(slot_ty, Ty::Fn { is_effect: true, .. })
                 && matches!(&arg.ty, Ty::Fn { ret, is_effect: false, .. } if !ret.is_result());
             if needs_effect_wrap {
                 let owned = arg.clone();
-                *arg = super::expressions::adapt_fn_value_to_effect_slot(ctx, owned, param_ty);
+                *arg = super::expressions::adapt_fn_value_to_effect_slot(ctx, owned, &slot_ty);
             }
         }
     }
