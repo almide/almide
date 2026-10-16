@@ -14,7 +14,9 @@
 //!
 //! The positive cells cover the inline fold over an owned and a borrowed
 //! source, a fused `map |> fold`, and pin the accumulator siblings that
-//! already moved (`map.fold`, `set.fold`, `list.scan`, the self tail call).
+//! already moved (`map.fold`, `set.fold`, `list.scan`, the self tail call)
+//! and the same rule on a chain SOURCE (`ys = ys |> list.map(f)` iterates
+//! the dying list by value instead of `iter().cloned()`).
 //! The negative cells keep the copy where `x` is read again: inside the
 //! callback, a second time in the same right side, and a non-rebind whose
 //! source is read afterwards. The differential runs the program on both
@@ -61,6 +63,15 @@ fn borrowed(n: Int) -> String = {
   x
 }
 
+fn source(n: Int) -> Int = {
+  var ys: List[String] = ["a", "b"]
+  for _i in 0..<n {
+    ys = ys |> list.map((s) => s + "x")
+    ys = list.filter(ys, (s) => string.len(s) > 0)
+  }
+  list.len(ys)
+}
+
 fn siblings(n: Int) -> String = {
   let m: Map[String, Int] = map.from_list([("k", 1)])
   let st: Set[String] = set.from_list(["e"])
@@ -101,6 +112,7 @@ effect fn main() -> Unit = {
   println(fused(2))
   println(borrowed(2))
   println(siblings(2))
+  println("${source(2)}")
   println(captured(3))
   println(twice(2))
   println(kept("k"))
@@ -108,7 +120,7 @@ effect fn main() -> Unit = {
 }
 "#;
 
-const EXPECTED: &str = "100\nfs1s1s1s1\nbssss\nske~~ke~~\nccccccc\nw--w--w--w\nkk++\ntgggg\n";
+const EXPECTED: &str = "100\nfs1s1s1s1\nbssss\nske~~ke~~\n2\nccccccc\nw--w--w--w\nkk++\ntgggg\n";
 
 fn emit_rust() -> String {
     let file = scratch("emit").join("prog.almd");
@@ -146,6 +158,8 @@ fn the_accumulator_siblings_keep_moving() {
         assert!(s.contains(needle), "siblings: expected `{needle}`:\n{s}");
     }
     assert!(!s.contains("x.clone()"), "siblings: an accumulator is copied:\n{s}");
+    let src = body(&rust, "source");
+    assert!(!src.contains("ys).iter().cloned()"), "source: a dying chain source is copied element by element:\n{src}");
     let g = body(&rust, "go");
     assert!(g.contains(".fold(acc, "), "go: the tail-call accumulator is copied:\n{g}");
 }
