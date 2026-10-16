@@ -48,3 +48,21 @@ fn an_assert_over_a_variable_does_not_copy_it_per_call() {
         assert!(allocs < 200, "{call}: {allocs} native allocations over 2000 calls — the operand is copied per call");
     }
 }
+
+/// The same copy in user code: a `match` on a variable that stays live after
+/// it cloned the whole value to match on it, though no arm binds anything.
+#[test]
+fn a_match_on_a_live_variable_does_not_copy_it() {
+    for (ty, init, arms) in [
+        ("Option[String]", "some(string.repeat(\"a\", 1000))", "some(_) => 1, none => 0"),
+        ("Result[String, String]", "ok(string.repeat(\"a\", 1000))", "ok(_) => 1, err(_) => 0"),
+        ("Option[String]", "some(string.repeat(\"a\", 1000))", "some(s) => string.len(s) - 999, none => 0"),
+    ] {
+        let src = format!(
+            "effect fn main() -> Unit = {{\n  let x: {ty} = {init}\n  var n = 0\n  var i = 0\n  while i < 2000 {{\n    n = n + (match x {{ {arms} }})\n    i = i + 1\n  }}\n  println(\"${{n}} ${{x == x}}\")\n}}\n"
+        );
+        let (out, allocs) = native_allocs(&src);
+        assert_eq!(out, "2000 true\n", "{arms}");
+        assert!(allocs < 200, "match x {{ {arms} }}: {allocs} native allocations over 2000 matches — the subject is copied per match");
+    }
+}
