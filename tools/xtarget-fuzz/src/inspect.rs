@@ -303,7 +303,7 @@ fn judge_timed(
         }
         let r1 = ratio(ds[0], ds[1]);
         let r2 = ratio(ds[1], ds[2]);
-        let tag = if matches!(leg, Leg::Native) { "native" } else { "wasm" };
+        let tag = leg_tag(leg);
         line.push_str(&format!(
             " {tag} {:.3}/{:.3}/{:.3}s x{r1:.2} x{r2:.2}",
             ds[0].as_secs_f64(),
@@ -646,7 +646,7 @@ fn judge_counted(
         let mut k = 1u64;
         loop {
             let (p, b) = marginal(n, k);
-            let d = counted_delta(ctx, &p, &b, leg).map_err(|e| format!("{label} {e}"))?;
+            let d = counted_delta(ctx, &p, &b, leg).map_err(|e| format!("{label} {} calibrating k={k} at n={n}: {e}", leg_tag(leg)))?;
             if counted_calibrated(&d) || k >= MAX_K {
                 return Ok(k);
             }
@@ -664,7 +664,9 @@ fn judge_counted(
         let mut ts = Vec::new();
         for &m in &sizes {
             let (p, b) = marginal(m, k);
-            let d = counted_delta(ctx, &p, &b, leg).map_err(|e| format!("{label} {e}"))?;
+            // Which leg, k and size failed is the first thing a timeout's
+            // diagnosis needs (value.as_array timed out with none of it).
+            let d = counted_delta(ctx, &p, &b, leg).map_err(|e| format!("{label} {} k={k} n={m}: {e}", leg_tag(leg)))?;
             ys.push(d.instructions);
             bs.push(d.moved);
             ts.push(d.wall);
@@ -673,7 +675,7 @@ fn judge_counted(
         let (bclass, brms) = fit_series(&sizes, &bs, k);
         worst = worst.max(class).max(bclass);
         unexplained |= rms > FIT_TOLERANCE || brms > FIT_TOLERANCE;
-        let tag = if matches!(leg, Leg::Native) { "native" } else { "wasm" };
+        let tag = leg_tag(leg);
         let sci = |v: &[f64]| v.iter().map(|y| format!("{:.3e}", y)).collect::<Vec<_>>().join("/");
         let times: Vec<String> = ts.iter().map(|t| format!("{:.3}", t.as_secs_f64())).collect();
         line.push_str(&format!(
@@ -703,6 +705,10 @@ fn judge_counted(
         Some(declared) if worst <= declared => Ok(format!("{line} (order {} ok)", CLASSES[declared].0)),
         Some(declared) => Err(format!("{line} (order {} exceeded: measured {measured})", CLASSES[declared].0)),
     }
+}
+
+fn leg_tag(leg: Leg) -> &'static str {
+    if matches!(leg, Leg::Native) { "native" } else { "wasm" }
 }
 
 /// Whether the counted judge's k is large enough for one leg: either meter
