@@ -8831,8 +8831,10 @@ fn router(routes: List[HttpRoute]) -> Result[HttpHandler, String] = {
 
 /// Applies middleware; the first is the outermost.
 @concurrent(handler, middleware)
-fn wrap(handler: HttpHandler, middleware: List[HttpMiddleware]) -> HttpHandler =
-  list.reverse(middleware) |> list.fold(handler, (inner, mw) => __apply(mw, inner))
+fn wrap(handler: HttpHandler, middleware: List[HttpMiddleware]) -> HttpHandler = list.reverse(middleware) |> list.fold(
+  handler,
+  (inner, mw) => __apply(mw, inner),
+)
 
 
 
