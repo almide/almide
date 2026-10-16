@@ -62,10 +62,11 @@ pub const FS_SERVICE_OPS: &[(i32, &str, i32)] = &[
     (42, "op_nop", 42),
     (51, "op_read_lines", 51),
     (52, "op_read_lines", 52),
-    // 61: fold_lines_range (and fold_lines_chunked's worker read) — op 1's
-    // body under the range's name; the guest walks the text (#2744).
+    // 61: fold_lines_range (and fold_lines_chunked's worker read) — the raw
+    // bytes reader under the range's name; the guest walks the bytes and
+    // validates UTF-8 only in what it reads (#2744, #3758).
     // 62: fold_lines_chunked's size probe — op 17's body under its name.
-    (61, "op_read_text", 61),
+    (61, "op_read_bytes", 61),
     (62, "op_file_size", 62),
     // 63/64: the Bytes-typed readers, ops 14/25's bodies under the writer's
     // call name (#2890 — sharing 14/25 said `fs.read_bytes` where native

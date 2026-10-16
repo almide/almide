@@ -118,6 +118,31 @@ fn fs_dispatch_w(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
 
 /// The structured READ ops (temp dir / list_dir / read_lines /
 /// if-exists / read_bytes) — split for the complexity budget.
+/// The streaming walkers' answer (ops 51/52, `fold_lines` / `for_each_line`).
+/// Native reads line by line, so invalid UTF-8 errs only when the line holding
+/// it is read — AFTER the callbacks for the lines before it ran (C-220). A
+/// valid file is status 0 and its lines; an invalid one is status 3 (#3758):
+/// the frames of every line before the first invalid one, then the err
+/// message as the LAST frame, which the guest answers once it has folded the
+/// rest. The first invalid line is the one holding `valid_up_to` — a `\n` is
+/// ASCII, so every line ending before it is valid and that one is not.
+fn stream_line_frames(op: i32, a: &str, bytes: Vec<u8>) -> (i64, Vec<u8>) {
+    let k = match std::str::from_utf8(&bytes) {
+        Ok(t) => {
+            let lines: Vec<String> = t.lines().map(str::to_string).collect();
+            let buf = frames(&lines);
+            return (pack(0, buf.len()), buf);
+        }
+        Err(e) => e.valid_up_to(),
+    };
+    let start = bytes[..k].iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1);
+    let prefix = std::str::from_utf8(&bytes[..start]).unwrap_or_default();
+    let mut lines: Vec<String> = prefix.lines().map(str::to_string).collect();
+    lines.push(io_err(fs_op_name(op), &q(a), almide_base::fs_errno::INVALID_UTF8_TEXT));
+    let buf = frames(&lines);
+    (pack(3, buf.len()), buf)
+}
+
 fn fs_dispatch_r2(op: i32, a: &str) -> (i64, Vec<u8>) {
     use std::path::Path;
     let ok_text = |t: String| (pack(0, t.len()), t.into_bytes());
@@ -159,12 +184,16 @@ fn fs_dispatch_r2(op: i32, a: &str) -> (i64, Vec<u8>) {
         // raw-BYTES reader, and routing them there fed the guest bytes where it
         // decodes length-prefixed frames — `fs.fold_lines` then summed an empty
         // walk and answered 0 instead of 6, silently.
-        12 | 51 | 52 => match std::fs::read_to_string(a) {
+        12 => match std::fs::read_to_string(a) {
             Ok(t) => {
                 let lines: Vec<String> = t.lines().map(str::to_string).collect();
                 let buf = frames(&lines);
                 (pack(0, buf.len()), buf)
             }
+            Err(e) => err_s(io_err(fs_op_name(op), &q(a), e)),
+        },
+        51 | 52 => match std::fs::read(a) {
+            Ok(bytes) => stream_line_frames(op, a, bytes),
             Err(e) => err_s(io_err(fs_op_name(op), &q(a), e)),
         },
         13 => {
@@ -620,11 +649,17 @@ fn fs_dispatch(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     let ok_text = |t: String| (pack(0, t.len()), t.into_bytes());
     let err_s = |m: String| (pack(1, m.len()), m.into_bytes());
     match op {
-        // 61 is fold_lines_range (and fold_lines_chunked's worker read): op
-        // 1's body under the range's name (#2744) — the guest walks the text's
-        // byte ranges.
-        1 | 61 => match std::fs::read_to_string(a) {
+        1 => match std::fs::read_to_string(a) {
             Ok(t) => ok_text(t),
+            Err(e) => err_s(io_err(fs_op_name(op), &q(a), e)),
+        },
+        // 61 is fold_lines_range (and fold_lines_chunked's worker read): the
+        // file's RAW bytes under the range's name (#2744). The guest walks
+        // the byte ranges and validates UTF-8 only in what it reads, as
+        // native's per-line `read_line` does (#3758) — a whole-file decode
+        // here failed ranges whose own lines are valid.
+        61 => match std::fs::read(a) {
+            Ok(bytes) => (pack(0, bytes.len()), bytes),
             Err(e) => err_s(io_err(fs_op_name(op), &q(a), e)),
         },
         4 => (pack(0, usize::from(Path::new(a).exists())), Vec::new()),

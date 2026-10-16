@@ -37,7 +37,7 @@ impl Emitter<'_> {
         self.lower_arg(init, Some(acc_ty), ArgMode::Retain)?;
         self.f.instructions().local_set(params[0]);
         self.fs_call_1(p, crate::fs::OP_FOLD_LINES)?;
-        let (hraw, hlen, herr) = self.fs_frames_or_err()?;
+        let (hraw, hlen, herr, hmsg) = self.fs_stream_frames_or_err()?;
         let hr = self.hold_i32()?;
         self.f.instructions().i32_const(0).local_set(hr);
         // #3137: the body's Result carrier. An owned body (the canonical
@@ -91,6 +91,7 @@ impl Emitter<'_> {
         })?;
         self.release_i32();
         self.fs_frames_release_raw(hraw, herr);
+        self.fs_stream_land_err(hmsg, hr, true);
         self.witness_fallible_result(heap_acc, params[0], acc_ty);
         let hs = self.hold_i32()?;
         {
@@ -116,7 +117,7 @@ impl Emitter<'_> {
         }
         self.store_ty_slot(acc_ty, almide_layout::SUM_FIELD);
         self.f.instructions().local_get(hs).end().end();
-        for _ in 0..5 {
+        for _ in 0..6 {
             self.release_i32();
         }
         Ok(SliceTy::Result(self.types.intern(acc_ty), self.types.intern(STR)))
@@ -153,7 +154,7 @@ impl Emitter<'_> {
         self.lower_arg(init, Some(acc_ty), ArgMode::Retain)?;
         self.f.instructions().local_set(hacc);
         self.fs_call_1(p, crate::fs::OP_FOLD_LINES)?;
-        let (hraw, hlen, herr) = self.fs_frames_or_err()?;
+        let (hraw, hlen, herr, hmsg) = self.fs_stream_frames_or_err()?;
         let hr = self.hold_i32()?;
         self.f.instructions().i32_const(0).local_set(hr);
         let acc_droppable = self.rc_droppable(p_acc);
@@ -218,6 +219,7 @@ impl Emitter<'_> {
         self.release_i32();
         self.release_i32();
         self.fs_frames_release_raw(hraw, herr);
+        self.fs_stream_land_err(hmsg, hr, true);
         self.witness_fallible_result(heap_acc, hacc, acc_ty);
         let hs = self.hold_i32()?;
         {
@@ -243,8 +245,8 @@ impl Emitter<'_> {
         }
         self.store_ty_slot(acc_ty, almide_layout::SUM_FIELD);
         self.f.instructions().local_get(hs).end().end();
-        // hs, hr, herr, hlen, hraw are i32 holds; hacc is typed; hcl is i32.
-        for _ in 0..5 {
+        // hs, hr, hmsg, herr, hlen, hraw are i32 holds; hacc is typed; hcl is i32.
+        for _ in 0..6 {
             self.release_i32();
         }
         self.release_for(acc_ty);
