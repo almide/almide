@@ -20,7 +20,7 @@
 32	23	800	32	spec/wasm_cross/assign_concat_operand_release.almd
 21	7	824	21	spec/wasm_cross/assign_mut_callee_consumes_var.almd
 31	24	703	31	spec/wasm_cross/assign_nested_call_release.almd
-26	16	560	26	spec/wasm_cross/assign_nested_mut_writeback_release.almd
+26	17	560	26	spec/wasm_cross/assign_nested_mut_writeback_release.almd
 14036	14002	34222253	14036	spec/wasm_cross/assign_self_call_release.almd
 9	0	121	9	spec/wasm_cross/autotry_construction.almd
 5	3	55	5	spec/wasm_cross/autotry_result_first_arg.almd
@@ -35,7 +35,7 @@
 12	10	184	12	spec/wasm_cross/bounded_kernel.almd
 12	10	184	12	spec/wasm_cross/bounded_kernel_plain.almd
 25	19	189	25	spec/wasm_cross/branch_lift_in_loop.almd
-32	9	262	32	spec/wasm_cross/branch_lift_stdlib_mut_arg.almd
+30	7	242	30	spec/wasm_cross/branch_lift_stdlib_mut_arg.almd
 11	5	100	11	spec/wasm_cross/branch_lift_user_fn_named_like_stdlib.almd
 53	43	397	53	spec/wasm_cross/bundled_pure_modules.almd
 30	18	185	30	spec/wasm_cross/bytes_alloc_ceiling_domain.almd
@@ -304,7 +304,7 @@
 5	1	66	5	spec/wasm_cross/guard_let_statement.almd
 3	0	34	3	spec/wasm_cross/guard_statement.almd
 25	10	389	25	spec/wasm_cross/guard_value_exit_in_loop.almd
-9197	9155	361817	9197	spec/wasm_cross/gzip_inflate_members.almd
+9196	9155	358817	9196	spec/wasm_cross/gzip_inflate_members.almd
 68	58	13349	68	spec/wasm_cross/hash_digests.almd
 266	249	77161	266	spec/wasm_cross/heap_arena.almd
 5	0	53	5	spec/wasm_cross/heap_result_err_interp.almd
@@ -439,7 +439,7 @@
 4	0	32	4	spec/wasm_cross/list_of_tuples_equality.almd
 23	18	212	23	spec/wasm_cross/list_pattern_in_option_payload.almd
 17	13	180	17	spec/wasm_cross/list_pattern_variant_element.almd
-9060	9017	8165397	9060	spec/wasm_cross/list_pop_map_insert_on_record_field.almd
+9060	9020	8165397	9060	spec/wasm_cross/list_pop_map_insert_on_record_field.almd
 18	10	164	18	spec/wasm_cross/list_product_overflow.almd
 36	21	250	36	spec/wasm_cross/list_push_on_record_field.almd
 634	616	2955	634	spec/wasm_cross/list_reduce_fused_fold_release.almd
@@ -551,7 +551,7 @@
 34	13	358	34	spec/wasm_cross/mut_call_nested_read_before.almd
 31	19	350	31	spec/wasm_cross/mut_call_two_mut_args_read.almd
 67	26	619	67	spec/wasm_cross/mut_heap_param.almd
-70	39	668	70	spec/wasm_cross/mut_list_param_read_by_range_ops.almd
+63	39	444	63	spec/wasm_cross/mut_list_param_read_by_range_ops.almd
 18	8	176	18	spec/wasm_cross/mut_map_param.almd
 170	71	75134	170	spec/wasm_cross/mut_param_alias_cow.almd
 42	23	1257	42	spec/wasm_cross/mut_param_alias_in_place_mutators.almd
@@ -571,9 +571,9 @@
 34	21	800	34	spec/wasm_cross/mut_param_global_no_reach_in_place.almd
 24	7	236	24	spec/wasm_cross/mut_param_interpolated.almd
 23	11	19880	23	spec/wasm_cross/mut_param_loop_stays_in_place.almd
-73	37	776	73	spec/wasm_cross/mut_param_move_mode_gaps.almd
+69	36	736	69	spec/wasm_cross/mut_param_move_mode_gaps.almd
 182	93	1818	182	spec/wasm_cross/mut_param_nested_place_writeback.almd
-372	293	3619	372	spec/wasm_cross/mut_param_reassign_from_hof.almd
+371	293	3607	371	spec/wasm_cross/mut_param_reassign_from_hof.almd
 2	0	32	2	spec/wasm_cross/mut_param_spread_reassign.almd
 22	8	8240	22	spec/wasm_cross/mut_param_tail_recursion.almd
 13	3	327	13	spec/wasm_cross/mut_param_writeback_growth.almd
