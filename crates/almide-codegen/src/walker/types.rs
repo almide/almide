@@ -28,6 +28,11 @@ fn render_type_named(ctx: &RenderContext, name: &almide_base::intern::Sym, args:
         // Strip module qualifier: module.Type → Type
         // (all modules flatten into one file in generated Rust)
         let bare = name.rsplit('.').next().unwrap_or(name);
+        // An ADR-0001 clock type is an i64 of nanoseconds past the checker;
+        // an annotated binding or signature keeps its tag (#3752).
+        if almide_lang::time_units::TIME_MODULES.iter().any(|(_, t)| *t == bare) {
+            return render_type(ctx, &Ty::Int);
+        }
         // A runtime-owned nominal renders under the runtime's reserved
         // spelling (`Value` → `AlmideValue`, #1821); the bare spelling is a
         // user type's.
