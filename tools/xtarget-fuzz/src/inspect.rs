@@ -67,10 +67,15 @@ pub fn cmd_inspect(args: &[String]) {
         dir,
         icount,
     };
-    let target = Engine::with_family(&repo, Family::Synthesis).inspect_target(&name).unwrap_or_else(|e| {
+    let engine = Engine::with_family(&repo, Family::Synthesis);
+    let target = engine.inspect_target(&name).unwrap_or_else(|e| {
         eprintln!("{e}");
         std::process::exit(2);
     });
+    // A generic function is also inspected with its free type variables at
+    // String, the heap instantiation (Target::new_filled). A function the
+    // grammar cannot build at String is a failed criterion, not a skip.
+    let heap = target.generic.then(|| engine.inspect_target_heap(&name));
     let order = super::flag_value(args, "--order");
     // Every size must sit in one memory tier: from 2000 to 8000 Int
     // elements a list crosses L1 (16 to 64 KiB), and the 4n step read x3.6
@@ -94,7 +99,11 @@ pub fn cmd_inspect(args: &[String]) {
     // evidence can be re-run by hand on both legs (#3666's audit).
     if let Some(out) = super::flag_value(args, "--emit") {
         let root = Path::new(out);
-        for (path, src) in probe_files(&target, n) {
+        let mut files = probe_files(&target, n);
+        if let Some(Ok(h)) = &heap {
+            files.extend(probe_files(h, n).into_iter().map(|(p, src)| (format!("heap/{p}"), src)));
+        }
+        for (path, src) in files {
             let file = root.join(path);
             if let Err(e) = file.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|_| std::fs::write(&file, src)) {
                 eprintln!("{}: {e}", file.display());
@@ -107,9 +116,16 @@ pub fn cmd_inspect(args: &[String]) {
 
     let mut verdicts = Vec::new();
     verdicts.push(("parity", parity(&ctx, &name, args)));
-    verdicts.push(("complexity", complexity(&ctx, &target, n, order, order_rebind)));
-    verdicts.push(("alloc", alloc(&ctx, &target, n)));
-    verdicts.push(("diamond", diamond(&ctx, &target, n)));
+    let per_inst = |f: &dyn Fn(&Target) -> String| -> String {
+        match &heap {
+            None => f(&target),
+            Some(Ok(h)) => both_instantiations(&f(&target), &f(h)),
+            Some(Err(e)) => format!("FAIL: [vars=String] the heap instantiation does not build: {e}"),
+        }
+    };
+    verdicts.push(("complexity", per_inst(&|t| complexity(&ctx, t, n, order, order_rebind))));
+    verdicts.push(("alloc", per_inst(&|t| alloc(&ctx, t, n))));
+    verdicts.push(("diamond", per_inst(&|t| diamond(&ctx, t, n))));
 
     let all_pass = verdicts.iter().all(|(_, v)| v.starts_with("PASS"));
     println!("# {name} — {}", if all_pass { "all criteria PASS (stampable)" } else { "NOT stampable" });
@@ -130,6 +146,14 @@ fn probe_files(t: &Target, n: u64) -> Vec<(String, String)> {
     files.extend(t.rebind_programs(n, 3).into_iter().map(|(shape, src)| (format!("{shape}.almd"), src)));
     files.extend(t.diamond_project(n.min(64)).files.into_iter().map(|(p, src)| (format!("diamond/{p}"), src)));
     files
+}
+
+/// One criterion's verdict at both instantiations: PASS only when both
+/// pass, each half labelled with what the type variables were.
+fn both_instantiations(int: &str, heap: &str) -> String {
+    let body = |v: &str| v.split_once(": ").map_or(v, |(_, r)| r).to_string();
+    let ok = int.starts_with("PASS") && heap.starts_with("PASS");
+    format!("{}: [vars=Int] {} || [vars=String] {}", if ok { "PASS" } else { "FAIL" }, body(int), body(heap))
 }
 
 fn toml_str(s: &str) -> String {
