@@ -69,7 +69,7 @@
 #                      every stamped row is to be re-inspected before each final
 #                      release for that (a manual GCE run: no credentials in CI)
 #
-# uninspected_ceiling = "167"
+# uninspected_ceiling = "168"
 
 [[fn]]
 name = "args.flag"
@@ -3916,14 +3916,7 @@ status = "uninspected"
 name = "http.router"
 sig = "(routes: List[HttpRoute]) -> Result[(HttpRequest) -> Result[HttpResponse, String], String]"
 class = "pure"
-status = "inspected"
-impl = "fnv1a:aa35961fe81de3ad"
-stamp = "almide 0.67.1 (dev) at insp-pure-2 f3757638d (develop plus the nominal-type grammar, the #3752 to #3758 and #3760 fixes, the if-arm effect adapter, the self-host rebind move-in, the zlib err texts, the fold-init move and the rebind shapes' size-1 foreign operand, the runtime-bound Eq/Ord check and the arm-by-arm effect adapter; recipes with instantiation-aware operands, scattered map keys and flat header names); xtarget-fuzz inspect at the same sha, every type variable measured at Int AND at String (the 10-16 heap-element ruling; complexity, alloc and diamond each carry both instantiations) (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC, no free-list reuse), 200 programs per fn; GCE c4-standard-4 (INTEL XEON PLATINUM 8581C, 4 vCPU, PMU architectural, one fn at a time per VM, asia-northeast1-b), Ubuntu 24.04 Linux 7.0.0-1014-gcp, rustc 1.99.1, wasmtime 49.0.1; 2026-10-16; codopsy: no crate code changed by this inspection (tools/xtarget-fuzz is not a gated crate)"
-order = "n2"
-parity = "PASS: seed 1792139827, 200 programs; 200 program(s) call it, 19 of them clean on every leg; unique findings 0"
-complexity = "PASS: call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=200..3200 native k=1..2 1.593e8/6.300e8/2.506e9/9.994e9/3.992e10 fit n2 (rms 0.6%) moved 2.885e6/1.145e7/4.562e7/1.821e8/7.278e8B fit n2 (rms 0.4%) wall 0.010/0.040/0.137/0.566/2.242s wasm k=1..2 4.165e7/1.616e8/6.366e8/2.526e9/1.007e10 fit n2 (rms 1.7%) moved 8.736e4/3.349e5/1.310e6/5.180e6/2.060e7B fit n2 (rms 2.5%) wall 0.005/0.010/0.025/0.157/0.614s (order n2 ok)"
-alloc = "PASS: call live=0"
-diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
+status = "uninspected"
 
 [[fn]]
 name = "http.serve"
