@@ -4,8 +4,11 @@
 //! back), and it unrolls a loop around it with the induction offsets on that
 //! path too. A remainder chain like `acc = (acc * 31 + j) % p` then runs ~9%
 //! slower than Go's (docs/benchmarks/fan-floor.md). `almide_rem_const` takes
-//! the sign from the dividend, beside the multiply, which measured 290 ms
-//! against rustc's 346 ms and Go's 315 ms on the GCE Intel VM.
+//! the sign from the dividend, beside the multiply, and multiplies with the
+//! signed one-operand `imul` (see `almide_mulhs`). A 90M-step chain measured
+//! (GCE, x86-64-v3, 2026-10-17) 290 ms against rustc's 366 ms and Go's 310 ms
+//! on the Intel 8581C, and 370 ms against 455 ms and 400-420 ms on the AMD
+//! EPYC 7B13.
 //!
 //! The body is ordinary Rust, compiled into the tests below and emitted
 //! verbatim (with the prelude's visibility) into every generated program.
@@ -78,7 +81,7 @@ mod tests {
             if !super::rem_const_applies(d) { continue; }
             let (m, s) = almide_rem_magic(d);
             let rem = |x: i64| {
-                let hi = ((x as i128 * m as i128) >> 64) as i64;
+                let hi = almide_mulhs(x, m);
                 let t = if m < 0 { hi.wrapping_add(x) } else { hi };
                 x.wrapping_sub((x >> 63) & d).wrapping_sub((t >> s).wrapping_mul(d))
             };

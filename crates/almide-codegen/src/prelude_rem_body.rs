@@ -37,6 +37,28 @@ impl<const D: i64> AlmideRemConst<D> {
     pub const MAGIC: (i64, u32) = almide_rem_magic(D);
 }
 
+/// The high 64 bits of the signed product `a * b`. On x86_64 this is the
+/// one-operand `imul`: with BMI2 enabled (the native build's default
+/// `x86-64-v3`) LLVM lowers the i128 form to an unsigned `mulx` plus sign
+/// fix-ups, a longer chain than the signed multiply it stands for.
+#[inline(always)]
+pub fn almide_mulhs(a: i64, b: i64) -> i64 {
+    #[cfg(target_arch = "x86_64")]
+    {
+        let hi: i64;
+        // SAFETY: `imul r64` reads rax and the operand, writes rdx:rax and
+        // the flags, and touches no memory.
+        unsafe {
+            std::arch::asm!("imul {b}", b = in(reg) b, inout("rax") a => _, out("rdx") hi, options(pure, nomem, nostack));
+        }
+        hi
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        ((a as i128 * b as i128) >> 64) as i64
+    }
+}
+
 /// `x % D` for a literal divisor `D >= 3` that is not a power of two: the
 /// same truncated remainder as `%`, never aborting. The quotient is the
 /// magic-number estimate, and the dividend's sign corrects the remainder
@@ -45,7 +67,7 @@ impl<const D: i64> AlmideRemConst<D> {
 #[inline(always)]
 pub fn almide_rem_const<const D: i64>(x: i64) -> i64 {
     let (m, s) = AlmideRemConst::<D>::MAGIC;
-    let hi = ((x as i128 * m as i128) >> 64) as i64;
+    let hi = almide_mulhs(x, m);
     let t = if m < 0 { hi.wrapping_add(x) } else { hi };
     x.wrapping_sub((x >> 63) & D).wrapping_sub((t >> s).wrapping_mul(D))
 }
