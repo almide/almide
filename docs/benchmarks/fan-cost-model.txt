@@ -208,3 +208,27 @@ wasm_worker_ns   = 5_000
 # sequential site one in 4 (`ALMIDE_FAN_RESAMPLE_NEAR`: at ~1.5 us per
 # element on AMD the clock reads were 14% of the offer); a site whose work
 # grows past the crossover is seen within 16 / 4 offers.
+#
+# The per-leg constants and the resampling, measured on GCE: native, 1000
+# offers x 10 elements, t(1010) - t(10), min of 11 with the modes
+# interleaved, ms per 1000 offers; old = develop (30 + 5W, every offer
+# timed), new = this; best = min(seq, w5, par):
+#
+#   AMD EPYC 7B13                               Intel 8581C
+#   iters    seq    old    new     w5    par |    seq    old    new     w5    par
+#   0        0.0    1.85   0.24   23.7   36.6 |    0.0    0.43   0.10   16.6   22.7
+#   100      4.69   6.52   4.85   24.3   38.2 |    3.74   4.19   3.84   11.7   22.7
+#   300     14.72  16.61  15.25   27.0   38.7 |   11.72  12.21  11.89   14.4   26.8
+#   1000    49.48  51.03  35.09   34.6   38.9 |   39.60  40.08  35.98   35.9   35.5
+#   2000    99.23  45.49  46.39   45.6   55.2 |   79.45  41.48  42.06   41.7   43.0
+#   3000   148.83  57.71  58.12   58.4   62.3 |  119.30  48.66  51.98   52.2   51.9
+#   5000   247.77  78.82  79.08   77.1   78.4 |  198.79  71.38  72.11   72.0   69.6
+#   10000  495.16 133.11 133.82  131.1  134.3 |  397.65 114.75 114.90  113.5  111.2
+#   30000 1486.54 340.89 348.52  348.8  338.6 | 1192.47 281.19 282.24  280.3  266.1
+#
+# new is within 6% of best from 100 iterations up on both machines (at 0
+# the sequential run is ~0 and new pays 0.1-0.26 us per offer, old
+# 0.43-1.85). snorm1200 / snorm3000 / the small map are unchanged against
+# develop on both (min of 15). The wasm leg's constants and code are
+# unchanged; its sweep on the same branch read within run-to-run noise of
+# develop's.
