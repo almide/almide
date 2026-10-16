@@ -257,3 +257,87 @@ fn mixed_effect_and_pure_arms_into_an_effect_slot_run_on_both_legs() {
         assert_eq!(String::from_utf8(out.stdout).unwrap(), expected, "{leg}: {stderr}");
     }
 }
+
+/// Run `src` on both legs and hold each to `expected`.
+fn runs_on_both_legs(src: &str, expected: &str) {
+    let bin = std::env::var("ALMIDE_BIN").unwrap_or_else(|_| env!("CARGO_BIN_EXE_almide").to_string());
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("app.almd");
+    std::fs::write(&file, src).unwrap();
+    for leg in ["native", "structural"] {
+        let mut cmd = Command::new(&bin);
+        cmd.arg("run").arg(&file).env_remove("ALMIDE_WASM_SKIP_STOCK_AUDIT");
+        if leg == "structural" {
+            cmd.args(["--target", "wasm"]).env("ALMIDE_WASM_SKIP_STOCK_AUDIT", "1");
+        }
+        let out = cmd.output().unwrap();
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(out.status.success(), "{leg}: {stderr}");
+        assert_eq!(String::from_utf8(out.stdout).unwrap(), expected, "{leg}: {stderr}");
+    }
+}
+
+/// A pure lambda reaching an effect-closure type through DATA, not as a call
+/// argument or a branch arm: inside `some` / `ok`, a list, tuple, record or
+/// map literal, the fallback of `??`, or returned from a callback whose
+/// expected return holds a handler (`option.unwrap_or_else(x, () => (req) =>
+/// …)`). The expected type never reached the lambda, so it typed pure while
+/// the slot it filled was the carrier — check passed and rustc refused
+/// (E0308 `expected Result<AlmideHttpResponse, String>`), the wasm leg walled.
+/// Minimized from the stdlib inspection's parity fuzz, plus #3749's list case.
+const HANDLERS_THROUGH_DATA: &str = r#"import http
+
+type Boxed = { name: String, h: HttpHandler }
+
+effect fn hit(h: HttpHandler) -> String = http.body(h(http.new_request("GET", "/p", "", [:]))!)
+
+effect fn main() -> Unit = {
+  let none_h: HttpHandler? = none
+  let a = option.unwrap_or(none_h, (req) => http.response(200, "a"))
+  let b0: Result[HttpHandler?, String] = ok(some((req) => http.response(200, "b")))
+  let b = option.unwrap_or_else(
+    result.unwrap_or_else(b0, (e) => some((req) => http.response(200, e))),
+    () => (req) => http.response(200, "y"),
+  )
+  let c = option.unwrap_or_else(none_h, () => (req) => http.response(200, "c"))
+  let d = http.wrap(
+    option.unwrap_or_else(
+      some(http.wrap((req) => http.response(200, "d"), [(next) => http.wrap(next, [])])),
+      () => (req) => http.response(200, "z"),
+    ),
+    [],
+  )
+  let mws: List[HttpMiddleware] = [(next) => (req) => http.response(299, "e")]
+  let e = http.wrap((req) => http.response(200, "q"), mws)
+  let pair: (String, HttpHandler) = ("f", (req) => http.response(200, "f"))
+  let bx = Boxed { name: "g", h: (req) => http.response(200, "g") }
+  let hs: Map[String, HttpHandler] = ["h": (req) => http.response(200, "h")]
+  let h = map.get(hs, "h") ?? a
+  let i = none_h ?? ((req) => http.response(200, "i"))
+  let r = http.route("GET /p", option.unwrap_or_else(result.unwrap_or_else(b0, (e) => none), () => (req) => http.response(200, "j")))
+  println(hit(a)! + hit(b)! + hit(c)! + hit(d)! + hit(e)! + hit(pair.1)! + hit(bx.h)! + hit(h)! + hit(i)! + hit(r.handler)!)
+}
+"#;
+
+#[test]
+fn pure_lambdas_reaching_an_effect_type_through_data_run_on_both_legs() {
+    runs_on_both_legs(HANDLERS_THROUGH_DATA, "abcdefghib\n");
+}
+
+/// #3749: a lambda nested in another lambda whose declared type returns an
+/// effect closure — the documented middleware spelling `(next) => (x) => …
+/// next(x)! …` — against a `let` annotation and against a user fn's param.
+const NESTED_MIDDLEWARE_3749: &str = r#"type H = effect (Int) -> Int
+fn wrap(h: H, m: (H) -> H) -> H = m(h)
+effect fn main() -> Unit = {
+  let m: (H) -> H = (next) => (x) => next(x)! + 1
+  let base: H = (x) => x * 2
+  println("${m(base)(20)!}")
+  println("${wrap(base, (next) => (x) => next(x)! + 1)(20)!}")
+}
+"#;
+
+#[test]
+fn nested_middleware_lambdas_take_the_declared_effect_type() {
+    runs_on_both_legs(NESTED_MIDDLEWARE_3749, "41\n41\n");
+}
