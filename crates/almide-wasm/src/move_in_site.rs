@@ -275,7 +275,7 @@ fn exit_calls(e: &IrExpr, vars: &[Place], out: &mut Vec<(usize, Vec<Place>)>) {
         args.iter().filter_map(Place::of).collect()
     };
     match &e.kind {
-        IrExprKind::Call { target: CallTarget::Named { .. }, args, .. } => out.push((args.as_ptr() as usize, take(args))),
+        IrExprKind::Call { target, args, .. } if table_call(target) => out.push((args.as_ptr() as usize, take(args))),
         IrExprKind::Unwrap { expr } | IrExprKind::Try { expr } => exit_calls(expr, vars, out),
         IrExprKind::Block { stmts, expr } => {
             if let Some(t) = expr {
@@ -309,7 +309,9 @@ fn exit_calls(e: &IrExpr, vars: &[Place], out: &mut Vec<(usize, Vec<Place>)>) {
         }
         IrExprKind::Match { subject, arms } => {
             arms.iter().for_each(|a| exit_calls(&a.body, vars, out));
-            if let IrExprKind::Call { target: CallTarget::Named { .. }, args, .. } = &unwrapped(subject).kind {
+            if let IrExprKind::Call { target, args, .. } = &unwrapped(subject).kind
+                && table_call(target)
+            {
                 let free: Vec<Place> = take(args)
                     .into_iter()
                     .filter(|p| !arms.iter().any(|a| a.guard.as_ref().is_some_and(|g| reads(g, p.root())) || reads_before_rebind(&a.body, *p)))
@@ -321,6 +323,15 @@ fn exit_calls(e: &IrExpr, vars: &[Place], out: &mut Vec<(usize, Vec<Place>)>) {
         }
         _ => {}
     }
+}
+
+/// A call that may resolve to a table fn: a program fn (`Named`), or a
+/// module call the emitter links to its table implementation
+/// (`lower_linked_call` — a self-hosted stdlib fn). Whether a place moves
+/// is still the callee's `param_owned` decision at the site; a module call
+/// lowered inline never asks.
+fn table_call(target: &CallTarget) -> bool {
+    matches!(target, CallTarget::Named { .. } | CallTarget::Module { .. })
 }
 
 /// Does `e` read `var` before rebinding it — an arm `{ xs = b; err((e, xs))! }`
