@@ -374,3 +374,45 @@ effect fn main() -> Unit = {
 fn effect_lambdas_shaped_through_a_generic_return_run_on_both_legs() {
     runs_on_both_legs(HANDLERS_THROUGH_GENERIC_RETURNS, "abcd11\n");
 }
+
+/// The other side of the generic-return flow: an argument that already holds
+/// PURE closures (an unannotated `let m = ["k": (req) => …]`) decides the
+/// generic, so the expected result does not turn a later lambda into an
+/// effect closure that `m`'s values are not (E001); the whole value is
+/// adapted at the effect slot. Plus the same flow through `??`, `get_or`,
+/// `map.get`, a fold's init and a `Result`.
+const GENERIC_RETURNS_DECIDED_BY_DATA: &str = r#"import http
+
+effect fn hit(h: HttpHandler) -> String = http.body(h(http.new_request("GET", "/p", "", [:]))!)
+
+effect fn main() -> Unit = {
+  let m = ["k": (req) => http.response(200, "z")]
+  let a = hit(map.get_or(m, "k", (req) => http.response(200, "y")))!
+  let ls = [(req) => http.response(200, "q")]
+  let b = hit(list.first(ls) ?? ((req) => http.response(200, "w")))!
+  let c = hit(option.unwrap_or(list.get(ls, 5), (req) => http.response(200, "e")))!
+  println(a + b + c)
+}
+"#;
+const GENERIC_RETURNS_MORE_SHAPES: &str = r#"import http
+
+effect fn hit(h: HttpHandler) -> String = http.body(h(http.new_request("GET", "/p", "", [:]))!)
+
+effect fn main() -> Unit = {
+  let a = hit(list.first([(req) => http.response(200, "a")]) ?? ((req) => http.response(200, "x")))!
+  let b = hit(list.get_or([(req) => http.response(200, "b")], 0, (req) => http.response(200, "x")))!
+  let mw = map.values(["k": (next) => next])
+  let c = hit(http.wrap((req) => http.response(200, "c"), mw))!
+  let d = hit(option.unwrap_or_else(map.get(["k": (req) => http.response(200, "d")], "k"), () => (req) => http.response(200, "x")))!
+  let e = hit(list.fold([1, 2], (req) => http.response(200, "e"), (acc, i) => acc))!
+  let r0: Result[HttpHandler, String] = ok((req) => http.response(200, "f"))
+  let f = hit(result.unwrap_or(r0, (req) => http.response(200, "x")))!
+  println(a + b + c + d + e + f)
+}
+"#;
+
+#[test]
+fn a_generic_result_bound_by_pure_data_stays_pure_on_both_legs() {
+    runs_on_both_legs(GENERIC_RETURNS_DECIDED_BY_DATA, "zqe\n");
+    runs_on_both_legs(GENERIC_RETURNS_MORE_SHAPES, "abcdef\n");
+}

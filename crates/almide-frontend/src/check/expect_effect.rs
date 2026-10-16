@@ -20,6 +20,8 @@ use super::types::resolve_ty;
 use crate::ast::{self, ExprKind};
 use crate::types::{Ty, TypeConstructorId};
 
+type Bindings = std::collections::HashMap<almide_base::intern::Sym, Ty>;
+
 /// How deep the effect-fn search follows type aliases and records.
 const MAX_DEPTH: usize = 8;
 
@@ -62,6 +64,15 @@ impl Checker {
                 self.expect_expr(else_, &t);
             }
             ExprKind::Match { arms, .. } => arms.iter().for_each(|a| self.expect_expr(&a.body, &t)),
+            // A call's result: its generics are seeded from `t` before its
+            // args are inferred (`seed_bindings_from_expected_ret`), so the
+            // expectation reaches the args that produce the result.
+            ExprKind::Call { .. } => {
+                self.call_expect.insert(expr.id, t);
+            }
+            ExprKind::Pipe { right, .. } if matches!(right.kind, ExprKind::Call { .. }) => {
+                self.call_expect.insert(right.id, t);
+            }
             _ => self.expect_data(expr, &t),
         }
     }
@@ -114,6 +125,54 @@ impl Checker {
     pub(crate) fn expect_named_record_fields(&mut self, name: almide_base::intern::Sym, fields: &[ast::FieldInit]) {
         if let Ty::Record { fields: decl } = self.env.resolve_named(&Ty::Named(name, vec![])) {
             self.expect_fields(fields, &decl);
+        }
+    }
+
+    /// Arm the expected result recorded for call `id` for the argument
+    /// inference that follows (consumed by `seed_bindings_from_expected_ret`).
+    pub(crate) fn arm_call_expect(&mut self, id: ast::ExprId) {
+        self.pending_call_ret = self.call_expect.remove(&id);
+    }
+
+    /// The generic bindings an expected result implies: `map.get_or(..) ->
+    /// V` in a handler slot binds `V` to the handler, so the slots of the
+    /// args that produce `V` read it.
+    pub(crate) fn bindings_from_expected_ret(&mut self, sig: Option<&crate::types::FnSig>) -> Bindings {
+        let mut seeds = Bindings::new();
+        let expected = self.pending_call_ret.take();
+        if let (Some(sig), Some(expected)) = (sig, expected)
+            && !sig.generics.is_empty()
+        {
+            crate::types::unify(&sig.ret, &expected, &mut seeds);
+            seeds.retain(|g, _| sig.generics.contains(g));
+        }
+        seeds
+    }
+
+    /// The bindings an argument's expectation is read through: what earlier
+    /// args bound, except that a seed from the expected result stays where
+    /// the arg's binding holds no PURE fn value. An earlier arg that holds
+    /// pure closures (`let m = ["k": (req) => …]`) decides the generic, so
+    /// a later lambda stays pure like it and the whole value is adapted at
+    /// the slot; one whose closures are already the carrier keeps the seed.
+    pub(crate) fn expected_bindings_view(&self, seeds: &Bindings, bindings: &Bindings) -> Bindings {
+        let mut view = seeds.clone();
+        for (g, actual) in bindings {
+            if !seeds.contains_key(g) || self.holds_pure_fn(actual, 0) {
+                view.insert(*g, actual.clone());
+            }
+        }
+        view
+    }
+
+    /// Does `t` hold a fn value that is neither effect nor the carrier?
+    fn holds_pure_fn(&self, t: &Ty, depth: usize) -> bool {
+        if depth > MAX_DEPTH {
+            return false;
+        }
+        match self.expect_view(t) {
+            Ty::Fn { is_effect: false, ret, .. } if !ret.is_result() => true,
+            other => other.children().iter().any(|c| self.holds_pure_fn(c, depth + 1)),
         }
     }
 

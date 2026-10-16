@@ -219,6 +219,7 @@ impl Checker {
     /// lambda slots see them.
     pub(crate) fn infer_call_arg_tys(&mut self, callee: &ast::Expr, args: &mut [ast::Expr], call_sig: &Option<crate::types::FnSig>) -> Vec<Ty> {
         let mut bindings: HashMap<Sym, Ty> = HashMap::new();
+        let seeds = self.bindings_from_expected_ret(call_sig.as_ref());
         let mut tys: Vec<Ty> = Vec::with_capacity(args.len());
         for (i, a) in args.iter_mut().enumerate() {
             let pinned = if is_lambda_arg(a) {
@@ -265,7 +266,8 @@ impl Checker {
             // shapes the lambdas inside the arg (`some((req) => …)`, a
             // callback returning a handler).
             if let Some((_, pty)) = call_sig.as_ref().and_then(|sig| sig.params.get(i)) {
-                self.expect_expr(a, &crate::types::substitute(pty, &bindings));
+                let view = self.expected_bindings_view(&seeds, &bindings);
+                self.expect_expr(a, &crate::types::substitute(pty, &view));
             }
             let slot = Self::fn_value_slot_for_arg(a, call_sig, i, &bindings);
             let prev_fn_slot = std::mem::replace(&mut self.fn_value_slot, slot);
