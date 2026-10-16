@@ -199,3 +199,10 @@ wasm_worker_ns   = 5_000
 # native: 12 + 3W us (18 at W=2 .. 36 at W=8) is the envelope over native's
 # own two calibration rows above (Intel 6.6 .. 22.5, AMD 17.1 .. 35.3 us at
 # W = 2 .. 8). wasm keeps 30 + 5W (its rows: 27 .. 69 us).
+#
+# Native also stops timing a site's cheap sequential offers: the per-offer
+# residue over seq at the cheap end (0.4 us Intel, 1.7 us AMD at 0
+# iterations) is the two thread-CPU-clock reads that time the offer. A site
+# whose estimate stays sequential even at 8x its measured work re-measures
+# one sequential offer in 16 (list.rs `ALMIDE_FAN_RESAMPLE`); a site whose
+# work grows past that is seen within 16 offers.

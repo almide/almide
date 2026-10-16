@@ -74,8 +74,7 @@ pub fn almide_rt_fan_map_par<A: Send + Sync + Clone, B: Send, F: Fn(A) -> Result
         // parallel run; every offer records what its elements took.
         let site = almide_rt_fan_map_par::<A, B, F> as fn(Vec<A>, F) -> Result<Vec<B>, String> as usize;
         let n = items.len();
-        let workers = almide_rt_fan_plan(n, almide_fan_estimate(site));
-        let clock = AlmideFanClock::new();
+        let (workers, clock) = AlmideFanClock::offer(site, n);
         if workers < 2 {
             clock.calling(|| {
                 for (slot, item) in slots.iter_mut().zip(items) {
@@ -83,7 +82,7 @@ pub fn almide_rt_fan_map_par<A: Send + Sync + Clone, B: Send, F: Fn(A) -> Result
                 }
                 ((), n)
             });
-            clock.record(site);
+            clock.record();
             return almide_fan_map_settle_slots(slots);
         }
         let block = almide_fan_block(n, workers);
@@ -100,7 +99,7 @@ pub fn almide_rt_fan_map_par<A: Send + Sync + Clone, B: Send, F: Fn(A) -> Result
                 Some(true)
             });
         }));
-        clock.record(site);
+        clock.record();
         almide_fan_map_settle_slots(slots)
     })();
     __almide_r.map_err(Into::into)
