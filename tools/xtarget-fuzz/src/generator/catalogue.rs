@@ -73,6 +73,10 @@ pub struct Signature {
     /// `Result[T, String]` (the checker's view; the ledger writes the
     /// signature `-> T ! String`). An `= _` intrinsic keeps its declared type.
     pub lifted: bool,
+    /// The decoder a call's result is observed through
+    /// ([`LEG_DEPENDENT_ENCODERS`]): the bytes differ by leg by contract, the
+    /// decoded payload does not.
+    pub observed_through: Option<&'static str>,
 }
 
 /// Effect modules whose functions are reproducible inside the fuzzer's
@@ -81,6 +85,25 @@ pub struct Signature {
 /// docs/roadmap/active/effect-inspection-harness.md). Every other effect
 /// function stays out.
 pub const SANDBOXED_EFFECT_MODULES: &[&str] = &["fs", "env", "io", "args"];
+
+/// Effect modules that reach no host: a computation that can fail, the same
+/// on every run and every leg, so their effect functions are catalogued with
+/// no sandbox (`zlib`: its codecs return `err` on a corrupt stream).
+pub const HOSTLESS_EFFECT_MODULES: &[&str] = &["zlib"];
+
+/// Encoders whose output bytes differ by leg BY CONTRACT, each with the
+/// decoder that undoes it: C-331 keeps flate2's LZ77 on native and emits
+/// stored blocks on wasm, pinned by round trip, never by encoded bytes. A
+/// call is observed through its decoder, so a difference in what decodes is
+/// still a divergence. Every zlib effect function is an encoder here or the
+/// decoder of one (`every_hostless_effect_function_is_an_encoder_or_its_decoder`).
+pub const LEG_DEPENDENT_ENCODERS: &[(&str, &str)] = &[
+    ("zlib.compress", "zlib.decompress"),
+    ("zlib.compress_level", "zlib.decompress"),
+    ("zlib.deflate", "zlib.inflate"),
+    ("zlib.deflate_level", "zlib.inflate"),
+    ("zlib.gzip", "zlib.gunzip"),
+];
 
 impl Signature {
     /// The type a call yields to the generator: a `Unit`-returning mutator
@@ -193,6 +216,7 @@ fn clock_constructors() -> Vec<Signature> {
                 mut_param: None,
                 effect: false,
                 lifted: false,
+                observed_through: None,
             });
         }
     }
@@ -384,6 +408,26 @@ mod availability_tests {
     }
 
     #[test]
+    fn every_hostless_effect_function_is_an_encoder_or_its_decoder() {
+        let cat = build();
+        let effects: Vec<String> = cat
+            .iter()
+            .filter(|s| s.effect && HOSTLESS_EFFECT_MODULES.contains(&s.module))
+            .map(|s| format!("{}.{}", s.module, s.func))
+            .collect();
+        assert!(effects.len() >= 8, "{effects:?}");
+        for f in &effects {
+            let known = LEG_DEPENDENT_ENCODERS.iter().any(|(e, d)| e == f || d == f);
+            assert!(known, "{f}: a hostless effect function neither an encoder nor a decoder of one — classify it in LEG_DEPENDENT_ENCODERS");
+        }
+        for (e, d) in LEG_DEPENDENT_ENCODERS {
+            assert!(effects.contains(&e.to_string()) && effects.contains(&d.to_string()), "{e} / {d} not catalogued");
+            let s = cat.iter().find(|s| format!("{}.{}", s.module, s.func) == *e).unwrap();
+            assert_eq!(s.observed_through, Some(*d));
+        }
+    }
+
+    #[test]
     fn only_stock_p1_rows_count() {
         let t = "[[unavailable]]\nfn = \"a.x\"\nlegs = [\"structural\"]\n[[unavailable]]\nfn = \"a.y\"\nlegs = [\"structural\", \"stock-p1\"]\n";
         let u = wasm_unavailable(t);
@@ -417,7 +461,7 @@ fn signature_from_decl(module: &'static str, decl: &Decl) -> Option<Signature> {
     // Effect functions only from the sandboxed modules: a clock, a socket or
     // a process is not reproducible across legs.
     let effect = effect.unwrap_or(false);
-    if effect && !SANDBOXED_EFFECT_MODULES.contains(&module) {
+    if effect && !SANDBOXED_EFFECT_MODULES.contains(&module) && !HOSTLESS_EFFECT_MODULES.contains(&module) {
         return None;
     }
 
@@ -457,6 +501,7 @@ fn signature_from_decl(module: &'static str, decl: &Decl) -> Option<Signature> {
     let ret = SigType::from_type_expr(return_type)?;
 
     let weight = weight_for(module, &func);
+    let observed_through = LEG_DEPENDENT_ENCODERS.iter().find(|(e, _)| *e == format!("{module}.{func}")).map(|(_, d)| *d);
 
     Some(Signature {
         module,
@@ -468,6 +513,7 @@ fn signature_from_decl(module: &'static str, decl: &Decl) -> Option<Signature> {
         mut_param,
         effect,
         lifted: effect && !matches!(body.as_ref().map(|b| &b.kind), None | Some(ExprKind::Hole)),
+        observed_through,
     })
 }
 
