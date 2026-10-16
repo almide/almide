@@ -304,6 +304,18 @@ const SHAPE_RECIPES: &[Recipe] = &[
         size: "m",
         args: &[("m", "map.set({sized}, \"k0\", {small_elem})"), ("key", "\"k0\"")],
     },
+    // The asserts' passing path, the one a stamp claims: a failing assert
+    // aborts the probe. `contains` and `snapshot` scale with the strings
+    // they compare (the needle at the end, two equal strings).
+    Recipe { func: "testing.assert_gt", size: "a", args: &[("a", "{n}"), ("b", "1")] },
+    Recipe { func: "testing.assert_lt", size: "b", args: &[("a", "1"), ("b", "{n}")] },
+    Recipe { func: "testing.assert_approx", size: "a", args: &[("a", "int.to_float({n})"), ("b", "int.to_float({n})"), ("tolerance", "0.5")] },
+    Recipe { func: "testing.assert_contains", size: "haystack", args: &[("haystack", "string.repeat(\"a\", {n}) + \"b\""), ("needle", "\"b\"")] },
+    Recipe { func: "testing.assert_snapshot", size: "actual", args: &[("actual", "string.repeat(\"aé\", {n})"), ("expected", "string.repeat(\"aé\", {n})")] },
+    Recipe { func: "testing.assert_some", size: "opt", args: &[("opt", "some({sized_elem})")] },
+    Recipe { func: "testing.assert_ok", size: "result", args: &[("result", "ok({sized_elem})")] },
+    Recipe { func: "testing.assert_none", size: "", args: &[("opt", "none")] },
+    Recipe { func: "testing.assert_err", size: "", args: &[("result", "err(\"e\")")] },
     // Dedup builders over scattered elements (see `{sized_scattered}`).
     Recipe { func: "set.from_list", size: "xs", args: &[("xs", "{sized_scattered}")] },
     Recipe { func: "list.unique", size: "xs", args: &[("xs", "{sized_scattered}")] },
@@ -415,7 +427,9 @@ impl Target {
             if let Some((p, _)) = r.args.iter().find(|(p, _)| param_at(p).is_none()) {
                 return Err(format!("{name}: shape recipe names `{p}`, which is not a parameter"));
             }
-            if param_at(r.size).is_none() {
+            // An empty size: a sizeless function whose recipe only keeps
+            // its operands in domain (an assert's passing argument).
+            if !r.size.is_empty() && param_at(r.size).is_none() {
                 return Err(format!("{name}: shape recipe's size `{}` is not a parameter", r.size));
             }
             if r.args.iter().any(|(p, e)| *p == r.size && !e.contains("{n}") && !e.contains("{sized")) {
@@ -482,6 +496,7 @@ impl Target {
         let sized_v = ty.as_ref().map(|g| sized(g, n)).unwrap_or_default();
         let elem_v = ty.as_ref().and_then(elem_of).map(|g| small(&g)).unwrap_or_default();
         let small_v = ty.as_ref().map(small).unwrap_or_default();
+        let sized_elem_v = ty.as_ref().and_then(elem_of).map(|g| sized(&g, n)).unwrap_or_default();
         // `{sized_flat}`: as `{sized}`, but a String element's digits run
         // least significant first, so two elements' common prefix does not
         // lengthen as n shrinks — "s100000000" against "s1000xxxxx" compares
@@ -507,6 +522,7 @@ impl Target {
             .replace("{sized_scattered}", &scattered_v)
             .replace("{sized}", &sized_v)
             .replace("{small_elem}", &elem_v)
+            .replace("{sized_elem}", &sized_elem_v)
             .replace("{small}", &small_v)
             .replace("{n}", &n.to_string())
             .replace("{i}", counter)
@@ -863,7 +879,7 @@ fn small(t: &GenType) -> String {
 /// The element type of a container (a Map's value).
 fn elem_of(t: &GenType) -> Option<GenType> {
     match t {
-        GenType::List(e) | GenType::Set(e) | GenType::Map(e) | GenType::Option(e) => Some((**e).clone()),
+        GenType::List(e) | GenType::Set(e) | GenType::Map(e) | GenType::Option(e) | GenType::Result(e) => Some((**e).clone()),
         _ => None,
     }
 }
@@ -1276,7 +1292,7 @@ pub(crate) mod tests {
     fn every_shape_recipe_names_a_catalogued_function_and_its_parameters() {
         for r in SHAPE_RECIPES {
             let t = target(r.func);
-            assert!(t.recipe.is_some() && t.size_param.is_some(), "{}", r.func);
+            assert!(t.recipe.is_some() && (r.size.is_empty() || t.size_param.is_some()), "{}", r.func);
         }
     }
 

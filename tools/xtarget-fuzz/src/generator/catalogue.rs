@@ -194,6 +194,9 @@ const BUNDLED_MODULES: &[(&str, &str, bool)] = &[
     ("datetime", include_str!("../../../../stdlib/datetime.almd"), false),
     ("http", include_str!("../../../../stdlib/http.almd"), true),
     ("html", include_str!("../../../../stdlib/html.almd"), true),
+    // The asserts abort the same way on every leg outside a test block
+    // (C-381, C-339), so a failing one is an observable, comparable outcome.
+    ("testing", include_str!("../../../../stdlib/testing.almd"), true),
 ];
 
 /// The ADR-0001 clock constructors (`duration.ms(n)`, `compute.s(n)`, …):
