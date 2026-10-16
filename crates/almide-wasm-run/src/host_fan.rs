@@ -394,7 +394,7 @@ fn run_all(ctx: &Arc<ParCtx>, req: Request) -> Option<(Vec<i64>, usize)> {
     let [c, cn] = cold.map(AtomicU64::into_inner);
     let (ns, k) = if wn > 0 { (w, wn) } else { (c, cn) };
     if almide_base::env::flag("ALMIDE_DBG_FAN") {
-        eprintln!("[fan-dbg] {}: measured {} ns per element (warm {w} ns / {wn}, warm-up {c} ns / {cn})", req.site, ns / k.max(1));
+        eprintln!("[fan-dbg] {}: {workers} workers, measured {} ns per element (warm {w} ns / {wn}, warm-up {c} ns / {cn})", req.site, ns / k.max(1));
     }
     if ok && k > 0 && let Ok(mut h) = ctx.history.lock() {
         h.insert(req.site, u128::from(ns) / u128::from(k));
