@@ -1447,7 +1447,7 @@ The disk filled up and three agents died together. A worktree audit removed 335 
 - **#3747:** the testing-assert contract merged in almide/als#142; the pin advanced and the asserts desugar outside test blocks on every leg.
 
 ### The third wave (2026-10-16 evening to 10-17)
-- **Stamped:** http.decode_json, http.param, http.wrap, http.router and 17 of the 22 rows of the fifteenth batch, which re-measured the rows the helper-closure fingerprint voided. The uninspected count is 164.
+- **Stamped:** http.decode_json, http.param, http.wrap, http.router and 17 of the 22 rows of the fifteenth batch, which re-measured the rows the helper-closure fingerprint voided; then the nine testing asserts, io.write, io.write_bytes, regex.replace, regex.replace_first and http.route. The uninspected count is 150: 126 host-dependent effects and 24 pure functions, each listed with its reason in #3751.
 - **Ledger:** a stamped fn's impl fingerprint covers the closure of its same-file helpers, self-host impls and runtime helpers, so editing a helper voids exactly the fns that reach it.
 - **Owner ruling (10-16):** set.from_list and list.unique are measured over scattered distinct elements and stamped.
 - **Generator:** a Result with a nominal error (decode_json), and the http.param probe runs inside a routed handler.
