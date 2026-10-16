@@ -121,6 +121,10 @@ use almide_ir::fusion::{stdlib_module_is_pure, TOTAL_MODULES};
 pub(super) struct Purity {
     pure: HashSet<Sym>,
     total: HashSet<Sym>,
+    /// The fan view (`for_fan`): an `effect fn` is a candidate too, and a
+    /// nested `fan`, a `fan.*` call and `!` are admitted, so an effect fn
+    /// whose only effect is fanning out over proven work is proven.
+    fan: bool,
 }
 
 impl Purity {
@@ -135,7 +139,7 @@ impl Purity {
     fn analyze(program: &IrProgram, local_state: bool) -> Purity {
         let mut bodies: Vec<(Vec<Sym>, Cow<'_, IrExpr>)> = Vec::new();
         for f in &program.functions {
-            if !f.is_effect && !f.is_test {
+            if (local_state || !f.is_effect) && !f.is_test {
                 if let Some(body) = proof_body(f, local_state) { bodies.push((vec![f.name], body)); }
             }
         }
@@ -143,7 +147,7 @@ impl Purity {
             let mod_name = m.versioned_name.map(|v| v.to_string()).unwrap_or_else(|| m.name.to_string());
             let mod_ident = almide_base::names::module_ident(&mod_name);
             for f in &m.functions {
-                if f.is_effect || f.is_test { continue; }
+                if (f.is_effect && !local_state) || f.is_test { continue; }
                 // Every spelling a call site may carry after StdlibLowering's
                 // intra-module rename (see `prefix_intra_module_calls`).
                 // A module-local bare name is not a root function alias.
@@ -167,7 +171,7 @@ impl Purity {
                 let snapshot = set;
                 set = HashSet::new();
                 for (names, body) in &bodies {
-                    let cx = Cx { fns: &snapshot, total };
+                    let cx = Cx { fns: &snapshot, total, fan: local_state };
                     if (total || names.iter().all(|n| snapshot.contains(n))) && expr_ok(body, &cx) {
                         set.extend(names.iter().copied());
                     }
@@ -178,11 +182,13 @@ impl Purity {
         };
         // Erasing loop-local writes proves neither termination nor absence of
         // aborts. Fan only consumes purity; never derive totality from this view.
-        Purity { pure: fixpoint(false), total: if local_state { HashSet::new() } else { fixpoint(true) } }
+        Purity { pure: fixpoint(false), total: if local_state { HashSet::new() } else { fixpoint(true) }, fan: local_state }
     }
 
-    pub(super) fn pure(&self, e: &IrExpr) -> bool { expr_ok(e, &Cx { fns: &self.pure, total: false }) }
-    fn total(&self, e: &IrExpr) -> bool { expr_ok(e, &Cx { fns: &self.total, total: true }) }
+    pub(super) fn pure(&self, e: &IrExpr) -> bool { expr_ok(e, &Cx { fns: &self.pure, total: false, fan: self.fan }) }
+    fn total(&self, e: &IrExpr) -> bool { expr_ok(e, &Cx { fns: &self.total, total: true, fan: false }) }
+    /// The function `name` (any spelling a call site carries) is proven.
+    pub(super) fn proves(&self, name: Sym) -> bool { self.pure.contains(&name) }
 }
 
 fn proof_body(f: &IrFunction, local_state: bool) -> Option<Cow<'_, IrExpr>> {
@@ -194,6 +200,8 @@ struct Cx<'a> {
     fns: &'a HashSet<Sym>,
     /// `true`: also refuse anything that can abort (the totality check).
     total: bool,
+    /// The fan view: see `Purity::fan`.
+    fan: bool,
 }
 
 fn all_ok(es: &[IrExpr], cx: &Cx) -> bool { es.iter().all(|e| expr_ok(e, cx)) }
@@ -245,13 +253,32 @@ fn runtime_arg_ok(arg: &IrExpr, cx: &Cx) -> bool {
 fn expr_ok(e: &IrExpr, cx: &Cx) -> bool {
     // Disjoint expression families; Some(false) must stop the chain. Unknown
     // nodes, mutable borrows, propagation and loops have no purity proof.
-    literal_ok(e, cx)
+    fan_ok(e, cx)
+        .or_else(|| literal_ok(e, cx))
         .or_else(|| operator_ok(e, cx))
         .or_else(|| control_ok(e, cx))
         .or_else(|| aggregate_ok(e, cx))
         .or_else(|| wrapper_ok(e, cx))
         .or_else(|| call_ok(e, cx))
         .unwrap_or(false)
+}
+
+/// The fan view only. A nested `fan { … }` and a `fan.*` call run their
+/// elements as if in list order (ADR-0024 D1) and write output through
+/// per-element timelines (D5), so they observe nothing their elements do not:
+/// they are proven when every element is. `!` returns the element's `Err` to
+/// its caller, which a fan collects in list order.
+fn fan_ok(e: &IrExpr, cx: &Cx) -> Option<bool> {
+    use IrExprKind as K;
+    if !cx.fan { return None; }
+    Some(match &e.kind {
+        K::Fan { exprs } => all_ok(exprs, cx),
+        K::Try { expr } | K::Unwrap { expr } => expr_ok(expr, cx),
+        K::Call { target: CallTarget::Module { module, .. }, args, .. } if module.as_str() == "fan" => {
+            args.iter().all(|a| runtime_arg_ok(a, cx))
+        }
+        _ => return None,
+    })
 }
 
 fn literal_ok(e: &IrExpr, _cx: &Cx) -> Option<bool> {
@@ -760,7 +787,7 @@ mod tests {
     #[test]
     fn a_function_argument_needs_a_callee_proof() {
         let fns = HashSet::from([sym("known")]);
-        let cx = Cx { fns: &fns, total: false };
+        let cx = Cx { fns: &fns, total: false, fan: false };
         let fn_ty = Ty::Fn { params: vec![], ret: Box::new(Ty::Int), is_effect: false };
         for (name, expected) in [("known", true), ("prints", false)] {
             let arg = IrExpr { kind: IrExprKind::FnRef { name: sym(name) },
@@ -776,7 +803,7 @@ mod tests {
     #[test]
     fn unknown_rust_and_effectful_runtime_calls_are_not_pure() {
         let fns = HashSet::new();
-        let cx = Cx { fns: &fns, total: false };
+        let cx = Cx { fns: &fns, total: false, fan: false };
         for template in ["emit_event({e0})", "[{event()}]", "[{e0}; side_effect()]"] {
             assert!(!inline_rust_ok(template, &cx), "unproven template: {template}");
         }
