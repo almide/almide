@@ -627,7 +627,13 @@ impl Target {
         // a recipe's operand that must keep its shape against the others.
         let mut consts = String::new();
         for i in (0..self.params.len()).filter(|i| *i != p && !self.is_fn(*i)) {
-            let m = if self.recipe_arg(i).is_some() && self.scales(i) { n } else { 1 };
+            // A size operand of another type than `x` does not shape it: a
+            // map `get_or` looks its default up in is built at size 1, not
+            // rebuilt at n by every step (a matrix operand of `x`'s type
+            // must still agree with it).
+            let foreign_size = Some(i) == self.size_param && self.ty(i).as_ref() != Some(&self.ret);
+            let shaped = self.recipe_arg(i).is_some() && self.scales(i) && !foreign_size;
+            let m = if shaped { n } else { 1 };
             let _ = writeln!(consts, "fn a{i}() -> {} = {}\n", self.render_param(i), self.arg(i, m));
         }
         let step = |v: &str| {
