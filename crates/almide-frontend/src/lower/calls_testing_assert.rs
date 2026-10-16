@@ -222,7 +222,9 @@ fn desugar_testing_assert_outside_test(
     };
     let guard = ctx.mk(guard, Ty::Unit, span);
     stmts.push(IrStmt { kind: IrStmtKind::Expr { expr: guard }, span: None });
-    Some(ctx.mk(IrExprKind::Block { stmts, expr: None }, Ty::Unit, span))
+    // A Unit tail, as `desugar_assert_abort`'s: the call may be a `let` value.
+    let unit = ctx.mk(IrExprKind::Unit, Ty::Unit, span);
+    Some(ctx.mk(IrExprKind::Block { stmts, expr: Some(Box::new(unit)) }, Ty::Unit, span))
 }
 
 /// `l <op> r` typed by the operator (Bool for comparisons, Float for `SubFloat`).
