@@ -215,7 +215,7 @@
 2846	spec/wasm_cross/fan_worker_abort_keeps_stdout.almd
 4693	spec/wasm_cross/field_and_interp_accumulator.almd
 2780	spec/wasm_cross/filter_map_conditional_arm.almd
-2883	spec/wasm_cross/flat_map_aliased_field.almd
+3080	spec/wasm_cross/flat_map_aliased_field.almd
 1154	spec/wasm_cross/flight_pid_control.almd
 10667	spec/wasm_cross/float32_arithmetic_rounds.almd
 6649	spec/wasm_cross/float32_display_shortest.almd
@@ -426,7 +426,7 @@
 8749	spec/wasm_cross/list_float_total_order.almd
 7584	spec/wasm_cross/list_fold_fused_callback_result_ownership.almd
 6622	spec/wasm_cross/list_head_read_borrows.almd
-7296	spec/wasm_cross/list_heap_ops_release_temporaries.almd
+7362	spec/wasm_cross/list_heap_ops_release_temporaries.almd
 8864	spec/wasm_cross/list_heap_tuple_return.almd
 10300	spec/wasm_cross/list_heapelem_rc.almd
 6619	spec/wasm_cross/list_index_element_append.almd
@@ -573,7 +573,7 @@
 2912	spec/wasm_cross/mut_param_loop_stays_in_place.almd
 11351	spec/wasm_cross/mut_param_move_mode_gaps.almd
 17299	spec/wasm_cross/mut_param_nested_place_writeback.almd
-50181	spec/wasm_cross/mut_param_reassign_from_hof.almd
+50214	spec/wasm_cross/mut_param_reassign_from_hof.almd
 2314	spec/wasm_cross/mut_param_spread_reassign.almd
 5099	spec/wasm_cross/mut_param_tail_recursion.almd
 3080	spec/wasm_cross/mut_param_writeback_growth.almd
@@ -591,7 +591,7 @@
 5255	spec/wasm_cross/nan_canonical_bytes_set_write.almd
 3525	spec/wasm_cross/nan_canonical_bytes_write.almd
 1452	spec/wasm_cross/nan_canonical_observation.almd
-5369	spec/wasm_cross/native_wall_shapes.almd
+5209	spec/wasm_cross/native_wall_shapes.almd
 4636	spec/wasm_cross/negative_float_literal_sized.almd
 8753	spec/wasm_cross/negative_offset_and_width_totality.almd
 3149	spec/wasm_cross/nested_box_guard_binder.almd
