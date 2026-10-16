@@ -27,6 +27,18 @@ effect fn main() -> Unit = {
 }
 "#;
 
+/// The probe's other shape: one identity middleware, so the fold's step runs.
+const HTTP_WRAP_IDENTITY: &str = r#"import http
+
+fn go(x: HttpHandler, i: Int) -> HttpHandler = if i <= 0 then x else go(http.wrap(x, [(next) => next]), i - 1)
+
+effect fn main() -> Unit = {
+  let x0: HttpHandler = (req) => http.response(200, "ok")
+  let x: HttpHandler = go(x0, DEPTH)
+  println(http.body(x(http.new_request("GET", "/", "", map.new()))!))
+}
+"#;
+
 /// The same position in user code: a pure closure as `list.fold`'s init.
 const FOLD_INIT: &str = r#"fn pass(x: (Int) -> Int, ms: List[Int]) -> (Int) -> Int = list.fold(ms, x, (a, b) => a)
 
@@ -74,13 +86,19 @@ fn run(src: &str, wasm: bool) -> (bool, String, String) {
 fn a_closure_passed_through_a_value_position_is_not_layered_on_wasm() {
     for (name, src, want) in [
         ("http.wrap", HTTP_WRAP, "ok\n"),
+        ("http.wrap identity middleware", HTTP_WRAP_IDENTITY, "ok\n"),
         ("fold init", FOLD_INIT, "42\n"),
         ("fold init (effect)", FOLD_INIT_EFFECT, "42\n"),
     ] {
         let native = run(src, false);
-        assert_eq!(native, (true, want.to_string(), native.2.clone()), "{name}: native");
+        assert!(native.0, "{name}: native failed: {}", native.2);
+        assert_eq!(native.1, want, "{name}: native stdout");
         let wasm = run(src, true);
-        assert!(wasm.0, "{name}: wasm failed (a closure layer per pass?): {}", wasm.2);
+        assert!(
+            wasm.0,
+            "{name}: wasm failed (a closure layer per pass?): {}",
+            wasm.2
+        );
         assert_eq!(wasm.1, want, "{name}: wasm stdout");
     }
 }
