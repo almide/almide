@@ -47,12 +47,21 @@ impl AlmideHttpResponse {
     pub fn with_headers(status: i64, body: String, headers: AlmideMap<String, String>) -> Self {
         Self::from_headers(status, body, &headers)
     }
+    /// `upsert_header` per entry, through an index of the lowercased names
+    /// already stored: the per-entry scan made building n headers O(n²).
     fn from_headers(status: i64, body: String, headers: &AlmideMap<String, String>) -> Self {
-        let mut resp = Self { status, body, headers: Vec::new() };
+        let mut list: Vec<(String, String)> = Vec::with_capacity(headers.len());
+        let mut at: std::collections::HashMap<String, usize> = std::collections::HashMap::with_capacity(headers.len());
         for (k, v) in headers.iter() {
-            upsert_header(&mut resp.headers, k, v);
+            match at.entry(k.to_ascii_lowercase()) {
+                std::collections::hash_map::Entry::Occupied(e) => list[*e.get()].1 = v.to_string(),
+                std::collections::hash_map::Entry::Vacant(e) => {
+                    e.insert(list.len());
+                    list.push((k.to_string(), v.to_string()));
+                }
+            }
         }
-        resp
+        Self { status, body, headers: list }
     }
 }
 
