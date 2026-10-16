@@ -595,11 +595,13 @@ struct AlmideFanGateState {
 
 impl AlmideFanGate {
     /// A pool thread helps: enter if the offer is still open, take blocks,
-    /// leave its outcome.
-    fn help(&self) {
+    /// leave its outcome — marking itself idle (`busy`) before it leaves, so
+    /// the offer's next one finds it free.
+    fn help(&self, busy: &std::sync::atomic::AtomicBool) {
         {
             let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
             if !state.open {
+                busy.store(false, std::sync::atomic::Ordering::Release);
                 return;
             }
             state.inside += 1;
@@ -611,6 +613,7 @@ impl AlmideFanGate {
         almide_fan_adopt(None);
         almide_stdout_flush();
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        busy.store(false, std::sync::atomic::Ordering::Release);
         state.inside -= 1;
         state.outcomes.push(outcome);
         drop(state);
@@ -619,48 +622,65 @@ impl AlmideFanGate {
 }
 
 /// The shared fan pool: resident threads that help offers (`almide_fan_deal`),
-/// spawned as offers first need them, at most one fewer than the cores. Each
-/// thread has its own channel, and an offer hands its helper calls to the
-/// next threads in turn: a thread still busy with another offer runs the call
-/// later, when it finds that offer's gate closed and returns at once. One
-/// channel per thread, not one queue for all: with a shared queue and
-/// condvar the woken helpers queued on its lock, and on an AMD EPYC 7B13 a
-/// 10-element map paid 4-12% more per offer from 1000 iterations up.
+/// spawned as offers first need them, at most one fewer than the cores. An
+/// offer hands its helper calls to the LOWEST-numbered idle threads, growing
+/// the pool only when too few are idle — so a run of single offers keeps
+/// reusing the same warm threads, as the per-offer crew did. Handing them out
+/// in turn over every thread (or through one queue all threads wait on) let
+/// each thread sit idle longer between offers, and on an AMD EPYC 7B13 a
+/// 10-element map paid 4-15% more per offer from 1000 iterations up.
 struct AlmideFanPool {
-    hands: std::sync::Mutex<Vec<std::sync::mpsc::Sender<std::sync::Arc<AlmideFanGate>>>>,
-    turn: std::sync::atomic::AtomicUsize,
+    hands: std::sync::Mutex<Vec<AlmideFanHand>>,
+}
+
+struct AlmideFanHand {
+    tx: std::sync::mpsc::Sender<std::sync::Arc<AlmideFanGate>>,
+    /// Set by the offer that hands this thread a call, cleared by the thread
+    /// before it leaves that offer's gate.
+    busy: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 fn almide_fan_pool() -> &'static AlmideFanPool {
     static POOL: std::sync::OnceLock<AlmideFanPool> = std::sync::OnceLock::new();
-    POOL.get_or_init(|| AlmideFanPool { hands: std::sync::Mutex::new(Vec::new()), turn: std::sync::atomic::AtomicUsize::new(0) })
+    POOL.get_or_init(|| AlmideFanPool { hands: std::sync::Mutex::new(Vec::new()) })
 }
 
-/// Post `helpers` helper calls of `gate` to the pool, growing it to that many
-/// threads (within the cores) first.
+/// Hand up to `helpers` helper calls of `gate` to idle pool threads.
 fn almide_fan_pool_post(helpers: usize, gate: &std::sync::Arc<AlmideFanGate>) {
+    use std::sync::atomic::Ordering;
     if helpers == 0 {
         return;
     }
-    let pool = almide_fan_pool();
-    let want = helpers.min(almide_rt_list_par_workers(usize::MAX).saturating_sub(1).max(1));
-    let mut hands = pool.hands.lock().unwrap_or_else(|e| e.into_inner());
-    while hands.len() < want {
+    let cap = almide_rt_list_par_workers(usize::MAX).saturating_sub(1).max(1);
+    let mut hands = almide_fan_pool().hands.lock().unwrap_or_else(|e| e.into_inner());
+    let mut posted = 0;
+    for hand in hands.iter() {
+        if posted == helpers {
+            break;
+        }
+        if hand.busy.compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed).is_ok() {
+            if hand.tx.send(std::sync::Arc::clone(gate)).is_ok() {
+                posted += 1;
+            } else {
+                hand.busy.store(false, Ordering::Release);
+            }
+        }
+    }
+    while posted < helpers && hands.len() < cap {
         let (tx, rx) = std::sync::mpsc::channel::<std::sync::Arc<AlmideFanGate>>();
+        let busy = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let mine = std::sync::Arc::clone(&busy);
         let spawned = std::thread::Builder::new().spawn(move || {
             while let Ok(gate) = rx.recv() {
-                gate.help();
+                gate.help(&mine);
             }
         });
         if spawned.is_err() {
             break;
         }
-        hands.push(tx);
-    }
-    let n = hands.len();
-    let first = pool.turn.fetch_add(helpers, std::sync::atomic::Ordering::Relaxed);
-    for k in 0..helpers.min(n) {
-        let _ = hands[(first + k) % n].send(std::sync::Arc::clone(gate));
+        let _ = tx.send(std::sync::Arc::clone(gate));
+        hands.push(AlmideFanHand { tx, busy });
+        posted += 1;
     }
 }
 
