@@ -301,8 +301,8 @@ pub fn almide_rt_list_par_workers(len: usize) -> usize {
 }
 
 // #3341 — THE FAN COST MODEL, one formula on both legs (the embedded wasm
-// host's copy is crates/almide-wasm-run/src/host_fan.rs `plan`; the two
-// constants are pinned to docs/benchmarks/fan-cost-model.txt by
+// host's copy is crates/almide-wasm-run/src/host_fan.rs `plan`; each leg's
+// two constants are its own, pinned to docs/benchmarks/fan-cost-model.txt by
 // tests/fan_cost_model_test.rs). Every parallel twin is a SITE (one per
 // callback type — the monomorphised twin's own address), and every offer at
 // a site records the compute time its elements took (`AlmideFanClock`: the
@@ -316,8 +316,8 @@ pub fn almide_rt_list_par_workers(len: usize) -> usize {
 // = the offer runs here, sequentially. Output is the same either way (C-321).
 // Timing element 0 first and deciding after it was measured and rejected: it
 // serialises one whole chunk, ~2x wall time when n ≈ workers (fannkuchredux).
-pub const ALMIDE_FAN_OFFER_NS: u128 = 30_000;
-pub const ALMIDE_FAN_WORKER_NS: u128 = 5_000;
+pub const ALMIDE_FAN_OFFER_NS: u128 = 12_000;
+pub const ALMIDE_FAN_WORKER_NS: u128 = 3_000;
 
 /// The worker count for an offer of `n` elements whose site last measured
 /// `per_elem` ns per element (`None` = its first offer): >= 2 = go parallel

@@ -2,8 +2,11 @@
 # decision uses, and the measurements they come from.
 # Pinned by tests/fan_cost_model_test.rs to the native runtime
 # (runtime/rs/src/list.rs `almide_rt_fan_plan`) and the embedded wasm host
-# (crates/almide-wasm-run/src/host_fan.rs `plan`): change a constant here
-# and in both copies, with the measurement that justifies it.
+# (crates/almide-wasm-run/src/host_fan.rs `plan`): one formula, a pair of
+# constants per leg (since 2026-10-16 — each leg's pair is the envelope over
+# its own measured rows; a shared pair had to cover the slower wasm leg and
+# kept native sequential where it would win). Change a constant here and in
+# its leg's copy, with the measurement that justifies it.
 #
 # The model. Every parallel twin is a SITE (native: one per callback type;
 # wasm: one per `__fan_site_K` export), and every offer at a site records
@@ -44,8 +47,10 @@
 # whose work per element swings between offers (the estimate is the last
 # offer's).
 
-offer_ns  = 30_000
-worker_ns = 5_000
+native_offer_ns  = 12_000
+native_worker_ns = 3_000
+wasm_offer_ns    = 30_000
+wasm_worker_ns   = 5_000
 
 # ── Where the constants come from ─────────────────────────────────────────
 # 2026-10-04, arm64 Darwin, 14 cores (10 P + 4 E), almide 0.65.1 (dev) at
@@ -189,3 +194,8 @@ worker_ns = 5_000
 # (1000 iterations): it stays sequential where W=5 is 30% (AMD) and 12%
 # (Intel) faster, because 30 + 5W is the envelope over the wasm leg, and
 # native's own W=2..8 rows (7-35 us) sit well under it.
+#
+# ── Per-leg constants, 2026-10-16 ─────────────────────────────────────────
+# native: 12 + 3W us (18 at W=2 .. 36 at W=8) is the envelope over native's
+# own two calibration rows above (Intel 6.6 .. 22.5, AMD 17.1 .. 35.3 us at
+# W = 2 .. 8). wasm keeps 30 + 5W (its rows: 27 .. 69 us).
