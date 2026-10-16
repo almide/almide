@@ -155,6 +155,25 @@ impl GenType {
             let (pre, expr) = e.observe(&x, depth + 1)?;
             pre.is_empty().then(|| format!("(({x}) => {expr})"))
         };
+        // An observation that calls an effect closure (a handler) cannot sit
+        // in a plain callback: an Option or Result is taken apart with a
+        // `match`, a list mapped in its fallible form.
+        if let GenType::List(e) | GenType::Option(e) | GenType::Result(e) = self {
+            if e.observe_calls_effect() {
+                let (pre, expr) = e.observe(&x, depth + 1)?;
+                if !pre.is_empty() {
+                    return None;
+                }
+                return Some((
+                    String::new(),
+                    match self {
+                        GenType::List(_) => format!("list.map({v}, ({x}) => {expr})!"),
+                        GenType::Option(_) => format!("match {v} {{ some({x}) => some({expr}), none => none }}"),
+                        _ => format!("match {v} {{ ok({x}) => ok({expr}), err(e{depth}) => err(e{depth}) }}"),
+                    },
+                ));
+            }
+        }
         match self {
             GenType::Bytes => Some((String::new(), format!("bytes.to_list({v})"))),
             GenType::Matrix => Some((String::new(), format!("matrix.to_lists({v})"))),
@@ -170,6 +189,26 @@ impl GenType {
                 Some((format!("let ({l}, {r}) = {v}\n  {pa}{pb}"), format!("({ea}, {eb})")))
             }
             _ => None,
+        }
+    }
+
+    /// [`observe`](Self::observe) calls an effect closure somewhere inside.
+    pub fn observe_calls_effect(&self) -> bool {
+        match self {
+            GenType::Nominal(k) => super::nominal::get(k).is_some_and(|n| n.observe_calls_effect),
+            GenType::List(e) | GenType::Option(e) | GenType::Result(e) | GenType::Map(e) | GenType::Set(e) => e.observe_calls_effect(),
+            GenType::Tuple2(a, b) => a.observe_calls_effect() || b.observe_calls_effect(),
+            _ => false,
+        }
+    }
+
+    /// A value of this type may not be bound with `var` ([`super::nominal::Nominal::refuses_var`]).
+    pub fn refuses_var(&self) -> bool {
+        match self {
+            GenType::Nominal(k) => super::nominal::get(k).is_some_and(|n| n.refuses_var),
+            GenType::List(e) | GenType::Option(e) | GenType::Result(e) | GenType::Map(e) | GenType::Set(e) => e.refuses_var(),
+            GenType::Tuple2(a, b) => a.refuses_var() || b.refuses_var(),
+            _ => false,
         }
     }
 
