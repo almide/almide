@@ -1,0 +1,24 @@
+fn work(s: Int, i: Int, iters: Int) -> Int = {
+  var acc = s + i
+  var j = 0
+  while j < iters { acc = (acc * 31 + j) % 1000003; j = j + 1 }
+  acc
+}
+
+effect fn inner(s: Int, iters: Int) -> Result[Int, String] = {
+  let xs = fan { list.map(list.range(0, 10), (i) => work(s, i, iters)) }
+  ok(list.fold(xs, 0, (a, x) => (a + x) % 1000003))
+}
+
+effect fn main() -> Unit = {
+  var s = 1
+  var k = 0
+  let iters = __IT__ + s - 1
+  while k < __OFF__ {
+    let s0 = s
+    let ys = fan.map(list.range(0, 4), (q) => inner(s0 + q, iters))!
+    s = (s + list.fold(ys, 0, (a, x) => a + x)) % 1000003
+    k = k + 1
+  }
+  println("${s}")
+}
