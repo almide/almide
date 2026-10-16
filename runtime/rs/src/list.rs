@@ -312,8 +312,8 @@ pub fn almide_rt_list_par_workers(len: usize) -> usize {
 // = the offer runs here, sequentially. Output is the same either way (C-321).
 // Timing element 0 first and deciding after it was measured and rejected: it
 // serialises one whole chunk, ~2x wall time when n ≈ workers (fannkuchredux).
-pub const ALMIDE_FAN_OFFER_NS: u128 = 30_000;
-pub const ALMIDE_FAN_WORKER_NS: u128 = 9_000;
+pub const ALMIDE_FAN_OFFER_NS: u128 = 60_000;
+pub const ALMIDE_FAN_WORKER_NS: u128 = 10_000;
 
 /// The worker count for an offer of `n` elements whose site last measured
 /// `per_elem` ns per element (`None` = its first offer): >= 2 = go parallel

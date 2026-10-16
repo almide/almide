@@ -71,8 +71,8 @@ const PINNED_RC: u32 = 1 << 30;
 /// parallel offer of `n` elements on W workers costs `OFFER + W·WORKER` and
 /// saves `t·(n − ⌈n/W⌉)`, `t` the site's last measured time per element;
 /// the largest positive net saving wins.
-const FAN_OFFER_NS: u128 = 30_000;
-const FAN_WORKER_NS: u128 = 9_000;
+const FAN_OFFER_NS: u128 = 60_000;
+const FAN_WORKER_NS: u128 = 10_000;
 
 /// The calling thread's CPU time in ns — the clock an offer's elements are
 /// measured on, the native runtime's `almide_fan_cpu_ns` (list.rs). Wall

@@ -40,8 +40,8 @@
 # offer pays ~40-120 us once), and a site whose work per element swings
 # between offers (the estimate is the last offer's).
 
-offer_ns  = 30_000
-worker_ns = 9_000
+offer_ns  = 60_000
+worker_ns = 10_000
 
 # ── Where the constants come from ─────────────────────────────────────────
 # 2026-10-04, arm64 Darwin, 14 cores (10 P + 4 E), almide 0.65.1 (dev) at
