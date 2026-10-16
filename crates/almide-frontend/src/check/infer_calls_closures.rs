@@ -539,7 +539,9 @@ impl Checker {
         let prev_call = self.call_span_hint.take();
         self.call_span_hint = span;
         self.reject_arg_placeholders(&**callee, args.as_slice(), span);
+        self.arm_call_expect(expr.id);
         let ty = self.infer_call(callee, args, named_args, type_args);
+        self.pending_call_ret = None;
         self.call_span_hint = prev_call;
         // A generic collection constructor whose element type NO argument
         // constrains — `set.new()` / `list.with_capacity(n)` — must have
@@ -1575,6 +1577,7 @@ impl Checker {
         // `xs |> list.map(f) |> list.join(",")` sees a raw TypeVar for the
         // intermediate result, causing module resolution to fail.
         let left_ty = super::types::resolve_ty(&left_ty, &self.uf);
+        let right_expect = self.call_expect.remove(&right.id);
         // #1521: the pipe path bypasses `check_call_with_type_args`, so the
         // E052 deprecation warning never fired for `x |> yell` — a caller
         // could migrate every direct call and keep using the deprecated fn
@@ -1624,7 +1627,9 @@ impl Checker {
                 }
                 // Pipe inserts left as the first argument
                 let mut all_arg_tys: Vec<Ty> = vec![left_ty];
+                self.pending_call_ret = right_expect;
                 all_arg_tys.extend(self.infer_call_arg_tys(callee, args, &call_sig));
+                self.pending_call_ret = None;
                 self.arg_spans = std::iter::once(left_span).chain(args.iter().map(|a| a.span)).collect();
                 // Resolve module calls for pipe (e.g. xs |> list.filter(f))
                 match &mut callee.kind {

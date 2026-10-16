@@ -179,6 +179,10 @@ pub struct Checker {
     /// The fn type each lambda inside data or a branch is expected to have,
     /// keyed by the lambda (`expect_effect.rs`, #3749).
     pub(crate) lambda_expect: std::collections::HashMap<crate::ast::ExprId, crate::types::Ty>,
+    /// The expected result of each call an effect expectation reached, and
+    /// the one armed for the call whose args are being inferred.
+    pub(crate) call_expect: std::collections::HashMap<crate::ast::ExprId, crate::types::Ty>,
+    pub(crate) pending_call_ret: Option<crate::types::Ty>,
     /// #2588: the declared return type of the lambda being inferred, when its
     /// expected type is a `Fn` known from a declaration (a fn return type, a
     /// call slot). A lambda BODY that is itself a lambda inherits it, so
@@ -682,6 +686,8 @@ impl Checker {
             lambda_arg_hint: None,
             lambda_slot_effect: false,
             lambda_expect: std::collections::HashMap::new(),
+            call_expect: std::collections::HashMap::new(),
+            pending_call_ret: None,
             lambda_ret_expect: None,
             list_elem_expect: None,
             fn_value_slot: None,
