@@ -22,13 +22,19 @@
 //! order: the partials list is native's, and parallelism is a wall-clock
 //! property, never an observable (C-220).
 //!
-//! Native's discard is a `read_line` into a String, so a range whose
-//! `start - 1` falls INSIDE a multi-byte character errs with the invalid
-//! UTF-8 message (a chunked fold over non-ASCII text hits it whenever a
-//! chunk boundary splits a character); the arms reproduce that error and
-//! its bytes. One divergence is inherent to reading the file whole: a file
-//! whose invalid UTF-8 lies OUTSIDE the folded range errs here and not
-//! natively.
+//! UTF-8 is checked where native checks it, and nowhere else (#3758):
+//! native's every read is a `read_line` into a String, which validates
+//! exactly the bytes it reads — the discarded prefix (from `start - 1`
+//! through its `\n`) and each folded line. The host therefore hands these
+//! arms the file's RAW bytes (op 61 is the bytes reader under the range's
+//! name), and the walk validates the discard and every line before it is
+//! folded: an invalid discard folds nothing, an invalid line ends the walk
+//! AFTER the callbacks for the lines before it ran, and invalid bytes
+//! outside the walked part never matter — a range over valid lines answers
+//! ok however broken the rest of the file is, an empty range reads nothing.
+//! A range whose `start - 1` falls INSIDE a multi-byte character therefore
+//! errs, as native's discard does (a chunked fold over non-ASCII text hits
+//! it whenever a chunk boundary splits a character).
 
 use almide_ir::IrExpr;
 use wasm_encoder::{BlockType, ValType};
@@ -40,7 +46,12 @@ pub(crate) const OP_FOLD_LINES_RANGE: i32 = 61;
 pub(crate) const OP_FOLD_LINES_CHUNKED: i32 = 62;
 
 fn byte_at() -> wasm_encoder::MemArg {
-    wasm_encoder::MemArg { offset: u64::from(almide_layout::PAYLOAD), align: 0, memory_index: 0 }
+    byte_at_plus(0)
+}
+
+/// The byte `d` past the addressed one.
+fn byte_at_plus(d: u32) -> wasm_encoder::MemArg {
+    wasm_encoder::MemArg { offset: u64::from(almide_layout::PAYLOAD + d), align: 0, memory_index: 0 }
 }
 
 impl Emitter<'_> {
@@ -76,11 +87,78 @@ impl Emitter<'_> {
         i.br(0).end().end();
     }
 
-    /// Fold the lines of the text in `hraw` (`hlen` bytes) owned by the
+    /// Set `hok` to whether bytes [`ha`, `hq`) of the block `hraw` are UTF-8
+    /// by `str::from_utf8`'s table (the lead fixes the width and the second
+    /// byte's range — no overlong, surrogate or > U+10FFFF form — later bytes
+    /// are plain continuations, a truncated tail is invalid). `ha` is the
+    /// cursor and is clobbered. A span ending at a `\n` decides as native's
+    /// `read_line` (which validates the `\n` too) does: an ASCII `\n` never
+    /// completes a multi-byte sequence.
+    fn emit_utf8_span_ok(&mut self, hraw: u32, ha: u32, hq: u32, hok: u32) -> Result<(), EmitError> {
+        let hb0 = self.hold_i32()?;
+        let hw = self.hold_i32()?;
+        let mut i = self.f.instructions();
+        i.i32_const(1).local_set(hok);
+        i.block(BlockType::Empty).loop_(BlockType::Empty);
+        i.local_get(ha).local_get(hq).i32_ge_u().br_if(1);
+        i.local_get(hraw).local_get(ha).i32_add().i32_load8_u(byte_at()).local_set(hb0);
+        // ASCII: one byte.
+        i.local_get(hb0).i32_const(0x80).i32_lt_u().if_(BlockType::Empty);
+        i.local_get(ha).i32_const(1).i32_add().local_set(ha);
+        i.br(1);
+        i.end();
+        // A continuation or overlong-2 lead (0x80..=0xC1), or 0xF5..: invalid.
+        i.local_get(hb0).i32_const(0xC2).i32_lt_u();
+        i.local_get(hb0).i32_const(0xF4).i32_gt_u();
+        i.i32_or().if_(BlockType::Empty);
+        i.i32_const(0).local_set(hok).br(2);
+        i.end();
+        // width: 0xC2..=0xDF 2, 0xE0..=0xEF 3, 0xF0..=0xF4 4.
+        i.i32_const(2);
+        i.i32_const(3).i32_const(4).local_get(hb0).i32_const(0xF0).i32_lt_u().select();
+        i.local_get(hb0).i32_const(0xE0).i32_lt_u().select();
+        i.local_set(hw);
+        i.local_get(ha).local_get(hw).i32_add().local_get(hq).i32_gt_u().if_(BlockType::Empty);
+        i.i32_const(0).local_set(hok).br(2);
+        i.end();
+        // The second byte: below its lead's low bound (0xE0 -> 0xA0,
+        // 0xF0 -> 0x90, else 0x80) or above its high bound (0xED -> 0x9F,
+        // 0xF4 -> 0x8F, else 0xBF).
+        i.local_get(hraw).local_get(ha).i32_add().i32_load8_u(byte_at_plus(1));
+        i.i32_const(0xA0);
+        i.i32_const(0x90).i32_const(0x80).local_get(hb0).i32_const(0xF0).i32_eq().select();
+        i.local_get(hb0).i32_const(0xE0).i32_eq().select();
+        i.i32_lt_u();
+        i.local_get(hraw).local_get(ha).i32_add().i32_load8_u(byte_at_plus(1));
+        i.i32_const(0x9F);
+        i.i32_const(0x8F).i32_const(0xBF).local_get(hb0).i32_const(0xF4).i32_eq().select();
+        i.local_get(hb0).i32_const(0xED).i32_eq().select();
+        i.i32_gt_u();
+        i.i32_or().if_(BlockType::Empty);
+        i.i32_const(0).local_set(hok).br(2);
+        i.end();
+        // The third and fourth bytes: plain continuations (0b10xx_xxxx).
+        for (k, at_least) in [(2u32, 3i32), (3, 4)] {
+            i.local_get(hw).i32_const(at_least).i32_ge_u().if_(BlockType::Empty);
+            i.local_get(hraw).local_get(ha).i32_add().i32_load8_u(byte_at_plus(k));
+            i.i32_const(0xC0).i32_and().i32_const(0x80).i32_ne().if_(BlockType::Empty);
+            i.i32_const(0).local_set(hok).br(3);
+            i.end();
+            i.end();
+        }
+        i.local_get(ha).local_get(hw).i32_add().local_set(ha);
+        i.br(0).end().end();
+        self.release_i32();
+        self.release_i32();
+        Ok(())
+    }
+
+    /// Fold the lines of the bytes in `hraw` (`hlen` bytes) owned by the
     /// range [`hs`, `he`) into `params[0]`. `hs` is 0, an in-file offset, or
     /// `hlen + 1` (past the file: no line); `he` is clamped to [0, hlen].
-    /// A discard that starts inside a character sets `hbad` and folds
-    /// nothing (native's `read_line` fails there).
+    /// An invalid UTF-8 discard sets `hbad` and folds nothing; an invalid
+    /// line sets `hbad` and ends the walk before it is folded (native's
+    /// `read_line` fails at exactly those reads).
     #[allow(clippy::too_many_arguments)]
     fn emit_range_walk(
         &mut self,
@@ -97,33 +175,30 @@ impl Emitter<'_> {
         let hpos = self.hold_i32()?;
         let hq = self.hold_i32()?;
         let hle = self.hold_i32()?;
+        let hok = self.hold_i32()?;
         // The first owned line: 0, or one past the first `\n` at or after
-        // `start - 1` (none = past the file).
+        // `start - 1` (none = past the file). The discarded bytes are a
+        // `read_line` natively, so they must be UTF-8 too.
         {
             let mut i = self.f.instructions();
             i.local_get(hs).i32_eqz().if_(BlockType::Empty);
             i.i32_const(0).local_set(hpos);
             i.else_();
-            i.local_get(hs).i32_const(1).i32_sub().local_set(hq);
-            // A UTF-8 continuation byte (0b10xx_xxxx) at `start - 1`.
-            i.local_get(hq).local_get(hlen).i32_lt_u().if_(BlockType::Result(ValType::I32));
-            i.local_get(hraw).local_get(hq).i32_add().i32_load8_u(byte_at());
-            i.i32_const(0xC0).i32_and().i32_const(0x80).i32_eq();
-            i.else_();
-            i.i32_const(0);
-            i.end();
-            i.if_(BlockType::Empty);
-            i.i32_const(1).local_set(hbad);
-            i.local_get(hlen).i32_const(1).i32_add().local_set(hpos);
-            i.else_();
+            i.local_get(hs).i32_const(1).i32_sub().local_tee(hq).local_set(hpos);
         }
         self.emit_scan_nl(hraw, hlen, hq);
+        // [start - 1, the `\n`) — `hpos` is the cursor (an empty span when
+        // `start - 1` is past the file: native's read there returns 0).
+        self.emit_utf8_span_ok(hraw, hpos, hq, hok)?;
         {
             let mut i = self.f.instructions();
             i.local_get(hq).i32_const(1).i32_add().local_set(hpos);
             i.local_get(hq).local_get(hlen).i32_ge_u().if_(BlockType::Empty);
             i.local_get(hlen).i32_const(1).i32_add().local_set(hpos);
             i.end();
+            i.local_get(hok).i32_eqz().if_(BlockType::Empty);
+            i.i32_const(1).local_set(hbad);
+            i.local_get(hlen).i32_const(1).i32_add().local_set(hpos);
             i.end();
             i.end();
             i.block(BlockType::Empty).loop_(BlockType::Empty);
@@ -132,6 +207,17 @@ impl Emitter<'_> {
             i.local_get(hpos).local_set(hq);
         }
         self.emit_scan_nl(hraw, hlen, hq);
+        // The line [pos, the `\n`) must be UTF-8 before it is folded; an
+        // invalid one ends the walk — the lines before it were folded.
+        self.f.instructions().local_get(hpos).local_set(hle);
+        self.emit_utf8_span_ok(hraw, hle, hq, hok)?;
+        {
+            let mut i = self.f.instructions();
+            i.local_get(hok).i32_eqz().if_(BlockType::Empty);
+            i.i32_const(1).local_set(hbad);
+            i.br(2);
+            i.end();
+        }
         {
             // The line ends at the `\n` (exclusive), minus one `\r` before
             // it; a last line with no `\n` keeps every byte.
@@ -173,13 +259,13 @@ impl Emitter<'_> {
             i.local_get(hq).i32_const(1).i32_add().local_set(hpos);
             i.br(0).end().end();
         }
-        self.release_i32();
-        self.release_i32();
-        self.release_i32();
+        for _ in 0..4 {
+            self.release_i32();
+        }
         Ok(())
     }
 
-    /// When `hbad` is set: release the text block and put native's
+    /// When `hbad` is set: release the bytes block and put native's
     /// `<name>("<path>"): stream did not contain valid UTF-8` err into `herr`
     /// (the quoting is runtime/rs/src/fs.rs `fs_q`: a bare pair of quotes).
     fn emit_utf8_err(&mut self, hbad: u32, hraw: u32, hp: u32, herr: u32, name: &str) -> Result<(), EmitError> {
