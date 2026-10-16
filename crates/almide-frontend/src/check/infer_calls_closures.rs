@@ -736,6 +736,7 @@ impl Checker {
     }
 
     fn infer_expr_g3_lambda(&mut self, expr: &mut ast::Expr) -> Ty {
+        let lambda_id = expr.id;
         let ExprKind::Lambda { params, body, .. } = &mut expr.kind else { unreachable!() };
         self.env.push_scope();
         // Lambda has its own return context — don't leak outer function's current_ret
@@ -759,7 +760,11 @@ impl Checker {
         // its own effect context) and the lambda ALWAYS types as the carrier
         // `(A) -> Result[B, String]`, so a pure value tail gets the same
         // ok(...) wrap the fallible machinery already emits (Phase 1b).
-        let slot_effect = std::mem::take(&mut self.lambda_slot_effect);
+        let armed_effect = std::mem::take(&mut self.lambda_slot_effect);
+        let mut ret_expect = self.lambda_ret_expect.take();
+        let mut param_hint = self.lambda_arg_hint.take();
+        // #3749: an expectation handed down through data or a branch.
+        let slot_effect = self.merge_lambda_expect(lambda_id, armed_effect, &mut ret_expect, &mut param_hint);
         // ADR-0021 D1: the channel's error type ε is decided by the context the
         // lambda flows into, else by the join of its `!` operands
         // (`lambda_channel.rs`). The effect carrier stays `String`.
@@ -767,7 +772,6 @@ impl Checker {
         self.env.lambda_ret = Some(Ty::result(channel_ok.clone(), eps.clone()));
         self.env.lambda_prop_used = false;
         self.open_lambda_channel(eps);
-        let ret_expect = self.lambda_ret_expect.take();
         let saved_can_call_effect = self.env.can_call_effect;
         if slot_effect {
             self.env.can_call_effect = true;
@@ -780,7 +784,6 @@ impl Checker {
         // method calls on the param via the protocol path instead of
         // collapsing it into a closure type. An explicit annotation on
         // the param always wins; the hint only fills inferred slots.
-        let param_hint = self.lambda_arg_hint.take();
         let param_tys: Vec<Ty> = params.iter().enumerate().map(|(i, p)| {
             let ty = p.ty.as_ref().map(|te| self.resolve_type_expr(te))
                 .or_else(|| param_hint.as_ref().and_then(|h| h.get(i).cloned().flatten()))
@@ -823,6 +826,7 @@ impl Checker {
         }).collect();
         if let Some(r) = &ret_expect {
             self.expect_lambda(body, r);
+            self.expect_expr(body, r);
         }
         let ret_ty = self.infer_expr(body);
         self.env.can_call_effect = saved_can_call_effect;
@@ -931,6 +935,9 @@ impl Checker {
     fn infer_expr_g3_unwrap_or(&mut self, expr: &mut ast::Expr) -> Ty {
         let ExprKind::UnwrapOr { expr: inner, fallback, .. } = &mut expr.kind else { unreachable!() };
         let t = self.infer_expr(inner);
+        if let Some(payload) = resolve_ty(&t, &self.uf).option_inner().or_else(|| resolve_ty(&t, &self.uf).result_ok_ty()) {
+            self.expect_expr(fallback, &payload);
+        }
         let ft = self.infer_expr(fallback);
         let resolved = resolve_ty(&t, &self.uf);
         // #3522: an effect fn's `Option[T]` call with a `T` fallback wants `!`.
@@ -1044,13 +1051,6 @@ impl Checker {
         if !known || self.env.lookup_var(mod_name.as_str()).is_some() {
             return;
         }
-        fn contains_unwrap(e: &mut ast::Expr) -> bool {
-            let mut found = false;
-            ast::visit_expr_mut(e, &mut |c| {
-                if matches!(c.kind, ExprKind::Unwrap { .. }) { found = true; }
-            });
-            found
-        }
         let mut fallible = false;
         for a in args.iter_mut() {
             match &mut a.kind {
@@ -1081,7 +1081,7 @@ impl Checker {
                 // `(A) -> Result[B, ε]` (its own channel, ADR-0021, + value-tail
                 // lift), which is exactly the twin's callback type.
                 ExprKind::Lambda { body, .. } => {
-                    if contains_unwrap(body) {
+                    if super::fallible_user_hof::body_has_own_bang(body) {
                         fallible = true;
                     }
                 }

@@ -42,6 +42,7 @@ mod exhaustiveness;
 mod call_defaults;
 mod effect_isolation_cascade;
 mod qq_effect_bang;
+mod expect_effect;
 
 use almide_lang::ast;
 use almide_base::diagnostic::Diagnostic;
@@ -175,6 +176,9 @@ pub struct Checker {
     /// `effect (A) -> B` fn type — the body gets effect-fn ergonomics and the
     /// lambda types as the effect carrier `(A) -> Result[B, String]`.
     pub(crate) lambda_slot_effect: bool,
+    /// The fn type each lambda inside data or a branch is expected to have,
+    /// keyed by the lambda (`expect_effect.rs`, #3749).
+    pub(crate) lambda_expect: std::collections::HashMap<crate::ast::ExprId, crate::types::Ty>,
     /// #2588: the declared return type of the lambda being inferred, when its
     /// expected type is a `Fn` known from a declaration (a fn return type, a
     /// call slot). A lambda BODY that is itself a lambda inherits it, so
@@ -677,6 +681,7 @@ impl Checker {
             next_synth_expr_id: 0xC000_0000,
             lambda_arg_hint: None,
             lambda_slot_effect: false,
+            lambda_expect: std::collections::HashMap::new(),
             lambda_ret_expect: None,
             list_elem_expect: None,
             fn_value_slot: None,
