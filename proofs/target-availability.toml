@@ -798,12 +798,10 @@ issue = "#2589"
 
 [[unavailable]]
 fn = "testing.assert_throws"
-legs = ["embedded", "stock-p1", "structural"]
+legs = ["embedded"]
 class = "native-only-forever"
 justification = "a wasm trap is uncatchable in-guest, so the native panic-catch semantics cannot be reproduced; redefining the repo-wide testing primitive to Result-carrying semantics for one row was refused — ruled native-only-forever (#1423 bucket C, 2026-08-31)"
 reason-embedded = "a wasm trap is uncatchable in-guest, so the panic-catch assertion has no wasm meaning — the plain assert forms work (native-only-forever, #1423)"
-reason-stock-p1 = "a wasm trap is uncatchable in-guest, so the panic-catch assertion has no wasm meaning — the plain assert forms work (native-only-forever, #1423)"
-reason-structural = "host-surface (native-only-forever)"
 alt = "match on the err arm and assert"
 issue = "#1423"
 
