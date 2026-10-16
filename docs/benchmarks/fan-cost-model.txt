@@ -37,9 +37,12 @@
 # offers read 263-277 ns). A wasm worker's warm-up call read 4-22 us (wall)
 # against ~0.2 us warm on that machine.
 #
-# What it cannot see: a site's first offer (always parallel, so one cheap
-# offer pays ~40-120 us once), and a site whose work per element swings
-# between offers (the estimate is the last offer's).
+# What it cannot see: a site's first offer (always parallel on every core,
+# so one cheap offer pays the W=8 row of the 2026-10-16 table once: 22-35 us
+# native, 41-69 us wasm, plus the crew's spawn — and on wasm the workers'
+# instantiation — when it is the run's first parallel offer), and a site
+# whose work per element swings between offers (the estimate is the last
+# offer's).
 
 offer_ns  = 30_000
 worker_ns = 5_000
@@ -150,3 +153,39 @@ worker_ns = 5_000
 # The cheap end is now at seq on both machines (the old residue was the
 # per-offer parallelism read, not the first offer), and native tracks
 # min(seq, par) throughout.
+#
+# The wasm columns above are too noisy to read the middle rows from: each
+# `almide run --target wasm` compiles the program, and 100 offers leave that
+# noise at the size of the difference (AMD 3000: model 16.2 against par 8.0
+# read as a missed parallel offer). Re-measured 2026-10-16 with 1000 offers,
+# t(1010 offers) - t(10 offers), min of 7, ms per 1000 offers; w5 =
+# ALMIDE_FAN_COST_OFF + ALMIDE_FAN_THREADS=5:
+#
+#   AMD EPYC 7B13    wasm                          native
+#   iters    seq    model     w5    par  |    seq   model     w5    par
+#   0        1.7     9.6    45.1   76.1  |    0.1     1.9   23.2   38.9
+#   1000    52.4    51.0    50.8   63.6  |   49.4    51.5   35.1   40.2
+#   3000   152.1    78.2    71.6   83.9  |  147.6    54.1   54.8   64.0
+#   5000   251.9    94.9   106.1   91.3  |  245.9    79.9   81.1   77.2
+#   10000  497.6   144.5   145.8  143.6  |  491.2   133.8  132.8  136.9
+#   30000 1499.1   352.0   350.5  348.3  | 1472.7   340.4  350.9  336.1
+#
+#   Intel 8581C      wasm                          native
+#   iters    seq    model     w5    par  |    seq   model     w5    par
+#   0        1.0     1.1    34.1   36.7  |    0.1     0.4   17.9   22.7
+#   1000    37.9    43.1    45.0   47.3  |   39.6    40.2   35.1   34.6
+#   3000   119.4    66.9    65.0   65.6  |  119.5    52.0   52.4   51.8
+#   5000   197.8    80.7    81.5   83.6  |  199.2    74.1   72.0   68.6
+#   10000  397.6   119.9   119.0  122.0  |  397.9   115.6  115.6  113.8
+#   30000 1177.3   282.2   287.1  274.3  | 1192.7   287.1  287.4  269.9
+#
+# ALMIDE_DBG_FAN on the AMD VM: the model takes W=5 on 1009 of 1010 offers
+# at 1000 iterations and above, and W=1 at 0 and 100 — the wasm leg tracks
+# min(seq, par) within 10% from 1000 iterations up. At 0 the sequential
+# offer still pays the host round trip (the guest hands the offer to the
+# host, which runs it on a pooled instance): ~8 us on AMD, where reading the
+# thread CPU clock is a ~1.1 us syscall (Intel ~0.3 us).
+# The one place the model gives time away is native at ~4-5 us per element
+# (1000 iterations): it stays sequential where W=5 is 30% (AMD) and 12%
+# (Intel) faster, because 30 + 5W is the envelope over the wasm leg, and
+# native's own W=2..8 rows (7-35 us) sit well under it.
