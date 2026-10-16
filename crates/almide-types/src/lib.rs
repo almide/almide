@@ -39,6 +39,7 @@ pub mod implements {
 }
 pub mod time_units;
 pub mod fallible_hofs;
+pub mod callback_params;
 
 // Re-export almide-base for convenience
 pub use almide_base;
