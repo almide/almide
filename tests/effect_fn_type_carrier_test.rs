@@ -258,12 +258,15 @@ fn mixed_effect_and_pure_arms_into_an_effect_slot_run_on_both_legs() {
     }
 }
 
-/// Run `src` on both legs and hold each to `expected`.
+/// Run `src` on both legs and hold each to `expected`. Both legs run before
+/// anything is asserted, and a failure names every leg that went wrong, so a
+/// native failure cannot hide what the wasm leg did.
 fn runs_on_both_legs(src: &str, expected: &str) {
     let bin = std::env::var("ALMIDE_BIN").unwrap_or_else(|_| env!("CARGO_BIN_EXE_almide").to_string());
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("app.almd");
     std::fs::write(&file, src).unwrap();
+    let mut wrong = Vec::new();
     for leg in ["native", "structural"] {
         let mut cmd = Command::new(&bin);
         cmd.arg("run").arg(&file).env_remove("ALMIDE_WASM_SKIP_STOCK_AUDIT");
@@ -271,10 +274,13 @@ fn runs_on_both_legs(src: &str, expected: &str) {
             cmd.args(["--target", "wasm"]).env("ALMIDE_WASM_SKIP_STOCK_AUDIT", "1");
         }
         let out = cmd.output().unwrap();
-        let stderr = String::from_utf8_lossy(&out.stderr);
-        assert!(out.status.success(), "{leg}: {stderr}");
-        assert_eq!(String::from_utf8(out.stdout).unwrap(), expected, "{leg}: {stderr}");
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        if !out.status.success() || stdout != expected {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            wrong.push(format!("{leg}: exit {:?}, stdout {stdout:?}\n{stderr}", out.status.code()));
+        }
     }
+    assert!(wrong.is_empty(), "expected {expected:?} on both legs:\n{}", wrong.join("\n"));
 }
 
 /// A pure lambda reaching an effect-closure type through DATA, not as a call
@@ -340,4 +346,31 @@ effect fn main() -> Unit = {
 #[test]
 fn nested_middleware_lambdas_take_the_declared_effect_type() {
     runs_on_both_legs(NESTED_MIDDLEWARE_3749, "41\n41\n");
+}
+
+/// The expected type of a GENERIC call's result flows back into the
+/// arguments that produce it: `map.get_or(m, k, d)` in a `HttpHandler` slot
+/// makes `V` the handler, so the map literal's value lambdas and the default
+/// are effect closures; `map.values(m)` in a `List[HttpMiddleware]` slot does
+/// the same for `m`'s values; and a `let` annotation reaches through a pipe
+/// into `list.map`'s callback (#3749's curried middleware built per index).
+/// The map shapes passed check and died in native lowering with "internal
+/// type resolution failed"; the pipe was refused with E001.
+const HANDLERS_THROUGH_GENERIC_RETURNS: &str = r#"import http
+
+effect fn hit(h: HttpHandler) -> String = http.body(h(http.new_request("GET", "/p", "", [:]))!)
+
+effect fn main() -> Unit = {
+  let r = http.route("GET /p", map.get_or(["k0": (req) => http.response(200, "a"), "k1": (req) => http.redirect("/r")], "k0", (req) => http.response(200, "y")))
+  let b = hit(map.get_or(["k0": (req) => http.response(200, "x")], "zz", (req) => http.response(200, "b")))!
+  let w = http.wrap((req) => http.response(200, "c"), map.values(["k0": (next) => http.wrap(next, []), "k1": (next) => next]))
+  let mws: List[HttpMiddleware] = list.range(0, 2) |> list.map((i) => (next) => (req) => http.set_header(next(req)!, "x${i}", "1"))
+  let resp = http.wrap((req) => http.response(200, "d"), mws)(http.new_request("GET", "/", "", [:]))!
+  println(hit(r.handler)! + b + hit(w)! + http.body(resp) + (http.get_header(resp, "x0") ?? "-") + (http.get_header(resp, "x1") ?? "-"))
+}
+"#;
+
+#[test]
+fn effect_lambdas_shaped_through_a_generic_return_run_on_both_legs() {
+    runs_on_both_legs(HANDLERS_THROUGH_GENERIC_RETURNS, "abcd11\n");
 }
