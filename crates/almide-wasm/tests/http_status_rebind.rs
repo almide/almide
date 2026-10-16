@@ -54,3 +54,26 @@ fn setting_the_status_in_a_loop_does_not_copy_the_headers() {
     // list is thousands of bytes. Allow a fresh status string and a little.
     assert!(per_step < 256, "{per_step} bytes per status step over {headers} headers ({base} to build, {looped} with {steps} steps) — the step copies the headers");
 }
+
+/// Value semantics: an alias taken before the rebind keeps the old status —
+/// the move-in may only take a var nothing reads before its rebind.
+#[test]
+fn an_alias_taken_before_the_rebind_keeps_the_old_status() {
+    let src = "import http
+
+effect fn main() -> Unit = {
+  var x = http.with_headers(200, \"b\", map.set(map.new(), \"k\", \"v\"))
+  let old = x
+  x = http.status(x, 201)
+  var i = 0
+  while i < 3 {
+    let before = x
+    x = http.status(x, 300 + i)
+    println(\"${http.status_code(before)} ${http.status_code(x)}\")
+    i = i + 1
+  }
+  println(\"${http.status_code(old)} ${http.status_code(x)} ${http.get_header(x, \"k\") ?? \"\"}\")
+}
+";
+    bytes_requested(src, "201 300\n300 301\n301 302\n200 302 v\n");
+}

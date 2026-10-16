@@ -710,8 +710,17 @@ impl Emitter<'_> {
         let depth = self.borrowed_temps.len();
         let mut no_transfer = false;
         let param_mut = crate::cells::linked_param_mut(module, func, args.len(), &self.table.infos[i].param_mut);
+        // The same move-in as the Named arm (#3337 / #3406): `x =
+        // http.status(x, c)` hands the dying `x` to the self-hosted
+        // implementation's owned param, so its `@reuse` op meets rc 1.
+        let move_in = self.take_move_in(args, true, tail && Some(index) != self.self_index);
+        let mut moved_in = Vec::new();
         let site = crate::witness::modes::site_begin();
         for (k, (a, want)) in args.iter().zip(params).enumerate() {
+            if let Some(idx) = self.try_move_in_arg(&move_in, args, (i, k), want)? {
+                moved_in.push(idx);
+                continue;
+            }
             if !self.lower_mut_param_arg(a, param_mut.get(k).copied().unwrap_or(false))? {
                 self.lower(a, Some(want))?;
             }
@@ -723,6 +732,7 @@ impl Emitter<'_> {
                 self.detach_global_mut_arg(a, i)?;
             }
         }
+        self.empty_moved_in(&moved_in)?;
         crate::witness::modes::site_end(site, index);
         let parked = self.borrowed_temps.len() > depth;
         self.calls.insert(i);
