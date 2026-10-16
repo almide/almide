@@ -204,6 +204,7 @@ impl Checker {
                     // Another module's omitted defaults, written in before the
                     // fields are inferred (call_defaults.rs, #3165).
                     self.fill_cross_module_field_defaults(n, fields);
+                    self.expect_named_record_fields(*n, fields);
                 }
                 for f in fields.iter_mut() { self.infer_expr(&mut f.value); }
                 if let Some(n) = name {

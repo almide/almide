@@ -130,6 +130,7 @@ impl Checker {
             if matches!(resolve_ty(&declared, &self.uf), Ty::Fn { is_effect: true, .. }) {
                 self.expect_lambda(value, &declared);
             }
+            self.expect_expr(value, &declared);
         }
         let val_ty = self.infer_expr(value);
         // #3274: resolved BEFORE `define_var`, so `let g = g` reads the outer `g`.
