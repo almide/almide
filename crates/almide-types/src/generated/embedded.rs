@@ -9246,10 +9246,13 @@ fn http_with_headers(status: Int, body: String, headers: Map[String, String]) ->
   else []))
 }
 
-fn http_status(resp: List[String], code: Int) -> List[String] = {
-  let st = int.to_string(code)
-  [st] + list.drop(resp, 1)
-}
+
+
+fn http_status(resp: List[String], code: Int) -> List[String] = list.set(
+  resp,
+  0,
+  int.to_string(code),
+)
 
 fn http_body(resp: List[String]) -> String = list.get(resp, 1) ?? ""
 
