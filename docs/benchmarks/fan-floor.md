@@ -74,8 +74,66 @@ All figures are µs per offer.
 
 ## Reading it
 
-- **`busy` has the largest gap: 4.0x (Intel) and 5.1x (AMD) at 1000 iterations**, and Almide is slower there than its own sequential mode (39.6 / 50.6 µs). Each lane's offers come from a `fan { }` arm's thread. Only one offer at a time could hold the resident crew (list.rs `almide_fan_run_tasks`), so the other lane spawned a thread per worker on every offer. That is the item fixed next, and the fix's own section will be appended here.
+- **`busy` has the largest gap: 4.0x (Intel) and 5.1x (AMD) at 1000 iterations**, and Almide is slower there than its own sequential mode (39.6 / 50.6 µs). Each lane's offers come from a `fan { }` arm's thread. Only one offer at a time could hold the resident crew (list.rs `almide_fan_run_tasks`), so the other lane spawned a thread per worker on every offer. That is the item fixed next: see **After** below.
 - `nest` comes next at 4.2x / 3.3x. Its outer map has an effect callback (it calls `fan { }`), and an effect `fan.map` runs its elements one after another (#2594). So only the inner maps are parallel, and 4 × 10 elements run as four 10-element offers. That is a language-surface change, not a runtime one.
 - `sweep` is within 1.3x of the fastest from 10000 iterations up. Its gap is 1.7–2.2x at 1000, where Rayon's work-stealing join costs less than Almide's dealing and the cost model's choice of 5 workers.
 - Zig 0.13's `std.Thread.Pool` costs 110–350 µs per offer here, and it is never the fastest.
 - Go's sequential loop is ~10% faster than the others' at high iteration counts. That is code generation, not the parallel runtime, and it is why Go is the fastest at 10000+.
+
+## After: one shared pool, the caller taking blocks too (2026-10-16)
+
+Every parallel offer now posts helper calls to one resident pool (list.rs `almide_fan_deal` / `almide_fan_pool`), whichever thread it comes from, a `fan { }` arm's included. The calling thread takes blocks of its own offer as well. A helper that starts after the blocks ran out takes none. The caller waits only for helpers already inside the offer's gate, so no offer waits on a helper that is busy elsewhere. Helper calls go to the lowest-numbered idle pool threads, so a run of single offers keeps the same warm threads; handing them out in turn cost 4–15% per offer on the AMD machine.
+
+Same runs, same probes; `develop` / `this` are the default (cost model) build of each, and `forced par` is this build with `ALMIDE_FAN_COST_OFF=1`; µs per offer:
+
+### GCE c4-standard-8, Intel Xeon Platinum 8581C
+
+| probe | iters | develop | this | forced par | fastest | develop / fastest | this / fastest | gap before | gap after |
+|---|---:|---:|---:|---:|---|---:|---:|---:|---:|
+| sweep | 0 | 0.1 | 0.0 | 8.2 | 0.0 go-seq | — | — | +0.0 | -0.1 |
+| sweep | 100 | 4.0 | 3.9 | 12.2 | 3.3 go-seq | 1.21x | 1.19x | +0.7 | +0.6 |
+| sweep | 300 | 12.3 | 12.1 | 15.8 | 10.3 rayon | 1.20x | 1.18x | +2.0 | +1.8 |
+| sweep | 1000 | 34.7 | 21.8 | 31.3 | 15.9 rayon | 2.19x | 1.37x | +18.8 | +5.9 |
+| sweep | 3000 | 52.2 | 45.3 | 41.5 | 34.3 rayon | 1.52x | 1.32x | +17.9 | +11.0 |
+| sweep | 10000 | 114.7 | 107.5 | 97.9 | 90.3 go | 1.27x | 1.19x | +24.4 | +17.2 |
+| sweep | 30000 | 284.0 | 268.4 | 258.4 | 232.0 go | 1.22x | 1.16x | +52.0 | +36.3 |
+| nest | 0 | 0.3 | 0.3 | 33.6 | 0.1 rayon-seq | — | — | +0.2 | +0.2 |
+| nest | 100 | 15.5 | 15.8 | 48.9 | 13.6 go-seq | 1.14x | 1.16x | +2.0 | +2.2 |
+| nest | 1000 | 135.4 | 112.2 | 126.7 | 31.9 rayon | 4.24x | 3.51x | +103.5 | +80.3 |
+| nest | 10000 | 461.2 | 427.6 | 398.4 | 215.2 rayon | 2.14x | 1.99x | +246.0 | +212.4 |
+| busy | 0 | 0.3 | 0.2 | 18.3 | 0.0 rayon-seq | — | — | +0.3 | +0.2 |
+| busy | 100 | 4.2 | 4.1 | 22.7 | 5.9 rayon | 0.70x | 0.70x | -1.7 | -1.8 |
+| busy | 1000 | 67.5 | 25.4 | 35.2 | 16.7 rayon | 4.03x | 1.52x | +50.7 | +8.7 |
+| busy | 10000 | 185.6 | 138.3 | 156.4 | 101.2 go | 1.83x | 1.37x | +84.4 | +37.1 |
+
+### GCE n2d-standard-8, AMD EPYC 7B13
+
+| probe | iters | develop | this | forced par | fastest | develop / fastest | this / fastest | gap before | gap after |
+|---|---:|---:|---:|---:|---|---:|---:|---:|---:|
+| sweep | 0 | 0.0 | 0.1 | 24.1 | 0.0 zig-seq | — | — | +0.0 | +0.2 |
+| sweep | 100 | 5.0 | 5.1 | 28.6 | 4.6 go-seq | 1.09x | 1.12x | +0.4 | +0.5 |
+| sweep | 300 | 16.2 | 15.6 | 35.6 | 14.1 go-seq | 1.15x | 1.10x | +2.1 | +1.4 |
+| sweep | 1000 | 42.6 | 39.1 | 43.1 | 25.8 rayon | 1.66x | 1.52x | +16.9 | +13.4 |
+| sweep | 3000 | 67.0 | 62.6 | 58.7 | 46.3 rayon | 1.45x | 1.35x | +20.6 | +16.2 |
+| sweep | 10000 | 158.0 | 145.7 | 134.7 | 132.3 rayon | 1.19x | 1.10x | +25.7 | +13.4 |
+| sweep | 30000 | 370.3 | 371.3 | 348.6 | 327.7 go | 1.13x | 1.13x | +42.6 | +43.6 |
+| nest | 0 | 1.1 | 1.1 | 98.4 | 0.0 zig-seq | — | — | +1.6 | +1.5 |
+| nest | 100 | 19.3 | 20.8 | 110.2 | 18.2 go-seq | 1.06x | 1.15x | +1.2 | +2.6 |
+| nest | 1000 | 164.3 | 129.0 | 170.2 | 49.4 rayon | 3.33x | 2.61x | +114.9 | +79.6 |
+| nest | 10000 | 593.5 | 555.0 | 542.3 | 291.4 rayon | 2.04x | 1.90x | +302.1 | +263.6 |
+| busy | 0 | 0.0 | 0.4 | 54.5 | 0.0 rayon-seq | — | — | -0.5 | +0.4 |
+| busy | 100 | 6.5 | 5.3 | 57.6 | 8.7 go-seq | 0.75x | 0.61x | -2.2 | -3.4 |
+| busy | 1000 | 114.1 | 49.9 | 69.3 | 22.6 rayon | 5.05x | 2.21x | +91.5 | +27.3 |
+| busy | 10000 | 307.2 | 188.2 | 210.2 | 143.6 go | 2.14x | 1.31x | +163.6 | +44.6 |
+
+**`busy`**: at 1000 iterations Almide is 1.52x Rayon on Intel (was 4.03x) and 2.21x on AMD (was 5.05x). The gap over the fastest fell from 50.7 to 8.7 µs (Intel) and from 91.5 to 27.3 µs (AMD), and at 10000 iterations from 84.4 to 37.1 and from 163.6 to 44.6 µs. Every busy row is under half its old gap.
+
+**No regression elsewhere.** These checks are the same as for the cost model (fan-cost-model.txt: 1000 offers × 10 elements, min of 11, modes interleaved). The default build is at or below develop's on both machines at every iteration count, except rows within 2.5% and sub-µs noise at 0 iterations (Intel 1000 iterations: 31.1 → 25.3 µs; AMD: 38.6 → 32.4). The forced-parallel offer at 0 iterations costs 8.2 µs (Intel) and 24.1 µs (AMD), against 17–36 before. On the benchmarks (min of 15, ms):
+
+| | Intel develop | Intel this | AMD develop | AMD this |
+|---|---:|---:|---:|---:|
+| small map ×500 | 54.6 | 47.6 | 74.9 | 64.3 |
+| spectralnorm 1200 | 13.8 | 13.2 | 22.7 | 20.3 |
+| spectralnorm 3000 | 72.9 | 71.6 | 109.6 | 105.2 |
+
+What is left: `nest` (#2594, the effect `fan.map` is sequential) and the wasm leg, whose two `fan { }` arms run one after another.
