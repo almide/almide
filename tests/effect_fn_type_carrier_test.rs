@@ -199,7 +199,8 @@ fn branched_lambdas_into_an_aliased_effect_slot_run_on_both_legs() {
 /// found `AlmideHttpResponse`; the wasm leg walled `ty-mismatch`). Every
 /// route a value reaches an effect slot by is held here: a stdlib call (`if`,
 /// `match`, a block's tail), a `let` annotated by the alias, a same-module user
-/// fn, and a fn of another user module.
+/// fn, and a fn of another user module. A block handed to a user fn's
+/// borrowed fn param yields the closure handle, which the borrow derefs.
 const MIXED_ARM_HOOKS: &str = r#"import http
 
 effect fn hit(h: HttpHandler) -> String = http.body(h(http.new_request("GET", "/", "", [:]))!)
@@ -223,7 +224,11 @@ effect fn run(flag: Bool) -> String = {
     let s = "l"
     if flag then http.wrap((req) => http.response(200, "k"), []) else (req) => http.response(200, s)
   })!
-  local_hit(a)! + local_hit(m)! + local_hit(g)! + u + v + k
+  let n = local_hit({
+    let s = "n"
+    (req) => http.response(200, s)
+  })!
+  local_hit(a)! + local_hit(m)! + local_hit(g)! + u + v + k + n
 }
 
 effect fn main() -> Unit = {
@@ -239,7 +244,7 @@ fn mixed_effect_and_pure_arms_into_an_effect_slot_run_on_both_legs() {
     std::fs::write(dir.path().join("hooks.almd"), MIXED_ARM_HOOKS).unwrap();
     let src = dir.path().join("app.almd");
     std::fs::write(&src, MIXED_ARM_APP).unwrap();
-    let expected = "bdfhjl\nacegik\n";
+    let expected = "bdfhjln\nacegikn\n";
     for leg in ["native", "structural"] {
         let mut cmd = Command::new(&bin);
         cmd.current_dir(dir.path()).arg("run").arg(&src).env_remove("ALMIDE_WASM_SKIP_STOCK_AUDIT");
