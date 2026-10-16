@@ -10,6 +10,7 @@ impl<'a> Interpreter<'a> {
         func: &str,
         args: &[Value],
     ) -> Option<Flow> {
+        let tys = self.container_arg_tys.take();
         // In-place container MUTATION cannot be modeled from HERE: by the time
         // args are values, the `var` binding identity of the receiver is gone,
         // and these stdlib ops have a `mut` receiver that (mostly) returns Unit
@@ -48,18 +49,54 @@ impl<'a> Interpreter<'a> {
                 return None;
             }
         }
-        // Per-module dispatch below — grouping by `module` first (rather than
-        // one flat `(module, func)` match) is behavior-preserving because every
+        // Per-module dispatch — grouping by `module` first (rather than one
+        // flat `(module, func)` match) is behavior-preserving because every
         // arm was already keyed by a unique `(module, func)` literal pair, so
         // regrouping by the first element changes nothing observable.
-        match module {
-            "list" => self.eval_container_op_list(func, args),
-            "map" => self.eval_container_op_map(func, args),
-            "set" => self.eval_container_op_set(func, args),
-            "option" => self.eval_container_op_option(func, args),
-            "result" => self.eval_container_op_result(func, args),
-            _ => None,
+        type Op<'a> = fn(&mut Interpreter<'a>, &str, &[Value]) -> Option<Flow>;
+        let op: Op<'a> = match module {
+            "list" => Self::eval_container_op_list,
+            "map" => Self::eval_container_op_map,
+            "set" => Self::eval_container_op_set,
+            "option" => Self::eval_container_op_option,
+            "result" => Self::eval_container_op_result,
+            _ => return None,
+        };
+        // INSIDE the pool tier a heap value is its address, so a native op
+        // over a real container would store or compare an ARGUMENT's address
+        // (`map.set(acc, k, v)` with a String `k` a body just built): two
+        // blocks spelling the same key are two different Ints, and
+        // `http.query_params` kept both `q`s of `?q=a&q=c`. Every argument is
+        // read back under its STATIC type first, as `eval_hof` reads back its
+        // receiver; one with no faithful read-back abstains.
+        if self.pool_depth > 0 {
+            match self.sync_container_args(args, tys.as_deref()) {
+                Ok(Some(synced)) => return op(self, func, &synced),
+                Ok(None) => {}
+                Err(why) => return Some(Flow::Unsupported(why)),
+            }
         }
+        op(self, func, args)
+    }
+
+    /// The pool-tier read-back of a native container op's arguments under
+    /// their static types: `Ok(None)` when none held a block address.
+    /// Without the types (a caller that stashed none) nothing is read back —
+    /// the value alone cannot tell an address from an Int (#2311).
+    fn sync_container_args(&self, args: &[Value], tys: Option<&[almide_lang::types::Ty]>) -> Result<Option<Vec<Value>>, String> {
+        let Some(tys) = tys.filter(|t| t.len() == args.len()) else { return Ok(None) };
+        let mut out = Vec::with_capacity(args.len());
+        let mut any = false;
+        for (v, ty) in args.iter().zip(tys) {
+            match self.sync_value(v, ty)? {
+                Some(r) => {
+                    any = true;
+                    out.push(r);
+                }
+                None => out.push(v.clone()),
+            }
+        }
+        Ok(any.then_some(out))
     }
 
     // ── list ── each arm is a thin one-line dispatch to its own op method

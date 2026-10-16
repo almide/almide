@@ -152,6 +152,11 @@ pub struct Interpreter<'a> {
     /// 3 i64 slots — and a body's `load64` on the wrong one reads garbage
     /// (list_chunk_windows printed 2^56 for 3).
     pub(crate) handle_arg_ty: Option<Ty>,
+    /// The STATIC argument types of the module call about to dispatch, for
+    /// [`Self::eval_container_op`]'s pool-tier read-back. Stashed, not
+    /// threaded, like `handle_arg_ty`: every caller of `eval_container_op`
+    /// sets it immediately before the call, and the op takes it first.
+    pub(crate) container_arg_tys: Option<Vec<Ty>>,
     /// Field-declaration lists (decl order + default exprs) for record types
     /// and record-variant ctors, keyed by type/ctor name — the interp-side
     /// twin of codegen's `default_fields` pass: a record literal that OMITS a
@@ -550,6 +555,7 @@ impl<'a> Interpreter<'a> {
             pool_fns,
             pool_depth: 0,
             handle_arg_ty: None,
+            container_arg_tys: None,
             record_decls,
             named_records,
             variant_ctors,
