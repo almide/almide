@@ -537,15 +537,12 @@ fn lower_call_coerce_from_sig(ctx: &mut LowerCtx, ir_args: &mut Vec<IrExpr>, sig
             super::statements::coerce_literal_to_sized(arg, param_ty, ctx.env);
             // A PURE fn value into an `effect (A) -> B` param slot gets the
             // ok(...) wrap here, same as the let-annotation site (#1148). The
-            // slot is read through its alias: a stdlib sig keeps `HttpHandler`
-            // as written, and a lambda reached through an `if`/`match`/block
-            // arm (not checked as an effect body) arrived pure and unwrapped.
-            let slot_ty = ctx.env.resolve_named(param_ty);
-            let needs_effect_wrap = matches!(slot_ty, Ty::Fn { is_effect: true, .. })
-                && matches!(&arg.ty, Ty::Fn { ret, is_effect: false, .. } if !ret.is_result());
-            if needs_effect_wrap {
+            // slot is read through its alias (a stdlib sig keeps `HttpHandler`
+            // as written), and a value reached through an `if`/`match`/block
+            // is adapted arm by arm — only its pure arms get the wrap.
+            if matches!(ctx.env.resolve_named(param_ty), Ty::Fn { is_effect: true, .. }) {
                 let owned = arg.clone();
-                *arg = super::expressions::adapt_fn_value_to_effect_slot(ctx, owned, &slot_ty);
+                *arg = super::expressions::adapt_fn_value_to_effect_slot(ctx, owned, param_ty);
             }
         }
     }
@@ -573,13 +570,12 @@ fn lower_call_coerce_from_ctor(ctx: &mut LowerCtx, ir_args: &mut Vec<IrExpr>, ca
 fn lower_call_coerce_args_module(ctx: &mut LowerCtx, ir_args: &mut Vec<IrExpr>, module: &Sym, func: &Sym) {
     if let Some(sig) = crate::stdlib::lookup_sig(module.as_str(), func.as_str()) {
         lower_call_coerce_from_sig(ctx, ir_args, &sig);
-    } else if let Some(sig) = ctx.env.functions.get(&almide_base::intern::sym(&format!("{}.{}", module, func))) {
+    } else if let Some(sig) = ctx.env.functions.get(&almide_base::intern::sym(&format!("{}.{}", module, func))).cloned() {
         // A user module's fn: its declared params are the slots the args
         // fill — an anonymous record literal takes the param's nominal type
-        // rather than the first same-field struct of the program (#3283).
-        for (arg, (_, param_ty)) in ir_args.iter_mut().zip(sig.params.iter()) {
-            super::statements::coerce_literal_to_sized(arg, param_ty, ctx.env);
-        }
+        // rather than the first same-field struct of the program (#3283), and
+        // a pure fn value into an effect param gets the ok(...) adapter.
+        lower_call_coerce_from_sig(ctx, ir_args, &sig);
     }
 }
 
