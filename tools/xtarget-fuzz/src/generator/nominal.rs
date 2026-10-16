@@ -221,6 +221,33 @@ pub const NOMINALS: &[Nominal] = &[
         observe_calls_effect: true,
         refuses_var: true,
     },
+    // The ADR-0001 clocks: an i64 of nanoseconds behind the checker's
+    // firewall, observed through Repr (S7 keeps accessors omitted). A
+    // constructor's size is its count; the value never has a size of its own.
+    Nominal {
+        name: "Duration",
+        module: "duration",
+        small: "duration.ms(2)",
+        sized: "duration.ns({n})",
+        leaves: &["duration.ns(0)", "duration.ms(1500)", "duration.s(2) + duration.us(7)", "duration.min(3) * 2"],
+        observe: "\"${ {v} }\"",
+        observed: string,
+        digest: "string.len(\"${ {v} }\")",
+        observe_calls_effect: false,
+        refuses_var: false,
+    },
+    Nominal {
+        name: "Compute",
+        module: "compute",
+        small: "compute.ms(2)",
+        sized: "compute.ns({n})",
+        leaves: &["compute.ns(0)", "compute.ms(1500)", "compute.s(2) + compute.us(7)", "compute.h(1) - compute.min(30)"],
+        observe: "\"${ {v} }\"",
+        observed: string,
+        digest: "string.len(\"${ {v} }\")",
+        observe_calls_effect: false,
+        refuses_var: false,
+    },
 ];
 
 /// The nominal named `name`, if the grammar builds it.
