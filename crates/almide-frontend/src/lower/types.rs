@@ -62,7 +62,27 @@ pub(super) fn lower_type_decl(ctx: &mut LowerCtx, decl: &TypeToLower<'_>) -> IrT
         ast::Visibility::Mod => IrVisibility::Mod,
         ast::Visibility::Local => IrVisibility::Private,
     };
-    IrTypeDecl { name: sym(&qualified_name), kind, deriving: deriving.as_ref().map(|d| d.iter().copied().collect()), generics: generics.cloned(), visibility: vis, doc: None, blank_lines_before: 0 }
+    let mut deriving: Option<Vec<Sym>> = deriving.as_ref().map(|d| d.iter().copied().collect());
+    // #3755: an opaque newtype (`mod type SafePath = String`) compares and
+    // orders exactly when its target does: the checker's capability walks
+    // follow the newtype to its target (`TypeEnv::named_def`), and the wasm
+    // leg erases the newtype and compares the payload. The native struct is
+    // the one place the capability has to be written down, so the newtype
+    // carries the `Eq` / `Ord` derives its target admits, decided by the
+    // checker's own predicates.
+    if let IrTypeDeclKind::Alias { target } = &kind
+        && matches!(vis, IrVisibility::Mod | IrVisibility::Private)
+    {
+        let admitted = [("Eq", ctx.env.is_eq(target)), ("Ord", ctx.env.is_ord(target))];
+        for (conv, _) in admitted.into_iter().filter(|(_, holds)| *holds) {
+            let conv = sym(conv);
+            let d = deriving.get_or_insert_with(Vec::new);
+            if !d.contains(&conv) {
+                d.push(conv);
+            }
+        }
+    }
+    IrTypeDecl { name: sym(&qualified_name), kind, deriving, generics: generics.cloned(), visibility: vis, doc: None, blank_lines_before: 0 }
 }
 
 fn lower_variant_case(ctx: &mut LowerCtx, case: &ast::VariantCase, _parent: &str, module_prefix: Option<&str>) -> IrVariantDecl {

@@ -194,6 +194,7 @@ fn every_stdlib_nominal_type_is_refused_or_builds_on_both_legs() {
     let accepted: Vec<&Cell> = cells.iter().zip(&verdicts).filter(|(_, v)| v.0).map(|(c, _)| c).collect();
     let wasm_ok: Vec<&Cell> = cells.iter().zip(&verdicts).filter(|(_, v)| v.1).map(|(c, _)| c).collect();
     assert!(!accepted.is_empty(), "every cell refused — the probe programs are malformed");
+    assert!(!wasm_ok.is_empty(), "no cell passes `check --target wasm` — the cross-leg half compares nothing");
 
     // Every check-accepted cell must build and run on native. Run them all as
     // one program. On failure, bisect to the cells rustc refused, so the

@@ -1,0 +1,7 @@
+// E016 (#3755): a Set built through the API over a function-typed element.
+// No binding names the Set's type, so only the post-solve sweep sees it;
+// check used to accept it while native rustc rejected `dyn Fn: PartialEq`.
+fn main() -> Unit = {
+  let fs = [(n: Int) => n + 1, (n: Int) => n * 2]
+  println("${set.len(set.from_list(fs))}")
+}
