@@ -57,6 +57,7 @@ impl<'a> Interpreter<'a> {
         if module.as_str() == "prim" && func.as_str() == "handle" {
             self.handle_arg_ty = args.first().map(|a| a.ty.clone());
         }
+        self.container_arg_tys = Some(args.iter().map(|a| a.ty.clone()).collect());
         self.dispatch_module_resolved(module, func, evaled)
     }
 
