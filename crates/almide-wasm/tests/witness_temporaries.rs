@@ -92,9 +92,10 @@ fn temporaries_witness_exactly_and_unhooked_shapes_decline() {
     }
     // The shapes whose sites are NOT hooks decline instead of certifying.
     // `and`'s right operand runs on one arm of a branch site (#2756): the
-    // param's share into `take` happens on that path only.
+    // param MOVES into `take` on that path only (its last read in the frame's
+    // tail leaf, move_in_site.rs `frame_tail_sites`); the other path releases it.
     let short = w.get("short").map(String::as_str).unwrap_or("<none>");
-    assert_eq!(short, "{ibamd|id}\n");
+    assert_eq!(short, "{ibm|id}\n");
     assert!(accepted(short));
     // A fresh heap operand of `==` is bound first (#2972, arg_temps.rs): the
     // borrowed param records nothing, the operand is born and released.
