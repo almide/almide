@@ -191,3 +191,64 @@ fn branched_lambdas_into_an_aliased_effect_slot_run_on_both_legs() {
         assert_eq!(String::from_utf8(out.stdout).unwrap(), expected, "{leg}: {stderr}");
     }
 }
+
+/// The arms of one branch disagree: one is already an effect handler (a call
+/// returning `HttpHandler`), the other a pure lambda. The branch as a whole
+/// types as the effect handler, so the whole-value adapter never fired and the
+/// pure arm reached the slot unwrapped (rustc E0308: expected `Result<..>`,
+/// found `AlmideHttpResponse`; the wasm leg walled `ty-mismatch`). Every
+/// route a value reaches an effect slot by is held here: a stdlib call (`if`,
+/// `match`, a block's tail), a `let` annotated by the alias, a same-module user
+/// fn, and a fn of another user module.
+const MIXED_ARM_HOOKS: &str = r#"import http
+
+effect fn hit(h: HttpHandler) -> String = http.body(h(http.new_request("GET", "/", "", [:]))!)
+"#;
+
+const MIXED_ARM_APP: &str = r#"import http
+import hooks
+
+effect fn local_hit(h: HttpHandler) -> String = http.body(h(http.new_request("GET", "/", "", [:]))!)
+
+effect fn run(flag: Bool) -> String = {
+  let a = http.wrap(if flag then http.wrap((req) => http.response(201, "a"), []) else (req) => http.response(200, "b"), [])
+  let m = http.wrap(match flag {
+    true => http.wrap((req) => http.response(200, "c"), []),
+    false => (req) => http.response(201, "d"),
+  }, [])
+  let g: HttpHandler = if flag then http.wrap((req) => http.response(201, "e"), []) else (req) => http.response(200, "f")
+  let u = local_hit(if flag then http.wrap((req) => http.response(201, "g"), []) else (req) => http.response(200, "h"))!
+  let v = hooks.hit(if flag then http.wrap((req) => http.response(201, "i"), []) else (req) => http.response(200, "j"))!
+  let k = hooks.hit({
+    let s = "l"
+    if flag then http.wrap((req) => http.response(200, "k"), []) else (req) => http.response(200, s)
+  })!
+  local_hit(a)! + local_hit(m)! + local_hit(g)! + u + v + k
+}
+
+effect fn main() -> Unit = {
+  println(run(false)!)
+  println(run(true)!)
+}
+"#;
+
+#[test]
+fn mixed_effect_and_pure_arms_into_an_effect_slot_run_on_both_legs() {
+    let bin = std::env::var("ALMIDE_BIN").unwrap_or_else(|_| env!("CARGO_BIN_EXE_almide").to_string());
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("hooks.almd"), MIXED_ARM_HOOKS).unwrap();
+    let src = dir.path().join("app.almd");
+    std::fs::write(&src, MIXED_ARM_APP).unwrap();
+    let expected = "bdfhjl\nacegik\n";
+    for leg in ["native", "structural"] {
+        let mut cmd = Command::new(&bin);
+        cmd.current_dir(dir.path()).arg("run").arg(&src).env_remove("ALMIDE_WASM_SKIP_STOCK_AUDIT");
+        if leg == "structural" {
+            cmd.args(["--target", "wasm"]).env("ALMIDE_WASM_SKIP_STOCK_AUDIT", "1");
+        }
+        let out = cmd.output().unwrap();
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(out.status.success(), "{leg}: {stderr}");
+        assert_eq!(String::from_utf8(out.stdout).unwrap(), expected, "{leg}: {stderr}");
+    }
+}
