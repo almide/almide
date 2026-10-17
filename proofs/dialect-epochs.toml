@@ -209,6 +209,7 @@ breaks = [
   "`bytes.heap_save()` → delete the call: it took or rewound an opaque arena checkpoint, and under reference counting it did nothing on any target",
   "`bytes.heap_restore(mark)` → delete the call: it took or rewound an opaque arena checkpoint, and under reference counting it did nothing on any target",
   "the pre-#3338 callback spellings a package's `native/*.rs` could still call (deprecation `legacy-native-callback-names`, #3425, since epoch 10) are gone: a `native/*.rs` calling `crate::almide_rt_<pkg>_v<N>_<fn>` or `..._v<N>_<sub>_<fn>` gets rustc E0425 — write the injective name (`_` in a segment is `_0`, a `.` is `_1`: `almide_rt_tf_v0_calc_double` → `almide_rt_tf_0v0_1calc_double`)",
+  "`testing.assert_throws(f, expected)` → rewrite as `testing.assert_aborts(expected, f)`: the expected text comes first, and `f` must be a lambda that captures nothing (it runs in a child process or instance); every abort counts — `panic`, index out of bounds, division by zero, a failed assert — not only `panic`. Outside a test block there is nothing to rewrite to: the call could only fail, so delete it",
 ]
 
 # DEPRECATIONS — spellings accepted for a window, with the epoch that removes them
