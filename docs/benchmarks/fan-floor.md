@@ -182,56 +182,56 @@ With the loop at Go's speed or better, the rest of every gap was the parallel ru
 - **Published, not posted.** An offer is published in one of 64 slots (`ALMIDE_FAN_SLOTS`). A pool thread polls for `ALMIDE_FAN_SPIN` (50 µs) after each offer before it parks, and takes blocks from any published offer with blocks left. An offer wakes parked threads only when fewer than it wants are polling. A polling thread reads one counter, the published offers with blocks left (`ALMIDE_FAN_OPEN_BLOCKS`), and touches nothing else until it is non-zero. A thread that enters after the last block was dealt leaves without the element cleanup, and the caller's handle is cloned only once the caller may sleep. The gate lives in the caller's frame, and blocks are dealt by an atomic counter, still in list order (the ADR-0024 D6 trap wait relies on it).
 - **One thread per core.** A pool thread enters an offer only while the threads working on offers are fewer than the cores (`ALMIDE_FAN_RUNNING`), and yields its core while they are not. Two `fan { }` arms each dealing to seven threads had put nine threads on eight cores (busy, 10000 iterations: 1.33x Go on the Intel VM).
 - **A waiting caller steals within its own tree.** Once its own blocks are taken, a caller takes blocks of offers made inside blocks of the same outermost offer (`AlmideFanGate::root`), not another arm's. Taking another arm's element delayed this arm's next offer by up to an element (busy 10000: 108 µs against 95 per pair); taking none left a core idle through each outer offer's tail (nest 10000: 220 against 187).
-- **The cost model, recalibrated.** A forced-parallel offer of ten empty elements now costs 2.9 µs (Intel) and 2.6 µs (AMD) at W=8, against 8.2 and 24.1 µs before (the table above). `native_offer_ns` / `native_worker_ns` are now 1.5 + 0.7W µs, the envelope of the new calibration rows (fan-cost-model.txt). A parallel offer is timed once in 8 (`ALMIDE_FAN_RESAMPLE_PAR`), the clock read is subtracted from every timed interval, and an estimate from a parallel offer within 2x of the crossover is checked by one sequential offer. A sequential site turns parallel only on two measurements in a row. The site history is a lock-free table.
+- **The cost model, recalibrated.** A forced-parallel offer of ten empty elements now costs 2.4 µs (Intel) and 3.1 µs (AMD) at W=8, against 8.2 and 24.1 µs before (the table above), and against Go's 3.0 and 7.3 µs. `native_offer_ns` / `native_worker_ns` are now 1.5 + 0.7W µs, the envelope of the new calibration rows (fan-cost-model.txt). A parallel offer is timed once in 8 (`ALMIDE_FAN_RESAMPLE_PAR`), the clock read is subtracted from every timed interval, and an estimate from a parallel offer within 2x of the crossover is checked by one sequential offer. A sequential site turns parallel only on two measurements in a row. The site history is a lock-free table.
 
-Same probes and method as above (µs per offer, min of 7, interleaved). `fan-rem` is develop with the remainder change only, `this` adds the pool, and `forced par` is this with `ALMIDE_FAN_COST_OFF=1`:
+Same probes and method as above (µs per offer, min of 7, interleaved). `develop` is develop at 2096b786f (it has the remainder change, #3771), `this` adds the pool, and `forced par` is this with `ALMIDE_FAN_COST_OFF=1`:
 
 ### GCE c4-standard-8, Intel Xeon Platinum 8581C
 
-| probe | iters | fan-rem | this | forced par | Rayon | Rayon seq | Go | Go seq | fastest | this / fastest |
+| probe | iters | develop | this | forced par | Rayon | Rayon seq | Go | Go seq | fastest | this / fastest |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| sweep | 0 | 0.1 | 0.1 | 2.9 | 9.2 | 0.0 | 3.1 | 0.1 | 0.0 rayon-seq | — |
-| sweep | 100 | 3.2 | 3.2 | 8.2 | 8.9 | 4.2 | 7.5 | 3.5 | 3.5 go-seq | 0.93x |
-| sweep | 300 | 10.1 | 6.2 | 8.2 | 10.8 | 11.8 | 15.5 | 10.8 | 10.8 go-seq | 0.58x |
-| sweep | 1000 | 22.1 | 10.0 | 10.1 | 16.2 | 39.6 | 30.0 | 35.8 | 16.2 rayon | 0.61x |
-| sweep | 3000 | 35.6 | 23.8 | 23.3 | 35.4 | 117.3 | 49.9 | 107.1 | 35.4 rayon | 0.67x |
-| sweep | 10000 | 92.8 | 72.7 | 72.4 | 116.2 | 385.4 | 91.8 | 348.3 | 91.8 go | 0.79x |
-| sweep | 30000 | 226.0 | 214.5 | 211.8 | 271.4 | 1141.5 | 237.3 | 1051.1 | 237.3 go | 0.90x |
-| busy | 0 | 0.2 | 0.4 | 6.3 | 4.2 | 0.1 | 3.4 | 0.2 | 0.1 rayon-seq | — |
-| busy | 100 | 3.4 | 3.5 | 9.8 | 6.1 | 7.5 | 6.8 | 7.0 | 6.1 rayon | 0.56x |
-| busy | 1000 | 24.0 | 12.0 | 12.1 | 17.3 | 79.4 | 21.0 | 71.3 | 17.3 rayon | 0.69x |
-| busy | 10000 | 120.2 | 95.9 | 96.1 | 152.3 | 766.8 | 103.8 | 701.2 | 103.8 go | 0.92x |
-| nest | 0 | 0.2 | 0.4 | 12.4 | 10.5 | 0.2 | 14.7 | 0.3 | 0.2 rayon-seq | — |
-| nest | 100 | 13.2 | 12.7 | 28.2 | 14.2 | 15.4 | 26.5 | 13.8 | 13.8 go-seq | 0.92x |
-| nest | 1000 | 109.9 | 39.3 | 38.6 | 32.7 | 155.2 | 67.2 | 143.6 | 32.7 rayon | 1.20x |
-| nest | 10000 | 371.0 | 285.7 | 288.3 | 222.5 | 1532.4 | 250.3 | 1412.2 | 222.5 rayon | 1.28x |
+| sweep | 0 | 0.0 | 0.0 | 2.4 | 9.3 | 0.0 | 3.0 | 0.1 | 0.0 rayon-seq | — |
+| sweep | 100 | 3.2 | 3.4 | 6.1 | 10.1 | 3.8 | 6.4 | 3.5 | 3.5 go-seq | 0.97x |
+| sweep | 300 | 10.1 | 4.8 | 6.8 | 10.4 | 11.7 | 15.3 | 10.8 | 10.4 rayon | 0.46x |
+| sweep | 1000 | 22.4 | 9.6 | 9.8 | 16.3 | 39.7 | 30.1 | 35.9 | 16.3 rayon | 0.59x |
+| sweep | 3000 | 37.0 | 23.1 | 22.9 | 36.1 | 117.9 | 49.4 | 107.9 | 36.1 rayon | 0.64x |
+| sweep | 10000 | 92.6 | 71.6 | 72.2 | 116.0 | 387.2 | 92.2 | 353.7 | 92.2 go | 0.78x |
+| sweep | 30000 | 226.7 | 214.6 | 211.8 | 284.9 | 1157.8 | 237.1 | 1044.1 | 237.1 go | 0.91x |
+| nest | 0 | 0.2 | 0.5 | 9.1 | 11.0 | 0.1 | 14.8 | 0.5 | 0.1 rayon-seq | — |
+| nest | 100 | 13.2 | 13.2 | 20.1 | 14.3 | 14.9 | 26.0 | 13.7 | 13.7 go-seq | 0.96x |
+| nest | 1000 | 94.7 | 37.6 | 37.1 | 32.6 | 159.0 | 67.0 | 143.3 | 32.6 rayon | 1.15x |
+| nest | 10000 | 377.2 | 289.9 | 286.9 | 225.4 | 1539.7 | 247.5 | 1415.8 | 225.4 rayon | 1.29x |
+| busy | 0 | 0.2 | 0.4 | 4.6 | 4.1 | 0.0 | 3.5 | 0.3 | 0.0 rayon-seq | — |
+| busy | 100 | 3.4 | 3.3 | 10.0 | 6.0 | 7.4 | 6.4 | 6.9 | 6.0 rayon | 0.55x |
+| busy | 1000 | 22.7 | 12.0 | 12.2 | 17.3 | 79.5 | 21.4 | 72.0 | 17.3 rayon | 0.69x |
+| busy | 10000 | 119.5 | 96.6 | 96.0 | 153.7 | 773.1 | 104.2 | 704.9 | 104.2 go | 0.93x |
 
 ### GCE n2d-standard-8, AMD EPYC 7B13
 
-| probe | iters | fan-rem | this | forced par | Rayon | Rayon seq | Go | Go seq | fastest | this / fastest |
+| probe | iters | develop | this | forced par | Rayon | Rayon seq | Go | Go seq | fastest | this / fastest |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| sweep | 0 | 0.5 | 0.0 | 2.6 | 20.2 | 0.3 | 7.2 | 0.6 | 0.3 rayon-seq | — |
-| sweep | 100 | 4.6 | 4.7 | 8.2 | 19.6 | 5.0 | 11.3 | 4.9 | 4.9 go-seq | 0.96x |
-| sweep | 300 | 13.4 | 9.3 | 9.4 | 20.6 | 15.0 | 22.2 | 14.0 | 14.0 go-seq | 0.67x |
-| sweep | 1000 | 41.8 | 12.7 | 14.9 | 31.3 | 49.5 | 49.9 | 45.4 | 31.3 rayon | 0.41x |
-| sweep | 3000 | 59.9 | 34.4 | 34.4 | 48.6 | 148.0 | 81.0 | 135.2 | 48.6 rayon | 0.71x |
-| sweep | 10000 | 137.0 | 104.2 | 97.8 | 175.1 | 499.7 | 192.2 | 454.9 | 175.1 rayon | 0.59x |
-| sweep | 30000 | 343.1 | 312.7 | 306.8 | 484.5 | 1484.6 | 416.2 | 1348.4 | 416.2 go | 0.75x |
-| busy | 0 | 1.1 | 1.1 | 4.6 | 4.6 | 0.2 | 5.0 | 1.0 | 0.2 rayon-seq | — |
-| busy | 100 | 4.0 | 2.9 | 13.3 | 13.2 | 10.2 | 8.8 | 9.7 | 8.8 go | 0.33x |
-| busy | 1000 | 50.4 | 15.5 | 15.7 | 23.3 | 98.4 | 37.6 | 89.7 | 23.3 rayon | 0.67x |
-| busy | 10000 | 182.7 | 125.4 | 126.8 | 209.8 | 994.4 | 167.3 | 902.3 | 167.3 go | 0.75x |
-| nest | 0 | 2.7 | 0.0 | 13.7 | 30.0 | 1.2 | 28.4 | 2.7 | 1.2 rayon-seq | 0.00x |
-| nest | 100 | 18.2 | 18.7 | 33.0 | 24.3 | 21.3 | 45.2 | 19.1 | 19.1 go-seq | 0.98x |
-| nest | 1000 | 171.2 | 61.7 | 54.5 | 57.9 | 197.3 | 123.0 | 183.6 | 57.9 rayon | 1.07x |
-| nest | 10000 | 476.6 | 368.9 | 371.3 | 324.1 | 1963.0 | 396.8 | 1779.2 | 324.1 rayon | 1.14x |
+| sweep | 0 | 0.4 | 0.4 | 3.1 | 24.0 | 0.1 | 7.3 | 0.0 | 0.0 go-seq | — |
+| sweep | 100 | 4.4 | 4.5 | 9.5 | 22.9 | 5.2 | 12.7 | 4.4 | 4.4 go-seq | 1.03x |
+| sweep | 300 | 12.5 | 6.6 | 14.6 | 21.9 | 14.9 | 22.8 | 14.4 | 14.4 go-seq | 0.46x |
+| sweep | 1000 | 38.2 | 14.5 | 13.8 | 32.8 | 50.2 | 49.0 | 45.0 | 32.8 rayon | 0.44x |
+| sweep | 3000 | 65.8 | 34.6 | 31.8 | 56.9 | 149.1 | 80.3 | 135.3 | 56.9 rayon | 0.61x |
+| sweep | 10000 | 128.2 | 95.2 | 93.2 | 167.6 | 495.8 | 186.4 | 450.9 | 167.6 rayon | 0.57x |
+| sweep | 30000 | 346.3 | 279.4 | 302.8 | 489.8 | 1482.9 | 402.0 | 1344.0 | 402.0 go | 0.70x |
+| nest | 0 | 0.0 | 3.0 | 7.6 | 21.4 | 0.4 | 23.6 | 0.0 | 0.0 go-seq | — |
+| nest | 100 | 18.6 | 14.6 | 32.4 | 27.1 | 21.0 | 48.5 | 17.3 | 17.3 go-seq | 0.84x |
+| nest | 1000 | 160.6 | 58.1 | 49.5 | 53.2 | 197.1 | 112.2 | 179.1 | 53.2 rayon | 1.09x |
+| nest | 10000 | 516.0 | 396.1 | 381.7 | 322.4 | 1984.5 | 427.0 | 1795.7 | 322.4 rayon | 1.23x |
+| busy | 0 | 0.3 | 0.0 | 3.7 | 6.3 | 0.2 | 6.0 | 0.6 | 0.2 rayon-seq | — |
+| busy | 100 | 3.6 | 4.6 | 11.3 | 10.2 | 9.7 | 11.2 | 9.1 | 9.1 go-seq | 0.51x |
+| busy | 1000 | 48.6 | 16.4 | 15.9 | 24.2 | 97.9 | 33.2 | 88.5 | 24.2 rayon | 0.68x |
+| busy | 10000 | 171.1 | 124.1 | 119.2 | 206.9 | 990.1 | 162.3 | 905.0 | 162.3 go | 0.76x |
 
-`sweep` and `busy` are at or under the fastest at every row on both machines. `nest` is not yet: its outer `fan.map` has an effect callback and still runs its four elements one after another (#2594), which the next change addresses.
+`sweep` and `busy` are at or under the fastest at every row on both machines but one: AMD `sweep` at 100 iterations, 4.5 µs against Go's sequential 4.4. This change does not move that row: its offers stay sequential, and develop read 4.4. `nest` is not yet: its outer `fan.map` has an effect callback and still runs its four elements one after another (#2594), which the next change addresses.
 
-No regression against develop on the cost model's sweep (fan-cost-model.txt, 1000 offers, min of 11): this is at or under develop at every iteration count on both machines. The benchmarks (min of 15, ms):
+No regression against develop on the cost model's sweep (fan-cost-model.txt, 1000 offers, min of 11): this is at or under develop from 100 iterations up on both machines. At 0 iterations it read 0.59 µs per offer against 0.06 on the AMD VM. That gap is not a per-offer cost: 200,000 offers of the same program cost 0.188 µs each against develop's 0.200 (min of 9). It is a one-time difference after the first ten offers. The benchmarks (min of 15, ms):
 
 | | Intel develop | Intel this | AMD develop | AMD this |
 |---|---:|---:|---:|---:|
-| small map ×500 | 50.4 | 32.6 | 69.0 | 42.3 |
-| spectralnorm 1200 | 13.6 | 12.9 | 22.0 | 20.5 |
-| spectralnorm 3000 | 75.5 | 74.9 | 117.1 | 116.5 |
+| small map ×500 | 41.6 | 31.8 | 64.4 | 42.3 |
+| spectralnorm 1200 | 13.8 | 12.9 | 24.0 | 22.1 |
+| spectralnorm 3000 | 74.6 | 74.6 | 117.6 | 114.8 |
