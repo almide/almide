@@ -45,6 +45,10 @@ pub(crate) const OP_WALL_NOW: i32 = 34;
 /// are meaningful, as native's first-call origin; op 34 is the wall clock
 /// and cannot stand in (it follows clock adjustments backwards).
 pub(crate) const OP_MONO_NOW: i32 = 60;
+/// The fuel meter's deadline clock (fan.timeout, fuel.rs): MONOTONIC, as
+/// native's `Instant` (#3781). The one name both the emitter and the cert
+/// projection's meter-read exemption (cert_project.rs `direct_caps`) read.
+pub(crate) const OP_METER_CLOCK: i32 = OP_MONO_NOW;
 /// env.sleep_ms (#1423 bucket A): the millisecond count rides the a_len
 /// slot with a null a_ptr (the op-35 scalar discipline — never a guest
 /// buffer), handled by the host BEFORE its buffer reads. No observable

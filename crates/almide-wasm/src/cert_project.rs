@@ -523,7 +523,7 @@ fn components(callees: &[BTreeSet<usize>]) -> Vec<usize> {
 }
 
 /// The host capabilities one body calls directly. The first `meter_reads`
-/// wall-clock reads (op [`OP_WALL_NOW`]) are the fuel meter's deadline test,
+/// meter-clock reads (op [`OP_METER_CLOCK`], monotonic since #3781) are the fuel meter's deadline test,
 /// which the declaration table charges to the region opener, not this frame
 /// (witness_decls.rs, `DeclFn::meter_clock_reads`, #3041): they name no
 /// capability here. Any read beyond that count is the source's.
@@ -547,7 +547,7 @@ fn direct_caps(m: &Module, b: &Body, meter_reads: u32) -> BTreeSet<u32> {
     }
     let mut meter_left = meter_reads;
     for op in &b.fs_ops {
-        if *op == Some(OP_WALL_NOW) && meter_left > 0 {
+        if *op == Some(OP_METER_CLOCK) && meter_left > 0 {
             meter_left -= 1;
             continue;
         }
@@ -556,8 +556,8 @@ fn direct_caps(m: &Module, b: &Body, meter_reads: u32) -> BTreeSet<u32> {
     out
 }
 
-/// The wall-clock read (`fs_meta.rs` `OP_WALL_NOW`).
-const OP_WALL_NOW: i32 = crate::fs_meta::OP_WALL_NOW;
+/// The fuel meter's clock read (`fs_meta.rs` `OP_METER_CLOCK`).
+const OP_METER_CLOCK: i32 = crate::fs_meta::OP_METER_CLOCK;
 
 /// The defined functions one body can transfer control to (positions in
 /// the defined-function list).
@@ -670,7 +670,7 @@ mod tests {
     fn only_the_meters_own_clock_reads_leave_the_frame() {
         // #3041: two wall-clock reads and a file read; one read is the meter's.
         let m = Module::default();
-        let b = Body { fs_ops: vec![Some(OP_WALL_NOW), Some(1), Some(OP_WALL_NOW)], ..Body::default() };
+        let b = Body { fs_ops: vec![Some(OP_METER_CLOCK), Some(1), Some(OP_METER_CLOCK)], ..Body::default() };
         assert_eq!(direct_caps(&m, &b, 0), [cap::FS_READ, cap::CLOCK].into());
         assert_eq!(direct_caps(&m, &b, 1), [cap::FS_READ, cap::CLOCK].into(), "the second read is the frame's own");
         assert_eq!(direct_caps(&m, &b, 2), [cap::FS_READ].into());
