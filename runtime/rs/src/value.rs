@@ -15,7 +15,7 @@ pub enum AlmideValue {
     Bool(bool),
     Int(i64),
     Float(f64),
-    Str(String),
+    Str(AlmideString),
     Array(Vec<AlmideValue>),
     Object(Vec<(AlmideKey, AlmideValue)>),
 }
@@ -59,7 +59,7 @@ pub(crate) fn almide_rt_intern_key(k: &str) -> AlmideKey {
 
 // ── Construction ──
 
-pub fn almide_rt_value_str(s: &str) -> AlmideValue { AlmideValue::Str(s.to_string()) }
+pub fn almide_rt_value_str(s: &str) -> AlmideValue { AlmideValue::Str(AlmideString::from(s)) }
 pub fn almide_rt_value_int(n: i64) -> AlmideValue { AlmideValue::Int(n) }
 pub fn almide_rt_value_float(f: f64) -> AlmideValue { AlmideValue::Float(f) }
 pub fn almide_rt_value_bool(b: bool) -> AlmideValue { AlmideValue::Bool(b) }
@@ -120,7 +120,7 @@ pub fn almide_rt_value_field(v: &AlmideValue, key: &str) -> Result<AlmideValue, 
     __almide_r.map_err(Into::into)
 }
 
-pub fn almide_rt_value_as_string(v: &AlmideValue) -> Result<AlmideString, AlmideString> { let __almide_v: Result<String, AlmideString> = { let __almide_r: Result<String, String> = (|| { match v { AlmideValue::Str(s) => Ok(s.clone()), _ => Err(format!("expected Str, received {}", almide_rt_value_kind(v))) } })(); __almide_r.map_err(Into::into) }; __almide_v.into_almide() }
+pub fn almide_rt_value_as_string(v: &AlmideValue) -> Result<AlmideString, AlmideString> { let __almide_v: Result<AlmideString, AlmideString> = { let __almide_r: Result<AlmideString, String> = (|| { match v { AlmideValue::Str(s) => Ok(s.clone()), _ => Err(format!("expected Str, received {}", almide_rt_value_kind(v))) } })(); __almide_r.map_err(Into::into) }; __almide_v.into_almide() }
 pub fn almide_rt_value_as_int(v: &AlmideValue) -> Result<i64, AlmideString> { let __almide_r: Result<i64, String> = (|| { match v { AlmideValue::Int(n) => Ok(*n), _ => Err(format!("expected Int, received {}", almide_rt_value_kind(v))) } })(); __almide_r.map_err(Into::into) }
 pub fn almide_rt_value_as_float(v: &AlmideValue) -> Result<f64, AlmideString> {
     let __almide_r: Result<f64, String> = (|| {
