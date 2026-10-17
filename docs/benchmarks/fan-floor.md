@@ -235,3 +235,82 @@ No regression against develop on the cost model's sweep (fan-cost-model.txt, 100
 | small map ×500 | 41.6 | 31.8 | 64.4 | 42.3 |
 | spectralnorm 1200 | 13.8 | 12.9 | 24.0 | 22.1 |
 | spectralnorm 3000 | 74.6 | 74.6 | 117.6 | 114.8 |
+
+## nest: an effect callback that only fans out (2026-10-17, #2594)
+
+`nest`'s outer `fan.map(list.range(0, 4), (q) => inner(s0 + q, iters))` ran its four elements one after another: `inner` is an `effect fn`, and an effect callback kept the sequential `fan.map` so that its effects stayed in list order. But `inner`'s only effect is its own `fan { list.map(…) }` over a pure `work`. A fan's observation is that of its sequential evaluation (ADR-0024 D1), and its output goes through per-element timelines (D5). So an element that does nothing but fan out over proven work cannot show another element its order.
+
+The fan view of the purity analysis (crates/almide-codegen/src/pass_stream_fusion.rs `Purity::for_fan`) now admits an `effect fn` whose body reaches only proven fns, nested `fan { }` blocks, `fan.*` calls with proven callbacks, and `!`. The fan routing (pass_rust_lowering_fan.rs) treats such a fn as not an effect. Any effect module call, directly or through another fn (`env.sleep_ms` in tests/fan_nested_effect_parallel_test.rs), still keeps the callback sequential, so no I/O changes order. The test pins both routings in the generated Rust and checks that the parallel output is byte-identical to the sequential run and to wasm.
+
+`nest` rows, µs per outer offer, same method; `pool` is develop with the pool change (#3774), `this` adds this one:
+
+### GCE c4-standard-8, Intel Xeon Platinum 8581C
+
+| probe | iters | pool | this | Rayon | Rayon seq | Go | Go seq | fastest | this / fastest |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| nest | 0 | 0.6 | 0.3 | 11.0 | 0.0 | 13.4 | 0.5 | 0.0 rayon-seq | — |
+| nest | 100 | 12.9 | 8.7 | 13.5 | 14.8 | 27.0 | 14.0 | 13.5 rayon | 0.64x |
+| nest | 1000 | 37.7 | 28.6 | 33.2 | 159.5 | 68.8 | 144.7 | 33.2 rayon | 0.86x |
+| nest | 10000 | 287.7 | 200.7 | 224.9 | 1549.2 | 246.8 | 1415.6 | 224.9 rayon | 0.89x |
+
+### GCE n2d-standard-8, AMD EPYC 7B13
+
+| probe | iters | pool | this | Rayon | Rayon seq | Go | Go seq | fastest | this / fastest |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| nest | 0 | 1.8 | 3.0 | 27.9 | 0.8 | 38.9 | 4.4 | 0.8 rayon-seq | — |
+| nest | 100 | 15.4 | 13.0 | 27.8 | 19.3 | 52.0 | 19.3 | 19.3 rayon-seq | 0.67x |
+| nest | 1000 | 53.3 | 43.0 | 62.5 | 198.0 | 113.3 | 180.8 | 62.5 rayon | 0.69x |
+| nest | 10000 | 405.8 | 270.4 | 320.8 | 2006.9 | 411.6 | 1784.8 | 320.8 rayon | 0.84x |
+
+## Results, 2026-10-17 (the remainder, the pool and nest together)
+
+The full run, every implementation, the same method as the first tables. `develop native` is develop at 9e4fbcb2a (the "After" pool above), before all three changes:
+
+### GCE c4-standard-8, Intel Xeon Platinum 8581C
+
+| probe | iters | Almide native | native seq | develop native | Almide wasm | Rayon | Rayon seq | Go | Go seq | Zig | Zig seq | fastest | Almide / fastest |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|
+| sweep | 0 | 0.0 | 0.0 | 0.1 | 2.2 | 8.9 | 0.0 | 3.1 | 0.0 | 137.5 | 0.0 | 0.0 rayon-seq | — |
+| sweep | 100 | 3.2 | 3.1 | 4.1 | 5.5 | 8.6 | 3.8 | 7.5 | 3.5 | 143.1 | 4.9 | 3.5 go-seq | 0.91x |
+| sweep | 300 | 4.8 | 9.9 | 12.4 | 15.0 | 10.1 | 11.7 | 15.3 | 10.5 | 152.7 | 14.8 | 10.1 rayon | 0.48x |
+| sweep | 1000 | 9.6 | 33.3 | 19.4 | 44.5 | 16.3 | 39.6 | 29.8 | 35.6 | 170.1 | 49.7 | 16.3 rayon | 0.59x |
+| sweep | 3000 | 23.3 | 98.9 | 45.3 | 65.3 | 36.0 | 118.1 | 49.4 | 107.6 | 170.5 | 148.3 | 36.0 rayon | 0.65x |
+| sweep | 10000 | 71.7 | 326.2 | 108.3 | 125.4 | 116.6 | 382.3 | 91.9 | 353.1 | 181.1 | 480.8 | 91.9 go | 0.78x |
+| sweep | 30000 | 210.0 | 957.8 | 275.0 | 291.9 | 279.0 | 1141.1 | 232.6 | 1036.9 | 364.2 | 1422.7 | 232.6 go | 0.90x |
+| nest | 0 | 0.0 | 0.0 | 0.1 | 16.1 | 11.6 | 0.3 | 15.0 | 0.2 | 451.1 | 0.2 | 0.2 go-seq | — |
+| nest | 100 | 7.6 | 12.4 | 16.2 | 32.3 | 14.1 | 15.0 | 26.6 | 14.2 | 475.8 | 19.1 | 14.1 rayon | 0.54x |
+| nest | 1000 | 28.1 | 130.6 | 115.3 | 189.9 | 33.2 | 158.4 | 66.4 | 143.3 | 600.0 | 198.7 | 33.2 rayon | 0.85x |
+| nest | 10000 | 201.0 | 1301.6 | 435.9 | 486.2 | 223.3 | 1556.3 | 248.1 | 1408.7 | 671.4 | 1940.4 | 223.3 rayon | 0.90x |
+| busy | 0 | 0.3 | 0.0 | 0.2 | 2.2 | 4.4 | 0.0 | 3.4 | 0.1 | 234.2 | 0.1 | 0.0 rayon-seq | — |
+| busy | 100 | 3.2 | 3.1 | 4.1 | 9.2 | 6.1 | 7.6 | 6.9 | 7.0 | 246.5 | 9.8 | 6.1 rayon | 0.53x |
+| busy | 1000 | 11.9 | 33.4 | 25.4 | 86.8 | 17.6 | 79.3 | 21.9 | 71.8 | 306.6 | 100.0 | 17.6 rayon | 0.68x |
+| busy | 10000 | 95.4 | 326.6 | 140.5 | 245.7 | 150.5 | 767.6 | 103.4 | 696.6 | 323.6 | 953.0 | 103.4 go | 0.92x |
+
+### GCE n2d-standard-8, AMD EPYC 7B13
+
+| probe | iters | Almide native | native seq | develop native | Almide wasm | Rayon | Rayon seq | Go | Go seq | Zig | Zig seq | fastest | Almide / fastest |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|
+| sweep | 0 | 0.5 | 0.0 | 0.3 | 28.0 | 18.8 | 0.0 | 6.2 | 0.3 | 423.4 | 0.1 | 0.0 rayon-seq | — |
+| sweep | 100 | 4.0 | 3.9 | 5.2 | 8.7 | 23.8 | 4.8 | 10.2 | 4.7 | 418.8 | 6.0 | 4.7 go-seq | 0.85x |
+| sweep | 300 | 8.2 | 12.7 | 15.8 | 33.0 | 17.9 | 14.6 | 21.8 | 13.7 | 460.3 | 16.9 | 13.7 go-seq | 0.60x |
+| sweep | 1000 | 13.4 | 41.5 | 38.0 | 73.6 | 28.4 | 49.1 | 49.4 | 44.3 | 571.1 | 56.6 | 28.4 rayon | 0.47x |
+| sweep | 3000 | 32.8 | 126.1 | 70.0 | 105.8 | 62.5 | 150.5 | 87.1 | 136.1 | 629.6 | 172.2 | 62.5 rayon | 0.53x |
+| sweep | 10000 | 101.8 | 415.5 | 148.1 | 197.5 | 161.3 | 496.0 | 177.5 | 449.1 | 669.8 | 569.8 | 161.3 rayon | 0.63x |
+| sweep | 30000 | 300.1 | 1239.0 | 379.2 | 454.1 | 476.3 | 1478.4 | 394.2 | 1341.4 | 737.0 | 1708.9 | 394.2 go | 0.76x |
+| nest | 0 | 2.2 | 0.6 | 1.3 | 23.1 | 26.9 | 1.2 | 29.7 | 2.5 | 1632.1 | 0.3 | 0.3 zig-seq | — |
+| nest | 100 | 11.7 | 16.2 | 19.7 | 205.8 | 20.5 | 18.3 | 50.2 | 17.8 | 1697.3 | 24.5 | 17.8 go-seq | 0.66x |
+| nest | 1000 | 39.9 | 166.4 | 159.1 | 358.1 | 59.3 | 195.3 | 111.4 | 179.3 | 1801.7 | 229.4 | 59.3 rayon | 0.67x |
+| nest | 10000 | 274.3 | 1651.3 | 602.6 | 764.9 | 322.8 | 1984.0 | 417.9 | 1811.1 | 2705.8 | 2288.8 | 322.8 rayon | 0.85x |
+| busy | 0 | 1.1 | 0.2 | 0.2 | 3.6 | 7.6 | 0.4 | 6.8 | 0.8 | 656.2 | 0.5 | 0.4 rayon-seq | — |
+| busy | 100 | 5.0 | 4.9 | 6.1 | 39.4 | 16.4 | 10.1 | 12.7 | 10.4 | 728.2 | 10.8 | 10.1 rayon-seq | 0.50x |
+| busy | 1000 | 18.9 | 42.8 | 54.3 | 148.1 | 26.2 | 98.1 | 41.1 | 90.3 | 924.9 | 114.8 | 26.2 rayon | 0.72x |
+| busy | 10000 | 126.9 | 414.1 | 210.2 | 485.9 | 200.7 | 992.1 | 163.2 | 902.0 | 1320.8 | 1149.8 | 163.2 go | 0.78x |
+
+### Reading it
+
+- **Almide native is at or under the fastest on every row** where the fastest is 1 µs or more: 0.48-0.92x on the Intel VM and 0.47-0.85x on the AMD one (sweep 0.48-0.91x / 0.47-0.85x, nest 0.54-0.90x / 0.66-0.85x, busy 0.53-0.92x / 0.50-0.78x). The 2026-10-16 table had it at 1.06-5.05x on 22 of its 24 such rows.
+- The rows closest to 1.00 are the ones the reference runtimes are best at: Go's goroutines on `busy` at 10000 iterations (0.92x Intel), Go's sequential loop at `sweep` 100 (0.91x Intel, where the offer stays sequential), and the large-work rows, where every runtime splits 10 elements over 8 threads the same way and the loop decides (0.90x sweep 30000 Intel).
+- An empty forced-parallel sweep offer costs Almide 2.55 / 2.47 µs (Intel / AMD), Go 3.14 / 6.23 and Rayon 8.95 / 18.75. Between 300 and 3000 iterations, where that cost is a large share of an offer, Almide is 0.47-0.65x the fastest.
+- The wasm column is for reference (the reference implementations are native code). On the AMD VM it read noisy in this run (205.8 µs at nest 100); develop's wasm and this tree's wasm, run interleaved, read 371 and 455 µs at nest 1000 and below zero at nest 0 and 100. These changes touch the native leg only.
+
+What is left: the wasm leg, where `fan { }` arms and parallel offers run one after another (ADR-0024 D8), and the effect callbacks this change does not admit: a callback reaching I/O still runs in list order. ADR-0024 D3 has it run concurrently unless it reaches an ordered operation, which needs the `@ordered` set.
