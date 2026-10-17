@@ -26796,6 +26796,7 @@ pub const SRC_NET_WASM: &str = r#"
 
 
 
+
 effect fn __net_listen(host: String, port: String) -> Result[String, String] = _
 
 effect fn __net_accept(listener: String, unused: String) -> Result[String, String] = _
@@ -26902,6 +26903,131 @@ fn __net_tcp_is_open_impl(stream: Int) -> Bool = match __net_is_open(int.to_stri
   ok("1") => true,
   _ => false,
 }
+
+
+
+
+
+
+
+
+
+
+
+
+effect fn __unix_connect(path: String, unused: String) -> Result[String, String] = _
+
+effect fn __unix_listen(path: String, unused: String) -> Result[String, String] = _
+
+effect fn __unix_accept(listener: String, unused: String) -> Result[String, String] = _
+
+
+effect fn __unix_send(sock_fds: String, data: Bytes) -> Result[String, String] = _
+
+effect fn __unix_recv(sock: String, max: String) -> Result[Bytes, String] = _
+
+
+
+fn __unix_take_fds(sock: String, unused: String) -> Result[String, String] = _
+
+effect fn __unix_poll(fd: String, timeout_ms: String) -> Result[String, String] = _
+
+effect fn __unix_wait(fds: String, timeout_ms: String) -> Result[String, String] = _
+
+effect fn __unix_close(fd: String, unused: String) -> Result[String, String] = _
+
+effect fn __shm_create(size: String, unused: String) -> Result[String, String] = _
+
+effect fn __shm_resize(fd: String, size: String) -> Result[String, String] = _
+
+
+effect fn __shm_write(fd_offset: String, data: Bytes) -> Result[String, String] = _
+
+
+effect fn __shm_read(fd: String, offset_len: String) -> Result[Bytes, String] = _
+
+fn __net_fd_lines(fds: List[Int]) -> String = fds |> list.map((f) => int.to_string(f)) |> list.join("\n")
+
+fn __net_fd_list(t: String) -> List[Int] =
+  if t == "" then [] else string.split(t, "\n") |> list.map((x) => int.parse(x) ?? -1)
+
+@implements("net.unix_connect")
+effect fn __net_unix_connect_impl(path: String) -> Result[Int, String] = {
+  let t = __unix_connect(path, "")!
+  ok(int.parse(t) ?? -1)
+}
+
+@implements("net.unix_listen")
+effect fn __net_unix_listen_impl(path: String) -> Result[Int, String] = {
+  let t = __unix_listen(path, "")!
+  ok(int.parse(t) ?? -1)
+}
+
+@implements("net.unix_accept")
+effect fn __net_unix_accept_impl(listener: Int) -> Result[Int, String] = {
+  let t = __unix_accept(int.to_string(listener), "")!
+  ok(int.parse(t) ?? -1)
+}
+
+@implements("net.unix_send")
+effect fn __net_unix_send_impl(sock: Int, data: Bytes, fds: List[Int]) -> Result[Unit, String] = {
+  let _ = __unix_send(__net_fd_lines([sock] + fds), data)!
+  ok(())
+}
+
+@implements("net.unix_recv")
+effect fn __net_unix_recv_impl(sock: Int, max: Int) -> Result[Bytes, String] = __unix_recv(
+  int.to_string(sock),
+  int.to_string(max),
+)
+
+@implements("net.unix_take_fds")
+fn __net_unix_take_fds_impl(sock: Int) -> List[Int] = match __unix_take_fds(int.to_string(sock), "") {
+  ok(t) => __net_fd_list(t),
+  err(_) => [],
+}
+
+@implements("net.unix_poll")
+effect fn __net_unix_poll_impl(fd: Int, timeout_ms: Int) -> Result[Bool, String] = {
+  let t = __unix_poll(int.to_string(fd), int.to_string(timeout_ms))!
+  ok(t == "1")
+}
+
+@implements("net.unix_wait")
+effect fn __net_unix_wait_impl(fds: List[Int], timeout_ms: Int) -> Result[List[Int], String] = {
+  let t = __unix_wait(__net_fd_lines(fds), int.to_string(timeout_ms))!
+  ok(__net_fd_list(t))
+}
+
+@implements("net.unix_close")
+effect fn __net_unix_close_impl(fd: Int) -> Result[Unit, String] = {
+  let _ = __unix_close(int.to_string(fd), "")!
+  ok(())
+}
+
+@implements("net.shm_create")
+effect fn __net_shm_create_impl(size: Int) -> Result[Int, String] = {
+  let t = __shm_create(int.to_string(size), "")!
+  ok(int.parse(t) ?? -1)
+}
+
+@implements("net.shm_resize")
+effect fn __net_shm_resize_impl(fd: Int, size: Int) -> Result[Unit, String] = {
+  let _ = __shm_resize(int.to_string(fd), int.to_string(size))!
+  ok(())
+}
+
+@implements("net.shm_write")
+effect fn __net_shm_write_impl(fd: Int, offset: Int, data: Bytes) -> Result[Unit, String] = {
+  let _ = __shm_write("${fd}\n${offset}", data)!
+  ok(())
+}
+
+@implements("net.shm_read")
+effect fn __net_shm_read_impl(fd: Int, offset: Int, len: Int) -> Result[Bytes, String] = __shm_read(
+  int.to_string(fd),
+  "${offset}\n${len}",
+)
 "#;
 pub const SRC_OPTION: &str = r#"
 
