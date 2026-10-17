@@ -161,6 +161,13 @@ fn absolute(p: PathBuf) -> PathBuf {
 fn probe_files(t: &Target, n: u64) -> Vec<(String, String)> {
     let mut files = vec![("call.almd".to_string(), t.direct_program(n, 3, true))];
     files.extend(t.rebind_programs(n, 3).into_iter().map(|(shape, src)| (format!("{shape}.almd"), src)));
+    // Paths that run alone are emitted as the projects that run.
+    if t.diamond_runs_paths_alone() {
+        for (path, project) in ["d", "l", "r"].into_iter().zip(t.diamond_path_projects(n.min(64))) {
+            files.extend(project.files.into_iter().map(|(p, src)| (format!("diamond-{path}/{p}"), src)));
+        }
+        return files;
+    }
     files.extend(t.diamond_project(n.min(64)).files.into_iter().map(|(p, src)| (format!("diamond/{p}"), src)));
     files
 }
@@ -588,7 +595,7 @@ fn alloc(ctx: &Ctx, t: &Target, n: u64) -> String {
         world.enter(&mut cmd);
         let out = cmd.output();
         let Ok(out) = out else { return "SKIP: could not run almide".into() };
-        let (pass, part) = alloc_part(label, &out);
+        let (pass, part) = alloc_part_exiting(label, &out, t.expected_exit());
         ok &= pass;
         parts.push(part);
     }
@@ -598,8 +605,15 @@ fn alloc(ctx: &Ctx, t: &Target, n: u64) -> String {
 /// One alloc probe's verdict from its `almide run` output: `live=0` passes.
 /// The counters are printed at exit whatever the exit, so a run that failed
 /// reports its exit: blocks an abort left behind are not a leak (#3636).
+#[cfg(test)]
 fn alloc_part(label: &str, out: &std::process::Output) -> (bool, String) {
-    if !out.status.success() {
+    alloc_part_exiting(label, out, 0)
+}
+
+/// [`alloc_part`] for a probe that must end with exit code `expected` (a
+/// `-> Never` call's, `Target::expected_exit`; 0 for every other).
+fn alloc_part_exiting(label: &str, out: &std::process::Output, expected: i32) -> (bool, String) {
+    if out.status.code() != Some(expected) {
         return (false, format!("{label} exit {:?} ({})", out.status.code(), failure_reason(&out.stderr)));
     }
     let err = String::from_utf8_lossy(&out.stderr);
@@ -627,8 +641,9 @@ fn diamond(ctx: &Ctx, t: &Target, n: u64) -> String {
             legs[i].push(out);
         }
     }
-    let [nat, was] = legs.map(joined);
-    diamond_verdict(&nat, &was)
+    let expected = t.expected_exit();
+    let [nat, was] = legs.map(|outs| joined(outs, expected));
+    diamond_verdict_exiting(&nat, &was, expected)
 }
 
 /// One diamond project's run. The project resolves from its own directory,
@@ -646,9 +661,9 @@ fn run_diamond(ctx: &Ctx, root: &Path, entry: &Path, wasm: bool) -> std::io::Res
 }
 
 /// Paths run one project each, read as one run: their outputs in order,
-/// failing as the first failing one did.
-fn joined(outs: Vec<std::process::Output>) -> std::process::Output {
-    let mut all = outs.iter().find(|o| !o.status.success()).unwrap_or(&outs[0]).clone();
+/// failing as the first one that did not exit `expected` did.
+fn joined(outs: Vec<std::process::Output>, expected: i32) -> std::process::Output {
+    let mut all = outs.iter().find(|o| o.status.code() != Some(expected)).unwrap_or(&outs[0]).clone();
     all.stdout = outs.iter().flat_map(|o| o.stdout.clone()).collect();
     all
 }
@@ -656,8 +671,15 @@ fn joined(outs: Vec<std::process::Output>) -> std::process::Output {
 /// Criterion 5's verdict from the diamond project's run on each leg. Every
 /// path prints a line: its return, `()` for a Unit return (#3636), and a
 /// `mut` parameter's mutated copy — so no output is a failure.
+#[cfg(test)]
 fn diamond_verdict(nat: &std::process::Output, was: &std::process::Output) -> String {
-    if !nat.status.success() || !was.status.success() {
+    diamond_verdict_exiting(nat, was, 0)
+}
+
+/// [`diamond_verdict`] for paths that must each end with exit code
+/// `expected` (a `-> Never` call's; 0 for every other).
+fn diamond_verdict_exiting(nat: &std::process::Output, was: &std::process::Output, expected: i32) -> String {
+    if nat.status.code() != Some(expected) || was.status.code() != Some(expected) {
         return format!("FAIL: native exit {:?} ({}), wasm exit {:?} ({})", nat.status.code(), failure_reason(&nat.stderr), was.status.code(), failure_reason(&was.stderr));
     }
     let (a, b) = (String::from_utf8_lossy(&nat.stdout).into_owned(), String::from_utf8_lossy(&was.stdout).into_owned());
@@ -666,6 +688,7 @@ fn diamond_verdict(nat: &std::process::Output, was: &std::process::Output) -> St
     let thirds = lines.len() / 3;
     let same_three = thirds > 0 && lines.len() % 3 == 0 && lines[..thirds] == lines[thirds..2 * thirds] && lines[..thirds] == lines[2 * thirds..];
     match (same_three, a == b) {
+        (true, true) if expected != 0 => format!("PASS: direct = via left = via right on both legs ({thirds} line(s) each, each path exit {expected})"),
         (true, true) => format!("PASS: direct = via left = via right on both legs ({} line(s) each)", thirds),
         (false, _) => format!("FAIL: the three calls differ on native: {a:?}"),
         (true, false) => format!("FAIL: native {a:?} vs wasm {b:?}"),

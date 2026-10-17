@@ -591,6 +591,32 @@ pub fn gen_focus_call(b: &mut Builder, idx: usize) -> Option<(String, GenType)> 
     Some((render_call(b, &sig, &subst)?, ret))
 }
 
+/// The call of a function that never returns (catalogue entry `idx`, a
+/// [`super::catalogue::NEVER_RETURNING`] row), at generated arguments
+/// brought into its domain and bound first: the statement a focused program
+/// ends with, after its prints.
+pub fn gen_final_call(b: &mut Builder, idx: usize) -> Option<String> {
+    let sig = b.catalogue[idx].clone();
+    let domain = super::catalogue::never_domain(sig.module, &sig.func)?;
+    let mut subst = sig.forced_bindings();
+    bind_free_vars(b, &sig, &mut subst)?;
+    let mut args = Vec::with_capacity(sig.params.len());
+    for (name, p) in sig.param_names.iter().zip(&sig.params) {
+        let a = gen_arg(b, p, name, &subst)?;
+        let a = match domain.iter().find(|(d, _)| d == name) {
+            Some((_, tmpl)) => super::verdicts::fill(tmpl, &[(name, &a)]),
+            None => a,
+        };
+        let v = b.fresh_name();
+        b.stmts.push(format!("let {v}: {} = {a}", p.instantiate(&subst)?.render()));
+        args.push(v);
+    }
+    if sig.effect {
+        b.effect = true;
+    }
+    Some(format!("{}.{}({})", sig.module, sig.func, args.join(", ")))
+}
+
 /// Parameter names that denote a count/size/index and so must receive a
 /// SMALL value, never a boundary `INT_POOL` extreme: a `repeat`/`pad`
 /// count of `u32::MAX` (or a negative one) would exhaust memory or panic
