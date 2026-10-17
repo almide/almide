@@ -131,9 +131,9 @@ fn to_p3_shaped(bytes: &[u8], host_ops: &[i32], service: bool) -> anyhow::Result
     let f_alloc = shim_base + 9;
     let f_eprintln = shim_base + 1;
     let f_await = shim_base + 10;
-    // The env.set overlay log (#3223): its own page past the fs page, its
-    // length global past the environment cache.
-    let ovl = P3Overlay::plan(env, park + PARK_SPAN + fs_span, global_count + 13, f_eprintln);
+    // The env.set overlay log (#3223): its first page past the fs page, its
+    // three globals past the environment cache.
+    let ovl = P3Overlay::plan(env, park + PARK_SPAN + fs_span, global_count + 13);
     let span = PARK_SPAN + fs_span + ovl.map_or(0, |_| crate::wasi::env_overlay::OVERLAY_BYTES);
     let f_http = wants_http.then_some(shim_base + 11);
     let f_env = env.any().then_some(shim_base + 11 + u32::from(wants_http));
@@ -162,7 +162,7 @@ fn to_p3_shaped(bytes: &[u8], host_ops: &[i32], service: bool) -> anyhow::Result
     let g_slots = global_count + 9; // fan slot-table base (0 = unallocated)
     let g_slotn = global_count + 10; // slot high-water mark
     let (g_env, g_envn) = (global_count + 11, global_count + 12); // cached environment list
-    let fs_first_global = global_count + 13 + u32::from(ovl.is_some()); // the fs service's own globals
+    let fs_first_global = global_count + 13 + 3 * u32::from(ovl.is_some()); // the fs service's own globals
     let mut globals = GlobalSection::new();
     for (idx, (gt, i32v, i64v, f64v)) in parsed_globals.iter().enumerate() {
         let init = if idx as u32 == heap_global {
@@ -186,7 +186,7 @@ fn to_p3_shaped(bytes: &[u8], host_ops: &[i32], service: bool) -> anyhow::Result
     globals.global(mutable_i32, &ConstExpr::i32_const(0)); // g_slotn
     globals.global(mutable_i32, &ConstExpr::i32_const(-1)); // g_env (unfetched)
     globals.global(mutable_i32, &ConstExpr::i32_const(0)); // g_envn
-    P3Overlay::emit_global(ovl, &mut globals);
+    P3Overlay::emit_globals(ovl, &mut globals);
     if let Some(f) = &fs {
         f.splice.emit_globals(&mut globals);
     }
@@ -353,7 +353,6 @@ fn to_p3_shaped(bytes: &[u8], host_ops: &[i32], service: bool) -> anyhow::Result
     if let Some(t) = &serve_texts {
         data.active(0, &ConstExpr::i32_const(t.base as i32), t.blob.iter().copied());
     }
-    P3Overlay::emit_data(ovl, &mut data, park);
 
     let mut m = Module::new();
     m.section(&type_sec)

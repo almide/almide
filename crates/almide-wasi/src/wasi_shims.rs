@@ -319,26 +319,53 @@ fn shim_host_read(park: u64, g_plen: u32, g_ppos: Option<u32>) -> Function {
     f
 }
 
-/// op 37 (env.set): append to the overlay log page (`env_overlay.rs`). A
-/// full page takes the defined refusal — never a silent drop.
-fn shim_env_set(park: u64, g_ovl: u32) -> Function {
-    // params: 0=op 1=a_ptr 2=a_len 3=b_ptr 4=b_len; locals: 5=at
-    let mut f = Function::new([(1, ValType::I32)]);
+/// op 37 (env.set): replace the name's entry in the overlay log
+/// (`env_overlay.rs`), moving the log to a bigger block bumped off the
+/// guest heap when it outgrows its buffer. Only a refused memory grow stops
+/// it — C-197's out-of-memory line, as the guest allocator's own.
+fn shim_env_set(park: u64, log: env_overlay::OverlayLog, heap: u32) -> Function {
+    // params: 0=op 1=a_ptr 2=a_len 3=b_ptr 4=b_len
+    // locals: 5=p 6=end 7=klen 8=vlen 9=best 10=j 11=need 12=cap
+    //         13=ptr 14=bump_end
+    let mut f = Function::new([(10, ValType::I32)]);
     let mut i = f.instructions();
-    let log = env_overlay::OverlayLog { base: park + OVL, g_len: g_ovl };
-    env_overlay::emit_append(&mut i, log, 5, |i| refuse(i, park, MSG2, ENV_FULL_MSG.len()));
+    let scan = env_overlay::ScanLocals { p: 5, endp: 6, klen: 7, vlen: 8, best: 9, j: 10 };
+    let l = env_overlay::SetLocals { scan, need: 11, cap: 12 };
+    env_overlay::emit_append(&mut i, log, l, |i, size| bump_heap(i, park, heap, size, (13, 14)));
     i.unreachable();
     i.end();
     f
 }
 
-/// op 26 (env.get): scan the overlay log for the LAST entry whose key
+/// Bump `size` bytes (8-aligned) off the guest heap `heap`, growing memory
+/// when the frontier passes its end, and leave the block's address on the
+/// stack. The bytes are never freed — the block allocator's free lists stay
+/// undisturbed (`cabi_realloc`'s rule). A refused grow, or a size that wraps
+/// the address space, is C-197's defined abort.
+fn bump_heap(i: &mut wasm_encoder::InstructionSink<'_>, park: u64, heap: u32, size: u32, (ptr, end): (u32, u32)) {
+    i.global_get(heap).i32_const(7).i32_add().i32_const(-8).i32_and().local_tee(ptr);
+    i.local_get(size).i32_add().local_set(end);
+    i.local_get(end).local_get(ptr).i32_lt_u().if_(BlockType::Empty);
+    refuse(i, park, MSG3, OOM_MSG.len());
+    i.end();
+    i.local_get(end).memory_size(0).i32_const(16).i32_shl().i32_gt_u().if_(BlockType::Empty);
+    i.local_get(end).memory_size(0).i32_const(16).i32_shl().i32_sub();
+    i.i32_const(0xFFFF).i32_add().i32_const(16).i32_shr_u();
+    i.memory_grow(0).i32_const(0).i32_lt_s().if_(BlockType::Empty);
+    refuse(i, park, MSG3, OOM_MSG.len());
+    i.end();
+    i.end();
+    i.local_get(end).global_set(heap);
+    i.local_get(ptr);
+}
+
+/// op 26 (env.get): scan the overlay log for the entry whose key
 /// matches (env.set wins over the process environ), else walk the real
 /// environ via `environ_sizes_get`/`environ_get` ("KEY=VALUE\0" strings).
 /// Found: value bytes stage at park+DATA (host_read's landing zone),
 /// answer `pack(0, len)`. Absent: `pack(2, 0)` — the ok-none tag.
 /// `i_sizes` / `i_get` are the import indices the environ pair landed on.
-fn shim_env_get(park: u64, g_plen: u32, g_ppos: u32, g_ovl: u32, i_sizes: u32, i_get: u32) -> Function {
+fn shim_env_get(park: u64, g_plen: u32, g_ppos: u32, log: env_overlay::OverlayLog, i_sizes: u32, i_get: u32) -> Function {
     // params: 0=op 1=a_ptr 2=a_len 3=b_ptr 4=b_len
     // locals: 5=p 6=end 7=klen 8=vlen 9=best 10=j 11=s 12=count
     //         13=stage 14=need
@@ -348,8 +375,7 @@ fn shim_env_get(park: u64, g_plen: u32, g_ppos: u32, g_ovl: u32, i_sizes: u32, i
     let mut f = Function::new([(10, ValType::I32)]);
     let mut i = f.instructions();
 
-    // ── overlay scan, last match wins ──
-    let log = env_overlay::OverlayLog { base: park + OVL, g_len: g_ovl };
+    // ── overlay scan (one entry per name) ──
     env_overlay::emit_scan(&mut i, log, (g_ppos, g_plen), env_overlay::ScanLocals { p, endp, klen, vlen, best, j });
 
     // ── real environ fallthrough ──
