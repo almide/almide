@@ -1494,10 +1494,23 @@ Goal: the 150 rows left uninspected reach 0, with no native-only stamps (owner, 
   - stock `fs.list_dir` / `walk` / `glob` were quadratic in the entry count (an insertion sort, and a fixed readdir buffer wasmtime re-reads from the start per pass);
   - stock p1, p2 and p3 `io.read_n_bytes` stopped short of the request (one 4 KiB `fd_read`, one 16 KiB `blocking-read`, and a p3 read that overran its staging page), against C-161.
 - **Harness:** spawn draws silent commands (a child's output order is the scheduler's); `tcp_read_timeout` gets a timeout the echo can beat; an embedded-lane wall counts as a wall.
-- **Waiting on owner rulings:**
-  - unix and shm interim host ops;
-  - the ENOTEMPTY fs error text;
-  - the reason phrase in `request_stream`'s non-2xx text on wasi:http;
-  - a base URL for the Anthropic streaming calls;
-  - `@concurrent(f)` on `fs.fold_lines_chunked`.
-  - `testing.assert_throws` on wasm.
+- **Owner rulings (10-17):**
+  - unix and shm get interim embedded host ops over one shared core (○; C-382, C-383), and native follows the same held-descriptor table (○);
+  - ENOTEMPTY / ENAMETOOLONG / EXDEV become errno-free classified texts on every leg (○; C-273);
+  - the nlogn class is not widened (×): `fs.list_dir` / `walk` / `glob` stay uninspected with a `blocked` reason;
+  - http's non-2xx text drops the reason phrase on every leg (○);
+  - the vendor LLM calls and the model-specific matrix kernels leave the stdlib for `almide/llm` and `almide/nnlib`, removed at dialect epoch 14 with no deprecation window (the 33 functions; the Anthropic base-URL question goes with them);
+  - `@concurrent(f)` on `fs.fold_lines_chunked` (○);
+  - `testing.assert_throws` is replaced by `testing.assert_aborts(expected, () => ...)`, which runs its closure in a child (○; ADR-0029 draft).
+- **Owner-delegated decisions (night of 10-17, "compare with other compilers; rust and wasm the same"):**
+  - a truncated http body is an err, `malformed or incomplete response from "<url>"`;
+  - the removal package is `almide/nnlib` (as Julia's NNlib.jl; `almide/nn` is taken);
+  - `legacy-native-callback-names` is removed at epoch 14, as its deprecation entry promised.
+- **More defects found and fixed (test-first, 10-17 evening):**
+  - the wasm subprocess argument frame was quadratic in the argument count;
+  - native `exec_with_stdin` died of SIGPIPE when the child closed its stdin early;
+  - the component `cabi_realloc` copied on every grow instead of growing in place;
+  - the shared http call core's chunked decoder was O(bytes × chunks).
+- **Measurement fixes:** the bytes-moved shim counted forward and backward copies differently; fixture chunks stay one width as n grows; k caps for `shm_read` / `unix_send`; http's k cap applies to its effect functions only (a plain accessor's marginal sank under the embedded leg's jitter).
+- **ADR-0013 step 7:** the native String is the shared buffer by default (final GCE A/B: strchurn −13%, fasta −4%); its flip moved 64 stamped fingerprints, re-inspected in batch 18.
+- **Stamped:** batches 4–18; 10 rows left (ceiling 10): the 5 of the 33 removed functions still in the ledger, `fs.list_dir` / `walk` / `glob` (blocked), `http.serve` (needs a client-driving fixture), `testing.assert_throws` (to be replaced). Seven moved rows await re-inspection: `regex.replace` / `replace_first` (the batch's order file dropped their rebind order), `http.body` / `req_body` / `req_method` (the cap above), and parity findings in `http.request` and `value.as_string`; a batch-18 campaign also found one in `http.request_stream_with_limits`, stamped in batch 17 on another seed, under triage.
