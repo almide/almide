@@ -9042,16 +9042,8 @@ import http
 
 fn __hc_cell(s: String) -> String = "${string.len(s)}\n${s}"
 
-fn __hc_frame(method: String, body: String, headers: Map[String, String], total_ms: Int, idle_ms: Int) -> String = __hc_frame_cells(
-  method,
-  body,
-  headers,
-  int.to_string(total_ms),
-  int.to_string(idle_ms),
-)
-
-fn __hc_frame_cells(method: String, body: String, headers: Map[String, String], total: String, idle: String) -> String = map.entries(headers) |> list.map(((k, v)) => "${__hc_cell(k)}${__hc_cell(v)}") |> list.fold(
-  "${__hc_cell(method)}${__hc_cell(body)}${__hc_cell(total)}${__hc_cell(idle)}",
+fn __hc_frame(method: String, body: String, headers: Map[String, String], total_ms: Int, idle_ms: Int) -> String = map.entries(headers) |> list.map(((k, v)) => "${__hc_cell(k)}${__hc_cell(v)}") |> list.fold(
+  "${__hc_cell(method)}${__hc_cell(body)}${__hc_cell(int.to_string(total_ms))}${__hc_cell(int.to_string(idle_ms))}",
   (acc, cell) => acc + cell,
 )
 
@@ -9139,8 +9131,14 @@ effect fn __hc_stream_limited_impl(method: String, url: String, body: String, he
 
 
 
+fn __hc_classic_frame(method: String, body: String, headers: Map[String, String]) -> String = map.entries(headers) |> list.map(((k, v)) => "${__hc_cell(k)}${__hc_cell(v)}") |> list.fold(
+  "${__hc_cell(method)}${__hc_cell(body)}${__hc_cell("classic")}${__hc_cell("classic")}",
+  (acc, cell) => acc + cell,
+)
+
+@implements("http.request_stream")
 effect fn __hc_stream_classic_impl(method: String, url: String, body: String, headers: Map[String, String], on_chunk: (String) -> Unit) -> Result[Unit, String] = {
-  let c = __http_call_open(url, __hc_frame_cells(method, body, headers, "classic", "classic"))!
+  let c = __http_call_open(url, __hc_classic_frame(method, body, headers))!
   __hc_pump(c, on_chunk)
 }
 "#;
