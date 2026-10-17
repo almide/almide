@@ -106,6 +106,24 @@ pub const VERDICTS: &[Verdict] = &[
     Verdict { func: "net.tcp_available", holds: "v >= 0", canon: "0", domain: &[] },
     // Exactly len of the 11 echoed bytes: never more than arrive.
     Verdict { func: "net.tcp_read_exact", holds: "bytes.len(v) == {len}", canon: "v", domain: &[("len", "int.abs({len}) % 12")] },
+    // A buffer's address reads back the buffer while it lives (checked on
+    // its first byte: the probe's check stays O(1)); a generated program goes
+    // on with null, so it never holds an address past its buffer.
+    Verdict {
+        func: "bytes.as_ptr",
+        holds: "bytes.from_raw_ptr(v, int.min(1, bytes.len({b}))) == bytes.slice({b}, 0, int.min(1, bytes.len({b})))",
+        canon: "bytes.as_ptr(bytes.from_list([]))",
+        domain: &[],
+    },
+    Verdict {
+        func: "bytes.as_mut_ptr",
+        holds: "bytes.from_raw_ptr(v, int.min(1, bytes.len({b}))) == bytes.slice({b}, 0, int.min(1, bytes.len({b})))",
+        canon: "bytes.as_ptr(bytes.from_list([]))",
+        domain: &[],
+    },
+    Verdict { func: "bytes.data_ptr", holds: "v > 0 or bytes.len({b}) == 0", canon: "0", domain: &[] },
+    // Through a generated (null) pointer nothing is written or read.
+    Verdict { func: "bytes.copy_to_ptr", holds: "v >= 0 and v <= bytes.len({b})", canon: "v", domain: &[] },
     Verdict { func: "mem.save", holds: "true", canon: "0", domain: &[] },
 ];
 
