@@ -402,9 +402,7 @@ fn dead_local_native_only_intrinsic_does_not_break_wasm_build() {
     let src = dir.path().join("dead.almd");
     std::fs::write(
         &src,
-        "local fn dead(h: Matrix, w: Bytes, g: List[Int]) -> Matrix = {\n  \
-           let (out, _a, _b) = matrix.qwen3_block_q1_0_kv(h, h, h, w, g, g, 0, 4, 2, 8, 16, 10000.0, 0.00001)\n  \
-           out\n}\n\
+        "import net\n\nlocal effect fn dead(h: String) -> Int = net.tcp_connect(h, 1)!\n\
          fn main() -> Unit = println(\"ok\")\n",
     )
     .unwrap();
