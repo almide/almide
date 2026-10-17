@@ -2633,7 +2633,7 @@ statement = "Every `matrix` entry point that took a head count (`multi_head_atte
 since     = "0.42.0"
 status    = "active"
 evidence  = [
-  { path = "tests/diagnostics/e002-epoch14-attention-moved-to-nn/broken.almd", class = "fixture" },
+  { path = "tests/diagnostics/e002-epoch14-attention-moved-to-nnlib/broken.almd", class = "fixture" },
   { path = "tests/diagnostic_harness_test.rs", name = "broken_files_produce_expected_diagnostics", class = "fixture" },
 ]
 
@@ -3505,8 +3505,8 @@ statement = "Dialect epoch 14 removed 33 stdlib functions with no deprecation wi
 since     = "0.57.1"
 status    = "active"
 evidence  = [
-  { path = "tests/diagnostics/e002-epoch14-matrix-moved-to-nn/broken.almd", class = "fixture" },
-  { path = "tests/diagnostics/e002-epoch14-q1-loader-moved-to-nn/broken.almd", class = "fixture" },
+  { path = "tests/diagnostics/e002-epoch14-matrix-moved-to-nnlib/broken.almd", class = "fixture" },
+  { path = "tests/diagnostics/e002-epoch14-q1-loader-moved-to-nnlib/broken.almd", class = "fixture" },
   { path = "tests/diagnostics/e002-epoch14-http-moved-to-llm/broken.almd", class = "fixture" },
   { path = "tests/diagnostics/e002-epoch14-heap-checkpoint-removed/broken.almd", class = "fixture" },
   { path = "tests/diagnostics/import-epoch14-mem-module-removed/broken.almd", class = "fixture" },
@@ -3613,7 +3613,7 @@ statement = "The `matrix.rope_rotate` family (`rope_rotate`, `rope_rotate_at`, `
 since     = "0.57.1"
 status    = "active"
 evidence  = [
-  { path = "tests/diagnostics/e002-epoch14-rope-moved-to-nn/broken.almd", class = "fixture" },
+  { path = "tests/diagnostics/e002-epoch14-rope-moved-to-nnlib/broken.almd", class = "fixture" },
   { path = "tests/diagnostic_harness_test.rs", name = "broken_files_produce_expected_diagnostics", class = "fixture" },
 ]
 [[contract]]
