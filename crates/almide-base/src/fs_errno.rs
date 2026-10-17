@@ -10,13 +10,15 @@
 //! `tests/fs_errno_table.rs` walks every row against the `Display` of the
 //! host the suite runs on, so a spelling can only drift by failing a test.
 //!
-//! Rows are the errnos the wasm hosts can produce whose NUMBER and TEXT are
-//! identical on the linux and macos hosts the legs are compared on. An errno
-//! that differs between them (`ENOTEMPTY` is 39 on linux and 66 on macos)
-//! cannot be spelled statically without breaking C-215 on one host, so it is
-//! deliberately not a row: a renderer that cannot spell a code falls back to
-//! its generic text, and the gate pins that fallback as a divergence to
-//! close, not a row to invent.
+//! The table has two kinds of row (C-273). A DISPLAY row ([`FS_ERRNOS`]) is
+//! an errno whose NUMBER and TEXT are identical on the linux and macos hosts
+//! the legs are compared on, spelled as the host's `Display` verbatim. An
+//! errno that differs between them (`ENOTEMPTY` is 39 on linux and 66 on
+//! macos) cannot be a Display row without breaking C-215 on one host, so it
+//! is a CLASSIFIED row ([`FS_CLASSIFIED_ERRNOS`], owner ruling 2026-10-17):
+//! one errno-free text every leg answers, the native legs included — they
+//! render through [`fs_io_error_text`]. An errno neither kind spells falls
+//! back to its renderer's generic text.
 
 /// One errno the legs spell: its WASI preview1 code, its POSIX number and
 /// the exact `std::io::Error` `Display` text.
@@ -58,6 +60,23 @@ pub fn by_wasi(errno: u16) -> Option<&'static FsErrno> {
 /// The row for a POSIX errno number, if the table spells it.
 pub fn by_os(os: i32) -> Option<&'static FsErrno> {
     FS_ERRNOS.iter().find(|r| r.os == os)
+}
+
+include!("fs_errno_classified.rs");
+
+/// Every WASI preview1 code either kind of row spells, with its text: the
+/// Display rows, then the classified rows — the order the p1 fs service lays
+/// its statics out in.
+pub fn wasi_texts() -> impl Iterator<Item = (u16, &'static str)> {
+    FS_ERRNOS
+        .iter()
+        .map(|r| (r.wasi, r.text))
+        .chain(FS_CLASSIFIED_ERRNOS.iter().map(|r| (r.wasi, r.text)))
+}
+
+/// The text of a WASI preview1 errno, if either kind of row spells it.
+pub fn text_by_wasi(errno: u16) -> Option<&'static str> {
+    wasi_texts().find(|(c, _)| *c == errno).map(|(_, t)| t)
 }
 
 /// Rust's own `std::io::ErrorKind::WriteZero` message (`write_all` accepting

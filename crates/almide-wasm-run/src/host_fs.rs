@@ -10,9 +10,26 @@
 ///
 /// The structural wasm leg crosses `almide.fs_call` to THIS host for every
 /// `fs.*` call, so this file — not the generated WAT — is where the default
-/// `--target wasm` message is built.
-fn io_err(call: &str, args: &str, e: impl std::fmt::Display) -> String {
-    format!("{call}({args}): {e}")
+/// `--target wasm` message is built. An io error's suffix goes through the
+/// same classifier native's does (`almide_base::fs_errno::fs_io_error_text`,
+/// C-273): ENOTEMPTY / ENAMETOOLONG / EXDEV answer their errno-free text.
+fn io_err(call: &str, args: &str, e: impl FsErrSuffix) -> String {
+    format!("{call}({args}): {}", e.fs_err_suffix())
+}
+/// What follows `<call>(<args>): ` — an io error's classified-or-Display
+/// text, or a fixed message verbatim.
+trait FsErrSuffix {
+    fn fs_err_suffix(&self) -> String;
+}
+impl FsErrSuffix for std::io::Error {
+    fn fs_err_suffix(&self) -> String {
+        almide_base::fs_errno::fs_io_error_text(self)
+    }
+}
+impl FsErrSuffix for &str {
+    fn fs_err_suffix(&self) -> String {
+        (*self).to_string()
+    }
 }
 /// Source-shaped quoting — the twin of `fs.rs`'s `q`. Deliberately not `{:?}`;
 /// see that file for why the escape table is not reproduced.

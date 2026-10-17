@@ -141,6 +141,11 @@ pub fn generate(workspace_root: &Path, out_dir: &Path) -> io::Result<()> {
         "cargo:rerun-if-changed={}",
         workspace_root.join("crates/almide-rt-core/src").display()
     );
+    // fs.rs splices almide-base's classified errno rows (C-273) the same way.
+    println!(
+        "cargo:rerun-if-changed={}",
+        workspace_root.join("crates/almide-base/src/fs_errno_classified.rs").display()
+    );
     Ok(())
 }
 
