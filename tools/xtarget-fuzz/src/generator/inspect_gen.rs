@@ -768,7 +768,7 @@ impl Target {
             Some(r) => self.in_handler(r, &format!("{}  http.response(200, \"${{acc}}\")\n", &s["effect fn main() -> Unit = {\n".len()..]), n, true),
             None => s + "  println(\"${acc}\")\n}\n",
         };
-        format!("{}{s}", super::catalogue::imports_for(&s))
+        format!("{}{}{s}", self.stdin_header(n, k), super::catalogue::imports_for(&s))
     }
 
     /// Criterion 2, the use-shapes: `k` steps that rebind the return-typed
@@ -924,7 +924,7 @@ impl Target {
             }
             None => main + "}\n",
         };
-        let main = format!("{}{main}", super::catalogue::imports_for(&main));
+        let main = format!("{}{}{main}", self.stdin_header(n, 3), super::catalogue::imports_for(&main));
         let base = wrap(&self.name, "");
         // A path names the types in its signature, so it imports their
         // modules as well as `base`.
@@ -954,6 +954,17 @@ impl Target {
             GenType::Result(_) => format!("(match {v} {{ ok(v) => if {holds} then 1 else 0, err(_) => 0 }})"),
             _ => format!("(match {v} {{ v => if {holds} then 1 else 0 }})"),
         })
+    }
+
+    /// The target reads stdin, sized per probe ([`Self::stdin_header`]).
+    pub fn reads_stdin(&self) -> bool {
+        effect_recipes::stdin_for(&self.name, 1, 1).is_some()
+    }
+
+    /// The stdin a reader's probe runs on (`effect_recipes::stdin_for`), as
+    /// the header line the harness reads ([`crate::oracle::sandbox::World::for_program`]).
+    fn stdin_header(&self, n: u64, k: u64) -> String {
+        effect_recipes::stdin_for(&self.name, n, k).map(|(len, lines)| format!("// inspect-stdin: {len} {lines}\n")).unwrap_or_default()
     }
 
     /// `let a<i>: T = <arg>` for every value parameter other than `skip`
