@@ -61,7 +61,13 @@ pub(super) const EFFECT_RECIPES: &[Recipe] = &[
     Recipe { func: "fs.glob", size: "pattern", args: &[("pattern", concat!("{ let d = ", dir_of_n_files!(), "\n  d + \"/*\" }"))] },
     // Writers of n bytes of content.
     Recipe { func: "fs.write", size: "content", args: &[("path", "\"out.txt\""), ("content", "string.repeat(\"aé\\n\", {n})")] },
-    Recipe { func: "fs.append", size: "content", args: &[("path", "\"out.txt\""), ("content", "string.repeat(\"aé\\n\", {n})")] },
+    // A whole number of the stock service's 64 KiB write slices at every
+    // measured size (65536 bytes at n = 20000): one fd_write per slice, so
+    // 4n bytes cost a + b·⌈4n / 65536⌉ — 2, 3, 5, 10, 20 host calls — and that
+    // staircase read nlogn (GCE: 5.185e6 / 6.576e6 / 9.355e6 / 1.631e7 /
+    // 3.021e7, exactly 9.5e3 + 5.4e3 per slice per call). Aligned, the series
+    // is the per-slice (per-byte) cost.
+    Recipe { func: "fs.append", size: "content", args: &[("path", "\"out.txt\""), ("content", "string.repeat(\"aé\\n\", {n} * 4096 / 5000)")] },
     Recipe { func: "fs.write_bytes", size: "bytes", args: &[("path", "\"out.bin\""), ("bytes", "list.range(0, {n}) |> list.map((i) => i % 256)")] },
     Recipe {
         func: "fs.write_bytes_raw",
