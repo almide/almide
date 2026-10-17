@@ -127,6 +127,13 @@ fn render_call(b: &mut Builder, sig: &Signature, subst: &HashMap<String, GenType
             args.push(a);
             continue;
         }
+        // cat with no file arguments reads its whole stdin: with arguments
+        // naming missing files it exits before reading, and whether the
+        // input write then sees EPIPE is timing, on every leg.
+        if sig.module == "process" && sig.func == "exec_with_stdin" && name == "args" {
+            args.push("[]".into());
+            continue;
+        }
         match sandbox_arg(b, sig, p, name) {
             Some(a) => args.push(a),
             None => args.push(gen_arg(b, p, name, subst)?),
