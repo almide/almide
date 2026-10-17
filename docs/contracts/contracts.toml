@@ -4358,6 +4358,7 @@ evidence  = [
   { path = "spec/embedded_cross/http_framed_errs.almd", class = "fixture" },
   { path = "spec/embedded_cross/http_error_classes.almd", class = "fixture" },
   { path = "tests/http_response_cross_test.rs", class = "fixture", name = "the_full_response_family_reads_the_same_on_native_and_the_p3_component" },
+  { path = "tests/http_response_cross_test.rs", class = "fixture", name = "the_full_response_family_reads_the_same_on_native_and_the_embedded_lane" },
   { path = "tests/http_error_class_cross_test.rs", class = "fixture", name = "the_spec_fixtures_read_the_same_on_native_embedded_and_p3" },
   { path = "tests/http_error_class_cross_test.rs", class = "fixture", name = "the_server_classes_read_the_same_on_native_embedded_and_p3" },
 ]

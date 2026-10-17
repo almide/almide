@@ -299,9 +299,21 @@ pub fn request_response(
     body: &str,
     headers: &[(String, String)],
 ) -> Result<HttpTextResponse, String> {
+    request_response_bytes(method, url, body, headers).map(|(c, h, b)| (c, h, String::from_utf8_lossy(&b).into_owned()))
+}
+
+/// `request_response` with the body still bytes: the embedded lane's
+/// wasi:http transport (ADR-0023 step 7) hands it to the component, whose
+/// shim decodes it exactly where the native caller would.
+pub fn request_response_bytes(
+    method: &str,
+    url: &str,
+    body: &str,
+    headers: &[(String, String)],
+) -> Result<HttpRawResponse, String> {
     http_request_raw(method, url, body, headers).map(|(c, mut h, b)| {
         h.retain(|(k, _)| !HTTP_FORBIDDEN_HEADERS.iter().any(|f| f.eq_ignore_ascii_case(k)));
-        (c, h, String::from_utf8_lossy(&b).into_owned())
+        (c, h, b)
     })
 }
 

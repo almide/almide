@@ -515,6 +515,31 @@ fn foreign_import(bytes: &[u8]) -> Option<(String, String)> {
 /// gate. Program args after `--` are forwarded to the guest.
 /// `wasmtime`'s own exit code is propagated unchanged, so a guest
 /// `proc_exit(n)` surfaces as `n` exactly as a native binary's exit would.
+/// `almide run --target wasm` over the program's p3 component (ADR-0023
+/// step 7): the bytes `ALMIDE_COMPONENT_P3=1 almide build --component` ships,
+/// with the run's real stdio, environment and arguments. The component
+/// carries no allocation counters, so ALMIDE_WASM_ALLOC_COUNT says so.
+fn run_wasm_component(bytes: &[u8], host_ops: &[i32], program_args: &[String]) -> i32 {
+    let component = match almide_wasm_run::wasi_p3::to_p3(bytes, host_ops) {
+        Ok(c) => c,
+        Err(e) => {
+            err(&format!("error: p3 component transform failed — this is an Almide bug: {e}"));
+            return 1;
+        }
+    };
+    let code = match almide_wasm_run::run_component(&component, program_args) {
+        Ok(code) => code,
+        Err(e) => {
+            err(&format!("error: embedded wasm host: {e}"));
+            return 1;
+        }
+    };
+    if almide_base::env::flag("ALMIDE_WASM_ALLOC_COUNT") {
+        eprintln!("__ALMD_WASM_ALLOC absent (the p3 component carries no counters)");
+    }
+    code.clamp(0, 255)
+}
+
 fn cmd_run_wasm(file: &str, program_args: &[String], verified: bool, time_report: bool) -> i32 {
     // #2752: the deterministic meter (ADR-0001 D5, the `time:` line) is
     // native-only now — its wasm twin was the incumbent renderer's Σ-probe
@@ -529,10 +554,16 @@ fn cmd_run_wasm(file: &str, program_args: &[String], verified: bool, time_report
     // failed the Perceus RC gate would silently execute leaky/double-freeing code,
     // so a verification failure is always a hard error here. The waiver is
     // build-only (you opt into shipping a known-bad artifact, not into running it).
-    let (bytes, _host_ops) = match super::wasm_compile::compile_to_wasm_bytes(file, false, verified, false, true) {
+    let (bytes, host_ops) = match super::wasm_compile::compile_to_wasm_bytes(file, false, verified, false, true) {
         Ok(b) => b,
         Err(()) => return 1,
     };
+    // ADR-0023 step 7: a program naming an op only the WASI 0.3 shim serves
+    // runs as its p3 component — the stock artifact itself — on the embedded
+    // host's wasi:http, whose transport is native's client.
+    if almide_wasm_run::component_availability::embedded_runs_component(&host_ops) {
+        return run_wasm_component(&bytes, &host_ops, program_args);
+    }
 
     // The module imports `almide.*` and executes on the EMBEDDED host — the
     // exact host the corpus acceptance measured (fs, env and stdin
