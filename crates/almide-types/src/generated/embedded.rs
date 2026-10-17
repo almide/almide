@@ -26315,6 +26315,309 @@ fn matrix_shape(m: Matrix) -> (Int, Int) = {
   let c = matrix.cols(m)
   (r, c)
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+fn __mxp_clamp(n: Int) -> Int = if n < 0 then 0 else n
+
+fn __mxp_over(r: Int, c: Int) -> Bool = {
+  let max = 268435456
+  r > max or (c > 0 and r > max / c)
+}
+
+
+
+fn __mxp_mismatch(a: Int, b: Int) -> Matrix = matrix.append_rows(
+  matrix.zeros(1, a),
+  matrix.zeros(1, b),
+)
+
+
+
+fn __mxp_head_count(n: Int) -> Int = {
+  let e = matrix.zeros(0, 0)
+  let _a = matrix.multi_head_attention(e, e, e, n)
+  n
+}
+
+fn __mxp_i8(u: Int) -> Int = if u >= 128 then u - 256 else u
+
+
+
+fn __q1p_lanes(xb: List[Float], w: Bytes, sp: Int, k: Int, l0: Float, l1: Float) -> Float =
+  if k == 128 then l0 + l1
+  else {
+    let byte = bytes.read_u8(w, sp + k / 8)
+    let v0 = if int.band(int.bshr(byte, k % 8), 1) == 1 then xb[k] else -xb[k]
+    let v1 = if int.band(int.bshr(byte, k % 8 + 1), 1) == 1 then xb[k + 1] else -xb[k + 1]
+    __q1p_lanes(xb, w, sp, k + 2, l0 + v0, l1 + v1)
+  }
+
+
+fn __q1p_cell(xi: List[Float], w: Bytes, row_off: Int, blocks: Int) -> Float = list.range(0, blocks) |> list.fold(
+  0.0,
+  (acc, b) => {
+    let bs = row_off + b * 18
+    let xb = list.slice(xi, b * 128, b * 128 + 128)
+    acc + __q1p_lanes(xb, w, bs + 2, 0, 0.0, 0.0) * bytes.read_f16_le(w, bs)
+  },
+)
+
+@implements("matrix.linear_q1_0_row_no_bias")
+fn matrix_linear_q1_0_row_no_bias(x: Matrix, w_bytes: Bytes, w_offset: Int, w_rows: Int, w_cols: Int) -> Matrix = {
+  let x_rows = matrix.rows(x)
+  let out_cols = __mxp_clamp(w_rows)
+  let n_in = __mxp_clamp(w_cols)
+  if __mxp_over(out_cols, n_in) then matrix.zeros(out_cols, n_in)
+  else if x_rows == 0 or out_cols == 0 or n_in == 0 then matrix.zeros(x_rows, w_rows)
+  else if matrix.cols(x) != n_in then __mxp_mismatch(matrix.cols(x), n_in)
+  else if __mxp_over(x_rows, out_cols) then matrix.zeros(x_rows, out_cols)
+  else {
+    let off = __mxp_clamp(w_offset)
+    let blocks = n_in / 128
+    let need = out_cols * blocks * 18
+    let len = bytes.len(w_bytes)
+    if off > len or need > len - off then matrix.zeros(x_rows, out_cols)
+    else {
+      let cell = (xi, j) => __q1p_cell(xi, w_bytes, off + j * blocks * 18, blocks)
+      let rows = matrix.to_lists(x) |> list.map((xi) => list.range(0, out_cols) |> list.map((j) => cell(xi, j)))
+      matrix.from_lists(rows)
+    }
+  }
+}
+
+
+
+
+
+fn __q8p_quant(xb: List[Float]) -> (Float, List[Int]) = {
+  let amax = xb |> list.fold(
+    0.0,
+    (m, v) => {
+      let a = float.abs(v)
+      if a > m then a else m
+    },
+  )
+  let d = float.from_float32(float.to_float32(amax / 127.0))
+  let inv = if d > 0.0 then 1.0 / d else 0.0
+  let q = xb |> list.map((v) => {
+    let t = float.round(v * inv)
+    if t != t then 0
+    else if t > 127.0 then 127
+    else if t < -127.0 then -127
+    else float.to_int(t)
+  })
+  (d, q)
+}
+
+fn __q8p_isum(w: Bytes, qp: Int, xq: List[Int], k: Int, s: Int) -> Int =
+  if k == 32 then s
+  else __q8p_isum(w, qp, xq, k + 1, s + __mxp_i8(bytes.read_u8(w, qp + k)) * xq[k])
+
+
+
+fn __q8p_cell(qx: List[(Float, List[Int])], w: Bytes, row_off: Int, b: Int, acc: Float) -> Float =
+  if b == list.len(qx) then acc
+  else {
+    let (dx, xq) = qx[b]
+    let bs = row_off + b * 34
+    let dd = float.from_float32(float.to_float32(bytes.read_f16_le(w, bs) * dx))
+    __q8p_cell(qx, w, row_off, b + 1, acc + dd * int.to_float(__q8p_isum(w, bs + 2, xq, 0, 0)))
+  }
+
+@implements("matrix.linear_q8_0_row_no_bias")
+fn matrix_linear_q8_0_row_no_bias(x: Matrix, w_bytes: Bytes, w_offset: Int, w_rows: Int, w_cols: Int) -> Matrix = {
+  let x_rows = matrix.rows(x)
+  if x_rows == 0 or w_rows <= 0 or w_cols <= 0 or w_cols % 32 != 0 then matrix.zeros(x_rows, w_rows)
+  else if __mxp_over(w_rows, w_cols) then matrix.zeros(w_rows, w_cols)
+  else if matrix.cols(x) != w_cols then __mxp_mismatch(matrix.cols(x), w_cols)
+  else {
+    let off = __mxp_clamp(w_offset)
+    let row_bytes = w_cols / 32 * 34
+    let len = bytes.len(w_bytes)
+    if off > len or w_rows * row_bytes > len - off then matrix.zeros(x_rows, w_rows)
+    else matrix.to_lists(x) |> list.map((xi) => {
+      let qx = list.range(0, w_cols / 32) |> list.map((b) => __q8p_quant(list.slice(xi, b * 32, b * 32 + 32)))
+      list.range(0, w_rows) |> list.map((j) => __q8p_cell(qx, w_bytes, off + j * row_bytes, 0, 0.0))
+    }) |> matrix.from_lists
+  }
+}
+
+
+
+
+fn __qw_head_norm(x: Matrix, gamma: List[Float], n_heads: Int, eps: Float) -> Matrix = {
+  let n = __mxp_head_count(n_heads)
+  if matrix.rows(x) == 0 then matrix.zeros(0, 0)
+  else {
+    let d = matrix.cols(x)
+    let hd = d / n
+    let heads = if hd == 0 then 0 else n
+    matrix.to_lists(x) |> list.map((row) => {
+      let normed = list.range(0, heads) |> list.flat_map((h) => {
+        let seg = list.slice(row, h * hd, h * hd + hd)
+        let ss = seg |> list.fold(0.0, (s, v) => s + v * v)
+        let inv = 1.0 / float.sqrt(ss / int.to_float(hd) + eps)
+        seg |> list.enumerate |> list.map(((k, v)) => v * inv * gamma[k])
+      })
+      normed + list.repeat(0.0, d - heads * hd)
+    }) |> matrix.from_lists
+  }
+}
+
+
+
+fn __qw_repeat_kv(kv: Matrix, n_kv_heads: Int, n_rep: Int) -> Matrix =
+  if n_rep <= 1 then kv
+  else {
+    let n = __mxp_head_count(n_kv_heads)
+    if matrix.rows(kv) == 0 then matrix.zeros(0, 0)
+    else {
+      let d = matrix.cols(kv)
+      let hd = d / n
+      let heads = if hd == 0 then 0 else n
+      matrix.to_lists(kv) |> list.map((row) => {
+        let reps = list.range(0, heads) |> list.flat_map((h) => {
+          let seg = list.slice(row, h * hd, h * hd + hd)
+          list.range(0, n_rep) |> list.flat_map((_) => seg)
+        })
+        reps + list.repeat(0.0, d * n_rep - heads * n_rep * hd)
+      }) |> matrix.from_lists
+    }
+  }
+
+
+fn __qw_gamma(w: Bytes, off: Int, len: Int) -> List[Float] = {
+  let o = __mxp_clamp(off)
+  list.range(0, len) |> list.map((i) => bytes.read_f32_le(w, o + i * 4))
+}
+
+
+fn __qw_linear(kind: Int, x: Matrix, w: Bytes, off: Int, rows: Int, cols: Int) -> Matrix = match kind {
+  0 => matrix_linear_q1_0_row_no_bias(x, w, off, rows, cols),
+  1 => matrix.linear_f32_row_no_bias(x, w, off, rows, cols),
+  _ => matrix_linear_q8_0_row_no_bias(x, w, off, rows, cols),
+}
+
+
+
+fn __qw_block(kind: Int, neox: Bool, hidden: Int, h: Matrix, k_cache: Matrix, v_cache: Matrix, w: Bytes, gamma_offs: List[Int], weight_offs: List[Int], start_pos: Int, n_q_heads: Int, n_kv_heads: Int, head_dim: Int, ffn_hidden: Int, rope_theta: Float, eps: Float) -> (Matrix, Matrix, Matrix) = {
+  let q_hidden = n_q_heads * head_dim
+  let kv_hidden = n_kv_heads * head_dim
+  let n_rep = n_q_heads / n_kv_heads
+  let hd = __mxp_clamp(head_dim)
+  let gamma_attn = __qw_gamma(w, gamma_offs[0], hidden)
+  let gamma_q = __qw_gamma(w, gamma_offs[1], hd)
+  let gamma_k = __qw_gamma(w, gamma_offs[2], hd)
+  let gamma_ffn = __qw_gamma(w, gamma_offs[3], hidden)
+  let h_normed = matrix.rms_norm_rows(h, gamma_attn, eps)
+  let q_proj = __qw_linear(kind, h_normed, w, weight_offs[0], q_hidden, hidden)
+  let k_proj = __qw_linear(kind, h_normed, w, weight_offs[1], kv_hidden, hidden)
+  let v_proj = __qw_linear(kind, h_normed, w, weight_offs[2], kv_hidden, hidden)
+  let q_normed = __qw_head_norm(q_proj, gamma_q, n_q_heads, eps)
+  let k_normed = __qw_head_norm(k_proj, gamma_k, n_kv_heads, eps)
+  let q_rot = if neox then matrix.rope_rotate_neox_at(
+    q_normed,
+    n_q_heads,
+    head_dim,
+    rope_theta,
+    start_pos,
+  )
+  else matrix.rope_rotate_at(q_normed, n_q_heads, head_dim, rope_theta, start_pos)
+  let k_rot = if neox then matrix.rope_rotate_neox_at(
+    k_normed,
+    n_kv_heads,
+    head_dim,
+    rope_theta,
+    start_pos,
+  )
+  else matrix.rope_rotate_at(k_normed, n_kv_heads, head_dim, rope_theta, start_pos)
+  let k_full_kv = matrix.append_rows(k_cache, k_rot)
+  let v_full_kv = matrix.append_rows(v_cache, v_proj)
+  let k_full = __qw_repeat_kv(k_full_kv, n_kv_heads, n_rep)
+  let v_full = __qw_repeat_kv(v_full_kv, n_kv_heads, n_rep)
+  let attn_out = matrix.masked_multi_head_attention(q_rot, k_full, v_full, n_q_heads)
+  let attn_proj = __qw_linear(kind, attn_out, w, weight_offs[3], hidden, q_hidden)
+  let x_attn = matrix.add(h, attn_proj)
+  let h2 = matrix.rms_norm_rows(x_attn, gamma_ffn, eps)
+  let gate = __qw_linear(kind, h2, w, weight_offs[4], ffn_hidden, hidden)
+  let up = __qw_linear(kind, h2, w, weight_offs[5], ffn_hidden, hidden)
+  let gated = matrix.silu_mul(gate, up)
+  let ffn_out = __qw_linear(kind, gated, w, weight_offs[6], hidden, ffn_hidden)
+  (matrix.add(x_attn, ffn_out), k_full_kv, v_full_kv)
+}
+
+
+@implements("matrix.qwen3_block_q1_0_kv")
+fn matrix_qwen3_block_q1_0_kv(h: Matrix, k_cache: Matrix, v_cache: Matrix, w: Bytes, gamma_offs: List[Int], weight_offs: List[Int], start_pos: Int, n_q_heads: Int, n_kv_heads: Int, head_dim: Int, ffn_hidden: Int, rope_theta: Float, eps: Float) -> (Matrix, Matrix, Matrix) = __qw_block(
+  0,
+  false,
+  n_q_heads * head_dim,
+  h,
+  k_cache,
+  v_cache,
+  w,
+  gamma_offs,
+  weight_offs,
+  start_pos,
+  n_q_heads,
+  n_kv_heads,
+  head_dim,
+  ffn_hidden,
+  rope_theta,
+  eps,
+)
+
+
+@implements("matrix.qwen3_block_f32_kv")
+fn matrix_qwen3_block_f32_kv(h: Matrix, k_cache: Matrix, v_cache: Matrix, w: Bytes, gamma_offs: List[Int], weight_offs: List[Int], start_pos: Int, n_q_heads: Int, n_kv_heads: Int, head_dim: Int, ffn_hidden: Int, rope_theta: Float, eps: Float) -> (Matrix, Matrix, Matrix) = __qw_block(
+  1,
+  true,
+  if matrix.rows(h) > 0 then matrix.cols(h) else 0,
+  h,
+  k_cache,
+  v_cache,
+  w,
+  gamma_offs,
+  weight_offs,
+  start_pos,
+  n_q_heads,
+  n_kv_heads,
+  head_dim,
+  ffn_hidden,
+  rope_theta,
+  eps,
+)
+
+@implements("matrix.qwen3_block_q8_0_kv")
+fn matrix_qwen3_block_q8_0_kv(h: Matrix, k_cache: Matrix, v_cache: Matrix, w: Bytes, gamma_offs: List[Int], weight_offs: List[Int], start_pos: Int, n_q_heads: Int, n_kv_heads: Int, head_dim: Int, ffn_hidden: Int, rope_theta: Float, eps: Float) -> (Matrix, Matrix, Matrix) = __qw_block(
+  2,
+  true,
+  if matrix.rows(h) > 0 then matrix.cols(h) else 0,
+  h,
+  k_cache,
+  v_cache,
+  w,
+  gamma_offs,
+  weight_offs,
+  start_pos,
+  n_q_heads,
+  n_kv_heads,
+  head_dim,
+  ffn_hidden,
+  rope_theta,
+  eps,
+)
 "#;
 pub const SRC_MEM: &str = r#"
 
