@@ -522,6 +522,16 @@ pub fn almide_rt_matrix_select_rows_q1_0(
 // (append_rows) and accepts weights as raw bytes + offsets to keep the
 // caller's argument list manageable.
 
+// The Qwen3 layers' `i`-th norm / weight offset: a list too short for the
+// layer is C-067's `xs[i]` abort, the line the self-hosted body prints — never
+// a raw slice panic (#1827).
+fn offs_at(offs: &[i64], i: usize) -> i64 {
+    match offs.get(i) {
+        Some(v) => *v,
+        None => almide_abort("index out of bounds"),
+    }
+}
+
 // Load a packed f32 sub-range from w_bytes as f64, for gamma-style
 // 1-D tensors that don't go through a Matrix intrinsic. An element whose 4
 // bytes are not all inside `w` is 0.0 — `bytes.read_f32_le`'s out-of-range
@@ -614,19 +624,19 @@ pub fn almide_rt_matrix_qwen3_block_q1_0_kv(
     // `attempt to divide by zero` panic at 0, #1827).
     let n_rep = n_q_heads / almide_rt_matrix_head_count(n_kv_heads) as i64;
 
-    let gamma_attn = load_f32_to_f64(w, gamma_offs[0].max(0) as usize, hidden);
-    let gamma_q = load_f32_to_f64(w, gamma_offs[1].max(0) as usize, head_dim.max(0) as usize);
-    let gamma_k = load_f32_to_f64(w, gamma_offs[2].max(0) as usize, head_dim.max(0) as usize);
-    let gamma_ffn = load_f32_to_f64(w, gamma_offs[3].max(0) as usize, hidden);
+    let gamma_attn = load_f32_to_f64(w, offs_at(gamma_offs, 0).max(0) as usize, hidden);
+    let gamma_q = load_f32_to_f64(w, offs_at(gamma_offs, 1).max(0) as usize, head_dim.max(0) as usize);
+    let gamma_k = load_f32_to_f64(w, offs_at(gamma_offs, 2).max(0) as usize, head_dim.max(0) as usize);
+    let gamma_ffn = load_f32_to_f64(w, offs_at(gamma_offs, 3).max(0) as usize, hidden);
 
     let h_normed = almide_rt_matrix_rms_norm_rows(h, &gamma_attn, eps);
 
     let q_proj = almide_rt_matrix_linear_q1_0_row_no_bias(
-        &h_normed, w, weight_offs[0], hidden as i64, hidden as i64);
+        &h_normed, w, offs_at(weight_offs, 0), hidden as i64, hidden as i64);
     let k_proj = almide_rt_matrix_linear_q1_0_row_no_bias(
-        &h_normed, w, weight_offs[1], kv_hidden as i64, hidden as i64);
+        &h_normed, w, offs_at(weight_offs, 1), kv_hidden as i64, hidden as i64);
     let v_proj = almide_rt_matrix_linear_q1_0_row_no_bias(
-        &h_normed, w, weight_offs[2], kv_hidden as i64, hidden as i64);
+        &h_normed, w, offs_at(weight_offs, 2), kv_hidden as i64, hidden as i64);
 
     let q_normed = per_head_rms_norm(&q_proj, &gamma_q, n_q_heads, eps);
     let k_normed = per_head_rms_norm(&k_proj, &gamma_k, n_kv_heads, eps);
@@ -642,17 +652,17 @@ pub fn almide_rt_matrix_qwen3_block_q1_0_kv(
 
     let attn_out = almide_rt_matrix_masked_multi_head_attention(&q_rot, &k_full, &v_full, n_q_heads);
     let attn_proj = almide_rt_matrix_linear_q1_0_row_no_bias(
-        &attn_out, w, weight_offs[3], hidden as i64, hidden as i64);
+        &attn_out, w, offs_at(weight_offs, 3), hidden as i64, hidden as i64);
     let x_attn = almide_rt_matrix_add(h, &attn_proj);
 
     let h2 = almide_rt_matrix_rms_norm_rows(&x_attn, &gamma_ffn, eps);
     let gate = almide_rt_matrix_linear_q1_0_row_no_bias(
-        &h2, w, weight_offs[4], ffn_hidden, hidden as i64);
+        &h2, w, offs_at(weight_offs, 4), ffn_hidden, hidden as i64);
     let up = almide_rt_matrix_linear_q1_0_row_no_bias(
-        &h2, w, weight_offs[5], ffn_hidden, hidden as i64);
+        &h2, w, offs_at(weight_offs, 5), ffn_hidden, hidden as i64);
     let gated = almide_rt_matrix_silu_mul(&gate, &up);
     let ffn_out = almide_rt_matrix_linear_q1_0_row_no_bias(
-        &gated, w, weight_offs[6], hidden as i64, ffn_hidden);
+        &gated, w, offs_at(weight_offs, 6), hidden as i64, ffn_hidden);
 
     let h_out = almide_rt_matrix_add(&x_attn, &ffn_out);
     (h_out, k_full_kv, v_full_kv)
@@ -886,19 +896,19 @@ pub fn almide_rt_matrix_qwen3_block_f32_kv(
     // `attempt to divide by zero` panic at 0, #1827).
     let n_rep = n_q_heads / almide_rt_matrix_head_count(n_kv_heads) as i64;
 
-    let gamma_attn = load_f32_to_f64(w, gamma_offs[0].max(0) as usize, hidden);
-    let gamma_q = load_f32_to_f64(w, gamma_offs[1].max(0) as usize, head_dim.max(0) as usize);
-    let gamma_k = load_f32_to_f64(w, gamma_offs[2].max(0) as usize, head_dim.max(0) as usize);
-    let gamma_ffn = load_f32_to_f64(w, gamma_offs[3].max(0) as usize, hidden);
+    let gamma_attn = load_f32_to_f64(w, offs_at(gamma_offs, 0).max(0) as usize, hidden);
+    let gamma_q = load_f32_to_f64(w, offs_at(gamma_offs, 1).max(0) as usize, head_dim.max(0) as usize);
+    let gamma_k = load_f32_to_f64(w, offs_at(gamma_offs, 2).max(0) as usize, head_dim.max(0) as usize);
+    let gamma_ffn = load_f32_to_f64(w, offs_at(gamma_offs, 3).max(0) as usize, hidden);
 
     let h_normed = almide_rt_matrix_rms_norm_rows(h, &gamma_attn, eps);
 
     let q_proj = almide_rt_matrix_linear_f32_row_no_bias(
-        &h_normed, w, weight_offs[0], q_hidden as i64, hidden as i64);
+        &h_normed, w, offs_at(weight_offs, 0), q_hidden as i64, hidden as i64);
     let k_proj = almide_rt_matrix_linear_f32_row_no_bias(
-        &h_normed, w, weight_offs[1], kv_hidden as i64, hidden as i64);
+        &h_normed, w, offs_at(weight_offs, 1), kv_hidden as i64, hidden as i64);
     let v_proj = almide_rt_matrix_linear_f32_row_no_bias(
-        &h_normed, w, weight_offs[2], kv_hidden as i64, hidden as i64);
+        &h_normed, w, offs_at(weight_offs, 2), kv_hidden as i64, hidden as i64);
 
     let q_normed = per_head_rms_norm(&q_proj, &gamma_q, n_q_heads, eps);
     let k_normed = per_head_rms_norm(&k_proj, &gamma_k, n_kv_heads, eps);
@@ -914,17 +924,17 @@ pub fn almide_rt_matrix_qwen3_block_f32_kv(
 
     let attn_out = almide_rt_matrix_masked_multi_head_attention(&q_rot, &k_full, &v_full, n_q_heads);
     let attn_proj = almide_rt_matrix_linear_f32_row_no_bias(
-        &attn_out, w, weight_offs[3], hidden as i64, q_hidden as i64);
+        &attn_out, w, offs_at(weight_offs, 3), hidden as i64, q_hidden as i64);
     let x_attn = almide_rt_matrix_add(h, &attn_proj);
 
     let h2 = almide_rt_matrix_rms_norm_rows(&x_attn, &gamma_ffn, eps);
     let gate = almide_rt_matrix_linear_f32_row_no_bias(
-        &h2, w, weight_offs[4], ffn_hidden, hidden as i64);
+        &h2, w, offs_at(weight_offs, 4), ffn_hidden, hidden as i64);
     let up = almide_rt_matrix_linear_f32_row_no_bias(
-        &h2, w, weight_offs[5], ffn_hidden, hidden as i64);
+        &h2, w, offs_at(weight_offs, 5), ffn_hidden, hidden as i64);
     let gated = almide_rt_matrix_silu_mul(&gate, &up);
     let ffn_out = almide_rt_matrix_linear_f32_row_no_bias(
-        &gated, w, weight_offs[6], hidden as i64, ffn_hidden);
+        &gated, w, offs_at(weight_offs, 6), hidden as i64, ffn_hidden);
 
     let h_out = almide_rt_matrix_add(&x_attn, &ffn_out);
     (h_out, k_full_kv, v_full_kv)
@@ -1133,19 +1143,19 @@ pub fn almide_rt_matrix_qwen3_block_q8_0_kv(
     // `attempt to divide by zero` panic at 0, #1827).
     let n_rep = n_q_heads / almide_rt_matrix_head_count(n_kv_heads) as i64;
 
-    let gamma_attn = load_f32_to_f64(w, gamma_offs[0].max(0) as usize, hidden);
-    let gamma_q = load_f32_to_f64(w, gamma_offs[1].max(0) as usize, head_dim.max(0) as usize);
-    let gamma_k = load_f32_to_f64(w, gamma_offs[2].max(0) as usize, head_dim.max(0) as usize);
-    let gamma_ffn = load_f32_to_f64(w, gamma_offs[3].max(0) as usize, hidden);
+    let gamma_attn = load_f32_to_f64(w, offs_at(gamma_offs, 0).max(0) as usize, hidden);
+    let gamma_q = load_f32_to_f64(w, offs_at(gamma_offs, 1).max(0) as usize, head_dim.max(0) as usize);
+    let gamma_k = load_f32_to_f64(w, offs_at(gamma_offs, 2).max(0) as usize, head_dim.max(0) as usize);
+    let gamma_ffn = load_f32_to_f64(w, offs_at(gamma_offs, 3).max(0) as usize, hidden);
 
     let h_normed = almide_rt_matrix_rms_norm_rows(h, &gamma_attn, eps);
 
     let q_proj = almide_rt_matrix_linear_q8_0_row_no_bias(
-        &h_normed, w, weight_offs[0], q_hidden as i64, hidden as i64);
+        &h_normed, w, offs_at(weight_offs, 0), q_hidden as i64, hidden as i64);
     let k_proj = almide_rt_matrix_linear_q8_0_row_no_bias(
-        &h_normed, w, weight_offs[1], kv_hidden as i64, hidden as i64);
+        &h_normed, w, offs_at(weight_offs, 1), kv_hidden as i64, hidden as i64);
     let v_proj = almide_rt_matrix_linear_q8_0_row_no_bias(
-        &h_normed, w, weight_offs[2], kv_hidden as i64, hidden as i64);
+        &h_normed, w, offs_at(weight_offs, 2), kv_hidden as i64, hidden as i64);
 
     let q_normed = per_head_rms_norm(&q_proj, &gamma_q, n_q_heads, eps);
     let k_normed = per_head_rms_norm(&k_proj, &gamma_k, n_kv_heads, eps);
@@ -1161,17 +1171,17 @@ pub fn almide_rt_matrix_qwen3_block_q8_0_kv(
 
     let attn_out = almide_rt_matrix_masked_multi_head_attention(&q_rot, &k_full, &v_full, n_q_heads);
     let attn_proj = almide_rt_matrix_linear_q8_0_row_no_bias(
-        &attn_out, w, weight_offs[3], hidden as i64, q_hidden as i64);
+        &attn_out, w, offs_at(weight_offs, 3), hidden as i64, q_hidden as i64);
     let x_attn = almide_rt_matrix_add(h, &attn_proj);
 
     let h2 = almide_rt_matrix_rms_norm_rows(&x_attn, &gamma_ffn, eps);
     let gate = almide_rt_matrix_linear_q8_0_row_no_bias(
-        &h2, w, weight_offs[4], ffn_hidden, hidden as i64);
+        &h2, w, offs_at(weight_offs, 4), ffn_hidden, hidden as i64);
     let up = almide_rt_matrix_linear_q8_0_row_no_bias(
-        &h2, w, weight_offs[5], ffn_hidden, hidden as i64);
+        &h2, w, offs_at(weight_offs, 5), ffn_hidden, hidden as i64);
     let gated = almide_rt_matrix_silu_mul(&gate, &up);
     let ffn_out = almide_rt_matrix_linear_q8_0_row_no_bias(
-        &gated, w, weight_offs[6], hidden as i64, ffn_hidden);
+        &gated, w, offs_at(weight_offs, 6), hidden as i64, ffn_hidden);
 
     let h_out = almide_rt_matrix_add(&x_attn, &ffn_out);
     (h_out, k_full_kv, v_full_kv)
