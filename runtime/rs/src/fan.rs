@@ -65,6 +65,7 @@ pub fn almide_rt_fan_map_par<A: Send + Sync + Clone, B: Send, F: Fn(A) -> Result
     items: Vec<A>,
     f: F,
 ) -> Result<Vec<B>, AlmideString> {
+    items.almide_share();
     // The slots cross threads, so an element's error is held as an owned
     // `String` (Send) and converted once at the boundary.
     let __almide_r: Result<Vec<B>, String> = (|| {
