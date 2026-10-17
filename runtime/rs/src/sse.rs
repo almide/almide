@@ -116,7 +116,7 @@ fn get_field(v: &AlmideValue, key: &str) -> Option<AlmideValue> {
 
 fn get_string(v: &AlmideValue, key: &str) -> Option<String> {
     if let Some(AlmideValue::Str(s)) = get_field(v, key) {
-        Some(s)
+        Some(String::from(s))
     } else {
         None
     }

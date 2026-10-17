@@ -49,7 +49,7 @@ pub fn almide_rt_json_parse(text: &str) -> Result<AlmideValue, AlmideString> {
             let b = t.as_bytes();
             if *pos >= b.len() { return Err("unexpected end of input".into()); }
             match b[*pos] {
-                b'"' => parse_string(t, pos).map(AlmideValue::Str),
+                b'"' => parse_string(t, pos).map(|s| AlmideValue::Str(AlmideString::from(s))),
                 b'{' => parse_object(t, pos),
                 b'[' => parse_array(t, pos),
                 b't' | b'f' => parse_bool(t, pos),
@@ -220,7 +220,7 @@ pub fn almide_json_get(j: &AlmideValue, key: &str) -> Option<AlmideValue> {
     }
 }
 
-pub fn almide_json_get_string(j: &AlmideValue, key: &str) -> Option<AlmideString> { let __almide_v: Option<String> = (|| {
+pub fn almide_json_get_string(j: &AlmideValue, key: &str) -> Option<AlmideString> { let __almide_v: Option<AlmideString> = (|| {
     match almide_json_get(j, key)? { AlmideValue::Str(s) => Some(s), _ => None }
 })(); __almide_v.into_almide() }
 
@@ -246,7 +246,7 @@ pub fn almide_json_get_array(j: &AlmideValue, key: &str) -> Option<Vec<AlmideVal
 
 // ── Keyless extractors ──
 
-pub fn almide_json_to_string(j: &AlmideValue) -> Option<AlmideString> { let __almide_v: Option<String> = (|| {
+pub fn almide_json_to_string(j: &AlmideValue) -> Option<AlmideString> { let __almide_v: Option<AlmideString> = (|| {
     match j { AlmideValue::Str(s) => Some(s.clone()), _ => None }
 })(); __almide_v.into_almide() }
 
@@ -277,7 +277,7 @@ pub fn almide_json_to_map(j: &AlmideValue) -> Option<AlmideMap<AlmideString, Alm
         AlmideValue::Object(entries) => {
             let map: AlmideMap<String, String> = entries.iter().map(|(k, v)| {
                 let s = match v {
-                    AlmideValue::Str(s) => s.clone(),
+                    AlmideValue::Str(s) => s.to_string(),
                     _ => String::from(almide_rt_value_stringify(v)),
                 };
                 (k.to_string(), s)
@@ -293,7 +293,7 @@ pub fn almide_json_object(entries: &[(AlmideString, AlmideValue)]) -> AlmideValu
 }
 
 pub fn almide_json_from_float(n: f64) -> AlmideValue { AlmideValue::Float(n) }
-pub fn almide_json_from_string(s: &str) -> AlmideValue { AlmideValue::Str(s.to_string()) }
+pub fn almide_json_from_string(s: &str) -> AlmideValue { AlmideValue::Str(AlmideString::from(s)) }
 pub fn almide_json_from_int(n: i64) -> AlmideValue { AlmideValue::Int(n) }
 pub fn almide_json_from_bool(b: bool) -> AlmideValue { AlmideValue::Bool(b) }
 pub fn almide_json_array(items: &[AlmideValue]) -> AlmideValue { AlmideValue::Array(items.to_vec()) }
