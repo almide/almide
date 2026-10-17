@@ -179,6 +179,9 @@ fn structural_test_render(test_file: &str, source_text: &str, ir_program: &almid
         Ok(ir) => ir,
         Err(e) => { wall("lower", e); return None; }
     };
+    // ALMIDE_WASM_ALLOC_COUNT (#2407): arm the counters as `almide run
+    // --target wasm` does; the embedded run below prints the line.
+    let _alloc_count = almide_base::env::flag("ALMIDE_WASM_ALLOC_COUNT").then(almide_wasm::alloc_count::CountGuard::set);
     let (bytes, host_ops) = match almide_wasm::emit_program_with_ops(&ir) {
         Ok(x) => x,
         Err(e) => { wall("emit", format!("{e:?}")); return None; }
@@ -212,6 +215,19 @@ fn structural_test_render(test_file: &str, source_text: &str, ir_program: &almid
         err(&format!("[route] {}: structural leg rendered the test module ({} bytes)", test_file, wasi.len()));
     }
     Some(TestModule { almide: bytes, wasi: Some(wasi) })
+}
+
+/// ALMIDE_WASM_ALLOC_COUNT (#2407): the armed test module's counters, in
+/// `almide run --target wasm`'s `__ALMD_WASM_ALLOC` line form. They count the
+/// run's own instance: an `assert_aborts` child is a store of its own.
+fn report_alloc_count(r: &almide_wasm_run::RunResult) {
+    if !almide_base::env::flag("ALMIDE_WASM_ALLOC_COUNT") {
+        return;
+    }
+    match r.alloc_count {
+        Some(c) => eprintln!("__ALMD_WASM_ALLOC {c} heap_end={}", r.heap_end.map_or_else(|| "?".to_string(), |h| h.to_string())),
+        None => eprintln!("__ALMD_WASM_ALLOC absent (the module carries no counters)"),
+    }
 }
 
 /// Which runtime executes the wasm leg of `almide test` (#3046).
@@ -448,7 +464,10 @@ pub(super) fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::P
             // real environment and cwd, which `-S inherit-env=y` and the
             // ALMIDE_CWD pin gave the CLI route.
             return match almide_wasm_run::run_wasm_unbounded(&module.almide) {
-                Ok(r) => wasm_run_outcome(test_file, counts, module.reported_len(), r.exit == 0, &r.stdout, &r.stderr),
+                Ok(r) => {
+                    report_alloc_count(&r);
+                    wasm_run_outcome(test_file, counts, module.reported_len(), r.exit == 0, &r.stdout, &r.stderr)
+                }
                 // A module the host cannot instantiate FAILS, as the CLI's
                 // non-zero exit did — it is not a benign skip.
                 Err(e) => wasm_run_outcome(test_file, counts, module.reported_len(), false, "", &format!("Error: embedded wasm host: {e:#}\n")),
