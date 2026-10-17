@@ -112,8 +112,16 @@ fn extra_goal(rng: &mut SplitMix64) -> GenType {
 /// effects are other functions' inspections (and a stock export refuses a
 /// handler that reads files, C-375); a leg-dependent encoding or a
 /// host-decided value would differ by contract, not by defect.
+/// A host module's functions stay out even when declared pure: their
+/// arguments are built from the fixtures (`net.tcp_is_open` over a
+/// connection to the echo fixture), which only a socket host can reach.
 pub fn handler_catalogue(catalogue: &[Signature]) -> Vec<Signature> {
-    catalogue.iter().filter(|s| !s.effect && s.observed_through.is_none() && s.verdict.is_none()).cloned().collect()
+    const HOST_MODULES: &[&str] = &["net", "process", "fs", "env", "io", "args", "random"];
+    catalogue
+        .iter()
+        .filter(|s| !s.effect && s.observed_through.is_none() && s.verdict.is_none() && !HOST_MODULES.contains(&s.module))
+        .cloned()
+        .collect()
 }
 
 /// Status codes a handler answers with most of the time: in the reason
@@ -262,7 +270,12 @@ mod tests {
         assert!(cat.iter().any(|s| s.module == "http" && s.func == "with_headers"), "the response builders are pure and drawn");
         let gen = |seed| synthesize_handler(&mut SplitMix64::for_program(7, seed), &cat);
         assert_eq!(gen(3), gen(3));
-        let many: Vec<String> = (0..64).map(gen).collect();
+        let many: Vec<String> = (0..400).map(gen).collect();
+        // A pure handler reaches no effect, not even through a nominal's
+        // template (the fixture address is read with `env.get`).
+        for h in &many {
+            assert!(!h.contains("env.") && !h.contains("http.start(") && !h.contains("net."), "an effect in a pure handler:\n{h}");
+        }
         assert!(many.iter().all(|h| h.starts_with("fn app(req: HttpRequest) -> Result[HttpResponse, String] = {\n") && h.contains("  let resp: HttpResponse = ")));
         assert!(many.iter().any(|h| h.contains(" then err(")), "some handlers take the err path");
         assert!(many.iter().any(|h| h.contains("http.req_body(req)")), "handlers read the request");

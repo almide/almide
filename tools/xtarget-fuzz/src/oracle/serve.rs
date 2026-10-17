@@ -416,7 +416,9 @@ fn kill_group(child: &mut Child) {
 #[derive(Debug, PartialEq, Eq)]
 pub struct Observed {
     pub version: String,
-    pub status: u16,
+    pub status: i128,
+    /// The status line's code as written.
+    status_token: String,
     /// Lowercased name → values in wire order: the order between different
     /// names is dropped, the order within one name kept.
     pub headers: BTreeMap<String, Vec<String>>,
@@ -429,14 +431,20 @@ pub struct Observed {
     connection: Vec<String>,
     /// The bytes after the head, before de-framing.
     raw_body_len: usize,
+    /// The first header line outside the field grammar, if any.
+    bad_field: Option<String>,
 }
 
 /// Parse one HTTP/1.1 response read to the connection's close.
 pub fn observe(raw: &[u8]) -> Result<Observed, String> {
     let mut raw = raw;
     // A `100 Continue` interim head comes before the response proper.
-    while raw.starts_with(b"HTTP/1.1 100") {
+    // A `100` with nothing after it was the final answer, and is read as one.
+    while raw.starts_with(b"HTTP/1.1 100 ") {
         let cut = raw.windows(4).position(|w| w == b"\r\n\r\n").ok_or("an interim head without its end")?;
+        if cut + 4 == raw.len() {
+            break;
+        }
         raw = &raw[cut + 4..];
     }
     let cut = raw.windows(4).position(|w| w == b"\r\n\r\n").ok_or("no end of the response head")?;
@@ -446,11 +454,15 @@ pub fn observe(raw: &[u8]) -> Result<Observed, String> {
     let status_line = lines.next().unwrap_or_default();
     let mut parts = status_line.splitn(3, ' ');
     let version = parts.next().unwrap_or_default().to_string();
-    let status = parts.next().and_then(|c| c.parse::<u16>().ok()).ok_or_else(|| format!("no status code in {status_line:?}"))?;
+    let status_token = parts.next().unwrap_or_default().to_string();
+    // Any integer is read as a value: what a host wrote is compared, and
+    // whether it is a status code at all is the `status` verdict.
+    let status = status_token.parse::<i128>().map_err(|_| format!("no status code in {status_line:?}"))?;
     let reason = parts.next().unwrap_or_default().to_string();
     let mut o = Observed {
         version,
         status,
+        status_token,
         headers: BTreeMap::new(),
         body: Vec::new(),
         reason,
@@ -459,9 +471,15 @@ pub fn observe(raw: &[u8]) -> Result<Observed, String> {
         transfer_encoding: Vec::new(),
         connection: Vec::new(),
         raw_body_len: rest.len(),
+        bad_field: None,
     };
     for line in lines {
         let (name, value) = line.split_once(':').ok_or_else(|| format!("a header line without a colon: {line:?}"))?;
+        // RFC 9110 §5.1 / §5.5: a field name is a token, a field value holds
+        // no control byte but HTAB.
+        if o.bad_field.is_none() && (!is_token(name) || value.bytes().any(|b| (b < 0x20 && b != b'\t') || b == 0x7f)) {
+            o.bad_field = Some(format!("the field {:?}: {:?} is not a token name with a control-free value", name, value));
+        }
         let name = name.to_ascii_lowercase();
         let value = value.trim_matches([' ', '\t']).to_string();
         match name.as_str() {
@@ -473,7 +491,13 @@ pub fn observe(raw: &[u8]) -> Result<Observed, String> {
         }
     }
     let chunked = o.transfer_encoding.iter().any(|v| v.to_ascii_lowercase().contains("chunked"));
-    o.body = if chunked {
+    // RFC 9110 §6.4.1: a 1xx, 204 or 304 has no content whatever its
+    // framing fields say (a 304's Content-Length describes the selected
+    // representation, §8.6); the bytes after its head are judged by the
+    // framing verdict.
+    o.body = if o.bodiless() {
+        Vec::new()
+    } else if chunked {
         dechunk(rest)?
     } else if let Some(n) = o.content_length.first().and_then(|v| v.parse::<usize>().ok()) {
         rest.get(..n).ok_or_else(|| format!("content-length {n} but {} body bytes", rest.len()))?.to_vec()
@@ -499,6 +523,11 @@ fn dechunk(mut rest: &[u8]) -> Result<Vec<u8>, String> {
 }
 
 impl Observed {
+    /// A status whose response has no content (RFC 9110 §6.4.1).
+    fn bodiless(&self) -> bool {
+        self.status == 204 || self.status == 304 || (100..200).contains(&self.status)
+    }
+
     /// The verdicts on the host-managed parts (ADR-0027 D3), each `ok` or
     /// what failed. `window`: the system clock just before the request was
     /// sent and just after its answer was read.
@@ -516,6 +545,15 @@ impl Observed {
         };
         let chunked = self.transfer_encoding.iter().any(|v| v.eq_ignore_ascii_case("chunked"));
         let framing = match (self.content_length.as_slice(), self.transfer_encoding.as_slice()) {
+            // §6.4.1 / §8.6: nothing follows a bodiless head; a 304 may carry
+            // one Content-Length, a 1xx or 204 none, and none carries a
+            // Transfer-Encoding.
+            (cl, te) if self.bodiless() => match (self.raw_body_len, cl, te) {
+                (0, [], []) => Ok(()),
+                (0, [n], []) if self.status == 304 && n.parse::<usize>().is_ok() => Ok(()),
+                (0, cl, te) => Err(format!("a {} with content-length {cl:?} and transfer-encoding {te:?}", self.status)),
+                (extra, _, _) => Err(format!("{extra} bytes followed the head of a {}", self.status)),
+            },
             ([], []) => Ok(()),
             ([], _) if chunked && self.transfer_encoding.len() == 1 => Ok(()),
             ([], te) => Err(format!("transfer-encoding {te:?} is not chunked")),
@@ -538,7 +576,16 @@ impl Observed {
         } else {
             Err(format!("reason phrase {:?} has a control byte", self.reason))
         };
-        vec![("date", date), ("framing", framing), ("connection", connection), ("reason", reason)]
+        // RFC 9112 §4: status-code = 3DIGIT; RFC 9110 §15: values outside
+        // 100..=599 are invalid, and a 1xx is interim, never the final answer
+        // (the client reads on for one that never comes).
+        let status = if self.status_token.len() == 3 && self.status_token.bytes().all(|b| b.is_ascii_digit()) && (200..=599).contains(&self.status) {
+            Ok(())
+        } else {
+            Err(format!("the final status {:?} is not a 3-digit code in 200..=599", self.status_token))
+        };
+        let fields = self.bad_field.clone().map_or(Ok(()), Err);
+        vec![("status", status), ("fields", fields), ("date", date), ("framing", framing), ("connection", connection), ("reason", reason)]
     }
 }
 
@@ -704,7 +751,7 @@ mod tests {
         assert_eq!(o.body, b"ok");
         let req = ready();
         let line = transcript_line(0, &req, raw, window());
-        assert_eq!(line, "#0 GET / -> HTTP/1.1 418 [x-a: v; x-b: 1 | 2] body=ok (date ok, framing ok, connection ok, reason ok)\n");
+        assert_eq!(line, "#0 GET / -> HTTP/1.1 418 [x-a: v; x-b: 1 | 2] body=ok (status ok, fields ok, date ok, framing ok, connection ok, reason ok)\n");
         // The same answer from a host that writes no date, frames by chunks
         // and has its own reason phrase is the same line.
         let other = b"HTTP/1.1 418 OK\r\nx-a: v\r\nTransfer-Encoding: chunked\r\nX-B: 1\r\nX-B: 2\r\nConnection: close\r\n\r\n1\r\no\r\n1\r\nk\r\n0\r\n\r\n";
@@ -721,12 +768,46 @@ mod tests {
             b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nokEXTRA",
             b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\ntransfer-encoding: chunked\r\n\r\n2\r\nok\r\n0\r\n\r\n",
             b"HTTP/1.1 200 O\x01K\r\ncontent-length: 2\r\n\r\nok",
+            b"HTTP/1.1 200 OK\r\nx-a: a\x01b\r\ncontent-length: 2\r\n\r\nok",
+            b"HTTP/1.1 200 OK\r\nx a: v\r\ncontent-length: 2\r\n\r\nok",
+            b"HTTP/1.1 40 OK\r\ncontent-length: 2\r\n\r\nok",
         ] {
             let line = transcript_line(0, &req, broken, window());
             assert_ne!(line, sound);
             assert!(!verdicts_hold(&line), "{line}");
         }
         assert!(verdicts_hold(&sound));
+    }
+
+    #[test]
+    fn a_final_status_outside_200_to_599_or_not_three_digits_fails_its_verdict() {
+        let req = ready();
+        let line = |code: &str| transcript_line(0, &req, format!("HTTP/1.1 {code} \r\ncontent-length: 0\r\n\r\n").as_bytes(), window());
+        for ok in ["200", "418", "599", "299"] {
+            assert!(verdicts_hold(&line(ok)), "{}", line(ok));
+        }
+        for bad in ["40", "127", "103", "1000", "-1", "-9223372036854775808", "2147483647", "600"] {
+            let l = line(bad);
+            assert!(!verdicts_hold(&l) && l.contains(&format!("status FAILED: the final status \"{bad}\"")), "{l}");
+        }
+        // A `100` alone is the final answer, not an interim head to skip.
+        assert!(line("100").contains("-> HTTP/1.1 100 [] body="), "{}", line("100"));
+        // An interim 100 before the final answer is skipped.
+        let both = transcript_line(0, &req, b"HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok", window());
+        assert!(both.contains("-> HTTP/1.1 200 [] body=ok (status ok"), "{both}");
+    }
+
+    #[test]
+    fn a_bodiless_status_has_no_content_whatever_its_framing_fields_say() {
+        let req = ready();
+        let l = |raw: &[u8]| transcript_line(0, &req, raw, window());
+        // A 304 may name the representation's length; nothing follows it.
+        assert!(verdicts_hold(&l(b"HTTP/1.1 304 Not Modified\r\nContent-Length: 2\r\n\r\n")));
+        assert!(verdicts_hold(&l(b"HTTP/1.1 204 No Content\r\n\r\n")));
+        assert_eq!(l(b"HTTP/1.1 304 Not Modified\r\nContent-Length: 2\r\n\r\n"), l(b"HTTP/1.1 304 X\r\n\r\n"));
+        for bad in [&b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n"[..], b"HTTP/1.1 304 N\r\n\r\nok", b"HTTP/1.1 204 N\r\ntransfer-encoding: chunked\r\n\r\n"] {
+            assert!(l(bad).contains("framing FAILED"), "{}", l(bad));
+        }
     }
 
     #[test]
@@ -785,7 +866,7 @@ mod tests {
         assert_eq!(sent[0], "GET / HTTP/1.1");
         let lines: Vec<&str> = s.transcript.lines().collect();
         assert_eq!(lines.len(), n + 1);
-        assert_eq!(lines[0], "#0 GET / -> HTTP/1.1 200 [] body=/ (date ok, framing ok, connection ok, reason ok)");
+        assert_eq!(lines[0], "#0 GET / -> HTTP/1.1 200 [] body=/ (status ok, fields ok, date ok, framing ok, connection ok, reason ok)");
         // `sleep` dies of the SIGTERM: its exit is the signal, which a
         // served program's would not be (a socket host returns from serve).
         assert_eq!(*lines.last().unwrap(), "exit signal 15");
