@@ -169,12 +169,12 @@ pub fn codegen(program: &mut IrProgram, target: Target) -> CodegenOutput {
 
 /// Matrix ops with a native (Rust) intrinsic but no WASM lowering: no primitive
 /// decomposition (`@rewrite` desugar) and no hand-written wasm arm, so the wasm
-/// emitter cannot lower a call to them. Currently just `qwen3_block_q1_0_kv` — a
-/// packed-GGUF Qwen3 block (RoPE + GQA + KV-cache, 3-matrix tuple return) that
-/// only exists as a native fast path. Add an op here if you introduce another
+/// emitter cannot lower a call to them. Empty since #1827: the packed-GGUF Qwen3
+/// blocks and their GEMVs link self-hosted bodies on wasm
+/// (stdlib/matrix_shape.almd). Add an op here only if you introduce another
 /// native-only matrix intrinsic; the CLI then rejects WASM builds that call it
 /// with a clear message instead of letting the emitter ICE.
-pub const NATIVE_ONLY_MATRIX_OPS: &[&str] = &["qwen3_block_q1_0_kv"];
+pub const NATIVE_ONLY_MATRIX_OPS: &[&str] = &[];
 
 /// If the program calls a native-only matrix op (see [`NATIVE_ONLY_MATRIX_OPS`]),
 /// return its name. The CLI uses this to reject WASM builds at build time with a
