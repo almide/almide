@@ -1,0 +1,9 @@
+// A helper fn is not a test block: there is no harness to report to, and a
+// program that wants to abort just aborts.
+import testing
+
+fn check_aborts() -> Unit = testing.assert_aborts("boom", () => panic("boom"))
+
+test "a panic aborts" {
+  check_aborts()
+}

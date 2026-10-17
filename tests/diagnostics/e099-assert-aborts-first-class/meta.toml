@@ -1,0 +1,4 @@
+expects_code = "E099"
+expects_error = "testing.assert_aborts is used as a value"
+hint_substring = "call it directly in a test block"
+expects_line_col = "6:15"

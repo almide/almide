@@ -1,0 +1,6 @@
+// The call is direct.
+import testing
+
+test "a panic aborts" {
+  testing.assert_aborts("boom", () => panic("boom"))
+}

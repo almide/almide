@@ -1,0 +1,8 @@
+// A first-class use hides the call site, so the closure it will run cannot be
+// lifted into a child.
+import testing
+
+test "a panic aborts" {
+  let check = testing.assert_aborts
+  check("boom", () => panic("boom"))
+}

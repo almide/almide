@@ -5014,3 +5014,15 @@ status    = "active"
 evidence  = [
   { path = "spec/embedded_cross/net_unix_errors.almd", class = "fixture" },
 ]
+[[contract]]
+id        = "C-384"
+spec      = "ALS-T30"
+title     = "testing.assert_aborts runs only its capture-free closure in a fresh child and passes iff the child ends in a defined abort whose text contains the expected substring, identically on native and wasm"
+statement = "ALS-T30 (ADR-0029): inside a test block, `testing.assert_aborts(s, f)` runs only `f` — a lambda that captures nothing, checked at compile time — in a fresh child process (native) or a fresh instance of the same module (wasm), and passes iff that child ends in a defined abort (exit status 1 with an `Error: ` / `PANIC: ` header on stderr) whose text, from the last header to the end of stderr, contains `s`, identically under `almide test` on native and on `--target wasm`. Every abort counts (`panic`, index out of bounds, division by zero, stack overflow, a failed assert in its T18 block form, which the closure takes because it runs as a program body). Returning normally, any other exit status, a raw panic or a trap fails it with an `expected: abort containing <s>` / `found: …` block. The test continues after each call, and several calls in one test each get their own child."
+since     = "0.68.0"
+status    = "active"
+evidence  = [
+  { path = "spec/stdlib/coverage_assert_aborts_test.almd", class = "fixture" },
+  { path = "spec/stdlib/testing_polarity_test.almd", class = "fixture" },
+  { path = "spec/lang/assert_aborts_continues_test.almd", class = "fixture" },
+]
