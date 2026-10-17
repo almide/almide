@@ -77,6 +77,9 @@ pub struct Signature {
     /// ([`LEG_DEPENDENT_ENCODERS`]): the bytes differ by leg by contract, the
     /// decoded payload does not.
     pub observed_through: Option<&'static str>,
+    /// A host-decided result ([`super::verdicts`]): each call is checked
+    /// against its properties and stands for a fixed value after.
+    pub verdict: Option<&'static super::verdicts::Verdict>,
 }
 
 /// Effect modules whose functions are reproducible inside the fuzzer's
@@ -197,6 +200,12 @@ const BUNDLED_MODULES: &[(&str, &str, bool)] = &[
     // The asserts abort the same way on every leg outside a test block
     // (C-381, C-339), so a failing one is an observable, comparable outcome.
     ("testing", include_str!("../../../../stdlib/testing.almd"), true),
+    // Host-decided results only (`verdicts.rs`), and `process.env` over the
+    // sandbox's fixed env: every other function of these is an effect a
+    // sandbox does not reproduce.
+    ("random", include_str!("../../../../stdlib/random.almd"), true),
+    ("process", include_str!("../../../../stdlib/process.almd"), true),
+    ("mem", include_str!("../../../../stdlib/mem.almd"), true),
 ];
 
 /// The ADR-0001 clock constructors (`duration.ms(n)`, `compute.s(n)`, …):
@@ -220,6 +229,7 @@ fn clock_constructors() -> Vec<Signature> {
                 effect: false,
                 lifted: false,
                 observed_through: None,
+                verdict: None,
             });
         }
     }
@@ -464,11 +474,13 @@ fn signature_from_decl(module: &'static str, decl: &Decl) -> Option<Signature> {
     // Effect functions only from the sandboxed modules: a clock, a socket or
     // a process is not reproducible across legs.
     let effect = effect.unwrap_or(false);
-    if effect && !SANDBOXED_EFFECT_MODULES.contains(&module) && !HOSTLESS_EFFECT_MODULES.contains(&module) {
+    let func = sym_str(*name).to_string();
+    // A host-decided result is admitted past both filters below: its calls
+    // are checked and replaced by a fixed value (`verdicts.rs`).
+    let verdict = super::verdicts::verdict_for(module, &func);
+    if verdict.is_none() && effect && !SANDBOXED_EFFECT_MODULES.contains(&module) && !HOSTLESS_EFFECT_MODULES.contains(&module) {
         return None;
     }
-
-    let func = sym_str(*name).to_string();
 
     // A `__`-prefixed fn is a module's private helper (the stdlib inspection
     // ledger's rule, tests/stdlib_inspection_test.rs): not public surface, so
@@ -480,7 +492,7 @@ fn signature_from_decl(module: &'static str, decl: &Decl) -> Option<Signature> {
     // Skip non-deterministic functions (the `effect` flag misses these).
     // Sourced from the shared `NamedDenylist` so the synthesis and
     // mutation paths deny the same surface.
-    if NamedDenylist::is_denied_function(module, &func) {
+    if verdict.is_none() && NamedDenylist::is_denied_function(module, &func) {
         return None;
     }
 
@@ -503,7 +515,8 @@ fn signature_from_decl(module: &'static str, decl: &Decl) -> Option<Signature> {
     }
     let ret = SigType::from_type_expr(return_type)?;
 
-    let weight = weight_for(module, &func);
+    // Weight 0: only a campaign focused on it draws a host-decided call.
+    let weight = if verdict.is_some() { 0 } else { weight_for(module, &func) };
     let observed_through = LEG_DEPENDENT_ENCODERS.iter().find(|(e, _)| *e == format!("{module}.{func}")).map(|(_, d)| *d);
 
     Some(Signature {
@@ -517,6 +530,7 @@ fn signature_from_decl(module: &'static str, decl: &Decl) -> Option<Signature> {
         effect,
         lifted: effect && !matches!(body.as_ref().map(|b| &b.kind), None | Some(ExprKind::Hole)),
         observed_through,
+        verdict,
     })
 }
 
