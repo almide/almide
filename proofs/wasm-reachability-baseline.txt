@@ -105,10 +105,10 @@ matrix.mul_f32 :: UNPROBEABLE :: parameter type outside the synthesizer
 matrix.mul_f32_scaled :: UNPROBEABLE :: parameter type outside the synthesizer
 matrix.mul_f32_t :: UNPROBEABLE :: parameter type outside the synthesizer
 matrix.mul_f32_t_scaled :: UNPROBEABLE :: parameter type outside the synthesizer
-net.shm_create :: HOST_CAPABILITY :: native-only-forever: stock WASI has no Unix-domain sockets, descriptor passing or shared-memory files (proofs/target-availability.toml, #1423)
-net.shm_read :: HOST_CAPABILITY :: native-only-forever: stock WASI has no Unix-domain sockets, descriptor passing or shared-memory files (proofs/target-availability.toml, #1423)
-net.shm_resize :: HOST_CAPABILITY :: native-only-forever: stock WASI has no Unix-domain sockets, descriptor passing or shared-memory files (proofs/target-availability.toml, #1423)
-net.shm_write :: HOST_CAPABILITY :: native-only-forever: stock WASI has no Unix-domain sockets, descriptor passing or shared-memory files (proofs/target-availability.toml, #1423)
+net.shm_create :: HOST_CAPABILITY :: WASI has neither Unix-domain sockets nor shared memory: the stock artifact refuses it (E081); the embedded host serves it through interim ops 104..=116 (proofs/target-availability.toml, #3620)
+net.shm_read :: HOST_CAPABILITY :: WASI has neither Unix-domain sockets nor shared memory: the stock artifact refuses it (E081); the embedded host serves it through interim ops 104..=116 (proofs/target-availability.toml, #3620)
+net.shm_resize :: HOST_CAPABILITY :: WASI has neither Unix-domain sockets nor shared memory: the stock artifact refuses it (E081); the embedded host serves it through interim ops 104..=116 (proofs/target-availability.toml, #3620)
+net.shm_write :: HOST_CAPABILITY :: WASI has neither Unix-domain sockets nor shared memory: the stock artifact refuses it (E081); the embedded host serves it through interim ops 104..=116 (proofs/target-availability.toml, #3620)
 net.tcp_accept :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_accept needs a declared capability not in this brick
 net.tcp_available :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_available needs a declared capability not in this brick
 net.tcp_close :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_close needs a declared capability not in this brick
@@ -122,15 +122,15 @@ net.tcp_read_exact :: HOST_CAPABILITY :: main is outside the MIR-lowering subset
 net.tcp_read_timeout :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_read_timeout needs a declared capability not in this brick
 net.tcp_set_timeout :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_set_timeout needs a declared capability not in this brick
 net.tcp_write :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_write needs a declared capability not in this brick
-net.unix_accept :: HOST_CAPABILITY :: native-only-forever: stock WASI has no Unix-domain sockets, descriptor passing or shared-memory files (proofs/target-availability.toml, #1423)
-net.unix_close :: HOST_CAPABILITY :: native-only-forever: stock WASI has no Unix-domain sockets, descriptor passing or shared-memory files (proofs/target-availability.toml, #1423)
-net.unix_connect :: HOST_CAPABILITY :: native-only-forever: stock WASI has no Unix-domain sockets, descriptor passing or shared-memory files (proofs/target-availability.toml, #1423)
-net.unix_listen :: HOST_CAPABILITY :: native-only-forever: stock WASI has no Unix-domain sockets, descriptor passing or shared-memory files (proofs/target-availability.toml, #1423)
-net.unix_poll :: HOST_CAPABILITY :: native-only-forever: stock WASI has no Unix-domain sockets, descriptor passing or shared-memory files (proofs/target-availability.toml, #1423)
-net.unix_recv :: HOST_CAPABILITY :: native-only-forever: stock WASI has no Unix-domain sockets, descriptor passing or shared-memory files (proofs/target-availability.toml, #1423)
-net.unix_send :: HOST_CAPABILITY :: native-only-forever: stock WASI has no Unix-domain sockets, descriptor passing or shared-memory files (proofs/target-availability.toml, #1423)
-net.unix_take_fds :: HOST_CAPABILITY :: native-only-forever: stock WASI has no Unix-domain sockets, descriptor passing or shared-memory files (proofs/target-availability.toml, #1423)
-net.unix_wait :: HOST_CAPABILITY :: native-only-forever: stock WASI has no Unix-domain sockets, descriptor passing or shared-memory files (proofs/target-availability.toml, #1423)
+net.unix_accept :: HOST_CAPABILITY :: WASI has neither Unix-domain sockets nor shared memory: the stock artifact refuses it (E081); the embedded host serves it through interim ops 104..=116 (proofs/target-availability.toml, #3620)
+net.unix_close :: HOST_CAPABILITY :: WASI has neither Unix-domain sockets nor shared memory: the stock artifact refuses it (E081); the embedded host serves it through interim ops 104..=116 (proofs/target-availability.toml, #3620)
+net.unix_connect :: HOST_CAPABILITY :: WASI has neither Unix-domain sockets nor shared memory: the stock artifact refuses it (E081); the embedded host serves it through interim ops 104..=116 (proofs/target-availability.toml, #3620)
+net.unix_listen :: HOST_CAPABILITY :: WASI has neither Unix-domain sockets nor shared memory: the stock artifact refuses it (E081); the embedded host serves it through interim ops 104..=116 (proofs/target-availability.toml, #3620)
+net.unix_poll :: HOST_CAPABILITY :: WASI has neither Unix-domain sockets nor shared memory: the stock artifact refuses it (E081); the embedded host serves it through interim ops 104..=116 (proofs/target-availability.toml, #3620)
+net.unix_recv :: HOST_CAPABILITY :: WASI has neither Unix-domain sockets nor shared memory: the stock artifact refuses it (E081); the embedded host serves it through interim ops 104..=116 (proofs/target-availability.toml, #3620)
+net.unix_send :: HOST_CAPABILITY :: WASI has neither Unix-domain sockets nor shared memory: the stock artifact refuses it (E081); the embedded host serves it through interim ops 104..=116 (proofs/target-availability.toml, #3620)
+net.unix_take_fds :: HOST_CAPABILITY :: WASI has neither Unix-domain sockets nor shared memory: the stock artifact refuses it (E081); the embedded host serves it through interim ops 104..=116 (proofs/target-availability.toml, #3620)
+net.unix_wait :: HOST_CAPABILITY :: WASI has neither Unix-domain sockets nor shared memory: the stock artifact refuses it (E081); the embedded host serves it through interim ops 104..=116 (proofs/target-availability.toml, #3620)
 result.flat_map :: UNPROBEABLE :: no candidate shape builds natively
 result.flatten :: UNPROBEABLE :: no candidate shape builds natively
 result.is_err :: UNPROBEABLE :: no candidate shape builds natively
