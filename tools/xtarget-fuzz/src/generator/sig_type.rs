@@ -43,6 +43,8 @@ pub enum SigType {
     /// (`Result[T, HttpResponse]`); see [`SigType::instantiate`].
     Result(Box<SigType>, Box<SigType>),
     Tuple2(Box<SigType>, Box<SigType>),
+    /// `(a, b, c)` — see [`GenType::Tuple3`].
+    Tuple3(Box<SigType>, Box<SigType>, Box<SigType>),
     Map(Box<SigType>, Box<SigType>),
     Set(Box<SigType>),
     /// `(p...) -> r` — a function/closure parameter (HOF position).
@@ -139,6 +141,11 @@ impl SigType {
                 Box::new(Self::from_type_expr(&elements[0])?),
                 Box::new(Self::from_type_expr(&elements[1])?),
             )),
+            TypeExpr::Tuple { elements } if elements.len() == 3 => Some(SigType::Tuple3(
+                Box::new(Self::from_type_expr(&elements[0])?),
+                Box::new(Self::from_type_expr(&elements[1])?),
+                Box::new(Self::from_type_expr(&elements[2])?),
+            )),
             // Records, variants, unions, wider tuples, const-literals:
             // outside the universe.
             _ => None,
@@ -157,6 +164,11 @@ impl SigType {
             SigType::Result(a, b) | SigType::Tuple2(a, b) | SigType::Map(a, b) => {
                 a.collect_vars(out);
                 b.collect_vars(out);
+            }
+            SigType::Tuple3(a, b, c) => {
+                a.collect_vars(out);
+                b.collect_vars(out);
+                c.collect_vars(out);
             }
             SigType::Fn(ps, r) => {
                 for p in ps {
@@ -195,6 +207,11 @@ impl SigType {
             SigType::Tuple2(a, b) => {
                 a.collect_forced_bindings(out);
                 b.collect_forced_bindings(out);
+            }
+            SigType::Tuple3(a, b, c) => {
+                a.collect_forced_bindings(out);
+                b.collect_forced_bindings(out);
+                c.collect_forced_bindings(out);
             }
             SigType::Fn(ps, r) => {
                 for p in ps {
@@ -242,6 +259,11 @@ impl SigType {
                 Box::new(a.instantiate(subst)?),
                 Box::new(b.instantiate(subst)?),
             )),
+            SigType::Tuple3(a, b, c) => Some(GenType::Tuple3(
+                Box::new(a.instantiate(subst)?),
+                Box::new(b.instantiate(subst)?),
+                Box::new(c.instantiate(subst)?),
+            )),
             SigType::Map(_k, v) => Some(GenType::Map(Box::new(v.instantiate(subst)?))),
             SigType::Set(e) => Some(e.instantiate(subst)?).filter(GenType::is_set_elem).map(|e| GenType::Set(Box::new(e))),
             // A function type is not a producible value, nor is Never.
@@ -285,6 +307,9 @@ impl SigType {
             (SigType::Result(ok, err), GenType::ResultNom(g, k)) => matches!(**err, SigType::Nominal(e) if e == *k) && ok.unify_with_goal(g, subst),
             (SigType::Tuple2(a, b), GenType::Tuple2(ga, gb)) => {
                 a.unify_with_goal(ga, subst) && b.unify_with_goal(gb, subst)
+            }
+            (SigType::Tuple3(a, b, c), GenType::Tuple3(ga, gb, gc)) => {
+                a.unify_with_goal(ga, subst) && b.unify_with_goal(gb, subst) && c.unify_with_goal(gc, subst)
             }
             (SigType::Map(_k, v), GenType::Map(gv)) => v.unify_with_goal(gv, subst),
             (SigType::Set(e), GenType::Set(g)) => e.unify_with_goal(g, subst),

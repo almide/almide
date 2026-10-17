@@ -35,9 +35,13 @@ pub enum GenType {
     /// nominal's own constructors, observed with the error side taken through
     /// the nominal's own readers ([`super::nominal`]).
     ResultNom(Box<GenType>, &'static str),
-    /// `(a, b)` — pairs only; wider tuples add little divergence value
-    /// for a lot of grammar surface.
+    /// `(a, b)` — the pair the value grammar builds and consumes.
     Tuple2(Box<GenType>, Box<GenType>),
+    /// `(a, b, c)` — only ever a RETURN type (the fused Qwen3 layers'
+    /// `(Matrix, Matrix, Matrix)`, #1827): no goal is a triple, so the
+    /// grammar never has to build one, but a function returning one must be
+    /// catalogued for its inspection to run.
+    Tuple3(Box<GenType>, Box<GenType>, Box<GenType>),
     /// `Map[String, value]` — keys fixed to `String` (the common,
     /// hashable, byte-comparable case).
     Map(Box<GenType>),
@@ -108,6 +112,15 @@ impl GenType {
                 a.render_into(out);
                 out.push_str(", ");
                 b.render_into(out);
+                out.push(')');
+            }
+            GenType::Tuple3(a, b, c) => {
+                out.push('(');
+                a.render_into(out);
+                out.push_str(", ");
+                b.render_into(out);
+                out.push_str(", ");
+                c.render_into(out);
                 out.push(')');
             }
             GenType::Map(v) => {
@@ -220,6 +233,13 @@ impl GenType {
                 let (pb, eb) = b.observe(&r, depth + 1)?;
                 Some((format!("let ({l}, {r}) = {v}\n  {pa}{pb}"), format!("({ea}, {eb})")))
             }
+            GenType::Tuple3(a, b, c) => {
+                let (l, m, r) = (format!("{x}a"), format!("{x}b"), format!("{x}c"));
+                let (pa, ea) = a.observe(&l, depth + 1)?;
+                let (pb, eb) = b.observe(&m, depth + 1)?;
+                let (pc, ec) = c.observe(&r, depth + 1)?;
+                Some((format!("let ({l}, {m}, {r}) = {v}\n  {pa}{pb}{pc}"), format!("({ea}, {eb}, {ec})")))
+            }
             _ => None,
         }
     }
@@ -231,6 +251,7 @@ impl GenType {
             GenType::ResultNom(e, k) => e.observe_calls_effect() || GenType::Nominal(k).observe_calls_effect(),
             GenType::List(e) | GenType::Option(e) | GenType::Result(e) | GenType::Map(e) | GenType::Set(e) => e.observe_calls_effect(),
             GenType::Tuple2(a, b) => a.observe_calls_effect() || b.observe_calls_effect(),
+            GenType::Tuple3(a, b, c) => a.observe_calls_effect() || b.observe_calls_effect() || c.observe_calls_effect(),
             _ => false,
         }
     }
@@ -242,6 +263,7 @@ impl GenType {
             GenType::ResultNom(e, k) => e.refuses_var() || GenType::Nominal(k).refuses_var(),
             GenType::List(e) | GenType::Option(e) | GenType::Result(e) | GenType::Map(e) | GenType::Set(e) => e.refuses_var(),
             GenType::Tuple2(a, b) => a.refuses_var() || b.refuses_var(),
+            GenType::Tuple3(a, b, c) => a.refuses_var() || b.refuses_var() || c.refuses_var(),
             _ => false,
         }
     }
@@ -261,6 +283,7 @@ impl GenType {
             GenType::Option(e) => GenType::Option(inner(e)?),
             GenType::Result(e) | GenType::ResultNom(e, _) => GenType::Result(inner(e)?),
             GenType::Tuple2(a, b) => GenType::Tuple2(inner(a)?, inner(b)?),
+            GenType::Tuple3(a, b, c) => GenType::Tuple3(inner(a)?, inner(b)?, inner(c)?),
             _ => return None,
         })
     }
@@ -273,6 +296,7 @@ impl GenType {
             GenType::Float => true,
             GenType::List(e) | GenType::Option(e) | GenType::Result(e) => e.is_observable(),
             GenType::Tuple2(a, b) => a.is_observable() && b.is_observable(),
+            GenType::Tuple3(a, b, c) => a.is_observable() && b.is_observable() && c.is_observable(),
             GenType::Map(v) => v.is_observable(),
             GenType::Sized(_) => true,
             GenType::Set(e) => e.is_observable(),
@@ -310,6 +334,7 @@ impl GenType {
                 1 + e.depth()
             }
             GenType::Tuple2(a, b) => 1 + a.depth().max(b.depth()),
+            GenType::Tuple3(a, b, c) => 1 + a.depth().max(b.depth()).max(c.depth()),
         }
     }
 }
