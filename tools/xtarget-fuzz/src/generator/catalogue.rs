@@ -87,7 +87,14 @@ pub struct Signature {
 /// so their effect functions are catalogued (tier E1,
 /// docs/roadmap/active/effect-inspection-harness.md). Every other effect
 /// function stays out.
-pub const SANDBOXED_EFFECT_MODULES: &[&str] = &["fs", "env", "io", "args"];
+pub const SANDBOXED_EFFECT_MODULES: &[&str] = &["fs", "env", "io", "args", "process"];
+
+/// Modules whose functions the stock runtime cannot serve but the embedded
+/// host does (`target-availability.toml` rows whose only leg is stock-p1):
+/// a program calling one runs its wasm leg on the embedded host
+/// ([`needs_embedded`], ADR-0027 D1). `process` runs a fixed command set
+/// (D4, `term.rs`).
+pub const EMBEDDED_ROUTED_MODULES: &[&str] = &["process"];
 
 /// Effect modules that reach no host: a computation that can fail, the same
 /// on every run and every leg, so their effect functions are catalogued with
@@ -314,7 +321,8 @@ pub fn build() -> Vec<Signature> {
         };
         for decl in &program.decls {
             if let Some(sig) = signature_from_decl(module, decl) {
-                if !unavailable.contains(&format!("{}.{}", sig.module, sig.func)) {
+                let name = format!("{}.{}", sig.module, sig.func);
+                if !unavailable.contains(&name) || (EMBEDDED_ROUTED_MODULES.contains(&sig.module) && embedded_only().contains(&name)) {
                     out.push(sig);
                 }
             }
@@ -373,6 +381,37 @@ fn wasm_unavailable(toml: &str) -> std::collections::HashSet<String> {
         }
     }
     out
+}
+
+/// `module.fn` of every row whose ONLY unavailable leg is stock-p1: the
+/// embedded host serves it.
+fn embedded_only() -> &'static std::collections::HashSet<String> {
+    static SET: std::sync::OnceLock<std::collections::HashSet<String>> = std::sync::OnceLock::new();
+    SET.get_or_init(|| {
+        let mut out = std::collections::HashSet::new();
+        let mut current: Option<String> = None;
+        for line in TARGET_AVAILABILITY.lines().map(str::trim) {
+            if let Some(v) = line.strip_prefix("fn = ") {
+                current = Some(v.trim_matches('"').to_string());
+            } else if line.starts_with("legs = ") && line == "legs = [\"stock-p1\"]" {
+                if let Some(f) = current.take() {
+                    out.insert(f);
+                }
+            } else if line.starts_with('[') {
+                current = None;
+            }
+        }
+        out
+    })
+}
+
+/// `src` calls a function only the embedded host serves: its wasm leg runs
+/// there (`almide run --target wasm`), not on a stock runtime.
+pub fn needs_embedded(src: &str) -> bool {
+    embedded_only()
+        .iter()
+        .filter(|f| EMBEDDED_ROUTED_MODULES.iter().any(|m| f.starts_with(&format!("{m}."))))
+        .any(|f| src.contains(&format!("{f}(")))
 }
 
 #[cfg(test)]

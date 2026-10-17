@@ -74,6 +74,20 @@ pub const VERDICTS: &[Verdict] = &[
     // short, non-negative wait.
     Verdict { func: "env.sleep_ms", holds: "true", canon: "()", domain: &[("ms", "int.abs({ms}) % 5")] },
     Verdict { func: "process.sleep", holds: "true", canon: "()", domain: &[("ms", "int.abs({ms}) % 5")] },
+    // A child's pid; the fixed command set exits at once.
+    Verdict { func: "process.spawn", holds: "v > 0", canon: "0", domain: &[] },
+    // A signal reaches only a child of this program's own: a generated pid
+    // could name any process on the host. Past every pid_max, the fallback
+    // fails with ESRCH.
+    Verdict {
+        func: "process.kill",
+        holds: "true",
+        canon: "()",
+        domain: &[
+            ("pid", "match process.spawn(\"/bin/sleep\", [\"1\"]) { ok(p) => p, err(_) => 2147483000 }"),
+            ("signal", "int.abs({signal}) % 2 * 6 + 9"),
+        ],
+    },
     Verdict { func: "mem.save", holds: "true", canon: "0", domain: &[] },
 ];
 

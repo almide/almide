@@ -491,8 +491,13 @@ fn worker_loop(
                 };
                 *reasons.entry(key).or_insert(0) += 1;
             }
-            Outcome::Skipped { .. } => {
+            Outcome::Skipped { reason } => {
                 stats.skipped.fetch_add(1, Ordering::Relaxed);
+                // A focused campaign whose calls all skip judges nothing:
+                // say why (XF_SHOW_SKIPS=1).
+                if std::env::var_os("XF_SHOW_SKIPS").is_some() {
+                    eprintln!("  skip: {reason}");
+                }
             }
             Outcome::Finding(finding) => {
                 stats.findings.fetch_add(1, Ordering::Relaxed);
