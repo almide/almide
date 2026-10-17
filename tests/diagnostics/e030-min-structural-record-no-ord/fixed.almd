@@ -1,0 +1,8 @@
+// The fix: declare `: Ord` so the derive exists on both legs.
+type P: Ord = { a: Int, b: Int }
+
+fn show(p: P) -> String = "${p.a} ${p.b}"
+
+fn main() -> Unit = {
+  println(show(list.min([{ a: 2, b: 0 }, { a: 1, b: 5 }]) ?? { a: 0, b: 0 }))
+}
