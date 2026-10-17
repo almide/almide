@@ -4231,6 +4231,8 @@ pub const SRC_FAN_ANY: &str = r#"
 
 
 
+
+
 fn __fan_any_go(xs: List[Int], f: (Int) -> Result[Int, String], i: Int) -> Result[Int, String] =
   if i >= list.len(xs) then err("fan.any: all candidates failed")
   else match f(list.get(xs, i) ?? 0) {
