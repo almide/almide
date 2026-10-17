@@ -241,8 +241,27 @@ fn script() -> Vec<Vec<u8>> {
         request("GET", "/missing?x=1&y=%E7%8C%AB", &[], b""),
         request("DELETE", "/hello", &[], b""),
         request("PUT", "/echo", &[], b"a\xffb\xe3\x81c\xf0\x9f\x98\x80"),
+        // What the server refuses or reshapes (C-367 / C-375): each answer
+        // is checked by name in the test as well as against native.
+        request("GET", "/s42", &[], b""),
+        request("GET", "/s103", &[], b""),
+        request("GET", "/hname", &[], b""),
+        request("GET", "/hctl", &[], b""),
+        request("GET", "/hframe", &[], b""),
     ]
 }
+
+/// The script's refused answers, by index in [`script`]: the reason each
+/// `500` names.
+const REFUSED_AT: &[(usize, &str)] = &[
+    (8, "response status 42 is not a final status code"),
+    (9, "response status 103 is not a final status code"),
+    (10, "response header name \"a b\" is not a token"),
+    (11, "response header X-C has a control character in its value"),
+];
+
+/// The script's index of `/hframe`, whose framing fields are dropped.
+const FRAMED_AT: usize = 12;
 
 #[test]
 fn the_stock_serve_export_answers_what_native_answers_under_wasmtime_serve() {
@@ -292,6 +311,17 @@ fn the_stock_serve_export_answers_what_native_answers_under_wasmtime_serve() {
             String::from_utf8_lossy(n),
             String::from_utf8_lossy(w)
         );
+    }
+    for (i, why) in REFUSED_AT {
+        for (leg, raw) in [("native", &answers[*i].0), ("export", &answers[*i].1)] {
+            let o = observe(raw).unwrap_or_else(|e| panic!("{leg} {i}: {e}"));
+            assert_eq!((o.status, String::from_utf8_lossy(&o.body).into_owned()), (500, format!("Internal error: {why}")), "{leg} {i}\n{log}");
+        }
+    }
+    for (leg, raw) in [("native", &answers[FRAMED_AT].0), ("export", &answers[FRAMED_AT].1)] {
+        let o = observe(raw).unwrap_or_else(|e| panic!("{leg}: {e}"));
+        assert_eq!((o.status, o.body.as_slice()), (200, b"hello".as_slice()), "{leg}\n{log}");
+        assert_eq!(o.headers.keys().collect::<Vec<_>>(), ["x-kept"], "{leg}: {:?}", String::from_utf8_lossy(raw));
     }
     let refused = |raw: &[u8], status: u16, reason: &str| {
         let o = observe(raw).unwrap_or_else(|e| panic!("{e}: {:?}\n{log}", String::from_utf8_lossy(raw)));
