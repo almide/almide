@@ -127,6 +127,23 @@ pub const VERDICTS: &[Verdict] = &[
     Verdict { func: "mem.save", holds: "true", canon: "0", domain: &[] },
 ];
 
+/// The O(1) form of a property checked inside a timed loop, where the full
+/// check's own cost (a membership scan, a per-element count) would be
+/// measured as the call's: the full form still runs on every diamond path
+/// and in every generated program.
+const PROBES: &[(&str, &str)] = &[
+    ("random.choice", "match v { some(_) => not list.is_empty({xs}), none => list.is_empty({xs}) }"),
+    ("random.shuffle", "list.len(v) == list.len({xs})"),
+    ("list.shuffle", "list.len(v) == list.len({xs})"),
+];
+
+impl Verdict {
+    /// [`Self::holds`], or its O(1) form when `cheap` and the table has one.
+    pub fn property(&self, cheap: bool) -> &'static str {
+        PROBES.iter().find(|(f, _)| cheap && *f == self.func).map_or(self.holds, |(_, p)| *p)
+    }
+}
+
 /// The verdict for `module.func`, if the host decides its result.
 pub fn verdict_for(module: &str, func: &str) -> Option<&'static Verdict> {
     VERDICTS.iter().find(|v| v.func.split_once('.') == Some((module, func)))
