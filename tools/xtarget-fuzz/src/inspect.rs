@@ -69,7 +69,7 @@ pub fn cmd_inspect(args: &[String]) {
     let dir = std::env::temp_dir().join(format!("xtarget-inspect-{}", std::process::id()));
     let _ = std::fs::create_dir_all(&dir);
     let icount = icount_available();
-    let ctx = Ctx {
+    let mut ctx = Ctx {
         // Absolute: every run enters its sandbox as its cwd, where a
         // relative path to the compiler would not resolve.
         almide: absolute(super::resolve_almide(&repo, args)),
@@ -77,7 +77,7 @@ pub fn cmd_inspect(args: &[String]) {
         memshim: if icount { build_memshim(&dir) } else { None },
         dir,
         icount,
-        max_k: crate::generator::inspect_max_k(&name).unwrap_or(MAX_K),
+        max_k: MAX_K,
         calibrate_scale: if crate::generator::needs_embedded(&format!("{name}(")) { 10.0 } else { 1.0 },
     };
     let engine = Engine::with_family(&repo, Family::Synthesis);
@@ -85,6 +85,7 @@ pub fn cmd_inspect(args: &[String]) {
         eprintln!("{e}");
         std::process::exit(2);
     });
+    ctx.max_k = crate::generator::inspect_max_k(&name, target.is_effect()).unwrap_or(MAX_K);
     // A generic function is also inspected with its free type variables at
     // String, the heap instantiation (Target::new_filled). A function the
     // grammar cannot build at String is a failed criterion, not a skip.

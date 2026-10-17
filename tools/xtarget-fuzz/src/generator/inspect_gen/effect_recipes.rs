@@ -260,7 +260,9 @@ pub(super) fn stdin_for(func: &str, n: u64, k: u64) -> Option<(u64, u64)> {
 /// A call that holds a socket (or a short-lived port) per call stops at this
 /// k: a probe runs 2k calls, and an fd per call past the soft limit (1024)
 /// or a TIME_WAIT per call past the ephemeral range is an err, not a cost.
-pub fn max_k(func: &str) -> Option<u64> {
+/// `effect` is the declaration's: a plain `fn` does no I/O per call, so a
+/// module-wide cap below never applies to it.
+pub fn max_k(func: &str, effect: bool) -> Option<u64> {
     match func.split_once('.') {
         Some(("net", f)) if matches!(f, "tcp_connect" | "tcp_listen" | "tcp_accept" | "tcp_close" | "tcp_close_listener") => Some(64),
         // A descriptor (or three) held per call (#3620).
@@ -278,7 +280,10 @@ pub fn max_k(func: &str) -> Option<u64> {
         // calibrated k of 2^20 overran the 60 s cap.
         Some(("net", "shm_read")) => Some(256),
         Some(("net", "unix_send")) => Some(256),
-        Some(("http", _)) => Some(256),
+        // A plain accessor (http.body, req_method) reads a value in hand: at
+        // k=256 its ~400 instructions per call sank under the embedded leg's
+        // run-to-run jitter and the marginal read 0 at three of five sizes.
+        Some(("http", _)) if effect => Some(256),
         // Each append grows the one file: 2k calls of n bytes at 16n.
         Some(("fs", "append")) => Some(256),
         _ => None,

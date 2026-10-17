@@ -709,6 +709,11 @@ impl Target {
 
     /// The exit code every probe of this target must end with: 0, or a
     /// `-> Never` function's code, its recipe's literal argument.
+    /// Declared `effect fn`.
+    pub fn is_effect(&self) -> bool {
+        self.effect
+    }
+
     pub fn expected_exit(&self) -> i32 {
         if !self.never {
             return 0;
