@@ -325,7 +325,7 @@ fn lower_fan_race_fold(
         };
         arm_ty = res_elem.clone().unwrap_or_else(|| call_ty.clone());
 
-        let (vi, exi, spi, arm_ok) = if let Some(elem) = res_elem {
+        let (vi, exi, spi, arm_ok) = if res_elem.is_some() {
             let (ri, st) = bind(ctx, &format!("__r_r{i}"), call_ty.clone(), call);
             stmts.push(st);
             let ex = mk_rt(ctx, "almide_rt_prim_budget_exhausted");
@@ -356,35 +356,10 @@ fn lower_fan_race_fold(
             }, Ty::Int, span);
             let (oki, st) = bind(ctx, &format!("__r_isok{i}"), Ty::Int, m_ok);
             stmts.push(st);
-            // vi = match ri { ok(v) => v, err(_) => <default of T> } — the
-            // default is dead (the ok flag guards it), it only types the arm.
-            let payload = ctx.var_table.alloc(sym("__r_okv"), elem.clone(), Mutability::Let, span);
-            let payload_body = mk_var(ctx, payload, elem.clone());
-            let default = match &elem {
-                Ty::String => ctx.mk(IrExprKind::LitStr { value: String::new() }, Ty::String, span),
-                _ => mk_int(ctx, 0),
-            };
-            let subj2 = mk_var(ctx, ri, call_ty.clone());
-            let m_val = ctx.mk(IrExprKind::Match {
-                subject: Box::new(subj2),
-                arms: vec![
-                    IrMatchArm {
-                        pattern: IrPattern::Ok {
-                            inner: Box::new(IrPattern::Bind { var: payload, ty: elem.clone() }),
-                        },
-                        guard: None,
-                        body: payload_body,
-                    },
-                    IrMatchArm {
-                        pattern: IrPattern::Err { inner: Box::new(IrPattern::Wildcard) },
-                        guard: None,
-                        body: default,
-                    },
-                ],
-            }, elem.clone(), span);
-            let (vi, st) = bind(ctx, &format!("__r_v{i}"), elem, m_val);
-            stmts.push(st);
-            (vi, exi, spi, Some(oki))
+            // The candidate VALUE is the arm's Result itself: the ok flag
+            // guards it, and keeping the Result means no placeholder of T is
+            // needed for an Err arm — any winner type works (#3782).
+            (ri, exi, spi, Some(oki))
         } else {
             let (vi, st) = bind(ctx, &format!("__r_v{i}"), arm_ty.clone(), call);
             stmts.push(st);
@@ -397,6 +372,17 @@ fn lower_fan_race_fold(
             (vi, exi, spi, None)
         };
 
+        // The arm's value as a winner-slot Result (#3782): a Result arm's own
+        // Result, a plain arm's `ok(v)` — built inline where it is stored, not
+        // bound on its own, so no `let x = ok(…)` reaches the effect-fn passes.
+        let slot_ty = Ty::result(arm_ty.clone(), Ty::String);
+        let slot_val = |ctx: &LowerCtx| -> IrExpr {
+            if arm_ok.is_some() {
+                mk_var(ctx, vi, slot_ty.clone())
+            } else {
+                ctx.mk(IrExprKind::ResultOk { expr: Box::new(mk_var(ctx, vi, arm_ty.clone())) }, slot_ty.clone(), span)
+            }
+        };
         // candidate = (exhausted == 0) AND (the arm's own Ok, when Result)
         let within = mk_cmp(ctx, almide_ir::BinOp::Eq, mk_var(ctx, exi, Ty::Int), mk_int(ctx, 0));
         let cand = match arm_ok {
@@ -414,10 +400,17 @@ fn lower_fan_race_fold(
                 let (ok0, st) = bind(ctx, "__r_ok0", Ty::Int,
                     mk_if_int(ctx, cand, mk_int(ctx, 1), mk_int(ctx, 0), Ty::Int));
                 stmts.push(st);
-                let _ = cand2;
+                // The slot holds `ok(v)` only for an admitted arm, so a cut
+                // first arm's zero-value Ok never reaches the winner (#3782).
+                let empty = ctx.mk(IrExprKind::LitStr { value: String::new() }, Ty::String, span);
+                let no_slot = ctx.mk(IrExprKind::ResultErr { expr: Box::new(empty) }, slot_ty.clone(), span);
+                let v0 = slot_val(ctx);
+                let (val0, st) = bind(ctx, "__r_val0", slot_ty.clone(),
+                    mk_if_int(ctx, cand2, v0, no_slot, slot_ty.clone()));
+                stmts.push(st);
                 ok_var = Some(ok0);
                 bs_var = Some(spi);
-                val_var = Some(vi);
+                val_var = Some(val0);
             }
             (Some(ok_p), Some(bs_p), Some(val_p)) => {
                 // better = candidate AND (no winner yet OR spend < best) —
@@ -461,8 +454,9 @@ fn lower_fan_race_fold(
                 let (bs_n, st) = bind(ctx, &format!("__r_bs{i}"), Ty::Int,
                     mk_if_int(ctx, is_bet.clone(), mk_var(ctx, spi, Ty::Int), mk_var(ctx, bs_p, Ty::Int), Ty::Int));
                 stmts.push(st);
-                let (val_n, st) = bind(ctx, &format!("__r_val{i}"), arm_ty.clone(),
-                    mk_if_int(ctx, is_bet, mk_var(ctx, vi, arm_ty.clone()), mk_var(ctx, val_p, arm_ty.clone()), arm_ty.clone()));
+                let vn = slot_val(ctx);
+                let (val_n, st) = bind(ctx, &format!("__r_val{i}"), slot_ty.clone(),
+                    mk_if_int(ctx, is_bet, vn, mk_var(ctx, val_p, slot_ty.clone()), slot_ty.clone()));
                 stmts.push(st);
                 ok_var = Some(ok_n);
                 bs_var = Some(bs_n);
@@ -516,14 +510,6 @@ fn lower_fan_race_map_fold(
     let assign = |v: VarId, value: IrExpr| -> IrStmt {
         IrStmt { kind: IrStmtKind::Assign { var: v, value }, span }
     };
-    // The winner type's dead placeholder — the ok flag guards every read, it
-    // only types the slot (the block form's exact convention).
-    let default_of = |ctx: &LowerCtx, t: &Ty| -> IrExpr {
-        match t {
-            Ty::String => ctx.mk(IrExprKind::LitStr { value: String::new() }, Ty::String, span),
-            _ => ctx.mk(IrExprKind::LitInt { value: 0 }, t.clone(), span),
-        }
-    };
 
     // Types from the checker: list → List[X], winner T from the node's own
     // Result[T, String] (the g3 arm's return).
@@ -553,8 +539,12 @@ fn lower_fan_race_map_fold(
     let maxs = mk_int(ctx, i64::MAX);
     let (bsv, st) = bind(ctx, "__rm_bs", Mutability::Var, Ty::Int, maxs);
     stmts.push(st);
-    let dflt = default_of(ctx, &winner_ty);
-    let (valv, st) = bind(ctx, "__rm_val", Mutability::Var, winner_ty.clone(), dflt);
+    // The winner slot is a Result[T, String], so its initial value is an Err
+    // and no placeholder of T is needed — any winner type works (#3782).
+    let slot_ty = Ty::result(winner_ty.clone(), Ty::String);
+    let empty = ctx.mk(IrExprKind::LitStr { value: String::new() }, Ty::String, span);
+    let dflt = ctx.mk(IrExprKind::ResultErr { expr: Box::new(empty) }, slot_ty.clone(), span);
+    let (valv, st) = bind(ctx, "__rm_val", Mutability::Var, slot_ty.clone(), dflt);
     stmts.push(st);
 
     // The metered region: the mapper body with its param bound to a fresh
@@ -638,21 +628,8 @@ fn lower_fan_race_map_fold(
     let bet_e = mk_mul(ctx, mk_var(ctx, candv, Ty::Int), or_e);
     let (betv, st) = bind(ctx, "__rm_bet", Mutability::Let, Ty::Int, bet_e);
     arm_stmts.push(st);
-    // if bet == 1 then { ok = 1; bs = sp; val = payload } else ()
-    let payload_var = ctx.var_table.alloc(sym("__rm_okv"), winner_ty.clone(), Mutability::Let, span);
-    let payload_body = mk_var(ctx, payload_var, winner_ty.clone());
-    let pdflt = default_of(ctx, &winner_ty);
-    let subj2 = mk_var(ctx, rv, mapper_ret_ty.clone());
-    let m_val = ctx.mk(IrExprKind::Match {
-        subject: Box::new(subj2),
-        arms: vec![
-            IrMatchArm {
-                pattern: IrPattern::Ok { inner: Box::new(IrPattern::Bind { var: payload_var, ty: winner_ty.clone() }) },
-                guard: None, body: payload_body,
-            },
-            IrMatchArm { pattern: IrPattern::Err { inner: Box::new(IrPattern::Wildcard) }, guard: None, body: pdflt },
-        ],
-    }, winner_ty.clone(), span);
+    // if bet == 1 then { ok = 1; bs = sp; val = r } else ()  — r is Ok here
+    let m_val = mk_var(ctx, rv, mapper_ret_ty.clone());
     let win_block = ctx.mk(IrExprKind::Block {
         stmts: vec![
             assign(okv, mk_int(ctx, 1)),

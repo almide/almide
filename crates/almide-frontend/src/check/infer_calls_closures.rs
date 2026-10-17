@@ -385,7 +385,13 @@ impl Checker {
             // the arm (symmetric with fan.any), and its Ok type joins the
             // unification. Plain arms are always candidates.
             let candidate = match &concrete {
-                Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 => a[0].clone(),
+                Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 => {
+                    // A literal `ok(v)` arm leaves its error type open; the
+                    // race's error channel is String, so close it here (#3782:
+                    // an open one reached codegen unresolved).
+                    self.constrain(a[1].clone(), Ty::String, "fan.race arm error type");
+                    a[0].clone()
+                }
                 _ => t,
             };
             match &arm_ty {
