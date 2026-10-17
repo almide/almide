@@ -1,0 +1,8 @@
+fn total(xs: List[Int]) -> Int = {
+  let cp = bytes.heap_save()
+  let s = xs |> list.fold(0, (acc, x) => acc + x)
+  bytes.heap_restore(cp)
+  s
+}
+
+fn main() -> Unit = println(int.to_string(total([1, 2, 3])))
