@@ -237,6 +237,8 @@ pub const WALLED: &[(&str, &str, &str)] = &[
     ("http", "serve", "the listener: native-only, and its handler is a closure the host invokes"),
     ("http", "__call_start", "reached only through its wrapper row `http.start`"),
     ("http", "__request_stream_limited", "reached only through its wrapper row `http.request_stream_with_limits`"),
+    ("testing", "__abort_site_run", "testing.assert_aborts's child run (ADR-0029): test builds only — the native runtime re-executes the test binary, the structural leg asks the embedded host (op 117)"),
+    ("testing", "__abort_site_selected", "testing.assert_aborts's site selector (ADR-0029): test builds only — the native runtime reads ALMIDE_ABORT_SITE, the structural leg asks the embedded host (op 118)"),
 ]
 ;
 
