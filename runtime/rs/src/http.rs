@@ -392,177 +392,14 @@ pub fn almide_http_request_stream_impl(
     url: &str,
     body: &str,
     headers: &AlmideMap<String, String>,
-    mut on_chunk: impl FnMut(String),
+    on_chunk: impl FnMut(String),
 ) -> Result<(), String> {
-    // The shared core prepares (URL, method and headers refused before any
-    // dial), routes (proxies, connect timeout) and writes the request, so
-    // the streaming client cannot drift from the buffered ones (#2828).
-    let pairs = header_pairs(headers);
-    let u = http_prepare(method, url, &pairs)?;
-    // Long read timeout — SSE responses can be quiet between events.
-    let (stream, route) = http_client_open(&u, 120)?;
-    let request = http_request_bytes(method, &u, &route, body, &pairs);
-
-    let mut wrap = |s: &str| on_chunk(s.to_string());
-    if u.https {
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let mut tls = make_tls_stream(&u.host, url, stream)?;
-            http_exchange_stream(&mut tls, url, &request, &mut wrap)
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            let _ = (stream, request);
-            Err("HTTPS streaming not supported on WASM target".to_string())
-        }
-    } else {
-        let mut s = stream;
-        http_exchange_stream(&mut s, url, &request, &mut wrap)
-    }
-}
-
-/// What a streamed response has read but not yet delivered, and where in the
-/// head / chunked framing it is.
-#[derive(Default)]
-struct AlmideHttpStreamParse {
-    acc: Vec<u8>,
-    headers_done: bool,
-    chunked: bool,
-    chunk_remaining: usize,
-    awaiting_size: bool,
-    // Body bytes not yet delivered because they end in an incomplete UTF-8
-    // sequence (at most 3 bytes).
-    utf8_tail: Vec<u8>,
-}
-
-impl AlmideHttpStreamParse {
-    fn deliver<F: FnMut(&str)>(&mut self, bytes: &[u8], at_end: bool, on_chunk: &mut F) {
-        self.utf8_tail.extend_from_slice(bytes);
-        let keep = if at_end { 0 } else { http_stream_incomplete_utf8_tail(&self.utf8_tail) };
-        let ready = self.utf8_tail.len() - keep;
-        if ready > 0 {
-            let drained: Vec<u8> = self.utf8_tail.drain(..ready).collect();
-            on_chunk(&String::from_utf8_lossy(&drained));
-        }
-    }
-
-    /// The response head, once its end has arrived: `None` while more bytes
-    /// are needed, else the non-2xx status line to report (if any).
-    fn take_head(&mut self, url: &str) -> Result<Option<Option<String>>, String> {
-        // A 1xx interim head (`100 Continue`) is dropped and the final
-        // one awaited (#2824) — several may arrive in one read.
-        while let Some(idx) = self.acc.windows(4).position(|w| w == b"\r\n\r\n") {
-            if !http_is_interim(http_status_of(&self.acc[..idx])) {
-                break;
-            }
-            self.acc.drain(..idx + 4);
-        }
-        let Some(idx) = self.acc.windows(4).position(|w| w == b"\r\n\r\n") else {
-            if self.acc.len() > HTTP_MAX_HEAD_BYTES {
-                return Err(http_head_too_large(url));
-            }
-            return Ok(None);
-        };
-        let header_section = String::from_utf8_lossy(&self.acc[..idx]).to_string();
-        let status_line = header_section.lines().next().unwrap_or("");
-        let code: i64 = status_line
-            .split_whitespace()
-            .nth(1)
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(0);
-        let error_status = (!(200..300).contains(&code))
-            .then(|| http_status_refusal(code));
-        self.chunked = http_fields_chunked(&http_head_fields(&header_section));
-        self.acc.drain(..idx + 4);
-        self.headers_done = true;
-        Ok(Some(error_status))
-    }
-
-    /// Deliver every complete chunk read so far: `true` at the terminating
-    /// zero-size chunk, `false` when more bytes are needed.
-    fn drain_chunked<F: FnMut(&str)>(&mut self, url: &str, on_chunk: &mut F) -> Result<bool, String> {
-        loop {
-            if self.awaiting_size {
-                // The \r\n that terminates the size line, or wait for more.
-                let Some(nl) = self.acc.windows(2).position(|w| w == b"\r\n") else { return Ok(false) };
-                let size = http_chunk_size(&self.acc[..nl]).map_err(|_| http_error_text(HttpErrorClass::Protocol, url))?;
-                self.acc.drain(..nl + 2);
-                if size == 0 {
-                    self.deliver(&[], true, on_chunk);
-                    return Ok(true);
-                }
-                self.chunk_remaining = size;
-                self.awaiting_size = false;
-            }
-            let take = self.chunk_remaining.min(self.acc.len());
-            if take > 0 {
-                let drained: Vec<u8> = self.acc.drain(..take).collect();
-                self.deliver(&drained, false, on_chunk);
-                self.chunk_remaining -= take;
-            }
-            // Mid-chunk, or the trailing CRLF has not arrived: wait for more.
-            if self.chunk_remaining != 0 || self.acc.len() < 2 {
-                return Ok(false);
-            }
-            if self.acc.starts_with(b"\r\n") {
-                self.acc.drain(..2);
-            }
-            self.awaiting_size = true;
-        }
-    }
-}
-
-fn http_exchange_stream<S: Read + Write, F: FnMut(&str)>(
-    stream: &mut S,
-    url: &str,
-    request: &[u8],
-    on_chunk: &mut F,
-) -> Result<(), String> {
-    stream.write_all(request).map_err(|e| http_io_error_text(url, &e))?;
-
-    let mut buf = vec![0u8; 8192];
-    let mut st = AlmideHttpStreamParse { awaiting_size: true, ..Default::default() };
-    loop {
-        let n = match stream.read(&mut buf) {
-            Ok(n) => n,
-            Err(e) => {
-                if st.acc.is_empty() && !st.headers_done {
-                    return Err(http_io_error_text(url, &e));
-                }
-                break;
-            }
-        };
-        if n == 0 {
-            break;
-        }
-        st.acc.extend_from_slice(&buf[..n]);
-        if !st.headers_done {
-            match st.take_head(url)? {
-                None => continue,
-                Some(Some(msg)) => {
-                    // Drain remaining body for error message context.
-                    let body_text = String::from_utf8_lossy(&st.acc).to_string();
-                    return Err(format!("{}: {}", msg, body_text.chars().take(500).collect::<String>()));
-                }
-                Some(None) => {}
-            }
-        }
-        if st.chunked {
-            if st.drain_chunked(url, on_chunk)? {
-                return Ok(());
-            }
-        } else if !st.acc.is_empty() {
-            // Plain body — surface as-is.
-            let drained: Vec<u8> = st.acc.drain(..).collect();
-            st.deliver(&drained, false, on_chunk);
-        }
-    }
-
-    if !st.headers_done {
-        return Err(http_error_text(HttpErrorClass::Protocol, url));
-    }
-    st.deliver(&[], true, on_chunk);
-    Ok(())
+    // A CLASSIC call on the shared call core (http_call_core.rs): the same
+    // worker, framing, UTF-8 carry and status refusal the embedded lane runs
+    // for this function, bounded only by the client read timeout.
+    let shared = http_call_spawn_classic(method, url, body, header_pairs(headers))?;
+    let call = AlmideHttpCall { inner: std::sync::Arc::new(AlmideHttpCallOwner { shared }) };
+    almide_http_stream_pump(&call, on_chunk)
 }
 
 // ── Call handle (#2631) ──
@@ -673,9 +510,14 @@ pub fn almide_http_stream_limited_impl(
     body: &str,
     headers: &AlmideMap<String, String>,
     (total_ms, idle_ms): (i64, i64),
-    mut on_chunk: impl FnMut(String),
+    on_chunk: impl FnMut(String),
 ) -> Result<(), String> {
     let call = almide_http_call_start(method, url, body, headers, total_ms, idle_ms)?;
+    almide_http_stream_pump(&call, on_chunk)
+}
+
+/// Deliver each arrival of `call` to `on_chunk` until it ends, and answer how.
+fn almide_http_stream_pump(call: &AlmideHttpCall, mut on_chunk: impl FnMut(String)) -> Result<(), String> {
     loop {
         let (piece, ended) = http_call_stream_step(call.shared());
         if !piece.is_empty() {

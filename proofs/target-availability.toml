@@ -355,12 +355,10 @@ issue = "#1423"
 
 [[unavailable]]
 fn = "http.openai_streaming_call"
-legs = ["structural", "stock-p1", "embedded"]
+legs = ["stock-p1"]
 class = "pending-port"
-reason-embedded = "Almide over request_stream (ADR-0023 step 5), which has no wasm service: the streaming client's port is ADR-0023 step 4 — run natively, or use openai_streaming_call_with_limits, which the embedded lane serves"
-reason-stock-p1 = "Almide over request_stream (ADR-0023 step 5), which has no wasm service: the streaming client's port is ADR-0023 step 4 — run natively"
-reason-structural = "host-surface"
-issue = "#1827"
+reason = "Almide over request_stream (ADR-0023 step 5): the structural leg and `almide run --target wasm` serve it through the http call handle's classic call (ops 53..=59, the shared call core); the DEFAULT stock artifact still refuses — stock WASI has no host for a guest-pollable http call until the call handle joins the wasi:http shim (ADR-0023 step 4)"
+issue = "#1710"
 
 [[unavailable]]
 fn = "http.patch"
@@ -448,12 +446,10 @@ issue = "#1710"
 
 [[unavailable]]
 fn = "http.request_stream"
-legs = ["structural", "stock-p1", "embedded"]
+legs = ["stock-p1"]
 class = "pending-port"
-reason-embedded = "no wasm host binding for the streaming client (the framed ops 43..=50 serve the non-streaming family only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
-reason-stock-p1 = "no wasm host binding for the streaming client (the framed ops 43..=50 serve the non-streaming family only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
-reason-structural = "host-surface"
-issue = "#1827"
+reason = "embedded-lane-served: `almide run --target wasm` serves it as the http call handle's CLASSIC call (ops 53..=59; both limit cells `classic`), the shared call core native runs too — the client read timeout between arrivals, no wall clock; the DEFAULT stock artifact still refuses — stock WASI has no host for a guest-pollable http call until the call handle joins the wasi:http shim (ADR-0023 step 4)"
+issue = "#1710"
 
 [[unavailable]]
 fn = "net.tcp_accept"
