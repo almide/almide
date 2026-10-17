@@ -6421,7 +6421,9 @@ effect fn fold_lines_range[A](path: String, start: Int, end: Int, init: A, f: (A
 
 
 
+
 /// Parallel chunk partials, in order; [] if empty.
+@concurrent(f)
 @intrinsic("almide_rt_fs_fold_lines_chunked")
 effect fn fold_lines_chunked[A](path: String, workers: Int, init: A, f: (A, String) -> A) -> Result[List[A], String] = _
 
