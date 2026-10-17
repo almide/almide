@@ -7455,7 +7455,7 @@ effect fn fs_remove(path: String) -> Result[Unit, String] = {
       err(m)
     } else {
       let entries: List[String] = prim.load_handle(rh + 12)
-      if list.len(entries) > 0 then err("directory not empty: " + path) else __rm_floor(path)
+      if list.len(entries) > 0 then err("fs.remove(\"" + path + "\"): Directory not empty") else __rm_floor(path)
     }
   } else __rm_floor(path)
 }
