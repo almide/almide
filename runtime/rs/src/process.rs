@@ -24,8 +24,8 @@ fn call_err(call: &str, args: &str, e: impl std::fmt::Display) -> String {
 #[derive(Clone, Debug, PartialEq)]
 pub struct AlmideProcessStatus {
     pub code: i64,
-    pub stdout: String,
-    pub stderr: String,
+    pub stdout: AlmideString,
+    pub stderr: AlmideString,
 }
 impl AlmideRepr for AlmideProcessStatus {
     fn almide_repr(&self) -> String {
@@ -142,7 +142,7 @@ pub fn almide_rt_process_exec_with_stdin(cmd: &str, args: &[AlmideString], input
 }
 
 fn almide_process_status((code, stdout, stderr): (i64, String, String)) -> AlmideProcessStatus {
-    AlmideProcessStatus { code, stdout, stderr }
+    AlmideProcessStatus { code, stdout: AlmideString::from(stdout), stderr: AlmideString::from(stderr) }
 }
 
 pub fn almide_rt_process_exec_status(cmd: &str, args: &[AlmideString]) -> Result<AlmideProcessStatus, AlmideString> {

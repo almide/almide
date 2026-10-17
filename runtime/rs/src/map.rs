@@ -512,6 +512,15 @@ impl<K: PartialEq + 'static, V, const N: usize> From<[(K, V); N]> for AlmideMap<
     }
 }
 
+// ADR-0013 stage 2: a map returned across the runtime boundary converts its
+// keys and values (only under the shared buffer; the identity otherwise).
+almide_into_str_impls! {
+    impl<K: AlmideIntoStr, V: AlmideIntoStr> AlmideIntoStr for AlmideMap<K, V> where K::Out: PartialEq + 'static {
+        type Out = AlmideMap<K::Out, V::Out>;
+        fn into_almide(self) -> Self::Out { self.into_iter().map(|(k, v)| (k.into_almide(), v.into_almide())).collect() }
+    }
+}
+
 impl<K, V> IntoIterator for AlmideMap<K, V> {
     type Item = (K, V);
     type IntoIter = std::iter::Flatten<std::vec::IntoIter<Option<(K, V)>>>;
@@ -567,26 +576,26 @@ pub fn almide_rt_map_upsert_fn<K: PartialEq + 'static, V: Clone, F: Fn(V) -> V>(
 // rewrite of `k.to_string()` at the key slot): the key is copied only when it
 // is inserted, never when it is found.
 pub fn almide_rt_map_upsert_str_fn<V: Clone, F: Fn(V) -> V>(mut m: AlmideMap<AlmideString, V>, k: &str, init: V, f: F) -> AlmideMap<AlmideString, V> {
-    let __almide_v: AlmideMap<String, V> = {
+    let __almide_v: AlmideMap<AlmideString, V> = {
         if let Some(v) = m.get_mut(k) {
             let old = std::mem::replace(v, init);
             *v = f(old);
         } else {
-            m.insert(k.to_string(), init);
+            m.insert(AlmideString::from(k), init);
         }
         m
     };
-    __almide_v.into_almide()
+    __almide_v
 }
 pub fn almide_rt_map_set_str<V: Clone>(mut m: AlmideMap<AlmideString, V>, k: &str, v: V) -> AlmideMap<AlmideString, V> {
-    let __almide_v: AlmideMap<String, V> = {
+    let __almide_v: AlmideMap<AlmideString, V> = {
         match m.get_mut(k) {
             Some(slot) => *slot = v,
-            None => m.insert(k.to_string(), v),
+            None => m.insert(AlmideString::from(k), v),
         }
         m
     };
-    __almide_v.into_almide()
+    __almide_v
 }
 pub fn almide_rt_map_remove<K: PartialEq + Clone + 'static, V: Clone>(m: &AlmideMap<K, V>, k: K) -> AlmideMap<K, V> { let mut r = m.clone(); r.remove(&k); r }
 // The owned twin (`@reuse(m)`, #3640): a source at its last use is edited in

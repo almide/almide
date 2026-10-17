@@ -548,14 +548,14 @@ pub fn almide_regex_full_match(pat: &str, s: &str) -> bool {
     AlmideRxVm::new(&rx, &chars, Some(chars.len()), false).exec(&rx.alts, 0).is_some()
 }
 
-pub fn almide_regex_find(pat: &str, s: &str) -> Option<String> {
+pub fn almide_regex_find(pat: &str, s: &str) -> Option<AlmideString> { let __almide_v: Option<String> = (|| {
     let rx = rx_compile(pat);
     let chars: Vec<char> = s.chars().collect();
     let mut vm = AlmideRxVm::new(&rx, &chars, None, false);
     rx_find_at(&mut vm, &rx, 0).map(|(start, end)| chars[start..end].iter().collect())
-}
+})(); __almide_v.into_almide() }
 
-pub fn almide_regex_find_all(pat: &str, s: &str) -> Vec<String> {
+pub fn almide_regex_find_all(pat: &str, s: &str) -> Vec<AlmideString> { let __almide_v: Vec<String> = (|| {
     let rx = rx_compile(pat);
     let chars: Vec<char> = s.chars().collect();
     let mut vm = AlmideRxVm::new(&rx, &chars, None, false);
@@ -570,9 +570,9 @@ pub fn almide_regex_find_all(pat: &str, s: &str) -> Vec<String> {
         }
     }
     results
-}
+})(); __almide_v.into_almide() }
 
-pub fn almide_regex_replace(pat: &str, s: &str, rep: &str) -> String {
+pub fn almide_regex_replace(pat: &str, s: &str, rep: &str) -> AlmideString { let __almide_v: String = (|| {
     let rx = rx_compile(pat);
     let chars: Vec<char> = s.chars().collect();
     let mut vm = AlmideRxVm::new(&rx, &chars, None, false);
@@ -600,9 +600,9 @@ pub fn almide_regex_replace(pat: &str, s: &str, rep: &str) -> String {
         }
     }
     result
-}
+})(); __almide_v.into_almide() }
 
-pub fn almide_regex_replace_first(pat: &str, s: &str, rep: &str) -> String {
+pub fn almide_regex_replace_first(pat: &str, s: &str, rep: &str) -> AlmideString { let __almide_v: String = (|| {
     let rx = rx_compile(pat);
     let chars: Vec<char> = s.chars().collect();
     let mut vm = AlmideRxVm::new(&rx, &chars, None, false);
@@ -615,7 +615,7 @@ pub fn almide_regex_replace_first(pat: &str, s: &str, rep: &str) -> String {
     } else {
         s.to_string()
     }
-}
+})(); __almide_v.into_almide() }
 
 /// A field is the text BETWEEN two matches, so the split point and the scan
 /// position are two different things — conflating them is what made a
@@ -632,7 +632,7 @@ pub fn almide_regex_replace_first(pat: &str, s: &str, rep: &str) -> String {
 /// with each other, which matters more than matching any one engine's
 /// treatment of an empty alternation arm (there the three disagree among
 /// themselves).
-pub fn almide_regex_split(pat: &str, s: &str) -> Vec<String> {
+pub fn almide_regex_split(pat: &str, s: &str) -> Vec<AlmideString> { let __almide_v: Vec<String> = (|| {
     let rx = rx_compile(pat);
     let chars: Vec<char> = s.chars().collect();
     let mut vm = AlmideRxVm::new(&rx, &chars, None, false);
@@ -646,7 +646,7 @@ pub fn almide_regex_split(pat: &str, s: &str) -> Vec<String> {
     }
     results.push(chars[last..].iter().collect());
     results
-}
+})(); __almide_v.into_almide() }
 
 /// Index 0 is the WHOLE match, 1.. are the groups — the shape every mainstream
 /// regex API uses (Rust `Captures::get(0)`, Python `m.group(0)`, JS `match[0]`,
@@ -658,7 +658,7 @@ pub fn almide_regex_split(pat: &str, s: &str) -> Vec<String> {
 /// also came back for a pattern with NO groups, conflating "matched nothing to
 /// capture" with "did not match" — with a full match at index 0 that case has a
 /// real answer, `some([whole])`.
-pub fn almide_regex_captures(pat: &str, s: &str) -> Option<Vec<String>> {
+pub fn almide_regex_captures(pat: &str, s: &str) -> Option<Vec<AlmideString>> { let __almide_v: Option<Vec<String>> = (|| {
     let rx = rx_compile(pat);
     let chars: Vec<char> = s.chars().collect();
     let mut vm = AlmideRxVm::new(&rx, &chars, None, true);
@@ -669,6 +669,6 @@ pub fn almide_regex_captures(pat: &str, s: &str) -> Option<Vec<String>> {
         None => String::new(),
     }));
     Some(result)
-}
+})(); __almide_v.into_almide() }
 
 // ---- End Regex Runtime ----
