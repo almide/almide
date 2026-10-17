@@ -140,6 +140,19 @@ fn a_failing_call_does_not_end_the_native_test_binary() {
     assert!(out.contains("runs after"), "the test after the failing one did not run\n{out}");
 }
 
+/// `ALMIDE_WASM_ALLOC_COUNT=1` arms the wasm test lane as it arms `almide run
+/// --target wasm`: the counter line reports the PARENT instance's blocks at
+/// exit (each child is its own store), and k sites leave none live. The
+/// inspection's alloc criterion reads this line.
+#[test]
+fn the_armed_wasm_test_lane_reports_the_parents_live_blocks() {
+    let src = one_test("  for _ in 0..<8 {\n    testing.assert_aborts(\"boom\", () => panic(\"boom\"))\n  }");
+    let (code, out) = run_test(&src, "wasm", &[("ALMIDE_WASM_ALLOC_COUNT", "1")]);
+    assert_eq!(code, 0, "{out}");
+    let line = out.lines().find(|l| l.starts_with("__ALMD_WASM_ALLOC ")).unwrap_or_else(|| panic!("no counter line\n{out}"));
+    assert!(line.contains(" live=0 "), "the parent leaves blocks live after 8 sites: {line}");
+}
+
 /// A stock runtime has no way to start a fresh instance, so under
 /// `ALMIDE_TEST_WASM_RUNNER=wasmtime` a file using `assert_aborts` is a
 /// declared limit of the host: the default lane runs it on native, with the
