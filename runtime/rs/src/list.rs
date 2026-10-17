@@ -340,11 +340,46 @@ pub fn almide_rt_fan_plan(n: usize, per_elem: Option<u128>) -> usize {
     best.0
 }
 
-/// Per site: its last measured time per element, and how many more offers
-/// may run sequentially without being measured (see `AlmideFanClock::record`).
-fn almide_fan_history() -> &'static std::sync::Mutex<std::collections::HashMap<usize, (u128, u32)>> {
-    static H: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<usize, (u128, u32)>>> = std::sync::OnceLock::new();
-    H.get_or_init(Default::default)
+/// Per site: its last measured time per element (`t`, plus one: 0 = never
+/// measured), and how many more offers may run without being measured (see
+/// `AlmideFanClock::record`). A fixed open-addressed table keyed by the
+/// site's address, read without a lock on every offer — the mutex-guarded
+/// map it replaces was a lock, a hash and a probe per offer, on a path a
+/// sequential offer of ten 0.3 us elements pays in full. A site that finds
+/// the table full keeps no history: each of its offers plans as a first.
+struct AlmideFanSite {
+    key: std::sync::atomic::AtomicUsize,
+    t: std::sync::atomic::AtomicU64,
+    skip: std::sync::atomic::AtomicU32,
+}
+
+const ALMIDE_FAN_SITE_EMPTY: AlmideFanSite = AlmideFanSite {
+    key: std::sync::atomic::AtomicUsize::new(0),
+    t: std::sync::atomic::AtomicU64::new(0),
+    skip: std::sync::atomic::AtomicU32::new(0),
+};
+static ALMIDE_FAN_SITES: [AlmideFanSite; 256] = [ALMIDE_FAN_SITE_EMPTY; 256];
+
+/// The table entry for `site`, claiming an empty one when `insert`.
+fn almide_fan_site(site: usize, insert: bool) -> Option<&'static AlmideFanSite> {
+    use std::sync::atomic::Ordering;
+    let n = ALMIDE_FAN_SITES.len();
+    let mut i = ((site as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 56) as usize % n;
+    for _ in 0..n {
+        let e = &ALMIDE_FAN_SITES[i];
+        match e.key.load(Ordering::Acquire) {
+            k if k == site => return Some(e),
+            0 if !insert => return None,
+            0 => match e.key.compare_exchange(0, site, Ordering::AcqRel, Ordering::Acquire) {
+                Ok(_) => return Some(e),
+                Err(k) if k == site => return Some(e),
+                Err(_) => {}
+            },
+            _ => {}
+        }
+        i = (i + 1) % n;
+    }
+    None
 }
 
 /// A site far below the crossover re-measures one sequential offer in this
@@ -410,20 +445,17 @@ impl AlmideFanClock {
     /// clock that measures it.
     fn offer(site: usize, n: usize) -> (usize, Self) {
         let z = || std::sync::atomic::AtomicU64::new(0);
-        let (workers, measure) = match almide_fan_history().lock() {
-            Ok(mut h) => match h.get_mut(&site) {
-                Some((t, skip)) => {
-                    let workers = almide_rt_fan_plan(n, Some(*t));
-                    if *skip > 0 {
-                        *skip -= 1;
-                        (workers, false)
-                    } else {
-                        (workers, true)
-                    }
-                }
-                None => (almide_rt_fan_plan(n, None), true),
-            },
-            Err(_) => (almide_rt_fan_plan(n, None), true),
+        use std::sync::atomic::Ordering;
+        let known = almide_fan_site(site, false).and_then(|e| match e.t.load(Ordering::Acquire) {
+            0 => None,
+            t => Some((e, u128::from(t - 1))),
+        });
+        let (workers, measure) = match known {
+            Some((e, t)) => {
+                let skipped = e.skip.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |k| k.checked_sub(1)).is_ok();
+                (almide_rt_fan_plan(n, Some(t)), !skipped)
+            }
+            None => (almide_rt_fan_plan(n, None), true),
         };
         (workers, AlmideFanClock { warm: [z(), z()], cold: [z(), z()], site, n, measure })
     }
@@ -499,8 +531,9 @@ impl AlmideFanClock {
             } else {
                 ALMIDE_FAN_RESAMPLE_PAR - 1
             };
-            if let Ok(mut h) = almide_fan_history().lock() {
-                h.insert(self.site, (t, skip));
+            if let Some(e) = almide_fan_site(self.site, true) {
+                e.skip.store(skip, std::sync::atomic::Ordering::Relaxed);
+                e.t.store(u64::try_from(t).unwrap_or(u64::MAX - 1) + 1, std::sync::atomic::Ordering::Release);
             }
         }
     }
@@ -559,6 +592,7 @@ fn almide_fan_deal<'a, T: Send + 'a>(blocks: Vec<T>, workers: usize, work: impl 
     use std::sync::atomic::Ordering;
     let queue = AlmideFanBlocks::new(blocks);
     let gate = AlmideFanGate {
+        parent: ALMIDE_FAN_IN_GATE.with(std::cell::Cell::get),
         inside: std::sync::atomic::AtomicUsize::new(0),
         next: std::sync::atomic::AtomicUsize::new(0),
         len: queue.cells.len(),
@@ -567,7 +601,17 @@ fn almide_fan_deal<'a, T: Send + 'a>(blocks: Vec<T>, workers: usize, work: impl 
         take: std::cell::UnsafeCell::new(None),
     };
     let counter = &gate.next;
+    let me: &AlmideFanGate = &gate;
     let take = || {
+        // restored on unwind too: a stale gate here would become the
+        // `parent` of this thread's next offer
+        struct Restore(*const AlmideFanGate);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                ALMIDE_FAN_IN_GATE.with(|g| g.set(self.0));
+            }
+        }
+        let _restore = Restore(ALMIDE_FAN_IN_GATE.with(|g| g.replace(me as *const AlmideFanGate)));
         let mut next = std::iter::from_fn(|| queue.take(counter.fetch_add(1, Ordering::Relaxed)));
         work(&mut next);
     };
@@ -591,16 +635,22 @@ fn almide_fan_deal<'a, T: Send + 'a>(blocks: Vec<T>, workers: usize, work: impl 
     if let Some(slot) = slot {
         almide_fan_withdraw(slot);
     }
-    // While its helpers finish, this thread takes blocks of other offers (an
-    // offer inside one of its own blocks, a sibling `fan { }` arm's) instead
-    // of idling on a core: a 4 x 10 nest otherwise left one of eight threads
-    // waiting through every outer offer's tail.
+    // While its helpers finish, this thread takes blocks of other offers of
+    // the same tree — made inside a block of the same outermost offer —
+    // instead of idling on a core: a 4 x 10 nest otherwise left threads
+    // waiting through every outer offer's tail (220 us against 187 per outer
+    // offer, Intel VM, 2026-10-17; 203 when only this offer's own
+    // descendants were taken). Not another tree's offer (another `fan { }`
+    // arm's): its elements do not bring this tree's end closer, and running
+    // one delayed this arm's next offer by up to an element (two arms of
+    // 10000-iteration maps: 108 us per pair against 95).
+    let root = gate.root();
     almide_fan_wait(
         || {
             if gate.inside.load(Ordering::SeqCst) == 0 {
                 return true;
             }
-            if let Some(other) = almide_fan_steal() {
+            if let Some(other) = almide_fan_steal(|g| std::ptr::eq(g.root(), root)) {
                 let sink = almide_fan_current();
                 almide_fan_help(other);
                 almide_fan_adopt(sink);
@@ -665,10 +715,18 @@ impl<T> AlmideFanBlocks<T> {
     }
 }
 
+std::thread_local! {
+    /// The gate whose blocks this thread is running (null outside any).
+    static ALMIDE_FAN_IN_GATE: std::cell::Cell<*const AlmideFanGate> = const { std::cell::Cell::new(std::ptr::null()) };
+}
+
 /// One offer's door for its helpers, in `almide_fan_deal`'s frame. A helper
 /// enters (`inside` + 1) through the slot the offer is published in, and
 /// the caller returns only once the offer is withdrawn and `inside` is 0.
 struct AlmideFanGate {
+    /// The gate in whose block this offer was made (null: none). It
+    /// outlives this one: the block does not end before this offer returns.
+    parent: *const AlmideFanGate,
     /// Helpers inside the gate.
     inside: std::sync::atomic::AtomicUsize,
     /// The next block to deal, of `len`.
@@ -683,8 +741,21 @@ struct AlmideFanGate {
 }
 
 // SAFETY: `take` points at a `Sync` closure, written before the gate is
-// shared and called from other threads only under the gate protocol above.
+// shared and called from other threads only under the gate protocol above;
+// `parent` is only read, and outlives the gate.
 unsafe impl Sync for AlmideFanGate {}
+
+impl AlmideFanGate {
+    /// The outermost offer this one was made inside (itself if none).
+    fn root(&self) -> &AlmideFanGate {
+        let mut g = self;
+        // SAFETY: a parent outlives its children (see `parent`).
+        while let Some(p) = unsafe { g.parent.as_ref() } {
+            g = p;
+        }
+        g
+    }
+}
 
 /// The threads working on offers — callers inside `almide_fan_deal` and
 /// pool threads inside a gate, each counted once however deep its offers
@@ -787,8 +858,9 @@ fn almide_fan_withdraw(i: usize) {
     }
 }
 
-/// Enter the oldest-slotted published offer that has a block left.
-fn almide_fan_steal() -> Option<&'static AlmideFanGate> {
+/// Enter the oldest-slotted published offer that has a block left and that
+/// `which` accepts.
+fn almide_fan_steal(which: impl Fn(&AlmideFanGate) -> bool) -> Option<&'static AlmideFanGate> {
     use std::sync::atomic::Ordering;
     if ALMIDE_FAN_PUBLISHED.load(Ordering::Relaxed) == 0 {
         return None;
@@ -803,7 +875,7 @@ fn almide_fan_steal() -> Option<&'static AlmideFanGate> {
         // caller has not finished withdrawing it, so it is alive; once
         // entered, the caller waits for this thread to leave.
         let entered = unsafe { p.as_ref() }.filter(|g| {
-            g.next.load(Ordering::Relaxed) < g.len && {
+            g.next.load(Ordering::Relaxed) < g.len && which(g) && {
                 g.inside.fetch_add(1, Ordering::SeqCst);
                 true
             }
@@ -869,12 +941,13 @@ fn almide_fan_hand_loop(hand: &'static AlmideFanHand) {
                     return false;
                 }
                 let Some(r) = AlmideFanRunning::enter_if_free() else {
-                    // every core is working: a polling thread would only take
-                    // time from one of them
-                    std::thread::park_timeout(std::time::Duration::from_micros(50));
+                    // every core is working: give this core to a thread that
+                    // has work, and look again as soon as the scheduler
+                    // finds none
+                    std::thread::yield_now();
                     return false;
                 };
-                gate = almide_fan_steal();
+                gate = almide_fan_steal(|_| true);
                 running = gate.is_some().then_some(r);
                 gate.is_some()
             },
