@@ -1,7 +1,7 @@
 // int extern — Rust native implementations
 // Tested by: cargo test in stdlib/
 
-pub fn almide_rt_int_to_string(n: i64) -> AlmideString { let __almide_out: String = n.to_string(); __almide_out.into() }
+pub fn almide_rt_int_to_string(n: i64) -> AlmideString { almide_str_from_i64(n) }
 
 pub fn almide_rt_int_from_string(s: AlmideString) -> Result<i64, AlmideString> { let __almide_r: Result<i64, String> = (|| { s.trim().parse::<i64>().map_err(|e| format!("invalid integer: {}", e)) })(); __almide_r.map_err(Into::into) }
 
