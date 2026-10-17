@@ -140,6 +140,11 @@ impl<'a> Interpreter<'a> {
             // chunk holding everything; windows past the length are none.
             "chunk" => Some(self.list_chunk(args)),
             "windows" | "window" => Some(self.list_windows(args)),
+            // Element-type-blind too: the registry core `list_repeat` is
+            // Int-declared, so a Float element reached its `prim.store64` as
+            // "a non-address" and every `list.repeat(0.0, n)` zero row left
+            // the oracle. `None` past the arena keeps the body's own abstain.
+            "repeat" => Self::list_repeat(args),
             // The aggregate/ordering ops are a second-tier sub-router — purely
             // to keep this router's own arm count (and cyclomatic weight)
             // under the per-function threshold; `func` still uniquely selects
@@ -186,6 +191,27 @@ impl<'a> Interpreter<'a> {
             .map(|w| Value::list(w.to_vec()))
             .collect();
         Flow::val(Value::list(out))
+    }
+
+    /// `list.repeat(x, n)` — runtime/rs/src/list.rs::almide_rt_list_repeat
+    /// exactly: a count above ALMIDE_LIST_REPEAT_MAX_ELEMS (2^31 bytes of
+    /// 8-byte slots, C-169) aborts with its line, a negative count is the
+    /// empty list (C-054). A count the interp arena could not hold either
+    /// (over 2^30 bytes, the `prim.alloc_list` ceiling) answers `None`, so the
+    /// call falls through to the body and abstains under that body's reason.
+    fn list_repeat(args: &[Value]) -> Option<Flow> {
+        const MAX_ELEMS: i64 = (1 << 31) / 8;
+        const ARENA_ELEMS: i64 = (1 << 30) / 8;
+        let (Some(x), Some(Value::Int(n))) = (args.first(), args.get(1)) else {
+            return Some(Flow::Abort("internal: list.repeat bad args".into()));
+        };
+        if *n > MAX_ELEMS {
+            return Some(Flow::Abort("repeat result too large".into()));
+        }
+        if *n > ARENA_ELEMS {
+            return None;
+        }
+        Some(Flow::val(Value::list(vec![x.clone(); (*n).max(0) as usize])))
     }
 
     fn list_dedup(&mut self, args: &[Value]) -> Flow {
