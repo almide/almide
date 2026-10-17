@@ -222,7 +222,7 @@ impl AlmideStr {
     }
 
     /// A unique view for a run of in-place edits. A shared or static block is copied first; the copy has room for `extra` more bytes.
-    pub fn unique_with(&mut self, extra: usize) -> UniqueStr<'_> {
+    pub fn unique_with(&mut self, extra: usize) -> AlmideUniqueStr<'_> {
         if !self.is_unique() {
             let len = self.len();
             let fresh = almide_str_alloc(len.checked_add(extra).expect("AlmideStr capacity overflow"), len);
@@ -232,10 +232,10 @@ impl AlmideStr {
             *self = copy;
         }
         let (len, cap, data) = (self.len(), self.capacity(), self.data());
-        UniqueStr { s: self, len, cap, data }
+        AlmideUniqueStr { s: self, len, cap, data }
     }
 
-    pub fn unique(&mut self) -> UniqueStr<'_> {
+    pub fn unique(&mut self) -> AlmideUniqueStr<'_> {
         self.unique_with(0)
     }
 
@@ -322,6 +322,49 @@ impl AlmideStr {
         out
     }
 
+    /// `format!` straight into the block (string interpolation). A rendering
+    /// of up to 256 bytes is built on the stack and copied into one
+    /// exact-size block; a longer one moves into a growing block. Formatting
+    /// a `String` and converting it would allocate, copy and free twice.
+    pub fn from_fmt(args: fmt::Arguments<'_>) -> AlmideStr {
+        if let Some(s) = args.as_str() {
+            return AlmideStr::from(s);
+        }
+        struct Sink {
+            buf: [u8; 256],
+            n: usize,
+            spill: Option<AlmideStr>,
+        }
+        impl fmt::Write for Sink {
+            fn write_str(&mut self, s: &str) -> fmt::Result {
+                if let Some(out) = &mut self.spill {
+                    out.push_str(s);
+                } else if self.n + s.len() <= self.buf.len() {
+                    self.buf[self.n..self.n + s.len()].copy_from_slice(s.as_bytes());
+                    self.n += s.len();
+                } else {
+                    let mut out = AlmideStr::with_capacity((self.n + s.len()).max(2 * self.buf.len()));
+                    {
+                        let mut u = out.unique();
+                        // The first `n` bytes are whole `&str`s written above.
+                        u.push_str(std::str::from_utf8(&self.buf[..self.n]).map_err(|_| fmt::Error)?);
+                        u.push_str(s);
+                    }
+                    self.spill = Some(out);
+                }
+                Ok(())
+            }
+        }
+        let mut sink = Sink { buf: [0; 256], n: 0, spill: None };
+        // A `Display` impl that errors is a bug in it; `format!` panics there too.
+        fmt::write(&mut sink, args).expect("a Display implementation returned an error unexpectedly");
+        match sink.spill {
+            Some(out) => out,
+            // The bytes are whole `&str`s, so this cannot fail.
+            None => AlmideStr::from(std::str::from_utf8(&sink.buf[..sink.n]).unwrap_or_default()),
+        }
+    }
+
     /// `parts` joined by `sep`, in one exact-size block; the parts are only read.
     pub fn join<S: AsRef<str>>(parts: &[S], sep: &str) -> AlmideStr {
         let Some((first, rest)) = parts.split_first() else { return AlmideStr::new() };
@@ -356,6 +399,37 @@ impl AlmideStr {
             }
         }
         out
+    }
+
+    /// `lhs + self` (a literal on the left of `+`). The only owner is
+    /// extended in place: its bytes move right and `lhs` fills the front, as
+    /// `String::insert_str` does; otherwise one exact-size block is built.
+    pub fn prepend(mut self, lhs: &str) -> AlmideStr {
+        if lhs.is_empty() {
+            return self;
+        }
+        if !self.is_unique() {
+            let mut out = AlmideStr::with_capacity(lhs.len().checked_add(self.len()).expect("AlmideStr capacity overflow"));
+            {
+                let mut u = out.unique();
+                u.push_str(lhs);
+                u.push_str(self.as_str());
+            }
+            return out;
+        }
+        let (n, len) = (lhs.len(), self.len());
+        let mut u = self.unique();
+        u.reserve(n);
+        // SAFETY: a unique block with room for `len + n` bytes; the first
+        // `len` are moved right (overlapping, hence `copy`), then `lhs` — not
+        // inside this block, which only this view can reach — fills the front.
+        unsafe {
+            std::ptr::copy(u.data, u.data.add(n), len);
+            std::ptr::copy_nonoverlapping(lhs.as_ptr(), u.data, n);
+        }
+        u.len = len + n;
+        drop(u);
+        self
     }
 
     pub fn into_string(self) -> String {
@@ -444,14 +518,14 @@ unsafe impl Send for AlmideStr {}
 // clone of a marked block is atomic.
 unsafe impl Sync for AlmideStr {}
 
-pub struct UniqueStr<'a> {
+pub struct AlmideUniqueStr<'a> {
     s: &'a mut AlmideStr,
     len: usize,
     cap: usize,
     data: *mut u8,
 }
 
-impl UniqueStr<'_> {
+impl AlmideUniqueStr<'_> {
     #[inline]
     pub fn push_str(&mut self, t: &str) {
         let n = t.len();
@@ -508,7 +582,7 @@ impl UniqueStr<'_> {
     }
 }
 
-impl Drop for UniqueStr<'_> {
+impl Drop for AlmideUniqueStr<'_> {
     fn drop(&mut self) {
         if self.cap - self.len > u32::MAX as usize {
             // A big block cleared or truncated in the view: give back the room the header cannot record.
@@ -595,7 +669,9 @@ impl From<AlmideStr> for String {
     }
 }
 
-impl FromIterator<char> for AlmideStr {
+// The full path: `FromIterator` is only in the 2021 prelude, and the v1
+// render is also compiled as edition 2015.
+impl std::iter::FromIterator<char> for AlmideStr {
     fn from_iter<I: IntoIterator<Item = char>>(iter: I) -> Self {
         let mut out = AlmideStr::new();
         {
@@ -608,7 +684,7 @@ impl FromIterator<char> for AlmideStr {
     }
 }
 
-impl<'a> FromIterator<&'a str> for AlmideStr {
+impl<'a> std::iter::FromIterator<&'a str> for AlmideStr {
     fn from_iter<I: IntoIterator<Item = &'a str>>(iter: I) -> Self {
         let mut out = AlmideStr::new();
         {
