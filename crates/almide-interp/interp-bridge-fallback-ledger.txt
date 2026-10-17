@@ -29,7 +29,7 @@ float.to_string  availability_pure_batch  floor: consumed inside a self-hosted b
 int.band  datetime_monotonic_ns  floor: consumed inside a self-hosted body
 int.bor  zlib_selfhost  floor: consumed inside a self-hosted body
 int.bshl  matrix_composition_family  floor: consumed inside a self-hosted body
-int.bshr  zlib_selfhost  floor: consumed inside a self-hosted body
+int.bshr  matrix_packed_weight_family  floor: consumed inside a self-hosted body
 int.bxor  zlib_selfhost  floor: consumed inside a self-hosted body
 int.from_int16  int_bit_family  floor: consumed inside a self-hosted body
 int.from_int32  checked_conversion_value_match  floor: consumed inside a self-hosted body
