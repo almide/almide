@@ -1,0 +1,23 @@
+fn loud(n: Int) -> Int = {
+  var i = 0
+  while i < n {
+    println("t-iter " + int.to_string(i))
+    i = i + 1
+  }
+  i
+}
+fn heavy(n: Int) -> Int = {
+  var i = 0
+  var acc = 0
+  while i < n {
+    acc = (acc + i * 7) % 999983
+    i = i + 1
+  }
+  acc
+}
+effect fn main() -> Unit = {
+  let p = fan.timeout(duration.us(3)) { loud(50) } ?? -1
+  println("p=" + int.to_string(p))
+  let m = fan.timeout(duration.us(300)) { heavy(100000) } ?? -1
+  println("m=" + int.to_string(m))
+}

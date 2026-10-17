@@ -1,0 +1,26 @@
+fn heavy(n: Int) -> Int = {
+  var i = 0
+  var acc = 0
+  while i < n {
+    acc = (acc + i * 7) % 999983
+    i = i + 1
+  }
+  acc
+}
+effect fn main() -> Unit = {
+  let xs: List[Int] = []
+  match fan.race(xs, (x) => ok(x)) {
+    ok(v) => println("M1 ok " + int.to_string(v)),
+    err(e) => println("M1 empty err " + e),
+  }
+  match fan.race([-1, -2], (x) => if x < 0 then err("neg" + int.to_string(x)) else ok(x)) {
+    ok(v) => println("M2 ok " + int.to_string(v)),
+    err(e) => println("M2 allfail err " + e),
+  }
+  println("M3 order " + int.to_string(fan.race([900, 30, 30, 600], (x) => ok(heavy(x) * 0 + x)) ?? -1))
+  match fan.race(compute.ns(30), [500, 600], (x) => ok(heavy(x))) {
+    ok(v) => println("M4 ok " + int.to_string(v)),
+    err(e) => println("M4 budget err " + e),
+  }
+  println("M5 budget admits " + int.to_string(fan.race(compute.ns(600), [1000, 100, 50], (x) => ok(heavy(x) * 0 + x)) ?? -1))
+}

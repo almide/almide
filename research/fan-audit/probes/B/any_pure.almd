@@ -1,0 +1,13 @@
+fn pf(m: Int) -> Result[Int, String] = if m < 0 then err("e" + int.to_string(m)) else ok(m)
+effect fn main() -> Unit = {
+  let r = fan.any {
+    pf(-1)
+    pf(-2)
+  }
+  match r {
+    ok(v) => println("P1 ok " + int.to_string(v)),
+    err(e) => println("P1 err " + e),
+  }
+  let s = fan.any { pf(-1), pf(4), pf(6) } ?? -9
+  println("P2 " + int.to_string(s))
+}

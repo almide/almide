@@ -1,0 +1,4 @@
+effect fn main() -> Unit = {
+  let c = fan.race([1.5, 0.5], (x) => ok(x * 2.0)) ?? 0.0
+  println("T3 mapper float " + float.to_string(c))
+}

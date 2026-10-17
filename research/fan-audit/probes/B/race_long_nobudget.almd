@@ -1,0 +1,16 @@
+fn heavy(n: Int) -> Int = {
+  var i = 0
+  var acc = 0
+  while i < n {
+    acc = (acc + i * 7) % 999983
+    i = i + 1
+  }
+  acc
+}
+effect fn main() -> Unit = {
+  let a = fan.race {
+    heavy(300000000)
+    heavy(300000001)
+  } ?? -1
+  println("long unbudgeted: " + int.to_string(a))
+}

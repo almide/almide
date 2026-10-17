@@ -1,0 +1,4 @@
+effect fn main() -> Unit = {
+  let r = fan.any([() => ok(1)])
+  println("x")
+}

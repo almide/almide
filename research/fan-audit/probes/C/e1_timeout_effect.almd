@@ -1,0 +1,5 @@
+import fs
+effect fn main() -> Unit = {
+  let a = fan.timeout(duration.s(1)) { fs.read_text("/etc/hosts") } ?? "x"
+  println(a)
+}

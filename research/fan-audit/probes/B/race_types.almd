@@ -1,0 +1,12 @@
+fn fl(x: Float) -> Result[Float, String] = if x < 0.0 then err("neg") else ok(x)
+fn li(n: Int) -> Result[List[Int], String] = if n < 0 then err("neg") else ok([n, n])
+effect fn main() -> Unit = {
+  let a = fan.race { fl(-1.0), fl(2.5) } ?? 0.0
+  println("T1 float " + float.to_string(a))
+  let b = fan.race { li(-1), li(3) } ?? []
+  println("T2 list len " + int.to_string(list.len(b)))
+  let c = fan.race([1.5, 0.5], (x) => ok(x * 2.0)) ?? 0.0
+  println("T3 mapper float " + float.to_string(c))
+  let d = fan.race(["aa", "b"], (s) => ok(s)) ?? "?"
+  println("T4 mapper string " + d)
+}

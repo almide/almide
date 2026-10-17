@@ -1,0 +1,5 @@
+fn li(n: Int) -> Result[List[Int], String] = if n < 0 then err("neg") else ok([n, n])
+effect fn main() -> Unit = {
+  let b = fan.race { li(-1), li(3) } ?? []
+  println("T2 list len " + int.to_string(list.len(b)))
+}

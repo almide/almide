@@ -1,0 +1,31 @@
+fn heavy(n: Int) -> Int = {
+  var i = 0
+  var acc = 0
+  while i < n {
+    acc = (acc + i * 7) % 999983
+    i = i + 1
+  }
+  acc
+}
+fn fail(m: String) -> Result[Int, String] = err(m)
+fn okh(n: Int, t: Int) -> Result[Int, String] = ok(heavy(n) * 0 + t)
+
+effect fn main() -> Unit = {
+  let a = fan.race {
+    fail("first")
+    okh(100, 2)
+    okh(100, 3)
+  }
+  match a {
+    ok(v) => println("E1 ok " + int.to_string(v)),
+    err(e) => println("E1 err " + e),
+  }
+  let b = fan.race {
+    fail("first-err")
+    fail("second-err")
+  }
+  match b {
+    ok(v) => println("E2 ok " + int.to_string(v)),
+    err(e) => println("E2 err " + e),
+  }
+}

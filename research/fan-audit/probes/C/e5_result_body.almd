@@ -1,0 +1,5 @@
+fn g(x: Int) -> Result[Int, String] = if x > 0 then ok(x) else err("neg")
+effect fn main() -> Unit = {
+  let a = fan.bounded(compute.ms(1)) { g(1) } ?? -1
+  println(int.to_string(a))
+}

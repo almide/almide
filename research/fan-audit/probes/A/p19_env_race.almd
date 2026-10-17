@@ -1,0 +1,16 @@
+import env
+
+effect fn reader() -> Result[String, String] = {
+  env.sleep_ms(300)
+  ok(env.get("FAN_AUDIT_KEY") ?? "unset")
+}
+
+effect fn writer() -> Result[String, String] = {
+  env.set("FAN_AUDIT_KEY", "written")
+  ok("w")
+}
+
+effect fn main() -> Unit = {
+  let (r, w) = fan { reader()!, writer()! }
+  println("reader saw ${r} / ${w}")
+}

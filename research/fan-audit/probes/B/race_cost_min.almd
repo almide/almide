@@ -1,0 +1,23 @@
+fn s1(x: Int) -> Int = x * 3 + 1
+fn d1(x: Int, t: Int) -> Int = s1(x) * 0 + t
+fn heavy(n: Int) -> Int = {
+  var i = 0
+  var acc = 0
+  while i < n {
+    acc = (acc + i * 7) % 999983
+    i = i + 1
+  }
+  acc
+}
+fn hv(n: Int, t: Int) -> Int = heavy(n) * 0 + t
+effect fn main() -> Unit = {
+  println("U0 d1 0u: " + int.to_string(fan.race(compute.ns(2)) { d1(1, 1) } ?? -1))
+  println("U1 d1 1u: " + int.to_string(fan.race(compute.ns(3)) { d1(1, 1) } ?? -1))
+  println("U2 d1 2u: " + int.to_string(fan.race(compute.ns(6)) { d1(1, 1) } ?? -1))
+  println("U3 d1 3u: " + int.to_string(fan.race(compute.ns(9)) { d1(1, 1) } ?? -1))
+  println("H0 heavy(10) 11u: " + int.to_string(fan.race(compute.ns(33)) { heavy(10) } ?? -1))
+  println("H1 heavy(10) 12u: " + int.to_string(fan.race(compute.ns(36)) { heavy(10) } ?? -1))
+  println("H2 hv(10) 12u: " + int.to_string(fan.race(compute.ns(36)) { hv(10, 1) } ?? -1))
+  println("H3 hv(10) 13u: " + int.to_string(fan.race(compute.ns(39)) { hv(10, 1) } ?? -1))
+  println("H4 hv(10) 14u: " + int.to_string(fan.race(compute.ns(42)) { hv(10, 1) } ?? -1))
+}

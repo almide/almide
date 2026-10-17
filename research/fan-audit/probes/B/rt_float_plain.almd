@@ -1,0 +1,5 @@
+fn fl(x: Float) -> Float = x
+effect fn main() -> Unit = {
+  let a = fan.race { fl(1.0), fl(2.5) } ?? 0.0
+  println("T1b plain float " + float.to_string(a))
+}

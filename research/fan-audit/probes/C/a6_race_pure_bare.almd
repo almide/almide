@@ -1,0 +1,5 @@
+fn pf(x: Int) -> Result[Int, String] = ok(x)
+effect fn main() -> Unit = {
+  let r = fan.race([1, 2], pf) ?? -1
+  println(int.to_string(r))
+}

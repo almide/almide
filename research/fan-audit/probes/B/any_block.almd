@@ -1,0 +1,38 @@
+effect fn try_a(x: Int) -> Result[Int, String] = {
+  println("ran a")
+  err("a-failed")
+}
+effect fn try_b(x: Int) -> Result[Int, String] = {
+  println("ran b")
+  ok(x * 10)
+}
+effect fn try_c(x: Int) -> Result[Int, String] = {
+  println("ran c")
+  ok(x * 100)
+}
+fn pure_fail(m: String) -> Result[Int, String] = err(m)
+fn pure_ok(x: Int) -> Result[Int, String] = ok(x)
+effect fn main() -> Unit = {
+  let r = fan.any {
+    try_a(1)
+    try_b(2)
+    try_c(3)
+  }
+  match r {
+    ok(v) => println("A1 ok " + int.to_string(v)),
+    err(e) => println("A1 err " + e),
+  }
+  let s = fan.any {
+    pure_fail("first")
+    pure_fail("second")
+  }
+  match s {
+    ok(v) => println("A2 ok " + int.to_string(v)),
+    err(e) => println("A2 allfail err " + e),
+  }
+  let t = fan.any {
+    pure_ok(5)
+    try_c(9)
+  } ?? -1
+  println("A3 " + int.to_string(t))
+}

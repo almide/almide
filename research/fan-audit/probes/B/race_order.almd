@@ -1,0 +1,53 @@
+fn heavy(n: Int) -> Int = {
+  var i = 0
+  var acc = 0
+  while i < n {
+    acc = (acc + i * 7) % 999983
+    i = i + 1
+  }
+  acc
+}
+fn tag(n: Int, t: Int) -> Int = heavy(n) * 0 + t
+
+effect fn main() -> Unit = {
+  // P1: cheap arm second in source order
+  let a = fan.race {
+    tag(1000, 1)
+    tag(10, 2)
+  } ?? -1
+  println("P1 expensive-first: " + int.to_string(a))
+  // P2: cheap arm first
+  let b = fan.race {
+    tag(10, 1)
+    tag(1000, 2)
+  } ?? -1
+  println("P2 cheap-first: " + int.to_string(b))
+  // P3: equal cost tie
+  let c = fan.race {
+    tag(50, 1)
+    tag(50, 2)
+    tag(50, 3)
+  } ?? -1
+  println("P3 tie: " + int.to_string(c))
+  // P4: budget excludes all (bare form to see Err text)
+  let d = fan.race(compute.ns(30)) {
+    tag(1000, 1)
+    tag(2000, 2)
+  }
+  match d {
+    ok(v) => println("P4 ok " + int.to_string(v)),
+    err(e) => println("P4 err " + e),
+  }
+  // P5: budget admits only the cheap (later) arm
+  let e = fan.race(compute.ns(600)) {
+    tag(1000, 1)
+    tag(100, 2)
+  } ?? -1
+  println("P5 budget picks: " + int.to_string(e))
+  // P6: budget = 0 with straight-line arm
+  let f = fan.race(compute.ns(0)) {
+    7 + 1
+    tag(5, 2)
+  } ?? -1
+  println("P6 zero budget: " + int.to_string(f))
+}

@@ -1,0 +1,41 @@
+fn heavy(n: Int) -> Int = {
+  var i = 0
+  var acc = 0
+  while i < n {
+    acc = (acc + i * 7) % 999983
+    i = i + 1
+  }
+  acc
+}
+fn id(x: Int) -> Int = x
+fn wrap(n: Int) -> Int = heavy(n)
+
+effect fn main() -> Unit = {
+  // exact unit threshold of three spellings of the same computation
+  var u = 995
+  while u <= 1010 {
+    let a = fan.bounded(compute.ns(u * 3)) { heavy(1000) } ?? -1
+    let b = fan.bounded(compute.ns(u * 3)) { wrap(1000) } ?? -1
+    let c = fan.bounded(compute.ns(u * 3)) {
+      var i = 0
+      var acc = 0
+      while i < 1000 {
+        acc = (acc + i * 7) % 999983
+        i = i + 1
+      }
+      acc
+    } ?? -1
+    println("units=" + int.to_string(u) + " call=" + int.to_string(a) + " wrapped=" + int.to_string(b) + " inline=" + int.to_string(c))
+    u = u + 1
+  }
+  // argument of a single-call body: is it metered?
+  let d = fan.bounded(compute.ns(30)) { id(heavy(100000)) } ?? -1
+  println("id(heavy(100000)) under 10 units = " + int.to_string(d))
+  let e = fan.bounded(compute.ns(30)) {
+    let v = heavy(100000)
+    id(v)
+  } ?? -1
+  println("let v = heavy(100000); id(v) under 10 units = " + int.to_string(e))
+  let f = fan.timeout(duration.ns(1)) { id(heavy(3000000)) } ?? -1
+  println("timeout 1ns id(heavy(3M)) = " + int.to_string(f))
+}

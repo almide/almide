@@ -1,0 +1,18 @@
+fn loud(n: Int) -> Int = {
+  var i = 0
+  while i < n {
+    println("iter " + int.to_string(i))
+    i = i + 1
+  }
+  i
+}
+
+effect fn main() -> Unit = {
+  let a = fan.bounded(compute.ns(30)) { loud(100) } ?? -1
+  println("a=" + int.to_string(a))
+  let b = fan.bounded(compute.ns(30)) {
+    println("inline print in body")
+    loud(2)
+  } ?? -1
+  println("b=" + int.to_string(b))
+}
