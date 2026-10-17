@@ -123,3 +123,16 @@ fn the_classified_errnos_read_the_same_errno_free_text_on_every_leg() {
         assert_eq!(run_wasmtime(&leg_dir(scratch.path(), "p3"), true), want, "the p3 component");
     }
 }
+
+/// The fifth leg, the interp: its writes land in the per-interpreter VFS
+/// overlay, which must refuse what the host refuses — a non-empty directory
+/// removed or renamed onto, a path component past NAME_MAX — in the same words.
+#[test]
+fn the_interp_vfs_answers_the_same_classified_texts() {
+    let scratch = tempfile::tempdir().expect("tempdir");
+    let entry = leg_dir(scratch.path(), "interp").join("probe.almd");
+    let ir = almide::wasm_leg::lower_to_ir(entry.to_str().expect("utf8"), PROBE).expect("front failed");
+    let out = almide_interp::Interpreter::new(&ir).run_main();
+    assert_eq!(out.status, almide_interp::RunStatus::Ok, "interp: stderr=<{}>", out.stderr);
+    assert_eq!(out.stdout, expected(), "the interp VFS");
+}
