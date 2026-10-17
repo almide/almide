@@ -191,10 +191,14 @@ fn __qw_repeat_kv(kv: Matrix, n_kv_heads: Int, n_rep: Int) -> Matrix =
   }
 
 // Native's `load_f32_to_f64`: `len` f32 LE values from `off`.
-fn __qw_gamma(w: Bytes, off: Int, len: Int) -> List[Float] = {
-  let o = __mxp_clamp(off)
-  list.range(0, len) |> list.map((i) => bytes.read_f32_le(w, o + i * 4))
-}
+// The width is a matrix extent (C-161): negative is empty, and past the
+// 2^28-element ceiling it is matrix.zeros' own abort.
+fn __qw_gamma(w: Bytes, off: Int, len: Int) -> List[Float] =
+  if __mxp_over(len, 1) then matrix.to_lists(matrix.zeros(len, 1)) |> list.map((r) => r[0])
+  else {
+    let o = __mxp_clamp(off)
+    list.range(0, len) |> list.map((i) => bytes.read_f32_le(w, o + i * 4))
+  }
 
 // One packed GEMV of the layer's weight kind: 0 = Q1_0, 1 = f32, 2 = Q8_0.
 fn __qw_linear(kind: Int, x: Matrix, w: Bytes, off: Int, rows: Int, cols: Int) -> Matrix = match kind {
