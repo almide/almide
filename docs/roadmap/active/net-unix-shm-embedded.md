@@ -102,8 +102,9 @@ tables: `crates/almide-wasm-run/src/net_unix_host.rs` and `crates/almide-wasm/sr
 
 ## Evidence
 
-- `tests/net_unix_embedded_cross_test.rs`: `tests/net_unix/net_unix_loopback.almd` (every
-  function on its success path, descriptors passed both ways) and `net_unix_errors.almd` (every
+- `tests/net_unix_embedded_cross_test.rs` and the `spec/embedded_cross` sweep:
+  `spec/embedded_cross/net_unix_loopback.almd` (C-382, every
+  function on its success path, descriptors passed both ways) and `net_unix_errors.almd` (C-383, every
   function's error paths) print the same lines on native and on `almide run --target wasm`, and
   each reaches its closing `done` line on both legs. A third test pins the error texts on native.
 - `crates/almide-rt-core/tests/net_unix_core.rs`: the table's refusals, the close of untaken
@@ -112,10 +113,10 @@ tables: `crates/almide-wasm-run/src/net_unix_host.rs` and `crates/almide-wasm/sr
 
 ## Contracts
 
-No contract covers this family yet. C-377..C-379 are the tcp contracts and name only
-`net.tcp_*`. A new contract id lands in the als judge first, so the fixtures stay under
-`tests/net_unix/` until then, and move to `spec/embedded_cross/` with their `// @contract:`
-headers once the judge holds the ids. Two statements, proposed for the judge:
+C-382 (agreement) and C-383 (errors), under ALS-R5, landed in the judge first (almide/als#145)
+with the two fixtures, which this tree carries verbatim in `spec/embedded_cross/`. Each fixture
+listens at a fresh random path in the temp dir and removes it before its closing line, so the
+sweep can run it without arguments. The statements:
 
 1. **Agreement.** ALS-R5 (#3620): the `net.unix_*` / `net.shm_*` family (`unix_connect`,
    `unix_listen`, `unix_accept`, `unix_send`, `unix_recv`, `unix_take_fds`, `unix_poll`,

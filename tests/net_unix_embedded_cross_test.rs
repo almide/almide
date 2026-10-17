@@ -1,46 +1,41 @@
 //! net's Unix-domain sockets and shared-memory files on the embedded wasm lane
 //! (`almide run --target wasm`) answer what native answers (#3620; the
 //! interim embedded host ops 104..=116, retired when ADR-0023 step 7 runs the
-//! embedded lane as the p3 component). Both legs serve the 13 functions from
-//! the one core in crates/almide-rt-core/src/net_unix_core.rs, so equal
-//! output is expected by construction; this test is the observation.
+//! embedded lane as the p3 component): C-382 and C-383, whose fixtures are the
+//! judge's own, verbatim, in spec/embedded_cross. Both legs serve the 13
+//! functions from the one core in crates/almide-rt-core/src/net_unix_core.rs,
+//! so equal output is expected by construction; this test is the observation.
 //!
-//! The programs in tests/net_unix/ take the socket path as argv[1] (a fresh
-//! path per leg: `unix_listen` needs one that does not exist yet) and print
-//! descriptor PROPERTIES, never the raw numbers, which differ between the
-//! native process and the embedded host's. Each must run to its closing
-//! `done` line on both legs: a check of stdout and the exit code alone passes
-//! two legs that fail the same way.
+//! Each program listens at a fresh random path in the temp dir and removes it
+//! before its last line, and prints descriptor PROPERTIES, never the raw
+//! numbers, which differ between the native process and the embedded host's.
+//! That directory's sweep compares stdout and the exit code only, so two legs
+//! that fail alike pass it; this test also requires each program to run to
+//! its closing `done` line on both legs.
 #![cfg(unix)]
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
 
 #[path = "support/capped_run.rs"]
 mod capped_run;
 
-/// A socket path short enough for `sun_path` (104 bytes on macOS) that does
-/// not exist yet.
-fn socket_path(dir: &Path, name: &str, leg: &str) -> PathBuf {
-    let p = dir.join(format!("{name}-{leg}.sock"));
-    let _ = std::fs::remove_file(&p);
-    p
+fn fixture(name: &str) -> std::path::PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("spec/embedded_cross/{name}.almd"))
 }
 
 /// Each program finishes in well under a second; 120 s per run (build
 /// included) turns a hang into a named failure.
-fn run(path: &Path, sock: &Path, wasm: bool) -> (String, Option<i32>, String) {
+fn run(path: &Path, wasm: bool) -> (String, Option<i32>, String) {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_almide"));
     cmd.arg("run").arg(path);
     if wasm {
         cmd.args(["--target", "wasm"]);
     }
-    cmd.arg("--").arg(sock);
     let leg = if wasm { "embedded" } else { "native" };
     let out = capped_run::output_capped(cmd, Duration::from_secs(120))
         .unwrap_or_else(|e| panic!("{} ({leg}): {e}", path.display()));
-    let _ = std::fs::remove_file(sock);
     (
         String::from_utf8_lossy(&out.stdout).into_owned(),
         out.status.code(),
@@ -49,11 +44,10 @@ fn run(path: &Path, sock: &Path, wasm: bool) -> (String, Option<i32>, String) {
 }
 
 fn cross(name: &str) {
-    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("tests/net_unix/{name}.almd"));
-    let dir = tempfile::Builder::new().prefix("au").tempdir_in("/tmp").expect("scratch dir");
-    let native = run(&src, &socket_path(dir.path(), name, "n"), false);
+    let src = fixture(name);
+    let native = run(&src, false);
     assert!(native.0.ends_with("done\n"), "{name}: native did not finish:\n{}\n{}", native.0, native.2);
-    let wasm = run(&src, &socket_path(dir.path(), name, "w"), true);
+    let wasm = run(&src, true);
     assert!(wasm.0.ends_with("done\n"), "{name}: the embedded lane did not finish:\n{}\n{}", wasm.0, wasm.2);
     assert_eq!((&wasm.0, wasm.1), (&native.0, native.1), "{name}: the embedded lane diverged");
 }
@@ -79,9 +73,8 @@ fn unix_and_shm_error_paths_agree_on_native_and_the_embedded_lane() {
 /// standard streams included — on either leg.
 #[test]
 fn an_unheld_descriptor_is_refused_before_any_system_call() {
-    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/net_unix/net_unix_errors.almd");
-    let dir = tempfile::Builder::new().prefix("au").tempdir_in("/tmp").expect("scratch dir");
-    let (out, code, err) = run(&src, &socket_path(dir.path(), "pin", "n"), false);
+    let src = fixture("net_unix_errors");
+    let (out, code, err) = run(&src, false);
     assert_eq!(code, Some(0), "{out}\n{err}");
     for want in [
         "err unix_connect(<path>): No such file or directory",
