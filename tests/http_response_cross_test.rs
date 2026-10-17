@@ -236,3 +236,30 @@ fn an_exit_code_crosses_the_component_route() {
         assert_eq!((&p3.0, p3.2), (&native.0, native.2), "the p3 component diverged: {}", p3.1);
     }
 }
+
+/// `ALMIDE_WASM_ALLOC_COUNT` on the component route (#2407's measurement):
+/// the armed component writes the allocator's exit report itself, in the
+/// core-module host's line form, so a full-response call is measured on the
+/// embedded lane like every other call — after a normal exit and after
+/// `process.exit` alike — and a full-response round trip leaves no block live.
+#[test]
+fn the_component_route_reports_the_allocation_counters() {
+    let port = serve();
+    let dir = tempfile::tempdir().expect("tempdir");
+    for (name, import, tail) in [("normal", "", ""), ("exit", "import process\n", "  process.exit(0)\n")] {
+        let file = dir.path().join(format!("alloc_{name}.almd"));
+        let src = format!(
+            "import http\n{import}\neffect fn main() -> Unit = {{\n  match http.get_response(\"http://127.0.0.1:{port}/ok\") {{\n    ok(r) => println(http.body(r)),\n    err(e) => println(e),\n  }}\n{tail}}}\n"
+        );
+        std::fs::write(&file, src).expect("write");
+        let mut c = Command::new(env!("CARGO_BIN_EXE_almide"));
+        c.arg("run").arg(&file).args(["--target", "wasm"]).env("ALMIDE_WASM_ALLOC_COUNT", "1");
+        let (out, err, code) = observe(c);
+        assert_eq!((out.as_str(), code), ("héllo\nworld\n", Some(0)), "{name}: {err}");
+        let report = err.lines().find(|l| l.starts_with("__ALMD_WASM_ALLOC allocs=")).unwrap_or_else(|| panic!("{name}: no counter report in {err:?}"));
+        for field in ["reused=", "bytes=", "frees=", "reclaimed=", "heap_end="] {
+            assert!(report.contains(field), "{name}: {report}");
+        }
+        assert!(report.contains(" live=0 "), "{name}: a full-response round trip left blocks live: {report}");
+    }
+}
