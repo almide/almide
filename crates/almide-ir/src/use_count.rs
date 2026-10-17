@@ -634,7 +634,8 @@ fn is_const_expr(expr: &IrExpr, const_vars: &std::collections::HashSet<u32>) -> 
         IrExprKind::LitStr { .. } => false,
         IrExprKind::UnOp { operand, .. } => is_const_expr(operand, const_vars),
         // Integer `/` and `%` render as the almide_div!/almide_mod! totality macros
-        // (abort with `Error: <msg>` + exit 1), which are not const-evaluable Rust —
+        // (abort with `Error: <msg>` + exit 1) or, by a literal, `almide_rem_const`,
+        // none of which is const-evaluable Rust —
         // a top-level let containing one must take the Lazy (runtime) path, where the
         // abort fires at startup exactly like wasm's top-let evaluation. Plain
         // literal-by-nonzero-literal division is folded by pass_const_fold before

@@ -89,7 +89,8 @@ mod tests {
                 assert_eq!(rem(x), x % d, "{x} % {d}");
             }
             for k in [1i64, 2, 3, 1 << 20, 1 << 40, i64::MAX / d] {
-                for x in [k * d - 1, k * d, k * d + 1, -(k * d) - 1, -(k * d), -(k * d) + 1] {
+                let m = k * d;
+                for x in [m - 1, m, m.wrapping_add(1), -m - 1, -m, 1 - m] {
                     assert_eq!(rem(x), x % d, "{x} % {d}");
                 }
             }
