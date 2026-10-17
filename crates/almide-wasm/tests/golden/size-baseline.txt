@@ -157,7 +157,7 @@
 3256	spec/wasm_cross/effect_operand_unwrap_distinct.almd
 6140	spec/wasm_cross/effect_option_explicit_bang.almd
 4836	spec/wasm_cross/effect_slot_carrier.almd
-5097	spec/wasm_cross/effect_slot_never_err_bang.almd
+5188	spec/wasm_cross/effect_slot_never_err_bang.almd
 5582	spec/wasm_cross/effect_tail_carrier_family.almd
 2531	spec/wasm_cross/effect_tco.almd
 2791	spec/wasm_cross/effect_tco_err_rewrap.almd
@@ -664,7 +664,7 @@
 26000	spec/wasm_cross/r5_wasm_interp_alias_rc.almd
 3919	spec/wasm_cross/r5_wasm_split_replace_iterative.almd
 2680	spec/wasm_cross/r5_wasm_tuple_variant_pattern.almd
-1820	spec/wasm_cross/random_int_entropy.almd
+1911	spec/wasm_cross/random_int_entropy.almd
 1818	spec/wasm_cross/range_bind_huge.almd
 3164	spec/wasm_cross/range_bind_no_materialize.almd
 2234	spec/wasm_cross/range_bind_walled_no_materialize.almd
