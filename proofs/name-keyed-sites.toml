@@ -380,11 +380,6 @@ class = "legacy"
 names = 8
 
 [[site]]
-id = "crates/almide-ir/src/effect.rs::RUNTIME_PREFIX_ALIASES::table"
-class = "legacy"
-names = 2
-
-[[site]]
 id = "crates/almide-ir/src/effect.rs::STDLIB_MODULE_EFFECTS::table"
 class = "legacy"
 names = 43
