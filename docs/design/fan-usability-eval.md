@@ -73,7 +73,7 @@ There are two scores per task:
 |---|---|
 | C0 | the current CHEATSHEET fan section, verbatim |
 | C1 | C0 plus ADR-0028's D-a hint text and D-c glosses |
-| C2 | C1 with `fan.first_ok` / `fan.cheapest` aliases spelled in, i.e. option B. This is measured only to size B's benefit; nothing ships from it. |
+| C2 | ADR-0028's proposal: the new names `fan.first_ok` / `fan.min_cost` with D-a/D-c |
 
 The writers are the Dojo model roster for the day. Each (task, condition,
 model) runs 5 samples. The model, sample count and date are recorded with
@@ -86,10 +86,11 @@ each result row.
    outside CI, with the API keys on the operator's machine (Dojo rule).
 3. Score each run on selection and misconception. Report per family and per
    condition, with the total counts beside each rate ("of how many").
-4. Compare C0 → C1 to see whether option A's diagnostics and glosses reduce
-   the misreadings. Compare C1 → C2 to see how much more renaming would buy.
-5. Apply ADR-0028's falsifier. If the F1 + F2 + F5 misreading rate under C1
-   is above 20%, revisit option B or C.
+4. Compare C0 → C1 to see what the diagnostics and glosses alone buy, and
+   C1 → C2 to see what the rename buys on top.
+5. Apply ADR-0028's falsifier. If C2 does not cut the F1 + F2 + F5
+   misreading rate by at least a third relative to C1, reconsider keeping
+   the names (option A) before the removal epoch.
 
 ## What this evaluation does not claim
 
