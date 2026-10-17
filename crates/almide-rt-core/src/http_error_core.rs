@@ -95,6 +95,20 @@ pub const HTTP_FORBIDDEN_HEADERS: [&str; 9] = [
     "http2-settings",
 ];
 
+/// The fields that frame the request body, which the client writes from the
+/// body it sends: a caller's copy (ASCII case-insensitive) is DROPPED on
+/// every lane, never sent and never refused — the Fetch standard's forbidden
+/// request header, and Go's net/http, which ignores a `Content-Length` in
+/// `Request.Header`. Sent as given, a length that disagrees with the body is
+/// a malformed request natively and `HTTP-request-body-size` under wasi:http.
+/// (`transfer-encoding` frames too, but is refused above, C-370.)
+pub const HTTP_FRAMING_HEADERS: [&str; 1] = ["content-length"];
+
+/// Whether `name` is one of `HTTP_FRAMING_HEADERS`.
+pub fn http_is_framing_header(name: &str) -> bool {
+    HTTP_FRAMING_HEADERS.iter().any(|f| f.eq_ignore_ascii_case(name))
+}
+
 /// The p3 shim's text for a host error it has no class for:
 /// head, the quoted URL, middle, the wasi:http case name, tail.
 pub const HTTP_ERR_UNCLASSIFIED: [&str; 3] = ["http request to ", " failed (", ")"];
