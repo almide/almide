@@ -1,0 +1,28 @@
+// fan floor, wide probe "heap" (see ../wide.py): __REPS__ offers of fan.map
+// over __N__ elements; every element runs and the lowest-index Err wins.
+fn work(s: Int, i: Int, iters: Int) -> Int = {
+  var acc = s + i
+  var j = 0
+  while j < iters { acc = (acc * 31 + j) % 1000003; j = j + 1 }
+  acc
+}
+
+fn elem(s: Int, i: Int, iters: Int) -> Result[Int, String] =
+  ok(list.range(0, 20) |> list.map((j) => int.to_string((s + i) * j % 1000)) |> list.join(",") |> string.len)
+
+effect fn main() -> Unit = {
+  let one = 1
+  let n = __N__ + one - 1
+  let iters = __IT__ + one - 1
+  var s = 1
+  var k = 0
+  while k < __REPS__ {
+    let s0 = s
+    s = match fan.map(list.range(0, n), (i) => elem(s0, i, iters)) {
+      ok(xs) => (s0 + list.fold(xs, 0, (a, x) => (a + x) % 1000003)) % 1000003,
+      err(e) => (s0 + string.len(e)) % 1000003,
+    }
+    k = k + 1
+  }
+  println("${s}")
+}
