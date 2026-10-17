@@ -477,7 +477,7 @@ fn lower_fan_race_fold(
 }
 
 /// Lower `fan.race(budget?, xs, f)` — the MAPPER form (T7-1) — into a dynamic
-/// (spend, index) lex-min fold: a while loop over `xs` calls ONE outlined
+/// (spend, index) lex-min fold: a `for` loop over `xs` calls ONE outlined
 /// metered region per element (the mapper body with its param bound to the
 /// element — per-branch budget, exactly the block form's rule), reads the
 /// persisted verdict + spend, and folds the minimum into scalar `var`s.

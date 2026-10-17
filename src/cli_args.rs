@@ -39,8 +39,8 @@ pub(crate) enum Commands {
         #[arg(long)]
         release: bool,
         /// Execution target: `rust` (default, native binary) or `wasm`
-        /// (build a wasm32-wasi module and execute it on the `wasmtime`
-        /// CLI). Both targets must produce byte-identical observable
+        /// (build a wasm32-wasi module and execute it on the embedded
+        /// wasmtime host). Both targets must produce byte-identical observable
         /// behavior — the cross-target equivalence guarantee.
         #[arg(long)]
         target: Option<String>,

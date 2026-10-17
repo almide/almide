@@ -326,8 +326,8 @@ impl Checker {
     /// `ExprKind::FanBounded` arm: `fan.bounded(budget) { body }` (Stage 2 v1).
     /// Effect-fn gate; budget must be a `Compute` (the ADR-0001 clock firewall
     /// — bare Int and wall-clock `Duration` are named type errors); the body is
-    /// checked in a PURE context (Rung 0) and, in v1, must be a single call
-    /// returning a plain (non-Result) value. Result[T, String] like fan.map.
+    /// checked in a PURE context (Rung 0) and must return a plain (non-Result)
+    /// value; it may be a whole block. Result[T, String] like fan.map.
     fn infer_expr_g3_fan_bounded(&mut self, expr: &mut ast::Expr) -> Ty {
         let ExprKind::FanBounded { budget, body } = &mut expr.kind else { unreachable!() };
         if !self.env.can_call_effect {
@@ -358,7 +358,7 @@ impl Checker {
 
     /// `ExprKind::FanRace` arm: `fan.race(budget?) { arms }` (Stage 3 v1).
     /// Effect-fn gate; the optional budget is a `Compute` (same firewall as
-    /// bounded); every arm is a single pure call and all arms unify to one T.
+    /// bounded); every arm is a pure expression and all arms unify to one T.
     /// Result[T, String] — Err is the ledger-constant no-winner verdict.
     fn infer_expr_g3_fan_race(&mut self, expr: &mut ast::Expr) -> Ty {
         let ExprKind::FanRace { budget, arms } = &mut expr.kind else { unreachable!() };

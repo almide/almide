@@ -158,12 +158,11 @@ fn parallel_name(name: &str) -> Option<&'static str> {
 }
 
 /// Send-safe = a type whose NATIVE repr carries no `Rc`: it can cross a
-/// `thread::scope` boundary by value. Scalars, and tuples / records / Option
-/// of Send-safe types. `Ty::Named` resolves through the program's record and
+/// `thread::scope` boundary by value. Scalars, String, and List / Set / Map /
+/// Result / Option / tuples / records of Send-safe types (#2044, see the
+/// `Ty::String` arm). `Ty::Named` resolves through the program's record and
 /// alias decls (a generic instantiation, a variant, or an unknown name is
-/// declined). String is declined on purpose: today it is a plain `String`,
-/// but ADR-0013 stage 2 makes it refcounted, and the fan runtime must not
-/// change meaning under it. Depth-bounded so a recursive alias cannot loop.
+/// declined). Depth-bounded so a recursive alias cannot loop.
 fn is_send_safe_ty(ty: &Ty, decls: &[IrTypeDecl], depth: u32) -> bool {
     if depth > 8 {
         return false;

@@ -261,11 +261,11 @@ pub enum ExprKind {
     Scoped { body: Box<Expr>, #[serde(skip)] end: Option<Span> },
     Fan { exprs: Vec<Expr> },
     /// `fan.bounded(budget) { body }` — deterministic computation budget
-    /// (Stage 2 v1: body is a single call expression; budget is a `Compute`).
+    /// (the body is a block, budget is a `Compute`).
     FanBounded { budget: Box<Expr>, body: Box<Expr> },
-    /// `fan.race(budget?) { arm; arm; … }` — deterministic race: the winner is
+    /// `fan.race(budget?) { arm, arm, … }` — deterministic race: the winner is
     /// the (spend, index)-lexicographic minimum completion. The optional budget
-    /// is a per-branch divergence guard (Stage 3 v1: arms are single calls).
+    /// is a per-branch divergence guard. Arms are pure expressions.
     FanRace { budget: Option<Box<Expr>>, arms: Vec<Expr> },
     /// `fan.race(xs, f)` / `fan.race(budget, xs, f)` — the MAPPER form: one
     /// pure 1-param lambda raced over a dynamic list, winner = the

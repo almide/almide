@@ -144,8 +144,10 @@ impl Checker {
     }
 
     /// `fan.*` dispatch of [`Self::resolve_static_member`] — compiler-known
-    /// concurrency primitives (`map`/`any`/`settle`), the removed `race` and
-    /// `timeout` tombstones, and the unknown-fan-fn diagnostic. Verbatim text
+    /// concurrency primitives (`map`/`any`/`settle`), the E027 tombstones of the
+    /// old `race(thunks)` and `timeout(ms, f)` CALL forms (the `fan.race { }` /
+    /// `fan.timeout(d) { }` heads are live and parse elsewhere), and the
+    /// unknown-fan-fn diagnostic. Verbatim text
     /// move: every arm ends in `return Some(..)`, so this always resolves
     /// (never falls through to UFCS).
     /// The closed unit set of ADR-0001 S2 — 2 clocks x 6 units, gate-checked.
@@ -186,15 +188,15 @@ impl Checker {
         // UFCS, so the diagnostic is emitted and `Unknown` recovers.
         self.emit(super::err(
             format!("unknown function 'fan.{}'", field),
-            // LIVE surfaces only. `fan.race` is tombstoned (E027) and naming it here sent a
-            // user who merely mistyped toward a function that no longer exists — the same
-            // defect class as a tombstone whose migration target is itself removed.
+            // LIVE surfaces only: the block heads are named, the tombstoned CALL forms
+            // (`fan.race(thunks)`, E027) are not — naming a removed form sent a user who
+            // merely mistyped toward a function that no longer exists.
             "Available: the mappers fan.map(xs, f) / fan.any(xs, f) / fan.settle(xs, f), and the block heads fan.any / fan.settle / fan.race / fan.bounded / fan.timeout",
             format!("call to fan.{}()", field)));
         Some(Ty::Unknown)
     }
 
-    /// `fan.map` and the tombstoned `fan.race` — the fan arms that consume a mapper.
+    /// `fan.map` and the tombstoned `fan.race(thunks)` call — the fan arms that consume a mapper.
     ///
     /// One group of `resolve_fan_call`'s arm table, arms verbatim and in source
     /// order. `None` means "not my group"; the router tries the groups in that
@@ -203,10 +205,10 @@ impl Checker {
         match field {
             "map" => {
                 // fan.map(xs, f) -> Result[List[B], String] where xs: List[A],
-                // f: Fn(A) -> Result[B, String]. EFFECTFUL: the first element
-                // Err (in list order) propagates as the whole map's Err. The
-                // Result is auto-unwrapped in effect-fn bindings and auto-`?`
-                // propagated, exactly like a user effect fn call.
+                // f: Fn(A) -> Result[B, String]. EFFECTFUL: every element runs and
+                // the lowest-index Err is the whole map's Err. The Result is a
+                // value like any effect fn call's: `!` propagates it (ADR-0008;
+                // a bare use is E041/E042).
                 if arg_tys.len() != 2 {
                     self.emit(super::err(
                         format!("fan.map() expects 2 arguments but got {}", arg_tys.len()),
@@ -329,8 +331,8 @@ impl Checker {
             }
             "any" => {
                 // Wave 1: the thunk-list SPELLING is removed; the block form is
-                // the surface. 2 args = the declared (not yet implemented)
-                // mapper form.
+                // the surface. 2 args = the mapper form `fan.any(xs, f)`
+                // (lowered to `any_map`).
                 if arg_tys.len() == 1 {
                     self.emit(super::err(
                         "fan.any changed signature: the thunk-list form was removed; any is now a block head",
