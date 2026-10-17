@@ -600,47 +600,6 @@ fn matrix_mul_lifts_and_lowers_verbatim() {
     }
 }
 
-/// Full gemm+bias+scale+gelu chain: saturation fires the
-/// `gemm_bias_scale_gelu` rule and lower emits the fused intrinsic.
-#[test]
-fn matrix_gemm_chain_fuses_on_real_ir() {
-    let a = matrix_var(0);
-    let b = matrix_var(1);
-    let bias = matrix_var(2);
-    let alpha = scalar_var(3);
-
-    let mul = matrix_call("mul", vec![a, b]);
-    let add = matrix_call("add", vec![mul, bias]);
-    let scale = matrix_call("scale", vec![add, alpha]);
-    let gelu = matrix_call("gelu", vec![scale]);
-
-    let mut bridge = Bridge::new();
-    let (rec, root) = bridge.lift(&gelu);
-    let runner = Runner::default()
-        .with_iter_limit(64)
-        .with_node_limit(10_000)
-        .with_expr(&rec)
-        .run(&fusion_rules());
-    let canonical_root = runner.egraph.find(root);
-    let extractor = Extractor::new(&runner.egraph, FusionCost);
-    let (_, best) = extractor.find_best(canonical_root);
-    assert_eq!(
-        best.to_string(),
-        "(matrix_fused_gemm_bias_scale_gelu _slot_0 _slot_1 _slot_2 _slot_3)",
-    );
-
-    let mut vt = seeded_var_table(3);
-    let lowered = bridge.lower(&best, &mut vt).expect("lower succeeds");
-    match &lowered.kind {
-        IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } => {
-            assert_eq!(module.as_str(), "matrix");
-            assert_eq!(func.as_str(), "fused_gemm_bias_scale_gelu");
-            assert_eq!(args.len(), 4);
-        }
-        other => panic!("expected fused call, got {:?}", other),
-    }
-}
-
 /// mul(a, scale(b, s)) — the `mul_scaled_rhs` rule — with arg reorder
 /// from the stdlib `(matrix_mul ?a (matrix_scale ?b ?s))` LHS to the
 /// `(matrix_mul_scaled ?a ?s ?b)` RHS. Confirms lower respects the
@@ -719,37 +678,22 @@ fn matrix_var_ref(id: u32) -> IrExpr {
     }
 }
 
-/// 4-stage let-split chain matching the imperative MatrixFusionPass's
-/// gemm_bias_scale_gelu shape:
-///   let mul    = matrix.mul(a, b)
-///   let added  = matrix.add(mul, bias)
-///   let scaled = matrix.scale(added, alpha)
-///   matrix.gelu(scaled)
+/// Let-split chain matching the `mul_scaled_rhs` shape:
+///   let scaled = matrix.scale(b, s)
+///   matrix.mul(a, scaled)
 /// Bridge must inline the chain into the trailing expression so egg
-/// can recognise the `gemm_bias_scale_gelu` rewrite.
+/// can recognise the rewrite.
 #[test]
 fn matrix_let_split_chain_fuses_via_inline() {
     let a = matrix_var(0);
     let b = matrix_var(1);
-    let bias = matrix_var(2);
-    let alpha = scalar_var(3);
-    let mul_id = 10;
-    let added_id = 11;
+    let s = scalar_var(2);
     let scaled_id = 12;
 
-    let mul_value = matrix_call("mul", vec![a, b]);
-    let added_value = matrix_call("add", vec![matrix_var_ref(mul_id), bias]);
-    let scaled_value = matrix_call("scale", vec![matrix_var_ref(added_id), alpha]);
-    let trailing = matrix_call("gelu", vec![matrix_var_ref(scaled_id)]);
+    let scaled_value = matrix_call("scale", vec![b, s]);
+    let trailing = matrix_call("mul", vec![a, matrix_var_ref(scaled_id)]);
 
-    let ir = block_lets(
-        vec![
-            (VarId(mul_id), mul_value),
-            (VarId(added_id), added_value),
-            (VarId(scaled_id), scaled_value),
-        ],
-        trailing,
-    );
+    let ir = block_lets(vec![(VarId(scaled_id), scaled_value)], trailing);
 
     let mut bridge = Bridge::new();
     let (rec, root) = bridge.lift(&ir);
@@ -763,7 +707,7 @@ fn matrix_let_split_chain_fuses_via_inline() {
     let (_, best) = extractor.find_best(canonical);
     assert_eq!(
         best.to_string(),
-        "(matrix_fused_gemm_bias_scale_gelu _slot_0 _slot_1 _slot_2 _slot_3)",
+        "(matrix_mul_scaled _slot_0 _slot_2 _slot_1)",
     );
 }
 

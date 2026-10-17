@@ -15,8 +15,8 @@
 
 /// Stdlib modules whose calls are effects, or read the outside world.
 pub const EFFECT_MODULES: &[&str] = &[
-    "args", "datetime", "env", "fan", "fs", "http", "io", "mem", "net",
-    "process", "random", "sse", "testing", "time", "zlib",
+    "args", "datetime", "env", "fan", "fs", "http", "io", "net",
+    "process", "random", "testing", "time", "zlib",
 ];
 
 /// Stdlib modules whose every fn is TOTAL: pure arithmetic / conversion that

@@ -408,7 +408,7 @@ pub(super) fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::P
     // spec/wasm_cross against the pre-migration capture, not merely a green suite.
     almide_driver::link_ir(&mut ir_program);
     mark(prof, &mut marks, "opt_mono");
-    // Native-only matrix ops (e.g. qwen3_block_q1_0_kv) have no WASM lowering;
+    // Native-only matrix ops (none today) have no WASM lowering;
     // skip with a clear reason instead of reaching the emitter (whose panic would
     // surface as a generic "WASM codegen panic" skip).
     if let Some(op) = almide::codegen::program_uses_native_only_matrix_on_wasm(&ir_program) {

@@ -74,7 +74,7 @@ impl<'a> IrMutVisitor for EggVisitor<'a> {
     fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
         // Recurse first so inner subtrees fuse before enclosing ones
         // are considered. Bottom-up matches the chain-shaped
-        // `gemm → add → scale → gelu` fusion's natural direction.
+        // `mul(a, scale(b, s))` fusion's natural direction.
         walk_expr_mut(self, expr);
 
         if !is_saturation_target(expr) {
