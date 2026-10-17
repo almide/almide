@@ -257,8 +257,34 @@ fn synthesize(ir: &mut IrProgram, run_filter: Option<&str>, module_reinit: Modul
         span: None,
         def_id: None,
     };
+    let body = if ir.functions.iter().any(|f| f.name.as_str() == almide_ir::ABORT_DISPATCH_FN) {
+        abort_site_selector(body)
+    } else {
+        body
+    };
     ir.functions.push(runner_fn(sym("main"), body, true));
     Ok(())
+}
+
+/// `testing.assert_aborts` (ADR-0029 D3): the runner `main` of a program with
+/// abort sites runs ONE site when the host started this instance for it, and
+/// the tests otherwise: `if testing.__abort_site_selected() >= 0 then
+/// __almd_abort_dispatch(testing.__abort_site_selected())! else <tests>`.
+fn abort_site_selector(tests: almide_ir::IrExpr) -> almide_ir::IrExpr {
+    use almide_ir::{BinOp, CallTarget, IrExpr, IrExprKind};
+    use almide_lang::intern::sym;
+    use almide_lang::types::Ty;
+    let mk = |kind: IrExprKind, ty: Ty| IrExpr { kind, ty, span: None, def_id: None };
+    let selected = || {
+        let target = CallTarget::Module { module: sym("testing"), func: sym("__abort_site_selected"), def_id: None };
+        mk(IrExprKind::Call { target, args: Vec::new(), type_args: Vec::new() }, Ty::Int)
+    };
+    let zero = mk(IrExprKind::LitInt { value: 0 }, Ty::Int);
+    let cond = mk(IrExprKind::BinOp { op: BinOp::Gte, left: Box::new(selected()), right: Box::new(zero) }, Ty::Bool);
+    let target = CallTarget::Named { name: sym(almide_ir::ABORT_DISPATCH_FN) };
+    let dispatch = mk(IrExprKind::Call { target, args: vec![selected()], type_args: Vec::new() }, Ty::result(Ty::Unit, Ty::String));
+    let run = mk(IrExprKind::Try { expr: Box::new(dispatch) }, Ty::Unit);
+    mk(IrExprKind::If { cond: Box::new(cond), then: Box::new(run), else_: Box::new(tests) }, Ty::Unit)
 }
 
 /// A synthesized zero-param Unit fn of the runner protocol (the runner `main`,

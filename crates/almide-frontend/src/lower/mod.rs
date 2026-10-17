@@ -76,6 +76,10 @@ pub struct LowerCtx<'a> {
     pub annotated_result_vars: std::collections::HashSet<VarId>,
     /// Functions synthesized during expression lowering (fan.bounded outlining).
     pub synthesized_fns: Vec<almide_ir::IrFunction>,
+    /// `testing.assert_aborts` sites lifted so far (ADR-0029), in declaration
+    /// order: whether each lifted site fn is an effect fn. The dispatcher is
+    /// synthesized from it once the program is lowered.
+    pub abort_sites: Vec<bool>,
     /// Counter for synthesized fan.bounded function names.
     pub bounded_counter: u32,
     /// #3483: the source names of the program's fns whose IR name is escaped
@@ -106,6 +110,7 @@ impl<'a> LowerCtx<'a> {
             annotated_result_vars: std::collections::HashSet::new(),
             synthesized_fns: Vec::new(),
             bounded_counter: 0,
+            abort_sites: Vec::new(),
             escaped_fns: std::collections::HashSet::new(),
         }
     }
@@ -605,6 +610,9 @@ fn build_ir_program(mut ctx: LowerCtx, functions: Vec<IrFunction>, top_lets: Vec
 
     let mut functions = functions;
     let mut effect_fn_names = effect_fn_names;
+    if let Some(dispatch) = calls::abort_site_dispatcher(&mut ctx) {
+        ctx.synthesized_fns.push(dispatch);
+    }
     // A synthesized fn, and a user fn under its escaped IR name (#3483), are
     // absent from the TypeEnv's source-keyed table.
     for f in functions.iter().chain(&ctx.synthesized_fns) {

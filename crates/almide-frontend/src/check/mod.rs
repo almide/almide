@@ -1485,6 +1485,7 @@ include!("interp_string_form.rs");
 include!("lint_error_surface.rs");
 include!("bounded.rs");
 include!("concurrent_reach_check.rs");
+include!("abort_site_check.rs");
 include!("scoped.rs");
 include!("scoped_walk.rs");
 include!("scoped_shape.rs");

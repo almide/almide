@@ -2324,8 +2324,8 @@ expect = "true"
 note = """
 The passing call pins the ARGUMENT ORDER: assert_gt(a, b) passes iff a > b,
 so a reversed implementation would fail this file. Strictness is measured
-out-of-band (an in-file failing call would fail the harness itself, and the
-assert_throws route is HARNESS_LIMITATION on wasm): assert_gt(1, 1) rejects
+out-of-band (an in-file failing call would fail the harness itself):
+assert_gt(1, 1) rejects
 on BOTH legs — native panics "assert_gt failed: 1 is not > 1" (exit 101),
 wasm prints "assert_gt failed" (exit 1).
 """
@@ -2341,6 +2341,48 @@ expect = "true"
 note = """
 The mirror of assert_gt: passes iff a < b, strictly — measured out-of-band,
 assert_lt(1, 1) rejects on both legs ("1 is not < 1" natively).
+"""
+
+[[testing.fn]]
+name = "__abort_site_selected"
+index_unit = "element-index"
+probe = "testing.__abort_site_selected()"
+expect = "-1"
+note = """
+The 0-based ordinal of the assert_aborts site this process or instance was
+started to run (ADR-0029), or -1. The test harness itself is never a child,
+so in-file the probe pins -1; the child side is the assert_aborts fixtures'
+(spec/stdlib/coverage_assert_aborts_test.almd), on both legs.
+"""
+
+[[testing.fn]]
+name = "__abort_site_run"
+index_unit = "element-index"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (a child process or instance): the Int is the 0-based
+ordinal of the lifted assert_aborts site the child runs, in declaration
+order — the same ordinal __abort_site_selected answers in the child. A
+probe here would start a child of a file that declares no site; the
+assert_aborts fixtures exercise it on both legs.
+"""
+
+[[testing.fn]]
+name = "__assert_aborts_check"
+index_unit = "value"
+setup = [
+  'testing.__assert_aborts_check("boom", ["1", "", "PANIC: boom"], 7)',
+  'testing.__assert_aborts_check("went wrong", ["1", "", "Error: x\\nPANIC: it went wrong"], 8)',
+]
+probe = "true"
+expect = "true"
+note = """
+The Int is the 1-based source LINE of the assert_aborts call, printed in the
+failure block's `at:` field and never compared. The passing calls pin the
+verdict's shape: exit status "1" plus a header line, matched from the LAST
+header; every failing shape is pinned by tests/assert_aborts_runner_test.rs
+(an in-file failing call would fail the harness itself).
 """
 
 # index_unit vocabulary — args:

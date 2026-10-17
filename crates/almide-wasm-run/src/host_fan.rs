@@ -135,6 +135,12 @@ impl ParCtx {
     ) -> Self {
         ParCtx { engine, module, linker, max_memory_bytes, ticked, args, pool: Mutex::new(Vec::new()), crew: Mutex::default(), history: Mutex::default() }
     }
+
+    /// The run's compiled module and bounds — what an abort-site child
+    /// (`testing.assert_aborts`, ADR-0029) is started from.
+    pub(super) fn compiled(&self) -> (&wasmtime::Engine, &wasmtime::Module, Option<usize>, &[String]) {
+        (&self.engine, &self.module, self.max_memory_bytes, &self.args)
+    }
 }
 
 /// One pooled instance and the handles its reuse check reads.
@@ -599,6 +605,7 @@ fn instantiate(ctx: &ParCtx) -> anyhow::Result<Worker> {
         live_out: None,
         err_last: Arc::default(),
         par: None,
+        abort_site: -1,
     };
     let mut store = wasmtime::Store::new(&ctx.engine, host);
     store.limiter(|h| &mut h.limits);

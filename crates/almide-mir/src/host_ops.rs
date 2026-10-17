@@ -237,7 +237,6 @@ pub const WALLED: &[(&str, &str, &str)] = &[
     ("http", "serve", "the listener: native-only, and its handler is a closure the host invokes"),
     ("http", "__call_start", "reached only through its wrapper row `http.start`"),
     ("http", "__request_stream_limited", "reached only through its wrapper row `http.request_stream_with_limits`"),
-    ("testing", "assert_throws", "needs an unwinding catch the MIR rung has no form for"),
 ]
 ;
 

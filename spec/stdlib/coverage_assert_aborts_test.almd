@@ -47,8 +47,11 @@ test "a failed assert reports its operands" {
 }
 
 test "an effect closure runs in the child" {
-  testing.assert_aborts("from an effect closure", () => {
-    let _ = env.temp_dir()
-    panic("from an effect closure")
-  })
+  testing.assert_aborts(
+    "from an effect closure",
+    () => {
+      let _ = env.temp_dir()
+      panic("from an effect closure")
+    },
+  )
 }
