@@ -15,12 +15,18 @@ macro_rules! file_of_n_lines {
     };
 }
 
-/// `d/`, holding n / 100 + 3 one-byte files of one name width (a sort over
+/// `d/`, holding n / 10 + 3 one-byte files of one name width (a sort over
 /// names of mixed widths moves a mixed number of bytes): every file is a host call to
-/// create, and 16n of them (320000) took the run past its cap.
+/// create, and 16n of them (320000) took the run past its cap. Not n / 100:
+/// wasmtime reads a directory through rustix, whose getdents buffer starts
+/// small, grows by 32 dirents per refill up to ~24 KiB and is zeroed on every
+/// refill, so below ~1600 entries its zeroing per entry falls as the
+/// directory grows — the stock fs.list_dir's bytes moved read 55, 59 and 14
+/// per entry at 203, 803 and 3203 entries (GCE, per call site) and fitted no
+/// class. From 2003 entries on every size is past that warm-up.
 macro_rules! dir_of_n_files {
     () => {
-        "{ fs.mkdir_p(\"d\")!\n  for j in list.range(0, {n} / 100 + 3) { fs.write(\"d/f${100000 + j}\", \"x\")! }\n  \"d\" }"
+        "{ fs.mkdir_p(\"d\")!\n  for j in list.range(0, {n} / 10 + 3) { fs.write(\"d/f${100000 + j}\", \"x\")! }\n  \"d\" }"
     };
 }
 
