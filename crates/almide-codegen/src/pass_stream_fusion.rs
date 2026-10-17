@@ -780,7 +780,7 @@ mod tests {
         for template in ["emit_event({e0})", "[{event()}]", "[{e0}; side_effect()]"] {
             assert!(!inline_rust_ok(template, &cx), "unproven template: {template}");
         }
-        for symbol in ["almide_rt_net_connect", "almide_rt_sse_openai_chat", "almide_rt_mem_restore", "almide_rt_unknown_action"] {
+        for symbol in ["almide_rt_net_connect", "almide_rt_sse_anthropic_messages", "almide_rt_mem_restore", "almide_rt_unknown_action"] {
             assert!(!runtime_ok(symbol, &cx), "unproven runtime call: {symbol}");
         }
         assert!(inline_rust_ok("[{e0}, {e1}]", &cx));

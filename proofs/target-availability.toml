@@ -338,8 +338,8 @@ issue = "#1423"
 fn = "http.openai_streaming_call"
 legs = ["structural", "stock-p1", "embedded"]
 class = "pending-port"
-reason-embedded = "no wasm host binding for the streaming client (the framed ops 43..=50 serve the non-streaming family only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
-reason-stock-p1 = "no wasm host binding for the streaming client (the framed ops 43..=50 serve the non-streaming family only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
+reason-embedded = "Almide over request_stream (ADR-0023 step 5), which has no wasm service: the streaming client's port is ADR-0023 step 4 — run natively, or use openai_streaming_call_with_limits, which the embedded lane serves"
+reason-stock-p1 = "Almide over request_stream (ADR-0023 step 5), which has no wasm service: the streaming client's port is ADR-0023 step 4 — run natively"
 reason-structural = "host-surface"
 issue = "#1827"
 
@@ -808,12 +808,10 @@ issue = "#1710"
 
 [[unavailable]]
 fn = "http.openai_streaming_call_with_limits"
-legs = ["structural", "stock-p1", "embedded"]
+legs = ["stock-p1"]
 class = "pending-port"
-reason-embedded = "no wasm host binding for the http call handle (the framed ops 43..=50 serve the one-shot clients only; the handle needs a guest-pollable response, #2631) — run natively, or wait for the wasi:http pollable port (#2633)"
-reason-stock-p1 = "no wasm host binding for the http call handle (the framed ops 43..=50 serve the one-shot clients only; the handle needs a guest-pollable response, #2631) — run natively, or wait for the wasi:http pollable port (#2633)"
-reason-structural = "host-surface"
-issue = "#2633"
+reason = "Almide over request_stream_with_limits (ADR-0023 step 5): the structural leg and `almide run --target wasm` serve it through the http call handle (ops 53..=59, C-366); the DEFAULT stock artifact still refuses — stock WASI has no host for a guest-pollable http call until the call handle joins the wasi:http shim (ADR-0023 step 4)"
+issue = "#1710"
 
 [[unavailable]]
 fn = "http.poll"

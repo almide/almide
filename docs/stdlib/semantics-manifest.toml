@@ -2784,12 +2784,37 @@ index_unit = "millisecond"
 probe = "1"
 expect = "1"
 note = """
-Declared, not probed: the private intrinsic behind http.openai_streaming_call_with_limits, whose two
+Declared, not probed: the private Almide body (ADR-0023 step 5) behind http.openai_streaming_call_with_limits, whose two
 trailing Ints are HttpLimits.total_ms and .idle_ms, both MILLISECONDS, 0 = no
 limit. A calling probe would dial the network and push this generated file off
 the wasm leg. Measured by tests/http_call_handle_test.rs against a loopback
 server (2026-09-25): total_ms 1000 ends a call at ~1000 ms and idle_ms 500 a
 silent one at ~500 ms (C-366).
+"""
+
+[[http.fn]]
+name = "__sse_start"
+index_unit = "count"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed: the empty accumulator of the OpenAI-compatible SSE helper
+(ADR-0023 step 5), whose Int fields are token COUNTS as the stream reports them
+(prompt, completion, total), each starting at 0. A calling probe would need a
+stream; tests/http_sse_cross_test.rs measures the whole helper against a
+loopback server on native and the embedded lane.
+"""
+
+[[http.fn]]
+name = "__sse_int"
+index_unit = "count"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed: an SSE payload's Int field (a token count or a tool-call
+index), a Float one truncated toward zero as the native helper read it. Measured
+through the helper by tests/http_sse_cross_test.rs (a Float completion_tokens of
+7.9 reads 7).
 """
 
 [[http.fn]]

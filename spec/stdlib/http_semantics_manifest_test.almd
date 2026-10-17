@@ -62,6 +62,14 @@ test "http.__openai_streaming_limited unit=millisecond" {
   assert_eq("${1}", "1")
 }
 
+test "http.__sse_start unit=count" {
+  assert_eq("${1}", "1")
+}
+
+test "http.__sse_int unit=count" {
+  assert_eq("${1}", "1")
+}
+
 test "http.__anthropic_streaming_limited unit=millisecond" {
   assert_eq("${1}", "1")
 }

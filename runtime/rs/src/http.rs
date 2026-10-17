@@ -1,7 +1,7 @@
 // http extern — Rust native HTTP client/server (platform layer)
 // Uses std::net::TcpStream for client and TcpListener for server.
 // HTTPS via rustls (pure-Rust TLS).
-// SSE streaming: almide_rt_sse_openai_chat, almide_rt_sse_anthropic_messages (in sse.rs)
+// SSE streaming: almide_rt_sse_anthropic_messages (in sse.rs); the OpenAI-compatible helper is Almide (stdlib/http.almd)
 
 // HashMap already imported by prelude
 // Read/Write/TcpStream come from the inlined client core (#1715); the
