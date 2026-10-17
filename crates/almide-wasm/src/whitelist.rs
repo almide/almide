@@ -268,7 +268,7 @@ pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
 /// the bodies never touch a raw layout.
 pub(crate) const HTTP_CALL_SUM: &[&str] = &[
     "__hc_start_impl", "__hc_stream_limited_impl", "__hc_poll_impl",
-    "__hc_read_new_impl", "__hc_wait_impl", "__hc_cancel_impl", "__hc_stream_classic_impl",
+    "__hc_read_new_impl", "__hc_wait_impl", "__hc_cancel_impl",
 ];
 
 /// The http.serve family (#2650, audited 2026-09-26): stdlib/http_serve.almd —
