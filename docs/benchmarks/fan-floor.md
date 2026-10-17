@@ -314,3 +314,107 @@ The full run, every implementation, the same method as the first tables. `develo
 - The wasm column is for reference (the reference implementations are native code). On the AMD VM it read noisy in this run (205.8 µs at nest 100); develop's wasm and this tree's wasm, run interleaved, read 371 and 455 µs at nest 1000 and below zero at nest 0 and 100. These changes touch the native leg only.
 
 What is left: the wasm leg, where `fan { }` arms and parallel offers run one after another (ADR-0024 D8), and the effect callbacks this change does not admit: a callback reaching I/O still runs in list order. ADR-0024 D3 has it run concurrently unless it reaches an ordered operation, which needs the `@ordered` set.
+
+## Wide shapes against tuned peers (2026-10-17, Almide develop at 0746eb689)
+
+Goal-5 extension: the earlier probes offer at most 10 elements of one size. These rows run **one `fan.map` over n elements** with n from 10 to 10⁶, plus four work shapes:
+
+| Shape | Element work |
+|---|---|
+| size | the floor's `work(s, i, iters)` loop |
+| skew | every 10th element does 20× the work |
+| heap | each element builds a 20-part `String` and returns its length; no loop |
+| fail | 1 element in 97 returns `err("bad i")` |
+
+Every implementation runs every element and keeps the lowest-index error, Almide's `fan.map` rule. All share the same work and all 8 threads, and every row printed the same checksum on every implementation.
+
+The peers are each tuned:
+
+| Language | Variants |
+|---|---|
+| Rust (Rayon 1.10.0) | `rayon`: `into_par_iter().map().collect()` · `tuned`: the same with `with_min_len(n / (4·threads))` · `scope`: one `rayon::scope` task per thread over a static chunk |
+| Go 1.22 | `par`: a goroutine per element · `pool`: resident workers woken per map, drawing chunks of n/(4W) from an atomic counter · `errgroup`: `golang.org/x/sync` v0.8.0 with `SetLimit(W)`, per-index error slots and no context cancellation |
+| Zig 0.13.0 | `std`: `std.Thread.Pool`, one `spawnWg` per chunk of n/(4W) with the caller helping · `hand`: W−1 resident threads plus the caller, a futex generation and an atomic chunk counter |
+
+**Reproduce:**
+
+```bash
+cd research/benchmark/fan-floor/wide && ./build.sh && ALMIDE=almide python3 wide.py
+```
+
+That gives µs per map (min of 7, implementations interleaved), max RSS (GNU time) and startup. The sources are in `wide/`. `al-n` is native Almide as compiled, `al-seq` is the same binary with `ALMIDE_FAN_SEQUENTIAL=1`, and `al-w` is `almide run --target wasm`, which is sequential. "best" is the fastest parallel variant per language, named in parentheses. **al-n / best** is the ratio to the fastest of all of them, and below 1.00 Almide wins.
+
+### µs per map, GCE c4-standard-8 (Intel 8581C) and n2d-standard-8 (AMD EPYC 7B13)
+
+| Row | n | iters | Intel al-n | al-seq | al-w | best Rust | best Go | best Zig | **al-n / best** | AMD al-n | al-seq | al-w | best Rust | best Go | best Zig | **al-n / best** |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| size | 10 | 100 | 3.5 | 3.1 | 4.6 | 8.1 (scope) | 6.4 (pool) | 2.5 (hand) | **1.39** | 4.6 | 4.0 | 5.4 | 11.3 (scope) | 7.5 (pool) | 5.0 (hand) | **0.92** |
+| size | 100 | 100 | 62.6 | 30.7 | 38.1 | 13.1 (scope) | 26.8 (pool) | 11.0 (hand) | **5.69** | 46.8 | 39.7 | 52.1 | 20.1 (scope) | 33.0 (pool) | 18.1 (hand) | **2.58** |
+| size | 1,000 | 100 | 560.7 | 306.1 | 375.6 | 62.4 (scope) | 86.3 (pool) | 74.5 (hand) | **8.99** | 344.3 | 396.6 | 512.2 | 90.0 (tuned) | 128.2 (pool) | 97.8 (hand) | **3.83** |
+| size | 10,000 | 100 | 5,179 | 3,064 | 3,759 | 564.8 (scope) | 533.8 (pool) | 705.1 (hand) | **9.70** | 3,410 | 3,962 | 5,115 | 791.7 (rayon) | 827.3 (pool) | 864.4 (hand) | **4.31** |
+| size | 100,000 | 100 | 56,013 | 30,757 | 37,532 | 5,459 (tuned) | 4,908 (pool) | 6,860 (hand) | **11.41** | 37,561 | 39,809 | 51,016 | 7,305 (rayon) | 6,780 (pool) | 8,290 (std) | **5.54** |
+| size | 1,000,000 | 100 | 522,808 | 312,428 | 378,638 | 55,546 (rayon) | 49,449 (pool) | 68,831 (std) | **10.57** | 333,926 | 406,298 | 509,297 | 72,998 (rayon) | 63,861 (pool) | 81,995 (hand) | **5.23** |
+| size | 10 | 10000 | 70.1 | 318.6 | 391.3 | 93.7 (scope) | 88.6 (pool) | 111.3 (hand) | **0.79** | 93.4 | 408.0 | 506.2 | 147.3 (tuned) | 143.7 (errgroup) | 136.0 (hand) | **0.69** |
+| size | 100 | 10000 | 548.3 | 3,185 | 3,908 | 541.3 (scope) | 512.8 (par) | 761.4 (hand) | **1.07** | 710.0 | 4,080 | 5,066 | 760.2 (rayon) | 752.0 (par) | 950.7 (hand) | **0.94** |
+| size | 1,000 | 10000 | 4,410 | 31,840 | 39,147 | 5,006 (scope) | 4,723 (par) | 6,723 (hand) | **0.93** | 5,768 | 40,912 | 50,306 | 6,671 (rayon) | 6,278 (par) | 8,140 (hand) | **0.92** |
+| size | 10,000 | 10000 | 42,895 | 318,359 | 391,612 | 49,911 (tuned) | 45,658 (pool) | 64,616 (hand) | **0.94** | 58,466 | 407,281 | 499,401 | 66,212 (scope) | 61,272 (pool) | 78,870 (std) | **0.95** |
+| skew | 1,000 | 1000 | 1,431 | 9,230 | 11,332 | 1,517 (tuned) | 1,445 (pool) | 2,012 (hand) | **0.99** | 1,967 | 11,918 | 14,709 | 2,052 (rayon) | 1,979 (par) | 2,567 (hand) | **0.99** |
+| skew | 100,000 | 1000 | 130,811 | 922,799 | 1,135,435 | 144,839 (tuned) | 131,419 (pool) | 187,502 (hand) | **1.00** | 174,728 | 1,191,449 | 1,478,121 | 193,655 (rayon) | 173,290 (pool) | 233,347 (hand) | **1.01** |
+| heap | 1,000 | 0 | 568.4 | 303.4 | 478.4 | 111.2 (scope) | 147.4 (pool) | 129.7 (hand) | **5.11** | 361.0 | 488.7 | 701.9 | 168.8 (scope) | 245.7 (pool) | 211.5 (hand) | **2.14** |
+| heap | 100,000 | 0 | 56,713 | 30,422 | 48,119 | 10,105 (rayon) | 12,033 (pool) | 12,455 (hand) | **5.61** | 37,206 | 49,658 | 69,168 | 15,384 (rayon) | 20,292 (pool) | 19,510 (std) | **2.42** |
+| fail | 1,000 | 1000 | 544.4 | 3,139 | 3,858 | 505.7 (scope) | 495.3 (pool) | 672.5 (hand) | **1.10** | 692.2 | 4,019 | 4,998 | 700.7 (rayon) | 756.0 (pool) | 813.5 (hand) | **0.99** |
+| fail | 100,000 | 1000 | 51,563 | 314,381 | 386,233 | 49,389 (tuned) | 44,814 (pool) | 64,388 (hand) | **1.15** | 67,720 | 403,124 | 498,135 | 66,508 (scope) | 58,823 (pool) | 75,685 (hand) | **1.15** |
+
+### Startup (n = 1, iters = 0, one map; process start to exit)
+
+| Implementation | Intel startup ms | AMD startup ms |
+|---|---|---|
+| al-n-seq | 0.52 | 1.08 |
+| al-n | 0.46 | 1.04 |
+| al-w | 101.21 | 167.93 |
+| rs-seq | 0.84 | 1.91 |
+| rs-rayon | 0.85 | 1.69 |
+| rs-tuned | 0.83 | 1.60 |
+| rs-scope | 0.82 | 1.79 |
+| go-seq | 0.70 | 1.45 |
+| go-par | 0.71 | 1.49 |
+| go-pool | 0.72 | 1.48 |
+| go-errgroup | 0.67 | 1.46 |
+| zig-seq | 0.40 | 0.85 |
+| zig-std | 0.72 | 1.59 |
+| zig-hand | 0.55 | 1.27 |
+
+The `al-w` startup is `almide run --target wasm` end to end: it includes the build-cache lookup and engine instantiation, not only the module's start.
+
+### Max RSS, KB (Intel)
+
+| Row | n | al-n | rs-rayon | rs-scope | go-pool | go-errgroup | zig-hand |
+|---|---|---|---|---|---|---|---|
+| size | 10 | 2208 | 2280 | 2228 | 1796 | 4228 | 1904 |
+| size | 100 | 2272 | 2500 | 2388 | 1948 | 7300 | 1904 |
+| size | 1,000 | 2272 | 2412 | 2256 | 1540 | 8440 | 1776 |
+| size | 10,000 | 2720 | 2432 | 2512 | 1668 | 8904 | 2032 |
+| size | 100,000 | 8656 | 3936 | 4016 | 3076 | 7672 | 2916 |
+| size | 1,000,000 | 65632 | 17712 | 17924 | 17308 | 37636 | 17264 |
+| size | 10 | 2336 | 2432 | 2260 | 1924 | 3332 | 1776 |
+| size | 100 | 2208 | 2420 | 2284 | 1412 | 3076 | 2028 |
+| size | 1,000 | 2192 | 2424 | 2420 | 1540 | 2692 | 2032 |
+| size | 10,000 | 2920 | 2444 | 2532 | 1668 | 3588 | 2032 |
+| skew | 1,000 | 2208 | 2284 | 2256 | 1412 | 4740 | 1904 |
+| skew | 100,000 | 8608 | 3924 | 3968 | 3076 | 7300 | 2928 |
+| heap | 1,000 | 2212 | 2308 | 2324 | 7564 | 8764 | 1904 |
+| heap | 100,000 | 8740 | 3932 | 3976 | 7560 | 8908 | 2928 |
+| fail | 1,000 | 2208 | 2280 | 2288 | 1692 | 7172 | 1904 |
+| fail | 100,000 | 7844 | 4012 | 3844 | 3588 | 8020 | 3056 |
+True
+
+### Where Almide loses, and why
+
+| # | Rows | Ratio (Intel / AMD) | Cause | Priority |
+|---|---|---|---|---|
+| W1 | size iters 100, n ≥ 100; heap | 5.7–11.4 / 2.1–5.5. On Intel `al-n` is **slower than `al-seq`** (522 ms vs 312 ms at n = 10⁶) | `almide_rt_fan_map_par` opens an output timeline **per element**: `almide_fan_enter` clones an `Arc` and swaps a thread-local, and its drop takes the group mutex, flushes stdout and calls `notify_all` (`runtime/rs/src/fan.rs:101`, `crates/almide-codegen/src/prelude_fan.rs:64-90`). Elements of ≤ 1 µs pay that in lock contention and futex wakes: locally the same program spends 18 s of sys time against 1.0 s sequential. `almide_fan_group` also allocates one buffer per element (`prelude_fan.rs:61`), which is the 65 MB against 17 MB RSS at n = 10⁶. | **P-high** (#3784): the most common `fan.map` shape, and it inverts the speedup |
+| W2 | size iters 100, n = 10 (Intel) | 1.39 / 0.92 | the same per-element cost on a tiny offer; the cost model keeps it parallel (`al-n` 3.5 µs vs `al-seq` 3.1 µs) | P-low, folds into W1 |
+| W3 | fail, n = 10³ / 10⁵ | 1.10–1.15 / 0.99–1.15 | W1's per-element cost at 1000 iterations, plus one `String` per failing element; Go's pool pays neither | P-low, folds into W1 |
+| W4 | every row, `al-w` | 1.2–1.3× `al-n-seq` | wasm runs `fan.map` sequentially (ADR-0024 D8); not a regression | tracked by #1628 / #3331 |
+
+Almide wins or ties wherever the element work dominates (iters 10000, skew, fail on AMD): 0.69–1.07 against the best tuned peer. Rayon's `with_min_len` and a static `scope` beat plain `rayon` only on small offers. Go's resident pool is the strongest peer above n = 10⁴. `errgroup` with `SetLimit` is the slowest parallel variant everywhere: a goroutine per element through a semaphore. W1 is a separate goal; nothing in this goal changes it.
