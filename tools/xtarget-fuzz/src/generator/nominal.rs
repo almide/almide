@@ -53,6 +53,33 @@ fn string_map() -> GenType {
 /// Sized values use fixed-width keys (`k100000000`…), so a series is
 /// linear in n.
 pub const NOMINALS: &[Nominal] = &[
+    // `fs.stat`'s record. Its mtime is the host's clock (`verdicts.rs`
+    // checks it), so it is observed through the other three fields.
+    Nominal {
+        name: "FileStat",
+        module: "fs",
+        small: "{ size: 0, is_dir: false, is_file: true, modified: 0 }",
+        sized: "{ size: {n}, is_dir: false, is_file: true, modified: 0 }",
+        leaves: &["{ size: 0, is_dir: true, is_file: false, modified: 0 }"],
+        observe: "\"${{v}.size} ${{v}.is_dir} ${{v}.is_file}\"",
+        observed: string,
+        digest: "{v}.size",
+        observe_calls_effect: false,
+        refuses_var: false,
+    },
+    // `process.exec_status`'s record, from the fixed command set (ADR-0027 D4).
+    Nominal {
+        name: "ProcessStatus",
+        module: "process",
+        small: "{ code: 0, stdout: \"\", stderr: \"\" }",
+        sized: "{ code: 0, stdout: string.repeat(\"a\", {n}), stderr: \"\" }",
+        leaves: &["{ code: 1, stdout: \"\", stderr: \"e\" }"],
+        observe: "\"${{v}.code}|${{v}.stdout}|${{v}.stderr}\"",
+        observed: string,
+        digest: "{v}.code + string.len({v}.stdout)",
+        observe_calls_effect: false,
+        refuses_var: false,
+    },
     Nominal {
         name: "HttpResponse",
         module: "http",

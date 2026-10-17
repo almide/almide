@@ -61,6 +61,10 @@ pub const VERDICTS: &[Verdict] = &[
     Verdict { func: "env.unix_timestamp", holds: concat!("v >= ", epoch_floor_s!()), canon: "0", domain: &[] },
     Verdict { func: "env.millis", holds: concat!("v >= ", epoch_floor_s!(), "000"), canon: "0", domain: &[] },
     Verdict { func: "datetime.monotonic_ns", holds: "v >= 0", canon: "0", domain: &[] },
+    // argv[0] is the program as the host names it (a native path, the wasm
+    // runner's name); the arguments after it are the sandbox's.
+    Verdict { func: "process.args", holds: "list.len(v) >= 1", canon: "[\"prog\"] + list.drop(v, 1)", domain: &[] },
+    Verdict { func: "fs.stat", holds: concat!("v.modified >= ", epoch_floor_s!()), canon: "v", domain: &[] },
     Verdict { func: "fs.modified_at", holds: concat!("v >= ", epoch_floor_s!()), canon: "0", domain: &[] },
     Verdict { func: "process.pid", holds: "v > 0", canon: "1", domain: &[] },
     Verdict { func: "env.os", holds: "list.contains([\"macos\", \"linux\", \"windows\", \"wasi\", \"unknown\"], v)", canon: "\"os\"", domain: &[] },
