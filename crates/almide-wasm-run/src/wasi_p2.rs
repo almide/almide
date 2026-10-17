@@ -359,7 +359,8 @@ fn shim_fs_call(
 ) -> Function {
     let (op, _a_ptr, a_len, b_ptr, b_len) = (0u32, 1u32, 2u32, 3u32, 4u32);
     let n = 6u32;
-    let mut f = Function::new([(2, ValType::I32)]);
+    // locals: 5 (unused), 6 n; op 35's 7 start, 8 total
+    let mut f = Function::new([(4, ValType::I32)]);
     let mut i = f.instructions();
 
     // op 30: raw stdout append (no newline) — b carries the bytes; op 73:
@@ -387,27 +388,7 @@ fn shim_fs_call(
         i.end();
     }
 
-    // op 35: stdin take up to a_len bytes — ONE blocking-read; the list
-    // lands via cabi_realloc; EOF (err) answers 0 bytes. The host answers
-    // with AT MOST a_len bytes, so reserving a_len first (#2119) makes
-    // that landing's grow impossible — and a shortage aborts here, where
-    // C-197's line can still be written.
-    i.local_get(op).i32_const(35).i32_eq().if_(BlockType::Empty);
-    i.local_get(a_len).call(f_reserve);
-    load_handle(&mut i, g_stdin, I_GET_STDIN);
-    i.local_get(a_len).i64_extend_i32_u();
-    i.i32_const((park + RET) as i32);
-    i.call(I_BLOCKING_READ);
-    // result tag 0 = ok(list ptr,len) — err (closed/failed) = 0 bytes.
-    i.i32_const((park + RET) as i32).i32_load(mem(0)).i32_eqz();
-    i.if_(BlockType::Empty);
-    i.i32_const((park + RET) as i32).i32_load(mem(4)).global_set(g_ppos);
-    i.i32_const((park + RET) as i32).i32_load(mem(8)).global_set(g_plen);
-    i.else_();
-    i.i32_const(0).global_set(g_plen);
-    i.end();
-    i.global_get(g_plen).i64_extend_i32_u().return_();
-    i.end();
+    stdin_take_arm(&mut i, park, (g_plen, g_ppos, g_stdin), f_reserve, (op, a_len));
 
     // op 32: entropy — n rides b_len; the list lands via cabi_realloc,
     // reserved first for exactly the length asked for (#2119).
@@ -457,6 +438,53 @@ fn shim_fs_call(
 }
 
 /// `(dst) -> ()`: copy the parked payload to guest memory.
+/// op 35: stdin take-n — blocking-read UNTIL a_len bytes are in or the
+/// stream ends (err = closed/failed, or an empty read). One blocking-read
+/// answers what the stream has ready (16 KiB on wasmtime), and every guest
+/// caller reads a short answer as EOF (C-161: min(n, what stdin has)). Each
+/// read lands via cabi_realloc at the bump frontier, past the bytes already
+/// in, and moves down onto them (memory.copy is a memmove), so the answer
+/// is one span at the first landing. Each read reserves the bytes still
+/// wanted first (#2119): the host answers at most that many, so the
+/// landing's grow is impossible and a shortage aborts here, where C-197's
+/// line can still be written.
+fn stdin_take_arm(
+    i: &mut wasm_encoder::InstructionSink<'_>,
+    park: u64,
+    (g_plen, g_ppos, g_stdin): (u32, u32, u32),
+    f_reserve: u32,
+    (op, a_len): (u32, u32),
+) {
+    let (n, start, total) = (6u32, 7u32, 8u32);
+    let ret = (park + RET) as i32;
+    i.local_get(op).i32_const(35).i32_eq().if_(BlockType::Empty);
+    i.i32_const(0).local_set(start);
+    i.i32_const(0).local_set(total);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(total).local_get(a_len).i32_ge_s().br_if(1);
+    i.local_get(a_len).local_get(total).i32_sub().call(f_reserve);
+    load_handle(i, g_stdin, I_GET_STDIN);
+    i.local_get(a_len).local_get(total).i32_sub().i64_extend_i32_u();
+    i.i32_const(ret);
+    i.call(I_BLOCKING_READ);
+    // result tag 0 = ok(list ptr, len); err (closed/failed) ends the stream
+    i.i32_const(ret).i32_load(mem(0)).br_if(1);
+    i.i32_const(ret).i32_load(mem(8)).local_tee(n).i32_eqz().br_if(1);
+    i.local_get(total).i32_eqz().if_(BlockType::Empty);
+    i.i32_const(ret).i32_load(mem(4)).local_set(start);
+    i.end();
+    i.local_get(start).local_get(total).i32_add();
+    i.i32_const(ret).i32_load(mem(4));
+    i.local_get(n).memory_copy(0, 0);
+    i.local_get(total).local_get(n).i32_add().local_set(total);
+    i.br(0);
+    i.end().end();
+    i.local_get(start).global_set(g_ppos);
+    i.local_get(total).global_set(g_plen);
+    i.local_get(total).i64_extend_i32_u().return_();
+    i.end();
+}
+
 fn shim_host_read(g_plen: u32, g_ppos: u32) -> Function {
     let mut f = Function::new([]);
     let mut i = f.instructions();
