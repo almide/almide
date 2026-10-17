@@ -523,6 +523,8 @@ call:matrix.gelu
 call:matrix.get
 call:matrix.layer_norm_rows
 call:matrix.linear_f32_row_no_bias
+call:matrix.linear_q1_0_row_no_bias
+call:matrix.linear_q8_0_row_no_bias
 call:matrix.linear_row
 call:matrix.linear_row_gelu
 call:matrix.linear_row_no_bias
@@ -540,6 +542,9 @@ call:matrix.ones
 call:matrix.ones_f32
 call:matrix.pow
 call:matrix.pre_norm_linear
+call:matrix.qwen3_block_f32_kv
+call:matrix.qwen3_block_q1_0_kv
+call:matrix.qwen3_block_q8_0_kv
 call:matrix.rms_norm_rows
 call:matrix.rope_rotate
 call:matrix.rope_rotate_at
