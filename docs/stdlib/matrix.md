@@ -4,8 +4,8 @@
 
 > **Dialect epoch 14:** the neural-network kernels (attention, RoPE, the row
 > norms, the activations, the Q1_0/Q8_0 loaders and the Qwen3 blocks — 25
-> functions) moved to package [almide/nn](https://github.com/almide/nn):
-> `almide add almide/nn@v0.1.0`, `import nn`, then `nn.gelu(m)` for
+> functions) moved to package [almide/nnlib](https://github.com/almide/nnlib):
+> `almide add almide/nnlib@v0.1.0`, `import nnlib`, then `nnlib.gelu(m)` for
 > `matrix.gelu(m)`, with the same arguments. Calling the old spelling is a
 > check-time error that names the new one.
 
@@ -133,7 +133,7 @@ stride below 1 aborts with `Error: stride must be positive`.
 ## Byte-resident rows
 
 Rows read straight from a byte buffer (the Q1_0 / Q8_0 quantized loaders
-moved to package almide/nn at dialect epoch 14).
+moved to package almide/nnlib at dialect epoch 14).
 
 | Signature | Purpose |
 |---|---|

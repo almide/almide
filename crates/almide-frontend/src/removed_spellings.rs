@@ -5,7 +5,7 @@
 //! two fixed shapes:
 //!
 //! ```text
-//! `matrix.gelu(…)` → `import nn` + `nn.gelu(…)` (package almide/nn: `almide add almide/nn@v0.1.0`)
+//! `matrix.gelu(…)` → `import nnlib` + `nnlib.gelu(…)` (package almide/nnlib: `almide add almide/nnlib@v0.1.0`)
 //! `mem.save()` → delete the call …
 //! ```
 //!
@@ -146,17 +146,17 @@ mod tests {
     fn a_moved_break_parses() {
         let r = parse_break(
             14,
-            "`matrix.gelu(m)` → `import nn` + `nn.gelu(m)` (package almide/nn: `almide add almide/nn@v0.1.0`)",
+            "`matrix.gelu(m)` → `import nnlib` + `nnlib.gelu(m)` (package almide/nnlib: `almide add almide/nnlib@v0.1.0`)",
         )
         .unwrap();
         assert_eq!(r.from, "matrix.gelu");
         assert_eq!(
             r.fate,
             Fate::Moved {
-                to: "nn.gelu".into(),
-                import: "nn".into(),
-                package: "almide/nn".into(),
-                add: "almide add almide/nn@v0.1.0".into(),
+                to: "nnlib.gelu".into(),
+                import: "nnlib".into(),
+                package: "almide/nnlib".into(),
+                add: "almide add almide/nnlib@v0.1.0".into(),
             }
         );
     }

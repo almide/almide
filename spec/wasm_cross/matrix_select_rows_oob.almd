@@ -10,7 +10,7 @@
 // so the zeros are observed through the printed lists, which spell the sign
 // (`0.0` vs `-0.0`) that `==` cannot see. (The Q1_0 / Q8_0 selectors whose
 // dequantization-zero sign this fixture also pinned, #1358, left the stdlib at
-// dialect epoch 14 for package almide/nn.)
+// dialect epoch 14 for package almide/nnlib.)
 import matrix
 import bytes
 

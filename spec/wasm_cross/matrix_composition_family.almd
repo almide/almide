@@ -5,7 +5,7 @@
 // - fma / fma3: native's `x*ka + y*kb [+ z*kc]` — two rounded products and a
 //   rounded sum per term, never a fused step — IS add∘scale, zip shape included;
 // - mul_scaled = scale∘mul (the gelu / softmax / norm compositions left the
-//   stdlib at dialect epoch 14 for package almide/nn);
+//   stdlib at dialect epoch 14 for package almide/nnlib);
 // - append_rows: an operand with no rows yields the other, else base's rows
 //   then extra's;
 // - linear_f32_row_no_bias: the sequential widen-mul-add dot over the f32
