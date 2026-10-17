@@ -261,6 +261,10 @@ fn sandbox_arg(b: &mut Builder, sig: &Signature, param: &SigType, name: &str) ->
     // ADR-0027 D4: a fixed command set, present at these paths on linux and
     // macos, and no shell: a generated argument list is data, never code.
     const COMMANDS: &[&str] = &["/bin/echo", "/bin/cat", "/usr/bin/true", "/usr/bin/false", "/no/such/command"];
+    // A spawned child shares the program's stdout and runs beside it: what it
+    // prints lands wherever the scheduler puts it, so spawn draws commands
+    // that print nothing.
+    const SILENT: &[&str] = &["/usr/bin/true", "/usr/bin/false", "/no/such/command"];
     const DIRS: &[&str] = &["sub", "empty_dir", ".", "missing_dir"];
     if !sig.effect || *param != SigType::String {
         return None;
@@ -269,6 +273,7 @@ fn sandbox_arg(b: &mut Builder, sig: &Signature, param: &SigType, name: &str) ->
         ("fs", _) => PATHS,
         ("env", _) => ENV_NAMES,
         ("args", _) => ARG_NAMES,
+        ("process", "cmd") if sig.func == "spawn" => SILENT,
         ("process", "cmd") => COMMANDS,
         ("process", "dir") => DIRS,
         // ADR-0027 D5: the loopback fixtures (`oracle/fixture.rs`), never
