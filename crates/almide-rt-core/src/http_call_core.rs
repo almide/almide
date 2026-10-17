@@ -47,8 +47,13 @@ pub fn http_stream_incomplete_utf8_tail(b: &[u8]) -> usize {
 //             the worker is stuck in a name lookup.
 //   idle_ms   the longest gap between two reads that bring bytes (the wait for
 //             the first byte counts) — the socket read timeout.
-// ALMIDE_HTTP_TIMEOUT_SECS is NOT read here: it is the default of the calls
-// that take no limits. A finished call (answered, failed, timed out or
+// ALMIDE_HTTP_TIMEOUT_SECS is NOT read by a call that has limits: it is the
+// default of the calls that take none. Plain `request_stream` is such a call,
+// and it runs here too, as a CLASSIC call (`http_call_spawn_classic`): its
+// one bound is the client read timeout (ALMIDE_HTTP_TIMEOUT_SECS, 120 s by
+// default) between arrivals, which fires as C-328's timeout class, and a read
+// that fails once the head is in ends the body — the streaming client's
+// behaviour before it shared this core, kept on every leg. A finished call (answered, failed, timed out or
 // cancelled) has its socket shut down, so the server sees the close at once.
 // Dropping the last copy of the handle cancels it.
 
@@ -75,6 +80,9 @@ pub struct AlmideHttpCallShared {
     deadline: Option<std::time::Instant>,
     total_ms: i64,
     idle_ms: i64,
+    /// A plain `request_stream` call (see the header): `idle_ms` is the
+    /// client read timeout, not a limit the program named.
+    classic: bool,
 }
 
 fn http_call_total_msg(total_ms: i64) -> String {
@@ -289,7 +297,7 @@ fn http_call_io_error(sh: &AlmideHttpCallShared, url: &str, e: &std::io::Error) 
     if sh.past_deadline() {
         return http_call_total_msg(sh.total_ms);
     }
-    if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) && sh.idle_ms > 0 {
+    if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) && sh.idle_ms > 0 && !sh.classic {
         return http_call_idle_msg(sh.idle_ms);
     }
     http_io_error_text(url, e)
@@ -398,6 +406,11 @@ fn http_call_pump<S: AlmideHttpCallSock>(
                 if e.kind() == std::io::ErrorKind::UnexpectedEof && matches!(framing, Some(HttpCallFraming::UntilClose)) {
                     return Ok(());
                 }
+                // A classic call's body ends at a failed read once the head
+                // is in (see the header).
+                if sh.classic && framing.is_some() {
+                    return Ok(());
+                }
                 return Err(http_call_io_error(sh, url, &e));
             }
         };
@@ -453,6 +466,29 @@ pub fn http_call_spawn(
             total_ms, idle_ms
         ));
     }
+    http_call_spawn_with(method, url, body, headers, (total_ms, idle_ms), false)
+}
+
+/// Start a CLASSIC call — plain `request_stream` on every leg: no wall
+/// clock, the client read timeout between arrivals.
+pub fn http_call_spawn_classic(
+    method: &str,
+    url: &str,
+    body: &str,
+    headers: Vec<(String, String)>,
+) -> Result<std::sync::Arc<AlmideHttpCallShared>, String> {
+    let idle_ms = client_read_timeout(120).map_or(0, |d| d.as_millis() as i64);
+    http_call_spawn_with(method, url, body, headers, (0, idle_ms), true)
+}
+
+fn http_call_spawn_with(
+    method: &str,
+    url: &str,
+    body: &str,
+    headers: Vec<(String, String)>,
+    (total_ms, idle_ms): (i64, i64),
+    classic: bool,
+) -> Result<std::sync::Arc<AlmideHttpCallShared>, String> {
     http_prepare(method, url, &headers)?;
     let shared = std::sync::Arc::new(AlmideHttpCallShared {
         state: std::sync::Mutex::new(AlmideHttpCallState {
@@ -467,6 +503,7 @@ pub fn http_call_spawn(
             .then(|| std::time::Instant::now() + std::time::Duration::from_millis(total_ms as u64)),
         total_ms,
         idle_ms,
+        classic,
     });
     let worker = shared.clone();
     let (method, url, body) = (method.to_string(), url.to_string(), body.to_string());

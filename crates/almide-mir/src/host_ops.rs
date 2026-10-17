@@ -204,7 +204,8 @@ pub const HOST_OPS: &[HostOp] = &[
     op("http", "delete_response", "almide_http_delete_response", NET).result(),
     op("http", "request_response", "almide_http_request_response", NET).result(),
     // The call handle (#2631): start, the four verbs over it, and the
-    // limited streaming twin built on it.
+    // streaming clients built on it — the limited twin, and plain
+    // request_stream as the handle's classic call (no limits named).
     wrapper("http", "start", "__call_start", "almide_rt_http___call_start", NET).result(),
     op("http", "poll", "almide_http_call_poll", NET),
     op("http", "read_new", "almide_http_call_read_new", NET),
@@ -218,6 +219,7 @@ pub const HOST_OPS: &[HostOp] = &[
         NET,
     )
     .result(),
+    op("http", "request_stream", "almide_http_request_stream", NET).result(),
 ];
 
 /// The modules whose surface reaches the host. Each one's `@intrinsic`s form
@@ -233,7 +235,6 @@ pub const WALLED: &[(&str, &str, &str)] = &[
     ("net", "*", "sockets, unix sockets and shared memory: native-only, no WASI floor (the native-FFI class)"),
     ("process", "*", "child processes, signals and the exit / sleep / pid / env family: native-only; `exit` lowers as the ProcExit prim; stdin_lines runs on wasm through a self-host body, outside this subset"),
     ("http", "serve", "the listener: native-only, and its handler is a closure the host invokes"),
-    ("http", "request_stream", "a callback the host invokes per chunk; its limited twin is the admitted form"),
     ("http", "openai_streaming_call", "a callback the host invokes per delta; not admitted"),
     ("http", "anthropic_streaming_call", "a callback the host invokes per delta; not admitted"),
     ("http", "__call_start", "reached only through its wrapper row `http.start`"),
