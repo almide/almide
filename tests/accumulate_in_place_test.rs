@@ -179,8 +179,13 @@ effect fn main() -> Unit = {
 }
 "#;
 
+/// A directory of this call's own: the tests run in parallel and several of
+/// them call `emitted`, which writes its program and removes the directory,
+/// so a per-process name let one test delete another's source mid-build.
 fn scratch(tag: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("almide-accumulate-{tag}-{}", std::process::id()));
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("almide-accumulate-{tag}-{}-{n}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     dir
 }
