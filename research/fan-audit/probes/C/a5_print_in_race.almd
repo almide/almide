@@ -1,0 +1,13 @@
+fn p(x: Int) -> Int = {
+  println("race arm " + int.to_string(x))
+  x
+}
+effect fn main() -> Unit = {
+  let r = fan.race { p(1), p(2) } ?? -1
+  println(int.to_string(r))
+  let t = fan.timeout(duration.s(1)) {
+    println("print inside timeout")
+    3
+  } ?? -1
+  println(int.to_string(t))
+}

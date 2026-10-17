@@ -1,0 +1,20 @@
+effect fn eff(x: Int) -> Int = {
+  println("eff " + int.to_string(x))
+  x * 10
+}
+effect fn main() -> Unit = {
+  let (p, q) = fan { eff(1), eff(2) }
+  println("fan block " + int.to_string(p + q))
+  let (s1, s2) = fan.settle { eff(3), eff(4) }
+  println("settle block " + int.to_string((s1 ?? 0) + (s2 ?? 0)))
+  let m = fan.map([5, 6], (x) => eff(x)) ?? []
+  println("map " + int.to_string(list.len(m)))
+  let m2 = fan.map([7], eff) ?? []
+  println("map bare fn " + int.to_string(list.len(m2)))
+  let st = fan.settle([8, 9], (x) => eff(x))
+  println("settle list " + int.to_string(list.len(st)))
+  let an = fan.any([10, 11], (x) => eff(x)) ?? -1
+  println("any list " + int.to_string(an))
+  let ab = fan.any { eff(12), eff(13) } ?? -1
+  println("any block " + int.to_string(ab))
+}

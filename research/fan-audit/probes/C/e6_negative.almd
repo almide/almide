@@ -1,0 +1,5 @@
+effect fn main() -> Unit = {
+  let n = 0 - 5
+  let a = fan.bounded(compute.us(n)) { 1 } ?? -1
+  println(int.to_string(a))
+}

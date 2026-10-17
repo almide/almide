@@ -1,0 +1,14 @@
+effect fn main() -> Unit = {
+  let xs = list.range(0, 3000000)
+  let a = fan.bounded(compute.ns(0)) { list.fold(xs, 0, (acc, x) => acc + x) } ?? -1
+  println("bounded0 fold=" + int.to_string(a))
+  let b = fan.timeout(duration.ns(1)) { list.fold(xs, 0, (acc, x) => acc + x) } ?? -1
+  println("timeout1ns fold=" + int.to_string(b))
+  let c = fan.bounded(compute.ns(0)) { string.len(string.repeat("ab", 20000000)) } ?? -1
+  println("bounded0 repeat=" + int.to_string(c))
+  let d = fan.timeout(duration.ns(1)) { string.len(string.repeat("ab", 20000000)) } ?? -1
+  println("timeout1ns repeat=" + int.to_string(d))
+  let f = (acc: Int, x: Int) => acc + x
+  let e = fan.bounded(compute.ns(3000)) { list.fold(xs, 0, f) } ?? -1
+  println("bounded fnvalue fold=" + int.to_string(e))
+}

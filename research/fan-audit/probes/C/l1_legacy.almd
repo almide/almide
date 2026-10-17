@@ -1,0 +1,4 @@
+effect fn main() -> Unit = {
+  let a = fan.timeout(100, () => 1) ?? -1
+  println(int.to_string(a))
+}

@@ -1,0 +1,6 @@
+effect fn main() -> Unit = {
+  var c = 5
+  c = c + 1
+  let a = fan.bounded(compute.ms(1)) { c + 1 } ?? -1
+  println(int.to_string(a))
+}

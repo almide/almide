@@ -1,0 +1,10 @@
+fn tag(n: Int, t: Int) -> Int = n * 0 + t
+fn boom(z: Int) -> Int = 10 / z
+effect fn main() -> Unit = {
+  let zero = int.parse("0") ?? 1
+  let a = fan.race {
+    tag(1, 1)
+    boom(zero)
+  } ?? -1
+  println("T1 " + int.to_string(a))
+}

@@ -1,0 +1,5 @@
+effect fn eff(x: Int) -> Result[Int, String] = ok(x)
+effect fn main() -> Unit = {
+  let r = fan.race([1, 2], eff) ?? -1
+  println(int.to_string(r))
+}

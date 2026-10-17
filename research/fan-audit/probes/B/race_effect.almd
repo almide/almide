@@ -1,0 +1,11 @@
+effect fn eff(x: Int) -> Int = {
+  println("side")
+  x
+}
+effect fn main() -> Unit = {
+  let a = fan.race {
+    eff(1)
+    eff(2)
+  } ?? -1
+  println(int.to_string(a))
+}

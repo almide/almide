@@ -1,0 +1,16 @@
+fn loud(n: Int) -> Int = {
+  var i = 0
+  while i < n { println("iter"); i = i + 1 }
+  i
+}
+fn loud2(n: Int) -> Int = {
+  var i = 0
+  while i < n { println("jter ${i}"); i = i + 1 }
+  i
+}
+effect fn main() -> Unit = {
+  let b = fan.bounded(compute.ns(30)) { loud(100) } ?? -1
+  println("plain cut ${b}")
+  let c = fan.bounded(compute.ns(30)) { loud2(100) } ?? -1
+  println("interp cut ${c}")
+}

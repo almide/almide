@@ -1,0 +1,6 @@
+effect fn main() -> Unit = {
+  let a = fan.bounded(duration.ms(1)) { 1 } ?? -1
+  let b = fan.timeout(compute.ms(1)) { 1 } ?? -1
+  let c = fan.bounded(5000) { 1 } ?? -1
+  println(int.to_string(a + b + c))
+}

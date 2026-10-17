@@ -1,0 +1,15 @@
+fn heavy(n: Int) -> Int = {
+  var i = 0
+  var acc = 0
+  while i < n {
+    acc = (acc + i * 7) % 999983
+    i = i + 1
+  }
+  acc
+}
+fn wrap(n: Int) -> Int = heavy(n)
+
+effect fn main() -> Unit = {
+  let b = fan.bounded(compute.ns(3006)) { wrap(1000) } ?? -1
+  println("wrap(1000) @1002 units = " + int.to_string(b))
+}

@@ -1,0 +1,15 @@
+fn s1(x: Int) -> Int = x * 3 + 1
+fn s2(x: Int) -> Int = s1(s1(x)) + 1
+fn s3(x: Int) -> Int = s2(s2(x)) + 1
+fn s4(x: Int) -> Int = s3(s3(x)) + 1
+fn d1(x: Int, t: Int) -> Int = s1(x) * 0 + t
+fn d2(x: Int, t: Int) -> Int = s2(x) * 0 + t
+fn d3(x: Int, t: Int) -> Int = s3(x) * 0 + t
+fn d4(x: Int, t: Int) -> Int = s4(x) * 0 + t
+effect fn main() -> Unit = {
+  println("Z1 d1 under 0ns: " + int.to_string(fan.race(compute.ns(0)) { d1(1, 1) } ?? -1))
+  println("Z2 d2 under 0ns: " + int.to_string(fan.race(compute.ns(0)) { d2(1, 1) } ?? -1))
+  println("Z3 d3 under 0ns: " + int.to_string(fan.race(compute.ns(0)) { d3(1, 1) } ?? -1))
+  println("Z4 d4 under 0ns: " + int.to_string(fan.race(compute.ns(0)) { d4(1, 1) } ?? -1))
+  println("Z5 d4 under 300ns: " + int.to_string(fan.race(compute.ns(300)) { d4(1, 1) } ?? -1))
+}

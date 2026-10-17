@@ -1,0 +1,6 @@
+fn a() -> Int = 1
+fn b() -> Int = 2
+effect fn main() -> Unit = {
+  let w = fan.race { a(); b() } ?? -1
+  println(int.to_string(w))
+}
