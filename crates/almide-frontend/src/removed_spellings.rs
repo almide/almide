@@ -2,11 +2,12 @@
 //!
 //! An epoch that removes stdlib functions lists, in its `breaks`
 //! (`proofs/dialect-epochs.toml`), one entry per removed spelling in one of
-//! two fixed shapes:
+//! three fixed shapes:
 //!
 //! ```text
 //! `matrix.gelu(…)` → `import nnlib` + `nnlib.gelu(…)` (package almide/nnlib: `almide add almide/nnlib@v0.1.0`)
 //! `mem.save()` → delete the call …
+//! `testing.assert_throws(f, expected)` → rewrite as `testing.assert_aborts(expected, f)`: …
 //! ```
 //!
 //! The diagnostic a call to a removed spelling gets (E002, or the
@@ -26,6 +27,9 @@ pub enum Fate {
     Moved { to: String, import: String, package: String, add: String },
     /// Deleted outright; `repair` is the ledger's "delete the call …" text.
     Deleted { repair: String },
+    /// Replaced in the stdlib by `to`, with a different call shape; `repair`
+    /// is the ledger's "rewrite as `…` …" text.
+    Rewritten { to: String, repair: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -60,6 +64,9 @@ pub fn parse_break(epoch: u32, text: &str) -> Option<Removal> {
     let rest = rest.trim_start().strip_prefix('→')?.trim_start();
     let fate = if rest.starts_with("delete the call") {
         Fate::Deleted { repair: rest.to_string() }
+    } else if let Some(shape) = rest.strip_prefix("rewrite as ") {
+        let (new_call, _) = between(shape, "`", "`")?;
+        Fate::Rewritten { to: callee(new_call)?.to_string(), repair: rest.to_string() }
     } else {
         let (import_line, rest) = between(rest, "`", "`")?;
         let import = import_line.strip_prefix("import ")?.trim().to_string();
@@ -109,7 +116,9 @@ pub fn hint(r: &Removal) -> String {
             "`{}` left the stdlib at dialect epoch {} for package {}: run `{}`, add `import {}`, then call `{}(…)`",
             r.from, r.epoch, package, add, import, to
         ),
-        Fate::Deleted { repair } => format!("`{}` was removed at dialect epoch {}: {}", r.from, r.epoch, repair),
+        Fate::Deleted { repair } | Fate::Rewritten { repair, .. } => {
+            format!("`{}` was removed at dialect epoch {}: {}", r.from, r.epoch, repair)
+        }
     }
 }
 
@@ -169,6 +178,22 @@ mod tests {
         assert!(parse_break(3, "`args.flag` is an `effect fn` — mark the caller").is_none());
     }
 
+    #[test]
+    fn a_rewritten_break_parses() {
+        let text = "`testing.assert_throws(f, expected)` → rewrite as `testing.assert_aborts(expected, f)`: the expected text first";
+        let r = parse_break(14, text).unwrap();
+        assert_eq!(r.from, "testing.assert_throws");
+        assert_eq!(
+            r.fate,
+            Fate::Rewritten {
+                to: "testing.assert_aborts".into(),
+                repair: "rewrite as `testing.assert_aborts(expected, f)`: the expected text first".into(),
+            }
+        );
+        assert!(hint(&r).starts_with("`testing.assert_throws` was removed at dialect epoch 14: rewrite as `testing.assert_aborts("));
+        assert!(parse_break(14, "`testing.assert_throws(f)` → rewrite as prose without a call").is_none());
+    }
+
     /// Epoch 14 removed 33 stdlib spellings, and every one of them parses as
     /// a removal, so the diagnostic cannot silently lose a row to a typo in
     /// the ledger. Other breaks may share the epoch (prose, not removals):
@@ -180,11 +205,13 @@ mod tests {
         let e14 = ledger["epoch"].as_array().unwrap().iter().find(|e| e["n"].as_integer() == Some(14)).unwrap();
         let breaks = e14["breaks"].as_array().unwrap();
         for b in breaks.iter().filter_map(|b| b.as_str()) {
-            let shaped = b.contains("` → `import ") || b.contains("` → delete the call");
+            let shaped = b.contains("` → `import ") || b.contains("` → delete the call") || b.contains("` → rewrite as `");
             assert!(!shaped || parse_break(14, b).is_some(), "a removal-shaped break that does not parse: {b}");
         }
-        assert_eq!(all().iter().filter(|r| r.epoch == 14).count(), 33);
+        // The 33 domain kernels, and `testing.assert_throws` (ADR-0029).
+        assert_eq!(all().iter().filter(|r| r.epoch == 14).count(), 34);
         assert!(lookup("matrix.gelu").is_some());
+        assert!(matches!(lookup("testing.assert_throws").map(|r| &r.fate), Some(Fate::Rewritten { .. })));
         assert!(lookup("matrix.mul").is_none());
         assert!(removed_module_hint("mem").is_some());
         assert!(removed_module_hint("matrix").is_none());
