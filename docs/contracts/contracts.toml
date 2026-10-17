@@ -4618,6 +4618,7 @@ evidence  = [
   { path = "spec/wasm_cross/exit_code_upper_bound.almd", class = "fixture" },
   { path = "spec/wasm_cross/exit_code_passthrough.almd", class = "fixture" },
   { path = "spec/embedded_cross/exit_status_passthrough.almd", class = "fixture" },
+  { path = "tests/http_response_cross_test.rs", class = "fixture", name = "an_exit_code_crosses_the_component_route" },
 ]
 
 # ── A LITERAL EXIT CODE IS CHECKED AT COMPILE TIME ──
