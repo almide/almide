@@ -401,7 +401,7 @@ fn check_handle_leg(leg: Leg, out: &Output, server: &Server) -> String {
     assert_eq!(get("stream"), "request timeout: total_ms 700 exceeded", "[{leg:?}]");
     assert_eq!(get("stream-first"), "data: 0", "[{leg:?}]");
     within("/trickle?stream", 600, 2500);
-    assert_eq!(get("stream-refused"), "HTTP 404: Not Found: gone", "[{leg:?}]");
+    assert_eq!(get("stream-refused"), "HTTP 404: gone", "[{leg:?}]");
     assert_eq!(get("stream-whole"), "ok hello", "[{leg:?}]");
 
     // 7. drop = cancel: the server saw the close long before the program's

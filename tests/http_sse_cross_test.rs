@@ -170,7 +170,7 @@ fn the_openai_streaming_helper_reads_the_same_on_native_and_the_embedded_lane() 
     assert!(native.0.starts_with("stream delta[h\u{e9}llo]\nstream delta[ w\u{f6}rld \u{1f600}]\n"), "{}", native.0);
     assert!(native.0.contains(expected_json), "{}", native.0);
     assert!(!native.0.contains("AFTER"), "{}", native.0);
-    assert!(native.0.contains("missing err HTTP 404: Not Found: nope\n"), "{}", native.0);
+    assert!(native.0.contains("missing err HTTP 404: nope\n"), "{}", native.0);
     assert!(native.0.contains("closed err could not connect to "), "{}", native.0);
     let embedded = run(&file, true);
     assert_eq!((&embedded.0, embedded.2), (&native.0, native.2), "the embedded lane diverged: {}", embedded.1);
