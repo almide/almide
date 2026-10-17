@@ -48,6 +48,13 @@
 # Solo run on this tree: 702 identical, 18 unsupported, 3 fuel-exhausted,
 # 0 diverge.
 #
+# 2026-10-17 (#1827): unsupported 18 -> 16. list.repeat is served value-level
+# on the interpreter (hofs_list_ops.rs), so a Float element no longer reaches the
+# Int-declared registry core's prim.store64: matrix_dims_guard,
+# module_var_alias_cow and the new matrix_packed_weight_family all vote.
+# Solo run on this tree: 943 identical, 16 unsupported, 3 fuel-exhausted,
+# 0 diverge.
+#
 # name<TAB>value
-unsupported	18
+unsupported	16
 fuel_exhausted	3
