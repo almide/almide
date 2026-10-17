@@ -1258,7 +1258,7 @@ mod verdict_tests {
     /// failed leg.
     #[test]
     fn a_unit_diamond_prints_its_value_on_each_path() {
-        let t = crate::generator::inspect_gen::tests::target("bytes.heap_restore");
+        let t = crate::generator::inspect_gen::tests::target("testing.assert_gt");
         let project = t.diamond_project(10);
         let main = project.files.iter().find(|(p, _)| p.ends_with("main.almd")).map(|(_, s)| s.clone()).unwrap();
         for v in ["d", "l", "r"] {
