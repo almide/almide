@@ -172,9 +172,9 @@
 7169	spec/wasm_cross/endian_explicit_import.almd
 1825	spec/wasm_cross/enumerate_unnameable_element.almd
 2571	spec/wasm_cross/env_args.almd
-3299	spec/wasm_cross/env_get.almd
+3302	spec/wasm_cross/env_get.almd
 3885	spec/wasm_cross/env_platform_reporting.almd
-3502	spec/wasm_cross/env_set_overlay.almd
+3765	spec/wasm_cross/env_set_overlay.almd
 1943	spec/wasm_cross/env_sleep_pause.almd
 3760	spec/wasm_cross/err_arm_takes_let_match_type.almd
 2019	spec/wasm_cross/error_operators.almd
@@ -243,7 +243,7 @@
 14542	spec/wasm_cross/fs_fallible_walker_call_head.almd
 14859	spec/wasm_cross/fs_glob_segments.almd
 11965	spec/wasm_cross/fs_list_dir_multipass.almd
-14398	spec/wasm_cross/fs_metadata_family.almd
+14401	spec/wasm_cross/fs_metadata_family.almd
 8463	spec/wasm_cross/fs_preopen_resolve.almd
 11481	spec/wasm_cross/fs_read_bytes_raw_call_head.almd
 15594	spec/wasm_cross/fs_read_directory_errno.almd
