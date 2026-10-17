@@ -117,7 +117,21 @@ pub(super) const EFFECT_RECIPES: &[Recipe] = &[
     },
     Recipe { func: "process.is_alive", size: "", args: &[("pid", "process.pid()")] },
     Recipe { func: "process.sleep", size: "", args: &[("ms", "0")] },
+    Recipe { func: "io.read_n_bytes", size: "n", args: &[("n", "{n}")] },
 ];
+
+/// What a stdin reader's probe gets on stdin: for size n and k calls, the
+/// line length and the line count of an `a…a\n` stream with exactly what k
+/// calls consume (`read_all` takes the whole k-fold input at its first call:
+/// the total is still k·n, so the marginal over k reads n per call).
+pub(super) fn stdin_for(func: &str, n: u64, k: u64) -> Option<(u64, u64)> {
+    match func {
+        "io.read_line" | "io.read_line_opt" | "io.read_all" | "process.stdin_lines" => Some((n, k)),
+        "io.read_byte" => Some((0, k)),
+        "io.read_n_bytes" => Some((n.saturating_sub(1), k)),
+        _ => None,
+    }
+}
 
 const ECHO: &str = "\"/bin/echo\"";
 const ECHO_ARGS: &str = "list.range(0, {n} / 10) |> list.map((i) => \"aé\")";

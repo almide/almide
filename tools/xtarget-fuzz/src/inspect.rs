@@ -226,7 +226,8 @@ fn expected_ratio(order: &str) -> Option<f64> {
 fn complexity(ctx: &Ctx, t: &Target, n: u64, order: Option<&str>, order_rebind: Option<&str>) -> String {
     let mut parts = Vec::new();
     let mut ok = true;
-    if t.size_param.is_none() {
+    // A stdin reader is sized by its stdin (`stdin_for`), not a parameter.
+    if t.size_param.is_none() && !t.reads_stdin() {
         return "PASS: no size parameter — constant-size arguments only (the plain call is the parity campaign's)".into();
     }
     let direct = |n: u64, k: u64, on: bool| t.direct_program(n, k, on);
@@ -423,6 +424,13 @@ fn build_as(ctx: &Ctx, src: &str, leg: Leg, canonical: bool) -> Result<PathBuf, 
 /// killed and reported as a timeout, never as a time.
 const RUN_CAP: Duration = Duration::from_secs(60);
 
+/// The program an artifact was built from: `build_as` writes `p<hash>.almd`
+/// and names every artifact of it `p<hash>.<kind>`.
+fn source_of(art: &Path) -> String {
+    let stem = art.file_name().map(|f| f.to_string_lossy().split('.').next().unwrap_or("").to_string()).unwrap_or_default();
+    std::fs::read_to_string(art.with_file_name(format!("{stem}.almd"))).unwrap_or_default()
+}
+
 /// An artifact `build_as` left as source for the embedded host.
 fn is_embedded(art: &Path) -> bool {
     art.to_string_lossy().ends_with(".embedded.almd")
@@ -442,7 +450,7 @@ fn embedded_cmd(ctx: &Ctx, art: &Path) -> Command {
 }
 
 fn run_artifact(ctx: &Ctx, art: &Path, leg: Leg) -> Result<String, String> {
-    let world = World::new(&ctx.dir)?;
+    let world = World::for_program(&ctx.dir, &source_of(art))?;
     let mut cmd = match leg {
         _ if is_embedded(art) => embedded_cmd(ctx, art),
         Leg::Native => Command::new(art),
@@ -561,7 +569,7 @@ fn alloc(ctx: &Ctx, t: &Target, n: u64) -> String {
         if std::fs::write(&file, &src).is_err() {
             return "SKIP: scratch write failed".into();
         }
-        let world = match World::new(&ctx.dir) {
+        let world = match World::for_program(&ctx.dir, &src) {
             Ok(w) => w,
             Err(e) => return format!("SKIP: {e}"),
         };
@@ -605,7 +613,7 @@ fn diamond(ctx: &Ctx, t: &Target, n: u64) -> String {
     // The project resolves from its own directory, so the run stays there;
     // it still gets the sandbox's argv, env and stdin.
     let run = |wasm: bool| {
-        let world = World::new(&ctx.dir).map_err(std::io::Error::other)?;
+        let world = World::for_program(&ctx.dir, &std::fs::read_to_string(&entry).unwrap_or_default()).map_err(std::io::Error::other)?;
         let mut c = Command::new(&ctx.almide);
         c.arg("run").arg(&entry);
         if wasm {
@@ -939,7 +947,7 @@ fn run_counted(ctx: &Ctx, art: &Path, leg: Leg) -> Result<(String, Counts), Stri
     let stat = ctx.dir.join(format!("stat-{}.csv", std::process::id()));
     let moved_file = ctx.dir.join(format!("moved-{}.txt", std::process::id()));
     let _ = std::fs::remove_file(&moved_file);
-    let world = World::new(&ctx.dir)?;
+    let world = World::for_program(&ctx.dir, &source_of(art))?;
     let mut cmd = Command::new("perf");
     cmd.args(["stat", "-x", ",", "-e", "instructions:u", "-o"]).arg(&stat).arg("--");
     if let Some(shim) = &ctx.memshim {

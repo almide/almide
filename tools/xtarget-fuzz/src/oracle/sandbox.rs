@@ -122,6 +122,19 @@ impl World {
         Ok(World { dir, stdin })
     }
 
+    /// [`Self::new`], with the stdin a probe's `// inspect-stdin: L N` header
+    /// asks for: N lines of L `a`s each (the inspection's stdin readers).
+    pub fn for_program(scratch: &Path, src: &str) -> Result<World, String> {
+        let w = World::new(scratch)?;
+        let spec = src.lines().next().and_then(|l| l.strip_prefix("// inspect-stdin: "));
+        if let Some((len, lines)) = spec.and_then(|s| s.split_once(' ')) {
+            let (len, lines): (usize, usize) = (len.parse().map_err(|_| "bad stdin header")?, lines.trim().parse().map_err(|_| "bad stdin header")?);
+            let line = format!("{}\n", "a".repeat(len));
+            std::fs::write(&w.stdin, line.repeat(lines)).map_err(|e| format!("sandbox stdin: {e}"))?;
+        }
+        Ok(w)
+    }
+
     /// The run's cwd, env and stdin; its argv is [`ARGS`], after the program
     /// (and after `--` for `almide run`).
     pub fn enter(&self, cmd: &mut std::process::Command) {
