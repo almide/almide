@@ -7,12 +7,25 @@
 // it declares Entropy (an `effect fn`); a pure `fn` reaching it is a frontend error AND would REJECT
 // at the gate. (The modulo has a slight bias for non-power-of-two spans — adequate for the functional
 // port; cryptographic uniformity is not promised by this floor.)
+//
+// A span past 2^63 - 1 wraps `max - min + 1` to zero or below. Such a span
+// covers at least half of all Int values, so it draws 64 raw bits until one
+// lands in [min, max] (each draw lands with probability at least 1/2).
 fn random_int(min: Int, max: Int) -> Int = {
   let span = max - min + 1
+  if max <= min then min
+  else if span <= 0 then random_int_wide(min, max)
+  else min + (int.band(random_bits(), 0x7FFFFFFFFFFFFFFF) % span)
+}
+
+fn random_int_wide(min: Int, max: Int) -> Int = {
+  let r = random_bits()
+  if r >= min and r <= max then r else random_int_wide(min, max)
+}
+
+fn random_bits() -> Int = {
   let buf = prim.alloc_bytes(8)
   let p = prim.handle(buf) + 12
   let _e = prim.random_get(p, 8)
-  let r = prim.load64(p)
-  let rpos = int.band(r, 0x7FFFFFFFFFFFFFFF)
-  if span <= 0 then min else min + (rpos % span)
+  prim.load64(p)
 }

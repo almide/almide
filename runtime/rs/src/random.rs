@@ -21,10 +21,14 @@ fn next_u64() -> u64 {
     })
 }
 
+// The span is counted in u64: `max - min + 1` overflows i64 once it passes
+// 2^63 - 1, and the full range wraps it to 0 (a division by zero).
 pub fn almide_rt_random_int(min: i64, max: i64) -> i64 {
     if min >= max { return min; }
-    let range = (max - min + 1) as u64;
-    min + (next_u64() % range) as i64
+    let span = (max as u64).wrapping_sub(min as u64).wrapping_add(1);
+    let r = next_u64();
+    if span == 0 { return r as i64; }
+    min.wrapping_add((r % span) as i64)
 }
 
 // The 53-bit construction: the top 53 bits of the draw (xorshift's low bits

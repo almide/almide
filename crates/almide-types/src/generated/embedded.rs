@@ -28911,14 +28911,27 @@ pub const SRC_RANDOM_INT: &str = r#"
 
 
 
+
+
+
+
 fn random_int(min: Int, max: Int) -> Int = {
   let span = max - min + 1
+  if max <= min then min
+  else if span <= 0 then random_int_wide(min, max)
+  else min + (int.band(random_bits(), 0x7FFFFFFFFFFFFFFF) % span)
+}
+
+fn random_int_wide(min: Int, max: Int) -> Int = {
+  let r = random_bits()
+  if r >= min and r <= max then r else random_int_wide(min, max)
+}
+
+fn random_bits() -> Int = {
   let buf = prim.alloc_bytes(8)
   let p = prim.handle(buf) + 12
   let _e = prim.random_get(p, 8)
-  let r = prim.load64(p)
-  let rpos = int.band(r, 0x7FFFFFFFFFFFFFFF)
-  if span <= 0 then min else min + (rpos % span)
+  prim.load64(p)
 }
 "#;
 pub const SRC_RANDOM_SHUFFLE: &str = r#"
