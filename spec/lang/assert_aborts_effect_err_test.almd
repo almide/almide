@@ -1,0 +1,26 @@
+// ADR-0029 D1: the closure may be an effect closure. An err it propagates
+// with `!` ends the child the way an effect `main`'s err ends a program —
+// `Error: <msg>` on stderr, exit 1 — so it is a defined abort, matched like
+// any other.
+import fs
+import testing
+
+test "an err propagated with ! is an abort" {
+  testing.assert_aborts(
+    "fs.read_text",
+    () => {
+      let text = fs.read_text("/no/such/almide-assert-aborts-probe")!
+      println(text)
+    },
+  )
+}
+
+test "an effect closure that succeeds is not an abort" {
+  testing.assert_aborts(
+    "PANIC: after the read",
+    () => {
+      let _ = fs.exists("/no/such/almide-assert-aborts-probe")
+      panic("after the read")
+    },
+  )
+}
