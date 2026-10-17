@@ -45,6 +45,10 @@ pub fn create(scratch: &Path) -> std::io::Result<(PathBuf, PathBuf)> {
         }
         std::fs::write(p, bytes)?;
     }
+    // A relative link inside the tree, for `fs.is_symlink` (a host that
+    // allows none leaves it out).
+    #[cfg(unix)]
+    let _ = std::os::unix::fs::symlink("data.txt", dir.join("link.txt"));
     let stdin = scratch.join(format!("sbx-{}-{n}.stdin", std::process::id()));
     std::fs::write(&stdin, STDIN)?;
     Ok((dir, stdin))
@@ -91,6 +95,43 @@ fn fnv1a(bytes: &[u8]) -> u64 {
 pub fn remove(dir: &Path, stdin: &Path) {
     let _ = std::fs::remove_dir_all(dir);
     let _ = std::fs::remove_file(stdin);
+}
+
+/// One run's sandbox, removed when dropped: the inspection harness enters a
+/// fresh one for every probe run on every leg (ADR-0027 D2).
+pub struct World {
+    pub dir: PathBuf,
+    stdin: PathBuf,
+}
+
+impl World {
+    pub fn new(scratch: &Path) -> Result<World, String> {
+        let (dir, stdin) = create(scratch).map_err(|e| format!("sandbox: {e}"))?;
+        Ok(World { dir, stdin })
+    }
+
+    /// The run's cwd, env and stdin; its argv is [`ARGS`], after the program
+    /// (and after `--` for `almide run`).
+    pub fn enter(&self, cmd: &mut std::process::Command) {
+        cmd.current_dir(&self.dir).envs(ENV.iter().copied());
+        if let Ok(f) = std::fs::File::open(&self.stdin) {
+            cmd.stdin(f);
+        }
+    }
+
+    /// What a stock `wasmtime run` needs before the module to see the same
+    /// world: the sandbox preopened as the guest's `.`, and the env.
+    pub fn wasmtime_args(&self) -> Vec<String> {
+        let mut a = vec![format!("--dir={}::.", self.dir.display())];
+        a.extend(ENV.iter().map(|(k, v)| format!("--env={k}={v}")));
+        a
+    }
+}
+
+impl Drop for World {
+    fn drop(&mut self) {
+        remove(&self.dir, &self.stdin);
+    }
 }
 
 #[cfg(test)]
