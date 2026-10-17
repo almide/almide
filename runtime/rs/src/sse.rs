@@ -42,9 +42,9 @@ impl AlmideSseAcc {
     }
 
     /// A text delta: shown live through the callback and kept.
-    fn text(&mut self, text: Option<String>, on_text_delta: &std::rc::Rc<dyn Fn(String)>) {
+    fn text(&mut self, text: Option<String>, on_text_delta: &std::rc::Rc<dyn Fn(AlmideString)>) {
         if let Some(text) = text.filter(|t| !t.is_empty()) {
-            on_text_delta(text.clone());
+            on_text_delta(AlmideString::from(text.as_str()));
             self.content.push_str(&text);
         }
     }
@@ -168,14 +168,14 @@ fn sse_anthropic_messages_run(
     api_key: &str,
     body_json: &str,
     limits: Option<(i64, i64)>,
-    on_text_delta: std::rc::Rc<dyn Fn(String)>,
+    on_text_delta: std::rc::Rc<dyn Fn(AlmideString)>,
 ) -> Result<String, String> {
     let url = "https://api.anthropic.com/v1/messages".to_string();
-    let mut headers: AlmideMap<String, String> = AlmideMap::new();
-    headers.insert("x-api-key".to_string(), api_key.to_string());
-    headers.insert("anthropic-version".to_string(), "2023-06-01".to_string());
-    headers.insert("Content-Type".to_string(), "application/json".to_string());
-    headers.insert("Accept".to_string(), "text/event-stream".to_string());
+    let mut headers: AlmideMap<AlmideString, AlmideString> = AlmideMap::new();
+    headers.insert(AlmideString::from("x-api-key"), AlmideString::from(api_key));
+    headers.insert(AlmideString::from("anthropic-version"), AlmideString::from("2023-06-01"));
+    headers.insert(AlmideString::from("Content-Type"), AlmideString::from("application/json"));
+    headers.insert(AlmideString::from("Accept"), AlmideString::from("text/event-stream"));
 
     let mut sse_buffer = String::new();
     // Tool blocks accumulate by `index` across content_block_start / delta.
@@ -195,7 +195,7 @@ fn sse_anthropic_messages_run(
 }
 
 /// One Anthropic Messages event, by its `event:` name.
-fn handle_anthropic_event(event_name: &str, parsed: &AlmideValue, acc: &mut AlmideSseAcc, on_text_delta: &std::rc::Rc<dyn Fn(String)>) {
+fn handle_anthropic_event(event_name: &str, parsed: &AlmideValue, acc: &mut AlmideSseAcc, on_text_delta: &std::rc::Rc<dyn Fn(AlmideString)>) {
     match event_name {
         // {"type":"message_start","message":{"id","model","usage":{"input_tokens","output_tokens"}}}
         "message_start" => anthropic_message_start(parsed, acc),
@@ -217,7 +217,7 @@ fn handle_anthropic_event(event_name: &str, parsed: &AlmideValue, acc: &mut Almi
             if let Some(err) = get_field(parsed, "error") {
                 let msg = get_string(&err, "message").unwrap_or_default();
                 if !msg.is_empty() {
-                    on_text_delta(format!("[anthropic stream error] {}", msg));
+                    on_text_delta(AlmideString::from(format!("[anthropic stream error] {}", msg)));
                 }
             }
         }
@@ -245,7 +245,7 @@ fn anthropic_block_start(parsed: &AlmideValue, acc: &mut AlmideSseAcc) {
     sse_set_nonempty(&mut call.name, get_string(&block, "name"));
 }
 
-fn anthropic_block_delta(parsed: &AlmideValue, acc: &mut AlmideSseAcc, on_text_delta: &std::rc::Rc<dyn Fn(String)>) {
+fn anthropic_block_delta(parsed: &AlmideValue, acc: &mut AlmideSseAcc, on_text_delta: &std::rc::Rc<dyn Fn(AlmideString)>) {
     let index = get_int(parsed, "index").unwrap_or(0) as usize;
     let Some(delta) = get_field(parsed, "delta") else { return };
     match get_string(&delta, "type").unwrap_or_default().as_str() {
