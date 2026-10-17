@@ -872,6 +872,25 @@ mod tests {
         assert_eq!(*lines.last().unwrap(), "exit signal 15");
     }
 
+    /// Under a launcher (`perf stat -- server`) the SIGTERM goes to the
+    /// launcher's child, and the launcher exits on its own when it ends: a
+    /// `sh` that runs `sleep` as a child and then `exit 7` stands in for it.
+    #[test]
+    fn a_wrapped_session_signals_the_launchers_child_and_the_launcher_reports() {
+        let port = free_port();
+        std::thread::spawn(move || {
+            let l = TcpListener::bind(("127.0.0.1", port)).unwrap();
+            let (mut s, _) = l.accept().unwrap();
+            let mut buf = [0u8; 1024];
+            let _ = s.read(&mut buf);
+            let _ = s.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\n\r\n");
+        });
+        let mut cmd = Command::new("sh");
+        cmd.args(["-c", "sleep 600; exit 7"]);
+        let s = drive(&mut cmd, port, Host::Socket, &Plan::Sized { k: 0, n: 0 }, true).expect("session");
+        assert!(s.transcript.ends_with("exit 7\n"), "{}", s.transcript);
+    }
+
     #[test]
     fn a_server_that_exits_before_answering_is_reported_with_its_exit() {
         let mut cmd = Command::new("sh");
