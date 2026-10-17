@@ -14,8 +14,8 @@
 //!
 //! Sound because this render realizes every `Dup` as a `.clone()` — an alias
 //! of `s` is its own `String`, never the block `push_str` grows — and `Drop`
-//! is erased (scope end frees). Under ADR-0013's shared buffer
-//! (`ALMIDE_SHARED_STR=1`) a `.clone()` is a count increment, so an alias DOES
+//! is erased (scope end frees). Under ADR-0013's shared buffer a `.clone()`
+//! is a count increment, so an alias DOES
 //! share the block; the window stays sound because `AlmideStr::push_str` goes
 //! through the unique view, which copies a shared block before it writes
 //! (`spec/lang/alias_cow_test.almd` pins `let t = s; s = s + "x"`). The window is taken only when `d` is touched

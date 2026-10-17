@@ -346,9 +346,8 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     let vis = if for_crate { "pub " } else { "" };
     let macro_attr = if for_crate { "#[macro_export]\n" } else { "" };
     let mut s = String::new();
-    // ADR-0013 stage 2: the Almide String alias, its boundary conversion and
-    // the `AlmideConcat` trait with its String impls (prelude_string.rs;
-    // `ALMIDE_SHARED_STR=1` selects the shared buffer).
+    // ADR-0013: the Almide String (the shared buffer `AlmideStr`), its
+    // boundary conversion and the `AlmideConcat` trait (prelude_string.rs).
     s.push_str(&prelude_string::string_prelude(vis));
     s.push_str("impl<T: Clone> AlmideConcat<Vec<T>> for Vec<T> { type Output = Vec<T>; #[inline(always)] fn concat(self, rhs: Vec<T>) -> Vec<T> { let mut r = self; r.extend(rhs); r } }\n");
     // ONE stdout buffer (#2245). `println` used to lower to Rust's `println!`,

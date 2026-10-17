@@ -495,9 +495,9 @@ pub fn almide_rt_value_stringify(v: &AlmideValue) -> AlmideString {
 // Both render the AlmideValue as its JSON text, identically, so the field reprs
 // consistently across every path — and byte-identically to wasm, which reprs a
 // `AlmideValue` through the same JSON serializer (see `emit_repr_value`).
-// ADR-0013 stage 2: `AlmideValue` keeps its own `String` (step 6), so it
+// ADR-0013: `AlmideValue` already holds `AlmideString` (step 6), so it
 // crosses the runtime boundary unchanged.
-almide_into_str_impls! { almide_into_str_leaf!(AlmideValue); }
+almide_into_str_leaf!(AlmideValue);
 
 impl AlmideRepr for AlmideValue {
     fn almide_repr(&self) -> String { String::from(almide_rt_value_stringify(self)) }
