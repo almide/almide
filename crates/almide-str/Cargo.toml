@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-description = "ADR-0013's shared immutable string buffer for the native runtime: one block [rc, len, cap | bytes], edited through a unique view"
+description = "ADR-0013's shared immutable string buffer for the native runtime: one block [rc, spare, len | bytes] with a 16-byte header, edited through a unique view"
 
 # Its own lints, not `[lints] workspace = true`: the workspace forbids unsafe code, and this
 # crate is the raw allocation boundary. Every unsafe block carries a SAFETY

@@ -597,7 +597,7 @@ fn my_max(a: Int, b: Int) -> Int   // body なし: 全ターゲットに @extern
 | 関数値 `(A) -> B` | `&dyn Fn(A) -> B`（借用 — 呼び出し中に呼ぶ） |
 | `mut v: T` | `&mut T`（`mut v: Bytes` は `&mut Vec<u8>`、`mut v: Matrix` は `&mut AlmideMatrix`。書き込みは呼び出し側の `var` に copy-on-write で反映） |
 
-戻り値はその型の生成コード表現（`Int` → `i64`、`String` → `String` …）で返す。`Bytes` / `Matrix` の戻り値は生の `Vec<u8>` / `AlmideMatrix` でよい（ラッパが `.into()` する）。
+戻り値はその型の生成コード表現（`Int` → `i64`、`String` → `String` …）で返す。生成コードの文字列は共有バッファ `AlmideString`（ADR-0013）だが、ホストは `String` のままでよい: ラッパが境界で変換する（`String` を含む `List` / `Set` / `Map` / `Option` / `Result` / タプルの引数はホスト側の `String` 形に複製して渡し、`mut` 引数は呼び出し後に書き戻し、戻り値は `AlmideString` 形に複製する。`AlmideString` をそのまま返すホストも受け付ける）。`Bytes` / `Matrix` の戻り値は生の `Vec<u8>` / `AlmideMatrix` でよい（ラッパが `.into()` する）。
 
 ```rust
 // native/host.rs
