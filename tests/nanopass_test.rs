@@ -1105,7 +1105,10 @@ mod fan_parallel_routing {
 
     #[test]
     fn fan_map_effect_callback_stays_sequential() {
-        // fan.map([1], (x) => ok(probe(x))) with `probe` an effect fn.
+        // fan.map([1], (x) => ok(probe(x))) with `probe` an effect fn that
+        // reads the clock. (An effect fn whose body proves pure, or only fans
+        // out over proven work, routes parallel: #2594,
+        // tests/fan_nested_effect_parallel_test.rs.)
         let mut vt = VarTable::new();
         let lambda = ok_lambda(&mut vt, |x| mk_expr(
             IrExprKind::Call {
@@ -1115,7 +1118,12 @@ mod fan_parallel_routing {
             },
             Ty::Int,
         ));
-        let probe = mk_fn("probe", vec![], Ty::Int, mk_expr(IrExprKind::LitInt { value: 0 }, Ty::Int), true);
+        let millis = mk_expr(IrExprKind::Call {
+            target: CallTarget::Module { module: sym("env"), func: sym("millis"), def_id: None },
+            args: vec![],
+            type_args: vec![],
+        }, Ty::Int);
+        let probe = mk_fn("probe", vec![], Ty::Int, millis, true);
         let program = mk_program(vec![mk_fn("main", vec![], Ty::Unit, fan_map(lambda), true), probe], vt);
         let out = route(program);
         assert_eq!(fan_func_name(&out), "map");
