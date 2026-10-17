@@ -150,6 +150,16 @@ fn outline_metered_arm_ir(
     use almide_ir::{CallTarget, IrFunction, IrParam, IrStmt, IrStmtKind, IrVisibility, Mutability, ParamBorrow};
     let body_ty = body_ir.ty.clone();
     let budget_ir = budget_arg;
+    // An empty body `{ }` (or one ending in a statement) is a Unit block, as in
+    // Rust, Kotlin and Swift: give it an explicit `()` tail so every leg lowers
+    // the same region (#3783; wasm refused a tail-less outlined body).
+    let body_ir = match body_ir.kind {
+        IrExprKind::Block { stmts, expr: None } if body_ty == Ty::Unit => {
+            let unit = ctx.mk(IrExprKind::Unit, Ty::Unit, span);
+            IrExpr { kind: IrExprKind::Block { stmts, expr: Some(Box::new(unit)) }, ..body_ir }
+        }
+        _ => body_ir,
+    };
 
     let mk_rt = |ctx: &LowerCtx, name: &str, args: Vec<IrExpr>| -> IrExpr {
         ctx.mk(IrExprKind::RuntimeCall { symbol: sym(name), args }, Ty::Int, span)
