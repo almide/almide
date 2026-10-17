@@ -1502,7 +1502,7 @@ Goal: the 150 rows left uninspected reach 0, with no native-only stamps (owner, 
   - the vendor LLM calls and the model-specific matrix kernels leave the stdlib for `almide/llm` and `almide/nnlib`, removed at dialect epoch 14 with no deprecation window (the 33 functions; the Anthropic base-URL question goes with them);
   - `@concurrent(f)` on `fs.fold_lines_chunked` (○);
   - `testing.assert_throws` is replaced by `testing.assert_aborts(expected, () => ...)`, which runs its closure in a child (○; ADR-0029 draft).
-- **Owner-delegated decisions (night of 10-17, "compare with other compilers; rust and wasm the same"):**
+- **Decisions taken by cross-language comparison, each the same on native and wasm (10-17 night):**
   - a truncated http body is an err, `malformed or incomplete response from "<url>"`;
   - the removal package is `almide/nnlib` (as Julia's NNlib.jl; `almide/nn` is taken);
   - `legacy-native-callback-names` is removed at epoch 14, as its deprecation entry promised.
