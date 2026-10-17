@@ -2189,6 +2189,7 @@ evidence  = [
   { path = "spec/wasm_cross/string_repeat_empty.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_elementwise_family.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_composition_family.almd", class = "fixture" },
+  { path = "spec/wasm_cross/matrix_packed_weight_family.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_linear_f32_empty_extent_ceiling.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_select_rows_f32_dims_ceiling.almd", class = "fixture" },
 ]
@@ -2986,6 +2987,7 @@ evidence  = [
   { path = "spec/wasm_cross/matrix_elementwise_family.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_product_family.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_composition_family.almd", class = "fixture" },
+  { path = "spec/wasm_cross/matrix_packed_weight_family.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_softmax_nonfinite_rows.almd", class = "fixture" },
   { path = "spec/wasm_cross/value_codec_matrix_temporaries_release.almd", class = "fixture" },
 ]
