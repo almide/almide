@@ -29,6 +29,7 @@ use crate::generator::{
 };
 use crate::oracle::sandbox::{self, World};
 
+mod aborts;
 mod serve;
 
 const NOISE_FLOOR: Duration = Duration::from_millis(60);
@@ -85,6 +86,9 @@ pub fn cmd_inspect(args: &[String]) {
     let engine = Engine::with_family(&repo, Family::Synthesis);
     // A function that serves until stopped is inspected as sessions the
     // harness drives (`inspect/serve.rs`), not as calls a program makes.
+    if aborts::TESTED.contains(&name.as_str()) {
+        return aborts::inspect(&mut ctx, &engine, &name, args);
+    }
     if serve::SERVED.contains(&name.as_str()) {
         return serve::inspect(&mut ctx, &engine, &name, args);
     }
@@ -414,6 +418,11 @@ fn build_as(ctx: &Ctx, src: &str, leg: Leg, canonical: bool) -> Result<PathBuf, 
     let file = ctx.dir.join(format!("p{:016x}.almd", hash(src)));
     std::fs::write(&file, src).map_err(|e| e.to_string())?;
     let canonical = canonical && matches!(leg, Leg::Wasm);
+    // A test-file probe (`// @xf-test`) is run by `almide test` on its leg's
+    // lane: its artifact is the source (`aborts::test_art`).
+    if crate::generator::aborts_gen::is_test_probe(src) {
+        return aborts::test_art(&file, src, matches!(leg, Leg::Wasm));
+    }
     // A program only the embedded host serves (ADR-0027 D1) is built and run
     // there in one step: its artifact is the source, under a name that
     // carries the allocator choice (`run_cmd`).
@@ -485,6 +494,9 @@ fn embedded_cmd(ctx: &Ctx, art: &Path) -> Command {
 fn run_artifact(ctx: &Ctx, art: &Path, leg: Leg) -> Result<String, String> {
     let src = source_of(art);
     let world = World::for_program(&ctx.dir, &src)?;
+    if let Some(wasm) = aborts::test_art_leg(art) {
+        return aborts::run_test_art(ctx, art, wasm, &world);
+    }
     let make = || {
         let mut cmd = match leg {
             _ if is_embedded(art) => embedded_cmd(ctx, art),
@@ -1036,7 +1048,13 @@ fn run_counted(ctx: &Ctx, art: &Path, leg: Leg) -> Result<(String, Counts), Stri
             .arg(format!("LD_PRELOAD={}", shim.display()))
             .arg(format!("MEMSHIM_OUT={}", moved_file.display()));
     }
+    let test_leg = aborts::test_art_leg(art);
     match leg {
+        _ if test_leg.is_some() => {
+            let e = aborts::test_art_cmd(ctx, art, test_leg == Some(true));
+            cmd.arg(e.get_program()).args(e.get_args());
+            &mut cmd
+        }
         _ if is_embedded(art) => {
             let e = embedded_cmd(ctx, art);
             cmd.arg(e.get_program()).args(e.get_args());
@@ -1055,7 +1073,9 @@ fn run_counted(ctx: &Ctx, art: &Path, leg: Leg) -> Result<(String, Counts), Stri
         // intercept absorbs it.
         Leg::Wasm => cmd.arg(&ctx.wasmtime).args(["run", "-C", "cache=n", "-C", "parallel-compilation=n"]).args(world.wasmtime_args()).arg(art),
     };
-    cmd.args(sandbox::ARGS);
+    if test_leg.is_none() {
+        cmd.args(sandbox::ARGS);
+    }
     world.enter(&mut cmd);
     let (out, wall) = match serve_plan(&source_of(art)) {
         // A served probe: the session's transcript is its output, and the
@@ -1076,6 +1096,10 @@ fn run_counted(ctx: &Ctx, art: &Path, leg: Leg) -> Result<(String, Counts), Stri
     if !out.status.success() {
         return Err(run_failure(&out));
     }
+    let out = match test_leg {
+        Some(_) => std::process::Output { stdout: aborts::output_transcript(&out).into_bytes(), ..out },
+        None => out,
+    };
     let instructions = parse_instructions(&std::fs::read_to_string(&stat).unwrap_or_default())
         .ok_or_else(|| "perf reported no instructions:u count".to_string())?;
     let moved = match &ctx.memshim {
