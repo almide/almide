@@ -34,6 +34,7 @@ interface stderr {
 
 interface exit {
   exit: func(status: result);
+  exit-with-code: func(status-code: u8);
 }
 
 interface run {

@@ -542,7 +542,10 @@ fn base_import_list(t: &P3Types) -> Vec<(u32, &'static str, &'static str, u32)> 
     let cli_in = "wasi:cli/stdin@0.3.0";
     let fs_types = "wasi:filesystem/types@0.3.0";
     let list = vec![
-        (I_EXIT, "wasi:cli/exit@0.3.0", "exit", t.exit),
+        // `exit-with-code(u8)` (@since 0.3.0, no feature gate): the whole
+        // byte, so `process.exit(code)` keeps its code (C-350); every
+        // defined-failure site passes 1, which `exit(err)` also meant.
+        (I_EXIT, "wasi:cli/exit@0.3.0", "exit-with-code", t.exit),
         (I_OUT_CALL, cli_out, "write-via-stream", t.call),
         (I_OUT_NEW, cli_out, "[stream-new-0]write-via-stream", t.new),
         (I_OUT_WRITE, cli_out, "[async-lower][stream-write-0]write-via-stream", t.rw),
