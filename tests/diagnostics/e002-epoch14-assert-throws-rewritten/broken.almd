@@ -1,0 +1,7 @@
+// testing.assert_throws left at dialect epoch 14 (ADR-0029): the diagnostic
+// reads its repair from the ledger and says how to rewrite the call.
+import testing
+
+test "panics with the expected message" {
+  testing.assert_throws(() => panic("oh no"), "oh no")
+}
