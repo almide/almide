@@ -146,6 +146,9 @@ fn operation_name(op: i32) -> &'static str {
             63 => "fs.read_bytes_raw", 64 => "fs.read_bytes_raw_if_exists",
             73 => "panic",
             91..=103 => "the net core (net.tcp_*)",
+            // Interim embedded-only ops (#3620): WASI has neither Unix-domain
+            // sockets nor shared memory; they retire at ADR-0023 step 7.
+            104..=116 => "the unix-socket and shared-memory core (net.unix_* / net.shm_*)",
             _ => "unknown operation",
         })
 }
