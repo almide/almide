@@ -10,7 +10,7 @@
 
 /// Whether this compile renders the shared buffer (`ALMIDE_SHARED_STR=1`).
 pub fn shared_str_enabled() -> bool {
-    almide_base::env::flag("ALMIDE_SHARED_STR")
+    std::env::var_os("ALMIDE_SHARED_STR").map_or(true, |v| almide_base::env::is_on(&v))
 }
 
 /// The alias, the boundary conversion trait, the `AlmideConcat` trait and

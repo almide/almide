@@ -6,7 +6,7 @@
 /// by default; under `ALMIDE_SHARED_STR=1` the shared `AlmideStr` block,
 /// spliced in from `almide-str`.
 pub(crate) fn almide_string_alias() -> String {
-    if !almide_base::env::flag("ALMIDE_SHARED_STR") {
+    if !std::env::var_os("ALMIDE_SHARED_STR").map_or(true, |v| almide_base::env::is_on(&v)) {
         return "// ADR-0013 stage 2, step 1: the Almide String, as the v0 prelude spells it.\n\
                 type AlmideString = String;\n\n".to_string();
     }
