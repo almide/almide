@@ -1,0 +1,3 @@
+expects_code = "E002"
+expects_error = "undefined function 'bytes.heap_save'"
+hint_substring = "delete the call"

@@ -1,0 +1,4 @@
+fn main() -> Unit = {
+  let words = ["a", "b", "c"] |> list.map((w) => string.to_upper(w))
+  println(words |> list.join(","))
+}
