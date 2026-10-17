@@ -164,6 +164,28 @@ pub(super) const EFFECT_RECIPES: &[Recipe] = &[
     Recipe { func: "net.tcp_read_exact", size: "len", args: &[("stream", SOURCE_STREAM), ("len", "{n}")] },
     Recipe { func: "net.tcp_read_timeout", size: "", args: &[("stream", SOURCE_STREAM), ("len", "1024"), ("timeout_ms", "1000")] },
     Recipe { func: "net.tcp_available", size: "", args: &[("stream", SOURCE_STREAM)] },
+    // Unix sockets and shared-memory files (#3620): sockets in the sandbox
+    // (short relative names, removed first: a diamond's legs run in one
+    // project directory), the fixture's sink for sends. A fresh socket
+    // per step where the call takes or holds one; a socket a read takes from
+    // holds its bytes and its descriptor before the call, its peer closed.
+    Recipe { func: "net.unix_connect", size: "", args: &[("path", UNIX_SINK)] },
+    Recipe { func: "net.unix_listen", size: "", args: &[("path", "{ let _r: Result[Unit, String] = fs.remove(\"l${{i}}.sock\")\n  \"l${{i}}.sock\" }")] },
+    Recipe { func: "net.unix_accept", size: "", args: &[("listener", UNIX_PENDING_LISTENER)] },
+    Recipe { func: "net.unix_send", size: "data", args: &[("sock", UNIX_SINK_STREAM), ("data", SIZED_BYTES), ("fds", "[]")] },
+    Recipe { func: "net.unix_recv", size: "", args: &[("sock", UNIX_PENDING_SOCKET), ("max", "64")] },
+    Recipe { func: "net.unix_take_fds", size: "", args: &[("sock", UNIX_RECEIVED_SOCKET)] },
+    Recipe { func: "net.unix_poll", size: "", args: &[("fd", UNIX_READY_SOCKET), ("timeout_ms", "0")] },
+    Recipe { func: "net.unix_wait", size: "", args: &[("fds", "[net.unix_connect(env.get(\"XF_UNIX_SINK\") ?? \"\")!, net.shm_create(8)!]"), ("timeout_ms", "0")] },
+    Recipe { func: "net.unix_close", size: "", args: &[("fd", "net.shm_create({i} * 0 + 8)!")] },
+    Recipe { func: "net.shm_create", size: "", args: &[("size", "4096")] },
+    Recipe { func: "net.shm_resize", size: "", args: &[("fd", "net.shm_create(64)!"), ("size", "4096 + {i} % 2")] },
+    Recipe { func: "net.shm_write", size: "data", args: &[("fd", "net.shm_create(64)!"), ("offset", "0"), ("data", SIZED_BYTES)] },
+    Recipe {
+        func: "net.shm_read",
+        size: "len",
+        args: &[("fd", "{ let f = net.shm_create({n})!\n  net.shm_write(f, 0, bytes.from_list(list.range(0, {n}) |> list.map((i) => i % 251)))!\n  f }"), ("offset", "0"), ("len", "{n}")],
+    },
     // HTTP against the fixture: a response of n bytes, or n bytes echoed.
     Recipe { func: "http.get", size: "url", args: &[("url", BYTES_URL)] },
     Recipe { func: "http.get_bytes", size: "url", args: &[("url", BYTES_URL)] },
@@ -228,6 +250,12 @@ pub(super) fn stdin_for(func: &str, n: u64, k: u64) -> Option<(u64, u64)> {
 pub fn max_k(func: &str) -> Option<u64> {
     match func.split_once('.') {
         Some(("net", f)) if matches!(f, "tcp_connect" | "tcp_listen" | "tcp_accept" | "tcp_close" | "tcp_close_listener") => Some(64),
+        // A descriptor (or three) held per call (#3620).
+        Some(("net", f))
+            if matches!(f, "unix_connect" | "unix_listen" | "unix_accept" | "unix_recv" | "unix_take_fds" | "unix_close" | "shm_create") =>
+        {
+            Some(64)
+        }
         Some(("http", _)) => Some(256),
         // Each append grows the one file: 2k calls of n bytes at 16n.
         Some(("fs", "append")) => Some(256),
@@ -244,6 +272,17 @@ const FRESH_STREAM: &str = "net.tcp_connect(\"127.0.0.1\", int.parse(env.get(\"X
 const LISTENER: &str = "net.tcp_listen(\"127.0.0.1\", 0)!";
 const FRESH_LISTENER: &str = "net.tcp_listen(\"127.0.0.1\", {i} * 0)!";
 const PENDING_LISTENER: &str = "{ let l = net.tcp_listen(\"127.0.0.1\", {i} * 0)!\n  let _c = net.tcp_connect(\"127.0.0.1\", net.tcp_local_port(l)!)!\n  l }";
+const UNIX_SINK: &str = "(env.get(\"XF_UNIX_SINK\") ?? \"\")";
+const UNIX_SINK_STREAM: &str = "net.unix_connect(env.get(\"XF_UNIX_SINK\") ?? \"\")!";
+/// A listener with one connection pending, a fresh one per step.
+const UNIX_PENDING_LISTENER: &str = "{ let _r: Result[Unit, String] = fs.remove(\"a${{i}}.sock\")\n  let l = net.unix_listen(\"a${{i}}.sock\")!\n  let _c = net.unix_connect(\"a${{i}}.sock\")!\n  l }";
+/// A socket holding 11 bytes, its peer closed, a fresh one per step.
+const UNIX_PENDING_SOCKET: &str = "{ let _r: Result[Unit, String] = fs.remove(\"r${{i}}.sock\")\n  let l = net.unix_listen(\"r${{i}}.sock\")!\n  let c = net.unix_connect(\"r${{i}}.sock\")!\n  let s = net.unix_accept(l)!\n  net.unix_send(c, bytes.from_string(\"hello world\"), [])!\n  net.unix_close(c)!\n  net.unix_close(l)!\n  s }";
+/// A socket whose one descriptor has arrived and not been taken, a fresh one
+/// per step.
+const UNIX_RECEIVED_SOCKET: &str = "{ let _r: Result[Unit, String] = fs.remove(\"t${{i}}.sock\")\n  let l = net.unix_listen(\"t${{i}}.sock\")!\n  let c = net.unix_connect(\"t${{i}}.sock\")!\n  let s = net.unix_accept(l)!\n  let f = net.shm_create(8)!\n  net.unix_send(c, bytes.from_string(\"x\"), [f])!\n  let _got = net.unix_recv(s, 8)!\n  net.unix_close(c)!\n  net.unix_close(l)!\n  net.unix_close(f)!\n  s }";
+/// A socket with bytes waiting, so a poll answers at once.
+const UNIX_READY_SOCKET: &str = "{ let _r: Result[Unit, String] = fs.remove(\"p.sock\")\n  let l = net.unix_listen(\"p.sock\")!\n  let c = net.unix_connect(\"p.sock\")!\n  let s = net.unix_accept(l)!\n  net.unix_send(c, bytes.from_string(\"x\"), [])!\n  s }";
 const BYTES_URL: &str = "\"http://\" + (env.get(\"XF_HTTP\") ?? \"\") + \"/bytes/{n}\"";
 const ECHO_URL: &str = "\"http://\" + (env.get(\"XF_HTTP\") ?? \"\") + \"/echo\"";
 const BODY: &str = "string.repeat(\"a\", {n})";
