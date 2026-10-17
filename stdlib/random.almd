@@ -7,7 +7,7 @@
 @intrinsic("almide_rt_random_int")
 effect fn int(min: Int, max: Int) -> Int = _
 
-/// Random Float in [0, 1]; not crypto-grade.
+/// Random Float in [0, 1); not crypto-grade.
 @intrinsic("almide_rt_random_float")
 effect fn float() -> Float = _
 
