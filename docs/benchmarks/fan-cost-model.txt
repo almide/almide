@@ -274,10 +274,12 @@ wasm_worker_ns   = 5_000
 #     every sequential site once in 16 (the 1-in-4 tier caught 0.4 us
 #     elements once the crossover fell to ~0.6 us, at 12% of their offer on
 #     the AMD VM);
-#   - an estimate from a parallel offer within 2x of the crossover is checked
-#     by the next offer running sequentially (`ALMIDE_FAN_PROBE`): the
-#     elements of a parallel offer read slower than the same elements on one
-#     thread, and a site's first offer is parallel;
+#   - an estimate from a parallel offer within 2x of the crossover, or one
+#     that timed only the workers' first elements, is checked by the next
+#     offer running sequentially (`ALMIDE_FAN_PROBE`): the elements of a
+#     parallel offer read slower than the same elements on one thread, and a
+#     site's first offer is parallel and spawns the pool (0.4 us elements
+#     read 4.1 us on the AMD VM, and the site ran parallel for 8 offers);
 #   - a sequential site turns parallel only on two measurements in a row: one
 #     interrupted offer read above the crossover sent 0.42 us elements (0.58
 #     us crossover) parallel at ~9 us a time on the AMD VM.
