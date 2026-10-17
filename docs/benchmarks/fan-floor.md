@@ -137,3 +137,40 @@ Same runs, same probes; `develop` / `this` are the default (cost model) build of
 | spectralnorm 3000 | 72.9 | 71.6 | 109.6 | 105.2 |
 
 What is left: `nest` (#2594, the effect `fan.map` is sequential) and the wasm leg, whose two `fan { }` arms run one after another.
+
+## The sequential loop: a remainder by a literal (2026-10-17)
+
+From 10000 iterations up the fastest column was Go's, because Go's sequential loop was ~10% faster than Rust's and Almide's (the parallel runtimes split 10 elements over 8 threads the same way, so the loop decides the row). The loop is `acc = (acc * 31 + j) % 1000003`: one dependent chain per iteration, latency-bound. Two things lengthened Almide's chain:
+
+- rustc lowers `checked_rem` by a constant to a magic-number multiply whose sign fix sits on the chain (shift the quotient estimate, add its sign bit, multiply back), and it unrolls the loop with the induction offsets (`j + 1`, `j + 2`) on the chain too;
+- with the native build's default `x86-64-v3`, an i128 multiply written in Rust becomes an unsigned `mulx` plus sign fix-ups, not the signed one-operand `imul`.
+
+`x % <literal>` on `Int` (a divisor of 3 or more that is not a power of two) now renders as `almide_rem_const::<D>(x)` (crates/almide-codegen/src/prelude_rem.rs): the same truncated remainder, the quotient from the magic multiply on the signed `imul`, and the sign correction applied to the remainder from the dividend's sign, beside the multiply. A literal divisor of 3 or more is never 0 or -1, so the call cannot abort, as `%` by such a literal never did. A 90M-step chain (`x86-64-v3`, two runs each) measured 290-292 ms against rustc's 364-372 ms and Go's 310 ms on the Intel VM, and 370-371 ms against 454-457 ms and 400-420 ms on the AMD one. The remainder is checked against `%` on 60,000 dividends for 17 divisors and at the multiples of every divisor below 2000 (`prelude_rem.rs` tests).
+
+The probes' sequential column, same method as the tables above (µs per offer, min of 7, implementations interleaved); `develop` is develop at 9e4fbcb2a with `ALMIDE_FAN_SEQUENTIAL=1`, `this` the same with this change:
+
+### GCE c4-standard-8, Intel Xeon Platinum 8581C
+
+| iters | develop seq | this seq | Rayon seq | Go seq | this / fastest other seq |
+|---:|---:|---:|---:|---:|---:|
+| 0 | 0.1 | 0.0 | 0.0 | 0.1 | — |
+| 100 | 4.0 | 3.2 | 3.8 | 3.5 | 0.92x |
+| 300 | 12.4 | 10.0 | 11.6 | 10.6 | 0.94x |
+| 1000 | 41.6 | 33.2 | 39.4 | 35.6 | 0.93x |
+| 3000 | 122.6 | 98.5 | 116.2 | 106.9 | 0.92x |
+| 10000 | 402.0 | 326.5 | 383.9 | 349.2 | 0.93x |
+| 30000 | 1193.8 | 961.5 | 1138.8 | 1031.9 | 0.93x |
+
+### GCE n2d-standard-8, AMD EPYC 7B13
+
+| iters | develop seq | this seq | Rayon seq | Go seq | this / fastest other seq |
+|---:|---:|---:|---:|---:|---:|
+| 0 | 0.1 | 0.0 | 0.0 | 0.3 | — |
+| 100 | 5.3 | 4.2 | 5.0 | 4.5 | 0.94x |
+| 300 | 15.2 | 12.5 | 14.8 | 13.8 | 0.91x |
+| 1000 | 50.2 | 41.7 | 49.4 | 45.3 | 0.92x |
+| 3000 | 150.5 | 125.1 | 148.9 | 135.4 | 0.92x |
+| 10000 | 502.5 | 414.9 | 494.6 | 445.5 | 0.93x |
+| 30000 | 1514.5 | 1252.5 | 1482.3 | 1345.2 | 0.93x |
+
+Almide's sequential loop is now 6-9% faster than the fastest other sequential loop at every iteration count on both machines, and 17-21% faster than before. The parallel rows move with it (the elements are this loop); the parallel runtime itself is unchanged here.
