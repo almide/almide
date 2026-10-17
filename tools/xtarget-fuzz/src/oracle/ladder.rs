@@ -5,7 +5,7 @@ use std::path::Path;
 
 use almide::fmt::format_program;
 
-use super::runner::Toolchain;
+use super::runner::{ProcResult, Toolchain};
 use crate::findings::{quoted_excerpt, SUMMARY_SIDE_CAP};
 use super::ReferenceOracle;
 
@@ -361,6 +361,10 @@ pub fn run_ladder(
 
     // ── Rung (e): wasm run + differential compare ──
     let wasm = tc.run_wasm(wasm_out);
+    // An embedded-lane run compiles too: its honest wall is a wall here.
+    if let Some(reason) = embedded_wall(wasm_out, &wasm) {
+        return Outcome::Walled { reason };
+    }
     if wasm.spawn_failed {
         // wasmtime not installed ⇒ we cannot do the differential compare.
         return Outcome::Skipped {
@@ -758,6 +762,17 @@ fn first_line_diff(expected: &str, actual: &str) -> String {
         expected.lines().count(),
         actual.lines().count()
     )
+}
+
+/// The `wall:` reason of a failed embedded-lane run (ADR-0027 D1), whose
+/// `almide run --target wasm` refuses a program no wasm route serves.
+fn embedded_wall(art: &Path, run: &ProcResult) -> Option<String> {
+    if run.success() || !super::runner::is_embedded_artifact(art) {
+        return None;
+    }
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    let line = stderr.lines().map(str::trim).find(|l| l.starts_with(almide::WASM_WALL_MARKER))?;
+    Some(line[almide::WASM_WALL_MARKER.len()..].to_string())
 }
 
 #[cfg(test)]

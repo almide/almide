@@ -47,6 +47,11 @@ struct Ctx {
     /// The largest k this function's probes may run: [`MAX_K`], or less for
     /// a call that holds a socket per call (`effect_recipes::max_k`).
     max_k: u64,
+    /// The calibration targets' multiplier: 10 for a function only the
+    /// embedded host serves, whose every run compiles the program first. The
+    /// compile is the same in both programs and cancels, but its run-to-run
+    /// jitter does not, so the call's own work must stand further above it.
+    calibrate_scale: f64,
 }
 
 #[derive(Clone, Copy)]
@@ -73,6 +78,7 @@ pub fn cmd_inspect(args: &[String]) {
         dir,
         icount,
         max_k: crate::generator::inspect_max_k(&name).unwrap_or(MAX_K),
+        calibrate_scale: if crate::generator::needs_embedded(&format!("{name}(")) { 10.0 } else { 1.0 },
     };
     let engine = Engine::with_family(&repo, Family::Synthesis);
     let target = engine.inspect_target(&name).unwrap_or_else(|e| {
@@ -611,24 +617,40 @@ fn diamond(ctx: &Ctx, t: &Target, n: u64) -> String {
     if !t.ret_is_observable() {
         return "SKIP: the return type is not printable".into();
     }
-    let project = t.diamond_project(n.min(64));
+    let projects = if t.diamond_runs_paths_alone() { t.diamond_path_projects(n.min(64)) } else { vec![t.diamond_project(n.min(64))] };
     let root = ctx.dir.join("diamond");
-    let Ok(entry) = project.write_to(&root) else { return "SKIP: scratch write failed".into() };
-    // The project resolves from its own directory, so the run stays there;
-    // it still gets the sandbox's argv, env and stdin.
-    let run = |wasm: bool| {
-        let world = World::for_program(&ctx.dir, &std::fs::read_to_string(&entry).unwrap_or_default()).map_err(std::io::Error::other)?;
-        let mut c = Command::new(&ctx.almide);
-        c.arg("run").arg(&entry);
-        if wasm {
-            c.args(["--target", "wasm"]);
+    let mut legs = [Vec::new(), Vec::new()];
+    for project in projects {
+        let Ok(entry) = project.write_to(&root) else { return "SKIP: scratch write failed".into() };
+        for (i, wasm) in [false, true].into_iter().enumerate() {
+            let Ok(out) = run_diamond(ctx, &root, &entry, wasm) else { return "SKIP: could not run almide".into() };
+            legs[i].push(out);
         }
-        c.arg("--").args(sandbox::ARGS);
-        world.enter(&mut c);
-        c.current_dir(root.join("app")).output()
-    };
-    let (Ok(nat), Ok(was)) = (run(false), run(true)) else { return "SKIP: could not run almide".into() };
+    }
+    let [nat, was] = legs.map(joined);
     diamond_verdict(&nat, &was)
+}
+
+/// One diamond project's run. The project resolves from its own directory,
+/// so the run stays there; it still gets the sandbox's argv, env and stdin.
+fn run_diamond(ctx: &Ctx, root: &Path, entry: &Path, wasm: bool) -> std::io::Result<std::process::Output> {
+    let world = World::for_program(&ctx.dir, &std::fs::read_to_string(entry).unwrap_or_default()).map_err(std::io::Error::other)?;
+    let mut c = Command::new(&ctx.almide);
+    c.arg("run").arg(entry);
+    if wasm {
+        c.args(["--target", "wasm"]);
+    }
+    c.arg("--").args(sandbox::ARGS);
+    world.enter(&mut c);
+    c.current_dir(root.join("app")).output()
+}
+
+/// Paths run one project each, read as one run: their outputs in order,
+/// failing as the first failing one did.
+fn joined(outs: Vec<std::process::Output>) -> std::process::Output {
+    let mut all = outs.iter().find(|o| !o.status.success()).unwrap_or(&outs[0]).clone();
+    all.stdout = outs.iter().flat_map(|o| o.stdout.clone()).collect();
+    all
 }
 
 /// Criterion 5's verdict from the diamond project's run on each leg. Every
@@ -705,7 +727,7 @@ fn judge_counted(
         loop {
             let (p, b) = marginal(n, k);
             let d = counted_delta(ctx, &p, &b, leg).map_err(|e| format!("{label} {} calibrating k={k} at n={n}: {e}", leg_tag(leg)))?;
-            if counted_calibrated(&d) || k >= ctx.max_k {
+            if counted_calibrated(&d, ctx.calibrate_scale) || k >= ctx.max_k {
                 return Ok(k);
             }
             k = (k * 4).min(ctx.max_k);
@@ -781,14 +803,14 @@ fn leg_tag(leg: Leg) -> &'static str {
 /// (set.insert / set.union's call shape on GCE, 2026-10-14). 2e8 bytes is
 /// about 20 ms of copying on c4-standard-4, the same order as 2e7
 /// instructions.
-fn counted_calibrated(d: &Delta) -> bool {
+fn counted_calibrated(d: &Delta, scale: f64) -> bool {
     const CALIBRATE_INSTRUCTIONS: f64 = 2.0e7;
     const CALIBRATE_BYTES: f64 = 2.0e8;
     // A call whose work is the kernel's (an effect function's write) retires
     // few user instructions: k stops on the wall clock too, before a run
     // reaches the cap. Only k's growth reads it; the fit stays on the counts.
     const CALIBRATE_WALL: Duration = Duration::from_secs(2);
-    d.instructions >= CALIBRATE_INSTRUCTIONS || d.moved >= CALIBRATE_BYTES || d.wall >= CALIBRATE_WALL
+    d.instructions >= CALIBRATE_INSTRUCTIONS * scale || d.moved >= CALIBRATE_BYTES * scale || d.wall >= CALIBRATE_WALL
 }
 
 /// The cheapest class whose `a + c·f(n)` least-squares fit leaves every
@@ -1067,13 +1089,14 @@ mod run_tests {
     /// call shape on GCE).
     #[test]
     fn calibration_stops_on_bytes_moved_as_well_as_instructions() {
+        let counted_calibrated_t = |d: &Delta| counted_calibrated(d, 1.0);
         let d = |instructions: f64, moved: f64| Delta { instructions, moved, wall: Duration::ZERO };
-        assert!(!counted_calibrated(&d(1e3, 1e3)));
-        assert!(counted_calibrated(&d(3e7, 0.0)));
-        assert!(counted_calibrated(&d(1e3, 3e8)));
+        assert!(!counted_calibrated_t(&d(1e3, 1e3)));
+        assert!(counted_calibrated_t(&d(3e7, 0.0)));
+        assert!(counted_calibrated_t(&d(1e3, 3e8)));
         // fs.write at n = 20000 calibrated to k = 65536 on instructions and
         // timed out at 60 s: its bytes go to the kernel.
-        assert!(counted_calibrated(&Delta { instructions: 1e3, moved: 0.0, wall: Duration::from_secs(3) }));
+        assert!(counted_calibrated_t(&Delta { instructions: 1e3, moved: 0.0, wall: Duration::from_secs(3) }));
     }
 }
 

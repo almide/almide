@@ -15,11 +15,12 @@ macro_rules! file_of_n_lines {
     };
 }
 
-/// `d/`, holding n / 100 + 3 one-byte files: every file is a host call to
+/// `d/`, holding n / 100 + 3 one-byte files of one name width (a sort over
+/// names of mixed widths moves a mixed number of bytes): every file is a host call to
 /// create, and 16n of them (320000) took the run past its cap.
 macro_rules! dir_of_n_files {
     () => {
-        "{ fs.mkdir_p(\"d\")!\n  for j in list.range(0, {n} / 100 + 3) { fs.write(\"d/f${j}\", \"x\")! }\n  \"d\" }"
+        "{ fs.mkdir_p(\"d\")!\n  for j in list.range(0, {n} / 100 + 3) { fs.write(\"d/f${100000 + j}\", \"x\")! }\n  \"d\" }"
     };
 }
 
@@ -51,7 +52,8 @@ pub(super) const EFFECT_RECIPES: &[Recipe] = &[
     Recipe { func: "fs.exists", size: "path", args: FILE_N },
     Recipe { func: "fs.is_file", size: "path", args: FILE_N },
     Recipe { func: "fs.file_size", size: "path", args: FILE_N },
-    Recipe { func: "fs.is_symlink", size: "", args: &[("path", "\"link.txt\"")] },
+    // The seeded link, reached from a diamond's project directory too.
+    Recipe { func: "fs.is_symlink", size: "", args: &[("path", "(env.get(\"XF_SANDBOX\") ?? \".\") + \"/link.txt\"")] },
     // A directory of n files.
     Recipe { func: "fs.is_dir", size: "path", args: &[("path", dir_of_n_files!())] },
     Recipe { func: "fs.list_dir", size: "path", args: &[("path", dir_of_n_files!())] },
@@ -102,10 +104,10 @@ pub(super) const EFFECT_RECIPES: &[Recipe] = &[
     // Processes from the fixed command set (ADR-0027 D4), on the embedded
     // host: n / 10 arguments echoed back, or n / 10 lines through cat.
     Recipe { func: "process.exec", size: "args", args: &[("cmd", ECHO), ("args", ECHO_ARGS)] },
-    Recipe { func: "process.exec_in", size: "args", args: &[("dir", "\"sub\""), ("cmd", ECHO), ("args", ECHO_ARGS)] },
+    Recipe { func: "process.exec_in", size: "args", args: &[("dir", MADE_DIR), ("cmd", ECHO), ("args", ECHO_ARGS)] },
     Recipe { func: "process.exec_attached", size: "args", args: &[("cmd", ECHO), ("args", ECHO_ARGS)] },
     Recipe { func: "process.run", size: "args", args: &[("cmd", ECHO), ("args", ECHO_ARGS)] },
-    Recipe { func: "process.run_in", size: "args", args: &[("dir", "\"sub\""), ("cmd", ECHO), ("args", ECHO_ARGS)] },
+    Recipe { func: "process.run_in", size: "args", args: &[("dir", MADE_DIR), ("cmd", ECHO), ("args", ECHO_ARGS)] },
     Recipe {
         func: "process.exec_with_stdin",
         size: "input",
@@ -139,9 +141,12 @@ pub(super) const EFFECT_RECIPES: &[Recipe] = &[
     Recipe { func: "net.tcp_is_open", size: "", args: &[("stream", SINK_STREAM)] },
     Recipe { func: "net.tcp_set_timeout", size: "", args: &[("stream", SINK_STREAM), ("timeout_ms", "1000")] },
     Recipe { func: "net.tcp_write", size: "data", args: &[("stream", SINK_STREAM), ("data", "bytes.from_list(list.range(0, {n}) |> list.map((i) => i % 251))")] },
-    Recipe { func: "net.tcp_read", size: "len", args: &[("stream", SOURCE_STREAM), ("len", "{n}")] },
+    // How much of the source has arrived bounds what a read returns, and
+    // that is the network's timing: a read no longer than one of the
+    // source's writes always fills, so its cost is fixed.
+    Recipe { func: "net.tcp_read", size: "", args: &[("stream", SOURCE_STREAM), ("len", "1024")] },
     Recipe { func: "net.tcp_read_exact", size: "len", args: &[("stream", SOURCE_STREAM), ("len", "{n}")] },
-    Recipe { func: "net.tcp_read_timeout", size: "len", args: &[("stream", SOURCE_STREAM), ("len", "{n}"), ("timeout_ms", "1000")] },
+    Recipe { func: "net.tcp_read_timeout", size: "", args: &[("stream", SOURCE_STREAM), ("len", "1024"), ("timeout_ms", "1000")] },
     Recipe { func: "net.tcp_available", size: "", args: &[("stream", SOURCE_STREAM)] },
     // HTTP against the fixture: a response of n bytes, or n bytes echoed.
     Recipe { func: "http.get", size: "url", args: &[("url", BYTES_URL)] },
@@ -213,5 +218,8 @@ const BYTES_URL: &str = "\"http://\" + (env.get(\"XF_HTTP\") ?? \"\") + \"/bytes
 const ECHO_URL: &str = "\"http://\" + (env.get(\"XF_HTTP\") ?? \"\") + \"/echo\"";
 const BODY: &str = "string.repeat(\"a\", {n})";
 
+/// A directory the probe makes, so it exists in a diamond's project too.
+const MADE_DIR: &str = "{ fs.mkdir_p(\"pdir\")!\n  \"pdir\" }";
+
 const ECHO: &str = "\"/bin/echo\"";
-const ECHO_ARGS: &str = "list.range(0, {n} / 10) |> list.map((i) => \"aé\")";
+const ECHO_ARGS: &str = "list.range(0, {n} / 100) |> list.map((i) => \"aé\")";

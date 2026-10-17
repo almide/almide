@@ -423,9 +423,12 @@ mod availability_tests {
     #[test]
     fn native_only_functions_are_left_out_of_the_catalogue() {
         let unavailable = wasm_unavailable(TARGET_AVAILABILITY);
-        assert!(unavailable.contains("matrix.linear_q1_0_row_no_bias"));
+        assert!(unavailable.contains("http.anthropic_streaming_call"));
         let cat = build();
-        assert!(!cat.iter().any(|s| unavailable.contains(&format!("{}.{}", s.module, s.func))));
+        // A row the embedded host serves stays, its wasm leg run there.
+        let unserved = |n: &String| unavailable.contains(n) && !embedded_only().contains(n);
+        assert!(!cat.iter().any(|s| unserved(&format!("{}.{}", s.module, s.func))));
+        assert!(!cat.iter().any(|s| s.module == "http" && s.func == "anthropic_streaming_call"), "a row no wasm leg serves is left out");
         assert!(cat.iter().any(|s| s.module == "matrix" && s.func == "dot_row"), "a served matrix fn stays");
     }
 

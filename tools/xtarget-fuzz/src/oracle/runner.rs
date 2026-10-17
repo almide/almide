@@ -434,6 +434,11 @@ fn project_root(file: &Path) -> Option<PathBuf> {
 /// hung program is killed promptly, large enough not to busy-spin.
 const POLL_INTERVAL_MS: u64 = 10;
 
+/// Whether `wasm` is an embedded-lane artifact (it names the checked source).
+pub fn is_embedded_artifact(wasm: &Path) -> bool {
+    std::fs::read(wasm).map(|b| b.starts_with(EMBEDDED_LEG.as_bytes())).unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
