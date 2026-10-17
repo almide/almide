@@ -601,8 +601,44 @@ def private_imports(path: str) -> list:
     return found
 
 
+# A fn callable only directly in a test block (E099 elsewhere), probed as a
+# test file through the wasm test lane instead of a program with a `main`:
+# the probe each leg would otherwise build is ill-typed by design.
+TEST_ONLY_PROBES = {
+    # ADR-0029: the closure runs in a fresh instance, which the embedded host
+    # starts and a stock runtime cannot (the stock runner's declared limit).
+    "testing.assert_aborts": 'import testing\n\ntest "probe" {\n  testing.assert_aborts("PANIC: probe", () => panic("probe"))\n}\n',
+}
+
+
+def measure_test_only(prog: str, leg: str, tmp: str, env: dict):
+    """`almide test --target wasm` over the test-file probe: the default
+    (embedded) runner for the structural and embedded legs, the stock
+    `wasmtime` runner for stock-p1. A pass is service; a SKIP or a failure
+    is the leg's wall, with the runner's own line as the reason."""
+    src = os.path.join(tmp, "probe_test.almd")
+    with open(src, "w") as fh:
+        fh.write(prog)
+    run_env = dict(env)
+    if leg == "stock-p1":
+        run_env["ALMIDE_TEST_WASM_RUNNER"] = "wasmtime"
+    r = subprocess.run(
+        [ALMIDE, "test", src, "--target", "wasm"],
+        capture_output=True, text=True, env=run_env, cwd=tmp,
+        stdin=subprocess.DEVNULL, timeout=120,
+    )
+    combined = r.stderr + r.stdout
+    if r.returncode == 0 and "tests passed" in combined:
+        return "ok", ""
+    first = next((l for l in combined.splitlines() if l.startswith(("SKIP ", "WALL ", "FAIL "))), None)
+    return "wall", (first or first_error_line(combined))[:200]
+
+
 def measure(mod, f, types, leg, tmp, env):
     """The verdict for one fn on one leg: (status, detail)."""
+    test_only = TEST_ONLY_PROBES.get(f"{mod}.{f['name']}")
+    if test_only is not None:
+        return measure_test_only(test_only, leg, tmp, env)
     try:
         params, ret = resolve_unknowns(mod, f)
     except Unsynth as e:
