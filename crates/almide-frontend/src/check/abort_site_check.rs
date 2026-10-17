@@ -221,7 +221,9 @@ fn abort_site_diagnostic(f: AbortFinding, file: Option<String>) -> Diagnostic {
             span,
         ),
     };
-    let mut d = Diagnostic::error(message, hint, "a call of testing.assert_aborts").with_code(code);
+    // Spelled out per code: the coverage gates read `with_code("E…")` literals.
+    let d = Diagnostic::error(message, hint, "a call of testing.assert_aborts");
+    let mut d = if code == "E098" { d.with_code("E098") } else { d.with_code("E099") };
     d.file = file;
     if let Some(s) = span {
         d.line = Some(s.line);
