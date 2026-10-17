@@ -29,6 +29,8 @@ use crate::generator::{
 };
 use crate::oracle::sandbox::{self, World};
 
+mod serve;
+
 const NOISE_FLOOR: Duration = Duration::from_millis(60);
 const CALIBRATE_TARGET: Duration = Duration::from_millis(250);
 const MAX_K: u64 = 1 << 22;
@@ -81,6 +83,11 @@ pub fn cmd_inspect(args: &[String]) {
         calibrate_scale: if crate::generator::needs_embedded(&format!("{name}(")) { 10.0 } else { 1.0 },
     };
     let engine = Engine::with_family(&repo, Family::Synthesis);
+    // A function that serves until stopped is inspected as sessions the
+    // harness drives (`inspect/serve.rs`), not as calls a program makes.
+    if serve::SERVED.contains(&name.as_str()) {
+        return serve::inspect(&mut ctx, &engine, &name, args);
+    }
     let target = engine.inspect_target(&name).unwrap_or_else(|e| {
         eprintln!("{e}");
         std::process::exit(2);
@@ -410,7 +417,10 @@ fn build_as(ctx: &Ctx, src: &str, leg: Leg, canonical: bool) -> Result<PathBuf, 
     // A program only the embedded host serves (ADR-0027 D1) is built and run
     // there in one step: its artifact is the source, under a name that
     // carries the allocator choice (`run_cmd`).
-    if matches!(leg, Leg::Wasm) && crate::generator::needs_embedded(src) {
+    // A served probe's wasm leg is the embedded lane too: the counted judge
+    // has two legs, and the stock `wasmtime serve` leg is compared in the
+    // served parity campaign (`serve::parity`).
+    if matches!(leg, Leg::Wasm) && (crate::generator::needs_embedded(src) || serve_plan(src).is_some()) {
         let art = file.with_extension(if canonical { "canonical.embedded.almd" } else { "embedded.almd" });
         std::fs::write(&art, src).map_err(|e| e.to_string())?;
         return Ok(art);
@@ -449,6 +459,11 @@ fn source_of(art: &Path) -> String {
     std::fs::read_to_string(art.with_file_name(format!("{stem}.almd"))).unwrap_or_default()
 }
 
+/// The session plan of a served probe (`// @xf-serve ...`), else None.
+fn serve_plan(src: &str) -> Option<crate::oracle::serve::Plan> {
+    crate::oracle::serve::plan_of(src)
+}
+
 /// An artifact `build_as` left as source for the embedded host.
 fn is_embedded(art: &Path) -> bool {
     art.to_string_lossy().ends_with(".embedded.almd")
@@ -468,18 +483,34 @@ fn embedded_cmd(ctx: &Ctx, art: &Path) -> Command {
 }
 
 fn run_artifact(ctx: &Ctx, art: &Path, leg: Leg) -> Result<String, String> {
-    let world = World::for_program(&ctx.dir, &source_of(art))?;
-    let mut cmd = match leg {
-        _ if is_embedded(art) => embedded_cmd(ctx, art),
-        Leg::Native => Command::new(art),
-        Leg::Wasm => {
-            let mut c = Command::new(&ctx.wasmtime);
-            c.arg("run").args(world.wasmtime_args()).arg(art);
-            c
-        }
+    let src = source_of(art);
+    let world = World::for_program(&ctx.dir, &src)?;
+    let make = || {
+        let mut cmd = match leg {
+            _ if is_embedded(art) => embedded_cmd(ctx, art),
+            Leg::Native => Command::new(art),
+            Leg::Wasm => {
+                let mut c = Command::new(&ctx.wasmtime);
+                c.arg("run").args(world.wasmtime_args()).arg(art);
+                c
+            }
+        };
+        cmd.args(sandbox::ARGS);
+        world.enter(&mut cmd);
+        cmd
     };
-    cmd.args(sandbox::ARGS);
-    world.enter(&mut cmd);
+    // A served probe runs as a session: the harness is its client, and its
+    // output is the transcript (`oracle/serve.rs`).
+    if let Some(plan) = serve_plan(&src) {
+        let s = crate::oracle::serve::drive_socket(&mut make(), &plan, false)?;
+        // The SIGTERM drains and returns from serve (ADR-0020 §5.6): any
+        // other exit is a failed run.
+        if !s.output.status.success() {
+            return Err(format!("after SIGTERM: {}", run_failure(&s.output)));
+        }
+        return Ok(s.transcript);
+    }
+    let mut cmd = make();
     let child = cmd
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -1026,12 +1057,22 @@ fn run_counted(ctx: &Ctx, art: &Path, leg: Leg) -> Result<(String, Counts), Stri
     };
     cmd.args(sandbox::ARGS);
     world.enter(&mut cmd);
-    let child = cmd
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .map_err(|e| e.to_string())?;
-    let (out, wall) = wait_capped(child, RUN_CAP)?;
+    let (out, wall) = match serve_plan(&source_of(art)) {
+        // A served probe: the session's transcript is its output, and the
+        // SIGTERM goes to perf's child, the server, so perf reports.
+        Some(plan) => {
+            let s = crate::oracle::serve::drive_socket(&mut cmd, &plan, true)?;
+            (std::process::Output { stdout: s.transcript.into_bytes(), ..s.output }, s.wall)
+        }
+        None => {
+            let child = cmd
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .map_err(|e| e.to_string())?;
+            wait_capped(child, RUN_CAP)?
+        }
+    };
     if !out.status.success() {
         return Err(run_failure(&out));
     }
