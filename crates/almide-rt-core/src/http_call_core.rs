@@ -51,9 +51,15 @@ pub fn http_stream_incomplete_utf8_tail(b: &[u8]) -> usize {
 // default of the calls that take none. Plain `request_stream` is such a call,
 // and it runs here too, as a CLASSIC call (`http_call_spawn_classic`): its
 // one bound is the client read timeout (ALMIDE_HTTP_TIMEOUT_SECS, 120 s by
-// default) between arrivals, which fires as C-328's timeout class, and a read
-// that fails once the head is in ends the body — the streaming client's
-// behaviour before it shared this core, kept on every leg. A finished call (answered, failed, timed out or
+// default) between arrivals, which fires as C-328's timeout class.
+//
+// A body is complete only by its own framing: the Content-Length reached, the
+// terminal `0` chunk read, or — for a body framed by the close — the close.
+// A read that fails, or a close that comes, before that is C-328's protocol
+// class (`malformed or incomplete response from "<url>"`), the text the
+// buffered client gives a truncated response, never a silent `ok` with part of
+// the body (owner decision 2026-10-17: Go, Python requests, curl, reqwest and
+// fetch all report it). What arrived before the cut has been delivered. A finished call (answered, failed, timed out or
 // cancelled) has its socket shut down, so the server sees the close at once.
 // Dropping the last copy of the handle cancels it.
 
@@ -406,18 +412,15 @@ fn http_call_pump<S: AlmideHttpCallSock>(
                 if e.kind() == std::io::ErrorKind::UnexpectedEof && matches!(framing, Some(HttpCallFraming::UntilClose)) {
                     return Ok(());
                 }
-                // A classic call's body ends at a failed read once the head
-                // is in (see the header).
-                if sh.classic && framing.is_some() {
-                    return Ok(());
-                }
                 return Err(http_call_io_error(sh, url, &e));
             }
         };
         if n == 0 {
+            // A close before the framing is complete is a truncated body (see
+            // the header); only a body framed by the close ends here whole.
             return match framing {
-                None => Err(http_error_text(HttpErrorClass::Protocol, url)),
-                Some(_) => Ok(()),
+                Some(HttpCallFraming::UntilClose) => Ok(()),
+                _ => Err(http_error_text(HttpErrorClass::Protocol, url)),
             };
         }
         raw.extend_from_slice(&buf[..n]);
