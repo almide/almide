@@ -387,50 +387,44 @@ issue = "#1423"
 
 [[unavailable]]
 fn = "http.get_response"
-legs = ["stock-p1", "embedded"]
+legs = ["stock-p1"]
 class = "pending-port"
-reason-embedded = "the full-response client is served by the WASI 0.3 component's wasi:http shim (op 65, ADR-0023 step 4); the embedded host gets it when it runs the component (step 7) — run natively, or build with ALMIDE_COMPONENT_P3=1 `--component` and run on wasmtime 46+ with `-S http`"
-reason-stock-p1 = "the stock p1 artifact has no http import; the WASI 0.3 component serves the full-response client (op 65, ADR-0023 step 4) — build with ALMIDE_COMPONENT_P3=1 `--component` and run on wasmtime 46+ with `-S http`, or run natively"
+reason = "the stock p1 artifact has no http import; the WASI 0.3 component serves the full-response client (op 65, ADR-0023 step 4), and `almide run --target wasm` runs that component on the embedded host (step 7) — build with ALMIDE_COMPONENT_P3=1 `--component` and run on wasmtime 46+ with `-S http`, or run natively; the default build becomes the component at step 9"
 issue = "#1710"
 
 [[unavailable]]
 fn = "http.post_response"
-legs = ["stock-p1", "embedded"]
+legs = ["stock-p1"]
 class = "pending-port"
-reason-embedded = "the full-response client is served by the WASI 0.3 component's wasi:http shim (op 65, ADR-0023 step 4); the embedded host gets it when it runs the component (step 7) — run natively, or build with ALMIDE_COMPONENT_P3=1 `--component` and run on wasmtime 46+ with `-S http`"
-reason-stock-p1 = "the stock p1 artifact has no http import; the WASI 0.3 component serves the full-response client (op 65, ADR-0023 step 4) — build with ALMIDE_COMPONENT_P3=1 `--component` and run on wasmtime 46+ with `-S http`, or run natively"
+reason = "the stock p1 artifact has no http import; the WASI 0.3 component serves the full-response client (op 65, ADR-0023 step 4), and `almide run --target wasm` runs that component on the embedded host (step 7) — build with ALMIDE_COMPONENT_P3=1 `--component` and run on wasmtime 46+ with `-S http`, or run natively; the default build becomes the component at step 9"
 issue = "#1710"
 
 [[unavailable]]
 fn = "http.put_response"
-legs = ["stock-p1", "embedded"]
+legs = ["stock-p1"]
 class = "pending-port"
-reason-embedded = "the full-response client is served by the WASI 0.3 component's wasi:http shim (op 65, ADR-0023 step 4); the embedded host gets it when it runs the component (step 7) — run natively, or build with ALMIDE_COMPONENT_P3=1 `--component` and run on wasmtime 46+ with `-S http`"
-reason-stock-p1 = "the stock p1 artifact has no http import; the WASI 0.3 component serves the full-response client (op 65, ADR-0023 step 4) — build with ALMIDE_COMPONENT_P3=1 `--component` and run on wasmtime 46+ with `-S http`, or run natively"
+reason = "the stock p1 artifact has no http import; the WASI 0.3 component serves the full-response client (op 65, ADR-0023 step 4), and `almide run --target wasm` runs that component on the embedded host (step 7) — build with ALMIDE_COMPONENT_P3=1 `--component` and run on wasmtime 46+ with `-S http`, or run natively; the default build becomes the component at step 9"
 issue = "#1710"
 
 [[unavailable]]
 fn = "http.patch_response"
-legs = ["stock-p1", "embedded"]
+legs = ["stock-p1"]
 class = "pending-port"
-reason-embedded = "the full-response client is served by the WASI 0.3 component's wasi:http shim (op 65, ADR-0023 step 4); the embedded host gets it when it runs the component (step 7) — run natively, or build with ALMIDE_COMPONENT_P3=1 `--component` and run on wasmtime 46+ with `-S http`"
-reason-stock-p1 = "the stock p1 artifact has no http import; the WASI 0.3 component serves the full-response client (op 65, ADR-0023 step 4) — build with ALMIDE_COMPONENT_P3=1 `--component` and run on wasmtime 46+ with `-S http`, or run natively"
+reason = "the stock p1 artifact has no http import; the WASI 0.3 component serves the full-response client (op 65, ADR-0023 step 4), and `almide run --target wasm` runs that component on the embedded host (step 7) — build with ALMIDE_COMPONENT_P3=1 `--component` and run on wasmtime 46+ with `-S http`, or run natively; the default build becomes the component at step 9"
 issue = "#1710"
 
 [[unavailable]]
 fn = "http.delete_response"
-legs = ["stock-p1", "embedded"]
+legs = ["stock-p1"]
 class = "pending-port"
-reason-embedded = "the full-response client is served by the WASI 0.3 component's wasi:http shim (op 65, ADR-0023 step 4); the embedded host gets it when it runs the component (step 7) — run natively, or build with ALMIDE_COMPONENT_P3=1 `--component` and run on wasmtime 46+ with `-S http`"
-reason-stock-p1 = "the stock p1 artifact has no http import; the WASI 0.3 component serves the full-response client (op 65, ADR-0023 step 4) — build with ALMIDE_COMPONENT_P3=1 `--component` and run on wasmtime 46+ with `-S http`, or run natively"
+reason = "the stock p1 artifact has no http import; the WASI 0.3 component serves the full-response client (op 65, ADR-0023 step 4), and `almide run --target wasm` runs that component on the embedded host (step 7) — build with ALMIDE_COMPONENT_P3=1 `--component` and run on wasmtime 46+ with `-S http`, or run natively; the default build becomes the component at step 9"
 issue = "#1710"
 
 [[unavailable]]
 fn = "http.request_response"
-legs = ["stock-p1", "embedded"]
+legs = ["stock-p1"]
 class = "pending-port"
-reason-embedded = "the full-response client is served by the WASI 0.3 component's wasi:http shim (op 65, ADR-0023 step 4); the embedded host gets it when it runs the component (step 7) — run natively, or build with ALMIDE_COMPONENT_P3=1 `--component` and run on wasmtime 46+ with `-S http`"
-reason-stock-p1 = "the stock p1 artifact has no http import; the WASI 0.3 component serves the full-response client (op 65, ADR-0023 step 4) — build with ALMIDE_COMPONENT_P3=1 `--component` and run on wasmtime 46+ with `-S http`, or run natively"
+reason = "the stock p1 artifact has no http import; the WASI 0.3 component serves the full-response client (op 65, ADR-0023 step 4), and `almide run --target wasm` runs that component on the embedded host (step 7) — build with ALMIDE_COMPONENT_P3=1 `--component` and run on wasmtime 46+ with `-S http`, or run natively; the default build becomes the component at step 9"
 issue = "#1710"
 
 [[unavailable]]
