@@ -14,3 +14,17 @@ test "testing.assert_lt unit=value" {
   testing.assert_lt(1, 2)
   assert_eq("${true}", "true")
 }
+
+test "testing.__abort_site_selected unit=element-index" {
+  assert_eq("${testing.__abort_site_selected()}", "-1")
+}
+
+test "testing.__abort_site_run unit=element-index" {
+  assert_eq("${1}", "1")
+}
+
+test "testing.__assert_aborts_check unit=value" {
+  testing.__assert_aborts_check("boom", ["1", "", "PANIC: boom"], 7)
+  testing.__assert_aborts_check("went wrong", ["1", "", "Error: x\\nPANIC: it went wrong"], 8)
+  assert_eq("${true}", "true")
+}

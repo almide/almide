@@ -292,6 +292,18 @@ pub struct IrFunction {
 /// All downstream passes see a pre-normalized, unique `func.name`.
 pub const TEST_NAME_PREFIX: &str = "__test_almd_";
 
+/// `testing.assert_aborts` (ADR-0029): the IR name of the program's abort-site
+/// dispatcher, `effect fn (site: Int) -> Unit`, which runs the site fn
+/// lifted from the `site`-th call. The lowering synthesizes it when the
+/// program has any call; each leg's child entry calls it — the native test
+/// binary's hidden ignored test, the wasm runner `main`'s selector.
+pub const ABORT_DISPATCH_FN: &str = "__almd_abort_dispatch";
+
+/// The IR name of the fn lifted from the `site`-th `assert_aborts` closure.
+pub fn abort_site_fn_name(site: usize) -> String {
+    format!("__almd_abort_site_{site}")
+}
+
 /// #3488: the IR name of the `ordinal`-th test fn of a program (declaration
 /// order, `where` cases expanded): `__test_almd_<NNNN>_<label>`.
 ///

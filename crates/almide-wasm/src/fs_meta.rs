@@ -147,6 +147,17 @@ pub(crate) const OP_NET_CLOSE: i32 = 100;
 pub(crate) const OP_NET_CLOSE_LISTENER: i32 = 101;
 pub(crate) const OP_NET_IS_OPEN: i32 = 102;
 pub(crate) const OP_NET_LOCAL_PORT: i32 = 103;
+/// `testing.assert_aborts` (ADR-0029): the private abort-site pair, served by
+/// the embedded host only and only in test builds. 117 runs site `k` (a_len)
+/// on a fresh instance of the same module and answers the frames [status,
+/// stdout, stderr]; 118 answers the site this instance was started to run,
+/// or -1. A stock runtime cannot start an instance, so the p1 op set omits
+/// both and a test file that uses them walls to native under the stock
+/// runner.
+pub const OP_ABORT_SITE_RUN: i32 = 117;
+pub const OP_ABORT_SITE_SELECTED: i32 = 118;
+/// The two ops above: what the test lane checks a module for.
+pub const ABORT_SITE_OPS: [i32; 2] = [OP_ABORT_SITE_RUN, OP_ABORT_SITE_SELECTED];
 pub(crate) const OP_STAT: i32 = 38;
 pub(crate) const OP_GLOB: i32 = 39;
 /// `read_bytes_raw` / `read_bytes_raw_if_exists`: ops 14 / 25's bodies under
