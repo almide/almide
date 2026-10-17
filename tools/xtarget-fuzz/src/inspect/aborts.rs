@@ -92,14 +92,15 @@ pub(super) fn inspect(ctx: &mut Ctx, engine: &Engine, name: &str, args: &[String
 // ── running a test file ────────────────────────────────────────────────
 
 /// `almide test <file> --target native|wasm` (the wasm lane's default
-/// runner is the embedded host), in the program's sandbox world.
-pub(super) fn test_cmd(ctx: &Ctx, file: &Path, wasm: bool) -> Result<Command, String> {
+/// runner is the embedded host), in the program's sandbox world. The world
+/// is returned with the command: dropping it removes the sandbox.
+pub(super) fn test_cmd(ctx: &Ctx, file: &Path, wasm: bool) -> Result<(Command, World), String> {
     let src = std::fs::read_to_string(file).unwrap_or_default();
     let world = World::for_program(&ctx.dir, &src)?;
     let mut c = Command::new(&ctx.almide);
     c.arg("test").arg(file).args(["--target", if wasm { "wasm" } else { "native" }]);
     world.enter(&mut c);
-    Ok(c)
+    Ok((c, world))
 }
 
 /// A test run's transcript, the same text on both reporters for the same
@@ -187,7 +188,7 @@ pub(super) fn run_test_art(ctx: &Ctx, art: &Path, wasm: bool, world: &World) -> 
 }
 
 fn run_transcript(ctx: &Ctx, file: &Path, wasm: bool, cwd: Option<&Path>) -> Result<String, String> {
-    let mut c = test_cmd(ctx, file, wasm)?;
+    let (mut c, _world) = test_cmd(ctx, file, wasm)?;
     if let Some(d) = cwd {
         c.current_dir(d);
     }
@@ -223,7 +224,7 @@ pub(super) fn alloc(ctx: &Ctx) -> String {
     if std::fs::write(&file, &src).is_err() {
         return "SKIP: scratch write failed".into();
     }
-    let mut c = match test_cmd(ctx, &file, true) {
+    let (mut c, _world) = match test_cmd(ctx, &file, true) {
         Ok(c) => c,
         Err(e) => return format!("SKIP: {e}"),
     };
