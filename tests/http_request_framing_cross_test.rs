@@ -1,3 +1,4 @@
+// @contract: C-385
 //! The client owns the request body's framing, on every lane: a caller's
 //! `Content-Length` header (any case) is dropped and the client writes the
 //! length of the body it sends — the Fetch standard's forbidden request

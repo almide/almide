@@ -5025,3 +5025,17 @@ evidence  = [
   { path = "spec/stdlib/testing_polarity_test.almd", class = "fixture" },
   { path = "spec/lang/assert_aborts_continues_test.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-385"
+spec      = "ALS-R5"
+title     = "The http client frames the request body itself: a caller's Content-Length header is dropped on every lane"
+statement = "A `Content-Length` header the caller passes to an http client function (ASCII case-insensitive; `request`, `request_status`, `request_bytes`, `request_response`, `request_stream`, `request_stream_with_limits`, `start`) is dropped: never sent and never refused, on native, the embedded wasm lane and the stock WASI 0.3 component. The client frames the body it sends: a non-empty body goes out with exactly one `Content-Length` equal to its length in bytes, and an empty body goes out with no length, except that the stock component may send `content-length: 0` for an empty body under a method other than GET or HEAD. A length that disagreed with the body was a malformed request natively (two lengths on the wire) and `HTTP-request-body-size` under wasi:http, where the legs diverged. This is the Fetch standard's forbidden request header and Go net/http's rule (a `Content-Length` in `Request.Header` is ignored). The other fields the client manages, `transfer-encoding` among them, stay refused (C-370)."
+since     = "0.68.0"
+status    = "active"
+evidence  = [
+  { path = "spec/embedded_cross/http_request_framing.almd", class = "fixture" },
+  { path = "tests/http_request_framing_cross_test.rs", name = "a_caller_content_length_is_dropped_on_native_and_the_embedded_lane", class = "fixture" },
+  { path = "tests/http_request_framing_cross_test.rs", name = "a_caller_content_length_is_dropped_on_the_p3_component", class = "fixture" },
+  { path = "tests/http_request_framing_cross_test.rs", name = "a_caller_content_length_is_dropped_by_the_streaming_client", class = "fixture" },
+]
