@@ -317,8 +317,8 @@ pub fn almide_rt_list_par_workers(len: usize) -> usize {
 // = the offer runs here, sequentially. Output is the same either way (C-321).
 // Timing element 0 first and deciding after it was measured and rejected: it
 // serialises one whole chunk, ~2x wall time when n ≈ workers (fannkuchredux).
-pub const ALMIDE_FAN_OFFER_NS: u128 = 12_000;
-pub const ALMIDE_FAN_WORKER_NS: u128 = 3_000;
+pub const ALMIDE_FAN_OFFER_NS: u128 = 1_500;
+pub const ALMIDE_FAN_WORKER_NS: u128 = 700;
 
 /// The worker count for an offer of `n` elements whose site last measured
 /// `per_elem` ns per element (`None` = its first offer): >= 2 = go parallel
@@ -382,23 +382,26 @@ fn almide_fan_site(site: usize, insert: bool) -> Option<&'static AlmideFanSite> 
     None
 }
 
-/// A site far below the crossover re-measures one sequential offer in this
-/// many: timing an offer reads the thread CPU clock twice, a syscall
-/// (~0.3 us on the GCE Intel VM, ~1.1 us on the AMD one) that a cheap
-/// sequential offer otherwise pays every time.
+/// A sequential site re-measures one offer in this many: timing an offer
+/// reads the thread CPU clock twice, a syscall (~0.3 us on the GCE Intel VM,
+/// ~1.1 us on the AMD one) that a cheap sequential offer otherwise pays every
+/// time; a site whose work grows past the crossover is seen within this many
+/// offers. (Until 2026-10-17 a site within 4x of the crossover re-measured
+/// one in 4; with the pool's crossover at ~0.6 us per element that tier
+/// caught 0.4 us elements and cost them 12% on the AMD VM.)
 const ALMIDE_FAN_RESAMPLE: u32 = 16;
-/// Any other sequential site re-measures one offer in this many: at ~1.5 us
-/// per element (AMD, 10 elements) the two clock reads were 14% of the
-/// offer, and a missed crossover costs at most this many offers.
-const ALMIDE_FAN_RESAMPLE_NEAR: u32 = 4;
 /// A parallel site re-measures one offer in this many: each thread reads the
 /// CPU clock around its elements, three syscalls per helper on the offer's
 /// critical path (~3.3 us on the AMD VM, 2026-10-17).
 const ALMIDE_FAN_RESAMPLE_PAR: u32 = 8;
-/// "Far below": the offer stays sequential even at this many times its
-/// measured work per element, so the skipped offers cannot hide a win
-/// unless the work per element grows that much within one resample period.
-const ALMIDE_FAN_RESAMPLE_MARGIN: u128 = 4;
+/// The site's next offer runs sequentially and is measured: a parallel
+/// offer's elements read slower than the same elements run in one thread
+/// (the threads share the block counter and the result slots), and an
+/// estimate from them within 2x of the crossover is not evidence that the
+/// site is above it. A site's first offer is parallel, so a run of 0.3 us
+/// elements otherwise stayed parallel for its first dozens of offers (100
+/// iterations: 0.36 us per offer over sequential on the Intel VM, 2026-10-17).
+const ALMIDE_FAN_PROBE: u32 = u32::MAX;
 
 /// The calling thread's CPU time in ns — the clock an offer's elements are
 /// measured on (the wasm host's copy is host_fan.rs `cpu_ns`). Wall time
@@ -426,6 +429,26 @@ fn almide_fan_cpu_ns() -> u64 {
     T0.get_or_init(std::time::Instant::now).elapsed().as_nanos() as u64
 }
 
+/// What one read of `almide_fan_cpu_ns` costs (measured once: the least of
+/// 16 back-to-back pairs). An interval between two reads also holds one read,
+/// and a worker of a parallel offer often times one or two elements: on the
+/// AMD VM (a 1.1 us read) a 0.4 us element read 1.5-4 us, and the site stayed
+/// parallel on that estimate where sequential was faster (2026-10-17).
+fn almide_fan_clock_cost() -> u64 {
+    static COST: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    *COST.get_or_init(|| {
+        (0..16).map(|_| {
+            let a = almide_fan_cpu_ns();
+            almide_fan_cpu_ns().wrapping_sub(a)
+        }).min().unwrap_or(0)
+    })
+}
+
+/// The CPU time since `t0`, less the read that ends it.
+fn almide_fan_cpu_since(t0: u64) -> u64 {
+    almide_fan_cpu_ns().wrapping_sub(t0).saturating_sub(almide_fan_clock_cost())
+}
+
 /// What one offer's elements took. A worker thread's FIRST element is its
 /// warm-up (a fresh thread's first touch of the body) and is kept apart —
 /// that cost belongs to the offer's `WORKER` term, not to `t`; the estimate
@@ -438,6 +461,8 @@ struct AlmideFanClock {
     n: usize,
     /// `false` = an unmeasured offer: no clock reads, no record.
     measure: bool,
+    /// The offer runs on more than one thread.
+    parallel: bool,
 }
 
 impl AlmideFanClock {
@@ -451,13 +476,16 @@ impl AlmideFanClock {
             t => Some((e, u128::from(t - 1))),
         });
         let (workers, measure) = match known {
+            // the probe a parallel estimate near the crossover asked for
+            Some((e, _)) if e.skip.load(Ordering::Relaxed) == ALMIDE_FAN_PROBE
+                && e.skip.compare_exchange(ALMIDE_FAN_PROBE, 0, Ordering::Relaxed, Ordering::Relaxed).is_ok() => (1, true),
             Some((e, t)) => {
-                let skipped = e.skip.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |k| k.checked_sub(1)).is_ok();
+                let skipped = e.skip.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |k| (k != ALMIDE_FAN_PROBE).then(|| k.checked_sub(1)).flatten()).is_ok();
                 (almide_rt_fan_plan(n, Some(t)), !skipped)
             }
             None => (almide_rt_fan_plan(n, None), true),
         };
-        (workers, AlmideFanClock { warm: [z(), z()], cold: [z(), z()], site, n, measure })
+        (workers, AlmideFanClock { warm: [z(), z()], cold: [z(), z()], site, n, measure, parallel: workers >= 2 })
     }
 
     fn add(cell: &[std::sync::atomic::AtomicU64; 2], ns: u64, n: u64) {
@@ -473,7 +501,7 @@ impl AlmideFanClock {
         }
         let t0 = almide_fan_cpu_ns();
         let (r, n) = g();
-        Self::add(&self.warm, almide_fan_cpu_ns().wrapping_sub(t0), n as u64);
+        Self::add(&self.warm, almide_fan_cpu_since(t0), n as u64);
         r
     }
 
@@ -492,7 +520,7 @@ impl AlmideFanClock {
         let go = each(first);
         let t1 = almide_fan_cpu_ns();
         if go.is_some() {
-            Self::add(&self.cold, t1.wrapping_sub(t0), 1);
+            Self::add(&self.cold, t1.wrapping_sub(t0).saturating_sub(almide_fan_clock_cost()), 1);
         }
         if go != Some(true) {
             return;
@@ -507,14 +535,12 @@ impl AlmideFanClock {
                 None => break,
             }
         }
-        Self::add(&self.warm, almide_fan_cpu_ns().wrapping_sub(t1), n);
+        Self::add(&self.warm, almide_fan_cpu_since(t1), n);
     }
 
-    /// Record the offer as the site's estimate: ns per element — and, when
-    /// the site would stay sequential, let its next sequential offers run
-    /// unmeasured: `ALMIDE_FAN_RESAMPLE - 1` of them when it would at
-    /// `ALMIDE_FAN_RESAMPLE_MARGIN` times that, `ALMIDE_FAN_RESAMPLE_NEAR - 1`
-    /// otherwise.
+    /// Record the offer as the site's estimate: ns per element — and let the
+    /// site's next offers run unmeasured: `ALMIDE_FAN_RESAMPLE - 1` of them
+    /// when it would stay sequential, `ALMIDE_FAN_RESAMPLE_PAR - 1` when not.
     fn record(self) {
         if !self.measure {
             return;
@@ -524,17 +550,26 @@ impl AlmideFanClock {
         let (ns, n) = if wn > 0 { (w, wn) } else { (c, cn) };
         if n > 0 {
             let t = u128::from(ns) / u128::from(n);
-            let skip = if almide_rt_fan_plan(self.n, Some(t.saturating_mul(ALMIDE_FAN_RESAMPLE_MARGIN))) < 2 {
+            let Some(e) = almide_fan_site(self.site, true) else { return };
+            let was_sequential = match e.t.load(std::sync::atomic::Ordering::Acquire) {
+                0 => false,
+                old => almide_rt_fan_plan(self.n, Some(u128::from(old - 1))) < 2,
+            };
+            let skip = if almide_rt_fan_plan(self.n, Some(t)) < 2 {
                 ALMIDE_FAN_RESAMPLE - 1
-            } else if almide_rt_fan_plan(self.n, Some(t)) < 2 {
-                ALMIDE_FAN_RESAMPLE_NEAR - 1
+            } else if self.parallel && almide_rt_fan_plan(self.n, Some(t / 2)) < 2 {
+                ALMIDE_FAN_PROBE
+            } else if !self.parallel && was_sequential {
+                // a sequential site turns parallel on two measurements in a
+                // row, not on one: one preempted or interrupted offer read
+                // above the crossover sent 0.42 us elements (0.58 us
+                // crossover) parallel at ~9 us a time on the AMD VM
+                ALMIDE_FAN_PROBE
             } else {
                 ALMIDE_FAN_RESAMPLE_PAR - 1
             };
-            if let Some(e) = almide_fan_site(self.site, true) {
-                e.skip.store(skip, std::sync::atomic::Ordering::Relaxed);
-                e.t.store(u64::try_from(t).unwrap_or(u64::MAX - 1) + 1, std::sync::atomic::Ordering::Release);
-            }
+            e.skip.store(skip, std::sync::atomic::Ordering::Relaxed);
+            e.t.store(u64::try_from(t).unwrap_or(u64::MAX - 1) + 1, std::sync::atomic::Ordering::Release);
         }
     }
 }
