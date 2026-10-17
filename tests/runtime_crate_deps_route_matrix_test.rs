@@ -1,7 +1,8 @@
 //! Every build route declares the crates a program's runtime needs (#3346).
 //!
-//! Three runtime modules are written against crates.io crates: `http` and `sse`
-//! (rustls and its root stores) and `zlib` (flate2). The bin route chose an
+//! Two runtime modules are written against crates.io crates: `http` (rustls
+//! and its root stores) and `zlib` (flate2). (`sse`, the Anthropic client's
+//! module, left with it at dialect epoch 14.) The bin route chose an
 //! HTTP manifest template and appended `flate2`; the cdylib route wrote only
 //! `[native-deps]`, so `almide build --cdylib` of a program using `zlib`
 //! failed with E0433 on `flate2` while the same program built as a binary.
@@ -27,7 +28,6 @@ fn program(module: &str) -> String {
     let call = match module {
         "zlib" => "zlib.deflate(bytes.from_string(\"hello hello hello\"))",
         "http" => "http.get(\"http://127.0.0.1:1/\")",
-        "sse" => "http.openai_streaming_call(\"http://127.0.0.1:1\", \"k\", \"{}\", (t) => println(t))",
         other => panic!("no program for {other}"),
     };
     let import = if module == "zlib" { "zlib" } else { "http" };
@@ -87,11 +87,6 @@ fn zlib_builds_on_every_route() {
 #[test]
 fn http_builds_on_every_route() {
     route_matrix("http");
-}
-
-#[test]
-fn sse_builds_on_every_route() {
-    route_matrix("sse");
 }
 
 /// The table covers every runtime module whose source names a crate the

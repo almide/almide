@@ -5,10 +5,7 @@
 //
 // FAMILY COMPLETENESS. The kernels that index one operand's extent against
 // another's require them EQUAL — `mul` (cols(a) == rows(b)), `linear_row` /
-// `_no_bias` (cols(x) == cols(w), len(bias) == rows(w)), `swiglu_gate` (both
-// weight widths against cols(x), rows(w_up) against rows(w_gate)), the
-// attention entries (cols(k)/cols(v) against cols(q), rows(v) against
-// rows(k), and rows(q) <= rows(k) for the causal offset), `conv1d`
+// `_no_bias` (cols(x) == cols(w), len(bias) == rows(w)), `conv1d`
 // (cols(weight) == in_ch * kernel, len(bias) == out_ch), `concat_cols`
 // (every non-empty member's row count) and `from_lists` (every row's width).
 // Violating any of them was a raw Rust panic natively (exit 101, the form
@@ -16,13 +13,14 @@
 // wasm legs — #2481 / #2482 / #2483.
 //
 // The ELEMENTWISE pair family is deliberately NOT in this rule: `add`,
-// `sub`, `div`, `silu_mul` and `broadcast_add_row` ZIP-truncate to the
-// shorter operand, identically on every leg, and those cells are pinned (here
-// and in the activations twin) so the guard work never silently converts them
-// into aborts.
+// `sub`, `div` and `broadcast_add_row` ZIP-truncate to the shorter operand,
+// identically on every leg, and those cells are pinned here so the guard work
+// never silently converts them into aborts. (`swiglu_gate`, `silu_mul` and the
+// attention entries left the stdlib at dialect epoch 14, with the activations
+// twin of this fixture.)
 //
-// The EMPTY operand is exempt on every entry (C-278's "the empty matrix has
-// no row to violate"): each kernel's empty short-circuit answers first.
+// The EMPTY operand is exempt on every entry ("the empty matrix has no row
+// to violate"): each kernel's empty short-circuit answers first.
 fn show(m: Matrix) -> String = "r=${matrix.rows(m)} c=${matrix.cols(m)} ${matrix.to_lists(m)}"
 
 fn main() -> Unit = {
@@ -51,7 +49,6 @@ fn main() -> Unit = {
   println("lin_empty_w=${show(matrix.linear_row(a, e, [1.0]))}")
   println("concat_empty_member=${show(matrix.concat_cols([b, e]))}")
   println("concat_empty_first=${show(matrix.concat_cols([e, b]))}")
-  println("mha_empty_k=${show(matrix.multi_head_attention(a, e, e, 1))}")
   // An r×0 operand keeps its rows and contracts over nothing.
   println("mul_rx0=${show(matrix.mul(matrix.zeros(2, 0), e))}")
   // #3651: an empty operand is empty whatever width it was built with — a

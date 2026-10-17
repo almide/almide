@@ -1,6 +1,6 @@
 # ALS — 実行時規範（Runtime）
 
-> Last updated: 2026-10-05
+> Last updated: 2026-10-17
 
 プログラム実行の観測規範（エラー終了・文字列補間の表示形・並行コンビネータ）。
 参照方法は [strings.md](strings.md) 冒頭と同じ。
@@ -124,8 +124,8 @@ err `request cancelled` で終わらせて接続を閉じる。以後 `read_new`
 観測で提供する。err の文字列、`cancel` で接続が閉じること、ハンドルの最後の写しを
 捨てると呼び出しが取り消されることも同じである。単体の成果物
 （`almide build --target wasm`）はこの族を持てず、`almide check --target wasm` は
-E081 で拒否する。`openai_streaming_call_with_limits` と
-`anthropic_streaming_call_with_limits` は native のみである。
+E081 で拒否する。OpenAI と Anthropic のストリーミングクライアントは
+dialect epoch 14 でパッケージ almide/llm に移った（C-270）。
 テスト: `spec/stdlib/http_call_test.almd`、`spec/embedded_cross/http_call_handle_errs.almd`
 
 `http.serve(port, f)` は埋め込み wasm レーン（`almide run --target wasm`）でも
