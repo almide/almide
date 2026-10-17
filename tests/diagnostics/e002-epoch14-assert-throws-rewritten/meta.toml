@@ -1,0 +1,4 @@
+expects_code = "E002"
+expects_error = "undefined function 'testing.assert_throws'"
+hint_substring = "rewrite as `testing.assert_aborts(expected, f)`"
+expects_line_col = "6:3"
