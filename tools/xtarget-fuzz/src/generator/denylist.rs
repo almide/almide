@@ -86,11 +86,10 @@ const NONDETERMINISTIC_FUNCTIONS: &[(&str, &str)] = &[
 /// observation into a layout one and reports a "divergence" no contract
 /// promises against. Screened as a word so the UFCS form is caught too.
 ///
-/// The other address-unit entries (`bytes.heap_save` / `heap_restore`,
-/// `mem.save` / `mem.restore`) are NOT here: C-041 pins their observable
-/// results native == wasm, so they stay valid seeds.
-/// [`ADDRESS_UNIT_PINNED_BY_CONTRACT`] lists them, and a test holds the
-/// two tables to the manifest's address-unit set cell for cell.
+/// An address-unit entry whose observable result a contract pins
+/// native == wasm is NOT here: it stays a valid seed, and
+/// [`ADDRESS_UNIT_PINNED_BY_CONTRACT`] lists it. A test holds the two
+/// tables to the manifest's address-unit set cell for cell.
 const HOST_ADDRESS_FUNCTIONS: &[(&str, &str)] = &[
     ("bytes", "data_ptr"), // as_ptr / handle + 12 — target layout
 ];
@@ -100,12 +99,7 @@ const HOST_ADDRESS_FUNCTIONS: &[(&str, &str)] = &[
 /// intentional omission from [`HOST_ADDRESS_FUNCTIONS`] from a forgotten
 /// one.
 #[cfg(test)]
-const ADDRESS_UNIT_PINNED_BY_CONTRACT: &[(&str, &str, &str)] = &[
-    ("bytes", "heap_save", "C-041"),
-    ("bytes", "heap_restore", "C-041"),
-    ("mem", "save", "C-041"),
-    ("mem", "restore", "C-041"),
-];
+const ADDRESS_UNIT_PINNED_BY_CONTRACT: &[(&str, &str, &str)] = &[];
 
 /// Bare tokens that name a nondeterministic operation regardless of the
 /// receiver, used as a belt-and-braces source screen for the mutation
@@ -287,7 +281,6 @@ mod tests {
         assert!(NamedDenylist::is_denied_function("list", "shuffle"));
         assert!(!NamedDenylist::is_denied_function("list", "map"));
         assert!(NamedDenylist::is_denied_function("bytes", "data_ptr"));
-        assert!(!NamedDenylist::is_denied_function("bytes", "heap_save"));
     }
 
     /// #3193: the nightly mutated `data_ptr(b("")) >= 0` into `>= 160` and
@@ -301,9 +294,6 @@ mod tests {
         assert!(NamedDenylist::source_references_denied_surface("buf.data_ptr()").is_some());
         // A longer identifier that merely contains the word stays allowed.
         assert!(NamedDenylist::source_references_denied_surface("let data_ptrs = 1").is_none());
-        // The contract-pinned checkpoint pair stays a valid seed.
-        assert!(NamedDenylist::source_references_denied_surface("let cp = mem.save()\nmem.restore(cp)").is_none());
-        assert!(NamedDenylist::source_references_denied_surface("bytes.heap_restore(bytes.heap_save())").is_none());
     }
 
     /// Every `index_unit = "address"` fn in the semantics manifest is in
