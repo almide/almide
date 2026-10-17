@@ -473,6 +473,36 @@ mod tests {
         }
     }
 
+    /// The driver against the real server: the probe app, built natively by
+    /// the workspace `almide`, answers the script, returns from `http.serve`
+    /// on the SIGTERM (exit 0), and every verdict holds. A no-op without a
+    /// built `almide` (as `every_in_domain_probe_takes_the_success_path`).
+    #[test]
+    fn the_probe_app_answers_the_script_natively_and_returns_from_serve() {
+        let bin = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/release/almide");
+        if !bin.exists() {
+            eprintln!("skipping: no workspace almide binary");
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("xtarget-serve-e2e-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let src = serve_gen::served_program(&Plan::Script.header(), PROBE_APP);
+        let file = dir.join("app.almd");
+        std::fs::write(&file, &src).unwrap();
+        let exe = dir.join("app.bin");
+        let built = Command::new(&bin).arg("build").arg(&file).arg("-o").arg(&exe).output().unwrap();
+        assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
+        let s = drv::drive_socket(&mut Command::new(&exe), &Plan::Script, false).expect("session");
+        let _ = std::fs::remove_dir_all(&dir);
+        let lines: Vec<&str> = s.transcript.lines().collect();
+        assert_eq!(lines.len(), Plan::Script.requests().len() + 1, "{}", s.transcript);
+        assert!(drv::verdicts_hold(&s.transcript), "{}", s.transcript);
+        assert_eq!(*lines.last().unwrap(), "exit 0");
+        assert!(lines[2].starts_with("#2 POST /echo -> HTTP/1.1 200 [content-type: text/plain; charset=utf-8; x-token: abc] body=POST /echo [] \\xe6\\x97\\xa5"), "{}", lines[2]);
+        assert!(lines[3].starts_with("#3 PUT /a/b -> HTTP/1.1 418 [content-type: text/plain; x-kind: teapot] body=a\\xef\\xbf\\xbdb"), "{}", lines[3]);
+        assert!(lines[7].starts_with("#7 GET /missing -> HTTP/1.1 500 [content-type: text/plain] body=Internal error: no route /missing"), "{}", lines[7]);
+    }
+
     #[test]
     fn the_default_sizes_stay_under_the_body_limit() {
         for counted in [true, false] {
