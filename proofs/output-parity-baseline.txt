@@ -1054,7 +1054,10 @@ spec/wasm_fail/matrix_concat_cols_rows_aborts.almd
 spec/wasm_fail/matrix_conv1d_stride_aborts.almd
 spec/wasm_fail/matrix_index_oob_aborts.almd
 spec/wasm_fail/matrix_linear_row_bias_aborts.almd
+spec/wasm_fail/matrix_qwen3_huge_head_dim_aborts.almd
 spec/wasm_fail/matrix_qwen3_kv_head_count_aborts.almd
+spec/wasm_fail/matrix_qwen3_repeat_kv_width_aborts.almd
+spec/wasm_fail/matrix_qwen3_short_offsets_aborts.almd
 spec/wasm_fail/matrix_ragged_from_lists_aborts.almd
 spec/wasm_fail/matrix_shape_mismatch_aborts.almd
 spec/wasm_fail/rope_geometry_exceeds_aborts.almd
