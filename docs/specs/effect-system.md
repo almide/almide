@@ -310,15 +310,22 @@ test "the tuple carries the unwrapped values" {
 契約台帳 C-004、fixture: `spec/wasm_cross/fan_deterministic.almd`,
 `spec/wasm_cross/fan_pure_thunks.almd`):
 
-- `fan.race` は 0.42.0 で撤去された(E027 トンボストーン)。決定的モデルの下では
-  `thunks[0]()` そのものであり、名前だけが言語にないタイミング意味論を約束していた。
-  thunk[0] **のみ**が評価される: 副作用順序も決定的。
+- thunk リストを取る呼び出し形 `fan.race(thunks)` / `fan.any(thunks)` /
+  `fan.settle(thunks)` は撤去済み(E027 トンボストーン)。旧 `fan.race(thunks)` は
+  決定的モデルの下では `thunks[0]()` そのもので、名前だけが言語にないタイミング意味論を
+  約束していた。
+- `fan.race { }` / `fan.race(xs, f)` — 現行の形。腕は純粋(E006)で、ソース順に一本ずつ
+  実行され、決定的な計算量が最小の Ok を選ぶ(同量ならソース順で先のもの)。
   (Go の select が仕様で RANDOM を要求するのと対照的な設計選択。)
-- `fan.any(thunks)` — リスト順に逐次試行し最初の Ok。副作用順序も決定的。
-- `fan.settle(thunks)` — **結果リストの順序のみ**を契約する。native は実スレッドで
-  実行するため thunk 内副作用の交互順は wall-clock(契約外)。wasm は逐次。
-- `fan.timeout` — **存在しない**(0.29.0 で削除、C-006)。壁時計デッドラインは可搬な
-  意味を持たないため、参照は check 時 tombstone エラー(E027)。ホスト境界で課す。
+- `fan.any { }` / `fan.any(xs, f)` — 順に逐次試行し最初の Ok。勝者より後は実行しない。
+  副作用順序も決定的。
+- `fan.settle { }` / `fan.settle(xs, f)` — 全要素の Result。どちらもターゲットを問わず
+  逐次に展開される(ブロックはタプル、マッパーは `list.map`)。
+- `fan.timeout(duration.X(n)) { }` — 純粋な本体に壁時計の期限を課す oracle 層の形。
+  旧呼び出し形 `fan.timeout(ms, f)` は E027(C-006)。
+
+テスト: `tests/fan_acceptance_test.rs`(4 レッグで stdout 一致を固定)。
+全形の現状と既知の食い違いは `docs/design/fan-semantics-audit.md`。
 
 ### Thunk typing
 
