@@ -74,7 +74,7 @@ use wasm_encoder::{
 
 use crate::component_alloc::{shim_cabi_realloc, shim_realloc_checked, shim_reserve};
 use crate::wasi::{
-    mem, mem8, parse_module, reencode_body, type_index, Parsed, Remap, DATA, MSG,
+    mem, mem8, parse_module, reencode_body, type_index, Parsed, Remap, DATA, MSG, OVL,
     MSG2, OOM_MSG, PARK_SPAN, UNSUPPORTED_MSG,
 };
 
@@ -341,6 +341,9 @@ struct P3Globals {
     /// The cached `get-environment` list (ptr, -1 = not fetched; count).
     g_env: u32,
     g_envn: u32,
+    /// The guest heap's bump frontier (`__heap`): stdin take-n reads a
+    /// large count into the free memory past it.
+    heap: u32,
 }
 
 /// One output port for `shim_print`: the stream/future globals and the

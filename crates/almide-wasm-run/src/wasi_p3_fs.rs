@@ -50,6 +50,108 @@ fn open_stdin(i: &mut wasm_encoder::InstructionSink<'_>, g_rx: u32, g_fut: u32, 
     i.end();
 }
 
+/// `g_in_rx` once the writer dropped: the handles are gone, and every later
+/// take answers 0 bytes — a read after the DROPPED status traps.
+const STDIN_AT_EOF: i32 = -2;
+
+/// The largest read one arena reservation serves (see `stdin_take_arm`).
+const STDIN_STEP: i32 = 1 << 20;
+
+/// op 35's locals: the count (a_len), the await answer, the buffer base,
+/// the bytes read so far, the staging destination.
+#[derive(Clone, Copy)]
+struct StdinLocals {
+    op: u32,
+    a_len: u32,
+    n: u32,
+    base: u32,
+    total: u32,
+    dst: u32,
+}
+
+/// op 35: stdin take-n — read (through `$await`) UNTIL a_len bytes are in
+/// or the writer drops. Native's `take(n).read_to_end` answers min(n, what
+/// stdin has) and every guest caller reads a short answer as EOF (C-161),
+/// so one read was a silent truncation; and that one read landed in the
+/// park's staging page whatever the count, writing past it. A count the
+/// page holds reads there; a larger one reads past the guest heap's
+/// frontier (reserved a step at a time, so memory grows only as bytes
+/// arrive) and stages above the guest's next allocation. A COMPLETED read
+/// of 0 items is not EOF (#2955) and reads again; DROPPED drops the handles
+/// and marks the stream ended (`STDIN_AT_EOF`).
+fn stdin_take_arm(i: &mut wasm_encoder::InstructionSink<'_>, g: P3Globals, l: StdinLocals) {
+    let P3Globals { park, g_plen, g_ppos, g_in_rx, heap, .. } = g;
+    let StdinLocals { op, a_len, base, total, .. } = l;
+    let room = (OVL - DATA) as i32;
+    i.local_get(op).i32_const(35).i32_eq().if_(BlockType::Empty);
+    i.i32_const(0).local_set(total);
+    i.i32_const((park + DATA) as i32).local_set(base);
+    i.global_get(g_in_rx).i32_const(STDIN_AT_EOF).i32_ne().if_(BlockType::Empty);
+    open_stdin(i, g_in_rx, g.g_in_fut, park);
+    i.local_get(a_len).i32_const(room).i32_gt_s().if_(BlockType::Empty);
+    i.global_get(heap).i32_const(7).i32_add().i32_const(-8).i32_and().local_set(base);
+    i.end();
+    stdin_take_loop(i, g, l);
+    i.local_get(a_len).i32_const(room).i32_gt_s().if_(BlockType::Empty);
+    stdin_stage_high(i, g, l);
+    i.end();
+    i.end();
+    i.local_get(base).global_set(g_ppos);
+    i.local_get(total).global_set(g_plen);
+    i.local_get(total).i64_extend_i32_u().return_();
+    i.end();
+}
+
+/// The read loop (see `stdin_take_arm`); `base` past the park is the arena.
+fn stdin_take_loop(i: &mut wasm_encoder::InstructionSink<'_>, g: P3Globals, l: StdinLocals) {
+    let P3Globals { park, g_in_rx, g_in_fut, f_reserve, f_await, .. } = g;
+    let StdinLocals { a_len, n, base, total, .. } = l;
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(total).local_get(a_len).i32_ge_s().br_if(1);
+    i.local_get(a_len).local_get(total).i32_sub().local_set(n); // want
+    i.local_get(base).i32_const((park + DATA) as i32).i32_ne().if_(BlockType::Empty);
+    i.local_get(n).i32_const(STDIN_STEP).i32_gt_u().if_(BlockType::Empty);
+    i.i32_const(STDIN_STEP).local_set(n);
+    i.end();
+    i.local_get(total).local_get(n).i32_add().call(f_reserve);
+    i.end();
+    i.global_get(g_in_rx);
+    i.global_get(g_in_rx);
+    i.local_get(base).local_get(total).i32_add();
+    i.local_get(n);
+    i.call(I_STDIN_READ);
+    i.call(f_await).local_set(n);
+    i.local_get(total).local_get(n).i32_const(4).i32_shr_u().i32_add().local_set(total);
+    i.local_get(n).i32_const(15).i32_and().if_(BlockType::Empty);
+    i.global_get(g_in_rx).call(I_STDIN_DROP_RX);
+    i.global_get(g_in_fut).call(I_STDIN_DROP_FUT);
+    i.i32_const(STDIN_AT_EOF).global_set(g_in_rx);
+    i.br(2);
+    i.end();
+    i.br(0);
+    i.end().end();
+}
+
+/// Move the `total` bytes read at the heap frontier to base + 2*total + 64
+/// (reserved first) and answer from there: the one guest allocation before
+/// host_read lands at that frontier and is at most total bytes plus its
+/// header (the fs service's `$stage` rule). memory.copy is a memmove.
+fn stdin_stage_high(i: &mut wasm_encoder::InstructionSink<'_>, g: P3Globals, l: StdinLocals) {
+    let StdinLocals { base, total, dst, .. } = l;
+    // 3*total + 64, saturated: past 4 GiB no grow serves it, and $reserve
+    // then aborts with C-197's line instead of a wrapped, too-small bound
+    i.local_get(total).i32_const(0x5555_0000).i32_gt_u().if_(BlockType::Result(ValType::I32));
+    i.i32_const(-65536);
+    i.else_();
+    i.local_get(total).i32_const(3).i32_mul().i32_const(64).i32_add();
+    i.end();
+    i.call(g.f_reserve);
+    i.local_get(base).local_get(total).i32_const(1).i32_shl().i32_add();
+    i.i32_const(64).i32_add().local_tee(dst);
+    i.local_get(base).local_get(total).memory_copy(0, 0);
+    i.local_get(dst).local_set(base);
+}
+
 /// Err return: park the static message, answer `pack(1, len)` (the http
 /// shim's static refusals).
 fn fs_err(
@@ -123,7 +225,7 @@ struct FsService {
 /// clock, 60 monotonic clock, plus the fs (through the spliced service), http
 /// and env (26 / 29 / 36 / 37) families; anything else = the defined refusal.
 fn shim_fs_call(g: P3Globals, abi: &FsAbi, (f_self, f_http, f_serve): (u32, Option<u32>, Option<u32>), f_env: Option<(u32, &[i32])>, svc: Option<&FsService>) -> Function {
-    let P3Globals { park, g_plen, g_ppos, g_in_rx, g_in_fut, g_out_tx, g_out_fut, g_err_tx, g_err_fut, f_reserve, f_await, .. } = g;
+    let P3Globals { park, g_plen, g_ppos, g_out_tx, g_out_fut, g_err_tx, g_err_fut, f_reserve, f_await, .. } = g;
     let (op, a_len, b_ptr, b_len) = (0u32, 2u32, 3u32, 4u32);
     let n = 6u32;
     let s64 = 7u32;
@@ -191,28 +293,7 @@ fn shim_fs_call(g: P3Globals, abi: &FsAbi, (f_self, f_http, f_serve): (u32, Opti
         i.end();
     }
 
-    // op 35: stdin take up to a_len bytes — reads (through `$await`)
-    // straight into the park data span until one delivers bytes; a DROPPED
-    // status (writer closed) answers 0. A COMPLETED read of 0 items is not
-    // EOF (#2955) and reads again.
-    i.local_get(op).i32_const(35).i32_eq().if_(BlockType::Empty);
-    open_stdin(&mut i, g_in_rx, g_in_fut, park);
-    i.i32_const(0).local_set(n);
-    i.block(BlockType::Empty).loop_(BlockType::Empty);
-    i.local_get(a_len).i32_eqz().br_if(1);
-    i.global_get(g_in_rx);
-    i.global_get(g_in_rx);
-    i.i32_const((park + DATA) as i32);
-    i.local_get(a_len);
-    i.call(I_STDIN_READ);
-    i.call(f_await).local_set(n);
-    i.local_get(n).i32_const(4).i32_shr_u().br_if(1);
-    i.local_get(n).i32_const(15).i32_and().br_if(1);
-    i.br(0).end().end();
-    i.local_get(n).i32_const(4).i32_shr_u().global_set(g_plen);
-    i.i32_const((park + DATA) as i32).global_set(g_ppos);
-    i.global_get(g_plen).i64_extend_i32_u().return_();
-    i.end();
+    stdin_take_arm(&mut i, g, StdinLocals { op, a_len, n, base: 9, total: 5, dst: 10 });
 
     // op 32: entropy — n rides b_len; the list lands via cabi_realloc,
     // reserved first for exactly the length asked for (#2119), so the
