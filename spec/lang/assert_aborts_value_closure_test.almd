@@ -1,0 +1,18 @@
+// ADR-0029: the closure's value is discarded, whatever its type. A block
+// body whose tail is a non-Unit value (an Int from a fn that aborts, a
+// division) is a site like any other.
+import testing
+
+fn boom(tag: String) -> Int = if string.len(tag) > 0 then panic("boom " + tag) else 0
+
+test "a block closure ending in an Int call is an abort site" {
+  testing.assert_aborts("PANIC: boom t", () => { boom("t") })
+}
+
+test "a block closure ending in a division is an abort site" {
+  testing.assert_aborts("division by zero", () => {
+    let a = 1
+    let z = 2
+    a / (z * 0)
+  })
+}
