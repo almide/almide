@@ -81,6 +81,7 @@ dependencies = [
  "almide-egg-lab",
  "almide-ir",
  "almide-lang",
+ "almide-str",
  "egg",
  "serde",
  "serde_json",
@@ -177,6 +178,7 @@ dependencies = [
  "almide-ir",
  "almide-lang",
  "almide-optimize",
+ "almide-str",
 ]
 
 [[package]]
@@ -196,6 +198,10 @@ dependencies = [
  "rustls-native-certs",
  "webpki-roots",
 ]
+
+[[package]]
+name = "almide-str"
+version = "0.12.2"
 
 [[package]]
 name = "almide-syntax"
