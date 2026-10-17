@@ -7,7 +7,7 @@ pub fn apply(f: &dyn Fn(i64) -> i64, x: i64) -> i64 {
 }
 
 pub fn __almide_main() -> () {
-    almide_println!("{}", &format!("{}", apply(&|x| (x).wrapping_add(1i64), 41i64)))
+    almide_println!("{}", &AlmideString::from(format!("{}", apply(&|x| (x).wrapping_add(1i64), 41i64))))
 }
 
 fn main() {
