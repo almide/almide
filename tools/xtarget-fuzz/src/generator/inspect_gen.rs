@@ -718,6 +718,7 @@ impl Target {
     /// difference of the two timings is the calls' cost alone.
     pub fn direct_program(&self, n: u64, k: u64, with_call: bool) -> String {
         let mut s = String::from("effect fn main() -> Unit = {\n");
+        s.push_str(&effect_recipes::prelude_for(&self.name, n).unwrap_or_default());
         // The input changes every iteration by an O(1) in-place step, run in
         // BOTH programs, so the call is never loop-invariant (a never-true
         // guard like `i < 0` was provable and hoisted through) and the step's
@@ -859,6 +860,7 @@ impl Target {
         let kw = if self.effect { "effect fn" } else { "fn" };
         let wrap = |inner: &str, bang: &str| format!("pub {kw} call({}) -> {ret} = {inner}({}){bang}\n", sig.join(", "), names.join(", "));
         let mut main = String::from("import self.left\nimport self.right\n\neffect fn main() -> Unit = {\n");
+        main.push_str(&effect_recipes::prelude_for(&self.name, n).unwrap_or_default());
         for i in (0..self.params.len()).filter(|i| Some(*i) != self.mut_param && !self.per_step(*i)) {
             let _ = writeln!(main, "  let a{i}: {} = {}", self.render_param(i), self.arg(i, n));
         }
