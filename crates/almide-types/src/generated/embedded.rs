@@ -8457,8 +8457,19 @@ effect fn request_stream(method: String, url: String, body: String, headers: Map
 
 
 /// Streams base_url/chat/completions; LLM-response JSON.
-@intrinsic("almide_rt_sse_openai_chat")
-effect fn openai_streaming_call(base_url: String, api_key: String, body_json: String, on_text_delta: (String) -> Unit) -> Result[String, String] = _
+effect fn openai_streaming_call(base_url: String, api_key: String, body_json: String, on_text_delta: (String) -> Unit) -> Result[String, String] = {
+  var sse = __sse_start()
+  http.request_stream(
+    "POST",
+    __openai_url(base_url),
+    body_json,
+    __openai_headers(api_key),
+    (chunk) => {
+      sse = __openai_feed(sse, chunk, on_text_delta)
+    },
+  )!
+  __sse_final_json(sse.acc)
+}
 
 
 
@@ -8553,8 +8564,158 @@ effect fn openai_streaming_call_with_limits(base_url: String, api_key: String, b
   on_text_delta,
 )
 
-@intrinsic("almide_rt_http___openai_streaming_limited")
-effect fn __openai_streaming_limited(base_url: String, api_key: String, body_json: String, total_ms: Int, idle_ms: Int, on_text_delta: (String) -> Unit) -> Result[String, String] = _
+effect fn __openai_streaming_limited(base_url: String, api_key: String, body_json: String, total_ms: Int, idle_ms: Int, on_text_delta: (String) -> Unit) -> Result[String, String] = {
+  var sse = __sse_start()
+  __request_stream_limited(
+    "POST",
+    __openai_url(base_url),
+    body_json,
+    __openai_headers(api_key),
+    total_ms,
+    idle_ms,
+    (chunk) => {
+      sse = __openai_feed(sse, chunk, on_text_delta)
+    },
+  )!
+  __sse_final_json(sse.acc)
+}
+
+
+
+
+
+
+
+
+
+
+
+fn __openai_url(base_url: String) -> String = __trim_end_slashes(base_url) + "/chat/completions"
+
+fn __trim_end_slashes(s: String) -> String =
+  if string.ends_with(s, "/") then __trim_end_slashes(string.drop_end(s, 1)) else s
+
+fn __openai_headers(api_key: String) -> Map[String, String] = ["Authorization": "Bearer " + api_key, "Content-Type": "application/json", "Accept": "text/event-stream"]
+
+fn __sse_start() -> { buffer: String, done: Bool, acc: { content: String, calls: List[(String, String, String)], prompt: Int, completion: Int, total: Int, finish: String, model: String } } = {
+  buffer: "",
+  done: false,
+  acc: { content: "", calls: [], prompt: 0, completion: 0, total: 0, finish: "", model: "" },
+}
+
+
+
+fn __openai_feed(sse: { buffer: String, done: Bool, acc: { content: String, calls: List[(String, String, String)], prompt: Int, completion: Int, total: Int, finish: String, model: String } }, chunk: String, on_delta: (String) -> Unit) -> { buffer: String, done: Bool, acc: { content: String, calls: List[(String, String, String)], prompt: Int, completion: Int, total: Int, finish: String, model: String } } =
+  if sse.done then sse
+  else {
+    let (payloads, rest, done) = __sse_take(sse.buffer + chunk, [])
+    {
+      buffer: rest,
+      done: done,
+      acc: payloads |> list.fold(sse.acc, (acc, p) => __openai_event(acc, p, on_delta)),
+    }
+  }
+
+
+
+fn __sse_take(buf: String, payloads: List[String]) -> (List[String], String, Bool) = match string.index_of(
+  buf,
+  "\n\n",
+) {
+  none => (payloads, buf, false),
+  some(i) => {
+    let data = __sse_data(string.take(buf, i + 2))
+    let rest = string.drop(buf, i + 2)
+    if data == "" then __sse_take(rest, payloads)
+    else if string.trim(data) == "[DONE]" then (payloads, rest, true)
+    else __sse_take(rest, payloads + [data])
+  },
+}
+
+
+
+fn __sse_data(block: String) -> String = string.lines(block) |> list.filter_map((line) => string.strip_prefix(line, "data:")) |> list.fold(
+  "",
+  (acc, rest) => if acc == "" then string.trim_start(rest) else acc + "\n" + string.trim_start(rest),
+)
+
+fn __openai_event(acc: { content: String, calls: List[(String, String, String)], prompt: Int, completion: Int, total: Int, finish: String, model: String }, payload: String, on_delta: (String) -> Unit) -> { content: String, calls: List[(String, String, String)], prompt: Int, completion: Int, total: Int, finish: String, model: String } = match json.parse(payload) {
+  err(_) => acc,
+  ok(v) => {
+    let withmodel = { ...acc, model: __sse_set(acc.model, json.get_string(v, "model")) }
+    let counted = match value.field(v, "usage") {
+      ok(u) => { ...withmodel, prompt: __sse_int(u, "prompt_tokens") ?? withmodel.prompt, completion: __sse_int(
+        u,
+        "completion_tokens",
+      ) ?? withmodel.completion, total: __sse_int(u, "total_tokens") ?? withmodel.total },
+      err(_) => withmodel,
+    }
+    match list.get(json.get_array(v, "choices") ?? [], 0) {
+      some(first) => __openai_choice(counted, first, on_delta),
+      none => counted,
+    }
+  },
+}
+
+fn __openai_choice(acc: { content: String, calls: List[(String, String, String)], prompt: Int, completion: Int, total: Int, finish: String, model: String }, choice: Value, on_delta: (String) -> Unit) -> { content: String, calls: List[(String, String, String)], prompt: Int, completion: Int, total: Int, finish: String, model: String } = {
+  let finished = { ...acc, finish: __sse_set(acc.finish, json.get_string(choice, "finish_reason")) }
+  match value.field(choice, "delta") {
+    err(_) => finished,
+    ok(delta) => {
+      let text = json.get_string(delta, "content") ?? ""
+      if text != "" then on_delta(text) else ()
+      let shown = { ...finished, content: finished.content + text }
+      (json.get_array(delta, "tool_calls") ?? []) |> list.fold(
+        shown,
+        (a, tc) => __openai_tool(a, tc),
+      )
+    },
+  }
+}
+
+
+
+fn __openai_tool(acc: { content: String, calls: List[(String, String, String)], prompt: Int, completion: Int, total: Int, finish: String, model: String }, tc: Value) -> { content: String, calls: List[(String, String, String)], prompt: Int, completion: Int, total: Int, finish: String, model: String } = {
+  let index = __sse_int(tc, "index") ?? 0
+  let calls = if list.len(acc.calls) > index then acc.calls
+  else acc.calls + list.repeat(("", "", ""), index + 1 - list.len(acc.calls))
+  let (id, name, args) = list.get(calls, index) ?? ("", "", "")
+  let entry = match value.field(tc, "function") {
+    ok(f) => (__sse_set(id, json.get_string(tc, "id")), __sse_set(name, json.get_string(f, "name")), args + (json.get_string(
+      f,
+      "arguments",
+    ) ?? "")),
+    err(_) => (__sse_set(id, json.get_string(tc, "id")), name, args),
+  }
+  { ...acc, calls: list.set(calls, index, entry) }
+}
+
+
+fn __sse_set(slot: String, fresh: String?) -> String = match fresh {
+  some(v) => if v == "" then slot else v,
+  none => slot,
+}
+
+
+fn __sse_int(v: Value, key: String) -> Int? = match json.get_int(v, key) {
+  some(n) => some(n),
+  none => json.get_float(v, key) |> option.map((f) => float.to_int(f)),
+}
+
+
+fn __sse_esc(s: String) -> String = {
+  let quoted = value.stringify(value.str(s))
+  string.slice(quoted, 1, string.len(quoted) - 1)
+}
+
+
+
+fn __sse_final_json(acc: { content: String, calls: List[(String, String, String)], prompt: Int, completion: Int, total: Int, finish: String, model: String }) -> String = {
+  let calls = acc.calls |> list.map(((id, name, args)) => "{\"id\":\"" + __sse_esc(id) + "\",\"name\":\"" + __sse_esc(name) + "\",\"arguments\":\"" + __sse_esc(args) + "\"}") |> list.join(",")
+  let total = if acc.total != 0 then acc.total
+  else acc.prompt + acc.completion
+  "{\"content\":\"" + __sse_esc(acc.content) + "\",\"model\":\"" + __sse_esc(acc.model) + "\",\"usage\":{\"prompt_tokens\":" + int.to_string(acc.prompt) + ",\"completion_tokens\":" + int.to_string(acc.completion) + ",\"total_tokens\":" + int.to_string(total) + "},\"finish_reason\":\"" + __sse_esc(acc.finish) + "\",\"tool_calls\":[" + calls + "]}"
+}
 
 /// anthropic_streaming_call bounded by per-call limits.
 effect fn anthropic_streaming_call_with_limits(api_key: String, body_json: String, limits: HttpLimits, on_text_delta: (String) -> Unit) -> Result[String, String] = __anthropic_streaming_limited(

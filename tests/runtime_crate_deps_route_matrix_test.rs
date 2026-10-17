@@ -122,6 +122,6 @@ fn runtime_crate_deps_per_module() {
     let names = |code: &str| almide_codegen::runtime_crate_deps(code).into_iter().map(|(n, _)| n).collect::<Vec<_>>();
     assert_eq!(names("fn f() { almide_rt_zlib_deflate(x) }"), ["flate2"]);
     assert_eq!(names("fn f() { almide_rt_http_get(x) }"), ["rustls", "webpki-roots", "rustls-native-certs"]);
-    assert_eq!(names("fn f() { almide_rt_sse_openai_chat(x); almide_rt_http_get(y) }"), ["rustls", "webpki-roots", "rustls-native-certs"]);
+    assert_eq!(names("fn f() { almide_rt_sse_anthropic_messages(x); almide_rt_http_get(y) }"), ["rustls", "webpki-roots", "rustls-native-certs"]);
     assert!(names("fn f() { almide_rt_list_len(x) }").is_empty());
 }
