@@ -22,14 +22,13 @@ float.from_float32  endian_explicit_import  floor: consumed inside a self-hosted
 float.from_int  fan_map_parallel_scalar  floor: consumed inside a self-hosted body
 float.is_infinite  availability_pure_batch  floor: consumed inside a self-hosted body
 float.is_nan  availability_pure_batch  floor: consumed inside a self-hosted body
-float.sqrt  matrix_head_count_domain  floor: consumed inside a self-hosted body
 float.to_float32  bytes_writer_family  floor: consumed inside a self-hosted body
 float.to_float64  uint64_upper_half  floor: consumed inside a self-hosted body
 float.to_string  availability_pure_batch  floor: consumed inside a self-hosted body
 int.band  datetime_monotonic_ns  floor: consumed inside a self-hosted body
 int.bor  zlib_selfhost  floor: consumed inside a self-hosted body
-int.bshl  matrix_composition_family  floor: consumed inside a self-hosted body
-int.bshr  matrix_packed_weight_family  floor: consumed inside a self-hosted body
+int.bshl  zlib_selfhost  floor: consumed inside a self-hosted body
+int.bshr  zlib_selfhost  floor: consumed inside a self-hosted body
 int.bxor  zlib_selfhost  floor: consumed inside a self-hosted body
 int.from_int16  int_bit_family  floor: consumed inside a self-hosted body
 int.from_int32  checked_conversion_value_match  floor: consumed inside a self-hosted body
@@ -42,8 +41,7 @@ int.from_uint8  checked_conversion_value_match  floor: consumed inside a self-ho
 int.parse  datetime_parse_iso_strict  floor: consumed inside a self-hosted body
 int.to_float  int_bit_family  floor: consumed inside a self-hosted body
 int.to_string  availability_pure_batch  floor: consumed inside a self-hosted body
-math.cos  matrix_head_count_domain  floor: consumed inside a self-hosted body
-math.fpow  matrix_head_count_domain  floor: consumed inside a self-hosted body
+math.fpow  matrix_pow_libm  floor: consumed inside a self-hosted body
 math.log  math_log_gamma  floor: consumed inside a self-hosted body
 math.sin  math_log_gamma_negative  floor: consumed inside a self-hosted body
 string.chars  http_response_headers  floor: consumed inside a self-hosted body
