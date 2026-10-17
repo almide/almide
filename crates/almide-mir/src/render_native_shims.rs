@@ -9,7 +9,7 @@ use super::render_native::NTy;
 const SHIMS: &[(&str, &[NTy], Option<NTy>, &str)] = &[
     ("int.to_string", &[NTy::I64],
             Some(NTy::Str),
-            "fn rt_int_to_string(n: i64) -> String { n.to_string() }"),
+            "fn rt_int_to_string(n: i64) -> AlmideString { AlmideString::from(n.to_string()) }"),
     ("print_str", &[NTy::Str],
             None,
             "fn rt_print_str(s: &str) { println!(\"{}\", s); }"),
@@ -20,7 +20,7 @@ const SHIMS: &[(&str, &[NTy], Option<NTy>, &str)] = &[
             "fn rt_eprintln(s: &str) { eprintln!(\"{}\", s); }"),
     ("__str_concat", &[NTy::Str, NTy::Str],
             Some(NTy::Str),
-            "fn rt_str_concat(a: &str, b: &str) -> String { [a, b].concat() }"),
+            "fn rt_str_concat(a: &str, b: &str) -> AlmideString { AlmideString::from([a, b].concat()) }"),
     ("string.eq", &[NTy::Str, NTy::Str],
             Some(NTy::I64),
             "fn rt_string_eq(a: &str, b: &str) -> i64 { (a == b) as i64 }"),
@@ -43,13 +43,13 @@ const SHIMS: &[(&str, &[NTy], Option<NTy>, &str)] = &[
             "fn rt_string_ends_with(s: &str, p: &str) -> i64 { s.ends_with(p) as i64 }"),
     ("string.to_upper", &[NTy::Str],
             Some(NTy::Str),
-            "fn rt_string_to_upper(s: &str) -> String { s.to_uppercase() }"),
+            "fn rt_string_to_upper(s: &str) -> AlmideString { AlmideString::from(s.to_uppercase()) }"),
     ("string.to_lower", &[NTy::Str],
             Some(NTy::Str),
-            "fn rt_string_to_lower(s: &str) -> String { s.to_lowercase() }"),
+            "fn rt_string_to_lower(s: &str) -> AlmideString { AlmideString::from(s.to_lowercase()) }"),
     ("string.trim", &[NTy::Str],
             Some(NTy::Str),
-            "fn rt_string_trim(s: &str) -> String { s.trim().to_string() }"),
+            "fn rt_string_trim(s: &str) -> AlmideString { AlmideString::from(s.trim()) }"),
     // #1869: `list.range` joins the floor as a closed shim. The lowering
     // materializes a `let`-bound range that is indexed or measured as
     // `CallFn list.range(s, e)`; without a floor entry the whole program
@@ -80,7 +80,7 @@ const SHIMS: &[(&str, &[NTy], Option<NTy>, &str)] = &[
             // wasm leg printed normally — a crash-form divergence the C-161
             // rule forbids (differential fuzz, seed 1785015406589852000 index
             // 1012). Keep in sync with ALMIDE_REPEAT_MAX_BYTES.
-            "fn rt_string_repeat(s: &str, n: i64) -> String {\n    let n = n.max(0);\n    if (s.len() as i64).saturating_mul(n) > (1i64 << 31) {\n        eprintln!(\"Error: repeat result too large\");\n        std::process::exit(1);\n    }\n    s.repeat(n as usize)\n}"),
+            "fn rt_string_repeat(s: &str, n: i64) -> AlmideString {\n    let n = n.max(0);\n    if (s.len() as i64).saturating_mul(n) > (1i64 << 31) {\n        eprintln!(\"Error: repeat result too large\");\n        std::process::exit(1);\n    }\n    AlmideString::from(s.repeat(n as usize))\n}"),
     ("string.cmp", // Byte-wise lexicographic, -1/0/1 (C-019: rt_string_extra cmp = native oracle).
             &[NTy::Str, NTy::Str],
             Some(NTy::I64),
@@ -89,7 +89,7 @@ const SHIMS: &[(&str, &[NTy], Option<NTy>, &str)] = &[
             // shortest round-trip Display, integral values forced to a `.0` tail.
             &[NTy::F64],
             Some(NTy::Str),
-            "fn rt_float_to_string(n: f64) -> String {\n    let s = format!(\"{}\", n);\n    if n.fract() == 0.0 && !s.contains('.') && !s.contains(\"inf\") && !s.contains(\"NaN\") {\n        format!(\"{}.0\", s)\n    } else {\n        s\n    }\n}"),
+            "fn rt_float_to_string(n: f64) -> AlmideString {\n    let s = format!(\"{}\", n);\n    AlmideString::from(if n.fract() == 0.0 && !s.contains('.') && !s.contains(\"inf\") && !s.contains(\"NaN\") {\n        format!(\"{}.0\", s)\n    } else {\n        s\n    })\n}"),
     ("__chk_div", &[NTy::I64, NTy::I64],
             Some(NTy::I64),
             "fn rt_chk_div(a: i64, b: i64) -> i64 {\n    if b == 0 { eprintln!(\"Error: division by zero\"); std::process::exit(1); }\n    if a == i64::MIN && b == -1 { eprintln!(\"Error: integer overflow\"); std::process::exit(1); }\n    a / b\n}"),

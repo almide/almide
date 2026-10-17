@@ -611,12 +611,12 @@ fn render_else(
                 var(v),
             ),
             NTy::Str => (
-                format!("let mut {}: AlmideString = String::new();", var(*d)),
+                format!("let mut {}: AlmideString = AlmideString::new();", var(*d)),
                 NTy::Str,
                 format!("{}.clone()", var(v)),
             ),
             NTy::StrRef => (
-                format!("let mut {}: AlmideString = String::new();", var(*d)),
+                format!("let mut {}: AlmideString = AlmideString::new();", var(*d)),
                 NTy::Str,
                 format!("{}.to_string()", var(v)),
             ),
