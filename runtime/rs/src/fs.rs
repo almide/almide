@@ -17,9 +17,15 @@ use std::path::Path;
 // `crates/almide-wasm-run/src/host.rs` carries the twin of this pair, and its
 // comment promises this formatting VERBATIM — the structural wasm leg crosses to
 // that host for every `fs.*` call, so the two move together or C-215 breaks.
-fn io_err(call: &str, args: &str, e: impl std::fmt::Display) -> String {
-    format!("{call}({args}): {e}")
+//
+// The suffix is the platform's Display only where every compared host spells
+// it alike. ENOTEMPTY, ENAMETOOLONG and EXDEV differ in number or text, so they
+// answer the classified errno-free text of almide-base's one table (C-273):
+// `fs.remove("d"): Directory not empty` on every host and every leg.
+fn io_err(call: &str, args: &str, e: std::io::Error) -> String {
+    format!("{call}({args}): {}", fs_io_error_text(&e))
 }
+include!("../../../crates/almide-base/src/fs_errno_classified.rs");
 // Source-shaped quoting, so the operand reads back as the writer spelled it.
 //
 // DELIBERATELY not Rust's `{:?}`. Four independent implementations have to emit

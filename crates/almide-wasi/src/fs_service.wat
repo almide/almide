@@ -21,8 +21,9 @@
 ;;
 ;; Results stage through `$stage`, which keeps them clear of the one guest
 ;; allocation that precedes `host_read` (the `stage_for` rule in
-;; wasi_shims.rs). Error texts are `almide_base::fs_errno`'s rows; an errno the
-;; table does not spell answers `filesystem operation failed (wasi errno N)`.
+;; wasi_shims.rs). Error texts are `almide_base::fs_errno`'s rows (Display and
+;; classified alike); an errno the table does not spell answers
+;; `filesystem operation failed (wasi errno N)`.
 (module
   (import "wasi_snapshot_preview1" "fd_write" (func $fd_write (param i32 i32 i32 i32) (result i32)))
   (import "wasi_snapshot_preview1" "fd_read" (func $fd_read (param i32 i32 i32 i32) (result i32)))
