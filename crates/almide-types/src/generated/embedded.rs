@@ -26514,7 +26514,8 @@ fn __qw_linear(kind: Int, x: Matrix, w: Bytes, off: Int, rows: Int, cols: Int) -
 fn __qw_block(kind: Int, neox: Bool, hidden: Int, h: Matrix, k_cache: Matrix, v_cache: Matrix, w: Bytes, gamma_offs: List[Int], weight_offs: List[Int], start_pos: Int, n_q_heads: Int, n_kv_heads: Int, head_dim: Int, ffn_hidden: Int, rope_theta: Float, eps: Float) -> (Matrix, Matrix, Matrix) = {
   let q_hidden = n_q_heads * head_dim
   let kv_hidden = n_kv_heads * head_dim
-  let n_rep = n_q_heads / n_kv_heads
+
+  let n_rep = n_q_heads / __mxp_head_count(n_kv_heads)
   let hd = __mxp_clamp(head_dim)
   let gamma_attn = __qw_gamma(w, gamma_offs[0], hidden)
   let gamma_q = __qw_gamma(w, gamma_offs[1], hd)
