@@ -40,8 +40,6 @@
 # the ratchet can see, so it is listed and ratcheted too.
 bytes.copy_to_ptr :: UNPROBEABLE :: parameter type outside the synthesizer
 bytes.from_raw_ptr :: UNPROBEABLE :: parameter type outside the synthesizer
-http.anthropic_streaming_call :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call http.anthropic_streaming_call needs a declared capability not in this brick
-http.anthropic_streaming_call_with_limits :: UNPROBEABLE :: parameter type outside the synthesizer
 http.body :: UNPROBEABLE :: parameter type outside the synthesizer
 http.cancel :: UNPROBEABLE :: parameter type outside the synthesizer
 http.decode_json :: UNPROBEABLE :: parameter type outside the synthesizer
@@ -55,8 +53,6 @@ http.get_status :: HOST_CAPABILITY :: http client is an OS socket API — checks
 http.header_values :: UNPROBEABLE :: parameter type outside the synthesizer
 http.headers :: UNPROBEABLE :: parameter type outside the synthesizer
 http.mount :: UNPROBEABLE :: parameter type outside the synthesizer
-http.openai_streaming_call :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call http.openai_streaming_call needs a declared capability not in this brick
-http.openai_streaming_call_with_limits :: UNPROBEABLE :: parameter type outside the synthesizer
 http.param :: UNPROBEABLE :: parameter type outside the synthesizer
 http.patch :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call http.patch needs a declared capability not in this brick
 http.patch_response :: HOST_CAPABILITY :: http client is an OS socket API — checks and builds natively, the wasm leg walls (sweep verdict GAP: wasm build failed)
