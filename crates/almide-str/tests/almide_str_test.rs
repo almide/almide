@@ -183,6 +183,29 @@ fn random_edits_over_shared_handles_match_a_string_model() {
 }
 
 #[test]
+fn the_header_is_sixteen_bytes_and_capacity_survives_every_edit_path() {
+    assert_eq!(std::mem::size_of::<almide_str::AlmideStrHeader>(), 16);
+    let mut s = AlmideStr::with_capacity(10);
+    assert_eq!((s.len(), s.capacity()), (0, 10));
+    s.push_str("abc"); // the handle's fast path
+    assert_eq!((s.len(), s.capacity()), (3, 10));
+    {
+        let mut u = s.unique();
+        u.push_str("defg");
+        u.push('h');
+    }
+    assert_eq!((s.as_str(), s.capacity()), ("abcdefgh", 10));
+    s.push_str("ijklmnop"); // grows
+    assert_eq!(s.as_str(), "abcdefghijklmnop");
+    assert!(s.capacity() >= 16);
+    let cap = s.capacity();
+    s.clear();
+    assert_eq!((s.len(), s.capacity()), (0, cap), "clearing a unique block keeps its room");
+    s.push_str("z");
+    assert_eq!((s.as_str(), s.capacity()), ("z", cap));
+}
+
+#[test]
 fn from_i64_renders_like_to_string_in_one_exact_block() {
     for n in [0i64, 1, -1, 9, 10, -10, 12345, -98765, i64::MAX, i64::MIN, 1 << 40, -(1 << 40)] {
         let s = AlmideStr::from_i64(n);

@@ -1,6 +1,6 @@
 // AlmideStr: ADR-0013's shared immutable string buffer (stage 2, step 2).
 //
-// One heap block `[rc, len, cap | bytes]`, the wasm leg's string layout:
+// One heap block `[rc, spare, len | bytes]` with a 16-byte header (the wasm leg's string block is `[rc, len, cap]`):
 // - `Clone` adds one to `rc`.
 // - `Drop` takes one away and frees the block at zero.
 // - `rc == 0` marks an immortal static block (the empty string, literals). It is never written and never freed.
@@ -23,20 +23,32 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 use std::ptr::NonNull;
-use std::sync::atomic::{fence, AtomicUsize, Ordering as AtomicOrdering};
+use std::sync::atomic::{fence, AtomicU32, AtomicUsize, Ordering as AtomicOrdering};
 
 /// The block header. The bytes follow it directly, at offset `ALMIDE_STR_HDR`.
+///
+/// The capacity is `len + spare`. Holding the spare room in 32 bits keeps the
+/// header at 16 bytes rather than 24: a short string's block (header and
+/// bytes) then lands in the same allocator size class as a `String`'s bytes
+/// alone, where a 24-byte header put it one class up. Length is not limited;
+/// only the spare room is, to `u32::MAX` bytes (`almide_str_max_cap`).
 #[repr(C)]
 pub struct AlmideStrHeader {
-    rc: AtomicUsize,
+    rc: AtomicU32,
+    spare: u32,
     len: usize,
-    cap: usize,
 }
 
 const ALMIDE_STR_HDR: usize = std::mem::size_of::<AlmideStrHeader>();
 
 /// The thread-shared bit of `rc`: the block may be owned from several threads.
-const ALMIDE_STR_SHARED: usize = 1 << (usize::BITS - 1);
+const ALMIDE_STR_SHARED: u32 = 1 << (u32::BITS - 1);
+
+/// The largest capacity a block of length `len` may have: its spare room fits the header's 32 bits.
+#[inline]
+fn almide_str_max_cap(len: usize) -> usize {
+    len.saturating_add(u32::MAX as usize)
+}
 
 /// Non-zero while a thread marks a value: every block cloned in that window
 /// is marked, so a clone of the value marks everything it reaches. A clone on
@@ -78,7 +90,7 @@ impl<const N: usize> AlmideStrStatic<N> {
             bytes[i] = src[i];
             i += 1;
         }
-        AlmideStrStatic { header: AlmideStrHeader { rc: AtomicUsize::new(0), len: N, cap: N }, bytes }
+        AlmideStrStatic { header: AlmideStrHeader { rc: AtomicU32::new(0), spare: 0, len: N }, bytes }
     }
 }
 
@@ -89,31 +101,36 @@ fn almide_str_layout(cap: usize) -> Layout {
     Layout::from_size_align(size, std::mem::align_of::<AlmideStrHeader>()).expect("AlmideStr capacity overflow")
 }
 
-/// A fresh heap block with `rc = 1`, the given capacity and length; the bytes are uninitialised.
+/// A fresh heap block with `rc = 1`, the given length and capacity (clamped to `almide_str_max_cap(len)`); the bytes are uninitialised.
 #[inline]
 fn almide_str_alloc(cap: usize, len: usize) -> NonNull<AlmideStrHeader> {
+    let cap = cap.min(almide_str_max_cap(len));
     let layout = almide_str_layout(cap);
     // SAFETY: the layout's size is at least the header's, so it is non-zero.
     let raw = unsafe { alloc(layout) }.cast::<AlmideStrHeader>();
     let block = NonNull::new(raw).unwrap_or_else(|| handle_alloc_error(layout));
-    // SAFETY: the block is freshly allocated, sized and aligned for the header.
-    unsafe { block.as_ptr().write(AlmideStrHeader { rc: AtomicUsize::new(1), len, cap }) };
+    // SAFETY: the block is freshly allocated, sized and aligned for the header; `cap - len` fits 32 bits (clamped above).
+    unsafe { block.as_ptr().write(AlmideStrHeader { rc: AtomicU32::new(1), spare: (cap - len) as u32, len }) };
     block
 }
 
-/// Resizes a unique heap block so `extra` more bytes fit after `len`. The capacity at least doubles. Returns the block and its new capacity.
+/// Resizes a unique heap block from capacity `cap` to `new_cap`. The header's `len` and `spare` are left to the unique view, which writes both when it ends.
+#[cold]
+#[inline(never)]
+fn almide_str_realloc(block: NonNull<AlmideStrHeader>, cap: usize, new_cap: usize) -> NonNull<AlmideStrHeader> {
+    let new_size = almide_str_layout(new_cap).size();
+    // SAFETY: the caller holds the only owner of a heap block (static ones were copied by `unique_with`), allocated with `cap`'s layout.
+    let raw = unsafe { realloc(block.as_ptr().cast(), almide_str_layout(cap), new_size) }.cast::<AlmideStrHeader>();
+    NonNull::new(raw).unwrap_or_else(|| handle_alloc_error(almide_str_layout(new_cap)))
+}
+
+/// Resizes a unique heap block so `extra` more bytes fit after `len`. The capacity at least doubles, within the spare room the header can record. Returns the block and its new capacity.
 #[cold]
 #[inline(never)]
 fn almide_str_grow(block: NonNull<AlmideStrHeader>, len: usize, cap: usize, extra: usize) -> (NonNull<AlmideStrHeader>, usize) {
     let need = len.checked_add(extra).expect("AlmideStr capacity overflow");
-    let new_cap = need.max(cap.saturating_mul(2)).max(8);
-    let new_size = almide_str_layout(new_cap).size();
-    // SAFETY: the caller holds the only owner of a heap block (static ones were copied by `unique_with`), allocated with `cap`'s layout.
-    let raw = unsafe { realloc(block.as_ptr().cast(), almide_str_layout(cap), new_size) }.cast::<AlmideStrHeader>();
-    let grown = NonNull::new(raw).unwrap_or_else(|| handle_alloc_error(almide_str_layout(new_cap)));
-    // SAFETY: `grown` is the live, resized block; only its capacity changes here.
-    unsafe { (*grown.as_ptr()).cap = new_cap };
-    (grown, new_cap)
+    let new_cap = need.max(cap.saturating_mul(2)).max(8).min(almide_str_max_cap(need));
+    (almide_str_realloc(block, cap, new_cap), new_cap)
 }
 
 pub struct AlmideStr {
@@ -136,13 +153,13 @@ impl AlmideStr {
     }
 
     #[inline]
-    fn rc_cell(&self) -> &AtomicUsize {
+    fn rc_cell(&self) -> &AtomicU32 {
         // SAFETY: `ptr` always points at a live header, heap or static; only the count is borrowed.
         unsafe { &(*self.ptr.as_ptr()).rc }
     }
 
     #[inline]
-    fn rc(&self) -> usize {
+    fn rc(&self) -> u32 {
         self.rc_cell().load(AtomicOrdering::Relaxed)
     }
 
@@ -172,7 +189,7 @@ impl AlmideStr {
     #[inline]
     pub fn capacity(&self) -> usize {
         // SAFETY: as in `rc`.
-        unsafe { (*self.ptr.as_ptr()).cap }
+        self.len() + unsafe { (*self.ptr.as_ptr()).spare } as usize
     }
 
     /// True when this handle is the block's only owner, so `unique()` will not copy.
@@ -184,7 +201,7 @@ impl AlmideStr {
 
     /// The number of owners, or 0 for an immortal static block.
     pub fn ref_count(&self) -> usize {
-        self.rc() & !ALMIDE_STR_SHARED
+        (self.rc() & !ALMIDE_STR_SHARED) as usize
     }
 
     /// True when both handles share one block.
@@ -229,7 +246,10 @@ impl AlmideStr {
             // SAFETY: a unique heap block with room for `n` more bytes; `t` is not inside it (this handle is its only owner and is held mutably).
             unsafe {
                 std::ptr::copy_nonoverlapping(t.as_ptr(), self.data().add(len), n);
-                (*self.ptr.as_ptr()).len = len + n;
+                let h = self.ptr.as_ptr();
+                (*h).len = len + n;
+                // `n` is at most the spare room just checked, so this does not wrap.
+                (*h).spare -= n as u32;
             }
             return;
         }
@@ -490,8 +510,18 @@ impl UniqueStr<'_> {
 
 impl Drop for UniqueStr<'_> {
     fn drop(&mut self) {
-        // SAFETY: the view's block is a unique heap block; `len <= cap` holds throughout.
-        unsafe { (*self.s.ptr.as_ptr()).len = self.len };
+        if self.cap - self.len > u32::MAX as usize {
+            // A big block cleared or truncated in the view: give back the room the header cannot record.
+            let cap = almide_str_max_cap(self.len);
+            self.s.ptr = almide_str_realloc(self.s.ptr, self.cap, cap);
+            self.cap = cap;
+        }
+        // SAFETY: the view's block is a unique heap block; `len <= cap` holds throughout, and `cap - len` fits 32 bits (ensured above).
+        unsafe {
+            let h = self.s.ptr.as_ptr();
+            (*h).len = self.len;
+            (*h).spare = (self.cap - self.len) as u32;
+        }
     }
 }
 
