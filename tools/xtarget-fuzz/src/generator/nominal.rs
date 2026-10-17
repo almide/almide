@@ -36,6 +36,11 @@ pub struct Nominal {
     /// reach a `var` (E008: handlers run concurrently): it is never bound
     /// with `var`, so it has no loop-rebind shape.
     pub refuses_var: bool,
+    /// A value of this type is work under way (a call in flight): a probe's
+    /// digest of a Result holding one reads it through [`Self::digest`],
+    /// which waits the work out, so the work the call began is measured
+    /// whole instead of racing the drop that cancels it.
+    pub in_flight: bool,
 }
 
 fn string() -> GenType {
@@ -85,6 +90,7 @@ pub const NOMINALS: &[Nominal] = &[
         digest: "1",
         observe_calls_effect: false,
         refuses_var: false,
+        in_flight: false,
     },
     // `fs.stat`'s record. Its mtime is the host's clock (`verdicts.rs`
     // checks it), so it is observed through the other three fields.
@@ -99,6 +105,7 @@ pub const NOMINALS: &[Nominal] = &[
         digest: "{v}.size",
         observe_calls_effect: false,
         refuses_var: false,
+        in_flight: false,
     },
     // `process.exec_status`'s record, from the fixed command set (ADR-0027 D4).
     Nominal {
@@ -112,6 +119,7 @@ pub const NOMINALS: &[Nominal] = &[
         digest: "{v}.code + string.len({v}.stdout)",
         observe_calls_effect: false,
         refuses_var: false,
+        in_flight: false,
     },
     Nominal {
         name: "HttpResponse",
@@ -130,6 +138,7 @@ pub const NOMINALS: &[Nominal] = &[
         digest: "map.len(http.headers({v}))",
         observe_calls_effect: false,
         refuses_var: false,
+        in_flight: false,
     },
     Nominal {
         name: "HttpRequest",
@@ -149,6 +158,7 @@ pub const NOMINALS: &[Nominal] = &[
         digest: "map.len(http.query_params({v}))",
         observe_calls_effect: false,
         refuses_var: false,
+        in_flight: false,
     },
     Nominal {
         name: "SafeHtml",
@@ -166,6 +176,7 @@ pub const NOMINALS: &[Nominal] = &[
         digest: "string.len(html.to_string({v}))",
         observe_calls_effect: false,
         refuses_var: false,
+        in_flight: false,
     },
     Nominal {
         name: "SafePath",
@@ -178,6 +189,7 @@ pub const NOMINALS: &[Nominal] = &[
         digest: "string.len(path.to_string({v}))",
         observe_calls_effect: false,
         refuses_var: false,
+        in_flight: false,
     },
     // `url.parse` is the only constructor; these inputs parse.
     Nominal {
@@ -195,6 +207,7 @@ pub const NOMINALS: &[Nominal] = &[
         digest: "string.len(url.to_string({v}))",
         observe_calls_effect: false,
         refuses_var: false,
+        in_flight: false,
     },
     // Observed by where it leads in a fixed value. The sized path is ONE
     // step whose key is n long: a path n steps deep is a structure n deep,
@@ -216,6 +229,7 @@ pub const NOMINALS: &[Nominal] = &[
         digest: "(if option.is_some(json.get_path(value.object([(\"a\", value.int(1))]), {v})) then 1 else 0)",
         observe_calls_effect: false,
         refuses_var: false,
+        in_flight: false,
     },
     // n rows of 2: the operands of the products agree with a 2 × 2 partner.
     Nominal {
@@ -229,6 +243,7 @@ pub const NOMINALS: &[Nominal] = &[
         digest: "matrix.rows({v})",
         observe_calls_effect: false,
         refuses_var: false,
+        in_flight: false,
     },
     // A request handler; observed by what it answers a fixed request. Its
     // values are one-level lambdas, which the checker lifts to the effect
@@ -248,6 +263,7 @@ pub const NOMINALS: &[Nominal] = &[
         digest: "string.len(http.body({v}(http.new_request(\"POST\", \"/p/7?x=1\", \"b\", map.new()))!))",
         observe_calls_effect: true,
         refuses_var: true,
+        in_flight: false,
     },
     // A route row; observed by what a one-row router answers. The sized
     // pattern has n literal segments before its parameter.
@@ -266,6 +282,7 @@ pub const NOMINALS: &[Nominal] = &[
         digest: "string.len(match http.router([{v}]) { ok(t) => http.body(t(http.new_request(\"GET\", \"/p/7\", \"\", map.new()))!), err(e) => e })",
         observe_calls_effect: true,
         refuses_var: true,
+        in_flight: false,
     },
     // A middleware; observed by what it makes of a fixed handler. Only
     // spellings that build no closure of their own: one that does is a
@@ -282,6 +299,7 @@ pub const NOMINALS: &[Nominal] = &[
         digest: "string.len(http.body(http.wrap((req) => http.response(200, \"base\"), [{v}])(http.new_request(\"GET\", \"/\", \"\", map.new()))!))",
         observe_calls_effect: true,
         refuses_var: true,
+        in_flight: false,
     },
     // A call's limits. Only limits no fixture exchange reaches (0 = none, or
     // far past what the loopback answers in): a limit that fires is the
@@ -302,6 +320,7 @@ pub const NOMINALS: &[Nominal] = &[
         digest: "{v}.total_ms + {v}.idle_ms",
         observe_calls_effect: false,
         refuses_var: false,
+        in_flight: false,
     },
     // A call in flight against the loopback fixture (ADR-0027 D5). It has
     // no value of its own: it is observed by how it ends (`http.wait`),
@@ -327,6 +346,7 @@ pub const NOMINALS: &[Nominal] = &[
         digest: "(match http.wait({v}) { ok(hr) => string.len(http.body(hr)), err(_) => 0 })",
         observe_calls_effect: true,
         refuses_var: false,
+        in_flight: true,
     },
     // The ADR-0001 clocks: an i64 of nanoseconds behind the checker's
     // firewall, observed through Repr (S7 keeps accessors omitted). A
@@ -342,6 +362,7 @@ pub const NOMINALS: &[Nominal] = &[
         digest: "string.len(\"${ {v} }\")",
         observe_calls_effect: false,
         refuses_var: false,
+        in_flight: false,
     },
     Nominal {
         name: "Compute",
@@ -354,6 +375,7 @@ pub const NOMINALS: &[Nominal] = &[
         digest: "string.len(\"${ {v} }\")",
         observe_calls_effect: false,
         refuses_var: false,
+        in_flight: false,
     },
 ];
 
