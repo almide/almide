@@ -448,7 +448,8 @@ pub fn to_wasi_mapped(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<(Vec<u8>
     let g_plen = global_count;
     // g_ppos exists only for the services that can stage outside the park
     // (#2120); a module without them keeps the fixed source and its bytes.
-    let g_ppos = services.stages_outside_park().then_some(global_count + 1);
+    // stdin take-n (op 35) stages a read larger than the park above the heap.
+    let g_ppos = (services.stages_outside_park() || host_ops.contains(&35)).then_some(global_count + 1);
     // The overlay log's globals (length, base, capacity) exist only when an
     // env service ships — nothing else reads or writes the log.
     let g_ovl = (services.env_get || services.env_set).then(|| {
@@ -645,7 +646,7 @@ pub fn to_wasi_mapped(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<(Vec<u8>
         code.function(&stub);
         code.function(&stub);
     } else {
-        code.function(&shim_fs_call(park, g_plen, g_ppos, &forward, host_ops));
+        code.function(&shim_fs_call(park, (g_plen, g_ppos, heap_global), &forward, host_ops));
         code.function(&shim_host_read(park, g_plen, g_ppos));
     }
     if f_env_get.is_some() {
@@ -687,9 +688,9 @@ pub fn to_wasi_mapped(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<(Vec<u8>
     if !host_ops.is_empty() {
         data.active(0, &ConstExpr::i32_const((park + MSG) as i32), UNSUPPORTED_MSG.iter().copied());
     }
-    // The high-staging services and the overlay log's growth are the only
-    // shim-side callers of memory.grow.
-    if f_env_get.is_some() || f_env_set.is_some() || f_args.is_some() {
+    // The high-staging services, the overlay log's growth and stdin take-n's
+    // arena are the only shim-side callers of memory.grow.
+    if f_env_get.is_some() || f_env_set.is_some() || f_args.is_some() || host_ops.contains(&35) {
         data.active(0, &ConstExpr::i32_const((park + MSG3) as i32), OOM_MSG.iter().copied());
     }
 
