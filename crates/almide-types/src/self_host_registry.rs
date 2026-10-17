@@ -315,7 +315,7 @@ pub fn self_host_runtime() -> &'static [SelfHostRow] {
         // The http call handle (#2633): `__call_start` / `__request_stream_limited` are
         // http.almd's private leaves (bare dunder demand keys, the codec-splice
         // convention); poll / read_new / wait / cancel are its public intrinsics.
-        (crate::embedded::SRC_HTTP_CALL, &[("__hc_start_impl", "__call_start"), ("__hc_stream_limited_impl", "__request_stream_limited"), ("__hc_poll_impl", "http.poll"), ("__hc_read_new_impl", "http.read_new"), ("__hc_wait_impl", "http.wait"), ("__hc_cancel_impl", "http.cancel")]),
+        (crate::embedded::SRC_HTTP_CALL, &[("__hc_start_impl", "__call_start"), ("__hc_stream_limited_impl", "__request_stream_limited"), ("__hc_stream_classic_impl", "http.request_stream"), ("__hc_poll_impl", "http.poll"), ("__hc_read_new_impl", "http.read_new"), ("__hc_wait_impl", "http.wait"), ("__hc_cancel_impl", "http.cancel")]),
         (crate::embedded::SRC_HTTP_SERVE, &[("http_serve", "http.serve")]),
         // The subprocess family (#2589, ADR-0025): one `almide:process/spawn`
         // call per fn, over the `__proc_*` host-op leaves.
