@@ -1,0 +1,4 @@
+expects_code = "E098"
+expects_error = "the closure passed to testing.assert_aborts captures `limit`, a local of the test"
+hint_substring = "make it a top-level `let`"
+expects_line_col = "8:44"
