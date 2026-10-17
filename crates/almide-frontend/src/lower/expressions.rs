@@ -276,9 +276,9 @@ fn lower_expr_control(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option
                 left: Box::new(ctx.mk(IrExprKind::Var { id: ok_var }, Ty::Int, span)),
                 right: Box::new(ctx.mk(IrExprKind::LitInt { value: 1 }, Ty::Int, span)),
             }, Ty::Bool, span);
-            let ok_arm = ctx.mk(IrExprKind::ResultOk {
-                expr: Box::new(ctx.mk(IrExprKind::Var { id: val_var }, arm_ty, span)),
-            }, result_ty.clone(), span);
+            // The fold's winner slot is already the `ok(v)` Result (#3782).
+            let _ = arm_ty;
+            let ok_arm = ctx.mk(IrExprKind::Var { id: val_var }, result_ty.clone(), span);
             let err_arm = ctx.mk(IrExprKind::ResultErr {
                 expr: Box::new(ctx.mk(IrExprKind::LitStr {
                     value: "fan.race: no branch completed within budget".to_string(),
@@ -300,9 +300,9 @@ fn lower_expr_control(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option
                 left: Box::new(ctx.mk(IrExprKind::Var { id: ok_var }, Ty::Int, span)),
                 right: Box::new(ctx.mk(IrExprKind::LitInt { value: 1 }, Ty::Int, span)),
             }, Ty::Bool, span);
-            let ok_arm = ctx.mk(IrExprKind::ResultOk {
-                expr: Box::new(ctx.mk(IrExprKind::Var { id: val_var }, arm_ty, span)),
-            }, result_ty.clone(), span);
+            // The fold's winner slot is already the `ok(v)` Result (#3782).
+            let _ = arm_ty;
+            let ok_arm = ctx.mk(IrExprKind::Var { id: val_var }, result_ty.clone(), span);
             let err_arm = ctx.mk(IrExprKind::ResultErr {
                 expr: Box::new(ctx.mk(IrExprKind::LitStr {
                     value: "fan.race: no branch completed within budget".to_string(),
@@ -538,10 +538,26 @@ fn lower_expr_variant(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option
                 left: Box::new(ctx.mk(IrExprKind::Var { id: ok_var }, Ty::Int, span)),
                 right: Box::new(ctx.mk(IrExprKind::LitInt { value: 1 }, Ty::Int, span)),
             }, Ty::Bool, span);
-            let tail = ctx.mk(IrExprKind::If {
-                cond: Box::new(cond),
-                then: Box::new(ctx.mk(IrExprKind::Var { id: val_var }, arm_ty.clone(), span)),
-                else_: Box::new(fb_ir),
+            // The winner slot is `ok(v)` exactly when the ok flag is set
+            // (#3782), so the fused tail is a match on it; the flag stays the
+            // fold's own bookkeeping.
+            let _ = cond;
+            let slot_ty = Ty::result(arm_ty.clone(), Ty::String);
+            let payload = ctx.var_table.alloc(sym("__r_win"), arm_ty.clone(), almide_ir::Mutability::Let, span);
+            let tail = ctx.mk(IrExprKind::Match {
+                subject: Box::new(ctx.mk(IrExprKind::Var { id: val_var }, slot_ty, span)),
+                arms: vec![
+                    almide_ir::IrMatchArm {
+                        pattern: almide_ir::IrPattern::Ok { inner: Box::new(almide_ir::IrPattern::Bind { var: payload, ty: arm_ty.clone() }) },
+                        guard: None,
+                        body: ctx.mk(IrExprKind::Var { id: payload }, arm_ty.clone(), span),
+                    },
+                    almide_ir::IrMatchArm {
+                        pattern: almide_ir::IrPattern::Err { inner: Box::new(almide_ir::IrPattern::Wildcard) },
+                        guard: None,
+                        body: fb_ir,
+                    },
+                ],
             }, arm_ty.clone(), span);
             ctx.mk(IrExprKind::Block { stmts, expr: Some(Box::new(tail)) }, arm_ty, span)
         }
@@ -557,10 +573,26 @@ fn lower_expr_variant(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option
                 left: Box::new(ctx.mk(IrExprKind::Var { id: ok_var }, Ty::Int, span)),
                 right: Box::new(ctx.mk(IrExprKind::LitInt { value: 1 }, Ty::Int, span)),
             }, Ty::Bool, span);
-            let tail = ctx.mk(IrExprKind::If {
-                cond: Box::new(cond),
-                then: Box::new(ctx.mk(IrExprKind::Var { id: val_var }, arm_ty.clone(), span)),
-                else_: Box::new(fb_ir),
+            // The winner slot is `ok(v)` exactly when the ok flag is set
+            // (#3782), so the fused tail is a match on it; the flag stays the
+            // fold's own bookkeeping.
+            let _ = cond;
+            let slot_ty = Ty::result(arm_ty.clone(), Ty::String);
+            let payload = ctx.var_table.alloc(sym("__r_win"), arm_ty.clone(), almide_ir::Mutability::Let, span);
+            let tail = ctx.mk(IrExprKind::Match {
+                subject: Box::new(ctx.mk(IrExprKind::Var { id: val_var }, slot_ty, span)),
+                arms: vec![
+                    almide_ir::IrMatchArm {
+                        pattern: almide_ir::IrPattern::Ok { inner: Box::new(almide_ir::IrPattern::Bind { var: payload, ty: arm_ty.clone() }) },
+                        guard: None,
+                        body: ctx.mk(IrExprKind::Var { id: payload }, arm_ty.clone(), span),
+                    },
+                    almide_ir::IrMatchArm {
+                        pattern: almide_ir::IrPattern::Err { inner: Box::new(almide_ir::IrPattern::Wildcard) },
+                        guard: None,
+                        body: fb_ir,
+                    },
+                ],
             }, arm_ty.clone(), span);
             ctx.mk(IrExprKind::Block { stmts, expr: Some(Box::new(tail)) }, arm_ty, span)
         }

@@ -93,7 +93,10 @@ pub enum MeteredBoundary {
 pub fn metered_boundary(ty: &Ty) -> Option<MeteredBoundary> {
     use almide_lang::types::constructor::TypeConstructorId as C;
     match ty {
-        Ty::Int | Ty::Float => Some(MeteredBoundary::Same),
+        // Float is NOT spliced: the v1 region render types a Float region's
+        // locals as `i64` (`wrapping_add` on an f64, #3782), so a Float region
+        // takes the codegen meter instead — the same meter as wasm.
+        Ty::Int => Some(MeteredBoundary::Same),
         Ty::Bool => Some(MeteredBoundary::Bool),
         Ty::String => Some(MeteredBoundary::Str),
         Ty::Applied(C::List, a) if matches!(a.as_slice(), [Ty::Int]) => Some(MeteredBoundary::IntList),
