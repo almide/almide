@@ -1,0 +1,3 @@
+expects_code = "E002"
+expects_error = "undefined function 'matrix.rope_rotate'"
+hint_substring = "nn.rope_rotate"

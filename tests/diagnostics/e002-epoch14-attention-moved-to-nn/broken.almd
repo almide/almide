@@ -1,0 +1,5 @@
+fn main() -> Unit = {
+  let x = matrix.ones(2, 4)
+  let y = matrix.multi_head_attention(x, x, x, 2)
+  println(int.to_string(matrix.rows(y)))
+}
