@@ -133,7 +133,10 @@ impl Toolchain {
         // "artifact" names the checked source, and `run_wasm` runs it there.
         let src = std::fs::read_to_string(file).unwrap_or_default();
         if crate::generator::needs_embedded(&src) {
-            let checked = self.run_almide(&["check", &file.to_string_lossy(), "--target", "wasm"]);
+            // `check --target wasm` audits the STOCK artifact, which refuses
+            // these functions (E081) by design; the embedded host's own run
+            // is the build.
+            let checked = self.run_almide(&["check", &file.to_string_lossy()]);
             if checked.success() {
                 let _ = std::fs::write(out, format!("{EMBEDDED_LEG}{}", absolute(file).display()));
             }
@@ -258,6 +261,9 @@ impl Toolchain {
             cmd.arg(format!("--dir={}::.", dir.display()));
             cmd.arg(format!("--dir={}::/tmp", super::sandbox::tmp_of(dir).display()));
             for (k, v) in super::sandbox::ENV {
+                cmd.arg(format!("--env={k}={v}"));
+            }
+            for (k, v) in super::fixture::env() {
                 cmd.arg(format!("--env={k}={v}"));
             }
             cmd.arg(&wasm);
@@ -405,6 +411,7 @@ impl Toolchain {
             cmd.env(k, v);
         }
         cmd.env("TMPDIR", super::sandbox::tmp_of(&dir));
+        cmd.envs(super::fixture::env().iter().map(|(k, v)| (k, v)));
         let mut res = self.spawn_timed_with(cmd, std::fs::File::open(&stdin).ok());
         res.tree = Some(super::sandbox::snapshot(&dir));
         super::sandbox::remove(&dir, &stdin);

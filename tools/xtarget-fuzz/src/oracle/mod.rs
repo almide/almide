@@ -16,6 +16,7 @@
 mod interp;
 mod ladder;
 mod runner;
+pub(crate) mod fixture;
 pub(crate) mod sandbox;
 
 pub use interp::InterpOracle;

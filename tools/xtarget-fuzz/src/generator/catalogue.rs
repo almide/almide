@@ -87,14 +87,14 @@ pub struct Signature {
 /// so their effect functions are catalogued (tier E1,
 /// docs/roadmap/active/effect-inspection-harness.md). Every other effect
 /// function stays out.
-pub const SANDBOXED_EFFECT_MODULES: &[&str] = &["fs", "env", "io", "args", "process"];
+pub const SANDBOXED_EFFECT_MODULES: &[&str] = &["fs", "env", "io", "args", "process", "net", "http"];
 
 /// Modules whose functions the stock runtime cannot serve but the embedded
 /// host does (`target-availability.toml` rows whose only leg is stock-p1):
 /// a program calling one runs its wasm leg on the embedded host
 /// ([`needs_embedded`], ADR-0027 D1). `process` runs a fixed command set
 /// (D4, `term.rs`).
-pub const EMBEDDED_ROUTED_MODULES: &[&str] = &["process"];
+pub const EMBEDDED_ROUTED_MODULES: &[&str] = &["process", "net", "http"];
 
 /// Effect modules that reach no host: a computation that can fail, the same
 /// on every run and every leg, so their effect functions are catalogued with
@@ -213,6 +213,8 @@ const BUNDLED_MODULES: &[(&str, &str, bool)] = &[
     ("random", include_str!("../../../../stdlib/random.almd"), true),
     ("process", include_str!("../../../../stdlib/process.almd"), true),
     ("mem", include_str!("../../../../stdlib/mem.almd"), true),
+    // Over the loopback fixtures only (`oracle/fixture.rs`, `term.rs`).
+    ("net", include_str!("../../../../stdlib/net.almd"), true),
 ];
 
 /// The ADR-0001 clock constructors (`duration.ms(n)`, `compute.s(n)`, …):
