@@ -10,7 +10,8 @@
 //! - `/echo` — 200, body `<METHOD> <path> <request body>`
 //! - `/status/<code>` — that status, body `s<code>`
 //! - `/bytes/<n>` — 200, n bytes `i % 251`
-//! - `/chunked/<n>` — 200, chunked, n chunks `c<i>\n`
+//! - `/chunked/<n>` — 200, chunked, n chunks `c<i>\n`, i zero-padded to 7 digits so
+//!   the body grows exactly with n (an unpadded index adds log n bytes per chunk)
 //! - `/sse/<n>` — 200, `text/event-stream`, n OpenAI-shaped delta events then
 //!   `data: [DONE]`
 //! - anything else — 404, body `missing`
@@ -151,7 +152,7 @@ fn respond(w: &mut impl Write, method: &str, path: &str, body: &[u8]) -> std::io
         return whole(w, 200, "application/octet-stream", &(0..n).map(|i| (i % 251) as u8).collect::<Vec<_>>());
     }
     if let Some(n) = num("/chunked/") {
-        return chunked(w, "text/plain", (0..n).map(|i| format!("c{i}\n")));
+        return chunked(w, "text/plain", (0..n).map(|i| format!("c{i:07}\n")));
     }
     // OpenAI-compatible base URL `/sse/<n>`: `<base>/chat/completions`.
     let path = path.strip_suffix("/chat/completions").unwrap_or(path);
