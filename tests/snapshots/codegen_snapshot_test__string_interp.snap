@@ -133,5 +133,5 @@ pub fn almide_rt_int_from_uint64(n: u64) -> i64 { n as i64 }
 
 //__ALMIDE_RT_BOUNDARY__
 pub fn describe(name: &str, age: i64) -> AlmideString {
-    AlmideString::from(format!("{} is {} years old", name, almide_rt_int_to_string(age)))
+    AlmideString::from_fmt(format_args!("{} is {} years old", name, almide_rt_int_to_string(age)))
 }
