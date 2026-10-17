@@ -1,8 +1,10 @@
 //! The network a run sees (ADR-0027 D5): TCP echo, sink and source servers and a small
 //! HTTP/1.1 server on 127.0.0.1, started once per harness process and handed
 //! to every run as `XF_TCP_PORT` / `XF_SINK_PORT` / `XF_SOURCE_PORT` / `XF_HTTP`
-//! (the same on every leg). No run
-//! reaches any other host.
+//! (the same on every leg), and a Unix-domain sink (`XF_UNIX_SINK`, #3620): a
+//! listener at a short absolute path (`sun_path` holds at most 104 bytes on
+//! macOS) that accepts every connection and drains it, so a `net.unix_send`
+//! of any size never backs up. No run reaches any other host.
 //!
 //! HTTP routes (every answer has a Content-Length unless chunked):
 //! - `/echo` — 200, body `<METHOD> <path> <request body>`
@@ -30,6 +32,7 @@ pub fn env() -> &'static [(String, String)] {
             ("XF_SINK_PORT".into(), sink.to_string()),
             ("XF_SOURCE_PORT".into(), source.to_string()),
             ("XF_HTTP".into(), format!("127.0.0.1:{http}")),
+            ("XF_UNIX_SINK".into(), spawn_unix_sink()),
         ]
     })
 }
@@ -43,6 +46,31 @@ fn spawn_server(handle: fn(TcpStream)) -> u16 {
         }
     });
     port
+}
+
+/// The Unix-domain sink's path, listening once this returns. One per
+/// harness process (the pid names it); a leftover from an earlier process
+/// with the same pid is removed first.
+#[cfg(unix)]
+fn spawn_unix_sink() -> String {
+    let path = format!("/tmp/xf-{}-sink.sock", std::process::id());
+    let _ = std::fs::remove_file(&path);
+    let l = std::os::unix::net::UnixListener::bind(&path).expect("unix sink listen");
+    std::thread::spawn(move || {
+        for s in l.incoming().flatten() {
+            std::thread::spawn(move || {
+                let mut s = s;
+                let mut buf = [0u8; 65536];
+                while matches!(s.read(&mut buf), Ok(n) if n > 0) {}
+            });
+        }
+    });
+    path
+}
+
+#[cfg(not(unix))]
+fn spawn_unix_sink() -> String {
+    String::new()
 }
 
 fn echo(mut s: TcpStream) {
