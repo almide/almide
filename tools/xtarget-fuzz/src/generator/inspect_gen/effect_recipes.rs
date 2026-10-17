@@ -108,15 +108,15 @@ pub(super) const EFFECT_RECIPES: &[Recipe] = &[
     Recipe { func: "list.shuffle", size: "xs", args: &[("xs", "{sized}")] },
     Recipe { func: "fs.modified_at", size: "path", args: FILE_N },
     Recipe { func: "fs.stat", size: "path", args: FILE_N },
-    Recipe { func: "process.exec_status", size: "args", args: &[("cmd", ECHO), ("args", ECHO_ARGS)] },
-    Recipe { func: "process.exec_status_timeout", size: "args", args: &[("cmd", ECHO), ("args", ECHO_ARGS), ("timeout_ms", "10000")] },
+    Recipe { func: "process.exec_status", size: "args", args: &[("cmd", ECHO), ("args", ECHO_ARGS_WIDE)] },
+    Recipe { func: "process.exec_status_timeout", size: "args", args: &[("cmd", ECHO), ("args", ECHO_ARGS_WIDE), ("timeout_ms", "10000")] },
     Recipe { func: "fs.create_temp_file", size: "", args: &[("prefix", "\"p\"")] },
     Recipe { func: "fs.create_temp_dir", size: "", args: &[("prefix", "\"p\"")] },
     Recipe { func: "env.sleep_ms", size: "", args: &[("ms", "0")] },
     // Processes from the fixed command set (ADR-0027 D4), on the embedded
     // host: n / 10 arguments echoed back, or n / 10 lines through cat.
-    Recipe { func: "process.exec", size: "args", args: &[("cmd", ECHO), ("args", ECHO_ARGS)] },
-    Recipe { func: "process.exec_in", size: "args", args: &[("dir", MADE_DIR), ("cmd", ECHO), ("args", ECHO_ARGS)] },
+    Recipe { func: "process.exec", size: "args", args: &[("cmd", ECHO), ("args", ECHO_ARGS_WIDE)] },
+    Recipe { func: "process.exec_in", size: "args", args: &[("dir", MADE_DIR), ("cmd", ECHO), ("args", ECHO_ARGS_WIDE)] },
     Recipe { func: "process.exec_attached", size: "args", args: &[("cmd", ECHO), ("args", ECHO_ARGS)] },
     Recipe { func: "process.run", size: "args", args: &[("cmd", ECHO), ("args", ECHO_ARGS)] },
     Recipe { func: "process.run_in", size: "args", args: &[("dir", MADE_DIR), ("cmd", ECHO), ("args", ECHO_ARGS)] },
@@ -235,3 +235,6 @@ const MADE_DIR: &str = "{ fs.mkdir_p(\"pdir\")!\n  \"pdir\" }";
 
 const ECHO: &str = "\"/bin/echo\"";
 const ECHO_ARGS: &str = "list.range(0, {n} / 100) |> list.map((i) => \"aé\")";
+/// n / 10 arguments: a captured run's pipe reads vary with the fork, and the
+/// call's own work must stand above that noise (the rms bound is 3%).
+const ECHO_ARGS_WIDE: &str = "list.range(0, {n} / 10) |> list.map((i) => \"aé\")";
