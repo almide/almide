@@ -166,7 +166,7 @@ For zero-copy interop with native code (e.g. when calling Rust runtime directly)
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (148 functions)
+## Signature index (146 functions)
 
 ```
 // Appends val rounded to f32, BE.
@@ -704,14 +704,6 @@ bytes.write_u8(b: Bytes, val: Int) -> Unit
 // Bytewise XOR, as long as the shorter input.
 // @since 0.13.4 or earlier
 bytes.xor(a: Bytes, b: Bytes) -> Bytes
-
-// Opaque arena checkpoint; currently always 0.
-// @since 0.16.2 or earlier
-bytes.heap_save() -> Int
-
-// Restores a heap_save checkpoint; currently a no-op.
-// @since 0.16.2 or earlier
-bytes.heap_restore(checkpoint: Int) -> Unit
 
 // UInt16 at offset; 0 if out of range.
 // @since 0.15.0 or earlier

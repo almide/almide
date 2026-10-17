@@ -1313,21 +1313,6 @@ test "bytes.write_u8 unit=value" {
   assert_eq("${bytes.to_list(b)}", "[200]")
 }
 
-test "bytes.heap_save unit=address" {
-  let cp1 = bytes.heap_save()
-  let _spacer = bytes.new(64)
-  let cp2 = bytes.heap_save()
-  assert_eq("${cp2 >= cp1}", "true")
-}
-
-test "bytes.heap_restore unit=address" {
-  let cp = bytes.heap_save()
-  let _spacer = bytes.new(64)
-  bytes.heap_restore(cp)
-  let after = bytes.from_list([5, 6])
-  assert_eq("${bytes.to_list(after)}", "[5, 6]")
-}
-
 test "bytes.read_uint16 unit=value" {
   let tb = bytes.from_list([1, 2, 3, 4])
   let sm_out = "${bytes.read_uint16(tb, 0, BigEndian).to_int64()} ${bytes.read_uint16(tb, 0, LittleEndian).to_int64()}"
