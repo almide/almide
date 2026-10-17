@@ -1,0 +1,12 @@
+// An un-annotated record literal is typed structurally, but natively it IS
+// the declared record with its field names and types — `P`, which declares
+// no `: Ord`. The orderable check passed the structural type while rustc
+// refused the monomorph ("P: Ord is not satisfied", stdlib inspection fuzz:
+// `list.min` over `http.HttpLimits`-shaped literals).
+type P = { a: Int, b: Int }
+
+fn show(p: P) -> String = "${p.a} ${p.b}"
+
+fn main() -> Unit = {
+  println(show(list.min([{ a: 2, b: 0 }, { a: 1, b: 5 }]) ?? { a: 0, b: 0 }))
+}

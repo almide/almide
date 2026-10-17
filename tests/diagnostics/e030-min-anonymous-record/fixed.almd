@@ -1,0 +1,6 @@
+// The fix: order by an explicit key, or declare the record with `: Ord`.
+fn main() -> Unit = {
+  let rs = [{ a: 2, b: 0 }, { a: 1, b: 5 }]
+  let m = list.first(list.sort_by(rs, (r) => (r.a, r.b))) ?? { a: 0, b: 0 }
+  println("${m.a} ${m.b}")
+}
