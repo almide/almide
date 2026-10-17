@@ -96,10 +96,44 @@ pub fn almide_rt_process_exec_in(dir: &str, cmd: &str, args: &[AlmideString]) ->
     __almide_v.into_almide()
 }
 
+/// SIGPIPE ignored while it lives, its previous disposition restored after.
+/// `main` sets SIGPIPE back to its default (#1950), so writing the input
+/// into the pipe of a child that already exited would end the whole program;
+/// ignored, the write fails with EPIPE, as on the embedded host (ALS-R5).
+struct AlmideSigpipeIgnored {
+    #[cfg(unix)]
+    previous: usize,
+}
+
+#[cfg(unix)]
+extern "C" {
+    fn signal(sig: i32, handler: usize) -> usize;
+}
+
+impl AlmideSigpipeIgnored {
+    fn new() -> Self {
+        // SIGPIPE = 13, SIG_IGN = 1.
+        #[cfg(unix)]
+        return AlmideSigpipeIgnored { previous: unsafe { signal(13, 1) } };
+        #[cfg(not(unix))]
+        AlmideSigpipeIgnored {}
+    }
+}
+
+impl Drop for AlmideSigpipeIgnored {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        unsafe {
+            signal(13, self.previous);
+        }
+    }
+}
+
 pub fn almide_rt_process_exec_with_stdin(cmd: &str, args: &[AlmideString], input: &str) -> Result<AlmideString, AlmideString> {
     let __almide_v: Result<String, AlmideString> = {
         let __almide_r: Result<String, String> = (|| {
             almide_stdout_flush();
+            let _quiet = AlmideSigpipeIgnored::new();
             almide_proc_exec_with_stdin(cmd, args, input)
         })();
         __almide_r.map_err(Into::into)
