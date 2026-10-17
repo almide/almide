@@ -11,6 +11,7 @@ description = "Almide v1 Middle IR — the single source of truth for ownership 
 # — these deps go away once the frontend is greenfielded.
 [dependencies]
 almide-base = { path = "../almide-base" }
+almide-str = { path = "../almide-str" }
 almide-ir = { path = "../almide-ir" }
 almide-lang = { path = "../almide-lang" }
 # The v1 execution pipeline (`pipeline::try_render_wasm_source`, the lib form of the
