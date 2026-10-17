@@ -263,6 +263,81 @@ impl AlmideStr {
         out
     }
 
+    /// The decimal rendering of `n`, written straight into one exact-size block.
+    /// Building a `String` and converting it would allocate, copy and free a second time.
+    pub fn from_i64(n: i64) -> AlmideStr {
+        // Two digits per division, as `core::fmt` renders integers.
+        const PAIRS: &[u8; 200] = b"0001020304050607080910111213141516171819\
+            2021222324252627282930313233343536373839\
+            4041424344454647484950515253545556575859\
+            6061626364656667686970717273747576777879\
+            8081828384858687888990919293949596979899";
+        let mut buf = [0u8; 20];
+        let mut i = buf.len();
+        let mut u = n.unsigned_abs();
+        while u >= 100 {
+            let d = (u % 100) as usize * 2;
+            u /= 100;
+            i -= 2;
+            buf[i] = PAIRS[d];
+            buf[i + 1] = PAIRS[d + 1];
+        }
+        if u >= 10 {
+            let d = u as usize * 2;
+            i -= 2;
+            buf[i] = PAIRS[d];
+            buf[i + 1] = PAIRS[d + 1];
+        } else {
+            i -= 1;
+            buf[i] = b'0' + u as u8;
+        }
+        if n < 0 {
+            i -= 1;
+            buf[i] = b'-';
+        }
+        let len = buf.len() - i;
+        let out = AlmideStr { ptr: almide_str_alloc(len, len) };
+        // SAFETY: a fresh block with room for exactly `len` bytes, which the ASCII digits fill.
+        unsafe { std::ptr::copy_nonoverlapping(buf.as_ptr().add(i), out.data(), len) };
+        out
+    }
+
+    /// `parts` joined by `sep`, in one exact-size block; the parts are only read.
+    pub fn join<S: AsRef<str>>(parts: &[S], sep: &str) -> AlmideStr {
+        let Some((first, rest)) = parts.split_first() else { return AlmideStr::new() };
+        let total = rest.iter().try_fold(first.as_ref().len(), |acc, p| acc.checked_add(sep.len())?.checked_add(p.as_ref().len()));
+        let total = total.expect("AlmideStr capacity overflow");
+        if total == 0 {
+            return AlmideStr::new();
+        }
+        let out = AlmideStr { ptr: almide_str_alloc(total, total) };
+        let mut at = out.data();
+        // SAFETY: the block has room for exactly `total` bytes, the sum of every part and separator written below; no source is inside the fresh block.
+        unsafe {
+            let first = first.as_ref();
+            std::ptr::copy_nonoverlapping(first.as_ptr(), at, first.len());
+            at = at.add(first.len());
+            // A one-byte separator (the common `","`) is a store, not a `memcpy` call per part.
+            if let [b] = sep.as_bytes() {
+                for p in rest {
+                    let p = p.as_ref();
+                    at.write(*b);
+                    std::ptr::copy_nonoverlapping(p.as_ptr(), at.add(1), p.len());
+                    at = at.add(1 + p.len());
+                }
+            } else {
+                for p in rest {
+                    let p = p.as_ref();
+                    std::ptr::copy_nonoverlapping(sep.as_ptr(), at, sep.len());
+                    at = at.add(sep.len());
+                    std::ptr::copy_nonoverlapping(p.as_ptr(), at, p.len());
+                    at = at.add(p.len());
+                }
+            }
+        }
+        out
+    }
+
     pub fn into_string(self) -> String {
         self.as_str().to_owned()
     }
@@ -271,6 +346,32 @@ impl AlmideStr {
 impl Drop for AlmideStr {
     #[inline]
     fn drop(&mut self) {
+        // The common case first: the only owner of an unmarked block frees it.
+        if self.rc() == 1 {
+            self.free_block();
+        } else {
+            self.drop_slow();
+        }
+    }
+}
+
+impl AlmideStr {
+    /// Frees the heap block. The caller is its last owner.
+    #[inline]
+    fn free_block(&mut self) {
+        let cap = self.capacity();
+        // SAFETY: the last owner frees the heap block with the layout it was
+        // allocated or grown with; that layout was valid then, so its size
+        // does not overflow and the unchecked constructor's contract holds.
+        unsafe {
+            let layout = Layout::from_size_align_unchecked(ALMIDE_STR_HDR + cap, std::mem::align_of::<AlmideStrHeader>());
+            dealloc(self.ptr.as_ptr().cast(), layout)
+        };
+    }
+
+    /// A static block, a shared count or a thread-shared block.
+    #[inline(never)]
+    fn drop_slow(&mut self) {
         let rc = self.rc();
         if rc == 0 {
             return;
@@ -281,13 +382,11 @@ impl Drop for AlmideStr {
             }
             // Every other owner's use of the block happens before the free.
             fence(AtomicOrdering::Acquire);
-        } else if rc > 1 {
+            self.free_block();
+        } else {
+            // rc > 1: another owner keeps the block.
             self.rc_cell().store(rc - 1, AtomicOrdering::Relaxed);
-            return;
         }
-        let layout = almide_str_layout(self.capacity());
-        // SAFETY: the last owner frees the heap block with the layout it was allocated or grown with.
-        unsafe { dealloc(self.ptr.as_ptr().cast(), layout) };
     }
 }
 
