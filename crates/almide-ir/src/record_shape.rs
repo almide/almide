@@ -109,6 +109,28 @@ impl RecordShapeIndex {
             .find_map(|shape| self.bind(shape, fields).map(|b| (shape, b)))
     }
 
+    /// Index record shapes that are not IR decls yet — the checker's declared
+    /// types, each labelled by its name. A generic parameter there is an
+    /// inference hole (`TypeVar`), which fits any field type.
+    pub fn from_records(records: impl IntoIterator<Item = (Sym, Vec<(Sym, Ty)>)>) -> Self {
+        let mut index = Self::default();
+        for (name, fields) in records {
+            let key = sorted_names(fields.iter().map(|(n, _)| n));
+            index.by_names.entry(key).or_default().push(index.shapes.len());
+            index.shapes.push(RecordShape { name, label: name.to_string(), fields, generics: Vec::new() });
+        }
+        index
+    }
+
+    /// Every declared shape a structural record with `fields` fits, generic or
+    /// not — for a caller that must hold for whichever one a leg picks.
+    pub fn matching<'a>(&'a self, fields: &'a [(Sym, Ty)]) -> impl Iterator<Item = &'a RecordShape> + 'a {
+        let key = sorted_names(fields.iter().map(|(n, _)| n));
+        self.by_names.get(&key).into_iter().flatten()
+            .map(|&i| &self.shapes[i])
+            .filter(move |shape| self.bind(shape, fields).is_some())
+    }
+
     /// The declared shape's label for `fields`, if it is one.
     pub fn label_for(&self, fields: &[(Sym, Ty)]) -> Option<String> {
         self.lookup(fields).map(|(s, _)| s.label.clone())
