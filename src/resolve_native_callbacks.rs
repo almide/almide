@@ -170,10 +170,10 @@ mod tests {
     }
 
     #[test]
-    fn the_major_is_read_from_the_pre_3338_spelling_too() {
-        assert_eq!(callback_major("crate::almide_rt_tf_v0_entry(x)", "tf"), Some(0));
-        assert_eq!(callback_major("crate::almide_rt_tf_v3_calc_double(x)", "tf"), Some(3));
-        assert_eq!(callback_major("crate::almide_rt_my_pkg_v1_go(x)", "my_pkg"), Some(1));
+    fn the_pre_3338_spelling_names_no_major_since_epoch_14() {
+        assert_eq!(callback_major("crate::almide_rt_tf_v0_entry(x)", "tf"), None);
+        assert_eq!(callback_major("crate::almide_rt_tf_v3_calc_double(x)", "tf"), None);
+        assert_eq!(callback_major("crate::almide_rt_my_pkg_v1_go(x)", "my_pkg"), None);
     }
 
     #[test]
