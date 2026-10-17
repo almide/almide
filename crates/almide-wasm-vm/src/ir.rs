@@ -79,12 +79,12 @@ const fn store(code: u8, name: &'static str, bytes: u8, value: ValType) -> Store
 }
 
 /// The loads of the closed set (REQ-VM-2). Absent on purpose: f32.load,
-/// i32.load16_s — the emitter never produces them.
+/// i32.load8_s, i32.load16_s — the emitter never produces them (i32.load8_s
+/// left with the Q8_0 decoder at dialect epoch 14).
 pub static LOADS: &[LoadOp] = &[
     load(0x28, "i32.load", 4, false, I32),
     load(0x29, "i64.load", 8, false, I64),
     load(0x2B, "f64.load", 8, false, F64),
-    load(0x2C, "i32.load8_s", 1, true, I32),
     load(0x2D, "i32.load8_u", 1, false, I32),
     load(0x2F, "i32.load16_u", 2, false, I32),
     load(0x30, "i64.load8_s", 1, true, I64),
@@ -146,7 +146,6 @@ mod tests {
     #[test]
     fn loads_extend_as_their_instruction_says() {
         let op = |c: u8| LOADS.iter().find(|o| o.code == c).unwrap();
-        assert_eq!(widen(op(0x2C), 0x80), 0xffff_ff80, "i32.load8_s keeps the cell 32 bits wide");
         assert_eq!(widen(op(0x2D), 0x80), 0x80);
         assert_eq!(widen(op(0x30), 0x80), (-128i64) as u64);
         assert_eq!(widen(op(0x34), 0x8000_0000), 0xffff_ffff_8000_0000);
