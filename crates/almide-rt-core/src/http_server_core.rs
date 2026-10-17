@@ -516,20 +516,50 @@ const HTTP_SERVER_REASONS: &[(i64, &str)] = &[
     (511, "Network Authentication Required"),
 ];
 
-/// A header the response may not carry as written (#2822): a name that is
-/// not an RFC 9110 token, or a value holding CR, LF or NUL — either would
-/// let the handler's text end the field and start another (response
-/// splitting). `None` for a well-formed field.
+/// A header the response may not carry as written (#2822, C-367): a name
+/// that is not an RFC 9110 token, or a value holding a control character
+/// other than HTAB (§5.5) — CR or LF would let the handler's text end the
+/// field and start another (response splitting). `None` for a well-formed
+/// field. The wasm legs apply the same rule, with the same text, in
+/// `stdlib/http_serve.almd` (`__hs_refusal`).
 pub fn http_server_bad_header(name: &str, value: &str) -> Option<String> {
     let tchar = |b: u8| b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b);
     if name.is_empty() || !name.bytes().all(tchar) {
-        return Some(format!("response header name {:?} is not a token", name));
+        return Some(format!("response header name {} is not a token", http_server_quote(name)));
     }
-    if value.bytes().any(|b| matches!(b, b'\r' | b'\n' | 0)) {
-        return Some(format!("response header {} has a CR, LF or NUL in its value", name));
+    if value.bytes().any(|b| (b < 0x20 && b != b'\t') || b == 0x7f) {
+        return Some(format!("response header {} has a control character in its value", name));
     }
     None
 }
+
+/// A status the response may not carry (C-367): a final status is a
+/// 3-digit code in 200..=599 (RFC 9110 §15; a 1xx is interim, and a client
+/// would wait on for the final answer).
+pub fn http_server_bad_status(status: i64) -> Option<String> {
+    (!(200..=599).contains(&status)).then(|| format!("response status {status} is not a final status code"))
+}
+
+/// `s` in double quotes for a refusal text: `\` and `"` escaped, and every
+/// control character (U+0000..=U+001F, U+007F..=U+009F) as `\u{hex}`, so
+/// the text is one printable line on every leg.
+pub fn http_server_quote(s: &str) -> String {
+    let mut out = String::from("\"");
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            c if c.is_control() => out.push_str(&format!("\\u{{{:x}}}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// The fields the server owns (the framing and the connection's lifetime):
+/// a handler's are dropped from its response.
+pub const HTTP_SERVER_OWNED_FIELDS: &[&str] = &["connection", "content-length", "transfer-encoding", "keep-alive"];
 
 /// The response bytes for a request of any method but HEAD: see
 /// [`http_server_response_bytes_for`].
@@ -546,7 +576,7 @@ pub fn http_server_response_bytes(status: i64, headers: &[(String, String)], bod
 pub fn http_server_response_bytes_for(head: bool, status: i64, headers: &[(String, String)], body: &str) -> Vec<u8> {
     let mut out = format!("HTTP/1.1 {} {}\r\n", status, http_server_reason(status));
     for (k, v) in headers {
-        if k.eq_ignore_ascii_case("connection") {
+        if HTTP_SERVER_OWNED_FIELDS.iter().any(|f| k.eq_ignore_ascii_case(f)) {
             continue;
         }
         out.push_str(&format!("{}: {}\r\n", k, v));
@@ -569,9 +599,9 @@ pub fn http_server_response_bytes_for(head: bool, status: i64, headers: &[(Strin
 /// timeout (ADR-0020 §5.7) is a `503`.
 pub fn http_server_write(conn: HttpServerConn, status: i64, headers: &[(String, String)], body: &str) -> Result<(), String> {
     let plain = [("Content-Type".to_string(), "text/plain".to_string())];
-    if let Some(why) = headers.iter().find_map(|(k, v)| http_server_bad_header(k, v)) {
-        eprintln!("http.serve: refused the response: {}", why.escape_debug());
-        return http_server_send(conn, 500, &plain, &format!("Internal error: {}", why.escape_debug()));
+    if let Some(why) = headers.iter().find_map(|(k, v)| http_server_bad_header(k, v)).or_else(|| http_server_bad_status(status)) {
+        eprintln!("http.serve: refused the response: {why}");
+        return http_server_send(conn, 500, &plain, &format!("Internal error: {why}"));
     }
     if std::time::Instant::now() >= conn.deadline {
         return http_server_send(conn, 503, &plain, http_server_reason(503));
