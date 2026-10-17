@@ -101,9 +101,9 @@ struct Host {
     calls: Arc<Mutex<crate::http_call_host::HttpCalls>>,
     /// `http.serve`'s listener and pending connection (ops 70..=72, #2650).
     serve: Arc<Mutex<crate::host_serve::ServeState>>,
-    /// The run's tcp streams and listeners (ops 91..=103, #3620) — closed
-    /// when the run ends.
-    net: Arc<Mutex<almide_rt_core::net_core::AlmideNetTables>>,
+    /// The run's tcp handles and unix / shm descriptors (ops 91..=116,
+    /// #3620) — closed when the run ends.
+    net: Arc<Mutex<crate::net_host::NetRun>>,
     /// The product runner's LIVE streams (#2650): stdout through a 64 KiB
     /// buffer flushed at every line end, and per write on a terminal —
     /// native's rule (#3417) — and stderr
@@ -650,8 +650,8 @@ fn host_linker(engine: &wasmtime::Engine) -> anyhow::Result<wasmtime::Linker<Hos
                 *caller.data().fs_buf.lock().expect("fs buf") = buf;
                 return Ok(ret);
             }
-            // ops 91..=103 = the tcp family (#3620): the net core native
-            // runs, on the run's own table.
+            // ops 91..=116 = the tcp family and the interim unix / shm ops
+            // (#3620): the net cores native runs, on the run's own tables.
             if (crate::net_host::OP_FIRST..=crate::net_host::OP_LAST).contains(&op) {
                 let net = caller.data().net.clone();
                 let (ret, buf) = crate::net_host::dispatch(&net, op, &a, &b);
