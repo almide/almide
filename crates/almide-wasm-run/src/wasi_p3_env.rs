@@ -98,34 +98,32 @@ impl EnvImports {
 /// length, so the reservation is a ceiling, not an exact bound.
 const ENV_RESERVE: i32 = 262_144;
 
-/// The env.set overlay on p3 (#3223): the p1 log (`env_overlay`) on its own
-/// page past the park and the fs page, and the eprintln shim its refusal
-/// prints through. Present exactly when the op set names op 37.
+/// The env.set overlay on p3 (#3223): the p1 log (`env_overlay`), its
+/// first buffer on its own page past the park and the fs page, its growth
+/// through the shims' checked allocator. Present exactly when the op set
+/// names op 37.
 #[derive(Clone, Copy)]
 struct P3Overlay {
     log: crate::wasi::env_overlay::OverlayLog,
-    f_eprintln: u32,
+    first_page: u64,
 }
 
 impl P3Overlay {
-    /// The overlay when the op set names env.set: the log at `base`, its
-    /// length in global `g_len`, refusals through `f_eprintln`.
-    fn plan(e: EnvImports, base: u64, g_len: u32, f_eprintln: u32) -> Option<Self> {
-        e.set.then_some(P3Overlay { log: crate::wasi::env_overlay::OverlayLog { base, g_len }, f_eprintln })
+    /// The overlay when the op set names env.set: the first buffer at
+    /// `first_page`, its three globals from `g_first` (length, base,
+    /// capacity).
+    fn plan(e: EnvImports, first_page: u64, g_first: u32) -> Option<Self> {
+        let log = crate::wasi::env_overlay::OverlayLog { g_len: g_first, g_base: g_first + 1, g_cap: g_first + 2 };
+        e.set.then_some(P3Overlay { log, first_page })
     }
 
-    /// The log-length global (starts empty), in its planned slot.
-    fn emit_global(ovl: Option<Self>, globals: &mut GlobalSection) {
-        if ovl.is_some() {
+    /// The globals the planned slots name: no bytes yet, in the first page.
+    fn emit_globals(ovl: Option<Self>, globals: &mut GlobalSection) {
+        if let Some(o) = ovl {
             let t = GlobalType { val_type: ValType::I32, mutable: true, shared: false };
-            globals.global(t, &ConstExpr::i32_const(0));
-        }
-    }
-
-    /// The full-log refusal line, at `park + MSG2` as on p1.
-    fn emit_data(ovl: Option<Self>, data: &mut wasm_encoder::DataSection, park: u64) {
-        if ovl.is_some() {
-            data.active(0, &ConstExpr::i32_const((park + MSG2) as i32), ENV_FULL_MSG.iter().copied());
+            for init in [0, o.first_page as i32, crate::wasi::env_overlay::OVERLAY_BYTES as i32] {
+                globals.global(t, &ConstExpr::i32_const(init));
+            }
         }
     }
 }
@@ -136,7 +134,8 @@ impl P3Overlay {
 /// - op 37 `env.set(key, value)` (#3223): appends to the overlay log — the
 ///   p1 shim's own emitter, so a set is local to the instance and never
 ///   reaches the host, as with wasi-libc's `setenv` over its copy of the
-///   environment. A full log prints `ENV_FULL_MSG` and exits 1, as on p1.
+///   environment. A log that outgrows its buffer moves to a bigger block
+///   from `f_alloc`, which reports C-197 when memory cannot grow.
 /// - op 26 `env.get(key)`: the overlay first (last write wins), then the
 ///   FIRST `(name, value)` of `get-environment`
 ///   whose name equals the key byte for byte answers `pack(0, len)` with
@@ -153,7 +152,7 @@ impl P3Overlay {
 ///   `wait-for(ms * 1_000_000)` on the monotonic clock. The task blocks —
 ///   no busy-wait (the p1 shim's spin has no p3 counterpart).
 fn shim_env(g: P3Globals, e: EnvImports, ovl: Option<P3Overlay>) -> Function {
-    use crate::wasi::env_overlay::{emit_append, emit_scan, ScanLocals};
+    use crate::wasi::env_overlay::{emit_append, emit_scan, ScanLocals, SetLocals};
     let P3Globals { park, g_plen, g_ppos, f_alloc, f_reserve, g_env, g_envn, .. } = g;
     let (op, a_ptr, a_len) = (0u32, 1u32, 2u32);
     let (p, endp, j, total, buf, out) = (5u32, 6u32, 7u32, 8u32, 9u32, 10u32);
@@ -161,12 +160,11 @@ fn shim_env(g: P3Globals, e: EnvImports, ovl: Option<P3Overlay>) -> Function {
     let mut f = Function::new([(9, ValType::I32)]);
     let mut i = f.instructions();
 
-    if let Some(P3Overlay { log, f_eprintln }) = ovl {
+    if let Some(P3Overlay { log, .. }) = ovl {
         i.local_get(op).i32_const(37).i32_eq().if_(BlockType::Empty);
-        emit_append(&mut i, log, p, |i| {
-            i.i32_const((park + MSG2) as i32).i32_const(ENV_FULL_MSG.len() as i32 - 1).call(f_eprintln);
-            i.i32_const(1).call(I_EXIT);
-            i.unreachable();
+        let scan = ScanLocals { p, endp, klen, vlen, best, j };
+        emit_append(&mut i, log, SetLocals { scan, need: total, cap: buf }, |i, size| {
+            i.i32_const(0).i32_const(0).i32_const(8).local_get(size).call(f_alloc);
         });
         i.end();
     }

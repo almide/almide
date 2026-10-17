@@ -224,16 +224,18 @@ effect fn main() -> Unit = {
 }
 "#;
 
-/// More names and values than the 64 KiB log holds: the defined refusal,
-/// the same line and exit code on both stock worlds (native has no log).
-const ENV_LOG_FULL: &str = r#"import env
+/// More names and values than the log's first 64 KiB page holds: the log
+/// grows on both stock worlds, as native has no cap (C-329).
+const ENV_LOG_GROWS: &str = r#"import env
 
 effect fn main() -> Unit = {
   let v = string.repeat("x", 1000)
   for k in list.range(0, 100) {
-    env.set("ENVSET_3223_K${k}", v)
+    env.set("ENVSET_3223_K${k}", "${k}${v}")
   }
-  println("not reached on a stock world")
+  println("${string.len(env.get("ENVSET_3223_K0") ?? "")}")
+  println("${string.len(env.get("ENVSET_3223_K99") ?? "")}")
+  println(env.get("ENVSET_3223_K100") ?? "unset")
 }
 "#;
 
@@ -250,9 +252,11 @@ fn p3_component_env_set_matches_native_and_p1() {
     std::fs::create_dir_all(&cwd).expect("cwd");
     let over_host = scratch.path().join("env_over_host.almd");
     std::fs::write(&over_host, ENV_OVER_HOST).expect("write");
+    let grows = scratch.path().join("env_log_grows.almd");
+    std::fs::write(&grows, ENV_LOG_GROWS).expect("write");
     let envs = [("ENVSET_3223_HOST", "host")];
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("spec/wasm_cross");
-    for src in [root.join("env_set_overlay.almd"), over_host] {
+    for src in [root.join("env_set_overlay.almd"), over_host, grows] {
         let mut native = Command::new(almide_bin());
         native.arg("run").arg(&src).current_dir(&cwd).env("PWD", &cwd).envs(envs);
         let native = observe(native, "almide run");
@@ -260,10 +264,4 @@ fn p3_component_env_set_matches_native_and_p1() {
         assert_eq!(p1, native, "{}: p1 differs from native", src.display());
         assert_eq!(p3, native, "{}: p3 differs from native", src.display());
     }
-
-    let full = scratch.path().join("env_log_full.almd");
-    std::fs::write(&full, ENV_LOG_FULL).expect("write");
-    let (p1, p3) = wasm_legs(&full, &cwd, scratch.path(), &[]);
-    assert_eq!(p1, (String::new(), "Error: env.set log full (64 KiB of names and values)\n".to_string(), Some(1)), "p1: {p1:?}");
-    assert_eq!(p3, p1, "the p3 log refuses where the p1 log does");
 }
