@@ -63,9 +63,10 @@ almide-str            ADR-0013's shared string buffer (AlmideStr: one block
                       [rc, len, cap | bytes], edited through a unique view).
                       Raw allocation, so it does not take the workspace's
                       `forbid(unsafe_code)`; CI runs its tests under Miri
-                      (`miri-almide-str`). Not wired into generated code
-                      yet — that is stage 2 step 3
-                      (docs/roadmap/active/adr-0013-string-sharing.md)
+                      (`miri-almide-str`). Generated code splices it in
+                      only under `ALMIDE_SHARED_STR=1` (off by default
+                      until step 7 of
+                      docs/roadmap/active/adr-0013-string-sharing.md)
 ```
 
 `almide-interp` is a *sibling consumer* of the linked IR, not part of the

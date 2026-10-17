@@ -186,6 +186,7 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_RUN_PROJECT_DIR", Value, Tool, "the scratch dir `almide run` / `almide build` compile native binaries in, instead of `<temp>/almide-run` (the content-keyed binary cache, its cargo target, its rustc incremental sessions); `almide clean` empties it"),
     sw("ALMIDE_SCOPED_CLOSURE_OFF", Flag, Ablation, "make BorrowInsertion treat every `let`-bound closure as a closure value, never as a non-escaping scope (#3455) — its captures are owned again, as before the scope rule"),
     sw("ALMIDE_SEMLAW_CASES", Value, Harness, "how many cases the semantic-laws property test draws"),
+    sw("ALMIDE_SHARED_STR", Flag, Route, "render the native Almide String as the shared buffer `AlmideStr` (ADR-0013 stage 2) instead of `String`; off by default until the stage lands"),
     sw("ALMIDE_SHUFFLE_PASSES", Value, Gate, "run the native passes in the seeded random order the declared dependency edges permit — a pass-dependency probe: the emitted Rust must not change (#2186)"),
     sw("ALMIDE_SIZE_ALONE", Value, Harness, "the one fixture a child process of the size ratchet measures alone, for its isolation check (#2309); the ratchet sets it on the processes it spawns"),
     sw("ALMIDE_SIZE_PRESSURE", Value, Harness, "the allocation pressure (`plain` / `quarantine` / `ballast`) a size-ratchet child builds its one fixture under, for the determinism check (#3143); the ratchet sets it on the processes it spawns"),
