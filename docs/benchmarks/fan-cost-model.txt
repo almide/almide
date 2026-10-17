@@ -41,7 +41,7 @@
 # against ~0.2 us warm on that machine.
 #
 # What it cannot see: a site's first offer (always parallel on every core,
-# so one cheap offer pays the W=8 row once: 1.7-4.1 us native since the
+# so one cheap offer pays the W=8 row once: 2.0-3.0 us native since the
 # 2026-10-17 pool, 41-69 us wasm, plus the pool's spawn — and on wasm the
 # workers' instantiation — when it is the run's first parallel offer), and a
 # site whose work per element swings between offers (the estimate is the
@@ -243,25 +243,22 @@ wasm_worker_ns   = 5_000
 #
 #   AMD EPYC 7B13
 #   iters   W1     W2     W3     W4     W5     W6     W7     W8
-#   0       0.18   1.01   0.72   1.38   2.09   1.97   1.93   1.72
-#   100     3.92   3.32   2.86   3.47   3.66   6.15   9.54  11.14
-#   300    12.42   8.42   7.11   6.15   5.93   4.67   6.80  10.00
+#   0       0.03   0.92   0.72   1.48   2.12   1.94   2.00   2.01
+#   100     3.93   3.58   3.62   3.11   3.28   4.35   6.80   6.04
+#   300    12.55   8.26   5.95   5.63   5.68   4.89   5.93   6.00
 #
 #   Intel 8581C
 #   iters   W1     W2     W3     W4     W5     W6     W7     W8
-#   0       0.01   0.86   1.23   1.45   2.71   2.36   2.59   4.13
-#   100     3.22   3.20   3.50   3.95   4.26   5.97   6.90   8.54
-#   300     9.77   7.14   5.64   5.38   5.51   5.84   6.79   8.00
+#   0       0.00   0.94   1.43   2.02   1.99   2.15   2.22   3.02
+#   100     3.29   3.07   3.15   3.15   3.54   4.00   4.63   5.27
+#   300     9.98   7.14   5.34   4.97   4.71   4.61   4.98   5.61
 #
 # The cost of an offer is its row less the elements' share,
 # ceil(10 / W) * (W1 / 10). native: 1.5 + 0.7W us (2.9 at W=2 .. 7.1 at
-# W=8) is the envelope over the empty-element rows (0.72 .. 4.13) and over
-# every row at W <= 6 (at most 5.37: AMD 100, W=6). It is not over W = 7
-# and 8 with 0.3-1.2 us elements, where seven or eight threads contending
-# for one offer's counter and slots cost up to 10.4 us (AMD 100, W=8). A
-# 10-element offer never takes W > 5 (ceil(10 / W) is 2 from W = 5 up, and
-# more workers only cost more).
-# The constants were 12 + 3W, the envelope over the crew's 7-35 us.
+# W=8) is the envelope over every row on both machines: the largest costs
+# are 2.2 (W=2..4), 3.2 (W=5), 3.6 (W=6), 6.0 (W=7, AMD 100) and 5.3 us
+# (W=8, AMD 100). The constants were 12 + 3W, the envelope over the crew's
+# 7-35 us.
 #
 # What an offer reads as t changed too:
 #   - the thread CPU clock read that ends a timed interval is subtracted
