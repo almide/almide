@@ -523,6 +523,7 @@
 7720	spec/wasm_cross/matrix_index_domain_family.almd
 4218	spec/wasm_cross/matrix_linear_f32_empty_extent_ceiling.almd
 8496	spec/wasm_cross/matrix_neg_signed_zero.almd
+50772	spec/wasm_cross/matrix_packed_weight_family.almd
 10959	spec/wasm_cross/matrix_pow_libm.almd
 19895	spec/wasm_cross/matrix_product_family.almd
 8651	spec/wasm_cross/matrix_q1_full_loader_cols_beyond_buffer.almd
@@ -954,6 +955,7 @@
 3581	spec/wasm_fail/matrix_conv1d_stride_aborts.almd
 4757	spec/wasm_fail/matrix_index_oob_aborts.almd
 3235	spec/wasm_fail/matrix_linear_row_bias_aborts.almd
+36194	spec/wasm_fail/matrix_qwen3_kv_head_count_aborts.almd
 2340	spec/wasm_fail/matrix_ragged_from_lists_aborts.almd
 3169	spec/wasm_fail/matrix_shape_mismatch_aborts.almd
 16419	spec/wasm_fail/rope_geometry_exceeds_aborts.almd
