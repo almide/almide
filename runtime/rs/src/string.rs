@@ -24,14 +24,14 @@ fn almide_string_ascii_sep(sep: &str) -> Option<char> {
         _ => None,
     }
 }
+// Each piece is built as the Almide String directly: collecting `String`s and
+// converting the Vec would allocate, copy and free every piece twice under
+// the shared buffer.
 pub fn almide_rt_string_split(s: &str, sep: &str) -> Vec<AlmideString> {
-    let __almide_v: Vec<String> = {
-        match almide_string_ascii_sep(sep) {
-            Some(c) => s.split(c).map(|x| x.to_string()).collect(),
-            None => s.split(sep).map(|x| x.to_string()).collect(),
-        }
-    };
-    __almide_v.into_almide()
+    match almide_string_ascii_sep(sep) {
+        Some(c) => s.split(c).map(AlmideString::from).collect(),
+        None => s.split(sep).map(AlmideString::from).collect(),
+    }
 }
 // Two allocations and no Vec — the hot-loop form when only the first
 // separator matters (`station;temp` parsing). None ⇔ sep absent.
@@ -46,7 +46,7 @@ pub fn almide_rt_string_split_once_ref<'a>(s: &'a str, sep: &str) -> Option<(&'a
     }
 }
 pub fn almide_rt_string_replace(s: &str, from: &str, to: &str) -> AlmideString { let __almide_out: String = s.replace(from, to); __almide_out.into() }
-pub fn almide_rt_string_join(parts: &[AlmideString], sep: &str) -> AlmideString { let __almide_out: String = parts.join(sep); __almide_out.into() }
+pub fn almide_rt_string_join(parts: &[AlmideString], sep: &str) -> AlmideString { almide_str_join(parts, sep) }
 // Negative counts clamp to 0 (C-054 discipline; `n as usize` on a negative
 // i64 reinterpreted to a huge count — a native "capacity overflow" panic
 // while the wasm leg trapped on the negative alloc size).
