@@ -762,7 +762,10 @@ impl AlmideFanClock {
             };
             let skip = if almide_rt_fan_plan(self.n, Some(t)) < 2 {
                 ALMIDE_FAN_RESAMPLE - 1
-            } else if self.parallel && almide_rt_fan_plan(self.n, Some(t / 2)) < 2 {
+            } else if self.parallel && (wn == 0 || almide_rt_fan_plan(self.n, Some(t / 2)) < 2) {
+                // only warm-ups timed (a site's first offer spawns the pool:
+                // 0.4 us elements read 4.1 us on the AMD VM), or near the
+                // crossover
                 ALMIDE_FAN_PROBE
             } else if !self.parallel && was_sequential {
                 // a sequential site turns parallel on two measurements in a
