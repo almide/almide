@@ -26,6 +26,9 @@ fn owned_prelude(vis: &str) -> String {
     // the identity while the alias is `String`.
     s.push_str(&format!("{vis}trait AlmideIntoStr {{ type Out; fn into_almide(self) -> Self::Out; }}\nimpl<T> AlmideIntoStr for T {{ type Out = T; #[inline(always)] fn into_almide(self) -> T {{ self }} }}\n"));
     s.push_str(SHARED_ONLY_OFF);
+    // The thread boundary marks nothing while the alias is `String`.
+    s.push_str(&format!("{vis}trait AlmideShare {{ #[inline(always)] fn almide_share(&self) {{}} }}\nimpl<T: ?Sized> AlmideShare for T {{}}\n"));
+    s.push_str(&format!("{vis}fn almide_shared_value<T: AlmideShare>(v: T) -> T {{ v.almide_share(); v }}\n"));
     // `x.to_almide()`: an owned Almide String copied from any string-typed value.
     s.push_str(&format!("{vis}trait AlmideToStr {{ fn to_almide(&self) -> AlmideString; }}\nimpl AlmideToStr for str {{ #[inline(always)] fn to_almide(&self) -> String {{ self.to_string() }} }}\n"));
     s.push_str(&concat_trait(vis));
@@ -50,10 +53,11 @@ fn shared_prelude(vis: &str) -> String {
     let mut s = String::new();
     s.push_str("#[allow(dead_code, unused_imports)]\n");
     s.push_str(&format!("{vis}mod almide_str_block {{\n{}\n}}\n", almide_str::SOURCE));
-    s.push_str(&format!("{vis}use almide_str_block::{{AlmideStr, UniqueStr}};\n"));
+    s.push_str(&format!("{vis}use almide_str_block::{{almide_str_mark_reachable, AlmideStr, UniqueStr}};\n"));
     s.push_str(&format!("{vis}type AlmideString = AlmideStr;\n"));
     s.push_str(&format!("{vis}trait AlmideIntoStr {{ type Out; fn into_almide(self) -> Self::Out; }}\n"));
     s.push_str(SHARED_ONLY_ON);
+    s.push_str(&shared_thread_boundary(vis));
     s.push_str(&format!("{vis}trait AlmideToStr {{ fn to_almide(&self) -> AlmideString; }}\nimpl AlmideToStr for str {{ #[inline(always)] fn to_almide(&self) -> AlmideStr {{ AlmideStr::from(self) }} }}\n"));
     s.push_str("impl AlmideRepr for AlmideStr { fn almide_repr(&self) -> String { almide_repr_str(self) } }\n");
     s.push_str(SHARED_INTO_IMPLS);
@@ -64,6 +68,17 @@ fn shared_prelude(vis: &str) -> String {
 
 fn concat_trait(vis: &str) -> String {
     format!("{vis}trait AlmideConcat<Rhs> {{ type Output; fn concat(self, rhs: Rhs) -> Self::Output; }}\n")
+}
+
+/// `x.almide_share()` marks every block a value reaches thread-shared (ADR-0013
+/// design point 3): a value is `Clone`, a slice marks its elements, a `str` holds no block.
+fn shared_thread_boundary(vis: &str) -> String {
+    let mut s = format!("{vis}trait AlmideShare {{ fn almide_share(&self); }}\n");
+    s.push_str("impl<T: Clone> AlmideShare for T { #[inline] fn almide_share(&self) { almide_str_mark_reachable(self) } }\n");
+    s.push_str("impl<T: AlmideShare> AlmideShare for [T] { fn almide_share(&self) { for e in self { e.almide_share() } } }\n");
+    s.push_str("impl AlmideShare for str { #[inline(always)] fn almide_share(&self) {} }\n");
+    s.push_str(&format!("{vis}fn almide_shared_value<T: AlmideShare>(v: T) -> T {{ v.almide_share(); v }}\n"));
+    s
 }
 
 /// `almide_into_str_impls! { .. }` wraps the conversion impls a runtime
