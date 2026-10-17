@@ -183,12 +183,17 @@ fn whole(w: &mut impl Write, code: u16, ty: &str, body: &[u8]) -> std::io::Resul
     w.flush()
 }
 
+/// The whole chunked response in ONE write: `w` is the bare socket, and a
+/// write per chunk made the arrival pattern (how many reads, how many
+/// deliveries) the scheduler's — the inspection then measured the server's
+/// pacing, not the client's work.
 fn chunked(w: &mut impl Write, ty: &str, parts: impl Iterator<Item = String>) -> std::io::Result<()> {
-    write!(w, "HTTP/1.1 200 OK\r\nContent-Type: {ty}\r\nTransfer-Encoding: chunked\r\n\r\n")?;
+    let mut out = format!("HTTP/1.1 200 OK\r\nContent-Type: {ty}\r\nTransfer-Encoding: chunked\r\n\r\n").into_bytes();
     for p in parts {
-        write!(w, "{:x}\r\n{p}\r\n", p.len())?;
+        out.extend_from_slice(format!("{:x}\r\n{p}\r\n", p.len()).as_bytes());
     }
-    w.write_all(b"0\r\n\r\n")?;
+    out.extend_from_slice(b"0\r\n\r\n");
+    w.write_all(&out)?;
     w.flush()
 }
 
