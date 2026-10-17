@@ -1,0 +1,216 @@
+// @contract: C-161, C-223
+// The packed-weight GEMVs and the fused Qwen3 decoder layers over them run
+// byte-identically on native and every wasm leg (#1827):
+// - linear_q1_0_row_no_bias: per 128-weight block, the signed sum (sign bit
+//   1 = +x, 0 = -x, the `from_q1_0_bytes` convention) accumulates in two
+//   lanes — even k and odd k, each k-ascending from 0.0 — then
+//   `(even + odd) * scale`, and the row sums the blocks from 0.0; trailing
+//   `n_in mod 128` columns contribute nothing;
+// - linear_q8_0_row_no_bias: each activation row quantizes per 32-block to
+//   an f32 scale `amax / 127` and round-half-away int8 quants, the block dot
+//   is the exact integer sum, scaled by the f32 product of the two scales;
+// - the empty-extent and out-of-buffer edges are the all-zero rows(x) x w_rows
+//   and rows(x) x out matrices (C-161's ceiling on the former);
+// - qwen3_block_{q1_0,f32,q8_0}_kv: rms_norm -> Q/K/V -> per-head rms_norm ->
+//   rope -> KV append -> repeat_kv -> causal multi-head attention (C-223's
+//   fast-exp softmax) -> output projection -> residual -> SwiGLU FFN ->
+//   residual, each step native's own arithmetic.
+fn show(tag: String, m: Matrix) -> Unit = {
+  let l = matrix.to_lists(m)
+  let s = matrix.shape(m)
+  println("${tag}: ${s} ${l}")
+}
+
+fn next(s: Int) -> Int = (s * 1103515245 + 12345) % 2147483648
+
+// `n` pseudo-random values produced by `gen` from a running LCG state.
+fn rand_list(seed: Int, n: Int, gen: (Int) -> Int) -> List[Int] = list.range(0, n) |> list.fold(
+  ([], seed),
+  ((acc, s), _) => {
+    let s2 = next(s)
+    (acc + [gen(s2 / 65536)], s2)
+  },
+) |> (p) => p.0
+
+fn byte_of(r: Int) -> Int = r % 256
+
+// fp16 scales in [2^-5, 2^-1): low byte random, high byte 0x28..0x37.
+fn q1_rows(seed: Int, rows: Int, blocks: Int) -> List[Int] = list.range(0, rows * blocks) |> list.flat_map((i) => {
+  let r = rand_list(seed + i * 7919, 18, byte_of)
+  [r[0], 40 + r[1] % 16] + list.drop(r, 2)
+})
+
+fn q8_rows(seed: Int, rows: Int, blocks: Int) -> List[Int] = list.range(0, rows * blocks) |> list.flat_map((i) => {
+  let r = rand_list(seed + i * 104729, 34, byte_of)
+  [r[0], 32 + r[1] % 8] + list.drop(r, 2)
+})
+
+// f32 LE weights of magnitude ~[2^-5, 2^-3), random sign.
+fn f32_vals(seed: Int, n: Int) -> List[Int] = list.range(0, n) |> list.flat_map((i) => {
+  let r = rand_list(seed + i * 31, 4, byte_of)
+  [
+    r[0],
+    r[1],
+    r[2],
+    if r[3] % 2 == 0 then 61 else 189
+  ]
+})
+
+// f32 LE gammas in [1, 2).
+fn gammas(seed: Int, n: Int) -> List[Int] = list.range(0, n) |> list.flat_map((i) => {
+  let r = rand_list(seed + i * 17, 3, byte_of)
+  [r[0], r[1], 128 + r[2] % 128, 63]
+})
+
+fn acts(seed: Int, rows: Int, cols: Int) -> Matrix = matrix.from_lists(list.range(0, rows) |> list.map((i) => rand_list(seed + i * 1009, cols, (r) => r % 2001) |> list.map((v) => float.from_int(v - 1000) / 1000.0)))
+
+fn linear_cases() -> Unit = {
+  // Q1_0: 3 output rows x 256 inputs (2 blocks), then 200 inputs (1 block
+  // and a 72-column tail the kernel never reads).
+  let wq1 = bytes.from_list([7, 7, 7] + q1_rows(11, 3, 2))
+  let x = acts(5, 2, 256)
+  show("q1_256", matrix.linear_q1_0_row_no_bias(x, wq1, 3, 3, 256))
+  let x200 = acts(6, 2, 200)
+  show("q1_200", matrix.linear_q1_0_row_no_bias(x200, wq1, 3, 3, 200))
+  show("q1_64", matrix.linear_q1_0_row_no_bias(acts(7, 1, 64), wq1, 3, 2, 64))
+  show("q1_oob", matrix.linear_q1_0_row_no_bias(x, wq1, 3, 4, 256))
+  show("q1_neg_off", matrix.linear_q1_0_row_no_bias(x, wq1, -9, 2, 256))
+  show("q1_empty", matrix.linear_q1_0_row_no_bias(matrix.zeros(0, 0), wq1, 3, 3, 256))
+  show("q1_zero_rows", matrix.linear_q1_0_row_no_bias(x, wq1, 3, 0, 256))
+  // Q8_0: 3 output rows x 96 inputs (3 blocks); a zero activation row
+  // (amax 0 -> scale 0) and a row of exact .5 ties.
+  let wq8 = bytes.from_list([1, 2] + q8_rows(23, 3, 3))
+  let x8 = matrix.from_lists(matrix.to_lists(acts(9, 2, 96)) + [
+    list.repeat(0.0, 96),
+    list.range(0, 96) |> list.map((k) => float.from_int(k - 48) * 0.5)
+  ])
+  show("q8_96", matrix.linear_q8_0_row_no_bias(x8, wq8, 2, 3, 96))
+  show("q8_cols40", matrix.linear_q8_0_row_no_bias(acts(9, 1, 40), wq8, 2, 3, 40))
+  show("q8_oob", matrix.linear_q8_0_row_no_bias(x8, wq8, 2, 4, 96))
+  show("q8_neg_off", matrix.linear_q8_0_row_no_bias(x8, wq8, -1, 2, 96))
+  show("q8_empty", matrix.linear_q8_0_row_no_bias(matrix.zeros(0, 0), wq8, 2, 3, 96))
+}
+
+// Layout: gammas [attn(hidden), q(hd), k(hd), ffn(hidden)] then the seven
+// weights [q, k, v, o, gate, up, down], each at the returned offsets.
+fn layout(sizes: List[Int]) -> List[Int] = sizes |> list.fold(
+  ([], 0),
+  ((acc, off), n) => (acc + [off], off + n),
+) |> (p) => p.0
+
+fn show_block(tag: String, r: (Matrix, Matrix, Matrix)) -> Unit = {
+  let (h, k, v) = r
+  show("${tag}.h", h)
+  show("${tag}.k", k)
+  show("${tag}.v", v)
+}
+
+fn block_q1() -> Unit = {
+  // n_q 2, n_kv 1, head_dim 64: hidden 128, kv_hidden 64, ffn 128.
+  let g = gammas(3, 128) + gammas(4, 64) + gammas(5, 64) + gammas(6, 128)
+  let ws = [
+    q1_rows(31, 128, 1),
+    q1_rows(32, 64, 1),
+    q1_rows(33, 64, 1),
+    q1_rows(34, 128, 1),
+    q1_rows(35, 128, 1),
+    q1_rows(36, 128, 1),
+    q1_rows(37, 128, 1)
+  ]
+  let offs = layout([list.len(g)] + (ws |> list.map((w) => list.len(w))))
+  let w = bytes.from_list(g + list.flatten(ws))
+  let h = acts(41, 2, 128)
+  let kc = acts(42, 1, 64)
+  let vc = acts(43, 1, 64)
+  let r = matrix.qwen3_block_q1_0_kv(
+    h,
+    kc,
+    vc,
+    w,
+    [0, 512, 768, 1024],
+    list.drop(offs, 1),
+    1,
+    2,
+    1,
+    64,
+    128,
+    10000.0,
+    0.000001,
+  )
+  show_block("qwen3_q1", r)
+}
+
+fn block_f32() -> Unit = {
+  // hidden 48 (from h), n_q 2, n_kv 1, head_dim 32: q_hidden 64, kv 32, ffn 40.
+  let g = gammas(7, 48) + gammas(8, 32) + gammas(9, 32) + gammas(10, 48)
+  let ws = [
+    f32_vals(51, 64 * 48),
+    f32_vals(52, 32 * 48),
+    f32_vals(53, 32 * 48),
+    f32_vals(54, 48 * 64),
+    f32_vals(55, 40 * 48),
+    f32_vals(56, 40 * 48),
+    f32_vals(57, 48 * 40)
+  ]
+  let offs = layout([list.len(g)] + (ws |> list.map((w) => list.len(w))))
+  let w = bytes.from_list(g + list.flatten(ws))
+  let h = acts(61, 2, 48)
+  let r = matrix.qwen3_block_f32_kv(
+    h,
+    matrix.zeros(0, 0),
+    matrix.zeros(0, 0),
+    w,
+    [0, 192, 320, 448],
+    list.drop(offs, 1),
+    0,
+    2,
+    1,
+    32,
+    40,
+    1000000.0,
+    0.000001,
+  )
+  show_block("qwen3_f32", r)
+}
+
+fn block_q8() -> Unit = {
+  // hidden 64, n_q 2, n_kv 1, head_dim 32: q_hidden 64, kv 32, ffn 96.
+  let g = gammas(12, 64) + gammas(13, 32) + gammas(14, 32) + gammas(15, 64)
+  let ws = [
+    q8_rows(71, 64, 2),
+    q8_rows(72, 32, 2),
+    q8_rows(73, 32, 2),
+    q8_rows(74, 64, 2),
+    q8_rows(75, 96, 2),
+    q8_rows(76, 96, 2),
+    q8_rows(77, 64, 3)
+  ]
+  let offs = layout([list.len(g)] + (ws |> list.map((w) => list.len(w))))
+  let w = bytes.from_list(g + list.flatten(ws))
+  let h = acts(81, 1, 64)
+  let kc = acts(82, 2, 32)
+  let vc = acts(83, 2, 32)
+  let r = matrix.qwen3_block_q8_0_kv(
+    h,
+    kc,
+    vc,
+    w,
+    [0, 256, 384, 512],
+    list.drop(offs, 1),
+    2,
+    2,
+    1,
+    32,
+    96,
+    1000000.0,
+    0.000001,
+  )
+  show_block("qwen3_q8", r)
+}
+
+fn main() -> Unit = {
+  linear_cases()
+  block_q1()
+  block_f32()
+  block_q8()
+}
