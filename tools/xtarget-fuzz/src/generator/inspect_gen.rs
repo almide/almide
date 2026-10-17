@@ -394,6 +394,22 @@ const SHAPE_RECIPES: &[Recipe] = &[
     Recipe { func: "regex.full_match", size: "s", args: &[("pat", "\"(aé)*\"")] },
 ];
 
+/// The shape recipe of `func` (`module.fn`), for the synthesis campaign's
+/// in-domain leaves ([`recipe_leaf`]).
+pub fn shape_recipe(func: &str) -> Option<&'static [(&'static str, &'static str)]> {
+    SHAPE_RECIPES.iter().find(|r| r.func == func).map(|r| r.args)
+}
+
+/// Parameter `param`'s recipe operand at size `n`, when it is a plain
+/// expression of n alone — the typed placeholders (`{sized}`, `{small}`, …)
+/// need an inspection target's instantiation, so those parameters stay
+/// generated.
+pub fn recipe_leaf(args: &[(&str, &str)], param: &str, n: u64) -> Option<String> {
+    let (_, e) = args.iter().find(|(p, _)| *p == param)?;
+    let e = e.replace("{n}", &n.to_string());
+    (!e.contains('{')).then_some(e)
+}
+
 /// A function whose in-domain input exists only inside a request handler
 /// the router called: `http.param` answers `some` only for a request the
 /// router bound path parameters into, and the binding (`http.__with_params`)
