@@ -221,7 +221,7 @@ fn a_field_accumulator_takes_the_field_and_extends_it() {
         "`b.text = b.text + \"ab\"` must take the field:\n{fields}");
     assert!(fields.contains("b.xs = AlmideConcat::concat(std::mem::take(&mut b.xs), vec![i])"),
         "`b.xs = b.xs + [i]` must take the field:\n{fields}");
-    assert!(fields.contains("b.text = AlmideConcat::concat(std::mem::take(&mut b.text), format!(\"-{}\", i))"),
+    assert!(fields.contains("b.text = AlmideConcat::concat(std::mem::take(&mut b.text), AlmideString::from(format!(\"-{}\", i)))"),
         "`b.text = \"${{b.text}}-${{i}}\"` must append to the taken field:\n{fields}");
     assert!(!fields.contains(".clone()"), "nothing in `fields` needs a copy:\n{fields}");
     let keep_old = body(&rust, "keep_old");
@@ -234,7 +234,7 @@ fn an_interpolation_led_by_the_accumulator_appends() {
     if !tool_available() { return; }
     let rust = emitted();
     let interp = body(&rust, "interp");
-    assert!(interp.contains("s = AlmideConcat::concat(s, format!(\"[{}]\", i))"),
+    assert!(interp.contains("s = AlmideConcat::concat(s, AlmideString::from(format!(\"[{}]\", i)))"),
         "`s = \"${{s}}[${{i}}]\"` must move `s` and append:\n{interp}");
     assert!(interp.contains("s = AlmideConcat::concat(s, AlmideString::from(\".\")"),
         "`s = \"${{s}}.\"` must move `s` and append:\n{interp}");

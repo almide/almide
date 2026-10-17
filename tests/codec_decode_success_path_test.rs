@@ -7,8 +7,8 @@
 //! the field's `Result` and took the key as an owned `String` — a payload
 //! clone and a key allocation on the SUCCESS path of every field, 2x the
 //! hand-written reference on the 8-field `decode` perf row. On the native
-//! leg the frame is now `.map_err(|_we| almide_rt___err_at(_we, "key"
-//! .to_string()))` on the field's own result: the success path is the plain
+//! leg the frame is now `.map_err(|_we| almide_rt___err_at(_we,
+//! AlmideString::from("key")))` on the field's own result: the success path is the plain
 //! `?`, the key stays a `&'static str` literal until an error needs it, and
 //! the workers no call site names are dropped from the program.
 //!
@@ -73,11 +73,11 @@ fn every_field_frame_is_a_map_err_on_the_borrowed_lookup() {
         ("address", "Address_decode((almide_rt_value_field_ref_at(__almide_ir1_v, \"address\", 3))?)"),
         ("homes", "almide_rt_value_decode_list_ref((almide_rt_value_field_ref_at(__almide_ir1_v, \"homes\", 4))?, Address_decode)"),
     ] {
-        let frame = format!("({read}.map_err(|_we| almide_rt___err_at(_we, {key:?}.to_string())))?");
+        let frame = format!("({read}.map_err(|_we| almide_rt___err_at(_we, AlmideString::from({key:?}))))?");
         assert!(decode.contains(&frame), "field `{key}` must read its borrowed lookup with the frame as a `.map_err` on it:\n{decode}");
     }
     let nested = body_of(&rust, "Address_decode");
-    assert!(nested.contains("(almide_rt_value_as_string((almide_rt_value_field_ref_at(__almide_ir1_v, \"city\", 0))?).map_err(|_we| almide_rt___err_at(_we, \"city\".to_string())))?"),
+    assert!(nested.contains("(almide_rt_value_as_string((almide_rt_value_field_ref_at(__almide_ir1_v, \"city\", 0))?).map_err(|_we| almide_rt___err_at(_we, AlmideString::from(\"city\"))))?"),
         "the nested record's own decode carries the same frame shape:\n{nested}");
 }
 
@@ -89,7 +89,7 @@ fn the_success_path_clones_no_payload_and_allocates_no_key() {
         let decode = body_of(&rust, name);
         assert!(!decode.contains(".clone()"), "{name} must not clone anything on the way to its record:\n{decode}");
         // The only owned copy of a key is the one inside a `map_err` closure — the error path.
-        for line in decode.lines().filter(|l| l.contains(".to_string()")) {
+        for line in decode.lines().filter(|l| l.contains("AlmideString::from(")) {
             assert!(line.contains(".map_err(|_we|"), "{name} allocates a key outside the error closure:\n{line}");
         }
     }

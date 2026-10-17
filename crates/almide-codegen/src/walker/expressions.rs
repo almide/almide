@@ -298,7 +298,7 @@ fn render_expr_result_err(ctx: &RenderContext, inner: &IrExpr, ty: &Ty) -> Strin
         // converting those regressed match_container_literal and
         // to_result_custom_e when this fix first landed unconditional.
         let payload = if matches!(&inner.ty, Ty::String) {
-            format!("{}.to_string()", inner_str)
+            format!("{}.to_almide()", inner_str)
         } else {
             inner_str.clone()
         };

@@ -107,7 +107,7 @@ template = "None"
 template = "Ok({inner})"
 
 [err_expr]
-template = "Err(format!(\"{:?}\", {inner}))"
+template = "Err(AlmideString::from(format!(\"{:?}\", {inner})))"
 
 [[unwrap_expr]]
 when_attr = "map_err_join"
@@ -125,7 +125,7 @@ template = "({inner})?"
 
 [[unwrap_expr]]
 when_type = "Option"
-template = "({inner}).ok_or(\"none\".to_string())?"
+template = "({inner}).ok_or(AlmideString::from(\"none\"))?"
 
 [[unwrap_or_expr]]
 template = "match {inner} {{ Ok(v) => v, Err(_) => {fallback}, }}"
@@ -199,7 +199,7 @@ template = "{name}: {value}"
 # ── String Interpolation ──
 
 [string_interp]
-template = "format!(\"{format_str}\", {args})"
+template = "AlmideString::from(format!(\"{format_str}\", {args}))"
 
 # ── Statements ──
 
@@ -562,7 +562,7 @@ template = "{{ almide_stdout_flush(); {arms} {join_expr} }}"
 template = "loop {{\n{body}\n}}"
 
 [err_inner_string]
-template = "Err({inner}.to_string())"
+template = "Err({inner}.to_almide())"
 
 [err_inner_other]
 template = "Err({inner})"
