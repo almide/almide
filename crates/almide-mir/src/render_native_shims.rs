@@ -9,7 +9,7 @@ use super::render_native::NTy;
 const SHIMS: &[(&str, &[NTy], Option<NTy>, &str)] = &[
     ("int.to_string", &[NTy::I64],
             Some(NTy::Str),
-            "fn rt_int_to_string(n: i64) -> AlmideString { AlmideString::from(n.to_string()) }"),
+            "fn rt_int_to_string(n: i64) -> AlmideString { AlmideString::from_i64(n) }"),
     ("print_str", &[NTy::Str],
             None,
             "fn rt_print_str(s: &str) { println!(\"{}\", s); }"),
@@ -20,7 +20,7 @@ const SHIMS: &[(&str, &[NTy], Option<NTy>, &str)] = &[
             "fn rt_eprintln(s: &str) { eprintln!(\"{}\", s); }"),
     ("__str_concat", &[NTy::Str, NTy::Str],
             Some(NTy::Str),
-            "fn rt_str_concat(a: &str, b: &str) -> AlmideString { AlmideString::from([a, b].concat()) }"),
+            "fn rt_str_concat(a: &str, b: &str) -> AlmideString { let mut s = AlmideString::with_capacity(a.len() + b.len()); s.push_str(a); s.push_str(b); s }"),
     ("string.eq", &[NTy::Str, NTy::Str],
             Some(NTy::I64),
             "fn rt_string_eq(a: &str, b: &str) -> i64 { (a == b) as i64 }"),

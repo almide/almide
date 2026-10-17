@@ -510,7 +510,7 @@ fn finish_native_fn(
 fn native_ret_expr(v: ValueId, t: NTy) -> String {
     match t {
         NTy::I64 | NTy::F64 | NTy::Str | NTy::Vec | NTy::Res => var(v),
-        NTy::StrRef => format!("{}.to_string()", var(v)),
+        NTy::StrRef => format!("AlmideString::from({})", var(v)),
         NTy::VecRef => format!("{}.to_vec()", var(v)),
     }
 }
@@ -807,7 +807,7 @@ pub(crate) fn render_dup(
         NTy::StrRef => {
             // Dup of a borrowed param mints a fresh owned handle.
             tys.insert(*dst, NTy::Str);
-            line!("let mut {} = {}.to_string();", var(*dst), var(*src));
+            line!("let mut {} = AlmideString::from({});", var(*dst), var(*src));
         }
         NTy::Vec => {
             tys.insert(*dst, NTy::Vec);

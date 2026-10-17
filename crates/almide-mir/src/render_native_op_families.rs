@@ -186,7 +186,7 @@ pub(crate) fn render_native_result_op(op: &Op, s: OpSink<'_>) -> Result<bool, Lo
         } => {
             let src = match tys.get(&args[0]) {
                 Some(NTy::Str) => format!("{}.clone()", var(args[0])),
-                Some(NTy::StrRef) => format!("{}.to_string()", var(args[0])),
+                Some(NTy::StrRef) => format!("AlmideString::from({})", var(args[0])),
                 other => {
                     return Err(wall(format!(
                         "native: ResMakeErrStr over a non-string payload ({other:?})"
