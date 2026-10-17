@@ -749,7 +749,7 @@ impl Target {
         }
         if with_call {
             let _ = writeln!(s, "    let r: {} = {}", self.ret.render(), self.bound_call(slot.map(|(i, _)| i)));
-            match self.verdict_digest("r", slot.map(|(i, _)| i)) {
+            match self.verdict_digest("r", slot.map(|(i, _)| i), true) {
                 // Its value differs per leg and run: the verdict is the digest.
                 Some(d) => {
                     s.push_str(&outcome_guard("r", &self.ret, self.in_domain(), "    "));
@@ -825,9 +825,13 @@ impl Target {
             ),
             (
                 "tail",
+                // An effect step makes `go` an effect fn, whose own calls
+                // are Results to the checker: each propagates.
                 format!(
-                    "fn go(x: {ty}, i: Int) -> {ty} = if i <= 0 then x else go({}, i - 1)\n\neffect fn main() -> Unit = {{\n  let x0: {ty} = {init}\n  let x: {ty} = go(x0, {k})\n{end}}}\n",
-                    step("x")
+                    "{kw} go(x: {ty}, i: Int) -> {ty} = if i <= 0 then x else go({}, i - 1){bang}\n\neffect fn main() -> Unit = {{\n  let x0: {ty} = {init}\n  let x: {ty} = go(x0, {k}){bang}\n{end}}}\n",
+                    step("x"),
+                    kw = if self.effect { "effect fn" } else { "fn" },
+                    bang = if self.effect { "!" } else { "" },
                 ),
             ),
             (
@@ -852,6 +856,22 @@ impl Target {
     /// `base` and wrap it again, and `main` imports both and also calls the
     /// function directly — three lines that must print the same value.
     pub fn diamond_project(&self, n: u64) -> Project {
+        self.diamond_project_of(n, &["d", "l", "r"])
+    }
+
+    /// One project per path, for a call that consumes what a later path
+    /// would read (`io.read_all` drains stdin): each path runs alone on the
+    /// same input, and their outputs are compared.
+    pub fn diamond_path_projects(&self, n: u64) -> Vec<Project> {
+        ["d", "l", "r"].iter().map(|v| self.diamond_project_of(n, &[v])).collect()
+    }
+
+    /// A call that consumes its whole input: its diamond runs each path alone.
+    pub fn diamond_runs_paths_alone(&self) -> bool {
+        matches!(self.name.as_str(), "io.read_all" | "process.stdin_lines")
+    }
+
+    fn diamond_project_of(&self, n: u64, paths: &[&str]) -> Project {
         let sig: Vec<String> = (0..self.params.len())
             .map(|i| format!("{}a{i}: {}", if Some(i) == self.mut_param { "mut " } else { "" }, self.render_param(i)))
             .collect();
@@ -880,7 +900,11 @@ impl Target {
         // A path is a user `effect fn`, so its call is a Result to the
         // checker (`Signature::lifted`) where an intrinsic's need not be.
         let bang = if self.effect && !matches!(self.ret, GenType::Result(_) | GenType::ResultNom(..)) { "!" } else { "" };
-        for (k, (v, callee)) in [("d", self.name.as_str()), ("l", "left.call"), ("r", "right.call")].into_iter().enumerate() {
+        // Each path runs, is checked and prints before the next one runs, so
+        // what a call writes itself (a child's inherited stdout) lands beside
+        // its own value and the three thirds of the output compare.
+        let all = [("d", self.name.as_str()), ("l", "left.call"), ("r", "right.call")];
+        for (k, (v, callee)) in all.into_iter().enumerate().filter(|(_, (v, _))| paths.contains(v)) {
             if let Some(m) = self.mut_param {
                 let _ = writeln!(main, "  var {v}m: {} = {}", self.render_param(m), self.arg(m, n));
             }
@@ -889,12 +913,8 @@ impl Target {
             }
             let bang = if v == "d" { "" } else { bang };
             let _ = writeln!(main, "  let {v}: {ret} = {callee}({}){bang}", path_args(v));
-        }
-        // Three paths agreeing on an `err` agree on the error path.
-        for v in ["d", "l", "r"] {
+            // Three paths agreeing on an `err` agree on the error path.
             main.push_str(&outcome_guard(v, &self.ret, self.in_domain(), "  "));
-        }
-        for v in ["d", "l", "r"] {
             match self.observe {
                 // Encoded bytes differ by leg by contract: compare what decodes.
                 Some(dec) => {
@@ -902,7 +922,7 @@ impl Target {
                     let _ = writeln!(main, "  {}", render_print(&format!("{v}_o"), &self.ret));
                 }
                 None if self.verdict.is_some() && self.ret != GenType::Unit => {
-                    let d = self.verdict_digest(v, None).unwrap_or_default();
+                    let d = self.verdict_digest(v, None, false).unwrap_or_default();
                     let _ = writeln!(main, "  let {v}_held: Int = {d}\n  println(\"{v} = ${{{v}_held}}\")");
                 }
                 None if self.ret != GenType::Unit => {
@@ -945,13 +965,13 @@ impl Target {
     /// 1 when `v` (this target's result) holds its declared properties, else
     /// 0, over the program's argument names (`x` in the size `slot`, `a<i>`
     /// elsewhere); None for a target whose value is compared as such.
-    fn verdict_digest(&self, v: &str, slot: Option<usize>) -> Option<String> {
+    fn verdict_digest(&self, v: &str, slot: Option<usize>, cheap: bool) -> Option<String> {
         let verdict = self.verdict?;
         let names: Vec<(String, String)> = (0..self.params.len())
             .map(|i| (self.params[i].0.clone(), if Some(i) == slot { "x".to_string() } else { format!("a{i}") }))
             .collect();
         let names: Vec<(&str, &str)> = names.iter().map(|(p, e)| (p.as_str(), e.as_str())).collect();
-        let holds = super::verdicts::fill(verdict.holds, &names);
+        let holds = super::verdicts::fill(verdict.property(cheap), &names);
         Some(match self.ret {
             GenType::Result(_) => format!("(match {v} {{ ok(v) => if {holds} then 1 else 0, err(_) => 0 }})"),
             _ => format!("(match {v} {{ v => if {holds} then 1 else 0 }})"),

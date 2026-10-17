@@ -140,6 +140,9 @@ impl World {
     pub fn enter(&self, cmd: &mut std::process::Command) {
         cmd.current_dir(&self.dir).envs(ENV.iter().copied()).env("TMPDIR", tmp_of(&self.dir));
         cmd.envs(super::fixture::env().iter().map(|(k, v)| (k, v)));
+        // The tree's absolute path, for a run whose cwd is elsewhere (a
+        // diamond's project); a stock runtime sees the tree as `.` instead.
+        cmd.env("XF_SANDBOX", &self.dir);
         if let Ok(f) = std::fs::File::open(&self.stdin) {
             cmd.stdin(f);
         }
