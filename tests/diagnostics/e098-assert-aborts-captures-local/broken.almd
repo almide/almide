@@ -1,0 +1,8 @@
+// The closure reads `xs`, a local of the test: it runs in a child process
+// (native) or a fresh instance (wasm), where the test's locals do not exist.
+import testing
+
+test "reading past the end aborts" {
+  let xs = [1, 2, 3]
+  testing.assert_aborts("index out of bounds", () => xs[5])
+}

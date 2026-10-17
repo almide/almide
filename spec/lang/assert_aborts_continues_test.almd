@@ -1,0 +1,34 @@
+// @contract: C-384
+// ADR-0029 D3: an aborting closure ends its child, never the test. The test
+// goes on after each `testing.assert_aborts`, several calls in one test each
+// get their own child, and the child starts from the program's initial state:
+// a top-level `var` the test changed holds its initializer there.
+import testing
+
+var counter = 0
+
+fn bump() -> Int = {
+  counter = counter + 1
+  counter
+}
+
+fn fail_unless_fresh() -> Unit = if counter == 0 then panic("fresh: counter is 0") else panic("stale: counter is ${counter}")
+
+test "the test continues after each assert_aborts" {
+  testing.assert_aborts("first", () => panic("first"))
+  testing.assert_aborts("second", () => panic("second"))
+  let n = bump()
+  assert_eq(n, 1)
+}
+
+test "the child sees top-level vars at their initial values" {
+  let _ = bump()
+  let _ = bump()
+  testing.assert_aborts("fresh: counter is 0", () => fail_unless_fresh())
+  assert_eq(counter, 2)
+}
+
+test "the closure's value is discarded" {
+  testing.assert_aborts("index out of bounds", () => [10, 20][2] + 1)
+  assert_eq([10, 20][1], 20)
+}

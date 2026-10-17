@@ -1,0 +1,54 @@
+// @contract: C-384
+// ADR-0029: `testing.assert_aborts(expected, f)` runs only `f`, in a child
+// process (native) or a fresh instance (wasm), and passes when the child ends
+// in a defined abort whose text contains `expected`. Every abort counts, not
+// only `panic`, and each call gets its own child.
+import env
+import testing
+
+fn nth(xs: List[Int], i: Int) -> Int = xs[i]
+
+fn halve_by(d: Int) -> Int = 10 / d
+
+test "panic is an abort" {
+  testing.assert_aborts("oh no", () => panic("oh no"))
+}
+
+test "the expected text is a substring" {
+  testing.assert_aborts("went wrong", () => panic("something went wrong"))
+}
+
+test "the panic header is part of the abort text" {
+  testing.assert_aborts("PANIC: oh no", () => panic("oh no"))
+}
+
+test "an index past the end is an abort" {
+  testing.assert_aborts("index out of bounds", () => [1][3])
+}
+
+test "an index past the end in a helper is an abort" {
+  testing.assert_aborts("Error: index out of bounds", () => nth([1, 2, 3], 5))
+}
+
+test "division by zero is an abort" {
+  testing.assert_aborts("division by zero", () => 10 / (int.parse("0") ?? 1))
+}
+
+test "division by zero in a helper is an abort" {
+  testing.assert_aborts("division by zero", () => halve_by(int.parse("0") ?? 1))
+}
+
+test "a failed assert_eq is an abort in its program form" {
+  testing.assert_aborts("Error: assertion failed", () => assert_eq(nth([1, 2], 0), 2))
+}
+
+test "a failed assert reports its operands" {
+  testing.assert_aborts("found: 1", () => assert_eq(nth([1, 2], 0), 2))
+}
+
+test "an effect closure runs in the child" {
+  testing.assert_aborts("from an effect closure", () => {
+    let _ = env.temp_dir()
+    panic("from an effect closure")
+  })
+}
