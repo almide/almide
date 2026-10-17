@@ -77,6 +77,16 @@ fn linear_cases() -> Unit = {
   show("q1_neg_off", matrix.linear_q1_0_row_no_bias(x, wq1, -9, 2, 256))
   show("q1_empty", matrix.linear_q1_0_row_no_bias(matrix.zeros(0, 0), wq1, 3, 3, 256))
   show("q1_zero_rows", matrix.linear_q1_0_row_no_bias(x, wq1, 3, 0, 256))
+  // The packed GEMV IS the decoded GEMV: eighth-valued activations keep every
+  // product and partial sum exact, so any summation order agrees.
+  let xe = matrix.from_lists([
+    list.range(0, 128) |> list.map((k) => float.from_int(k % 9 - 4) / 8.0)
+  ])
+  let wone = bytes.from_list(q1_rows(13, 2, 1))
+  let packed = matrix.linear_q1_0_row_no_bias(xe, wone, 0, 2, 128)
+  let decoded = matrix.linear_row_no_bias(xe, matrix.from_q1_0_bytes(wone, 0, 2, 128))
+  show("q1_packed", packed)
+  println("q1_packed_is_decoded: ${matrix.to_lists(packed) == matrix.to_lists(decoded)}")
   // Q8_0: 3 output rows x 96 inputs (3 blocks); a zero activation row
   // (amax 0 -> scale 0) and a row of exact .5 ties.
   let wq8 = bytes.from_list([1, 2] + q8_rows(23, 3, 3))
