@@ -75,6 +75,7 @@ pub mod pass_meter_charge;
 pub mod pass_region_window;
 pub mod pass_region_window_clone;
 mod prelude_region;
+pub mod prelude_string;
 mod prelude_fan;
 mod prelude_stack;
 pub use prelude_region::region_arena_prelude_source;
@@ -344,25 +345,10 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     let vis = if for_crate { "pub " } else { "" };
     let macro_attr = if for_crate { "#[macro_export]\n" } else { "" };
     let mut s = String::new();
-    // ADR-0013 stage 2, step 1: the Almide `String` is spelled `AlmideString`
-    // in generated code. Today it is `String` itself, so the runtime and every
-    // `@extern(rust)` host compile unchanged; the shared buffer replaces it
-    // here, in one place (docs/roadmap/active/adr-0013-string-sharing.md).
-    s.push_str(&format!("{vis}type AlmideString = String;\n"));
-    // A runtime function converts what it returns once, at its boundary:
-    // the identity while the alias is `String`.
-    s.push_str(&format!("{vis}trait AlmideIntoStr {{ type Out; fn into_almide(self) -> Self::Out; }}\nimpl<T> AlmideIntoStr for T {{ type Out = T; #[inline(always)] fn into_almide(self) -> T {{ self }} }}\n"));
-    s.push_str(&format!("{vis}trait AlmideConcat<Rhs> {{ type Output; fn concat(self, rhs: Rhs) -> Self::Output; }}\n"));
-    // The owned-String impls extend in place (`push_str`) instead of
-    // `format!`: byte-identical output, but an owned accumulator keeps its
-    // capacity — with the TCO accumulator move this makes a tail-recursive
-    // string builder amortized O(n) instead of reallocating every step.
-    s.push_str("impl AlmideConcat<String> for String { type Output = String; #[inline(always)] fn concat(self, rhs: String) -> String { let mut s = self; s.push_str(&rhs); s } }\n");
-    s.push_str("impl AlmideConcat<&str> for String { type Output = String; #[inline(always)] fn concat(self, rhs: &str) -> String { let mut s = self; s.push_str(rhs); s } }\n");
-    // A literal left operand (`"k" + x`) prepends into the owned right operand's buffer: no allocation
-    // when its capacity covers both (`int.to_string` reserves 19 bytes), else one grow — never a fresh String.
-    s.push_str("impl AlmideConcat<String> for &str { type Output = String; #[inline(always)] fn concat(self, rhs: String) -> String { let mut r = rhs; r.insert_str(0, self); r } }\n");
-    s.push_str("impl AlmideConcat<&str> for &str { type Output = String; #[inline(always)] fn concat(self, rhs: &str) -> String { format!(\"{}{}\", self, rhs) } }\n");
+    // ADR-0013 stage 2: the Almide String alias, its boundary conversion and
+    // the `AlmideConcat` trait with its String impls (prelude_string.rs;
+    // `ALMIDE_SHARED_STR=1` selects the shared buffer).
+    s.push_str(&prelude_string::string_prelude(vis));
     s.push_str("impl<T: Clone> AlmideConcat<Vec<T>> for Vec<T> { type Output = Vec<T>; #[inline(always)] fn concat(self, rhs: Vec<T>) -> Vec<T> { let mut r = self; r.extend(rhs); r } }\n");
     // ONE stdout buffer (#2245). `println` used to lower to Rust's `println!`,
     // whose `Stdout` is line-buffered whatever it is attached to — one write
