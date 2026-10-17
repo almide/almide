@@ -156,7 +156,21 @@ The raw count rose at the last step because some errors moved into the runtime i
 
 All 61 remaining errors are the thread boundary: `AlmideStr` is not `Send`/`Sync`, and it reaches a `fan` block, `fan.map_par`, `fs.fold_lines_chunked`, or a top-level `let` (a `static LazyLock`). That is design point 3 (the Koka thread-shared flip), not a construction site.
 
-**Flag on, the corpus runs.** The same 463 files built with `rustc --test` at opt-level 0 and run natively: 438 pass with the flag on and 452 with it off. The difference is the 14 thread-boundary files; the 10 rustls / flate2 files do not link in a standalone rustc, and one deep-recursion test overflows the default test-thread stack at opt-level 0 in this harness (on both sides).
+| + design point 3: the thread-shared mark at every thread boundary | 0 | 0 | 0 |
+
+**Design point 3 (the thread boundary).** This is Koka's thread-shared flip (`kklib.h`: a negative count is atomic; `kk_block_mark_shared` before a task starts).
+- `AlmideStr`'s count carries an `ALMIDE_STR_SHARED` bit. A marked block counts with atomic read-modify-writes, and its last drop pairs `Release` with an `Acquire` fence. An unmarked block uses `Relaxed` loads and stores, which are plain moves. The unique check loads with `Acquire`.
+- `almide_str_mark_reachable(&v)` marks everything `v` reaches. It clones `v` inside a marking window, a global counter that makes each clone set the bit. So no per-type walker is needed: every Almide value is `Clone`, as Koka's walk covers every block.
+- The compiler marks at every boundary it emits, and nowhere else:
+  - the free variables of a threaded `fan` block's arms;
+  - the free variables of the arguments to a runtime helper whose signature bounds `Send` (`runtime_fn_modes::crosses_threads`, generated from the signatures);
+  - the data those helpers deal to their workers (`fan.map_par` items, `list.par_*`, the `fold_lines_chunked` init);
+  - a top-level `let`'s value, which a `static LazyLock` hands to every thread.
+- `unsafe impl Send / Sync for AlmideStr` rests on that marking. An unmarked block is never reachable from two threads.
+- Only values that cross a boundary turn atomic. A clone made on another thread during a marking window also marks its block, which only costs speed.
+- Off the flag, `almide_share()` is an empty default method: the runtime's calls compile to nothing, and the compiler emits no marks.
+
+**Flag on, the corpus runs.** The same 463 files built with `rustc --test` at opt-level 0 and run natively: 438 pass with the flag on and 452 with it off. The difference is the 14 thread-boundary files. With design point 3 in place (464 files, `spec/stdlib/thread_shared_string_test.almd` added), 453 pass on both sides and the non-passing set is the same 11 files. The 10 rustls / flate2 files do not link in a standalone rustc, and one deep-recursion test overflows the default test-thread stack at opt-level 0 in this harness (on both sides).
 
 **Step 5 (`let t = s; s = s + "x"`).** `spec/lang/alias_cow_test.almd` pins it, straight and in a loop, and it passes on wasm and natively with the flag on and off. Under the shared buffer the walker's `+` goes through `AlmideStr::concat`, and the v1 append window's `s.push_str(x)` through `AlmideStr::push_str`. Both take the unique view, which copies a shared block before it writes.
 
@@ -169,7 +183,7 @@ All 61 remaining errors are the thread boundary: `AlmideStr` is not `Send`/`Sync
   - A v1 census is the next instrument to build.
 
 **Not covered yet:**
-- the thread boundary above (design point 3);
+- Miri over the new atomic path (`crates/almide-str/tests/almide_str_threads_test.rs`) runs only in CI (`miri-almide-str`); this machine has no rustup toolchain for Miri;
 - `AlmideValue::Str` (step 6) and the default flip (step 7), both deliberately untouched;
 - speed under the flag: `&str + AlmideStr` and a v1 shim result copy once more than they need to, and `to_almide()` copies where a count increment would do. Step 7's `gce_ab.sh` run is where that is judged.
 
