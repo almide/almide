@@ -787,7 +787,6 @@ spec/wasm_cross/testing_assert_abort_lt.almd
 spec/wasm_cross/testing_assert_abort_none.almd
 spec/wasm_cross/testing_assert_abort_ok.almd
 spec/wasm_cross/testing_assert_abort_some.almd
-spec/wasm_cross/testing_assert_abort_throws.almd
 spec/wasm_cross/time_negative_scale.almd
 spec/wasm_cross/time_negative_trap.almd
 spec/wasm_cross/time_ops_algebra.almd

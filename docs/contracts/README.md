@@ -416,7 +416,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-378 | net tcp: every failure reads as errno-free classified text from one table, identical on native, the embedded wasm lane and the stock WASI 0.3 component | 0.68.0 | active | fixture | 0 |
 | C-379 | net tcp: timeouts and tcp_available are guest-enforced on the stock WASI 0.3 component and answer what native and the embedded wasm lane answer | 0.68.0 | active | fixture | 0 |
 | C-380 | json.to_map holds one entry per key: a repeated object key keeps its first position and takes its last value, on every leg | 0.68.0 | active | fixture | 1 |
-| C-381 | The testing asserts' failures outside test blocks abort in the T18 form on both targets | 0.68.0 | active | fixture | 9 |
+| C-381 | The testing asserts' failures outside test blocks abort in the T18 form on both targets | 0.68.0 | active | fixture | 8 |
 | C-382 | net unix sockets and shm files: bytes, descriptors received, readiness and shm contents agree on native and the embedded wasm lane; the stock artifact refuses them | 0.68.0 | active | fixture | 0 |
 | C-383 | net unix sockets and shm files: every failure is an err with the same text on native and the embedded wasm lane, and a descriptor the program does not hold is refused before any system call | 0.68.0 | active | fixture | 0 |
 | C-384 | testing.assert_aborts runs only its capture-free closure in a fresh child and passes iff the child ends in a defined abort whose text contains the expected substring, identically on native and wasm | 0.68.0 | active | fixture | 0 |

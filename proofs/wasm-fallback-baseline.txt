@@ -13,9 +13,10 @@
 #                       and the embedded host does not serve (TCP listen, an
 #                       @extern binding); out of wasm scope BY DESIGN until the
 #                       WASI story changes.
-#   HARNESS_LIMITATION— the TESTING harness needs a mechanism wasm lacks
-#                       (assert_throws requires catching a panic; wasm traps
-#                       are uncatchable in-process).
+#   HARNESS_LIMITATION— the TESTING harness needs a mechanism wasm lacks.
+#                       None since ADR-0029: testing.assert_aborts runs its
+#                       closure in a fresh instance, so no catch is needed and
+#                       the two assert_throws files run the wasm leg.
 #
 # COMPILER_FRONTIER (2) — the test harness's wasm lane renders through the
 # INCUMBENT brick, which has no list-rest / as-pattern bind (#1461); the
@@ -29,10 +30,6 @@
 # wasm leg byte for byte with native.
 spec/lang/effect_intrinsic_tail_test.almd :: HOST_CAPABILITY :: http.serve is a TCP listener
 spec/stdlib/net_test.almd :: HOST_CAPABILITY :: net is an OS socket API
-#
-# HARNESS_LIMITATION (2):
-spec/stdlib/coverage_assert_throws_test.almd :: HARNESS_LIMITATION :: assert_throws needs panic catching; a wasm trap is uncatchable in-process
-spec/stdlib/testing_polarity_test.almd :: HARNESS_LIMITATION :: assert_throws needs panic catching; a wasm trap is uncatchable in-process
 spec/stdlib/http_status_test.almd :: HOST_CAPABILITY :: http client is an OS socket API
 # 2026-09-25 (#2631): the http call handle fixture — its server arm is `net`
 # (no wasm host) and the stock artifact refuses the handle (E081 on stock-p1;

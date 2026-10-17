@@ -768,3 +768,10 @@ legs = ["stock-p1"]
 class = "pending-port"
 reason = "embedded-lane-served (#2633, ops 53..=59): `almide run --target wasm` serves the http call handle through the http_call splice and the shared native call core (crates/almide-rt-core, C-366); the DEFAULT stock artifact still refuses — stock WASI has no host for a guest-pollable http call until the wasi:http port (#1710)"
 issue = "#1710"
+
+[[unavailable]]
+fn = "testing.assert_aborts"
+legs = ["stock-p1"]
+class = "host-capability"
+justification = "the closure runs in a fresh instance of the same module (ADR-0029 D3), which the embedded host starts for the test lane and a stock runtime has no way to start; native runs it in a re-executed test binary"
+reason-stock-p1 = "under ALMIDE_TEST_WASM_RUNNER=wasmtime the test file runs on native: testing.assert_aborts needs the embedded host to start a fresh instance (host-capability, ADR-0029)"

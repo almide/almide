@@ -10759,6 +10759,12 @@ complexity = "PASS: call k=64..128 meter=instructions:u+bytes-moved alloc=canoni
 alloc = "PASS: call live=0, loop live=0, tail live=0, fold live=0"
 diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 [[fn]]
+name = "testing.assert_aborts"
+sig = "(expected: String, f: () -> T) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
 name = "testing.assert_approx"
 sig = "(a: Float, b: Float, tolerance: Float) -> Unit"
 class = "pure"
@@ -10874,12 +10880,6 @@ parity = "PASS: seed 1792164379, 200 programs; 200 program(s) call it, 187 of th
 complexity = "PASS: [vars=Int] call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=4194304..8388608 8.870e2/1.461e3/0.000e0/8.600e1/1.194e3 fit 1 (rms 0.0%) moved 0.000e0/0.000e0/0.000e0/0.000e0/0.000e0B fit 1 (rms 0.0%) wall 0.000/0.000/0.000/0.000/0.000s wasm k=1048576..2097152 4.365e7/4.365e7/4.365e7/4.365e7/4.365e7 fit 1 (rms 0.0%) moved 1.440e2/4.800e1/0.000e0/4.800e1/0.000e0B fit 1 (rms 0.0%) wall 0.005/0.005/0.005/0.005/0.005s (order 1 ok) || [vars=String] call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=4194304..8388608 0.000e0/9.350e2/1.302e3/3.310e2/0.000e0 fit 1 (rms 0.0%) moved 0.000e0/0.000e0/0.000e0/0.000e0/0.000e0B fit 1 (rms 0.0%) wall 0.000/0.000/0.000/0.000/0.000s wasm k=1048576..2097152 5.098e7/5.099e7/5.098e7/5.099e7/5.099e7 fit 1 (rms 0.0%) moved 0.000e0/0.000e0/0.000e0/4.800e1/0.000e0B fit 1 (rms 0.0%) wall 0.005/0.005/0.005/0.005/0.005s (order 1 ok)"
 alloc = "PASS: [vars=Int] call live=0 || [vars=String] call live=0"
 diamond = "PASS: [vars=Int] direct = via left = via right on both legs (1 line(s) each) || [vars=String] direct = via left = via right on both legs (1 line(s) each)"
-
-[[fn]]
-name = "testing.assert_throws"
-sig = "(f: () -> Unit, expected: String) -> Unit"
-class = "pure"
-status = "uninspected"
 
 [[fn]]
 name = "uint16.max_value"

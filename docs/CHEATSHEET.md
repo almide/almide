@@ -786,6 +786,22 @@ test "ok result" { assert_eq(validate(5), ok(5)) }      // Result-aware
 test "err" { assert_eq(validate(-1), err("bad")) }      // natural
 ```
 
+### Testing that code aborts
+
+`testing.assert_aborts(expected, () => …)` runs only the closure, in a child process (native) or a fresh instance (wasm), and passes when it aborts with text containing `expected` — `panic`, an index out of bounds, a division by zero, a failed assert. The test goes on after it. The closure is a lambda written in the call that captures nothing of the test (E098), and the call sits directly in a `test` block (E099). There is no `assert_throws` (removed at dialect epoch 14).
+
+```almide check
+import testing
+
+fn nth(xs: List[Int], i: Int) -> Int = xs[i]
+
+test "aborts" {
+  testing.assert_aborts("index out of bounds", () => nth([1, 2, 3], 5))
+  testing.assert_aborts("PANIC: oh no", () => panic("oh no"))
+  assert_eq(nth([1, 2, 3], 0), 1)
+}
+```
+
 ## Built-in functions
 ```
 println(s)                 // print line to stdout
