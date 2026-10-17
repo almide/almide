@@ -33,8 +33,11 @@ fn render_fan(ctx: &RenderContext, span: Option<almide_base::span::Span>, exprs:
     let spawns_s = spawns.join(" ");
     let construct = if any_result && ctx.auto_unwrap { "fan_effect" } else { "fan_expr" };
     let err_s = render_type(ctx, &fan_err_ty(ctx));
-    ctx.templates.render_with(construct, None, &[], &[("exprs", exprs_s.as_str()), ("count", count_s.as_str()), ("spawns", spawns_s.as_str()), ("join_expr", join_expr.as_str()), ("err_ty", err_s.as_str())])
-        .unwrap_or_else(|| format!("fan({})", rendered.join(", ")))
+    let fan = ctx.templates.render_with(construct, None, &[], &[("exprs", exprs_s.as_str()), ("count", count_s.as_str()), ("spawns", spawns_s.as_str()), ("join_expr", join_expr.as_str()), ("err_ty", err_s.as_str())])
+        .unwrap_or_else(|| format!("fan({})", rendered.join(", ")));
+    // ADR-0013: what the arms read from outside is marked thread-shared first.
+    let marks = thread_share_marks(ctx, &exprs.iter().collect::<Vec<_>>());
+    if marks.is_empty() { fan } else { format!("{{ {marks}{fan} }}") }
 }
 
 /// The error a fan block's join propagates into: the enclosing fn's (#3467:
@@ -92,3 +95,5 @@ fn render_fan_inline(ctx: &RenderContext, exprs: &[IrExpr], rendered: &[String])
     ctx.templates.render_with("fan_inline", None, &[], &[("arms", arms_s.as_str()), ("join_expr", join_expr.as_str())])
         .unwrap_or_else(|| format!("{{ {arms_s} {join_expr} }}"))
 }
+
+include!("expressions_thread_share.rs");

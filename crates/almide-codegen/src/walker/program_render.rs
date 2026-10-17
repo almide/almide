@@ -213,6 +213,8 @@ fn render_program_top_lets(ctx: &RenderContext, program: &IrProgram, parts: &mut
             }
             Tls::Const | Tls::Lazy { .. } => {
                 let construct = if matches!(info.storage, Tls::Const) { "top_let_const" } else { "top_let_lazy" };
+                // ADR-0013: a lazy static is reachable from every thread, so its value is marked thread-shared.
+                let val_str = if construct == "top_let_lazy" && crate::prelude_string::shared_str_enabled() { format!("almide_shared_value({val_str})") } else { val_str.clone() };
                 ctx.templates.render_with(construct, None, &[], &[("name", static_name), ("type", ty_str.as_str()), ("value", val_str.as_str())])
                     .unwrap_or_else(|| format!("const {} = {};", static_name, val_str))
             }

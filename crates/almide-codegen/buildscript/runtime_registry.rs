@@ -272,6 +272,17 @@ fn write_runtime_fn_modes(rust_entries: &[fs::DirEntry], out_dir: &Path) -> io::
         modes_out.push_str(&format!("        \"{}\" => Some(\"{}\"),\n", threaded, twin));
     }
     modes_out.push_str("        _ => None,\n    }\n}\n");
+    let mut crossing: Vec<&String> = generics.iter().filter(|(_, g)| g.contains("Send")).map(|(n, _)| n).collect();
+    crossing.sort();
+    crossing.dedup();
+    modes_out.push_str("\n/// The runtime helpers that hand work to scoped threads: their signature\n");
+    modes_out.push_str("/// bounds `Send` (ADR-0013 marks what they capture thread-shared).\n");
+    modes_out.push_str("pub fn crosses_threads(name: &str) -> bool {\n    matches!(name,\n");
+    for (i, n) in crossing.iter().enumerate() {
+        let sep = if i + 1 < crossing.len() { " |" } else { "" };
+        modes_out.push_str(&format!("        \"{}\"{}\n", n, sep));
+    }
+    modes_out.push_str("    )\n}\n");
     fs::write(out_dir.join("runtime_fn_modes.rs"), &modes_out)
 }
 

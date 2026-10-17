@@ -851,3 +851,17 @@ pub fn send_free_twin(name: &str) -> Option<&'static str> {
         _ => None,
     }
 }
+
+/// The runtime helpers that hand work to scoped threads: their signature
+/// bounds `Send` (ADR-0013 marks what they capture thread-shared).
+pub fn crosses_threads(name: &str) -> bool {
+    matches!(name,
+        "almide_rt_fan_map_par" |
+        "almide_rt_fan_settle" |
+        "almide_rt_fs_fold_lines_chunked" |
+        "almide_rt_list_par_all" |
+        "almide_rt_list_par_any" |
+        "almide_rt_list_par_filter" |
+        "almide_rt_list_par_map"
+    )
+}
