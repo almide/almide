@@ -251,16 +251,12 @@ pub fn self_host_runtime() -> &'static [SelfHostRow] {
         (crate::embedded::SRC_BYTES_CURSOR, &[("bytes_read_u8_at", "bytes.read_u8_at"), ("bytes_read_bool_at", "bytes.read_bool_at"), ("bytes_read_u16_le_at", "bytes.read_u16_le_at"), ("bytes_read_u16_be_at", "bytes.read_u16_be_at"), ("bytes_read_i16_le_at", "bytes.read_i16_le_at"), ("bytes_read_i16_be_at", "bytes.read_i16_be_at"), ("bytes_read_u32_le_at", "bytes.read_u32_le_at"), ("bytes_read_u32_be_at", "bytes.read_u32_be_at"), ("bytes_read_i32_le_at", "bytes.read_i32_le_at"), ("bytes_read_i32_be_at", "bytes.read_i32_be_at"), ("bytes_read_i64_le_at", "bytes.read_i64_le_at"), ("bytes_read_i64_be_at", "bytes.read_i64_be_at"), ("bytes_read_f16_le_at", "bytes.read_f16_le_at"), ("bytes_read_f32_le_at", "bytes.read_f32_le_at"), ("bytes_read_f32_be_at", "bytes.read_f32_be_at"), ("bytes_read_f64_le_at", "bytes.read_f64_le_at"), ("bytes_read_f64_be_at", "bytes.read_f64_be_at"), ("bytes_take_at", "bytes.take_at"), ("bytes_read_string_be_at", "bytes.read_string_be_at")]),
         (crate::embedded::SRC_BYTES_F16, &[("bytes_read_f16_le", "bytes.read_f16_le"), ("bytes_read_f16_le_array", "bytes.read_f16_le_array")]),
         (
-            crate::embedded::SRC_MATRIX_ACTIVATIONS,
-            &[("matrix_softmax_rows", "matrix.softmax_rows"), ("matrix_gelu", "matrix.gelu"), ("matrix_swiglu_gate", "matrix.swiglu_gate"), ("matrix_silu_mul", "matrix.silu_mul"), ("matrix_rope_rotate", "matrix.rope_rotate"), ("matrix_rope_rotate_at", "matrix.rope_rotate_at"), ("matrix_rope_rotate_neox_at", "matrix.rope_rotate_neox_at"), ("matrix_multi_head_attention", "matrix.multi_head_attention"), ("matrix_masked_multi_head_attention", "matrix.masked_multi_head_attention"), ("matrix_from_q1_0_bytes", "matrix.from_q1_0_bytes"), ("matrix_select_rows_q1_0", "matrix.select_rows_q1_0"), ("matrix_select_rows_q8_0_dq", "matrix.select_rows_q8_0_dq")],
-        ),
-        (
             crate::embedded::SRC_MATRIX_SHAPE,
             &[("matrix_shape", "matrix.shape")],
         ),
         (
             crate::embedded::SRC_MATRIX_FUSED,
-            &[("matrix_mul_scaled", "matrix.mul_scaled"), ("matrix_mul_f32", "matrix.mul_f32"), ("matrix_mul_f32_scaled", "matrix.mul_f32_scaled"), ("matrix_mul_f32_t", "matrix.mul_f32_t"), ("matrix_mul_f32_t_scaled", "matrix.mul_f32_t_scaled"), ("matrix_zeros_f32", "matrix.zeros_f32"), ("matrix_ones_f32", "matrix.ones_f32"), ("matrix_attention_weights", "matrix.attention_weights"), ("matrix_scaled_dot_product_attention", "matrix.scaled_dot_product_attention"), ("matrix_fma", "matrix.fma"), ("matrix_fma3", "matrix.fma3"), ("matrix_fused_gemm_bias_scale_gelu", "matrix.fused_gemm_bias_scale_gelu"), ("matrix_linear_row_gelu", "matrix.linear_row_gelu"), ("matrix_pre_norm_linear", "matrix.pre_norm_linear"), ("matrix_append_rows", "matrix.append_rows"), ("matrix_linear_f32_row_no_bias", "matrix.linear_f32_row_no_bias")],
+            &[("matrix_mul_scaled", "matrix.mul_scaled"), ("matrix_mul_f32", "matrix.mul_f32"), ("matrix_mul_f32_scaled", "matrix.mul_f32_scaled"), ("matrix_mul_f32_t", "matrix.mul_f32_t"), ("matrix_mul_f32_t_scaled", "matrix.mul_f32_t_scaled"), ("matrix_zeros_f32", "matrix.zeros_f32"), ("matrix_ones_f32", "matrix.ones_f32"), ("matrix_fma", "matrix.fma"), ("matrix_fma3", "matrix.fma3"), ("matrix_append_rows", "matrix.append_rows"), ("matrix_linear_f32_row_no_bias", "matrix.linear_f32_row_no_bias")],
         ),
         (
             crate::embedded::SRC_MATRIX_EXT,
@@ -286,14 +282,11 @@ pub fn self_host_runtime() -> &'static [SelfHostRow] {
                 ("matrix_transpose", "matrix.transpose"),
                 ("matrix_slice_rows", "matrix.slice_rows"),
                 ("matrix_gather_rows", "matrix.gather_rows"),
-                ("matrix_causal_mask_add", "matrix.causal_mask_add"),
-                ("matrix_dot_row", "matrix.dot_row"),
+                                ("matrix_dot_row", "matrix.dot_row"),
                 ("matrix_mul", "matrix.mul"),
                 ("matrix_linear_row", "matrix.linear_row"),
                 ("matrix_linear_row_no_bias", "matrix.linear_row_no_bias"),
-                ("matrix_rms_norm_rows", "matrix.rms_norm_rows"),
-                ("matrix_layer_norm_rows", "matrix.layer_norm_rows"),
-                ("matrix_from_bytes_f32_le", "matrix.from_bytes_f32_le"),
+                                                ("matrix_from_bytes_f32_le", "matrix.from_bytes_f32_le"),
                 ("matrix_select_rows_f32", "matrix.select_rows_f32"),
                 ("matrix_from_bytes_f16_le", "matrix.from_bytes_f16_le"),
                 ("matrix_split_cols_even", "matrix.split_cols_even"),
@@ -662,12 +655,6 @@ pub fn self_host_runtime() -> &'static [SelfHostRow] {
         (
             crate::embedded::SRC_STRING_MUTATE,
             &[("string_clear", "string.clear")],
-        ),
-        // The C-041 arena-checkpoint pair (#1423 stage 4): trivial on v1
-        // exactly as bytes.heap_save/heap_restore are (bytes_core.almd).
-        (
-            crate::embedded::SRC_MEM_CHECKPOINT,
-            &[("mem_save", "mem.save"), ("mem_restore", "mem.restore")],
         ),
         (
             crate::embedded::SRC_FLOAT_SATURATING,
