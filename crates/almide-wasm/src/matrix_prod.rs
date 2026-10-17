@@ -1,5 +1,5 @@
 //! Matrix products on the FLAT layout (#1423 stage 4): mul, linear_row /
-//! linear_row_no_bias, swiglu_gate and conv1d. Every dot product is the
+//! linear_row_no_bias and conv1d. Every dot product is the
 //! native scalar loop — accumulate from 0.0, k ascending, mul-then-add, no
 //! fused step (runtime/rs/src/matrix.rs; the self-host bodies in
 //! stdlib/matrix_core.almd / matrix_ext.almd spell the same order). The
@@ -23,11 +23,10 @@ use crate::*;
 
 impl Emitter<'_> {
     /// C-353: two extents a kernel indexes against each other must be EQUAL,
-    /// or the call aborts in the unified T6 form — the same abort the head
-    /// count (C-198), the head geometry (C-278) and the index domain (C-282)
-    /// take. `applies` is a 0/1 i32 local: the EMPTY-operand short-circuit
-    /// each kernel already has answers first (C-278's "the empty matrix has
-    /// no row to violate"), so the guard only judges a call that will read.
+    /// or the call aborts in the unified T6 form — the same abort the index
+    /// domain (C-282) takes. `applies` is a 0/1 i32 local: the EMPTY-operand
+    /// short-circuit each kernel already has answers first (the empty matrix
+    /// has no row to violate), so the guard only judges a call that will read.
     pub(crate) fn matrix_shape_eq(&mut self, applies: u32, a: u32, b: u32) {
         let msg = self.pool.intern("matrix shape mismatch");
         {
@@ -58,7 +57,7 @@ impl Emitter<'_> {
     }
 
     /// `acc = 0.0; for k < n { acc = acc + A[ar, k]·B[br, k] }` with
-    /// per-operand row strides — the shared row·row dot (linear, swiglu).
+    /// per-operand row strides — the row·row dot of linear.
     fn row_row_dot(&mut self, acc: u32, a: (u32, u32, u32), b: (u32, u32, u32), k: u32, n: u32) {
         let ((ha, ar, astride), (hb, br, bstride)) = (a, b);
         self.f.instructions().f64_const(0.0f64.into()).local_set(acc);
@@ -180,70 +179,6 @@ impl Emitter<'_> {
         self.f.instructions().local_get(ho);
         self.release_f64();
         for _ in 0..16 {
-            self.release_i32();
-        }
-        Ok(Some(Lowered::owned(SliceTy::Matrix)))
-    }
-
-    /// swiglu_gate: g = x[i]·w_gate[j], u = x[i]·w_up[j], out = g·σ(g)·u
-    /// with σ(g) = 1 / (1 + exp(−g)) through the vendored libm exp —
-    /// native's scalar loop (matrix.rs almide_rt_matrix_swiglu_gate).
-    pub(crate) fn lower_matrix_swiglu(&mut self, x: &IrExpr, wg: &IrExpr, wu: &IrExpr) -> ArmResult {
-        let exp = self.linked_math("math.exp")?;
-        let (hx, xr, xc) = self.mat_open(x)?;
-        let (hg, gr, gc) = self.mat_open(wg)?;
-        let (hu, ur, uc) = self.mat_open(wu)?;
-        let hrows = self.hold_i32()?;
-        let hout = self.hold_i32()?;
-        let hin = self.hold_i32()?;
-        {
-            // rows = 0 when any operand is empty (native's early return)
-            let mut i = self.f.instructions();
-            i.local_get(xr).i32_const(0);
-            i.local_get(gr).i32_eqz().local_get(ur).i32_eqz().i32_or().i32_eqz();
-            i.select().local_set(hrows);
-        }
-        self.min_u32(hout, gr, ur);
-        self.zero_cols_if_no_rows(hrows, hout);
-        // C-353: both weights are (d_out, d_in) against cols(x), and w_up
-        // carries w_gate's row count — checked after the empty short-circuit.
-        let happ = self.hold_i32()?;
-        {
-            let mut i = self.f.instructions();
-            i.local_get(xr).i32_eqz().local_get(gr).i32_eqz().i32_or();
-            i.local_get(ur).i32_eqz().i32_or().i32_eqz().local_set(happ);
-        }
-        self.matrix_shape_eq(happ, gc, xc);
-        self.matrix_shape_eq(happ, uc, xc);
-        self.matrix_shape_eq(happ, ur, gr);
-        self.min_u32(hin, xc, gc);
-        self.min_u32(hin, hin, uc);
-        let ho = self.mat_alloc_guarded(hrows, hout)?;
-        let hi = self.hold_i32()?;
-        let hj = self.hold_i32()?;
-        let hk = self.hold_i32()?;
-        let hgs = self.hold_f64()?;
-        let hus = self.hold_f64()?;
-        self.loop_begin(hi, hrows);
-        self.loop_begin(hj, hout);
-        self.row_row_dot(hgs, (hx, hi, xc), (hg, hj, gc), hk, hin);
-        self.row_row_dot(hus, (hx, hi, xc), (hu, hj, uc), hk, hin);
-        self.elem_at(ho, hi, hout, hj);
-        {
-            let mut i = self.f.instructions();
-            // g * (1 / (1 + exp(-g))) * u, left to right
-            i.local_get(hgs);
-            i.f64_const(1.0f64.into()).f64_const(1.0f64.into());
-            i.local_get(hgs).f64_neg().call(exp);
-            i.f64_add().f64_div().f64_mul();
-            i.local_get(hus).f64_mul().f64_store(mat_elem());
-        }
-        self.loop_end(hj);
-        self.loop_end(hi);
-        self.f.instructions().local_get(ho);
-        self.release_f64();
-        self.release_f64();
-        for _ in 0..17 {
             self.release_i32();
         }
         Ok(Some(Lowered::owned(SliceTy::Matrix)))

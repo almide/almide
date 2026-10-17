@@ -1,9 +1,8 @@
-//! Matrix byte-loaders and row selectors on the FLAT layout — f32/f16
-//! full loaders, the f32/plain/Q1_0/Q8_0 row-subset selectors, and the
-//! Q1_0 full loader. Transcribed from matrix_core/matrix_activations
-//! self-hosts: negative dims/offsets clamp (#1503), OOB rows are the
-//! defined all-zero edge (C-229 family), the q family carries the 2^28
-//! dims guard (#1525), and dequant zeros normalize -0.0 → +0.0.
+//! Matrix byte-loaders and row selectors on the FLAT layout — f32/f16/f64
+//! full loaders and the f32/plain row-subset selectors. Transcribed from
+//! the matrix_core self-host: negative dims/offsets clamp (#1503), OOB
+//! rows are the defined all-zero edge (C-229 family), and the byte
+//! loaders carry the 2^28 dims guard (#1525).
 
 use almide_ir::IrExpr;
 use wasm_encoder::{BlockType, MemArg, ValType};
@@ -35,10 +34,7 @@ impl Emitter<'_> {
             "from_bytes_f32_le" => self.lower_matrix_from_bytes(4, a, b, c, d),
             "from_bytes_f16_le" => self.lower_matrix_from_bytes(2, a, b, c, d),
             "from_bytes_f64_le" => self.lower_matrix_from_bytes(8, a, b, c, d),
-            "select_rows_f32" => self.lower_matrix_select_f32(a, b, c, d),
-            "from_q1_0_bytes" => self.lower_matrix_q1_0(false, a, b, c, d),
-            "select_rows_q1_0" => self.lower_matrix_q1_0(true, a, b, c, d),
-            _ => self.lower_matrix_q8_select(a, b, c, d),
+            _ => self.lower_matrix_select_f32(a, b, c, d),
         }
     }
 
@@ -71,7 +67,7 @@ impl Emitter<'_> {
         i.i64_const(0).local_get(h).local_get(h).i64_const(0).i64_lt_s().select().local_set(h);
     }
 
-    /// The q-family constructor ceiling (#1525): rows > 2^28 dies, then
+    /// The byte-loader constructor ceiling (#1525): rows > 2^28 dies, then
     /// rows > 0 and cols > 2^28/rows dies — the unified T6 abort.
     fn q_dims_guard(&mut self, hr: u32, hc: u32) {
         let msg = self.pool.intern("matrix dimensions too large");
@@ -324,266 +320,6 @@ impl Emitter<'_> {
         self.release_i64();
         self.release_i64();
         self.release_i32();
-        Ok(Some(Lowered::owned(SliceTy::Matrix)))
-    }
-
-    /// from_q1_0_bytes / select_rows_q1_0: the Q1_0 decode on the
-    /// global-k schedule via `$q10_val` (per-element bound, #1532); a
-    /// row whose blocks leave the buffer stays all-zero; the #1525 dims
-    /// guard fires before any alloc.
-    pub(crate) fn lower_matrix_q1_0(
-        &mut self,
-        select: bool,
-        data: &IrExpr,
-        offset: &IrExpr,
-        dim_a: &IrExpr,
-        dim_b: &IrExpr,
-    ) -> ArmResult {
-        let qv = self.work.helper(crate::work::Helper::Q10Val);
-        self.lower_arg(data, Some(SliceTy::Scalar(Scalar::Bytes)), ArgMode::Borrow)?;
-        let hd = self.hold_i32()?;
-        self.f.instructions().local_set(hd);
-        self.lower_arg(offset, Some(INT), ArgMode::Borrow)?;
-        let hoff = self.hold_i64()?;
-        self.f.instructions().local_set(hoff);
-        self.clamp0(hoff);
-        // full loader: (rows, cols); selector: (cols, ids)
-        let hr = self.hold_i64()?;
-        let hc = self.hold_i64()?;
-        let hids = self.hold_i32()?;
-        if select {
-            self.lower_arg(dim_a, Some(INT), ArgMode::Borrow)?;
-            self.f.instructions().local_set(hc);
-            self.clamp0(hc);
-            match self.lower_arg(dim_b, None, ArgMode::Borrow)? {
-                SliceTy::List(h) if self.types.el(h) == INT => {}
-                other => return unsup(&format!("matrix-q1-ids:{other:?}")),
-            }
-            let mut i = self.f.instructions();
-            i.local_set(hids);
-            i.local_get(hids)
-                .i32_load(len_memarg())
-                .i32_const(8)
-                .i32_div_u()
-                .i64_extend_i32_u()
-                .local_set(hr);
-        } else {
-            self.lower_arg(dim_a, Some(INT), ArgMode::Borrow)?;
-            self.f.instructions().local_set(hr);
-            self.lower_arg(dim_b, Some(INT), ArgMode::Borrow)?;
-            self.f.instructions().local_set(hc);
-            self.clamp0(hr);
-            self.clamp0(hc);
-        }
-        self.q_dims_guard(hr, hc);
-        let ho = self.mat_alloc_out64(hr, hc)?;
-        let hi = self.hold_i32()?;
-        let hrow = self.hold_i64()?; // rid (selector) / row index as i64
-        let hj = self.hold_i32()?;
-        let hrb = self.hold_i64()?; // row_bytes
-        // #1787: a selected ROW is `cols / 128` whole blocks (native's row
-        // schedule); the trailing `cols mod 128` elements are 0.0. The
-        // global-k schedule below is right only for the full loader.
-        let hcr = self.hold_i64()?; // cols rounded down to the block
-        let mut i = self.f.instructions();
-        i.local_get(hc).i64_const(128).i64_div_s().i64_const(18).i64_mul().local_set(hrb);
-        i.local_get(hc).i64_const(128).i64_div_s().i64_const(128).i64_mul().local_set(hcr);
-        i.i32_const(0).local_set(hi);
-        i.block(BlockType::Empty).loop_(BlockType::Empty);
-        i.local_get(hi).local_get(hr).i32_wrap_i64().i32_ge_u().br_if(1);
-        if select {
-            i.local_get(hids).local_get(hi).i32_const(8).i32_mul().i32_add();
-            i.i64_load(slot_memarg(0)).local_set(hrow);
-            let _ = i;
-            self.clamp0(hrow);
-            i = self.f.instructions();
-        } else {
-            i.local_get(hi).i64_extend_i32_u().local_set(hrow);
-        }
-        if select {
-            // Selector: a selected row is `cols / 128` whole blocks on native's
-            // ROW schedule (#1787); a row whose blocks leave the buffer stays
-            // all-zero — in bounds? off + rid*row_bytes + row_bytes <= len,
-            // overflow-free (#2676).
-            let _ = i;
-            self.row_fits(hd, hoff, hrow, hrb);
-            i = self.f.instructions();
-        } else {
-            // Full loader: NO row-level bound — native has none. Its rule is
-            // per ELEMENT on the global-k schedule (`$q10_val`, #1532): a k
-            // whose 18-byte block lies inside the buffer decodes, any other is
-            // 0.0. Applying the selector's row test here skipped whole rows
-            // whenever `cols/128*18` exceeded the buffer, so a `cols` beyond
-            // the buffer answered all zeros where native decoded the blocks
-            // that were present (#2419, fuzz seed 990100/151 on 0.62.0 too).
-            i.i32_const(1);
-        }
-        i.if_(BlockType::Empty);
-        i.i32_const(0).local_set(hj);
-        i.block(BlockType::Empty).loop_(BlockType::Empty);
-        i.local_get(hj).local_get(hc).i32_wrap_i64().i32_ge_u().br_if(1);
-        i.local_get(ho);
-        i.local_get(hi)
-            .local_get(hc)
-            .i32_wrap_i64()
-            .i32_mul()
-            .local_get(hj)
-            .i32_add()
-            .i32_const(8)
-            .i32_mul();
-        i.i32_add();
-        if select {
-            // j < cr: k = rid*cr + j on the ROW schedule; else the zero tail.
-            i.local_get(hj).i64_extend_i32_u().local_get(hcr).i64_lt_u();
-            i.if_(BlockType::Result(ValType::F64));
-            i.local_get(hd).local_get(hoff);
-            i.local_get(hrow).local_get(hcr).i64_mul().local_get(hj).i64_extend_i32_u().i64_add();
-            i.call(qv);
-            i.else_();
-            i.i64_const(0).f64_reinterpret_i64();
-            i.end();
-        } else {
-            // k = rid*cols + j (global schedule)
-            i.local_get(hd).local_get(hoff);
-            i.local_get(hrow).local_get(hc).i64_mul().local_get(hj).i64_extend_i32_u().i64_add();
-            i.call(qv);
-        }
-        i.f64_store(mat_elem());
-        i.local_get(hj).i32_const(1).i32_add().local_set(hj);
-        i.br(0).end().end();
-        i.end();
-        i.local_get(hi).i32_const(1).i32_add().local_set(hi);
-        i.br(0).end().end();
-        i.local_get(ho);
-        let _ = i;
-        self.release_i64();
-        self.release_i64();
-        self.release_i32();
-        self.release_i64();
-        self.release_i32();
-        self.release_i32();
-        self.release_i32();
-        self.release_i64();
-        self.release_i64();
-        self.release_i64();
-        self.release_i32();
-        Ok(Some(Lowered::owned(SliceTy::Matrix)))
-    }
-
-    /// select_rows_q8_0_dq: 34-byte blocks of [fp16 scale][32 int8
-    /// quants]; cols not divisible by 32 is the all-zero matrix; the
-    /// dequant zero normalizes -0.0 → +0.0 per ELEMENT.
-    pub(crate) fn lower_matrix_q8_select(
-        &mut self,
-        data: &IrExpr,
-        offset: &IrExpr,
-        cols: &IrExpr,
-        ids: &IrExpr,
-    ) -> ArmResult {
-        self.lower_arg(data, Some(SliceTy::Scalar(Scalar::Bytes)), ArgMode::Borrow)?;
-        let hd = self.hold_i32()?;
-        self.f.instructions().local_set(hd);
-        self.lower_arg(offset, Some(INT), ArgMode::Borrow)?;
-        let hoff = self.hold_i64()?;
-        self.f.instructions().local_set(hoff);
-        self.clamp0(hoff);
-        self.lower_arg(cols, Some(INT), ArgMode::Borrow)?;
-        let hc = self.hold_i64()?;
-        self.f.instructions().local_set(hc);
-        self.clamp0(hc);
-        match self.lower_arg(ids, None, ArgMode::Borrow)? {
-            SliceTy::List(h) if self.types.el(h) == INT => {}
-            other => return unsup(&format!("matrix-q8-ids:{other:?}")),
-        }
-        let hids = self.hold_i32()?;
-        let hn = self.hold_i64()?;
-        {
-            let mut i = self.f.instructions();
-            i.local_set(hids);
-            i.local_get(hids)
-                .i32_load(len_memarg())
-                .i32_const(8)
-                .i32_div_u()
-                .i64_extend_i32_u()
-                .local_set(hn);
-        }
-        self.q_dims_guard(hn, hc);
-        let ho = self.mat_alloc_out64(hn, hc)?;
-        let hi = self.hold_i32()?;
-        let hrow = self.hold_i64()?; // rid → row byte base
-        let hj = self.hold_i32()?;
-        let hrb = self.hold_i64()?;
-        let hs = self.hold_f64()?;
-        let mut i = self.f.instructions();
-        // cols % 32 != 0 → all zeros (the fresh alloc IS the answer)
-        i.local_get(hc).i64_const(32).i64_rem_s().i64_eqz().if_(BlockType::Empty);
-        i.local_get(hc).i64_const(32).i64_div_s().i64_const(34).i64_mul().local_set(hrb);
-        i.i32_const(0).local_set(hi);
-        i.block(BlockType::Empty).loop_(BlockType::Empty);
-        i.local_get(hi).local_get(hn).i32_wrap_i64().i32_ge_u().br_if(1);
-        i.local_get(hids).local_get(hi).i32_const(8).i32_mul().i32_add();
-        i.i64_load(slot_memarg(0)).local_set(hrow);
-        let _ = i;
-        self.clamp0(hrow);
-        // fits? off + rid*row_bytes + row_bytes <= len, overflow-free (#2676)
-        self.row_fits(hd, hoff, hrow, hrb);
-        let mut i = self.f.instructions();
-        i.if_(BlockType::Empty);
-        // row_off = rid * row_bytes (in range: the window fits)
-        i.local_get(hrow).local_get(hrb).i64_mul().local_set(hrow);
-        i.i32_const(0).local_set(hj);
-        i.block(BlockType::Empty).loop_(BlockType::Empty);
-        i.local_get(hj).local_get(hc).i32_wrap_i64().i32_ge_u().br_if(1);
-        // scale = f16(load16(data + off + row_off + (j>>5)*34))
-        i.local_get(hd);
-        i.local_get(hoff).local_get(hrow).i64_add().i32_wrap_i64().i32_add();
-        i.local_get(hj).i32_const(5).i32_shr_u().i32_const(34).i32_mul().i32_add();
-        i.i32_load16_u(raw16()).call(F_F16_TO_F64).local_set(hs);
-        // v = scale * f64(q) with q = load8_s(... + 2 + (j&31))
-        i.local_get(ho);
-        i.local_get(hi)
-            .local_get(hc)
-            .i32_wrap_i64()
-            .i32_mul()
-            .local_get(hj)
-            .i32_add()
-            .i32_const(8)
-            .i32_mul();
-        i.i32_add();
-        i.local_get(hs);
-        i.local_get(hd);
-        i.local_get(hoff).local_get(hrow).i64_add().i32_wrap_i64().i32_add();
-        i.local_get(hj).i32_const(5).i32_shr_u().i32_const(34).i32_mul().i32_add();
-        i.local_get(hj).i32_const(31).i32_and().i32_add();
-        i.i32_load8_s(MemArg {
-            offset: u64::from(almide_layout::PAYLOAD) + 2,
-            align: 0,
-            memory_index: 0,
-        });
-        i.f64_convert_i32_s();
-        i.f64_mul().local_set(hs);
-        // dq_zero per element
-        i.local_get(hs).f64_const(0.0f64.into()).f64_eq().if_(BlockType::Result(ValType::F64));
-        i.f64_const(0.0f64.into());
-        i.else_();
-        i.local_get(hs);
-        i.end();
-        i.f64_store(mat_elem());
-        i.local_get(hj).i32_const(1).i32_add().local_set(hj);
-        i.br(0).end().end();
-        i.end();
-        i.local_get(hi).i32_const(1).i32_add().local_set(hi);
-        i.br(0).end().end();
-        i.end();
-        i.local_get(ho);
-        let _ = i;
-        self.release_f64();
-        for _ in 0..5 {
-            self.release_i64();
-        }
-        for _ in 0..5 {
-            self.release_i32();
-        }
         Ok(Some(Lowered::owned(SliceTy::Matrix)))
     }
 

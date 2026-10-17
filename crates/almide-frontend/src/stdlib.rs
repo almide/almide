@@ -81,7 +81,6 @@ const MODULE_DESCRIPTIONS: &[(&str, &str)] = &[
     ("hex", "hexadecimal encoding and decoding"),
     ("hash", "non-cryptographic digests and SHA-256"),
     ("html", "HTML escaping and construction"),
-    ("mem", "raw memory checkpoints"),
     ("net", "TCP sockets"),
     ("url", "URL parsing, building, and percent-encoding (RFC 3986-lite)"),
     ("zlib", "zlib compression and decompression"),
@@ -457,7 +456,7 @@ mod tests {
         }
         // The misses that prompted this, pinned by name so a future
         // "simplification" back to a literal list fails here first.
-        for m in ["hash", "hex", "url", "base64", "zlib", "net", "path", "args", "html", "mem"] {
+        for m in ["hash", "hex", "url", "base64", "zlib", "net", "path", "args", "html"] {
             assert!(is_import_suggestable(m), "{m} still gets no import hint");
         }
         for m in ["bytes", "matrix", "datetime", "string", "list"] {

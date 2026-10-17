@@ -536,13 +536,10 @@ pub(crate) fn resolve_extras(
             Helper::JsonPathSet { .. } => {
                 vec![ValType::I32, ValType::I32, ValType::I32, ValType::I32]
             }
-            Helper::FastExp | Helper::GeluScalar { .. } => vec![ValType::F64],
-            Helper::Q10Val => vec![ValType::I32, ValType::I64, ValType::I64],
             _ => vec![ValType::I32, ValType::I32],
             },
         };
         let ret = match h {
-            Helper::FastExp | Helper::GeluScalar { .. } | Helper::Q10Val => Some(ValType::F64),
             _ if runtime_line::helper_is_void(h) => None,
             _ => crate::fan::js_async::helper_result(h).unwrap_or_else(|| runtime_alloc::helper_result(h)),
         };
@@ -592,13 +589,10 @@ pub(crate) fn resolve_extras(
     }
     (extra_fns, entry_fn_indices)
 }
-/// The scalar-kernel / named-type / json-path half of the helper table —
+/// The named-type / json-path half of the helper table —
 /// split from `helper_body` for the complexity budget.
 fn helper_body_b(h: &Helper, work: &FnWork, helper_snapshot: &[Helper]) -> Function {
     match h {
-    Helper::FastExp => matrix_scalars::emit_fast_exp(),
-    Helper::GeluScalar { fast_exp } => matrix_scalars::emit_gelu_scalar(*fast_exp),
-    Helper::Q10Val => matrix_scalars::emit_q10_val(F_F16_TO_F64),
     Helper::DisplayNamed { ti, irk } => {
         match work.display_bodies.borrow_mut().remove(&(*ti, *irk)) {
             Some(work::DisplayBuild::Built(f)) => f,

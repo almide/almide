@@ -133,7 +133,7 @@ fn infer_shape(expr: &IrExpr, shapes: &HashMap<VarId, Shape>) -> Option<Shape> {
             Some(Shape { rows: r, cols: c, dtype: Dtype::F32 })
         }
         // Shape-preserving unary / binary ops.
-        "scale" | "neg" | "gelu" | "softmax_rows" if !args.is_empty() => {
+        "scale" | "neg" if !args.is_empty() => {
             infer_shape(&args[0], shapes)
         }
         "add" | "sub" | "div" | "fma" | "mul" if args.len() >= 2 => {
