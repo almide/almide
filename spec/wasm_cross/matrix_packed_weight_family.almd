@@ -1,4 +1,4 @@
-// @contract: C-161, C-223
+// @contract: C-161, C-223, C-229
 // The packed-weight GEMVs and the fused Qwen3 decoder layers over them run
 // byte-identically on native and every wasm leg (#1827):
 // - linear_q1_0_row_no_bias: per 128-weight block, the signed sum (sign bit
@@ -14,7 +14,8 @@
 // - qwen3_block_{q1_0,f32,q8_0}_kv: rms_norm -> Q/K/V -> per-head rms_norm ->
 //   rope -> KV append -> repeat_kv -> causal multi-head attention (C-223's
 //   fast-exp softmax) -> output projection -> residual -> SwiGLU FFN ->
-//   residual, each step native's own arithmetic.
+//   residual, each step native's own arithmetic; a norm gamma past the byte
+//   buffer reads 0.0 per missing element (C-229's out-of-buffer edge).
 fn show(tag: String, m: Matrix) -> Unit = {
   let l = matrix.to_lists(m)
   let s = matrix.shape(m)
@@ -181,6 +182,25 @@ fn block_f32() -> Unit = {
     0.000001,
   )
   show_block("qwen3_f32", r)
+  // A gamma past the buffer reads 0.0 per missing element, like every byte
+  // loader's out-of-buffer edge (C-229): the attn gamma straddles the end,
+  // the ffn gamma lies wholly past it.
+  let (h_oob, _k, _v) = matrix.qwen3_block_f32_kv(
+    h,
+    matrix.zeros(0, 0),
+    matrix.zeros(0, 0),
+    w,
+    [bytes.len(w) - 8, 192, 320, 9223372036854775000],
+    list.drop(offs, 1),
+    0,
+    2,
+    1,
+    32,
+    40,
+    1000000.0,
+    0.000001,
+  )
+  show("qwen3_f32_gamma_oob", h_oob)
 }
 
 fn block_q8() -> Unit = {

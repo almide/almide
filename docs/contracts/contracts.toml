@@ -2638,6 +2638,7 @@ since     = "0.42.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/matrix_head_count_domain.almd", class = "fixture" },
+  { path = "spec/wasm_fail/matrix_qwen3_kv_head_count_aborts.almd", class = "fixture" },
   { path = "tests/matrix_head_count_domain_test.rs", class = "by-construction", name = "no_native_site_totalizes_a_head_count_on_its_own" },
 ]
 
@@ -3074,6 +3075,7 @@ evidence  = [
   { path = "spec/wasm_cross/matrix_select_rows_oob.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_q_dims_guard.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_select_rows_q1_partial_block.almd", class = "fixture" },
+  { path = "spec/wasm_cross/matrix_packed_weight_family.almd", class = "fixture" },
   { path = "spec/wasm_cross/bytes_negative_offset_family.almd", class = "fixture" },
   { path = "spec/wasm_cross/bytes_cursor_read_domain.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_domain_edges.almd", class = "fixture" },
