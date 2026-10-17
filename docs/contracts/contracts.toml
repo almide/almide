@@ -2185,6 +2185,7 @@ evidence  = [
   { path = "spec/wasm_cross/matrix_dims_guard_rows.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_q_dims_guard.almd", class = "fixture" },
   { path = "spec/wasm_fail/matrix_qwen3_huge_head_dim_aborts.almd", class = "fixture" },
+  { path = "spec/wasm_fail/matrix_qwen3_repeat_kv_width_aborts.almd", class = "fixture" },
   { path = "spec/wasm_cross/count_domain_nonbytes.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_dims_guard_product.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_from_bytes_count_domain.almd", class = "fixture" },
