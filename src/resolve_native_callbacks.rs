@@ -65,9 +65,7 @@ pub fn include_native_callback_modules(
     for segs in self_module_paths(&src_dir) {
         let path = format!("{prefix}.{}", segs.join("."));
         let ident = almide_base::names::module_ident(&path);
-        // The pre-#3338 spelling too, kept as a deprecated alias (#3425).
-        let legacy = almide_base::names::legacy_module_ident(&path);
-        if !native.contains(&format!("almide_rt_{ident}_")) && !native.contains(&format!("almide_rt_{legacy}_")) {
+        if !native.contains(&format!("almide_rt_{ident}_")) {
             continue;
         }
         let mod_path: Vec<crate::intern::Sym> = segs.iter().map(|s| crate::intern::sym(s)).collect();
@@ -93,21 +91,15 @@ fn native_sources(root: &Path) -> String {
 }
 
 /// The major `N` of the first `almide_rt_<pkg>_0v<N>_` (module path
-/// `<pkg>_v<N>`) the native code names — or of its pre-#3338 spelling
-/// `almide_rt_<pkg>_v<N>_`, a deprecated alias (#3425).
+/// `<pkg>_v<N>`) the native code names. (The pre-#3338 spelling
+/// `almide_rt_<pkg>_v<N>_` is no name since dialect epoch 14.)
 fn callback_major(native: &str, pkg: &str) -> Option<u64> {
-    let versioned = format!("{pkg}_v");
-    let needles = [
-        format!("almide_rt_{}_0v", almide_base::names::module_ident(pkg)),
-        format!("almide_rt_{}", almide_base::names::legacy_module_ident(&versioned)),
-    ];
-    needles.iter().find_map(|needle| {
-        native.match_indices(needle.as_str()).find_map(|(at, _)| {
-            let rest = &native[at + needle.len()..];
-            let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
-            let after = rest[digits.len()..].chars().next();
-            (!digits.is_empty() && after == Some('_')).then(|| digits.parse().ok()).flatten()
-        })
+    let needle = format!("almide_rt_{}_0v", almide_base::names::module_ident(pkg));
+    native.match_indices(needle.as_str()).find_map(|(at, _)| {
+        let rest = &native[at + needle.len()..];
+        let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+        let after = rest[digits.len()..].chars().next();
+        (!digits.is_empty() && after == Some('_')).then(|| digits.parse().ok()).flatten()
     })
 }
 
