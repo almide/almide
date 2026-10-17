@@ -10,7 +10,7 @@
 //   matrix when the input is empty or shorter than the kernel.
 // The operands are small integers and halves so every summation order agrees
 // (native's matmul may run through the platform BLAS). (swiglu_gate, pinned
-// here before, left the stdlib at dialect epoch 14 for package almide/nn.)
+// here before, left the stdlib at dialect epoch 14 for package almide/nnlib.)
 fn show(tag: String, m: Matrix) -> Unit = {
   let l = matrix.to_lists(m)
   let s = matrix.shape(m)

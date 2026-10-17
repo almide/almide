@@ -25,10 +25,10 @@ read here is what the current compiler accepts.
   `net`, `path`, `process`, `random`, `regex`, `testing`, `zlib`.
 - Not in the stdlib since dialect epoch 14: the neural-network kernels
   (`gelu`, `softmax_rows`, attention, RoPE, the row norms, Q1_0/Q8_0, the
-  Qwen3 blocks) are package `almide/nn` (`import nn`, then `nn.gelu(m)`),
+  Qwen3 blocks) are package `almide/nnlib` (`import nnlib`, then `nnlib.gelu(m)`),
   and the OpenAI / Anthropic streaming clients are package `almide/llm`
   (`import llm`, then `llm.openai_streaming_call(...)`); add one with
-  `almide add almide/nn@v0.1.0`. The `mem` module and `bytes.heap_save` /
+  `almide add almide/nnlib@v0.1.0`. The `mem` module and `bytes.heap_save` /
   `heap_restore` are gone: they did nothing under reference counting.
 - Null is spelled `T?` (shorthand for `Option[T]`, valid in every type
   position — the canonical spelling, `almide fmt` normalizes to it; ADR-0010).
