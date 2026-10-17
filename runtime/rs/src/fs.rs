@@ -434,6 +434,10 @@ pub fn almide_rt_fs_remove_all(path: &str) -> Result<(), AlmideString> {
 }
 
 // Copy / Rename
+fn fs_same_file(a: &str, b: &str) -> bool {
+    matches!((std::fs::canonicalize(a), std::fs::canonicalize(b)), (Ok(x), Ok(y)) if x == y)
+}
+
 pub fn almide_rt_fs_copy(src: &str, dst: &str) -> Result<(), AlmideString> {
     let __almide_r: Result<(), String> = (|| {
         let args = format!("{}, {}", fs_q(src), fs_q(dst));
@@ -445,6 +449,12 @@ pub fn almide_rt_fs_copy(src: &str, dst: &str) -> Result<(), AlmideString> {
             if let Err(e) = std::fs::read(src) {
                 return Err(io_err("fs.copy", &args, e));
             }
+        }
+        // Onto the same file (under any spelling) the copy is already done:
+        // std::fs::copy truncates its destination before reading the source,
+        // which would empty the file. The host twin is `fs_copy_or_rename`.
+        if fs_same_file(src, dst) {
+            return Ok(());
         }
         std::fs::copy(src, dst).map(|_| ()).map_err(|e| io_err("fs.copy", &args, e))
     })();
