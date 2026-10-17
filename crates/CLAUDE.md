@@ -60,12 +60,12 @@ almide-spine          Salsa-cached front queries + the parity gates; its s5
 almide-corpus         Corpus path resolution (in-tree, or the als/ judge mount
                       in the greenfield form)
 almide-str            ADR-0013's shared string buffer (AlmideStr: one block
-                      [rc, len, cap | bytes], edited through a unique view).
-                      Raw allocation, so it does not take the workspace's
-                      `forbid(unsafe_code)`; CI runs its tests under Miri
-                      (`miri-almide-str`). Generated code splices it in
-                      only under `ALMIDE_SHARED_STR=1` (off by default
-                      until step 7 of
+                      [rc: u32, spare: u32, len | bytes], a 16-byte header,
+                      edited through a unique view). Raw allocation, so it
+                      does not take the workspace's `forbid(unsafe_code)`;
+                      CI runs its tests under Miri (`miri-almide-str`).
+                      Every generated native program splices it in as its
+                      Almide String (`AlmideString = AlmideStr`;
                       docs/roadmap/active/adr-0013-string-sharing.md)
 ```
 

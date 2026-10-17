@@ -1,8 +1,8 @@
 # ADR-0013: native String as a shared buffer — implementation
 
-**Status:** stage 1 landed (#3715, 2026-10-15). Stage 2 in progress:
+**Status:** stage 1 landed (#3715, 2026-10-15). Stage 2 complete on branch `a13-flip-final` (2026-10-17):
 - landed: step 1 (the alias, #3716), the type (#3717) and the literals (#3719);
-- on branch `adr0013-stage2`: the `ALMIDE_SHARED_STR` flag, steps 3–4 for the walker and the runtime, and the step 5 alias fixture.
+- on the branch: steps 3–6, the thread boundary, and step 7 — the shared buffer is the only native Almide String and the `ALMIDE_SHARED_STR` switch is gone (see "Step 7" at the end).
 **Decision:** [ADR-0013](../../adr/0013-string-shared-immutable-buffer.md) (accepted 2026-09-04).
 **Owner ruling 2026-10-15:** implement this right after the stdlib inspection's individual fixes. Do not change borrow inference for conditionally consumed parameters instead.
 
@@ -195,5 +195,23 @@ All 61 remaining errors are the thread boundary: `AlmideStr` is not `Send`/`Sync
 - Flag off, the generated user code is byte-identical over all 463 census files (compared after `RT_BOUNDARY_MARKER`). The census stays 0 errors with the flag on and off.
 - `spec/stdlib/value_string_payload_test.almd` pins the payload paths: `value.str`, a push on the source, parse/stringify, a derived Codec round trip, and many Values sharing one string. It passes on wasm and natively with the flag on and off.
 - Native corpus (465 files): 454 pass with the flag on and with it off, with the same 11 non-passing files.
+
+**Step 7 (the flip, 2026-10-17).** The falsifier first failed: on GCE (c4-standard-4, Xeon 8581C, `gce-perf-ab.sh`, 3 alternating rounds × 5 runs, medians) strchurn ran 0.478 s with `String` and 0.675 s with the shared buffer, 41% slower; fasta was unchanged. Where the time went, and the fixes:
+- **Every string result was built twice.** The runtime rendered a `String` and converted it (`.into()` / `into_almide()`): a second allocation, copy and free per string. `int.to_string`, `string.join` (a 30 MB copy) and `string.split` (4M pieces and a second `Vec`) now build one exact-size block (`AlmideStr::from_i64`, `AlmideStr::join`, `AlmideString::from` per piece). Locally this took instructions from 1.72× to 1.04× of `String`.
+- **The 24-byte header put every short string one allocator size class up** (glibc: a 7-byte string is a 48-byte chunk where `String`'s bytes are a 32-byte one). The header is now `[rc: u32, spare: u32, len: usize]`, 16 bytes; capacity is `len + spare`, and only the spare room is limited (to `u32::MAX`; allocation and growth clamp to it, a unique view that ends with more shrinks the block). A three-way GCE profile run: `String` 0.4545 s, 24-byte header 0.4855 s (+6.8%), 16-byte header 0.3925 s (−13.6%).
+- The release runtime rlib had silently failed to build (`pub #[inline] fn`), so every shared-buffer release build fell back to the cargo route; a unit test now pins the attribute order.
+- A unique block is freed on the drop fast path before any other check.
+
+Falsifier, final (GCE A = `adr0013-stage2` with `String`, B = `a13-perf`): strchurn 0.4565 s → 0.3925 s (**−14.0%**, almide/rust ratio 1.117 → 0.953); fasta 3.177 s → 3.186 s (+0.27%, spread 0.77%). Both under the 5% bar.
+
+Then the switch went away (no `String` path is left):
+- `prelude_string.rs` renders only the shared prelude; the `almide_into_str_impls!` gate, the env-switch row and its `docs/specs/cli.md` line are gone; the thread-boundary marks and the lazy-static mark are unconditional; the v1 header always splices the block.
+- **`@extern(rust)` hosts keep their documented `String` signatures** (docs/specs/module-system.md §11.1). The wrapper converts at the boundary: a value holding a String in a List / Set / Map / Option / Result / tuple is copied into its `String` shape on the way in (a `mut` one is copied back after the call), and a returned one is copied into the `AlmideString` shape — whether the host returns `String` or already `AlmideString`. A plain `String` param stays `&str`. Rows `ret_string`, `ret_list_str`, `ret_opt_str`, `mut_str`, `mut_list_str` pin it.
+- **Map / set hashing keyed on `String`.** `almide_rt_map_key_hash` recognized `String` (and `(String, _)`, `Vec<String>`) keys by `TypeId`, so `AlmideString` keys fell to the linear path: `list.unique` over 500,000 strings took 27 s, `map.update` rebinds copied per step. The downcasts now name `AlmideString`.
+- The v1 renderer minted owned copies of a borrowed string with `.to_string()` (a `String`); they are `AlmideString::from(..)` now, and its `int.to_string` / concat shims build one block.
+- `UniqueStr` is `AlmideUniqueStr` (a bare top-level item name), and `FromIterator` is spelled by its full path (the v1 render is also compiled as edition 2015).
+- Interpolation renders `AlmideString::from_fmt(format_args!(..))` (stack buffer, one exact block) and a literal left of `+` prepends into an owned right operand (`AlmideStr::prepend`), so the native allocation ledger only moved down: str 389 → 349, strs 822 → 708, map 569 → 524, rec 473 → 378, recs 766 → 686; list, set and bytes unchanged.
+
+Not done: many runtime functions still return `let __almide_out: String = ..; __almide_out.into()`, a second allocation per result; each is a local fix of the same kind as `int.to_string`.
 
 **The runtime ABI steps void inspection stamps.** Changing a runtime function's text changes its implementation hash, and `tests/stdlib_inspection_test.rs` then requires re-inspection. The `-> String` step alone voided 38 stamped functions. So the ABI steps (returns, `Result`, `Vec`, `Option`) are collected on one branch and re-inspected once on GCE before they are proposed.
