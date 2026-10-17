@@ -23,9 +23,12 @@ import sys
 # The platform transcendental surface. `powi` is included deliberately: it is
 # compiler-expanded multiplication rather than a libm call, so it is expected to
 # classify as IEEE-exact — but it must be CLASSIFIED, not assumed.
+# `sin_cos` / `exp_m1` / `ln_1p` are Rust's spellings of the same host calls: the
+# list once lacked `sin_cos`, and both RoPE kernels rotated through the host's
+# sin/cos unseen while the wasm leg linked the vendored pair (#1827).
 CALL = re.compile(
     r"\.(exp|exp2|expm1|ln|log|log2|log10|log1p|sin|cos|tan|asin|acos|atan|"
-    r"atan2|sinh|cosh|tanh|powf|powi|cbrt|hypot)\s*\("
+    r"atan2|sinh|cosh|tanh|powf|powi|cbrt|hypot|sin_cos|exp_m1|ln_1p)\s*\("
 )
 FN = re.compile(
     r"\s*(?:#\[[^\]]*\]\s*)?(?:pub(?:\(crate\))?\s+)?(?:unsafe\s+)?fn\s+([A-Za-z_0-9]+)"
