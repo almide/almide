@@ -841,11 +841,11 @@
 
   ;; The entry names of a directory (`.` and `..` skipped) as a node list:
   ;; (head, count, errno). fd_readdir is resumable (C-272): each pass resumes
-  ;; at the last complete entry's cookie, the buffer doubles when not even one
-  ;; entry fits, and a short fill ends the stream.
+  ;; at the last complete entry's cookie, the buffer doubles after every full
+  ;; pass (so an entry larger than it fits too), and a short fill ends the stream.
   (func $names_at (param $fd i32) (param $p i32) (param $l i32) (result i32 i32 i32)
     (local $e i32) (local $h i32) (local $buf i32) (local $cap i32) (local $used i32) (local $off i32)
-    (local $nl i32) (local $np i32) (local $cookie i64) (local $got i32)
+    (local $nl i32) (local $np i32) (local $cookie i64)
     (local $head i32) (local $tail i32) (local $cnt i32) (local $node i32)
     (local.set $e (call $path_open (local.get $fd) (i32.const 1) (local.get $p) (local.get $l)
                                    (i32.const 2) (i64.const 16384) (i64.const 16384) (i32.const 0) (global.get $fsp)))
@@ -859,14 +859,12 @@
       (br_if $done (local.get $e))
       (local.set $used (i32.load offset=8 (global.get $fsp)))
       (local.set $off (i32.const 0))
-      (local.set $got (i32.const 0))
       (block $pdone (loop $ent
         (br_if $pdone (i32.gt_u (i32.add (local.get $off) (i32.const 24)) (local.get $used)))
         (local.set $nl (i32.load offset=16 (i32.add (local.get $buf) (local.get $off))))
         (br_if $pdone (i32.gt_u (i32.add (i32.add (local.get $off) (i32.const 24)) (local.get $nl)) (local.get $used)))
         (local.set $np (i32.add (i32.add (local.get $buf) (local.get $off)) (i32.const 24)))
         (local.set $cookie (i64.load (i32.add (local.get $buf) (local.get $off))))
-        (local.set $got (i32.const 1))
         (if (i32.eqz (call $is_dot (local.get $np) (local.get $nl)))
           (then
             (local.set $node (call $alloc (i32.add (local.get $nl) (i32.const 8))))
@@ -881,10 +879,12 @@
         (local.set $off (i32.add (i32.add (local.get $off) (i32.const 24)) (local.get $nl)))
         (br $ent)))
       (br_if $done (i32.lt_u (local.get $used) (local.get $cap)))
-      (if (i32.eqz (local.get $got))
-        (then
-          (local.set $cap (i32.shl (local.get $cap) (i32.const 1)))
-          (local.set $buf (call $alloc (local.get $cap)))))
+      ;; A full buffer: the next pass gets twice the room. A host may re-read
+      ;; the directory from its start on every call (wasmtime does, and so
+      ;; does the p3 adapter), so a fixed buffer made a listing quadratic in
+      ;; its entries; doubling keeps the passes logarithmic.
+      (local.set $cap (i32.shl (local.get $cap) (i32.const 1)))
+      (local.set $buf (call $alloc (local.get $cap)))
       (br $pass)))
     (drop (call $fd_close (local.get $h)))
     (local.get $head) (local.get $cnt) (local.get $e))
