@@ -120,20 +120,6 @@ pub fn almide_rt_matrix_select_rows(m: &AlmideMatrix, row_ids: &[i64]) -> Almide
     out.into()
 }
 
- 8]; 256] = {
-    let mut t = [[0.0; 8]; 256];
-    let mut i = 0;
-    while i < 256 {
-        let mut j = 0;
-        while j < 8 {
-            t[i][j] = if (i >> j) & 1 == 1 { 1.0 } else { -1.0 };
-            j += 1;
-        }
-        i += 1;
-    }
-    t
-};
-
 // ── f32 bytes-resident path (L2-2): weights stay in the source GGUF buffer ──
 //
 // Mirror of the Q1_0 path for plain f32 tensors: no decoded AlmideMatrix is
@@ -288,4 +274,3 @@ fn select_row_window(off: usize, rid: i64, row_bytes: usize, len: usize) -> Opti
     let base = (rid.max(0) as usize).checked_mul(row_bytes)?.checked_add(off)?;
     (base.checked_add(row_bytes)? <= len).then_some(base)
 }
-
