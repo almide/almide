@@ -36,7 +36,8 @@ struct HttpErrTexts {
     key_max: Piece,
     /// 128 bytes: 1 where the ASCII byte is an RFC 9110 tchar.
     tchar: i32,
-    /// 9 × (address, length) of the managed header names.
+    /// (address, length) of the managed header names, then of the names the
+    /// client frames (`HTTP_FORBIDDEN_HEADERS` ++ `HTTP_FRAMING_HEADERS`).
     forbidden: i32,
     /// One `EC_ENTRY` per error-code case, in discriminant order.
     ec_table: i32,
@@ -68,7 +69,7 @@ impl HttpErrTexts {
         let tchar_bytes: Vec<u8> =
             (0u8..128).map(|b| u8::from(b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b))).collect();
         let tchar = put(&tchar_bytes).at;
-        let names: Vec<Piece> = hc::HTTP_FORBIDDEN_HEADERS.iter().map(|n| put(n.as_bytes())).collect();
+        let names: Vec<Piece> = hc::HTTP_FORBIDDEN_HEADERS.iter().chain(hc::HTTP_FRAMING_HEADERS.iter()).map(|n| put(n.as_bytes())).collect();
         let classes = [
             hc::HttpErrorClass::Dns,
             hc::HttpErrorClass::Connect,
@@ -265,7 +266,8 @@ fn shim_http_err(g: P3Globals, quote: u32) -> Function {
 /// `(name, name_len, value, value_len) -> code`: rt-core's
 /// `http_check_request` for one header, in its order — 1 = the name is not
 /// a token, 2 = the value holds a control but HTAB (or DEL), 3 = a managed
-/// name (ASCII case-insensitive), 0 = sendable.
+/// name (ASCII case-insensitive), 4 = a name the client frames, which the
+/// append loop drops (`HTTP_FRAMING_HEADERS`), 0 = sendable.
 fn shim_http_hdr_check(t: &HttpErrTexts) -> Function {
     let (np, nn, vp, vn) = (0u32, 1u32, 2u32, 3u32);
     let (k, b, j, fp, fln) = (4u32, 5u32, 6u32, 7u32, 8u32);
@@ -295,17 +297,21 @@ fn shim_http_hdr_check(t: &HttpErrTexts) -> Function {
     i.end();
     i.local_get(k).i32_const(1).i32_add().local_set(k);
     i.br(0).end().end();
-    // The managed names: a token's bytes lowercase by `| 0x20` exactly.
+    // The managed names, then the framing ones: a token's bytes lowercase
+    // by `| 0x20` exactly.
+    use almide_rt_core::http_client_core as hc;
+    let managed = hc::HTTP_FORBIDDEN_HEADERS.len() as i32;
+    let named = managed + hc::HTTP_FRAMING_HEADERS.len() as i32;
     i.i32_const(0).local_set(j);
     i.block(BlockType::Empty).loop_(BlockType::Empty);
-    i.local_get(j).i32_const(9).i32_ge_u().br_if(1);
+    i.local_get(j).i32_const(named).i32_ge_u().br_if(1);
     i.local_get(j).i32_const(8).i32_mul().i32_const(t.forbidden).i32_add().local_tee(fp).i32_load(mem(4)).local_set(fln);
     i.local_get(fp).i32_load(mem(0)).local_set(fp);
     i.local_get(fln).local_get(nn).i32_eq().if_(BlockType::Empty);
     i.i32_const(0).local_set(k);
     i.block(BlockType::Empty).loop_(BlockType::Empty);
     i.local_get(k).local_get(nn).i32_ge_u().if_(BlockType::Empty);
-    i.i32_const(3).return_();
+    i.i32_const(3).i32_const(4).local_get(j).i32_const(managed).i32_lt_u().select().return_();
     i.end();
     i.local_get(np).local_get(k).i32_add().i32_load8_u(mem8(0)).i32_const(0x20).i32_or();
     i.local_get(fp).local_get(k).i32_add().i32_load8_u(mem8(0));

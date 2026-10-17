@@ -208,6 +208,10 @@ fn shim_http(g: P3Globals, h: &HttpAbi, t: &HttpErrTexts, fns: HttpErrFns) -> Fu
     i.local_get(cur).local_get(tmp).i32_sub().local_set(key_len);
     i.local_get(cur).local_get(frame_end).i32_ge_u().br_if(1);
     http_frame_cell(&mut i, cur, cell_len, frame_end, tmp, digit);
+    // A name the client frames (`content-length`, check code 4) is dropped,
+    // as rt-core's writer drops it: the length appended below is the body's.
+    i.local_get(key_ptr).local_get(key_len).local_get(tmp).local_get(cur).local_get(tmp).i32_sub();
+    i.call(fns.check).i32_const(4).i32_ne().if_(BlockType::Empty);
     i.local_get(headers);
     i.local_get(key_ptr).local_get(key_len);
     i.local_get(tmp);
@@ -217,6 +221,7 @@ fn shim_http(g: P3Globals, h: &HttpAbi, t: &HttpErrTexts, fns: HttpErrFns) -> Fu
     i.i32_const((park + RET) as i32).i32_load8_u(mem8(0)).if_(BlockType::Empty);
     i.local_get(headers).call(I_HTTP_FIELDS_DROP);
     http_err_call(&mut i, fns, (key_ptr, key_len), t.hdr[2][0], t.hdr[2][1], None, Piece::default());
+    i.end();
     i.end();
     i.br(0).end().end();
     i.end();
