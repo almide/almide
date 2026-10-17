@@ -121,6 +121,39 @@ pub(super) const EFFECT_RECIPES: &[Recipe] = &[
     Recipe { func: "process.is_alive", size: "", args: &[("pid", "process.pid()")] },
     Recipe { func: "process.sleep", size: "", args: &[("ms", "0")] },
     Recipe { func: "io.read_n_bytes", size: "n", args: &[("n", "{n}")] },
+    // TCP against the loopback fixtures (ADR-0027 D5): a fresh socket per
+    // step where the call consumes or holds one, the sink for writes and the
+    // source for reads so neither side waits.
+    Recipe { func: "net.tcp_connect", size: "", args: &[("host", LOCALHOST), ("port", ECHO_PORT)] },
+    Recipe { func: "net.tcp_listen", size: "", args: &[("host", LOCALHOST), ("port", "0")] },
+    Recipe { func: "net.tcp_accept", size: "", args: &[("listener", PENDING_LISTENER)] },
+    Recipe { func: "net.tcp_close", size: "", args: &[("stream", FRESH_STREAM)] },
+    Recipe { func: "net.tcp_close_listener", size: "", args: &[("listener", FRESH_LISTENER)] },
+    Recipe { func: "net.tcp_local_port", size: "", args: &[("listener", LISTENER)] },
+    Recipe { func: "net.tcp_is_open", size: "", args: &[("stream", SINK_STREAM)] },
+    Recipe { func: "net.tcp_set_timeout", size: "", args: &[("stream", SINK_STREAM), ("timeout_ms", "1000")] },
+    Recipe { func: "net.tcp_write", size: "data", args: &[("stream", SINK_STREAM), ("data", "bytes.from_list(list.range(0, {n}) |> list.map((i) => i % 251))")] },
+    Recipe { func: "net.tcp_read", size: "len", args: &[("stream", SOURCE_STREAM), ("len", "{n}")] },
+    Recipe { func: "net.tcp_read_exact", size: "len", args: &[("stream", SOURCE_STREAM), ("len", "{n}")] },
+    Recipe { func: "net.tcp_read_timeout", size: "len", args: &[("stream", SOURCE_STREAM), ("len", "{n}"), ("timeout_ms", "1000")] },
+    Recipe { func: "net.tcp_available", size: "", args: &[("stream", SOURCE_STREAM)] },
+    // HTTP against the fixture: a response of n bytes, or n bytes echoed.
+    Recipe { func: "http.get", size: "url", args: &[("url", BYTES_URL)] },
+    Recipe { func: "http.get_bytes", size: "url", args: &[("url", BYTES_URL)] },
+    Recipe { func: "http.get_status", size: "url", args: &[("url", BYTES_URL)] },
+    Recipe { func: "http.get_response", size: "url", args: &[("url", BYTES_URL)] },
+    Recipe { func: "http.delete", size: "url", args: &[("url", BYTES_URL)] },
+    Recipe { func: "http.delete_response", size: "url", args: &[("url", BYTES_URL)] },
+    Recipe { func: "http.post", size: "body", args: &[("url", ECHO_URL), ("body", BODY)] },
+    Recipe { func: "http.post_response", size: "body", args: &[("url", ECHO_URL), ("body", BODY)] },
+    Recipe { func: "http.put", size: "body", args: &[("url", ECHO_URL), ("body", BODY)] },
+    Recipe { func: "http.put_response", size: "body", args: &[("url", ECHO_URL), ("body", BODY)] },
+    Recipe { func: "http.patch", size: "body", args: &[("url", ECHO_URL), ("body", BODY)] },
+    Recipe { func: "http.patch_response", size: "body", args: &[("url", ECHO_URL), ("body", BODY)] },
+    Recipe { func: "http.request", size: "body", args: &[("method", "\"POST\""), ("url", ECHO_URL), ("body", BODY), ("headers", "[\"x-k\": \"v\"]")] },
+    Recipe { func: "http.request_bytes", size: "body", args: &[("method", "\"POST\""), ("url", ECHO_URL), ("body", BODY), ("headers", "[\"x-k\": \"v\"]")] },
+    Recipe { func: "http.request_status", size: "body", args: &[("method", "\"POST\""), ("url", ECHO_URL), ("body", BODY), ("headers", "[\"x-k\": \"v\"]")] },
+    Recipe { func: "http.request_response", size: "body", args: &[("method", "\"POST\""), ("url", ECHO_URL), ("body", BODY), ("headers", "[\"x-k\": \"v\"]")] },
 ];
 
 /// What a stdin reader's probe gets on stdin: for size n and k calls, the
@@ -135,6 +168,29 @@ pub(super) fn stdin_for(func: &str, n: u64, k: u64) -> Option<(u64, u64)> {
         _ => None,
     }
 }
+
+/// A call that holds a socket (or a short-lived port) per call stops at this
+/// k: a probe runs 2k calls, and an fd per call past the soft limit (1024)
+/// or a TIME_WAIT per call past the ephemeral range is an err, not a cost.
+pub fn max_k(func: &str) -> Option<u64> {
+    match func.split_once('.') {
+        Some(("net", f)) if matches!(f, "tcp_connect" | "tcp_listen" | "tcp_accept" | "tcp_close" | "tcp_close_listener") => Some(64),
+        Some(("http", _)) => Some(256),
+        _ => None,
+    }
+}
+
+const LOCALHOST: &str = "\"127.0.0.1\"";
+const ECHO_PORT: &str = "(int.parse(env.get(\"XF_TCP_PORT\") ?? \"0\") ?? 0)";
+const SINK_STREAM: &str = "net.tcp_connect(\"127.0.0.1\", int.parse(env.get(\"XF_SINK_PORT\") ?? \"0\") ?? 0)!";
+const SOURCE_STREAM: &str = "net.tcp_connect(\"127.0.0.1\", int.parse(env.get(\"XF_SOURCE_PORT\") ?? \"0\") ?? 0)!";
+const FRESH_STREAM: &str = "net.tcp_connect(\"127.0.0.1\", int.parse(env.get(\"XF_SINK_PORT\") ?? \"${{i} * 0}\") ?? 0)!";
+const LISTENER: &str = "net.tcp_listen(\"127.0.0.1\", 0)!";
+const FRESH_LISTENER: &str = "net.tcp_listen(\"127.0.0.1\", {i} * 0)!";
+const PENDING_LISTENER: &str = "{ let l = net.tcp_listen(\"127.0.0.1\", {i} * 0)!\n  let _c = net.tcp_connect(\"127.0.0.1\", net.tcp_local_port(l)!)!\n  l }";
+const BYTES_URL: &str = "\"http://\" + (env.get(\"XF_HTTP\") ?? \"\") + \"/bytes/{n}\"";
+const ECHO_URL: &str = "\"http://\" + (env.get(\"XF_HTTP\") ?? \"\") + \"/echo\"";
+const BODY: &str = "string.repeat(\"a\", {n})";
 
 const ECHO: &str = "\"/bin/echo\"";
 const ECHO_ARGS: &str = "list.range(0, {n} / 10) |> list.map((i) => \"aé\")";

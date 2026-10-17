@@ -95,6 +95,14 @@ pub const VERDICTS: &[Verdict] = &[
     // How much of the echo has arrived is the network's timing.
     Verdict { func: "net.tcp_read", holds: "bytes.len(v) <= {len} or {len} < 0", canon: "bytes.from_list([])", domain: &[] },
     Verdict { func: "net.tcp_read_timeout", holds: "bytes.len(v) <= {len} or {len} < 0", canon: "bytes.from_list([])", domain: &[] },
+    // A socket's handle counts the sockets opened before it: two paths that
+    // each open one see different handles. The value the program goes on
+    // with is the handle itself (the legs number them alike).
+    Verdict { func: "net.tcp_connect", holds: "v >= 0", canon: "v", domain: &[] },
+    Verdict { func: "net.tcp_listen", holds: "v >= 0", canon: "v", domain: &[] },
+    Verdict { func: "net.tcp_accept", holds: "v >= 0", canon: "v", domain: &[] },
+    // The OS picks a listener's ephemeral port.
+    Verdict { func: "net.tcp_local_port", holds: "v > 0 and v < 65536", canon: "0", domain: &[] },
     Verdict { func: "net.tcp_available", holds: "v >= 0", canon: "0", domain: &[] },
     // Exactly len of the 11 echoed bytes: never more than arrive.
     Verdict { func: "net.tcp_read_exact", holds: "bytes.len(v) == {len}", canon: "v", domain: &[("len", "int.abs({len}) % 12")] },

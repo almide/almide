@@ -36,6 +36,11 @@ mod term;
 mod types;
 pub mod verdicts;
 
+/// The largest k an inspection probe of `name` may run ([`inspect_gen::effect_recipes::max_k`]).
+pub fn inspect_max_k(name: &str) -> Option<u64> {
+    inspect_gen::effect_recipes::max_k(name)
+}
+
 pub use catalogue::{build as build_catalogue, needs_embedded, Signature, SANDBOXED_EFFECT_MODULES};
 
 use crate::rng::SplitMix64;

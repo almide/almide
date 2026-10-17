@@ -199,7 +199,7 @@ const FLAT_LAST_NAME: &str = "\"k\" + string.reverse(\"${100000000 + {n} - 1}\")
 /// n bytes with no short period, for the zlib codecs.
 const CODEC_BYTES: &str = "bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251))";
 
-mod effect_recipes;
+pub mod effect_recipes;
 
 const SHAPE_RECIPES: &[Recipe] = &[
     Recipe { func: "matrix.rope_rotate", size: "x", args: ROPE },
@@ -901,7 +901,7 @@ impl Target {
                 }
                 None if self.verdict.is_some() && self.ret != GenType::Unit => {
                     let d = self.verdict_digest(v, None).unwrap_or_default();
-                    let _ = writeln!(main, "  let {v}_held: Int = {d}\n  println(\"{v} holds ${{{v}_held}}\")");
+                    let _ = writeln!(main, "  let {v}_held: Int = {d}\n  println(\"{v} = ${{{v}_held}}\")");
                 }
                 None if self.ret != GenType::Unit => {
                     let _ = writeln!(main, "  {}", render_print(v, &self.ret));
