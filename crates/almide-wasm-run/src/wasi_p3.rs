@@ -74,7 +74,7 @@ use wasm_encoder::{
 
 use crate::component_alloc::{shim_cabi_realloc, shim_realloc_checked, shim_reserve};
 use crate::wasi::{
-    mem, mem8, parse_module, reencode_body, type_index, Parsed, Remap, DATA, ENV_FULL_MSG, MSG,
+    mem, mem8, parse_module, reencode_body, type_index, Parsed, Remap, DATA, MSG,
     MSG2, OOM_MSG, PARK_SPAN, UNSUPPORTED_MSG,
 };
 
@@ -227,8 +227,7 @@ const AWAIT_EV: u64 = 800;
 const _: () = {
     assert!(RET + 32 <= MSG);
     assert!(MSG + UNSUPPORTED_MSG.len() as u64 <= STATRET);
-    // The env.set refusal line (#3223) sits in the gap past the stat result.
-    assert!(MSG2 + ENV_FULL_MSG.len() as u64 <= MSG_HTTP);
+    assert!(MSG2 <= MSG_HTTP);
     assert!(MSG_HTTP + E_HTTP.len() as u64 <= MSG_CLEN);
     assert!(MSG_CLEN + E_CLEN.len() as u64 <= CLEN_BUF);
     assert!(CLEN_BUF + 20 <= MSG_OOM);
