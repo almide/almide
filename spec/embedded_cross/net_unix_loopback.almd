@@ -1,25 +1,29 @@
+// @contract: C-382
 // net's Unix-domain sockets and shared-memory files on their success paths
 // (#3620; the embedded lane's interim ops 104..=116). One program plays both
-// ends: it listens at the socket path it is given (argv[1]), connects to
+// ends: it listens at a fresh socket path in the temp dir, connects to
 // itself, and passes two shared-memory files across the socket beside its
 // bytes. Descriptors are raw OS numbers, which differ between native and the
 // embedded host, so the program prints their properties (non-negative,
 // distinct, new on receipt) and what flows through them, never the numbers.
 import env
+import fs
 import net
+import random
 
 fn is_fd(fd: Int) -> String = if fd >= 0 then "fd" else "not a descriptor: ${fd}"
 
 fn text(b: Bytes) -> String = bytes.to_string_lossy(b)
 
 effect fn main() -> Unit = {
-  let path = list.get(env.args(), 0) ?? "almide-net-unix.sock"
+  // A fresh socket path in the temp dir (a random name, so two runs at
+  // once cannot meet), removed again before the closing line.
+  let path = "${env.temp_dir()}/almide-unix-${random.int(0, 999999999)}.sock"
   let l = net.unix_listen(path)!
   let c = net.unix_connect(path)!
   let s = net.unix_accept(l)!
   println("listen ${is_fd(l)}, connect ${is_fd(c)}, accept ${is_fd(s)}, distinct ${l != c and c != s and l != s}")
   println("idle ${net.unix_poll(s, 0)!}")
-
   // Shared-memory files: created zero-filled, resized, written and read at offsets.
   let a = net.shm_create(64)!
   let b = net.shm_create(0)!
@@ -31,7 +35,6 @@ effect fn main() -> Unit = {
   println("zero-filled ${bytes.len(zeros)} ${list.all(bytes.to_list(zeros), (x) => x == 0)}")
   println("read ${text(net.shm_read(a, 10, 6)!)}, at the end ${bytes.len(net.shm_read(a, 60, 10)!)}, past it ${bytes.len(net.shm_read(a, 100, 4)!)}")
   println("resized ${bytes.len(net.shm_read(b, 0, 100)!)}")
-
   // Bytes with descriptors riding on the first one.
   net.unix_send(c, bytes.from_string("hello"), [a, b])!
   println("ready ${net.unix_poll(s, 1000)!}")
@@ -45,7 +48,6 @@ effect fn main() -> Unit = {
   net.unix_close(other)!
   println("peer sees the close ${net.unix_poll(peer, 1000)!} ${bytes.len(net.unix_recv(peer, 8)!)}")
   net.unix_close(peer)!
-
   let got = net.unix_recv(s, 100)!
   let fds = net.unix_take_fds(s)
   println("got ${text(got)} with ${list.len(fds)} descriptors")
@@ -58,7 +60,6 @@ effect fn main() -> Unit = {
   net.shm_resize(fa, 4096)!
   println("size seen by the sender ${bytes.len(net.shm_read(a, 0, 10000)!)}")
   println("taken once ${list.len(net.unix_take_fds(s))}")
-
   // A descriptor this side received travels on, and plain bytes carry none.
   net.unix_send(s, bytes.from_string("echo"), [fb])!
   let echo = net.unix_recv(c, 100)!
@@ -68,7 +69,6 @@ effect fn main() -> Unit = {
   println("plain ${text(net.unix_recv(s, 100)!)} with ${list.len(net.unix_take_fds(s))}")
   net.unix_send(c, bytes.from_string(""), [])!
   println("empty send ready ${net.unix_poll(s, 0)!}")
-
   // A larger message (inside the smallest platform socket buffer, 8 KiB on
   // macOS, so one thread can send it all before reading) arrives whole
   // across reads.
@@ -76,22 +76,27 @@ effect fn main() -> Unit = {
   net.unix_send(c, big, [])!
   let first = net.unix_recv(s, 100)!
   println("big ${bytes.len(big)} first read nonempty ${bytes.len(first) > 0}")
-
   net.unix_close(c)!
   let drained = drain(s, bytes.len(first))!
   println("drained ${drained}")
   println("closed ${net.unix_poll(s, 1000)!} ${bytes.len(net.unix_recv(s, 10)!)}")
-  for f in back { net.unix_close(f)! }
-  for f in fds { net.unix_close(f)! }
+  for f in back {
+    net.unix_close(f)!
+  }
+  for f in fds {
+    net.unix_close(f)!
+  }
   net.unix_close(a)!
   net.unix_close(b)!
   net.unix_close(s)!
   net.unix_close(l)!
+  fs.remove(path)!
   println("done")
 }
 
 // Read until the peer's close; the total byte count.
 effect fn drain(s: Int, n: Int) -> Int = {
   let chunk = net.unix_recv(s, 65536)!
-  if bytes.len(chunk) == 0 then n else drain(s, n + bytes.len(chunk))!
+  if bytes.len(chunk) == 0 then n
+  else drain(s, n + bytes.len(chunk))!
 }
