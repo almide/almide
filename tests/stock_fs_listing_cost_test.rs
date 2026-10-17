@@ -10,6 +10,10 @@
 //! sort meets with room to spare and a quadratic one exceeds several times
 //! over, so the verdict does not move with the machine's load. The answer is
 //! also differed against native, so the faster sort is the same sort.
+//!
+//! The directory READ was quadratic too, in host work no fuel sees: see
+//! `stock_list_dir_reads_in_logarithmic_passes`, which counts the
+//! `fd_readdir` calls in wasmtime's WASI trace instead.
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -66,14 +70,19 @@ fn native(dir: &Path) -> String {
     String::from_utf8(o.stdout).expect("utf8")
 }
 
-/// The shipped artifact under a stock wasmtime with a fuel budget.
-fn stock_fueled(dir: &Path) -> String {
+/// `almide build --target wasm`: the stock p1 artifact, `probe.wasm`.
+fn build_stock(dir: &Path) {
     let o = Command::new(almide_bin())
         .args(["build", "probe.almd", "--target", "wasm", "-o", "probe.wasm"])
         .current_dir(dir)
         .output()
         .expect("spawn almide");
     assert!(o.status.success(), "stock build failed:\n{}", String::from_utf8_lossy(&o.stderr));
+}
+
+/// The shipped artifact under a stock wasmtime with a fuel budget.
+fn stock_fueled(dir: &Path) -> String {
+    build_stock(dir);
     let o = Command::new("wasmtime")
         .args(["run", "--dir=.", "-W"])
         .arg(format!("fuel={FUEL}"))
@@ -100,6 +109,51 @@ fn check(tag: &str, call: &str) {
     assert!(want.lines().next().is_some_and(|n| n.parse::<usize>().unwrap() >= ENTRIES), "native: {want:.80}");
     let got = stock_fueled(&dir);
     assert!(got == want, "stock {call} differs from native (first 200 bytes):\n{:.200}\nvs\n{:.200}", got, want);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The `fd_readdir` calls one stock run makes, from wasmtime's own WASI
+/// trace (one `cookie=` line per call). `None` when this wasmtime does not
+/// trace preview-1 calls.
+fn readdir_calls(dir: &Path) -> Option<usize> {
+    let o = Command::new("wasmtime")
+        .args(["run", "--dir=.", "probe.wasm"])
+        .env("WASMTIME_LOG", "wasmtime_wasi=trace")
+        .current_dir(dir)
+        .output()
+        .expect("spawn wasmtime");
+    assert!(o.status.success(), "stock run failed");
+    let log = String::from_utf8_lossy(&o.stderr);
+    let calls = log.lines().filter(|l| l.contains("fd_readdir") && l.contains("cookie=")).count();
+    (calls > 0).then_some(calls)
+}
+
+/// The service reads a directory in passes, resuming at a cookie. wasmtime
+/// answers each pass by reading the directory from its start (and stat-ing
+/// every entry), so a FIXED 16 KiB buffer made one listing cost
+/// (entries x passes) = Θ(n²) host work: 16000 entries took 1.6 s where
+/// 4000 took 0.09 s, with the sort already O(n log n). The buffer now
+/// doubles after every full pass, so the passes grow with log(n).
+#[test]
+fn stock_list_dir_reads_in_logarithmic_passes() {
+    if !has_wasmtime() {
+        return;
+    }
+    let dir = probe_dir("passes");
+    std::fs::write(dir.join("probe.almd"), program("fs.list_dir(\"d\")")).expect("write");
+    build_stock(&dir);
+    let Some(calls) = readdir_calls(&dir) else {
+        eprintln!("skipping: this wasmtime does not trace fd_readdir");
+        return;
+    };
+    // 6000 dirents of 31 bytes (~186 KB): a fixed 16 KiB buffer takes 12
+    // passes, a doubling one 5 (16, 32, 64, 128, 256 KiB).
+    let bytes = ENTRIES * (24 + 7);
+    let doubling = (bytes / 16384 + 1).next_power_of_two().trailing_zeros() as usize + 1;
+    assert!(
+        calls <= doubling,
+        "{calls} fd_readdir passes for {ENTRIES} entries; a doubling buffer needs at most {doubling}"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
