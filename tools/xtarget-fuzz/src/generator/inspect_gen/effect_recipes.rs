@@ -96,4 +96,28 @@ pub(super) const EFFECT_RECIPES: &[Recipe] = &[
     Recipe { func: "fs.create_temp_file", size: "", args: &[("prefix", "\"p\"")] },
     Recipe { func: "fs.create_temp_dir", size: "", args: &[("prefix", "\"p\"")] },
     Recipe { func: "env.sleep_ms", size: "", args: &[("ms", "0")] },
+    // Processes from the fixed command set (ADR-0027 D4), on the embedded
+    // host: n / 10 arguments echoed back, or n / 10 lines through cat.
+    Recipe { func: "process.exec", size: "args", args: &[("cmd", ECHO), ("args", ECHO_ARGS)] },
+    Recipe { func: "process.exec_in", size: "args", args: &[("dir", "\"sub\""), ("cmd", ECHO), ("args", ECHO_ARGS)] },
+    Recipe { func: "process.exec_attached", size: "args", args: &[("cmd", ECHO), ("args", ECHO_ARGS)] },
+    Recipe { func: "process.run", size: "args", args: &[("cmd", ECHO), ("args", ECHO_ARGS)] },
+    Recipe { func: "process.run_in", size: "args", args: &[("dir", "\"sub\""), ("cmd", ECHO), ("args", ECHO_ARGS)] },
+    Recipe {
+        func: "process.exec_with_stdin",
+        size: "input",
+        args: &[("cmd", "\"/bin/cat\""), ("args", "[]"), ("input", "string.repeat(\"aé\\n\", {n} / 10)")],
+    },
+    Recipe { func: "process.spawn", size: "", args: &[("cmd", "\"/usr/bin/true\""), ("args", "[]")] },
+    // A fresh child per step to signal.
+    Recipe {
+        func: "process.kill",
+        size: "",
+        args: &[("pid", "match process.spawn(\"/bin/sleep\", [\"${{i} * 0 + 5}\"]) { ok(p) => p, err(_) => 2147483000 }"), ("signal", "15")],
+    },
+    Recipe { func: "process.is_alive", size: "", args: &[("pid", "process.pid()")] },
+    Recipe { func: "process.sleep", size: "", args: &[("ms", "0")] },
 ];
+
+const ECHO: &str = "\"/bin/echo\"";
+const ECHO_ARGS: &str = "list.range(0, {n} / 10) |> list.map((i) => \"aé\")";

@@ -123,7 +123,7 @@ fn render_call(b: &mut Builder, sig: &Signature, subst: &HashMap<String, GenType
     let mut args = Vec::with_capacity(sig.params.len());
     for (i, p) in sig.params.iter().enumerate() {
         let name = sig.param_names.get(i).map(String::as_str).unwrap_or("");
-        match sandbox_arg(b, sig, p) {
+        match sandbox_arg(b, sig, p, name) {
             Some(a) => args.push(a),
             None => args.push(gen_arg(b, p, name, subst)?),
         }
@@ -183,7 +183,11 @@ fn render_verdict_call(
             Some((_, tmpl)) => super::verdicts::fill(tmpl, &[(name, &a)]),
             None => a,
         };
-        bound.push((name.clone(), b.hoist(&ty, a)));
+        // Out of scope like the raw result: a domain operand can be a host
+        // choice too (`process.kill`'s pid is a fresh child's).
+        let v = b.fresh_name();
+        b.stmts.push(format!("let {v}: {} = {a}", ty.render()));
+        bound.push((name.clone(), v));
     }
     let names: Vec<(&str, &str)> = bound.iter().map(|(p, e)| (p.as_str(), e.as_str())).collect();
     let call = format!("{}.{}({})", sig.module, sig.func, bound.iter().map(|(_, e)| e.as_str()).collect::<Vec<_>>().join(", "));
@@ -214,20 +218,26 @@ fn render_verdict_call(
 /// A String argument of a sandboxed effect function names something the
 /// sandbox holds (`oracle/sandbox.rs`), or misses it: a path in the seeded
 /// tree, an env var of the fixed env, an argv flag. `None`: generate as usual.
-fn sandbox_arg(b: &mut Builder, sig: &Signature, param: &SigType) -> Option<String> {
+fn sandbox_arg(b: &mut Builder, sig: &Signature, param: &SigType, name: &str) -> Option<String> {
     const PATHS: &[&str] = &[
         "data.txt", "empty.txt", "bin.dat", "sub/nested.txt", "sub", "sub/deeper", "empty_dir",
         "missing.txt", "out.txt", "sub/new.txt", "made/inner", "*.txt", "sub/*",
     ];
     const ENV_NAMES: &[&str] = &["XF_GREETING", "XF_EMPTY", "XF_UNSET"];
     const ARG_NAMES: &[&str] = &["flag", "opt", "alpha", "beta", "missing"];
+    // ADR-0027 D4: a fixed command set, present at these paths on linux and
+    // macos, and no shell: a generated argument list is data, never code.
+    const COMMANDS: &[&str] = &["/bin/echo", "/bin/cat", "/usr/bin/true", "/usr/bin/false", "/no/such/command"];
+    const DIRS: &[&str] = &["sub", "empty_dir", ".", "missing_dir"];
     if !sig.effect || *param != SigType::String {
         return None;
     }
-    let pool = match sig.module {
-        "fs" => PATHS,
-        "env" => ENV_NAMES,
-        "args" => ARG_NAMES,
+    let pool = match (sig.module, name) {
+        ("fs", _) => PATHS,
+        ("env", _) => ENV_NAMES,
+        ("args", _) => ARG_NAMES,
+        ("process", "cmd") => COMMANDS,
+        ("process", "dir") => DIRS,
         _ => return None,
     };
     Some(render_string_literal(b.rng.pick(pool)))
