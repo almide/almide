@@ -220,7 +220,19 @@ schema = 3
 # the writer's call name). Evidence: spec/wasm_cross/fs_call_head_family.almd
 # on the structural build lane, spec/stdlib/fs_fold_lines_range_test.almd and
 # the five list.partition spec files on the structural test lane.
-pending_self_host_ceiling = 5
+# 2026-10-17 (#1827): 5 -> 0. The five matrix rows go on every leg: the
+# packed GEMVs (linear_q1_0_row_no_bias, linear_q8_0_row_no_bias) and the three
+# qwen3_block_*_kv layers are self-hosted, prim-free, in stdlib/matrix_shape.almd
+# (`@implements`), over the public matrix arms each leg already serves. Two
+# native findings closed on the way: almide-kernel's packed Q1_0 dot read sign
+# bit 1 as -x (the opposite of from_q1_0_bytes, so the packed GEMV was the
+# NEGATED decoded GEMV), and it summed in a different order per arch (AVX four
+# lanes, NEON two, the fallback one) — now one two-lane order everywhere, which
+# the self-host transcribes. Native's Q8_0 path is a transcription too (the f32
+# activation scale, round-half-away quants, the exact integer dot, the f32
+# product of the scales). Parity evidence:
+# spec/wasm_cross/matrix_packed_weight_family.almd.
+pending_self_host_ceiling = 0
 # 2026-09-25 (#2631): 56 -> 64. NEW surface, not a regression: the http call
 # handle (start / poll / read_new / wait / cancel) and the three *_with_limits
 # streaming twins land native-first; each is refused at check time on the
@@ -434,41 +446,6 @@ class = "pending-port"
 reason-embedded = "no wasm host binding for the streaming client (the framed ops 43..=50 serve the non-streaming family only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
 reason-stock-p1 = "no wasm host binding for the streaming client (the framed ops 43..=50 serve the non-streaming family only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
 reason-structural = "host-surface"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.linear_q1_0_row_no_bias"
-legs = ["structural", "stock-p1", "embedded"]
-class = "pending-self-host"
-reason = "fused-kernel-perf: a native intrinsic (almide_rt_matrix_linear_q1_0_row_no_bias) with no wasm definition on any leg — the incumbent refuses the unlinked call and the structural leg has no arm; the weights are consumed packed from the source buffer, so the portable spelling is the primitive matrix ops over an unpacked Matrix"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.linear_q8_0_row_no_bias"
-legs = ["structural", "stock-p1", "embedded"]
-class = "pending-self-host"
-reason = "fused-kernel-perf: a native intrinsic (almide_rt_matrix_linear_q8_0_row_no_bias) with no wasm definition on any leg — the incumbent refuses the unlinked call and the structural leg has no arm; the weights are consumed packed from the source buffer, so the portable spelling is the primitive matrix ops over an unpacked Matrix"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.qwen3_block_f32_kv"
-legs = ["structural", "stock-p1", "embedded"]
-class = "pending-self-host"
-reason = "fused-kernel-perf: a native intrinsic (almide_rt_matrix_qwen3_block_f32_kv) with no wasm definition on any leg — the incumbent refuses the unlinked call and the structural leg has no arm; the weights are consumed packed from the source buffer, so the portable spelling is the primitive matrix ops over an unpacked Matrix"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.qwen3_block_q1_0_kv"
-legs = ["structural", "stock-p1", "embedded"]
-class = "pending-self-host"
-reason = "fused-kernel-perf: a native intrinsic (almide_rt_matrix_qwen3_block_q1_0_kv) with no wasm definition on any leg — the incumbent refuses the unlinked call and the structural leg has no arm; the weights are consumed packed from the source buffer, so the portable spelling is the primitive matrix ops over an unpacked Matrix"
-issue = "#1827"
-
-[[unavailable]]
-fn = "matrix.qwen3_block_q8_0_kv"
-legs = ["structural", "stock-p1", "embedded"]
-class = "pending-self-host"
-reason = "fused-kernel-perf: a native intrinsic (almide_rt_matrix_qwen3_block_q8_0_kv) with no wasm definition on any leg — the incumbent refuses the unlinked call and the structural leg has no arm; the weights are consumed packed from the source buffer, so the portable spelling is the primitive matrix ops over an unpacked Matrix"
 issue = "#1827"
 
 [[unavailable]]
