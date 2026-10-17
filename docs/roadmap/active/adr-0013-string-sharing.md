@@ -180,11 +180,20 @@ All 61 remaining errors are the thread boundary: `AlmideStr` is not `Send`/`Sync
 - The census cannot see either: v1 is not the `--target rust` route, and http needs rustls.
   - For http: the 10 excluded files were built through `almide build` (the cargo route, with rustls and flate2) with the flag on, and all 10 compile.
   - For v1 there is no corpus measurement yet. One program that exercises the append window and every string shim renders through v1 with the flag on and prints the same bytes as with it off.
-  - A v1 census is the next instrument to build.
+  - **The v1 census.** `probe_native` (the v1 renderer as an example binary) was run over 543 programs: `spec/`, `examples/`, `research/benchmark/perf` and `exercises`.
+    - Only 7 render through v1; the other 536 wall to the walker, for example on `env.args`.
+    - With the flag on, all 7 type-check and run with the same stdout and exit code as with it off.
 
 **Not covered yet:**
 - Miri over the new atomic path (`crates/almide-str/tests/almide_str_threads_test.rs`) runs only in CI (`miri-almide-str`); this machine has no rustup toolchain for Miri;
-- `AlmideValue::Str` (step 6) and the default flip (step 7), both deliberately untouched;
+- the default flip (step 7), which waits for the GCE A/B;
 - speed under the flag: `&str + AlmideStr` and a v1 shim result copy once more than they need to, and `to_almide()` copies where a count increment would do. Step 7's `gce_ab.sh` run is where that is judged.
+
+**Step 6 (`AlmideValue::Str`).** The payload is now `Str(AlmideString)`, so under the flag a Value shares the string block it was built from; ADR-0018 rules ○ for `AlmideStr`.
+- Object keys stay `AlmideKey` (`Cow<'static, str>`, interned).
+- Nine runtime lines changed spelling, each the identity while the alias is `String`.
+- Flag off, the generated user code is byte-identical over all 463 census files (compared after `RT_BOUNDARY_MARKER`). The census stays 0 errors with the flag on and off.
+- `spec/stdlib/value_string_payload_test.almd` pins the payload paths: `value.str`, a push on the source, parse/stringify, a derived Codec round trip, and many Values sharing one string. It passes on wasm and natively with the flag on and off.
+- Native corpus (465 files): 454 pass with the flag on and with it off, with the same 11 non-passing files.
 
 **The runtime ABI steps void inspection stamps.** Changing a runtime function's text changes its implementation hash, and `tests/stdlib_inspection_test.rs` then requires re-inspection. The `-> String` step alone voided 38 stamped functions. So the ABI steps (returns, `Result`, `Vec`, `Option`) are collected on one branch and re-inspected once on GCE before they are proposed.
