@@ -22,11 +22,12 @@ fn shim_print(port: PrintPort, park: u64, f_await: u32, newline: bool) -> Functi
     f
 }
 
-/// `(code) -> ()`: exit(ok) for 0, exit(err) otherwise.
+/// `(code) -> ()`: `exit-with-code(code)` — the guest has already refused a
+/// code outside 0..=255, so the byte is the code (C-350).
 fn shim_exit() -> Function {
     let mut f = Function::new([]);
     let mut i = f.instructions();
-    i.local_get(0).i32_const(0).i32_ne();
+    i.local_get(0);
     i.call(I_EXIT);
     i.unreachable();
     i.end();
