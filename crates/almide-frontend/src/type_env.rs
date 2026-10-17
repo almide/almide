@@ -684,11 +684,16 @@ impl TypeEnv {
                     {
                         return false;
                     }
-                    // Variant-definition bypass (see is_eq_inner): the
-                    // declares_ord gate above already admitted the derive;
-                    // the payloads must still order structurally.
+                    // Definition bypass (see is_eq_inner): the declares_ord
+                    // gate above already admitted the derive; the fields and
+                    // payloads must still order structurally. A record's
+                    // definition is walked here, not re-entered as the
+                    // structural record it is spelled with (that arm asks
+                    // which DECLARED record it is).
                     if let Ty::Variant { name: vn, .. } = &resolved {
                         seen.insert(*vn);
+                    }
+                    if matches!(resolved, Ty::Record { .. } | Ty::OpenRecord { .. } | Ty::Variant { .. }) {
                         return resolved.children().iter().all(|child| self.is_ord_inner(child, seen));
                     }
                     self.is_ord_inner(&resolved, seen)
@@ -702,8 +707,29 @@ impl TypeEnv {
                     almide_lang::stdlib_info::stdlib_owned_type_owner(name.as_str()).is_none()
                 }
             }
+            Ty::Record { fields } | Ty::OpenRecord { fields } => self.structural_record_is_ord(fields, seen),
             _ => ty.children().iter().all(|child| self.is_ord_inner(child, seen)),
         }
+    }
+
+    /// A structural record (an un-annotated literal's type) IS the declared
+    /// record with its field names and types (#3189, `RecordShapeIndex` —
+    /// the answer native and wasm build it by), so it orders only when that
+    /// record declares `: Ord`. One that is no declared record is an anonymous
+    /// `AlmdRec_*` struct: nothing declares the derive for it, so it has no
+    /// order — check accepted `list.min` over either while rustc refused the
+    /// monomorph (stdlib inspection fuzz, `http.HttpLimits` literals).
+    fn structural_record_is_ord(&self, fields: &[(Sym, Ty)], seen: &mut std::collections::HashSet<Sym>) -> bool {
+        let index = almide_ir::record_shape::RecordShapeIndex::from_records(
+            self.types.iter().filter_map(|(name, def)| match def {
+                Ty::Record { fields } => Some((*name, fields.clone())),
+                _ => None,
+            }),
+        );
+        let declared: Vec<Sym> = index.matching(fields).map(|shape| shape.name).collect();
+        !declared.is_empty()
+            && declared.into_iter().all(|name| self.is_ord_inner(&Ty::Named(name, vec![]), seen))
+            && fields.iter().all(|(_, field)| self.is_ord_inner(field, seen))
     }
 
     /// Does the user type declare `: Ord`? Keyed leniently like the derive

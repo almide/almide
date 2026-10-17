@@ -776,7 +776,7 @@ impl Checker {
                     "List".into()
                 }
             }
-            _ => format!("{:?}", ty),
+            _ => ty.display(),
         }
     }
 }
