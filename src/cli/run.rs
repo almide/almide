@@ -517,8 +517,9 @@ fn foreign_import(bytes: &[u8]) -> Option<(String, String)> {
 /// `proc_exit(n)` surfaces as `n` exactly as a native binary's exit would.
 /// `almide run --target wasm` over the program's p3 component (ADR-0023
 /// step 7): the bytes `ALMIDE_COMPONENT_P3=1 almide build --component` ships,
-/// with the run's real stdio, environment and arguments. The component
-/// carries no allocation counters, so ALMIDE_WASM_ALLOC_COUNT says so.
+/// with the run's real stdio, environment and arguments. Under
+/// ALMIDE_WASM_ALLOC_COUNT the armed component writes the counter line
+/// itself (the core host's globals are out of a host's reach in a component).
 fn run_wasm_component(bytes: &[u8], host_ops: &[i32], program_args: &[String]) -> i32 {
     let component = match almide_wasm_run::wasi_p3::to_p3(bytes, host_ops) {
         Ok(c) => c,
@@ -527,17 +528,13 @@ fn run_wasm_component(bytes: &[u8], host_ops: &[i32], program_args: &[String]) -
             return 1;
         }
     };
-    let code = match almide_wasm_run::run_component(&component, program_args) {
-        Ok(code) => code,
+    match almide_wasm_run::run_component(&component, program_args) {
+        Ok(code) => code.clamp(0, 255),
         Err(e) => {
             err(&format!("error: embedded wasm host: {e}"));
-            return 1;
+            1
         }
-    };
-    if almide_base::env::flag("ALMIDE_WASM_ALLOC_COUNT") {
-        eprintln!("__ALMD_WASM_ALLOC absent (the p3 component carries no counters)");
     }
-    code.clamp(0, 255)
 }
 
 fn cmd_run_wasm(file: &str, program_args: &[String], verified: bool, time_report: bool) -> i32 {
