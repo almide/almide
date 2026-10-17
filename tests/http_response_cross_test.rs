@@ -190,3 +190,24 @@ fn the_full_response_family_reads_the_same_on_native_and_the_p3_component() {
     let p3 = p3(&file, dir.path());
     assert_eq!((&p3.0, p3.2), (&native.0, native.2), "the p3 component diverged: {}", p3.1);
 }
+
+/// ADR-0023 step 7: `almide run --target wasm` runs the program's WASI 0.3
+/// component on the embedded host, whose wasi:http transport is the rt-core
+/// client native runs — so the embedded lane answers the full-response
+/// family exactly as native does, with no host-served op for it.
+#[test]
+fn the_full_response_family_reads_the_same_on_native_and_the_embedded_lane() {
+    let port = serve();
+    let dead = closed_port();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let file = dir.path().join("http_response.almd");
+    std::fs::write(&file, program(port, dead)).expect("write");
+    let native = native(&file);
+    assert_eq!(native.2, Some(0), "native failed: {}", native.1);
+    assert!(native.0.contains("get 200 a=1 loc=- cookies=a=1,b=2 keys=content-length,set-cookie,x-a,x-multi "), "{}", native.0);
+    assert!(native.0.contains("closed err: could not connect to "), "{}", native.0);
+    let mut c = Command::new(env!("CARGO_BIN_EXE_almide"));
+    c.arg("run").arg(&file).args(["--target", "wasm"]);
+    let embedded = observe(c);
+    assert_eq!((&embedded.0, embedded.2), (&native.0, native.2), "the embedded lane diverged: {}", embedded.1);
+}
