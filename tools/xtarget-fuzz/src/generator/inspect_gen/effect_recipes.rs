@@ -217,6 +217,19 @@ pub(super) const EFFECT_RECIPES: &[Recipe] = &[
     Recipe { func: "http.read_new", size: "c", args: &[("c", FRESH_ENDED_CALL)] },
     Recipe { func: "http.wait", size: "c", args: &[("c", CALL)] },
     Recipe { func: "http.cancel", size: "", args: &[("c", FRESH_CALL)] },
+    // The streaming clients over the fixture's `/chunked/{n}`: n chunks
+    // `c<i>\n`, each delivered to the generated `on_chunk` — plain
+    // request_stream (the call core's classic call) and its limited twin.
+    Recipe {
+        func: "http.request_stream",
+        size: "url",
+        args: &[("method", "\"GET\""), ("url", CHUNKED_URL), ("body", "\"\""), ("headers", "map.new()")],
+    },
+    Recipe {
+        func: "http.request_stream_with_limits",
+        size: "url",
+        args: &[("method", "\"GET\""), ("url", CHUNKED_URL), ("body", "\"\""), ("headers", "map.new()"), ("limits", NO_LIMITS)],
+    },
 ];
 
 /// Statements a probe's `main` runs first, for operands that must outlive
@@ -284,7 +297,8 @@ const UNIX_RECEIVED_SOCKET: &str = "{ let _r: Result[Unit, String] = fs.remove(\
 /// A socket with bytes waiting, so a poll answers at once.
 const UNIX_READY_SOCKET: &str = "{ let _r: Result[Unit, String] = fs.remove(\"p.sock\")\n  let l = net.unix_listen(\"p.sock\")!\n  let c = net.unix_connect(\"p.sock\")!\n  let s = net.unix_accept(l)!\n  net.unix_send(c, bytes.from_string(\"x\"), [])!\n  s }";
 const BYTES_URL: &str = "\"http://\" + (env.get(\"XF_HTTP\") ?? \"\") + \"/bytes/{n}\"";
-const ECHO_URL: &str = "\"http://\" + (env.get(\"XF_HTTP\") ?? \"\") + \"/echo\"";
+const CHUNKED_URL: &str = "\"http://\" + (env.get(\"XF_HTTP\") ?? \"\") + \"/chunked/{n}\"";
+const ECHO_URL: &str ="\"http://\" + (env.get(\"XF_HTTP\") ?? \"\") + \"/echo\"";
 const BODY: &str = "string.repeat(\"a\", {n})";
 const NO_LIMITS: &str = "{ total_ms: 0, idle_ms: 0 }";
 

@@ -1857,7 +1857,7 @@ pub(crate) mod tests {
             assert!(t.recipe.is_some(), "{name} has no recipe");
             let direct = t.direct_program(1000, 4, true);
             assert!(direct.contains("/chunked/1000"), "{name}: {direct}");
-            assert!(direct.contains(&format!("{name}(\"GET\"")), "{name}: {direct}");
+            assert!(direct.contains(&format!("{name}(a0, x, ")) && direct.contains("let a0: String = \"GET\""), "{name}: {direct}");
         }
     }
 
