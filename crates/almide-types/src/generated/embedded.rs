@@ -9306,6 +9306,60 @@ fn __hs_request(raw: List[String]) -> List[String] = list.take(raw, 3) + [int.to
 
 
 
+
+fn __hs_tchar(c: String) -> Bool = c != "" and string.contains(
+  "!#$%&'*+-.^_`|~0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
+  c,
+)
+
+fn __hs_cp(c: String) -> Int = string.codepoint(c) ?? 0
+
+
+
+fn __hs_quote_char(c: String) -> String = match c {
+  "\\" => "\\\\",
+  "\"" => "\\\"",
+  _ => if __hs_cp(c) < 32 or (__hs_cp(c) >= 127 and __hs_cp(c) <= 159) then "\\u{${int.to_hex(__hs_cp(c))}}" else c,
+}
+
+fn __hs_quote(s: String) -> String = "\"" + (string.chars(s) |> list.map((c) => __hs_quote_char(c)) |> list.join("")) + "\""
+
+fn __hs_control(c: String) -> Bool = (__hs_cp(c) < 32 and c != "\t") or __hs_cp(c) == 127
+
+fn __hs_bad_header(k: String, v: String) -> String? =
+  if k == "" or not list.all(string.chars(k), (c) => __hs_tchar(c)) then some("response header name ${__hs_quote(k)} is not a token")
+  else if list.any(string.chars(v), (c) => __hs_control(c)) then some("response header ${k} has a control character in its value")
+  else none
+
+fn __hs_pairs(resp: List[String]) -> List[(String, String)] = list.range(
+  0,
+  (list.len(resp) - 2) / 2,
+) |> list.map((i) => (list.get(resp, 2 + 2 * i) ?? "", list.get(resp, 3 + 2 * i) ?? ""))
+
+fn __hs_refusal(resp: List[String]) -> String? = {
+  let status = list.get(resp, 0) ?? ""
+  let code = int.parse(status) ?? 0
+  match __hs_pairs(resp) |> list.filter_map(((k, v)) => __hs_bad_header(k, v)) |> list.first {
+    some(why) => some(why),
+    none => if code >= 200 and code <= 599 then none
+    else some("response status ${status} is not a final status code"),
+  }
+}
+
+fn __hs_owned(k: String) -> Bool = list.contains(
+  ["connection", "content-length", "transfer-encoding", "keep-alive"],
+  string.to_lower(k),
+)
+
+fn __hs_shaped(resp: List[String]) -> List[String] = list.take(resp, 2) + (__hs_pairs(resp) |> list.filter(((k, _)) => not __hs_owned(k)) |> list.flat_map(((k, v)) => [k, v]))
+
+
+
+
+
+
+
+
 effect fn http_serve(port: Int, f: effect (List[String]) -> List[String]) -> Unit = {
   match __http_serve_bind(int.to_string(port)) {
     ok(_) => (),
@@ -9322,7 +9376,14 @@ effect fn http_serve(port: Int, f: effect (List[String]) -> List[String]) -> Uni
         ok(r) => r,
         err(e) => ["500", "Internal error: ${e}", "Content-Type", "text/plain"],
       }
-      __http_serve_reply(__hs_frame(resp))!
+      let answer = match __hs_refusal(resp) {
+        some(why) => {
+          eprintln("http.serve: refused the response: ${why}")
+          ["500", "Internal error: ${why}", "Content-Type", "text/plain"]
+        },
+        none => __hs_shaped(resp),
+      }
+      __http_serve_reply(__hs_frame(answer))!
     }
   }
 }
