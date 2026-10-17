@@ -113,15 +113,16 @@ pub const VERDICTS: &[Verdict] = &[
     // Exactly len of the 11 echoed bytes: never more than arrive.
     Verdict { func: "net.tcp_read_exact", holds: "bytes.len(v) == {len}", canon: "v", domain: &[("len", "int.abs({len}) % 12")] },
     // net's Unix sockets and shared-memory files (#3620): a descriptor is the
-    // OS's lowest free number, so two paths that each open one see different
-    // ones. The program goes on with the descriptor itself (both legs start
-    // from the same free numbers).
-    Verdict { func: "net.unix_connect", holds: "v >= 0", canon: "v", domain: &[] },
-    Verdict { func: "net.unix_listen", holds: "v >= 0", canon: "v", domain: &[] },
-    Verdict { func: "net.unix_accept", holds: "v >= 0", canon: "v", domain: &[] },
-    Verdict { func: "net.shm_create", holds: "v >= 0", canon: "v", domain: &[] },
+    // OS's lowest free number, and the legs do not start from the same free
+    // numbers (on Linux the embedded host holds one more descriptor than a
+    // native program; C-382 leaves raw numbers to the host). The program goes
+    // on with 0, which every leg refuses alike (C-383's held-descriptor rule).
+    Verdict { func: "net.unix_connect", holds: "v >= 0", canon: "0", domain: &[] },
+    Verdict { func: "net.unix_listen", holds: "v >= 0", canon: "0", domain: &[] },
+    Verdict { func: "net.unix_accept", holds: "v >= 0", canon: "0", domain: &[] },
+    Verdict { func: "net.shm_create", holds: "v >= 0", canon: "0", domain: &[] },
     // The descriptors that arrived: new ones, so numbered by what is open.
-    Verdict { func: "net.unix_take_fds", holds: "list.all(v, (f) => f >= 0)", canon: "v", domain: &[] },
+    Verdict { func: "net.unix_take_fds", holds: "list.all(v, (f) => f >= 0)", canon: "list.map(v, (f) => 0)", domain: &[] },
     // A wait never blocks for long: a sink stream never becomes readable,
     // so a generated timeout would hold the run that long (a negative one
     // forever).
@@ -129,7 +130,7 @@ pub const VERDICTS: &[Verdict] = &[
     Verdict {
         func: "net.unix_wait",
         holds: "list.all(v, (f) => list.contains({fds}, f))",
-        canon: "v",
+        canon: "list.map(v, (f) => 0)",
         domain: &[("timeout_ms", "({timeout_ms} % 50 + 50) % 50")],
     },
     // A buffer's address reads back the buffer while it lives (checked on
