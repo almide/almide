@@ -286,12 +286,56 @@ fn stdin_arm(i: &mut wasm_encoder::InstructionSink<'_>, park: u64, (g_plen, g_pp
     i.i32_const((park + DATA) as i32).local_set(base);
     stdin_fill(i, park, l, false);
     i.else_();
-    i.global_get(heap).i32_const(7).i32_add().i32_const(-8).i32_and().local_set(base);
+    arena_base(i, park, heap, l);
     stdin_fill(i, park, l, true);
+    // The guest's one allocation before host_read lands at the frontier and
+    // holds total bytes plus its header: below `base` whenever
+    // total + 64 <= base - frontier, which every read of up to one grow step
+    // meets, so only a longer one moves its bytes up.
+    i.local_get(total).i64_extend_i32_u().i64_const(64).i64_add();
+    i.local_get(base);
+    i.global_get(heap).i32_const(7).i32_add().i32_const(-8).i32_and();
+    i.i32_sub().i64_extend_i32_u();
+    i.i64_gt_u().if_(BlockType::Empty);
     stage_high(i, park, g_ppos, l);
+    i.else_();
+    i.local_get(base).global_set(g_ppos);
+    i.end();
     i.end();
     i.local_get(total).global_set(g_plen);
     i.local_get(total).i64_extend_i32_u().return_();
+    i.end();
+}
+
+/// The arena read's base: past the guest heap's frontier by the request
+/// (at most one grow step) plus 64, so the guest's allocation for the
+/// answer, made at the frontier before host_read, cannot reach the bytes and
+/// they need no second copy. Memory is grown to reach `base` first (the
+/// fill's room is measured from there). Staging the read AT the frontier and
+/// moving it up afterwards copied every byte of a read past the park's room
+/// once more: io.read_n_bytes moved 3 bytes per byte read at n = 160000 and
+/// 4 at 320000, and its series fitted no class (GCE c4-standard-4).
+fn arena_base(i: &mut wasm_encoder::InstructionSink<'_>, park: u64, heap: u32, l: StdinLocals) {
+    let StdinLocals { a_len, base, wide, .. } = l;
+    i.global_get(heap).i32_const(7).i32_add().i32_const(-8).i32_and().i64_extend_i32_u();
+    i.local_get(a_len).i32_const(STDIN_GROW_STEP).i32_lt_u().if_(BlockType::Result(ValType::I32));
+    i.local_get(a_len);
+    i.else_();
+    i.i32_const(STDIN_GROW_STEP);
+    i.end();
+    i.i32_const(64 + 7).i32_add().i32_const(-8).i32_and().i64_extend_i32_u();
+    i.i64_add().local_tee(wide);
+    i.i64_const(1 << 32).i64_ge_u().if_(BlockType::Empty);
+    refuse(i, park, MSG3, OOM_MSG.len());
+    i.end();
+    i.local_get(wide).i32_wrap_i64().local_set(base);
+    // wide = base - memory end; grow by its pages when positive
+    i.local_get(wide).memory_size(0).i64_extend_i32_u().i64_const(16).i64_shl().i64_sub();
+    i.local_tee(wide).i64_const(0).i64_gt_s().if_(BlockType::Empty);
+    i.local_get(wide).i64_const(0xFFFF).i64_add().i64_const(16).i64_shr_u().i32_wrap_i64();
+    i.memory_grow(0).i32_const(0).i32_lt_s().if_(BlockType::Empty);
+    refuse(i, park, MSG3, OOM_MSG.len());
+    i.end();
     i.end();
 }
 
