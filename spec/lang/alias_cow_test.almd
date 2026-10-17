@@ -105,3 +105,23 @@ test "alias cow: string.push in place" {
   assert_eq(s, "hi!")
   assert_eq(b, "hi")
 }
+
+// ADR-0013 stage 2 step 5: the in-place append window (`s = s + x` rendered
+// as one append) must not grow a buffer an alias still reads.
+test "alias cow: string self-append leaves a let alias unchanged" {
+  var s = "ab"
+  let t = s
+  s = s + "x"
+  assert_eq(s, "abx")
+  assert_eq(t, "ab")
+}
+
+test "alias cow: string self-append in a loop leaves the alias unchanged" {
+  var s = "a"
+  let t = s
+  for i in 0..<3 {
+    s = s + "${i}"
+  }
+  assert_eq(s, "a012")
+  assert_eq(t, "a")
+}
