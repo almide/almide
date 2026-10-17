@@ -128,6 +128,9 @@ fn render_call(b: &mut Builder, sig: &Signature, subst: &HashMap<String, GenType
             None => args.push(gen_arg(b, p, name, subst)?),
         }
     }
+    if let Some(v) = sig.verdict {
+        return render_verdict_call(b, sig, v, args, subst);
+    }
     if sig.effect {
         // Bound to an annotated `let`: an effect call's Result is then a
         // value (an un-annotated bind is E041), and its error path is
@@ -160,6 +163,52 @@ fn render_call(b: &mut Builder, sig: &Signature, subst: &HashMap<String, GenType
     } else {
         Some(call)
     }
+}
+
+/// A host-decided call (ADR-0027 D3, `verdicts.rs`): every argument is bound
+/// once (the checks read it again), brought into the function's domain, and
+/// the result is checked against its properties, then replaced by the fixed
+/// value every leg agrees on. A leg whose result breaks a property panics.
+fn render_verdict_call(
+    b: &mut Builder,
+    sig: &Signature,
+    v: &super::verdicts::Verdict,
+    args: Vec<String>,
+    subst: &HashMap<String, GenType>,
+) -> Option<String> {
+    let mut bound: Vec<(String, String)> = Vec::new();
+    for ((name, p), a) in sig.param_names.iter().zip(&sig.params).zip(args) {
+        let ty = p.instantiate(subst)?;
+        let a = match v.domain.iter().find(|(d, _)| d == name) {
+            Some((_, tmpl)) => super::verdicts::fill(tmpl, &[(name, &a)]),
+            None => a,
+        };
+        bound.push((name.clone(), b.hoist(&ty, a)));
+    }
+    let names: Vec<(&str, &str)> = bound.iter().map(|(p, e)| (p.as_str(), e.as_str())).collect();
+    let call = format!("{}.{}({})", sig.module, sig.func, bound.iter().map(|(_, e)| e.as_str()).collect::<Vec<_>>().join(", "));
+    let ty = sig.effective_ret().instantiate(subst)?;
+    if sig.effect {
+        b.effect = true;
+    }
+    if ty == GenType::Unit {
+        b.stmts.push(call);
+        return Some("()".to_string());
+    }
+    // Bound out of scope: the raw value is read only by its check, never by
+    // a later term (it differs per leg and per run).
+    let r = b.fresh_name();
+    b.stmts.push(format!("let {r}: {} = {call}", ty.render()));
+    let holds = super::verdicts::fill(v.holds, &names);
+    let canon = super::verdicts::fill(v.canon, &names);
+    let broke = format!("panic(\"verdict: {}.{} broke its declared property\")", sig.module, sig.func);
+    let checked = match ty {
+        // The error names what the host chose too (a temp path, its clock
+        // suffix), so only that the call failed is compared.
+        GenType::Result(_) => format!("match {r} {{ ok(v) => if {holds} then ok({canon}) else {broke}, err(_) => err(\"{}.{} failed\") }}", sig.module, sig.func),
+        _ => format!("match {r} {{ v => if {holds} then {canon} else {broke} }}"),
+    };
+    Some(b.hoist(&ty, checked))
 }
 
 /// A String argument of a sandboxed effect function names something the

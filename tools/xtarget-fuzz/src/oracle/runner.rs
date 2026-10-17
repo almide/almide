@@ -230,6 +230,7 @@ impl Toolchain {
         self.run_sandboxed(|dir| {
             let mut cmd = Command::new(&self.wasmtime);
             cmd.arg(format!("--dir={}::.", dir.display()));
+            cmd.arg(format!("--dir={}::/tmp", super::sandbox::tmp_of(dir).display()));
             for (k, v) in super::sandbox::ENV {
                 cmd.arg(format!("--env={k}={v}"));
             }
@@ -377,6 +378,7 @@ impl Toolchain {
         for (k, v) in super::sandbox::ENV {
             cmd.env(k, v);
         }
+        cmd.env("TMPDIR", super::sandbox::tmp_of(&dir));
         let mut res = self.spawn_timed_with(cmd, std::fs::File::open(&stdin).ok());
         res.tree = Some(super::sandbox::snapshot(&dir));
         super::sandbox::remove(&dir, &stdin);

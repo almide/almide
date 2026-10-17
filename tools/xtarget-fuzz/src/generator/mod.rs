@@ -34,6 +34,7 @@ mod program;
 mod sig_type;
 mod term;
 mod types;
+pub mod verdicts;
 
 pub use catalogue::{build as build_catalogue, Signature, SANDBOXED_EFFECT_MODULES};
 
@@ -267,7 +268,8 @@ impl Engine {
     pub fn focus(mut self, focus: &str) -> Result<Self, String> {
         for (i, sig) in self.catalogue.iter_mut().enumerate() {
             if format!("{}.{}", sig.module, sig.func) == focus {
-                sig.weight = sig.weight.saturating_mul(FOCUS_BOOST);
+                // A weight-0 function (a host-decided result) is drawn only here.
+                sig.weight = sig.weight.max(1).saturating_mul(FOCUS_BOOST);
                 self.focus.get_or_insert(i);
             }
         }

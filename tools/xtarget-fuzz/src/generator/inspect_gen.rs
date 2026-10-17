@@ -48,6 +48,9 @@ pub struct Target {
     effect: bool,
     /// The decoder the result is observed through ([`super::catalogue::LEG_DEPENDENT_ENCODERS`]).
     observe: Option<&'static str>,
+    /// A host-decided result (ADR-0027 D3): observed through its declared
+    /// properties, never its value.
+    verdict: Option<&'static super::verdicts::Verdict>,
 }
 
 /// An argument inside the function's domain, derived from its declaration
@@ -435,6 +438,10 @@ const ROUTED: &[Routed] = &[Routed { func: "http.param", param: "req", pattern: 
 /// in-domain (a [`SHAPE_RECIPES`] entry or a derived [`Domain`]) returned
 /// `none` or `false`: it refused the input, and that run measured the
 /// refusal (#3671). `src/inspect.rs` reads it off the run's stderr.
+/// The panic a probe stops with when a host-decided result breaks a
+/// declared property (ADR-0027 D3).
+pub const BROKE: &str = "inspect: the result broke its declared property";
+
 pub const OFF_DOMAIN: &str = "inspect: the probed call refused its in-domain input";
 
 /// The panic a probe program stops with when the probed call returned `err`:
@@ -521,7 +528,12 @@ impl Target {
                 .position(|(_, t)| concrete(t).as_ref().is_some_and(has_size))
                 .or_else(|| params.iter().position(|(n, t)| *t == SigType::Int && SIZE_LIKE_INT.contains(&n.as_str()))),
         };
-        let rebind_param = params.iter().position(|(_, t)| concrete(t).as_ref() == Some(&ret));
+        // A host-decided scalar rebound through its own call is a chain of
+        // host choices; only a collection's length (its digest) is fixed.
+        let rebind_param = params
+            .iter()
+            .position(|(_, t)| concrete(t).as_ref() == Some(&ret))
+            .filter(|_| sig.verdict.is_none() || matches!(ret, GenType::List(_) | GenType::Set(_) | GenType::Map(_)));
         let generic = {
             let forced = sig.forced_bindings();
             subst.keys().any(|k| !forced.contains_key(k))
@@ -540,6 +552,7 @@ impl Target {
             generic,
             effect: sig.effect,
             observe: sig.observed_through,
+            verdict: sig.verdict,
         })
     }
 
@@ -735,8 +748,17 @@ impl Target {
         }
         if with_call {
             let _ = writeln!(s, "    let r: {} = {}", self.ret.render(), self.bound_call(slot.map(|(i, _)| i)));
-            let _ = writeln!(s, "    acc = acc + {}", digest("r", &self.ret));
-            s.push_str(&outcome_guard("r", &self.ret, self.in_domain(), "    "));
+            match self.verdict_digest("r", slot.map(|(i, _)| i)) {
+                // Its value differs per leg and run: the verdict is the digest.
+                Some(d) => {
+                    s.push_str(&outcome_guard("r", &self.ret, self.in_domain(), "    "));
+                    let _ = writeln!(s, "    let held: Int = {d}\n    if held == 1 then () else panic(\"{BROKE}\")\n    acc = acc + held");
+                }
+                None => {
+                    let _ = writeln!(s, "    acc = acc + {}", digest("r", &self.ret));
+                    s.push_str(&outcome_guard("r", &self.ret, self.in_domain(), "    "));
+                }
+            }
         }
         let _ = writeln!(s, "    acc = acc + 1\n    i = i + 1\n  }}");
         if let Some(i) = self.size_param.filter(|i| !self.leg_dependent_input(*i)) {
@@ -835,24 +857,36 @@ impl Target {
         let names: Vec<String> = (0..self.params.len()).map(|i| format!("a{i}")).collect();
         let ret = self.ret.render();
         let kw = if self.effect { "effect fn" } else { "fn" };
-        let wrap = |inner: &str| format!("pub {kw} call({}) -> {ret} = {inner}({})\n", sig.join(", "), names.join(", "));
+        let wrap = |inner: &str, bang: &str| format!("pub {kw} call({}) -> {ret} = {inner}({}){bang}\n", sig.join(", "), names.join(", "));
         let mut main = String::from("import self.left\nimport self.right\n\neffect fn main() -> Unit = {\n");
-        for i in (0..self.params.len()).filter(|i| Some(*i) != self.mut_param) {
+        for i in (0..self.params.len()).filter(|i| Some(*i) != self.mut_param && !self.per_step(*i)) {
             let _ = writeln!(main, "  let a{i}: {} = {}", self.render_param(i), self.arg(i, n));
         }
         // Each path mutates its own var, so the three must agree on the
-        // mutated value as well as on the return.
+        // mutated value as well as on the return. A per-step operand is one
+        // the call consumes (`fs.remove`'s file): each path builds its own.
         let path_args = |path: &str| -> String {
             (0..self.params.len())
-                .map(|i| if Some(i) == self.mut_param { format!("{path}m") } else { format!("a{i}") })
+                .map(|i| match i {
+                    _ if Some(i) == self.mut_param => format!("{path}m"),
+                    _ if self.per_step(i) => format!("{path}a{i}"),
+                    _ => format!("a{i}"),
+                })
                 .collect::<Vec<_>>()
                 .join(", ")
         };
-        for (v, callee) in [("d", self.name.as_str()), ("l", "left.call"), ("r", "right.call")] {
+        // A path is a user `effect fn`, so its call is a Result to the
+        // checker (`Signature::lifted`) where an intrinsic's need not be.
+        let bang = if self.effect && !matches!(self.ret, GenType::Result(_) | GenType::ResultNom(..)) { "!" } else { "" };
+        for (k, (v, callee)) in [("d", self.name.as_str()), ("l", "left.call"), ("r", "right.call")].into_iter().enumerate() {
             if let Some(m) = self.mut_param {
                 let _ = writeln!(main, "  var {v}m: {} = {}", self.render_param(m), self.arg(m, n));
             }
-            let _ = writeln!(main, "  let {v}: {ret} = {callee}({})", path_args(v));
+            for i in (0..self.params.len()).filter(|i| self.per_step(*i)) {
+                let _ = writeln!(main, "  let {v}a{i}: {} = {}", self.render_param(i), self.recipe_expr(i, n, &k.to_string()));
+            }
+            let bang = if v == "d" { "" } else { bang };
+            let _ = writeln!(main, "  let {v}: {ret} = {callee}({}){bang}", path_args(v));
         }
         // Three paths agreeing on an `err` agree on the error path.
         for v in ["d", "l", "r"] {
@@ -864,6 +898,10 @@ impl Target {
                 Some(dec) => {
                     let _ = writeln!(main, "  let {v}_o: {ret} = match {v} {{\n    ok(c) => {dec}(c),\n    err(e) => err(e),\n  }}");
                     let _ = writeln!(main, "  {}", render_print(&format!("{v}_o"), &self.ret));
+                }
+                None if self.verdict.is_some() && self.ret != GenType::Unit => {
+                    let d = self.verdict_digest(v, None).unwrap_or_default();
+                    let _ = writeln!(main, "  let {v}_held: Int = {d}\n  println(\"{v} holds ${{{v}_held}}\")");
                 }
                 None if self.ret != GenType::Unit => {
                     let _ = writeln!(main, "  {}", render_print(v, &self.ret));
@@ -887,10 +925,10 @@ impl Target {
             None => main + "}\n",
         };
         let main = format!("{}{main}", super::catalogue::imports_for(&main));
-        let base = wrap(&self.name);
+        let base = wrap(&self.name, "");
         // A path names the types in its signature, so it imports their
         // modules as well as `base`.
-        let path = wrap("base.call");
+        let path = wrap("base.call", bang);
         let path = format!("{}import self.base\n\n{path}", super::catalogue::imports_for(&path));
         let files = vec![
             ("app/almide.toml".to_string(), "[package]\nname = \"app\"\nversion = \"0.1.0\"\n".to_string()),
@@ -900,6 +938,22 @@ impl Target {
             ("app/src/main.almd".to_string(), main),
         ];
         Project { files, entry: "app/src/main.almd".to_string() }
+    }
+
+    /// 1 when `v` (this target's result) holds its declared properties, else
+    /// 0, over the program's argument names (`x` in the size `slot`, `a<i>`
+    /// elsewhere); None for a target whose value is compared as such.
+    fn verdict_digest(&self, v: &str, slot: Option<usize>) -> Option<String> {
+        let verdict = self.verdict?;
+        let names: Vec<(String, String)> = (0..self.params.len())
+            .map(|i| (self.params[i].0.clone(), if Some(i) == slot { "x".to_string() } else { format!("a{i}") }))
+            .collect();
+        let names: Vec<(&str, &str)> = names.iter().map(|(p, e)| (p.as_str(), e.as_str())).collect();
+        let holds = super::verdicts::fill(verdict.holds, &names);
+        Some(match self.ret {
+            GenType::Result(_) => format!("(match {v} {{ ok(v) => if {holds} then 1 else 0, err(_) => 0 }})"),
+            _ => format!("(match {v} {{ v => if {holds} then 1 else 0 }})"),
+        })
     }
 
     /// `let a<i>: T = <arg>` for every value parameter other than `skip`

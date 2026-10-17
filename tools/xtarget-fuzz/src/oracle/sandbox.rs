@@ -31,6 +31,15 @@ const FILES: &[(&str, &[u8])] = &[
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
+/// The run's temp dir, beside the tree rather than in it: `fs.create_temp_*`
+/// names what it creates after the clock, so what it leaves cannot be
+/// compared byte for byte (ADR-0027 D3), and C-189 lets each leg place its
+/// temp dir differently. Every leg is pointed here: native and the embedded
+/// host through `TMPDIR`, a stock runtime through its `/tmp` preopen.
+pub fn tmp_of(dir: &Path) -> PathBuf {
+    dir.with_extension("tmp")
+}
+
 /// A fresh sandbox under `scratch`, seeded with the fixed tree and the stdin
 /// file. The stdin file lives beside the sandbox, so it is not in the tree.
 pub fn create(scratch: &Path) -> std::io::Result<(PathBuf, PathBuf)> {
@@ -38,6 +47,8 @@ pub fn create(scratch: &Path) -> std::io::Result<(PathBuf, PathBuf)> {
     let dir = scratch.join(format!("sbx-{}-{n}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(dir.join("empty_dir"))?;
+    let _ = std::fs::remove_dir_all(tmp_of(&dir));
+    std::fs::create_dir_all(tmp_of(&dir))?;
     for (rel, bytes) in FILES {
         let p = dir.join(rel);
         if let Some(parent) = p.parent() {
@@ -94,6 +105,7 @@ fn fnv1a(bytes: &[u8]) -> u64 {
 /// Remove a sandbox and its stdin file.
 pub fn remove(dir: &Path, stdin: &Path) {
     let _ = std::fs::remove_dir_all(dir);
+    let _ = std::fs::remove_dir_all(tmp_of(dir));
     let _ = std::fs::remove_file(stdin);
 }
 
@@ -113,7 +125,7 @@ impl World {
     /// The run's cwd, env and stdin; its argv is [`ARGS`], after the program
     /// (and after `--` for `almide run`).
     pub fn enter(&self, cmd: &mut std::process::Command) {
-        cmd.current_dir(&self.dir).envs(ENV.iter().copied());
+        cmd.current_dir(&self.dir).envs(ENV.iter().copied()).env("TMPDIR", tmp_of(&self.dir));
         if let Ok(f) = std::fs::File::open(&self.stdin) {
             cmd.stdin(f);
         }
@@ -122,7 +134,7 @@ impl World {
     /// What a stock `wasmtime run` needs before the module to see the same
     /// world: the sandbox preopened as the guest's `.`, and the env.
     pub fn wasmtime_args(&self) -> Vec<String> {
-        let mut a = vec![format!("--dir={}::.", self.dir.display())];
+        let mut a = vec![format!("--dir={}::.", self.dir.display()), format!("--dir={}::/tmp", tmp_of(&self.dir).display())];
         a.extend(ENV.iter().map(|(k, v)| format!("--env={k}={v}")));
         a
     }
