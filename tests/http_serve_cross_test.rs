@@ -495,9 +495,42 @@ fn a_response_header_holding_crlf_is_refused_with_500_on_native_and_the_embedded
         assert!(!resp.contains("\r\nSet-Cookie"), "{leg}: the split reached the wire: {resp:?}");
         assert!(a[1].ends_with(b"\r\n\r\nGET /fine "), "{leg}: {:?}", String::from_utf8_lossy(&a[1]));
         assert!(
-            err.lines().any(|l| l.starts_with("http.serve: refused the response: response header X-A has a CR, LF or NUL")),
+            err.lines().any(|l| l.starts_with("http.serve: refused the response: response header X-A has a control character in its value")),
             "{leg}: no stderr line: {err:?}"
         );
+    }
+    assert_eq!(line_multiset(&n_err), line_multiset(&w_err));
+}
+
+/// What the core refuses or reshapes in a handler's answer (C-367): a status
+/// outside 200..=599 (a 1xx included) and a header name that is not a token
+/// or a value holding a control character are a `500` naming the reason
+/// (and one stderr line), and the framing fields the server owns are
+/// dropped — the same answer on both legs.
+#[cfg_attr(debug_assertions, ignore = "serve-cross net is release-only (CI: release-shape job)")]
+#[test]
+fn a_bad_status_or_field_is_refused_and_the_handlers_framing_fields_are_dropped_on_native_and_the_embedded_lane() {
+    const REFUSED: &[(&[u8], &str)] = &[
+        (b"GET /s42 HTTP/1.1\r\n\r\n", "response status 42 is not a final status code"),
+        (b"GET /s103 HTTP/1.1\r\n\r\n", "response status 103 is not a final status code"),
+        (b"GET /s600 HTTP/1.1\r\n\r\n", "response status 600 is not a final status code"),
+        (b"GET /hname HTTP/1.1\r\n\r\n", "response header name \"a b\" is not a token"),
+        (b"GET /hctl HTTP/1.1\r\n\r\n", "response header X-C has a control character in its value"),
+    ];
+    let (native, wasm, n_err, w_err) = on_both_legs(&[], |leg| {
+        let mut out: Vec<Vec<u8>> = REFUSED.iter().map(|(r, _)| ask(leg.port, r)).collect();
+        out.push(ask(leg.port, b"GET /hframe HTTP/1.1\r\n\r\n"));
+        out
+    });
+    for (leg, a, err) in [("native", &native, &n_err), ("wasm", &wasm, &w_err)] {
+        for (i, (_, why)) in REFUSED.iter().enumerate() {
+            let resp = String::from_utf8_lossy(&a[i]);
+            assert!(resp.starts_with("HTTP/1.1 500 Internal Server Error\r\n"), "{leg} {i}: {resp:?}");
+            assert!(resp.ends_with(&format!("\r\n\r\nInternal error: {why}")), "{leg} {i}: {resp:?}");
+            assert!(err.lines().any(|l| l == format!("http.serve: refused the response: {why}")), "{leg} {i}: no stderr line: {err:?}");
+        }
+        let framed = String::from_utf8_lossy(&a[REFUSED.len()]);
+        assert_eq!(framed, "HTTP/1.1 200 OK\r\nX-Kept: 1\r\nConnection: close\r\nContent-Length: 5\r\n\r\nhello", "{leg}");
     }
     assert_eq!(line_multiset(&n_err), line_multiset(&w_err));
 }
