@@ -1487,10 +1487,17 @@ Goal: the 150 rows left uninspected reach 0, with no native-only stamps (owner, 
   - the packed Q1_0 GEMV was negated against `from_q1_0_bytes` and summed in a per-arch order;
   - the Qwen3 layers divided by a zero KV head count on native.
 - **Doc fixes:** `env.os` names "wasi" (C-189), and `random.float` is [0, 1).
-- **Stamped:** 20 fs and args effect functions (150 → 130).
+- **Stamped:** 72 effect functions across three GCE batches (150 → 78).
+- **More defects found and fixed (test-first, 10-17 afternoon):**
+  - the embedded lane's p3 component resolved relative paths against an inherited, possibly stale `PWD` rather than the launcher's cwd;
+  - a program needing both the component-only full-response client and an op only the core host serves ran on the core route and answered `unknown fs op 65`; it is now refused by name (E081, with the wall line);
+  - stock `fs.list_dir` / `walk` / `glob` were quadratic in the entry count (an insertion sort, and a fixed readdir buffer wasmtime re-reads from the start per pass);
+  - stock p1, p2 and p3 `io.read_n_bytes` stopped short of the request (one 4 KiB `fd_read`, one 16 KiB `blocking-read`, and a p3 read that overran its staging page), against C-161.
+- **Harness:** spawn draws silent commands (a child's output order is the scheduler's); `tcp_read_timeout` gets a timeout the echo can beat; an embedded-lane wall counts as a wall.
 - **Waiting on owner rulings:**
   - unix and shm interim host ops;
   - the ENOTEMPTY fs error text;
   - the reason phrase in `request_stream`'s non-2xx text on wasi:http;
   - a base URL for the Anthropic streaming calls;
   - `@concurrent(f)` on `fs.fold_lines_chunked`.
+  - `testing.assert_throws` on wasm.
