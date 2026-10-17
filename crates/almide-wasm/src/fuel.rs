@@ -76,7 +76,7 @@ impl Emitter<'_> {
                 if crate::fuel::omega_replay() >= 0 {
                     self.f.instructions().i64_const(0);
                 } else {
-                    self.fs_call_0(crate::fs_meta::OP_MONO_NOW)?;
+                    self.fs_call_0(crate::fs_meta::OP_METER_CLOCK)?;
                 }
                 let mut i = self.f.instructions();
                 i.local_get(hn).i64_add().local_set(hn); // now + ns
@@ -192,11 +192,11 @@ impl Emitter<'_> {
             i.end();
             i.end();
         } else {
-            self.note_host_op(crate::fs_meta::OP_MONO_NOW);
+            self.note_host_op(crate::fs_meta::OP_METER_CLOCK);
             // #3041: the meter's own read, not the frame's (witness_decls.rs).
             self.work.meter_reads_pending.set(self.work.meter_reads_pending.get() + 1);
             let mut i = self.f.instructions();
-            i.i32_const(crate::fs_meta::OP_MONO_NOW);
+            i.i32_const(crate::fs_meta::OP_METER_CLOCK);
             i.i32_const(0).i32_const(0).i32_const(0).i32_const(0);
             i.call(F_FS_CALL);
             i.global_get(G_T_DEADLINE).i64_ge_s().if_(BlockType::Empty);
