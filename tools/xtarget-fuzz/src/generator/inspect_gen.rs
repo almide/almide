@@ -981,7 +981,7 @@ impl Target {
                     let _ = writeln!(main, "  {}", render_print(&format!("{v}_o"), &self.ret));
                 }
                 None if self.verdict.is_some() && self.ret != GenType::Unit => {
-                    let d = self.verdict_digest(v, None, false).unwrap_or_default();
+                    let d = self.verdict_digest_on(v, None, false, v).unwrap_or_default();
                     let _ = writeln!(main, "  let {v}_held: Int = {d}\n  println(\"{v} = ${{{v}_held}}\")");
                 }
                 None if self.ret != GenType::Unit => {
@@ -1025,9 +1025,22 @@ impl Target {
     /// 0, over the program's argument names (`x` in the size `slot`, `a<i>`
     /// elsewhere); None for a target whose value is compared as such.
     fn verdict_digest(&self, v: &str, slot: Option<usize>, cheap: bool) -> Option<String> {
+        self.verdict_digest_on(v, slot, cheap, "")
+    }
+
+    /// [`Self::verdict_digest`] where a per-step operand is the diamond
+    /// path's own (`<path>a<i>`, [`Self::diamond_project_of`]).
+    fn verdict_digest_on(&self, v: &str, slot: Option<usize>, cheap: bool, path: &str) -> Option<String> {
         let verdict = self.verdict?;
         let names: Vec<(String, String)> = (0..self.params.len())
-            .map(|i| (self.params[i].0.clone(), if Some(i) == slot { "x".to_string() } else { format!("a{i}") }))
+            .map(|i| {
+                let e = match i {
+                    _ if Some(i) == slot => "x".to_string(),
+                    _ if self.per_step(i) => format!("{path}a{i}"),
+                    _ => format!("a{i}"),
+                };
+                (self.params[i].0.clone(), e)
+            })
             .collect();
         let names: Vec<(&str, &str)> = names.iter().map(|(p, e)| (p.as_str(), e.as_str())).collect();
         let holds = super::verdicts::fill(verdict.property(cheap), &names);
@@ -1237,6 +1250,9 @@ fn digest(v: &str, t: &GenType) -> String {
         GenType::List(_) => format!("list.len({v})"),
         GenType::Map(_) => format!("map.len({v})"),
         GenType::Option(_) => format!("(if option.is_some({v}) then 1 else 0)"),
+        GenType::Result(e) if matches!(&**e, GenType::Nominal(k) if nominal::get(k).is_some_and(|d| d.in_flight)) => {
+            format!("(match {v} {{ ok(fv) => {}, err(_) => 0 }})", digest("fv", e))
+        }
         GenType::Result(_) | GenType::ResultNom(..) => format!("(if result.is_ok({v}) then 1 else 0)"),
         GenType::Tuple2(..) => "1".into(),
         GenType::Sized(name) if name.starts_with("Float") => {
