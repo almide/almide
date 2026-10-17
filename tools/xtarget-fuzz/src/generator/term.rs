@@ -385,6 +385,7 @@ fn gen_leaf(b: &mut Builder, goal: &GenType) -> String {
         | GenType::Result(_)
         | GenType::ResultNom(..)
         | GenType::Tuple2(_, _)
+        | GenType::Tuple3(..)
         | GenType::Map(_)
         | GenType::Set(_) => gen_construct(b, goal),
     }
@@ -518,6 +519,7 @@ fn gen_construct(b: &mut Builder, goal: &GenType) -> String {
             // A tuple literal is unambiguous from its element exprs.
             format!("({}, {})", gen_expr(b, a), gen_expr(b, b2))
         }
+        GenType::Tuple3(a, b2, c) => format!("({}, {}, {})", gen_expr(b, a), gen_expr(b, b2), gen_expr(b, c)),
         GenType::Map(v) => {
             let n = *b.rng.pick(pools::SMALL_COUNT_POOL) as usize;
             if n == 0 {
@@ -779,6 +781,7 @@ fn gen_lambda_body(b: &mut Builder, goal: &GenType) -> String {
         GenType::Tuple2(a, c) => {
             format!("({}, {})", gen_lambda_body(b, a), gen_lambda_body(b, c))
         }
+        GenType::Tuple3(a, c, d) => format!("({}, {}, {})", gen_lambda_body(b, a), gen_lambda_body(b, c), gen_lambda_body(b, d)),
         GenType::Map(v) => {
             // Single-entry map literal is inline-safe.
             format!("[\"k\": {}]", gen_lambda_body(b, v))
