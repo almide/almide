@@ -6,10 +6,12 @@
 //!
 //! The server answers every request `404` with a reason phrase no table
 //! would produce (`Gone Fishing`), so a leg that still renders the line's
-//! reason, or one that renders a table's, is visible. All four streaming
-//! calls — the two `_with_limits` twins and the plain `request_stream` /
-//! `openai_streaming_call` — run on native (`almide run`) and on the embedded
-//! lane (`almide run --target wasm`), and both print the expected bytes.
+//! reason, or one that renders a table's, is visible. Both streaming calls —
+//! the `_with_limits` twin and the plain `request_stream` — run on native
+//! (`almide run`) and on the embedded lane (`almide run --target wasm`), and
+//! both print the expected bytes. (The OpenAI and Anthropic clients left for
+//! package almide/llm at dialect epoch 14; they are built on these calls and
+//! inherit the text.)
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::Path;
@@ -65,25 +67,16 @@ fn said(tag: String, r: Result[Unit, String]) -> Unit = match r {{
   err(e) => println("${{tag}} err ${{e}}"),
 }}
 
-fn said_s(tag: String, r: Result[String, String]) -> Unit = match r {{
-  ok(j) => println("${{tag}} ok ${{j}}"),
-  err(e) => println("${{tag}} err ${{e}}"),
-}}
-
 effect fn main() -> Unit = {{
   let url = "http://127.0.0.1:{port}/x"
-  let base = "http://127.0.0.1:{port}/v1"
   said("stream_limits", http.request_stream_with_limits("GET", url, "", map.new(), {{ total_ms: 20000, idle_ms: 0 }}, (c) => println("chunk ${{c}}")))
-  said_s("openai_limits", http.openai_streaming_call_with_limits(base, "k", "{{}}", {{ total_ms: 20000, idle_ms: 0 }}, (d) => println("delta ${{d}}")))
-  said_s("openai", http.openai_streaming_call(base, "k", "{{}}", (d) => println("delta ${{d}}")))
   said("stream", http.request_stream("GET", url, "", map.new(), (c) => println("chunk ${{c}}")))
 }}
 "#
     )
 }
 
-const EXPECTED: &str = "stream_limits err HTTP 404: gone\nopenai_limits err HTTP 404: gone\n\
-openai err HTTP 404: gone\nstream err HTTP 404: gone\n";
+const EXPECTED: &str = "stream_limits err HTTP 404: gone\nstream err HTTP 404: gone\n";
 
 fn run(file: &Path, wasm: bool) -> (String, String, Option<i32>) {
     let mut c = Command::new(env!("CARGO_BIN_EXE_almide"));
