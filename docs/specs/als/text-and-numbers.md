@@ -490,7 +490,7 @@ Fixture: `spec/wasm_cross/float_to_int_edges.almd`、
 スカラーループで計算する: 0.0 から累積し、k は昇順、乗算してから加算し、融合
 積和は使わない。正準 fast-exp を通っていた活性化関数（`softmax_rows`・`gelu`・
 `swiglu_gate`）と rope の逆周波数表は、dialect epoch 14 で標準ライブラリを離れ、
-パッケージ almide/nn に移った（C-270）。Fixtures:
+パッケージ almide/nnlib に移った（C-270）。Fixtures:
 `spec/wasm_cross/matrix_pow_libm.almd`。Contracts: C-223。
 
 ## ALS-T26 datetime の暦フィールドと parse_iso の文法
