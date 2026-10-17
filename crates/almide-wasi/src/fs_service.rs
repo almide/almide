@@ -17,7 +17,8 @@
 //!
 //! The reference is the embedded host's `fs_dispatch` (almide-wasm-run),
 //! which answers what native `std::fs` answers; the error texts come from
-//! `almide_base::fs_errno`, the table every leg spells from.
+//! `almide_base::fs_errno`, the table every leg spells from (its Display and
+//! its classified rows alike).
 
 use wasm_encoder::reencode::{Reencode, RoundtripReencoder};
 use wasm_encoder::{CodeSection, ConstExpr, DataSection, GlobalSection, ValType};
@@ -160,11 +161,11 @@ pub fn service_wat_ext(fsp: u32, ops: &[i32], extra_arms: &str) -> String {
         tail.push_str(&format!("  (func $s_{name} (result i32 i32) (i32.const {at}) (i32.const {len}))\n"));
     }
     tail.push_str("  (func $errno_text (param $e i32) (result i32 i32)\n");
-    for row in almide_base::fs_errno::FS_ERRNOS {
-        let (at, len) = place(row.text.as_bytes());
+    // Both kinds of row (C-273): the Display rows and the classified ones.
+    for (wasi, text) in almide_base::fs_errno::wasi_texts() {
+        let (at, len) = place(text.as_bytes());
         tail.push_str(&format!(
-            "    (if (i32.eq (local.get $e) (i32.const {})) (then (return (i32.const {at}) (i32.const {len}))))\n",
-            row.wasi
+            "    (if (i32.eq (local.get $e) (i32.const {wasi})) (then (return (i32.const {at}) (i32.const {len}))))\n"
         ));
     }
     tail.push_str("    (i32.const 0) (i32.const 0))\n");
