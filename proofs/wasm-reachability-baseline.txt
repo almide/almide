@@ -101,15 +101,10 @@ json.stringify_pretty :: UNPROBEABLE :: no candidate shape builds natively
 json.to_map :: UNPROBEABLE :: no candidate shape builds natively
 list.with_capacity :: UNPROBEABLE :: no candidate shape builds natively
 map.new :: UNPROBEABLE :: no candidate shape builds natively
-matrix.linear_q1_0_row_no_bias :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.linear_q1_0_row_no_bias — rendering them would emit a dangling `(call $…)` (invalid wasm). Add t
-matrix.linear_q8_0_row_no_bias :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.linear_q8_0_row_no_bias — rendering them would emit a dangling `(call $…)` (invalid wasm). Add t
 matrix.mul_f32 :: UNPROBEABLE :: parameter type outside the synthesizer
 matrix.mul_f32_scaled :: UNPROBEABLE :: parameter type outside the synthesizer
 matrix.mul_f32_t :: UNPROBEABLE :: parameter type outside the synthesizer
 matrix.mul_f32_t_scaled :: UNPROBEABLE :: parameter type outside the synthesizer
-matrix.qwen3_block_f32_kv :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.qwen3_block_f32_kv — rendering them would emit a dangling `(call $…)` (invalid wasm). Add the ca
-matrix.qwen3_block_q1_0_kv :: COMPILER_FRONTIER :: wasm build failed
-matrix.qwen3_block_q8_0_kv :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.qwen3_block_q8_0_kv — rendering them would emit a dangling `(call $…)` (invalid wasm). Add the c
 net.shm_create :: HOST_CAPABILITY :: native-only-forever: stock WASI has no Unix-domain sockets, descriptor passing or shared-memory files (proofs/target-availability.toml, #1423)
 net.shm_read :: HOST_CAPABILITY :: native-only-forever: stock WASI has no Unix-domain sockets, descriptor passing or shared-memory files (proofs/target-availability.toml, #1423)
 net.shm_resize :: HOST_CAPABILITY :: native-only-forever: stock WASI has no Unix-domain sockets, descriptor passing or shared-memory files (proofs/target-availability.toml, #1423)
