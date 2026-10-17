@@ -124,8 +124,6 @@ pub const STDLIB_MODULE_EFFECTS: &[(&str, ModuleEffects)] = &[
     ("float64", ModuleEffects::Pure),
     // Assertions: they abort, which is not a category (ADR-0022).
     ("testing", ModuleEffects::Pure),
-    // The allocator's arena mark/rewind: program memory, not the host.
-    ("mem", ModuleEffects::Pure),
     // The primitive floor is stdlib-internal (E085 outside it); its host ops
     // are classified at the public function that wraps them, so a stdlib
     // body over the floor does not charge its callers twice.
@@ -141,7 +139,7 @@ pub const HOST_FREE_EFFECT_FNS: &[&str] = &[
 
 /// Runtime-symbol prefixes that are not their module's name
 /// (`almide_rt_<prefix>_…`).
-const RUNTIME_PREFIX_ALIASES: &[(&str, &str)] = &[("sse", "http"), ("test", "testing")];
+const RUNTIME_PREFIX_ALIASES: &[(&str, &str)] = &[("test", "testing")];
 
 pub fn module_effects(module: &str) -> Option<ModuleEffects> {
     STDLIB_MODULE_EFFECTS.iter().find(|(m, _)| *m == module).map(|(_, e)| *e)

@@ -261,7 +261,7 @@ impl LowerCtx {
         let scalar_list = matches!(result_elem.as_ref(),
             Some(Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, b))
                 if b.len() == 1 && !is_heap_ty(&b[0]));
-        // A `Matrix` result element (`heads |> list.map((h) => matrix.rms_norm_rows(h, g, e))`
+        // A `Matrix` result element (`heads |> list.map((h) => matrix.scale(h, s))`
         // — the nn per-head shape) or its structural `List[List[scalar]]` spelling: each
         // element is a TWO-LEVEL block (row handles inside), so the result list's scope-end
         // drop must be the nested `DropListListStr` (`list_list_str_lists`) — the flat

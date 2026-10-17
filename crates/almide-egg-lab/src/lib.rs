@@ -75,17 +75,9 @@ define_language! {
         "matrix_mul" = MatrixMul([Id; 2]),
         "matrix_add" = MatrixAdd([Id; 2]),
         "matrix_scale" = MatrixScale([Id; 2]),
-        "matrix_gelu" = MatrixGelu([Id; 1]),
-        "matrix_softmax_rows" = MatrixSoftmaxRows([Id; 1]),
         "matrix_linear_row" = MatrixLinearRow([Id; 3]),
-        "matrix_layer_norm_rows" = MatrixLayerNormRows([Id; 4]),
 
         // ── Matrix fused targets (RHS of fusion rules) ────────────
-        "matrix_fused_gemm_bias_scale_gelu" = MatrixFusedGemmBiasScaleGelu([Id; 4]),
-        "matrix_attention_weights" = MatrixAttentionWeights([Id; 3]),
-        "matrix_scaled_dot_product_attention" = MatrixScaledDotProductAttention([Id; 4]),
-        "matrix_pre_norm_linear" = MatrixPreNormLinear([Id; 6]),
-        "matrix_linear_row_gelu" = MatrixLinearRowGelu([Id; 3]),
         "matrix_mul_scaled" = MatrixMulScaled([Id; 3]),
 
         // ── Default variant (atoms, identifiers) ──────────────────
@@ -189,9 +181,9 @@ impl CostFunction<AlmideExpr> for FusionCost {
         //     allocation; fusion avoiding even one of these is worth
         //     dozens of scalar ops.
         //   - Fused matrix ops: 110 each. One BLAS call + in-place
-        //     post-pass. Cheaper than the ~4-op chain it replaces
-        //     (the 4-op gemm_bias_scale_gelu chain = 4×200 = 800)
-        //     so extraction always prefers the fused form.
+        //     post-pass. Cheaper than the chain it replaces (the
+        //     2-op mul+scale chain = 2×200 = 400) so extraction always
+        //     prefers the fused form.
         //   - Fusion markers (compose / and-pred / lam): 1. Bookkeeping.
         //   - Atoms (Num / Symbol): 1.
         let self_cost: u64 = match enode {
@@ -203,16 +195,9 @@ impl CostFunction<AlmideExpr> for FusionCost {
             | AlmideExpr::FlatMap(_) | AlmideExpr::FilterMap(_) => 100,
 
             AlmideExpr::MatrixMul(_) | AlmideExpr::MatrixAdd(_)
-            | AlmideExpr::MatrixScale(_) | AlmideExpr::MatrixGelu(_)
-            | AlmideExpr::MatrixSoftmaxRows(_) | AlmideExpr::MatrixLinearRow(_)
-            | AlmideExpr::MatrixLayerNormRows(_) => 200,
+            | AlmideExpr::MatrixScale(_) | AlmideExpr::MatrixLinearRow(_) => 200,
 
-            AlmideExpr::MatrixFusedGemmBiasScaleGelu(_)
-            | AlmideExpr::MatrixAttentionWeights(_)
-            | AlmideExpr::MatrixScaledDotProductAttention(_)
-            | AlmideExpr::MatrixPreNormLinear(_)
-            | AlmideExpr::MatrixLinearRowGelu(_)
-            | AlmideExpr::MatrixMulScaled(_) => 110,
+            AlmideExpr::MatrixMulScaled(_) => 110,
 
             AlmideExpr::Compose(_) | AlmideExpr::AndPred(_) | AlmideExpr::Lam(_)
             | AlmideExpr::ComposeFold(_) | AlmideExpr::ComposeFlatmap(_)
@@ -322,70 +307,6 @@ mod tests {
     // `matrix_fusion_rules()`. The tests below prove saturation
     // reaches the fused form from the unfused chain for every rule,
     // which is the go-signal for migrating the pass to egg.
-
-    #[test]
-    fn matrix_gemm_bias_scale_gelu_fuses() {
-        let (best, _) = optimize(
-            "(matrix_gelu (matrix_scale (matrix_add (matrix_mul a b) bias) alpha))"
-        );
-        assert_eq!(
-            best.to_string(),
-            "(matrix_fused_gemm_bias_scale_gelu a b bias alpha)"
-        );
-    }
-
-    #[test]
-    fn matrix_attention_weights_fuses() {
-        let (best, _) = optimize(
-            "(matrix_softmax_rows (matrix_scale (matrix_mul q kt) scale))"
-        );
-        assert_eq!(
-            best.to_string(),
-            "(matrix_attention_weights q kt scale)"
-        );
-    }
-
-    /// Scaled dot-product attention. The outer rule depends on the
-    /// inner `attention_weights` fusion having already fired — this
-    /// is where phase-order-free saturation shines: both rewrites
-    /// live in the same e-graph and extraction picks the cheapest
-    /// form without us sequencing them manually.
-    #[test]
-    fn matrix_sdpa_fuses_through_intermediate() {
-        let (best, _) = optimize(
-            "(matrix_mul \
-                (matrix_softmax_rows (matrix_scale (matrix_mul q kt) scale)) \
-                v)"
-        );
-        assert_eq!(
-            best.to_string(),
-            "(matrix_scaled_dot_product_attention q kt v scale)"
-        );
-    }
-
-    #[test]
-    fn matrix_pre_norm_linear_fuses() {
-        let (best, _) = optimize(
-            "(matrix_linear_row \
-                (matrix_layer_norm_rows x gamma beta eps) \
-                w bias)"
-        );
-        assert_eq!(
-            best.to_string(),
-            "(matrix_pre_norm_linear x gamma beta eps w bias)"
-        );
-    }
-
-    #[test]
-    fn matrix_linear_row_gelu_fuses() {
-        let (best, _) = optimize(
-            "(matrix_gelu (matrix_linear_row x w bias))"
-        );
-        assert_eq!(
-            best.to_string(),
-            "(matrix_linear_row_gelu x w bias)"
-        );
-    }
 
     #[test]
     fn matrix_mul_scaled_rhs_fuses() {

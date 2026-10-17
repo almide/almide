@@ -226,7 +226,7 @@ pub const HOST_OPS: &[HostOp] = &[
 /// the audited matrix; a stdlib module outside this list must be wholly pure
 /// (`crate::purity::PURE_MODULES` — the contract test checks the partition).
 pub const CAP_MODULES: &[&str] =
-    &["args", "datetime", "env", "fs", "http", "io", "mem", "net", "process", "random", "testing", "zlib"];
+    &["args", "datetime", "env", "fs", "http", "io", "net", "process", "random", "testing", "zlib"];
 
 /// The capability-module intrinsics that are NEITHER a host op NOR pure: they
 /// are refused by the lowering outright, so they never reach a certificate.
@@ -235,12 +235,8 @@ pub const WALLED: &[(&str, &str, &str)] = &[
     ("net", "*", "sockets, unix sockets and shared memory: native-only, no WASI floor (the native-FFI class)"),
     ("process", "*", "child processes, signals and the exit / sleep / pid / env family: native-only; `exit` lowers as the ProcExit prim; stdin_lines runs on wasm through a self-host body, outside this subset"),
     ("http", "serve", "the listener: native-only, and its handler is a closure the host invokes"),
-    ("http", "openai_streaming_call", "a callback the host invokes per delta; not admitted"),
-    ("http", "anthropic_streaming_call", "a callback the host invokes per delta; not admitted"),
     ("http", "__call_start", "reached only through its wrapper row `http.start`"),
     ("http", "__request_stream_limited", "reached only through its wrapper row `http.request_stream_with_limits`"),
-    ("http", "__openai_streaming_limited", "the limited streaming twins: not admitted"),
-    ("http", "__anthropic_streaming_limited", "the limited streaming twins: not admitted"),
     ("testing", "assert_throws", "needs an unwinding catch the MIR rung has no form for"),
 ]
 ;

@@ -22,11 +22,6 @@ fn mk_mx(func: &str, args: Vec<IrExpr>) -> IrExpr {
 /// nodes are matrix-typed (matrix ops return Matrix).
 pub(super) fn desugar_matrix_fusion(method: &str, args: &[IrExpr]) -> Option<IrExpr> {
     match method {
-        "fused_gemm_bias_scale_gelu" if args.len() == 4 => Some(mk_mx("gelu", vec![mk_mx("scale", vec![mk_mx("add", vec![mk_mx("mul", vec![args[0usize].clone(), args[1usize].clone()]), args[2usize].clone()]), args[3usize].clone()])])),
-        "attention_weights" if args.len() == 3 => Some(mk_mx("softmax_rows", vec![mk_mx("scale", vec![mk_mx("mul", vec![args[0usize].clone(), args[1usize].clone()]), args[2usize].clone()])])),
-        "scaled_dot_product_attention" if args.len() == 4 => Some(mk_mx("mul", vec![mk_mx("attention_weights", vec![args[0usize].clone(), args[1usize].clone(), args[3usize].clone()]), args[2usize].clone()])),
-        "linear_row_gelu" if args.len() == 3 => Some(mk_mx("gelu", vec![mk_mx("linear_row", vec![args[0usize].clone(), args[1usize].clone(), args[2usize].clone()])])),
-        "pre_norm_linear" if args.len() == 6 => Some(mk_mx("linear_row", vec![mk_mx("layer_norm_rows", vec![args[0usize].clone(), args[1usize].clone(), args[2usize].clone(), args[3usize].clone()]), args[4usize].clone(), args[5usize].clone()])),
         "mul_scaled" if args.len() == 3 => Some(mk_mx("mul", vec![args[0usize].clone(), mk_mx("scale", vec![args[2usize].clone(), args[1usize].clone()])])),
         _ => None,
     }

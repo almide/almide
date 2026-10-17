@@ -579,38 +579,14 @@ impl Emitter<'_> {
             ("transpose", [m]) => self.lower_matrix_transpose(m)?,
             ("row_dot" | "dot_row", [m, r, v]) => self.lower_matrix_row_dot(m, r, v)?,
             // Kernel families, shape-grouped (name split in the subs).
-            ("gelu" | "softmax_rows", [m]) => {
-                return if func == "gelu" {
-                    self.lower_matrix_elementwise("gelu", m, None).map(Some)
-                } else {
-                    self.lower_matrix_softmax(m).map(Some)
-                }
-            }
-            ("pow", [m, e]) => {
-                return self.lower_matrix_elementwise("pow", m, Some(e)).map(Some)
-            }
-            ("rms_norm_rows", [m, g, eps]) => {
-                return self.lower_matrix_rms_norm(m, g, eps).map(Some)
-            }
+            ("pow", [m, e]) => return self.lower_matrix_elementwise_pow(m, e).map(Some),
             ("select_rows", [m, ids]) => {
                 return self.lower_matrix_select_rows(m, ids).map(Some)
             }
             (
-                "from_bytes_f32_le" | "from_bytes_f16_le" | "from_bytes_f64_le" | "select_rows_f32"
-                | "from_q1_0_bytes" | "select_rows_q1_0" | "select_rows_q8_0_dq",
+                "from_bytes_f32_le" | "from_bytes_f16_le" | "from_bytes_f64_le" | "select_rows_f32",
                 [a, b, c, d],
             ) => return self.lower_matrix_loader(func, a, b, c, d).map(Some),
-            ("rope_rotate", [x, nh, hd, th]) => {
-                return self.lower_matrix_rope(false, x, nh, hd, th, None).map(Some)
-            }
-            ("rope_rotate_at" | "rope_rotate_neox_at", [x, nh, hd, th, sp]) => {
-                let neox = func == "rope_rotate_neox_at";
-                return self.lower_matrix_rope(neox, x, nh, hd, th, Some(sp)).map(Some)
-            }
-            ("multi_head_attention" | "masked_multi_head_attention", [q, k, v, nh]) => {
-                let causal = func == "masked_multi_head_attention";
-                return self.lower_matrix_mha(causal, q, k, v, nh).map(Some)
-            }
             _ => return self.lower_matrix_call_b(func, args),
         };
         Ok(Some(out))
