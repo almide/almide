@@ -195,4 +195,25 @@ fn main() -> Unit = {
     "av_root_arr",
     json.set_path(rootarr, json.field(json.index(json.root(), 0), "y"), value.int(1)),
   )
+  // 8. The ROOT path (no steps): get yields the document, set replaces it, and
+  //    remove yields null — jq's `del(.)`. WASM's remove built the null in a
+  //    fresh block without writing its tag, so on a recycled block a reader
+  //    that switches on the tag (value.as_string / as_int) saw the stale tag
+  //    of whatever the block last held ("received Object") while native said
+  //    "received Null".
+  p_get("g_root", json.get_path(obj, json.root()))
+  // {"a":1,"b":2}
+  p_set("s_root", json.set_path(obj, json.root(), value.int(7)))
+  // 7
+  p_rm("r_root_obj", json.remove_path(obj, json.root()))
+  // null
+  p_rm("r_root_arr", json.remove_path(arr, json.root()))
+  // null
+  p_rm("r_root_scalar", json.remove_path(scalar, json.root()))
+  // null
+  println("r_root_as_str:${value.as_string(json.remove_path(deep, json.root()))}")
+  // err("expected Str, received Null")
+  println("r_root_as_int:${value.as_int(json.remove_path(obj, json.root()))}")
+  // err("expected Int, received Null"); next line: true
+  println("r_root_is_null:${json.remove_path(nested, json.root()) == value.null()}")
 }
