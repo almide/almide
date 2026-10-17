@@ -6,7 +6,13 @@
 // - `rc == 0` marks an immortal static block (the empty string, literals). It is never written and never freed.
 // Mutation goes through `unique()`, which copies a shared or static block first (`Rc::make_mut` semantics), then keeps `len` and `cap` in locals until the view ends. Writes through the byte pointer cannot force those to reload (docs/roadmap/active/adr-0013-string-sharing.md, "the unique view").
 //
-// Not `Send`/`Sync`: the count is not atomic. The fan boundary is a later stage.
+// Thread-shared blocks (ADR-0013 design point 3, Koka's negative count): a
+// block reachable from a value that crosses into a scoped thread carries the
+// `ALMIDE_STR_SHARED` bit, and its count then changes only atomically. An
+// unmarked block belongs to one thread, and its count is a plain load and
+// store (`Relaxed` atomics compile to ordinary moves). The compiler marks at
+// every boundary it emits (`almide_str_mark_reachable`); that marking is what
+// the `Send` / `Sync` impls below rely on.
 //
 // Splice discipline (as almide-rt-core): this file must also compile as flat text inside the runtime module, so there are no `crate::` paths and `use` lines appear at the top level only.
 
@@ -17,16 +23,42 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 use std::ptr::NonNull;
+use std::sync::atomic::{fence, AtomicUsize, Ordering as AtomicOrdering};
 
 /// The block header. The bytes follow it directly, at offset `ALMIDE_STR_HDR`.
 #[repr(C)]
 pub struct AlmideStrHeader {
-    rc: usize,
+    rc: AtomicUsize,
     len: usize,
     cap: usize,
 }
 
 const ALMIDE_STR_HDR: usize = std::mem::size_of::<AlmideStrHeader>();
+
+/// The thread-shared bit of `rc`: the block may be owned from several threads.
+const ALMIDE_STR_SHARED: usize = 1 << (usize::BITS - 1);
+
+/// Non-zero while a thread marks a value: every block cloned in that window
+/// is marked, so a clone of the value marks everything it reaches. A clone on
+/// another thread in the same window marks its own block too, which is only
+/// slower, never wrong.
+static ALMIDE_STR_MARKING: AtomicUsize = AtomicUsize::new(0);
+
+/// Marks every block reachable from `v` as thread-shared (Koka's
+/// `kk_block_mark_shared`), by cloning `v` inside a marking window. The
+/// compiler calls this on every value it hands to a scoped thread, and on
+/// every top-level value, before any other thread can reach it.
+pub fn almide_str_mark_reachable<T: Clone>(v: &T) {
+    struct Window;
+    impl Drop for Window {
+        fn drop(&mut self) {
+            ALMIDE_STR_MARKING.fetch_sub(1, AtomicOrdering::SeqCst);
+        }
+    }
+    ALMIDE_STR_MARKING.fetch_add(1, AtomicOrdering::SeqCst);
+    let _window = Window;
+    drop(v.clone());
+}
 
 /// An immortal block in static memory: a header with `rc == 0` and `N` bytes.
 /// Built at compile time by `AlmideStrStatic::new`, wrapped by `AlmideStr::from_static`.
@@ -46,7 +78,7 @@ impl<const N: usize> AlmideStrStatic<N> {
             bytes[i] = src[i];
             i += 1;
         }
-        AlmideStrStatic { header: AlmideStrHeader { rc: 0, len: N, cap: N }, bytes }
+        AlmideStrStatic { header: AlmideStrHeader { rc: AtomicUsize::new(0), len: N, cap: N }, bytes }
     }
 }
 
@@ -65,7 +97,7 @@ fn almide_str_alloc(cap: usize, len: usize) -> NonNull<AlmideStrHeader> {
     let raw = unsafe { alloc(layout) }.cast::<AlmideStrHeader>();
     let block = NonNull::new(raw).unwrap_or_else(|| handle_alloc_error(layout));
     // SAFETY: the block is freshly allocated, sized and aligned for the header.
-    unsafe { block.as_ptr().write(AlmideStrHeader { rc: 1, len, cap }) };
+    unsafe { block.as_ptr().write(AlmideStrHeader { rc: AtomicUsize::new(1), len, cap }) };
     block
 }
 
@@ -104,9 +136,26 @@ impl AlmideStr {
     }
 
     #[inline]
+    fn rc_cell(&self) -> &AtomicUsize {
+        // SAFETY: `ptr` always points at a live header, heap or static; only the count is borrowed.
+        unsafe { &(*self.ptr.as_ptr()).rc }
+    }
+
+    #[inline]
     fn rc(&self) -> usize {
-        // SAFETY: `ptr` always points at a live header, heap or static.
-        unsafe { (*self.ptr.as_ptr()).rc }
+        self.rc_cell().load(AtomicOrdering::Relaxed)
+    }
+
+    /// True when the block may be owned from several threads.
+    pub fn is_thread_shared(&self) -> bool {
+        self.rc() & ALMIDE_STR_SHARED != 0
+    }
+
+    /// Marks this block thread-shared. An immortal static block is never written, so it stays as it is.
+    pub fn mark_shared(&self) {
+        if self.rc() != 0 {
+            self.rc_cell().fetch_or(ALMIDE_STR_SHARED, AtomicOrdering::Relaxed);
+        }
     }
 
     #[inline]
@@ -129,12 +178,13 @@ impl AlmideStr {
     /// True when this handle is the block's only owner, so `unique()` will not copy.
     #[inline]
     pub fn is_unique(&self) -> bool {
-        self.rc() == 1
+        // `Acquire` pairs with the `Release` of another thread's last drop, so its reads of the bytes come before our writes.
+        self.rc_cell().load(AtomicOrdering::Acquire) & !ALMIDE_STR_SHARED == 1
     }
 
     /// The number of owners, or 0 for an immortal static block.
     pub fn ref_count(&self) -> usize {
-        self.rc()
+        self.rc() & !ALMIDE_STR_SHARED
     }
 
     /// True when both handles share one block.
@@ -225,9 +275,14 @@ impl Drop for AlmideStr {
         if rc == 0 {
             return;
         }
-        if rc > 1 {
-            // SAFETY: a heap header; the write touches only the count.
-            unsafe { (*self.ptr.as_ptr()).rc = rc - 1 };
+        if rc & ALMIDE_STR_SHARED != 0 {
+            if self.rc_cell().fetch_sub(1, AtomicOrdering::Release) != ALMIDE_STR_SHARED | 1 {
+                return;
+            }
+            // Every other owner's use of the block happens before the free.
+            fence(AtomicOrdering::Acquire);
+        } else if rc > 1 {
+            self.rc_cell().store(rc - 1, AtomicOrdering::Relaxed);
             return;
         }
         let layout = almide_str_layout(self.capacity());
@@ -240,17 +295,36 @@ impl Clone for AlmideStr {
     #[inline]
     fn clone(&self) -> Self {
         let rc = self.rc();
-        if rc != 0 {
-            // An overflowing count would free a live block; abort as `Rc` does.
-            let next = rc.checked_add(1).unwrap_or_else(|| std::process::abort());
-            // SAFETY: a heap header; the write touches only the count.
-            unsafe { (*self.ptr.as_ptr()).rc = next };
+        if rc == 0 {
+            return AlmideStr { ptr: self.ptr };
+        }
+        if rc & ALMIDE_STR_SHARED == 0 && ALMIDE_STR_MARKING.load(AtomicOrdering::Relaxed) == 0 {
+            // An overflowing count would reach the shared bit; abort as `Rc` does.
+            if rc + 1 >= ALMIDE_STR_SHARED {
+                std::process::abort();
+            }
+            self.rc_cell().store(rc + 1, AtomicOrdering::Relaxed);
+        } else {
+            self.mark_shared();
+            if self.rc_cell().fetch_add(1, AtomicOrdering::Relaxed) & !ALMIDE_STR_SHARED >= ALMIDE_STR_SHARED - 1 {
+                std::process::abort();
+            }
         }
         AlmideStr { ptr: self.ptr }
     }
 }
 
 /// A run of in-place edits on a uniquely owned block. `len`, `cap` and the byte pointer live in locals and are written back when the view drops.
+// SAFETY: an `AlmideStr` handed to another thread was marked first
+// (`almide_str_mark_reachable`, emitted at every thread boundary), so every
+// count change on its block is atomic, and its bytes are only written through
+// a unique view after an `Acquire` count of one. An unmarked block is never
+// reachable from two threads.
+unsafe impl Send for AlmideStr {}
+// SAFETY: as for `Send`; `&AlmideStr` only reads the bytes or clones, and a
+// clone of a marked block is atomic.
+unsafe impl Sync for AlmideStr {}
+
 pub struct UniqueStr<'a> {
     s: &'a mut AlmideStr,
     len: usize,
