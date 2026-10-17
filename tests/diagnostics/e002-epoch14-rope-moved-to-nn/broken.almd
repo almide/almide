@@ -1,0 +1,5 @@
+fn main() -> Unit = {
+  let x = matrix.ones(2, 4)
+  let r = matrix.rope_rotate(x, 2, 2, 10000.0)
+  println(int.to_string(matrix.cols(r)))
+}

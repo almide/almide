@@ -76,7 +76,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-038 | Sized-integer literals narrow to the declared field width | 0.24.0 | active | fixture | 4 |
 | C-039 | Type-changing map.map / set.map yield a collection of the new type | 0.24.0 | active | fixture | 2 |
 | C-040 | Codegen emit is host-architecture deterministic | 0.24.0 | active | fixture | 3 |
-| C-041 | Heap / RC primitives honour the Lean-certified Perceus discipline | 0.24.0 | active | lean | 7 |
+| C-041 | Heap / RC primitives honour the Lean-certified Perceus discipline | 0.24.0 | active | lean | 5 |
 | C-042 | fs preopen-dir scan + path resolution is observable-equivalent | 0.24.0 | active | fixture | 1 |
 | C-043 | A user type named Box coexists with recursive-enum heap indirection | 0.24.0 | active | fixture | 1 |
 | C-044 | Result/Option construction and matching are byte-identical | 0.24.0 | active | fixture | 6 |
@@ -196,7 +196,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-158 | A some/ok ctor over a scalar call or tuple payload materializes the real value, never a zeroed ctor | 0.32.0 | active | fixture | 5 |
 | C-159 | list.binary_search returns the same index on both targets for duplicate keys | 0.32.0 | active | fixture | 1 |
 | C-160 | Pure-Almide bundled stdlib modules link and run byte-identically on wasm | 0.34.4 | active | fixture | 1 |
-| C-161 | Matrix constructor dimensions clamp negatives and abort over a shared ceiling | 0.35.0 | active | fixture | 14 |
+| C-161 | Matrix constructor dimensions clamp negatives and abort over a shared ceiling | 0.35.0 | active | fixture | 12 |
 | C-162 | io.write / io.write_bytes emit in program order, interleaved with println | 0.35.0 | active | fixture | 1 |
 | C-163 | A heap-result if/match bound to a let/var executes the taken arm on both targets | 0.35.0 | active | fixture | 1 |
 | C-164 | List modifiers and suffix copies co-own tuple / record / nested-list elements | 0.35.0 | active | fixture | 1 |
@@ -233,7 +233,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-195 | Value-position variant match over the checked-conversion family executes | 0.38.1 | active | fixture | 1 |
 | C-196 | Call-stack exhaustion is a defined abort at a per-target depth | 0.41.0 | active | fixture | 1 |
 | C-197 | Linear-memory exhaustion is a resource limit with a defined abort | 0.41.0 | active | fixture | 10 |
-| C-198 | A head count below 1 is a defined abort, identically on both targets | 0.42.0 | active | fixture | 1 |
+| C-198 | The head-count-taking matrix entry points left the stdlib at dialect epoch 14 | 0.42.0 | active | fixture | 0 |
 | C-199 | A fan block joins every sibling and reports the first Err in list order | 0.42.0 | active | fixture | 2 |
 | C-200 | A trap in a fan sibling exits through the unified main-error abort, convergently | 0.42.0 | active | fixture | 2 |
 | C-201 | An Option combinator's tuple result is materializable as an owned element for every element-type combination | 0.44.0 | active | fixture | 1 |
@@ -258,13 +258,13 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-220 | fs streaming line walkers fold/each with read_lines line semantics | 0.56.1 | active | fixture | 2 |
 | C-221 | An effect fn-typed slot admits pure and fallible lambdas with one carrier semantics | 0.56.1 | active | fixture | 4 |
 | C-222 | An expression-nested scalar unwrap propagates the err identically on both legs | 0.56.1 | active | fixture | 1 |
-| C-223 | Matrix transcendentals compute through the vendored musl-libm, not the platform one | 0.56.1 | active | fixture | 9 |
+| C-223 | Matrix arithmetic computes through the vendored musl-libm and native's product order, not the platform's | 0.56.1 | active | fixture | 2 |
 | C-224 | if let / guard let bind and release heap payloads identically on both targets | 0.56.1 | active | fixture | 1 |
 | C-225 | fs.read_lines materializes a file's lines identically on both targets | 0.56.2 | active | fixture | 2 |
 | C-226 | A mut parameter crossing a call boundary mutates the caller's data on both targets | 0.56.2 | active | fixture | 14 |
 | C-227 | The fs metadata and composition family answers identically on both targets | 0.56.2 | active | fixture | 1 |
 | C-228 | The fs composition family and the matrix row selectors answer identically on both targets | 0.56.2 | active | fixture | 4 |
-| C-229 | A selected row past the byte buffer is the all-zero row on both targets | 0.57.1 | active | fixture | 11 |
+| C-229 | A selected row past the byte buffer is the all-zero row on both targets | 0.57.1 | active | fixture | 5 |
 | C-230 | The flight reference PID kernel runs identically on both targets | 0.57.1 | active | fixture | 1 |
 | C-231 | Integer and boolean literal forms evaluate identically on both targets | 0.57.1 | active | fixture | 1 |
 | C-232 | Boolean literals and their display form are identical on both targets | 0.57.1 | active | fixture | 1 |
@@ -305,7 +305,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-267 | The binary operator surface evaluates identically on both targets, including the signed division rulings | 0.57.1 | active | fixture | 1 |
 | C-268 | A `_` in call-argument position is a check-time E046, identically on both targets | 0.57.1 | active | fixture | 0 |
 | C-269 | A nested variant match bound to a let executes identically on both targets; a constructor pattern the subject lacks is a check-time E048 on both | 0.57.1 | active | fixture | 1 |
-| C-270 | The shared fp16 block scale decodes the whole fp16 domain identically on both targets | 0.57.1 | active | fixture | 1 |
+| C-270 | A stdlib spelling removed at dialect epoch 14 is a check-time error that names where it went | 0.57.1 | active | fixture | 0 |
 | C-271 | `carrier ?? call!` yields the fallback's PAYLOAD, never its Result block, for a handle-carrying payload on both targets | 0.57.1 | active | fixture | 1 |
 | C-272 | `fs.list_dir` returns EVERY entry on both targets, whatever the directory's size, sorted by bytes | 0.57.1 | active | fixture | 1 |
 | C-273 | The fs write-side floors answer with native's std::io Display text, and fd_write's errno is not dropped | 0.57.1 | active | fixture | 1 |
@@ -313,7 +313,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-275 | The http response-header surface answers identically on both targets, with case-insensitive field names | 0.57.1 | active | fixture | 1 |
 | C-276 | A String-key `list.sort_by` over HEAP elements orders and co-owns identically on both targets | 0.57.1 | active | fixture | 1 |
 | C-277 | A return-only-generic constructor pinned by unification builds and runs identically on both targets even when const-folding erases the pinning context | 0.57.1 | active | fixture | 1 |
-| C-278 | The rope head geometry must fit the row: exceeding aborts identically, the uncovered tail copies through identically | 0.57.1 | active | fixture | 2 |
+| C-278 | The rope family left the stdlib at dialect epoch 14 | 0.57.1 | active | fixture | 0 |
 | C-279 | A zero-trip loop performs none of its body's effects or traps on either target | 0.57.1 | active | fixture | 1 |
 | C-280 | The kernel-conformance family behaves per the machine-checked λ_almd semantics on both targets | 0.57.1 | active | fixture | 1 |
 | C-281 | Bare Result constructors and parameter-passthrough effect tails run identically per the kernel semantics | 0.57.1 | active | fixture | 3 |
@@ -388,7 +388,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-350 | process.exit passes the exit status 0..=255 through, rejects any other code, and a WASI preview-1 build walls 126..=255 | 0.63.0 | active | fixture | 3 |
 | C-351 | literal process exit codes are checked against the exit-status domain | 0.63.0 | active | fixture | 0 |
 | C-352 | Or-pattern guards are evaluated once per matching alternative, in source order | 0.63.0 | active | fixture | 3 |
-| C-353 | A matrix kernel's shape precondition is a defined abort on both targets | 0.63.0 | active | fixture | 2 |
+| C-353 | A matrix kernel's shape precondition is a defined abort on both targets | 0.63.0 | active | fixture | 1 |
 | C-354 | A matrix row range clamps like list.slice and a part count of 0 or less is the empty result | 0.63.0 | active | fixture | 1 |
 | C-355 | matrix.neg is IEEE negation, so the sign of a zero flips on both targets | 0.63.0 | active | fixture | 1 |
 | C-356 | A non-finite Float in a Value stringifies as the JSON null on every leg | 0.63.0 | active | fixture | 1 |
