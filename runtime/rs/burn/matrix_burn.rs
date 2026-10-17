@@ -46,10 +46,6 @@ extern "C" {
         beta: f32,
         c: *mut f32, ldc: i32,
     );
-    // vForce vectorized elementwise exp — 10-30× faster than scalar .exp()
-    // on Apple Silicon. Critical for softmax throughput at seq ≥ 128.
-    fn vvexpf(y: *mut f32, x: *const f32, n: *const i32);
-    fn vvexp(y: *mut f64, x: *const f64, n: *const i32);
 }
 
 #[derive(Clone)]
@@ -84,15 +80,13 @@ fn wrap(t: Tensor<B, 2>) -> AlmideMatrix { AlmideMatrix::Burn(t) }
 
 // ── Fused-matmul helpers ────────────────────────────────────────────
 //
-// The fused runtime fns below (fused_gemm_bias_scale_gelu,
-// attention_weights, scaled_dot_product_attention, linear_row_gelu,
-// pre_norm_linear, swiglu_gate) all share the same skeleton:
+// The fused runtime fns (the NN fusions that used these left the stdlib
+// at dialect epoch 14 for package almide/nn) share the same skeleton:
 //
 //   1. Build a fresh output buffer, optionally seeded from `bias` / a
 //      previous result for `β != 0` GEMM use.
 //   2. Call `cblas_{d,s}gemm` with a particular `α / β / trans` combo.
-//   3. Sweep the result once to apply an element-wise post-op (gelu,
-//      softmax, silu⊙up, bias-scale).
+//   3. Sweep the result once to apply an element-wise post-op.
 //
 // These helpers pull step 1+2 out so each fused fn only has to declare
 // its GEMM config and write its post loop. The helper signatures are
@@ -216,65 +210,6 @@ pub fn run_gemm_f32(cfg: GemmF32<'_>) -> Vec<f32> {
         );
     }
     c
-}
-
-/// In-place row-wise stable softmax over an `m × n` row-major buffer.
-/// Uses vForce's `vvexp` for vectorised exponential — critical for
-/// softmax throughput at seq ≥ 128.
-pub fn softmax_rows_inplace_f64(buf: &mut [f64], m: usize, n: usize) {
-    let n_i32 = n as i32;
-    let dst = buf.as_mut_ptr();
-    unsafe {
-        for i in 0..m {
-            let base = i * n;
-            let mut max = f64::NEG_INFINITY;
-            for j in 0..n {
-                let x = *dst.add(base + j);
-                if x > max { max = x; }
-            }
-            for j in 0..n { *dst.add(base + j) -= max; }
-            vvexp(dst.add(base), dst.add(base), &n_i32);
-            let mut sum = 0.0f64;
-            for j in 0..n { sum += *dst.add(base + j); }
-            let inv = 1.0 / sum;
-            for j in 0..n { *dst.add(base + j) *= inv; }
-        }
-    }
-}
-
-pub fn softmax_rows_inplace_f32(buf: &mut [f32], m: usize, n: usize) {
-    let n_i32 = n as i32;
-    for i in 0..m {
-        let row = &mut buf[i * n..(i + 1) * n];
-        let max = row.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-        for v in row.iter_mut() { *v -= max; }
-        unsafe { vvexpf(row.as_mut_ptr(), row.as_ptr(), &n_i32); }
-        let sum: f32 = row.iter().sum();
-        let inv = 1.0f32 / sum;
-        for v in row.iter_mut() { *v *= inv; }
-    }
-}
-
-/// Tanh-based GELU approximation: `0.5·x·(1 + tanh(√(2/π)·(x + 0.044715·x³)))`.
-/// Applied in place, one coefficient choice for both f64 and f32.
-pub fn gelu_inplace_f64(buf: &mut [f64]) {
-    const K: f64 = 0.7978845608028654;
-    for v in buf.iter_mut() {
-        let x = *v;
-        let x3 = x * x * x;
-        let inner = K * (x + 0.044715 * x3);
-        *v = 0.5 * x * (1.0 + inner.tanh());
-    }
-}
-
-pub fn gelu_inplace_f32(buf: &mut [f32]) {
-    const K: f32 = 0.7978845608028654;
-    for v in buf.iter_mut() {
-        let x = *v;
-        let x3 = x * x * x;
-        let inner = K * (x + 0.044715 * x3);
-        *v = 0.5 * x * (1.0 + inner.tanh());
-    }
 }
 
 impl AlmideMatrix {

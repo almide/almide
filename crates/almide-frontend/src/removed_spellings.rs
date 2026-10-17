@@ -128,7 +128,8 @@ pub fn removed_module_hint(module: &str) -> Option<String> {
         return None;
     }
     let names: Vec<String> = rows.iter().map(|r| format!("`{}`", r.from)).collect();
-    let why = repair.strip_prefix("delete the call").unwrap_or(repair).trim_start_matches([' ', ':', ',', ';', '—']);
+    // The reason is what follows the repair's first `: `.
+    let why = repair.split_once(": ").map(|(_, why)| why).unwrap_or("");
     Some(format!(
         "the stdlib `{module}` module was removed at dialect epoch {} ({}): delete the import and the calls{}",
         first.epoch,

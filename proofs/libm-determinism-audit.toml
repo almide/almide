@@ -25,13 +25,6 @@
 # contract or issue ref, which is exactly what #1197 found missing.
 
 [[site]]
-file = "crates/almide-kernel/src/q1_0.rs"
-fn = "tree_order_error_is_within_the_proven_bound"
-calls = 1
-verdict = "TEST_ONLY"
-why = "A #[test] checking the q1_0 tree-order error bound; never compiled into a shipped program."
-
-[[site]]
 file = "runtime/rs/src/bytes.rs"
 fn = "f16_bits_to_f64"
 calls = 2
