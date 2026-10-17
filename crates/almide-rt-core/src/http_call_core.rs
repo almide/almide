@@ -212,36 +212,58 @@ pub fn http_call_decode(f: &mut HttpCallFraming, raw: &mut Vec<u8>, out: &mut Ve
             out.append(raw);
             Ok(false)
         }
-        HttpCallFraming::Chunked { remaining, awaiting_size } => loop {
-            if !*awaiting_size && *remaining == 0 {
-                // The CRLF that closes a chunk's data.
-                if raw.len() < 2 {
-                    return Ok(false);
-                }
-                if raw.starts_with(b"\r\n") {
-                    raw.drain(..2);
-                }
-                *awaiting_size = true;
-            }
-            if *awaiting_size {
-                let Some(nl) = raw.windows(2).position(|w| w == b"\r\n") else {
-                    return Ok(false);
-                };
-                let size = http_chunk_size(&raw[..nl])?;
-                raw.drain(..nl + 2);
-                if size == 0 {
-                    return Ok(true);
-                }
-                *remaining = size;
-                *awaiting_size = false;
-            }
-            let take = (*remaining).min(raw.len());
-            out.extend(raw.drain(..take));
-            *remaining -= take;
-            if *remaining > 0 {
+        HttpCallFraming::Chunked { remaining, awaiting_size } => {
+            // Walk the buffer with a cursor and drop what was consumed ONCE:
+            // draining each size line, data run and CRLF off the front moved
+            // the rest of the buffer per chunk — bytes × chunks (the
+            // http.request_stream inspection, 2026-10-17).
+            let mut at = 0;
+            let done = http_call_decode_chunks(remaining, awaiting_size, raw, &mut at, out);
+            raw.drain(..at);
+            done
+        }
+    }
+}
+
+/// The chunked framing from `raw[*at..]` on: decoded data appended to `out`,
+/// `*at` advanced past everything consumed; `Ok(true)` at the terminal chunk.
+fn http_call_decode_chunks(
+    remaining: &mut usize,
+    awaiting_size: &mut bool,
+    raw: &[u8],
+    at: &mut usize,
+    out: &mut Vec<u8>,
+) -> Result<bool, String> {
+    loop {
+        if !*awaiting_size && *remaining == 0 {
+            // The CRLF that closes a chunk's data.
+            if raw.len() - *at < 2 {
                 return Ok(false);
             }
-        },
+            if raw[*at..].starts_with(b"\r\n") {
+                *at += 2;
+            }
+            *awaiting_size = true;
+        }
+        if *awaiting_size {
+            let Some(nl) = raw[*at..].windows(2).position(|w| w == b"\r\n") else {
+                return Ok(false);
+            };
+            let size = http_chunk_size(&raw[*at..*at + nl])?;
+            *at += nl + 2;
+            if size == 0 {
+                return Ok(true);
+            }
+            *remaining = size;
+            *awaiting_size = false;
+        }
+        let take = (*remaining).min(raw.len() - *at);
+        out.extend_from_slice(&raw[*at..*at + take]);
+        *at += take;
+        *remaining -= take;
+        if *remaining > 0 {
+            return Ok(false);
+        }
     }
 }
 
