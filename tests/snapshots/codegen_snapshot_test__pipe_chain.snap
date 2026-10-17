@@ -674,7 +674,18 @@ impl AlmideFanClock {
             Some((e, _)) if e.skip.load(Ordering::Relaxed) == ALMIDE_FAN_PROBE
                 && e.skip.compare_exchange(ALMIDE_FAN_PROBE, 0, Ordering::Relaxed, Ordering::Relaxed).is_ok() => (1, true),
             Some((e, t)) => {
-                let skipped = e.skip.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |k| (k != ALMIDE_FAN_PROBE).then(|| k.checked_sub(1)).flatten()).is_ok();
+                // a CAS loop, not `fetch_update`: newer toolchains deprecate
+                // that spelling, and generated programs build warning-free
+                let mut k = e.skip.load(Ordering::Relaxed);
+                let skipped = loop {
+                    if k == 0 || k == ALMIDE_FAN_PROBE {
+                        break false;
+                    }
+                    match e.skip.compare_exchange_weak(k, k - 1, Ordering::Relaxed, Ordering::Relaxed) {
+                        Ok(_) => break true,
+                        Err(now) => k = now,
+                    }
+                };
                 (almide_rt_fan_plan(n, Some(t)), !skipped)
             }
             None => (almide_rt_fan_plan(n, None), true),
@@ -827,10 +838,11 @@ fn almide_fan_deal<'a, T: Send + 'a>(blocks: Vec<T>, workers: usize, work: impl 
         next: std::sync::atomic::AtomicUsize::new(0),
         len: queue.cells.len(),
         caller: std::thread::current(),
+        parking: std::sync::atomic::AtomicBool::new(false),
+        counted: std::sync::atomic::AtomicBool::new(false),
         panics: std::sync::Mutex::new(Vec::new()),
         take: std::cell::UnsafeCell::new(None),
     };
-    let counter = &gate.next;
     let me: &AlmideFanGate = &gate;
     let take = || {
         // restored on unwind too: a stale gate here would become the
@@ -841,24 +853,35 @@ fn almide_fan_deal<'a, T: Send + 'a>(blocks: Vec<T>, workers: usize, work: impl 
                 ALMIDE_FAN_IN_GATE.with(|g| g.set(self.0));
             }
         }
+        // a thread that arrives after the last block was dealt does nothing,
+        // so it has nothing to undo either (see `almide_fan_help`)
+        let Some(first) = queue.take(me.draw()) else { return false };
         let _restore = Restore(ALMIDE_FAN_IN_GATE.with(|g| g.replace(me as *const AlmideFanGate)));
-        let mut next = std::iter::from_fn(|| queue.take(counter.fetch_add(1, Ordering::Relaxed)));
+        let mut next = std::iter::once(first).chain(std::iter::from_fn(|| queue.take(me.draw())));
         work(&mut next);
+        true
     };
-    let take: &(dyn Fn() + Sync + '_) = &take;
+    let take: &(dyn Fn() -> bool + Sync + '_) = &take;
     // SAFETY (the lifetime erasure): a helper calls `take` only from inside
     // the gate, which it can enter only while the gate is published; this
     // function withdraws it and waits until no helper is inside before it
     // returns — so no call outlives the borrow. Written before publishing.
     unsafe {
-        *gate.take.get() = Some(std::mem::transmute::<*const (dyn Fn() + Sync + '_), *const (dyn Fn() + Sync + 'static)>(take as *const _));
+        *gate.take.get() = Some(std::mem::transmute::<*const (dyn Fn() -> bool + Sync + '_), *const (dyn Fn() -> bool + Sync + 'static)>(take as *const _));
     }
     let _running = AlmideFanRunning::enter();
+    // counted before it is visible: no thread can draw past its last block
+    // before the count includes it
+    gate.counted.store(true, Ordering::SeqCst);
+    ALMIDE_FAN_OPEN_BLOCKS.fetch_add(1, Ordering::SeqCst);
     let slot = almide_fan_publish(&gate);
-    if slot.is_some() {
+    if slot.is_none() {
+        gate.counted.store(false, Ordering::SeqCst);
+        ALMIDE_FAN_OPEN_BLOCKS.fetch_sub(1, Ordering::SeqCst);
+    } else {
         almide_fan_pool_wake(workers.saturating_sub(1));
     }
-    let mine = std::panic::catch_unwind(std::panic::AssertUnwindSafe(take));
+    let mine = std::panic::catch_unwind(std::panic::AssertUnwindSafe(take)).map(|_| ());
     // the elements this thread ran printed into its own buffer: out before
     // the offer returns, as a helper's are
     almide_stdout_flush();
@@ -887,7 +910,15 @@ fn almide_fan_deal<'a, T: Send + 'a>(blocks: Vec<T>, workers: usize, work: impl 
             }
             false
         },
-        almide_fan_park,
+        || {
+            // a helper that leaves after this sees `parking` and wakes this
+            // thread; one that read it just before sleeps it until the park
+            // times out (1 ms)
+            gate.parking.store(true, Ordering::SeqCst);
+            if gate.inside.load(Ordering::SeqCst) != 0 {
+                almide_fan_park();
+            }
+        },
     );
     let mut outcomes = vec![mine];
     outcomes.append(&mut gate.panics.lock().unwrap_or_else(|e| e.into_inner()));
@@ -962,12 +993,18 @@ struct AlmideFanGate {
     /// The next block to deal, of `len`.
     next: std::sync::atomic::AtomicUsize,
     len: usize,
-    /// Woken by the helper that leaves last.
+    /// The offer is counted in `ALMIDE_FAN_OPEN_BLOCKS` (it was published).
+    counted: std::sync::atomic::AtomicBool,
+    /// Woken by the helper that leaves last, once `parking` says it sleeps.
     caller: std::thread::Thread,
+    /// The caller has polled for `ALMIDE_FAN_SPIN` and may be parked. Until
+    /// then no helper clones `caller`: seven helpers cloning and dropping one
+    /// handle per offer contended on its count.
+    parking: std::sync::atomic::AtomicBool,
     panics: std::sync::Mutex<Vec<std::thread::Result<()>>>,
     /// The offer's taking loop, borrowed from `almide_fan_deal`'s frame
     /// (see the SAFETY note there).
-    take: std::cell::UnsafeCell<Option<*const (dyn Fn() + Sync)>>,
+    take: std::cell::UnsafeCell<Option<*const (dyn Fn() -> bool + Sync)>>,
 }
 
 // SAFETY: `take` points at a `Sync` closure, written before the gate is
@@ -976,6 +1013,17 @@ struct AlmideFanGate {
 unsafe impl Sync for AlmideFanGate {}
 
 impl AlmideFanGate {
+    /// The next block's index. The draw that first runs past the last block
+    /// takes the offer out of `ALMIDE_FAN_OPEN_BLOCKS`.
+    fn draw(&self) -> usize {
+        use std::sync::atomic::Ordering;
+        let i = self.next.fetch_add(1, Ordering::Relaxed);
+        if i == self.len && self.counted.load(Ordering::SeqCst) {
+            ALMIDE_FAN_OPEN_BLOCKS.fetch_sub(1, Ordering::SeqCst);
+        }
+        i
+    }
+
     /// The outermost offer this one was made inside (itself if none).
     fn root(&self) -> &AlmideFanGate {
         let mut g = self;
@@ -1012,10 +1060,18 @@ impl AlmideFanRunning {
 
     /// A pool thread's entry: `None` when the cores are all taken.
     fn enter_if_free() -> Option<Self> {
+        use std::sync::atomic::Ordering;
         let cores = almide_rt_list_par_workers(usize::MAX);
-        ALMIDE_FAN_RUNNING
-            .fetch_update(std::sync::atomic::Ordering::SeqCst, std::sync::atomic::Ordering::SeqCst, |r| (r < cores).then_some(r + 1))
-            .ok()?;
+        let mut r = ALMIDE_FAN_RUNNING.load(Ordering::SeqCst);
+        loop {
+            if r >= cores {
+                return None;
+            }
+            match ALMIDE_FAN_RUNNING.compare_exchange_weak(r, r + 1, Ordering::SeqCst, Ordering::SeqCst) {
+                Ok(_) => break,
+                Err(now) => r = now,
+            }
+        }
         ALMIDE_FAN_DEPTH.with(|d| d.set(d.get() + 1));
         Some(AlmideFanRunning)
     }
@@ -1037,16 +1093,21 @@ fn almide_fan_help(gate: &AlmideFanGate) {
     // and the closure is alive; it was written before the gate was published.
     let take = unsafe { &*(*gate.take.get()).expect("set before the gate is published") };
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(take));
-    almide_fan_adopt(None);
-    almide_stdout_flush();
-    if outcome.is_err() {
-        gate.panics.lock().unwrap_or_else(|e| e.into_inner()).push(outcome);
+    // a helper that took a block leaves no element's sink or output behind
+    if !matches!(outcome, Ok(false)) {
+        almide_fan_adopt(None);
+        almide_stdout_flush();
+    }
+    if let Err(panic) = outcome {
+        gate.panics.lock().unwrap_or_else(|e| e.into_inner()).push(Err(panic));
     }
     // after the decrement the caller may return and free the gate: wake it
     // through a handle cloned before
-    let caller = gate.caller.clone();
+    let caller = gate.parking.load(Ordering::SeqCst).then(|| gate.caller.clone());
     if gate.inside.fetch_sub(1, Ordering::SeqCst) == 1 {
-        caller.unpark();
+        if let Some(caller) = caller {
+            caller.unpark();
+        }
     }
 }
 
@@ -1065,16 +1126,20 @@ const ALMIDE_FAN_SLOT_EMPTY: AlmideFanSlot = AlmideFanSlot {
 };
 /// Offers open at once beyond this run on their callers alone.
 static ALMIDE_FAN_SLOTS: [AlmideFanSlot; 64] = [ALMIDE_FAN_SLOT_EMPTY; 64];
-/// Slots in use, and one past the highest slot ever used (the scan bound).
-static ALMIDE_FAN_PUBLISHED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+/// One past the highest slot ever used (the scan bound).
 static ALMIDE_FAN_HIGH: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+/// Published offers with a block left to deal. A polling thread reads only
+/// this until it is non-zero: with every thread reading and writing the
+/// slots' and the budget's counters while an offer is published (after its
+/// blocks were all dealt, too), an empty forced-parallel offer cost ~3 us on
+/// the Intel VM.
+static ALMIDE_FAN_OPEN_BLOCKS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 fn almide_fan_publish(gate: &AlmideFanGate) -> Option<usize> {
     use std::sync::atomic::Ordering;
     let p = gate as *const AlmideFanGate as *mut AlmideFanGate;
     let i = ALMIDE_FAN_SLOTS.iter().position(|s| s.gate.compare_exchange(std::ptr::null_mut(), p, Ordering::SeqCst, Ordering::Relaxed).is_ok())?;
     ALMIDE_FAN_HIGH.fetch_max(i + 1, Ordering::SeqCst);
-    ALMIDE_FAN_PUBLISHED.fetch_add(1, Ordering::SeqCst);
     Some(i)
 }
 
@@ -1082,7 +1147,6 @@ fn almide_fan_withdraw(i: usize) {
     use std::sync::atomic::Ordering;
     let slot = &ALMIDE_FAN_SLOTS[i];
     slot.gate.store(std::ptr::null_mut(), Ordering::SeqCst);
-    ALMIDE_FAN_PUBLISHED.fetch_sub(1, Ordering::SeqCst);
     while slot.readers.load(Ordering::SeqCst) > 0 {
         std::hint::spin_loop();
     }
@@ -1092,7 +1156,7 @@ fn almide_fan_withdraw(i: usize) {
 /// `which` accepts.
 fn almide_fan_steal(which: impl Fn(&AlmideFanGate) -> bool) -> Option<&'static AlmideFanGate> {
     use std::sync::atomic::Ordering;
-    if ALMIDE_FAN_PUBLISHED.load(Ordering::Relaxed) == 0 {
+    if ALMIDE_FAN_OPEN_BLOCKS.load(Ordering::Relaxed) == 0 {
         return None;
     }
     for slot in &ALMIDE_FAN_SLOTS[..ALMIDE_FAN_HIGH.load(Ordering::Relaxed)] {
@@ -1167,7 +1231,7 @@ fn almide_fan_hand_loop(hand: &'static AlmideFanHand) {
         let mut running = None;
         almide_fan_wait(
             || {
-                if ALMIDE_FAN_PUBLISHED.load(Ordering::Relaxed) == 0 {
+                if ALMIDE_FAN_OPEN_BLOCKS.load(Ordering::Relaxed) == 0 {
                     return false;
                 }
                 let Some(r) = AlmideFanRunning::enter_if_free() else {
@@ -1186,7 +1250,7 @@ fn almide_fan_hand_loop(hand: &'static AlmideFanHand) {
                 // that counted this thread finds it published-aware
                 polling.fetch_sub(1, Ordering::SeqCst);
                 hand.parked.store(true, Ordering::SeqCst);
-                if ALMIDE_FAN_PUBLISHED.load(Ordering::SeqCst) == 0 {
+                if ALMIDE_FAN_OPEN_BLOCKS.load(Ordering::SeqCst) == 0 {
                     std::thread::park();
                 }
                 hand.parked.store(false, Ordering::SeqCst);
