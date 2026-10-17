@@ -21,9 +21,9 @@ pub fn almide_rt_fan_map<A, B>(
     items: Vec<A>,
     f: std::rc::Rc<dyn Fn(A) -> Result<B, AlmideString>>,
 ) -> Result<Vec<B>, AlmideString> {
-    let __almide_r: Result<Vec<B>, String> = (|| {
+    let __almide_r: Result<Vec<B>, AlmideString> = (|| {
         let mut out = Vec::with_capacity(items.len());
-        let mut first_err: Option<String> = None;
+        let mut first_err: Option<AlmideString> = None;
         for item in items {
             match (f(item), &first_err) {
                 (Ok(v), None) => out.push(v),
@@ -65,24 +65,26 @@ pub fn almide_rt_fan_map_par<A: Send + Sync + Clone, B: Send, F: Fn(A) -> Result
     items: Vec<A>,
     f: F,
 ) -> Result<Vec<B>, AlmideString> {
+    // The slots cross threads, so an element's error is held as an owned
+    // `String` (Send) and converted once at the boundary.
     let __almide_r: Result<Vec<B>, String> = (|| {
         let mut slots: Vec<Option<Result<B, String>>> = (0..items.len()).map(|_| None).collect();
         if items.len() < 2 || almide_rt_list_par_sequential() {
             for (slot, item) in slots.iter_mut().zip(items) {
-                *slot = Some(f(item));
+                *slot = Some(f(item).map_err(String::from));
             }
             return almide_fan_map_settle_slots(slots);
         }
         // #3341: the cost model (list.rs `almide_rt_fan_plan`) decides from the
         // site's last measured time per element whether this offer is worth a
         // parallel run; every offer records what its elements took.
-        let site = almide_rt_fan_map_par::<A, B, F> as fn(Vec<A>, F) -> Result<Vec<B>, String> as usize;
+        let site = almide_rt_fan_map_par::<A, B, F> as fn(Vec<A>, F) -> Result<Vec<B>, AlmideString> as usize;
         let n = items.len();
         let (workers, clock) = AlmideFanClock::offer(site, n);
         if workers < 2 {
             clock.calling(|| {
                 for (slot, item) in slots.iter_mut().zip(items) {
-                    *slot = Some(f(item));
+                    *slot = Some(f(item).map_err(String::from));
                 }
                 ((), n)
             });
@@ -99,7 +101,7 @@ pub fn almide_rt_fan_map_par<A: Send + Sync + Clone, B: Send, F: Fn(A) -> Result
             let elems = blocks.flat_map(|(b, (chunk, out))| out.iter_mut().zip(chunk.iter()).enumerate().map(move |(i, e)| (b * block + i, e)));
             clock.worker(elems, |(index, (slot, item))| {
                 let _elem = almide_fan_enter(&group, index);
-                *slot = Some(f(item.clone()));
+                *slot = Some(f(item.clone()).map_err(String::from));
                 Some(true)
             });
         }));
@@ -132,10 +134,10 @@ fn almide_fan_map_settle_slots<B>(slots: Vec<Option<Result<B, String>>>) -> Resu
 pub fn almide_rt_fan_race<T>(
     thunks: Vec<impl Fn() -> Result<T, AlmideString>>,
 ) -> Result<T, AlmideString> {
-    let __almide_r: Result<T, String> = (|| {
+    let __almide_r: Result<T, AlmideString> = (|| {
         match thunks.into_iter().next() {
             Some(thunk) => thunk(),
-            None => Err("fan.race: no candidates".to_string()),
+            None => Err(AlmideString::from("fan.race: no candidates")),
         }
     })();
     __almide_r.map_err(Into::into)
@@ -148,13 +150,13 @@ pub fn almide_rt_fan_race<T>(
 pub fn almide_rt_fan_any<T>(
     thunks: Vec<impl Fn() -> Result<T, AlmideString>>,
 ) -> Result<T, AlmideString> {
-    let __almide_r: Result<T, String> = (|| {
+    let __almide_r: Result<T, AlmideString> = (|| {
         for thunk in &thunks {
             if let Ok(val) = thunk() {
                 return Ok(val);
             }
         }
-        Err("fan.any: all candidates failed".to_string())
+        Err(AlmideString::from("fan.any: all candidates failed"))
     })();
     __almide_r.map_err(Into::into)
 }
@@ -167,13 +169,13 @@ pub fn almide_rt_fan_any_map<A, B>(
     items: Vec<A>,
     f: std::rc::Rc<dyn Fn(A) -> Result<B, AlmideString>>,
 ) -> Result<B, AlmideString> {
-    let __almide_r: Result<B, String> = (|| {
+    let __almide_r: Result<B, AlmideString> = (|| {
         for item in items {
             if let Ok(v) = f(item) {
                 return Ok(v);
             }
         }
-        Err("fan.any: all candidates failed".to_string())
+        Err(AlmideString::from("fan.any: all candidates failed"))
     })();
     __almide_r.map_err(Into::into)
 }
@@ -193,12 +195,14 @@ pub fn almide_rt_fan_settle<T: Send + 'static>(
             .enumerate()
             .map(|(i, thunk)| s.spawn(move || {
                 let _elem = almide_fan_enter(group, i);
-                thunk()
+                // The error crosses the thread as an owned `String` (Send);
+                // the identity while the alias is `String`.
+                thunk().map_err(String::from)
             }))
             .collect();
         handles
             .into_iter()
-            .map(almide_fan_join)
+            .map(|h| almide_fan_join(h).map_err(AlmideString::from))
             .collect()
     })
 }
