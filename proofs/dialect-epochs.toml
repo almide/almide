@@ -169,6 +169,47 @@ breaks = [
   "a call to an `args` reader is typed `Result[T, String]` and is propagated with `!` like any Almide-bodied effect fn's: `args.flag(\"verbose\")!`, `args.option(\"out\")! ?? \"-\"`; without it the value is a Result (E041 on a `let`, a type mismatch as an argument)",
 ]
 
+[[epoch]]
+n = 14
+since = "0.68.0"
+name = "domain-kernels-leave-the-stdlib"
+summary = "Thirty-three stdlib functions leave the language with no deprecation window (owner ruling 2026-10-17). The four LLM-provider streaming clients move to package almide/llm, built on the generic `http.request_stream` that stays; the twenty-five neural-network kernels of `matrix` move to package almide/nn, pure Almide over the generic `matrix` API that stays; the arena checkpoints `mem.save`/`mem.restore` (the whole `mem` module) and `bytes.heap_save`/`bytes.heap_restore`, v0 bump-allocator relics that are no-ops under reference counting, are deleted. A call to any of them is a check-time error whose hint is the entry below (crates/almide-frontend/src/removed_spellings.rs reads it from this ledger)."
+breaks = [
+  "`http.anthropic_streaming_call(…)` → `import llm` + `llm.anthropic_streaming_call(…)` (package almide/llm: `almide add almide/llm@v0.1.0`; the same arguments, plus an optional trailing `base_url` that defaults to https://api.anthropic.com)",
+  "`http.anthropic_streaming_call_with_limits(…)` → `import llm` + `llm.anthropic_streaming_call_with_limits(…)` (package almide/llm: `almide add almide/llm@v0.1.0`; the same arguments, plus an optional trailing `base_url` that defaults to https://api.anthropic.com)",
+  "`http.openai_streaming_call(…)` → `import llm` + `llm.openai_streaming_call(…)` (package almide/llm: `almide add almide/llm@v0.1.0`)",
+  "`http.openai_streaming_call_with_limits(…)` → `import llm` + `llm.openai_streaming_call_with_limits(…)` (package almide/llm: `almide add almide/llm@v0.1.0`)",
+  "`matrix.qwen3_block_f32_kv(…)` → `import nn` + `nn.qwen3_block_f32_kv(…)` (package almide/nn: `almide add almide/nn@v0.1.0`; the same arguments)",
+  "`matrix.qwen3_block_q1_0_kv(…)` → `import nn` + `nn.qwen3_block_q1_0_kv(…)` (package almide/nn: `almide add almide/nn@v0.1.0`; the same arguments)",
+  "`matrix.qwen3_block_q8_0_kv(…)` → `import nn` + `nn.qwen3_block_q8_0_kv(…)` (package almide/nn: `almide add almide/nn@v0.1.0`; the same arguments)",
+  "`matrix.from_q1_0_bytes(…)` → `import nn` + `nn.from_q1_0_bytes(…)` (package almide/nn: `almide add almide/nn@v0.1.0`; the same arguments)",
+  "`matrix.linear_q1_0_row_no_bias(…)` → `import nn` + `nn.linear_q1_0_row_no_bias(…)` (package almide/nn: `almide add almide/nn@v0.1.0`; the same arguments)",
+  "`matrix.select_rows_q1_0(…)` → `import nn` + `nn.select_rows_q1_0(…)` (package almide/nn: `almide add almide/nn@v0.1.0`; the same arguments)",
+  "`matrix.linear_q8_0_row_no_bias(…)` → `import nn` + `nn.linear_q8_0_row_no_bias(…)` (package almide/nn: `almide add almide/nn@v0.1.0`; the same arguments)",
+  "`matrix.select_rows_q8_0_dq(…)` → `import nn` + `nn.select_rows_q8_0_dq(…)` (package almide/nn: `almide add almide/nn@v0.1.0`; the same arguments)",
+  "`matrix.attention_weights(…)` → `import nn` + `nn.attention_weights(…)` (package almide/nn: `almide add almide/nn@v0.1.0`; the same arguments)",
+  "`matrix.scaled_dot_product_attention(…)` → `import nn` + `nn.scaled_dot_product_attention(…)` (package almide/nn: `almide add almide/nn@v0.1.0`; the same arguments)",
+  "`matrix.multi_head_attention(…)` → `import nn` + `nn.multi_head_attention(…)` (package almide/nn: `almide add almide/nn@v0.1.0`; the same arguments)",
+  "`matrix.masked_multi_head_attention(…)` → `import nn` + `nn.masked_multi_head_attention(…)` (package almide/nn: `almide add almide/nn@v0.1.0`; the same arguments)",
+  "`matrix.rope_rotate(…)` → `import nn` + `nn.rope_rotate(…)` (package almide/nn: `almide add almide/nn@v0.1.0`; the same arguments)",
+  "`matrix.rope_rotate_at(…)` → `import nn` + `nn.rope_rotate_at(…)` (package almide/nn: `almide add almide/nn@v0.1.0`; the same arguments)",
+  "`matrix.rope_rotate_neox_at(…)` → `import nn` + `nn.rope_rotate_neox_at(…)` (package almide/nn: `almide add almide/nn@v0.1.0`; the same arguments)",
+  "`matrix.gelu(…)` → `import nn` + `nn.gelu(…)` (package almide/nn: `almide add almide/nn@v0.1.0`; the same arguments)",
+  "`matrix.silu_mul(…)` → `import nn` + `nn.silu_mul(…)` (package almide/nn: `almide add almide/nn@v0.1.0`; the same arguments)",
+  "`matrix.swiglu_gate(…)` → `import nn` + `nn.swiglu_gate(…)` (package almide/nn: `almide add almide/nn@v0.1.0`; the same arguments)",
+  "`matrix.linear_row_gelu(…)` → `import nn` + `nn.linear_row_gelu(…)` (package almide/nn: `almide add almide/nn@v0.1.0`; the same arguments)",
+  "`matrix.fused_gemm_bias_scale_gelu(…)` → `import nn` + `nn.fused_gemm_bias_scale_gelu(…)` (package almide/nn: `almide add almide/nn@v0.1.0`; the same arguments)",
+  "`matrix.rms_norm_rows(…)` → `import nn` + `nn.rms_norm_rows(…)` (package almide/nn: `almide add almide/nn@v0.1.0`; the same arguments)",
+  "`matrix.layer_norm_rows(…)` → `import nn` + `nn.layer_norm_rows(…)` (package almide/nn: `almide add almide/nn@v0.1.0`; the same arguments)",
+  "`matrix.pre_norm_linear(…)` → `import nn` + `nn.pre_norm_linear(…)` (package almide/nn: `almide add almide/nn@v0.1.0`; the same arguments)",
+  "`matrix.causal_mask_add(…)` → `import nn` + `nn.causal_mask_add(…)` (package almide/nn: `almide add almide/nn@v0.1.0`; the same arguments)",
+  "`matrix.softmax_rows(…)` → `import nn` + `nn.softmax_rows(…)` (package almide/nn: `almide add almide/nn@v0.1.0`; the same arguments)",
+  "`mem.save()` → delete the call, and the `import mem` line with it: it took or rewound an opaque arena checkpoint, and under reference counting it did nothing on any target",
+  "`mem.restore(mark)` → delete the call, and the `import mem` line with it: it took or rewound an opaque arena checkpoint, and under reference counting it did nothing on any target",
+  "`bytes.heap_save()` → delete the call: it took or rewound an opaque arena checkpoint, and under reference counting it did nothing on any target",
+  "`bytes.heap_restore(mark)` → delete the call: it took or rewound an opaque arena checkpoint, and under reference counting it did nothing on any target",
+]
+
 # DEPRECATIONS — spellings accepted for a window, with the epoch that removes them
 # =============================================================
 
