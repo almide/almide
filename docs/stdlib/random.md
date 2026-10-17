@@ -80,7 +80,7 @@ native leg.
 // @since 0.5.0 or earlier
 effect random.int(min: Int, max: Int) -> Int
 
-// Random Float in [0, 1]; not crypto-grade.
+// Random Float in [0, 1); not crypto-grade.
 // @since 0.5.0 or earlier
 effect random.float() -> Float
 

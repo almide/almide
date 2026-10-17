@@ -4025,7 +4025,7 @@ effect fn sleep_ms(ms: Int) -> Unit = _
 @intrinsic("almide_rt_env_temp_dir")
 effect fn temp_dir() -> String = _
 
-/// Host OS: macos, linux, windows or unknown.
+/// Host OS: macos, linux, windows or unknown; "wasi" on wasm (C-189).
 @intrinsic("almide_rt_env_os")
 fn os() -> String = _
 "#;
@@ -28826,7 +28826,7 @@ pub const SRC_RANDOM: &str = r#"
 @intrinsic("almide_rt_random_int")
 effect fn int(min: Int, max: Int) -> Int = _
 
-/// Random Float in [0, 1]; not crypto-grade.
+/// Random Float in [0, 1); not crypto-grade.
 @intrinsic("almide_rt_random_float")
 effect fn float() -> Float = _
 

@@ -15,10 +15,11 @@ macro_rules! file_of_n_lines {
     };
 }
 
-/// `d/`, holding n one-byte files.
+/// `d/`, holding n / 100 + 3 one-byte files: every file is a host call to
+/// create, and 16n of them (320000) took the run past its cap.
 macro_rules! dir_of_n_files {
     () => {
-        "{ fs.mkdir_p(\"d\")!\n  for j in list.range(0, {n}) { fs.write(\"d/f${j}\", \"x\")! }\n  \"d\" }"
+        "{ fs.mkdir_p(\"d\")!\n  for j in list.range(0, {n} / 100 + 3) { fs.write(\"d/f${j}\", \"x\")! }\n  \"d\" }"
     };
 }
 
@@ -81,5 +82,18 @@ pub(super) const EFFECT_RECIPES: &[Recipe] = &[
     Recipe { func: "args.positional_at", size: "", args: &[("i", "0")] },
     Recipe { func: "env.get", size: "", args: &[("name", "\"XF_GREETING\"")] },
     Recipe { func: "env.set", size: "value", args: &[("name", "\"XF_SET\""), ("value", "string.repeat(\"aé\", {n})")] },
-    Recipe { func: "io.print", size: "s", args: &[("s", "string.repeat(\"aé\", {n})")] },
+    // Past the native 64 KiB stdout buffer at every size, so every size
+    // writes in one regime (as io.write's recipe).
+    Recipe { func: "io.print", size: "s", args: &[("s", "string.repeat(\"aé\", 4 * {n})")] },
+    Recipe { func: "process.env", size: "", args: &[("key", "\"XF_GREETING\"")] },
+    // Host-decided results (`verdicts.rs`): each probe checks the declared
+    // properties instead of reading the value.
+    Recipe { func: "random.int", size: "", args: &[("min", "0"), ("max", "9")] },
+    Recipe { func: "random.choice", size: "xs", args: &[("xs", "{sized}")] },
+    Recipe { func: "random.shuffle", size: "xs", args: &[("xs", "{sized}")] },
+    Recipe { func: "list.shuffle", size: "xs", args: &[("xs", "{sized}")] },
+    Recipe { func: "fs.modified_at", size: "path", args: FILE_N },
+    Recipe { func: "fs.create_temp_file", size: "", args: &[("prefix", "\"p\"")] },
+    Recipe { func: "fs.create_temp_dir", size: "", args: &[("prefix", "\"p\"")] },
+    Recipe { func: "env.sleep_ms", size: "", args: &[("ms", "0")] },
 ];

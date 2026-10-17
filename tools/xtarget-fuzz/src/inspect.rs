@@ -745,7 +745,11 @@ fn leg_tag(leg: Leg) -> &'static str {
 fn counted_calibrated(d: &Delta) -> bool {
     const CALIBRATE_INSTRUCTIONS: f64 = 2.0e7;
     const CALIBRATE_BYTES: f64 = 2.0e8;
-    d.instructions >= CALIBRATE_INSTRUCTIONS || d.moved >= CALIBRATE_BYTES
+    // A call whose work is the kernel's (an effect function's write) retires
+    // few user instructions: k stops on the wall clock too, before a run
+    // reaches the cap. Only k's growth reads it; the fit stays on the counts.
+    const CALIBRATE_WALL: Duration = Duration::from_secs(2);
+    d.instructions >= CALIBRATE_INSTRUCTIONS || d.moved >= CALIBRATE_BYTES || d.wall >= CALIBRATE_WALL
 }
 
 /// The cheapest class whose `a + c·f(n)` least-squares fit leaves every
@@ -1018,6 +1022,9 @@ mod run_tests {
         assert!(!counted_calibrated(&d(1e3, 1e3)));
         assert!(counted_calibrated(&d(3e7, 0.0)));
         assert!(counted_calibrated(&d(1e3, 3e8)));
+        // fs.write at n = 20000 calibrated to k = 65536 on instructions and
+        // timed out at 60 s: its bytes go to the kernel.
+        assert!(counted_calibrated(&Delta { instructions: 1e3, moved: 0.0, wall: Duration::from_secs(3) }));
     }
 }
 
