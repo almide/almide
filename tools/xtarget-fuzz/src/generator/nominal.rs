@@ -61,7 +61,7 @@ pub const NOMINALS: &[Nominal] = &[
         module: "bytes",
         small: "bytes.as_ptr(bytes.from_list([]))",
         sized: "bytes.as_ptr(bytes.from_list([]))",
-        leaves: &[],
+        leaves: &["bytes.as_ptr(bytes.from_list([]))"],
         observe: "\"ptr\"",
         observed: string,
         digest: "1",
