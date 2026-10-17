@@ -562,10 +562,13 @@ fn per_head_rms_norm(
     if x.is_empty() { return vec![].into(); }
     let d = x[0].len();
     let head_dim = d / n_heads;
+    // #1827: with no column a head (head_dim 0) every head is a no-op, so none
+    // is walked — 2^40 heads of nothing never returned here.
+    let heads = if head_dim == 0 { 0 } else { n_heads };
     let mut out = Vec::<Vec<f64>>::with_capacity(x.len());
     for row in x.iter() {
         let mut out_row = vec![0.0f64; d];
-        for h in 0..n_heads {
+        for h in 0..heads {
             let start = h * head_dim;
             let mut ss = 0.0f64;
             for k in 0..head_dim {
@@ -589,11 +592,14 @@ fn repeat_kv(kv: &AlmideMatrix, n_kv_heads: i64, n_rep: i64) -> AlmideMatrix {
     if kv.is_empty() { return vec![].into(); }
     let d = kv[0].len();
     let head_dim = d / n_kv;
-    let out_cols = d * n_rep_u;
+    // #1827: the widened cache is a matrix extent (C-161's ceiling), and with
+    // no column a head no head is copied — never 2^40 empty copies.
+    let (_, out_cols) = almide_rt_matrix_dims(kv.len() as i64, (d as i64).saturating_mul(n_rep));
+    let heads = if head_dim == 0 { 0 } else { n_kv };
     let mut out = Vec::<Vec<f64>>::with_capacity(kv.len());
     for row in kv.iter() {
         let mut out_row = vec![0.0f64; out_cols];
-        for h in 0..n_kv {
+        for h in 0..heads {
             let src = h * head_dim;
             for r in 0..n_rep_u {
                 let dst = (h * n_rep_u + r) * head_dim;

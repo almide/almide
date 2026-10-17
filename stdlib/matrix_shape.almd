@@ -180,7 +180,11 @@ fn __qw_repeat_kv(kv: Matrix, n_kv_heads: Int, n_rep: Int) -> Matrix =
       let d = matrix.cols(kv)
       let hd = d / n
       let heads = if hd == 0 then 0 else n
-      matrix.to_lists(kv) |> list.map((row) => {
+      // The widened cache is a matrix extent: past C-161's ceiling it is
+      // matrix.zeros' own abort (the width saturates rather than wraps).
+      let wide = if d > 0 and n_rep > 268435456 / d then 268435457 else d * n_rep
+      if __mxp_over(matrix.rows(kv), wide) then matrix.zeros(matrix.rows(kv), wide)
+      else matrix.to_lists(kv) |> list.map((row) => {
         let reps = list.range(0, heads) |> list.flat_map((h) => {
           let seg = list.slice(row, h * hd, h * hd + hd)
           list.range(0, n_rep) |> list.flat_map((_) => seg)
