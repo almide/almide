@@ -1,6 +1,6 @@
 # Effect inspection harness
 
-**Status:** design, 2026-10-12. Implementation starts with tier E1.
+**Status:** design, 2026-10-12; decided in [ADR-0027](../../adr/0027-effect-functions-are-inspected-in-a-fixed-host-world.md) (2026-10-17).
 **Tracks:** #3552 (the stdlib inspection campaign).
 
 ## Problem
