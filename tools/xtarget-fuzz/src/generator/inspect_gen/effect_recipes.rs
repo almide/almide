@@ -176,6 +176,8 @@ pub fn max_k(func: &str) -> Option<u64> {
     match func.split_once('.') {
         Some(("net", f)) if matches!(f, "tcp_connect" | "tcp_listen" | "tcp_accept" | "tcp_close" | "tcp_close_listener") => Some(64),
         Some(("http", _)) => Some(256),
+        // Each append grows the one file: 2k calls of n bytes at 16n.
+        Some(("fs", "append")) => Some(256),
         _ => None,
     }
 }
