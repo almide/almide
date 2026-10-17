@@ -2,15 +2,25 @@
 
 Test assertions. import testing.
 
-### `testing.assert_throws(f: fn() -> Unit, expected: String) -> Unit`
+### `testing.assert_aborts[T](expected: String, f: () -> T) -> Unit`
 
-Assert that a function throws an error containing the expected message.
+Assert that `f` aborts with text containing `expected`. Only `f` runs, in a
+child process (native) or a fresh instance (wasm) that starts the program
+afresh, so every abort counts — `panic`, an index out of bounds, a division by
+zero, a failed assert — and the test continues after the call. `f` must be a
+lambda written in the call that captures nothing of the test (E098), and the
+call must sit directly in a `test` block (E099). The child's output is shown
+only when the assertion fails.
 
 ```almd check
 import testing
 
-test "panics with the expected message" {
-  testing.assert_throws(() => panic("oh no"), "oh no")
+fn nth(xs: List[Int], i: Int) -> Int = xs[i]
+
+test "reading past the end aborts" {
+  testing.assert_aborts("index out of bounds", () => nth([1, 2, 3], 5))
+  testing.assert_aborts("PANIC: oh no", () => panic("oh no"))
+  assert_eq(nth([1, 2, 3], 0), 1)
 }
 ```
 
@@ -126,9 +136,9 @@ every target (contract C-336).
 ## Signature index (10 functions)
 
 ```
-// Fails unless f panics, message containing expected.
-// @since 0.6.0 or earlier
-testing.assert_throws(f: () -> Unit, expected: String) -> Unit
+// Fails unless f, run alone in a child, aborts with text containing expected.
+// @since 0.68.0
+testing.assert_aborts(expected: String, f: () -> T) -> Unit
 
 // Fails unless needle is in haystack; "" passes.
 // @since 0.6.0 or earlier

@@ -399,6 +399,14 @@ template = "mod tests {{\n    use super::*;\n\n{tests}\n}}"
 [test_block]
 template = "#[test]\nfn {name}() {{\n{body}\n}}"
 
+# testing.assert_aborts (ADR-0029): the child entry. The ordinary run skips it
+# (ignored); a call re-executes the binary with `--ignored --exact
+# tests::__almd_abort_site_entry` and ALMIDE_ABORT_SITE=<k>. The dispatcher is
+# an effect fn, rendered with or without its Result carrier, so the outcome
+# trait takes both; an err ends the child as an effect `main`'s does.
+[abort_site_entry]
+template = "#[test]\n#[ignore = \"almide:abort-site\"]\nfn __almd_abort_site_entry() {{\n    trait AlmdAbortSiteOutcome {{ fn finish(self); }}\n    impl AlmdAbortSiteOutcome for () {{ fn finish(self) {{}} }}\n    impl<E: std::fmt::Display> AlmdAbortSiteOutcome for Result<(), E> {{ fn finish(self) {{ if let Err(e) = self {{ almide_abort(e) }} }} }}\n    let site: i64 = std::env::var(\"ALMIDE_ABORT_SITE\").ok().and_then(|v| v.parse().ok()).unwrap_or(-1);\n    AlmdAbortSiteOutcome::finish({dispatch}(site));\n    almide_stdout_flush();\n    std::process::exit(0);\n}}"
+
 [assert_eq]
 template = "assert!(almide_eq!({left}, {right}), \"assertion failed: {{:?}} != {{:?}}\", {left}, {right});"
 
