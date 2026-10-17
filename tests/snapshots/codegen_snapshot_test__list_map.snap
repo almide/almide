@@ -500,11 +500,13 @@ pub fn almide_rt_list_par_workers(len: usize) -> usize {
 // a site records the compute time its elements took (`AlmideFanClock`: the
 // threads' CPU time inside the elements, so spawn latency and the time a
 // thread sat descheduled are not counted, and each worker's first element —
-// its warm-up — is kept out of the mean; a site far below the crossover is
-// timed on one sequential offer in `ALMIDE_FAN_RESAMPLE`). A site's FIRST offer goes parallel, as
+// its warm-up — is kept out of the mean; a sequential site is timed on one
+// offer in `ALMIDE_FAN_RESAMPLE`, a parallel one on one in
+// `ALMIDE_FAN_RESAMPLE_PAR`). A site's FIRST offer goes parallel, as
 // before #3341; later offers estimate each element at the site's last
 // measured time `t`. A parallel offer on W workers COSTS `OFFER + W·WORKER`
-// (thread spawn, join, the group's bookkeeping — measured) and SAVES
+// (publishing it, the pool threads entering and leaving, the group's
+// bookkeeping — measured, docs/benchmarks/fan-cost-model.txt) and SAVES
 // `t·(n − ⌈n/W⌉)`; the W with the largest positive net saving wins, and none
 // = the offer runs here, sequentially. Output is the same either way (C-321).
 // Timing element 0 first and deciding after it was measured and rejected: it
@@ -586,6 +588,14 @@ const ALMIDE_FAN_RESAMPLE: u32 = 16;
 /// CPU clock around its elements, three syscalls per helper on the offer's
 /// critical path (~3.3 us on the AMD VM, 2026-10-17).
 const ALMIDE_FAN_RESAMPLE_PAR: u32 = 8;
+/// The site's next offer runs sequentially and is measured: a parallel
+/// offer's elements read slower than the same elements run in one thread
+/// (the threads share the block counter and the result slots), and an
+/// estimate from them within 2x of the crossover is not evidence that the
+/// site is above it. A site's first offer is parallel, so a run of 0.3 us
+/// elements otherwise stayed parallel for its first dozens of offers (100
+/// iterations: 0.36 us per offer over sequential on the Intel VM, 2026-10-17).
+const ALMIDE_FAN_PROBE: u32 = u32::MAX;
 
 /// The calling thread's CPU time in ns — the clock an offer's elements are
 /// measured on (the wasm host's copy is host_fan.rs `cpu_ns`). Wall time
@@ -645,6 +655,8 @@ struct AlmideFanClock {
     n: usize,
     /// `false` = an unmeasured offer: no clock reads, no record.
     measure: bool,
+    /// The offer runs on more than one thread.
+    parallel: bool,
 }
 
 impl AlmideFanClock {
@@ -658,13 +670,16 @@ impl AlmideFanClock {
             t => Some((e, u128::from(t - 1))),
         });
         let (workers, measure) = match known {
+            // the probe a parallel estimate near the crossover asked for
+            Some((e, _)) if e.skip.load(Ordering::Relaxed) == ALMIDE_FAN_PROBE
+                && e.skip.compare_exchange(ALMIDE_FAN_PROBE, 0, Ordering::Relaxed, Ordering::Relaxed).is_ok() => (1, true),
             Some((e, t)) => {
-                let skipped = e.skip.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |k| k.checked_sub(1)).is_ok();
+                let skipped = e.skip.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |k| (k != ALMIDE_FAN_PROBE).then(|| k.checked_sub(1)).flatten()).is_ok();
                 (almide_rt_fan_plan(n, Some(t)), !skipped)
             }
             None => (almide_rt_fan_plan(n, None), true),
         };
-        (workers, AlmideFanClock { warm: [z(), z()], cold: [z(), z()], site, n, measure })
+        (workers, AlmideFanClock { warm: [z(), z()], cold: [z(), z()], site, n, measure, parallel: workers >= 2 })
     }
 
     fn add(cell: &[std::sync::atomic::AtomicU64; 2], ns: u64, n: u64) {
@@ -729,19 +744,35 @@ impl AlmideFanClock {
         let (ns, n) = if wn > 0 { (w, wn) } else { (c, cn) };
         if n > 0 {
             let t = u128::from(ns) / u128::from(n);
-            let skip = if almide_rt_fan_plan(self.n, Some(t)) < 2 { ALMIDE_FAN_RESAMPLE - 1 } else { ALMIDE_FAN_RESAMPLE_PAR - 1 };
-            if let Some(e) = almide_fan_site(self.site, true) {
-                e.skip.store(skip, std::sync::atomic::Ordering::Relaxed);
-                e.t.store(u64::try_from(t).unwrap_or(u64::MAX - 1) + 1, std::sync::atomic::Ordering::Release);
-            }
+            let Some(e) = almide_fan_site(self.site, true) else { return };
+            let was_sequential = match e.t.load(std::sync::atomic::Ordering::Acquire) {
+                0 => false,
+                old => almide_rt_fan_plan(self.n, Some(u128::from(old - 1))) < 2,
+            };
+            let skip = if almide_rt_fan_plan(self.n, Some(t)) < 2 {
+                ALMIDE_FAN_RESAMPLE - 1
+            } else if self.parallel && almide_rt_fan_plan(self.n, Some(t / 2)) < 2 {
+                ALMIDE_FAN_PROBE
+            } else if !self.parallel && was_sequential {
+                // a sequential site turns parallel on two measurements in a
+                // row, not on one: one preempted or interrupted offer read
+                // above the crossover sent 0.42 us elements (0.58 us
+                // crossover) parallel at ~9 us a time on the AMD VM
+                ALMIDE_FAN_PROBE
+            } else {
+                ALMIDE_FAN_RESAMPLE_PAR - 1
+            };
+            e.skip.store(skip, std::sync::atomic::Ordering::Relaxed);
+            e.t.store(u64::try_from(t).unwrap_or(u64::MAX - 1) + 1, std::sync::atomic::Ordering::Release);
         }
     }
 }
 
 // The RESIDENT fan pool (`almide_fan_pool`, below `almide_fan_deal`): the
-// threads that help a parallel offer take its blocks, spawned by the first
-// offers that need them and parked between offers for the rest of the
-// process. A thread per chunk per offer (`std::thread::scope`) cost 117 us
+// threads that help parallel offers take their blocks, spawned by the first
+// offers that need them, polling for the next offer for a while after each
+// one and parked after that, for the rest of the process. A thread per chunk
+// per offer (`std::thread::scope`) cost 117 us
 // per offer on eight workers on an Intel 8581C and 299 us on an AMD EPYC
 // 7B13 (2026-10-16, an empty 10-element chunk map) — a fixed cost the cost
 // model above must charge every offer. The wasm host keeps resident workers
@@ -751,8 +782,8 @@ impl AlmideFanClock {
 // flushed (a scoped thread flushed it as it exited) and its fan sink is
 // cleared (a `list.par_*` chunk adopts its element's sink). A chunk may
 // itself start a parallel offer, and two `fan { }` arms may start offers at
-// once: every offer posts to the same pool and takes its own blocks too, so
-// none waits for a helper that is busy elsewhere.
+// once: every offer is published to the same pool and takes its own blocks
+// too, so none waits for a helper that is busy elsewhere.
 /// The `std::thread::scope` panic: once every task has finished, a panicked
 /// one panics the offer.
 fn almide_fan_panic_if_any(outcomes: Vec<std::thread::Result<()>>) {
