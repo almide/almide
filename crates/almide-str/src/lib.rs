@@ -15,3 +15,7 @@
 mod almide_str;
 
 pub use almide_str::{AlmideStr, AlmideStrHeader, AlmideStrStatic, UniqueStr};
+
+/// The source text of `almide_str.rs`, which generated programs splice in
+/// when `ALMIDE_SHARED_STR=1` selects the shared buffer.
+pub const SOURCE: &str = include_str!("almide_str.rs");

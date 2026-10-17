@@ -88,6 +88,7 @@ dependencies = [
  "almide-egg-lab",
  "almide-ir",
  "almide-lang",
+ "almide-str",
  "egg",
  "proptest",
  "serde",
