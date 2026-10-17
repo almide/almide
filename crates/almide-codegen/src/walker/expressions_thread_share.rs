@@ -1,17 +1,13 @@
 // The thread boundary under ADR-0013's shared string buffer (design point 3,
-// Koka's thread-shared flip). With `ALMIDE_SHARED_STR=1`, every value a
+// Koka's thread-shared flip). Every value a
 // scoped thread can reach is marked before the threads start, so the count
 // of each `AlmideStr` block it holds turns atomic and only those do. The
 // values are the free variables of the threaded code: a fan block's arms, or
 // the arguments of a runtime helper whose signature bounds `Send` (the
-// runtime marks its own data arguments). Off the flag nothing is emitted.
+// runtime marks its own data arguments).
 
-/// `v.almide_share();` for every variable `exprs` read from outside, or the
-/// empty string when the shared buffer is off.
+/// `v.almide_share();` for every variable `exprs` read from outside.
 fn thread_share_marks(ctx: &RenderContext, exprs: &[&IrExpr]) -> String {
-    if !crate::prelude_string::shared_str_enabled() {
-        return String::new();
-    }
     let mut seen = std::collections::HashSet::new();
     let mut out = String::new();
     for e in exprs {

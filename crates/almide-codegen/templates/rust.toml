@@ -107,7 +107,7 @@ template = "None"
 template = "Ok({inner})"
 
 [err_expr]
-template = "Err(AlmideString::from(format!(\"{:?}\", {inner})))"
+template = "Err(AlmideString::from_fmt(format_args!(\"{:?}\", {inner})))"
 
 [[unwrap_expr]]
 when_attr = "map_err_join"
@@ -199,7 +199,7 @@ template = "{name}: {value}"
 # ── String Interpolation ──
 
 [string_interp]
-template = "AlmideString::from(format!(\"{format_str}\", {args}))"
+template = "AlmideString::from_fmt(format_args!(\"{format_str}\", {args}))"
 
 # ── Statements ──
 

@@ -116,7 +116,7 @@ pub fn almide_rt_map_key_hash<K: 'static>(k: &K) -> Option<u64> {
     if let Some(x) = a.downcast_ref::<i64>() {
         return Some(almide_rt_map_mix64(*x as u64));
     }
-    if let Some(s) = a.downcast_ref::<String>() {
+    if let Some(s) = a.downcast_ref::<AlmideString>() {
         return Some(almide_rt_map_hash_bytes(s.as_bytes()));
     }
     if let Some(b) = a.downcast_ref::<bool>() {
@@ -129,19 +129,19 @@ fn almide_map_key_hash_compound(a: &dyn std::any::Any) -> Option<u64> {
     if let Some((x, y)) = a.downcast_ref::<(i64, i64)>() {
         return Some(almide_rt_map_hash_pair(*x as u64, *y as u64));
     }
-    if let Some((x, y)) = a.downcast_ref::<(String, String)>() {
+    if let Some((x, y)) = a.downcast_ref::<(AlmideString, AlmideString)>() {
         return Some(almide_rt_map_hash_pair(almide_rt_map_hash_bytes(x.as_bytes()), almide_rt_map_hash_bytes(y.as_bytes())));
     }
-    if let Some((x, y)) = a.downcast_ref::<(String, i64)>() {
+    if let Some((x, y)) = a.downcast_ref::<(AlmideString, i64)>() {
         return Some(almide_rt_map_hash_pair(almide_rt_map_hash_bytes(x.as_bytes()), *y as u64));
     }
-    if let Some((x, y)) = a.downcast_ref::<(i64, String)>() {
+    if let Some((x, y)) = a.downcast_ref::<(i64, AlmideString)>() {
         return Some(almide_rt_map_hash_pair(*x as u64, almide_rt_map_hash_bytes(y.as_bytes())));
     }
     if let Some(xs) = a.downcast_ref::<Vec<i64>>() {
         return Some(almide_map_hash_seq(xs.iter().map(|x| *x as u64)));
     }
-    if let Some(xs) = a.downcast_ref::<Vec<String>>() {
+    if let Some(xs) = a.downcast_ref::<Vec<AlmideString>>() {
         return Some(almide_map_hash_seq(xs.iter().map(|s| almide_rt_map_hash_bytes(s.as_bytes()))));
     }
     almide_map_key_hash_sized_int(a)
@@ -155,6 +155,8 @@ fn almide_map_key_hash_sized_int(a: &dyn std::any::Any) -> Option<u64> {
     if let Some(x) = a.downcast_ref::<u32>() { return Some(almide_rt_map_mix64(*x as u64)); }
     if let Some(x) = a.downcast_ref::<u16>() { return Some(almide_rt_map_mix64(*x as u64)); }
     if let Some(x) = a.downcast_ref::<u8>() { return Some(almide_rt_map_mix64(*x as u64)); }
+    // A runtime-internal `String` key (not an Almide String, which is `AlmideString` above).
+    if let Some(s) = a.downcast_ref::<String>() { return Some(almide_rt_map_hash_bytes(s.as_bytes())); }
     None
 }
 
@@ -162,8 +164,8 @@ fn almide_map_key_hash_sized_int(a: &dyn std::any::Any) -> Option<u64> {
 /// type's hash for every `K: Borrow<Q>` pair the read side admits. The
 /// blanket impl covers every sized key; `str` is the one unsized borrow —
 /// a `&str` parameter (the borrow-inferred rendering of a String param)
-/// probes a `Map[String, _]` without materializing a `String` first, and
-/// hashes byte-identically to the stored `String`.
+/// probes a `Map[String, _]` without materializing a String first, and
+/// hashes byte-identically to the stored `AlmideString`.
 pub trait AlmideMapKey {
     fn almide_key_hash(&self) -> Option<u64>;
 }
@@ -512,13 +514,10 @@ impl<K: PartialEq + 'static, V, const N: usize> From<[(K, V); N]> for AlmideMap<
     }
 }
 
-// ADR-0013 stage 2: a map returned across the runtime boundary converts its
-// keys and values (only under the shared buffer; the identity otherwise).
-almide_into_str_impls! {
-    impl<K: AlmideIntoStr, V: AlmideIntoStr> AlmideIntoStr for AlmideMap<K, V> where K::Out: PartialEq + 'static {
-        type Out = AlmideMap<K::Out, V::Out>;
-        fn into_almide(self) -> Self::Out { self.into_iter().map(|(k, v)| (k.into_almide(), v.into_almide())).collect() }
-    }
+// ADR-0013: a map returned across the runtime boundary converts its keys and values.
+impl<K: AlmideIntoStr, V: AlmideIntoStr> AlmideIntoStr for AlmideMap<K, V> where K::Out: PartialEq + 'static {
+    type Out = AlmideMap<K::Out, V::Out>;
+    fn into_almide(self) -> Self::Out { self.into_iter().map(|(k, v)| (k.into_almide(), v.into_almide())).collect() }
 }
 
 impl<K, V> IntoIterator for AlmideMap<K, V> {

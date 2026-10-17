@@ -1103,7 +1103,6 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_RUN_PROJECT_DIR=value` | tool | the scratch dir `almide run` / `almide build` compile native binaries in, instead of `<temp>/almide-run` (the content-keyed binary cache, its cargo target, its rustc incremental sessions); `almide clean` empties it |
 | `ALMIDE_SCOPED_CLOSURE_OFF` | ablation | make BorrowInsertion treat every `let`-bound closure as a closure value, never as a non-escaping scope (#3455) — its captures are owned again, as before the scope rule |
 | `ALMIDE_SEMLAW_CASES=value` | harness | how many cases the semantic-laws property test draws |
-| `ALMIDE_SHARED_STR` | route | render the native Almide String as the shared buffer `AlmideStr` (ADR-0013 stage 2) instead of `String`; off by default until the stage lands |
 | `ALMIDE_SHUFFLE_PASSES=value` | gate | run the native passes in the seeded random order the declared dependency edges permit — a pass-dependency probe: the emitted Rust must not change (#2186) |
 | `ALMIDE_SIZE_ALONE=value` | harness | the one fixture a child process of the size ratchet measures alone, for its isolation check (#2309); the ratchet sets it on the processes it spawns |
 | `ALMIDE_SIZE_PRESSURE=value` | harness | the allocation pressure (`plain` / `quarantine` / `ballast`) a size-ratchet child builds its one fixture under, for the determinism check (#3143); the ratchet sets it on the processes it spawns |

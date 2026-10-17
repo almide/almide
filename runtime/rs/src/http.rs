@@ -220,7 +220,7 @@ pub fn almide_http_req_with_path(mut req: AlmideHttpRequest, target: &str) -> Al
 
 // ADR-0013 stage 2: the request and response keep their own `String`s and
 // cross the runtime boundary unchanged.
-almide_into_str_impls! { almide_into_str_leaf!(AlmideHttpResponse, AlmideHttpRequest); }
+almide_into_str_leaf!(AlmideHttpResponse, AlmideHttpRequest);
 
 impl AlmideRepr for AlmideHttpRequest {
     fn almide_repr(&self) -> String {
