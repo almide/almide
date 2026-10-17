@@ -560,6 +560,9 @@ fn cmd_run_wasm(file: &str, program_args: &[String], verified: bool, time_report
     // host's wasi:http, whose transport is native's client.
     if let Some(refusal) = almide_wasm_run::component_availability::embedded_split(&host_ops) {
         err(&refusal);
+        // The fuzzer's honest-wall line, as every wall path prints it.
+        let first = refusal.lines().next().unwrap_or_default();
+        err(&format!("{}{}", crate::WASM_WALL_MARKER, first.trim_start_matches("error[E081]: ")));
         return 1;
     }
     if almide_wasm_run::component_availability::embedded_runs_component(&host_ops) {
