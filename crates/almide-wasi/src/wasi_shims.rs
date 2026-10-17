@@ -157,8 +157,7 @@ fn shim_exit(park: u64, wall: bool) -> Function {
 /// (stderr + exit 1).
 fn shim_fs_call(
     park: u64,
-    g_plen: u32,
-    g_ppos: Option<u32>,
+    (g_plen, g_ppos, heap): (u32, Option<u32>, u32),
     forward: &[(i32, u32)],
     ops: &[i32],
 ) -> Function {
@@ -168,10 +167,15 @@ fn shim_fs_call(
     // every artifact. The refusal below still answers anything else.
     let has = |op: i32| ops.contains(&op);
     // params: 0=op 1=a_ptr 2=a_len 3=b_ptr 4=b_len; locals: 5=nread
-    // 6=deadline (i64, op 36)
+    // 6=deadline (i64, op 36; op 35's staging bound), and op 35's
+    // 7=base 8=total 9=room when the op set names it
     let (op, a_len, b_ptr, b_len, nread) = (0u32, 2u32, 3u32, 4u32, 5u32);
     let deadline = 6u32;
-    let mut f = Function::new([(1, ValType::I32), (1, ValType::I64)]);
+    let mut locals = vec![(1, ValType::I32), (1, ValType::I64)];
+    if has(35) {
+        locals.push((3, ValType::I32));
+    }
+    let mut f = Function::new(locals);
     let mut i = f.instructions();
     // Every op stages in the park unless it says otherwise (#2120).
     if let Some(g) = g_ppos {
@@ -202,7 +206,9 @@ fn shim_fs_call(
     }
 
     if has(35) {
-        stdin_arm(&mut i, park, g_plen, (op, a_len, nread));
+        let l = StdinLocals { a_len, nread, base: 7, total: 8, room: 9, wide: deadline };
+        let g_ppos = g_ppos.expect("op 35 stages outside the park");
+        stdin_arm(&mut i, park, (g_plen, g_ppos, heap), op, l);
     }
 
     // op 32: entropy into the park data region (count rides in b_len).
@@ -242,39 +248,120 @@ fn shim_fs_call(
     f
 }
 
-/// op 35: incremental stdin — ONE fd_read of up to min(a_len, 4096) bytes
-/// into the park data region (the count rides in a_len, op 32's b_len
-/// convention). Short reads are the contract ("up to n"): the guest's
-/// read_line/read_byte loops ask byte-at-a-time, so one fd_read per call is
-/// exactly the incumbent leg's cadence. An errno or EOF answers 0 bytes.
-fn stdin_arm(i: &mut wasm_encoder::InstructionSink<'_>, park: u64, g_plen: u32, (op, a_len, nread): (u32, u32, u32)) {
+/// op 35's locals: the count (a_len), the fd_read scratch, the buffer base,
+/// the bytes read so far, the room past them (the arena path's), and an i64
+/// scratch for the staging bound.
+#[derive(Clone, Copy)]
+struct StdinLocals {
+    a_len: u32,
+    nread: u32,
+    base: u32,
+    total: u32,
+    room: u32,
+    wide: u32,
+}
+
+/// The largest read one arena grow serves: memory grows in steps of at most
+/// this many bytes, so a request far above what stdin holds costs at most
+/// one step of unused pages, never the request's size.
+const STDIN_GROW_STEP: i32 = 1 << 20;
+
+/// op 35: stdin take-n — read UNTIL `a_len` bytes are in (the count rides
+/// in a_len, op 32's b_len convention) or fd 0 reports EOF / an errno.
+/// Native's `take(n).read_to_end` and the embedded host answer min(n, what
+/// stdin has); every guest caller reads a short answer as EOF, so one
+/// fd_read per call (a pipe answers what it holds, wasmtime at most 64 KiB)
+/// silently truncated the stream (C-161). A count the park's staging room
+/// holds reads there; a larger one reads into the free memory past the
+/// guest heap, growing it only as bytes arrive, and stages above the
+/// guest's next allocation (`stage_high`).
+fn stdin_arm(i: &mut wasm_encoder::InstructionSink<'_>, park: u64, (g_plen, g_ppos, heap): (u32, u32, u32), op: u32, l: StdinLocals) {
+    let StdinLocals { a_len, base, total, .. } = l;
     i.local_get(op).i32_const(35).i32_eq().if_(BlockType::Empty);
-    i.i32_const(park as i32).i32_const((park + DATA) as i32).i32_store(mem(IOV));
-    // len = clamp(a_len, 0..=4096) — unsigned min folds a negative count
-    // into the 4096 arm, and 4096 stays inside the fixed park span.
     i.local_get(a_len).i32_const(0).i32_lt_s().if_(BlockType::Empty);
     i.i32_const(0).local_set(a_len);
     i.end();
-    i.local_get(a_len).i32_const(4096).i32_lt_u().if_(BlockType::Result(ValType::I32));
-    i.local_get(a_len);
+    i.i32_const(0).local_set(total);
+    i.local_get(a_len).i32_const((OVL - DATA) as i32).i32_le_u().if_(BlockType::Empty);
+    i.i32_const((park + DATA) as i32).local_set(base);
+    stdin_fill(i, park, l, false);
     i.else_();
-    i.i32_const(4096);
+    i.global_get(heap).i32_const(7).i32_add().i32_const(-8).i32_and().local_set(base);
+    stdin_fill(i, park, l, true);
+    stage_high(i, park, g_ppos, l);
     i.end();
-    i.local_set(nread);
+    i.local_get(total).global_set(g_plen);
+    i.local_get(total).i64_extend_i32_u().return_();
+    i.end();
+}
+
+/// The fill loop: fd_read into base+total until total == a_len, a read of 0
+/// bytes (EOF) or an errno. On the arena path a read never runs past the
+/// memory end: an exhausted room grows memory by one step first.
+fn stdin_fill(i: &mut wasm_encoder::InstructionSink<'_>, park: u64, l: StdinLocals, arena: bool) {
+    let StdinLocals { a_len, nread, base, total, room, .. } = l;
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(total).local_get(a_len).i32_ge_u().br_if(1);
+    i.local_get(a_len).local_get(total).i32_sub().local_set(nread); // want
+    if arena {
+        i.memory_size(0).i32_const(16).i32_shl();
+        i.local_get(base).local_get(total).i32_add().i32_sub().local_set(room);
+        i.local_get(room).i32_eqz().if_(BlockType::Empty);
+        i.local_get(nread).i32_const(STDIN_GROW_STEP).i32_lt_u().if_(BlockType::Result(ValType::I32));
+        i.local_get(nread);
+        i.else_();
+        i.i32_const(STDIN_GROW_STEP);
+        i.end();
+        i.i32_const(0xFFFF).i32_add().i32_const(16).i32_shr_u();
+        i.memory_grow(0).i32_const(0).i32_lt_s().if_(BlockType::Empty);
+        refuse(i, park, MSG3, OOM_MSG.len());
+        i.end();
+        i.br(1); // re-measure the room
+        i.end();
+        i.local_get(nread).local_get(room).i32_gt_u().if_(BlockType::Empty);
+        i.local_get(room).local_set(nread);
+        i.end();
+    }
+    i.i32_const(park as i32).local_get(base).local_get(total).i32_add().i32_store(mem(IOV));
     i.i32_const(park as i32).local_get(nread).i32_store(mem(IOV + 4));
     i.i32_const(0);
     i.i32_const((park + IOV) as i32);
     i.i32_const(1);
     i.i32_const((park + NREAD) as i32);
-    i.call(4); // fd_read
-    i.if_(BlockType::Empty); // errno != 0 → 0 bytes
-    i.i32_const(0).global_set(g_plen);
-    i.i64_const(0).return_();
+    i.call(4); // fd_read; an errno ends the stream
+    i.br_if(1);
+    i.i32_const(park as i32).i32_load(mem(NREAD)).local_tee(nread);
+    i.i32_eqz().br_if(1); // EOF
+    i.local_get(total).local_get(nread).i32_add().local_set(total);
+    i.br(0);
+    i.end().end();
+}
+
+/// Move the `total` bytes read at `base` (the guest heap's frontier) to
+/// base + 2*total + 64 and point g_ppos there: the one guest allocation
+/// before host_read lands at that frontier and is at most total bytes plus
+/// its header (the fs service's `$stage` rule). memory.copy is a memmove.
+fn stage_high(i: &mut wasm_encoder::InstructionSink<'_>, park: u64, g_ppos: u32, l: StdinLocals) {
+    let StdinLocals { base, total, room, wide, .. } = l;
+    // wide = the end the staged copy needs, base + 3*total + 64, in i64 (the
+    // sum may pass 4 GiB, which no grow can serve)
+    i.local_get(base).i64_extend_i32_u();
+    i.local_get(total).i64_extend_i32_u().i64_const(3).i64_mul().i64_add();
+    i.i64_const(64).i64_add().local_set(wide);
+    i.local_get(wide).i64_const(1 << 32).i64_gt_u().if_(BlockType::Empty);
+    refuse(i, park, MSG3, OOM_MSG.len());
     i.end();
-    i.i32_const(park as i32).i32_load(mem(NREAD)).local_set(nread);
-    i.local_get(nread).global_set(g_plen);
-    i.local_get(nread).i64_extend_i32_u().return_();
+    i.local_get(wide).memory_size(0).i64_extend_i32_u().i64_const(16).i64_shl().i64_sub();
+    i.local_tee(wide).i64_const(0).i64_gt_s().if_(BlockType::Empty);
+    i.local_get(wide).i64_const(0xFFFF).i64_add().i64_const(16).i64_shr_u().i32_wrap_i64();
+    i.memory_grow(0).i32_const(0).i32_lt_s().if_(BlockType::Empty);
+    refuse(i, park, MSG3, OOM_MSG.len());
     i.end();
+    i.end();
+    i.local_get(base).local_get(total).i32_const(1).i32_shl().i32_add();
+    i.i32_const(64).i32_add().local_tee(room); // dst
+    i.local_get(base).local_get(total).memory_copy(0, 0);
+    i.local_get(room).global_set(g_ppos);
 }
 
 /// op 36: env.sleep_ms — a MONOTONIC busy-wait over clock_time_get (the ms
