@@ -1,0 +1,42 @@
+// @expect-fail: Error: head count must be positive
+// @contract: C-198
+// The fused Qwen3 layers divide the query heads by the KV heads
+// (`n_rep = n_q_heads / n_kv_heads`) before any other head-count read, so a
+// zero KV head count reached a raw Rust `attempt to divide by zero` panic
+// natively (exit 101, the form ALS-T6 forbids) while the self-hosted wasm body
+// died in the language's own division abort — two different lines for one
+// program (#1827). Both legs now ask the shared head-count guard first, the
+// C-198 rule every attention/rope entry already follows; a negative KV head
+// count was already this abort (the per-head norm reads it), so this pins the
+// one value that skipped it.
+fn main() -> Unit = {
+  let h = matrix.from_lists([
+    [0.5, -1.0, 2.0, 0.25]
+  ])
+  let e = matrix.zeros(0, 0)
+  let w = bytes.from_list(list.repeat(60, 64))
+  let (out, _k, _v) = matrix.qwen3_block_f32_kv(
+    h,
+    e,
+    e,
+    w,
+    [0, 0, 0, 0],
+    [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    0,
+    2,
+    0,
+    2,
+    4,
+    10000.0,
+    0.00001,
+  )
+  println("UNREACHABLE ${matrix.rows(out)}")
+}
