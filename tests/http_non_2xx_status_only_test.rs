@@ -6,11 +6,10 @@
 //!
 //! The server answers every request `404` with a reason phrase no table
 //! would produce (`Gone Fishing`), so a leg that still renders the line's
-//! reason, or one that renders a table's, is visible. Native (`almide run`)
-//! runs all four streaming calls; the embedded lane (`almide run --target
-//! wasm`) runs the two `_with_limits` twins it serves (the plain
-//! `request_stream` and `openai_streaming_call` are E081 there, ADR-0023
-//! step 4), and must print the same lines for them.
+//! reason, or one that renders a table's, is visible. All four streaming
+//! calls — the two `_with_limits` twins and the plain `request_stream` /
+//! `openai_streaming_call` — run on native (`almide run`) and on the embedded
+//! lane (`almide run --target wasm`), and both print the expected bytes.
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::Path;
@@ -57,15 +56,7 @@ fn serve() -> u16 {
     port
 }
 
-/// The calls every leg serves; `plain` adds the native-only two.
-fn program(port: u16, plain: bool) -> String {
-    let native_only = if plain {
-        r#"  said_s("openai", http.openai_streaming_call(base, "k", "{}", (d) => println("delta ${d}")))
-  said("stream", http.request_stream("GET", url, "", map.new(), (c) => println("chunk ${c}")))
-"#
-    } else {
-        ""
-    };
+fn program(port: u16) -> String {
     format!(
         r#"import http
 
@@ -84,13 +75,15 @@ effect fn main() -> Unit = {{
   let base = "http://127.0.0.1:{port}/v1"
   said("stream_limits", http.request_stream_with_limits("GET", url, "", map.new(), {{ total_ms: 20000, idle_ms: 0 }}, (c) => println("chunk ${{c}}")))
   said_s("openai_limits", http.openai_streaming_call_with_limits(base, "k", "{{}}", {{ total_ms: 20000, idle_ms: 0 }}, (d) => println("delta ${{d}}")))
-{native_only}}}
+  said_s("openai", http.openai_streaming_call(base, "k", "{{}}", (d) => println("delta ${{d}}")))
+  said("stream", http.request_stream("GET", url, "", map.new(), (c) => println("chunk ${{c}}")))
+}}
 "#
     )
 }
 
-const SERVED: &str = "stream_limits err HTTP 404: gone\nopenai_limits err HTTP 404: gone\n";
-const NATIVE_ONLY: &str = "openai err HTTP 404: gone\nstream err HTTP 404: gone\n";
+const EXPECTED: &str = "stream_limits err HTTP 404: gone\nopenai_limits err HTTP 404: gone\n\
+openai err HTTP 404: gone\nstream err HTTP 404: gone\n";
 
 fn run(file: &Path, wasm: bool) -> (String, String, Option<i32>) {
     let mut c = Command::new(env!("CARGO_BIN_EXE_almide"));
@@ -106,13 +99,10 @@ fn run(file: &Path, wasm: bool) -> (String, String, Option<i32>) {
 fn a_non_2xx_streaming_call_answers_the_status_without_a_reason_phrase_on_every_leg() {
     let port = serve();
     let dir = tempfile::tempdir().expect("tempdir");
-    let all = dir.path().join("non_2xx_all.almd");
-    std::fs::write(&all, program(port, true)).expect("write");
-    let served = dir.path().join("non_2xx_served.almd");
-    std::fs::write(&served, program(port, false)).expect("write");
-    let native = run(&all, false);
-    let want = format!("{SERVED}{NATIVE_ONLY}");
-    assert_eq!((native.0.as_str(), native.2), (want.as_str(), Some(0)), "native: {}", native.1);
-    let embedded = run(&served, true);
-    assert_eq!((embedded.0.as_str(), embedded.2), (SERVED, Some(0)), "the embedded lane: {}", embedded.1);
+    let file = dir.path().join("non_2xx.almd");
+    std::fs::write(&file, program(port)).expect("write");
+    let native = run(&file, false);
+    assert_eq!((native.0.as_str(), native.2), (EXPECTED, Some(0)), "native: {}", native.1);
+    let embedded = run(&file, true);
+    assert_eq!((embedded.0.as_str(), embedded.2), (EXPECTED, Some(0)), "the embedded lane: {}", embedded.1);
 }
