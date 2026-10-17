@@ -94,7 +94,13 @@ pub const VERDICTS: &[Verdict] = &[
     },
     // How much of the echo has arrived is the network's timing.
     Verdict { func: "net.tcp_read", holds: "bytes.len(v) <= {len} or {len} < 0", canon: "bytes.from_list([])", domain: &[] },
-    Verdict { func: "net.tcp_read_timeout", holds: "bytes.len(v) <= {len} or {len} < 0", canon: "bytes.from_list([])", domain: &[] },
+    // A timeout the echo can beat on any host: a 1 ms one races it.
+    Verdict {
+        func: "net.tcp_read_timeout",
+        holds: "bytes.len(v) <= {len} or {len} < 0",
+        canon: "bytes.from_list([])",
+        domain: &[("timeout_ms", "1000 + int.abs({timeout_ms}) % 1000")],
+    },
     // A socket's handle counts the sockets opened before it: two paths that
     // each open one see different handles. The value the program goes on
     // with is the handle itself (the legs number them alike).
