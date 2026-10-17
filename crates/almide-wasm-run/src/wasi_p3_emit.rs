@@ -287,6 +287,7 @@ fn to_p3_shaped(bytes: &[u8], host_ops: &[i32], service: bool) -> anyhow::Result
     let g = P3Globals {
         park, f_alloc, g_plen, g_ppos, g_in_rx, g_in_fut, g_out_tx, g_out_fut,
         g_err_tx, g_err_fut, g_wset, g_slots, g_slotn, f_reserve, f_await, g_env, g_envn,
+        heap: heap_global,
     };
     let out_port = PrintPort { g_tx: g_out_tx, g_fut: g_out_fut, call_import: I_OUT_CALL, new_import: I_OUT_NEW, write_import: I_OUT_WRITE };
     let err_port = PrintPort { g_tx: g_err_tx, g_fut: g_err_fut, call_import: I_ERR_CALL, new_import: I_ERR_NEW, write_import: I_ERR_WRITE };
