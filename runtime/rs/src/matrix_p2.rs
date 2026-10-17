@@ -536,8 +536,10 @@ fn offs_at(offs: &[i64], i: usize) -> i64 {
 // 1-D tensors that don't go through a Matrix intrinsic. An element whose 4
 // bytes are not all inside `w` is 0.0 — `bytes.read_f32_le`'s out-of-range
 // answer and the byte loaders' all-zero edge (C-229) — never a raw slice
-// panic (#1827).
-fn load_f32_to_f64(w: &[u8], offset: usize, len: usize) -> Vec<f64> {
+// panic (#1827). The width is a matrix extent: a negative one is empty and one
+// past the 2^28-element ceiling aborts (C-161), as `matrix.zeros(len, 1)` does.
+fn load_f32_to_f64(w: &[u8], offset: usize, len: i64) -> Vec<f64> {
+    let (len, _) = almide_rt_matrix_dims(len, 1);
     let mut out = Vec::<f64>::with_capacity(len);
     for i in 0..len {
         let v = offset
@@ -618,16 +620,16 @@ pub fn almide_rt_matrix_qwen3_block_q1_0_kv(
     rope_theta: f64,
     eps: f64,
 ) -> (AlmideMatrix, AlmideMatrix, AlmideMatrix) {
-    let hidden = (n_q_heads * head_dim) as usize;
-    let kv_hidden = (n_kv_heads * head_dim) as usize;
+    let hidden = n_q_heads.wrapping_mul(head_dim) as usize;
+    let kv_hidden = n_kv_heads.wrapping_mul(head_dim) as usize;
     // C-198: the KV head count is a head count before it is a divisor (a raw
     // `attempt to divide by zero` panic at 0, #1827).
     let n_rep = n_q_heads / almide_rt_matrix_head_count(n_kv_heads) as i64;
 
-    let gamma_attn = load_f32_to_f64(w, offs_at(gamma_offs, 0).max(0) as usize, hidden);
-    let gamma_q = load_f32_to_f64(w, offs_at(gamma_offs, 1).max(0) as usize, head_dim.max(0) as usize);
-    let gamma_k = load_f32_to_f64(w, offs_at(gamma_offs, 2).max(0) as usize, head_dim.max(0) as usize);
-    let gamma_ffn = load_f32_to_f64(w, offs_at(gamma_offs, 3).max(0) as usize, hidden);
+    let gamma_attn = load_f32_to_f64(w, offs_at(gamma_offs, 0).max(0) as usize, hidden as i64);
+    let gamma_q = load_f32_to_f64(w, offs_at(gamma_offs, 1).max(0) as usize, head_dim);
+    let gamma_k = load_f32_to_f64(w, offs_at(gamma_offs, 2).max(0) as usize, head_dim);
+    let gamma_ffn = load_f32_to_f64(w, offs_at(gamma_offs, 3).max(0) as usize, hidden as i64);
 
     let h_normed = almide_rt_matrix_rms_norm_rows(h, &gamma_attn, eps);
 
@@ -890,16 +892,16 @@ pub fn almide_rt_matrix_qwen3_block_f32_kv(
     eps: f64,
 ) -> (AlmideMatrix, AlmideMatrix, AlmideMatrix) {
     let hidden = if h.rows > 0 { h.cols } else { 0 };
-    let q_hidden = (n_q_heads * head_dim) as usize;
-    let kv_hidden = (n_kv_heads * head_dim) as usize;
+    let q_hidden = n_q_heads.wrapping_mul(head_dim) as usize;
+    let kv_hidden = n_kv_heads.wrapping_mul(head_dim) as usize;
     // C-198: the KV head count is a head count before it is a divisor (a raw
     // `attempt to divide by zero` panic at 0, #1827).
     let n_rep = n_q_heads / almide_rt_matrix_head_count(n_kv_heads) as i64;
 
-    let gamma_attn = load_f32_to_f64(w, offs_at(gamma_offs, 0).max(0) as usize, hidden);
-    let gamma_q = load_f32_to_f64(w, offs_at(gamma_offs, 1).max(0) as usize, head_dim.max(0) as usize);
-    let gamma_k = load_f32_to_f64(w, offs_at(gamma_offs, 2).max(0) as usize, head_dim.max(0) as usize);
-    let gamma_ffn = load_f32_to_f64(w, offs_at(gamma_offs, 3).max(0) as usize, hidden);
+    let gamma_attn = load_f32_to_f64(w, offs_at(gamma_offs, 0).max(0) as usize, hidden as i64);
+    let gamma_q = load_f32_to_f64(w, offs_at(gamma_offs, 1).max(0) as usize, head_dim);
+    let gamma_k = load_f32_to_f64(w, offs_at(gamma_offs, 2).max(0) as usize, head_dim);
+    let gamma_ffn = load_f32_to_f64(w, offs_at(gamma_offs, 3).max(0) as usize, hidden as i64);
 
     let h_normed = almide_rt_matrix_rms_norm_rows(h, &gamma_attn, eps);
 
@@ -1137,16 +1139,16 @@ pub fn almide_rt_matrix_qwen3_block_q8_0_kv(
     eps: f64,
 ) -> (AlmideMatrix, AlmideMatrix, AlmideMatrix) {
     let hidden = if h.rows > 0 { h.cols } else { 0 };
-    let q_hidden = (n_q_heads * head_dim) as usize;
-    let kv_hidden = (n_kv_heads * head_dim) as usize;
+    let q_hidden = n_q_heads.wrapping_mul(head_dim) as usize;
+    let kv_hidden = n_kv_heads.wrapping_mul(head_dim) as usize;
     // C-198: the KV head count is a head count before it is a divisor (a raw
     // `attempt to divide by zero` panic at 0, #1827).
     let n_rep = n_q_heads / almide_rt_matrix_head_count(n_kv_heads) as i64;
 
-    let gamma_attn = load_f32_to_f64(w, offs_at(gamma_offs, 0).max(0) as usize, hidden);
-    let gamma_q = load_f32_to_f64(w, offs_at(gamma_offs, 1).max(0) as usize, head_dim.max(0) as usize);
-    let gamma_k = load_f32_to_f64(w, offs_at(gamma_offs, 2).max(0) as usize, head_dim.max(0) as usize);
-    let gamma_ffn = load_f32_to_f64(w, offs_at(gamma_offs, 3).max(0) as usize, hidden);
+    let gamma_attn = load_f32_to_f64(w, offs_at(gamma_offs, 0).max(0) as usize, hidden as i64);
+    let gamma_q = load_f32_to_f64(w, offs_at(gamma_offs, 1).max(0) as usize, head_dim);
+    let gamma_k = load_f32_to_f64(w, offs_at(gamma_offs, 2).max(0) as usize, head_dim);
+    let gamma_ffn = load_f32_to_f64(w, offs_at(gamma_offs, 3).max(0) as usize, hidden as i64);
 
     let h_normed = almide_rt_matrix_rms_norm_rows(h, &gamma_attn, eps);
 

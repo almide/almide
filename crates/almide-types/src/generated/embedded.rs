@@ -26499,10 +26499,14 @@ fn __qw_repeat_kv(kv: Matrix, n_kv_heads: Int, n_rep: Int) -> Matrix =
   }
 
 
-fn __qw_gamma(w: Bytes, off: Int, len: Int) -> List[Float] = {
-  let o = __mxp_clamp(off)
-  list.range(0, len) |> list.map((i) => bytes.read_f32_le(w, o + i * 4))
-}
+
+
+fn __qw_gamma(w: Bytes, off: Int, len: Int) -> List[Float] =
+  if __mxp_over(len, 1) then matrix.to_lists(matrix.zeros(len, 1)) |> list.map((r) => r[0])
+  else {
+    let o = __mxp_clamp(off)
+    list.range(0, len) |> list.map((i) => bytes.read_f32_le(w, o + i * 4))
+  }
 
 
 fn __qw_linear(kind: Int, x: Matrix, w: Bytes, off: Int, rows: Int, cols: Int) -> Matrix = match kind {
