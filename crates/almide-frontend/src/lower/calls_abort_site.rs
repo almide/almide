@@ -25,7 +25,13 @@ fn lower_assert_aborts(ctx: &mut LowerCtx, callee: &ast::Expr, args: &[ast::Expr
     if !params.is_empty() {
         return None;
     }
-    let is_effect = matches!(ctx.expr_ty(&args[1]), Ty::Fn { is_effect: true, .. });
+    // Every site fn is an effect fn: the body is lowered inside the test (an
+    // effect fn), so a `!` in it is a Try that propagates out of the site
+    // fn, whatever the lambda's type said — an effect closure's slot type can
+    // read `is_effect: false` where the body still propagates an err. The
+    // dispatcher propagates it, and a leg's child entry ends with it as an
+    // effect `main` does: `Error: <msg>`, exit 1.
+    let is_effect = true;
     let expected = lower_expr(ctx, &args[0]);
     ctx.in_test = false;
     ctx.push_scope();
