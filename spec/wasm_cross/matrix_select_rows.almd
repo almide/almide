@@ -1,7 +1,7 @@
 // @contract: C-228
 // The matrix.select_rows_f32 selector decodes identically on both targets (the
 // shared f32 LE decoder the full-matrix loader uses, on a row-subset schedule).
-// Its Q1_0 / Q8_0 siblings left the stdlib at dialect epoch 14 (package almide/nn).
+// Its Q1_0 / Q8_0 siblings left the stdlib at dialect epoch 14 (package almide/nnlib).
 import matrix
 import bytes
 

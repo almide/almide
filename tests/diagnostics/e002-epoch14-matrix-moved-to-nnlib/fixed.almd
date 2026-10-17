@@ -1,4 +1,4 @@
-// The real fix is `almide add almide/nn@v0.1.0`, `import nn` and `nn.gelu(m)`;
+// The real fix is `almide add almide/nnlib@v0.1.0`, `import nnlib` and `nnlib.gelu(m)`;
 // this case checks without dependencies, so it keeps a local element-wise form.
 fn gelu_scalar(x: Float) -> Float = 0.5 * x * (1.0 + math.tanh(0.7978845608028654 * (x + 0.044715 * x * x * x)))
 

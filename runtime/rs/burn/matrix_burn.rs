@@ -81,7 +81,7 @@ fn wrap(t: Tensor<B, 2>) -> AlmideMatrix { AlmideMatrix::Burn(t) }
 // ── Fused-matmul helpers ────────────────────────────────────────────
 //
 // The fused runtime fns (the NN fusions that used these left the stdlib
-// at dialect epoch 14 for package almide/nn) share the same skeleton:
+// at dialect epoch 14 for package almide/nnlib) share the same skeleton:
 //
 //   1. Build a fresh output buffer, optionally seeded from `bias` / a
 //      previous result for `β != 0` GEMM use.
