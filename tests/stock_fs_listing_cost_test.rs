@@ -157,6 +157,39 @@ fn stock_list_dir_reads_in_logarithmic_passes() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Even doubling, every pass is a full host read: wasmtime collects and
+/// stats the WHOLE directory on each `fd_readdir` call, whatever the cookie,
+/// so a listing of E entries in P passes costs E x P host work, and P grows
+/// with log(E). On GCE the stock `fs.list_dir` series read 7.6k host and
+/// guest instructions per entry in one pass, 13.3k in two and 18.7k in three
+/// — the step where the directory first outgrew 16 KiB (403 to 803 entries)
+/// read as no complexity class at all. The directory's own size bounds its
+/// dirents (an ext4 / APFS / tmpfs directory spends at least a quarter of a
+/// WASI dirent's 24 + name bytes per entry), so the first buffer is sized
+/// from it and the listing takes one pass wherever that bound holds.
+#[test]
+fn stock_list_dir_reads_a_directory_its_size_bounds_in_one_pass() {
+    if !has_wasmtime() {
+        return;
+    }
+    let dir = probe_dir("one-pass");
+    let st_size = std::fs::metadata(dir.join("d")).expect("stat d").len() as usize;
+    // ENTRIES files of 7-byte names, the nested dir and `.` / `..`.
+    let bytes = (ENTRIES + 3) * (24 + 7);
+    if 4 * st_size < bytes {
+        eprintln!("skipping: this filesystem's directory size ({st_size} B) does not bound its {bytes} B of dirents");
+        return;
+    }
+    std::fs::write(dir.join("probe.almd"), program("fs.list_dir(\"d\")")).expect("write");
+    build_stock(&dir);
+    let Some(calls) = readdir_calls(&dir) else {
+        eprintln!("skipping: this wasmtime does not trace fd_readdir");
+        return;
+    };
+    assert_eq!(calls, 1, "{calls} fd_readdir passes for {ENTRIES} entries in a directory of {st_size} B");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn stock_list_dir_sorts_in_n_log_n() {
     check("list_dir", "fs.list_dir(\"d\")");
