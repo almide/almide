@@ -181,10 +181,23 @@ pub struct Session {
 pub const READY_CAP: Duration = Duration::from_secs(180);
 pub const STOP_CAP: Duration = Duration::from_secs(30);
 
-/// A loopback port nothing listens on now. The server binds `0.0.0.0` on
-/// it; a race with another process is reported as a bind failure, and
-/// [`drive_fresh`] retries on a new port.
+/// A port nothing listens on now, below every ephemeral range (Linux
+/// 32768.., macOS 49152..): the server binds it only after it starts (the
+/// embedded lane compiles first), and meanwhile the readiness connects of
+/// this and every parallel session take ephemeral ports, which an
+/// ephemeral pick could collide with. Ports are handed out in turn from an
+/// offset per process. A race with another process is still a bind
+/// failure, which [`drive_fresh`] retries on a new port.
 pub fn free_port() -> u16 {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static NEXT: AtomicU32 = AtomicU32::new(0);
+    let base = std::process::id().wrapping_mul(7919) % 10_000;
+    for _ in 0..10_000 {
+        let port = (20_000 + (base + NEXT.fetch_add(1, Ordering::Relaxed)) % 10_000) as u16;
+        if TcpListener::bind(("0.0.0.0", port)).is_ok() {
+            return port;
+        }
+    }
     TcpListener::bind("127.0.0.1:0").and_then(|l| l.local_addr()).map(|a| a.port()).unwrap_or(0)
 }
 
@@ -500,7 +513,8 @@ pub fn observe(raw: &[u8]) -> Result<Observed, String> {
     } else if chunked {
         dechunk(rest)?
     } else if let Some(n) = o.content_length.first().and_then(|v| v.parse::<usize>().ok()) {
-        rest.get(..n).ok_or_else(|| format!("content-length {n} but {} body bytes", rest.len()))?.to_vec()
+        // A length the bytes do not meet is the framing verdict's to report.
+        rest[..n.min(rest.len())].to_vec()
     } else {
         rest.to_vec()
     };
@@ -833,7 +847,9 @@ mod tests {
     /// per request read to close, the transcript, and the stop.
     #[test]
     fn a_session_retries_until_ready_sends_each_request_and_stops_the_server() {
+        // The listener binds late, as a server that compiles first does.
         let port = free_port();
+        assert!((20_000..30_000).contains(&port), "{port}: below the ephemeral ranges");
         let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
         let seen2 = seen.clone();
         let n = Plan::Script.requests().len();
@@ -877,9 +893,9 @@ mod tests {
     /// `sh` that runs `sleep` as a child and then `exit 7` stands in for it.
     #[test]
     fn a_wrapped_session_signals_the_launchers_child_and_the_launcher_reports() {
-        let port = free_port();
+        let l = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = l.local_addr().unwrap().port();
         std::thread::spawn(move || {
-            let l = TcpListener::bind(("127.0.0.1", port)).unwrap();
             let (mut s, _) = l.accept().unwrap();
             let mut buf = [0u8; 1024];
             let _ = s.read(&mut buf);
