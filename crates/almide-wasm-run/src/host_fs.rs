@@ -264,6 +264,10 @@ fn fs_mtime(op: i32, a: &str) -> (i64, Vec<u8>) {
     }
 }
 
+fn same_file(a: &str, b: &str) -> bool {
+    matches!((std::fs::canonicalize(a), std::fs::canonicalize(b)), (Ok(x), Ok(y)) if x == y)
+}
+
 /// ops 19 / 20: copy / rename `a` to the path in `b`.
 fn fs_copy_or_rename(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     let to = String::from_utf8_lossy(b);
@@ -272,6 +276,9 @@ fn fs_copy_or_rename(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     let r = if op == 19 {
         match std::path::Path::new(a).is_dir().then(|| std::fs::read(a)) {
             Some(Err(e)) => Err(e),
+            // Onto the same file the copy is already done (truncating it
+            // first would empty it): the twin of native's `fs_same_file`.
+            _ if same_file(a, &to) => Ok(()),
             _ => std::fs::copy(a, to.as_ref()).map(|_| ()),
         }
     } else {
