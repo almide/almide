@@ -241,7 +241,8 @@ fn an_exit_code_crosses_the_component_route() {
 /// the armed component writes the allocator's exit report itself, in the
 /// core-module host's line form, so a full-response call is measured on the
 /// embedded lane like every other call — after a normal exit and after
-/// `process.exit` alike — and a full-response round trip leaves no block live.
+/// `process.exit` alike — and a full-response round trip that returns
+/// normally leaves no block live.
 #[test]
 fn the_component_route_reports_the_allocation_counters() {
     let port = serve();
@@ -260,6 +261,10 @@ fn the_component_route_reports_the_allocation_counters() {
         for field in ["reused=", "bytes=", "frees=", "reclaimed=", "heap_end="] {
             assert!(report.contains(field), "{name}: {report}");
         }
-        assert!(report.contains(" live=0 "), "{name}: a full-response round trip left blocks live: {report}");
+        // `process.exit` leaves `main`'s blocks unreleased on the core host
+        // too, so only a normal exit is held to live=0.
+        if name == "normal" {
+            assert!(report.contains(" live=0 "), "{name}: a full-response round trip left blocks live: {report}");
+        }
     }
 }

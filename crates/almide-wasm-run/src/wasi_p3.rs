@@ -541,6 +541,9 @@ include!("wasi_p3_fs.rs");
 // `$await` and the env/args/sleep service: wasi_p3_env.rs.
 include!("wasi_p3_env.rs");
 
+// The armed module's allocation report: wasi_p3_alloc.rs.
+include!("wasi_p3_alloc.rs");
+
 /// `(dst) -> ()`: copy the parked payload to guest memory.
 fn shim_host_read(g_plen: u32, g_ppos: u32) -> Function {
     let mut f = Function::new([]);
@@ -558,11 +561,15 @@ fn shim_host_read(g_plen: u32, g_ppos: u32) -> Function {
 /// deterministic drain handshake), drop the stdin readables, task.return
 /// (ok), answer EXIT (0). The callback is never reached: everything
 /// happened in the initial call.
-fn shim_run(main_index: u32, g: P3Globals) -> Function {
+fn shim_run(main_index: u32, g: P3Globals, report: Option<u32>) -> Function {
     let P3Globals { park, g_out_tx, g_out_fut, g_err_tx, g_err_fut, g_in_rx, g_in_fut, g_wset, f_await, .. } = g;
     let mut f = Function::new([]);
     let mut i = f.instructions();
     i.call(main_index);
+    // An armed module reports its counters while stderr is still open.
+    if let Some(r) = report {
+        i.call(r);
+    }
 
     // End both streams, then wait for the host's completion future: the
     // future.read completes only once every byte is drained host-side.

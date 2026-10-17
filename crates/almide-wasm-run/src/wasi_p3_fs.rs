@@ -23,10 +23,14 @@ fn shim_print(port: PrintPort, park: u64, f_await: u32, newline: bool) -> Functi
 }
 
 /// `(code) -> ()`: `exit-with-code(code)` — the guest has already refused a
-/// code outside 0..=255, so the byte is the code (C-350).
-fn shim_exit() -> Function {
+/// code outside 0..=255, so the byte is the code (C-350). An armed module
+/// reports its allocation counters first.
+fn shim_exit(report: Option<u32>) -> Function {
     let mut f = Function::new([]);
     let mut i = f.instructions();
+    if let Some(r) = report {
+        i.call(r);
+    }
     i.local_get(0);
     i.call(I_EXIT);
     i.unreachable();
