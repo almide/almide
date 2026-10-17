@@ -15,7 +15,8 @@
 //   rope -> KV append -> repeat_kv -> causal multi-head attention (C-223's
 //   fast-exp softmax) -> output projection -> residual -> SwiGLU FFN ->
 //   residual, each step native's own arithmetic; a norm gamma past the byte
-//   buffer reads 0.0 per missing element (C-229's out-of-buffer edge).
+//   buffer reads 0.0 per missing element (C-229's out-of-buffer edge), and
+//   head_dim 0 walks no head.
 fn show(tag: String, m: Matrix) -> Unit = {
   let l = matrix.to_lists(m)
   let s = matrix.shape(m)
@@ -201,6 +202,35 @@ fn block_f32() -> Unit = {
     0.000001,
   )
   show("qwen3_f32_gamma_oob", h_oob)
+  // head_dim 0: no head has a column, so the per-head norm and the KV widening
+  // walk none of the 2^40 heads (native looped over every one and never
+  // returned); attention adds nothing and the FFN still runs.
+  let (h0, k0, v0) = matrix.qwen3_block_f32_kv(
+    h,
+    matrix.zeros(0, 0),
+    matrix.zeros(0, 0),
+    w,
+    [0, 0, 0, 0],
+    [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    0,
+    1099511627776,
+    1,
+    0,
+    8,
+    10000.0,
+    0.00001,
+  )
+  show("qwen3_f32_head_dim0", h0)
+  show("qwen3_f32_head_dim0.k", k0)
+  show("qwen3_f32_head_dim0.v", v0)
 }
 
 fn block_q8() -> Unit = {
