@@ -41,6 +41,22 @@ pub const P3_EXCLUDED_P1_OPS: &[(i32, &str)] = &[
     (90, PROC_EXCLUDED),
 ];
 
+/// The ops the WASI 0.3 shim serves and the embedded core-module host does
+/// not: ADR-0023 step 4 put them in the shim only (op 65, the full-response
+/// client), and decision 1 forbids a host-served twin. On the embedded lane a
+/// program naming one runs as its p3 component (step 7, `run_component`),
+/// whose wasi:http transport is native's rt-core client. Every other program
+/// keeps the core-module route until step 7's full switch, which waits on the
+/// call handle in the shim (ops 53..=59) and on exit codes above 1, which
+/// the p3 shim's `wasi:cli/exit` cannot carry (C-350).
+pub const COMPONENT_ONLY_OPS: &[i32] = &[65];
+
+/// Whether `almide run --target wasm` runs this op set as the p3 component:
+/// it names a component-only op and the p3 shim serves all of it.
+pub fn embedded_runs_component(host_ops: &[i32]) -> bool {
+    host_ops.iter().any(|op| COMPONENT_ONLY_OPS.contains(op)) && check(host_ops, true).is_ok()
+}
+
 /// Reject an artifact before writing it when its direct shim cannot serve it.
 /// P3 HTTP imports are selected separately whenever an HTTP operation is emitted.
 pub fn check(host_ops: &[i32], p3: bool) -> Result<(), String> {
@@ -117,7 +133,22 @@ fn operation_name(op: i32) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{serves, P3_EXCLUDED_P1_OPS};
+    use super::{embedded_runs_component, serves, COMPONENT_ONLY_OPS, P3_EXCLUDED_P1_OPS};
+
+    /// A component-only op is one the p3 shim serves and the p1 shim does
+    /// not (the embedded core host serves the p1 surface and more, never
+    /// less); the embedded route takes it to the component only when the
+    /// shim serves the whole op set.
+    #[test]
+    fn component_only_ops_are_p3_ops_the_route_sends_to_the_component() {
+        for op in COMPONENT_ONLY_OPS {
+            assert!(serves(*op, true), "component-only op {op} is not served on p3");
+            assert!(!crate::wasi::P1_SERVED_OPS.contains(op), "component-only op {op} is p1-served");
+            assert!(embedded_runs_component(&[1, *op]), "op {op} with fs.read_text stays on the core route");
+            assert!(!embedded_runs_component(&[53, *op]), "op {op} with the call handle left the core route");
+        }
+        assert!(!embedded_runs_component(&[43, 48]), "a program the core host serves left the core route");
+    }
 
     /// #3140's exit gate: a program that builds as a p1 core module also
     /// builds as a p3 component — the p3 served set covers every p1-served op

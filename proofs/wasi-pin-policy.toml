@@ -27,8 +27,11 @@ minor = "0.3.0"
 [runtime]
 # wasmtime floor for the p3 leg: 46 is the first release running p3 BY
 # DEFAULT; LTS 36 has NO default p3 (documented refusal, not a target).
-# `crate_major` is the embedded host's Cargo pin; `ci` is the release CI
-# installs for the execution legs.
+# `crate_major` is the embedded host's Cargo pin — wasmtime, and the
+# wasmtime-wasi / wasmtime-wasi-http p3 worlds it runs an HTTP program's
+# component on (ADR-0023 step 7), in lockstep (§6.5: their p3 modules are
+# experimental and get no patch backports, so they move with the major);
+# `ci` is the release CI installs for the execution legs.
 floor = 46
 crate_major = 49
 ci = "v49.0.1"
