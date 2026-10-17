@@ -31,6 +31,10 @@ fn owned_prelude(vis: &str) -> String {
     s.push_str(&format!("{vis}fn almide_shared_value<T: AlmideShare>(v: T) -> T {{ v.almide_share(); v }}\n"));
     // `x.to_almide()`: an owned Almide String copied from any string-typed value.
     s.push_str(&format!("{vis}trait AlmideToStr {{ fn to_almide(&self) -> AlmideString; }}\nimpl AlmideToStr for str {{ #[inline(always)] fn to_almide(&self) -> String {{ self.to_string() }} }}\n"));
+    // Constructors the runtime builds its hot results through, so the shared
+    // buffer can build them in place (see `shared_prelude`).
+    s.push_str(&format!("{vis}fn almide_str_from_i64(n: i64) -> String {{ n.to_string() }}\n"));
+    s.push_str(&format!("{vis}fn almide_str_join(parts: &[String], sep: &str) -> String {{ parts.join(sep) }}\n"));
     s.push_str(&concat_trait(vis));
     // The owned-String impls extend in place (`push_str`) instead of
     // `format!`: byte-identical output, but an owned accumulator keeps its
@@ -60,6 +64,11 @@ fn shared_prelude(vis: &str) -> String {
     s.push_str(&shared_thread_boundary(vis));
     s.push_str(&format!("{vis}trait AlmideToStr {{ fn to_almide(&self) -> AlmideString; }}\nimpl AlmideToStr for str {{ #[inline(always)] fn to_almide(&self) -> AlmideStr {{ AlmideStr::from(self) }} }}\n"));
     s.push_str("impl AlmideRepr for AlmideStr { fn almide_repr(&self) -> String { almide_repr_str(self) } }\n");
+    // Built straight into one exact block. Rendering a `String` and converting
+    // it pays a second allocation, copy and free per result, which cost
+    // strchurn 41% on the step 7 A/B.
+    s.push_str(&format!("{vis}#[inline] fn almide_str_from_i64(n: i64) -> AlmideStr {{ AlmideStr::from_i64(n) }}\n"));
+    s.push_str(&format!("{vis}#[inline] fn almide_str_join(parts: &[AlmideStr], sep: &str) -> AlmideStr {{ AlmideStr::join(parts, sep) }}\n"));
     s.push_str(SHARED_INTO_IMPLS);
     s.push_str(&concat_trait(vis));
     s.push_str(SHARED_CONCAT_IMPLS);

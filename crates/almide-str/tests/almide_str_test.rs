@@ -181,3 +181,31 @@ fn random_edits_over_shared_handles_match_a_string_model() {
         }
     }
 }
+
+#[test]
+fn from_i64_renders_like_to_string_in_one_exact_block() {
+    for n in [0i64, 1, -1, 9, 10, -10, 12345, -98765, i64::MAX, i64::MIN, 1 << 40, -(1 << 40)] {
+        let s = AlmideStr::from_i64(n);
+        assert_eq!(s.as_str(), n.to_string());
+        assert_eq!(s.capacity(), s.len(), "one exact-size block, not a copy of a String");
+        assert!(s.is_unique());
+    }
+}
+
+#[test]
+fn join_matches_slice_join_and_leaves_the_parts_shared() {
+    let cases: Vec<Vec<&str>> = vec![vec![], vec![""], vec!["a"], vec!["", ""], vec!["ab", "", "cde"], vec!["x"; 50]];
+    for parts in &cases {
+        let owned: Vec<AlmideStr> = parts.iter().map(|p| AlmideStr::from(*p)).collect();
+        for sep in ["", ",", "::", "é"] {
+            let j = AlmideStr::join(&owned, sep);
+            assert_eq!(j.as_str(), parts.join(sep));
+            assert_eq!(j.capacity(), j.len());
+        }
+    }
+    let p = AlmideStr::from("shared");
+    let q = p.clone();
+    let j = AlmideStr::join(&[p, AlmideStr::from("x")], "-");
+    assert_eq!(j, "shared-x");
+    assert!(q.is_unique(), "join only reads its parts");
+}
