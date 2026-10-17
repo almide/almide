@@ -444,11 +444,15 @@ pub fn run_ladder(
 
     match compare_runs(source, &native, &wasm, reference, expected) {
         // ── Rung (f): live heap at exit (wasm leg) — only a clean program
-        // that exited 0 is re-run with the allocation counters armed.
-        Outcome::Clean { native } if tc.leak_check && wasm.exit_code == Some(0) => match leak_at_exit(tc, file) {
-            Some(finding) => Outcome::Finding(finding),
-            None => Outcome::Clean { native },
-        },
+        // that exited 0 is re-run with the allocation counters armed. A
+        // program that ends by `process.exit` ends without unwinding on every
+        // leg: nothing was released, so nothing leaked.
+        Outcome::Clean { native } if tc.leak_check && wasm.exit_code == Some(0) && !crate::generator::ends_without_unwinding(source) => {
+            match leak_at_exit(tc, file) {
+                Some(finding) => Outcome::Finding(finding),
+                None => Outcome::Clean { native },
+            }
+        }
         other => other,
     }
 }

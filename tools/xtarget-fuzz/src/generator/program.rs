@@ -9,7 +9,8 @@
 
 use crate::rng::SplitMix64;
 
-use super::term::{gen_expr, gen_focus_call, Builder, ScopeVar, MAX_GOAL_DEPTH, START_FUEL};
+use super::sig_type::SigType;
+use super::term::{gen_expr, gen_final_call, gen_focus_call, Builder, ScopeVar, MAX_GOAL_DEPTH, START_FUEL};
 use super::types::{render_print, GenType};
 use super::{Generated, Origin, Signature};
 
@@ -114,7 +115,13 @@ pub fn synthesize_focused(rng: &mut SplitMix64, catalogue: &[Signature], focus: 
     // The observables: (binding name, type) we will println at the end.
     let mut observables: Vec<(String, GenType)> = Vec::new();
 
-    if let Some(idx) = focus {
+    // A focus that never returns is the program's last statement, its
+    // arguments bound here so the bindings after them may read them.
+    let mut last = None;
+    if let Some(idx) = focus.filter(|i| catalogue[*i].ret == SigType::Never) {
+        builder.fuel = START_FUEL;
+        last = gen_final_call(&mut builder, idx);
+    } else if let Some(idx) = focus {
         builder.fuel = START_FUEL;
         match gen_focus_call(&mut builder, idx) {
             // A `Unit` call (`env.set`, `io.print`) runs as a statement: a
@@ -165,6 +172,7 @@ pub fn synthesize_focused(rng: &mut SplitMix64, catalogue: &[Signature], focus: 
     for (name, ty) in &observables {
         body.push(render_print(name, ty));
     }
+    body.extend(last);
 
     let source = render_main(&body, builder.effect);
 

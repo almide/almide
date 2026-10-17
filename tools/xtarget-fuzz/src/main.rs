@@ -450,7 +450,10 @@ fn worker_loop(
                 // re-discovery dedups whatever the minimizer would produce:
                 // only the first leak of the campaign pays for minimizing
                 // (with the rung armed, so the ladder reproduces the kind).
-                if let Some(leak) = if tc.leak_check && gen.project.is_none() { leak_at_exit(&tc, &file) } else { None } {
+                // A program that ends by `process.exit` released nothing on
+                // any leg, so it has no leak to judge.
+                let judged = tc.leak_check && gen.project.is_none() && !crate::generator::ends_without_unwinding(&gen.source);
+                if let Some(leak) = if judged { leak_at_exit(&tc, &file) } else { None } {
                     stats.findings.fetch_add(1, Ordering::Relaxed);
                     if !sink.is_known(&leak) {
                         let minimized = match &gen.plan {
@@ -467,8 +470,13 @@ fn worker_loop(
                     }
                 }
             }
-            Outcome::GeneratorReject { .. } => {
+            Outcome::GeneratorReject { diagnostics } => {
                 stats.generator_rejects.fetch_add(1, Ordering::Relaxed);
+                // A focused campaign's rejects are the generator's defects
+                // about that function: say which (XF_SHOW_SKIPS=1).
+                if std::env::var_os("XF_SHOW_SKIPS").is_some() {
+                    eprintln!("  reject #{index}: {}", diagnostics.lines().find(|l| l.contains("error")).unwrap_or(""));
+                }
             }
             Outcome::Walled { reason } => {
                 stats.walled.fetch_add(1, Ordering::Relaxed);

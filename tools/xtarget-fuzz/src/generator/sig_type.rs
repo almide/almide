@@ -55,6 +55,10 @@ pub enum SigType {
     Endian,
     /// A stdlib nominal type the grammar builds ([`super::nominal`]).
     Nominal(&'static str),
+    /// `Never`: the call does not return. It has no value, so no goal
+    /// unifies with it; a program calls such a function only as its last
+    /// statement ([`super::catalogue::NEVER_RETURNING`]).
+    Never,
 }
 
 /// Single-letter (or short) names the stdlib uses for generic type
@@ -78,6 +82,7 @@ impl SigType {
                     "String" => Some(SigType::String),
                     "Bool" => Some(SigType::Bool),
                     "Unit" => Some(SigType::Unit),
+                    "Never" => Some(SigType::Never),
                     "Bytes" => Some(SigType::Bytes),
                     "Matrix" => Some(SigType::Matrix),
                     "Value" => Some(SigType::Value),
@@ -239,8 +244,8 @@ impl SigType {
             )),
             SigType::Map(_k, v) => Some(GenType::Map(Box::new(v.instantiate(subst)?))),
             SigType::Set(e) => Some(e.instantiate(subst)?).filter(GenType::is_set_elem).map(|e| GenType::Set(Box::new(e))),
-            // A function type is not a producible value.
-            SigType::Fn(_, _) => None,
+            // A function type is not a producible value, nor is Never.
+            SigType::Fn(_, _) | SigType::Never => None,
         }
     }
 
