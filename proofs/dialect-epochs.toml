@@ -208,17 +208,15 @@ breaks = [
   "`mem.restore(mark)` → delete the call, and the `import mem` line with it: it took or rewound an opaque arena checkpoint, and under reference counting it did nothing on any target",
   "`bytes.heap_save()` → delete the call: it took or rewound an opaque arena checkpoint, and under reference counting it did nothing on any target",
   "`bytes.heap_restore(mark)` → delete the call: it took or rewound an opaque arena checkpoint, and under reference counting it did nothing on any target",
+  "the pre-#3338 callback spellings a package's `native/*.rs` could still call (deprecation `legacy-native-callback-names`, #3425, since epoch 10) are gone: a `native/*.rs` calling `crate::almide_rt_<pkg>_v<N>_<fn>` or `..._v<N>_<sub>_<fn>` gets rustc E0425 — write the injective name (`_` in a segment is `_0`, a `.` is `_1`: `almide_rt_tf_v0_calc_double` → `almide_rt_tf_0v0_1calc_double`)",
 ]
 
 # DEPRECATIONS — spellings accepted for a window, with the epoch that removes them
 # =============================================================
 
-[[deprecation]]
-id = "legacy-native-callback-names"
-issue = 3425
-since_epoch = 10
-since = "0.67.0"
-removal_epoch = 14
-summary = "A package's `native/*.rs` may still call the package's own fns by their spelling before #3338 (`almide_rt_tf_v0_entry`, `almide_rt_tf_v0_calc_double`), through a deprecated alias of the injective name (`almide_rt_tf_0v0_entry`, `almide_rt_tf_0v0_1calc_double`). The build warns once per old name it finds. A name that the old spelling made ambiguous (`a.b` and `a_b`) gets no alias."
-removal = "epoch 14 drops the aliases: a `native/*.rs` calling `crate::almide_rt_<pkg>_v<N>_<fn>` or `..._v<N>_<sub>_<fn>` gets rustc E0425 — write the injective name the warning prints (`_` in a segment is `_0`, a `.` is `_1`)"
+# None open. `legacy-native-callback-names` (#3425, since epoch 10) reached its
+# removal_epoch 14 and is a break of epoch 14 above. A new window is a
+# [[deprecation]] block: id, issue, since_epoch, since, removal_epoch,
+# summary, removal.
+
 # ======================================================
