@@ -175,6 +175,7 @@ pub fn almide_rt_fs_fold_lines_range<A, F: Fn(A, AlmideString) -> A>(path: &str,
 // only for an accumulator and callback with no `Rc` inside: RustLowering
 // routes every other call to the `_seq` twin below (#3649).
 pub fn almide_rt_fs_fold_lines_chunked<A: Clone + Send, F: Fn(A, AlmideString) -> A + Send + Sync>(path: &str, workers: i64, init: A, f: F) -> Result<Vec<A>, AlmideString> {
+    init.almide_share();
     let __almide_r: Result<Vec<A>, String> = (|| {
         let ranges = fold_lines_chunk_ranges(path, workers)?;
         // Flush first: a worker's abort cannot reach this thread's buffer (C-197).
