@@ -272,9 +272,11 @@ pub fn max_k(func: &str) -> Option<u64> {
         // n bytes landed in the guest per call: the canonical allocator
         // never reuses a block, so 2k calls at 16n grow the heap to gigabytes
         // and the host's memory growth enters the count (shm_read at k=4096
-        // read x2.24 at 4n, rms 8%), and a send of 16n bytes per call at a
+        // read x2.24 at 4n, rms 8%; 256 keeps 2k calls at 16n near 160 MB,
+        // where 64 left the fixed per-call cost visible at n: rms 3.2%), and a
+        // send of 16n bytes per call at a
         // calibrated k of 2^20 overran the 60 s cap.
-        Some(("net", "shm_read")) => Some(64),
+        Some(("net", "shm_read")) => Some(256),
         Some(("net", "unix_send")) => Some(256),
         Some(("http", _)) => Some(256),
         // Each append grows the one file: 2k calls of n bytes at 16n.
