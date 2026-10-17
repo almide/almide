@@ -192,7 +192,7 @@ fn http_call_result(st: &AlmideHttpCallState, outcome: &Result<(), String>) -> R
 }
 
 /// How the body is framed on the wire.
-enum HttpCallFraming {
+pub enum HttpCallFraming {
     Chunked { remaining: usize, awaiting_size: bool },
     Length(usize),
     UntilClose,
@@ -200,7 +200,7 @@ enum HttpCallFraming {
 
 /// Move the decoded body bytes out of `raw` into `out`; `Ok(true)` once the
 /// body is complete by its own framing, `Err` on a malformed chunk size.
-fn http_call_decode(f: &mut HttpCallFraming, raw: &mut Vec<u8>, out: &mut Vec<u8>) -> Result<bool, String> {
+pub fn http_call_decode(f: &mut HttpCallFraming, raw: &mut Vec<u8>, out: &mut Vec<u8>) -> Result<bool, String> {
     match f {
         HttpCallFraming::Length(left) => {
             let take = (*left).min(raw.len());
