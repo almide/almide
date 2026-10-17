@@ -1,0 +1,10 @@
+// A fs.fold_lines_chunked callback runs on parallel chunk workers: it may
+// not reach a `var` of the enclosing fn.
+import fs
+
+effect fn main() -> Unit = {
+  var seen = 0
+  let parts = fs.fold_lines_chunked("data.txt", 4, 0, (acc, line) => acc + string.len(line) + seen)!
+  seen = seen + 1
+  println("${list.sum(parts)} ${seen}")
+}
