@@ -843,15 +843,28 @@
   ;; (head, count, errno). fd_readdir is resumable (C-272): each pass resumes
   ;; at the last complete entry's cookie, the buffer doubles after every full
   ;; pass (so an entry larger than it fits too), and a short fill ends the stream.
+  ;; Every pass costs the host the WHOLE directory (wasmtime collects and stats
+  ;; every entry on each call, whatever the cookie), so the first buffer is
+  ;; sized from the directory's own size: ext4, APFS and tmpfs spend at least a
+  ;; quarter of a dirent's 24 + name bytes per entry, so four times it holds
+  ;; the listing in one pass; a smaller hint (or none) falls back to doubling.
   (func $names_at (param $fd i32) (param $p i32) (param $l i32) (result i32 i32 i32)
     (local $e i32) (local $h i32) (local $buf i32) (local $cap i32) (local $used i32) (local $off i32)
-    (local $nl i32) (local $np i32) (local $cookie i64)
+    (local $nl i32) (local $np i32) (local $cookie i64) (local $hint i64)
     (local $head i32) (local $tail i32) (local $cnt i32) (local $node i32)
     (local.set $e (call $path_open (local.get $fd) (i32.const 1) (local.get $p) (local.get $l)
                                    (i32.const 2) (i64.const 16384) (i64.const 16384) (i32.const 0) (global.get $fsp)))
     (if (local.get $e) (then (return (i32.const 0) (i32.const 0) (local.get $e))))
     (local.set $h (i32.load (global.get $fsp)))
     (local.set $cap (i32.const 16384))
+    ;; 4 x st_size, at most 64 MiB (a larger directory doubles from there)
+    (if (i32.eqz (call $fd_filestat_get (local.get $h) (i32.add (global.get $fsp) (i32.const 64))))
+      (then
+        (local.set $hint (i64.load offset=96 (global.get $fsp)))
+        (if (i64.gt_u (local.get $hint) (i64.const 0x1000000)) (then (local.set $hint (i64.const 0x1000000))))
+        (local.set $hint (i64.shl (local.get $hint) (i64.const 2)))
+        (if (i64.gt_u (local.get $hint) (i64.extend_i32_u (local.get $cap)))
+          (then (local.set $cap (i32.wrap_i64 (local.get $hint)))))))
     (local.set $buf (call $alloc (local.get $cap)))
     (block $done (loop $pass
       (local.set $e (call $fd_readdir (local.get $h) (local.get $buf) (local.get $cap) (local.get $cookie)
