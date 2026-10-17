@@ -24,3 +24,8 @@ pub mod process_core;
 /// The tcp family (#3620): `runtime/rs/src/net.rs` includes it, the embedded
 /// host serves its net ops with it.
 pub mod net_core;
+/// net's Unix-domain sockets and shared-memory files (#3620): the same two
+/// consumers as `net_core`; the embedded host serves its interim ops
+/// 104..=116 with it. Its syscall module (net_unix_sys.rs, included) is the
+/// crate's one sanctioned `unsafe` site — see Cargo.toml's lints.
+pub mod net_unix_core;
