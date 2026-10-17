@@ -274,6 +274,10 @@ fn sandbox_arg(b: &mut Builder, sig: &Signature, param: &SigType, name: &str) ->
         ("env", _) => ENV_NAMES,
         ("args", _) => ARG_NAMES,
         ("process", "cmd") if sig.func == "spawn" => SILENT,
+        // A child that exits before reading its input races the write
+        // (EPIPE or not, by timing, on every leg): the input goes to one that
+        // reads it all.
+        ("process", "cmd") if sig.func == "exec_with_stdin" => &["/bin/cat", "/no/such/command"],
         ("process", "cmd") => COMMANDS,
         ("process", "dir") => DIRS,
         // ADR-0027 D5: the loopback fixtures (`oracle/fixture.rs`), never
