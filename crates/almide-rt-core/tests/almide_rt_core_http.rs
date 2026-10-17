@@ -230,7 +230,7 @@ fn a_non_2xx_stream_is_refused_with_its_body_quoted() {
     let sh = start(&url, 0, 0);
     let (text, outcome) = client::http_call_stream_step(&sh);
     assert_eq!(text, "");
-    assert_eq!(outcome, Some(Err("HTTP 404: Not Found: missing".to_string())));
+    assert_eq!(outcome, Some(Err("HTTP 404: missing".to_string())));
     join(h);
 }
 

@@ -471,7 +471,7 @@ impl AlmideHttpStreamParse {
             .and_then(|s| s.parse().ok())
             .unwrap_or(0);
         let error_status = (!(200..300).contains(&code))
-            .then(|| format!("HTTP {}: {}", code, status_line.splitn(3, ' ').nth(2).unwrap_or("")));
+            .then(|| http_status_refusal(code));
         self.chunked = http_fields_chunked(&http_head_fields(&header_section));
         self.acc.drain(..idx + 4);
         self.headers_done = true;
