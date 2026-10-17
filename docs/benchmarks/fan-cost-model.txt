@@ -47,8 +47,8 @@
 # whose work per element swings between offers (the estimate is the last
 # offer's).
 
-native_offer_ns  = 12_000
-native_worker_ns = 3_000
+native_offer_ns  = 1_500
+native_worker_ns = 700
 wasm_offer_ns    = 30_000
 wasm_worker_ns   = 5_000
 
