@@ -32,6 +32,7 @@ mod pools;
 #[path = "../../../../tests/shape_matrix/gen.rs"]
 pub mod shape;
 mod program;
+pub mod serve_gen;
 mod sig_type;
 mod term;
 mod types;
@@ -289,6 +290,13 @@ impl Engine {
         v.sort();
         v.dedup();
         v
+    }
+
+    /// A generated `http.serve` handler for program `index` of a campaign
+    /// seeded `seed` ([`serve_gen::synthesize_handler`]).
+    pub fn serve_handler(&self, seed: u64, index: u64) -> String {
+        let cat = serve_gen::handler_catalogue(&self.catalogue);
+        serve_gen::synthesize_handler(&mut crate::rng::SplitMix64::for_program(seed, index), &cat)
     }
 
     /// Number of catalogued stdlib signatures (diagnostics).
