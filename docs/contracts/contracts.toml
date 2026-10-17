@@ -1039,6 +1039,7 @@ since     = "0.27.4"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/index_bounds.almd", class = "fixture" },
+  { path = "spec/wasm_fail/matrix_qwen3_short_offsets_aborts.almd", class = "fixture" },
   { path = "spec/wasm_cross/index_bounds_write_heap.almd", class = "fixture" },
   { path = "spec/wasm_cross/index_bounds_i64.almd", class = "fixture" },
   { path = "spec/wasm_cross/index_bounds_write_only_var.almd", class = "fixture" },
