@@ -123,35 +123,8 @@ impl Emitter<'_> {
                 // passes the module path. env.args is native argv[1..]
                 // (the FIRST frame drops — its fresh block frees);
                 // process.args is the FULL argv (C-096, argv0 kept).
-                let skip0 = module == "env";
                 self.fs_call_0(OP_ARGS)?;
-                let (hraw, hlen, herr) = self.fs_frames_or_err()?;
-                let hlist = self.hold_i32()?;
-                let hfirst = self.hold_i32()?;
-                self.f.instructions().i32_const(0).call(F_ALLOC).local_set(hlist);
-                self.f.instructions().i32_const(i32::from(skip0)).local_set(hfirst);
-                self.fs_frames_foreach(hraw, hlen, |em| {
-                    let hline = em.tmp_i32_local;
-                    em.f.instructions().local_set(hline);
-                    em.f.instructions().local_get(hfirst).if_(BlockType::Empty);
-                    em.f.instructions().i32_const(0).local_set(hfirst);
-                    em.f.instructions().local_get(hline).call(F_DEC_FLAT);
-                    em.f.instructions().else_();
-                    em.f
-                        .instructions()
-                        .local_get(hlist)
-                        .local_get(hline)
-                        .call(F_LIST_PUSH_4)
-                        .local_set(hlist);
-                    em.f.instructions().end();
-                    Ok(())
-                })?;
-                self.fs_frames_release_raw(hraw, herr);
-                self.f.instructions().local_get(hlist);
-                for _ in 0..5 {
-                    self.release_i32();
-                }
-                Some(Lowered::owned(SliceTy::List(self.types.intern(STR))))
+                Some(Lowered::owned(self.frames_to_string_list(module == "env")?))
             }
             // stdin read-to-end (#1598's io half): chunks off the shared
             // cursor, appended into the owned-string accumulator (#2116 —
@@ -445,6 +418,34 @@ impl Emitter<'_> {
 }
 
 impl Emitter<'_> {
+    /// A frames answer on the stack (the fs_call ret) → a `List[String]` of
+    /// its frames, the first dropped when `skip0` (argv0). Shared by the
+    /// argv reads (op 29) and the abort-site run (ADR-0029).
+    pub(crate) fn frames_to_string_list(&mut self, skip0: bool) -> Result<SliceTy, EmitError> {
+        let (hraw, hlen, herr) = self.fs_frames_or_err()?;
+        let hlist = self.hold_i32()?;
+        let hfirst = self.hold_i32()?;
+        self.f.instructions().i32_const(0).call(F_ALLOC).local_set(hlist);
+        self.f.instructions().i32_const(i32::from(skip0)).local_set(hfirst);
+        self.fs_frames_foreach(hraw, hlen, |em| {
+            let hline = em.tmp_i32_local;
+            em.f.instructions().local_set(hline);
+            em.f.instructions().local_get(hfirst).if_(BlockType::Empty);
+            em.f.instructions().i32_const(0).local_set(hfirst);
+            em.f.instructions().local_get(hline).call(F_DEC_FLAT);
+            em.f.instructions().else_();
+            em.f.instructions().local_get(hlist).local_get(hline).call(F_LIST_PUSH_4).local_set(hlist);
+            em.f.instructions().end();
+            Ok(())
+        })?;
+        self.fs_frames_release_raw(hraw, herr);
+        self.f.instructions().local_get(hlist);
+        for _ in 0..5 {
+            self.release_i32();
+        }
+        Ok(SliceTy::List(self.types.intern(STR)))
+    }
+
     /// `lower`'s shared tail: the value of type `got` is what `want` asked
     /// for, or a Unit effect's carrier where a Unit is wanted
     /// ([`Self::unit_from_carrier`]); anything else is a wall.

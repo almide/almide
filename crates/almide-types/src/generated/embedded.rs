@@ -34189,9 +34189,69 @@ pub const SRC_TESTING: &str = r#"
 
 
 
-/// Fails unless f panics, message containing expected.
-@intrinsic("almide_rt_test_assert_throws")
-fn assert_throws(f: () -> Unit, expected: String) -> Unit = _
+/// Fails unless f, run alone in a child, aborts with text containing expected.
+fn assert_aborts[T](expected: String, f: () -> T) -> Unit = panic("testing.assert_aborts runs only as a direct call in a test block (E099)")
+
+
+
+
+
+
+
+@intrinsic("almide_rt_test_abort_site_run")
+fn __abort_site_run(site: Int) -> List[String] = _
+
+
+
+@intrinsic("almide_rt_test_abort_site_selected")
+fn __abort_site_selected() -> Int = _
+
+local fn abort_header(line: String) -> Bool = ["Error: ", "PANIC: "] |> list.any((h) => string.starts_with(line, h))
+
+
+
+local fn abort_text(stderr: String) -> String? = {
+  let lines = string.split(stderr, "\n")
+  let heads = lines |> list.enumerate |> list.filter_map(((i, l)) => if abort_header(l) then some(i) else none)
+  match list.last(heads) {
+    some(i) => some(list.drop(lines, i) |> list.join("\n")),
+    none => none,
+  }
+}
+
+
+local fn abort_mismatch(expected: String, status: Int, stderr: String) -> String? = match status {
+  0 => some("returned normally"),
+  1 => match abort_text(stderr) {
+    some(text) => if string.contains(text, expected) then none else some("abort \"${text}\""),
+    none => some("exit code 1"),
+  },
+  101 => some("exit code 101 (raw panic)"),
+  134 => some("trap (exit 134)"),
+  n => some("exit code ${n}"),
+}
+
+
+
+local fn child_section(name: String, text: String) -> String = {
+  let lines = string.split(text, "\n") |> list.filter((l) => l != "") |> list.map((l) => "    ${l}")
+  if list.is_empty(lines) then "" else "\n  child ${name}:\n" + list.join(lines, "\n")
+}
+
+
+fn __assert_aborts_check(expected: String, child: List[String], line: Int) -> Unit = {
+  let status = int.parse(list.get(child, 0) ?? "-1") ?? -1
+  let stdout = list.get(child, 1) ?? ""
+  let stderr = list.get(child, 2) ?? ""
+  match abort_mismatch(expected, status, stderr) {
+    none => (),
+    some(found) => {
+      let sections = child_section("stdout", stdout) + child_section("stderr", stderr)
+      eprintln("Error: assertion failed\n  at: line ${line}\n  expected: abort containing \"${expected}\"\n  found: ${found}${sections}")
+      panic("testing.assert_aborts failed at line ${line}")
+    },
+  }
+}
 
 /// Fails unless needle is in haystack; "" passes.
 @intrinsic("almide_rt_test_assert_contains")

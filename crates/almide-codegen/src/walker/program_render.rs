@@ -286,9 +286,16 @@ fn render_program_test_fns(ctx: &RenderContext, program: &IrProgram, parts: &mut
     if test_fns.is_empty() {
         return;
     }
-    let test_parts: Vec<String> = test_fns.iter()
+    let mut test_parts: Vec<String> = test_fns.iter()
         .map(|f| render_function(ctx, f))
         .collect();
+    // `testing.assert_aborts` (ADR-0029): the hidden child entry, when the
+    // lowering synthesized the abort-site dispatcher.
+    if program.functions.iter().any(|f| f.name.as_str() == almide_ir::ABORT_DISPATCH_FN) {
+        if let Some(entry) = ctx.templates.render_with("abort_site_entry", None, &[], &[("dispatch", almide_ir::ABORT_DISPATCH_FN)]) {
+            test_parts.push(entry);
+        }
+    }
     let tests_s = test_parts.join("\n\n");
     let indented_tests = indent_lines(&tests_s, 4);
     let wrapped = ctx.templates.render_with("test_module", None, &[], &[("tests", indented_tests.as_str())])
