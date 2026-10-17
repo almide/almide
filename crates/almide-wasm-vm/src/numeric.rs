@@ -236,9 +236,6 @@ fn f64_ceil(a: u64) -> u64 {
 fn f64_floor(a: u64) -> u64 {
     cf64(f64v(a).floor())
 }
-fn f64_nearest(a: u64) -> u64 {
-    cf64(f64v(a).round_ties_even())
-}
 fn f64_sqrt(a: u64) -> u64 {
     cf64(f64v(a).sqrt())
 }
@@ -253,29 +250,6 @@ fn f64_mul(a: u64, b: u64) -> Result<u64, Trap> {
 }
 fn f64_div(a: u64, b: u64) -> Result<u64, Trap> {
     Ok(cf64(f64v(a) / f64v(b)))
-}
-/// wasm `f64.min`: a NaN operand gives NaN, and -0 is below +0 (Rust's
-/// `f64::min` returns the other operand for a NaN and treats the zeros as
-/// equal, so it is not used).
-fn f64_min(a: u64, b: u64) -> Result<u64, Trap> {
-    let (x, y) = (f64v(a), f64v(b));
-    Ok(if x.is_nan() || y.is_nan() {
-        cf64(f64::NAN)
-    } else if x == y {
-        a | b // equal values: the zeros differ only in sign, and -0 wins
-    } else {
-        cf64(if x < y { x } else { y })
-    })
-}
-fn f64_max(a: u64, b: u64) -> Result<u64, Trap> {
-    let (x, y) = (f64v(a), f64v(b));
-    Ok(if x.is_nan() || y.is_nan() {
-        cf64(f64::NAN)
-    } else if x == y {
-        a & b // equal values: +0 wins
-    } else {
-        cf64(if x > y { x } else { y })
-    })
 }
 fn f64_copysign(a: u64, b: u64) -> Result<u64, Trap> {
     Ok((a & !(1u64 << 63)) | (b & (1u64 << 63)))
@@ -296,9 +270,6 @@ fn f32_convert_i64_s(a: u64) -> u64 {
 }
 fn f32_demote_f64(a: u64) -> u64 {
     cf32(f64v(a) as f32)
-}
-fn f64_convert_i32_s(a: u64) -> u64 {
-    cf64(f64::from(w32(a) as i32))
 }
 fn f64_convert_i64_s(a: u64) -> u64 {
     cf64(a as i64 as f64)
@@ -382,21 +353,17 @@ pub static NUMERIC: &[NumericOp] = &[
     un(0x9A, "f64.neg", F64, F64, f64_neg),
     un(0x9B, "f64.ceil", F64, F64, f64_ceil),
     un(0x9C, "f64.floor", F64, F64, f64_floor),
-    un(0x9E, "f64.nearest", F64, F64, f64_nearest),
     un(0x9F, "f64.sqrt", F64, F64, f64_sqrt),
     bin(0xA0, "f64.add", F64, F64, f64_add),
     bin(0xA1, "f64.sub", F64, F64, f64_sub),
     bin(0xA2, "f64.mul", F64, F64, f64_mul),
     bin(0xA3, "f64.div", F64, F64, f64_div),
-    bin(0xA4, "f64.min", F64, F64, f64_min),
-    bin(0xA5, "f64.max", F64, F64, f64_max),
     bin(0xA6, "f64.copysign", F64, F64, f64_copysign),
     un(0xA7, "i32.wrap_i64", I64, I32, i32_wrap_i64),
     un(0xAC, "i64.extend_i32_s", I32, I64, i64_extend_i32_s),
     un(0xAD, "i64.extend_i32_u", I32, I64, i64_extend_i32_u),
     un(0xB4, "f32.convert_i64_s", I64, F32, f32_convert_i64_s),
     un(0xB6, "f32.demote_f64", F64, F32, f32_demote_f64),
-    un(0xB7, "f64.convert_i32_s", I32, F64, f64_convert_i32_s),
     un(0xB9, "f64.convert_i64_s", I64, F64, f64_convert_i64_s),
     un(0xBA, "f64.convert_i64_u", I64, F64, f64_convert_i64_u),
     un(0xBB, "f64.promote_f32", F32, F64, f64_promote_f32),
@@ -460,13 +427,6 @@ mod tests {
 
     #[test]
     fn float_edges_follow_the_spec() {
-        let nz = (-0.0f64).to_bits();
-        let pz = 0.0f64.to_bits();
-        assert_eq!(b(0xA4, pz, nz), Ok(nz), "min(+0, -0) = -0");
-        assert_eq!(b(0xA5, nz, pz), Ok(pz), "max(-0, +0) = +0");
-        assert!(f64::from_bits(b(0xA4, 1.0f64.to_bits(), f64::NAN.to_bits()).unwrap()).is_nan());
-        assert_eq!(u(0x9E, 2.5f64.to_bits()), 2.0f64.to_bits(), "nearest ties to even");
-        assert_eq!(u(0x9E, (-0.5f64).to_bits()), (-0.0f64).to_bits());
         assert_eq!(u(0xFC06, f64::NAN.to_bits()), 0, "trunc_sat NaN is 0");
         assert_eq!(u(0xFC06, 1e300f64.to_bits()), i64::MAX as u64);
         assert_eq!(u(0xFC06, (-1e300f64).to_bits()), i64::MIN as u64);
