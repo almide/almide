@@ -1134,6 +1134,7 @@ fn small(t: &GenType) -> String {
         GenType::Option(e) => format!("some({})", small(e)),
         GenType::Result(e) | GenType::ResultNom(e, _) => format!("ok({})", small(e)),
         GenType::Tuple2(a, b) => format!("({}, {})", small(a), small(b)),
+        GenType::Tuple3(a, b, c) => format!("({}, {}, {})", small(a), small(b), small(c)),
         GenType::Map(v) => format!("[\"k\": {}]", small(v)),
         GenType::Sized(name) => GenType::sized_literal(name, "2"),
         GenType::Bytes => "bytes.from_list([1, 2])".into(),
@@ -1173,6 +1174,7 @@ fn elem(t: &GenType) -> String {
         GenType::List(e) => format!("[{}]", elem(e)),
         GenType::Option(e) => format!("some({})", elem(e)),
         GenType::Tuple2(a, b) => format!("({}, {})", elem(a), elem(b)),
+        GenType::Tuple3(a, b, c) => format!("({}, {}, {})", elem(a), elem(b), elem(c)),
         GenType::Sized(name) => GenType::sized_literal(name, "i % 100"),
         GenType::Set(e) => format!("set.from_list([{}])", elem(e)),
         other => small(other),
@@ -1255,6 +1257,8 @@ fn digest(v: &str, t: &GenType) -> String {
         }
         GenType::Result(_) | GenType::ResultNom(..) => format!("(if result.is_ok({v}) then 1 else 0)"),
         GenType::Tuple2(..) => "1".into(),
+        // A triple is the Qwen3 layers' (h, k, v): the first element's digest keeps the call live.
+        GenType::Tuple3(a, ..) => digest(&format!("{v}.0"), a),
         GenType::Sized(name) if name.starts_with("Float") => {
             format!("(if float.from_{}({v}) > 0.0 then 1 else 0)", name.to_lowercase())
         }
