@@ -4,7 +4,12 @@
   2026-09-30: (1) the order in which an outside system receives a program's
   requests is part of the environment's answers (ω), not of the program's
   observation; (2) `fan.map` runs every element, and its result is the first
-  `Err` in list order. None of it is implemented yet.
+  `Err` in list order. None of it was implemented at acceptance. As of
+  2026-10-17 (docs/design/fan-semantics-audit.md, pinned 0746eb689): D1, D5
+  and D6 are implemented. D3/D4 (the `@ordered` set and the sequential
+  note) are not, and native `fan { }` runs every arm on threads (#3780).
+  Step 4's effect `fan.map` / `fan.settle` on threads is not either: an effect
+  callback stays sequential unless its only effect is a nested fan (#2594).
   Amended 2026-10-05 (#3383): D3 and D8 for async JS hooks on `--host js`
   (see the amendment section before the references).
 - **Date**: 2026-09-30
@@ -241,6 +246,8 @@ demonstrated". The runtime bounds in-flight elements itself. The initial
 bound is ADR-0020's `max_in_flight` default of 64, so a process has one
 number. `ALMIDE_FAN_SEQUENTIAL=1` stays as the ablation switch. It is an
 environment variable for measurement, not a language feature.
+(Audit note 2026-10-17: the switch reaches the parallel twins of `fan.map`
+and `fan { list.map }` only. Native `fan { }` blocks stay threaded under it.)
 
 If the search tool (the motivating program) shows a provider rate limit
 that 64 cannot absorb, that is the demonstration the table asks for, and a
