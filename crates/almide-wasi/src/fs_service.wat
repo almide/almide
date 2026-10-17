@@ -902,9 +902,64 @@
     (global.set $rt (local.get $node))
     (global.set $rc (i32.add (global.get $rc) (i32.const 1))))
 
+  ;; node x sorts strictly before node y (bytewise on the names)
+  (func $node_lt (param $x i32) (param $y i32) (result i32)
+    (call $lt (i32.add (local.get $x) (i32.const 8)) (i32.load offset=4 (local.get $x))
+              (i32.add (local.get $y) (i32.const 8)) (i32.load offset=4 (local.get $y))))
+
+  ;; Merge the sorted runs src[lo..mid) and src[mid..hi) into dst[lo..hi),
+  ;; the left run winning ties (stable).
+  (func $merge_runs (param $src i32) (param $dst i32) (param $lo i32) (param $mid i32) (param $hi i32)
+    (local $i i32) (local $j i32) (local $k i32) (local $x i32) (local $y i32)
+    (local.set $i (local.get $lo)) (local.set $j (local.get $mid)) (local.set $k (local.get $lo))
+    (block $d (loop $c
+      (br_if $d (i32.ge_u (local.get $k) (local.get $hi)))
+      ;; take the right run's head when the left is spent or it sorts first
+      (local.set $y (i32.const 0))
+      (if (i32.lt_u (local.get $j) (local.get $hi))
+        (then
+          (local.set $y (i32.load (i32.add (local.get $src) (i32.shl (local.get $j) (i32.const 2)))))
+          (if (i32.lt_u (local.get $i) (local.get $mid))
+            (then
+              (local.set $x (i32.load (i32.add (local.get $src) (i32.shl (local.get $i) (i32.const 2)))))
+              (if (i32.eqz (call $node_lt (local.get $y) (local.get $x))) (then (local.set $y (i32.const 0))))))))
+      (if (local.get $y)
+        (then (local.set $x (local.get $y)) (local.set $j (i32.add (local.get $j) (i32.const 1))))
+        (else
+          (local.set $x (i32.load (i32.add (local.get $src) (i32.shl (local.get $i) (i32.const 2)))))
+          (local.set $i (i32.add (local.get $i) (i32.const 1)))))
+      (i32.store (i32.add (local.get $dst) (i32.shl (local.get $k) (i32.const 2))) (local.get $x))
+      (local.set $k (i32.add (local.get $k) (i32.const 1)))
+      (br $c))))
+
+  ;; Bottom-up merge sort of cnt node pointers (O(n log n): an insertion sort
+  ;; here made one listing of a large directory quadratic); answers the array
+  ;; that holds the sorted order, arr or the scratch one.
+  (func $sort_nodes (param $arr i32) (param $cnt i32) (result i32)
+    (local $tmp i32) (local $w i32) (local $lo i32) (local $mid i32) (local $hi i32) (local $t i32)
+    (local.set $tmp (call $alloc (i32.shl (local.get $cnt) (i32.const 2))))
+    (local.set $w (i32.const 1))
+    (block $d (loop $pass
+      (br_if $d (i32.ge_u (local.get $w) (local.get $cnt)))
+      (local.set $lo (i32.const 0))
+      (block $pd (loop $run
+        (br_if $pd (i32.ge_u (local.get $lo) (local.get $cnt)))
+        (local.set $mid (call $min_u (i32.add (local.get $lo) (local.get $w)) (local.get $cnt)))
+        (local.set $hi (call $min_u (i32.add (local.get $mid) (local.get $w)) (local.get $cnt)))
+        (call $merge_runs (local.get $arr) (local.get $tmp) (local.get $lo) (local.get $mid) (local.get $hi))
+        (local.set $lo (local.get $hi))
+        (br $run)))
+      (local.set $t (local.get $arr)) (local.set $arr (local.get $tmp)) (local.set $tmp (local.get $t))
+      (local.set $w (i32.shl (local.get $w) (i32.const 1)))
+      (br $pass)))
+    (local.get $arr))
+
+  (func $min_u (param $a i32) (param $b i32) (result i32)
+    (select (local.get $a) (local.get $b) (i32.lt_u (local.get $a) (local.get $b))))
+
   ;; A node list, byte-sorted (native `Vec<String>::sort`), as frames.
   (func $sorted_frames (param $head i32) (param $cnt i32) (result i32 i32)
-    (local $arr i32) (local $i i32) (local $j i32) (local $x i32) (local $y i32) (local $tot i32) (local $out i32) (local $w i32)
+    (local $arr i32) (local $i i32) (local $x i32) (local $tot i32) (local $out i32) (local $w i32)
     (local.set $arr (call $alloc (i32.shl (local.get $cnt) (i32.const 2))))
     (block $d (loop $c
       (br_if $d (i32.eqz (local.get $head)))
@@ -913,23 +968,7 @@
       (local.set $i (i32.add (local.get $i) (i32.const 1)))
       (local.set $head (i32.load (local.get $head)))
       (br $c)))
-    ;; insertion sort
-    (local.set $i (i32.const 1))
-    (block $sd (loop $sc
-      (br_if $sd (i32.ge_u (local.get $i) (local.get $cnt)))
-      (local.set $x (i32.load (i32.add (local.get $arr) (i32.shl (local.get $i) (i32.const 2)))))
-      (local.set $j (local.get $i))
-      (block $id (loop $ic
-        (br_if $id (i32.eqz (local.get $j)))
-        (local.set $y (i32.load (i32.add (local.get $arr) (i32.shl (i32.sub (local.get $j) (i32.const 1)) (i32.const 2)))))
-        (br_if $id (i32.eqz (call $lt (i32.add (local.get $x) (i32.const 8)) (i32.load offset=4 (local.get $x))
-                                      (i32.add (local.get $y) (i32.const 8)) (i32.load offset=4 (local.get $y)))))
-        (i32.store (i32.add (local.get $arr) (i32.shl (local.get $j) (i32.const 2))) (local.get $y))
-        (local.set $j (i32.sub (local.get $j) (i32.const 1)))
-        (br $ic)))
-      (i32.store (i32.add (local.get $arr) (i32.shl (local.get $j) (i32.const 2))) (local.get $x))
-      (local.set $i (i32.add (local.get $i) (i32.const 1)))
-      (br $sc)))
+    (local.set $arr (call $sort_nodes (local.get $arr) (local.get $cnt)))
     (local.set $out (call $alloc (local.get $tot)))
     (local.set $w (local.get $out))
     (local.set $i (i32.const 0))
