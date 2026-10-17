@@ -3,7 +3,7 @@
 # definitions in crates/almide-wasm/src, `<mod>.<fn>[_shape]` rows in
 # self_host_registry.rs), re-derived by scripts/lib/impl-count-enumerate.py.
 # Gated by tools/almide-gates impl-count: a total may not grow without its row.
-# holes = 871  implementations = 2034
+# holes = 884  implementations = 2047
 [[hole]]
 module   = "base64"
 name     = "encode"
@@ -4146,92 +4146,92 @@ module   = "net"
 name     = "unix_connect"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "unix_listen"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "unix_accept"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "unix_send"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "unix_recv"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "unix_take_fds"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "unix_poll"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "unix_wait"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "unix_close"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "shm_create"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "shm_resize"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "shm_write"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "shm_read"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "__net_listen"
@@ -4319,6 +4319,97 @@ total    = 0
 [[hole]]
 module   = "net"
 name     = "__net_is_open"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__unix_connect"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__unix_listen"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__unix_accept"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__unix_send"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__unix_recv"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__unix_take_fds"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__unix_poll"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__unix_wait"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__unix_close"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__shm_create"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__shm_resize"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__shm_write"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__shm_read"
 native   = 0
 emitter  = 0
 selfhost = 0
