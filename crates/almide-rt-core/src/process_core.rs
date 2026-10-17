@@ -27,8 +27,8 @@ pub fn almide_proc_q(s: &str) -> String {
 }
 
 /// Stdout on exit 0; else the stderr text, or a status line when it is empty.
-pub fn almide_proc_exec(cmd: &str, args: &[String]) -> Result<String, String> {
-    match std::process::Command::new(cmd).args(args).output() {
+pub fn almide_proc_exec(cmd: &str, args: &[impl AsRef<str>]) -> Result<String, String> {
+    match std::process::Command::new(cmd).args(args.iter().map(|a| a.as_ref())).output() {
         Ok(out) => {
             if out.status.success() {
                 Ok(String::from_utf8_lossy(&out.stdout).to_string())
@@ -47,8 +47,8 @@ pub fn almide_proc_exec(cmd: &str, args: &[String]) -> Result<String, String> {
 }
 
 /// `exec` in `dir`; a bad `dir` fails at spawn too, so both operands are named.
-pub fn almide_proc_exec_in(dir: &str, cmd: &str, args: &[String]) -> Result<String, String> {
-    match std::process::Command::new(cmd).args(args).current_dir(dir).output() {
+pub fn almide_proc_exec_in(dir: &str, cmd: &str, args: &[impl AsRef<str>]) -> Result<String, String> {
+    match std::process::Command::new(cmd).args(args.iter().map(|a| a.as_ref())).current_dir(dir).output() {
         Ok(out) => {
             if out.status.success() {
                 Ok(String::from_utf8_lossy(&out.stdout).to_string())
@@ -66,10 +66,10 @@ pub fn almide_proc_exec_in(dir: &str, cmd: &str, args: &[String]) -> Result<Stri
 
 /// `exec` with `input` piped into the child's stdin. The pipe write and the
 /// wait are inner steps of this one call, so they report the call.
-pub fn almide_proc_exec_with_stdin(cmd: &str, args: &[String], input: &str) -> Result<String, String> {
+pub fn almide_proc_exec_with_stdin(cmd: &str, args: &[impl AsRef<str>], input: &str) -> Result<String, String> {
     let fail = |e: std::io::Error| almide_proc_call_err("process.exec_with_stdin", &almide_proc_q(cmd), e);
     let mut child = std::process::Command::new(cmd)
-        .args(args)
+        .args(args.iter().map(|a| a.as_ref()))
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -87,8 +87,8 @@ pub fn almide_proc_exec_with_stdin(cmd: &str, args: &[String], input: &str) -> R
 }
 
 /// `(code, stdout, stderr)`; code -1 when the child was killed by a signal.
-pub fn almide_proc_exec_status(cmd: &str, args: &[String]) -> Result<(i64, String, String), String> {
-    match std::process::Command::new(cmd).args(args).output() {
+pub fn almide_proc_exec_status(cmd: &str, args: &[impl AsRef<str>]) -> Result<(i64, String, String), String> {
+    match std::process::Command::new(cmd).args(args.iter().map(|a| a.as_ref())).output() {
         Ok(out) => Ok((
             out.status.code().unwrap_or(-1) as i64,
             String::from_utf8_lossy(&out.stdout).to_string(),
@@ -127,12 +127,12 @@ pub fn almide_proc_try_wait_poll(child: &mut std::process::Child) -> std::io::Re
 /// consumer can see one.
 pub fn almide_proc_exec_status_timeout(
     cmd: &str,
-    args: &[String],
+    args: &[impl AsRef<str>],
     timeout_ms: i64,
     poll: fn(&mut std::process::Child) -> std::io::Result<AlmideChildPoll>,
 ) -> Result<(i64, String, String), String> {
     let mut command = std::process::Command::new(cmd);
-    command.args(args).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
+    command.args(args.iter().map(|a| a.as_ref())).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
     #[cfg(unix)]
     {
         std::os::unix::process::CommandExt::process_group(&mut command, 0);
@@ -218,8 +218,8 @@ pub fn almide_proc_stop_tree(child: &mut std::process::Child) {
 /// The terminal-attached run (#2540, `process.run` since #3379): the child
 /// inherits stdin, stdout and stderr; nothing is captured; the answer is the
 /// exit code (-1 if signalled).
-pub fn almide_proc_run(cmd: &str, args: &[String]) -> Result<i64, String> {
-    match std::process::Command::new(cmd).args(args).status() {
+pub fn almide_proc_run(cmd: &str, args: &[impl AsRef<str>]) -> Result<i64, String> {
+    match std::process::Command::new(cmd).args(args.iter().map(|a| a.as_ref())).status() {
         Ok(status) => Ok(status.code().unwrap_or(-1) as i64),
         Err(e) => Err(almide_proc_call_err("process.run", &format!("{cmd:?}"), e)),
     }
@@ -227,8 +227,8 @@ pub fn almide_proc_run(cmd: &str, args: &[String]) -> Result<i64, String> {
 
 /// `run` in `dir`; a bad `dir` fails at spawn too, so both operands are named
 /// (exec_in's form).
-pub fn almide_proc_run_in(dir: &str, cmd: &str, args: &[String]) -> Result<i64, String> {
-    match std::process::Command::new(cmd).args(args).current_dir(dir).status() {
+pub fn almide_proc_run_in(dir: &str, cmd: &str, args: &[impl AsRef<str>]) -> Result<i64, String> {
+    match std::process::Command::new(cmd).args(args.iter().map(|a| a.as_ref())).current_dir(dir).status() {
         Ok(status) => Ok(status.code().unwrap_or(-1) as i64),
         Err(e) => Err(almide_proc_call_err(
             "process.run_in",
@@ -248,9 +248,9 @@ pub fn almide_proc_spawned_children() -> &'static std::sync::Mutex<std::collecti
 }
 
 /// Start `cmd` in the background (stdin null); its pid.
-pub fn almide_proc_spawn(cmd: &str, args: &[String]) -> Result<i64, String> {
+pub fn almide_proc_spawn(cmd: &str, args: &[impl AsRef<str>]) -> Result<i64, String> {
     let child = std::process::Command::new(cmd)
-        .args(args)
+        .args(args.iter().map(|a| a.as_ref()))
         .stdin(std::process::Stdio::null())
         .spawn()
         .map_err(|e| almide_proc_call_err("process.spawn", &almide_proc_q(cmd), e))?;

@@ -98,7 +98,7 @@ pub fn almide_rt_fs_fold_lines<A>(path: &str, init: A, f: std::rc::Rc<dyn Fn(A, 
             // copy and leaves `buf`'s capacity intact to reuse. 2M lines / 162 MB,
             // best-of-15, interleaved: 137 ms clone vs 143-146 ms take — the "saving"
             // is a 4-6% REGRESSION. Do not re-apply without re-measuring.
-            acc = f(acc, buf.clone());
+            acc = f(acc, AlmideString::from(buf.as_str()));
         }
     })();
     __almide_r.map_err(Into::into)
@@ -109,7 +109,7 @@ pub fn almide_rt_fs_fold_lines<A>(path: &str, init: A, f: std::rc::Rc<dyn Fn(A, 
 // exactly once: start>0 seeks to start-1 and discards through the first \n
 // (if byte start-1 IS \n the discard consumes just it), then lines fold while
 // their start offset is < end — the final line may read past end to finish.
-fn fold_lines_range_impl<A, F: Fn(A, String) -> A + ?Sized>(path: &str, start: i64, end: i64, init: A, f: &F) -> Result<A, String> {
+fn fold_lines_range_impl<A, F: Fn(A, AlmideString) -> A + ?Sized>(path: &str, start: i64, end: i64, init: A, f: &F) -> Result<A, String> {
     use std::io::{BufRead, Seek};
     let mut file = std::fs::File::open(path).map_err(|e| io_err("fs.fold_lines_range", &fs_q(path), e))?;
     // #3652: a directory opens but fails its first read, and the empty range
@@ -152,7 +152,7 @@ fn fold_lines_range_impl<A, F: Fn(A, String) -> A + ?Sized>(path: &str, start: i
         // copy and leaves `buf`'s capacity intact to reuse. 2M lines / 162 MB,
         // best-of-15, interleaved: 137 ms clone vs 143-146 ms take — the "saving"
         // is a 4-6% REGRESSION. Do not re-apply without re-measuring.
-        acc = f(acc, buf.clone());
+        acc = f(acc, AlmideString::from(buf.as_str()));
     }
     Ok(acc)
 }
@@ -253,7 +253,7 @@ pub fn almide_rt_fs_for_each_line(path: &str, f: std::rc::Rc<dyn Fn(AlmideString
             // copy and leaves `buf`'s capacity intact to reuse. 2M lines / 162 MB,
             // best-of-15, interleaved: 137 ms clone vs 143-146 ms take — the "saving"
             // is a 4-6% REGRESSION. Do not re-apply without re-measuring.
-            f(buf.clone());
+            f(AlmideString::from(buf.as_str()));
         }
     })();
     __almide_r.map_err(Into::into)
@@ -292,7 +292,7 @@ pub fn almide_rt_fs_fold_lines_effect<A>(path: &str, init: A, f: std::rc::Rc<dyn
             // copy and leaves `buf`'s capacity intact to reuse. 2M lines / 162 MB,
             // best-of-15, interleaved: 137 ms clone vs 143-146 ms take — the "saving"
             // is a 4-6% REGRESSION. Do not re-apply without re-measuring.
-            acc = f(acc, buf.clone())?;
+            acc = f(acc, AlmideString::from(buf.as_str()))?;
         }
     })();
     __almide_r.map_err(Into::into)
@@ -320,7 +320,7 @@ pub fn almide_rt_fs_for_each_line_effect(path: &str, f: std::rc::Rc<dyn Fn(Almid
             // copy and leaves `buf`'s capacity intact to reuse. 2M lines / 162 MB,
             // best-of-15, interleaved: 137 ms clone vs 143-146 ms take — the "saving"
             // is a 4-6% REGRESSION. Do not re-apply without re-measuring.
-            f(buf.clone())?;
+            f(AlmideString::from(buf.as_str()))?;
         }
     })();
     __almide_r.map_err(Into::into)
