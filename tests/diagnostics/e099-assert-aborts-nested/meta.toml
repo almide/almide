@@ -1,0 +1,4 @@
+expects_code = "E099"
+expects_error = "testing.assert_aborts is called inside another assert_aborts closure"
+hint_substring = "side by side in the test"
+expects_line_col = "6:39"

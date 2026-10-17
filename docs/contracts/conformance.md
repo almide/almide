@@ -154,3 +154,4 @@
 | ALS-T27 | C-361 | `spec/wasm_cross/url_authority_edges.almd` (byte-compare)<br>`spec/stdlib/url_test.almd` (both-target test) |
 | ALS-T28 | C-371 | `spec/wasm_cross/float32_arithmetic_rounds.almd` (byte-compare) |
 | ALS-T29 | C-372 | `spec/wasm_cross/float32_display_shortest.almd` (byte-compare)<br>`spec/wasm_cross/sized_display_matrix.almd` (byte-compare) |
+| ALS-T30 | C-384 | `spec/stdlib/coverage_assert_aborts_test.almd` (both-target test)<br>`spec/stdlib/testing_polarity_test.almd` (both-target test)<br>`spec/lang/assert_aborts_continues_test.almd` (both-target test) |

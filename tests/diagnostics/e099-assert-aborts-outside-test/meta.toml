@@ -1,0 +1,4 @@
+expects_code = "E099"
+expects_error = "testing.assert_aborts is called outside a test block"
+hint_substring = "move the call into a `test"
+expects_line_col = "5:29"

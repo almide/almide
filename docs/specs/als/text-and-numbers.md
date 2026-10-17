@@ -1,6 +1,6 @@
 # ALS §T — Text and Number Semantics (normative)
 
-> Last updated: 2026-10-17
+> Last updated: 2026-10-18
 
 > **Status**: normative. これらの節は実装から独立した**規範**であり、v0（native）と
 > v1（MIR/wasm）の両実装がこの節に適合する義務を負う。適合の証拠は
@@ -298,15 +298,10 @@ Fixtures: `spec/wasm_cross/assert_abort_eq.almd`, `assert_abort_ne.almd`,
 - `testing.assert_none(o)` → `expected: none`、`found: <o>`
 - `testing.assert_ok(r)` → `expected: ok(_)`、`found: <r>`
 - `testing.assert_err(r)` → `expected: err(_)`、`found: <r>`
-- `testing.assert_throws(f, s)` → `expected: panic containing <s>`、
-  `found: returned normally`
 
-`test` ブロック外の `panic` は C-219 の abort であり、捕捉されない。したがって
-`test` ブロック外の `assert_throws` は合格しない。thunk を一度だけ呼び、`panic` すれば
-その abort で停止し、戻れば上のブロックで停止する。関数値として渡した呼び出しは
-直接呼び出しではなく、本節の対象外である。
+関数値として渡した呼び出しは直接呼び出しではなく、本節の対象外である。
 Fixtures: `spec/wasm_cross/testing_assert_abort_gt.almd`、`_lt`、`_approx`、
-`_contains`、`_some`、`_none`、`_ok`、`_err`、`_throws`。Contracts: C-381。
+`_contains`、`_some`、`_none`、`_ok`、`_err`。Contracts: C-381。
 
 ## ALS-T19 数値決定性ファミリー
 
@@ -583,3 +578,44 @@ binary32 へ丸めた値である。
 非有限値は `inf` / `-inf` / `NaN`。
 
 テスト: `spec/wasm_cross/float32_display_shortest.almd`。Contracts: C-372。
+
+## ALS-T30 testing.assert_aborts — 子で走る abort 表明
+
+`testing.assert_aborts(s, f)` は `test` ブロックの中で、`f` **だけ**を子で実行する。
+native では同じテストバイナリを新しい子プロセスとして起動し、wasm では同じ
+モジュールの新しいインスタンスを作る。子はプログラムの初期状態から始まる:
+トップレベルの `let` と `var` は初期値を持ち、親の状態は一切見えない。cwd・環境
+変数・argv はテストと同じである。`f` は effect closure でもよく、その値は捨てる。
+
+`f` はその場に書いたラムダでなければならず、テストのローカル（`let`・`var`・
+`where` の束縛・外側のラムダの引数）を捕捉してはならない。捕捉と、ラムダ
+リテラルでない関数値は検査時のエラー E098 である。参照できるのはトップレベルの
+`fn`・`let`・`var` と import したモジュールだけである。`test` ブロックの外
+（`fn` や `main`）での呼び出し、関数値としての使用、別の `assert_aborts` の
+closure の中での呼び出しは検査時のエラー E099 である。
+
+子の中で `f` は**プログラム本体として**降ろされる。`assert` 系と `testing.assert_*`
+は ALS-T18 のブロック形で停止し、`panic` は C-219 の `PANIC: <msg>` で停止する。
+
+子が**定義された abort** で終わったとき、すなわち exit status が 1 で、stderr に
+`Error: ` または `PANIC: ` で始まる行（abort の見出し）があるときだけ、abort と
+数える。**abort テキスト**は、最後の見出し行から stderr の末尾までである。
+`assert_aborts` は abort テキストが `s` を部分文字列として含む（バイト単位、大文字
+小文字を区別）ときに合格する。それより前の `eprintln` は照合に使わない。`panic`・
+範囲外の添字・ゼロ除算・スタック溢れ・失敗した assert のどれも abort である。
+
+普通に戻った場合、ほかの exit status（`process.exit(n)` で n ≠ 1、生の panic、
+trap）、見出しのない exit 1 は不合格である。不合格は ALS-T18 の項目順のブロックで
+報告する: `Error: assertion failed`、`at: line <N>`、
+`expected: abort containing "<s>"`、`found: <理由>`。`<理由>` は
+`returned normally`、`abort "<abort テキスト>"`、`exit code <n>`、
+`exit code 101 (raw panic)`、`trap (exit 134)` のいずれかである。子が何か出力して
+いれば、そのあとに `child stdout:` と `child stderr:` の節が続く。子の出力は
+この報告にだけ現れ、合格時には転送しない。
+
+テストは各呼び出しのあとも続き、一つのテストの複数の呼び出しはそれぞれ自分の
+子を持つ。
+
+テスト: `spec/stdlib/coverage_assert_aborts_test.almd`、
+`spec/stdlib/testing_polarity_test.almd`、
+`spec/lang/assert_aborts_continues_test.almd`。Contracts: C-384。
