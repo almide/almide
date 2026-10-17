@@ -151,7 +151,6 @@ pub const VERDICTS: &[Verdict] = &[
     Verdict { func: "bytes.data_ptr", holds: "v > 0 or bytes.len({b}) == 0", canon: "0", domain: &[] },
     // Through a generated (null) pointer nothing is written or read.
     Verdict { func: "bytes.copy_to_ptr", holds: "v >= 0 and v <= bytes.len({b})", canon: "v", domain: &[] },
-    Verdict { func: "mem.save", holds: "true", canon: "0", domain: &[] },
     // An http call handle (#2631) against the loopback fixture. Whether the
     // exchange has ended when `poll` looks is the network's timing: `none`,
     // or the very result `wait` answers (an ended call's outcome never

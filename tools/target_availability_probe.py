@@ -62,7 +62,7 @@ LEGS = ("structural", "stock-p1", "embedded")
 EXPLICIT_IMPORT = {
     "json", "fs", "http", "env", "io", "random", "regex", "process",
     "testing", "url", "args", "base64", "compute", "hash", "hex",
-    "path", "html", "duration", "mem", "net", "zlib",
+    "path", "html", "duration", "net", "zlib",
 }
 # docs/stdlib pages that document CHECKER surface (clock constructors), not
 # a module interface — tools/gen-stdlib-doc-index.py's own exclusion.
@@ -637,10 +637,9 @@ def measure(mod, f, types, leg, tmp, env):
             # arg like a missing file): the program's opening print on
             # stdout proves the build succeeded and execution began, so
             # the non-zero exit is the host's ANSWER. A refusal before
-            # that line (a build wall, the native-only matrix guard) is
-            # not service — the text heuristic this replaces took
-            # `matrix.qwen3_block_q1_0_kv is native-only` for a runtime
-            # err (#1827).
+            # that line (a build wall, a native-only guard) is not
+            # service — the text heuristic this replaces took a
+            # native-only refusal for a runtime err (#1827).
             return "ok", ""
         first = first_error_line(combined)
         # A type/synthesis error is the probe's fault — try the next
