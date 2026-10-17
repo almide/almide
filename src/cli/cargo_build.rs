@@ -69,7 +69,6 @@ codegen-units = 1
     // `cargo_build_generated_with_native`.
     let mut lib_code = rs_code.to_string();
     let inputs = CrateInputs::collect(source_root)?;
-    inputs.warn_legacy_callbacks(rs_code);
     inputs.apply(&mut lib_code, &src_dir, project_dir)?;
     std::fs::write(src_dir.join("lib.rs"), &lib_code)
         .map_err(|e| format!("failed to write lib.rs: {}", e))?;
