@@ -3,7 +3,7 @@
 # definitions in crates/almide-wasm/src, `<mod>.<fn>[_shape]` rows in
 # self_host_registry.rs), re-derived by scripts/lib/impl-count-enumerate.py.
 # Gated by tools/almide-gates impl-count: a total may not grow without its row.
-# holes = 871  implementations = 2029
+# holes = 871  implementations = 2034
 [[hole]]
 module   = "base64"
 name     = "encode"
@@ -3593,8 +3593,8 @@ module   = "matrix"
 name     = "linear_q1_0_row_no_bias"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "matrix"
 name     = "silu_mul"
@@ -3635,8 +3635,8 @@ module   = "matrix"
 name     = "qwen3_block_q1_0_kv"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "matrix"
 name     = "linear_f32_row_no_bias"
@@ -3663,15 +3663,15 @@ module   = "matrix"
 name     = "qwen3_block_f32_kv"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "matrix"
 name     = "linear_q8_0_row_no_bias"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "matrix"
 name     = "select_rows_q8_0_dq"
@@ -3684,8 +3684,8 @@ module   = "matrix"
 name     = "qwen3_block_q8_0_kv"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "matrix"
 name     = "to_lists"
