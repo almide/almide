@@ -139,10 +139,10 @@ fn borrowed_loop_binder_compares_as_str_and_borrowed_param_stores_owned() {
     for name in ["has_digit", "count_above", "starts_upper"] {
         let body = fn_body(&rust, name);
         assert!(body.contains(".iter()") && !body.contains(".cloned()"), "{name} lost its borrowed binder: {body}");
-        assert!(!body.contains(".clone()") && !body.contains(".to_string()"), "{name} clones: {body}");
+        assert!(!body.contains(".clone()") && !body.contains(".to_string()") && !body.contains(".to_almide()"), "{name} clones: {body}");
     }
     // The stores convert the borrow into the owned binding's type.
-    assert!(fn_body(&rust, "keep").contains("model = lit.to_string();"), "{}", fn_body(&rust, "keep"));
+    assert!(fn_body(&rust, "keep").contains("model = lit.to_almide();"), "{}", fn_body(&rust, "keep"));
     assert!(fn_body(&rust, "keep_list").contains("out = xs.to_vec();"), "{}", fn_body(&rust, "keep_list"));
 
     run_on_every_leg(&bin, &source, EXPECTED);
