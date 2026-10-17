@@ -1,6 +1,6 @@
 # ADR-0027: Effect functions are inspected in a fixed host world — a seeded sandbox, property verdicts for what the host decides, and loopback fixtures for the network
 
-- **Status**: Accepted (D1–D7, 2026-10-17). Open questions 2 and 3 are not decided here.
+- **Status**: Accepted (D1–D8, 2026-10-17).
 - **Date**: 2026-10-17
 - **Scope**: how `xtarget-fuzz inspect` applies the five inspection criteria (parity, complexity, alloc, fuzz, diamond) to the stdlib functions whose results depend on the host: fs, env, args, io, process, random, datetime, http and net, the host-address functions in `bytes` and `mem`, and `list.shuffle`.
 - **Builds on**: [effect-inspection-harness.md](../roadmap/active/effect-inspection-harness.md) (the 2026-10-12 design, tiers E1–E4). This ADR turns it into decisions for the inspection harness, and fills the gaps that design left open: the legs, how a non-deterministic value is compared, the host-address functions, and how each criterion reads for an effect row.
@@ -36,7 +36,7 @@ The program fuzzer already has half of the machinery: `oracle/sandbox.rs` create
 
 An effect row compares native against the **embedded wasm host** (`almide run --target wasm`, `almide-wasm-run`). It also compares against the **stock runtime** (`wasmtime run`) wherever `proofs/target-availability.toml` says stock serves the function.
 
-The row's `parity` field names the legs it covers. A function the embedded host does not serve is not stamped by this ADR (see §Open, question 2).
+The row's `parity` field names the legs it covers. A function the embedded host does not serve is made to run on wasm first and then inspected on both legs (D8).
 
 ### D2. A fixed world per run (tier E1: fs, env, args, io, process.args / env / stdin_lines)
 
@@ -105,6 +105,10 @@ The program reads the address from a fixed env var. The `anthropic_` / `openai_`
 
 The tier of each function and the properties in D3 live in one table in `tools/xtarget-fuzz`. A test refuses an effect row of the ledger that the table does not classify. The same rule applies to pure functions, where nothing may be special-cased by name outside the declaration.
 
+### D8. Nothing is stamped native-only
+
+A function no wasm leg serves today is ported first, then inspected on both legs. This covers the http streaming family, `http.*_response`, `net.unix_*`, `net.shm_*`, the quantised matrix kernels, and `testing.assert_throws` inside a test block. The native-only stamp ruled on 2026-10-12 (plan B) is not used for "uninspected = 0" (owner, 2026-10-17: 「未対応は当然wasmでも動くようにした上で両方検品です」).
+
 ## Alternatives considered
 
 - **Mock the effects in the stdlib for inspection.** Rejected (as in the 2026-10-12 design): the inspection would judge the mock, not the legs' real host bindings, which are where cross-target bugs live.
@@ -127,5 +131,5 @@ The tier of each function and the properties in D3 live in one table in `tools/x
 ## Open
 
 1. ~~Adopting D1–D7 as a whole.~~ Accepted 2026-10-17 (○).
-2. The 24 rows the embedded host does not serve: the http streaming family (5), `http.*_response` (6), and `net.unix_*` and `net.shm_*` (13). There are two options. One is to port them, via the wasi:http@0.3 port (#1710) for http and interim embedded host ops (as with TCP) for unix and shm. The other is the native-only stamp ruled on 2026-10-12, which would then count towards "uninspected = 0".
-3. `testing.assert_throws`: its success path exists only inside a test block, and the wasm test renderer declines it there.
+2. ~~The 24 rows the embedded host does not serve.~~ Decided 2026-10-17: port them, then inspect both legs (D8).
+3. ~~`testing.assert_throws` inside a test block.~~ Decided by the same ruling (D8): make it run on wasm, then inspect both legs.
