@@ -169,18 +169,20 @@ mod tests {
         assert!(parse_break(3, "`args.flag` is an `effect fn` — mark the caller").is_none());
     }
 
-    /// Epoch 14 removed 33 stdlib spellings; every one of its `breaks` is a
-    /// parseable removal, so the diagnostic cannot silently lose a row to a
-    /// typo in the ledger.
+    /// Epoch 14 removed 33 stdlib spellings, and every one of them parses as
+    /// a removal, so the diagnostic cannot silently lose a row to a typo in
+    /// the ledger. Other breaks may share the epoch (prose, not removals):
+    /// every break that NAMES one of the removed modules' functions in the
+    /// removal shape must parse.
     #[test]
-    fn every_epoch_14_break_is_a_removal() {
+    fn every_epoch_14_removal_parses() {
         let ledger: toml::Value = toml::from_str(LEDGER).unwrap();
         let e14 = ledger["epoch"].as_array().unwrap().iter().find(|e| e["n"].as_integer() == Some(14)).unwrap();
         let breaks = e14["breaks"].as_array().unwrap();
-        for b in breaks {
-            assert!(parse_break(14, b.as_str().unwrap()).is_some(), "not a removal: {b}");
+        for b in breaks.iter().filter_map(|b| b.as_str()) {
+            let shaped = b.contains("` → `import ") || b.contains("` → delete the call");
+            assert!(!shaped || parse_break(14, b).is_some(), "a removal-shaped break that does not parse: {b}");
         }
-        assert_eq!(breaks.len(), 33);
         assert_eq!(all().iter().filter(|r| r.epoch == 14).count(), 33);
         assert!(lookup("matrix.gelu").is_some());
         assert!(lookup("matrix.mul").is_none());
