@@ -1847,6 +1847,20 @@ pub(crate) mod tests {
         }
     }
 
+    /// The streaming clients (ADR-0027 D8: ported, then inspected) are
+    /// probed over the fixture's `/chunked/{n}` route, sized by the url, with
+    /// a generated `on_chunk`.
+    #[test]
+    fn the_streaming_clients_stream_the_fixtures_chunked_route() {
+        for name in ["http.request_stream", "http.request_stream_with_limits"] {
+            let t = target(name);
+            assert!(t.recipe.is_some(), "{name} has no recipe");
+            let direct = t.direct_program(1000, 4, true);
+            assert!(direct.contains("/chunked/1000"), "{name}: {direct}");
+            assert!(direct.contains(&format!("{name}(\"GET\"")), "{name}: {direct}");
+        }
+    }
+
     /// A `mut`-parameter mutator: its sized input is a `var` the loop calls
     /// it on, and each diamond path mutates its own `var` and prints it.
     #[test]
