@@ -24,5 +24,13 @@ rustls-native-certs = "0.8"
 # exists nowhere else (#2820). Same ring backend the client uses.
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "ring"] }
 
-[lints]
-workspace = true
+# Its own lints, not `[lints] workspace = true` (#3620): the workspace FORBIDS
+# unsafe code, which no module can relax, and net's Unix-socket core needs
+# four syscalls std has no safe form of (sendmsg / recvmsg with SCM_RIGHTS,
+# poll, fcntl). Here unsafe is DENIED crate-wide and allowed in exactly one
+# module, src/net_unix_sys.rs; tests/net_unix_core.rs fails if it appears in
+# any other file or a block there lacks its SAFETY line. Native and the
+# embedded wasm host both run that one module, so they agree by construction.
+[lints.rust]
+unsafe_code = "deny"
+unsafe_op_in_unsafe_fn = "deny"

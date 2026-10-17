@@ -98,6 +98,14 @@ A stream socket to a peer on the same machine, which can carry open file
 descriptors beside its bytes (SCM_RIGHTS). This is the transport of Wayland,
 PipeWire and D-Bus.
 
+The `unix_*` and `shm_*` functions act only on descriptors the program holds:
+the ones they opened (`unix_listen`, `unix_connect`, `unix_accept`,
+`shm_create`) and the ones that arrived on a socket (`unix_recv`), until
+`unix_close`. Any other number, a standard stream included, is an `err`
+(`<fn>: descriptor <n> is not open in this program`) before any system call;
+a negative one is `<fn>: not a file descriptor: <n>`. Closing a socket also
+closes the descriptors it received that were never taken.
+
 ### `effect net.unix_connect(path: String) -> Int`
 
 Connect to the listener at `path`; the socket's descriptor.
