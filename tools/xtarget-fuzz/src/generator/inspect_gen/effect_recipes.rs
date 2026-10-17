@@ -122,6 +122,10 @@ pub(super) const EFFECT_RECIPES: &[Recipe] = &[
     },
     Recipe { func: "process.is_alive", size: "", args: &[("pid", "process.pid()")] },
     Recipe { func: "process.sleep", size: "", args: &[("ms", "0")] },
+    // Judged by the exit it makes (ADR-0027 D4): a code no clean end of a
+    // program makes, inside C-350's 0..=125. The literal is what every
+    // probe must exit with (`Target::expected_exit`).
+    Recipe { func: "process.exit", size: "", args: &[("code", "3")] },
     Recipe { func: "io.read_n_bytes", size: "n", args: &[("n", "{n}")] },
     // Host addresses over a live buffer: the probe binds it before the loop.
     Recipe { func: "bytes.as_ptr", size: "b", args: &[("b", SIZED_BYTES)] },
@@ -165,6 +169,20 @@ pub(super) const EFFECT_RECIPES: &[Recipe] = &[
     Recipe { func: "http.request_bytes", size: "body", args: &[("method", "\"POST\""), ("url", ECHO_URL), ("body", BODY), ("headers", "[\"x-k\": \"v\"]")] },
     Recipe { func: "http.request_status", size: "body", args: &[("method", "\"POST\""), ("url", ECHO_URL), ("body", BODY), ("headers", "[\"x-k\": \"v\"]")] },
     Recipe { func: "http.request_response", size: "body", args: &[("method", "\"POST\""), ("url", ECHO_URL), ("body", BODY), ("headers", "[\"x-k\": \"v\"]")] },
+    // The call handle (#2631): start's cost is the exchange it begins,
+    // which the probe's digest waits out (the echo of n bytes); poll answers
+    // a call that has ended (its recipe waits first) with a copy of the n
+    // bytes; read_new's first read of an ended call is its whole body, so
+    // every step reads a fresh one; cancel ends a fresh call of its own.
+    Recipe {
+        func: "http.start",
+        size: "body",
+        args: &[("method", "\"POST\""), ("url", ECHO_URL), ("body", BODY), ("headers", "[\"x-k\": \"v\"]"), ("limits", NO_LIMITS)],
+    },
+    Recipe { func: "http.poll", size: "c", args: &[("c", ENDED_CALL)] },
+    Recipe { func: "http.read_new", size: "c", args: &[("c", FRESH_ENDED_CALL)] },
+    Recipe { func: "http.wait", size: "c", args: &[("c", CALL)] },
+    Recipe { func: "http.cancel", size: "", args: &[("c", FRESH_CALL)] },
 ];
 
 /// Statements a probe's `main` runs first, for operands that must outlive
@@ -217,6 +235,31 @@ const PENDING_LISTENER: &str = "{ let l = net.tcp_listen(\"127.0.0.1\", {i} * 0)
 const BYTES_URL: &str = "\"http://\" + (env.get(\"XF_HTTP\") ?? \"\") + \"/bytes/{n}\"";
 const ECHO_URL: &str = "\"http://\" + (env.get(\"XF_HTTP\") ?? \"\") + \"/echo\"";
 const BODY: &str = "string.repeat(\"a\", {n})";
+const NO_LIMITS: &str = "{ total_ms: 0, idle_ms: 0 }";
+
+/// `http.start("GET", <fixture>path, "", headers)` with no limits, an `err`
+/// stopping the probe (the fixture is always up).
+macro_rules! call_of {
+    ($path:literal, $headers:literal) => {
+        concat!(
+            "match http.start(\"GET\", \"http://\" + (env.get(\"XF_HTTP\") ?? \"\") + \"",
+            $path,
+            "\", \"\", ",
+            $headers,
+            ", { total_ms: 0, idle_ms: 0 }) { ok(hc) => hc, err(he) => panic(he) }"
+        )
+    };
+}
+
+/// A call answering n bytes, in flight.
+const CALL: &str = call_of!("/bytes/{n}", "map.new()");
+/// A call answering n bytes, ended before the probe reads it.
+const ENDED_CALL: &str = concat!("{ let hc = ", call_of!("/bytes/{n}", "map.new()"), "\n  let _w: Result[HttpResponse, String] = http.wait(hc)\n  hc }");
+/// [`ENDED_CALL`], a new one every step (`{i}` names the step).
+const FRESH_ENDED_CALL: &str =
+    concat!("{ let hc = ", call_of!("/bytes/{n}", "[\"x-step\": \"${{i}}\"]"), "\n  let _w: Result[HttpResponse, String] = http.wait(hc)\n  hc }");
+/// A call answering 16 bytes, a new one every step.
+const FRESH_CALL: &str = call_of!("/bytes/16", "[\"x-step\": \"${{i}}\"]");
 
 /// A directory the probe makes, so it exists in a diamond's project too.
 const MADE_DIR: &str = "{ fs.mkdir_p(\"pdir\")!\n  \"pdir\" }";

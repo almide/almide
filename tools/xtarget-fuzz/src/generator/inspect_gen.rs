@@ -51,6 +51,10 @@ pub struct Target {
     /// A host-decided result (ADR-0027 D3): observed through its declared
     /// properties, never its value.
     verdict: Option<&'static super::verdicts::Verdict>,
+    /// A `-> Never` function ([`super::catalogue::NEVER_RETURNING`]): every
+    /// probe calls it once, as its last statement, and is judged by the
+    /// exit it makes ([`Self::expected_exit`]); `ret` stands as `Unit`.
+    never: bool,
 }
 
 /// An argument inside the function's domain, derived from its declaration
@@ -480,7 +484,9 @@ impl Target {
         }
         // A bodied effect fn's call is a `Result[T, String]` to the checker
         // (`Signature::lifted`): that is what the probe binds and wraps.
+        let never = sig.ret == SigType::Never;
         let declared = match &sig.ret {
+            SigType::Never => SigType::Unit,
             SigType::Result(..) => sig.ret.clone(),
             r if sig.lifted => SigType::Result(Box::new(r.clone()), Box::new(SigType::String)),
             r => r.clone(),
@@ -553,7 +559,32 @@ impl Target {
             effect: sig.effect,
             observe: sig.observed_through,
             verdict: sig.verdict,
+            never,
         })
+    }
+
+    /// The exit code every probe of this target must end with: 0, or a
+    /// `-> Never` function's code, its recipe's literal argument.
+    pub fn expected_exit(&self) -> i32 {
+        if !self.never {
+            return 0;
+        }
+        (0..self.params.len()).find_map(|i| self.recipe_arg(i)?.trim().parse().ok()).unwrap_or(0)
+    }
+
+    /// A `-> Never` probe: the arguments bound, a line naming the exit to
+    /// come (so what was printed before the call is compared, and must be
+    /// flushed by it), then the call — `callee` with `bang` for a path that
+    /// reaches it through a user effect fn.
+    fn never_body(&self, label: &str, callee: &str, bang: &str, with_call: bool) -> String {
+        let mut s = self.arg_lets(0, None, &[]);
+        let names: Vec<String> = (0..self.params.len()).map(|i| format!("a{i}")).collect();
+        let shown: Vec<String> = names.iter().map(|a| format!("${{{a}}}")).collect();
+        let _ = writeln!(s, "  println(\"{label}{} {}\")", self.func(), shown.join(" "));
+        if with_call {
+            let _ = writeln!(s, "  {callee}({}){bang}", names.join(", "));
+        }
+        s
     }
 
     /// The probes give this function an input inside its domain (a recipe
@@ -717,6 +748,12 @@ impl Target {
     /// `with_call` false the same loop runs without the call, so the
     /// difference of the two timings is the calls' cost alone.
     pub fn direct_program(&self, n: u64, k: u64, with_call: bool) -> String {
+        // A call that does not return runs once, last: there is no loop of
+        // it to time (it is sizeless, so it is never timed).
+        if self.never {
+            let s = format!("effect fn main() -> Unit = {{\n{}}}\n", self.never_body("", &self.name, "", with_call));
+            return format!("{}{s}", super::catalogue::imports_for(&s));
+        }
         let mut s = String::from("effect fn main() -> Unit = {\n");
         s.push_str(&effect_recipes::prelude_for(&self.name, n).unwrap_or_default());
         // The input changes every iteration by an O(1) in-place step, run in
@@ -868,7 +905,8 @@ impl Target {
 
     /// A call that consumes its whole input: its diamond runs each path alone.
     pub fn diamond_runs_paths_alone(&self) -> bool {
-        matches!(self.name.as_str(), "io.read_all" | "process.stdin_lines")
+        // A call that does not return ends its path's program.
+        self.never || matches!(self.name.as_str(), "io.read_all" | "process.stdin_lines")
     }
 
     fn diamond_project_of(&self, n: u64, paths: &[&str]) -> Project {
@@ -876,10 +914,31 @@ impl Target {
             .map(|i| format!("{}a{i}: {}", if Some(i) == self.mut_param { "mut " } else { "" }, self.render_param(i)))
             .collect();
         let names: Vec<String> = (0..self.params.len()).map(|i| format!("a{i}")).collect();
-        let ret = self.ret.render();
+        let ret = if self.never { "Never".to_string() } else { self.ret.render() };
         let kw = if self.effect { "effect fn" } else { "fn" };
         let wrap = |inner: &str, bang: &str| format!("pub {kw} call({}) -> {ret} = {inner}({}){bang}\n", sig.join(", "), names.join(", "));
         let mut main = String::from("import self.left\nimport self.right\n\neffect fn main() -> Unit = {\n");
+        // A path that does not return is its program's last statement; it
+        // reaches the call through user effect fns, whose call is a Result.
+        if self.never {
+            let all = [("d", self.name.as_str(), ""), ("l", "left.call", "!"), ("r", "right.call", "!")];
+            for (v, callee, bang) in all.into_iter().filter(|(v, _, _)| paths.contains(v)) {
+                main.push_str(&self.never_body(&format!("{v} = "), callee, bang, true));
+            }
+            main.push_str("}\n");
+            let main = format!("{}{main}", super::catalogue::imports_for(&main));
+            let base = wrap(&self.name, "");
+            let path = wrap("base.call", "!");
+            let path = format!("{}import self.base\n\n{path}", super::catalogue::imports_for(&path));
+            let files = vec![
+                ("app/almide.toml".to_string(), "[package]\nname = \"app\"\nversion = \"0.1.0\"\n".to_string()),
+                ("app/src/base.almd".to_string(), format!("{}{base}", super::catalogue::imports_for(&base))),
+                ("app/src/left.almd".to_string(), path.clone()),
+                ("app/src/right.almd".to_string(), path),
+                ("app/src/main.almd".to_string(), main),
+            ];
+            return Project { files, entry: "app/src/main.almd".to_string() };
+        }
         main.push_str(&effect_recipes::prelude_for(&self.name, n).unwrap_or_default());
         for i in (0..self.params.len()).filter(|i| Some(*i) != self.mut_param && !self.per_step(*i)) {
             let _ = writeln!(main, "  let a{i}: {} = {}", self.render_param(i), self.arg(i, n));
@@ -1492,7 +1551,8 @@ pub(crate) mod tests {
             cmd.arg("run").arg(&file).arg("--").args(crate::oracle::sandbox::ARGS);
             world.enter(&mut cmd);
             let out = cmd.output().expect("spawn almide");
-            if !out.status.success() {
+            // A `-> Never` probe ends with its call's exit code.
+            if out.status.code() != Some(t.expected_exit()) {
                 let stderr = String::from_utf8_lossy(&out.stderr);
                 let why = stderr.lines().find(|l| l.contains("inspect:") || l.contains("error")).unwrap_or("").to_string();
                 failed.push(format!("{}: exit {:?} {why}", t.name, out.status.code()));
