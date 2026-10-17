@@ -45,6 +45,10 @@ impl ProcResult {
     }
 }
 
+/// The first bytes of a wasm "artifact" that is a pointer to its source,
+/// for the embedded host to run (`build_wasm`).
+const EMBEDDED_LEG: &str = "almide-embedded-leg:";
+
 /// Address-space ceiling for a fuzzed program's NATIVE run: wasm32's own
 /// linear-memory ceiling, so both legs stop at the same size (#2611).
 pub const NATIVE_MEMORY_CAP_BYTES: u64 = 4 << 30;
@@ -125,6 +129,16 @@ impl Toolchain {
 
     /// `almide build <file> --target wasm -o <out>` — direct WASM emit.
     pub fn build_wasm(&self, file: &Path, out: &Path) -> ProcResult {
+        // A program only the embedded host can serve (ADR-0027 D1): its
+        // "artifact" names the checked source, and `run_wasm` runs it there.
+        let src = std::fs::read_to_string(file).unwrap_or_default();
+        if crate::generator::needs_embedded(&src) {
+            let checked = self.run_almide(&["check", &file.to_string_lossy(), "--target", "wasm"]);
+            if checked.success() {
+                let _ = std::fs::write(out, format!("{EMBEDDED_LEG}{}", absolute(file).display()));
+            }
+            return checked;
+        }
         self.run_almide(&[
             "build",
             &file.to_string_lossy(),
@@ -227,6 +241,18 @@ impl Toolchain {
     /// `wasmtime <wasm>` — execute the WASM build.
     pub fn run_wasm(&self, wasm: &Path) -> ProcResult {
         let wasm = absolute(wasm);
+        if let Some(src) = std::fs::read(&wasm).ok().and_then(|b| String::from_utf8(b).ok()).and_then(|s| s.strip_prefix(EMBEDDED_LEG).map(String::from)) {
+            // Absolute: the run's cwd is its sandbox.
+            let almide = absolute(&self.almide);
+            return self.run_sandboxed(|_| {
+                let mut cmd = Command::new(&almide);
+                cmd.args(["run", &src, "--target", "wasm", "--"]);
+                cmd.args(super::sandbox::ARGS);
+                cmd.env("ALMIDE_RUN_PROJECT_DIR", &self.scratch);
+                cmd.env("NO_COLOR", "1");
+                cmd
+            });
+        }
         self.run_sandboxed(|dir| {
             let mut cmd = Command::new(&self.wasmtime);
             cmd.arg(format!("--dir={}::.", dir.display()));

@@ -36,7 +36,7 @@ mod term;
 mod types;
 pub mod verdicts;
 
-pub use catalogue::{build as build_catalogue, Signature, SANDBOXED_EFFECT_MODULES};
+pub use catalogue::{build as build_catalogue, needs_embedded, Signature, SANDBOXED_EFFECT_MODULES};
 
 use crate::rng::SplitMix64;
 

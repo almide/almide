@@ -388,6 +388,14 @@ fn build_as(ctx: &Ctx, src: &str, leg: Leg, canonical: bool) -> Result<PathBuf, 
     let file = ctx.dir.join(format!("p{:016x}.almd", hash(src)));
     std::fs::write(&file, src).map_err(|e| e.to_string())?;
     let canonical = canonical && matches!(leg, Leg::Wasm);
+    // A program only the embedded host serves (ADR-0027 D1) is built and run
+    // there in one step: its artifact is the source, under a name that
+    // carries the allocator choice (`run_cmd`).
+    if matches!(leg, Leg::Wasm) && crate::generator::needs_embedded(src) {
+        let art = file.with_extension(if canonical { "canonical.embedded.almd" } else { "embedded.almd" });
+        std::fs::write(&art, src).map_err(|e| e.to_string())?;
+        return Ok(art);
+    }
     let art = file.with_extension(match leg {
         Leg::Wasm if canonical => "canonical.wasm",
         Leg::Wasm => "wasm",
@@ -415,9 +423,28 @@ fn build_as(ctx: &Ctx, src: &str, leg: Leg, canonical: bool) -> Result<PathBuf, 
 /// killed and reported as a timeout, never as a time.
 const RUN_CAP: Duration = Duration::from_secs(60);
 
+/// An artifact `build_as` left as source for the embedded host.
+fn is_embedded(art: &Path) -> bool {
+    art.to_string_lossy().ends_with(".embedded.almd")
+}
+
+/// `almide run <src> --target wasm --` on the embedded host, with the
+/// allocator the artifact's name asks for. Each run compiles: the compile
+/// is the same work in the program with the call and the one without, so
+/// the counted judge's difference cancels it.
+fn embedded_cmd(ctx: &Ctx, art: &Path) -> Command {
+    let mut c = Command::new(&ctx.almide);
+    c.arg("run").arg(art).args(["--target", "wasm", "--"]);
+    if art.to_string_lossy().ends_with(".canonical.embedded.almd") {
+        c.env("ALMIDE_WASM_CANONICAL_ALLOC", "1");
+    }
+    c
+}
+
 fn run_artifact(ctx: &Ctx, art: &Path, leg: Leg) -> Result<String, String> {
     let world = World::new(&ctx.dir)?;
     let mut cmd = match leg {
+        _ if is_embedded(art) => embedded_cmd(ctx, art),
         Leg::Native => Command::new(art),
         Leg::Wasm => {
             let mut c = Command::new(&ctx.wasmtime);
@@ -921,6 +948,16 @@ fn run_counted(ctx: &Ctx, art: &Path, leg: Leg) -> Result<(String, Counts), Stri
             .arg(format!("MEMSHIM_OUT={}", moved_file.display()));
     }
     match leg {
+        _ if is_embedded(art) => {
+            let e = embedded_cmd(ctx, art);
+            cmd.arg(e.get_program()).args(e.get_args());
+            for (k, v) in e.get_envs() {
+                if let Some(v) = v {
+                    cmd.env(k, v);
+                }
+            }
+            &mut cmd
+        }
         Leg::Native => cmd.arg(art),
         // Compile on every run, single-threaded: wasmtime's compile cache
         // makes a module's first run count ~10x its later ones (c4-standard-4:
