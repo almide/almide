@@ -200,8 +200,8 @@ fn a_let_of_an_arithmetic_index_only_printed_borrows_into_the_list() {
     if !tool_available() { eprintln!("skipping: almide binary not available"); return; }
     let rust = emitted(INDEX_READS, "index_ref");
     let main = fn_body(&rust, "__almide_main");
-    assert!(main.contains("let name: _ = almide_index_ref!(names, almide_mod!(i, 3i64));"), "`names[i % 3]` read only by an interpolation borrows:\n{main}");
-    assert!(main.contains("almide_index_ref!(names, almide_mod!((i).wrapping_add(1i64), 3i64))"), "a compound arithmetic index borrows too:\n{main}");
+    assert!(main.contains("let name: _ = almide_index_ref!(names, almide_rem_const::<3>(i));"), "`names[i % 3]` read only by an interpolation borrows:\n{main}");
+    assert!(main.contains("almide_index_ref!(names, almide_rem_const::<3>((i).wrapping_add(1i64)))"), "a compound arithmetic index borrows too:\n{main}");
     assert!(!main.contains("almide_index!(names"), "no element is copied:\n{main}");
     with_program(INDEX_READS, "index_ref_run", |src| {
         let expected = "a>bb\nbb>ccc\nccc>a\na>bb\nbb>ccc\n";
