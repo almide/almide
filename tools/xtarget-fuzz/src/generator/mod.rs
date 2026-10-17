@@ -23,6 +23,7 @@ mod denylist;
 pub mod identity;
 pub mod inspect_gen;
 mod mutate;
+mod net_unix_args;
 mod nominal;
 mod pools;
 /// The shape vocabulary of the multi-module matrix gate (#3309), shared

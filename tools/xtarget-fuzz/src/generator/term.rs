@@ -123,6 +123,13 @@ fn render_call(b: &mut Builder, sig: &Signature, subst: &HashMap<String, GenType
     let mut args = Vec::with_capacity(sig.params.len());
     for (i, p) in sig.params.iter().enumerate() {
         let name = sig.param_names.get(i).map(String::as_str).unwrap_or("");
+        // net's descriptors, socket paths and bounded sizes (#3620).
+        if sig.module == "net" {
+            if let Some(a) = super::net_unix_args::arg(b, &sig.func, name) {
+                args.push(a);
+                continue;
+            }
+        }
         if let Some(a) = net_int_arg(sig, name).filter(|_| *p == SigType::Int) {
             args.push(a);
             continue;
@@ -136,7 +143,11 @@ fn render_call(b: &mut Builder, sig: &Signature, subst: &HashMap<String, GenType
         }
         match sandbox_arg(b, sig, p, name) {
             Some(a) => args.push(a),
-            None => args.push(gen_arg(b, p, name, subst)?),
+            None => {
+                let a = gen_arg(b, p, name, subst)?;
+                let bounded = (sig.module == "net").then(|| super::net_unix_args::int_domain(&sig.func, name)).flatten();
+                args.push(bounded.map_or(a.clone(), |d| d.replace("{x}", &a)));
+            }
         }
     }
     if let Some(v) = sig.verdict {
