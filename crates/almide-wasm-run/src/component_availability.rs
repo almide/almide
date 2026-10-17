@@ -57,6 +57,24 @@ pub fn embedded_runs_component(host_ops: &[i32]) -> bool {
     host_ops.iter().any(|op| COMPONENT_ONLY_OPS.contains(op)) && check(host_ops, true).is_ok()
 }
 
+/// The refusal for a program no single route of the embedded lane serves: it
+/// names a component-only op AND one the p3 shim does not serve, so neither
+/// the component nor the core-module host (which has no op 65, decision 1)
+/// can run all of it.
+pub fn embedded_split(host_ops: &[i32]) -> Option<String> {
+    let only = host_ops.iter().copied().find(|op| COMPONENT_ONLY_OPS.contains(op))?;
+    let other = host_ops.iter().copied().find(|op| !serves(*op, true))?;
+    Some(format!(
+        "error[E081]: {} (host op {only}) runs only as the WASI 0.3 component and {} (host op {other}) only on the \
+         embedded core-module host, so no wasm route serves this program\n  \
+         reason: ADR-0023 decision 1 keeps the full-response client out of the core host, and the component world \
+         has no import for host op {other}\n  \
+         note: the native target serves both",
+        operation_label(only),
+        operation_label(other),
+    ))
+}
+
 /// Reject an artifact before writing it when its direct shim cannot serve it.
 /// P3 HTTP imports are selected separately whenever an HTTP operation is emitted.
 pub fn check(host_ops: &[i32], p3: bool) -> Result<(), String> {
@@ -127,6 +145,7 @@ fn operation_name(op: i32) -> &'static str {
             61 => "fs.fold_lines_range", 62 => "fs.fold_lines_chunked",
             63 => "fs.read_bytes_raw", 64 => "fs.read_bytes_raw_if_exists",
             73 => "panic",
+            91..=103 => "the net core (net.tcp_*)",
             _ => "unknown operation",
         })
 }

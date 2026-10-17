@@ -558,6 +558,10 @@ fn cmd_run_wasm(file: &str, program_args: &[String], verified: bool, time_report
     // ADR-0023 step 7: a program naming an op only the WASI 0.3 shim serves
     // runs as its p3 component — the stock artifact itself — on the embedded
     // host's wasi:http, whose transport is native's client.
+    if let Some(refusal) = almide_wasm_run::component_availability::embedded_split(&host_ops) {
+        err(&refusal);
+        return 1;
+    }
     if almide_wasm_run::component_availability::embedded_runs_component(&host_ops) {
         return run_wasm_component(&bytes, &host_ops, program_args);
     }
