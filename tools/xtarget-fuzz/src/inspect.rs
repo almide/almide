@@ -1098,6 +1098,60 @@ mod run_tests {
         // timed out at 60 s: its bytes go to the kernel.
         assert!(counted_calibrated_t(&Delta { instructions: 1e3, moved: 0.0, wall: Duration::from_secs(3) }));
     }
+
+    /// The shim's copies cost the same instructions per byte in both
+    /// directions. A memmove copies forward when the destination sits below
+    /// the source and backward otherwise, so which loop runs depends on where
+    /// the allocator put two blocks — and that changed with n: wasm env.set's
+    /// overlay log sat in the park (below the value) at n = 20000 and in a
+    /// heap block (above it) from 40000 on, and its series read 5 then 4
+    /// instructions per byte, fitted nlogn (GCE c4-standard-4, 2026-10-17).
+    /// Skipped where no PMU is readable.
+    #[test]
+    fn the_shims_forward_and_backward_copies_count_alike() {
+        if !icount_available() {
+            eprintln!("skipping: no instructions:u counter here");
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("xtarget-memshim-dir-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let shim = build_memshim(&dir).expect("cc builds the shim");
+        // memmove 1 MB 64 times, down (forward copy) or up (backward copy)
+        // by 64 bytes; the program is the same, only the direction differs.
+        let driver = dir.join("driver.c");
+        std::fs::write(
+            &driver,
+            "#include <stdlib.h>\n#include <string.h>\nint main(int c, char **v) {\n  size_t n = 1 << 20;\n  \
+             unsigned char *b = malloc(n + 128);\n  for (size_t i = 0; i < n + 128; i++) b[i] = (unsigned char)i;\n  \
+             int up = v[1][0] == 'u';\n  for (int r = 0; r < 64; r++) {\n    if (up) memmove(b + 64, b, n); else memmove(b, b + 64, n);\n  }\n  \
+             return b[n / 2] == 7;\n}\n",
+        )
+        .unwrap();
+        let exe = dir.join("driver");
+        let ok = Command::new("cc").args(["-O0", "-o"]).arg(&exe).arg(&driver).status().is_ok_and(|s| s.success());
+        assert!(ok, "cc builds the driver");
+        let count = |dirn: &str| -> u64 {
+            let stat = dir.join(format!("{dirn}.csv"));
+            let st = Command::new("perf")
+                .args(["stat", "-x", ",", "-e", "instructions:u", "-o"])
+                .arg(&stat)
+                .arg("--")
+                .arg("env")
+                .arg(format!("LD_PRELOAD={}", shim.display()))
+                .arg(&exe)
+                .arg(dirn)
+                .status()
+                .expect("perf");
+            assert!(st.code().is_some(), "driver ran");
+            parse_instructions(&std::fs::read_to_string(&stat).unwrap()).expect("a count")
+        };
+        let (down, up) = (count("down"), count("up"));
+        let _ = std::fs::remove_dir_all(&dir);
+        // 64 MiB copied each way: a one-instruction-per-byte difference is
+        // 6.7e7, so 1% of either count is far under it and far over jitter.
+        let diff = down.abs_diff(up) as f64 / down.max(up) as f64;
+        assert!(diff < 0.01, "forward copy {down} instructions, backward {up}: the directions differ by {:.1}%", diff * 100.0);
+    }
 }
 
 #[cfg(test)]
