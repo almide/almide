@@ -1,0 +1,7 @@
+// An anonymous record has no declaration to carry the `: Ord` derive, so it
+// has no order. Check accepted the call while rustc refused the monomorph
+// ("AlmdRec_a_b<i64, i64>: Ord is not satisfied").
+fn main() -> Unit = {
+  let m = list.min([{ a: 2, b: 0 }, { a: 1, b: 5 }]) ?? { a: 0, b: 0 }
+  println("${m.a} ${m.b}")
+}
