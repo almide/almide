@@ -113,8 +113,17 @@ pub(crate) fn shim_cabi_realloc(heap_global: u32) -> Function {
     let result = 4u32;
     let mut f = Function::new([(1, ValType::I32)]);
     let mut i = f.instructions();
-    // result = (heap + 7) & !7
+    // result = (heap + 7) & !7 — or, for the frontier block (the last one
+    // bumped, ending exactly at `heap`), the block itself: it grows (or
+    // shrinks) where it stands and nothing is copied. A read-to-end drain
+    // doubles one buffer with nothing allocated between two doublings, so
+    // copying it cost up to the body's size again in steps at each doubling.
+    i.local_get(old_ptr);
     i.global_get(heap_global).i32_const(7).i32_add().i32_const(-8).i32_and();
+    i.local_get(old_ptr).i32_const(0).i32_ne();
+    i.local_get(old_ptr).local_get(old_size).i32_add().global_get(heap_global).i32_eq();
+    i.i32_and();
+    i.select();
     i.local_set(result);
     // grow if result + new_size overruns memory
     i.local_get(result).local_get(new_size).i32_add();
@@ -134,8 +143,11 @@ pub(crate) fn shim_cabi_realloc(heap_global: u32) -> Function {
     i.end();
     i.end();
     i.local_get(result).local_get(new_size).i32_add().global_set(heap_global);
-    // realloc semantics: copy min(old_size, new_size) from old_ptr.
-    i.local_get(old_ptr).i32_eqz().i32_eqz();
+    // realloc semantics: copy min(old_size, new_size) from old_ptr (a block
+    // grown in place is already there).
+    i.local_get(old_ptr).i32_const(0).i32_ne();
+    i.local_get(old_ptr).local_get(result).i32_ne();
+    i.i32_and();
     i.if_(BlockType::Empty);
     i.local_get(result);
     i.local_get(old_ptr);
