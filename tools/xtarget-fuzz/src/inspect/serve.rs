@@ -239,6 +239,8 @@ fn parity(ctx: &Ctx, engine: &Engine, args: &[String]) -> String {
     });
     let stock = stock_serves_p3(&ctx.wasmtime);
     let findings_dir = std::env::temp_dir().join(format!("xtarget-serve-findings-{seed}"));
+    // A rerun of the seed must not show the last run's findings as its own.
+    let _ = std::fs::remove_dir_all(&findings_dir);
     let next = AtomicU64::new(0);
     let results: Mutex<Vec<(u64, Outcome)>> = Mutex::new(Vec::new());
     std::thread::scope(|s| {
@@ -428,10 +430,14 @@ fn native_cause(native: &str, what: &str) -> &'static str {
     let at = what.split(' ').next().unwrap_or("");
     let Some(line) = native.lines().find(|l| l.split(' ').next() == Some(at)) else { return "native line missing" };
     let status = line.split(" -> ").nth(1).and_then(|r| r.split(' ').nth(1)).and_then(|s| s.parse::<i64>().ok());
+    let headers = line.split_once(" [").and_then(|(_, h)| h.split_once("] body=")).map_or("", |(h, _)| h);
+    let control = (0u8..0x20).filter(|b| *b != b'\t').chain([0x7f]).any(|b| headers.contains(&format!("\\x{b:02x}")));
     match status {
         Some(s) if !(100..=599).contains(&s) => "native wrote a status outside 100..=599",
+        Some(s) if (100..200).contains(&s) => "native wrote a 1xx as the final response",
         Some(500) if line.contains("body=Internal error: response header") => "native refused a response header, #2822",
-        Some(_) => "native status in 100..=599",
+        Some(_) if control => "native wrote a header value holding a control byte",
+        Some(_) => "native status in 200..=599",
         None => "native wrote no parseable status line",
     }
 }
@@ -441,7 +447,7 @@ mod tests {
     use super::*;
 
     fn t(body: &str) -> String {
-        format!("#0 GET / -> HTTP/1.1 200 [] body={body} (date ok, framing ok, connection ok, reason ok)\nexit 0\n")
+        format!("#0 GET / -> HTTP/1.1 200 [] body={body} (status ok, fields ok, date ok, framing ok, connection ok, reason ok)\nexit 0\n")
     }
 
     #[test]
