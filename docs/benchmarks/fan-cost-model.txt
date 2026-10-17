@@ -41,11 +41,11 @@
 # against ~0.2 us warm on that machine.
 #
 # What it cannot see: a site's first offer (always parallel on every core,
-# so one cheap offer pays the W=8 row of the 2026-10-16 table once: 22-35 us
-# native, 41-69 us wasm, plus the crew's spawn — and on wasm the workers'
-# instantiation — when it is the run's first parallel offer), and a site
-# whose work per element swings between offers (the estimate is the last
-# offer's).
+# so one cheap offer pays the W=8 row once: 1.7-4.1 us native since the
+# 2026-10-17 pool, 41-69 us wasm, plus the pool's spawn — and on wasm the
+# workers' instantiation — when it is the run's first parallel offer), and a
+# site whose work per element swings between offers (the estimate is the
+# last offer's).
 
 native_offer_ns  = 1_500
 native_worker_ns = 700
@@ -207,7 +207,8 @@ wasm_worker_ns   = 5_000
 # one sequential offer in 16 (list.rs `ALMIDE_FAN_RESAMPLE`), any other
 # sequential site one in 4 (`ALMIDE_FAN_RESAMPLE_NEAR`: at ~1.5 us per
 # element on AMD the clock reads were 14% of the offer); a site whose work
-# grows past the crossover is seen within 16 / 4 offers.
+# grows past the crossover is seen within 16 / 4 offers. (Superseded
+# 2026-10-17: every sequential site re-measures one in 16; see the end.)
 #
 # The per-leg constants and the resampling, measured on GCE: native, 1000
 # offers x 10 elements, t(1010) - t(10), min of 11 with the modes
@@ -232,3 +233,51 @@ wasm_worker_ns   = 5_000
 # develop on both (min of 15). The wasm leg's constants and code are
 # unchanged; its sweep on the same branch read within run-to-run noise of
 # develop's.
+
+# ── The native pool, 2026-10-17 ───────────────────────────────────────────
+# The pool now publishes an offer to threads that poll between offers and
+# steal blocks (docs/benchmarks/fan-floor.md, "The pool"), so the native
+# constants were re-measured: 1000 forced-parallel offers of 10 elements,
+# ALMIDE_FAN_THREADS = W, t(1010) - t(10), min of 11 with W interleaved, us
+# per offer (W1 = ALMIDE_FAN_SEQUENTIAL):
+#
+#   AMD EPYC 7B13
+#   iters   W1     W2     W3     W4     W5     W6     W7     W8
+#   0       0.18   1.01   0.72   1.38   2.09   1.97   1.93   1.72
+#   100     3.92   3.32   2.86   3.47   3.66   6.15   9.54  11.14
+#   300    12.42   8.42   7.11   6.15   5.93   4.67   6.80  10.00
+#
+#   Intel 8581C
+#   iters   W1     W2     W3     W4     W5     W6     W7     W8
+#   0       0.01   0.86   1.23   1.45   2.71   2.36   2.59   4.13
+#   100     3.22   3.20   3.50   3.95   4.26   5.97   6.90   8.54
+#   300     9.77   7.14   5.64   5.38   5.51   5.84   6.79   8.00
+#
+# The cost of an offer is its row less the elements' share,
+# ceil(10 / W) * (W1 / 10). native: 1.5 + 0.7W us (2.9 at W=2 .. 7.1 at
+# W=8) is the envelope over the empty-element rows (0.72 .. 4.13) and over
+# every row at W <= 6 (at most 5.37: AMD 100, W=6). It is not over W = 7
+# and 8 with 0.3-1.2 us elements, where seven or eight threads contending
+# for one offer's counter and slots cost up to 10.4 us (AMD 100, W=8). A
+# 10-element offer never takes W > 5 (ceil(10 / W) is 2 from W = 5 up, and
+# more workers only cost more).
+# The constants were 12 + 3W, the envelope over the crew's 7-35 us.
+#
+# What an offer reads as t changed too:
+#   - the thread CPU clock read that ends a timed interval is subtracted
+#     from it (measured once: the least of 16 back-to-back pairs). A worker
+#     of a parallel offer often times one or two elements, and on the AMD VM
+#     (a 1.1 us read) 0.4 us elements read 1.5-4 us, which kept the site
+#     parallel where sequential was faster;
+#   - a parallel offer is timed once in 8 (`ALMIDE_FAN_RESAMPLE_PAR`; each
+#     helper's three clock reads were on the offer's critical path), and
+#     every sequential site once in 16 (the 1-in-4 tier caught 0.4 us
+#     elements once the crossover fell to ~0.6 us, at 12% of their offer on
+#     the AMD VM);
+#   - an estimate from a parallel offer within 2x of the crossover is checked
+#     by the next offer running sequentially (`ALMIDE_FAN_PROBE`): the
+#     elements of a parallel offer read slower than the same elements on one
+#     thread, and a site's first offer is parallel;
+#   - a sequential site turns parallel only on two measurements in a row: one
+#     interrupted offer read above the crossover sent 0.42 us elements (0.58
+#     us crossover) parallel at ~9 us a time on the AMD VM.
