@@ -278,6 +278,14 @@ const MADE_DIR: &str = "{ fs.mkdir_p(\"pdir\")!\n  \"pdir\" }";
 
 const ECHO: &str = "\"/bin/echo\"";
 const ECHO_ARGS: &str = "list.range(0, {n} / 100) |> list.map((i) => \"aé\")";
-/// n / 10 arguments: a captured run's pipe reads vary with the fork, and the
-/// call's own work must stand above that noise (the rms bound is 3%).
-const ECHO_ARGS_WIDE: &str = "list.range(0, {n} / 10) |> list.map((i) => \"aé\")";
+/// n / 5 arguments: a captured run's pipe reads vary with the fork, and the
+/// call's own work must stand above that noise (the rms bound is 3%). Not
+/// n / 10: native `Command` holds one small CString per argument, and once
+/// its argument Vec reaches 64 KiB (4096 arguments) freeing it crosses
+/// glibc's fastbin-consolidation threshold, which then walks every freed
+/// CString on each call — per argument 670-720 instructions up to 3000
+/// arguments, 765-800 from 4000 (GCE, native process.exec, k = 256..512), so
+/// n / 10 (2000..32000) straddled the step and fit no class (rms 6.0%); with
+/// fastbins off (GLIBC_TUNABLES=glibc.malloc.mxfast=0) the step is gone. From
+/// 4000 arguments every size is in the one allocator regime (fit n, 0.9%).
+const ECHO_ARGS_WIDE: &str = "list.range(0, {n} / 5) |> list.map((i) => \"aé\")";
