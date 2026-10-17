@@ -7,6 +7,8 @@ pub mod ir_link;
 pub mod import_table;
 pub mod dialect_check;
 pub mod deprecation;
+/// Where a stdlib spelling removed at a dialect epoch went (read from the ledger).
+pub mod removed_spellings;
 pub mod attr_vocab;
 pub mod stdlib;
 pub mod bundled_sigs;
