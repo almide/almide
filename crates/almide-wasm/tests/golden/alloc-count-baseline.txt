@@ -783,7 +783,6 @@
 2	0	12	0	spec/wasm_cross/testing_assert_abort_none.almd
 4	0	52	0	spec/wasm_cross/testing_assert_abort_ok.almd
 4	1	60	2	spec/wasm_cross/testing_assert_abort_some.almd
-0	0	0	0	spec/wasm_cross/testing_assert_abort_throws.almd
 0	0	0	0	spec/wasm_cross/time_negative_scale.almd
 0	0	0	0	spec/wasm_cross/time_negative_trap.almd
 0	0	0	0	spec/wasm_cross/time_ops_algebra.almd

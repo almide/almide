@@ -783,7 +783,6 @@
 2808	spec/wasm_cross/testing_assert_abort_none.almd
 5733	spec/wasm_cross/testing_assert_abort_ok.almd
 2199	spec/wasm_cross/testing_assert_abort_some.almd
-1871	spec/wasm_cross/testing_assert_abort_throws.almd
 1320	spec/wasm_cross/time_negative_scale.almd
 1182	spec/wasm_cross/time_negative_trap.almd
 3923	spec/wasm_cross/time_ops_algebra.almd

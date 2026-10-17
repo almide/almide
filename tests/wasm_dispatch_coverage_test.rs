@@ -25,8 +25,8 @@ fn almide() -> &'static str { env!("CARGO_BIN_EXE_almide") }
 fn repo_root() -> PathBuf { PathBuf::from(env!("CARGO_MANIFEST_DIR")) }
 
 /// Pure `// wasm:skip` directives — files that legitimately cannot run
-/// on WASM (native-only `process` fns, `testing.assert_throws` which
-/// relies on panic catching). The 3 matrix ops (`rms_norm_rows`,
+/// on WASM (native-only `process` fns; `testing.assert_throws`, which
+/// relied on panic catching, left at dialect epoch 14). The 3 matrix ops (`rms_norm_rows`,
 /// `attention_weights`, `swiglu_gate`) are now implemented inline;
 /// bumping this upward requires a roadmap entry.
 const SKIP_BASELINE: usize = 35;
