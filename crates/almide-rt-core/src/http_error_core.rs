@@ -23,6 +23,16 @@
 //   tls            TLS handshake with "<url>" failed
 //   too-large      response from "<url>" is larger than <n> bytes (raise ALMIDE_HTTP_MAX_RESPONSE_BYTES; 0 = no limit)
 //   protocol       malformed or incomplete response from "<url>"
+//   status         HTTP <status>: <the body's first 500 chars> (the streaming calls)
+
+/// The head of a non-2xx refusal (`request_stream` and its streaming twins):
+/// `HTTP <status>`, which the caller follows with `: ` and the body. No reason
+/// phrase (owner ruling 2026-10-17): wasi:http hands a guest the status code
+/// and none, so a leg on it could not spell one, and C-367 keeps the phrase
+/// out of its comparison for the same cause.
+pub fn http_status_refusal(status: i64) -> String {
+    format!("HTTP {status}")
+}
 
 /// A transport failure's class. The request-side classes (invalid-url,
 /// refused-header) are rendered where they are found, from the pieces below.

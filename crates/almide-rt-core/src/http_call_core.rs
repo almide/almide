@@ -54,7 +54,6 @@ pub fn http_stream_incomplete_utf8_tail(b: &[u8]) -> usize {
 
 pub struct AlmideHttpCallHead {
     status: i64,
-    reason: String,
     headers: Vec<(String, String)>,
 }
 
@@ -232,7 +231,7 @@ fn http_call_decode(f: &mut HttpCallFraming, raw: &mut Vec<u8>, out: &mut Vec<u8
     }
 }
 
-/// Split the head off `raw` once it is whole: status, reason, header lines
+/// Split the head off `raw` once it is whole: status, header lines
 /// (wire order, repeats kept — the `request_response` rule) and framing. A
 /// 1xx interim head (`100 Continue`) is dropped and the next one awaited
 /// (#2824); a head past `HTTP_MAX_HEAD_BYTES` is an error.
@@ -248,8 +247,6 @@ fn http_call_parse_head(raw: &mut Vec<u8>) -> Result<Option<(AlmideHttpCallHead,
             break (section, status);
         }
     };
-    let status_line = section.lines().next().unwrap_or("");
-    let reason = status_line.splitn(3, ' ').nth(2).unwrap_or("").to_string();
     let headers = http_head_fields(&section);
     let chunked = http_fields_chunked(&headers);
     let length = headers
@@ -261,7 +258,7 @@ fn http_call_parse_head(raw: &mut Vec<u8>) -> Result<Option<(AlmideHttpCallHead,
         (false, Some(n)) => HttpCallFraming::Length(n),
         (false, None) => HttpCallFraming::UntilClose,
     };
-    Ok(Some((AlmideHttpCallHead { status, reason, headers }, framing)))
+    Ok(Some((AlmideHttpCallHead { status, headers }, framing)))
 }
 
 /// The socket timeout for the next blocking step: the idle limit (reads
@@ -509,14 +506,14 @@ pub fn http_call_read_new(sh: &AlmideHttpCallShared) -> String {
 /// and the SSE twins): block until bytes arrive or the call ends, then answer
 /// the text to deliver and — once the call is over — how it ended. A non-2xx
 /// status is refused the way `request_stream` refuses it (after the whole
-/// body, its first 500 chars quoted), with nothing delivered.
+/// body, `http_status_refusal` and its first 500 chars), with nothing delivered.
 pub fn http_call_stream_step(sh: &AlmideHttpCallShared) -> (String, Option<Result<(), String>>) {
     let mut st = sh.wait_until(|st| st.head.is_some() && st.body.len() > st.delivered);
     let refused = st
         .head
         .as_ref()
         .filter(|h| !(200..300).contains(&h.status))
-        .map(|h| format!("HTTP {}: {}", h.status, h.reason));
+        .map(|h| http_status_refusal(h.status));
     if let Some(prefix) = refused {
         drop(st);
         let st = sh.wait_until(|_| false);
