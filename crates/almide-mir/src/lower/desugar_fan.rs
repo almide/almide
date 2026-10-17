@@ -1,9 +1,11 @@
 /// Desugar `fan.race` / `fan.any` over a LITERAL thunk list by INLINING each thunk's body — avoiding a
 /// `List[funcref]` (unrepresentable in v1) entirely. On wasm the fan combinators are deterministic:
-///   `fan.race([() => t0, () => t1, …])`  ≡  `t0`           (the FIRST thunk settles first)
 ///   `fan.any([() => t0, () => t1, …])`   ≡  `match t0 { ok(v) => ok(v), err(_) => <any of the rest> }`
-///                                             (the FIRST Ok in list order; the last thunk's result is
-///                                              the fallback if every earlier one errs)
+///                                             (the FIRST Ok in list order; if every thunk errs, the
+///                                              ledger-constant `err("fan.any: all candidates failed")`)
+/// The `fan.race([…]) ≡ t0` rewrite below (`rewrite_race_head`) is the pre-0.42 thunk-list form and is
+/// unreachable from source: that call is E027, and the live `fan.race` heads lower in the frontend to a
+/// least-(spend, index) fold (docs/design/fan-semantics-audit.md §5).
 /// Each `t_i` is a no-param lambda whose body is a `Result[T, String]` (an effect fn call). The inlined
 /// form is a plain match-over-a-call chain, all in v1's subset. A NON-literal thunk list (`let ts =
 /// […]; fan.race(ts)`) has no inlinable bodies → left for the call-site purity wall.

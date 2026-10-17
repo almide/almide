@@ -5,9 +5,11 @@
 // value is an `Rc<dyn Fn>`, which is neither `Send` nor `Sync`, so it could not
 // be moved across the `thread::scope` boundary the parallel version required.
 // Results are identical to a parallel map (input order preserved); only the
-// (unobservable) parallelism is dropped. race/settle keep their
-// thread::scope and receive `Box<dyn Fn + Send[+ Sync]>` thunks (the box pass
-// boxes them), which still satisfy the existing `impl Fn + Send + Sync` bounds.
+// (unobservable) parallelism is dropped. `fan.race` never reaches this file:
+// it lowers in the frontend to a sequential least-(spend, index) fold
+// (almide-frontend lower/expressions_fan.rs). `fan.settle` lowers to a tuple
+// (block) or `list.map` (mapper), so `almide_rt_fan_race` and
+// `almide_rt_fan_settle` below have no producer (docs/design/fan-semantics-audit.md).
 //
 // `fan.map` is EFFECTFUL and runs EVERY element (ADR-0024 D1, C-005): an
 // element's `Err` does not stop the map, the elements after it still run, and
@@ -39,10 +41,12 @@ pub fn almide_rt_fan_map<A, B>(
 
 // `fan.map`'s PARALLEL twin (#2044). RustLowering's fan routing (native only) routes a
 // `fan.map` here when its callback is a PURE lambda LITERAL whose element,
-// result and captured types are all Send-safe scalars — Int/Float/Bool/Unit,
-// the sized numerics, and tuples/records of those. Anything carrying an `Rc`
-// (List/Map/Set/Bytes/String, closure values) and every EFFECT callback (its
-// side effects must stay in list order) keeps the sequential `almide_rt_fan_map`.
+// result and captured types are all Send-safe (`is_send_safe_ty` in
+// pass_rust_lowering_fan.rs: the scalars, String, List, Set, Map, Result and
+// tuples/records of those), or an effect callback whose only effect is a
+// nested fan (`Purity::for_fan`). Closure values and every other EFFECT
+// callback (its side effects must stay in list order) keep the sequential
+// `almide_rt_fan_map`.
 // The callback is a raw `impl Fn` (the box pass leaves fan args unboxed), so
 // a non-Send capture the pass missed is a loud rustc error, never a race.
 //
@@ -120,15 +124,11 @@ fn almide_fan_map_settle_slots<B>(slots: Vec<Option<Result<B, String>>>) -> Resu
     Ok(out)
 }
 
-// `fan.race` returns the FIRST thunk in LIST ORDER to SETTLE — i.e. thunk[0]'s
-// `Result` (Ok or Err), DETERMINISTIC (not wall-clock fastest, which is neither
-// reproducible nor expressible on the single-threaded WASM target). It differs
-// from `fan.any`, which SKIPS failures to find the first Ok: race surfaces
-// thunk[0]'s Err. Since fan thunks are pure (capturing a `var` is a compile
-// error), the non-head thunks are observably irrelevant, so evaluating only the
-// head is equivalent to "start all, take the first to settle". An empty list is
-// a defined Err, never a panic. EFFECTFUL: the caller's auto-`?` routes a head
-// Err to the unified main-error exit, byte-identical to the wasm path.
+// NO PRODUCER. This is the pre-0.42 thunk-list `fan.race(thunks)`, which
+// evaluated only thunk[0]. The call form is now refused with E027
+// (static_dispatch.rs), and the live `fan.race { }` / `fan.race(xs, f)` heads
+// lower in the frontend to the least-(spend, index) fold, so they never call
+// this function. Kept only until the runtime registry drops it.
 pub fn almide_rt_fan_race<T>(
     thunks: Vec<impl Fn() -> Result<T, AlmideString>>,
 ) -> Result<T, AlmideString> {
@@ -143,8 +143,8 @@ pub fn almide_rt_fan_race<T>(
 
 // `fan.any` tries the thunks in LIST ORDER and returns the FIRST `Ok`
 // (deterministic — NOT wall-clock fastest). If every candidate fails it returns
-// a defined `Err`, never panicking or trapping. This is intentionally NOT
-// `fan.race` (which is parallel + wall-clock nondeterministic and stays as-is).
+// a defined `Err`, never panicking or trapping. Later thunks are never started.
+// (`fan.race` is a different selection: least compute spent, tie -> list order.)
 pub fn almide_rt_fan_any<T>(
     thunks: Vec<impl Fn() -> Result<T, AlmideString>>,
 ) -> Result<T, AlmideString> {
@@ -178,7 +178,8 @@ pub fn almide_rt_fan_any_map<A, B>(
     __almide_r.map_err(Into::into)
 }
 
-// One output timeline per thunk, flushed in list order (ADR-0024 D5). The
+// NO PRODUCER: `fan.settle { }` lowers to a tuple and `fan.settle(xs, f)` to
+// `list.map`, both sequential. One output timeline per thunk, flushed in list order (ADR-0024 D5). The
 // group flushes this thread's stdout first: a runtime abort on a worker exits
 // without reaching this thread's buffer (C-197, see rust.toml fan_expr).
 pub fn almide_rt_fan_settle<T: Send + 'static>(

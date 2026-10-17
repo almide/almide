@@ -1,7 +1,9 @@
 // fan_any — SELF-HOSTED `fan.any` MAPPER form (Wave 2): apply the callback IN LIST ORDER and
 // return the FIRST Ok — an element's Err disqualifies that element only (deterministic skip,
 // never wall-clock). The EARLY CUT is structural: the recursion returns at the first Ok, so
-// later elements are never evaluated. All-fail (and the empty list) is the ledger-constant Err.
+// later elements are never evaluated here. (A wasm callback that is an fs read takes the
+// prefetch lowering instead, crates/almide-wasm/src/fan.rs, which issues every read up front
+// and drops the losers.) All-fail (and the empty list) is the ledger-constant Err.
 // Monomorphic per (input element A, output element B) like fan_map; the trust spine routes by
 // type (`fan_call_name`); an unsupported pairing walls.
 // ── (Int → Int) ──

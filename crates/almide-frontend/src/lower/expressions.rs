@@ -268,7 +268,7 @@ fn lower_expr_control(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option
         }
         ast::ExprKind::FanRaceMap { .. } => {
             // Same tail construction as the block form below — only the fold
-            // differs (dynamic while-scan vs static unrolled arms).
+            // differs (a `for` over the list vs static unrolled arms).
             let result_ty = ty.clone();
             let (stmts, ok_var, val_var, arm_ty) = lower_fan_race_map_fold(ctx, expr, span);
             let cond = ctx.mk(IrExprKind::BinOp {
