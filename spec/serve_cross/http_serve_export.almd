@@ -5,7 +5,7 @@
 // (no flags) and runs it natively with `almide run`, replays one request
 // script against both and compares each response's status code, header set
 // and de-framed body (the reason phrase, `date` and the framing are the
-// host's). It also sends the artifact a body over 1 MiB (413) and a request
+// host's), the refused and reshaped answers included. It also sends the artifact a body over 1 MiB (413) and a request
 // line over 8 KiB (414), and asks `/trap` last: the export host answers its
 // own 500 and discards the instance, where native aborts.
 // `main` is serve-shaped: one `http.serve` call, preceded only by a `let`
@@ -33,6 +33,23 @@ effect fn app(req: HttpRequest) -> HttpResponse = {
       ],
     ),
     "/teapot" => http.response(200, "short and stout") |> http.status(418),
+    // Answers the server refuses (a status that is not a final status code,
+    // a header name that is not a token, a value holding a control
+    // character) or reshapes (the framing fields it owns are dropped).
+    "/s42" => http.response(42, "x"),
+    "/s103" => http.response(103, "x"),
+    "/hname" => http.with_headers(200, "x", ["a b": "v"]),
+    "/hctl" => http.with_headers(200, "x", ["X-C": "a\u{1}b"]),
+    "/hframe" => http.with_headers(
+      200,
+      "hello",
+      [
+        "Content-Length": "99",
+        "Transfer-Encoding": "chunked",
+        "Keep-Alive": "timeout=5",
+        "X-Kept": "1"
+      ],
+    ),
     "/fail" => {
       deny(route)!
       http.response(200, "unreachable")
