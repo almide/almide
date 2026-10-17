@@ -53,6 +53,8 @@
 #                      host capability on wasm, and their parity is judged on
 #                      the embedded host and a stock WASI runtime both
 #   status             `uninspected` | `inspected`
+#   blocked            on an `uninspected` row only: why it cannot be stamped
+#                      yet under the unloosened criteria, and what unblocks it
 #   stamp              "<version> @ <commit> <date>; codopsy <scores>"
 #   order              declared per-call cost, in the size of the named param
 #   parity, complexity, diamond, alloc
@@ -3507,6 +3509,7 @@ name = "fs.glob"
 sig = "effect (pattern: String) -> List[String] ! String"
 class = "effect"
 status = "uninspected"
+blocked = "complexity: the result is sorted, so the cost is a sort (n log n) plus linear work; the counted judge fits the nlogn class as a + c*n*ln n with no linear term, and native misses it by 3.6-6.1% (rms bound 3%). Owner ruling 2026-10-17 (x): the class is not widened to a + b*n + c*n*ln n, which over n..16n would also pass n^1.2 and n*ln^2 n. Unblocked by a measurement that separates the sort from the linear work, or a judge change ruled separately"
 
 [[fn]]
 name = "fs.is_dir"
@@ -3552,6 +3555,7 @@ name = "fs.list_dir"
 sig = "effect (path: String) -> List[String] ! String"
 class = "effect"
 status = "uninspected"
+blocked = "complexity: the result is sorted, so the cost is a sort (n log n) plus linear work; the counted judge fits the nlogn class as a + c*n*ln n with no linear term, and native misses it by 3.6-6.1% (rms bound 3%). Owner ruling 2026-10-17 (x): the class is not widened to a + b*n + c*n*ln n, which over n..16n would also pass n^1.2 and n*ln^2 n. Unblocked by a measurement that separates the sort from the linear work, or a judge change ruled separately"
 
 [[fn]]
 name = "fs.mkdir_p"
@@ -3739,6 +3743,7 @@ name = "fs.walk"
 sig = "effect (dir: String) -> List[String] ! String"
 class = "effect"
 status = "uninspected"
+blocked = "complexity: the result is sorted, so the cost is a sort (n log n) plus linear work; the counted judge fits the nlogn class as a + c*n*ln n with no linear term, and native misses it by 3.6-6.1% (rms bound 3%). Owner ruling 2026-10-17 (x): the class is not widened to a + b*n + c*n*ln n, which over n..16n would also pass n^1.2 and n*ln^2 n. Unblocked by a measurement that separates the sort from the linear work, or a judge change ruled separately"
 
 [[fn]]
 name = "fs.write"
