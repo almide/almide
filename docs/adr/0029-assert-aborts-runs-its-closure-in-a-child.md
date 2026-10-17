@@ -1,6 +1,6 @@
 # ADR-0029: `testing.assert_aborts(expected, closure)` runs only its closure, in a child process or a fresh instance; the closure captures nothing, every abort counts, and `testing.assert_throws` leaves at dialect epoch 14
 
-- **Status**: Proposed (draft, 2026-10-17).
+- **Status**: Accepted (2026-10-18). The nine Open questions were decided under the owner's delegation of the night of 2026-10-17 ("decide by comparison with other languages; native and wasm must agree"), each by the Swift exit-test precedent Q15 chose; see [Open](#open).
   - The direction is the owner's ruling of 2026-10-17 (○): replace `testing.assert_throws(f, expected)` and land the change in dialect epoch 14.
   - The spelling is the owner's ruling Q15 (2026-10-17). It is a body-level call, `testing.assert_aborts("expected substring", () => { … })`, executed the way Swift 6.2's exit tests are: the runner runs *only the closure*, in a child process (native) or a fresh instance (wasm). The closure may capture nothing, and every abort counts.
   - Q15 rejected the first draft of this ADR (a test-level `@aborts("…")` attribute, then a test-header modifier). That draft is kept below as rejected alternatives.
@@ -321,7 +321,7 @@ The als PR does not touch dialect epochs. Epoch 14 is this repo's ledger.
 
 ## Open
 
-Each needs a ○× ruling. Already ruled: the spelling and argument order (Q15), the child-process / fresh-instance execution, no captures, every abort counting, and the epoch-14 removal with no deprecation window and "delete" outside a test. The `removed_spellings.rs` third shape is an implementation choice, done in D6.
+Decided 2026-10-18 under the owner's delegation, all ○ (the answer each question proposes), each following Swift 6.2's exit tests where they speak to it: the body is any code, effects included, run in a child that inherits the environment and sees globals at their initial values; it matches a declared exit condition; output is captured for the report only. Q8 is ○ because a guest under stock wasmtime has no way to start a fresh instance, so the embedded host serves the wasm leg and the stock lane declares the wall. Already ruled before: the spelling and argument order (Q15), the child-process / fresh-instance execution, no captures, every abort counting, and the epoch-14 removal with no deprecation window and "delete" outside a test. The `removed_spellings.rs` third shape is an implementation choice, done in D6.
 
 1. Is the closure's type `() -> T` with the value discarded, rather than `() -> Unit` only?
 2. May the closure be an effect closure (fs/env/argv in the child, same cwd/env/argv as the test)?
