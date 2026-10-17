@@ -30,18 +30,3 @@ pub fn almide_rt_matrix_select_rows(m: &AlmideMatrix, row_ids: &[i64]) -> Almide
     }
     mk(out_rows, cols, flat)
 }
-
- 8]; 256] = {
-    let mut t = [[0.0; 8]; 256];
-    let mut i = 0;
-    while i < 256 {
-        let mut j = 0;
-        while j < 8 {
-            t[i][j] = if (i >> j) & 1 == 1 { 1.0 } else { -1.0 };
-            j += 1;
-        }
-        i += 1;
-    }
-    t
-};
-
