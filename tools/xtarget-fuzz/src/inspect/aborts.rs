@@ -11,7 +11,9 @@
 //!               out of bounds, a division by zero, a failed assert, an effect
 //!               err propagated with `!`) or, on the failing paths, in none or
 //!               under an expected text the abort does not carry: 0 unique
-//!               findings between native and the embedded lane
+//!               findings between native and the embedded lane (a pair that
+//!               differs only where a child died at a host resource limit,
+//!               C-196/C-197, is no verdict, as in the fuzzer's ladder)
 //!   complexity  n = the bytes the child writes to stderr before it aborts,
 //!               which the parent reads whole and scans for the last abort
 //!               header; k = calls of one site in a loop (the program's size
@@ -291,8 +293,23 @@ enum Outcome {
     PassedAlike,
     /// Both legs failed with the same transcript (a failing path).
     FailedAlike,
+    /// The legs differ only where a child died at a host resource limit
+    /// (C-196 stack depth, C-197 address space): not an observable the ALS
+    /// specifies, so no verdict — the fuzzer's resource-limit family.
+    ResourceLimit,
     /// A divergence, keyed by its signature for de-duplication.
     Finding(String),
+}
+
+/// A child's abort at a host resource limit, as the fuzzer's ladder reads
+/// it (`oracle::ladder::resource_limit`): the abort text a failing call
+/// reports as `found: abort "…"`.
+const RESOURCE_SIGNATURES: [&str; 4] = ["Error: out of memory", "call stack exhausted", "stack overflow", "bytes failed"];
+
+/// Some transcript's failure block reports a child that died at a resource
+/// limit.
+pub fn resource_limited(t: &str) -> bool {
+    t.lines().any(|l| l.starts_with("found: abort ") && RESOURCE_SIGNATURES.iter().any(|s| l.contains(s)))
 }
 
 /// Criteria 1 and 4: `--count` generated test files (default 200) from
@@ -328,6 +345,7 @@ fn parity_line(seed: u64, count: u64, results: &[(u64, Outcome)], findings_dir: 
     let rejected: Vec<&String> = results.iter().filter_map(|(_, o)| if let Outcome::Rejected(e) = o { Some(e) } else { None }).collect();
     let passed = results.iter().filter(|(_, o)| *o == Outcome::PassedAlike).count();
     let failed = results.iter().filter(|(_, o)| *o == Outcome::FailedAlike).count();
+    let limited = results.iter().filter(|(_, o)| *o == Outcome::ResourceLimit).count();
     let mut sigs: Vec<(String, u64)> = Vec::new();
     for (i, o) in results {
         if let Outcome::Finding(sig) = o {
@@ -339,7 +357,7 @@ fn parity_line(seed: u64, count: u64, results: &[(u64, Outcome)], findings_dir: 
     sigs.sort();
     let reject_note = rejected.first().map(|e| format!(" (first: {e})")).unwrap_or_default();
     let mut line = format!(
-        "seed {seed}, {count} generated test files; legs native, embedded; {passed} passed alike, {failed} failed alike with the same failure block; {} generator rejects{reject_note}; unique findings {}",
+        "seed {seed}, {count} generated test files; legs native, embedded; {passed} passed alike, {failed} failed alike with the same failure block; {limited} skipped at a host resource limit (C-196/C-197); {} generator rejects{reject_note}; unique findings {}",
         rejected.len(),
         sigs.len()
     );
@@ -369,7 +387,9 @@ fn one_test(ctx: &Ctx, src: &str, i: u64, findings: &Path) -> Outcome {
         (Ok(n), Ok(w)) => (n, w),
         (Err(e), _) | (_, Err(e)) => return Outcome::Finding(e),
     };
-    let out = if n != w {
+    let out = if n != w && (resource_limited(&n) || resource_limited(&w)) {
+        Outcome::ResourceLimit
+    } else if n != w {
         let first = n.lines().zip(w.lines()).find(|(a, b)| a != b).map(|(a, b)| format!("{a} | {b}")).unwrap_or_else(|| "length".into());
         let key = first.split(':').next().unwrap_or("").to_string();
         let dir = findings.join(format!("{i:04}"));
@@ -432,6 +452,13 @@ mod tests {
         let mut odd = three.clone();
         odd[2] = "pass\n".into();
         assert!(diamond_verdict(&odd, &three).starts_with("FAIL: the three paths differ on native"));
+    }
+
+    #[test]
+    fn a_child_at_a_resource_limit_is_no_verdict() {
+        assert!(resource_limited("fail\nat line 12\nexpected: abort containing \"x\"\nfound: abort \"Error: out of memory\n\"\n"));
+        assert!(!resource_limited("fail\nat line 12\nexpected: abort containing \"x\"\nfound: abort \"PANIC: boom\"\nchild stderr:\nError: out of memory\n"));
+        assert!(!resource_limited("pass\n"));
     }
 
     #[test]
