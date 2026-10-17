@@ -123,6 +123,10 @@ fn render_call(b: &mut Builder, sig: &Signature, subst: &HashMap<String, GenType
     let mut args = Vec::with_capacity(sig.params.len());
     for (i, p) in sig.params.iter().enumerate() {
         let name = sig.param_names.get(i).map(String::as_str).unwrap_or("");
+        if let Some(a) = net_int_arg(sig, name).filter(|_| *p == SigType::Int) {
+            args.push(a);
+            continue;
+        }
         match sandbox_arg(b, sig, p, name) {
             Some(a) => args.push(a),
             None => args.push(gen_arg(b, p, name, subst)?),
@@ -215,6 +219,35 @@ fn render_verdict_call(
     Some(b.hoist(&ty, checked))
 }
 
+const HTTP_PATHS: &[&str] = &["/echo", "/status/404", "/status/500", "/bytes/16", "/chunked/3", "/sse/2", "/missing"];
+const HTTP_METHODS: &[&str] = &["GET", "POST", "PUT", "PATCH", "DELETE"];
+
+/// `http://<the fixture>/<path>`, read from the run's env.
+fn fixture_url(path: &str) -> String {
+    format!("\"http://\" + (env.get(\"XF_HTTP\") ?? \"\") + {}", render_string_literal(path))
+}
+
+/// An Int argument of a net function that names the fixture's port, a
+/// listener's own port (0) or a live handle: a generated Int would dial or
+/// close an arbitrary socket of the host.
+fn net_int_arg(sig: &Signature, name: &str) -> Option<String> {
+    let tcp_port = "(int.parse(env.get(\"XF_TCP_PORT\") ?? \"0\") ?? 0)";
+    // A stream to the echo fixture with 11 bytes on their way back, and a
+    // listener with a connection already pending: a read or an accept
+    // against nothing would wait forever.
+    let stream = format!(
+        "(match net.tcp_connect(\"127.0.0.1\", {tcp_port}) {{ ok(s) => {{ let _w: Result[Unit, String] = net.tcp_write(s, bytes.from_string(\"hello world\"))\n s }}, err(_) => -1 }})"
+    );
+    let listener = "(match net.tcp_listen(\"127.0.0.1\", 0) { ok(l) => { let _c: Result[Int, String] = net.tcp_connect(\"127.0.0.1\", net.tcp_local_port(l) ?? 0)\n l }, err(_) => -1 })".to_string();
+    match (sig.module, sig.func.as_str(), name) {
+        ("net", "tcp_listen", "port") => Some("0".into()),
+        ("net", _, "port") => Some(tcp_port.into()),
+        ("net", _, "stream") => Some(stream),
+        ("net", _, "listener") => Some(listener),
+        _ => None,
+    }
+}
+
 /// A String argument of a sandboxed effect function names something the
 /// sandbox holds (`oracle/sandbox.rs`), or misses it: a path in the seeded
 /// tree, an env var of the fixed env, an argv flag. `None`: generate as usual.
@@ -238,6 +271,12 @@ fn sandbox_arg(b: &mut Builder, sig: &Signature, param: &SigType, name: &str) ->
         ("args", _) => ARG_NAMES,
         ("process", "cmd") => COMMANDS,
         ("process", "dir") => DIRS,
+        // ADR-0027 D5: the loopback fixtures (`oracle/fixture.rs`), never
+        // another host.
+        ("http", "url") => return Some(fixture_url(b.rng.pick(HTTP_PATHS))),
+        ("http", "base_url") => return Some(fixture_url("/sse/2")),
+        ("http", "method") => HTTP_METHODS,
+        ("net", "host") => &["127.0.0.1"],
         _ => return None,
     };
     Some(render_string_literal(b.rng.pick(pool)))

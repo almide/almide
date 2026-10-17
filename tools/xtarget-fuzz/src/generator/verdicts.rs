@@ -92,6 +92,12 @@ pub const VERDICTS: &[Verdict] = &[
             ("signal", "int.abs({signal}) % 2 * 6 + 9"),
         ],
     },
+    // How much of the echo has arrived is the network's timing.
+    Verdict { func: "net.tcp_read", holds: "bytes.len(v) <= {len} or {len} < 0", canon: "bytes.from_list([])", domain: &[] },
+    Verdict { func: "net.tcp_read_timeout", holds: "bytes.len(v) <= {len} or {len} < 0", canon: "bytes.from_list([])", domain: &[] },
+    Verdict { func: "net.tcp_available", holds: "v >= 0", canon: "0", domain: &[] },
+    // Exactly len of the 11 echoed bytes: never more than arrive.
+    Verdict { func: "net.tcp_read_exact", holds: "bytes.len(v) == {len}", canon: "v", domain: &[("len", "int.abs({len}) % 12")] },
     Verdict { func: "mem.save", holds: "true", canon: "0", domain: &[] },
 ];
 

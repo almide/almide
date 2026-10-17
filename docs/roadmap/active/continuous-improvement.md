@@ -1461,3 +1461,36 @@ The disk filled up and three agents died together. A worktree audit removed 335 
   - **io.write / io.write_bytes:** the probes write 4n bytes. Native stdout is a 64 KiB BufWriter, and n bytes straddled it: a shorter write is copied into the buffer, a longer one goes straight to the kernel, which neither meter counts.
   - **regex.replace / replace_first:** the batch declared no rebind order, and the shapes measured O(1) against it. The order is now declared as their earlier stamps had it.
 - **CI:** the availability gate saw testing.assert_throws serve on the embedded leg outside test blocks, so its row is gone. Inside a test block the wasm test lane still declines it.
+
+### The fourth wave: every function, effects included (2026-10-17)
+Goal: the 150 rows left uninspected reach 0, with no native-only stamps (owner, 10-17).
+- **ADR-0027 (accepted 10-17):** effect functions are inspected in a fixed host world.
+  - fs, env, args and io run in a fresh seeded sandbox per run on every leg, and the tree a run leaves is part of parity.
+  - What the host decides (entropy, clocks, pids, argv0, temp names, socket timing, mtimes) is checked against its declared properties and stands for a fixed value, in generated programs and probes alike.
+  - process runs a fixed command set and signals only its own children.
+  - net and http reach only loopback fixtures.
+  - D8: a function no wasm leg serves is ported first, then inspected on both legs.
+- **Harness:**
+  - the inspection probes run in the sandbox world;
+  - a program calling an embedded-only function runs its wasm leg on the embedded host (campaign and probes);
+  - stdin readers get a stdin sized for n and k;
+  - k stops growing on the wall clock too, for kernel-bound calls;
+  - a consumed operand is rebuilt per step and per diamond path.
+- **Ports:**
+  - the five quantised matrix kernels self-host on wasm;
+  - the six `http.*_response` functions run on the embedded lane through the p3 component (ADR-0023 step 7, partial);
+  - `openai_streaming_call_with_limits` self-hosts.
+- **Defects found and fixed (test-first):**
+  - `random.int` divided by zero on native over a span wider than Int, and on wasm returned min for every such span;
+  - `fs.copy` onto the same file emptied it on native and the embedded host;
+  - the stock `env.set` overlay refused past 64 KiB, an undeclared cap against C-329;
+  - the packed Q1_0 GEMV was negated against `from_q1_0_bytes` and summed in a per-arch order;
+  - the Qwen3 layers divided by a zero KV head count on native.
+- **Doc fixes:** `env.os` names "wasi" (C-189), and `random.float` is [0, 1).
+- **Stamped:** 20 fs and args effect functions (150 → 130).
+- **Waiting on owner rulings:**
+  - unix and shm interim host ops;
+  - the ENOTEMPTY fs error text;
+  - the reason phrase in `request_stream`'s non-2xx text on wasi:http;
+  - a base URL for the Anthropic streaming calls;
+  - `@concurrent(f)` on `fs.fold_lines_chunked`.

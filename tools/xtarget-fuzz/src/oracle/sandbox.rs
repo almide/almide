@@ -139,6 +139,7 @@ impl World {
     /// (and after `--` for `almide run`).
     pub fn enter(&self, cmd: &mut std::process::Command) {
         cmd.current_dir(&self.dir).envs(ENV.iter().copied()).env("TMPDIR", tmp_of(&self.dir));
+        cmd.envs(super::fixture::env().iter().map(|(k, v)| (k, v)));
         if let Ok(f) = std::fs::File::open(&self.stdin) {
             cmd.stdin(f);
         }
@@ -149,6 +150,7 @@ impl World {
     pub fn wasmtime_args(&self) -> Vec<String> {
         let mut a = vec![format!("--dir={}::.", self.dir.display()), format!("--dir={}::/tmp", tmp_of(&self.dir).display())];
         a.extend(ENV.iter().map(|(k, v)| format!("--env={k}={v}")));
+        a.extend(super::fixture::env().iter().map(|(k, v)| format!("--env={k}={v}")));
         a
     }
 }
