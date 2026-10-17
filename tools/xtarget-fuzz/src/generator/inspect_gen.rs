@@ -196,6 +196,8 @@ const FLAT_LAST_NAME: &str = "\"k\" + string.reverse(\"${100000000 + {n} - 1}\")
 /// n bytes with no short period, for the zlib codecs.
 const CODEC_BYTES: &str = "bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251))";
 
+mod effect_recipes;
+
 const SHAPE_RECIPES: &[Recipe] = &[
     Recipe { func: "matrix.rope_rotate", size: "x", args: ROPE },
     Recipe { func: "matrix.rope_rotate_at", size: "x", args: ROPE },
@@ -469,10 +471,17 @@ impl Target {
         for v in vars {
             subst.entry(v).or_insert_with(|| fill.clone());
         }
-        let ret = sig.ret.instantiate(&subst).ok_or_else(|| format!("{name}: return type has no value form"))?;
+        // A bodied effect fn's call is a `Result[T, String]` to the checker
+        // (`Signature::lifted`): that is what the probe binds and wraps.
+        let declared = match &sig.ret {
+            SigType::Result(..) => sig.ret.clone(),
+            r if sig.lifted => SigType::Result(Box::new(r.clone()), Box::new(SigType::String)),
+            r => r.clone(),
+        };
+        let ret = declared.instantiate(&subst).ok_or_else(|| format!("{name}: return type has no value form"))?;
         let params: Vec<(String, SigType)> = sig.param_names.iter().cloned().zip(sig.params.iter().cloned()).collect();
         let concrete = |t: &SigType| t.instantiate(&subst);
-        let recipe = SHAPE_RECIPES.iter().find(|r| r.func == name);
+        let recipe = SHAPE_RECIPES.iter().chain(effect_recipes::EFFECT_RECIPES).find(|r| r.func == name);
         let routed = ROUTED.iter().find(|r| r.func == name);
         let param_at = |p: &str| params.iter().position(|(n, _)| n == p);
         if let Some(r) = routed {
@@ -1390,7 +1399,12 @@ pub(crate) mod tests {
         for t in &targets {
             let file = dir.join(format!("{}.almd", t.name.replace('.', "_")));
             std::fs::write(&file, t.direct_program(64, 1, true)).unwrap();
-            let out = std::process::Command::new(&bin).arg("run").arg(&file).current_dir(&dir).output().expect("spawn almide");
+            // In the fixed world the harness runs it in (ADR-0027 D2).
+            let world = crate::oracle::sandbox::World::new(&dir).expect("sandbox");
+            let mut cmd = std::process::Command::new(&bin);
+            cmd.arg("run").arg(&file).arg("--").args(crate::oracle::sandbox::ARGS);
+            world.enter(&mut cmd);
+            let out = cmd.output().expect("spawn almide");
             if !out.status.success() {
                 let stderr = String::from_utf8_lossy(&out.stderr);
                 let why = stderr.lines().find(|l| l.contains("inspect:") || l.contains("error")).unwrap_or("").to_string();
@@ -1453,7 +1467,7 @@ pub(crate) mod tests {
     /// a silent fall-back to the shapes that function refuses.
     #[test]
     fn every_shape_recipe_names_a_catalogued_function_and_its_parameters() {
-        for r in SHAPE_RECIPES {
+        for r in SHAPE_RECIPES.iter().chain(super::effect_recipes::EFFECT_RECIPES) {
             let t = target(r.func);
             assert!(t.recipe.is_some() && (r.size.is_empty() || t.size_param.is_some()), "{}", r.func);
         }

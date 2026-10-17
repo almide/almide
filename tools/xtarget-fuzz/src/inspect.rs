@@ -27,6 +27,7 @@ use crate::generator::{
     inspect_gen::{Target, ERR_PATH, OFF_DOMAIN},
     Engine, Family,
 };
+use crate::oracle::sandbox::{self, World};
 
 const NOISE_FLOOR: Duration = Duration::from_millis(60);
 const CALIBRATE_TARGET: Duration = Duration::from_millis(250);
@@ -61,7 +62,9 @@ pub fn cmd_inspect(args: &[String]) {
     let _ = std::fs::create_dir_all(&dir);
     let icount = icount_available();
     let ctx = Ctx {
-        almide: super::resolve_almide(&repo, args),
+        // Absolute: every run enters its sandbox as its cwd, where a
+        // relative path to the compiler would not resolve.
+        almide: absolute(super::resolve_almide(&repo, args)),
         wasmtime: super::resolve_wasmtime(),
         memshim: if icount { build_memshim(&dir) } else { None },
         dir,
@@ -141,6 +144,10 @@ pub fn cmd_inspect(args: &[String]) {
 /// The programs the criteria run at size `n`, as files: the plain call
 /// (3 calls), each rebind shape (3 steps) and the diamond project (at
 /// `n.min(64)`, as [`diamond`] runs it).
+fn absolute(p: PathBuf) -> PathBuf {
+    std::fs::canonicalize(&p).unwrap_or(p)
+}
+
 fn probe_files(t: &Target, n: u64) -> Vec<(String, String)> {
     let mut files = vec![("call.almd".to_string(), t.direct_program(n, 3, true))];
     files.extend(t.rebind_programs(n, 3).into_iter().map(|(shape, src)| (format!("{shape}.almd"), src)));
@@ -409,14 +416,17 @@ fn build_as(ctx: &Ctx, src: &str, leg: Leg, canonical: bool) -> Result<PathBuf, 
 const RUN_CAP: Duration = Duration::from_secs(60);
 
 fn run_artifact(ctx: &Ctx, art: &Path, leg: Leg) -> Result<String, String> {
+    let world = World::new(&ctx.dir)?;
     let mut cmd = match leg {
         Leg::Native => Command::new(art),
         Leg::Wasm => {
             let mut c = Command::new(&ctx.wasmtime);
-            c.arg("run").arg(art);
+            c.arg("run").args(world.wasmtime_args()).arg(art);
             c
         }
     };
+    cmd.args(sandbox::ARGS);
+    world.enter(&mut cmd);
     let child = cmd
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -524,7 +534,14 @@ fn alloc(ctx: &Ctx, t: &Target, n: u64) -> String {
         if std::fs::write(&file, &src).is_err() {
             return "SKIP: scratch write failed".into();
         }
-        let out = Command::new(&ctx.almide).arg("run").arg(&file).args(["--target", "wasm"]).env("ALMIDE_WASM_ALLOC_COUNT", "1").output();
+        let world = match World::new(&ctx.dir) {
+            Ok(w) => w,
+            Err(e) => return format!("SKIP: {e}"),
+        };
+        let mut cmd = Command::new(&ctx.almide);
+        cmd.arg("run").arg(&file).args(["--target", "wasm", "--"]).args(sandbox::ARGS).env("ALMIDE_WASM_ALLOC_COUNT", "1");
+        world.enter(&mut cmd);
+        let out = cmd.output();
         let Ok(out) = out else { return "SKIP: could not run almide".into() };
         let (pass, part) = alloc_part(label, &out);
         ok &= pass;
@@ -558,13 +575,18 @@ fn diamond(ctx: &Ctx, t: &Target, n: u64) -> String {
     let project = t.diamond_project(n.min(64));
     let root = ctx.dir.join("diamond");
     let Ok(entry) = project.write_to(&root) else { return "SKIP: scratch write failed".into() };
+    // The project resolves from its own directory, so the run stays there;
+    // it still gets the sandbox's argv, env and stdin.
     let run = |wasm: bool| {
+        let world = World::new(&ctx.dir).map_err(std::io::Error::other)?;
         let mut c = Command::new(&ctx.almide);
-        c.arg("run").arg(&entry).current_dir(root.join("app"));
+        c.arg("run").arg(&entry);
         if wasm {
             c.args(["--target", "wasm"]);
         }
-        c.output()
+        c.arg("--").args(sandbox::ARGS);
+        world.enter(&mut c);
+        c.current_dir(root.join("app")).output()
     };
     let (Ok(nat), Ok(was)) = (run(false), run(true)) else { return "SKIP: could not run almide".into() };
     diamond_verdict(&nat, &was)
@@ -886,6 +908,7 @@ fn run_counted(ctx: &Ctx, art: &Path, leg: Leg) -> Result<(String, Counts), Stri
     let stat = ctx.dir.join(format!("stat-{}.csv", std::process::id()));
     let moved_file = ctx.dir.join(format!("moved-{}.txt", std::process::id()));
     let _ = std::fs::remove_file(&moved_file);
+    let world = World::new(&ctx.dir)?;
     let mut cmd = Command::new("perf");
     cmd.args(["stat", "-x", ",", "-e", "instructions:u", "-o"]).arg(&stat).arg("--");
     if let Some(shim) = &ctx.memshim {
@@ -900,8 +923,10 @@ fn run_counted(ctx: &Ctx, art: &Path, leg: Leg) -> Result<(String, Counts), Stri
         // 41.7M against 4.46M), and parallel compilation adds worker-thread
         // spinning. A fresh compile is the same work at every n, so the fit's
         // intercept absorbs it.
-        Leg::Wasm => cmd.arg(&ctx.wasmtime).args(["run", "-C", "cache=n", "-C", "parallel-compilation=n"]).arg(art),
+        Leg::Wasm => cmd.arg(&ctx.wasmtime).args(["run", "-C", "cache=n", "-C", "parallel-compilation=n"]).args(world.wasmtime_args()).arg(art),
     };
+    cmd.args(sandbox::ARGS);
+    world.enter(&mut cmd);
     let child = cmd
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
