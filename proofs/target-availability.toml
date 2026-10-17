@@ -305,7 +305,7 @@ pending_self_host_ceiling = 0
 # serves it (ops 91..=103), and TCP design step 4 routes the stock artifact to
 # the p3 component, retiring all thirteen rows together. Not a relaxation:
 # no existing row moved, the count names one more function honestly.
-pending_port_ceiling = 40
+pending_port_ceiling = 36
 
 # The unprobed class (#1827), per leg. Empty since #2588: the five
 # HttpRequest readers (http.query_params / req_body / req_header / req_method /
