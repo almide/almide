@@ -527,8 +527,10 @@ fn a_trickle_outlives_the_classic_stream_but_not_total_ms() {
 
 /// The E081 verdict names what is and is not served: the stock artifact
 /// (`almide check --target wasm`, the build route) still refuses the handle
-/// — stock WASI has no host for it — while the run route admits it, and the
-/// SSE twin stays refused on every wasm leg.
+/// and the OpenAI SSE twin built on it — stock WASI has no host for it —
+/// while the run route admits both (the OpenAI helper is Almide over the
+/// handle, ADR-0023 step 5), and the Anthropic SSE twin, still a native
+/// intrinsic, stays refused on every wasm leg.
 #[test]
 fn the_stock_route_and_the_sse_twin_keep_their_e081() {
     let dir = tempfile::tempdir().unwrap();
@@ -541,13 +543,21 @@ fn the_stock_route_and_the_sse_twin_keep_their_e081() {
     let checked = Command::new(almide()).arg("check").arg(&src).arg("--target").arg("wasm").output().unwrap();
     let stderr = String::from_utf8_lossy(&checked.stderr);
     assert!(!checked.status.success() && stderr.contains("error[E081]: `http.start`"), "{stderr}");
-    let sse = dir.path().join("sse.almd");
-    std::fs::write(
-        &sse,
-        "import http\n\neffect fn main() -> Unit = {\n  let r = http.openai_streaming_call_with_limits(\"http://127.0.0.1:1\", \"k\", \"{}\", { total_ms: 1, idle_ms: 0 }, (_) => ())\n  println(match r { ok(_) => \"ok\", err(e) => e })\n}\n",
-    )
-    .unwrap();
-    let ran = Command::new(almide()).arg("run").arg(&sse).arg("--target").arg("wasm").output().unwrap();
+    let twin = |name: &str, args: &str| {
+        let sse = dir.path().join(format!("{name}.almd"));
+        std::fs::write(
+            &sse,
+            format!("import http\n\neffect fn main() -> Unit = {{\n  let r = http.{name}({args}{{ total_ms: 1, idle_ms: 0 }}, (_) => ())\n  println(match r {{ ok(_) => \"ok\", err(e) => e }})\n}}\n"),
+        )
+        .unwrap();
+        sse
+    };
+    let openai = twin("openai_streaming_call_with_limits", "\"http://127.0.0.1:1\", \"k\", \"{}\", ");
+    let checked = Command::new(almide()).arg("check").arg(&openai).arg("--target").arg("wasm").output().unwrap();
+    let stderr = String::from_utf8_lossy(&checked.stderr);
+    assert!(!checked.status.success() && stderr.contains("error[E081]: `http.openai_streaming_call_with_limits`"), "{stderr}");
+    let anthropic = twin("anthropic_streaming_call_with_limits", "\"k\", \"{}\", ");
+    let ran = Command::new(almide()).arg("run").arg(&anthropic).arg("--target").arg("wasm").output().unwrap();
     let stderr = String::from_utf8_lossy(&ran.stderr);
-    assert!(!ran.status.success() && stderr.contains("error[E081]: `http.openai_streaming_call_with_limits`"), "{stderr}");
+    assert!(!ran.status.success() && stderr.contains("error[E081]: `http.anthropic_streaming_call_with_limits`"), "{stderr}");
 }

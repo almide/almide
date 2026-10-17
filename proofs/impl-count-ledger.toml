@@ -3,7 +3,7 @@
 # definitions in crates/almide-wasm/src, `<mod>.<fn>[_shape]` rows in
 # self_host_registry.rs), re-derived by scripts/lib/impl-count-enumerate.py.
 # Gated by tools/almide-gates impl-count: a total may not grow without its row.
-# holes = 873  implementations = 2031
+# holes = 871  implementations = 2029
 [[hole]]
 module   = "base64"
 name     = "encode"
@@ -2064,13 +2064,6 @@ selfhost = 0
 total    = 1
 [[hole]]
 module   = "http"
-name     = "openai_streaming_call"
-native   = 1
-emitter  = 0
-selfhost = 0
-total    = 1
-[[hole]]
-module   = "http"
 name     = "anthropic_streaming_call"
 native   = 1
 emitter  = 0
@@ -2114,13 +2107,6 @@ total    = 2
 [[hole]]
 module   = "http"
 name     = "__request_stream_limited"
-native   = 1
-emitter  = 0
-selfhost = 0
-total    = 1
-[[hole]]
-module   = "http"
-name     = "__openai_streaming_limited"
 native   = 1
 emitter  = 0
 selfhost = 0

@@ -1,90 +1,15 @@
-// Streaming wrappers for OpenAI-compatible Chat Completions SSE.
+// The Anthropic Messages streaming wrapper.
 //
-// These intrinsics own the SSE parsing + delta accumulation so that the
-// almide-level caller (e.g. `almai.providers.openai.call_streaming`)
-// only has to hand off a `(text_delta) -> Unit` callback for live
-// rendering and consume the final LLMResponse-shaped JSON.
+// This intrinsic owns the SSE parsing + delta accumulation so that the
+// almide-level caller only has to hand off a `(text_delta) -> Unit` callback
+// for live rendering and consume the final LLMResponse-shaped JSON. The
+// OpenAI-compatible helper is Almide now (stdlib/http.almd, ADR-0023 step 5),
+// over the same streaming clients.
 //
 // `AlmideValue` and `almide_http_stream_dispatch` resolve via flat inlining
 // into the user program (the runtime crate isn't a workspace member —
 // every module's source is concatenated into a single file at compile
 // time). No `use crate::...` imports here.
-
-// ── Public intrinsic ──
-//
-// Calls an OpenAI-compatible /chat/completions endpoint with `stream:
-// true` already set in body_json, parses every SSE `data:` event as
-// JSON, accumulates assistant text + tool_calls + usage, and returns a
-// JSON string shaped like a non-streaming LLMResponse:
-//
-// {
-//   "content": "...", "model": "...",
-//   "usage": {"prompt_tokens": N, "completion_tokens": N, "total_tokens": N},
-//   "finish_reason": "...",
-//   "tool_calls": [{"id": "...", "name": "...", "arguments": "..."}]
-// }
-//
-// The almide caller `json.parse`s this and slots fields into
-// `almai.LLMResponse`.
-
-pub fn almide_rt_sse_openai_chat(
-    base_url: &str,
-    api_key: &str,
-    body_json: &str,
-    on_text_delta: std::rc::Rc<dyn Fn(AlmideString)>,
-) -> Result<AlmideString, AlmideString> { let __almide_v: Result<String, AlmideString> = { let __almide_r: Result<String, String> = (|| { sse_openai_chat_run(base_url, api_key, body_json, None, on_text_delta) })(); __almide_r.map_err(Into::into) }; __almide_v.into_almide() }
-
-/// `openai_streaming_call_with_limits` (#2631): the same helper streaming
-/// through the call handle, so `total_ms` / `idle_ms` bound it.
-pub fn almide_rt_http___openai_streaming_limited(
-    base_url: &str,
-    api_key: &str,
-    body_json: &str,
-    total_ms: i64,
-    idle_ms: i64,
-    on_text_delta: std::rc::Rc<dyn Fn(AlmideString)>,
-) -> Result<AlmideString, AlmideString> { let __almide_v: Result<String, AlmideString> = { let __almide_r: Result<String, String> = (|| { sse_openai_chat_run(base_url, api_key, body_json, Some((total_ms, idle_ms)), on_text_delta) })(); __almide_r.map_err(Into::into) }; __almide_v.into_almide() }
-
-fn sse_openai_chat_run(
-    base_url: &str,
-    api_key: &str,
-    body_json: &str,
-    limits: Option<(i64, i64)>,
-    on_text_delta: std::rc::Rc<dyn Fn(String)>,
-) -> Result<String, String> {
-    let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
-    let mut headers: AlmideMap<String, String> = AlmideMap::new();
-    headers.insert("Authorization".to_string(), format!("Bearer {}", api_key));
-    headers.insert("Content-Type".to_string(), "application/json".to_string());
-    headers.insert("Accept".to_string(), "text/event-stream".to_string());
-
-    let mut sse_buffer = String::new();
-    let mut acc = AlmideSseAcc::default();
-    let mut done = false;
-
-    almide_http_stream_dispatch("POST", &url, body_json, &headers, limits, |chunk: String| {
-        if done {
-            return;
-        }
-        sse_buffer.push_str(&chunk);
-        while let Some(idx) = sse_buffer.find("\n\n") {
-            let event_block: String = sse_buffer.drain(..idx + 2).collect();
-            // Each block can have multiple `data:` lines; merge into one payload.
-            let (_, data_payload) = sse_event_parts(&event_block);
-            if data_payload.is_empty() {
-                continue;
-            }
-            if data_payload.trim() == "[DONE]" {
-                // The stream is over: nothing after it is applied, in this
-                // chunk or a later one.
-                done = true;
-                break;
-            }
-            handle_sse_data(&data_payload, &mut acc, &on_text_delta);
-        }
-    })?;
-    Ok(acc.final_json())
-}
 
 // ── SSE event handler ──
 
@@ -174,40 +99,6 @@ fn sse_event_parts(event_block: &str) -> (String, String) {
         }
     }
     (event_name, data_payload)
-}
-
-/// One OpenAI Chat Completions `data:` payload.
-fn handle_sse_data(payload: &str, acc: &mut AlmideSseAcc, on_text_delta: &std::rc::Rc<dyn Fn(String)>) {
-    let Ok(parsed) = almide_rt_json_parse(payload) else { return };
-    sse_set_nonempty(&mut acc.model_id, get_string(&parsed, "model"));
-    if let Some(usage) = get_field(&parsed, "usage") {
-        if let Some(p) = get_int(&usage, "prompt_tokens") { acc.prompt_tokens = p; }
-        if let Some(c) = get_int(&usage, "completion_tokens") { acc.completion_tokens = c; }
-        if let Some(t) = get_int(&usage, "total_tokens") { acc.total_tokens = t; }
-    }
-    let Some(AlmideValue::Array(choices)) = get_field(&parsed, "choices") else { return };
-    let Some(first) = choices.first() else { return };
-    sse_set_nonempty(&mut acc.finish_reason, get_string(first, "finish_reason"));
-    let Some(delta) = get_field(first, "delta") else { return };
-    acc.text(get_string(&delta, "content"), on_text_delta);
-    if let Some(AlmideValue::Array(tcs)) = get_field(&delta, "tool_calls") {
-        for tc in tcs {
-            openai_tool_call_delta(acc, &tc);
-        }
-    }
-}
-
-/// One entry of an OpenAI delta's `tool_calls`: id and name arrive once,
-/// the arguments in fragments.
-fn openai_tool_call_delta(acc: &mut AlmideSseAcc, tc: &AlmideValue) {
-    let call = acc.tool(get_int(tc, "index").unwrap_or(0) as usize);
-    sse_set_nonempty(&mut call.id, get_string(tc, "id"));
-    if let Some(func) = get_field(tc, "function") {
-        sse_set_nonempty(&mut call.name, get_string(&func, "name"));
-        if let Some(args) = get_string(&func, "arguments") {
-            call.arguments.push_str(&args);
-        }
-    }
 }
 
 // ── Tiny AlmideValue helpers (mirrors json.rs's getters) ──

@@ -391,7 +391,7 @@ mod classification_gate {
         assert_eq!(runtime_symbol_effect("almide_rt_datetime_format"), None);
         assert_eq!(stdlib_call_effect("http", "get"), Some(Effect::Net));
         assert_eq!(stdlib_call_effect("http", "response"), None);
-        assert_eq!(runtime_symbol_effect("almide_rt_sse_openai_chat"), Some(Effect::Net));
+        assert_eq!(runtime_symbol_effect("almide_rt_sse_anthropic_messages"), Some(Effect::Net));
         assert_eq!(stdlib_call_effect("list", "map"), None);
         assert_eq!(stdlib_call_effect("not_a_module", "f"), None);
         // #2223: a user module named like a stdlib module, calling a fn the
