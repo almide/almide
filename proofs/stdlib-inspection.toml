@@ -69,7 +69,7 @@
 #                      every stamped row is to be re-inspected before each final
 #                      release for that (a manual GCE run: no credentials in CI)
 #
-# uninspected_ceiling = "59"
+# uninspected_ceiling = "55"
 
 [[fn]]
 name = "args.flag"
@@ -3556,7 +3556,14 @@ diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 name = "fs.modified_at"
 sig = "effect (path: String) -> Int ! String"
 class = "effect"
-status = "uninspected"
+status = "inspected"
+impl = "fnv1a:4d2937410534e081"
+stamp = "almide 0.67.1 (dev) at insp-all 71aa54c93 (develop plus the #3769 inspection batch, ADR-0027's fixed host world, the embedded component route's cwd pin and split-route refusal, the stock listing and stdin fixes, the linear subprocess argument frame and native exec_with_stdin's SIGPIPE guard); effect function inspected in the fixed world of ADR-0027 D2: every probe run on every leg in a fresh sandbox (a seeded tree as its cwd, fixed argv, env and stdin; oracle/sandbox.rs), the parity campaign also comparing the tree each leg leaves; recipes build what the call reads in the sandbox before the timed calls so the call takes its success path; xtarget-fuzz inspect at the same sha (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC, no free-list reuse), 200 programs per fn; legs (D1): native against the stock p1 artifact under wasmtime with the sandbox preopened (campaign and complexity) and against the embedded host (diamond, alloc, the campaign's leak rung, and every leg of a function only the embedded host serves); host-decided results compared as verdict lines of their declared properties (D3); process from a fixed command set (D4); net and http against loopback echo, sink, source and HTTP fixtures (D5); GCE c4-standard-4 (INTEL XEON PLATINUM 8581C, 4 vCPU, PMU architectural, one fn at a time per VM, asia-northeast1-b), Ubuntu 24.04 Linux 7.0.0-1014-gcp, rustc 1.99.1, wasmtime 49.0.1; 2026-10-17 (with the sandbox temp dir beside the tree, the counted judge's wall-clock stop for kernel-bound calls, a consumed operand rebuilt per step and per diamond path, each diamond path run alone, and spawn drawing silent commands); codopsy: every workspace crate A at the same sha (codopsy HEAD 85ac6cdcd)"
+order = "1"
+parity = "PASS: seed 1792224889, 200 programs; 200 program(s) call it, 172 of them clean on every leg; unique findings 0"
+complexity = "PASS: call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=16384..32768 6.912e7/6.912e7/6.913e7/6.912e7/6.912e7 fit 1 (rms 0.0%) moved 1.242e7/1.242e7/1.242e7/1.242e7/1.242e7B fit 1 (rms 0.0%) wall 0.010/0.005/0.005/0.005/0.010s wasm k=4096..8192 4.572e7/4.572e7/4.572e7/4.572e7/4.572e7 fit 1 (rms 0.0%) moved 4.096e6/4.096e6/4.096e6/4.096e6/4.096e6B fit 1 (rms 0.0%) wall 0.010/0.010/0.015/0.010/0.010s (order 1 ok)"
+alloc = "PASS: call live=0"
+diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 
 [[fn]]
 name = "fs.read_bytes"
@@ -9510,7 +9517,14 @@ status = "uninspected"
 name = "process.exec_attached"
 sig = "effect (cmd: String, args: List[String]) -> Int ! String"
 class = "effect"
-status = "uninspected"
+status = "inspected"
+impl = "fnv1a:eb19e1981281bcf2"
+stamp = "almide 0.67.1 (dev) at insp-all 71aa54c93 (develop plus the #3769 inspection batch, ADR-0027's fixed host world, the embedded component route's cwd pin and split-route refusal, the stock listing and stdin fixes, the linear subprocess argument frame and native exec_with_stdin's SIGPIPE guard); effect function inspected in the fixed world of ADR-0027 D2: every probe run on every leg in a fresh sandbox (a seeded tree as its cwd, fixed argv, env and stdin; oracle/sandbox.rs), the parity campaign also comparing the tree each leg leaves; recipes build what the call reads in the sandbox before the timed calls so the call takes its success path; xtarget-fuzz inspect at the same sha (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC, no free-list reuse), 200 programs per fn; legs (D1): native against the stock p1 artifact under wasmtime with the sandbox preopened (campaign and complexity) and against the embedded host (diamond, alloc, the campaign's leak rung, and every leg of a function only the embedded host serves); host-decided results compared as verdict lines of their declared properties (D3); process from a fixed command set (D4); net and http against loopback echo, sink, source and HTTP fixtures (D5); GCE c4-standard-4 (INTEL XEON PLATINUM 8581C, 4 vCPU, PMU architectural, one fn at a time per VM, asia-northeast1-b), Ubuntu 24.04 Linux 7.0.0-1014-gcp, rustc 1.99.1, wasmtime 49.0.1; 2026-10-17 (with the sandbox temp dir beside the tree, the counted judge's wall-clock stop for kernel-bound calls, a consumed operand rebuilt per step and per diamond path, each diamond path run alone, and spawn drawing silent commands); codopsy: every workspace crate A at the same sha (codopsy HEAD 85ac6cdcd)"
+order = "n"
+parity = "PASS: seed 1792225011, 200 programs; 200 program(s) call it, 179 of them clean on every leg; unique findings 0"
+complexity = "PASS: call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=1024..2048 4.708e8/5.794e8/7.939e8/1.223e9/2.080e9 fit n (rms 0.1%) moved 6.513e5/1.266e6/2.494e6/4.952e6/9.867e6B fit n (rms 0.0%) wall 0.542/0.584/0.653/0.765/1.022s wasm k=256..512 2.114e8/3.281e8/5.624e8/1.017e9/1.936e9 fit n (rms 0.6%) moved 5.793e5/1.137e6/2.272e6/4.519e6/9.029e6B fit n (rms 0.2%) wall 0.151/0.157/0.183/0.237/0.339s (order n ok)"
+alloc = "PASS: call live=0"
+diamond = "PASS: direct = via left = via right on both legs (2 line(s) each)"
 
 [[fn]]
 name = "process.exec_in"
@@ -9585,13 +9599,27 @@ diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 name = "process.run"
 sig = "effect (cmd: String, args: List[String]) -> Int ! String"
 class = "effect"
-status = "uninspected"
+status = "inspected"
+impl = "fnv1a:49306d482957c22a"
+stamp = "almide 0.67.1 (dev) at insp-all 71aa54c93 (develop plus the #3769 inspection batch, ADR-0027's fixed host world, the embedded component route's cwd pin and split-route refusal, the stock listing and stdin fixes, the linear subprocess argument frame and native exec_with_stdin's SIGPIPE guard); effect function inspected in the fixed world of ADR-0027 D2: every probe run on every leg in a fresh sandbox (a seeded tree as its cwd, fixed argv, env and stdin; oracle/sandbox.rs), the parity campaign also comparing the tree each leg leaves; recipes build what the call reads in the sandbox before the timed calls so the call takes its success path; xtarget-fuzz inspect at the same sha (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC, no free-list reuse), 200 programs per fn; legs (D1): native against the stock p1 artifact under wasmtime with the sandbox preopened (campaign and complexity) and against the embedded host (diamond, alloc, the campaign's leak rung, and every leg of a function only the embedded host serves); host-decided results compared as verdict lines of their declared properties (D3); process from a fixed command set (D4); net and http against loopback echo, sink, source and HTTP fixtures (D5); GCE c4-standard-4 (INTEL XEON PLATINUM 8581C, 4 vCPU, PMU architectural, one fn at a time per VM, asia-northeast1-b), Ubuntu 24.04 Linux 7.0.0-1014-gcp, rustc 1.99.1, wasmtime 49.0.1; 2026-10-17 (with the sandbox temp dir beside the tree, the counted judge's wall-clock stop for kernel-bound calls, a consumed operand rebuilt per step and per diamond path, each diamond path run alone, and spawn drawing silent commands); codopsy: every workspace crate A at the same sha (codopsy HEAD 85ac6cdcd)"
+order = "n"
+parity = "PASS: seed 1792225606, 200 programs; 200 program(s) call it, 176 of them clean on every leg; unique findings 0"
+complexity = "PASS: call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=1024..2048 4.708e8/5.794e8/7.939e8/1.223e9/2.080e9 fit n (rms 0.1%) moved 6.513e5/1.266e6/2.494e6/4.952e6/9.867e6B fit n (rms 0.0%) wall 0.547/0.568/0.643/0.755/1.022s wasm k=256..512 2.115e8/3.289e8/5.549e8/1.014e9/1.934e9 fit n (rms 0.3%) moved 5.878e5/1.142e6/2.272e6/4.524e6/9.026e6B fit n (rms 0.4%) wall 0.142/0.159/0.187/0.228/0.329s (order n ok)"
+alloc = "PASS: call live=0"
+diamond = "PASS: direct = via left = via right on both legs (2 line(s) each)"
 
 [[fn]]
 name = "process.run_in"
 sig = "effect (dir: String, cmd: String, args: List[String]) -> Int ! String"
 class = "effect"
-status = "uninspected"
+status = "inspected"
+impl = "fnv1a:7706c3cf2fbd3bd2"
+stamp = "almide 0.67.1 (dev) at insp-all 71aa54c93 (develop plus the #3769 inspection batch, ADR-0027's fixed host world, the embedded component route's cwd pin and split-route refusal, the stock listing and stdin fixes, the linear subprocess argument frame and native exec_with_stdin's SIGPIPE guard); effect function inspected in the fixed world of ADR-0027 D2: every probe run on every leg in a fresh sandbox (a seeded tree as its cwd, fixed argv, env and stdin; oracle/sandbox.rs), the parity campaign also comparing the tree each leg leaves; recipes build what the call reads in the sandbox before the timed calls so the call takes its success path; xtarget-fuzz inspect at the same sha (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC, no free-list reuse), 200 programs per fn; legs (D1): native against the stock p1 artifact under wasmtime with the sandbox preopened (campaign and complexity) and against the embedded host (diamond, alloc, the campaign's leak rung, and every leg of a function only the embedded host serves); host-decided results compared as verdict lines of their declared properties (D3); process from a fixed command set (D4); net and http against loopback echo, sink, source and HTTP fixtures (D5); GCE c4-standard-4 (INTEL XEON PLATINUM 8581C, 4 vCPU, PMU architectural, one fn at a time per VM, asia-northeast1-b), Ubuntu 24.04 Linux 7.0.0-1014-gcp, rustc 1.99.1, wasmtime 49.0.1; 2026-10-17 (with the sandbox temp dir beside the tree, the counted judge's wall-clock stop for kernel-bound calls, a consumed operand rebuilt per step and per diamond path, each diamond path run alone, and spawn drawing silent commands); codopsy: every workspace crate A at the same sha (codopsy HEAD 85ac6cdcd)"
+order = "n"
+parity = "PASS: seed 1792225586, 200 programs; 200 program(s) call it, 167 of them clean on every leg; unique findings 0"
+complexity = "PASS: call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=1024..2048 4.717e8/5.803e8/7.948e8/1.224e9/2.081e9 fit n (rms 0.1%) moved 6.554e5/1.270e6/2.499e6/4.956e6/9.871e6B fit n (rms 0.0%) wall 0.557/0.572/0.633/0.745/0.987s wasm k=256..512 2.212e8/3.480e8/5.967e8/1.097e9/2.091e9 fit n (rms 0.3%) moved 2.023e6/4.012e6/8.009e6/1.601e7/3.197e7B fit n (rms 0.1%) wall 0.146/0.158/0.184/0.239/0.349s (order n ok)"
+alloc = "PASS: call live=0"
+diamond = "PASS: direct = via left = via right on both legs (2 line(s) each)"
 
 [[fn]]
 name = "process.sleep"
