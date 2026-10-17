@@ -41,8 +41,21 @@ fn lower_assert_aborts(ctx: &mut LowerCtx, callee: &ast::Expr, args: &[ast::Expr
     let site = ctx.abort_sites.len();
     ctx.abort_sites.push(is_effect);
     // The closure's value is discarded: the site fn is `-> Unit` and its body
-    // a block that runs the closure body as a statement.
-    let stmt = IrStmt { kind: IrStmtKind::Expr { expr: site_body }, span: None };
+    // a block that runs the closure body as a statement — bound to `_` when
+    // it has a value, as `let _ = …` would: a block-shaped body with a
+    // non-Unit tail as a bare Rust statement is E0308.
+    let kind = match site_body.ty {
+        Ty::Unit => IrStmtKind::Expr { expr: site_body },
+        ref ty => {
+            let ty = ty.clone();
+            let var = ctx.define_var("_", ty.clone(), Mutability::Let, span);
+            if ty.is_result() {
+                ctx.annotated_result_vars.insert(var);
+            }
+            IrStmtKind::Bind { var, mutability: Mutability::Let, ty, value: site_body }
+        }
+    };
+    let stmt = IrStmt { kind, span: None };
     let site_body = ctx.mk(IrExprKind::Block { stmts: vec![stmt], expr: None }, Ty::Unit, span);
     ctx.synthesized_fns.push(abort_site_fn(sym(&almide_ir::abort_site_fn_name(site)), vec![], site_body, is_effect));
     let k = ctx.mk(IrExprKind::LitInt { value: site as i64 }, Ty::Int, span);
