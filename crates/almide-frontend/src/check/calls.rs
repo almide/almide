@@ -1054,6 +1054,12 @@ impl Checker {
     // hallucinations that need a conversion wrapper or operator rewrite
     // rather than a rename.
     fn unresolved_call_hint(&self, name: &str) -> (String, Option<String>, Option<&'static str>) {
+        // A spelling a dialect epoch removed: say where it went (or that the
+        // call is deleted), as the ledger records it. No fix-it — the new
+        // spelling needs a dependency and an import, not a rename.
+        if let Some(removal) = crate::removed_spellings::lookup(name) {
+            return (crate::removed_spellings::hint(removal), None, None);
+        }
         // For module-qualified calls (e.g. "string.uppercase"), narrow candidates to the same module and compare only the function part for better suggestions.
         if let Some((module, func)) = name.split_once('.') {
             // Use the *full* surface (TOML + bundled) so diagnostic suggestions see fns migrated to `stdlib/<m>.almd` even after their TOML entries have been deleted.
