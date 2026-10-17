@@ -398,6 +398,8 @@ fn render_generic_call_method(ctx: &RenderContext, object: &IrExpr, method: almi
             | IrExprKind::If { .. } | IrExprKind::Match { .. }
         ) || matches!(&object.kind, IrExprKind::LitFloat { value } if *value < 0.0)
           || matches!(&object.kind, IrExprKind::LitInt { value } if *value < 0);
+        // A copy of a String-typed value builds the Almide String (ADR-0013).
+        let method = if method.as_str() == "to_string" && args.is_empty() && matches!(object.ty, Ty::String) { "to_almide" } else { method.as_str() };
         if needs_parens {
             format!("({}).{}", obj_str, method)
         } else {
@@ -631,7 +633,7 @@ fn coerce_to_owned_string(rendered: &str, expr: &IrExpr) -> String {
         _ => false,
     };
     if is_bare_string_var {
-        format!("{}.to_string()", rendered)
+        format!("{}.to_almide()", rendered)
     } else {
         rendered.to_string()
     }
