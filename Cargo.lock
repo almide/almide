@@ -195,6 +195,7 @@ dependencies = [
  "almide-ir",
  "almide-lang",
  "almide-optimize",
+ "almide-str",
 ]
 
 [[package]]

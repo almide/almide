@@ -332,7 +332,7 @@ pub(crate) fn render_native_scalar_op(op: &Op, s: OpSink<'_>) -> Result<bool, Lo
                 // bidi controls today, but one rule for every native renderer
                 // keeps that a property of the code, not of std's Debug tables.
                 let lit = almide_base::rust_lit::escape_rust_str(s);
-                line!("let mut {}: AlmideString = String::from(\"{lit}\");", var(*dst));
+                line!("let mut {}: AlmideString = AlmideString::from(\"{lit}\");", var(*dst));
             }
             other => {
                 return Err(wall(format!(
