@@ -618,7 +618,8 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         // normalized into the same RuntimeCall spelling already returns the
         // mapped types — no glue (double-wrap otherwise).
         IrExprKind::RuntimeCall { symbol, args } => {
-            scope_cell_guard_of_call(ctx, expr, render_expr_runtime_call(ctx, symbol, args, &expr.ty))
+            let call = render_expr_runtime_call(ctx, symbol, args, &expr.ty);
+            scope_cell_guard_of_call(ctx, expr, render_thread_crossing_call(ctx, symbol, args, call))
         }
 
         // ── Calls ──
