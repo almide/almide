@@ -69,11 +69,16 @@ impl Emitter<'_> {
                 let mut i = self.f.instructions();
                 i.local_set(hn);
                 i.global_get(G_T_DEADLINE).local_set(hd);
-                self.note_host_op(crate::fs_meta::OP_WALL_NOW);
-        let mut i = self.f.instructions();
-        i.i32_const(crate::fs_meta::OP_WALL_NOW);
-                i.i32_const(0).i32_const(0).i32_const(0).i32_const(0);
-                i.call(F_FS_CALL);
+                let _ = i;
+                // #3781: the deadline clock is MONOTONIC (op 60), as native's
+                // `Instant`; in a replay build the clock is never read (now = 0),
+                // as native's baked-ω shim.
+                if crate::fuel::omega_replay() >= 0 {
+                    self.f.instructions().i64_const(0);
+                } else {
+                    self.fs_call_0(crate::fs_meta::OP_MONO_NOW)?;
+                }
+                let mut i = self.f.instructions();
                 i.local_get(hn).i64_add().local_set(hn); // now + ns
                 i.local_get(hn).global_get(G_T_DEADLINE).i64_lt_s().if_(BlockType::Empty);
                 i.local_get(hn).global_set(G_T_DEADLINE);
@@ -174,17 +179,32 @@ impl Emitter<'_> {
         i.global_get(G_T_DEADLINE).i64_const(i64::MAX).i64_ne();
         i.if_(BlockType::Empty);
         i.global_get(G_T_HIT).i32_eqz().if_(BlockType::Empty);
-        self.note_host_op(crate::fs_meta::OP_WALL_NOW);
-        // #3041: the meter's own read, not the frame's (witness_decls.rs).
-        self.work.meter_reads_pending.set(self.work.meter_reads_pending.get() + 1);
+        let _ = i;
+        let omega = crate::fuel::omega_replay();
+        if omega >= 0 {
+            // #3781 replay: the n-th armed check fires, the clock is never
+            // read — native's `__almd_wall_hit` under a baked ω, check for check.
+            let ord = self.omega_ord_global();
+            let mut i = self.f.instructions();
+            i.global_get(ord).i64_const(1).i64_add().global_set(ord);
+            i.global_get(ord).i64_const(omega).i64_ge_s().if_(BlockType::Empty);
+            i.i32_const(1).global_set(G_T_HIT);
+            i.end();
+            i.end();
+        } else {
+            self.note_host_op(crate::fs_meta::OP_MONO_NOW);
+            // #3041: the meter's own read, not the frame's (witness_decls.rs).
+            self.work.meter_reads_pending.set(self.work.meter_reads_pending.get() + 1);
+            let mut i = self.f.instructions();
+            i.i32_const(crate::fs_meta::OP_MONO_NOW);
+            i.i32_const(0).i32_const(0).i32_const(0).i32_const(0);
+            i.call(F_FS_CALL);
+            i.global_get(G_T_DEADLINE).i64_ge_s().if_(BlockType::Empty);
+            i.i32_const(1).global_set(G_T_HIT);
+            i.end();
+            i.end();
+        }
         let mut i = self.f.instructions();
-        i.i32_const(crate::fs_meta::OP_WALL_NOW);
-        i.i32_const(0).i32_const(0).i32_const(0).i32_const(0);
-        i.call(F_FS_CALL);
-        i.global_get(G_T_DEADLINE).i64_ge_s().if_(BlockType::Empty);
-        i.i32_const(1).global_set(G_T_HIT);
-        i.end();
-        i.end();
         i.global_get(G_T_HIT);
         i.if_(BlockType::Empty);
         let _ = i;
@@ -235,5 +255,22 @@ impl Emitter<'_> {
             w.branch_arm();
             w.branch_close();
         }
+    }
+}
+
+/// #3781: `ALMIDE_OMEGA` at build time, as native bakes it
+/// (`charge_probe::omega_replay`): `-1` = live, `n >= 0` = cut at the n-th
+/// armed deadline check without reading the clock.
+pub(crate) fn omega_replay() -> i64 {
+    almide_base::env::var("ALMIDE_OMEGA").and_then(|v| v.parse().ok()).unwrap_or(-1)
+}
+
+impl Emitter<'_> {
+    /// The replay build's check-ordinal global: appended after the top-let
+    /// globals and the alloc counters (assembly.rs), so a live build — which
+    /// has none — keeps every index and byte.
+    pub(crate) fn omega_ord_global(&self) -> u32 {
+        let top = self.globals.values().map(|&(slot, _)| slot + 1).max().unwrap_or(G_FIXED_COUNT);
+        top + if crate::alloc_count::armed() { crate::alloc_count::EXPORTS.len() as u32 } else { 0 }
     }
 }

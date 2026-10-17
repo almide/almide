@@ -150,6 +150,16 @@ fn outline_metered_arm_ir(
     use almide_ir::{CallTarget, IrFunction, IrParam, IrStmt, IrStmtKind, IrVisibility, Mutability, ParamBorrow};
     let body_ty = body_ir.ty.clone();
     let budget_ir = budget_arg;
+    // An empty body `{ }` (or one ending in a statement) is a Unit block, as in
+    // Rust, Kotlin and Swift: give it an explicit `()` tail so every leg lowers
+    // the same region (#3783; wasm refused a tail-less outlined body).
+    let body_ir = match body_ir.kind {
+        IrExprKind::Block { stmts, expr: None } if body_ty == Ty::Unit => {
+            let unit = ctx.mk(IrExprKind::Unit, Ty::Unit, span);
+            IrExpr { kind: IrExprKind::Block { stmts, expr: Some(Box::new(unit)) }, ..body_ir }
+        }
+        _ => body_ir,
+    };
 
     let mk_rt = |ctx: &LowerCtx, name: &str, args: Vec<IrExpr>| -> IrExpr {
         ctx.mk(IrExprKind::RuntimeCall { symbol: sym(name), args }, Ty::Int, span)
@@ -274,7 +284,7 @@ fn lower_fan_race_fold(
     ctx: &mut LowerCtx,
     expr: &ast::Expr,
     span: Option<ast::Span>,
-) -> (Vec<almide_ir::IrStmt>, almide_ir::VarId, almide_ir::VarId, Ty) {
+) -> (Vec<almide_ir::IrStmt>, almide_ir::VarId, almide_ir::VarId, Ty, bool) {
     use almide_ir::{IrStmt, IrStmtKind, Mutability, VarId};
     let ast::ExprKind::FanRace { budget, arms } = &expr.kind else { unreachable!() };
 
@@ -308,6 +318,18 @@ fn lower_fan_race_fold(
     let (bv, st) = bind(ctx, "__r_budget", Ty::Int, budget_ir);
     stmts.push(st);
 
+    // #3782: a Result arm needs a placeholder of T for its Err case, which
+    // only the cheap types have; with such an arm and no cheap zero, the fold
+    // carries the winner in a `Result[T, String]` slot instead. Plain arms
+    // never need a placeholder, so they keep the plain slot of any type.
+    let any_result_arm = arms.iter().any(|a| {
+        matches!(ctx.expr_ty(a), Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, _))
+    });
+    let winner_ty = match ctx.expr_ty(expr) {
+        Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, a) if a.len() == 2 => a[0].clone(),
+        _ => Ty::Unknown,
+    };
+    let slotted = any_result_arm && race_slotted(&winner_ty);
     let mut arm_ty = Ty::Unknown;
     let mut ok_var: Option<VarId> = None;
     let mut bs_var: Option<VarId> = None;
@@ -325,7 +347,7 @@ fn lower_fan_race_fold(
         };
         arm_ty = res_elem.clone().unwrap_or_else(|| call_ty.clone());
 
-        let (vi, exi, spi, arm_ok) = if let Some(elem) = res_elem {
+        let (vi, exi, spi, arm_ok) = if res_elem.is_some() {
             let (ri, st) = bind(ctx, &format!("__r_r{i}"), call_ty.clone(), call);
             stmts.push(st);
             let ex = mk_rt(ctx, "almide_rt_prim_budget_exhausted");
@@ -356,35 +378,32 @@ fn lower_fan_race_fold(
             }, Ty::Int, span);
             let (oki, st) = bind(ctx, &format!("__r_isok{i}"), Ty::Int, m_ok);
             stmts.push(st);
-            // vi = match ri { ok(v) => v, err(_) => <default of T> } — the
-            // default is dead (the ok flag guards it), it only types the arm.
-            let payload = ctx.var_table.alloc(sym("__r_okv"), elem.clone(), Mutability::Let, span);
-            let payload_body = mk_var(ctx, payload, elem.clone());
-            let default = match &elem {
-                Ty::String => ctx.mk(IrExprKind::LitStr { value: String::new() }, Ty::String, span),
-                _ => mk_int(ctx, 0),
-            };
-            let subj2 = mk_var(ctx, ri, call_ty.clone());
-            let m_val = ctx.mk(IrExprKind::Match {
-                subject: Box::new(subj2),
-                arms: vec![
-                    IrMatchArm {
-                        pattern: IrPattern::Ok {
-                            inner: Box::new(IrPattern::Bind { var: payload, ty: elem.clone() }),
+            if slotted {
+                // No cheap zero of T: the candidate VALUE is the arm's Result
+                // itself, guarded by the ok flag (#3782).
+                (ri, exi, spi, Some(oki))
+            } else {
+                // vi = match ri { ok(v) => v, err(_) => <zero of T> } — the zero
+                // is dead (the ok flag guards it), it only types the arm.
+                let elem = arm_ty.clone();
+                let payload = ctx.var_table.alloc(sym("__r_okv"), elem.clone(), Mutability::Let, span);
+                let payload_body = mk_var(ctx, payload, elem.clone());
+                let zero = race_zero(ctx, &elem, span).expect("race_slotted = false implies a zero");
+                let m_val = ctx.mk(IrExprKind::Match {
+                    subject: Box::new(mk_var(ctx, ri, call_ty.clone())),
+                    arms: vec![
+                        IrMatchArm {
+                            pattern: IrPattern::Ok { inner: Box::new(IrPattern::Bind { var: payload, ty: elem.clone() }) },
+                            guard: None,
+                            body: payload_body,
                         },
-                        guard: None,
-                        body: payload_body,
-                    },
-                    IrMatchArm {
-                        pattern: IrPattern::Err { inner: Box::new(IrPattern::Wildcard) },
-                        guard: None,
-                        body: default,
-                    },
-                ],
-            }, elem.clone(), span);
-            let (vi, st) = bind(ctx, &format!("__r_v{i}"), elem, m_val);
-            stmts.push(st);
-            (vi, exi, spi, Some(oki))
+                        IrMatchArm { pattern: IrPattern::Err { inner: Box::new(IrPattern::Wildcard) }, guard: None, body: zero },
+                    ],
+                }, elem.clone(), span);
+                let (vi, st) = bind(ctx, &format!("__r_v{i}"), elem, m_val);
+                stmts.push(st);
+                (vi, exi, spi, Some(oki))
+            }
         } else {
             let (vi, st) = bind(ctx, &format!("__r_v{i}"), arm_ty.clone(), call);
             stmts.push(st);
@@ -397,6 +416,21 @@ fn lower_fan_race_fold(
             (vi, exi, spi, None)
         };
 
+        // The arm's value as a winner-slot Result (#3782): a Result arm's own
+        // Result, a plain arm's `ok(v)` — built inline where it is stored, not
+        // bound on its own, so no `let x = ok(…)` reaches the effect-fn passes.
+        // Otherwise the plain `T` slot, so those modules do not grow by a
+        // Result per arm.
+        let slot_ty = if slotted { Ty::result(arm_ty.clone(), Ty::String) } else { arm_ty.clone() };
+        let slot_val = |ctx: &LowerCtx| -> IrExpr {
+            if !slotted {
+                mk_var(ctx, vi, arm_ty.clone())
+            } else if arm_ok.is_some() {
+                mk_var(ctx, vi, slot_ty.clone())
+            } else {
+                ctx.mk(IrExprKind::ResultOk { expr: Box::new(mk_var(ctx, vi, arm_ty.clone())) }, slot_ty.clone(), span)
+            }
+        };
         // candidate = (exhausted == 0) AND (the arm's own Ok, when Result)
         let within = mk_cmp(ctx, almide_ir::BinOp::Eq, mk_var(ctx, exi, Ty::Int), mk_int(ctx, 0));
         let cand = match arm_ok {
@@ -414,10 +448,22 @@ fn lower_fan_race_fold(
                 let (ok0, st) = bind(ctx, "__r_ok0", Ty::Int,
                     mk_if_int(ctx, cand, mk_int(ctx, 1), mk_int(ctx, 0), Ty::Int));
                 stmts.push(st);
-                let _ = cand2;
+                // The slot holds `ok(v)` only for an admitted arm, so a cut
+                // first arm's zero-value Ok never reaches the winner (#3782).
+                let val0 = if slotted {
+                    let empty = ctx.mk(IrExprKind::LitStr { value: String::new() }, Ty::String, span);
+                    let no_slot = ctx.mk(IrExprKind::ResultErr { expr: Box::new(empty) }, slot_ty.clone(), span);
+                    let v0 = slot_val(ctx);
+                    let (val0, st) = bind(ctx, "__r_val0", slot_ty.clone(),
+                        mk_if_int(ctx, cand2, v0, no_slot, slot_ty.clone()));
+                    stmts.push(st);
+                    val0
+                } else {
+                    vi
+                };
                 ok_var = Some(ok0);
                 bs_var = Some(spi);
-                val_var = Some(vi);
+                val_var = Some(val0);
             }
             (Some(ok_p), Some(bs_p), Some(val_p)) => {
                 // better = candidate AND (no winner yet OR spend < best) —
@@ -461,8 +507,9 @@ fn lower_fan_race_fold(
                 let (bs_n, st) = bind(ctx, &format!("__r_bs{i}"), Ty::Int,
                     mk_if_int(ctx, is_bet.clone(), mk_var(ctx, spi, Ty::Int), mk_var(ctx, bs_p, Ty::Int), Ty::Int));
                 stmts.push(st);
-                let (val_n, st) = bind(ctx, &format!("__r_val{i}"), arm_ty.clone(),
-                    mk_if_int(ctx, is_bet, mk_var(ctx, vi, arm_ty.clone()), mk_var(ctx, val_p, arm_ty.clone()), arm_ty.clone()));
+                let vn = slot_val(ctx);
+                let (val_n, st) = bind(ctx, &format!("__r_val{i}"), slot_ty.clone(),
+                    mk_if_int(ctx, is_bet, vn, mk_var(ctx, val_p, slot_ty.clone()), slot_ty.clone()));
                 stmts.push(st);
                 ok_var = Some(ok_n);
                 bs_var = Some(bs_n);
@@ -473,7 +520,7 @@ fn lower_fan_race_fold(
     }
     // The parser refuses an armless `fan.race`, so the first arm set all three.
     let (Some(ok_var), Some(val_var)) = (ok_var, val_var) else { unreachable!("fan.race lowered with no arms") };
-    (stmts, ok_var, val_var, arm_ty)
+    (stmts, ok_var, val_var, arm_ty, slotted)
 }
 
 /// Lower `fan.race(budget?, xs, f)` — the MAPPER form (T7-1) — into a dynamic
@@ -489,7 +536,7 @@ fn lower_fan_race_map_fold(
     ctx: &mut LowerCtx,
     expr: &ast::Expr,
     span: Option<ast::Span>,
-) -> (Vec<almide_ir::IrStmt>, almide_ir::VarId, almide_ir::VarId, Ty) {
+) -> (Vec<almide_ir::IrStmt>, almide_ir::VarId, almide_ir::VarId, Ty, bool) {
     use almide_ir::{IrMatchArm, IrPattern, IrStmt, IrStmtKind, Mutability, VarId};
     use almide_lang::types::constructor::TypeConstructorId;
     let ast::ExprKind::FanRaceMap { budget, list, mapper } = &expr.kind else { unreachable!() };
@@ -515,14 +562,6 @@ fn lower_fan_race_map_fold(
     };
     let assign = |v: VarId, value: IrExpr| -> IrStmt {
         IrStmt { kind: IrStmtKind::Assign { var: v, value }, span }
-    };
-    // The winner type's dead placeholder — the ok flag guards every read, it
-    // only types the slot (the block form's exact convention).
-    let default_of = |ctx: &LowerCtx, t: &Ty| -> IrExpr {
-        match t {
-            Ty::String => ctx.mk(IrExprKind::LitStr { value: String::new() }, Ty::String, span),
-            _ => ctx.mk(IrExprKind::LitInt { value: 0 }, t.clone(), span),
-        }
     };
 
     // Types from the checker: list → List[X], winner T from the node's own
@@ -553,8 +592,17 @@ fn lower_fan_race_map_fold(
     let maxs = mk_int(ctx, i64::MAX);
     let (bsv, st) = bind(ctx, "__rm_bs", Mutability::Var, Ty::Int, maxs);
     stmts.push(st);
-    let dflt = default_of(ctx, &winner_ty);
-    let (valv, st) = bind(ctx, "__rm_val", Mutability::Var, winner_ty.clone(), dflt);
+    // The winner slot is a Result[T, String], so its initial value is an Err
+    // and no placeholder of T is needed — any winner type works (#3782).
+    let slotted = race_slotted(&winner_ty);
+    let slot_ty = if slotted { Ty::result(winner_ty.clone(), Ty::String) } else { winner_ty.clone() };
+    let dflt = if slotted {
+        let empty = ctx.mk(IrExprKind::LitStr { value: String::new() }, Ty::String, span);
+        ctx.mk(IrExprKind::ResultErr { expr: Box::new(empty) }, slot_ty.clone(), span)
+    } else {
+        race_zero(ctx, &winner_ty, span).expect("race_slotted = false implies a zero")
+    };
+    let (valv, st) = bind(ctx, "__rm_val", Mutability::Var, slot_ty.clone(), dflt);
     stmts.push(st);
 
     // The metered region: the mapper body with its param bound to a fresh
@@ -638,21 +686,24 @@ fn lower_fan_race_map_fold(
     let bet_e = mk_mul(ctx, mk_var(ctx, candv, Ty::Int), or_e);
     let (betv, st) = bind(ctx, "__rm_bet", Mutability::Let, Ty::Int, bet_e);
     arm_stmts.push(st);
-    // if bet == 1 then { ok = 1; bs = sp; val = payload } else ()
-    let payload_var = ctx.var_table.alloc(sym("__rm_okv"), winner_ty.clone(), Mutability::Let, span);
-    let payload_body = mk_var(ctx, payload_var, winner_ty.clone());
-    let pdflt = default_of(ctx, &winner_ty);
-    let subj2 = mk_var(ctx, rv, mapper_ret_ty.clone());
-    let m_val = ctx.mk(IrExprKind::Match {
-        subject: Box::new(subj2),
-        arms: vec![
-            IrMatchArm {
-                pattern: IrPattern::Ok { inner: Box::new(IrPattern::Bind { var: payload_var, ty: winner_ty.clone() }) },
-                guard: None, body: payload_body,
-            },
-            IrMatchArm { pattern: IrPattern::Err { inner: Box::new(IrPattern::Wildcard) }, guard: None, body: pdflt },
-        ],
-    }, winner_ty.clone(), span);
+    // if bet == 1 then { ok = 1; bs = sp; val = r / its payload } — r is Ok here
+    let m_val = if slotted {
+        mk_var(ctx, rv, mapper_ret_ty.clone())
+    } else {
+        let payload_var = ctx.var_table.alloc(sym("__rm_okv"), winner_ty.clone(), Mutability::Let, span);
+        let payload_body = mk_var(ctx, payload_var, winner_ty.clone());
+        let pzero = race_zero(ctx, &winner_ty, span).expect("race_slotted = false implies a zero");
+        ctx.mk(IrExprKind::Match {
+            subject: Box::new(mk_var(ctx, rv, mapper_ret_ty.clone())),
+            arms: vec![
+                IrMatchArm {
+                    pattern: IrPattern::Ok { inner: Box::new(IrPattern::Bind { var: payload_var, ty: winner_ty.clone() }) },
+                    guard: None, body: payload_body,
+                },
+                IrMatchArm { pattern: IrPattern::Err { inner: Box::new(IrPattern::Wildcard) }, guard: None, body: pzero },
+            ],
+        }, winner_ty.clone(), span)
+    };
     let win_block = ctx.mk(IrExprKind::Block {
         stmts: vec![
             assign(okv, mk_int(ctx, 1)),
@@ -681,7 +732,7 @@ fn lower_fan_race_map_fold(
     }, Ty::Unit, span);
     stmts.push(IrStmt { kind: IrStmtKind::Expr { expr: for_e }, span });
 
-    (stmts, okv, valv, winner_ty)
+    (stmts, okv, valv, winner_ty, slotted)
 }
 
 /// L4 (#1108 Phase 2b): inside a FALLIBLE lambda body, rewrite every
@@ -725,4 +776,30 @@ fn convert_option_unwraps_to_result(body: &mut IrExpr) {
         }
     }
     Rw.visit_expr_mut(body);
+}
+
+/// The dead placeholder of a race winner type with a CHEAP zero — the scalars
+/// and String. `None` = no cheap zero: the fold carries the winner in a
+/// `Result[T, String]` slot instead (#3782), which costs a Result per arm, so
+/// the cheap types keep the plain slot.
+pub(crate) fn race_zero(ctx: &LowerCtx, ty: &Ty, span: Option<ast::Span>) -> Option<IrExpr> {
+    let kind = match ty {
+        Ty::Int | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
+        | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64 => IrExprKind::LitInt { value: 0 },
+        Ty::Float | Ty::Float32 | Ty::Float64 => IrExprKind::LitFloat { value: 0.0 },
+        Ty::Bool => IrExprKind::LitBool { value: false },
+        Ty::String => IrExprKind::LitStr { value: String::new() },
+        _ => return None,
+    };
+    Some(ctx.mk(kind, ty.clone(), span))
+}
+
+/// Does the race fold carry this winner type in a `Result` slot ([`race_zero`])?
+pub(crate) fn race_slotted(ty: &Ty) -> bool {
+    !matches!(
+        ty,
+        Ty::Int | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
+            | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
+            | Ty::Float | Ty::Float32 | Ty::Float64 | Ty::Bool | Ty::String
+    )
 }

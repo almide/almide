@@ -359,6 +359,14 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
         globals.global(GlobalType { val_type: vt, mutable: true, shared: false }, &init);
     }
     crate::alloc_count::declare_globals(&mut globals, counters);
+    // #3781: a replay build's deadline-check ordinal (fuel.rs
+    // `omega_ord_global`), after the alloc counters; a live build has none.
+    if crate::fuel::omega_replay() >= 0 {
+        globals.global(
+            GlobalType { val_type: ValType::I64, mutable: true, shared: false },
+            &ConstExpr::i64_const(0),
+        );
+    }
 
     let mut exports = ExportSection::new();
     exports.export("memory", ExportKind::Memory, 0);
