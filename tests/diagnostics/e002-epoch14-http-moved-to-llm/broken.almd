@@ -1,0 +1,10 @@
+import http
+
+effect fn ask(key: String, body: String) -> String = http.openai_streaming_call(
+  "http://127.0.0.1:9",
+  key,
+  body,
+  (d) => println(d),
+)!
+
+effect fn main() -> Unit = println(ask("k", "{\"stream\": true}")!)
