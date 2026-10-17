@@ -143,6 +143,10 @@ repo = "O6lvl4/almide-otel-demo"
 commands = ["check", "test"]
 
 [[project]]
+repo = "O6lvl4/arlk"
+commands = ["check", "test", "test src/", "build"]
+
+[[project]]
 repo = "O6lvl4/assay"
 commands = ["check", "test"]
 
