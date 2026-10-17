@@ -254,7 +254,28 @@ mod tests {
         assert_eq!(out.failure_stdout(Some("three")), "  stdout:\n    STDOUT: value is 42\n");
         assert_eq!(out.failure_stdout(None), "  stdout:\n    STDOUT: value is 42\n");
         assert_eq!(out.stderr, "E1\nDEBUG: value is 42\n");
-        assert_eq!(wasm_failure_lines(stderr), vec!["Error: assertion failed", "  at: line 4"]);
+        assert_eq!(wasm_failure_lines(stderr), vec!["Error: assertion failed", "  at: line 4", "  expected: 2", "  found: 1"]);
+    }
+
+    /// The whole failure block, not its first two lines: `expected:` /
+    /// `found:` are the report (testing.assert_aborts' `found:` names why the
+    /// child was not the expected abort, and its child sections follow). A
+    /// blank line ends the block, as it ends the native reporter's.
+    #[test]
+    fn the_wasm_failure_detail_is_the_whole_block() {
+        let stderr = "noise\nError: assertion failed\n  at: line 5\n  expected: abort containing \"boom\"\n  found: returned normally\n  child stdout:\n    hi\nPANIC: testing.assert_aborts failed at line 5\n\nafter\n";
+        assert_eq!(
+            wasm_failure_lines(stderr),
+            vec![
+                "Error: assertion failed",
+                "  at: line 5",
+                "  expected: abort containing \"boom\"",
+                "  found: returned normally",
+                "  child stdout:",
+                "    hi",
+                "PANIC: testing.assert_aborts failed at line 5",
+            ]
+        );
     }
 
     #[test]
