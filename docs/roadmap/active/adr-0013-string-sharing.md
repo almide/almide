@@ -1,6 +1,8 @@
 # ADR-0013: native String as a shared buffer — implementation
 
-**Status:** stage 1 landed (#3715, 2026-10-15). Stage 2 in progress: step 1 (the alias) landed in #3716. The literals (#3719) and the type (#3717) are in review.
+**Status:** stage 1 landed (#3715, 2026-10-15). Stage 2 in progress:
+- landed: step 1 (the alias, #3716), the type (#3717) and the literals (#3719);
+- on branch `adr0013-stage2`: the `ALMIDE_SHARED_STR` flag, steps 3–4 for the walker and the runtime, and the step 5 alias fixture.
 **Decision:** [ADR-0013](../../adr/0013-string-shared-immutable-buffer.md) (accepted 2026-09-04).
 **Owner ruling 2026-10-15:** implement this right after the stdlib inspection's individual fixes. Do not change borrow inference for conditionally consumed parameters instead.
 
@@ -138,5 +140,37 @@ From here on the census also counts **distinct sites** (an error inside the runt
 | + 137 runtime `Result<_, String>` signatures spell `AlmideString` | 9,501 | 1,137 |
 
 The raw count rose at the last step because some errors moved into the runtime itself, where each one repeats per file. Distinct sites fell. Flag off, every step stays at 0.
+
+**The flag is real from here on (2026-10-17).** `ALMIDE_SHARED_STR=1` is a registered switch: the prelude (`crates/almide-codegen/src/prelude_string.rs`) splices `almide-str`'s source in as `mod almide_str_block` and points the alias at `AlmideStr`. So the census no longer needs a probe edit, and the harness changed with it:
+- Emit with `almide <file> --target rust`, type-check with `rustc --test --emit=metadata`, over the 463 files minus the 10 that need rustls / flate2 (453).
+- A distinct site is (error code, message, offending source line).
+- The flag-on prelude carries the `AlmideConcat` impls for `AlmideStr` (through `AlmideStr::concat`, which appends in place only when unique) and a structural `into_almide` (String converts; `Vec` / `Option` / `Result` / tuples / `HashMap` / `AlmideMap` map their elements; scalars and `AlmideValue` are the identity).
+- The new harness re-measures the starting point, so its rows are not comparable with the rows above.
+
+| State (flag on, this harness) | Errors | Distinct sites | Files with errors |
+|---|---:|---:|---:|
+| start: the alias, literals, runtime returns and `Result` errors as landed | 15,643 | 724 | 453 |
+| + runtime internals through the boundary (`fan`, `fs`, `value`, `json`, `map`, `list`, `error`, `process_core`) | 959 | 681 | 187 |
+| + construction sites: `to_almide()` for a String copy, `AlmideString::from(format!(..))` for interpolation, error payloads, `ok_or`, the decode frame key | 115 | 96 | 18 |
+| + the unprefixed runtime returns (`almide_regex_*`, `almide_json_*`, `ProcessStatus` fields) | 61 | 44 | 14 |
+
+All 61 remaining errors are the thread boundary: `AlmideStr` is not `Send`/`Sync`, and it reaches a `fan` block, `fan.map_par`, `fs.fold_lines_chunked`, or a top-level `let` (a `static LazyLock`). That is design point 3 (the Koka thread-shared flip), not a construction site.
+
+**Flag on, the corpus runs.** The same 463 files built with `rustc --test` at opt-level 0 and run natively: 438 pass with the flag on and 452 with it off. The difference is the 14 thread-boundary files; the 10 rustls / flate2 files do not link in a standalone rustc, and one deep-recursion test overflows the default test-thread stack at opt-level 0 in this harness (on both sides).
+
+**Step 5 (`let t = s; s = s + "x"`).** `spec/lang/alias_cow_test.almd` pins it, straight and in a loop, and it passes on wasm and natively with the flag on and off. Under the shared buffer the walker's `+` goes through `AlmideStr::concat`, and the v1 append window's `s.push_str(x)` through `AlmideStr::push_str`. Both take the unique view, which copies a shared block before it writes.
+
+**The v1 renderer and http follow.**
+- The v1 header splices the same block under the flag (`crates/almide-mir/src/render_native_str.rs`). Its string shims and literals build `AlmideString`.
+- `http.rs` and the SSE client return `AlmideString`, and take header maps and chunk callbacks in it.
+- The census cannot see either: v1 is not the `--target rust` route, and http needs rustls.
+  - For http: the 10 excluded files were built through `almide build` (the cargo route, with rustls and flate2) with the flag on, and all 10 compile.
+  - For v1 there is no corpus measurement yet. One program that exercises the append window and every string shim renders through v1 with the flag on and prints the same bytes as with it off.
+  - A v1 census is the next instrument to build.
+
+**Not covered yet:**
+- the thread boundary above (design point 3);
+- `AlmideValue::Str` (step 6) and the default flip (step 7), both deliberately untouched;
+- speed under the flag: `&str + AlmideStr` and a v1 shim result copy once more than they need to, and `to_almide()` copies where a count increment would do. Step 7's `gce_ab.sh` run is where that is judged.
 
 **The runtime ABI steps void inspection stamps.** Changing a runtime function's text changes its implementation hash, and `tests/stdlib_inspection_test.rs` then requires re-inspection. The `-> String` step alone voided 38 stamped functions. So the ABI steps (returns, `Result`, `Vec`, `Option`) are collected on one branch and re-inspected once on GCE before they are proposed.
