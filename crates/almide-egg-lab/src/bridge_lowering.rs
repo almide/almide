@@ -99,25 +99,9 @@ impl Bridge {
                 self.lower_matrix_call(rec, "add", &[*a, *b], vt),
             AlmideExpr::MatrixScale([m, s]) =>
                 self.lower_matrix_call(rec, "scale", &[*m, *s], vt),
-            AlmideExpr::MatrixGelu([m]) =>
-                self.lower_matrix_call(rec, "gelu", &[*m], vt),
-            AlmideExpr::MatrixSoftmaxRows([m]) =>
-                self.lower_matrix_call(rec, "softmax_rows", &[*m], vt),
             AlmideExpr::MatrixLinearRow([x, w, b]) =>
                 self.lower_matrix_call(rec, "linear_row", &[*x, *w, *b], vt),
-            AlmideExpr::MatrixLayerNormRows([x, g, be, e]) =>
-                self.lower_matrix_call(rec, "layer_norm_rows", &[*x, *g, *be, *e], vt),
 
-            AlmideExpr::MatrixFusedGemmBiasScaleGelu([a, b, bi, al]) =>
-                self.lower_matrix_call(rec, "fused_gemm_bias_scale_gelu", &[*a, *b, *bi, *al], vt),
-            AlmideExpr::MatrixAttentionWeights([q, kt, s]) =>
-                self.lower_matrix_call(rec, "attention_weights", &[*q, *kt, *s], vt),
-            AlmideExpr::MatrixScaledDotProductAttention([q, kt, v, s]) =>
-                self.lower_matrix_call(rec, "scaled_dot_product_attention", &[*q, *kt, *v, *s], vt),
-            AlmideExpr::MatrixPreNormLinear([x, g, be, e, w, b]) =>
-                self.lower_matrix_call(rec, "pre_norm_linear", &[*x, *g, *be, *e, *w, *b], vt),
-            AlmideExpr::MatrixLinearRowGelu([x, w, b]) =>
-                self.lower_matrix_call(rec, "linear_row_gelu", &[*x, *w, *b], vt),
             AlmideExpr::MatrixMulScaled([a, s, b]) =>
                 self.lower_matrix_call(rec, "mul_scaled", &[*a, *s, *b], vt),
 
@@ -352,14 +336,7 @@ impl Bridge {
                 compose_filter_map_into_fold_fresh(&fm, &g, vt)
             }
             AlmideExpr::MatrixMul(_) | AlmideExpr::MatrixAdd(_)
-            | AlmideExpr::MatrixScale(_) | AlmideExpr::MatrixGelu(_)
-            | AlmideExpr::MatrixSoftmaxRows(_) | AlmideExpr::MatrixLinearRow(_)
-            | AlmideExpr::MatrixLayerNormRows(_)
-            | AlmideExpr::MatrixFusedGemmBiasScaleGelu(_)
-            | AlmideExpr::MatrixAttentionWeights(_)
-            | AlmideExpr::MatrixScaledDotProductAttention(_)
-            | AlmideExpr::MatrixPreNormLinear(_)
-            | AlmideExpr::MatrixLinearRowGelu(_)
+            | AlmideExpr::MatrixScale(_) | AlmideExpr::MatrixLinearRow(_)
             | AlmideExpr::MatrixMulScaled(_) => Err(LowerError::UnexpectedNode(
                 "matrix node in lambda position".into(),
             )),

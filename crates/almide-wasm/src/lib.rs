@@ -189,8 +189,6 @@ mod matrix_kernels;
 mod matrix_load;
 mod matrix_ops;
 mod matrix_prod;
-mod matrix_rope;
-mod matrix_scalars;
 mod matrix_shape;
 mod binop;
 mod fan;

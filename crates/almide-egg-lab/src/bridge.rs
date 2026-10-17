@@ -165,66 +165,15 @@ impl Bridge {
                 let s = self.lift_node(&args[1], rec);
                 Some(rec.add(AlmideExpr::MatrixScale([m, s])))
             }
-            ("gelu", 1) => {
-                let m = self.lift_node(&args[0], rec);
-                Some(rec.add(AlmideExpr::MatrixGelu([m])))
-            }
-            ("softmax_rows", 1) => {
-                let m = self.lift_node(&args[0], rec);
-                Some(rec.add(AlmideExpr::MatrixSoftmaxRows([m])))
-            }
             ("linear_row", 3) => {
                 let x = self.lift_node(&args[0], rec);
                 let w = self.lift_node(&args[1], rec);
                 let b = self.lift_node(&args[2], rec);
                 Some(rec.add(AlmideExpr::MatrixLinearRow([x, w, b])))
             }
-            ("layer_norm_rows", 4) => {
-                let x = self.lift_node(&args[0], rec);
-                let gamma = self.lift_node(&args[1], rec);
-                let beta = self.lift_node(&args[2], rec);
-                let eps = self.lift_node(&args[3], rec);
-                Some(rec.add(AlmideExpr::MatrixLayerNormRows([x, gamma, beta, eps])))
-            }
-
-            // Fused forms — normally produced only by rewrites, but we
-            // also accept them as input (e.g. if the user called the
-            // intrinsic directly) so that lift is idempotent.
-            ("fused_gemm_bias_scale_gelu", 4) => {
-                let a = self.lift_node(&args[0], rec);
-                let b = self.lift_node(&args[1], rec);
-                let bias = self.lift_node(&args[2], rec);
-                let alpha = self.lift_node(&args[3], rec);
-                Some(rec.add(AlmideExpr::MatrixFusedGemmBiasScaleGelu([a, b, bias, alpha])))
-            }
-            ("attention_weights", 3) => {
-                let q = self.lift_node(&args[0], rec);
-                let kt = self.lift_node(&args[1], rec);
-                let s = self.lift_node(&args[2], rec);
-                Some(rec.add(AlmideExpr::MatrixAttentionWeights([q, kt, s])))
-            }
-            ("scaled_dot_product_attention", 4) => {
-                let q = self.lift_node(&args[0], rec);
-                let kt = self.lift_node(&args[1], rec);
-                let v = self.lift_node(&args[2], rec);
-                let s = self.lift_node(&args[3], rec);
-                Some(rec.add(AlmideExpr::MatrixScaledDotProductAttention([q, kt, v, s])))
-            }
-            ("pre_norm_linear", 6) => {
-                let x = self.lift_node(&args[0], rec);
-                let gamma = self.lift_node(&args[1], rec);
-                let beta = self.lift_node(&args[2], rec);
-                let eps = self.lift_node(&args[3], rec);
-                let w = self.lift_node(&args[4], rec);
-                let b = self.lift_node(&args[5], rec);
-                Some(rec.add(AlmideExpr::MatrixPreNormLinear([x, gamma, beta, eps, w, b])))
-            }
-            ("linear_row_gelu", 3) => {
-                let x = self.lift_node(&args[0], rec);
-                let w = self.lift_node(&args[1], rec);
-                let b = self.lift_node(&args[2], rec);
-                Some(rec.add(AlmideExpr::MatrixLinearRowGelu([x, w, b])))
-            }
+            // Fused form — normally produced only by the rewrites, but
+            // also accepted as input (the user called the intrinsic
+            // directly) so that lift is idempotent.
             ("mul_scaled", 3) => {
                 let a = self.lift_node(&args[0], rec);
                 let s = self.lift_node(&args[1], rec);

@@ -218,9 +218,9 @@ fn main() -> Unit = {
     Case {
         name: "matrix_heads_map_and_flat_map",
         shape: "map / flat_map over List[Matrix] heads (defunc_hof_inner.rs)",
-        src: r#"fn per_head_rms_norm(x: Matrix, gamma: List[Float], n_heads: Int, eps: Float) -> Matrix = {
+        src: r#"fn per_head_shift(x: Matrix, gamma: List[Float], n_heads: Int, eps: Float) -> Matrix = {
   let heads = matrix.split_cols_even(x, n_heads)
-  let normed = heads |> list.map((h) => matrix.rms_norm_rows(h, gamma, eps))
+  let normed = heads |> list.map((h) => matrix.scale(matrix.broadcast_add_row(h, gamma), eps))
   matrix.concat_cols(normed)
 }
 fn repeat_kv(kv: Matrix, n_kv_heads: Int, n_rep: Int) -> Matrix = {
@@ -233,13 +233,13 @@ fn repeat_kv(kv: Matrix, n_kv_heads: Int, n_rep: Int) -> Matrix = {
 }
 effect fn main() -> Unit = {
   let x = matrix.from_lists([[1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.0]])
-  let p = per_head_rms_norm(x, [0.5, 1.5], 2, 0.00001)
+  let p = per_head_shift(x, [0.5, 1.5], 2, 0.5)
   println(float.to_string(matrix.get(p, 0, 0)))
   let r2 = repeat_kv(x, 2, 2)
   println(int.to_string(matrix.cols(r2)))
 }
 "#,
-        fns: &["per_head_rms_norm", "repeat_kv", "main"],
+        fns: &["per_head_shift", "repeat_kv", "main"],
         loops: &[],
     },
     Case {
