@@ -211,3 +211,28 @@ fn the_full_response_family_reads_the_same_on_native_and_the_embedded_lane() {
     let embedded = observe(c);
     assert_eq!((&embedded.0, embedded.2), (&native.0, native.2), "the embedded lane diverged: {}", embedded.1);
 }
+
+/// C-350 on the component route: `process.exit(code)` exits with `code` on
+/// native and on the embedded lane, which runs a full-response program as its
+/// p3 component — so the component's exit carries the whole byte
+/// (`wasi:cli/exit.exit-with-code`), on stock wasmtime as on the embedded host.
+#[test]
+fn an_exit_code_crosses_the_component_route() {
+    let dead = closed_port();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let file = dir.path().join("exit_code.almd");
+    let src = format!(
+        "import http\nimport process\n\neffect fn main() -> Unit = {{\n  match http.get_response(\"http://127.0.0.1:{dead}/\") {{\n    ok(_) => println(\"ok\"),\n    err(_) => println(\"err\"),\n  }}\n  process.exit(3)\n}}\n"
+    );
+    std::fs::write(&file, src).expect("write");
+    let native = native(&file);
+    assert_eq!((native.0.as_str(), native.2), ("err\n", Some(3)), "native: {}", native.1);
+    let mut c = Command::new(env!("CARGO_BIN_EXE_almide"));
+    c.arg("run").arg(&file).args(["--target", "wasm"]);
+    let embedded = observe(c);
+    assert_eq!((&embedded.0, embedded.2), (&native.0, native.2), "the embedded lane diverged: {}", embedded.1);
+    if wasmtime_runs_p3() {
+        let p3 = p3(&file, dir.path());
+        assert_eq!((&p3.0, p3.2), (&native.0, native.2), "the p3 component diverged: {}", p3.1);
+    }
+}
