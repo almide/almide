@@ -157,7 +157,7 @@
 15	8	240	15	spec/wasm_cross/effect_operand_unwrap_distinct.almd
 25	8	256	25	spec/wasm_cross/effect_option_explicit_bang.almd
 7	4	112	7	spec/wasm_cross/effect_slot_carrier.almd
-8	6	104	8	spec/wasm_cross/effect_slot_never_err_bang.almd
+5	3	80	5	spec/wasm_cross/effect_slot_never_err_bang.almd
 10	4	141	10	spec/wasm_cross/effect_tail_carrier_family.almd
 3	0	48	3	spec/wasm_cross/effect_tco.almd
 ~	spec/wasm_cross/effect_tco_err_rewrap.almd
