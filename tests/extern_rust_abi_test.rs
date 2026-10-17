@@ -120,6 +120,18 @@ const ROWS: &[Row] = &[
           call: "let a_rb = f_ret_bytes(3)\n  println(int.to_string(bytes.len(a_rb)))", expected: "3" },
     Row { id: "ret_matrix", almide_params: "n: Int", almide_ret: "Matrix", host_params: "n: i64", host_ret: "AlmideMatrix", host_body: "AlmideMatrix { rows: n as usize, cols: 1, data: vec![0.0; n as usize] }",
           call: "println(int.to_string(matrix.rows(f_ret_matrix(5))))", expected: "5" },
+    // ADR-0013: the host speaks `String` while generated code holds the shared
+    // buffer; the wrapper converts at the boundary, both ways.
+    Row { id: "ret_string", almide_params: "v: String", almide_ret: "String", host_params: "v: &str", host_ret: "String", host_body: "format!(\"<{v}>\")",
+          call: "println(f_ret_string(\"q\"))", expected: "<q>" },
+    Row { id: "ret_list_str", almide_params: "n: Int", almide_ret: "List[String]", host_params: "n: i64", host_ret: "Vec<String>", host_body: "(0..n).map(|i| i.to_string()).collect()",
+          call: "println(list.join(f_ret_list_str(3), \",\"))", expected: "0,1,2" },
+    Row { id: "ret_opt_str", almide_params: "v: Option[String]", almide_ret: "Result[String, String]", host_params: "v: Option<String>", host_ret: "Result<String, String>", host_body: "v.ok_or_else(|| \"none\".to_string())",
+          call: "println(f_ret_opt_str(some(\"s\")) ?? \"e\")\n  println(match f_ret_opt_str(none) { ok(x) => x, err(e) => e })", expected: "s\nnone" },
+    Row { id: "mut_str", almide_params: "mut v: String", almide_ret: "Unit", host_params: "v: &mut String", host_ret: "()", host_body: "v.push_str(\"!\")",
+          call: "var a_ms = \"hey\"\n  let a_ms0 = a_ms\n  f_mut_str(a_ms)\n  println(a_ms)\n  println(a_ms0)", expected: "hey!\nhey" },
+    Row { id: "mut_list_str", almide_params: "mut v: List[String]", almide_ret: "Unit", host_params: "v: &mut Vec<String>", host_ret: "()", host_body: "v.push(\"z\".to_string())",
+          call: "var a_mls = [\"y\"]\n  f_mut_list_str(a_mls)\n  println(list.join(a_mls, \"\"))", expected: "yz" },
 ];
 
 /// Which row(s) exercise each `Ty` variant as an extern parameter — or why it
