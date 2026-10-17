@@ -1,12 +1,13 @@
-//! A package's `native/*.rs` that calls back into the package by the item
-//! names released compilers spelled keeps building (#3425).
+//! The item names a package's `native/*.rs` calls back into the package by.
 //!
 //! #3338 made `module_ident` injective and respelled every item a native
 //! module calls back into: `almide_rt_tf_v0_entry` → `almide_rt_tf_0v0_entry`,
 //! `almide_rt_tf_v0_calc_double` → `almide_rt_tf_0v0_1calc_double`. The old
-//! spellings stay callable as deprecated aliases, emitted only into a crate
-//! that carries a package `native/` tree, only where the old spelling is
-//! unambiguous, with one warning per old name the native code uses.
+//! spellings stayed callable as deprecated aliases from dialect epoch 10
+//! (#3425, deprecation `legacy-native-callback-names`), and dialect epoch 14
+//! removed them as that deprecation promised: a native file calling an old
+//! spelling is now rustc's E0425 (an unresolved name), no alias is emitted
+//! into any crate, and nothing warns about a spelling that no longer exists.
 //!
 //! Each build gets its own `ALMIDE_RUN_PROJECT_DIR`, so it is a cold build
 //! whose generated crate root (`src/main.rs`) can be read back.
@@ -105,39 +106,33 @@ fn run(dir: &Path, tag: &str) -> Run {
     }
 }
 
-fn warnings_for(stderr: &str, name: &str) -> usize {
-    stderr.matches(&format!("calls `{name}`, the spelling before #3338")).count()
-}
-
-fn assert_old_names_run_and_warn(r: &Run, lane: &str) {
-    assert!(r.ok && r.stdout.trim() == "706", "{lane}: the old spelling did not build and run:\n{}\n{}", r.stdout, r.stderr);
-    for (old, new) in [
-        ("almide_rt_tf_v0_entry", "almide_rt_tf_0v0_entry"),
-        ("almide_rt_tf_v0_calc_double", "almide_rt_tf_0v0_1calc_double"),
-    ] {
-        assert_eq!(warnings_for(&r.stderr, old), 1, "{lane}: not one warning for {old}:\n{}", r.stderr);
-        assert!(r.stderr.contains(&format!("write `crate::{new}`")), "{lane}: the warning does not name {new}:\n{}", r.stderr);
-        assert!(r.stderr.contains("dialect epoch 14"), "{lane}: the warning does not name the removal epoch:\n{}", r.stderr);
+/// The removal text of epoch 14's break: the old spelling is an unresolved
+/// name (rustc E0425) naming the old spelling, the build fails, no alias is
+/// in the crate, and no deprecation warning is printed.
+fn assert_old_names_are_unresolved(r: &Run, lane: &str) {
+    assert!(!r.ok, "{lane}: a native file calling the pre-#3338 spelling still built:\n{}\n{}", r.stdout, r.stderr);
+    assert!(r.stderr.contains("E0425"), "{lane}: the failure is not rustc's E0425:\n{}", r.stderr);
+    assert!(r.stderr.contains("almide_rt_tf_v0_entry"), "{lane}: the error does not name the old spelling:\n{}", r.stderr);
+    assert!(!r.stderr.contains("the spelling before #3338"), "{lane}: a deprecation warning for a removed alias:\n{}", r.stderr);
+    if let Some(root) = &r.crate_root {
+        assert!(!root.contains(" as almide_rt_tf_v0_"), "{lane}: the crate still carries an alias");
     }
 }
 
 #[test]
-fn old_names_build_as_the_entry_package_and_warn_once_each() {
+fn old_names_are_unresolved_in_the_entry_package() {
     if !available() {
         return;
     }
     let tf = scratch("old-entry");
     tf_package(&tf, OLD_HOST);
     let r = run(&tf, "old-entry");
-    assert_old_names_run_and_warn(&r, "entry package");
-    let root = r.crate_root.expect("the build wrote no crate root");
-    assert!(root.contains("use crate::almide_rt_tf_0v0_entry as almide_rt_tf_v0_entry;"), "no root alias in the crate");
-    assert!(root.contains("use crate::almide_rt_tf_0v0_1calc_double as almide_rt_tf_v0_calc_double;"), "no sub-module alias in the crate");
+    assert_old_names_are_unresolved(&r, "entry package");
     let _ = std::fs::remove_dir_all(&tf);
 }
 
 #[test]
-fn old_names_build_as_a_dependency_and_warn_once_each() {
+fn old_names_are_unresolved_in_a_dependency() {
     if !available() {
         return;
     }
@@ -145,7 +140,7 @@ fn old_names_build_as_a_dependency_and_warn_once_each() {
     tf_package(&base.join("tf"), OLD_HOST);
     app_package(&base.join("app"), "tf", &base.join("tf"), "tf.via_native(3)");
     let r = run(&base.join("app"), "old-dep");
-    assert_old_names_run_and_warn(&r, "dependency");
+    assert_old_names_are_unresolved(&r, "dependency");
     let _ = std::fs::remove_dir_all(&base);
 }
 
@@ -179,7 +174,7 @@ fn a_package_without_native_code_gets_no_alias() {
     let r = run(&base.join("app"), "plain");
     assert!(r.ok && r.stdout.trim() == "7", "the plain package did not run:\n{}\n{}", r.stdout, r.stderr);
     if let Some(root) = &r.crate_root {
-        assert!(!root.contains("#3425") && !root.contains(" as almide_rt_"), "a crate without native code got aliases");
+        assert!(!root.contains(" as almide_rt_"), "a crate without native code got aliases");
     }
     // The emitted Rust is the generated crate before injection: no alias,
     // and the same text a second time.
@@ -195,8 +190,8 @@ fn a_package_without_native_code_gets_no_alias() {
 }
 
 /// #3338's own collision: modules `a.b` and `a_b` both define `c`, so the old
-/// spelling `almide_rt_cz_v0_a_b_c` named two items. Neither gets it as an
-/// alias, and native code calling both by their new names builds.
+/// spelling `almide_rt_cz_v0_a_b_c` named two items. Native code calling both
+/// by their new names builds, and the old spelling is in the crate nowhere.
 #[test]
 fn a_colliding_old_spelling_gets_no_alias() {
     if !available() {
@@ -220,6 +215,6 @@ fn a_colliding_old_spelling_gets_no_alias() {
     assert!(r.ok && r.stdout.trim() == "2112", "the collision package did not build and run:\n{}\n{}", r.stdout, r.stderr);
     assert!(!r.stderr.contains("#3338"), "a warning for names the native code does not use:\n{}", r.stderr);
     let root = r.crate_root.expect("the build wrote no crate root");
-    assert!(!root.contains("as almide_rt_cz_v0_a_b_c;"), "the ambiguous old spelling got an alias");
+    assert!(!root.contains("as almide_rt_cz_v0_a_b_c;"), "the old spelling got an alias");
     let _ = std::fs::remove_dir_all(&cz);
 }
