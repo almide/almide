@@ -101,9 +101,36 @@ pub fn almide_rt_io_read_n_bytes(n: i64) -> Vec<i64> {
     use std::io::Read;
     almide_stdout_flush();
     if n <= 0 { return Vec::new(); }
-    let mut buf: Vec<u8> = Vec::new();
-    let _ = std::io::stdin().take(n as u64).read_to_end(&mut buf);
-    buf.into_iter().map(|b| b as i64).collect()
+    // Slices of at most 64 KiB read straight into one zeroed-once chunk and
+    // widened into the answer: a slice of 8 KiB or more bypasses stdin's
+    // buffer, so its bytes are not copied through it. `take(n).read_to_end`
+    // grew its Vec from 32 bytes and sized each read adaptively, and the reads
+    // that fit stdin's buffer went through it and its copy — all 20000 bytes
+    // of a call at n = 20000, 8 KiB of one at n >= 80000 (GCE c4-standard-4),
+    // a per-call cost that moved with n. Nothing is sized from n past one slice.
+    const SLICE: usize = 1 << 16;
+    thread_local! {
+        static CHUNK: std::cell::RefCell<Vec<u8>> = std::cell::RefCell::new(vec![0u8; SLICE]);
+    }
+    CHUNK.with(|chunk| {
+        let mut chunk = chunk.borrow_mut();
+        let mut out: Vec<i64> = Vec::with_capacity((n as u64).min(SLICE as u64) as usize);
+        let mut left = n as u64;
+        let mut input = std::io::stdin().lock();
+        while left > 0 {
+            let want = left.min(SLICE as u64) as usize;
+            match input.read(&mut chunk[..want]) {
+                Ok(0) => break,
+                Ok(got) => {
+                    out.extend(chunk[..got].iter().map(|&b| b as i64));
+                    left -= got as u64;
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(_) => break,
+            }
+        }
+        out
+    })
 }
 
 // Byte writes share the buffer with `println` (#2245), so they interleave in
