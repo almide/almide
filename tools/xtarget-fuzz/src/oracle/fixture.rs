@@ -1,6 +1,7 @@
-//! The network a run sees (ADR-0027 D5): a TCP echo server and a small
+//! The network a run sees (ADR-0027 D5): TCP echo, sink and source servers and a small
 //! HTTP/1.1 server on 127.0.0.1, started once per harness process and handed
-//! to every run as `XF_TCP_PORT` / `XF_HTTP` (the same on every leg). No run
+//! to every run as `XF_TCP_PORT` / `XF_SINK_PORT` / `XF_SOURCE_PORT` / `XF_HTTP`
+//! (the same on every leg). No run
 //! reaches any other host.
 //!
 //! HTTP routes (every answer has a Content-Length unless chunked):
@@ -21,8 +22,15 @@ pub fn env() -> &'static [(String, String)] {
     static ENV: OnceLock<Vec<(String, String)>> = OnceLock::new();
     ENV.get_or_init(|| {
         let tcp = spawn_server(echo);
+        let sink = spawn_server(sink);
+        let source = spawn_server(source);
         let http = spawn_server(serve_http);
-        vec![("XF_TCP_PORT".into(), tcp.to_string()), ("XF_HTTP".into(), format!("127.0.0.1:{http}"))]
+        vec![
+            ("XF_TCP_PORT".into(), tcp.to_string()),
+            ("XF_SINK_PORT".into(), sink.to_string()),
+            ("XF_SOURCE_PORT".into(), source.to_string()),
+            ("XF_HTTP".into(), format!("127.0.0.1:{http}")),
+        ]
     })
 }
 
@@ -44,6 +52,18 @@ fn echo(mut s: TcpStream) {
             return;
         }
     }
+}
+
+/// Reads and drops everything: a writer's probe never backs up.
+fn sink(mut s: TcpStream) {
+    let mut buf = [0u8; 65536];
+    while matches!(s.read(&mut buf), Ok(n) if n > 0) {}
+}
+
+/// Writes `a` until the peer closes: a reader's probe never waits.
+fn source(mut s: TcpStream) {
+    let buf = [b'a'; 65536];
+    while s.write_all(&buf).is_ok() {}
 }
 
 fn serve_http(s: TcpStream) {

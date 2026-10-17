@@ -44,6 +44,9 @@ struct Ctx {
     /// None when no C compiler is here: then a counted verdict is reported
     /// but not stampable, since bulk copies are invisible to instructions.
     memshim: Option<PathBuf>,
+    /// The largest k this function's probes may run: [`MAX_K`], or less for
+    /// a call that holds a socket per call (`effect_recipes::max_k`).
+    max_k: u64,
 }
 
 #[derive(Clone, Copy)]
@@ -69,6 +72,7 @@ pub fn cmd_inspect(args: &[String]) {
         memshim: if icount { build_memshim(&dir) } else { None },
         dir,
         icount,
+        max_k: crate::generator::inspect_max_k(&name).unwrap_or(MAX_K),
     };
     let engine = Engine::with_family(&repo, Family::Synthesis);
     let target = engine.inspect_target(&name).unwrap_or_else(|e| {
@@ -296,10 +300,10 @@ fn judge_timed(
         // 30-minute cap that way).
         let dn = delta(ctx, &p, &b, Leg::Native).map_err(|e| format!("{label} {e}"))?;
         let dw = delta(ctx, &p, &b, Leg::Wasm).map_err(|e| format!("{label} {e}"))?;
-        if dn.max(dw) >= CALIBRATE_TARGET || k >= MAX_K {
+        if dn.max(dw) >= CALIBRATE_TARGET || k >= ctx.max_k {
             break;
         }
-        k = (k * 4).min(MAX_K);
+        k = (k * 4).min(ctx.max_k);
     }
     let mut line = format!("{label} k={k}");
     let mut worst: f64 = 0.0;
@@ -701,10 +705,10 @@ fn judge_counted(
         loop {
             let (p, b) = marginal(n, k);
             let d = counted_delta(ctx, &p, &b, leg).map_err(|e| format!("{label} {} calibrating k={k} at n={n}: {e}", leg_tag(leg)))?;
-            if counted_calibrated(&d) || k >= MAX_K {
+            if counted_calibrated(&d) || k >= ctx.max_k {
                 return Ok(k);
             }
-            k = (k * 4).min(MAX_K);
+            k = (k * 4).min(ctx.max_k);
         }
     };
     let ks = [(Leg::Native, calibrate(Leg::Native)?), (Leg::Wasm, calibrate(Leg::Wasm)?)];
