@@ -50,6 +50,24 @@ fn string_map() -> GenType {
     GenType::Map(Box::new(GenType::String))
 }
 
+/// `http.start(method, <fixture>path, body, headers, no limits)`, an `err`
+/// stopping the program (the fixture is always up).
+macro_rules! http_call {
+    ($method:literal, $path:literal, $body:literal, $headers:literal) => {
+        concat!(
+            "(match http.start(\"",
+            $method,
+            "\", \"http://\" + (env.get(\"XF_HTTP\") ?? \"\") + \"",
+            $path,
+            "\", \"",
+            $body,
+            "\", ",
+            $headers,
+            ", { total_ms: 0, idle_ms: 0 }) { ok(hc) => hc, err(he) => panic(he) })"
+        )
+    };
+}
+
 /// Sized values use fixed-width keys (`k100000000`…), so a series is
 /// linear in n.
 pub const NOMINALS: &[Nominal] = &[
@@ -264,6 +282,51 @@ pub const NOMINALS: &[Nominal] = &[
         digest: "string.len(http.body(http.wrap((req) => http.response(200, \"base\"), [{v}])(http.new_request(\"GET\", \"/\", \"\", map.new()))!))",
         observe_calls_effect: true,
         refuses_var: true,
+    },
+    // A call's limits. Only limits no fixture exchange reaches (0 = none, or
+    // far past what the loopback answers in): a limit that fires is the
+    // host's timing, and a call that took it is the error path.
+    Nominal {
+        name: "HttpLimits",
+        module: "http",
+        small: "{ total_ms: 0, idle_ms: 0 }",
+        sized: "{ total_ms: 0, idle_ms: 0 }",
+        leaves: &[
+            "{ total_ms: 0, idle_ms: 0 }",
+            "{ total_ms: 60000, idle_ms: 0 }",
+            "{ total_ms: 0, idle_ms: 30000 }",
+            "{ total_ms: 60000, idle_ms: 30000 }",
+        ],
+        observe: "\"${{v}.total_ms} ${{v}.idle_ms}\"",
+        observed: string,
+        digest: "{v}.total_ms + {v}.idle_ms",
+        observe_calls_effect: false,
+        refuses_var: false,
+    },
+    // A call in flight against the loopback fixture (ADR-0027 D5). It has
+    // no value of its own: it is observed by how it ends (`http.wait`),
+    // which no read and no poll changes (the whole body stays the
+    // response's), and which no generated program can cancel — `cancel`'s
+    // operand is a fresh call of its own (`verdicts.rs`). The sized call
+    // answers n bytes.
+    Nominal {
+        name: "HttpCall",
+        module: "http",
+        small: http_call!("GET", "/chunked/3", "", "map.new()"),
+        sized: http_call!("GET", "/bytes/{n}", "", "map.new()"),
+        leaves: &[
+            http_call!("GET", "/chunked/3", "", "map.new()"),
+            http_call!("GET", "/bytes/16", "", "map.new()"),
+            http_call!("POST", "/echo", "aé", "[\"x-k\": \"v\"]"),
+            http_call!("GET", "/status/404", "", "map.new()"),
+            http_call!("GET", "/sse/2", "", "map.new()"),
+            http_call!("DELETE", "/missing", "", "map.new()"),
+        ],
+        observe: "(match http.wait({v}) { ok(hr) => \"${http.status_code(hr)}|${http.body(hr)}\", err(he) => he })",
+        observed: string,
+        digest: "(match http.wait({v}) { ok(hr) => string.len(http.body(hr)), err(_) => 0 })",
+        observe_calls_effect: true,
+        refuses_var: false,
     },
     // The ADR-0001 clocks: an i64 of nanoseconds behind the checker's
     // firewall, observed through Repr (S7 keeps accessors omitted). A

@@ -131,7 +131,36 @@ pub const VERDICTS: &[Verdict] = &[
     // Through a generated (null) pointer nothing is written or read.
     Verdict { func: "bytes.copy_to_ptr", holds: "v >= 0 and v <= bytes.len({b})", canon: "v", domain: &[] },
     Verdict { func: "mem.save", holds: "true", canon: "0", domain: &[] },
+    // An http call handle (#2631) against the loopback fixture. Whether the
+    // exchange has ended when `poll` looks is the network's timing: `none`,
+    // or the very result `wait` answers (an ended call's outcome never
+    // changes). The program goes on with that result.
+    Verdict {
+        func: "http.poll",
+        // A call's Result is consumed by its ok / err arms (an operand or a
+        // bare match subject is E041).
+        holds: "match v { none => true, some(pr) => match http.wait({c}) { ok(wr) => pr == ok(wr), err(we) => pr == err(we) } }",
+        canon: "some(match http.wait({c}) { ok(wr) => ok(wr), err(we) => err(we) })",
+        domain: &[],
+    },
+    // How much of the body has arrived is the network's timing: what one
+    // read hands back is a run of the body `wait` answers (no read takes
+    // from the response).
+    Verdict {
+        func: "http.read_new",
+        holds: "match http.wait({c}) { ok(wr) => string.contains(http.body(wr), v), err(_) => false }",
+        canon: "\"\"",
+        domain: &[],
+    },
+    // Whether a call has already ended when it is cancelled is the
+    // network's timing, so a cancel reaches only a call of its own: a call
+    // the program goes on reading would end ok on one run and as
+    // "request cancelled" on another.
+    Verdict { func: "http.cancel", holds: "true", canon: "()", domain: &[("c", HTTP_CALL_OF_ITS_OWN)] },
 ];
+
+/// A fresh call to the fixture, for a call that would disturb a shared one.
+const HTTP_CALL_OF_ITS_OWN: &str = "match http.start(\"GET\", \"http://\" + (env.get(\"XF_HTTP\") ?? \"\") + \"/bytes/16\", \"\", map.new(), { total_ms: 0, idle_ms: 0 }) { ok(hc) => hc, err(he) => panic(he) }";
 
 /// The O(1) form of a property checked inside a timed loop, where the full
 /// check's own cost (a membership scan, a per-element count) would be
@@ -141,6 +170,10 @@ const PROBES: &[(&str, &str)] = &[
     ("random.choice", "match v { some(_) => not list.is_empty({xs}), none => list.is_empty({xs}) }"),
     ("random.shuffle", "list.len(v) == list.len({xs})"),
     ("list.shuffle", "list.len(v) == list.len({xs})"),
+    // The probe's call has ended before the loop (its recipe waits), so
+    // poll answers it; comparing that answer with `wait`'s would time a
+    // second copy of the body as poll's.
+    ("http.poll", "option.is_some(v)"),
 ];
 
 impl Verdict {

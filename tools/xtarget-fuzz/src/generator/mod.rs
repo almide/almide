@@ -41,7 +41,7 @@ pub fn inspect_max_k(name: &str) -> Option<u64> {
     inspect_gen::effect_recipes::max_k(name)
 }
 
-pub use catalogue::{build as build_catalogue, needs_embedded, Signature, SANDBOXED_EFFECT_MODULES};
+pub use catalogue::{build as build_catalogue, ends_without_unwinding, needs_embedded, Signature, SANDBOXED_EFFECT_MODULES};
 
 use crate::rng::SplitMix64;
 

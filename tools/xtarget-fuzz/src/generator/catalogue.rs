@@ -96,6 +96,28 @@ pub const SANDBOXED_EFFECT_MODULES: &[&str] = &["fs", "env", "io", "args", "proc
 /// (D4, `term.rs`).
 pub const EMBEDDED_ROUTED_MODULES: &[&str] = &["process", "net", "http"];
 
+/// The functions that never return (`-> Never`), each with the domain its
+/// arguments are brought into: a program calls one only as its last
+/// statement (`program.rs`), after printing everything it observed, so the
+/// comparison is the stdout before the call and the exit the call makes.
+/// `process.exit`'s code is brought into 0..=125, the exit codes every leg
+/// reports alike (C-350; the declaration's 0..=255 holds on native only).
+/// Every catalogued `-> Never` function has a row here
+/// (`every_never_returning_function_is_classified`).
+pub const NEVER_RETURNING: &[(&str, &[(&str, &str)])] = &[("process.exit", &[("code", "({code} % 126 + 126) % 126")])];
+
+/// The [`NEVER_RETURNING`] row of `module.func`.
+pub fn never_domain(module: &str, func: &str) -> Option<&'static [(&'static str, &'static str)]> {
+    NEVER_RETURNING.iter().find(|(f, _)| f.split_once('.') == Some((module, func))).map(|(_, d)| *d)
+}
+
+/// `src` calls a [`NEVER_RETURNING`] function: it ends without unwinding,
+/// on every leg, so what is live when it ends was released by no one —
+/// the live-heap rung has no leak to judge there.
+pub fn ends_without_unwinding(src: &str) -> bool {
+    NEVER_RETURNING.iter().any(|(f, _)| src.contains(&format!("{f}(")))
+}
+
 /// Effect modules that reach no host: a computation that can fail, the same
 /// on every run and every leg, so their effect functions are catalogued with
 /// no sandbox (`zlib`: its codecs return `err` on a corrupt stream).
@@ -481,6 +503,23 @@ mod availability_tests {
             assert!(effects.contains(&e.to_string()) && effects.contains(&d.to_string()), "{e} / {d} not catalogued");
             let s = cat.iter().find(|s| format!("{}.{}", s.module, s.func) == *e).unwrap();
             assert_eq!(s.observed_through, Some(*d));
+        }
+    }
+
+    #[test]
+    fn every_never_returning_function_is_classified() {
+        let cat = build();
+        let never: Vec<String> = cat.iter().filter(|s| s.ret == SigType::Never).map(|s| format!("{}.{}", s.module, s.func)).collect();
+        assert!(never.contains(&"process.exit".to_string()), "{never:?}");
+        for f in &never {
+            let (m, n) = f.split_once('.').unwrap();
+            assert!(never_domain(m, n).is_some(), "{f}: a `-> Never` function with no NEVER_RETURNING row");
+        }
+        for (f, domain) in NEVER_RETURNING {
+            let s = cat.iter().find(|s| format!("{}.{}", s.module, s.func) == *f).unwrap_or_else(|| panic!("{f} is not catalogued"));
+            for (p, _) in *domain {
+                assert!(s.param_names.iter().any(|q| q == p), "{f}: domain names `{p}`, not a parameter");
+            }
         }
     }
 
