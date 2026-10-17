@@ -364,7 +364,7 @@
 71914	65885	1590792	71914	spec/wasm_cross/json_many_keys.almd
 116	72	1453	116	spec/wasm_cross/json_number_unicode.almd
 218	203	2995	218	spec/wasm_cross/json_parse_lenient_edges.almd
-681	587	6241	681	spec/wasm_cross/json_path_edges.almd
+718	624	6669	718	spec/wasm_cross/json_path_edges.almd
 1676	1619	20456	1676	spec/wasm_cross/json_path_index_domain.almd
 329	305	4186	329	spec/wasm_cross/json_string_span.almd
 1593	1536	20687	1593	spec/wasm_cross/json_stringify_control_chars.almd

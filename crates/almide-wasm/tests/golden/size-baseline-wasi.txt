@@ -364,8 +364,8 @@
 25196	spec/wasm_cross/json_many_keys.almd
 23812	spec/wasm_cross/json_number_unicode.almd
 22022	spec/wasm_cross/json_parse_lenient_edges.almd
-30491	spec/wasm_cross/json_path_edges.almd
-28870	spec/wasm_cross/json_path_index_domain.almd
+32708	spec/wasm_cross/json_path_edges.almd
+28879	spec/wasm_cross/json_path_index_domain.almd
 22059	spec/wasm_cross/json_string_span.almd
 24376	spec/wasm_cross/json_stringify_control_chars.almd
 28048	spec/wasm_cross/json_stringify_nonfinite.almd
