@@ -3,5 +3,5 @@
 // beside `count`. The hint names the plain spelling.
 effect fn main() -> Unit = {
   let count = 3
-  println("${count}")
+  println("done")
 }
