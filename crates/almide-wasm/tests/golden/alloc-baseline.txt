@@ -196,6 +196,7 @@
 66912	spec/wasm_cross/fan_deterministic.almd
 66624	spec/wasm_cross/fan_effect_mapper.almd
 ~	spec/wasm_cross/fan_effect_mapper_capability.almd
+66592	spec/wasm_cross/fan_list_map_trap_order.almd
 65888	spec/wasm_cross/fan_map_all_workers_abort_one_line.almd
 66016	spec/wasm_cross/fan_map_err.almd
 66048	spec/wasm_cross/fan_map_err_runs_every_element.almd
