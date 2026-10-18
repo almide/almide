@@ -986,6 +986,7 @@ spec/wasm_cross/tuple_single.almd
 spec/wasm_cross/uint64_assert_display.almd
 spec/wasm_cross/uint64_upper_half.almd
 spec/wasm_cross/unannotated_toplet_generic_ctor.almd
+spec/wasm_cross/unicode_identifiers.almd
 spec/wasm_cross/unique_non_flat_element.almd
 spec/wasm_cross/unit_effect_abi.almd
 spec/wasm_cross/unsigned_literal_domain.almd

@@ -890,6 +890,7 @@
 6	0	64	0	spec/wasm_cross/uint64_assert_display.almd
 31	22	554	31	spec/wasm_cross/uint64_upper_half.almd
 2	0	8	2	spec/wasm_cross/unannotated_toplet_generic_ctor.almd
+10	2	149	10	spec/wasm_cross/unicode_identifiers.almd
 5	0	32	5	spec/wasm_cross/unique_non_flat_element.almd
 9	5	144	9	spec/wasm_cross/unit_effect_abi.almd
 11	1	116	11	spec/wasm_cross/unsigned_literal_domain.almd

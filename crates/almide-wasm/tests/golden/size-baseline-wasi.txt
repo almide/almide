@@ -888,6 +888,7 @@
 3300	spec/wasm_cross/uint64_assert_display.almd
 5845	spec/wasm_cross/uint64_upper_half.almd
 1902	spec/wasm_cross/unannotated_toplet_generic_ctor.almd
+4531	spec/wasm_cross/unicode_identifiers.almd
 2321	spec/wasm_cross/unique_non_flat_element.almd
 2179	spec/wasm_cross/unit_effect_abi.almd
 3036	spec/wasm_cross/unsigned_literal_domain.almd
