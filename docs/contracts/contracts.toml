@@ -2710,7 +2710,7 @@ evidence  = [
 id        = "C-204"
 spec      = "ALS-DT2"
 title     = "A fan.bounded verdict is a function of the program and its inputs alone"
-statement = "`fan.bounded(c) { body }` yields Err (the ledger-constant message) exactly when the region's metered spend in charge units exceeds `floor(ns / CM-1)`, and the Ok ⇄ Err flip happens at the SAME declared nanosecond on both targets — the boundary fixtures pin the flip at unit exactness (heavy(1000) = 1002 units flips at 3006ns under CM-1 v0.3). Bind statements inside a block body add zero charge; the bare (no-`??`) form produces the same verdict as a real `Result[T, String]` value; the region body is pure by typing, so no wall-clock input can reach the verdict. The budget expression may reach the head through variables (a let-bound sum, a nested-block binding, an effect-fn boundary) — the nominal time tag erases at MIR, so the variable spelling meters identically to the inline one."
+statement = "`fan.bounded(c) { body }` yields Err (the ledger-constant message) exactly when the region's metered spend in charge units exceeds `floor(ns / CM-1)`, and the Ok ⇄ Err flip happens at the SAME declared nanosecond on both targets — the boundary fixtures pin the flip at unit exactness (heavy(1000) = 1002 units flips at 3006ns under CM-1 v0.3). Bind statements inside a block body add zero charge; the bare (no-`??`) form produces the same verdict as a real `Result[T, String]` value; the region body is pure by typing, so no wall-clock input can reach the verdict. The budget expression may reach the head through variables (a let-bound sum, a nested-block binding, an effect-fn boundary) — the nominal time tag erases at MIR, so the variable spelling meters identically to the inline one. The charge sites are the table's: a fn entry, a loop head and a bulk concat — the `+` the writer spelled, 1 + result_bytes/16; a string INTERPOLATION is not a charge site on any leg (spec/wasm_cross/fuel_interp_uncharged.almd: a body that interpolates in its loop is cut at the same iteration on native and wasm, and one that appends with `+` pays per iteration). Until #3778 the native default route charged the concat chain an interpolation lowers to; it now places the charge where the writer spelled `+`."
 since     = "0.47.0"
 status    = "active"
 evidence  = [
@@ -2720,6 +2720,7 @@ evidence  = [
   { path = "spec/wasm_cross/fuel_divergence_cut.almd", class = "fixture" },
   { path = "spec/wasm_cross/fuel_dyn_charge.almd", class = "fixture" },
   { path = "spec/wasm_cross/fuel_var_budget.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fuel_interp_uncharged.almd", class = "fixture" },
   { path = "spec/wasm_cross/fan_race_walled_program.almd", class = "fixture" },
 ]
 
@@ -3843,11 +3844,12 @@ evidence  = [
 id        = "C-294"
 spec      = "ALS-T1"
 title     = "A zero compute budget admits inlined loop-free callees on every leg"
-statement = "ADR-0001 S5's check-then-charge zero-budget edge composed with the shared-MIR inliner: W1 charge sites are defined over the SHARED MIR (ADR-0001's charge-site definition), and the MIR inlines loop-free non-recursive user fns into their metered region entry-charge and all, so `fan.bounded(compute.ms(0)) { w() }` admits `w` when its body is loop-free (`= 42`, a let block, a branch) and exhausts when it carries a loop (the surviving loop-head charge). The reference interpreter mirrors the same exemption (loop-free, on no call cycle — direct or mutual recursion keeps its per-entry charges, the TCO-aligned approximation) instead of charging every AST-level entry: before the mirror it voted exhaust where both backends admitted (xtarget-fuzz seed=20260817 index=578, a time_saturate mutation whose dynamic budget collapsed to zero)."
+statement = "ADR-0001 S5's check-then-charge zero-budget edge composed with the shared-MIR inliner: W1 charge sites are defined over the SHARED MIR (ADR-0001's charge-site definition), and the MIR inlines loop-free non-recursive user fns into their metered region entry-charge and all, so `fan.bounded(compute.ms(0)) { w() }` admits `w` when its body is loop-free (`= 42`, a let block, a branch) and exhausts when it carries a loop (the surviving loop-head charge). The reference interpreter mirrors the same exemption (loop-free, on no call cycle — direct or mutual recursion keeps its per-entry charges, the TCO-aligned approximation) instead of charging every AST-level entry: before the mirror it voted exhaust where both backends admitted (xtarget-fuzz seed=20260817 index=578, a time_saturate mutation whose dynamic budget collapsed to zero). The native default route (the MIR render) reads the same meter plan since #3778 — before it charged every fn entry, so `fan.bounded(compute.ns(3006)) { wrap(1000) }` was Err there and Ok on wasm; spec/wasm_cross/fuel_wrapper_entry_exempt.almd pins the wrapper (and a wrapper of a wrapper) at the unit-exact boundary, and the tie a `fan.min` over two such wrappers resolves by source order, on both targets."
 since     = "0.57.2"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/fuel_zero_budget_inline.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fuel_wrapper_entry_exempt.almd", class = "fixture" },
 ]
 
 # ── BOX-PATTERN REFINEMENT BACKSTOP ─
