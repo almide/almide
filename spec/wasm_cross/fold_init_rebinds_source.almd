@@ -7,6 +7,10 @@
 // read freed memory. Every fold-shaped arm is pinned: the plain and fused
 // `list.fold`, `list.fold` over `list.enumerate` and `list.scan`, each
 // with String elements so a stale read shows.
+// #3801: `set.fold` and `map.fold` take their source by reference on
+// native, which held a borrow of the variable across the init's rebind and
+// rustc refused the program (E0506). Their arms are pinned here too, plus an
+// init that reads the source before it rebinds it.
 effect fn main() -> Unit = {
   var xs = ["a", "b", "c"]
   let plain = xs |> list.fold({
@@ -38,4 +42,36 @@ effect fn main() -> Unit = {
     ""
   }, (acc, x) => acc + x)
   println("running=${running} now=${list.len(ss)}")
+  var st = set.from_list(["a", "b"])
+  let in_set = st |> set.fold({
+    st = set.from_list(["z"])
+    ""
+  }, (acc, x) => acc + x)
+  println("set=${in_set} now=${set.len(st)}")
+  var m = ["a": "1", "b": "2"]
+  let in_map = m |> map.fold({
+    m = ["z": "9"]
+    ""
+  }, (acc, k, v) => acc + k + v)
+  println("map=${in_map} now=${map.len(m)}")
+  var sr = set.from_list(["a", "b", "c"])
+  let read_then_rebind = sr |> set.fold(
+    {
+      let n = set.len(sr)
+      sr = set.from_list(["z"])
+      "${n}:"
+    },
+    (acc, x) => acc + x,
+  )
+  println("set read=${read_then_rebind} now=${set.len(sr)}")
+  var mr = ["a": "1"]
+  let map_read_then_rebind = mr |> map.fold(
+    {
+      let n = map.len(mr)
+      mr = ["z": "9", "y": "8"]
+      "${n}:"
+    },
+    (acc, k, v) => acc + k + v,
+  )
+  println("map read=${map_read_then_rebind} now=${map.len(mr)}")
 }
