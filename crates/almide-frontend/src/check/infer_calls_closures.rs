@@ -252,13 +252,16 @@ impl Checker {
     /// gate, mutable-capture diagnostic, and per-expr Result auto-unwrap.
     /// Verbatim text move.
     fn infer_expr_g3_fan(&mut self, expr: &mut ast::Expr) -> Ty {
-        let ExprKind::Fan { exprs, .. } = &mut expr.kind else { unreachable!() };
         if !self.env.can_call_effect {
             self.emit(super::err(
                 "fan block can only be used inside an effect fn".to_string(),
                 "Mark the enclosing function as `effect fn`",
                 "fan block".to_string()).with_code("E007"));
         }
+        if matches!(&expr.kind, ExprKind::Fan { names, .. } if !names.is_empty()) {
+            return self.infer_expr_g3_fan_record(expr);
+        }
+        let ExprKind::Fan { exprs, .. } = &mut expr.kind else { unreachable!() };
         // A `var` reached from an arm is E008, judged after inference by
         // `check_concurrent_var_reach` over every concurrent slot (#2697).
         let tys: Vec<Ty> = exprs.iter_mut().map(|e| {
@@ -276,6 +279,28 @@ impl Checker {
             1 => tys.into_iter().next().unwrap_or(Ty::Unknown),
             _ => Ty::Tuple(tys.iter().map(|t| resolve_ty(t, &self.uf)).collect()),
         }
+    }
+
+    /// The record form `fan { name: expr, … }` (#1388): typed exactly as the
+    /// plain record literal `{ name: expr, … }` — a field's value is its
+    /// expression's value, with NO auto-unwrap. A field whose value is a
+    /// `Result` (an effect call's included) must spell its propagation with
+    /// `!`: the tuple form would propagate it implicitly and the plain literal
+    /// would keep the `Result`, so an unmarked one is refused (E041) rather
+    /// than given either reading. A `!` field's Err is the block's first-Err
+    /// candidate, as in the tuple form (C-199).
+    fn infer_expr_g3_fan_record(&mut self, expr: &mut ast::Expr) -> Ty {
+        let ExprKind::Fan { exprs, names } = &mut expr.kind else { unreachable!() };
+        let mut field_tys: Vec<(Sym, Ty)> = Vec::with_capacity(exprs.len());
+        for (e, name) in exprs.iter_mut().zip(names.iter()) {
+            let ty = self.infer_expr(e);
+            if !matches!(e.kind, ExprKind::Unwrap { .. }) {
+                self.deferred_implicit_prop_checks.push((ty.clone(), e.span, "of this fan field", true, false));
+            }
+            field_tys.push((*name, resolve_ty(&ty, &self.uf)));
+        }
+        let id = self.uf.fresh_record_literal(Ty::Record { fields: field_tys });
+        Ty::TypeVar(sym(&format!("?{}", id)))
     }
 
     /// Budget clock firewall (ADR-0001 S4 / S6-6): the EXPECTED clock comes
