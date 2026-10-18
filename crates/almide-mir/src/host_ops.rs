@@ -37,8 +37,10 @@
 //! structural wasm leg (`almide_wasm::cert_project::op_caps`): clock reads and
 //! the sleep reach `Clock`; argv and environment reads/writes `CliArgs` (the
 //! manifest's `Env`); entropy `Entropy`; stdout `Stdout`; stdin `Stdin`; the
-//! filesystem `FsRead` / `FsWrite`; the http client `Net`. A function that
-//! reaches a capability it does not declare stays caps-unverified.
+//! filesystem `FsRead` / `FsWrite`; the http client `Net`; starting a child
+//! (`testing.assert_aborts`'s run, ADR-0029) `Process`, the projection's
+//! private process id. A function that reaches a capability it does not
+//! declare stays caps-unverified.
 
 use crate::Capability;
 
@@ -97,7 +99,7 @@ impl HostOp {
     }
 }
 
-use Capability::{CliArgs, Clock, Entropy, FsRead, FsWrite, Net, Stdin, Stdout};
+use Capability::{CliArgs, Clock, Entropy, FsRead, FsWrite, Net, Process, Stdin, Stdout};
 
 const ENV: &[Capability] = &[CliArgs];
 const CLOCK: &[Capability] = &[Clock];
@@ -109,6 +111,7 @@ const WRITE_ENTROPY: &[Capability] = &[FsWrite, Entropy];
 const OUT: &[Capability] = &[Stdout];
 const IN: &[Capability] = &[Stdin];
 const NET: &[Capability] = &[Net];
+const PROCESS: &[Capability] = &[Process];
 
 /// Every admitted host op. Adding one is adding a row; the contract gate then
 /// checks it against the stdlib declaration and the runtime signature.
@@ -220,6 +223,13 @@ pub const HOST_OPS: &[HostOp] = &[
     )
     .result(),
     op("http", "request_stream", "almide_http_request_stream", NET).result(),
+    // ── testing: assert_aborts's site pair (ADR-0029, #3792), test builds only ──
+    // The child run starts a child — a re-exec of the native test binary, a
+    // fresh instance on the embedded host (op 117) — so it counts Process. The
+    // selector reads how this run was launched (ALMIDE_ABORT_SITE natively,
+    // op 118 on the embedded host): an environment read.
+    op("testing", "__abort_site_run", "almide_rt_test_abort_site_run", PROCESS),
+    op("testing", "__abort_site_selected", "almide_rt_test_abort_site_selected", ENV),
 ];
 
 /// The modules whose surface reaches the host. Each one's `@intrinsic`s form
@@ -237,10 +247,7 @@ pub const WALLED: &[(&str, &str, &str)] = &[
     ("http", "serve", "the listener: native-only, and its handler is a closure the host invokes"),
     ("http", "__call_start", "reached only through its wrapper row `http.start`"),
     ("http", "__request_stream_limited", "reached only through its wrapper row `http.request_stream_with_limits`"),
-    ("testing", "__abort_site_run", "testing.assert_aborts's child run (ADR-0029): test builds only — the native runtime re-executes the test binary, the structural leg asks the embedded host (op 117)"),
-    ("testing", "__abort_site_selected", "testing.assert_aborts's site selector (ADR-0029): test builds only — the native runtime reads ALMIDE_ABORT_SITE, the structural leg asks the embedded host (op 118)"),
-]
-;
+];
 
 /// The typed-twin suffixes a ROUTED row's call name can carry
 /// (`lower::list_heap_call_name`): random's element twins and the fold walkers'
@@ -334,6 +341,19 @@ mod tests {
         assert_eq!(host_op_capabilities("env.set"), &[Capability::CliArgs]);
         assert_eq!(host_op_capabilities("http.get"), &[Capability::Net]);
         assert_eq!(host_op_capabilities("fs.copy"), &[Capability::FsRead, Capability::FsWrite]);
+    }
+
+    /// testing.assert_aborts's site pair (ADR-0029, #3792) is admitted: the
+    /// child run counts Process (ADR-0025's child-start id, 10), the selector
+    /// reads the launch environment and counts CliArgs.
+    #[test]
+    fn the_abort_site_pair_is_admitted_and_counted() {
+        assert_eq!(classify("testing", "__abort_site_run"), Cell::HostOp);
+        assert_eq!(classify("testing", "__abort_site_selected"), Cell::HostOp);
+        assert_eq!(host_op_capabilities("testing.__abort_site_run"), &[Capability::Process]);
+        assert_eq!(host_op_capabilities("testing.__abort_site_selected"), &[Capability::CliArgs]);
+        assert_eq!(Capability::Process.id(), 10, "the wasm projection's cap::PROC");
+        assert!(!is_uncounted_host_call("testing.__abort_site_run"));
     }
 
     #[test]
