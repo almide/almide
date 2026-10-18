@@ -18,6 +18,22 @@ fn 色名(c: 色) -> String = match c {
 
 fn 都市名(a: 住所) -> String = a.都市
 
+fn 住所.表示(self) -> String = "${self.都市}-${self.番地}"
+
+fn 色.反対(self) -> 色 = match self {
+  赤 => 緑,
+  緑 => 赤,
+  青(n) => 青(0 - n),
+}
+
+test "convention methods on caseless types" {
+  let a = 住所 { 都市: "大阪", 番地: 9 }
+  assert_eq(a.表示(), "大阪-9")
+  assert_eq(住所.表示(a), "大阪-9")
+  assert_eq(赤.反対(), 緑)
+  assert_eq(色.反対(青(2)), 青(-2))
+}
+
 test "let, fn and parameter names may be non-ASCII" {
   let 日本 = 1
   let café = 2

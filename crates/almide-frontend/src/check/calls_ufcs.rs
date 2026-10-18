@@ -505,7 +505,7 @@ impl Checker {
             Ty::Named(name, _) => Some(name.to_string()),
             Ty::Record { .. } | Ty::Variant { .. } => {
                 self.env.types.iter().find_map(|(name, def)| {
-                    (def == ty && name.starts_with(|c: char| c.is_uppercase())).then(|| name.to_string())
+                    (def == ty && almide_base::names::is_type_side_name(name.as_str())).then(|| name.to_string())
                 })
             }
             _ => None,
@@ -517,7 +517,7 @@ impl Checker {
             Ty::Named(name, _) => Some(*name),
             Ty::Record { .. } | Ty::Variant { .. } => {
                 self.env.types.iter().find_map(|(name, def)| {
-                    (def == ty && name.starts_with(|c: char| c.is_uppercase())).then(|| *name)
+                    (def == ty && almide_base::names::is_type_side_name(name.as_str())).then(|| *name)
                 })
             }
             // TypeVars and inference vars are not concrete — skip protocol checking

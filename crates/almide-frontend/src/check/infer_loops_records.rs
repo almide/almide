@@ -105,7 +105,7 @@ impl Checker {
         let n = match &callee.kind {
             ExprKind::TypeName { name } => *name,
             ExprKind::Member { object, field }
-                if field.as_str().chars().next().map_or(false, |c| c.is_uppercase()) =>
+                if almide_base::names::is_type_side_name(field.as_str()) =>
             {
                 let ExprKind::Ident { name: obj, .. } = &object.kind else { return false };
                 sym(&format!("{}.{}", obj, field))

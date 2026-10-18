@@ -315,7 +315,7 @@ fn lower_call_target_convention_method(ctx: &mut LowerCtx, object: &ast::Expr, f
         Ty::Named(name, _) => Some(name.to_string()),
         Ty::Record { .. } | Ty::Variant { .. } => {
             ctx.env.types.iter().find_map(|(name, ty)| {
-                if ty == obj_ty && name.chars().next().map_or(false, |c| c.is_uppercase()) {
+                if ty == obj_ty && almide_base::names::is_type_side_name(name.as_str()) {
                     Some(name.to_string())
                 } else { None }
             })
