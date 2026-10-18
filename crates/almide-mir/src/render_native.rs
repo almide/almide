@@ -352,7 +352,7 @@ fn render_fn(
                 line!("// dead handle elided");
             }
             Op::Dup { dst, src } if borrows.arms.contains(dst) => {
-                render_borrowed_arm(dst, src, &mut tys, &mut out, indent)?
+                crate::borrow_join::render_arm(dst, src, &mut tys, &mut out, indent)?
             }
             // Rung-5 closures slab: a FuncRef is the lambda's DISPATCH-TABLE index
             // (the name-sorted position shared with the `__almd_ci_*` tables).
@@ -785,31 +785,6 @@ fn render_native_drop_op(
         _ => return Ok(false),
     }
     Ok(true)
-}
-
-/// An arm `Dup` that feeds a borrow join (#3532): the share is a Rust shared
-/// borrow of `src`. A source the render does not hold as a list or String
-/// keeps the ordinary [`render_dup`] (its join then renders owned as well).
-fn render_borrowed_arm(
-    dst: &ValueId,
-    src: &ValueId,
-    tys: &mut BTreeMap<ValueId, NTy>,
-    out: &mut String,
-    indent: usize,
-) -> Result<(), LowerError> {
-    let (t, ty_name, amp) = match tys.get(src) {
-        Some(NTy::Vec) => (NTy::VecRef, "&[i64]", "&"),
-        Some(NTy::VecRef) => (NTy::VecRef, "&[i64]", ""),
-        Some(NTy::Str) => (NTy::StrRef, "&str", "&"),
-        Some(NTy::StrRef) => (NTy::StrRef, "&str", ""),
-        _ => return render_dup(dst, src, tys, out, indent),
-    };
-    tys.insert(*dst, t);
-    for _ in 0..indent {
-        out.push_str("    ");
-    }
-    writeln!(out, "let {}: {ty_name} = {amp}{};", var(*dst), var(*src)).unwrap();
-    Ok(())
 }
 
 /// `Op::Dup` — mint a fresh handle from `src` per its NTy (verbatim arm body

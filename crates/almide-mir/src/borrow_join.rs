@@ -33,9 +33,12 @@
 //!    of any later loop that reads it) rebinds, writes, consumes, returns or
 //!    makes unique an arm's source.
 
+use crate::lower::LowerError;
 use crate::mir_ops::{defined_value, op_values};
+use crate::render_native::{render_dup, var, NTy};
 use crate::{CallArg, MirFunction, Op, ValueId};
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write as _;
 
 /// The joins the native render realizes as borrows, and the arm `Dup`s that
 /// feed them.
@@ -216,6 +219,30 @@ fn writes(op: &Op, s: ValueId) -> bool {
         Op::Return { val } => *val == Some(s),
         _ => false,
     }
+}
+
+/// The native spelling of an arm `Dup` that feeds a borrow join: the share is
+/// a Rust shared borrow of `src`. A source the render does not hold as a list
+/// or String keeps the ordinary [`render_dup`] (its join then renders owned
+/// as well).
+pub(crate) fn render_arm(
+    dst: &ValueId,
+    src: &ValueId,
+    tys: &mut BTreeMap<ValueId, NTy>,
+    out: &mut String,
+    indent: usize,
+) -> Result<(), LowerError> {
+    let (t, ty_name, amp) = match tys.get(src) {
+        Some(NTy::Vec) => (NTy::VecRef, "&[i64]", "&"),
+        Some(NTy::VecRef) => (NTy::VecRef, "&[i64]", ""),
+        Some(NTy::Str) => (NTy::StrRef, "&str", "&"),
+        Some(NTy::StrRef) => (NTy::StrRef, "&str", ""),
+        _ => return render_dup(dst, src, tys, out, indent),
+    };
+    tys.insert(*dst, t);
+    out.push_str(&"    ".repeat(indent));
+    let _ = writeln!(out, "let {}: {ty_name} = {amp}{};", var(*dst), var(*src));
+    Ok(())
 }
 
 #[cfg(test)]
