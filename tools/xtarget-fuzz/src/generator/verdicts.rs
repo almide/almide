@@ -112,6 +112,27 @@ pub const VERDICTS: &[Verdict] = &[
     Verdict { func: "net.tcp_available", holds: "v >= 0", canon: "0", domain: &[] },
     // Exactly len of the 11 echoed bytes: never more than arrive.
     Verdict { func: "net.tcp_read_exact", holds: "bytes.len(v) == {len}", canon: "v", domain: &[("len", "int.abs({len}) % 12")] },
+    // net's Unix sockets and shared-memory files (#3620): a descriptor is the
+    // OS's lowest free number, and the legs do not start from the same free
+    // numbers (on Linux the embedded host holds one more descriptor than a
+    // native program; C-382 leaves raw numbers to the host). The program goes
+    // on with 0, which every leg refuses alike (C-383's held-descriptor rule).
+    Verdict { func: "net.unix_connect", holds: "v >= 0", canon: "0", domain: &[] },
+    Verdict { func: "net.unix_listen", holds: "v >= 0", canon: "0", domain: &[] },
+    Verdict { func: "net.unix_accept", holds: "v >= 0", canon: "0", domain: &[] },
+    Verdict { func: "net.shm_create", holds: "v >= 0", canon: "0", domain: &[] },
+    // The descriptors that arrived: new ones, so numbered by what is open.
+    Verdict { func: "net.unix_take_fds", holds: "list.all(v, (f) => f >= 0)", canon: "list.map(v, (f) => 0)", domain: &[] },
+    // A wait never blocks for long: a sink stream never becomes readable,
+    // so a generated timeout would hold the run that long (a negative one
+    // forever).
+    Verdict { func: "net.unix_poll", holds: "true", canon: "v", domain: &[("timeout_ms", "({timeout_ms} % 50 + 50) % 50")] },
+    Verdict {
+        func: "net.unix_wait",
+        holds: "list.all(v, (f) => list.contains({fds}, f))",
+        canon: "list.map(v, (f) => 0)",
+        domain: &[("timeout_ms", "({timeout_ms} % 50 + 50) % 50")],
+    },
     // A buffer's address reads back the buffer while it lives (checked on
     // its first byte: the probe's check stays O(1)); a generated program goes
     // on with null, so it never holds an address past its buffer.
@@ -130,7 +151,6 @@ pub const VERDICTS: &[Verdict] = &[
     Verdict { func: "bytes.data_ptr", holds: "v > 0 or bytes.len({b}) == 0", canon: "0", domain: &[] },
     // Through a generated (null) pointer nothing is written or read.
     Verdict { func: "bytes.copy_to_ptr", holds: "v >= 0 and v <= bytes.len({b})", canon: "v", domain: &[] },
-    Verdict { func: "mem.save", holds: "true", canon: "0", domain: &[] },
     // An http call handle (#2631) against the loopback fixture. Whether the
     // exchange has ended when `poll` looks is the network's timing: `none`,
     // or the very result `wait` answers (an ended call's outcome never

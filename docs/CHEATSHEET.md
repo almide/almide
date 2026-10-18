@@ -787,6 +787,22 @@ test "ok result" { assert_eq(validate(5), ok(5)) }      // Result-aware
 test "err" { assert_eq(validate(-1), err("bad")) }      // natural
 ```
 
+### Testing that code aborts
+
+`testing.assert_aborts(expected, () => …)` runs only the closure, in a child process (native) or a fresh instance (wasm), and passes when it aborts with text containing `expected` — `panic`, an index out of bounds, a division by zero, a failed assert. The test goes on after it. The closure is a lambda written in the call that captures nothing of the test (E098), and the call sits directly in a `test` block (E099). There is no `assert_throws` (removed at dialect epoch 14).
+
+```almide check
+import testing
+
+fn nth(xs: List[Int], i: Int) -> Int = xs[i]
+
+test "aborts" {
+  testing.assert_aborts("index out of bounds", () => nth([1, 2, 3], 5))
+  testing.assert_aborts("PANIC: oh no", () => panic("oh no"))
+  assert_eq(nth([1, 2, 3], 0), 1)
+}
+```
+
 ## Built-in functions
 ```
 println(s)                 // print line to stdout
@@ -984,7 +1000,8 @@ fn types, Result) — wrap those in a named Codec type or convert at the boundar
 ## Naming conventions across stdlib
 
 - `bytes`: `read_<dtype>_le|be(b, pos)` for one value, `read_<dtype>_le_array(b, pos, count)` for bulk, `set_<dtype>_le(b, pos, val)` to overwrite, `append_<dtype>_le(b, val)` to grow. `<dtype>` ∈ `u8|u16|u32|i32|i64|f16|f32|f64`.
-- `matrix`: row-shaped ops use `_rows` suffix (`softmax_rows`, `slice_rows`, `gather_rows`, `layer_norm_rows`); singular `_row` when an op consumes/produces *one* row (`linear_row`, `dot_row`, `broadcast_add_row`); column ops use `_cols` (`split_cols_even`, `concat_cols`).
+- `matrix` holds the generic dense ops; the neural-network kernels (`gelu`, `softmax_rows`, attention, RoPE, norms, Q1_0/Q8_0, Qwen3 blocks) are package `almide/nnlib` and the OpenAI / Anthropic streaming clients package `almide/llm` since dialect epoch 14 (`import nnlib`, `nnlib.gelu(m)`).
+- `matrix`: row-shaped ops use `_rows` suffix (`slice_rows`, `gather_rows`); singular `_row` when an op consumes/produces *one* row (`linear_row`, `dot_row`, `broadcast_add_row`); column ops use `_cols` (`split_cols_even`, `concat_cols`).
 - `from_X` builds from another representation, `to_X` is its inverse (e.g. `from_bytes_f64_le` ↔ `to_bytes_f64_le`).
 - sized integers (`int8`…`int64`, `uint8`…`uint64`, plus `int` = i64): `x.to_<dst>()` truncates (Rust `as` semantics); every **lossy** pair also has `to_<dst>_checked` → `Option` (None on overflow) and `to_<dst>_saturating` (clamp) — lossless pairs have only the plain form. Every carrier has `min_value()`/`max_value()`. Widening is `int.from_<src>(x)`; the one lossy widening `UInt64 → Int` has `int.from_uint64_checked/_saturating`.
 

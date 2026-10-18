@@ -1,14 +1,17 @@
 //! The network a run sees (ADR-0027 D5): TCP echo, sink and source servers and a small
 //! HTTP/1.1 server on 127.0.0.1, started once per harness process and handed
 //! to every run as `XF_TCP_PORT` / `XF_SINK_PORT` / `XF_SOURCE_PORT` / `XF_HTTP`
-//! (the same on every leg). No run
-//! reaches any other host.
+//! (the same on every leg), and a Unix-domain sink (`XF_UNIX_SINK`, #3620): a
+//! listener at a short absolute path (`sun_path` holds at most 104 bytes on
+//! macOS) that accepts every connection and drains it, so a `net.unix_send`
+//! of any size never backs up. No run reaches any other host.
 //!
 //! HTTP routes (every answer has a Content-Length unless chunked):
 //! - `/echo` — 200, body `<METHOD> <path> <request body>`
 //! - `/status/<code>` — that status, body `s<code>`
 //! - `/bytes/<n>` — 200, n bytes `i % 251`
-//! - `/chunked/<n>` — 200, chunked, n chunks `c<i>\n`
+//! - `/chunked/<n>` — 200, chunked, n chunks `c<i>\n`, i zero-padded to 7 digits so
+//!   the body grows exactly with n (an unpadded index adds log n bytes per chunk)
 //! - `/sse/<n>` — 200, `text/event-stream`, n OpenAI-shaped delta events then
 //!   `data: [DONE]`
 //! - anything else — 404, body `missing`
@@ -30,6 +33,7 @@ pub fn env() -> &'static [(String, String)] {
             ("XF_SINK_PORT".into(), sink.to_string()),
             ("XF_SOURCE_PORT".into(), source.to_string()),
             ("XF_HTTP".into(), format!("127.0.0.1:{http}")),
+            ("XF_UNIX_SINK".into(), spawn_unix_sink()),
         ]
     })
 }
@@ -43,6 +47,31 @@ fn spawn_server(handle: fn(TcpStream)) -> u16 {
         }
     });
     port
+}
+
+/// The Unix-domain sink's path, listening once this returns. One per
+/// harness process (the pid names it); a leftover from an earlier process
+/// with the same pid is removed first.
+#[cfg(unix)]
+fn spawn_unix_sink() -> String {
+    let path = format!("/tmp/xf-{}-sink.sock", std::process::id());
+    let _ = std::fs::remove_file(&path);
+    let l = std::os::unix::net::UnixListener::bind(&path).expect("unix sink listen");
+    std::thread::spawn(move || {
+        for s in l.incoming().flatten() {
+            std::thread::spawn(move || {
+                let mut s = s;
+                let mut buf = [0u8; 65536];
+                while matches!(s.read(&mut buf), Ok(n) if n > 0) {}
+            });
+        }
+    });
+    path
+}
+
+#[cfg(not(unix))]
+fn spawn_unix_sink() -> String {
+    String::new()
 }
 
 fn echo(mut s: TcpStream) {
@@ -123,7 +152,7 @@ fn respond(w: &mut impl Write, method: &str, path: &str, body: &[u8]) -> std::io
         return whole(w, 200, "application/octet-stream", &(0..n).map(|i| (i % 251) as u8).collect::<Vec<_>>());
     }
     if let Some(n) = num("/chunked/") {
-        return chunked(w, "text/plain", (0..n).map(|i| format!("c{i}\n")));
+        return chunked(w, "text/plain", (0..n).map(|i| format!("c{i:07}\n")));
     }
     // OpenAI-compatible base URL `/sse/<n>`: `<base>/chat/completions`.
     let path = path.strip_suffix("/chat/completions").unwrap_or(path);
@@ -155,12 +184,17 @@ fn whole(w: &mut impl Write, code: u16, ty: &str, body: &[u8]) -> std::io::Resul
     w.flush()
 }
 
+/// The whole chunked response in ONE write: `w` is the bare socket, and a
+/// write per chunk made the arrival pattern (how many reads, how many
+/// deliveries) the scheduler's — the inspection then measured the server's
+/// pacing, not the client's work.
 fn chunked(w: &mut impl Write, ty: &str, parts: impl Iterator<Item = String>) -> std::io::Result<()> {
-    write!(w, "HTTP/1.1 200 OK\r\nContent-Type: {ty}\r\nTransfer-Encoding: chunked\r\n\r\n")?;
+    let mut out = format!("HTTP/1.1 200 OK\r\nContent-Type: {ty}\r\nTransfer-Encoding: chunked\r\n\r\n").into_bytes();
     for p in parts {
-        write!(w, "{:x}\r\n{p}\r\n", p.len())?;
+        out.extend_from_slice(format!("{:x}\r\n{p}\r\n", p.len()).as_bytes());
     }
-    w.write_all(b"0\r\n\r\n")?;
+    out.extend_from_slice(b"0\r\n\r\n");
+    w.write_all(&out)?;
     w.flush()
 }
 

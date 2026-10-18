@@ -9,11 +9,16 @@ listener is an opaque `Int` handle. The `unix_*` and `shm_*` functions take and
 return raw file descriptors instead, because a descriptor is what crosses to the
 peer.
 
-**Native only.** The wasm leg has no socket floor, so a program using `net`
-builds and runs natively but walls on `--target wasm`. The `unix_*` and `shm_*`
+**Targets.** Native serves every function. `almide run --target wasm` (the
+embedded host) serves them too, from the same code native runs: the `tcp_*`
+family through host ops 91..=103, the `unix_*` and `shm_*` family through
+interim ops 104..=116 (#3620, retired when ADR-0023 step 7 runs that lane as
+the WASI 0.3 component). A stock artifact (`almide build --target wasm`)
+refuses them at build time (E081): the p1 standard has no sockets, and WASI has
+neither Unix-domain sockets nor shared memory at all. The `unix_*` and `shm_*`
 functions need a Unix platform (Linux, macOS, the BSDs); elsewhere they return
-`err`. `spec/stdlib/net_test.almd`
-carries a `// wasm:skip` marker for the same reason.
+`err`. `spec/stdlib/net_test.almd` carries a `// wasm:skip` marker because
+`almide test`'s wasm leg builds the stock artifact.
 
 ## Client
 
@@ -97,6 +102,14 @@ effect fn serve() -> Unit = {
 A stream socket to a peer on the same machine, which can carry open file
 descriptors beside its bytes (SCM_RIGHTS). This is the transport of Wayland,
 PipeWire and D-Bus.
+
+The `unix_*` and `shm_*` functions act only on descriptors the program holds:
+the ones they opened (`unix_listen`, `unix_connect`, `unix_accept`,
+`shm_create`) and the ones that arrived on a socket (`unix_recv`), until
+`unix_close`. Any other number, a standard stream included, is an `err`
+(`<fn>: descriptor <n> is not open in this program`) before any system call;
+a negative one is `<fn>: not a file descriptor: <n>`. Closing a socket also
+closes the descriptors it received that were never taken.
 
 ### `effect net.unix_connect(path: String) -> Int`
 

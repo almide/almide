@@ -34,8 +34,6 @@ enum SkipReason {
     /// The file asserts a COMPILE error and has no test blocks, so there is
     /// nothing for either leg to run.
     CompileErrorFixture,
-    /// wasm has no unwinding, so a panic cannot be caught and inspected.
-    NoUnwinding,
 }
 
 /// Every file allowed to carry `// wasm:skip`, and why.
@@ -47,9 +45,9 @@ const GENUINE_SKIPS: &[(&str, SkipReason)] = &[
     // classification keys on, so this file runs the wasm leg. The ledger only
     // shrinks — and this hand-written skip is exactly what hid #1368, the
     // read-a-directory-as-ok("") miscompile, from the cross-target gate.)
-    // #1110: the wrong-polarity probes ride assert_throws — wasm cannot catch
-    // a panic (unreachable trap; the coverage_assert_throws precedent).
-    ("spec/stdlib/testing_polarity_test.almd", SkipReason::NoUnwinding),
+    // (#1110 polarity row RETIRED by ADR-0029: its wrong-polarity probes ride
+    // testing.assert_aborts, which runs the closure in a fresh instance — no
+    // catch is needed, and the file runs the wasm leg.)
     ("spec/integration/extern_c/extern_c_test.almd", SkipReason::NativeOnlyApi),
     // OS sockets: outside the WASI surface the runtime targets. (The three
     // subprocess files left this list with #2589: the embedded host serves
@@ -76,8 +74,8 @@ const GENUINE_SKIPS: &[(&str, SkipReason)] = &[
     ("spec/integration/modules/vis_local_error_test.almd", SkipReason::CompileErrorFixture),
     ("spec/integration/modules/phantom_dep_error_test.almd", SkipReason::CompileErrorFixture),
     ("spec/integration/modules/deep_phantom_test.almd", SkipReason::CompileErrorFixture),
-    // `assert_throws` catches a panic; a wasm trap cannot be caught.
-    ("spec/stdlib/coverage_assert_throws_test.almd", SkipReason::NoUnwinding),
+    // (coverage_assert_throws row RETIRED with the function, ADR-0029: its
+    // successor coverage_assert_aborts_test runs the wasm leg.)
     // (fs_streaming_test's C-220 row retired: the streaming family completed —
     // the String/Int/List[String] fold accumulator twins, the for_each_line
     // visitor, and the ADR-0006 fallible carriers — and the declared-Unit

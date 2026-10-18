@@ -1,0 +1,4 @@
+expects_code = "E098"
+expects_error = "the closure passed to testing.assert_aborts must be a lambda written in place; `boom` is a fn value"
+hint_substring = "Write the lambda in the call"
+expects_line_col = "7:33"

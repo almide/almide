@@ -23,7 +23,6 @@ const TLS_CRATES: &[(&str, &str)] = &[
 /// generated code (the runtime is inlined as source).
 pub const RUNTIME_MODULE_CRATES: &[(&str, &[(&str, &str)])] = &[
     ("http", TLS_CRATES),
-    ("sse", TLS_CRATES),
     ("zlib", &[("flate2", "1")]),
 ];
 

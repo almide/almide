@@ -1,0 +1,8 @@
+import mem
+
+fn main() -> Unit = {
+  let cp = mem.save()
+  let words = ["a", "b", "c"] |> list.map((w) => string.to_upper(w))
+  mem.restore(cp)
+  println(words |> list.join(","))
+}

@@ -78,16 +78,24 @@ grep -q "CURRENT_DIALECT_RENAMED" "$tmp/const_moved.rs" || { echo "FAIL: the ren
 expect_fail "$LEDGER" "$tmp/const_moved.rs" \
   "gate passed when it could not find the constant — extraction breaking must be loud"
 
+# The deprecation rules run on a forged row appended to the ledger: the ledger
+# may hold no open window at all, and a mutation of a row that is not there
+# would test nothing. The well-formed row must pass first, or the two
+# negatives below could fail for a reason other than the one they name.
+dep_row() { printf '\n[[deprecation]]\nid = "forged"\nissue = 1\nsince_epoch = %s\nsince = "0.0.0"\nremoval_epoch = %s\nsummary = "x"\nremoval = "x"\n' "$1" "$2"; }
+{ cat "$LEDGER"; dep_row "$CUR" "$((CUR + 1))"; } >"$tmp/dep_ok.toml"
+expect_pass "$tmp/dep_ok.toml" "$CONST" \
+  "a well-formed open deprecation did not pass — the two deprecation negatives would be meaningless"
+
 # A deprecation removed no later than it was deprecated is no window at all.
-sed -E 's/^removal_epoch = [0-9]+/removal_epoch = 1/' "$LEDGER" >"$tmp/dep_order.toml"
-grep -q '^removal_epoch = 1$' "$tmp/dep_order.toml" || { echo "FAIL: the deprecation-order mutation matched nothing" >&2; exit 1; }
+{ cat "$LEDGER"; dep_row "$CUR" "$CUR"; } >"$tmp/dep_order.toml"
 expect_fail "$tmp/dep_order.toml" "$CONST" \
   "gate passed a deprecation whose removal_epoch is not above its since_epoch"
 
-# The ledger's removal epoch drifting from the one the alias warning prints (#3425).
-sed -E 's/^removal_epoch = ([0-9]+)/removal_epoch = 9\1/' "$LEDGER" >"$tmp/dep_drift.toml"
-grep -q '^removal_epoch = 9' "$tmp/dep_drift.toml" || { echo "FAIL: the deprecation-drift mutation matched nothing" >&2; exit 1; }
-expect_fail "$tmp/dep_drift.toml" "$CONST" \
-  "gate passed a removal epoch that disagrees with the one the warning prints"
+# A window whose removal epoch has arrived and is still listed is overdue: the
+# alias it describes outlived the epoch that promised to remove it (#3425).
+{ cat "$LEDGER"; dep_row "$((CUR - 1))" "$CUR"; } >"$tmp/dep_overdue.toml"
+expect_fail "$tmp/dep_overdue.toml" "$CONST" \
+  "gate passed a deprecation whose removal_epoch has already arrived"
 
-echo "dialect-epochs negative controls: 1 positive + 7 negatives all behaved"
+echo "dialect-epochs negative controls: 2 positives + 7 negatives all behaved"

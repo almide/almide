@@ -185,8 +185,7 @@ fn verify_wasm_ir(ir_program: &almide::ir::IrProgram) -> Result<(), ()> {
 }
 
 /// `compile_to_wasm_bytes`'s native-only-matrix-op guard: native-only matrix
-/// ops (e.g. qwen3_block_q1_0_kv: a packed-GGUF block with no primitive
-/// decomposition) have no WASM lowering. Reject at build time with a clear
+/// ops (none today; the list is NATIVE_ONLY_MATRIX_OPS) have no WASM lowering. Reject at build time with a clear
 /// message rather than letting the emitter ICE deep in codegen. Extracted
 /// verbatim.
 /// #1423 stage 3 — the check-time availability diagnostic. The declared

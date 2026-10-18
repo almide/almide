@@ -32,6 +32,11 @@ pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, call: CallArgs<
     if let Some(erased) = lower_time_ctor(ctx, callee, args, span) {
         return erased;
     }
+    // ADR-0029: the closure is lowered as a program body, so this runs before
+    // the arguments are lowered in the test's mode below.
+    if let Some(lifted) = lower_assert_aborts(ctx, callee, args, span) {
+        return lifted;
+    }
 
     let mut ir_args: Vec<IrExpr> = Vec::new();
     let ta_raw: Vec<Ty> = type_args.map(|tas| tas.iter().map(|t| resolve_type_expr_env(ctx, t)).collect()).unwrap_or_default();
@@ -713,3 +718,5 @@ include!("calls_target.rs");
 include!("calls_time.rs");
 
 include!("calls_testing_assert.rs");
+
+include!("calls_abort_site.rs");

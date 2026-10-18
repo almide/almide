@@ -40,7 +40,6 @@ mod cargo_ice;
 mod cargo_toml;
 mod crate_inputs;
 mod native_target;
-mod native_legacy_aliases;
 mod js_host;
 mod wasm_debug;
 

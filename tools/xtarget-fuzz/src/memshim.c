@@ -22,8 +22,23 @@ __attribute__((destructor)) static void fini(void) {
   FILE *f = fopen(p, "w");
   if (f) { fprintf(f, "%llu\n", moved); fclose(f); }
 }
-static void copy_fwd(unsigned char *d, const unsigned char *s, size_t n) { for (size_t i = 0; i < n; i++) d[i] = s[i]; }
-static void copy_bwd(unsigned char *d, const unsigned char *s, size_t n) { while (n--) d[n] = s[n]; }
+// Both directions run the same loop shape — one load, one store and one
+// counting step to zero per byte — so they retire the same instructions per
+// byte. A memmove's direction follows where the allocator put its two
+// blocks, which can change with n: an up-counting forward loop (compare
+// against n) and a down-counting backward one (flags from the decrement)
+// differed by one instruction per byte, and wasm env.set's series read 5
+// then 4 instructions per byte when its log moved from below the value to
+// above it (GCE c4-standard-4, 2026-10-17).
+#include <stdint.h>
+static void copy_fwd(unsigned char *d, const unsigned char *s, size_t n) {
+  d += n;
+  s += n;
+  for (intptr_t i = -(intptr_t)n; i != 0; i++) d[i] = s[i];
+}
+static void copy_bwd(unsigned char *d, const unsigned char *s, size_t n) {
+  for (intptr_t i = (intptr_t)n; i != 0; i--) d[i - 1] = s[i - 1];
+}
 void *memcpy(void *d, const void *s, size_t n) {
   __atomic_fetch_add(&moved, n, __ATOMIC_RELAXED);
   copy_fwd(d, s, n);

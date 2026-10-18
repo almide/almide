@@ -1,0 +1,3 @@
+expects_code = "E002"
+expects_error = "undefined function 'matrix.gelu'"
+hint_substring = "almide add almide/nnlib@v0.1.0"

@@ -17,7 +17,9 @@
 use almide_frontend::bundled_sigs;
 use almide_lang::types::FnSig;
 
-const STREAMING: &[&str] = &["request_stream", "openai_streaming_call", "anthropic_streaming_call"];
+// The OpenAI / Anthropic clients and their twins left for package almide/llm
+// at dialect epoch 14; request_stream is the stdlib's one streaming client.
+const STREAMING: &[&str] = &["request_stream"];
 const VERBS: &[&str] = &["start", "poll", "read_new", "wait", "cancel"];
 
 fn sig(name: &str) -> FnSig {

@@ -33,6 +33,60 @@ fn __hs_request(raw: List[String]) -> List[String] = list.take(raw, 3) + [int.to
   3,
 )
 
+// What native's server core does to a handler's answer before it sends it
+// (crates/almide-rt-core/src/http_server_core.rs `http_server_write`, C-367),
+// done here for both wasm legs — the stock export has no server core, and on
+// the embedded lane the core then finds nothing left to refuse. A header
+// name that is not a token, a value holding a control character other than
+// HTAB, or a status outside 200..=599 is a 500 naming the first reason (and
+// one stderr line); otherwise the framing fields the server owns are
+// dropped. The texts are the core's, byte for byte.
+fn __hs_tchar(c: String) -> Bool = c != "" and string.contains(
+  "!#$%&'*+-.^_`|~0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
+  c,
+)
+
+fn __hs_cp(c: String) -> Int = string.codepoint(c) ?? 0
+
+// The core's `http_server_quote`: `\` and `"` escaped, a control character
+// (U+0000..=U+001F, U+007F..=U+009F) as `\u{hex}`.
+fn __hs_quote_char(c: String) -> String = match c {
+  "\\" => "\\\\",
+  "\"" => "\\\"",
+  _ => if __hs_cp(c) < 32 or (__hs_cp(c) >= 127 and __hs_cp(c) <= 159) then "\\u{${int.to_hex(__hs_cp(c))}}" else c,
+}
+
+fn __hs_quote(s: String) -> String = "\"" + (string.chars(s) |> list.map((c) => __hs_quote_char(c)) |> list.join("")) + "\""
+
+fn __hs_control(c: String) -> Bool = (__hs_cp(c) < 32 and c != "\t") or __hs_cp(c) == 127
+
+fn __hs_bad_header(k: String, v: String) -> String? =
+  if k == "" or not list.all(string.chars(k), (c) => __hs_tchar(c)) then some("response header name ${__hs_quote(k)} is not a token")
+  else if list.any(string.chars(v), (c) => __hs_control(c)) then some("response header ${k} has a control character in its value")
+  else none
+
+fn __hs_pairs(resp: List[String]) -> List[(String, String)] = list.range(
+  0,
+  (list.len(resp) - 2) / 2,
+) |> list.map((i) => (list.get(resp, 2 + 2 * i) ?? "", list.get(resp, 3 + 2 * i) ?? ""))
+
+fn __hs_refusal(resp: List[String]) -> String? = {
+  let status = list.get(resp, 0) ?? ""
+  let code = int.parse(status) ?? 0
+  match __hs_pairs(resp) |> list.filter_map(((k, v)) => __hs_bad_header(k, v)) |> list.first {
+    some(why) => some(why),
+    none => if code >= 200 and code <= 599 then none
+    else some("response status ${status} is not a final status code"),
+  }
+}
+
+fn __hs_owned(k: String) -> Bool = list.contains(
+  ["connection", "content-length", "transfer-encoding", "keep-alive"],
+  string.to_lower(k),
+)
+
+fn __hs_shaped(resp: List[String]) -> List[String] = list.take(resp, 2) + (__hs_pairs(resp) |> list.filter(((k, _)) => not __hs_owned(k)) |> list.flat_map(((k, v)) => [k, v]))
+
 // A handler err is native's 500: `Internal error: <msg>` as text/plain.
 // `http.serve` is typed never-err (`-> Unit`), so its caller's `!` is a no-op
 // (#1049) and nothing could observe a returned err: a bind failure ABORTS,
@@ -56,7 +110,14 @@ effect fn http_serve(port: Int, f: effect (List[String]) -> List[String]) -> Uni
         ok(r) => r,
         err(e) => ["500", "Internal error: ${e}", "Content-Type", "text/plain"],
       }
-      __http_serve_reply(__hs_frame(resp))!
+      let answer = match __hs_refusal(resp) {
+        some(why) => {
+          eprintln("http.serve: refused the response: ${why}")
+          ["500", "Internal error: ${why}", "Content-Type", "text/plain"]
+        },
+        none => __hs_shaped(resp),
+      }
+      __http_serve_reply(__hs_frame(answer))!
     }
   }
 }

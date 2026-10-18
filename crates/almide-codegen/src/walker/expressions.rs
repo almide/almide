@@ -298,7 +298,7 @@ fn render_expr_result_err(ctx: &RenderContext, inner: &IrExpr, ty: &Ty) -> Strin
         // converting those regressed match_container_literal and
         // to_result_custom_e when this fix first landed unconditional.
         let payload = if matches!(&inner.ty, Ty::String) {
-            format!("{}.to_string()", inner_str)
+            format!("{}.to_almide()", inner_str)
         } else {
             inner_str.clone()
         };
@@ -618,7 +618,8 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         // normalized into the same RuntimeCall spelling already returns the
         // mapped types — no glue (double-wrap otherwise).
         IrExprKind::RuntimeCall { symbol, args } => {
-            scope_cell_guard_of_call(ctx, expr, render_expr_runtime_call(ctx, symbol, args, &expr.ty))
+            let call = render_expr_runtime_call(ctx, symbol, args, &expr.ty);
+            scope_cell_guard_of_call(ctx, expr, call)
         }
 
         // ── Calls ──

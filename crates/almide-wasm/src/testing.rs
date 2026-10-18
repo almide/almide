@@ -16,9 +16,9 @@
 //! verbatim; native panics through libtest with the operand values in the
 //! message instead, and no contract pins that text (the pass path is
 //! silent on every target, and that is the observable the test lane
-//! compares). `assert_throws` inside a test block stays native-only (an
-//! uncatchable trap), and `assert_snapshot` is desugared by the frontend
-//! before it reaches here.
+//! compares). `assert_snapshot` is desugared by the frontend before it
+//! reaches here, and so is `assert_aborts` (ADR-0029): what reaches here of
+//! it is its abort-site pair, the embedded host's ops 117 / 118.
 
 use almide_ir::IrExpr;
 use wasm_encoder::BlockType;
@@ -34,6 +34,9 @@ impl Emitter<'_> {
         func: &str,
         args: &[IrExpr],
     ) -> Result<Option<Option<Lowered>>, EmitError> {
+        if let Some(out) = self.lower_abort_site_op(func, args)? {
+            return Ok(Some(Some(out)));
+        }
         // Leaves the PASS condition (i32 0/1) on the stack.
         let msg = match (func, args) {
             ("assert_gt" | "assert_lt", [a, b]) => {
@@ -109,5 +112,34 @@ impl Emitter<'_> {
         self.io_raw(crate::fs_meta::OP_STDERR_RAW)?;
         self.f.instructions().i32_const(1).call(F_EXIT_IMPORT).unreachable().end();
         Ok(Some(None))
+    }
+
+    /// The abort-site pair of `testing.assert_aborts` (ADR-0029): the
+    /// embedded host's ops 117 / 118. The site index rides the a_len slot
+    /// with a null a_ptr (the op-35 scalar discipline); the frontend numbers
+    /// sites from 0, so the index is a small non-negative i32.
+    fn lower_abort_site_op(&mut self, func: &str, args: &[IrExpr]) -> Result<Option<Lowered>, EmitError> {
+        match (func, args) {
+            ("__abort_site_selected", []) => {
+                self.fs_call_0(crate::fs_meta::OP_ABORT_SITE_SELECTED)?;
+                Ok(Some(Lowered::owned(INT)))
+            }
+            ("__abort_site_run", [site]) => {
+                self.lower_arg(site, Some(INT), ArgMode::Borrow)?;
+                let hs = self.hold_i64()?;
+                self.note_host_op(crate::fs_meta::OP_ABORT_SITE_RUN);
+                let mut i = self.f.instructions();
+                i.local_set(hs);
+                i.i32_const(crate::fs_meta::OP_ABORT_SITE_RUN);
+                i.i32_const(0);
+                i.local_get(hs).i32_wrap_i64();
+                i.i32_const(0).i32_const(0);
+                i.call(F_FS_CALL);
+                let _ = i;
+                self.release_i64();
+                Ok(Some(Lowered::owned(self.frames_to_string_list(false)?)))
+            }
+            _ => Ok(None),
+        }
     }
 }

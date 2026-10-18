@@ -1,0 +1,61 @@
+// @contract: C-385
+// The client frames the request body (C-385): a caller's `Content-Length`
+// header, in any case, is dropped — never sent, never refused — and the one
+// length on the wire is the body's. The program is its own server: it listens
+// on 127.0.0.1 port 0, `http.start` dials and writes the request and returns
+// at once, the program accepts and reads the request head, answers, and
+// `http.wait` reads the answer. The head is printed as its framing fields
+// only (the Host line carries the per-run port). Native and the embedded lane
+// print the same transcript.
+import http
+import net
+
+fn framing(head: String) -> String = head |> string.split("\r\n") |> list.filter((l) => {
+  let k = string.to_lower(string.split(l, ":") |> list.first ?? "")
+  k == "content-length" or k == "transfer-encoding"
+}) |> list.map((l) => string.to_lower(l)) |> list.join(" / ")
+
+effect fn read_head(s: Int, acc: String) -> Result[String, String] = {
+  if string.contains(acc, "\r\n\r\n") then ok(acc)
+  else {
+    let b = net.tcp_read(s, 4096)!
+    if bytes.len(b) == 0 then ok(acc)
+    else read_head(s, acc + bytes.to_string_lossy(b))
+  }
+}
+
+effect fn exchange(l: Int, port: Int, tag: String, method: String, body: String, headers: Map[String, String]) -> Unit = {
+  let url = "http://127.0.0.1:${port}/e"
+  match http.start(method, url, body, headers, { total_ms: 0, idle_ms: 0 }) {
+    err(e) => println("${tag}: start err ${e}"),
+    ok(call) => {
+      let s = net.tcp_accept(l)!
+      let raw = read_head(s, "")!
+      let parts = string.split(raw, "\r\n\r\n")
+      let head = parts |> list.first ?? ""
+      net.tcp_write(
+        s,
+        bytes.from_string("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"),
+      )!
+      let answer = match http.wait(call) {
+        ok(r) => "${http.status_code(r)} ${http.body(r)}",
+        err(e) => "err ${e}",
+      }
+      let _ = net.tcp_close(s)
+      println("${tag}: [${framing(head)}] answer=${answer}")
+    },
+  }
+}
+
+effect fn main() -> Unit = {
+  let l = net.tcp_listen("127.0.0.1", 0)!
+  let port = net.tcp_local_port(l)!
+  exchange(l, port, "short", "POST", "abcd", ["Content-Length": "2"])!
+  exchange(l, port, "long", "PUT", "abc", ["content-length": "99"])!
+  exchange(l, port, "equal", "POST", "xyz", ["CONTENT-LENGTH": "3"])!
+  exchange(l, port, "empty-patch", "PATCH", "", ["Content-Length": "5"])!
+  exchange(l, port, "get", "GET", "", ["content-length": "7", "X-K": "v"])!
+  exchange(l, port, "none", "POST", "hi", ["X-K": "v"])!
+  let _ = net.tcp_close_listener(l)
+  println("done")
+}

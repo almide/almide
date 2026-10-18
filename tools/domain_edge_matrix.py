@@ -226,7 +226,7 @@ def render_for(ty, e):
 
 # Modules that need an explicit import in the generated program.
 NEEDS_IMPORT = {"bytes", "json", "fs", "http", "env", "io", "random", "regex",
-                "process", "testing", "matrix", "net", "zlib", "args", "mem"}
+                "process", "testing", "matrix", "net", "zlib", "args"}
 
 # The `COUNT_LIKE_PARAM_NAMES` list the fuzzer uses to shrink a parameter to
 # {0..5}. Kept in sync by the gate below, not by hand: a name added there and

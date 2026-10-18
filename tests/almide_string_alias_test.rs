@@ -1,6 +1,6 @@
-//! ADR-0013 stage 2, step 1: generated native Rust spells the Almide `String`
-//! type as `AlmideString`, declared once per render, so the shared buffer can
-//! replace it in one place (docs/roadmap/active/adr-0013-string-sharing.md).
+//! ADR-0013: generated native Rust spells the Almide `String`
+//! type as `AlmideString`, declared once per render as the shared buffer
+//! `AlmideStr` (docs/roadmap/active/adr-0013-string-sharing.md).
 //! Both native renderers are pinned: the v0 walker (`--target rust`, what
 //! `almide test` and every program v1 walls on use) and the v1 render (what
 //! `almide build` / `run` ship when it does not wall).
@@ -36,7 +36,8 @@ fn has_bare_string(sig: &str) -> bool {
 }
 
 fn assert_spelled(rust: &str, user_fns: &[&str], which: &str) {
-    assert_eq!(rust.matches("type AlmideString = String;").count(), 1, "{which}: the alias is declared exactly once:\n{rust}");
+    assert_eq!(rust.matches("type AlmideString = AlmideStr;").count(), 1, "{which}: the alias names the shared buffer exactly once:\n{rust}");
+    assert_eq!(rust.matches("type AlmideString").count(), 1, "{which}: one alias declaration:\n{rust}");
     for f in user_fns {
         let sig = signatures(rust).into_iter().find(|l| l.contains(&format!("{f}("))).unwrap_or_else(|| panic!("{which}: no fn {f}:\n{rust}"));
         assert!(sig.contains("AlmideString"), "{which}: `{f}` must spell the Almide String as AlmideString: {sig}");

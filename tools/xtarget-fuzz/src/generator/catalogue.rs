@@ -234,7 +234,6 @@ const BUNDLED_MODULES: &[(&str, &str, bool)] = &[
     // sandbox does not reproduce.
     ("random", include_str!("../../../../stdlib/random.almd"), true),
     ("process", include_str!("../../../../stdlib/process.almd"), true),
-    ("mem", include_str!("../../../../stdlib/mem.almd"), true),
     // Over the loopback fixtures only (`oracle/fixture.rs`, `term.rs`).
     ("net", include_str!("../../../../stdlib/net.almd"), true),
 ];
@@ -445,12 +444,14 @@ mod availability_tests {
     #[test]
     fn native_only_functions_are_left_out_of_the_catalogue() {
         let unavailable = wasm_unavailable(TARGET_AVAILABILITY);
-        assert!(unavailable.contains("http.anthropic_streaming_call"));
+        assert!(unavailable.contains("http.request_stream"));
         let cat = build();
         // A row the embedded host serves stays, its wasm leg run there.
         let unserved = |n: &String| unavailable.contains(n) && !embedded_only().contains(n);
         assert!(!cat.iter().any(|s| unserved(&format!("{}.{}", s.module, s.func))));
-        assert!(!cat.iter().any(|s| s.module == "http" && s.func == "anthropic_streaming_call"), "a row no wasm leg serves is left out");
+        // Every unavailable row is stock-p1 only since the structural leg
+        // admitted `http.request_stream`, its last wall: so the row stays.
+        assert!(cat.iter().any(|s| s.module == "http" && s.func == "request_stream"), "a row the embedded host serves stays");
         assert!(cat.iter().any(|s| s.module == "matrix" && s.func == "dot_row"), "a served matrix fn stays");
     }
 

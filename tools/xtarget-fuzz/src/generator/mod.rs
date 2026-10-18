@@ -23,6 +23,7 @@ mod denylist;
 pub mod identity;
 pub mod inspect_gen;
 mod mutate;
+mod net_unix_args;
 mod nominal;
 mod pools;
 /// The shape vocabulary of the multi-module matrix gate (#3309), shared
@@ -31,14 +32,16 @@ mod pools;
 #[path = "../../../../tests/shape_matrix/gen.rs"]
 pub mod shape;
 mod program;
+pub mod aborts_gen;
+pub mod serve_gen;
 mod sig_type;
 mod term;
 mod types;
 pub mod verdicts;
 
 /// The largest k an inspection probe of `name` may run ([`inspect_gen::effect_recipes::max_k`]).
-pub fn inspect_max_k(name: &str) -> Option<u64> {
-    inspect_gen::effect_recipes::max_k(name)
+pub fn inspect_max_k(name: &str, effect: bool) -> Option<u64> {
+    inspect_gen::effect_recipes::max_k(name, effect)
 }
 
 pub use catalogue::{build as build_catalogue, ends_without_unwinding, needs_embedded, Signature, SANDBOXED_EFFECT_MODULES};
@@ -288,6 +291,20 @@ impl Engine {
         v.sort();
         v.dedup();
         v
+    }
+
+    /// A generated `http.serve` handler for program `index` of a campaign
+    /// seeded `seed` ([`serve_gen::synthesize_handler`]).
+    pub fn serve_handler(&self, seed: u64, index: u64) -> String {
+        let cat = serve_gen::handler_catalogue(&self.catalogue);
+        serve_gen::synthesize_handler(&mut crate::rng::SplitMix64::for_program(seed, index), &cat)
+    }
+
+    /// Test file `index` of the `testing.assert_aborts` parity campaign
+    /// `seed` (`aborts_gen::synthesize_test`).
+    pub fn abort_test(&self, seed: u64, index: u64) -> String {
+        let cat = aborts_gen::abort_catalogue(&self.catalogue);
+        aborts_gen::synthesize_test(&mut crate::rng::SplitMix64::for_program(seed, index), &cat)
     }
 
     /// Number of catalogued stdlib signatures (diagnostics).

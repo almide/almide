@@ -1,0 +1,8 @@
+// The closure is a fn value held by a local, so what it captures cannot be
+// seen where it is passed.
+import testing
+
+test "a panic aborts" {
+  let boom = () => panic("boom")
+  testing.assert_aborts("boom", boom)
+}

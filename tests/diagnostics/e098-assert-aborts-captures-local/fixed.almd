@@ -1,0 +1,9 @@
+// The value is written inside the closure, so the child computes it itself.
+import testing
+
+test "reading past the end aborts" {
+  testing.assert_aborts("index out of bounds", () => {
+    let xs = [1, 2, 3]
+    xs[5]
+  })
+}

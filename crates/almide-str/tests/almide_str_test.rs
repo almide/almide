@@ -181,3 +181,91 @@ fn random_edits_over_shared_handles_match_a_string_model() {
         }
     }
 }
+
+#[test]
+fn the_header_is_sixteen_bytes_and_capacity_survives_every_edit_path() {
+    assert_eq!(std::mem::size_of::<almide_str::AlmideStrHeader>(), 16);
+    let mut s = AlmideStr::with_capacity(10);
+    assert_eq!((s.len(), s.capacity()), (0, 10));
+    s.push_str("abc"); // the handle's fast path
+    assert_eq!((s.len(), s.capacity()), (3, 10));
+    {
+        let mut u = s.unique();
+        u.push_str("defg");
+        u.push('h');
+    }
+    assert_eq!((s.as_str(), s.capacity()), ("abcdefgh", 10));
+    s.push_str("ijklmnop"); // grows
+    assert_eq!(s.as_str(), "abcdefghijklmnop");
+    assert!(s.capacity() >= 16);
+    let cap = s.capacity();
+    s.clear();
+    assert_eq!((s.len(), s.capacity()), (0, cap), "clearing a unique block keeps its room");
+    s.push_str("z");
+    assert_eq!((s.as_str(), s.capacity()), ("z", cap));
+}
+
+#[test]
+fn prepend_writes_in_place_when_unique_and_copies_when_shared() {
+    let mut s = AlmideStr::with_capacity(16);
+    s.push_str("tail");
+    let block = s.clone();
+    drop(block);
+    let p = s.prepend("head-");
+    assert_eq!(p, "head-tail");
+    assert!(p.is_unique());
+    let shared = AlmideStr::from("b");
+    let keep = shared.clone();
+    let q = shared.prepend("a");
+    assert_eq!((q.as_str(), keep.as_str()), ("ab", "b"), "a shared right operand is left as it was");
+    assert_eq!(q.capacity(), 2);
+    assert_eq!(AlmideStr::from("x").prepend(""), "x");
+    assert_eq!(AlmideStr::new().prepend("lit"), "lit");
+    let long = "é".repeat(100);
+    assert_eq!(AlmideStr::from("z").prepend(&long).as_str(), format!("{long}z"));
+}
+
+#[test]
+fn from_fmt_renders_like_format_in_one_block() {
+    let long = "x".repeat(1000);
+    for (got, want) in [
+        (AlmideStr::from_fmt(format_args!("plain")), "plain".to_string()),
+        (AlmideStr::from_fmt(format_args!("{}-{}", 1, "a")), format!("{}-{}", 1, "a")),
+        (AlmideStr::from_fmt(format_args!("{:>300}", "r")), format!("{:>300}", "r")),
+        (AlmideStr::from_fmt(format_args!("{long}{long}é{}", 7)), format!("{long}{long}é{}", 7)),
+    ] {
+        assert_eq!(got.as_str(), want);
+        assert!(got.is_unique());
+    }
+    let short = AlmideStr::from_fmt(format_args!("n={}", 42));
+    assert_eq!(short.capacity(), short.len(), "a short rendering is one exact-size block");
+    assert_eq!(AlmideStr::from_fmt(format_args!("{}", "")).ref_count(), 0, "empty is the static block");
+}
+
+#[test]
+fn from_i64_renders_like_to_string_in_one_exact_block() {
+    for n in [0i64, 1, -1, 9, 10, -10, 12345, -98765, i64::MAX, i64::MIN, 1 << 40, -(1 << 40)] {
+        let s = AlmideStr::from_i64(n);
+        assert_eq!(s.as_str(), n.to_string());
+        assert_eq!(s.capacity(), s.len(), "one exact-size block, not a copy of a String");
+        assert!(s.is_unique());
+    }
+}
+
+#[test]
+fn join_matches_slice_join_and_leaves_the_parts_shared() {
+    let cases: Vec<Vec<&str>> = vec![vec![], vec![""], vec!["a"], vec!["", ""], vec!["ab", "", "cde"], vec!["x"; 50]];
+    for parts in &cases {
+        let owned: Vec<AlmideStr> = parts.iter().map(|p| AlmideStr::from(*p)).collect();
+        for sep in ["", ",", "::", "é"] {
+            let j = AlmideStr::join(&owned, sep);
+            assert_eq!(j.as_str(), parts.join(sep));
+            assert_eq!(j.capacity(), j.len());
+        }
+    }
+    let p = AlmideStr::from("shared");
+    let q = p.clone();
+    let j = AlmideStr::join(&[p, AlmideStr::from("x")], "-");
+    assert_eq!(j, "shared-x");
+    assert!(q.is_unique(), "join only reads its parts");
+}

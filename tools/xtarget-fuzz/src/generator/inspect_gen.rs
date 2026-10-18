@@ -184,10 +184,6 @@ struct Recipe {
     args: &'static [(&'static str, &'static str)],
 }
 
-/// Rope: 2 heads × head_dim 2 fill the 4 columns; n is the row (position)
-/// count.
-const ROPE: &[(&str, &str)] = &[("x", "matrix.zeros({n}, 4)"), ("n_heads", "2"), ("head_dim", "2")];
-
 /// n keys `k<i * 7919 mod 1000003>`: distinct (7919 is invertible mod the
 /// prime) and in no run of consecutive numerals.
 const SCATTERED_MAP: &str = "list.range(0, {n}) |> list.fold(map.new(), (m, i) => map.set(m, \"k${i * 7919 % 1000003}\", {small_elem}))";
@@ -205,162 +201,7 @@ const CODEC_BYTES: &str = "bytes.from_list(list.range(0, {n}) |> list.map((i) =>
 
 pub mod effect_recipes;
 
-// ── The packed-weight kernels (#1827) ──
-// Their weights are bytes at offsets, so a generic `bytes.from_list([1, 2])`
-// took the out-of-buffer all-zero edge (or an offset list too short for the
-// layer, an abort) — never the dot the stamp claims. Each recipe builds
-// well-formed blocks at the offsets the call reads. A weight is square where
-// the result rebinds the activation (`x = linear(x, …)` keeps its shape), and
-// its scale keeps the repeated product bounded.
-
-/// n/1000 activation rows of `cols` eighths in [-1, 1].
-macro_rules! activations {
-    ($cols:literal) => {
-        concat!("matrix.from_lists(list.range(0, {n} / 1000) |> list.map((i) => list.range(0, ", $cols, ") |> list.map((k) => int.to_float((i * 7 + k * 3) % 17 - 8) / 8.0)))")
-    };
-}
-/// `rows` Q1_0 rows of one 128-weight block: the fp16 scale 0x2DA8 ≈
-/// 1/√128, then 16 sign bytes.
-macro_rules! q1_rows {
-    ($rows:literal) => {
-        concat!("(list.range(0, ", $rows, ") |> list.flat_map((j) => [168, 45] + (list.range(0, 16) |> list.map((b) => (j * 31 + b * 7 + 3) % 256))))")
-    };
-}
-/// `rows` Q8_0 rows of `blocks` 32-weight blocks: the fp16 scale 2^-9, then
-/// 32 int8 quants.
-macro_rules! q8_rows {
-    ($rows:literal, $blocks:literal) => {
-        concat!(
-            "(list.range(0, ", $rows, " * ", $blocks, ") |> list.flat_map((j) => [0, 24] + (list.range(0, 32) |> list.map((b) => (j * 31 + b * 7 + 3) % 256))))"
-        )
-    };
-}
-/// `count` f32 LE values ±(1/8 .. 1/4).
-macro_rules! f32_vals {
-    ($count:literal) => {
-        concat!("(list.range(0, ", $count, ") |> list.flat_map((i) => [0, 0, (i * 37) % 128, if i % 3 == 0 then 190 else 62]))")
-    };
-}
-/// `count` f32 LE gammas of 1.0.
-macro_rules! gammas {
-    ($count:literal) => {
-        concat!("(list.range(0, ", $count, ") |> list.flat_map((i) => [0, 0, 128, 63]))")
-    };
-}
-/// The KV cache: n/100 cached positions of `cols` values, the size of a
-/// Qwen3 layer's decode step — attention reads every cached row and the
-/// append copies them, so the work grows in n over a fixed projection cost.
-macro_rules! kv_cache {
-    ($cols:literal) => {
-        concat!("matrix.from_lists(list.range(0, {n} / 100) |> list.map((i) => list.range(0, ", $cols, ") |> list.map((k) => int.to_float((i * 5 + k) % 11 - 5) / 10.0)))")
-    };
-}
-
-/// A 128 × 128 Q1_0 weight against n/1000 rows of 128.
-const LINEAR_Q1: &[(&str, &str)] = &[
-    ("x", activations!("128")),
-    ("w_bytes", concat!("bytes.from_list(", q1_rows!("128"), ")")),
-    ("w_offset", "0"),
-    ("w_rows", "128"),
-    ("w_cols", "128"),
-];
-/// A 64 × 64 Q8_0 weight (two blocks a row) against n/1000 rows of 64.
-const LINEAR_Q8: &[(&str, &str)] = &[
-    ("x", activations!("64")),
-    ("w_bytes", concat!("bytes.from_list(", q8_rows!("64", "2"), ")")),
-    ("w_offset", "0"),
-    ("w_rows", "64"),
-    ("w_cols", "64"),
-];
-/// One decode step (h is 1 row) over a cache of n/100 positions, start_pos
-/// the cache length. Q1_0: hidden = 2 heads × 64 = 128 (one block a row),
-/// 1 KV head of 64, ffn 128. Gammas [attn 128, q 64, k 64, ffn 128] at
-/// 0 / 512 / 768 / 1024; the seven weights' rows at 18 bytes from 1536.
-const QWEN3_Q1: &[(&str, &str)] = &[
-    ("h", "matrix.from_lists([list.range(0, 128) |> list.map((k) => int.to_float(k % 9 - 4) / 4.0)])"),
-    ("k_cache", kv_cache!("64")),
-    ("v_cache", kv_cache!("64")),
-    (
-        "w",
-        concat!(
-            "bytes.from_list(",
-            gammas!("384"),
-            " + ",
-            q1_rows!("128"),
-            " + ",
-            q1_rows!("64"),
-            " + ",
-            q1_rows!("64"),
-            " + ",
-            q1_rows!("512"),
-            ")"
-        ),
-    ),
-    ("gamma_offs", "[0, 512, 768, 1024]"),
-    ("weight_offs", "[1536, 3840, 4992, 6144, 8448, 10752, 13056]"),
-    ("start_pos", "{n} / 100"),
-    ("n_q_heads", "2"),
-    ("n_kv_heads", "1"),
-    ("head_dim", "64"),
-    ("ffn_hidden", "128"),
-    ("rope_theta", "10000.0"),
-    ("eps", "0.000001"),
-];
-/// f32: hidden 8 (h's width), 2 heads × 4, 1 KV head of 4, ffn 8. Gammas
-/// [8, 4, 4, 8] floats at 0 / 32 / 48 / 64; the weights q 8×8, k / v 4×8,
-/// o 8×8, gate / up 8×8, down 8×8 from 96.
-const QWEN3_F32: &[(&str, &str)] = &[
-    ("h", "matrix.from_lists([list.range(0, 8) |> list.map((k) => int.to_float(k % 5 - 2) / 2.0)])"),
-    ("k_cache", kv_cache!("4")),
-    ("v_cache", kv_cache!("4")),
-    ("w", concat!("bytes.from_list(", gammas!("24"), " + ", f32_vals!("384"), ")")),
-    ("gamma_offs", "[0, 32, 48, 64]"),
-    ("weight_offs", "[96, 352, 480, 608, 864, 1120, 1376]"),
-    ("start_pos", "{n} / 100"),
-    ("n_q_heads", "2"),
-    ("n_kv_heads", "1"),
-    ("head_dim", "4"),
-    ("ffn_hidden", "8"),
-    ("rope_theta", "1000000.0"),
-    ("eps", "0.000001"),
-];
-/// Q8_0: hidden 32 (h's width), 2 heads × 16, 1 KV head of 16, ffn 32 —
-/// every weight row one block. Gammas [32, 16, 16, 32] at 0 / 128 / 192 /
-/// 256; the rows q 32, k 16, v 16, o 32, gate 32, up 32, down 32 at 34
-/// bytes from 384.
-const QWEN3_Q8: &[(&str, &str)] = &[
-    ("h", "matrix.from_lists([list.range(0, 32) |> list.map((k) => int.to_float(k % 7 - 3) / 3.0)])"),
-    ("k_cache", kv_cache!("16")),
-    ("v_cache", kv_cache!("16")),
-    ("w", concat!("bytes.from_list(", gammas!("96"), " + ", q8_rows!("192", "1"), ")")),
-    ("gamma_offs", "[0, 128, 192, 256]"),
-    ("weight_offs", "[384, 1472, 2016, 2560, 3648, 4736, 5824]"),
-    ("start_pos", "{n} / 100"),
-    ("n_q_heads", "2"),
-    ("n_kv_heads", "1"),
-    ("head_dim", "16"),
-    ("ffn_hidden", "32"),
-    ("rope_theta", "1000000.0"),
-    ("eps", "0.000001"),
-];
-
 const SHAPE_RECIPES: &[Recipe] = &[
-    Recipe { func: "matrix.linear_q1_0_row_no_bias", size: "x", args: LINEAR_Q1 },
-    Recipe { func: "matrix.linear_q8_0_row_no_bias", size: "x", args: LINEAR_Q8 },
-    Recipe { func: "matrix.qwen3_block_q1_0_kv", size: "k_cache", args: QWEN3_Q1 },
-    Recipe { func: "matrix.qwen3_block_f32_kv", size: "k_cache", args: QWEN3_F32 },
-    Recipe { func: "matrix.qwen3_block_q8_0_kv", size: "k_cache", args: QWEN3_Q8 },
-    Recipe { func: "matrix.rope_rotate", size: "x", args: ROPE },
-    Recipe { func: "matrix.rope_rotate_at", size: "x", args: ROPE },
-    Recipe { func: "matrix.rope_rotate_neox_at", size: "x", args: ROPE },
-    // Causal attention needs rows(q) <= rows(k), and k / v as wide as q:
-    // n is the key/value length (a KV cache) against 2 query rows, 4 wide
-    // over 2 heads. The rebound q keeps its 2 × 4 shape.
-    Recipe {
-        func: "matrix.masked_multi_head_attention",
-        size: "k",
-        args: &[("q", "matrix.zeros(2, 4)"), ("k", "matrix.zeros({n}, 4)"), ("v", "matrix.zeros({n}, 4)"), ("n_heads", "2")],
-    },
     // A (T, in_ch) input, an (out_ch, in_ch × kernel) weight, one bias per
     // out_ch; kernel 3, stride 1, padding 1 give T output rows of out_ch =
     // in_ch, so the rebound input keeps its shape. n is T.
@@ -553,6 +394,22 @@ const SHAPE_RECIPES: &[Recipe] = &[
     Recipe { func: "regex.full_match", size: "s", args: &[("pat", "\"(aé)*\"")] },
 ];
 
+/// The shape recipe of `func` (`module.fn`), for the synthesis campaign's
+/// in-domain leaves ([`recipe_leaf`]).
+pub fn shape_recipe(func: &str) -> Option<&'static [(&'static str, &'static str)]> {
+    SHAPE_RECIPES.iter().find(|r| r.func == func).map(|r| r.args)
+}
+
+/// Parameter `param`'s recipe operand at size `n`, when it is a plain
+/// expression of n alone — the typed placeholders (`{sized}`, `{small}`, …)
+/// need an inspection target's instantiation, so those parameters stay
+/// generated.
+pub fn recipe_leaf(args: &[(&str, &str)], param: &str, n: u64) -> Option<String> {
+    let (_, e) = args.iter().find(|(p, _)| *p == param)?;
+    let e = e.replace("{n}", &n.to_string());
+    (!e.contains('{')).then_some(e)
+}
+
 /// A function whose in-domain input exists only inside a request handler
 /// the router called: `http.param` answers `some` only for a request the
 /// router bound path parameters into, and the binding (`http.__with_params`)
@@ -709,6 +566,11 @@ impl Target {
 
     /// The exit code every probe of this target must end with: 0, or a
     /// `-> Never` function's code, its recipe's literal argument.
+    /// Declared `effect fn`.
+    pub fn is_effect(&self) -> bool {
+        self.effect
+    }
+
     pub fn expected_exit(&self) -> i32 {
         if !self.never {
             return 0;
@@ -1444,35 +1306,12 @@ pub(crate) mod tests {
         assert!(!s.contains("value.int(i)"), "{s}");
     }
 
-    /// #3637: matrix functions with head or kernel geometry got
-    /// `matrix.zeros(n, 2)` with every other operand 2×2 and 2 for every
-    /// count, so heads × dim = 4 overran the 2 columns and the q/k/v and
-    /// conv1d shapes did not line up — every shape exited 1. Each gets
-    /// operands that agree, with n on an axis the function accepts, in the
-    /// plain call, the rebind shapes and the diamond alike.
+    /// #3637: conv1d got `matrix.zeros(n, 2)` with every other operand 2×2
+    /// and 2 for every count, so the input, weight and bias shapes did not
+    /// line up — every shape exited 1. It gets operands that agree, with n on
+    /// an axis the function accepts, in the plain call and the diamond alike.
     #[test]
-    fn head_and_kernel_geometry_functions_get_operands_that_agree() {
-        for name in ["matrix.rope_rotate", "matrix.rope_rotate_at", "matrix.rope_rotate_neox_at"] {
-            let t = target(name);
-            let direct = t.direct_program(1000, 4, true);
-            // 2 heads × head_dim 2 = the 4 columns.
-            assert!(direct.contains("  var x: Matrix = matrix.zeros(1000, 4)"), "{direct}");
-            assert!(direct.contains("  let a1: Int = 2\n  let a2: Int = 2\n"), "{direct}");
-            let tail = &t.rebind_programs(1000, 4)[1].1;
-            assert!(tail.contains("let x0: Matrix = matrix.zeros(1000, 4)") && tail.contains("fn a1() -> Int = 2"), "{tail}");
-        }
-        // Causal attention needs rows(q) <= rows(k): n is the key/value
-        // length (a KV cache), q a fixed 2 rows, all 4 wide over 2 heads.
-        let t = target("matrix.masked_multi_head_attention");
-        let direct = t.direct_program(1000, 4, true);
-        assert!(direct.contains("  var x: Matrix = matrix.zeros(1000, 4)"), "{direct}");
-        assert!(direct.contains("  let a0: Matrix = matrix.zeros(2, 4)"), "{direct}");
-        assert!(direct.contains("  let a2: Matrix = matrix.zeros(1000, 4)"), "{direct}");
-        assert!(direct.contains("  let a3: Int = 2"), "{direct}");
-        assert!(direct.contains("matrix.masked_multi_head_attention(a0, x, a2, a3)"), "{direct}");
-        let fold = &t.rebind_programs(1000, 4)[2].1;
-        assert!(fold.contains("let x0: Matrix = matrix.zeros(2, 4)"), "{fold}");
-        assert!(fold.contains("fn a1() -> Matrix = matrix.zeros(1000, 4)") && fold.contains("fn a2() -> Matrix = matrix.zeros(1000, 4)"), "{fold}");
+    fn kernel_geometry_functions_get_operands_that_agree() {
         // conv1d: (T, in_ch) input, (out_ch, in_ch × kernel) weight, one
         // bias per out_ch; kernel 3, stride 1, padding 1 keep T rows out.
         let t = target("matrix.conv1d");
@@ -1774,69 +1613,6 @@ pub(crate) mod tests {
         assert!(!main.contains("println(http.body(res))"), "the diamond prints only its three lines: {main}");
     }
 
-    /// #1827: the packed-weight kernels read their weights at offsets, so a
-    /// recipe's offsets must be the running sum of the blocks its bytes
-    /// hold, in the order the call reads them: the gammas (f32, 4 bytes) of
-    /// attn / q / k / ffn, then the seven weights' rows. A drifted offset
-    /// reads another tensor's bytes or none (the all-zero edge), never the
-    /// dot the stamp claims.
-    #[test]
-    fn packed_weight_recipes_put_every_tensor_at_its_offset() {
-        fn arg(recipe: &[(&str, &str)], p: &str) -> String {
-            recipe.iter().find(|(q, _)| *q == p).map(|(_, e)| e.to_string()).unwrap()
-        }
-        fn offsets(gammas: [u64; 4], rows: [u64; 7], row_bytes: u64) -> (String, String) {
-            let mut at = 0;
-            let g: Vec<String> = gammas
-                .iter()
-                .map(|n| {
-                    let o = at;
-                    at += n * 4;
-                    o.to_string()
-                })
-                .collect();
-            let w: Vec<String> = rows
-                .iter()
-                .map(|r| {
-                    let o = at;
-                    at += r * row_bytes;
-                    o.to_string()
-                })
-                .collect();
-            (format!("[{}]", g.join(", ")), format!("[{}]", w.join(", ")))
-        }
-        // (recipe, gamma lengths, weight rows [q, k, v, o, gate, up, down], bytes a row)
-        let cases: [(&[(&str, &str)], [u64; 4], [u64; 7], u64); 3] = [
-            (QWEN3_Q1, [128, 64, 64, 128], [128, 64, 64, 128, 128, 128, 128], 18),
-            (QWEN3_F32, [8, 4, 4, 8], [8, 4, 4, 8, 8, 8, 8], 8 * 4),
-            (QWEN3_Q8, [32, 16, 16, 32], [32, 16, 16, 32, 32, 32, 32], 34),
-        ];
-        for (recipe, g, w, rb) in cases {
-            let (go, wo) = offsets(g, w, rb);
-            assert_eq!(arg(recipe, "gamma_offs"), go);
-            assert_eq!(arg(recipe, "weight_offs"), wo);
-        }
-        // The decode step: one h row, a cache of n/100 rows on both k and v,
-        // start_pos the cache length — and no rebind (the result is a triple).
-        for name in ["matrix.qwen3_block_q1_0_kv", "matrix.qwen3_block_f32_kv", "matrix.qwen3_block_q8_0_kv"] {
-            let t = target(name);
-            let direct = t.direct_program(20000, 4, true);
-            assert!(direct.contains("var x: Matrix = matrix.from_lists(list.range(0, 20000 / 100)"), "{direct}");
-            assert!(direct.contains("let a2: Matrix = matrix.from_lists(list.range(0, 20000 / 100)"), "{direct}");
-            assert!(direct.contains("let a6: Int = 20000 / 100"), "{direct}");
-            assert!(direct.contains("acc = acc + matrix.rows(r.0)"), "{direct}");
-            assert!(t.rebind_programs(20000, 4).is_empty(), "{name}");
-        }
-        // The GEMVs' weights are square, so the activation rebinds to itself.
-        for name in ["matrix.linear_q1_0_row_no_bias", "matrix.linear_q8_0_row_no_bias"] {
-            let t = target(name);
-            let w = &t.recipe.unwrap().args;
-            assert_eq!(arg(w, "w_rows"), arg(w, "w_cols"), "{name}");
-            let tail = &t.rebind_programs(20000, 4)[1].1;
-            assert!(tail.contains("let x0: Matrix = matrix.from_lists(list.range(0, 20000 / 1000)"), "{tail}");
-        }
-    }
-
     /// A recipe that drifted from its function's signature is an error, not
     /// a silent fall-back to the shapes that function refuses.
     #[test]
@@ -1844,6 +1620,20 @@ pub(crate) mod tests {
         for r in SHAPE_RECIPES.iter().chain(super::effect_recipes::EFFECT_RECIPES) {
             let t = target(r.func);
             assert!(t.recipe.is_some() && (r.size.is_empty() || t.size_param.is_some()), "{}", r.func);
+        }
+    }
+
+    /// The streaming clients (ADR-0027 D8: ported, then inspected) are
+    /// probed over the fixture's `/chunked/{n}` route, sized by the url, with
+    /// a generated `on_chunk`.
+    #[test]
+    fn the_streaming_clients_stream_the_fixtures_chunked_route() {
+        for name in ["http.request_stream", "http.request_stream_with_limits"] {
+            let t = target(name);
+            assert!(t.recipe.is_some(), "{name} has no recipe");
+            let direct = t.direct_program(1000, 4, true);
+            assert!(direct.contains("/chunked/1000"), "{name}: {direct}");
+            assert!(direct.contains(&format!("{name}(a0, x, ")) && direct.contains("let a0: String = \"GET\""), "{name}: {direct}");
         }
     }
 

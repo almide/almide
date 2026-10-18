@@ -196,13 +196,18 @@ pub fn wasm_program_stderr(stderr: &str) -> String {
     out
 }
 
-/// The wasm leg's two-line failure detail: from the failure block when there
-/// is one, so what the program itself printed is not mistaken for the error.
+/// The wasm leg's failure detail: the failure block when there is one, so
+/// what the program itself printed is not mistaken for the error, through
+/// its last line before a blank one — the native reporter's block end. The
+/// block's `expected:` / `found:` are the report; two lines dropped them.
 pub fn wasm_failure_lines(stderr: &str) -> Vec<&str> {
     let lines: Vec<&str> = stderr.lines().collect();
     let start = lines.iter().position(|l| failure_block_start(l)).unwrap_or(0);
-    lines[start..].iter().take(2).copied().collect()
+    lines[start..].iter().take_while(|l| !l.trim().is_empty()).take(WASM_FAILURE_LINES_CAP).copied().collect()
 }
+
+/// A failure block longer than this (a trap's backtrace) is cut here.
+const WASM_FAILURE_LINES_CAP: usize = 40;
 
 fn stdout_block(stdout: &str) -> String {
     if stdout.is_empty() { String::new() } else { format!("  stdout:\n{}", indent(stdout)) }
@@ -254,7 +259,28 @@ mod tests {
         assert_eq!(out.failure_stdout(Some("three")), "  stdout:\n    STDOUT: value is 42\n");
         assert_eq!(out.failure_stdout(None), "  stdout:\n    STDOUT: value is 42\n");
         assert_eq!(out.stderr, "E1\nDEBUG: value is 42\n");
-        assert_eq!(wasm_failure_lines(stderr), vec!["Error: assertion failed", "  at: line 4"]);
+        assert_eq!(wasm_failure_lines(stderr), vec!["Error: assertion failed", "  at: line 4", "  expected: 2", "  found: 1"]);
+    }
+
+    /// The whole failure block, not its first two lines: `expected:` /
+    /// `found:` are the report (testing.assert_aborts' `found:` names why the
+    /// child was not the expected abort, and its child sections follow). A
+    /// blank line ends the block, as it ends the native reporter's.
+    #[test]
+    fn the_wasm_failure_detail_is_the_whole_block() {
+        let stderr = "noise\nError: assertion failed\n  at: line 5\n  expected: abort containing \"boom\"\n  found: returned normally\n  child stdout:\n    hi\nPANIC: testing.assert_aborts failed at line 5\n\nafter\n";
+        assert_eq!(
+            wasm_failure_lines(stderr),
+            vec![
+                "Error: assertion failed",
+                "  at: line 5",
+                "  expected: abort containing \"boom\"",
+                "  found: returned normally",
+                "  child stdout:",
+                "    hi",
+                "PANIC: testing.assert_aborts failed at line 5",
+            ]
+        );
     }
 
     #[test]

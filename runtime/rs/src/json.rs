@@ -49,7 +49,7 @@ pub fn almide_rt_json_parse(text: &str) -> Result<AlmideValue, AlmideString> {
             let b = t.as_bytes();
             if *pos >= b.len() { return Err("unexpected end of input".into()); }
             match b[*pos] {
-                b'"' => parse_string(t, pos).map(AlmideValue::Str),
+                b'"' => parse_string(t, pos).map(|s| AlmideValue::Str(AlmideString::from(s))),
                 b'{' => parse_object(t, pos),
                 b'[' => parse_array(t, pos),
                 b't' | b'f' => parse_bool(t, pos),
@@ -220,9 +220,9 @@ pub fn almide_json_get(j: &AlmideValue, key: &str) -> Option<AlmideValue> {
     }
 }
 
-pub fn almide_json_get_string(j: &AlmideValue, key: &str) -> Option<String> {
+pub fn almide_json_get_string(j: &AlmideValue, key: &str) -> Option<AlmideString> { let __almide_v: Option<AlmideString> = (|| {
     match almide_json_get(j, key)? { AlmideValue::Str(s) => Some(s), _ => None }
-}
+})(); __almide_v.into_almide() }
 
 /// An Int field only: a Float value is `None`, even an integral one (`3.0`),
 /// never truncated — the same answer as `value.as_int` and Codec Int decode, and
@@ -246,9 +246,9 @@ pub fn almide_json_get_array(j: &AlmideValue, key: &str) -> Option<Vec<AlmideVal
 
 // ── Keyless extractors ──
 
-pub fn almide_json_to_string(j: &AlmideValue) -> Option<String> {
+pub fn almide_json_to_string(j: &AlmideValue) -> Option<AlmideString> { let __almide_v: Option<AlmideString> = (|| {
     match j { AlmideValue::Str(s) => Some(s.clone()), _ => None }
-}
+})(); __almide_v.into_almide() }
 
 pub fn almide_json_to_int(j: &AlmideValue) -> Option<i64> {
     match j { AlmideValue::Int(n) => Some(*n), _ => None }
@@ -268,16 +268,16 @@ pub fn almide_json_as_array(j: &AlmideValue) -> Option<Vec<AlmideValue>> {
 
 // ── Object operations ──
 
-pub fn almide_json_keys(j: &AlmideValue) -> Vec<String> {
+pub fn almide_json_keys(j: &AlmideValue) -> Vec<AlmideString> { let __almide_v: Vec<String> = (|| {
     match j { AlmideValue::Object(entries) => entries.iter().map(|(k, _)| k.to_string()).collect(), _ => vec![] }
-}
+})(); __almide_v.into_almide() }
 
-pub fn almide_json_to_map(j: &AlmideValue) -> Option<AlmideMap<String, String>> {
+pub fn almide_json_to_map(j: &AlmideValue) -> Option<AlmideMap<AlmideString, AlmideString>> { let __almide_v: Option<AlmideMap<String, String>> = (|| {
     match j {
         AlmideValue::Object(entries) => {
             let map: AlmideMap<String, String> = entries.iter().map(|(k, v)| {
                 let s = match v {
-                    AlmideValue::Str(s) => s.clone(),
+                    AlmideValue::Str(s) => s.to_string(),
                     _ => String::from(almide_rt_value_stringify(v)),
                 };
                 (k.to_string(), s)
@@ -286,30 +286,30 @@ pub fn almide_json_to_map(j: &AlmideValue) -> Option<AlmideMap<String, String>> 
         }
         _ => None,
     }
-}
+})(); __almide_v.into_almide() }
 
-pub fn almide_json_object(entries: &[(String, AlmideValue)]) -> AlmideValue {
+pub fn almide_json_object(entries: &[(AlmideString, AlmideValue)]) -> AlmideValue {
     AlmideValue::Object(entries.iter().map(|(k, v)| (almide_rt_intern_key(k), v.clone())).collect())
 }
 
 pub fn almide_json_from_float(n: f64) -> AlmideValue { AlmideValue::Float(n) }
-pub fn almide_json_from_string(s: &str) -> AlmideValue { AlmideValue::Str(s.to_string()) }
+pub fn almide_json_from_string(s: &str) -> AlmideValue { AlmideValue::Str(AlmideString::from(s)) }
 pub fn almide_json_from_int(n: i64) -> AlmideValue { AlmideValue::Int(n) }
 pub fn almide_json_from_bool(b: bool) -> AlmideValue { AlmideValue::Bool(b) }
 pub fn almide_json_array(items: &[AlmideValue]) -> AlmideValue { AlmideValue::Array(items.to_vec()) }
 
 // ── Stringify pretty ──
 
-pub fn almide_json_stringify_pretty(j: &AlmideValue) -> String {
+pub fn almide_json_stringify_pretty(j: &AlmideValue) -> AlmideString { let __almide_v: String = (|| {
     stringify_value(j, 0)
-}
+})(); __almide_v.into_almide() }
 
 /// JSON string quoting is `almide_rt_value_json_quote` (value.rs) — the one
 /// RFC 8259 §7 rule every serializer shares (#2802). The previous `{:?}`
 /// (Rust `escape_debug`) escaped combining marks as `\u{301}` — not valid
 /// JSON escaping, and a byte divergence against the wasm leg.
 fn json_quote(s: &str) -> String {
-    almide_rt_value_json_quote(s)
+    String::from(almide_rt_value_json_quote(s))
 }
 
 fn stringify_value(v: &AlmideValue, depth: usize) -> String {
@@ -319,7 +319,7 @@ fn stringify_value(v: &AlmideValue, depth: usize) -> String {
         AlmideValue::Null => "null".into(),
         AlmideValue::Bool(b) => if *b { "true" } else { "false" }.into(),
         AlmideValue::Int(n) => n.to_string(),
-        AlmideValue::Float(f) => almide_rt_value_float_json(*f),
+        AlmideValue::Float(f) => String::from(almide_rt_value_float_json(*f)),
         AlmideValue::Str(s) => json_quote(s),
         AlmideValue::Array(items) => {
             if items.is_empty() { return "[]".into(); }
@@ -412,10 +412,10 @@ pub fn almide_json_get_path(j: &AlmideValue, path: &AlmideJsonPath) -> Option<Al
     Some(current)
 }
 
-pub fn almide_json_set_path(j: &AlmideValue, path: &AlmideJsonPath, value: AlmideValue) -> Result<AlmideValue, String> {
+pub fn almide_json_set_path(j: &AlmideValue, path: &AlmideJsonPath, value: AlmideValue) -> Result<AlmideValue, AlmideString> { let __almide_r: Result<AlmideValue, String> = (|| {
     let steps = resolve_path(path);
     Ok(set_at_steps(j, &steps, &value))
-}
+})(); __almide_r.map_err(Into::into) }
 
 pub fn almide_json_remove_path(j: &AlmideValue, path: &AlmideJsonPath) -> AlmideValue {
     let steps = resolve_path(path);

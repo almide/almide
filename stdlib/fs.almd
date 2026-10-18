@@ -98,9 +98,11 @@ effect fn fold_lines_range[A](path: String, start: Int, end: Int, init: A, f: (A
 // Chunk-PARALLEL fold: N workers each fold their byte-range partition on
 // real threads inside the runtime, returning the partials in CHUNK ORDER —
 // the merge stays with the caller, so the result is deterministic whatever
-// the thread schedule. The callback must not capture mutable state (the
-// emitted program's Send + Sync bounds make a violation a compile error).
+// the thread schedule. The callback must not reach mutable state:
+// `@concurrent(f)` makes a callback that reaches a `var` E008 at check, on
+// every target (the wasm leg runs the chunks sequentially and would accept it).
 /// Parallel chunk partials, in order; [] if empty.
+@concurrent(f)
 @intrinsic("almide_rt_fs_fold_lines_chunked")
 effect fn fold_lines_chunked[A](path: String, workers: Int, init: A, f: (A, String) -> A) -> Result[List[A], String] = _
 

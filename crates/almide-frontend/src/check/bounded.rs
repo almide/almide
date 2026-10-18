@@ -106,7 +106,7 @@ const BOUNDED_PURE_MODULES: &[&str] = &[
 /// registry module, so `bounded_tables_name_real_modules` admits them by name.
 /// `prim` is the raw-memory floor; nothing bounded may reach it directly.
 const BOUNDED_DENIED_MODULES: &[&str] = &[
-    "env", "fs", "http", "net", "process", "random", "zlib", "datetime", "args", "mem",
+    "env", "fs", "http", "net", "process", "random", "zlib", "datetime", "args",
     "testing", "fan", "compute", "duration", "prim",
 ];
 

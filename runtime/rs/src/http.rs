@@ -44,12 +44,12 @@ impl AlmideHttpResponse {
     /// `almide_rt_http_with_headers` intrinsic uses, so the struct API and the
     /// intrinsic cannot drift apart again — they used to disagree, this one
     /// REPLACING the header list while the intrinsic seeded-then-upserted.
-    pub fn with_headers(status: i64, body: String, headers: AlmideMap<String, String>) -> Self {
+    pub fn with_headers(status: i64, body: String, headers: AlmideMap<AlmideString, AlmideString>) -> Self {
         Self::from_headers(status, body, &headers)
     }
     /// `upsert_header` per entry, through an index of the lowercased names
     /// already stored: the per-entry scan made building n headers O(n²).
-    fn from_headers(status: i64, body: String, headers: &AlmideMap<String, String>) -> Self {
+    fn from_headers(status: i64, body: String, headers: &AlmideMap<AlmideString, AlmideString>) -> Self {
         let mut list: Vec<(String, String)> = Vec::with_capacity(headers.len());
         let mut at: std::collections::HashMap<String, usize> = std::collections::HashMap::with_capacity(headers.len());
         for (k, v) in headers.iter() {
@@ -115,18 +115,18 @@ pub fn almide_http_set_status(mut resp: AlmideHttpResponse, code: i64) -> Almide
     resp.status = code; resp
 }
 
-pub fn almide_http_get_body(resp: &AlmideHttpResponse) -> String {
+pub fn almide_http_get_body(resp: &AlmideHttpResponse) -> AlmideString { let __almide_v: String = (|| {
     resp.body.clone()
-}
+})(); __almide_v.into_almide() }
 
 pub fn almide_http_set_header(mut resp: AlmideHttpResponse, key: &str, value: &str) -> AlmideHttpResponse {
     upsert_header(&mut resp.headers, key, value);
     resp
 }
 
-pub fn almide_http_get_header(resp: &AlmideHttpResponse, key: &str) -> Option<String> {
+pub fn almide_http_get_header(resp: &AlmideHttpResponse, key: &str) -> Option<AlmideString> { let __almide_v: Option<String> = (|| {
     resp.headers.iter().find(|(k, _)| k.eq_ignore_ascii_case(key)).map(|(_, v)| v.clone())
-}
+})(); __almide_v.into_almide() }
 
 /// The status code of a response — the read twin of `almide_http_set_status`
 /// (#1791; the Almide surface had no status GETTER before the response family).
@@ -136,15 +136,15 @@ pub fn almide_http_status_code(resp: &AlmideHttpResponse) -> i64 {
 
 /// EVERY value of one field, in wire order — the accessor that keeps a
 /// repeated field (`Set-Cookie`) whole where `get_header` answers the first.
-pub fn almide_http_header_values(resp: &AlmideHttpResponse, key: &str) -> Vec<String> {
+pub fn almide_http_header_values(resp: &AlmideHttpResponse, key: &str) -> Vec<AlmideString> { let __almide_v: Vec<String> = (|| {
     resp.headers.iter().filter(|(k, _)| k.eq_ignore_ascii_case(key)).map(|(_, v)| v.clone()).collect()
-}
+})(); __almide_v.into_almide() }
 
 /// All headers as a map keyed by the LOWERCASED field name (RFC 9110 §5.1 —
 /// field names are case-insensitive ASCII tokens). A repeated field keeps its
 /// FIRST value — the same rule `get_header` / `req_header` apply — so a
 /// `Set-Cookie` list is read through `header_values`, never through this map.
-pub fn almide_http_headers(resp: &AlmideHttpResponse) -> AlmideMap<String, String> {
+pub fn almide_http_headers(resp: &AlmideHttpResponse) -> AlmideMap<AlmideString, AlmideString> { let __almide_v: AlmideMap<String, String> = (|| {
     let mut out = AlmideMap::new();
     for (k, v) in resp.headers.iter() {
         let name = k.to_ascii_lowercase();
@@ -153,7 +153,7 @@ pub fn almide_http_headers(resp: &AlmideHttpResponse) -> AlmideMap<String, Strin
         }
     }
     out
-}
+})(); __almide_v.into_almide() }
 
 /// Router plumbing: HEAD answered by the GET route keeps the status and the
 /// headers and drops the body.
@@ -195,17 +195,17 @@ pub fn almide_rt_http_new_request(method: &str, target: &str, body: &str, header
     }
 }
 
-pub fn almide_http_param(req: &AlmideHttpRequest, name: &str) -> Option<String> {
+pub fn almide_http_param(req: &AlmideHttpRequest, name: &str) -> Option<AlmideString> { let __almide_v: Option<String> = (|| {
     req.params.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone())
-}
+})(); __almide_v.into_almide() }
 
 /// Router plumbing: bind path parameters, given flat `[k1, v1, k2, v2, …]`
 /// pairs (the shape the wasm rep stores them in). New bindings go IN FRONT of
 /// the ones an enclosing `mount` bound, so `param` finds the innermost first
 /// and `{org}` of `mount("/orgs/{org}", sub)` stays visible inside `sub`.
-pub fn almide_http_req_with_params(mut req: AlmideHttpRequest, flat: &[String]) -> AlmideHttpRequest {
+pub fn almide_http_req_with_params(mut req: AlmideHttpRequest, flat: &[AlmideString]) -> AlmideHttpRequest {
     let mut params: Vec<(String, String)> =
-        flat.chunks(2).filter(|c| c.len() == 2).map(|c| (c[0].clone(), c[1].clone())).collect();
+        flat.chunks(2).filter(|c| c.len() == 2).map(|c| (c[0].to_string(), c[1].to_string())).collect();
     params.append(&mut req.params);
     req.params = params;
     req
@@ -218,21 +218,25 @@ pub fn almide_http_req_with_path(mut req: AlmideHttpRequest, target: &str) -> Al
     req
 }
 
+// ADR-0013 stage 2: the request and response keep their own `String`s and
+// cross the runtime boundary unchanged.
+almide_into_str_leaf!(AlmideHttpResponse, AlmideHttpRequest);
+
 impl AlmideRepr for AlmideHttpRequest {
     fn almide_repr(&self) -> String {
         format!("HttpRequest {{ method: {}, path: {}, body: {}, headers: {} }}", self.method.almide_repr(), self.path.almide_repr(), self.body.almide_repr(), self.headers.len())
     }
 }
 
-pub fn almide_http_req_method(req: &AlmideHttpRequest) -> String { req.method.clone() }
-pub fn almide_http_req_path(req: &AlmideHttpRequest) -> String { req.path.clone() }
-pub fn almide_http_req_body(req: &AlmideHttpRequest) -> String { req.body.clone() }
+pub fn almide_http_req_method(req: &AlmideHttpRequest) -> AlmideString { let __almide_v: String = (|| { req.method.clone() })(); __almide_v.into_almide() }
+pub fn almide_http_req_path(req: &AlmideHttpRequest) -> AlmideString { let __almide_v: String = (|| { req.path.clone() })(); __almide_v.into_almide() }
+pub fn almide_http_req_body(req: &AlmideHttpRequest) -> AlmideString { let __almide_v: String = (|| { req.body.clone() })(); __almide_v.into_almide() }
 
-pub fn almide_http_req_header(req: &AlmideHttpRequest, key: &str) -> Option<String> {
+pub fn almide_http_req_header(req: &AlmideHttpRequest, key: &str) -> Option<AlmideString> { let __almide_v: Option<String> = (|| {
     req.headers.iter().find(|(k, _)| k.eq_ignore_ascii_case(key)).map(|(_, v)| v.clone())
-}
+})(); __almide_v.into_almide() }
 
-pub fn almide_http_query_params(req: &AlmideHttpRequest) -> AlmideMap<String, String> {
+pub fn almide_http_query_params(req: &AlmideHttpRequest) -> AlmideMap<AlmideString, AlmideString> { let __almide_v: AlmideMap<String, String> = (|| {
     let mut params = AlmideMap::new();
     if let Some(q) = req.path.split('?').nth(1) {
         for pair in q.split('&') {
@@ -243,36 +247,36 @@ pub fn almide_http_query_params(req: &AlmideHttpRequest) -> AlmideMap<String, St
         }
     }
     params
-}
+})(); __almide_v.into_almide() }
 
 /// Percent-decode a URL component for manual use (stdlib `http.url_decode`).
 /// Same rules as the query-param decoder: `+` → space, `%XX` → raw byte.
-pub fn almide_http_url_decode(s: &str) -> String {
+pub fn almide_http_url_decode(s: &str) -> AlmideString { let __almide_v: String = (|| {
     percent_decode(s)
-}
+})(); __almide_v.into_almide() }
 
 
-pub fn almide_http_get(url: &str) -> Result<String, String> {
+pub fn almide_http_get(url: &str) -> Result<AlmideString, AlmideString> {
     almide_http_request("GET", url, "", &AlmideMap::new())
 }
 
-pub fn almide_http_post(url: &str, body: &str) -> Result<String, String> {
+pub fn almide_http_post(url: &str, body: &str) -> Result<AlmideString, AlmideString> {
     almide_http_request("POST", url, body, &AlmideMap::new())
 }
 
-pub fn almide_http_put(url: &str, body: &str) -> Result<String, String> {
+pub fn almide_http_put(url: &str, body: &str) -> Result<AlmideString, AlmideString> {
     almide_http_request("PUT", url, body, &AlmideMap::new())
 }
 
-pub fn almide_http_patch(url: &str, body: &str) -> Result<String, String> {
+pub fn almide_http_patch(url: &str, body: &str) -> Result<AlmideString, AlmideString> {
     almide_http_request("PATCH", url, body, &AlmideMap::new())
 }
 
-pub fn almide_http_delete(url: &str) -> Result<String, String> {
+pub fn almide_http_delete(url: &str) -> Result<AlmideString, AlmideString> {
     almide_http_request("DELETE", url, "", &AlmideMap::new())
 }
 
-pub fn almide_http_get_with_headers(url: &str, headers: &AlmideMap<String, String>) -> Result<String, String> {
+pub fn almide_http_get_with_headers(url: &str, headers: &AlmideMap<AlmideString, AlmideString>) -> Result<AlmideString, AlmideString> {
     almide_http_request("GET", url, "", headers)
 }
 
@@ -286,13 +290,13 @@ pub fn almide_http_get_with_headers(url: &str, headers: &AlmideMap<String, Strin
 include!("../../../crates/almide-rt-core/src/http_client_core.rs");
 
 /// Headers cross into the shared core as a plain pair slice.
-fn header_pairs(headers: &AlmideMap<String, String>) -> Vec<(String, String)> {
-    headers.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+fn header_pairs(headers: &AlmideMap<AlmideString, AlmideString>) -> Vec<(String, String)> {
+    headers.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
 }
 
-pub fn almide_http_request(method: &str, url: &str, body: &str, headers: &AlmideMap<String, String>) -> Result<String, String> {
+pub fn almide_http_request(method: &str, url: &str, body: &str, headers: &AlmideMap<AlmideString, AlmideString>) -> Result<AlmideString, AlmideString> { let __almide_v: Result<String, String> = (|| {
     request(method, url, body, &header_pairs(headers))
-}
+})(); __almide_v.into_almide() }
 
 // ── Status-preserving client ──
 //
@@ -303,13 +307,13 @@ pub fn almide_http_request(method: &str, url: &str, body: &str, headers: &Almide
 // caller that needs to branch on the numeric status (e.g. 404 vs 200) uses
 // these instead.
 
-pub fn almide_http_get_status(url: &str) -> Result<(i64, String), String> {
+pub fn almide_http_get_status(url: &str) -> Result<(i64, AlmideString), AlmideString> {
     almide_http_request_status("GET", url, "", &AlmideMap::new())
 }
 
-pub fn almide_http_request_status(method: &str, url: &str, body: &str, headers: &AlmideMap<String, String>) -> Result<(i64, String), String> {
+pub fn almide_http_request_status(method: &str, url: &str, body: &str, headers: &AlmideMap<AlmideString, AlmideString>) -> Result<(i64, AlmideString), AlmideString> { let __almide_v: Result<(i64, String), String> = (|| {
     request_status(method, url, body, &header_pairs(headers))
-}
+})(); __almide_v.into_almide() }
 
 // ── Full-response client (#1791) ──
 //
@@ -320,30 +324,30 @@ pub fn almide_http_request_status(method: &str, url: &str, body: &str, headers: 
 // String and status clients above are projections of `request_response` in
 // the shared core, so the three shapes cannot drift apart.
 
-pub fn almide_http_get_response(url: &str) -> Result<AlmideHttpResponse, String> {
+pub fn almide_http_get_response(url: &str) -> Result<AlmideHttpResponse, AlmideString> {
     almide_http_request_response("GET", url, "", &AlmideMap::new())
 }
 
-pub fn almide_http_post_response(url: &str, body: &str) -> Result<AlmideHttpResponse, String> {
+pub fn almide_http_post_response(url: &str, body: &str) -> Result<AlmideHttpResponse, AlmideString> {
     almide_http_request_response("POST", url, body, &AlmideMap::new())
 }
 
-pub fn almide_http_put_response(url: &str, body: &str) -> Result<AlmideHttpResponse, String> {
+pub fn almide_http_put_response(url: &str, body: &str) -> Result<AlmideHttpResponse, AlmideString> {
     almide_http_request_response("PUT", url, body, &AlmideMap::new())
 }
 
-pub fn almide_http_patch_response(url: &str, body: &str) -> Result<AlmideHttpResponse, String> {
+pub fn almide_http_patch_response(url: &str, body: &str) -> Result<AlmideHttpResponse, AlmideString> {
     almide_http_request_response("PATCH", url, body, &AlmideMap::new())
 }
 
-pub fn almide_http_delete_response(url: &str) -> Result<AlmideHttpResponse, String> {
+pub fn almide_http_delete_response(url: &str) -> Result<AlmideHttpResponse, AlmideString> {
     almide_http_request_response("DELETE", url, "", &AlmideMap::new())
 }
 
-pub fn almide_http_request_response(method: &str, url: &str, body: &str, headers: &AlmideMap<String, String>) -> Result<AlmideHttpResponse, String> {
+pub fn almide_http_request_response(method: &str, url: &str, body: &str, headers: &AlmideMap<AlmideString, AlmideString>) -> Result<AlmideHttpResponse, AlmideString> { let __almide_r: Result<AlmideHttpResponse, String> = (|| {
     request_response(method, url, body, &header_pairs(headers))
         .map(|(status, headers, body)| AlmideHttpResponse { status, body, headers })
-}
+})(); __almide_r.map_err(Into::into) }
 
 // ── Binary client ──
 //
@@ -351,13 +355,13 @@ pub fn almide_http_request_response(method: &str, url: &str, body: &str, headers
 // (Almide `Bytes`) with NO UTF-8 conversion, so binary payloads (images,
 // audio — e.g. TTS mp3/wav) survive byte-identical.
 
-pub fn almide_http_get_bytes(url: &str) -> Result<Vec<u8>, String> {
+pub fn almide_http_get_bytes(url: &str) -> Result<Vec<u8>, AlmideString> {
     almide_http_request_bytes("GET", url, "", &AlmideMap::new())
 }
 
-pub fn almide_http_request_bytes(method: &str, url: &str, body: &str, headers: &AlmideMap<String, String>) -> Result<Vec<u8>, String> {
+pub fn almide_http_request_bytes(method: &str, url: &str, body: &str, headers: &AlmideMap<AlmideString, AlmideString>) -> Result<Vec<u8>, AlmideString> { let __almide_r: Result<Vec<u8>, String> = (|| {
     request_bytes(method, url, body, &header_pairs(headers))
-}
+})(); __almide_r.map_err(Into::into) }
 
 
 
@@ -379,190 +383,27 @@ pub fn almide_http_request_stream(
     method: &str,
     url: &str,
     body: &str,
-    headers: &AlmideMap<String, String>,
-    on_chunk: std::rc::Rc<dyn Fn(String)>,
-) -> Result<(), String> {
+    headers: &AlmideMap<AlmideString, AlmideString>,
+    on_chunk: std::rc::Rc<dyn Fn(AlmideString)>,
+) -> Result<(), AlmideString> { let __almide_r: Result<(), String> = (|| {
     // Almide function values use Rc<dyn Fn>; Rc itself does not implement
     // FnMut. Adapt at the boundary while native SSE callers retain FnMut.
-    almide_http_request_stream_impl(method, url, body, headers, |chunk| on_chunk(chunk))
-}
+    almide_http_request_stream_impl(method, url, body, headers, |chunk| on_chunk(AlmideString::from(chunk)))
+})(); __almide_r.map_err(Into::into) }
 
 pub fn almide_http_request_stream_impl(
     method: &str,
     url: &str,
     body: &str,
-    headers: &AlmideMap<String, String>,
-    mut on_chunk: impl FnMut(String),
+    headers: &AlmideMap<AlmideString, AlmideString>,
+    on_chunk: impl FnMut(String),
 ) -> Result<(), String> {
-    // The shared core prepares (URL, method and headers refused before any
-    // dial), routes (proxies, connect timeout) and writes the request, so
-    // the streaming client cannot drift from the buffered ones (#2828).
-    let pairs = header_pairs(headers);
-    let u = http_prepare(method, url, &pairs)?;
-    // Long read timeout — SSE responses can be quiet between events.
-    let (stream, route) = http_client_open(&u, 120)?;
-    let request = http_request_bytes(method, &u, &route, body, &pairs);
-
-    let mut wrap = |s: &str| on_chunk(s.to_string());
-    if u.https {
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let mut tls = make_tls_stream(&u.host, url, stream)?;
-            http_exchange_stream(&mut tls, url, &request, &mut wrap)
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            let _ = (stream, request);
-            Err("HTTPS streaming not supported on WASM target".to_string())
-        }
-    } else {
-        let mut s = stream;
-        http_exchange_stream(&mut s, url, &request, &mut wrap)
-    }
-}
-
-/// What a streamed response has read but not yet delivered, and where in the
-/// head / chunked framing it is.
-#[derive(Default)]
-struct AlmideHttpStreamParse {
-    acc: Vec<u8>,
-    headers_done: bool,
-    chunked: bool,
-    chunk_remaining: usize,
-    awaiting_size: bool,
-    // Body bytes not yet delivered because they end in an incomplete UTF-8
-    // sequence (at most 3 bytes).
-    utf8_tail: Vec<u8>,
-}
-
-impl AlmideHttpStreamParse {
-    fn deliver<F: FnMut(&str)>(&mut self, bytes: &[u8], at_end: bool, on_chunk: &mut F) {
-        self.utf8_tail.extend_from_slice(bytes);
-        let keep = if at_end { 0 } else { http_stream_incomplete_utf8_tail(&self.utf8_tail) };
-        let ready = self.utf8_tail.len() - keep;
-        if ready > 0 {
-            let drained: Vec<u8> = self.utf8_tail.drain(..ready).collect();
-            on_chunk(&String::from_utf8_lossy(&drained));
-        }
-    }
-
-    /// The response head, once its end has arrived: `None` while more bytes
-    /// are needed, else the non-2xx status line to report (if any).
-    fn take_head(&mut self, url: &str) -> Result<Option<Option<String>>, String> {
-        // A 1xx interim head (`100 Continue`) is dropped and the final
-        // one awaited (#2824) — several may arrive in one read.
-        while let Some(idx) = self.acc.windows(4).position(|w| w == b"\r\n\r\n") {
-            if !http_is_interim(http_status_of(&self.acc[..idx])) {
-                break;
-            }
-            self.acc.drain(..idx + 4);
-        }
-        let Some(idx) = self.acc.windows(4).position(|w| w == b"\r\n\r\n") else {
-            if self.acc.len() > HTTP_MAX_HEAD_BYTES {
-                return Err(http_head_too_large(url));
-            }
-            return Ok(None);
-        };
-        let header_section = String::from_utf8_lossy(&self.acc[..idx]).to_string();
-        let status_line = header_section.lines().next().unwrap_or("");
-        let code: i64 = status_line
-            .split_whitespace()
-            .nth(1)
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(0);
-        let error_status = (!(200..300).contains(&code))
-            .then(|| format!("HTTP {}: {}", code, status_line.splitn(3, ' ').nth(2).unwrap_or("")));
-        self.chunked = http_fields_chunked(&http_head_fields(&header_section));
-        self.acc.drain(..idx + 4);
-        self.headers_done = true;
-        Ok(Some(error_status))
-    }
-
-    /// Deliver every complete chunk read so far: `true` at the terminating
-    /// zero-size chunk, `false` when more bytes are needed.
-    fn drain_chunked<F: FnMut(&str)>(&mut self, url: &str, on_chunk: &mut F) -> Result<bool, String> {
-        loop {
-            if self.awaiting_size {
-                // The \r\n that terminates the size line, or wait for more.
-                let Some(nl) = self.acc.windows(2).position(|w| w == b"\r\n") else { return Ok(false) };
-                let size = http_chunk_size(&self.acc[..nl]).map_err(|_| http_error_text(HttpErrorClass::Protocol, url))?;
-                self.acc.drain(..nl + 2);
-                if size == 0 {
-                    self.deliver(&[], true, on_chunk);
-                    return Ok(true);
-                }
-                self.chunk_remaining = size;
-                self.awaiting_size = false;
-            }
-            let take = self.chunk_remaining.min(self.acc.len());
-            if take > 0 {
-                let drained: Vec<u8> = self.acc.drain(..take).collect();
-                self.deliver(&drained, false, on_chunk);
-                self.chunk_remaining -= take;
-            }
-            // Mid-chunk, or the trailing CRLF has not arrived: wait for more.
-            if self.chunk_remaining != 0 || self.acc.len() < 2 {
-                return Ok(false);
-            }
-            if self.acc.starts_with(b"\r\n") {
-                self.acc.drain(..2);
-            }
-            self.awaiting_size = true;
-        }
-    }
-}
-
-fn http_exchange_stream<S: Read + Write, F: FnMut(&str)>(
-    stream: &mut S,
-    url: &str,
-    request: &[u8],
-    on_chunk: &mut F,
-) -> Result<(), String> {
-    stream.write_all(request).map_err(|e| http_io_error_text(url, &e))?;
-
-    let mut buf = vec![0u8; 8192];
-    let mut st = AlmideHttpStreamParse { awaiting_size: true, ..Default::default() };
-    loop {
-        let n = match stream.read(&mut buf) {
-            Ok(n) => n,
-            Err(e) => {
-                if st.acc.is_empty() && !st.headers_done {
-                    return Err(http_io_error_text(url, &e));
-                }
-                break;
-            }
-        };
-        if n == 0 {
-            break;
-        }
-        st.acc.extend_from_slice(&buf[..n]);
-        if !st.headers_done {
-            match st.take_head(url)? {
-                None => continue,
-                Some(Some(msg)) => {
-                    // Drain remaining body for error message context.
-                    let body_text = String::from_utf8_lossy(&st.acc).to_string();
-                    return Err(format!("{}: {}", msg, body_text.chars().take(500).collect::<String>()));
-                }
-                Some(None) => {}
-            }
-        }
-        if st.chunked {
-            if st.drain_chunked(url, on_chunk)? {
-                return Ok(());
-            }
-        } else if !st.acc.is_empty() {
-            // Plain body — surface as-is.
-            let drained: Vec<u8> = st.acc.drain(..).collect();
-            st.deliver(&drained, false, on_chunk);
-        }
-    }
-
-    if !st.headers_done {
-        return Err(http_error_text(HttpErrorClass::Protocol, url));
-    }
-    st.deliver(&[], true, on_chunk);
-    Ok(())
+    // A CLASSIC call on the shared call core (http_call_core.rs): the same
+    // worker, framing, UTF-8 carry and status refusal the embedded lane runs
+    // for this function, bounded only by the client read timeout.
+    let shared = http_call_spawn_classic(method, url, body, header_pairs(headers))?;
+    let call = AlmideHttpCall { inner: std::sync::Arc::new(AlmideHttpCallOwner { shared }) };
+    almide_http_stream_pump(&call, on_chunk)
 }
 
 // ── Call handle (#2631) ──
@@ -623,7 +464,7 @@ pub fn almide_http_call_start(
     method: &str,
     url: &str,
     body: &str,
-    headers: &AlmideMap<String, String>,
+    headers: &AlmideMap<AlmideString, AlmideString>,
     total_ms: i64,
     idle_ms: i64,
 ) -> Result<AlmideHttpCall, String> {
@@ -643,21 +484,21 @@ pub fn almide_rt_http___call_start(
 ) -> Result<AlmideHttpCall, AlmideString> { let __almide_r: Result<AlmideHttpCall, String> = (|| { almide_http_call_start(method, url, body, headers, total_ms, idle_ms) })(); __almide_r.map_err(Into::into) }
 
 /// Never blocks: `None` while the call runs, the result once it ended.
-pub fn almide_http_call_poll(c: &AlmideHttpCall) -> Option<Result<AlmideHttpResponse, String>> {
+pub fn almide_http_call_poll(c: &AlmideHttpCall) -> Option<Result<AlmideHttpResponse, AlmideString>> { let __almide_v: Option<Result<AlmideHttpResponse, String>> = (|| {
     http_call_poll(c.shared()).map(http_call_response)
-}
+})(); __almide_v.into_almide() }
 
 /// Block until the call ends (bounded by its limits) and answer it: ANY
 /// complete response is `Ok`, as with `request_response`.
-pub fn almide_http_call_wait(c: &AlmideHttpCall) -> Result<AlmideHttpResponse, String> {
+pub fn almide_http_call_wait(c: &AlmideHttpCall) -> Result<AlmideHttpResponse, AlmideString> { let __almide_r: Result<AlmideHttpResponse, String> = (|| {
     http_call_response(http_call_wait(c.shared()))
-}
+})(); __almide_r.map_err(Into::into) }
 
 /// The body text received since the previous `read_new`; never blocks. A
 /// multibyte character split across reads is held back until it is whole.
-pub fn almide_http_call_read_new(c: &AlmideHttpCall) -> String {
+pub fn almide_http_call_read_new(c: &AlmideHttpCall) -> AlmideString { let __almide_v: String = (|| {
     http_call_read_new(c.shared())
-}
+})(); __almide_v.into_almide() }
 
 pub fn almide_http_call_cancel(c: &AlmideHttpCall) {
     c.shared().cancel();
@@ -671,11 +512,16 @@ pub fn almide_http_stream_limited_impl(
     method: &str,
     url: &str,
     body: &str,
-    headers: &AlmideMap<String, String>,
+    headers: &AlmideMap<AlmideString, AlmideString>,
     (total_ms, idle_ms): (i64, i64),
-    mut on_chunk: impl FnMut(String),
+    on_chunk: impl FnMut(String),
 ) -> Result<(), String> {
     let call = almide_http_call_start(method, url, body, headers, total_ms, idle_ms)?;
+    almide_http_stream_pump(&call, on_chunk)
+}
+
+/// Deliver each arrival of `call` to `on_chunk` until it ends, and answer how.
+fn almide_http_stream_pump(call: &AlmideHttpCall, mut on_chunk: impl FnMut(String)) -> Result<(), String> {
     loop {
         let (piece, ended) = http_call_stream_step(call.shared());
         if !piece.is_empty() {
@@ -695,7 +541,7 @@ pub fn almide_rt_http___request_stream_limited(
     total_ms: i64,
     idle_ms: i64,
     on_chunk: std::rc::Rc<dyn Fn(AlmideString)>,
-) -> Result<(), AlmideString> { let __almide_r: Result<(), String> = (|| { almide_http_stream_limited_impl(method, url, body, headers, (total_ms, idle_ms), |chunk| on_chunk(chunk)) })(); __almide_r.map_err(Into::into) }
+) -> Result<(), AlmideString> { let __almide_r: Result<(), String> = (|| { almide_http_stream_limited_impl(method, url, body, headers, (total_ms, idle_ms), |chunk| on_chunk(AlmideString::from(chunk))) })(); __almide_r.map_err(Into::into) }
 
 /// The one entry the SSE helpers stream through: no limits = the classic
 /// `request_stream` path (ALMIDE_HTTP_TIMEOUT_SECS / 120 s), limits = the
@@ -704,7 +550,7 @@ pub fn almide_http_stream_dispatch(
     method: &str,
     url: &str,
     body: &str,
-    headers: &AlmideMap<String, String>,
+    headers: &AlmideMap<AlmideString, AlmideString>,
     limits: Option<(i64, i64)>,
     on_chunk: impl FnMut(String),
 ) -> Result<(), String> {
@@ -723,7 +569,7 @@ pub fn almide_http_stream_dispatch(
 // serve ops, so C-367's byte-identity holds by shared code.
 include!("../../../crates/almide-rt-core/src/http_server_core.rs");
 
-pub fn almide_http_serve(port: i64, handler: std::rc::Rc<dyn Fn(AlmideHttpRequest) -> Result<AlmideHttpResponse, String>>) -> Result<(), String> {
+pub fn almide_http_serve(port: i64, handler: std::rc::Rc<dyn Fn(AlmideHttpRequest) -> Result<AlmideHttpResponse, AlmideString>>) -> Result<(), String> {
     // `http.serve` is typed never-err (`-> Unit`), so a caller's `!` is a
     // no-op (#1049) and a returned Err only surfaced when the call happened
     // to be a fn's tail — elsewhere the server silently never started. A

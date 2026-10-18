@@ -741,11 +741,6 @@ impl<'a> Interpreter<'a> {
 /// `write_*` in `stdlib/bytes.almd` returns Unit and mutates in place, and the
 /// functional `bytes.set(b, i, v) -> Bytes` is excluded by the underscore — the
 /// prefix is the whole rule, and a new family member is covered on arrival.
-///
-/// NOT here: `bytes.heap_save` / `bytes.heap_restore`. They take a checkpoint
-/// Int, not a buffer, so there is no receiver to write back — they are the
-/// wasm-only arena pair, and native's no-ops are the vote the bridge casts
-/// (`bridge.rs::bytes_fn`).
 pub(crate) fn is_inplace_mutating_op(module: &str, func: &str) -> bool {
     if module == "bytes"
         && (func.starts_with("set_") || func.starts_with("append_") || func.starts_with("write_"))

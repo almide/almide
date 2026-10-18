@@ -68,7 +68,14 @@
 #                        sentence and never counts as pending. No ceiling —
 #                        but a forever leg that starts serving is still
 #                        STALE (the two-direction agreement covers every
-#                        class).
+#                        class). Since 2026-10-17 (#3620) the class is
+#                        PER LEG: net's 13 unix_* / shm_* rows keep only
+#                        their stock-p1 leg — WASI has neither Unix-domain
+#                        sockets nor shared memory, so no stock artifact
+#                        serves them ever — while the embedded host serves
+#                        them through interim ops 104..=116 (retired at
+#                        ADR-0023 step 7) and the structural leg lowers
+#                        their stdlib/net_wasm.almd bodies.
 #   host-capability      the fn works only where the HOST grants a
 #                        capability stock WASI does not define: it runs on
 #                        native and on the embedded host, and its stock
@@ -298,7 +305,7 @@ pending_self_host_ceiling = 0
 # serves it (ops 91..=103), and TCP design step 4 routes the stock artifact to
 # the p3 component, retiring all thirteen rows together. Not a relaxation:
 # no existing row moved, the count names one more function honestly.
-pending_port_ceiling = 40
+pending_port_ceiling = 36
 
 # The unprobed class (#1827), per leg. Empty since #2588: the five
 # HttpRequest readers (http.query_params / req_body / req_header / req_method /
@@ -308,15 +315,6 @@ pending_port_ceiling = 40
 unprobed_ceiling_structural = 0
 unprobed_ceiling_stock_p1 = 0
 unprobed_ceiling_embedded = 0
-
-[[unavailable]]
-fn = "http.anthropic_streaming_call"
-legs = ["structural", "stock-p1", "embedded"]
-class = "pending-port"
-reason-embedded = "no wasm host binding for the streaming client (the framed ops 43..=50 serve the non-streaming family only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
-reason-stock-p1 = "no wasm host binding for the streaming client (the framed ops 43..=50 serve the non-streaming family only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
-reason-structural = "host-surface"
-issue = "#1827"
 
 [[unavailable]]
 fn = "http.delete"
@@ -345,15 +343,6 @@ legs = ["stock-p1"]
 class = "pending-port"
 reason = "embedded-lane-served (#1710 increment 3, the framed ops 48..=50): `almide run --target wasm` serves the 4-arg request family through the http_framed splice and the transcribed native client (C-328); the DEFAULT stock artifact still refuses at build via the op audit"
 issue = "#1423"
-
-[[unavailable]]
-fn = "http.openai_streaming_call"
-legs = ["structural", "stock-p1", "embedded"]
-class = "pending-port"
-reason-embedded = "Almide over request_stream (ADR-0023 step 5), which has no wasm service: the streaming client's port is ADR-0023 step 4 — run natively, or use openai_streaming_call_with_limits, which the embedded lane serves"
-reason-stock-p1 = "Almide over request_stream (ADR-0023 step 5), which has no wasm service: the streaming client's port is ADR-0023 step 4 — run natively"
-reason-structural = "host-surface"
-issue = "#1827"
 
 [[unavailable]]
 fn = "http.patch"
@@ -441,12 +430,10 @@ issue = "#1710"
 
 [[unavailable]]
 fn = "http.request_stream"
-legs = ["structural", "stock-p1", "embedded"]
+legs = ["stock-p1"]
 class = "pending-port"
-reason-embedded = "no wasm host binding for the streaming client (the framed ops 43..=50 serve the non-streaming family only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
-reason-stock-p1 = "no wasm host binding for the streaming client (the framed ops 43..=50 serve the non-streaming family only) — run natively, or wait for the wasi:http@0.3 port (#1710)"
-reason-structural = "host-surface"
-issue = "#1827"
+reason = "embedded-lane-served: `almide run --target wasm` serves it as the http call handle's CLASSIC call (ops 53..=59; both limit cells `classic`), the shared call core native runs too — the client read timeout between arrivals, no wall clock; the DEFAULT stock artifact still refuses — stock WASI has no host for a guest-pollable http call until the call handle joins the wasi:http shim (ADR-0023 step 4)"
+issue = "#1710"
 
 [[unavailable]]
 fn = "net.tcp_accept"
@@ -542,133 +529,107 @@ issue = "#3620"
 
 [[unavailable]]
 fn = "net.shm_create"
-legs = ["embedded", "stock-p1", "structural"]
+legs = ["stock-p1"]
 class = "native-only-forever"
-justification = "stock WASI (0.2 and 0.3) has no Unix-domain sockets and no descriptor passing, and a shared-memory file is passed as a descriptor over a Unix socket — the IPC floor of Wayland and PipeWire, which only exists natively"
-reason-embedded = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
-reason-stock-p1 = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
-reason-structural = "host-surface (native-only-forever)"
-issue = "#1423"
+justification = "WASI (preview 1, 0.2 and 0.3) has neither Unix-domain sockets nor shared memory, so no stock artifact can serve it on any runtime; native and the embedded host (`almide run --target wasm`, interim ops 104..=116 over native's own core, #3620) serve it"
+reason-stock-p1 = "WASI has neither Unix-domain sockets nor shared memory, so a stock artifact cannot serve it — `almide run --target wasm` (the embedded host, interim ops 104..=116) and the native target do"
+issue = "#3620"
 
 [[unavailable]]
 fn = "net.shm_read"
-legs = ["embedded", "stock-p1", "structural"]
+legs = ["stock-p1"]
 class = "native-only-forever"
-justification = "stock WASI (0.2 and 0.3) has no Unix-domain sockets and no descriptor passing, and a shared-memory file is passed as a descriptor over a Unix socket — the IPC floor of Wayland and PipeWire, which only exists natively"
-reason-embedded = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
-reason-stock-p1 = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
-reason-structural = "host-surface (native-only-forever)"
-issue = "#1423"
+justification = "WASI (preview 1, 0.2 and 0.3) has neither Unix-domain sockets nor shared memory, so no stock artifact can serve it on any runtime; native and the embedded host (`almide run --target wasm`, interim ops 104..=116 over native's own core, #3620) serve it"
+reason-stock-p1 = "WASI has neither Unix-domain sockets nor shared memory, so a stock artifact cannot serve it — `almide run --target wasm` (the embedded host, interim ops 104..=116) and the native target do"
+issue = "#3620"
 
 [[unavailable]]
 fn = "net.shm_resize"
-legs = ["embedded", "stock-p1", "structural"]
+legs = ["stock-p1"]
 class = "native-only-forever"
-justification = "stock WASI (0.2 and 0.3) has no Unix-domain sockets and no descriptor passing, and a shared-memory file is passed as a descriptor over a Unix socket — the IPC floor of Wayland and PipeWire, which only exists natively"
-reason-embedded = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
-reason-stock-p1 = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
-reason-structural = "host-surface (native-only-forever)"
-issue = "#1423"
+justification = "WASI (preview 1, 0.2 and 0.3) has neither Unix-domain sockets nor shared memory, so no stock artifact can serve it on any runtime; native and the embedded host (`almide run --target wasm`, interim ops 104..=116 over native's own core, #3620) serve it"
+reason-stock-p1 = "WASI has neither Unix-domain sockets nor shared memory, so a stock artifact cannot serve it — `almide run --target wasm` (the embedded host, interim ops 104..=116) and the native target do"
+issue = "#3620"
 
 [[unavailable]]
 fn = "net.shm_write"
-legs = ["embedded", "stock-p1", "structural"]
+legs = ["stock-p1"]
 class = "native-only-forever"
-justification = "stock WASI (0.2 and 0.3) has no Unix-domain sockets and no descriptor passing, and a shared-memory file is passed as a descriptor over a Unix socket — the IPC floor of Wayland and PipeWire, which only exists natively"
-reason-embedded = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
-reason-stock-p1 = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
-reason-structural = "host-surface (native-only-forever)"
-issue = "#1423"
+justification = "WASI (preview 1, 0.2 and 0.3) has neither Unix-domain sockets nor shared memory, so no stock artifact can serve it on any runtime; native and the embedded host (`almide run --target wasm`, interim ops 104..=116 over native's own core, #3620) serve it"
+reason-stock-p1 = "WASI has neither Unix-domain sockets nor shared memory, so a stock artifact cannot serve it — `almide run --target wasm` (the embedded host, interim ops 104..=116) and the native target do"
+issue = "#3620"
 
 [[unavailable]]
 fn = "net.unix_accept"
-legs = ["embedded", "stock-p1", "structural"]
+legs = ["stock-p1"]
 class = "native-only-forever"
-justification = "stock WASI (0.2 and 0.3) has no Unix-domain sockets and no descriptor passing, and a Unix-domain socket that carries file descriptors — the IPC floor of Wayland and PipeWire, which only exists natively"
-reason-embedded = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
-reason-stock-p1 = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
-reason-structural = "host-surface (native-only-forever)"
-issue = "#1423"
+justification = "WASI (preview 1, 0.2 and 0.3) has neither Unix-domain sockets nor shared memory, so no stock artifact can serve it on any runtime; native and the embedded host (`almide run --target wasm`, interim ops 104..=116 over native's own core, #3620) serve it"
+reason-stock-p1 = "WASI has neither Unix-domain sockets nor shared memory, so a stock artifact cannot serve it — `almide run --target wasm` (the embedded host, interim ops 104..=116) and the native target do"
+issue = "#3620"
 
 [[unavailable]]
 fn = "net.unix_wait"
-legs = ["embedded", "stock-p1", "structural"]
+legs = ["stock-p1"]
 class = "native-only-forever"
-justification = "stock WASI (0.2 and 0.3) has no Unix-domain sockets and no descriptor passing, and a Unix-domain socket that carries file descriptors — the IPC floor of Wayland and PipeWire, which only exists natively"
-reason-embedded = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
-reason-stock-p1 = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
-reason-structural = "host-surface (native-only-forever)"
-issue = "#1423"
+justification = "WASI (preview 1, 0.2 and 0.3) has neither Unix-domain sockets nor shared memory, so no stock artifact can serve it on any runtime; native and the embedded host (`almide run --target wasm`, interim ops 104..=116 over native's own core, #3620) serve it"
+reason-stock-p1 = "WASI has neither Unix-domain sockets nor shared memory, so a stock artifact cannot serve it — `almide run --target wasm` (the embedded host, interim ops 104..=116) and the native target do"
+issue = "#3620"
 
 [[unavailable]]
 fn = "net.unix_close"
-legs = ["embedded", "stock-p1", "structural"]
+legs = ["stock-p1"]
 class = "native-only-forever"
-justification = "stock WASI (0.2 and 0.3) has no Unix-domain sockets and no descriptor passing, and a Unix-domain socket that carries file descriptors — the IPC floor of Wayland and PipeWire, which only exists natively"
-reason-embedded = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
-reason-stock-p1 = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
-reason-structural = "host-surface (native-only-forever)"
-issue = "#1423"
+justification = "WASI (preview 1, 0.2 and 0.3) has neither Unix-domain sockets nor shared memory, so no stock artifact can serve it on any runtime; native and the embedded host (`almide run --target wasm`, interim ops 104..=116 over native's own core, #3620) serve it"
+reason-stock-p1 = "WASI has neither Unix-domain sockets nor shared memory, so a stock artifact cannot serve it — `almide run --target wasm` (the embedded host, interim ops 104..=116) and the native target do"
+issue = "#3620"
 
 [[unavailable]]
 fn = "net.unix_connect"
-legs = ["embedded", "stock-p1", "structural"]
+legs = ["stock-p1"]
 class = "native-only-forever"
-justification = "stock WASI (0.2 and 0.3) has no Unix-domain sockets and no descriptor passing, and a Unix-domain socket that carries file descriptors — the IPC floor of Wayland and PipeWire, which only exists natively"
-reason-embedded = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
-reason-stock-p1 = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
-reason-structural = "host-surface (native-only-forever)"
-issue = "#1423"
+justification = "WASI (preview 1, 0.2 and 0.3) has neither Unix-domain sockets nor shared memory, so no stock artifact can serve it on any runtime; native and the embedded host (`almide run --target wasm`, interim ops 104..=116 over native's own core, #3620) serve it"
+reason-stock-p1 = "WASI has neither Unix-domain sockets nor shared memory, so a stock artifact cannot serve it — `almide run --target wasm` (the embedded host, interim ops 104..=116) and the native target do"
+issue = "#3620"
 
 [[unavailable]]
 fn = "net.unix_listen"
-legs = ["embedded", "stock-p1", "structural"]
+legs = ["stock-p1"]
 class = "native-only-forever"
-justification = "stock WASI (0.2 and 0.3) has no Unix-domain sockets and no descriptor passing, and a Unix-domain socket that carries file descriptors — the IPC floor of Wayland and PipeWire, which only exists natively"
-reason-embedded = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
-reason-stock-p1 = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
-reason-structural = "host-surface (native-only-forever)"
-issue = "#1423"
+justification = "WASI (preview 1, 0.2 and 0.3) has neither Unix-domain sockets nor shared memory, so no stock artifact can serve it on any runtime; native and the embedded host (`almide run --target wasm`, interim ops 104..=116 over native's own core, #3620) serve it"
+reason-stock-p1 = "WASI has neither Unix-domain sockets nor shared memory, so a stock artifact cannot serve it — `almide run --target wasm` (the embedded host, interim ops 104..=116) and the native target do"
+issue = "#3620"
 
 [[unavailable]]
 fn = "net.unix_poll"
-legs = ["embedded", "stock-p1", "structural"]
+legs = ["stock-p1"]
 class = "native-only-forever"
-justification = "stock WASI (0.2 and 0.3) has no Unix-domain sockets and no descriptor passing, and a Unix-domain socket that carries file descriptors — the IPC floor of Wayland and PipeWire, which only exists natively"
-reason-embedded = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
-reason-stock-p1 = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
-reason-structural = "host-surface (native-only-forever)"
-issue = "#1423"
+justification = "WASI (preview 1, 0.2 and 0.3) has neither Unix-domain sockets nor shared memory, so no stock artifact can serve it on any runtime; native and the embedded host (`almide run --target wasm`, interim ops 104..=116 over native's own core, #3620) serve it"
+reason-stock-p1 = "WASI has neither Unix-domain sockets nor shared memory, so a stock artifact cannot serve it — `almide run --target wasm` (the embedded host, interim ops 104..=116) and the native target do"
+issue = "#3620"
 
 [[unavailable]]
 fn = "net.unix_recv"
-legs = ["embedded", "stock-p1", "structural"]
+legs = ["stock-p1"]
 class = "native-only-forever"
-justification = "stock WASI (0.2 and 0.3) has no Unix-domain sockets and no descriptor passing, and a Unix-domain socket that carries file descriptors — the IPC floor of Wayland and PipeWire, which only exists natively"
-reason-embedded = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
-reason-stock-p1 = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
-reason-structural = "host-surface (native-only-forever)"
-issue = "#1423"
+justification = "WASI (preview 1, 0.2 and 0.3) has neither Unix-domain sockets nor shared memory, so no stock artifact can serve it on any runtime; native and the embedded host (`almide run --target wasm`, interim ops 104..=116 over native's own core, #3620) serve it"
+reason-stock-p1 = "WASI has neither Unix-domain sockets nor shared memory, so a stock artifact cannot serve it — `almide run --target wasm` (the embedded host, interim ops 104..=116) and the native target do"
+issue = "#3620"
 
 [[unavailable]]
 fn = "net.unix_send"
-legs = ["embedded", "stock-p1", "structural"]
+legs = ["stock-p1"]
 class = "native-only-forever"
-justification = "stock WASI (0.2 and 0.3) has no Unix-domain sockets and no descriptor passing, and a Unix-domain socket that carries file descriptors — the IPC floor of Wayland and PipeWire, which only exists natively"
-reason-embedded = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
-reason-stock-p1 = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
-reason-structural = "host-surface (native-only-forever)"
-issue = "#1423"
+justification = "WASI (preview 1, 0.2 and 0.3) has neither Unix-domain sockets nor shared memory, so no stock artifact can serve it on any runtime; native and the embedded host (`almide run --target wasm`, interim ops 104..=116 over native's own core, #3620) serve it"
+reason-stock-p1 = "WASI has neither Unix-domain sockets nor shared memory, so a stock artifact cannot serve it — `almide run --target wasm` (the embedded host, interim ops 104..=116) and the native target do"
+issue = "#3620"
 
 [[unavailable]]
 fn = "net.unix_take_fds"
-legs = ["embedded", "stock-p1", "structural"]
+legs = ["stock-p1"]
 class = "native-only-forever"
-justification = "stock WASI (0.2 and 0.3) has no Unix-domain sockets and no descriptor passing, and a Unix-domain socket that carries file descriptors — the IPC floor of Wayland and PipeWire, which only exists natively"
-reason-embedded = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
-reason-stock-p1 = "stock WASI has no Unix-domain sockets or descriptor passing — run natively (native-only-forever)"
-reason-structural = "host-surface (native-only-forever)"
-issue = "#1423"
+justification = "WASI (preview 1, 0.2 and 0.3) has neither Unix-domain sockets nor shared memory, so no stock artifact can serve it on any runtime; native and the embedded host (`almide run --target wasm`, interim ops 104..=116 over native's own core, #3620) serve it"
+reason-stock-p1 = "WASI has neither Unix-domain sockets nor shared memory, so a stock artifact cannot serve it — `almide run --target wasm` (the embedded host, interim ops 104..=116) and the native target do"
+issue = "#3620"
 
 [[unavailable]]
 fn = "process.exec"
@@ -766,28 +727,11 @@ justification = "stock WASI (0.2 and 0.3) has no subprocess API; the fn runs whe
 reason-stock-p1 = "the artifact imports the private almide:process/spawn capability, which a stock runtime refuses at load — run natively, with `almide run --target wasm`, or on a host that implements the import (host-capability, ADR-0025)"
 issue = "#2589"
 
-
-[[unavailable]]
-fn = "http.anthropic_streaming_call_with_limits"
-legs = ["structural", "stock-p1", "embedded"]
-class = "pending-port"
-reason-embedded = "no wasm host binding for the http call handle (the framed ops 43..=50 serve the one-shot clients only; the handle needs a guest-pollable response, #2631) — run natively, or wait for the wasi:http pollable port (#2633)"
-reason-stock-p1 = "no wasm host binding for the http call handle (the framed ops 43..=50 serve the one-shot clients only; the handle needs a guest-pollable response, #2631) — run natively, or wait for the wasi:http pollable port (#2633)"
-reason-structural = "host-surface"
-issue = "#2633"
-
 [[unavailable]]
 fn = "http.cancel"
 legs = ["stock-p1"]
 class = "pending-port"
 reason = "embedded-lane-served (#2633, ops 53..=59): `almide run --target wasm` serves the http call handle through the http_call splice and the shared native call core (crates/almide-rt-core, C-366); the DEFAULT stock artifact still refuses — stock WASI has no host for a guest-pollable http call until the wasi:http port (#1710)"
-issue = "#1710"
-
-[[unavailable]]
-fn = "http.openai_streaming_call_with_limits"
-legs = ["stock-p1"]
-class = "pending-port"
-reason = "Almide over request_stream_with_limits (ADR-0023 step 5): the structural leg and `almide run --target wasm` serve it through the http call handle (ops 53..=59, C-366); the DEFAULT stock artifact still refuses — stock WASI has no host for a guest-pollable http call until the call handle joins the wasi:http shim (ADR-0023 step 4)"
 issue = "#1710"
 
 [[unavailable]]
@@ -824,3 +768,10 @@ legs = ["stock-p1"]
 class = "pending-port"
 reason = "embedded-lane-served (#2633, ops 53..=59): `almide run --target wasm` serves the http call handle through the http_call splice and the shared native call core (crates/almide-rt-core, C-366); the DEFAULT stock artifact still refuses — stock WASI has no host for a guest-pollable http call until the wasi:http port (#1710)"
 issue = "#1710"
+
+[[unavailable]]
+fn = "testing.assert_aborts"
+legs = ["stock-p1"]
+class = "host-capability"
+justification = "the closure runs in a fresh instance of the same module (ADR-0029 D3), which the embedded host starts for the test lane and a stock runtime has no way to start; native runs it in a re-executed test binary"
+reason-stock-p1 = "under ALMIDE_TEST_WASM_RUNNER=wasmtime the test file runs on native: testing.assert_aborts needs the embedded host to start a fresh instance (host-capability, ADR-0029)"

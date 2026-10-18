@@ -189,7 +189,7 @@ pub fn almide_rt_list_reduce<A: Clone>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A, A) -
 pub fn almide_rt_list_scan<A: Clone, B: Clone>(xs: Vec<A>, init: B, f: std::rc::Rc<dyn Fn(B, A) -> B>) -> Vec<B> { let f = move |a, b| f(a, b); let mut r = Vec::new(); let mut a = init; for x in xs { a = f(a, x); r.push(a.clone()); } r }
 pub fn almide_rt_list_sort_by<A: Clone, B: Ord>(mut xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> B>) -> Vec<A> { let f = move |a| f(a); xs.sort_by_cached_key(|x| f(x.clone())); xs }  // #560: cached_key calls the key fn ONCE PER ELEMENT (n), matching the wasm precomputed-key array + the key-extraction intent; sort_by_key called it per COMPARISON (n log n), an observable native!=wasm divergence for side-effectful keys.
 pub fn almide_rt_list_fold_effect<A, B>(xs: Vec<A>, init: B, f: std::rc::Rc<dyn Fn(B, A) -> Result<B, AlmideString>>) -> Result<B, AlmideString> { let __almide_r: Result<B, String> = (|| { let f = move |a, b| f(a, b); let mut a = init; for x in xs { a = f(a, x)?; } Ok(a) })(); __almide_r.map_err(Into::into) }
-pub fn almide_rt_list_map_effect<A, B>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> Result<B, AlmideString>>) -> Result<Vec<B>, AlmideString> { let __almide_r: Result<Vec<B>, String> = (|| { let f = move |a| f(a); xs.into_iter().map(f).collect() })(); __almide_r.map_err(Into::into) }
+pub fn almide_rt_list_map_effect<A, B>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> Result<B, AlmideString>>) -> Result<Vec<B>, AlmideString> { let __almide_r: Result<Vec<B>, AlmideString> = (|| { let f = move |a| f(a); xs.into_iter().map(f).collect() })(); __almide_r.map_err(Into::into) }
 
 pub fn almide_rt_list_take_end<T: Clone>(xs: &[T], n: i64) -> Vec<T> {
     let start = if n as usize >= xs.len() { 0 } else { xs.len() - n as usize };
@@ -1123,6 +1123,7 @@ fn almide_fan_pool_wake(helpers: usize) {
 }
 
 pub fn almide_rt_list_par_map<A: Send + Sync + Clone, B: Send, F: Fn(A) -> B + Send + Sync>(xs: Vec<A>, f: F) -> Vec<B> {
+    xs.almide_share();
     if xs.len() < ALMIDE_PARALLEL_THRESHOLD || almide_rt_list_par_sequential() {
         return xs.into_iter().map(&f).collect();
     }
@@ -1154,6 +1155,7 @@ pub fn almide_rt_list_par_map<A: Send + Sync + Clone, B: Send, F: Fn(A) -> B + S
 }
 
 pub fn almide_rt_list_par_filter<A: Send + Sync + Clone, F: Fn(A) -> bool + Send + Sync>(xs: Vec<A>, f: F) -> Vec<A> {
+    xs.almide_share();
     if xs.len() < ALMIDE_PARALLEL_THRESHOLD || almide_rt_list_par_sequential() {
         return xs.into_iter().filter(|x| f(x.clone())).collect();
     }
@@ -1233,6 +1235,7 @@ fn almide_fan_search<A: Send + Sync + Clone, F: Fn(A) -> bool + Send + Sync>(sit
 }
 
 pub fn almide_rt_list_par_any<A: Send + Sync + Clone, F: Fn(A) -> bool + Send + Sync>(xs: &[A], f: F) -> bool {
+    xs.almide_share();
     if xs.len() < ALMIDE_PARALLEL_THRESHOLD || almide_rt_list_par_sequential() {
         return xs.iter().any(|x| f(x.clone()));
     }
@@ -1240,6 +1243,7 @@ pub fn almide_rt_list_par_any<A: Send + Sync + Clone, F: Fn(A) -> bool + Send + 
 }
 
 pub fn almide_rt_list_par_all<A: Send + Sync + Clone, F: Fn(A) -> bool + Send + Sync>(xs: &[A], f: F) -> bool {
+    xs.almide_share();
     if xs.len() < ALMIDE_PARALLEL_THRESHOLD || almide_rt_list_par_sequential() {
         return xs.iter().all(|x| f(x.clone()));
     }

@@ -121,8 +121,28 @@ impl<'a> Builder<'a> {
 /// mutated var.
 fn render_call(b: &mut Builder, sig: &Signature, subst: &HashMap<String, GenType>) -> Option<String> {
     let mut args = Vec::with_capacity(sig.params.len());
+    // Half the calls of a function with an inspection shape recipe take the
+    // recipe's in-domain operands at a small size: generated values never
+    // line up weight bytes with their offsets, head counts and widths, so the
+    // campaign only reached such a kernel's guards, never its dot (#1827 — a
+    // -128 Q8_0 weight quant diverged natively on x86 and only the
+    // inspection's diamond saw it).
+    let shaped = super::inspect_gen::shape_recipe(&format!("{}.{}", sig.module, sig.func))
+        .filter(|_| b.rng.chance(1, 2))
+        .map(|r| (r, *b.rng.pick(&[100u64, 300, 1000, 2000, 5000])));
     for (i, p) in sig.params.iter().enumerate() {
         let name = sig.param_names.get(i).map(String::as_str).unwrap_or("");
+        // net's descriptors, socket paths and bounded sizes (#3620).
+        if sig.module == "net" {
+            if let Some(a) = super::net_unix_args::arg(b, &sig.func, name) {
+                args.push(a);
+                continue;
+            }
+        }
+        if let Some(a) = shaped.and_then(|(r, n)| super::inspect_gen::recipe_leaf(r, name, n)) {
+            args.push(a);
+            continue;
+        }
         if let Some(a) = net_int_arg(sig, name).filter(|_| *p == SigType::Int) {
             args.push(a);
             continue;
@@ -136,7 +156,11 @@ fn render_call(b: &mut Builder, sig: &Signature, subst: &HashMap<String, GenType
         }
         match sandbox_arg(b, sig, p, name) {
             Some(a) => args.push(a),
-            None => args.push(gen_arg(b, p, name, subst)?),
+            None => {
+                let a = gen_arg(b, p, name, subst)?;
+                let bounded = (sig.module == "net").then(|| super::net_unix_args::int_domain(&sig.func, name)).flatten();
+                args.push(bounded.map_or(a.clone(), |d| d.replace("{x}", &a)));
+            }
         }
     }
     if let Some(v) = sig.verdict {

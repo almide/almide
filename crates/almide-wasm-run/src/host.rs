@@ -101,9 +101,9 @@ struct Host {
     calls: Arc<Mutex<crate::http_call_host::HttpCalls>>,
     /// `http.serve`'s listener and pending connection (ops 70..=72, #2650).
     serve: Arc<Mutex<crate::host_serve::ServeState>>,
-    /// The run's tcp streams and listeners (ops 91..=103, #3620) — closed
-    /// when the run ends.
-    net: Arc<Mutex<almide_rt_core::net_core::AlmideNetTables>>,
+    /// The run's tcp handles and unix / shm descriptors (ops 91..=116,
+    /// #3620) — closed when the run ends.
+    net: Arc<Mutex<crate::net_host::NetRun>>,
     /// The product runner's LIVE streams (#2650): stdout through a 64 KiB
     /// buffer flushed at every line end, and per write on a terminal —
     /// native's rule (#3417) — and stderr
@@ -116,6 +116,9 @@ struct Host {
     /// The instance-parallel fan context (#3003): set on a run's own store,
     /// `None` on a chunk's — a chunk's nested offer runs sequentially.
     par: Option<Arc<fan::ParCtx>>,
+    /// The `testing.assert_aborts` site this instance was started to run
+    /// (op 118, ADR-0029), or -1: the run's own instance runs its tests.
+    abort_site: i64,
 }
 
 /// Is the process's stdout a terminal (native flushes per write there).
@@ -379,6 +382,25 @@ fn run_wasm_src_here(
     cfg.async_stack_size(EMBEDDED_WASM_STACK + 1024 * 1024);
     let engine = wasmtime::Engine::new(&cfg)?;
     let module = wasmtime::Module::new(&engine, bytes)?;
+    run_compiled(&engine, &module, Launch { stdin, max_memory_bytes, args, watchdog, live, abort_site: -1 })
+}
+
+/// How one instance of a compiled module is started: the run's own, or an
+/// abort-site child of it (`testing.assert_aborts`, ADR-0029).
+struct Launch<'a> {
+    stdin: StdinSource,
+    max_memory_bytes: Option<usize>,
+    args: &'a [String],
+    watchdog: Option<std::time::Duration>,
+    live: bool,
+    /// The abort site this instance runs (op 118), or -1 for the tests.
+    abort_site: i64,
+}
+
+/// Instantiate `module` once and run its `main` to completion.
+fn run_compiled(engine: &wasmtime::Engine, module: &wasmtime::Module, launch: Launch<'_>) -> anyhow::Result<RunResult> {
+    let Launch { stdin, max_memory_bytes, args, watchdog, live, abort_site } = launch;
+    let (engine, module) = (engine.clone(), module.clone());
     let out = Arc::new(Mutex::new(String::new()));
     let err = Arc::new(Mutex::new(String::new()));
     let exit = Arc::new(Mutex::new(None));
@@ -404,6 +426,7 @@ fn run_wasm_src_here(
             live_out: live.then(|| Arc::new(Mutex::new(std::io::BufWriter::with_capacity(65536, std::io::stdout())))),
             err_last: Arc::new(Mutex::new(String::new())),
             par: None,
+            abort_site,
         },
     );
     store.limiter(|h| &mut h.limits);
@@ -599,6 +622,11 @@ fn host_linker(engine: &wasmtime::Engine) -> anyhow::Result<wasmtime::Linker<Hos
                 *caller.data().fs_buf.lock().expect("fs buf") = buf;
                 return Ok((len as i64) & 0xFFFF_FFFF);
             }
+            // ops 117 / 118 = `testing.assert_aborts`'s abort sites
+            // (ADR-0029): scalars in a_len, no guest buffers.
+            if op == 117 || op == 118 {
+                return Ok(abort_site_op(&caller, op, a_len));
+            }
             let mem = caller
                 .get_export("memory")
                 .and_then(|e| e.into_memory())
@@ -650,8 +678,8 @@ fn host_linker(engine: &wasmtime::Engine) -> anyhow::Result<wasmtime::Linker<Hos
                 *caller.data().fs_buf.lock().expect("fs buf") = buf;
                 return Ok(ret);
             }
-            // ops 91..=103 = the tcp family (#3620): the net core native
-            // runs, on the run's own table.
+            // ops 91..=116 = the tcp family and the interim unix / shm ops
+            // (#3620): the net cores native runs, on the run's own tables.
             if (crate::net_host::OP_FIRST..=crate::net_host::OP_LAST).contains(&op) {
                 let net = caller.data().net.clone();
                 let (ret, buf) = crate::net_host::dispatch(&net, op, &a, &b);
@@ -685,6 +713,44 @@ fn host_linker(engine: &wasmtime::Engine) -> anyhow::Result<wasmtime::Linker<Hos
 }
 
 /// The `unreachable` trap — the instruction the die lowering ends on.
+/// `testing.assert_aborts` (ADR-0029). Op 118 answers the site this instance
+/// runs (-1: the tests). Op 117 runs site `a_len` on a FRESH instance of the
+/// run's own compiled module — fresh globals, an empty stdin, the run's args
+/// and bounds — on its own guest thread, and parks the frames [status,
+/// stdout, stderr]; the parent instance continues after it. A store without
+/// the run context (a fan chunk) cannot start one and answers status -1.
+fn abort_site_op(caller: &wasmtime::Caller<'_, Host>, op: i32, a_len: i32) -> i64 {
+    if op == 118 {
+        return caller.data().abort_site;
+    }
+    // A child never starts a grandchild (E099 refuses the nesting at check
+    // time; this bounds a direct call of the private op).
+    let par = if caller.data().abort_site >= 0 { None } else { caller.data().par.clone() };
+    let child = match par {
+        Some(par) => {
+            let (engine, module, max_memory_bytes, args) = par.compiled();
+            std::thread::scope(|s| {
+                spawn_guest_thread(s, || {
+                    let launch =
+                        Launch { stdin: StdinSource::Buf(Vec::new()), max_memory_bytes, args, watchdog: None, live: false, abort_site: i64::from(a_len) };
+                    run_compiled(engine, module, launch)
+                })
+                .join()
+                .unwrap_or_else(|p| std::panic::resume_unwind(p))
+            })
+        }
+        None => Err(anyhow::anyhow!("an abort site cannot start from a fan element or from another abort site")),
+    };
+    let answer = match child {
+        Ok(r) => vec![r.exit.to_string(), r.stdout, r.stderr],
+        Err(e) => vec!["-1".to_string(), String::new(), format!("the abort-site child did not start: {e:#}")],
+    };
+    let buf = frames(&answer);
+    let len = buf.len();
+    *caller.data().fs_buf.lock().expect("fs buf") = buf;
+    (len as i64) & 0xFFFF_FFFF
+}
+
 fn is_unreachable_trap(e: &wasmtime::Error) -> bool {
     matches!(e.downcast_ref::<wasmtime::Trap>(), Some(wasmtime::Trap::UnreachableCodeReached))
 }

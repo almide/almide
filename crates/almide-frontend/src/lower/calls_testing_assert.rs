@@ -93,8 +93,6 @@ enum TestingVerdict {
     Cond(IrExpr),
     /// The first operand matches this pattern.
     Arm(IrPattern),
-    /// Never passes here: call the thunk, then fail (`assert_throws`).
-    AfterCall(IrExpr),
 }
 
 /// The arity of a `testing` assert this desugar owns, or None. One name
@@ -108,15 +106,14 @@ fn testing_assert_arity(func: &str) -> Option<usize> {
         "assert_gt" => Some(2),
         "assert_lt" => Some(2),
         "assert_contains" => Some(2),
-        "assert_throws" => Some(2),
         "assert_approx" => Some(3),
         _ => None,
     }
 }
 
 /// `testing.assert_gt` / `assert_lt` / `assert_approx` / `assert_contains` /
-/// `assert_some` / `assert_none` / `assert_ok` / `assert_err` /
-/// `assert_throws` OUTSIDE a test block (#3747) desugar to the T18 abort
+/// `assert_some` / `assert_none` / `assert_ok` / `assert_err` OUTSIDE a test
+/// block (#3747) desugar to the T18 abort
 /// form, the same way `assert_eq` does (C-153), so every target prints
 /// one block and exits 1:
 /// ```text
@@ -125,14 +122,7 @@ fn testing_assert_arity(func: &str) -> Option<usize> {
 ///   expected: <the relation, e.g. `> 2`, `contains "x"`, `ok(_)`>
 ///   found: <the operand>
 /// ```
-/// Inside a test block the call stays a call: the harness reports it, and
-/// `assert_throws` must be able to catch it there.
-///
-/// `assert_throws` outside a test can only fail — a `panic` there is the
-/// uncatchable C-219 abort — so it calls the thunk and then fails with
-/// `found: returned normally`. The thunk's own panic is that abort, on
-/// every target, so the desugared call builds on wasm too; the E081
-/// availability refusal still holds for a call inside a test block.
+/// Inside a test block the call stays a call: the harness reports it.
 fn desugar_testing_assert_outside_test(
     ctx: &mut LowerCtx,
     target: &CallTarget,
@@ -147,14 +137,7 @@ fn desugar_testing_assert_outside_test(
     if module.as_str() != "testing" || testing_assert_arity(f) != Some(ir_args.len()) {
         return None;
     }
-    // `assert_throws`'s thunk is called in place, never bound: the structural
-    // wasm leg has no slot for a fn-typed `let` whose body diverges, and the
-    // thunk is read once either way. The expected text binds first.
-    let (callee, bound) = match ir_args.split_first() {
-        Some((thunk, rest)) if f == "assert_throws" => (Some(thunk.clone()), rest.to_vec()),
-        _ => (None, ir_args.to_vec()),
-    };
-    let (mut stmts, v) = bind_assert_operands(ctx, bound, span);
+    let (mut stmts, v) = bind_assert_operands(ctx, ir_args.to_vec(), span);
     let at = span.as_ref().map(|s| format!("\n  at: line {}", s.line)).unwrap_or_default();
     let head = |rel: &str| IrStringPart::Lit { value: format!("Error: assertion failed{at}\n  expected: {rel}") };
     let lit = |s: &str| IrStringPart::Lit { value: s.to_string() };
@@ -206,21 +189,7 @@ fn desugar_testing_assert_outside_test(
             let pat = IrPattern::Err { inner: Box::new(IrPattern::Wildcard) };
             (vec![head("err(_)"), found(), val(&v[0])], TestingVerdict::Arm(pat))
         }
-        _ => {
-            // Typed at the parameter's `() -> Unit`: a lambda whose body
-            // diverges (`() => panic(..)`) infers `() -> Never`, a shape the
-            // structural wasm leg has no slot for.
-            let mut thunk = callee.expect("assert_throws carries its thunk");
-            thunk.ty = Ty::Fn { params: vec![], ret: Box::new(Ty::Unit), is_effect: false };
-            let call = IrExprKind::Call {
-                target: CallTarget::Computed { callee: Box::new(thunk) },
-                args: vec![],
-                type_args: vec![],
-            };
-            let call = ctx.mk(call, Ty::Unit, span);
-            let parts = vec![head("panic containing "), val(&v[0]), found(), lit("returned normally")];
-            (parts, TestingVerdict::AfterCall(call))
-        }
+        _ => return None,
     };
     let fail = t18_abort_block(ctx, parts, span);
     let ok = ctx.mk(IrExprKind::Block { stmts: vec![], expr: None }, Ty::Unit, span);
@@ -232,13 +201,6 @@ fn desugar_testing_assert_outside_test(
                 IrMatchArm { pattern, guard: None, body: ok },
                 IrMatchArm { pattern: IrPattern::Wildcard, guard: None, body: fail },
             ],
-        },
-        TestingVerdict::AfterCall(call) => IrExprKind::Block {
-            stmts: vec![
-                IrStmt { kind: IrStmtKind::Expr { expr: call }, span: None },
-                IrStmt { kind: IrStmtKind::Expr { expr: fail }, span: None },
-            ],
-            expr: None,
         },
     };
     let guard = ctx.mk(guard, Ty::Unit, span);

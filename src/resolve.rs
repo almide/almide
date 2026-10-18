@@ -745,6 +745,11 @@ fn find_module_file(name: &str, base_dir: &Path, dep_paths: &[(project::PkgId, P
             "'{name}' is auto-available — it is a built-in surface, not a module\n  hint: Remove the `import {name}` line; {name}.ms(...) is always in scope",
         ));
     }
+    // A stdlib module a dialect epoch removed whole (`mem`): the fix is to
+    // delete the import, not to create the file.
+    if let Some(hint) = almide_frontend::removed_spellings::removed_module_hint(name) {
+        return Err(format!("module '{name}' not found\n  hint: {hint}"));
+    }
     Err(format!(
         "module '{}' not found\n  searched: {}\n  hint: Create {}.almd in the same directory, or add to [dependencies] in almide.toml",
         name,

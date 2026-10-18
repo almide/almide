@@ -29,6 +29,9 @@ use crate::generator::{
 };
 use crate::oracle::sandbox::{self, World};
 
+mod aborts;
+mod serve;
+
 const NOISE_FLOOR: Duration = Duration::from_millis(60);
 const CALIBRATE_TARGET: Duration = Duration::from_millis(250);
 const MAX_K: u64 = 1 << 22;
@@ -69,7 +72,7 @@ pub fn cmd_inspect(args: &[String]) {
     let dir = std::env::temp_dir().join(format!("xtarget-inspect-{}", std::process::id()));
     let _ = std::fs::create_dir_all(&dir);
     let icount = icount_available();
-    let ctx = Ctx {
+    let mut ctx = Ctx {
         // Absolute: every run enters its sandbox as its cwd, where a
         // relative path to the compiler would not resolve.
         almide: absolute(super::resolve_almide(&repo, args)),
@@ -77,14 +80,23 @@ pub fn cmd_inspect(args: &[String]) {
         memshim: if icount { build_memshim(&dir) } else { None },
         dir,
         icount,
-        max_k: crate::generator::inspect_max_k(&name).unwrap_or(MAX_K),
+        max_k: MAX_K,
         calibrate_scale: if crate::generator::needs_embedded(&format!("{name}(")) { 10.0 } else { 1.0 },
     };
     let engine = Engine::with_family(&repo, Family::Synthesis);
+    // A function that serves until stopped is inspected as sessions the
+    // harness drives (`inspect/serve.rs`), not as calls a program makes.
+    if aborts::TESTED.contains(&name.as_str()) {
+        return aborts::inspect(&mut ctx, &engine, &name, args);
+    }
+    if serve::SERVED.contains(&name.as_str()) {
+        return serve::inspect(&mut ctx, &engine, &name, args);
+    }
     let target = engine.inspect_target(&name).unwrap_or_else(|e| {
         eprintln!("{e}");
         std::process::exit(2);
     });
+    ctx.max_k = crate::generator::inspect_max_k(&name, target.is_effect()).unwrap_or(MAX_K);
     // A generic function is also inspected with its free type variables at
     // String, the heap instantiation (Target::new_filled). A function the
     // grammar cannot build at String is a failed criterion, not a skip.
@@ -406,10 +418,19 @@ fn build_as(ctx: &Ctx, src: &str, leg: Leg, canonical: bool) -> Result<PathBuf, 
     let file = ctx.dir.join(format!("p{:016x}.almd", hash(src)));
     std::fs::write(&file, src).map_err(|e| e.to_string())?;
     let canonical = canonical && matches!(leg, Leg::Wasm);
+    // A test-file probe (`// @xf-test`) is run by `almide test` on its leg's
+    // lane: its artifact is the source, or the native libtest binary built
+    // once here (`aborts::test_art`).
+    if crate::generator::aborts_gen::is_test_probe(src) {
+        return aborts::test_art(ctx, &file, src, matches!(leg, Leg::Wasm));
+    }
     // A program only the embedded host serves (ADR-0027 D1) is built and run
     // there in one step: its artifact is the source, under a name that
     // carries the allocator choice (`run_cmd`).
-    if matches!(leg, Leg::Wasm) && crate::generator::needs_embedded(src) {
+    // A served probe's wasm leg is the embedded lane too: the counted judge
+    // has two legs, and the stock `wasmtime serve` leg is compared in the
+    // served parity campaign (`serve::parity`).
+    if matches!(leg, Leg::Wasm) && (crate::generator::needs_embedded(src) || serve_plan(src).is_some()) {
         let art = file.with_extension(if canonical { "canonical.embedded.almd" } else { "embedded.almd" });
         std::fs::write(&art, src).map_err(|e| e.to_string())?;
         return Ok(art);
@@ -448,6 +469,11 @@ fn source_of(art: &Path) -> String {
     std::fs::read_to_string(art.with_file_name(format!("{stem}.almd"))).unwrap_or_default()
 }
 
+/// The session plan of a served probe (`// @xf-serve ...`), else None.
+fn serve_plan(src: &str) -> Option<crate::oracle::serve::Plan> {
+    crate::oracle::serve::plan_of(src)
+}
+
 /// An artifact `build_as` left as source for the embedded host.
 fn is_embedded(art: &Path) -> bool {
     art.to_string_lossy().ends_with(".embedded.almd")
@@ -467,18 +493,37 @@ fn embedded_cmd(ctx: &Ctx, art: &Path) -> Command {
 }
 
 fn run_artifact(ctx: &Ctx, art: &Path, leg: Leg) -> Result<String, String> {
-    let world = World::for_program(&ctx.dir, &source_of(art))?;
-    let mut cmd = match leg {
-        _ if is_embedded(art) => embedded_cmd(ctx, art),
-        Leg::Native => Command::new(art),
-        Leg::Wasm => {
-            let mut c = Command::new(&ctx.wasmtime);
-            c.arg("run").args(world.wasmtime_args()).arg(art);
-            c
-        }
+    let src = source_of(art);
+    let world = World::for_program(&ctx.dir, &src)?;
+    if let Some(wasm) = aborts::test_art_leg(art) {
+        return aborts::run_test_art(ctx, art, wasm, &world);
+    }
+    let make = || {
+        let mut cmd = match leg {
+            _ if is_embedded(art) => embedded_cmd(ctx, art),
+            Leg::Native => Command::new(art),
+            Leg::Wasm => {
+                let mut c = Command::new(&ctx.wasmtime);
+                c.arg("run").args(world.wasmtime_args()).arg(art);
+                c
+            }
+        };
+        cmd.args(sandbox::ARGS);
+        world.enter(&mut cmd);
+        cmd
     };
-    cmd.args(sandbox::ARGS);
-    world.enter(&mut cmd);
+    // A served probe runs as a session: the harness is its client, and its
+    // output is the transcript (`oracle/serve.rs`).
+    if let Some(plan) = serve_plan(&src) {
+        let s = crate::oracle::serve::drive_socket(&mut make(), &plan, false)?;
+        // The SIGTERM drains and returns from serve (ADR-0020 §5.6): any
+        // other exit is a failed run.
+        if !s.output.status.success() {
+            return Err(format!("after SIGTERM: {}", run_failure(&s.output)));
+        }
+        return Ok(s.transcript);
+    }
+    let mut cmd = make();
     let child = cmd
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -876,9 +921,9 @@ fn fit_class(sizes: &[u64], ys: &[f64]) -> (usize, f64) {
     }
     let floor = top * 0.01;
     let mut best = (0usize, f64::MAX);
-    for (i, (_, f)) in CLASSES.iter().enumerate() {
+    for (i, (name, f)) in CLASSES.iter().enumerate() {
         let xs: Vec<f64> = sizes.iter().map(|&m| f(m as f64)).collect();
-        let rms = fit_rms(&xs, ys, floor);
+        let rms = if *name == "nlogn" { fit_nlogn(sizes, ys, floor) } else { fit_rms(&xs, ys, floor) };
         if rms <= FIT_TOLERANCE {
             return (i, rms);
         }
@@ -887,6 +932,71 @@ fn fit_class(sizes: &[u64], ys: &[f64]) -> (usize, f64) {
         }
     }
     best
+}
+
+/// The nlogn class (owner ruling Q17, 2026-10-18): `a + b·n + c·n·ln n`, so
+/// a sort plus linear work fits (fs.list_dir / walk / glob return sorted
+/// entries), under a slope cap that keeps the linear term from admitting a
+/// steeper curve. Over n..16n that model alone fits n^1.2 at 0.4% and
+/// n·ln²n at 0.1%; the cap is n·ln n's own log-log slope across the measured
+/// sizes plus 0.03, taken on the fitted curve without its intercept (a
+/// program-shape constant is not the call's cost). It refuses n^1.2 (1.200)
+/// and n·ln²n (1.179) against a cap of 1.119 at n = 20000, admits n·ln n
+/// (1.089) and a sort plus linear work (below it), and leaves n^1.1 (1.100)
+/// where the 2-term fit already put it (0.71%). A curve that fails the cap
+/// reports a residual above the tolerance.
+fn fit_nlogn(sizes: &[u64], ys: &[f64], floor: f64) -> f64 {
+    let ns: Vec<f64> = sizes.iter().map(|&m| m as f64).collect();
+    let (n0, n1) = (ns[0], ns[ns.len() - 1]);
+    // Columns scaled to 1 at n0 keep the normal equations well conditioned.
+    let cols = |n: f64| [1.0, n / n0, (n * n.ln()) / (n0 * n0.ln())];
+    let Some([a, b, c]) = least_squares_3(&ns, ys, cols) else { return f64::MAX };
+    let curve = |n: f64| {
+        let x = cols(n);
+        b * x[1] + c * x[2]
+    };
+    let span = (n1 / n0).ln();
+    let cap = ((n1 * n1.ln()) / (n0 * n0.ln())).ln() / span + NLOGN_SLOPE_MARGIN;
+    if curve(n0) <= 0.0 || curve(n1) <= 0.0 || (curve(n1) / curve(n0)).ln() / span > cap {
+        return f64::MAX;
+    }
+    let sq: f64 = ns.iter().zip(ys).map(|(&n, y)| ((y - (a + curve(n))) / y.abs().max(floor)).powi(2)).sum();
+    (sq / ns.len() as f64).sqrt()
+}
+
+/// How far above n·ln n's own log-log slope the nlogn class reaches (Q17).
+const NLOGN_SLOPE_MARGIN: f64 = 0.03;
+
+/// Least-squares `y = a·x0 + b·x1 + c·x2` over the columns `cols(n)`, by the
+/// normal equations (Gaussian elimination with partial pivoting); None when
+/// they are singular.
+fn least_squares_3(ns: &[f64], ys: &[f64], cols: impl Fn(f64) -> [f64; 3]) -> Option<[f64; 3]> {
+    let mut m = [[0.0f64; 4]; 3];
+    for (&n, &y) in ns.iter().zip(ys) {
+        let x = cols(n);
+        for i in 0..3 {
+            for j in 0..3 {
+                m[i][j] += x[i] * x[j];
+            }
+            m[i][3] += x[i] * y;
+        }
+    }
+    for i in 0..3 {
+        let p = (i..3).max_by(|&r, &q| m[r][i].abs().total_cmp(&m[q][i].abs()))?;
+        m.swap(i, p);
+        if m[i][i].abs() < f64::MIN_POSITIVE {
+            return None;
+        }
+        for r in 0..3 {
+            if r != i {
+                let f = m[r][i] / m[i][i];
+                for j in i..4 {
+                    m[r][j] -= f * m[i][j];
+                }
+            }
+        }
+    }
+    Some([m[0][3] / m[0][0], m[1][3] / m[1][1], m[2][3] / m[2][2]])
 }
 
 /// Relative RMS residual of the least-squares line `y = a + c·x`.
@@ -1004,7 +1114,18 @@ fn run_counted(ctx: &Ctx, art: &Path, leg: Leg) -> Result<(String, Counts), Stri
             .arg(format!("LD_PRELOAD={}", shim.display()))
             .arg(format!("MEMSHIM_OUT={}", moved_file.display()));
     }
+    let test_leg = aborts::test_art_leg(art);
     match leg {
+        _ if test_leg.is_some() => {
+            let e = aborts::test_art_cmd(ctx, art, test_leg == Some(true), &world.dir);
+            cmd.arg(e.get_program()).args(e.get_args());
+            for (k, v) in e.get_envs() {
+                if let Some(v) = v {
+                    cmd.env(k, v);
+                }
+            }
+            &mut cmd
+        }
         _ if is_embedded(art) => {
             let e = embedded_cmd(ctx, art);
             cmd.arg(e.get_program()).args(e.get_args());
@@ -1023,17 +1144,33 @@ fn run_counted(ctx: &Ctx, art: &Path, leg: Leg) -> Result<(String, Counts), Stri
         // intercept absorbs it.
         Leg::Wasm => cmd.arg(&ctx.wasmtime).args(["run", "-C", "cache=n", "-C", "parallel-compilation=n"]).args(world.wasmtime_args()).arg(art),
     };
-    cmd.args(sandbox::ARGS);
+    if test_leg.is_none() {
+        cmd.args(sandbox::ARGS);
+    }
     world.enter(&mut cmd);
-    let child = cmd
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .map_err(|e| e.to_string())?;
-    let (out, wall) = wait_capped(child, RUN_CAP)?;
+    let (out, wall) = match serve_plan(&source_of(art)) {
+        // A served probe: the session's transcript is its output, and the
+        // SIGTERM goes to perf's child, the server, so perf reports.
+        Some(plan) => {
+            let s = crate::oracle::serve::drive_socket(&mut cmd, &plan, true)?;
+            (std::process::Output { stdout: s.transcript.into_bytes(), ..s.output }, s.wall)
+        }
+        None => {
+            let child = cmd
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .map_err(|e| e.to_string())?;
+            wait_capped(child, RUN_CAP)?
+        }
+    };
     if !out.status.success() {
         return Err(run_failure(&out));
     }
+    let out = match test_leg {
+        Some(_) => std::process::Output { stdout: aborts::output_transcript(&out).into_bytes(), ..out },
+        None => out,
+    };
     let instructions = parse_instructions(&std::fs::read_to_string(&stat).unwrap_or_default())
         .ok_or_else(|| "perf reported no instructions:u count".to_string())?;
     let moved = match &ctx.memshim {
@@ -1121,6 +1258,60 @@ mod run_tests {
         // timed out at 60 s: its bytes go to the kernel.
         assert!(counted_calibrated_t(&Delta { instructions: 1e3, moved: 0.0, wall: Duration::from_secs(3) }));
     }
+
+    /// The shim's copies cost the same instructions per byte in both
+    /// directions. A memmove copies forward when the destination sits below
+    /// the source and backward otherwise, so which loop runs depends on where
+    /// the allocator put two blocks — and that changed with n: wasm env.set's
+    /// overlay log sat in the park (below the value) at n = 20000 and in a
+    /// heap block (above it) from 40000 on, and its series read 5 then 4
+    /// instructions per byte, fitted nlogn (GCE c4-standard-4, 2026-10-17).
+    /// Skipped where no PMU is readable.
+    #[test]
+    fn the_shims_forward_and_backward_copies_count_alike() {
+        if !icount_available() {
+            eprintln!("skipping: no instructions:u counter here");
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("xtarget-memshim-dir-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let shim = build_memshim(&dir).expect("cc builds the shim");
+        // memmove 1 MB 64 times, down (forward copy) or up (backward copy)
+        // by 64 bytes; the program is the same, only the direction differs.
+        let driver = dir.join("driver.c");
+        std::fs::write(
+            &driver,
+            "#include <stdlib.h>\n#include <string.h>\nint main(int c, char **v) {\n  size_t n = 1 << 20;\n  \
+             unsigned char *b = malloc(n + 128);\n  for (size_t i = 0; i < n + 128; i++) b[i] = (unsigned char)i;\n  \
+             int up = v[1][0] == 'u';\n  for (int r = 0; r < 64; r++) {\n    if (up) memmove(b + 64, b, n); else memmove(b, b + 64, n);\n  }\n  \
+             return b[n / 2] == 7;\n}\n",
+        )
+        .unwrap();
+        let exe = dir.join("driver");
+        let ok = Command::new("cc").args(["-O0", "-o"]).arg(&exe).arg(&driver).status().is_ok_and(|s| s.success());
+        assert!(ok, "cc builds the driver");
+        let count = |dirn: &str| -> u64 {
+            let stat = dir.join(format!("{dirn}.csv"));
+            let st = Command::new("perf")
+                .args(["stat", "-x", ",", "-e", "instructions:u", "-o"])
+                .arg(&stat)
+                .arg("--")
+                .arg("env")
+                .arg(format!("LD_PRELOAD={}", shim.display()))
+                .arg(&exe)
+                .arg(dirn)
+                .status()
+                .expect("perf");
+            assert!(st.code().is_some(), "driver ran");
+            parse_instructions(&std::fs::read_to_string(&stat).unwrap()).expect("a count")
+        };
+        let (down, up) = (count("down"), count("up"));
+        let _ = std::fs::remove_dir_all(&dir);
+        // 64 MiB copied each way: a one-instruction-per-byte difference is
+        // 6.7e7, so 1% of either count is far under it and far over jitter.
+        let diff = down.abs_diff(up) as f64 / down.max(up) as f64;
+        assert!(diff < 0.01, "forward copy {down} instructions, backward {up}: the directions differ by {:.1}%", diff * 100.0);
+    }
 }
 
 #[cfg(test)]
@@ -1203,7 +1394,7 @@ mod verdict_tests {
     /// failed leg.
     #[test]
     fn a_unit_diamond_prints_its_value_on_each_path() {
-        let t = crate::generator::inspect_gen::tests::target("bytes.heap_restore");
+        let t = crate::generator::inspect_gen::tests::target("testing.assert_gt");
         let project = t.diamond_project(10);
         let main = project.files.iter().find(|(p, _)| p.ends_with("main.almd")).map(|(_, s)| s.clone()).unwrap();
         for v in ["d", "l", "r"] {
@@ -1241,6 +1432,34 @@ mod fit_tests {
         // n log n over a 16x range is within tolerance of a line with an
         // intercept: it reads as n or nlogn, never as n2.
         assert!(matches!(class_of(|n| 40.0 * n * n.ln()), "n" | "nlogn"));
+    }
+
+    fn class_of_exact(f: impl Fn(f64) -> f64) -> &'static str {
+        let ys: Vec<f64> = sizes().iter().map(|&n| f(n as f64)).collect();
+        CLASSES[fit_class(&sizes(), &ys).0].0
+    }
+
+    fn explained(f: impl Fn(f64) -> f64) -> bool {
+        let ys: Vec<f64> = sizes().iter().map(|&n| f(n as f64)).collect();
+        fit_class(&sizes(), &ys).1 <= FIT_TOLERANCE
+    }
+
+    #[test]
+    fn a_sort_plus_linear_work_reads_as_nlogn() {
+        // A sorted listing: n log n for the sort plus a linear term for the
+        // entries. The 2-term n and nlogn fits miss it by 3.1% and 4.9%.
+        assert_eq!(class_of_exact(|n| 20.0 * n + n * n.ln()), "nlogn");
+        // A program-shape intercept below zero does not steepen the curve.
+        assert_eq!(class_of_exact(|n| -1.0e5 + 20.0 * n + n * n.ln()), "nlogn");
+    }
+
+    #[test]
+    fn the_linear_term_does_not_let_a_steeper_curve_pass_as_nlogn() {
+        // Over n..16n `a + b·n + c·n·ln n` fits these within 3%; the slope cap
+        // (n·ln n's own log-log slope + 0.03) refuses them.
+        for f in [|n: f64| n.powf(1.2), |n: f64| n * n.ln() * n.ln()] {
+            assert!(!explained(f) || !matches!(class_of_exact(f), "1" | "log" | "n" | "nlogn"));
+        }
     }
 
     #[test]

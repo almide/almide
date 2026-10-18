@@ -348,33 +348,6 @@ fn __mx_gather_fill(ho: Int, hm: Int, mr: Int, cols: Int, hi: Int, n: Int, i: In
     __mx_gather_fill(ho, hm, mr, cols, hi, n, i + 1)
   }
 
-// v0 causal_mask_add: out[i][j] = x + mask_val when j > i, else x.
-fn matrix_causal_mask_add(m: List[List[Float]], mask_val: Float) -> List[List[Float]] = {
-  let hm = prim.handle(m)
-  let n = prim.load32(hm + 4)
-  let out: List[List[Float]] = prim.alloc_list_str(n)
-  let _x = __mx_mask_rows(prim.handle(out), hm, mask_val, n, 0)
-  out
-}
-
-fn __mx_mask_rows(ho: Int, hm: Int, mv: Float, n: Int, i: Int) -> Int = if i >= n then 0
-else {
-  let rh = prim.load64(hm + 12 + i * 8)
-  let c = prim.load32(rh + 4)
-  let row = prim.alloc_list_f64(c)
-  let _f = __mx_mask_row(prim.handle(row), rh, mv, i, c, 0)
-  prim.store_str(ho + 12 + i * 8, row)
-  __mx_mask_rows(ho, hm, mv, n, i + 1)
-}
-
-fn __mx_mask_row(dh: Int, sh: Int, mv: Float, i: Int, n: Int, j: Int) -> Int = if j >= n then 0
-else {
-  let x = prim.ffrombits(prim.load64(sh + 12 + j * 8))
-  let y = if j > i then x + mv else x
-  prim.store64(dh + 12 + j * 8, prim.fbits(y))
-  __mx_mask_row(dh, sh, mv, i, n, j + 1)
-}
-
 // ── reductions / products ──
 // v0 row_dot: r out of range → 0.0; else Σ row[k]·vec[k] over min(len, vec.len), k ascending.
 fn matrix_dot_row(m: List[List[Float]], r: Int, vec: List[Float]) -> Float = {
@@ -510,101 +483,6 @@ else {
   let y = prim.ffrombits(prim.load64(bh + 12 + i * 8))
   __mx_dot_raw(ah, bh, n, i + 1, acc + x * y)
 }
-
-// ── row-wise norms ──
-fn __mx_sq_sum(rh: Int, n: Int, i: Int, acc: Float) -> Float = if i >= n then acc
-else {
-  let x = prim.ffrombits(prim.load64(rh + 12 + i * 8))
-  __mx_sq_sum(rh, n, i + 1, acc + x * x)
-}
-
-fn __mx_sum(rh: Int, n: Int, i: Int, acc: Float) -> Float = if i >= n then acc
-else {
-  let x = prim.ffrombits(prim.load64(rh + 12 + i * 8))
-  __mx_sum(rh, n, i + 1, acc + x)
-}
-
-fn __mx_var_sum(rh: Int, mean: Float, n: Int, i: Int, acc: Float) -> Float = if i >= n then acc
-else {
-  let x = prim.ffrombits(prim.load64(rh + 12 + i * 8))
-  let d = x - mean
-  __mx_var_sum(rh, mean, n, i + 1, acc + d * d)
-}
-
-// v0 rms_norm_rows: inv = 1 / sqrt(Σx²/n + eps) over the FULL row; output truncates to
-// min(row, gamma) like the zip.
-fn matrix_rms_norm_rows(m: List[List[Float]], gamma: List[Float], eps: Float) -> List[List[Float]] = {
-  let hm = prim.handle(m)
-  let n = prim.load32(hm + 4)
-  let gh = prim.handle(gamma)
-  let glen = prim.load32(gh + 4)
-  let out: List[List[Float]] = prim.alloc_list_str(n)
-  let _x = __mx_rms_rows(prim.handle(out), hm, gh, glen, eps, n, 0)
-  out
-}
-
-fn __mx_rms_rows(ho: Int, hm: Int, gh: Int, glen: Int, eps: Float, n: Int, i: Int) -> Int =
-  if i >= n then 0
-  else {
-    let rh = prim.load64(hm + 12 + i * 8)
-    let c = prim.load32(rh + 4)
-    let sq = __mx_sq_sum(rh, c, 0, 0.0)
-    let inv = 1.0 / prim.fsqrt(sq / prim.i2f(c) + eps)
-    let outn = if c < glen then c else glen
-    let row = prim.alloc_list_f64(outn)
-    let _f = __mx_rms_row(prim.handle(row), rh, gh, inv, outn, 0)
-    prim.store_str(ho + 12 + i * 8, row)
-    __mx_rms_rows(ho, hm, gh, glen, eps, n, i + 1)
-  }
-
-fn __mx_rms_row(dh: Int, rh: Int, gh: Int, inv: Float, n: Int, i: Int) -> Int = if i >= n then 0
-else {
-  let x = prim.ffrombits(prim.load64(rh + 12 + i * 8))
-  let g = prim.ffrombits(prim.load64(gh + 12 + i * 8))
-  prim.store64(dh + 12 + i * 8, prim.fbits(x * inv * g))
-  __mx_rms_row(dh, rh, gh, inv, n, i + 1)
-}
-
-// v0 layer_norm_rows: mean = Σx/n; var = Σ(x-mean)²/n; inv = 1/sqrt(var+eps); output
-// (x-mean)·inv·g + b over min(row, gamma, beta) like the double zip.
-fn matrix_layer_norm_rows(m: List[List[Float]], gamma: List[Float], beta: List[Float], eps: Float) -> List[List[Float]] = {
-  let hm = prim.handle(m)
-  let n = prim.load32(hm + 4)
-  let gh = prim.handle(gamma)
-  let bh = prim.handle(beta)
-  let glen = prim.load32(gh + 4)
-  let blen = prim.load32(bh + 4)
-  let gb = if glen < blen then glen else blen
-  let out: List[List[Float]] = prim.alloc_list_str(n)
-  let _x = __mx_ln_rows(prim.handle(out), hm, gh, bh, gb, eps, n, 0)
-  out
-}
-
-fn __mx_ln_rows(ho: Int, hm: Int, gh: Int, bh: Int, gb: Int, eps: Float, n: Int, i: Int) -> Int =
-  if i >= n then 0
-  else {
-    let rh = prim.load64(hm + 12 + i * 8)
-    let c = prim.load32(rh + 4)
-    let nf = prim.i2f(c)
-    let mean = __mx_sum(rh, c, 0, 0.0) / nf
-    let vr = __mx_var_sum(rh, mean, c, 0, 0.0) / nf
-    let inv = 1.0 / prim.fsqrt(vr + eps)
-    let outn = if c < gb then c else gb
-    let row = prim.alloc_list_f64(outn)
-    let _f = __mx_ln_row(prim.handle(row), rh, gh, bh, mean, inv, outn, 0)
-    prim.store_str(ho + 12 + i * 8, row)
-    __mx_ln_rows(ho, hm, gh, bh, gb, eps, n, i + 1)
-  }
-
-fn __mx_ln_row(dh: Int, rh: Int, gh: Int, bh: Int, mean: Float, inv: Float, n: Int, i: Int) -> Int =
-  if i >= n then 0
-  else {
-    let x = prim.ffrombits(prim.load64(rh + 12 + i * 8))
-    let g = prim.ffrombits(prim.load64(gh + 12 + i * 8))
-    let b = prim.ffrombits(prim.load64(bh + 12 + i * 8))
-    prim.store64(dh + 12 + i * 8, prim.fbits((x - mean) * inv * g + b))
-    __mx_ln_row(dh, rh, gh, bh, mean, inv, n, i + 1)
-  }
 
 // ── byte decode ──
 // v0 from_bytes_f32_le: off + r·c·4 past the buffer → the all-zero r×c matrix; else each

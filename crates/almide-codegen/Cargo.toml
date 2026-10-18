@@ -7,6 +7,7 @@ description = "Almide code generation: nanopass pipeline, walker, WASM emit"
 
 [dependencies]
 almide-base = { path = "../almide-base" }
+almide-str = { path = "../almide-str" }
 almide-lang = { path = "../almide-lang" }
 almide-ir = { path = "../almide-ir" }
 almide-egg-lab = { path = "../almide-egg-lab" }

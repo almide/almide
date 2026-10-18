@@ -131,7 +131,7 @@ fn the_closed_set_is_exactly_what_the_shipped_artifact_can_contain() {
         "the emitter or the to_wasi shims write instructions the VM does not accept: {missing:?}"
     );
     assert!(extra.is_empty(), "the VM accepts instructions no shipped artifact can contain: {extra:?}");
-    assert_eq!(vm.len(), 127, "the closed set's size (the numeric table, the memory rows, control and variables)");
+    assert_eq!(vm.len(), 122, "the closed set's size (the numeric table, the memory rows, control and variables)");
 }
 
 #[test]

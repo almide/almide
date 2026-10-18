@@ -13,7 +13,7 @@
 //! hand-written reference.
 //!
 //! This pass rewrites each `T.__erratw_M(<res>, "key")?` on the native leg
-//! into `<res>.map_err(|_we| almide_rt___err_at(_we, "key".to_string()))?`:
+//! into `<res>.map_err(|_we| almide_rt___err_at(_we, AlmideString::from("key")))?`:
 //! the success path is the plain `?` on the field's own result, the key is
 //! the `&'static str` literal until an error actually needs an owned copy,
 //! and the error bytes are the ones the worker produced (`almide_rt___err_at`
@@ -142,7 +142,7 @@ impl IrMutVisitor for Rewriter {
         let Some(seg) = seg_literal(&args[1]) else { return };
         // `{:?}` on a `str` is a valid Rust string literal for any segment
         // (quotes, backslashes and controls escaped).
-        let template = format!("{{r}}.map_err(|_we| {ERR_AT_SYM}(_we, {seg:?}.to_string()))");
+        let template = format!("{{r}}.map_err(|_we| {ERR_AT_SYM}(_we, AlmideString::from({seg:?})))");
         let res = args.swap_remove(0);
         tried.kind = IrExprKind::InlineRust { template, args: vec![(sym("r"), res)] };
         self.changed = true;

@@ -50,6 +50,7 @@ pub mod pass_var_storage;
 pub mod pass_borrow_lowering;
 pub mod pass_slice_binders;
 pub mod pass_str_map_key;
+pub mod pass_thread_share;
 pub mod owned_source;
 pub mod pass_owned_source_hoist;
 pub mod pass_fan_lowering;
@@ -75,6 +76,7 @@ pub mod pass_meter_charge;
 pub mod pass_region_window;
 pub mod pass_region_window_clone;
 mod prelude_region;
+pub mod prelude_string;
 mod prelude_fan;
 mod prelude_stack;
 mod prelude_rem;
@@ -345,25 +347,9 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     let vis = if for_crate { "pub " } else { "" };
     let macro_attr = if for_crate { "#[macro_export]\n" } else { "" };
     let mut s = String::new();
-    // ADR-0013 stage 2, step 1: the Almide `String` is spelled `AlmideString`
-    // in generated code. Today it is `String` itself, so the runtime and every
-    // `@extern(rust)` host compile unchanged; the shared buffer replaces it
-    // here, in one place (docs/roadmap/active/adr-0013-string-sharing.md).
-    s.push_str(&format!("{vis}type AlmideString = String;\n"));
-    // A runtime function converts what it returns once, at its boundary:
-    // the identity while the alias is `String`.
-    s.push_str(&format!("{vis}trait AlmideIntoStr {{ type Out; fn into_almide(self) -> Self::Out; }}\nimpl<T> AlmideIntoStr for T {{ type Out = T; #[inline(always)] fn into_almide(self) -> T {{ self }} }}\n"));
-    s.push_str(&format!("{vis}trait AlmideConcat<Rhs> {{ type Output; fn concat(self, rhs: Rhs) -> Self::Output; }}\n"));
-    // The owned-String impls extend in place (`push_str`) instead of
-    // `format!`: byte-identical output, but an owned accumulator keeps its
-    // capacity — with the TCO accumulator move this makes a tail-recursive
-    // string builder amortized O(n) instead of reallocating every step.
-    s.push_str("impl AlmideConcat<String> for String { type Output = String; #[inline(always)] fn concat(self, rhs: String) -> String { let mut s = self; s.push_str(&rhs); s } }\n");
-    s.push_str("impl AlmideConcat<&str> for String { type Output = String; #[inline(always)] fn concat(self, rhs: &str) -> String { let mut s = self; s.push_str(rhs); s } }\n");
-    // A literal left operand (`"k" + x`) prepends into the owned right operand's buffer: no allocation
-    // when its capacity covers both (`int.to_string` reserves 19 bytes), else one grow — never a fresh String.
-    s.push_str("impl AlmideConcat<String> for &str { type Output = String; #[inline(always)] fn concat(self, rhs: String) -> String { let mut r = rhs; r.insert_str(0, self); r } }\n");
-    s.push_str("impl AlmideConcat<&str> for &str { type Output = String; #[inline(always)] fn concat(self, rhs: &str) -> String { format!(\"{}{}\", self, rhs) } }\n");
+    // ADR-0013: the Almide String (the shared buffer `AlmideStr`), its
+    // boundary conversion and the `AlmideConcat` trait (prelude_string.rs).
+    s.push_str(&prelude_string::string_prelude(vis));
     s.push_str("impl<T: Clone> AlmideConcat<Vec<T>> for Vec<T> { type Output = Vec<T>; #[inline(always)] fn concat(self, rhs: Vec<T>) -> Vec<T> { let mut r = self; r.extend(rhs); r } }\n");
     // ONE stdout buffer (#2245). `println` used to lower to Rust's `println!`,
     // whose `Stdout` is line-buffered whatever it is attached to — one write
@@ -416,11 +402,13 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     // pins it on every leg — `PANIC: <msg>` on stderr with NO trailing newline,
     // exit 1 — never a raw Rust panic (exit 101 + the thread banner). A `--test`
     // build keeps the unwinding panic: libtest reports one failed test from its
-    // payload and `testing.assert_throws` catches it. The `cfg!(test)` sits in
+    // payload — except in an abort-site child of `testing.assert_aborts`
+    // (ADR-0029), which ALMIDE_TEST_ABORT_PROBE marks at run time so a helper
+    // the closure calls aborts the C-219 way too. The `cfg!(test)` sits in
     // the MACRO so it is read in the crate the `panic` is written in — the
     // prelude may be compiled once, as a crate of its own, without `--test`.
     s.push_str(&format!("{vis}fn almide_panic_abort(msg: std::fmt::Arguments<'_>) -> ! {{ almide_fan_trap_wait(); static ALMIDE_PANICKING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false); if ALMIDE_PANICKING.swap(true, std::sync::atomic::Ordering::SeqCst) {{ loop {{ std::thread::park(); }} }} almide_stdout_flush(); {{ let _ = std::io::Write::write_fmt(&mut std::io::stderr().lock(), format_args!(\"PANIC: {{}}\", msg)); }} std::process::exit(1) }}\n"));
-    s.push_str(&format!("{macro_attr}macro_rules! almide_panic {{ ($($arg:tt)*) => {{ if cfg!(test) {{ panic!($($arg)*) }} else {{ $crate::almide_panic_abort(format_args!($($arg)*)) }} }}; }}\n"));
+    s.push_str(&format!("{macro_attr}macro_rules! almide_panic {{ ($($arg:tt)*) => {{ if cfg!(test) && std::env::var_os(\"ALMIDE_TEST_ABORT_PROBE\").is_none() {{ panic!($($arg)*) }} else {{ $crate::almide_panic_abort(format_args!($($arg)*)) }} }}; }}\n"));
     s.push_str(&format!("{vis}fn almide_stdout_write_fmt(args: std::fmt::Arguments<'_>, newline: bool) {{ if almide_fan_active() {{ return almide_fan_write_fmt(false, args, newline); }} ALMIDE_STDOUT_BUF.with(|buf| {{ let mut w = buf.borrow_mut(); let _ = std::io::Write::write_fmt(&mut *w, args); if newline {{ let _ = std::io::Write::write_all(&mut *w, b\"\\n\"); }} if newline || almide_stdout_is_terminal() {{ let _ = std::io::Write::flush(&mut *w); }} }}); }}\n"));
     s.push_str(&format!("{vis}fn almide_stdout_write_bytes(bytes: &[u8]) {{ if almide_fan_active() {{ return almide_out_write(false, bytes); }} ALMIDE_STDOUT_BUF.with(|buf| {{ let mut w = buf.borrow_mut(); let _ = std::io::Write::write_all(&mut *w, bytes); if bytes.contains(&b'\\n') || almide_stdout_is_terminal() {{ let _ = std::io::Write::flush(&mut *w); }} }}); }}\n"));
     s.push_str(&format!("{macro_attr}macro_rules! almide_println {{ ($($arg:tt)*) => {{ $crate::almide_stdout_write_fmt(format_args!($($arg)*), true) }}; }}\n"));

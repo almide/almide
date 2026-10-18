@@ -401,7 +401,7 @@ fn check_handle_leg(leg: Leg, out: &Output, server: &Server) -> String {
     assert_eq!(get("stream"), "request timeout: total_ms 700 exceeded", "[{leg:?}]");
     assert_eq!(get("stream-first"), "data: 0", "[{leg:?}]");
     within("/trickle?stream", 600, 2500);
-    assert_eq!(get("stream-refused"), "HTTP 404: Not Found: gone", "[{leg:?}]");
+    assert_eq!(get("stream-refused"), "HTTP 404: gone", "[{leg:?}]");
     assert_eq!(get("stream-whole"), "ok hello", "[{leg:?}]");
 
     // 7. drop = cancel: the server saw the close long before the program's
@@ -434,10 +434,10 @@ fn call_handle_limits_cancel_poll_and_the_streaming_twins() {
     assert_eq!(seen[0].1, seen[1].1, "native vs --target wasm stdout differ");
 }
 
-/// What only the native leg serves: the SSE twin (its accumulator has no wasm
-/// body — `openai_streaming_call` itself is native-only) and the one-shot
-/// full-response client that shows the process-wide default still applies to
-/// a call WITHOUT limits.
+/// What only the native leg serves: the one-shot full-response client that
+/// shows the process-wide default still applies to a call WITHOUT limits. (The
+/// OpenAI SSE twin this also pinned moved to package almide/llm at dialect
+/// epoch 14.)
 const NATIVE_ONLY_PROGRAM: &str = r#"
 import http
 import env
@@ -447,16 +447,11 @@ effect fn main() -> Unit = {
   let t6 = env.millis()
   let r6: Result[HttpResponse, String] = http.request_response("GET", b + "/slow?default", "", [:])
   println("slow-default: " + int.to_string(env.millis() - t6) + " " + (match r6 { ok(_) => "ok", err(e) => e }))
-  var deltas: List[String] = []
-  let t9 = env.millis()
-  let r9: Result[String, String] = http.openai_streaming_call_with_limits(b + "/v1", "k", "{}", { total_ms: 700, idle_ms: 0 }, (d: String) => list.push(deltas, d))
-  println("openai: " + int.to_string(env.millis() - t9) + " " + (match r9 { ok(_) => "ok", err(e) => e }))
-  println("openai-first: " + (deltas |> list.first ?? ""))
 }
 "#;
 
 #[test]
-fn native_only_default_timeout_and_the_sse_twin() {
+fn native_only_default_timeout() {
     let server = Server::start();
     let dir = tempfile::tempdir().unwrap();
     let app = prepare(dir.path(), "native_only", NATIVE_ONLY_PROGRAM, Leg::Native);
@@ -468,11 +463,6 @@ fn native_only_default_timeout_and_the_sse_twin() {
     let get = |k: &str| l.get(k).unwrap_or_else(|| panic!("no `{k}:` line in\n{stdout}")).clone();
     let (_, rest) = timed(&get("slow-default"));
     assert!(rest.starts_with("timed out waiting for \"http://127.0.0.1:"), "{rest}");
-    let (ms, rest) = timed(&get("openai"));
-    assert_eq!(rest, "request timeout: total_ms 700 exceeded");
-    assert!((600..2500).contains(&ms), "{ms}");
-    assert_eq!(get("openai-first"), "t0 ");
-    assert!(server.conn("/v1/chat/completions").closed.is_some());
 }
 
 const OLD_STREAM_PROGRAM: &str = r#"
@@ -525,14 +515,13 @@ fn a_trickle_outlives_the_classic_stream_but_not_total_ms() {
     assert!(server.conn("/trickle?limited").closed.is_some());
 }
 
-/// The E081 verdict names what is and is not served: the stock artifact
-/// (`almide check --target wasm`, the build route) still refuses the handle
-/// and the OpenAI SSE twin built on it — stock WASI has no host for it —
-/// while the run route admits both (the OpenAI helper is Almide over the
-/// handle, ADR-0023 step 5), and the Anthropic SSE twin, still a native
-/// intrinsic, stays refused on every wasm leg.
+/// The E081 verdict names what is not served: the stock artifact
+/// (`almide check --target wasm`, the build route) refuses the handle and the
+/// limited streaming twin built on it — stock WASI has no host for them. (The
+/// OpenAI / Anthropic twins this also pinned moved to package almide/llm at
+/// dialect epoch 14.)
 #[test]
-fn the_stock_route_and_the_sse_twin_keep_their_e081() {
+fn the_stock_route_keeps_its_e081() {
     let dir = tempfile::tempdir().unwrap();
     let src = dir.path().join("stock.almd");
     std::fs::write(
@@ -543,21 +532,13 @@ fn the_stock_route_and_the_sse_twin_keep_their_e081() {
     let checked = Command::new(almide()).arg("check").arg(&src).arg("--target").arg("wasm").output().unwrap();
     let stderr = String::from_utf8_lossy(&checked.stderr);
     assert!(!checked.status.success() && stderr.contains("error[E081]: `http.start`"), "{stderr}");
-    let twin = |name: &str, args: &str| {
-        let sse = dir.path().join(format!("{name}.almd"));
-        std::fs::write(
-            &sse,
-            format!("import http\n\neffect fn main() -> Unit = {{\n  let r = http.{name}({args}{{ total_ms: 1, idle_ms: 0 }}, (_) => ())\n  println(match r {{ ok(_) => \"ok\", err(e) => e }})\n}}\n"),
-        )
-        .unwrap();
-        sse
-    };
-    let openai = twin("openai_streaming_call_with_limits", "\"http://127.0.0.1:1\", \"k\", \"{}\", ");
-    let checked = Command::new(almide()).arg("check").arg(&openai).arg("--target").arg("wasm").output().unwrap();
+    let twin = dir.path().join("twin.almd");
+    std::fs::write(
+        &twin,
+        "import http\n\neffect fn main() -> Unit = {\n  let r = http.request_stream_with_limits(\"GET\", \"http://127.0.0.1:1/\", \"\", [:], { total_ms: 1, idle_ms: 0 }, (_) => ())\n  println(match r { ok(_) => \"ok\", err(e) => e })\n}\n",
+    )
+    .unwrap();
+    let checked = Command::new(almide()).arg("check").arg(&twin).arg("--target").arg("wasm").output().unwrap();
     let stderr = String::from_utf8_lossy(&checked.stderr);
-    assert!(!checked.status.success() && stderr.contains("error[E081]: `http.openai_streaming_call_with_limits`"), "{stderr}");
-    let anthropic = twin("anthropic_streaming_call_with_limits", "\"k\", \"{}\", ");
-    let ran = Command::new(almide()).arg("run").arg(&anthropic).arg("--target").arg("wasm").output().unwrap();
-    let stderr = String::from_utf8_lossy(&ran.stderr);
-    assert!(!ran.status.success() && stderr.contains("error[E081]: `http.anthropic_streaming_call_with_limits`"), "{stderr}");
+    assert!(!checked.status.success() && stderr.contains("error[E081]: `http.request_stream_with_limits`"), "{stderr}");
 }

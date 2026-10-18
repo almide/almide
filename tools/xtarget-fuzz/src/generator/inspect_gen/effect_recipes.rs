@@ -15,12 +15,18 @@ macro_rules! file_of_n_lines {
     };
 }
 
-/// `d/`, holding n / 100 + 3 one-byte files of one name width (a sort over
+/// `d/`, holding n / 10 + 3 one-byte files of one name width (a sort over
 /// names of mixed widths moves a mixed number of bytes): every file is a host call to
-/// create, and 16n of them (320000) took the run past its cap.
+/// create, and 16n of them (320000) took the run past its cap. Not n / 100:
+/// wasmtime reads a directory through rustix, whose getdents buffer starts
+/// small, grows by 32 dirents per refill up to ~24 KiB and is zeroed on every
+/// refill, so below ~1600 entries its zeroing per entry falls as the
+/// directory grows — the stock fs.list_dir's bytes moved read 55, 59 and 14
+/// per entry at 203, 803 and 3203 entries (GCE, per call site) and fitted no
+/// class. From 2003 entries on every size is past that warm-up.
 macro_rules! dir_of_n_files {
     () => {
-        "{ fs.mkdir_p(\"d\")!\n  for j in list.range(0, {n} / 100 + 3) { fs.write(\"d/f${100000 + j}\", \"x\")! }\n  \"d\" }"
+        "{ fs.mkdir_p(\"d\")!\n  for j in list.range(0, {n} / 10 + 3) { fs.write(\"d/f${100000 + j}\", \"x\")! }\n  \"d\" }"
     };
 }
 
@@ -61,7 +67,13 @@ pub(super) const EFFECT_RECIPES: &[Recipe] = &[
     Recipe { func: "fs.glob", size: "pattern", args: &[("pattern", concat!("{ let d = ", dir_of_n_files!(), "\n  d + \"/*\" }"))] },
     // Writers of n bytes of content.
     Recipe { func: "fs.write", size: "content", args: &[("path", "\"out.txt\""), ("content", "string.repeat(\"aé\\n\", {n})")] },
-    Recipe { func: "fs.append", size: "content", args: &[("path", "\"out.txt\""), ("content", "string.repeat(\"aé\\n\", {n})")] },
+    // A whole number of the stock service's 64 KiB write slices at every
+    // measured size (65536 bytes at n = 20000): one fd_write per slice, so
+    // 4n bytes cost a + b·⌈4n / 65536⌉ — 2, 3, 5, 10, 20 host calls — and that
+    // staircase read nlogn (GCE: 5.185e6 / 6.576e6 / 9.355e6 / 1.631e7 /
+    // 3.021e7, exactly 9.5e3 + 5.4e3 per slice per call). Aligned, the series
+    // is the per-slice (per-byte) cost.
+    Recipe { func: "fs.append", size: "content", args: &[("path", "\"out.txt\""), ("content", "string.repeat(\"aé\\n\", {n} * 4096 / 5000)")] },
     Recipe { func: "fs.write_bytes", size: "bytes", args: &[("path", "\"out.bin\""), ("bytes", "list.range(0, {n}) |> list.map((i) => i % 256)")] },
     Recipe {
         func: "fs.write_bytes_raw",
@@ -152,6 +164,28 @@ pub(super) const EFFECT_RECIPES: &[Recipe] = &[
     Recipe { func: "net.tcp_read_exact", size: "len", args: &[("stream", SOURCE_STREAM), ("len", "{n}")] },
     Recipe { func: "net.tcp_read_timeout", size: "", args: &[("stream", SOURCE_STREAM), ("len", "1024"), ("timeout_ms", "1000")] },
     Recipe { func: "net.tcp_available", size: "", args: &[("stream", SOURCE_STREAM)] },
+    // Unix sockets and shared-memory files (#3620): sockets in the sandbox
+    // (short relative names, removed first: a diamond's legs run in one
+    // project directory), the fixture's sink for sends. A fresh socket
+    // per step where the call takes or holds one; a socket a read takes from
+    // holds its bytes and its descriptor before the call, its peer closed.
+    Recipe { func: "net.unix_connect", size: "", args: &[("path", UNIX_SINK)] },
+    Recipe { func: "net.unix_listen", size: "", args: &[("path", "{ let _r: Result[Unit, String] = fs.remove(\"l${{i}}.sock\")\n  \"l${{i}}.sock\" }")] },
+    Recipe { func: "net.unix_accept", size: "", args: &[("listener", UNIX_PENDING_LISTENER)] },
+    Recipe { func: "net.unix_send", size: "data", args: &[("sock", UNIX_SINK_STREAM), ("data", SIZED_BYTES), ("fds", "[]")] },
+    Recipe { func: "net.unix_recv", size: "", args: &[("sock", UNIX_PENDING_SOCKET), ("max", "64")] },
+    Recipe { func: "net.unix_take_fds", size: "", args: &[("sock", UNIX_RECEIVED_SOCKET)] },
+    Recipe { func: "net.unix_poll", size: "", args: &[("fd", UNIX_READY_SOCKET), ("timeout_ms", "0")] },
+    Recipe { func: "net.unix_wait", size: "", args: &[("fds", "[net.unix_connect(env.get(\"XF_UNIX_SINK\") ?? \"\")!, net.shm_create(8)!]"), ("timeout_ms", "0")] },
+    Recipe { func: "net.unix_close", size: "", args: &[("fd", "net.shm_create({i} * 0 + 8)!")] },
+    Recipe { func: "net.shm_create", size: "", args: &[("size", "4096")] },
+    Recipe { func: "net.shm_resize", size: "", args: &[("fd", "net.shm_create(64)!"), ("size", "4096 + {i} % 2")] },
+    Recipe { func: "net.shm_write", size: "data", args: &[("fd", "net.shm_create(64)!"), ("offset", "0"), ("data", SIZED_BYTES)] },
+    Recipe {
+        func: "net.shm_read",
+        size: "len",
+        args: &[("fd", "{ let f = net.shm_create({n})!\n  net.shm_write(f, 0, bytes.from_list(list.range(0, {n}) |> list.map((i) => i % 251)))!\n  f }"), ("offset", "0"), ("len", "{n}")],
+    },
     // HTTP against the fixture: a response of n bytes, or n bytes echoed.
     Recipe { func: "http.get", size: "url", args: &[("url", BYTES_URL)] },
     Recipe { func: "http.get_bytes", size: "url", args: &[("url", BYTES_URL)] },
@@ -183,6 +217,19 @@ pub(super) const EFFECT_RECIPES: &[Recipe] = &[
     Recipe { func: "http.read_new", size: "c", args: &[("c", FRESH_ENDED_CALL)] },
     Recipe { func: "http.wait", size: "c", args: &[("c", CALL)] },
     Recipe { func: "http.cancel", size: "", args: &[("c", FRESH_CALL)] },
+    // The streaming clients over the fixture's `/chunked/{n}`: n chunks
+    // `c<i>\n`, each delivered to the generated `on_chunk` — plain
+    // request_stream (the call core's classic call) and its limited twin.
+    Recipe {
+        func: "http.request_stream",
+        size: "url",
+        args: &[("method", "\"GET\""), ("url", CHUNKED_URL), ("body", "\"\""), ("headers", "map.new()")],
+    },
+    Recipe {
+        func: "http.request_stream_with_limits",
+        size: "url",
+        args: &[("method", "\"GET\""), ("url", CHUNKED_URL), ("body", "\"\""), ("headers", "map.new()"), ("limits", NO_LIMITS)],
+    },
 ];
 
 /// Statements a probe's `main` runs first, for operands that must outlive
@@ -213,10 +260,30 @@ pub(super) fn stdin_for(func: &str, n: u64, k: u64) -> Option<(u64, u64)> {
 /// A call that holds a socket (or a short-lived port) per call stops at this
 /// k: a probe runs 2k calls, and an fd per call past the soft limit (1024)
 /// or a TIME_WAIT per call past the ephemeral range is an err, not a cost.
-pub fn max_k(func: &str) -> Option<u64> {
+/// `effect` is the declaration's: a plain `fn` does no I/O per call, so a
+/// module-wide cap below never applies to it.
+pub fn max_k(func: &str, effect: bool) -> Option<u64> {
     match func.split_once('.') {
         Some(("net", f)) if matches!(f, "tcp_connect" | "tcp_listen" | "tcp_accept" | "tcp_close" | "tcp_close_listener") => Some(64),
-        Some(("http", _)) => Some(256),
+        // A descriptor (or three) held per call (#3620).
+        Some(("net", f))
+            if matches!(f, "unix_connect" | "unix_listen" | "unix_accept" | "unix_recv" | "unix_take_fds" | "unix_close" | "shm_create") =>
+        {
+            Some(64)
+        }
+        // n bytes landed in the guest per call: the canonical allocator
+        // never reuses a block, so 2k calls at 16n grow the heap to gigabytes
+        // and the host's memory growth enters the count (shm_read at k=4096
+        // read x2.24 at 4n, rms 8%; 256 keeps 2k calls at 16n near 160 MB,
+        // where 64 left the fixed per-call cost visible at n: rms 3.2%), and a
+        // send of 16n bytes per call at a
+        // calibrated k of 2^20 overran the 60 s cap.
+        Some(("net", "shm_read")) => Some(256),
+        Some(("net", "unix_send")) => Some(256),
+        // A plain accessor (http.body, req_method) reads a value in hand: at
+        // k=256 its ~400 instructions per call sank under the embedded leg's
+        // run-to-run jitter and the marginal read 0 at three of five sizes.
+        Some(("http", _)) if effect => Some(256),
         // Each append grows the one file: 2k calls of n bytes at 16n.
         Some(("fs", "append")) => Some(256),
         _ => None,
@@ -232,8 +299,20 @@ const FRESH_STREAM: &str = "net.tcp_connect(\"127.0.0.1\", int.parse(env.get(\"X
 const LISTENER: &str = "net.tcp_listen(\"127.0.0.1\", 0)!";
 const FRESH_LISTENER: &str = "net.tcp_listen(\"127.0.0.1\", {i} * 0)!";
 const PENDING_LISTENER: &str = "{ let l = net.tcp_listen(\"127.0.0.1\", {i} * 0)!\n  let _c = net.tcp_connect(\"127.0.0.1\", net.tcp_local_port(l)!)!\n  l }";
+const UNIX_SINK: &str = "(env.get(\"XF_UNIX_SINK\") ?? \"\")";
+const UNIX_SINK_STREAM: &str = "net.unix_connect(env.get(\"XF_UNIX_SINK\") ?? \"\")!";
+/// A listener with one connection pending, a fresh one per step.
+const UNIX_PENDING_LISTENER: &str = "{ let _r: Result[Unit, String] = fs.remove(\"a${{i}}.sock\")\n  let l = net.unix_listen(\"a${{i}}.sock\")!\n  let _c = net.unix_connect(\"a${{i}}.sock\")!\n  l }";
+/// A socket holding 11 bytes, its peer closed, a fresh one per step.
+const UNIX_PENDING_SOCKET: &str = "{ let _r: Result[Unit, String] = fs.remove(\"r${{i}}.sock\")\n  let l = net.unix_listen(\"r${{i}}.sock\")!\n  let c = net.unix_connect(\"r${{i}}.sock\")!\n  let s = net.unix_accept(l)!\n  net.unix_send(c, bytes.from_string(\"hello world\"), [])!\n  net.unix_close(c)!\n  net.unix_close(l)!\n  s }";
+/// A socket whose one descriptor has arrived and not been taken, a fresh one
+/// per step.
+const UNIX_RECEIVED_SOCKET: &str = "{ let _r: Result[Unit, String] = fs.remove(\"t${{i}}.sock\")\n  let l = net.unix_listen(\"t${{i}}.sock\")!\n  let c = net.unix_connect(\"t${{i}}.sock\")!\n  let s = net.unix_accept(l)!\n  let f = net.shm_create(8)!\n  net.unix_send(c, bytes.from_string(\"x\"), [f])!\n  let _got = net.unix_recv(s, 8)!\n  net.unix_close(c)!\n  net.unix_close(l)!\n  net.unix_close(f)!\n  s }";
+/// A socket with bytes waiting, so a poll answers at once.
+const UNIX_READY_SOCKET: &str = "{ let _r: Result[Unit, String] = fs.remove(\"p.sock\")\n  let l = net.unix_listen(\"p.sock\")!\n  let c = net.unix_connect(\"p.sock\")!\n  let s = net.unix_accept(l)!\n  net.unix_send(c, bytes.from_string(\"x\"), [])!\n  s }";
 const BYTES_URL: &str = "\"http://\" + (env.get(\"XF_HTTP\") ?? \"\") + \"/bytes/{n}\"";
-const ECHO_URL: &str = "\"http://\" + (env.get(\"XF_HTTP\") ?? \"\") + \"/echo\"";
+const CHUNKED_URL: &str = "\"http://\" + (env.get(\"XF_HTTP\") ?? \"\") + \"/chunked/{n}\"";
+const ECHO_URL: &str ="\"http://\" + (env.get(\"XF_HTTP\") ?? \"\") + \"/echo\"";
 const BODY: &str = "string.repeat(\"a\", {n})";
 const NO_LIMITS: &str = "{ total_ms: 0, idle_ms: 0 }";
 
@@ -266,6 +345,14 @@ const MADE_DIR: &str = "{ fs.mkdir_p(\"pdir\")!\n  \"pdir\" }";
 
 const ECHO: &str = "\"/bin/echo\"";
 const ECHO_ARGS: &str = "list.range(0, {n} / 100) |> list.map((i) => \"aé\")";
-/// n / 10 arguments: a captured run's pipe reads vary with the fork, and the
-/// call's own work must stand above that noise (the rms bound is 3%).
-const ECHO_ARGS_WIDE: &str = "list.range(0, {n} / 10) |> list.map((i) => \"aé\")";
+/// n / 5 arguments: a captured run's pipe reads vary with the fork, and the
+/// call's own work must stand above that noise (the rms bound is 3%). Not
+/// n / 10: native `Command` holds one small CString per argument, and once
+/// its argument Vec reaches 64 KiB (4096 arguments) freeing it crosses
+/// glibc's fastbin-consolidation threshold, which then walks every freed
+/// CString on each call — per argument 670-720 instructions up to 3000
+/// arguments, 765-800 from 4000 (GCE, native process.exec, k = 256..512), so
+/// n / 10 (2000..32000) straddled the step and fit no class (rms 6.0%); with
+/// fastbins off (GLIBC_TUNABLES=glibc.malloc.mxfast=0) the step is gone. From
+/// 4000 arguments every size is in the one allocator regime (fit n, 0.9%).
+const ECHO_ARGS_WIDE: &str = "list.range(0, {n} / 5) |> list.map((i) => \"aé\")";

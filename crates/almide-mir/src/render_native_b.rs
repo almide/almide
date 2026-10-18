@@ -139,7 +139,7 @@ pub(crate) fn render_set_local(
     let rhs = match t {
         NTy::I64 | NTy::F64 => var(*src),
         NTy::Str => format!("{}.clone()", var(*src)),
-        NTy::StrRef => format!("{}.to_string()", var(*src)),
+        NTy::StrRef => format!("AlmideString::from({})", var(*src)),
         NTy::Vec => format!("{}.clone()", var(*src)),
         NTy::VecRef => format!("{}.to_vec()", var(*src)),
         NTy::Res => format!("{}.clone()", var(*src)),
@@ -611,14 +611,14 @@ fn render_else(
                 var(v),
             ),
             NTy::Str => (
-                format!("let mut {}: AlmideString = String::new();", var(*d)),
+                format!("let mut {}: AlmideString = AlmideString::new();", var(*d)),
                 NTy::Str,
                 format!("{}.clone()", var(v)),
             ),
             NTy::StrRef => (
-                format!("let mut {}: AlmideString = String::new();", var(*d)),
+                format!("let mut {}: AlmideString = AlmideString::new();", var(*d)),
                 NTy::Str,
-                format!("{}.to_string()", var(v)),
+                format!("AlmideString::from({})", var(v)),
             ),
             NTy::Vec => (
                 format!("let mut {}: Vec<i64> = Vec::new();", var(*d)),
@@ -675,7 +675,7 @@ fn render_end_if(
         let rhs = match t {
             NTy::I64 | NTy::F64 => var(v),
             NTy::Str => format!("{}.clone()", var(v)),
-            NTy::StrRef => format!("{}.to_string()", var(v)),
+            NTy::StrRef => format!("AlmideString::from({})", var(v)),
             NTy::Vec => format!("{}.clone()", var(v)),
             NTy::VecRef => format!("{}.to_vec()", var(v)),
             NTy::Res => format!("{}.clone()", var(v)),
