@@ -187,6 +187,14 @@ impl<'a> Interpreter<'a> {
         let mut out = Vec::with_capacity(exprs.len());
         let mut first_err: Option<String> = None;
         for e in exprs {
+            // An arm whose marker is its own top-level `!` is a Result arm: its
+            // Err ends the ARM, not the fn, so every later arm still runs and
+            // the join below picks the lowest-index Err (C-199) — the marker
+            // the backends strip before their join (wasm `front_desugar`).
+            let e = match &e.kind {
+                IrExprKind::Unwrap { expr } if expr.ty.is_result() => &**expr,
+                _ => e,
+            };
             let v = val!(self.eval_expr(e, scope));
             match v {
                 Value::Result(Ok(payload)) => out.push(*payload),
