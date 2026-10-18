@@ -87,6 +87,7 @@ fn scan_type_body(tokens: &[Token], mut i: usize, names: &mut HashSet<String>) -
                 && seen_eq
                 && matches!(prev, Some(TokenType::Eq | TokenType::Pipe))
                 && is_caseless_name(&t.value)
+                && !is_qualifier(tokens, i)
             {
                 names.insert(t.value.clone());
             }
@@ -128,6 +129,12 @@ pub fn compatibility_hint(ch: char) -> Option<String> {
     })
 }
 
+/// Is the name at `i` a path qualifier (`地理` in `地理.住所`)? A qualifier
+/// names a module, never a declared type.
+fn is_qualifier(tokens: &[Token], i: usize) -> bool {
+    tokens.get(i + 1).is_some_and(|t| t.token_type == TokenType::Dot)
+}
+
 /// Reclassify every `Ident` token spelled as a declared caseless type-side name.
 pub fn reclassify(tokens: &mut [Token], names: &HashSet<String>) {
     if names.is_empty() {
@@ -166,6 +173,10 @@ mod tests {
         assert_eq!(declared("type 住所 = { 都市: String }\nlet 値 = 1"), vec!["住所"]);
         assert_eq!(declared("type T = | A(名前) \nlet x = 値"), Vec::<String>::new());
         assert_eq!(declared("type T = { x: Int }\nfn f() -> Int = 値"), Vec::<String>::new());
+        // A qualifier is not a case head: in `type 別名 = 地理.住所` the name
+        // after `=` is followed by `.`, so it is a path, not a type.
+        assert_eq!(declared("type 別名 = 地理.住所"), vec!["別名"]);
+        assert_eq!(declared("type 別名 =\n  | 地理.住所"), vec!["別名"]);
         assert!(!is_caseless_name("_名"));
         assert!(!is_caseless_name("abc"));
         assert!(!is_caseless_name("Δ"));

@@ -181,7 +181,7 @@ impl Parser {
 
         let alias = if self.check_ident("as") {
             self.advance();
-            Some(self.expect_ident()?)
+            Some(self.expect_module_name()?)
         } else {
             None
         };
@@ -189,14 +189,35 @@ impl Parser {
         Ok(Decl::Import { path, names: None, alias, span: Some(self.span_to_prev_end(span)) })
     }
 
+    /// A module name — an `import` / `module` path segment or an `import … as`
+    /// alias — is ASCII (#1456). It is a qualifier, and a caseless name in
+    /// qualifier position reads as a type (`地理.作る` would be a method of a
+    /// type `地理`); a path segment is also a file name, which a file system
+    /// may store decomposed — the reason Rust refuses a non-ASCII file-backed
+    /// `mod` (E0754). One rule here keeps every later stage's spelling test
+    /// sound: no qualifier a program can write is caseless.
+    fn expect_module_name(&mut self) -> Result<Sym, String> {
+        let (line, col) = (self.current().line, self.current().col);
+        let name = self.expect_ident()?;
+        if name.as_str().is_ascii() {
+            return Ok(name);
+        }
+        Err(format!(
+            "module name '{}' is not ASCII at line {}:{}\n  Hint: Module names are qualifiers and file names, so they are ASCII. \
+             Rename the module (and its file) or the alias to an ASCII name, e.g. `geo`; the module's types, \
+             functions and fields may keep their non-ASCII names (`geo.住所`).",
+            name, line, col
+        ))
+    }
+
     fn parse_module_path(&mut self) -> Result<Vec<Sym>, String> {
         let mut parts = Vec::new();
-        parts.push(self.expect_ident()?);
+        parts.push(self.expect_module_name()?);
         while self.check(TokenType::Dot)
             && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Ident)
         {
             self.advance();
-            parts.push(self.expect_ident()?);
+            parts.push(self.expect_module_name()?);
         }
         // Hint: `import self.protocol` → suggest backtick escaping
         if self.check(TokenType::Dot) {

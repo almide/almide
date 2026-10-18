@@ -67,6 +67,8 @@ pub fn is_caseless_name(name: &str) -> bool {
 /// always can; a caseless start can too, because a caseless script has no
 /// capital to mark its type names (#1456). A lowercase start never can. Use
 /// this wherever a type-vs-value decision is made from a name's spelling.
+/// Deciding a qualifier (`X.f`) by it is sound because a module name is
+/// ASCII — the parser refuses any other — so a caseless head is never a module.
 pub fn is_type_side_name(name: &str) -> bool {
     name.chars().next().is_some_and(char::is_uppercase) || is_caseless_name(name)
 }
@@ -106,7 +108,9 @@ mod tests {
     fn identifier_names_keep_their_spelling() {
         assert_eq!(rust_safe_fn_name("挨拶"), "挨拶");
         assert_eq!(rust_safe_fn_name("café"), "café");
-        assert_eq!(rust_safe_fn_name("__test_almd_日本 語"), rust_safe_fn_name("__test_almd_日本 語"));
+        // Names that differ only in a non-identifier character fold to one
+        // skeleton; the hash suffix still keeps them apart.
+        assert_ne!(rust_safe_fn_name("__test_almd_日本、語"), rust_safe_fn_name("__test_almd_日本。語"));
         assert_eq!(rust_safe_fn_name("__test_almd_日本 語"), "__test_almd_日本_語");
         // Not NFC: folded and hashed, never kept verbatim.
         assert!(rust_safe_fn_name("cafe\u{301}").starts_with("cafe__"));
