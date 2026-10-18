@@ -450,19 +450,36 @@ impl LowerCtx {
 
 /// Read counts for EVERY variable in a body — the whole-body half of the fold's
 /// liveness test (see `LowerCtx::var_read_counts`). One pass.
+///
+/// A read inside a loop body or a lambda of a variable bound OUTSIDE it runs
+/// again on the next iteration or call, so it counts twice: one syntactic
+/// read there is not the variable's last. Without this, `let w = if c then s
+/// else t` in a loop body passed the fold's last-reader gate (`t` is named
+/// once), the fold rebound `t`'s slot to `s`, and every later iteration read
+/// `s` through `t` (#3532).
 pub(crate) fn collect_var_read_counts(body: &IrExpr) -> HashMap<VarId, u32> {
     struct C {
         counts: HashMap<VarId, u32>,
+        /// The variables bound inside each enclosing loop body / lambda.
+        repeating: Vec<std::collections::HashSet<VarId>>,
     }
     impl almide_ir::visit::IrVisitor for C {
         fn visit_expr(&mut self, e: &IrExpr) {
             if let IrExprKind::Var { id } = &e.kind {
-                *self.counts.entry(*id).or_insert(0) += 1;
+                let repeats = self.repeating.last().is_some_and(|inner| !inner.contains(id));
+                *self.counts.entry(*id).or_insert(0) += if repeats { 2 } else { 1 };
+            }
+            let region = matches!(e.kind, IrExprKind::ForIn { .. } | IrExprKind::While { .. } | IrExprKind::Lambda { .. });
+            if region {
+                self.repeating.push(almide_ir::free_vars::bound_vars(e));
             }
             almide_ir::visit::walk_expr(self, e);
+            if region {
+                self.repeating.pop();
+            }
         }
     }
-    let mut c = C { counts: HashMap::new() };
+    let mut c = C { counts: HashMap::new(), repeating: Vec::new() };
     almide_ir::visit::IrVisitor::visit_expr(&mut c, body);
     c.counts
 }

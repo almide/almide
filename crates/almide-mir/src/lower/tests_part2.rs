@@ -614,3 +614,31 @@
             "the gate must decline: a later read of the else-arm var survives this bind"
         );
     }
+
+    #[test]
+    fn read_counts_see_a_read_in_a_loop_of_an_outer_var_as_repeated() {
+        // `{ let s = ""; let t = ""; while c { let w = if c then s else t } }` —
+        // t is named once, inside w's bind value, but the loop reads it again on
+        // the next iteration: that bind is NOT t's last reader (#3532).
+        let (s, t, w) = (VarId(0), VarId(1), VarId(2));
+        let var = |id| ir_expr(IrExprKind::Var { id }, Ty::String);
+        let value = iff_faithful(var(s), var(t), Ty::String);
+        let lp = IrExprKind::While { cond: Box::new(faithful_cond()), body: vec![bind_stmt(w, Ty::String, value.clone())] };
+        let body = ir_expr(
+            IrExprKind::Block {
+                stmts: vec![
+                    bind_stmt(s, Ty::String, lit_str("")),
+                    bind_stmt(t, Ty::String, lit_str("")),
+                    IrStmt { kind: IrStmtKind::Expr { expr: ir_expr(lp, Ty::Unit) }, span: None },
+                ],
+                expr: None,
+            },
+            Ty::Unit,
+        );
+        let counts = collect_var_read_counts(&body);
+        assert_ne!(
+            counts.get(&t).copied().unwrap_or(0),
+            collect_var_read_counts(&value).get(&t).copied().unwrap_or(0),
+            "the gate must decline: the next iteration reads the else-arm var again"
+        );
+    }
