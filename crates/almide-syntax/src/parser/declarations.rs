@@ -195,19 +195,23 @@ impl Parser {
     /// type `地理`); a path segment is also a file name, which a file system
     /// may store decomposed — the reason Rust refuses a non-ASCII file-backed
     /// `mod` (E0754). One rule here keeps every later stage's spelling test
-    /// sound: no qualifier a program can write is caseless.
+    /// sound: no qualifier a program can write is caseless. The refusal is
+    /// recorded and the name kept, so its uses do not cascade into
+    /// undefined-name errors.
     fn expect_module_name(&mut self) -> Result<Sym, String> {
         let (line, col) = (self.current().line, self.current().col);
         let name = self.expect_ident()?;
         if name.as_str().is_ascii() {
             return Ok(name);
         }
-        Err(format!(
+        let msg = format!(
             "module name '{}' is not ASCII at line {}:{}\n  Hint: Module names are qualifiers and file names, so they are ASCII. \
              Rename the module (and its file) or the alias to an ASCII name, e.g. `geo`; the module's types, \
              functions and fields may keep their non-ASCII names (`geo.住所`).",
             name, line, col
-        ))
+        );
+        self.errors.push(self.string_to_diagnostic(&msg));
+        Ok(name)
     }
 
     fn parse_module_path(&mut self) -> Result<Vec<Sym>, String> {
