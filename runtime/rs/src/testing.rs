@@ -42,7 +42,7 @@ pub fn almide_rt_test_assert_err<T: std::fmt::Debug, E: std::fmt::Debug>(r: &Res
 // stdlib/testing.almd's `__assert_aborts_check`.
 
 /// The libtest banner the child prints before the entry runs (`-q`).
-const ALMIDE_ABORT_SITE_BANNER: &str = "\nrunning 1 test\n";
+const ABORT_SITE_BANNER: &str = "\nrunning 1 test\n";
 
 pub fn almide_rt_test_abort_site_run(site: i64) -> Vec<AlmideString> {
     almide_stdout_flush();
@@ -63,7 +63,7 @@ pub fn almide_rt_test_abort_site_run(site: i64) -> Vec<AlmideString> {
     let (status, stdout, stderr) = match child {
         Ok(out) => {
             let stdout = String::from_utf8_lossy(&out.stdout);
-            let stdout = stdout.strip_prefix(ALMIDE_ABORT_SITE_BANNER).unwrap_or(&stdout).to_string();
+            let stdout = stdout.strip_prefix(ABORT_SITE_BANNER).unwrap_or(&stdout).to_string();
             (out.status.code().unwrap_or(-1), stdout, String::from_utf8_lossy(&out.stderr).to_string())
         }
         Err(e) => (-1, String::new(), format!("the abort-site child did not start: {e}")),
