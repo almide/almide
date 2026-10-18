@@ -18,7 +18,7 @@ not propose any. The decisions it led to are in
 > clock argument required, and its all-fail text is `fan.min: no branch
 > succeeded within budget`. `fan.min(duration…)` is decided and tracked in
 > #3788. The findings §6–§10 and the issues they name stand as
-> recorded.
+> recorded. #3778 (the meters) and #3780 (ordered arms) are fixed on 2026-10-18: the native default route reads the shared meter plan and charges `+` only, and a fan reaching an `@ordered` stdlib fn runs its arms in order on every target.
 
 Each form was traced in order: syntax → type check → lowering → runtime
 (native and wasm, pure and effect). Legs: `almide run` (native), the same

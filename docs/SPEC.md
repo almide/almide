@@ -1081,9 +1081,9 @@ duration.ms(5000)   // Duration — wall-clock time (oracle-tier surfaces)
   both targets); an overflowing construction saturates to the maximum instead
   of wrapping.
 - Deterministic time is metered in charge units on a frozen abstract machine
-  (function entries, loop heads and string concatenation; see
-  `docs/design/fan-semantics-audit.md` §8 for the full list and its open
-  cross-target gap, #3778) and converted from declared nanoseconds by
+  (function entries — a loop-free, non-recursive callee's is exempt — loop
+  heads and the `+` string concatenation, never an interpolation; the same
+  table on every target since #3778) and converted from declared nanoseconds by
   a versioned calibration constant (CM-1). The contract is RATIO-ONLY: the
   declared time approximates the wall clock within a declared band (a standing
   CI gate measures it), but the METERING itself is exact and
