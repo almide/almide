@@ -228,6 +228,7 @@ pub fn try_render_metered_splice(source: &str) -> Result<String, LowerError> {
     crate::charge_probe::reset_budget_used();
     let _strict = crate::lower::StrictValuesGuard::set(true);
     let ir = source_to_ir_with(source, &[])?;
+    crate::charge_probe::note_program_regions(almide_ir::meter_plan::program_has_regions(&ir));
     let record_layouts = crate::lower::build_record_layouts(&ir.type_decls);
     let variant_layouts = crate::lower::build_variant_layouts(&ir.type_decls);
     let roots = metered_region_roots(&ir)?;

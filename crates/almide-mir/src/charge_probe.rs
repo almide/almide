@@ -79,11 +79,24 @@ pub fn entry_exempt_set(ir: &almide_ir::IrProgram) -> std::collections::HashSet<
     almide_ir::meter_plan::meter_plan(ir, &registry).exempt
 }
 
-/// True when this program's MIR carries charges at all: the probe, or a
-/// `fan.bounded` / `fan.min` / `fan.timeout` region was noted by the
-/// frontend. The lowering asks before placing a concat charge.
+/// True when this program's MIR carries charges at all: the probe, or the
+/// program brackets a region (`meter_plan::program_has_regions`, noted by the
+/// pipeline BEFORE lowering — `budget_used` is only known once the region's
+/// own fn has lowered, and a concat lowered before it must charge too). The
+/// lowering asks before placing a concat charge.
 pub fn charges_wanted() -> bool {
-    probe_enabled() || budget_used() || timeout_used()
+    probe_enabled() || budget_used() || timeout_used() || PROGRAM_HAS_REGIONS.with(|b| b.get())
+}
+
+thread_local! {
+    /// Set by the pipelines from the IR before any fn lowers; reset with the
+    /// budget flags.
+    static PROGRAM_HAS_REGIONS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Note, before lowering, whether the program brackets any metered region.
+pub fn note_program_regions(has: bool) {
+    PROGRAM_HAS_REGIONS.with(|b| b.set(has));
 }
 
 /// Drop the lowering's concat charges from a fn that is not metered.
@@ -310,6 +323,7 @@ pub fn budget_used() -> bool {
 pub fn reset_budget_used() {
     BUDGET_USED.with(|b| b.set(false));
     TIMEOUT_USED.with(|b| b.set(false));
+    PROGRAM_HAS_REGIONS.with(|b| b.set(false));
 }
 
 thread_local! {

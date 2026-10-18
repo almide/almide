@@ -329,6 +329,7 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
     crate::charge_probe::reset_budget_used();
     let _strict = crate::lower::StrictValuesGuard::set(true);
     let ir = source_to_ir_with(source, &[])?;
+    crate::charge_probe::note_program_regions(almide_ir::meter_plan::program_has_regions(&ir));
     require_native_concurrency_support(&ir)?;
     // Rung-5 records slab: the layout registries the wasm leg threads — without
     // them a record literal lowers as an Opaque skeleton and every field read
