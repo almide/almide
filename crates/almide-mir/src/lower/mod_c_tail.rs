@@ -579,6 +579,7 @@ include!("desugar_loop_b.rs");
 include!("desugar_branch.rs");
 include!("desugar_branch_b.rs");
 include!("desugar_fan.rs");
+include!("desugar_fan_settle.rs");
 include!("desugar_match.rs");
 include!("desugar_match_grouped.rs");
 include!("desugar_match_b.rs");
