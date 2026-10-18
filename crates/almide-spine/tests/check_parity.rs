@@ -27,7 +27,9 @@ type Check = for<'db> fn(&'db dyn salsa::Database, almide_spine::SourceFile) -> 
 
 /// One file's check under the per-fixture limit (#3768), so a checker that
 /// never returns fails naming the file. The db moves to the file's thread
-/// and back, so the sweep keeps its one cache.
+/// and back, so the sweep keeps its one cache. The checker has no step meter
+/// to poll the cut's stop with (#3809), so a cut check is reported as left
+/// running; the interpreter sweeps, where the corpus's time goes, do stop.
 fn check_limited(db: &mut Option<almide_spine::SpineDb>, rel: &str, text: String, check: Check) -> almide_spine::s3::CheckOutput {
     let held = db.take().expect("the db came back from the previous file");
     let path = rel.to_string();

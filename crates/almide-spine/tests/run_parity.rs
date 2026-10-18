@@ -134,8 +134,8 @@ fn wasm_cross_fixtures_run_identically_on_the_interpreter() {
         // #3768: each fixture under its own limit, so a hang fails naming
         // the fixture instead of running into the job's timeout.
         let path = rel.clone();
-        let outcome = almide_corpus::run_limited(rel, almide_corpus::FIXTURE_LIMIT, move |_stop| {
-            almide_spine::s5::run_file(&path, &text)
+        let outcome = almide_corpus::run_limited(rel, almide_corpus::FIXTURE_LIMIT, move |stop| {
+            almide_spine::s5::run_file_until(&path, &text, Some(stop.flag()))
         });
         walls.push((stem_of(rel), t0.elapsed()));
         match outcome {
