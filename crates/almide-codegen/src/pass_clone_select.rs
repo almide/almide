@@ -17,9 +17,12 @@
 //!   when no sibling argument names `x` or `x2`.
 //!
 //! Nested `if`s whose every arm is a variable select too. The chosen
-//! variables must be `let` locals of the fn: a param may already be a
-//! reference (its `&` would not type like a local's), and a top-level let is
-//! a global the walker spells differently.
+//! variables must be plain `let` locals of the fn that render as values, so
+//! every arm's `&` has the same type: not a param (it may already be a
+//! reference), a loop or pattern binder (the clone walk may bind it `&T`), a
+//! binder another pass already bound by reference (`by_ref`: head reads,
+//! TCO temporaries, an earlier selection), or a top-level let (a global the
+//! walker spells differently).
 //!
 //! Compatibility: none observable — the same value is read on every path;
 //! only the native copy goes. Wasm does not run this pass.
@@ -30,19 +33,36 @@ use almide_lang::types::Ty;
 use super::pass_clone_projection::{mentions, reads_binding};
 
 /// Rewrite every read-only selection of `func`'s body; returns the `let`
-/// binders now bound by reference.
-pub(super) fn rewrite(func: &mut IrFunction, vt: &VarTable, top_lets: &HashSet<VarId>) -> HashSet<VarId> {
-    let params = func.params.iter().map(|p| p.var).collect();
-    let mut sel = Selections { vt, top_lets, params, ref_lets: HashSet::new() };
+/// binders now bound by reference. `by_ref` holds the binders already bound
+/// by reference.
+pub(super) fn rewrite(func: &mut IrFunction, vt: &VarTable, top_lets: &HashSet<VarId>, by_ref: &HashSet<VarId>) -> HashSet<VarId> {
+    let lets = plain_lets(&func.body).into_iter().filter(|v| !top_lets.contains(v) && !by_ref.contains(v)).collect();
+    let mut sel = Selections { vt, lets, ref_lets: HashSet::new() };
     sel.visit_expr_mut(&mut func.body);
     sel.ref_lets
 }
 
 struct Selections<'a> {
     vt: &'a VarTable,
-    top_lets: &'a HashSet<VarId>,
-    params: HashSet<VarId>,
+    /// The plain `let` binders a selection may choose between.
+    lets: HashSet<VarId>,
     ref_lets: HashSet<VarId>,
+}
+
+/// Every variable a plain `let` statement binds in `body`.
+fn plain_lets(body: &IrExpr) -> HashSet<VarId> {
+    struct Lets(HashSet<VarId>);
+    impl almide_ir::visit::IrVisitor for Lets {
+        fn visit_stmt(&mut self, s: &IrStmt) {
+            if let IrStmtKind::Bind { var, mutability: Mutability::Let, .. } = &s.kind {
+                self.0.insert(*var);
+            }
+            almide_ir::visit::walk_stmt(self, s);
+        }
+    }
+    let mut lets = Lets(HashSet::new());
+    almide_ir::visit::IrVisitor::visit_expr(&mut lets, body);
+    lets.0
 }
 
 /// The variables the selection `e` chooses between, when every arm (through
@@ -79,15 +99,15 @@ fn heap_value(ty: &Ty) -> bool {
 }
 
 impl Selections<'_> {
-    /// The variables of a borrowable selection: an `if` over `let` locals of
-    /// this fn.
+    /// The variables of a borrowable selection: an `if` over plain `let`
+    /// locals of this fn that are still bound by value.
     fn locals(&self, e: &IrExpr) -> Option<Vec<VarId>> {
         if !matches!(e.kind, IrExprKind::If { .. }) || !heap_value(&e.ty) {
             return None;
         }
         let vars = selected(e)?;
         vars.iter()
-            .all(|v| !self.params.contains(v) && !self.top_lets.contains(v) && self.vt.get(*v).mutability == Mutability::Let)
+            .all(|v| self.lets.contains(v) && !self.ref_lets.contains(v) && self.vt.get(*v).mutability == Mutability::Let)
             .then_some(vars)
     }
 
