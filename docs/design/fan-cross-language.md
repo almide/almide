@@ -103,8 +103,8 @@ go to source/list order (audit §5). Nothing is saved by finding a cheap arm
 early: every arm runs to completion, or to the budget. An optional budget,
 applied per arm, cuts an arm at a charge site, and the arm is excluded. The
 arm is pure, so nothing external had started. The answer is the same on
-every machine; it is meant to be the same on every target too, but #3778
-records shapes where today's native and wasm meters disagree.
+every machine and, since #3778, on every target: both meters read the one
+charge table (a loop-free wrapper's entry is exempt, interpolation is free).
 
 The nearest peers are Rayon `min_by_key` over a cost you compute yourself
 (this runs everything to completion, so nothing is saved), and search
