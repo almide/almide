@@ -44,17 +44,56 @@ pub fn probe_enabled() -> bool {
 /// Returns every metered clone as `(clone, base)`: the pass that made the
 /// clones is the one that knows them, so a consumer never recovers the base
 /// by parsing a clone's name (#3491).
-pub fn insert_probe_charges(functions: &mut Vec<MirFunction>) -> Vec<(String, String)> {
+///
+/// `exempt` is the meter plan's entry-exempt set (`almide_ir::meter_plan`, the
+/// one definition the wasm emitter and the codegen meter read): a loop-free,
+/// non-recursive user fn whose entry the shared inliner folds away charges no
+/// entry here either (#3778). The lowering has already placed a `ChargeDyn`
+/// behind every bulk concat the writer spelled; this pass numbers those sites
+/// in metered fns and strips them everywhere else.
+pub fn insert_probe_charges(functions: &mut Vec<MirFunction>, exempt: &std::collections::HashSet<String>) -> Vec<(String, String)> {
     if probe_enabled() {
         for f in functions.iter_mut() {
-            charge_fn(f);
+            charge_fn(f, exempt);
         }
         return Vec::new();
     }
     if budget_used() || timeout_used() {
-        return specialize_metered_clones(functions);
+        return specialize_metered_clones(functions, exempt);
+    }
+    for f in functions.iter_mut() {
+        strip_dyn_charges(f);
     }
     Vec::new()
+}
+
+/// The meter plan's entry-exempt set for `ir` (ALS-DT2, C-294): the same
+/// `almide_ir::meter_plan` the wasm emitter and the codegen meter read, keyed
+/// on the self-host registry's impl names so pool bodies never charge.
+pub fn entry_exempt_set(ir: &almide_ir::IrProgram) -> std::collections::HashSet<String> {
+    let registry: std::collections::HashSet<&str> = almide_lang::self_host_registry::self_host_runtime()
+        .iter()
+        .flat_map(|(_, maps)| maps.iter())
+        .map(|(impl_fn, _)| *impl_fn)
+        .collect();
+    almide_ir::meter_plan::meter_plan(ir, &registry).exempt
+}
+
+/// True when this program's MIR carries charges at all: the probe, or a
+/// `fan.bounded` / `fan.min` / `fan.timeout` region was noted by the
+/// frontend. The lowering asks before placing a concat charge.
+pub fn charges_wanted() -> bool {
+    probe_enabled() || budget_used() || timeout_used()
+}
+
+/// Drop the lowering's concat charges from a fn that is not metered.
+fn strip_dyn_charges(f: &mut MirFunction) {
+    f.ops.retain(|op| !matches!(op, Op::ChargeDyn { .. }));
+}
+
+/// The fn the meter plan names for a metered clone or a plain fn.
+fn base_name(name: &str) -> &str {
+    name.strip_prefix("__fuel__").unwrap_or(name)
 }
 
 /// The name of `base`'s metered clone. It sits in the compiler's `__` fn-name
@@ -64,37 +103,36 @@ fn metered_clone_name(base: &str) -> String {
     format!("__fuel__{base}")
 }
 
-/// Entry + loop-head charges for one fn, in place (the W1 placement).
-fn charge_fn(f: &mut MirFunction) {
+/// Entry + loop-head charges for one fn, in place (the W1 placement), and
+/// the site numbers of the concat charges the lowering placed.
+fn charge_fn(f: &mut MirFunction, exempt: &std::collections::HashSet<String>) {
     let mut idx: u32 = 0;
     let mut out: Vec<Op> = Vec::with_capacity(f.ops.len() + 4);
-    out.push(Op::Charge {
-        site: site_id(&f.name, idx),
-        cost: 1,
-    });
+    if !exempt.contains(base_name(&f.name)) {
+        out.push(Op::Charge {
+            site: site_id(&f.name, idx),
+            cost: 1,
+        });
+    }
     idx += 1;
     for op in f.ops.drain(..) {
         let is_loop_start = matches!(op, Op::LoopStart);
-        // T3-5: a bulk string concat charges 1 + result_len/16 (the dyn
-        // charge reads the result AFTER the op, so it sits right behind it).
-        let dyn_src = match &op {
-            Op::CallFn {
-                name, dst: Some(d), ..
-            } if name == "__str_concat" => Some(*d),
-            _ => None,
-        };
-        out.push(op);
+        match op {
+            // T3-5: the dyn charge reads the result AFTER the concat, so the
+            // lowering put it right behind the call; only its site is open.
+            Op::ChargeDyn { src, .. } => {
+                out.push(Op::ChargeDyn {
+                    site: site_id(&f.name, idx),
+                    src,
+                });
+                idx += 1;
+            }
+            op => out.push(op),
+        }
         if is_loop_start {
             out.push(Op::Charge {
                 site: site_id(&f.name, idx),
                 cost: 1,
-            });
-            idx += 1;
-        }
-        if let Some(src) = dyn_src {
-            out.push(Op::ChargeDyn {
-                site: site_id(&f.name, idx),
-                src,
             });
             idx += 1;
         }
@@ -108,7 +146,7 @@ fn charge_fn(f: &mut MirFunction) {
 /// region reaches a `FuncRef` every `__lambda_*` fn stays metered globally —
 /// the one documented remainder of "zero metering outside regions".
 /// Returns the clones as `(clone, base)`.
-fn specialize_metered_clones(functions: &mut Vec<MirFunction>) -> Vec<(String, String)> {
+fn specialize_metered_clones(functions: &mut Vec<MirFunction>, exempt: &std::collections::HashSet<String>) -> Vec<(String, String)> {
     use std::collections::{BTreeMap, BTreeSet, VecDeque};
     let names: BTreeSet<String> = functions
         .iter()
@@ -165,7 +203,7 @@ fn specialize_metered_clones(functions: &mut Vec<MirFunction>) -> Vec<(String, S
         let mut c = functions[i].clone();
         c.name = metered_clone_name(n);
         retarget(&mut c, &reachable);
-        charge_fn(&mut c);
+        charge_fn(&mut c, exempt);
         clone_of.push((c.name.clone(), n.clone()));
         clones.push(c);
     }
@@ -173,9 +211,11 @@ fn specialize_metered_clones(functions: &mut Vec<MirFunction>) -> Vec<(String, S
         let name = f.name.as_str().to_string();
         if is_root(&name) {
             retarget(f, &reachable);
-            charge_fn(f);
+            charge_fn(f, exempt);
         } else if uses_funcref && name.starts_with("__lambda_") {
-            charge_fn(f);
+            charge_fn(f, exempt);
+        } else {
+            strip_dyn_charges(f);
         }
     }
     functions.extend(clones);
@@ -241,7 +281,7 @@ mod cert_tests {
             return; // an outer harness set it; this test's claim is vacuous there
         }
         let mut fns: Vec<crate::MirFunction> = Vec::new();
-        insert_probe_charges(&mut fns);
+        insert_probe_charges(&mut fns, &std::collections::HashSet::new());
         assert!(fns.is_empty());
     }
 }

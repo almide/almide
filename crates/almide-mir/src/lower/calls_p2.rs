@@ -168,6 +168,13 @@ impl LowerCtx {
             args,
             result: Some(Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT }),
         });
+        // T3-5: a bulk concat the writer spelled charges 1 + result_len/16;
+        // `charge_probe` numbers the site and keeps it only in metered fns.
+        // Placed only when the program meters at all (a region or the probe),
+        // so an unmetered program's MIR is byte-identical to before.
+        if self.in_interp == 0 && crate::charge_probe::charges_wanted() {
+            self.ops.push(Op::ChargeDyn { site: 0, src: dst });
+        }
         Some(dst)
     }
 
@@ -628,7 +635,10 @@ impl LowerCtx {
             return Some(self.lower_interp_compound_wall(parts));
         }
         let tree = crate::lower::desugar_string_interp(parts, &self.record_layouts)?;
-        self.try_lower_concat_str(&tree)
+        self.in_interp += 1;
+        let out = self.try_lower_concat_str(&tree);
+        self.in_interp -= 1;
+        out
     }
 
     /// Is there a record/tuple part the desugar would EXPAND (statically `aggregate_part_expandable`)

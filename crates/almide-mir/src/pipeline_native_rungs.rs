@@ -386,7 +386,8 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
     // clone→base pairs come from the pass that made the clones, never from a
     // name's spelling: a `__fuel` suffix test gave a user fn `heavy__fuel`
     // `heavy`'s signature (#3491).
-    for (clone, base) in crate::charge_probe::insert_probe_charges(&mut functions) {
+    let exempt = crate::charge_probe::entry_exempt_set(&ir);
+    for (clone, base) in crate::charge_probe::insert_probe_charges(&mut functions, &exempt) {
         if let Some(sig) = sigs.get(base.as_str()).cloned() {
             sigs.insert(clone, sig);
         }
