@@ -195,7 +195,7 @@
 4855	spec/wasm_cross/fan_block_rc_closure_capture.almd
 5369	spec/wasm_cross/fan_deterministic.almd
 3971	spec/wasm_cross/fan_effect_mapper.almd
-5903	spec/wasm_cross/fan_effect_mapper_capability.almd
+5296	spec/wasm_cross/fan_effect_mapper_capability.almd
 2804	spec/wasm_cross/fan_map_all_workers_abort_one_line.almd
 2501	spec/wasm_cross/fan_map_err.almd
 2737	spec/wasm_cross/fan_map_err_runs_every_element.almd
