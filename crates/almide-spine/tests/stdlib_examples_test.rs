@@ -52,7 +52,12 @@ fn every_stdlib_example_evaluates_to_true() {
             "{import_line}effect fn main() -> Unit = println(if ({expr}) then \"true\" else \"false\")\n"
         );
         let name = format!("example_{i}_{file}.almd");
-        match almide_spine::s5::run_file(&name, &program) {
+        // #3768: the per-fixture limit every program-running sweep holds.
+        let label = format!("stdlib/{file}.almd example `{expr}`");
+        let run = almide_corpus::run_limited(&label, almide_corpus::FIXTURE_LIMIT, move || {
+            almide_spine::s5::run_file(&name, &program)
+        });
+        match run {
             Ok(out) if out.exit == 0 && out.stdout == "true\n" => {}
             Ok(out) => failures.push(format!(
                 "{file}: `{expr}` -> exit {} stdout {:?} stderr {:?}",
