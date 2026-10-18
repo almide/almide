@@ -1,0 +1,33 @@
+// @contract: C-004
+// ADR-0024 D3 (#3780): a `fan { }` whose arm reaches an `@ordered` stdlib fn
+// — here `env.set`, process-local state a sibling arm reads — runs its arms
+// in arm order on every target. Native used to run the arms on threads, so
+// the sleeping reader saw the writer's value; wasm evaluated them in order
+// and did not. The reader now finishes before the writer starts on both.
+import env
+
+effect fn reader(key: String) -> Result[String, String] = {
+  env.sleep_ms(100)
+  ok(env.get(key) ?? "unset")
+}
+
+effect fn writer(key: String) -> Result[String, String] = {
+  env.set(key, "written")
+  ok("w")
+}
+
+// The same pair through a wrapper: the reach is transitive.
+effect fn via_wrapper(key: String) -> Result[String, String] = writer(key)
+
+effect fn main() -> Unit = {
+  let (r, w) = fan {
+    reader("FAN_ORDERED_A")!
+    writer("FAN_ORDERED_A")!
+  }
+  println("${r} ${w}")
+  let (r2, w2) = fan {
+    reader("FAN_ORDERED_B")!
+    via_wrapper("FAN_ORDERED_B")!
+  }
+  println("${r2} ${w2}")
+}
