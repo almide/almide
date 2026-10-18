@@ -10,15 +10,10 @@
 import http
 import net
 
-fn framing(head: String) -> String =
-  head
-    |> string.split("\r\n")
-    |> list.filter((l) => {
-      let k = string.to_lower(string.split(l, ":") |> list.first ?? "")
-      k == "content-length" or k == "transfer-encoding"
-    })
-    |> list.map((l) => string.to_lower(l))
-    |> list.join(" / ")
+fn framing(head: String) -> String = head |> string.split("\r\n") |> list.filter((l) => {
+  let k = string.to_lower(string.split(l, ":") |> list.first ?? "")
+  k == "content-length" or k == "transfer-encoding"
+}) |> list.map((l) => string.to_lower(l)) |> list.join(" / ")
 
 effect fn read_head(s: Int, acc: String) -> Result[String, String] = {
   if string.contains(acc, "\r\n\r\n") then ok(acc)
@@ -38,7 +33,10 @@ effect fn exchange(l: Int, port: Int, tag: String, method: String, body: String,
       let raw = read_head(s, "")!
       let parts = string.split(raw, "\r\n\r\n")
       let head = parts |> list.first ?? ""
-      net.tcp_write(s, bytes.from_string("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"))!
+      net.tcp_write(
+        s,
+        bytes.from_string("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"),
+      )!
       let answer = match http.wait(call) {
         ok(r) => "${http.status_code(r)} ${http.body(r)}",
         err(e) => "err ${e}",
