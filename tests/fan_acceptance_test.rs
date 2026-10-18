@@ -301,7 +301,6 @@ fn fan_outside_an_effect_fn_and_a_captured_var_are_refused() {
 // ---- known divergences (docs/design/fan-semantics-audit.md §Discrepancies) ----
 
 #[test]
-#[ignore = "#3778: the native meter charges a loop-free wrapper's entry, wasm does not"]
 fn a_loop_free_wrapper_costs_the_same_on_every_leg() {
     let src = format!(
         "{HEAVY}fn wrap(n: Int) -> Int = heavy(n)\neffect fn main() -> Unit = {{\n  let b = fan.bounded(compute.ns(3006)) {{ wrap(1000) }} ?? -1\n  println(\"${{b}}\")\n}}\n"
@@ -310,7 +309,6 @@ fn a_loop_free_wrapper_costs_the_same_on_every_leg() {
 }
 
 #[test]
-#[ignore = "#3778: the native meter charges string concatenation, wasm does not"]
 fn a_cut_body_that_interpolates_stops_at_the_same_point_on_every_leg() {
     let src = "fn loud(n: Int) -> Int = {\n  var i = 0\n  while i < n { println(\"i ${i}\"); i = i + 1 }\n  i\n}\neffect fn main() -> Unit = {\n  let b = fan.bounded(compute.ns(30)) { loud(100) } ?? -1\n  println(\"cut ${b}\")\n}\n";
     four_legs("cut.almd", src, "i 0\ni 1\ni 2\ni 3\ni 4\ni 5\ni 6\ni 7\ni 8\ncut -1\n");
