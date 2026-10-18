@@ -63,13 +63,30 @@ impl NanoPass for ThreadShareMarksPass {
 /// The threaded code of `e`: the arms of a fan block that spawns them, or a
 /// thread-crossing runtime call's arguments. A one-arm fan (#3341) and a fan
 /// `FanLowering` marked inline (#3459) run on the calling thread.
+///
+/// A runtime call reaches the walker in two spellings: a `RuntimeCall`, and a
+/// `Call { Module }` the walker renders as `almide_rt_{module}_{func}`
+/// — the spelling `fan.map`'s parallel route (`fan.map_par`, RustLowering)
+/// keeps. Both are judged by the one declaration the router's target carries:
+/// the runtime helper's `Send` bound (`crosses_threads`).
 fn threaded_code<'e>(e: &'e IrExpr, ann: &CodegenAnnotations) -> Option<&'e [IrExpr]> {
     match &e.kind {
         IrExprKind::Fan { exprs } if exprs.len() > 1 && !ann.is_inline_fan(e.span) => Some(exprs),
-        IrExprKind::RuntimeCall { symbol, args }
-            if crate::generated::runtime_fn_modes::crosses_threads(symbol.as_str()) => Some(args),
+        IrExprKind::RuntimeCall { symbol, args } if crosses_threads(symbol.as_str()) => Some(args),
+        IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
+            if crosses_threads(&module_call_symbol(module.as_str(), func.as_str())) => Some(args),
         _ => None,
     }
+}
+
+fn crosses_threads(symbol: &str) -> bool {
+    crate::generated::runtime_fn_modes::crosses_threads(symbol)
+}
+
+/// The runtime symbol a `Call { Module }` renders as — the walker's
+/// `render_expr_call` spelling.
+fn module_call_symbol(module: &str, func: &str) -> String {
+    format!("almide_rt_{}_{}", almide_base::names::module_ident(module), func.replace('.', "_"))
 }
 
 /// The variables `exprs` read from outside, once each, in order.
