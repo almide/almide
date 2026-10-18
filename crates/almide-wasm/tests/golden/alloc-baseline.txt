@@ -267,6 +267,7 @@
 65888	spec/wasm_cross/fuel_interp_uncharged.almd
 65712	spec/wasm_cross/fuel_race_boundary.almd
 65952	spec/wasm_cross/fuel_race_err_skip.almd
+65776	spec/wasm_cross/fuel_single_call_args.almd
 65648	spec/wasm_cross/fuel_timeout_ends.almd
 65728	spec/wasm_cross/fuel_trap_cut.almd
 65728	spec/wasm_cross/fuel_trap_window.almd
