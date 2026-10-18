@@ -59,3 +59,40 @@ test "fan captures let binding" {
   assert_eq(a, 11)
   assert_eq(b, 20)
 }
+
+// ── a fan nested in an arm: its join propagates out of the arm ──
+effect fn err_val(tag: String) -> Result[Int, String] = err("bad:" + tag)
+
+effect fn nested_fan_err() -> Result[Int, String] = {
+  let (a, (b, c)) = fan {
+    add(1, 2)!
+    fan {
+      pure_val(4)!
+      err_val("inner")!
+    }
+  }
+  ok(a + b + c)
+}
+
+test "fan nested in an arm" {
+  let (a, (b, c)) = fan {
+    add(1, 2)!
+    fan {
+      mul(2, 3)!
+      pure_val(5)!
+    }
+  }
+  assert_eq(a + b + c, 14)
+  let (d, e) = fan {
+    add(0, 1)!
+    {
+      let (x, y) = fan {
+        add(1, 1)!
+        mul(2, 2)!
+      }
+      x + y
+    }
+  }
+  assert_eq(d + e, 7)
+  assert_eq(nested_fan_err(), err("bad:inner"))
+}
