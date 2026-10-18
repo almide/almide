@@ -1,0 +1,58 @@
+// #1456 — identifiers follow UAX #31 Default Identifiers: XID_Start (or `_`)
+// then XID_Continue, stored in NFC. A caseless name (CJK, kana, Hangul) is a
+// value name unless this module declares it as a type or a variant case; an
+// uppercase start (`Δ`) is a type name exactly as an ASCII capital is.
+type 住所 = { 都市: String, 番地: Int }
+
+type 色 = | 赤 | 緑 | 青(Int)
+
+type Δ = { ε: Float }
+
+fn 挨拶(名前: String) -> String = "こんにちは、${名前}"
+
+fn 色名(c: 色) -> String = match c {
+  赤 => "red",
+  緑 => "green",
+  青(n) => "blue:${n}",
+}
+
+fn 都市名(a: 住所) -> String = a.都市
+
+test "let, fn and parameter names may be non-ASCII" {
+  let 日本 = 1
+  let café = 2
+  let λ = (x: Int) => x + 日本
+  assert_eq(日本 + café, 3)
+  assert_eq(λ(4), 5)
+  assert_eq(挨拶("世界"), "こんにちは、世界")
+}
+
+test "canonically equivalent spellings name one binding" {
+  let café = 5
+  assert_eq(café, 5)
+}
+
+test "a caseless record type, its fields and its repr" {
+  let a = 住所 { 都市: "東京", 番地: 3 }
+  assert_eq(都市名(a), "東京")
+  assert_eq(a.番地, 3)
+  let b = { ...a, 番地: 4 }
+  assert_eq("${b}", "住所 { 都市: \"東京\", 番地: 4 }")
+  let xs: List[住所] = [a, b]
+  assert_eq(list.len(xs), 2)
+}
+
+test "caseless variant cases construct, match and print" {
+  assert_eq(色名(赤), "red")
+  assert_eq(色名(緑), "green")
+  assert_eq(色名(青(7)), "blue:7")
+  assert_eq("${青(2)}", "青(2)")
+  assert_eq("${緑}", "緑")
+  assert_eq(赤 == 赤, true)
+  assert_eq(赤 == 緑, false)
+}
+
+test "an uppercase non-ASCII start is a type name" {
+  let d = Δ { ε: 0.5 }
+  assert_eq(d.ε, 0.5)
+}

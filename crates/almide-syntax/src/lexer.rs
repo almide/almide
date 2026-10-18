@@ -1062,7 +1062,7 @@ mod tests {
     #[test]
     fn malformed_backtick_escape_never_yields_an_empty_ident() {
         // Non-ASCII body, empty body, and an unterminated escape at EOF.
-        for src in ["let `日本語` = 1", "let `` = 1", "let `"] {
+        for src in ["let `ａｂ` = 1", "let `` = 1", "let `"] {
             let tokens = Lexer::tokenize(src);
             assert!(
                 !tokens.iter().any(|t| {
@@ -1321,5 +1321,66 @@ mod tests {
             assert_eq!((zz.line, zz.col), (2 + newlines, 5),
                 "{kind}: token on the line after the literal");
         }
+    }
+
+    fn words(src: &str) -> Vec<(TokenType, String)> {
+        Lexer::tokenize(src)
+            .into_iter()
+            .filter(|t| !matches!(t.token_type, TokenType::Newline | TokenType::EOF))
+            .map(|t| (t.token_type, t.value))
+            .collect()
+    }
+
+    // #1456: identifiers follow UAX #31 Default Identifiers — XID_Start (or
+    // `_`) then XID_Continue. A caseless start (CJK, kana, Hangul, ...) is a
+    // value-side name; an uppercase start stays a type-side name.
+    #[test]
+    fn non_ascii_identifiers_follow_xid() {
+        assert_eq!(words("日本国憲法"), vec![(TokenType::Ident, "日本国憲法".to_string())]);
+        assert_eq!(words("café"), vec![(TokenType::Ident, "café".to_string())]);
+        assert_eq!(words("λx"), vec![(TokenType::Ident, "λx".to_string())]);
+        assert_eq!(words("Δx"), vec![(TokenType::TypeName, "Δx".to_string())]);
+        assert_eq!(words("_名前"), vec![(TokenType::Ident, "_名前".to_string())]);
+        assert_eq!(words("x日本2"), vec![(TokenType::Ident, "x日本2".to_string())]);
+        assert_eq!(words("`日本`"), vec![(TokenType::Ident, "日本".to_string())]);
+        // A non-XID character still ends the name and lexes as Unknown.
+        assert_eq!(
+            words("名前→"),
+            vec![(TokenType::Ident, "名前".to_string()), (TokenType::Unknown, "→".to_string())]
+        );
+    }
+
+    // #1456: canonically equivalent spellings are one identifier — the name is
+    // stored in NFC, so the NFD `e` + U+0301 and the precomposed `é` (and the
+    // NFD `か` + U+3099 an IME can produce, versus `が`) compare equal.
+    #[test]
+    fn identifiers_are_nfc_normalized() {
+        assert_eq!(words("cafe\u{301}"), vec![(TokenType::Ident, "caf\u{e9}".to_string())]);
+        assert_eq!(words("\u{304b}\u{3099}"), vec![(TokenType::Ident, "\u{304c}".to_string())]);
+        // Columns still count source characters, not normalized ones.
+        let toks = Lexer::tokenize("cafe\u{301} x");
+        assert_eq!((toks[0].col, toks[0].end_col, toks[1].col), (1, 6, 7));
+    }
+
+    // #1456: a character whose compatibility decomposition differs from its
+    // canonical one (full-width Latin and digits, ligatures, circled forms)
+    // is not an identifier character: it stays Unknown, so the copy-paste
+    // diagnostic still fires instead of `ａｂｃ` silently naming a second `abc`.
+    #[test]
+    fn compatibility_characters_are_not_identifier_characters() {
+        assert_eq!(words("ａｂ")[0], (TokenType::Unknown, "ａ".to_string()));
+        assert_eq!(
+            words("x１"),
+            vec![(TokenType::Ident, "x".to_string()), (TokenType::Unknown, "１".to_string())]
+        );
+        assert_eq!(words("\u{fb01}x")[0], (TokenType::Unknown, "\u{fb01}".to_string()));
+        assert_eq!(words("①")[0], (TokenType::Unknown, "①".to_string()));
+    }
+
+    // Keywords stay ASCII: a full-width or accented look-alike is never a keyword.
+    #[test]
+    fn keywords_stay_ascii() {
+        assert_eq!(words("let")[0].0, TokenType::Let);
+        assert_eq!(words("lét")[0].0, TokenType::Ident);
     }
 }
