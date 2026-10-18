@@ -503,8 +503,8 @@ mod rust_safe_fn_name_tests {
     /// runs and platforms), so a reordered file keeps its names.
     #[test]
     fn hash_suffix_is_stable() {
-        let once = rust_safe_fn_name("日本語");
-        assert_eq!(once, rust_safe_fn_name("日本語"));
+        let once = rust_safe_fn_name("日本語のテスト、一");
+        assert_eq!(once, rust_safe_fn_name("日本語のテスト、一"));
         assert!(once.ends_with(|c: char| c.is_ascii_hexdigit()));
     }
 }
