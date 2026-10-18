@@ -239,7 +239,9 @@
 6	1	1709	6	spec/wasm_cross/float_subnormal_preserved.almd
 68	64	197190	68	spec/wasm_cross/float_to_fixed.almd
 7	4	71	7	spec/wasm_cross/float_to_int_edges.almd
+17	9	344	17	spec/wasm_cross/fold_family_source_before_init.almd
 22	14	109	22	spec/wasm_cross/fold_heap_acc.almd
+27	13	170	27	spec/wasm_cross/fold_init_rebinds_source.almd
 6	0	88	6	spec/wasm_cross/for_in_forms.almd
 ~	spec/wasm_cross/fs_call_head_family.almd
 ~	spec/wasm_cross/fs_composition_family.almd
