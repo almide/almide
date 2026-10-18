@@ -696,3 +696,130 @@ pub fn almide_rt_m_f(x: i64) -> i64 { x.other() }
         assert_eq!(changed, *want, "editing {what} changed the fingerprints of {changed:?}");
     }
 }
+
+/// A function's wasm lowering is part of what a stamp inspected: editing the
+/// emitter arm that dispatches on the function's name, or a lowering helper
+/// only stdlib arms reach, changes the fingerprint of exactly the functions
+/// that arm serves (#3796). Shared emitter infrastructure (reached from
+/// general expression lowering too) and other modules' arms move nothing.
+#[test]
+fn an_emitter_arm_edit_voids_exactly_the_functions_it_serves() {
+    const MODULE: &str = "\
+fn a(x: Int) -> Int = x + 1
+
+fn b(x: Int, y: Int) -> Int = x + y
+
+fn c(x: Int) -> Int = x * 2
+
+fn d(x: Int) -> Int = x * 3
+
+fn e(x: Int, y: Int) -> Int = x - y
+";
+    const EMITTER: &str = r#"
+impl Emitter<'_> {
+    pub(crate) fn lower_expr(&mut self, e: &IrExpr) -> ArmResult {
+        self.lower_arg(e)?;
+        match &e.kind {
+            IrExprKind::Call { target, args, .. } => self.lower_module_call(target, args),
+            _ => Ok(None),
+        }
+    }
+
+    fn lower_module_call(&mut self, target: &CallTarget, args: &[IrExpr]) -> ArmResult {
+        match target {
+            CallTarget::Module { module, func, .. } if module.as_str() == "m" && func.as_str() == "c" => {
+                self.lower_arg(&args[0])?;
+                self.emit_c_kernel()
+            }
+            CallTarget::Module { module, func, .. } if module.as_str() == "m" => {
+                self.lower_m_call(func.as_str(), args)
+            }
+            CallTarget::Module { module, func, .. } if module.as_str() == "n" => {
+                self.lower_n_call(func.as_str(), args)
+            }
+            _ => self.lower_linked_call(args),
+        }
+    }
+
+    fn lower_m_call(&mut self, func: &str, args: &[IrExpr]) -> ArmResult {
+        match (func, args) {
+            ("a", [x]) => self.lower_m_a(x),
+            ("b" | "e", [x, y]) => self.lower_m_pair(func == "b", x, y),
+            _ => self.lower_linked_call(args),
+        }
+    }
+
+    fn lower_n_call(&mut self, func: &str, args: &[IrExpr]) -> ArmResult {
+        match (func, args) {
+            ("a", [x]) => self.lower_arg(x),
+            _ => self.lower_linked_call(args),
+        }
+    }
+
+    fn lower_m_a(&mut self, x: &IrExpr) -> ArmResult {
+        self.lower_arg(x)?;
+        self.zip_kernel(1)
+    }
+
+    fn lower_m_pair(&mut self, is_b: bool, x: &IrExpr, y: &IrExpr) -> ArmResult {
+        self.lower_arg(x)?;
+        self.lower_arg(y)?;
+        self.zip_kernel(if is_b { 2 } else { 3 })
+    }
+
+    fn zip_kernel(&mut self, k: i32) -> ArmResult {
+        self.f.instructions().i32_const(k);
+        Ok(None)
+    }
+
+    fn emit_c_kernel(&mut self) -> ArmResult {
+        self.f.instructions().i32_const(7);
+        Ok(None)
+    }
+
+    fn lower_arg(&mut self, e: &IrExpr) -> ArmResult {
+        self.f.instructions().i32_const(0);
+        Ok(None)
+    }
+
+    fn lower_linked_call(&mut self, args: &[IrExpr]) -> ArmResult {
+        Ok(None)
+    }
+}
+"#;
+    let fns = ["a", "b", "c", "d", "e"];
+    let run = |emitter: &str| -> BTreeMap<&str, String> {
+        let dir = tempfile::tempdir().expect("tempdir");
+        for (p, text) in [("stdlib/m.almd", MODULE), ("crates/almide-wasm/src/calls.rs", emitter)] {
+            let path = dir.path().join(p);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, text).unwrap();
+        }
+        let src = Sources::load_at(dir.path());
+        fns.iter().map(|f| (*f, impl_fingerprint(&src, &format!("m.{f}")).expect("declared"))).collect()
+    };
+    let base = run(EMITTER);
+    let edits: &[(&str, &str, &str, &[&str])] = &[
+        ("the a arm", "(\"a\", [x]) => self.lower_m_a(x)", "(\"a\", [x]) => self.lower_m_a(x).map(|l| l)", &["a"]),
+        ("a's own helper", "self.zip_kernel(1)", "self.zip_kernel(4)", &["a"]),
+        ("the b|e arm", "self.lower_m_pair(func == \"b\", x, y)", "self.lower_m_pair(func != \"e\", x, y)", &["b", "e"]),
+        ("the b|e helper", "if is_b { 2 } else { 3 }", "if is_b { 5 } else { 3 }", &["b", "e"]),
+        ("a helper every m arm shares", "i32_const(k)", "i32_const(k + 1)", &["a", "b", "e"]),
+        ("the m.c guard arm", "self.emit_c_kernel()\n", "self.emit_c_kernel().map(|l| l)\n", &["c"]),
+        ("c's own helper", "i32_const(7)", "i32_const(8)", &["c"]),
+        ("shared infrastructure", "i32_const(0)", "i32_const(1)", &[]),
+        ("another module's arm of the same name", "(\"a\", [x]) => self.lower_arg(x)", "(\"a\", [x]) => self.lower_arg(x).map(|l| l)", &[]),
+        (
+            "the fallback",
+            "fn lower_linked_call(&mut self, args: &[IrExpr]) -> ArmResult {\n        Ok(None)",
+            "fn lower_linked_call(&mut self, args: &[IrExpr]) -> ArmResult {\n        Ok(Some(None))",
+            &[],
+        ),
+    ];
+    for (what, from, to, want) in edits {
+        assert!(EMITTER.contains(from), "{what}: edit anchor {from:?} not in the emitter");
+        let now = run(&EMITTER.replacen(from, to, 1));
+        let changed: Vec<&str> = fns.iter().copied().filter(|f| base[f] != now[f]).collect();
+        assert_eq!(changed, *want, "editing {what} changed the fingerprints of {changed:?}");
+    }
+}
