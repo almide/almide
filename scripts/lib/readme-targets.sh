@@ -8,7 +8,9 @@
 # Generators source this and call `readme_fanout "$0" "$@"` right after they
 # have parsed their arguments: the first invocation re-execs itself once per
 # target with ALMIDE_README_TARGET set, and each re-exec falls through to the
-# script's own body with README pointing at that file.
+# script's own body with README pointing at that file. The build-speed block is
+# rendered by the almide-gates `bench` subcommand, which carries the same list
+# (tools/almide-gates/src/main.almd); change both together.
 README_TARGETS=(README.md README.ja.md README.zh-CN.md)
 
 readme_fanout() {
