@@ -147,7 +147,7 @@ pub fn slim_main_with_external_runtime(full_rs: &str) -> Option<String> {
     let idx = full_rs.find(RT_BOUNDARY_MARKER)?;
     let user_code = full_rs[idx + RT_BOUNDARY_MARKER.len()..].trim_start_matches('\n');
     let mut out = String::new();
-    out.push_str("#![allow(unused_parens, unused_variables, dead_code, unused_imports, unused_mut, unused_must_use)]\n\n");
+    out.push_str("#![allow(unused_parens, unused_variables, dead_code, unused_imports, unused_mut, unused_must_use, uncommon_codepoints, confusable_idents, mixed_script_confusables)]\n\n");
     out.push_str("use std::collections::HashMap;\nuse std::collections::HashSet;\n");
     out.push_str("#[macro_use] extern crate almide_rt;\nuse almide_rt::*;\n\n");
     out.push_str(user_code);
@@ -730,7 +730,7 @@ pub mod rust_idents;
 /// version, so callers can cache the resulting rlib keyed by a hash of this output.
 pub fn emit_runtime_crate() -> String {
     let mut out = String::new();
-    out.push_str("#![allow(unused_parens, unused_variables, dead_code, unused_imports, unused_mut, unused_must_use, non_snake_case)]\n\n");
+    out.push_str("#![allow(unused_parens, unused_variables, dead_code, unused_imports, unused_mut, unused_must_use, non_snake_case, uncommon_codepoints, confusable_idents, mixed_script_confusables)]\n\n");
     out.push_str("use std::collections::HashMap;\nuse std::collections::HashSet;\n\n");
     out.push_str(&rust_runtime_prelude(true));
     // Every std-only runtime module (exclude external-dep modules).
@@ -767,7 +767,7 @@ fn emit_source(program: &mut IrProgram, target: Target, config: &target::TargetC
     let mut output = String::new();
     match target {
         Target::Rust => {
-            output.push_str("#![allow(unused_parens, unused_variables, dead_code, unused_imports, unused_mut, unused_must_use)]\n\n");
+            output.push_str("#![allow(unused_parens, unused_variables, dead_code, unused_imports, unused_mut, unused_must_use, uncommon_codepoints, confusable_idents, mixed_script_confusables)]\n\n");
             output.push_str("use std::collections::HashMap;\nuse std::collections::HashSet;\n\n");
             output.push_str(&rust_runtime_prelude(false));
             // Include runtime modules referenced in the IR. The IrProgram tracks
