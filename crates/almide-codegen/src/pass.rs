@@ -591,8 +591,11 @@ impl NanoPass for BorrowInsertionPass {
             super::pass_borrow_inference::commit_scoped_closures(&mut program, &sigs);
             super::pass_borrow_inference::commit_chain_source_modes(&mut program, &sigs);
             super::pass_borrow_inference::insert_borrows_at_call_sites(&mut program, &sigs);
-            super::pass_borrow_inference::hoist_conflicting_reads(&mut program);
         }
+        // Unconditional: an argument that rebinds a variable an earlier
+        // argument reads conflicts with a runtime fn's by-reference source
+        // even in a program with no inferred user-fn signature (#3801).
+        super::pass_borrow_inference::hoist_conflicting_reads(&mut program);
         PassResult { program, changed }
     }
 }
