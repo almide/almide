@@ -166,6 +166,7 @@ mod list_edit;
 mod list_search;
 mod list_fuse;
 mod list_enumerate_fold;
+mod list_range_head;
 mod list_mut;
 mod list_order;
 mod list_sort;
