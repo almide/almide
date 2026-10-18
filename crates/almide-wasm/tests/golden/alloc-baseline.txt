@@ -210,6 +210,8 @@
 66208	spec/wasm_cross/fan_pure_thunks.almd
 66224	spec/wasm_cross/fan_race_mapper.almd
 66480	spec/wasm_cross/fan_race_walled_program.almd
+65904	spec/wasm_cross/fan_record_err_source_order.almd
+67584	spec/wasm_cross/fan_record_serial_elision.almd
 ~	spec/wasm_cross/fan_settle_tuple.almd
 66080	spec/wasm_cross/fan_sibling_trap.almd
 66128	spec/wasm_cross/fan_trap_waits_for_elements_below.almd
