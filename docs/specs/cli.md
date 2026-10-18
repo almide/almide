@@ -996,6 +996,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 <!-- almide switches --md: begin -->
 | 変数 | 種別 | 説明 |
 |---|---|---|
+| `ALMIDE_ABORT_SITE=value` | runtime | the testing.assert_aborts site a native test child runs (ADR-0029): set by the parent when it re-executes the test binary; never set by hand |
 | `ALMIDE_ALLOC_COUNT` | harness | build the native program with a counting allocator that prints `__ALMD_ALLOC allocs=N deallocs=N reallocs=N peak=N` on stderr when `__almide_main` returns (the native borrow oracle's allocation lane, tests/native_borrow_oracle_test.rs) |
 | `ALMIDE_BANG_RETURN` | ablation | turn OFF the per-position `!` desugars of the v1 lowering so every `!` reaches the bind-position rule or walls loudly (the decline-matrix probe) |
 | `ALMIDE_BENCH_DIR=value` | harness | the fixture directory of the structural leg's perf probe (default `crates/almide-wasm/tests/perf`) |
@@ -1112,6 +1113,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_SURVIVE_OVERLAY=value` | route | set by `almide survive` on its child runs (#2147): every compiler read of this `.almd` path returns the text in `ALMIDE_SURVIVE_OVERLAY_TEXT` instead of the disk bytes, so a proposed edit is judged without being written |
 | `ALMIDE_SURVIVE_OVERLAY_TEXT=value` | route | the file holding the proposed text for `ALMIDE_SURVIVE_OVERLAY`; set without it, the overlay refuses to run rather than read the disk file |
 | `ALMIDE_TCO_DEBUG` | debug | print the native tail-call loop rewrite decisions |
+| `ALMIDE_TEST_ABORT_PROBE` | runtime | marks a native testing.assert_aborts child (ADR-0029) so `panic` takes the C-219 abort path there; set by the parent, never by hand |
 | `ALMIDE_TEST_LAX_WASM` | gate | let the default `almide test` lane (wasm first, native fallback) PASS a file whose wasm leg diverged — trapped where the native re-run passed; without it a diverged leg fails the run |
 | `ALMIDE_TEST_VERBOSE` | tool | show the full cargo / rustc output of the `almide test` harness build |
 | `ALMIDE_TEST_WASM_RUNNER=value` | tool | `wasmtime` runs the wasm leg of `almide test` on the `wasmtime` CLI (the stock `to_wasi` artifact) instead of the embedded host every `almide` binary carries (#3046) — the comparison route; unset is the embedded host |
