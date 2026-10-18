@@ -58,9 +58,14 @@ pub fn almide_rt_fan_map<A, B>(
 // when the site's measured time per element is worth the offer's cost.
 // `ALMIDE_FAN_SEQUENTIAL=1` forces the sequential path — the ablation knob.
 //
-// Every element writes into its own output timeline (ADR-0024 D5), flushed in
-// list order. Every element runs, so no Err cuts the group: a trap in element k
-// waits for the elements below it and discards everything above (ADR-0024 D6).
+// Every BLOCK of elements (the dealer's unit, about four per worker) writes
+// into its own output timeline (ADR-0024 D5), flushed in list order; inside a
+// block the elements run in list order on one thread, so element order holds
+// at element granularity for the cost of one registration per block (#3784:
+// one per element — a mutex, a flush and a wake — made a light map slower
+// than sequential). Every element runs, so no Err cuts the group: a trap in
+// element k waits for the blocks below its own and discards everything above
+// (ADR-0024 D6, #3779).
 pub fn almide_rt_fan_map_par<A: Send + Sync + Clone, B: Send, F: Fn(A) -> Result<B, AlmideString> + Send + Sync>(
     items: Vec<A>,
     f: F,
@@ -92,16 +97,17 @@ pub fn almide_rt_fan_map_par<A: Send + Sync + Clone, B: Send, F: Fn(A) -> Result
         let block = almide_fan_block(n, workers);
         // The group flushes this thread's stdout first: a runtime abort on a worker
         // exits without reaching this thread's buffer (C-197, see rust.toml fan_expr).
-        let group = almide_fan_group(n);
-        // dealt in blocks to this thread and the resident pool (list.rs `almide_fan_deal`)
+        // One timeline per BLOCK, dealt in list order (list.rs `almide_fan_deal`).
         let blocks: Vec<_> = items.chunks(block).zip(slots.chunks_mut(block)).enumerate().collect();
+        let group = almide_fan_group(blocks.len());
         almide_fan_panic_if_any(almide_fan_deal(blocks, workers, |blocks| {
-            let elems = blocks.flat_map(|(b, (chunk, out))| out.iter_mut().zip(chunk.iter()).enumerate().map(move |(i, e)| (b * block + i, e)));
-            clock.worker(elems, |(index, (slot, item))| {
-                let _elem = almide_fan_enter(&group, index);
-                *slot = Some(f(item.clone()));
-                Some(true)
-            });
+            for (b, (chunk, out)) in blocks {
+                let _blk = almide_fan_enter(&group, b);
+                clock.worker(out.iter_mut().zip(chunk.iter()), |(slot, item)| {
+                    *slot = Some(f(item.clone()));
+                    Some(true)
+                });
+            }
         }));
         clock.record();
         almide_fan_map_settle_slots(slots)
