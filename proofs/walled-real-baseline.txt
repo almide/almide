@@ -308,3 +308,29 @@
 # global slots are keyed by the ENTRY file's ids — a module's own top-let ids
 # had shared the key space, so `m.rec.n = 3` read `m.counts`' slot and type.
 # The set is EMPTY again. ANY row is a regression.
+
+# (2026-10-18, ADR-0029) testing.assert_aborts's two internal calls (__abort_site_run,
+# __abort_site_selected) sit in almide-mir's host_ops WALLED table: the child run is a
+# test-build-only host request (embedded op 117/118) with no capability id in the
+# certificate's closed set yet, so every test fn that calls assert_aborts walls on the
+# v1 spine. Admitting them as host-op rows needs a capability for the child run and
+# the matching Coq cap-set change (#3792); until then these 19 rows are the declared wall.
+spec/lang/assert_aborts_continues_test.almd :: __test_almd_0000_the test continues after each assert_aborts
+spec/lang/assert_aborts_continues_test.almd :: __test_almd_0001_the child sees top-level vars at their initial values
+spec/lang/assert_aborts_continues_test.almd :: __test_almd_0002_the closure's value is discarded
+spec/lang/assert_aborts_effect_err_test.almd :: __test_almd_0000_an err propagated with ! is an abort
+spec/lang/assert_aborts_effect_err_test.almd :: __test_almd_0001_an effect closure that succeeds is not an abort
+spec/lang/assert_aborts_value_closure_test.almd :: __test_almd_0000_a block closure ending in an Int call is an abort site
+spec/lang/assert_aborts_value_closure_test.almd :: __test_almd_0001_a block closure ending in a division is an abort site
+spec/stdlib/coverage_assert_aborts_test.almd :: __test_almd_0000_panic is an abort
+spec/stdlib/coverage_assert_aborts_test.almd :: __test_almd_0001_the expected text is a substring
+spec/stdlib/coverage_assert_aborts_test.almd :: __test_almd_0002_the panic header is part of the abort text
+spec/stdlib/coverage_assert_aborts_test.almd :: __test_almd_0003_an index past the end is an abort
+spec/stdlib/coverage_assert_aborts_test.almd :: __test_almd_0004_an index past the end in a helper is an abort
+spec/stdlib/coverage_assert_aborts_test.almd :: __test_almd_0005_division by zero is an abort
+spec/stdlib/coverage_assert_aborts_test.almd :: __test_almd_0006_division by zero in a helper is an abort
+spec/stdlib/coverage_assert_aborts_test.almd :: __test_almd_0007_a failed assert_eq is an abort in its program form
+spec/stdlib/coverage_assert_aborts_test.almd :: __test_almd_0008_a failed assert reports its operands
+spec/stdlib/coverage_assert_aborts_test.almd :: __test_almd_0009_an effect closure runs in the child
+spec/stdlib/testing_polarity_test.almd :: __test_almd_0002_wrong polarity fails
+spec/stdlib/testing_semantics_manifest_test.almd :: __test_almd_0002_testing.__abort_site_selected unit=element-index
