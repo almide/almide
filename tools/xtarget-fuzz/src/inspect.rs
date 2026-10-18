@@ -920,9 +920,9 @@ fn fit_class(sizes: &[u64], ys: &[f64]) -> (usize, f64) {
     }
     let floor = top * 0.01;
     let mut best = (0usize, f64::MAX);
-    for (i, (_, f)) in CLASSES.iter().enumerate() {
+    for (i, (name, f)) in CLASSES.iter().enumerate() {
         let xs: Vec<f64> = sizes.iter().map(|&m| f(m as f64)).collect();
-        let rms = fit_rms(&xs, ys, floor);
+        let rms = if *name == "nlogn" { fit_nlogn(sizes, ys, floor) } else { fit_rms(&xs, ys, floor) };
         if rms <= FIT_TOLERANCE {
             return (i, rms);
         }
@@ -931,6 +931,71 @@ fn fit_class(sizes: &[u64], ys: &[f64]) -> (usize, f64) {
         }
     }
     best
+}
+
+/// The nlogn class (owner ruling Q17, 2026-10-18): `a + b·n + c·n·ln n`, so
+/// a sort plus linear work fits (fs.list_dir / walk / glob return sorted
+/// entries), under a slope cap that keeps the linear term from admitting a
+/// steeper curve. Over n..16n that model alone fits n^1.2 at 0.4% and
+/// n·ln²n at 0.1%; the cap is n·ln n's own log-log slope across the measured
+/// sizes plus 0.03, taken on the fitted curve without its intercept (a
+/// program-shape constant is not the call's cost). It refuses n^1.2 (1.200)
+/// and n·ln²n (1.179) against a cap of 1.119 at n = 20000, admits n·ln n
+/// (1.089) and a sort plus linear work (below it), and leaves n^1.1 (1.100)
+/// where the 2-term fit already put it (0.71%). A curve that fails the cap
+/// reports a residual above the tolerance.
+fn fit_nlogn(sizes: &[u64], ys: &[f64], floor: f64) -> f64 {
+    let ns: Vec<f64> = sizes.iter().map(|&m| m as f64).collect();
+    let (n0, n1) = (ns[0], ns[ns.len() - 1]);
+    // Columns scaled to 1 at n0 keep the normal equations well conditioned.
+    let cols = |n: f64| [1.0, n / n0, (n * n.ln()) / (n0 * n0.ln())];
+    let Some([a, b, c]) = least_squares_3(&ns, ys, cols) else { return f64::MAX };
+    let curve = |n: f64| {
+        let x = cols(n);
+        b * x[1] + c * x[2]
+    };
+    let span = (n1 / n0).ln();
+    let cap = ((n1 * n1.ln()) / (n0 * n0.ln())).ln() / span + NLOGN_SLOPE_MARGIN;
+    if curve(n0) <= 0.0 || curve(n1) <= 0.0 || (curve(n1) / curve(n0)).ln() / span > cap {
+        return f64::MAX;
+    }
+    let sq: f64 = ns.iter().zip(ys).map(|(&n, y)| ((y - (a + curve(n))) / y.abs().max(floor)).powi(2)).sum();
+    (sq / ns.len() as f64).sqrt()
+}
+
+/// How far above n·ln n's own log-log slope the nlogn class reaches (Q17).
+const NLOGN_SLOPE_MARGIN: f64 = 0.03;
+
+/// Least-squares `y = a·x0 + b·x1 + c·x2` over the columns `cols(n)`, by the
+/// normal equations (Gaussian elimination with partial pivoting); None when
+/// they are singular.
+fn least_squares_3(ns: &[f64], ys: &[f64], cols: impl Fn(f64) -> [f64; 3]) -> Option<[f64; 3]> {
+    let mut m = [[0.0f64; 4]; 3];
+    for (&n, &y) in ns.iter().zip(ys) {
+        let x = cols(n);
+        for i in 0..3 {
+            for j in 0..3 {
+                m[i][j] += x[i] * x[j];
+            }
+            m[i][3] += x[i] * y;
+        }
+    }
+    for i in 0..3 {
+        let p = (i..3).max_by(|&r, &q| m[r][i].abs().total_cmp(&m[q][i].abs()))?;
+        m.swap(i, p);
+        if m[i][i].abs() < f64::MIN_POSITIVE {
+            return None;
+        }
+        for r in 0..3 {
+            if r != i {
+                let f = m[r][i] / m[i][i];
+                for j in i..4 {
+                    m[r][j] -= f * m[i][j];
+                }
+            }
+        }
+    }
+    Some([m[0][3] / m[0][0], m[1][3] / m[1][1], m[2][3] / m[2][2]])
 }
 
 /// Relative RMS residual of the least-squares line `y = a + c·x`.
@@ -1361,6 +1426,34 @@ mod fit_tests {
         // n log n over a 16x range is within tolerance of a line with an
         // intercept: it reads as n or nlogn, never as n2.
         assert!(matches!(class_of(|n| 40.0 * n * n.ln()), "n" | "nlogn"));
+    }
+
+    fn class_of_exact(f: impl Fn(f64) -> f64) -> &'static str {
+        let ys: Vec<f64> = sizes().iter().map(|&n| f(n as f64)).collect();
+        CLASSES[fit_class(&sizes(), &ys).0].0
+    }
+
+    fn explained(f: impl Fn(f64) -> f64) -> bool {
+        let ys: Vec<f64> = sizes().iter().map(|&n| f(n as f64)).collect();
+        fit_class(&sizes(), &ys).1 <= FIT_TOLERANCE
+    }
+
+    #[test]
+    fn a_sort_plus_linear_work_reads_as_nlogn() {
+        // A sorted listing: n log n for the sort plus a linear term for the
+        // entries. The 2-term n and nlogn fits miss it by 3.1% and 4.9%.
+        assert_eq!(class_of_exact(|n| 20.0 * n + n * n.ln()), "nlogn");
+        // A program-shape intercept below zero does not steepen the curve.
+        assert_eq!(class_of_exact(|n| -1.0e5 + 20.0 * n + n * n.ln()), "nlogn");
+    }
+
+    #[test]
+    fn the_linear_term_does_not_let_a_steeper_curve_pass_as_nlogn() {
+        // Over n..16n `a + b·n + c·n·ln n` fits these within 3%; the slope cap
+        // (n·ln n's own log-log slope + 0.03) refuses them.
+        for f in [|n: f64| n.powf(1.2), |n: f64| n * n.ln() * n.ln()] {
+            assert!(!explained(f) || !matches!(class_of_exact(f), "1" | "log" | "n" | "nlogn"));
+        }
     }
 
     #[test]
