@@ -55,6 +55,32 @@ pub(crate) fn dispatch(module: &str, func: &str, args: &[Value]) -> Option<Flow>
         // The scalar prim floor — consumed by the self-hosted stdlib bodies the
         // `stdlib_pool` evaluates, not by fixture code directly.
         "prim" => prim_fn(func, args),
+        // The env floor's writers: true `@intrinsic` stubs with no lowered body
+        // (the readers go through `prim.env_get`).
+        "env" => env_fn(func, args),
+        _ => None,
+    }
+}
+
+/// `env.set` writes the LIVE process environment, exactly what the other two
+/// legs do (native setenv; wasm the embedded host's environ), so a fixture
+/// that sets then reads a key (fan_ordered_arms.almd) observes the same
+/// bytes on every leg. `env.sleep_ms` pauses for real: the pause is not an
+/// observation of its own, and a fixture's ordering argument (a sleeping
+/// reader beside a writer) reads the same here as on the targets.
+fn env_fn(func: &str, args: &[Value]) -> Option<Flow> {
+    match (func, args) {
+        ("set", [Value::Str(name), Value::Str(value)]) => {
+            // SAFETY: the interp is single-threaded while a fixture runs, so
+            // no other thread reads the environment during the write — the
+            // condition `set_var` asks for.
+            unsafe { std::env::set_var(name.as_str(), value.as_str()) };
+            Some(Flow::val(Value::Unit))
+        }
+        ("sleep_ms", [Value::Int(ms)]) => {
+            std::thread::sleep(std::time::Duration::from_millis((*ms).max(0) as u64));
+            Some(Flow::val(Value::Unit))
+        }
         _ => None,
     }
 }
