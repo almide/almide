@@ -315,7 +315,6 @@ fn a_cut_body_that_interpolates_stops_at_the_same_point_on_every_leg() {
 }
 
 #[test]
-#[ignore = "#3779: native fan { list.map } reports the first trap in time"]
 fn a_trap_in_a_parallel_list_map_is_the_lowest_index_one() {
     let src = format!(
         "{HEAVY}fn elem(x: Int, z: Int) -> Int =\n  if x == 0 then {{ let big = heavy(30000000) + 5\n [1, 2][big] }}\n  else if x == 7 then 10 / z\n  else heavy(1000)\neffect fn main() -> Unit = {{\n  let z = list.len(list.range(0, 0))\n  let ys = fan {{ list.map(list.range(0, 8), (x) => elem(x, z)) }}\n  println(\"${{ys}}\")\n}}\n"
