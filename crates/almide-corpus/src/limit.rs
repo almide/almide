@@ -41,13 +41,21 @@ impl Stop {
     }
 }
 
+/// How long a cut run is given to honour its [`Stop`] before the cut is
+/// reported as one that did not stop (#3809): the limit itself when that is
+/// shorter, so a short test limit is not outwaited by its own grace.
+pub const STOP_GRACE: Duration = Duration::from_secs(30);
+
 /// Run one fixture's `work` under `limit`, naming `fixture` if it is cut.
 ///
-/// The work runs on a thread of its own; the caller waits at most `limit`
-/// for its result. On expiry this panics with the fixture's path and the
-/// limit, and the thread is left behind — it cannot be stopped from outside,
-/// and the failing test process takes it down. A panic inside the work is
-/// re-raised here with its own message.
+/// The work runs on a thread of its own and is handed a [`Stop`]; the caller
+/// waits at most `limit` for its result. On expiry the stop is set and the
+/// caller waits up to [`STOP_GRACE`] for the thread to finish (#3809), so a
+/// cut fixture stops instead of spinning beside the rest of the test process.
+/// Then this panics with the fixture's path and the limit, and says whether
+/// the thread stopped — a work that never polls its stop is left behind, and
+/// the message says so. A panic inside the work is re-raised here with its
+/// own message.
 pub fn run_limited<R: Send + 'static>(
     fixture: &str,
     limit: Duration,
@@ -64,9 +72,22 @@ pub fn run_limited<R: Send + 'static>(
         .unwrap_or_else(|e| panic!("{fixture}: cannot start its thread: {e}"));
     match rx.recv_timeout(limit) {
         Ok(r) => r,
-        Err(RecvTimeoutError::Timeout) => panic!(
-            "{fixture}: still running after the per-fixture limit of {limit:?} (#3768) — cut, not waited on"
-        ),
+        Err(RecvTimeoutError::Timeout) => {
+            stop.0.store(true, Ordering::Relaxed);
+            let grace = limit.min(STOP_GRACE);
+            let after = match rx.recv_timeout(grace) {
+                // Finished (with a result or a panic): reap the thread, so a
+                // reported stop is a stopped thread.
+                Ok(_) | Err(RecvTimeoutError::Disconnected) => {
+                    let _ = worker.join();
+                    "cut and stopped".to_string()
+                }
+                Err(RecvTimeoutError::Timeout) => {
+                    format!("cut, but it did not stop within {grace:?} of its stop (#3809) and is left running")
+                }
+            };
+            panic!("{fixture}: still running after the per-fixture limit of {limit:?} (#3768) — {after}")
+        }
         Err(RecvTimeoutError::Disconnected) => match worker.join() {
             Err(payload) => std::panic::resume_unwind(payload),
             Ok(()) => panic!("{fixture}: its thread ended without a result"),
@@ -112,6 +133,8 @@ mod tests {
         let msg = cut_message("spec/lang/loops_forever.almd", Duration::from_millis(200));
         assert!(msg.contains("spec/lang/loops_forever.almd"), "the fixture is not named: {msg}");
         assert!(msg.contains("200ms"), "the limit is not named: {msg}");
+        // This work never polls its stop: the cut says it is left running.
+        assert!(msg.contains("did not stop"), "a run that ignores its stop is reported as stopped: {msg}");
     }
 
     /// #3809: a cut run must STOP, not keep a core busy for the rest of the
@@ -140,6 +163,7 @@ mod tests {
             .expect("run_limited did not cut a non-terminating run within 10 s")
             .expect("a cut run must fail, not return");
         assert!(msg.contains("spec/lang/spins_forever.almd") && msg.contains("200ms"), "{msg}");
+        assert!(msg.contains("cut and stopped"), "{msg}");
         let before = ticks.load(Ordering::Relaxed);
         thread::sleep(Duration::from_millis(300));
         let after = ticks.load(Ordering::Relaxed);
