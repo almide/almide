@@ -293,7 +293,7 @@ first thing to revisit.
 | B: meter version gate | a script that recomputes every pinned spend and fails unless `METER_VERSION` moved with it | CI | follow-up |
 | #3779: trap order in `fan { list.map }` | un-ignore `a_trap_in_a_parallel_list_map_is_the_lowest_index_one`; run it 20 times | native par / seq, wasm | done 2026-10-18 (one timeline per dealt block; `fan_list_map_trap_order.almd`, the acceptance test un-ignored; #3784 closed by the same change) |
 | D / #3780: ordered ops make a fan sequential | un-ignore `fan_arms_that_share_process_state_agree_across_targets`; a codegen test that the block with `env.set` renders sequential and one without it does not | 4 legs | follow-up |
-| E: single-call arguments metered | `fan.bounded(compute.ns(30)) { id(heavy(100000)) }` is Err on every leg (today Ok) | 4 legs | follow-up |
+| E: single-call arguments metered | `fan.bounded(compute.ns(30)) { id(heavy(100000)) }` is Err on every leg; the same for `fan.timeout` and `fan.min` (`tests/fan_acceptance_test.rs` `a_single_call_bodys_arguments_are_inside_the_region`, `spec/wasm_cross/fuel_single_call_args.almd`) | 4 legs | done (#3790) |
 | H: `fan.min(duration…)` | the winner is the first Ok in real time; a loser's println is discarded; the loser's effect (a written file) remains; the form returns only after the loser stopped; `ALMIDE_OMEGA` replays the winner index on both targets; wasm takes arm 0 | native, wasm | #3788 |
 | H: one shared deadline | two arms that each need 60% of the deadline: the second is cut on the sequential leg | native, wasm | #3788 |
 | H: `fan.timeout(duration…)` with an I/O body | the body's request is sent, the cut lands at the next boundary, the Err is the deadline's | native, wasm | #3788 |

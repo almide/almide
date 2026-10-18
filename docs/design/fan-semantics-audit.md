@@ -296,7 +296,7 @@ There are three kinds of entry:
 | 18 | C-208, cli.md "replay anywhere" | ω replay on every target | native only; the test is vacuous | Issue #3781 |
 | 19 | CHEATSHEET:705-708, SPEC §13.5 | race is generic over `T` | Float/List winners do not compile | Issue #3782 |
 | 20 | — | (nothing promised) | empty bounded/timeout body: native ok, wasm E082 | Issue #3783 |
-| 21 | — | (nothing promised) | single-call arguments run outside the meter / deadline | ADR-0028 Q6 |
+| 21 | — | (nothing promised) | single-call arguments run outside the meter / deadline | ADR-0028 E; fixed in #3790 |
 | 22 | ADR-0024 D4 | a note when a fan runs sequentially | no note is emitted | ADR-0028 test plan (diagnostic) |
 | 23 | C-200 / ADR-0024 D6 | the substrate "stops starting elements" after a trap | nothing stops starting; only output is gated | ADR-0028 test plan |
 | 24 | diagnostics | — | the clock-type mismatch and "plain value" errors have no code; one E006 cascades into E001/E041; `fan.settle(xs, f)` non-Result E001 is garbled | ADR-0028 §Diagnostics |
