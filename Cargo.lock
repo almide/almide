@@ -60,6 +60,7 @@ dependencies = [
  "lsp-server",
  "lsp-types",
  "proptest",
+ "quote",
  "semver",
  "serde",
  "serde_json",

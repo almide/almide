@@ -63,11 +63,15 @@
 #   impl               FNV-1a of what was inspected: the declaration block
 #                      (attributes, signature, a pure-Almide body; doc lines
 #                      excluded), the native runtime fn its @intrinsic names
-#                      and that fn's `_owned` twin, and the wasm self-host
-#                      source file. `ALMIDE_UPDATE_INSPECTION=1` writes it for a
-#                      fresh stamp and demotes a row whose fingerprint moved.
-#                      NOT covered: a dedicated lowering arm inside
-#                      crates/almide-wasm (it cannot be cut per function) —
+#                      and that fn's `_owned` twin, the wasm self-host
+#                      source file, and (#3796) the crates/almide-wasm emitter
+#                      arms that dispatch on the function's name with the
+#                      lowering helpers only stdlib arms reach.
+#                      `ALMIDE_UPDATE_INSPECTION=1` writes it for a fresh stamp
+#                      and demotes a row whose fingerprint moved.
+#                      NOT covered: emitter code general lowering shares (a
+#                      dispatcher's fallback, `lower_arg`, the prim floor), a
+#                      name-membership table, a fusion keyed on call shape —
 #                      every stamped row is to be re-inspected before each final
 #                      release for that (a manual GCE run: no credentials in CI)
 #
