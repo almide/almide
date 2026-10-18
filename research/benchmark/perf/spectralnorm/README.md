@@ -94,6 +94,46 @@ spellings cannot see a tax that every spelling pays alike. The gate's profile le
 compares each spelling with itself across the two profiles. The `perf-profile-arm` CI job runs that leg on
 `ubuntu-24.04-arm`.
 
+Fixed 2026-10-19 (#3604). Two causes, both general:
+
+- **The vectorizer took the in-order float reduction.** Almide's `Float` `+`
+  is strict, so `sum + eval_a(i, j) * v[j]` is an ordered reduction. x86's
+  cost model never vectorizes one; AArch64's opts in, and its generic tuning
+  then paired `eval_a`'s divide across NEON lanes while the i64 multiply (no
+  64-bit vector multiply on NEON) and the ordered adds ran lane by lane
+  around it (`fdiv v.2d` in the hot loop). A release build now passes
+  `-C llvm-args=-force-ordered-reductions=false` on every target
+  (`RELEASE_LLVM_ARGS` in `src/cli/native_target.rs`): these loops stay
+  scalar, integer reductions and reduction-free loops vectorize as before.
+  On x86 it is what the cost model already did.
+- **A range literal heading a fold was built.** `list.fold(0..<n, …)`
+  materialized a `Vec<i64>` per row, and an index read out of a `Vec` told
+  LLVM nothing about its range, so `v[j]` kept its bounds check in the loop.
+  The literal now counts like `list.range(a, b)` on both legs (#3810). A
+  collecting chain (`list.map(0..<n, f)`) keeps the built head: its failure on
+  a span no machine holds stays C-197's out-of-memory abort.
+
+Before → after, GCE, n=1200, 21 samples (hyperfine median, ms), every
+artifact printing `1.274224150`:
+
+| Arch | Profile | Imperative | Indexed fold | Enumerate fold |
+| --- | --- | ---: | ---: | ---: |
+| aarch64 (Neoverse-V2) | release | 76.91 → 53.26 | 69.59 → 57.65 | 76.90 → 54.22 |
+| aarch64 (Neoverse-V2) | default | 53.76 → 53.76 | 90.65 → 53.47 | 62.87 → 62.83 |
+| x86_64 (Xeon 8581C) | release | 48.17 → 48.13 | 63.47 → 47.52 | 49.88 → 52.30 |
+| x86_64 (Xeon 8581C) | default | 60.04 → 60.31 | 70.81 → 59.53 | 59.32 → 58.46 |
+
+x86 enumerate release is the same machine code before and after (the option
+is inert there and the source did not change); its two readings are this
+VM's run-to-run spread. What remains on aarch64 is the indexed fold at 1.08x
+its imperative twin: with the outer index read from the built list and the
+inner one counted, LLVM re-associates `eval_a`'s `ij * (ij + 1) / 2` around
+the one index whose range it knows (the same effect, mirrored, measured for
+enumerate with the outer head counted: a `mul` + `sub` pair where the
+other build has one `madd`). Counting the outer head too measured 53.45 ms for
+indexed but 62.0 ms for enumerate, and would change a collecting chain's
+failure form, so it is not taken.
+
 Earlier readings kept for the record: before the wasm scalar enumerate/fold
 lowering, wasm enumerate measured 365.81 ms (3.21x); after it, 129.72 ms
 (1.17x). Before native scalar-fold capture borrowing, native indexed measured
