@@ -24,7 +24,7 @@
 6529	spec/wasm_cross/assign_self_call_release.almd
 2594	spec/wasm_cross/autotry_construction.almd
 2093	spec/wasm_cross/autotry_result_first_arg.almd
-14533	spec/wasm_cross/availability_pure_batch.almd
+14531	spec/wasm_cross/availability_pure_batch.almd
 5628	spec/wasm_cross/bang_in_record_literal_field.almd
 3295	spec/wasm_cross/base64_encode.almd
 5353	spec/wasm_cross/binary_operators.almd
@@ -210,6 +210,8 @@
 3036	spec/wasm_cross/fan_pure_thunks.almd
 5852	spec/wasm_cross/fan_race_mapper.almd
 10041	spec/wasm_cross/fan_race_walled_program.almd
+2283	spec/wasm_cross/fan_record_err_source_order.almd
+5182	spec/wasm_cross/fan_record_serial_elision.almd
 3239	spec/wasm_cross/fan_settle_tuple.almd
 4749	spec/wasm_cross/fan_sibling_trap.almd
 4953	spec/wasm_cross/fan_trap_waits_for_elements_below.almd
@@ -237,7 +239,9 @@
 7707	spec/wasm_cross/float_subnormal_preserved.almd
 4707	spec/wasm_cross/float_to_fixed.almd
 3501	spec/wasm_cross/float_to_int_edges.almd
+6803	spec/wasm_cross/fold_family_source_before_init.almd
 2527	spec/wasm_cross/fold_heap_acc.almd
+4122	spec/wasm_cross/fold_init_rebinds_source.almd
 2020	spec/wasm_cross/for_in_forms.almd
 17519	spec/wasm_cross/fs_call_head_family.almd
 13684	spec/wasm_cross/fs_composition_family.almd
@@ -325,7 +329,7 @@
 2952	spec/wasm_cross/hof_closure_string_tail.almd
 28547	spec/wasm_cross/hof_fn_value_callbacks.almd
 4709	spec/wasm_cross/host_floor_string_alloc.almd
-13595	spec/wasm_cross/http_response_headers.almd
+13619	spec/wasm_cross/http_response_headers.almd
 743	spec/wasm_cross/i64_min_literal.almd
 1217	spec/wasm_cross/if_block_forms.almd
 1591	spec/wasm_cross/if_let_forms.almd
@@ -400,7 +404,7 @@
 7151	spec/wasm_cross/leak_free_map_walk_exit.almd
 6429	spec/wasm_cross/leak_free_propagating_literal_operand.almd
 13295	spec/wasm_cross/leak_free_reader_temporaries.almd
-8736	spec/wasm_cross/leak_free_result_option_carriers.almd
+8748	spec/wasm_cross/leak_free_result_option_carriers.almd
 3234	spec/wasm_cross/leak_free_spread_produced_base.almd
 7359	spec/wasm_cross/let_bound_closure_scope.almd
 2702	spec/wasm_cross/let_unwrap_propagation.almd
@@ -481,7 +485,7 @@
 4033	spec/wasm_cross/map_fold_heap_accumulator.almd
 7712	spec/wasm_cross/map_get_fallback_key_and_lazy.almd
 8015	spec/wasm_cross/map_index_order.almd
-6914	spec/wasm_cross/map_index_released_with_block.almd
+6950	spec/wasm_cross/map_index_released_with_block.almd
 8719	spec/wasm_cross/map_index_string_key_shapes.almd
 15474	spec/wasm_cross/map_insertion_order.almd
 13573	spec/wasm_cross/map_interp_string_value.almd
@@ -710,7 +714,7 @@
 1927	spec/wasm_cross/result_default_and_passthrough.almd
 1897	spec/wasm_cross/result_eq.almd
 3431	spec/wasm_cross/result_filter_heap_ok.almd
-6829	spec/wasm_cross/result_generic_param_arg.almd
+6825	spec/wasm_cross/result_generic_param_arg.almd
 2227	spec/wasm_cross/result_heap_err_match.almd
 1893	spec/wasm_cross/result_heap_ok_match.almd
 2653	spec/wasm_cross/result_list_str_int_tuple.almd
