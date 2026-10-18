@@ -59,6 +59,7 @@ fn the_region_splice_meters_like_the_whole_program_render() {
         "fuel_dyn_charge",
         "fuel_divergence_cut",
         "fuel_trap_window",
+        "fuel_single_call_args",
     ] {
         let path = fixture(name);
         let (code, out, err, _) = run_native(&path, false);
@@ -98,5 +99,37 @@ fn a_region_outside_the_v1_subset_is_metered_by_the_standard_codegen() {
     assert!(
         stderr.contains("its regions metered by the standard codegen") && stderr.contains("string.split"),
         "the note must name the meter that ran, and why the region splice could not: {stderr}"
+    );
+}
+
+/// #3790 (ADR-0028 E): a single-call body's argument runs inside the region,
+/// so an argument outside the v1 subset puts the region on the standard
+/// codegen meter, and that meter charges the argument's work: 1002 units for
+/// `heavy(1000)` admit the body at 3006 ns and cut it at 3003 ns, as on wasm.
+#[test]
+fn a_single_call_bodys_argument_is_charged_by_the_standard_codegen_meter() {
+    let dir = std::env::temp_dir().join(format!("almide-fan-meter-args-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("args_in_codegen_meter.almd");
+    let body = |ns: u32, n: u32| {
+        format!("  println(int.to_string(fan.bounded(compute.ns({ns})) {{ pick(heavy({n}), list.len(string.split(\"a,b\", \",\"))) }} ?? -1))\n")
+    };
+    let src = format!(
+        "fn heavy(n: Int) -> Int = {{\n  var i = 0\n  var acc = 0\n  while i < n {{\n    acc = (acc + i * 7) % 999983\n    i = i + 1\n  }}\n  acc\n}}\n\
+         fn pick(a: Int, b: Int) -> Int = a + b\n\
+         effect fn main() -> Unit = {{\n{}{}{}}}\n",
+        body(30, 100000),
+        body(3006, 1000),
+        body(3003, 1000),
+    );
+    std::fs::write(&path, src).unwrap();
+    let out = Command::new(almide_bin()).arg("run").arg(&path).env("ALMIDE_VERBOSE", "1").output().expect("spawn almide");
+    let _ = std::fs::remove_dir_all(&dir);
+    let (stdout, stderr) = (String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    assert_eq!(out.status.code(), Some(0), "stdout={stdout:?} stderr={stderr:?}");
+    assert_eq!(stdout, "-1\n496553\n-1\n");
+    assert!(
+        stderr.contains("its regions metered by the standard codegen"),
+        "the codegen meter must be the one that ran: {stderr}"
     );
 }
