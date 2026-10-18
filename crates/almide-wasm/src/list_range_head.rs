@@ -38,8 +38,13 @@ impl LoopSrc {
     }
 }
 
-/// `list.range(a, b)` as its two bound expressions.
+/// `list.range(a, b)` or the range literal `a..<b` as its two bound
+/// expressions (#3810: the literal is the same list, so it counts the same
+/// way). An inclusive `a..=b` keeps the built list: its end is not exclusive.
 pub(crate) fn range_head(xs: &IrExpr) -> Option<(&IrExpr, &IrExpr)> {
+    if let IrExprKind::Range { start, end, inclusive: false } = &xs.kind {
+        return Some((start, end));
+    }
     let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } = &xs.kind else {
         return None;
     };

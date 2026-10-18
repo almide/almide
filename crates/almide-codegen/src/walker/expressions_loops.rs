@@ -69,10 +69,17 @@ fn render_expr_for_in(ctx: &RenderContext, expr: &IrExpr) -> String {
         .unwrap_or_else(|| format!("for _ in _ {{ }}"))
 }
 
-/// `list.range(a, b)` as the rendered bounds `(a, b)`, for a consumer that
-/// iterates the range once and never holds the list: a `for` head or an
-/// iterator chain's source.
+/// `list.range(a, b)` or the range literal `a..<b` as the rendered bounds
+/// `(a, b)`, for a consumer that iterates the range once and never holds the
+/// list: a `for` head or an iterator chain's source. The literal is the same
+/// list (#3810); counting it is what lets LLVM see the index stay in
+/// `[a, b)` — a fold over the materialized `Vec<i64>` reads indices it cannot
+/// bound, so `xs[j]` keeps its check in the loop (#3604). An inclusive
+/// `a..=b` keeps the built list, as the wasm leg does.
 fn list_range_bounds(ctx: &RenderContext, e: &IrExpr) -> Option<(String, String)> {
+    if let IrExprKind::Range { start, end, inclusive: false } = &e.kind {
+        return Some((render_expr(ctx, start), render_expr(ctx, end)));
+    }
     let IrExprKind::RuntimeCall { symbol, args } = &e.kind else { return None };
     let [start, end] = args.as_slice() else { return None };
     (symbol.as_str() == "almide_rt_list_range").then(|| (render_expr(ctx, start), render_expr(ctx, end)))
