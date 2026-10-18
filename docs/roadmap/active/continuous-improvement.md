@@ -1513,4 +1513,13 @@ Goal: the 150 rows left uninspected reach 0, with no native-only stamps (owner, 
   - the shared http call core's chunked decoder was O(bytes × chunks).
 - **Measurement fixes:** the bytes-moved shim counted forward and backward copies differently; fixture chunks stay one width as n grows; k caps for `shm_read` / `unix_send`; http's k cap applies to its effect functions only (a plain accessor's marginal sank under the embedded leg's jitter).
 - **ADR-0013 step 7:** the native String is the shared buffer by default (final GCE A/B: strchurn −13%, fasta −4%); its flip moved 64 stamped fingerprints, re-inspected in batch 18.
-- **Stamped:** batches 4–18; 10 rows left (ceiling 10): the 5 of the 33 removed functions still in the ledger, `fs.list_dir` / `walk` / `glob` (blocked), `http.serve` (needs a client-driving fixture), `testing.assert_throws` (to be replaced). Seven moved rows await re-inspection: `regex.replace` / `replace_first` (the batch's order file dropped their rebind order), `http.body` / `req_body` / `req_method` (the cap above), and parity findings in `http.request` and `value.as_string`; a batch-18 campaign also found one in `http.request_stream_with_limits`, stamped in batch 17 on another seed, under triage.
+- **Stamped:** batches 4–29. **The ledger reaches 0 uninspected, ceiling 0 (2026-10-18): all 999 public stdlib functions inspected on both legs** (1032 rows before the 33 functions left for packages).
+- **Defects the last batches found (each test-first):**
+  - wasm `json.remove_path` at the root returned an untagged recycled block, read as "Object" (tag store added; the 180-cell path-op matrix agrees);
+  - `list.min` / `max` / `sort` over an unannotated record literal passed check but never built natively (now E030, as for a declared record without `: Ord`);
+  - the http client sent a caller's `Content-Length` beside its own (native) or refused it (wasi:http); it now frames the body itself on every lane (C-385);
+  - `http.serve` wrote any integer as a status, the stock export skipped the header checks, control bytes passed in values, and a handler's framing fields went out; all refused or dropped on every host (C-367, C-375);
+  - an `assert_aborts` closure with a value tail failed to build natively, and its wasm failure detail dropped part of the block;
+  - native `fs.list_dir`'s stable sort moved bytes faster than n log n (now an in-place unstable sort; names are unique).
+- **Instrument:** the nlogn class is `a + b·n + c·n·ln n` under a log-log slope cap of n·ln n's own slope + 0.03 (owner ruling Q17); its resolution limit is filed as #3787. http.serve and assert_aborts gained session and test-file drivers; a native test probe is built once outside the meter.
+- **ADR-0029 accepted and implemented:** `testing.assert_aborts` replaces `testing.assert_throws` at epoch 14 (C-384, E098, E099).
