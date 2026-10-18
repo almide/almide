@@ -73,7 +73,7 @@ There are two scores per task:
 |---|---|
 | C0 | the current CHEATSHEET fan section, verbatim |
 | C1 | C0 plus ADR-0028's D-a hint text and D-c glosses |
-| C2 | ADR-0028's proposal: the new names `fan.first_ok` / `fan.min_cost` with D-a/D-c |
+| C2 | ADR-0028 as accepted: `??` / `list.find_map` for the first Ok in order, `fan.min(clock)` with the clock required, with D-a/D-c |
 
 The writers are the Dojo model roster for the day. Each (task, condition,
 model) runs 5 samples. The model, sample count and date are recorded with

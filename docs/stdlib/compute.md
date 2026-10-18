@@ -8,8 +8,9 @@ A `Compute` value is a quantity of **deterministic compute time**: it meters
 the program's own work on a frozen abstract machine (charge units at function
 entries and loop heads), so a budget verdict is a function of the program and
 its inputs alone — the same on every target and every host. This is the clock
-`fan.bounded` and `fan.race` read. Wall-clock time is the OTHER clock —
-[duration](duration.md).
+`fan.bounded` reads, and the clock `fan.min(compute…)` selects by (the clock
+argument of `fan.min` is required; its type says what "least" is measured on).
+Wall-clock time is the OTHER clock — [duration](duration.md).
 
 The unit set is closed: `ns / us / ms / s / min / h`. There are no time
 literals (`100ms` does not parse) and a bare `Int` is never a time.
@@ -101,7 +102,7 @@ effect fn main() -> Unit = {
   let input = 21
   let fallback = -1
   let r = fan.bounded(compute.ms(100)) { work(input) } ?? fallback
-  let w = fan.race(compute.us(50)) { fast(), slow() } ?? fallback
+  let w = fan.min(compute.us(50)) { fast(), slow() } ?? fallback
   println(int.to_string(r))
   println(int.to_string(w))
 }

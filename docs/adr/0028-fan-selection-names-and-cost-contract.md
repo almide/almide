@@ -1,23 +1,30 @@
-# ADR-0028: Rename `fan.any` to `fan.first_ok` and `fan.race` to `fan.min_cost`, keep the old names as tombstones that name the replacement, and scope the cost contract to a meter version
+# ADR-0028: Replace `fan.any` with `??` / `list.find_map`, rename `fan.race` to `fan.min` with a required clock, admit the real-time clock, and scope the cost contract to a meter version
 
-- **Status**: Proposed
-- **Date**: 2026-10-17 (revised the same day: the first draft recommended
-  keeping the names. A comparison with other languages' and compilers' naming
-  reversed it; see §Naming in other languages)
-- **Scope**: the names, diagnostics and documentation of `fan.any` and
-  `fan.race`; the contract of the `Compute` meter that `fan.race` and
-  `fan.bounded` select by; and the open semantic questions the 2026-10-17
-  audit found. This ADR changes no behaviour. Each change it proposes waits on
-  a ratification question in §Questions.
+- **Status**: Accepted (2026-10-18). Q1 was ratified on 2026-10-17 with one
+  amendment (no deprecation window); every other question was decided on
+  2026-10-18 by comparison with other languages' designs (§Decision). No
+  question is open.
+- **Date**: 2026-10-17 (proposed; revised the same day after the
+  cross-language naming comparison), 2026-10-18 (accepted, with the interim
+  names `fan.first_ok` / `fan.min_cost` of the first revision replaced — see
+  §Alternatives rejected).
+- **Scope**: the selection forms of `fan` (`fan.any`, `fan.race`), their
+  diagnostics and documentation; the real-time selection the language did
+  not have; the contract of the `Compute` meter that `fan.min` and
+  `fan.bounded` select by; and the semantic questions the 2026-10-17 audit
+  found (#3778–#3783).
 - **Evidence**: [fan-semantics-audit.md](../design/fan-semantics-audit.md)
   (pinned 0746eb689), [fan-cross-language.md](../design/fan-cross-language.md),
   `tests/fan_acceptance_test.rs`, issues #3778–#3784.
+- **Lands in**: dialect epoch 14 (`fan-selection-names`,
+  `proofs/dialect-epochs.toml`). The real-time clock of `fan.min` and the
+  I/O body of `fan.timeout` are the follow-up #3788.
 
 ## Context
 
-1. **Almide offers three of the five selection kinds.**
+1. **Almide offered three of the five selection kinds.**
 
-   | Kind | What it selects | Almide |
+   | Kind | What it selects | Almide before this ADR |
    |---|---|---|
    | K1 | first success in input order | `fan.any` |
    | K2 | first success in real time | – |
@@ -25,20 +32,24 @@
    | K4 | least logical cost (tie → input order) | `fan.race` |
    | K5 | collect all | `fan.map` / `fan.settle` / `fan { }` |
 
-   K2 and K3 are absent on purpose. Their answer depends on scheduling, which
+   K2 and K3 were absent on purpose. Their answer depends on scheduling, which
    ADR-0024 N7 and SPEC §13.5 (theorem T9) exclude from the deterministic
    tier.
-2. **Both names compile silently under the wrong reading.** A writer who
-   expects JS `Promise.race` (K3) gets K4 from `fan.race { a(), b() }` over
-   pure arms. A writer who expects `Promise.any` (K2) gets K1 from
-   `fan.any`. Neither case raises a diagnostic. Only the I/O-arm `race` hits
+2. **Both names compiled silently under the wrong reading.** A writer who
+   expects JS `Promise.race` (K3) got K4 from `fan.race { a(), b() }` over
+   pure arms. A writer who expects `Promise.any` (K2) got K1 from
+   `fan.any`. Neither case raised a diagnostic. Only the I/O-arm `race` hit
    E006.
 3. **The cost value depends on the compiler.** Spend is counted at IR/MIR
-   charge sites that the inliner and lowering decide (audit §8). Today, two
+   charge sites that the inliner and lowering decide (audit §8). Two
    native routes of one build disagree with each other and with wasm
-   (#3778). The current promise, "same winner/verdict on every target and
-   every machine" (CHEATSHEET, C-204/C-205), says nothing about compiler
+   (#3778). The promise before this ADR, "same winner/verdict on every target
+   and every machine" (CHEATSHEET, C-204/C-205), said nothing about compiler
    versions.
+4. **The most common real-world shape had no spelling.** "Ask two servers
+   and use whichever answers first" (K2) is what every peer's `race` /
+   `any` is for; the cross-language table shows it in JS, Rust, Python, Go,
+   Haskell, Kotlin and Swift. Almide's answer was "not expressible".
 
 ## Naming in other languages
 
@@ -53,24 +64,26 @@ Each row is a library's documented meaning, sorted by selection kind.
 | `any` | JS `Promise.any`; Rust `futures::select_ok` (same kind) | K2 | none |
 | `findAny` / `find_any` | Java `Stream.findAny`; Rayon `find_any` | any match, **explicitly nondeterministic** | none |
 | `any` | Python `any()`, Rust `Iterator::any`, Haskell `any` | a Bool, not a selection | – |
+| `find_map` / `find_value` / `firstNotNullOfOrNull` / `collectFirst` | Rust `Iterator::find_map`, OCaml `List.find_map`; Elixir `Enum.find_value`; Kotlin; Scala | **K1** — and in every case a LIST/iterator function, never a concurrency primitive | input order |
 | `findFirst` / `find_first` / `find_map_first` | Java `Stream.findFirst`; Rayon `find_first`, `find_map_first` | **K1** | input order |
-| `asum` / `<\|>` | Haskell `Alternative` | **K1** (first success, left to right) | input order |
+| `asum` / `<\|>` / `or_else` / `.catch(() => b())` | Haskell `Alternative`; Rust `Result::or_else`; JS | **K1 over two or three candidates**: a lazily-evaluated fallback chain | input order |
 | `min_by_key` | Rust `Iterator::min_by_key`: "if several elements are equally minimum, the first element is returned" | **K4's exact rule** (least key, tie → first) | input order on ties |
 
 Results:
 
 - **`race` means "first to finish" in every ecosystem that has the word**,
-  and in Haskell it also cancels the loser. Almide `race` neither finishes
-  first nor cancels.
+  and in Haskell it also cancels the loser. Almide `race` neither finished
+  first nor cancelled.
 - **`any` never means an ordered selection.** It means "no order guarantee"
-  (`findAny`, `find_any`, `Promise.any`) or a Bool. The ordered selection is
-  spelled **`first`** everywhere: `findFirst`, `find_first`,
-  `find_map_first`.
+  (`findAny`, `find_any`, `Promise.any`) or a Bool.
+- **The ordered first-success is a list function everywhere**, and over a
+  handful of candidates it is a lazy fallback chain. No peer gives it a
+  concurrency combinator, because it is sequential by definition.
 - K4's rule (least key, ties go to the first) is `min_by_key`'s documented
   contract. The established word for it is **`min`**.
-- Almide has done this once before. 0.42.0 removed `fan.race(thunks)`
+- Almide had done this once before. 0.42.0 removed `fan.race(thunks)`
   because "the name promised timing behaviour the language deliberately does
-  not have" (SPEC §fan, C-004). The live `fan.race` head repeats the same
+  not have" (SPEC §fan, C-004). The live `fan.race` head repeated the same
   defect under the same name.
 
 ## How other compilers rename a public name
@@ -81,63 +94,34 @@ Results:
 | Kotlin | `@Deprecated(message, ReplaceWith("new(...)"), level)` with levels WARNING → ERROR → HIDDEN across releases | the IDE replaces every use; the old name stays a pointed error before it disappears |
 | Rust | `#[deprecated(note)]`, machine-applicable suggestions applied by `cargo fix`; editions (`cargo fix --edition`) for breaking spellings | `rustc` prints the replacement; one command migrates a crate |
 | Go | `go fix` rewriters for API moves | one command migrates a module |
-| Almide today | `@deprecated(since=N, use="…")` on stdlib fns (`stdlib/list.almd:18`), a `[[deprecation]]` entry in `proofs/dialect-epochs.toml`, `try:` replacements in diagnostics, and E027 tombstones with a migration hint (the 0.42 `race`) | a warning naming the replacement, then an error that still names it |
+| Almide | `@deprecated(since=N, use="…")` on stdlib fns, a `[[deprecation]]` entry in `proofs/dialect-epochs.toml`, `try:` replacements in diagnostics, and E027 tombstones | the same three pieces |
 
-Every peer does the same three things:
-
-1. The old name keeps compiling for a window, with a warning that carries
-   the exact replacement.
-2. A tool or fix-it applies the replacement mechanically.
-3. The old name ends as an error *that still names the replacement*, never
-   as an unknown identifier.
-
-Almide already has each piece.
-
-## Options for the names
-
-| | A. Keep `any` / `race` | **B. Rename both** | C. Rename `race` only |
-|---|---|---|---|
-| Spelling | `fan.any`, `fan.race` | **`fan.first_ok` (K1), `fan.min_cost` (K4)** | `fan.any`, `fan.min_cost` |
-| Peer precedent | contradicted by every peer row above | `find_map_first`, `findFirst`; `min_by_key` | half |
-| A JS / Haskell / Java reader writes the old name | compiles silently with another meaning | warning, then E027, both naming the replacement and its meaning | `any` still silent |
-| Compatibility | no change | old names compile with a warning for the window | `race` only |
-| Migration | – | the `try:` fix-it rewrites the name; a `[[deprecation]]` entry (`since_epoch` 13, `removal_epoch` 14, the next removal epoch); the window's end in epoch 14's `breaks` | the same, one name |
-| End state of the old name | – | a permanent E027 tombstone: "`fan.race` (first to finish) does not exist in Almide: for the least compute use `fan.min_cost`, for the first Ok in order use `fan.first_ok`" | the same, one name |
-| Corpus | – | every example, CHEATSHEET, llms.txt, and the Dojo tasks using either name | `race` uses |
-
-**Diagnostics that ship with B**:
-
-- **D-a:** E006 inside `fan.min_cost` names K1/K5 for I/O: "for I/O,
-  `fan.first_ok` takes the first Ok in source order, and `fan.map` /
-  `fan.settle` collect them all".
-- **D-b:** for an unbudgeted all-Err `fan.min_cost`, the text becomes
-  "fan.min_cost: every branch failed". The budget wording stays only where a
-  budget excluded the arms (Q9).
-- **D-c:** the CHEATSHEET glosses state the kind, "first Ok in LIST order"
-  and "least compute spent, tie → source order", and say what neither does:
-  "not the first to finish".
+Every peer ends the old name as an error *that still names the replacement*,
+never as an unknown identifier. Decision (2026-10-17): Almide skips the
+warning window and goes straight to that end state, because the rename is a
+one-token mechanical change, the corpus is small, and a silent window would
+keep the misreading compiling for one more epoch.
 
 ## Logical cost: the contract to state
 
 - **Unit.** One charge unit. It is converted from declared time by the
   versioned calibration constant CM-1 (v0.3 = 3 ns/unit,
-  `crates/almide-types/src/time_units.rs:9-18`).
+  `crates/almide-types/src/time_units.rs`).
 - **Charge sites.** Exactly the table in `docs/specs/als/deterministic-time.md`:
   - fn entry, except a loop-free non-recursive callee (C-294);
   - each loop-head evaluation;
   - bulk string concatenation at `1 + len/16`;
   - nothing else.
   #3778 shows that native and wasm each break a different row today. The fix
-  is to make both legs follow the table, not to change the table (Q4).
+  is to make both legs follow the table, not to change the table (C below).
 - **Budget scope.**
   - `fan.bounded`: the body.
-  - `fan.race { }`: each arm separately, with the full budget.
-  - `fan.race(xs, f)`: each element separately.
+  - `fan.min(compute…) { }`: each arm separately, with the full budget.
+  - `fan.min(compute…, xs, f)`: each element separately.
   - An enclosing region min-caps; source cannot nest regions today.
-- **Arguments.** In a single-call body such as `{ f(g(x)) }`, `g(x)` runs
-  before the meter starts (audit §6). Whether that is the rule, or whether
-  arguments are inside the region, is Q6.
-- **Versioning (the new part).** The verdict and the winner are functions of
+- **Arguments.** In a single-call body such as `{ f(g(x)) }`, `g(x)` ran
+  before the meter started (audit §6). E below puts it inside the region.
+- **Versioning.** The verdict and the winner are functions of
   (program, inputs, **meter version**). Within one meter version they are the
   same on every target and machine. The meter version changes when the
   charge table, its exemption rule or the calibration constant changes, and
@@ -148,138 +132,201 @@ Almide already has each piece.
   units), and a change in any pinned spend fails CI unless the meter version
   is bumped in the same PR.
 
-## Decision (proposed)
+## Decision
 
-1. **Option B.** Rename `fan.any` → `fan.first_ok` and `fan.race` →
-   `fan.min_cost`, in every form: block, mapper and budgeted. Meaning is
-   unchanged.
-2. Migrate the way Swift, Kotlin and Rust do. During epoch 13 the old names
-   compile with a deprecation warning that carries a `try:` replacement.
-   In epoch 14 they become E027 tombstones, and those tombstones stay
-   permanently and name both replacements and what each selects.
-3. Keep K2 and K3 out of the language, and make that visible: the
-   tombstone's text and the CHEATSHEET say that "first to finish" does not
-   exist and why.
-4. State the cost contract as above, including the meter version.
-5. Fix #3778–#3783 toward the contracts as already written. #3780 and the
-   open points Q5–Q8 wait on their own answers.
+The rule behind every item: **the name says what is selected; the clock's
+TYPE says what it is measured on and which tier it runs in.** `compute.*`
+means a pure body and the same answer on every machine; `duration.*` means
+the oracle tier — effects allowed, the verdict a recorded host input.
 
-## Rationale
-
-- **The comparison is one-sided.** No peer uses `race` for anything but
-  "first to finish", and no peer uses `any` for an ordered selection. The
-  ordered selection is `first` in Java, Rayon and Haskell's idiom, and
-  least-key with first-on-tie is `min_by_key`.
-- **A silent misreading is the worst case for the metric.** Under A, a model
-  carrying the JS or Haskell meaning writes `fan.race` / `fan.any`, the
-  program compiles, and nothing tells it that the meaning differs.
-  Modification survival measures whether code does what the writer meant.
-  Under B, the same habit produces a diagnostic that names the right form.
-  That costs one fix iteration, and it is the cheapest way to learn the rule.
-- **The window protects existing code.** During epoch 13 every existing
-  program still compiles, and the fix is mechanical: a one-token rename with
-  no change in meaning. This is the migration every peer compiler ships.
-- **Almide made the same call in 0.42.0** for the same reason, and on the
-  same word.
+1. **Q1 (2026-10-17): retire the old names at once, no deprecation window.**
+   From dialect epoch 14 `fan.race` and `fan.any` are E027 tombstones that
+   name the replacement. The parser reports the block heads
+   (`crates/almide-syntax/src/parser/fan.rs`, `renamed_fan_head_text`), the
+   checker reports the call spellings with the same text
+   (`static_dispatch.rs`).
+2. **A (2026-10-18): `fan.any` is removed, not renamed.** The first Ok in
+   source order is `a() ?? b() ?? fallback`; over a list it is
+   `list.find_map(xs, (x) => f(x)?) ?? fallback`. Both already existed; `??`
+   evaluates its right side only when the left side failed, and
+   `list.find_map` accepts an effect callback — measured on native and wasm
+   on 2026-10-18. Because: every peer (Rust `find_map`, OCaml
+   `List.find_map`, Elixir `find_value`, Kotlin `firstNotNullOfOrNull`,
+   Scala `collectFirst`) keeps this in the list library, and the
+   two-candidate form is a lazy fallback chain everywhere (`or_else`,
+   `.catch(() => b())`, `<|>`). A fan form for a sequential selection was one
+   meaning with two spellings.
+3. **Q1 as amended (2026-10-18): `fan.race` becomes `fan.min(clock)`, and
+   the clock argument is required.** `fan.min(compute.ms(5)) { a(), b() }`
+   and `fan.min(compute.ms(5), xs, f)`; `fan.min { … }` and `fan.min(xs, f)`
+   are parse errors. Because: `min` is `min_by_key`'s word for this rule,
+   and the mandatory clock prevents reading `fan.min { 3, 5 }` as the
+   smallest value. The interim `min_cost` was rejected because the clock
+   type already says what is minimised.
+4. **H (2026-10-18): the real-time clock is admitted** —
+   `fan.min(duration.ms(n)) { … }` / `(duration…, xs, f)`: the arms start
+   together, the first to finish with Ok wins, arms may do I/O, **one
+   deadline is shared from entry** (not per arm), and the losers are
+   cancelled at their next charge site or I/O boundary and awaited before
+   the form returns. A loser's performed effects remain, its stdout is
+   discarded, only the winner's value is returned. Native runs the arms in
+   parallel; wasm runs them in order until it has async (ADR-0024 D8; arm 0
+   winning when it succeeds is a legal schedule); ω record/replay pins the
+   winning index. Because: this is the shape every peer's `race` / `any`
+   serves, and the trade-off (the winner may differ between runs) is the
+   one every peer accepts. The structured stop is Haskell `race`, Python
+   `TaskGroup`, Kotlin and Swift; JS's leave-it-running is rejected because
+   Almide has no unstructured spawn. One shared deadline is what
+   `Promise.race([a, b, timer])`, tokio `timeout(dur, select!)`,
+   `asyncio.wait(tasks, timeout=…)` and a single Go `ctx` all do; per-arm
+   deadlines would multiply the wall time on the sequential wasm leg.
+   `fan.timeout(duration…)` admits an I/O body under the same cancellation
+   rule. This partly reverses the first draft's "keep K2 and K3 out": K2 is
+   in; K3 stays out, because a failed arm is skipped, never selected.
+   Follow-up: #3788; until it lands the `Duration` clock is a
+   type error on `fan.min`.
+5. **G (2026-10-18, ×): `fan.bounded` stays a separate name from
+   `fan.timeout`.** The clock-by-type rule is NOT extended to the cut forms.
+   Because: every runtime names a fuel/gas limit and a wall deadline
+   differently — wasmtime `set_fuel` vs `set_epoch_deadline`, Ethereum "gas
+   limit" vs a timeout, tokio `timeout` vs `timeout_at`. Different names for
+   different kinds of limit is the peers' design, and "timeout" means wall
+   time everywhere.
+6. **B (2026-10-18): the cost contract is scoped to a meter version**, as
+   stated in §Logical cost. Because: Ethereum reprices gas by hard fork
+   (EIP-150, EIP-2929) under a fork id, and wasmtime documents that fuel per
+   instruction may change between versions; a promise across versions would
+   forbid every inliner change.
+7. **C (2026-10-18, #3778): native and wasm follow the charge table.**
+   Native stops charging a loop-free wrapper's entry, wasm starts charging
+   string concatenation; existing winners and verdicts may move, under the
+   meter version. Because: with two implementations of one table, a
+   disagreement is a consensus bug (Ethereum clients treat it as the highest
+   priority), not a tolerance.
+8. **D (2026-10-18, #3780): a `fan { }` whose arm reaches an ordered process
+   operation (`env.set`, added to ADR-0024 D3's set) runs sequentially on
+   native too.** Because: Rust made `env::set_var` `unsafe` in edition 2024
+   and Go's `t.Setenv` panics under `t.Parallel` — the peers refuse the
+   combination; Almide keeps its determinism by serialising it, so native
+   matches the wasm observation. A check-time refusal remains a possible
+   later tightening.
+9. **E (2026-10-18): a single-call body's arguments are inside the metered
+   region** for `fan.bounded` / `fan.timeout` / `fan.min`. Because: gas and
+   wasmtime fuel count every executed instruction; a limit that skips the
+   argument's work is not a limit.
+10. **F (2026-10-18): the all-fail text of `fan.min` is `fan.min: no branch
+    succeeded within budget`.** With the clock required the budget is always
+    present, so one text covers "every arm returned Err" and "every arm was
+    cut"; `succeeded` says the former case too. (JS `Promise.any` reports
+    "All promises were rejected"; the text names the failure, not a budget
+    the writer did not set.)
 
 ## Alternatives rejected
 
 - **A, keep both names.** Every peer reads `race` as "first to finish" and
   `any` as "unordered". Keeping the names leaves both misreadings silent.
   (This was the first draft's recommendation. It weighed the cost of the
-  rename window against JS alone, and did not check how far `race` and `any`
+  rename against JS alone, and did not check how far `race` and `any`
   carry the same meaning across ecosystems.)
-- **C, rename `race` only.** `any` is contradicted just as consistently
-  (`findAny`, `find_any`, `Promise.any`), and a partial rename leaves a
-  family with one intent-revealing name and one misleading name.
-- **Other spellings.**
-  - `fan.first`: Scala's `firstCompletedOf` reads it as first *in time*.
-    `first_ok` names both the order and the Ok.
-  - `fan.cheapest`: there is no precedent for it. `min_cost` reuses
-    `min_by_key`'s word and tie rule.
-  - `fan.select`: this is K3 in Rust, Kotlin and Go.
-- **Add K2/K3 (`fan.first_done`).** The answer would depend on scheduling.
-  ADR-0024 N7 excludes that, and the wasm leg cannot express it
-  deterministically.
-- **Make `race` K3 to match JS.** That reverses the 0.42.0 decision, and
-  pure arms have no wall-clock meaning that every target agrees on.
+- **The interim names `fan.first_ok` / `fan.min_cost`** (first revision,
+  2026-10-17). `first_ok` was rejected because no peer puts an ordered
+  try-in-order in the concurrency library; the selection is sequential and
+  already spelled by `??` and `list.find_map`. `min_cost` was rejected
+  because the clock type already says what is minimised, so the suffix was
+  redundant and closed the door on the `Duration` clock.
+- **`fan.min` with an optional clock.** `fan.min { 3, 5 }` reads as the
+  smallest value; the argument is the one thing that makes `min` a
+  selection over arms.
+- **Per-arm deadlines for `fan.min(duration…)`.** No peer has them, and on a
+  sequential leg they multiply the total wall time by the arm count.
+- **Unify `fan.bounded` into `fan.timeout` by clock type (G).** Rejected per
+  Decision 5.
+- **Keep K2 out of the language** (the first draft's Q2). The shape is the
+  most common use of a race in every peer; the trade-off is one every peer
+  accepts; the oracle tier (ω record/replay) already exists for
+  `fan.timeout`.
+- **JS-style abandonment of the losers.** Almide has no unstructured spawn,
+  and a loser running on after the form returned would be one.
 - **Freeze the meter across versions.** It would forbid inliner and lowering
   changes in any program with a region.
 
 ## Consequences
 
 - **Gains**:
-  - Both names say what they select in the words other ecosystems use for
-    it.
-  - A habit carried from another language turns into a diagnostic that
-    names the right form.
+  - Every selection name says what it selects, in the words other
+    ecosystems use for it, and a habit carried from another language turns
+    into a diagnostic that names the right form.
+  - The most common real-world shape ("whichever server answers first")
+    gains a spelling, with structured cancellation.
+  - One rule — clock type decides the tier — covers `fan.min` and
+    `fan.timeout` alike.
   - A user upgrading the compiler can tell from the meter version whether a
     winner may move.
 - **Costs**:
-  - One deprecation window and one removal-epoch entry.
-  - The examples, the CHEATSHEET, llms.txt and the Dojo tasks are rewritten.
-  - The spend ledger is one more gate.
-  - The meter version is one more number in the release notes.
+  - One epoch entry (14) with three breaks; the examples, CHEATSHEET,
+    llms.txt and the Dojo tasks are rewritten.
+  - The `fan.any` runtime (nine self-hosted `any_map` cells, the chain
+    desugar) is dead code until its removal lands.
+  - The spend ledger is one more gate; the meter version is one more number
+    in the release notes.
+  - `fan.min(duration…)` and the I/O body of `fan.timeout` need a cancellation
+    mechanism on native (a cooperative flag checked at charge sites and I/O
+    boundaries) and the sequential schedule on wasm.
 
 ## Falsifier
 
 The usability evaluation (`docs/design/fan-usability-eval.md`) runs C1, the
-old names with D-a/D-c, against C2, the new names. If C2 does not cut the
-F1 + F2 + F5 misreading rate by at least a third relative to C1, the rename
-is not buying what this ADR claims. Then option A, with its diagnostics,
-should be reconsidered before the removal epoch.
+old names with D-a/D-c, against C2, the accepted surface. If C2 does not cut
+the F1 + F2 + F5 misreading rate by at least a third relative to C1, the
+rename is not buying what this ADR claims, and the diagnostics' text is the
+first thing to revisit.
 
-## Test plan for the semantic changes
+## Test plan
 
-These are tests for behaviour that does not exist yet. Each one lands with
-the change it gates, after that change's question is answered ○.
+| Change | Test | Legs | Status |
+|---|---|---|---|
+| Q1 / A: old names are E027 naming the replacement | `tests/diagnostics/e027-fan-race-renamed-head`, `e027-fan-any-removed`, the thunk-list cases; `scripts/check-dialect-epochs.sh` sees epoch 14's `breaks` | check | done with the epoch |
+| A: the replacements are sequential and lazy | `spec/wasm_cross/fan_any_early_winner.almd` (a `??` chain: later candidates never run), `fan_any_allfail.almd` (every candidate fails → the fallback), `list.find_map` with an effect callback in the mapper fixtures | native, wasm | done with the epoch |
+| Q1: `fan.min` requires the clock | parse error for `fan.min { }` and `fan.min(xs, f)`; `tests/fan_surface_matrix_test.rs` | check | done with the epoch |
+| F: all-fail text | `fan.min(compute.ms(1)) { err("a"), err("b") }` → `fan.min: no branch succeeded within budget` | 4 legs | done with the epoch |
+| C / #3778: meters follow the table | `tests/fan_acceptance_test.rs`: un-ignore `a_loop_free_wrapper_costs_the_same_on_every_leg` and `a_cut_body_that_interpolates_stops_at_the_same_point_on_every_leg` | 4 legs | follow-up |
+| B: meter version gate | a script that recomputes every pinned spend and fails unless `METER_VERSION` moved with it | CI | follow-up |
+| #3779: trap order in `fan { list.map }` | un-ignore `a_trap_in_a_parallel_list_map_is_the_lowest_index_one`; run it 20 times | native par / seq, wasm | follow-up (with #3784) |
+| D / #3780: ordered ops make a fan sequential | un-ignore `fan_arms_that_share_process_state_agree_across_targets`; a codegen test that the block with `env.set` renders sequential and one without it does not | 4 legs | follow-up |
+| E: single-call arguments metered | `fan.bounded(compute.ns(30)) { id(heavy(100000)) }` is Err on every leg (today Ok) | 4 legs | follow-up |
+| H: `fan.min(duration…)` | the winner is the first Ok in real time; a loser's println is discarded; the loser's effect (a written file) remains; the form returns only after the loser stopped; `ALMIDE_OMEGA` replays the winner index on both targets; wasm takes arm 0 | native, wasm | #3788 |
+| H: one shared deadline | two arms that each need 60% of the deadline: the second is cut on the sequential leg | native, wasm | #3788 |
+| H: `fan.timeout(duration…)` with an I/O body | the body's request is sent, the cut lands at the next boundary, the Err is the deadline's | native, wasm | #3788 |
+| #3783 (empty body), #3781 (wasm ω replay), #3782 (Float winner) | landed in #3786 | 4 legs | done |
 
-| Change | Test | Legs |
+## Ratification record
+
+| Question | Verdict | Date |
 |---|---|---|
-| Q4 / #3778: meters follow the table | `tests/fan_acceptance_test.rs`: un-ignore `a_loop_free_wrapper_costs_the_same_on_every_leg` and `a_cut_body_that_interpolates_stops_at_the_same_point_on_every_leg`; add both shapes to `spec/wasm_cross/fuel_*` with the pinned spend | native default / splice / codegen meter, wasm |
-| Meter version gate | a script that recomputes every pinned spend and fails unless `METER_VERSION` moved with it | CI |
-| #3779: trap order in `fan { list.map }` | un-ignore `a_trap_in_a_parallel_list_map_is_the_lowest_index_one`; run it 20 times (it is timing-forced, not timing-dependent) | native par / seq, wasm |
-| Q5 / #3780: ordered ops make a fan sequential | un-ignore `fan_arms_that_share_process_state_agree_across_targets`; a codegen test that the block with `env.set` renders sequential and one without it stays threaded; the D4 note text | native, wasm |
-| Q6: single-call arguments metered | `fan.bounded(compute.ns(30)) { id(heavy(100000)) }` is Err on every leg (today Ok) | 4 legs |
-| Q7 / #3783: empty body | `fan.bounded(c) { }` and `fan.timeout(d) { }` are the same parse error on both targets | check, both targets |
-| Q8 / #3781: wasm timeout clock + replay | `ALMIDE_OMEGA=10` cuts at the same check on wasm as on native; replace the vacuous fixture with one whose replayed output differs from the live one | native, wasm |
-| Q9: unbudgeted all-fail message | `fan.min_cost { err("a"), err("b") }` → `fan.min_cost: every branch failed`; a budgeted all-excluded race keeps the budget message | 4 legs |
-| D-a hint | diagnostic harness case: `fan.min_cost { http.get(a), http.get(b) }` → E006 with the K1/K5 pointers | check |
-| Q1 rename window | `fan.race` / `fan.any` in every form: a deprecation warning whose `try:` text is the new name, and the program's output is unchanged; the renamed program prints the same on 4 legs (the acceptance tests, renamed) | check + 4 legs |
-| Q1 removal | at epoch 14 both old names are E027 naming both replacements; `scripts/check-dialect-epochs.sh` sees the `[[deprecation]]` → `breaks` pair | check |
-| Stop starting after a trap (C-200 / ADR-0024 D6 wording) | a pure `fan.map` whose element 0 traps and whose elements 1..n would print through `eprintln`; nothing after the trap is observable | native par |
-
-## Questions (ratification, one at a time)
-
-Each question takes one ○ or ×. They are independent. When one depends on
-another, the dependency is stated in the question.
-
-1. **Q1.** `fan.any` を `fan.first_ok` に、`fan.race` を `fan.min_cost` に改名する（意味は
-   不変・全形）。旧名は epoch 13 の間は警告と `try:` 置換つきで通し、epoch 14 で
-   置換先を名指す E027 トンボストーンにする（案B）。○×
-2. **Q2.** 実時間で最初の成功（K2）と最初の完了（K3）は、今後も言語に入れない。○×
-3. **Q3.** `fan.race` の勝者と `fan.bounded` の判定は「同じ meter 版の中では全
-   ターゲット・全マシンで同一」と約束し、meter 版はコンパイラ更新で変わりうる
-   ものとして版番号と spend 台帳で告知する。○×
-4. **Q4.** #3778 は `docs/specs/als/deterministic-time.md` の charge 表に両レッグを
-   合わせて直す。native はループ無しラッパーの entry を免除し、wasm は文字列連結を
-   課金する。既存プログラムの勝者・判定は変わりうる。○×
-5. **Q5.** `fan { }` の腕が順序付き操作（`env.set` など。ADR-0024 D3 の集合に
-   `env.set` を足す）に届くとき、native でも逐次に実行する（#3780）。○×
-6. **Q6.** `fan.bounded` / `fan.timeout` の本体が単一呼び出しのとき、その引数の
-   評価も計量・期限の対象に含める（現状は対象外）。○×
-7. **Q7.** 空の `fan.bounded` / `fan.timeout` 本体は、全ターゲットで parse error に
-   する（`fan { }` / `fan.settle { }` と同じ扱い、#3783）。○×
-8. **Q8.** wasm の `fan.timeout` は単調時計を読み、`ALMIDE_OMEGA` の再生にも対応する
-   （#3781）。○×
-9. **Q9.** 予算なしの race（Q1 が ○ なら `fan.min_cost`）で全腕が Err のときのエラー文言を
-   `every branch failed` に変える（予算ありで全腕超過の文言は据え置き）。○×
+| Q1 rename, no deprecation window | ○ | 2026-10-17 |
+| Interim names `first_ok` / `min_cost` | × — replaced by A and `fan.min` | 2026-10-18 |
+| ① list form of `fan.any` → `list.find_map` | ○ | 2026-10-18 |
+| ② `fan.race` → `fan.min`, clock required | ○ | 2026-10-18 |
+| ②b admit `fan.min(duration…)` | ○ | 2026-10-18 |
+| ②c losers cancelled at the next boundary and awaited; I/O allowed | ○ | 2026-10-18 |
+| A block form of `fan.any` → `??` chain | ○ | 2026-10-18 |
+| B cost contract scoped to a meter version | ○ | 2026-10-18 |
+| C meters follow the table (#3778) | ○ | 2026-10-18 |
+| D `env.set` arms run sequentially on native (#3780) | ○ | 2026-10-18 |
+| E single-call arguments metered | ○ | 2026-10-18 |
+| F all-fail text | ○ (as `no branch succeeded within budget`) | 2026-10-18 |
+| G unify `fan.bounded` into `fan.timeout` | × | 2026-10-18 |
+| H one shared deadline for the real-time clock | ○ | 2026-10-18 |
+| Q7 empty body, Q8 wasm ω replay | ○ — landed in #3786 | 2026-10-18 |
 
 ## References
 
 - ADR-0001 (deterministic time units), ADR-0011, ADR-0020, ADR-0022, ADR-0024
-- C-004, C-185, C-199, C-200, C-204, C-205, C-207, C-208, C-294, C-320
-- Haskell `async`: [race](https://hackage.haskell.org/package/async/docs/Control-Concurrent-Async.html#v:race) · Java [Stream.findFirst / findAny](https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/stream/Stream.html) · [CompletableFuture.anyOf](https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/concurrent/CompletableFuture.html#anyOf(java.util.concurrent.CompletableFuture...)) · Scala [Future.firstCompletedOf](https://www.scala-lang.org/api/current/scala/concurrent/Future$.html) · C# [Task.WhenAny](https://learn.microsoft.com/dotnet/api/system.threading.tasks.task.whenany) · Kotlin [select](https://kotlinlang.org/api/kotlinx.coroutines/kotlinx-coroutines-core/kotlinx.coroutines.selects/select.html) · Go [select statements](https://go.dev/ref/spec#Select_statements)
-- Rayon [find_first / find_any / find_map_first](https://docs.rs/rayon/1.10.0/rayon/iter/trait.ParallelIterator.html) · Rust [Iterator::min_by_key](https://doc.rust-lang.org/std/iter/trait.Iterator.html#method.min_by_key)
-- Renames: Swift [`@available(renamed:)`](https://docs.swift.org/swift-book/documentation/the-swift-programming-language/attributes/#available) · Kotlin [`@Deprecated` / `ReplaceWith`](https://kotlinlang.org/api/core/kotlin-stdlib/kotlin/-deprecated/) · Rust [`#[deprecated]`](https://doc.rust-lang.org/reference/attributes/diagnostics.html#the-deprecated-attribute) and [`cargo fix`](https://doc.rust-lang.org/cargo/commands/cargo-fix.html) · [`go fix`](https://pkg.go.dev/cmd/fix)
+- C-004, C-005, C-185, C-199, C-200, C-204, C-205, C-207, C-208, C-294, C-320
+- Haskell `async`: [race](https://hackage.haskell.org/package/async/docs/Control-Concurrent-Async.html#v:race) · Java [Stream.findFirst / findAny](https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/stream/Stream.html)
+- Rayon [find_first / find_any / find_map_first](https://docs.rs/rayon/1.10.0/rayon/iter/trait.ParallelIterator.html) · Rust [Iterator::min_by_key](https://doc.rust-lang.org/std/iter/trait.Iterator.html#method.min_by_key), [Iterator::find_map](https://doc.rust-lang.org/std/iter/trait.Iterator.html#method.find_map), [Result::or_else](https://doc.rust-lang.org/std/result/enum.Result.html#method.or_else) · OCaml [List.find_map](https://ocaml.org/manual/5.2/api/List.html) · Elixir [Enum.find_value](https://hexdocs.pm/elixir/Enum.html#find_value/3)
+- Limits by kind: wasmtime [Store::set_fuel](https://docs.rs/wasmtime/latest/wasmtime/struct.Store.html#method.set_fuel) / [set_epoch_deadline](https://docs.rs/wasmtime/latest/wasmtime/struct.Store.html#method.set_epoch_deadline) · tokio [timeout](https://docs.rs/tokio/latest/tokio/time/fn.timeout.html) / [timeout_at](https://docs.rs/tokio/latest/tokio/time/fn.timeout_at.html) · Ethereum gas repricing [EIP-150](https://eips.ethereum.org/EIPS/eip-150), [EIP-2929](https://eips.ethereum.org/EIPS/eip-2929)
+- Env + parallelism: Rust [std::env::set_var (unsafe since edition 2024)](https://doc.rust-lang.org/std/env/fn.set_var.html) · Go [testing.T.Setenv](https://pkg.go.dev/testing#T.Setenv) ("cannot be used in parallel tests")
+- Shared deadline: tokio `timeout(dur, select!{…})` · Python [asyncio.wait](https://docs.python.org/3/library/asyncio-task.html#asyncio.wait) (`timeout=`) · Go [context.WithTimeout](https://pkg.go.dev/context#WithTimeout)
+- Renames: Swift [`@available(renamed:)`](https://docs.swift.org/swift-book/documentation/the-swift-programming-language/attributes/#available) · Kotlin [`@Deprecated` / `ReplaceWith`](https://kotlinlang.org/api/core/kotlin-stdlib/kotlin/-deprecated/) · Rust [`cargo fix`](https://doc.rust-lang.org/cargo/commands/cargo-fix.html)
 - MDN [Promise.any](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/any) / [Promise.race](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/race)
