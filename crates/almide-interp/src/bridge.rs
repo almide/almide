@@ -55,6 +55,51 @@ pub(crate) fn dispatch(module: &str, func: &str, args: &[Value]) -> Option<Flow>
         // The scalar prim floor — consumed by the self-hosted stdlib bodies the
         // `stdlib_pool` evaluates, not by fixture code directly.
         "prim" => prim_fn(func, args),
+        // The env floor's writers: true `@intrinsic` stubs with no lowered body
+        // (the readers go through `prim.env_get`).
+        "env" => env_fn(func, args),
+        _ => None,
+    }
+}
+
+thread_local! {
+    // The variables the running program set with `env.set`. They are the
+    // program's environment, layered over the process's: the interp runs
+    // in-process beside the harness that spawns the native and wasm legs,
+    // and a write to the real environment would reach those children (#3808).
+    static ENV_OVERLAY: std::cell::RefCell<std::collections::HashMap<String, String>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// Forget every `env.set` of the previous program; a new interpreter starts
+/// from the process environment.
+pub(crate) fn reset_env_overlay() {
+    ENV_OVERLAY.with(|o| o.borrow_mut().clear());
+}
+
+/// The value the running program set for `name`, if it set one.
+pub(crate) fn env_overlay_get(name: &str) -> Option<String> {
+    ENV_OVERLAY.with(|o| o.borrow().get(name).cloned())
+}
+
+/// `env.set` writes the program's environment, as the other two legs do
+/// (native setenv; wasm the embedded host's environ), so a fixture that sets
+/// then reads a key (fan_ordered_arms.almd) observes the same bytes on every
+/// leg. The interp keeps those writes in its overlay rather than the process
+/// environment, which the native and wasm legs it is compared against inherit.
+/// `env.sleep_ms` pauses for real: the pause is not an observation of its own,
+/// and a fixture's ordering argument (a sleeping reader beside a writer) reads
+/// the same here as on the targets.
+fn env_fn(func: &str, args: &[Value]) -> Option<Flow> {
+    match (func, args) {
+        ("set", [Value::Str(name), Value::Str(value)]) => {
+            ENV_OVERLAY.with(|o| o.borrow_mut().insert(name.to_string(), value.to_string()));
+            Some(Flow::val(Value::Unit))
+        }
+        ("sleep_ms", [Value::Int(ms)]) => {
+            std::thread::sleep(std::time::Duration::from_millis((*ms).max(0) as u64));
+            Some(Flow::val(Value::Unit))
+        }
         _ => None,
     }
 }
@@ -597,4 +642,23 @@ fn string_fn_structural(func: &str, args: &[Value]) -> Option<Flow> {
         _ => return None,
     };
     Some(f)
+}
+
+#[cfg(test)]
+mod env_overlay_tests {
+    use super::*;
+
+    /// `env.set` is the program's own environment, not the host process's:
+    /// the oracle runs the interp in-process and then spawns the native and
+    /// wasm legs, which inherit the process environment (#3808).
+    #[test]
+    fn env_set_stays_inside_the_interpreter() {
+        let key = "INTERP_ENV_OVERLAY_PROBE";
+        reset_env_overlay();
+        env_fn("set", &[Value::str(key.to_string()), Value::str("written".to_string())]);
+        assert_eq!(std::env::var(key).ok(), None, "env.set leaked into the host process");
+        assert_eq!(env_overlay_get(key), Some("written".to_string()));
+        reset_env_overlay();
+        assert_eq!(env_overlay_get(key), None);
+    }
 }

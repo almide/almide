@@ -85,3 +85,61 @@ fn fan_settles_the_lowest_index_err_first() {
     assert!(other_at < check_tested, "arm 1 is settled before arm 3 ran:\n{ops:#?}");
     assert!(check_tested < other_tested, "arm 3's Err would win over arm 1's:\n{ops:#?}");
 }
+
+/// Every function of a spec file, by name, must lower (no wall).
+fn assert_all_lower(path: &str, src: &str) {
+    let ir_names: Vec<String> = {
+        let funcs = lowered(src);
+        funcs.iter().map(|f| f.name.as_str().to_string()).collect()
+    };
+    let missing: Vec<&str> = src
+        .lines()
+        .filter_map(|l| l.strip_prefix("test \"").and_then(|r| r.split('"').next()))
+        .filter(|t| !ir_names.iter().any(|n| n.starts_with("__test_almd_") && n.ends_with(&format!("_{t}"))))
+        .collect();
+    assert!(missing.is_empty(), "{path}: tests walled on v1: {missing:#?}");
+}
+
+#[test]
+fn fan_record_form_lowers_on_v1() {
+    // #1388 / C-386: `fan { a: e1!, b: e2! }` is the tuple-form fan of its fields
+    // destructured into the record literal; a field's `!` settles like a tuple arm's.
+    assert_all_lower("spec/lang/fan_record_test.almd", include_str!("../../../spec/lang/fan_record_test.almd"));
+    assert_all_lower("spec/lang/fan_test.almd", include_str!("../../../spec/lang/fan_test.almd"));
+}
+
+#[test]
+fn fan_record_field_runs_every_arm_before_the_first_err_exits() {
+    let src = format!(
+        "{CHECK}effect fn second(x: Int) -> Int = {{\n  println(\"second ran\")\n  ok(x + 1)\n}}\n\
+         effect fn main() -> Unit = {{\n  let r = fan {{\n    a: check(1)!\n    b: second(2)!\n  }}\n  println(\"${{r.a + r.b}}\")\n}}\n"
+    );
+    let ops = ops_of(&lowered(&src), "main");
+    let (second_at, _) = call_of(&ops, "second");
+    let die_at = ops.iter().position(|o| o.contains("kind: Die")).expect("main has its err exit");
+    assert!(second_at < die_at, "field 2 runs only after field 1's Err exit was taken:\n{ops:#?}");
+}
+
+#[test]
+fn nested_fan_field_runs_inner_arms_before_the_outer_err_exits() {
+    // The nested fan is a scoped thunk arm; it runs in its turn (both inner arms),
+    // and the outer field's Err (lower index) is settled before the inner ones.
+    let src = format!(
+        "{CHECK}effect fn second(x: Int) -> Int = {{\n  println(\"second ran\")\n  ok(x + 1)\n}}\n\
+         effect fn other(x: Int) -> Int = {{\n  if x > 0 then err(\"other\") else ok(x)\n}}\n\
+         effect fn main() -> Unit = {{\n  let r = fan {{\n    a: check(1)!\n    b: fan {{\n      x: other(2)!\n      y: second(3)!\n    }}\n  }}\n  println(\"${{r.a + r.b.x + r.b.y}}\")\n}}\n"
+    );
+    let ops = ops_of(&lowered(&src), "main");
+    let (check_at, check_v) = call_of(&ops, "check");
+    let (other_at, other_v) = call_of(&ops, "other");
+    let (second_at, _) = call_of(&ops, "second");
+    let die_at = ops.iter().position(|o| o.contains("kind: Die")).expect("main has its err exit");
+    assert!(check_at < other_at && other_at < second_at, "arms run out of source order:\n{ops:#?}");
+    assert!(second_at < die_at, "an inner arm runs only after an Err exit was taken:\n{ops:#?}");
+    let reads = |v: &str| {
+        ops.iter()
+            .position(|o| o.starts_with("Prim { kind: Handle") && o.contains(&format!("args: [{v}]")))
+            .unwrap_or_else(|| panic!("{v} is never tested:\n{ops:#?}"))
+    };
+    assert!(reads(&check_v) < reads(&other_v), "the inner Err would win over the outer field's:\n{ops:#?}");
+}

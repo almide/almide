@@ -29,13 +29,13 @@ Contracts: C-008, C-009, C-010, C-011。
 
 **受理形**(構文要素方向: `ExprKind::Fan` / `FanBounded` / `FanRace` /
 `FanRaceMap` / `FanSettle` / `FanTimeout`): リスト形 `fan.map(xs, (x) =>
-…)`、ブロック形 `fan.any { a(); b() }` / `fan.settle { … }`。全形が
+…)`、ブロック形 `fan.settle { … }` / `fan.min(clock) { … }`。全形が
 **effect fn 文脈必須**。`fan.map` の mapper は **Result を返す契約**
 (裸の値は検査時拒否、`(x) => ok(…)` へ誘導 — any/settle の thunk は
 auto-wrap、map の mapper はしない)。`fan.settle { a; b }` の返りは
 **Result のタプル**(要素数 = thunk 数、ALS-DT4)。
 
-`fan.any`・`fan.map`・`fan.settle` の結果は**リスト順で決定的**(最初に
+`fan.map`・`fan.settle` の結果は**リスト順で決定的**(最初に
 完了したものではなく、引数リストの先頭から評価した最初の該当)。エラーは
 ALS-R1 の統一 abort 形で表面化する。
 
@@ -51,7 +51,7 @@ trap までの出力の後に abort する観測となり、k より後の要素
 
 `fan.race` と `fan.timeout` は 0.42.0 / 0.29.0 でいったん削除された後、
 **決定的意味論を得て 0.47.0 で復活した**: race は (spend, index) 辞書式
-最小の勝者則(ALS-DT3、C-205 — mapper 形 `fan.race(budget?, xs, f)` を含む)、
+最小の勝者則(ALS-DT3、C-205 — mapper 形 `fan.min(clock, xs, f)` を含む)、
 timeout は charge site 協調チェックの壁時計期限(ALS-DT5、C-208)。
 `fan.bounded(c) { … }` は決定的予算(ALS-DT2、C-204)であり、mapper 形は
 持たない。旧 tombstone 裁定(C-004/C-006)はこの復活で SUPERSEDED。

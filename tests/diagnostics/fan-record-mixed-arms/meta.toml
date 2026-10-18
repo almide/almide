@@ -1,0 +1,2 @@
+expects_error = "every arm of a record-form fan block must be a `name: expr` field"
+hint_substring = "write no names at all"

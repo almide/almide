@@ -484,7 +484,7 @@ impl LowerCtx {
         Some(dst)
     }
 
-    /// `ok(<Tuple|Record>)` / `err(<Tuple|Record>)` → `let $p = <payload>;
+    /// `ok(<heap payload>)` / `err(<heap payload>)` → `let $p = <payload>;
     /// ok($p)`, lowered through [`Self::lower_heap_result_arm`]; the temp stays
     /// tracked for the caller to release. Refuses a payload the permissive bind
     /// could only defer (an `Init::Opaque` block), and rolls back on any decline.
@@ -494,9 +494,10 @@ impl LowerCtx {
         else {
             return None;
         };
-        if !is_heap_ty(&payload.ty)
-            || !matches!(&payload.kind, IrExprKind::Tuple { .. } | IrExprKind::Record { .. })
-        {
+        // Any heap payload: a tuple or record, and also a `??` fallback or a
+        // call (#3780's `ok(env.get(k) ?? "unset")`). The bind below refuses
+        // whatever it can only defer, so widening the shape stays honest.
+        if !is_heap_ty(&payload.ty) {
             return None;
         }
         let mark = self.ops.len();

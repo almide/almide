@@ -112,9 +112,9 @@ almide-mir 既存 605 lib テストは全緑（Op::Charge の追加は無破壊�
 5. ~~UFCS 診断 / S6 gate なし~~ → **解消**（T3-2 / T3-3）。
 6. ~~fan{} × budget 未定義~~ → **解消**（T3-8 裁定: 型システムが排除）。
 
-## Stage 3 垂直スライス — fan.race が両ターゲットで着地（2026-08-02、同 branch）
+## Stage 3 垂直スライス — fan.min が両ターゲットで着地（2026-08-02、同 branch）
 
-`fan.race(budget?) { arm; arm }` が native v1 / wasm 両レッグで動き、**証明済みの
+`fan.min(budget?) { arm; arm }` が native v1 / wasm 両レッグで動き、**証明済みの
 lockstep ≡ (spend, index) lex-min 意味論**が実物になった:
 
 - 勝者 = 最小消費の完了（cheap(7)=~2 units が heavy(2000)=~2003 units に勝つ）
@@ -123,7 +123,7 @@ lockstep ≡ (spend, index) lex-min 意味論**が実物になった:
 - **勝者出現境界**: heavy(500) の spend = 502 units。`compute.us(501)` は全滅、
   `compute.us(502)` で arm 1 が勝者に — 両ターゲット同一の 1µs 点（gate で assert）
 - probe 併用でも三点一致（consumed 9018 / trace 同一）
-- legacy `fan.race(thunks)` は parser が旧 AST を再構築して **E027 を署名移行ヒント**
+- legacy `fan.min(thunks)` は parser が旧 AST を再構築して **E027 を署名移行ヒント**
   として発火（設計どおりの改訂。fixture 更新済み）
 
 ### 実装形
@@ -144,7 +144,7 @@ lockstep ≡ (spend, index) lex-min 意味論**が実物になった:
 
 ## P0 修正 2 件（2026-08-02、同 branch）
 
-1. **fmt のコード破壊を修正**: formatter の wildcard が `fan.bounded` / `fan.race` を
+1. **fmt のコード破壊を修正**: formatter の wildcard が `fan.bounded` / `fan.min` を
    `/* unformatted */` に置換してコードを**消していた**（データ損失クラス）。整形
    アームを追加 — bounded はインライン、race は arm 改行の block 形。roundtrip
    （fmt → 再パース緑）と冪等性を確認。
@@ -214,7 +214,7 @@ op 単位の対応は不可能。採った形は **native レグ専用の認識�
 race/bounded が block head になったことで残っていた表面の不整合（any/settle だけ
 thunk-list）を解消:
 
-- **block 形**: `fan.any { a(); b() }` / `fan.settle { a(); b() }` — parser が
+- **block 形**: `a() ?? b()` (was `fan.any { a(); b() }`) / `fan.settle { a(); b() }` — parser が
   literal thunk-list AST（内部名 `__any_block`/`__settle_block`）へ脱糖し、frontend
   lowering が名前を正規化。**checker 以深は完全無変更**で両ターゲット即動作。
   fmt は内部名を block 構文へ re-sugar（roundtrip + 冪等確認済み）。
@@ -244,7 +244,7 @@ tuple 契約は本実装 PR での deviation 項目に追加）。
 
 ## Tier 7 — race mapper 実装（2026-08-03、ユーザー指示でセル閉鎖）
 
-`fan.race(xs, f)` / `fan.race(budget, xs, f)` が実装され、fan v2 matrix の最後の
+`fan.min(xs, f)` / `fan.min(budget, xs, f)` が実装され、fan v2 matrix の最後の
 宣言済みセルが埋まった。意味論は block 形と同一法則の動的拡張: arm i = `f(xs[i])`
 （pure な 1 引数 lambda、Result 必須 — ok が競技、err は自己失格）、index = リスト
 順、budget は per-element、勝者 = (spend, index) 辞書式最小、全滅 = 台帳定数 Err。

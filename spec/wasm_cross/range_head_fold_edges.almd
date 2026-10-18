@@ -1,0 +1,62 @@
+// @contract: C-238
+// #2045 guard rails: a `list.range(a, b)` head consumed once by a fold is
+// counted, not built (the cell that can only pass that way is
+// range_head_fold_huge.almd). Everything here is small enough for all three
+// oracles, and pins that counting reads the same sequence the list held:
+// an empty span and a reversed one fold zero times (the fold answers its
+// init), a span crossing zero, spans touching i64::MAX and i64::MIN (the
+// counter stops AT the end, it never steps past it), the bounds evaluated
+// once and before the fold's init, as they are when the list is built, a
+// fold callback that prints (no stage to reorder against, so it may run per
+// element), and a fused map/filter chain with a heap accumulator.
+fn lo() -> Int = {
+  println("lo")
+  2
+}
+
+fn hi() -> Int = {
+  println("hi")
+  5
+}
+
+fn start() -> String = {
+  println("init")
+  "<"
+}
+
+effect fn main() -> Unit = {
+  let empty = list.range(5, 5) |> list.fold(42, (a, x) => a + x)
+  let reversed = list.range(5, 2) |> list.fold(42, (a, x) => a + x)
+  println("empty=${empty} reversed=${reversed}")
+  let crossing = list.range(-3, 3) |> list.fold(0, (a, x) => a * 2 + x)
+  println("crossing=${crossing}")
+  let top_count = list.range(9223372036854775804, 9223372036854775807) |> list.fold(
+    0,
+    (a, _x) => a + 1,
+  )
+  let top_last = list.range(9223372036854775804, 9223372036854775807) |> list.fold(0, (_a, x) => x)
+  println("top=${top_count} last=${top_last}")
+  let bottom_first = list.range(-9223372036854775808, -9223372036854775805) |> list.fold(
+    0,
+    (a, x) => if a == 0 then x else a,
+  )
+  let bottom_count = list.range(-9223372036854775808, -9223372036854775805) |> list.fold(
+    0,
+    (a, _x) => a + 1,
+  )
+  println("bottom=${bottom_count} first=${bottom_first}")
+  let ordered = list.range(lo(), hi()) |> list.fold(start(), (acc, x) => acc + int.to_string(x))
+  println("ordered=${ordered}")
+  let traced = list.range(0, 3) |> list.fold(0, (a, x) => {
+    println("step ${x}")
+    a + x
+  })
+  println("traced=${traced}")
+  let odd_squares = list.range(1, 8) |> list.map((x) => x * x) |> list.filter((x) => x % 2 == 1) |> list.fold(
+    "",
+    (acc, x) => acc + int.to_string(x) + ",",
+  )
+  println("odd_squares=${odd_squares}")
+  let none_kept = list.range(0, 10) |> list.filter((x) => x > 100) |> list.fold(7, (a, x) => a + x)
+  println("none_kept=${none_kept}")
+}

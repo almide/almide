@@ -26,32 +26,32 @@ effect fn main() -> Unit = {
   // heavy(500) spends 502 units = 1506ns: no winner through 1505ns
   var ns = 1503
   while ns < 1509 {
-    let r = fan.race(compute.ns(ns)) {
+    let r = fan.min(compute.ns(ns)) {
       heavy(1000)
       heavy(500)
     } ?? -1
     println(int.to_string(ns * 10 + (if r == -1 then 1 else 0)))
     ns = ns + 1
   }
-  let greeting = fan.race {
+  let greeting = fan.min(compute.ms(100)) {
     greet("ab")
     greet("c")
   } ?? "none"
   println(greeting)
-  let picked = fan.race {
+  let picked = fan.min(compute.ms(100)) {
     [1, 2, 3]
     [4]
   } ?? []
   println(int.to_string(list.len(picked)))
-  let flag = fan.race {
+  let flag = fan.min(compute.ms(100)) {
     even(3)
     even(4)
   } ?? false
   println("${flag}")
   println(int.to_string(fan.bounded(compute.ns(30)) { heavy(100) } ?? -1))
   println(int.to_string(fan.bounded(compute.ns(100000)) { heavy(100) } ?? -1))
-  println(int.to_string(fan.race([-1, 8], (x) => if x < 0 then err("neg") else ok(x)) ?? -1))
-  let w = fan.race {
+  println(int.to_string(fan.min(compute.ms(100), [-1, 8], (x) => if x < 0 then err("neg") else ok(x)) ?? -1))
+  let w = fan.min(compute.ms(100)) {
     heavy(20)
     heavy(10)
   }!

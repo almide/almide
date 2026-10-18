@@ -465,6 +465,7 @@ fn lower_function_all_impl(
     // is a later precision refinement.) Clock and Net join the bound with the host ops that
     // reach them on this rung (#2739: `env.sleep_ms`, the http client) — the structural leg's
     // `EFFECT_BOUND` (almide-wasm cert_project.rs) already declares both for an effect fn.
+    // Process joins with testing.assert_aborts's child run (#3792); EFFECT_BOUND holds PROC.
     let declared_caps = if func.is_effect {
         vec![
             crate::Capability::Stdout,
@@ -475,6 +476,7 @@ fn lower_function_all_impl(
             crate::Capability::Clock,
             crate::Capability::Stdin,
             crate::Capability::Net,
+            crate::Capability::Process,
         ]
     } else {
         Vec::new()
@@ -577,6 +579,7 @@ include!("desugar_loop_b.rs");
 include!("desugar_branch.rs");
 include!("desugar_branch_b.rs");
 include!("desugar_fan.rs");
+include!("desugar_fan_settle.rs");
 include!("desugar_match.rs");
 include!("desugar_match_grouped.rs");
 include!("desugar_match_b.rs");

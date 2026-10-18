@@ -259,7 +259,15 @@ pub enum ExprKind {
     /// (docs/specs/scoped.md). `end` is the closing brace — the "scope ends
     /// at" line of E086 — and, like every span, is not part of the JSON.
     Scoped { body: Box<Expr>, #[serde(skip)] end: Option<Span> },
-    Fan { exprs: Vec<Expr> },
+    /// `fan { a, b }` (the tuple form, `names` empty) or `fan { x: a, y: b }`
+    /// (the record form, #1388): `names[i]` is the field arm `exprs[i]`
+    /// fills, so the value is the anonymous record `{ x: …, y: … }` — the
+    /// arms run exactly as the tuple form's do.
+    Fan {
+        exprs: Vec<Expr>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        names: Vec<Sym>,
+    },
     /// `fan.bounded(budget) { body }` — deterministic computation budget
     /// (the body is a block, budget is a `Compute`).
     FanBounded { budget: Box<Expr>, body: Box<Expr> },
@@ -795,7 +803,7 @@ pub fn visit_expr_mut(expr: &mut Expr, f: &mut impl FnMut(&mut Expr)) {
 
         // ── A flat sequence of children ──
         ExprKind::List { elements: xs } | ExprKind::Tuple { elements: xs }
-        | ExprKind::Fan { exprs: xs } | ExprKind::FanSettle { arms: xs } => {
+        | ExprKind::Fan { exprs: xs, .. } | ExprKind::FanSettle { arms: xs } => {
             visit_exprs_slice_mut(xs, f)
         }
 
@@ -992,7 +1000,7 @@ pub fn visit_expr(expr: &Expr, f: &mut impl FnMut(&Expr)) {
 
         // ── A flat sequence of children ──
         ExprKind::List { elements: xs } | ExprKind::Tuple { elements: xs }
-        | ExprKind::Fan { exprs: xs } | ExprKind::FanSettle { arms: xs } => {
+        | ExprKind::Fan { exprs: xs, .. } | ExprKind::FanSettle { arms: xs } => {
             visit_exprs_slice(xs, f)
         }
 

@@ -1,0 +1,9 @@
+// #1456: a caseless name this module declares as a variant case is a
+// type-side name everywhere in the module, as `Red` is — it cannot also be a
+// binding. The hint says why, since there is no capital letter to see.
+type 色 = | 赤 | 緑
+
+effect fn main() -> Unit = {
+  let 数 = 1
+  println("${数}")
+}

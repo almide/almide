@@ -116,7 +116,7 @@ impl ErrorSurfaceLint {
             }
 
             // ── A flat sequence of children ──
-            EK::List { elements: xs } | EK::Tuple { elements: xs } | EK::Fan { exprs: xs }
+            EK::List { elements: xs } | EK::Tuple { elements: xs } | EK::Fan { exprs: xs, .. }
             | EK::FanRace { arms: xs, .. } | EK::FanSettle { arms: xs } => {
                 for e in xs {
                     self.walk_expr(e, err_binds);
@@ -385,7 +385,7 @@ fn expr_uses_ident(expr: &ast::Expr, name: Sym) -> bool {
         }
 
         // ── A flat sequence of children ──
-        EK::List { elements: xs } | EK::Tuple { elements: xs } | EK::Fan { exprs: xs }
+        EK::List { elements: xs } | EK::Tuple { elements: xs } | EK::Fan { exprs: xs, .. }
         | EK::FanRace { arms: xs, .. } | EK::FanSettle { arms: xs } => xs.iter().any(uses),
 
         _ => expr_uses_ident_nested(expr, name),

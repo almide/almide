@@ -1,15 +1,22 @@
 // @contract: C-005
-// fan.any all-fail: when EVERY candidate fails, fan.any returns a defined
-// Err("fan.any: all candidates failed"), which the effect-main termination
-// surfaces as "Error: fan.any: all candidates failed" + exit 1 on BOTH targets.
-// NOT a native panic (exit 101) and NOT a wasm unreachable trap (exit 134).
-effect fn fail_n(m: String) -> Result[Int, String] = err(m)
+// A `??` chain over failing candidates: when EVERY candidate fails, the chain yields
+// its final fallback — a defined value on BOTH targets, NOT a native panic (exit 101)
+// and NOT a wasm unreachable trap (exit 134) — and once a candidate succeeds, no later
+// candidate runs (the right side of `??` is evaluated only when the left failed). This
+// is the selection `fan.any` used to spell (removed in dialect epoch 14, ADR-0028).
+effect fn fail_n(m: String) -> Result[Int, String] = {
+  println("try " + m)
+  err(m)
+}
+
+effect fn win(n: Int) -> Result[Int, String] = {
+  println("win " + int.to_string(n))
+  ok(n)
+}
 
 effect fn main() -> Unit = {
-  let winner = fan.any {
-    fail_n("a")
-    fail_n("b")
-    fail_n("c")
-  }!
-  println("unreachable: " + int.to_string(winner))
+  let all = fail_n("a") ?? fail_n("b") ?? fail_n("c") ?? -1
+  println("all failed: " + int.to_string(all))
+  let first = fail_n("d") ?? win(2) ?? fail_n("never") ?? -1
+  println("first: " + int.to_string(first))
 }

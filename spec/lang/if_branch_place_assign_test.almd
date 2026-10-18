@@ -1,0 +1,124 @@
+// A `then` / `else` branch takes the same assignment targets as a statement
+// (#3757): a variable, a list slot, a record field, and the nested targets —
+// `o.ui.dirty = v`, `o.ui.xs[i] = v`. An unbraced branch (`if c then
+// o.ui.dirty = true`) parses to the single-statement block written here, the
+// shape `almide fmt` prints; the unbraced spelling itself is pinned by
+// crates/almide-syntax/tests/grammar_assign_rule.rs.
+type In = { dirty: Bool, xs: List[Int] }
+
+type Out = { ui: In, n: Int }
+
+fn fresh() -> Out = Out { ui: In { dirty: false, xs: [0, 0, 0] }, n: 0 }
+
+test "then assigns a variable" {
+  var a = 0
+  let c = true
+  if c then {
+    a = 10
+  } else ()
+  assert_eq(a, 10)
+}
+
+test "then assigns a list slot" {
+  var xs = [1, 2, 3]
+  let c = true
+  if c then {
+    xs[1] = 20
+  } else ()
+  assert_eq(xs, [1, 20, 3])
+}
+
+test "then assigns a record field" {
+  var o = fresh()
+  let c = true
+  if c then {
+    o.n = 7
+  } else ()
+  assert_eq(o.n, 7)
+}
+
+test "then assigns a nested field" {
+  var o = fresh()
+  let c = true
+  if c then {
+    o.ui.dirty = true
+  } else ()
+  assert_eq(o.ui.dirty, true)
+}
+
+test "then assigns a nested list slot" {
+  var o = fresh()
+  let c = true
+  if c then {
+    o.ui.xs[0] = 2
+  } else ()
+  assert_eq(o.ui.xs, [2, 0, 0])
+}
+
+test "then not taken leaves the nested target" {
+  var o = fresh()
+  let c = false
+  if c then {
+    o.ui.dirty = true
+  } else ()
+  assert_eq(o.ui.dirty, false)
+}
+
+test "else alone assigns a nested field" {
+  var o = fresh()
+  let c = true
+  if not c then ()
+  else {
+    o.ui.dirty = true
+  }
+  assert_eq(o.ui.dirty, true)
+}
+
+test "else alone assigns a nested list slot" {
+  var o = fresh()
+  let c = false
+  if c then ()
+  else {
+    o.ui.xs[2] = 9
+  }
+  assert_eq(o.ui.xs, [0, 0, 9])
+}
+
+test "both branches assign nested targets" {
+  var o = fresh()
+  let c = false
+  if c then {
+    o.ui.dirty = true
+  } else {
+    o.ui.xs[1] = 5
+  }
+  assert_eq(o.ui.dirty, false)
+  assert_eq(o.ui.xs, [0, 5, 0])
+}
+
+test "an else-if chain assigns a different target per branch" {
+  var o = fresh()
+  var hits = 0
+  for k in [0, 1, 2, 3] {
+    if k == 0 then {
+      o.ui.dirty = true
+    } else if k == 1 then {
+      o.ui.xs[1] = 11
+    } else if k == 2 then {
+      o.n = 22
+    } else {
+      hits = hits + 1
+    }
+  }
+  assert_eq(o.ui.dirty, true)
+  assert_eq(o.ui.xs, [0, 11, 0])
+  assert_eq(o.n, 22)
+  assert_eq(hits, 1)
+}
+
+test "a branch that reads a nested field is still an expression" {
+  let o = fresh()
+  let v = if o.ui.dirty then o.ui.xs[0]
+  else o.n + 1
+  assert_eq(v, 1)
+}

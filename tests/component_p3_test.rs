@@ -219,7 +219,7 @@ fn p3_component_emits_and_matches_core() {
 
 
 // fan.* on the p3 component (#1628 stage 2, the deterministic half): the
-// C-004 contract's combinators — list-order map, first-success any,
+// C-004 contract's combinators — list-order map, a first-success `??` chain / list.find_map,
 // settle — must answer byte-identically through the async canonical ABI.
 // Deterministic fan needs NO overlap machinery (arms evaluate in list
 // order by the language's own semantics); the async-I/O overlap half
@@ -230,7 +230,7 @@ const FAN: &str = r#"effect fn dbl(x: Int) -> Result[Int, String] = ok(x * 2)
 effect fn main() -> Unit = {
   let doubled = fan.map([1, 2, 3, 4], (x) => dbl(x))!
   println(doubled |> list.map((x) => int.to_string(x)) |> list.join(","))
-  let first = fan.any([9, 10], (x) => dbl(x)) ?? -1
+  let first = list.find_map([9, 10], (x) => dbl(x)?) ?? -1
   println(int.to_string(first))
 }
 "#;
@@ -474,25 +474,23 @@ fn p3_component_fan_prefetch_reads_concurrently() {
     assert_eq!(ecode, 1);
 }
 
-// fan.any over the same shape (#1628 increment 2c): first ok in ARM
-// order wins, the started loser arms are ABANDONED via subtask.cancel —
-// the p3 run must exit clean (an outstanding subtask at task exit would
-// trap), and all-fail answers the C-004 ledger Err.
+// list.find_map over the same shape — the first-Ok selection that
+// `fan.any(xs, f)` spelled until dialect epoch 14 (ADR-0028; #1628 increment
+// 2c was the prefetch-any lowering of that form): the first ok in LIST order
+// wins, later elements never start, the p3 run exits clean, and all-fail is
+// the `??` fallback.
 const FAN_ANY: &str = r#"import fs
 
 effect fn main() -> Unit = {
-  let first = fan.any(["gone-a.txt", "f2.txt", "f3.txt"], (p) => fs.read_text(p)!) ?? "(none)"
+  let first = list.find_map(["gone-a.txt", "f2.txt", "f3.txt"], (p) => fs.read_text(p)?) ?? "(none)"
   println(string.trim_end(first))
-  let nores = fan.any(["gone-a.txt", "gone-b.txt"], (p) => fs.read_text(p)!)
-  match nores {
-    ok(_)  => println("BAD"),
-    err(m) => println("allfail=${m}"),
-  }
+  let nores = list.find_map(["gone-a.txt", "gone-b.txt"], (p) => fs.read_text(p)?) ?? "(none)"
+  println("allfail=${nores}")
 }
 "#;
 
 #[test]
-fn p3_component_fan_any_cancels_the_losers() {
+fn p3_component_find_map_over_fs_stops_at_the_first_ok() {
     if Command::new(almide_bin()).arg("--version").output().is_err() {
         return;
     }
@@ -504,11 +502,7 @@ fn p3_component_fan_any_cancels_the_losers() {
     let src = d.join("anyp.almd");
     std::fs::write(&src, FAN_ANY).expect("write");
     let p3 = d.join("anyp_p3.wasm");
-    let build_log = build_p3_structural(&src, &p3);
-    assert!(
-        build_log.contains("prefetch-any lowering engaged"),
-        "fan.any over fs.read_text must lower through the prefetch-any route:\n{build_log}"
-    );
+    let _build_log = build_p3_structural(&src, &p3);
     if !wasmtime_available() {
         return;
     }
@@ -516,10 +510,10 @@ fn p3_component_fan_any_cancels_the_losers() {
         return;
     };
     assert_eq!(
-        out, "file-2 body\nallfail=fan.any: all candidates failed\n",
-        "fan.any prefetch diverged (stderr: {err})"
+        out, "file-2 body\nallfail=(none)\n",
+        "list.find_map over fs.read_text diverged (stderr: {err})"
     );
-    assert_eq!(code, 0, "a leaked loser subtask would trap at task exit");
+    assert_eq!(code, 0, "an outstanding subtask would trap at task exit");
 }
 
 // The filesystem WRITE surface (#1628 increment 2d): recursive mkdir_p

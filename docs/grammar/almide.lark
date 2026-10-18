@@ -74,7 +74,7 @@ fn_body: EQ _nl braceless_block
 braceless_block: _braceless_head (_stmt_sep stmt)* _o_stmt_sep
 _braceless_head: let_stmt | var_stmt | guard_stmt
 
-fn_name: TYPENAME DOT _ident
+fn_name: _tname DOT _ident
        | _ident
 
 param_list: _nl _o_params _nl
@@ -90,12 +90,12 @@ param: _o_attrs _o_mut _param_name COLON type_expr _o_default
 _param_name: _ident | VAR
 
 // ── type ─────────────────────────────────────────────────────────
-type_decl: _o_vis TYPE_KW TYPENAME _o_generics _o_deriving _nl EQ _nl type_expr
+type_decl: _o_vis TYPE_KW _tname _o_generics _o_deriving _nl EQ _nl type_expr
 _o_deriving: COLON protocol_ref (COMMA protocol_ref)*
            |
 
 // ── protocol ─────────────────────────────────────────────────────
-protocol_decl: PROTOCOL TYPENAME _o_generics "{" _nl (protocol_method _nl)* "}"
+protocol_decl: PROTOCOL _tname _o_generics "{" _nl (protocol_method _nl)* "}"
 protocol_method: _o_effect FN fn_name _o_generics "(" param_list ")" ARROW type_expr _o_bang
 
 // ── top-level let / var ──────────────────────────────────────────
@@ -134,7 +134,7 @@ _o_attr_arg_list: attr_arg (COMMA _nl attr_arg)* _comma _nl
 attr_arg: IDENT (EQ | COLON) attr_value
         | attr_value
 ?attr_value: plain_string | INT | MINUS INT | TRUE | FALSE | IDENT
-?attr_name: IDENT | TYPENAME | keyword_as_name
+?attr_name: IDENT | _tname | keyword_as_name
 
 // ═══════════════════════════════════════════════════════════════════
 // Types
@@ -155,7 +155,7 @@ type_tail: "[" type_args "]" _o_question
          | "(" _o_type_list ")"
          | _o_question
 
-qualified_type_name: (IDENT DOT)* TYPENAME
+qualified_type_name: (IDENT DOT)* _tname
 
 type_args: _nl type_expr (COMMA _nl type_expr)* _nl
 type_list: type_expr (COMMA type_expr)*
@@ -182,12 +182,12 @@ field_type: _o_attrs name_tok _o_field_alias COLON type_expr _o_default
 _o_field_alias: AS plain_string
               |
 
-variant_case: TYPENAME "(" _o_type_list ")"
-            | TYPENAME "{" _nl _o_field_types "}"
-            | TYPENAME
+variant_case: _tname "(" _o_type_list ")"
+            | _tname "{" _nl _o_field_types "}"
+            | _tname
 
 generic_params: "[" generic_param (COMMA generic_param)* "]"
-generic_param: TYPENAME _o_generic_bound
+generic_param: _tname _o_generic_bound
 _o_generic_bound: COLON record_type
                 | COLON protocol_ref (PLUS protocol_ref)*
                 |
@@ -236,7 +236,7 @@ assign_stmt: _assign_target EQ _nl _assign_value
 index_assign_stmt: _assign_target (DOT name_tok)* "[" expr "]" EQ _nl _assign_value
 field_assign_stmt: _assign_target (DOT name_tok)+ EQ _nl _assign_value
 _assign_value: expr (COLON type_expr)?
-_assign_target: _ident | TYPENAME
+_assign_target: _ident | _tname
 
 destructure_tuple: "(" (_destructure_elem _comma _nl)* ")"
 _destructure_elem: destructure_tuple | UNDERSCORE | _ident
@@ -285,7 +285,7 @@ pipe_match: MATCH _nl "{" match_body "}"
 
 ?postfix: primary postfix_op*
 
-postfix_op: _nl DOT TYPENAME named_record          -> qualified_record
+postfix_op: _nl DOT _tname named_record          -> qualified_record
           | _nl DOT name_tok                       -> member
           | DOT INT                                -> tuple_index
           | "[" type_args "]" "(" call_args ")"    -> type_args_call
@@ -374,9 +374,13 @@ _for_name: _ident | UNDERSCORE
 fan_expr: FAN DOT IDENT "(" _nl expr _nl ")" _nl block   -> fan_head_call
         | FAN DOT IDENT _nl fan_arm_block                -> fan_head_block
         | FAN fan_arm_block                              -> fan_block
+        | FAN fan_record_block                           -> fan_record
         | FAN                                            -> fan_name
 
 fan_arm_block: "{" _nl (expr _stmt_sep)* _o_expr "}"
+// `fan { a: e1, b: e2 }` (#1388): every arm a `name: expr` field (no punning
+// — `fan { x }` is the one-arm tuple form); the value is the record.
+fan_record_block: "{" _nl field_kv (_seps field_kv)* _o_seps "}"
 _o_expr: expr
        |
 
@@ -412,10 +416,10 @@ lambda_params: lambda_param (COMMA lambda_param)*
 ?lambda_param: "(" (_for_name _comma)* ")"          -> lambda_tuple_param
              | _for_name _o_ty_ann
 
-typename_expr: TYPENAME "[" type_args "]" "(" call_args ")"   -> ctor_type_args_call
-             | TYPENAME "(" call_args ")"                     -> ctor_call
-             | TYPENAME _nl named_record                      -> named_record_lit
-             | TYPENAME                                       -> type_name_value
+typename_expr: _tname "[" type_args "]" "(" call_args ")"   -> ctor_type_args_call
+             | _tname "(" call_args ")"                     -> ctor_call
+             | _tname _nl named_record                      -> named_record_lit
+             | _tname                                       -> type_name_value
 
 named_record: "{" _nl DOTDOTDOT expr (COMMA _nl field_init)* _o_seps "}"  -> named_spread
             | "{" _nl (field_init _seps)* _o_field_init "}"               -> named_fields
@@ -459,7 +463,7 @@ ctor_pattern: qualified_ctor "(" _o_pattern_args ")"   -> ctor_args_pat
 _o_pattern_args: pattern (COMMA pattern)*
                |
 
-qualified_ctor: _o_module_prefix TYPENAME
+qualified_ctor: _o_module_prefix _tname
 _o_module_prefix: IDENT DOT
                 |
 
@@ -481,10 +485,15 @@ _o_field_pat: COLON pattern
 // wherever the two qualifier heads do not claim it. Earley carries the one
 // ambiguity: in `match scoped { … }` the subject is this identifier and the
 // brace opens the match body, exactly as the parser reads it.
-_ident: IDENT | SCOPED
+_ident: IDENT | SCOPED | UNAME
+// #1456: a name starting with a non-ASCII letter. The compiler reads a
+// caseless one (CJK, kana, Hangul, ...) as a value name unless its module
+// declares it as a type or variant case, and an uppercase one (`Δ`) as a
+// type name; the artifact admits UNAME in both positions (README gap G13).
+_tname: TYPENAME | UNAME
 
 // `expect_any_name`: identifier, TypeName, or a SOFT KEYWORD used as a name.
-?name_tok: _ident | TYPENAME | soft_keyword
+?name_tok: _ident | _tname | soft_keyword
 !soft_keyword: OK | OK_UC | ERR | ERR_UC | SOME | SOME_UC | NONE | NONE_UC | TODO
 !keyword_as_name: EFFECT | TYPE_KW | TEST | FN | LET | VAR | MOD | IN | FOR | MATCH
 
@@ -642,11 +651,17 @@ AT: "@"
 // ──── END-EXCLUDED ──
 
 // ── identifiers ──
-IDENT: /[a-z][A-Za-z0-9_]*/
-     | /_[A-Za-z0-9_]+/
-     | /`[a-z_][A-Za-z0-9_]*`/
-TYPENAME: /[A-Z][A-Za-z0-9_]*/
-        | /`[A-Z][A-Za-z0-9_]*`/
+// Identifiers follow UAX #31 (#1456): `\w` is Unicode-aware here, a
+// superset of XID_Continue minus the compatibility characters the lexer
+// refuses (full-width Latin and digits stay unsampleable only in the
+// compiler — README gap G13).
+IDENT: /[a-z]\w*/
+     | /_\w+/
+     | /`[a-z_]\w*`/
+TYPENAME: /[A-Z]\w*/
+        | /`[A-Z]\w*`/
+UNAME: /[^\W\d_A-Za-z]\w*/
+     | /`[^\W\d_A-Za-z]\w*`/
 
 // ── numbers ── (FLOAT outranks INT so `1.5` is one token, mirroring the
 // lexer's scan_float_tail; radix forms keep their prefix in the token value)

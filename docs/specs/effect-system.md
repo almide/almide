@@ -68,7 +68,7 @@ output path is a stdlib effect fn and stays E006 from a pure fn, including
    unspecified.
 4. **`fan` bodies.** A pure fn called from a `fan` arm prints as part of that
    arm. The exemption adds no ordering promise beyond §5's determinism
-   contract: C-004 fixes list/arm order for `fan.any` and `fan.map`, while the
+   contract: C-004 fixes list/arm order for `fan.map` (and a `??` chain is sequential by definition), while the
    interleaving of `fan.settle` thunks' side effects on native is outside the
    contract. `fan` itself still requires an effect context (E007).
 5. **Reference evaluators.** The in-process interpreter and the judge's
@@ -263,7 +263,7 @@ effect fn compute_b() -> Result[Int, String] = ok(2)
 fn bad() -> (Int, Int) = fan { compute_a(), compute_b() }
 ```
 
-The same check applies to `fan.map()` and `fan.any()` calls via `static_dispatch.rs`.
+The same check applies to `fan.map()` / `fan.settle()` / `fan.min()` calls via `static_dispatch.rs`.
 
 ### E008: No mutable variable capture
 
@@ -282,7 +282,7 @@ effect fn bad() -> Result[Unit, String] = {
 
 ### Type behavior
 
-A `fan` ALL-block / `fan.settle` yields its tuple (no Result wrapper — nothing to unwrap). The Result-yielding forms (`fan.any`, the mappers, `fan.race`) follow ADR-0008: the Result is a VALUE, and a binding spells its propagation explicitly (`let v = fan.any { ... }!`). Test: `spec/wasm_cross/fan_any_early_winner.almd` and the fan fixtures migrated at the 0.55 switch.
+A `fan` ALL-block / `fan.settle` yields its tuple (no Result wrapper — nothing to unwrap). The Result-yielding forms (the mappers, `fan.min`) follow ADR-0008: the Result is a VALUE, and a binding spells its propagation explicitly (`let v = fan.first_ok { ... }!`). Test: `spec/wasm_cross/fan_any_early_winner.almd` and the fan fixtures migrated at the 0.55 switch.
 
 ```almide
 effect fn add(a: Int, b: Int) -> Result[Int, String] = ok(a + b)
@@ -314,14 +314,19 @@ test "the tuple carries the unwrapped values" {
   `fan.settle(thunks)` は撤去済み(E027 トンボストーン)。旧 `fan.race(thunks)` は
   決定的モデルの下では `thunks[0]()` そのもので、名前だけが言語にないタイミング意味論を
   約束していた。
-- `fan.race { }` / `fan.race(xs, f)` — 現行の形。腕は純粋(E006)で、ソース順に一本ずつ
-  実行され、決定的な計算量が最小の Ok を選ぶ(同量ならソース順で先のもの)。
+- `fan.min(compute.X(n)) { }` / `fan.min(compute.X(n), xs, f)` — 現行の形。時計引数は
+  必須(型が「何で測って最小か」を言う)。腕は純粋(E006)で、ソース順に一本ずつ
+  実行され、予算内で決定的な計算量が最小の Ok を選ぶ(同量ならソース順で先のもの)。
   (Go の select が仕様で RANDOM を要求するのと対照的な設計選択。)
-- `fan.any { }` / `fan.any(xs, f)` — 順に逐次試行し最初の Ok。勝者より後は実行しない。
-  副作用順序も決定的。
+  `fan.min(duration.X(n)) { }` — 実時間で最初に成功した腕(oracle 層、I/O 可、負けた腕は
+  次の区切りで止めて待つ)は決定済み(ADR-0028)で、#3788 で入る。
+- 順に試して最初の Ok は fan ではない: `a() ?? b() ?? 既定値`(`??` の右辺は左辺が
+  失敗したときだけ評価される)、リストなら `list.find_map(xs, (x) => f(x)?) ?? 既定値`。
+  旧 `fan.any { }` / `fan.any(xs, f)` は方言 epoch 14 で撤去(E027 が置換先を示す)。
 - `fan.settle { }` / `fan.settle(xs, f)` — 全要素の Result。どちらもターゲットを問わず
   逐次に展開される(ブロックはタプル、マッパーは `list.map`)。
-- `fan.timeout(duration.X(n)) { }` — 純粋な本体に壁時計の期限を課す oracle 層の形。
+- `fan.timeout(duration.X(n)) { }` — 純粋な本体に壁時計の期限を課す oracle 層の形
+  (本体に I/O を許すのは決定済み、#3788)。
   旧呼び出し形 `fan.timeout(ms, f)` は E027(C-006)。
 
 テスト: `tests/fan_acceptance_test.rs`(4 レッグで stdout 一致を固定)。

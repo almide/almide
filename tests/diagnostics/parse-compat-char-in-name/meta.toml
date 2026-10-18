@@ -1,0 +1,2 @@
+expects_error = "Expected identifier"
+hint_substring = "is a compatibility form of 'c'"

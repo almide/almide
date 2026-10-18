@@ -17,11 +17,8 @@ test "fan block arms in canonical newline form" {
   assert_eq(x + y, 3)
 }
 
-test "fan.any arms in canonical newline form" {
-  let n = fan.any {
-    ea()
-    eb()
-  }!
+test "a chain of candidates in place of the retired fan.any block" {
+  let n = ea() ?? eb() ?? -1
   assert_eq(n, 1)
 }
 

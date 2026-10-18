@@ -202,9 +202,10 @@ fn validate_convention_method_conflicts(env: &TypeEnv, diagnostics: &mut Vec<Dia
             Some((p, t)) => (Some(p), t),
             _ => (Option::None, head),
         };
-        // A convention key's middle segment is a TYPE name (uppercase); a
-        // dotted PLAIN fn ("mod.helper") is not a convention target.
-        if !type_seg.starts_with(|c: char| c.is_ascii_uppercase()) {
+        // A convention key's middle segment is a TYPE name (uppercase, or
+        // caseless — #1456); a dotted PLAIN fn ("mod.helper") is not a
+        // convention target.
+        if !almide_base::names::is_type_side_name(type_seg) {
             return Option::None;
         }
         let id = match prefix {

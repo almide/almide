@@ -71,7 +71,7 @@ impl Parser {
         if self.check(TokenType::Ident) && self.peek_dot_type_name() {
             let mut path = self.advance_and_get_sym().to_string();
             self.advance(); // skip '.'
-            while self.check(TokenType::Ident) {
+            while self.check(TokenType::Ident) && self.peek_at(1).is_some_and(|t| t.token_type == TokenType::Dot) {
                 path.push('.');
                 path.push_str(&self.advance_and_get_sym());
                 self.advance(); // skip '.' (guaranteed by peek_dot_type_name)
@@ -147,7 +147,7 @@ impl Parser {
         let name = if self.check(TokenType::Ident) && self.peek_dot_type_name() {
             let mut path = self.advance_and_get_sym().to_string();
             self.advance(); // skip '.' (guaranteed by peek_dot_type_name)
-            while self.check(TokenType::Ident) {
+            while self.check(TokenType::Ident) && self.peek_at(1).is_some_and(|t| t.token_type == TokenType::Dot) {
                 path.push('.');
                 path.push_str(&self.advance_and_get_sym());
                 self.advance(); // skip '.' (guaranteed by peek_dot_type_name)
@@ -527,7 +527,7 @@ impl Parser {
         let module = if self.check(TokenType::Ident) && self.peek_dot_type_name() {
             let mut path = self.advance_and_get_sym().to_string();
             self.advance(); // skip '.'
-            while self.check(TokenType::Ident) {
+            while self.check(TokenType::Ident) && self.peek_at(1).is_some_and(|t| t.token_type == TokenType::Dot) {
                 path.push('.');
                 path.push_str(&self.advance_and_get_sym());
                 self.advance(); // skip '.' (guaranteed by peek_dot_type_name)

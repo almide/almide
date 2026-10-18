@@ -1,6 +1,9 @@
 # Fan against JS, Rust, Python and Go: what each one selects, waits for and stops
 
-> Last updated: 2026-10-17 · Almide side pinned at 0746eb689 (see
+> Last updated: 2026-10-18 (the Almide column reflects ADR-0028 as accepted:
+> K1 is `??` / `list.find_map`, K4 is `fan.min(compute…)`, and K2 is
+> `fan.min(duration…)`, decided and landing in #3788) · the audit
+> evidence is pinned at 0746eb689 (see
 > [fan-semantics-audit.md](./fan-semantics-audit.md) for the evidence behind
 > every Almide cell). Peer semantics are from their reference documentation
 > (links at the end), not from names.
@@ -24,10 +27,13 @@ Two kinds of stopping must not be confused.
   *cooperative*: Go `context`, JS `AbortSignal` and Python `CancelledError` only
   reach code that checks for them. Dropping a future never un-sends a request.
 
-Almide has no external cancellation at all. Its only stops are "never start an
-element" and "cut a pure body at a charge site" (fan.bounded / fan.timeout /
-fan.race budgets). A cut body cannot have external effects, because those
-bodies are checked pure (E006).
+Almide today has no external cancellation at all. Its only stops are "never
+start an element" and "cut a pure body at a charge site" (fan.bounded /
+fan.timeout / fan.min(compute…) budgets). A cut body cannot have external
+effects, because those bodies are checked pure (E006). The decided
+`fan.min(duration…)` (#3788) adds cooperative cancellation of the
+losing arms at their next charge site or I/O boundary, awaited before the
+form returns — the structured kind, as Haskell `race` and Python `TaskGroup`.
 
 ## The five selection kinds
 
@@ -43,17 +49,19 @@ bodies are checked pure (E006).
 
 | Kind | Almide | JS | Rust | Python asyncio | Go |
 |---|---|---|---|---|---|
-| K1 | `fan.any(xs, f)`, `fan.any { }` | — | Rayon `find_first` (pure predicate) | — | — |
-| K2 | — (excluded by design) | `Promise.any` | `futures::future::select_ok`; Rayon `find_any` | `as_completed` loop / `wait(FIRST_COMPLETED)` with a success check | hand-written: a channel plus `context` cancel |
-| K3 | — (excluded by design) | `Promise.race` | `futures::select!` / `future::select` / `select_all` | `asyncio.wait(return_when=FIRST_COMPLETED)` | first receive from a shared channel |
-| K4 | `fan.race { }`, `fan.race(xs, f)`, `fan.race(compute.us(n), …)` | — | — | — | — |
+| K1 | `list.find_map(xs, (x) => f(x)?)`, `a() ?? b()` — sequential, not a fan form | — | `Iterator::find_map`; Rayon `find_first` (pure predicate) | — | — |
+| K2 | `fan.min(duration.ms(n)) { }` / `(duration…, xs, f)` — decided, #3788 | `Promise.any` | `futures::future::select_ok`; Rayon `find_any` | `as_completed` loop / `wait(FIRST_COMPLETED)` with a success check | hand-written: a channel plus `context` cancel |
+| K3 | — (a failed arm is skipped, never selected: see K2) | `Promise.race` | `futures::select!` / `future::select` / `select_all` | `asyncio.wait(return_when=FIRST_COMPLETED)` | first receive from a shared channel |
+| K4 | `fan.min(compute.us(n)) { }`, `fan.min(compute.us(n), xs, f)` — the clock argument is required | — | — | — | — |
 | K5 all-or-error | `fan.map(xs, f)`, `fan { }` | `Promise.all` | `join_all` over Results / `try_join_all`; Rayon `collect::<Result<_,_>>()` | `gather()`, `TaskGroup` | `errgroup.Group` |
 | K5 all results | `fan.settle(xs, f)`, `fan.settle { }` | `Promise.allSettled` | `join_all` | `gather(return_exceptions=True)` | `errgroup` with per-index error slots |
 
-The two names that collide are the trap. **JS `race` is K3, while Almide
-`race` is K4. JS `any` is K2, while Almide `any` is K1.** A reader carrying the
-JS meaning gets a different result on every input where wall-clock order
-differs from list order, or from cost order.
+The two names that collided were the trap. **JS `race` is K3, while Almide
+`race` was K4. JS `any` is K2, while Almide `any` was K1.** A reader carrying
+the JS meaning got a different result on every input where wall-clock order
+differed from list order, or from cost order. Dialect epoch 14 closed it:
+`fan.race` became `fan.min(clock)` and `fan.any` was removed in favour of the
+sequential spellings above (ADR-0028).
 
 ## Selects / waits for / stops, per operation
 
@@ -61,7 +69,7 @@ differs from list order, or from cost order.
 
 | | Selects | Waits for | Stops |
 |---|---|---|---|
-| Almide `fan.any` | the lowest-index Ok; a constant Err if every element fails | until the winner is known, which requires every element *before* it to have failed | starts **no element after the winner** (audit §4, test `any_runs_nothing_after_the_winner…`). Elements before the winner have all run, with their effects kept. One exception: on wasm, an fs-read callback is prefetched, so every read is issued and the losers are dropped. |
+| Almide `list.find_map(xs, (x) => f(x)?)` / `a() ?? b()` (was `fan.any`) | the lowest-index Ok; the `??` fallback if every element fails | until the winner is known, which requires every element *before* it to have failed | starts **no element after the winner** (audit §4, test `any_runs_nothing_after_the_winner…`). Elements before the winner have all run, with their effects kept. One exception: on wasm, an fs-read callback is prefetched, so every read is issued and the losers are dropped. |
 | Rayon `find_first` | the leftmost element matching the predicate | the whole split tree to settle | splits to the right of a found match are skipped "as soon as possible". Work already running on other threads finishes, so the predicate may run on elements past the answer. Pure predicates only by convention; there is no checker. |
 
 Almide's K1 is sequential-observable: the set of elements that ran is exactly
@@ -89,14 +97,14 @@ that ran is a timing-dependent superset of it.
 
 ### K4: least logical cost
 
-Only Almide has this. `fan.race` runs every arm, one after another, under
+Only Almide has this. `fan.min` runs every arm, one after another, under
 the deterministic charge meter, and picks the Ok with the least spend; ties
 go to source/list order (audit §5). Nothing is saved by finding a cheap arm
 early: every arm runs to completion, or to the budget. An optional budget,
 applied per arm, cuts an arm at a charge site, and the arm is excluded. The
 arm is pure, so nothing external had started. The answer is the same on
-every machine; it is meant to be the same on every target too, but #3778
-records shapes where today's native and wasm meters disagree.
+every machine and, since #3778, on every target: both meters read the one
+charge table (a loop-free wrapper's entry is exempt, interpolation is free).
 
 The nearest peers are Rayon `min_by_key` over a cost you compute yourself
 (this runs everything to completion, so nothing is saved), and search
@@ -130,14 +138,14 @@ loop with `!` to stop at the first failure.
 
 | Coming from | Writing | Almide meaning | Correct Almide |
 |---|---|---|---|
-| JS `Promise.any` | `fan.any` | input order, not first in time | `fan.any`, if the earliest in the list is acceptable. Real-time first success does not exist. |
-| JS `Promise.race` | `fan.race` | least compute, pure arms only, errors disqualify | real-time first completion does not exist. Use `fan.any`/`fan.settle` and choose explicitly. |
+| JS `Promise.any` | `fan.any` | E027 | `fan.min(duration.ms(n), mirrors, f)` once #3788 lands (first to succeed in real time, losers cancelled and awaited); until then `list.find_map(mirrors, (m) => f(m)?)` if the earliest in the list is acceptable |
+| JS `Promise.race` | `fan.race` | E027 | `fan.min(compute.ms(n)) { … }` for the least compute over pure arms; `fan.min(duration.ms(n)) { … }` (#3788) for the first to finish — a failed arm is skipped, not selected |
 | JS `Promise.all` | `fan.map` | runs all, lowest-index error | `fan.map` (same value on success) |
 | Python `TaskGroup` | `fan.map` | no cancellation of siblings | `fan.map`; a `for … !` loop if stopping is needed |
 | Go `errgroup.WithContext` | `fan.map` | no context; the earliest-index error | `fan.map` |
 | Rust `try_join_all` | `fan.map` | nothing dropped | `fan.map` |
-| Rayon `find_first` | `fan.any` | the same answer; elements after the winner never start | `fan.any` |
-| a timeout around I/O (`asyncio.wait_for`, `context.WithTimeout`) | `fan.timeout { http.get(u) }` | rejected: the body must be pure (E006) | no equivalent today |
+| Rayon `find_first` / `Iterator::find_map` | `list.find_map(xs, (x) => f(x)?)` | the same answer; elements after the winner never start | `list.find_map` |
+| a timeout around I/O (`asyncio.wait_for`, `context.WithTimeout`) | `fan.timeout { http.get(u) }` | rejected today: the body must be pure (E006) | decided (ADR-0028): the `Duration` clock admits an I/O body, cancelled at its next charge site or I/O boundary and awaited — #3788 |
 
 ## References
 

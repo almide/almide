@@ -1,6 +1,6 @@
 // Value-asserting regression tests for the fan.* cross-target bugs.
 // The original fan specs only checked lengths / race winners, so corrupt
-// settled payloads and dropped/invalid fan.any results all slipped
+// settled payloads and dropped/invalid first-Ok results all slipped
 // through. These lock in the actual values.
 effect fn succeed(x: Int) -> Result[Int, String] = ok(x)
 
@@ -20,34 +20,32 @@ test "fan.settle preserves ok and err payloads" {
   assert_eq(r3, ok(33))
 }
 
-// ── fan.any returning Int — must produce a valid module + correct value ──
-// fan.any is now Result[T, String]; the test-block binding is the full Result.
-test "fan.any returns the Int winner" {
-  let w = fan.any {
-    succeed(5)
-  }
-  assert_eq(w, ok(5))
+// ── a `??` chain returning Int — must produce a valid module + correct value ──
+// (the chain replaced `fan.any { }` in dialect epoch 14; it yields the payload)
+test "chain returns the Int winner" {
+  let w = succeed(5) ?? -1
+  assert_eq(w, 5)
 }
 
-// ── fan.any returning String — must not silently drop the winner ──
-// fan.any is now DETERMINISTIC (first Ok in list order) on BOTH targets, so the
+// ── a `??` chain returning String — must not silently drop the winner ──
+// The chain is DETERMINISTIC (first Ok in source order) on BOTH targets, so the
 // winner is always the first success ("alpha"). The original regression was that
 // a valid String result was dropped/garbage on wasm; this locks in the value.
-test "fan.any returns the String winner" {
-  let w = fan.any {
-    pick("alpha")
-    pick("beta")
-  }
-  assert_eq(w, ok("alpha"))
+test "chain returns the String winner" {
+  let w = pick("alpha") ?? pick("beta") ?? "-"
+  assert_eq(w, "alpha")
 }
 
 // ── a fan combinator's Result bound to a Result let — ?? and == must type-check ──
-// (was written against fan.race, removed in 0.42.0; the regression is about the BINDING,
-// not about which combinator produced it, so fan.any over a succeeding thunk pins it.)
+// (was written against the thunk-list fan.race, removed in 0.42.0; the regression is
+// about the BINDING, not about which combinator produced it, so fan.settle over a
+// succeeding thunk pins it.)
 test "fan combinator result supports ?? and ==" {
-  let r: Result[Int, String] = fan.any {
+  let (r, r2) = fan.settle {
     succeed(42)
+    succeed(0)
   }
+  assert_eq(r2, ok(0))
   assert_eq(r ?? -1, 42)
   assert(r == ok(42))
 }
@@ -59,10 +57,10 @@ test "fan combinator result supports ?? and ==" {
 // (E0308), and a captured closure VALUE is `Rc<dyn Fn>`, neither Send nor Sync
 // (E0277). The native runner (`almide test --target rust`) is what exercises
 // this — the wasm runner table-dispatches closures and never hit the bug.
-// Written against fan.race, removed in 0.42.0. The regression is TWO capturing thunks
+// Written against fan.min, removed in 0.42.0. The regression is TWO capturing thunks
 // sharing one list — the shape that produced E0308 — not which combinator consumed them,
 // so it moves to fan.settle, which keeps both thunks live and stays distinct from the
-// fan.any case below.
+// `??` chain case below.
 test "two capturing thunks share one fan thunk list (native E0308)" {
   let a = 4
   let b = 5
@@ -74,15 +72,12 @@ test "two capturing thunks share one fan thunk list (native E0308)" {
   assert_eq(rb, ok(9))
 }
 
-test "fan.any over capturing thunks picks the lone success" {
+test "a chain over capturing calls picks the lone success" {
   let lo = 2
   let hi = 8
   let msg = "skip"
-  let w = fan.any {
-    fail_with(msg)
-    succeed(hi - lo)
-  }
-  assert_eq(w, ok(6))
+  let w = fail_with(msg) ?? succeed(hi - lo) ?? -1
+  assert_eq(w, 6)
 }
 
 test "fan.settle over capturing thunks preserves order and payloads" {

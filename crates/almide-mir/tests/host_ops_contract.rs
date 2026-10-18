@@ -340,6 +340,25 @@ fn walled_cells_name_real_declarations() {
     }
 }
 
+/// End to end (#3792): a function making testing.assert_aborts's two site
+/// calls is certified, not walled, and its caps witness names Process (10)
+/// for the child run and CliArgs (2) for the site selector.
+#[test]
+fn the_caps_witness_of_an_abort_site_caller_names_process_and_env() {
+    let src = r#"import testing
+effect fn main() -> Unit = {
+  let k = testing.__abort_site_selected()
+  let r = testing.__abort_site_run(0)
+  if k >= 0 and list.len(r) == 3 then println("ok") else println("no")
+}
+"#;
+    let w = almide_mir::pipeline::program_witnesses(src, &[], None).expect("the program lowers");
+    let main = w.functions.iter().find(|f| f.name == "main").expect("main is certified, not walled");
+    let used: Vec<&str> = main.caps.split_once('|').map(|(_, u)| u).unwrap_or("").split_whitespace().collect();
+    assert!(used.contains(&"10"), "Process (10) missing from main's used caps: `{}`", main.caps);
+    assert!(used.contains(&"2"), "CliArgs (2) missing from main's used caps: `{}`", main.caps);
+}
+
 /// End to end (#3302): the witness producer `almide verify` runs counts the
 /// clock reads of `env.millis` / `datetime.now` in the caps witness of the
 /// function that makes them — `<declared>|<used>`, Clock is id 5.

@@ -570,13 +570,13 @@ impl<'a> Analyzer<'a> {
                 scope.truncate(mark);
                 self.walk(else_, scope, mode);
             }
-            ExprKind::Fan { exprs } => self.fan_arms(exprs.iter(), "fan", scope, mode),
+            ExprKind::Fan { exprs, .. } => self.fan_arms(exprs.iter(), "fan", scope, mode),
             ExprKind::FanSettle { arms } => self.fan_arms(arms.iter(), "fan.settle", scope, mode),
             ExprKind::FanRace { budget, arms } => {
                 if let Some(b) = budget {
                     self.walk(b, scope, mode);
                 }
-                self.fan_arms(arms.iter(), "fan.race", scope, mode);
+                self.fan_arms(arms.iter(), "fan.min", scope, mode);
             }
             ExprKind::FanBounded { budget, body } => {
                 self.walk(budget, scope, mode);
@@ -591,7 +591,7 @@ impl<'a> Analyzer<'a> {
                     self.walk(b, scope, mode);
                 }
                 self.walk(list, scope, mode);
-                let kind = SlotKind::FanCallback { surface: "fan.race".to_string() };
+                let kind = SlotKind::FanCallback { surface: "fan.min".to_string() };
                 self.site(mapper, kind, None, scope, mode);
             }
             ExprKind::Member { object, field } => {

@@ -589,6 +589,7 @@ fn render_if_then(
 /// type is known now), open the `else` arm.
 fn render_else(
     val: &Option<ValueId>,
+    borrows: &std::collections::BTreeSet<ValueId>,
     tys: &mut BTreeMap<ValueId, NTy>,
     out: &mut String,
     indent: &mut usize,
@@ -605,6 +606,12 @@ fn render_else(
         let t = *tys.get(&v).ok_or_else(|| wall("native: if-value yield untyped"))?;
         let arm_own = !known.contains(&v);
         let (decl, join_t, rhs) = match t {
+            // #3532: a borrow join holds the arm's shared reference.
+            NTy::VecRef | NTy::StrRef if borrows.contains(d) => (
+                format!("let {}: {};", var(*d), if t == NTy::VecRef { "&[i64]" } else { "&str" }),
+                t,
+                var(v),
+            ),
             NTy::I64 => (
                 format!("let mut {}: i64 = 0;", var(*d)),
                 NTy::I64,
@@ -656,6 +663,7 @@ fn render_else(
 /// `Op::EndIf` — close the `else` arm, converging the if-as-value join (if any).
 fn render_end_if(
     val: &Option<ValueId>,
+    borrows: &std::collections::BTreeSet<ValueId>,
     tys: &BTreeMap<ValueId, NTy>,
     out: &mut String,
     indent: &mut usize,
@@ -672,6 +680,15 @@ fn render_end_if(
         let v = val.ok_or_else(|| wall("native: if-value arm without a yield"))?;
         let t = *tys.get(&v).ok_or_else(|| wall("native: if-value yield untyped"))?;
         let join_t = *tys.get(&d).ok_or_else(|| wall("native: if-value join untyped"))?;
+        if borrows.contains(&d) && matches!(join_t, NTy::VecRef | NTy::StrRef) {
+            if t != join_t {
+                return Err(wall("native: borrow-join arms disagree on type"));
+            }
+            line!("{} = {};", var(d), var(v));
+            *indent -= 1;
+            line!("}}");
+            return Ok(());
+        }
         let rhs = match t {
             NTy::I64 | NTy::F64 => var(v),
             NTy::Str => format!("{}.clone()", var(v)),

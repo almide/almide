@@ -17,6 +17,8 @@ impl Emitter<'_> {
             ("add", [a, b]) => self.lower_matrix_zip(ZipOp::Add, a, b)?,
             ("sub", [a, b]) => self.lower_matrix_zip(ZipOp::Sub, a, b)?,
             ("div", [a, b]) => self.lower_matrix_zip(ZipOp::Div, a, b)?,
+            ("fma", [a, ka, b, kb]) => self.lower_matrix_fma(&[(a, ka), (b, kb)])?,
+            ("fma3", [a, ka, b, kb, c, kc]) => self.lower_matrix_fma(&[(a, ka), (b, kb), (c, kc)])?,
             ("neg", [m]) => self.lower_matrix_unary(func, m, None)?,
             ("scale" | "map", [m, x]) => self.lower_matrix_unary(func, m, Some(x))?,
             ("broadcast_add_row", [m, x]) => self.lower_matrix_row_bias(m, x)?,

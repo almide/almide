@@ -26,7 +26,7 @@ effect fn sizes(keys: List[String]) -> List[Int] = fan.map(keys, (k) => size(k))
 
 effect fn peek_all(keys: List[String]) -> List[String] = fan.map(keys, (k) => ok(peek(k)))!
 
-effect fn first_found(keys: List[String]) -> String = fan.any(keys, (k) => fetch(k))!
+effect fn first_found(keys: List[String]) -> String = list.find_map(keys, (k) => fetch(k)?) ?? "none"
 
 effect fn pair(a: String, b: String) -> String = {
   let (x, y) = fan {

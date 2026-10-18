@@ -39,7 +39,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-001 | Integer division/modulo by zero is total — it aborts, never traps | 0.24.0 | active | fixture | 5 |
 | C-002 | Signed MIN / -1 overflow aborts, at the TRUE per-width MIN | 0.24.0 | active | fixture | 3 |
 | C-003 | Non-aborting integer div/mod stay byte-identical | 0.24.0 | active | fixture | 1 |
-| C-004 | fan.first_ok / fan.map / fan.settle are deterministic by list order | 0.24.0 | active | fixture | 9 |
+| C-004 | fan.map / fan.settle are deterministic by list order | 0.24.0 | active | fixture | 10 |
 | C-005 | fan error propagation surfaces as the unified main-error abort | 0.24.0 | active | fixture | 5 |
 | C-006 | [fan.timeout does not exist — wall-clock deadlines live at the host boundary](C-006-fan-timeout-removed.md) | 0.29.0 | active | fixture | 0 |
 | C-007 | Abortable top-level lets evaluate eagerly at startup | 0.24.0 | active | fixture | 4 |
@@ -196,7 +196,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-158 | A some/ok ctor over a scalar call or tuple payload materializes the real value, never a zeroed ctor | 0.32.0 | active | fixture | 5 |
 | C-159 | list.binary_search returns the same index on both targets for duplicate keys | 0.32.0 | active | fixture | 1 |
 | C-160 | Pure-Almide bundled stdlib modules link and run byte-identically on wasm | 0.34.4 | active | fixture | 1 |
-| C-161 | Matrix constructor dimensions clamp negatives and abort over a shared ceiling | 0.35.0 | active | fixture | 12 |
+| C-161 | Matrix constructor dimensions clamp negatives and abort over a shared ceiling | 0.35.0 | active | fixture | 13 |
 | C-162 | io.write / io.write_bytes emit in program order, interleaved with println | 0.35.0 | active | fixture | 1 |
 | C-163 | A heap-result if/match bound to a let/var executes the taken arm on both targets | 0.35.0 | active | fixture | 1 |
 | C-164 | List modifiers and suffix copies co-own tuple / record / nested-list elements | 0.35.0 | active | fixture | 1 |
@@ -220,7 +220,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-182 | A negated float literal takes its context's float type on both targets | 0.37.0 | active | fixture | 2 |
 | C-183 | A loop-carried append of a list-of-scalar-records executes on both targets | 0.37.0 | active | fixture | 1 |
 | C-184 | The integer `^` operator is the same total exponentiation as math.pow on both targets | 0.37.0 | active | fixture | 1 |
-| C-185 | fan.first_ok returns the first Ok in list order on both targets, whatever position it is in | 0.37.0 | active | fixture | 1 |
+| C-185 | A `??` chain returns the first Ok in source order on both targets, whatever position it is in | 0.37.0 | active | fixture | 1 |
 | C-186 | Appending an inline index read to a list accumulator lowers and runs on both targets | 0.37.0 | active | fixture | 2 |
 | C-187 | An in-place mutator writing through a module-level `var` buffer behaves identically on both targets | 0.37.0 | active | fixture | 6 |
 | C-188 | A scalar `if` arm executes its statement effects — global writes land and outer-var reassignments hit the stable local | 0.37.0 | active | fixture | 1 |
@@ -235,12 +235,12 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-197 | Linear-memory exhaustion is a resource limit with a defined abort | 0.41.0 | active | fixture | 10 |
 | C-198 | The head-count-taking matrix entry points left the stdlib at dialect epoch 14 | 0.42.0 | active | fixture | 0 |
 | C-199 | A fan block joins every sibling and reports the first Err in list order | 0.42.0 | active | fixture | 2 |
-| C-200 | A trap in a fan sibling exits through the unified main-error abort, convergently | 0.42.0 | active | fixture | 2 |
+| C-200 | A trap in a fan sibling exits through the unified main-error abort, convergently | 0.42.0 | active | fixture | 3 |
 | C-201 | An Option combinator's tuple result is materializable as an owned element for every element-type combination | 0.44.0 | active | fixture | 1 |
 | C-202 | Time constructors guard their domain: negative aborts, overflow saturates | 0.47.0 | active | fixture | 3 |
 | C-203 | The time-type operator algebra is unit-exact and saturating on both targets | 0.47.0 | active | fixture | 1 |
-| C-204 | A fan.bounded verdict is a function of the program and its inputs alone | 0.47.0 | active | fixture | 7 |
-| C-205 | The fan.min_cost winner is the (spend, index) lexicographic minimum among admitted arms | 0.47.0 | active | fixture | 7 |
+| C-204 | A fan.bounded verdict is a function of the program and its inputs alone | 0.47.0 | active | fixture | 8 |
+| C-205 | The fan.min winner is the (spend, index) lexicographic minimum among admitted arms | 0.47.0 | active | fixture | 7 |
 | C-206 | A settle block settles every arm into its own tuple slot, in arm order | 0.47.0 | active | fixture | 1 |
 | C-207 | CM-1 is a versioned constant with a ratio-only wall-clock claim | 0.47.0 | active | fixture | 1 |
 | C-208 | fan.timeout is omega-relative: fixed ends everywhere, fixed omega replays byte-identically | 0.47.0 | active | fixture | 1 |
@@ -273,7 +273,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-235 | Unary operators: `not` negation and prefix minus evaluate identically on both targets | 0.57.1 | active | fixture | 1 |
 | C-236 | Tuple construction, destructuring, indexing, and structural equality are identical on both targets | 0.57.1 | active | fixture | 1 |
 | C-237 | Option/Result constructor literals build and eliminate identically on both targets | 0.57.1 | active | fixture | 1 |
-| C-238 | First-class range values iterate their true bounds on both targets | 0.57.1 | active | fixture | 7 |
+| C-238 | First-class range values iterate their true bounds on both targets | 0.57.1 | active | fixture | 9 |
 | C-239 | Collection literals, indexing, and the empty spellings behave identically on both targets | 0.57.1 | active | fixture | 1 |
 | C-240 | Map literals and empty-map reads behave identically on both targets | 0.57.1 | active | fixture | 2 |
 | C-241 | Binding statements: let shadowing, var reassignment, and their check-time guards are identical on both targets | 0.57.1 | active | fixture | 1 |
@@ -293,7 +293,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-255 | Record literals, member reads, and spread updates preserve value semantics identically on both targets | 0.57.1 | active | fixture | 2 |
 | C-256 | break and continue take effect at their statement position, identically on both targets and the interp | 0.57.1 | active | fixture | 2 |
 | C-257 | The scalar error operators evaluate identically on both targets | 0.57.1 | active | fixture | 1 |
-| C-258 | Named calls and lambdas evaluate identically on both targets | 0.57.1 | active | fixture | 3 |
+| C-258 | Named calls and lambdas evaluate identically on both targets | 0.57.1 | active | fixture | 5 |
 | C-259 | Variant constructor references build values eliminated identically by match on both targets | 0.57.1 | active | fixture | 1 |
 | C-260 | The declaration family compiles and runs identically on both targets | 0.57.1 | active | fixture | 5 |
 | C-261 | Canonical float values including the negative-zero sign display identically on both targets | 0.57.1 | active | fixture | 1 |
@@ -329,7 +329,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-291 | Each error-channel operator agrees with its defining function on both targets | 0.57.1 | active | fixture | 2 |
 | C-292 | The reference-suite conformance corpus runs byte-identical across targets | 0.57.2 | active | fixture | 48 |
 | C-293 | Two-level container nestings run byte-identical; the third level and map-valued shapes are pinned walls | 0.57.2 | active | fixture | 6 |
-| C-294 | A zero compute budget admits inlined loop-free callees on every leg | 0.57.2 | active | fixture | 1 |
+| C-294 | A zero compute budget admits inlined loop-free callees on every leg | 0.57.2 | active | fixture | 2 |
 | C-295 | A checker-exhaustive match of guard-lowered box patterns still builds on native | 0.57.2 | active | fixture | 1 |
 | C-296 | The generated type x operation matrix runs byte-identical across targets | 0.57.2 | active | fixture | 70 |
 | C-297 | flat_map whose closure returns an aliased list field is drop-balanced on both targets | 0.57.2 | active | fixture | 1 |
@@ -421,4 +421,6 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-383 | net unix sockets and shm files: every failure is an err with the same text on native and the embedded wasm lane, and a descriptor the program does not hold is refused before any system call | 0.68.0 | active | fixture | 0 |
 | C-384 | testing.assert_aborts runs only its capture-free closure in a fresh child and passes iff the child ends in a defined abort whose text contains the expected substring, identically on native and wasm | 0.68.0 | active | fixture | 0 |
 | C-385 | The http client frames the request body itself: a caller's Content-Length header is dropped on every lane | 0.68.0 | active | fixture | 0 |
+| C-386 | A record-form fan block is the record literal of its fields, run as parallel siblings | 0.68.0 | active | fixture | 2 |
+| C-387 | Identifiers are UAX #31 names held in NFC; compatibility characters are refused; a caseless name is type-side only by declaration; non-ASCII names run byte-identically on every leg | 0.68.0 | active | fixture | 1 |
 

@@ -468,9 +468,10 @@ impl Emitter<'_> {
                 let Some(b) = slice_ty_of(&init.ty, self.types) else {
                     return unsup(&format!("map-fold-acc:{}", ty_name(&init.ty)));
                 };
-                self.lower_arg(init, Some(b), ArgMode::Retain)?;
-                self.f.instructions().local_set(acc_p);
-                let (k, v) = match self.lower_arg(m, None, ArgMode::Borrow)? {
+                // The source before the init, as native evaluates them
+                // (#2045); an init that runs code keeps the source alive.
+                let (got, keep) = self.lower_fold_source(m, init)?;
+                let (k, v) = match got {
                     SliceTy::Map(kh, vh) => (self.types.el(kh), self.types.el(vh)),
                     other => return unsup(&format!("map-fold-of:{other:?}")),
                 };
@@ -478,9 +479,11 @@ impl Emitter<'_> {
                 let bh = self.hold_i32()?;
                 let cur = self.hold_i32()?;
                 let end = self.hold_i32()?;
+                self.f.instructions().local_set(bh);
+                self.lower_arg(init, Some(b), ArgMode::Retain)?;
+                self.f.instructions().local_set(acc_p);
                 {
                     let mut i = self.f.instructions();
-                    i.local_set(bh);
                     i.local_get(bh)
                         .i32_const(almide_layout::PAYLOAD as i32)
                         .i32_add()
@@ -523,6 +526,7 @@ impl Emitter<'_> {
                     i.end();
                     i.local_get(acc_p);
                 }
+                self.release_fold_source(bh, keep.then_some(got));
                 self.release_i32();
                 self.release_i32();
                 self.release_i32();

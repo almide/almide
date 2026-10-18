@@ -203,6 +203,18 @@ mod tests {
     }
 
     #[test]
+    fn a_dynamic_charge_reads_its_operand() {
+        let f = func(
+            vec![
+                Op::Const { dst: ValueId(0) },
+                Op::ChargeDyn { site: 0, src: ValueId(0) },
+            ],
+            Some(ValueId(0)),
+        );
+        assert_eq!(check_def_before_use(&f), Ok(()));
+    }
+
+    #[test]
     fn read_before_definition_is_a_named_wall() {
         let f = func(vec![Op::Dup { dst: ValueId(1), src: ValueId(0) }], None);
         let err = check_def_before_use(&f).expect_err("undefined read must be rejected");

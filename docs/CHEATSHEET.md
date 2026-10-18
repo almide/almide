@@ -78,6 +78,28 @@ Skip `: Codec` only for variants that never serialize
 variant should opt in — the roundtrip code is LLM-error prone when
 hand-written.
 
+### Names (any script)
+Identifiers are Unicode (UAX #31, held in NFC); keywords stay ASCII.
+Full-width `ａ`/`１` are refused, not folded. Uppercase start = type side,
+lowercase or caseless (漢字/かな/한글) = value side — a caseless name the
+module declares as a type or case is type-side in that module; from another
+module write it qualified (`geo.住所`).
+```almide check
+type 住所 = { 都市: String }
+
+type 色 = | 赤 | 緑
+
+fn 名前(c: 色) -> String = match c {
+  赤 => "赤",
+  緑 => "緑",
+}
+
+effect fn main() -> Unit = {
+  let 場所 = 住所 { 都市: "東京" }
+  println("${場所.都市} ${名前(赤)}")
+}
+```
+
 ### Built-in types
 - Primitives: `Int`, `Float`, `String`, `Bool`, `Unit`, `Path`
 - Collections: `List[T]`, `Map[K, V]`, `Set[T]`
@@ -455,7 +477,7 @@ an `effect fn`, a lambda may call effect fns, but their results stay
 **explicit `Result` values** (auto-`?` never crosses a closure boundary):
 unwrap with `?? fallback` or `match` — `!` cannot propagate out of a lambda.
 In a pure fn the same lambda is an error. Exception: metered regions
-(`fan.bounded` / `fan.race` bodies) are pure by design, so effect calls are
+(`fan.bounded` / `fan.min` bodies) are pure by design, so effect calls are
 rejected there even inside an effect fn.
 
 **Effect fn-typed slots** (`effect (A) -> B`): a HOF can declare that its
@@ -682,8 +704,10 @@ All `fan.*` forms require an `effect fn` context. There is NO `async`/`await` in
 // Dynamic mappers — a list + one callback returning Result (the mapper matrix
 // covers every A→B pairing with A, B in {Int, Float, String}):
 let results = fan.map(urls, (u) => http.get(u))!          // Result[List[B], String]: EVERY element runs, the lowest-index Err propagates
-let winner  = fan.any(mirrors, (m) => fetch(m)) ?? fb     // Result[B, String]: first Ok in LIST order; an Err skips that element; later elements never run
 let report  = fan.settle(jobs, (j) => run(j))             // List[Result[B, String]]: EVERY element's Result, Errs captured
+// The first Ok in LIST order is NOT a fan form: it is sequential, so it is list.find_map
+// (`?` turns an element's Err into none, so the element is skipped; later elements never run)
+let winner  = list.find_map(mirrors, (m) => fetch(m)?) ?? fb   // B: first Ok in LIST order; fb when every element fails
 // The callback may be an EFFECT fn, in either spelling — an inline lambda that
 // calls one, or a bare effect-fn value. Same rule as the block heads' arms.
 let checked = fan.map(paths, read_meta)                   // read_meta: an `effect fn`, passed by name
@@ -693,24 +717,61 @@ let checked = fan.map(paths, read_meta)                   // read_meta: an `effe
 // an implicit `|>` chain (those are fused sequentially).
 let sums = fan.map(chunks, (c) => ok(heavy(c)))!            // parallel natively; sequential and byte-identical on wasm
 
+// fan { } — named arms run in parallel natively; the value is a record read by name
+// (see the record form below). Unnamed arms give a tuple: `let (a, b) = fan { f()!, g()! }`
 // Block heads — arms separated by `,` or newline (`fan { }` runs them in parallel natively;
-// fan.any / fan.settle / fan.race run them in source order)
+// fan.settle / fan.min run them in source order)
 // (`;` between arms is an error: it means sequencing, and stays legal only
 //  INSIDE a block arm — `{ let x = f(); g(x) }`)
-let first = fan.any { fetch_a(), fetch_b() } ?? fallback  // first Ok in SOURCE order
 let all   = fan.settle { job_a(), job_b() }               // TUPLE of per-arm Results (heterogeneous arms allowed)
-let win   = fan.race { solve_fast(), solve_slow() } ?? d  // deterministic winner (least compute spent; tie → source order)
+// The first Ok in SOURCE order is a `??` chain, not a fan form: the right side runs only
+// when the left side failed, so later candidates never run once one succeeds
+let first = fetch_a() ?? fetch_b() ?? fallback            // T: first Ok in SOURCE order (not the first to finish)
 
-// Budgets: deterministic compute-time limits, built with compute.* constructors
+// fan.min(clock) — pick ONE arm by the clock you pass; the clock argument is REQUIRED
+// (it says what "least" is measured on; `fan.min { 3, 5 }` would read as the smallest value)
+let w = fan.min(compute.us(50)) { a(), b() } ?? -1          // Compute: the Ok that spent the LEAST deterministic compute; tie → source order; arms over budget are excluded; arms are PURE
+// fan.min(duration.ms(n)) { … } — the first to FINISH in real time, arms may do I/O, the losers are
+// cancelled at their next charge site or I/O boundary and awaited — is decided (ADR-0028) and lands
+// in a follow-up (#3788); today it is a type error
+
+// Budget: a deterministic compute-time limit on ONE body, built with compute.* constructors
 let r = fan.bounded(compute.ms(100)) { work(input) } ?? -1   // Err if work exceeds 100ms of deterministic compute
-let w = fan.race(compute.us(50)) { a(), b() } ?? -1          // arms over budget are excluded
 
-// Mapper form: race ONE pure lambda over a dynamic list (winner = cheapest, tie → list order)
-let m = fan.race(xs, (x) => ok(solve(x))) ?? fallback        // mapper returns Result: err(...) disqualifies
-let n = fan.race(compute.us(50), xs, (x) => ok(solve(x))) ?? fallback  // per-element budget
+// Mapper form: fan.min(clock, xs, f) races ONE pure lambda over a dynamic list (winner = cheapest, tie → list order)
+let n = fan.min(compute.us(50), xs, (x) => ok(solve(x))) ?? fallback  // mapper returns Result: err(...) disqualifies; per-element budget
 
 // Wall-clock deadline (oracle tier): checked cooperatively at charge sites
-let t = fan.timeout(duration.ms(5000)) { work(input) } ?? -1 // Err if the wall deadline fires first
+let t = fan.timeout(duration.ms(5000)) { work(input) } ?? -1 // Err if the wall deadline fires first (body pure today; an I/O body lands with #3788)
+```
+
+### fan record form — parallel fields, read by name
+
+`fan { name: expr, … }` runs its fields as parallel siblings and yields the
+anonymous record `{ name: value, … }`. Removing `fan` gives the same output and
+value (fields print in source order). A fallible field must say `!`: the
+field's Err is the whole block's Err — every field still runs, and the first
+Err in source order wins. A Result field without `!` is E041. Sibling fields
+are not in scope inside the block.
+
+```almide check
+effect fn add(a: Int, b: Int) -> Result[Int, String] = ok(a + b)
+
+effect fn mul(a: Int, b: Int) -> Result[Int, String] = ok(a * b)
+
+effect fn main() -> Unit = {
+  let r = fan {
+    sum: add(3, 4)!
+    product: mul(3, 4)!
+    label: "3 and 4"
+  }
+  println(r.label + ": " + int.to_string(r.sum + r.product))
+  let { sum, product } = fan {
+    sum: add(1, 2)!
+    product: mul(1, 2)!
+  }
+  println(int.to_string(sum * product))
+}
 ```
 
 ### Time constructors (closed set)
@@ -718,15 +779,16 @@ let t = fan.timeout(duration.ms(5000)) { work(input) } ?? -1 // Err if the wall 
 Two clock types, six units each — `ns / us / ms / s / min / h`:
 
 ```
-compute.ms(100)     // Compute — deterministic compute-time (fan.bounded / fan.race budgets)
-duration.ms(5000)   // Duration — wall-clock time (fan.timeout deadlines)
+compute.ms(100)     // Compute — deterministic compute-time (fan.bounded budgets, fan.min's deterministic clock)
+duration.ms(5000)   // Duration — wall-clock time (fan.timeout deadlines; fan.min's real-time clock, #3788)
 ```
 
 - A bare `Int` is NEVER a time: `fan.bounded(5000) {...}` is a type error — write `compute.ms(5000)`
 - `Compute` and `Duration` do not mix: `fan.bounded(duration.ms(5)) {...}` is a type error
 - There is no literal suffix: `100ms` does not parse — write `compute.ms(100)`
 - A negative argument aborts at runtime (`Error: negative time: ...`); an overflowing construction saturates to the maximum
-- `fan.race` / `fan.bounded` results are deterministic: same program + same inputs = same winner/verdict on every target and every machine
+- `fan.min(compute…)` / `fan.bounded` results are deterministic: same program + same inputs = same winner/verdict on every target and every machine, within one meter version (the charge table and its calibration are versioned; a change is announced with the version)
+- The clock TYPE decides the tier: `compute.*` means a pure body, the same answer everywhere; `duration.*` means the oracle tier — the verdict is a host input, recorded and replayed with ω
 ## scoped — a declared reclamation boundary
 
 `scoped { ... }` declares where the storage a block allocates ends; `scoped fn`
@@ -1026,9 +1088,12 @@ fn types, Result) — wrap those in a named Codec type or convert at the boundar
 - Nested `fn` inside a function → **WRONG**. All `fn` must be top-level. Use `let helper = (x) => ...` for local functions
 - `match x { ... pattern => expr }` with `...` → **WRONG**. No spread in patterns
 - `try f()` / `try! f()` / `f()?` for an effect call → **WRONG**. Write `f()!`. Almide's `!` is Swift's `try` (propagate), never `try!` (trap); `?` converts Result → Option
-- `async fn` / `await` → **WRONG**. Almide has no async/await. Use `fan.any` / `fan.settle` / `fan.race` / `fan.bounded` block forms
-- `fan.any([a, b])` / `fan.settle([...])` → **WRONG**. The thunk-list form was removed. Write `fan.any { a(), b() }`
-- `fan.bounded(100) {...}` / `fan.race(5000) {...}` → **WRONG**. A bare Int is not a time. Write `compute.ms(100)`
+- `async fn` / `await` → **WRONG**. Almide has no async/await. Use `fan { }` / `fan.map` / `fan.settle` / `fan.min(clock)` / `fan.bounded` / `fan.timeout`
+- `fan.race { … }` → **WRONG** (renamed in dialect epoch 14, E027). Write `fan.min(compute.ms(5)) { … }` — the clock argument is required and says what "least" is measured on
+- `fan.any { a(), b() }` / `fan.any(xs, f)` / `fan.first_ok` → **WRONG** (removed in dialect epoch 14, E027). The first Ok in order is sequential, not a fan: write `a() ?? b() ?? fallback`, or over a list `list.find_map(xs, (x) => f(x)?) ?? fallback`
+- `fan.min { a(), b() }` / `fan.min(xs, f)` → **WRONG**. The clock argument is required: `fan.min(compute.ms(5)) { a(), b() }` / `fan.min(compute.ms(5), xs, f)`
+- `fan.settle([...])` → **WRONG**. The thunk-list form was removed. Write `fan.settle { a(), b() }`
+- `fan.bounded(100) {...}` / `fan.min(5000) {...}` → **WRONG**. A bare Int is not a time. Write `compute.ms(100)`
 - `compute.msec(5)` / `compute.sec(5)` / `compute.m(5)` → **WRONG**. The unit set is closed: `ns / us / ms / s / min / h`
 - `100ms` / `5s` as a literal → **WRONG**. There are no time literals. Write `compute.ms(100)` / `duration.s(5)`
 - `let list = [1, 2]` then `list.len(list)` → **WRONG**. A local binding shadows the module of the same name in member position too, so this reads as the LOCAL's `len` method with the receiver as its first argument, and the one you wrote as a second (E004). Do not name a binding after a module you still need — `list`, `string`, `map`, `set` are the ones that get written by accident. Two fixes, both accepted: rename the binding (`let xs = [1, 2]`, then `list.len(xs)`), or drop the argument and call the method on the local — `list.len()` prints `2`, because the shadowed name IS the local. The auto-imported modules shadow SILENTLY: there is no import statement to report as unused, so nothing warns you

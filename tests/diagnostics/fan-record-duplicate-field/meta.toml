@@ -1,0 +1,2 @@
+expects_error = "field `sum` appears twice in this fan block"
+hint_substring = "named once"

@@ -6,8 +6,18 @@
   observation; (2) `fan.map` runs every element, and its result is the first
   `Err` in list order. None of it was implemented at acceptance. As of
   2026-10-17 (docs/design/fan-semantics-audit.md, pinned 0746eb689): D1, D5
-  and D6 are implemented. D3/D4 (the `@ordered` set and the sequential
-  note) are not, and native `fan { }` runs every arm on threads (#3780).
+  and D6 are implemented. As of 2026-10-18 (#3780) D3 is implemented for the
+  `fan { }` block: the stdlib marks the ordered set with `@ordered` (`env.set`
+  joins the initial list — process-local state like `kv`), and a block whose
+  arm's executable closure reaches one runs its arms in arm order on native
+  too (`mark_inline_fans`, spec/wasm_cross/fan_ordered_arms.almd). D4 (the
+  sequential note) is not. Also 2026-10-18 (#3779, #3784): the native
+  parallel twins (`fan.map`, `list.map` / `filter` / `any` / `all` under a
+  fan) keep one output timeline per dealt BLOCK of elements, not per
+  element — inside a block the elements run in list order on one thread, so
+  D5's order and D6's lowest-index trap hold at element granularity for one
+  registration per block (spec/wasm_cross/fan_list_map_trap_order.almd); the
+  per-element registration was what made a light map slower than sequential.
   Step 4's effect `fan.map` / `fan.settle` on threads is not either: an effect
   callback stays sequential unless its only effect is a nested fan (#2594).
   Amended 2026-10-05 (#3383): D3 and D8 for async JS hooks on `--host js`
@@ -407,7 +417,7 @@ prints or writes) is measured in step 3, before the epoch is cut.
 |---|---|---|
 | 0 | C-004 / C-005 / C-200 rewording in almide/als | — |
 | 1 | D5 on native for `fan { }`, `fan.settle { }` and `fan_map_par`; delete C-004's EXCEPTION | 0 |
-| 2 | The `@ordered` attribute on the D3 set; the substrate bit computed from ADR-0020's `X(E)`; the D4 note | ADR-0020 step 1 (#2697) |
+| 2 | The `@ordered` attribute on the D3 set; the substrate bit computed from ADR-0020's `X(E)` (done 2026-10-18, #3780, for `fan { }`); the D4 note (open) | ADR-0020 step 1 (#2697) |
 | 3 | D1 on every leg: `stdlib/fan_map.almd`, the wasm emitters, native, `almide-interp`, the reference evaluator (ADR-0015); impact measurement; the epoch | 0 |
 | 4 | Native: lower lambda-literal and named-fn callbacks of `fan.map` / `fan.settle` as owned `move` closures like block arms; `fan.settle { }` onto threads; the in-flight bound (D7); per-thread RNG seeds (ADR-0020 §5.5) | 1, 2, 3 |
 | 5 | ADR-0011 D5 gate extended to the four surfaces, run repeatedly and with the substrate forced | 4 |

@@ -1,0 +1,8 @@
+effect fn add(a: Int, b: Int) -> Result[Int, String] = ok(a + b)
+
+effect fn mul(a: Int, b: Int) -> Result[Int, String] = ok(a * b)
+
+effect fn main() -> Unit = {
+  let r = fan { sum: add(3, 4)!, product: mul(3, 4) }
+  println(int.to_string(r.sum))
+}

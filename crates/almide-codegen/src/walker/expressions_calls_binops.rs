@@ -525,8 +525,9 @@ fn render_method_call_full(ctx: &RenderContext, object: &IrExpr, method: &str, a
         all_args.extend(args.iter().map(|a| render_expr(ctx, a)));
         let module = &method[..dot_pos];
         let func = &method[dot_pos+1..];
-        // Convention methods (Type.method): first char uppercase → emit as Type_method(args)
-        let is_convention = module.chars().next().map_or(false, |c| c.is_uppercase());
+        // Convention methods (Type.method): a type-side first char (uppercase,
+        // or caseless — #1456) → emit as Type_method(args)
+        let is_convention = almide_base::names::is_type_side_name(module);
         if is_convention {
             let callee = format!("{}_{}", module, func);
             return Some(format!("{}({})", callee, all_args.join(", ")));

@@ -209,8 +209,8 @@ fn lex_word(chars: &[char], cur: &mut Cursor, tokens: &mut Vec<Token>) -> bool {
     // identifiers, Swift-style.
     let is_backtick = ch == '`';
     // Identifier or keyword (lone `_` falls through to operator lexing → Underscore)
-    let is_ident_start = ch.is_ascii_alphabetic()
-        || (ch == '_' && cur.pos + 1 < chars.len() && (chars[cur.pos + 1].is_ascii_alphanumeric() || chars[cur.pos + 1] == '_'));
+    let is_ident_start = is_ident_start_char(ch)
+        || (ch == '_' && cur.pos + 1 < chars.len() && is_ident_continue_char(chars[cur.pos + 1]));
     if !is_backtick && !is_ident_start {
         return false;
     }
@@ -918,17 +918,65 @@ fn scan_digit_run(chars: &[char], mut pos: usize) -> usize {
 
 // ── Identifier / keyword lexing ─────────────────────────────────
 
+/// Identifier characters follow UAX #31 Default Identifiers (#1456) — the
+/// rule Rust (RFC 2457), Python (PEP 3131) and ECMAScript use: a name starts
+/// with an XID_Start character (or `_`, handled by the caller) and continues
+/// with XID_Continue characters.
+///
+/// One restriction on top: a character whose COMPATIBILITY decomposition
+/// differs from its canonical one (full-width Latin and digits, ligatures,
+/// circled and super/subscript forms — the NFKC-only differences) is not an
+/// identifier character. It lexes as `Unknown`, so the copy-paste diagnostic
+/// keeps naming `ａ` (U+FF41) instead of `ａｂｃ` silently becoming a second
+/// name beside `abc`. Python folds those with NFKC; Almide refuses them, and
+/// folds only canonical differences (see `normalize_ident`).
+pub fn is_ident_start_char(c: char) -> bool {
+    c.is_ascii_alphabetic() || (!c.is_ascii() && unicode_ident::is_xid_start(c) && compat_stable(c))
+}
+
+/// Continuation counterpart of [`is_ident_start_char`].
+pub fn is_ident_continue_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_' || (!c.is_ascii() && unicode_ident::is_xid_continue(c) && compat_stable(c))
+}
+
+/// True when `c` has no compatibility mapping: its NFKD equals its NFD. A
+/// string of such characters has NFKC == NFC, so per-character refusal is
+/// exactly "the identifier's NFKC form differs from its NFC form".
+fn compat_stable(c: char) -> bool {
+    use unicode_normalization::UnicodeNormalization;
+    std::iter::once(c).nfkd().eq(std::iter::once(c).nfd())
+}
+
+/// An identifier's stored spelling: its NFC form, so canonically equivalent
+/// spellings — the precomposed `é` and `e` + U+0301, or the `か` + U+3099 an
+/// IME or a macOS file name can produce versus `が` — are one name. NFC (not
+/// NFKC) is Rust's choice too (RFC 2457): canonical equivalents render
+/// identically, so a difference between them is one no reader can see;
+/// compatibility characters are refused before they get here.
+fn normalize_ident(raw: &[char]) -> String {
+    if raw.iter().all(|c| c.is_ascii()) {
+        return raw.iter().collect();
+    }
+    use unicode_normalization::UnicodeNormalization;
+    raw.iter().copied().nfc().collect()
+}
+
+/// The type/value split for a non-keyword name: an uppercase first character
+/// (`Point`, `Δ`) is a type-side name; lowercase AND caseless starts (`x`,
+/// `日本`) are value-side. A caseless name the module declares as a type or a
+/// variant case is moved to the type side by the parser (#1456).
+fn name_token_type(value: &str) -> TokenType {
+    if value.chars().next().is_some_and(|c| c.is_uppercase()) { TokenType::TypeName } else { TokenType::Ident }
+}
+
 fn lex_ident(chars: &[char], start: usize, line: usize, col: usize) -> (Token, usize) {
     let mut pos = start;
-    while pos < chars.len() && (chars[pos].is_ascii_alphanumeric() || chars[pos] == '_') { pos += 1; }
+    while pos < chars.len() && is_ident_continue_char(chars[pos]) { pos += 1; }
 
-    let value: String = chars[start..pos].iter().collect();
+    let value = normalize_ident(&chars[start..pos]);
 
     // Check if it's a keyword
-    let token_type = keyword(&value).unwrap_or_else(|| {
-        if value.chars().next().map_or(false, |c| c.is_uppercase()) { TokenType::TypeName }
-        else { TokenType::Ident }
-    });
+    let token_type = keyword(&value).unwrap_or_else(|| name_token_type(&value));
 
     let end_col = col + (pos - start);
     (Token { token_type, value, line, col, end_col, raw: None }, pos)
@@ -940,29 +988,24 @@ fn lex_ident(chars: &[char], start: usize, line: usize, col: usize) -> (Token, u
 ///
 /// `None` when the escape encloses no identifier character at all — an empty
 /// pair of backticks, or a body the identifier rule cannot start on (a
-/// non-ASCII name). The body is the SAME ASCII set `lex_ident` accepts, so a
-/// non-ASCII name is no more writable escaped than bare; the escape only buys
-/// keyword-ness. An empty name is not a token any later stage can use, so it is
+/// compatibility character). The body is the SAME character set `lex_ident`
+/// accepts, so the escape only buys keyword-ness. An empty name is not a token any later stage can use, so it is
 /// never built (#1457).
 fn lex_backtick_ident(chars: &[char], start: usize, line: usize, col: usize) -> Option<(Token, usize)> {
     let mut pos = start + 1; // skip opening backtick
     let ident_start = pos;
-    while pos < chars.len() && (chars[pos].is_ascii_alphanumeric() || chars[pos] == '_') {
+    while pos < chars.len() && is_ident_continue_char(chars[pos]) {
         pos += 1;
     }
     if pos == ident_start {
         return None;
     }
-    let value: String = chars[ident_start..pos].iter().collect();
+    let value = normalize_ident(&chars[ident_start..pos]);
     // Consume closing backtick if present
     if pos < chars.len() && chars[pos] == '`' {
         pos += 1;
     }
-    let token_type = if value.chars().next().map_or(false, |c| c.is_uppercase()) {
-        TokenType::TypeName
-    } else {
-        TokenType::Ident
-    };
+    let token_type = name_token_type(&value);
     let end_col = col + (pos - start);
     Some((Token { token_type, value, line, col, end_col, raw: None }, pos))
 }
@@ -1062,7 +1105,7 @@ mod tests {
     #[test]
     fn malformed_backtick_escape_never_yields_an_empty_ident() {
         // Non-ASCII body, empty body, and an unterminated escape at EOF.
-        for src in ["let `日本語` = 1", "let `` = 1", "let `"] {
+        for src in ["let `ａｂ` = 1", "let `` = 1", "let `"] {
             let tokens = Lexer::tokenize(src);
             assert!(
                 !tokens.iter().any(|t| {
@@ -1321,5 +1364,66 @@ mod tests {
             assert_eq!((zz.line, zz.col), (2 + newlines, 5),
                 "{kind}: token on the line after the literal");
         }
+    }
+
+    fn words(src: &str) -> Vec<(TokenType, String)> {
+        Lexer::tokenize(src)
+            .into_iter()
+            .filter(|t| !matches!(t.token_type, TokenType::Newline | TokenType::EOF))
+            .map(|t| (t.token_type, t.value))
+            .collect()
+    }
+
+    // #1456: identifiers follow UAX #31 Default Identifiers — XID_Start (or
+    // `_`) then XID_Continue. A caseless start (CJK, kana, Hangul, ...) is a
+    // value-side name; an uppercase start stays a type-side name.
+    #[test]
+    fn non_ascii_identifiers_follow_xid() {
+        assert_eq!(words("日本国憲法"), vec![(TokenType::Ident, "日本国憲法".to_string())]);
+        assert_eq!(words("café"), vec![(TokenType::Ident, "café".to_string())]);
+        assert_eq!(words("λx"), vec![(TokenType::Ident, "λx".to_string())]);
+        assert_eq!(words("Δx"), vec![(TokenType::TypeName, "Δx".to_string())]);
+        assert_eq!(words("_名前"), vec![(TokenType::Ident, "_名前".to_string())]);
+        assert_eq!(words("x日本2"), vec![(TokenType::Ident, "x日本2".to_string())]);
+        assert_eq!(words("`日本`"), vec![(TokenType::Ident, "日本".to_string())]);
+        // A non-XID character still ends the name and lexes as Unknown.
+        assert_eq!(
+            words("名前→"),
+            vec![(TokenType::Ident, "名前".to_string()), (TokenType::Unknown, "→".to_string())]
+        );
+    }
+
+    // #1456: canonically equivalent spellings are one identifier — the name is
+    // stored in NFC, so the NFD `e` + U+0301 and the precomposed `é` (and the
+    // NFD `か` + U+3099 an IME can produce, versus `が`) compare equal.
+    #[test]
+    fn identifiers_are_nfc_normalized() {
+        assert_eq!(words("cafe\u{301}"), vec![(TokenType::Ident, "caf\u{e9}".to_string())]);
+        assert_eq!(words("\u{304b}\u{3099}"), vec![(TokenType::Ident, "\u{304c}".to_string())]);
+        // Columns still count source characters, not normalized ones.
+        let toks = Lexer::tokenize("cafe\u{301} x");
+        assert_eq!((toks[0].col, toks[0].end_col, toks[1].col), (1, 6, 7));
+    }
+
+    // #1456: a character whose compatibility decomposition differs from its
+    // canonical one (full-width Latin and digits, ligatures, circled forms)
+    // is not an identifier character: it stays Unknown, so the copy-paste
+    // diagnostic still fires instead of `ａｂｃ` silently naming a second `abc`.
+    #[test]
+    fn compatibility_characters_are_not_identifier_characters() {
+        assert_eq!(words("ａｂ")[0], (TokenType::Unknown, "ａ".to_string()));
+        assert_eq!(
+            words("x１"),
+            vec![(TokenType::Ident, "x".to_string()), (TokenType::Unknown, "１".to_string())]
+        );
+        assert_eq!(words("\u{fb01}x")[0], (TokenType::Unknown, "\u{fb01}".to_string()));
+        assert_eq!(words("①")[0], (TokenType::Unknown, "①".to_string()));
+    }
+
+    // Keywords stay ASCII: a full-width or accented look-alike is never a keyword.
+    #[test]
+    fn keywords_stay_ascii() {
+        assert_eq!(words("let")[0].0, TokenType::Let);
+        assert_eq!(words("lét")[0].0, TokenType::Ident);
     }
 }

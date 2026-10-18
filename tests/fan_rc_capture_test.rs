@@ -5,8 +5,8 @@
 //! captured one failed rustc with E0277 when the arms were spawned. Such a
 //! fan now runs its arms inline in arm order (the sequential evaluation the
 //! threaded form reproduces), a fn-typed param read in a fan arm is the `Rc`
-//! handle rather than `&dyn Fn`, and a `fan.any` thunk is a plain `Box<dyn
-//! Fn>` (its runtime is sequential).
+//! handle rather than `&dyn Fn`, and a `??` chain over closure calls (the
+//! respelling of the retired `fan.any { }`) runs them sequentially.
 //!
 //! The pin, per shape: the emitted Rust compiles warning-free, and native and
 //! wasm print the same, expected output.
@@ -157,7 +157,7 @@ effect fn main() -> Unit = {
   println(int.to_string(x + y))
   let k = 10
   let g: (Int) -> Result[Int, String] = (i) => ok(i * k)
-  println(int.to_string(fan.any { g(1), g(2) } ?? 0))
+  println(int.to_string(g(1) ?? g(2) ?? 0))
 }
 ", "9\n7\n10\n");
 }

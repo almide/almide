@@ -146,6 +146,11 @@ scoped scoped fn f() -> Int = 1
 ### scoped-block-without-a-block
 fn f() -> Int = scoped 1
 
+### fan-record-form-with-an-unnamed-arm
+effect fn main() -> Unit = {
+  let r = fan { a: f()!, g()! }
+}
+
 ### index-before-the-last-assignment-step
 type P = { n: Int }
 fn main() -> Unit = {

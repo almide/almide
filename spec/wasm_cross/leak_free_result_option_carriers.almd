@@ -4,7 +4,7 @@
 // block live per carrier in each shape below (#2969): `r?` over a bound
 // Result, `??` over a closure call or a record payload, the retained input
 // of `result.map` / `flat_map` and a rejected `option.filter`, a `filter_map` callback's `some`, every element
-// carrier of `fan.map` / `fan.any`, a `fan { … }` tuple, an `if` whose
+// carrier of `fan.map` / `list.find_map`, a `fan { … }` tuple, an `if` whose
 // fresh arm is a module call (`set.insert`), and the `ok(())` a
 // Result-returning `main` ends with. A `mut`-param effect call's Result
 // consumed by `match` or `??` (#3004) is here too. The program prints the
@@ -51,9 +51,9 @@ effect fn main() -> Result[Unit, String] = {
   // A filter_map callback's fresh Option.
   let evens = [1, 2, 3, 4] |> list.filter_map((x) => if x % 2 == 0 then some("e" + int.to_string(x)) else none)
   println("filter_map: ${list.join(evens, ",")}")
-  // fan.map / fan.any element carriers, and a fan block's tuple.
+  // fan.map / list.find_map element carriers, and a fan block's tuple.
   let labels = fan.map([3, 4], (x) => probe(x))!
-  let first = fan.any([1, 2, 5, 9], (n) => probe(n))!
+  let first = list.find_map([1, 2, 5, 9], (n) => probe(n)?) ?? "-"
   let pair = fan {
     half(4)
     half(6)

@@ -21,22 +21,27 @@ effect fn read_text(path: String) -> Result[String, String] = _
 effect fn read_bytes(path: String) -> Result[List[Int], String] = _
 
 /// Overwrites or creates; err if no parent dir.
+@ordered
 @intrinsic("almide_rt_fs_write")
 effect fn write(path: String, content: String) -> Result[Unit, String] = _
 
 /// Writes low byte of each Int (-1 -> 255).
+@ordered
 @intrinsic("almide_rt_fs_write_bytes")
 effect fn write_bytes(path: String, bytes: List[Int]) -> Result[Unit, String] = _
 
 /// Writes data verbatim, replacing the file.
+@ordered
 @intrinsic("almide_rt_fs_write_bytes_raw")
 effect fn write_bytes_raw(path: String, data: Bytes) -> Result[Unit, String] = _
 
 /// Appends content; creates the file if missing.
+@ordered
 @intrinsic("almide_rt_fs_append")
 effect fn append(path: String, content: String) -> Result[Unit, String] = _
 
 /// Creates dir and parents; ok if it exists.
+@ordered
 @intrinsic("almide_rt_fs_mkdir_p")
 effect fn mkdir_p(path: String) -> Result[Unit, String] = _
 
@@ -130,6 +135,7 @@ effect fn read_lines_if_exists(path: String) -> Result[List[String]?, String] = 
 effect fn read_bytes_raw_if_exists(path: String) -> Result[Bytes?, String] = _
 
 /// Deletes a file or empty dir; err if missing.
+@ordered
 @intrinsic("almide_rt_fs_remove")
 effect fn remove(path: String) -> Result[Unit, String] = _
 
@@ -146,10 +152,12 @@ effect fn is_dir(path: String) -> Bool = _
 effect fn is_file(path: String) -> Bool = _
 
 /// Copies src to dst; overwrites dst.
+@ordered
 @intrinsic("almide_rt_fs_copy")
 effect fn copy(src: String, dst: String) -> Result[Unit, String] = _
 
 /// Moves src to dst; replaces an existing dst.
+@ordered
 @intrinsic("almide_rt_fs_rename")
 effect fn rename(src: String, dst: String) -> Result[Unit, String] = _
 
@@ -158,6 +166,7 @@ effect fn rename(src: String, dst: String) -> Result[Unit, String] = _
 effect fn walk(dir: String) -> Result[List[String], String] = _
 
 /// Deletes a tree or file; err if missing.
+@ordered
 @intrinsic("almide_rt_fs_remove_all")
 effect fn remove_all(path: String) -> Result[Unit, String] = _
 
@@ -181,10 +190,12 @@ effect fn stat(path: String) -> Result[FileStat, String] = _
 effect fn glob(pattern: String) -> Result[List[String], String] = _
 
 /// New empty file temp_dir/prefix+nanos; its path.
+@ordered
 @intrinsic("almide_rt_fs_create_temp_file")
 effect fn create_temp_file(prefix: String) -> Result[String, String] = _
 
 /// New dir temp_dir/prefix+nanos; its path.
+@ordered
 @intrinsic("almide_rt_fs_create_temp_dir")
 effect fn create_temp_dir(prefix: String) -> Result[String, String] = _
 

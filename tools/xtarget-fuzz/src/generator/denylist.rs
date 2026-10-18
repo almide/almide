@@ -48,7 +48,7 @@ const DENIED_MODULES: &[&str] = &[
 /// never drift.
 ///
 /// `fan` is a language-level concurrency construct (`fan { … }`,
-/// `fan.map`, `fan.race`, `fan.any`, `fan.timeout`) rather than a bundled
+/// `fan.map`, `fan.min`, `fan.first_ok`, `fan.timeout`) rather than a bundled
 /// stdlib module; its scheduling-order-dependent combinators are
 /// nondeterministic and are denied here for the mutation path.
 const NONDETERMINISTIC_FUNCTIONS: &[(&str, &str)] = &[
@@ -133,7 +133,7 @@ impl NamedDenylist {
             }
         }
         // A module that is otherwise in-universe: deny only its named
-        // nondeterministic functions (`fan.race(`, `datetime.now(`, …), NOT
+        // nondeterministic functions (`fan.min(`, `datetime.now(`, …), NOT
         // `fan.map` / `fan.settle` / a bare `fan { }` block or the calendar
         // functions — those are deterministic and a valid mutation seed.
         for &(m, f) in NONDETERMINISTIC_FUNCTIONS {
@@ -182,7 +182,7 @@ fn contains_call_prefix(src: &str, module: &str) -> bool {
 }
 
 /// `true` if `src` contains the exact `<prefix>(` call form with a clean
-/// left boundary (used for `fan.race(`, `fan.timeout(`, …).
+/// left boundary (used for `fan.min(`, `fan.timeout(`, …).
 fn contains_token_call(src: &str, prefix: &str) -> bool {
     let needle = format!("{prefix}(");
     let bytes = src.as_bytes();
@@ -251,7 +251,7 @@ mod tests {
         assert!(NamedDenylist::source_references_denied_surface("list.shuffle(xs)").is_some());
         assert!(NamedDenylist::source_references_denied_surface("xs.sample(3)").is_some());
         assert!(NamedDenylist::source_references_denied_surface("fan.timeout(100, t)").is_some());
-        assert!(NamedDenylist::source_references_denied_surface("fan.race(a, b)").is_some());
+        assert!(NamedDenylist::source_references_denied_surface("fan.min(a, b)").is_some());
     }
 
     #[test]

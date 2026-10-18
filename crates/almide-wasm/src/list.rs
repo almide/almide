@@ -480,7 +480,13 @@ impl Emitter<'_> {
         &mut self,
         xs: &IrExpr,
     ) -> Result<(SliceTy, u32, u32, u32), EmitError> {
-        let elem = match self.lower_arg(xs, None, ArgMode::Borrow)? {
+        let got = self.lower_arg(xs, None, ArgMode::Borrow)?;
+        self.hof_loop_header(got)
+    }
+
+    /// [`Self::hof_loop_open`] over a block already on the stack.
+    pub(crate) fn hof_loop_header(&mut self, got: SliceTy) -> Result<(SliceTy, u32, u32, u32), EmitError> {
+        let elem = match got {
             // Set is layout-identical; order-preserving HOFs apply as-is.
             SliceTy::List(h) | SliceTy::Set(h) => self.types.el(h),
             other => return unsup(&format!("list-hof-of:{other:?}")),
@@ -650,11 +656,16 @@ impl Emitter<'_> {
         let Some(b) = slice_ty_of(&init.ty, self.types) else {
             return unsup(&format!("list-fold-acc:{}", ty_name(&init.ty)));
         };
+        // The source is evaluated before the init, in argument order, as
+        // native does (#2045: `list.range(lo(), hi())` printed after the
+        // init's line here); a `list.range` head is counted, not built.
+        let src = self.loop_src_open(xs, init)?;
         self.lower_arg(init, Some(b), ArgMode::Retain)?;
         self.f.instructions().local_set(acc_p);
-        let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
-        self.hof_elem_into(elem, bh, ch, ih, x_p);
+        self.loop_src_exit(src);
+        self.loop_src_load(src);
+        self.f.instructions().local_set(x_p);
         self.witness_callback_open(cb, Some(acc_p));
         self.lower_fold_body(cb, body, b)?;
         // The accumulator OWNS one credit on every step: a borrowed body
@@ -668,11 +679,9 @@ impl Emitter<'_> {
         self.witness_fold_step(body, acc_p, b);
         self.f.instructions().local_set(acc_p);
         self.witness_loop_close();
-        self.hof_step(ih);
+        self.loop_src_step(src);
         self.f.instructions().local_get(acc_p);
-        self.release_i32();
-        self.release_i32();
-        self.release_i32();
+        self.loop_src_close(src);
         Ok(Some(Lowered::owned(b)))
     }
 

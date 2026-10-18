@@ -574,6 +574,12 @@ pub enum Capability {
     /// has no prim floor in the program map, so `cap_witness` counts it at the `CallFn`
     /// itself; a function that reaches it without declaring it is never caps-verified.
     Net,
+    /// Starting a CHILD: a process natively, a fresh instance of the same module on the
+    /// embedded host. The structural leg's private `almide:process/spawn` capability
+    /// (ADR-0025, `cap::PROC` in almide-wasm's cert projection), reached on this rung by
+    /// `testing.assert_aborts`'s child run (ADR-0029). Its id is 10, the projection's, so
+    /// both legs speak one registry.
+    Process,
 }
 
 impl Capability {
@@ -581,7 +587,8 @@ impl Capability {
     /// proofs/CapabilityBound.v's checker is GENERIC over `list nat` (a `subset_check`,
     /// no per-capability enumeration), so it needs no edit to admit a new id — only
     /// this mapping must stay injective + stable (Stdout = 0, Entropy = 1, CliArgs = 2,
-    /// FsRead = 3, FsWrite = 4, Clock = 5, Stdin = 6, Net = 7).
+    /// FsRead = 3, FsWrite = 4, Clock = 5, Stdin = 6, Net = 7, Process = 10; 8 and 9 are
+    /// the wasm projection's FOREIGN and SENTINEL).
     pub const fn id(self) -> u32 {
         match self {
             Capability::Stdout => 0,
@@ -592,6 +599,7 @@ impl Capability {
             Capability::Clock => 5,
             Capability::Stdin => 6,
             Capability::Net => 7,
+            Capability::Process => 10,
         }
     }
 }

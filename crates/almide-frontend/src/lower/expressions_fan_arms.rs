@@ -84,20 +84,75 @@ fn bang_channel_in_scope(e: &IrExpr) -> Option<Ty> {
     impl IrVisitor for Scan {
         fn visit_expr(&mut self, e: &IrExpr) {
             match &e.kind {
-                IrExprKind::Lambda { .. } | IrExprKind::Fan { .. } => return,
-                IrExprKind::Unwrap { expr } => {
-                    let err = expr.ty.result_err_ty().unwrap_or(Ty::String);
-                    self.0 = Some(match self.0.take() {
-                        Some(seen) if seen != err => Ty::String,
-                        _ => err,
-                    });
+                IrExprKind::Lambda { .. } => return,
+                // A nested fan's arms are scoped in turn, but its JOIN
+                // propagates the first failing arm's Err out of it — a `!` of
+                // this scope (#1388: a fan nested in a fan arm was a `?` inside
+                // the outer arm's non-Result thread closure, natively).
+                IrExprKind::Fan { exprs } => {
+                    for arm in exprs {
+                        let err = match &arm.kind {
+                            IrExprKind::Unwrap { expr } => Some(expr.ty.result_err_ty().unwrap_or(Ty::String)),
+                            _ => arm.ty.result_err_ty(),
+                        };
+                        if let Some(err) = err {
+                            self.join(err);
+                        }
+                    }
+                    return;
                 }
+                IrExprKind::Unwrap { expr } => self.join(expr.ty.result_err_ty().unwrap_or(Ty::String)),
                 _ => {}
             }
             walk_expr(self, e);
         }
     }
+    impl Scan {
+        fn join(&mut self, err: Ty) {
+            self.0 = Some(match self.0.take() {
+                Some(seen) if seen != err => Ty::String,
+                _ => err,
+            });
+        }
+    }
     let mut s = Scan(None);
     s.visit_expr(e);
     s.0
+}
+
+/// The record form `fan { x: a, y: b }` (#1388): the tuple-form fan of the
+/// same arms, destructured into one fresh binding per field, then the record
+/// literal over them — `{ let (x', y') = fan { a, b }; { x: x', y: y' } }`.
+/// Every leg (native threads + ADR-0013 share marks, wasm, interp) sees the
+/// one `Fan` node it already runs, so the arms' concurrency, `!` scoping and
+/// first-Err order are the tuple form's by construction. An arm's slot type
+/// is its value type: a scoped `!` arm is a Result the join unwraps (the
+/// checker refused a field whose own value is a Result).
+fn lower_fan_record(ctx: &mut LowerCtx, arms: Vec<IrExpr>, names: &[almide_base::intern::Sym], ty: Ty, span: Option<ast::Span>) -> IrExpr {
+    let slot_tys: Vec<Ty> = arms.iter().map(|a| match &a.ty {
+        Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(),
+        t => t.clone(),
+    }).collect();
+    let fan_ty = match slot_tys.as_slice() {
+        [one] => one.clone(),
+        many => Ty::Tuple(many.to_vec()),
+    };
+    let vars: Vec<VarId> = names.iter().zip(&slot_tys)
+        .map(|(n, t)| ctx.var_table.alloc(sym(&format!("__fan_{}", n.as_str())), t.clone(), Mutability::Let, span))
+        .collect();
+    let fan = ctx.mk(IrExprKind::Fan { exprs: arms }, fan_ty.clone(), span);
+    let bind = match vars.as_slice() {
+        [one] => IrStmtKind::Bind { var: *one, mutability: Mutability::Let, ty: fan_ty, value: fan },
+        many => IrStmtKind::BindDestructure {
+            pattern: IrPattern::Tuple {
+                elements: many.iter().zip(&slot_tys).map(|(v, t)| IrPattern::Bind { var: *v, ty: t.clone() }).collect(),
+            },
+            value: fan,
+        },
+    };
+    let fields: Vec<(almide_base::intern::Sym, IrExpr)> = names.iter().zip(vars.iter().zip(&slot_tys))
+        .map(|(n, (v, t))| (*n, ctx.mk(IrExprKind::Var { id: *v }, t.clone(), span)))
+        .collect();
+    let record = ctx.mk(IrExprKind::Record { name: None, fields }, ty.clone(), span);
+    ctx.mk(IrExprKind::Block { stmts: vec![IrStmt { kind: bind, span }], expr: Some(Box::new(record)) }, ty, span)
 }

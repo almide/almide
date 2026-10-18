@@ -1,2 +1,2 @@
 expects_code = "E027"
-expects_error = "fan.any changed signature"
+expects_error = "fan.any was removed"

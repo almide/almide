@@ -1,0 +1,35 @@
+// @contract: C-200
+// ADR-0024 D6 inside a parallel `fan { list.map(…) }` (#3779): the trap that
+// surfaces is the LOWEST-INDEX one, whatever finishes first in time. Element
+// 0 traps late (after a long loop) on an out-of-bounds index; element 7 traps
+// at once on a division by zero. Native used to report whichever trap reached
+// the abort first — element 7's — because the parallel list twin carried no
+// element index under a one-arm fan; it now runs each dealt block of elements
+// in list order under its own output timeline, and a trap waits for the
+// blocks below its own. The outputs of the elements below the winner appear
+// in list order, nothing of any element above it.
+fn heavy(n: Int) -> Int = {
+  var i = 0
+  var acc = 0
+  while i < n {
+    acc = (acc + i) % 1000003
+    i = i + 1
+  }
+  acc
+}
+
+fn elem(x: Int, z: Int) -> Int = {
+  if x == 0 then {
+    let big = heavy(2000000)
+    [1, 2][big % 2 + 5]
+  } else if x == 7 then 10 / z
+  else heavy(2000000)
+}
+
+effect fn main() -> Unit = {
+  let z = string.len("")
+  let ys = fan {
+    list.map(list.range(0, 8), (x) => elem(x, z))
+  }
+  println("${list.len(ys)}")
+}

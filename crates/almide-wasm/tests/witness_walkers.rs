@@ -44,7 +44,7 @@ effect fn ranged(p: String) -> List[String] = fs.fold_lines_range(p, 0, 100, [],
 
 effect fn texts(ps: List[String]) -> Result[List[String], String] = fan.map(ps, (p) => fs.read_text(p)!)
 
-effect fn first(ps: List[String]) -> Result[String, String] = fan.any(ps, (p) => fs.read_text(p)!)
+effect fn first(ps: List[String]) -> Result[String, String] = ok(list.find_map(ps, (p) => fs.read_text(p)?) ?? "none")
 
 effect fn main() -> Unit = {
   let p = "in.txt"

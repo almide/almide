@@ -100,6 +100,7 @@ corpus check proves no real Almide is affected.
 | G10 | **Retired / rejected spellings excluded.** `&&`, `\|\|`, `++` and `..`/`..=`-as-a-range parse in the compiler *only* so it can answer with a migration hint. The artifact excludes them: a decoder must never sample them. | tighter |
 | G11 | **No depth limit.** The parser caps expression nesting at 500 (`MAX_DEPTH`); the artifact does not. | looser |
 | G12 | **Module-qualified record literals** (`mod.TypeName { … }`) are accepted after any postfix expression, not only after a bare identifier as the parser requires. | looser |
+| G13 | **Non-ASCII names** (#1456). The compiler takes UAX #31 identifiers (XID_Start then XID_Continue, NFC), refuses compatibility characters (`ａ`, `１`, `ﬁ`), and decides a caseless name's side by declaration: `住所` is a type name only in a module that declares `type 住所` or a case `| 住所`. The artifact's `UNAME` is any name starting with a non-ASCII letter, admitted in both value and type positions, and its `\w` continuation admits the compatibility characters too. | looser |
 
 ## Relationship to the `grammar/` submodule
 

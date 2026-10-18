@@ -332,13 +332,14 @@ pub(crate) const SIZED_CONVERT_SUM_BUILDERS: &[&str] = &[
 /// matrix_prod.rs / matrix_shape.rs). No block is read or written by the
 /// body itself, so no incumbent layout can leak in. Native spells each of
 /// these as the same composition (matrix.rs: mul_scaled = scale∘mul, the
-/// f32 family delegating to the f64 ops) or as its op-for-op equal (fma's
-/// `x*ka + y*kb` IS add(scale, scale): two rounded products, one rounded
-/// sum). Parity evidence: spec/wasm_cross/matrix_composition_family.almd.
+/// f32 family delegating to the f64 ops). fma / fma3 left this list for
+/// their own one-pass arm (matrix_elem.rs `lower_matrix_fma`, #3644): the
+/// composition walked each whole operand before truncating to the overlap.
+/// Parity evidence: spec/wasm_cross/matrix_composition_family.almd.
 pub(crate) const MATRIX_COMPOSITIONS: &[&str] = &[
     "matrix_mul_scaled",
     "matrix_mul_f32", "matrix_mul_f32_scaled", "matrix_mul_f32_t", "matrix_mul_f32_t_scaled",
-    "matrix_zeros_f32", "matrix_ones_f32", "matrix_fma", "matrix_fma3",
+    "matrix_zeros_f32", "matrix_ones_f32",
     "matrix_append_rows", "matrix_linear_f32_row_no_bias",
 ];
 

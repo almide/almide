@@ -1,4 +1,4 @@
-//! #3669: a metered program (`fan.bounded` / `fan.race` / `fan.timeout`) that
+//! #3669: a metered program (`fan.bounded` / `fan.min` / `fan.timeout`) that
 //! walls the whole-program native v1 render is built by the standard codegen
 //! with the v1-rendered regions linked in. Two claims:
 //!
@@ -87,7 +87,7 @@ fn a_region_outside_the_v1_subset_is_metered_by_the_standard_codegen() {
     std::fs::write(
         &path,
         "fn parts(s: String) -> Int = list.len(string.split(s, \",\"))\n\
-         effect fn main() -> Unit = println(int.to_string(fan.race { parts(\"a,b\"), parts(\"c\") } ?? 0))\n",
+         effect fn main() -> Unit = println(int.to_string(fan.min(compute.ms(100)) { parts(\"a,b\"), parts(\"c\") } ?? 0))\n",
     )
     .unwrap();
     let out = Command::new(almide_bin()).arg("run").arg(&path).env("ALMIDE_VERBOSE", "1").output().expect("spawn almide");

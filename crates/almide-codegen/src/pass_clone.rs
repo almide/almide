@@ -40,10 +40,14 @@ impl NanoPass for CloneInsertionPass {
         // Head reads borrow (#3453); a `let` they bind by reference is no
         // owned value of this walk and renders its annotation `_`.
         let all_top_lets: HashSet<VarId> = program.top_lets.iter().chain(program.modules.iter().flat_map(|m| &m.top_lets)).map(|tl| tl.var).collect();
+        let bound_by_ref: HashSet<VarId> = program.codegen_annotations.infer_binding_tys.iter().copied().collect();
         let IrProgram { functions, modules, var_table, .. } = &mut program;
         let mut ref_lets = HashSet::new();
         for f in functions.iter_mut().chain(modules.iter_mut().flat_map(|m| &mut m.functions)) {
             ref_lets.extend(super::pass_clone_head::rewrite(f, var_table, &all_top_lets));
+            // Read-only selections borrow (#3532), over binders still bound by value.
+            let by_ref: HashSet<VarId> = ref_lets.union(&bound_by_ref).copied().collect();
+            ref_lets.extend(super::pass_clone_select::rewrite(f, var_table, &all_top_lets, &by_ref));
             super::pass_clone_projection::fold_bindings(&mut f.body);
         }
         program.codegen_annotations.infer_binding_tys.extend(ref_lets.iter().copied());

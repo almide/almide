@@ -1,0 +1,21 @@
+// @contract: C-238
+// #2045, the load-bearing cell, alone in its own file (the reference
+// interpreter abstains on it by fuel, as on range_bind_huge.almd): a
+// `list.range(a, b)` that a fold consumes once — directly, or through pure
+// map/filter stages fused into the fold — is counted, never built. The span
+// here is 2^29 + 2^20 elements, 8 bytes each: more than wasm32's whole 4 GiB
+// address space, so a leg that materializes the list cannot answer at all.
+// Before #2045 native counted the range (`(a..b).fold(..)`) and printed both
+// lines while the wasm leg built the list first and died `Error: out of
+// memory` — the same program, one leg. Small and edge spans live in
+// range_head_fold_edges.almd, where all three oracles vote.
+effect fn main() -> Unit = {
+  let n = 537919488
+  let sum = list.range(0, n) |> list.fold(0, (a, x) => a + x)
+  println("sum=" + int.to_string(sum))
+  let kept = list.range(0, n) |> list.map((x) => x * 3) |> list.filter((x) => x % 7 == 1) |> list.fold(
+    0,
+    (a, _x) => a + 1,
+  )
+  println("kept=" + int.to_string(kept))
+}

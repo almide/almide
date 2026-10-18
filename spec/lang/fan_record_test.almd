@@ -1,0 +1,125 @@
+// fan record form — `fan { name: expr, … }` runs the fields as parallel
+// siblings and yields the anonymous record `{ name: value, … }` (#1388).
+effect fn add(a: Int, b: Int) -> Result[Int, String] = ok(a + b)
+
+effect fn mul(a: Int, b: Int) -> Result[Int, String] = ok(a * b)
+
+effect fn label(n: Int) -> Result[String, String] = ok("n=" + int.to_string(n))
+
+effect fn boom(tag: String) -> Result[Int, String] = err("boom:" + tag)
+
+effect fn sum_and_product(x: Int, y: Int) -> Result[Int, String] = {
+  let r = fan {
+    sum: add(x, y)!
+    product: mul(x, y)!
+  }
+  ok(r.sum + r.product)
+}
+
+effect fn first_err() -> Result[Int, String] = {
+  let r = fan {
+    a: boom("first")!
+    b: add(1, 2)!
+    c: boom("third")!
+  }
+  ok(r.a + r.b + r.c)
+}
+
+test "fan record: all fields ok, read by name" {
+  let r = fan {
+    sum: add(3, 4)!
+    product: mul(3, 4)!
+  }
+  assert_eq(r.sum, 7)
+  assert_eq(r.product, 12)
+}
+
+test "fan record: swapping fields swaps nothing" {
+  let r = fan {
+    product: mul(3, 4)!
+    sum: add(3, 4)!
+  }
+  assert_eq(r.sum, 7)
+  assert_eq(r.product, 12)
+}
+
+test "fan record: mixed field types, a pure field and an Option field" {
+  let r = fan {
+    n: add(1, 1)!
+    s: label(5)!
+    flag: true
+    o: list.first([9, 8])
+  }
+  assert_eq(r.n, 2)
+  assert_eq(r.s, "n=5")
+  assert_eq(r.flag, true)
+  assert_eq(r.o, some(9))
+}
+
+test "fan record: a single field is still a record" {
+  let r = fan {
+    only: add(10, 20)!
+  }
+  assert_eq(r.only, 30)
+}
+
+test "fan record: nested fan in a field" {
+  let r = fan {
+    outer: add(1, 2)!
+    inner: fan {
+      x: mul(2, 3)!
+      y: label(7)!
+    }
+  }
+  assert_eq(r.outer, 3)
+  assert_eq(r.inner.x, 6)
+  assert_eq(r.inner.y, "n=7")
+}
+
+test "fan record: let destructuring" {
+  let { sum, product } = fan {
+    sum: add(2, 5)!
+    product: mul(2, 5)!
+  }
+  assert_eq(sum, 7)
+  assert_eq(product, 10)
+}
+
+test "fan record: in a pipe" {
+  let total = fan {
+    a: add(1, 2)!
+    b: mul(4, 5)!
+  } |> (r) => r.a + r.b
+  assert_eq(total, 23)
+  let joined = fan {
+    k: label(1)!
+    v: add(0, 1)!
+  } |> (r) => r.k + ":" + int.to_string(r.v)
+  assert_eq(joined, "n=1:1")
+}
+
+test "fan record: field reads outer bindings" {
+  let x = 10
+  let r = fan {
+    a: add(x, 1)!
+    b: mul(x, 2)!
+  }
+  assert_eq(r.a + r.b, 31)
+}
+
+test "fan record: inside an effect fn" {
+  assert_eq(sum_and_product(3, 4), ok(19))
+}
+
+test "fan record: the first Err in source order is the whole Err" {
+  assert_eq(first_err(), err("boom:first"))
+}
+
+test "fan record: same value as the plain record literal" {
+  let p = fan {
+    sum: add(3, 4)!
+    product: mul(3, 4)!
+  }
+  let q = { sum: add(3, 4)!, product: mul(3, 4)! }
+  assert_eq(p, q)
+}

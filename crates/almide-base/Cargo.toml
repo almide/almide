@@ -8,3 +8,5 @@ description = "Foundational types for the Almide compiler (Sym, Span, Diagnostic
 [dependencies]
 lasso = { version = "0.7", features = ["multi-threaded"] }
 serde = { version = "1", features = ["derive"] }
+unicode-ident = "1"
+unicode-normalization = "0.1"
