@@ -48,6 +48,28 @@ fn a_range_head_folded_once_allocates_nothing_per_element() {
     assert!(failures.is_empty(), "range heads materialized on wasm:\n{}", failures.join("\n"));
 }
 
+/// An init that rebinds the variable its fold's source names: the source was
+/// evaluated first, so the fold walks the OLD block, which the arm keeps
+/// alive across the init and releases after the loop — no stale read, no
+/// leak. `set.fold` / `map.fold` are pinned here rather than in a
+/// cross-target fixture because the native leg refuses this shape at rustc
+/// (E0506) for those two.
+#[test]
+fn a_fold_source_survives_an_init_that_rebinds_it() {
+    let cases = [
+        ("var xs = [\"a\", \"b\", \"c\"]\n  let r = xs |> list.fold({\n    xs = [\"z\"]\n    \"\"\n  }, (a, x) => a + x)", "abc"),
+        ("var xs = [\"a\", \"b\", \"c\"]\n  let r = xs |> list.scan({\n    xs = [\"z\"]\n    \"\"\n  }, (a, x) => a + x)", "[\"a\", \"ab\", \"abc\"]"),
+        ("var s = set.from_list([\"a\", \"b\"])\n  let r = s |> set.fold({\n    s = set.from_list([\"z\"])\n    \"\"\n  }, (a, x) => a + x)", "ab"),
+        ("var m = [\"a\": \"1\", \"b\": \"2\"]\n  let r = m |> map.fold({\n    m = [\"z\": \"9\"]\n    \"\"\n  }, (a, k, v) => a + k + v)", "a1b2"),
+    ];
+    for (body, want) in cases {
+        let src = format!("effect fn main() -> Unit = {{\n  {body}\n  println(\"${{r}}\")\n}}\n");
+        let (out, _, allocs, frees) = requested(&src);
+        assert_eq!(out.trim(), want, "{body}");
+        assert_eq!(allocs, frees, "{body}: leaked {} block(s)", allocs - frees);
+    }
+}
+
 #[test]
 fn a_counted_range_head_reads_the_built_lists_sequence() {
     // The same values in the same order the list held: empty and reversed
