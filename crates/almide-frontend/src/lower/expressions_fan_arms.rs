@@ -84,17 +84,35 @@ fn bang_channel_in_scope(e: &IrExpr) -> Option<Ty> {
     impl IrVisitor for Scan {
         fn visit_expr(&mut self, e: &IrExpr) {
             match &e.kind {
-                IrExprKind::Lambda { .. } | IrExprKind::Fan { .. } => return,
-                IrExprKind::Unwrap { expr } => {
-                    let err = expr.ty.result_err_ty().unwrap_or(Ty::String);
-                    self.0 = Some(match self.0.take() {
-                        Some(seen) if seen != err => Ty::String,
-                        _ => err,
-                    });
+                IrExprKind::Lambda { .. } => return,
+                // A nested fan's arms are scoped in turn, but its JOIN
+                // propagates the first failing arm's Err out of it — a `!` of
+                // this scope (#1388: a fan nested in a fan arm was a `?` inside
+                // the outer arm's non-Result thread closure, natively).
+                IrExprKind::Fan { exprs } => {
+                    for arm in exprs {
+                        let err = match &arm.kind {
+                            IrExprKind::Unwrap { expr } => Some(expr.ty.result_err_ty().unwrap_or(Ty::String)),
+                            _ => arm.ty.result_err_ty(),
+                        };
+                        if let Some(err) = err {
+                            self.join(err);
+                        }
+                    }
+                    return;
                 }
+                IrExprKind::Unwrap { expr } => self.join(expr.ty.result_err_ty().unwrap_or(Ty::String)),
                 _ => {}
             }
             walk_expr(self, e);
+        }
+    }
+    impl Scan {
+        fn join(&mut self, err: Ty) {
+            self.0 = Some(match self.0.take() {
+                Some(seen) if seen != err => Ty::String,
+                _ => err,
+            });
         }
     }
     let mut s = Scan(None);
