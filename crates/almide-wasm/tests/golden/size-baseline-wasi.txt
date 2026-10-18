@@ -402,7 +402,7 @@
 13367	spec/wasm_cross/leak_free_reader_temporaries.almd
 8838	spec/wasm_cross/leak_free_result_option_carriers.almd
 3271	spec/wasm_cross/leak_free_spread_produced_base.almd
-7475	spec/wasm_cross/let_bound_closure_scope.almd
+7421	spec/wasm_cross/let_bound_closure_scope.almd
 2637	spec/wasm_cross/let_unwrap_propagation.almd
 1486	spec/wasm_cross/let_wildcard_discard.almd
 2139	spec/wasm_cross/letbound_variant_match.almd
@@ -487,7 +487,7 @@
 13614	spec/wasm_cross/map_interp_string_value.almd
 6523	spec/wasm_cross/map_literal_borrowed_if_arg.almd
 9981	spec/wasm_cross/map_literal_ctor_values.almd
-15644	spec/wasm_cross/map_merge_in_place.almd
+15205	spec/wasm_cross/map_merge_in_place.almd
 3425	spec/wasm_cross/map_of_maps_value.almd
 2948	spec/wasm_cross/map_rich_variant_key.almd
 11470	spec/wasm_cross/map_set_eq.almd
@@ -661,6 +661,8 @@
 2198	spec/wasm_cross/range_bind_walled_no_materialize.almd
 816	spec/wasm_cross/range_exclusive_end_at_min.almd
 667	spec/wasm_cross/range_first_class.almd
+3623	spec/wasm_cross/range_head_fold_edges.almd
+1918	spec/wasm_cross/range_head_fold_huge.almd
 1469	spec/wasm_cross/range_inclusive_end_at_max.almd
 2135	spec/wasm_cross/range_materialize_oom.almd
 8233	spec/wasm_cross/rc_alloc_stress.almd
