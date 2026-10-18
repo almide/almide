@@ -6,16 +6,51 @@
 //! and on expiry the sweep fails naming the fixture's path and the limit — a
 //! hang is a failure, not a wait (#2567's rule for the output-parity sweep).
 
+use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::Duration;
 
+/// The limit every corpus sweep in almide-spine runs one fixture under.
+///
+/// Chosen from measured walls, not from #2567's 60 s (that sweep times one
+/// wasmtime run; these run a whole interpreter leg in-process): the heaviest
+/// fixture, `string_position_large_offset`, takes 521 s on the CI runner
+/// (`run_parity` column of proofs/corpus-weights.txt) and 47 s in a local
+/// release build, and a runner shared with other suites ran the corpus
+/// giants up to 1.95× slower (#2381). 1200 s is 2.3× that 521 s. It also
+/// stays under the job: a run_parity shard takes 11–16 min, so a hang that
+/// starts anywhere in it is cut and named by minute ~36, before the
+/// 40-minute cancellation that hid the fixture in #3768.
+pub const FIXTURE_LIMIT: Duration = Duration::from_secs(1200);
+
 /// Run one fixture's `work` under `limit`, naming `fixture` if it is cut.
+///
+/// The work runs on a thread of its own; the caller waits at most `limit`
+/// for its result. On expiry this panics with the fixture's path and the
+/// limit, and the thread is left behind — it cannot be stopped from outside,
+/// and the failing test process takes it down. A panic inside the work is
+/// re-raised here with its own message.
 pub fn run_limited<R: Send + 'static>(
     fixture: &str,
     limit: Duration,
     work: impl FnOnce() -> R + Send + 'static,
 ) -> R {
-    let _ = (fixture, limit);
-    work()
+    let (tx, rx) = mpsc::channel();
+    let worker = std::thread::Builder::new()
+        .name(format!("fixture {fixture}"))
+        .spawn(move || {
+            let _ = tx.send(work());
+        })
+        .unwrap_or_else(|e| panic!("{fixture}: cannot start its thread: {e}"));
+    match rx.recv_timeout(limit) {
+        Ok(r) => r,
+        Err(RecvTimeoutError::Timeout) => panic!(
+            "{fixture}: still running after the per-fixture limit of {limit:?} (#3768) — cut, not waited on"
+        ),
+        Err(RecvTimeoutError::Disconnected) => match worker.join() {
+            Err(payload) => std::panic::resume_unwind(payload),
+            Ok(()) => panic!("{fixture}: its thread ended without a result"),
+        },
+    }
 }
 
 #[cfg(test)]

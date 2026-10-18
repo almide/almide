@@ -12,7 +12,7 @@
 use std::path::{Path, PathBuf};
 
 mod limit;
-pub use limit::run_limited;
+pub use limit::{run_limited, FIXTURE_LIMIT};
 
 /// The submodule mount point of almide/als, relative to the workspace root.
 pub const JUDGE_MOUNT: &str = "als";
