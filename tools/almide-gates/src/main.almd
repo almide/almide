@@ -158,17 +158,22 @@ effect fn main() -> Unit = {
       if mode == "--readme" or mode == "--check-readme" then {
         let base_lines = fs.read_lines(base) ?? []
         let block = bench.readme_block(base_lines)
-        let readme = fs.read_text("README.md")!
-        let rendered = bench.splice_block(readme, block)
+        // Every translation carries the same block (scripts/lib/readme-targets.sh holds
+        // the list for the shell generators): a translated block nobody renders is a fossil.
+        let targets = ["README.md", "README.ja.md", "README.zh-CN.md"] |> list.filter((p) => fs.exists(p))
+        let readmes = targets |> list.map((p) => (p, fs.read_text(p)!))!
+        let stale = readmes |> list.filter(((_, text)) => bench.splice_block(text, block) != text) |> list.map(((p, _)) => p)
         if mode == "--readme" then {
-          fs.write("README.md", rendered)!
-          println("build-speed: README block rendered from " + base)
+          for (p, text) in readmes {
+            fs.write(p, bench.splice_block(text, block))!
+          }
+          println("build-speed: README block rendered from " + base + " into " + list.join(targets, ", "))
           process.exit(0)
-        } else if rendered == readme then {
-          println("build-speed: README block is fresh.")
+        } else if list.is_empty(stale) then {
+          println("build-speed: README block is fresh in " + list.join(targets, ", ") + ".")
           process.exit(0)
         } else {
-          println("::error::README build-speed block is stale — run: almide run tools/almide-gates/src/main.almd -- bench docs/benchmarks --readme")
+          println("::error::README build-speed block is stale in " + list.join(stale, ", ") + " — run: almide run tools/almide-gates/src/main.almd -- bench docs/benchmarks --readme")
           process.exit(1)
         }
       } else ()

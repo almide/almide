@@ -5,7 +5,7 @@
   </picture>
 </p>
 
-<p align="center"><strong>The language where LLM edits survive.</strong></p>
+<p align="center"><strong>When the model is wrong, the compiler names the fix.</strong></p>
 
 <p align="center">
   <a href="https://github.com/almide/almide/actions/workflows/ci.yml"><img src="https://github.com/almide/almide/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
@@ -24,11 +24,19 @@
   <a href="#project-status">Status</a>
 </p>
 
+<p align="center">
+  <a href="README.md"><img alt="English" src="https://img.shields.io/badge/English-24292f?style=flat-square"></a>
+  <a href="README.ja.md"><img alt="日本語" src="https://img.shields.io/badge/%E6%97%A5%E6%9C%AC%E8%AA%9E-d0d7de?style=flat-square"></a>
+  <a href="README.zh-CN.md"><img alt="简体中文" src="https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-d0d7de?style=flat-square"></a>
+</p>
+
+---
+
 ## An edit that survives
 
-Almide is a statically-typed language built for one metric: **modification survival rate** — how often code still compiles and passes its tests after a series of AI-driven edits. It compiles to native binaries (via Rust) and to WebAssembly, and the two produce byte-identical output.
+Almide is a statically-typed language for code that AI writes and edits. The claim is not that the model gets it right. It is that **when the model is wrong, the compiler says so at author time and names the fix; and when the model is right, a checker proven in Rocq certifies that the program is memory-safe**: `almide verify` hands its ownership, name and capability witnesses to the independent `almide-verify` (a certificate over the shipped wasm bytes themselves is still pending, #2755–#2760). It compiles to native binaries (via Rust) and to WebAssembly, and the two produce byte-identical output.
 
-The metric in one screen. A model adds a case to a type and, as models do, touches nothing else:
+The first half in one screen. A model adds a case to a type and, as models do, touches nothing else:
 
 ```almd
 type Shape =
@@ -53,7 +61,7 @@ error[E010]: non-exhaustive match: missing Triangle(_, _)
 Or use `_ => todo()` to compile incrementally.
 ```
 
-The compiler names the missing case at the site, spells out the arm to add, and offers a way to keep compiling while the rest is written. The model's next turn is `Triangle(b, h) => 0.5 * b * h`; the program then runs natively and on wasm and prints the same bytes. That loop — an edit, a diagnostic that is itself the fix, a passing build — is what every decision below serves.
+The compiler names the missing case at the site, spells out the arm to add, and offers a way to keep compiling while the rest is written. The model's next turn is `Triangle(b, h) => 0.5 * b * h`; the program then runs natively and on wasm and prints the same bytes. That loop — an edit, a diagnostic that is itself the fix, a passing build — is what every decision below serves. The same question asked against Python, on eight injected modification mistakes: [demo/make-verify](./demo/make-verify/).
 
 ## Why Almide?
 
@@ -104,11 +112,12 @@ almide run hello.almd --target wasm   # same bytes, on wasmtime
 - **Bidirectional type inference** — Annotations flow into expressions (`let xs: List[Int] = []`)
 - **Codec system** — `Type.decode(value)` / `Type.encode(value)` with auto-derive
 - **Map literals** — `["key": value]`, `m[key]`, `for (k, v) in m`
-- **Fan** — structured concurrency: `fan { a(); b() }` runs each arm on its own thread natively and one after another on wasm; `fan.map` / `fan.first_ok` / `fan.settle` return results in list order on both, `fan.map` runs every element and surfaces the lowest-index `Err` (dialect epoch 7), and natively it runs on threads only for a pure callback over scalars (an effect callback runs one element at a time). Every native arm and element writes into its own output timeline, flushed in list order, so what concurrent arms print comes out in source order on both targets, and a trap waits for the elements below it ([ADR-0024](./docs/adr/0024-fan-effect-callbacks-run-concurrently-as-if-sequential.md) steps 1 and 3, C-004, C-005, C-200).
+- **Fan** — structured concurrency: `fan { a(), b() }` runs each arm on its own thread natively and one after another on wasm; `fan.map` / `fan.settle` return results in list order on both, `fan.map` runs every element and surfaces the lowest-index `Err` (dialect epoch 7), and natively it runs on threads only for a pure callback over scalars (an effect callback runs one element at a time). Every native arm and element writes into its own output timeline, flushed in list order, so what concurrent arms print comes out in source order on both targets, and a trap waits for the elements below it ([ADR-0024](./docs/adr/0024-fan-effect-callbacks-run-concurrently-as-if-sequential.md) steps 1 and 3, C-004, C-005, C-200). `fan.min(compute.ms(n))` picks the arm that spent the least deterministic compute, so the winner is the same on both targets. The first `Ok` in order is not a fan form: it is `a() ?? b()`, or `list.find_map` over a list (dialect epoch 14 removed `fan.any` and renamed `fan.race` to `fan.min`).
+- **Names in any script** — identifiers follow Unicode UAX #31 and are held in NFC (`let 合計 = 価格 * 数量`); keywords stay ASCII
 - **Pipeline operator** — `data |> transform |> output`
 - **Module system** — Packages, sub-namespaces, visibility control, diamond dependency resolution
-- **Standard library** — self-hosted `.almd` modules: string, list, map, json, http, fs, and more ([reference](./docs/stdlib/); the count is derived under [Project Status](#project-status))
-- **Built-in testing** — `test "name" { assert_eq(a, b) }` with `almide test`
+- **Standard library** — self-hosted `.almd` modules: string, list, map, json, http, fs, and more ([reference](./docs/stdlib/); the count is derived under [Project Status](#project-status)). Domain kernels live in packages, not the language: LLM provider clients in [almide/llm](https://github.com/almide/llm), neural-network matrix kernels in [almide/nnlib](https://github.com/almide/nnlib) (dialect epoch 14)
+- **Built-in testing** — `test "name" { assert_eq(a, b) }` with `almide test`; `testing.assert_aborts(expected, () => …)` for a call that must abort
 
 ## What is measured
 
@@ -254,6 +263,7 @@ The Perceus proof above proves one compiler pass, once. v1 generalizes that prin
 | Targets | Rust (native), WASM (direct emit — the structural leg, see [How It Works](#how-it-works)) |
 | Verified codegen | Structural wasm leg: byte-exact corpus and mutation gates, trusted with its per-build certificate pending (#2755–#2760); the PCC-certified incumbent leg (per-build re-verification since 0.29.0) was retired by #2761 |
 | Codegen | Rust: Nanopass + TOML templates; wasm: structural engine → direct emit (the v0 emitter and the incumbent MIR→WAT renderer are retired — a wall is an error, never a fallback) |
+| Stdlib inspection | Every public stdlib function carries an `inspected` stamp in [`proofs/stdlib-inspection.toml`](./proofs/stdlib-inspection.toml): the same bytes on native and wasm, a per-call cost within its declared order, codopsy A, fresh fuzzed combinations, and the call through a module diamond. 0 uninspected as of 2026-10-19 (almide 0.68.0); `tests/stdlib_inspection_test.rs` voids a stamp when the signature or the body changes, and the uninspected count only falls |
 | Artifacts | `.almdi` module interface files via `almide compile` |
 | Playground | [Live](https://almide.github.io/playground/) — the compiler runs as WASM in the browser |
 
@@ -269,6 +279,21 @@ The Perceus proof above proves one compiler pass, once. v1 generalizes that prin
 <!-- mutation-score:generated:start (as of 2026-09-22) — stamped from proofs/mutation-score.toml by scripts/gen-mutation-score.sh; re-measured by every mutation-sweep run, refreshed only by `--from-run`; DO NOT EDIT between the markers -->
 **Mutation score** — 41/41 mutants caught (100.0 %), 0 survived, 0 stale: the full release-shape net sweep of `ci/mutations/` ([`scripts/check-mutation-gate.sh`](./scripts/check-mutation-gate.sh)), stamped 2026-09-22 from mutation-sweep run [35650396971](https://github.com/almide/almide/actions/runs/35650396971) at `3b02f7dc4`.
 <!-- mutation-score:generated:end -->
+
+## Written in Almide
+
+The standard library is the largest Almide program in this repository. The ones below are written in Almide elsewhere, and are where the surface claims meet code nobody wrote to make the language look good.
+
+- **Coding agents** — [comide](https://github.com/O6lvl4/comide), a conversation in a directory · [golemide](https://github.com/O6lvl4/golemide), one static binary, observe-then-edit, every write through a syntax gate · [homullus](https://github.com/almide-ai/homullus), a modular agent runtime · [manus](https://github.com/almide-ai/manus), computer use on macOS
+- **Agent infrastructure** — [porta](https://github.com/almide/porta), WASM isolation plus an OS sandbox, no Docker · [ctxgate](https://github.com/O6lvl4/ctxgate), a context firewall living in the tool hooks · [hew](https://github.com/O6lvl4/hew), structure-aware `cat`/`grep`/`sed` for agents · [almai](https://github.com/almide-ai/almai), one LLM interface over every provider
+- **Parsing** — [gramide](https://github.com/O6lvl4/gramide), syntax trees for coding agents, with grammar packages for [TypeScript](https://github.com/O6lvl4/gramide-typescript), [Python](https://github.com/O6lvl4/gramide-python), [Rust](https://github.com/O6lvl4/gramide-rust), [Go](https://github.com/O6lvl4/gramide-go), [JavaScript](https://github.com/O6lvl4/gramide-javascript) and [Almide](https://github.com/O6lvl4/gramide-almide), each checked against that language's own parser · [parsegen](https://github.com/almide/parsegen), a tree-sitter compatible parser generator with no C and no dynamic loading
+- **Graphics** — [ceangal2](https://github.com/almide-graphics/ceangal2), the snaidhm compute-shader-first 2D/3D renderer and the ceangal layout and widgets on top of it, one Almide program on the web, iOS, macOS, Android, Windows and Linux (start from [ceangal-hello](https://github.com/almide-graphics/ceangal-hello)) · [obsid](https://github.com/almide-graphics/obsid), Canvas 2D / WebGL / 3D through WASM · [nn](https://github.com/almide-graphics/nn) and [slabhra](https://github.com/almide-graphics/slabhra), neural-network primitives and reverse-mode autograd · [cruth](https://github.com/almide-graphics/cruth), VRM/glTF characters · [lumen](https://github.com/almide-graphics/lumen), graphics math that needs no `@extern`
+- **Desktop** — [almide-shell](https://github.com/almide-graphics/almide-shell), a Hyprland shell: bar, launcher, notifications, on-screen display · [sprid](https://github.com/O6lvl4/sprid), a terminal emulator with scrollback under a hard memory budget
+- **Bindings and packaging** — [almide-bindgen](https://github.com/almide/almide-bindgen), FFI for 20 language targets · [almide-wasm-bindgen](https://github.com/almide/almide-wasm-bindgen) · [almide-lander](https://github.com/almide/almide-lander), Almide as a native shared library · [almide-web](https://github.com/almide/almide-web), browser APIs
+- **Libraries** — [toml](https://github.com/almide/toml) · [yaml](https://github.com/almide/yaml) · [csv](https://github.com/almide/csv) · [svg](https://github.com/almide/svg) · [dfa](https://github.com/almide/dfa) · [bigint](https://github.com/almide/bigint) · [aes](https://github.com/almide/aes) · [rsa](https://github.com/almide/rsa) · [sha1](https://github.com/almide/sha1) · [base64](https://github.com/almide/base64) · [almide-sqlite](https://github.com/almide/almide-sqlite) · [llm](https://github.com/almide/llm), streaming clients for LLM providers · [nnlib](https://github.com/almide/nnlib), neural-network kernels (attention, RoPE, norms, quantized rows)
+- **Conformance and measurement** — [als](https://github.com/almide/als), the normative specification with its own judge, run against any `almide` binary · [almide-dojo](https://github.com/almide/almide-dojo), the LLM-writability ground, harness written in Almide · [bonsai-almide](https://github.com/almide/bonsai-almide), a 1-bit LLM in the browser
+
+Measured 2026-09-30: 144 public repositories outside this one carry Almide source. Hand-written, excluding generated output: [nn](https://github.com/almide-graphics/nn) 21,815 lines, the [gramide](https://github.com/O6lvl4/gramide) family 19,780 across eight repositories, [almide-shell](https://github.com/almide-graphics/almide-shell) 8,502, [snaidhm](https://github.com/almide-graphics/snaidhm) 6,800, [almide-bindgen](https://github.com/almide/almide-bindgen) 5,871, [ceangal](https://github.com/almide-graphics/ceangal) 5,099, [sprid](https://github.com/O6lvl4/sprid) 4,565, [porta](https://github.com/almide/porta) 4,419. snaidhm and ceangal were counted in their own repositories, which have since been archived and moved into ceangal2.
 
 ## Ecosystem and documentation
 

@@ -1,6 +1,6 @@
 # Mission
 
-**Almide is the language LLMs can write most accurately.** Every design decision serves one metric: modification survival rate.
+**Almide is the language LLMs can write most accurately.** The claim is not that the model gets it right: it is that a wrong modification is caught at author time with a diagnostic that names the fix, and a right one is certified memory-safe by a checker proven in Rocq (`almide verify`). Every design decision serves that. (Modification survival rate, measured directly, saturates at the top of the model range — `demo/make-verify/README.md` records why it was replaced.)
 
 # Critical Safety Rules
 
