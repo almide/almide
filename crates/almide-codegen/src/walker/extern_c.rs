@@ -26,22 +26,7 @@ fn render_native_call(ctx: &RenderContext, func: &IrFunction, attr: &almide_lang
     // `&str` and needs nothing.
     let mut before = String::new();
     let mut after = String::new();
-    let args: Vec<String> = func.params.iter().map(|p| {
-        let name = p.name.to_string();
-        if !extern_rust_has_str(&p.ty) || matches!(p.borrow, ParamBorrow::RefStr) {
-            return name;
-        }
-        match p.borrow {
-            ParamBorrow::Own => extern_rust_str_conv(&format!("&{name}"), &p.ty, true, 0),
-            ParamBorrow::RefMut => {
-                let h = format!("__host_{name}");
-                before.push_str(&format!("    let mut {h} = {};\n", extern_rust_str_conv(&format!("&*{name}"), &p.ty, true, 0)));
-                after.push_str(&format!("    *{name} = {};\n", extern_rust_str_conv(&format!("&{h}"), &p.ty, false, 0)));
-                format!("&mut {h}")
-            }
-            _ => format!("&{}", extern_rust_str_conv(&name, &p.ty, true, 0)),
-        }
-    }).collect();
+    let args: Vec<String> = func.params.iter().map(|p| extern_rust_arg(p, &mut before, &mut after)).collect();
     let ret = render_type(ctx, &func.ret_ty);
     let call = format!("{}::{}({})", mod_name, fn_name, args.join(", "));
     let result = if extern_rust_is_rc_cow(&func.ret_ty) {

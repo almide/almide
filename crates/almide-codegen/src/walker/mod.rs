@@ -297,6 +297,27 @@ fn extern_rust_param_type(ctx: &RenderContext, p: &IrParam) -> String {
     }
 }
 
+/// One `@extern(rust)` wrapper argument, spelled from the param's mode like
+/// its type above (ADR-0013): a value holding a String in a structural
+/// position is copied into its host shape, and a `mut` one is copied back
+/// after the call through `after`.
+fn extern_rust_arg(p: &IrParam, before: &mut String, after: &mut String) -> String {
+    let name = p.name.to_string();
+    if !extern_rust_has_str(&p.ty) || matches!(p.borrow, ParamBorrow::RefStr) {
+        return name;
+    }
+    match p.borrow {
+        ParamBorrow::Own => extern_rust_str_conv(&format!("&{name}"), &p.ty, true, 0),
+        ParamBorrow::RefMut => {
+            let h = format!("__host_{name}");
+            before.push_str(&format!("    let mut {h} = {};\n", extern_rust_str_conv(&format!("&*{name}"), &p.ty, true, 0)));
+            after.push_str(&format!("    *{name} = {};\n", extern_rust_str_conv(&format!("&{h}"), &p.ty, false, 0)));
+            format!("&mut {h}")
+        }
+        _ => format!("&{}", extern_rust_str_conv(&name, &p.ty, true, 0)),
+    }
+}
+
 fn render_fn_params_str(fn_ctx: &RenderContext, func: &IrFunction) -> String {
     func.params.iter()
         .map(|p| {
