@@ -204,6 +204,7 @@
 6409	spec/wasm_cross/fan_map_nested_combinators.almd
 8809	spec/wasm_cross/fan_map_parallel_scalar.almd
 2815	spec/wasm_cross/fan_map_worker_abort_keeps_stdout.almd
+2971	spec/wasm_cross/fan_ordered_arms.almd
 4471	spec/wasm_cross/fan_prefetch_fs.almd
 3036	spec/wasm_cross/fan_pure_thunks.almd
 5852	spec/wasm_cross/fan_race_mapper.almd
