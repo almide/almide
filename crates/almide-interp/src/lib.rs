@@ -489,6 +489,7 @@ fn index_record_decls(program: &IrProgram) -> HashMap<Sym, &[almide_ir::IrFieldD
 
 impl<'a> Interpreter<'a> {
     pub fn new(program: &'a IrProgram) -> Self {
+        bridge::reset_env_overlay();
         let mut fns = HashMap::new();
         for f in &program.functions {
             fns.insert(f.name, f);
