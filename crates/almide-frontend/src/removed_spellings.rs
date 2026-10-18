@@ -18,7 +18,9 @@
 
 use std::sync::OnceLock;
 
-const LEDGER: &str = include_str!("../../../proofs/dialect-epochs.toml");
+// The committed copy of `proofs/dialect-epochs.toml`, refreshed by build.rs
+// inside a checkout (#3361).
+const LEDGER: &str = include_str!("generated/dialect-epochs.toml");
 
 /// What became of one removed spelling.
 #[derive(Debug, Clone, PartialEq, Eq)]

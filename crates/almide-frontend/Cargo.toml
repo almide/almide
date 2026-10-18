@@ -10,7 +10,7 @@ almide-base = { path = "../almide-base" }
 almide-lang = { path = "../almide-lang" }
 almide-ir = { path = "../almide-ir" }
 serde = { version = "1", features = ["derive"] }
-# removed_spellings.rs reads proofs/dialect-epochs.toml.
+# removed_spellings.rs reads the dialect ledger (src/generated/dialect-epochs.toml).
 toml = "1.1"
 
 [build-dependencies]

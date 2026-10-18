@@ -45,6 +45,7 @@ COPIES=(
   "crates/almide-types/buildscript/in_checkout.rs crates/almide-codegen/buildscript/in_checkout.rs"
   "crates/almide-types/buildscript/in_checkout.rs crates/almide-egg-lab/buildscript/in_checkout.rs"
   "crates/almide-types/buildscript/in_checkout.rs crates/almide-interp/buildscript/in_checkout.rs"
+  "crates/almide-types/buildscript/in_checkout.rs crates/almide-frontend/buildscript/in_checkout.rs"
   "crates/almide-codegen/buildscript/fusion_parse.rs crates/almide-egg-lab/buildscript/fusion_parse.rs"
 )
 for pair in "${COPIES[@]}"; do
@@ -162,13 +163,14 @@ GENERATED=(
   crates/almide-codegen/src/generated
   crates/almide-egg-lab/src/generated
   crates/almide-interp/src/generated
+  crates/almide-frontend/src/generated
 )
 if [ "$MODE" = "--regen" ]; then
   # A recompiled build script reruns; touching the shared module recompiles
   # all four, whatever their rerun-if-changed lists say.
-  touch crates/almide-{types,codegen,egg-lab,interp}/buildscript/in_checkout.rs
+  touch crates/almide-{types,codegen,egg-lab,interp,frontend}/buildscript/in_checkout.rs
   # almide-codegen pulls almide-types and almide-egg-lab; almide-interp is apart.
-  cargo build -p almide-codegen -p almide-interp
+  cargo build -p almide-codegen -p almide-interp -p almide-frontend
   drift=$(git status --porcelain -- "${GENERATED[@]}")
   if [ -n "$drift" ]; then
     echo "$drift"
