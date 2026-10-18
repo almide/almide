@@ -188,13 +188,13 @@
 108	86	1398	108	spec/wasm_cross/fallible_hof_recursive_callee.almd
 470	444	6607	470	spec/wasm_cross/fallible_hof_release_matrix.almd
 13	0	168	13	spec/wasm_cross/fallible_tuple_value_tail.almd
-5	3	101	3	spec/wasm_cross/fan_any_allfail.almd
-30	12	318	30	spec/wasm_cross/fan_any_early_winner.almd
+15	7	131	15	spec/wasm_cross/fan_any_allfail.almd
+30	7	272	30	spec/wasm_cross/fan_any_early_winner.almd
 13	2	140	13	spec/wasm_cross/fan_arm_unwrap_or.almd
 5	2	70	2	spec/wasm_cross/fan_block_err_list_order.almd
 46	20	518	22	spec/wasm_cross/fan_block_rc_closure_capture.almd
-46	17	416	46	spec/wasm_cross/fan_deterministic.almd
-38	13	453	38	spec/wasm_cross/fan_effect_mapper.almd
+46	16	416	46	spec/wasm_cross/fan_deterministic.almd
+40	15	469	40	spec/wasm_cross/fan_effect_mapper.almd
 ~	spec/wasm_cross/fan_effect_mapper_capability.almd
 3	0	48	0	spec/wasm_cross/fan_map_all_workers_abort_one_line.almd
 10	4	153	7	spec/wasm_cross/fan_map_err.almd
@@ -205,7 +205,7 @@
 201	113	5338	201	spec/wasm_cross/fan_map_parallel_scalar.almd
 10	4	152	7	spec/wasm_cross/fan_map_worker_abort_keeps_stdout.almd
 ~	spec/wasm_cross/fan_prefetch_fs.almd
-5	1	72	5	spec/wasm_cross/fan_pure_thunks.almd
+5	0	72	5	spec/wasm_cross/fan_pure_thunks.almd
 20	7	328	20	spec/wasm_cross/fan_race_mapper.almd
 18	4	217	18	spec/wasm_cross/fan_race_walled_program.almd
 ~	spec/wasm_cross/fan_settle_tuple.almd
@@ -397,7 +397,7 @@
 767	744	9255	767	spec/wasm_cross/leak_free_map_walk_exit.almd
 43	37	483	43	spec/wasm_cross/leak_free_propagating_literal_operand.almd
 62	25	758	62	spec/wasm_cross/leak_free_reader_temporaries.almd
-65	32	698	65	spec/wasm_cross/leak_free_result_option_carriers.almd
+67	34	706	67	spec/wasm_cross/leak_free_result_option_carriers.almd
 970	951	8131	970	spec/wasm_cross/leak_free_spread_produced_base.almd
 91	73	948	91	spec/wasm_cross/let_bound_closure_scope.almd
 7	2	111	7	spec/wasm_cross/let_unwrap_propagation.almd
@@ -945,7 +945,7 @@
 0	0	0	0	spec/wasm_cross/while_loops.almd
 11	5	62	11	spec/wasm_cross/whilep_str.almd
 140	0	1120	140	spec/wasm_cross/wide_function_body.almd
-91	59	978	91	spec/wasm_cross/witness_straightline.almd
+93	61	986	93	spec/wasm_cross/witness_straightline.almd
 15	1	643	15	spec/wasm_cross/zip_view_shape.almd
 4275	4208	342160	4275	spec/wasm_cross/zlib_selfhost.almd
 2	0	52	0	spec/wasm_fail/effect_err_aborts_both_legs.almd

@@ -183,8 +183,6 @@ call:env.set
 call:env.sleep_ms
 call:env.temp_dir
 call:eprintln
-call:fan.any
-call:fan.any_map
 call:fan.map
 call:float.abs
 call:float.ceil
@@ -395,6 +393,9 @@ call:list.__almd_mono21___fallible_find_index__Int_cString
 call:list.__almd_mono21___fallible_take_while__Int_cString
 call:list.__almd_mono4_tail__Tup_lFloat_cBool_r
 call:list.__almd_mono4_tail___nPt
+call:list.__almd_mono8_find_map__Int_cInt
+call:list.__almd_mono8_find_map__Int_cString
+call:list.__almd_mono8_find_map__String_cString
 call:list.all
 call:list.any
 call:list.binary_search

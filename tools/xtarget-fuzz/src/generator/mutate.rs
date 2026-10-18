@@ -184,7 +184,7 @@ fn collect_almd(
         // Effect/nondeterminism screen (last gate before admission): a
         // corpus file referencing the effectful or nondeterministic
         // surface (`fs.*`, `process.*`, `http.*`, `net.*`, a clock, RNG,
-        // `fan.race/any/timeout`, …) can run differently on each target —
+        // `fan.min/any/timeout`, …) can run differently on each target —
         // or one target cannot perform the effect at all — so mutating it
         // would manufacture spurious "divergences". The synthesis path
         // denies the same surface; this mirrors that decision via the
