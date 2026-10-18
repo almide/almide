@@ -6,6 +6,7 @@ use almide_ir::IrExpr;
 use wasm_encoder::{BlockType, ValType};
 
 use crate::emitter::Emitter;
+use crate::list_range_head::LoopSrc;
 use crate::*;
 
 #[path = "list_zip.rs"]
@@ -533,9 +534,14 @@ impl Emitter<'_> {
         // result list holds — a borrowed body result (the seed, the
         // previous accumulator) takes its share before the push (fuzz
         // 20260910: `scan(xs, s, (a, x) => a)` pushed one block twice).
+        // The source before the seed, as native evaluates them (#2045); a
+        // seed that runs code keeps the source alive across it.
+        let src = self.loop_src_open_block(xs, init)?;
         self.lower_arg(init, Some(b_ty), ArgMode::Borrow)?;
         self.f.instructions().local_set(params[0]);
-        let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
+        let LoopSrc::Block { elem, base: bh, count: ch, idx: ih, .. } = src else {
+            return unsup("scan-source");
+        };
         let hacc = self.hold_i32()?;
         self.f.instructions().i32_const(0).call(F_ALLOC).local_set(hacc);
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
@@ -559,9 +565,8 @@ impl Emitter<'_> {
         self.f.instructions().call(push).local_set(hacc);
         self.hof_step(ih);
         self.f.instructions().local_get(hacc);
-        for _ in 0..4 {
-            self.release_i32();
-        }
+        self.release_i32();
+        self.loop_src_close(src);
         Ok(Some(Lowered::owned(SliceTy::List(self.types.intern(b_ty)))))
     }
 

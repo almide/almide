@@ -480,7 +480,13 @@ impl Emitter<'_> {
         &mut self,
         xs: &IrExpr,
     ) -> Result<(SliceTy, u32, u32, u32), EmitError> {
-        let elem = match self.lower_arg(xs, None, ArgMode::Borrow)? {
+        let got = self.lower_arg(xs, None, ArgMode::Borrow)?;
+        self.hof_loop_header(got)
+    }
+
+    /// [`Self::hof_loop_open`] over a block already on the stack.
+    pub(crate) fn hof_loop_header(&mut self, got: SliceTy) -> Result<(SliceTy, u32, u32, u32), EmitError> {
+        let elem = match got {
             // Set is layout-identical; order-preserving HOFs apply as-is.
             SliceTy::List(h) | SliceTy::Set(h) => self.types.el(h),
             other => return unsup(&format!("list-hof-of:{other:?}")),
@@ -653,7 +659,7 @@ impl Emitter<'_> {
         // The source is evaluated before the init, in argument order, as
         // native does (#2045: `list.range(lo(), hi())` printed after the
         // init's line here); a `list.range` head is counted, not built.
-        let src = self.loop_src_open(xs)?;
+        let src = self.loop_src_open(xs, init)?;
         self.lower_arg(init, Some(b), ArgMode::Retain)?;
         self.f.instructions().local_set(acc_p);
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);

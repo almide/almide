@@ -189,11 +189,8 @@ impl Emitter<'_> {
         // The source first, then the init — argument order, as native
         // evaluates them; a `list.range` head is counted, not built (#2045).
         let src = match enumerated {
-            Some(inner) => {
-                let (elem, base, count, idx) = self.hof_loop_open(inner)?;
-                LoopSrc::Block { elem, base, count, idx }
-            }
-            None => self.loop_src_open(cur)?,
+            Some(inner) => self.loop_src_open_block(inner, init)?,
+            None => self.loop_src_open(cur, init)?,
         };
         self.lower_arg(init, Some(acc_ty), ArgMode::Retain)?;
         self.f.instructions().local_set(fold_params[0]);

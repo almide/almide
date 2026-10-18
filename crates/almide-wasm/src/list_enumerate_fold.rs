@@ -66,10 +66,13 @@ impl Emitter<'_> {
         let pair_ty = self.types.tuple(vec![INT, elem]);
         let def = self.types.tuple_def(pair_ty);
         let (index_offset, value_offset, size) = (def.fields[0].1, def.fields[1].1, def.size);
-        self.lower_arg(init, Some(acc), ArgMode::Retain)?;
-        self.f.instructions().local_set(acc_p);
+        // The source, snapshotted, before the init — argument order, as
+        // native evaluates them (#2045); the snapshot is taken before the
+        // init runs, so an init that rebinds the source cannot reach it.
         let (_, base, count, index) = self.hof_loop_open(&args[0])?;
         self.f.instructions().local_get(base).call(F_BLOCK_COPY).local_set(base);
+        self.lower_arg(init, Some(acc), ArgMode::Retain)?;
+        self.f.instructions().local_set(acc_p);
         self.f.instructions().i32_const(size as i32).call(F_ALLOC).local_set(pair_p);
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
         self.f.instructions().local_get(index).local_get(count).i32_ge_u().br_if(1);
