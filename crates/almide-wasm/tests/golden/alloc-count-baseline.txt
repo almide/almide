@@ -259,12 +259,14 @@
 104	95	16960	104	spec/wasm_cross/fuel_cut_releases_frame.almd
 0	0	0	0	spec/wasm_cross/fuel_divergence_cut.almd
 80	71	13440	80	spec/wasm_cross/fuel_dyn_charge.almd
+14	8	66	14	spec/wasm_cross/fuel_interp_uncharged.almd
 0	0	0	0	spec/wasm_cross/fuel_race_boundary.almd
 6	0	96	6	spec/wasm_cross/fuel_race_err_skip.almd
 0	0	0	0	spec/wasm_cross/fuel_timeout_ends.almd
 0	0	0	0	spec/wasm_cross/fuel_trap_cut.almd
 0	0	0	0	spec/wasm_cross/fuel_trap_window.almd
 2	0	32	2	spec/wasm_cross/fuel_var_budget.almd
+0	0	0	0	spec/wasm_cross/fuel_wrapper_entry_exempt.almd
 0	0	0	0	spec/wasm_cross/fuel_zero_budget_inline.almd
 3	0	56	1	spec/wasm_cross/fusion_two_aborting_stages_staged.almd
 8	2	66	8	spec/wasm_cross/fuzz_found_nested_interp_capture.almd
