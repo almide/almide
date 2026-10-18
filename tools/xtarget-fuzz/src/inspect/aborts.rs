@@ -34,7 +34,7 @@
 //!
 //! Every criterion has its own reading here; none is skipped.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
@@ -168,31 +168,98 @@ pub fn transcript(code: Option<i32>, stdout: &str, stderr: &str) -> String {
     out
 }
 
-/// The judge's artifact of a test-file probe: the source itself, under a
-/// name that carries its lane (`p<hash>.nativetest.almd` /
-/// `p<hash>.wasmtest.almd`), so `source_of` still finds `p<hash>.almd`.
-pub(super) fn test_art(file: &Path, src: &str, wasm: bool) -> Result<std::path::PathBuf, String> {
-    let art = file.with_extension(if wasm { "wasmtest.almd" } else { "nativetest.almd" });
-    std::fs::write(&art, src).map_err(|e| e.to_string())?;
-    Ok(art)
+/// The judge's artifact of a test-file probe, named so `source_of` still
+/// finds `p<hash>.almd`:
+///
+/// - wasm: the source (`p<hash>.wasmtest.almd`), run by `almide test
+///   --target wasm`. That compiles in process on every run (no rustc), and the
+///   counted judge reads it clean (rms 0.0–0.1% on GCE), so it is unchanged.
+/// - native: the libtest binary `almide test --target native` builds
+///   (`p<hash>.nativetest.bin`), built ONCE here, outside the meter, and then
+///   run directly ([`test_art_cmd`]). Counting `almide test` itself counted a
+///   fresh rustc compile per run (the world gives each run its own TMPDIR,
+///   so the build cache never hits): a ~1.5e8-instruction intercept that
+///   wobbled enough to bend the n fit (GCE batch 28). The abort-site children
+///   re-execute this same binary, so they are still counted.
+pub(super) fn test_art(ctx: &Ctx, file: &Path, src: &str, wasm: bool) -> Result<PathBuf, String> {
+    if wasm {
+        let art = file.with_extension("wasmtest.almd");
+        std::fs::write(&art, src).map_err(|e| e.to_string())?;
+        return Ok(art);
+    }
+    let art = file.with_extension("nativetest.bin");
+    if art.is_file() {
+        return Ok(art);
+    }
+    let build = file.with_extension("nativetest.d");
+    let _ = std::fs::remove_dir_all(&build);
+    let tmp = build.join("tmp");
+    std::fs::create_dir_all(&tmp).map_err(|e| e.to_string())?;
+    let src_file = build.join(format!("{}_test.almd", file.file_stem().map(|s| s.to_string_lossy()).unwrap_or_default()));
+    std::fs::write(&src_file, src).map_err(|e| e.to_string())?;
+    let out = Command::new(&ctx.almide)
+        .arg("test")
+        .arg(&src_file)
+        .args(["--target", "native"])
+        .env("TMPDIR", &tmp)
+        .current_dir(&build)
+        .output()
+        .map_err(|e| format!("almide test did not run: {e}"))?;
+    if !out.status.success() {
+        let t = output_transcript(&out);
+        let _ = std::fs::remove_dir_all(&build);
+        return Err(format!("the test did not pass at build: {}", t.replace('\n', " / ")));
+    }
+    let bin = built_test_bin(&tmp);
+    let copied = bin.and_then(|b| std::fs::copy(&b, &art).map_err(|e| format!("{}: {e}", b.display())));
+    let _ = std::fs::remove_dir_all(&build);
+    copied.map(|_| art)
 }
+
+/// The libtest binary a native `almide test` left in its build cache:
+/// `$TMPDIR/almide-test/native/<stem>-<path hash>/almide_test_bin`
+/// (`src/cli/test_scratch.rs`). Exactly one, or the layout moved.
+pub fn built_test_bin(tmp: &Path) -> Result<PathBuf, String> {
+    let root = tmp.join("almide-test").join("native");
+    let found: Vec<PathBuf> = std::fs::read_dir(&root)
+        .map_err(|e| format!("no native test cache at {}: {e}", root.display()))?
+        .filter_map(|d| d.ok())
+        .map(|d| d.path().join(TEST_BIN))
+        .filter(|p| p.is_file())
+        .collect();
+    match found.as_slice() {
+        [one] => Ok(one.clone()),
+        _ => Err(format!("expected one {TEST_BIN} under {}, found {}", root.display(), found.len())),
+    }
+}
+
+const TEST_BIN: &str = "almide_test_bin";
 
 /// Some(wasm) for an artifact [`test_art`] named, else None.
 pub(super) fn test_art_leg(art: &Path) -> Option<bool> {
     let name = art.to_string_lossy();
     if name.ends_with(".wasmtest.almd") {
         Some(true)
-    } else if name.ends_with(".nativetest.almd") {
+    } else if name.ends_with(".nativetest.bin") {
         Some(false)
     } else {
         None
     }
 }
 
-/// `almide test <art> --target <leg>`, without the world (the caller enters it).
-pub(super) fn test_art_cmd(ctx: &Ctx, art: &Path, wasm: bool) -> Command {
-    let mut c = Command::new(&ctx.almide);
-    c.arg("test").arg(art).args(["--target", if wasm { "wasm" } else { "native" }]);
+/// The run of a test artifact, without the world (the caller enters it;
+/// `cwd` is the world's directory). wasm: `almide test <art> --target wasm`.
+/// native: the binary with the argv and env `almide test` gives it
+/// (`src/cli/test_report.rs` HARNESS_FLAGS, `src/cli/run.rs`
+/// `binary_command`: RUST_MIN_STACK and ALMIDE_CWD, the launcher's cwd).
+pub(super) fn test_art_cmd(ctx: &Ctx, art: &Path, wasm: bool, cwd: &Path) -> Command {
+    if wasm {
+        let mut c = Command::new(&ctx.almide);
+        c.arg("test").arg(art).args(["--target", "wasm"]);
+        return c;
+    }
+    let mut c = Command::new(art);
+    c.args(["--nocapture", "--test-threads=1"]).env("RUST_MIN_STACK", "8388608").env("ALMIDE_CWD", cwd);
     c
 }
 
@@ -203,7 +270,7 @@ pub(super) fn output_transcript(out: &std::process::Output) -> String {
 }
 
 pub(super) fn run_test_art(ctx: &Ctx, art: &Path, wasm: bool, world: &World) -> Result<String, String> {
-    let mut c = test_art_cmd(ctx, art, wasm);
+    let mut c = test_art_cmd(ctx, art, wasm, &world.dir);
     world.enter(&mut c);
     let out = c.output().map_err(|e| format!("almide test did not run: {e}"))?;
     let t = output_transcript(&out);
@@ -458,6 +525,50 @@ mod tests {
     #[test]
     fn a_failure_without_a_block_keeps_its_first_error_line() {
         assert_eq!(transcript(Some(1), "", "warning: x\nerror[E0277]: the `?` operator\nmore\n"), "fail\nerror[E0277]: the `?` operator\n");
+    }
+
+    #[test]
+    fn the_native_test_binary_is_found_where_almide_test_leaves_it() {
+        let tmp = std::env::temp_dir().join(format!("xf-aborts-bin-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let cache = tmp.join("almide-test").join("native");
+        assert!(built_test_bin(&tmp).unwrap_err().starts_with("no native test cache"));
+        std::fs::create_dir_all(cache.join("p0-1a2b")).unwrap();
+        assert!(built_test_bin(&tmp).unwrap_err().contains("found 0"));
+        std::fs::write(cache.join("p0-1a2b").join(TEST_BIN), "bin").unwrap();
+        assert_eq!(built_test_bin(&tmp).unwrap(), cache.join("p0-1a2b").join(TEST_BIN));
+        std::fs::create_dir_all(cache.join("p1-3c4d")).unwrap();
+        std::fs::write(cache.join("p1-3c4d").join(TEST_BIN), "bin").unwrap();
+        assert!(built_test_bin(&tmp).unwrap_err().contains("found 2"), "two builds are ambiguous");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// The counted native run is the built binary with `almide test`'s argv
+    /// and env — never `almide test` (whose rustc compile the meter counted).
+    #[test]
+    fn a_native_test_artifact_runs_the_binary_as_almide_test_does() {
+        let ctx = Ctx {
+            almide: "/x/almide".into(),
+            wasmtime: "wasmtime".into(),
+            dir: "/tmp/d".into(),
+            icount: true,
+            memshim: None,
+            max_k: 1,
+            calibrate_scale: 1.0,
+        };
+        let art = Path::new("/tmp/d/p00ab.nativetest.bin");
+        assert_eq!(test_art_leg(art), Some(false));
+        assert_eq!(test_art_leg(Path::new("/tmp/d/p00ab.wasmtest.almd")), Some(true));
+        assert_eq!(test_art_leg(Path::new("/tmp/d/p00ab.nativetest.almd")), None, "the source is no longer a native artifact");
+        assert_eq!(super::super::source_of(art), "", "source_of strips every kind suffix");
+        let c = test_art_cmd(&ctx, art, false, Path::new("/w"));
+        assert_eq!(c.get_program(), art.as_os_str());
+        assert_eq!(c.get_args().collect::<Vec<_>>(), ["--nocapture", "--test-threads=1"]);
+        let envs: Vec<_> = c.get_envs().map(|(k, v)| (k.to_string_lossy().into_owned(), v.map(|v| v.to_string_lossy().into_owned()))).collect();
+        assert!(envs.contains(&("RUST_MIN_STACK".into(), Some("8388608".into()))) && envs.contains(&("ALMIDE_CWD".into(), Some("/w".into()))), "{envs:?}");
+        let w = test_art_cmd(&ctx, Path::new("/tmp/d/p00ab.wasmtest.almd"), true, Path::new("/w"));
+        assert_eq!(w.get_program(), "/x/almide");
+        assert_eq!(w.get_args().collect::<Vec<_>>(), ["test", "/tmp/d/p00ab.wasmtest.almd", "--target", "wasm"]);
     }
 
     /// The joined criterion is what the stamp gate reads: one string, PASS
