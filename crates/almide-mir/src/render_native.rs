@@ -322,6 +322,8 @@ fn render_fn(
     // side effect), so skipping an unused one is sound — and it keeps the
     // subset honest: a USED Handle still walls below.
     let used = native_used_values(func);
+    // #3532: the if-as-value joins realized as a borrow of the selected value.
+    let borrows = crate::borrow_join::borrow_joins(func);
     if is_main {
         used_shims.push(almide_base::native_stack_guard::NATIVE_STACK_GUARD);
         used_shims.push(STACK_GUARD_GLUE_SHIM);
@@ -348,6 +350,9 @@ fn render_fn(
                 ..
             } if !used.contains(d) => {
                 line!("// dead handle elided");
+            }
+            Op::Dup { dst, src } if borrows.arms.contains(dst) => {
+                render_borrowed_arm(dst, src, &mut tys, &mut out, indent)?
             }
             // Rung-5 closures slab: a FuncRef is the lambda's DISPATCH-TABLE index
             // (the name-sorted position shared with the `__almd_ci_*` tables).
@@ -421,6 +426,7 @@ fn render_fn(
                     },
                 )? || render_native_flow_op(
                     other,
+                    &borrows.joins,
                     &mut tys,
                     &mut out,
                     &mut indent,
@@ -656,6 +662,7 @@ fn render_native_call_op(op: &Op, s: OpSink<'_>) -> Result<bool, LowerError> {
 /// [`render_fn`] op match.
 fn render_native_flow_op(
     op: &Op,
+    borrows: &std::collections::BTreeSet<ValueId>,
     tys: &mut BTreeMap<ValueId, NTy>,
     out: &mut String,
     indent: &mut usize,
@@ -669,13 +676,13 @@ fn render_native_flow_op(
     }
     match op {
         Op::DropVariant { .. } | Op::Drop { .. } | Op::DropListStr { .. } => {
-            return render_native_drop_op(op, tys, out, *indent)
+            return render_native_drop_op(op, borrows, tys, out, *indent)
         }
         // Pure ownership bookkeeping — no native code.
         Op::Consume { .. } | Op::Borrow { .. } | Op::MakeUnique { .. } => {}
         Op::IfThen { cond, dst } => render_if_then(cond, dst, tys, out, indent, if_stack),
-        Op::Else { val } => render_else(val, tys, out, indent, if_stack)?,
-        Op::EndIf { val } => render_end_if(val, tys, out, indent, if_stack)?,
+        Op::Else { val } => render_else(val, borrows, tys, out, indent, if_stack)?,
+        Op::EndIf { val } => render_end_if(val, borrows, tys, out, indent, if_stack)?,
         Op::LoopStart => {
             line!("loop {{");
             *indent += 1;
@@ -712,6 +719,7 @@ fn render_native_flow_op(
 /// outside-the-rung-subset message, exactly as the former inline match did.
 fn render_native_drop_op(
     op: &Op,
+    borrows: &std::collections::BTreeSet<ValueId>,
     tys: &BTreeMap<ValueId, NTy>,
     out: &mut String,
     indent: usize,
@@ -738,6 +746,12 @@ fn render_native_drop_op(
         },
         // Drop is ERASED: Rust frees at scope end (or at reassignment for a
         // loop-carried handle). `verify_ownership` above certified balance.
+        // A borrow join (#3532) holds a reference: its borrow simply ends.
+        Op::Drop { v } | Op::DropListStr { v }
+            if borrows.contains(v) && matches!(tys.get(v), Some(NTy::StrRef | NTy::VecRef)) =>
+        {
+            line!("// drop: borrowed join, scope-end");
+        }
         Op::Drop { v } => {
             if matches!(tys.get(v), Some(NTy::StrRef | NTy::VecRef)) {
                 return Err(wall(
@@ -771,6 +785,31 @@ fn render_native_drop_op(
         _ => return Ok(false),
     }
     Ok(true)
+}
+
+/// An arm `Dup` that feeds a borrow join (#3532): the share is a Rust shared
+/// borrow of `src`. A source the render does not hold as a list or String
+/// keeps the ordinary [`render_dup`] (its join then renders owned as well).
+fn render_borrowed_arm(
+    dst: &ValueId,
+    src: &ValueId,
+    tys: &mut BTreeMap<ValueId, NTy>,
+    out: &mut String,
+    indent: usize,
+) -> Result<(), LowerError> {
+    let (t, ty_name, amp) = match tys.get(src) {
+        Some(NTy::Vec) => (NTy::VecRef, "&[i64]", "&"),
+        Some(NTy::VecRef) => (NTy::VecRef, "&[i64]", ""),
+        Some(NTy::Str) => (NTy::StrRef, "&str", "&"),
+        Some(NTy::StrRef) => (NTy::StrRef, "&str", ""),
+        _ => return render_dup(dst, src, tys, out, indent),
+    };
+    tys.insert(*dst, t);
+    for _ in 0..indent {
+        out.push_str("    ");
+    }
+    writeln!(out, "let {}: {ty_name} = {amp}{};", var(*dst), var(*src)).unwrap();
+    Ok(())
 }
 
 /// `Op::Dup` — mint a fresh handle from `src` per its NTy (verbatim arm body

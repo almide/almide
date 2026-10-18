@@ -29,6 +29,7 @@
 pub(crate) mod trace;
 
 pub mod alias_safety;
+pub(crate) mod borrow_join;
 pub mod certificate;
 pub mod charge_probe;
 pub mod coown_names;
