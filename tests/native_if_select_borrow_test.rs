@@ -90,7 +90,9 @@ const SOURCE_WRITTEN_WHILE_LIVE: &str = r#"effect fn main() -> Unit = {
 
 /// The same reads as test blocks, for the walker leg `almide test` runs:
 /// selections over `let` locals that borrow, one whose source moves while it
-/// is live, and the written-source program above.
+/// is live, the written-source program above, and selections over a
+/// selection, a loop binder and a head-read binder (each arm's `&` must type
+/// alike, so a binder already bound by reference stays a copy).
 const WALKER_TESTS: &str = r#"fn lens(n: Int) -> List[Int] = {
   let x = list.range(0, 3)
   let x2 = list.range(0, 2)
@@ -154,6 +156,47 @@ test "a String selection reads the chosen String" {
 
 test "a selection keeps its value when a source is rebound while it is live" {
   assert_eq(written(3), [3, 2, 5])
+}
+
+fn nested(n: Int) -> Int = {
+  let x = list.range(0, 3)
+  let x2 = list.range(0, 2)
+  var acc = 0
+  var i = 0
+  while i < n {
+    let y = if i % 2 == 0 then x else x2
+    let z = if i % 3 == 0 then y else x
+    acc = acc + list.len(z) + list.len(y)
+    i = i + 1
+  }
+  acc
+}
+
+fn rows(xs: List[List[Int]], other: List[Int]) -> Int = {
+  var acc = 0
+  for row in xs {
+    let y = if list.len(row) > 1 then row else other
+    acc = acc + list.len(y)
+  }
+  acc
+}
+
+fn heads(xs: List[List[Int]], other: List[Int]) -> Int = {
+  let h = xs[0]
+  let y = if list.len(h) > 1 then h else other
+  list.len(y) + list.len(h)
+}
+
+test "nested selections" {
+  assert_eq(nested(6), 32)
+}
+
+test "a loop binder selection" {
+  assert_eq(rows([[1, 2], [3]], [7, 8, 9]), 5)
+}
+
+test "a head binder selection" {
+  assert_eq(heads([[1, 2], [3]], [7, 8, 9]), 4)
 }
 "#;
 
@@ -261,7 +304,7 @@ fn the_walker_selections_answer_their_tests() {
         .expect("spawn almide test");
     let log = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
     assert!(out.status.success(), "almide test:\n{log}");
-    assert!(log.contains("4 tests in 1 file"), "almide test ran a different count:\n{log}");
+    assert!(log.contains("7 tests in 1 file"), "almide test ran a different count:\n{log}");
 }
 
 #[test]
