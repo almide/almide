@@ -1,0 +1,124 @@
+// #3777: a `let` annotated `Result[..]` / `Option[..]` asks for the value, not
+// for propagation, so an `if` / `match` whose branches are Result values is
+// that value (ADR-0008: E041 is the UN-annotated binding). Every shape below
+// was E041 in an effect fn before the fix; the pure fn twins pin that the
+// same source means the same thing outside one.
+effect fn ok_call() -> Result[Int, String] = ok(7)
+
+effect fn fail_call() -> Result[Int, String] = err("boom")
+
+fn show(r: Result[Int, String]) -> String = match r {
+  ok(v) => "ok ${int.to_string(v)}",
+  err(e) => "err ${e}",
+}
+
+fn show_opt(o: Int?) -> String = match o {
+  some(v) => "some ${int.to_string(v)}",
+  none => "none",
+}
+
+effect fn if_of_bound_values(c: Bool) -> String = {
+  let a: Result[Int, String] = ok(1)
+  let b: Result[Int, String] = err("no")
+  let r: Result[Int, String] = if c then a else b
+  show(r)
+}
+
+effect fn if_of_calls(c: Bool) -> String = {
+  let r: Result[Int, String] = if c then ok_call() else fail_call()
+  show(r)
+}
+
+effect fn match_of_bound_values(n: Int) -> String = {
+  let a: Result[Int, String] = ok(2)
+  let b: Result[Int, String] = err("two")
+  let r: Result[Int, String] = match n {
+    0 => a,
+    _ => b,
+  }
+  show(r)
+}
+
+effect fn match_of_calls(n: Int) -> String = {
+  let r: Result[Int, String] = match n {
+    0 => ok_call(),
+    _ => fail_call(),
+  }
+  show(r)
+}
+
+effect fn nested_if(x: Int) -> String = {
+  let a: Result[Int, String] = ok(3)
+  let b: Result[Int, String] = err("b")
+  let r: Result[Int, String] = if x > 0 then if x > 1 then a else b
+  else {
+    let n = x + 1
+    if n > 0 then b else a
+  }
+  show(r)
+}
+
+effect fn var_of_if(c: Bool) -> String = {
+  let a: Result[Int, String] = ok(4)
+  var r: Result[Int, String] = if c then a else fail_call()
+  let first = show(r)
+  r = ok(5)
+  "${first} ${show(r)}"
+}
+
+effect fn option_branches(c: Bool) -> String = {
+  let a: Int? = some(6)
+  let b: Int? = none
+  let o: Int? = if c then a else b
+  let m: Int? = match c {
+    true => b,
+    false => a,
+  }
+  "${show_opt(o)} ${show_opt(m)}"
+}
+
+fn pure_if(c: Bool) -> String = {
+  let a: Result[Int, String] = ok(8)
+  let b: Result[Int, String] = err("pure")
+  let r: Result[Int, String] = if c then a else b
+  let m: Result[Int, String] = match c {
+    true => b,
+    false => a,
+  }
+  "${show(r)} ${show(m)}"
+}
+
+test "if over Result values bound to a Result-annotated let" {
+  assert_eq(if_of_bound_values(true) ?? "x", "ok 1")
+  assert_eq(if_of_bound_values(false) ?? "x", "err no")
+  assert_eq(if_of_calls(true) ?? "x", "ok 7")
+  assert_eq(if_of_calls(false) ?? "x", "err boom")
+}
+
+test "match over Result values bound to a Result-annotated let" {
+  assert_eq(match_of_bound_values(0) ?? "x", "ok 2")
+  assert_eq(match_of_bound_values(1) ?? "x", "err two")
+  assert_eq(match_of_calls(0) ?? "x", "ok 7")
+  assert_eq(match_of_calls(1) ?? "x", "err boom")
+}
+
+test "nested if and a block branch keep the Result" {
+  assert_eq(nested_if(2) ?? "x", "ok 3")
+  assert_eq(nested_if(1) ?? "x", "err b")
+  assert_eq(nested_if(0) ?? "x", "err b")
+}
+
+test "an annotated var takes the same rule" {
+  assert_eq(var_of_if(true) ?? "x", "ok 4 ok 5")
+  assert_eq(var_of_if(false) ?? "x", "err boom ok 5")
+}
+
+test "Option branches in an effect fn" {
+  assert_eq(option_branches(true) ?? "x", "some 6 none")
+  assert_eq(option_branches(false) ?? "x", "none some 6")
+}
+
+test "a pure fn reads the same source the same way" {
+  assert_eq(pure_if(true), "ok 8 err pure")
+  assert_eq(pure_if(false), "err pure ok 8")
+}
