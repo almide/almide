@@ -778,12 +778,20 @@ Rules:
 - No `var` capture from outer scope (prevents data races)
 
 Library forms:
-- `fan.map(xs, f)` -- map over a collection via the fan surface (deterministic, sequential in list order)
-- `fan.any(thunks)` -- the first thunk whose result is `Ok`, in list order
+- `fan.map(xs, f)` -- map over a collection via the fan surface (every element runs; results in list order)
+- `fan.settle(xs, f)` -- every element's Result, in list order
+- `fan.min(clock, xs, f)` -- one element selected by the clock (§13.5)
 
-(`fan.race` was REMOVED in 0.42.0: under list-order semantics it was exactly `thunks[0]()`,
-so the name promised timing behaviour the language deliberately does not have. Referencing it
-is a check-time `E027` tombstone with a migration hint.)
+The first element whose result is `Ok`, in list order, is NOT a fan form: it is
+sequential, so it is `list.find_map(xs, (x) => f(x)?) ?? fallback` (`?` turns an
+element's `Err` into `none`, so the element is skipped and later elements never
+run). The block spelling is a `??` chain: `a() ?? b() ?? fallback`.
+
+(The thunk-list CALL forms `fan.race(thunks)` / `fan.any(thunks)` / `fan.settle(thunks)` are
+check-time `E027` tombstones with a migration hint, as are `fan.race { }` (renamed `fan.min`
+in dialect epoch 14) and `fan.any { }` / `fan.any(xs, f)` (removed in the same epoch; a `??`
+chain and `list.find_map` say the same thing). Under list-order semantics the old
+`fan.race(thunks)` was exactly `thunks[0]()`.)
 
 ### 9.10 Pipe
 
@@ -1031,24 +1039,29 @@ effect fn main() -> Result[Unit, String] = {
 ```
 
 Results are returned as a tuple. All siblings are joined — nothing is cancelled. If any
-expression returns `Err`, the block's value is the first `Err` in list order.
+expression returns `Err`, the block's value is the first `Err` in list order (the lowest
+index, whichever arm failed first in time).
 
-### 13.2 fan.map and the block heads fan.any / fan.settle
+### 13.2 fan.map and the block head fan.settle
 
 ```
 let results = fan.map(urls, (url) => fetch(url))    // Result[List[B], String], list order
-let first   = fan.any { fetch_a(); fetch_b() }      // Result[T, String]: first Ok in SOURCE order
-let all     = fan.settle { job_a(); job_b() }       // List[Result[T, String]], list order
+let all     = fan.settle { job_a(), job_b() }       // tuple of per-arm Results, arm order
+let first   = fetch_a() ?? fetch_b() ?? fallback    // NOT a fan form: first Ok in SOURCE order
 ```
 
-- `fan.map(xs, f)` maps in deterministic list order; the first `Err` (in list
-  order) propagates as the whole map's `Err`.
-- `fan.any { ... }` — arms are single calls. The value is the first `Ok` in
-  source order; `Err` arms are skipped; all-`Err` yields `Err`.
-- `fan.settle { ... }` — every arm runs to completion; the RESULT list is in
-  arm order (deterministic) even where the native leg uses real threads.
+- `fan.map(xs, f)` runs every element; the result is in list order, and the
+  first `Err` in list order is the whole map's `Err`.
+- `fan.settle { ... }` — every arm runs to completion, in arm order on every
+  target (it lowers to a tuple); the result is the tuple of per-arm Results.
+- The first `Ok` in source order is a `??` chain (the right side is evaluated
+  only when the left side failed, so candidates after the winner never run);
+  over a list it is `list.find_map(xs, (x) => f(x)?) ?? fallback`. Neither is a
+  fan form, because the selection is sequential by definition. `fan.any { }`
+  / `fan.any(xs, f)` were removed in dialect epoch 14 (E027 names both
+  replacements; ADR-0028).
 - The thunk-list spellings `fan.any([...])` / `fan.settle([...])` were removed
-  (E027 names the block-form migration).
+  earlier (E027 names the migration).
 
 ### 13.3 Deterministic time: `Compute` and `Duration`
 
@@ -1068,7 +1081,9 @@ duration.ms(5000)   // Duration — wall-clock time (oracle-tier surfaces)
   both targets); an overflowing construction saturates to the maximum instead
   of wrapping.
 - Deterministic time is metered in charge units on a frozen abstract machine
-  (function entries and loop heads) and converted from declared nanoseconds by
+  (function entries — a loop-free, non-recursive callee's is exempt — loop
+  heads and the `+` string concatenation, never an interpolation; the same
+  table on every target since #3778) and converted from declared nanoseconds by
   a versioned calibration constant (CM-1). The contract is RATIO-ONLY: the
   declared time approximates the wall clock within a declared band (a standing
   CI gate measures it), but the METERING itself is exact and
@@ -1086,37 +1101,54 @@ let r = fan.bounded(compute.ms(100)) { work(input) } ?? fallback
 - The verdict is a function of the program and its inputs ONLY: the same
   program flips from `Ok` to `Err` at the same declared nanosecond on every
   target and every machine.
-- Nested budgets min-cap: an inner region can never spend more than the
-  enclosing region's remainder.
-- The body is checked in a PURE context; in v1 it must be a single function
-  call returning a plain (non-`Result`) value.
+- Budgets min-cap with an enclosing region (an inner region can never spend
+  more than the remainder). Source cannot nest regions today: a `fan.*` form
+  inside a region body is E007, because the body is pure.
+- The body is checked in a PURE context; it is a block returning a plain
+  (non-`Result`) value.
 
-### 13.5 fan.race — deterministic winner
+### 13.5 fan.min(clock) — one arm, selected by the clock you pass
 
 ```
-let w = fan.race { solve_fast(); solve_slow() } ?? fallback
-let b = fan.race(compute.us(50)) { a(); b() } ?? fallback   // per-arm budget
-let m = fan.race(xs, (x) => ok(solve(x))) ?? fallback       // mapper form
-let n = fan.race(compute.us(50), xs, (x) => ok(solve(x))) ?? fallback
+let b = fan.min(compute.us(50)) { a(), b() } ?? fallback              // least deterministic compute within the budget
+let n = fan.min(compute.us(50), xs, (x) => ok(solve(x))) ?? fallback  // mapper form, per-element budget
 ```
 
-- Every arm is metered on the deterministic clock; the winner is the arm with
-  the LEXICOGRAPHICALLY least `(spend, index)` — the cheapest arm, ties
-  resolved by source order. With a budget, arms whose spend exceeds it are
-  excluded; no admitted arm yields `Err`. Type: `Result[T, String]`.
+- The clock argument is REQUIRED. Its TYPE says what "least" is measured on,
+  and its value is the budget. `fan.min { … }` and `fan.min(xs, f)` are parse
+  errors ("fan.min requires a clock argument"): without the clock,
+  `fan.min { 3, 5 }` would read as the smallest value.
+- `Compute` clock (deterministic tier): every arm is metered on the
+  deterministic clock; the winner is the arm with the LEXICOGRAPHICALLY least
+  `(spend, index)` — the cheapest arm, ties resolved by source order. Arms
+  whose spend exceeds the budget are excluded; no admitted arm yields
+  `err("fan.min: no branch succeeded within budget")`. Type: `Result[T, String]`.
+  Every arm runs, one after another in source order. Arms are PURE (E006). An
+  arm that returns `Err` disqualifies itself.
 - The MAPPER form races one PURE 1-param lambda over a dynamic list: arm `i`
-  is `f(xs[i])`, index order is list order, and the budget (when given) is
-  per-element — the same law as the block form. The mapper must return a
-  `Result` (the mapper-form contract): `ok(v)` competes, `err(_)`
-  self-disqualifies the element. An empty list is the no-admitted-arm `Err`.
+  is `f(xs[i])`, index order is list order, and the budget is per-element —
+  the same law as the block form. The mapper must return a `Result` (the
+  mapper-form contract): `ok(v)` competes, `err(_)` self-disqualifies the
+  element. An empty list is the no-admitted-arm `Err`.
+- `Duration` clock (oracle tier) — DECIDED (ADR-0028, 2026-10-18), lands in a
+  follow-up (#3788); today it is a type error. The rule it will
+  have: the arms start together and the first to FINISH with `Ok` wins; the
+  arms may do I/O; one deadline is shared from entry (not per arm); the losers
+  are cancelled at their next charge site or I/O boundary and `fan.min` waits
+  for them before returning (structured, as Haskell `race`, Python `TaskGroup`,
+  Kotlin and Swift do; never JS's leave-it-running); a loser's performed
+  effects remain, its stdout is discarded, only the winner's value is
+  returned. Native runs the arms in parallel; wasm runs them in order until it
+  has async (arm 0 wins when it succeeds, a legal schedule); ω record/replay
+  pins the winning index.
 - History: an earlier spec revision promised both "results are identical on
   every target" (§13.1) and "the first arm to COMPLETE wins" (then-§13.2) —
   incompatible, since the second makes wall-clock scheduling observable. The
-  wall-clock race was removed in 0.42.0. `fan.race` returns with the winner
-  measured on the DECLARED deterministic clock, which makes both promises
-  true at once: the fast arm wins, and every target agrees on which arm that
-  is. Selecting a winner by wall clock is impossible in the deterministic
-  tier by theorem (T9), not by preference.
+  wall-clock race was removed in 0.42.0; the deterministic head came back as
+  `fan.race` and was renamed `fan.min` in dialect epoch 14 (`race` means
+  "first to finish" in every other ecosystem). On the `Compute` clock the
+  fast arm wins and every target agrees on which arm that is (T9); the
+  `Duration` clock is the oracle tier, where the winner is a host input.
 
 ### 13.6 fan.timeout — the oracle-tier wall-clock deadline
 
@@ -1128,23 +1160,31 @@ let t = fan.timeout(duration.ms(5000)) { work(input) } ?? fallback
   charge sites — never mid-operation (the Go-context cancellation model) —
   and nested deadlines min-cap on the absolute deadline.
 - The verdict is ω-RELATIVE: which check the deadline fires at is a host
-  input (ADR-0001 S8). A recorded ω replays byte-identically on every target
+  input (ADR-0001 S8). A recorded ω replays byte-identically
   (`ALMIDE_OMEGA_RECORD=1` to record on native, `ALMIDE_OMEGA=<n>` to
-  replay anywhere — the replay never reads the clock). Two ends are
+  replay — the replay never reads the clock). Today replay works on native
+  only; wasm ignores `ALMIDE_OMEGA` (#3781). Two ends are
   absolute: a deadline larger than the work always completes, and a
   diverging body under any finite deadline is always cut.
 
 ### 13.7 Rules
 
 - All `fan` forms only inside `effect fn` — pure functions cannot fork
-  (`fan.bounded` / `fan.race` bodies and arms are themselves checked PURE)
+  (`fan.bounded` / `fan.timeout` bodies and `fan.min(compute…)` arms are themselves checked PURE)
 - No `var` capture — only `let` bindings from outer scope (prevents data races)
 - No unstructured `spawn` — all concurrency is scoped
-- No cancellation, by design — a cancelled sibling's side effects would depend on when the
-  cancellation landed, which is exactly the scheduling dependence the model excludes. The
-  block joins every sibling and reports the first `Err` in list order
+- A `fan { }` whose arm reaches an `@ordered` stdlib fn (`env.set`, an `fs`
+  write, a stdin read, a `process` spawn — process-local state a sibling arm
+  could read) runs its arms in arm order on every target (ADR-0024 D3); the
+  observation is the sequential one either way
+- No cancellation of siblings, by design — a cancelled sibling's side effects would depend on
+  when the cancellation landed, which is exactly the scheduling dependence the model excludes.
+  The block joins every sibling and reports the first `Err` in list order. (The only cut is of a
+  PURE body at a charge site: `fan.bounded`, `fan.timeout` and `fan.min(compute…)` arms. The
+  `Duration` clock of `fan.min` / `fan.timeout`, #3788, is the one oracle-tier
+  exception: a loser is cancelled at its next charge site or I/O boundary and awaited.)
 - Budgets are `Compute`, never `Duration` and never a bare `Int` — wall-clock
-  limits belong to the oracle tier (`fan.timeout`, future), not the
+  limits belong to the oracle tier (`fan.timeout`), not the
   deterministic tier
 
 ---
@@ -1204,7 +1244,7 @@ The `is_` prefix convention is used for predicates in the stdlib: `string.is_emp
 
 ## 16. Standard Library
 
-1019 functions across 43 modules, defined in pure Almide (`stdlib/*.almd`). Runtime implementation: 100%.
+987 functions across 42 modules, defined in pure Almide (`stdlib/*.almd`). Runtime implementation: 100%.
 
 ### 16.1 Auto-Imported Modules
 

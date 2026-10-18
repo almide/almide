@@ -16,8 +16,8 @@ use crate::*;
 /// `counters` (#2407): the first of the four `alloc_count` globals when
 /// the counter switch is armed — every call bumps `__alloc_count` and adds
 /// `len` to `__alloc_bytes`, a free-list pop bumps `__alloc_reused`. `None`
-/// (the shipped module) emits none of it.
-pub(crate) fn emit_alloc(oom_msg: u32, counters: Option<u32>) -> Function {
+/// (the shipped module) emits none of it. `canonical`: see canonical_alloc.rs.
+pub(crate) fn emit_alloc(oom_msg: u32, counters: Option<u32>, canonical: bool) -> Function {
     // params: 0=len i32; locals: 1=base i32, 2=next i32 (class scratch
     // before the bump path claims it), 3=want i32, 4=head i32, 5..=9 the
     // large-list walk (pp, p, q, z, r — runtime_large.rs)
@@ -51,7 +51,7 @@ pub(crate) fn emit_alloc(oom_msg: u32, counters: Option<u32>) -> Function {
         .i32_const(FREELIST_BASE as i32)
         .i32_add()
         .local_set(next); // next = the class slot ADDRESS now
-    i.local_get(next).i32_load(word(0)).local_tee(head).if_(BlockType::Empty);
+    crate::canonical_alloc::emit_class_head(&mut i, canonical, next).local_tee(head).if_(BlockType::Empty);
     // pop: slot = head.payload[0]; headers rc=1/len/cap=len; done.
     if let Some(c) = counters {
         bump_counter(&mut i, c + crate::alloc_count::REUSED);
@@ -84,7 +84,7 @@ pub(crate) fn emit_alloc(oom_msg: u32, counters: Option<u32>) -> Function {
     i.i32_const(16).local_get(next).i32_shl().local_set(want);
     // Above the ceiling (#3348): the exact-size large list first.
     i.else_();
-    crate::runtime_large::emit_ltake(&mut i, (want, len), (5, 6, 7, 8, 9), |i| {
+    crate::runtime_large::emit_ltake(&mut i, (want, len), (5, 6, 7, 8, 9), canonical, |i| {
         if let Some(c) = counters {
             bump_counter(i, c + crate::alloc_count::REUSED);
         }
@@ -759,7 +759,7 @@ mod tests {
         // $alloc with a FIXED probe immediate for its one per-program
         // parameter (the OOM message address): the tree shape is pinned;
         // the immediate's value is not part of the transcription.
-        body_bytes(&super::emit_alloc(0, None)).hash(&mut h);
+        body_bytes(&super::emit_alloc(0, None, false)).hash(&mut h);
         let got = h.finish();
         // Recorded at the StructuralRuntime.v landing. A mismatch means
         // the emitted trees moved: update proofs/StructuralRuntime.v to
@@ -788,7 +788,7 @@ mod byte_dump {
             ("free", super::emit_free(None)),
             // 0 stands in for the per-program OOM message address; the
             // .v side carries that immediate as a parameter.
-            ("alloc", super::emit_alloc(0, None)),
+            ("alloc", super::emit_alloc(0, None, false)),
         ] {
             let mut cs = CodeSection::new();
             cs.function(&f);

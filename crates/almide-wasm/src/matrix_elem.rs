@@ -1,7 +1,6 @@
 //! Matrix element-wise and row-wise kernels on the FLAT layout (#1423
-//! stage 4): the zip family (add / sub / div / silu_mul), the unary family
-//! (neg / scale / map), broadcast_add_row, causal_mask_add and
-//! layer_norm_rows. Transcribed op for op from native
+//! stage 4): the zip family (add / sub / div, and fma / fma3), the unary
+//! family (neg / scale / map) and broadcast_add_row. Transcribed op for op from native
 //! runtime/rs/src/matrix.rs + matrix_p2.rs (the self-host bodies in
 //! stdlib/matrix_core.almd / matrix_arith.almd / matrix_ext.almd agree on
 //! the sane domain):
@@ -9,18 +8,12 @@
 //! - ZIP: rows and cols truncate to the shorter operand (`a.iter().zip(b)`
 //!   twice); a 0-row result has 0 cols — native's `from_iter` reads the
 //!   width off row 0, and this layout's header must say what `shape` says.
-//! - The row reductions accumulate left to right from 0.0, mul-then-add,
-//!   no fused step, no reassociation.
-//! - silu_mul on equal shapes is native's almide-kernel path: the CANONICAL
-//!   fast-exp (#1197, the `$fast_exp` helper every kernel here shares); a
-//!   shape mismatch is native's ragged fallback, which calls libm `exp`.
 
 use almide_ir::IrExpr;
-use wasm_encoder::{BlockType, ValType};
+use wasm_encoder::BlockType;
 
 use crate::emitter::Emitter;
 use crate::matrix_kernels::mat_elem;
-use crate::work::Helper;
 use crate::*;
 
 /// The zip-family element operation.
@@ -29,7 +22,6 @@ pub(crate) enum ZipOp {
     Add,
     Sub,
     Div,
-    SiluMul,
 }
 
 impl Emitter<'_> {
@@ -90,22 +82,19 @@ impl Emitter<'_> {
         Ok((hl, hn))
     }
 
-    /// add / sub / div / silu_mul — the zip family.
+    /// add / sub / div — the zip family.
     pub(crate) fn lower_matrix_zip(&mut self, op: ZipOp, a: &IrExpr, b: &IrExpr) -> ArmResult {
         let (ha, ra, ca) = self.mat_open(a)?;
         let (hb, rb, cb) = self.mat_open(b)?;
         let hr = self.hold_i32()?;
         let hc = self.hold_i32()?;
+        // `hsame` (and `hx` below) are no longer read by any zip op; they
+        // stay so the emitted body is byte-identical to the pinned size
+        // goldens — drop them together with a golden regen.
         let hsame = self.hold_i32()?;
         self.min_u32(hr, ra, rb);
         self.min_u32(hc, ca, cb);
         self.zero_cols_if_no_rows(hr, hc);
-        let exps = if op == ZipOp::SiluMul {
-            let fast = self.work.helper(Helper::FastExp);
-            Some((fast, self.linked_math("math.exp")?))
-        } else {
-            None
-        };
         {
             let mut i = self.f.instructions();
             i.local_get(ra).local_get(rb).i32_eq();
@@ -114,38 +103,21 @@ impl Emitter<'_> {
         let ho = self.mat_alloc_out(hr, hc)?;
         let hi = self.hold_i32()?;
         let hj = self.hold_i32()?;
-        let hx = self.hold_f64()?;
+        let _hx = self.hold_f64()?;
         self.loop_begin(hi, hr);
         self.loop_begin(hj, hc);
         self.elem_at(ho, hi, hc, hj);
         self.elem_at(ha, hi, ca, hj);
         self.f.instructions().f64_load(mat_elem());
-        match exps {
-            None => {
-                self.elem_at(hb, hi, cb, hj);
-                let mut i = self.f.instructions();
-                i.f64_load(mat_elem());
-                match op {
-                    ZipOp::Add => i.f64_add(),
-                    ZipOp::Sub => i.f64_sub(),
-                    _ => i.f64_div(),
-                };
-            }
-            Some((fast, libm)) => {
-                // x * (1 / (1 + exp(-x))) * y, left to right (native's
-                // silu_mul_naive and its ragged fallback alike).
-                {
-                    let mut i = self.f.instructions();
-                    i.local_tee(hx);
-                    i.f64_const(1.0f64.into()).f64_const(1.0f64.into());
-                    i.local_get(hsame).if_(BlockType::Result(ValType::F64));
-                    i.local_get(hx).f64_neg().call(fast);
-                    i.else_().local_get(hx).f64_neg().call(libm).end();
-                    i.f64_add().f64_div().f64_mul();
-                }
-                self.elem_at(hb, hi, cb, hj);
-                self.f.instructions().f64_load(mat_elem()).f64_mul();
-            }
+        self.elem_at(hb, hi, cb, hj);
+        {
+            let mut i = self.f.instructions();
+            i.f64_load(mat_elem());
+            match op {
+                ZipOp::Add => i.f64_add(),
+                ZipOp::Sub => i.f64_sub(),
+                ZipOp::Div => i.f64_div(),
+            };
         }
         self.f.instructions().f64_store(mat_elem());
         self.loop_end(hj);
@@ -155,6 +127,62 @@ impl Emitter<'_> {
         // ha ra ca | hb rb cb | hr hc hsame | ho | hi hj
         for _ in 0..12 {
             self.release_i32();
+        }
+        Ok(Some(Lowered::owned(SliceTy::Matrix)))
+    }
+
+    /// fma / fma3 (#3644) — native's `x*ka + y*kb [+ z*kc]` per zipped cell
+    /// in ONE pass over the overlap: rows and cols are each the shortest
+    /// operand's, as add's zip. Each product rounds, then the sum rounds left
+    /// to right — the `add(scale, scale)` composition's arithmetic, without
+    /// walking and copying each whole operand first. `terms` is the
+    /// (matrix, scalar) pairs in source order, which is also the order they
+    /// are evaluated in.
+    pub(crate) fn lower_matrix_fma(&mut self, terms: &[(&IrExpr, &IrExpr)]) -> ArmResult {
+        let mut ops: Vec<(u32, u32, u32, u32)> = Vec::with_capacity(terms.len());
+        for (m, k) in terms {
+            let (hm, hr, hc) = self.mat_open(m)?;
+            let hk = self.hold_f64()?;
+            self.lower_arg(k, Some(FLOAT), ArgMode::Borrow)?;
+            self.f.instructions().local_set(hk);
+            ops.push((hm, hr, hc, hk));
+        }
+        let hr = self.hold_i32()?;
+        let hc = self.hold_i32()?;
+        {
+            let mut i = self.f.instructions();
+            i.local_get(ops[0].1).local_set(hr);
+            i.local_get(ops[0].2).local_set(hc);
+        }
+        for &(_, r, c, _) in &ops[1..] {
+            self.min_u32(hr, hr, r);
+            self.min_u32(hc, hc, c);
+        }
+        self.zero_cols_if_no_rows(hr, hc);
+        let ho = self.mat_alloc_out(hr, hc)?;
+        let hi = self.hold_i32()?;
+        let hj = self.hold_i32()?;
+        self.loop_begin(hi, hr);
+        self.loop_begin(hj, hc);
+        self.elem_at(ho, hi, hc, hj);
+        for (n, &(hm, _, c, hk)) in ops.iter().enumerate() {
+            self.elem_at(hm, hi, c, hj);
+            let mut i = self.f.instructions();
+            i.f64_load(mat_elem()).local_get(hk).f64_mul();
+            if n > 0 {
+                i.f64_add();
+            }
+        }
+        self.f.instructions().f64_store(mat_elem());
+        self.loop_end(hj);
+        self.loop_end(hi);
+        self.f.instructions().local_get(ho);
+        // per term hm hr hc | hr hc | ho | hi hj
+        for _ in 0..(3 * ops.len() + 5) {
+            self.release_i32();
+        }
+        for _ in 0..ops.len() {
+            self.release_f64();
         }
         Ok(Some(Lowered::owned(SliceTy::Matrix)))
     }
@@ -214,27 +242,17 @@ impl Emitter<'_> {
         Ok(Some(Lowered::owned(SliceTy::Matrix)))
     }
 
-    /// broadcast_add_row (x + bias[j], cols = min(cols, len(bias))) and
-    /// causal_mask_add (x + v strictly above the diagonal, else x).
-    pub(crate) fn lower_matrix_row_bias(&mut self, func: &str, m: &IrExpr, arg: &IrExpr) -> ArmResult {
-        let causal = func == "causal_mask_add";
+    /// broadcast_add_row (x + bias[j], cols = min(cols, len(bias))).
+    pub(crate) fn lower_matrix_row_bias(&mut self, m: &IrExpr, bias: &IrExpr) -> ArmResult {
         let (hm, hr, hc) = self.mat_open(m)?;
-        let hv = self.hold_f64()?;
-        let hx = self.hold_f64()?;
-        let (hb, hblen) = if causal {
-            self.lower_arg(arg, Some(FLOAT), ArgMode::Borrow)?;
-            self.f.instructions().local_set(hv);
-            (self.hold_i32()?, self.hold_i32()?)
-        } else {
-            self.float_list_open(arg)?
-        };
+        // Two f64 holds no longer read; kept so the emitted body stays
+        // byte-identical to the pinned size goldens.
+        let _hv = self.hold_f64()?;
+        let _hx = self.hold_f64()?;
+        let (hb, hblen) = self.float_list_open(bias)?;
         let hoc = self.hold_i32()?;
-        if causal {
-            self.f.instructions().local_get(hc).local_set(hoc);
-        } else {
-            self.min_u32(hoc, hc, hblen);
-            self.zero_cols_if_no_rows(hr, hoc);
-        }
+        self.min_u32(hoc, hc, hblen);
+        self.zero_cols_if_no_rows(hr, hoc);
         let ho = self.mat_alloc_out(hr, hoc)?;
         let hi = self.hold_i32()?;
         let hj = self.hold_i32()?;
@@ -243,17 +261,8 @@ impl Emitter<'_> {
         self.elem_at(ho, hi, hoc, hj);
         self.elem_at(hm, hi, hc, hj);
         self.f.instructions().f64_load(mat_elem());
-        if causal {
-            // strictly above the diagonal: x + v, else x (a select keeps x
-            // in one place; the sum is computed either way, no side effect)
-            let mut i = self.f.instructions();
-            i.local_tee(hx).local_get(hv).f64_add();
-            i.local_get(hx);
-            i.local_get(hj).local_get(hi).i32_gt_u().select();
-        } else {
-            self.float_slot(hb, hj);
-            self.f.instructions().f64_add();
-        }
+        self.float_slot(hb, hj);
+        self.f.instructions().f64_add();
         self.f.instructions().f64_store(mat_elem());
         self.loop_end(hj);
         self.loop_end(hi);
@@ -263,92 +272,6 @@ impl Emitter<'_> {
         }
         self.release_f64();
         self.release_f64();
-        Ok(Some(Lowered::owned(SliceTy::Matrix)))
-    }
-
-    /// layer_norm_rows: mean = Σx / c, var = Σ(x − mean)² / c over the FULL
-    /// row, inv = 1 / √(var + eps); out[j] = (x − mean)·inv·g[j] + b[j] over
-    /// min(cols, len(gamma), len(beta)) — native's double zip.
-    pub(crate) fn lower_matrix_layer_norm(
-        &mut self,
-        m: &IrExpr,
-        gamma: &IrExpr,
-        beta: &IrExpr,
-        eps: &IrExpr,
-    ) -> ArmResult {
-        let (hm, hr, hc) = self.mat_open(m)?;
-        let (hg, hglen) = self.float_list_open(gamma)?;
-        let (hb, hblen) = self.float_list_open(beta)?;
-        self.lower_arg(eps, Some(FLOAT), ArgMode::Borrow)?;
-        let heps = self.hold_f64()?;
-        self.f.instructions().local_set(heps);
-        let hoc = self.hold_i32()?;
-        self.min_u32(hoc, hc, hglen);
-        self.min_u32(hoc, hoc, hblen);
-        self.zero_cols_if_no_rows(hr, hoc);
-        let ho = self.mat_alloc_out(hr, hoc)?;
-        let hi = self.hold_i32()?;
-        let hj = self.hold_i32()?;
-        let hmean = self.hold_f64()?;
-        let hacc = self.hold_f64()?;
-        self.loop_begin(hi, hr);
-        // mean = (0.0 + x0 + x1 + …) / c
-        self.f.instructions().f64_const(0.0f64.into()).local_set(hacc);
-        self.loop_begin(hj, hc);
-        self.f.instructions().local_get(hacc);
-        self.elem_at(hm, hi, hc, hj);
-        self.f.instructions().f64_load(mat_elem()).f64_add().local_set(hacc);
-        self.loop_end(hj);
-        {
-            let mut i = self.f.instructions();
-            // `_s`, not `_u`: a column count is a non-negative i32 bounded by
-            // the allocation ceiling (r·c cells of 8 bytes under 2 GiB, so
-            // c < 2^28), where the two conversions are the same f64 — and `_s`
-            // is what the kernel arms spell for this very quantity
-            // (matrix_kernels.rs). The closed set the VM accepts holds one of
-            // them (#865, crates/almide-wasm-vm/src/numeric.rs).
-            i.local_get(hacc).local_get(hc).f64_convert_i32_s().f64_div().local_set(hmean);
-            i.f64_const(0.0f64.into()).local_set(hacc);
-        }
-        // var = (0.0 + d0·d0 + d1·d1 + …) / c with d = x − mean; then
-        // inv = 1 / √(var + eps) — native's `(var + eps).sqrt().recip()`.
-        let hd = self.hold_f64()?;
-        self.loop_begin(hj, hc);
-        self.elem_at(hm, hi, hc, hj);
-        {
-            let mut i = self.f.instructions();
-            i.f64_load(mat_elem()).local_get(hmean).f64_sub().local_set(hd);
-            i.local_get(hacc).local_get(hd).local_get(hd).f64_mul().f64_add().local_set(hacc);
-        }
-        self.loop_end(hj);
-        {
-            let mut i = self.f.instructions();
-            i.f64_const(1.0f64.into());
-            i.local_get(hacc).local_get(hc).f64_convert_i32_s().f64_div();
-            i.local_get(heps).f64_add().f64_sqrt().f64_div().local_set(hacc);
-        }
-        // out[j] = (x − mean)·inv·g[j] + b[j], left association exactly
-        self.loop_begin(hj, hoc);
-        self.elem_at(ho, hi, hoc, hj);
-        self.elem_at(hm, hi, hc, hj);
-        {
-            let mut i = self.f.instructions();
-            i.f64_load(mat_elem()).local_get(hmean).f64_sub().local_get(hacc).f64_mul();
-        }
-        self.float_slot(hg, hj);
-        self.f.instructions().f64_mul();
-        self.float_slot(hb, hj);
-        self.f.instructions().f64_add().f64_store(mat_elem());
-        self.loop_end(hj);
-        self.loop_end(hi);
-        self.f.instructions().local_get(ho);
-        for _ in 0..4 {
-            self.release_f64();
-        }
-        // hm hr hc | hg hglen | hb hblen | hoc | ho | hi hj
-        for _ in 0..11 {
-            self.release_i32();
-        }
         Ok(Some(Lowered::owned(SliceTy::Matrix)))
     }
 }

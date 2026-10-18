@@ -1,0 +1,8 @@
+// Near miss of #3522: the fallback is neither the call's Option[String] nor its
+// String, so no `!` would fix it — the plain `??` mismatch is reported.
+effect fn load(path: String) -> String? = if path == "" then none else some(path)
+
+effect fn main() -> Unit = {
+  let config = load("app.toml") ?? some("5")
+  println(config ?? "none")
+}

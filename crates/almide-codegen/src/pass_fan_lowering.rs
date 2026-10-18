@@ -6,6 +6,7 @@
 //! inside Fan expressions and fan.map/fan.race/fan.any lambda arguments.
 
 use almide_ir::*;
+use almide_base::Sym;
 
 /// Strip Try nodes from inside Fan expressions and fan.* call arguments.
 pub fn strip_fan_auto_try(program: &mut IrProgram) {
@@ -87,14 +88,28 @@ fn unit_placeholder() -> IrExpr {
 /// and rustc refuses the spawn (E0277). Such a fan runs its arms in arm order
 /// on the calling thread, the sequential evaluation the threaded form
 /// reproduces. A one-arm fan already runs inline (#3341).
+///
+/// The second reason is ADR-0024 D3 (#3780): an arm whose executable closure
+/// reaches an `@ordered` stdlib fn — `env.set`, an `fs` write, a stdin read,
+/// a `process` spawn — could leave process-local state a sibling arm reads,
+/// so the order of the arms is observable. Such a fan runs inline, in arm
+/// order, on every target: wasm already evaluates arms in order, and this is
+/// what makes native agree with it (C-004).
 pub fn mark_inline_fans(program: &mut IrProgram) {
     use almide_ir::visit::{IrVisitor, walk_expr};
-    struct Scan<'a> { decls: Vec<&'a IrTypeDecl>, vt: &'a VarTable, out: std::collections::HashSet<(usize, usize, usize)> }
+    struct Scan<'a> {
+        decls: Vec<&'a IrTypeDecl>,
+        vt: &'a VarTable,
+        reach: OrderedReach<'a>,
+        module: Option<Sym>,
+        out: std::collections::HashSet<(usize, usize, usize)>,
+    }
     impl IrVisitor for Scan<'_> {
         fn visit_expr(&mut self, e: &IrExpr) {
             if let (IrExprKind::Fan { exprs }, Some(span)) = (&e.kind, e.span)
                 && exprs.len() > 1
-                && exprs.iter().any(|arm| self.arm_holds_rc(arm))
+                && (exprs.iter().any(|arm| self.arm_holds_rc(arm))
+                    || exprs.iter().any(|arm| self.reach.expr_reaches_ordered(arm, self.module)))
             {
                 self.out.insert(almide_ir::annotations::CodegenAnnotations::fan_key(span));
             }
@@ -111,12 +126,164 @@ pub fn mark_inline_fans(program: &mut IrProgram) {
     let decls: Vec<&IrTypeDecl> = program.type_decls.iter()
         .chain(program.modules.iter().flat_map(|m| m.type_decls.iter()))
         .collect();
-    let mut scan = Scan { decls, vt: &program.var_table, out: std::collections::HashSet::new() };
-    for func in program.functions.iter().chain(program.modules.iter().flat_map(|m| m.functions.iter())) {
+    let mut scan = Scan {
+        decls,
+        vt: &program.var_table,
+        reach: OrderedReach::new(program),
+        module: None,
+        out: std::collections::HashSet::new(),
+    };
+    for func in &program.functions {
+        scan.module = None;
         scan.visit_expr(&func.body);
+    }
+    for m in &program.modules {
+        scan.module = Some(m.name);
+        for func in &m.functions {
+            scan.visit_expr(&func.body);
+        }
     }
     let out = scan.out;
     program.codegen_annotations.inline_fans = out;
+}
+
+/// Whether an expression's executable closure (ADR-0020 §3.2: the fns it
+/// calls or names, transitively) reaches an `@ordered` stdlib fn (ADR-0024
+/// D3). The table is the stdlib's own attribute, read through
+/// `stdlib_info::is_ordered_stdlib_fn`; user fns are followed by name within
+/// the program and across its modules, each at most once per query.
+struct OrderedReach<'a> {
+    /// (module, fn) → body; `None` is the entry program.
+    fns: std::collections::HashMap<(Option<Sym>, Sym), &'a IrFunction>,
+    /// The user module names, to tell a module call from a stdlib call.
+    modules: std::collections::HashSet<Sym>,
+    /// Memo per fn: does its body reach an ordered op.
+    memo: std::cell::RefCell<std::collections::HashMap<(Option<Sym>, Sym), bool>>,
+}
+
+impl<'a> OrderedReach<'a> {
+    fn new(program: &'a IrProgram) -> Self {
+        let mut fns = std::collections::HashMap::new();
+        for f in &program.functions {
+            fns.insert((None, f.name), f);
+        }
+        for m in &program.modules {
+            for f in &m.functions {
+                fns.insert((Some(m.name), f.name), f);
+            }
+        }
+        let modules = program.modules.iter().map(|m| m.name).collect();
+        Self { fns, modules, memo: std::cell::RefCell::new(std::collections::HashMap::new()) }
+    }
+
+    fn expr_reaches_ordered(&self, e: &IrExpr, module: Option<Sym>) -> bool {
+        use almide_ir::visit::{IrVisitor, walk_expr};
+        struct Walk<'r, 'a> { reach: &'r OrderedReach<'a>, module: Option<Sym>, hit: bool }
+        impl IrVisitor for Walk<'_, '_> {
+            fn visit_expr(&mut self, e: &IrExpr) {
+                if self.hit {
+                    return;
+                }
+                let target = match &e.kind {
+                    IrExprKind::Call { target, .. } | IrExprKind::TailCall { target, .. } => Some(target),
+                    _ => None,
+                };
+                match (target, &e.kind) {
+                    // A stdlib intrinsic is already its runtime symbol here.
+                    (_, IrExprKind::RuntimeCall { symbol, .. }) => {
+                        if almide_lang::stdlib_info::is_ordered_runtime_symbol(symbol.as_str()) {
+                            self.hit = true;
+                        }
+                    }
+                    (Some(CallTarget::Named { name }), _) | (_, IrExprKind::FnRef { name }) => {
+                        if self.reach.fn_reaches_ordered(self.module, *name) {
+                            self.hit = true;
+                        }
+                    }
+                    (Some(CallTarget::Module { module, func, .. }), _) => {
+                        if self.reach.modules.contains(module) {
+                            if self.reach.fn_reaches_ordered(Some(*module), *func) {
+                                self.hit = true;
+                            }
+                        } else if almide_lang::stdlib_info::is_ordered_stdlib_fn(module.as_str(), func.as_str()) {
+                            self.hit = true;
+                        }
+                    }
+                    _ => {}
+                }
+                if !self.hit {
+                    walk_expr(self, e);
+                }
+            }
+        }
+        let mut w = Walk { reach: self, module, hit: false };
+        w.visit_expr(e);
+        w.hit
+    }
+
+    /// A fn by name: the current module's, else the entry program's. A fn
+    /// still on the stack (recursion) answers false for that edge; its own
+    /// answer is memoised once its body is fully walked.
+    fn fn_reaches_ordered(&self, module: Option<Sym>, name: Sym) -> bool {
+        let key = if self.fns.contains_key(&(module, name)) { (module, name) } else { (None, name) };
+        let Some(f) = self.fns.get(&key) else { return false };
+        if let Some(&b) = self.memo.borrow().get(&key) {
+            return b;
+        }
+        self.memo.borrow_mut().insert(key, false);
+        let b = self.expr_reaches_ordered(&f.body, key.0);
+        self.memo.borrow_mut().insert(key, b);
+        b
+    }
+}
+
+/// #3649: route a call to a threaded runtime helper (a `Send` bound) to its
+/// `Send`-free `_seq` twin when an argument holds an `Rc`: a Matrix / Bytes /
+/// closure-valued argument, or a closure literal capturing one. The stdlib
+/// signature (`fs.fold_lines_chunked[A]`) bounds nothing, so the checker admits
+/// these, and the threaded form is rustc E0277. The pairs are derived from the
+/// runtime signatures (`runtime_fn_modes::send_free_twin`). Runs in
+/// RustLowering before boxing, so the twin's `Rc<dyn Fn>` slot is boxed.
+pub fn route_send_free_twins(program: &mut IrProgram) -> bool {
+    use almide_ir::visit_mut::{IrMutVisitor, walk_expr_mut};
+    struct Route<'a> { decls: Vec<&'a IrTypeDecl>, vt: &'a VarTable, changed: bool }
+    impl IrMutVisitor for Route<'_> {
+        fn visit_expr_mut(&mut self, expr: &mut IrExpr) {
+            walk_expr_mut(self, expr);
+            let IrExprKind::RuntimeCall { symbol, args } = &mut expr.kind else { return };
+            let Some(twin) = crate::generated::runtime_fn_modes::send_free_twin(symbol.as_str()) else { return };
+            if args.iter().any(|a| self.arg_holds_rc(a)) {
+                *symbol = almide_base::intern::sym(twin);
+                self.changed = true;
+            }
+        }
+    }
+    impl Route<'_> {
+        /// A closure literal is judged by its captures (its own `Fn` type is
+        /// the raw closure, which is `Send` when they are); any other argument
+        /// by its type — a closure VALUE is an `Rc<dyn Fn>`.
+        fn arg_holds_rc(&self, arg: &IrExpr) -> bool {
+            if !super::pass_rust_lowering::is_closure_literal(arg) {
+                return ty_holds_rc(&arg.ty, &self.decls, &mut Vec::new());
+            }
+            almide_ir::free_vars::free_vars(arg, &std::collections::HashSet::new())
+                .into_iter()
+                .any(|v| ty_holds_rc(&self.vt.get(v).ty, &self.decls, &mut Vec::new()))
+        }
+    }
+    let decls: Vec<IrTypeDecl> = program.type_decls.iter()
+        .chain(program.modules.iter().flat_map(|m| m.type_decls.iter()))
+        .cloned()
+        .collect();
+    let IrProgram { functions, top_lets, modules, var_table, .. } = program;
+    let mut r = Route { decls: decls.iter().collect(), vt: var_table, changed: false };
+    for f in functions.iter_mut() { r.visit_expr_mut(&mut f.body); }
+    for tl in top_lets.iter_mut() { r.visit_expr_mut(&mut tl.value); }
+    for m in modules.iter_mut() {
+        for f in m.functions.iter_mut() { r.visit_expr_mut(&mut f.body); }
+        for tl in m.top_lets.iter_mut() { r.visit_expr_mut(&mut tl.value); }
+    }
+    r.changed
 }
 
 /// Does a value of `ty` hold an `Rc`-backed leaf on the native leg? A named

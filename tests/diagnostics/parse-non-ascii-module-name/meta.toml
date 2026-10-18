@@ -1,0 +1,2 @@
+expects_error = "is not ASCII"
+hint_substring = "Rename the module"

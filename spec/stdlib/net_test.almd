@@ -1,9 +1,9 @@
-// wasm:skip — OS/native-only API, not available in WASM
+// wasm:skip — the stock artifact refuses tcp until the p3 route (#3620 step 4); the embedded lane is pinned by tests/net_tcp_embedded_cross_test.rs
 import net
 
 test "tcp loopback: listen, connect, write, read, close" {
-  let server = net.tcp_listen("127.0.0.1", 39183)!
-  let client = net.tcp_connect("127.0.0.1", 39183)!
+  let server = net.tcp_listen("127.0.0.1", 0)!
+  let client = net.tcp_connect("127.0.0.1", net.tcp_local_port(server)!)!
   let peer = net.tcp_accept(server)!
   let msg = bytes.from_string("hello")
   net.tcp_write(client, msg)!
@@ -19,8 +19,8 @@ test "tcp_is_open returns false for invalid handle" {
 }
 
 test "tcp_is_open returns false after close" {
-  let server = net.tcp_listen("127.0.0.1", 39184)!
-  let client = net.tcp_connect("127.0.0.1", 39184)!
+  let server = net.tcp_listen("127.0.0.1", 0)!
+  let client = net.tcp_connect("127.0.0.1", net.tcp_local_port(server)!)!
   assert_eq(net.tcp_is_open(client), true)
   net.tcp_close(client)!
   assert_eq(net.tcp_is_open(client), false)
@@ -28,7 +28,10 @@ test "tcp_is_open returns false after close" {
 }
 
 test "tcp connect to closed port returns error" {
-  let result = net.tcp_connect("127.0.0.1", 19999)
+  let probe = net.tcp_listen("127.0.0.1", 0)!
+  let port = net.tcp_local_port(probe)!
+  net.tcp_close_listener(probe)!
+  let result = net.tcp_connect("127.0.0.1", port)
   match result {
     ok(_) => assert(false),
     err(_) => assert(true),

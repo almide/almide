@@ -13,9 +13,103 @@ pub mod dialect;
 pub mod types;
 pub mod stdlib_info;
 pub mod self_host_registry;
+
+/// The stdlib's `@implements("m.f")` declarations (#3620): the self-hosted
+/// bodies that name the stdlib function they implement, generated from the
+/// sources (`buildscript/implements.rs`) and committed (#3361).
+/// `self_host_registry::self_host_runtime()` serves `DECLARED` beside its
+/// hand-written table; `PRIM_FREE` names the declared bodies whose file never
+/// reaches `prim.`, which the wasm emitter admits without a list entry.
+pub mod implements {
+    include!("generated/implements.rs");
+
+    /// Is `impl_fn` a declared body whose file never reaches `prim.`?
+    pub fn prim_free(impl_fn: &str) -> bool {
+        PRIM_FREE.contains(&impl_fn)
+    }
+
+    /// Is the stdlib call `module.func` implemented by a declared body whose
+    /// file never reaches `prim.`? Such a body builds every value, a Result
+    /// included, through constructors the backends lower themselves.
+    pub fn surface_prim_free(module: &str, func: &str) -> bool {
+        DECLARED.iter().flat_map(|(_, pairs)| pairs.iter()).any(|(impl_fn, call)| {
+            call.split_once('.') == Some((module, func)) && prim_free(impl_fn)
+        })
+    }
+}
 pub mod time_units;
 pub mod fallible_hofs;
+pub mod callback_params;
 
 // Re-export almide-base for convenience
 pub use almide_base;
 pub use almide_base::intern;
+
+/// The stdlib's `@reuse(p)` declarations (ruling 2026-10-11): when the
+/// argument for parameter `param` is at its last use, the result may take
+/// over its storage. ONE table, generated from the declarations
+/// (`buildscript/reuse.rs`) and committed (#3361), that the native twin
+/// selection and the wasm dying-read moves both read — never a name list.
+pub mod reuse {
+    /// One `@reuse` declaration.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct Reuse {
+        pub module: &'static str,
+        pub func: &'static str,
+        /// The index of the reused parameter.
+        pub param: usize,
+        /// The declared parameter count.
+        pub arity: usize,
+        /// The native runtime symbol (`@intrinsic`).
+        pub intrinsic: &'static str,
+        /// The runtime fn that takes the source by value, where the intrinsic
+        /// borrows it; `None` when the intrinsic itself consumes (`@consume`).
+        pub owned_twin: Option<&'static str>,
+    }
+
+    include!("generated/reuse.rs");
+
+    /// The declaration of `module.func`, if it reuses a parameter.
+    pub fn of(module: &str, func: &str) -> Option<&'static Reuse> {
+        REUSE.iter().find(|r| r.module == module && r.func == func)
+    }
+
+    /// The declaration whose native intrinsic is `symbol`.
+    pub fn of_intrinsic(symbol: &str) -> Option<&'static Reuse> {
+        REUSE.iter().find(|r| r.intrinsic == symbol)
+    }
+}
+
+/// Which type parameters of a native-intrinsic stdlib function need equality
+/// or ordering, read off the runtime fn's generic bounds
+/// (`almide_rt_list_dedup<T: Clone + PartialEq>`) by
+/// `buildscript/capability_bounds.rs` and committed (#3361). The checker
+/// refuses a call whose binding cannot meet the bound (E016 / E030) — the
+/// native leg would otherwise fail in rustc after check passed.
+pub mod capability_bounds {
+    /// The capability a runtime bound demands.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum Cap {
+        /// `PartialEq` / `Eq`.
+        Eq,
+        /// `Ord` / `PartialOrd`.
+        Ord,
+    }
+
+    /// One bounded type parameter.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct Bound {
+        pub module: &'static str,
+        pub func: &'static str,
+        /// The index into the stdlib signature's generic list.
+        pub generic: usize,
+        pub cap: Cap,
+    }
+
+    include!("generated/capability_bounds.rs");
+
+    /// The bounded type parameters of `module.func`.
+    pub fn of<'a>(module: &'a str, func: &'a str) -> impl Iterator<Item = &'static Bound> + 'a {
+        BOUNDS.iter().filter(move |b| b.module == module && b.func == func)
+    }
+}

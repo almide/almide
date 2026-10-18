@@ -68,6 +68,13 @@ effect fn main() -> Unit = {
   // half, and BOTH name both paths in native's order.
   unit("copy_missing_src", fs.copy(missing, d + "/x"), d)
   unit("copy_onto_dir", fs.copy(f, dir), d)
+  // A directory SOURCE fails as reading it does (EISDIR), on every leg.
+  unit("copy_dir_src", fs.copy(dir, d + "/y"), d)
+  // #3652: a directory is EISDIR for every range, the empty (0, 0) one
+  // included, whose walk reads no line but still must not answer ok(init).
+  count("fold_lines_range_dir_0_0", fs.fold_lines_range(dir, 0, 0, 0, (acc, line) => acc + 1), d)
+  count("fold_lines_range_dir_5_5", fs.fold_lines_range(dir, 5, 5, 0, (acc, line) => acc + 1), d)
+  count("fold_lines_range_dir_0_10", fs.fold_lines_range(dir, 0, 10, 0, (acc, line) => acc + 1), d)
   unit("append_dir", fs.append(dir, "z"), d)
   unit("write_bytes_dir", fs.write_bytes(dir, [1, 2]), d)
   unit("write_bytes_raw_dir", fs.write_bytes_raw(dir, bytes.from_list([1, 2])), d)

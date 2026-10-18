@@ -27,7 +27,6 @@ const PARITY: &[&str] = &[
     "pid-kernel.almd",
     "fan_demo.almd",
     "lisp.almd",
-    "llama_block.almd",
     "raytracer.almd",
     "roman-numeral.almd",
 ];

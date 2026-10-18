@@ -29,9 +29,12 @@ use super::pass_match_subject::MatchSubjectPass;
 use super::pass_pattern_literal_guard::PatternLiteralGuardPass;
 use super::pass_effect_inference::EffectInferencePass;
 use super::pass_tco::TailCallOptPass;
+use super::pass_owned_source_hoist::OwnedSourceHoistPass;
 use super::pass_licm::LICMPass;
 use super::pass_peephole::PeepholePass;
 use super::pass_range_counting::RangeCountingVarsPass;
+use super::pass_metered_region_delegate::MeteredRegionDelegatePass;
+use super::pass_meter_charge::MeterChargePass;
 use super::pass_egg_saturation::EggSaturationPass;
 use super::pass_matrix_shape_spec::MatrixShapeSpecPass;
 use super::pass_const_fold::ConstFoldPass;
@@ -47,6 +50,7 @@ use super::pass_var_storage::VarStoragePass;
 use super::pass_borrow_lowering::BorrowLoweringPass;
 use super::pass_slice_binders::SliceBindersPass;
 use super::pass_str_map_key::StrMapKeyPass;
+use super::pass_thread_share::ThreadShareMarksPass;
 use super::pass_ir_link_flatten::IrLinkFlattenPass;
 use super::template::TemplateSet;
 
@@ -102,6 +106,12 @@ fn build_pipeline(target: Target) -> Pipeline {
                 // Wgsl/Wasm arms have their own single invocation.)
                 .add(LambdaTypeResolvePass)
                 .add(ConcretizeTypesPass)
+                // #3669: a metered region becomes a delegate into the
+                // v1-rendered region module the CLI links in.
+                .add(MeteredRegionDelegatePass)
+                // #3673: or, when the CLI asks for it, this codegen meters
+                // the regions itself (the delegate pass then stands aside).
+                .add(MeterChargePass)
                 // Hoist payload-nested string literals (`ok("x")`, `Word("hi")`)
                 // into Bind + `==` guards BEFORE MatchSubject so the as_deref /
                 // &* subject deref only ever sees top-level / already-handled
@@ -144,6 +154,10 @@ fn build_pipeline(target: Target) -> Pipeline {
                 // a `&T` param the step only reads stays `&T` (#2278).
                 .add(StreamFusionPass)
         .add(BorrowInsertionPass)
+        // OwnedSourceHoist (#3519): `list.slice(xs, 1, list.len(xs))` binds
+        // its scalar later arguments first, so the source can be the call's
+        // last read — before the two passes that decide its move.
+        .add(OwnedSourceHoistPass)
         // TCO: convert self-recursive tail calls to loops AFTER BorrowInsertion
         // (so that param types are already finalized — avoids String/&str mismatch)
         .add(TailCallOptPass)
@@ -216,6 +230,11 @@ fn build_pipeline(target: Target) -> Pipeline {
                 // A String-keyed `map.set` / `map.upsert` whose key is
                 // `k.to_string()` takes `k` borrowed (copied on insert only).
                 .add(StrMapKeyPass)
+                // ADR-0013: every variable a fan arm or a thread-crossing
+                // runtime call reaches is marked shared before the threads
+                // start — spelled as an `InlineRust` block on the final IR,
+                // after every pass that reads a variable occurrence.
+                .add(ThreadShareMarksPass)
         }
 
         Target::Wgsl => Pipeline::new()

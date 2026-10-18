@@ -15,7 +15,7 @@ pub fn serves(op: i32, p3: bool) -> bool {
     // both component shims — the guest then runs its chunks sequentially.
     let common = matches!(op, 30..=32 | 34..=35 | 60 | 73 | 74);
     let extra = p3
-        && (matches!(op, 26 | 29 | 36 | 37 | 40..=50)
+        && (matches!(op, 26 | 29 | 36 | 37 | 40..=50 | 65)
             || crate::wasi::FS_SERVICE_OPS.iter().any(|(o, _, _)| *o == op));
     common || extra
 }
@@ -40,6 +40,40 @@ pub const P3_EXCLUDED_P1_OPS: &[(i32, &str)] = &[
     (89, PROC_EXCLUDED),
     (90, PROC_EXCLUDED),
 ];
+
+/// The ops the WASI 0.3 shim serves and the embedded core-module host does
+/// not: ADR-0023 step 4 put them in the shim only (op 65, the full-response
+/// client), and decision 1 forbids a host-served twin. On the embedded lane a
+/// program naming one runs as its p3 component (step 7, `run_component`),
+/// whose wasi:http transport is native's rt-core client. Every other program
+/// keeps the core-module route until step 7's full switch, which waits on the
+/// call handle in the shim (ops 53..=59) and on exit codes above 1, which
+/// the p3 shim's `wasi:cli/exit` cannot carry (C-350).
+pub const COMPONENT_ONLY_OPS: &[i32] = &[65];
+
+/// Whether `almide run --target wasm` runs this op set as the p3 component:
+/// it names a component-only op and the p3 shim serves all of it.
+pub fn embedded_runs_component(host_ops: &[i32]) -> bool {
+    host_ops.iter().any(|op| COMPONENT_ONLY_OPS.contains(op)) && check(host_ops, true).is_ok()
+}
+
+/// The refusal for a program no single route of the embedded lane serves: it
+/// names a component-only op AND one the p3 shim does not serve, so neither
+/// the component nor the core-module host (which has no op 65, decision 1)
+/// can run all of it.
+pub fn embedded_split(host_ops: &[i32]) -> Option<String> {
+    let only = host_ops.iter().copied().find(|op| COMPONENT_ONLY_OPS.contains(op))?;
+    let other = host_ops.iter().copied().find(|op| !serves(*op, true))?;
+    Some(format!(
+        "error[E081]: {} (host op {only}) runs only as the WASI 0.3 component and {} (host op {other}) only on the \
+         embedded core-module host, so no wasm route serves this program\n  \
+         reason: ADR-0023 decision 1 keeps the full-response client out of the core host, and the component world \
+         has no import for host op {other}\n  \
+         note: the native target serves both",
+        operation_label(only),
+        operation_label(other),
+    ))
+}
 
 /// Reject an artifact before writing it when its direct shim cannot serve it.
 /// P3 HTTP imports are selected separately whenever an HTTP operation is emitted.
@@ -104,20 +138,39 @@ fn operation_name(op: i32) -> &'static str {
             40..=42 => "filesystem fan prefetch",
             43 => "http.get", 44 => "http.post", 45 => "http.put",
             46 => "http.patch", 47 => "http.delete",
-            48..=50 => "http.request framed response",
+            48..=50 | 65 => "the framed http client (http.request, its status / bytes shapes, the *_response family)",
             51 => "fs.fold_lines", 52 => "fs.for_each_line",
             53..=59 => "the http call handle (http.start / poll / read_new / wait / cancel)",
             60 => "datetime.monotonic_ns",
             61 => "fs.fold_lines_range", 62 => "fs.fold_lines_chunked",
             63 => "fs.read_bytes_raw", 64 => "fs.read_bytes_raw_if_exists",
             73 => "panic",
+            91..=103 => "the net core (net.tcp_*)",
+            // Interim embedded-only ops (#3620): WASI has neither Unix-domain
+            // sockets nor shared memory; they retire at ADR-0023 step 7.
+            104..=116 => "the unix-socket and shared-memory core (net.unix_* / net.shm_*)",
             _ => "unknown operation",
         })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{serves, P3_EXCLUDED_P1_OPS};
+    use super::{embedded_runs_component, serves, COMPONENT_ONLY_OPS, P3_EXCLUDED_P1_OPS};
+
+    /// A component-only op is one the p3 shim serves and the p1 shim does
+    /// not (the embedded core host serves the p1 surface and more, never
+    /// less); the embedded route takes it to the component only when the
+    /// shim serves the whole op set.
+    #[test]
+    fn component_only_ops_are_p3_ops_the_route_sends_to_the_component() {
+        for op in COMPONENT_ONLY_OPS {
+            assert!(serves(*op, true), "component-only op {op} is not served on p3");
+            assert!(!crate::wasi::P1_SERVED_OPS.contains(op), "component-only op {op} is p1-served");
+            assert!(embedded_runs_component(&[1, *op]), "op {op} with fs.read_text stays on the core route");
+            assert!(!embedded_runs_component(&[53, *op]), "op {op} with the call handle left the core route");
+        }
+        assert!(!embedded_runs_component(&[43, 48]), "a program the core host serves left the core route");
+    }
 
     /// #3140's exit gate: a program that builds as a p1 core module also
     /// builds as a p3 component — the p3 served set covers every p1-served op

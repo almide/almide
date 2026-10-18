@@ -16,15 +16,9 @@ impl Checker {
         let mut reported: HashSet<String> = HashSet::new();
         let checks = std::mem::take(&mut self.deferred_ord_elem_checks);
         for (subject_ty, span, fn_name) in checks {
-            let resolved = resolve_ty(&subject_ty, &self.uf);
-            // list.sort/min/max enqueue the LIST subject; sort_by enqueues the
-            // key type directly. Extract the element when it is a List.
-            let elem = match &resolved {
-                Ty::Applied(almide_lang::types::TypeConstructorId::List, a) if a.len() == 1 => {
-                    a[0].clone()
-                }
-                _ => resolved.clone(),
-            };
+            // The ORDERED type itself: the binding of the runtime's `Ord`-bounded
+            // parameter (`capability_bounds`), not the list holding it.
+            let elem = resolve_ty(&subject_ty, &self.uf);
             // An unresolved slot is E025's business; a BARE Float rides the
             // `_float` twins.
             if matches!(elem, Ty::Unknown | Ty::TypeVar(_) | Ty::Float) {
@@ -50,7 +44,8 @@ impl Checker {
                     "A record or variant orders too \u{2014} by field declaration order, by case ",
                     "order \u{2014} but only when it DECLARES the derive: `type T: Ord = { ... }`. ",
                     "Map, Set and function values have no order, and a Float INSIDE a compound has ",
-                    "none either (native's derive cannot order f64) \u{2014} compare via an explicit key instead.",
+                    "none either (native's derive cannot order f64; a Matrix and a Value hold Floats) ",
+                    "\u{2014} compare via an explicit key instead.",
                 )
                 .to_string(),
                 format!("call to {}", fn_name),
@@ -164,9 +159,11 @@ impl Checker {
             collect_named(&resolved, &mut names);
             for s in names {
                 // `Value` is the BUILT-IN dynamic type (json/codec surface) —
-                // nominal by name but never declared in env.types.
+                // nominal by name but never declared in env.types; so are the
+                // ADR-0001 clock types, which exist only in the checker (#3752).
                 // A builtin applied to the wrong count carries its E093 (#3408).
-                if s.as_str() == "Value" || self.env.types.contains_key(&s) || rooted.contains(&s) || !reported.insert(s) {
+                let clock = almide_lang::time_units::TIME_MODULES.iter().any(|(_, t)| *t == s.as_str());
+                if s.as_str() == "Value" || clock || self.env.types.contains_key(&s) || rooted.contains(&s) || !reported.insert(s) {
                     continue;
                 }
                 // Its qualified spelling already carries the root E029 (#3336).
@@ -431,6 +428,7 @@ impl Checker {
                 }
             }
         }
+        self.validate_set_elem_types();
     }
 
     /// The unhashable-Map-key diagnostic, coded by CAUSE (#1518: this error
@@ -778,7 +776,7 @@ impl Checker {
                     "List".into()
                 }
             }
-            _ => format!("{:?}", ty),
+            _ => ty.display(),
         }
     }
 }

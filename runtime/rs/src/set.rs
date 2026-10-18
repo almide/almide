@@ -13,27 +13,30 @@
 // the hasher and the threshold live in map.rs and resolve via flat inlining;
 // the `almide_rt_map_` reference also declares the map dependency to
 // RUNTIME_DEPS) makes `insert` / `contains` O(1). Element types with no hash
-// (Float et al) stay on the linear path.
+// (Float et al) stay on the linear path. `remove` on an indexed set leaves a
+// `None` hole and compacts once the holes outnumber the members — the map's
+// tombstones (#3691), amortized O(1) instead of a shift plus a full rebuild.
 
 
 #[derive(Clone, Debug, Default)]
 pub struct AlmideSet<T> {
-    items: Vec<T>,
+    items: Vec<Option<T>>,
+    dead: usize,
     lookup: AlmideKeyLookup,
 }
 
 impl<T> AlmideSet<T> {
     pub fn new() -> Self {
-        AlmideSet { items: Vec::new(), lookup: AlmideKeyLookup::Linear }
+        AlmideSet { items: Vec::new(), dead: 0, lookup: AlmideKeyLookup::Linear }
     }
     pub fn len(&self) -> usize {
-        self.items.len()
+        self.items.len() - self.dead
     }
     pub fn is_empty(&self) -> bool {
-        self.items.is_empty()
+        self.len() == 0
     }
-    pub fn iter(&self) -> std::slice::Iter<'_, T> {
-        self.items.iter()
+    pub fn iter(&self) -> std::iter::Flatten<std::slice::Iter<'_, Option<T>>> {
+        self.items.iter().flatten()
     }
 }
 
@@ -42,9 +45,10 @@ impl<T: PartialEq + 'static> AlmideSet<T> {
     #[inline]
     fn position_with<Q: ?Sized + PartialEq>(&self, value: &Q, h: Option<u64>) -> Option<usize>
     where T: std::borrow::Borrow<Q> {
+        let is_v = |e: &Option<T>| matches!(e, Some(x) if x.borrow() == value);
         match (&self.lookup, h) {
-            (AlmideKeyLookup::Built(ix), Some(h)) => ix.find(h, |p| self.items[p].borrow() == value),
-            _ => self.items.iter().position(|x| x.borrow() == value),
+            (AlmideKeyLookup::Built(ix), Some(h)) => ix.find(h, |p| is_v(&self.items[p])),
+            _ => self.items.iter().position(is_v),
         }
     }
 
@@ -63,8 +67,9 @@ impl<T: PartialEq + 'static> AlmideSet<T> {
             }
             return;
         }
+        // A linear set has no holes, so member order is position order.
         if matches!(self.lookup, AlmideKeyLookup::Linear) && self.items.len() >= ALMIDE_MAP_INDEX_THRESHOLD {
-            self.lookup.build(self.items.iter(), self.items.len());
+            self.lookup.build(self.items.iter().flatten(), self.items.len());
         }
     }
 
@@ -74,7 +79,7 @@ impl<T: PartialEq + 'static> AlmideSet<T> {
         if self.position_with(&value, h).is_some() {
             return false;
         }
-        self.items.push(value);
+        self.items.push(Some(value));
         self.note_push(h);
         true
     }
@@ -82,15 +87,25 @@ impl<T: PartialEq + 'static> AlmideSet<T> {
     where T: std::borrow::Borrow<Q> {
         self.position(value).is_some()
     }
-    /// Remove, keeping the order of the survivors. Returns true if present.
+    /// Remove, keeping the order of the survivors: an indexed set leaves a
+    /// hole (amortized O(1), #3691), a linear one shifts. Returns true if
+    /// present.
     pub fn remove(&mut self, value: &T) -> bool {
-        if let Some(i) = self.position(value) {
+        let Some(i) = self.position(value) else { return false };
+        let AlmideKeyLookup::Built(ix) = &mut self.lookup else {
             self.items.remove(i);
-            self.lookup.removed_at(i);
-            true
-        } else {
-            false
+            return true;
+        };
+        ix.kill(i);
+        self.items[i] = None;
+        self.dead += 1;
+        if self.dead * 2 > self.items.len() {
+            let items = &self.items;
+            ix.retain(|p| items[p].is_some());
+            self.items.retain(Option::is_some);
+            self.dead = 0;
         }
+        true
     }
 }
 
@@ -101,7 +116,7 @@ impl<T: PartialEq + 'static> AlmideSet<T> {
 impl<T: AlmideRepr> AlmideRepr for AlmideSet<T> {
     fn almide_repr(&self) -> String {
         let mut o = String::from("set.from_list([");
-        for (i, e) in self.items.iter().enumerate() {
+        for (i, e) in self.iter().enumerate() {
             if i > 0 { o.push_str(", "); }
             o.push_str(&e.almide_repr());
         }
@@ -114,7 +129,7 @@ impl<T: AlmideRepr> AlmideRepr for AlmideSet<T> {
 // std HashSet semantics and the wasm structural Set `==`.
 impl<T: PartialEq + 'static> PartialEq for AlmideSet<T> {
     fn eq(&self, other: &Self) -> bool {
-        self.items.len() == other.items.len() && self.items.iter().all(|x| other.contains(x))
+        self.len() == other.len() && self.iter().all(|x| other.contains(x))
     }
 }
 
@@ -136,17 +151,17 @@ impl<T: PartialEq + 'static, const N: usize> From<[T; N]> for AlmideSet<T> {
 
 impl<T> IntoIterator for AlmideSet<T> {
     type Item = T;
-    type IntoIter = std::vec::IntoIter<T>;
+    type IntoIter = std::iter::Flatten<std::vec::IntoIter<Option<T>>>;
     fn into_iter(self) -> Self::IntoIter {
-        self.items.into_iter()
+        self.items.into_iter().flatten()
     }
 }
 
 impl<'a, T> IntoIterator for &'a AlmideSet<T> {
     type Item = &'a T;
-    type IntoIter = std::slice::Iter<'a, T>;
+    type IntoIter = std::iter::Flatten<std::slice::Iter<'a, Option<T>>>;
     fn into_iter(self) -> Self::IntoIter {
-        self.items.iter()
+        self.items.iter().flatten()
     }
 }
 
@@ -154,6 +169,10 @@ pub fn almide_rt_set_new<T>() -> AlmideSet<T> { AlmideSet::new() }
 pub fn almide_rt_set_from_list<T: PartialEq + Clone + 'static>(xs: &[T]) -> AlmideSet<T> { xs.iter().cloned().collect() }
 pub fn almide_rt_set_insert<T: PartialEq + Clone + 'static>(s: &AlmideSet<T>, value: T) -> AlmideSet<T> { let mut s = s.clone(); s.insert(value); s }
 pub fn almide_rt_set_remove<T: PartialEq + Clone + 'static>(s: &AlmideSet<T>, value: T) -> AlmideSet<T> { let mut s = s.clone(); s.remove(&value); s }
+// Owned twins (`@reuse(s)` in stdlib/set.almd): a source at its last use is
+// edited in place instead of cloned whole.
+pub fn almide_rt_set_insert_owned<T: PartialEq + Clone + 'static>(mut s: AlmideSet<T>, value: T) -> AlmideSet<T> { s.insert(value); s }
+pub fn almide_rt_set_remove_owned<T: PartialEq + Clone + 'static>(mut s: AlmideSet<T>, value: T) -> AlmideSet<T> { s.remove(&value); s }
 // Borrowed member (`@borrow_ref(value)` in stdlib/set.almd), as map.get is.
 pub fn almide_rt_set_contains<T: PartialEq + 'static, Q: ?Sized + PartialEq + AlmideMapKey>(s: &AlmideSet<T>, value: &Q) -> bool
 where T: std::borrow::Borrow<Q> { s.contains(value) }

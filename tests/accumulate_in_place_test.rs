@@ -179,8 +179,13 @@ effect fn main() -> Unit = {
 }
 "#;
 
+/// A directory of this call's own: the tests run in parallel and several of
+/// them call `emitted`, which writes its program and removes the directory,
+/// so a per-process name let one test delete another's source mid-build.
 fn scratch(tag: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("almide-accumulate-{tag}-{}", std::process::id()));
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("almide-accumulate-{tag}-{}-{n}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     dir
 }
@@ -212,11 +217,11 @@ fn a_field_accumulator_takes_the_field_and_extends_it() {
     if !tool_available() { return; }
     let rust = emitted();
     let fields = body(&rust, "fields");
-    assert!(fields.contains("b.text = AlmideConcat::concat(std::mem::take(&mut b.text), \"ab\""),
+    assert!(fields.contains("b.text = AlmideConcat::concat(std::mem::take(&mut b.text), AlmideString::from(\"ab\")"),
         "`b.text = b.text + \"ab\"` must take the field:\n{fields}");
     assert!(fields.contains("b.xs = AlmideConcat::concat(std::mem::take(&mut b.xs), vec![i])"),
         "`b.xs = b.xs + [i]` must take the field:\n{fields}");
-    assert!(fields.contains("b.text = AlmideConcat::concat(std::mem::take(&mut b.text), format!(\"-{}\", i))"),
+    assert!(fields.contains("b.text = AlmideConcat::concat(std::mem::take(&mut b.text), AlmideString::from_fmt(format_args!(\"-{}\", i)))"),
         "`b.text = \"${{b.text}}-${{i}}\"` must append to the taken field:\n{fields}");
     assert!(!fields.contains(".clone()"), "nothing in `fields` needs a copy:\n{fields}");
     let keep_old = body(&rust, "keep_old");
@@ -229,11 +234,11 @@ fn an_interpolation_led_by_the_accumulator_appends() {
     if !tool_available() { return; }
     let rust = emitted();
     let interp = body(&rust, "interp");
-    assert!(interp.contains("s = AlmideConcat::concat(s, format!(\"[{}]\", i))"),
+    assert!(interp.contains("s = AlmideConcat::concat(s, AlmideString::from_fmt(format_args!(\"[{}]\", i)))"),
         "`s = \"${{s}}[${{i}}]\"` must move `s` and append:\n{interp}");
-    assert!(interp.contains("s = AlmideConcat::concat(s, \".\""),
+    assert!(interp.contains("s = AlmideConcat::concat(s, AlmideString::from(\".\")"),
         "`s = \"${{s}}.\"` must move `s` and append:\n{interp}");
-    assert!(!interp.contains("format!(\"{}"), "no interpolation re-formats `s`:\n{interp}");
+    assert!(!interp.contains("format_args!(\"{}"), "no interpolation re-formats `s`:\n{interp}");
 }
 
 #[test]
@@ -245,8 +250,8 @@ fn the_copy_stays_where_the_place_is_read_again() {
     assert!(doubled.contains("AlmideConcat::concat(b.text.clone(), b.text.clone())"), "`b.text + b.text` copies:\n{doubled}");
     assert!(doubled.contains("AlmideConcat::concat(b.xs.clone(), b.xs.clone())"), "`b.xs + b.xs` copies:\n{doubled}");
     let reread = body(&rust, "interp_reread");
-    assert!(reread.contains("format!(\"{}+{}\", s, s)"), "`\"${{s}}+${{s}}\"` keeps the interpolation:\n{reread}");
-    assert!(reread.contains("format!(\"<{}>\", s)"), "`s` not first keeps the interpolation:\n{reread}");
+    assert!(reread.contains("format_args!(\"{}+{}\", s, s)"), "`\"${{s}}+${{s}}\"` keeps the interpolation:\n{reread}");
+    assert!(reread.contains("format_args!(\"<{}>\", s)"), "`s` not first keeps the interpolation:\n{reread}");
     let captured = body(&rust, "captured");
     assert!(!captured.contains("std::mem::take"), "a record a closure captures is a shared cell, never taken:\n{captured}");
 }

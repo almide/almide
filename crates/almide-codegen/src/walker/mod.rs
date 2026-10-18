@@ -297,6 +297,27 @@ fn extern_rust_param_type(ctx: &RenderContext, p: &IrParam) -> String {
     }
 }
 
+/// One `@extern(rust)` wrapper argument, spelled from the param's mode like
+/// its type above (ADR-0013): a value holding a String in a structural
+/// position is copied into its host shape, and a `mut` one is copied back
+/// after the call through `after`.
+fn extern_rust_arg(p: &IrParam, before: &mut String, after: &mut String) -> String {
+    let name = p.name.to_string();
+    if !extern_rust_has_str(&p.ty) || matches!(p.borrow, ParamBorrow::RefStr) {
+        return name;
+    }
+    match p.borrow {
+        ParamBorrow::Own => extern_rust_str_conv(&format!("&{name}"), &p.ty, true, 0),
+        ParamBorrow::RefMut => {
+            let h = format!("__host_{name}");
+            before.push_str(&format!("    let mut {h} = {};\n", extern_rust_str_conv(&format!("&*{name}"), &p.ty, true, 0)));
+            after.push_str(&format!("    *{name} = {};\n", extern_rust_str_conv(&format!("&{h}"), &p.ty, false, 0)));
+            format!("&mut {h}")
+        }
+        _ => format!("&{}", extern_rust_str_conv(&name, &p.ty, true, 0)),
+    }
+}
+
 fn render_fn_params_str(fn_ctx: &RenderContext, func: &IrFunction) -> String {
     func.params.iter()
         .map(|p| {
@@ -437,6 +458,27 @@ fn render_fn_generics_str(ctx: &RenderContext, fn_ctx: &RenderContext, func: &Ir
 /// walker below and the test-report name recovery — keeps its spelling.
 pub use almide_base::names::rust_safe_fn_name;
 
+/// The Rust symbol of a module fn (`module_origin` set): `almide_rt_<origin>_<name>`.
+/// The IR name stays clean; the prefix is a rendering concern, and the
+/// passes that must know a call's callee read it from here.
+pub fn module_fn_symbol(raw_name: &str, origin: &str) -> String {
+    // A qualified-method fn (e.g. a Codec `Type.encode` whose type is now the
+    // namespaced `mod.Type`) flattens to `mod_Type_method`; the emit prefix
+    // already adds `almide_rt_<origin>_`, so strip a leading `<origin>_` to
+    // avoid doubling the module (#433 × #411-B). Mirrors the call-site strip;
+    // gated on a dotted IR name so plain module fns are unaffected.
+    let base: String = if raw_name.contains('.') {
+        almide_base::names::strip_module_path(raw_name, origin).map_or_else(|| rust_safe_fn_name(raw_name), rust_safe_fn_name)
+    } else {
+        rust_safe_fn_name(raw_name)
+    };
+    // No keyword escape on this branch: a prefixed symbol is never a Rust
+    // keyword, and the call-emitting paths (render_expr_call,
+    // prefix_intra_module_calls, ...) mangle without escaping — escaping
+    // before prefixing produced `almide_rt_util_r#move` (#1494).
+    format!("almide_rt_{}_{}", origin, base)
+}
+
 #[cfg(test)]
 mod rust_safe_fn_name_tests {
     use super::rust_safe_fn_name;
@@ -461,8 +503,8 @@ mod rust_safe_fn_name_tests {
     /// runs and platforms), so a reordered file keeps its names.
     #[test]
     fn hash_suffix_is_stable() {
-        let once = rust_safe_fn_name("日本語");
-        assert_eq!(once, rust_safe_fn_name("日本語"));
+        let once = rust_safe_fn_name("日本語のテスト、一");
+        assert_eq!(once, rust_safe_fn_name("日本語のテスト、一"));
         assert!(once.ends_with(|c: char| c.is_ascii_hexdigit()));
     }
 }
@@ -488,21 +530,7 @@ fn render_fn_safe_name(
     // Emit-time prefix: module_origin → "almide_rt_{origin}_{name}"
     // IR name stays clean; prefix is a rendering concern.
     if let Some(ref origin) = func.module_origin {
-        // A qualified-method fn (e.g. a Codec `Type.encode` whose type is now the
-        // namespaced `mod.Type`) flattens to `mod_Type_method`; the emit prefix
-        // already adds `almide_rt_<origin>_`, so strip a leading `<origin>_` to
-        // avoid doubling the module (#433 × #411-B). Mirrors the call-site strip;
-        // gated on a dotted IR name so plain module fns are unaffected.
-        let base: String = if func.name.as_str().contains('.') {
-            almide_base::names::strip_module_path(&raw_name, origin).map_or_else(|| safe_name.clone(), rust_safe_fn_name)
-        } else {
-            safe_name.clone()
-        };
-        // No keyword escape on this branch: a prefixed symbol is never a Rust
-        // keyword, and the call-emitting paths (render_expr_call,
-        // prefix_intra_module_calls, ...) mangle without escaping — escaping
-        // before prefixing produced `almide_rt_util_r#move` (#1494).
-        safe_name = format!("almide_rt_{}_{}", origin, base);
+        safe_name = module_fn_symbol(&raw_name, origin);
     } else if !(is_rust_effect_main || is_rust_plain_main_with_forces) {
         // Escape a Rust-keyword fn name (`box` → `r#box`) so the DEFINITION
         // matches the CALL site exactly (#659). Only unprefixed names can

@@ -1,0 +1,3 @@
+expects_code = "E002"
+expects_error = "undefined function 'http.openai_streaming_call'"
+hint_substring = "llm.openai_streaming_call"

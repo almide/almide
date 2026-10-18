@@ -359,3 +359,56 @@ fn the_cost_model_runs_an_expensive_chunk_map_in_parallel() {
     let route = route_by_cost_model(COST_SRC, &["3000000"]);
     assert_eq!(route.matches("served on separate instances (8 elements").count(), 3, "{route}");
 }
+
+/// #3331: a chunk that reads a captured LIST of scalars — spectralnorm's row
+/// kernel — is served. The host copies each list into every worker once per
+/// offer; scalar and list captures mix, an empty list travels, and repeated
+/// offers reuse the pooled workers.
+#[test]
+fn a_chunk_reading_captured_scalar_lists_is_served() {
+    let src = r#"fn row(v: List[Float], w: List[Int], n: Int, i: Int) -> Float = {
+  var s = 0.0
+  var j = 0
+  while j < n { s = s + v[j] * int.to_float(i + j + w[j % list.len(w)]); j = j + 1 }
+  s + int.to_float(list.len(w))
+}
+
+effect fn rows(v: List[Float], w: List[Int], empty: List[Int], n: Int) -> List[Float] =
+  fan { list.map(list.range(0, n), (i) => row(v, w, n, i) + int.to_float(list.len(empty))) }
+
+effect fn main() -> Unit = {
+  let v = list.map(list.range(0, 40), (i) => int.to_float(i) * 0.25)
+  let w = [3, 1, 4, 1, 5]
+  var u = v
+  var k = 0
+  while k < 3 {
+    u = rows(u, w, [], 40)!
+    k = k + 1
+  }
+  println("${u}")
+}
+"#;
+    let route = same_on_every_leg(src);
+    assert_eq!(route.matches("served on separate instances (40 elements").count(), 3, "{route}");
+}
+
+/// A chunk that writes to its captured list writes to a COPY: the block the
+/// host built is pinned shared, so the write copies first and every element
+/// sees the original values — as each sees the caller's list natively.
+#[test]
+fn a_chunk_writing_its_captured_list_copies_it_first() {
+    let src = r#"fn bump(v: List[Int], i: Int) -> Int = {
+  var c = v
+  c[0] = c[0] + i
+  c[0] + v[0]
+}
+
+effect fn main() -> Unit = {
+  let v = [10, 20, 30]
+  let rs = fan { list.map(list.range(0, 16), (i) => bump(v, i)) }
+  println("${rs} ${v}")
+}
+"#;
+    let route = same_on_every_leg(src);
+    assert!(route.contains("__fan_site_0: served on separate instances (16 elements"), "{route}");
+}

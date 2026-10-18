@@ -63,18 +63,30 @@ impl Place {
     }
 }
 
+/// The tuple a write-back destructured (`let t = f(…); let (r, b) = t`,
+/// arg_temps.rs names it), settled right after the last write-back.
+#[derive(Clone)]
+pub(super) struct Subject {
+    /// The tuple's local.
+    pub(super) var: VarId,
+    /// Its binds that are NOT written back — views the frame may still read.
+    pub(super) others: Vec<VarId>,
+    /// The tuple positions whose bind IS written back into a place: the
+    /// write-back took its own credit on that block, so the tuple's credit
+    /// on it is surplus once the write-backs ran.
+    pub(super) written: Vec<usize>,
+}
+
 /// One statement's move-in sites.
 #[derive(Clone)]
 pub(super) struct MoveIn {
     /// Each candidate call's argument slice (its identity) and the vars it
     /// may take.
     at: Vec<(usize, Vec<Place>)>,
-    /// The tuple the call answered (`let t = f(…); let (r, b) = t`,
-    /// arg_temps.rs names it) and its binds that are NOT written back: its
-    /// slots keep a credit on each buffer until the frame releases it —
-    /// released right after the last write-back instead
-    /// (`settle_subject`), when nothing else reads it.
-    pub(super) subject: Option<(VarId, Vec<VarId>)>,
+    /// The tuple the call answered: its slots keep a credit on each buffer
+    /// until the frame releases it — settled right after the last
+    /// write-back instead (`settle_subject`), when nothing else reads it.
+    pub(super) subject: Option<Subject>,
     /// The index of the last statement of the site (the last write-back).
     pub(super) last: usize,
 }
@@ -141,6 +153,104 @@ pub(super) fn fold_site(body: &IrExpr, acc: VarId) -> Option<MoveIn> {
     (!at.is_empty()).then_some(MoveIn { at, subject: None, last: usize::MAX })
 }
 
+/// The frame-tail move-in sites: a call nested in one of the body's result
+/// leaves (`go(st(x, c), i - 1)`, `{ ...r, xs: f(x) }`) whose Var argument
+/// that leaf mentions nowhere else. The frame ends with that leaf, so the
+/// var is never read after the inner call: it hands its credit over instead
+/// of sharing it, and the callee's in-place op meets the block at its true
+/// count (the exit's release of the emptied local is a release of NULL).
+/// The leaf's own call is left out: the tail transfer already releases the
+/// frame before it runs. A var an enclosing `match` subject or destructure
+/// mentions is never taken (its bindings are views into the block), nor a
+/// call under a loop or a lambda (it may run more than once).
+pub(super) fn frame_tail_sites(body: &IrExpr) -> Option<MoveIn> {
+    let mut at = Vec::new();
+    tail_leaves(body, &mut Vec::new(), &mut at);
+    (!at.is_empty()).then_some(MoveIn { at, subject: None, last: usize::MAX })
+}
+
+fn tail_leaves<'e>(e: &'e IrExpr, views: &mut Vec<&'e IrExpr>, out: &mut Vec<(usize, Vec<Place>)>) {
+    match &e.kind {
+        IrExprKind::Block { stmts, expr: Some(t) } => {
+            let n = views.len();
+            views.extend(stmts.iter().filter_map(|s| match &s.kind {
+                IrStmtKind::BindDestructure { value, .. } => Some(value),
+                _ => None,
+            }));
+            tail_leaves(t, views, out);
+            views.truncate(n);
+        }
+        IrExprKind::If { then, else_, .. } => {
+            tail_leaves(then, views, out);
+            tail_leaves(else_, views, out);
+        }
+        IrExprKind::Match { subject, arms } => {
+            views.push(subject);
+            arms.iter().for_each(|a| tail_leaves(&a.body, views, out));
+            views.pop();
+        }
+        IrExprKind::Try { expr } | IrExprKind::Unwrap { expr } => tail_leaves(expr, views, out),
+        _ => {
+            let mut inner = Vec::new();
+            let own = match &e.kind {
+                IrExprKind::Call { args, .. } => Some(args.as_ptr() as usize),
+                _ => None,
+            };
+            nested_calls(e, &mut inner);
+            for (ptr, places) in inner.into_iter().filter(|(p, _)| Some(*p) != own) {
+                let free: Vec<Place> = places
+                    .into_iter()
+                    .filter(|p| mentions(e, p.root()) == 1 && !views.iter().any(|v| reads(v, p.root())))
+                    .collect();
+                if !free.is_empty() {
+                    out.push((ptr, free));
+                }
+            }
+        }
+    }
+}
+
+/// The table calls inside `e` that run at most once (not under a loop or a
+/// lambda), each with its place arguments.
+fn nested_calls(e: &IrExpr, out: &mut Vec<(usize, Vec<Place>)>) {
+    struct Calls<'o>(&'o mut Vec<(usize, Vec<Place>)>);
+    impl IrVisitor for Calls<'_> {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            match &e.kind {
+                IrExprKind::While { .. } | IrExprKind::ForIn { .. } | IrExprKind::Lambda { .. } => return,
+                IrExprKind::Call { target, args, .. } if table_call(target) => {
+                    self.0.push((args.as_ptr() as usize, args.iter().filter_map(Place::of).collect()));
+                }
+                _ => {}
+            }
+            walk_expr(self, e);
+        }
+    }
+    Calls(out).visit_expr(e);
+}
+
+/// How many times `e` mentions `var`: a read, or an in-place statement's target.
+fn mentions(e: &IrExpr, var: VarId) -> usize {
+    struct Count(VarId, usize);
+    impl IrVisitor for Count {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if matches!(&e.kind, IrExprKind::Var { id } if *id == self.0) {
+                self.1 += 1;
+            }
+            walk_expr(self, e);
+        }
+        fn visit_stmt(&mut self, s: &IrStmt) {
+            if stmt_targets(s, self.0) {
+                self.1 += 1;
+            }
+            walk_stmt(self, s);
+        }
+    }
+    let mut c = Count(var, 0);
+    c.visit_expr(e);
+    c.1
+}
+
 /// The index of the statement after `i` that rebinds `var` (`var = …` not
 /// reading it) with nothing between that reads it or may leave the block —
 /// or, past the last statement, a tail that rebinds it first on every path
@@ -190,7 +300,7 @@ fn write_backs(
     tail: Option<&IrExpr>,
     i: usize,
     bound: VarId,
-) -> Option<(Vec<VarId>, Option<(VarId, Vec<VarId>)>, usize)> {
+) -> Option<(Vec<VarId>, Option<Subject>, usize)> {
     let (bufs, subject, first) = match stmts.get(i + 1).map(|s| &s.kind) {
         Some(IrStmtKind::BindDestructure { pattern: IrPattern::Tuple { elements }, value })
             if matches!(&value.kind, IrExprKind::Var { id } if *id == bound) =>
@@ -225,7 +335,12 @@ fn write_backs(
     let subject = subject.and_then(|(t, binds)| {
         let once = reads_in_block(stmts, tail, t) == 1
             && backs.iter().all(|&(_, b)| reads_in_block(stmts, tail, b) == 1);
-        once.then(|| (t, binds.into_iter().filter(|b| !backs.iter().any(|&(_, w)| w == *b)).collect()))
+        let written_back = |b: &VarId| backs.iter().any(|&(_, w)| w == *b);
+        once.then(|| Subject {
+            var: t,
+            others: binds.iter().copied().filter(|b| !written_back(b)).collect(),
+            written: binds.iter().enumerate().filter(|(_, b)| written_back(b)).map(|(k, _)| k).collect(),
+        })
     });
     Some((backs.iter().map(|&(v, _)| v).collect(), subject, first + backs.len() - 1))
 }
@@ -275,7 +390,7 @@ fn exit_calls(e: &IrExpr, vars: &[Place], out: &mut Vec<(usize, Vec<Place>)>) {
         args.iter().filter_map(Place::of).collect()
     };
     match &e.kind {
-        IrExprKind::Call { target: CallTarget::Named { .. }, args, .. } => out.push((args.as_ptr() as usize, take(args))),
+        IrExprKind::Call { target, args, .. } if table_call(target) => out.push((args.as_ptr() as usize, take(args))),
         IrExprKind::Unwrap { expr } | IrExprKind::Try { expr } => exit_calls(expr, vars, out),
         IrExprKind::Block { stmts, expr } => {
             if let Some(t) = expr {
@@ -309,7 +424,9 @@ fn exit_calls(e: &IrExpr, vars: &[Place], out: &mut Vec<(usize, Vec<Place>)>) {
         }
         IrExprKind::Match { subject, arms } => {
             arms.iter().for_each(|a| exit_calls(&a.body, vars, out));
-            if let IrExprKind::Call { target: CallTarget::Named { .. }, args, .. } = &unwrapped(subject).kind {
+            if let IrExprKind::Call { target, args, .. } = &unwrapped(subject).kind
+                && table_call(target)
+            {
                 let free: Vec<Place> = take(args)
                     .into_iter()
                     .filter(|p| !arms.iter().any(|a| a.guard.as_ref().is_some_and(|g| reads(g, p.root())) || reads_before_rebind(&a.body, *p)))
@@ -321,6 +438,15 @@ fn exit_calls(e: &IrExpr, vars: &[Place], out: &mut Vec<(usize, Vec<Place>)>) {
         }
         _ => {}
     }
+}
+
+/// A call that may resolve to a table fn: a program fn (`Named`), or a
+/// module call the emitter links to its table implementation
+/// (`lower_linked_call` — a self-hosted stdlib fn). Whether a place moves
+/// is still the callee's `param_owned` decision at the site; a module call
+/// lowered inline never asks.
+fn table_call(target: &CallTarget) -> bool {
+    matches!(target, CallTarget::Named { .. } | CallTarget::Module { .. })
 }
 
 /// Does `e` read `var` before rebinding it — an arm `{ xs = b; err((e, xs))! }`
@@ -397,22 +523,25 @@ impl IrVisitor for Finder {
         }
     }
     fn visit_stmt(&mut self, s: &IrStmt) {
-        let hit = match &s.kind {
-            IrStmtKind::IndexAssign { target, .. }
-            | IrStmtKind::MapInsert { target, .. }
-            | IrStmtKind::FieldAssign { target, .. }
-            | IrStmtKind::ListSwap { target, .. }
-            | IrStmtKind::ListReverse { target, .. }
-            | IrStmtKind::ListRotateLeft { target, .. }
-            | IrStmtKind::RcInc { var: target }
-            | IrStmtKind::RcDec { var: target } => *target == self.0,
-            IrStmtKind::ListCopySlice { dst, src, .. } => *dst == self.0 || *src == self.0,
-            _ => false,
-        };
-        self.1 |= hit;
+        self.1 |= stmt_targets(s, self.0);
         if !self.1 {
             walk_stmt(self, s);
         }
     }
 }
 
+/// Is `var` the target of an in-place statement (`var[i] = …`, `var.f = …`, …)?
+fn stmt_targets(s: &IrStmt, var: VarId) -> bool {
+    match &s.kind {
+        IrStmtKind::IndexAssign { target, .. }
+        | IrStmtKind::MapInsert { target, .. }
+        | IrStmtKind::FieldAssign { target, .. }
+        | IrStmtKind::ListSwap { target, .. }
+        | IrStmtKind::ListReverse { target, .. }
+        | IrStmtKind::ListRotateLeft { target, .. }
+        | IrStmtKind::RcInc { var: target }
+        | IrStmtKind::RcDec { var: target } => *target == var,
+        IrStmtKind::ListCopySlice { dst, src, .. } => *dst == var || *src == var,
+        _ => false,
+    }
+}

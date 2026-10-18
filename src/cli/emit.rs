@@ -113,9 +113,14 @@ fn emit_codegen_output(ir_program: &mut Option<almide::ir::IrProgram>, target: &
         "wgsl" => codegen::pass::Target::Wgsl,
         other => { err(&format!("Unknown target: {}. Use rust, wgsl.", other)); std::process::exit(1); }
     };
-    let opts = codegen::CodegenOptions { repr_c, allow_unverified: false, trace: trace_map, ..Default::default() };
+    // #3673: a metered program (fan.bounded / fan.race / fan.timeout) is
+    // emitted with the codegen's own meter and its runtime, so the Rust stands
+    // alone — the region delegates point at a module only the CLI links.
+    let metered = t == codegen::pass::Target::Rust && almide::ir::runtime_use::uses_metered_prims(ir);
+    let opts = codegen::CodegenOptions { repr_c, allow_unverified: false, trace: trace_map, meter_in_codegen: metered };
     match codegen::codegen_with(ir, t, &opts) {
         codegen::CodegenOutput::Source(code) => {
+            let code = if metered { code + &almide_mir::pipeline::native_meter_runtime() } else { code };
             if trace_map {
                 write_trace_map(src_file, &code);
             }

@@ -88,6 +88,4 @@ fn sha256(data: &[u8]) -> Vec<u8> {
 
 pub fn almide_rt_hash_sha256(b: &Vec<u8>) -> Vec<u8> { sha256(b) }
 
-pub fn almide_rt_hash_sha256_hex(s: &str) -> String {
-    sha256(s.as_bytes()).iter().map(|b| format!("{:02x}", b)).collect()
-}
+pub fn almide_rt_hash_sha256_hex(s: &str) -> AlmideString { let __almide_out: String = sha256(s.as_bytes()).iter().map(|b| format!("{:02x}", b)).collect(); __almide_out.into() }

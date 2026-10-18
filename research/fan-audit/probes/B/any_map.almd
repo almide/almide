@@ -1,0 +1,27 @@
+effect fn probe(x: Int) -> Result[Int, String] = {
+  println("probe " + int.to_string(x))
+  if x < 0 then err("neg " + int.to_string(x)) else ok(x)
+}
+effect fn main() -> Unit = {
+  match fan.any([-1, 5, 7, -2], (x) => probe(x)) {
+    ok(v) => println("L1 ok " + int.to_string(v)),
+    err(e) => println("L1 err " + e),
+  }
+  match fan.any([-1, -2], (x) => probe(x)) {
+    ok(v) => println("L2 ok " + int.to_string(v)),
+    err(e) => println("L2 allfail err " + e),
+  }
+  let xs: List[Int] = []
+  match fan.any(xs, (x) => probe(x)) {
+    ok(v) => println("L3 ok " + int.to_string(v)),
+    err(e) => println("L3 empty err " + e),
+  }
+  match fan.any([3, 4], probe) {
+    ok(v) => println("L4 fnvalue ok " + int.to_string(v)),
+    err(e) => println("L4 err " + e),
+  }
+  match fan.any(["x", "y"], (s) => if s == "y" then ok(s) else err("no")) {
+    ok(v) => println("L5 ss ok " + v),
+    err(e) => println("L5 err " + e),
+  }
+}

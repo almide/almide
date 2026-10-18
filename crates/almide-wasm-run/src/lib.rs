@@ -6,11 +6,16 @@ mod host;
 mod http_call_host;
 mod host_process;
 mod host_serve;
+mod net_host;
+mod net_unix_host;
 #[cfg(test)]
 #[path = "tests/http_host_test.rs"]
 mod http_host_test;
 pub(crate) mod component_alloc;
 pub mod component_availability;
+mod component_host;
+/// ADR-0023 step 7: the embedded lane's runner for a WASI 0.3 component.
+pub use component_host::run_component;
 /// The private `almide:process/spawn` capability (#2589, ADR-0025): the
 /// `[permissions] proc` bound and the canonical-ABI import.
 pub use host_process::{link_spawn_import, set_allowlist as set_proc_allowlist};

@@ -111,7 +111,7 @@ fn list_and_option_drivers_take_the_by_reference_twin() {
     assert!(rust.contains("almide_rt_value_decode_list_ref((almide_rt_value_field_ref_at(__almide_ir1_v, \"homes\", 3))?, Address_decode)"),
         "a List[Record] field must route to the `&AlmideValue` list driver with the by-ref element decoder:\n{}", grep(&rust, "decode_list"));
     assert!(!rust.contains("almide_rt_value_decode_list(&"), "the by-value list driver must never receive a borrow:\n{}", grep(&rust, "decode_list"));
-    assert!(rust.contains("__decode_option_Address(__almide_ir1_v: &AlmideValue, __almide_ir1_key: String)"), "the derived option worker borrows its AlmideValue too:\n{}", grep(&rust, "__decode_option_Address"));
+    assert!(rust.contains("__decode_option_Address(__almide_ir1_v: &AlmideValue, __almide_ir1_key: AlmideString)"), "the derived option worker borrows its AlmideValue too:\n{}", grep(&rust, "__decode_option_Address"));
 }
 
 /// #2052: the primitive option/default helpers (`__decode_option_<prim>`,
@@ -139,17 +139,17 @@ fn primitive_option_and_default_helpers_borrow_the_document() {
         assert!(rust.contains(&format!("pub fn {decode}(__almide_ir1_v: &AlmideValue)")),
             "every derived decode borrows its document, defaulted fields or not (#2052):\n{}", grep(&rust, "_decode("));
     }
-    assert!(rust.contains("almide_rt_value_decode_option_custom_ref(__almide_ir1_v, \"a\".to_string(), WithDefault_decode)"),
+    assert!(rust.contains("almide_rt_value_decode_option_custom_ref(__almide_ir1_v, AlmideString::from(\"a\"), WithDefault_decode)"),
         "an Option[record-with-default] field routes to the by-reference option driver:\n{}", grep(&rust, "decode_option_custom"));
-    assert!(rust.contains("almide_rt_value_decode_option_custom_ref(__almide_ir1_v, \"b\".to_string(), Plain_decode)"),
+    assert!(rust.contains("almide_rt_value_decode_option_custom_ref(__almide_ir1_v, AlmideString::from(\"b\"), Plain_decode)"),
         "an Option[record] field routes to the by-reference option driver:\n{}", grep(&rust, "decode_option_custom"));
     assert!(!rust.contains("almide_rt_value_decode_option_custom("),
         "the by-value option driver must never be handed a borrowed document:\n{}", grep(&rust, "decode_option_custom"));
-    assert!(rust.contains("almide_rt___decode_option_int(__almide_ir1_v, \"d\".to_string())"),
+    assert!(rust.contains("almide_rt___decode_option_int(__almide_ir1_v, AlmideString::from(\"d\"))"),
         "a primitive Option field hands the helper the borrowed document, not a clone:\n{}", grep(&rust, "__decode_option_int"));
-    assert!(rust.contains("almide_rt___decode_default_string(__almide_ir1_v, \"tag\".to_string()"),
+    assert!(rust.contains("almide_rt___decode_default_string(__almide_ir1_v, AlmideString::from(\"tag\")"),
         "a defaulted scalar field hands the helper the borrowed document:\n{}", grep(&rust, "__decode_default_string"));
-    assert!(rust.contains("almide_rt___decode_default_list_int(__almide_ir1_v, \"xs\".to_string()"),
+    assert!(rust.contains("almide_rt___decode_default_list_int(__almide_ir1_v, AlmideString::from(\"xs\")"),
         "a defaulted list field hands the helper the borrowed document:\n{}", grep(&rust, "__decode_default_list_int"));
     assert!(!rust.contains("__almide_ir1_v.clone()"),
         "no whole-document clone survives in a derived decode:\n{}", grep(&rust, "__almide_ir1_v.clone()"));

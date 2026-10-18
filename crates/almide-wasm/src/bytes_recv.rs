@@ -142,8 +142,8 @@ impl Emitter<'_> {
 
     /// `emit_bytes_writeback` for an arm whose block is FRESH (never the
     /// receiver's own): a var's credit on the block it replaces goes with
-    /// the rebind (`emit_rebind_mut_var_fresh`) — fill / clear / the BE
-    /// writers / copy_within / the linked append family (#2968).
+    /// the rebind (`emit_rebind_mut_var_fresh`) — the linked append family
+    /// (#2968).
     pub(crate) fn emit_bytes_writeback_fresh(&mut self, recv: &BytesRecv) -> Result<(), EmitError> {
         self.bytes_writeback(recv, true)
     }

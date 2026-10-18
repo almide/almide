@@ -56,6 +56,68 @@ pub(crate) fn cross_target() -> Option<String> {
     CROSS_TARGET.with(|c| c.borrow().clone())
 }
 
+thread_local! {
+    static TARGET_CPU: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+/// Scope `almide build --target-cpu <cpu>` to the current build, the same way
+/// [`CrossTargetGuard`] scopes the triple. Restores the previous value on drop.
+pub(crate) struct TargetCpuGuard(Option<String>);
+
+impl TargetCpuGuard {
+    pub(crate) fn set(cpu: Option<String>) -> Self {
+        TargetCpuGuard(TARGET_CPU.with(|c| c.replace(cpu)))
+    }
+}
+
+impl Drop for TargetCpuGuard {
+    fn drop(&mut self) {
+        let prev = self.0.take();
+        TARGET_CPU.with(|c| *c.borrow_mut() = prev);
+    }
+}
+
+/// The `-C target-cpu` a `--release` build passes (#3604), or `None` for
+/// rustc's generic default.
+///
+/// The default is a named BASELINE for the target's architecture, not
+/// `native`: an x86_64 target gets `x86-64-v3` (AVX2 and FMA — Intel since
+/// Haswell, 2013; AMD since Zen, 2017), any other target the generic CPU.
+/// Measured 2026-10-15, spectralnorm with a runtime `n`, ms (generic → v3 →
+/// native): AMD EPYC 7B13 (Zen3, the GitHub x86 runner's class) imperative
+/// 87.8 → 67.2 → 109.8, enumerate 88.4 → 69.5 → 108.4; Intel Xeon 8581C
+/// 57.1 → 45.4 → 47.1. `native` lost 25% on Zen3 (LLVM's znver3 cost model
+/// vectorizes `eval_a` badly), and it shipped as the default once (#3727,
+/// reverted): a default must win on every CPU class measured, and only the
+/// v3 baseline did. aarch64 stays generic: on Neoverse-V2 native helped the
+/// idiomatic spellings but cost the imperative one 5%, and no named
+/// baseline was measured to win both.
+///
+/// `--target-cpu portable` asks for the generic CPU (a binary for a machine
+/// without AVX2); any other value is passed to rustc as is (`native`,
+/// `x86-64-v4`, `neoverse-n1`, …).
+pub(crate) fn release_target_cpu() -> Option<String> {
+    match TARGET_CPU.with(|c| c.borrow().clone()) {
+        Some(cpu) => (cpu != "portable").then_some(cpu),
+        None => {
+            let arch = cross_target().map_or_else(|| std::env::consts::ARCH.to_string(), |t| t.split('-').next().unwrap_or("").to_string());
+            (arch == "x86_64").then(|| "x86-64-v3".to_string())
+        }
+    }
+}
+
+/// `--target-cpu native` on a cross build would tune for this machine's CPU,
+/// which the target may not have.
+pub(crate) fn validate_target_cpu(cpu: Option<&str>, triple: Option<&str>) -> Result<(), String> {
+    match (cpu, triple) {
+        (Some("native"), Some(t)) => Err(format!(
+            "error: --target-cpu native tunes for THIS machine, but the build targets {t}\n  \
+             hint: name the target's CPU (`--target-cpu x86-64-v3`), or omit the flag for the target's default baseline"
+        )),
+        _ => Ok(()),
+    }
+}
+
 /// Resolve `almide build --target <flag>` (already known not to be a wasm
 /// target) plus the inherited `CARGO_BUILD_TARGET` into the triple to build
 /// for, `None` meaning the host. `host_arch` is `std::env::consts::ARCH`,
@@ -285,5 +347,29 @@ mod tests {
             assert_eq!(cross_target().as_deref(), Some("x86_64-unknown-linux-musl"));
         }
         assert_eq!(cross_target(), None);
+    }
+
+    #[test]
+    fn a_release_defaults_to_the_targets_baseline_and_the_flag_overrides_it() {
+        let host = if std::env::consts::ARCH == "x86_64" { Some("x86-64-v3") } else { None };
+        assert_eq!(release_target_cpu().as_deref(), host);
+        {
+            let _g = CrossTargetGuard::set(Some("x86_64-unknown-linux-musl".into()));
+            assert_eq!(release_target_cpu().as_deref(), Some("x86-64-v3"), "the baseline follows the TARGET's arch");
+            let _c = TargetCpuGuard::set(Some("znver4".into()));
+            assert_eq!(release_target_cpu().as_deref(), Some("znver4"), "a named CPU passes through");
+        }
+        {
+            let _g = CrossTargetGuard::set(Some("aarch64-unknown-linux-musl".into()));
+            assert_eq!(release_target_cpu(), None, "aarch64 stays generic");
+        }
+        {
+            let _c = TargetCpuGuard::set(Some("portable".into()));
+            assert_eq!(release_target_cpu(), None, "portable is rustc's generic default");
+        }
+        assert_eq!(release_target_cpu().as_deref(), host);
+        assert!(validate_target_cpu(Some("native"), Some("aarch64-unknown-linux-musl")).is_err());
+        assert!(validate_target_cpu(Some("native"), None).is_ok());
+        assert!(validate_target_cpu(Some("x86-64-v3"), Some("x86_64-unknown-linux-musl")).is_ok());
     }
 }

@@ -16,11 +16,14 @@ pub fn almide_rt_io_print(s: &str) {
     almide_stdout_flush();
 }
 
-pub fn almide_rt_io_read_line() -> String {
-    almide_stdout_flush();
-    let mut buf = String::new();
-    std::io::stdin().read_line(&mut buf).unwrap_or(0);
-    buf.trim_end_matches('\n').trim_end_matches('\r').to_string()
+pub fn almide_rt_io_read_line() -> AlmideString {
+    let __almide_out: String = {
+        almide_stdout_flush();
+        let mut buf = String::new();
+        std::io::stdin().read_line(&mut buf).unwrap_or(0);
+        buf.trim_end_matches('\n').trim_end_matches('\r').to_string()
+    };
+    __almide_out.into()
 }
 
 // `read_line` answers "" both for an empty line and at end of input, so a loop
@@ -29,25 +32,31 @@ pub fn almide_rt_io_read_line() -> String {
 // The line is decoded lossily (as io.read_all's twin does), so a stray invalid
 // byte costs one U+FFFD instead of the whole line — the wasm self-host
 // (stdlib/io_read_line_opt.almd) decodes the same way.
-pub fn almide_rt_io_read_line_opt() -> Option<String> {
-    use std::io::BufRead;
-    almide_stdout_flush();
-    let mut buf: Vec<u8> = Vec::new();
-    match std::io::stdin().lock().read_until(b'\n', &mut buf) {
-        Ok(0) | Err(_) => None,
-        Ok(_) => {
-            let line = String::from_utf8_lossy(&buf);
-            Some(line.trim_end_matches('\n').trim_end_matches('\r').to_string())
+pub fn almide_rt_io_read_line_opt() -> Option<AlmideString> {
+    let __almide_v: Option<String> = {
+        use std::io::BufRead;
+        almide_stdout_flush();
+        let mut buf: Vec<u8> = Vec::new();
+        match std::io::stdin().lock().read_until(b'\n', &mut buf) {
+            Ok(0) | Err(_) => None,
+            Ok(_) => {
+                let line = String::from_utf8_lossy(&buf);
+                Some(line.trim_end_matches('\n').trim_end_matches('\r').to_string())
+            }
         }
-    }
+    };
+    __almide_v.into_almide()
 }
 
-pub fn almide_rt_io_read_all() -> String {
-    almide_stdout_flush();
-    use std::io::Read;
-    let mut buf = String::new();
-    std::io::stdin().read_to_string(&mut buf).unwrap_or(0);
-    buf
+pub fn almide_rt_io_read_all() -> AlmideString {
+    let __almide_out: String = {
+        almide_stdout_flush();
+        use std::io::Read;
+        let mut buf = String::new();
+        std::io::stdin().read_to_string(&mut buf).unwrap_or(0);
+        buf
+    };
+    __almide_out.into()
 }
 
 pub fn almide_rt_io_read_byte() -> i64 {
@@ -92,15 +101,42 @@ pub fn almide_rt_io_read_n_bytes(n: i64) -> Vec<i64> {
     use std::io::Read;
     almide_stdout_flush();
     if n <= 0 { return Vec::new(); }
-    let mut buf: Vec<u8> = Vec::new();
-    let _ = std::io::stdin().take(n as u64).read_to_end(&mut buf);
-    buf.into_iter().map(|b| b as i64).collect()
+    // Slices of at most 64 KiB read straight into one zeroed-once chunk and
+    // widened into the answer: a slice of 8 KiB or more bypasses stdin's
+    // buffer, so its bytes are not copied through it. `take(n).read_to_end`
+    // grew its Vec from 32 bytes and sized each read adaptively, and the reads
+    // that fit stdin's buffer went through it and its copy — all 20000 bytes
+    // of a call at n = 20000, 8 KiB of one at n >= 80000 (GCE c4-standard-4),
+    // a per-call cost that moved with n. Nothing is sized from n past one slice.
+    const SLICE: usize = 1 << 16;
+    thread_local! {
+        static CHUNK: std::cell::RefCell<Vec<u8>> = std::cell::RefCell::new(vec![0u8; SLICE]);
+    }
+    CHUNK.with(|chunk| {
+        let mut chunk = chunk.borrow_mut();
+        let mut out: Vec<i64> = Vec::with_capacity((n as u64).min(SLICE as u64) as usize);
+        let mut left = n as u64;
+        let mut input = std::io::stdin().lock();
+        while left > 0 {
+            let want = left.min(SLICE as u64) as usize;
+            match input.read(&mut chunk[..want]) {
+                Ok(0) => break,
+                Ok(got) => {
+                    out.extend(chunk[..got].iter().map(|&b| b as i64));
+                    left -= got as u64;
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(_) => break,
+            }
+        }
+        out
+    })
 }
 
 // Byte writes share the buffer with `println` (#2245), so they interleave in
 // PROGRAM order without a flush per call (the C-162 fixture pins the order on
 // both legs); a terminal still sees each write as it happens.
-pub fn almide_rt_io_write_bytes(data: &Vec<i64>) {
+pub fn almide_rt_io_write_bytes(data: &[i64]) {
     let bytes: Vec<u8> = data.iter().map(|&b| b as u8).collect();
     almide_stdout_write_bytes(&bytes);
 }

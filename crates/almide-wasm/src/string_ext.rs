@@ -186,6 +186,10 @@ impl Emitter<'_> {
     /// `h.f = h.f + x` through `lower_field_assign`'s copy-on-write rebind,
     /// the route `list.push(h.f, v)` takes (#2411).
     fn lower_string_push(&mut self, v: &IrExpr, x: &IrExpr) -> ArmResult {
+        // #3639: a field the append window admits grows in place.
+        if self.try_field_push_str(v, x)? {
+            return Ok(None);
+        }
         if let Some((id, path)) = crate::list_mut::record_field_receiver(v) {
             // Built here, not as a synthesized `h.f + x` expression: a
             // fresh `x` (`int.to_string(i)`) is then a borrowed argument
@@ -213,6 +217,22 @@ impl Emitter<'_> {
         }
         self.emit_read_mut_var(id, var_idx, var_ty, vglob);
         self.lower_arg(x, Some(STR), ArgMode::Borrow)?;
+        // #3639: a plain local appends through `$str_append` — the window
+        // `s = s + x` already takes (stmts_append.rs): in place when the
+        // block is owned outright (rc == 1) and its capacity holds the grown
+        // length, else a fresh geometric block with the outgrown one
+        // released. It consumes the var's credit and answers the block the
+        // var now holds, so a shared receiver (an alias bound before the
+        // push) is copied and the alias keeps its text. F_CONCAT copied the
+        // whole string on every push: a builder loop was quadratic. A global
+        // or a C-319 cell keeps the concat rebind: a call in `x` may rebind
+        // that outer holder under the block read above.
+        if !vglob && !self.cells.contains(id) {
+            self.f.instructions().call(F_STR_APPEND);
+            self.emit_store_mut_var(*id, var_idx, var_ty, vglob)?;
+            self.witness_mut_rebind(*id, vglob);
+            return Ok(None);
+        }
         self.f.instructions().call(F_CONCAT);
         self.emit_rebind_mut_var_fresh(*id, var_idx, var_ty, vglob)?;
         Ok(None)
@@ -309,10 +329,22 @@ impl Emitter<'_> {
 
     /// Byte-prefix compare (native str::starts_with): for valid UTF-8
     /// the byte test IS the char test.
-    fn lower_string_starts_with(
+    fn lower_string_starts_with(&mut self, s: &IrExpr, prefix: &IrExpr) -> ArmResult {
+        self.lower_string_affix(s, prefix, false)
+    }
+
+    fn lower_string_ends_with(&mut self, s: &IrExpr, suffix: &IrExpr) -> ArmResult {
+        self.lower_string_affix(s, suffix, true)
+    }
+
+    /// `starts_with` / `ends_with` (`at_end`): `affix`'s bytes against the
+    /// same number of bytes at the start or the end of `s`, Rust's byte-wise
+    /// `str` compare.
+    fn lower_string_affix(
         &mut self,
         s: &IrExpr,
         prefix: &IrExpr,
+        at_end: bool,
     ) -> ArmResult {
         self.lower_arg(s, Some(STR), ArgMode::Borrow)?;
         let hs = self.hold_i32()?;
@@ -329,6 +361,10 @@ impl Emitter<'_> {
         i.if_(BlockType::Result(ValType::I32));
         i.i32_const(0);
         i.else_();
+        if at_end {
+            // Compare from len(s) − len(affix): move the base by that much.
+            i.local_get(hs).local_get(hs).i32_load(len_memarg()).local_get(hn).i32_sub().i32_add().local_set(hs);
+        }
         i.i32_const(1).local_set(hr);
         i.i32_const(0).local_set(hk);
         i.block(BlockType::Empty).loop_(BlockType::Empty);
@@ -381,22 +417,10 @@ impl Emitter<'_> {
     ) -> Result<Option<Option<Lowered>>, EmitError> {
         match (func, args) {
             ("starts_with", [s, p]) => self.lower_string_starts_with(s, p),
-            // ends_with = the strip_suffix compare with a Bool verdict.
-            ("ends_with", [s, p]) => {
-                let got = self.lower_string_strip(s, p, false)?;
-                // The verdict is whether the strip answered `some`; that
-                // Option and the stripped string in it are this arm's own
-                // and go right after (#2977 — every hit kept both; a `none`
-                // is NULL_ADDR, which the drop no-ops).
-                let dec = match got {
-                    Some(l) => self.dec_fn_of(l.ty),
-                    None => return unsup("string-ends-with-strip"),
-                };
-                let h = self.hold_i32()?;
-                self.f.instructions().local_tee(h).i32_const(0).i32_ne().local_get(h).call(dec);
-                self.release_i32();
-                Ok(Some(Lowered::scalar(BOOL)))
-            }
+            // ends_with compares the suffix's bytes in place. It used to build
+            // strip_suffix's stripped string — nearly a copy of `s` — only to
+            // drop it, so every call cost O(len(s)).
+            ("ends_with", [s, p]) => self.lower_string_ends_with(s, p),
             ("strip_prefix" | "strip_suffix", [s, p]) => {
                 self.lower_string_strip(s, p, func == "strip_prefix")
             }
@@ -463,6 +487,11 @@ impl Emitter<'_> {
                     .if_(BlockType::Result(ValType::I32));
                 i.i32_const(empty as i32);
                 i.else_();
+                // `r` is borrowed, so the payload handed out as owned needs
+                // its own reference: without it a temporary `r` frees it
+                // after the call, and a live `r` loses it when the message
+                // is dropped.
+                i.local_get(hr).i32_load(slot_memarg(almide_layout::SUM_FIELD)).call(F_INC);
                 i.local_get(hr).i32_load(slot_memarg(almide_layout::SUM_FIELD));
                 i.end();
                 let _ = i;
@@ -486,6 +515,7 @@ impl Emitter<'_> {
                 let hm = self.hold_i32()?;
                 let sep = self.pool.intern(": ");
                 let hout = self.hold_i32()?;
+                let hpre = self.hold_i32()?;
                 let mut i = self.f.instructions();
                 i.local_set(hm);
                 i.local_get(hr)
@@ -495,10 +525,13 @@ impl Emitter<'_> {
                 // ok: pass the Result through untouched.
                 i.local_get(hr);
                 i.else_();
-                // err: "{msg}: {e}" in a fresh err block.
-                i.local_get(hm).i32_const(sep as i32).call(F_CONCAT);
+                // err: "{msg}: {e}" in a fresh err block. "{msg}: " is a block
+                // of this arm's own making: parked, consumed by the outer
+                // concat, released (as `chain` does).
+                i.local_get(hm).i32_const(sep as i32).call(F_CONCAT).local_tee(hpre);
                 i.local_get(hr).i32_load(slot_memarg(almide_layout::SUM_FIELD));
                 i.call(F_CONCAT).local_set(hm);
+                i.local_get(hpre).call(F_DEC_FLAT);
                 i.i32_const(16)
                     .call(F_ALLOC)
                     .local_tee(hout)
@@ -509,6 +542,7 @@ impl Emitter<'_> {
                 i.local_get(hout);
                 i.end();
                 let _ = i;
+                self.release_i32();
                 self.release_i32();
                 self.release_i32();
                 self.release_i32();

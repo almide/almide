@@ -183,9 +183,14 @@ fn bytes_fill(b: Bytes, val: Int) -> Unit = {
 // `lower_bytes_clear`, the incumbent's `rewrite_clear` to `bytes.new(0)`), the C-033 discipline.
 fn bytes_clear(b: Bytes) -> Unit = prim.store32(prim.handle(b) + 4, 0)
 
-// ── f64 (store the 8 IEEE bits; prim.fbits gives the i64 bit pattern) ──
+// Float sets are NaN-OBSERVATION boundaries like every bytes float writer
+// (C-210, #3658): f64 through the one `float.to_bits` rule, f32 through
+// `__bm_f32_obs_bits` (bytes_append_multi's `__f32_obs_bits` rule).
+fn __bm_f32_obs_bits(v: Float) -> Int = if float.is_nan(v) then 0x7FC00000 else prim.f32bits(prim.f2f32(v))
+
+// ── f64 (store the 8 IEEE bits of `float.to_bits`) ──
 fn bytes_set_f64_be(b: Bytes, pos: Int, val: Float) -> Unit = {
-  let bits = prim.fbits(val)
+  let bits = float.to_bits(val)
   let n = prim.load32(prim.handle(b) + 4)
   let base = prim.handle(b) + 12
   let _ = if pos >= 0 then (if pos <= n - 8 then __s64be(base + pos, bits) else 0)
@@ -193,17 +198,16 @@ fn bytes_set_f64_be(b: Bytes, pos: Int, val: Float) -> Unit = {
 }
 
 fn bytes_set_f64_le(b: Bytes, pos: Int, val: Float) -> Unit = {
-  let bits = prim.fbits(val)
+  let bits = float.to_bits(val)
   let n = prim.load32(prim.handle(b) + 4)
   let base = prim.handle(b) + 12
   let _ = if pos >= 0 then (if pos <= n - 8 then __s64le(base + pos, bits) else 0)
   else 0
 }
 
-// ── f32 (demote f64 → f32, store the 4 f32 bits; prim.f32bits = the f32 bit pattern as Int) ──
+// ── f32 (demote f64 → f32, store the 4 f32 bits) ──
 fn bytes_set_f32_be(b: Bytes, pos: Int, val: Float) -> Unit = {
-  let f = prim.f2f32(val)
-  let bits = prim.f32bits(f)
+  let bits = __bm_f32_obs_bits(val)
   let n = prim.load32(prim.handle(b) + 4)
   let base = prim.handle(b) + 12
   let _ = if pos >= 0 then (if pos <= n - 4 then __s32be(base + pos, bits) else 0)
@@ -211,8 +215,7 @@ fn bytes_set_f32_be(b: Bytes, pos: Int, val: Float) -> Unit = {
 }
 
 fn bytes_set_f32_le(b: Bytes, pos: Int, val: Float) -> Unit = {
-  let f = prim.f2f32(val)
-  let bits = prim.f32bits(f)
+  let bits = __bm_f32_obs_bits(val)
   let n = prim.load32(prim.handle(b) + 4)
   let base = prim.handle(b) + 12
   let _ = if pos >= 0 then (if pos <= n - 4 then __s32le(base + pos, bits) else 0)

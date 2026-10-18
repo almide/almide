@@ -5,7 +5,8 @@
 # fact it states from the tree, so none of them can drift silently:
 #   1. the vendored p3 WIT interfaces are at exactly [wasi].minor;
 #   2. the p3 shim imports interfaces at that same version;
-#   3. the embedded host's wasmtime Cargo pin is [runtime].crate_major;
+#   3. the embedded host's wasmtime, wasmtime-wasi and wasmtime-wasi-http
+#      Cargo pins are [runtime].crate_major;
 #   4. CI installs [runtime].ci for the execution legs;
 #   5. the p3 test harness passes [runtime].flags verbatim;
 #   6. the wasm-tools family pins (wasmparser / wit-component) agree
@@ -37,9 +38,12 @@ while IFS= read -r v; do
   [ "$v" = "$minor" ] || err "wasi_p3*.rs imports wasi:*@$v, policy says $minor"
 done < <(grep -ohE "wasi:[a-z/-]+@[0-9.]+" crates/almide-wasm-run/src/wasi_p3*.rs | sed -E 's/.*@//' | sort -u)
 
-# 3. the embedded host's wasmtime pin.
-got="$(grep -E '^wasmtime *= *' crates/almide-wasm-run/Cargo.toml | sed -E 's/[^0-9]*([0-9]+).*/\1/')"
-[ "$got" = "$crate_major" ] || err "wasmtime Cargo pin is $got, policy says $crate_major"
+# 3. the embedded host's wasmtime pin, and its p3 worlds in lockstep
+#    (ADR-0023 §6.5: wasmtime-wasi and wasmtime-wasi-http move with the major).
+for dep in wasmtime wasmtime-wasi wasmtime-wasi-http; do
+  got="$(grep -E "^$dep *= *" crates/almide-wasm-run/Cargo.toml | sed -E 's/[^0-9]*([0-9]+).*/\1/')"
+  [ "$got" = "$crate_major" ] || err "$dep Cargo pin is ${got:-absent}, policy says $crate_major"
+done
 
 # 4. the CI-installed runtime.
 grep -q "wasmtime-${ci_ver}-" .github/workflows/ci.yml \

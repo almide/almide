@@ -26,7 +26,7 @@ fn trap_late(k: Int) -> Int = {
 }
 
 effect fn main() -> Unit = {
-  let w = fan.race(compute.us(100)) {
+  let w = fan.min(compute.us(100)) {
     {
       let x = heavy(100)
       trap_late(x)

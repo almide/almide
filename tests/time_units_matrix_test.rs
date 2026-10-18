@@ -199,9 +199,36 @@ fn s6_6_clock_declaration_matrix_matches_s4() {
         declared,
         vec![
             ("fan.bounded", "Compute"),
-            ("fan.race", "Compute"),
+            ("fan.min", "Compute"),
             ("fan.timeout", "Duration"),
         ],
         "S4 clock column drifted — update ADR-0001 S4, the table, and this pin together"
     );
+}
+
+/// S1: each clock type is a type the writer can spell — in a `let`, a
+/// parameter and a return annotation, wherever its constructors resolve
+/// (#3752: every annotation was E029 "unknown type"). The other clock's
+/// annotation still carries the clock-mixing error, not E029.
+#[test]
+fn s1_clock_types_are_nameable_in_every_annotation_position() {
+    for (module, ty) in TIME_MODULES {
+        let src = format!(
+            "fn twice(x: {ty}) -> {ty} = x + x\n\
+             effect fn main() -> Unit = {{\n\
+               let d: {ty} = {module}.ms(3)\n\
+               println(\"${{twice(d)}}\")\n\
+             }}\n"
+        );
+        let errs = errors(&src);
+        assert!(errs.is_empty(), "{ty} annotations: expected clean, got {errs:?}");
+    }
+    for (module, ty) in TIME_MODULES {
+        let other = TIME_MODULES.iter().find(|(_, t)| t != ty).map(|(_, t)| *t).expect("two clocks");
+        let errs = errors(&format!("effect fn main() -> Unit = {{\n  let d: {other} = {module}.ms(3)\n  println(\"${{d}}\")\n}}\n"));
+        assert!(
+            !errs.is_empty() && errs.iter().all(|e| !e.contains("unknown type")),
+            "a {ty} value under a {other} annotation: expected the clock-mixing error, got {errs:?}"
+        );
+    }
 }

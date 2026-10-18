@@ -1,0 +1,10 @@
+// #1456: a module name is a qualifier and a file name, so it is ASCII.
+// An import alias spelled in a caseless script would read as a type
+// (`文書.stringify` as a method of a type `文書`); the parser refuses it
+// and names the fix.
+import json as doc
+
+effect fn main() -> Unit = {
+  let v = doc.parse("[1]")!
+  println(doc.stringify(v))
+}

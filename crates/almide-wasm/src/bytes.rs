@@ -6,7 +6,7 @@
 //! assume fresh memory (the bump path's zero pages were never a
 //! guarantee once frees became real, #2004).
 
-use almide_ir::{IrExpr, IrExprKind};
+use almide_ir::IrExpr;
 use wasm_encoder::{BlockType, MemArg, ValType};
 
 use crate::emitter::Emitter;
@@ -95,8 +95,12 @@ impl Emitter<'_> {
     }
 
     fn lower_bytes_set_arm(&mut self, b: &IrExpr, idx: &IrExpr, v: &IrExpr) -> ArmResult {
-        self.lower_arg(b, Some(BYTES), ArgMode::Borrow)?;
-        self.f.instructions().call(F_BLOCK_COPY);
+        // `@reuse(b)` (#3577): a dying source is written in place; a live one
+        // is copied first, as before.
+        if self.owned_reuse_source(b, &[idx, v], Some(BYTES))?.is_none() {
+            self.lower_arg(b, Some(BYTES), ArgMode::Borrow)?;
+            self.f.instructions().call(F_BLOCK_COPY);
+        }
         let bh = self.hold_i32()?;
         self.f.instructions().local_set(bh);
         self.lower_arg(idx, Some(INT), ArgMode::Borrow)?;
@@ -162,46 +166,6 @@ impl Emitter<'_> {
         self.release_i64();
         self.release_i32();
         Ok(Some(Lowered::owned(BYTES)))
-    }
-
-    fn lower_bytes_fill(&mut self, b: &IrExpr, v: &IrExpr) -> ArmResult {
-        let recv = self.bytes_recv("fill", b)?;
-        self.lower_arg(b, Some(BYTES), ArgMode::Borrow)?;
-        let hb = self.hold_i32()?;
-        self.f.instructions().local_set(hb);
-        self.lower_arg(v, Some(INT), ArgMode::Borrow)?;
-        let hv = self.hold_i64()?;
-        let ho = self.hold_i32()?;
-        let mut i = self.f.instructions();
-        i.local_set(hv);
-        i.local_get(hb).i32_load(len_memarg()).call(F_ALLOC).local_set(ho);
-        i.local_get(ho).i32_const(almide_layout::PAYLOAD as i32).i32_add();
-        i.local_get(hv).i32_wrap_i64();
-        i.local_get(hb).i32_load(len_memarg());
-        i.memory_fill(0);
-        i.local_get(ho);
-        let _ = i;
-        self.emit_bytes_writeback_fresh(&recv)?;
-        self.release_i32();
-        self.release_i64();
-        self.release_i32();
-        Ok(None)
-    }
-
-    /// clear (native `Vec::clear`: length 0, #1423 stage 4): the mutator
-    /// family's shape — a fresh EMPTY block, written back through a var
-    /// receiver or released for a temporary (bytes_recv.rs). The receiver
-    /// is still evaluated (a temporary's construction is observable), and
-    /// an alias bound before the clear keeps its bytes (value semantics).
-    fn lower_bytes_clear(&mut self, b: &IrExpr) -> ArmResult {
-        if self.lower_field_clear(b)? {
-            return Ok(None);
-        }
-        let recv = self.bytes_recv("clear", b)?;
-        self.lower_arg(b, Some(BYTES), ArgMode::Borrow)?;
-        self.f.instructions().drop().i32_const(0).call(F_ALLOC);
-        self.emit_bytes_writeback_fresh(&recv)?;
-        Ok(None)
     }
 
     fn lower_bytes_concat(&mut self, a: &IrExpr, b: &IrExpr) -> ArmResult {
@@ -626,93 +590,9 @@ impl Emitter<'_> {
             // each is `push` k times — `$bytes_push`'s amortized growth, the
             // push receiver protocol (bytes_append.rs).
             (f, _) if crate::bytes_append::is_member(f) => self.lower_bytes_append(f, args),
-            // copy_within: memmove inside the buffer, NO-OP when the
-            // range is empty or the destination does not fit (C-213).
-            // The fit test is SUBTRACTIVE and signed — `d >= 0 && d <=
-            // len - (e - s)` — like `bytes_room`. The first cut copied
-            // native's `d + (e - s) <= len` "verbatim", and that sum
-            // wraps in i64 exactly as native's release usize arithmetic
-            // did: `-1 + 2 = 1 <= 6` passed, and where native's
-            // `Vec::copy_within` still had a slice bounds check behind
-            // the guard, this leg ran `memory.copy(payload - 1, ..)` and
-            // stored into the block header (#2474 — `[2, 2, 3, 4, 5, 6]`
-            // for `copy_within(b, 0, 2, -1)`, and `dst = -len` rewrote
-            // the length field). With `e <= len` (the clamp below) and
-            // `s < e`, `e - s` is in `[1, len]` and `len - (e - s)` in
-            // `[0, len)`, so a `d` that passes puts `[d, d + (e - s))`
-            // inside the payload — no offset can reach memory.copy
-            // otherwise.
-            ("copy_within", [b, s, e, d]) => {
-                let IrExprKind::Var { id } = &b.kind else {
-                    return unsup("bytes-copy-within-nonvar");
-                };
-                let Some((var_idx, var_ty, vglob)) = self.mut_var(id) else {
-                    return unsup("var:unmapped");
-                };
-                self.lower_arg(b, Some(BYTES), ArgMode::Borrow)?;
-                let hb = self.hold_i32()?;
-                self.f.instructions().local_set(hb);
-                self.lower_arg(s, Some(INT), ArgMode::Borrow)?;
-                let hs = self.hold_i64()?;
-                self.f.instructions().local_set(hs);
-                self.lower_arg(e, Some(INT), ArgMode::Borrow)?;
-                let he = self.hold_i64()?;
-                self.f.instructions().local_set(he);
-                self.lower_arg(d, Some(INT), ArgMode::Borrow)?;
-                let hd = self.hold_i64()?;
-                let ho = self.hold_i32()?;
-                let mut i = self.f.instructions();
-                i.local_set(hd);
-                i.local_get(hb).i32_load(len_memarg()).call(F_ALLOC).local_set(ho);
-                i.local_get(ho).i32_const(almide_layout::PAYLOAD as i32).i32_add();
-                i.local_get(hb).i32_const(almide_layout::PAYLOAD as i32).i32_add();
-                i.local_get(hb).i32_load(len_memarg());
-                i.memory_copy(0, 0);
-                // e = min_u(e, len)
-                i.local_get(he);
-                i.local_get(hb).i32_load(len_memarg()).i64_extend_i32_u();
-                i.local_get(he)
-                    .local_get(hb)
-                    .i32_load(len_memarg())
-                    .i64_extend_i32_u()
-                    .i64_lt_u();
-                i.select().local_set(he);
-                // s < e (unsigned: a negative s is enormous and fails)
-                //   && d >= 0 && d <= len - (e - s)
-                i.local_get(hs).local_get(he).i64_lt_u();
-                i.local_get(hd).i64_const(0).i64_ge_s().i32_and();
-                i.local_get(hd);
-                i.local_get(hb).i32_load(len_memarg()).i64_extend_i32_u();
-                i.local_get(he).local_get(hs).i64_sub().i64_sub();
-                i.i64_le_s();
-                i.i32_and().if_(BlockType::Empty);
-                i.local_get(ho)
-                    .i32_const(almide_layout::PAYLOAD as i32)
-                    .i32_add()
-                    .local_get(hd)
-                    .i32_wrap_i64()
-                    .i32_add();
-                i.local_get(ho)
-                    .i32_const(almide_layout::PAYLOAD as i32)
-                    .i32_add()
-                    .local_get(hs)
-                    .i32_wrap_i64()
-                    .i32_add();
-                i.local_get(he).local_get(hs).i64_sub().i32_wrap_i64();
-                i.memory_copy(0, 0);
-                i.end();
-                i.local_get(ho);
-                let _ = i;
-                self.emit_rebind_mut_var_fresh(*id, var_idx, var_ty, vglob)?;
-                self.release_i32();
-                self.release_i64();
-                self.release_i64();
-                self.release_i64();
-                self.release_i32();
-                Ok(None)
-            }
-            // fill: every byte becomes `val as u8` — mut on the native
-            // surface (same convention).
+            // copy_within / fill / clear: in place on the unique receiver
+            // (bytes_recv.rs, #3641).
+            ("copy_within", [b, s, e, d]) => self.lower_bytes_copy_within(b, s, e, d),
             // Concatenation: blocks share the string layout (len = bytes),
             // so the string concat helper applies verbatim.
             // chunks: size <= 0 is the empty list; the last chunk may be

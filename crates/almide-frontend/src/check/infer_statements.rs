@@ -130,6 +130,8 @@ impl Checker {
             if matches!(resolve_ty(&declared, &self.uf), Ty::Fn { is_effect: true, .. }) {
                 self.expect_lambda(value, &declared);
             }
+            self.expect_expr(value, &declared);
+            self.expect_annotated_value(&declared);
         }
         let val_ty = self.infer_expr(value);
         // #3274: resolved BEFORE `define_var`, so `let g = g` reads the outer `g`.
@@ -190,6 +192,14 @@ impl Checker {
         }
     }
 
+    /// #3777: an annotated `let` / `var` value is a tail position whose type
+    /// is stated — its `if` branches and `match` arms join against the
+    /// annotation (a `Result[..]` one keeps a Result branch as the value). Not
+    /// an effect body: the binding has no lift and no strip of its own.
+    fn expect_annotated_value(&mut self, declared: &Ty) {
+        self.tail_expect = Some(super::types::TailExpect { ty: declared.clone(), effect_body: false });
+    }
+
     /// #3274: the effect fn a `let`/`var` binds when its value is a bare
     /// effect fn reference — unless the annotation is itself an
     /// `effect (A) -> B` type, whose bit the binding's type already carries
@@ -229,6 +239,10 @@ impl Checker {
     /// `ast::Stmt::Var` arm of [`Self::check_stmt`]. Verbatim text move.
     fn check_stmt_var(&mut self, stmt: &mut ast::Stmt) {
         let ast::Stmt::Var { name, ty, value, span } = stmt else { unreachable!() };
+        if let Some(te) = ty.as_ref() {
+            let declared = self.resolve_type_expr(te);
+            self.expect_annotated_value(&declared);
+        }
         let val_ty = self.infer_expr(value);
         let effect_target = self.effect_alias_target(value, ty.as_ref());
         let final_ty = if let Some(te) = ty {

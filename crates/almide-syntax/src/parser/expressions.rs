@@ -7,9 +7,70 @@ use super::Parser;
 impl Parser {
     pub(crate) fn parse_expr(&mut self) -> Result<Expr, String> {
         self.enter_depth()?;
-        let result = self.parse_expr_bp(0);
+        let result = self.parse_expr_bp(0).and_then(|cond| self.parse_ternary_rest(cond));
         self.exit_depth();
         result
+    }
+
+    /// `println!(…)` / `panic!(…)` / `assert_eq!(…)` (a Rust macro whose
+    /// name is also an Almide builtin): one error naming the plain call, and
+    /// the `!` is skipped so the call parses — read as error propagation on
+    /// a function value, it cascaded into three errors. Only these names,
+    /// written with no space before the `!` or its `(`, can mean it.
+    fn rust_macro_bang(&mut self, callee: &Expr) -> bool {
+        let ExprKind::Ident { name } = &callee.kind else { return false };
+        let name = name.as_str();
+        if !matches!(name, "println" | "eprintln" | "panic" | "assert" | "assert_eq") {
+            return false;
+        }
+        let bang = self.current();
+        let adjacent = |a: &crate::lexer::Token, b: &crate::lexer::Token| a.line == b.line && a.end_col == b.col;
+        let opens = self.peek_at(1).is_some_and(|n| n.token_type == TokenType::LParen && adjacent(bang, n));
+        if bang.token_type != TokenType::Bang || self.pos == 0 || !adjacent(&self.tokens[self.pos - 1], bang) || !opens {
+            return false;
+        }
+        let diag = self.diag_error(
+            format!("'{name}!' is a Rust macro, not Almide: write {name}(…)"),
+            "Almide has no macros: call the function directly. `!` after a call propagates an error in an `effect fn`.",
+            "call",
+        ).with_try("println(\"hi\")");
+        self.errors.push(diag);
+        self.advance();
+        true
+    }
+
+    /// `c ? a : b` (C / JS / Java): one error naming `if … then … else`, and
+    /// the parse goes on as that `if`. The postfix `?` steps aside for it
+    /// (`ternary_follows`), so `c` here is the whole condition, not its last
+    /// operand.
+    fn parse_ternary_rest(&mut self, cond: Expr) -> Result<Expr, String> {
+        if !self.ternary_follows() { return Ok(cond); }
+        let span = cond.span;
+        let diag = self.diag_error(
+            "'c ? a : b' is not Almide: use 'if c then a else b'",
+            "Almide's conditional is an expression: `if c then a else b`. A postfix `?` converts a Result to an Option.",
+            "if",
+        ).with_try("if x > 0 then 1 else 2");
+        self.errors.push(diag);
+        self.advance();
+        let then = self.parse_expr_bp(0)?;
+        self.expect(TokenType::Colon)?;
+        let else_ = self.parse_expr()?;
+        Ok(Expr::new(self.next_id(), span, ExprKind::If {
+            cond: Box::new(cond), then: Box::new(then), else_: Box::new(else_),
+        }))
+    }
+
+    /// A `?` on the condition's line followed, on the same line, by the
+    /// start of an operand — never the Result→Option postfix, which a value
+    /// does not follow.
+    pub(crate) fn ternary_follows(&self) -> bool {
+        if !self.check(TokenType::Question) || self.newline_before_current() { return false; }
+        let q = self.current();
+        self.peek_at(1).is_some_and(|t| t.line == q.line && matches!(t.token_type,
+            TokenType::Int | TokenType::Float | TokenType::String | TokenType::InterpolatedString
+            | TokenType::Ident | TokenType::TypeName | TokenType::True | TokenType::False
+            | TokenType::LParen | TokenType::LBracket))
     }
 
     /// Kept as public entry point for callers that expect parse_or level
@@ -58,6 +119,8 @@ impl Parser {
     /// The postfix `??` opens a line too, in `parse_postfix`.
     pub(crate) const INFIX_TOKENS: &'static [TokenType] = &[
         TokenType::Or, TokenType::And,
+        // not Almide, reported once and read as `or` / `and`
+        TokenType::PipePipe, TokenType::AmpAmp,
         TokenType::EqEq, TokenType::BangEq, TokenType::LtEq, TokenType::GtEq,
         TokenType::LAngle, TokenType::RAngle,
         TokenType::PipeArrow, TokenType::ComposeArrow,
@@ -90,22 +153,28 @@ impl Parser {
         gap
     }
 
-    /// `||` / `&&` are not Almide spellings — reject them with the hint table's
-    /// suggestion rather than letting them fall through as unknown operators.
-    fn reject_c_style_boolean_operator(&mut self) -> Result<(), String> {
-        if self.check(TokenType::PipePipe) {
-            return Err(self.check_hint_or_err(
-                None, super::hints::HintScope::Expression,
-                "'||' is not valid in Almide",
-            ));
-        }
-        if self.check(TokenType::AmpAmp) {
-            return Err(self.check_hint_or_err(
-                None, super::hints::HintScope::Expression,
-                "'&&' is not valid in Almide",
-            ));
-        }
-        Ok(())
+    /// `||` / `&&` / prefix `!` are not Almide spellings: one error with the
+    /// hint table's suggestion, then the token reads as the word it stands
+    /// for (`or` / `and` / `not`), so the rest of the expression parses —
+    /// stopping here lost the parse and failed the enclosing fn's type too.
+    fn respell_c_style_boolean_operator(&mut self) {
+        let (word, tt) = match self.current().token_type {
+            TokenType::PipePipe => ("or", TokenType::Or),
+            TokenType::AmpAmp => ("and", TokenType::And),
+            TokenType::Bang => ("not", TokenType::Not),
+            _ => return,
+        };
+        let op = self.current().value.clone();
+        let hint = self.check_hint(None, super::hints::HintScope::Expression);
+        let (message, hint) = match hint {
+            Some(h) => (h.message.unwrap_or_else(|| format!("'{op}' is not valid in Almide")), h.hint),
+            None => (format!("'{op}' is not valid in Almide"), format!("Use '{word}'.")),
+        };
+        let diag = self.diag_error(message, hint, "operator").with_try(format!("a {word} b"));
+        self.errors.push(diag);
+        let tok = &mut self.tokens[self.pos];
+        tok.token_type = tt;
+        tok.value = word.to_string();
     }
 
     /// Reject chained comparisons: `a < b < c`.
@@ -136,7 +205,9 @@ impl Parser {
             if !gap.is_empty() {
                 self.pending_gap = Some((self.pos, gap));
             }
-            self.reject_c_style_boolean_operator()?;
+            if matches!(self.current().token_type, TokenType::PipePipe | TokenType::AmpAmp) {
+                self.respell_c_style_boolean_operator();
+            }
 
             let tt = self.current().token_type.clone();
             let Some((l_bp, r_bp)) = Self::infix_bp(&tt) else { break };
@@ -297,11 +368,8 @@ impl Parser {
             }));
         }
         if self.check(TokenType::Bang) {
-            let tok = self.current();
-            return Err(format!(
-                "'!' is not valid in Almide at line {}:{}\n  Hint: Use 'not' for boolean negation. Write: not x",
-                tok.line, tok.col
-            ));
+            self.respell_c_style_boolean_operator();
+            return self.parse_unary();
         }
         self.parse_postfix()
     }
@@ -473,6 +541,9 @@ impl Parser {
     /// (Result→Option). Returns `(expr, consumed)`; `consumed = false` hands
     /// the unchanged expr back to the caller's loop to break.
     fn parse_postfix_unwrap_op(&mut self, expr: Expr) -> Result<(Expr, bool), String> {
+        if self.rust_macro_bang(&expr) {
+            return Ok((expr, true));
+        }
         if self.check(TokenType::Bang) && !self.newline_before_current() {
             // expr! — unwrap with error propagation
             let span = Some(self.current_span());
@@ -493,7 +564,7 @@ impl Parser {
                 expr: Box::new(expr), field,
             }), true));
         }
-        if self.check(TokenType::Question) && !self.newline_before_current() {
+        if self.check(TokenType::Question) && !self.newline_before_current() && !self.ternary_follows() {
             // expr? — convert to Option
             let span = Some(self.current_span());
             self.advance();
@@ -561,7 +632,8 @@ impl Parser {
         // Module-qualified record literal: module.TypeName { field: value }
         // Detected when: the object is an Ident, the field starts with
         // uppercase, and the next token is { followed by ident: (record pattern)
-        let is_qualified_record = field.as_str().starts_with(char::is_uppercase)
+        let is_qualified_record = (field.as_str().starts_with(char::is_uppercase)
+            || super::caseless::is_caseless_name(field.as_str()))
             && matches!(&expr.kind, ExprKind::Ident { .. })
             && self.peek_named_record();
         if is_qualified_record {

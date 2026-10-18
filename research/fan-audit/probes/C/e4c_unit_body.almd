@@ -1,0 +1,4 @@
+effect fn main() -> Unit = {
+  let a = fan.bounded(compute.ms(1)) { () }
+  println("bounded unit: " + (match a { ok(_) => "ok", err(e) => e }))
+}

@@ -94,11 +94,6 @@ pub(crate) const SCALAR_TEXT_VERIFIED: &[&str] = &[
     "base64_encode", "base64_encode_url", "hash_fnv1a32_bytes",
     "datetime_add_days", "datetime_add_hours", "datetime_add_minutes", "datetime_add_seconds", "datetime_day", "datetime_diff_seconds", "datetime_format", "datetime_from_parts", "datetime_from_unix", "datetime_hour", "datetime_is_after", "datetime_is_before", "datetime_minute", "datetime_month", "datetime_second", "datetime_to_iso", "datetime_to_unix", "datetime_weekday", "datetime_year",
     "string_is_whitespace", "string_to_bytes",
-    // mem_checkpoint.almd (#1423 stage 4): the C-041 arena-checkpoint
-    // pair — `0` / `()`, no prim access at all, the bytes_heap_save /
-    // bytes_heap_restore precedent. Parity evidence:
-    // spec/wasm_cross/mem_checkpoint.almd.
-    "mem_save", "mem_restore",
 ];
 
 /// Same audit, Option/Result-returning (constructor-built sums).
@@ -204,13 +199,12 @@ pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
     // scratch blocks only.
     "regex_is_match", "regex_full_match", "regex_find_all", "regex_replace",
     "regex_replace_first", "regex_split",
-    // bytes_rawptr.almd / bytes_skip.almd / bytes_core heap pair
-    // (audited 2026-08-25): raw-address bridge over load8/store8 on
-    // Bytes data regions (len = bytes both legs), handle+12 = OUR
-    // PAYLOAD; the empty-buffer NULL guard is the 2026-08-10 fuzz
-    // doctrine; heap_save/restore are the v1 trivial pair (0 / no-op).
+    // bytes_rawptr.almd / bytes_skip.almd (audited 2026-08-25):
+    // raw-address bridge over load8/store8 on Bytes data regions
+    // (len = bytes both legs), handle+12 = OUR PAYLOAD; the empty-buffer
+    // NULL guard is the 2026-08-10 fuzz doctrine.
     "bytes_as_ptr", "bytes_as_mut_ptr", "bytes_from_raw_ptr", "bytes_copy_to_ptr",
-    "bytes_skip_length_prefixed_le", "bytes_heap_save", "bytes_heap_restore",
+    "bytes_skip_length_prefixed_le",
     // http_response.almd (audited 2026-08-25): PURE Almide over the
     // published List[String] rep — list/string surfaces only, the RFC
     // 9110 ASCII fold spelled with chars/index_of/slice. get_header
@@ -259,24 +253,6 @@ pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
     "zlib_gzip",
 ];
 
-/// The vendored-libm family (C-305): every body is a FAITHFUL
-/// transcription of libm 0.2.16 with constants via prim.ffrombits —
-/// pure scalar prims throughout; math_trig's coefficient tables go
-/// through prim-MEDIATED alloc_list_f64 with 8-byte Float slot stores
-/// (the one list class both layouts share). One vendored libm on every
-/// target is the bit-parity mechanism itself.
-/// The framed http client family (#1710 increment 3, audited 2026-09-02):
-/// stdlib/http_framed.almd — PURE language surface end to end (string
-/// interpolation, list.map/fold, map.entries, string.take/drop,
-/// int.parse, ok()/tuple ctors); the only leaves are the op-48/49/50
-/// host calls the emitter lowers itself (host_env arms). Result returns
-/// and the Map[String, String] headers param trip the coupled proxy;
-/// the bodies never touch a raw layout.
-pub(crate) const HTTP_CLIENT_SUM: &[&str] = &[
-    "__request_impl", "__request_status_impl", "__get_status_impl",
-    "__request_bytes_impl", "__get_bytes_impl",
-];
-
 /// The http call handle (#2633, audited 2026-09-26): stdlib/http_call.almd
 /// — language surface only (string interpolation and slicing, list.map/fold,
 /// map.entries, int.parse, `??`, ok()/err()/some()/none ctors, a callback
@@ -314,6 +290,12 @@ pub(crate) const PROCESS_SUM: &[&str] = &[
     "__process_kill_impl", "__process_is_alive_impl", "__process_pid_impl",
 ];
 
+/// The vendored-libm family (C-305): every body is a FAITHFUL
+/// transcription of libm 0.2.16 with constants via prim.ffrombits —
+/// pure scalar prims throughout; math_trig's coefficient tables go
+/// through prim-MEDIATED alloc_list_f64 with 8-byte Float slot stores
+/// (the one list class both layouts share). One vendored libm on every
+/// target is the bit-parity mechanism itself.
 pub(crate) const MATH_VERIFIED: &[&str] = &[
     "math_abs", "math_atan", "math_choose", "math_cos", "math_e", "math_exp",
     "math_factorial", "math_fmax", "math_fmin", "math_fpow", "math_log", "math_log10",
@@ -349,16 +331,15 @@ pub(crate) const SIZED_CONVERT_SUM_BUILDERS: &[&str] = &[
 /// a native arm on its own flat layout (matrix.rs / matrix_elem.rs /
 /// matrix_prod.rs / matrix_shape.rs). No block is read or written by the
 /// body itself, so no incumbent layout can leak in. Native spells each of
-/// these as the same composition (matrix.rs: fused_gemm_bias_scale_gelu =
-/// gelu∘scale∘add∘mul, attention_weights = softmax∘scale∘mul, the f32
-/// family delegating to the f64 ops) or as its op-for-op equal (fma's
-/// `x*ka + y*kb` IS add(scale, scale): two rounded products, one rounded
-/// sum). Parity evidence: spec/wasm_cross/matrix_composition_family.almd.
+/// these as the same composition (matrix.rs: mul_scaled = scale∘mul, the
+/// f32 family delegating to the f64 ops). fma / fma3 left this list for
+/// their own one-pass arm (matrix_elem.rs `lower_matrix_fma`, #3644): the
+/// composition walked each whole operand before truncating to the overlap.
+/// Parity evidence: spec/wasm_cross/matrix_composition_family.almd.
 pub(crate) const MATRIX_COMPOSITIONS: &[&str] = &[
-    "matrix_mul_scaled", "matrix_attention_weights", "matrix_scaled_dot_product_attention",
+    "matrix_mul_scaled",
     "matrix_mul_f32", "matrix_mul_f32_scaled", "matrix_mul_f32_t", "matrix_mul_f32_t_scaled",
-    "matrix_zeros_f32", "matrix_ones_f32", "matrix_fma", "matrix_fma3",
-    "matrix_fused_gemm_bias_scale_gelu", "matrix_linear_row_gelu", "matrix_pre_norm_linear",
+    "matrix_zeros_f32", "matrix_ones_f32",
     "matrix_append_rows", "matrix_linear_f32_row_no_bias",
 ];
 
@@ -374,7 +355,6 @@ const TIERS: &[(&[&str], bool)] = &[
     (CODEC_ENCODE_VERIFIED, true),
     (BYTES_FAMILY_VERIFIED, false),
     (BYTES_FAMILY_SUM, true),
-    (HTTP_CLIENT_SUM, true),
     (HTTP_CALL_SUM, true),
     (HTTP_SERVE_SUM, true),
     (PROCESS_SUM, true),
@@ -383,8 +363,14 @@ const TIERS: &[(&[&str], bool)] = &[
 
 /// The admission of a registry impl through the tiers above: `None` when
 /// no tier lists it, else `Some(exempt)` — exempt when ANY listing tier is.
+/// A body declared with `@implements` whose file never reaches `prim.` is
+/// admitted, exempt, without a tier (#3620): it builds every value through
+/// surface this emitter lowers on its own layout, which is what each tier's
+/// audit establishes by hand. The tiers are legacy lists that only shrink.
 pub(crate) fn tier_of(impl_fn: &str) -> Option<bool> {
     let mut hits = TIERS.iter().filter(|(members, _)| members.contains(&impl_fn)).peekable();
-    hits.peek()?;
+    if hits.peek().is_none() {
+        return almide_types::implements::prim_free(impl_fn).then_some(true);
+    }
     Some(hits.any(|(_, exempt)| *exempt))
 }

@@ -10,9 +10,26 @@
 ///
 /// The structural wasm leg crosses `almide.fs_call` to THIS host for every
 /// `fs.*` call, so this file — not the generated WAT — is where the default
-/// `--target wasm` message is built.
-fn io_err(call: &str, args: &str, e: impl std::fmt::Display) -> String {
-    format!("{call}({args}): {e}")
+/// `--target wasm` message is built. An io error's suffix goes through the
+/// same classifier native's does (`almide_base::fs_errno::fs_io_error_text`,
+/// C-273): ENOTEMPTY / ENAMETOOLONG / EXDEV answer their errno-free text.
+fn io_err(call: &str, args: &str, e: impl FsErrSuffix) -> String {
+    format!("{call}({args}): {}", e.fs_err_suffix())
+}
+/// What follows `<call>(<args>): ` — an io error's classified-or-Display
+/// text, or a fixed message verbatim.
+trait FsErrSuffix {
+    fn fs_err_suffix(&self) -> String;
+}
+impl FsErrSuffix for std::io::Error {
+    fn fs_err_suffix(&self) -> String {
+        almide_base::fs_errno::fs_io_error_text(self)
+    }
+}
+impl FsErrSuffix for &str {
+    fn fs_err_suffix(&self) -> String {
+        (*self).to_string()
+    }
 }
 /// Source-shaped quoting — the twin of `fs.rs`'s `q`. Deliberately not `{:?}`;
 /// see that file for why the escape table is not reproduced.
@@ -118,6 +135,31 @@ fn fs_dispatch_w(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
 
 /// The structured READ ops (temp dir / list_dir / read_lines /
 /// if-exists / read_bytes) — split for the complexity budget.
+/// The streaming walkers' answer (ops 51/52, `fold_lines` / `for_each_line`).
+/// Native reads line by line, so invalid UTF-8 errs only when the line holding
+/// it is read — AFTER the callbacks for the lines before it ran (C-220). A
+/// valid file is status 0 and its lines; an invalid one is status 3 (#3758):
+/// the frames of every line before the first invalid one, then the err
+/// message as the LAST frame, which the guest answers once it has folded the
+/// rest. The first invalid line is the one holding `valid_up_to` — a `\n` is
+/// ASCII, so every line ending before it is valid and that one is not.
+fn stream_line_frames(op: i32, a: &str, bytes: Vec<u8>) -> (i64, Vec<u8>) {
+    let k = match std::str::from_utf8(&bytes) {
+        Ok(t) => {
+            let lines: Vec<String> = t.lines().map(str::to_string).collect();
+            let buf = frames(&lines);
+            return (pack(0, buf.len()), buf);
+        }
+        Err(e) => e.valid_up_to(),
+    };
+    let start = bytes[..k].iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1);
+    let prefix = std::str::from_utf8(&bytes[..start]).unwrap_or_default();
+    let mut lines: Vec<String> = prefix.lines().map(str::to_string).collect();
+    lines.push(io_err(fs_op_name(op), &q(a), almide_base::fs_errno::INVALID_UTF8_TEXT));
+    let buf = frames(&lines);
+    (pack(3, buf.len()), buf)
+}
+
 fn fs_dispatch_r2(op: i32, a: &str) -> (i64, Vec<u8>) {
     use std::path::Path;
     let ok_text = |t: String| (pack(0, t.len()), t.into_bytes());
@@ -159,12 +201,16 @@ fn fs_dispatch_r2(op: i32, a: &str) -> (i64, Vec<u8>) {
         // raw-BYTES reader, and routing them there fed the guest bytes where it
         // decodes length-prefixed frames — `fs.fold_lines` then summed an empty
         // walk and answered 0 instead of 6, silently.
-        12 | 51 | 52 => match std::fs::read_to_string(a) {
+        12 => match std::fs::read_to_string(a) {
             Ok(t) => {
                 let lines: Vec<String> = t.lines().map(str::to_string).collect();
                 let buf = frames(&lines);
                 (pack(0, buf.len()), buf)
             }
+            Err(e) => err_s(io_err(fs_op_name(op), &q(a), e)),
+        },
+        51 | 52 => match std::fs::read(a) {
+            Ok(bytes) => stream_line_frames(op, a, bytes),
             Err(e) => err_s(io_err(fs_op_name(op), &q(a), e)),
         },
         13 => {
@@ -235,10 +281,26 @@ fn fs_mtime(op: i32, a: &str) -> (i64, Vec<u8>) {
     }
 }
 
+fn same_file(a: &str, b: &str) -> bool {
+    matches!((std::fs::canonicalize(a), std::fs::canonicalize(b)), (Ok(x), Ok(y)) if x == y)
+}
+
 /// ops 19 / 20: copy / rename `a` to the path in `b`.
 fn fs_copy_or_rename(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     let to = String::from_utf8_lossy(b);
-    let r = if op == 19 { std::fs::copy(a, to.as_ref()).map(|_| ()) } else { std::fs::rename(a, to.as_ref()) };
+    // fs.copy of a directory fails as reading it does (EISDIR, C-215): the
+    // twin of runtime/rs/src/fs.rs `almide_rt_fs_copy`.
+    let r = if op == 19 {
+        match std::path::Path::new(a).is_dir().then(|| std::fs::read(a)) {
+            Some(Err(e)) => Err(e),
+            // Onto the same file the copy is already done (truncating it
+            // first would empty it): the twin of native's `fs_same_file`.
+            _ if same_file(a, &to) => Ok(()),
+            _ => std::fs::copy(a, to.as_ref()).map(|_| ()),
+        }
+    } else {
+        std::fs::rename(a, to.as_ref())
+    };
     match r {
         Ok(()) => (pack(0, 0), Vec::new()),
         Err(e) => fs_err(io_err(fs_op_name(op), &format!("{}, {}", q(a), q(&to)), e)),
@@ -611,11 +673,17 @@ fn fs_dispatch(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     let ok_text = |t: String| (pack(0, t.len()), t.into_bytes());
     let err_s = |m: String| (pack(1, m.len()), m.into_bytes());
     match op {
-        // 61 is fold_lines_range (and fold_lines_chunked's worker read): op
-        // 1's body under the range's name (#2744) — the guest walks the text's
-        // byte ranges.
-        1 | 61 => match std::fs::read_to_string(a) {
+        1 => match std::fs::read_to_string(a) {
             Ok(t) => ok_text(t),
+            Err(e) => err_s(io_err(fs_op_name(op), &q(a), e)),
+        },
+        // 61 is fold_lines_range (and fold_lines_chunked's worker read): the
+        // file's RAW bytes under the range's name (#2744). The guest walks
+        // the byte ranges and validates UTF-8 only in what it reads, as
+        // native's per-line `read_line` does (#3758) — a whole-file decode
+        // here failed ranges whose own lines are valid.
+        61 => match std::fs::read(a) {
+            Ok(bytes) => (pack(0, bytes.len()), bytes),
             Err(e) => err_s(io_err(fs_op_name(op), &q(a), e)),
         },
         4 => (pack(0, usize::from(Path::new(a).exists())), Vec::new()),

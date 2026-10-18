@@ -185,8 +185,7 @@ fn verify_wasm_ir(ir_program: &almide::ir::IrProgram) -> Result<(), ()> {
 }
 
 /// `compile_to_wasm_bytes`'s native-only-matrix-op guard: native-only matrix
-/// ops (e.g. qwen3_block_q1_0_kv: a packed-GGUF block with no primitive
-/// decomposition) have no WASM lowering. Reject at build time with a clear
+/// ops (none today; the list is NATIVE_ONLY_MATRIX_OPS) have no WASM lowering. Reject at build time with a clear
 /// message rather than letting the emitter ICE deep in codegen. Extracted
 /// verbatim.
 /// #1423 stage 3 — the check-time availability diagnostic. The declared
@@ -209,7 +208,7 @@ fn check_wasm_availability(
     }
     use std::collections::BTreeMap;
     use std::sync::OnceLock;
-    type Row = (String, Option<String>, Option<String>, Option<String>, Option<String>);
+    type Row = (String, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>);
     static UNAVAILABLE: OnceLock<BTreeMap<String, Row>> = OnceLock::new();
     let table = UNAVAILABLE.get_or_init(|| {
         let toml = include_str!("../../proofs/target-availability.toml");
@@ -243,7 +242,7 @@ fn check_wasm_availability(
             if let Some(fn_name) = field("fn") {
                 out.insert(
                     fn_name,
-                    (legs, field("reason-stock-p1"), field("reason-embedded"), field("reason"), field("alt")),
+                    (legs, field("reason-stock-p1"), field("reason-embedded"), field("reason"), field("alt"), field("class")),
                 );
             }
         }
@@ -309,26 +308,15 @@ fn check_wasm_availability(
     }
     hits.extend(scan.hits);
     let serves = scan.serves;
-    // The p3 component serves the http string family (#1710 PR B): under
-    // ALMIDE_COMPONENT_P3 the ops-43..=50 fns ship through the to_p3 http
-    // shim, so their stock-p1 rows do not bar THIS build path — the same
-    // predicate that flips fs routing structural for p3.
+    // The p3 component (ALMIDE_COMPONENT_P3) is its own service leg, and
+    // until ADR-0023 step 9 gives it rows, what it serves is exactly the
+    // emitted-op audit (`component_availability::check`, p3). A stock-p1 row
+    // whose class is `pending-port` walls a HOST service, not the lowering,
+    // so it does not bar this build path: the audit judges the ops the build
+    // really emits — the shim's http families pass, any other op is refused
+    // there with its own text. Rows of the other classes still refuse here.
     if almide_base::env::flag("ALMIDE_COMPONENT_P3") {
-        for k in [
-            "http.get",
-            "http.post",
-            "http.put",
-            "http.patch",
-            "http.delete",
-            // The framed family rides the same shim (ops 48..=50, #1710).
-            "http.request",
-            "http.request_status",
-            "http.get_status",
-            "http.request_bytes",
-            "http.get_bytes",
-        ] {
-            hits.remove(k);
-        }
+        hits.retain(|_, row| row.5.as_deref() != Some("pending-port"));
     }
     // The stock serve export (#2659, C-375): a program whose `main` is
     // serve-shaped builds as a `wasi:http/handler@0.3.0` component; any other
@@ -349,7 +337,7 @@ fn check_wasm_availability(
     if hits.is_empty() {
         return if shape_refusal.is_some() { Err(()) } else { Ok(serve_export) };
     }
-    for (key, (_, r_stock, r_emb, r_shared, alt)) in &hits {
+    for (key, (_, r_stock, r_emb, r_shared, alt, _)) in &hits {
         let reason = if embedded_leg { r_emb.as_ref() } else { r_stock.as_ref() }
             .or(r_shared.as_ref())
             .cloned()
@@ -499,6 +487,11 @@ pub(crate) fn compile_to_wasm_bytes_surfaced(file: &str, allow_unverified: bool,
     // guard scopes the thread-local to this build; off, nothing is emitted.
     let _alloc_count = almide_base::env::flag("ALMIDE_WASM_ALLOC_COUNT")
         .then(almide_wasm::alloc_count::CountGuard::set);
+    // ALMIDE_WASM_CANONICAL_ALLOC: the inspection meter's fixed allocator —
+    // `$alloc` bumps every request, so a measured copy series depends on the
+    // requests alone, not on what the free lists hold (canonical_alloc.rs).
+    let _canonical_alloc = almide_base::env::flag("ALMIDE_WASM_CANONICAL_ALLOC")
+        .then(almide_wasm::canonical_alloc::CanonicalGuard::set);
 
     // The route resolves the module list itself (once, off disk, through the
     // same resolver) and hands the FRESH un-inferred programs to whichever

@@ -76,6 +76,10 @@ pub struct LowerCtx<'a> {
     pub annotated_result_vars: std::collections::HashSet<VarId>,
     /// Functions synthesized during expression lowering (fan.bounded outlining).
     pub synthesized_fns: Vec<almide_ir::IrFunction>,
+    /// `testing.assert_aborts` sites lifted so far (ADR-0029), in declaration
+    /// order: whether each lifted site fn is an effect fn. The dispatcher is
+    /// synthesized from it once the program is lowered.
+    pub abort_sites: Vec<bool>,
     /// Counter for synthesized fan.bounded function names.
     pub bounded_counter: u32,
     /// #3483: the source names of the program's fns whose IR name is escaped
@@ -106,6 +110,7 @@ impl<'a> LowerCtx<'a> {
             annotated_result_vars: std::collections::HashSet::new(),
             synthesized_fns: Vec::new(),
             bounded_counter: 0,
+            abort_sites: Vec::new(),
             escaped_fns: std::collections::HashSet::new(),
         }
     }
@@ -605,6 +610,9 @@ fn build_ir_program(mut ctx: LowerCtx, functions: Vec<IrFunction>, top_lets: Vec
 
     let mut functions = functions;
     let mut effect_fn_names = effect_fn_names;
+    if let Some(dispatch) = calls::abort_site_dispatcher(&mut ctx) {
+        ctx.synthesized_fns.push(dispatch);
+    }
     // A synthesized fn, and a user fn under its escaped IR name (#3483), are
     // absent from the TypeEnv's source-keyed table.
     for f in functions.iter().chain(&ctx.synthesized_fns) {
@@ -673,28 +681,12 @@ fn finalize_ir_program(program: &mut IrProgram, env: &TypeEnv, annotated_result_
     // `-> Result[..]` fn returning a Result-valued arm beside a plain-value arm,
     // a `-> T!` marker fn's lifted tail — where the wrap/ok-strip is the
     // declared return, not a propagation the writer left out.
-    // #558: callees whose FIRST parameter is Result/Option must NOT have that
-    // arg auto-?'d (it would unwrap the very value the callee consumes —
-    // `error.context(inner(), msg)`, `result.unwrap_or(r, d)`, …). Derive the
-    // set from the signature table instead of a hardcoded module-name list.
-    // #1970: PER PARAMETER, not first-only — `fn show(tag: String, r: Result[..])`
-    // consumes its SECOND argument as a Result, and the first-only skip unwrapped it.
-    let mut result_params: std::collections::HashMap<almide_base::intern::Sym, Vec<bool>> = env.functions.iter()
-        .filter_map(|(k, sig)| {
-            let flags: Vec<bool> = sig.params.iter()
-                .map(|(_, t)| t.is_result() || matches!(t, almide_lang::types::Ty::Applied(almide_lang::types::TypeConstructorId::Option, _)))
-                .collect();
-            if flags.iter().any(|f| *f) { Some((*k, flags)) } else { None }
-        })
-        .collect();
-    // An escaped user fn (#3483) is called under its IR name.
-    for f in &program.functions {
-        let src = almide_ir::user_fn_source_name(f.name.as_str());
-        if let Some(flags) = (src != f.name.as_str()).then(|| result_params.get(&sym(src)).cloned()).flatten() {
-            result_params.insert(f.name, flags);
-        }
-    }
-    auto_try::insert_auto_try(program, annotated_result_vars, &result_params);
+    // #558 / #1970 / #3646: a call argument is never auto-?'d. The checker
+    // constrains every argument against its parameter (a Result where `Int`
+    // is expected is E005, propagation is the explicit `!`), so an argument
+    // still Result-typed here is one its parameter accepts — declared
+    // Result/Option, or a type variable instantiated at Result.
+    auto_try::insert_auto_try(program, annotated_result_vars);
 
     // Collect stdlib modules used in root functions/top_lets.
     // ir_link extends this with modules from dependencies.

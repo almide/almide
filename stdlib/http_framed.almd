@@ -12,7 +12,13 @@
 // 50 bytes) served by the embedded host's transcription of the native
 // client, so transport-error texts match native byte-for-byte (C-328).
 // The status op answers `<code>\n<body>` — split at the FIRST newline;
-// the body may carry any number of its own.
+// the body may carry any number of its own. The response leaf (op 65,
+// ADR-0023 step 4) answers `<code>\n<hlen>\n<header cells><body>`: hlen CHARS
+// of name/value cells, so one cut separates the headers from the body and
+// the body is copied once. The answer becomes the HttpResponse rep
+// http_response.almd reads — `[status, body, k1, v1, …]` — built as-is: a
+// repeated field keeps every occurrence, as native's Vec does. The p3 shim
+// serves it over wasi:http (wasi_p3_http_resp.rs); no host serves it.
 fn __http_cell(s: String) -> String = "${string.len(s)}\n${s}"
 
 fn __http_frame(method: String, body: String, headers: Map[String, String]) -> String = map.entries(headers) |> list.map(((k, v)) => "${__http_cell(k)}${__http_cell(v)}") |> list.fold(
@@ -26,17 +32,20 @@ effect fn __http_framed_status(url: String, frame: String) -> Result[String, Str
 
 effect fn __http_framed_bytes(url: String, frame: String) -> Result[Bytes, String] = _
 
+@implements("http.request")
 effect fn __request_impl(method: String, url: String, body: String, headers: Map[String, String]) -> Result[String, String] = __http_framed_text(
   url,
   __http_frame(method, body, headers),
 )
 
+@implements("http.request_status")
 effect fn __request_status_impl(method: String, url: String, body: String, headers: Map[String, String]) -> Result[(Int, String), String] = {
   let f = __http_framed_status(url, __http_frame(method, body, headers))!
   let cut = string.index_of(f, "\n") ?? 0
   ok((int.parse(string.take(f, cut)) ?? 0, string.drop(f, cut + 1)))
 }
 
+@implements("http.get_status")
 effect fn __get_status_impl(url: String) -> Result[(Int, String), String] = __request_status_impl(
   "GET",
   url,
@@ -44,13 +53,82 @@ effect fn __get_status_impl(url: String) -> Result[(Int, String), String] = __re
   map.new(),
 )
 
+@implements("http.request_bytes")
 effect fn __request_bytes_impl(method: String, url: String, body: String, headers: Map[String, String]) -> Result[Bytes, String] = __http_framed_bytes(
   url,
   __http_frame(method, body, headers),
 )
 
+@implements("http.get_bytes")
 effect fn __get_bytes_impl(url: String) -> Result[Bytes, String] = __request_bytes_impl(
   "GET",
+  url,
+  "",
+  map.new(),
+)
+
+effect fn __http_framed_response(url: String, frame: String) -> Result[String, String] = _
+
+// The next decimal-length cell of `f`: (payload, rest).
+fn __http_take_cell(f: String) -> (String, String) = {
+  let cut = string.index_of(f, "\n") ?? 0
+  let n = int.parse(string.take(f, cut)) ?? 0
+  let rest = string.drop(f, cut + 1)
+  (string.take(rest, n), string.drop(rest, n))
+}
+
+fn __http_cells(f: String, acc: List[String]) -> List[String] = if f == "" then acc
+else {
+  let (cell, rest) = __http_take_cell(f)
+  __http_cells(rest, acc + [cell])
+}
+
+@implements("http.request_response")
+effect fn __request_response_impl(method: String, url: String, body: String, headers: Map[String, String]) -> Result[List[String], String] = {
+  let f = __http_framed_response(url, __http_frame(method, body, headers))!
+  let c1 = string.index_of(f, "\n") ?? 0
+  let after_code = string.drop(f, c1 + 1)
+  let c2 = string.index_of(after_code, "\n") ?? 0
+  let hlen = int.parse(string.take(after_code, c2)) ?? 0
+  let rest = string.drop(after_code, c2 + 1)
+  ok([string.take(f, c1), string.drop(rest, hlen)] + __http_cells(string.take(rest, hlen), []))
+}
+
+@implements("http.get_response")
+effect fn __get_response_impl(url: String) -> Result[List[String], String] = __request_response_impl(
+  "GET",
+  url,
+  "",
+  map.new(),
+)
+
+@implements("http.post_response")
+effect fn __post_response_impl(url: String, body: String) -> Result[List[String], String] = __request_response_impl(
+  "POST",
+  url,
+  body,
+  map.new(),
+)
+
+@implements("http.put_response")
+effect fn __put_response_impl(url: String, body: String) -> Result[List[String], String] = __request_response_impl(
+  "PUT",
+  url,
+  body,
+  map.new(),
+)
+
+@implements("http.patch_response")
+effect fn __patch_response_impl(url: String, body: String) -> Result[List[String], String] = __request_response_impl(
+  "PATCH",
+  url,
+  body,
+  map.new(),
+)
+
+@implements("http.delete_response")
+effect fn __delete_response_impl(url: String) -> Result[List[String], String] = __request_response_impl(
+  "DELETE",
   url,
   "",
   map.new(),

@@ -15,9 +15,11 @@
 #   3. every epoch above 1 lists at least one `breaks` entry — an epoch with
 #      no break is a release, and releases are not epochs
 #   4. max(epoch) == CURRENT_DIALECT in crates/almide-types/src/dialect.rs
-#   5. every `[[deprecation]]` names a `removal_epoch` above its `since_epoch`,
-#      and the one the native-callback alias warning prints (#3425) agrees
-#      with LEGACY_NATIVE_CALLBACK_REMOVAL_EPOCH in its source
+#   5. every `[[deprecation]]` names a `removal_epoch` above its `since_epoch`
+#      and above the current epoch: a window whose removal epoch has arrived
+#      is overdue — its removal belongs in that epoch's `breaks`, and the row
+#      goes (legacy-native-callback-names, #3425, sat at removal_epoch 14 in
+#      the ledger of epoch 14 until the row was moved into its breaks)
 set -uo pipefail
 export LC_ALL=C
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -25,7 +27,6 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # forged ledgers and forged constants; the defaults are the real ones.
 LEDGER="${1:-$ROOT/proofs/dialect-epochs.toml}"
 CONST_FILE="${2:-$ROOT/crates/almide-types/src/dialect.rs}"
-ALIAS_FILE="${3:-$ROOT/src/cli/native_legacy_aliases.rs}"
 
 fail=0
 err() { echo "::error::$1"; fail=1; }
@@ -97,13 +98,8 @@ while read -r id since removal; do
   elif [ "$since" -gt "$max_epoch" ]; then
     err "deprecation $id: since_epoch $since names an epoch that does not exist yet (current $max_epoch)"
   fi
-  if [ "$id" = "legacy-native-callback-names" ]; then
-    printed=$(grep -oE 'LEGACY_NATIVE_CALLBACK_REMOVAL_EPOCH: u32 = [0-9]+' "$ALIAS_FILE" 2>/dev/null | grep -oE '[0-9]+$')
-    if [ -z "$printed" ]; then
-      err "could not read LEGACY_NATIVE_CALLBACK_REMOVAL_EPOCH from $ALIAS_FILE — the extraction broke, not the ledger"
-    elif [ "$printed" != "$removal" ]; then
-      err "deprecation $id: the ledger removes it at epoch $removal but the warning prints epoch $printed ($ALIAS_FILE)"
-    fi
+  if [[ "$removal" =~ ^[0-9]+$ ]] && [ "$removal" -le "$max_epoch" ]; then
+    err "deprecation $id: removal_epoch $removal has arrived (current $max_epoch) — remove the spelling, add its removal text to epoch $removal's breaks, and drop the row"
   fi
 done <<<"$deprecations"
 [ "$fail" -eq 0 ] || exit 1

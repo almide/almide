@@ -32,6 +32,11 @@ pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, call: CallArgs<
     if let Some(erased) = lower_time_ctor(ctx, callee, args, span) {
         return erased;
     }
+    // ADR-0029: the closure is lowered as a program body, so this runs before
+    // the arguments are lowered in the test's mode below.
+    if let Some(lifted) = lower_assert_aborts(ctx, callee, args, span) {
+        return lifted;
+    }
 
     let mut ir_args: Vec<IrExpr> = Vec::new();
     let ta_raw: Vec<Ty> = type_args.map(|tas| tas.iter().map(|t| resolve_type_expr_env(ctx, t)).collect()).unwrap_or_default();
@@ -53,15 +58,12 @@ pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, call: CallArgs<
     if let CallTarget::Module { module, func, .. } = &mut target {
         if module.as_str() == "fan" {
             if func.as_str() == "__any_block" {
+                // `fan.any { }` is E027 since dialect epoch 14 (ADR-0028); the
+                // checker has already refused the program, so this is the
+                // recovery path only.
                 *func = sym("any");
             } else if func.as_str() == "__settle_block" {
                 *func = sym("settle");
-            } else if func.as_str() == "any" && ir_args.len() == 2 {
-                // T2-3: the MAPPER form gets its own runtime name so it can
-                // never collide with the thunk-list ABI the block form uses
-                // (v0: almide_rt_fan_any_map; wasm: the fan_any self-host
-                // routed by type in fan_any_call_name).
-                *func = sym("any_map");
             } else if func.as_str() == "settle" && ir_args.len() == 2 {
                 // T2-3: settle's mapper IS list.map (apply in order, collect
                 // every Result — Errs captured) — desugar to it outright, so
@@ -90,6 +92,9 @@ pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, call: CallArgs<
         return desugared;
     }
     if let Some(desugared) = desugar_snapshot_assert(ctx, &target, &ir_args, span) {
+        return desugared;
+    }
+    if let Some(desugared) = desugar_testing_assert_outside_test(ctx, &target, &ir_args, span) {
         return desugared;
     }
 
@@ -536,10 +541,11 @@ fn lower_call_coerce_from_sig(ctx: &mut LowerCtx, ir_args: &mut Vec<IrExpr>, sig
         if let Some(arg) = ir_args.get_mut(i) {
             super::statements::coerce_literal_to_sized(arg, param_ty, ctx.env);
             // A PURE fn value into an `effect (A) -> B` param slot gets the
-            // ok(...) wrap here, same as the let-annotation site (#1148).
-            let needs_effect_wrap = matches!(param_ty, Ty::Fn { is_effect: true, .. })
-                && matches!(&arg.ty, Ty::Fn { ret, is_effect: false, .. } if !ret.is_result());
-            if needs_effect_wrap {
+            // ok(...) wrap here, same as the let-annotation site (#1148). The
+            // slot is read through its alias (a stdlib sig keeps `HttpHandler`
+            // as written), and a value reached through an `if`/`match`/block
+            // is adapted arm by arm — only its pure arms get the wrap.
+            if matches!(ctx.env.resolve_named(param_ty), Ty::Fn { is_effect: true, .. }) {
                 let owned = arg.clone();
                 *arg = super::expressions::adapt_fn_value_to_effect_slot(ctx, owned, param_ty);
             }
@@ -569,13 +575,12 @@ fn lower_call_coerce_from_ctor(ctx: &mut LowerCtx, ir_args: &mut Vec<IrExpr>, ca
 fn lower_call_coerce_args_module(ctx: &mut LowerCtx, ir_args: &mut Vec<IrExpr>, module: &Sym, func: &Sym) {
     if let Some(sig) = crate::stdlib::lookup_sig(module.as_str(), func.as_str()) {
         lower_call_coerce_from_sig(ctx, ir_args, &sig);
-    } else if let Some(sig) = ctx.env.functions.get(&almide_base::intern::sym(&format!("{}.{}", module, func))) {
+    } else if let Some(sig) = ctx.env.functions.get(&almide_base::intern::sym(&format!("{}.{}", module, func))).cloned() {
         // A user module's fn: its declared params are the slots the args
         // fill — an anonymous record literal takes the param's nominal type
-        // rather than the first same-field struct of the program (#3283).
-        for (arg, (_, param_ty)) in ir_args.iter_mut().zip(sig.params.iter()) {
-            super::statements::coerce_literal_to_sized(arg, param_ty, ctx.env);
-        }
+        // rather than the first same-field struct of the program (#3283), and
+        // a pure fn value into an effect param gets the ok(...) adapter.
+        lower_call_coerce_from_sig(ctx, ir_args, &sig);
     }
 }
 
@@ -619,17 +624,7 @@ fn desugar_assert_abort(
     ir_args: Vec<IrExpr>,
     span: Option<ast::Span>,
 ) -> IrExpr {
-    let mut stmts: Vec<IrStmt> = Vec::new();
-    let mut vars: Vec<IrExpr> = Vec::new();
-    for (i, a) in ir_args.into_iter().enumerate() {
-        let a_ty = a.ty.clone();
-        let v = ctx.define_var(&format!("__assert_{i}"), a_ty.clone(), Mutability::Let, None);
-        stmts.push(IrStmt {
-            kind: IrStmtKind::Bind { var: v, mutability: Mutability::Let, ty: a_ty.clone(), value: a },
-            span: None,
-        });
-        vars.push(ctx.mk(IrExprKind::Var { id: v }, a_ty, span));
-    }
+    let (mut stmts, vars) = bind_assert_operands(ctx, ir_args, span);
     let cond = match name {
         "assert_eq" | "assert_snapshot" => ctx.mk(
             IrExprKind::BinOp {
@@ -693,41 +688,7 @@ fn desugar_assert_abort(
         }
         _ => vec![IrStringPart::Lit { value: format!("Error: assertion failed{at}") }],
     };
-    let msg = ctx.mk(IrExprKind::StringInterp { parts }, Ty::String, span);
-    let eprint = ctx.mk(
-        IrExprKind::Call {
-            target: CallTarget::Named { name: sym("eprintln") },
-            args: vec![msg],
-            type_args: vec![],
-        },
-        Ty::Unit,
-        span,
-    );
-    let one = ctx.mk(IrExprKind::LitInt { value: 1 }, Ty::Int, span);
-    let exit = ctx.mk(
-        IrExprKind::Call {
-            target: CallTarget::Module {
-                module: sym("process"),
-                func: sym("exit"),
-                def_id: ctx.def_map.get(&sym("process.exit")).copied(),
-            },
-            args: vec![one],
-            type_args: vec![],
-        },
-        Ty::Unit,
-        span,
-    );
-    let fail = ctx.mk(
-        IrExprKind::Block {
-            stmts: vec![
-                IrStmt { kind: IrStmtKind::Expr { expr: eprint }, span: None },
-                IrStmt { kind: IrStmtKind::Expr { expr: exit }, span: None },
-            ],
-            expr: None,
-        },
-        Ty::Unit,
-        span,
-    );
+    let fail = t18_abort_block(ctx, parts, span);
     let ok = ctx.mk(IrExprKind::Block { stmts: vec![], expr: None }, Ty::Unit, span);
     let guard = ctx.mk(
         IrExprKind::If { cond: Box::new(cond), then: Box::new(ok), else_: Box::new(fail) },
@@ -740,7 +701,9 @@ fn desugar_assert_abort(
                 stmts.push(IrStmt { kind: IrStmtKind::Expr { expr: guard }, span: None });
                 stmts
             },
-            expr: None,
+            // A Unit tail: bound to a `let`, a tail-less block is no value
+            // the wasm leg lowers (E082 `expr:Block-no-tail`).
+            expr: Some(Box::new(ctx.mk(IrExprKind::Unit, Ty::Unit, span))),
         },
         Ty::Unit,
         span,
@@ -750,3 +713,7 @@ fn desugar_assert_abort(
 include!("calls_target.rs");
 
 include!("calls_time.rs");
+
+include!("calls_testing_assert.rs");
+
+include!("calls_abort_site.rs");

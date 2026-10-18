@@ -1,9 +1,11 @@
 /// Desugar `fan.race` / `fan.any` over a LITERAL thunk list by INLINING each thunk's body — avoiding a
 /// `List[funcref]` (unrepresentable in v1) entirely. On wasm the fan combinators are deterministic:
-///   `fan.race([() => t0, () => t1, …])`  ≡  `t0`           (the FIRST thunk settles first)
 ///   `fan.any([() => t0, () => t1, …])`   ≡  `match t0 { ok(v) => ok(v), err(_) => <any of the rest> }`
-///                                             (the FIRST Ok in list order; the last thunk's result is
-///                                              the fallback if every earlier one errs)
+///                                             (the FIRST Ok in list order; if every thunk errs, the
+///                                              ledger-constant `err("fan.any: all candidates failed")`)
+/// The `fan.race([…]) ≡ t0` rewrite below (`rewrite_race_head`) is the pre-0.42 thunk-list form and is
+/// unreachable from source: that call is E027, and the live `fan.race` heads lower in the frontend to a
+/// least-(spend, index) fold (docs/design/fan-semantics-audit.md §5).
 /// Each `t_i` is a no-param lambda whose body is a `Result[T, String]` (an effect fn call). The inlined
 /// form is a plain match-over-a-call chain, all in v1's subset. A NON-literal thunk list (`let ts =
 /// […]; fan.race(ts)`) has no inlinable bodies → left for the call-site purity wall.
@@ -456,9 +458,8 @@ fn is_first_ok_chain(e: &IrExpr) -> bool {
 /// fallback (expressions_g2 "Fan block — no parallelism in WASM"): each expr evaluated
 /// in list order, results stored into a fresh tuple. A Tuple literal evaluates its
 /// elements in exactly that order, so the rewrite is byte-identical on the wasm
-/// target (contract C-004's determinism family). A Result-typed expr (an effect-fn
-/// thunk) needs v0's auto-unwrap + Err early-return — DECLINED here (a later brick),
-/// so the function stays honestly walled. Count-invariant: every expr appears once.
+/// target (contract C-004's determinism family). A Result-typed arm takes the
+/// sequential settle (`fan_settle_block`). Count-invariant: every expr appears once.
 pub fn desugar_fan_block(body: &IrExpr) -> Option<IrExpr> {
     use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
     struct V {
@@ -467,163 +468,34 @@ pub fn desugar_fan_block(body: &IrExpr) -> Option<IrExpr> {
     }
     impl IrMutVisitor for V {
         fn visit_expr_mut(&mut self, e: &mut IrExpr) {
-            use almide_lang::types::constructor::TypeConstructorId;
             walk_expr_mut(self, e);
             let IrExprKind::Fan { exprs } = &e.kind else { return };
-            // The checker types EVERY fan expr as `Result[T, String]` (the fan thunk
-            // convention) even when the callee is a PLAIN fn whose runtime value is the
-            // raw T (v0 native builds the raw tuple; a plain call never errs, so the
-            // wasm auto-unwrap is a no-op on it). Admit a direct NAMED call with that
-            // PHANTOM Result type and strip it to the Ok type — the v1 call of a plain
-            // fn yields the raw T, so the element ty must say T for the tuple build.
-            // A Module/Method/Computed expr (a REAL fallible thunk, `fs.read` etc.)
-            // stays declined — its unwrap + Err early-return is a later brick.
-            let phantom_ok_ty = |x: &IrExpr| -> Option<Ty> {
-                match &x.ty {
-                    Ty::Applied(TypeConstructorId::Result, a)
-                        if a.len() == 2
-                            && matches!(
-                                &x.kind,
-                                IrExprKind::Call {
-                                    target: almide_ir::CallTarget::Named { .. },
-                                    ..
-                                }
-                            ) =>
-                    {
-                        // The Result type is PHANTOM (v1 value = raw T) ONLY for a
-                        // never-err LIFTED callee. A DECLARED-Result thunk (`effect fn
-                        // add(..) -> Result[Int, String] = ok(a + b)` — fan_test) builds
-                        // a REAL Result block; stripping its type made the callsite read
-                        // the i32 handle as a raw i64 — INVALID WASM (latent while the
-                        // file walled elsewhere; exposed by the single-expr arm,
-                        // 2026-07-17). Such a thunk needs the real fan unwrap + Err
-                        // propagation — a later brick — so it DECLINES (honest wall).
-                        let IrExprKind::Call {
-                            target: almide_ir::CallTarget::Named { name }, ..
-                        } = &x.kind
-                        else {
-                            return None;
-                        };
-                        let raw_abi = crate::lower::NEVER_ERR_LIFTED_FNS
-                            .with(|s| s.borrow().contains(name.as_str()))
-                            && !crate::lower::AUTO_WRAP_ABI_FNS
-                                .with(|s| s.borrow().contains(name.as_str()));
-                        if raw_abi {
-                            Some(a[0].clone())
-                        } else {
-                            None
-                        }
-                    }
-                    _ if !crate::lower::is_result_ty(&x.ty) => Some(x.ty.clone()),
-                    _ => None,
-                }
-            };
-            // A REAL-Result thunk (a declared-Result / lifted-can-err / auto-wrapped
-            // NAMED call — its v1 value IS a Result block) takes the SEQUENTIAL
-            // settle (`fan_settle_block`): every arm runs, then the `!`s in list
-            // order, so the lowest-index Err wins (C-199). An `e1!; e2!` chain
-            // would skip e2 after e1's Err (#3465). The existing unwrap machinery
-            // (desugar_let_unwrap's ok/err match, the err-type join) lowers each
-            // `!`. Count-invariant: each thunk call appears exactly once.
-            let real_result_ok_ty = |x: &IrExpr| -> Option<Ty> {
-                match (&x.ty, &x.kind) {
-                    (
-                        Ty::Applied(TypeConstructorId::Result, a),
-                        IrExprKind::Call { target: almide_ir::CallTarget::Named { .. }, .. },
-                    ) if a.len() == 2 && phantom_ok_ty(x).is_none() => Some(a[0].clone()),
-                    _ => None,
-                }
-            };
             // A SINGLE-expression fan (`let r = fan { add(10, 20) }`) IS its expression:
             // there is nothing to run concurrently with, v0's sequential value is the bare
             // result (no tuple; a real-Result thunk keeps its `!`). fan thunks cannot
             // capture `var`s — the rewrite is observation-equal and count-invariant. It
             // previously fell through to the scalar-bind deferred-Const wall (fan_test).
-            // An `ok(e)` element (the frontend's lift of an infallible-at-IR
-            // call, e.g. an `@extern` effect hook: `ResultOk { fetch(a) }`) can
-            // never be the first Err, so its `!` IS `e` — a raw element like a
-            // phantom one, taking the inner expression. Count-invariant: the
-            // inner call appears exactly once.
-            let ok_inner = |x: &IrExpr| -> Option<IrExpr> {
-                match &x.kind {
-                    IrExprKind::ResultOk { expr } if crate::lower::is_result_ty(&x.ty) => {
-                        Some((**expr).clone())
-                    }
-                    _ => None,
-                }
-            };
             if exprs.len() == 1 {
-                if let Some(inner) = ok_inner(&exprs[0]) {
-                    *e = inner;
-                    self.changed = true;
-                } else if let Some(ok_ty) = phantom_ok_ty(&exprs[0]) {
-                    let mut nx = exprs[0].clone();
-                    nx.ty = ok_ty;
-                    *e = nx;
-                    self.changed = true;
-                } else if let Some(ok_ty) = real_result_ok_ty(&exprs[0]) {
-                    *e = IrExpr {
-                        kind: IrExprKind::Unwrap { expr: Box::new(exprs[0].clone()) },
-                        ty: ok_ty,
-                        span: e.span.clone(),
-                        def_id: e.def_id,
-                    };
-                    self.changed = true;
-                }
+                let Some(arm) = fan_classify_arm(&exprs[0]) else { return };
+                *e = fan_single_arm(arm, e);
+                self.changed = true;
                 return;
             }
             if exprs.len() < 2 {
                 return;
             }
-            enum Elem {
-                Plain(Ty),
-                Unwrap(Ty),
-            }
-            let classes: Option<Vec<Elem>> = exprs
-                .iter()
-                .map(|x| {
-                    ok_inner(x)
-                        .map(|inner| Elem::Plain(inner.ty.clone()))
-                        .or_else(|| phantom_ok_ty(x).map(Elem::Plain))
-                        .or_else(|| real_result_ok_ty(x).map(Elem::Unwrap))
-                })
-                .collect();
-            let Some(classes) = classes else { return };
-            if classes.iter().all(|c| matches!(c, Elem::Plain(_))) {
-                // Every element raw — the original direct-tuple rewrite (no binds).
-                let elements: Vec<IrExpr> = exprs
-                    .iter()
-                    .zip(&classes)
-                    .map(|(x, c)| {
-                        let Elem::Plain(t) = c else { unreachable!() };
-                        let mut nx = ok_inner(x).unwrap_or_else(|| x.clone());
-                        nx.ty = t.clone();
-                        nx
-                    })
-                    .collect();
-                *e = IrExpr {
-                    kind: IrExprKind::Tuple { elements },
-                    ty: e.ty.clone(),
-                    span: e.span.clone(),
-                    def_id: e.def_id,
-                };
-                self.changed = true;
+            let Some(classes) = exprs.iter().map(fan_classify_arm).collect::<Option<Vec<_>>>()
+            else {
                 return;
-            }
-            // Mixed / real-Result elements: every arm runs, THEN the `!`s (#3465).
-            let arms: Vec<(IrExpr, Option<Ty>)> = exprs
-                .iter()
-                .zip(&classes)
-                .map(|(x, c)| match c {
-                    Elem::Plain(t) => {
-                        let mut nx = ok_inner(x).unwrap_or_else(|| x.clone());
-                        nx.ty = t.clone();
-                        (nx, None)
-                    }
-                    Elem::Unwrap(t) => (x.clone(), Some(t.clone())),
-                })
-                .collect();
-            *e = fan_settle_block(arms, e, &mut self.next_var);
+            };
+            *e = if classes.iter().all(|c| matches!(c, FanElem::Plain(_))) {
+                // Every element raw — the original direct-tuple rewrite (no binds).
+                let elements = classes.into_iter().filter_map(|c| match c { FanElem::Plain(x) => Some(x), _ => None }).collect();
+                IrExpr { kind: IrExprKind::Tuple { elements }, ty: e.ty.clone(), span: e.span, def_id: e.def_id }
+            } else {
+                // Mixed / real-Result elements: every arm runs, THEN the `!`s (#3465).
+                fan_settle_block(classes, e, &mut self.next_var)
+            };
             self.changed = true;
         }
     }
@@ -633,48 +505,66 @@ pub fn desugar_fan_block(body: &IrExpr) -> Option<IrExpr> {
     v.changed.then_some(out)
 }
 
-/// The mixed / real-Result fan block (C-199, ADR-0024): `fan { e1; e2 } ≡
-/// { let $r1 = e1; let $r2 = e2; let $v1 = $r1!; let $v2 = $r2!; ($v1, $v2) }`.
-/// Every arm runs in list order BEFORE any `!`, and the `!`s run in list order,
-/// so the lowest-index Err wins. A `None` ok-type arm is raw (bound once, used
-/// as is). The existing bind-`!` machinery lowers each unwrap. Count-invariant.
-fn fan_settle_block(arms: Vec<(IrExpr, Option<Ty>)>, fan: &IrExpr, next_var: &mut u32) -> IrExpr {
-    use almide_ir::{IrStmt, IrStmtKind, Mutability, VarId};
-    let mut fresh = |ty: &Ty, value: IrExpr, stmts: &mut Vec<IrStmt>| -> IrExpr {
-        let var = VarId(*next_var);
-        *next_var += 1;
-        stmts.push(IrStmt {
-            kind: IrStmtKind::Bind { var, mutability: Mutability::Let, ty: ty.clone(), value },
-            span: None,
-        });
-        IrExpr { kind: IrExprKind::Var { id: var }, ty: ty.clone(), span: None, def_id: None }
+/// `ok(e)` with a Result type: the inner expression (it never errs).
+fn fan_ok_inner(x: &IrExpr) -> Option<IrExpr> {
+    match &x.kind {
+        IrExprKind::ResultOk { expr } if crate::lower::is_result_ty(&x.ty) => Some((**expr).clone()),
+        _ => None,
+    }
+}
+
+/// The checker types EVERY fan expr as `Result[T, String]` (the fan thunk
+/// convention) even when the callee is a PLAIN fn whose runtime value is the
+/// raw T (v0 native builds the raw tuple; a plain call never errs, so the
+/// wasm auto-unwrap is a no-op on it). Admit a direct NAMED call with that
+/// PHANTOM Result type and strip it to the Ok type — the v1 call of a plain
+/// fn yields the raw T, so the element ty must say T for the tuple build.
+/// The Result type is PHANTOM (v1 value = raw T) ONLY for a never-err LIFTED
+/// callee. A DECLARED-Result thunk (`effect fn add(..) -> Result[Int, String] =
+/// ok(a + b)` — fan_test) builds a REAL Result block; stripping its type made
+/// the callsite read the i32 handle as a raw i64 — INVALID WASM (2026-07-17).
+/// A non-Result expr is raw as is.
+fn fan_phantom_ok_ty(x: &IrExpr) -> Option<Ty> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    match (&x.ty, &x.kind) {
+        (
+            Ty::Applied(TypeConstructorId::Result, a),
+            IrExprKind::Call { target: almide_ir::CallTarget::Named { name }, .. },
+        ) if a.len() == 2 => {
+            let raw_abi = crate::lower::NEVER_ERR_LIFTED_FNS.with(|s| s.borrow().contains(name.as_str()))
+                && !crate::lower::AUTO_WRAP_ABI_FNS.with(|s| s.borrow().contains(name.as_str()));
+            raw_abi.then(|| a[0].clone())
+        }
+        _ if !crate::lower::is_result_ty(&x.ty) => Some(x.ty.clone()),
+        _ => None,
+    }
+}
+
+/// A REAL-Result thunk (a declared-Result / lifted-can-err / auto-wrapped NAMED
+/// call — its v1 value IS a Result block): its Ok type.
+fn fan_real_result_ok_ty(x: &IrExpr) -> Option<Ty> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    match (&x.ty, &x.kind) {
+        (
+            Ty::Applied(TypeConstructorId::Result, a),
+            IrExprKind::Call { target: almide_ir::CallTarget::Named { .. }, .. },
+        ) if a.len() == 2 && fan_phantom_ok_ty(x).is_none() => Some(a[0].clone()),
+        _ => None,
+    }
+}
+
+/// The frontend's scoped arm `(() => ok(body))()` (#3462): a zero-arg lambda
+/// called in place, whose value is a REAL Result. Its body and Ok type.
+fn fan_thunk_body(x: &IrExpr) -> Option<(&IrExpr, Ty)> {
+    use almide_lang::types::constructor::TypeConstructorId;
+    let IrExprKind::Call { target: almide_ir::CallTarget::Computed { callee }, args, .. } = &x.kind else {
+        return None;
     };
-    let mut stmts: Vec<IrStmt> = Vec::with_capacity(arms.len() * 2);
-    let held: Vec<(IrExpr, Option<Ty>)> = arms
-        .into_iter()
-        .map(|(x, ok_ty)| (fresh(&x.ty.clone(), x, &mut stmts), ok_ty))
-        .collect();
-    let elements: Vec<IrExpr> = held
-        .into_iter()
-        .map(|(r, ok_ty)| match ok_ty {
-            None => r,
-            Some(t) => {
-                let span = fan.span.clone();
-                let unwrap = IrExpr { kind: IrExprKind::Unwrap { expr: Box::new(r) }, ty: t.clone(), span, def_id: None };
-                fresh(&t, unwrap, &mut stmts)
-            }
-        })
-        .collect();
-    let tuple = IrExpr {
-        kind: IrExprKind::Tuple { elements },
-        ty: fan.ty.clone(),
-        span: fan.span.clone(),
-        def_id: fan.def_id,
-    };
-    IrExpr {
-        kind: IrExprKind::Block { stmts, expr: Some(Box::new(tuple)) },
-        ty: fan.ty.clone(),
-        span: fan.span.clone(),
-        def_id: fan.def_id,
+    let IrExprKind::Lambda { params, body, .. } = &callee.kind else { return None };
+    match &x.ty {
+        Ty::Applied(TypeConstructorId::Result, a) if args.is_empty() && params.is_empty() && a.len() == 2 && body.ty == x.ty => {
+            Some((&**body, a[0].clone()))
+        }
+        _ => None,
     }
 }

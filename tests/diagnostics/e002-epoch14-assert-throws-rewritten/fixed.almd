@@ -1,0 +1,6 @@
+// The expected text first, the closure last; it runs in a child.
+import testing
+
+test "panics with the expected message" {
+  testing.assert_aborts("oh no", () => panic("oh no"))
+}

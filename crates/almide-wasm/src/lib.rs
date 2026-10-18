@@ -106,9 +106,11 @@ pub mod decline_site;
 mod imports;
 mod param_borrow;
 mod bytes_rw;
+mod bytes_in_place;
 mod bytes_recv;
 mod bytes_split;
 pub mod alloc_count;
+pub mod canonical_alloc;
 mod alloc_inline;
 pub mod heap_cap;
 pub mod host_exports;
@@ -118,6 +120,7 @@ mod witness_hooks;
 mod witness_unwrap;
 mod calls;
 mod http_call;
+mod net_call;
 mod calls_modules;
 pub mod cells;
 mod global_reach;
@@ -127,7 +130,13 @@ mod collections;
 mod collections_hof;
 mod collections_set;
 mod map_inplace;
+mod map_holes;
 mod map_index;
+mod map_merge;
+mod map_remove;
+mod set_insert;
+mod program_tables;
+pub(crate) use program_tables::{build_globals, collect_program_fns};
 mod emit;
 pub use emit::{debug_lines, emit_library_with_ops, emit_program, emit_program_with_ops, package_keys};
 mod emitter;
@@ -157,6 +166,7 @@ mod list_edit;
 mod list_search;
 mod list_fuse;
 mod list_enumerate_fold;
+mod list_range_head;
 mod list_mut;
 mod list_order;
 mod list_sort;
@@ -167,7 +177,9 @@ mod stmts;
 mod stmts_index;
 mod stmts_append;
 mod writeback_move;
+mod rebind_move;
 mod tail_append;
+mod concat_dying;
 mod string_ext;
 pub(crate) mod work;
 pub(crate) use work::*;
@@ -178,8 +190,6 @@ mod matrix_kernels;
 mod matrix_load;
 mod matrix_ops;
 mod matrix_prod;
-mod matrix_rope;
-mod matrix_scalars;
 mod matrix_shape;
 mod binop;
 mod fan;
@@ -195,6 +205,7 @@ mod arm;
 pub(crate) use arm::{ArgMode, ArmResult, Lowered, Own};
 mod exit_plan;
 pub use exit_plan::test_omit_first_release;
+pub use fs_meta::{ABORT_SITE_OPS, OP_ABORT_SITE_RUN, OP_ABORT_SITE_SELECTED};
 mod fuel;
 mod inline_calls;
 mod ranges;
@@ -534,7 +545,6 @@ impl SliceTy {
     }
 }
 
-
 // ── literal pool ────────────────────────────────────────────────────────
 
 fn len_memarg() -> MemArg {
@@ -696,104 +706,4 @@ pub(crate) struct InitLet {
     pub(crate) space: u32,
     pub(crate) module: Option<String>,
     pub(crate) tl: IrTopLet,
-}
-
-/// Top-lets (root + module) as wasm globals + the dependency init order
-/// (split from emit_program for the complexity budget).
-#[allow(clippy::type_complexity)]
-fn build_globals(
-    ir: &IrProgram,
-    types: &TypeTable,
-) -> (HashMap<GVar, (u32, SliceTy)>, Vec<(VarId, SliceTy)>, Vec<InitLet>) {
-    // Top-lets (root + module) become wasm globals — zero-initialized,
-    // then set by main's prelude in DEPENDENCY order (C-077: the same
-    // `dependency_init_order` the interp uses, so the order matches by
-    // construction). Identities are SPACED (#1596): separately-lowered
-    // modules each carry their own VarTable starting at VarId 0, so a
-    // bare-VarId key collides across tables — the (space, var) pair is
-    // the unambiguous name, and every use-site alias (the entry reading
-    // `m.SYSTEM`) maps to its declaration's slot.
-    use almide_ir::top_let_storage::{
-        build_global_tables_spaced, dependency_init_order_spaced,
-    };
-    let mut global_map: HashMap<GVar, (u32, SliceTy)> = HashMap::new();
-    let mut global_decls: Vec<(VarId, SliceTy)> = Vec::new();
-    {
-        let mut next = G_FIXED_COUNT;
-        let mut add = |space: u32,
-                       tl: &IrTopLet,
-                       map: &mut HashMap<GVar, (u32, SliceTy)>,
-                       decls: &mut Vec<(VarId, SliceTy)>| {
-            if let Some(sty) = slice_ty_of(&tl.ty, types) {
-                map.insert((space, tl.var), (next, sty));
-                decls.push((tl.var, sty));
-                next += 1;
-            }
-            // An unsliceable top-let stays out of the pool; reading it
-            // refuses at the var site with its own honest reason.
-        };
-        for tl in &ir.top_lets {
-            add(0, tl, &mut global_map, &mut global_decls);
-        }
-        for (i, m) in ir.modules.iter().enumerate() {
-            for tl in &m.top_lets {
-                add(i as u32 + 1, tl, &mut global_map, &mut global_decls);
-            }
-        }
-    }
-    let (_info, alias, _off) = build_global_tables_spaced(ir);
-    // Use-site aliases resolve to the declaration's slot — one lookup at
-    // the Var site whatever space the read happens in.
-    for (&use_g, &decl_g) in &alias {
-        if let Some(&slot) = global_map.get(&decl_g) {
-            global_map.insert(use_g, slot);
-        }
-    }
-    let init_order = dependency_init_order_spaced(ir, &alias);
-    let mut init_by_var: HashMap<GVar, InitLet> = HashMap::new();
-    for tl in &ir.top_lets {
-        init_by_var.insert((0, tl.var), InitLet { space: 0, module: None, tl: tl.clone() });
-    }
-    for (i, m) in ir.modules.iter().enumerate() {
-        for tl in &m.top_lets {
-            init_by_var.insert(
-                (i as u32 + 1, tl.var),
-                InitLet { space: i as u32 + 1, module: Some(m.name.as_str().to_string()), tl: tl.clone() },
-            );
-        }
-    }
-    let init_lets: Vec<InitLet> =
-        init_order.iter().filter_map(|g| init_by_var.get(g).cloned()).collect();
-    (global_map, global_decls, init_lets)
-}
-
-/// The callable-fn flattening (entry fns + module fns under qualified
-/// names, Hole-bodied surfaces excluded) — split from emit_program. The
-/// third field is the fn's variable SPACE (0 = entry program, i+1 =
-/// `ir.modules[i]` — #1596): module fn bodies index their own VarTable.
-fn collect_program_fns(ir: &IrProgram) -> Vec<(&IrFunction, Option<String>, u32)> {
-    let mut program_fns: Vec<(&IrFunction, Option<String>, u32)> = ir
-        .functions
-        .iter()
-        .filter(|f| !f.is_test && f.name.as_str() != "main")
-        .map(|f| (f, None, 0))
-        .collect();
-    for (i, m) in ir.modules.iter().enumerate() {
-        for f in &m.functions {
-            // A Hole body without `@extern` is a bridge SURFACE (`= _`): registering
-            // it would shadow the self-host registry's implementation (expr:Hole ×70).
-            // An `@extern` Hole is a host binding and registers (#2876).
-            let is_surface = matches!(f.body.kind, IrExprKind::Hole) && f.extern_attrs.is_empty();
-            if !f.is_test && !is_surface {
-                program_fns.push((
-                    f,
-                    Some(format!("{}.{}", m.name.as_str(), f.name.as_str())),
-                    i as u32 + 1,
-                ));
-            }
-        }
-    }
-
-    // Signature table first: call sites need indices and types up front.
-    program_fns
 }

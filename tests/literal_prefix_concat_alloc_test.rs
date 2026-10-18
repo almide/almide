@@ -43,7 +43,7 @@ fn a_literal_left_operand_is_emitted_as_a_bare_str() {
         "the literal left operand should stay a `&str`:\n{}",
         rust.lines().filter(|l| l.contains("AlmideConcat::concat(")).collect::<Vec<_>>().join("\n")
     );
-    assert!(!rust.contains("AlmideConcat::concat(\"k\".to_string()"), "the literal was materialized as a String");
+    assert!(!rust.contains("AlmideConcat::concat(AlmideString::from(\"k\")"), "the literal was materialized as a String");
 }
 
 // The allocation effect is pinned corpus-wide by the native borrow oracle's

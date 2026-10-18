@@ -65,6 +65,7 @@ pub fn rewrite_result_ops(f: &mut MirFunction, result_fns: &BTreeSet<String>) {
                     args: vec![payload],
                 });
                 t.res_vals.insert(dst);
+                t.minted.insert(dst);
             }
             Op::Alloc { dst, init: Init::ResErrStr { piece }, .. } => {
                 let (dst, piece) = (*dst, *piece);
@@ -74,6 +75,10 @@ pub fn rewrite_result_ops(f: &mut MirFunction, result_fns: &BTreeSet<String>) {
                     args: vec![piece],
                 });
                 t.res_vals.insert(dst);
+                t.minted.insert(dst);
+            }
+            Op::Dup { src: v, .. } | Op::Drop { v } | Op::DropListStr { v } if t.minted.contains(v) => {
+                t.track_minted_copy(op, &mut out)
             }
             Op::Prim {
                 kind: PrimKind::Handle,
@@ -127,6 +132,9 @@ struct ResultWindowTracker {
     res_addrs: BTreeMap<ValueId, (ValueId, i64)>,
     /// if-value stack: dst of each open IfThen (for res propagation to joins).
     if_dsts: Vec<Option<ValueId>>,
+    /// Carriers this rewrite MINTED (`ResMakeOk` / `ResMakeErrStr`, and their
+    /// copies): no object to the verifier, unlike a `CallFn` Result.
+    minted: BTreeSet<ValueId>,
 }
 
 impl ResultWindowTracker {
@@ -199,6 +207,18 @@ impl ResultWindowTracker {
                 args: vec![r],
             }),
             None => out.push(op),
+        }
+    }
+
+    /// A `Dup` or a release of a MINTED carrier (#3669). The shared lowering
+    /// dups a Result that outlives a statement (a metered region's value
+    /// across its `budget_exit`) and releases the original; a minted carrier
+    /// has no object, so the dup becomes a carrier copy and the release goes.
+    fn track_minted_copy(&mut self, op: Op, out: &mut Vec<Op>) {
+        if let Op::Dup { dst, src } = op {
+            out.push(Op::Prim { kind: PrimKind::ResCopy, dst: Some(dst), args: vec![src] });
+            self.res_vals.insert(dst);
+            self.minted.insert(dst);
         }
     }
 

@@ -6,22 +6,24 @@
 // binary run as `./p a -- b` answered ["b"] where both wasm legs answered
 // ["a", "--", "b"] (#2485). The wasm legs build the same list from WASI
 // args_get with argv[0] skipped (stdlib/env_args.almd).
-pub fn almide_rt_env_args() -> Vec<String> {
-    std::env::args().skip(1).collect()
-}
+pub fn almide_rt_env_args() -> Vec<AlmideString> { let __almide_v: Vec<String> = { std::env::args().skip(1).collect() }; __almide_v.into_almide() }
 
-pub fn almide_rt_env_get(name: &str) -> Option<String> {
-    std::env::var(name).ok()
-}
+pub fn almide_rt_env_get(name: &str) -> Option<AlmideString> { let __almide_v: Option<String> = { std::env::var(name).ok() }; __almide_v.into_almide() }
 
 pub fn almide_rt_env_set(name: &str, value: &str) {
     std::env::set_var(name, value);
 }
 
-pub fn almide_rt_env_cwd() -> Result<String, String> {
-    std::env::current_dir()
-        .map(|p| p.to_string_lossy().to_string())
-        .map_err(|e| e.to_string())
+pub fn almide_rt_env_cwd() -> Result<AlmideString, AlmideString> {
+    let __almide_v: Result<String, AlmideString> = {
+        let __almide_r: Result<String, String> = (|| {
+            std::env::current_dir()
+                .map(|p| p.to_string_lossy().to_string())
+                .map_err(|e| e.to_string())
+        })();
+        __almide_r.map_err(Into::into)
+    };
+    __almide_v.into_almide()
 }
 
 pub fn almide_rt_env_unix_timestamp() -> i64 {
@@ -48,13 +50,14 @@ pub fn almide_rt_env_sleep_ms(ms: i64) {
     std::thread::sleep(std::time::Duration::from_millis(ms.max(0) as u64));
 }
 
-pub fn almide_rt_env_temp_dir() -> String {
-    std::env::temp_dir().to_string_lossy().replace('\\', "/")
-}
+pub fn almide_rt_env_temp_dir() -> AlmideString { let __almide_out: String = std::env::temp_dir().to_string_lossy().replace('\\', "/"); __almide_out.into() }
 
-pub fn almide_rt_env_os() -> String {
-    if cfg!(target_os = "windows") { "windows".to_string() }
-    else if cfg!(target_os = "macos") { "macos".to_string() }
-    else if cfg!(target_os = "linux") { "linux".to_string() }
-    else { "unknown".to_string() }
+pub fn almide_rt_env_os() -> AlmideString {
+    let __almide_out: String = {
+        if cfg!(target_os = "windows") { "windows".to_string() }
+        else if cfg!(target_os = "macos") { "macos".to_string() }
+        else if cfg!(target_os = "linux") { "linux".to_string() }
+        else { "unknown".to_string() }
+    };
+    __almide_out.into()
 }

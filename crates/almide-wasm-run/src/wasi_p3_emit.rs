@@ -16,7 +16,7 @@ pub fn to_p3_service(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<Vec<u8>> 
 }
 
 fn to_p3_shaped(bytes: &[u8], host_ops: &[i32], service: bool) -> anyhow::Result<Vec<u8>> {
-    let wants_http = host_ops.iter().any(|op| (43..=50).contains(op));
+    let wants_http = host_ops.iter().any(|op| (43..=50).contains(op) || *op == 65);
     let http_types = wants_http || service;
     // The vendored WIT first: the fs shim's layout facts derive from it,
     // so a WIT/shim drift refuses to emit instead of corrupting stores.
@@ -63,7 +63,7 @@ fn to_p3_shaped(bytes: &[u8], host_ops: &[i32], service: bool) -> anyhow::Result
         parsed_globals,
         global_count,
         heap_global,
-        exports: _,
+        exports,
         main_index,
         elements,
         mut data,
@@ -86,6 +86,10 @@ fn to_p3_shaped(bytes: &[u8], host_ops: &[i32], service: bool) -> anyhow::Result
     };
     let (env, n_env) = EnvImports::plan(host_ops, env_base, wants_http);
     let t = P3Types::new(&mut types);
+    // An armed module's counters (#2407) get the exit report the core host
+    // would print (wasi_p3_alloc.rs); a shipped module has none.
+    let alloc = if service { None } else { AllocGlobals::find(&exports, heap_global) };
+    let t_void = alloc.map(|_| type_index(&mut types, &[], &[]));
     let import_list = base_import_list(&t);
     let http_import_list = http_import_list(&t);
     let serve_list = match &sabi {
@@ -127,9 +131,9 @@ fn to_p3_shaped(bytes: &[u8], host_ops: &[i32], service: bool) -> anyhow::Result
     let f_alloc = shim_base + 9;
     let f_eprintln = shim_base + 1;
     let f_await = shim_base + 10;
-    // The env.set overlay log (#3223): its own page past the fs page, its
-    // length global past the environment cache.
-    let ovl = P3Overlay::plan(env, park + PARK_SPAN + fs_span, global_count + 13, f_eprintln);
+    // The env.set overlay log (#3223): its first page past the fs page, its
+    // three globals past the environment cache.
+    let ovl = P3Overlay::plan(env, park + PARK_SPAN + fs_span, global_count + 13);
     let span = PARK_SPAN + fs_span + ovl.map_or(0, |_| crate::wasi::env_overlay::OVERLAY_BYTES);
     let f_http = wants_http.then_some(shim_base + 11);
     let f_env = env.any().then_some(shim_base + 11 + u32::from(wants_http));
@@ -141,8 +145,10 @@ fn to_p3_shaped(bytes: &[u8], host_ops: &[i32], service: bool) -> anyhow::Result
         check: fe + 3,
         num: fe + 4,
     });
+    let after_http = shim_base + 11 + u32::from(wants_http) + u32::from(env.any()) + 4 * u32::from(http_fns.is_some());
+    let f_report = alloc.map(|_| after_http);
     // The fs service's functions come last, after every optional shim.
-    let serve_first = shim_base + 11 + u32::from(wants_http) + u32::from(env.any()) + 4 * u32::from(http_fns.is_some());
+    let serve_first = after_http + u32::from(alloc.is_some());
     let serve_fns = service.then_some(ServeFns { op: serve_first, handle: serve_first + 1, cell: serve_first + 2 });
     let fs_first = serve_first + 3 * u32::from(service);
 
@@ -156,7 +162,7 @@ fn to_p3_shaped(bytes: &[u8], host_ops: &[i32], service: bool) -> anyhow::Result
     let g_slots = global_count + 9; // fan slot-table base (0 = unallocated)
     let g_slotn = global_count + 10; // slot high-water mark
     let (g_env, g_envn) = (global_count + 11, global_count + 12); // cached environment list
-    let fs_first_global = global_count + 13 + u32::from(ovl.is_some()); // the fs service's own globals
+    let fs_first_global = global_count + 13 + 3 * u32::from(ovl.is_some()); // the fs service's own globals
     let mut globals = GlobalSection::new();
     for (idx, (gt, i32v, i64v, f64v)) in parsed_globals.iter().enumerate() {
         let init = if idx as u32 == heap_global {
@@ -180,7 +186,7 @@ fn to_p3_shaped(bytes: &[u8], host_ops: &[i32], service: bool) -> anyhow::Result
     globals.global(mutable_i32, &ConstExpr::i32_const(0)); // g_slotn
     globals.global(mutable_i32, &ConstExpr::i32_const(-1)); // g_env (unfetched)
     globals.global(mutable_i32, &ConstExpr::i32_const(0)); // g_envn
-    P3Overlay::emit_global(ovl, &mut globals);
+    P3Overlay::emit_globals(ovl, &mut globals);
     if let Some(f) = &fs {
         f.splice.emit_globals(&mut globals);
     }
@@ -233,6 +239,9 @@ fn to_p3_shaped(bytes: &[u8], host_ops: &[i32], service: bool) -> anyhow::Result
             functions.function(ti);
         }
     }
+    if let Some(tv) = t_void {
+        functions.function(tv);
+    }
     // The service's op shim, its export and the lossy cell writer.
     if service {
         for ti in [t.fs, t.call, t.rw] {
@@ -272,22 +281,24 @@ fn to_p3_shaped(bytes: &[u8], host_ops: &[i32], service: bool) -> anyhow::Result
     let mut code = CodeSection::new();
     let mut remap = Remap { shim_base, shift };
     for b in bodies {
-        code.function(&reencode_body(&b, &mut remap, I_EXIT)?);
+        // Armed, a trap's exit goes through `$exit`, which reports first.
+        code.function(&reencode_body(&b, &mut remap, if f_report.is_some() { shim_base + 2 } else { I_EXIT })?);
     }
     let g = P3Globals {
         park, f_alloc, g_plen, g_ppos, g_in_rx, g_in_fut, g_out_tx, g_out_fut,
         g_err_tx, g_err_fut, g_wset, g_slots, g_slotn, f_reserve, f_await, g_env, g_envn,
+        heap: heap_global,
     };
     let out_port = PrintPort { g_tx: g_out_tx, g_fut: g_out_fut, call_import: I_OUT_CALL, new_import: I_OUT_NEW, write_import: I_OUT_WRITE };
     let err_port = PrintPort { g_tx: g_err_tx, g_fut: g_err_fut, call_import: I_ERR_CALL, new_import: I_ERR_NEW, write_import: I_ERR_WRITE };
     code.function(&shim_print(out_port, park, f_await, true));
     code.function(&shim_print(err_port, park, f_await, true));
-    code.function(&shim_exit());
+    code.function(&shim_exit(f_report));
     let env_ops = env.ops();
     code.function(&shim_fs_call(g, &abi, (f_fs_self, f_http, serve_fns.map(|s| s.op)), f_env.map(|fe| (fe, env_ops.as_slice())), svc.as_ref()));
     code.function(&shim_host_read(g_plen, g_ppos));
     code.function(&shim_cabi_realloc(heap_global));
-    code.function(&shim_run(main_index + shift, g));
+    code.function(&shim_run(main_index + shift, g, f_report));
     code.function(&shim_callback());
     code.function(&shim_reserve(
         heap_global,
@@ -300,6 +311,9 @@ fn to_p3_shaped(bytes: &[u8], host_ops: &[i32], service: bool) -> anyhow::Result
     code.function(&shim_await(park));
     let texts = habi.as_ref().filter(|_| wants_http).map(|h| HttpErrTexts::new(park, h));
     push_optional_shims(&mut code, g, habi.as_ref().zip(texts.as_ref()).zip(http_fns), (env, ovl), f_env);
+    if let Some(a) = alloc {
+        code.function(&shim_alloc_report(a, AllocReportAt { buf: park + DATA, span, f_eprintln }));
+    }
     let serve_texts = sabi.as_ref().map(|a| ServeTexts::new(park, a));
     if let (Some(a), Some(st), Some(sg), Some(sf)) = (&sabi, &serve_texts, serve_globals, serve_fns) {
         code.function(&shim_serve_op(g, sg));
@@ -340,7 +354,6 @@ fn to_p3_shaped(bytes: &[u8], host_ops: &[i32], service: bool) -> anyhow::Result
     if let Some(t) = &serve_texts {
         data.active(0, &ConstExpr::i32_const(t.base as i32), t.blob.iter().copied());
     }
-    P3Overlay::emit_data(ovl, &mut data, park);
 
     let mut m = Module::new();
     m.section(&type_sec)
@@ -542,7 +555,10 @@ fn base_import_list(t: &P3Types) -> Vec<(u32, &'static str, &'static str, u32)> 
     let cli_in = "wasi:cli/stdin@0.3.0";
     let fs_types = "wasi:filesystem/types@0.3.0";
     let list = vec![
-        (I_EXIT, "wasi:cli/exit@0.3.0", "exit", t.exit),
+        // `exit-with-code(u8)` (@since 0.3.0, no feature gate): the whole
+        // byte, so `process.exit(code)` keeps its code (C-350); every
+        // defined-failure site passes 1, which `exit(err)` also meant.
+        (I_EXIT, "wasi:cli/exit@0.3.0", "exit-with-code", t.exit),
         (I_OUT_CALL, cli_out, "write-via-stream", t.call),
         (I_OUT_NEW, cli_out, "[stream-new-0]write-via-stream", t.new),
         (I_OUT_WRITE, cli_out, "[async-lower][stream-write-0]write-via-stream", t.rw),
@@ -635,6 +651,8 @@ fn http_import_list(t: &P3Types) -> Vec<(u32, &'static str, &'static str, u32)> 
         (I_HTTP_OPT_CONNECT, http_types, "[method]request-options.set-connect-timeout", t.opt_set),
         (I_HTTP_OPT_FIRST, http_types, "[method]request-options.set-first-byte-timeout", t.opt_set),
         (I_HTTP_OPT_BETWEEN, http_types, "[method]request-options.set-between-bytes-timeout", t.opt_set),
+        (I_HTTP_RESP_HEADERS, http_types, "[method]response.get-headers", t.call),
+        (I_HTTP_COPY_ALL, http_types, "[method]fields.copy-all", t.ws_join),
     ];
     assert_eq!(IMPORTS + list.len() as u32, IMPORTS_HTTP, "IMPORTS_HTTP count drift");
     list

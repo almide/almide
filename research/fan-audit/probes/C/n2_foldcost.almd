@@ -1,0 +1,21 @@
+effect fn main() -> Unit = {
+  let xs = list.range(0, 1000)
+  var u = 0
+  while u <= 1004 {
+    let r = fan.bounded(compute.ns(u * 3)) { list.fold(xs, 0, (acc, x) => acc + x) } ?? -1
+    if r >= 0 then {
+      println("fold(1000) admitted at units=" + int.to_string(u))
+      u = 99999
+    }
+    u = u + 1
+  }
+  var w = 0
+  while w <= 5 {
+    let r = fan.bounded(compute.ns(w * 3)) { 1 + 2 } ?? -1
+    if r >= 0 then {
+      println("1+2 admitted at units=" + int.to_string(w))
+      w = 99
+    }
+    w = w + 1
+  }
+}

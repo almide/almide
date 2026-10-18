@@ -1,0 +1,9 @@
+// A `where` binding is a local of the test too: the child never runs it.
+import testing
+
+test "an index past the limit aborts"
+  where limit = 3
+{
+  let _ = limit
+  testing.assert_aborts("index", () => [1][limit])
+}

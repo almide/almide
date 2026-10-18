@@ -422,6 +422,7 @@ fn reverse(b: Bytes) -> Bytes = _
 
 /// Copy with byte i set to val; as-is if out of range.
 @intrinsic("almide_rt_bytes_set")
+@reuse(b)
 fn set(b: Bytes, i: Int, val: Int) -> Bytes = _
 
 /// Writes f32 BE at pos; no-op out of range.
@@ -547,16 +548,6 @@ fn write_u8(mut b: Bytes, val: Int) -> Unit = _
 /// Bytewise XOR, as long as the shorter input.
 @intrinsic("almide_rt_bytes_xor")
 fn xor(a: Bytes, b: Bytes) -> Bytes = _
-
-// Arena memory management (WASM only — no-op on Rust target).
-// heap_save returns a checkpoint; heap_restore frees all allocations above it.
-/// Opaque arena checkpoint; currently always 0.
-@intrinsic("almide_rt_bytes_heap_save")
-fn heap_save() -> Int = _
-
-/// Restores a heap_save checkpoint; currently a no-op.
-@intrinsic("almide_rt_bytes_heap_restore")
-fn heap_restore(checkpoint: Int) -> Unit = _
 
 // ── Typed byte IO (Stage 4a, Sized Numeric Types integration) ──
 //

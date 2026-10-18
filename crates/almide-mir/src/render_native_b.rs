@@ -139,7 +139,7 @@ pub(crate) fn render_set_local(
     let rhs = match t {
         NTy::I64 | NTy::F64 => var(*src),
         NTy::Str => format!("{}.clone()", var(*src)),
-        NTy::StrRef => format!("{}.to_string()", var(*src)),
+        NTy::StrRef => format!("AlmideString::from({})", var(*src)),
         NTy::Vec => format!("{}.clone()", var(*src)),
         NTy::VecRef => format!("{}.to_vec()", var(*src)),
         NTy::Res => format!("{}.clone()", var(*src)),
@@ -323,10 +323,10 @@ fn bind_user_fn_result(
             };
             tys.insert(*d, t);
             let ty_name = match t {
-                NTy::Str => "String",
+                NTy::Str => "AlmideString",
                 NTy::Vec => "Vec<i64>",
                 NTy::F64 => "f64",
-                NTy::Res => "Result<i64, String>",
+                NTy::Res => "Result<i64, AlmideString>",
                 _ => "i64",
             };
             line!("let mut {}: {} = {};", var(*d), ty_name, rendered);
@@ -373,7 +373,7 @@ fn render_closed_shim_call(
         (Some(d), Some(t)) => {
             tys.insert(*d, t);
             let ty_name = match t {
-                NTy::Str => "String",
+                NTy::Str => "AlmideString",
                 NTy::Vec => "Vec<i64>",
                 _ => "i64",
             };
@@ -561,9 +561,10 @@ fn render_call_witness(
 fn render_if_then(
     cond: &ValueId,
     dst: &Option<ValueId>,
+    tys: &BTreeMap<ValueId, NTy>,
     out: &mut String,
     indent: &mut usize,
-    if_stack: &mut Vec<Option<(String, ValueId)>>,
+    if_stack: &mut Vec<Option<IfJoin>>,
 ) {
     macro_rules! line {
         ($($arg:tt)*) => {{
@@ -576,7 +577,7 @@ fn render_if_then(
         // yield, when its type is known.
         let marker = format!("//__JOIN_{}__", var(*d));
         line!("{marker}");
-        if_stack.push(Some((marker, *d)));
+        if_stack.push(Some((marker, *d, tys.keys().copied().collect())));
     } else {
         if_stack.push(None);
     }
@@ -588,10 +589,11 @@ fn render_if_then(
 /// type is known now), open the `else` arm.
 fn render_else(
     val: &Option<ValueId>,
+    borrows: &std::collections::BTreeSet<ValueId>,
     tys: &mut BTreeMap<ValueId, NTy>,
     out: &mut String,
     indent: &mut usize,
-    if_stack: &Vec<Option<(String, ValueId)>>,
+    if_stack: &mut [Option<IfJoin>],
 ) -> Result<(), LowerError> {
     macro_rules! line {
         ($($arg:tt)*) => {{
@@ -599,24 +601,31 @@ fn render_else(
             writeln!(out, $($arg)*).unwrap();
         }};
     }
-    if let Some(Some((marker, d))) = if_stack.last() {
+    if let Some(Some((marker, d, known))) = if_stack.last_mut() {
         let v = val.ok_or_else(|| wall("native: if-value arm without a yield"))?;
         let t = *tys.get(&v).ok_or_else(|| wall("native: if-value yield untyped"))?;
+        let arm_own = !known.contains(&v);
         let (decl, join_t, rhs) = match t {
+            // #3532: a borrow join holds the arm's shared reference.
+            NTy::VecRef | NTy::StrRef if borrows.contains(d) => (
+                format!("let {}: {};", var(*d), if t == NTy::VecRef { "&[i64]" } else { "&str" }),
+                t,
+                var(v),
+            ),
             NTy::I64 => (
                 format!("let mut {}: i64 = 0;", var(*d)),
                 NTy::I64,
                 var(v),
             ),
             NTy::Str => (
-                format!("let mut {}: String = String::new();", var(*d)),
+                format!("let mut {}: AlmideString = AlmideString::new();", var(*d)),
                 NTy::Str,
                 format!("{}.clone()", var(v)),
             ),
             NTy::StrRef => (
-                format!("let mut {}: String = String::new();", var(*d)),
+                format!("let mut {}: AlmideString = AlmideString::new();", var(*d)),
                 NTy::Str,
-                format!("{}.to_string()", var(v)),
+                format!("AlmideString::from({})", var(v)),
             ),
             NTy::Vec => (
                 format!("let mut {}: Vec<i64> = Vec::new();", var(*d)),
@@ -634,14 +643,16 @@ fn render_else(
                 var(v),
             ),
             NTy::Res => (
-                format!("let mut {}: Result<i64, String> = Ok(0);", var(*d)),
+                format!("let mut {}: Result<i64, AlmideString> = Ok(0);", var(*d)),
                 NTy::Res,
                 format!("{}.clone()", var(v)),
             ),
         };
-        *out = out.replacen(marker, &decl, 1);
+        *out = out.replacen(marker.as_str(), &decl, 1);
         tys.insert(*d, join_t);
-        line!("{} = {};", var(*d), rhs);
+        line!("{} = {};", var(*d), join_rhs(v, t, arm_own, rhs));
+        // the else arm's own values are the ones defined after this point
+        *known = tys.keys().copied().collect();
     }
     *indent -= 1;
     line!("}} else {{");
@@ -652,10 +663,11 @@ fn render_else(
 /// `Op::EndIf` — close the `else` arm, converging the if-as-value join (if any).
 fn render_end_if(
     val: &Option<ValueId>,
+    borrows: &std::collections::BTreeSet<ValueId>,
     tys: &BTreeMap<ValueId, NTy>,
     out: &mut String,
     indent: &mut usize,
-    if_stack: &mut Vec<Option<(String, ValueId)>>,
+    if_stack: &mut Vec<Option<IfJoin>>,
 ) -> Result<(), LowerError> {
     macro_rules! line {
         ($($arg:tt)*) => {{
@@ -664,14 +676,23 @@ fn render_end_if(
         }};
     }
     let top = if_stack.pop().ok_or_else(|| wall("native: EndIf without IfThen"))?;
-    if let Some((_, d)) = top {
+    if let Some((_, d, known)) = top {
         let v = val.ok_or_else(|| wall("native: if-value arm without a yield"))?;
         let t = *tys.get(&v).ok_or_else(|| wall("native: if-value yield untyped"))?;
         let join_t = *tys.get(&d).ok_or_else(|| wall("native: if-value join untyped"))?;
+        if borrows.contains(&d) && matches!(join_t, NTy::VecRef | NTy::StrRef) {
+            if t != join_t {
+                return Err(wall("native: borrow-join arms disagree on type"));
+            }
+            line!("{} = {};", var(d), var(v));
+            *indent -= 1;
+            line!("}}");
+            return Ok(());
+        }
         let rhs = match t {
             NTy::I64 | NTy::F64 => var(v),
             NTy::Str => format!("{}.clone()", var(v)),
-            NTy::StrRef => format!("{}.to_string()", var(v)),
+            NTy::StrRef => format!("AlmideString::from({})", var(v)),
             NTy::Vec => format!("{}.clone()", var(v)),
             NTy::VecRef => format!("{}.to_vec()", var(v)),
             NTy::Res => format!("{}.clone()", var(v)),
@@ -684,11 +705,25 @@ fn render_end_if(
         if arm_t != join_t {
             return Err(wall("native: if-value arms disagree on type"));
         }
-        line!("{} = {};", var(d), rhs);
+        line!("{} = {};", var(d), join_rhs(v, t, !known.contains(&v), rhs));
     }
     *indent -= 1;
     line!("}}");
     Ok(())
+}
+
+/// An if-as-value join: the decl marker, the join value, and the values that
+/// existed when the current arm opened.
+pub(crate) type IfJoin = (String, ValueId, std::collections::BTreeSet<ValueId>);
+
+/// The join's right-hand side: an owned heap value the arm itself defined
+/// dies with the arm, so it moves (its `.clone()` copied it a second time);
+/// a value that outlives the arm keeps `copy`.
+fn join_rhs(v: ValueId, t: NTy, arm_own: bool, copy: String) -> String {
+    match t {
+        NTy::Str | NTy::Vec | NTy::Res if arm_own => var(v),
+        _ => copy,
+    }
 }
 
 /// A rendered call argument with the NTy it carries (`Imm` is always i64).
@@ -751,7 +786,7 @@ pub(crate) fn render_int_binop(
 }
 
 /// A user fn name that is a valid Rust identifier (dots from module paths).
-fn mangle(name: &str) -> String {
+pub(crate) fn mangle(name: &str) -> String {
     format!("almd_{}", name.replace(['.', '$'], "_"))
 }
 

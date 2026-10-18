@@ -139,6 +139,10 @@ pub(crate) struct Emitter<'a> {
     /// C-319 shared-cell vars: the local holds a one-slot heap cell's
     /// ADDRESS; reads load through it, writes store through it.
     pub(crate) cells: &'a std::collections::HashSet<VarId>,
+    /// #3691: the frame's tombstone vars (map_remove.rs) — a read settles
+    /// their block unless `raw_map_read` (a keyed read through the index).
+    pub(crate) tomb_vars: &'a std::collections::HashSet<VarId>,
+    pub(crate) raw_map_read: bool,
     /// #3104 / #3337: what the statement being lowered may MOVE
     /// (writeback_move.rs) — set by the block walk, taken by the assign
     /// (the temp) and by the call site (the vars handed to `mut` params).
@@ -481,6 +485,7 @@ impl Emitter<'_> {
                     if self.cells.contains(id) {
                         self.load_ty_slot(ty, 0);
                     }
+                    self.settle_tomb_read(id, ty);
                     ty
                 } else if let Some(&(gidx, ty)) = self.globals.get(&(self.var_space, *id)) {
                     self.f.instructions().global_get(gidx);
@@ -617,12 +622,7 @@ impl Emitter<'_> {
             }
             _ => self.lower_data(e, want)?,
         };
-        if let Some(w) = want
-            && got != w
-        {
-            return unsup(&format!("ty-mismatch:{got:?}-vs-{w:?}"));
-        }
-        Ok(got)
+        self.settle_want(e, got, want)
     }
 
     /// Data-shaped values: sum constructors, unwraps, records, lists.

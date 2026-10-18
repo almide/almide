@@ -1,0 +1,45 @@
+fn heavy(n: Int) -> Int = {
+  var i = 0
+  var acc = 0
+  while i < n {
+    acc = (acc + i * 7) % 999983
+    i = i + 1
+  }
+  acc
+}
+
+fn spin(n: Int) -> Int = {
+  var acc = n
+  while true {
+    acc = (acc + 7) % 999983
+  }
+  acc
+}
+
+fn loud(n: Int) -> Int = {
+  var i = 0
+  while i < n {
+    println("t-iter " + int.to_string(i))
+    i = i + 1
+  }
+  i
+}
+
+effect fn main() -> Unit = {
+  let a = fan.timeout(duration.s(10)) { heavy(1000) } ?? -1
+  println("a=" + int.to_string(a))
+  let r = fan.timeout(duration.ms(20)) { spin(1) }
+  match r {
+    ok(v) => println("r ok " + int.to_string(v)),
+    err(e) => println("r err [" + e + "]"),
+  }
+  let z = fan.timeout(duration.ns(0)) { 1 + 2 } ?? -9
+  println("zero-nocharge=" + int.to_string(z))
+  let z2 = fan.timeout(duration.ns(0)) { heavy(0) } ?? -9
+  println("zero-heavy0=" + int.to_string(z2))
+  let m = fan.timeout(duration.us(200)) { heavy(300000) } ?? -1
+  println("mid=" + int.to_string(m))
+  let p = fan.timeout(duration.ns(1)) { loud(3) } ?? -1
+  println("p=" + int.to_string(p))
+  println("end")
+}

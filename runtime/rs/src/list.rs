@@ -9,7 +9,7 @@ pub fn almide_rt_list_get<T: Clone>(xs: &[T], i: i64) -> Option<T> { xs.get(i as
 pub fn almide_rt_list_get_or<T: Clone>(xs: &[T], i: i64, default: T) -> T { xs.get(i as usize).cloned().unwrap_or(default) }
 pub fn almide_rt_list_contains<T: PartialEq>(xs: &[T], x: T) -> bool { xs.contains(&x) }
 pub fn almide_rt_list_index_of<T: PartialEq>(xs: &[T], x: T) -> Option<i64> { xs.iter().position(|v| *v == x).map(|i| i as i64) }
-pub fn almide_rt_list_join(xs: &[String], sep: &str) -> String { xs.join(sep) }
+pub fn almide_rt_list_join(xs: &[AlmideString], sep: &str) -> AlmideString { let __almide_out: String = xs.join(sep); __almide_out.into() }
 pub fn almide_rt_list_reverse<A: Clone>(xs: &[A]) -> Vec<A> { xs.iter().rev().cloned().collect() }
 pub fn almide_rt_list_sort<A: Ord + Clone>(xs: &[A]) -> Vec<A> { let mut v = xs.to_vec(); v.sort(); v }
 // Float ordering uses IEEE-754 totalOrder (`f64::total_cmp`): NaN takes its
@@ -51,7 +51,19 @@ pub fn almide_rt_list_max<T: Ord + Clone>(xs: &[T]) -> Option<T> { xs.iter().max
 pub fn almide_rt_list_chunk<T: Clone>(xs: &[T], n: i64) -> Vec<Vec<T>> { if n == 0 { almide_abort("chunk size must be positive"); } xs.chunks(n as usize).map(|c| c.to_vec()).collect() }
 pub fn almide_rt_list_windows<T: Clone>(xs: &[T], n: i64) -> Vec<Vec<T>> { if n == 0 { almide_abort("window size must be positive"); } if (n as usize) > xs.len() { return vec![]; } xs.windows(n as usize).map(|w| w.to_vec()).collect() }
 pub fn almide_rt_list_dedup<T: Clone + PartialEq>(xs: &[T]) -> Vec<T> { let mut r = Vec::new(); for x in xs { if r.last() != Some(x) { r.push(x.clone()); } } r }
-pub fn almide_rt_list_unique<T: Clone + PartialEq>(xs: &[T]) -> Vec<T> { let mut r = Vec::new(); for x in xs { if !r.contains(x) { r.push(x.clone()); } } r }
+// The seen set is an `AlmideMap` (#3704): it hashes only the exact-equality
+// key types (Int, String, Bool, their pairs, List[Int] / List[String]) and
+// probes every other type by `PartialEq`, so the answer is the old
+// `r.contains` scan's — Float `-0.0 == 0.0`, NaN never matches — in O(n)
+// for the hashed types where the scan was O(n^2).
+pub fn almide_rt_list_unique<T: Clone + PartialEq + 'static>(xs: &[T]) -> Vec<T> {
+    let mut seen: AlmideMap<T, ()> = AlmideMap::new();
+    let mut r = Vec::new();
+    for x in xs {
+        if !seen.contains_key(x) { seen.insert(x.clone(), ()); r.push(x.clone()); }
+    }
+    r
+}
 pub fn almide_rt_list_set<T: Clone>(xs: &[T], i: i64, x: T) -> Vec<T> { let mut r = xs.to_vec(); if let Some(s) = r.get_mut(i as usize) { *s = x; } r }
 pub fn almide_rt_list_swap<T: Clone>(xs: &[T], i: i64, j: i64) -> Vec<T> { let mut r = xs.to_vec(); let (a, b) = (i as usize, j as usize); if a < r.len() && b < r.len() { r.swap(a, b); } r }
 
@@ -100,7 +112,7 @@ pub fn almide_rt_list_flat_map_arr<A, B, const N: usize, F: Fn(A) -> [B; N]>(xs:
     for x in xs { out.extend(f(x)); }
     out
 }
-pub fn almide_rt_list_flat_map_effect<A, B>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> Result<Vec<B>, String>>) -> Result<Vec<B>, String> { let f = move |a| f(a); let mut r = Vec::new(); for x in xs { r.extend(f(x)?); } Ok(r) }
+pub fn almide_rt_list_flat_map_effect<A, B>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> Result<Vec<B>, AlmideString>>) -> Result<Vec<B>, AlmideString> { let __almide_r: Result<Vec<B>, String> = (|| { let f = move |a| f(a); let mut r = Vec::new(); for x in xs { r.extend(f(x)?); } Ok(r) })(); __almide_r.map_err(Into::into) }
 pub fn almide_rt_list_filter_map<A, B>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> Option<B>>) -> Vec<B> { let f = move |a| f(a); xs.into_iter().filter_map(f).collect() }
 pub fn almide_rt_list_find_index<A: Clone>(xs: &[A], f: std::rc::Rc<dyn Fn(A) -> bool>) -> Option<i64> { let f = move |a| f(a); xs.iter().position(|x| f(x.clone())).map(|i| i as i64) }
 pub fn almide_rt_list_take<T: Clone>(xs: &[T], n: i64) -> Vec<T> { xs.iter().take(n as usize).cloned().collect() }
@@ -176,8 +188,8 @@ pub fn almide_rt_list_range(start: i64, end: i64) -> Vec<i64> {
 pub fn almide_rt_list_reduce<A: Clone>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A, A) -> A>) -> Option<A> { let f = move |a, b| f(a, b); xs.into_iter().reduce(f) }
 pub fn almide_rt_list_scan<A: Clone, B: Clone>(xs: Vec<A>, init: B, f: std::rc::Rc<dyn Fn(B, A) -> B>) -> Vec<B> { let f = move |a, b| f(a, b); let mut r = Vec::new(); let mut a = init; for x in xs { a = f(a, x); r.push(a.clone()); } r }
 pub fn almide_rt_list_sort_by<A: Clone, B: Ord>(mut xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> B>) -> Vec<A> { let f = move |a| f(a); xs.sort_by_cached_key(|x| f(x.clone())); xs }  // #560: cached_key calls the key fn ONCE PER ELEMENT (n), matching the wasm precomputed-key array + the key-extraction intent; sort_by_key called it per COMPARISON (n log n), an observable native!=wasm divergence for side-effectful keys.
-pub fn almide_rt_list_fold_effect<A, B>(xs: Vec<A>, init: B, f: std::rc::Rc<dyn Fn(B, A) -> Result<B, String>>) -> Result<B, String> { let f = move |a, b| f(a, b); let mut a = init; for x in xs { a = f(a, x)?; } Ok(a) }
-pub fn almide_rt_list_map_effect<A, B>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> Result<B, String>>) -> Result<Vec<B>, String> { let f = move |a| f(a); xs.into_iter().map(f).collect() }
+pub fn almide_rt_list_fold_effect<A, B>(xs: Vec<A>, init: B, f: std::rc::Rc<dyn Fn(B, A) -> Result<B, AlmideString>>) -> Result<B, AlmideString> { let __almide_r: Result<B, String> = (|| { let f = move |a, b| f(a, b); let mut a = init; for x in xs { a = f(a, x)?; } Ok(a) })(); __almide_r.map_err(Into::into) }
+pub fn almide_rt_list_map_effect<A, B>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> Result<B, AlmideString>>) -> Result<Vec<B>, AlmideString> { let __almide_r: Result<Vec<B>, AlmideString> = (|| { let f = move |a| f(a); xs.into_iter().map(f).collect() })(); __almide_r.map_err(Into::into) }
 
 pub fn almide_rt_list_take_end<T: Clone>(xs: &[T], n: i64) -> Vec<T> {
     let start = if n as usize >= xs.len() { 0 } else { xs.len() - n as usize };
@@ -202,19 +214,25 @@ pub fn almide_rt_list_find_owned<A: Clone>(mut xs: Vec<A>, f: std::rc::Rc<dyn Fn
 pub fn almide_rt_list_slice_owned<T>(mut xs: Vec<T>, start: i64, end: i64) -> Vec<T> { let s = start as usize; let e = (end as usize).min(xs.len()); if s >= e { return Vec::new(); } xs.truncate(e); xs.drain(..s); xs }
 pub fn almide_rt_list_take_end_owned<T>(mut xs: Vec<T>, n: i64) -> Vec<T> { let start = if n as usize >= xs.len() { 0 } else { xs.len() - n as usize }; xs.drain(..start); xs }
 pub fn almide_rt_list_drop_end_owned<T>(mut xs: Vec<T>, n: i64) -> Vec<T> { let end = if n as usize >= xs.len() { 0 } else { xs.len() - n as usize }; xs.truncate(end); xs }
+// The point writes (#3533): `xs = list.set(xs, i, v)` wrote into a copy of the
+// whole list every step; the twin writes into the source it owns.
+pub fn almide_rt_list_set_owned<T>(mut xs: Vec<T>, i: i64, x: T) -> Vec<T> { if let Some(s) = xs.get_mut(i as usize) { *s = x; } xs }
+pub fn almide_rt_list_swap_owned<T>(mut xs: Vec<T>, i: i64, j: i64) -> Vec<T> { let (a, b) = (i as usize, j as usize); if a < xs.len() && b < xs.len() { xs.swap(a, b); } xs }
 // Keep the FIRST element of each distinct key, in first-occurrence order.
 // The key bound is `PartialEq` (not `Eq + Hash`) so a record, variant, tuple,
 // Option or Float key dedups exactly as the wasm leg's generic-equality scan
 // does (#1812): user types derive `Clone, Debug, PartialEq` only, so the old
 // `HashSet` seen set was a check-passes/build-fails gap (rustc E0277), and a
 // Float key follows `PartialEq` — `-0.0 == 0.0` collapses, NaN never matches.
-pub fn almide_rt_list_unique_by<T: Clone, K: PartialEq>(xs: Vec<T>, f: std::rc::Rc<dyn Fn(T) -> K>) -> Vec<T> {
+// The seen keys live in an `AlmideMap` (#3704), with the same answers as
+// the old `Vec` scan for the reason `almide_rt_list_unique` gives.
+pub fn almide_rt_list_unique_by<T: Clone, K: PartialEq + 'static>(xs: Vec<T>, f: std::rc::Rc<dyn Fn(T) -> K>) -> Vec<T> {
     let f = move |a| f(a);
-    let mut seen: Vec<K> = Vec::new();
+    let mut seen: AlmideMap<K, ()> = AlmideMap::new();
     let mut result = Vec::new();
     for x in xs {
         let k = f(x.clone());
-        if !seen.iter().any(|s| *s == k) { seen.push(k); result.push(x); }
+        if !seen.contains_key(&k) { seen.insert(k, ()); result.push(x); }
     }
     result
 }
@@ -274,28 +292,35 @@ pub fn almide_rt_list_par_workers(len: usize) -> usize {
     let cap = *CAP.get_or_init(|| {
         std::env::var("ALMIDE_FAN_THREADS").ok().and_then(|v| v.parse::<usize>().ok()).filter(|&n| n > 0).unwrap_or(usize::MAX)
     });
-    let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
+    // Read once too: on Linux `available_parallelism` reads the cgroup quota
+    // files on every call, which cost every offer 11-48 us on GCE (#3341's
+    // fixed cost, paid even by the offers the model keeps sequential).
+    static CPUS: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    let cpus = *CPUS.get_or_init(|| std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1));
     cpus.max(1).min(cap).min(len.max(1))
 }
 
 // #3341 — THE FAN COST MODEL, one formula on both legs (the embedded wasm
-// host's copy is crates/almide-wasm-run/src/host_fan.rs `plan`; the two
-// constants are pinned to docs/benchmarks/fan-cost-model.txt by
+// host's copy is crates/almide-wasm-run/src/host_fan.rs `plan`; each leg's
+// two constants are its own, pinned to docs/benchmarks/fan-cost-model.txt by
 // tests/fan_cost_model_test.rs). Every parallel twin is a SITE (one per
 // callback type — the monomorphised twin's own address), and every offer at
 // a site records the compute time its elements took (`AlmideFanClock`: the
 // threads' CPU time inside the elements, so spawn latency and the time a
 // thread sat descheduled are not counted, and each worker's first element —
-// its warm-up — is kept out of the mean). A site's FIRST offer goes parallel, as
+// its warm-up — is kept out of the mean; a sequential site is timed on one
+// offer in `ALMIDE_FAN_RESAMPLE`, a parallel one on one in
+// `ALMIDE_FAN_RESAMPLE_PAR`). A site's FIRST offer goes parallel, as
 // before #3341; later offers estimate each element at the site's last
 // measured time `t`. A parallel offer on W workers COSTS `OFFER + W·WORKER`
-// (thread spawn, join, the group's bookkeeping — measured) and SAVES
+// (publishing it, the pool threads entering and leaving, the group's
+// bookkeeping — measured, docs/benchmarks/fan-cost-model.txt) and SAVES
 // `t·(n − ⌈n/W⌉)`; the W with the largest positive net saving wins, and none
 // = the offer runs here, sequentially. Output is the same either way (C-321).
 // Timing element 0 first and deciding after it was measured and rejected: it
 // serialises one whole chunk, ~2x wall time when n ≈ workers (fannkuchredux).
-pub const ALMIDE_FAN_OFFER_NS: u128 = 30_000;
-pub const ALMIDE_FAN_WORKER_NS: u128 = 9_000;
+pub const ALMIDE_FAN_OFFER_NS: u128 = 1_500;
+pub const ALMIDE_FAN_WORKER_NS: u128 = 700;
 
 /// The worker count for an offer of `n` elements whose site last measured
 /// `per_elem` ns per element (`None` = its first offer): >= 2 = go parallel
@@ -317,15 +342,68 @@ pub fn almide_rt_fan_plan(n: usize, per_elem: Option<u128>) -> usize {
     best.0
 }
 
-fn almide_fan_history() -> &'static std::sync::Mutex<std::collections::HashMap<usize, u128>> {
-    static H: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<usize, u128>>> = std::sync::OnceLock::new();
-    H.get_or_init(Default::default)
+/// Per site: its last measured time per element (`t`, plus one: 0 = never
+/// measured), and how many more offers may run without being measured (see
+/// `AlmideFanClock::record`). A fixed open-addressed table keyed by the
+/// site's address, read without a lock on every offer — the mutex-guarded
+/// map it replaces was a lock, a hash and a probe per offer, on a path a
+/// sequential offer of ten 0.3 us elements pays in full. A site that finds
+/// the table full keeps no history: each of its offers plans as a first.
+struct AlmideFanSite {
+    key: std::sync::atomic::AtomicUsize,
+    t: std::sync::atomic::AtomicU64,
+    skip: std::sync::atomic::AtomicU32,
 }
 
-/// The site's last measured time per element, if it has run before.
-fn almide_fan_estimate(site: usize) -> Option<u128> {
-    almide_fan_history().lock().ok()?.get(&site).copied()
+const ALMIDE_FAN_SITE_EMPTY: AlmideFanSite = AlmideFanSite {
+    key: std::sync::atomic::AtomicUsize::new(0),
+    t: std::sync::atomic::AtomicU64::new(0),
+    skip: std::sync::atomic::AtomicU32::new(0),
+};
+static ALMIDE_FAN_SITES: [AlmideFanSite; 256] = [ALMIDE_FAN_SITE_EMPTY; 256];
+
+/// The table entry for `site`, claiming an empty one when `insert`.
+fn almide_fan_site(site: usize, insert: bool) -> Option<&'static AlmideFanSite> {
+    use std::sync::atomic::Ordering;
+    let n = ALMIDE_FAN_SITES.len();
+    let mut i = ((site as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 56) as usize % n;
+    for _ in 0..n {
+        let e = &ALMIDE_FAN_SITES[i];
+        match e.key.load(Ordering::Acquire) {
+            k if k == site => return Some(e),
+            0 if !insert => return None,
+            0 => match e.key.compare_exchange(0, site, Ordering::AcqRel, Ordering::Acquire) {
+                Ok(_) => return Some(e),
+                Err(k) if k == site => return Some(e),
+                Err(_) => {}
+            },
+            _ => {}
+        }
+        i = (i + 1) % n;
+    }
+    None
 }
+
+/// A sequential site re-measures one offer in this many: timing an offer
+/// reads the thread CPU clock twice, a syscall (~0.3 us on the GCE Intel VM,
+/// ~1.1 us on the AMD one) that a cheap sequential offer otherwise pays every
+/// time; a site whose work grows past the crossover is seen within this many
+/// offers. (Until 2026-10-17 a site within 4x of the crossover re-measured
+/// one in 4; with the pool's crossover at ~0.6 us per element that tier
+/// caught 0.4 us elements and cost them 12% on the AMD VM.)
+const ALMIDE_FAN_RESAMPLE: u32 = 16;
+/// A parallel site re-measures one offer in this many: each thread reads the
+/// CPU clock around its elements, three syscalls per helper on the offer's
+/// critical path (~3.3 us on the AMD VM, 2026-10-17).
+const ALMIDE_FAN_RESAMPLE_PAR: u32 = 8;
+/// The site's next offer runs sequentially and is measured: a parallel
+/// offer's elements read slower than the same elements run in one thread
+/// (the threads share the block counter and the result slots), and an
+/// estimate from them within 2x of the crossover is not evidence that the
+/// site is above it. A site's first offer is parallel, so a run of 0.3 us
+/// elements otherwise stayed parallel for its first dozens of offers (100
+/// iterations: 0.36 us per offer over sequential on the Intel VM, 2026-10-17).
+const ALMIDE_FAN_PROBE: u32 = u32::MAX;
 
 /// The calling thread's CPU time in ns — the clock an offer's elements are
 /// measured on (the wasm host's copy is host_fan.rs `cpu_ns`). Wall time
@@ -353,6 +431,26 @@ fn almide_fan_cpu_ns() -> u64 {
     T0.get_or_init(std::time::Instant::now).elapsed().as_nanos() as u64
 }
 
+/// What one read of `almide_fan_cpu_ns` costs (measured once: the least of
+/// 16 back-to-back pairs). An interval between two reads also holds one read,
+/// and a worker of a parallel offer often times one or two elements: on the
+/// AMD VM (a 1.1 us read) a 0.4 us element read 1.5-4 us, and the site stayed
+/// parallel on that estimate where sequential was faster (2026-10-17).
+fn almide_fan_clock_cost() -> u64 {
+    static COST: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    *COST.get_or_init(|| {
+        (0..16).map(|_| {
+            let a = almide_fan_cpu_ns();
+            almide_fan_cpu_ns().wrapping_sub(a)
+        }).min().unwrap_or(0)
+    })
+}
+
+/// The CPU time since `t0`, less the read that ends it.
+fn almide_fan_cpu_since(t0: u64) -> u64 {
+    almide_fan_cpu_ns().wrapping_sub(t0).saturating_sub(almide_fan_clock_cost())
+}
+
 /// What one offer's elements took. A worker thread's FIRST element is its
 /// warm-up (a fresh thread's first touch of the body) and is kept apart —
 /// that cost belongs to the offer's `WORKER` term, not to `t`; the estimate
@@ -361,12 +459,46 @@ fn almide_fan_cpu_ns() -> u64 {
 struct AlmideFanClock {
     warm: [std::sync::atomic::AtomicU64; 2],
     cold: [std::sync::atomic::AtomicU64; 2],
+    site: usize,
+    n: usize,
+    /// `false` = an unmeasured offer: no clock reads, no record.
+    measure: bool,
+    /// The offer runs on more than one thread.
+    parallel: bool,
 }
 
 impl AlmideFanClock {
-    fn new() -> Self {
+    /// Plan an offer of `n` elements at `site`: its worker count, and the
+    /// clock that measures it.
+    fn offer(site: usize, n: usize) -> (usize, Self) {
         let z = || std::sync::atomic::AtomicU64::new(0);
-        AlmideFanClock { warm: [z(), z()], cold: [z(), z()] }
+        use std::sync::atomic::Ordering;
+        let known = almide_fan_site(site, false).and_then(|e| match e.t.load(Ordering::Acquire) {
+            0 => None,
+            t => Some((e, u128::from(t - 1))),
+        });
+        let (workers, measure) = match known {
+            // the probe a parallel estimate near the crossover asked for
+            Some((e, _)) if e.skip.load(Ordering::Relaxed) == ALMIDE_FAN_PROBE
+                && e.skip.compare_exchange(ALMIDE_FAN_PROBE, 0, Ordering::Relaxed, Ordering::Relaxed).is_ok() => (1, true),
+            Some((e, t)) => {
+                // a CAS loop, not `fetch_update`: newer toolchains deprecate
+                // that spelling, and generated programs build warning-free
+                let mut k = e.skip.load(Ordering::Relaxed);
+                let skipped = loop {
+                    if k == 0 || k == ALMIDE_FAN_PROBE {
+                        break false;
+                    }
+                    match e.skip.compare_exchange_weak(k, k - 1, Ordering::Relaxed, Ordering::Relaxed) {
+                        Ok(_) => break true,
+                        Err(now) => k = now,
+                    }
+                };
+                (almide_rt_fan_plan(n, Some(t)), !skipped)
+            }
+            None => (almide_rt_fan_plan(n, None), true),
+        };
+        (workers, AlmideFanClock { warm: [z(), z()], cold: [z(), z()], site, n, measure, parallel: workers >= 2 })
     }
 
     fn add(cell: &[std::sync::atomic::AtomicU64; 2], ns: u64, n: u64) {
@@ -377,22 +509,31 @@ impl AlmideFanClock {
     /// The calling thread runs the offer: `g` returns its result and how
     /// many elements it evaluated.
     fn calling<R>(&self, g: impl FnOnce() -> (R, usize)) -> R {
+        if !self.measure {
+            return g().0;
+        }
         let t0 = almide_fan_cpu_ns();
         let (r, n) = g();
-        Self::add(&self.warm, almide_fan_cpu_ns().wrapping_sub(t0), n as u64);
+        Self::add(&self.warm, almide_fan_cpu_since(t0), n as u64);
         r
     }
 
     /// A worker thread runs `items` through `each`: `Some(go_on)` = it
     /// evaluated the element, `None` = it stopped without evaluating it.
     fn worker<T>(&self, items: impl IntoIterator<Item = T>, mut each: impl FnMut(T) -> Option<bool>) {
+        if !self.measure {
+            for x in items {
+                if each(x) != Some(true) { break; }
+            }
+            return;
+        }
         let mut it = items.into_iter();
         let Some(first) = it.next() else { return };
         let t0 = almide_fan_cpu_ns();
         let go = each(first);
         let t1 = almide_fan_cpu_ns();
         if go.is_some() {
-            Self::add(&self.cold, t1.wrapping_sub(t0), 1);
+            Self::add(&self.cold, t1.wrapping_sub(t0).saturating_sub(almide_fan_clock_cost()), 1);
         }
         if go != Some(true) {
             return;
@@ -407,111 +548,660 @@ impl AlmideFanClock {
                 None => break,
             }
         }
-        Self::add(&self.warm, almide_fan_cpu_ns().wrapping_sub(t1), n);
+        Self::add(&self.warm, almide_fan_cpu_since(t1), n);
     }
 
-    /// Record the offer as the site's estimate: ns per element.
-    fn record(self, site: usize) {
+    /// Record the offer as the site's estimate: ns per element — and let the
+    /// site's next offers run unmeasured: `ALMIDE_FAN_RESAMPLE - 1` of them
+    /// when it would stay sequential, `ALMIDE_FAN_RESAMPLE_PAR - 1` when not.
+    fn record(self) {
+        if !self.measure {
+            return;
+        }
         let [w, wn] = self.warm.map(|a| a.into_inner());
         let [c, cn] = self.cold.map(|a| a.into_inner());
         let (ns, n) = if wn > 0 { (w, wn) } else { (c, cn) };
         if n > 0 {
-            if let Ok(mut h) = almide_fan_history().lock() {
-                h.insert(site, u128::from(ns) / u128::from(n));
-            }
+            let t = u128::from(ns) / u128::from(n);
+            let Some(e) = almide_fan_site(self.site, true) else { return };
+            let was_sequential = match e.t.load(std::sync::atomic::Ordering::Acquire) {
+                0 => false,
+                old => almide_rt_fan_plan(self.n, Some(u128::from(old - 1))) < 2,
+            };
+            let skip = if almide_rt_fan_plan(self.n, Some(t)) < 2 {
+                ALMIDE_FAN_RESAMPLE - 1
+            } else if self.parallel && (wn == 0 || almide_rt_fan_plan(self.n, Some(t / 2)) < 2) {
+                // only warm-ups timed (a site's first offer spawns the pool:
+                // 0.4 us elements read 4.1 us on the AMD VM), or near the
+                // crossover
+                ALMIDE_FAN_PROBE
+            } else if !self.parallel && was_sequential {
+                // a sequential site turns parallel on two measurements in a
+                // row, not on one: one preempted or interrupted offer read
+                // above the crossover sent 0.42 us elements (0.58 us
+                // crossover) parallel at ~9 us a time on the AMD VM
+                ALMIDE_FAN_PROBE
+            } else {
+                ALMIDE_FAN_RESAMPLE_PAR - 1
+            };
+            e.skip.store(skip, std::sync::atomic::Ordering::Relaxed);
+            e.t.store(u64::try_from(t).unwrap_or(u64::MAX - 1) + 1, std::sync::atomic::Ordering::Release);
         }
     }
 }
 
+// The RESIDENT fan pool (`almide_fan_pool`, below `almide_fan_deal`): the
+// threads that help parallel offers take their blocks, spawned by the first
+// offers that need them, polling for the next offer for a while after each
+// one and parked after that, for the rest of the process. A thread per chunk
+// per offer (`std::thread::scope`) cost 117 us
+// per offer on eight workers on an Intel 8581C and 299 us on an AMD EPYC
+// 7B13 (2026-10-16, an empty 10-element chunk map) — a fixed cost the cost
+// model above must charge every offer. The wasm host keeps resident workers
+// too (crates/almide-wasm-run/src/host_fan.rs `Crew`).
+//
+// A pool thread leaves nothing of an offer behind: its stdout buffer is
+// flushed (a scoped thread flushed it as it exited) and its fan sink is
+// cleared (a `list.par_*` chunk adopts its element's sink). A chunk may
+// itself start a parallel offer, and two `fan { }` arms may start offers at
+// once: every offer is published to the same pool and takes its own blocks
+// too, so none waits for a helper that is busy elsewhere.
+/// The `std::thread::scope` panic: once every task has finished, a panicked
+/// one panics the offer.
+fn almide_fan_panic_if_any(outcomes: Vec<std::thread::Result<()>>) {
+    if outcomes.iter().any(Result::is_err) {
+        panic!("a scoped thread panicked");
+    }
+}
+
+/// The block size an offer of `n` elements on `workers` threads is dealt in:
+/// about four blocks per worker, the wasm host's `run_all` split.
+fn almide_fan_block(n: usize, workers: usize) -> usize {
+    n.div_ceil(workers * 4).max(1)
+}
+
+/// Deal `blocks`, in order, to `workers` threads: each takes the next
+/// block until none is left, and `work` runs on each thread over the blocks
+/// it took. A thread the OS left waiting (or placed on a busy core) takes
+/// fewer blocks instead of holding the offer back — with a fixed chunk per
+/// thread, resident threads made spectralnorm 1.3x slower on an Intel 8581C.
+/// Blocks are dealt in list order, so every block below one being run was
+/// already taken by a running thread (the ADR-0024 D6 trap wait relies on it).
+///
+/// The calling thread is one of the takers. The others are threads of the
+/// shared fan pool (`almide_fan_pool`): the offer is PUBLISHED in a slot
+/// (`ALMIDE_FAN_SLOTS`), and every pool thread that is polling for work —
+/// whichever offer it last helped — enters it and takes blocks until none is
+/// left, so offers made from any thread (a pool thread, a `fan { }` arm)
+/// share one set of threads, and an offer inside an offer gets help from
+/// threads that finished elsewhere. `workers` only says how many sleeping
+/// threads to wake. Once its own taking is done the caller withdraws the
+/// offer and waits only for the threads already inside it.
+///
+/// Returns this thread's outcome, then every helper's PANIC (a helper that
+/// finished normally leaves nothing).
+fn almide_fan_deal<'a, T: Send + 'a>(blocks: Vec<T>, workers: usize, work: impl Fn(&mut dyn Iterator<Item = T>) + Sync + 'a) -> Vec<std::thread::Result<()>> {
+    use std::sync::atomic::Ordering;
+    let queue = AlmideFanBlocks::new(blocks);
+    let gate = AlmideFanGate {
+        parent: ALMIDE_FAN_IN_GATE.with(std::cell::Cell::get),
+        inside: std::sync::atomic::AtomicUsize::new(0),
+        next: std::sync::atomic::AtomicUsize::new(0),
+        len: queue.cells.len(),
+        caller: std::thread::current(),
+        parking: std::sync::atomic::AtomicBool::new(false),
+        counted: std::sync::atomic::AtomicBool::new(false),
+        panics: std::sync::Mutex::new(Vec::new()),
+        take: std::cell::UnsafeCell::new(None),
+    };
+    let me: &AlmideFanGate = &gate;
+    let take = || {
+        // restored on unwind too: a stale gate here would become the
+        // `parent` of this thread's next offer
+        struct Restore(*const AlmideFanGate);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                ALMIDE_FAN_IN_GATE.with(|g| g.set(self.0));
+            }
+        }
+        // a thread that arrives after the last block was dealt does nothing,
+        // so it has nothing to undo either (see `almide_fan_help`)
+        let Some(first) = queue.take(me.draw()) else { return false };
+        let _restore = Restore(ALMIDE_FAN_IN_GATE.with(|g| g.replace(me as *const AlmideFanGate)));
+        let mut next = std::iter::once(first).chain(std::iter::from_fn(|| queue.take(me.draw())));
+        work(&mut next);
+        true
+    };
+    let take: &(dyn Fn() -> bool + Sync + '_) = &take;
+    // SAFETY (the lifetime erasure): a helper calls `take` only from inside
+    // the gate, which it can enter only while the gate is published; this
+    // function withdraws it and waits until no helper is inside before it
+    // returns — so no call outlives the borrow. Written before publishing.
+    unsafe {
+        *gate.take.get() = Some(std::mem::transmute::<*const (dyn Fn() -> bool + Sync + '_), *const (dyn Fn() -> bool + Sync + 'static)>(take as *const _));
+    }
+    let _running = AlmideFanRunning::enter();
+    // counted before it is visible: no thread can draw past its last block
+    // before the count includes it
+    gate.counted.store(true, Ordering::SeqCst);
+    ALMIDE_FAN_OPEN_BLOCKS.fetch_add(1, Ordering::SeqCst);
+    let slot = almide_fan_publish(&gate);
+    if slot.is_none() {
+        gate.counted.store(false, Ordering::SeqCst);
+        ALMIDE_FAN_OPEN_BLOCKS.fetch_sub(1, Ordering::SeqCst);
+    } else {
+        almide_fan_pool_wake(workers.saturating_sub(1));
+    }
+    let mine = std::panic::catch_unwind(std::panic::AssertUnwindSafe(take)).map(|_| ());
+    // the elements this thread ran printed into its own buffer: out before
+    // the offer returns, as a helper's are
+    almide_stdout_flush();
+    if let Some(slot) = slot {
+        almide_fan_withdraw(slot);
+    }
+    // While its helpers finish, this thread takes blocks of other offers of
+    // the same tree — made inside a block of the same outermost offer —
+    // instead of idling on a core: a 4 x 10 nest otherwise left threads
+    // waiting through every outer offer's tail (220 us against 187 per outer
+    // offer, Intel VM, 2026-10-17; 203 when only this offer's own
+    // descendants were taken). Not another tree's offer (another `fan { }`
+    // arm's): its elements do not bring this tree's end closer, and running
+    // one delayed this arm's next offer by up to an element (two arms of
+    // 10000-iteration maps: 108 us per pair against 95).
+    let root = gate.root();
+    almide_fan_wait(
+        || {
+            if gate.inside.load(Ordering::SeqCst) == 0 {
+                return true;
+            }
+            if let Some(other) = almide_fan_steal(|g| std::ptr::eq(g.root(), root)) {
+                let sink = almide_fan_current();
+                almide_fan_help(other);
+                almide_fan_adopt(sink);
+            }
+            false
+        },
+        || {
+            // a helper that leaves after this sees `parking` and wakes this
+            // thread; one that read it just before sleeps it until the park
+            // times out (1 ms)
+            gate.parking.store(true, Ordering::SeqCst);
+            if gate.inside.load(Ordering::SeqCst) != 0 {
+                almide_fan_park();
+            }
+        },
+    );
+    let mut outcomes = vec![mine];
+    outcomes.append(&mut gate.panics.lock().unwrap_or_else(|e| e.into_inner()));
+    outcomes
+}
+
+/// How long a pool thread polls for an offer, and an offer's caller for its
+/// last helper, before it sleeps. A thread put to sleep and woken again costs
+/// the offer the kernel's wake-up path — 5-20 us on the GCE VMs, most of an
+/// offer of short elements; Rayon's and Go's idle workers poll for a while
+/// for the same reason.
+const ALMIDE_FAN_SPIN: std::time::Duration = std::time::Duration::from_micros(50);
+
+/// Poll `done` for up to `ALMIDE_FAN_SPIN`, then call `sleep` (which may
+/// return early) between polls until it holds.
+fn almide_fan_wait(mut done: impl FnMut() -> bool, mut sleep: impl FnMut()) {
+    let mut start: Option<std::time::Instant> = None;
+    let mut polls = 0u32;
+    while !done() {
+        polls = polls.wrapping_add(1);
+        if polls % 64 == 0 {
+            let t0 = *start.get_or_insert_with(std::time::Instant::now);
+            if t0.elapsed() >= ALMIDE_FAN_SPIN {
+                sleep();
+                continue;
+            }
+        }
+        std::hint::spin_loop();
+    }
+}
+
+fn almide_fan_park() {
+    std::thread::park_timeout(std::time::Duration::from_millis(1));
+}
+
+/// An offer's blocks, each taken by exactly one thread: the index comes from
+/// the gate's counter, and the block at an index is moved out by the thread
+/// that drew it.
+struct AlmideFanBlocks<T> {
+    cells: Vec<std::cell::UnsafeCell<Option<T>>>,
+}
+
+// SAFETY: a cell is read only by the one thread whose `fetch_add` drew its
+// index, so no two threads touch the same block.
+unsafe impl<T: Send> Sync for AlmideFanBlocks<T> {}
+
+impl<T> AlmideFanBlocks<T> {
+    fn new(blocks: Vec<T>) -> Self {
+        AlmideFanBlocks { cells: blocks.into_iter().map(|b| std::cell::UnsafeCell::new(Some(b))).collect() }
+    }
+
+    fn take(&self, i: usize) -> Option<T> {
+        // SAFETY: see the `Sync` impl.
+        self.cells.get(i).and_then(|c| unsafe { (*c.get()).take() })
+    }
+}
+
+std::thread_local! {
+    /// The gate whose blocks this thread is running (null outside any).
+    static ALMIDE_FAN_IN_GATE: std::cell::Cell<*const AlmideFanGate> = const { std::cell::Cell::new(std::ptr::null()) };
+}
+
+/// One offer's door for its helpers, in `almide_fan_deal`'s frame. A helper
+/// enters (`inside` + 1) through the slot the offer is published in, and
+/// the caller returns only once the offer is withdrawn and `inside` is 0.
+struct AlmideFanGate {
+    /// The gate in whose block this offer was made (null: none). It
+    /// outlives this one: the block does not end before this offer returns.
+    parent: *const AlmideFanGate,
+    /// Helpers inside the gate.
+    inside: std::sync::atomic::AtomicUsize,
+    /// The next block to deal, of `len`.
+    next: std::sync::atomic::AtomicUsize,
+    len: usize,
+    /// The offer is counted in `ALMIDE_FAN_OPEN_BLOCKS` (it was published).
+    counted: std::sync::atomic::AtomicBool,
+    /// Woken by the helper that leaves last, once `parking` says it sleeps.
+    caller: std::thread::Thread,
+    /// The caller has polled for `ALMIDE_FAN_SPIN` and may be parked. Until
+    /// then no helper clones `caller`: seven helpers cloning and dropping one
+    /// handle per offer contended on its count.
+    parking: std::sync::atomic::AtomicBool,
+    panics: std::sync::Mutex<Vec<std::thread::Result<()>>>,
+    /// The offer's taking loop, borrowed from `almide_fan_deal`'s frame
+    /// (see the SAFETY note there).
+    take: std::cell::UnsafeCell<Option<*const (dyn Fn() -> bool + Sync)>>,
+}
+
+// SAFETY: `take` points at a `Sync` closure, written before the gate is
+// shared and called from other threads only under the gate protocol above;
+// `parent` is only read, and outlives the gate.
+unsafe impl Sync for AlmideFanGate {}
+
+impl AlmideFanGate {
+    /// The next block's index. The draw that first runs past the last block
+    /// takes the offer out of `ALMIDE_FAN_OPEN_BLOCKS`.
+    fn draw(&self) -> usize {
+        use std::sync::atomic::Ordering;
+        let i = self.next.fetch_add(1, Ordering::Relaxed);
+        if i == self.len && self.counted.load(Ordering::SeqCst) {
+            ALMIDE_FAN_OPEN_BLOCKS.fetch_sub(1, Ordering::SeqCst);
+        }
+        i
+    }
+
+    /// The outermost offer this one was made inside (itself if none).
+    fn root(&self) -> &AlmideFanGate {
+        let mut g = self;
+        // SAFETY: a parent outlives its children (see `parent`).
+        while let Some(p) = unsafe { g.parent.as_ref() } {
+            g = p;
+        }
+        g
+    }
+}
+
+/// The threads working on offers — callers inside `almide_fan_deal` and
+/// pool threads inside a gate, each counted once however deep its offers
+/// nest. A pool thread enters a gate only while this is below the cores: two
+/// `fan { }` arms each dealing an offer to seven pool threads put nine
+/// threads on eight cores, and a preempted element held its whole offer back
+/// (busy, 10000 iterations: 1.33x Go's time on the Intel VM, 2026-10-17).
+static ALMIDE_FAN_RUNNING: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+std::thread_local! {
+    static ALMIDE_FAN_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+/// This thread's count in `ALMIDE_FAN_RUNNING` for as long as it lives.
+struct AlmideFanRunning;
+
+impl AlmideFanRunning {
+    fn enter() -> Self {
+        if ALMIDE_FAN_DEPTH.with(|d| d.replace(d.get() + 1)) == 0 {
+            ALMIDE_FAN_RUNNING.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+        AlmideFanRunning
+    }
+
+    /// A pool thread's entry: `None` when the cores are all taken.
+    fn enter_if_free() -> Option<Self> {
+        use std::sync::atomic::Ordering;
+        let cores = almide_rt_list_par_workers(usize::MAX);
+        let mut r = ALMIDE_FAN_RUNNING.load(Ordering::SeqCst);
+        loop {
+            if r >= cores {
+                return None;
+            }
+            match ALMIDE_FAN_RUNNING.compare_exchange_weak(r, r + 1, Ordering::SeqCst, Ordering::SeqCst) {
+                Ok(_) => break,
+                Err(now) => r = now,
+            }
+        }
+        ALMIDE_FAN_DEPTH.with(|d| d.set(d.get() + 1));
+        Some(AlmideFanRunning)
+    }
+}
+
+impl Drop for AlmideFanRunning {
+    fn drop(&mut self) {
+        if ALMIDE_FAN_DEPTH.with(|d| d.replace(d.get() - 1)) == 1 {
+            ALMIDE_FAN_RUNNING.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+}
+
+/// A pool thread inside `gate` (counted in `inside`): take blocks, leave its
+/// panic if it had one, and leave — waking the caller when it is the last.
+fn almide_fan_help(gate: &AlmideFanGate) {
+    use std::sync::atomic::Ordering;
+    // SAFETY: this helper is inside the gate, so the offer has not returned
+    // and the closure is alive; it was written before the gate was published.
+    let take = unsafe { &*(*gate.take.get()).expect("set before the gate is published") };
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(take));
+    // a helper that took a block leaves no element's sink or output behind
+    if !matches!(outcome, Ok(false)) {
+        almide_fan_adopt(None);
+        almide_stdout_flush();
+    }
+    if let Err(panic) = outcome {
+        gate.panics.lock().unwrap_or_else(|e| e.into_inner()).push(Err(panic));
+    }
+    // after the decrement the caller may return and free the gate: wake it
+    // through a handle cloned before
+    let caller = gate.parking.load(Ordering::SeqCst).then(|| gate.caller.clone());
+    if gate.inside.fetch_sub(1, Ordering::SeqCst) == 1 {
+        if let Some(caller) = caller {
+            caller.unpark();
+        }
+    }
+}
+
+/// The published offers. A pool thread entering one holds the slot's
+/// `readers` count while it reads the gate pointer and enters, and
+/// withdrawing an offer clears the pointer and waits for `readers` to drain,
+/// so no thread reaches a gate after its caller stopped waiting for entrants.
+struct AlmideFanSlot {
+    gate: std::sync::atomic::AtomicPtr<AlmideFanGate>,
+    readers: std::sync::atomic::AtomicUsize,
+}
+
+const ALMIDE_FAN_SLOT_EMPTY: AlmideFanSlot = AlmideFanSlot {
+    gate: std::sync::atomic::AtomicPtr::new(std::ptr::null_mut()),
+    readers: std::sync::atomic::AtomicUsize::new(0),
+};
+/// Offers open at once beyond this run on their callers alone.
+static ALMIDE_FAN_SLOTS: [AlmideFanSlot; 64] = [ALMIDE_FAN_SLOT_EMPTY; 64];
+/// One past the highest slot ever used (the scan bound).
+static ALMIDE_FAN_HIGH: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+/// Published offers with a block left to deal. A polling thread reads only
+/// this until it is non-zero: with every thread reading and writing the
+/// slots' and the budget's counters while an offer is published (after its
+/// blocks were all dealt, too), an empty forced-parallel offer cost ~3 us on
+/// the Intel VM.
+static ALMIDE_FAN_OPEN_BLOCKS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+fn almide_fan_publish(gate: &AlmideFanGate) -> Option<usize> {
+    use std::sync::atomic::Ordering;
+    let p = gate as *const AlmideFanGate as *mut AlmideFanGate;
+    let i = ALMIDE_FAN_SLOTS.iter().position(|s| s.gate.compare_exchange(std::ptr::null_mut(), p, Ordering::SeqCst, Ordering::Relaxed).is_ok())?;
+    ALMIDE_FAN_HIGH.fetch_max(i + 1, Ordering::SeqCst);
+    Some(i)
+}
+
+fn almide_fan_withdraw(i: usize) {
+    use std::sync::atomic::Ordering;
+    let slot = &ALMIDE_FAN_SLOTS[i];
+    slot.gate.store(std::ptr::null_mut(), Ordering::SeqCst);
+    while slot.readers.load(Ordering::SeqCst) > 0 {
+        std::hint::spin_loop();
+    }
+}
+
+/// Enter the oldest-slotted published offer that has a block left and that
+/// `which` accepts.
+fn almide_fan_steal(which: impl Fn(&AlmideFanGate) -> bool) -> Option<&'static AlmideFanGate> {
+    use std::sync::atomic::Ordering;
+    if ALMIDE_FAN_OPEN_BLOCKS.load(Ordering::Relaxed) == 0 {
+        return None;
+    }
+    for slot in &ALMIDE_FAN_SLOTS[..ALMIDE_FAN_HIGH.load(Ordering::Relaxed)] {
+        if slot.gate.load(Ordering::Relaxed).is_null() {
+            continue;
+        }
+        slot.readers.fetch_add(1, Ordering::SeqCst);
+        let p = slot.gate.load(Ordering::SeqCst);
+        // SAFETY: a non-null pointer read under `readers` is a gate whose
+        // caller has not finished withdrawing it, so it is alive; once
+        // entered, the caller waits for this thread to leave.
+        let entered = unsafe { p.as_ref() }.filter(|g| {
+            g.next.load(Ordering::Relaxed) < g.len && which(g) && {
+                g.inside.fetch_add(1, Ordering::SeqCst);
+                true
+            }
+        });
+        slot.readers.fetch_sub(1, Ordering::SeqCst);
+        if let Some(g) = entered {
+            // SAFETY: see above — valid until this thread leaves the gate,
+            // which `almide_fan_help` does last.
+            return Some(unsafe { &*(g as *const AlmideFanGate) });
+        }
+    }
+    None
+}
+
+/// The shared fan pool: resident threads that help published offers,
+/// spawned as offers first need them, at most one fewer than the cores. A
+/// thread polls for an offer for `ALMIDE_FAN_SPIN` after each one before it
+/// parks, so back-to-back offers reach it without a wake-up; an offer wakes
+/// parked threads (the lowest-numbered first) only when fewer than it wants
+/// are polling.
+struct AlmideFanPool {
+    hands: Box<[AlmideFanHand]>,
+    /// Hands `0..started` have a thread.
+    started: std::sync::atomic::AtomicUsize,
+    /// Threads polling (not parked, not helping).
+    polling: std::sync::atomic::AtomicUsize,
+    spawning: std::sync::Mutex<()>,
+}
+
+struct AlmideFanHand {
+    /// The thread is (about to be) parked: a waker must unpark it.
+    parked: std::sync::atomic::AtomicBool,
+    thread: std::sync::OnceLock<std::thread::Thread>,
+}
+
+fn almide_fan_pool() -> &'static AlmideFanPool {
+    static POOL: std::sync::OnceLock<AlmideFanPool> = std::sync::OnceLock::new();
+    POOL.get_or_init(|| {
+        let cap = almide_rt_list_par_workers(usize::MAX).saturating_sub(1).max(1);
+        AlmideFanPool {
+            hands: (0..cap).map(|_| AlmideFanHand {
+                parked: std::sync::atomic::AtomicBool::new(false),
+                thread: std::sync::OnceLock::new(),
+            }).collect(),
+            started: std::sync::atomic::AtomicUsize::new(0),
+            polling: std::sync::atomic::AtomicUsize::new(0),
+            spawning: std::sync::Mutex::new(()),
+        }
+    })
+}
+
+/// A pool thread's life: poll for a published offer with blocks left, help
+/// it, poll again; park after `ALMIDE_FAN_SPIN` with nothing published.
+fn almide_fan_hand_loop(hand: &'static AlmideFanHand) {
+    use std::sync::atomic::Ordering;
+    let polling = &almide_fan_pool().polling;
+    loop {
+        let mut gate = None;
+        let mut running = None;
+        almide_fan_wait(
+            || {
+                if ALMIDE_FAN_OPEN_BLOCKS.load(Ordering::Relaxed) == 0 {
+                    return false;
+                }
+                let Some(r) = AlmideFanRunning::enter_if_free() else {
+                    // every core is working: give this core to a thread that
+                    // has work, and look again as soon as the scheduler
+                    // finds none
+                    std::thread::yield_now();
+                    return false;
+                };
+                gate = almide_fan_steal(|_| true);
+                running = gate.is_some().then_some(r);
+                gate.is_some()
+            },
+            || {
+                // stop counting as polling BEFORE the last look, so a waker
+                // that counted this thread finds it published-aware
+                polling.fetch_sub(1, Ordering::SeqCst);
+                hand.parked.store(true, Ordering::SeqCst);
+                if ALMIDE_FAN_OPEN_BLOCKS.load(Ordering::SeqCst) == 0 {
+                    std::thread::park();
+                }
+                hand.parked.store(false, Ordering::SeqCst);
+                polling.fetch_add(1, Ordering::SeqCst);
+            },
+        );
+        polling.fetch_sub(1, Ordering::SeqCst);
+        if let Some(gate) = gate {
+            almide_fan_help(gate);
+        }
+        drop(running);
+        polling.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+/// Make `helpers` pool threads available to the offer just published: those
+/// polling already will find it; wake parked ones (and spawn new ones, up to
+/// the cap) for the rest.
+fn almide_fan_pool_wake(helpers: usize) {
+    use std::sync::atomic::Ordering;
+    if helpers == 0 {
+        return;
+    }
+    let pool = almide_fan_pool();
+    let mut short = helpers.saturating_sub(pool.polling.load(Ordering::SeqCst));
+    if short == 0 {
+        return;
+    }
+    for hand in &pool.hands[..pool.started.load(Ordering::Acquire)] {
+        if short == 0 {
+            return;
+        }
+        if hand.parked.swap(false, Ordering::SeqCst) {
+            if let Some(t) = hand.thread.get() {
+                t.unpark();
+            }
+            short -= 1;
+        }
+    }
+    if pool.started.load(Ordering::Acquire) == pool.hands.len() {
+        return;
+    }
+    let _spawning = pool.spawning.lock().unwrap_or_else(|e| e.into_inner());
+    while short > 0 {
+        let i = pool.started.load(Ordering::Acquire);
+        if i == pool.hands.len() {
+            return;
+        }
+        pool.polling.fetch_add(1, Ordering::SeqCst);
+        let spawned = std::thread::Builder::new().spawn(move || almide_fan_hand_loop(&almide_fan_pool().hands[i]));
+        let Ok(handle) = spawned else {
+            pool.polling.fetch_sub(1, Ordering::SeqCst);
+            return;
+        };
+        let _ = pool.hands[i].thread.set(handle.thread().clone());
+        pool.started.store(i + 1, Ordering::Release);
+        short -= 1;
+    }
+}
+
 pub fn almide_rt_list_par_map<A: Send + Sync + Clone, B: Send, F: Fn(A) -> B + Send + Sync>(xs: Vec<A>, f: F) -> Vec<B> {
+    xs.almide_share();
     if xs.len() < ALMIDE_PARALLEL_THRESHOLD || almide_rt_list_par_sequential() {
         return xs.into_iter().map(&f).collect();
     }
     let site = almide_rt_list_par_map::<A, B, F> as fn(Vec<A>, F) -> Vec<B> as usize;
     let n = xs.len();
-    let workers = almide_rt_fan_plan(n, almide_fan_estimate(site));
-    let clock = AlmideFanClock::new();
+    let (workers, clock) = AlmideFanClock::offer(site, n);
     if workers < 2 {
         let out = clock.calling(|| (xs.into_iter().map(&f).collect(), n));
-        clock.record(site);
+        clock.record();
         return out;
     }
-    let chunk_size = n.div_ceil(workers);
+    let block = almide_fan_block(n, workers);
     let mut slots: Vec<Option<B>> = (0..n).map(|_| None).collect();
-    // Flush first: a worker's abort cannot reach this thread's buffer (C-197).
-    almide_stdout_flush();
-    // The workers work for the enclosing fan element: a trap on one waits for
-    // the elements below it (ADR-0024 D6).
-    let sink = almide_fan_current();
-    std::thread::scope(|s| {
-        for (chunk, out) in xs.chunks(chunk_size).zip(slots.chunks_mut(chunk_size)) {
-            let (f, clock) = (&f, &clock);
-            let sink = sink.clone();
-            s.spawn(move || {
-                almide_fan_adopt(sink);
-                clock.worker(out.iter_mut().zip(chunk), |(slot, x)| {
-                    *slot = Some(f(x.clone()));
-                    Some(true)
-                });
+    // One output timeline per BLOCK, under the enclosing fan element's (the
+    // group's parent): inside a block the elements run in list order on one
+    // thread, blocks drain in list order, and a trap in element k waits for
+    // the blocks below its own (ADR-0024 D6, #3779 — adopting the parent's
+    // sink alone carried no index, so under a one-arm fan the first trap in
+    // TIME won). The group flushes this thread's stdout first (C-197).
+    let blocks: Vec<_> = xs.chunks(block).zip(slots.chunks_mut(block)).enumerate().collect();
+    let group = almide_fan_group(blocks.len());
+    almide_fan_panic_if_any(almide_fan_deal(blocks, workers, |blocks| {
+        for (b, (chunk, out)) in blocks {
+            let _blk = almide_fan_enter(&group, b);
+            clock.worker(out.iter_mut().zip(chunk.iter()), |(slot, x)| {
+                *slot = Some(f(x.clone()));
+                Some(true)
             });
         }
-    });
-    clock.record(site);
+    }));
+    clock.record();
     slots.into_iter().map(|b| b.expect("list.par_map: every slot is written by its worker")).collect()
 }
 
 pub fn almide_rt_list_par_filter<A: Send + Sync + Clone, F: Fn(A) -> bool + Send + Sync>(xs: Vec<A>, f: F) -> Vec<A> {
+    xs.almide_share();
     if xs.len() < ALMIDE_PARALLEL_THRESHOLD || almide_rt_list_par_sequential() {
         return xs.into_iter().filter(|x| f(x.clone())).collect();
     }
     let site = almide_rt_list_par_filter::<A, F> as fn(Vec<A>, F) -> Vec<A> as usize;
     let n = xs.len();
-    let workers = almide_rt_fan_plan(n, almide_fan_estimate(site));
-    let clock = AlmideFanClock::new();
+    let (workers, clock) = AlmideFanClock::offer(site, n);
     if workers < 2 {
         let out = clock.calling(|| (xs.into_iter().filter(|x| f(x.clone())).collect(), n));
-        clock.record(site);
+        clock.record();
         return out;
     }
-    let chunk_size = n.div_ceil(workers);
-    let chunks: Vec<&[A]> = xs.chunks(chunk_size).collect();
-    let mut results: Vec<Option<Vec<A>>> = (0..chunks.len()).map(|_| None).collect();
-    // Flush first: a worker's abort cannot reach this thread's buffer (C-197).
-    almide_stdout_flush();
-    // The workers work for the enclosing fan element: a trap on one waits for
-    // the elements below it (ADR-0024 D6).
-    let sink = almide_fan_current();
-    std::thread::scope(|s| {
-        let mut handles = Vec::new();
-        for chunk in &chunks {
-            let (f, clock) = (&f, &clock);
-            let sink = sink.clone();
-            handles.push(s.spawn(move || {
-                almide_fan_adopt(sink);
-                let mut kept = Vec::new();
-                clock.worker(chunk.iter(), |x| {
-                    if f(x.clone()) {
-                        kept.push(x.clone());
-                    }
-                    Some(true)
-                });
-                kept
-            }));
+    let block = almide_fan_block(n, workers);
+    // each element's verdict by index; the kept elements are then taken in
+    // list order
+    let mut keep = vec![false; n];
+    // One output timeline per block (see `almide_rt_list_par_map`).
+    let blocks: Vec<_> = xs.chunks(block).zip(keep.chunks_mut(block)).enumerate().collect();
+    let group = almide_fan_group(blocks.len());
+    // the lowest thread's panic, as joining the handles in order resumed it
+    if let Some(Err(panic)) = almide_fan_deal(blocks, workers, |blocks| {
+        for (b, (chunk, out)) in blocks {
+            let _blk = almide_fan_enter(&group, b);
+            clock.worker(out.iter_mut().zip(chunk.iter()), |(k, x)| {
+                *k = f(x.clone());
+                Some(true)
+            });
         }
-        for (i, handle) in handles.into_iter().enumerate() {
-            results[i] = Some(handle.join().unwrap());
-        }
-    });
-    clock.record(site);
-    results.into_iter().flatten().flatten().collect()
+    })
+    .into_iter()
+    .find(Result::is_err)
+    {
+        std::panic::resume_unwind(panic);
+    }
+    clock.record();
+    xs.into_iter().zip(keep).filter_map(|(x, k)| k.then_some(x)).collect()
 }
 
 /// `any` (`stop_on` = true) / `all` (`stop_on` = false): does some element's
 /// verdict equal `stop_on`. Records the elements it actually evaluated.
 fn almide_fan_search<A: Send + Sync + Clone, F: Fn(A) -> bool + Send + Sync>(site: usize, xs: &[A], f: &F, stop_on: bool) -> bool {
-    let clock = AlmideFanClock::new();
+    let (workers, clock) = AlmideFanClock::offer(site, xs.len());
     let look = |x: &A| f(x.clone()) == stop_on;
-    let workers = almide_rt_fan_plan(xs.len(), almide_fan_estimate(site));
     let hit = if workers < 2 {
         clock.calling(|| {
             let mut seen = 0usize;
@@ -522,37 +1212,32 @@ fn almide_fan_search<A: Send + Sync + Clone, F: Fn(A) -> bool + Send + Sync>(sit
             (hit, seen)
         })
     } else {
-        let chunk_size = xs.len().div_ceil(workers);
+        let block = almide_fan_block(xs.len(), workers);
         let hit = std::sync::atomic::AtomicBool::new(false);
-        // Flush first: a worker's abort cannot reach this thread's buffer (C-197).
-        almide_stdout_flush();
-        // The workers work for the enclosing fan element: a trap on one waits for
-        // the elements below it (ADR-0024 D6).
-        let sink = almide_fan_current();
-        std::thread::scope(|s| {
-            for chunk in xs.chunks(chunk_size) {
-                let (hit, clock, look) = (&hit, &clock, &look);
-                let sink = sink.clone();
-                s.spawn(move || {
-                    almide_fan_adopt(sink);
-                    clock.worker(chunk, |x| {
-                        if hit.load(std::sync::atomic::Ordering::Relaxed) { return None; }
-                        if look(x) {
-                            hit.store(true, std::sync::atomic::Ordering::Relaxed);
-                            return Some(false);
-                        }
-                        Some(true)
-                    });
+        // One output timeline per block (see `almide_rt_list_par_map`).
+        let blocks: Vec<_> = xs.chunks(block).enumerate().collect();
+        let group = almide_fan_group(blocks.len());
+        almide_fan_panic_if_any(almide_fan_deal(blocks, workers, |blocks| {
+            for (b, chunk) in blocks {
+                let _blk = almide_fan_enter(&group, b);
+                clock.worker(chunk.iter(), |x| {
+                    if hit.load(std::sync::atomic::Ordering::Relaxed) { return None; }
+                    if look(x) {
+                        hit.store(true, std::sync::atomic::Ordering::Relaxed);
+                        return Some(false);
+                    }
+                    Some(true)
                 });
             }
-        });
+        }));
         hit.load(std::sync::atomic::Ordering::Relaxed)
     };
-    clock.record(site);
+    clock.record();
     hit
 }
 
 pub fn almide_rt_list_par_any<A: Send + Sync + Clone, F: Fn(A) -> bool + Send + Sync>(xs: &[A], f: F) -> bool {
+    xs.almide_share();
     if xs.len() < ALMIDE_PARALLEL_THRESHOLD || almide_rt_list_par_sequential() {
         return xs.iter().any(|x| f(x.clone()));
     }
@@ -560,6 +1245,7 @@ pub fn almide_rt_list_par_any<A: Send + Sync + Clone, F: Fn(A) -> bool + Send + 
 }
 
 pub fn almide_rt_list_par_all<A: Send + Sync + Clone, F: Fn(A) -> bool + Send + Sync>(xs: &[A], f: F) -> bool {
+    xs.almide_share();
     if xs.len() < ALMIDE_PARALLEL_THRESHOLD || almide_rt_list_par_sequential() {
         return xs.iter().all(|x| f(x.clone()));
     }

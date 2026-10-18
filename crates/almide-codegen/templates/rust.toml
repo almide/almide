@@ -107,7 +107,7 @@ template = "None"
 template = "Ok({inner})"
 
 [err_expr]
-template = "Err(format!(\"{:?}\", {inner}))"
+template = "Err(AlmideString::from_fmt(format_args!(\"{:?}\", {inner})))"
 
 [[unwrap_expr]]
 when_attr = "map_err_join"
@@ -125,7 +125,7 @@ template = "({inner})?"
 
 [[unwrap_expr]]
 when_type = "Option"
-template = "({inner}).ok_or(\"none\".to_string())?"
+template = "({inner}).ok_or(AlmideString::from(\"none\"))?"
 
 [[unwrap_or_expr]]
 template = "match {inner} {{ Ok(v) => v, Err(_) => {fallback}, }}"
@@ -179,7 +179,7 @@ template = "{value}i64"
 template = "{value}f64"
 
 [string_literal]
-template = "\"{value}\".to_string()"
+template = "AlmideString::from(\"{value}\")"
 
 [bool_literal_true]
 template = "true"
@@ -199,7 +199,7 @@ template = "{name}: {value}"
 # ── String Interpolation ──
 
 [string_interp]
-template = "format!(\"{format_str}\", {args})"
+template = "AlmideString::from_fmt(format_args!(\"{format_str}\", {args}))"
 
 # ── Statements ──
 
@@ -240,7 +240,7 @@ template = "i64"
 template = "f64"
 
 [type_string]
-template = "String"
+template = "AlmideString"
 
 [type_bool]
 template = "bool"
@@ -296,6 +296,11 @@ template = "std::rc::Rc<dyn Fn({params}) -> {return}>"
 
 [for_loop]
 template = "for {var} in {iter} {{\n{body}\n}}"
+
+# #3673: a metered `for` head (`MeterChargePass`) — the adapter charges each
+# head evaluation, the exhausting one included, as the wasm leg's loop head does.
+[metered_iter]
+template = "__almd_meter_iter({iter})"
 
 [while_loop]
 template = "while {cond} {{\n{body}\n}}"
@@ -393,6 +398,14 @@ template = "mod tests {{\n    use super::*;\n\n{tests}\n}}"
 
 [test_block]
 template = "#[test]\nfn {name}() {{\n{body}\n}}"
+
+# testing.assert_aborts (ADR-0029): the child entry. The ordinary run skips it
+# (ignored); a call re-executes the binary with `--ignored --exact
+# tests::__almd_abort_site_entry` and ALMIDE_ABORT_SITE=<k>. The dispatcher is
+# an effect fn, rendered with or without its Result carrier, so the outcome
+# trait takes both; an err ends the child as an effect `main`'s does.
+[abort_site_entry]
+template = "#[test]\n#[ignore = \"almide:abort-site\"]\nfn __almd_abort_site_entry() {{\n    trait AlmdAbortSiteOutcome {{ fn finish(self); }}\n    impl AlmdAbortSiteOutcome for () {{ fn finish(self) {{}} }}\n    impl<E: std::fmt::Display> AlmdAbortSiteOutcome for Result<(), E> {{ fn finish(self) {{ if let Err(e) = self {{ almide_abort(e) }} }} }}\n    let site: i64 = std::env::var(\"ALMIDE_ABORT_SITE\").ok().and_then(|v| v.parse().ok()).unwrap_or(-1);\n    AlmdAbortSiteOutcome::finish({dispatch}(site));\n    almide_stdout_flush();\n    std::process::exit(0);\n}}"
 
 [assert_eq]
 template = "assert!(almide_eq!({left}, {right}), \"assertion failed: {{:?}} != {{:?}}\", {left}, {right});"
@@ -557,7 +570,7 @@ template = "{{ almide_stdout_flush(); {arms} {join_expr} }}"
 template = "loop {{\n{body}\n}}"
 
 [err_inner_string]
-template = "Err({inner}.to_string())"
+template = "Err({inner}.to_almide())"
 
 [err_inner_other]
 template = "Err({inner})"

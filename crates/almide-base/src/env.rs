@@ -79,6 +79,7 @@ use Scope::{Ablation, Ci, Debug as Dbg, Gate, Harness, Route, Runtime, Tool, Tra
 /// Every `ALMIDE_*` switch the tree reads. Sorted by name; the gate proves the
 /// order and the completeness.
 pub const SWITCHES: &[Switch] = &[
+    sw("ALMIDE_ABORT_SITE", Value, Runtime, "the testing.assert_aborts site a native test child runs (ADR-0029): set by the parent when it re-executes the test binary; never set by hand"),
     sw("ALMIDE_ALLOC_COUNT", Flag, Harness, "build the native program with a counting allocator that prints `__ALMD_ALLOC allocs=N deallocs=N reallocs=N peak=N` on stderr when `__almide_main` returns (the native borrow oracle's allocation lane, tests/native_borrow_oracle_test.rs)"),
     sw("ALMIDE_BANG_RETURN", Flag, Ablation, "turn OFF the per-position `!` desugars of the v1 lowering so every `!` reaches the bind-position rule or walls loudly (the decline-matrix probe)"),
     sw("ALMIDE_BENCH_DIR", Value, Harness, "the fixture directory of the structural leg's perf probe (default `crates/almide-wasm/tests/perf`)"),
@@ -139,6 +140,8 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_FLOAT_SWEEP_N", Value, Harness, "how many xorshift64 bit patterns the float printer sweep prints and compares with Rust `format!` on each leg (default 100000; tests/float_to_string_cross_target_test.rs)"),
     sw("ALMIDE_FMOD_SWEEP_N", Value, Harness, "how many xorshift64 bit-pattern pairs the float `%` sweep compares with Rust `%` on each leg, as Float and as Float32 (default 20000; tests/float_fmod_cross_target_test.rs)"),
     sw("ALMIDE_FN_ESCAPE_OFF", Flag, Ablation, "make BorrowInsertion borrow EVERY fn-typed param as `&dyn Fn`, escaping or not (#2288) — the ablation the ownership certifier's C5 sensitivity test drives"),
+    sw("ALMIDE_FORCE_METER_CODEGEN", Flag, Route, "build a metered (fan.bounded / fan.min / fan.timeout) native program through the standard codegen with its own deterministic meter, even when the whole program renders on v1 or its regions splice — the differential that holds the codegen meter to the v1 render (#3673)"),
+    sw("ALMIDE_FORCE_METER_SPLICE", Flag, Route, "build a metered (fan.bounded / fan.min / fan.timeout) native program through the standard codegen with the v1-rendered regions linked in, even when the whole program renders on v1 — the differential that holds the two routes' spends equal (#3669)"),
     sw("ALMIDE_FUEL_PROBE", Flag, Route,"insert fuel charges into the native render (the charge probe); `almide run --time-report` sets it internally. Native-only: the wasm leg carries no charge trace (#2752)"),
     sw("ALMIDE_FUZZ_BASE", Value, Harness, "the first seed of the differential fuzz's fixed seed range (default 0)"),
     sw("ALMIDE_FUZZ_HOST_ORACLE", Flag, Harness, "run the differential fuzz in host-oracle mode (arm selection is deterministic per seed and mode)"),
@@ -193,6 +196,7 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_SURVIVE_OVERLAY", Value, Route, "set by `almide survive` on its child runs (#2147): every compiler read of this `.almd` path returns the text in `ALMIDE_SURVIVE_OVERLAY_TEXT` instead of the disk bytes, so a proposed edit is judged without being written"),
     sw("ALMIDE_SURVIVE_OVERLAY_TEXT", Value, Route, "the file holding the proposed text for `ALMIDE_SURVIVE_OVERLAY`; set without it, the overlay refuses to run rather than read the disk file"),
     sw("ALMIDE_TCO_DEBUG", Flag, Dbg, "print the native tail-call loop rewrite decisions"),
+    sw("ALMIDE_TEST_ABORT_PROBE", Flag, Runtime, "marks a native testing.assert_aborts child (ADR-0029) so `panic` takes the C-219 abort path there; set by the parent, never by hand"),
     sw("ALMIDE_TEST_LAX_WASM", Flag, Gate, "let the default `almide test` lane (wasm first, native fallback) PASS a file whose wasm leg diverged — trapped where the native re-run passed; without it a diverged leg fails the run"),
     sw("ALMIDE_TEST_VERBOSE", Flag, Tool, "show the full cargo / rustc output of the `almide test` harness build"),
     sw("ALMIDE_TEST_WASM_RUNNER", Value, Tool, "`wasmtime` runs the wasm leg of `almide test` on the `wasmtime` CLI (the stock `to_wasi` artifact) instead of the embedded host every `almide` binary carries (#3046) — the comparison route; unset is the embedded host"),
@@ -203,7 +207,9 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_UPDATE_ALLOC", Flag, Harness, "regenerate the structural leg's allocation baseline"),
     sw("ALMIDE_UPDATE_DUMPS", Flag, Harness, "regenerate the structural leg's section-dump goldens"),
     sw("ALMIDE_UPDATE_GAUNTLET", Flag, Harness, "regenerate the gauntlet manifest"),
+    sw("ALMIDE_UPDATE_INSPECTION", Flag, Harness, "add the missing rows to the stdlib inspection ledger and reset the stale ones"),
     sw("ALMIDE_UPDATE_INTERP_LEDGER", Flag, Harness, "regenerate the interpreter abstain and bridge-fallback ledgers"),
+    sw("ALMIDE_UPDATE_NAME_SITES", Flag, Harness, "remove stale rows from the name-keyed property ledger and append the new sites (each still needs its `why`)"),
     sw("ALMIDE_UPDATE_NATIVE_OWN", Flag, Harness, "regenerate the native result-ownership ledger"),
     sw("ALMIDE_UPDATE_SIZES", Flag, Harness, "regenerate the structural leg's size baselines"),
     sw("ALMIDE_UPDATE_SIZE_LADDER", Flag, Harness, "regenerate the stdlib-linking size ladder ledger (#2141)"),
@@ -215,6 +221,7 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_VERSION_LINE", Value, Ci, "NOT read from the environment at run time: `build.rs` EMITS it as `cargo:rustc-env`, and `src/main.rs` reads it with `env!` at compile time. It is the string `almide --version` prints — `<version> (<kind>[, <sha>])` — assembled from ALMIDE_BUILD_PROVENANCE and ALMIDE_BUILD_SHA (#2384)"),
     sw("ALMIDE_WALL_REASON", Flag, Dbg, "make `almide test` say WHICH stage of the wasm leg declined a fallback file, not just `v1 wall`"),
     sw("ALMIDE_WASM_ALLOC_COUNT", Flag, Harness, "emit the structural wasm leg's allocation counters (#2407: five i64 globals `$alloc`/`$free`/a region restore bump, exported as `__alloc_count` / `__alloc_reused` / `__alloc_bytes` / `__free_count` / `__region_reclaimed`; `main` also releases its top-let globals before returning) and make `almide run --target wasm` print `__ALMD_WASM_ALLOC allocs=N reused=N bytes=N frees=N reclaimed=N live=N heap_end=N` on stderr after the run, `live` being the heap blocks never released; off, the module is byte-identical to a build without the switch (the wasm twin of `ALMIDE_ALLOC_COUNT`; the ledgers are crates/almide-wasm/tests/golden/alloc-count-baseline.txt and live-at-exit-baseline.txt)"),
+    sw("ALMIDE_WASM_CANONICAL_ALLOC", Flag, Harness, "emit the structural wasm leg's `$alloc` without its free-list paths, so every request bumps (the stdlib inspection meter's fixed allocator, owner ruling 2026-10-15): a measured bytes-moved series then depends on the program's requests alone, not on which freed blocks the heap holds, and is an upper bound of the shipped module's copies; off, the module is byte-identical to a build without the switch (crates/almide-wasm/src/canonical_alloc.rs)"),
     sw("ALMIDE_WASM_FREES", Flag, Ci, "the frees-churn gate's switch; its compiler reader retired with the v0 emitter (#782), the gate that still sets it is #2207's"),
     sw("ALMIDE_WASM_SKIP_STOCK_AUDIT", Flag, Route, "skip the stock-WASI host-op audit on `almide build --target wasm` (the emitter-frontier probe the parity, diff-fuzz and availability gates build under); named ALMIDE_WASM_STRUCTURAL until #2934"),
     sw("ALMIDE_WASM_WATCHDOG_SECS", Value, Harness, "the wall-time seconds the IN-PROCESS test runner's epoch watchdog (`run_wasm` / `run_wasm_with` / `run_wasm_capped` in almide-wasm-run) lets a module run before it traps with `interrupt` (default 30); `almide run --target wasm` and `almide bench --target wasm` arm no watchdog on any setting, as native has none (#2615)"),

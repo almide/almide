@@ -5,9 +5,11 @@
 // value is an `Rc<dyn Fn>`, which is neither `Send` nor `Sync`, so it could not
 // be moved across the `thread::scope` boundary the parallel version required.
 // Results are identical to a parallel map (input order preserved); only the
-// (unobservable) parallelism is dropped. race/settle keep their
-// thread::scope and receive `Box<dyn Fn + Send[+ Sync]>` thunks (the box pass
-// boxes them), which still satisfy the existing `impl Fn + Send + Sync` bounds.
+// (unobservable) parallelism is dropped. `fan.min` never reaches this file:
+// it lowers in the frontend to a sequential least-(spend, index) fold
+// (almide-frontend lower/expressions_fan.rs). `fan.settle` lowers to a tuple
+// (block) or `list.map` (mapper), so `almide_rt_fan_race` and
+// `almide_rt_fan_settle` below have no producer (docs/design/fan-semantics-audit.md).
 //
 // `fan.map` is EFFECTFUL and runs EVERY element (ADR-0024 D1, C-005): an
 // element's `Err` does not stop the map, the elements after it still run, and
@@ -17,29 +19,34 @@
 // the wasm `__main_runner`.
 pub fn almide_rt_fan_map<A, B>(
     items: Vec<A>,
-    f: std::rc::Rc<dyn Fn(A) -> Result<B, String>>,
-) -> Result<Vec<B>, String> {
-    let mut out = Vec::with_capacity(items.len());
-    let mut first_err: Option<String> = None;
-    for item in items {
-        match (f(item), &first_err) {
-            (Ok(v), None) => out.push(v),
-            (Err(e), None) => first_err = Some(e),
-            _ => {}
+    f: std::rc::Rc<dyn Fn(A) -> Result<B, AlmideString>>,
+) -> Result<Vec<B>, AlmideString> {
+    let __almide_r: Result<Vec<B>, AlmideString> = (|| {
+        let mut out = Vec::with_capacity(items.len());
+        let mut first_err: Option<AlmideString> = None;
+        for item in items {
+            match (f(item), &first_err) {
+                (Ok(v), None) => out.push(v),
+                (Err(e), None) => first_err = Some(e),
+                _ => {}
+            }
         }
-    }
-    match first_err {
-        Some(e) => Err(e),
-        None => Ok(out),
-    }
+        match first_err {
+            Some(e) => Err(e),
+            None => Ok(out),
+        }
+    })();
+    __almide_r.map_err(Into::into)
 }
 
 // `fan.map`'s PARALLEL twin (#2044). RustLowering's fan routing (native only) routes a
 // `fan.map` here when its callback is a PURE lambda LITERAL whose element,
-// result and captured types are all Send-safe scalars — Int/Float/Bool/Unit,
-// the sized numerics, and tuples/records of those. Anything carrying an `Rc`
-// (List/Map/Set/Bytes/String, closure values) and every EFFECT callback (its
-// side effects must stay in list order) keeps the sequential `almide_rt_fan_map`.
+// result and captured types are all Send-safe (`is_send_safe_ty` in
+// pass_rust_lowering_fan.rs: the scalars, String, List, Set, Map, Result and
+// tuples/records of those), or an effect callback whose only effect is a
+// nested fan (`Purity::for_fan`). Closure values and every other EFFECT
+// callback (its side effects must stay in list order) keep the sequential
+// `almide_rt_fan_map`.
 // The callback is a raw `impl Fn` (the box pass leaves fan args unboxed), so
 // a non-Send capture the pass missed is a loud rustc error, never a race.
 //
@@ -51,57 +58,64 @@ pub fn almide_rt_fan_map<A, B>(
 // when the site's measured time per element is worth the offer's cost.
 // `ALMIDE_FAN_SEQUENTIAL=1` forces the sequential path — the ablation knob.
 //
-// Every element writes into its own output timeline (ADR-0024 D5), flushed in
-// list order. Every element runs, so no Err cuts the group: a trap in element k
-// waits for the elements below it and discards everything above (ADR-0024 D6).
-pub fn almide_rt_fan_map_par<A: Send + Sync + Clone, B: Send, F: Fn(A) -> Result<B, String> + Send + Sync>(
+// Every BLOCK of elements (the dealer's unit, about four per worker) writes
+// into its own output timeline (ADR-0024 D5), flushed in list order; inside a
+// block the elements run in list order on one thread, so element order holds
+// at element granularity for the cost of one registration per block (#3784:
+// one per element — a mutex, a flush and a wake — made a light map slower
+// than sequential). Every element runs, so no Err cuts the group: a trap in
+// element k waits for the blocks below its own and discards everything above
+// (ADR-0024 D6, #3779).
+pub fn almide_rt_fan_map_par<A: Send + Sync + Clone, B: Send, F: Fn(A) -> Result<B, AlmideString> + Send + Sync>(
     items: Vec<A>,
     f: F,
-) -> Result<Vec<B>, String> {
-    let mut slots: Vec<Option<Result<B, String>>> = (0..items.len()).map(|_| None).collect();
-    if items.len() < 2 || almide_rt_list_par_sequential() {
-        for (slot, item) in slots.iter_mut().zip(items) {
-            *slot = Some(f(item));
-        }
-        return almide_fan_map_settle_slots(slots);
-    }
-    // #3341: the cost model (list.rs `almide_rt_fan_plan`) decides from the
-    // site's last measured time per element whether this offer is worth a
-    // parallel run; every offer records what its elements took.
-    let site = almide_rt_fan_map_par::<A, B, F> as fn(Vec<A>, F) -> Result<Vec<B>, String> as usize;
-    let n = items.len();
-    let workers = almide_rt_fan_plan(n, almide_fan_estimate(site));
-    let clock = AlmideFanClock::new();
-    if workers < 2 {
-        clock.calling(|| {
+) -> Result<Vec<B>, AlmideString> {
+    items.almide_share();
+    // The slots cross threads, so an element's error is held as an owned
+    // `String` (Send) and converted once at the boundary.
+    let __almide_r: Result<Vec<B>, String> = (|| {
+        let mut slots: Vec<Option<Result<B, String>>> = (0..items.len()).map(|_| None).collect();
+        if items.len() < 2 || almide_rt_list_par_sequential() {
             for (slot, item) in slots.iter_mut().zip(items) {
-                *slot = Some(f(item));
+                *slot = Some(f(item).map_err(String::from));
             }
-            ((), n)
-        });
-        clock.record(site);
-        return almide_fan_map_settle_slots(slots);
-    }
-    let chunk_size = n.div_ceil(workers);
-    // The group flushes this thread's stdout first: a runtime abort on a worker
-    // exits without reaching this thread's buffer (C-197, see rust.toml fan_expr).
-    let group = almide_fan_group(n);
-    std::thread::scope(|s| {
-        for (chunk_idx, (chunk, out)) in items.chunks(chunk_size).zip(slots.chunks_mut(chunk_size)).enumerate() {
-            let (f, clock) = (&f, &clock);
-            let group = &group;
-            let base = chunk_idx * chunk_size;
-            s.spawn(move || {
-                clock.worker(out.iter_mut().zip(chunk).enumerate(), |(i, (slot, item))| {
-                    let _elem = almide_fan_enter(group, base + i);
-                    *slot = Some(f(item.clone()));
+            return almide_fan_map_settle_slots(slots);
+        }
+        // #3341: the cost model (list.rs `almide_rt_fan_plan`) decides from the
+        // site's last measured time per element whether this offer is worth a
+        // parallel run; every offer records what its elements took.
+        let site = almide_rt_fan_map_par::<A, B, F> as fn(Vec<A>, F) -> Result<Vec<B>, AlmideString> as usize;
+        let n = items.len();
+        let (workers, clock) = AlmideFanClock::offer(site, n);
+        if workers < 2 {
+            clock.calling(|| {
+                for (slot, item) in slots.iter_mut().zip(items) {
+                    *slot = Some(f(item).map_err(String::from));
+                }
+                ((), n)
+            });
+            clock.record();
+            return almide_fan_map_settle_slots(slots);
+        }
+        let block = almide_fan_block(n, workers);
+        // The group flushes this thread's stdout first: a runtime abort on a worker
+        // exits without reaching this thread's buffer (C-197, see rust.toml fan_expr).
+        // One timeline per BLOCK, dealt in list order (list.rs `almide_fan_deal`).
+        let blocks: Vec<_> = items.chunks(block).zip(slots.chunks_mut(block)).enumerate().collect();
+        let group = almide_fan_group(blocks.len());
+        almide_fan_panic_if_any(almide_fan_deal(blocks, workers, |blocks| {
+            for (b, (chunk, out)) in blocks {
+                let _blk = almide_fan_enter(&group, b);
+                clock.worker(out.iter_mut().zip(chunk.iter()), |(slot, item)| {
+                    *slot = Some(f(item.clone()).map_err(String::from));
                     Some(true)
                 });
-            });
-        }
-    });
-    clock.record(site);
-    almide_fan_map_settle_slots(slots)
+            }
+        }));
+        clock.record();
+        almide_fan_map_settle_slots(slots)
+    })();
+    __almide_r.map_err(Into::into)
 }
 
 // The map's result from its filled slots: the ok values in list order, or the
@@ -119,61 +133,67 @@ fn almide_fan_map_settle_slots<B>(slots: Vec<Option<Result<B, String>>>) -> Resu
     Ok(out)
 }
 
-// `fan.race` returns the FIRST thunk in LIST ORDER to SETTLE — i.e. thunk[0]'s
-// `Result` (Ok or Err), DETERMINISTIC (not wall-clock fastest, which is neither
-// reproducible nor expressible on the single-threaded WASM target). It differs
-// from `fan.any`, which SKIPS failures to find the first Ok: race surfaces
-// thunk[0]'s Err. Since fan thunks are pure (capturing a `var` is a compile
-// error), the non-head thunks are observably irrelevant, so evaluating only the
-// head is equivalent to "start all, take the first to settle". An empty list is
-// a defined Err, never a panic. EFFECTFUL: the caller's auto-`?` routes a head
-// Err to the unified main-error exit, byte-identical to the wasm path.
+// NO PRODUCER. This is the pre-0.42 thunk-list `fan.race(thunks)`, which
+// evaluated only thunk[0]. The call form is now refused with E027
+// (static_dispatch.rs), and its successor `fan.min { }` / `fan.min(xs, f)`
+// lowers in the frontend to the least-(spend, index) fold, so they never call
+// this function. Kept only until the runtime registry drops it.
 pub fn almide_rt_fan_race<T>(
-    thunks: Vec<impl Fn() -> Result<T, String>>,
-) -> Result<T, String> {
-    match thunks.into_iter().next() {
-        Some(thunk) => thunk(),
-        None => Err("fan.race: no candidates".to_string()),
-    }
-}
-
-// `fan.any` tries the thunks in LIST ORDER and returns the FIRST `Ok`
-// (deterministic — NOT wall-clock fastest). If every candidate fails it returns
-// a defined `Err`, never panicking or trapping. This is intentionally NOT
-// `fan.race` (which is parallel + wall-clock nondeterministic and stays as-is).
-pub fn almide_rt_fan_any<T>(
-    thunks: Vec<impl Fn() -> Result<T, String>>,
-) -> Result<T, String> {
-    for thunk in &thunks {
-        if let Ok(val) = thunk() {
-            return Ok(val);
+    thunks: Vec<impl Fn() -> Result<T, AlmideString>>,
+) -> Result<T, AlmideString> {
+    let __almide_r: Result<T, AlmideString> = (|| {
+        match thunks.into_iter().next() {
+            Some(thunk) => thunk(),
+            None => Err(AlmideString::from("fan.race: no candidates")),
         }
-    }
-    Err("fan.any: all candidates failed".to_string())
+    })();
+    __almide_r.map_err(Into::into)
 }
 
-// `fan.any_map` -- the T2-3 MAPPER form: apply `f` to the items IN LIST ORDER
+// `fan.any { }` (removed in dialect epoch 14) tries the thunks in LIST ORDER and returns the FIRST `Ok`
+// (deterministic — NOT wall-clock fastest). If every candidate fails it returns
+// a defined `Err`, never panicking or trapping. Later thunks are never started.
+// (`fan.min` is a different selection: least compute spent, tie -> list order.)
+pub fn almide_rt_fan_any<T>(
+    thunks: Vec<impl Fn() -> Result<T, AlmideString>>,
+) -> Result<T, AlmideString> {
+    let __almide_r: Result<T, AlmideString> = (|| {
+        for thunk in &thunks {
+            if let Ok(val) = thunk() {
+                return Ok(val);
+            }
+        }
+        Err(AlmideString::from("fan.any: all candidates failed"))
+    })();
+    __almide_r.map_err(Into::into)
+}
+
+// `fan.any(xs, f)` (removed in dialect epoch 14) (internally `any_map`) -- the T2-3 MAPPER form: apply `f` to the items IN LIST ORDER
 // and return the FIRST `Ok`; an element's Err disqualifies that element only.
 // All-fail (and the empty list) is the ledger-constant Err. Deterministic --
 // the early cut is structural (later elements are never evaluated).
 pub fn almide_rt_fan_any_map<A, B>(
     items: Vec<A>,
-    f: std::rc::Rc<dyn Fn(A) -> Result<B, String>>,
-) -> Result<B, String> {
-    for item in items {
-        if let Ok(v) = f(item) {
-            return Ok(v);
+    f: std::rc::Rc<dyn Fn(A) -> Result<B, AlmideString>>,
+) -> Result<B, AlmideString> {
+    let __almide_r: Result<B, AlmideString> = (|| {
+        for item in items {
+            if let Ok(v) = f(item) {
+                return Ok(v);
+            }
         }
-    }
-    Err("fan.any: all candidates failed".to_string())
+        Err(AlmideString::from("fan.any: all candidates failed"))
+    })();
+    __almide_r.map_err(Into::into)
 }
 
-// One output timeline per thunk, flushed in list order (ADR-0024 D5). The
+// NO PRODUCER: `fan.settle { }` lowers to a tuple and `fan.settle(xs, f)` to
+// `list.map`, both sequential. One output timeline per thunk, flushed in list order (ADR-0024 D5). The
 // group flushes this thread's stdout first: a runtime abort on a worker exits
 // without reaching this thread's buffer (C-197, see rust.toml fan_expr).
 pub fn almide_rt_fan_settle<T: Send + 'static>(
-    thunks: Vec<impl Fn() -> Result<T, String> + Send + Sync>,
-) -> Vec<Result<T, String>> {
+    thunks: Vec<impl Fn() -> Result<T, AlmideString> + Send + Sync>,
+) -> Vec<Result<T, AlmideString>> {
     let group = almide_fan_group(thunks.len());
     let group = &group;
     std::thread::scope(|s| {
@@ -182,12 +202,14 @@ pub fn almide_rt_fan_settle<T: Send + 'static>(
             .enumerate()
             .map(|(i, thunk)| s.spawn(move || {
                 let _elem = almide_fan_enter(group, i);
-                thunk()
+                // The error crosses the thread as an owned `String` (Send);
+                // the identity while the alias is `String`.
+                thunk().map_err(String::from)
             }))
             .collect();
         handles
             .into_iter()
-            .map(almide_fan_join)
+            .map(|h| almide_fan_join(h).map_err(AlmideString::from))
             .collect()
     })
 }

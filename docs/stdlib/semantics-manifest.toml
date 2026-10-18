@@ -61,7 +61,7 @@
 #                   whole point: 0x0102 reads 258 big-endian, 513 little-endian
 #   ordering      — the Int is a comparison sign (-1 / 0 / 1), not a magnitude
 #   address       — the Int is a raw address or an opaque heap token
-#                   (`data_ptr`, `heap_save`) — meaningless to arithmetic on
+#                   (`data_ptr`) — meaningless to arithmetic on
 #
 # OPTIONAL `note` key: prose recording what the probe does NOT prove, for the
 # rare entry whose declared dimension is not fully probe-reachable. It is never
@@ -75,7 +75,7 @@
 #   ordering      — the Int is a comparison verdict, strictly -1/0/1 (measured:
 #                   NOT a byte difference)
 #   address       — the Int is a linear-memory/native address or allocator
-#                   checkpoint (data_ptr, heap_save). Never a stable value —
+#                   checkpoint (data_ptr). Never a stable value —
 #                   probes pin only leg-independent properties (non-zero,
 #                   monotonicity, restore-then-allocate works)
 
@@ -1348,29 +1348,6 @@ probe = "bytes.to_list(b)"
 expect = "[200]"
 
 [[bytes.fn]]
-name = "heap_save"
-index_unit = "address"
-setup = [
-  "let cp1 = bytes.heap_save()",
-  "let _spacer = bytes.new(64)",
-  "let cp2 = bytes.heap_save()",
-]
-probe = "cp2 >= cp1"
-expect = "true"
-
-[[bytes.fn]]
-name = "heap_restore"
-index_unit = "address"
-setup = [
-  "let cp = bytes.heap_save()",
-  "let _spacer = bytes.new(64)",
-  "bytes.heap_restore(cp)",
-  "let after = bytes.from_list([5, 6])",
-]
-probe = "bytes.to_list(after)"
-expect = "[5, 6]"
-
-[[bytes.fn]]
 name = "read_uint16"
 index_unit = "value"
 setup = [
@@ -2347,8 +2324,8 @@ expect = "true"
 note = """
 The passing call pins the ARGUMENT ORDER: assert_gt(a, b) passes iff a > b,
 so a reversed implementation would fail this file. Strictness is measured
-out-of-band (an in-file failing call would fail the harness itself, and the
-assert_throws route is HARNESS_LIMITATION on wasm): assert_gt(1, 1) rejects
+out-of-band (an in-file failing call would fail the harness itself):
+assert_gt(1, 1) rejects
 on BOTH legs — native panics "assert_gt failed: 1 is not > 1" (exit 101),
 wasm prints "assert_gt failed" (exit 1).
 """
@@ -2364,6 +2341,48 @@ expect = "true"
 note = """
 The mirror of assert_gt: passes iff a < b, strictly — measured out-of-band,
 assert_lt(1, 1) rejects on both legs ("1 is not < 1" natively).
+"""
+
+[[testing.fn]]
+name = "__abort_site_selected"
+index_unit = "element-index"
+probe = "testing.__abort_site_selected()"
+expect = "-1"
+note = """
+The 0-based ordinal of the assert_aborts site this process or instance was
+started to run (ADR-0029), or -1. The test harness itself is never a child,
+so in-file the probe pins -1; the child side is the assert_aborts fixtures'
+(spec/stdlib/coverage_assert_aborts_test.almd), on both legs.
+"""
+
+[[testing.fn]]
+name = "__abort_site_run"
+index_unit = "element-index"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (a child process or instance): the Int is the 0-based
+ordinal of the lifted assert_aborts site the child runs, in declaration
+order — the same ordinal __abort_site_selected answers in the child. A
+probe here would start a child of a file that declares no site; the
+assert_aborts fixtures exercise it on both legs.
+"""
+
+[[testing.fn]]
+name = "__assert_aborts_check"
+index_unit = "value"
+setup = [
+  'testing.__assert_aborts_check("boom", ["1", "", "PANIC: boom"], 7)',
+  'testing.__assert_aborts_check("went wrong", ["1", "", "Error: x\\nPANIC: it went wrong"], 8)',
+]
+probe = "true"
+expect = "true"
+note = """
+The Int is the 1-based source LINE of the assert_aborts call, printed in the
+failure block's `at:` field and never compared. The passing calls pin the
+verdict's shape: exit status "1" plus a header line, matched from the LAST
+header; every failing shape is pinned by tests/assert_aborts_runner_test.rs
+(an in-file failing call would fail the harness itself).
 """
 
 # index_unit vocabulary — args:
@@ -2416,41 +2435,6 @@ FILTERED-list dimension is measured out-of-band on BOTH legs (2026-08-13,
 positional_at(0) = "alpha" and positional_at(1) = "beta" — the index counts
 POSITIONAL (non-flag) arguments with "--flag" filtered out, 0-based — and
 positional_at(2) is none.
-"""
-
-# index_unit vocabulary — mem (the bytes address discipline, module-sized):
-#   address — the Int is an opaque allocator CHECKPOINT token, produced by
-#             save and consumed by restore — never a byte count, meaningless
-#             to arithmetic on
-[mem]
-
-[[mem.fn]]
-name = "save"
-index_unit = "address"
-probe = "1"
-expect = "1"
-note = """
-Declared, not probed in-file: mem.save WALLS the verified wasm renderer today
-("scalar binding outside the value subset" brick), so a calling probe would
-push this generated file off the wasm leg. Measured on the native leg
-(2026-08-13): save() returns 0 and the save/spacer/save monotonicity and
-restore-then-allocate sequences run without corruption — native pins both
-calls as no-ops (runtime/rs/src/mem.rs: RC already reclaims what a restore
-would). The checkpoint is only a live bump-allocator token on the wasm leg,
-where the same discipline is probe-pinned by the bytes.heap_save /
-bytes.heap_restore rows.
-"""
-
-[[mem.fn]]
-name = "restore"
-index_unit = "address"
-probe = "1"
-expect = "1"
-note = """
-Declared, not probed in-file (the same wasm wall as save). mark is an opaque
-token a save RETURNED, not a byte count. Measured on the native leg
-(2026-08-13): save / allocate 64 bytes / restore / allocate again returns the
-fresh allocation intact ([5, 6]) — the native no-op pair is safe to call.
 """
 
 # index_unit vocabulary — zlib:
@@ -2778,34 +2762,6 @@ server (2026-09-25): total_ms 1000 ends a call at ~1000 ms and idle_ms 500 a
 silent one at ~500 ms (C-366).
 """
 
-[[http.fn]]
-name = "__openai_streaming_limited"
-index_unit = "millisecond"
-probe = "1"
-expect = "1"
-note = """
-Declared, not probed: the private intrinsic behind http.openai_streaming_call_with_limits, whose two
-trailing Ints are HttpLimits.total_ms and .idle_ms, both MILLISECONDS, 0 = no
-limit. A calling probe would dial the network and push this generated file off
-the wasm leg. Measured by tests/http_call_handle_test.rs against a loopback
-server (2026-09-25): total_ms 1000 ends a call at ~1000 ms and idle_ms 500 a
-silent one at ~500 ms (C-366).
-"""
-
-[[http.fn]]
-name = "__anthropic_streaming_limited"
-index_unit = "millisecond"
-probe = "1"
-expect = "1"
-note = """
-Declared, not probed: the private intrinsic behind http.anthropic_streaming_call_with_limits, whose two
-trailing Ints are HttpLimits.total_ms and .idle_ms, both MILLISECONDS, 0 = no
-limit. A calling probe would dial the network and push this generated file off
-the wasm leg. Measured by tests/http_call_handle_test.rs against a loopback
-server (2026-09-25): total_ms 1000 ends a call at ~1000 ms and idle_ms 500 a
-silent one at ~500 ms (C-366).
-"""
-
 # index_unit vocabulary — net (HOST_CAPABILITY on the wasm leg — net is an OS
 # socket API, named as such in proofs/wasm-fallback-baseline.txt for
 # spec/stdlib/net_test.almd — so every entry is DECLARED with a non-calling
@@ -2852,6 +2808,19 @@ note = """
 Declared, not probed (host-capability). Measured natively:
 tcp_listen("127.0.0.1", 8792) returns listener handle 0 and a subsequent
 tcp_connect to 8792 succeeds — the Int is the port actually bound.
+"""
+
+[[net.fn]]
+name = "tcp_local_port"
+index_unit = "port"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability). The Int PARAMETER is a LISTENER
+handle; the Ok Int is a TCP port. Measured natively by
+tests/net_tcp_native_core_test.rs (2026-10-13): a listener bound to port 0
+reports a port above 0, and a connect to that port reaches it — the port the
+OS chose, the one a program passes to tcp_connect.
 """
 
 [[net.fn]]

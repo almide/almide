@@ -49,13 +49,26 @@ impl NanoPass for BorrowLoweringPass {
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         let mut param_borrows: HashMap<VarId, ParamBorrow> = HashMap::new();
         let mut ref_binders: HashSet<VarId> = HashSet::new();
+        // Functions compiled from Almide (user code and self-hosted stdlib),
+        // by the symbol a call to them carries (a module fn's
+        // `almide_rt_<module>_<fn>`, the walker's own spelling): their Bytes /
+        // Matrix params are `&AlmideRcCow<T>`, unlike a runtime intrinsic's
+        // raw `&T`. A declaration dispatched to the runtime has no Almide body.
+        let ir_fns: HashSet<Sym> = program.functions.iter()
+            .chain(program.modules.iter().flat_map(|m| m.functions.iter()))
+            .filter(|f| !f.attrs.iter().any(|a| matches!(a.name.as_str(), "inline_rust" | "wasm_intrinsic" | "intrinsic")))
+            .map(|f| match &f.module_origin {
+                Some(origin) => sym(&super::walker::module_fn_symbol(f.name.as_str(), origin)),
+                None => f.name,
+            })
+            .collect();
         let IrProgram { functions, modules, codegen_annotations, .. } = &mut program;
         let module_fns = modules.iter_mut().flat_map(|m| m.functions.iter_mut());
         for func in functions.iter_mut().chain(module_fns) {
             for p in &func.params {
                 param_borrows.insert(p.var, p.borrow);
             }
-            let mut lower = Lower { params: &func.params, ann: codegen_annotations, counting_binders: HashSet::new(), ref_binders: HashSet::new() };
+            let mut lower = Lower { params: &func.params, ann: codegen_annotations, ir_fns: &ir_fns, counting_binders: HashSet::new(), ref_binders: HashSet::new() };
             lower.visit_expr_mut(&mut func.body);
             lower.own_consumed_ref_mut(body_tail(&mut func.body));
             ref_binders.extend(lower.ref_binders);
@@ -69,7 +82,7 @@ impl NanoPass for BorrowLoweringPass {
         let top_lets = program.top_lets.iter_mut()
             .chain(program.modules.iter_mut().flat_map(|m| m.top_lets.iter_mut()));
         for tl in top_lets {
-            let mut lower = Lower { params: &[], ann: &program.codegen_annotations, counting_binders: HashSet::new(), ref_binders: HashSet::new() };
+            let mut lower = Lower { params: &[], ann: &program.codegen_annotations, ir_fns: &ir_fns, counting_binders: HashSet::new(), ref_binders: HashSet::new() };
             lower.visit_expr_mut(&mut tl.value);
             ref_binders.extend(lower.ref_binders);
         }
@@ -108,6 +121,8 @@ impl almide_ir::visit::IrVisitor for GuardReads {
 struct Lower<'a> {
     params: &'a [IrParam],
     ann: &'a CodegenAnnotations,
+    /// The names of the functions compiled from Almide ([`BorrowLoweringPass::run`]).
+    ir_fns: &'a HashSet<Sym>,
     /// Loop binders in `borrowed_loop_vars` whose head is a let-bound range
     /// the walker keeps as a bare `Range<i64>` (`range_counting_vars`,
     /// #1857): the head counts and binds an OWNED scalar, not `&T` (#2256).
@@ -225,13 +240,41 @@ fn place_root(e: &IrExpr) -> Option<VarId> {
 /// Their value convention is `AlmideRcCow<T>` while the runtime signature
 /// takes the raw `&T`, and the deref coercion `&var` relies on does not reach
 /// through a propagating expression (#1210, #617): the borrow must deref
-/// explicitly.
+/// explicitly. An `InlineRust` whose template IS a Rust block propagates the
+/// same way (#3753: `MatrixShapeSpec`'s unrolled small matmul,
+/// `{ let __almide_sa = ..; AlmideRcCow::from(..) }`, at a runtime arg slot).
 fn propagating_rc_cow_value(e: &IrExpr) -> bool {
     let rc_cow = matches!(e.ty, Ty::Bytes | Ty::Matrix | Ty::Applied(TypeConstructorId::Matrix, _));
-    rc_cow && matches!(
-        e.kind,
-        IrExprKind::If { .. } | IrExprKind::Match { .. } | IrExprKind::Block { .. } | IrExprKind::UnwrapOr { .. }
-    )
+    rc_cow && match &e.kind {
+        IrExprKind::If { .. } | IrExprKind::Match { .. } | IrExprKind::Block { .. } | IrExprKind::UnwrapOr { .. } => true,
+        IrExprKind::InlineRust { template, .. } => template_renders_as_block(template.as_str()),
+        _ => false,
+    }
+}
+
+/// Does an `InlineRust` template render as one Rust block expression — a
+/// `{` opening it (not a `{name}` placeholder: a block's brace is followed by
+/// whitespace) whose matching `}` closes the whole template?
+fn template_renders_as_block(template: &str) -> bool {
+    let t = template.trim();
+    let mut chars = t.chars();
+    if chars.next() != Some('{') || !chars.next().is_some_and(char::is_whitespace) {
+        return false;
+    }
+    let mut depth = 0usize;
+    for (i, c) in t.char_indices() {
+        match c {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return i + 1 == t.len();
+                }
+            }
+            _ => {}
+        }
+    }
+    false
 }
 
 /// A list value no binding holds — a call's result, a collected chain, a
@@ -276,10 +319,13 @@ impl Lower<'_> {
         // which does not coerce to `&dyn Fn`: `&*g` reaches the callable
         // through the handle. A lambda literal and a fn item borrow as they
         // are (`&|x| …`, `&dbl` — both coerce to `&dyn Fn`), and a
-        // by-reference fn param already IS the reference (handled above).
+        // by-reference fn param already IS the reference (handled above). A
+        // block yields the handle too — its tail lambda renders boxed, only a
+        // lambda written straight in the slot borrows bare — and `&{ ..; h }`
+        // does not reach the callable either (rustc E0277), so it derefs.
         if !as_str && !mutable
             && matches!(inner.ty, Ty::Fn { .. })
-            && !matches!(inner.kind, IrExprKind::Lambda { .. } | IrExprKind::FnRef { .. } | IrExprKind::Deref { .. } | IrExprKind::Block { .. })
+            && !matches!(inner.kind, IrExprKind::Lambda { .. } | IrExprKind::FnRef { .. } | IrExprKind::Deref { .. })
         {
             let value = std::mem::replace(inner.as_mut(), mk(IrExprKind::Unit, Ty::Unit, None));
             let ty = value.ty.clone();
@@ -351,6 +397,28 @@ impl Lower<'_> {
             let ty = value.ty.clone();
             let span = value.span;
             *inner.as_mut() = mk(IrExprKind::Deref { expr: Box::new(value) }, ty, span);
+        }
+    }
+
+    /// An Almide-compiled callee takes a Bytes / Matrix param as
+    /// `&AlmideRcCow<T>`, so the `&*(…)` [`Self::lower_borrow`] spelled over a
+    /// propagating argument for a runtime intrinsic's raw `&T` is undone
+    /// there: `&(if …)` borrows the `AlmideRcCow` the arms build.
+    fn keep_rc_cow_args(&self, expr: &mut IrExpr) {
+        let args = match &mut expr.kind {
+            IrExprKind::Call { target: CallTarget::Named { name }, args, .. }
+            | IrExprKind::TailCall { target: CallTarget::Named { name }, args } if self.ir_fns.contains(name) => args,
+            IrExprKind::RuntimeCall { symbol, args } if self.ir_fns.contains(symbol) => args,
+            _ => return,
+        };
+        for arg in args {
+            if let IrExprKind::Borrow { expr: inner, as_str: false, mutable: false } = &mut arg.kind
+                && let IrExprKind::Deref { expr: value } = &mut inner.kind
+                && propagating_rc_cow_value(value)
+            {
+                let value = std::mem::replace(value.as_mut(), mk(IrExprKind::Unit, Ty::Unit, None));
+                **inner = value;
+            }
         }
     }
 
@@ -673,6 +741,7 @@ impl IrMutVisitor for Lower<'_> {
             IrExprKind::MapAccess { .. } => self.lower_map_access(expr),
             _ => {}
         }
+        self.keep_rc_cow_args(expr);
     }
 
     fn visit_stmt_mut(&mut self, stmt: &mut IrStmt) {

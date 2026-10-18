@@ -1,0 +1,8 @@
+effect fn main() -> Unit = {
+  let paths = ["research/fan-audit/probes/B/missing.txt", "research/fan-audit/probes/B/f2.txt", "research/fan-audit/probes/B/f3.txt"]
+  let r: Result[String, String] = fan.any(paths, (p) => fs.read_text(p))
+  match r {
+    ok(v) => println("FS1 ok " + string.trim(v)),
+    err(e) => println("FS1 err " + e),
+  }
+}

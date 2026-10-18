@@ -100,7 +100,7 @@
 
 wasm_budget_bytes = 1073741824
 count = 67
-skip_count = 186
+skip_count = 148
 
 [[divergence]]
 cell   = "bytes.new:len:i32_max"
@@ -777,18 +777,6 @@ slot   = "matrix.from_bytes_f64_le(rows)"
 reason = "unrenderable: no RENDER entry for return type `Matrix`"
 
 [[skip]]
-slot   = "matrix.from_q1_0_bytes(cols)"
-reason = "unrenderable: no RENDER entry for return type `Matrix`"
-
-[[skip]]
-slot   = "matrix.from_q1_0_bytes(offset)"
-reason = "unrenderable: no RENDER entry for return type `Matrix`"
-
-[[skip]]
-slot   = "matrix.from_q1_0_bytes(rows)"
-reason = "unrenderable: no RENDER entry for return type `Matrix`"
-
-[[skip]]
 slot   = "matrix.get(col)"
 reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
 
@@ -809,38 +797,6 @@ slot   = "matrix.linear_f32_row_no_bias(w_rows)"
 reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
 
 [[skip]]
-slot   = "matrix.linear_q1_0_row_no_bias(w_cols)"
-reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
-
-[[skip]]
-slot   = "matrix.linear_q1_0_row_no_bias(w_offset)"
-reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
-
-[[skip]]
-slot   = "matrix.linear_q1_0_row_no_bias(w_rows)"
-reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
-
-[[skip]]
-slot   = "matrix.linear_q8_0_row_no_bias(w_cols)"
-reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
-
-[[skip]]
-slot   = "matrix.linear_q8_0_row_no_bias(w_offset)"
-reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
-
-[[skip]]
-slot   = "matrix.linear_q8_0_row_no_bias(w_rows)"
-reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
-
-[[skip]]
-slot   = "matrix.masked_multi_head_attention(n_heads)"
-reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
-
-[[skip]]
-slot   = "matrix.multi_head_attention(n_heads)"
-reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
-
-[[skip]]
 slot   = "matrix.ones(cols)"
 reason = "unrenderable: no RENDER entry for return type `Matrix`"
 
@@ -857,98 +813,6 @@ slot   = "matrix.ones_f32(rows)"
 reason = "unrenderable: no RENDER entry for return type `Matrix[Float32]`"
 
 [[skip]]
-slot   = "matrix.qwen3_block_f32_kv(ffn_hidden)"
-reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
-
-[[skip]]
-slot   = "matrix.qwen3_block_f32_kv(head_dim)"
-reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
-
-[[skip]]
-slot   = "matrix.qwen3_block_f32_kv(n_kv_heads)"
-reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
-
-[[skip]]
-slot   = "matrix.qwen3_block_f32_kv(n_q_heads)"
-reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
-
-[[skip]]
-slot   = "matrix.qwen3_block_f32_kv(start_pos)"
-reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
-
-[[skip]]
-slot   = "matrix.qwen3_block_q1_0_kv(ffn_hidden)"
-reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
-
-[[skip]]
-slot   = "matrix.qwen3_block_q1_0_kv(head_dim)"
-reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
-
-[[skip]]
-slot   = "matrix.qwen3_block_q1_0_kv(n_kv_heads)"
-reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
-
-[[skip]]
-slot   = "matrix.qwen3_block_q1_0_kv(n_q_heads)"
-reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
-
-[[skip]]
-slot   = "matrix.qwen3_block_q1_0_kv(start_pos)"
-reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
-
-[[skip]]
-slot   = "matrix.qwen3_block_q8_0_kv(ffn_hidden)"
-reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
-
-[[skip]]
-slot   = "matrix.qwen3_block_q8_0_kv(head_dim)"
-reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
-
-[[skip]]
-slot   = "matrix.qwen3_block_q8_0_kv(n_kv_heads)"
-reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
-
-[[skip]]
-slot   = "matrix.qwen3_block_q8_0_kv(n_q_heads)"
-reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
-
-[[skip]]
-slot   = "matrix.qwen3_block_q8_0_kv(start_pos)"
-reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
-
-[[skip]]
-slot   = "matrix.rope_rotate(head_dim)"
-reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
-
-[[skip]]
-slot   = "matrix.rope_rotate(n_heads)"
-reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
-
-[[skip]]
-slot   = "matrix.rope_rotate_at(head_dim)"
-reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
-
-[[skip]]
-slot   = "matrix.rope_rotate_at(n_heads)"
-reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
-
-[[skip]]
-slot   = "matrix.rope_rotate_at(start_pos)"
-reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
-
-[[skip]]
-slot   = "matrix.rope_rotate_neox_at(head_dim)"
-reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
-
-[[skip]]
-slot   = "matrix.rope_rotate_neox_at(n_heads)"
-reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
-
-[[skip]]
-slot   = "matrix.rope_rotate_neox_at(start_pos)"
-reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
-
-[[skip]]
 slot   = "matrix.row_dot(r)"
 reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
 
@@ -958,22 +822,6 @@ reason = "unrenderable: no RENDER entry for return type `Matrix`"
 
 [[skip]]
 slot   = "matrix.select_rows_f32(offset)"
-reason = "unrenderable: no RENDER entry for return type `Matrix`"
-
-[[skip]]
-slot   = "matrix.select_rows_q1_0(cols)"
-reason = "unrenderable: no RENDER entry for return type `Matrix`"
-
-[[skip]]
-slot   = "matrix.select_rows_q1_0(offset)"
-reason = "unrenderable: no RENDER entry for return type `Matrix`"
-
-[[skip]]
-slot   = "matrix.select_rows_q8_0_dq(cols)"
-reason = "unrenderable: no RENDER entry for return type `Matrix`"
-
-[[skip]]
-slot   = "matrix.select_rows_q8_0_dq(offset)"
 reason = "unrenderable: no RENDER entry for return type `Matrix`"
 
 [[skip]]

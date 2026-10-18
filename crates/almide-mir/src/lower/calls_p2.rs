@@ -145,6 +145,45 @@ impl LowerCtx {
     /// Returns `None` (rolled back) if an operand doesn't lower. The mir↔ir gate counts each
     /// `ConcatStr` node as 1 IR call (classify_corpus.rs) so this synthetic CallFn keeps
     /// `mir_calls <= ir_calls`.
+    /// The operands of a concat no call-argument form lowers (`"cut " +
+    /// int.to_string(fan.bounded(b) { w() } ?? -1)`): bind each to a temp in
+    /// source order, as `let` would, and pass the temps. Refuses an operand
+    /// the bind could only defer to an empty `Init::Opaque` block, and rolls
+    /// back on any decline.
+    fn concat_operands_via_binds(&mut self, operands: &[IrExpr]) -> Option<Vec<CallArg>> {
+        let ops_mark = self.ops.len();
+        let lhh_mark = self.live_heap_handles.len();
+        let lifted_mark = self.lifted.len();
+        let mut vars = Vec::with_capacity(operands.len());
+        for operand in operands {
+            let tmp = self.fresh_synth_var();
+            if self.lower_bind(tmp, &operand.ty, operand).is_err() {
+                vars.clear();
+                break;
+            }
+            vars.push(IrExpr {
+                kind: IrExprKind::Var { id: tmp },
+                ty: operand.ty.clone(),
+                span: operand.span,
+                def_id: None,
+            });
+        }
+        let deferred = self.ops[ops_mark..]
+            .iter()
+            .any(|op| matches!(op, Op::Alloc { init: crate::Init::Opaque, .. }));
+        let args = if vars.len() == operands.len() && !deferred {
+            self.lower_call_args(&vars).ok()
+        } else {
+            None
+        };
+        if args.is_none() {
+            self.ops.truncate(ops_mark);
+            self.live_heap_handles.truncate(lhh_mark);
+            self.lifted.truncate(lifted_mark);
+        }
+        args
+    }
+
     pub(crate) fn try_lower_concat_str(&mut self, value: &IrExpr) -> Option<ValueId> {
         use almide_ir::BinOp;
         let IrExprKind::BinOp { op: BinOp::ConcatStr, left, right } = &value.kind else {
@@ -158,7 +197,7 @@ impl LowerCtx {
             Err(_) => {
                 self.ops.truncate(ops_mark);
                 self.live_heap_handles.truncate(lhh_mark);
-                return None;
+                self.concat_operands_via_binds(&arg_exprs)?
             }
         };
         let dst = self.fresh_value();
@@ -168,6 +207,13 @@ impl LowerCtx {
             args,
             result: Some(Repr::Ptr { layout: crate::PLACEHOLDER_LAYOUT }),
         });
+        // T3-5: a bulk concat the writer spelled charges 1 + result_len/16;
+        // `charge_probe` numbers the site and keeps it only in metered fns.
+        // Placed only when the program meters at all (a region or the probe),
+        // so an unmetered program's MIR is byte-identical to before.
+        if self.in_interp == 0 && crate::charge_probe::charges_wanted() {
+            self.ops.push(Op::ChargeDyn { site: 0, src: dst });
+        }
         Some(dst)
     }
 
@@ -628,7 +674,10 @@ impl LowerCtx {
             return Some(self.lower_interp_compound_wall(parts));
         }
         let tree = crate::lower::desugar_string_interp(parts, &self.record_layouts)?;
-        self.try_lower_concat_str(&tree)
+        self.in_interp += 1;
+        let out = self.try_lower_concat_str(&tree);
+        self.in_interp -= 1;
+        out
     }
 
     /// Is there a record/tuple part the desugar would EXPAND (statically `aggregate_part_expandable`)

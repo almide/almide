@@ -29,10 +29,12 @@ fn unwrap_or_else[A](o: A?, f: () -> A) -> A = _
 
 /// true for some(_), false for none.
 @intrinsic("almide_rt_option_is_some")
+@borrow_ref(o)
 fn is_some[A](o: A?) -> Bool = _
 
 /// true for none, false for some(_).
 @intrinsic("almide_rt_option_is_none")
+@borrow_ref(o)
 fn is_none[A](o: A?) -> Bool = _
 
 // #1114: E-generic (Rust ok_or parity) — a pure bundled body monos per
@@ -63,25 +65,32 @@ fn to_list[A](o: A?) -> List[A] = _
 
 // ── Symmetry fills (option.collect / collect_map — these MATCH Rust's collect, unlike the removed result twins; ADR-0007) ──
 //
-// Pure Almide bodies — short-circuit on the first `none` via
-// `list.fold` + nested match on the accumulator. Contract matches
+// Pure Almide bodies. Contract matches
 // Rust's `Vec<Option<T>>.into_iter().collect::<Option<Vec<T>>>()`.
 // The runtime wrappers in `runtime/rs/src/option.rs` remain for
 // the monomorphised callsites the walker emits; this layer is the
 // behavioural source of truth and works on both Rust and WASM
 // targets without per-target dispatch arms.
+//
+// collect: two linear passes: any `none` answers `none`, else the values are
+// gathered once. The fold this replaced appended each value to a list it
+// read out of the `some` accumulator — a binder it could not move, so every
+// step copied the whole list (O(n²) on both legs, #3543). The elements are
+// values, so checking them all is unobservable next to stopping at the
+// first `none`. The second pass is a `map`, not a `filter_map`: once every
+// element is known to be `some`, the result has exactly as many values as the
+// input, so it is reserved once (the growth ruling, 2026-10-15). A
+// `filter_map` grew it by doubling, about twice its size allocated and copied.
 /// some(values) if no element is none, else none.
-fn collect[T](xs: List[T?]) -> List[T]? = list.fold(
-  xs,
-  some([]),
-  (acc, item) => match acc {
-    some(vals) => match item {
-      some(v) => some(vals + [v]),
-      none => none,
+fn collect[T](xs: List[T?]) -> List[T]? =
+  if list.any(xs, (o) => option.is_none(o)) then none
+  else some(list.map(
+    xs,
+    (o) => match o {
+      some(v) => v,
+      none => panic("option.collect: unreachable, every element was checked"),
     },
-    none => none,
-  },
-)
+  ))
 
 /// some of all f(x), or none; f runs on every x.
 fn collect_map[T, U](xs: List[T], f: (T) -> U?) -> List[U]? = option.collect(list.map(xs, f))

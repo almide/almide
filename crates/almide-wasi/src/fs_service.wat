@@ -21,8 +21,9 @@
 ;;
 ;; Results stage through `$stage`, which keeps them clear of the one guest
 ;; allocation that precedes `host_read` (the `stage_for` rule in
-;; wasi_shims.rs). Error texts are `almide_base::fs_errno`'s rows; an errno the
-;; table does not spell answers `filesystem operation failed (wasi errno N)`.
+;; wasi_shims.rs). Error texts are `almide_base::fs_errno`'s rows (Display and
+;; classified alike); an errno the table does not spell answers
+;; `filesystem operation failed (wasi errno N)`.
 (module
   (import "wasi_snapshot_preview1" "fd_write" (func $fd_write (param i32 i32 i32 i32) (result i32)))
   (import "wasi_snapshot_preview1" "fd_read" (func $fd_read (param i32 i32 i32 i32) (result i32)))
@@ -210,6 +211,16 @@
 
   (func $fail (param $op i32) (param $a i32) (param $al i32) (param $b i32) (param $bl i32)
               (param $two i32) (param $tp i32) (param $tl i32) (result i64)
+    (local $m i32) (local $l i32)
+    (call $fail_text (local.get $op) (local.get $a) (local.get $al) (local.get $b) (local.get $bl)
+                     (local.get $two) (local.get $tp) (local.get $tl))
+    (local.set $l) (local.set $m)
+    (call $stage (local.get $m) (local.get $l))
+    (call $pack (i32.const 1) (local.get $l)))
+
+  ;; The message `$fail` answers, as (ptr, len) in the arena.
+  (func $fail_text (param $op i32) (param $a i32) (param $al i32) (param $b i32) (param $bl i32)
+                   (param $two i32) (param $tp i32) (param $tl i32) (result i32 i32)
     (local $np i32) (local $nl i32) (local $m i32) (local $w i32)
     (call $op_name (local.get $op)) (local.set $nl) (local.set $np)
     (local.set $m (call $alloc (i32.add (i32.add (i32.add (local.get $nl) (local.get $al))
@@ -233,8 +244,8 @@
     (i32.store8 offset=1 (local.get $w) (i32.const 58))
     (i32.store8 offset=2 (local.get $w) (i32.const 32))
     (local.set $w (call $put (i32.add (local.get $w) (i32.const 3)) (local.get $tp) (local.get $tl)))
-    (call $stage (local.get $m) (i32.sub (local.get $w) (local.get $m)))
-    (call $pack (i32.const 1) (i32.sub (local.get $w) (local.get $m))))
+    (local.get $m)
+    (i32.sub (local.get $w) (local.get $m)))
 
   ;; The errno's native Display text, or the bounded fallback.
   (func $errtext (param $e i32) (result i32 i32)
@@ -491,6 +502,11 @@
 
   ;; Rust's `str::from_utf8` acceptance (the incumbent's #1506 loop).
   (func $utf8_ok (param $p i32) (param $n i32) (result i32)
+    (i32.eq (call $utf8_upto (local.get $p) (local.get $n)) (local.get $n)))
+
+  ;; Rust's `Utf8Error::valid_up_to`: the length of the longest valid prefix
+  ;; (`n` when all of it is valid).
+  (func $utf8_upto (param $p i32) (param $n i32) (result i32)
     (local $i i32) (local $b0 i32) (local $b1 i32) (local $w i32) (local $lo i32) (local $hi i32) (local $k i32)
     (block $done (loop $next
       (br_if $done (i32.ge_u (local.get $i) (local.get $n)))
@@ -498,11 +514,11 @@
       (if (i32.lt_u (local.get $b0) (i32.const 128))
         (then (local.set $i (i32.add (local.get $i) (i32.const 1))) (br $next)))
       (if (i32.or (i32.lt_u (local.get $b0) (i32.const 194)) (i32.gt_u (local.get $b0) (i32.const 244)))
-        (then (return (i32.const 0))))
+        (then (return (local.get $i))))
       (local.set $w (select (i32.const 2)
                             (select (i32.const 3) (i32.const 4) (i32.lt_u (local.get $b0) (i32.const 240)))
                             (i32.lt_u (local.get $b0) (i32.const 224))))
-      (if (i32.gt_u (i32.add (local.get $i) (local.get $w)) (local.get $n)) (then (return (i32.const 0))))
+      (if (i32.gt_u (i32.add (local.get $i) (local.get $w)) (local.get $n)) (then (return (local.get $i))))
       (local.set $lo (i32.const 128))
       (local.set $hi (i32.const 191))
       (if (i32.eq (local.get $b0) (i32.const 224)) (then (local.set $lo (i32.const 160))))
@@ -511,19 +527,19 @@
       (if (i32.eq (local.get $b0) (i32.const 244)) (then (local.set $hi (i32.const 143))))
       (local.set $b1 (i32.load8_u (i32.add (local.get $p) (i32.add (local.get $i) (i32.const 1)))))
       (if (i32.or (i32.lt_u (local.get $b1) (local.get $lo)) (i32.gt_u (local.get $b1) (local.get $hi)))
-        (then (return (i32.const 0))))
+        (then (return (local.get $i))))
       (local.set $k (i32.const 2))
       (block $cdone (loop $cnext
         (br_if $cdone (i32.ge_u (local.get $k) (local.get $w)))
         (if (i32.ne (i32.and (i32.load8_u (i32.add (local.get $p) (i32.add (local.get $i) (local.get $k))))
                              (i32.const 192))
                     (i32.const 128))
-          (then (return (i32.const 0))))
+          (then (return (local.get $i))))
         (local.set $k (i32.add (local.get $k) (i32.const 1)))
         (br $cnext)))
       (local.set $i (i32.add (local.get $i) (local.get $w)))
       (br $next)))
-    (i32.const 1))
+    (local.get $i))
 
   ;; `str::lines` as frames: split on '\n', a '\r' before the '\n' dropped,
   ;; no phantom line after a trailing newline (C-225).
@@ -561,20 +577,50 @@
   ;; The text readers: `mode` 0 = the text, 1 = its lines; `absent_none`
   ;; answers ok-none on ENOENT (the *_if_exists twins, C-215).
   (func $read_text_as (param $op i32) (param $a i32) (param $al i32) (param $mode i32) (param $absent_none i32) (result i64)
-    (local $p i32) (local $l i32) (local $e i32) (local $tp i32) (local $tl i32)
+    (local $p i32) (local $l i32) (local $e i32) (local $tp i32) (local $tl i32) (local $k i32)
     (call $read_all (local.get $a) (local.get $al)) (local.set $e) (local.set $l) (local.set $p)
     (if (local.get $e)
       (then
         (if (i32.and (local.get $absent_none) (i32.eq (local.get $e) (i32.const 44))) (then (return (call $none))))
         (return (call $fail_e (local.get $op) (local.get $a) (local.get $al) (i32.const 0) (i32.const 0)
                               (i32.const 0) (local.get $e)))))
-    (if (i32.eqz (call $utf8_ok (local.get $p) (local.get $l)))
+    (local.set $k (call $utf8_upto (local.get $p) (local.get $l)))
+    (if (i32.ne (local.get $k) (local.get $l))
       (then
         (call $s_utf8) (local.set $tl) (local.set $tp)
+        ;; The streaming walkers (51 fold_lines / 52 for_each_line) read
+        ;; line by line natively: the lines before the invalid one are
+        ;; folded first (C-220, #3758).
+        (if (i32.or (i32.eq (local.get $op) (i32.const 51)) (i32.eq (local.get $op) (i32.const 52)))
+          (then (return (call $stream_partial (local.get $op) (local.get $a) (local.get $al)
+                                              (local.get $p) (local.get $k) (local.get $tp) (local.get $tl)))))
         (return (call $fail (local.get $op) (local.get $a) (local.get $al) (i32.const 0) (i32.const 0)
                             (i32.const 0) (local.get $tp) (local.get $tl)))))
     (if (local.get $mode) (then (call $lines (local.get $p) (local.get $l)) (local.set $l) (local.set $p)))
     (call $ok (local.get $p) (local.get $l)))
+
+  ;; Status 3 for the streaming walkers (the embedded host's
+  ;; `stream_line_frames`): the frames of every line before the first invalid
+  ;; one — the line holding byte `k`, `valid_up_to` — then the err message as
+  ;; the LAST frame, which the guest answers after folding the others.
+  (func $stream_partial (param $op i32) (param $a i32) (param $al i32) (param $p i32) (param $k i32)
+                        (param $tp i32) (param $tl i32) (result i64)
+    (local $s i32) (local $fp i32) (local $fl i32) (local $mp i32) (local $ml i32) (local $out i32) (local $w i32)
+    (local.set $s (local.get $k))
+    (block $d (loop $c
+      (br_if $d (i32.eqz (local.get $s)))
+      (br_if $d (i32.eq (i32.load8_u (i32.add (local.get $p) (i32.sub (local.get $s) (i32.const 1)))) (i32.const 10)))
+      (local.set $s (i32.sub (local.get $s) (i32.const 1)))
+      (br $c)))
+    (call $lines (local.get $p) (local.get $s)) (local.set $fl) (local.set $fp)
+    (call $fail_text (local.get $op) (local.get $a) (local.get $al) (i32.const 0) (i32.const 0)
+                     (i32.const 0) (local.get $tp) (local.get $tl))
+    (local.set $ml) (local.set $mp)
+    (local.set $out (call $alloc (i32.add (i32.add (local.get $fl) (local.get $ml)) (i32.const 4))))
+    (local.set $w (call $put (local.get $out) (local.get $fp) (local.get $fl)))
+    (local.set $w (call $frame (local.get $w) (local.get $mp) (local.get $ml)))
+    (call $stage (local.get $out) (i32.sub (local.get $w) (local.get $out)))
+    (call $pack (i32.const 3) (i32.sub (local.get $w) (local.get $out))))
 
   (func $op_read_text (param $op i32) (param $a i32) (param $al i32) (param $b i32) (param $bl i32) (result i64)
     (call $read_text_as (local.get $op) (local.get $a) (local.get $al) (i32.const 0) (i32.const 0)))
@@ -796,17 +842,30 @@
 
   ;; The entry names of a directory (`.` and `..` skipped) as a node list:
   ;; (head, count, errno). fd_readdir is resumable (C-272): each pass resumes
-  ;; at the last complete entry's cookie, the buffer doubles when not even one
-  ;; entry fits, and a short fill ends the stream.
+  ;; at the last complete entry's cookie, the buffer doubles after every full
+  ;; pass (so an entry larger than it fits too), and a short fill ends the stream.
+  ;; Every pass costs the host the WHOLE directory (wasmtime collects and stats
+  ;; every entry on each call, whatever the cookie), so the first buffer is
+  ;; sized from the directory's own size: ext4, APFS and tmpfs spend at least a
+  ;; quarter of a dirent's 24 + name bytes per entry, so four times it holds
+  ;; the listing in one pass; a smaller hint (or none) falls back to doubling.
   (func $names_at (param $fd i32) (param $p i32) (param $l i32) (result i32 i32 i32)
     (local $e i32) (local $h i32) (local $buf i32) (local $cap i32) (local $used i32) (local $off i32)
-    (local $nl i32) (local $np i32) (local $cookie i64) (local $got i32)
+    (local $nl i32) (local $np i32) (local $cookie i64) (local $hint i64)
     (local $head i32) (local $tail i32) (local $cnt i32) (local $node i32)
     (local.set $e (call $path_open (local.get $fd) (i32.const 1) (local.get $p) (local.get $l)
                                    (i32.const 2) (i64.const 16384) (i64.const 16384) (i32.const 0) (global.get $fsp)))
     (if (local.get $e) (then (return (i32.const 0) (i32.const 0) (local.get $e))))
     (local.set $h (i32.load (global.get $fsp)))
     (local.set $cap (i32.const 16384))
+    ;; 4 x st_size, at most 64 MiB (a larger directory doubles from there)
+    (if (i32.eqz (call $fd_filestat_get (local.get $h) (i32.add (global.get $fsp) (i32.const 64))))
+      (then
+        (local.set $hint (i64.load offset=96 (global.get $fsp)))
+        (if (i64.gt_u (local.get $hint) (i64.const 0x1000000)) (then (local.set $hint (i64.const 0x1000000))))
+        (local.set $hint (i64.shl (local.get $hint) (i64.const 2)))
+        (if (i64.gt_u (local.get $hint) (i64.extend_i32_u (local.get $cap)))
+          (then (local.set $cap (i32.wrap_i64 (local.get $hint)))))))
     (local.set $buf (call $alloc (local.get $cap)))
     (block $done (loop $pass
       (local.set $e (call $fd_readdir (local.get $h) (local.get $buf) (local.get $cap) (local.get $cookie)
@@ -814,14 +873,12 @@
       (br_if $done (local.get $e))
       (local.set $used (i32.load offset=8 (global.get $fsp)))
       (local.set $off (i32.const 0))
-      (local.set $got (i32.const 0))
       (block $pdone (loop $ent
         (br_if $pdone (i32.gt_u (i32.add (local.get $off) (i32.const 24)) (local.get $used)))
         (local.set $nl (i32.load offset=16 (i32.add (local.get $buf) (local.get $off))))
         (br_if $pdone (i32.gt_u (i32.add (i32.add (local.get $off) (i32.const 24)) (local.get $nl)) (local.get $used)))
         (local.set $np (i32.add (i32.add (local.get $buf) (local.get $off)) (i32.const 24)))
         (local.set $cookie (i64.load (i32.add (local.get $buf) (local.get $off))))
-        (local.set $got (i32.const 1))
         (if (i32.eqz (call $is_dot (local.get $np) (local.get $nl)))
           (then
             (local.set $node (call $alloc (i32.add (local.get $nl) (i32.const 8))))
@@ -836,10 +893,12 @@
         (local.set $off (i32.add (i32.add (local.get $off) (i32.const 24)) (local.get $nl)))
         (br $ent)))
       (br_if $done (i32.lt_u (local.get $used) (local.get $cap)))
-      (if (i32.eqz (local.get $got))
-        (then
-          (local.set $cap (i32.shl (local.get $cap) (i32.const 1)))
-          (local.set $buf (call $alloc (local.get $cap)))))
+      ;; A full buffer: the next pass gets twice the room. A host may re-read
+      ;; the directory from its start on every call (wasmtime does, and so
+      ;; does the p3 adapter), so a fixed buffer made a listing quadratic in
+      ;; its entries; doubling keeps the passes logarithmic.
+      (local.set $cap (i32.shl (local.get $cap) (i32.const 1)))
+      (local.set $buf (call $alloc (local.get $cap)))
       (br $pass)))
     (drop (call $fd_close (local.get $h)))
     (local.get $head) (local.get $cnt) (local.get $e))
@@ -857,9 +916,64 @@
     (global.set $rt (local.get $node))
     (global.set $rc (i32.add (global.get $rc) (i32.const 1))))
 
+  ;; node x sorts strictly before node y (bytewise on the names)
+  (func $node_lt (param $x i32) (param $y i32) (result i32)
+    (call $lt (i32.add (local.get $x) (i32.const 8)) (i32.load offset=4 (local.get $x))
+              (i32.add (local.get $y) (i32.const 8)) (i32.load offset=4 (local.get $y))))
+
+  ;; Merge the sorted runs src[lo..mid) and src[mid..hi) into dst[lo..hi),
+  ;; the left run winning ties (stable).
+  (func $merge_runs (param $src i32) (param $dst i32) (param $lo i32) (param $mid i32) (param $hi i32)
+    (local $i i32) (local $j i32) (local $k i32) (local $x i32) (local $y i32)
+    (local.set $i (local.get $lo)) (local.set $j (local.get $mid)) (local.set $k (local.get $lo))
+    (block $d (loop $c
+      (br_if $d (i32.ge_u (local.get $k) (local.get $hi)))
+      ;; take the right run's head when the left is spent or it sorts first
+      (local.set $y (i32.const 0))
+      (if (i32.lt_u (local.get $j) (local.get $hi))
+        (then
+          (local.set $y (i32.load (i32.add (local.get $src) (i32.shl (local.get $j) (i32.const 2)))))
+          (if (i32.lt_u (local.get $i) (local.get $mid))
+            (then
+              (local.set $x (i32.load (i32.add (local.get $src) (i32.shl (local.get $i) (i32.const 2)))))
+              (if (i32.eqz (call $node_lt (local.get $y) (local.get $x))) (then (local.set $y (i32.const 0))))))))
+      (if (local.get $y)
+        (then (local.set $x (local.get $y)) (local.set $j (i32.add (local.get $j) (i32.const 1))))
+        (else
+          (local.set $x (i32.load (i32.add (local.get $src) (i32.shl (local.get $i) (i32.const 2)))))
+          (local.set $i (i32.add (local.get $i) (i32.const 1)))))
+      (i32.store (i32.add (local.get $dst) (i32.shl (local.get $k) (i32.const 2))) (local.get $x))
+      (local.set $k (i32.add (local.get $k) (i32.const 1)))
+      (br $c))))
+
+  ;; Bottom-up merge sort of cnt node pointers (O(n log n): an insertion sort
+  ;; here made one listing of a large directory quadratic); answers the array
+  ;; that holds the sorted order, arr or the scratch one.
+  (func $sort_nodes (param $arr i32) (param $cnt i32) (result i32)
+    (local $tmp i32) (local $w i32) (local $lo i32) (local $mid i32) (local $hi i32) (local $t i32)
+    (local.set $tmp (call $alloc (i32.shl (local.get $cnt) (i32.const 2))))
+    (local.set $w (i32.const 1))
+    (block $d (loop $pass
+      (br_if $d (i32.ge_u (local.get $w) (local.get $cnt)))
+      (local.set $lo (i32.const 0))
+      (block $pd (loop $run
+        (br_if $pd (i32.ge_u (local.get $lo) (local.get $cnt)))
+        (local.set $mid (call $min_u (i32.add (local.get $lo) (local.get $w)) (local.get $cnt)))
+        (local.set $hi (call $min_u (i32.add (local.get $mid) (local.get $w)) (local.get $cnt)))
+        (call $merge_runs (local.get $arr) (local.get $tmp) (local.get $lo) (local.get $mid) (local.get $hi))
+        (local.set $lo (local.get $hi))
+        (br $run)))
+      (local.set $t (local.get $arr)) (local.set $arr (local.get $tmp)) (local.set $tmp (local.get $t))
+      (local.set $w (i32.shl (local.get $w) (i32.const 1)))
+      (br $pass)))
+    (local.get $arr))
+
+  (func $min_u (param $a i32) (param $b i32) (result i32)
+    (select (local.get $a) (local.get $b) (i32.lt_u (local.get $a) (local.get $b))))
+
   ;; A node list, byte-sorted (native `Vec<String>::sort`), as frames.
   (func $sorted_frames (param $head i32) (param $cnt i32) (result i32 i32)
-    (local $arr i32) (local $i i32) (local $j i32) (local $x i32) (local $y i32) (local $tot i32) (local $out i32) (local $w i32)
+    (local $arr i32) (local $i i32) (local $x i32) (local $tot i32) (local $out i32) (local $w i32)
     (local.set $arr (call $alloc (i32.shl (local.get $cnt) (i32.const 2))))
     (block $d (loop $c
       (br_if $d (i32.eqz (local.get $head)))
@@ -868,23 +982,7 @@
       (local.set $i (i32.add (local.get $i) (i32.const 1)))
       (local.set $head (i32.load (local.get $head)))
       (br $c)))
-    ;; insertion sort
-    (local.set $i (i32.const 1))
-    (block $sd (loop $sc
-      (br_if $sd (i32.ge_u (local.get $i) (local.get $cnt)))
-      (local.set $x (i32.load (i32.add (local.get $arr) (i32.shl (local.get $i) (i32.const 2)))))
-      (local.set $j (local.get $i))
-      (block $id (loop $ic
-        (br_if $id (i32.eqz (local.get $j)))
-        (local.set $y (i32.load (i32.add (local.get $arr) (i32.shl (i32.sub (local.get $j) (i32.const 1)) (i32.const 2)))))
-        (br_if $id (i32.eqz (call $lt (i32.add (local.get $x) (i32.const 8)) (i32.load offset=4 (local.get $x))
-                                      (i32.add (local.get $y) (i32.const 8)) (i32.load offset=4 (local.get $y)))))
-        (i32.store (i32.add (local.get $arr) (i32.shl (local.get $j) (i32.const 2))) (local.get $y))
-        (local.set $j (i32.sub (local.get $j) (i32.const 1)))
-        (br $ic)))
-      (i32.store (i32.add (local.get $arr) (i32.shl (local.get $j) (i32.const 2))) (local.get $x))
-      (local.set $i (i32.add (local.get $i) (i32.const 1)))
-      (br $sc)))
+    (local.set $arr (call $sort_nodes (local.get $arr) (local.get $cnt)))
     (local.set $out (call $alloc (local.get $tot)))
     (local.set $w (local.get $out))
     (local.set $i (i32.const 0))

@@ -23,7 +23,7 @@ pub const BUNDLED_MODULES: &[&str] = &[
     "error", "math", "datetime", "value", "option", "result",
     "map", "set", "string",
     "env", "io", "random", "regex", "testing",
-    "process", "fs", "http", "html", "json", "matrix", "mem", "net", "url", "zlib",
+    "process", "fs", "http", "html", "json", "matrix", "net", "url", "zlib",
     "int8", "int16", "int32", "int64",
     "uint8", "uint16", "uint32", "uint64",
     "float32", "float64",
@@ -261,7 +261,6 @@ fn bundled_source_io(name: &str) -> Option<&'static str> {
         "html" => Some(crate::embedded::SRC_HTML),
         "json" => Some(crate::embedded::SRC_JSON),
         "matrix" => Some(crate::embedded::SRC_MATRIX),
-        "mem" => Some(crate::embedded::SRC_MEM),
         "math" => Some(crate::embedded::SRC_MATH),
         "datetime" => Some(crate::embedded::SRC_DATETIME),
         _ => None,
@@ -496,5 +495,83 @@ fn resolve_ufcs_sized_numeric(method: &str) -> Vec<&'static str> {
         ],
 
         _ => vec![],
+    }
+}
+
+/// Every bundled stdlib fn declared `@ordered` (ADR-0024 D3): its effect on
+/// process-local state could be read by a sibling fan arm, so a fan whose
+/// arm reaches one runs its arms sequentially on every target. Derived from
+/// the one declaration site, the attribute in the module's `.almd`, by a
+/// text scan of the bundled sources (an attribute block, then the fn it
+/// annotates); built once. The third field is the fn's `@intrinsic` runtime
+/// symbol when it has one, because by the time codegen asks, such a call is
+/// already a `RuntimeCall` of that symbol.
+pub fn ordered_stdlib_fns() -> &'static [(&'static str, String, Option<String>)] {
+    use std::sync::OnceLock;
+    static TABLE: OnceLock<Vec<(&'static str, String, Option<String>)>> = OnceLock::new();
+    TABLE.get_or_init(|| {
+        let mut out = Vec::new();
+        for &module in BUNDLED_MODULES {
+            let Some(src) = bundled_source(module) else { continue };
+            if !src.contains("@ordered") {
+                continue;
+            }
+            let mut pending = false;
+            let mut intrinsic: Option<String> = None;
+            for line in src.lines() {
+                let line = line.trim_start();
+                if line.starts_with("@ordered") {
+                    pending = true;
+                } else if let Some(rest) = line.strip_prefix("@intrinsic(\"") {
+                    intrinsic = rest.split('"').next().map(str::to_string);
+                } else if line.starts_with('@') || line.starts_with("///") {
+                    // another attribute or a doc line between the mark and its fn
+                } else if pending {
+                    pending = false;
+                    let decl = line.strip_prefix("effect ").unwrap_or(line);
+                    if let Some(rest) = decl.strip_prefix("fn ") {
+                        let name: String = rest.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect();
+                        if !name.is_empty() {
+                            out.push((module, name, intrinsic.take()));
+                        }
+                    }
+                    intrinsic = None;
+                } else {
+                    intrinsic = None;
+                }
+            }
+        }
+        out
+    })
+}
+
+/// True if `module.func` is an `@ordered` stdlib fn (ADR-0024 D3).
+pub fn is_ordered_stdlib_fn(module: &str, func: &str) -> bool {
+    ordered_stdlib_fns().iter().any(|(m, f, _)| *m == module && f == func)
+}
+
+/// True if the runtime symbol (`almide_rt_env_set`) is the intrinsic of an
+/// `@ordered` stdlib fn — the shape a lowered stdlib call has in codegen.
+pub fn is_ordered_runtime_symbol(symbol: &str) -> bool {
+    ordered_stdlib_fns().iter().any(|(_, _, i)| i.as_deref() == Some(symbol))
+}
+
+#[cfg(test)]
+mod ordered_tests {
+    #[test]
+    fn the_ordered_table_is_the_d3_set() {
+        let t = super::ordered_stdlib_fns();
+        assert!(super::is_ordered_stdlib_fn("env", "set"));
+        assert!(super::is_ordered_stdlib_fn("fs", "write"));
+        assert!(super::is_ordered_stdlib_fn("io", "read_line"));
+        assert!(super::is_ordered_stdlib_fn("process", "spawn"));
+        assert!(super::is_ordered_runtime_symbol("almide_rt_env_set"));
+        assert!(super::is_ordered_runtime_symbol("almide_rt_process_spawn"));
+        // reads, output and the clock are not ordered (D3)
+        assert!(!super::is_ordered_stdlib_fn("env", "get"));
+        assert!(!super::is_ordered_stdlib_fn("fs", "read_text"));
+        assert!(!super::is_ordered_stdlib_fn("io", "print"));
+        assert!(!super::is_ordered_runtime_symbol("almide_rt_env_get"));
+        assert_eq!(t.len(), 28, "{t:?}");
     }
 }

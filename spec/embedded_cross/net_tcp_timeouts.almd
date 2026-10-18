@@ -1,0 +1,66 @@
+// @contract: C-379
+// net tcp timeouts and `tcp_available` (#3620). Both are guest-enforced on
+// the stock WASI 0.3 component (WASI has no SO_RCVTIMEO, no peek and no
+// FIONREAD), and the transcript below is the same on native, the embedded
+// lane and the component. Every timeout here fires on a stream nobody
+// writes to, so no byte can race the timer and the outcome is fixed; only
+// WHEN it fires is the clock's. `tcp_available` is asked only after the
+// first byte of the writer's one small write was read, so the count is
+// settled. `tcp_read_timeout` restores the earlier `tcp_set_timeout` value:
+// the plain `tcp_read` after it times out at 100 ms instead of blocking.
+import net
+
+fn show_bytes(r: Result[Bytes, String]) -> String = match r {
+  ok(b) => "ok ${bytes.len(b)} [${bytes.to_string(b) ?? "<not utf-8>"}]",
+  err(e) => "err ${e}",
+}
+
+fn show_int(r: Result[Int, String]) -> String = match r {
+  ok(v) => "ok ${v}",
+  err(e) => "err ${e}",
+}
+
+fn show_unit(r: Result[Unit, String]) -> String = match r {
+  ok(_) => "ok",
+  err(e) => "err ${e}",
+}
+
+effect fn main() -> Unit = {
+  let l = net.tcp_listen("127.0.0.1", 0)!
+  let port = net.tcp_local_port(l)!
+  let c = net.tcp_connect("127.0.0.1", port)!
+  let s = net.tcp_accept(l)!
+  // read_timeout: nothing sent, then bytes already waiting.
+  println("read_timeout, idle: ${show_bytes(net.tcp_read_timeout(s, 4, 50))}")
+  net.tcp_write(c, bytes.from_string("ping"))!
+  println("read_timeout, waiting: ${show_bytes(net.tcp_read_timeout(s, 16, 5000))}")
+  // available: bytes readable now, without consuming them.
+  println("available, idle: ${show_int(net.tcp_available(s))}")
+  // When bytes arrive is the network's: block for the first byte of one
+  // small write, after which the rest of that write is readable too.
+  net.tcp_write(c, bytes.from_string("abcdef"))!
+  println("read_exact 1: ${show_bytes(net.tcp_read_exact(s, 1))}")
+  println("available after 1 of 6: ${show_int(net.tcp_available(s))}")
+  println("available again: ${show_int(net.tcp_available(s))}")
+  println("read 2: ${show_bytes(net.tcp_read(s, 2))}")
+  println("available after read 2: ${show_int(net.tcp_available(s))}")
+  println("read_exact 3: ${show_bytes(net.tcp_read_exact(s, 3))}")
+  println("available drained: ${show_int(net.tcp_available(s))}")
+  // set_timeout bounds plain reads; read_timeout leaves it in place.
+  println("set_timeout 100: ${show_unit(net.tcp_set_timeout(s, 100))}")
+  println("read, idle: ${show_bytes(net.tcp_read(s, 4))}")
+  println("read_exact, idle: ${show_bytes(net.tcp_read_exact(s, 4))}")
+  println("read_timeout 30, idle: ${show_bytes(net.tcp_read_timeout(s, 4, 30))}")
+  println("read after read_timeout: ${show_bytes(net.tcp_read(s, 4))}")
+  // <= 0 clears it: this read waits for the byte instead of timing out.
+  println("set_timeout 0: ${show_unit(net.tcp_set_timeout(s, 0))}")
+  net.tcp_write(c, bytes.from_string("z"))!
+  println("read after clear: ${show_bytes(net.tcp_read(s, 4))}")
+  // After the peer closes: nothing is available and a read is EOF.
+  println("close client: ${show_unit(net.tcp_close(c))}")
+  println("available after peer close: ${show_int(net.tcp_available(s))}")
+  println("read after peer close: ${show_bytes(net.tcp_read(s, 4))}")
+  println("close: ${show_unit(net.tcp_close(s))}")
+  println("close listener: ${show_unit(net.tcp_close_listener(l))}")
+  println("done")
+}

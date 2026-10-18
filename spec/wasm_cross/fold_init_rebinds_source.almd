@@ -1,0 +1,41 @@
+// @contract: C-258
+// #2045 review: arguments are taken by value, left to right, so a fold's init
+// that rebinds the variable its source names cannot change what is folded —
+// the fold walks the list the source evaluated to. Once the wasm leg
+// evaluated the source before the init, it held the source block as a bare
+// borrow while the init ran; the rebind released that block and the loop
+// read freed memory. Every fold-shaped arm is pinned: the plain and fused
+// `list.fold`, `list.fold` over `list.enumerate` and `list.scan`, each
+// with String elements so a stale read shows.
+effect fn main() -> Unit = {
+  var xs = ["a", "b", "c"]
+  let plain = xs |> list.fold({
+    xs = ["z"]
+    ""
+  }, (acc, x) => acc + x)
+  println("plain=${plain} now=${list.len(xs)}")
+  var ys = ["a", "b", "c"]
+  let fused = ys |> list.map((x) => x + "!") |> list.fold(
+    {
+      ys = ["z"]
+      ""
+    },
+    (acc, x) => acc + x,
+  )
+  println("fused=${fused} now=${list.len(ys)}")
+  var es = ["a", "b", "c"]
+  let indexed = list.enumerate(es) |> list.fold(
+    {
+      es = ["z"]
+      0
+    },
+    (acc, p) => acc + p.0 + string.len(p.1),
+  )
+  println("indexed=${indexed} now=${list.len(es)}")
+  var ss = ["a", "b", "c"]
+  let running = ss |> list.scan({
+    ss = ["z"]
+    ""
+  }, (acc, x) => acc + x)
+  println("running=${running} now=${list.len(ss)}")
+}

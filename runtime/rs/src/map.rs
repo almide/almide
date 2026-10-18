@@ -32,8 +32,12 @@ pub const ALMIDE_MAP_INDEX_THRESHOLD: usize = 16;
 
 /// Empty slot marker in `AlmideKeyIndex::slots`. A live slot is never all
 /// ones: its low half is an entry position, and positions stay below
-/// `u32::MAX`.
+/// `u32::MAX - 1`.
 pub const ALMIDE_MAP_SLOT_EMPTY: u64 = u64::MAX;
+
+/// A removed entry's slot (#3691): a probe passes over it, an insert never
+/// claims it. Its low half is no position a live slot can hold.
+pub const ALMIDE_MAP_SLOT_DEAD: u64 = u64::MAX - 1;
 
 /// The half of a slot that holds the upper 32 bits of the entry's hash.
 pub const ALMIDE_MAP_SLOT_TAG: u64 = 0xFFFF_FFFF_0000_0000;
@@ -112,7 +116,7 @@ pub fn almide_rt_map_key_hash<K: 'static>(k: &K) -> Option<u64> {
     if let Some(x) = a.downcast_ref::<i64>() {
         return Some(almide_rt_map_mix64(*x as u64));
     }
-    if let Some(s) = a.downcast_ref::<String>() {
+    if let Some(s) = a.downcast_ref::<AlmideString>() {
         return Some(almide_rt_map_hash_bytes(s.as_bytes()));
     }
     if let Some(b) = a.downcast_ref::<bool>() {
@@ -125,19 +129,19 @@ fn almide_map_key_hash_compound(a: &dyn std::any::Any) -> Option<u64> {
     if let Some((x, y)) = a.downcast_ref::<(i64, i64)>() {
         return Some(almide_rt_map_hash_pair(*x as u64, *y as u64));
     }
-    if let Some((x, y)) = a.downcast_ref::<(String, String)>() {
+    if let Some((x, y)) = a.downcast_ref::<(AlmideString, AlmideString)>() {
         return Some(almide_rt_map_hash_pair(almide_rt_map_hash_bytes(x.as_bytes()), almide_rt_map_hash_bytes(y.as_bytes())));
     }
-    if let Some((x, y)) = a.downcast_ref::<(String, i64)>() {
+    if let Some((x, y)) = a.downcast_ref::<(AlmideString, i64)>() {
         return Some(almide_rt_map_hash_pair(almide_rt_map_hash_bytes(x.as_bytes()), *y as u64));
     }
-    if let Some((x, y)) = a.downcast_ref::<(i64, String)>() {
+    if let Some((x, y)) = a.downcast_ref::<(i64, AlmideString)>() {
         return Some(almide_rt_map_hash_pair(*x as u64, almide_rt_map_hash_bytes(y.as_bytes())));
     }
     if let Some(xs) = a.downcast_ref::<Vec<i64>>() {
         return Some(almide_map_hash_seq(xs.iter().map(|x| *x as u64)));
     }
-    if let Some(xs) = a.downcast_ref::<Vec<String>>() {
+    if let Some(xs) = a.downcast_ref::<Vec<AlmideString>>() {
         return Some(almide_map_hash_seq(xs.iter().map(|s| almide_rt_map_hash_bytes(s.as_bytes()))));
     }
     almide_map_key_hash_sized_int(a)
@@ -151,6 +155,8 @@ fn almide_map_key_hash_sized_int(a: &dyn std::any::Any) -> Option<u64> {
     if let Some(x) = a.downcast_ref::<u32>() { return Some(almide_rt_map_mix64(*x as u64)); }
     if let Some(x) = a.downcast_ref::<u16>() { return Some(almide_rt_map_mix64(*x as u64)); }
     if let Some(x) = a.downcast_ref::<u8>() { return Some(almide_rt_map_mix64(*x as u64)); }
+    // A runtime-internal `String` key (not an Almide String, which is `AlmideString` above).
+    if let Some(s) = a.downcast_ref::<String>() { return Some(almide_rt_map_hash_bytes(s.as_bytes())); }
     None
 }
 
@@ -158,8 +164,8 @@ fn almide_map_key_hash_sized_int(a: &dyn std::any::Any) -> Option<u64> {
 /// type's hash for every `K: Borrow<Q>` pair the read side admits. The
 /// blanket impl covers every sized key; `str` is the one unsized borrow —
 /// a `&str` parameter (the borrow-inferred rendering of a String param)
-/// probes a `Map[String, _]` without materializing a `String` first, and
-/// hashes byte-identically to the stored `String`.
+/// probes a `Map[String, _]` without materializing a String first, and
+/// hashes byte-identically to the stored `AlmideString`.
 pub trait AlmideMapKey {
     fn almide_key_hash(&self) -> Option<u64>;
 }
@@ -183,9 +189,17 @@ impl AlmideMapKey for str {
 /// it already loaded — it never reads `hashes[p]` (a second, dependent load
 /// into another array) — and touches the entry only on a tag match. Shared
 /// by `AlmideMap` and `AlmideSet`.
-/// No tombstones: a removal shifts the entry vector, so the table is rebuilt
-/// from the cached hashes (O(n), no key access) — the same order the old
-/// sidecar paid, and removal is not the hot path the index exists for.
+///
+/// Removal tombstones (#3691). The owner leaves a hole at the removed
+/// entry's position instead of shifting the later entries down (insertion
+/// order is observable, C-033, so `swap_remove` is out), and `kill` marks
+/// the entry's slot `ALMIDE_MAP_SLOT_DEAD`: a probe steps over it and an
+/// insert never reuses it. Every position — live or dead — owns exactly one
+/// non-empty slot, so `hashes.len()` stays the occupancy the growth check
+/// reads, and growth re-places only the live slots. The owner compacts
+/// (`retain`, its entries the same way) once the holes outnumber the live
+/// entries, so a removal is amortized O(1) where the shift-and-rebuild it
+/// replaced was O(n) per call.
 #[derive(Clone, Debug, Default)]
 pub struct AlmideKeyIndex {
     hashes: Vec<u64>,
@@ -209,7 +223,7 @@ impl AlmideKeyIndex {
             if s == ALMIDE_MAP_SLOT_EMPTY {
                 return None;
             }
-            if s & ALMIDE_MAP_SLOT_TAG == tag {
+            if s & ALMIDE_MAP_SLOT_TAG == tag && s != ALMIDE_MAP_SLOT_DEAD {
                 let p = (s & !ALMIDE_MAP_SLOT_TAG) as usize;
                 if eq(p) {
                     return Some(p);
@@ -225,23 +239,49 @@ impl AlmideKeyIndex {
         let p = self.hashes.len() as u32;
         self.hashes.push(h);
         if self.hashes.len() * 4 > self.slots.len() * 3 {
-            self.rebuild(self.slots.len() * 2);
-        } else {
-            self.place(h, p);
+            self.grow(self.slots.len() * 2);
         }
+        self.place(h, p);
     }
 
-    /// The entry at `p` was removed and every later entry shifted down one.
-    pub fn remove_at(&mut self, p: usize) {
-        self.hashes.remove(p);
-        self.rebuild(self.slots.len());
+    /// The entry at `p` became a hole: its slot turns dead. Its slot holds
+    /// exactly its hash tag and position, so the probe compares whole words
+    /// and never touches the entries.
+    pub fn kill(&mut self, p: usize) {
+        let h = self.hashes[p];
+        let want = (h & ALMIDE_MAP_SLOT_TAG) | p as u64;
+        let mask = self.slots.len() - 1;
+        let mut i = (h as usize) & mask;
+        while self.slots[i] != want {
+            i = (i + 1) & mask;
+        }
+        self.slots[i] = ALMIDE_MAP_SLOT_DEAD;
     }
 
-    fn rebuild(&mut self, slot_len: usize) {
+    /// The owner dropped its holes: keep the positions `keep` admits,
+    /// renumbered in order, and re-place them in a table sized for them.
+    pub fn retain(&mut self, mut keep: impl FnMut(usize) -> bool) {
+        let mut p = 0;
+        self.hashes.retain(|_| {
+            p += 1;
+            keep(p - 1)
+        });
+        let slot_len = (self.hashes.len() * 4 / 3 + 1).next_power_of_two().max(32);
         self.slots.clear();
         self.slots.resize(slot_len, ALMIDE_MAP_SLOT_EMPTY);
         for p in 0..self.hashes.len() {
             self.place(self.hashes[p], p as u32);
+        }
+    }
+
+    /// Double the table: the live slots are re-placed, the dead ones dropped.
+    fn grow(&mut self, slot_len: usize) {
+        let old = std::mem::replace(&mut self.slots, vec![ALMIDE_MAP_SLOT_EMPTY; slot_len]);
+        for s in old {
+            if s != ALMIDE_MAP_SLOT_EMPTY && s != ALMIDE_MAP_SLOT_DEAD {
+                let p = (s & !ALMIDE_MAP_SLOT_TAG) as u32;
+                self.place(self.hashes[p as usize], p);
+            }
         }
     }
 
@@ -290,41 +330,42 @@ impl AlmideKeyLookup {
         }
         *self = AlmideKeyLookup::Built(ix);
     }
-
-    pub fn removed_at(&mut self, p: usize) {
-        if let AlmideKeyLookup::Built(ix) = self {
-            ix.remove_at(p);
-        }
-    }
 }
 
+/// `entries` in insertion order; a removed entry of an indexed map leaves a
+/// `None` hole (#3691) that every read skips, counted by `dead`. Holes exist
+/// only beside a `Built` index (the linear lanes shift instead — their scan
+/// is O(n) per lookup anyway), and `remove` compacts once they outnumber
+/// the live entries.
 #[derive(Clone, Debug, Default)]
 pub struct AlmideMap<K, V> {
-    entries: Vec<(K, V)>,
+    entries: Vec<Option<(K, V)>>,
+    dead: usize,
     lookup: AlmideKeyLookup,
 }
 
 impl<K, V> AlmideMap<K, V> {
     pub fn new() -> Self {
-        AlmideMap { entries: Vec::new(), lookup: AlmideKeyLookup::Linear }
+        AlmideMap { entries: Vec::new(), dead: 0, lookup: AlmideKeyLookup::Linear }
     }
     pub fn len(&self) -> usize {
-        self.entries.len()
+        self.entries.len() - self.dead
     }
     pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
+        self.len() == 0
     }
     pub fn keys(&self) -> impl Iterator<Item = &K> {
-        self.entries.iter().map(|(k, _)| k)
+        self.iter().map(|(k, _)| k)
     }
     pub fn values(&self) -> impl Iterator<Item = &V> {
-        self.entries.iter().map(|(_, v)| v)
+        self.iter().map(|(_, v)| v)
     }
     pub fn iter(&self) -> impl Iterator<Item = (&K, &V)> {
-        self.entries.iter().map(|(k, v)| (k, v))
+        self.entries.iter().flatten().map(|(k, v)| (k, v))
     }
     pub fn clear(&mut self) {
         self.entries.clear();
+        self.dead = 0;
         self.lookup = AlmideKeyLookup::Linear;
     }
 }
@@ -336,9 +377,10 @@ impl<K: PartialEq + 'static, V> AlmideMap<K, V> {
     #[inline]
     fn position_with<Q: ?Sized + PartialEq>(&self, k: &Q, h: Option<u64>) -> Option<usize>
     where K: std::borrow::Borrow<Q> {
+        let is_k = |e: &Option<(K, V)>| matches!(e, Some((ek, _)) if ek.borrow() == k);
         match (&self.lookup, h) {
-            (AlmideKeyLookup::Built(ix), Some(h)) => ix.find(h, |p| self.entries[p].0.borrow() == k),
-            _ => self.entries.iter().position(|(ek, _)| ek.borrow() == k),
+            (AlmideKeyLookup::Built(ix), Some(h)) => ix.find(h, |p| is_k(&self.entries[p])),
+            _ => self.entries.iter().position(is_k),
         }
     }
 
@@ -357,18 +399,21 @@ impl<K: PartialEq + 'static, V> AlmideMap<K, V> {
             }
             return;
         }
+        // A linear map has no holes, so key order is position order.
         if matches!(self.lookup, AlmideKeyLookup::Linear) && self.entries.len() >= ALMIDE_MAP_INDEX_THRESHOLD {
-            self.lookup.build(self.entries.iter().map(|(k, _)| k), self.entries.len());
+            self.lookup.build(self.entries.iter().flatten().map(|(k, _)| k), self.entries.len());
         }
     }
 
     pub fn get<Q: ?Sized + PartialEq + AlmideMapKey>(&self, k: &Q) -> Option<&V>
     where K: std::borrow::Borrow<Q> {
-        self.position(k).map(|i| &self.entries[i].1)
+        let i = self.position(k)?;
+        self.entries[i].as_ref().map(|(_, v)| v)
     }
     pub fn get_mut<Q: ?Sized + PartialEq + AlmideMapKey>(&mut self, k: &Q) -> Option<&mut V>
     where K: std::borrow::Borrow<Q> {
-        self.position(k).map(|i| &mut self.entries[i].1)
+        let i = self.position(k)?;
+        self.entries[i].as_mut().map(|(_, v)| v)
     }
     pub fn contains_key<Q: ?Sized + PartialEq + AlmideMapKey>(&self, k: &Q) -> bool
     where K: std::borrow::Borrow<Q> {
@@ -379,10 +424,12 @@ impl<K: PartialEq + 'static, V> AlmideMap<K, V> {
     pub fn insert(&mut self, k: K, v: V) {
         let h = self.lookup.hash_for(&k);
         if let Some(i) = self.position_with(&k, h) {
-            self.entries[i].1 = v;
+            if let Some((_, slot)) = &mut self.entries[i] {
+                *slot = v;
+            }
             return;
         }
-        self.entries.push((k, v));
+        self.entries.push(Some((k, v)));
         self.note_push(h);
     }
     /// `m[k] = f(map.get_or(m, k, init))` in ONE probe (the walker's
@@ -393,19 +440,31 @@ impl<K: PartialEq + 'static, V> AlmideMap<K, V> {
     pub fn upsert_with<F: FnOnce(V) -> V>(&mut self, k: K, init: V, f: F) where V: Clone {
         let h = self.lookup.hash_for(&k);
         if let Some(i) = self.position_with(&k, h) {
-            let slot = &mut self.entries[i].1;
-            *slot = f(slot.clone());
+            if let Some((_, slot)) = &mut self.entries[i] {
+                *slot = f(slot.clone());
+            }
             return;
         }
         let v = f(init);
-        self.entries.push((k, v));
+        self.entries.push(Some((k, v)));
         self.note_push(h);
     }
-    /// Remove, keeping the order of the remaining entries.
+    /// Remove, keeping the order of the remaining entries: an indexed map
+    /// leaves a hole (amortized O(1), #3691), a linear one shifts.
     pub fn remove(&mut self, k: &K) {
-        if let Some(i) = self.position(k) {
+        let Some(i) = self.position(k) else { return };
+        let AlmideKeyLookup::Built(ix) = &mut self.lookup else {
             self.entries.remove(i);
-            self.lookup.removed_at(i);
+            return;
+        };
+        ix.kill(i);
+        self.entries[i] = None;
+        self.dead += 1;
+        if self.dead * 2 > self.entries.len() {
+            let entries = &self.entries;
+            ix.retain(|p| entries[p].is_some());
+            self.entries.retain(Option::is_some);
+            self.dead = 0;
         }
     }
 }
@@ -416,11 +475,11 @@ impl<K: PartialEq + 'static, V> AlmideMap<K, V> {
 // output matches the wasm compact-ordered-dict walk byte-for-byte.
 impl<K: AlmideRepr, V: AlmideRepr> AlmideRepr for AlmideMap<K, V> {
     fn almide_repr(&self) -> String {
-        if self.entries.is_empty() {
+        if self.is_empty() {
             return "[:]".to_string();
         }
         let mut o = String::from("[");
-        for (i, (k, v)) in self.entries.iter().enumerate() {
+        for (i, (k, v)) in self.iter().enumerate() {
             if i > 0 { o.push_str(", "); }
             o.push_str(&k.almide_repr());
             o.push_str(": ");
@@ -435,8 +494,7 @@ impl<K: AlmideRepr, V: AlmideRepr> AlmideRepr for AlmideMap<K, V> {
 // std HashMap and the wasm structural Map `==`.
 impl<K: PartialEq + 'static, V: PartialEq> PartialEq for AlmideMap<K, V> {
     fn eq(&self, other: &Self) -> bool {
-        self.entries.len() == other.entries.len()
-            && self.entries.iter().all(|(k, v)| other.get(k) == Some(v))
+        self.len() == other.len() && self.iter().all(|(k, v)| other.get(k) == Some(v))
     }
 }
 
@@ -456,11 +514,17 @@ impl<K: PartialEq + 'static, V, const N: usize> From<[(K, V); N]> for AlmideMap<
     }
 }
 
+// ADR-0013: a map returned across the runtime boundary converts its keys and values.
+impl<K: AlmideIntoStr, V: AlmideIntoStr> AlmideIntoStr for AlmideMap<K, V> where K::Out: PartialEq + 'static {
+    type Out = AlmideMap<K::Out, V::Out>;
+    fn into_almide(self) -> Self::Out { self.into_iter().map(|(k, v)| (k.into_almide(), v.into_almide())).collect() }
+}
+
 impl<K, V> IntoIterator for AlmideMap<K, V> {
     type Item = (K, V);
-    type IntoIter = std::vec::IntoIter<(K, V)>;
+    type IntoIter = std::iter::Flatten<std::vec::IntoIter<Option<(K, V)>>>;
     fn into_iter(self) -> Self::IntoIter {
-        self.entries.into_iter()
+        self.entries.into_iter().flatten()
     }
 }
 
@@ -510,23 +574,32 @@ pub fn almide_rt_map_upsert_fn<K: PartialEq + 'static, V: Clone, F: Fn(V) -> V>(
 // String-keyed twins whose key arrives BORROWED (`StrMapKey`, the final-IR
 // rewrite of `k.to_string()` at the key slot): the key is copied only when it
 // is inserted, never when it is found.
-pub fn almide_rt_map_upsert_str_fn<V: Clone, F: Fn(V) -> V>(mut m: AlmideMap<String, V>, k: &str, init: V, f: F) -> AlmideMap<String, V> {
-    if let Some(v) = m.get_mut(k) {
-        let old = std::mem::replace(v, init);
-        *v = f(old);
-    } else {
-        m.insert(k.to_string(), init);
-    }
-    m
+pub fn almide_rt_map_upsert_str_fn<V: Clone, F: Fn(V) -> V>(mut m: AlmideMap<AlmideString, V>, k: &str, init: V, f: F) -> AlmideMap<AlmideString, V> {
+    let __almide_v: AlmideMap<AlmideString, V> = {
+        if let Some(v) = m.get_mut(k) {
+            let old = std::mem::replace(v, init);
+            *v = f(old);
+        } else {
+            m.insert(AlmideString::from(k), init);
+        }
+        m
+    };
+    __almide_v
 }
-pub fn almide_rt_map_set_str<V: Clone>(mut m: AlmideMap<String, V>, k: &str, v: V) -> AlmideMap<String, V> {
-    match m.get_mut(k) {
-        Some(slot) => *slot = v,
-        None => m.insert(k.to_string(), v),
-    }
-    m
+pub fn almide_rt_map_set_str<V: Clone>(mut m: AlmideMap<AlmideString, V>, k: &str, v: V) -> AlmideMap<AlmideString, V> {
+    let __almide_v: AlmideMap<AlmideString, V> = {
+        match m.get_mut(k) {
+            Some(slot) => *slot = v,
+            None => m.insert(AlmideString::from(k), v),
+        }
+        m
+    };
+    __almide_v
 }
 pub fn almide_rt_map_remove<K: PartialEq + Clone + 'static, V: Clone>(m: &AlmideMap<K, V>, k: K) -> AlmideMap<K, V> { let mut r = m.clone(); r.remove(&k); r }
+// The owned twin (`@reuse(m)`, #3640): a source at its last use is edited in
+// place instead of cloned.
+pub fn almide_rt_map_remove_owned<K: PartialEq + Clone + 'static, V: Clone>(mut m: AlmideMap<K, V>, k: K) -> AlmideMap<K, V> { m.remove(&k); m }
 pub fn almide_rt_map_contains<K: PartialEq + 'static, V, Q: ?Sized + PartialEq + AlmideMapKey>(m: &AlmideMap<K, V>, k: &Q) -> bool
 where K: std::borrow::Borrow<Q> { m.contains_key(k) }
 pub fn almide_rt_map_keys<K: Clone, V>(m: &AlmideMap<K, V>) -> Vec<K> { m.keys().cloned().collect() }
@@ -539,14 +612,19 @@ pub fn almide_rt_map_entries<K: Clone, V: Clone>(m: &AlmideMap<K, V>) -> Vec<(K,
 // value out instead of cloning it. `map_values_owned` also keeps the source's
 // key index: the keys and their order are unchanged, so the hashes and the
 // slot table stay valid as they are and nothing is rehashed.
-pub fn almide_rt_map_keys_owned<K, V>(m: AlmideMap<K, V>) -> Vec<K> { m.entries.into_iter().map(|(k, _)| k).collect() }
-pub fn almide_rt_map_values_owned<K, V>(m: AlmideMap<K, V>) -> Vec<V> { m.entries.into_iter().map(|(_, v)| v).collect() }
-pub fn almide_rt_map_entries_owned<K, V>(m: AlmideMap<K, V>) -> Vec<(K, V)> { m.entries }
+pub fn almide_rt_map_keys_owned<K, V>(m: AlmideMap<K, V>) -> Vec<K> { m.into_iter().map(|(k, _)| k).collect() }
+pub fn almide_rt_map_values_owned<K, V>(m: AlmideMap<K, V>) -> Vec<V> { m.into_iter().map(|(_, v)| v).collect() }
+pub fn almide_rt_map_entries_owned<K, V>(m: AlmideMap<K, V>) -> Vec<(K, V)> { m.entries.into_iter().flatten().collect() }
+// The holes stay where they are, so the index and `dead` carry over as is.
 pub fn almide_rt_map_map_values_owned<K, V, W>(m: AlmideMap<K, V>, f: std::rc::Rc<dyn Fn(V) -> W>) -> AlmideMap<K, W> {
-    let AlmideMap { entries, lookup } = m;
-    AlmideMap { entries: entries.into_iter().map(|(k, v)| (k, f(v))).collect(), lookup }
+    let AlmideMap { entries, dead, lookup } = m;
+    AlmideMap { entries: entries.into_iter().map(|e| e.map(|(k, v)| (k, f(v)))).collect(), dead, lookup }
 }
 pub fn almide_rt_map_merge<K: PartialEq + Clone + 'static, V: Clone>(a: &AlmideMap<K, V>, b: &AlmideMap<K, V>) -> AlmideMap<K, V> { let mut r = a.clone(); for (k, v) in b.iter() { r.insert(k.clone(), v.clone()); } r }
+// The owned twin (`@reuse(a)`, #3643): a left map at its last use is extended
+// in place instead of cloned — b's keys a has take b's value where they are,
+// b's new keys append in b's order (`insert`).
+pub fn almide_rt_map_merge_owned<K: PartialEq + Clone + 'static, V: Clone>(mut a: AlmideMap<K, V>, b: &AlmideMap<K, V>) -> AlmideMap<K, V> { for (k, v) in b.iter() { a.insert(k.clone(), v.clone()); } a }
 
 pub fn almide_rt_map_filter<K: PartialEq + Clone + 'static, V: Clone>(m: &AlmideMap<K, V>, f: std::rc::Rc<dyn Fn(K, V) -> bool>) -> AlmideMap<K, V> {
     let f = move |a, b| f(a, b);
@@ -588,8 +666,12 @@ pub fn almide_rt_map_find<K: Clone + PartialEq + 'static, V: Clone>(m: &AlmideMa
     m.iter().find(|&(k, v)| f(k.clone(), v.clone())).map(|(k, v)| (k.clone(), v.clone()))
 }
 pub fn almide_rt_map_update<K: PartialEq + Clone + 'static, V: Clone>(m: &AlmideMap<K, V>, key: K, f: std::rc::Rc<dyn Fn(V) -> V>) -> AlmideMap<K, V> {
+    almide_rt_map_update_owned(m.clone(), key, f)
+}
+// `@reuse(m)` (#3707): `m = map.update(m, k, f)` over a dying `m` updates
+// the map it is handed instead of a copy of it.
+pub fn almide_rt_map_update_owned<K: PartialEq + Clone + 'static, V: Clone>(mut m: AlmideMap<K, V>, key: K, f: std::rc::Rc<dyn Fn(V) -> V>) -> AlmideMap<K, V> {
     let f = move |a| f(a);
-    let mut m = m.clone();
     if let Some(v) = m.get(&key).cloned() { m.insert(key, f(v)); }
     m
 }

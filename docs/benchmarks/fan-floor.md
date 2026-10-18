@@ -1,0 +1,420 @@
+# Fan floor ledger: Almide's parallel offers against Rayon, Go and Zig
+
+How much of a parallel offer's cost is the language's? This ledger measures `fan` against three other parallel runtimes on the same programs and machines. The largest gap it shows is the next thing to fix. The sources and the runner are in [research/benchmark/fan-floor/](../../research/benchmark/fan-floor/). The cost model's own ledger is [fan-cost-model.txt](./fan-cost-model.txt).
+
+## The probes
+
+Every program computes `work(s, i, iters)`: `iters` steps of `acc = (acc * 31 + j) % 1000003`. It runs in OFFERS of 10 elements, and each offer's result seeds the next, so offers cannot overlap. An element costs about 4–5 ns per iteration on these machines (iters 1000 ≈ 4–5 µs).
+
+| probe | one offer | measured as |
+|---|---|---|
+| `sweep` | one 10-element parallel map | t(1010 offers) − t(10 offers), per offer |
+| `nest` | a 4-element parallel map whose element is itself a 10-element parallel map | t(210) − t(10), per outer offer |
+| `busy` | two independent lanes at once, each running its own sequence of 10-element maps (Almide: two `fan { }` arms) | t(510) − t(10), per pair of offers |
+
+The difference of two runs cancels process start and, on wasm, compilation. Each figure is the minimum of 7 runs, with every implementation run in turn on each repetition so they see the same machine state. Every implementation printed the same result for every row.
+
+The implementations:
+
+| column | what |
+|---|---|
+| Almide native | `almide build --release`, the default (the cost model chooses sequential or parallel per offer) |
+| native seq | the same binary, `ALMIDE_FAN_SEQUENTIAL=1`. Two `fan { }` arms still run at once, so `busy` seq is one lane's time |
+| Almide wasm | `almide run --target wasm`, the default. Shown for reference only: it is a wasm program, and the reference implementations are native code, so it is not ranked against them |
+| Rayon | Rust 1.x + `rayon` 1.10.0: `into_par_iter().map().collect()`, nested par_iter, `rayon::join` for the lanes |
+| Go | Go 1.22.2: a goroutine per element and a `sync.WaitGroup` per offer, two goroutines for the lanes |
+| Zig | Zig 0.13.0: `std.Thread.Pool` + `spawnWg` + `waitAndWork`, two `std.Thread`s for the lanes |
+| … seq | each language's plain loop |
+
+`fastest` is the smallest of the six reference columns. `Almide / fastest` compares it with Almide native, and `—` marks a row where the fastest is under 1 µs (no parallel work to compare).
+
+## Results, 2026-10-16 (Almide develop at 594a5eb81)
+
+All figures are µs per offer.
+
+### GCE c4-standard-8, Intel Xeon Platinum 8581C
+
+| probe | iters | Almide native | native seq | Almide wasm | Rayon | Rayon seq | Go | Go seq | Zig | Zig seq | fastest | Almide / fastest |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|
+| sweep | 0 | 0.1 | 0.0 | 1.8 | 8.9 | 0.0 | 2.8 | 0.0 | 137.6 | 0.1 | 0.0 go-seq | — |
+| sweep | 100 | 4.0 | 3.8 | 5.7 | 8.4 | 3.6 | 7.1 | 3.3 | 143.9 | 4.6 | 3.3 go-seq | 1.21x |
+| sweep | 300 | 12.3 | 11.7 | 12.0 | 10.3 | 11.2 | 14.8 | 10.3 | 151.4 | 14.3 | 10.3 rayon | 1.20x |
+| sweep | 1000 | 34.7 | 39.7 | 42.9 | 15.9 | 37.9 | 30.0 | 34.4 | 169.3 | 47.7 | 15.9 rayon | 2.19x |
+| sweep | 3000 | 52.2 | 120.3 | 65.2 | 34.3 | 113.8 | 49.4 | 103.1 | 171.1 | 143.1 | 34.3 rayon | 1.52x |
+| sweep | 10000 | 114.7 | 397.6 | 123.1 | 114.2 | 379.9 | 90.3 | 344.3 | 178.1 | 474.6 | 90.3 go | 1.27x |
+| sweep | 30000 | 284.0 | 1192.4 | 283.5 | 273.9 | 1138.8 | 232.0 | 1030.2 | 360.3 | 1420.7 | 232.0 go | 1.22x |
+| nest | 0 | 0.3 | 0.1 | 13.2 | 10.6 | 0.1 | 14.6 | 0.8 | 453.9 | 0.2 | 0.1 rayon-seq | — |
+| nest | 100 | 15.5 | 15.2 | 20.7 | 13.9 | 14.5 | 26.2 | 13.6 | 469.5 | 18.5 | 13.6 go-seq | 1.14x |
+| nest | 1000 | 135.4 | 159.2 | 162.1 | 31.9 | 152.4 | 64.5 | 136.8 | 595.8 | 190.7 | 31.9 rayon | 4.24x |
+| nest | 10000 | 461.2 | 1591.0 | 489.6 | 215.2 | 1517.5 | 239.8 | 1381.6 | 652.7 | 1900.4 | 215.2 rayon | 2.14x |
+| busy | 0 | 0.3 | 0.0 | 2.3 | 4.4 | 0.0 | 3.4 | 0.3 | 235.7 | 0.1 | 0.0 rayon-seq | — |
+| busy | 100 | 4.2 | 3.7 | 8.9 | 5.9 | 7.3 | 6.7 | 6.9 | 247.2 | 9.3 | 5.9 rayon | 0.70x |
+| busy | 1000 | 67.5 | 39.6 | 82.8 | 16.7 | 75.6 | 20.4 | 68.5 | 302.5 | 95.2 | 16.7 rayon | 4.03x |
+| busy | 10000 | 185.6 | 397.9 | 252.2 | 147.8 | 758.8 | 101.2 | 688.1 | 316.3 | 949.8 | 101.2 go | 1.83x |
+
+### GCE n2d-standard-8, AMD EPYC 7B13
+
+| probe | iters | Almide native | native seq | Almide wasm | Rayon | Rayon seq | Go | Go seq | Zig | Zig seq | fastest | Almide / fastest |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|
+| sweep | 0 | 0.0 | 0.0 | 6.3 | 14.7 | 0.0 | 4.6 | 0.2 | 348.8 | 0.0 | 0.0 zig-seq | — |
+| sweep | 100 | 5.0 | 4.7 | 19.2 | 17.3 | 4.7 | 9.9 | 4.6 | 392.5 | 5.9 | 4.6 go-seq | 1.09x |
+| sweep | 300 | 16.2 | 14.7 | 27.4 | 18.8 | 14.9 | 17.2 | 14.1 | 414.9 | 17.3 | 14.1 go-seq | 1.15x |
+| sweep | 1000 | 42.6 | 49.5 | 66.0 | 25.8 | 49.1 | 36.3 | 44.9 | 431.0 | 57.0 | 25.8 rayon | 1.66x |
+| sweep | 3000 | 67.0 | 149.6 | 81.0 | 46.3 | 146.9 | 65.4 | 134.2 | 475.7 | 170.6 | 46.3 rayon | 1.45x |
+| sweep | 10000 | 158.0 | 502.3 | 170.0 | 132.3 | 491.5 | 141.8 | 445.2 | 476.5 | 567.5 | 132.3 rayon | 1.19x |
+| sweep | 30000 | 370.3 | 1501.2 | 407.1 | 397.6 | 1471.0 | 327.7 | 1338.6 | 545.5 | 1688.8 | 327.7 go | 1.13x |
+| nest | 0 | 1.1 | 0.0 | 5.6 | 19.2 | 0.5 | 19.7 | 1.4 | 1397.8 | 0.0 | 0.0 zig-seq | — |
+| nest | 100 | 19.3 | 18.7 | 92.7 | 22.4 | 19.7 | 32.0 | 18.2 | 1551.9 | 22.4 | 18.2 go-seq | 1.06x |
+| nest | 1000 | 164.3 | 201.2 | 245.4 | 49.4 | 196.1 | 88.6 | 179.4 | 1547.0 | 227.4 | 49.4 rayon | 3.33x |
+| nest | 10000 | 593.5 | 2022.9 | 631.1 | 291.4 | 1962.6 | 348.1 | 1787.0 | 1942.8 | 2265.5 | 291.4 rayon | 2.04x |
+| busy | 0 | 0.0 | 0.0 | 20.7 | 4.3 | 0.0 | 4.7 | 0.4 | 573.5 | 0.1 | 0.0 rayon-seq | — |
+| busy | 100 | 6.5 | 4.8 | 25.0 | 8.7 | 9.3 | 8.9 | 8.7 | 647.8 | 11.3 | 8.7 go-seq | 0.75x |
+| busy | 1000 | 114.1 | 50.6 | 129.7 | 22.6 | 98.2 | 31.0 | 89.9 | 758.5 | 112.8 | 22.6 rayon | 5.05x |
+| busy | 10000 | 307.2 | 502.2 | 344.3 | 180.2 | 976.5 | 143.6 | 888.3 | 931.8 | 1132.4 | 143.6 go | 2.14x |
+
+## Reading it
+
+- **`busy` has the largest gap: 4.0x (Intel) and 5.1x (AMD) at 1000 iterations**, and Almide is slower there than its own sequential mode (39.6 / 50.6 µs). Each lane's offers come from a `fan { }` arm's thread. Only one offer at a time could hold the resident crew (list.rs `almide_fan_run_tasks`), so the other lane spawned a thread per worker on every offer. That is the item fixed next: see **After** below.
+- `nest` comes next at 4.2x / 3.3x. Its outer map has an effect callback (it calls `fan { }`), and an effect `fan.map` runs its elements one after another (#2594). So only the inner maps are parallel, and 4 × 10 elements run as four 10-element offers. That is a language-surface change, not a runtime one.
+- `sweep` is within 1.3x of the fastest from 10000 iterations up. Its gap is 1.7–2.2x at 1000, where Rayon's work-stealing join costs less than Almide's dealing and the cost model's choice of 5 workers.
+- Zig 0.13's `std.Thread.Pool` costs 110–350 µs per offer here, and it is never the fastest.
+- Go's sequential loop is ~10% faster than the others' at high iteration counts. That is code generation, not the parallel runtime, and it is why Go is the fastest at 10000+.
+
+## After: one shared pool, the caller taking blocks too (2026-10-16)
+
+Every parallel offer now posts helper calls to one resident pool (list.rs `almide_fan_deal` / `almide_fan_pool`), whichever thread it comes from, a `fan { }` arm's included. The calling thread takes blocks of its own offer as well. A helper that starts after the blocks ran out takes none. The caller waits only for helpers already inside the offer's gate, so no offer waits on a helper that is busy elsewhere. Helper calls go to the lowest-numbered idle pool threads, so a run of single offers keeps the same warm threads; handing them out in turn cost 4–15% per offer on the AMD machine.
+
+Same runs, same probes; `develop` / `this` are the default (cost model) build of each, and `forced par` is this build with `ALMIDE_FAN_COST_OFF=1`; µs per offer:
+
+### GCE c4-standard-8, Intel Xeon Platinum 8581C
+
+| probe | iters | develop | this | forced par | fastest | develop / fastest | this / fastest | gap before | gap after |
+|---|---:|---:|---:|---:|---|---:|---:|---:|---:|
+| sweep | 0 | 0.1 | 0.0 | 8.2 | 0.0 go-seq | — | — | +0.0 | -0.1 |
+| sweep | 100 | 4.0 | 3.9 | 12.2 | 3.3 go-seq | 1.21x | 1.19x | +0.7 | +0.6 |
+| sweep | 300 | 12.3 | 12.1 | 15.8 | 10.3 rayon | 1.20x | 1.18x | +2.0 | +1.8 |
+| sweep | 1000 | 34.7 | 21.8 | 31.3 | 15.9 rayon | 2.19x | 1.37x | +18.8 | +5.9 |
+| sweep | 3000 | 52.2 | 45.3 | 41.5 | 34.3 rayon | 1.52x | 1.32x | +17.9 | +11.0 |
+| sweep | 10000 | 114.7 | 107.5 | 97.9 | 90.3 go | 1.27x | 1.19x | +24.4 | +17.2 |
+| sweep | 30000 | 284.0 | 268.4 | 258.4 | 232.0 go | 1.22x | 1.16x | +52.0 | +36.3 |
+| nest | 0 | 0.3 | 0.3 | 33.6 | 0.1 rayon-seq | — | — | +0.2 | +0.2 |
+| nest | 100 | 15.5 | 15.8 | 48.9 | 13.6 go-seq | 1.14x | 1.16x | +2.0 | +2.2 |
+| nest | 1000 | 135.4 | 112.2 | 126.7 | 31.9 rayon | 4.24x | 3.51x | +103.5 | +80.3 |
+| nest | 10000 | 461.2 | 427.6 | 398.4 | 215.2 rayon | 2.14x | 1.99x | +246.0 | +212.4 |
+| busy | 0 | 0.3 | 0.2 | 18.3 | 0.0 rayon-seq | — | — | +0.3 | +0.2 |
+| busy | 100 | 4.2 | 4.1 | 22.7 | 5.9 rayon | 0.70x | 0.70x | -1.7 | -1.8 |
+| busy | 1000 | 67.5 | 25.4 | 35.2 | 16.7 rayon | 4.03x | 1.52x | +50.7 | +8.7 |
+| busy | 10000 | 185.6 | 138.3 | 156.4 | 101.2 go | 1.83x | 1.37x | +84.4 | +37.1 |
+
+### GCE n2d-standard-8, AMD EPYC 7B13
+
+| probe | iters | develop | this | forced par | fastest | develop / fastest | this / fastest | gap before | gap after |
+|---|---:|---:|---:|---:|---|---:|---:|---:|---:|
+| sweep | 0 | 0.0 | 0.1 | 24.1 | 0.0 zig-seq | — | — | +0.0 | +0.2 |
+| sweep | 100 | 5.0 | 5.1 | 28.6 | 4.6 go-seq | 1.09x | 1.12x | +0.4 | +0.5 |
+| sweep | 300 | 16.2 | 15.6 | 35.6 | 14.1 go-seq | 1.15x | 1.10x | +2.1 | +1.4 |
+| sweep | 1000 | 42.6 | 39.1 | 43.1 | 25.8 rayon | 1.66x | 1.52x | +16.9 | +13.4 |
+| sweep | 3000 | 67.0 | 62.6 | 58.7 | 46.3 rayon | 1.45x | 1.35x | +20.6 | +16.2 |
+| sweep | 10000 | 158.0 | 145.7 | 134.7 | 132.3 rayon | 1.19x | 1.10x | +25.7 | +13.4 |
+| sweep | 30000 | 370.3 | 371.3 | 348.6 | 327.7 go | 1.13x | 1.13x | +42.6 | +43.6 |
+| nest | 0 | 1.1 | 1.1 | 98.4 | 0.0 zig-seq | — | — | +1.6 | +1.5 |
+| nest | 100 | 19.3 | 20.8 | 110.2 | 18.2 go-seq | 1.06x | 1.15x | +1.2 | +2.6 |
+| nest | 1000 | 164.3 | 129.0 | 170.2 | 49.4 rayon | 3.33x | 2.61x | +114.9 | +79.6 |
+| nest | 10000 | 593.5 | 555.0 | 542.3 | 291.4 rayon | 2.04x | 1.90x | +302.1 | +263.6 |
+| busy | 0 | 0.0 | 0.4 | 54.5 | 0.0 rayon-seq | — | — | -0.5 | +0.4 |
+| busy | 100 | 6.5 | 5.3 | 57.6 | 8.7 go-seq | 0.75x | 0.61x | -2.2 | -3.4 |
+| busy | 1000 | 114.1 | 49.9 | 69.3 | 22.6 rayon | 5.05x | 2.21x | +91.5 | +27.3 |
+| busy | 10000 | 307.2 | 188.2 | 210.2 | 143.6 go | 2.14x | 1.31x | +163.6 | +44.6 |
+
+**`busy`**: at 1000 iterations Almide is 1.52x Rayon on Intel (was 4.03x) and 2.21x on AMD (was 5.05x). The gap over the fastest fell from 50.7 to 8.7 µs (Intel) and from 91.5 to 27.3 µs (AMD), and at 10000 iterations from 84.4 to 37.1 and from 163.6 to 44.6 µs. Every busy row is under half its old gap.
+
+**No regression elsewhere.** These checks are the same as for the cost model (fan-cost-model.txt: 1000 offers × 10 elements, min of 11, modes interleaved). The default build is at or below develop's on both machines at every iteration count, except rows within 2.5% and sub-µs noise at 0 iterations (Intel 1000 iterations: 31.1 → 25.3 µs; AMD: 38.6 → 32.4). The forced-parallel offer at 0 iterations costs 8.2 µs (Intel) and 24.1 µs (AMD), against 17–36 before. On the benchmarks (min of 15, ms):
+
+| | Intel develop | Intel this | AMD develop | AMD this |
+|---|---:|---:|---:|---:|
+| small map ×500 | 54.6 | 47.6 | 74.9 | 64.3 |
+| spectralnorm 1200 | 13.8 | 13.2 | 22.7 | 20.3 |
+| spectralnorm 3000 | 72.9 | 71.6 | 109.6 | 105.2 |
+
+What is left: `nest` (#2594, the effect `fan.map` is sequential) and the wasm leg, whose two `fan { }` arms run one after another.
+
+## The sequential loop: a remainder by a literal (2026-10-17)
+
+From 10000 iterations up the fastest column was Go's, because Go's sequential loop was ~10% faster than Rust's and Almide's (the parallel runtimes split 10 elements over 8 threads the same way, so the loop decides the row). The loop is `acc = (acc * 31 + j) % 1000003`: one dependent chain per iteration, latency-bound. Two things lengthened Almide's chain:
+
+- rustc lowers `checked_rem` by a constant to a magic-number multiply whose sign fix sits on the chain (shift the quotient estimate, add its sign bit, multiply back), and it unrolls the loop with the induction offsets (`j + 1`, `j + 2`) on the chain too;
+- with the native build's default `x86-64-v3`, an i128 multiply written in Rust becomes an unsigned `mulx` plus sign fix-ups, not the signed one-operand `imul`.
+
+`x % <literal>` on `Int` (a divisor of 3 or more that is not a power of two) now renders as `almide_rem_const::<D>(x)` (crates/almide-codegen/src/prelude_rem.rs): the same truncated remainder, the quotient from the magic multiply on the signed `imul`, and the sign correction applied to the remainder from the dividend's sign, beside the multiply. A literal divisor of 3 or more is never 0 or -1, so the call cannot abort, as `%` by such a literal never did. A 90M-step chain (`x86-64-v3`, two runs each) measured 290-292 ms against rustc's 364-372 ms and Go's 310 ms on the Intel VM, and 370-371 ms against 454-457 ms and 400-420 ms on the AMD one. The remainder is checked against `%` on 60,000 dividends for 17 divisors and at the multiples of every divisor below 2000 (`prelude_rem.rs` tests).
+
+The probes' sequential column, same method as the tables above (µs per offer, min of 7, implementations interleaved); `develop` is develop at 9e4fbcb2a with `ALMIDE_FAN_SEQUENTIAL=1`, `this` the same with this change:
+
+### GCE c4-standard-8, Intel Xeon Platinum 8581C
+
+| iters | develop seq | this seq | Rayon seq | Go seq | this / fastest other seq |
+|---:|---:|---:|---:|---:|---:|
+| 0 | 0.1 | 0.0 | 0.0 | 0.1 | — |
+| 100 | 4.0 | 3.2 | 3.8 | 3.5 | 0.92x |
+| 300 | 12.4 | 10.0 | 11.6 | 10.6 | 0.94x |
+| 1000 | 41.6 | 33.2 | 39.4 | 35.6 | 0.93x |
+| 3000 | 122.6 | 98.5 | 116.2 | 106.9 | 0.92x |
+| 10000 | 402.0 | 326.5 | 383.9 | 349.2 | 0.93x |
+| 30000 | 1193.8 | 961.5 | 1138.8 | 1031.9 | 0.93x |
+
+### GCE n2d-standard-8, AMD EPYC 7B13
+
+| iters | develop seq | this seq | Rayon seq | Go seq | this / fastest other seq |
+|---:|---:|---:|---:|---:|---:|
+| 0 | 0.1 | 0.0 | 0.0 | 0.3 | — |
+| 100 | 5.3 | 4.2 | 5.0 | 4.5 | 0.94x |
+| 300 | 15.2 | 12.5 | 14.8 | 13.8 | 0.91x |
+| 1000 | 50.2 | 41.7 | 49.4 | 45.3 | 0.92x |
+| 3000 | 150.5 | 125.1 | 148.9 | 135.4 | 0.92x |
+| 10000 | 502.5 | 414.9 | 494.6 | 445.5 | 0.93x |
+| 30000 | 1514.5 | 1252.5 | 1482.3 | 1345.2 | 0.93x |
+
+Almide's sequential loop is now 6-9% faster than the fastest other sequential loop at every iteration count on both machines, and 17-21% faster than before. The parallel rows move with it (the elements are this loop); the parallel runtime itself is unchanged here.
+
+## The pool: offers published to polling threads, stealing, a recalibrated cost model (2026-10-17)
+
+With the loop at Go's speed or better, the rest of every gap was the parallel runtime. An offer handed a call to each idle pool thread through its own channel, and the threads slept between offers, so every offer paid the kernel's wake-up path (5-20 µs on these VMs). Each worker also read the thread CPU clock three times (a syscall, ~1.1 µs on the AMD VM), the blocks came from a mutex, and the site history was a mutex-guarded map. And an offer made inside another offer's element found the threads already claimed, so it ran on its caller alone. Now (runtime/rs/src/list.rs):
+
+- **Published, not posted.** An offer is published in one of 64 slots (`ALMIDE_FAN_SLOTS`). A pool thread polls for `ALMIDE_FAN_SPIN` (50 µs) after each offer before it parks, and takes blocks from any published offer with blocks left. An offer wakes parked threads only when fewer than it wants are polling. A polling thread reads one counter, the published offers with blocks left (`ALMIDE_FAN_OPEN_BLOCKS`), and touches nothing else until it is non-zero. A thread that enters after the last block was dealt leaves without the element cleanup, and the caller's handle is cloned only once the caller may sleep. The gate lives in the caller's frame, and blocks are dealt by an atomic counter, still in list order (the ADR-0024 D6 trap wait relies on it).
+- **One thread per core.** A pool thread enters an offer only while the threads working on offers are fewer than the cores (`ALMIDE_FAN_RUNNING`), and yields its core while they are not. Two `fan { }` arms each dealing to seven threads had put nine threads on eight cores (busy, 10000 iterations: 1.33x Go on the Intel VM).
+- **A waiting caller steals within its own tree.** Once its own blocks are taken, a caller takes blocks of offers made inside blocks of the same outermost offer (`AlmideFanGate::root`), not another arm's. Taking another arm's element delayed this arm's next offer by up to an element (busy 10000: 108 µs against 95 per pair); taking none left a core idle through each outer offer's tail (nest 10000: 220 against 187).
+- **The cost model, recalibrated.** A forced-parallel offer of ten empty elements now costs 2.4 µs (Intel) and 3.1 µs (AMD) at W=8, against 8.2 and 24.1 µs before (the table above), and against Go's 3.0 and 7.3 µs. `native_offer_ns` / `native_worker_ns` are now 1.5 + 0.7W µs, the envelope of the new calibration rows (fan-cost-model.txt). A parallel offer is timed once in 8 (`ALMIDE_FAN_RESAMPLE_PAR`), the clock read is subtracted from every timed interval, and an estimate from a parallel offer within 2x of the crossover is checked by one sequential offer. A sequential site turns parallel only on two measurements in a row. The site history is a lock-free table.
+
+Same probes and method as above (µs per offer, min of 7, interleaved). `develop` is develop at 2096b786f (it has the remainder change, #3771), `this` adds the pool, and `forced par` is this with `ALMIDE_FAN_COST_OFF=1`:
+
+### GCE c4-standard-8, Intel Xeon Platinum 8581C
+
+| probe | iters | develop | this | forced par | Rayon | Rayon seq | Go | Go seq | fastest | this / fastest |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| sweep | 0 | 0.0 | 0.0 | 2.4 | 9.3 | 0.0 | 3.0 | 0.1 | 0.0 rayon-seq | — |
+| sweep | 100 | 3.2 | 3.4 | 6.1 | 10.1 | 3.8 | 6.4 | 3.5 | 3.5 go-seq | 0.97x |
+| sweep | 300 | 10.1 | 4.8 | 6.8 | 10.4 | 11.7 | 15.3 | 10.8 | 10.4 rayon | 0.46x |
+| sweep | 1000 | 22.4 | 9.6 | 9.8 | 16.3 | 39.7 | 30.1 | 35.9 | 16.3 rayon | 0.59x |
+| sweep | 3000 | 37.0 | 23.1 | 22.9 | 36.1 | 117.9 | 49.4 | 107.9 | 36.1 rayon | 0.64x |
+| sweep | 10000 | 92.6 | 71.6 | 72.2 | 116.0 | 387.2 | 92.2 | 353.7 | 92.2 go | 0.78x |
+| sweep | 30000 | 226.7 | 214.6 | 211.8 | 284.9 | 1157.8 | 237.1 | 1044.1 | 237.1 go | 0.91x |
+| nest | 0 | 0.2 | 0.5 | 9.1 | 11.0 | 0.1 | 14.8 | 0.5 | 0.1 rayon-seq | — |
+| nest | 100 | 13.2 | 13.2 | 20.1 | 14.3 | 14.9 | 26.0 | 13.7 | 13.7 go-seq | 0.96x |
+| nest | 1000 | 94.7 | 37.6 | 37.1 | 32.6 | 159.0 | 67.0 | 143.3 | 32.6 rayon | 1.15x |
+| nest | 10000 | 377.2 | 289.9 | 286.9 | 225.4 | 1539.7 | 247.5 | 1415.8 | 225.4 rayon | 1.29x |
+| busy | 0 | 0.2 | 0.4 | 4.6 | 4.1 | 0.0 | 3.5 | 0.3 | 0.0 rayon-seq | — |
+| busy | 100 | 3.4 | 3.3 | 10.0 | 6.0 | 7.4 | 6.4 | 6.9 | 6.0 rayon | 0.55x |
+| busy | 1000 | 22.7 | 12.0 | 12.2 | 17.3 | 79.5 | 21.4 | 72.0 | 17.3 rayon | 0.69x |
+| busy | 10000 | 119.5 | 96.6 | 96.0 | 153.7 | 773.1 | 104.2 | 704.9 | 104.2 go | 0.93x |
+
+### GCE n2d-standard-8, AMD EPYC 7B13
+
+| probe | iters | develop | this | forced par | Rayon | Rayon seq | Go | Go seq | fastest | this / fastest |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| sweep | 0 | 0.4 | 0.4 | 3.1 | 24.0 | 0.1 | 7.3 | 0.0 | 0.0 go-seq | — |
+| sweep | 100 | 4.4 | 4.5 | 9.5 | 22.9 | 5.2 | 12.7 | 4.4 | 4.4 go-seq | 1.03x |
+| sweep | 300 | 12.5 | 6.6 | 14.6 | 21.9 | 14.9 | 22.8 | 14.4 | 14.4 go-seq | 0.46x |
+| sweep | 1000 | 38.2 | 14.5 | 13.8 | 32.8 | 50.2 | 49.0 | 45.0 | 32.8 rayon | 0.44x |
+| sweep | 3000 | 65.8 | 34.6 | 31.8 | 56.9 | 149.1 | 80.3 | 135.3 | 56.9 rayon | 0.61x |
+| sweep | 10000 | 128.2 | 95.2 | 93.2 | 167.6 | 495.8 | 186.4 | 450.9 | 167.6 rayon | 0.57x |
+| sweep | 30000 | 346.3 | 279.4 | 302.8 | 489.8 | 1482.9 | 402.0 | 1344.0 | 402.0 go | 0.70x |
+| nest | 0 | 0.0 | 3.0 | 7.6 | 21.4 | 0.4 | 23.6 | 0.0 | 0.0 go-seq | — |
+| nest | 100 | 18.6 | 14.6 | 32.4 | 27.1 | 21.0 | 48.5 | 17.3 | 17.3 go-seq | 0.84x |
+| nest | 1000 | 160.6 | 58.1 | 49.5 | 53.2 | 197.1 | 112.2 | 179.1 | 53.2 rayon | 1.09x |
+| nest | 10000 | 516.0 | 396.1 | 381.7 | 322.4 | 1984.5 | 427.0 | 1795.7 | 322.4 rayon | 1.23x |
+| busy | 0 | 0.3 | 0.0 | 3.7 | 6.3 | 0.2 | 6.0 | 0.6 | 0.2 rayon-seq | — |
+| busy | 100 | 3.6 | 4.6 | 11.3 | 10.2 | 9.7 | 11.2 | 9.1 | 9.1 go-seq | 0.51x |
+| busy | 1000 | 48.6 | 16.4 | 15.9 | 24.2 | 97.9 | 33.2 | 88.5 | 24.2 rayon | 0.68x |
+| busy | 10000 | 171.1 | 124.1 | 119.2 | 206.9 | 990.1 | 162.3 | 905.0 | 162.3 go | 0.76x |
+
+`sweep` and `busy` are at or under the fastest at every row on both machines but one: AMD `sweep` at 100 iterations, 4.5 µs against Go's sequential 4.4. This change does not move that row: its offers stay sequential, and develop read 4.4. `nest` is not yet: its outer `fan.map` has an effect callback and still runs its four elements one after another (#2594), which the next change addresses.
+
+No regression against develop on the cost model's sweep (fan-cost-model.txt, 1000 offers, min of 11): this is at or under develop from 100 iterations up on both machines. At 0 iterations it read 0.59 µs per offer against 0.06 on the AMD VM. That gap is not a per-offer cost: 200,000 offers of the same program cost 0.188 µs each against develop's 0.200 (min of 9). It is a one-time difference after the first ten offers. The benchmarks (min of 15, ms):
+
+| | Intel develop | Intel this | AMD develop | AMD this |
+|---|---:|---:|---:|---:|
+| small map ×500 | 41.6 | 31.8 | 64.4 | 42.3 |
+| spectralnorm 1200 | 13.8 | 12.9 | 24.0 | 22.1 |
+| spectralnorm 3000 | 74.6 | 74.6 | 117.6 | 114.8 |
+
+## nest: an effect callback that only fans out (2026-10-17, #2594)
+
+`nest`'s outer `fan.map(list.range(0, 4), (q) => inner(s0 + q, iters))` ran its four elements one after another: `inner` is an `effect fn`, and an effect callback kept the sequential `fan.map` so that its effects stayed in list order. But `inner`'s only effect is its own `fan { list.map(…) }` over a pure `work`. A fan's observation is that of its sequential evaluation (ADR-0024 D1), and its output goes through per-element timelines (D5). So an element that does nothing but fan out over proven work cannot show another element its order.
+
+The fan view of the purity analysis (crates/almide-codegen/src/pass_stream_fusion.rs `Purity::for_fan`) now admits an `effect fn` whose body reaches only proven fns, nested `fan { }` blocks, `fan.*` calls with proven callbacks, and `!`. The fan routing (pass_rust_lowering_fan.rs) treats such a fn as not an effect. Any effect module call, directly or through another fn (`env.sleep_ms` in tests/fan_nested_effect_parallel_test.rs), still keeps the callback sequential, so no I/O changes order. The test pins both routings in the generated Rust and checks that the parallel output is byte-identical to the sequential run and to wasm.
+
+`nest` rows, µs per outer offer, same method; `pool` is develop with the pool change (#3774), `this` adds this one:
+
+### GCE c4-standard-8, Intel Xeon Platinum 8581C
+
+| probe | iters | pool | this | Rayon | Rayon seq | Go | Go seq | fastest | this / fastest |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| nest | 0 | 0.6 | 0.3 | 11.0 | 0.0 | 13.4 | 0.5 | 0.0 rayon-seq | — |
+| nest | 100 | 12.9 | 8.7 | 13.5 | 14.8 | 27.0 | 14.0 | 13.5 rayon | 0.64x |
+| nest | 1000 | 37.7 | 28.6 | 33.2 | 159.5 | 68.8 | 144.7 | 33.2 rayon | 0.86x |
+| nest | 10000 | 287.7 | 200.7 | 224.9 | 1549.2 | 246.8 | 1415.6 | 224.9 rayon | 0.89x |
+
+### GCE n2d-standard-8, AMD EPYC 7B13
+
+| probe | iters | pool | this | Rayon | Rayon seq | Go | Go seq | fastest | this / fastest |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| nest | 0 | 1.8 | 3.0 | 27.9 | 0.8 | 38.9 | 4.4 | 0.8 rayon-seq | — |
+| nest | 100 | 15.4 | 13.0 | 27.8 | 19.3 | 52.0 | 19.3 | 19.3 rayon-seq | 0.67x |
+| nest | 1000 | 53.3 | 43.0 | 62.5 | 198.0 | 113.3 | 180.8 | 62.5 rayon | 0.69x |
+| nest | 10000 | 405.8 | 270.4 | 320.8 | 2006.9 | 411.6 | 1784.8 | 320.8 rayon | 0.84x |
+
+## Results, 2026-10-17 (the remainder, the pool and nest together)
+
+The full run, every implementation, the same method as the first tables. `develop native` is develop at 9e4fbcb2a (the "After" pool above), before all three changes:
+
+### GCE c4-standard-8, Intel Xeon Platinum 8581C
+
+| probe | iters | Almide native | native seq | develop native | Almide wasm | Rayon | Rayon seq | Go | Go seq | Zig | Zig seq | fastest | Almide / fastest |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|
+| sweep | 0 | 0.0 | 0.0 | 0.1 | 2.2 | 8.9 | 0.0 | 3.1 | 0.0 | 137.5 | 0.0 | 0.0 rayon-seq | — |
+| sweep | 100 | 3.2 | 3.1 | 4.1 | 5.5 | 8.6 | 3.8 | 7.5 | 3.5 | 143.1 | 4.9 | 3.5 go-seq | 0.91x |
+| sweep | 300 | 4.8 | 9.9 | 12.4 | 15.0 | 10.1 | 11.7 | 15.3 | 10.5 | 152.7 | 14.8 | 10.1 rayon | 0.48x |
+| sweep | 1000 | 9.6 | 33.3 | 19.4 | 44.5 | 16.3 | 39.6 | 29.8 | 35.6 | 170.1 | 49.7 | 16.3 rayon | 0.59x |
+| sweep | 3000 | 23.3 | 98.9 | 45.3 | 65.3 | 36.0 | 118.1 | 49.4 | 107.6 | 170.5 | 148.3 | 36.0 rayon | 0.65x |
+| sweep | 10000 | 71.7 | 326.2 | 108.3 | 125.4 | 116.6 | 382.3 | 91.9 | 353.1 | 181.1 | 480.8 | 91.9 go | 0.78x |
+| sweep | 30000 | 210.0 | 957.8 | 275.0 | 291.9 | 279.0 | 1141.1 | 232.6 | 1036.9 | 364.2 | 1422.7 | 232.6 go | 0.90x |
+| nest | 0 | 0.0 | 0.0 | 0.1 | 16.1 | 11.6 | 0.3 | 15.0 | 0.2 | 451.1 | 0.2 | 0.2 go-seq | — |
+| nest | 100 | 7.6 | 12.4 | 16.2 | 32.3 | 14.1 | 15.0 | 26.6 | 14.2 | 475.8 | 19.1 | 14.1 rayon | 0.54x |
+| nest | 1000 | 28.1 | 130.6 | 115.3 | 189.9 | 33.2 | 158.4 | 66.4 | 143.3 | 600.0 | 198.7 | 33.2 rayon | 0.85x |
+| nest | 10000 | 201.0 | 1301.6 | 435.9 | 486.2 | 223.3 | 1556.3 | 248.1 | 1408.7 | 671.4 | 1940.4 | 223.3 rayon | 0.90x |
+| busy | 0 | 0.3 | 0.0 | 0.2 | 2.2 | 4.4 | 0.0 | 3.4 | 0.1 | 234.2 | 0.1 | 0.0 rayon-seq | — |
+| busy | 100 | 3.2 | 3.1 | 4.1 | 9.2 | 6.1 | 7.6 | 6.9 | 7.0 | 246.5 | 9.8 | 6.1 rayon | 0.53x |
+| busy | 1000 | 11.9 | 33.4 | 25.4 | 86.8 | 17.6 | 79.3 | 21.9 | 71.8 | 306.6 | 100.0 | 17.6 rayon | 0.68x |
+| busy | 10000 | 95.4 | 326.6 | 140.5 | 245.7 | 150.5 | 767.6 | 103.4 | 696.6 | 323.6 | 953.0 | 103.4 go | 0.92x |
+
+### GCE n2d-standard-8, AMD EPYC 7B13
+
+| probe | iters | Almide native | native seq | develop native | Almide wasm | Rayon | Rayon seq | Go | Go seq | Zig | Zig seq | fastest | Almide / fastest |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|
+| sweep | 0 | 0.5 | 0.0 | 0.3 | 28.0 | 18.8 | 0.0 | 6.2 | 0.3 | 423.4 | 0.1 | 0.0 rayon-seq | — |
+| sweep | 100 | 4.0 | 3.9 | 5.2 | 8.7 | 23.8 | 4.8 | 10.2 | 4.7 | 418.8 | 6.0 | 4.7 go-seq | 0.85x |
+| sweep | 300 | 8.2 | 12.7 | 15.8 | 33.0 | 17.9 | 14.6 | 21.8 | 13.7 | 460.3 | 16.9 | 13.7 go-seq | 0.60x |
+| sweep | 1000 | 13.4 | 41.5 | 38.0 | 73.6 | 28.4 | 49.1 | 49.4 | 44.3 | 571.1 | 56.6 | 28.4 rayon | 0.47x |
+| sweep | 3000 | 32.8 | 126.1 | 70.0 | 105.8 | 62.5 | 150.5 | 87.1 | 136.1 | 629.6 | 172.2 | 62.5 rayon | 0.53x |
+| sweep | 10000 | 101.8 | 415.5 | 148.1 | 197.5 | 161.3 | 496.0 | 177.5 | 449.1 | 669.8 | 569.8 | 161.3 rayon | 0.63x |
+| sweep | 30000 | 300.1 | 1239.0 | 379.2 | 454.1 | 476.3 | 1478.4 | 394.2 | 1341.4 | 737.0 | 1708.9 | 394.2 go | 0.76x |
+| nest | 0 | 2.2 | 0.6 | 1.3 | 23.1 | 26.9 | 1.2 | 29.7 | 2.5 | 1632.1 | 0.3 | 0.3 zig-seq | — |
+| nest | 100 | 11.7 | 16.2 | 19.7 | 205.8 | 20.5 | 18.3 | 50.2 | 17.8 | 1697.3 | 24.5 | 17.8 go-seq | 0.66x |
+| nest | 1000 | 39.9 | 166.4 | 159.1 | 358.1 | 59.3 | 195.3 | 111.4 | 179.3 | 1801.7 | 229.4 | 59.3 rayon | 0.67x |
+| nest | 10000 | 274.3 | 1651.3 | 602.6 | 764.9 | 322.8 | 1984.0 | 417.9 | 1811.1 | 2705.8 | 2288.8 | 322.8 rayon | 0.85x |
+| busy | 0 | 1.1 | 0.2 | 0.2 | 3.6 | 7.6 | 0.4 | 6.8 | 0.8 | 656.2 | 0.5 | 0.4 rayon-seq | — |
+| busy | 100 | 5.0 | 4.9 | 6.1 | 39.4 | 16.4 | 10.1 | 12.7 | 10.4 | 728.2 | 10.8 | 10.1 rayon-seq | 0.50x |
+| busy | 1000 | 18.9 | 42.8 | 54.3 | 148.1 | 26.2 | 98.1 | 41.1 | 90.3 | 924.9 | 114.8 | 26.2 rayon | 0.72x |
+| busy | 10000 | 126.9 | 414.1 | 210.2 | 485.9 | 200.7 | 992.1 | 163.2 | 902.0 | 1320.8 | 1149.8 | 163.2 go | 0.78x |
+
+### Reading it
+
+- **Almide native is at or under the fastest on every row** where the fastest is 1 µs or more: 0.48-0.92x on the Intel VM and 0.47-0.85x on the AMD one (sweep 0.48-0.91x / 0.47-0.85x, nest 0.54-0.90x / 0.66-0.85x, busy 0.53-0.92x / 0.50-0.78x). The 2026-10-16 table had it at 1.06-5.05x on 22 of its 24 such rows.
+- The rows closest to 1.00 are the ones the reference runtimes are best at: Go's goroutines on `busy` at 10000 iterations (0.92x Intel), Go's sequential loop at `sweep` 100 (0.91x Intel, where the offer stays sequential), and the large-work rows, where every runtime splits 10 elements over 8 threads the same way and the loop decides (0.90x sweep 30000 Intel).
+- An empty forced-parallel sweep offer costs Almide 2.55 / 2.47 µs (Intel / AMD), Go 3.14 / 6.23 and Rayon 8.95 / 18.75. Between 300 and 3000 iterations, where that cost is a large share of an offer, Almide is 0.47-0.65x the fastest.
+- The wasm column is for reference (the reference implementations are native code). On the AMD VM it read noisy in this run (205.8 µs at nest 100); develop's wasm and this tree's wasm, run interleaved, read 371 and 455 µs at nest 1000 and below zero at nest 0 and 100. These changes touch the native leg only.
+
+What is left: the wasm leg, where `fan { }` arms and parallel offers run one after another (ADR-0024 D8), and the effect callbacks this change does not admit: a callback reaching I/O still runs in list order. ADR-0024 D3 has it run concurrently unless it reaches an ordered operation, which needs the `@ordered` set.
+
+## Wide shapes against tuned peers (2026-10-17, Almide develop at 0746eb689)
+
+Goal-5 extension: the earlier probes offer at most 10 elements of one size. These rows run **one `fan.map` over n elements** with n from 10 to 10⁶, plus four work shapes:
+
+| Shape | Element work |
+|---|---|
+| size | the floor's `work(s, i, iters)` loop |
+| skew | every 10th element does 20× the work |
+| heap | each element builds a 20-part `String` and returns its length; no loop |
+| fail | 1 element in 97 returns `err("bad i")` |
+
+Every implementation runs every element and keeps the lowest-index error, Almide's `fan.map` rule. All share the same work and all 8 threads, and every row printed the same checksum on every implementation.
+
+The peers are each tuned:
+
+| Language | Variants |
+|---|---|
+| Rust (Rayon 1.10.0) | `rayon`: `into_par_iter().map().collect()` · `tuned`: the same with `with_min_len(n / (4·threads))` · `scope`: one `rayon::scope` task per thread over a static chunk |
+| Go 1.22 | `par`: a goroutine per element · `pool`: resident workers woken per map, drawing chunks of n/(4W) from an atomic counter · `errgroup`: `golang.org/x/sync` v0.8.0 with `SetLimit(W)`, per-index error slots and no context cancellation |
+| Zig 0.13.0 | `std`: `std.Thread.Pool`, one `spawnWg` per chunk of n/(4W) with the caller helping · `hand`: W−1 resident threads plus the caller, a futex generation and an atomic chunk counter |
+
+**Reproduce:**
+
+```bash
+cd research/benchmark/fan-floor/wide && ./build.sh && ALMIDE=almide python3 wide.py
+```
+
+That gives µs per map (min of 7, implementations interleaved), max RSS (GNU time) and startup. The sources are in `wide/`. `al-n` is native Almide as compiled, `al-seq` is the same binary with `ALMIDE_FAN_SEQUENTIAL=1`, and `al-w` is `almide run --target wasm`, which is sequential. "best" is the fastest parallel variant per language, named in parentheses. **al-n / best** is the ratio to the fastest of all of them, and below 1.00 Almide wins.
+
+### µs per map, GCE c4-standard-8 (Intel 8581C) and n2d-standard-8 (AMD EPYC 7B13)
+
+| Row | n | iters | Intel al-n | al-seq | al-w | best Rust | best Go | best Zig | **al-n / best** | AMD al-n | al-seq | al-w | best Rust | best Go | best Zig | **al-n / best** |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| size | 10 | 100 | 3.5 | 3.1 | 4.6 | 8.1 (scope) | 6.4 (pool) | 2.5 (hand) | **1.39** | 4.6 | 4.0 | 5.4 | 11.3 (scope) | 7.5 (pool) | 5.0 (hand) | **0.92** |
+| size | 100 | 100 | 62.6 | 30.7 | 38.1 | 13.1 (scope) | 26.8 (pool) | 11.0 (hand) | **5.69** | 46.8 | 39.7 | 52.1 | 20.1 (scope) | 33.0 (pool) | 18.1 (hand) | **2.58** |
+| size | 1,000 | 100 | 560.7 | 306.1 | 375.6 | 62.4 (scope) | 86.3 (pool) | 74.5 (hand) | **8.99** | 344.3 | 396.6 | 512.2 | 90.0 (tuned) | 128.2 (pool) | 97.8 (hand) | **3.83** |
+| size | 10,000 | 100 | 5,179 | 3,064 | 3,759 | 564.8 (scope) | 533.8 (pool) | 705.1 (hand) | **9.70** | 3,410 | 3,962 | 5,115 | 791.7 (rayon) | 827.3 (pool) | 864.4 (hand) | **4.31** |
+| size | 100,000 | 100 | 56,013 | 30,757 | 37,532 | 5,459 (tuned) | 4,908 (pool) | 6,860 (hand) | **11.41** | 37,561 | 39,809 | 51,016 | 7,305 (rayon) | 6,780 (pool) | 8,290 (std) | **5.54** |
+| size | 1,000,000 | 100 | 522,808 | 312,428 | 378,638 | 55,546 (rayon) | 49,449 (pool) | 68,831 (std) | **10.57** | 333,926 | 406,298 | 509,297 | 72,998 (rayon) | 63,861 (pool) | 81,995 (hand) | **5.23** |
+| size | 10 | 10000 | 70.1 | 318.6 | 391.3 | 93.7 (scope) | 88.6 (pool) | 111.3 (hand) | **0.79** | 93.4 | 408.0 | 506.2 | 147.3 (tuned) | 143.7 (errgroup) | 136.0 (hand) | **0.69** |
+| size | 100 | 10000 | 548.3 | 3,185 | 3,908 | 541.3 (scope) | 512.8 (par) | 761.4 (hand) | **1.07** | 710.0 | 4,080 | 5,066 | 760.2 (rayon) | 752.0 (par) | 950.7 (hand) | **0.94** |
+| size | 1,000 | 10000 | 4,410 | 31,840 | 39,147 | 5,006 (scope) | 4,723 (par) | 6,723 (hand) | **0.93** | 5,768 | 40,912 | 50,306 | 6,671 (rayon) | 6,278 (par) | 8,140 (hand) | **0.92** |
+| size | 10,000 | 10000 | 42,895 | 318,359 | 391,612 | 49,911 (tuned) | 45,658 (pool) | 64,616 (hand) | **0.94** | 58,466 | 407,281 | 499,401 | 66,212 (scope) | 61,272 (pool) | 78,870 (std) | **0.95** |
+| skew | 1,000 | 1000 | 1,431 | 9,230 | 11,332 | 1,517 (tuned) | 1,445 (pool) | 2,012 (hand) | **0.99** | 1,967 | 11,918 | 14,709 | 2,052 (rayon) | 1,979 (par) | 2,567 (hand) | **0.99** |
+| skew | 100,000 | 1000 | 130,811 | 922,799 | 1,135,435 | 144,839 (tuned) | 131,419 (pool) | 187,502 (hand) | **1.00** | 174,728 | 1,191,449 | 1,478,121 | 193,655 (rayon) | 173,290 (pool) | 233,347 (hand) | **1.01** |
+| heap | 1,000 | 0 | 568.4 | 303.4 | 478.4 | 111.2 (scope) | 147.4 (pool) | 129.7 (hand) | **5.11** | 361.0 | 488.7 | 701.9 | 168.8 (scope) | 245.7 (pool) | 211.5 (hand) | **2.14** |
+| heap | 100,000 | 0 | 56,713 | 30,422 | 48,119 | 10,105 (rayon) | 12,033 (pool) | 12,455 (hand) | **5.61** | 37,206 | 49,658 | 69,168 | 15,384 (rayon) | 20,292 (pool) | 19,510 (std) | **2.42** |
+| fail | 1,000 | 1000 | 544.4 | 3,139 | 3,858 | 505.7 (scope) | 495.3 (pool) | 672.5 (hand) | **1.10** | 692.2 | 4,019 | 4,998 | 700.7 (rayon) | 756.0 (pool) | 813.5 (hand) | **0.99** |
+| fail | 100,000 | 1000 | 51,563 | 314,381 | 386,233 | 49,389 (tuned) | 44,814 (pool) | 64,388 (hand) | **1.15** | 67,720 | 403,124 | 498,135 | 66,508 (scope) | 58,823 (pool) | 75,685 (hand) | **1.15** |
+
+### Startup (n = 1, iters = 0, one map; process start to exit)
+
+| Implementation | Intel startup ms | AMD startup ms |
+|---|---|---|
+| al-n-seq | 0.52 | 1.08 |
+| al-n | 0.46 | 1.04 |
+| al-w | 101.21 | 167.93 |
+| rs-seq | 0.84 | 1.91 |
+| rs-rayon | 0.85 | 1.69 |
+| rs-tuned | 0.83 | 1.60 |
+| rs-scope | 0.82 | 1.79 |
+| go-seq | 0.70 | 1.45 |
+| go-par | 0.71 | 1.49 |
+| go-pool | 0.72 | 1.48 |
+| go-errgroup | 0.67 | 1.46 |
+| zig-seq | 0.40 | 0.85 |
+| zig-std | 0.72 | 1.59 |
+| zig-hand | 0.55 | 1.27 |
+
+The `al-w` startup is `almide run --target wasm` end to end: it includes the build-cache lookup and engine instantiation, not only the module's start.
+
+### Max RSS, KB (Intel)
+
+| Row | n | al-n | rs-rayon | rs-scope | go-pool | go-errgroup | zig-hand |
+|---|---|---|---|---|---|---|---|
+| size | 10 | 2208 | 2280 | 2228 | 1796 | 4228 | 1904 |
+| size | 100 | 2272 | 2500 | 2388 | 1948 | 7300 | 1904 |
+| size | 1,000 | 2272 | 2412 | 2256 | 1540 | 8440 | 1776 |
+| size | 10,000 | 2720 | 2432 | 2512 | 1668 | 8904 | 2032 |
+| size | 100,000 | 8656 | 3936 | 4016 | 3076 | 7672 | 2916 |
+| size | 1,000,000 | 65632 | 17712 | 17924 | 17308 | 37636 | 17264 |
+| size | 10 | 2336 | 2432 | 2260 | 1924 | 3332 | 1776 |
+| size | 100 | 2208 | 2420 | 2284 | 1412 | 3076 | 2028 |
+| size | 1,000 | 2192 | 2424 | 2420 | 1540 | 2692 | 2032 |
+| size | 10,000 | 2920 | 2444 | 2532 | 1668 | 3588 | 2032 |
+| skew | 1,000 | 2208 | 2284 | 2256 | 1412 | 4740 | 1904 |
+| skew | 100,000 | 8608 | 3924 | 3968 | 3076 | 7300 | 2928 |
+| heap | 1,000 | 2212 | 2308 | 2324 | 7564 | 8764 | 1904 |
+| heap | 100,000 | 8740 | 3932 | 3976 | 7560 | 8908 | 2928 |
+| fail | 1,000 | 2208 | 2280 | 2288 | 1692 | 7172 | 1904 |
+| fail | 100,000 | 7844 | 4012 | 3844 | 3588 | 8020 | 3056 |
+True
+
+### Where Almide loses, and why
+
+| # | Rows | Ratio (Intel / AMD) | Cause | Priority |
+|---|---|---|---|---|
+| W1 | size iters 100, n ≥ 100; heap | 5.7–11.4 / 2.1–5.5. On Intel `al-n` is **slower than `al-seq`** (522 ms vs 312 ms at n = 10⁶) | `almide_rt_fan_map_par` opens an output timeline **per element**: `almide_fan_enter` clones an `Arc` and swaps a thread-local, and its drop takes the group mutex, flushes stdout and calls `notify_all` (`runtime/rs/src/fan.rs:101`, `crates/almide-codegen/src/prelude_fan.rs:64-90`). Elements of ≤ 1 µs pay that in lock contention and futex wakes: locally the same program spends 18 s of sys time against 1.0 s sequential. `almide_fan_group` also allocates one buffer per element (`prelude_fan.rs:61`), which is the 65 MB against 17 MB RSS at n = 10⁶. | **P-high** (#3784): the most common `fan.map` shape, and it inverts the speedup |
+| W2 | size iters 100, n = 10 (Intel) | 1.39 / 0.92 | the same per-element cost on a tiny offer; the cost model keeps it parallel (`al-n` 3.5 µs vs `al-seq` 3.1 µs) | P-low, folds into W1 |
+| W3 | fail, n = 10³ / 10⁵ | 1.10–1.15 / 0.99–1.15 | W1's per-element cost at 1000 iterations, plus one `String` per failing element; Go's pool pays neither | P-low, folds into W1 |
+| W4 | every row, `al-w` | 1.2–1.3× `al-n-seq` | wasm runs `fan.map` sequentially (ADR-0024 D8); not a regression | tracked by #1628 / #3331 |
+
+Almide wins or ties wherever the element work dominates (iters 10000, skew, fail on AMD): 0.69–1.07 against the best tuned peer. Rayon's `with_min_len` and a static `scope` beat plain `rayon` only on small offers. Go's resident pool is the strongest peer above n = 10⁴. `errgroup` with `SetLimit` is the slowest parallel variant everywhere: a goroutine per element through a semaphore. W1 is a separate goal; nothing in this goal changes it.

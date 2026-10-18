@@ -1,12 +1,9 @@
-// Use fan.any when you meant "the first candidate that SUCCEEDS, in list order".
+// Use a `??` chain when you meant "the first candidate that SUCCEEDS, in source order".
 effect fn a() -> Result[String, String] = ok("a")
 
 effect fn b() -> Result[String, String] = ok("b")
 
 effect fn main() -> Unit = {
-  let w = fan.any {
-    a()
-    b()
-  }!
+  let w = a() ?? b() ?? "none"
   println(w)
 }

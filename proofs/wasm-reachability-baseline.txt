@@ -41,9 +41,6 @@
 bytes.copy_to_ptr :: UNPROBEABLE :: parameter type outside the synthesizer
 bytes.from_raw_ptr :: UNPROBEABLE :: parameter type outside the synthesizer
 fs.fold_lines_chunked :: UNPROBEABLE :: no candidate shape builds natively
-fs.fold_lines_range :: UNPROBEABLE :: no candidate shape builds natively
-http.anthropic_streaming_call :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call http.anthropic_streaming_call needs a declared capability not in this brick
-http.anthropic_streaming_call_with_limits :: UNPROBEABLE :: parameter type outside the synthesizer
 http.body :: UNPROBEABLE :: parameter type outside the synthesizer
 http.cancel :: UNPROBEABLE :: parameter type outside the synthesizer
 http.decode_json :: UNPROBEABLE :: parameter type outside the synthesizer
@@ -57,8 +54,6 @@ http.get_status :: HOST_CAPABILITY :: http client is an OS socket API — checks
 http.header_values :: UNPROBEABLE :: parameter type outside the synthesizer
 http.headers :: UNPROBEABLE :: parameter type outside the synthesizer
 http.mount :: UNPROBEABLE :: parameter type outside the synthesizer
-http.openai_streaming_call :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call http.openai_streaming_call needs a declared capability not in this brick
-http.openai_streaming_call_with_limits :: UNPROBEABLE :: parameter type outside the synthesizer
 http.param :: UNPROBEABLE :: parameter type outside the synthesizer
 http.patch :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call http.patch needs a declared capability not in this brick
 http.patch_response :: HOST_CAPABILITY :: http client is an OS socket API — checks and builds natively, the wasm leg walls (sweep verdict GAP: wasm build failed)
@@ -103,19 +98,14 @@ json.stringify_pretty :: UNPROBEABLE :: no candidate shape builds natively
 json.to_map :: UNPROBEABLE :: no candidate shape builds natively
 list.with_capacity :: UNPROBEABLE :: no candidate shape builds natively
 map.new :: UNPROBEABLE :: no candidate shape builds natively
-matrix.linear_q1_0_row_no_bias :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.linear_q1_0_row_no_bias — rendering them would emit a dangling `(call $…)` (invalid wasm). Add t
-matrix.linear_q8_0_row_no_bias :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.linear_q8_0_row_no_bias — rendering them would emit a dangling `(call $…)` (invalid wasm). Add t
 matrix.mul_f32 :: UNPROBEABLE :: parameter type outside the synthesizer
 matrix.mul_f32_scaled :: UNPROBEABLE :: parameter type outside the synthesizer
 matrix.mul_f32_t :: UNPROBEABLE :: parameter type outside the synthesizer
 matrix.mul_f32_t_scaled :: UNPROBEABLE :: parameter type outside the synthesizer
-matrix.qwen3_block_f32_kv :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.qwen3_block_f32_kv — rendering them would emit a dangling `(call $…)` (invalid wasm). Add the ca
-matrix.qwen3_block_q1_0_kv :: COMPILER_FRONTIER :: wasm build failed
-matrix.qwen3_block_q8_0_kv :: COMPILER_FRONTIER :: unlinked stdlib/runtime call(s) with no wasm definition: matrix.qwen3_block_q8_0_kv — rendering them would emit a dangling `(call $…)` (invalid wasm). Add the c
-net.shm_create :: HOST_CAPABILITY :: native-only-forever: stock WASI has no Unix-domain sockets, descriptor passing or shared-memory files (proofs/target-availability.toml, #1423)
-net.shm_read :: HOST_CAPABILITY :: native-only-forever: stock WASI has no Unix-domain sockets, descriptor passing or shared-memory files (proofs/target-availability.toml, #1423)
-net.shm_resize :: HOST_CAPABILITY :: native-only-forever: stock WASI has no Unix-domain sockets, descriptor passing or shared-memory files (proofs/target-availability.toml, #1423)
-net.shm_write :: HOST_CAPABILITY :: native-only-forever: stock WASI has no Unix-domain sockets, descriptor passing or shared-memory files (proofs/target-availability.toml, #1423)
+net.shm_create :: HOST_CAPABILITY :: WASI has neither Unix-domain sockets nor shared memory: the stock artifact refuses it (E081); the embedded host serves it through interim ops 104..=116 (proofs/target-availability.toml, #3620)
+net.shm_read :: HOST_CAPABILITY :: WASI has neither Unix-domain sockets nor shared memory: the stock artifact refuses it (E081); the embedded host serves it through interim ops 104..=116 (proofs/target-availability.toml, #3620)
+net.shm_resize :: HOST_CAPABILITY :: WASI has neither Unix-domain sockets nor shared memory: the stock artifact refuses it (E081); the embedded host serves it through interim ops 104..=116 (proofs/target-availability.toml, #3620)
+net.shm_write :: HOST_CAPABILITY :: WASI has neither Unix-domain sockets nor shared memory: the stock artifact refuses it (E081); the embedded host serves it through interim ops 104..=116 (proofs/target-availability.toml, #3620)
 net.tcp_accept :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_accept needs a declared capability not in this brick
 net.tcp_available :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_available needs a declared capability not in this brick
 net.tcp_close :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_close needs a declared capability not in this brick
@@ -123,21 +113,21 @@ net.tcp_close_listener :: HOST_CAPABILITY :: main is outside the MIR-lowering su
 net.tcp_connect :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_connect needs a declared capability not in this brick
 net.tcp_is_open :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: scalar binding outside the value subset cannot be faithfully computed in this brick (the permissive caps-counting path 
 net.tcp_listen :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_listen needs a declared capability not in this brick
+net.tcp_local_port :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_local_port needs a declared capability not in this brick
 net.tcp_read :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_read needs a declared capability not in this brick
 net.tcp_read_exact :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_read_exact needs a declared capability not in this brick
 net.tcp_read_timeout :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_read_timeout needs a declared capability not in this brick
 net.tcp_set_timeout :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_set_timeout needs a declared capability not in this brick
 net.tcp_write :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_write needs a declared capability not in this brick
-net.unix_accept :: HOST_CAPABILITY :: native-only-forever: stock WASI has no Unix-domain sockets, descriptor passing or shared-memory files (proofs/target-availability.toml, #1423)
-net.unix_close :: HOST_CAPABILITY :: native-only-forever: stock WASI has no Unix-domain sockets, descriptor passing or shared-memory files (proofs/target-availability.toml, #1423)
-net.unix_connect :: HOST_CAPABILITY :: native-only-forever: stock WASI has no Unix-domain sockets, descriptor passing or shared-memory files (proofs/target-availability.toml, #1423)
-net.unix_listen :: HOST_CAPABILITY :: native-only-forever: stock WASI has no Unix-domain sockets, descriptor passing or shared-memory files (proofs/target-availability.toml, #1423)
-net.unix_poll :: HOST_CAPABILITY :: native-only-forever: stock WASI has no Unix-domain sockets, descriptor passing or shared-memory files (proofs/target-availability.toml, #1423)
-net.unix_recv :: HOST_CAPABILITY :: native-only-forever: stock WASI has no Unix-domain sockets, descriptor passing or shared-memory files (proofs/target-availability.toml, #1423)
-net.unix_send :: HOST_CAPABILITY :: native-only-forever: stock WASI has no Unix-domain sockets, descriptor passing or shared-memory files (proofs/target-availability.toml, #1423)
-net.unix_take_fds :: HOST_CAPABILITY :: native-only-forever: stock WASI has no Unix-domain sockets, descriptor passing or shared-memory files (proofs/target-availability.toml, #1423)
-net.unix_wait :: HOST_CAPABILITY :: native-only-forever: stock WASI has no Unix-domain sockets, descriptor passing or shared-memory files (proofs/target-availability.toml, #1423)
-process.stdin_lines :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call process.stdin_lines needs a declared capability not in this brick
+net.unix_accept :: HOST_CAPABILITY :: WASI has neither Unix-domain sockets nor shared memory: the stock artifact refuses it (E081); the embedded host serves it through interim ops 104..=116 (proofs/target-availability.toml, #3620)
+net.unix_close :: HOST_CAPABILITY :: WASI has neither Unix-domain sockets nor shared memory: the stock artifact refuses it (E081); the embedded host serves it through interim ops 104..=116 (proofs/target-availability.toml, #3620)
+net.unix_connect :: HOST_CAPABILITY :: WASI has neither Unix-domain sockets nor shared memory: the stock artifact refuses it (E081); the embedded host serves it through interim ops 104..=116 (proofs/target-availability.toml, #3620)
+net.unix_listen :: HOST_CAPABILITY :: WASI has neither Unix-domain sockets nor shared memory: the stock artifact refuses it (E081); the embedded host serves it through interim ops 104..=116 (proofs/target-availability.toml, #3620)
+net.unix_poll :: HOST_CAPABILITY :: WASI has neither Unix-domain sockets nor shared memory: the stock artifact refuses it (E081); the embedded host serves it through interim ops 104..=116 (proofs/target-availability.toml, #3620)
+net.unix_recv :: HOST_CAPABILITY :: WASI has neither Unix-domain sockets nor shared memory: the stock artifact refuses it (E081); the embedded host serves it through interim ops 104..=116 (proofs/target-availability.toml, #3620)
+net.unix_send :: HOST_CAPABILITY :: WASI has neither Unix-domain sockets nor shared memory: the stock artifact refuses it (E081); the embedded host serves it through interim ops 104..=116 (proofs/target-availability.toml, #3620)
+net.unix_take_fds :: HOST_CAPABILITY :: WASI has neither Unix-domain sockets nor shared memory: the stock artifact refuses it (E081); the embedded host serves it through interim ops 104..=116 (proofs/target-availability.toml, #3620)
+net.unix_wait :: HOST_CAPABILITY :: WASI has neither Unix-domain sockets nor shared memory: the stock artifact refuses it (E081); the embedded host serves it through interim ops 104..=116 (proofs/target-availability.toml, #3620)
 result.flat_map :: UNPROBEABLE :: no candidate shape builds natively
 result.flatten :: UNPROBEABLE :: no candidate shape builds natively
 result.is_err :: UNPROBEABLE :: no candidate shape builds natively
@@ -153,9 +143,9 @@ result.unwrap_or :: UNPROBEABLE :: no candidate shape builds natively
 result.unwrap_or_else :: UNPROBEABLE :: no candidate shape builds natively
 result.zip :: UNPROBEABLE :: no candidate shape builds natively
 set.new :: UNPROBEABLE :: no candidate shape builds natively
+testing.assert_aborts :: UNPROBEABLE :: no candidate shape builds natively
 testing.assert_err :: UNPROBEABLE :: no candidate shape builds natively
 testing.assert_ok :: UNPROBEABLE :: no candidate shape builds natively
-testing.assert_throws :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call testing.assert_throws needs a declared capability not in this brick
 url.to_string :: UNPROBEABLE :: parameter type outside the synthesizer
 value.array :: UNPROBEABLE :: no candidate shape builds natively
 value.as_array :: UNPROBEABLE :: no candidate shape builds natively

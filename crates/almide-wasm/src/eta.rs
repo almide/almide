@@ -20,14 +20,20 @@
 //! An effect fn value is skipped: its runtime shape is the
 //! carrier-returning closure, which the value paths
 //! (`lower_list_map_fnvalue`, the fan closure route) call as is.
+//!
+//! Only a CALLBACK position is expanded — one the stdlib declaration types
+//! as a function (`almide_types::callback_params`). A type-variable position
+//! (`list.fold`'s init, `option.unwrap_or`'s default, `list.push`'s element)
+//! hands the value through, and must hand back the SAME closure.
 
 use almide_base::intern::sym;
 use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
 use almide_ir::{CallTarget, IrExpr, IrExprKind, IrProgram, Mutability, VarTable};
 use almide_types::types::Ty;
 
-/// The stdlib families whose arms inline a callback (`hof_lambda`).
-const HOF_MODULES: &[&str] = &["list", "map", "set", "option", "result", "fan", "fs", "matrix"];
+/// The stdlib families whose arms inline a callback (`hof_lambda`) — the
+/// one list the native codegen's meter reads too (#3673).
+use almide_ir::meter_plan::INLINED_CALLBACK_MODULES as HOF_MODULES;
 
 /// The eta-expanded program, or `None` when no callback needed it (the
 /// common case: no clone).
@@ -95,15 +101,26 @@ impl Eta<'_> {
 impl IrMutVisitor for Eta<'_> {
     fn visit_expr_mut(&mut self, e: &mut IrExpr) {
         walk_expr_mut(self, e);
-        let IrExprKind::Call { target: CallTarget::Module { module, .. }, args, .. } = &mut e.kind else {
+        let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } = &mut e.kind else {
             return;
         };
         if !HOF_MODULES.contains(&module.as_str()) {
             return;
         }
-        for a in args.iter_mut() {
+        // Only a CALLBACK position — one the declaration types as a function.
+        // A type-variable position (`list.fold`'s init, `option.unwrap_or`'s
+        // default) takes the value through: wrapping it there handed back a
+        // fresh closure layer per call, so a handler re-passed k times nested
+        // k frames (`http.wrap(h, [])` in a loop overflowed the wasm stack).
+        let declared = almide_types::callback_params::callback_params(
+            module.as_str(),
+            almide_ir::mono_base_or_self(func.as_str()),
+        )
+        .filter(|ps| ps.len() == args.len());
+        for (k, a) in args.iter_mut().enumerate() {
+            let callback_pos = declared.as_ref().is_none_or(|ps| ps[k]);
             let value_shape = matches!(a.kind, IrExprKind::Var { .. } | IrExprKind::FnRef { .. });
-            if value_shape && matches!(a.ty, Ty::Fn { is_effect: false, .. }) {
+            if callback_pos && value_shape && matches!(a.ty, Ty::Fn { is_effect: false, .. }) {
                 let v = std::mem::take(a);
                 *a = self.expand(v);
                 *self.changed = true;

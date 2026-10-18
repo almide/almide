@@ -34,8 +34,15 @@ pub const KNOWN_ATTRS: &[&str] = &[
     "mutating",
     "consume",
     "borrow_ref",
+    // May take over a dying source's storage (crates/almide-types: `reuse`)
+    "reuse",
+    // A self-hosted body names the stdlib fn it implements (crates/almide-types: `implements`)
+    "implements",
     // A parameter that runs concurrently (ADR-0020 §3.1, E008)
     "concurrent",
+    // A stdlib fn whose effect on process-local state a sibling fan arm could
+    // read (ADR-0024 D3): a fan reaching one runs its arms sequentially
+    "ordered",
     // The empty effect set, checked (E092, #3250)
     "pure",
     // Scheduling and placement

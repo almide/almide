@@ -49,9 +49,9 @@ use wasmparser::{
 
 use crate::witness::decls::{Declared, PassDecls};
 
-/// The capability ids the witness speaks (the first seven are the
-/// registry `almide_mir::Capability::id` fixes; NET and FOREIGN extend it
-/// for the host surface only the wasm leg reaches).
+/// The capability ids the witness speaks (STDOUT..=NET and PROC are the
+/// registry `almide_mir::Capability::id` fixes; FOREIGN extends it for the
+/// host surface only the wasm leg reaches).
 pub mod cap {
     pub const STDOUT: u32 = 0;
     pub const ENTROPY: u32 = 1;
@@ -65,7 +65,8 @@ pub mod cap {
     /// A program-declared `@extern(wasm, ..)` host function.
     pub const FOREIGN: u32 = 8;
     /// Starting and signalling child processes (ops 80..=90, the private
-    /// `almide:process/spawn` capability, ADR-0025). Past [`super::SENTINEL`]
+    /// `almide:process/spawn` capability, ADR-0025), and assert_aborts's
+    /// child run (op 117). `almide_mir::Capability::Process` has this id. Past [`super::SENTINEL`]
     /// so the sentinel keeps its small value.
     pub const PROC: u32 = 10;
 }
@@ -99,8 +100,13 @@ pub fn op_caps(op: i32) -> &'static [u32] {
         32 => &[ENTROPY],
         34 | 36 | 60 => &[CLOCK],
         35 => &[STDIN],
-        43..=50 | 53..=59 | 70..=72 => &[NET],
+        43..=50 | 53..=59 | 65 | 70..=72 => &[NET],
         80..=90 => &[PROC],
+        // testing.assert_aborts's site pair (ADR-0029, #3792): op 117 runs a
+        // site on a fresh instance — a child, the native leg's re-exec — and
+        // op 118 reads which site this instance was launched to run.
+        117 => &[PROC],
+        118 => &[ENV],
         // The instance-parallel fan offer (#3003, fan_par_lower.rs): the host
         // runs the program's own exported `__fan_site_K` chunk on workers and
         // writes scalars into the answer room; their output is captured and
@@ -523,7 +529,7 @@ fn components(callees: &[BTreeSet<usize>]) -> Vec<usize> {
 }
 
 /// The host capabilities one body calls directly. The first `meter_reads`
-/// wall-clock reads (op [`OP_WALL_NOW`]) are the fuel meter's deadline test,
+/// meter-clock reads (op [`OP_METER_CLOCK`], monotonic since #3781) are the fuel meter's deadline test,
 /// which the declaration table charges to the region opener, not this frame
 /// (witness_decls.rs, `DeclFn::meter_clock_reads`, #3041): they name no
 /// capability here. Any read beyond that count is the source's.
@@ -547,7 +553,7 @@ fn direct_caps(m: &Module, b: &Body, meter_reads: u32) -> BTreeSet<u32> {
     }
     let mut meter_left = meter_reads;
     for op in &b.fs_ops {
-        if *op == Some(OP_WALL_NOW) && meter_left > 0 {
+        if *op == Some(OP_METER_CLOCK) && meter_left > 0 {
             meter_left -= 1;
             continue;
         }
@@ -556,8 +562,8 @@ fn direct_caps(m: &Module, b: &Body, meter_reads: u32) -> BTreeSet<u32> {
     out
 }
 
-/// The wall-clock read (`fs_meta.rs` `OP_WALL_NOW`).
-const OP_WALL_NOW: i32 = crate::fs_meta::OP_WALL_NOW;
+/// The fuel meter's clock read (`fs_meta.rs` `OP_METER_CLOCK`).
+const OP_METER_CLOCK: i32 = crate::fs_meta::OP_METER_CLOCK;
 
 /// The defined functions one body can transfer control to (positions in
 /// the defined-function list).
@@ -638,6 +644,8 @@ mod tests {
         assert_eq!(op_caps(35), &[cap::STDIN]);
         assert_eq!(op_caps(31), &[SENTINEL]);
         assert!(op_caps(74).is_empty(), "the fan offer reaches no capability of its own");
+        assert_eq!(op_caps(117), &[cap::PROC]);
+        assert_eq!(op_caps(118), &[cap::ENV]);
         assert_eq!(op_caps(-1), &[SENTINEL]);
     }
 
@@ -670,7 +678,7 @@ mod tests {
     fn only_the_meters_own_clock_reads_leave_the_frame() {
         // #3041: two wall-clock reads and a file read; one read is the meter's.
         let m = Module::default();
-        let b = Body { fs_ops: vec![Some(OP_WALL_NOW), Some(1), Some(OP_WALL_NOW)], ..Body::default() };
+        let b = Body { fs_ops: vec![Some(OP_METER_CLOCK), Some(1), Some(OP_METER_CLOCK)], ..Body::default() };
         assert_eq!(direct_caps(&m, &b, 0), [cap::FS_READ, cap::CLOCK].into());
         assert_eq!(direct_caps(&m, &b, 1), [cap::FS_READ, cap::CLOCK].into(), "the second read is the frame's own");
         assert_eq!(direct_caps(&m, &b, 2), [cap::FS_READ].into());

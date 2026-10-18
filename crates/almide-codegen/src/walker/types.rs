@@ -28,6 +28,11 @@ fn render_type_named(ctx: &RenderContext, name: &almide_base::intern::Sym, args:
         // Strip module qualifier: module.Type → Type
         // (all modules flatten into one file in generated Rust)
         let bare = name.rsplit('.').next().unwrap_or(name);
+        // An ADR-0001 clock type is an i64 of nanoseconds past the checker;
+        // an annotated binding or signature keeps its tag (#3752).
+        if almide_lang::time_units::TIME_MODULES.iter().any(|(_, t)| *t == bare) {
+            return render_type(ctx, &Ty::Int);
+        }
         // A runtime-owned nominal renders under the runtime's reserved
         // spelling (`Value` → `AlmideValue`, #1821); the bare spelling is a
         // user type's.
@@ -135,7 +140,7 @@ fn templated_scalar_type(ty: &Ty) -> Option<(&'static str, &'static str)> {
     Some(match ty {
         Ty::Int => ("type_int", "i64"),
         Ty::Float => ("type_float", "f64"),
-        Ty::String => ("type_string", "String"),
+        Ty::String => ("type_string", "AlmideString"),
         Ty::Bool => ("type_bool", "bool"),
         Ty::Unit | Ty::Never => ("type_unit", "()"),
         Ty::Bytes => ("type_bytes", "AlmideRcCow<Vec<u8>>"),
@@ -169,8 +174,8 @@ fn render_type_applied(ctx: &RenderContext, id: &TypeConstructorId, args: &[Ty])
             // `Result<_, String>`). A real generic error param (named typevar) is
             // left untouched.
             let err_s = match err {
-                Ty::Unknown => "String".to_string(),
-                Ty::TypeVar(n) if n.starts_with('?') => "String".to_string(),
+                Ty::Unknown => "AlmideString".to_string(),
+                Ty::TypeVar(n) if n.starts_with('?') => "AlmideString".to_string(),
                 _ => render_type(ctx, err),
             };
             ctx.templates.render_with("type_result", None, &[], &[("ok", ok_s.as_str()), ("err", err_s.as_str())])

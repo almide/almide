@@ -259,6 +259,52 @@ fn render_expr_inline_rust(ctx: &RenderContext, expr: &IrExpr) -> String {
     out
 }
 
+/// Wrap a rendered call (`Call`, `TailCall`, `RuntimeCall`, `InlineRust`)
+/// in [`scope_cell_guard`] when one of its arguments borrows a shared cell
+/// mutably — whichever spelling the call took by the time it reaches the
+/// walker (a stdlib `list.pop` is a `RuntimeCall`, a user fn's `mut` param a
+/// `Call`, an `@inline_rust` body an `InlineRust`).
+fn scope_cell_guard_of_call(ctx: &RenderContext, expr: &IrExpr, rendered: String) -> String {
+    let takes_cell = match &expr.kind {
+        IrExprKind::Call { args, .. } | IrExprKind::TailCall { args, .. } | IrExprKind::RuntimeCall { args, .. } => {
+            args.iter().any(|a| borrows_shared_cell_mutably(ctx, a))
+        }
+        IrExprKind::InlineRust { args, .. } => args.iter().any(|(_, a)| borrows_shared_cell_mutably(ctx, a)),
+        _ => false,
+    };
+    if takes_cell { scope_cell_guard(rendered) } else { rendered }
+}
+
+/// An argument rendered through a shared cell's `borrow_mut()` — the `&mut`
+/// slot of a closure-captured `var` (`&mut *xs.borrow_mut()`) or of a field /
+/// tuple slot under one (`&mut (*h.borrow_mut()).f`). The `RefMut` guard is
+/// a temporary of the call expression.
+fn borrows_shared_cell_mutably(ctx: &RenderContext, arg: &IrExpr) -> bool {
+    let IrExprKind::Borrow { expr: inner, mutable: true, .. } = &arg.kind else { return false };
+    let place = strip_place_clones(inner);
+    let mut cur = &place;
+    let id = loop {
+        match &cur.kind {
+            IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => cur = object,
+            IrExprKind::Var { id } => break *id,
+            _ => return false,
+        }
+    };
+    ctx.ann.is_shared_mut(&id) && !almide_ir::top_let_storage::capture_copy_cell(&ctx.var_table.get(id).ty)
+}
+
+/// A call that takes a shared cell's `RefMut` is bound in its own block
+/// (#3754). The guard is a temporary of the call, and Rust keeps a
+/// temporary alive to the end of the enclosing STATEMENT, so in
+/// `list.map(option.to_list(list.pop(xs)), (x) => xs)` the `pop`'s guard
+/// was still held when `map` ran the closure, whose read of `xs` then
+/// panicked with "RefCell already mutably borrowed". Every other leg ends
+/// the mutation when the call returns; the `let` drops the guard at its
+/// `;`, so the cell is free again before the call's result is used.
+fn scope_cell_guard(call: String) -> String {
+    format!("{{ let __almide_cell_call = {call}; __almide_cell_call }}")
+}
+
 fn render_expr_call(ctx: &RenderContext, expr: &IrExpr) -> String {
     let (IrExprKind::Call { target, args, .. } | IrExprKind::TailCall { target, args }) = &expr.kind else { unreachable!() };
     match target {

@@ -1,0 +1,8 @@
+// A top-level `let` is computed by the child itself.
+import testing
+
+let limit = 3
+
+test "an index past the limit aborts" {
+  testing.assert_aborts("index", () => [1][limit])
+}

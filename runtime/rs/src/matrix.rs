@@ -118,49 +118,10 @@ pub fn almide_rt_matrix_dims(rows: i64, cols: i64) -> (usize, usize) {
     (r as usize, c as usize)
 }
 
-/// Normalize a HEAD COUNT. A head count below 1 has no meaning — it is not a
-/// degenerate case with an obvious answer the way a negative dimension is (that
-/// clamps to the empty matrix, C-034) — so it aborts with the unified
-/// `Error: <msg>` + exit 1 that `list.chunk` / `list.windows` / `int.clamp`
-/// already use for their domain violations.
-///
-/// This exists because the family had THREE answers to the same question:
-/// `almide_rt_matrix_rope_rotate_at` clamped with `.max(0)` (negative → no
-/// heads), `almide_rt_matrix_rms_norm_heads` clamped with `.max(1)` (negative →
-/// one head), and `almide_rt_matrix_mha_core` did not guard at all — it cast
-/// straight to `usize`, so `n_heads = i32::MIN` became 18446744071562067968 and
-/// `for h in 0..n_heads` hung the process (Wave 5 R2). The self-hosted wasm
-/// bodies diverged from all three, dividing by a zero head count.
-///
-/// Every head-count-taking entry point goes through here, and
-/// `matrix_head_count_domain_test.rs` is the matrix gate that keeps it that way.
-pub fn almide_rt_matrix_head_count(n: i64) -> usize {
-    if n < 1 {
-        almide_abort("head count must be positive");
-    }
-    n as usize
-}
-
-/// #1419: the head GEOMETRY rule for the rope family — `n_heads * head_dim`
-/// must fit the row. Exceeding it used to index straight past the row (a raw
-/// slice panic natively, an OOB memory trap on the self-hosted leg: exit 101
-/// vs 134, fuzz seed 508666777783 index 2120). Same abort family as the
-/// head-count domain above; the division form cannot overflow on a huge head
-/// count. An empty matrix has no row to violate and stays a no-op. The MHA /
-/// rms_norm entries derive `head_dim = cols / n_heads` internally and cannot
-/// express the mismatch — only the rope entries take both numbers, and
-/// `matrix_head_count_domain_test.rs` keeps every one of them routed here.
-pub fn almide_rt_matrix_head_geometry(n_heads_u: usize, head_dim_u: usize, rows: usize, cols: usize) {
-    if rows > 0 && head_dim_u > 0 && n_heads_u > cols / head_dim_u {
-        almide_abort("head geometry exceeds row width");
-    }
-}
-
 /// The SHAPE precondition of the two-operand kernels (#2481 / #2482 / #2483):
 /// two extents that the kernel indexes against each other must be EQUAL —
 /// `cols(a) == rows(b)` for `mul`, `cols(x) == cols(weight)` and
-/// `len(bias) == rows(weight)` for `linear_row`, the three widths and two row
-/// counts of `swiglu_gate`, `k`/`v` against `q` in the attention entries, the
+/// `len(bias) == rows(weight)` for `linear_row`, the
 /// weight width and bias length of `conv1d`, every member's row count in
 /// `concat_cols`, and `cols(extra) == cols(base)` in `append_rows`. Violating
 /// it used to be a RAW slice panic natively (exit 101, the form ALS-T6
@@ -175,18 +136,6 @@ pub fn almide_rt_matrix_head_geometry(n_heads_u: usize, head_dim_u: usize, rows:
 #[inline]
 pub fn almide_rt_matrix_shape_eq(a: usize, b: usize) {
     if a != b {
-        almide_abort("matrix shape mismatch");
-    }
-}
-
-/// The ORDERED half of the same precondition: the causal attention offset
-/// `sk - sq` needs `rows(q) <= rows(k)` (new tokens never outnumber the keys
-/// they attend to). Past it the offset underflowed here (no row was masked
-/// at all) while the self-hosted body masked from a negative offset — two
-/// exit-0 answers that differed.
-#[inline]
-pub fn almide_rt_matrix_shape_le(a: usize, b: usize) {
-    if a > b {
         almide_abort("matrix shape mismatch");
     }
 }
@@ -403,9 +352,14 @@ pub fn almide_rt_matrix_mul(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMatrix 
     // over Almide's tiled-scalar, used where BLAS isn't linked: wasm, etc.).
     // Either way it's the fastest available — BLAS for dense, almide-kernel for
     // BLAS's blind spots (quant/fused/attention/data-movement).
+    // #3651: a 0-row operand's stored width is unobservable (`shape` and `cols`
+    // report 0), so the kernel reads the observable width too. Its own
+    // `mk(0, n)` result kept `cols = n`, and that hidden width then failed the
+    // inner-dimension check below as a right operand — C-278 exempts empty
+    // operands on every entry, and the wasm leg answered r×0.
     let m = a.rows;
-    let k = a.cols;
-    let n = b.cols;
+    let k = if m == 0 { 0 } else { a.cols };
+    let n = if b.rows == 0 { 0 } else { b.cols };
     if m == 0 || k == 0 || n == 0 {
         return mk(m, n, vec![0.0f64; m * n]);
     }
@@ -477,122 +431,6 @@ pub fn almide_rt_matrix_broadcast_add_row(m: &AlmideMatrix, bias: &[f64]) -> Alm
     m.iter().map(|row| row.iter().zip(bias.iter()).map(|(x, b)| x + b).collect()).collect()
 }
 
-pub fn almide_rt_matrix_layer_norm_rows(m: &AlmideMatrix, gamma: &[f64], beta: &[f64], eps: f64) -> AlmideMatrix {
-    m.iter().map(|row| {
-        let n = row.len() as f64;
-        let mut sum = 0.0;
-        for &x in row { sum += x; }
-        let mean = sum / n;
-        let mut var = 0.0;
-        for &x in row { let d = x - mean; var += d * d; }
-        var /= n;
-        let inv = (var + eps).sqrt().recip();
-        row.iter().zip(gamma.iter()).zip(beta.iter())
-            .map(|((x, g), b)| (x - mean) * inv * g + b)
-            .collect()
-    }).collect()
-}
-
-pub fn almide_rt_matrix_softmax_rows(m: &AlmideMatrix) -> AlmideMatrix {
-    // Routed to almide-kernel: SIMD fast-exp softmax (attention's core). exp is
-    // the autovec wall; 2.74x over scalar libm. within-tolerance, each row sums
-    // to 1 by construction. Flat data straight in.
-    if m.rows == 0 || m.cols == 0 {
-        return mk(m.rows, m.cols, vec![0.0f64; m.rows * m.cols]);
-    }
-    let mut out = vec![0.0f64; m.data.len()];
-    almide_kernel::softmax::softmax_rows(&m.data, m.rows, m.cols, &mut out);
-    mk(m.rows, m.cols, out)
-}
-
-pub fn almide_rt_matrix_gelu(m: &AlmideMatrix) -> AlmideMatrix {
-    // SIMD tanh via the shared fast-exp (tanh(y)=1-2/(exp(2y)+1)): 7.94x over
-    // scalar libm. within-tolerance. Flat data straight in.
-    let mut out = vec![0.0f64; m.data.len()];
-    almide_kernel::gelu::gelu(&m.data, &mut out);
-    mk(m.rows, m.cols, out)
-}
-
-pub fn almide_rt_matrix_fused_gemm_bias_scale_gelu(
-    a: &AlmideMatrix,
-    b: &AlmideMatrix,
-    bias: &AlmideMatrix,
-    alpha: f64,
-) -> AlmideMatrix {
-    let mul = almide_rt_matrix_mul(a, b);
-    let added = almide_rt_matrix_add(&mul, bias);
-    let scaled = almide_rt_matrix_scale(&added, alpha);
-    almide_rt_matrix_gelu(&scaled)
-}
-
-pub fn almide_rt_matrix_rms_norm_rows(
-    m: &AlmideMatrix,
-    gamma: &[f64],
-    eps: f64,
-) -> AlmideMatrix {
-    m.iter().map(|row| {
-        let n = row.len() as f64;
-        let mut sq = 0.0;
-        for &x in row { sq += x * x; }
-        let inv = 1.0 / (sq / n + eps).sqrt();
-        row.iter().zip(gamma.iter()).map(|(x, g)| x * inv * g).collect()
-    }).collect()
-}
-
-pub fn almide_rt_matrix_swiglu_gate(
-    x: &AlmideMatrix,
-    w_gate: &AlmideMatrix,
-    w_up: &AlmideMatrix,
-) -> AlmideMatrix {
-    if x.is_empty() || w_gate.is_empty() || w_up.is_empty() { return vec![].into(); }
-    let r = x.len();
-    let d_in = x[0].len();
-    let d_out = w_gate.len();
-    // Both weights are (d_out, d_in): the gate/up dots read `w[j][k]` for
-    // k < d_in and j < d_out, so a narrower weight or a shorter `w_up` was a
-    // raw index panic here and an out-of-block read on the wasm leg.
-    almide_rt_matrix_shape_eq(w_gate.cols, d_in);
-    almide_rt_matrix_shape_eq(w_up.cols, d_in);
-    almide_rt_matrix_shape_eq(w_up.rows, d_out);
-    let mut out = vec![vec![0.0f64; d_out]; r];
-    for i in 0..r {
-        let xi = &x[i];
-        for j in 0..d_out {
-            let wg = &w_gate[j];
-            let wu = &w_up[j];
-            let mut g = 0.0;
-            let mut u = 0.0;
-            for k in 0..d_in {
-                g += xi[k] * wg[k];
-                u += xi[k] * wu[k];
-            }
-            let sig = 1.0 / (1.0 + almide_rt_libm_exp(-g));
-            out[i][j] = g * sig * u;
-        }
-    }
-    out.into()
-}
-
-pub fn almide_rt_matrix_attention_weights(
-    q: &AlmideMatrix,
-    kt: &AlmideMatrix,
-    scale: f64,
-) -> AlmideMatrix {
-    let prod = almide_rt_matrix_mul(q, kt);
-    let scaled = almide_rt_matrix_scale(&prod, scale);
-    almide_rt_matrix_softmax_rows(&scaled)
-}
-
-pub fn almide_rt_matrix_scaled_dot_product_attention(
-    q: &AlmideMatrix,
-    kt: &AlmideMatrix,
-    v: &AlmideMatrix,
-    scale: f64,
-) -> AlmideMatrix {
-    let w = almide_rt_matrix_attention_weights(q, kt, scale);
-    almide_rt_matrix_mul(&w, v)
-}
-
 pub fn almide_rt_matrix_split_cols_even(m: &AlmideMatrix, n: i64) -> Vec<AlmideMatrix> {
     // #2480: a part count of 0 or less is the EMPTY list, the same answer
     // `n == 0` has always had here and on the self-hosted leg (the C-034
@@ -636,95 +474,6 @@ pub fn almide_rt_matrix_concat_cols_many(matrices: &[AlmideMatrix]) -> AlmideMat
     }).collect()
 }
 
-pub fn almide_rt_matrix_causal_mask_add(m: &AlmideMatrix, mask_val: f64) -> AlmideMatrix {
-    m.iter().enumerate().map(|(i, row)| {
-        row.iter().enumerate().map(|(j, &x)| {
-            if j > i { x + mask_val } else { x }
-        }).collect()
-    }).collect()
-}
-
-pub fn almide_rt_matrix_multi_head_attention(q: &AlmideMatrix, k: &AlmideMatrix, v: &AlmideMatrix, n_heads: i64) -> AlmideMatrix {
-    almide_rt_matrix_mha_core(q, k, v, n_heads, false)
-}
-
-pub fn almide_rt_matrix_masked_multi_head_attention(q: &AlmideMatrix, k: &AlmideMatrix, v: &AlmideMatrix, n_heads: i64) -> AlmideMatrix {
-    almide_rt_matrix_mha_core(q, k, v, n_heads, true)
-}
-
-pub fn almide_rt_matrix_mha_core(q: &AlmideMatrix, k: &AlmideMatrix, v: &AlmideMatrix, n_heads: i64, causal: bool) -> AlmideMatrix {
-    let n_heads = almide_rt_matrix_head_count(n_heads);
-    if q.is_empty() { return vec![].into(); }
-    let sq = q.len();
-    let sk = k.len();
-    let d = q[0].len();
-    // `k` and `v` are read at `[j][col0 + kk]` for j < sk: a narrower `k` or
-    // `v` was a raw index panic natively and an out-of-block read on the wasm
-    // leg (the two wasm legs even disagreed with each other on the garbage);
-    // a `v` with fewer rows than `k` panicked past its data. An EMPTY `k`
-    // reads nothing and needs no shape.
-    if sk > 0 {
-        almide_rt_matrix_shape_eq(k.cols, d);
-        almide_rt_matrix_shape_eq(v.rows, sk);
-        almide_rt_matrix_shape_eq(v.cols, d);
-    }
-    if causal {
-        almide_rt_matrix_shape_le(sq, sk);
-    }
-    let dh = d / n_heads;
-    let scale = (dh as f64).sqrt().recip();
-
-    let mut out = vec![vec![0.0f64; d]; sq];
-
-    for h in 0..n_heads {
-        let col0 = h * dh;
-        let col1 = col0 + dh;
-
-        // scores[i][j] = (sum_k q[i][col0+k] * k[j][col0+k]) * scale
-        let mut scores = vec![vec![0.0f64; sk]; sq];
-        for i in 0..sq {
-            for j in 0..sk {
-                let mut s = 0.0;
-                for kk in col0..col1 {
-                    s += q[i][kk] * k[j][kk];
-                }
-                scores[i][j] = s * scale;
-                // causal mask: Q row i (new tokens) attends to K row j
-                // if j is at-or-before the i-th new token's absolute
-                // position. When sq == sk this reduces to j <= i; when
-                // sq < sk (KV-cache gen step), the sk - sq past rows are
-                // always visible.
-                if causal && j > (sk - sq) + i {
-                    scores[i][j] += -1.0e9;
-                }
-            }
-        }
-
-        // Row-wise softmax
-        for row in scores.iter_mut() {
-            let mut max = f64::NEG_INFINITY;
-            for &x in row.iter() { if x > max { max = x; } }
-            let mut sum = 0.0;
-            for x in row.iter_mut() { *x = almide_rt_libm_exp(*x - max); sum += *x; }
-            let inv = 1.0 / sum;
-            for x in row.iter_mut() { *x *= inv; }
-        }
-
-        // out[i][col0..col1] += sum_j scores[i][j] * v[j][col0..col1]
-        for i in 0..sq {
-            for j in 0..sk {
-                let w = scores[i][j];
-                if w == 0.0 { continue; }
-                for kk in 0..dh {
-                    out[i][col0 + kk] += w * v[j][col0 + kk];
-                }
-            }
-        }
-    }
-
-    out.into()
-}
-
 pub fn almide_rt_matrix_linear_row(x: &AlmideMatrix, weight: &AlmideMatrix, bias: &[f64]) -> AlmideMatrix {
     // y[i][j] = sum_k x[i][k] * weight[j][k] + bias[j]
     if x.is_empty() || weight.is_empty() { return vec![].into(); }
@@ -750,27 +499,6 @@ pub fn almide_rt_matrix_linear_row(x: &AlmideMatrix, weight: &AlmideMatrix, bias
         }
     }
     out.into()
-}
-
-pub fn almide_rt_matrix_linear_row_gelu(
-    x: &AlmideMatrix,
-    weight: &AlmideMatrix,
-    bias: &[f64],
-) -> AlmideMatrix {
-    let lin = almide_rt_matrix_linear_row(x, weight, bias);
-    almide_rt_matrix_gelu(&lin)
-}
-
-pub fn almide_rt_matrix_pre_norm_linear(
-    x: &AlmideMatrix,
-    gamma: &[f64],
-    beta: &[f64],
-    eps: f64,
-    weight: &AlmideMatrix,
-    bias: &[f64],
-) -> AlmideMatrix {
-    let normed = almide_rt_matrix_layer_norm_rows(x, gamma, beta, eps);
-    almide_rt_matrix_linear_row(&normed, weight, bias)
 }
 
 pub fn almide_rt_matrix_linear_row_no_bias(x: &AlmideMatrix, weight: &AlmideMatrix) -> AlmideMatrix {

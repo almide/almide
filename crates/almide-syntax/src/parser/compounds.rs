@@ -34,9 +34,36 @@ impl Parser {
                 else_: Box::new(else_),
             }));
         }
+        self.parse_if_rest(span)
+    }
+
+    /// The condition, the branches and the `else` chain after `if`.
+    fn parse_if_rest(&mut self, span: Option<crate::ast::Span>) -> Result<Expr, String> {
         let cond = self.parse_expr()?;
+        let branch_on_next_line = self.check(TokenType::Newline);
         self.skip_newlines();
-        self.expect(TokenType::Then)?;
+        // `if (c) { a } else { b }` (C / Rust / JS): one error naming `then`,
+        // and the braces parse as the branches — stopping here lost the parse
+        // at `else` and failed the enclosing fn's type as well.
+        if self.check(TokenType::LBrace) {
+            let diag = self.diag_error(
+                "if requires 'then', not a brace block",
+                "Write `if cond then a else b`. Braces make a block value: `if cond then { … } else { … }`.",
+                "if",
+            ).with_try("if x > 0 then 1 else 2");
+            self.errors.push(diag);
+        } else if branch_on_next_line && !self.check(TokenType::Then) {
+            // `if c` with the branch on the next line (Python / Ruby): one
+            // error, and the branch parses as the `then` it means.
+            let diag = self.diag_error(
+                "if requires 'then' before its branch",
+                "Write `if cond then a else b`; the branch may go on the next line after `then`.",
+                "if",
+            ).with_try("if x > 0 then 1 else 2");
+            self.errors.push(diag);
+        } else {
+            self.expect(TokenType::Then)?;
+        }
         self.skip_newlines();
         let then = self.parse_if_branch()?;
         self.skip_newlines();
@@ -44,6 +71,17 @@ impl Parser {
             self.advance();
             self.skip_newlines();
             self.parse_if_branch()?
+        } else if let Some(guide) = self.elif_guide() {
+            // `elif` / `elsif` / `elseif` (Python / Ruby / PHP): one error
+            // naming `else if`, and the chain goes on as the `else if` it
+            // means — stopping here lost the parse and the fn's type with it.
+            let diag = self.diag_error(guide.message.unwrap_or_default(), guide.hint, "if")
+                .with_try("if x > 0 then 1 else if x < 0 then 2 else 3");
+            self.errors.push(diag);
+            let elif_span = Some(self.current_span());
+            self.advance();
+            self.skip_newlines();
+            self.parse_if_rest(elif_span)?
         } else {
             Expr::new(self.next_id(), span.clone(), ExprKind::Unit)
         };
@@ -52,36 +90,38 @@ impl Parser {
         }))
     }
 
-    fn parse_if_branch(&mut self) -> Result<Expr, String> {
-        if self.check(TokenType::Ident) || self.check(TokenType::TypeName) {
-            let is_assign = self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Eq)
-                && self.peek_at(2).map(|t| &t.token_type) != Some(&TokenType::Eq);
-            let is_index = self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::LBracket);
-            let is_field = self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Dot)
-                && self.peek_at(2).map(|t| matches!(t.token_type, TokenType::Ident)).unwrap_or(false)
-                && self.peek_at(3).map(|t| &t.token_type) == Some(&TokenType::Eq)
-                && self.peek_at(4).map(|t| &t.token_type) != Some(&TokenType::Eq);
-
-            if is_assign || is_index || is_field {
-                let span = Some(self.current_span());
-                let stmt = self.parse_stmt()?;
-                match &stmt {
-                    Stmt::Assign { .. } | Stmt::IndexAssign { .. } | Stmt::FieldAssign { .. } => {
-                        return Ok(Expr::new(self.next_id(), span, ExprKind::Block {
-                            stmts: vec![stmt],
-                            expr: None,
-                        }));
-                    }
-                    // index lookahead matched but turned out to be an expression (e.g. xs[i])
-                    Stmt::Expr { expr, .. } => return Ok(expr.clone()),
-                    _ => return Ok(Expr::new(self.next_id(), span, ExprKind::Block {
-                        stmts: vec![stmt],
-                        expr: None,
-                    })),
-                }
-            }
+    /// The syntax guide's diagnosis of an `elif` / `elsif` / `elseif` here.
+    fn elif_guide(&self) -> Option<super::hints::HintResult> {
+        let tok = self.current();
+        if tok.token_type != TokenType::Ident || !matches!(tok.value.as_str(), "elif" | "elsif" | "elseif") {
+            return None;
         }
-        self.parse_expr()
+        super::hints::syntax_guide::check_rejected_ident(tok.value.as_str())
+    }
+
+    /// A `then` / `else` branch: an expression, or — unbraced — any
+    /// assignment a statement takes (#3757). The branch defers to the
+    /// statement parser's own target recognition (`x = v`, and every place
+    /// target `try_parse_place_assign` accepts: `xs[i] = v`, `o.ui.dirty = v`,
+    /// `o.ui.xs[i] = v`) instead of a shorter lookahead of its own, which
+    /// knew only the one-level forms and sent a nested target down the
+    /// expression path to die as "Assignments return Unit". A place prefix
+    /// that turns out not to be assigned (`xs[i]`, `o.f(x)`) backtracks and
+    /// parses as the expression it is.
+    fn parse_if_branch(&mut self) -> Result<Expr, String> {
+        let named = self.check(TokenType::Ident) || self.check(TokenType::TypeName);
+        let place = matches!(
+            self.peek_at(1).map(|t| &t.token_type),
+            Some(TokenType::Eq | TokenType::LBracket | TokenType::Dot)
+        );
+        if !(named && place) {
+            return self.parse_expr();
+        }
+        let span = Some(self.current_span());
+        match self.parse_stmt()? {
+            Stmt::Expr { expr, .. } => Ok(expr),
+            stmt => Ok(Expr::new(self.next_id(), span, ExprKind::Block { stmts: vec![stmt], expr: None })),
+        }
     }
 
     pub(crate) fn parse_match_expr(&mut self) -> Result<Expr, String> {
@@ -113,6 +153,7 @@ impl Parser {
     }
 
     pub(crate) fn parse_match_arm(&mut self) -> Result<MatchArm, String> {
+        self.skip_case_prefix();
         let pattern = self.parse_pattern()?;
         // #1461: or-pattern alternatives — `a | b | c => body`.
         let pattern = if self.check(TokenType::Pipe) {
@@ -132,10 +173,49 @@ impl Parser {
         } else {
             None
         };
-        self.expect(TokenType::FatArrow)?;
+        self.expect_arm_arrow()?;
         self.skip_newlines();
         let body = self.parse_expr()?;
         Ok(MatchArm { pattern, guard, body, comments: Vec::new() })
+    }
+
+    /// `case p => e` (Scala / Swift): one error, and the arm parses without
+    /// the `case`. A pattern that binds the name `case` (`case => …`) is not
+    /// a prefix and stays.
+    fn skip_case_prefix(&mut self) {
+        if !self.check_ident("case") { return; }
+        let binds_case = self.peek_at(1).is_some_and(|t| matches!(t.token_type,
+            TokenType::FatArrow | TokenType::If | TokenType::Pipe | TokenType::Comma | TokenType::Newline));
+        if binds_case { return; }
+        let diag = self.diag_error(
+            "'case' is not Almide: a match arm is 'pattern => expr'",
+            "Drop the `case`: `match x { 1 => \"one\", _ => \"other\" }`.",
+            "match",
+        ).with_try("match x { 1 => 2, _ => 3 }");
+        self.errors.push(diag);
+        self.advance();
+    }
+
+    /// The arm's `=>`. `->` (Haskell / OCaml / Kotlin) and `:` (Python dicts)
+    /// are one error each, and the arm goes on as `=>` — stopping here lost
+    /// the parse and failed the fn's type too.
+    fn expect_arm_arrow(&mut self) -> Result<(), String> {
+        // `head :: tail` (a Haskell / OCaml cons pattern) is its own hint,
+        // not an arm arrow.
+        let cons = self.peek_at(1).is_some_and(|t| t.token_type == TokenType::Colon);
+        let got = match self.current().token_type {
+            TokenType::Arrow => "->",
+            TokenType::Colon if !cons => ":",
+            _ => return self.expect(TokenType::FatArrow).map(|_| ()),
+        };
+        let diag = self.diag_error(
+            format!("'{got}' is not a match arm arrow: use '=>'"),
+            "A match arm is `pattern => expr`. `->` is the return type arrow in `fn f(x: Int) -> Int`.",
+            "match",
+        ).with_try("match x { 1 => 2, _ => 3 }");
+        self.errors.push(diag);
+        self.advance();
+        Ok(())
     }
 
     pub(crate) fn parse_paren_lambda(&mut self) -> Result<Expr, String> {
@@ -160,7 +240,7 @@ impl Parser {
     }
 
 
-    fn parse_lambda_param(&mut self) -> Result<LambdaParam, String> {
+    pub(crate) fn parse_lambda_param(&mut self) -> Result<LambdaParam, String> {
         if self.check(TokenType::LParen) {
             self.advance();
             let mut names = Vec::new();
@@ -188,6 +268,9 @@ impl Parser {
         self.expect(TokenType::LBrace)?;
         let mut exprs = Vec::new();
         self.skip_newlines();
+        if self.at_record_field_head() {
+            return self.parse_fan_record_fields(span, open);
+        }
         while !self.check(TokenType::RBrace) && !self.check(TokenType::EOF) {
             // fan blocks only allow expressions — reject statements
             let tok = self.current().clone();
@@ -219,7 +302,59 @@ impl Parser {
         }
         Ok(Expr::new(self.next_id(), span, ExprKind::Fan {
             exprs,
+            names: Vec::new(),
         }))
+    }
+
+    /// `name:` — a record field head (the field name may be a soft keyword,
+    /// as in the record literal: `{ ok: … }`).
+    fn at_record_field_head(&self) -> bool {
+        (self.check(TokenType::Ident) || self.is_soft_keyword_name())
+            && self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Colon)
+    }
+
+    /// The record form `fan { name: expr, … }` (#1388), entered after `{` when
+    /// the first arm is a field head. Every arm must be a field — the form is
+    /// the record literal's, minus punning (`fan { x }` is the one-arm tuple
+    /// form) — and a name may appear once. Same separators and statement ban
+    /// as the tuple form.
+    fn parse_fan_record_fields(&mut self, span: Option<Span>, open: crate::lexer::Token) -> Result<Expr, String> {
+        let mut exprs = Vec::new();
+        let mut names: Vec<crate::intern::Sym> = Vec::new();
+        while !self.check(TokenType::RBrace) && !self.check(TokenType::EOF) {
+            let tok = self.current().clone();
+            if !self.at_record_field_head() {
+                return Err(format!(
+                    "every arm of a record-form fan block must be a `name: expr` field at line {}:{} (got {:?} '{}')\n  Hint: `fan {{ a: f(), b: g() }}` names every arm; to collect a tuple instead, write no names at all: `fan {{ f(), g() }}`",
+                    tok.line, tok.col, tok.token_type, tok.value
+                ));
+            }
+            let name = self.expect_any_name()?;
+            if names.contains(&name) {
+                return Err(format!(
+                    "field `{}` appears twice in this fan block at line {}:{}\n  Hint: each field of the record a fan block builds is named once",
+                    name.as_str(), tok.line, tok.col
+                ));
+            }
+            self.expect(TokenType::Colon)?;
+            self.skip_newlines();
+            let head = self.current().clone();
+            if matches!(head.token_type, TokenType::Let | TokenType::Var | TokenType::For | TokenType::While) {
+                return Err(format!("`{}` is not allowed inside fan block at line {}:{}\n  Hint: a field's value is an expression — wrap statements in a block: {{ let x = f(); g(x) }}", head.value, head.line, head.col));
+            }
+            exprs.push(self.parse_expr()?);
+            names.push(name);
+            self.skip_newlines();
+            if self.check(TokenType::Semicolon) {
+                return Err(self.fan_arm_semicolon_error("fan block"));
+            }
+            if self.check(TokenType::Comma) {
+                self.advance();
+                self.skip_newlines();
+            }
+        }
+        self.expect_closing(TokenType::RBrace, open.line, open.col, "fan block")?;
+        Ok(Expr::new(self.next_id(), span, ExprKind::Fan { exprs, names }))
     }
 
 }

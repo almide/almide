@@ -41,6 +41,8 @@ mod prim_wrappers;
 mod exhaustiveness;
 mod call_defaults;
 mod effect_isolation_cascade;
+mod qq_effect_bang;
+mod expect_effect;
 
 use almide_lang::ast;
 use almide_base::diagnostic::Diagnostic;
@@ -174,6 +176,13 @@ pub struct Checker {
     /// `effect (A) -> B` fn type — the body gets effect-fn ergonomics and the
     /// lambda types as the effect carrier `(A) -> Result[B, String]`.
     pub(crate) lambda_slot_effect: bool,
+    /// The fn type each lambda inside data or a branch is expected to have,
+    /// keyed by the lambda (`expect_effect.rs`, #3749).
+    pub(crate) lambda_expect: std::collections::HashMap<crate::ast::ExprId, crate::types::Ty>,
+    /// The expected result of each call an effect expectation reached, and
+    /// the one armed for the call whose args are being inferred.
+    pub(crate) call_expect: std::collections::HashMap<crate::ast::ExprId, crate::types::Ty>,
+    pub(crate) pending_call_ret: Option<crate::types::Ty>,
     /// #2588: the declared return type of the lambda being inferred, when its
     /// expected type is a `Fn` known from a declaration (a fn return type, a
     /// call slot). A lambda BODY that is itself a lambda inherits it, so
@@ -349,6 +358,9 @@ pub struct Checker {
     /// #3515: the E006s on fallible effect callees whose hint names the `!`,
     /// and the cascade E001s they own (`effect_isolation_cascade.rs`).
     pub(crate) isolation_cascade: effect_isolation_cascade::IsolationCascade,
+    /// #3522: the calls to effect fns declared `-> Option[T]`, for the `??`
+    /// whose fallback is that `T` (`qq_effect_bang.rs`).
+    pub(crate) effect_option_calls: qq_effect_bang::EffectOptionCalls,
     /// #2927: the expectation handed to the NEXT `infer_expr` (a tail
     /// position's), and the one of the expression being inferred now. See
     /// `arm_blame.rs`.
@@ -673,6 +685,9 @@ impl Checker {
             next_synth_expr_id: 0xC000_0000,
             lambda_arg_hint: None,
             lambda_slot_effect: false,
+            lambda_expect: std::collections::HashMap::new(),
+            call_expect: std::collections::HashMap::new(),
+            pending_call_ret: None,
             lambda_ret_expect: None,
             list_elem_expect: None,
             fn_value_slot: None,
@@ -701,6 +716,7 @@ impl Checker {
             deferred_implicit_prop_checks: Vec::new(),
             effect_call_spans: std::collections::HashSet::new(),
             isolation_cascade: Default::default(),
+            effect_option_calls: Default::default(),
             tail_expect: None,
             expr_expect: None,
             fallible_marker_fns: std::collections::HashSet::new(),
@@ -1469,6 +1485,7 @@ include!("interp_string_form.rs");
 include!("lint_error_surface.rs");
 include!("bounded.rs");
 include!("concurrent_reach_check.rs");
+include!("abort_site_check.rs");
 include!("scoped.rs");
 include!("scoped_walk.rs");
 include!("scoped_shape.rs");

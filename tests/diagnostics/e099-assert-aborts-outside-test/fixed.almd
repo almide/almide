@@ -1,0 +1,6 @@
+// The call sits in the test block itself.
+import testing
+
+test "a panic aborts" {
+  testing.assert_aborts("boom", () => panic("boom"))
+}

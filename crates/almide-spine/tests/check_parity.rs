@@ -23,6 +23,23 @@ fn sha(s: &str) -> String {
     Sha256::digest(s.as_bytes()).iter().map(|b| format!("{b:02x}")).collect::<String>()
 }
 
+type Check = for<'db> fn(&'db dyn salsa::Database, almide_spine::SourceFile) -> &'db almide_spine::s3::CheckOutput;
+
+/// One file's check under the per-fixture limit (#3768), so a checker that
+/// never returns fails naming the file. The db moves to the file's thread
+/// and back, so the sweep keeps its one cache.
+fn check_limited(db: &mut Option<almide_spine::SpineDb>, rel: &str, text: String, check: Check) -> almide_spine::s3::CheckOutput {
+    let held = db.take().expect("the db came back from the previous file");
+    let path = rel.to_string();
+    let (held, out) = almide_corpus::run_limited(rel, almide_corpus::FIXTURE_LIMIT, move || {
+        let file = almide_spine::SourceFile::new(&held, path, text);
+        let out = check(&held, file).clone();
+        (held, out)
+    });
+    *db = Some(held);
+    out
+}
+
 #[test]
 fn spec_corpus_check_matches_oracle_hashes() {
     let root = workspace_root();
@@ -57,7 +74,7 @@ fn spec_corpus_check_matches_oracle_hashes() {
     }
     assert_eq!(files.len(), manifest.len() + exclusions.len(), "stale golden entries");
 
-    let db = almide_spine::SpineDb::default();
+    let mut db = Some(almide_spine::SpineDb::default());
     let mut purity_skipped = Vec::new();
     let mut mismatches = Vec::new();
     let mut compared = 0usize;
@@ -73,8 +90,7 @@ fn spec_corpus_check_matches_oracle_hashes() {
             }
             _ => {}
         }
-        let file = almide_spine::SourceFile::new(&db, rel.clone(), text);
-        let out = almide_spine::s3::check_file_json(&db, file);
+        let out = check_limited(&mut db, rel, text, almide_spine::s3::check_file_json);
         assert!(out.fatal.is_none(), "{rel}: greenfield hit a fatal path the oracle did not");
         assert!(out.module_diags.is_empty(), "{rel}: module diagnostics on a stdlib-only file");
         let stdout = if out.diags.is_empty() {
@@ -115,7 +131,7 @@ fn stage2_variant_matches_oracle_hashes() {
         let _rc = it.next().expect("test harness invariant");
         manifest.insert(it.next().expect("test harness invariant").to_string(), h);
     }
-    let db = almide_spine::SpineDb::default();
+    let mut db = Some(almide_spine::SpineDb::default());
     let mut compared = 0usize;
     let mut mismatches = Vec::new();
     for (rel, want) in &manifest {
@@ -126,8 +142,7 @@ fn stage2_variant_matches_oracle_hashes() {
             Ok(prog) if !almide_spine::s3::stdlib_only(&prog) => continue,
             _ => {}
         }
-        let file = almide_spine::SourceFile::new(&db, rel.clone(), text);
-        let out = almide_spine::s3::check_file_json_v2(&db, file);
+        let out = check_limited(&mut db, rel, text, almide_spine::s3::check_file_json_v2);
         if out.fatal.is_some() { continue; }
         let stdout = if out.diags.is_empty() { String::new() } else { format!("{}\n", out.diags.join("\n")) };
         if sha(&stdout) != *want { mismatches.push(rel.clone()); }
@@ -151,7 +166,7 @@ fn stage2_v3_template_matches_oracle_hashes() {
         let _rc = it.next().expect("test harness invariant");
         manifest.insert(it.next().expect("test harness invariant").to_string(), h);
     }
-    let db = almide_spine::SpineDb::default();
+    let mut db = Some(almide_spine::SpineDb::default());
     let mut compared = 0usize;
     let mut mismatches = Vec::new();
     for (rel, want) in &manifest {
@@ -162,8 +177,7 @@ fn stage2_v3_template_matches_oracle_hashes() {
             Ok(prog) if !almide_spine::s3::stdlib_only(&prog) => continue,
             _ => {}
         }
-        let file = almide_spine::SourceFile::new(&db, rel.clone(), text);
-        let out = almide_spine::s3::check_file_json_v3(&db, file);
+        let out = check_limited(&mut db, rel, text, almide_spine::s3::check_file_json_v3);
         if out.fatal.is_some() { continue; }
         let stdout = if out.diags.is_empty() { String::new() } else { format!("{}\n", out.diags.join("\n")) };
         if sha(&stdout) != *want { mismatches.push(rel.clone()); }

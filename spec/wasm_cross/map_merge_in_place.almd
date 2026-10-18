@@ -1,0 +1,63 @@
+// @contract: C-033, C-013
+// map.merge reuses a dying left operand (#3643, `@reuse(a)`): the rebind `m = map.merge(m, b)`,
+// a self tail call and a fold accumulator extend the left map IN PLACE — b's keys that a has take
+// b's value at a's position, b's new keys append in b's order — instead of copying the whole left
+// map per step. A left map that is still shared is copied, so every alias, holder or capture bound
+// before the merge keeps the pre-merge map (C-033), and a right operand that IS the left map (the
+// same var, or an alias of it) reads the pre-merge entries. String keys and values pin the credits
+// of the entries that move and the values that are replaced.
+type Holder = { snap: Map[String, String], tag: Int }
+
+fn small(i: Int) -> Map[String, String] = map.from_list([("k${i % 5}", "v${i}"), ("n${i}", "w${i}")])
+
+fn show(m: Map[String, String]) -> String = map.entries(m) |> list.map(((k, v)) => "${k}=${v}") |> list.join(",")
+
+fn go(m: Map[String, String], i: Int, k: Int) -> Map[String, String] = if i >= k then m
+else go(map.merge(m, small(i)), i + 1, k)
+
+effect fn main() -> Unit = {
+  let base = map.from_list([("k0", "a"), ("k1", "b"), ("k2", "c")])
+  // the rebind in a loop, with an alias and a holder bound before it
+  var m = base
+  let keep = m
+  let h = { snap: m, tag: 1 }
+  let peek = () => map.len(keep)
+  var i = 0
+  while i < 7 {
+    m = map.merge(m, small(i))
+    i = i + 1
+  }
+  println(show(m))
+  println("${show(keep)} | ${show(h.snap)} ${h.tag} ${peek()} | ${show(base)}")
+  // a self tail call and a fold accumulator
+  println(show(go(map.from_list([("k3", "x")]), 0, 6)))
+  let f = list.range(0, 6) |> list.fold(
+    map.from_list([("k4", "y")]),
+    (acc, j) => map.merge(acc, small(j * 2)),
+  )
+  println(show(f))
+  // the right operand is the left map itself, or an alias of it
+  var s = map.from_list([("p", "1"), ("q", "2")])
+  s = map.merge(s, s)
+  let t = s
+  s = map.merge(s, t)
+  s = map.merge(s, map.from_list([("q", "3"), ("r", "4")]))
+  println("${show(s)} | ${show(t)}")
+  // empty operands, and an Int-keyed map past the index threshold
+  var e: Map[String, String] = map.new()
+  e = map.merge(e, map.new())
+  e = map.merge(e, base)
+  e = map.merge(e, map.new())
+  println("${show(e)} ${map.len(e)}")
+  var big: Map[Int, Int] = list.range(0, 40) |> list.fold(map.new(), (acc, j) => map.set(acc, j, j))
+  let big0 = big
+  var j = 0
+  while j < 30 {
+    big = map.merge(big, map.from_list([(j * 3, 0 - j), (100 + j, j)]))
+    j = j + 1
+  }
+  println("${map.len(big)} ${map.len(big0)} ${map.get(big, 9)} ${map.get(big0, 9)} ${map.get(big, 129)} ${list.drop(
+    map.keys(big),
+    60,
+  )}")
+}

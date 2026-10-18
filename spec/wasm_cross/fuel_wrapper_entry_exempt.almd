@@ -1,0 +1,31 @@
+// @contract: C-294
+// ALS-DT2 (a): a loop-free, non-recursive callee's entry costs 0 — the shared
+// inliner folds it away — so `wrap(1000)` spends exactly what `heavy(1000)`
+// spends, 1002 units = 3006 ns, and a budget of 3006 ns admits it on every
+// leg. The native default route charged the wrapper's own entry (#3778) and
+// cut it; it now reads the same meter plan as the wasm emitter.
+fn heavy(n: Int) -> Int = {
+  var i = 0
+  var acc = 0
+  while i < n {
+    acc = (acc + i * 7) % 999983
+    i = i + 1
+  }
+  acc
+}
+
+fn wrap(n: Int) -> Int = heavy(n)
+
+fn wrap2(n: Int) -> Int = wrap(n)
+
+effect fn main() -> Unit = {
+  println(int.to_string(fan.bounded(compute.ns(3006)) { wrap(1000) } ?? -1))
+  println(int.to_string(fan.bounded(compute.ns(3006)) { wrap2(1000) } ?? -1))
+  println(int.to_string(fan.bounded(compute.ns(3003)) { wrap(1000) } ?? -1))
+  // The same exemption decides a race: both arms are loop-free wrappers, so
+  // arm 0 ties on spend and wins by source order on every leg.
+  println(int.to_string(fan.min(compute.ms(1)) {
+    wrap(3)
+    wrap2(3)
+  } ?? -1))
+}

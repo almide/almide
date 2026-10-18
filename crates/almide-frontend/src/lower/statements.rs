@@ -33,6 +33,13 @@ fn lower_self_list_set(ctx: &mut LowerCtx, var: VarId, value: &IrExpr, span: Opt
     let mk = |kind: IrExprKind, ty: Ty| IrExpr { kind, ty, span, def_id: None };
     let idx_var = ctx.var_table.alloc(sym("__set_i"), Ty::Int, Mutability::Let, span);
     let val_var = ctx.var_table.alloc(sym("__set_v"), elem_ty.clone(), Mutability::Let, span);
+    // The hoisted value is the element itself, never a propagation point: in
+    // an effect fn auto_try reads an un-annotated Result bind as one and
+    // unwraps it (`let v: i64 = (Ok(2))?`, #3591). A user cannot write that
+    // bind (E041), so only this synthetic one reached it.
+    if elem_ty.is_result() {
+        ctx.annotated_result_vars.insert(val_var);
+    }
     let idx = |mk: &dyn Fn(IrExprKind, Ty) -> IrExpr| mk(IrExprKind::Var { id: idx_var }, Ty::Int);
     let len = mk(IrExprKind::Call {
         target: CallTarget::Module { module: sym("list"), func: sym("len"), def_id: None },

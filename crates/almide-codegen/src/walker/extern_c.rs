@@ -18,11 +18,80 @@ fn render_native_call(ctx: &RenderContext, func: &IrFunction, attr: &almide_lang
     let params: Vec<String> = func.params.iter()
         .map(|p| format!("{}: {}", p.name, extern_rust_param_type(ctx, p)))
         .collect();
-    let args: Vec<String> = func.params.iter().map(|p| p.name.to_string()).collect();
+    // ADR-0013: generated code holds the shared buffer `AlmideStr`, the host
+    // speaks `String`. A value that holds a String in a structural position
+    // (List / Set / Map / Option / Result / tuple) is copied into its host
+    // shape on the way in, and a `mut` one is copied back after the call; a
+    // returned one is copied into the Almide shape. A plain `String` param is
+    // `&str` and needs nothing.
+    let mut before = String::new();
+    let mut after = String::new();
+    let args: Vec<String> = func.params.iter().map(|p| extern_rust_arg(p, &mut before, &mut after)).collect();
     let ret = render_type(ctx, &func.ret_ty);
     let call = format!("{}::{}({})", mod_name, fn_name, args.join(", "));
-    let body = if extern_rust_is_rc_cow(&func.ret_ty) { format!("{call}.into()") } else { call };
-    format!("fn {}({}) -> {} {{\n    {}\n}}", emit_name, params.join(", "), ret, body)
+    let result = if extern_rust_is_rc_cow(&func.ret_ty) {
+        "__almide_r.into()".to_string()
+    } else if extern_rust_has_str(&func.ret_ty) {
+        extern_rust_str_conv("&__almide_r", &func.ret_ty, false, 0)
+    } else {
+        "__almide_r".to_string()
+    };
+    let body = if before.is_empty() && after.is_empty() && result == "__almide_r" {
+        format!("    {call}")
+    } else {
+        format!("{before}    let __almide_r = {call};\n{after}    {result}")
+    };
+    format!("fn {}({}) -> {} {{\n{}\n}}", emit_name, params.join(", "), ret, body)
+}
+
+/// Whether a value of `ty` holds an Almide String the `@extern(rust)` host
+/// sees as `String`: the String itself, or one inside a List / Set / Map /
+/// Option / Result / tuple. Records and variants are the program's own types,
+/// which the host uses as they are.
+fn extern_rust_has_str(ty: &Ty) -> bool {
+    use almide_lang::types::TypeConstructorId as C;
+    match ty {
+        Ty::String => true,
+        Ty::Applied(C::List | C::Set | C::Option | C::Result | C::Map, args) => args.iter().any(extern_rust_has_str),
+        Ty::Tuple(elems) => elems.iter().any(extern_rust_has_str),
+        _ => false,
+    }
+}
+
+/// An owned copy of the value `e` (an expression of type `&T`) in the host's
+/// shape (`to_host`: every Almide String becomes a `String`) or in the Almide
+/// shape (every host `String`, or an `AlmideString` a host already returns,
+/// becomes an `AlmideString`). `depth` keeps closure binders distinct.
+fn extern_rust_str_conv(e: &str, ty: &Ty, to_host: bool, depth: usize) -> String {
+    use almide_lang::types::TypeConstructorId as C;
+    if !extern_rust_has_str(ty) {
+        return format!("({e}).clone()");
+    }
+    let x = format!("__x{depth}");
+    let y = format!("__y{depth}");
+    let inner = |e: &str, ty: &Ty| extern_rust_str_conv(e, ty, to_host, depth + 1);
+    match ty {
+        Ty::String if to_host => format!("({e}).to_string()"),
+        Ty::String => format!("AlmideString::from(({e}).as_str())"),
+        Ty::Applied(C::List, args) => format!("({e}).iter().map(|{x}| {}).collect::<Vec<_>>()", inner(&x, &args[0])),
+        Ty::Applied(C::Set, args) => format!("({e}).iter().map(|{x}| {}).collect::<AlmideSet<_>>()", inner(&x, &args[0])),
+        Ty::Applied(C::Option, args) => format!("({e}).as_ref().map(|{x}| {})", inner(&x, &args[0])),
+        Ty::Applied(C::Result, args) => format!(
+            "match {e} {{ Ok({x}) => Ok({}), Err({x}) => Err({}) }}",
+            inner(&x, &args[0]),
+            inner(&x, &args[1])
+        ),
+        Ty::Applied(C::Map, args) => format!(
+            "({e}).iter().map(|({x}, {y})| ({}, {})).collect::<AlmideMap<_, _>>()",
+            inner(&x, &args[0]),
+            inner(&y, &args[1])
+        ),
+        Ty::Tuple(elems) => {
+            let parts: Vec<String> = elems.iter().enumerate().map(|(i, t)| inner(&format!("&{x}.{i}"), t)).collect();
+            format!("{{ let {x} = {e}; ({},) }}", parts.join(", "))
+        }
+        _ => format!("({e}).clone()"),
+    }
 }
 
 /// `Bytes` / `Matrix`: the two value types generated code holds behind an

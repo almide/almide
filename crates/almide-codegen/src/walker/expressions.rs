@@ -298,7 +298,7 @@ fn render_expr_result_err(ctx: &RenderContext, inner: &IrExpr, ty: &Ty) -> Strin
         // converting those regressed match_container_literal and
         // to_result_custom_e when this fix first landed unconditional.
         let payload = if matches!(&inner.ty, Ty::String) {
-            format!("{}.to_string()", inner_str)
+            format!("{}.to_almide()", inner_str)
         } else {
             inner_str.clone()
         };
@@ -610,7 +610,7 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         // Produced by `pass_stdlib_lowering` for calls to bundled stdlib
         // fns whose IrFunction carries an `@inline_rust("...")` attribute.
         // Render each arg into the param-keyed placeholder.
-        IrExprKind::InlineRust { .. } => render_expr_inline_rust(ctx, expr),
+        IrExprKind::InlineRust { .. } => scope_cell_guard_of_call(ctx, expr, render_expr_inline_rust(ctx, expr)),
 
         // ── Pre-resolved runtime call (from @intrinsic / NormalizeRuntimeCalls) ──
         // #617: a raw NATIVE-runtime result whose type reaches Bytes/Matrix
@@ -618,11 +618,12 @@ pub fn render_expr(ctx: &RenderContext, expr: &IrExpr) -> String {
         // normalized into the same RuntimeCall spelling already returns the
         // mapped types — no glue (double-wrap otherwise).
         IrExprKind::RuntimeCall { symbol, args } => {
-            render_expr_runtime_call(ctx, symbol, args, &expr.ty)
+            let call = render_expr_runtime_call(ctx, symbol, args, &expr.ty);
+            scope_cell_guard_of_call(ctx, expr, call)
         }
 
         // ── Calls ──
-        IrExprKind::Call { .. } | IrExprKind::TailCall { .. } => render_expr_call(ctx, expr),
+        IrExprKind::Call { .. } | IrExprKind::TailCall { .. } => scope_cell_guard_of_call(ctx, expr, render_expr_call(ctx, expr)),
 
         // ── Collections, access, wrappers and codegen nodes ──
         _ => render_expr_data(ctx, expr),

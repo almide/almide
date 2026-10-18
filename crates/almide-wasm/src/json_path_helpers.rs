@@ -19,6 +19,7 @@ fn raw8() -> MemArg {
     MemArg { offset: 0, align: 0, memory_index: 0 }
 }
 
+const VT_NULL: i32 = crate::value::VT_NULL;
 const VT_OBJECT: i32 = 6;
 const VT_ARRAY: i32 = 5;
 
@@ -334,11 +335,15 @@ pub(crate) fn emit_json_path_remove_helper(helper_base: u32, helpers: &[Helper])
     let m_pay = slot_memarg(almide_layout::SUM_FIELD);
     let mut f = Function::new([(13, ValType::I32), (1, ValType::I64)]);
     let mut i = f.instructions();
-    // k >= count → value.null()
+    // k >= count → value.null() (the root path: jq's `del(.)`). The tag is
+    // WRITTEN, not assumed: `$alloc` hands back a recycled block as it was
+    // left, so a bare allocation read as whatever Value last lived there.
     i.local_get(k);
     i.local_get(path).i32_load(len_memarg()).i32_const(2).i32_shr_u();
     i.i32_ge_u().if_(BlockType::Empty);
-    i.i32_const(16).call(F_ALLOC).return_();
+    i.i32_const(16).call(F_ALLOC).local_tee(tmp);
+    i.i32_const(VT_NULL).i32_store(m_tag);
+    i.local_get(tmp).return_();
     i.end();
     // last = k + 1 >= count
     i.local_get(k).i32_const(1).i32_add();

@@ -106,7 +106,7 @@ pub(super) fn insert_clones_member(object: IrExpr, field: Sym, ty: Ty, span: Opt
 /// statement overwrites it, so it moves even inside a loop — `b = add(b, i)`
 /// hands `b` over instead of copying it, and the next iteration (or any later
 /// read) sees the new value. The read must be the only occurrence of `x` in
-/// `value`, outside every closure, loop body, iterator chain, guard and
+/// `value`, outside every closure, loop body, chain lambda, guard and
 /// `&mut` (each of which may run it again or keep it borrowed), and `x` must
 /// be an owned, uncaptured, non-always-clone binding: a borrowed param or a
 /// global cannot be moved from at all.
@@ -162,16 +162,24 @@ fn interp_as_append(value: IrExpr, root: VarId, field: Option<Sym>) -> IrExpr {
     IrExpr { kind, ty: Ty::String, span: value.span, def_id: None }
 }
 
+/// An iterator chain is not excluded as a whole: its source, `take` count and
+/// fold `init` run once, before the iteration (`x = list.fold(xs, x, f)`
+/// moves `x`). The parts that run per element — the step and collector
+/// lambdas — are walked as loop bodies (`in_loop`), and a var one of them
+/// captures is `guard_forced` at every occurrence in the chain.
 fn reads_once_plainly(value: &IrExpr, var: VarId) -> bool {
     use super::use_kind::{ExplicitBorrows, Site, UseSites};
     let sites = UseSites::of_expr(value, Site::Assigned, &ExplicitBorrows);
     let mut uses = sites.of(var);
     let Some(u) = uses.next() else { return false };
-    uses.next().is_none() && u.is_node() && u.depth == 0 && !u.in_chain && !u.in_loop && !u.in_mut
+    uses.next().is_none() && u.is_node() && u.depth == 0 && !u.in_loop && !u.in_mut
         && !u.in_guard && !u.guard_forced
 }
 
 /// `Clone(Var x)` → `Var x` (the single occurrence `reads_once_plainly` found).
+/// The source of a runtime op with an owned twin is kept as `&x` rather than
+/// cloned when it is not the last use; that borrow becomes `x` too, so
+/// `x = list.swap(x, i, j)` calls the twin and writes in place (#3533).
 fn strip_var_clone(e: &mut IrExpr, var: VarId) {
     use almide_ir::visit_mut::{IrMutVisitor, walk_expr_mut};
     struct Strip(VarId);
@@ -182,6 +190,15 @@ fn strip_var_clone(e: &mut IrExpr, var: VarId) {
             {
                 e.kind = IrExprKind::Var { id: self.0 };
                 return;
+            }
+            if let IrExprKind::RuntimeCall { symbol, args } = &mut e.kind
+                && crate::owned_source::takes_source_either_way(symbol.as_str())
+                && let Some(src) = args.first_mut()
+                && crate::owned_source::borrowed_var(src) == Some(self.0)
+                && let IrExprKind::Borrow { expr, .. } = &mut src.kind
+            {
+                let var = std::mem::replace(&mut **expr, IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None });
+                *src = var;
             }
             walk_expr_mut(self, e);
         }

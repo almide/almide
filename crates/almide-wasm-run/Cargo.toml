@@ -12,6 +12,8 @@ description = "The greenfield wasm HOST: the almide.* import surface (print/exit
 [dependencies]
 almide-base = { path = "../almide-base" }
 almide-wasm = { path = "../almide-wasm" }
+# The block layout a fan worker builds a list capture in (#3331).
+almide-layout = { path = "../almide-layout" }
 # The p1 transform moved out (#2554) so wasm32 consumers can carry it
 # without wasmtime; re-exported below as `wasi`, the path every caller uses.
 almide-wasi = { path = "../almide-wasi" }
@@ -27,7 +29,19 @@ anyhow = "1"
 ctrlc = { version = "3.5", features = ["termination"] }
 wasmparser = "0.261"
 wasm-encoder = "0.261"
-wasmtime = "49.0.2"
+wasmtime = "49.0.3"
+# ADR-0023 step 7: the embedded lane runs an HTTP program's WASI 0.3
+# component. The p3 worlds come from wasmtime-wasi; wasi:http comes from
+# wasmtime-wasi-http WITHOUT `default-send-request` (no hyper client, no
+# rustls): the transport is the `send_request` hook, which is almide-rt-core,
+# the client native runs (§2.2). Pinned in lockstep with wasmtime's major
+# (proofs/wasi-pin-policy.toml [runtime].crate_major).
+wasmtime-wasi = { version = "49.0.3", default-features = false, features = ["p3"] }
+wasmtime-wasi-http = { version = "49.0.3", default-features = false, features = ["p3"] }
+tokio = { version = "1", default-features = false, features = ["rt", "rt-multi-thread"] }
+http = "1"
+http-body-util = "0.1"
+bytes = "1"
 wit-component = "0.261"
 wit-parser = "0.261"
 

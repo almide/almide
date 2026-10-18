@@ -8,15 +8,30 @@ use almide_lang::types::Ty;
 pub(super) fn view(function: &IrFunction) -> Option<IrExpr> {
     let params: HashSet<_> = function.params.iter().map(|p| p.var).collect();
     if !free_vars::free_vars(&function.body, &params).is_empty() { return None; }
-    // Heap parameters can alias caller-owned storage. Keep their original,
-    // stricter body rather than granting local mutation admission.
-    if !function.params.iter().all(|p| scalar(&p.ty)) {
-        return Some(function.body.clone());
-    }
     let mut body = function.body.clone();
-    let locals = free_vars::bound_vars(&body);
+    let mut locals = free_vars::bound_vars(&body);
+    // Heap parameters can alias caller-owned storage, so with one in scope
+    // only a scalar `let`/`var` binding is invocation-owned: it holds no
+    // storage a parameter could share. Writes to heap locals stay in the view.
+    if !function.params.iter().all(|p| scalar(&p.ty)) {
+        let mut scalars = ScalarBinds(HashSet::new());
+        scalars.visit_expr(&body);
+        locals.retain(|v| scalars.0.contains(v));
+    }
     View { locals }.visit_expr_mut(&mut body);
     Some(body)
+}
+
+/// Every `let`/`var` binding of a scalar type.
+struct ScalarBinds(HashSet<VarId>);
+
+impl IrVisitor for ScalarBinds {
+    fn visit_stmt(&mut self, s: &IrStmt) {
+        if let IrStmtKind::Bind { var, ty, .. } = &s.kind {
+            if scalar(ty) { self.0.insert(*var); }
+        }
+        walk_stmt(self, s);
+    }
 }
 
 fn scalar(ty: &Ty) -> bool {

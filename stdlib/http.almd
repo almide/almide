@@ -229,30 +229,6 @@ effect fn request_bytes(method: String, url: String, body: String, headers: Map[
 @borrow_ref(headers)
 effect fn request_stream(method: String, url: String, body: String, headers: Map[String, String], on_chunk: (String) -> Unit) -> Result[Unit, String] = _
 
-// OpenAI-compatible /chat/completions SSE helper. The runtime opens the
-// stream, parses each `data: {...}` event, calls `on_text_delta` with
-// each new content fragment for live rendering, and accumulates
-// content / tool_calls / usage on its own. Returns a JSON string shaped
-// like a non-streaming LLMResponse:
-//
-//   {"content":"...","model":"...","usage":{...},"finish_reason":"...",
-//    "tool_calls":[{"id":"...","name":"...","arguments":"..."}]}
-//
-// `body_json` must already include `"stream": true`. The almai layer
-// (or any caller) is expected to `json.parse` the result.
-/// Streams base_url/chat/completions; LLM-response JSON.
-@intrinsic("almide_rt_sse_openai_chat")
-effect fn openai_streaming_call(base_url: String, api_key: String, body_json: String, on_text_delta: (String) -> Unit) -> Result[String, String] = _
-
-// Anthropic Messages API streaming. Same return shape as
-// `openai_streaming_call`; the runtime translates Anthropic's distinct
-// SSE event format (`event: content_block_delta` etc.) into the same
-// LLMResponse-shaped JSON ({content, model, usage, finish_reason,
-// tool_calls}).
-/// Streams Anthropic Messages; LLM-response JSON.
-@intrinsic("almide_rt_sse_anthropic_messages")
-effect fn anthropic_streaming_call(api_key: String, body_json: String, on_text_delta: (String) -> Unit) -> Result[String, String] = _
-
 // ── Call handle and per-call limits (#2631) ──
 //
 // `start` returns at once with an `HttpCall`; a runtime thread does the
@@ -268,8 +244,9 @@ effect fn anthropic_streaming_call(api_key: String, body_json: String, on_text_d
 //
 // FAMILY RULE (machine-checked by tests/http_call_family_gate_test.rs): the
 // handle has exactly the five verbs start / poll / read_new / wait / cancel,
-// and every streaming client — request_stream, openai_streaming_call,
-// anthropic_streaming_call — has exactly one `<name>_with_limits` twin: the
+// and every streaming client (request_stream; the OpenAI and Anthropic clients
+// moved to package almide/llm at dialect epoch 14) has exactly one
+// `<name>_with_limits` twin: the
 // same parameters with `limits: HttpLimits` inserted before the callback, the
 // same return type, built on the handle. Intentional omissions: the one-shot
 // clients (get / request / *_response / *_status / *_bytes) get no twin —
@@ -326,31 +303,6 @@ effect fn request_stream_with_limits(method: String, url: String, body: String, 
 @intrinsic("almide_rt_http___request_stream_limited")
 @borrow_ref(headers)
 effect fn __request_stream_limited(method: String, url: String, body: String, headers: Map[String, String], total_ms: Int, idle_ms: Int, on_chunk: (String) -> Unit) -> Result[Unit, String] = _
-
-/// openai_streaming_call bounded by per-call limits.
-effect fn openai_streaming_call_with_limits(base_url: String, api_key: String, body_json: String, limits: HttpLimits, on_text_delta: (String) -> Unit) -> Result[String, String] = __openai_streaming_limited(
-  base_url,
-  api_key,
-  body_json,
-  limits.total_ms,
-  limits.idle_ms,
-  on_text_delta,
-)
-
-@intrinsic("almide_rt_http___openai_streaming_limited")
-effect fn __openai_streaming_limited(base_url: String, api_key: String, body_json: String, total_ms: Int, idle_ms: Int, on_text_delta: (String) -> Unit) -> Result[String, String] = _
-
-/// anthropic_streaming_call bounded by per-call limits.
-effect fn anthropic_streaming_call_with_limits(api_key: String, body_json: String, limits: HttpLimits, on_text_delta: (String) -> Unit) -> Result[String, String] = __anthropic_streaming_limited(
-  api_key,
-  body_json,
-  limits.total_ms,
-  limits.idle_ms,
-  on_text_delta,
-)
-
-@intrinsic("almide_rt_http___anthropic_streaming_limited")
-effect fn __anthropic_streaming_limited(api_key: String, body_json: String, total_ms: Int, idle_ms: Int, on_text_delta: (String) -> Unit) -> Result[String, String] = _
 
 // ── Server: handlers, routes, middleware (#2588) ──
 //
@@ -416,10 +368,14 @@ fn __decode_part(s: String) -> String = http.url_decode(string.replace(s, "+", "
 fn __is_hex(c: String) -> Bool = c != "" and string.contains("0123456789abcdefABCDEF", c)
 
 // Some `%` is not followed by two hex digits: the path is not percent-encoded.
-fn __bad_escape(cs: List[String]) -> Bool = match list.first(cs) {
-  none => false,
-  some(c) => if c != "%" then __bad_escape(list.drop(cs, 1))
-  else if __is_hex(list.get(cs, 1) ?? "") and __is_hex(list.get(cs, 2) ?? "") then __bad_escape(list.drop(cs, 3)) else true,
+// Every piece after a `%` must start with two hex digits — one pass over the
+// path, where recursing over its chars with `list.drop` copied the rest of
+// the path per char, O(L²) in the request.
+fn __bad_escape(path: String) -> Bool = string.split(path, "%") |> list.drop(1) |> list.any((p) => not __hex_pair(p))
+
+fn __hex_pair(p: String) -> Bool = {
+  let cs = string.chars(string.take(p, 2))
+  list.len(cs) == 2 and list.all(cs, __is_hex)
 }
 
 fn __is_rest(s: String) -> Bool = string.starts_with(s, "{") and string.ends_with(s, "...}")
@@ -468,33 +424,32 @@ fn __mounted(sub: HttpHandler) -> HttpHandler = (req) => {
 }
 
 // The `[name, value, …]` bindings when a pattern matches the path's parts.
-fn __bind(segs: List[String], parts: List[String]) -> List[String]? = __bind_into(segs, parts, [])
-
-// Tail-recursive: `bound` carries the bindings made so far.
-fn __bind_into(segs: List[String], parts: List[String], bound: List[String]) -> List[String]? = match list.first(segs) {
-  none => if list.is_empty(parts) then some(bound) else none,
-  some(s) => if __is_rest(s) then {
-    let name = __name_of(s)
-    some(bound + [
-      name,
-      if name == "" then list.join(parts, "/")
-      else parts |> list.map(__decode_part) |> list.join("/")
-    ])
-  } else match list.first(parts) {
-    none => none,
-    some(part) => if __is_param(s) then __bind_into(
-      list.drop(segs, 1),
-      list.drop(parts, 1),
-      bound + [__name_of(s), __decode_part(part)],
-    )
-    else if __decode_part(part) == s then __bind_into(
-      list.drop(segs, 1),
-      list.drop(parts, 1),
-      bound,
-    )
-    else none,
-  },
+// The segments before a `{name...}` match the parts one for one; the rest
+// param, if any, binds whatever is left. Pairing by `list.zip` walks each list
+// once, where dropping one part per segment copied the parts per step.
+fn __bind(segs: List[String], parts: List[String]) -> List[String]? = {
+  let fixed = segs |> list.take_while((s) => not __is_rest(s))
+  let n = list.len(fixed)
+  let rest = list.get(segs, n)
+  let pairs = list.zip(fixed, parts)
+  let fits = if rest == none then list.len(parts) == n else list.len(parts) >= n
+  if not fits or not list.all(pairs, ((s, part)) => __is_param(s) or __decode_part(part) == s) then none
+  else {
+    let bound = pairs |> list.filter(((s, _)) => __is_param(s)) |> list.flat_map(((s, part)) => [__name_of(s), __decode_part(part)])
+    match rest {
+      none => some(bound),
+      some(r) => some(bound + __bind_rest(__name_of(r), list.drop(parts, n))),
+    }
+  }
 }
+
+// `{name...}` binds the remaining parts decoded; the anonymous `{...}` of a
+// mount binds them undecoded.
+fn __bind_rest(name: String, parts: List[String]) -> List[String] = [
+  name,
+  if name == "" then list.join(parts, "/")
+  else parts |> list.map(__decode_part) |> list.join("/")
+]
 
 // Every path `a` matches, `b` matches too: `a` is at least as specific.
 fn __covers(a: List[String], b: List[String]) -> Bool = {
@@ -579,7 +534,7 @@ effect fn __dispatch(hits: List[(HttpRoute, List[String])], req: HttpRequest) ->
     400,
     "Bad Request: the request target must start with /",
   )
-  else if __bad_escape(string.chars(path)) then http.response(
+  else if __bad_escape(path) then http.response(
     400,
     "Bad Request: malformed percent-encoding in the path",
   )
@@ -617,19 +572,16 @@ fn router(routes: List[HttpRoute]) -> Result[HttpHandler, String] = {
 
 /// Applies middleware; the first is the outermost.
 @concurrent(handler, middleware)
-fn wrap(handler: HttpHandler, middleware: List[HttpMiddleware]) -> HttpHandler =
-  if list.is_empty(middleware) then handler
-  else wrap(
-    __apply(list.last(middleware) ?? __no_middleware, handler),
-    list.take(middleware, list.len(middleware) - 1),
-  )
+fn wrap(handler: HttpHandler, middleware: List[HttpMiddleware]) -> HttpHandler = list.reverse(middleware) |> list.fold(
+  handler,
+  (inner, mw) => __apply(mw, inner),
+)
 
 // Named rather than inline `mw(inner)`: the wasm legs return a handler out
 // of an `if` only through a call they can resolve. `wrap` applies the LAST
-// middleware first, so the recursion is a tail call.
+// middleware first, one fold step each: the recursion it replaces copied
+// the rest of the list on every step (`list.take`), O(n²) in middleware.
 fn __apply(mw: HttpMiddleware, inner: HttpHandler) -> HttpHandler = mw(inner)
-
-fn __no_middleware(next: HttpHandler) -> HttpHandler = next
 
 /// JSON body through decode; err is a 400 response.
 fn decode_json[T](req: HttpRequest, decode: (Value) -> Result[T, String]) -> Result[T, HttpResponse] = match json.parse(http.req_body(req)) {

@@ -45,18 +45,32 @@ fn render_iter_chain(ctx: &RenderContext, source: &IrExpr, consume: bool, steps:
 fn render_iter_collector(ctx: &RenderContext, chain: &str, collector: &IterCollector) -> String {
     match collector {
         IterCollector::Collect => format!("{}.collect::<Vec<_>>()", chain),
+        // #3555: a Bytes / Matrix accumulator is an `AlmideRcCow`, and rustc
+        // infers `fold`'s accumulator type from the expected type first — as
+        // a by-reference argument that is the raw `Vec<u8>`, which the init
+        // then mismatches (E0308). Name the accumulator type outright.
+        IterCollector::Fold { init, lambda } if rc_cow_needs_glue(&init.ty) => format!(
+            "{}.fold::<{}, _>({}, {})",
+            chain,
+            render_type(ctx, &init.ty),
+            render_expr(ctx, init),
+            render_expr(ctx, lambda)
+        ),
         IterCollector::Fold { init, lambda } => format!("{}.fold({}, {})", chain, render_expr(ctx, init), render_expr(ctx, lambda)),
         IterCollector::Any { lambda } => format!("{}.any({})", chain, render_expr(ctx, lambda)),
         IterCollector::All { lambda } => format!("{}.all({})", chain, render_expr(ctx, lambda)),
         IterCollector::Find { lambda } => format!("{}.find({})", chain, render_expr(ctx, lambda)),
         IterCollector::FindIndex { lambda } => format!("{}.position({}).map(|i| i as i64)", chain, render_expr(ctx, lambda)),
         IterCollector::FindMap { lambda } => format!("{}.find_map({})", chain, render_expr(ctx, lambda)),
-        IterCollector::Count { lambda } => format!("{}.filter({}).count() as i64", chain, render_expr(ctx, lambda)),
+        // #3648: parenthesized, so a template that borrows its argument
+        // (`&{x}`) borrows the cast Int, not the chain (`&c.count() as i64`
+        // parses as `(&c.count()) as i64`: E0606).
+        IterCollector::Count { lambda } => format!("({}.filter({}).count() as i64)", chain, render_expr(ctx, lambda)),
         // Same law as `almide_rt_list_sum` (C-056): two's-complement wrapping,
         // never the profile-dependent `Iterator::sum` overflow check.
         IterCollector::Sum { float: false } => format!("{}.fold(0i64, |a: i64, b: i64| a.wrapping_add(b))", chain),
         IterCollector::Sum { float: true } => format!("{}.sum::<f64>()", chain),
-        IterCollector::Len => format!("{}.count() as i64", chain),
+        IterCollector::Len => format!("({}.count() as i64)", chain),
     }
 }
 
@@ -207,6 +221,14 @@ fn render_binop(ctx: &RenderContext, op: BinOp, left: &IrExpr, right: &IrExpr, _
         BinOp::DivInt => {
             ctx.templates.render_with("div_int", None, &[], &[("left", l.as_str()), ("right", r.as_str())])
                 .unwrap_or_else(|| format!("almide_div!({}, {})", l, r))
+        }
+        // `x % <literal>` on Int: the magic-number remainder (prelude_rem.rs).
+        // A literal divisor >= 3 cannot be 0 or -1, so it never aborts.
+        BinOp::ModInt if matches!(left.ty, Ty::Int)
+            && matches!(right.kind, IrExprKind::LitInt { value } if crate::prelude_rem::rem_const_applies(value)) =>
+        {
+            let IrExprKind::LitInt { value } = right.kind else { unreachable!() };
+            format!("almide_rem_const::<{value}>({l})")
         }
         BinOp::ModInt => {
             ctx.templates.render_with("mod_int", None, &[], &[("left", l.as_str()), ("right", r.as_str())])
@@ -376,6 +398,8 @@ fn render_generic_call_method(ctx: &RenderContext, object: &IrExpr, method: almi
             | IrExprKind::If { .. } | IrExprKind::Match { .. }
         ) || matches!(&object.kind, IrExprKind::LitFloat { value } if *value < 0.0)
           || matches!(&object.kind, IrExprKind::LitInt { value } if *value < 0);
+        // A copy of a String-typed value builds the Almide String (ADR-0013).
+        let method = if method.as_str() == "to_string" && args.is_empty() && matches!(object.ty, Ty::String) { "to_almide" } else { method.as_str() };
         if needs_parens {
             format!("({}).{}", obj_str, method)
         } else {
@@ -501,8 +525,9 @@ fn render_method_call_full(ctx: &RenderContext, object: &IrExpr, method: &str, a
         all_args.extend(args.iter().map(|a| render_expr(ctx, a)));
         let module = &method[..dot_pos];
         let func = &method[dot_pos+1..];
-        // Convention methods (Type.method): first char uppercase → emit as Type_method(args)
-        let is_convention = module.chars().next().map_or(false, |c| c.is_uppercase());
+        // Convention methods (Type.method): a type-side first char (uppercase,
+        // or caseless — #1456) → emit as Type_method(args)
+        let is_convention = almide_base::names::is_type_side_name(module);
         if is_convention {
             let callee = format!("{}_{}", module, func);
             return Some(format!("{}({})", callee, all_args.join(", ")));
@@ -532,8 +557,8 @@ fn result_turbofish_args(ctx: &RenderContext, ty: &Ty) -> Option<(String, String
                 _ => render_type(ctx, &args[0]),
             };
             let err_s = match &args[1] {
-                Ty::Unknown => "String".to_string(),
-                Ty::TypeVar(n) if n.starts_with('?') => "String".to_string(),
+                Ty::Unknown => "AlmideString".to_string(),
+                Ty::TypeVar(n) if n.starts_with('?') => "AlmideString".to_string(),
                 _ => render_type(ctx, &args[1]),
             };
             Some((ok_s, err_s))
@@ -609,7 +634,7 @@ fn coerce_to_owned_string(rendered: &str, expr: &IrExpr) -> String {
         _ => false,
     };
     if is_bare_string_var {
-        format!("{}.to_string()", rendered)
+        format!("{}.to_almide()", rendered)
     } else {
         rendered.to_string()
     }
@@ -644,7 +669,13 @@ pub(super) fn rc_cow_result_glue(expr_str: String, ty: &Ty) -> String {
         return expr_str;
     }
     match ty {
-        Ty::Bytes | Ty::Matrix | Ty::Applied(TC::Matrix, _) => {
+        // The value type is named: inferred, `AlmideRcCow::from(x)` leaves
+        // `x`'s type to the surrounding call, and a generic runtime result
+        // (`almide_rt_option_unwrap_or_else(…)`) then has nothing to fix it
+        // (E0282, found by the inspection's parity campaign).
+        Ty::Bytes => format!("AlmideRcCow::<Vec<u8>>::from({expr_str})"),
+        Ty::Matrix => format!("AlmideRcCow::<AlmideMatrix>::from({expr_str})"),
+        Ty::Applied(TC::Matrix, _) => {
             format!("AlmideRcCow::from({expr_str})")
         }
         Ty::Applied(TC::List, args) => {
@@ -1003,13 +1034,20 @@ fn render_runtime_call_arg_owned(ctx: &RenderContext, symbol: &almide_base::inte
     {
         return format!("(&*{})", render_expr(ctx, inner));
     }
-    let r = render_expr_owned(ctx, a);
     // #617: a concrete container-of-raw runtime param cannot deref-coerce
     // through AlmideRcCow ELEMENTS — clone them out at this (rare) boundary. The
     // closure param is EXPLICITLY typed: the producer side may itself be
     // result glue ending in `collect::<Vec<_>>()`, whose `_` only resolves
-    // from this consumer.
+    // from this consumer. The param is a slice, so the collected Vec is
+    // borrowed here whatever the argument's own shape: a local arrives as
+    // a `Borrow` (whose `&` would otherwise bind to the chain by accident), a
+    // fn parameter does not (#3638).
     if rc_cow_arg_needs_raw_elems(symbol.as_str()) && rc_cow_needs_glue(&a.ty) {
+        let src = match &a.kind {
+            IrExprKind::Borrow { expr: inner, as_str: false, .. } => inner.as_ref(),
+            _ => a,
+        };
+        let s = render_expr(ctx, src);
         let elem = match &a.ty {
             Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, es)
                 if es.len() == 1 =>
@@ -1018,9 +1056,9 @@ fn render_runtime_call_arg_owned(ctx: &RenderContext, symbol: &almide_base::inte
             }
             _ => "_".to_string(),
         };
-        format!("{r}.iter().map(|__e: &{elem}| (**__e).clone()).collect::<Vec<_>>()")
+        format!("&({s}).iter().map(|__e: &{elem}| (**__e).clone()).collect::<Vec<_>>()")
     } else {
-        r
+        render_expr_owned(ctx, a)
     }
 }
 

@@ -1,0 +1,24 @@
+// @contract: C-386
+// A field's `!` makes its Err the whole `fan { name: expr, … }`'s Err, under the same
+// rule as the tuple form (C-199): EVERY field runs — nothing is cancelled — and when
+// several fail, the first Err in SOURCE order is the one that surfaces, as
+// `Error: <msg>` + exit 1 on both targets. Here the first and last fields fail and the
+// middle one prints; the abort names the first.
+effect fn boom(tag: String) -> Result[Int, String] = {
+  println("ran " + tag)
+  err("fail:" + tag)
+}
+
+effect fn fine(tag: String) -> Result[Int, String] = {
+  println("ran " + tag)
+  ok(1)
+}
+
+effect fn main() -> Unit = {
+  let r = fan {
+    first: boom("first")!
+    middle: fine("middle")!
+    last: boom("last")!
+  }
+  println("unreachable " + int.to_string(r.first + r.middle + r.last))
+}

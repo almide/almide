@@ -21,7 +21,10 @@ mod catalogue;
 pub mod composition;
 mod denylist;
 pub mod identity;
+pub mod inspect_gen;
 mod mutate;
+mod net_unix_args;
+mod nominal;
 mod pools;
 /// The shape vocabulary of the multi-module matrix gate (#3309), shared
 /// verbatim with `tests/shape_matrix_test.rs` so the random hunt and the
@@ -29,11 +32,19 @@ mod pools;
 #[path = "../../../../tests/shape_matrix/gen.rs"]
 pub mod shape;
 mod program;
+pub mod aborts_gen;
+pub mod serve_gen;
 mod sig_type;
 mod term;
 mod types;
+pub mod verdicts;
 
-pub use catalogue::{build as build_catalogue, Signature};
+/// The largest k an inspection probe of `name` may run ([`inspect_gen::effect_recipes::max_k`]).
+pub fn inspect_max_k(name: &str, effect: bool) -> Option<u64> {
+    inspect_gen::effect_recipes::max_k(name, effect)
+}
+
+pub use catalogue::{build as build_catalogue, ends_without_unwinding, needs_embedded, Signature, SANDBOXED_EFFECT_MODULES};
 
 use crate::rng::SplitMix64;
 
@@ -204,11 +215,16 @@ pub enum Origin {
     Shape { files: usize },
 }
 
+/// The weight multiplier `--focus` applies to its function.
+pub const FOCUS_BOOST: u32 = 100;
+
 /// Everything the generator needs that is constant across the campaign.
 pub struct Engine {
     catalogue: Vec<Signature>,
     corpus: Vec<mutate::CorpusEntry>,
     family: Family,
+    /// `--focus`: the catalogue index every synthesized program calls first.
+    focus: Option<usize>,
 }
 
 impl Engine {
@@ -224,11 +240,71 @@ impl Engine {
             catalogue: build_catalogue(),
             corpus: mutate::load_corpus(corpus_root),
             family,
+            focus: None,
         }
     }
 
     pub fn family(&self) -> Family {
         self.family
+    }
+
+    /// The inspection target for `module.fn` (`xtarget-fuzz inspect`).
+    pub fn inspect_target(&self, name: &str) -> Result<inspect_gen::Target, String> {
+        self.inspect_target_filled(name, types::GenType::Int)
+    }
+
+    /// [`Self::inspect_target`] with every free type variable at String, the
+    /// heap instantiation a generic function is also inspected at.
+    pub fn inspect_target_heap(&self, name: &str) -> Result<inspect_gen::Target, String> {
+        self.inspect_target_filled(name, types::GenType::String)
+    }
+
+    fn inspect_target_filled(&self, name: &str, fill: types::GenType) -> Result<inspect_gen::Target, String> {
+        let sig = self
+            .catalogue
+            .iter()
+            .find(|s| format!("{}.{}", s.module, s.func) == name)
+            .ok_or_else(|| format!("{name}: not in the generator's catalogue"))?;
+        inspect_gen::Target::new_filled(sig, &self.catalogue, fill)
+    }
+
+    /// Centre the campaign on one stdlib function (`module.fn`, the stdlib
+    /// inspection ledger's criterion 4): its selection weight is multiplied
+    /// by [`FOCUS_BOOST`], so most synthesized and composed programs call it
+    /// beside the functions they draw around it. `Err` names a function the
+    /// catalogue does not hold — a focus run must not silently fuzz nothing.
+    pub fn focus(mut self, focus: &str) -> Result<Self, String> {
+        for (i, sig) in self.catalogue.iter_mut().enumerate() {
+            if format!("{}.{}", sig.module, sig.func) == focus {
+                // A weight-0 function (a host-decided result) is drawn only here.
+                sig.weight = sig.weight.max(1).saturating_mul(FOCUS_BOOST);
+                self.focus.get_or_insert(i);
+            }
+        }
+        if self.focus.is_some() { Ok(self) } else { Err(format!("--focus {focus}: not in the generator's catalogue")) }
+    }
+
+    /// `module.fn` of every catalogued signature — the functions `--focus`
+    /// and `inspect` can reach (the inspection ledger's coverage).
+    pub fn catalogue_names(&self) -> Vec<String> {
+        let mut v: Vec<String> = self.catalogue.iter().map(|s| format!("{}.{}", s.module, s.func)).collect();
+        v.sort();
+        v.dedup();
+        v
+    }
+
+    /// A generated `http.serve` handler for program `index` of a campaign
+    /// seeded `seed` ([`serve_gen::synthesize_handler`]).
+    pub fn serve_handler(&self, seed: u64, index: u64) -> String {
+        let cat = serve_gen::handler_catalogue(&self.catalogue);
+        serve_gen::synthesize_handler(&mut crate::rng::SplitMix64::for_program(seed, index), &cat)
+    }
+
+    /// Test file `index` of the `testing.assert_aborts` parity campaign
+    /// `seed` (`aborts_gen::synthesize_test`).
+    pub fn abort_test(&self, seed: u64, index: u64) -> String {
+        let cat = aborts_gen::abort_catalogue(&self.catalogue);
+        aborts_gen::synthesize_test(&mut crate::rng::SplitMix64::for_program(seed, index), &cat)
     }
 
     /// Number of catalogued stdlib signatures (diagnostics).
@@ -257,7 +333,7 @@ impl Engine {
             Family::Shape => return Self::shape(&mut shape_rng, seed, index),
             Family::Synthesis => {
                 let mut rng = SplitMix64::for_program(seed, index);
-                return program::synthesize(&mut rng, &self.catalogue);
+                return program::synthesize_focused(&mut rng, &self.catalogue, self.focus);
             }
             Family::All => {
                 if alt.pick_weighted(&[SYNTHESIS_WEIGHT + MUTATION_WEIGHT, IDENTITY_WEIGHT]) == 1 {
@@ -291,7 +367,7 @@ impl Engine {
             // Fall through to synthesis on mutation failure.
         }
 
-        program::synthesize(&mut rng, &self.catalogue)
+        program::synthesize_focused(&mut rng, &self.catalogue, self.focus)
     }
 
     /// One program of the self-checking identity family, carrying both its
@@ -367,6 +443,27 @@ mod tests {
             .find(|s| s.module == "string" && s.func == "to_upper")
             .expect("string.to_upper missing from catalogue");
         assert!(to_upper.weight > 1, "to_upper should be boosted");
+    }
+
+    /// `http.decode_json` returns `Result[T, HttpResponse]`: the focused
+    /// campaign builds calls of it, binds the result at that type and prints
+    /// it with the error side seen through HttpResponse's own readers — a
+    /// Result whose error is not a String was outside the model, and the
+    /// function was never called.
+    #[test]
+    fn a_result_with_a_nominal_error_is_generated_and_observed() {
+        let engine = Engine::with_family(std::path::Path::new("/nonexistent"), Family::Synthesis).focus("http.decode_json").expect("decode_json is catalogued");
+        let mut calls = 0;
+        for index in 0..40u64 {
+            let g = engine.generate(7, index);
+            assert!(parses(&g.source), "program {index} did not parse:\n{}", g.source);
+            if let Some(line) = g.source.lines().find(|l| l.contains("= http.decode_json(")) {
+                calls += 1;
+                assert!(line.contains(": Result[") && line.contains(", HttpResponse] = "), "{line}");
+                assert!(g.source.contains("err(e0) => {\n    let e0o: (Int, (String, Map[String, String])) = (http.status_code(e0), "), "{}", g.source);
+            }
+        }
+        assert!(calls > 20, "only {calls} of 40 focused programs call http.decode_json");
     }
 
     /// Synthesis-only generation must always emit parseable source. This

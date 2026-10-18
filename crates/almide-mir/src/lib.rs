@@ -29,6 +29,7 @@
 pub(crate) mod trace;
 
 pub mod alias_safety;
+pub(crate) mod borrow_join;
 pub mod certificate;
 pub mod charge_probe;
 pub mod coown_names;
@@ -40,6 +41,8 @@ pub mod native_result_rewrite;
 pub mod pipeline;
 pub mod purity;
 pub mod render_native;
+mod render_native_append;
+mod render_native_str;
 mod render_native_op_families;
 mod render_native_shims;
 

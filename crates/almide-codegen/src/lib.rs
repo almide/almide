@@ -43,6 +43,7 @@ pub mod pass_clone_interp;
 mod pass_clone_compare;
 mod pass_clone_places;
 mod pass_clone_head;
+mod pass_clone_select;
 mod pass_clone_projection;
 mod pass_clone_record_fields;
 pub mod pass_top_let_storage;
@@ -50,7 +51,9 @@ pub mod pass_var_storage;
 pub mod pass_borrow_lowering;
 pub mod pass_slice_binders;
 pub mod pass_str_map_key;
+pub mod pass_thread_share;
 pub mod owned_source;
+pub mod pass_owned_source_hoist;
 pub mod pass_fan_lowering;
 pub mod pass_list_pattern;
 mod pass_list_pattern_nested;
@@ -69,11 +72,15 @@ pub mod pass_tco;
 pub mod pass_licm;
 pub mod pass_peephole;
 pub mod pass_range_counting;
+pub mod pass_metered_region_delegate;
+pub mod pass_meter_charge;
 pub mod pass_region_window;
 pub mod pass_region_window_clone;
 mod prelude_region;
+pub mod prelude_string;
 mod prelude_fan;
 mod prelude_stack;
+mod prelude_rem;
 pub use prelude_region::region_arena_prelude_source;
 pub mod perceus_verified;
 pub mod pass_egg_saturation;
@@ -119,6 +126,11 @@ pub struct CodegenOptions {
     /// not user code), so the default is a hard error; this flag exists only as
     /// an explicit, recorded escape hatch for shipping despite a known leak.
     pub allow_unverified: bool,
+    /// Meter the `fan.bounded` / `fan.race` / `fan.timeout` regions in this
+    /// codegen (#3673, `MeterChargePass`) instead of delegating them to the
+    /// v1-rendered region module. The caller links the meter's runtime
+    /// (`almide_mir::pipeline::native_meter_runtime`).
+    pub meter_in_codegen: bool,
 }
 
 /// Marker the Rust emitter inserts between the inlined runtime preamble and the
@@ -136,7 +148,7 @@ pub fn slim_main_with_external_runtime(full_rs: &str) -> Option<String> {
     let idx = full_rs.find(RT_BOUNDARY_MARKER)?;
     let user_code = full_rs[idx + RT_BOUNDARY_MARKER.len()..].trim_start_matches('\n');
     let mut out = String::new();
-    out.push_str("#![allow(unused_parens, unused_variables, dead_code, unused_imports, unused_mut, unused_must_use)]\n\n");
+    out.push_str("#![allow(unused_parens, unused_variables, dead_code, unused_imports, unused_mut, unused_must_use, uncommon_codepoints, confusable_idents, mixed_script_confusables)]\n\n");
     out.push_str("use std::collections::HashMap;\nuse std::collections::HashSet;\n");
     out.push_str("#[macro_use] extern crate almide_rt;\nuse almide_rt::*;\n\n");
     out.push_str(user_code);
@@ -160,12 +172,12 @@ pub fn codegen(program: &mut IrProgram, target: Target) -> CodegenOutput {
 
 /// Matrix ops with a native (Rust) intrinsic but no WASM lowering: no primitive
 /// decomposition (`@rewrite` desugar) and no hand-written wasm arm, so the wasm
-/// emitter cannot lower a call to them. Currently just `qwen3_block_q1_0_kv` — a
-/// packed-GGUF Qwen3 block (RoPE + GQA + KV-cache, 3-matrix tuple return) that
-/// only exists as a native fast path. Add an op here if you introduce another
+/// emitter cannot lower a call to them. Empty since #1827: the packed-GGUF Qwen3
+/// blocks and their GEMVs link self-hosted bodies on wasm
+/// (stdlib/matrix_shape.almd). Add an op here only if you introduce another
 /// native-only matrix intrinsic; the CLI then rejects WASM builds that call it
 /// with a clear message instead of letting the emitter ICE.
-pub const NATIVE_ONLY_MATRIX_OPS: &[&str] = &["qwen3_block_q1_0_kv"];
+pub const NATIVE_ONLY_MATRIX_OPS: &[&str] = &[];
 
 /// If the program calls a native-only matrix op (see [`NATIVE_ONLY_MATRIX_OPS`]),
 /// return its name. The CLI uses this to reject WASM builds at build time with a
@@ -258,6 +270,7 @@ pub fn codegen_with(program: &mut IrProgram, target: Target, options: &CodegenOp
     // 2. gate — refuse whatever is still bare-with-qualified-decl (genuinely
     //    ambiguous), turning the silent E0425 / wasm-trap class into a
     //    structured compiler-bug report.
+    program.codegen_annotations.meter_in_codegen = options.meter_in_codegen;
     verify_names::repair_bare_type_names(program);
     verify_names::assert_names_resolvable(program);
 
@@ -335,17 +348,9 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     let vis = if for_crate { "pub " } else { "" };
     let macro_attr = if for_crate { "#[macro_export]\n" } else { "" };
     let mut s = String::new();
-    s.push_str(&format!("{vis}trait AlmideConcat<Rhs> {{ type Output; fn concat(self, rhs: Rhs) -> Self::Output; }}\n"));
-    // The owned-String impls extend in place (`push_str`) instead of
-    // `format!`: byte-identical output, but an owned accumulator keeps its
-    // capacity — with the TCO accumulator move this makes a tail-recursive
-    // string builder amortized O(n) instead of reallocating every step.
-    s.push_str("impl AlmideConcat<String> for String { type Output = String; #[inline(always)] fn concat(self, rhs: String) -> String { let mut s = self; s.push_str(&rhs); s } }\n");
-    s.push_str("impl AlmideConcat<&str> for String { type Output = String; #[inline(always)] fn concat(self, rhs: &str) -> String { let mut s = self; s.push_str(rhs); s } }\n");
-    // A literal left operand (`"k" + x`) prepends into the owned right operand's buffer: no allocation
-    // when its capacity covers both (`int.to_string` reserves 19 bytes), else one grow — never a fresh String.
-    s.push_str("impl AlmideConcat<String> for &str { type Output = String; #[inline(always)] fn concat(self, rhs: String) -> String { let mut r = rhs; r.insert_str(0, self); r } }\n");
-    s.push_str("impl AlmideConcat<&str> for &str { type Output = String; #[inline(always)] fn concat(self, rhs: &str) -> String { format!(\"{}{}\", self, rhs) } }\n");
+    // ADR-0013: the Almide String (the shared buffer `AlmideStr`), its
+    // boundary conversion and the `AlmideConcat` trait (prelude_string.rs).
+    s.push_str(&prelude_string::string_prelude(vis));
     s.push_str("impl<T: Clone> AlmideConcat<Vec<T>> for Vec<T> { type Output = Vec<T>; #[inline(always)] fn concat(self, rhs: Vec<T>) -> Vec<T> { let mut r = self; r.extend(rhs); r } }\n");
     // ONE stdout buffer (#2245). `println` used to lower to Rust's `println!`,
     // whose `Stdout` is line-buffered whatever it is attached to — one write
@@ -398,11 +403,13 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     // pins it on every leg — `PANIC: <msg>` on stderr with NO trailing newline,
     // exit 1 — never a raw Rust panic (exit 101 + the thread banner). A `--test`
     // build keeps the unwinding panic: libtest reports one failed test from its
-    // payload and `testing.assert_throws` catches it. The `cfg!(test)` sits in
+    // payload — except in an abort-site child of `testing.assert_aborts`
+    // (ADR-0029), which ALMIDE_TEST_ABORT_PROBE marks at run time so a helper
+    // the closure calls aborts the C-219 way too. The `cfg!(test)` sits in
     // the MACRO so it is read in the crate the `panic` is written in — the
     // prelude may be compiled once, as a crate of its own, without `--test`.
     s.push_str(&format!("{vis}fn almide_panic_abort(msg: std::fmt::Arguments<'_>) -> ! {{ almide_fan_trap_wait(); static ALMIDE_PANICKING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false); if ALMIDE_PANICKING.swap(true, std::sync::atomic::Ordering::SeqCst) {{ loop {{ std::thread::park(); }} }} almide_stdout_flush(); {{ let _ = std::io::Write::write_fmt(&mut std::io::stderr().lock(), format_args!(\"PANIC: {{}}\", msg)); }} std::process::exit(1) }}\n"));
-    s.push_str(&format!("{macro_attr}macro_rules! almide_panic {{ ($($arg:tt)*) => {{ if cfg!(test) {{ panic!($($arg)*) }} else {{ $crate::almide_panic_abort(format_args!($($arg)*)) }} }}; }}\n"));
+    s.push_str(&format!("{macro_attr}macro_rules! almide_panic {{ ($($arg:tt)*) => {{ if cfg!(test) && std::env::var_os(\"ALMIDE_TEST_ABORT_PROBE\").is_none() {{ panic!($($arg)*) }} else {{ $crate::almide_panic_abort(format_args!($($arg)*)) }} }}; }}\n"));
     s.push_str(&format!("{vis}fn almide_stdout_write_fmt(args: std::fmt::Arguments<'_>, newline: bool) {{ if almide_fan_active() {{ return almide_fan_write_fmt(false, args, newline); }} ALMIDE_STDOUT_BUF.with(|buf| {{ let mut w = buf.borrow_mut(); let _ = std::io::Write::write_fmt(&mut *w, args); if newline {{ let _ = std::io::Write::write_all(&mut *w, b\"\\n\"); }} if newline || almide_stdout_is_terminal() {{ let _ = std::io::Write::flush(&mut *w); }} }}); }}\n"));
     s.push_str(&format!("{vis}fn almide_stdout_write_bytes(bytes: &[u8]) {{ if almide_fan_active() {{ return almide_out_write(false, bytes); }} ALMIDE_STDOUT_BUF.with(|buf| {{ let mut w = buf.borrow_mut(); let _ = std::io::Write::write_all(&mut *w, bytes); if bytes.contains(&b'\\n') || almide_stdout_is_terminal() {{ let _ = std::io::Write::flush(&mut *w); }} }}); }}\n"));
     s.push_str(&format!("{macro_attr}macro_rules! almide_println {{ ($($arg:tt)*) => {{ $crate::almide_stdout_write_fmt(format_args!($($arg)*), true) }}; }}\n"));
@@ -424,6 +431,7 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     // (`Error: <msg>\n` + exit 1) and to the WASM div/mod trap.
     s.push_str(&format!("{macro_attr}macro_rules! almide_div {{ ($a:expr, $b:expr) => {{{{ let (__a, __b) = ($a, $b); match __a.checked_div(__b) {{ Some(__v) => __v, None => {{ $crate::almide_abort(if __b == 0 {{ \"division by zero\" }} else {{ \"integer overflow\" }}); }} }} }}}}; }}\n"));
     s.push_str(&format!("{macro_attr}macro_rules! almide_mod {{ ($a:expr, $b:expr) => {{{{ let (__a, __b) = ($a, $b); match __a.checked_rem(__b) {{ Some(__v) => __v, None => {{ $crate::almide_abort(if __b == 0 {{ \"division by zero\" }} else {{ \"integer overflow\" }}); }} }} }}}}; }}\n"));
+    s.push_str(&prelude_rem::rem_const_prelude(vis));
     // almide_pow!: integer `^`. A CALL form, not `{left}.pow({right} as u32)`, for
     // two reasons that were both live divergences (#895):
     //   * PRECEDENCE — `-3i64.pow(2)` parses as `-(3.pow(2))` == -9, because Rust
@@ -459,6 +467,11 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     s.push_str("impl<T: PartialEq> PartialEq for AlmideRcCow<T> { fn eq(&self, other: &Self) -> bool { *self.0 == *other.0 } }\n");
     s.push_str("impl<T: PartialEq> PartialEq<T> for AlmideRcCow<T> { fn eq(&self, other: &T) -> bool { *self.0 == *other } }\n");
     s.push_str("impl PartialEq<&str> for AlmideRcCow<String> { fn eq(&self, other: &&str) -> bool { self.0.as_str() == *other } }\n");
+    // #3555: ordering is the value's own (`list.min` / `sort` over `Bytes`
+    // or `Matrix` require `Ord`), exactly as equality is.
+    s.push_str("impl<T: Eq> Eq for AlmideRcCow<T> {}\n");
+    s.push_str("impl<T: PartialOrd> PartialOrd for AlmideRcCow<T> { fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> { (*self.0).partial_cmp(&*other.0) } }\n");
+    s.push_str("impl<T: Ord> Ord for AlmideRcCow<T> { fn cmp(&self, other: &Self) -> std::cmp::Ordering { (*self.0).cmp(&*other.0) } }\n");
     s.push_str("impl<T> std::ops::Deref for AlmideRcCow<T> { type Target = T; fn deref(&self) -> &T { &self.0 } }\n");
     // Every in-place write (`bytes.set_*`, `list.push`, ...) goes through here.
     // `Rc::make_mut` does not inline, so the common case — the value is not
@@ -466,6 +479,10 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     s.push_str("impl<T: Clone> std::ops::DerefMut for AlmideRcCow<T> { #[inline(always)] fn deref_mut(&mut self) -> &mut T { if std::rc::Rc::get_mut(&mut self.0).is_none() { return std::rc::Rc::make_mut(&mut self.0); } std::rc::Rc::get_mut(&mut self.0).unwrap() } }\n");
     s.push_str(&format!("impl<T> AlmideRcCow<T> {{ {vis}fn new(v: T) -> Self {{ AlmideRcCow(std::rc::Rc::new(v)) }} {vis}fn make_mut(&mut self) -> &mut T where T: Clone {{ std::rc::Rc::make_mut(&mut self.0) }} {vis}fn into_inner(self) -> T where T: Clone {{ std::rc::Rc::try_unwrap(self.0).unwrap_or_else(|rc| (*rc).clone()) }} }}\n"));
     s.push_str("impl<T> From<T> for AlmideRcCow<T> { fn from(v: T) -> Self { AlmideRcCow::new(v) } }\n");
+    // #3577: a runtime twin that takes its Bytes source by value
+    // (`impl Into<Vec<u8>>`) gets the buffer out of the wrapper — moved when
+    // this is the only holder, copied when shared.
+    s.push_str("impl From<AlmideRcCow<Vec<u8>>> for Vec<u8> { fn from(v: AlmideRcCow<Vec<u8>>) -> Self { v.into_inner() } }\n");
     s.push_str("impl<T: std::fmt::Display> std::fmt::Display for AlmideRcCow<T> { fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result { self.0.fmt(f) } }\n");
     s.push_str("impl<T: std::hash::Hash> std::hash::Hash for AlmideRcCow<T> { fn hash<H: std::hash::Hasher>(&self, state: &mut H) { self.0.hash(state) } }\n");
     // Blanket AlmideConcat: AlmideRcCow<T> + Rhs and AlmideRcCow<T> + Val<U> — 2 impls cover all combos.
@@ -714,7 +731,7 @@ pub mod rust_idents;
 /// version, so callers can cache the resulting rlib keyed by a hash of this output.
 pub fn emit_runtime_crate() -> String {
     let mut out = String::new();
-    out.push_str("#![allow(unused_parens, unused_variables, dead_code, unused_imports, unused_mut, unused_must_use, non_snake_case)]\n\n");
+    out.push_str("#![allow(unused_parens, unused_variables, dead_code, unused_imports, unused_mut, unused_must_use, non_snake_case, uncommon_codepoints, confusable_idents, mixed_script_confusables)]\n\n");
     out.push_str("use std::collections::HashMap;\nuse std::collections::HashSet;\n\n");
     out.push_str(&rust_runtime_prelude(true));
     // Every std-only runtime module (exclude external-dep modules).
@@ -751,7 +768,7 @@ fn emit_source(program: &mut IrProgram, target: Target, config: &target::TargetC
     let mut output = String::new();
     match target {
         Target::Rust => {
-            output.push_str("#![allow(unused_parens, unused_variables, dead_code, unused_imports, unused_mut, unused_must_use)]\n\n");
+            output.push_str("#![allow(unused_parens, unused_variables, dead_code, unused_imports, unused_mut, unused_must_use, uncommon_codepoints, confusable_idents, mixed_script_confusables)]\n\n");
             output.push_str("use std::collections::HashMap;\nuse std::collections::HashSet;\n\n");
             output.push_str(&rust_runtime_prelude(false));
             // Include runtime modules referenced in the IR. The IrProgram tracks

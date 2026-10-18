@@ -14,7 +14,9 @@
 //! Error strings mirror the native runtime's `io_err` (= `Display` of
 //! `std::io::Error`, `runtime/rs/src/fs.rs`); overlay-synthesized errors read
 //! `almide_base::fs_errno` (#2206), the one table every leg spells from,
-//! pinned against the host's `Display` by its own test.
+//! pinned against the host's `Display` by its own test; a host error goes
+//! through the same classifier native's does (`fs_io_error_text`, C-273), so
+//! ENOTEMPTY / ENAMETOOLONG / EXDEV read their errno-free text here too.
 
 use std::collections::HashMap;
 
@@ -56,6 +58,22 @@ pub(crate) fn normalize(path: &str) -> String {
 }
 
 const ENOENT: &str = almide_base::fs_errno::ENOENT.text;
+const ENOTEMPTY: &str = almide_base::fs_errno::FS_ENOTEMPTY.text;
+const ENAMETOOLONG: &str = almide_base::fs_errno::FS_ENAMETOOLONG.text;
+
+/// NAME_MAX on every compared host (linux and macos): a longer component is
+/// the host's ENAMETOOLONG, which an overlay write must refuse alike rather
+/// than store a name the host could never hold.
+const NAME_MAX: usize = 255;
+
+fn name_too_long(path: &str) -> bool {
+    path.split('/').any(|c| c.len() > NAME_MAX)
+}
+
+/// A host error's text, classified exactly as the native runtime's.
+fn host_err(e: std::io::Error) -> String {
+    almide_base::fs_errno::fs_io_error_text(&e)
+}
 
 /// `prim.read_text_file` — overlay first, then a READ-ONLY real-fs fallback.
 pub(crate) fn read_text(vfs: &Vfs, path: &str) -> Result<String, String> {
@@ -66,7 +84,7 @@ pub(crate) fn read_text(vfs: &Vfs, path: &str) -> Result<String, String> {
         Some(VfsEntry::File(content)) => String::from_utf8(content.clone())
             .map_err(|_| almide_base::fs_errno::INVALID_UTF8_TEXT.to_string()),
         Some(VfsEntry::Dir) => Err(EISDIR.to_string()),
-        None => std::fs::read_to_string(path).map_err(|e| format!("{e}")),
+        None => std::fs::read_to_string(path).map_err(host_err),
     }
 }
 
@@ -78,6 +96,9 @@ pub(crate) fn read_text(vfs: &Vfs, path: &str) -> Result<String, String> {
 /// (`fs.write_bytes` / `fs.write_bytes_raw`) — a String arrives as its UTF-8.
 pub(crate) fn write_bytes(vfs: &mut Vfs, path: &str, content: &[u8]) -> Result<(), String> {
     let path = &normalize(path);
+    if name_too_long(path) {
+        return Err(ENAMETOOLONG.to_string());
+    }
     if matches!(vfs.get(path.as_str()), Some(VfsEntry::Dir)) {
         return Err(EISDIR.to_string());
     }
@@ -115,6 +136,9 @@ fn ancestor_is_file(vfs: &Vfs, path: &str) -> bool {
 /// an existing dir is Ok, an existing FILE at the path is the EEXIST error.
 pub(crate) fn make_dir(vfs: &mut Vfs, path: &str) -> Result<(), String> {
     let path = &normalize(path);
+    if name_too_long(path) {
+        return Err(ENAMETOOLONG.to_string());
+    }
     if matches!(vfs.get(path.as_str()), Some(VfsEntry::File(_))) {
         return Err(almide_base::fs_errno::EEXIST.text.to_string());
     }
@@ -179,7 +203,7 @@ pub(crate) fn read_bytes(vfs: &Vfs, path: &str) -> Result<Vec<u8>, String> {
     match vfs.get(path.as_str()) {
         Some(VfsEntry::File(content)) => Ok(content.clone()),
         Some(VfsEntry::Dir) => Err(EISDIR.to_string()),
-        None => std::fs::read(path).map_err(|e| format!("{e}")),
+        None => std::fs::read(path).map_err(host_err),
     }
 }
 
@@ -251,9 +275,9 @@ pub(crate) fn read_dir(vfs: &Vfs, path: &str) -> Result<Vec<String>, String> {
     let real = std::path::Path::new(path);
     let mut names: Vec<String> = Vec::new();
     if real.is_dir() {
-        let entries = std::fs::read_dir(path).map_err(|e| format!("{e}"))?;
+        let entries = std::fs::read_dir(path).map_err(host_err)?;
         for entry in entries {
-            let e = entry.map_err(|e| format!("{e}"))?;
+            let e = entry.map_err(host_err)?;
             names.push(e.file_name().to_string_lossy().to_string());
         }
     } else if !overlay_dir {
@@ -278,7 +302,9 @@ pub(crate) fn read_dir(vfs: &Vfs, path: &str) -> Result<Vec<String>, String> {
 /// so the caller abstains. A missing source is the native ENOENT; a
 /// destination whose parent exists nowhere is ENOENT too (`std::fs::rename`
 /// does not create directories); an existing destination file is replaced,
-/// as on both legs.
+/// as on both legs. A directory renamed onto a NON-EMPTY directory is the
+/// host's ENOTEMPTY (an empty one is replaced), and a component past
+/// NAME_MAX its ENAMETOOLONG, both in their classified text (C-273).
 pub(crate) enum RenameOutcome {
     Renamed,
     HostOnly,
@@ -288,6 +314,9 @@ pub(crate) enum RenameOutcome {
 pub(crate) fn rename(vfs: &mut Vfs, src: &str, dst: &str) -> RenameOutcome {
     let src = normalize(src);
     let dst = normalize(dst);
+    if name_too_long(&src) || name_too_long(&dst) {
+        return RenameOutcome::Failed(ENAMETOOLONG.to_string());
+    }
     let sub_prefix = format!("{src}/");
     let keys: Vec<String> = vfs
         .keys()
@@ -307,6 +336,9 @@ pub(crate) fn rename(vfs: &mut Vfs, src: &str, dst: &str) -> RenameOutcome {
             return RenameOutcome::Failed(ENOENT.to_string());
         }
     }
+    if matches!(vfs.get(&src), Some(VfsEntry::Dir)) && dir_has_entries(vfs, &dst) {
+        return RenameOutcome::Failed(ENOTEMPTY.to_string());
+    }
     let moved: Vec<(String, VfsEntry)> = keys
         .into_iter()
         .filter_map(|k| {
@@ -319,4 +351,12 @@ pub(crate) fn rename(vfs: &mut Vfs, src: &str, dst: &str) -> RenameOutcome {
         vfs.insert(k, e);
     }
     RenameOutcome::Renamed
+}
+
+/// `dst` is a directory with at least one entry, in the overlay or on the
+/// real filesystem (a read-only probe).
+fn dir_has_entries(vfs: &Vfs, dst: &str) -> bool {
+    let prefix = format!("{dst}/");
+    vfs.keys().any(|k| k.starts_with(&prefix))
+        || std::fs::read_dir(dst).is_ok_and(|mut it| it.next().is_some())
 }

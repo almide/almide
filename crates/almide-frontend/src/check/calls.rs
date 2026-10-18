@@ -219,6 +219,7 @@ impl Checker {
     /// lambda slots see them.
     pub(crate) fn infer_call_arg_tys(&mut self, callee: &ast::Expr, args: &mut [ast::Expr], call_sig: &Option<crate::types::FnSig>) -> Vec<Ty> {
         let mut bindings: HashMap<Sym, Ty> = HashMap::new();
+        let seeds = self.bindings_from_expected_ret(call_sig.as_ref());
         let mut tys: Vec<Ty> = Vec::with_capacity(args.len());
         for (i, a) in args.iter_mut().enumerate() {
             let pinned = if is_lambda_arg(a) {
@@ -260,6 +261,13 @@ impl Checker {
                 && matches!(e.first(), Some(Ty::Fn { .. }))
             {
                 self.list_elem_expect = e.first().cloned();
+            }
+            // #3749: the slot's type, with the generics earlier args bound,
+            // shapes the lambdas inside the arg (`some((req) => …)`, a
+            // callback returning a handler).
+            if let Some((_, pty)) = call_sig.as_ref().and_then(|sig| sig.params.get(i)) {
+                let view = self.expected_bindings_view(&seeds, &bindings);
+                self.expect_expr(a, &crate::types::substitute(pty, &view));
             }
             let slot = Self::fn_value_slot_for_arg(a, call_sig, i, &bindings);
             let prev_fn_slot = std::mem::replace(&mut self.fn_value_slot, slot);
@@ -482,8 +490,7 @@ impl Checker {
         let Some(sig) = sig else {
             return self.check_unresolved_named_call(name, arg_tys);
         };
-
-        self.defer_ord_elem_check(name, qualified_via_direct.as_deref(), arg_tys);
+        let call_span = self.current_span;
 
         self.last_mut_params = sig.mut_params.clone();
 
@@ -492,6 +499,9 @@ impl Checker {
         // call is `T!` (ADR-0002 §D6), the case whose `!` repair is exact.
         if sig.is_effect && !sig.ret.is_result() && let Some(s) = self.current_span {
             self.effect_call_spans.insert((s.line, s.col, s.end_col));
+        }
+        if sig.is_effect && sig.ret.option_inner().is_some() {
+            self.note_effect_option_call();
         }
         self.check_arg_count(name, &sig, arg_tys);
 
@@ -504,6 +514,7 @@ impl Checker {
         }
         // #3495: a parameter nothing determines is E025, judged post-solve.
         self.defer_type_param_check(name, &sig.generics, &bindings, arg_tys);
+        self.defer_capability_checks(qualified_via_direct.as_deref().unwrap_or(name), &sig, &bindings, call_span);
 
         // #2496: a generic USER fn's instantiation is judged post-solve
         // against what its body interpolates (`interp_string_form.rs`).
@@ -527,19 +538,39 @@ impl Checker {
 
         self.finalize_call_return_ty(name, &sig, bindings)
     }
-    /// E026: order-sensitive combinators enqueue their subject (or key) for the post-solve ORDERABLE-element check — see validate_ord_elem_types. Verbatim text move out of [`Self::check_named_call_with_type_args`].
-    fn defer_ord_elem_check(&mut self, name: &str, qualified_via_direct: Option<&str>, arg_tys: &[Ty]) {
-        let ord_name = qualified_via_direct.unwrap_or(name);
-        if matches!(ord_name, "list.sort" | "list.min" | "list.max") {
-            if let Some(a0) = arg_tys.first() {
-                self.deferred_ord_elem_checks.push((a0.clone(), self.current_span, ord_name.to_string()));
+    /// E016 / E030: a native-intrinsic stdlib fn whose runtime bounds a type
+    /// parameter by `PartialEq` or `Ord` (`capability_bounds`, read off the
+    /// runtime's own declaration) enqueues that parameter's binding for the
+    /// post-solve equality / ordering check. A function anywhere in the
+    /// binding — an `http.HttpRoute`'s handler, a user record's fn field —
+    /// otherwise passed check and failed rustc. A parameter the signature
+    /// spells as a Set element or Map key is left to the Set / Map sweeps,
+    /// which judge every such type wherever it appears.
+    fn defer_capability_checks(&mut self, qualified: &str, sig: &crate::types::FnSig, bindings: &HashMap<Sym, Ty>, span: Option<crate::ast::Span>) {
+        use almide_lang::capability_bounds::{self, Cap};
+        let Some((module, func)) = qualified.split_once('.') else { return };
+        for bound in capability_bounds::of(module, func) {
+            let Some(g) = sig.generics.get(bound.generic) else { continue };
+            let Some(binding) = bindings.get(g) else { continue };
+            match bound.cap {
+                Cap::Eq if !Self::sig_keys_on(sig, *g) => {
+                    self.deferred_eq_checks.push((binding.clone(), span, format!("{qualified}()")));
+                }
+                Cap::Eq => {}
+                Cap::Ord => self.deferred_ord_elem_checks.push((binding.clone(), span, qualified.to_string())),
             }
         }
-        if ord_name == "list.sort_by" {
-            if let Some(Ty::Fn { ret, .. }) = arg_tys.get(1) {
-                self.deferred_ord_elem_checks.push(((**ret).clone(), self.current_span, ord_name.to_string()));
+    }
+    /// Does `sig` spell generic `g` as a Set element or Map key anywhere?
+    fn sig_keys_on(sig: &crate::types::FnSig, g: Sym) -> bool {
+        use almide_lang::types::TypeConstructorId::{Map, Set};
+        fn walk(t: &Ty, g: Sym) -> bool {
+            match t {
+                Ty::Applied(Map | Set, args) if matches!(args.first(), Some(Ty::TypeVar(n)) if *n == g) => true,
+                _ => t.children().iter().any(|c| walk(c, g)),
             }
         }
+        sig.params.iter().map(|(_, t)| t).chain(std::iter::once(&sig.ret)).any(|t| walk(t, g))
     }
     /// Effect isolation: pure fn cannot call effect fn. Verbatim text move out of [`Self::check_named_call_with_type_args`].
     pub(crate) fn check_effect_isolation(&mut self, name: &str, sig: &crate::types::FnSig) {
@@ -1023,6 +1054,12 @@ impl Checker {
     // hallucinations that need a conversion wrapper or operator rewrite
     // rather than a rename.
     fn unresolved_call_hint(&self, name: &str) -> (String, Option<String>, Option<&'static str>) {
+        // A spelling a dialect epoch removed: say where it went (or that the
+        // call is deleted), as the ledger records it. No fix-it — the new
+        // spelling needs a dependency and an import, not a rename.
+        if let Some(removal) = crate::removed_spellings::lookup(name) {
+            return (crate::removed_spellings::hint(removal), None, None);
+        }
         // For module-qualified calls (e.g. "string.uppercase"), narrow candidates to the same module and compare only the function part for better suggestions.
         if let Some((module, func)) = name.split_once('.') {
             // Use the *full* surface (TOML + bundled) so diagnostic suggestions see fns migrated to `stdlib/<m>.almd` even after their TOML entries have been deleted.

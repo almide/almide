@@ -1,0 +1,27 @@
+# Release evidence seal — v0.67.1. IMMUTABLE: every [derived] field is
+# re-measured from the tag's tree by `scripts/release-seal.sh check`;
+# an edit that disagrees with the tag fails CI. [recorded] fields are
+# facts the tag cannot re-derive (fill them in before committing).
+
+[release]
+version = "0.67.1"
+tag = "v0.67.1"
+tag_commit = "92cde08670786927c3199e02c125f7372fe2c3a9"
+date = "2026-10-10"
+url = "https://github.com/almide/almide/releases/tag/v0.67.1"
+
+[derived]
+cargo_version = "0.67.1"
+contracts_sha256 = "eb41b56ee906c4ff4b15aa477c3687b26aac221c131eb86cdc0dc27ff93dfdea"
+contracts_total = "376"
+contracts_flagged = "0"
+abstain_ledger_sha256 = "c953796d0ce50c8afc764afe3e111606e03935378bbdb141948ddd963bbfd797"
+abstain_ledger_entries = "21"
+wasm_cross_fixtures = "939"
+rust_toolchain = "1.96.0"
+wasmtime = "v49.0.1"
+
+[recorded]
+release_gate = "Patch release without an rc (owner-approved 2026-10-10) for the v0.67.0 codegen regression #3520, fixed by #3521 (ca2284e24); tag on the merge of release PR #3526 (92cde0867, tree of develop d1b15a115). Downstream canary BEFORE the tag on the fix commit f539070c7 vs v0.67.0 (run 38027328898): 44 projects, O6lvl4/hew and O6lvl4/ctxgate fixed (build FAIL -> ok), no command fails on the candidate that passed on the baseline; the 6 known-good-earlier rows fail on both (4 declared epoch breaks, O6lvl4/gramide and O6lvl4/gramide-cli on their own E032). Release-gate fuzz on the tag tree d1b15a115 (fuzz-nightly run 38040279550, scheduled): shards 8/8, 41.0 of 40 planned minutes delivered, 6,996 programs generated, 0 findings (correctness 0, slow 0, leak 0); the base it patches was soaked as v0.67.0-rc2 (run 38010058439, 90,096 programs, 0 correctness findings). develop CI on d1b15a115 green (CI, Cross-Target, Trust Spine, Mutation sweep, Acceptance Ring, RustSec); release PR #3526 129 checks passed. Blocker gate at the tag: 0 (#1482). Interface diff v0.67.0 -> v0.67.1: identical (added=0 removed=0; #1488). Trust spine on the tag green (run 38041085370, dossier attached)."
+assets = "7: almide-linux-x86_64.tar.gz, almide-linux-aarch64.tar.gz, almide-macos-x86_64.tar.gz, almide-macos-aarch64.tar.gz, almide-windows-x86_64.zip, almide-checksums.sha256 (all five verify; macOS arm64 binary reports `almide 0.67.1 (release, 92cde0867)`), almide-dossier-v0.67.1.md"
+known_problems = "Open at the tag, not blocking: (1) #3519 (A-perf) — native `list.slice(xs, 1, list.len(xs))` deep-clones a dead source (row 1 fixed on develop after the tag, PR #3527) and wasm prepend onto a list of lists is 6.6x slower than native (row 2); (2) #3518 (A-ci) — the nightly fuzz verdict counts same-named findings once and posts Slow findings to the newest fuzz-perf issue; (3) #3522 — `args.positional_at(0) ?? \"x\"` reports E001 without naming the missing `!` (fix in PR #3527); (4) #3523 — `almide fix` does not apply a fix-it on an imported module's call (fix in PR #3527)."

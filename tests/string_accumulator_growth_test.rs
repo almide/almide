@@ -139,3 +139,248 @@ effect fn main() -> Unit = {
     assert_eq!(run(&native, false), expected, "native");
     assert_eq!(run(&core, true), expected, "core wasm");
 }
+
+/// #3519 row 2, the prepend twin: `go(i + 1, n, [[i]] + acc)` took `$concat`'s
+/// full copy per iteration — a +1 on every element of the copy, a -1 on every
+/// element of the released `acc` — and each outgrown block was stranded between
+/// the inner lists allocated since, so 30,000 prepends reached 1.27 GB and 4 s
+/// on wasm (native 0.45 s). The block now grows in place and the old slots
+/// shift right; the live list stays under 1 MiB, so the 32 MiB ceiling only
+/// the stranded copies could reach is the assertion.
+#[test]
+fn a_tail_recursive_prepend_onto_a_list_of_lists_grows_in_place() {
+    let dir = tempfile::tempdir().expect("scratch");
+    let source = dir.path().join("prepend.almd");
+    std::fs::write(
+        &source,
+        r#"fn go(i: Int, n: Int, acc: List[List[Int]]) -> List[List[Int]] =
+  if i >= n then acc else go(i + 1, n, [[i]] + acc)
+
+effect fn main() -> Unit = {
+  let xs = go(0, 30000, [])
+  println("len=${list.len(xs)} head=${list.get(xs, 0) ?? []} last=${list.get(xs, list.len(xs) - 1) ?? []}")
+}
+"#,
+    )
+    .expect("source");
+    let cap = ["--heap-cap", "33554432"];
+    let native = build(dir.path(), &source, "native", &cap);
+    let core = build(dir.path(), &source, "core.wasm", &[&cap[..], &["--target", "wasm"]].concat());
+    let expected = "len=30000 head=[29999] last=[0]\n";
+    assert_eq!(run(&native, false), expected, "native");
+    assert_eq!(run(&core, true), expected, "core wasm");
+}
+
+/// The prepend window moves slots, not credits: every element type the layout
+/// gives a slot (8-byte Int/Float, 4-byte String/Bool/list/record/variant
+/// handles), an element shared with the caller, an `acc` the caller still
+/// holds (the `$cow` copy), and an element that reads `acc` itself — each
+/// printed by both legs and compared.
+#[test]
+fn the_prepend_window_agrees_with_native_on_every_slot_kind_and_on_shared_values() {
+    let dir = tempfile::tempdir().expect("scratch");
+    let source = dir.path().join("kinds.almd");
+    std::fs::write(
+        &source,
+        r#"type P = { x: Int, s: String }
+type T = | Leaf | Node(Int, String)
+
+fn ints(i: Int, n: Int, acc: List[Int]) -> List[Int] =
+  if i >= n then acc else ints(i + 1, n, [i * 3] + acc)
+fn floats(i: Int, n: Int, acc: List[Float]) -> List[Float] =
+  if i >= n then acc else floats(i + 1, n, [int.to_float(i) / 2.0] + acc)
+fn strs(i: Int, n: Int, acc: List[String]) -> List[String] =
+  if i >= n then acc else strs(i + 1, n, ["s${i}"] + acc)
+fn bools(i: Int, n: Int, acc: List[Bool]) -> List[Bool] =
+  if i >= n then acc else bools(i + 1, n, [i % 3 == 0] + acc)
+fn lists(i: Int, n: Int, acc: List[List[Int]]) -> List[List[Int]] =
+  if i >= n then acc else lists(i + 1, n, [[i, i + 1]] + acc)
+fn recs(i: Int, n: Int, acc: List[P]) -> List[P] =
+  if i >= n then acc else recs(i + 1, n, [{ x: i, s: "r${i}" }] + acc)
+fn vars(i: Int, n: Int, acc: List[T]) -> List[T] =
+  if i >= n then acc else vars(i + 1, n, [if i % 2 == 0 then Leaf else Node(i, "n${i}")] + acc)
+fn shared_elem(i: Int, n: Int, e: List[Int], acc: List[List[Int]]) -> List[List[Int]] =
+  if i >= n then acc else shared_elem(i + 1, n, e, [e] + acc)
+fn reads_acc(i: Int, n: Int, acc: List[Int]) -> List[Int] =
+  if i >= n then acc else reads_acc(i + 1, n, [list.len(acc)] + acc)
+
+effect fn main() -> Unit = {
+  println("${ints(0, 40, [])}")
+  println("${floats(0, 9, [0.25])}")
+  println("${strs(0, 20, ["z"])}")
+  println("${bools(0, 10, [])}")
+  println("${lists(0, 12, [[9]])}")
+  println("${recs(0, 5, [])}")
+  println("${vars(0, 7, [])}")
+  let base = [100, 200]
+  let grown = ints(0, 5, base)
+  println("${base} ${grown}")
+  let inner = [7, 8]
+  let s = shared_elem(0, 4, inner, [])
+  println("${inner} ${s}")
+  let ll = [[1], [2]]
+  let g2 = lists(0, 3, ll)
+  println("${ll} ${g2}")
+  println("${reads_acc(0, 8, [])}")
+}
+"#,
+    )
+    .expect("source");
+    let native = build(dir.path(), &source, "native", &[]);
+    let core = build(dir.path(), &source, "core.wasm", &["--target", "wasm"]);
+    let want = run(&native, false);
+    assert!(want.contains("[100, 200] [12, 9, 6, 3, 0, 100, 200]"), "{want}");
+    assert_eq!(run(&core, true), want, "core wasm");
+}
+
+/// The assign twin (#3519): `acc = [[i]] + acc` in a loop took the same
+/// `$concat` copy per step as the tail call did — 3.94 s and 1.30 GB for
+/// 30,000 steps on wasm. It now pushes through the append window and shifts.
+#[test]
+fn an_assign_prepend_onto_a_list_of_lists_grows_in_place() {
+    let dir = tempfile::tempdir().expect("scratch");
+    let source = dir.path().join("assign_prepend.almd");
+    std::fs::write(
+        &source,
+        r#"effect fn main() -> Unit = {
+  var acc: List[List[Int]] = []
+  var i = 0
+  while i < 30000 {
+    acc = [[i]] + acc
+    i = i + 1
+  }
+  println("len=${list.len(acc)} head=${list.get(acc, 0) ?? []} last=${list.get(acc, list.len(acc) - 1) ?? []}")
+}
+"#,
+    )
+    .expect("source");
+    let cap = ["--heap-cap", "33554432"];
+    let native = build(dir.path(), &source, "native", &cap);
+    let core = build(dir.path(), &source, "core.wasm", &[&cap[..], &["--target", "wasm"]].concat());
+    let expected = "len=30000 head=[29999] last=[0]\n";
+    assert_eq!(run(&native, false), expected, "native");
+    assert_eq!(run(&core, true), expected, "core wasm");
+}
+
+/// The assign window keeps value semantics: an alias taken before the loop
+/// keeps the old list (the `$cow` copy), an element that reads the var sees
+/// the pre-assign value, and a handle element shared with another var keeps
+/// its own count.
+#[test]
+fn the_assign_prepend_window_agrees_with_native_on_aliases_and_self_reads() {
+    let dir = tempfile::tempdir().expect("scratch");
+    let source = dir.path().join("assign_kinds.almd");
+    std::fs::write(
+        &source,
+        r#"type P = { x: Int, s: String }
+
+effect fn main() -> Unit = {
+  var a: List[Int] = [9]
+  let snap = a
+  var i = 0
+  while i < 5 {
+    a = [list.len(a) * 10] + a
+    i = i + 1
+  }
+  println("${snap} ${a}")
+  var ps: List[P] = []
+  for k in 0..<4 {
+    ps = [{ x: k, s: "p${k}" }] + ps
+  }
+  println("${ps}")
+  var ls: List[List[String]] = [["z"]]
+  let inner = ["q"]
+  for k in 0..<3 {
+    ls = [inner] + ls
+    ls = [["k${k}"]] + ls
+  }
+  println("${inner} ${ls}")
+  var fs: List[Float] = []
+  for k in 0..<4 { fs = [int.to_float(k) + 0.5] + fs }
+  println("${fs}")
+}
+"#,
+    )
+    .expect("source");
+    let native = build(dir.path(), &source, "native", &[]);
+    let core = build(dir.path(), &source, "core.wasm", &["--target", "wasm"]);
+    let want = run(&native, false);
+    assert!(want.starts_with("[9] [50, 40, 30, 20, 10, 9]\n"), "{want}");
+    assert_eq!(run(&core, true), want, "core wasm");
+}
+
+
+/// #3530: a `list.fold` callback that pushes onto its accumulator — either
+/// end — took `$concat`'s copy per step (30,000 steps: 3.7 s and 1.28 GB on
+/// wasm, 0.3 s native): the callback's `a` is not rebound by its own
+/// expression, so only the fold body's DYING note can hand the concat its
+/// credit. Both directions run under the 32 MiB ceiling.
+#[test]
+fn a_fold_that_pushes_onto_its_accumulator_grows_in_place() {
+    let dir = tempfile::tempdir().expect("scratch");
+    let source = dir.path().join("fold_push.almd");
+    std::fs::write(
+        &source,
+        r#"effect fn main() -> Unit = {
+  let front = list.range(0, 30000) |> list.fold([], (a, i) => [[i]] + a)
+  let back = list.range(0, 30000) |> list.fold([], (a, i) => a + [[i]])
+  println("front=${list.len(front)} ${list.get(front, 0) ?? []} back=${list.len(back)} ${list.get(back, 0) ?? []}")
+}
+"#,
+    )
+    .expect("source");
+    let cap = ["--heap-cap", "33554432"];
+    let native = build(dir.path(), &source, "native", &cap);
+    let core = build(dir.path(), &source, "core.wasm", &[&cap[..], &["--target", "wasm"]].concat());
+    let expected = "front=30000 [29999] back=30000 [0]\n";
+    assert_eq!(run(&native, false), expected, "native");
+    assert_eq!(run(&core, true), expected, "core wasm");
+}
+
+/// The fold window takes the accumulator's credit only where the body's
+/// last read of it is the push: an arm that returns the accumulator as is, an
+/// element that reads it, a shared `init` (the `$cow` copy keeps `base`), a
+/// `match` on it, and a handle element shared by every step — each printed by
+/// both legs and compared.
+#[test]
+fn the_fold_push_window_agrees_with_native() {
+    let dir = tempfile::tempdir().expect("scratch");
+    let source = dir.path().join("fold_kinds.almd");
+    std::fs::write(
+        &source,
+        r#"type P = { x: Int, s: String }
+
+fn keep_small(xs: List[Int]) -> List[List[Int]] =
+  xs |> list.fold([], (a, i) => if list.len(a) >= 3 then a else [[i]] + a)
+
+effect fn main() -> Unit = {
+  let xs = list.range(0, 8)
+  println("${keep_small(xs)}")
+  println("${xs |> list.fold([], (a, i) => [list.len(a)] + a)}")
+  let base = [[100]]
+  let grown = xs |> list.fold(base, (a, i) => [[i]] + a)
+  println("${base} ${grown}")
+  let grown2 = xs |> list.fold(base, (a, i) => a + [[i * 2]])
+  println("${base} ${grown2}")
+  let m = xs |> list.fold([], (a, i) => match a {
+    [] => [i],
+    _ => [i * 10] + a,
+  })
+  println("${m}")
+  let ps = xs |> list.fold([], (a, i) => [{ x: i, s: "p${i}" }] + a)
+  println("${ps}")
+  let shared = ["s"]
+  let ss = xs |> list.fold([], (a, i) => [shared] + a)
+  println("${shared} ${list.len(ss)} ${ss}")
+  let fs = xs |> list.fold([], (a, i) => a + [int.to_float(i) * 0.5])
+  println("${fs}")
+}
+"#,
+    )
+    .expect("source");
+    let native = build(dir.path(), &source, "native", &[]);
+    let core = build(dir.path(), &source, "core.wasm", &["--target", "wasm"]);
+    let want = run(&native, false);
+    assert!(want.contains("[[100]] [[7], [6], [5], [4], [3], [2], [1], [0], [100]]"), "{want}");
+    assert_eq!(run(&core, true), want, "core wasm");
+}

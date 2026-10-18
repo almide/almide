@@ -1,0 +1,29 @@
+// #1456: caseless type and variant names declared in ANOTHER module. This
+// module never sees their declarations, so it spells them qualified: a
+// caseless last segment after `module.` is a type in a type position, a
+// record literal before a named-record brace, and a constructor in a pattern.
+import self.geo
+
+fn 表示(a: geo.住所) -> String = "${a.都市}:${a.番地}"
+
+fn 判定(c: geo.色) -> String = match c {
+  geo.赤 => "R",
+  geo.緑(n) => "G${n}",
+}
+
+test "an imported caseless record type in type positions and literals" {
+  let a = geo.作る("京都")
+  let b = geo.住所 { 都市: "奈良", 番地: 2 }
+  assert_eq(表示(a), "京都:1")
+  assert_eq(表示(b), "奈良:2")
+  let xs: List[geo.住所] = [a, b]
+  assert_eq("${xs}", "[住所 { 都市: \"京都\", 番地: 1 }, 住所 { 都市: \"奈良\", 番地: 2 }]")
+  assert_eq(a.ラベル(), "<京都>")
+}
+
+test "imported caseless variant cases construct and match qualified" {
+  assert_eq(geo.名前(geo.赤), "red")
+  assert_eq(geo.名前(geo.緑(3)), "green3")
+  assert_eq(判定(geo.緑(5)), "G5")
+  assert_eq(判定(geo.赤), "R")
+}

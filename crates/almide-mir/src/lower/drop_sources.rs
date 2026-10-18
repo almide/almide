@@ -230,9 +230,9 @@ pub(crate) fn tuple_repr_ident(tys: &[Ty]) -> Option<String> {
 /// construction. Args spell via their `Debug` form, sanitized to identifier
 /// chars (the `instantiate_variant_layout` key discipline).
 pub(crate) fn repr_inst_ident(name: &str, args: &[Ty]) -> String {
-    let sane = |s: String| -> String {
-        s.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect()
-    };
+    // The same spelling `sanitize_ty_ident` gives: a non-ASCII character
+    // spells its code point, so two caseless type arguments stay distinct.
+    let sane = |s: String| -> String { sanitize_ty_ident(&s) };
     format!(
         "{}_{}",
         drop_fn_ident(name),

@@ -1,0 +1,40 @@
+// @contract: C-387
+// #1456: identifiers follow UAX #31 (XID_Start then XID_Continue, stored in
+// NFC). Non-ASCII let / fn / parameter / record-field / type / variant names
+// run and print identically on both targets, including a record's and a
+// variant's repr, which spell the declared names.
+type 住所 = { 都市: String, 番地: Int }
+
+type 色 = | 赤 | 緑 | 青(Int) | 混色 { 名前: String, 割合: Int }
+
+fn 色名(c: 色) -> String = match c {
+  赤 => "赤い",
+  緑 => "緑の",
+  青(n) => "青:${n}",
+  混色 { 名前, 割合 } => "${名前}:${割合}",
+}
+
+fn 挨拶(名前: String) -> String = "こんにちは、${名前}"
+
+fn main() -> Unit = {
+  let 日本 = 2
+  let café = 3
+  let λ = (x: Int) => x * 日本 + café
+  println(int.to_string(λ(5)))
+  println(挨拶("世界"))
+  let a = 住所 { 都市: "東京", 番地: 1 }
+  let b = { ...a, 番地: a.番地 + 1 }
+  println("${b}")
+  println(b.都市)
+  let 色たち = [
+    赤,
+    緑,
+    青(4),
+    混色 { 名前: "紫", 割合: 50 }
+  ]
+  for c in 色たち {
+    println(色名(c))
+  }
+  println("${色たち}")
+  println("${赤 == 赤} ${赤 == 緑}")
+}

@@ -6,6 +6,7 @@ use almide_ir::IrExpr;
 use wasm_encoder::{BlockType, ValType};
 
 use crate::emitter::Emitter;
+use crate::list_range_head::LoopSrc;
 use crate::*;
 
 #[path = "list_zip.rs"]
@@ -105,19 +106,35 @@ impl Emitter<'_> {
         let hb = self.hold_i32()?;
         let hc = self.hold_i32()?;
         let hacc = self.hold_i32()?;
-        let hprev = self.hold_i32()?;
+        let hdst = self.hold_i32()?;
+        let payload = almide_layout::PAYLOAD as i32;
+        // Two passes (#3534): the byte total of the inner lists, then one
+        // allocation that every inner payload is copied into in order. A
+        // `$concat` per inner list re-copied the growing result each time —
+        // 800,000 one-element lists took 32.5 s.
         let mut i = self.f.instructions();
         i.local_set(hb);
-        i.i32_const(0).call(F_ALLOC).local_set(hacc);
+        i.i32_const(0).local_set(hdst);
         i.i32_const(0).local_set(hc);
         i.block(BlockType::Empty).loop_(BlockType::Empty);
         i.local_get(hc).local_get(hb).i32_load(len_memarg()).i32_ge_u().br_if(1);
-        i.local_get(hacc).local_tee(hprev);
-        i.local_get(hb).local_get(hc).i32_add().i32_load(slot_memarg(0));
-        i.call(F_CONCAT).local_set(hacc);
-        // The outgrown accumulator is a bare spine no credit was taken
-        // through yet (#2977 — one leaked per inner list).
-        i.local_get(hprev).call(F_DEC_FLAT);
+        i.local_get(hdst);
+        i.local_get(hb).local_get(hc).i32_add().i32_load(slot_memarg(0)).i32_load(len_memarg());
+        i.i32_add().local_set(hdst);
+        i.local_get(hc).i32_const(4).i32_add().local_set(hc);
+        i.br(0).end().end();
+        i.local_get(hdst).call(F_ALLOC).local_tee(hacc);
+        i.i32_const(payload).i32_add().local_set(hdst);
+        i.i32_const(0).local_set(hc);
+        i.block(BlockType::Empty).loop_(BlockType::Empty);
+        i.local_get(hc).local_get(hb).i32_load(len_memarg()).i32_ge_u().br_if(1);
+        i.local_get(hdst);
+        i.local_get(hb).local_get(hc).i32_add().i32_load(slot_memarg(0)).i32_const(payload).i32_add();
+        i.local_get(hb).local_get(hc).i32_add().i32_load(slot_memarg(0)).i32_load(len_memarg());
+        i.memory_copy(0, 0);
+        i.local_get(hdst);
+        i.local_get(hb).local_get(hc).i32_add().i32_load(slot_memarg(0)).i32_load(len_memarg());
+        i.i32_add().local_set(hdst);
         i.local_get(hc).i32_const(4).i32_add().local_set(hc);
         i.br(0).end().end();
         let _ = i;
@@ -412,34 +429,31 @@ impl Emitter<'_> {
         xs: &IrExpr,
         cb: &IrExpr,
     ) -> ArmResult {
+        // Scan for the prefix length first, then copy the prefix in ONE
+        // `memory.copy` the way `list.take` does. Pushing element by element
+        // regrew the result by doubling: up to twice the prefix's bytes
+        // copied, and how much of that the allocator could extend in place
+        // depended on the heap, so the inspection's bytes-moved meter read a
+        // different constant per size (c4-standard-4, n=20000: one doubling
+        // step short of the copy the larger sizes paid).
         let (params, body) = self.hof_lambda(cb, 1)?;
         let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
-        let hacc = self.hold_i32()?;
-        self.f.instructions().i32_const(0).call(F_ALLOC).local_set(hacc);
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
         self.hof_elem_into(elem, bh, ch, ih, params[0]);
-        self.witness_callback_open(cb, None);
-        self.lower(body, Some(BOOL))?;
-        // #2755: a false verdict leaves the walk; a true one shares the
-        // element into the prefix.
-        self.witness_filter_skip();
-        self.witness_view_shares(&[(params[0], elem)]);
-        self.witness_loop_close();
+        self.lower_inlined_predicate(cb, body)?;
         self.f.instructions().i32_eqz().br_if(1);
-        self.f.instructions().local_get(hacc).local_get(params[0]);
-        if elem.val_type() == ValType::F64 {
-            self.f.instructions().i64_reinterpret_f64();
-        }
-        let push = match elem.slot_size() {
-            8 => F_LIST_PUSH_8,
-            _ => F_LIST_PUSH_4,
-        };
-        // The pushed element is a COPY of the source's handle: the result
-        // takes its share (#2010).
-        self.share_handle_top(elem);
-        self.f.instructions().call(push).local_set(hacc);
         self.hof_step(ih);
-        self.f.instructions().local_get(hacc);
+        // ih = the prefix length; copy that many slots and share each one.
+        let ho = self.hold_i32()?;
+        let mut i = self.f.instructions();
+        i.local_get(ih).i32_const(elem.slot_size() as i32).i32_mul().call(F_ALLOC).local_set(ho);
+        i.local_get(ho).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+        i.local_get(bh).i32_const(almide_layout::PAYLOAD as i32).i32_add();
+        i.local_get(ih).i32_const(elem.slot_size() as i32).i32_mul();
+        i.memory_copy(0, 0);
+        let _ = i;
+        self.emit_inc_elems(ho, elem);
+        self.f.instructions().local_get(ho);
         for _ in 0..4 {
             self.release_i32();
         }
@@ -520,9 +534,14 @@ impl Emitter<'_> {
         // result list holds — a borrowed body result (the seed, the
         // previous accumulator) takes its share before the push (fuzz
         // 20260910: `scan(xs, s, (a, x) => a)` pushed one block twice).
+        // The source before the seed, as native evaluates them (#2045); a
+        // seed that runs code keeps the source alive across it.
+        let src = self.loop_src_open_block(xs, init)?;
         self.lower_arg(init, Some(b_ty), ArgMode::Borrow)?;
         self.f.instructions().local_set(params[0]);
-        let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
+        let LoopSrc::Block { elem, base: bh, count: ch, idx: ih, .. } = src else {
+            return unsup("scan-source");
+        };
         let hacc = self.hold_i32()?;
         self.f.instructions().i32_const(0).call(F_ALLOC).local_set(hacc);
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
@@ -546,9 +565,8 @@ impl Emitter<'_> {
         self.f.instructions().call(push).local_set(hacc);
         self.hof_step(ih);
         self.f.instructions().local_get(hacc);
-        for _ in 0..4 {
-            self.release_i32();
-        }
+        self.release_i32();
+        self.loop_src_close(src);
         Ok(Some(Lowered::owned(SliceTy::List(self.types.intern(b_ty)))))
     }
 
@@ -570,6 +588,9 @@ impl Emitter<'_> {
                 | SliceTy::Option(_)
         ) {
             return unsup(&format!("list-unique-elem:{elem:?}"));
+        }
+        if crate::map_index::index_key(elem).is_some() {
+            return self.emit_indexed_dedup(h, elem);
         }
         let stride = elem.slot_size() as i32;
         let hb = self.hold_i32()?;
@@ -671,35 +692,44 @@ impl Emitter<'_> {
         self.lower_arg(sep, Some(elem), ArgMode::Borrow)?;
         let hx = self.hold_val(elem)?;
         self.f.instructions().local_set(hx);
+        // The result's length is known: 2·len − 1 slots (none for an empty
+        // list). Allocate it once and store each slot into place. Pushing slot
+        // by slot regrew by doubling — 11 allocations for 1000 Ints, and a
+        // bytes-moved count that depended on how much of the regrowth the
+        // allocator could extend in place.
         let hc = self.hold_i32()?;
         let hacc = self.hold_i32()?;
-        let push = match elem.slot_size() {
-            8 => F_LIST_PUSH_8,
-            _ => F_LIST_PUSH_4,
-        };
+        let hn = self.hold_i32()?;
+        let ho = self.hold_i32()?;
         {
             let mut i = self.f.instructions();
-            i.i32_const(0).call(F_ALLOC).local_set(hacc);
-            i.i32_const(0).local_set(hc);
-            i.block(BlockType::Empty).loop_(BlockType::Empty);
-            i.local_get(hc).local_get(hb).i32_load(len_memarg()).i32_ge_u().br_if(1);
-            i.local_get(hc).if_(BlockType::Empty);
-            i.local_get(hacc).local_get(hx);
-            if elem.val_type() == ValType::F64 {
-                i.i64_reinterpret_f64();
-            }
-            i.call(push).local_set(hacc);
+            i.local_get(hb).i32_load(len_memarg()).local_tee(hn);
+            i.i32_eqz().if_(BlockType::Result(ValType::I32));
+            i.i32_const(0);
+            i.else_();
+            i.local_get(hn).i32_const(2).i32_mul().i32_const(stride).i32_sub();
             i.end();
-            i.local_get(hacc);
+            i.call(F_ALLOC).local_set(hacc);
+            i.i32_const(0).local_set(hc);
+            i.i32_const(0).local_set(ho);
+            i.block(BlockType::Empty).loop_(BlockType::Empty);
+            i.local_get(hc).local_get(hn).i32_ge_u().br_if(1);
+            i.local_get(hc).if_(BlockType::Empty);
+            i.local_get(hacc).local_get(ho).i32_add().local_get(hx);
+        }
+        self.store_ty_slot(elem, 0);
+        {
+            let mut i = self.f.instructions();
+            i.local_get(ho).i32_const(stride).i32_add().local_set(ho);
+            i.end();
+            i.local_get(hacc).local_get(ho).i32_add();
             i.local_get(hb).local_get(hc).i32_add();
         }
         self.load_ty_slot(elem, 0);
+        self.store_ty_slot(elem, 0);
         {
             let mut i = self.f.instructions();
-            if elem.val_type() == ValType::F64 {
-                i.i64_reinterpret_f64();
-            }
-            i.call(push).local_set(hacc);
+            i.local_get(ho).i32_const(stride).i32_add().local_set(ho);
             i.local_get(hc).i32_const(stride).i32_add().local_set(hc);
             i.br(0).end().end();
         }
@@ -707,6 +737,8 @@ impl Emitter<'_> {
         // separator — holds its own credit.
         self.emit_inc_elems(hacc, elem);
         self.f.instructions().local_get(hacc);
+        self.release_i32();
+        self.release_i32();
         self.release_i32();
         self.release_i32();
         self.release_val(elem);

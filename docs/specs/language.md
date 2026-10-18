@@ -1,4 +1,4 @@
-> Last updated: 2026-10-01
+> Last updated: 2026-10-18
 
 # Almide Language Specification
 
@@ -63,6 +63,42 @@ test "every import form resolves" {
 Selective imports use the syntax `import path.{ Name1, Name2 }`. Aliases use `as`.
 
 テスト: `spec/lang/import_test.almd`
+
+### Identifiers
+
+An identifier follows UAX #31 Default Identifiers: an XID_Start character or
+`_`, then XID_Continue characters (the rule of Rust RFC 2457, Python PEP 3131
+and ECMAScript). Names are stored in NFC, so `é` and `e` + U+0301 are one
+name. A character whose compatibility form differs (full-width `ａ`, `１`,
+ligatures, circled forms) is not an identifier character and is reported with
+the plain spelling to write instead. Keywords are ASCII.
+
+An uppercase first character makes a type-side name (type, variant case,
+constructor); a lowercase or caseless first character (漢字, かな, 한글) a
+value-side name. A caseless name the module declares with `type` / `protocol`
+or as a variant case is type-side throughout that module, as `Red` is, and
+from another module it is written qualified (`geo.住所`).
+
+```almide
+type 住所 = { 都市: String, 番地: Int }
+
+type 色 = | 赤 | 緑
+
+fn 色名(c: 色) -> String = match c {
+  赤 => "red",
+  緑 => "green",
+}
+
+effect fn main() -> Unit = {
+  let 場所 = 住所 { 都市: "東京", 番地: 3 }
+  println("${場所} ${色名(緑)}")
+}
+```
+
+テスト: `spec/lang/unicode_identifier_test.almd`,
+`spec/integration/caseless_imported_types/`,
+`spec/wasm_cross/unicode_identifiers.almd` (C-387),
+`tests/unicode_identifier_nfc_test.rs`
 
 ---
 
@@ -963,6 +999,35 @@ Fan blocks execute expressions concurrently. Each expression in the block runs i
 
 Fan blocks only allow expressions -- no `let`, `var`, `for`, or `while` statements.
 
+**Record form.** When every arm is a `name: expr` field, the block is a record
+literal whose fields run as parallel siblings: the value is the anonymous record
+`{ name: value, … }`, typed exactly as the plain literal, and read by name.
+
+```almide
+effect fn add(a: Int, b: Int) -> Result[Int, String] = ok(a + b)
+effect fn mul(a: Int, b: Int) -> Result[Int, String] = ok(a * b)
+
+test "fan record form" {
+  let r = fan {
+    sum: add(3, 4)!
+    product: mul(3, 4)!
+  }
+  assert_eq(r.sum + r.product, 19)
+  assert_eq(r, { sum: 7, product: 12 })
+}
+```
+
+- Removing `fan` changes nothing observable when no field fails: the fields'
+  output appears in source order and the value equals the plain literal's (C-386).
+- A field written `e!` makes its Err the block's Err under the tuple form's
+  rule: every field runs, and the first Err in source order wins (C-199, C-386).
+- A field whose value is a `Result` (an effect call's included) must be written
+  `e!`; an unmarked one is E041. Sibling fields are not in scope inside the block.
+- Every arm must be named (`fan { a: f(), g() }` is a parse error), a name
+  appears once, and there is no punning: `fan { x }` is the one-arm tuple form.
+
+テスト: `spec/lang/fan_record_test.almd`, `spec/wasm_cross/fan_record_serial_elision.almd`, `spec/wasm_cross/fan_record_err_source_order.almd`, `tests/diagnostics/e041-fan-record-field-without-bang/`
+
 The `fan.*` block heads share the surface:
 
 ```almide
@@ -971,25 +1036,27 @@ effect fn b() -> Result[Int, String] = ok(2)
 fn work(x: Int) -> Int = x * 2
 
 test "fan.* heads" {
-  let first = fan.any {                 // first Ok in source order
-    a()
-    b()
-  }
+  let first = a() ?? b() ?? -1          // first Ok in source order: a `??` chain, not a fan form
   let (ra, rb) = fan.settle {           // a TUPLE of per-arm Results
     a()
     b()
   }
   let r = fan.bounded(compute.ms(100)) { work(21) } ?? -1  // deterministic budget
-  assert_eq(first, ok(2))
+  let w = fan.min(compute.ms(5)) { work(1), work(2) } ?? -1  // least compute within the budget
+  assert_eq(first, 2)
   assert_eq(ra, err("a failed"))
   assert_eq(rb, ok(2))
   assert_eq(r, 42)
+  assert_eq(w, 2)
 }
 ```
 
 Arms are separated by newlines (or `,`), never `;`. `fan.race` was removed in
 0.42.0 — under the deterministic model it was `thunks[0]()` by another name —
-and a reference is a tombstone error (E027).
+and the deterministic head that replaced it was renamed `fan.min` in dialect
+epoch 14, with the clock argument required; `fan.any` was removed in the same
+epoch (a `??` chain or `list.find_map` says the same thing). A reference to
+either old name is a tombstone error (E027) naming the replacement.
 
 Budgets are built with the `compute.*` time constructors (closed unit set
 `ns / us / ms / s / min / h`); a bare `Int` or a wall-clock `duration.*` value

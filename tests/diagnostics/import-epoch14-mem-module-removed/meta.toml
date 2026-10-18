@@ -1,0 +1,2 @@
+expects_error = "module 'mem' not found"
+hint_substring = "delete the import"

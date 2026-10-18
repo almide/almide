@@ -1,0 +1,7 @@
+// The closure already runs in a child; a call inside it would need a
+// grandchild.
+import testing
+
+test "a panic aborts" {
+  testing.assert_aborts("boom", () => testing.assert_aborts("boom", () => panic("boom")))
+}

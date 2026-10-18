@@ -172,11 +172,15 @@ fn lower_expr_control(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option
             call
         }
 
-        ast::ExprKind::Fan { exprs, .. } => {
+        ast::ExprKind::Fan { exprs, names } => {
             let ir_exprs: Vec<IrExpr> = exprs.iter()
                 .map(|e| { let arm = lower_expr(ctx, e); fan_arm_scope(ctx, arm) })
                 .collect();
-            ctx.mk(IrExprKind::Fan { exprs: ir_exprs }, ty, span)
+            if names.is_empty() {
+                ctx.mk(IrExprKind::Fan { exprs: ir_exprs }, ty, span)
+            } else {
+                lower_fan_record(ctx, ir_exprs, names, ty, span)
+            }
         }
         // fan.bounded(budget) { body } — Stage 2 v1 desugar by OUTLINING.
         // The region becomes a synthesized PLAIN fn `__almd_bounded_N(budget,
@@ -268,20 +272,26 @@ fn lower_expr_control(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option
         }
         ast::ExprKind::FanRaceMap { .. } => {
             // Same tail construction as the block form below — only the fold
-            // differs (dynamic while-scan vs static unrolled arms).
+            // differs (a `for` over the list vs static unrolled arms).
             let result_ty = ty.clone();
-            let (stmts, ok_var, val_var, arm_ty) = lower_fan_race_map_fold(ctx, expr, span);
+            let (stmts, ok_var, val_var, arm_ty, slotted) = lower_fan_race_map_fold(ctx, expr, span);
             let cond = ctx.mk(IrExprKind::BinOp {
                 op: almide_ir::BinOp::Eq,
                 left: Box::new(ctx.mk(IrExprKind::Var { id: ok_var }, Ty::Int, span)),
                 right: Box::new(ctx.mk(IrExprKind::LitInt { value: 1 }, Ty::Int, span)),
             }, Ty::Bool, span);
-            let ok_arm = ctx.mk(IrExprKind::ResultOk {
-                expr: Box::new(ctx.mk(IrExprKind::Var { id: val_var }, arm_ty, span)),
-            }, result_ty.clone(), span);
+            // A `Result`-slotted fold already holds `ok(v)` (#3782); a plain
+            // slot holds `v`.
+            let ok_arm = if slotted {
+                ctx.mk(IrExprKind::Var { id: val_var }, result_ty.clone(), span)
+            } else {
+                ctx.mk(IrExprKind::ResultOk {
+                    expr: Box::new(ctx.mk(IrExprKind::Var { id: val_var }, arm_ty, span)),
+                }, result_ty.clone(), span)
+            };
             let err_arm = ctx.mk(IrExprKind::ResultErr {
                 expr: Box::new(ctx.mk(IrExprKind::LitStr {
-                    value: "fan.race: no branch completed within budget".to_string(),
+                    value: "fan.min: no branch succeeded within budget".to_string(),
                 }, Ty::String, span)),
             }, result_ty.clone(), span);
             let tail = ctx.mk(IrExprKind::If {
@@ -294,18 +304,24 @@ fn lower_expr_control(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option
         }
         ast::ExprKind::FanRace { .. } => {
             let result_ty = ty.clone();
-            let (stmts, ok_var, val_var, arm_ty) = lower_fan_race_fold(ctx, expr, span);
+            let (stmts, ok_var, val_var, arm_ty, slotted) = lower_fan_race_fold(ctx, expr, span);
             let cond = ctx.mk(IrExprKind::BinOp {
                 op: almide_ir::BinOp::Eq,
                 left: Box::new(ctx.mk(IrExprKind::Var { id: ok_var }, Ty::Int, span)),
                 right: Box::new(ctx.mk(IrExprKind::LitInt { value: 1 }, Ty::Int, span)),
             }, Ty::Bool, span);
-            let ok_arm = ctx.mk(IrExprKind::ResultOk {
-                expr: Box::new(ctx.mk(IrExprKind::Var { id: val_var }, arm_ty, span)),
-            }, result_ty.clone(), span);
+            // A `Result`-slotted fold already holds `ok(v)` (#3782); a plain
+            // slot holds `v`.
+            let ok_arm = if slotted {
+                ctx.mk(IrExprKind::Var { id: val_var }, result_ty.clone(), span)
+            } else {
+                ctx.mk(IrExprKind::ResultOk {
+                    expr: Box::new(ctx.mk(IrExprKind::Var { id: val_var }, arm_ty, span)),
+                }, result_ty.clone(), span)
+            };
             let err_arm = ctx.mk(IrExprKind::ResultErr {
                 expr: Box::new(ctx.mk(IrExprKind::LitStr {
-                    value: "fan.race: no branch completed within budget".to_string(),
+                    value: "fan.min: no branch succeeded within budget".to_string(),
                 }, Ty::String, span)),
             }, result_ty.clone(), span);
             let tail = ctx.mk(IrExprKind::If {
@@ -531,17 +547,40 @@ fn lower_expr_variant(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option
         {
             // FUSED `race-mapper ?? fb`: winner-or-fallback as a scalar If —
             // the exact shape of the block form's fused arm below.
-            let (stmts, ok_var, val_var, arm_ty) = lower_fan_race_map_fold(ctx, expr, span);
+            let (stmts, ok_var, val_var, arm_ty, slotted) = lower_fan_race_map_fold(ctx, expr, span);
             let fb_ir = lower_expr(ctx, fallback);
             let cond = ctx.mk(IrExprKind::BinOp {
                 op: almide_ir::BinOp::Eq,
                 left: Box::new(ctx.mk(IrExprKind::Var { id: ok_var }, Ty::Int, span)),
                 right: Box::new(ctx.mk(IrExprKind::LitInt { value: 1 }, Ty::Int, span)),
             }, Ty::Bool, span);
-            let tail = ctx.mk(IrExprKind::If {
-                cond: Box::new(cond),
-                then: Box::new(ctx.mk(IrExprKind::Var { id: val_var }, arm_ty.clone(), span)),
-                else_: Box::new(fb_ir),
+            if !slotted {
+                let tail = ctx.mk(IrExprKind::If {
+                    cond: Box::new(cond),
+                    then: Box::new(ctx.mk(IrExprKind::Var { id: val_var }, arm_ty.clone(), span)),
+                    else_: Box::new(fb_ir),
+                }, arm_ty.clone(), span);
+                return Some(ctx.mk(IrExprKind::Block { stmts, expr: Some(Box::new(tail)) }, arm_ty, span));
+            }
+            // A `Result` slot is `ok(v)` exactly when the ok flag is set
+            // (#3782), so the fused tail is a match on it.
+            let _ = cond;
+            let slot_ty = Ty::result(arm_ty.clone(), Ty::String);
+            let payload = ctx.var_table.alloc(sym("__r_win"), arm_ty.clone(), almide_ir::Mutability::Let, span);
+            let tail = ctx.mk(IrExprKind::Match {
+                subject: Box::new(ctx.mk(IrExprKind::Var { id: val_var }, slot_ty, span)),
+                arms: vec![
+                    almide_ir::IrMatchArm {
+                        pattern: almide_ir::IrPattern::Ok { inner: Box::new(almide_ir::IrPattern::Bind { var: payload, ty: arm_ty.clone() }) },
+                        guard: None,
+                        body: ctx.mk(IrExprKind::Var { id: payload }, arm_ty.clone(), span),
+                    },
+                    almide_ir::IrMatchArm {
+                        pattern: almide_ir::IrPattern::Err { inner: Box::new(almide_ir::IrPattern::Wildcard) },
+                        guard: None,
+                        body: fb_ir,
+                    },
+                ],
             }, arm_ty.clone(), span);
             ctx.mk(IrExprKind::Block { stmts, expr: Some(Box::new(tail)) }, arm_ty, span)
         }
@@ -550,17 +589,40 @@ fn lower_expr_variant(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option
         {
             // FUSED `race ?? fb`: winner-or-fallback as a scalar If — no Result
             // value exists, so the shape renders on the native rung today.
-            let (stmts, ok_var, val_var, arm_ty) = lower_fan_race_fold(ctx, expr, span);
+            let (stmts, ok_var, val_var, arm_ty, slotted) = lower_fan_race_fold(ctx, expr, span);
             let fb_ir = lower_expr(ctx, fallback);
             let cond = ctx.mk(IrExprKind::BinOp {
                 op: almide_ir::BinOp::Eq,
                 left: Box::new(ctx.mk(IrExprKind::Var { id: ok_var }, Ty::Int, span)),
                 right: Box::new(ctx.mk(IrExprKind::LitInt { value: 1 }, Ty::Int, span)),
             }, Ty::Bool, span);
-            let tail = ctx.mk(IrExprKind::If {
-                cond: Box::new(cond),
-                then: Box::new(ctx.mk(IrExprKind::Var { id: val_var }, arm_ty.clone(), span)),
-                else_: Box::new(fb_ir),
+            if !slotted {
+                let tail = ctx.mk(IrExprKind::If {
+                    cond: Box::new(cond),
+                    then: Box::new(ctx.mk(IrExprKind::Var { id: val_var }, arm_ty.clone(), span)),
+                    else_: Box::new(fb_ir),
+                }, arm_ty.clone(), span);
+                return Some(ctx.mk(IrExprKind::Block { stmts, expr: Some(Box::new(tail)) }, arm_ty, span));
+            }
+            // A `Result` slot is `ok(v)` exactly when the ok flag is set
+            // (#3782), so the fused tail is a match on it.
+            let _ = cond;
+            let slot_ty = Ty::result(arm_ty.clone(), Ty::String);
+            let payload = ctx.var_table.alloc(sym("__r_win"), arm_ty.clone(), almide_ir::Mutability::Let, span);
+            let tail = ctx.mk(IrExprKind::Match {
+                subject: Box::new(ctx.mk(IrExprKind::Var { id: val_var }, slot_ty, span)),
+                arms: vec![
+                    almide_ir::IrMatchArm {
+                        pattern: almide_ir::IrPattern::Ok { inner: Box::new(almide_ir::IrPattern::Bind { var: payload, ty: arm_ty.clone() }) },
+                        guard: None,
+                        body: ctx.mk(IrExprKind::Var { id: payload }, arm_ty.clone(), span),
+                    },
+                    almide_ir::IrMatchArm {
+                        pattern: almide_ir::IrPattern::Err { inner: Box::new(almide_ir::IrPattern::Wildcard) },
+                        guard: None,
+                        body: fb_ir,
+                    },
+                ],
             }, arm_ty.clone(), span);
             ctx.mk(IrExprKind::Block { stmts, expr: Some(Box::new(tail)) }, arm_ty, span)
         }

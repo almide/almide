@@ -15,29 +15,25 @@ pub fn compile_to_binary(file: &str, no_check: bool, test_mode: bool, release: b
 /// fall back to the v0 source on a WALL — a v1-rendered program is never wrong.
 pub fn compile_to_binary_with(file: &str, no_check: bool, test_mode: bool, release: bool, project_dir_override: Option<&std::path::Path>, native_verified: bool) -> Result<std::path::PathBuf, String> {
     let t = PhaseTimer::start();
-    let (rs_code, ir) = crate::try_compile_with_ir(file, no_check, &crate::codegen::CodegenOptions::default())
+    let opts = crate::codegen::CodegenOptions::default();
+    // `metered`: from the IR, not the text — a user literal spelled like a
+    // prim is emitted into `rs_code` verbatim (#3486).
+    let (rs_code, metered) = crate::try_compile_with_ir(file, no_check, &opts)
         .map_err(|_| "compile failed".to_string())?;
-    // From the IR, not the text: a user literal spelled like a prim is
-    // emitted into `rs_code` verbatim (#3486).
-    let uses_metered_prims = ir.as_ref().is_some_and(almide::ir::runtime_use::uses_metered_prims);
     t.lap("frontend+emit");
     let rs_code = if native_verified && !test_mode {
-        super::render_v1_native_or_fallback(file, rs_code, uses_metered_prims)
+        super::render_v1_native_or_fallback(file, rs_code, metered, &opts)
     } else {
-        // The NATIVE TEST harness rides v0, which has no deterministic meter:
-        // a budget/timeout prim reaching it would die later as an opaque
-        // rustc E0425 in generated code. Refuse with the real reason instead
-        // (the wasm test leg is the metered one; it runs first by default).
-        if test_mode && uses_metered_prims {
-            return Err(
-                "fan.bounded / fan.race / fan.timeout tests run on the WASM test leg \
-                 (the native test harness has no deterministic meter). This file fell \
-                 back to the native harness, so its wasm render declined — fix that \
-                 wall (run with ALMIDE_WALL_REASON=1 to see it)"
-                    .to_string(),
-            );
+        // The NATIVE TEST harness rides the standard codegen: link the
+        // v1-rendered regions in, exactly as the run path does when the whole
+        // program walls (#3669), or meter them in the codegen (#3673).
+        match metered {
+            Some(ir) if test_mode => {
+                let source_text = almide::source_overlay::read_to_string(file).unwrap_or_default();
+                super::link_metered_regions(&source_text, rs_code, "the native test harness rides the standard codegen", ir, &opts)
+            }
+            _ => rs_code,
         }
-        rs_code
     };
     t.lap("v1-native-render");
     // ALMIDE_ALLOC_COUNT (#2228): the counting allocator, when armed.
@@ -125,7 +121,6 @@ pub(crate) fn build_native_cached(
     // narrower, editing an input the key did not see was a cache hit that
     // shipped the previous binary with exit 0.
     let inputs = super::crate_inputs::CrateInputs::collect(source_root)?;
-    inputs.warn_legacy_callbacks(rs_code);
     let native_key = inputs.cache_key();
     // The target triple (#2772) is part of the identity too: a musl build of
     // the same code is a different binary, and keyed without it `almide build
@@ -134,9 +129,12 @@ pub(crate) fn build_native_cached(
     // And what shapes the binary from OUTSIDE the crate (#3091): the build
     // recipe, the toolchain, the flags and cargo config it reads.
     let env_key = super::crate_inputs::build_environment_key(&project_dir);
+    // The release CPU tuning (#3604): a `--target-cpu portable` build of the
+    // same code is a different binary from the default `native` one.
+    let cpu = release.then(super::native_target::release_target_cpu).flatten().unwrap_or_default();
     let hash_input = format!(
-        "{}:test={}:release={}:deps={}:root={:?}:native={}:target={}:env={}",
-        &rs_code, use_test_harness, release, dep_key, source_root, native_key, triple, env_key
+        "{}:test={}:release={}:deps={}:root={:?}:native={}:target={}:cpu={}:env={}",
+        &rs_code, use_test_harness, release, dep_key, source_root, native_key, triple, cpu, env_key
     );
     let code_hash = format!("{:016x}", hash64(hash_input.as_bytes()));
     let profile_dir = if release { "release" } else { "debug" };
@@ -516,6 +514,28 @@ fn foreign_import(bytes: &[u8]) -> Option<(String, String)> {
 /// gate. Program args after `--` are forwarded to the guest.
 /// `wasmtime`'s own exit code is propagated unchanged, so a guest
 /// `proc_exit(n)` surfaces as `n` exactly as a native binary's exit would.
+/// `almide run --target wasm` over the program's p3 component (ADR-0023
+/// step 7): the bytes `ALMIDE_COMPONENT_P3=1 almide build --component` ships,
+/// with the run's real stdio, environment and arguments. Under
+/// ALMIDE_WASM_ALLOC_COUNT the armed component writes the counter line
+/// itself (the core host's globals are out of a host's reach in a component).
+fn run_wasm_component(bytes: &[u8], host_ops: &[i32], program_args: &[String]) -> i32 {
+    let component = match almide_wasm_run::wasi_p3::to_p3(bytes, host_ops) {
+        Ok(c) => c,
+        Err(e) => {
+            err(&format!("error: p3 component transform failed — this is an Almide bug: {e}"));
+            return 1;
+        }
+    };
+    match almide_wasm_run::run_component(&component, program_args) {
+        Ok(code) => code.clamp(0, 255),
+        Err(e) => {
+            err(&format!("error: embedded wasm host: {e}"));
+            1
+        }
+    }
+}
+
 fn cmd_run_wasm(file: &str, program_args: &[String], verified: bool, time_report: bool) -> i32 {
     // #2752: the deterministic meter (ADR-0001 D5, the `time:` line) is
     // native-only now — its wasm twin was the incumbent renderer's Σ-probe
@@ -530,10 +550,23 @@ fn cmd_run_wasm(file: &str, program_args: &[String], verified: bool, time_report
     // failed the Perceus RC gate would silently execute leaky/double-freeing code,
     // so a verification failure is always a hard error here. The waiver is
     // build-only (you opt into shipping a known-bad artifact, not into running it).
-    let (bytes, _host_ops) = match super::wasm_compile::compile_to_wasm_bytes(file, false, verified, false, true) {
+    let (bytes, host_ops) = match super::wasm_compile::compile_to_wasm_bytes(file, false, verified, false, true) {
         Ok(b) => b,
         Err(()) => return 1,
     };
+    // ADR-0023 step 7: a program naming an op only the WASI 0.3 shim serves
+    // runs as its p3 component — the stock artifact itself — on the embedded
+    // host's wasi:http, whose transport is native's client.
+    if let Some(refusal) = almide_wasm_run::component_availability::embedded_split(&host_ops) {
+        err(&refusal);
+        // The fuzzer's honest-wall line, as every wall path prints it.
+        let first = refusal.lines().next().unwrap_or_default();
+        err(&format!("{}{}", crate::WASM_WALL_MARKER, first.trim_start_matches("error[E081]: ")));
+        return 1;
+    }
+    if almide_wasm_run::component_availability::embedded_runs_component(&host_ops) {
+        return run_wasm_component(&bytes, &host_ops, program_args);
+    }
 
     // The module imports `almide.*` and executes on the EMBEDDED host — the
     // exact host the corpus acceptance measured (fs, env and stdin

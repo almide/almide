@@ -37,9 +37,13 @@ handler is not called for any of them. A chunked request body is decoded.
 The response goes out as `HTTP/1.1 <status> <reason>` (the registered reason,
 empty for an unregistered code), the response's headers in order,
 `Connection: close`, `Content-Length`, the body, and then the connection
-closes. A HEAD request, a `204` and a `304` get no body. A response header
-whose name is not a token, or whose value holds CR, LF or NUL, is refused: the
-answer is a `500` and one line goes to stderr. A response later than 30 s is
+closes. A HEAD request, a `204` and a `304` get no body. The server owns the
+framing: a handler's `Connection`, `Content-Length`, `Transfer-Encoding` and
+`Keep-Alive` fields are dropped. A response header whose name is not a token,
+or whose value holds a control character other than HTAB, and a status
+outside `200..=599` (a 1xx included) are refused: the answer is a `500` whose
+body is `Internal error: <reason>` (for example `Internal error: response
+status 42 is not a final status code`) and one line goes to stderr. A response later than 30 s is
 replaced by `503`. A handler `err(m)` answers `500` with the body
 `Internal error: <m>`. If the port cannot be bound, the program stops with
 `Error: bind failed: <reason>` and exit code 1.
@@ -976,13 +980,16 @@ effect fn main() -> Unit = {
 }
 ```
 
-### The streaming clients with limits
+### The streaming client with limits
 
-`request_stream`, `openai_streaming_call` and `anthropic_streaming_call` each
-have a `_with_limits` twin: the same parameters with `limits: HttpLimits`
-before the callback, the same answer, built on the handle — so a stream that
-keeps talking ends at `total_ms`, and one that stalls ends at `idle_ms`, each
-with the error that names it. The forms without limits are unchanged.
+`request_stream` has a `_with_limits` twin: the same parameters with
+`limits: HttpLimits` before the callback, the same answer, built on the handle
+— so a stream that keeps talking ends at `total_ms`, and one that stalls ends
+at `idle_ms`, each with the error that names it. The form without limits is
+unchanged. (The OpenAI and Anthropic streaming clients and their twins moved
+to package [almide/llm](https://github.com/almide/llm) at dialect epoch 14:
+`almide add almide/llm@v0.1.0`, `import llm`, then
+`llm.openai_streaming_call(...)` with the same arguments.)
 
 ```almd check
 import http
@@ -990,8 +997,7 @@ import http
 effect fn main() -> Unit = {
   let limits = { total_ms: 10 * 60 * 1000, idle_ms: 2 * 60 * 1000 }
   let body = """{"model": "m", "stream": true, "messages": []}"""
-  let answer = http.openai_streaming_call_with_limits("http://127.0.0.1:8080/v1", "key", body, limits, (delta) => eprintln(delta))!
-  println(answer)
+  http.request_stream_with_limits("POST", "http://127.0.0.1:8080/v1/chat/completions", body, ["Content-Type": "application/json"], limits, (chunk) => eprintln(chunk))!
 }
 ```
 
@@ -1002,13 +1008,11 @@ limit and cancel errors are the same text, and dropping the last copy of a
 handle cancels its call there too. A standalone `.wasm` built with
 `almide build --target wasm` cannot carry them yet (there is no stock WASI
 host for an in-flight call), so `almide check --target wasm`, which checks
-the build route, still refuses them. `openai_streaming_call_with_limits` and
-`anthropic_streaming_call_with_limits` stay native-only, like the streaming
-helpers they extend.
+the build route, still refuses them.
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (52 functions)
+## Signature index (48 functions)
 
 ```
 // Serves 0.0.0.0:port forever; handler err is a 500.
@@ -1151,14 +1155,6 @@ effect http.request_bytes(method: String, url: String, body: String, headers: Ma
 // @since 0.15.1 or earlier
 effect http.request_stream(method: String, url: String, body: String, headers: Map[String, String], on_chunk: (String) -> Unit) -> Unit
 
-// Streams base_url/chat/completions; LLM-response JSON.
-// @since 0.15.1 or earlier
-effect http.openai_streaming_call(base_url: String, api_key: String, body_json: String, on_text_delta: (String) -> Unit) -> String
-
-// Streams Anthropic Messages; LLM-response JSON.
-// @since 0.15.1 or earlier
-effect http.anthropic_streaming_call(api_key: String, body_json: String, on_text_delta: (String) -> Unit) -> String
-
 // Begins a request; returns at once with a handle.
 // @since unreleased
 effect http.start(method: String, url: String, body: String, headers: Map[String, String], limits: HttpLimits) -> HttpCall
@@ -1182,14 +1178,6 @@ effect http.cancel(c: HttpCall) -> Unit
 // request_stream bounded by per-call limits.
 // @since unreleased
 effect http.request_stream_with_limits(method: String, url: String, body: String, headers: Map[String, String], limits: HttpLimits, on_chunk: (String) -> Unit) -> Unit
-
-// openai_streaming_call bounded by per-call limits.
-// @since unreleased
-effect http.openai_streaming_call_with_limits(base_url: String, api_key: String, body_json: String, limits: HttpLimits, on_text_delta: (String) -> Unit) -> String
-
-// anthropic_streaming_call bounded by per-call limits.
-// @since unreleased
-effect http.anthropic_streaming_call_with_limits(api_key: String, body_json: String, limits: HttpLimits, on_text_delta: (String) -> Unit) -> String
 
 // Request built in code; target keeps its ?query.
 // @since unreleased

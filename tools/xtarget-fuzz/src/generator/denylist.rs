@@ -38,7 +38,6 @@ const DENIED_MODULES: &[&str] = &[
     "io",       // stdin and other stream I/O — host state
     "env",      // environment variables — host state
     "clock",    // wall-clock time — nondeterministic
-    "datetime", // current time / now() — nondeterministic
     "random",   // RNG — nondeterministic by definition
 ];
 
@@ -49,7 +48,7 @@ const DENIED_MODULES: &[&str] = &[
 /// never drift.
 ///
 /// `fan` is a language-level concurrency construct (`fan { … }`,
-/// `fan.map`, `fan.race`, `fan.any`, `fan.timeout`) rather than a bundled
+/// `fan.map`, `fan.min`, `fan.first_ok`, `fan.timeout`) rather than a bundled
 /// stdlib module; its scheduling-order-dependent combinators are
 /// nondeterministic and are denied here for the mutation path.
 const NONDETERMINISTIC_FUNCTIONS: &[(&str, &str)] = &[
@@ -58,6 +57,22 @@ const NONDETERMINISTIC_FUNCTIONS: &[(&str, &str)] = &[
     ("fan", "race"),     // first-to-finish — scheduling-order-dependent
     ("fan", "any"),      // first-success — scheduling-order-dependent
     ("fan", "timeout"),  // wall-clock deadline — nondeterministic
+    // `datetime` is a pure calendar over Int timestamps except its clocks.
+    ("datetime", "now"),          // wall clock
+    ("datetime", "monotonic_ns"), // monotonic clock
+    // Inside the sandboxed effect modules (tier E1), what the sandbox does
+    // not fix: the host's own paths, the target's name, the clock, and
+    // random names.
+    ("env", "cwd"),              // the sandbox's host path — differs per leg
+    ("env", "os"),               // the target's OS name — differs per leg by design
+    ("env", "temp_dir"),         // the host's temp dir — differs per leg
+    ("fs", "temp_dir"),          // the host's temp dir — differs per leg
+    ("env", "millis"),           // wall clock
+    ("env", "unix_timestamp"),   // wall clock
+    ("env", "sleep_ms"),         // wall clock
+    ("fs", "modified_at"),       // file timestamp
+    ("fs", "create_temp_dir"),   // random name
+    ("fs", "create_temp_file"),  // random name
 ];
 
 /// Functions whose Int result is a **host address** — the semantics
@@ -71,11 +86,10 @@ const NONDETERMINISTIC_FUNCTIONS: &[(&str, &str)] = &[
 /// observation into a layout one and reports a "divergence" no contract
 /// promises against. Screened as a word so the UFCS form is caught too.
 ///
-/// The other address-unit entries (`bytes.heap_save` / `heap_restore`,
-/// `mem.save` / `mem.restore`) are NOT here: C-041 pins their observable
-/// results native == wasm, so they stay valid seeds.
-/// [`ADDRESS_UNIT_PINNED_BY_CONTRACT`] lists them, and a test holds the
-/// two tables to the manifest's address-unit set cell for cell.
+/// An address-unit entry whose observable result a contract pins
+/// native == wasm is NOT here: it stays a valid seed, and
+/// [`ADDRESS_UNIT_PINNED_BY_CONTRACT`] lists it. A test holds the two
+/// tables to the manifest's address-unit set cell for cell.
 const HOST_ADDRESS_FUNCTIONS: &[(&str, &str)] = &[
     ("bytes", "data_ptr"), // as_ptr / handle + 12 — target layout
 ];
@@ -85,12 +99,7 @@ const HOST_ADDRESS_FUNCTIONS: &[(&str, &str)] = &[
 /// intentional omission from [`HOST_ADDRESS_FUNCTIONS`] from a forgotten
 /// one.
 #[cfg(test)]
-const ADDRESS_UNIT_PINNED_BY_CONTRACT: &[(&str, &str, &str)] = &[
-    ("bytes", "heap_save", "C-041"),
-    ("bytes", "heap_restore", "C-041"),
-    ("mem", "save", "C-041"),
-    ("mem", "restore", "C-041"),
-];
+const ADDRESS_UNIT_PINNED_BY_CONTRACT: &[(&str, &str, &str)] = &[];
 
 /// Bare tokens that name a nondeterministic operation regardless of the
 /// receiver, used as a belt-and-braces source screen for the mutation
@@ -123,13 +132,13 @@ impl NamedDenylist {
                 return Some(m);
             }
         }
-        // Fan: deny only the nondeterministic combinators (`fan.race(`,
-        // `fan.any(`, `fan.timeout(`), NOT `fan.map` / `fan.settle` / a
-        // bare `fan { }` block — those are deterministic and a valid
-        // mutation seed.
+        // A module that is otherwise in-universe: deny only its named
+        // nondeterministic functions (`fan.min(`, `datetime.now(`, …), NOT
+        // `fan.map` / `fan.settle` / a bare `fan { }` block or the calendar
+        // functions — those are deterministic and a valid mutation seed.
         for &(m, f) in NONDETERMINISTIC_FUNCTIONS {
-            if m == "fan" && contains_token_call(src, &format!("{m}.{f}")) {
-                return Some("fan");
+            if !DENIED_MODULES.contains(&m) && contains_token_call(src, &format!("{m}.{f}")) {
+                return Some(m);
             }
         }
         for &tok in NONDETERMINISTIC_TOKENS {
@@ -173,7 +182,7 @@ fn contains_call_prefix(src: &str, module: &str) -> bool {
 }
 
 /// `true` if `src` contains the exact `<prefix>(` call form with a clean
-/// left boundary (used for `fan.race(`, `fan.timeout(`, …).
+/// left boundary (used for `fan.min(`, `fan.timeout(`, …).
 fn contains_token_call(src: &str, prefix: &str) -> bool {
     let needle = format!("{prefix}(");
     let bytes = src.as_bytes();
@@ -232,6 +241,9 @@ mod tests {
         assert!(NamedDenylist::source_references_denied_surface("env.get(\"X\")").is_some());
         assert!(NamedDenylist::source_references_denied_surface("datetime.now()").is_some());
         assert!(NamedDenylist::source_references_denied_surface("random.int(0, 9)").is_some());
+        assert!(NamedDenylist::source_references_denied_surface("datetime.monotonic_ns()").is_some());
+        // the calendar over Int timestamps is deterministic and a valid seed
+        assert!(NamedDenylist::source_references_denied_surface("datetime.year(datetime.from_unix(0))").is_none());
     }
 
     #[test]
@@ -239,7 +251,7 @@ mod tests {
         assert!(NamedDenylist::source_references_denied_surface("list.shuffle(xs)").is_some());
         assert!(NamedDenylist::source_references_denied_surface("xs.sample(3)").is_some());
         assert!(NamedDenylist::source_references_denied_surface("fan.timeout(100, t)").is_some());
-        assert!(NamedDenylist::source_references_denied_surface("fan.race(a, b)").is_some());
+        assert!(NamedDenylist::source_references_denied_surface("fan.min(a, b)").is_some());
     }
 
     #[test]
@@ -269,7 +281,6 @@ mod tests {
         assert!(NamedDenylist::is_denied_function("list", "shuffle"));
         assert!(!NamedDenylist::is_denied_function("list", "map"));
         assert!(NamedDenylist::is_denied_function("bytes", "data_ptr"));
-        assert!(!NamedDenylist::is_denied_function("bytes", "heap_save"));
     }
 
     /// #3193: the nightly mutated `data_ptr(b("")) >= 0` into `>= 160` and
@@ -283,9 +294,6 @@ mod tests {
         assert!(NamedDenylist::source_references_denied_surface("buf.data_ptr()").is_some());
         // A longer identifier that merely contains the word stays allowed.
         assert!(NamedDenylist::source_references_denied_surface("let data_ptrs = 1").is_none());
-        // The contract-pinned checkpoint pair stays a valid seed.
-        assert!(NamedDenylist::source_references_denied_surface("let cp = mem.save()\nmem.restore(cp)").is_none());
-        assert!(NamedDenylist::source_references_denied_surface("bytes.heap_restore(bytes.heap_save())").is_none());
     }
 
     /// Every `index_unit = "address"` fn in the semantics manifest is in

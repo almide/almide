@@ -1,0 +1,15 @@
+fn spin(n: Int) -> Int = {
+  var i = 0
+  while i >= 0 {
+    i = i + n
+  }
+  i
+}
+fn tag(n: Int, t: Int) -> Int = n * 0 + t
+effect fn main() -> Unit = {
+  let a = fan.race(compute.ms(1)) {
+    spin(1)
+    tag(1, 2)
+  } ?? -1
+  println("D1 budgeted diverge: " + int.to_string(a))
+}

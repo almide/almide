@@ -476,7 +476,7 @@ fn try_fmt_fan_block_resugar(out: &mut String, callee: &Expr, args: &[Expr], dep
     }
     let [arg] = args else { return false };
     let ExprKind::List { elements } = &arg.kind else { return false };
-    let head = if field.as_str() == "__any_block" { "any" } else { "settle" };
+    let head = if field.as_str() == "__settle_block" { "settle" } else { "any" };
     w!(out, "fan.{head} {{\n");
     for el in elements {
         let body: &Expr = match &el.kind {
@@ -552,10 +552,15 @@ fn fmt_expr_block(out: &mut String, expr: &Expr, depth: usize) {
 }
 
 fn fmt_expr_fan(out: &mut String, expr: &Expr, depth: usize) {
-    let ExprKind::Fan { exprs, .. } = &expr.kind else { unreachable!() };
+    let ExprKind::Fan { exprs, names } = &expr.kind else { unreachable!() };
     out.push_str("fan {\n");
-    for e in exprs {
-        out.push_str(&ind(depth + 1)); fmt_expr(out, e, depth + 1); out.push('\n');
+    for (i, e) in exprs.iter().enumerate() {
+        out.push_str(&ind(depth + 1));
+        // The record form (#1388): one `name: expr` field per line.
+        if let Some(name) = names.get(i) {
+            w!(out, "{}: ", name.as_str());
+        }
+        fmt_expr(out, e, depth + 1); out.push('\n');
     }
     out.push_str(&ind(depth)); out.push('}');
 }
@@ -580,7 +585,7 @@ fn fmt_expr_fan_bounded(out: &mut String, expr: &Expr, depth: usize) {
 
 fn fmt_expr_fan_race(out: &mut String, expr: &Expr, depth: usize) {
     let ExprKind::FanRace { budget, arms } = &expr.kind else { unreachable!() };
-    out.push_str("fan.race");
+    out.push_str("fan.min");
     if let Some(b) = budget {
         out.push('(');
         fmt_expr(out, b, depth);
@@ -596,7 +601,7 @@ fn fmt_expr_fan_race(out: &mut String, expr: &Expr, depth: usize) {
 
 fn fmt_expr_fan_race_map(out: &mut String, expr: &Expr, depth: usize) {
     let ExprKind::FanRaceMap { budget, list, mapper } = &expr.kind else { unreachable!() };
-    out.push_str("fan.race(");
+    out.push_str("fan.min(");
     if let Some(b) = budget {
         fmt_expr(out, b, depth);
         out.push_str(", ");

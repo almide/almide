@@ -23,6 +23,16 @@
 //   tls            TLS handshake with "<url>" failed
 //   too-large      response from "<url>" is larger than <n> bytes (raise ALMIDE_HTTP_MAX_RESPONSE_BYTES; 0 = no limit)
 //   protocol       malformed or incomplete response from "<url>"
+//   status         HTTP <status>: <the body's first 500 chars> (the streaming calls)
+
+/// The head of a non-2xx refusal (`request_stream` and its streaming twins):
+/// `HTTP <status>`, which the caller follows with `: ` and the body. No reason
+/// phrase (owner ruling 2026-10-17): wasi:http hands a guest the status code
+/// and none, so a leg on it could not spell one, and C-367 keeps the phrase
+/// out of its comparison for the same cause.
+pub fn http_status_refusal(status: i64) -> String {
+    format!("HTTP {status}")
+}
 
 /// A transport failure's class. The request-side classes (invalid-url,
 /// refused-header) are rendered where they are found, from the pieces below.
@@ -84,6 +94,20 @@ pub const HTTP_FORBIDDEN_HEADERS: [&str; 9] = [
     "host",
     "http2-settings",
 ];
+
+/// The fields that frame the request body, which the client writes from the
+/// body it sends: a caller's copy (ASCII case-insensitive) is DROPPED on
+/// every lane, never sent and never refused — the Fetch standard's forbidden
+/// request header, and Go's net/http, which ignores a `Content-Length` in
+/// `Request.Header`. Sent as given, a length that disagrees with the body is
+/// a malformed request natively and `HTTP-request-body-size` under wasi:http.
+/// (`transfer-encoding` frames too, but is refused above, C-370.)
+pub const HTTP_FRAMING_HEADERS: [&str; 1] = ["content-length"];
+
+/// Whether `name` is one of `HTTP_FRAMING_HEADERS`.
+pub fn http_is_framing_header(name: &str) -> bool {
+    HTTP_FRAMING_HEADERS.iter().any(|f| f.eq_ignore_ascii_case(name))
+}
 
 /// The p3 shim's text for a host error it has no class for:
 /// head, the quoted URL, middle, the wasi:http case name, tail.

@@ -8,7 +8,8 @@
 //!
 //! Ops (the id rides a_len with a null a_ptr, except open):
 //!   53 open    url in a, the start frame in b → the id in the len half, or
-//!              err(message)
+//!              err(message); limit cells `classic` open plain
+//!              `request_stream`'s classic call
 //!   54 state   "1" once the call ended (the wall clock checked), else "0"
 //!   55 wait    blocks; the response as frames `[status, body, k1, v1, …]`
 //!              (wire order, repeats kept), or err(message)
@@ -58,8 +59,10 @@ fn cell(s: &str) -> String {
 }
 
 /// The start frame: method, body, total_ms, idle_ms, then header key/value
-/// cells until the frame ends.
-type StartFrame = (String, String, i64, i64, Vec<(String, String)>);
+/// cells until the frame ends. Both limit cells `classic` is plain
+/// `request_stream`'s call (the core's classic mode, no limits named);
+/// `None` here.
+type StartFrame = (String, String, Option<(i64, i64)>, Vec<(String, String)>);
 
 fn parse_start_frame(frame: &str) -> Result<StartFrame, String> {
     fn take(rest: &str) -> Result<(String, &str), String> {
@@ -84,7 +87,8 @@ fn parse_start_frame(frame: &str) -> Result<StartFrame, String> {
         headers.push((k, v));
         rest = r2;
     }
-    Ok((method, body, int(total)?, int(idle)?, headers))
+    let limits = if total == "classic" && idle == "classic" { None } else { Some((int(total)?, int(idle)?)) };
+    Ok((method, body, limits, headers))
 }
 
 /// Length-prefixed frames (u32 LE + bytes), the list-of-strings encoding.
@@ -100,11 +104,15 @@ fn frames(items: &[String]) -> Vec<u8> {
 /// Op 53: validate and start the call; its id, or the start error.
 pub(crate) fn open(calls: &Mutex<HttpCalls>, url: &str, frame: &[u8]) -> (i64, Vec<u8>) {
     let frame = String::from_utf8_lossy(frame);
-    let (method, body, total_ms, idle_ms, headers) = match parse_start_frame(&frame) {
+    let (method, body, limits, headers) = match parse_start_frame(&frame) {
         Ok(f) => f,
         Err(m) => return err_text(m),
     };
-    match core::http_call_spawn(&method, url, &body, headers, total_ms, idle_ms) {
+    let spawned = match limits {
+        Some((total_ms, idle_ms)) => core::http_call_spawn(&method, url, &body, headers, total_ms, idle_ms),
+        None => core::http_call_spawn_classic(&method, url, &body, headers),
+    };
+    match spawned {
         Ok(sh) => {
             let mut t = calls.lock().unwrap_or_else(|p| p.into_inner());
             t.next += 1;

@@ -222,7 +222,22 @@ impl Emitter<'_> {
 
     /// remove: the set minus one member (a plain copy when absent).
     fn lower_set_remove(&mut self, s: &IrExpr, x: &IrExpr) -> ArmResult {
+        if let Some(owned) = self.try_set_remove_owned(s, x)? {
+            return Ok(Some(owned));
+        }
         let (sh, _xh, eh, e) = self.set_scan(s, x, ArgMode::Borrow)?;
+        self.emit_set_remove_copy(sh, eh, e)?;
+        self.release_i32(); // eh
+        self.release_for(e);
+        self.release_i32(); // sh
+        Ok(Some(Lowered::owned(SliceTy::Set(self.types.intern(e)))))
+    }
+
+    /// The functional remove's result, left on the stack: a copy of set
+    /// `sh` without the member at `eh` (a whole copy when `eh` is 0),
+    /// holding its own member credits — the removed member's stays with
+    /// the input.
+    pub(crate) fn emit_set_remove_copy(&mut self, sh: u32, eh: u32, e: SliceTy) -> Result<(), EmitError> {
         let stride = e.slot_size() as i32;
         let ho = self.hold_i32()?;
         let hp = self.hold_i32()?;
@@ -264,10 +279,7 @@ impl Emitter<'_> {
         self.f.instructions().local_get(ho);
         self.release_i32();
         self.release_i32();
-        self.release_i32(); // eh
-        self.release_for(e);
-        self.release_i32(); // sh
-        Ok(Some(Lowered::owned(st)))
+        Ok(())
     }
 
     /// (a - b) ++ (b - a): the two filters are DISJOINT, so the
@@ -355,9 +367,16 @@ impl Emitter<'_> {
         };
         let b_ty = self.infer(body)?;
         let SliceTy::Scalar(_) = b_ty else { return unsup("set-map-elem-nonscalar") };
-        let scan = self.scan_helper(b_ty)?;
+        // An Int / String member probes the result through the key index
+        // and grows it in place (#3704 family: the scan made set.map O(n²));
+        // the result is a Set, so its own drop retires the index.
+        let indexed = crate::map_index::index_key(b_ty).is_some();
+        let scan = if indexed { self.keyed_find(b_ty)? } else { self.scan_helper(b_ty)? };
+        let append = if indexed { self.keyed_append(b_ty) } else { None };
+        let reserve = self.work.helper(crate::work::Helper::MapReserve);
         let stride = e.slot_size() as i32;
         let bstride = b_ty.slot_size() as i32;
+        let hold = self.hold_i32()?;
         let sh = self.hold_i32()?;
         self.f.instructions().local_set(sh);
         let hcur = self.hold_i32()?;
@@ -394,27 +413,32 @@ impl Emitter<'_> {
             self.emit_release_hold(hv, b_ty);
         }
         self.f.instructions().else_();
-        self.f.instructions().local_get(hacc).local_get(hv);
-        if !owned {
-            self.share_handle_top(b_ty);
+        if indexed {
+            let push = crate::list_search::KeyedPush { acc: hacc, old: hold, val: hv, ty: b_ty, share: !owned, append, reserve };
+            self.emit_keyed_push(push);
+        } else {
+            self.f.instructions().local_get(hacc).local_get(hv);
+            if !owned {
+                self.share_handle_top(b_ty);
+            }
+            if b_ty.val_type() == wasm_encoder::ValType::F64 {
+                self.f.instructions().i64_reinterpret_f64();
+            }
+            let push = match b_ty.slot_size() {
+                8 => F_LIST_PUSH_8,
+                _ => F_LIST_PUSH_4,
+            };
+            self.f.instructions().call(push).local_set(hacc);
         }
-        if b_ty.val_type() == wasm_encoder::ValType::F64 {
-            self.f.instructions().i64_reinterpret_f64();
-        }
-        let push = match b_ty.slot_size() {
-            8 => F_LIST_PUSH_8,
-            _ => F_LIST_PUSH_4,
-        };
         {
             let mut i = self.f.instructions();
-            i.call(push).local_set(hacc);
             i.end();
             i.local_get(hcur).i32_const(stride).i32_add().local_set(hcur);
             i.br(0).end().end();
             i.local_get(hacc);
         }
         self.release_for(b_ty);
-        for _ in 0..4 {
+        for _ in 0..5 {
             self.release_i32();
         }
         Ok(Some(Lowered::owned(SliceTy::Set(self.types.intern(b_ty)))))
@@ -509,6 +533,9 @@ impl Emitter<'_> {
                 Ok(Some(Lowered::scalar(BOOL)))
             }
             ("insert", [s, x]) => {
+                if let Some(owned) = self.try_set_insert_owned(s, x)? {
+                    return Ok(Some(owned));
+                }
                 let (sh, xh, eh, e) = self.set_scan(s, x, ArgMode::Retain)?;
                 self.f
                     .instructions()
@@ -552,9 +579,10 @@ impl Emitter<'_> {
                 let Some(b) = slice_ty_of(&init.ty, self.types) else {
                     return unsup(&format!("set-fold-acc:{}", ty_name(&init.ty)));
                 };
-                self.lower_arg(init, Some(b), ArgMode::Retain)?;
-                self.f.instructions().local_set(acc_p);
-                let e = match self.lower_arg(s, None, ArgMode::Borrow)? {
+                // The source before the init, as native evaluates them
+                // (#2045); an init that runs code keeps the source alive.
+                let (got, keep) = self.lower_fold_source(s, init)?;
+                let e = match got {
                     SliceTy::Set(h) => self.types.el(h),
                     other => return unsup(&format!("set-fold-of:{other:?}")),
                 };
@@ -562,9 +590,11 @@ impl Emitter<'_> {
                 let bh = self.hold_i32()?;
                 let cur = self.hold_i32()?;
                 let end = self.hold_i32()?;
+                self.f.instructions().local_set(bh);
+                self.lower_arg(init, Some(b), ArgMode::Retain)?;
+                self.f.instructions().local_set(acc_p);
                 {
                     let mut i = self.f.instructions();
-                    i.local_set(bh);
                     i.local_get(bh)
                         .i32_const(almide_layout::PAYLOAD as i32)
                         .i32_add()
@@ -601,6 +631,7 @@ impl Emitter<'_> {
                     i.end();
                     i.local_get(acc_p);
                 }
+                self.release_fold_source(bh, keep.then_some(got));
                 self.release_i32();
                 self.release_i32();
                 self.release_i32();
@@ -619,12 +650,20 @@ impl Emitter<'_> {
                 ) {
                     return unsup("set-elem-nonscalar");
                 }
+                // The result is fresh and ours alone, so it grows in place
+                // through `$map_reserve` (amortized) and dedups through the
+                // key index its append hook keeps — the `map.from_list`
+                // shape (#3544). The old body scanned the result linearly
+                // and copy-grew it per member: O(n²) on wasm (#3552).
                 let stride = e.slot_size();
-                let scan = self.scan_helper(e)?;
+                let scan = self.keyed_find(e)?;
+                let append = self.keyed_append(e);
+                let reserve = self.work.helper(crate::work::Helper::MapReserve);
                 let bh = self.hold_i32()?;
                 let ch = self.hold_i32()?;
                 let ih = self.hold_i32()?;
                 let rh = self.hold_i32()?;
+                let oh = self.hold_i32()?;
                 let xh = self.hold_for(e)?;
                 self.f.instructions().local_tee(bh);
                 self.f
@@ -659,25 +698,40 @@ impl Emitter<'_> {
                     .call(scan)
                     .i32_eqz()
                     .if_(BlockType::Empty);
-                let (len_h, nh) = self.emit_copy_grow(rh, stride)?;
+                // room for one member (in place under class slack, else the
+                // doubled block), then the member at the old end
                 self.f
                     .instructions()
-                    .local_get(nh)
+                    .local_get(rh)
+                    .local_set(oh)
+                    .local_get(rh)
+                    .i32_const(stride as i32)
+                    .call(reserve)
+                    .local_tee(rh)
                     .i32_const(almide_layout::PAYLOAD as i32)
                     .i32_add()
-                    .local_get(len_h)
+                    .local_get(rh)
+                    .i32_load(len_memarg())
                     .i32_add()
                     .local_get(xh);
                 // The member handle copied into the set takes +1: the set
                 // releases it through its typed drop (#2010 Map stage b).
                 self.share_handle_top(e);
                 self.store_ty_slot_raw(e);
-                // the outgrown block is ours alone and its members moved
-                self.f.instructions().local_get(rh).call(F_FREE);
-                self.f.instructions().local_get(nh).local_set(rh);
-                self.release_i32();
-                self.release_i32();
-                self.f.instructions().end();
+                {
+                    let mut i = self.f.instructions();
+                    i.local_get(rh)
+                        .local_get(rh)
+                        .i32_load(len_memarg())
+                        .i32_const(stride as i32)
+                        .i32_add()
+                        .i32_store(len_memarg());
+                    // the index follows the member (and the block, if it moved)
+                    if let Some(append) = append {
+                        i.local_get(oh).local_get(rh).i32_const(stride as i32).i32_const(0).call(append).drop();
+                    }
+                    i.end();
+                }
                 self.f
                     .instructions()
                     .local_get(ih)
@@ -689,6 +743,7 @@ impl Emitter<'_> {
                     .end();
                 self.f.instructions().local_get(rh);
                 self.release_for(e);
+                self.release_i32(); // oh
                 self.release_i32();
                 self.release_i32();
                 self.release_i32();

@@ -3,7 +3,7 @@
 # definitions in crates/almide-wasm/src, `<mod>.<fn>[_shape]` rows in
 # self_host_registry.rs), re-derived by scripts/lib/impl-count-enumerate.py.
 # Gated by tools/almide-gates impl-count: a total may not grow without its row.
-# holes = 858  implementations = 1998
+# holes = 854  implementations = 1988
 [[hole]]
 module   = "base64"
 name     = "encode"
@@ -351,9 +351,9 @@ total    = 1
 module   = "bytes"
 name     = "copy_within"
 native   = 1
-emitter  = 0
+emitter  = 1
 selfhost = 0
-total    = 1
+total    = 2
 [[hole]]
 module   = "bytes"
 name     = "read_bool"
@@ -966,20 +966,6 @@ total    = 1
 [[hole]]
 module   = "bytes"
 name     = "xor"
-native   = 1
-emitter  = 0
-selfhost = 0
-total    = 1
-[[hole]]
-module   = "bytes"
-name     = "heap_save"
-native   = 1
-emitter  = 0
-selfhost = 0
-total    = 1
-[[hole]]
-module   = "bytes"
-name     = "heap_restore"
 native   = 1
 emitter  = 0
 selfhost = 0
@@ -1948,43 +1934,43 @@ module   = "http"
 name     = "get"
 native   = 1
 emitter  = 0
-selfhost = 3
-total    = 4
+selfhost = 4
+total    = 5
 [[hole]]
 module   = "http"
 name     = "post"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "http"
 name     = "put"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "http"
 name     = "patch"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "http"
 name     = "delete"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "http"
 name     = "request"
 native   = 1
 emitter  = 0
-selfhost = 3
-total    = 4
+selfhost = 5
+total    = 6
 [[hole]]
 module   = "http"
 name     = "get_status"
@@ -2004,43 +1990,43 @@ module   = "http"
 name     = "get_response"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "http"
 name     = "post_response"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "http"
 name     = "put_response"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "http"
 name     = "patch_response"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "http"
 name     = "delete_response"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "http"
 name     = "request_response"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "http"
 name     = "get_bytes"
@@ -2060,22 +2046,8 @@ module   = "http"
 name     = "request_stream"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
-[[hole]]
-module   = "http"
-name     = "openai_streaming_call"
-native   = 1
-emitter  = 0
-selfhost = 0
-total    = 1
-[[hole]]
-module   = "http"
-name     = "anthropic_streaming_call"
-native   = 1
-emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "http"
 name     = "__call_start"
@@ -2114,20 +2086,6 @@ total    = 2
 [[hole]]
 module   = "http"
 name     = "__request_stream_limited"
-native   = 1
-emitter  = 0
-selfhost = 0
-total    = 1
-[[hole]]
-module   = "http"
-name     = "__openai_streaming_limited"
-native   = 1
-emitter  = 0
-selfhost = 0
-total    = 1
-[[hole]]
-module   = "http"
-name     = "__anthropic_streaming_limited"
 native   = 1
 emitter  = 0
 selfhost = 0
@@ -2233,6 +2191,13 @@ total    = 0
 [[hole]]
 module   = "http"
 name     = "__http_framed_bytes"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "http"
+name     = "__http_framed_response"
 native   = 0
 emitter  = 0
 selfhost = 0
@@ -2774,8 +2739,8 @@ module   = "json"
 name     = "to_map"
 native   = 1
 emitter  = 1
-selfhost = 0
-total    = 2
+selfhost = 1
+total    = 3
 [[hole]]
 module   = "list"
 name     = "len"
@@ -3583,53 +3548,11 @@ selfhost = 1
 total    = 3
 [[hole]]
 module   = "matrix"
-name     = "from_q1_0_bytes"
-native   = 1
-emitter  = 0
-selfhost = 1
-total    = 2
-[[hole]]
-module   = "matrix"
 name     = "select_rows"
 native   = 1
 emitter  = 1
-selfhost = 3
-total    = 5
-[[hole]]
-module   = "matrix"
-name     = "linear_q1_0_row_no_bias"
-native   = 1
-emitter  = 0
-selfhost = 0
-total    = 1
-[[hole]]
-module   = "matrix"
-name     = "silu_mul"
-native   = 1
-emitter  = 0
 selfhost = 1
-total    = 2
-[[hole]]
-module   = "matrix"
-name     = "select_rows_q1_0"
-native   = 1
-emitter  = 0
-selfhost = 1
-total    = 2
-[[hole]]
-module   = "matrix"
-name     = "rope_rotate"
-native   = 1
-emitter  = 0
-selfhost = 3
-total    = 4
-[[hole]]
-module   = "matrix"
-name     = "rope_rotate_at"
-native   = 1
-emitter  = 0
-selfhost = 1
-total    = 2
+total    = 3
 [[hole]]
 module   = "matrix"
 name     = "append_rows"
@@ -3637,13 +3560,6 @@ native   = 1
 emitter  = 0
 selfhost = 1
 total    = 2
-[[hole]]
-module   = "matrix"
-name     = "qwen3_block_q1_0_kv"
-native   = 1
-emitter  = 0
-selfhost = 0
-total    = 1
 [[hole]]
 module   = "matrix"
 name     = "linear_f32_row_no_bias"
@@ -3658,41 +3574,6 @@ native   = 1
 emitter  = 0
 selfhost = 1
 total    = 2
-[[hole]]
-module   = "matrix"
-name     = "rope_rotate_neox_at"
-native   = 1
-emitter  = 0
-selfhost = 1
-total    = 2
-[[hole]]
-module   = "matrix"
-name     = "qwen3_block_f32_kv"
-native   = 1
-emitter  = 0
-selfhost = 0
-total    = 1
-[[hole]]
-module   = "matrix"
-name     = "linear_q8_0_row_no_bias"
-native   = 1
-emitter  = 0
-selfhost = 0
-total    = 1
-[[hole]]
-module   = "matrix"
-name     = "select_rows_q8_0_dq"
-native   = 1
-emitter  = 0
-selfhost = 1
-total    = 2
-[[hole]]
-module   = "matrix"
-name     = "qwen3_block_q8_0_kv"
-native   = 1
-emitter  = 0
-selfhost = 0
-total    = 1
 [[hole]]
 module   = "matrix"
 name     = "to_lists"
@@ -3746,9 +3627,9 @@ total    = 2
 module   = "matrix"
 name     = "fma"
 native   = 1
-emitter  = 0
+emitter  = 1
 selfhost = 1
-total    = 2
+total    = 3
 [[hole]]
 module   = "matrix"
 name     = "fma3"
@@ -3835,76 +3716,6 @@ selfhost = 1
 total    = 2
 [[hole]]
 module   = "matrix"
-name     = "layer_norm_rows"
-native   = 1
-emitter  = 0
-selfhost = 1
-total    = 2
-[[hole]]
-module   = "matrix"
-name     = "rms_norm_rows"
-native   = 1
-emitter  = 0
-selfhost = 1
-total    = 2
-[[hole]]
-module   = "matrix"
-name     = "swiglu_gate"
-native   = 1
-emitter  = 0
-selfhost = 1
-total    = 2
-[[hole]]
-module   = "matrix"
-name     = "softmax_rows"
-native   = 1
-emitter  = 0
-selfhost = 1
-total    = 2
-[[hole]]
-module   = "matrix"
-name     = "gelu"
-native   = 1
-emitter  = 0
-selfhost = 1
-total    = 2
-[[hole]]
-module   = "matrix"
-name     = "fused_gemm_bias_scale_gelu"
-native   = 1
-emitter  = 0
-selfhost = 1
-total    = 2
-[[hole]]
-module   = "matrix"
-name     = "attention_weights"
-native   = 1
-emitter  = 0
-selfhost = 1
-total    = 2
-[[hole]]
-module   = "matrix"
-name     = "scaled_dot_product_attention"
-native   = 1
-emitter  = 0
-selfhost = 1
-total    = 2
-[[hole]]
-module   = "matrix"
-name     = "linear_row_gelu"
-native   = 1
-emitter  = 0
-selfhost = 1
-total    = 2
-[[hole]]
-module   = "matrix"
-name     = "pre_norm_linear"
-native   = 1
-emitter  = 0
-selfhost = 1
-total    = 2
-[[hole]]
-module   = "matrix"
 name     = "split_cols_even"
 native   = 1
 emitter  = 0
@@ -3926,32 +3737,11 @@ selfhost = 1
 total    = 2
 [[hole]]
 module   = "matrix"
-name     = "causal_mask_add"
-native   = 1
-emitter  = 0
-selfhost = 1
-total    = 2
-[[hole]]
-module   = "matrix"
-name     = "multi_head_attention"
-native   = 1
-emitter  = 0
-selfhost = 1
-total    = 2
-[[hole]]
-module   = "matrix"
-name     = "masked_multi_head_attention"
-native   = 1
-emitter  = 0
-selfhost = 1
-total    = 2
-[[hole]]
-module   = "matrix"
 name     = "linear_row"
 native   = 1
 emitter  = 0
-selfhost = 3
-total    = 4
+selfhost = 2
+total    = 3
 [[hole]]
 module   = "matrix"
 name     = "linear_row_no_bias"
@@ -4044,194 +3834,369 @@ emitter  = 0
 selfhost = 1
 total    = 2
 [[hole]]
-module   = "mem"
-name     = "save"
-native   = 1
-emitter  = 0
-selfhost = 1
-total    = 2
-[[hole]]
-module   = "mem"
-name     = "restore"
-native   = 1
-emitter  = 0
-selfhost = 1
-total    = 2
-[[hole]]
 module   = "net"
 name     = "tcp_connect"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "tcp_read"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 3
+total    = 4
 [[hole]]
 module   = "net"
 name     = "tcp_write"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "tcp_read_exact"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "tcp_close"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 2
+total    = 3
 [[hole]]
 module   = "net"
 name     = "tcp_is_open"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "tcp_read_timeout"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "tcp_set_timeout"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "tcp_available"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "tcp_listen"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "net"
+name     = "tcp_local_port"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "tcp_accept"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "tcp_close_listener"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "unix_connect"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "unix_listen"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "unix_accept"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "unix_send"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "unix_recv"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "unix_take_fds"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "unix_poll"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "unix_wait"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "unix_close"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "shm_create"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "shm_resize"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "shm_write"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "net"
 name     = "shm_read"
 native   = 1
 emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "net"
+name     = "__net_listen"
+native   = 0
+emitter  = 0
 selfhost = 0
-total    = 1
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__net_accept"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__net_connect"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__net_read"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__net_read_exact"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__net_read_timeout"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__net_write"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__net_available"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__net_set_timeout"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__net_close"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__net_close_listener"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__net_local_port"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__net_is_open"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__unix_connect"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__unix_listen"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__unix_accept"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__unix_send"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__unix_recv"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__unix_take_fds"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__unix_poll"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__unix_wait"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__unix_close"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__shm_create"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__shm_resize"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__shm_write"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "net"
+name     = "__shm_read"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
 [[hole]]
 module   = "option"
 name     = "map"
@@ -4944,8 +4909,8 @@ module   = "process"
 name     = "stdin_lines"
 native   = 1
 emitter  = 0
-selfhost = 0
-total    = 1
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "process"
 name     = "exec_in"
@@ -5461,9 +5426,9 @@ total    = 3
 module   = "string"
 name     = "ends_with"
 native   = 1
-emitter  = 0
+emitter  = 1
 selfhost = 1
-total    = 2
+total    = 3
 [[hole]]
 module   = "string"
 name     = "slice"
@@ -5753,7 +5718,14 @@ selfhost = 1
 total    = 3
 [[hole]]
 module   = "testing"
-name     = "assert_throws"
+name     = "__abort_site_run"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "testing"
+name     = "__abort_site_selected"
 native   = 1
 emitter  = 0
 selfhost = 0

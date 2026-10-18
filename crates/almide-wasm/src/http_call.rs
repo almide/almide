@@ -2,7 +2,8 @@
 //! handle the embedded host serves with the native call core
 //! (crates/almide-rt-core/src/http_call_core.rs). stdlib/http_call.almd
 //! declares the leaves bodyless (`= _`); they intercept BEFORE resolution,
-//! as the http_framed leaves do.
+//! as the http_framed leaves do. `lower_host_leaf` is the one entry for every
+//! such bodyless leaf (http_framed, http.serve, subprocess, http call).
 //!
 //! `HttpCall` is this emitter's own one-slot block (ty.rs `HTTP_CALL_FIELD`)
 //! holding the host call id; its drop glue (`Helper::DropHttpCall`) sends op
@@ -20,6 +21,73 @@ use crate::fs_meta::{
 use crate::*;
 
 impl Emitter<'_> {
+    /// A bodyless self-host leaf (`= _`) lowered as a host op, or
+    /// `Ok(None)` when `name` is not one. They carry no table body, so they
+    /// intercept BEFORE resolution (calls.rs), and the caller marks the call
+    /// OWNED: every answer here is built fresh at rc 1 by `fs_result_*`
+    /// (#3623 — classed borrowed for want of a table entry, the caller took
+    /// a +1 on it and the Result block with its payload outlived every
+    /// call). The leaf runs inside an `arm_scope`: its operands are
+    /// `ArgMode::Borrow`, so a temporary handed straight in (the
+    /// `__http_frame(…)` frame, the `__proc_argv(…)` cells) is released once
+    /// the answer is on the stack — without the scope it stayed parked and
+    /// was never released.
+    pub(crate) fn lower_host_leaf(&mut self, name: &str, args: &[IrExpr]) -> Result<Option<SliceTy>, EmitError> {
+        self.arm_scope(|em| em.lower_host_leaf_op(name, args))
+    }
+
+    fn lower_host_leaf_op(&mut self, name: &str, args: &[IrExpr]) -> Result<Option<SliceTy>, EmitError> {
+        use crate::fs_meta::{
+            OP_HTTP_FRAMED_BYTES, OP_HTTP_FRAMED_RESPONSE, OP_HTTP_FRAMED_STATUS, OP_HTTP_FRAMED_TEXT, OP_HTTP_SERVE_BIND, OP_HTTP_SERVE_NEXT,
+            OP_HTTP_SERVE_REPLY, PROC_LEAVES,
+        };
+        // The http_framed leaves (#1710 increment 3): url in a, the
+        // method/body/headers frame in b — the intra-module twins of the
+        // host_env http arms.
+        let framed = match name {
+            "__http_framed_text" => Some(OP_HTTP_FRAMED_TEXT),
+            "__http_framed_status" => Some(OP_HTTP_FRAMED_STATUS),
+            "__http_framed_bytes" => Some(OP_HTTP_FRAMED_BYTES),
+            "__http_framed_response" => Some(OP_HTTP_FRAMED_RESPONSE),
+            _ => None,
+        };
+        // The subprocess leaves (#2589, ADR-0025): two text operands in
+        // a/b, a Result[String, String] answer.
+        let proc = PROC_LEAVES.iter().find(|(l, _)| *l == name).map(|&(_, op)| op);
+        if let Some(op) = framed.or(proc) {
+            let [a, b] = args else { return unsup("host-leaf-arity") };
+            self.fs_call_str2(a, b, op)?;
+            let t = if op == OP_HTTP_FRAMED_BYTES { self.fs_result_bytes()? } else { self.fs_result_string()? };
+            return Ok(Some(t));
+        }
+        // The http.serve loop's leaves (#2650): bind (port text), next (the
+        // request as a List[String] of frames), reply (the response's cells
+        // in a).
+        let t = match (name, args) {
+            ("__http_serve_bind", [p]) => {
+                self.fs_call_1(p, OP_HTTP_SERVE_BIND)?;
+                self.fs_result_unit()?
+            }
+            ("__http_serve_next", []) => {
+                self.fs_call_0(OP_HTTP_SERVE_NEXT)?;
+                self.fs_result_string_list()?
+            }
+            ("__http_serve_reply", [r]) => {
+                self.fs_call_1(r, OP_HTTP_SERVE_REPLY)?;
+                self.fs_result_unit()?
+            }
+            // The http call handle's leaves (#2633), then the tcp family's
+            // (#3620).
+            _ => {
+                return match self.lower_http_call_leaf(name, args)? {
+                    Some(t) => Ok(Some(t)),
+                    None => self.lower_net_leaf(name, args),
+                };
+            }
+        };
+        Ok(Some(t))
+    }
+
     /// The `HttpCall` slice type and its id slot's payload offset.
     fn http_call_ty(&self) -> Result<(SliceTy, u32), EmitError> {
         let Some(t) = crate::ty::slice_ty_of(&almide_types::types::Ty::Named(almide_base::intern::sym("HttpCall"), vec![]), self.types)
@@ -34,7 +102,7 @@ impl Emitter<'_> {
     }
 
     /// A `__http_call_*` leaf, or `Ok(None)` when `name` is not one.
-    pub(crate) fn lower_http_call_leaf(&mut self, name: &str, args: &[IrExpr]) -> Result<Option<SliceTy>, EmitError> {
+    fn lower_http_call_leaf(&mut self, name: &str, args: &[IrExpr]) -> Result<Option<SliceTy>, EmitError> {
         let op = match name {
             "__http_call_open" => return self.lower_http_call_open(args).map(Some),
             "__http_call_state" => OP_HTTP_CALL_STATE,

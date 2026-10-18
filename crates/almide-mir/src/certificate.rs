@@ -497,7 +497,9 @@ pub fn manifest_caps(allow: &[String]) -> Vec<Capability> {
                 Capability::FsWrite,
             ]),
             "Rand" => caps.push(Capability::Entropy),
-            "Env" => caps.push(Capability::CliArgs),
+            // The frontend classifies the `process` module as Env, so starting a
+            // child (Process, #3792) rides the same manifest name.
+            "Env" => caps.extend([Capability::CliArgs, Capability::Process]),
             "Time" => caps.push(Capability::Clock),
             "Net" => caps.push(Capability::Net),
             _ => {}

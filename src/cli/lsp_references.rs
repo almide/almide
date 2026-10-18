@@ -333,7 +333,7 @@ impl<'a> OccWalker<'a> {
     fn walk_aggregate(&mut self, expr: &crate::ast::Expr) {
         use crate::ast::ExprKind as E;
         match &expr.kind {
-            E::List { elements } | E::Tuple { elements } | E::Fan { exprs: elements } | E::FanSettle { arms: elements } => {
+            E::List { elements } | E::Tuple { elements } | E::Fan { exprs: elements, .. } | E::FanSettle { arms: elements } => {
                 for e in elements { self.walk_expr(e); }
             }
             E::MapLiteral { entries } => for (k, v) in entries { self.walk_expr(k); self.walk_expr(v); },

@@ -40,7 +40,6 @@ mod cargo_ice;
 mod cargo_toml;
 mod crate_inputs;
 mod native_target;
-mod native_legacy_aliases;
 mod js_host;
 mod wasm_debug;
 
@@ -233,13 +232,35 @@ fn incremental_cache_dir() -> std::path::PathBuf {
 /// (`run.rs`), which had identical copies of this try/fallback logic gated
 /// behind their own (different) `native_verified` conditions.
 ///
-/// `uses_metered_prims` is read from the program's IR
-/// (`almide_ir::runtime_use::uses_metered_prims`), never from `rs_code`: a
-/// user string literal is emitted into that text verbatim, and
-/// `println("almide_rt_prim_budget_x")` was refused here (#3486).
-pub(crate) fn render_v1_native_or_fallback(file: &str, rs_code: String, uses_metered_prims: bool) -> String {
+/// `metered` is the linked IR of a program that calls the meter prims
+/// (`almide_ir::runtime_use::uses_metered_prims`, read from the IR, never
+/// from `rs_code`: a user string literal is emitted into that text verbatim,
+/// and `println("almide_rt_prim_budget_x")` was refused here, #3486).
+pub(crate) fn render_v1_native_or_fallback(
+    file: &str,
+    rs_code: String,
+    metered: Option<almide::ir::IrProgram>,
+    opts: &crate::codegen::CodegenOptions,
+) -> String {
     let source_text = almide::source_overlay::read_to_string(file).unwrap_or_default();
+    // ALMIDE_FORCE_METER_CODEGEN=1 meters the program in the standard
+    // codegen even when the whole program renders — the differential that
+    // holds the codegen meter to the v1 render (tests/fan_region_floor_test.rs).
+    let metered = match metered {
+        Some(ir) if almide_base::env::flag("ALMIDE_FORCE_METER_CODEGEN") => {
+            return meter_in_codegen(ir, opts, "forced by ALMIDE_FORCE_METER_CODEGEN");
+        }
+        other => other,
+    };
+    // ALMIDE_FORCE_METER_SPLICE=1 takes the region-splice route even when the
+    // whole program renders — the differential that holds the two routes'
+    // spends equal (tests/fan_meter_splice_test.rs).
+    let force_splice = metered.is_some() && almide_base::env::flag("ALMIDE_FORCE_METER_SPLICE");
     match almide_mir::pipeline::try_render_rust_source(&source_text) {
+        Ok(_) if force_splice => {
+            let ir = metered.expect("force_splice implies a metered program");
+            link_metered_regions(&source_text, rs_code, "forced by ALMIDE_FORCE_METER_SPLICE", ir, opts)
+        }
         Ok(v1_code) => {
             if almide_base::env::flag("ALMIDE_VERIFIED_DEBUG") {
                 err(&format!("native: v1 trust-spine render"));
@@ -257,16 +278,12 @@ pub(crate) fn render_v1_native_or_fallback(file: &str, rs_code: String, uses_met
                 ));
                 std::process::exit(1);
             }
-            // Budget semantics (fan.bounded / fan.race) exist only on the v1
-            // trust spine — the v0 pipeline emits calls to budget runtime fns
-            // that do not exist, so the fallback would die later as an opaque
-            // rustc E0425 in generated code. Refuse with the wall reason
-            // instead (same honesty rule as the probe above).
-            if uses_metered_prims {
-                err(&format!(
-                    "error: fan.bounded / fan.race require the v1 native render, but it walled\n  reason: {e}\n  hint: budgets are metered on the trust spine only; simplify the program to the v1 subset or build for --target wasm"
-                ));
-                std::process::exit(1);
+            // Budget semantics (fan.bounded / fan.race / fan.timeout): the
+            // program walled on the whole-program v1 render, so the standard
+            // codegen builds it with the v1-rendered regions linked in
+            // (#3669), or meters the regions itself (#3673).
+            if let Some(ir) = metered {
+                return link_metered_regions(&source_text, rs_code, &e.to_string(), ir, opts);
             }
             // #931 made this note loud because verified was an explicit
             // opt-in; #1074 makes it opt-in again because verified is now the
@@ -283,6 +300,43 @@ pub(crate) fn render_v1_native_or_fallback(file: &str, rs_code: String, uses_met
             rs_code
         }
     }
+}
+
+fn verbose() -> bool {
+    almide_base::env::flag("ALMIDE_VERBOSE") || almide_base::env::flag("ALMIDE_VERIFIED_DEBUG")
+}
+
+/// #3669: link the v1-rendered metered regions of `source_text` into the
+/// standard codegen's `rs_code` (whose region fns already delegate to them —
+/// `MeteredRegionDelegatePass`). `whole_wall` is why the whole-program render
+/// was not used. When a region itself is outside the v1 subset, the program
+/// `metered` is built again with the codegen's own meter (#3673) — never
+/// without one, which would change which arm wins.
+pub(crate) fn link_metered_regions(
+    source_text: &str,
+    rs_code: String,
+    whole_wall: &str,
+    metered: almide::ir::IrProgram,
+    opts: &crate::codegen::CodegenOptions,
+) -> String {
+    match almide_mir::pipeline::try_render_metered_splice(source_text) {
+        Ok(splice) => {
+            if verbose() {
+                err(&format!("note: metered program built via the standard codegen, its regions rendered by the trust spine\n  reason: {whole_wall}"));
+            }
+            rs_code + &splice
+        }
+        Err(e) => meter_in_codegen(metered, opts, &format!("a region is outside the v1 native render: {e}")),
+    }
+}
+
+/// #3673: build the metered program with the standard codegen's own
+/// deterministic meter (`MeterChargePass` + its runtime).
+fn meter_in_codegen(metered: almide::ir::IrProgram, opts: &crate::codegen::CodegenOptions, why: &str) -> String {
+    if verbose() {
+        err(&format!("note: metered program built via the standard codegen, its regions metered by the standard codegen\n  reason: {why}"));
+    }
+    crate::codegen_metered(metered, opts)
 }
 
 /// Resolve `[dependencies]` search paths from `almide.toml` in the current

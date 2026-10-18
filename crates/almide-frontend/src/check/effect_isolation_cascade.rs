@@ -93,6 +93,11 @@ impl Checker {
         IsolationFrame { inferring: std::mem::replace(&mut state.inferring, expr.span), consumed }
     }
 
+    /// The span of the innermost expression being inferred.
+    pub(crate) fn inferring_span(&self) -> Option<ast::Span> {
+        self.isolation_cascade.inferring
+    }
+
     /// `report_effect_isolation` just pushed diagnostic `diag` for a call of
     /// `callee` outside any lambda or metered region.
     pub(crate) fn defer_isolation_hint(&mut self, diag: usize, callee: &str) {

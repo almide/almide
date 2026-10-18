@@ -209,10 +209,15 @@ fn range_ops_emit_a_borrow_of_a_used_afterwards_source() {
 // at most and the nested-list ops (`window`, `windows`, `chunk`) copy elements
 // into several results anyway: neither gains from a move, so neither has one.
 
-use almide_codegen::owned_source::OWNED_SOURCE_TWINS;
+use almide_codegen::owned_source::owned_twins;
 
 /// Ops with a twin beyond the sub-list rule.
 const TWIN_EXTRA: &[&str] = &["find"];
+
+/// The point edits (#3533): not range ops, but `@reuse` with a twin that
+/// writes into the source it owns. Their values and cost are pinned by
+/// list_point_edit_reuse_test.rs; here they take the same twin-shape rules.
+const POINT_EDITS: &[&str] = &["set", "swap"];
 
 /// The declared return type of `list.<op>` in `stdlib/list.almd`.
 fn stdlib_return_type(op: &str) -> String {
@@ -226,7 +231,7 @@ fn stdlib_return_type(op: &str) -> String {
 #[test]
 fn every_sub_list_range_op_has_an_owned_twin_that_takes_the_source_by_value() {
     // The map twins (`almide_rt_map_*`) are gated by map_owned_twin_test.rs.
-    let list_twins: Vec<&(&str, &str)> = OWNED_SOURCE_TWINS.iter()
+    let list_twins: Vec<(&str, &str)> = owned_twins()
         .filter(|(b, _)| b.starts_with("almide_rt_list_"))
         .collect();
     let twin_ops: Vec<&str> = list_twins.iter()
@@ -245,7 +250,10 @@ fn every_sub_list_range_op_has_an_owned_twin_that_takes_the_source_by_value() {
     for (borrowed, owned) in list_twins {
         assert_eq!(*owned, format!("{borrowed}_owned"), "the twin of {borrowed} is named `{borrowed}_owned`");
         let op = borrowed.strip_prefix("almide_rt_list_").unwrap();
-        assert!(RANGE_OPS.iter().any(|(o, _)| *o == op), "{borrowed} has a twin but is not a RANGE op");
+        assert!(
+            RANGE_OPS.iter().any(|(o, _)| *o == op) || POINT_EDITS.contains(&op),
+            "{borrowed} has a twin but is neither a RANGE op nor a point edit"
+        );
         let head = format!("pub fn {owned}");
         let line = src.lines().find(|l| l.starts_with(&head) && l[head.len()..].starts_with(['<', '(']))
             .unwrap_or_else(|| panic!("runtime/rs/src/list.rs has no `{head}`"));
@@ -280,8 +288,10 @@ fn last_use_program() -> String {
      effect fn main() -> Unit = {\n\
      \x20 let s_take = mk()\n  let s_drop = mk()\n  let s_take_while = mk()\n  let s_drop_while = mk()\n\
      \x20 let s_find = mk()\n  let s_slice = mk()\n  let s_take_end = mk()\n  let s_drop_end = mk()\n\
+     \x20 let s_set = mk()\n  let s_swap = mk()\n\
      \x20 let n = list.len(s_take) + list.len(s_drop) + list.len(s_take_while) + list.len(s_drop_while)\n\
      \x20   + list.len(s_find) + list.len(s_slice) + list.len(s_take_end) + list.len(s_drop_end)\n\
+     \x20   + list.len(s_set) + list.len(s_swap)\n\
      \x20 let r = [\n\
      \x20   list.len(list.take(s_take, 2)),\n\
      \x20   list.len(list.drop(s_drop, 1)),\n\
@@ -291,6 +301,8 @@ fn last_use_program() -> String {
      \x20   list.len(list.slice(s_slice, 1, 3)),\n\
      \x20   list.len(list.take_end(s_take_end, 3)),\n\
      \x20   list.len(list.drop_end(s_drop_end, 3)),\n\
+     \x20   list.len(list.set(s_set, 0, \"z\")),\n\
+     \x20   list.len(list.swap(s_swap, 0, 1)),\n\
      \x20 ]\n\
      \x20 let both = mk()\n\
      \x20 let kept = list.take(both, 1)\n\
@@ -322,7 +334,7 @@ fn fn_body<'a>(rust: &'a str, name: &str) -> &'a str {
 fn a_range_op_at_its_sources_last_use_moves_it_into_the_owned_twin() {
     let (_dir, src, rust) = emit_rust("last_use.almd", &last_use_program());
     let main = fn_body(&rust, "__almide_main");
-    for (_, owned) in OWNED_SOURCE_TWINS.iter().filter(|(b, _)| b.starts_with("almide_rt_list_")) {
+    for (_, owned) in owned_twins().filter(|(b, _)| b.starts_with("almide_rt_list_")) {
         let op = owned.strip_prefix("almide_rt_list_").unwrap().strip_suffix("_owned").unwrap();
         let moved = format!("{owned}(s_{op}");
         // `find` with a lambda may fuse into an iterator chain that consumes
@@ -351,7 +363,56 @@ fn a_range_op_at_its_sources_last_use_moves_it_into_the_owned_twin() {
     let run = Command::new(almide()).args(["run", src.to_str().unwrap()]).output().unwrap();
     assert_eq!(
         String::from_utf8_lossy(&run.stdout).lines().collect::<Vec<_>>(),
-        vec!["2 3 2 2 1 2 3 1", "32 a abc 4 4"],
+        vec!["2 3 2 2 1 2 3 1 4 4", "40 a abc 4 4"],
+        "native run disagrees:\n{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+}
+
+/// #3519: a later argument that reads the source only as a scalar
+/// (`list.len(xs)`, `list.is_empty(xs)`) is bound first, so a source dead
+/// after the call still moves into the owned twin — in a loop param (`walk`,
+/// the issue's 7× head/tail recursion) and in a local (`dead`). `kept` reads
+/// its source again after the call, so it must still borrow; `other` reads it
+/// in a later argument through a non-scalar op, which is not bound early and
+/// keeps today's borrow.
+fn scalar_later_arg_program() -> String {
+    "fn walk(xs: List[List[Int]], k: Int) -> Int =\n\
+     \x20 if list.len(xs) == 0 then k else walk(list.slice(xs, 1, list.len(xs)), k + 1)\n\
+     \n\
+     fn mk() -> List[List[Int]] = list.map(list.range(0, 6), (i) => [i, i])\n\
+     \n\
+     effect fn main() -> Unit = {\n\
+     \x20 let dead = mk()\n\
+     \x20 let d = list.take(dead, if list.is_empty(dead) then 0 else list.len(dead) - 2)\n\
+     \x20 let kept = mk()\n\
+     \x20 let k = list.slice(kept, 1, list.len(kept))\n\
+     \x20 let other = mk()\n\
+     \x20 let o = list.slice(other, 1, list.len(list.reverse(other)))\n\
+     \x20 println(\"${walk(mk(), 0)} ${list.len(d)} ${list.len(k)} ${list.len(kept)} ${list.len(o)}\")\n\
+     }\n"
+        .to_string()
+}
+
+#[test]
+fn a_scalar_read_of_the_source_in_a_later_argument_still_lets_it_move() {
+    let (_dir, src, rust) = emit_rust("scalar_later_arg.almd", &scalar_later_arg_program());
+    let walk = fn_body(&rust, "walk");
+    assert!(
+        walk.contains("almide_rt_list_slice_owned(xs, 1i64, "),
+        "the loop param of `walk` is dead after `list.slice(xs, 1, list.len(xs))` but is not moved (#3519)\n{walk}"
+    );
+    assert!(!walk.contains("almide_rt_list_slice(&xs"), "`walk` still clones the kept elements (#3519)\n{walk}");
+    let main = fn_body(&rust, "__almide_main");
+    assert!(main.contains("almide_rt_list_take_owned(dead, "), "a dead local read by `list.len` in a later argument is not moved (#3519)\n{main}");
+    assert!(main.contains("almide_rt_list_slice(&kept, 1i64, "), "a source read again after the call must stay borrowed\n{main}");
+    assert!(!main.contains("almide_rt_list_slice_owned(kept"), "a source read again after the call is moved\n{main}");
+    assert!(main.contains("almide_rt_list_slice(&other, "), "a later argument that is not a scalar read of the source must keep the borrow\n{main}");
+
+    let run = Command::new(almide()).args(["run", src.to_str().unwrap()]).output().unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout).trim(),
+        "6 4 5 6 5",
         "native run disagrees:\n{}",
         String::from_utf8_lossy(&run.stderr)
     );

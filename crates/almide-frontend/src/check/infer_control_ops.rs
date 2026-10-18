@@ -355,9 +355,10 @@ impl Checker {
         // `(String,Int)` in toml parse_key_part; mistyping the whole match as the OK type
         // walled the v1 MIR / mis-rewrapped native — base64 decode.) The pure auto-unwrap case
         // (no ctor arm, just effect-call/value arms unifying to T) is unchanged.
-        let arms_have_result_ctor = arms
-            .iter()
-            .any(|a| matches!(&a.body.kind, ExprKind::Ok { .. } | ExprKind::Err { .. }));
+        // #3777: a position that takes a Result as its value (a `let r:
+        // Result[..] = match ..`) produces one too — no arm is unwrapped.
+        let arms_have_result_ctor = self.expect_takes_result(expect)
+            || arms.iter().any(|a| matches!(&a.body.kind, ExprKind::Ok { .. } | ExprKind::Err { .. }));
         let mut out = MatchArmTypes::default();
         for arm in arms.iter_mut() {
             self.env.push_scope();
@@ -556,7 +557,9 @@ impl Checker {
                     // declaring `-> Result[..]`) lifts each branch on its own —
                     // the same rule the match arms follow.
                     (lifted[0].clone(), lifted[1].clone())
-                } else if self.env.auto_unwrap {
+                } else if self.env.auto_unwrap && !self.expect_takes_result(expect.as_ref()) {
+                    // #3777: skipped where the position takes the Result as
+                    // its value — the branches are that value, unstripped.
                     // #2182: a branch whose Result the comparison strips is
                     // implicit propagation — report it at the branch's tail
                     // leaves (the `else` side never reached any report: the

@@ -225,7 +225,8 @@ pub(crate) fn op_values(op: &Op, out: &mut Vec<ValueId>) {
         }
     };
     match op {
-        Op::Charge { .. } | Op::ChargeDyn { .. } => {}
+        Op::Charge { .. } => {}
+        Op::ChargeDyn { src, .. } => out.push(*src),
         Op::Alloc { dst, init, .. } => {
             out.push(*dst);
             match init {

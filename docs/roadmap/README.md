@@ -7,10 +7,11 @@
 
 ## Active
 
-95 items
+98 items
 
 | Item | Description |
 |------|-------------|
+| [ADR-0013: native String as a shared buffer — implementation](active/adr-0013-string-sharing.md) |  |
 | [AlmidePerceusBelt](active/almide-perceus-belt.md) | AlmidePerceusBelt — formal memory safety guarantee for Almide |
 | [全軸制覇への突破点 — アリーナと近隣比較から導いた設計指針](active/arena-breakthroughs.md) | 全軸制覇への突破点台帳 — 近隣アリーナの実測と 18 近隣コンパイラの機構読みから、どの軸で負けていて何を突破すれば世界一かを、勝利条件・ゲート・順序つきで固定する |
 | [Async Inception — logical time as the language's time base](active/async-inception.md) | The async inception: thesis, grammar, semantics, proofs, claim and plan in one charter |
@@ -33,6 +34,7 @@
 | [The Determinism / Purity Belt](active/determinism-belt.md) | Determinism/Purity Belt — a Perceus-analog that makes the compiler deterministic & target-portable by construction |
 | [Deterministic Bounds — legalising a bound on computation under byte-identity](active/deterministic-bounds.md) | Legalising fan.timeout under byte-identity — fuel, deterministic allocation, winner order, effect isolation |
 | [edit-locality theory — the theorem Almide exists to prove](active/edit-locality-theory.md) | Turn bounded edit blast radius from design instinct into a proven theorem |
+| [Effect inspection harness](active/effect-inspection-harness.md) |  |
 | [Capability-Based Effect System](active/effect-system-capability.md) | Capability-based effect system for sandboxed AI agent containers |
 | [Blueprint — making the ~27 effectful / raw-pointer stdlib fns FUNCTIONAL in v1](active/effectful-27-blueprint.md) | Blueprint for making the ~27 effectful / raw-pointer stdlib fns functional on the v1 leg, split by real cause |
 | [Execution Inception — as-if 規則を、並行と target の向こうまで完成させる](active/execution-inception.md) | The execution inception: the as-if rule completed across concurrency and targets |
@@ -61,6 +63,7 @@
 | [Mission-critical attack list](active/mission-critical-attack-list.md) | Tiered list making Almide defensibly usable in mission-critical domains |
 | [native: nested ctor/literal pattern at a Box'd (recursive-variant) field](active/native-boxed-pattern-lowering.md) | Native lowering for a nested ctor/literal pattern at a Box'd recursive-variant field |
 | [Native Trust Spine — Perceus as the single memory model (#764)](active/native-trust-spine.md) | Routing almide build --target rust through the same v1 Perceus MIR as wasm, so one memory model serves both legs |
+| [net unix sockets and shm on the embedded wasm lane (interim ops 104..=116)](active/net-unix-shm-embedded.md) | Interim embedded host ops 104..=116 for net's Unix-domain sockets and shared-memory files, and their retirement at ADR-0023 step 7 |
 | [Outside-Review Audit 2026-07 — 証拠層の負債バーンダウン](active/outside-review-audit-2026-07.md) | The 2026-07-27 five-lens outside-reviewer audit — the evidence layer lagged the v0→v1 transition and the honesty gradient inverted (internal docs honest, outward claims false); the layered burn-down to "zero false claims, every gate real" with issue links #913-#932 |
 | [Playground UI Revamp](active/playground-revamp.md) | Playground UI revamp: file tabs, share URLs, TS-style example gallery |
 | [Post-0.29 Improvement Sweep](active/post-0.29-improvement-sweep.md) | Post-0.29.0 improvement sweep — every open gap issue-ized and ordered, from face-fixes to the v0 wasm retirement |

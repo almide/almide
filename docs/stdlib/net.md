@@ -9,11 +9,16 @@ listener is an opaque `Int` handle. The `unix_*` and `shm_*` functions take and
 return raw file descriptors instead, because a descriptor is what crosses to the
 peer.
 
-**Native only.** The wasm leg has no socket floor, so a program using `net`
-builds and runs natively but walls on `--target wasm`. The `unix_*` and `shm_*`
+**Targets.** Native serves every function. `almide run --target wasm` (the
+embedded host) serves them too, from the same code native runs: the `tcp_*`
+family through host ops 91..=103, the `unix_*` and `shm_*` family through
+interim ops 104..=116 (#3620, retired when ADR-0023 step 7 runs that lane as
+the WASI 0.3 component). A stock artifact (`almide build --target wasm`)
+refuses them at build time (E081): the p1 standard has no sockets, and WASI has
+neither Unix-domain sockets nor shared memory at all. The `unix_*` and `shm_*`
 functions need a Unix platform (Linux, macOS, the BSDs); elsewhere they return
-`err`. `spec/stdlib/net_test.almd`
-carries a `// wasm:skip` marker for the same reason.
+`err`. `spec/stdlib/net_test.almd` carries a `// wasm:skip` marker because
+`almide test`'s wasm leg builds the stock artifact.
 
 ## Client
 
@@ -98,6 +103,14 @@ A stream socket to a peer on the same machine, which can carry open file
 descriptors beside its bytes (SCM_RIGHTS). This is the transport of Wayland,
 PipeWire and D-Bus.
 
+The `unix_*` and `shm_*` functions act only on descriptors the program holds:
+the ones they opened (`unix_listen`, `unix_connect`, `unix_accept`,
+`shm_create`) and the ones that arrived on a socket (`unix_recv`), until
+`unix_close`. Any other number, a standard stream included, is an `err`
+(`<fn>: descriptor <n> is not open in this program`) before any system call;
+a negative one is `<fn>: not a file descriptor: <n>`. Closing a socket also
+closes the descriptors it received that were never taken.
+
 ### `effect net.unix_connect(path: String) -> Int`
 
 Connect to the listener at `path`; the socket's descriptor.
@@ -163,14 +176,14 @@ effect fn share() -> Unit = {
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (25 functions)
+## Signature index (26 functions)
 
 ```
 // Connected stream handle; err if refused.
 // @since 0.20.0 or earlier
 effect net.tcp_connect(host: String, port: Int) -> Int
 
-// Up to len bytes; empty once the peer closed.
+// Up to len bytes; empty once the peer closed; err if len < 0.
 // @since 0.20.0 or earlier
 effect net.tcp_read(stream: Int, len: Int) -> Bytes
 
@@ -178,7 +191,7 @@ effect net.tcp_read(stream: Int, len: Int) -> Bytes
 // @since 0.20.0 or earlier
 effect net.tcp_write(stream: Int, data: Bytes) -> Unit
 
-// Exactly len bytes; err on early EOF.
+// Exactly len bytes; err on early EOF, naming how many arrived.
 // @since 0.20.0 or earlier
 effect net.tcp_read_exact(stream: Int, len: Int) -> Bytes
 
@@ -190,7 +203,7 @@ effect net.tcp_close(stream: Int) -> Unit
 // @since 0.20.0 or earlier
 net.tcp_is_open(stream: Int) -> Bool
 
-// Up to len bytes; err on timeout or 0 ms.
+// Up to len bytes within timeout_ms (> 0); the stream's own timeout holds again after.
 // @since 0.20.0 or earlier
 effect net.tcp_read_timeout(stream: Int, len: Int, timeout_ms: Int) -> Bytes
 
@@ -205,6 +218,10 @@ effect net.tcp_available(stream: Int) -> Int
 // Listener bound to host:port; err if in use.
 // @since 0.20.0 or earlier
 effect net.tcp_listen(host: String, port: Int) -> Int
+
+// The port a listener is bound to: the one the OS chose when it listened on port 0.
+// @since unreleased
+effect net.tcp_local_port(listener: Int) -> Int
 
 // Blocks for the next client; its stream handle.
 // @since 0.20.0 or earlier

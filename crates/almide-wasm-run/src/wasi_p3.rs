@@ -74,7 +74,7 @@ use wasm_encoder::{
 
 use crate::component_alloc::{shim_cabi_realloc, shim_realloc_checked, shim_reserve};
 use crate::wasi::{
-    mem, mem8, parse_module, reencode_body, type_index, Parsed, Remap, DATA, ENV_FULL_MSG, MSG,
+    mem, mem8, parse_module, reencode_body, type_index, Parsed, Remap, DATA, MSG, OVL,
     MSG2, OOM_MSG, PARK_SPAN, UNSUPPORTED_MSG,
 };
 
@@ -174,7 +174,12 @@ const I_HTTP_OPT_NEW: u32 = 69; // [constructor]request-options
 const I_HTTP_OPT_CONNECT: u32 = 70; // [method]request-options.set-connect-timeout (retptr)
 const I_HTTP_OPT_FIRST: u32 = 71; // [method]request-options.set-first-byte-timeout (retptr)
 const I_HTTP_OPT_BETWEEN: u32 = 72; // [method]request-options.set-between-bytes-timeout (retptr)
-const IMPORTS_HTTP: u32 = 73;
+// The full-response family (op 65, ADR-0023 step 4): the response's header
+// fields, copied out before consume-body moves the response. The serve
+// export reads its request's fields through the same copy-all.
+const I_HTTP_RESP_HEADERS: u32 = 73; // [method]response.get-headers
+const I_HTTP_COPY_ALL: u32 = 74; // [method]fields.copy-all (retptr)
+const IMPORTS_HTTP: u32 = 75;
 
 // Park offsets past the shared ones: retptr / future-payload scratch.
 const RET: u64 = 32;
@@ -222,8 +227,7 @@ const AWAIT_EV: u64 = 800;
 const _: () = {
     assert!(RET + 32 <= MSG);
     assert!(MSG + UNSUPPORTED_MSG.len() as u64 <= STATRET);
-    // The env.set refusal line (#3223) sits in the gap past the stat result.
-    assert!(MSG2 + ENV_FULL_MSG.len() as u64 <= MSG_HTTP);
+    assert!(MSG2 <= MSG_HTTP);
     assert!(MSG_HTTP + E_HTTP.len() as u64 <= MSG_CLEN);
     assert!(MSG_CLEN + E_CLEN.len() as u64 <= CLEN_BUF);
     assert!(CLEN_BUF + 20 <= MSG_OOM);
@@ -337,6 +341,9 @@ struct P3Globals {
     /// The cached `get-environment` list (ptr, -1 = not fetched; count).
     g_env: u32,
     g_envn: u32,
+    /// The guest heap's bump frontier (`__heap`): stdin take-n reads a
+    /// large count into the free memory past it.
+    heap: u32,
 }
 
 /// One output port for `shim_print`: the stream/future globals and the
@@ -368,6 +375,7 @@ include!("wasi_p3_fs_service.rs");
 
 // The http shim (shim_http + its frame/body helpers): wasi_p3_http.rs.
 include!("wasi_p3_http.rs");
+include!("wasi_p3_http_resp.rs");
 
 // Its error classes, texts and helper functions (ADR-0023 step 2).
 include!("wasi_p3_http_err.rs");
@@ -535,6 +543,9 @@ include!("wasi_p3_fs.rs");
 // `$await` and the env/args/sleep service: wasi_p3_env.rs.
 include!("wasi_p3_env.rs");
 
+// The armed module's allocation report: wasi_p3_alloc.rs.
+include!("wasi_p3_alloc.rs");
+
 /// `(dst) -> ()`: copy the parked payload to guest memory.
 fn shim_host_read(g_plen: u32, g_ppos: u32) -> Function {
     let mut f = Function::new([]);
@@ -552,11 +563,15 @@ fn shim_host_read(g_plen: u32, g_ppos: u32) -> Function {
 /// deterministic drain handshake), drop the stdin readables, task.return
 /// (ok), answer EXIT (0). The callback is never reached: everything
 /// happened in the initial call.
-fn shim_run(main_index: u32, g: P3Globals) -> Function {
+fn shim_run(main_index: u32, g: P3Globals, report: Option<u32>) -> Function {
     let P3Globals { park, g_out_tx, g_out_fut, g_err_tx, g_err_fut, g_in_rx, g_in_fut, g_wset, f_await, .. } = g;
     let mut f = Function::new([]);
     let mut i = f.instructions();
     i.call(main_index);
+    // An armed module reports its counters while stderr is still open.
+    if let Some(r) = report {
+        i.call(r);
+    }
 
     // End both streams, then wait for the host's completion future: the
     // future.read completes only once every byte is drained host-side.

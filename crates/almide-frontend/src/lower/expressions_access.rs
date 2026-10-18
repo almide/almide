@@ -412,19 +412,23 @@ fn lower_expr_binary(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<
             // Side detection reads the CHECKER's types of the operand ASTs: a
             // time ctor's IR expr is already erased to Ty::Int, so the IR
             // types cannot tell the time side from the scale side.
-            let is_time = |t: &Ty| matches!(
-                t,
-                Ty::Named(n, args) if args.is_empty()
-                    && matches!(n.as_str(), "Compute" | "Duration")
-            );
-            let l_time = is_time(&ctx.expr_ty(left));
-            let r_time = is_time(&ctx.expr_ty(right));
+            let l_time = super::calls::is_time_ty(&ctx.expr_ty(left));
+            let r_time = super::calls::is_time_ty(&ctx.expr_ty(right));
             if l_time || r_time {
                 if let Some(out) = super::calls::lower_time_binop(
                     ctx, op.as_str(), l.clone(), r.clone(), l_time, span,
                 ) {
                     return out;
                 }
+                // A comparison: an operand read from an annotated binding
+                // still carries the clock tag (#3752); compare the erased i64.
+                for e in [&mut l, &mut r] {
+                    if super::calls::is_time_ty(&e.ty) {
+                        e.ty = Ty::Int;
+                    }
+                }
+                let bin_op = binop_for(op.as_str(), &Ty::Int, &Ty::Int);
+                return ctx.mk(IrExprKind::BinOp { op: bin_op, left: Box::new(l), right: Box::new(r) }, ty, span);
             }
             let bin_op = binop_for(op.as_str(), left_ty, right_ty);
             ctx.mk(IrExprKind::BinOp { op: bin_op, left: Box::new(l), right: Box::new(r) }, ty, span)
@@ -738,35 +742,4 @@ fn lower_expr_ident(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<c
             }
 }
 
-/// A PURE fn value flowing into an `effect (A) -> B` slot must become a
-/// carrier-returning closure — the slot's runtime shape is
-/// `(A) -> Result[B, String]` (ALS-M15, #1148). Wraps the value as
-/// `(a0..an) => ok(value(a0..an))`. No-op when the slot is not an effect
-/// slot or the value already returns the carrier (a named effect fn's value,
-/// which the checker bakes — `fn_value_ty`).
-pub(super) fn adapt_fn_value_to_effect_slot(ctx: &mut LowerCtx, val: IrExpr, slot: &Ty) -> IrExpr {
-    let Ty::Fn { is_effect: true, .. } = slot else { return val };
-    let Ty::Fn { params: vparams, ret: vret, is_effect: false } = &val.ty else { return val };
-    if vret.is_result() {
-        return val;
-    }
-    let span = val.span;
-    let vparams = vparams.clone();
-    let inner_ret = vret.as_ref().clone();
-    let params: Vec<(VarId, Ty)> = vparams.iter().enumerate().map(|(i, pt)| {
-        let vid = ctx.var_table.alloc(sym(&format!("__eff_wrap{}", i)), pt.clone(), Mutability::Let, None);
-        (vid, pt.clone())
-    }).collect();
-    let args: Vec<IrExpr> = params.iter()
-        .map(|(vid, pt)| ctx.mk(IrExprKind::Var { id: *vid }, pt.clone(), span))
-        .collect();
-    let call = ctx.mk(IrExprKind::Call {
-        target: CallTarget::Computed { callee: Box::new(val) },
-        args, type_args: vec![],
-    }, inner_ret.clone(), span);
-    let carrier = Ty::result(inner_ret, Ty::String);
-    let body = ctx.mk(IrExprKind::ResultOk { expr: Box::new(call) }, carrier.clone(), span);
-    let lambda_ty = Ty::Fn { params: vparams, ret: Box::new(carrier), is_effect: false };
-    let lambda_id = Some(ctx.next_lambda_id());
-    ctx.mk(IrExprKind::Lambda { params, body: Box::new(body), lambda_id }, lambda_ty, span)
-}
+include!("effect_slot_adapter.rs");

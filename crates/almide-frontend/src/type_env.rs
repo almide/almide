@@ -489,6 +489,35 @@ impl TypeEnv {
         put_values_back(&mut self.def_map, &s.keys, s.def_map);
     }
 
+    /// The `types` key a `Named` type is declared under. A stdlib-owned type
+    /// is keyed by its BARE name (#1828), but an alias target written
+    /// `url.Url` (`local type W = url.Url`) keeps the qualified spelling,
+    /// which is no key at all. Without this the capability walks below
+    /// found no declaration and said yes for every such type (#3755).
+    fn canonical_named(&self, name: Sym) -> Sym {
+        if self.types.contains_key(&name) {
+            return name;
+        }
+        match name.as_str().rsplit_once('.') {
+            Some((module, bare))
+                if almide_lang::stdlib_info::stdlib_owned_type_owner(bare) == Some(module) =>
+            {
+                sym(bare)
+            }
+            _ => name,
+        }
+    }
+
+    /// What a `Named` type IS, for the capability walks (eq / hash / ord).
+    /// An opaque newtype (`mod type SafePath = String`) is registered in
+    /// `types` as itself — `Named(SafePath)` — so the walk read the name as a
+    /// cycle and said yes for any target; its target is what decides (#3755).
+    /// The wasm leg erases the newtype and compares the target, and native's
+    /// derive follows the same answer (`lower_type_decl`).
+    fn named_def(&self, name: Sym) -> Option<&Ty> {
+        self.opaque_alias_targets.get(&name).or_else(|| self.types.get(&name))
+    }
+
     pub fn is_eq(&self, ty: &Ty) -> bool {
         let mut seen = std::collections::HashSet::new();
         self.is_eq_inner(ty, &mut seen)
@@ -506,10 +535,11 @@ impl TypeEnv {
                 ty.children().iter().all(|child| self.is_eq_inner(child, seen))
             }
             Ty::Named(name, _) => {
+                let name = &self.canonical_named(*name);
                 if !seen.insert(*name) {
                     return true;
                 }
-                match self.types.get(name) {
+                match self.named_def(*name) {
                     // A Named that resolves to its variant DEFINITION is one
                     // logical node: re-entering the Variant arm would read the
                     // name already in `seen` as a cycle and skip the payloads
@@ -548,10 +578,11 @@ impl TypeEnv {
                 ty.children().iter().all(|child| self.is_hash_inner(child, seen))
             }
             Ty::Named(name, _) => {
+                let name = &self.canonical_named(*name);
                 if !seen.insert(*name) {
                     return true;
                 }
-                match self.types.get(name) {
+                match self.named_def(*name) {
                     // One logical node with its variant definition — see
                     // is_eq_inner. Without the bypass the payload walk was
                     // skipped as a false cycle and `| Temp(Float)` keyed a
@@ -592,10 +623,11 @@ impl TypeEnv {
                 ty.children().iter().find_map(|child| self.hash_blocker_inner(child, seen))
             }
             Ty::Named(name, _) => {
+                let name = &self.canonical_named(*name);
                 if !seen.insert(*name) {
                     return None;
                 }
-                match self.types.get(name) {
+                match self.named_def(*name) {
                     // Mirror of is_hash_inner's variant-definition bypass —
                     // the two traversals must never disagree on reachability.
                     Some(resolved @ Ty::Variant { name: vn, .. }) => {
@@ -624,6 +656,11 @@ impl TypeEnv {
             Ty::Float | Ty::Float32 | Ty::Float64 | Ty::Fn { .. } => false,
             Ty::Applied(almide_lang::types::TypeConstructorId::Map, _) => false,
             Ty::Applied(almide_lang::types::TypeConstructorId::Set, _) => false,
+            // #3588: a Matrix is a grid of f64 and a Value can hold one, so both
+            // are a Float inside a compound — no order. Neither has children to
+            // walk, so the structural default below said yes while rustc
+            // rejected the monomorph (`AlmideMatrix: Ord`) and wasm walled.
+            Ty::Matrix => false,
             Ty::Variant { name, .. } => {
                 if !seen.insert(*name) {
                     return true;
@@ -632,10 +669,11 @@ impl TypeEnv {
                     && ty.children().iter().all(|child| self.is_ord_inner(child, seen))
             }
             Ty::Named(name, _) => {
+                let name = &self.canonical_named(*name);
                 if !seen.insert(*name) {
                     return true;
                 }
-                if let Some(resolved) = self.types.get(name).cloned() {
+                if let Some(resolved) = self.named_def(*name).cloned() {
                     // #1521: a user record/variant is Ord natively only when it
                     // DECLARES `: Ord` (the derive). Structural orderability of
                     // its fields is not enough — check said yes while rustc
@@ -646,20 +684,52 @@ impl TypeEnv {
                     {
                         return false;
                     }
-                    // Variant-definition bypass (see is_eq_inner): the
-                    // declares_ord gate above already admitted the derive;
-                    // the payloads must still order structurally.
+                    // Definition bypass (see is_eq_inner): the declares_ord
+                    // gate above already admitted the derive; the fields and
+                    // payloads must still order structurally. A record's
+                    // definition is walked here, not re-entered as the
+                    // structural record it is spelled with (that arm asks
+                    // which DECLARED record it is).
                     if let Ty::Variant { name: vn, .. } = &resolved {
                         seen.insert(*vn);
+                    }
+                    if matches!(resolved, Ty::Record { .. } | Ty::OpenRecord { .. } | Ty::Variant { .. }) {
                         return resolved.children().iter().all(|child| self.is_ord_inner(child, seen));
                     }
                     self.is_ord_inner(&resolved, seen)
                 } else {
-                    true
+                    // A stdlib-owned type with no declaration is the builtin
+                    // `Value` (it can hold a Float, #3588) or a runtime-backed
+                    // handle (`HttpRequest`, `JsonPath`, …): native has no
+                    // `Ord` for either. Wasm ordered the handle by whatever its
+                    // representation happened to be, and native refused the
+                    // build (#3755). An opaque handle has no order to give.
+                    almide_lang::stdlib_info::stdlib_owned_type_owner(name.as_str()).is_none()
                 }
             }
+            Ty::Record { fields } | Ty::OpenRecord { fields } => self.structural_record_is_ord(fields, seen),
             _ => ty.children().iter().all(|child| self.is_ord_inner(child, seen)),
         }
+    }
+
+    /// A structural record (an un-annotated literal's type) IS the declared
+    /// record with its field names and types (#3189, `RecordShapeIndex` —
+    /// the answer native and wasm build it by), so it orders only when that
+    /// record declares `: Ord`. One that is no declared record is an anonymous
+    /// `AlmdRec_*` struct: nothing declares the derive for it, so it has no
+    /// order — check accepted `list.min` over either while rustc refused the
+    /// monomorph (stdlib inspection fuzz, `http.HttpLimits` literals).
+    fn structural_record_is_ord(&self, fields: &[(Sym, Ty)], seen: &mut std::collections::HashSet<Sym>) -> bool {
+        let index = almide_ir::record_shape::RecordShapeIndex::from_records(
+            self.types.iter().filter_map(|(name, def)| match def {
+                Ty::Record { fields } => Some((*name, fields.clone())),
+                _ => None,
+            }),
+        );
+        let declared: Vec<Sym> = index.matching(fields).map(|shape| shape.name).collect();
+        !declared.is_empty()
+            && declared.into_iter().all(|name| self.is_ord_inner(&Ty::Named(name, vec![]), seen))
+            && fields.iter().all(|(_, field)| self.is_ord_inner(field, seen))
     }
 
     /// Does the user type declare `: Ord`? Keyed leniently like the derive

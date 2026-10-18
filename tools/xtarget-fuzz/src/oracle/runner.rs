@@ -34,6 +34,9 @@ pub struct ProcResult {
     /// timeout). The hang-vs-slow split (#1235) reports this, so a Slow
     /// finding carries its measured time instead of just "over budget".
     pub duration: Duration,
+    /// The sandbox tree after the run ([`super::sandbox::snapshot`]), for a
+    /// leg that ran in one; `None` for a build or check.
+    pub tree: Option<String>,
 }
 
 impl ProcResult {
@@ -41,6 +44,10 @@ impl ProcResult {
         self.exit_code == Some(0) && !self.timed_out && !self.spawn_failed
     }
 }
+
+/// The first bytes of a wasm "artifact" that is a pointer to its source,
+/// for the embedded host to run (`build_wasm`).
+const EMBEDDED_LEG: &str = "almide-embedded-leg:";
 
 /// Address-space ceiling for a fuzzed program's NATIVE run: wasm32's own
 /// linear-memory ceiling, so both legs stop at the same size (#2611).
@@ -122,6 +129,19 @@ impl Toolchain {
 
     /// `almide build <file> --target wasm -o <out>` — direct WASM emit.
     pub fn build_wasm(&self, file: &Path, out: &Path) -> ProcResult {
+        // A program only the embedded host can serve (ADR-0027 D1): its
+        // "artifact" names the checked source, and `run_wasm` runs it there.
+        let src = std::fs::read_to_string(file).unwrap_or_default();
+        if crate::generator::needs_embedded(&src) {
+            // `check --target wasm` audits the STOCK artifact, which refuses
+            // these functions (E081) by design; the embedded host's own run
+            // is the build.
+            let checked = self.run_almide(&["check", &file.to_string_lossy()]);
+            if checked.success() {
+                let _ = std::fs::write(out, format!("{EMBEDDED_LEG}{}", absolute(file).display()));
+            }
+            return checked;
+        }
         self.run_almide(&[
             "build",
             &file.to_string_lossy(),
@@ -157,54 +177,99 @@ impl Toolchain {
     /// grandchild `almide run` used to exec — same stdout, same abort forms,
     /// same exit code — with the timeout now covering ONLY the program.
     pub fn run_native_bin(&self, bin: &Path) -> ProcResult {
-        let mut cmd = Command::new(bin);
-        cmd.env("NO_COLOR", "1");
-        // The address-space cap (#2611). A corpus mutation can raise a loop
-        // bound to 4294967295 around an allocation (seed 578090231173 index
-        // 4323: a fresh Map pushed per iteration). Native then allocates at
-        // GB/s for the whole 30 s budget, well past the runner's 16 GB, and the
-        // hosted runner is shut down ("The runner has received a shutdown
-        // signal", exit 143) with the shard's campaign and upload lost. That
-        // was the shard-loss mechanism on the aarch64 runners, measured with
-        // the in-step sampler: mem_used went from ~1.3 GB to 13.5-15.6 GB with
-        // mem_avail at 297-343 MB in the last sample before every kill.
-        // The wasm leg already has this ceiling (wasm32's 4 GiB), so the cap
-        // gives native the same one, and a program that reaches it is skipped
-        // by the ladder (`native_hit_memory_cap`), never compared.
-        #[cfg(unix)]
-        unsafe {
-            use std::os::unix::process::CommandExt;
-            cmd.pre_exec(|| {
-                let lim = libc::rlimit {
-                    rlim_cur: NATIVE_MEMORY_CAP_BYTES as libc::rlim_t,
-                    rlim_max: NATIVE_MEMORY_CAP_BYTES as libc::rlim_t,
-                };
-                // Best effort: an OS that refuses the cap runs the program
-                // uncapped, exactly as before.
-                let _ = libc::setrlimit(libc::RLIMIT_AS, &lim);
-                Ok(())
-            });
-        }
-        self.spawn_timed(cmd)
+        let bin = absolute(bin);
+        self.run_sandboxed(|_| {
+            let mut cmd = Command::new(&bin);
+            cmd.args(super::sandbox::ARGS);
+            cmd.env("NO_COLOR", "1");
+            native_memory_cap(&mut cmd);
+            cmd
+        })
     }
+}
 
+/// The native address-space cap, applied before exec.
+fn native_memory_cap(cmd: &mut Command) {
+    // The address-space cap (#2611). A corpus mutation can raise a loop
+    // bound to 4294967295 around an allocation (seed 578090231173 index
+    // 4323: a fresh Map pushed per iteration). Native then allocates at
+    // GB/s for the whole 30 s budget, well past the runner's 16 GB, and the
+    // hosted runner is shut down ("The runner has received a shutdown
+    // signal", exit 143) with the shard's campaign and upload lost. That
+    // was the shard-loss mechanism on the aarch64 runners, measured with
+    // the in-step sampler: mem_used went from ~1.3 GB to 13.5-15.6 GB with
+    // mem_avail at 297-343 MB in the last sample before every kill.
+    // The wasm leg already has this ceiling (wasm32's 4 GiB), so the cap
+    // gives native the same one, and a program that reaches it is skipped
+    // by the ladder (`native_hit_memory_cap`), never compared.
+    #[cfg(unix)]
+    unsafe {
+        use std::os::unix::process::CommandExt;
+        cmd.pre_exec(|| {
+            let lim = libc::rlimit {
+                rlim_cur: NATIVE_MEMORY_CAP_BYTES as libc::rlim_t,
+                rlim_max: NATIVE_MEMORY_CAP_BYTES as libc::rlim_t,
+            };
+            // Best effort: an OS that refuses the cap runs the program
+            // uncapped, exactly as before.
+            let _ = libc::setrlimit(libc::RLIMIT_AS, &lim);
+            Ok(())
+        });
+    }
+}
+
+/// `p` resolved against the current directory: a sandboxed child runs in
+/// another cwd, where a relative program or module path would not resolve.
+fn absolute(p: &Path) -> PathBuf {
+    if p.is_absolute() { p.to_path_buf() } else { std::env::current_dir().map(|d| d.join(p)).unwrap_or_else(|_| p.to_path_buf()) }
+}
+
+impl Toolchain {
     /// `ALMIDE_WASM_ALLOC_COUNT=1 almide run <file> --target wasm` — the
     /// structural leg on the embedded host with the allocation counters
     /// armed; the `__ALMD_WASM_ALLOC … live=N` line lands on stderr.
     pub fn run_wasm_counted(&self, file: &Path) -> ProcResult {
-        let mut cmd = Command::new(&self.almide);
-        cmd.args(["run", &file.to_string_lossy(), "--target", "wasm"]);
-        cmd.env("ALMIDE_RUN_PROJECT_DIR", &self.scratch);
-        cmd.env("NO_COLOR", "1");
-        cmd.env("ALMIDE_WASM_ALLOC_COUNT", "1");
-        self.spawn_timed(cmd)
+        let file = absolute(file);
+        self.run_sandboxed(|_| {
+            let mut cmd = Command::new(&self.almide);
+            cmd.args(["run", &file.to_string_lossy(), "--target", "wasm", "--"]);
+            cmd.args(super::sandbox::ARGS);
+            cmd.env("ALMIDE_RUN_PROJECT_DIR", &self.scratch);
+            cmd.env("NO_COLOR", "1");
+            cmd.env("ALMIDE_WASM_ALLOC_COUNT", "1");
+            cmd
+        })
     }
 
     /// `wasmtime <wasm>` — execute the WASM build.
     pub fn run_wasm(&self, wasm: &Path) -> ProcResult {
-        let mut cmd = Command::new(&self.wasmtime);
-        cmd.arg(wasm);
-        self.spawn_timed(cmd)
+        let wasm = absolute(wasm);
+        if let Some(src) = std::fs::read(&wasm).ok().and_then(|b| String::from_utf8(b).ok()).and_then(|s| s.strip_prefix(EMBEDDED_LEG).map(String::from)) {
+            // Absolute: the run's cwd is its sandbox.
+            let almide = absolute(&self.almide);
+            return self.run_sandboxed(|_| {
+                let mut cmd = Command::new(&almide);
+                cmd.args(["run", &src, "--target", "wasm", "--"]);
+                cmd.args(super::sandbox::ARGS);
+                cmd.env("ALMIDE_RUN_PROJECT_DIR", &self.scratch);
+                cmd.env("NO_COLOR", "1");
+                cmd
+            });
+        }
+        self.run_sandboxed(|dir| {
+            let mut cmd = Command::new(&self.wasmtime);
+            cmd.arg(format!("--dir={}::.", dir.display()));
+            cmd.arg(format!("--dir={}::/tmp", super::sandbox::tmp_of(dir).display()));
+            for (k, v) in super::sandbox::ENV {
+                cmd.arg(format!("--env={k}={v}"));
+            }
+            for (k, v) in super::fixture::env() {
+                cmd.arg(format!("--env={k}={v}"));
+            }
+            cmd.arg(&wasm);
+            cmd.args(super::sandbox::ARGS);
+            cmd
+        })
     }
 
     /// Spawn `almide` with the given args under this worker's isolated
@@ -229,8 +294,13 @@ impl Toolchain {
     /// Spawn a command, capture stdout/stderr on dedicated reader
     /// threads (so a child that fills a pipe buffer never deadlocks),
     /// and enforce the timeout by polling, killing on overrun.
-    fn spawn_timed(&self, mut cmd: Command) -> ProcResult {
-        cmd.stdin(Stdio::null());
+    fn spawn_timed(&self, cmd: Command) -> ProcResult {
+        self.spawn_timed_with(cmd, None)
+    }
+
+    /// [`Self::spawn_timed`] with stdin read from `stdin` (null when `None`).
+    fn spawn_timed_with(&self, mut cmd: Command, stdin: Option<std::fs::File>) -> ProcResult {
+        cmd.stdin(stdin.map(Stdio::from).unwrap_or_else(Stdio::null));
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
         // Make the child its own process-GROUP leader, so a timeout kill can
@@ -256,6 +326,7 @@ impl Toolchain {
                     timed_out: false,
                     spawn_failed: true,
                     duration: Duration::ZERO,
+                    tree: None,
                 };
             }
         };
@@ -322,7 +393,29 @@ impl Toolchain {
             timed_out,
             spawn_failed: false,
             duration,
+            tree: None,
         }
+    }
+
+    /// Run `cmd` in a fresh sandbox (docs/roadmap/active/effect-inspection-harness.md,
+    /// tier E1): cwd = the seeded tree, the fixed env, stdin from the fixed
+    /// file. `build` makes the command for the sandbox it is given and places
+    /// the program arguments itself. The tree after the run is kept.
+    fn run_sandboxed(&self, build: impl FnOnce(&Path) -> Command) -> ProcResult {
+        let Ok((dir, stdin)) = super::sandbox::create(&self.scratch) else {
+            return self.spawn_timed(build(&self.scratch));
+        };
+        let mut cmd = build(&dir);
+        cmd.current_dir(&dir);
+        for (k, v) in super::sandbox::ENV {
+            cmd.env(k, v);
+        }
+        cmd.env("TMPDIR", super::sandbox::tmp_of(&dir));
+        cmd.envs(super::fixture::env().iter().map(|(k, v)| (k, v)));
+        let mut res = self.spawn_timed_with(cmd, std::fs::File::open(&stdin).ok());
+        res.tree = Some(super::sandbox::snapshot(&dir));
+        super::sandbox::remove(&dir, &stdin);
+        res
     }
 }
 
@@ -340,6 +433,11 @@ fn project_root(file: &Path) -> Option<PathBuf> {
 /// Polling granularity while waiting on a child. Small enough that a
 /// hung program is killed promptly, large enough not to busy-spin.
 const POLL_INTERVAL_MS: u64 = 10;
+
+/// Whether `wasm` is an embedded-lane artifact (it names the checked source).
+pub fn is_embedded_artifact(wasm: &Path) -> bool {
+    std::fs::read(wasm).map(|b| b.starts_with(EMBEDDED_LEG.as_bytes())).unwrap_or(false)
+}
 
 #[cfg(test)]
 mod tests {
@@ -381,6 +479,7 @@ mod tests {
             timed_out: false,
             spawn_failed: false,
             duration: Duration::ZERO,
+            tree: None,
         };
         assert!(native_hit_memory_cap(&run("memory allocation of 4294967296 bytes failed\n")));
         assert!(!native_hit_memory_cap(&run("thread 'main' panicked at 'index out of bounds'\n")));

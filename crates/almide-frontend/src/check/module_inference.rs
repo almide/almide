@@ -34,6 +34,7 @@ impl Checker {
         self.lint_error_surface(program);
         self.check_bounded_profile(program);
         self.check_concurrent_var_reach(program);
+        self.check_abort_sites(program);
         self.check_scoped(program);
         self.check_pure_attrs(program);
     }
@@ -505,6 +506,9 @@ impl Checker {
             generics.as_ref().map(|gs| gs.iter().map(|g| sym(&g.name)).collect()).unwrap_or_default(),
         ));
         self.expect_lambda(body, &ret_ty);
+        self.lambda_expect.clear();
+        self.call_expect.clear();
+        self.expect_expr(body, &ret_ty);
         // ADR-0002 Phase 1b (#1103): a `-> T!` fn's body gets the SAME
         // value-tail acceptance an effect fn's lifted body has — the
         // lowering wraps the T-typed exits in ok(...).

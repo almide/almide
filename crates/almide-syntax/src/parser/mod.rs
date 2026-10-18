@@ -6,6 +6,7 @@
 /// Does NOT: type checking, name resolution, semantic validation
 
 mod braceless_body;
+pub mod caseless;
 mod collections;
 mod compounds;
 mod declarations;
@@ -14,6 +15,7 @@ mod entry;
 mod fn_decls;
 mod expressions;
 mod fan;
+pub use fan::renamed_fan_head_text;
 pub mod hints;
 mod helpers;
 mod patterns;
@@ -81,6 +83,10 @@ pub struct Parser {
     /// declaration, when its body was one braceless expression — read by
     /// `top_decl_error` to explain an indented line that follows it.
     pub(crate) preceding_expr_fn: Option<braceless_body::ExprBodiedFn>,
+    /// #1456: the caseless names this module declares as types or variant
+    /// cases; their tokens were reclassified `TypeName`, and an
+    /// interpolation hole's sub-parse applies the same set.
+    pub(crate) caseless_type_names: std::collections::HashSet<String>,
 }
 
 /// A comment collected from a continuation gap (#1326): the Newline/Comment
@@ -107,8 +113,10 @@ pub(crate) enum CommentSide {
 
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
-        let (tokens, inline_comments) = Self::drop_inline_comments(tokens);
-        Parser { tokens, pos: 0, inline_comments, expr_comments: std::collections::HashMap::new(), pending_gap: None, errors: Vec::new(), file: None, next_expr_id: 0, depth: 0, failed_fn_names: std::collections::HashSet::new(), delim_depth: 0, block_head_depth: None, last_fn_body: None, preceding_expr_fn: None }
+        let (mut tokens, inline_comments) = Self::drop_inline_comments(tokens);
+        let caseless_type_names = caseless::declared_caseless_type_names(&tokens);
+        caseless::reclassify(&mut tokens, &caseless_type_names);
+        Parser { caseless_type_names, tokens, pos: 0, inline_comments, expr_comments: std::collections::HashMap::new(), pending_gap: None, errors: Vec::new(), file: None, next_expr_id: 0, depth: 0, failed_fn_names: std::collections::HashSet::new(), delim_depth: 0, block_head_depth: None, last_fn_body: None, preceding_expr_fn: None }
     }
 
     /// Drop Comment tokens sitting INLINE mid-expression (`f(1 /* x */, 2)`) so the
@@ -191,6 +199,14 @@ impl Parser {
         let mut p = Self::new(tokens);
         p.next_expr_id = id_offset;
         p
+    }
+
+    /// Apply an enclosing module's caseless type-side names (#1456) to this
+    /// parser's tokens — for a sub-parse that cannot see the declarations.
+    pub(crate) fn with_caseless_type_names(mut self, names: &std::collections::HashSet<String>) -> Self {
+        caseless::reclassify(&mut self.tokens, names);
+        self.caseless_type_names.extend(names.iter().cloned());
+        self
     }
 
     pub fn with_file(mut self, file: &str) -> Self {

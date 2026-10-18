@@ -149,7 +149,17 @@ fn wasm_test_dep_paths() -> Vec<(project::PkgId, std::path::PathBuf)> {
 /// is `WasmTestRunner`'s choice.
 struct TestModule {
     almide: Vec<u8>,
-    wasi: Vec<u8>,
+    /// None when the module runs `testing.assert_aborts` sites: the abort-site
+    /// ops (ADR-0029) start a fresh instance, which only the embedded host
+    /// can, so there is no stock artifact to run.
+    wasi: Option<Vec<u8>>,
+}
+
+impl TestModule {
+    /// The size the pass line reports: the stock artifact's when there is one.
+    fn reported_len(&self) -> usize {
+        self.wasi.as_ref().map_or(self.almide.len(), Vec::len)
+    }
 }
 
 fn structural_test_render(test_file: &str, source_text: &str, ir_program: &almide::ir::IrProgram, declared_tests: usize, run_filter: Option<&str>, explain: bool) -> Option<TestModule> {
@@ -169,6 +179,9 @@ fn structural_test_render(test_file: &str, source_text: &str, ir_program: &almid
         Ok(ir) => ir,
         Err(e) => { wall("lower", e); return None; }
     };
+    // ALMIDE_WASM_ALLOC_COUNT (#2407): arm the counters as `almide run
+    // --target wasm` does; the embedded run below prints the line.
+    let _alloc_count = almide_base::env::flag("ALMIDE_WASM_ALLOC_COUNT").then(almide_wasm::alloc_count::CountGuard::set);
     let (bytes, host_ops) = match almide_wasm::emit_program_with_ops(&ir) {
         Ok(x) => x,
         Err(e) => { wall("emit", format!("{e:?}")); return None; }
@@ -177,9 +190,18 @@ fn structural_test_render(test_file: &str, source_text: &str, ir_program: &almid
         wall("validate", e.to_string());
         return None;
     }
-    if let Some(op) = host_ops.iter().find(|op| !almide_wasm_run::wasi::P1_SERVED_OPS.contains(op)) {
+    // The abort-site ops are test-only and embedded-only (ADR-0029): they are
+    // not a wall of the leg, and there is no stock artifact to rewrite.
+    let abort_sites = host_ops.iter().any(|op| almide_wasm::ABORT_SITE_OPS.contains(op));
+    if let Some(op) = host_ops
+        .iter()
+        .find(|op| !almide_wasm_run::wasi::P1_SERVED_OPS.contains(op) && !almide_wasm::ABORT_SITE_OPS.contains(op))
+    {
         wall("host audit", format!("op {op} is not served by the p1 shim"));
         return None;
+    }
+    if abort_sites {
+        return Some(TestModule { almide: bytes, wasi: None });
     }
     // The structural module imports `almide.*` (the embedded host's surface,
     // which runs it by default); the same `to_wasi` rewrite the build ships
@@ -192,7 +214,20 @@ fn structural_test_render(test_file: &str, source_text: &str, ir_program: &almid
     if explain {
         err(&format!("[route] {}: structural leg rendered the test module ({} bytes)", test_file, wasi.len()));
     }
-    Some(TestModule { almide: bytes, wasi })
+    Some(TestModule { almide: bytes, wasi: Some(wasi) })
+}
+
+/// ALMIDE_WASM_ALLOC_COUNT (#2407): the armed test module's counters, in
+/// `almide run --target wasm`'s `__ALMD_WASM_ALLOC` line form. They count the
+/// run's own instance: an `assert_aborts` child is a store of its own.
+fn report_alloc_count(r: &almide_wasm_run::RunResult) {
+    if !almide_base::env::flag("ALMIDE_WASM_ALLOC_COUNT") {
+        return;
+    }
+    match r.alloc_count {
+        Some(c) => eprintln!("__ALMD_WASM_ALLOC {c} heap_end={}", r.heap_end.map_or_else(|| "?".to_string(), |h| h.to_string())),
+        None => eprintln!("__ALMD_WASM_ALLOC absent (the module carries no counters)"),
+    }
 }
 
 /// Which runtime executes the wasm leg of `almide test` (#3046).
@@ -408,7 +443,7 @@ pub(super) fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::P
     // spec/wasm_cross against the pre-migration capture, not merely a green suite.
     almide_driver::link_ir(&mut ir_program);
     mark(prof, &mut marks, "opt_mono");
-    // Native-only matrix ops (e.g. qwen3_block_q1_0_kv) have no WASM lowering;
+    // Native-only matrix ops (none today) have no WASM lowering;
     // skip with a clear reason instead of reaching the emitter (whose panic would
     // surface as a generic "WASM codegen panic" skip).
     if let Some(op) = almide::codegen::program_uses_native_only_matrix_on_wasm(&ir_program) {
@@ -429,17 +464,28 @@ pub(super) fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::P
             // real environment and cwd, which `-S inherit-env=y` and the
             // ALMIDE_CWD pin gave the CLI route.
             return match almide_wasm_run::run_wasm_unbounded(&module.almide) {
-                Ok(r) => wasm_run_outcome(test_file, counts, module.wasi.len(), r.exit == 0, &r.stdout, &r.stderr),
+                Ok(r) => {
+                    report_alloc_count(&r);
+                    wasm_run_outcome(test_file, counts, module.reported_len(), r.exit == 0, &r.stdout, &r.stderr)
+                }
                 // A module the host cannot instantiate FAILS, as the CLI's
                 // non-zero exit did — it is not a benign skip.
-                Err(e) => wasm_run_outcome(test_file, counts, module.wasi.len(), false, "", &format!("Error: embedded wasm host: {e:#}\n")),
+                Err(e) => wasm_run_outcome(test_file, counts, module.reported_len(), false, "", &format!("Error: embedded wasm host: {e:#}\n")),
             };
         }
+        // A stock runtime cannot start the fresh instance an abort site runs
+        // in (ADR-0029 D3): a declared limit of the host, named, and the file
+        // runs on native.
+        let Some(wasi) = &module.wasi else {
+            return skip_env(
+                "ALMIDE_TEST_WASM_RUNNER=wasmtime, and testing.assert_aborts needs the embedded host to start a fresh instance (almide:test/abort-site); a stock runtime cannot".to_string(),
+            );
+        };
         // `ALMIDE_TEST_WASM_RUNNER=wasmtime`: write the stock artifact and run
         // it under the wasmtime CLI. `-S inherit-env=y` mirrors the embedded
         // host: `env.get` in a test observes the same host variables native
         // does (the env cross-target contract).
-        if let Err(e) = std::fs::write(&wasm_path, &module.wasi) {
+        if let Err(e) = std::fs::write(&wasm_path, wasi) {
             return skip_env(format!("write: {}", e));
         }
         let mut cmd = std::process::Command::new("wasmtime");
@@ -457,7 +503,7 @@ pub(super) fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::P
             Ok(result) => wasm_run_outcome(
                 test_file,
                 counts,
-                module.wasi.len(),
+                wasi.len(),
                 result.status.success(),
                 &String::from_utf8_lossy(&result.stdout),
                 &String::from_utf8_lossy(&result.stderr),

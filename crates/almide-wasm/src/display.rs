@@ -632,6 +632,8 @@ fn build_helper_body(
             deferred_ranges: &empty_ranges,
             metered: false,
             cells: &empty_cells,
+            tomb_vars: &empty_cells,
+            raw_map_read: false,
             moves: Default::default(),
             region_repair: None,
             loop_ctl: None,

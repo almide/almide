@@ -1,0 +1,36 @@
+fn heavy(n: Int) -> Int = {
+  var i = 0
+  var acc = 0
+  while i < n {
+    acc = (acc + i * 7) % 999983
+    i = i + 1
+  }
+  acc
+}
+
+fn spin(n: Int) -> Int = {
+  var acc = n
+  while true {
+    acc = (acc + 7) % 999983
+  }
+  acc
+}
+
+effect fn main() -> Unit = {
+  let a = fan.bounded(compute.ns(3006)) { heavy(1000) } ?? -1
+  println("a=" + int.to_string(a))
+  let b = fan.bounded(compute.ns(3005)) { heavy(1000) } ?? -1
+  println("b=" + int.to_string(b))
+  let r = fan.bounded(compute.ns(3005)) { heavy(1000) }
+  match r {
+    ok(v) => println("r ok " + int.to_string(v)),
+    err(e) => println("r err [" + e + "]"),
+  }
+  let s = fan.bounded(compute.ms(5)) { spin(1) } ?? -7
+  println("spin=" + int.to_string(s))
+  let z = fan.bounded(compute.ns(0)) { 1 + 2 } ?? -9
+  println("zero-nocharge=" + int.to_string(z))
+  let z2 = fan.bounded(compute.ns(0)) { heavy(0) } ?? -9
+  println("zero-heavy0=" + int.to_string(z2))
+  println("end")
+}

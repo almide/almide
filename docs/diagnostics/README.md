@@ -65,6 +65,8 @@ equal to the set of codes the compiler emits.
 | [E095](E095.md) | The app passed to `http.serve` reads a local of the fn that serves it (a `let`, `var` or parameter of main): the app must be closed over top-level items |
 | [E096](E096.md) | A fn with a `mut` parameter used as a function value (a `let`, an argument, a record field, a list element, a return, `module.fn`): a function type cannot carry the write-back |
 | [E097](E097.md) | `pub` before a `type`, `protocol` or `test` — those are public by default (or have no visibility); delete `pub` (machine-applicable fix-it + `almide fix`) |
+| [E098](E098.md) | The closure passed to `testing.assert_aborts` captures a local of the test, or is a fn value rather than a lambda written in the call: it runs in a child process or instance, where the test's locals do not exist |
+| [E099](E099.md) | `testing.assert_aborts` called outside a test block, used as a value, or called inside another `assert_aborts` closure |
 | [E420](E420.md) | Function visibility violation (placeholder code, renumber candidate) |
 
 Retired codes: **E039** (the result.collect/collect_map deprecation window — the fns are removed, `result.partition` is the substance) and **E040** (the json.*/value.* alias deprecation window) each fired

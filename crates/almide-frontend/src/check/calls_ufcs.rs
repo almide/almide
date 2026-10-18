@@ -316,7 +316,7 @@ impl Checker {
                 format!("ambiguous time unit '.{}()': the unit does not name a clock", field),
                 format!(
                     "Write the clock module explicitly: compute.{f}(n) for a deterministic \
-                     compute budget (fan.bounded / fan.race), or duration.{f}(n) for \
+                     compute budget (fan.bounded / fan.min), or duration.{f}(n) for \
                      wall-clock time",
                     f = field
                 ),
@@ -505,7 +505,7 @@ impl Checker {
             Ty::Named(name, _) => Some(name.to_string()),
             Ty::Record { .. } | Ty::Variant { .. } => {
                 self.env.types.iter().find_map(|(name, def)| {
-                    (def == ty && name.starts_with(|c: char| c.is_uppercase())).then(|| name.to_string())
+                    (def == ty && almide_base::names::is_type_side_name(name.as_str())).then(|| name.to_string())
                 })
             }
             _ => None,
@@ -517,7 +517,7 @@ impl Checker {
             Ty::Named(name, _) => Some(*name),
             Ty::Record { .. } | Ty::Variant { .. } => {
                 self.env.types.iter().find_map(|(name, def)| {
-                    (def == ty && name.starts_with(|c: char| c.is_uppercase())).then(|| *name)
+                    (def == ty && almide_base::names::is_type_side_name(name.as_str())).then_some(*name)
                 })
             }
             // TypeVars and inference vars are not concrete — skip protocol checking

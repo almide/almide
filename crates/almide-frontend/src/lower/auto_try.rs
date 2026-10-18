@@ -32,7 +32,6 @@
 use std::collections::{HashMap, HashSet};
 use almide_ir::*;
 use almide_ir::visit::IrVisitor;
-use almide_base::intern::sym;
 use almide_base::intern::Sym;
 use crate::types::{Ty, TypeConstructorId};
 
@@ -48,13 +47,6 @@ struct TryCtx<'a> {
     /// a `-> Result[..]`-declared effect fn has the same Bind.ty but takes
     /// the auto-`?` (#485).
     annotated_result_vars: &'a HashSet<VarId>,
-    /// #558 / #1970: per-parameter flags, keyed by the fn's sig key (bare
-    /// name for a user fn, `module.func` for a stdlib fn): `true` where the
-    /// param is Result/Option-typed — that arg keeps its Result (no auto-?).
-    /// #558 covered only the FIRST param; a Result param at any other index
-    /// still had its effect-call argument unwrapped (`show(tag, f(1))` →
-    /// `show(tag, f(1)?)`: invalid Rust, invalid wasm, a structural wall).
-    result_params: &'a HashMap<Sym, Vec<bool>>,
     /// Usage-based skip set for THIS fn body: vars consumed as a Result
     /// (`match { ok/err }`, `== ok/err`, `??`). Collected once per body and
     /// consulted at EVERY Bind depth — VarIds are unique, so one flat set is
@@ -66,7 +58,7 @@ struct TryCtx<'a> {
 }
 
 /// Insert auto-? (Try nodes) in all effect fn bodies of the program.
-pub fn insert_auto_try(program: &mut IrProgram, annotated_result_vars: &HashSet<VarId>, result_params: &HashMap<Sym, Vec<bool>>) {
+pub fn insert_auto_try(program: &mut IrProgram, annotated_result_vars: &HashSet<VarId>) {
     // Record decls (root + modules) so FieldAssign can resolve a Named
     // target type to its field types. Decl names are canonical (qualified
     // `mod.Type` for user-module types), matching Ty::Named on var types.
@@ -81,7 +73,7 @@ pub fn insert_auto_try(program: &mut IrProgram, annotated_result_vars: &HashSet<
         if func.is_effect && !func.is_test {
             let returns_result = func.ret_ty.is_result();
             let (skip_unwrap, force_skip) = collect_result_match_vars(&func.body);
-            let mut ctx = TryCtx { var_table, record_fields: &record_fields, annotated_result_vars, result_params, skip_unwrap, force_skip };
+            let mut ctx = TryCtx { var_table, record_fields: &record_fields, annotated_result_vars, skip_unwrap, force_skip };
             let ret_ty = func.ret_ty.clone();
             func.body = insert_try_body(std::mem::take(&mut func.body), returns_result, &ret_ty, &mut ctx);
         }
@@ -92,7 +84,7 @@ pub fn insert_auto_try(program: &mut IrProgram, annotated_result_vars: &HashSet<
             if func.is_effect {
                 let returns_result = func.ret_ty.is_result();
                 let (skip_unwrap, force_skip) = collect_result_match_vars(&func.body);
-                let mut ctx = TryCtx { var_table, record_fields: &record_fields, annotated_result_vars, result_params, skip_unwrap, force_skip };
+                let mut ctx = TryCtx { var_table, record_fields: &record_fields, annotated_result_vars, skip_unwrap, force_skip };
                 let ret_ty = func.ret_ty.clone();
                 func.body = insert_try_body(std::mem::take(&mut func.body), returns_result, &ret_ty, &mut ctx);
             }
@@ -497,40 +489,17 @@ fn insert_try_control(kind: IrExprKind, ty: &Ty, keep_leaves: bool, ctx: &mut Tr
             operand: Box::new(insert_try(*operand, false, ctx)),
         },
         IrExprKind::Call { target, args, type_args } => {
-            // `result.*` / `option.*` functions consume their FIRST argument AS a
-            // Result/Option (UFCS: `r.unwrap_or(d)` == `result.unwrap_or(r, d)`).
-            // That arg must NOT be auto-?'d, exactly like the `??` (UnwrapOr) and
-            // match-subject exceptions — otherwise `result.unwrap_or(int.parse(s), d)`
-            // becomes `result.unwrap_or((int.parse(s))?, d)`, unwrapping the Result
-            // the callee needs (E0308 at build; passes check/test). The `true` flag
-            // suppresses only the top-level wrap of that arg, like a match subject.
-            // #558: skip the auto-? on arg 0 when the callee's FIRST param is
-            // Result/Option (derived from signatures), generalizing the old
-            // hardcoded result/option module list — error.context/message,
-            // testing.assert_ok and any user fn taking a Result first are now
-            // covered. result/option stay as a fallback for intrinsic keys.
-            // #1970: the flag is PER PARAMETER — `fn show(tag: String, r:
-            // Result[..])` keeps its second argument's Result exactly as a
-            // first-param Result was kept; the old first-only skip unwrapped
-            // it (`show(tag, f(1)?)`) on every leg.
-            let (flags, first_intrinsic) = match &target {
-                CallTarget::Module { module, func, .. } => (
-                    ctx.result_params.get(&sym(&format!("{}.{}", module.as_str(), func.as_str()))),
-                    module.as_str() == "result" || module.as_str() == "option",
-                ),
-                // A USER fn whose param is Result/Option (e.g.
-                // `fn take(r: Result[..], ..)`) — its sig key is the bare name.
-                CallTarget::Named { name } => (ctx.result_params.get(name), false),
-                _ => (None, false),
-            };
-            let keeps_result = |i: usize| -> bool {
-                (first_intrinsic && i == 0) || flags.is_some_and(|f| f.get(i).copied().unwrap_or(false))
-            };
+            // #558 / #1970 / #3646: every argument keeps its Result. The
+            // checker constrained each one against its parameter (E005; the
+            // explicit `!` is already a Try), so a Result-typed argument is
+            // one the parameter consumes as a Result — a declared Result /
+            // Option parameter at any index, or a type variable instantiated
+            // at Result (`id(int.parse(s))`, a fold seeded with a Result
+            // call). The `true` suppresses only the top-level wrap of each
+            // argument, like a match subject.
             IrExprKind::Call {
                 target,
-                args: args.into_iter().enumerate()
-                    .map(|(i, a)| insert_try(a, keeps_result(i), ctx))
-                    .collect(),
+                args: args.into_iter().map(|a| insert_try(a, true, ctx)).collect(),
                 type_args,
             }
         },
@@ -589,14 +558,17 @@ fn insert_try_construct(kind: IrExprKind, ty: &Ty, ctx: &mut TryCtx) -> Result<I
                     .collect(),
             }
         }
+        // The payload keeps a Result when the constructor's own type says it
+        // is one (`some(int.parse(s))` : Option[Result[Int, String]]), as a
+        // list element does above; anything else takes the `?`.
         IrExprKind::OptionSome { expr: inner } => IrExprKind::OptionSome {
-            expr: Box::new(insert_try(*inner, false, ctx)),
+            expr: Box::new(insert_try(*inner, ctor_payload_is_result(ty, TypeConstructorId::Option, 0), ctx)),
         },
         IrExprKind::ResultOk { expr: inner } => IrExprKind::ResultOk {
-            expr: Box::new(insert_try(*inner, false, ctx)),
+            expr: Box::new(insert_try(*inner, ctor_payload_is_result(ty, TypeConstructorId::Result, 0), ctx)),
         },
         IrExprKind::ResultErr { expr: inner } => IrExprKind::ResultErr {
-            expr: Box::new(insert_try(*inner, false, ctx)),
+            expr: Box::new(insert_try(*inner, ctor_payload_is_result(ty, TypeConstructorId::Result, 1), ctx)),
         },
         IrExprKind::Member { object, field } => IrExprKind::Member {
             object: Box::new(insert_try(*object, false, ctx)),
@@ -670,3 +642,8 @@ fn insert_try_iterate(kind: IrExprKind, ty: &Ty, ctx: &mut TryCtx) -> Result<IrE
 }
 
 include!("auto_try_wrap.rs");
+
+/// Is type argument `at` of `ty` (an `Option[..]` / `Result[..]`) itself a Result?
+fn ctor_payload_is_result(ty: &Ty, ctor: TypeConstructorId, at: usize) -> bool {
+    matches!(ty, Ty::Applied(c, args) if *c == ctor && args.get(at).is_some_and(|a| a.is_result()))
+}

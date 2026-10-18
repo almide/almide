@@ -2,8 +2,11 @@
 # decision uses, and the measurements they come from.
 # Pinned by tests/fan_cost_model_test.rs to the native runtime
 # (runtime/rs/src/list.rs `almide_rt_fan_plan`) and the embedded wasm host
-# (crates/almide-wasm-run/src/host_fan.rs `plan`): change a constant here
-# and in both copies, with the measurement that justifies it.
+# (crates/almide-wasm-run/src/host_fan.rs `plan`): one formula, a pair of
+# constants per leg (since 2026-10-16 — each leg's pair is the envelope over
+# its own measured rows; a shared pair had to cover the slower wasm leg and
+# kept native sequential where it would win). Change a constant here and in
+# its leg's copy, with the measurement that justifies it.
 #
 # The model. Every parallel twin is a SITE (native: one per callback type;
 # wasm: one per `__fan_site_K` export), and every offer at a site records
@@ -15,8 +18,9 @@
 # out of t (it is the WORKER term's), unless no worker ran a second one.
 # A site's FIRST offer goes parallel, as
 # before #3341. A later offer of n elements on W workers costs
-#   offer_ns + W * worker_ns   (thread spawn and join, the fan group's
-# bookkeeping; on wasm, the request round trip and the worker calls) and
+#   offer_ns + W * worker_ns   (waking the resident crew and waiting for
+# it, the fan group's bookkeeping; on wasm, the request round trip and the
+# worker calls) and
 # saves   t * (n - ceil(n / W)).   The W in 2..=workers with the largest
 # positive net saving wins; none = the offer runs on the calling thread
 # (wasm: on one pooled instance), sequentially. Output is the same on every
@@ -36,12 +40,17 @@
 # offers read 263-277 ns). A wasm worker's warm-up call read 4-22 us (wall)
 # against ~0.2 us warm on that machine.
 #
-# What it cannot see: a site's first offer (always parallel, so one cheap
-# offer pays ~40-120 us once), and a site whose work per element swings
-# between offers (the estimate is the last offer's).
+# What it cannot see: a site's first offer (always parallel on every core,
+# so one cheap offer pays the W=8 row once: 2.0-3.0 us native since the
+# 2026-10-17 pool, 41-69 us wasm, plus the pool's spawn — and on wasm the
+# workers' instantiation — when it is the run's first parallel offer), and a
+# site whose work per element swings between offers (the estimate is the
+# last offer's).
 
-offer_ns  = 30_000
-worker_ns = 9_000
+native_offer_ns  = 1_500
+native_worker_ns = 700
+wasm_offer_ns    = 30_000
+wasm_worker_ns   = 5_000
 
 # ── Where the constants come from ─────────────────────────────────────────
 # 2026-10-04, arm64 Darwin, 14 cores (10 P + 4 E), almide 0.65.1 (dev) at
@@ -98,3 +107,176 @@ worker_ns = 9_000
 # end is the site's first offer, which always goes parallel.
 # fannkuchredux (args=10, one offer of 10 chunks of ~18 ms) is unchanged:
 # its first offer goes parallel exactly as before.
+
+# ── Recalibrated 2026-10-16: the resident crews (#3748 wasm, #3759 native) ─
+# Both legs now keep their fan threads resident for the run and deal blocks
+# to them, and both read the available parallelism ONCE (on Linux
+# `available_parallelism` reads the cgroup quota files on every call — it
+# had cost every offer, sequential ones included, 11 us on the Intel VM and
+# 48 us on the AMD one). Measured on GCE, the probe above (an empty 10-element
+# chunk map), (t(3000 offers) - t(300 offers)) / 2700, best of 9, us per
+# offer, ALMIDE_FAN_COST_OFF + ALMIDE_FAN_THREADS pinning W:
+#
+#                       W=1   W=2   W=3   W=4   W=6   W=8
+#   Intel 8581C native   0.5   6.6   7.2   8.7  19.8  22.5   (c4-standard-8)
+#   Intel 8581C wasm     1.0  37.3  27.3  35.8  37.9  40.6
+#   AMD EPYC 7B13 native 1.8  17.1  17.1  19.6  27.4  35.3   (n2d-standard-8,
+#   AMD EPYC 7B13 wasm   6.5  27.2  40.3  36.9  47.0  69.1    Milan: CI's x86)
+#
+# Before the crews, the same probe on the AMD VM read 140 / 250 / 299 us
+# native and 85 / 112 / 161 us wasm at W = 2 / 4 / 8 — 3x the model's
+# 30 + 9W there. offer_ns = 30 us, worker_ns = 5 us (30 + 5W = 40 .. 70 us
+# at W = 2 .. 8) is the envelope over all four rows: the model still errs
+# toward sequential, on the slowest leg measured.
+#
+# The crossover sweep: 100 offers x 10 elements, ms per run, as
+# t(110 offers) - t(10 offers) (min of 7) so build and startup cancel; seq =
+# ALMIDE_FAN_SEQUENTIAL / ALMIDE_FAN_PAR_OFF, par = ALMIDE_FAN_COST_OFF,
+# old = the crews with 30 + 9W and the per-call parallelism read, new = this.
+# The wasm leg's difference carries +-3 ms of build-time noise.
+#
+#   Intel 8581C     native                       wasm
+#   iters   seq    old    new    par  |   seq    old    new    par
+#   0        0.0    1.26   0.04   2.30 |   1.0    3.5   -0.6    2.7
+#   100      0.42   1.64   0.46   2.38 |   1.5    1.0   -1.6    3.2
+#   1000     4.05   5.43   4.22   3.53 |   5.2    7.8    4.2    4.1
+#   3000    12.41   6.02   5.20   5.19 |  15.1    7.7    9.6   12.0
+#   5000    20.48   8.48   7.55   7.23 |  18.4    9.0    9.7    5.5
+#   10000   41.18  12.89  11.99  11.50 |  42.1   15.2   12.8   11.9
+#   30000  124.25  30.47  29.72  28.64 | 126.0   31.9   30.2   30.6
+#
+#   AMD EPYC 7B13   native                       wasm
+#   iters   seq    old    new    par  |   seq    old    new    par
+#   0        0.01   5.25   0.22   3.94 |   4.0   12.1   -2.2    7.1
+#   100      0.47   5.79   0.57   4.18 |  -1.0    7.5    1.0    6.9
+#   1000     4.90  10.11   5.02   4.58 |   3.8   11.3    2.6    9.6
+#   3000    14.86  12.59   5.78   6.47 |  17.3   16.5   16.2    8.0
+#   5000    24.61  15.92   8.75   7.96 |  27.6   16.0   16.3    9.6
+#   10000   49.52  20.97  14.34  14.23 |  50.0   21.4   15.1   13.9
+#   30000  148.26  42.85  35.34  35.01 | 151.4   43.4   38.6   32.9
+#
+# The cheap end is now at seq on both machines (the old residue was the
+# per-offer parallelism read, not the first offer), and native tracks
+# min(seq, par) throughout.
+#
+# The wasm columns above are too noisy to read the middle rows from: each
+# `almide run --target wasm` compiles the program, and 100 offers leave that
+# noise at the size of the difference (AMD 3000: model 16.2 against par 8.0
+# read as a missed parallel offer). Re-measured 2026-10-16 with 1000 offers,
+# t(1010 offers) - t(10 offers), min of 7, ms per 1000 offers; w5 =
+# ALMIDE_FAN_COST_OFF + ALMIDE_FAN_THREADS=5:
+#
+#   AMD EPYC 7B13    wasm                          native
+#   iters    seq    model     w5    par  |    seq   model     w5    par
+#   0        1.7     9.6    45.1   76.1  |    0.1     1.9   23.2   38.9
+#   1000    52.4    51.0    50.8   63.6  |   49.4    51.5   35.1   40.2
+#   3000   152.1    78.2    71.6   83.9  |  147.6    54.1   54.8   64.0
+#   5000   251.9    94.9   106.1   91.3  |  245.9    79.9   81.1   77.2
+#   10000  497.6   144.5   145.8  143.6  |  491.2   133.8  132.8  136.9
+#   30000 1499.1   352.0   350.5  348.3  | 1472.7   340.4  350.9  336.1
+#
+#   Intel 8581C      wasm                          native
+#   iters    seq    model     w5    par  |    seq   model     w5    par
+#   0        1.0     1.1    34.1   36.7  |    0.1     0.4   17.9   22.7
+#   1000    37.9    43.1    45.0   47.3  |   39.6    40.2   35.1   34.6
+#   3000   119.4    66.9    65.0   65.6  |  119.5    52.0   52.4   51.8
+#   5000   197.8    80.7    81.5   83.6  |  199.2    74.1   72.0   68.6
+#   10000  397.6   119.9   119.0  122.0  |  397.9   115.6  115.6  113.8
+#   30000 1177.3   282.2   287.1  274.3  | 1192.7   287.1  287.4  269.9
+#
+# ALMIDE_DBG_FAN on the AMD VM: the model takes W=5 on 1009 of 1010 offers
+# at 1000 iterations and above, and W=1 at 0 and 100 — the wasm leg tracks
+# min(seq, par) within 10% from 1000 iterations up. At 0 the sequential
+# offer still pays the host round trip (the guest hands the offer to the
+# host, which runs it on a pooled instance): ~8 us on AMD, where reading the
+# thread CPU clock is a ~1.1 us syscall (Intel ~0.3 us).
+# The one place the model gives time away is native at ~4-5 us per element
+# (1000 iterations): it stays sequential where W=5 is 30% (AMD) and 12%
+# (Intel) faster, because 30 + 5W is the envelope over the wasm leg, and
+# native's own W=2..8 rows (7-35 us) sit well under it.
+#
+# ── Per-leg constants, 2026-10-16 ─────────────────────────────────────────
+# native: 12 + 3W us (18 at W=2 .. 36 at W=8) is the envelope over native's
+# own two calibration rows above (Intel 6.6 .. 22.5, AMD 17.1 .. 35.3 us at
+# W = 2 .. 8). wasm keeps 30 + 5W (its rows: 27 .. 69 us).
+#
+# Native also stops timing a site's cheap sequential offers: the per-offer
+# residue over seq at the cheap end (0.4 us Intel, 1.7 us AMD at 0
+# iterations) is the two thread-CPU-clock reads that time the offer. A site
+# whose estimate stays sequential even at 4x its measured work re-measures
+# one sequential offer in 16 (list.rs `ALMIDE_FAN_RESAMPLE`), any other
+# sequential site one in 4 (`ALMIDE_FAN_RESAMPLE_NEAR`: at ~1.5 us per
+# element on AMD the clock reads were 14% of the offer); a site whose work
+# grows past the crossover is seen within 16 / 4 offers. (Superseded
+# 2026-10-17: every sequential site re-measures one in 16; see the end.)
+#
+# The per-leg constants and the resampling, measured on GCE: native, 1000
+# offers x 10 elements, t(1010) - t(10), min of 11 with the modes
+# interleaved, ms per 1000 offers; old = develop (30 + 5W, every offer
+# timed), new = this; best = min(seq, w5, par):
+#
+#   AMD EPYC 7B13                               Intel 8581C
+#   iters    seq    old    new     w5    par |    seq    old    new     w5    par
+#   0        0.0    1.85   0.24   23.7   36.6 |    0.0    0.43   0.10   16.6   22.7
+#   100      4.69   6.52   4.85   24.3   38.2 |    3.74   4.19   3.84   11.7   22.7
+#   300     14.72  16.61  15.25   27.0   38.7 |   11.72  12.21  11.89   14.4   26.8
+#   1000    49.48  51.03  35.09   34.6   38.9 |   39.60  40.08  35.98   35.9   35.5
+#   2000    99.23  45.49  46.39   45.6   55.2 |   79.45  41.48  42.06   41.7   43.0
+#   3000   148.83  57.71  58.12   58.4   62.3 |  119.30  48.66  51.98   52.2   51.9
+#   5000   247.77  78.82  79.08   77.1   78.4 |  198.79  71.38  72.11   72.0   69.6
+#   10000  495.16 133.11 133.82  131.1  134.3 |  397.65 114.75 114.90  113.5  111.2
+#   30000 1486.54 340.89 348.52  348.8  338.6 | 1192.47 281.19 282.24  280.3  266.1
+#
+# new is within 6% of best from 100 iterations up on both machines (at 0
+# the sequential run is ~0 and new pays 0.1-0.26 us per offer, old
+# 0.43-1.85). snorm1200 / snorm3000 / the small map are unchanged against
+# develop on both (min of 15). The wasm leg's constants and code are
+# unchanged; its sweep on the same branch read within run-to-run noise of
+# develop's.
+
+# ── The native pool, 2026-10-17 ───────────────────────────────────────────
+# The pool now publishes an offer to threads that poll between offers and
+# steal blocks (docs/benchmarks/fan-floor.md, "The pool"), so the native
+# constants were re-measured: 1000 forced-parallel offers of 10 elements,
+# ALMIDE_FAN_THREADS = W, t(1010) - t(10), min of 11 with W interleaved, us
+# per offer (W1 = ALMIDE_FAN_SEQUENTIAL):
+#
+#   AMD EPYC 7B13
+#   iters   W1     W2     W3     W4     W5     W6     W7     W8
+#   0       0.03   0.92   0.72   1.48   2.12   1.94   2.00   2.01
+#   100     3.93   3.58   3.62   3.11   3.28   4.35   6.80   6.04
+#   300    12.55   8.26   5.95   5.63   5.68   4.89   5.93   6.00
+#
+#   Intel 8581C
+#   iters   W1     W2     W3     W4     W5     W6     W7     W8
+#   0       0.00   0.94   1.43   2.02   1.99   2.15   2.22   3.02
+#   100     3.29   3.07   3.15   3.15   3.54   4.00   4.63   5.27
+#   300     9.98   7.14   5.34   4.97   4.71   4.61   4.98   5.61
+#
+# The cost of an offer is its row less the elements' share,
+# ceil(10 / W) * (W1 / 10). native: 1.5 + 0.7W us (2.9 at W=2 .. 7.1 at
+# W=8) is the envelope over every row on both machines: the largest costs
+# are 2.2 (W=2..4), 3.2 (W=5), 3.6 (W=6), 6.0 (W=7, AMD 100) and 5.3 us
+# (W=8, AMD 100). The constants were 12 + 3W, the envelope over the crew's
+# 7-35 us.
+#
+# What an offer reads as t changed too:
+#   - the thread CPU clock read that ends a timed interval is subtracted
+#     from it (measured once: the least of 16 back-to-back pairs). A worker
+#     of a parallel offer often times one or two elements, and on the AMD VM
+#     (a 1.1 us read) 0.4 us elements read 1.5-4 us, which kept the site
+#     parallel where sequential was faster;
+#   - a parallel offer is timed once in 8 (`ALMIDE_FAN_RESAMPLE_PAR`; each
+#     helper's three clock reads were on the offer's critical path), and
+#     every sequential site once in 16 (the 1-in-4 tier caught 0.4 us
+#     elements once the crossover fell to ~0.6 us, at 12% of their offer on
+#     the AMD VM);
+#   - an estimate from a parallel offer within 2x of the crossover, or one
+#     that timed only the workers' first elements, is checked by the next
+#     offer running sequentially (`ALMIDE_FAN_PROBE`): the elements of a
+#     parallel offer read slower than the same elements on one thread, and a
+#     site's first offer is parallel and spawns the pool (0.4 us elements
+#     read 4.1 us on the AMD VM, and the site ran parallel for 8 offers);
+#   - a sequential site turns parallel only on two measurements in a row: one
+#     interrupted offer read above the crossover sent 0.42 us elements (0.58
+#     us crossover) parallel at ~9 us a time on the AMD VM.

@@ -59,7 +59,7 @@ Fixtures: `spec/wasm_cross/fuel_bounded_boundary.almd`, `fuel_block_body.almd`,
 （0.58.0 は規則 1〜2 に両ターゲット同一に違反する — 直下ループの cut が stale Ok(0) になり、以後の全 region が汚染される。合意判定には映らない種で、
 参照レグが値を固定するまで agreement で運ぶ。almide/almide#1572）。
 
-## ALS-DT3 決定的 race（fan.race）
+## ALS-DT3 決定的 race（fan.min）
 
 勝者は「予算内で完走し、かつ自身が Err を返さなかった arm」のうち
 `(spend, index)` 辞書式最小 — 最安 arm、同点は原文順。Result arm の Err は

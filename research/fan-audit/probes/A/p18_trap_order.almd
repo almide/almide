@@ -1,0 +1,16 @@
+fn heavy(n: Int) -> Int = {
+  var acc = 0
+  for i in 0..<n { acc = (acc + i * i) % 1000003 }
+  acc
+}
+
+fn elem(x: Int, z: Int) -> Int =
+  if x == 0 then { let big = heavy(30000000) + 5; [1, 2][big] }
+  else if x == 7 then 10 / z
+  else heavy(1000)
+
+effect fn main() -> Unit = {
+  let z = list.len(list.range(0, 0))
+  let ys = fan { list.map(list.range(0, 8), (x) => elem(x, z)) }
+  println("${ys}")
+}

@@ -30,7 +30,7 @@ almide run app.almd -- arg1 arg2        # ファイル指定 + プログラム�
 |---|---|
 | `--target rust\|wasm` | 実行ターゲット。`rust`（既定、ネイティブバイナリ）または `wasm`（v1 trust-spine が直接 WASM を生成し `wasmtime` CLI で実行。rustc 不要）。両ターゲットは同一の観測可能挙動（stdout/stderr/exit）を出す（クロスターゲット等価性保証）。`wasm` には PATH に `wasmtime` が必要 |
 | `--no-check` | 型チェックをスキップ |
-| `--release` | 最適化ビルド (cargo --release) |
+| `--release` | 最適化ビルド。opt-level=3、fat LTO、codegen-units=1。ターゲットが x86_64 なら **`x86-64-v3`（AVX2・FMA。Intel は 2013 年の Haswell 以降、AMD は 2017 年の Zen 以降）に合わせて調整する**（#3604）。実測（spectralnorm、実行時の `n`）では汎用 → v3 が AMD Zen3 で 87.8 → 67.2 ms、Intel Xeon 8581C で 57.1 → 45.4 ms。`native` は Zen3 で 109.8 ms と逆に遅く、一度既定にして取り消した（#3727 → #3734）。AVX2 を持たない CPU では `SIGILL` で落ちるので、そこに配るなら `--target-cpu portable`。aarch64 などほかのターゲットは汎用のまま |
 
 `almide` 自身のフラグ（`--target` / `--no-check` / `--release`）は `--` の前で解釈され、`--` 以降はそのままプログラムに渡る（`cargo run` と同じ規約）。プログラム内で `env.args()` を呼ぶと `--` 以降の引数が `List[String]` で返る。
 
@@ -118,8 +118,8 @@ almide build app.almd --target linux-musl -o app  # Linux の静的 musl バイ�
 almide build app.almd --target x86_64-unknown-linux-musl  # 任意の rustc ターゲット三つ組
 almide build app.almd --target wasm --host js -o dist/app.wasm  # + dist/app.js, dist/app.d.ts (JS ホスト、#2265)
 almide build app.almd --target wasm --debug   # + DWARF 行テーブル（.debug_* カスタムセクション、#1315）
-almide build --release                  # 最適化ビルド (opt-level=2)
-almide build --fast                     # 最大性能 (opt-level=3, LTO, native CPU)
+almide build --release                  # 最適化ビルド (opt-level=3, fat LTO, x86_64 は x86-64-v3 向け)
+almide build --release --target-cpu portable -o app  # AVX2 の無い CPU にも配るバイナリ（rustc の汎用 CPU）
 ```
 
 | オプション | 説明 |
@@ -129,8 +129,9 @@ almide build --fast                     # 最大性能 (opt-level=3, LTO, native
 | `--target <triple>` | ネイティブバイナリのターゲット（#2772）。`rust` / `native`（既定、このホスト）、`linux-musl`（ホストのアーキテクチャの `<arch>-unknown-linux-musl`。x86_64 と aarch64）、または rustc のターゲット三つ組。cargo に `--target` を渡し、`target/<triple>/<profile>/` から成果物を拾う。ターゲットの標準ライブラリは `rustup target add <triple>` で入れる。musl ターゲットは Rust の既定（`crt-static`）で**静的リンク**になり、almide は追加のリンクフラグを付けない（glibc ターゲットは従来どおり動的）。依存の無いプログラムは rustc 同梱の musl crt で x86_64 ホスト上なら追加ツール無しにリンクできる。別アーキテクチャ向けや C を含む `[native-deps]` には、そのターゲットのリンカ / C コンパイラ（`musl-tools` 等）が要る。未知の値（三つ組の形をしていないもの）と `wasm32-*` は、ホスト向けに黙ってビルドせず終了コード 2 で拒否する |
 | `--host js` | `--target wasm` 専用: モジュールの隣に JS ホスト `<mod>.js`（依存なしの ES module）と `<mod>.d.ts` を書く（#2265）。`init(source?, hooks?)` がインスタンス化、`run()` が `main`、`pub fn` ごとに 1 つのラッパ。`@extern(wasm, "js", "name")` は `init({ js: { name } })` で結線（`effect fn` か `Result[T, String]` で宣言した extern は hook の throw / reject を err として受け取り、Almide 側で `!` 伝搬できる。それ以外の extern で hook が throw するとインスタンスは放棄され、`init()` し直すまで呼べない — #3356）。Promise を返す hook は extern 側に `@extern(wasm, "js", "name", returns: promise)` と書く（#3353 / #3371）: glue がそれを `WebAssembly.Suspending` で包み、そこへ到達しうる export（と `run()`）だけを呼び出しグラフから推論して `WebAssembly.promising` 経由の async 関数（`.d.ts` は `Promise<T>`）にする。インスタンスへの呼び出しは 1 つずつ呼んだ順に直列化され、async 呼び出しが中断中の同期 export は入らずに例外。JSPI の無い実行系では `init()` が理由を挙げて拒否。言語の型・効果・呼び出し側は変わらず、native は無視する。印の無い hook が thenable を返すと `almide: hooks.js.<name> returned a Promise; mark its @extern with returns: promise` を throw してインスタンスを放棄する（fallible extern でも err にはならない）。develop にあった暫定フラグ `--async-import` は v0.67.0-rc1 より前に削除され、どのリリースにも入っていない。設計: docs/wasm/JS-HOST-ASYNC-IMPORTS.md。マーシャルは Int（`number`、±2^53 の範囲検査）/ Float / Bool / String / Unit、export ではさらに Bytes（`Uint8Array`）/ List[T]（配列、入れ子可）/ Option[T]（`T | undefined`）/ レコード（宣言順のフィールドを持つ plain object）を引数・戻り値の両方で（#3354、レイアウトとビルド側の所有権はエミッタが export ごとに記録したものに従う）— それ以外の型（バリアント / Map / Set / タプル / 関数）を境界に持つ `pub fn` はビルド時に型名を挙げて拒否。`effect fn`（と `Result[T, String]` を返す fn）の戻り値はモジュール上では Result ブロックで、ラッパはエミッタが記録した戻り ABI から作る: ok は `T` の値、err は message を持つ `AlmideError`（`Error` の派生）を throw する。記録とソースの型が合わない export もビルド時に関数名を挙げて拒否（#3352）。出荷物はプログラムが使う分だけ（#2276）: `__alloc`/`__release` の export と glue の String ヘルパは境界に `String` がある時だけ、WASI shim は出荷モジュール（`--wasm-opt` 後）が import する名前だけ。ゲート: `scripts/check-js-host.sh`（`spec/wasm_host_js/` を node で実行し、期待出力と native 出力に一致させ、モジュールのバイト同一性・shim 集合・`glue-ceiling.txt` の上限を検査）。仕様: docs/wasm/WASM-OUTPUT.md「JS host」節 |
 | `--debug` | `--target wasm` 専用: 出荷するモジュール（`to_wasi` 後）の末尾に DWARF 4 の `.debug_info` / `.debug_abbrev` / `.debug_line` / `.debug_str` / `.debug_ranges` をカスタムセクションとして足し、コードオフセット（Code セクション内容先頭からのバイト位置、LLVM/Emscripten と同じ "DWARF for WebAssembly" 規約）から `.almd` の file:line:col を引けるようにする（#1315）。ソースファイルごとに compile unit 1 つ、関数ごとに `DW_TAG_subprogram`（名前・`low_pc`/`high_pc`）1 つ。Chrome DevTools と wasmtime + lldb がフラグ無しで読む。行はエミッタが命令ごとに IR の span から記録し（span を持たない合成ノードは最も近い祖先の span を継ぐ、祖先にも無い命令 — 関数の出口の解放など — は line 0）、コード自体は変えない: 既定（`--debug` 無し）の出力はバイト同一で、`size-baseline*.txt` の対象外。`--component` / `--wasm-opt` とは併用不可（どちらも出荷バイトを書き換え、表が指すアドレスが変わるため、終了コード 2 で拒否）。ネイティブターゲットでも拒否 |
-| `--release` | 最適化ビルド |
-| `--fast` | 最大性能（`--release` を含む + LTO + native CPU） |
+| `--release` | 最適化ビルド。opt-level=3、fat LTO、codegen-units=1。ターゲットが x86_64 なら **`x86-64-v3`（AVX2・FMA。Intel は 2013 年の Haswell 以降、AMD は 2017 年の Zen 以降）に合わせて調整する**（#3604）。実測（spectralnorm、実行時の `n`）では汎用 → v3 が AMD Zen3 で 87.8 → 67.2 ms、Intel Xeon 8581C で 57.1 → 45.4 ms。`native` は Zen3 で 109.8 ms と逆に遅く、一度既定にして取り消した（#3727 → #3734）。AVX2 を持たない CPU では `SIGILL` で落ちるので、そこに配るなら `--target-cpu portable`。aarch64 などほかのターゲットは汎用のまま |
+| `--target-cpu <cpu>` | `--release` のネイティブビルドを調整する CPU（#3604）。既定はターゲットの系統で決まり、x86_64 なら `x86-64-v3`、それ以外は rustc の汎用 CPU（クロスビルドでもターゲットの三つ組で決まる）。`portable` は汎用 CPU、それ以外の値は rustc の CPU 名としてそのまま渡す（`native`、`x86-64-v4`、`neoverse-n1` など）。クロスビルドに `native` を指定するとエラー、`--target wasm` に指定してもエラー（wasm は CPU に依存しない）。ランタイムの rlib も同じ CPU でビルドし、ビルドキャッシュの鍵に CPU が入る |
+| `--fast` | `--release` と同じ（互換のために残す） |
 | `--unchecked-index` | 配列の境界チェックを無効化（unsafe） |
 | `--no-check` | 型チェックをスキップ |
 | `--repr-c` | struct/enum に `#[repr(C)]` を付与（C ABI 互換） |
@@ -995,6 +996,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 <!-- almide switches --md: begin -->
 | 変数 | 種別 | 説明 |
 |---|---|---|
+| `ALMIDE_ABORT_SITE=value` | runtime | the testing.assert_aborts site a native test child runs (ADR-0029): set by the parent when it re-executes the test binary; never set by hand |
 | `ALMIDE_ALLOC_COUNT` | harness | build the native program with a counting allocator that prints `__ALMD_ALLOC allocs=N deallocs=N reallocs=N peak=N` on stderr when `__almide_main` returns (the native borrow oracle's allocation lane, tests/native_borrow_oracle_test.rs) |
 | `ALMIDE_BANG_RETURN` | ablation | turn OFF the per-position `!` desugars of the v1 lowering so every `!` reaches the bind-position rule or walls loudly (the decline-matrix probe) |
 | `ALMIDE_BENCH_DIR=value` | harness | the fixture directory of the structural leg's perf probe (default `crates/almide-wasm/tests/perf`) |
@@ -1055,6 +1057,8 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_FLOAT_SWEEP_N=value` | harness | how many xorshift64 bit patterns the float printer sweep prints and compares with Rust `format!` on each leg (default 100000; tests/float_to_string_cross_target_test.rs) |
 | `ALMIDE_FMOD_SWEEP_N=value` | harness | how many xorshift64 bit-pattern pairs the float `%` sweep compares with Rust `%` on each leg, as Float and as Float32 (default 20000; tests/float_fmod_cross_target_test.rs) |
 | `ALMIDE_FN_ESCAPE_OFF` | ablation | make BorrowInsertion borrow EVERY fn-typed param as `&dyn Fn`, escaping or not (#2288) — the ablation the ownership certifier's C5 sensitivity test drives |
+| `ALMIDE_FORCE_METER_CODEGEN` | route | build a metered (fan.bounded / fan.min / fan.timeout) native program through the standard codegen with its own deterministic meter, even when the whole program renders on v1 or its regions splice — the differential that holds the codegen meter to the v1 render (#3673) |
+| `ALMIDE_FORCE_METER_SPLICE` | route | build a metered (fan.bounded / fan.min / fan.timeout) native program through the standard codegen with the v1-rendered regions linked in, even when the whole program renders on v1 — the differential that holds the two routes' spends equal (#3669) |
 | `ALMIDE_FUEL_PROBE` | route | insert fuel charges into the native render (the charge probe); `almide run --time-report` sets it internally. Native-only: the wasm leg carries no charge trace (#2752) |
 | `ALMIDE_FUZZ_BASE=value` | harness | the first seed of the differential fuzz's fixed seed range (default 0) |
 | `ALMIDE_FUZZ_HOST_ORACLE` | harness | run the differential fuzz in host-oracle mode (arm selection is deterministic per seed and mode) |
@@ -1109,6 +1113,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_SURVIVE_OVERLAY=value` | route | set by `almide survive` on its child runs (#2147): every compiler read of this `.almd` path returns the text in `ALMIDE_SURVIVE_OVERLAY_TEXT` instead of the disk bytes, so a proposed edit is judged without being written |
 | `ALMIDE_SURVIVE_OVERLAY_TEXT=value` | route | the file holding the proposed text for `ALMIDE_SURVIVE_OVERLAY`; set without it, the overlay refuses to run rather than read the disk file |
 | `ALMIDE_TCO_DEBUG` | debug | print the native tail-call loop rewrite decisions |
+| `ALMIDE_TEST_ABORT_PROBE` | runtime | marks a native testing.assert_aborts child (ADR-0029) so `panic` takes the C-219 abort path there; set by the parent, never by hand |
 | `ALMIDE_TEST_LAX_WASM` | gate | let the default `almide test` lane (wasm first, native fallback) PASS a file whose wasm leg diverged — trapped where the native re-run passed; without it a diverged leg fails the run |
 | `ALMIDE_TEST_VERBOSE` | tool | show the full cargo / rustc output of the `almide test` harness build |
 | `ALMIDE_TEST_WASM_RUNNER=value` | tool | `wasmtime` runs the wasm leg of `almide test` on the `wasmtime` CLI (the stock `to_wasi` artifact) instead of the embedded host every `almide` binary carries (#3046) — the comparison route; unset is the embedded host |
@@ -1119,7 +1124,9 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_UPDATE_ALLOC` | harness | regenerate the structural leg's allocation baseline |
 | `ALMIDE_UPDATE_DUMPS` | harness | regenerate the structural leg's section-dump goldens |
 | `ALMIDE_UPDATE_GAUNTLET` | harness | regenerate the gauntlet manifest |
+| `ALMIDE_UPDATE_INSPECTION` | harness | add the missing rows to the stdlib inspection ledger and reset the stale ones |
 | `ALMIDE_UPDATE_INTERP_LEDGER` | harness | regenerate the interpreter abstain and bridge-fallback ledgers |
+| `ALMIDE_UPDATE_NAME_SITES` | harness | remove stale rows from the name-keyed property ledger and append the new sites (each still needs its `why`) |
 | `ALMIDE_UPDATE_NATIVE_OWN` | harness | regenerate the native result-ownership ledger |
 | `ALMIDE_UPDATE_SIZES` | harness | regenerate the structural leg's size baselines |
 | `ALMIDE_UPDATE_SIZE_LADDER` | harness | regenerate the stdlib-linking size ladder ledger (#2141) |
@@ -1131,6 +1138,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_VERSION_LINE=value` | ci | NOT read from the environment at run time: `build.rs` EMITS it as `cargo:rustc-env`, and `src/main.rs` reads it with `env!` at compile time. It is the string `almide --version` prints — `<version> (<kind>[, <sha>])` — assembled from ALMIDE_BUILD_PROVENANCE and ALMIDE_BUILD_SHA (#2384) |
 | `ALMIDE_WALL_REASON` | debug | make `almide test` say WHICH stage of the wasm leg declined a fallback file, not just `v1 wall` |
 | `ALMIDE_WASM_ALLOC_COUNT` | harness | emit the structural wasm leg's allocation counters (#2407: five i64 globals `$alloc`/`$free`/a region restore bump, exported as `__alloc_count` / `__alloc_reused` / `__alloc_bytes` / `__free_count` / `__region_reclaimed`; `main` also releases its top-let globals before returning) and make `almide run --target wasm` print `__ALMD_WASM_ALLOC allocs=N reused=N bytes=N frees=N reclaimed=N live=N heap_end=N` on stderr after the run, `live` being the heap blocks never released; off, the module is byte-identical to a build without the switch (the wasm twin of `ALMIDE_ALLOC_COUNT`; the ledgers are crates/almide-wasm/tests/golden/alloc-count-baseline.txt and live-at-exit-baseline.txt) |
+| `ALMIDE_WASM_CANONICAL_ALLOC` | harness | emit the structural wasm leg's `$alloc` without its free-list paths, so every request bumps (the stdlib inspection meter's fixed allocator, owner ruling 2026-10-15): a measured bytes-moved series then depends on the program's requests alone, not on which freed blocks the heap holds, and is an upper bound of the shipped module's copies; off, the module is byte-identical to a build without the switch (crates/almide-wasm/src/canonical_alloc.rs) |
 | `ALMIDE_WASM_FREES` | ci | the frees-churn gate's switch; its compiler reader retired with the v0 emitter (#782), the gate that still sets it is #2207's |
 | `ALMIDE_WASM_SKIP_STOCK_AUDIT` | route | skip the stock-WASI host-op audit on `almide build --target wasm` (the emitter-frontier probe the parity, diff-fuzz and availability gates build under); named ALMIDE_WASM_STRUCTURAL until #2934 |
 | `ALMIDE_WASM_WATCHDOG_SECS=value` | harness | the wall-time seconds the IN-PROCESS test runner's epoch watchdog (`run_wasm` / `run_wasm_with` / `run_wasm_capped` in almide-wasm-run) lets a module run before it traps with `interrupt` (default 30); `almide run --target wasm` and `almide bench --target wasm` arm no watchdog on any setting, as native has none (#2615) |

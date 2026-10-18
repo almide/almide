@@ -82,6 +82,8 @@ breaks = [
 # append-only. After 0.64.0, E084's range went back up to the exit status
 # 0..=255. A literal from 126 through 255 is accepted again; one below 0 or
 # above 255 is still E084. That change only accepts more programs, so it is not
+
+
 # an epoch.
 
 [[epoch]]
@@ -169,15 +171,59 @@ breaks = [
   "a call to an `args` reader is typed `Result[T, String]` and is propagated with `!` like any Almide-bodied effect fn's: `args.flag(\"verbose\")!`, `args.option(\"out\")! ?? \"-\"`; without it the value is a Result (E041 on a `let`, a type mismatch as an argument)",
 ]
 
+[[epoch]]
+n = 14
+since = "0.68.0"
+name = "domain-kernels-leave-the-stdlib"
+summary = "Thirty-three stdlib functions leave the language with no deprecation window (owner ruling 2026-10-17). The four LLM-provider streaming clients move to package almide/llm, built on the generic `http.request_stream` that stays; the twenty-five neural-network kernels of `matrix` move to package almide/nnlib, pure Almide over the generic `matrix` API that stays; the arena checkpoints `mem.save`/`mem.restore` (the whole `mem` module) and `bytes.heap_save`/`bytes.heap_restore`, v0 bump-allocator relics that are no-ops under reference counting, are deleted. A call to any of them is a check-time error whose hint is the entry below (crates/almide-frontend/src/removed_spellings.rs reads it from this ledger). The same epoch renames the fan selection forms (ADR-0028, decided 2026-10-17/18): `fan.race` is `fan.min(clock) { … }` — the clock argument is required and its TYPE says what \"least\" is measured on (`compute` = the least deterministic compute within the budget, ties to source order; `duration` lands separately, #3788) — and `fan.any` is removed: the first Ok in source order is a `??` chain, over a list `list.find_map(xs, (x) => f(x)?)`; every peer keeps try-in-order with its list functions (Rust/OCaml `find_map`, Elixir `find_value`), and in every other ecosystem `race` means \"first to finish\" and `any` \"no order guarantee\". The interim names `fan.first_ok` / `fan.min_cost` were never released. No deprecation window."
+breaks = [
+  "`http.anthropic_streaming_call(…)` → `import llm` + `llm.anthropic_streaming_call(…)` (package almide/llm: `almide add almide/llm@v0.1.0`; the same arguments, plus an optional trailing `base_url` that defaults to https://api.anthropic.com)",
+  "`http.anthropic_streaming_call_with_limits(…)` → `import llm` + `llm.anthropic_streaming_call_with_limits(…)` (package almide/llm: `almide add almide/llm@v0.1.0`; the same arguments, plus an optional trailing `base_url` that defaults to https://api.anthropic.com)",
+  "`http.openai_streaming_call(…)` → `import llm` + `llm.openai_streaming_call(…)` (package almide/llm: `almide add almide/llm@v0.1.0`)",
+  "`http.openai_streaming_call_with_limits(…)` → `import llm` + `llm.openai_streaming_call_with_limits(…)` (package almide/llm: `almide add almide/llm@v0.1.0`)",
+  "`matrix.qwen3_block_f32_kv(…)` → `import nnlib` + `nnlib.qwen3_block_f32_kv(…)` (package almide/nnlib: `almide add almide/nnlib@v0.1.0`; the same arguments)",
+  "`matrix.qwen3_block_q1_0_kv(…)` → `import nnlib` + `nnlib.qwen3_block_q1_0_kv(…)` (package almide/nnlib: `almide add almide/nnlib@v0.1.0`; the same arguments)",
+  "`matrix.qwen3_block_q8_0_kv(…)` → `import nnlib` + `nnlib.qwen3_block_q8_0_kv(…)` (package almide/nnlib: `almide add almide/nnlib@v0.1.0`; the same arguments)",
+  "`matrix.from_q1_0_bytes(…)` → `import nnlib` + `nnlib.from_q1_0_bytes(…)` (package almide/nnlib: `almide add almide/nnlib@v0.1.0`; the same arguments)",
+  "`matrix.linear_q1_0_row_no_bias(…)` → `import nnlib` + `nnlib.linear_q1_0_row_no_bias(…)` (package almide/nnlib: `almide add almide/nnlib@v0.1.0`; the same arguments)",
+  "`matrix.select_rows_q1_0(…)` → `import nnlib` + `nnlib.select_rows_q1_0(…)` (package almide/nnlib: `almide add almide/nnlib@v0.1.0`; the same arguments)",
+  "`matrix.linear_q8_0_row_no_bias(…)` → `import nnlib` + `nnlib.linear_q8_0_row_no_bias(…)` (package almide/nnlib: `almide add almide/nnlib@v0.1.0`; the same arguments)",
+  "`matrix.select_rows_q8_0_dq(…)` → `import nnlib` + `nnlib.select_rows_q8_0_dq(…)` (package almide/nnlib: `almide add almide/nnlib@v0.1.0`; the same arguments)",
+  "`matrix.attention_weights(…)` → `import nnlib` + `nnlib.attention_weights(…)` (package almide/nnlib: `almide add almide/nnlib@v0.1.0`; the same arguments)",
+  "`matrix.scaled_dot_product_attention(…)` → `import nnlib` + `nnlib.scaled_dot_product_attention(…)` (package almide/nnlib: `almide add almide/nnlib@v0.1.0`; the same arguments)",
+  "`matrix.multi_head_attention(…)` → `import nnlib` + `nnlib.multi_head_attention(…)` (package almide/nnlib: `almide add almide/nnlib@v0.1.0`; the same arguments)",
+  "`matrix.masked_multi_head_attention(…)` → `import nnlib` + `nnlib.masked_multi_head_attention(…)` (package almide/nnlib: `almide add almide/nnlib@v0.1.0`; the same arguments)",
+  "`matrix.rope_rotate(…)` → `import nnlib` + `nnlib.rope_rotate(…)` (package almide/nnlib: `almide add almide/nnlib@v0.1.0`; the same arguments)",
+  "`matrix.rope_rotate_at(…)` → `import nnlib` + `nnlib.rope_rotate_at(…)` (package almide/nnlib: `almide add almide/nnlib@v0.1.0`; the same arguments)",
+  "`matrix.rope_rotate_neox_at(…)` → `import nnlib` + `nnlib.rope_rotate_neox_at(…)` (package almide/nnlib: `almide add almide/nnlib@v0.1.0`; the same arguments)",
+  "`matrix.gelu(…)` → `import nnlib` + `nnlib.gelu(…)` (package almide/nnlib: `almide add almide/nnlib@v0.1.0`; the same arguments)",
+  "`matrix.silu_mul(…)` → `import nnlib` + `nnlib.silu_mul(…)` (package almide/nnlib: `almide add almide/nnlib@v0.1.0`; the same arguments)",
+  "`matrix.swiglu_gate(…)` → `import nnlib` + `nnlib.swiglu_gate(…)` (package almide/nnlib: `almide add almide/nnlib@v0.1.0`; the same arguments)",
+  "`matrix.linear_row_gelu(…)` → `import nnlib` + `nnlib.linear_row_gelu(…)` (package almide/nnlib: `almide add almide/nnlib@v0.1.0`; the same arguments)",
+  "`matrix.fused_gemm_bias_scale_gelu(…)` → `import nnlib` + `nnlib.fused_gemm_bias_scale_gelu(…)` (package almide/nnlib: `almide add almide/nnlib@v0.1.0`; the same arguments)",
+  "`matrix.rms_norm_rows(…)` → `import nnlib` + `nnlib.rms_norm_rows(…)` (package almide/nnlib: `almide add almide/nnlib@v0.1.0`; the same arguments)",
+  "`matrix.layer_norm_rows(…)` → `import nnlib` + `nnlib.layer_norm_rows(…)` (package almide/nnlib: `almide add almide/nnlib@v0.1.0`; the same arguments)",
+  "`matrix.pre_norm_linear(…)` → `import nnlib` + `nnlib.pre_norm_linear(…)` (package almide/nnlib: `almide add almide/nnlib@v0.1.0`; the same arguments)",
+  "`matrix.causal_mask_add(…)` → `import nnlib` + `nnlib.causal_mask_add(…)` (package almide/nnlib: `almide add almide/nnlib@v0.1.0`; the same arguments)",
+  "`matrix.softmax_rows(…)` → `import nnlib` + `nnlib.softmax_rows(…)` (package almide/nnlib: `almide add almide/nnlib@v0.1.0`; the same arguments)",
+  "`mem.save()` → delete the call, and the `import mem` line with it: it took or rewound an opaque arena checkpoint, and under reference counting it did nothing on any target",
+  "`mem.restore(mark)` → delete the call, and the `import mem` line with it: it took or rewound an opaque arena checkpoint, and under reference counting it did nothing on any target",
+  "`bytes.heap_save()` → delete the call: it took or rewound an opaque arena checkpoint, and under reference counting it did nothing on any target",
+  "`bytes.heap_restore(mark)` → delete the call: it took or rewound an opaque arena checkpoint, and under reference counting it did nothing on any target",
+  "the pre-#3338 callback spellings a package's `native/*.rs` could still call (deprecation `legacy-native-callback-names`, #3425, since epoch 10) are gone: a `native/*.rs` calling `crate::almide_rt_<pkg>_v<N>_<fn>` or `..._v<N>_<sub>_<fn>` gets rustc E0425 — write the injective name (`_` in a segment is `_0`, a `.` is `_1`: `almide_rt_tf_v0_calc_double` → `almide_rt_tf_0v0_1calc_double`)",
+  "`testing.assert_throws(f, expected)` → rewrite as `testing.assert_aborts(expected, f)`: the expected text comes first, and `f` must be a lambda that captures nothing (it runs in a child process or instance); every abort counts — `panic`, index out of bounds, division by zero, a failed assert — not only `panic`. Outside a test block there is nothing to rewrite to: the call could only fail, so delete it",
+  "`fan.race { … }`, `fan.race(budget) { … }`, `fan.race(xs, f)` and `fan.race(budget, xs, f)` are E027; write `fan.min(compute.ms(n)) { … }` / `fan.min(compute.ms(n), xs, f)` — the arms and mapper are unchanged, and the budget is now required (`fan.min { … }` and `fan.min(xs, f)` without a clock are parse errors)",
+  "`fan.any { a(), b() }` is E027; write `a() ?? b() ?? fallback` — the same first-Ok-in-source-order, and later candidates never run once one succeeds; the value is the winner's payload (not a Result), so the all-failed case is the fallback, not an Err",
+  "`fan.any(xs, f)` is E027; write `list.find_map(xs, (x) => f(x)?) ?? fallback` — `?` turns an element's Err into none so the element is skipped; the all-failed case is `none`, so the fixed text `fan.any: all candidates failed` no longer exists",
+  "the all-failed error text of `fan.min` is `fan.min: no branch succeeded within budget` (was `fan.race: no branch completed within budget`); a program matching on the old text must match the new one",
+]
+
 # DEPRECATIONS — spellings accepted for a window, with the epoch that removes them
 # =============================================================
 
-[[deprecation]]
-id = "legacy-native-callback-names"
-issue = 3425
-since_epoch = 10
-since = "0.67.0"
-removal_epoch = 14
-summary = "A package's `native/*.rs` may still call the package's own fns by their spelling before #3338 (`almide_rt_tf_v0_entry`, `almide_rt_tf_v0_calc_double`), through a deprecated alias of the injective name (`almide_rt_tf_0v0_entry`, `almide_rt_tf_0v0_1calc_double`). The build warns once per old name it finds. A name that the old spelling made ambiguous (`a.b` and `a_b`) gets no alias."
-removal = "epoch 14 drops the aliases: a `native/*.rs` calling `crate::almide_rt_<pkg>_v<N>_<fn>` or `..._v<N>_<sub>_<fn>` gets rustc E0425 — write the injective name the warning prints (`_` in a segment is `_0`, a `.` is `_1`)"
+# None open. `legacy-native-callback-names` (#3425, since epoch 10) reached its
+# removal_epoch 14 and is a break of epoch 14 above. A new window is a
+# [[deprecation]] block: id, issue, since_epoch, since, removal_epoch,
+# summary, removal.
+
 # ======================================================

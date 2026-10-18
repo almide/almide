@@ -45,14 +45,16 @@ impl Parser {
         // building a zero-length Ident (#1457). The generic copy-paste hint
         // would send the reader looking for an invisible character, so name the
         // construct that actually failed.
+        let compat = super::caseless::compatibility_hint(ch);
         let hint = if ch == '`' {
             "A backtick escape wraps a name that would otherwise be a keyword — \
-             `type`, `protocol`. It takes ASCII letters, digits and '_', and cannot \
-             be empty, so it does not make a non-ASCII name writable either."
+             `type`, `protocol`. It takes identifier characters and cannot be empty."
         } else {
-            "This character is not Almide syntax. Full-width or invisible Unicode \
-             characters often sneak in from copy-paste — delete it, or move it into \
-             a string or comment."
+            compat.as_deref().unwrap_or(
+                "This character is not Almide syntax. Full-width or invisible Unicode \
+                 characters often sneak in from copy-paste — delete it, or move it into \
+                 a string or comment.",
+            )
         };
         let diag = self.diag_error(msg.clone(), hint, "unknown-char");
         self.errors.push(diag);

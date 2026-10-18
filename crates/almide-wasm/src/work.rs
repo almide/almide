@@ -62,8 +62,6 @@ pub(crate) enum Helper {
     /// Table 3-7 well-formed ranges, one U+FFFD per MAXIMAL invalid
     /// subpart (the WHATWG replacement walk).
     Utf8Lossy,
-    /// `$fast_exp(f64) -> f64` — the canonical unfused fast-exp (#1197).
-    FastExp,
     /// `$named_<op>_<ti>(a, b) -> i32` — the runtime-recursive body of a
     /// type-directed walk over a RECURSIVE Named type (the DisplayNamed
     /// doctrine for `==` and for the total order). Both ops have the same
@@ -80,10 +78,6 @@ pub(crate) enum Helper {
     /// family's DEEP lane: compound keys (tuples, records) compare by
     /// the type-directed `==` instead of a word/byte class.
     ScanDeep { key: crate::ETy },
-    /// `$q10_val(data, off, k) -> f64` — one Q1_0 weight (global-k).
-    Q10Val,
-    /// `$gelu(f64) -> f64` — tanh-approximation gelu over `$fast_exp`.
-    GeluScalar { fast_exp: u32 },
     /// `$bytes_to_string(bytes) -> i32` — std::str::from_utf8 verbatim:
     /// ok(shared block) or err(the Utf8Error Display line, "invalid
     /// UTF-8: " prefixed — the native wrapper's format).
@@ -135,7 +129,14 @@ pub(crate) enum Helper {
     MapIdxHash { key: crate::map_index::IdxKey },
     MapIdxBuild { key: crate::map_index::IdxKey, hash: u32 },
     MapIdxFind { key: crate::map_index::IdxKey, fns: crate::map_index::IdxFns, build: u32 },
-    MapIdxAppend { key: crate::map_index::IdxKey, fns: crate::map_index::IdxFns },
+    MapIdxAppend { key: crate::map_index::IdxKey, fns: crate::map_index::IdxFns, grow: u32 },
+    /// The hole family (#3691, map_index.rs "Holes"): the index doubled with
+    /// its tombstones dropped, the delete's tombstone, the in-place
+    /// compaction and the hole count.
+    MapIdxGrow { key: crate::map_index::IdxKey, hash: u32 },
+    MapIdxKill { key: crate::map_index::IdxKey, fns: crate::map_index::IdxFns, build: u32 },
+    MapIdxSettle { key: crate::map_index::IdxKey, fns: crate::map_index::IdxFns },
+    MapIdxDead { side_get: u32 },
     /// `$drop_list(block)` — the typed drop of a List whose elements are
     /// heap HANDLES (#2010 stage 2b): the spine's credit down; at zero
     /// every element released through `elem_dec` (`$dec_flat` for a

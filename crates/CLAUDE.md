@@ -59,6 +59,14 @@ almide-spine          Salsa-cached front queries + the parity gates; its s5
                       product leg and the gates judge ONE implementation
 almide-corpus         Corpus path resolution (in-tree, or the als/ judge mount
                       in the greenfield form)
+almide-str            ADR-0013's shared string buffer (AlmideStr: one block
+                      [rc: u32, spare: u32, len | bytes], a 16-byte header,
+                      edited through a unique view). Raw allocation, so it
+                      does not take the workspace's `forbid(unsafe_code)`;
+                      CI runs its tests under Miri (`miri-almide-str`).
+                      Every generated native program splices it in as its
+                      Almide String (`AlmideString = AlmideStr`;
+                      docs/roadmap/active/adr-0013-string-sharing.md)
 ```
 
 `almide-interp` is a *sibling consumer* of the linked IR, not part of the
@@ -130,6 +138,7 @@ The shapes to copy already exist: `VarId`/`VarTable` and `DefId`/`DefTable` in
 ## When Adding a New Feature
 
 - **New syntax** → almide-syntax (parser) → almide-frontend (checker + lowering) → almide-codegen (passes + templates)
-- **New stdlib function** → pure-Almide impl in `stdlib/<module>[_<part>].almd`; register for WASM + interp in `almide-types/src/self_host_registry.rs` (`self_host_runtime()`); native intrinsics (only when needed) in `runtime/rs/src/<module>.rs` + `@intrinsic` declaration. To keep the 3-way oracle covering it (instead of skipping it), also add the glue to almide-interp's bridge — it is hand-maintained, NOT auto-generated. See [almide-interp/CLAUDE.md](./almide-interp/CLAUDE.md#coverage-model--does-a-new-stdlib-fn-get-covered-automatically).
+- **New stdlib function** → pure-Almide impl in `stdlib/<module>[_<part>].almd`; register it for WASM + interp with `@implements("module.fn")` above the body's `fn` (the build generates the row; `self_host_registry.rs` is a legacy table that only shrinks); native intrinsics (only when needed) in `runtime/rs/src/<module>.rs` + `@intrinsic` declaration. To keep the 3-way oracle covering it (instead of skipping it), also add the glue to almide-interp's bridge — it is hand-maintained, NOT auto-generated. See [almide-interp/CLAUDE.md](./almide-interp/CLAUDE.md#coverage-model--does-a-new-stdlib-fn-get-covered-automatically).
 - **New type** → almide-types (Ty variant) → almide-frontend (inference rules) → almide-ir (IR nodes) → almide-codegen (emission)
 - **New codegen target** → almide-codegen (pass pipeline + TOML template + target entry)
+- **A property several stdlib functions share** (consumes its source, mutates in place, may reuse a dying source, …) → declare it AT the functions, as an attribute on their `.almd` declaration (`@consume`, `@borrow_ref`, …), and make every leg read that declaration. Never answer it with a list of their names (`matches!(f, "set" | "swap")`, `&["almide_rt_…", …]`): the list is a second copy of the property, and a function added later is silently missing from it. Gated by `tests/name_keyed_sites_test.rs` against `proofs/name-keyed-sites.toml` — the pre-gate name lists are `legacy` rows that may only shrink, and a new one is refused.

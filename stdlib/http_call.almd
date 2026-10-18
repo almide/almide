@@ -105,3 +105,18 @@ effect fn __hc_stream_limited_impl(method: String, url: String, body: String, he
   let c = __hc_start_impl(method, url, body, headers, total_ms, idle_ms)!
   __hc_pump(c, on_chunk)
 }
+
+// Plain `request_stream`: the call core's CLASSIC call — no limits named, the
+// client read timeout (ALMIDE_HTTP_TIMEOUT_SECS) between arrivals, as on
+// native, which runs the same core (http_call_core.rs). Both limit cells
+// read `classic`, which no Int limit can spell.
+fn __hc_classic_frame(method: String, body: String, headers: Map[String, String]) -> String = map.entries(headers) |> list.map(((k, v)) => "${__hc_cell(k)}${__hc_cell(v)}") |> list.fold(
+  "${__hc_cell(method)}${__hc_cell(body)}${__hc_cell("classic")}${__hc_cell("classic")}",
+  (acc, cell) => acc + cell,
+)
+
+@implements("http.request_stream")
+effect fn __hc_stream_classic_impl(method: String, url: String, body: String, headers: Map[String, String], on_chunk: (String) -> Unit) -> Result[Unit, String] = {
+  let c = __http_call_open(url, __hc_classic_frame(method, body, headers))!
+  __hc_pump(c, on_chunk)
+}

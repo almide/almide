@@ -365,7 +365,8 @@ pub struct AlmideHttpRoute {
 /// userinfo unless the caller sent an `Authorization`, the proxy's
 /// credentials, a `Content-Length` whenever a body rides along (plus a
 /// default JSON `Content-Type` unless the caller named one), then the
-/// caller's headers in map order. A caller's `Host` replaces ours, as in
+/// caller's headers in map order, less a `Content-Length` (the client frames
+/// the body, `HTTP_FRAMING_HEADERS`). A caller's `Host` replaces ours, as in
 /// curl. ONE writer for every client shape, so the wire request cannot drift
 /// between them. The headers must have passed `http_check_request`.
 pub fn http_request_bytes(
@@ -393,7 +394,7 @@ pub fn http_request_bytes(
             req.push_str("Content-Type: application/json\r\n");
         }
     }
-    for (k, v) in headers.iter() {
+    for (k, v) in headers.iter().filter(|(k, _)| !http_is_framing_header(k)) {
         req.push_str(&format!("{}: {}\r\n", k, v));
     }
     req.push_str("\r\n");

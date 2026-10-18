@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/almide-base", "crates/almide-syntax", "crates/almide-types", "crates/almide-lang", "crates/almide-ir", "crates/almide-mir", "crates/almide-dialect", "crates/almide-codegen", "crates/almide-optimize", "crates/almide-frontend", "crates/almide-driver", "crates/almide-interp", "crates/almide-tools", "crates/almide-egg-lab", "crates/almide-layout", "crates/almide-corpus", "crates/almide-rt-core", "crates/almide-wasm", "crates/almide-wasm-run", "crates/almide-wasi", "crates/almide-wasm-vm", "crates/almide-spine", "crates/almide-verify"]
+members = [".", "crates/almide-base", "crates/almide-syntax", "crates/almide-types", "crates/almide-lang", "crates/almide-ir", "crates/almide-mir", "crates/almide-dialect", "crates/almide-codegen", "crates/almide-optimize", "crates/almide-frontend", "crates/almide-driver", "crates/almide-interp", "crates/almide-tools", "crates/almide-egg-lab", "crates/almide-layout", "crates/almide-corpus", "crates/almide-rt-core", "crates/almide-str", "crates/almide-wasm", "crates/almide-wasm-run", "crates/almide-wasi", "crates/almide-wasm-vm", "crates/almide-spine", "crates/almide-verify"]
 # `cargo build` at the root builds the compiler AND the independent verifier
 # binary (#2152): `almide verify` execs `almide-verify` from next to itself and
 # has no linked fallback, so a build that produced one without the other would
@@ -22,7 +22,7 @@ unsafe_code = "forbid"
 
 [package]
 name = "almide"
-version = "0.67.1"
+version = "0.68.0"
 edition = "2024"
 # Runner-class MSRV: the binary embeds the wasmtime 49 host (the commissioned
 # wasm leg). Compiler crates keep their own 1.89 claim via workspace.package.
@@ -108,6 +108,8 @@ almide-corpus = { path = "crates/almide-corpus" }
 # --emit` writes with the verifier's own parser. The almide binary never links
 # it — `almide verify` execs the separate almide-verify binary, no fallback.
 almide-verify = { path = "crates/almide-verify" }
+# The name-keyed-site gate parses the compiler's own source (tests/name_keyed_sites_test.rs).
+syn = { version = "3", default-features = false, features = ["full", "visit", "parsing"] }
 
 # The root build.rs (docs/diagnostics) and almide-types (stdlib/) re-embed repo
 # content on any mtime bump — git pull/checkout triggers a full opt-3 recompile

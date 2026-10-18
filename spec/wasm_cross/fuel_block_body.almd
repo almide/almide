@@ -36,7 +36,7 @@ effect fn main() -> Unit = {
   println(int.to_string(u))
   let z = fan.bounded(compute.ms(0)) { 42 } ?? -1
   println(int.to_string(z))
-  let w = fan.race {
+  let w = fan.min(compute.ms(100)) {
     {
       let a = heavy(1000)
       a + 1

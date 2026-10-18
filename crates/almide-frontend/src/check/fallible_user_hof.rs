@@ -257,18 +257,33 @@ fn cb_called_inside_loop(body: &Expr, cb: Sym) -> bool {
 /// a named fn declared `-> T!`.
 fn arg_is_fallible(arg: &Expr, fallible_marker_fns: &HashSet<Sym>) -> bool {
     match &arg.kind {
-        ExprKind::Lambda { body, .. } => {
-            let mut found = false;
-            ast::visit_expr(body, &mut |e| {
-                if matches!(e.kind, ExprKind::Unwrap { .. }) {
-                    found = true;
-                }
-            });
-            found
-        }
+        ExprKind::Lambda { body, .. } => body_has_own_bang(body),
         ExprKind::Ident { name } => fallible_marker_fns.contains(name),
         _ => false,
     }
+}
+
+/// Does a lambda body hold a `!` of its OWN — one outside every lambda nested
+/// in it? A nested lambda's `!` propagates into that lambda's channel, not
+/// the outer one's (#3749: `(next) => (x) => next(x)! + 1` is an infallible
+/// middleware returning a fallible handler), so it does not make the outer
+/// lambda a fallible callback.
+pub(crate) fn body_has_own_bang(body: &Expr) -> bool {
+    let mut nested: HashSet<*const Expr> = HashSet::new();
+    ast::visit_expr(body, &mut |e| {
+        if let ExprKind::Lambda { body: inner, .. } = &e.kind {
+            ast::visit_expr(inner, &mut |c| {
+                nested.insert(c as *const Expr);
+            });
+        }
+    });
+    let mut found = false;
+    ast::visit_expr(body, &mut |e| {
+        if matches!(e.kind, ExprKind::Unwrap { .. }) && !nested.contains(&(e as *const Expr)) {
+            found = true;
+        }
+    });
+    found
 }
 
 /// In the twin body, every direct `cb(...)` call gains the explicit `!` — the

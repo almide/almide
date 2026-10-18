@@ -542,7 +542,7 @@ pub(crate) fn dispatch(cli: crate::cli_args::Cli) {
             let file = resolve_file(file);
             cli::cmd_bench(&file, runs, target.as_deref(), &program_args);
         }
-        Commands::Build { file, o, target, release, fast, unchecked_index, no_check, repr_c, cdylib, emit_unverified, verified: _, no_verified, wasm_opt, component, heap_cap, host, debug } => {
+        Commands::Build { file, o, target, release, fast, target_cpu, unchecked_index, no_check, repr_c, cdylib, emit_unverified, verified: _, no_verified, wasm_opt, component, heap_cap, host, debug } => {
             let file = resolve_file(file);
             warn_no_verified_deprecated(no_verified);
             cli::cmd_build(cli::BuildArgs {
@@ -551,6 +551,7 @@ pub(crate) fn dispatch(cli: crate::cli_args::Cli) {
                 target: target.as_deref(),
                 release: release || fast,
                 fast,
+                target_cpu: target_cpu.as_deref(),
                 unchecked_index,
                 no_check,
                 repr_c,

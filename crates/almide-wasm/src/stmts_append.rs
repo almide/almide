@@ -100,13 +100,16 @@ impl Emitter<'_> {
         let Some(&(idx, SliceTy::List(h))) = self.locals.get(var) else {
             return Ok(false);
         };
-        let Some((left, right)) = concat_operands(value, almide_ir::BinOp::ConcatList) else {
-            return Ok(false);
+        let is_var = |e: &IrExpr| matches!(&e.kind, IrExprKind::Var { id } if id == var);
+        // `data + [e]` appends; `[e] + data` (#3519) pushes, then shifts.
+        let (lit, front) = match concat_operands(value, almide_ir::BinOp::ConcatList) {
+            Some((left, right)) if is_var(left) => (right, false),
+            _ => match crate::tail_append::prepend_operands(value) {
+                Some((left, right)) if is_var(right) => (left, true),
+                _ => return Ok(false),
+            },
         };
-        if !matches!(&left.kind, IrExprKind::Var { id } if id == var) {
-            return Ok(false);
-        }
-        let IrExprKind::List { elements } = &right.kind else {
+        let IrExprKind::List { elements } = &lit.kind else {
             return Ok(false);
         };
         let [elem] = &elements[..] else {
@@ -131,7 +134,11 @@ impl Emitter<'_> {
         self.rc_share_guard(elem, el);
         self.witness_store(elem, el);
         let push = if el.slot_size() == 8 { F_LIST_PUSH_8 } else { F_LIST_PUSH_4 };
-        self.f.instructions().call(push).local_set(idx);
+        self.f.instructions().call(push);
+        if front {
+            self.shift_pushed_to_front(el.slot_size())?;
+        }
+        self.f.instructions().local_set(idx);
         self.rc_own(idx, SliceTy::List(h));
         Ok(true)
     }
@@ -242,6 +249,30 @@ impl Emitter<'_> {
             _ => return Ok(false),
         };
         self.emit_field_append(target, head, &place, appended)?;
+        Ok(true)
+    }
+
+    /// #3639: `string.push(b.text, x)` is the field window's
+    /// `b.text = b.text + x` — the same place, the same admission (the
+    /// pushed operand must not read the root), the same in-place append.
+    /// The receiver is the window's head and `x` its appended operand, both
+    /// the call's own nodes. `false` = not admitted; the caller keeps the
+    /// copy-on-write field write.
+    pub(crate) fn try_field_push_str(&mut self, recv: &IrExpr, x: &IrExpr) -> Result<bool, EmitError> {
+        let Some((target, path)) = crate::list_mut::record_field_receiver(recv) else {
+            return Ok(false);
+        };
+        let Some(place) = self.field_append_place(&target, &path) else {
+            return Ok(false);
+        };
+        if place.leaf.0 != STR || almide_ir::free_vars::free_vars(x, &Default::default()).contains(&target) {
+            return Ok(false);
+        }
+        self.emit_field_append(&target, recv, &place, Appended::Str(x))?;
+        // The window lowered `x` itself (its own sites recorded the operand's
+        // birth and release), not through `lower_arg`: name it to the
+        // module-call audit as the arm's own argument.
+        self.witness_inline_arg(x);
         Ok(true)
     }
 

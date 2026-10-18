@@ -1,0 +1,3 @@
+expects_code = "E002"
+expects_error = "undefined function 'matrix.from_q1_0_bytes'"
+hint_substring = "nnlib.from_q1_0_bytes"

@@ -22,21 +22,10 @@ impl Emitter<'_> {
     /// accumulator is not reachable from the callback, and an abort ends the
     /// run). Returns the result list's type when it took the body.
     fn try_flat_map_literal_tail(&mut self, body: &IrExpr, hacc: u32) -> Result<Option<ETy>, EmitError> {
-        let (stmts, tail): (&[almide_ir::IrStmt], &IrExpr) = match &body.kind {
-            almide_ir::IrExprKind::Block { stmts, expr: Some(t) } => (stmts, t),
-            almide_ir::IrExprKind::List { .. } => (&[], body),
-            _ => return Ok(None),
-        };
-        let almide_ir::IrExprKind::List { elements } = &tail.kind else {
-            return Ok(None);
-        };
-        let SliceTy::List(bi) = self.infer(tail)? else {
+        let Some((stmts, elements, bi)) = self.flat_map_literal_tail(body)? else {
             return Ok(None);
         };
         let el = self.types.el(bi);
-        if !matches!(el, SliceTy::Scalar(Scalar::Int | Scalar::Float)) {
-            return Ok(None);
-        }
         for s in stmts {
             self.lower_stmt(s)?;
         }
@@ -52,12 +41,70 @@ impl Emitter<'_> {
         Ok(Some(bi))
     }
 
+    /// The body's statements, its tail list literal's elements and the
+    /// literal's type, when the tail is a list literal of Int / Float.
+    #[allow(clippy::type_complexity)]
+    fn flat_map_literal_tail<'b>(&mut self, body: &'b IrExpr) -> Result<Option<(&'b [almide_ir::IrStmt], &'b [IrExpr], ETy)>, EmitError> {
+        let (stmts, tail): (&[almide_ir::IrStmt], &IrExpr) = match &body.kind {
+            almide_ir::IrExprKind::Block { stmts, expr: Some(t) } => (stmts, t),
+            almide_ir::IrExprKind::List { .. } => (&[], body),
+            _ => return Ok(None),
+        };
+        let almide_ir::IrExprKind::List { elements } = &tail.kind else {
+            return Ok(None);
+        };
+        let SliceTy::List(bi) = self.infer(tail)? else {
+            return Ok(None);
+        };
+        let scalar = matches!(self.types.el(bi), SliceTy::Scalar(Scalar::Int | Scalar::Float));
+        Ok(scalar.then_some((stmts, elements.as_slice(), bi)))
+    }
+
+    /// Push every `stride`-byte slot of the chunk list in `hs` onto the
+    /// accumulator in `hacc` through `$list_push_*`'s amortized window: the
+    /// slots' bits move, no count changes.
+    fn push_chunk_slots(&mut self, hacc: u32, hs: u32, stride: i32) -> Result<(), EmitError> {
+        let hj = self.hold_i32()?;
+        let he = self.hold_i32()?;
+        let mut i = self.f.instructions();
+        i.local_get(hs).i32_load(len_memarg()).local_set(he);
+        i.i32_const(0).local_set(hj);
+        i.block(BlockType::Empty).loop_(BlockType::Empty);
+        i.local_get(hj).local_get(he).i32_ge_u().br_if(1);
+        i.local_get(hacc);
+        i.local_get(hs).local_get(hj).i32_add();
+        if stride == 8 {
+            i.i64_load(slot_memarg(0)).call(F_LIST_PUSH_8);
+        } else {
+            i.i32_load(slot_memarg(0)).call(F_LIST_PUSH_4);
+        }
+        i.local_set(hacc);
+        i.local_get(hj).i32_const(stride).i32_add().local_set(hj);
+        i.br(0).end().end();
+        self.release_i32();
+        self.release_i32();
+        Ok(())
+    }
+
     pub(crate) fn lower_list_flat_map(&mut self, xs: &IrExpr, cb: &IrExpr) -> ArmResult {
         let (params, body) = self.hof_lambda(cb, 1)?;
         let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
         let hs = self.hold_i32()?;
         let hacc = self.hold_i32()?;
-        self.f.instructions().i32_const(0).call(F_ALLOC).local_set(hacc);
+        // A literal tail of L scalars makes the result exactly len(xs) * L
+        // slots: reserve them (`$alloc` sets cap; len starts at 0) so the
+        // pushes never regrow — growth by doubling from empty allocated and
+        // copied about twice the result.
+        match self.flat_map_literal_tail(body)? {
+            Some((_, elements, _)) => {
+                let mut i = self.f.instructions();
+                i.local_get(ch).i32_const(8 * elements.len() as i32).i32_mul().call(F_ALLOC).local_tee(hacc);
+                i.i32_const(0).i32_store(len_memarg());
+            }
+            None => {
+                self.f.instructions().i32_const(0).call(F_ALLOC).local_set(hacc);
+            }
+        }
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
         self.hof_elem_into(elem, bh, ch, ih, params[0]);
         self.witness_callback_open(cb, None);
@@ -74,7 +121,8 @@ impl Emitter<'_> {
         let SliceTy::List(bi) = got else {
             return unsup(&format!("flat-map-body:{got:?}"));
         };
-        if matches!(self.types.el(bi), SliceTy::Scalar(Scalar::Int | Scalar::Float)) {
+        let el = self.types.el(bi);
+        if matches!(el, SliceTy::Scalar(Scalar::Int | Scalar::Float)) {
             // 8-byte scalar chunks ride the amortized push window (#1729):
             // the per-element $concat re-copied the WHOLE accumulator and
             // freed neither side, so n chunks retained O(n²) bytes — 2^16
@@ -89,48 +137,30 @@ impl Emitter<'_> {
             // #2755: shared when borrowed, released after the walk either way.
             self.witness_shared_released(body, got);
             self.f.instructions().local_set(hs);
-            let hj = self.hold_i32()?;
-            let he = self.hold_i32()?;
-            self.f.instructions().local_get(hs).i32_load(len_memarg()).local_set(he);
-            self.f.instructions().i32_const(0).local_set(hj);
-            self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
-            self.f.instructions().local_get(hj).local_get(he).i32_ge_u().br_if(1);
-            self.f.instructions().local_get(hacc);
-            self.f.instructions().local_get(hs).local_get(hj).i32_add();
-            self.f.instructions().i64_load(slot_memarg(0));
-            self.f.instructions().call(F_LIST_PUSH_8).local_set(hacc);
-            self.f.instructions().local_get(hj).i32_const(8).i32_add().local_set(hj);
-            self.f.instructions().br(0).end().end();
+            self.push_chunk_slots(hacc, hs, 8)?;
             self.f.instructions().local_get(hs).call(F_DEC_FLAT);
-            self.release_i32();
-            self.release_i32();
         } else {
-            // Handle-element chunks keep the concat merge: their interiors
-            // are co-owned by the chunk, and freeing after a raw byte copy
-            // needs the Dup discipline (the C-186 trap) — outside this
-            // window, as in the assign-site append gate.
-            //
+            // Handle-element chunks (#3756) ride the same push window with
+            // 4-byte slots. The per-element $concat they took allocated a
+            // whole new accumulator every iteration — O(n²) bytes; 20,000
+            // Strings requested 1.7 GB under the canonical allocator.
             //
             // #2977: the chunk's handles are COPIED into the accumulator, so
             // the accumulator takes one credit per element right here (the
             // chunk's own credits stay the chunk's — fuzz 20260912: a
             // callback returning a captured list); an OWNED chunk is then
             // this arm's temporary and goes with its typed drop, a borrowed
-            // one is its holder's. The outgrown accumulator is a spine whose
-            // credits moved with the concat's byte copy: its spine goes.
+            // one is its holder's. The pushes move bits, never credits, so
+            // the accumulator's regrowth releases nothing.
             let chunk_owned = self.rc_owned_result(crate::rc_ownership::rc_tail(body));
-            let prev = self.hold_i32()?;
             self.f.instructions().local_set(hs);
-            self.emit_inc_elems(hs, self.types.el(bi));
-            self.f.instructions().local_get(hacc).local_tee(prev).local_get(hs).call(F_CONCAT);
-            self.f.instructions().local_set(hacc);
-            self.f.instructions().local_get(prev).call(F_DEC_FLAT);
+            self.emit_inc_elems(hs, el);
+            self.push_chunk_slots(hacc, hs, 4)?;
             if chunk_owned {
                 let dec = self.dec_fn_of(got);
                 self.f.instructions().local_get(hs).call(dec);
             }
             self.witness_owned_released(body, got);
-            self.release_i32();
         }
         self.witness_loop_close();
         self.hof_step(ih);
@@ -146,7 +176,20 @@ impl Emitter<'_> {
         let (elem, bh, ch, ih) = self.hof_loop_open(xs)?;
         let hr = self.hold_i32()?;
         let hacc = self.hold_i32()?;
-        self.f.instructions().i32_const(0).call(F_ALLOC).local_set(hacc);
+        // A literal tail of L scalars makes the result exactly len(xs) * L
+        // slots: reserve them (`$alloc` sets cap; len starts at 0) so the
+        // pushes never regrow — growth by doubling from empty allocated and
+        // copied about twice the result.
+        match self.flat_map_literal_tail(body)? {
+            Some((_, elements, _)) => {
+                let mut i = self.f.instructions();
+                i.local_get(ch).i32_const(8 * elements.len() as i32).i32_mul().call(F_ALLOC).local_tee(hacc);
+                i.i32_const(0).i32_store(len_memarg());
+            }
+            None => {
+                self.f.instructions().i32_const(0).call(F_ALLOC).local_set(hacc);
+            }
+        }
         self.f.instructions().block(BlockType::Empty).loop_(BlockType::Empty);
         self.hof_elem_into(elem, bh, ch, ih, params[0]);
         self.witness_callback_open(cb, None);

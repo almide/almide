@@ -1,0 +1,5 @@
+gen/
+rust/target/
+go/floor
+zig/floor
+zig/*.o

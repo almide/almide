@@ -1,13 +1,73 @@
 //! Structural list edits (remove_at/reverse) — split from list_order.rs
 //! for the complexity budget; list_order's dispatcher forwards here.
 
-use almide_ir::IrExpr;
+use almide_ir::{IrExpr, IrExprKind};
 use wasm_encoder::{BlockType, ValType};
 
 use crate::emitter::Emitter;
 use crate::*;
 
 impl Emitter<'_> {
+    /// The source of an edit declared `@reuse(xs)` (#3533) as a block this op
+    /// owns alone — unless `xs` is a plain var that is not dying, which the
+    /// caller copies as before. A dying var none of `operands` reads
+    /// (dying_move.rs) hands its credit over and its local is emptied; any
+    /// other source (an inner edit's result, a call, a field read) is lowered
+    /// RETAINED, so the op holds one credit whatever the source was. `$cow`
+    /// then answers the block itself at rc 1, else a copy that drops that
+    /// credit: value semantics hold by count, not by a guess made before the
+    /// source was lowered (a module call's ownership mark is set only by its
+    /// own lowering, so a pre-lowering `rc_owned_result` misses it).
+    fn owned_edit_source(&mut self, xs: &IrExpr, operands: &[&IrExpr]) -> Result<Option<ETy>, EmitError> {
+        match self.owned_reuse_source(xs, operands, None)? {
+            None => Ok(None),
+            Some(SliceTy::List(h)) => Ok(Some(h)),
+            Some(got) => unsup(&format!("list-edit-of:{got:?}")),
+        }
+    }
+
+    /// [`Self::owned_edit_source`] for any block type `expect` (a list, or the
+    /// flat Bytes block, #3577): the source on the stack at one credit this op
+    /// holds alone, or `None` when it is a live var the caller copies.
+    pub(crate) fn owned_reuse_source(
+        &mut self,
+        xs: &IrExpr,
+        operands: &[&IrExpr],
+        expect: Option<SliceTy>,
+    ) -> Result<Option<SliceTy>, EmitError> {
+        if self.metered {
+            return Ok(None);
+        }
+        let dying = self.owned_receiver(xs, operands).flatten();
+        if dying.is_none() && matches!(xs.kind, IrExprKind::Var { .. }) {
+            return Ok(None);
+        }
+        self.owned_call_marks.set_moving(xs, dying.is_some());
+        let got = self.lower_arg(xs, expect, ArgMode::Retain)?;
+        self.owned_call_marks.set_moving(xs, false);
+        if let Some((id, idx, _)) = dying {
+            self.empty_dying(id, idx);
+        }
+        let cow = self.cow_fn_of(got);
+        self.f.instructions().call(cow);
+        Ok(Some(got))
+    }
+
+    /// The edited block on the stack, owned by this op: the dying source
+    /// itself ([`Self::owned_edit_source`]) or a copy of the borrowed one.
+    fn edit_source(&mut self, xs: &IrExpr, operands: &[&IrExpr], what: &str) -> Result<ETy, EmitError> {
+        if let Some(h) = self.owned_edit_source(xs, operands)? {
+            return Ok(h);
+        }
+        let h = match self.lower_arg(xs, None, ArgMode::Borrow)? {
+            SliceTy::List(h) => h,
+            other => return unsup(&format!("list-{what}-of:{other:?}")),
+        };
+        let copy = self.copy_fn_of(SliceTy::List(h));
+        self.f.instructions().call(copy);
+        Ok(h)
+    }
+
     /// Native `if (i as usize) < len { xs.remove(i) }`: OOB — negative
     /// wraps huge — is a NO-OP (C-034), never a trap. Two spans copied
     /// around the removed slot; OOB degenerates to span1 = whole,
@@ -128,14 +188,9 @@ impl Emitter<'_> {
         idx: &IrExpr,
         v: &IrExpr,
     ) -> ArmResult {
-        let h = match self.lower_arg(xs, None, ArgMode::Borrow)? {
-            SliceTy::List(h) => h,
-            other => return unsup(&format!("list-set-of:{other:?}")),
-        };
+        let h = self.edit_source(xs, &[idx, v], "set")?;
         let et = self.types.el(h);
         let stride = et.slot_size() as i32;
-        let copy = self.copy_fn_of(SliceTy::List(h));
-        self.f.instructions().call(copy);
         let hb = self.hold_i32()?;
         self.f.instructions().local_set(hb);
         self.lower_arg(idx, Some(INT), ArgMode::Borrow)?;
@@ -249,6 +304,9 @@ impl Emitter<'_> {
         xs: &IrExpr,
         n: &IrExpr,
     ) -> ArmResult {
+        if let Some(h) = self.owned_edit_source(xs, &[n])? {
+            return self.drop_end_in_place(h, n);
+        }
         let h = match self.lower_arg(xs, None, ArgMode::Borrow)? {
             SliceTy::List(h) => h,
             other => return unsup(&format!("list-drop-end-of:{other:?}")),
@@ -282,6 +340,53 @@ impl Emitter<'_> {
         let _ = i;
         self.emit_inc_elems(ho, self.types.el(h));
         self.f.instructions().local_get(ho);
+        for _ in 0..4 {
+            self.release_i32();
+        }
+        self.release_i64();
+        Ok(Some(Lowered::owned(SliceTy::List(h))))
+    }
+
+    /// `drop_end` over a block it owns alone (#3533): the dropped slots give
+    /// their credits back and the length shrinks in place — the capacity
+    /// stays, as `Vec::truncate` keeps it.
+    fn drop_end_in_place(&mut self, h: ETy, n: &IrExpr) -> ArmResult {
+        let et = self.types.el(h);
+        let stride = et.slot_size() as i32;
+        let hb = self.hold_i32()?;
+        self.f.instructions().local_set(hb);
+        self.lower_arg(n, Some(INT), ArgMode::Borrow)?;
+        let hn = self.hold_i64()?;
+        let hl = self.hold_i32()?;
+        let hend = self.hold_i32()?;
+        let hc = self.hold_i32()?;
+        let mut i = self.f.instructions();
+        i.local_set(hn);
+        i.local_get(hb).i32_load(len_memarg()).local_set(hl);
+        // end = big ? 0 : len - n*stride, exactly as the copying form
+        i.i32_const(0);
+        i.local_get(hl);
+        i.local_get(hn).i64_const(i64::from(stride)).i64_mul().i32_wrap_i64();
+        i.i32_sub();
+        i.local_get(hn).i64_const(0).i64_lt_s();
+        i.local_get(hn);
+        i.local_get(hl).i32_const(stride).i32_div_u().i64_extend_i32_u();
+        i.i64_ge_s().i32_or();
+        i.select().local_set(hend);
+        let _ = i;
+        if self.elem_is_handle(et) {
+            let dec = self.dec_fn_of(et);
+            let mut i = self.f.instructions();
+            i.local_get(hend).local_set(hc);
+            i.block(BlockType::Empty).loop_(BlockType::Empty);
+            i.local_get(hc).local_get(hl).i32_ge_u().br_if(1);
+            i.local_get(hb).local_get(hc).i32_add().i32_load(slot_memarg(0)).call(dec);
+            i.local_get(hc).i32_const(stride).i32_add().local_set(hc);
+            i.br(0).end().end();
+        }
+        let mut i = self.f.instructions();
+        i.local_get(hb).local_get(hend).i32_store(len_memarg());
+        i.local_get(hb);
         for _ in 0..4 {
             self.release_i32();
         }
@@ -381,14 +486,9 @@ impl Emitter<'_> {
         cb: &IrExpr,
     ) -> ArmResult {
         let (params, body) = self.hof_lambda(cb, 1)?;
-        let h = match self.lower_arg(xs, None, ArgMode::Borrow)? {
-            SliceTy::List(h) => h,
-            other => return unsup(&format!("list-update-of:{other:?}")),
-        };
+        let h = self.edit_source(xs, &[idx, cb], "update")?;
         let et = self.types.el(h);
         let stride = et.slot_size() as i32;
-        let copy = self.copy_fn_of(SliceTy::List(h));
-        self.f.instructions().call(copy);
         let hb = self.hold_i32()?;
         self.f.instructions().local_set(hb);
         self.lower_arg(idx, Some(INT), ArgMode::Borrow)?;
@@ -456,13 +556,8 @@ impl Emitter<'_> {
         ia: &IrExpr,
         ib: &IrExpr,
     ) -> ArmResult {
-        let h = match self.lower_arg(xs, None, ArgMode::Borrow)? {
-            SliceTy::List(h) => h,
-            other => return unsup(&format!("list-swap-of:{other:?}")),
-        };
+        let h = self.edit_source(xs, &[ia, ib], "swap")?;
         let stride = self.types.el(h).slot_size() as i32;
-        let copy = self.copy_fn_of(SliceTy::List(h));
-        self.f.instructions().call(copy);
         let hb = self.hold_i32()?;
         self.f.instructions().local_set(hb);
         self.lower_arg(ia, Some(INT), ArgMode::Borrow)?;

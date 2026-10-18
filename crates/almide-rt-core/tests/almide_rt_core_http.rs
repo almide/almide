@@ -230,7 +230,7 @@ fn a_non_2xx_stream_is_refused_with_its_body_quoted() {
     let sh = start(&url, 0, 0);
     let (text, outcome) = client::http_call_stream_step(&sh);
     assert_eq!(text, "");
-    assert_eq!(outcome, Some(Err("HTTP 404: Not Found: missing".to_string())));
+    assert_eq!(outcome, Some(Err("HTTP 404: missing".to_string())));
     join(h);
 }
 
@@ -538,6 +538,61 @@ fn a_crlf_header_is_refused_with_500() {
     });
     assert_eq!(status_line(&resp), "HTTP/1.1 500 Internal Server Error");
     assert!(!resp.contains("Set-Cookie"), "{resp:?}");
+}
+
+/// Every control character in a value is refused, HTAB alone allowed
+/// (RFC 9110 §5.5); the refusal names the field, and a name that is not a
+/// token is quoted with its control characters escaped.
+#[test]
+fn a_control_character_in_a_value_is_refused_and_a_bad_name_is_quoted() {
+    assert_eq!(server::http_server_bad_header("X-A", "a\tb"), None);
+    assert_eq!(server::http_server_bad_header("X-A", "café"), None);
+    for v in ["a\u{1}b", "a\u{7f}", "\u{1b}[31m", "1\r\nx", "1\0"] {
+        assert_eq!(server::http_server_bad_header("X-A", v).as_deref(), Some("response header X-A has a control character in its value"), "{v:?}");
+    }
+    assert_eq!(server::http_server_bad_header("a b", "v").as_deref(), Some("response header name \"a b\" is not a token"));
+    assert_eq!(server::http_server_bad_header("é\"\\\u{1}\u{85}", "v").as_deref(), Some("response header name \"é\\\"\\\\\\u{1}\\u{85}\" is not a token"));
+    assert_eq!(server::http_server_bad_header("", "v").as_deref(), Some("response header name \"\" is not a token"));
+}
+
+/// A final status is a 3-digit code in 200..=599 (RFC 9110 §15): anything
+/// else, a 1xx included, is refused.
+#[test]
+fn a_status_outside_200_to_599_is_refused() {
+    for s in [200, 204, 299, 304, 418, 599] {
+        assert_eq!(server::http_server_bad_status(s), None, "{s}");
+    }
+    for s in [0, 42, 100, 103, 199, 600, 1000, -1, i64::MIN, i64::MAX] {
+        assert_eq!(server::http_server_bad_status(s), Some(format!("response status {s} is not a final status code")), "{s}");
+    }
+}
+
+/// The server owns the framing: a handler's Content-Length,
+/// Transfer-Encoding and Keep-Alive are dropped, as its Connection is.
+#[test]
+fn the_handlers_framing_fields_are_dropped() {
+    let headers = [
+        ("Content-Length".to_string(), "99".to_string()),
+        ("transfer-encoding".to_string(), "chunked".to_string()),
+        ("Keep-Alive".to_string(), "timeout=5".to_string()),
+        ("Connection".to_string(), "keep-alive".to_string()),
+        ("X-B".to_string(), "2".to_string()),
+    ];
+    let out = text(server::http_server_response_bytes(200, &headers, "hello"));
+    assert_eq!(out, "HTTP/1.1 200 OK\r\nX-B: 2\r\nConnection: close\r\nContent-Length: 5\r\n\r\nhello");
+}
+
+#[test]
+fn a_bad_status_or_control_value_is_answered_500_with_the_reason() {
+    let resp = exchange(b"GET /x HTTP/1.1\r\n\r\n", false, server::HTTP_SERVER_DEFAULT_LIMITS, |conn, _| {
+        server::http_server_write(conn, 103, &[], "x").expect("written");
+    });
+    assert_eq!(status_line(&resp), "HTTP/1.1 500 Internal Server Error");
+    assert!(resp.ends_with("\r\n\r\nInternal error: response status 103 is not a final status code"), "{resp:?}");
+    let resp = exchange(b"GET /x HTTP/1.1\r\n\r\n", false, server::HTTP_SERVER_DEFAULT_LIMITS, |conn, _| {
+        server::http_server_write(conn, 200, &[("a b".to_string(), "v".to_string())], "x").expect("written");
+    });
+    assert!(resp.ends_with("\r\n\r\nInternal error: response header name \"a b\" is not a token"), "{resp:?}");
 }
 
 #[test]

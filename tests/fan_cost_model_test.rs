@@ -2,8 +2,8 @@
 //! (`runtime/rs/src/list.rs` `almide_rt_fan_plan`) and the embedded wasm host
 //! (`crates/almide-wasm-run/src/host_fan.rs` `plan`) each carry a copy — the
 //! native one is emitted into every program, so it cannot import the host's.
-//! This test pins both copies to the measured constants in
-//! `docs/benchmarks/fan-cost-model.txt` and to each other's formula, so the
+//! This test pins each copy to its leg's measured constants in
+//! `docs/benchmarks/fan-cost-model.txt` and both to one formula, so the
 //! legs cannot drift apart and nobody changes a constant without the ledger.
 
 fn read(rel: &str) -> String {
@@ -39,13 +39,12 @@ fn formula(src: &str) -> Vec<String> {
 }
 
 #[test]
-fn both_legs_carry_the_ledgers_constants_and_the_same_formula() {
+fn each_leg_carries_its_ledger_constants_and_both_the_same_formula() {
     let native = read("runtime/rs/src/list.rs");
     let host = read("crates/almide-wasm-run/src/host_fan.rs");
     for (key, name) in [("offer_ns", "FAN_OFFER_NS"), ("worker_ns", "FAN_WORKER_NS")] {
-        let want = ledger(key);
-        assert_eq!(constant(&native, &format!("ALMIDE_{name}")), want, "native {name} vs ledger {key}");
-        assert_eq!(constant(&host, name), want, "wasm host {name} vs ledger {key}");
+        assert_eq!(constant(&native, &format!("ALMIDE_{name}")), ledger(&format!("native_{key}")), "native {name} vs ledger native_{key}");
+        assert_eq!(constant(&host, name), ledger(&format!("wasm_{key}")), "wasm host {name} vs ledger wasm_{key}");
     }
     let (fn_native, fn_host) = (formula(&native), formula(&host));
     assert_eq!(fn_native.len(), 3, "native formula lines: {fn_native:?}");

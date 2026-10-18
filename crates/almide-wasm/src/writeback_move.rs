@@ -114,7 +114,7 @@ pub(crate) enum Emptied {
 
 #[path = "move_in_site.rs"]
 mod move_in_site;
-use move_in_site::{move_in_site, MoveIn, Place};
+use move_in_site::{move_in_site, MoveIn, Place, Subject};
 
 /// The temp statement `i` of a block may move out of, if any.
 pub(crate) fn movable_temp(stmts: &[IrStmt], tail: Option<&IrExpr>, i: usize) -> Option<VarId> {
@@ -220,13 +220,20 @@ impl Emitter<'_> {
 
     /// #3337: release the destructured call result right after its
     /// write-backs took their own credits on the buffers, so the next call
-    /// on the same var meets the buffer unshared. Every OTHER slot must be a
-    /// scalar — a droppable one (`__mp_res`) is a view the tail still reads.
-    fn settle_subject(&mut self, subject: Option<(VarId, Vec<VarId>)>) {
-        let Some((t, others)) = subject else { return };
-        let Some(&(idx, ty)) = self.locals.get(&t) else { return };
-        let other_droppable = others.iter().any(|b| self.locals.get(b).is_none_or(|&(_, bty)| self.rc_droppable(bty)));
-        if other_droppable || !self.rc_owned.contains(&idx) || self.cells.contains(&t) {
+    /// on the same var meets the buffer unshared. When every OTHER slot is a
+    /// scalar the whole result goes; a droppable one (`__mp_res`, a tuple /
+    /// String / record the callee answered) is a view the frame still reads,
+    /// so the result stays and only its credits on the written-back buffers
+    /// go ([`Self::release_written_slots`]).
+    fn settle_subject(&mut self, subject: Option<Subject>) {
+        let Some(sub) = subject else { return };
+        let Some(&(idx, ty)) = self.locals.get(&sub.var) else { return };
+        if !self.rc_owned.contains(&idx) || self.cells.contains(&sub.var) {
+            return;
+        }
+        let other_droppable = sub.others.iter().any(|b| self.locals.get(b).is_none_or(|&(_, bty)| self.rc_droppable(bty)));
+        if other_droppable {
+            self.release_written_slots(idx, ty, &sub.written);
             return;
         }
         let dec = self.dec_fn_of(ty);
@@ -235,12 +242,52 @@ impl Emitter<'_> {
         self.empty_moved_temp(Some(idx));
     }
 
+    /// The result tuple in local `idx` outlives its write-backs (a heap view
+    /// of it is still read), but each written-back slot's block is now held
+    /// by the place the write-back stored it in, with that place's own
+    /// credit. The tuple's credit on it is released and the slot emptied —
+    /// the tuple's eventual release then releases NULL there — so the next
+    /// call on the place meets the buffer at rc 1 instead of copying it.
+    /// Only when the tuple itself is unique (a heap block at rc 1): a shared
+    /// tuple's other holders may still read the slot.
+    fn release_written_slots(&mut self, idx: u32, ty: crate::SliceTy, written: &[usize]) {
+        let crate::SliceTy::Tuple(ti) = ty else { return };
+        let fields = self.types.tuple_def(ti).fields;
+        let slots: Vec<(u32, u32)> = written
+            .iter()
+            .filter_map(|&k| fields.get(k).copied())
+            .filter(|&(fty, _)| self.rc_droppable(fty))
+            .map(|(fty, off)| (self.dec_fn_of(fty), off))
+            .collect();
+        if slots.is_empty() {
+            return;
+        }
+        let rc = wasm_encoder::MemArg { offset: u64::from(almide_layout::RC.offset), align: 2, memory_index: 0 };
+        let mut i = self.f.instructions();
+        i.local_get(idx).global_get(crate::G_LINE_END).i32_ge_u();
+        i.local_get(idx).i32_load(rc).i32_const(1).i32_eq();
+        i.i32_and().if_(wasm_encoder::BlockType::Empty);
+        for (dec, off) in slots {
+            i.local_get(idx).i32_load(crate::slot_memarg(off)).call(dec);
+            i.local_get(idx).i32_const(0).i32_store(crate::slot_memarg(off));
+        }
+        i.end();
+    }
+
     /// #3337: the vars this call (by its argument slice) may take by move.
     /// `open`: the site may move at all (no region window). A `tail` site
     /// (not a self call, whose loop form rebinds the params) may move ANY
     /// var (#3342): nothing in this frame reads it after the call, and the
     /// exit plan's release of the emptied local is a release of NULL — the
     /// `if c then grow(xs, x) else ()` arm a write-back folds into the tail.
+    /// The frame's tail-leaf move-in sites (`move_in_site::frame_tail_sites`),
+    /// with the dying notes of its tail ops: what a frame whose exit releases
+    /// its locals may hand over instead of sharing.
+    pub(crate) fn note_dying_frame_tail(&mut self, body: &IrExpr) {
+        self.note_dying_tail(body, None, true);
+        self.moves.move_in = move_in_site::frame_tail_sites(body);
+    }
+
     pub(crate) fn take_move_in(&mut self, args: &[IrExpr], open: bool, tail: bool) -> MoveSet {
         match &self.moves.move_in {
             Some(m) if open && let Some(vars) = m.vars_at(args) => MoveSet::Vars(vars),

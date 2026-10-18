@@ -928,6 +928,30 @@ jobs:
           printf '\n[workspace]\n' >> crates/almide-kernel/Cargo.toml
           cargo test --release --manifest-path crates/almide-kernel/Cargo.toml
 
+  miri-almide-str:
+    name: Miri (almide-str)
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
+    # almide-str (ADR-0013) manages its own [rc, len, cap | bytes] heap block, so
+    # unlike the greenfield crates it cannot take the workspace's
+    # `unsafe_code = "forbid"`. Its tests run here under Miri, which checks every raw access:
+    # use-after-free, double free, leaks, out-of-bounds reads and writes, and
+    # Stacked Borrows aliasing. The crate is std-only, so this job builds
+    # nothing else. Miri needs nightly, so this is the one nightly job.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri, rust-src
+
+      - name: Run almide-str's tests under Miri
+        run: |
+          cargo miri setup
+          cargo miri test -p almide-str
+
   test-wasm:
     name: Test WASM
     needs: [changes, build]
@@ -1848,6 +1872,36 @@ jobs:
       - name: The documented spelling's tax stays bounded (#2098)
         run: ALMIDE_BIN=/tmp/almide-bin/almide scripts/check-spelling-ratio.sh
 
+  perf-profile-arm:
+    name: Perf ratchet (aarch64 release/default, #3604)
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
+    # The release profile's pessimization is arch-conditional: on generic
+    # aarch64 LLVM vectorizes spectralnorm's inner loop into NEON lane
+    # shuffles and `--release` runs 1.43x SLOWER than the default profile,
+    # while x86_64 reads 1.00x (#3604). The x86 job above cannot see it, so
+    # this leg runs where it happens. ubuntu-24.04-arm is free for public
+    # repos (fuzz-nightly already rides it). It builds its own compiler: the
+    # `build` artifact is x86_64. Stable toolchain for the same reason as
+    # perf-ratchet — the claim is about the generated code.
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: perf-profile-arm
+          save-if: ${{ github.ref == 'refs/heads/develop' }}
+          cache-on-failure: true
+
+      - run: cargo build --release --bin almide
+
+      - name: --release is not slower than the default profile on aarch64 (#3604)
+        run: ALMIDE_BIN=target/release/almide SPELLING_RATIO_LEGS=profile scripts/check-spelling-ratio.sh
+
   # ═══════════════════════════════════════════════
   # Full CI — cross-platform (PRs to main only)
   # ═══════════════════════════════════════════════
@@ -2225,7 +2279,7 @@ jobs:
       # unreported. scripts/check-release-only-tests.sh keeps this list
       # honest; the wasm crate's seven ride the carried-gates step above.
       - name: Release-only root tests (the shards skip these by profile)
-        run: cargo test --release --locked --test anon_record_structural_identity_matrix_test --test cross_module_field_defaults_test --test embedded_cross_test --test http_serve_cross_test --test imported_recursive_variant_test --test module_fn_value_let_test --test module_type_repr_test --test qualified_ctor_names_test --test record_literal_binding_test --test record_literal_through_alias_test --test same_shape_records_test --test selective_import_ctor_let_test --test top_let_forward_reference_test --test top_let_recursive_payload_test --test wasm_vm_parity_test
+        run: cargo test --release --locked --test anon_record_structural_identity_matrix_test --test cross_module_field_defaults_test --test embedded_cross_test --test http_serve_cross_test --test map_delete_amortized_test --test matrix_fma_overlap_cost_test --test imported_recursive_variant_test --test module_fn_value_let_test --test module_type_repr_test --test qualified_ctor_names_test --test record_literal_binding_test --test record_literal_through_alias_test --test same_shape_records_test --test selective_import_ctor_let_test --test top_let_forward_reference_test --test top_let_recursive_payload_test --test wasm_vm_parity_test
 
   commissioned-wasm-gates-probes:
     name: Commissioned wasm gates (target availability + runtime ratio)

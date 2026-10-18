@@ -245,6 +245,7 @@ pub(crate) fn lower_fn(
     // C-319: shared-cell LOCALS (captured ∩ mutated; never a global, #3317)
     // hold the CELL ADDRESS (i32); env-captured cells arrive pre-flagged.
     let mut cell_vars = crate::cells::cell_vars_of(body);
+    let tomb_vars = crate::map_remove::tomb_vars_of(body);
     let mut binds: Vec<(VarId, SliceTy)> = Vec::new();
     if let Some(caps) = &env_captures {
         for (var, ty, _, is_cell) in caps {
@@ -395,6 +396,8 @@ pub(crate) fn lower_fn(
             deferred_ranges: &deferred_ranges,
             metered,
             cells: &cell_vars,
+            tomb_vars: &tomb_vars,
+            raw_map_read: false,
             moves: Default::default(),
             region_repair: region_saved_var.and_then(|v| {
                 let saved = locals.get(&v)?.0;
@@ -403,6 +406,7 @@ pub(crate) fn lower_fn(
             f: &mut f,
         };
         em.owned_call_marks.register_frame(body, top_lets.iter().map(|t| &t.tl.value));
+        em.note_dying_rebinds(body);
         // #1696 phase A: arm the witness recorder when the sweep is
         // collecting and the straightline gate admits this body (no
         // effect wrap, no captures, no top-let prelude — every excluded
@@ -440,7 +444,7 @@ pub(crate) fn lower_fn(
             }
         }
         populate_tail_release_set(&mut em, cur_module, env_shift, params, body, &param_owned);
-        if em.tail_release_allowed && effect_raw.is_none() { em.note_dying_tail(body, None, true) } // #3406
+        if em.tail_release_allowed && effect_raw.is_none() { em.note_dying_frame_tail(body) } // #3406
         if let Some((_, dl)) = em.region_repair {
             em.f.instructions().global_get(G_DET_DEPTH).local_set(dl);
         }

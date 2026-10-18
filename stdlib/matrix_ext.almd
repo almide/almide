@@ -1,8 +1,7 @@
 // matrix_ext — SELF-HOSTED prim-level matrix extensions for v1
 // (broadcast_add_row, row_dot, conv1d, byte codecs). Faithful
-// transcriptions of runtime/rs/src/matrix.rs + matrix_p2.rs over the sane domain
-// (silu_mul lives in matrix_activations.almd beside the canonical fast-exp it
-// shares with native's kernel path). LAYOUT + OWNERSHIP: matrix_core's — outer DynListStr
+// transcriptions of runtime/rs/src/matrix.rs + matrix_p2.rs over the sane domain.
+// LAYOUT + OWNERSHIP: matrix_core's — outer DynListStr
 // of row handles, rows flat f64 blocks; args BORROWED, results fresh OWNED, fresh
 // rows MOVED in via prim.store_str. This file is List-typed like matrix_core (the
 // v1 Matrix IS a List[List[Float]]), so it makes NO matrix.* module calls — the

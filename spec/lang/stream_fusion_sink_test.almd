@@ -1,0 +1,79 @@
+// A list sink (#3584 / #3590): a fn whose whole body is one list call over
+// its only parameter is inlined into a call whose argument is a list chain,
+// so each leg's fusion sees one chain. The values pin the results on every
+// leg; the println sink pins that an impure sink keeps the stage-by-stage
+// order (every map line before the first fold line).
+fn fsum(xs: List[Float]) -> Float = xs |> list.fold(0.0, (acc, x) => acc + x)
+
+fn isum(xs: List[Int]) -> Int = xs |> list.fold(0, (acc, x) => acc + x)
+
+fn weigh(i: Int, j: Int) -> Float = 1.0 / int.to_float(i + j + 1)
+
+// spectralnorm's row: enumerate, a destructured pair, a user-fn sink
+fn row(v: List[Float], i: Int) -> Float = v |> list.enumerate |> list.map(((j, x)) => weigh(i, j) * x) |> fsum
+
+// the pair read by projection instead
+fn row_proj(v: List[Float], i: Int) -> Float = v |> list.enumerate |> list.map((p) => weigh(i, p.0) * p.1) |> fsum
+
+fn doubled_total(xs: List[Int]) -> Int = xs |> list.map((x) => x * 2) |> isum
+
+fn idx_weighted(xs: List[Int]) -> Int = xs |> list.enumerate |> list.map(((i, x)) => i * x) |> list.filter((y) => y > 0) |> isum
+
+// two stages that can abort: not fused on any leg, same value
+fn inv_sum(xs: List[Int]) -> Int = xs |> list.fold(0, (a, x) => a + 100 / x)
+
+fn two_aborts(v: List[Int]) -> Int = v |> list.map((x) => 60 / x) |> inv_sum
+
+// not a sink: the parameter is read twice
+fn mean(xs: List[Float]) -> Float = fsum(xs) / int.to_float(list.len(xs))
+
+fn mean_doubled(v: List[Float]) -> Float = v |> list.map((x) => x * 2.0) |> mean
+
+// a heap element through enumerate into a sink
+fn joined(xs: List[String]) -> String = xs |> list.fold("", (a, s) => a + s)
+
+fn tagged(v: List[String]) -> String = v |> list.enumerate |> list.map(((i, s)) => "${i}${s}") |> joined
+
+// an impure sink: its println keeps the order
+fn loud_sum(xs: List[Int]) -> Int = xs |> list.fold(
+  0,
+  (a, x) => {
+    println("fold ${x}")
+    a + x
+  },
+)
+
+fn loud(v: List[Int]) -> Int = v |> list.map((x) => {
+  println("map ${x}")
+  x + 1
+}) |> loud_sum
+
+test "an enumerate row into a user-fn sink" {
+  let v = [1.0, 2.0, 4.0]
+  // 1/1 + 2/2 + 4/3, and with i = 1: 1/2 + 2/3 + 4/4
+  assert_eq(float.to_fixed(row(v, 0), 6), "3.333333")
+  assert_eq(float.to_fixed(row(v, 1), 6), "2.166667")
+  assert_eq(float.to_fixed(row_proj(v, 1), 6), "2.166667")
+}
+
+test "an int chain into a sink" {
+  assert_eq(doubled_total([1, 2, 3]), 12)
+  assert_eq(idx_weighted([5, 6, 7]), 20)
+}
+
+test "two aborting stages keep their value" {
+  assert_eq(two_aborts([1, 2, 3]), 9)
+}
+
+test "a fn that reads its parameter twice" {
+  assert_eq(mean_doubled([1.0, 2.0, 3.0]), 4.0)
+}
+
+test "a heap enumerate chain into a sink" {
+  assert_eq(tagged(["a", "b"]), "0a1b")
+}
+
+test "an impure sink keeps every map before the first fold" {
+  // stdout: map 1, map 2, fold 2, fold 3
+  assert_eq(loud([1, 2]), 5)
+}

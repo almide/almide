@@ -77,6 +77,23 @@ What moved, and what it says:
 - Wasm samples remain noisy; these are local comparative measurements, not a
   portable timing guarantee.
 
+Remeasured on Linux on 2026-10-12, develop `1df5391`, GCE c4-standard-8 (x86_64) and c4a-standard-8
+(aarch64, Neoverse-V2), n=1200, nine samples. The table gives the native leg, release median ÷ default median for each spelling. Both
+profiles were timed round-robin with `compare.py --profile-pair`:
+
+| Arch | Imperative | Indexed fold | Enumerate fold |
+| --- | ---: | ---: | ---: |
+| x86_64 | 76.0 / 76.2 ms (1.00x) | 85.3 / 93.3 ms (0.91x) | 76.0 / 76.1 ms (1.00x) |
+| aarch64 | 76.9 / 53.8 ms (**1.43x**) | 73.6 / 90.8 ms (0.81x) | 76.9 / 63.0 ms (**1.22x**) |
+
+On aarch64, `--release` is slower for every spelling. The cause is not a spelling tax. LLVM's loop
+vectorizer, costed for a generic aarch64 core, splits `eval_a`'s i64 multiply
+across NEON lanes. With `-C llvm-args=-vectorize-loops=false` or
+`-C target-cpu=native`, the slowdown goes away (#3604). A ratio between
+spellings cannot see a tax that every spelling pays alike. The gate's profile leg
+compares each spelling with itself across the two profiles. The `perf-profile-arm` CI job runs that leg on
+`ubuntu-24.04-arm`.
+
 Earlier readings kept for the record: before the wasm scalar enumerate/fold
 lowering, wasm enumerate measured 365.81 ms (3.21x); after it, 129.72 ms
 (1.17x). Before native scalar-fold capture borrowing, native indexed measured

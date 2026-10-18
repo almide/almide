@@ -1,0 +1,33 @@
+// @contract: C-204
+// ALS-DT2 (c): bulk concat — the `+` the writer spelled — charges
+// 1 + result_bytes/16; a string INTERPOLATION is not a charge site (the
+// wasm emitter, the codegen meter, the interp and the reference evaluator
+// leave `${…}` uncharged). The native default route charged the
+// `__str_concat` chain an interpolation lowers to (#3778), so a body that
+// interpolates was cut earlier there; it now charges only the `+`.
+fn loud(n: Int) -> Int = {
+  var i = 0
+  while i < n {
+    println("i ${i}")
+    i = i + 1
+  }
+  i
+}
+
+fn join(n: Int) -> Int = {
+  var i = 0
+  var s = ""
+  while i < n {
+    s = s + "ab"
+    i = i + 1
+  }
+  string.len(s)
+}
+
+effect fn main() -> Unit = {
+  // 30 ns = 10 units: entry 1 + 9 loop heads, so 9 lines then the cut.
+  println("cut " + int.to_string(fan.bounded(compute.ns(30)) { loud(100) } ?? -1))
+  // `+` IS charged: each iteration pays the head plus 1 + len/16.
+  println("join " + int.to_string(fan.bounded(compute.ns(30)) { join(100) } ?? -1))
+  println("join " + int.to_string(fan.bounded(compute.ns(3000)) { join(3) } ?? -1))
+}

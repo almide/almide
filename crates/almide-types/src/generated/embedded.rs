@@ -681,6 +681,7 @@ fn reverse(b: Bytes) -> Bytes = _
 
 /// Copy with byte i set to val; as-is if out of range.
 @intrinsic("almide_rt_bytes_set")
+@reuse(b)
 fn set(b: Bytes, i: Int, val: Int) -> Bytes = _
 
 /// Writes f32 BE at pos; no-op out of range.
@@ -806,16 +807,6 @@ fn write_u8(mut b: Bytes, val: Int) -> Unit = _
 /// Bytewise XOR, as long as the shorter input.
 @intrinsic("almide_rt_bytes_xor")
 fn xor(a: Bytes, b: Bytes) -> Bytes = _
-
-
-
-/// Opaque arena checkpoint; currently always 0.
-@intrinsic("almide_rt_bytes_heap_save")
-fn heap_save() -> Int = _
-
-/// Restores a heap_save checkpoint; currently a no-op.
-@intrinsic("almide_rt_bytes_heap_restore")
-fn heap_restore(checkpoint: Int) -> Unit = _
 
 
 
@@ -2153,16 +2144,6 @@ fn bytes_map_each(b: Bytes, f: (Int) -> Int) -> Bytes = {
   let _x = __bme_fill(prim.handle(out) + 12, h + 12, f, n, 0)
   out
 }
-
-
-
-
-
-
-
-fn bytes_heap_save() -> Int = 0
-
-fn bytes_heap_restore(cp: Int) -> Unit = ()
 "#;
 pub const SRC_BYTES_CURSOR: &str = r#"
 
@@ -2608,8 +2589,13 @@ fn bytes_fill(b: Bytes, val: Int) -> Unit = {
 fn bytes_clear(b: Bytes) -> Unit = prim.store32(prim.handle(b) + 4, 0)
 
 
+
+
+fn __bm_f32_obs_bits(v: Float) -> Int = if float.is_nan(v) then 0x7FC00000 else prim.f32bits(prim.f2f32(v))
+
+
 fn bytes_set_f64_be(b: Bytes, pos: Int, val: Float) -> Unit = {
-  let bits = prim.fbits(val)
+  let bits = float.to_bits(val)
   let n = prim.load32(prim.handle(b) + 4)
   let base = prim.handle(b) + 12
   let _ = if pos >= 0 then (if pos <= n - 8 then __s64be(base + pos, bits) else 0)
@@ -2617,7 +2603,7 @@ fn bytes_set_f64_be(b: Bytes, pos: Int, val: Float) -> Unit = {
 }
 
 fn bytes_set_f64_le(b: Bytes, pos: Int, val: Float) -> Unit = {
-  let bits = prim.fbits(val)
+  let bits = float.to_bits(val)
   let n = prim.load32(prim.handle(b) + 4)
   let base = prim.handle(b) + 12
   let _ = if pos >= 0 then (if pos <= n - 8 then __s64le(base + pos, bits) else 0)
@@ -2626,8 +2612,7 @@ fn bytes_set_f64_le(b: Bytes, pos: Int, val: Float) -> Unit = {
 
 
 fn bytes_set_f32_be(b: Bytes, pos: Int, val: Float) -> Unit = {
-  let f = prim.f2f32(val)
-  let bits = prim.f32bits(f)
+  let bits = __bm_f32_obs_bits(val)
   let n = prim.load32(prim.handle(b) + 4)
   let base = prim.handle(b) + 12
   let _ = if pos >= 0 then (if pos <= n - 4 then __s32be(base + pos, bits) else 0)
@@ -2635,8 +2620,7 @@ fn bytes_set_f32_be(b: Bytes, pos: Int, val: Float) -> Unit = {
 }
 
 fn bytes_set_f32_le(b: Bytes, pos: Int, val: Float) -> Unit = {
-  let f = prim.f2f32(val)
-  let bits = prim.f32bits(f)
+  let bits = __bm_f32_obs_bits(val)
   let n = prim.load32(prim.handle(b) + 4)
   let base = prim.handle(b) + 12
   let _ = if pos >= 0 then (if pos <= n - 4 then __s32le(base + pos, bits) else 0)
@@ -2970,6 +2954,7 @@ pub const SRC_BYTES_STRING: &str = r#"
 
 
 
+
 fn __bs_copy(dst: Int, src: Int, n: Int, i: Int) -> Int = if i >= n then 0
 else {
   prim.store8(dst + i, prim.load8(src + i))
@@ -3002,9 +2987,7 @@ fn bytes_read_string_at(b: Bytes, pos: Int, len: Int) -> String = {
   let n = if pos < 0 then 0
   else if len < 0 then 0
   else if pos > blen - len then 0 else len
-  let out = prim.alloc_str(n)
-  let _x = __bs_copy(prim.handle(out) + 12, h + 12 + pos, n, 0)
-  out
+  bytes.to_string_lossy(bytes.slice(b, pos, pos + n))
 }
 
 
@@ -3032,9 +3015,7 @@ fn bytes_read_string_be(b: Bytes, pos: Int) -> String = {
   let slen = if hdr_ok then __bs_be32(h + 12 + pos) else 0
   let n = if hdr_ok then (if slen > blen - 4 - pos then 0 else slen)
   else 0
-  let out = prim.alloc_str(n)
-  let _x = __bs_copy(prim.handle(out) + 12, h + 12 + pos + 4, n, 0)
-  out
+  bytes.to_string_lossy(bytes.slice(b, pos + 4, pos + 4 + n))
 }
 "#;
 pub const SRC_BYTES_TYPED: &str = r#"
@@ -3136,10 +3117,19 @@ fn bytes_write_uint32(b: Bytes, v: Int, e: Endian) -> Bytes = __bt_append(
 
 fn bytes_write_int32(b: Bytes, v: Int, e: Endian) -> Bytes = __bt_append(b, v, 4, __endian_is_le(e))
 
-fn bytes_write_float32(b: Bytes, v: Float32, e: Endian) -> Bytes = {
+
+
+fn __bt_f32_obs_bits(v: Float32) -> Int = {
   let f = float.from_float32(v)
-  __bt_append(b, prim.f32bits(prim.f2f32(f)), 4, __endian_is_le(e))
+  if float.is_nan(f) then 0x7FC00000 else prim.f32bits(prim.f2f32(f))
 }
+
+fn bytes_write_float32(b: Bytes, v: Float32, e: Endian) -> Bytes = __bt_append(
+  b,
+  __bt_f32_obs_bits(v),
+  4,
+  __endian_is_le(e),
+)
 
 
 
@@ -3187,10 +3177,13 @@ fn bytes_set_int32(b: Bytes, offset: Int, v: Int, e: Endian) -> Unit = __bt_set(
   __endian_is_le(e),
 )
 
-fn bytes_set_float32(b: Bytes, offset: Int, v: Float32, e: Endian) -> Unit = {
-  let f = float.from_float32(v)
-  __bt_set(b, offset, prim.f32bits(prim.f2f32(f)), 4, __endian_is_le(e))
-}
+fn bytes_set_float32(b: Bytes, offset: Int, v: Float32, e: Endian) -> Unit = __bt_set(
+  b,
+  offset,
+  __bt_f32_obs_bits(v),
+  4,
+  __endian_is_le(e),
+)
 "#;
 pub const SRC_CLOCK_NOW: &str = r#"
 
@@ -3993,6 +3986,7 @@ effect fn args() -> List[String] = _
 effect fn get(name: String) -> String? = _
 
 /// Sets name for this process and later spawns.
+@ordered
 @intrinsic("almide_rt_env_set")
 effect fn set(name: String, value: String) -> Unit = _
 
@@ -4012,7 +4006,7 @@ effect fn sleep_ms(ms: Int) -> Unit = _
 @intrinsic("almide_rt_env_temp_dir")
 effect fn temp_dir() -> String = _
 
-/// Host OS: macos, linux, windows or unknown.
+/// Host OS: macos, linux, windows or unknown; "wasi" on wasm (C-189).
 @intrinsic("almide_rt_env_os")
 fn os() -> String = _
 "#;
@@ -4196,56 +4190,24 @@ fn error_chain(outer: String, cause: String) -> String = {
 
 
 
-fn __ectx_err(ch: Int, clen: Int, msg_h: Int) -> Result[Int, String] = {
-  let mlen = prim.load32(msg_h + 4)
-  let total = clen + 2 + mlen
-  let out = prim.alloc_str(total)
-  let d0 = prim.handle(out) + 12
-  let _1 = __echain_copy(d0, ch + 12, clen, 0)
-  let d1 = d0 + clen
-  prim.store8(d1, 58)
-  prim.store8(d1 + 1, 32)
-  let d2 = d1 + 2
-  let _3 = __echain_copy(d2, msg_h + 12, mlen, 0)
-  err(out)
-}
-
-fn error_context(r: Result[Int, String], ctx: String) -> Result[Int, String] = {
-  let h = prim.handle(r)
-  let len = prim.load32(h + 4)
-  let v = prim.load64(h + 12)
-  let ch = prim.handle(ctx)
-  let clen = prim.load32(ch + 4)
-  if len == 0 then ok(v)
-  else __ectx_err(ch, clen, v)
+fn error_context(r: Result[Int, String], ctx: String) -> Result[Int, String] = match r {
+  ok(v) => ok(v),
+  err(e) => err(ctx + ": " + e),
 }
 "#;
 pub const SRC_ERROR_MESSAGE: &str = r#"
 
 
 
-fn __emsg_copy(blen: Int, src: Int, dst: Int, i: Int) -> Int = if i >= blen then 0
-else {
-  prim.store8(dst + i, prim.load8(src + i))
-  __emsg_copy(blen, src, dst, i + 1)
-}
 
-fn __emsg_err(msg_h: Int) -> String = {
-  let blen = prim.load32(msg_h + 4)
-  let out = prim.alloc_str(blen)
-  let dh = prim.handle(out) + 12
-  let _c = __emsg_copy(blen, msg_h + 12, dh, 0)
-  out
-}
-
-fn error_message(r: Result[Int, String]) -> String = {
-  let h = prim.handle(r)
-  let len = prim.load32(h + 4)
-  let msg_h = prim.load64(h + 12)
-  if len == 0 then "" else __emsg_err(msg_h)
+fn error_message(r: Result[Int, String]) -> String = match r {
+  ok(_) => "",
+  err(e) => e,
 }
 "#;
 pub const SRC_FAN_ANY: &str = r#"
+
+
 
 
 
@@ -6363,22 +6325,27 @@ effect fn read_text(path: String) -> Result[String, String] = _
 effect fn read_bytes(path: String) -> Result[List[Int], String] = _
 
 /// Overwrites or creates; err if no parent dir.
+@ordered
 @intrinsic("almide_rt_fs_write")
 effect fn write(path: String, content: String) -> Result[Unit, String] = _
 
 /// Writes low byte of each Int (-1 -> 255).
+@ordered
 @intrinsic("almide_rt_fs_write_bytes")
 effect fn write_bytes(path: String, bytes: List[Int]) -> Result[Unit, String] = _
 
 /// Writes data verbatim, replacing the file.
+@ordered
 @intrinsic("almide_rt_fs_write_bytes_raw")
 effect fn write_bytes_raw(path: String, data: Bytes) -> Result[Unit, String] = _
 
 /// Appends content; creates the file if missing.
+@ordered
 @intrinsic("almide_rt_fs_append")
 effect fn append(path: String, content: String) -> Result[Unit, String] = _
 
 /// Creates dir and parents; ok if it exists.
+@ordered
 @intrinsic("almide_rt_fs_mkdir_p")
 effect fn mkdir_p(path: String) -> Result[Unit, String] = _
 
@@ -6442,7 +6409,9 @@ effect fn fold_lines_range[A](path: String, start: Int, end: Int, init: A, f: (A
 
 
 
+
 /// Parallel chunk partials, in order; [] if empty.
+@concurrent(f)
 @intrinsic("almide_rt_fs_fold_lines_chunked")
 effect fn fold_lines_chunked[A](path: String, workers: Int, init: A, f: (A, String) -> A) -> Result[List[A], String] = _
 
@@ -6470,6 +6439,7 @@ effect fn read_lines_if_exists(path: String) -> Result[List[String]?, String] = 
 effect fn read_bytes_raw_if_exists(path: String) -> Result[Bytes?, String] = _
 
 /// Deletes a file or empty dir; err if missing.
+@ordered
 @intrinsic("almide_rt_fs_remove")
 effect fn remove(path: String) -> Result[Unit, String] = _
 
@@ -6486,10 +6456,12 @@ effect fn is_dir(path: String) -> Bool = _
 effect fn is_file(path: String) -> Bool = _
 
 /// Copies src to dst; overwrites dst.
+@ordered
 @intrinsic("almide_rt_fs_copy")
 effect fn copy(src: String, dst: String) -> Result[Unit, String] = _
 
 /// Moves src to dst; replaces an existing dst.
+@ordered
 @intrinsic("almide_rt_fs_rename")
 effect fn rename(src: String, dst: String) -> Result[Unit, String] = _
 
@@ -6498,6 +6470,7 @@ effect fn rename(src: String, dst: String) -> Result[Unit, String] = _
 effect fn walk(dir: String) -> Result[List[String], String] = _
 
 /// Deletes a tree or file; err if missing.
+@ordered
 @intrinsic("almide_rt_fs_remove_all")
 effect fn remove_all(path: String) -> Result[Unit, String] = _
 
@@ -6521,10 +6494,12 @@ effect fn stat(path: String) -> Result[FileStat, String] = _
 effect fn glob(pattern: String) -> Result[List[String], String] = _
 
 /// New empty file temp_dir/prefix+nanos; its path.
+@ordered
 @intrinsic("almide_rt_fs_create_temp_file")
 effect fn create_temp_file(prefix: String) -> Result[String, String] = _
 
 /// New dir temp_dir/prefix+nanos; its path.
+@ordered
 @intrinsic("almide_rt_fs_create_temp_dir")
 effect fn create_temp_dir(prefix: String) -> Result[String, String] = _
 
@@ -7474,7 +7449,7 @@ effect fn fs_remove(path: String) -> Result[Unit, String] = {
       err(m)
     } else {
       let entries: List[String] = prim.load_handle(rh + 12)
-      if list.len(entries) > 0 then err("directory not empty: " + path) else __rm_floor(path)
+      if list.len(entries) > 0 then err("fs.remove(\"" + path + "\"): Directory not empty") else __rm_floor(path)
     }
   } else __rm_floor(path)
 }
@@ -8475,29 +8450,6 @@ effect fn request_stream(method: String, url: String, body: String, headers: Map
 
 
 
-/// Streams base_url/chat/completions; LLM-response JSON.
-@intrinsic("almide_rt_sse_openai_chat")
-effect fn openai_streaming_call(base_url: String, api_key: String, body_json: String, on_text_delta: (String) -> Unit) -> Result[String, String] = _
-
-
-
-
-
-
-/// Streams Anthropic Messages; LLM-response JSON.
-@intrinsic("almide_rt_sse_anthropic_messages")
-effect fn anthropic_streaming_call(api_key: String, body_json: String, on_text_delta: (String) -> Unit) -> Result[String, String] = _
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -8561,31 +8513,6 @@ effect fn request_stream_with_limits(method: String, url: String, body: String, 
 @intrinsic("almide_rt_http___request_stream_limited")
 @borrow_ref(headers)
 effect fn __request_stream_limited(method: String, url: String, body: String, headers: Map[String, String], total_ms: Int, idle_ms: Int, on_chunk: (String) -> Unit) -> Result[Unit, String] = _
-
-/// openai_streaming_call bounded by per-call limits.
-effect fn openai_streaming_call_with_limits(base_url: String, api_key: String, body_json: String, limits: HttpLimits, on_text_delta: (String) -> Unit) -> Result[String, String] = __openai_streaming_limited(
-  base_url,
-  api_key,
-  body_json,
-  limits.total_ms,
-  limits.idle_ms,
-  on_text_delta,
-)
-
-@intrinsic("almide_rt_http___openai_streaming_limited")
-effect fn __openai_streaming_limited(base_url: String, api_key: String, body_json: String, total_ms: Int, idle_ms: Int, on_text_delta: (String) -> Unit) -> Result[String, String] = _
-
-/// anthropic_streaming_call bounded by per-call limits.
-effect fn anthropic_streaming_call_with_limits(api_key: String, body_json: String, limits: HttpLimits, on_text_delta: (String) -> Unit) -> Result[String, String] = __anthropic_streaming_limited(
-  api_key,
-  body_json,
-  limits.total_ms,
-  limits.idle_ms,
-  on_text_delta,
-)
-
-@intrinsic("almide_rt_http___anthropic_streaming_limited")
-effect fn __anthropic_streaming_limited(api_key: String, body_json: String, total_ms: Int, idle_ms: Int, on_text_delta: (String) -> Unit) -> Result[String, String] = _
 
 
 
@@ -8651,10 +8578,14 @@ fn __decode_part(s: String) -> String = http.url_decode(string.replace(s, "+", "
 fn __is_hex(c: String) -> Bool = c != "" and string.contains("0123456789abcdefABCDEF", c)
 
 
-fn __bad_escape(cs: List[String]) -> Bool = match list.first(cs) {
-  none => false,
-  some(c) => if c != "%" then __bad_escape(list.drop(cs, 1))
-  else if __is_hex(list.get(cs, 1) ?? "") and __is_hex(list.get(cs, 2) ?? "") then __bad_escape(list.drop(cs, 3)) else true,
+
+
+
+fn __bad_escape(path: String) -> Bool = string.split(path, "%") |> list.drop(1) |> list.any((p) => not __hex_pair(p))
+
+fn __hex_pair(p: String) -> Bool = {
+  let cs = string.chars(string.take(p, 2))
+  list.len(cs) == 2 and list.all(cs, __is_hex)
 }
 
 fn __is_rest(s: String) -> Bool = string.starts_with(s, "{") and string.ends_with(s, "...}")
@@ -8703,33 +8634,32 @@ fn __mounted(sub: HttpHandler) -> HttpHandler = (req) => {
 }
 
 
-fn __bind(segs: List[String], parts: List[String]) -> List[String]? = __bind_into(segs, parts, [])
 
 
-fn __bind_into(segs: List[String], parts: List[String], bound: List[String]) -> List[String]? = match list.first(segs) {
-  none => if list.is_empty(parts) then some(bound) else none,
-  some(s) => if __is_rest(s) then {
-    let name = __name_of(s)
-    some(bound + [
-      name,
-      if name == "" then list.join(parts, "/")
-      else parts |> list.map(__decode_part) |> list.join("/")
-    ])
-  } else match list.first(parts) {
-    none => none,
-    some(part) => if __is_param(s) then __bind_into(
-      list.drop(segs, 1),
-      list.drop(parts, 1),
-      bound + [__name_of(s), __decode_part(part)],
-    )
-    else if __decode_part(part) == s then __bind_into(
-      list.drop(segs, 1),
-      list.drop(parts, 1),
-      bound,
-    )
-    else none,
-  },
+
+fn __bind(segs: List[String], parts: List[String]) -> List[String]? = {
+  let fixed = segs |> list.take_while((s) => not __is_rest(s))
+  let n = list.len(fixed)
+  let rest = list.get(segs, n)
+  let pairs = list.zip(fixed, parts)
+  let fits = if rest == none then list.len(parts) == n else list.len(parts) >= n
+  if not fits or not list.all(pairs, ((s, part)) => __is_param(s) or __decode_part(part) == s) then none
+  else {
+    let bound = pairs |> list.filter(((s, _)) => __is_param(s)) |> list.flat_map(((s, part)) => [__name_of(s), __decode_part(part)])
+    match rest {
+      none => some(bound),
+      some(r) => some(bound + __bind_rest(__name_of(r), list.drop(parts, n))),
+    }
+  }
 }
+
+
+
+fn __bind_rest(name: String, parts: List[String]) -> List[String] = [
+  name,
+  if name == "" then list.join(parts, "/")
+  else parts |> list.map(__decode_part) |> list.join("/")
+]
 
 
 fn __covers(a: List[String], b: List[String]) -> Bool = {
@@ -8814,7 +8744,7 @@ effect fn __dispatch(hits: List[(HttpRoute, List[String])], req: HttpRequest) ->
     400,
     "Bad Request: the request target must start with /",
   )
-  else if __bad_escape(string.chars(path)) then http.response(
+  else if __bad_escape(path) then http.response(
     400,
     "Bad Request: malformed percent-encoding in the path",
   )
@@ -8852,19 +8782,16 @@ fn router(routes: List[HttpRoute]) -> Result[HttpHandler, String] = {
 
 /// Applies middleware; the first is the outermost.
 @concurrent(handler, middleware)
-fn wrap(handler: HttpHandler, middleware: List[HttpMiddleware]) -> HttpHandler =
-  if list.is_empty(middleware) then handler
-  else wrap(
-    __apply(list.last(middleware) ?? __no_middleware, handler),
-    list.take(middleware, list.len(middleware) - 1),
-  )
+fn wrap(handler: HttpHandler, middleware: List[HttpMiddleware]) -> HttpHandler = list.reverse(middleware) |> list.fold(
+  handler,
+  (inner, mw) => __apply(mw, inner),
+)
+
 
 
 
 
 fn __apply(mw: HttpMiddleware, inner: HttpHandler) -> HttpHandler = mw(inner)
-
-fn __no_middleware(next: HttpHandler) -> HttpHandler = next
 
 /// JSON body through decode; err is a 400 response.
 fn decode_json[T](req: HttpRequest, decode: (Value) -> Result[T, String]) -> Result[T, HttpResponse] = match json.parse(http.req_body(req)) {
@@ -8982,8 +8909,29 @@ effect fn __hc_stream_limited_impl(method: String, url: String, body: String, he
   let c = __hc_start_impl(method, url, body, headers, total_ms, idle_ms)!
   __hc_pump(c, on_chunk)
 }
+
+
+
+
+
+fn __hc_classic_frame(method: String, body: String, headers: Map[String, String]) -> String = map.entries(headers) |> list.map(((k, v)) => "${__hc_cell(k)}${__hc_cell(v)}") |> list.fold(
+  "${__hc_cell(method)}${__hc_cell(body)}${__hc_cell("classic")}${__hc_cell("classic")}",
+  (acc, cell) => acc + cell,
+)
+
+@implements("http.request_stream")
+effect fn __hc_stream_classic_impl(method: String, url: String, body: String, headers: Map[String, String], on_chunk: (String) -> Unit) -> Result[Unit, String] = {
+  let c = __http_call_open(url, __hc_classic_frame(method, body, headers))!
+  __hc_pump(c, on_chunk)
+}
 "#;
 pub const SRC_HTTP_FRAMED: &str = r#"
+
+
+
+
+
+
 
 
 
@@ -9011,17 +8959,20 @@ effect fn __http_framed_status(url: String, frame: String) -> Result[String, Str
 
 effect fn __http_framed_bytes(url: String, frame: String) -> Result[Bytes, String] = _
 
+@implements("http.request")
 effect fn __request_impl(method: String, url: String, body: String, headers: Map[String, String]) -> Result[String, String] = __http_framed_text(
   url,
   __http_frame(method, body, headers),
 )
 
+@implements("http.request_status")
 effect fn __request_status_impl(method: String, url: String, body: String, headers: Map[String, String]) -> Result[(Int, String), String] = {
   let f = __http_framed_status(url, __http_frame(method, body, headers))!
   let cut = string.index_of(f, "\n") ?? 0
   ok((int.parse(string.take(f, cut)) ?? 0, string.drop(f, cut + 1)))
 }
 
+@implements("http.get_status")
 effect fn __get_status_impl(url: String) -> Result[(Int, String), String] = __request_status_impl(
   "GET",
   url,
@@ -9029,13 +8980,82 @@ effect fn __get_status_impl(url: String) -> Result[(Int, String), String] = __re
   map.new(),
 )
 
+@implements("http.request_bytes")
 effect fn __request_bytes_impl(method: String, url: String, body: String, headers: Map[String, String]) -> Result[Bytes, String] = __http_framed_bytes(
   url,
   __http_frame(method, body, headers),
 )
 
+@implements("http.get_bytes")
 effect fn __get_bytes_impl(url: String) -> Result[Bytes, String] = __request_bytes_impl(
   "GET",
+  url,
+  "",
+  map.new(),
+)
+
+effect fn __http_framed_response(url: String, frame: String) -> Result[String, String] = _
+
+
+fn __http_take_cell(f: String) -> (String, String) = {
+  let cut = string.index_of(f, "\n") ?? 0
+  let n = int.parse(string.take(f, cut)) ?? 0
+  let rest = string.drop(f, cut + 1)
+  (string.take(rest, n), string.drop(rest, n))
+}
+
+fn __http_cells(f: String, acc: List[String]) -> List[String] = if f == "" then acc
+else {
+  let (cell, rest) = __http_take_cell(f)
+  __http_cells(rest, acc + [cell])
+}
+
+@implements("http.request_response")
+effect fn __request_response_impl(method: String, url: String, body: String, headers: Map[String, String]) -> Result[List[String], String] = {
+  let f = __http_framed_response(url, __http_frame(method, body, headers))!
+  let c1 = string.index_of(f, "\n") ?? 0
+  let after_code = string.drop(f, c1 + 1)
+  let c2 = string.index_of(after_code, "\n") ?? 0
+  let hlen = int.parse(string.take(after_code, c2)) ?? 0
+  let rest = string.drop(after_code, c2 + 1)
+  ok([string.take(f, c1), string.drop(rest, hlen)] + __http_cells(string.take(rest, hlen), []))
+}
+
+@implements("http.get_response")
+effect fn __get_response_impl(url: String) -> Result[List[String], String] = __request_response_impl(
+  "GET",
+  url,
+  "",
+  map.new(),
+)
+
+@implements("http.post_response")
+effect fn __post_response_impl(url: String, body: String) -> Result[List[String], String] = __request_response_impl(
+  "POST",
+  url,
+  body,
+  map.new(),
+)
+
+@implements("http.put_response")
+effect fn __put_response_impl(url: String, body: String) -> Result[List[String], String] = __request_response_impl(
+  "PUT",
+  url,
+  body,
+  map.new(),
+)
+
+@implements("http.patch_response")
+effect fn __patch_response_impl(url: String, body: String) -> Result[List[String], String] = __request_response_impl(
+  "PATCH",
+  url,
+  body,
+  map.new(),
+)
+
+@implements("http.delete_response")
+effect fn __delete_response_impl(url: String) -> Result[List[String], String] = __request_response_impl(
+  "DELETE",
   url,
   "",
   map.new(),
@@ -9171,23 +9191,34 @@ fn __hr_ci_eq(x: String, y: String) -> Bool = {
 
 
 
-fn __hr_hdrs(headers: Map[String, String], ks: List[String], i: Int, acc: List[String]) -> List[String] =
-  if i >= list.len(ks) then acc
-  else {
-    let k = list.get(ks, i) ?? ""
-    let v = map.get(headers, k) ?? ""
-    __hr_hdrs(headers, ks, i + 1, __hr_set(acc, 2, k, v))
-  }
+
 
 fn http_with_headers(status: Int, body: String, headers: Map[String, String]) -> List[String] = {
   let st = int.to_string(status)
-  __hr_hdrs(headers, map.keys(headers), 0, [st, body])
+  let named = map.keys(headers) |> list.enumerate |> list.map(((i, k)) => (i, __hr_lower(k), k))
+  let last = named |> list.fold(
+    map.new(),
+    (m, (_, low, k)) => map.set(m, low, map.get(headers, k) ?? ""),
+  )
+  let first = named |> list.fold(
+    map.new(),
+    (m, (i, low, _)) => if map.contains(m, low) then m
+    else map.set(m, low, i),
+  )
+  [st, body] + (named |> list.flat_map(((i, low, k)) => if map.get(first, low) == some(i) then [
+    k,
+    map.get(last, low) ?? ""
+  ]
+  else []))
 }
 
-fn http_status(resp: List[String], code: Int) -> List[String] = {
-  let st = int.to_string(code)
-  [st] + list.drop(resp, 1)
-}
+
+
+fn http_status(resp: List[String], code: Int) -> List[String] = list.set(
+  resp,
+  0,
+  int.to_string(code),
+)
 
 fn http_body(resp: List[String]) -> String = list.get(resp, 1) ?? ""
 
@@ -9232,16 +9263,17 @@ fn __hr_all(resp: List[String], i: Int, key: String, acc: List[String]) -> List[
 fn __hr_lower(s: String) -> String = string.chars(s) |> list.map((c) => __hr_fold(c)) |> list.join("")
 
 
-fn http_headers(resp: List[String]) -> Map[String, String] = __hr_map(resp, 2, map.new())
 
-fn __hr_map(resp: List[String], i: Int, acc: Map[String, String]) -> Map[String, String] =
-  if i >= list.len(resp) then acc
-  else {
-    let k = __hr_lower(list.get(resp, i) ?? "")
-    let next = if map.contains(acc, k) then acc
-    else map.set(acc, k, list.get(resp, i + 1) ?? "")
-    __hr_map(resp, i + 2, next)
-  }
+
+
+fn http_headers(resp: List[String]) -> Map[String, String] = list.range(0, (list.len(resp) - 2) / 2) |> list.fold(
+  map.new(),
+  (acc, j) => {
+    let k = __hr_lower(list.get(resp, 2 + 2 * j) ?? "")
+    if map.contains(acc, k) then acc
+    else map.set(acc, k, list.get(resp, 3 + 2 * j) ?? "")
+  },
+)
 
 
 fn http_set_body(resp: List[String], body: String) -> List[String] = list.set(resp, 1, body)
@@ -9288,6 +9320,60 @@ fn __hs_request(raw: List[String]) -> List[String] = list.take(raw, 3) + [int.to
 
 
 
+
+fn __hs_tchar(c: String) -> Bool = c != "" and string.contains(
+  "!#$%&'*+-.^_`|~0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
+  c,
+)
+
+fn __hs_cp(c: String) -> Int = string.codepoint(c) ?? 0
+
+
+
+fn __hs_quote_char(c: String) -> String = match c {
+  "\\" => "\\\\",
+  "\"" => "\\\"",
+  _ => if __hs_cp(c) < 32 or (__hs_cp(c) >= 127 and __hs_cp(c) <= 159) then "\\u{${int.to_hex(__hs_cp(c))}}" else c,
+}
+
+fn __hs_quote(s: String) -> String = "\"" + (string.chars(s) |> list.map((c) => __hs_quote_char(c)) |> list.join("")) + "\""
+
+fn __hs_control(c: String) -> Bool = (__hs_cp(c) < 32 and c != "\t") or __hs_cp(c) == 127
+
+fn __hs_bad_header(k: String, v: String) -> String? =
+  if k == "" or not list.all(string.chars(k), (c) => __hs_tchar(c)) then some("response header name ${__hs_quote(k)} is not a token")
+  else if list.any(string.chars(v), (c) => __hs_control(c)) then some("response header ${k} has a control character in its value")
+  else none
+
+fn __hs_pairs(resp: List[String]) -> List[(String, String)] = list.range(
+  0,
+  (list.len(resp) - 2) / 2,
+) |> list.map((i) => (list.get(resp, 2 + 2 * i) ?? "", list.get(resp, 3 + 2 * i) ?? ""))
+
+fn __hs_refusal(resp: List[String]) -> String? = {
+  let status = list.get(resp, 0) ?? ""
+  let code = int.parse(status) ?? 0
+  match __hs_pairs(resp) |> list.filter_map(((k, v)) => __hs_bad_header(k, v)) |> list.first {
+    some(why) => some(why),
+    none => if code >= 200 and code <= 599 then none
+    else some("response status ${status} is not a final status code"),
+  }
+}
+
+fn __hs_owned(k: String) -> Bool = list.contains(
+  ["connection", "content-length", "transfer-encoding", "keep-alive"],
+  string.to_lower(k),
+)
+
+fn __hs_shaped(resp: List[String]) -> List[String] = list.take(resp, 2) + (__hs_pairs(resp) |> list.filter(((k, _)) => not __hs_owned(k)) |> list.flat_map(((k, v)) => [k, v]))
+
+
+
+
+
+
+
+
 effect fn http_serve(port: Int, f: effect (List[String]) -> List[String]) -> Unit = {
   match __http_serve_bind(int.to_string(port)) {
     ok(_) => (),
@@ -9304,7 +9390,14 @@ effect fn http_serve(port: Int, f: effect (List[String]) -> List[String]) -> Uni
         ok(r) => r,
         err(e) => ["500", "Internal error: ${e}", "Content-Type", "text/plain"],
       }
-      __http_serve_reply(__hs_frame(resp))!
+      let answer = match __hs_refusal(resp) {
+        some(why) => {
+          eprintln("http.serve: refused the response: ${why}")
+          ["500", "Internal error: ${why}", "Content-Type", "text/plain"]
+        },
+        none => __hs_shaped(resp),
+      }
+      __http_serve_reply(__hs_frame(answer))!
     }
   }
 }
@@ -11011,10 +11104,12 @@ pub const SRC_IO: &str = r#"
 
 
 /// Next stdin line, newline cut; "" at EOF too — read_line_opt tells them apart.
+@ordered
 @intrinsic("almide_rt_io_read_line")
 effect fn read_line() -> String = _
 
 /// Next stdin line, newline cut; none at EOF, some("") for an empty line.
+@ordered
 @intrinsic("almide_rt_io_read_line_opt")
 effect fn read_line_opt() -> String? = _
 
@@ -11023,14 +11118,17 @@ effect fn read_line_opt() -> String? = _
 effect fn print(s: String) -> Unit = _
 
 /// Rest of stdin as text; empty at EOF.
+@ordered
 @intrinsic("almide_rt_io_read_all")
 effect fn read_all() -> String = _
 
 /// Next stdin byte 0..255, or -1 at EOF.
+@ordered
 @intrinsic("almide_rt_io_read_byte")
 effect fn read_byte() -> Int = _
 
 /// Up to n stdin bytes; [] if n <= 0.
+@ordered
 @intrinsic("almide_rt_io_read_n_bytes")
 effect fn read_n_bytes(n: Int) -> List[Int] = _
 
@@ -11998,6 +12096,39 @@ fn __jpr_items(j: Value, path: List[String], k: Int, tgt: Int, last: Bool, i: In
       }
     } else __jpr_items(j, path, k, tgt, last, i + 1, n, acc + [ev])
   }
+
+
+
+
+
+
+
+
+
+
+
+@implements("json.to_map")
+fn json_to_map(j: Value) -> Map[String, String]? =
+  if prim.load32(prim.handle(j) + 4) == 6 then some(__tomap_fold(
+    j,
+    0,
+    prim.load32(prim.handle(j) + 8) / 2,
+    map.new(),
+  ))
+  else none
+
+fn __tomap_fold(v: Value, i: Int, n: Int, acc: Map[String, String]) -> Map[String, String] =
+  if i >= n then acc
+  else {
+    let h = prim.handle(v)
+    let k: String = prim.load_handle(h + 12 + (2 * i) * 8)
+    let x: Value = prim.load_handle(h + 12 + (2 * i + 1) * 8)
+    __tomap_fold(v, i + 1, n, map.set(acc, k, __tomap_text(x)))
+  }
+
+fn __tomap_text(x: Value) -> String =
+  if prim.load32(prim.handle(x) + 4) == 4 then prim.load_str(prim.handle(x) + 12)
+  else value.stringify(x)
 "#;
 pub const SRC_LIST: &str = r#"
 
@@ -12030,10 +12161,12 @@ fn get_or[A](xs: List[A], i: Int, default: A) -> A = _
 
 /// Copy with slot i = val; no-op if i out of range.
 @intrinsic("almide_rt_list_set")
+@reuse(xs)
 fn set[A](xs: List[A], i: Int, val: A) -> List[A] = _
 
 /// Copy with i and j swapped; no-op if either OOB.
 @intrinsic("almide_rt_list_swap")
+@reuse(xs)
 fn swap[A](xs: List[A], i: Int, j: Int) -> List[A] = _
 
 /// Ascending copy; Floats in IEEE totalOrder.
@@ -12074,10 +12207,12 @@ fn flatten[T](xss: List[List[T]]) -> List[T] = _
 
 /// First n elements; all if n >= len or n < 0.
 @intrinsic("almide_rt_list_take")
+@reuse(xs)
 fn take[A](xs: List[A], n: Int) -> List[A] = _
 
 /// All but the first n; [] if n >= len or n < 0.
 @intrinsic("almide_rt_list_drop")
+@reuse(xs)
 fn drop[A](xs: List[A], n: Int) -> List[A] = _
 
 /// All but the first element; [] when empty.
@@ -12143,6 +12278,7 @@ fn filter[A](xs: List[A], f: (A) -> Bool) -> List[A] = _
 
 /// First element where f holds, or none.
 @intrinsic("almide_rt_list_find")
+@reuse(xs)
 fn find[A](xs: List[A], f: (A) -> Bool) -> A? = _
 
 /// true if f holds for some x; false when empty.
@@ -12180,10 +12316,12 @@ fn sort_by[A, B](xs: List[A], f: (A) -> B) -> List[A] = _
 
 /// Longest prefix where f holds.
 @intrinsic("almide_rt_list_take_while")
+@reuse(xs)
 fn take_while[A](xs: List[A], f: (A) -> Bool) -> List[A] = _
 
 /// Rest after the longest prefix where f holds.
 @intrinsic("almide_rt_list_drop_while")
+@reuse(xs)
 fn drop_while[A](xs: List[A], f: (A) -> Bool) -> List[A] = _
 
 /// (where f holds, the rest), order kept.
@@ -12207,6 +12345,7 @@ fn find_index[A](xs: List[A], f: (A) -> Bool) -> Int? = _
 
 /// Copy with slot i = f(old); no-op if i out of range.
 @intrinsic("almide_rt_list_update")
+@reuse(xs)
 @consume(xs)
 fn update[A](xs: List[A], i: Int, f: (A) -> A) -> List[A] = _
 
@@ -12232,6 +12371,7 @@ fn range(start: Int, end: Int) -> List[Int] = _
 
 /// Indices start..<end, clamped; [] if start >= end.
 @intrinsic("almide_rt_list_slice")
+@reuse(xs)
 fn slice[A](xs: List[A], start: Int, end: Int) -> List[A] = _
 
 /// Copy with val at i; i >= len or i < 0 appends.
@@ -12263,10 +12403,12 @@ fn dedup[A](xs: List[A]) -> List[A] = _
 
 /// Last n elements; all if n >= len or n < 0.
 @intrinsic("almide_rt_list_take_end")
+@reuse(xs)
 fn take_end[A](xs: List[A], n: Int) -> List[A] = _
 
 /// All but the last n; [] if n >= len or n < 0.
 @intrinsic("almide_rt_list_drop_end")
+@reuse(xs)
 fn drop_end[A](xs: List[A], n: Int) -> List[A] = _
 
 /// Random permutation; unseeded, differs per run.
@@ -17732,6 +17874,7 @@ fn get_or[K, V](m: Map[K, V], key: K, default: V) -> V = _
 
 /// Copy with key -> value; existing keys stay put.
 @intrinsic("almide_rt_map_set")
+@reuse(m)
 @consume(m)
 fn set[K, V](m: Map[K, V], key: K, value: V) -> Map[K, V] = _
 
@@ -17742,14 +17885,17 @@ fn contains[K, V](m: Map[K, V], key: K) -> Bool = _
 
 /// Copy without key; unchanged if absent.
 @intrinsic("almide_rt_map_remove")
+@reuse(m)
 fn remove[K, V](m: Map[K, V], key: K) -> Map[K, V] = _
 
 /// Every key, in insertion order.
 @intrinsic("almide_rt_map_keys")
+@reuse(m)
 fn keys[K, V](m: Map[K, V]) -> List[K] = _
 
 /// Every value, in key insertion order.
 @intrinsic("almide_rt_map_values")
+@reuse(m)
 fn values[K, V](m: Map[K, V]) -> List[V] = _
 
 /// Entry count; 0 for an empty map.
@@ -17758,10 +17904,12 @@ fn len[K, V](m: Map[K, V]) -> Int = _
 
 /// (key, value) pairs in insertion order.
 @intrinsic("almide_rt_map_entries")
+@reuse(m)
 fn entries[K, V](m: Map[K, V]) -> List[(K, V)] = _
 
 /// a plus b's entries; b wins on shared keys.
 @intrinsic("almide_rt_map_merge")
+@reuse(a)
 fn merge[K, V](a: Map[K, V], b: Map[K, V]) -> Map[K, V] = _
 
 /// true iff m has no entries.
@@ -17777,6 +17925,7 @@ fn from_list[K, V](pairs: List[(K, V)]) -> Map[K, V] = _
 
 /// Same keys and order, values replaced by f(v).
 @intrinsic("almide_rt_map_map_values")
+@reuse(m)
 fn map[K, V, B](m: Map[K, V], f: (V) -> B) -> Map[K, B] = _
 
 /// Entries where f(k, v) holds, order kept.
@@ -17805,6 +17954,7 @@ fn find[K, V](m: Map[K, V], f: (K, V) -> Bool) -> (K, V)? = _
 
 /// Copy with key's value f(v); no-op if absent.
 @intrinsic("almide_rt_map_update")
+@reuse(m)
 fn update[K, V](m: Map[K, V], key: K, f: (V) -> V) -> Map[K, V] = _
 
 
@@ -17812,6 +17962,7 @@ fn update[K, V](m: Map[K, V], key: K, f: (V) -> V) -> Map[K, V] = _
 
 /// key -> f(old) if present, else init appended.
 @intrinsic("almide_rt_map_upsert")
+@reuse(m)
 @consume(m)
 fn upsert[K, V](m: Map[K, V], key: K, init: V, f: (V) -> V) -> Map[K, V] = _
 
@@ -23349,78 +23500,15 @@ fn from_lists(rows: List[List[Float]]) -> Matrix = _
 
 
 
-
-
-/// Q1_0 1-bit decode; blocks past data are 0.0.
-@intrinsic("almide_rt_matrix_from_q1_0_bytes")
-fn from_q1_0_bytes(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix = _
-
-
-
-
 /// Rows at row_ids; id < 0 is row 0, past end zeros.
 @intrinsic("almide_rt_matrix_select_rows")
 fn select_rows(m: Matrix, row_ids: List[Int]) -> Matrix = _
 
 
 
-
-
-
-
-
-/// x times Q1_0-packed W^T.
-@intrinsic("almide_rt_matrix_linear_q1_0_row_no_bias")
-fn linear_q1_0_row_no_bias(x: Matrix, w_bytes: Bytes, w_offset: Int, w_rows: Int, w_cols: Int) -> Matrix = _
-
-
-
-
-/// Elementwise x*sigmoid(x) of a, times b.
-@intrinsic("almide_rt_matrix_silu_mul")
-fn silu_mul(a: Matrix, b: Matrix) -> Matrix = _
-
-
-
-
-
-/// Q1_0 rows at row_ids; past-data rows are 0.
-@intrinsic("almide_rt_matrix_select_rows_q1_0")
-fn select_rows_q1_0(data: Bytes, offset: Int, cols: Int, row_ids: List[Int]) -> Matrix = _
-
-
-
-
-/// Interleaved RoPE, position = row; bad head sizes abort.
-@intrinsic("almide_rt_matrix_rope_rotate")
-fn rope_rotate(x: Matrix, n_heads: Int, head_dim: Int, theta_base: Float) -> Matrix = _
-
-
-
-
-/// RoPE with row p at start_pos + p; negative start is 0.
-@intrinsic("almide_rt_matrix_rope_rotate_at")
-fn rope_rotate_at(x: Matrix, n_heads: Int, head_dim: Int, theta_base: Float, start_pos: Int) -> Matrix = _
-
-
-
 /// base rows then extra; empty side gives other.
 @intrinsic("almide_rt_matrix_append_rows")
 fn append_rows(base: Matrix, extra: Matrix) -> Matrix = _
-
-
-
-
-
-
-
-
-
-
-
-/// Qwen3 layer, Q1_0; new (h, k_cache, v_cache).
-@intrinsic("almide_rt_matrix_qwen3_block_q1_0_kv")
-fn qwen3_block_q1_0_kv(h: Matrix, k_cache: Matrix, v_cache: Matrix, w: Bytes, gamma_offs: List[Int], weight_offs: List[Int], start_pos: Int, n_q_heads: Int, n_kv_heads: Int, head_dim: Int, ffn_hidden: Int, rope_theta: Float, eps: Float) -> (Matrix, Matrix, Matrix) = _
 
 
 
@@ -23434,36 +23522,6 @@ fn linear_f32_row_no_bias(x: Matrix, w_bytes: Bytes, w_offset: Int, w_rows: Int,
 /// f32 LE rows at row_ids; past-data rows are 0.
 @intrinsic("almide_rt_matrix_select_rows_f32")
 fn select_rows_f32(data: Bytes, offset: Int, cols: Int, row_ids: List[Int]) -> Matrix = _
-
-
-
-/// NeoX RoPE: pairs (j, j + head_dim/2).
-@intrinsic("almide_rt_matrix_rope_rotate_neox_at")
-fn rope_rotate_neox_at(x: Matrix, n_heads: Int, head_dim: Int, theta_base: Float, start_pos: Int) -> Matrix = _
-
-
-
-
-
-
-/// Qwen3 layer, f32; new (h, k_cache, v_cache).
-@intrinsic("almide_rt_matrix_qwen3_block_f32_kv")
-fn qwen3_block_f32_kv(h: Matrix, k_cache: Matrix, v_cache: Matrix, w: Bytes, gamma_offs: List[Int], weight_offs: List[Int], start_pos: Int, n_q_heads: Int, n_kv_heads: Int, head_dim: Int, ffn_hidden: Int, rope_theta: Float, eps: Float) -> (Matrix, Matrix, Matrix) = _
-
-
-/// x times Q8_0 W^T; all 0 if w_cols % 32 > 0.
-@intrinsic("almide_rt_matrix_linear_q8_0_row_no_bias")
-fn linear_q8_0_row_no_bias(x: Matrix, w_bytes: Bytes, w_offset: Int, w_rows: Int, w_cols: Int) -> Matrix = _
-
-/// Q8_0 rows dequantized; 0 past data or if cols % 32 > 0.
-@intrinsic("almide_rt_matrix_select_rows_q8_0_dq")
-fn select_rows_q8_0_dq(data: Bytes, offset: Int, cols: Int, row_ids: List[Int]) -> Matrix = _
-
-
-
-/// Qwen3 layer, Q8_0; new (h, k_cache, v_cache).
-@intrinsic("almide_rt_matrix_qwen3_block_q8_0_kv")
-fn qwen3_block_q8_0_kv(h: Matrix, k_cache: Matrix, v_cache: Matrix, w: Bytes, gamma_offs: List[Int], weight_offs: List[Int], start_pos: Int, n_q_heads: Int, n_kv_heads: Int, head_dim: Int, ffn_hidden: Int, rope_theta: Float, eps: Float) -> (Matrix, Matrix, Matrix) = _
 
 /// Rows as lists; r x 0 gives r empty rows.
 @intrinsic("almide_rt_matrix_to_lists")
@@ -23548,84 +23606,6 @@ fn from_bytes_f64_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix =
 @intrinsic("almide_rt_matrix_broadcast_add_row")
 fn broadcast_add_row(m: Matrix, bias: List[Float]) -> Matrix = _
 
-/// Row-wise layer norm; cols cut to gamma/beta.
-@intrinsic("almide_rt_matrix_layer_norm_rows")
-fn layer_norm_rows(m: Matrix, gamma: List[Float], beta: List[Float], eps: Float) -> Matrix = _
-
-
-
-
-/// Row-wise RMS norm; cols cut to gamma.
-@intrinsic("almide_rt_matrix_rms_norm_rows")
-fn rms_norm_rows(m: Matrix, gamma: List[Float], eps: Float) -> Matrix = _
-
-
-
-
-
-
-/// silu(x Wg^T) * (x Wu^T); empty input: 0 x 0.
-@intrinsic("almide_rt_matrix_swiglu_gate")
-fn swiglu_gate(x: Matrix, w_gate: Matrix, w_up: Matrix) -> Matrix = _
-
-/// Row-wise softmax, max-subtracted; a row holding NaN or +inf, or all -inf, is all NaN.
-@intrinsic("almide_rt_matrix_softmax_rows")
-fn softmax_rows(m: Matrix) -> Matrix = _
-
-/// Elementwise GELU, tanh approximation.
-@intrinsic("almide_rt_matrix_gelu")
-fn gelu(m: Matrix) -> Matrix = _
-
-
-
-
-
-
-
-
-
-
-/// gelu(scale(add(mul(a, b), bias), alpha)).
-@rewrite(name="gemm_bias_scale_gelu", from="matrix.gelu(matrix.scale(matrix.add(matrix.mul(?a, ?b), ?bias), ?alpha))", to="matrix.fused_gemm_bias_scale_gelu(?a, ?b, ?bias, ?alpha)")
-@intrinsic("almide_rt_matrix_fused_gemm_bias_scale_gelu")
-fn fused_gemm_bias_scale_gelu(a: Matrix, b: Matrix, bias: Matrix, alpha: Float) -> Matrix = _
-
-
-
-
-/// softmax_rows(scale(mul(q, kt), scale)).
-@rewrite(name="attention_weights", from="matrix.softmax_rows(matrix.scale(matrix.mul(?q, ?kt), ?scale))", to="matrix.attention_weights(?q, ?kt, ?scale)")
-@intrinsic("almide_rt_matrix_attention_weights")
-fn attention_weights(q: Matrix, kt: Matrix, scale: Float) -> Matrix = _
-
-
-
-
-
-
-/// mul(attention_weights(q, kt, scale), v).
-@rewrite(name="scaled_dot_product_attention", from="matrix.mul(matrix.attention_weights(?q, ?kt, ?scale), ?v)", to="matrix.scaled_dot_product_attention(?q, ?kt, ?v, ?scale)")
-@intrinsic("almide_rt_matrix_scaled_dot_product_attention")
-fn scaled_dot_product_attention(q: Matrix, kt: Matrix, v: Matrix, scale: Float) -> Matrix = _
-
-
-
-
-
-/// gelu(linear_row(x, weight, bias)).
-@rewrite(name="linear_row_gelu", from="matrix.gelu(matrix.linear_row(?x, ?w, ?bias))", to="matrix.linear_row_gelu(?x, ?w, ?bias)")
-@intrinsic("almide_rt_matrix_linear_row_gelu")
-fn linear_row_gelu(x: Matrix, weight: Matrix, bias: List[Float]) -> Matrix = _
-
-
-
-
-
-/// linear_row(layer_norm_rows(x, ...), weight, bias).
-@rewrite(name="pre_norm_linear", from="matrix.linear_row(matrix.layer_norm_rows(?x, ?gamma, ?beta, ?eps), ?w, ?bias)", to="matrix.pre_norm_linear(?x, ?gamma, ?beta, ?eps, ?w, ?bias)")
-@intrinsic("almide_rt_matrix_pre_norm_linear")
-fn pre_norm_linear(x: Matrix, gamma: List[Float], beta: List[Float], eps: Float, weight: Matrix, bias: List[Float]) -> Matrix = _
-
 /// n slices cols/n wide, remainder dropped; [] if n = 0.
 @intrinsic("almide_rt_matrix_split_cols_even")
 fn split_cols_even(m: Matrix, n: Int) -> List[Matrix] = _
@@ -23638,18 +23618,6 @@ fn concat_cols(matrices: List[Matrix]) -> Matrix = _
 @deprecated(since=5, use="matrix.concat_cols")
 @intrinsic("almide_rt_matrix_concat_cols_many")
 fn concat_cols_many(matrices: List[Matrix]) -> Matrix = _
-
-/// mask_val added where col > row.
-@intrinsic("almide_rt_matrix_causal_mask_add")
-fn causal_mask_add(m: Matrix, mask_val: Float) -> Matrix = _
-
-/// Attention over n_heads; n_heads < 1 aborts; a NaN or +inf score row is NaN.
-@intrinsic("almide_rt_matrix_multi_head_attention")
-fn multi_head_attention(q: Matrix, k: Matrix, v: Matrix, n_heads: Int) -> Matrix = _
-
-/// Causal multi-head attention; n_heads < 1 aborts.
-@intrinsic("almide_rt_matrix_masked_multi_head_attention")
-fn masked_multi_head_attention(q: Matrix, k: Matrix, v: Matrix, n_heads: Int) -> Matrix = _
 
 /// x W^T + bias; empty x or W gives 0 x 0.
 @intrinsic("almide_rt_matrix_linear_row")
@@ -23723,882 +23691,6 @@ fn mul_f32_t_scaled(a: Matrix[Float32], alpha: Float, b: Matrix[Float32]) -> Mat
 @rewrite(name="mul_scaled_lhs", from="matrix.mul(matrix.scale(?a, ?s), ?b)", to="matrix.mul_scaled(?a, ?s, ?b)")
 @intrinsic("almide_rt_matrix_mul_scaled")
 fn mul_scaled(a: Matrix, alpha: Float, b: Matrix) -> Matrix = _
-"#;
-pub const SRC_MATRIX_ACTIVATIONS: &str = r#"
-
-
-
-
-
-
-import prim
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-fn __fast_exp(x0: Float) -> Float = {
-  let lo = prim.fmax(x0, -708.0)
-  let x = prim.fmin(lo, 708.0)
-  let kf = prim.fnearest(prim.fmul(x, 1.4426950408889634))
-  let r = prim.fsub(x, prim.fmul(kf, 0.6931471805599453))
-  let p1 = prim.fadd(prim.fmul(0.001388888888888889, r), 0.008333333333333333)
-  let p2 = prim.fadd(prim.fmul(p1, r), 0.041666666666666664)
-  let p3 = prim.fadd(prim.fmul(p2, r), 0.16666666666666666)
-  let p4 = prim.fadd(prim.fmul(p3, r), 0.5)
-  let p5 = prim.fadd(prim.fmul(p4, r), 1.0)
-  let p6 = prim.fadd(prim.fmul(p5, r), 1.0)
-  let biased = prim.f2i(kf) + 1023
-  prim.fmul(p6, prim.ffrombits(int.bshl(biased, 52)))
-}
-
-fn __sm_row_max(row: List[Float], n: Int, i: Int, acc: Float) -> Float = if i >= n then acc
-else {
-  let x = list.get(row, i) ?? acc
-  __sm_row_max(row, n, i + 1, if x > acc then x else acc)
-}
-
-fn __softmax_row(row: List[Float]) -> List[Float] = {
-  let n = list.len(row)
-  if n == 0 then row
-  else {
-    let mx = __sm_row_max(row, n, 1, list.get(row, 0) ?? 0.0)
-    let exps = row |> list.map((x) => __fast_exp(x - mx))
-    let s = exps |> list.fold(0.0, (acc, v) => acc + v)
-
-
-
-
-
-
-
-
-
-    let inv = 1.0 / s
-    exps |> list.map((v) => v * inv)
-  }
-}
-
-
-
-
-
-
-
-
-fn matrix_softmax_rows(m: List[List[Float]]) -> List[List[Float]] = m |> list.map((row) => __softmax_row(row))
-
-fn __gelu_scalar(x: Float) -> Float = {
-  let inner = 0.7978845608028654 * (x + 0.044715 * ((x * x) * x))
-
-
-
-
-  let e2 = __fast_exp(2.0 * inner)
-  let t = 1.0 - 2.0 / (e2 + 1.0)
-
-
-
-
-
-
-
-
-
-  (0.5 * x) * (1.0 + t)
-}
-
-fn __gelu_row(dh: Int, sh: Int, n: Int, i: Int) -> Int = if i >= n then 0
-else {
-  let x = prim.ffrombits(prim.load64(sh + 12 + i * 8))
-  prim.store64(dh + 12 + i * 8, prim.fbits(__gelu_scalar(x)))
-  __gelu_row(dh, sh, n, i + 1)
-}
-
-fn __gelu_rows(ho: Int, hm: Int, n: Int, i: Int) -> Int = if i >= n then 0
-else {
-  let rh = prim.load64(hm + 12 + i * 8)
-  let c = prim.load32(rh + 4)
-  let row = prim.alloc_list_f64(c)
-  let _f = __gelu_row(prim.handle(row), rh, c, 0)
-  prim.store_str(ho + 12 + i * 8, row)
-  __gelu_rows(ho, hm, n, i + 1)
-}
-
-
-
-
-
-
-
-fn matrix_gelu(m: List[List[Float]]) -> List[List[Float]] = {
-  let hm = prim.handle(m)
-  let n = prim.load32(hm + 4)
-  let out: List[List[Float]] = prim.alloc_list_str(n)
-  let _x = __gelu_rows(prim.handle(out), hm, n, 0)
-  out
-}
-
-fn __sg_dot(ah: Int, bh: Int, n: Int, k: Int, acc: Float) -> Float = if k >= n then acc
-else {
-  let av = prim.ffrombits(prim.load64(ah + 12 + k * 8))
-  let bv = prim.ffrombits(prim.load64(bh + 12 + k * 8))
-  __sg_dot(ah, bh, n, k + 1, acc + av * bv)
-}
-
-fn __sg_cell(xrow_h: Int, wg: List[List[Float]], wu: List[List[Float]], j: Int, d_in: Int) -> Float = {
-  let wgj = prim.load64(prim.handle(wg) + 12 + j * 8)
-  let wuj = prim.load64(prim.handle(wu) + 12 + j * 8)
-  let g = __sg_dot(xrow_h, wgj, d_in, 0, 0.0)
-  let u = __sg_dot(xrow_h, wuj, d_in, 0, 0.0)
-
-
-
-  let sig = 1.0 / (1.0 + math.exp(-g))
-  (g * sig) * u
-}
-
-fn __sg_row_cells(dh: Int, xrow_h: Int, wg: List[List[Float]], wu: List[List[Float]], d_out: Int, d_in: Int, j: Int) -> Int =
-  if j >= d_out then 0
-  else {
-    prim.store64(dh + 12 + j * 8, prim.fbits(__sg_cell(xrow_h, wg, wu, j, d_in)))
-    __sg_row_cells(dh, xrow_h, wg, wu, d_out, d_in, j + 1)
-  }
-
-fn __sg_rows(ho: Int, x: List[List[Float]], wg: List[List[Float]], wu: List[List[Float]], r: Int, d_out: Int, d_in: Int, i: Int) -> Int =
-  if i >= r then 0
-  else {
-    let xrow_h = prim.load64(prim.handle(x) + 12 + i * 8)
-    let row = prim.alloc_list_f64(d_out)
-    let _c = __sg_row_cells(prim.handle(row), xrow_h, wg, wu, d_out, d_in, 0)
-    prim.store_str(ho + 12 + i * 8, row)
-    __sg_rows(ho, x, wg, wu, r, d_out, d_in, i + 1)
-  }
-
-
-
-
-
-
-fn __silu_row(dh: Int, ah: Int, bh: Int, n: Int, fast: Bool, j: Int) -> Int = if j >= n then 0
-else {
-  let x = prim.ffrombits(prim.load64(ah + 12 + j * 8))
-  let y = prim.ffrombits(prim.load64(bh + 12 + j * 8))
-  let e = if fast then __fast_exp(-x) else math.exp(-x)
-  let sig = 1.0 / (1.0 + e)
-  prim.store64(dh + 12 + j * 8, prim.fbits(x * sig * y))
-  __silu_row(dh, ah, bh, n, fast, j + 1)
-}
-
-fn __silu_rows(ho: Int, ha: Int, hb: Int, n: Int, fast: Bool, i: Int) -> Int = if i >= n then 0
-else {
-  let ar = prim.load64(ha + 12 + i * 8)
-  let br = prim.load64(hb + 12 + i * 8)
-  let ca = prim.load32(ar + 4)
-  let cb = prim.load32(br + 4)
-  let c = if ca < cb then ca else cb
-  let row = prim.alloc_list_f64(c)
-  let _f = __silu_row(prim.handle(row), ar, br, c, fast, 0)
-  prim.store_str(ho + 12 + i * 8, row)
-  __silu_rows(ho, ha, hb, n, fast, i + 1)
-}
-
-fn matrix_silu_mul(a: List[List[Float]], b: List[List[Float]]) -> List[List[Float]] = {
-  let ha = prim.handle(a)
-  let hb = prim.handle(b)
-  let la = prim.load32(ha + 4)
-  let lb = prim.load32(hb + 4)
-  let n = if la < lb then la else lb
-
-  let ca = if la == 0 then 0 else prim.load32(prim.load64(ha + 12) + 4)
-  let cb = if lb == 0 then 0 else prim.load32(prim.load64(hb + 12) + 4)
-  let fast = la == lb and ca == cb
-  let out: List[List[Float]] = prim.alloc_list_str(n)
-  let _x = __silu_rows(prim.handle(out), ha, hb, n, fast, 0)
-  out
-}
-
-
-
-
-
-
-
-fn matrix_swiglu_gate(x: List[List[Float]], w_gate: List[List[Float]], w_up: List[List[Float]]) -> List[List[Float]] = {
-  let hx = prim.handle(x)
-  let r = prim.load32(hx + 4)
-
-  let d_in = if r == 0 then 0 else prim.load32(prim.load64(hx + 12) + 4)
-  let d_out = prim.load32(prim.handle(w_gate) + 4)
-  let up_rows = prim.load32(prim.handle(w_up) + 4)
-
-
-
-
-
-  let rows = if r == 0 or d_out == 0 or up_rows == 0 then 0 else r
-
-
-
-
-  let _g = if rows == 0 then 0
-  else __mxa_shape_guard(w_gate, w_up, d_in, d_out)
-  let out: List[List[Float]] = prim.alloc_list_str(rows)
-  let _x = __sg_rows(prim.handle(out), x, w_gate, w_up, rows, d_out, d_in, 0)
-  out
-}
-
-
-
-
-fn __mxa_shape_eq(a: Int, b: Int) -> Int = {
-  if a != b then prim.die(prim.handle("Error: matrix shape mismatch\n")) else ()
-  0
-}
-
-fn __mxa_shape_guard(w_gate: List[List[Float]], w_up: List[List[Float]], d_in: Int, d_out: Int) -> Int = {
-  let hg = prim.handle(w_gate)
-  let hu = prim.handle(w_up)
-  let _a = __mxa_shape_eq(prim.load32(prim.load64(hg + 12) + 4), d_in)
-  let _b = __mxa_shape_eq(prim.load32(prim.load64(hu + 12) + 4), d_in)
-  __mxa_shape_eq(prim.load32(hu + 4), d_out)
-}
-
-fn __rope_copy(dh: Int, sh: Int, cols: Int, j: Int) -> Int = if j >= cols then 0
-else {
-  prim.store64(dh + 12 + j * 8, prim.load64(sh + 12 + j * 8))
-  __rope_copy(dh, sh, cols, j + 1)
-}
-
-
-
-
-
-
-
-
-fn __rope_pairs(dh: Int, sh: Int, pos_f: Float, head_dim_f: Float, theta: Float, h: Int, head_dim: Int, half: Int, i_pair: Int) -> Int =
-  if i_pair >= half then 0
-  else {
-    let j0 = h * head_dim + 2 * i_pair
-    let x0 = prim.ffrombits(prim.load64(sh + 12 + j0 * 8))
-    let x1 = prim.ffrombits(prim.load64(sh + 12 + (j0 + 1) * 8))
-    let two_i_f = int.to_float(2 * i_pair)
-
-
-
-
-
-
-    let inv_freq = 1.0 / math.fpow(theta, two_i_f / head_dim_f)
-    let angle = pos_f * inv_freq
-    let s = math.sin(angle)
-    let c = math.cos(angle)
-    prim.store64(dh + 12 + j0 * 8, prim.fbits(x0 * c - x1 * s))
-    prim.store64(dh + 12 + (j0 + 1) * 8, prim.fbits(x0 * s + x1 * c))
-    __rope_pairs(dh, sh, pos_f, head_dim_f, theta, h, head_dim, half, i_pair + 1)
-  }
-
-fn __mx_head_count(n: Int) -> Int = {
-  if n < 1 then prim.die(prim.handle("Error: head count must be positive\n")) else ()
-  n
-}
-
-
-
-
-
-
-
-fn __mx_head_geometry(nh: Int, head_dim: Int, rows: Int, cols: Int) -> Int = {
-  if rows > 0 and head_dim > 0 and nh > cols / head_dim then prim.die(prim.handle("Error: head geometry exceeds row width\n")) else ()
-  nh
-}
-
-fn __rope_heads(dh: Int, sh: Int, pos_f: Float, head_dim_f: Float, theta: Float, n_heads: Int, head_dim: Int, half: Int, h: Int) -> Int =
-  if h >= n_heads then 0
-  else {
-    let _p = __rope_pairs(dh, sh, pos_f, head_dim_f, theta, h, head_dim, half, 0)
-    __rope_heads(dh, sh, pos_f, head_dim_f, theta, n_heads, head_dim, half, h + 1)
-  }
-
-fn __rope_rows(ho: Int, hx: Int, n_heads: Int, head_dim: Int, half: Int, head_dim_f: Float, theta: Float, cols: Int, rows: Int, start: Int, p: Int) -> Int =
-  if p >= rows then 0
-  else {
-    let sh = prim.load64(hx + 12 + p * 8)
-    let row = prim.alloc_list_f64(cols)
-    let dh = prim.handle(row)
-    let _cp = __rope_copy(dh, sh, cols, 0)
-    let _ht = __rope_heads(
-      dh,
-      sh,
-      int.to_float(start + p),
-      head_dim_f,
-      theta,
-      n_heads,
-      head_dim,
-      half,
-      0,
-    )
-    prim.store_str(ho + 12 + p * 8, row)
-    __rope_rows(ho, hx, n_heads, head_dim, half, head_dim_f, theta, cols, rows, start, p + 1)
-  }
-
-
-
-
-
-
-fn __rope_neox_pairs(dh: Int, sh: Int, pos_f: Float, head_dim_f: Float, theta: Float, h: Int, head_dim: Int, half: Int, j: Int) -> Int =
-  if j >= half then 0
-  else {
-    let j0 = h * head_dim + j
-    let j1 = h * head_dim + half + j
-    let x0 = prim.ffrombits(prim.load64(sh + 12 + j0 * 8))
-    let x1 = prim.ffrombits(prim.load64(sh + 12 + j1 * 8))
-    let two_j_f = int.to_float(2 * j)
-    let inv_freq = 1.0 / math.fpow(theta, two_j_f / head_dim_f)
-    let angle = pos_f * inv_freq
-    let s = math.sin(angle)
-    let c = math.cos(angle)
-    prim.store64(dh + 12 + j0 * 8, prim.fbits(x0 * c - x1 * s))
-    prim.store64(dh + 12 + j1 * 8, prim.fbits(x0 * s + x1 * c))
-    __rope_neox_pairs(dh, sh, pos_f, head_dim_f, theta, h, head_dim, half, j + 1)
-  }
-
-fn __rope_neox_heads(dh: Int, sh: Int, pos_f: Float, head_dim_f: Float, theta: Float, n_heads: Int, head_dim: Int, half: Int, h: Int) -> Int =
-  if h >= n_heads then 0
-  else {
-    let _p = __rope_neox_pairs(dh, sh, pos_f, head_dim_f, theta, h, head_dim, half, 0)
-    __rope_neox_heads(dh, sh, pos_f, head_dim_f, theta, n_heads, head_dim, half, h + 1)
-  }
-
-fn __rope_neox_rows(ho: Int, hx: Int, n_heads: Int, head_dim: Int, half: Int, head_dim_f: Float, theta: Float, cols: Int, rows: Int, start: Int, p: Int) -> Int =
-  if p >= rows then 0
-  else {
-    let sh = prim.load64(hx + 12 + p * 8)
-    let row = prim.alloc_list_f64(cols)
-    let dh = prim.handle(row)
-    let _cp = __rope_copy(dh, sh, cols, 0)
-    let _ht = __rope_neox_heads(
-      dh,
-      sh,
-      int.to_float(start + p),
-      head_dim_f,
-      theta,
-      n_heads,
-      head_dim,
-      half,
-      0,
-    )
-    prim.store_str(ho + 12 + p * 8, row)
-    __rope_neox_rows(ho, hx, n_heads, head_dim, half, head_dim_f, theta, cols, rows, start, p + 1)
-  }
-
-
-
-
-
-
-fn matrix_rope_rotate(x: List[List[Float]], n_heads: Int, head_dim: Int, theta: Float) -> List[List[Float]] = {
-  let hx = prim.handle(x)
-  let rows = prim.load32(hx + 4)
-  let cols = if rows == 0 then 0 else prim.load32(prim.load64(hx + 12) + 4)
-  let half = head_dim / 2
-  let nh = __mx_head_geometry(__mx_head_count(n_heads), head_dim, rows, cols)
-  let out: List[List[Float]] = prim.alloc_list_str(rows)
-  let _x = __rope_rows(
-    prim.handle(out),
-    hx,
-    nh,
-    head_dim,
-    half,
-    int.to_float(head_dim),
-    theta,
-    cols,
-    rows,
-    0,
-    0,
-  )
-  out
-}
-
-
-
-
-
-
-
-fn matrix_rope_rotate_at(x: List[List[Float]], n_heads: Int, head_dim: Int, theta: Float, start_pos: Int) -> List[List[Float]] = {
-  let hx = prim.handle(x)
-  let rows = prim.load32(hx + 4)
-  let cols = if rows == 0 then 0 else prim.load32(prim.load64(hx + 12) + 4)
-  let half = head_dim / 2
-  let nh = __mx_head_geometry(__mx_head_count(n_heads), head_dim, rows, cols)
-  let start = if start_pos < 0 then 0 else start_pos
-  let out: List[List[Float]] = prim.alloc_list_str(rows)
-  let _x = __rope_rows(
-    prim.handle(out),
-    hx,
-    nh,
-    head_dim,
-    half,
-    int.to_float(head_dim),
-    theta,
-    cols,
-    rows,
-    start,
-    0,
-  )
-  out
-}
-
-
-fn matrix_rope_rotate_neox_at(x: List[List[Float]], n_heads: Int, head_dim: Int, theta: Float, start_pos: Int) -> List[List[Float]] = {
-  let hx = prim.handle(x)
-  let rows = prim.load32(hx + 4)
-  let cols = if rows == 0 then 0 else prim.load32(prim.load64(hx + 12) + 4)
-  let half = head_dim / 2
-  let nh = __mx_head_geometry(__mx_head_count(n_heads), head_dim, rows, cols)
-  let start = if start_pos < 0 then 0 else start_pos
-  let out: List[List[Float]] = prim.alloc_list_str(rows)
-  let _x = __rope_neox_rows(
-    prim.handle(out),
-    hx,
-    nh,
-    head_dim,
-    half,
-    int.to_float(head_dim),
-    theta,
-    cols,
-    rows,
-    start,
-    0,
-  )
-  out
-}
-
-
-fn __mha_dot(qh: Int, kh: Int, col0: Int, dh: Int, k: Int, acc: Float) -> Float =
-  if k >= dh then acc
-  else {
-    let qv = prim.ffrombits(prim.load64(qh + 12 + (col0 + k) * 8))
-    let kv = prim.ffrombits(prim.load64(kh + 12 + (col0 + k) * 8))
-    __mha_dot(qh, kh, col0, dh, k + 1, acc + qv * kv)
-  }
-
-fn __mha_scores(sch: Int, qh: Int, kmat: List[List[Float]], col0: Int, dh: Int, sk: Int, scale: Float, mask: Int, j: Int) -> Int =
-  if j >= sk then 0
-  else {
-    let kh = prim.load64(prim.handle(kmat) + 12 + j * 8)
-    let dot = __mha_dot(qh, kh, col0, dh, 0, 0.0)
-    let scaled = dot * scale
-    let masked = if mask >= 0 and j > mask then scaled + (0.0 - 1000000000.0) else scaled
-    prim.store64(sch + 12 + j * 8, prim.fbits(masked))
-    __mha_scores(sch, qh, kmat, col0, dh, sk, scale, mask, j + 1)
-  }
-
-fn __mha_max(sch: Int, sk: Int, j: Int, acc: Float) -> Float = if j >= sk then acc
-else {
-  let v = prim.ffrombits(prim.load64(sch + 12 + j * 8))
-  __mha_max(sch, sk, j + 1, if v > acc then v else acc)
-}
-
-
-
-
-fn __mha_exp(sch: Int, sk: Int, mx: Float, j: Int, sum: Float) -> Float = if j >= sk then sum
-else {
-  let s = prim.ffrombits(prim.load64(sch + 12 + j * 8))
-  let e = math.exp(s - mx)
-  prim.store64(sch + 12 + j * 8, prim.fbits(e))
-  __mha_exp(sch, sk, mx, j + 1, sum + e)
-}
-
-
-fn __mha_acc_cols(oh: Int, vh: Int, col0: Int, dh: Int, w: Float, k: Int) -> Int = if k >= dh then 0
-else {
-  let old = prim.ffrombits(prim.load64(oh + 12 + (col0 + k) * 8))
-  let vv = prim.ffrombits(prim.load64(vh + 12 + (col0 + k) * 8))
-  prim.store64(oh + 12 + (col0 + k) * 8, prim.fbits(old + vv * w))
-  __mha_acc_cols(oh, vh, col0, dh, w, k + 1)
-}
-
-
-
-
-fn __mha_out(oh: Int, sch: Int, vmat: List[List[Float]], col0: Int, dh: Int, sk: Int, inv: Float, j: Int) -> Int =
-  if j >= sk then 0
-  else {
-    let w = prim.ffrombits(prim.load64(sch + 12 + j * 8)) * inv
-    let _c = if w == 0.0 then 0
-    else __mha_acc_cols(oh, prim.load64(prim.handle(vmat) + 12 + j * 8), col0, dh, w, 0)
-    __mha_out(oh, sch, vmat, col0, dh, sk, inv, j + 1)
-  }
-
-fn __mha_heads(oh: Int, qh: Int, kmat: List[List[Float]], vmat: List[List[Float]], nh: Int, dh: Int, sk: Int, sq: Int, i: Int, scale: Float, causal: Bool, h: Int) -> Int =
-  if h >= nh then 0
-  else {
-    let col0 = h * dh
-    let scores = prim.alloc_list_f64(sk)
-    let sch = prim.handle(scores)
-    let mask = if causal then (sk - sq) + i else 0 - 1
-    let _s = __mha_scores(sch, qh, kmat, col0, dh, sk, scale, mask, 0)
-
-
-
-
-    let mx = __mha_max(sch, sk, 0, prim.ffrombits(int.bshl(4095, 52)))
-    let sum = __mha_exp(sch, sk, mx, 0, 0.0)
-    let _o = __mha_out(oh, sch, vmat, col0, dh, sk, 1.0 / sum, 0)
-    __mha_heads(oh, qh, kmat, vmat, nh, dh, sk, sq, i, scale, causal, h + 1)
-  }
-
-fn __mha_zero(oh: Int, dm: Int, i: Int) -> Int = if i >= dm then 0
-else {
-  prim.store64(oh + 12 + i * 8, prim.fbits(0.0))
-  __mha_zero(oh, dm, i + 1)
-}
-
-fn __mha_rows(ho: Int, qmat: List[List[Float]], kmat: List[List[Float]], vmat: List[List[Float]], nh: Int, dh: Int, dm: Int, sk: Int, sq: Int, scale: Float, causal: Bool, i: Int) -> Int =
-  if i >= sq then 0
-  else {
-    let qh = prim.load64(prim.handle(qmat) + 12 + i * 8)
-    let row = prim.alloc_list_f64(dm)
-    let oh = prim.handle(row)
-    let _z = __mha_zero(oh, dm, 0)
-    let _h = __mha_heads(oh, qh, kmat, vmat, nh, dh, sk, sq, i, scale, causal, 0)
-    prim.store_str(ho + 12 + i * 8, row)
-    __mha_rows(ho, qmat, kmat, vmat, nh, dh, dm, sk, sq, scale, causal, i + 1)
-  }
-
-
-
-
-
-
-fn __mha_shape_guard(hk: Int, hv: Int, sk: Int, dm: Int) -> Int = if sk == 0 then 0
-else {
-  let _a = __mxa_shape_eq(prim.load32(prim.load64(hk + 12) + 4), dm)
-  let _b = __mxa_shape_eq(prim.load32(hv + 4), sk)
-  __mxa_shape_eq(prim.load32(prim.load64(hv + 12) + 4), dm)
-}
-
-
-
-
-fn __mxa_shape_le(a: Int, b: Int) -> Int = {
-  if a > b then prim.die(prim.handle("Error: matrix shape mismatch\n")) else ()
-  0
-}
-
-fn __mha_impl(q: List[List[Float]], k: List[List[Float]], v: List[List[Float]], n_heads: Int, causal: Bool) -> List[List[Float]] = {
-  let hq = prim.handle(q)
-  let sq = prim.load32(hq + 4)
-  let sk = prim.load32(prim.handle(k) + 4)
-  let dm = if sq == 0 then 0 else prim.load32(prim.load64(hq + 12) + 4)
-  let nh = __mx_head_count(n_heads)
-  let _g = if sq == 0 then 0
-  else __mha_shape_guard(prim.handle(k), prim.handle(v), sk, dm)
-  let _c = if sq == 0 or not causal then 0 else __mxa_shape_le(sq, sk)
-  let dh = dm / nh
-  let scale = 1.0 / float.sqrt(int.to_float(dh))
-  let out: List[List[Float]] = prim.alloc_list_str(sq)
-  let _x = __mha_rows(prim.handle(out), q, k, v, nh, dh, dm, sk, sq, scale, causal, 0)
-  out
-}
-
-fn matrix_multi_head_attention(q: List[List[Float]], k: List[List[Float]], v: List[List[Float]], n_heads: Int) -> List[List[Float]] = __mha_impl(
-  q,
-  k,
-  v,
-  n_heads,
-  false,
-)
-
-
-
-
-
-fn matrix_masked_multi_head_attention(q: List[List[Float]], k: List[List[Float]], v: List[List[Float]], n_heads: Int) -> List[List[Float]] = __mha_impl(
-  q,
-  k,
-  v,
-  n_heads,
-  true,
-)
-
-
-
-
-
-
-
-
-fn __dq_zero(v: Float) -> Float = if v == 0.0 then 0.0 else v
-
-
-
-
-fn __fp16_subnormal_bits(signbits: Int, m: Int, e: Int) -> Int =
-  if prim.band(m, 1024) == 0 then __fp16_subnormal_bits(
-    signbits,
-    prim.bshl(m, 1),
-    e - 1,
-  )
-  else prim.bor(prim.bor(signbits, prim.bshl(e + 127, 23)), prim.bshl(prim.band(m, 1023), 13))
-
-
-
-
-
-
-fn __fp16_bits(raw: Int) -> Int = {
-  let signbits = prim.bshl(prim.band(prim.bshr_u(raw, 15), 1), 31)
-  let expv = prim.band(prim.bshr_u(raw, 10), 31)
-  let mant = prim.band(raw, 1023)
-  if expv == 0 and mant == 0 then 0
-  else if expv == 0 then __fp16_subnormal_bits(signbits, mant, 0 - 14)
-  else if expv == 31 then prim.bor(prim.bor(signbits, prim.bshl(255, 23)), prim.bshl(mant, 13)) else prim.bor(
-    prim.bor(signbits, prim.bshl(expv + 112, 23)),
-    prim.bshl(mant, 13),
-  )
-}
-
-fn __q10_scale(base: Int, block_start: Int) -> Float = {
-  let raw = prim.bor(
-    prim.load8(base + block_start),
-    prim.bshl(prim.load8(base + block_start + 1), 8),
-  )
-  prim.bits_to_f32(__fp16_bits(raw))
-}
-
-
-
-
-
-
-
-fn __q10_val(base: Int, limit: Int, k: Int) -> Float = {
-  let block_start = prim.bshr_u(k, 7) * 18
-  if base + block_start + 18 > limit then 0.0
-  else {
-    let scale = __q10_scale(base, block_start)
-    let bits_start = block_start + 2
-    let byte_idx = bits_start + prim.band(prim.bshr_u(k, 3), 15)
-    let bit = prim.band(prim.bshr_u(prim.load8(base + byte_idx), prim.band(k, 7)), 1)
-    if bit == 1 then __dq_zero(scale) else __dq_zero(0.0 - scale)
-  }
-}
-
-fn __q10_row(dh: Int, base: Int, limit: Int, row_k0: Int, cols: Int, c: Int) -> Int =
-  if c >= cols then 0
-  else {
-    prim.store64(dh + 12 + c * 8, prim.fbits(__q10_val(base, limit, row_k0 + c)))
-    __q10_row(dh, base, limit, row_k0, cols, c + 1)
-  }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-fn __q10_rows(ho: Int, base: Int, limit: Int, rows: Int, cols: Int, r: Int) -> Int =
-  if r >= rows then 0
-  else {
-    let row = prim.alloc_list_f64(cols)
-    let _c = __q10_row(prim.handle(row), base, limit, r * cols, cols, 0)
-    prim.store_str(ho + 12 + r * 8, row)
-    __q10_rows(ho, base, limit, rows, cols, r + 1)
-  }
-
-
-
-
-
-
-
-
-fn __q_dims_guard(rows: Int, cols: Int) -> Int = {
-  if rows > 268435456 then prim.die(prim.handle("Error: matrix dimensions too large\n")) else ()
-  if rows > 0 and cols > 268435456 / rows then prim.die(prim.handle("Error: matrix dimensions too large\n")) else ()
-  0
-}
-
-fn matrix_from_q1_0_bytes(data: Bytes, offset: Int, rows: Int, cols: Int) -> List[List[Float]] = {
-  let hd = prim.handle(data)
-
-
-
-  let off = __q_sel_off(offset, prim.load32(hd + 4))
-  let base = hd + 12 + off
-  let limit = hd + 12 + prim.load32(hd + 4)
-
-  let r = if rows < 0 then 0 else rows
-  let c = if cols < 0 then 0 else cols
-  let _g = __q_dims_guard(r, c)
-  let out: List[List[Float]] = prim.alloc_list_str(r)
-  let _x = __q10_rows(prim.handle(out), base, limit, r, c, 0)
-  out
-}
-
-
-
-
-
-
-
-fn __q_row_fits(avail: Int, rid: Int, rb: Int) -> Bool = rb <= avail and (rb == 0 or rid <= (avail - rb) / rb)
-
-
-
-fn __q_sel_off(offset: Int, len: Int) -> Int = if offset < 0 then 0
-else if offset > len then len else offset
-
-
-
-
-
-
-
-
-
-
-
-
-
-fn __q10_sel_rows(ho: Int, base: Int, limit: Int, ids: List[Int], cols: Int, i: Int) -> Int =
-  if i >= list.len(ids) then 0
-  else {
-    let rid0 = list.get(ids, i) ?? 0
-    let rid = if rid0 < 0 then 0 else rid0
-    let row_bytes = cols / 128 * 18
-    let cr = cols / 128 * 128
-    let row = prim.alloc_list_f64(cols)
-    let _c = if __q_row_fits(limit - base, rid, row_bytes) then {
-      let _d = __q10_row(prim.handle(row), base, limit, rid * cr, cr, 0)
-      __q8_zfill(prim.handle(row), cols, cr)
-    } else __q8_zfill(prim.handle(row), cols, 0)
-    prim.store_str(ho + 12 + i * 8, row)
-    __q10_sel_rows(ho, base, limit, ids, cols, i + 1)
-  }
-
-fn matrix_select_rows_q1_0(data: Bytes, offset: Int, cols: Int, row_ids: List[Int]) -> List[List[Float]] = {
-  let hd = prim.handle(data)
-  let off = __q_sel_off(offset, prim.load32(hd + 4))
-  let base = hd + 12 + off
-  let limit = hd + 12 + prim.load32(hd + 4)
-
-  let c = if cols < 0 then 0 else cols
-  let n = list.len(row_ids)
-  let _g = __q_dims_guard(n, c)
-  let out: List[List[Float]] = prim.alloc_list_str(n)
-  let _x = __q10_sel_rows(prim.handle(out), base, limit, row_ids, c, 0)
-  out
-}
-
-
-
-
-
-
-fn __q8_i8(base: Int, addr: Int) -> Int = {
-  let v = prim.load8(base + addr)
-  if v > 127 then v - 256 else v
-}
-
-fn __q8_row(dh: Int, base: Int, row_off: Int, cols: Int, c: Int) -> Int = if c >= cols then 0
-else {
-  let blk = prim.bshr_u(c, 5)
-  let block_start = row_off + blk * 34
-  let scale = __q10_scale(base, block_start)
-  let q = __q8_i8(base, block_start + 2 + prim.band(c, 31))
-
-
-
-  prim.store64(dh + 12 + c * 8, prim.fbits(__dq_zero(scale * int.to_float(q))))
-  __q8_row(dh, base, row_off, cols, c + 1)
-}
-
-
-
-
-
-fn __q8_sel_rows(ho: Int, base: Int, limit: Int, ids: List[Int], cols: Int, row_bytes: Int, i: Int) -> Int =
-  if i >= list.len(ids) then 0
-  else {
-    let rid0 = list.get(ids, i) ?? 0
-    let rid = if rid0 < 0 then 0 else rid0
-    let row = prim.alloc_list_f64(cols)
-    let fits = __q_row_fits(limit - base, rid, row_bytes)
-    let _c = if fits then __q8_row(prim.handle(row), base, rid * row_bytes, cols, 0)
-    else __q8_zfill(prim.handle(row), cols, 0)
-    prim.store_str(ho + 12 + i * 8, row)
-    __q8_sel_rows(ho, base, limit, ids, cols, row_bytes, i + 1)
-  }
-
-fn matrix_select_rows_q8_0_dq(data: Bytes, offset: Int, cols: Int, row_ids: List[Int]) -> List[List[Float]] = {
-  let hd = prim.handle(data)
-  let off = __q_sel_off(offset, prim.load32(hd + 4))
-  let base = hd + 12 + off
-  let limit = hd + 12 + prim.load32(hd + 4)
-  let n = list.len(row_ids)
-
-  let c = if cols < 0 then 0 else cols
-  let _g = __q_dims_guard(n, c)
-  if c % 32 != 0 then __q8_zeros(n, c)
-  else {
-    let out: List[List[Float]] = prim.alloc_list_str(n)
-    let row_bytes = c / 32 * 34
-    let _x = __q8_sel_rows(prim.handle(out), base, limit, row_ids, c, row_bytes, 0)
-    out
-  }
-}
-
-fn __q8_zfill(dh: Int, cols: Int, c: Int) -> Int = if c >= cols then 0
-else {
-  prim.store64(dh + 12 + c * 8, 0)
-  __q8_zfill(dh, cols, c + 1)
-}
-
-fn __q8_zero_rows(ho: Int, n: Int, cols: Int, i: Int) -> Int = if i >= n then 0
-else {
-  let row = prim.alloc_list_f64(cols)
-  let _z = __q8_zfill(prim.handle(row), cols, 0)
-  prim.store_str(ho + 12 + i * 8, row)
-  __q8_zero_rows(ho, n, cols, i + 1)
-}
-
-fn __q8_zeros(n: Int, cols: Int) -> List[List[Float]] = {
-  let out: List[List[Float]] = prim.alloc_list_str(n)
-  let _x = __q8_zero_rows(prim.handle(out), n, cols, 0)
-  out
-}
 "#;
 pub const SRC_MATRIX_ARITH: &str = r#"
 
@@ -25078,33 +24170,6 @@ fn __mx_gather_fill(ho: Int, hm: Int, mr: Int, cols: Int, hi: Int, n: Int, i: In
   }
 
 
-fn matrix_causal_mask_add(m: List[List[Float]], mask_val: Float) -> List[List[Float]] = {
-  let hm = prim.handle(m)
-  let n = prim.load32(hm + 4)
-  let out: List[List[Float]] = prim.alloc_list_str(n)
-  let _x = __mx_mask_rows(prim.handle(out), hm, mask_val, n, 0)
-  out
-}
-
-fn __mx_mask_rows(ho: Int, hm: Int, mv: Float, n: Int, i: Int) -> Int = if i >= n then 0
-else {
-  let rh = prim.load64(hm + 12 + i * 8)
-  let c = prim.load32(rh + 4)
-  let row = prim.alloc_list_f64(c)
-  let _f = __mx_mask_row(prim.handle(row), rh, mv, i, c, 0)
-  prim.store_str(ho + 12 + i * 8, row)
-  __mx_mask_rows(ho, hm, mv, n, i + 1)
-}
-
-fn __mx_mask_row(dh: Int, sh: Int, mv: Float, i: Int, n: Int, j: Int) -> Int = if j >= n then 0
-else {
-  let x = prim.ffrombits(prim.load64(sh + 12 + j * 8))
-  let y = if j > i then x + mv else x
-  prim.store64(dh + 12 + j * 8, prim.fbits(y))
-  __mx_mask_row(dh, sh, mv, i, n, j + 1)
-}
-
-
 
 fn matrix_dot_row(m: List[List[Float]], r: Int, vec: List[Float]) -> Float = {
   let hm = prim.handle(m)
@@ -25239,101 +24304,6 @@ else {
   let y = prim.ffrombits(prim.load64(bh + 12 + i * 8))
   __mx_dot_raw(ah, bh, n, i + 1, acc + x * y)
 }
-
-
-fn __mx_sq_sum(rh: Int, n: Int, i: Int, acc: Float) -> Float = if i >= n then acc
-else {
-  let x = prim.ffrombits(prim.load64(rh + 12 + i * 8))
-  __mx_sq_sum(rh, n, i + 1, acc + x * x)
-}
-
-fn __mx_sum(rh: Int, n: Int, i: Int, acc: Float) -> Float = if i >= n then acc
-else {
-  let x = prim.ffrombits(prim.load64(rh + 12 + i * 8))
-  __mx_sum(rh, n, i + 1, acc + x)
-}
-
-fn __mx_var_sum(rh: Int, mean: Float, n: Int, i: Int, acc: Float) -> Float = if i >= n then acc
-else {
-  let x = prim.ffrombits(prim.load64(rh + 12 + i * 8))
-  let d = x - mean
-  __mx_var_sum(rh, mean, n, i + 1, acc + d * d)
-}
-
-
-
-fn matrix_rms_norm_rows(m: List[List[Float]], gamma: List[Float], eps: Float) -> List[List[Float]] = {
-  let hm = prim.handle(m)
-  let n = prim.load32(hm + 4)
-  let gh = prim.handle(gamma)
-  let glen = prim.load32(gh + 4)
-  let out: List[List[Float]] = prim.alloc_list_str(n)
-  let _x = __mx_rms_rows(prim.handle(out), hm, gh, glen, eps, n, 0)
-  out
-}
-
-fn __mx_rms_rows(ho: Int, hm: Int, gh: Int, glen: Int, eps: Float, n: Int, i: Int) -> Int =
-  if i >= n then 0
-  else {
-    let rh = prim.load64(hm + 12 + i * 8)
-    let c = prim.load32(rh + 4)
-    let sq = __mx_sq_sum(rh, c, 0, 0.0)
-    let inv = 1.0 / prim.fsqrt(sq / prim.i2f(c) + eps)
-    let outn = if c < glen then c else glen
-    let row = prim.alloc_list_f64(outn)
-    let _f = __mx_rms_row(prim.handle(row), rh, gh, inv, outn, 0)
-    prim.store_str(ho + 12 + i * 8, row)
-    __mx_rms_rows(ho, hm, gh, glen, eps, n, i + 1)
-  }
-
-fn __mx_rms_row(dh: Int, rh: Int, gh: Int, inv: Float, n: Int, i: Int) -> Int = if i >= n then 0
-else {
-  let x = prim.ffrombits(prim.load64(rh + 12 + i * 8))
-  let g = prim.ffrombits(prim.load64(gh + 12 + i * 8))
-  prim.store64(dh + 12 + i * 8, prim.fbits(x * inv * g))
-  __mx_rms_row(dh, rh, gh, inv, n, i + 1)
-}
-
-
-
-fn matrix_layer_norm_rows(m: List[List[Float]], gamma: List[Float], beta: List[Float], eps: Float) -> List[List[Float]] = {
-  let hm = prim.handle(m)
-  let n = prim.load32(hm + 4)
-  let gh = prim.handle(gamma)
-  let bh = prim.handle(beta)
-  let glen = prim.load32(gh + 4)
-  let blen = prim.load32(bh + 4)
-  let gb = if glen < blen then glen else blen
-  let out: List[List[Float]] = prim.alloc_list_str(n)
-  let _x = __mx_ln_rows(prim.handle(out), hm, gh, bh, gb, eps, n, 0)
-  out
-}
-
-fn __mx_ln_rows(ho: Int, hm: Int, gh: Int, bh: Int, gb: Int, eps: Float, n: Int, i: Int) -> Int =
-  if i >= n then 0
-  else {
-    let rh = prim.load64(hm + 12 + i * 8)
-    let c = prim.load32(rh + 4)
-    let nf = prim.i2f(c)
-    let mean = __mx_sum(rh, c, 0, 0.0) / nf
-    let vr = __mx_var_sum(rh, mean, c, 0, 0.0) / nf
-    let inv = 1.0 / prim.fsqrt(vr + eps)
-    let outn = if c < gb then c else gb
-    let row = prim.alloc_list_f64(outn)
-    let _f = __mx_ln_row(prim.handle(row), rh, gh, bh, mean, inv, outn, 0)
-    prim.store_str(ho + 12 + i * 8, row)
-    __mx_ln_rows(ho, hm, gh, bh, gb, eps, n, i + 1)
-  }
-
-fn __mx_ln_row(dh: Int, rh: Int, gh: Int, bh: Int, mean: Float, inv: Float, n: Int, i: Int) -> Int =
-  if i >= n then 0
-  else {
-    let x = prim.ffrombits(prim.load64(rh + 12 + i * 8))
-    let g = prim.ffrombits(prim.load64(gh + 12 + i * 8))
-    let b = prim.ffrombits(prim.load64(bh + 12 + i * 8))
-    prim.store64(dh + 12 + i * 8, prim.fbits((x - mean) * inv * g + b))
-    __mx_ln_row(dh, rh, gh, bh, mean, inv, n, i + 1)
-  }
 
 
 
@@ -25611,7 +24581,6 @@ else {
 fn matrix_concat_cols_many(matrices: List[List[List[Float]]]) -> List[List[Float]] = matrix_concat_cols(matrices)
 "#;
 pub const SRC_MATRIX_EXT: &str = r#"
-
 
 
 
@@ -25935,18 +24904,6 @@ fn matrix_zeros_f32(rows: Int, cols: Int) -> Matrix = matrix.zeros(rows, cols)
 fn matrix_ones_f32(rows: Int, cols: Int) -> Matrix = matrix.ones(rows, cols)
 
 
-fn matrix_attention_weights(q: Matrix, kt: Matrix, s: Float) -> Matrix = {
-  let p = matrix.mul(q, kt)
-  let sc = matrix.scale(p, s)
-  matrix.softmax_rows(sc)
-}
-
-fn matrix_scaled_dot_product_attention(q: Matrix, kt: Matrix, v: Matrix, s: Float) -> Matrix = {
-  let w = matrix_attention_weights(q, kt, s)
-  matrix.mul(w, v)
-}
-
-
 
 
 
@@ -25962,26 +24919,6 @@ fn matrix_fma3(a: Matrix, ka: Float, b: Matrix, kb: Float, c: Matrix, kc: Float)
   let ab = matrix_fma(a, ka, b, kb)
   let sc = matrix.scale(c, kc)
   matrix.add(ab, sc)
-}
-
-
-fn matrix_fused_gemm_bias_scale_gelu(a: Matrix, b: Matrix, bias: Matrix, alpha: Float) -> Matrix = {
-  let p = matrix.mul(a, b)
-  let s = matrix.add(p, bias)
-  let t = matrix.scale(s, alpha)
-  matrix.gelu(t)
-}
-
-
-fn matrix_linear_row_gelu(x: Matrix, weight: Matrix, bias: List[Float]) -> Matrix = {
-  let l = matrix.linear_row(x, weight, bias)
-  matrix.gelu(l)
-}
-
-
-fn matrix_pre_norm_linear(x: Matrix, gamma: List[Float], beta: List[Float], eps: Float, weight: Matrix, bias: List[Float]) -> Matrix = {
-  let n = matrix.layer_norm_rows(x, gamma, beta, eps)
-  matrix.linear_row(n, weight, bias)
 }
 
 
@@ -26030,36 +24967,6 @@ fn matrix_shape(m: Matrix) -> (Int, Int) = {
   (r, c)
 }
 "#;
-pub const SRC_MEM: &str = r#"
-
-
-
-
-
-
-
-
-/// Opaque checkpoint for restore.
-@intrinsic("almide_rt_mem_save")
-fn save() -> Int = _
-
-/// Rewinds to mark; a no-op under RC today.
-@intrinsic("almide_rt_mem_restore")
-fn restore(mark: Int) -> Unit = _
-"#;
-pub const SRC_MEM_CHECKPOINT: &str = r#"
-
-
-
-
-
-
-
-
-fn mem_save() -> Int = 0
-
-fn mem_restore(mark: Int) -> Unit = ()
-"#;
 pub const SRC_NET: &str = r#"
 
 
@@ -26078,7 +24985,7 @@ type TcpListener = Int
 effect fn tcp_connect(host: String, port: Int) -> Result[Int, String] = _
 
 
-/// Up to len bytes; empty once the peer closed.
+/// Up to len bytes; empty once the peer closed; err if len < 0.
 @intrinsic("almide_rt_net_tcp_read")
 effect fn tcp_read(stream: Int, len: Int) -> Result[Bytes, String] = _
 
@@ -26086,7 +24993,7 @@ effect fn tcp_read(stream: Int, len: Int) -> Result[Bytes, String] = _
 @intrinsic("almide_rt_net_tcp_write")
 effect fn tcp_write(stream: Int, data: Bytes) -> Result[Unit, String] = _
 
-/// Exactly len bytes; err on early EOF.
+/// Exactly len bytes; err on early EOF, naming how many arrived.
 @intrinsic("almide_rt_net_tcp_read_exact")
 effect fn tcp_read_exact(stream: Int, len: Int) -> Result[Bytes, String] = _
 
@@ -26101,7 +25008,7 @@ effect fn tcp_close(stream: Int) -> Result[Unit, String] = _
 fn tcp_is_open(stream: Int) -> Bool = _
 
 
-/// Up to len bytes; err on timeout or 0 ms.
+/// Up to len bytes within timeout_ms (> 0); the stream's own timeout holds again after.
 @intrinsic("almide_rt_net_tcp_read_timeout")
 effect fn tcp_read_timeout(stream: Int, len: Int, timeout_ms: Int) -> Result[Bytes, String] = _
 
@@ -26118,6 +25025,10 @@ effect fn tcp_available(stream: Int) -> Result[Int, String] = _
 /// Listener bound to host:port; err if in use.
 @intrinsic("almide_rt_net_tcp_listen")
 effect fn tcp_listen(host: String, port: Int) -> Result[Int, String] = _
+
+/// The port a listener is bound to: the one the OS chose when it listened on port 0.
+@intrinsic("almide_rt_net_tcp_local_port")
+effect fn tcp_local_port(listener: Int) -> Result[Int, String] = _
 
 /// Blocks for the next client; its stream handle.
 @intrinsic("almide_rt_net_tcp_accept")
@@ -26181,6 +25092,251 @@ effect fn shm_write(fd: Int, offset: Int, data: Bytes) -> Result[Unit, String] =
 @intrinsic("almide_rt_net_shm_read")
 effect fn shm_read(fd: Int, offset: Int, len: Int) -> Result[Bytes, String] = _
 "#;
+pub const SRC_NET_WASM: &str = r#"
+
+
+
+
+
+
+
+
+
+
+
+effect fn __net_listen(host: String, port: String) -> Result[String, String] = _
+
+effect fn __net_accept(listener: String, unused: String) -> Result[String, String] = _
+
+effect fn __net_connect(host: String, port: String) -> Result[String, String] = _
+
+effect fn __net_read(stream: String, len: String) -> Result[Bytes, String] = _
+
+effect fn __net_read_exact(stream: String, len: String) -> Result[Bytes, String] = _
+
+
+effect fn __net_read_timeout(stream: String, len_ms: String) -> Result[Bytes, String] = _
+
+effect fn __net_write(stream: String, data: Bytes) -> Result[String, String] = _
+
+effect fn __net_available(stream: String, unused: String) -> Result[String, String] = _
+
+effect fn __net_set_timeout(stream: String, ms: String) -> Result[String, String] = _
+
+effect fn __net_close(stream: String, unused: String) -> Result[String, String] = _
+
+effect fn __net_close_listener(listener: String, unused: String) -> Result[String, String] = _
+
+effect fn __net_local_port(listener: String, unused: String) -> Result[String, String] = _
+
+
+
+fn __net_is_open(stream: String, unused: String) -> Result[String, String] = _
+
+@implements("net.tcp_listen")
+effect fn __net_tcp_listen_impl(host: String, port: Int) -> Result[Int, String] = {
+  let t = __net_listen(host, int.to_string(port))!
+  ok(int.parse(t) ?? -1)
+}
+
+@implements("net.tcp_accept")
+effect fn __net_tcp_accept_impl(listener: Int) -> Result[Int, String] = {
+  let t = __net_accept(int.to_string(listener), "")!
+  ok(int.parse(t) ?? -1)
+}
+
+@implements("net.tcp_connect")
+effect fn __net_tcp_connect_impl(host: String, port: Int) -> Result[Int, String] = {
+  let t = __net_connect(host, int.to_string(port))!
+  ok(int.parse(t) ?? -1)
+}
+
+@implements("net.tcp_local_port")
+effect fn __net_tcp_local_port_impl(listener: Int) -> Result[Int, String] = {
+  let t = __net_local_port(int.to_string(listener), "")!
+  ok(int.parse(t) ?? -1)
+}
+
+@implements("net.tcp_read")
+effect fn __net_tcp_read_impl(stream: Int, len: Int) -> Result[Bytes, String] = __net_read(
+  int.to_string(stream),
+  int.to_string(len),
+)
+
+@implements("net.tcp_read_exact")
+effect fn __net_tcp_read_exact_impl(stream: Int, len: Int) -> Result[Bytes, String] = __net_read_exact(
+  int.to_string(stream),
+  int.to_string(len),
+)
+
+@implements("net.tcp_read_timeout")
+effect fn __net_tcp_read_timeout_impl(stream: Int, len: Int, timeout_ms: Int) -> Result[Bytes, String] = __net_read_timeout(
+  int.to_string(stream),
+  "${len}\n${timeout_ms}",
+)
+
+@implements("net.tcp_write")
+effect fn __net_tcp_write_impl(stream: Int, data: Bytes) -> Result[Unit, String] = {
+  let _ = __net_write(int.to_string(stream), data)!
+  ok(())
+}
+
+@implements("net.tcp_available")
+effect fn __net_tcp_available_impl(stream: Int) -> Result[Int, String] = {
+  let t = __net_available(int.to_string(stream), "")!
+  ok(int.parse(t) ?? -1)
+}
+
+@implements("net.tcp_set_timeout")
+effect fn __net_tcp_set_timeout_impl(stream: Int, timeout_ms: Int) -> Result[Unit, String] = {
+  let _ = __net_set_timeout(int.to_string(stream), int.to_string(timeout_ms))!
+  ok(())
+}
+
+@implements("net.tcp_close")
+effect fn __net_tcp_close_impl(stream: Int) -> Result[Unit, String] = {
+  let _ = __net_close(int.to_string(stream), "")!
+  ok(())
+}
+
+@implements("net.tcp_close_listener")
+effect fn __net_tcp_close_listener_impl(listener: Int) -> Result[Unit, String] = {
+  let _ = __net_close_listener(int.to_string(listener), "")!
+  ok(())
+}
+
+@implements("net.tcp_is_open")
+fn __net_tcp_is_open_impl(stream: Int) -> Bool = match __net_is_open(int.to_string(stream), "") {
+  ok("1") => true,
+  _ => false,
+}
+
+
+
+
+
+
+
+
+
+
+
+
+effect fn __unix_connect(path: String, unused: String) -> Result[String, String] = _
+
+effect fn __unix_listen(path: String, unused: String) -> Result[String, String] = _
+
+effect fn __unix_accept(listener: String, unused: String) -> Result[String, String] = _
+
+
+effect fn __unix_send(sock_fds: String, data: Bytes) -> Result[String, String] = _
+
+effect fn __unix_recv(sock: String, max: String) -> Result[Bytes, String] = _
+
+
+
+fn __unix_take_fds(sock: String, unused: String) -> Result[String, String] = _
+
+effect fn __unix_poll(fd: String, timeout_ms: String) -> Result[String, String] = _
+
+effect fn __unix_wait(fds: String, timeout_ms: String) -> Result[String, String] = _
+
+effect fn __unix_close(fd: String, unused: String) -> Result[String, String] = _
+
+effect fn __shm_create(size: String, unused: String) -> Result[String, String] = _
+
+effect fn __shm_resize(fd: String, size: String) -> Result[String, String] = _
+
+
+effect fn __shm_write(fd_offset: String, data: Bytes) -> Result[String, String] = _
+
+
+effect fn __shm_read(fd: String, offset_len: String) -> Result[Bytes, String] = _
+
+fn __net_fd_lines(fds: List[Int]) -> String = fds |> list.map((f) => int.to_string(f)) |> list.join("\n")
+
+fn __net_fd_list(t: String) -> List[Int] =
+  if t == "" then []
+  else string.split(t, "\n") |> list.map((x) => int.parse(x) ?? -1)
+
+@implements("net.unix_connect")
+effect fn __net_unix_connect_impl(path: String) -> Result[Int, String] = {
+  let t = __unix_connect(path, "")!
+  ok(int.parse(t) ?? -1)
+}
+
+@implements("net.unix_listen")
+effect fn __net_unix_listen_impl(path: String) -> Result[Int, String] = {
+  let t = __unix_listen(path, "")!
+  ok(int.parse(t) ?? -1)
+}
+
+@implements("net.unix_accept")
+effect fn __net_unix_accept_impl(listener: Int) -> Result[Int, String] = {
+  let t = __unix_accept(int.to_string(listener), "")!
+  ok(int.parse(t) ?? -1)
+}
+
+@implements("net.unix_send")
+effect fn __net_unix_send_impl(sock: Int, data: Bytes, fds: List[Int]) -> Result[Unit, String] = {
+  let _ = __unix_send(__net_fd_lines([sock] + fds), data)!
+  ok(())
+}
+
+@implements("net.unix_recv")
+effect fn __net_unix_recv_impl(sock: Int, max: Int) -> Result[Bytes, String] = __unix_recv(
+  int.to_string(sock),
+  int.to_string(max),
+)
+
+@implements("net.unix_take_fds")
+fn __net_unix_take_fds_impl(sock: Int) -> List[Int] = match __unix_take_fds(int.to_string(sock), "") {
+  ok(t) => __net_fd_list(t),
+  err(_) => [],
+}
+
+@implements("net.unix_poll")
+effect fn __net_unix_poll_impl(fd: Int, timeout_ms: Int) -> Result[Bool, String] = {
+  let t = __unix_poll(int.to_string(fd), int.to_string(timeout_ms))!
+  ok(t == "1")
+}
+
+@implements("net.unix_wait")
+effect fn __net_unix_wait_impl(fds: List[Int], timeout_ms: Int) -> Result[List[Int], String] = {
+  let t = __unix_wait(__net_fd_lines(fds), int.to_string(timeout_ms))!
+  ok(__net_fd_list(t))
+}
+
+@implements("net.unix_close")
+effect fn __net_unix_close_impl(fd: Int) -> Result[Unit, String] = {
+  let _ = __unix_close(int.to_string(fd), "")!
+  ok(())
+}
+
+@implements("net.shm_create")
+effect fn __net_shm_create_impl(size: Int) -> Result[Int, String] = {
+  let t = __shm_create(int.to_string(size), "")!
+  ok(int.parse(t) ?? -1)
+}
+
+@implements("net.shm_resize")
+effect fn __net_shm_resize_impl(fd: Int, size: Int) -> Result[Unit, String] = {
+  let _ = __shm_resize(int.to_string(fd), int.to_string(size))!
+  ok(())
+}
+
+@implements("net.shm_write")
+effect fn __net_shm_write_impl(fd: Int, offset: Int, data: Bytes) -> Result[Unit, String] = {
+  let _ = __shm_write("${fd}\n${offset}", data)!
+  ok(())
+}
+
+@implements("net.shm_read")
+effect fn __net_shm_read_impl(fd: Int, offset: Int, len: Int) -> Result[Bytes, String] = __shm_read(
+  int.to_string(fd),
+  "${offset}\n${len}",
+)
+"#;
 pub const SRC_OPTION: &str = r#"
 
 
@@ -26212,10 +25368,12 @@ fn unwrap_or_else[A](o: A?, f: () -> A) -> A = _
 
 /// true for some(_), false for none.
 @intrinsic("almide_rt_option_is_some")
+@borrow_ref(o)
 fn is_some[A](o: A?) -> Bool = _
 
 /// true for none, false for some(_).
 @intrinsic("almide_rt_option_is_none")
+@borrow_ref(o)
 fn is_none[A](o: A?) -> Bool = _
 
 
@@ -26253,18 +25411,25 @@ fn to_list[A](o: A?) -> List[A] = _
 
 
 
+
+
+
+
+
+
+
+
+
 /// some(values) if no element is none, else none.
-fn collect[T](xs: List[T?]) -> List[T]? = list.fold(
-  xs,
-  some([]),
-  (acc, item) => match acc {
-    some(vals) => match item {
-      some(v) => some(vals + [v]),
-      none => none,
+fn collect[T](xs: List[T?]) -> List[T]? =
+  if list.any(xs, (o) => option.is_none(o)) then none
+  else some(list.map(
+    xs,
+    (o) => match o {
+      some(v) => v,
+      none => panic("option.collect: unreachable, every element was checked"),
     },
-    none => none,
-  },
-)
+  ))
 
 /// some of all f(x), or none; f runs on every x.
 fn collect_map[T, U](xs: List[T], f: (T) -> U?) -> List[U]? = option.collect(list.map(xs, f))
@@ -28303,6 +27468,7 @@ pub const SRC_PROCESS: &str = r#"
 type ProcessStatus = { code: Int, stdout: String, stderr: String }
 
 /// Stdout on exit 0; else err with stderr text.
+@ordered
 @intrinsic("almide_rt_process_exec")
 effect fn exec(cmd: String, args: List[String]) -> Result[String, String] = _
 
@@ -28315,14 +27481,17 @@ effect fn exit(code: Int) -> Never = _
 effect fn args() -> List[String] = _
 
 /// All stdin lines; err on non-UTF-8 input.
+@ordered
 @intrinsic("almide_rt_process_stdin_lines")
 effect fn stdin_lines() -> Result[List[String], String] = _
 
 /// exec in dir; err is stderr, maybe empty.
+@ordered
 @intrinsic("almide_rt_process_exec_in")
 effect fn exec_in(dir: String, cmd: String, args: List[String]) -> Result[String, String] = _
 
 /// exec with input piped in; err may be empty.
+@ordered
 @intrinsic("almide_rt_process_exec_with_stdin")
 effect fn exec_with_stdin(cmd: String, args: List[String], input: String) -> Result[String, String] = _
 
@@ -28330,6 +27499,7 @@ effect fn exec_with_stdin(cmd: String, args: List[String], input: String) -> Res
 
 
 /// Code and output; code -1 if killed by signal. Child stdin is null.
+@ordered
 @intrinsic("almide_rt_process_exec_status")
 effect fn exec_status(cmd: String, args: List[String]) -> Result[ProcessStatus, String] = _
 
@@ -28345,6 +27515,7 @@ effect fn exec_status(cmd: String, args: List[String]) -> Result[ProcessStatus, 
 
 
 /// exec_status, but kills cmd and errs at timeout_ms.
+@ordered
 @intrinsic("almide_rt_process_exec_status_timeout")
 effect fn exec_status_timeout(cmd: String, args: List[String], timeout_ms: Int) -> Result[ProcessStatus, String] = _
 
@@ -28355,14 +27526,17 @@ effect fn exec_status_timeout(cmd: String, args: List[String], timeout_ms: Int) 
 
 
 /// Run cmd on this terminal; exit code, -1 if signalled.
+@ordered
 @intrinsic("almide_rt_process_run")
 effect fn run(cmd: String, args: List[String]) -> Result[Int, String] = _
 
 /// run in dir; exit code, -1 if signalled.
+@ordered
 @intrinsic("almide_rt_process_run_in")
 effect fn run_in(dir: String, cmd: String, args: List[String]) -> Result[Int, String] = _
 
 /// Alias of process.run.
+@ordered
 @deprecated(since=10, use="process.run")
 @intrinsic("almide_rt_process_run")
 effect fn exec_attached(cmd: String, args: List[String]) -> Result[Int, String] = _
@@ -28376,10 +27550,12 @@ fn pid() -> Int = _
 fn env(key: String) -> String? = _
 
 /// Pid of cmd started in the background.
+@ordered
 @intrinsic("almide_rt_process_spawn")
 effect fn spawn(cmd: String, args: List[String]) -> Result[Int, String] = _
 
 /// Sends signal to pid; err is kill's stderr.
+@ordered
 @intrinsic("almide_rt_process_kill")
 effect fn kill(pid: Int, signal: Int) -> Result[Unit, String] = _
 
@@ -28399,6 +27575,44 @@ pub const SRC_PROCESS_ARGS: &str = r#"
 
 
 effect fn process_args() -> List[String] = prim.args_get_list_full()
+"#;
+pub const SRC_PROCESS_STDIN_LINES: &str = r#"
+
+
+
+
+
+
+
+
+
+
+
+import io
+
+@implements("process.stdin_lines")
+effect fn process_stdin_lines() -> Result[List[String], String] = {
+  var buf = bytes.new(0)
+  var n = 1
+  while n > 0 {
+    let chunk = io.read_n_bytes(4096)
+    n = list.len(chunk)
+    for v in chunk {
+      bytes.push(buf, v)
+    }
+  }
+  if not bytes.is_valid_utf8(buf) then err("process.stdin_lines(): stream did not contain valid UTF-8")
+  else {
+
+
+
+    let parts = string.split(bytes.to_string_lossy(buf), "\n")
+    let cut = list.len(parts) - 1
+    let terminated = list.take(parts, cut) |> list.map((l) => string.strip_suffix(l, "\r") ?? l)
+    let tail = list.drop(parts, cut)
+    ok(if tail == [""] then terminated else terminated + tail)
+  }
+}
 "#;
 pub const SRC_PROCESS_WASM: &str = r#"
 
@@ -28421,10 +27635,7 @@ import process
 
 fn __proc_cell(s: String) -> String = "${string.len(s)}\n${s}"
 
-fn __proc_argv(args: List[String]) -> String = args |> list.map((a) => __proc_cell(a)) |> list.fold(
-  "",
-  (acc, c) => acc + c,
-)
+fn __proc_argv(args: List[String]) -> String = args |> list.map((a) => __proc_cell(a)) |> list.join("")
 
 effect fn __proc_exec(cmd: String, argv: String) -> Result[String, String] = _
 
@@ -28530,7 +27741,7 @@ pub const SRC_RANDOM: &str = r#"
 @intrinsic("almide_rt_random_int")
 effect fn int(min: Int, max: Int) -> Int = _
 
-/// Random Float in [0, 1]; not crypto-grade.
+/// Random Float in [0, 1); not crypto-grade.
 @intrinsic("almide_rt_random_float")
 effect fn float() -> Float = _
 
@@ -28615,14 +27826,27 @@ pub const SRC_RANDOM_INT: &str = r#"
 
 
 
+
+
+
+
 fn random_int(min: Int, max: Int) -> Int = {
   let span = max - min + 1
+  if max <= min then min
+  else if span <= 0 then random_int_wide(min, max)
+  else min + (int.band(random_bits(), 0x7FFFFFFFFFFFFFFF) % span)
+}
+
+fn random_int_wide(min: Int, max: Int) -> Int = {
+  let r = random_bits()
+  if r >= min and r <= max then r else random_int_wide(min, max)
+}
+
+fn random_bits() -> Int = {
   let buf = prim.alloc_bytes(8)
   let p = prim.handle(buf) + 12
   let _e = prim.random_get(p, 8)
-  let r = prim.load64(p)
-  let rpos = int.band(r, 0x7FFFFFFFFFFFFFFF)
-  if span <= 0 then min else min + (rpos % span)
+  prim.load64(p)
 }
 "#;
 pub const SRC_RANDOM_SHUFFLE: &str = r#"
@@ -30918,10 +30142,12 @@ fn from_list[A](xs: List[A]) -> Set[A] = _
 
 /// Copy with value appended; unchanged if present.
 @intrinsic("almide_rt_set_insert")
+@reuse(s)
 fn insert[A](s: Set[A], value: A) -> Set[A] = _
 
 /// Copy without value; unchanged if absent.
 @intrinsic("almide_rt_set_remove")
+@reuse(s)
 fn remove[A](s: Set[A], value: A) -> Set[A] = _
 
 /// true when value is a member.
@@ -34336,18 +33562,41 @@ fn string_drop(s: String, n: Int) -> String = {
   __td_slice(s, k, count)
 }
 
+
+fn __td_lead(base: Int, addr: Int) -> Int = if addr <= base then base
+else if prim.load8(addr) / 64 == 2 then __td_lead(base, addr - 1) else addr
+
+
+
+
+fn __td_back(base: Int, addr: Int, k: Int) -> Int = if k <= 0 then addr
+else if addr <= base then base
+else __td_back(base, __td_lead(base, addr - 1), k - 1)
+
+
+fn __td_bytes(lo: Int, hi: Int) -> String = {
+  let nbytes = if hi > lo then hi - lo else 0
+  let buf = prim.alloc_str(nbytes)
+  let _e = __td_copy(lo, prim.handle(buf) + 12, nbytes)
+  buf
+}
+
 fn string_take_end(s: String, n: Int) -> String = {
-  let count = __td_count(s)
-  let start = if n < 0 then 0
-  else (if n >= count then 0 else count - n)
-  __td_slice(s, start, count)
+  let h = prim.handle(s)
+  let base = h + 12
+  let end = base + prim.load32(h + 4)
+  let start = if n < 0 then base
+  else __td_back(base, end, n)
+  __td_bytes(start, end)
 }
 
 fn string_drop_end(s: String, n: Int) -> String = {
-  let count = __td_count(s)
-  let endi = if n < 0 then 0
-  else (if n >= count then 0 else count - n)
-  __td_slice(s, 0, endi)
+  let h = prim.handle(s)
+  let base = h + 12
+  let end = base + prim.load32(h + 4)
+  let cut = if n < 0 then base
+  else __td_back(base, end, n)
+  __td_bytes(base, cut)
 }
 "#;
 pub const SRC_STRING_TO_BYTES: &str = r#"
@@ -34968,9 +34217,69 @@ pub const SRC_TESTING: &str = r#"
 
 
 
-/// Fails unless f panics, message containing expected.
-@intrinsic("almide_rt_test_assert_throws")
-fn assert_throws(f: () -> Unit, expected: String) -> Unit = _
+/// Fails unless f, run alone in a child, aborts with text containing expected.
+fn assert_aborts[T](expected: String, f: () -> T) -> Unit = panic("testing.assert_aborts runs only as a direct call in a test block (E099)")
+
+
+
+
+
+
+
+@intrinsic("almide_rt_test_abort_site_run")
+fn __abort_site_run(site: Int) -> List[String] = _
+
+
+
+@intrinsic("almide_rt_test_abort_site_selected")
+fn __abort_site_selected() -> Int = _
+
+local fn abort_header(line: String) -> Bool = ["Error: ", "PANIC: "] |> list.any((h) => string.starts_with(line, h))
+
+
+
+local fn abort_text(stderr: String) -> String? = {
+  let lines = string.split(stderr, "\n")
+  let heads = lines |> list.enumerate |> list.filter_map(((i, l)) => if abort_header(l) then some(i) else none)
+  match list.last(heads) {
+    some(i) => some(list.drop(lines, i) |> list.join("\n")),
+    none => none,
+  }
+}
+
+
+local fn abort_mismatch(expected: String, status: Int, stderr: String) -> String? = match status {
+  0 => some("returned normally"),
+  1 => match abort_text(stderr) {
+    some(text) => if string.contains(text, expected) then none else some("abort \"${text}\""),
+    none => some("exit code 1"),
+  },
+  101 => some("exit code 101 (raw panic)"),
+  134 => some("trap (exit 134)"),
+  n => some("exit code ${n}"),
+}
+
+
+
+local fn child_section(name: String, text: String) -> String = {
+  let lines = string.split(text, "\n") |> list.filter((l) => l != "") |> list.map((l) => "    ${l}")
+  if list.is_empty(lines) then "" else "\n  child ${name}:\n" + list.join(lines, "\n")
+}
+
+
+fn __assert_aborts_check(expected: String, child: List[String], line: Int) -> Unit = {
+  let status = int.parse(list.get(child, 0) ?? "-1") ?? -1
+  let stdout = list.get(child, 1) ?? ""
+  let stderr = list.get(child, 2) ?? ""
+  match abort_mismatch(expected, status, stderr) {
+    none => (),
+    some(found) => {
+      let sections = child_section("stdout", stdout) + child_section("stderr", stderr)
+      eprintln("Error: assertion failed\n  at: line ${line}\n  expected: abort containing \"${expected}\"\n  found: ${found}${sections}")
+      panic("testing.assert_aborts failed at line ${line}")
+    },
+  }
+}
 
 /// Fails unless needle is in haystack; "" passes.
 @intrinsic("almide_rt_test_assert_contains")
@@ -36873,7 +36182,10 @@ fn __vmerge_fill_a(a: Value, b: Value, dst: Value, i: Int, na: Int, nb: Int) -> 
     let dh = prim.handle(dst)
     let key = prim.load64(ah + 12 + (2 * i) * 8)
     let ak: String = prim.load_handle(ah + 12 + (2 * i) * 8)
-    let bidx = if __vobj_find(a, ak, 0, i) < 0 then __vobj_find_last(b, ak, nb)
+
+    let last_b = __vobj_find_last(b, ak, nb)
+    let bidx = if last_b < 0 then last_b
+    else if __vobj_find(a, ak, 0, i) < 0 then last_b
     else 0 - 1
     let val = if bidx < 0 then prim.load64(ah + 12 + (2 * i + 1) * 8) else prim.load64(prim.handle(b) + 12 + (2 * bidx + 1) * 8)
     prim.rc_inc(key)
@@ -38232,7 +37544,10 @@ else if sym == 16 then 2
 else if sym == 17 then 3 else 4
 
 
-fn zli_codes(pos: Int, buf: Int, cnt: Int, inp: Bytes, mut out: Bytes, lencode: List[Int], distcode: List[Int]) -> (Int, Int, Int, Int) = {
+
+
+
+fn zli_codes(pos: Int, buf: Int, cnt: Int, inp: Bytes, mut out: Bytes, base: Int, lencode: List[Int], distcode: List[Int]) -> (Int, Int, Int, Int) = {
   let lbase = zli_lbase()
   let lext = zli_lext()
   let dbase = zli_dbase()
@@ -38279,7 +37594,9 @@ fn zli_codes(pos: Int, buf: Int, cnt: Int, inp: Bytes, mut out: Bytes, lencode: 
     }
     var k = 0
     while k < clen {
-      bytes.push(out, bytes.get_or(out, bytes.len(out) - dist, 0))
+      let src = bytes.len(out) - dist
+      bytes.push(out, if src < base then 0
+      else bytes.get_or(out, src, 0))
       k = k + 1
     }
   }
@@ -38340,36 +37657,49 @@ fn zli_read_lengths(pos: Int, buf: Int, cnt: Int, inp: Bytes, lencode: List[Int]
 }
 
 
-fn zli_dynamic(pos: Int, buf: Int, cnt: Int, inp: Bytes, mut out: Bytes) -> (Int, Int, Int, Int) = {
-  let order = [
-    16,
-    17,
-    18,
-    0,
-    8,
-    7,
-    9,
-    6,
-    10,
-    5,
-    11,
-    4,
-    12,
-    3,
-    13,
-    2,
-    14,
-    1,
-    15
-  ]
+fn zli_cl_order() -> List[Int] = [
+  16,
+  17,
+  18,
+  0,
+  8,
+  7,
+  9,
+  6,
+  10,
+  5,
+  11,
+  4,
+  12,
+  3,
+  13,
+  2,
+  14,
+  1,
+  15
+]
+
+
+fn zli_dynamic(pos: Int, buf: Int, cnt: Int, inp: Bytes, mut out: Bytes, base: Int) -> (Int, Int, Int, Int) = {
   let (nlit, p1, b1, c1) = zli_bits(pos, buf, cnt, inp, 5)
   let (ndist, p2, b2, c2) = zli_bits(p1, b1, c1, inp, 5)
   let (ncode, p3, b3, c3) = zli_bits(p2, b2, c2, inp, 4)
   let nlen = nlit + 257
   let ndis = ndist + 1
-  var p = p3
-  var b = b3
-  var c = c3
+
+
+
+  if nlen > 286 or ndis > 30 then (0 - 1, p3, b3, c3)
+  else zli_dynamic_tables(p3, b3, c3, inp, out, base, nlen, ndis, ncode)
+}
+
+
+
+fn zli_dynamic_tables(pos: Int, buf: Int, cnt: Int, inp: Bytes, mut out: Bytes, base: Int, nlen: Int, ndis: Int, ncode: Int) -> (Int, Int, Int, Int) = {
+  let order = zli_cl_order()
+  var p = pos
+  var b = buf
+  var c = cnt
   var cl = list.repeat(0, 19)
   var i = 0
   while i < ncode + 4 {
@@ -38383,7 +37713,7 @@ fn zli_dynamic(pos: Int, buf: Int, cnt: Int, inp: Bytes, mut out: Bytes) -> (Int
 
 
 
-  if nlen > 286 or ndis > 30 or not zli_code_ok(cl, 19, false) then (0 - 1, p, b, c)
+  if not zli_code_ok(cl, 19, false) then (0 - 1, p, b, c)
   else {
     let (status, p5, b5, c5, lengths) = zli_read_lengths(
       p,
@@ -38396,7 +37726,16 @@ fn zli_dynamic(pos: Int, buf: Int, cnt: Int, inp: Bytes, mut out: Bytes) -> (Int
     let dlens = list.slice(lengths, nlen, nlen + ndis)
     if status != 0 then (status, p5, b5, c5)
     else if not zli_code_ok(lengths, nlen, true) or not zli_code_ok(dlens, ndis, true) then (0 - 1, p5, b5, c5)
-    else zli_codes(p5, b5, c5, inp, out, zli_construct(lengths, nlen), zli_construct(dlens, ndis))
+    else zli_codes(
+      p5,
+      b5,
+      c5,
+      inp,
+      out,
+      base,
+      zli_construct(lengths, nlen),
+      zli_construct(dlens, ndis),
+    )
   }
 }
 
@@ -38425,6 +37764,7 @@ fn zli_inflate_stream(pos: Int, inp: Bytes, mut out: Bytes) -> (Int, Int) = {
 
 
   let fdist = zli_construct(list.repeat(5, 32), 32)
+  let base = bytes.len(out)
   var p = pos
   var b = 0
   var c = 0
@@ -38436,8 +37776,8 @@ fn zli_inflate_stream(pos: Int, inp: Bytes, mut out: Bytes) -> (Int, Int) = {
     last = l
     let (s, p3, b3, c3) = match int.band(kind, 3) {
       0 => zli_stored(p2, inp, out),
-      1 => zli_codes(p2, b2, c2, inp, out, flit, fdist),
-      2 => zli_dynamic(p2, b2, c2, inp, out),
+      1 => zli_codes(p2, b2, c2, inp, out, base, flit, fdist),
+      2 => zli_dynamic(p2, b2, c2, inp, out, base),
       _ => (0 - 1, p2, b2, c2),
     }
     status = s
@@ -38504,12 +37844,27 @@ fn zli_skip_zstr(b: Bytes, p: Int) -> Int = if bytes.get_or(b, p, 0) == 0 then p
 )
 
 
-fn zli_header_end(inp: Bytes, pos: Int) -> Int = {
-  if bytes.get_or(inp, pos, 0) != 31 or bytes.get_or(inp, pos + 1, 0) != 139 or bytes.get_or(
-    inp,
-    pos + 2,
-    0,
-  ) != 8 then 0 - 1
+fn zli_gzip_magic(i: Int) -> Int = match i {
+  0 => 31,
+  1 => 139,
+  2 => 8,
+  _ => 0 - 1,
+}
+
+
+fn zli_magic_prefix(inp: Bytes, pos: Int, i: Int) -> Bool =
+  if i >= 3 or pos + i >= bytes.len(inp) then true
+  else if bytes.get_or(inp, pos + i, 0) != zli_gzip_magic(i) then false
+  else zli_magic_prefix(inp, pos, i + 1)
+
+
+
+
+
+fn zli_header_end(t: List[Int], inp: Bytes, pos: Int) -> Int = {
+  let n = bytes.len(inp)
+  if not zli_magic_prefix(inp, pos, 0) then 0 - 1
+  else if pos + 10 > n then 0 - 2
   else {
     let flg = bytes.get_or(inp, pos + 3, 0)
     let p0 = pos + 10
@@ -38520,10 +37875,19 @@ fn zli_header_end(inp: Bytes, pos: Int) -> Int = {
     else p0
     let p2 = if int.band(flg, 8) != 0 then zli_skip_zstr(inp, p1) else p1
     let p3 = if int.band(flg, 16) != 0 then zli_skip_zstr(inp, p2) else p2
-    if int.band(flg, 2) != 0 then p3 + 2 else p3
+    let end = if int.band(flg, 2) != 0 then p3 + 2 else p3
+    if int.band(flg, 224) != 0 then 0 - 1
+    else if end > n then 0 - 2
+    else if int.band(flg, 2) != 0 and int.band(
+      zli_crc32_from(t, bytes.slice(inp, pos, p3), 0),
+      65535,
+    ) != int.bor(
+      bytes.get_or(inp, p3, 0),
+      int.bshl(bytes.get_or(inp, p3 + 1, 0), 8),
+    ) then 0 - 3
+    else end
   }
 }
-
 
 
 
@@ -38535,27 +37899,38 @@ fn zli_gunzip_members(inp: Bytes, mut out: Bytes) -> Int = {
   var pos = 0
   var code = if bytes.len(inp) == 0 then 5 else 0
   while pos < bytes.len(inp) and code == 0 {
-    let start = zli_header_end(inp, pos)
-    let member_start = bytes.len(out)
-    let (status, after) = zli_inflate_stream(if start < 0 then pos else start, inp, out)
-    let stored_crc = zli_u32_le(inp, after)
-    let isize = zli_u32_le(inp, after + 4)
-    pos = after + 8
-    code = if start < 0 then 1
-    else if status == 0 - 2 then 6
-    else if status != 0 then 2
-    else if after + 8 > bytes.len(inp) then 5
-    else if zli_crc32_from(t, out, member_start) != stored_crc then 3
-    else if int.band(bytes.len(out) - member_start, 4294967295) != isize then 4 else 0
+    let start = zli_header_end(t, inp, pos)
+    code = match start {
+      -1 => 1,
+      -2 => 5,
+      -3 => 7,
+      _ => {
+        let member_start = bytes.len(out)
+        let (status, after) = zli_inflate_stream(start, inp, out)
+        pos = after + 8
+        if status == 0 - 2 then 6
+        else if status != 0 then 2
+        else if after + 8 > bytes.len(inp) then 5
+        else if zli_crc32_from(t, out, member_start) != zli_u32_le(inp, after) then 3
+        else if int.band(bytes.len(out) - member_start, 4294967295) != zli_u32_le(inp, after + 4) then 4 else 0
+      },
+    }
   }
   code
 }
 
-fn zli_gunzip_error(code: Int) -> String = if code == 1 then "not gzip"
-else if code == 2 then "corrupt deflate stream"
-else if code == 3 then "crc mismatch"
-else if code == 5 then "unexpected end of file"
-else if code == 6 then "incomplete deflate stream" else "size mismatch"
+
+
+
+fn zli_gunzip_error(code: Int) -> String = match code {
+  1 => "invalid gzip header",
+  2 => "corrupt deflate stream",
+  3 => "crc mismatch",
+  5 => "unexpected end of file",
+  6 => "incomplete deflate stream",
+  7 => "header crc mismatch",
+  _ => "size mismatch",
+}
 
 
 effect fn zlib_gunzip(data: Bytes) -> Result[Bytes, String] = {
@@ -38572,10 +37947,14 @@ effect fn zlib_inflate(data: Bytes) -> Result[Bytes, String] = {
   else if status == 0 - 2 then err("zlib.inflate: incomplete deflate stream") else err("zlib.inflate: corrupt deflate stream")
 }
 
+
+
+
 effect fn zlib_decompress(data: Bytes) -> Result[Bytes, String] = {
   let cmf = bytes.get_or(data, 0, 0)
   let flg = bytes.get_or(data, 1, 0)
-  if bytes.len(data) < 6 or int.band(cmf, 15) != 8 or (cmf * 256 + flg) % 31 != 0 then err("zlib.decompress: not a zlib stream")
+  if bytes.len(data) < 2 then err("zlib.decompress: unexpected end of file")
+  else if int.band(cmf, 15) != 8 or int.bshr(cmf, 4) > 7 or (cmf * 256 + flg) % 31 != 0 then err("zlib.decompress: invalid zlib header")
   else if int.band(flg, 32) != 0 then err("zlib.decompress: preset dictionary unsupported")
   else {
     var out = bytes.new(0)
@@ -38587,8 +37966,9 @@ effect fn zlib_decompress(data: Bytes) -> Result[Bytes, String] = {
         int.bor(int.bshl(bytes.get_or(data, after + 2, 0), 8), bytes.get_or(data, after + 3, 0)),
       ),
     )
-    if status == 0 - 2 or (status == 0 and after + 4 > bytes.len(data)) then err("zlib.decompress: incomplete deflate stream")
+    if status == 0 - 2 then err("zlib.decompress: incomplete deflate stream")
     else if status != 0 then err("zlib.decompress: corrupt deflate stream")
+    else if after + 4 > bytes.len(data) then err("zlib.decompress: unexpected end of file")
     else if zli_adler32_from(out, 0) != stored then err("zlib.decompress: adler32 mismatch") else ok(out)
   }
 }
@@ -38816,15 +38196,13 @@ pub fn source_of(stem: &str) -> Option<&'static str> {
         "math_tanh" => Some(SRC_MATH_TANH),
         "math_trig" => Some(SRC_MATH_TRIG),
         "matrix" => Some(SRC_MATRIX),
-        "matrix_activations" => Some(SRC_MATRIX_ACTIVATIONS),
         "matrix_arith" => Some(SRC_MATRIX_ARITH),
         "matrix_core" => Some(SRC_MATRIX_CORE),
         "matrix_ext" => Some(SRC_MATRIX_EXT),
         "matrix_fused" => Some(SRC_MATRIX_FUSED),
         "matrix_shape" => Some(SRC_MATRIX_SHAPE),
-        "mem" => Some(SRC_MEM),
-        "mem_checkpoint" => Some(SRC_MEM_CHECKPOINT),
         "net" => Some(SRC_NET),
+        "net_wasm" => Some(SRC_NET_WASM),
         "option" => Some(SRC_OPTION),
         "option_collect" => Some(SRC_OPTION_COLLECT),
         "option_collect_map" => Some(SRC_OPTION_COLLECT_MAP),
@@ -38846,6 +38224,7 @@ pub fn source_of(stem: &str) -> Option<&'static str> {
         "print_str" => Some(SRC_PRINT_STR),
         "process" => Some(SRC_PROCESS),
         "process_args" => Some(SRC_PROCESS_ARGS),
+        "process_stdin_lines" => Some(SRC_PROCESS_STDIN_LINES),
         "process_wasm" => Some(SRC_PROCESS_WASM),
         "random" => Some(SRC_RANDOM),
         "random_choice" => Some(SRC_RANDOM_CHOICE),

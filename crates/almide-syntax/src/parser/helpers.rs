@@ -66,6 +66,13 @@ impl Parser {
             }
             match self.peek_at(i + 1).map(|t| t.token_type) {
                 Some(TokenType::TypeName) => return true,
+                // #1456: a caseless last segment (`geo.住所`) names an imported
+                // type — this module never saw its declaration, so its token
+                // was not reclassified. Every caller is a type or pattern
+                // position, where a dotted path cannot be a field access.
+                Some(TokenType::Ident) if !self.peek_at(i + 2).is_some_and(|t| t.token_type == TokenType::Dot) => {
+                    return self.peek_at(i + 1).is_some_and(|t| super::caseless::is_caseless_name(&t.value));
+                }
                 Some(TokenType::Ident) => i += 2,
                 _ => return false,
             }
@@ -263,6 +270,12 @@ impl Parser {
             return Ok(self.advance_and_get_sym());
         }
         let tok = self.current();
+        if let Some(h) = super::caseless::name_position_hint(tok) {
+            return Err(format!(
+                "Expected identifier at line {}:{} (got {:?} '{}')\n  Hint: {}",
+                tok.line, tok.col, tok.token_type, tok.value, h
+            ));
+        }
         let hint = match (&tok.token_type, tok.value.as_str()) {
             (TokenType::Underscore, _) => "\n  Hint: '_' can only be used in match patterns, not as a variable name.",
             (TokenType::Test, _) => "\n  Hint: `test \"...\"` is a top-level form. Got here mid-declaration — either the previous fn/type/impl is missing a closing `}`, or the test block shouldn't be in this file at all (harness-submitted code).",
@@ -279,7 +292,7 @@ impl Parser {
             // declines one enclosing no identifier character (#1457). Binding
             // position never reaches `unknown_char_error`, so the hint that
             // names the construct has to be repeated here.
-            (TokenType::Unknown, "`") => "\n  Hint: A backtick escape takes ASCII letters, digits and '_', and cannot be empty. It makes a KEYWORD usable as a name (`type`, `protocol`) — it does not make a non-ASCII name writable.",
+            (TokenType::Unknown, "`") => "\n  Hint: A backtick escape takes identifier characters and cannot be empty. It makes a KEYWORD usable as a name (`type`, `protocol`).",
             (TokenType::Unknown, _) => "\n  Hint: This character is not Almide syntax. Full-width or invisible Unicode characters often sneak in from copy-paste — delete it, or move it into a string or comment.",
             _ => "",
         };
@@ -302,6 +315,12 @@ impl Parser {
 
     pub(crate) fn expect_type_name(&mut self) -> Result<Sym, String> {
         if self.check(TokenType::TypeName) {
+            return Ok(self.advance_and_get_sym());
+        }
+        // #1456: a caseless name has no capital to mark it, so in a position
+        // that only a type can fill it is read as one; the checker reports
+        // it if no such type exists.
+        if self.check(TokenType::Ident) && super::caseless::is_caseless_name(&self.current().value) {
             return Ok(self.advance_and_get_sym());
         }
         let tok = self.current();
@@ -389,7 +408,10 @@ impl Parser {
             return Ok(self.advance_and_get_sym());
         }
         let tok = self.current();
-        let hint = if tok.token_type == TokenType::TypeName {
+        let special = super::caseless::name_position_hint(tok).map(|h| format!("\n  Hint: {h}"));
+        let hint = if let Some(h) = special.as_deref() {
+            h
+        } else if tok.token_type == TokenType::TypeName {
             "\n  Hint: Function names must start with a lowercase letter. Use camelCase, e.g. fn myFunc()"
         } else {
             ""
@@ -405,7 +427,10 @@ impl Parser {
             return Ok(self.advance_and_get_sym());
         }
         let tok = self.current();
-        let hint = if tok.token_type == TokenType::TypeName {
+        let special = super::caseless::name_position_hint(tok).map(|h| format!("\n  Hint: {h}"));
+        let hint = if let Some(h) = special.as_deref() {
+            h
+        } else if tok.token_type == TokenType::TypeName {
             "\n  Hint: Parameter names must start with a lowercase letter. Example: fn greet(name: String)"
         } else if tok.value == ")" {
             "\n  Hint: Trailing comma before ')' is not allowed"

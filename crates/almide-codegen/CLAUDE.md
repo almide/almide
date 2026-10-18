@@ -13,14 +13,14 @@ does NOT live here — it is the v1 MIR trust-spine in `crates/almide-mir`
 
 25+ semantic transformation passes, each doing one thing, composed per target
 in `target.rs::build_pipeline`. The Rust pipeline (in order): UnifyVarTables →
-ListPatternLowering → LambdaTypeResolve → ConcretizeTypes →
+ListPatternLowering → LambdaTypeResolve → ConcretizeTypes → MeteredRegionDelegate → MeterCharge →
 PatternLiteralGuard → ResolveCalls → RegionWindow → BoxDeref → LICM → EggSaturation →
 MatrixShapeSpec → ConstFold → IntrinsicLowering → BorrowInsertion →
-TailCallOpt → CaptureClone → CloneInsertion → MatchSubject → EffectInference →
+OwnedSourceHoist → TailCallOpt → CaptureClone → CloneInsertion → MatchSubject → EffectInference →
 StdlibLowering → StreamFusion → ResultPropagation → BuiltinLowering →
 DecodeSlotHint → DecodeErrFrame → Peephole → RustLowering → FanLowering → NormalizeRuntimeCalls →
 IrLinkFlatten → SharedCellBorrow → VarStorage → RangeCountingVars → TopLetStorage → BorrowLowering →
-SliceBinders → StrMapKey
+SliceBinders → StrMapKey → ThreadShareMarks
 
 - Each pass: `impl NanoPass { fn run(&self, program, target) -> PassResult }`
 

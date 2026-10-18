@@ -3,10 +3,10 @@
 pub fn almide_rt_option_map<T: Clone, U>(o: Option<T>, f: std::rc::Rc<dyn Fn(T) -> U>) -> Option<U> { let f = move |a| f(a); o.map(f) }
 pub fn almide_rt_option_and_then<T: Clone, U>(o: Option<T>, f: std::rc::Rc<dyn Fn(T) -> Option<U>>) -> Option<U> { let f = move |a| f(a); o.and_then(f) }
 pub fn almide_rt_option_unwrap_or<T>(o: Option<T>, default: T) -> T { o.unwrap_or(default) }
-pub fn almide_rt_option_is_some<T>(o: Option<T>) -> bool { o.is_some() }
-pub fn almide_rt_option_is_none<T>(o: Option<T>) -> bool { o.is_none() }
+pub fn almide_rt_option_is_some<T>(o: &Option<T>) -> bool { o.is_some() }
+pub fn almide_rt_option_is_none<T>(o: &Option<T>) -> bool { o.is_none() }
 pub fn almide_rt_option_flatten<T>(o: Option<Option<T>>) -> Option<T> { o.flatten() }
-pub fn almide_rt_option_to_result<T>(o: Option<T>, err: &str) -> Result<T, String> { o.ok_or(err.to_string()) }
+pub fn almide_rt_option_to_result<T>(o: Option<T>, err: &str) -> Result<T, AlmideString> { let __almide_r: Result<T, String> = (|| { o.ok_or(err.to_string()) })(); __almide_r.map_err(Into::into) }
 pub fn almide_rt_option_unwrap_or_else<T>(o: Option<T>, f: std::rc::Rc<dyn Fn() -> T>) -> T { let f = move || f(); o.unwrap_or_else(f) }
 pub fn almide_rt_option_filter<T: Clone>(o: Option<T>, f: std::rc::Rc<dyn Fn(T) -> bool>) -> Option<T> { let f = move |a| f(a); o.filter(|x| f(x.clone())) }
 pub fn almide_rt_option_zip<T, U>(a: Option<T>, b: Option<U>) -> Option<(T, U)> { a.zip(b) }

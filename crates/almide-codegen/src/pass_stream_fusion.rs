@@ -46,6 +46,10 @@
 //!    `Vec` per stage, exactly the spec order. The fallible `!` form never
 //!    reaches here (it lowers to the self-hosted `__fallible_*` twins).
 //!
+//! A call to a user fn whose whole body is one list call over its only
+//! parameter arrives here already inlined (`almide-optimize`'s sink pass,
+//! #3584), so a chain into it is just a longer chain.
+//!
 //! A chain's source starts CONSUMED; whether it stays so is decided by what
 //! the steps do with each element, not by the twin's `@consume(xs)` slot
 //! (#2287): `BorrowInsertion` reads `chain_elements_consumed` — a `Copy`
@@ -117,6 +121,10 @@ use almide_ir::fusion::{stdlib_module_is_pure, TOTAL_MODULES};
 pub(super) struct Purity {
     pure: HashSet<Sym>,
     total: HashSet<Sym>,
+    /// The fan view (`for_fan`): an `effect fn` is a candidate too, and a
+    /// nested `fan`, a `fan.*` call and `!` are admitted, so an effect fn
+    /// whose only effect is fanning out over proven work is proven.
+    fan: bool,
 }
 
 impl Purity {
@@ -131,7 +139,7 @@ impl Purity {
     fn analyze(program: &IrProgram, local_state: bool) -> Purity {
         let mut bodies: Vec<(Vec<Sym>, Cow<'_, IrExpr>)> = Vec::new();
         for f in &program.functions {
-            if !f.is_effect && !f.is_test {
+            if (local_state || !f.is_effect) && !f.is_test {
                 if let Some(body) = proof_body(f, local_state) { bodies.push((vec![f.name], body)); }
             }
         }
@@ -139,7 +147,7 @@ impl Purity {
             let mod_name = m.versioned_name.map(|v| v.to_string()).unwrap_or_else(|| m.name.to_string());
             let mod_ident = almide_base::names::module_ident(&mod_name);
             for f in &m.functions {
-                if f.is_effect || f.is_test { continue; }
+                if (f.is_effect && !local_state) || f.is_test { continue; }
                 // Every spelling a call site may carry after StdlibLowering's
                 // intra-module rename (see `prefix_intra_module_calls`).
                 // A module-local bare name is not a root function alias.
@@ -163,7 +171,7 @@ impl Purity {
                 let snapshot = set;
                 set = HashSet::new();
                 for (names, body) in &bodies {
-                    let cx = Cx { fns: &snapshot, total };
+                    let cx = Cx { fns: &snapshot, total, fan: local_state };
                     if (total || names.iter().all(|n| snapshot.contains(n))) && expr_ok(body, &cx) {
                         set.extend(names.iter().copied());
                     }
@@ -174,11 +182,13 @@ impl Purity {
         };
         // Erasing loop-local writes proves neither termination nor absence of
         // aborts. Fan only consumes purity; never derive totality from this view.
-        Purity { pure: fixpoint(false), total: if local_state { HashSet::new() } else { fixpoint(true) } }
+        Purity { pure: fixpoint(false), total: if local_state { HashSet::new() } else { fixpoint(true) }, fan: local_state }
     }
 
-    pub(super) fn pure(&self, e: &IrExpr) -> bool { expr_ok(e, &Cx { fns: &self.pure, total: false }) }
-    fn total(&self, e: &IrExpr) -> bool { expr_ok(e, &Cx { fns: &self.total, total: true }) }
+    pub(super) fn pure(&self, e: &IrExpr) -> bool { expr_ok(e, &Cx { fns: &self.pure, total: false, fan: self.fan }) }
+    fn total(&self, e: &IrExpr) -> bool { expr_ok(e, &Cx { fns: &self.total, total: true, fan: false }) }
+    /// The function `name` (any spelling a call site carries) is proven.
+    pub(super) fn proves(&self, name: Sym) -> bool { self.pure.contains(&name) }
 }
 
 fn proof_body(f: &IrFunction, local_state: bool) -> Option<Cow<'_, IrExpr>> {
@@ -190,6 +200,8 @@ struct Cx<'a> {
     fns: &'a HashSet<Sym>,
     /// `true`: also refuse anything that can abort (the totality check).
     total: bool,
+    /// The fan view: see `Purity::fan`.
+    fan: bool,
 }
 
 fn all_ok(es: &[IrExpr], cx: &Cx) -> bool { es.iter().all(|e| expr_ok(e, cx)) }
@@ -241,13 +253,32 @@ fn runtime_arg_ok(arg: &IrExpr, cx: &Cx) -> bool {
 fn expr_ok(e: &IrExpr, cx: &Cx) -> bool {
     // Disjoint expression families; Some(false) must stop the chain. Unknown
     // nodes, mutable borrows, propagation and loops have no purity proof.
-    literal_ok(e, cx)
+    fan_ok(e, cx)
+        .or_else(|| literal_ok(e, cx))
         .or_else(|| operator_ok(e, cx))
         .or_else(|| control_ok(e, cx))
         .or_else(|| aggregate_ok(e, cx))
         .or_else(|| wrapper_ok(e, cx))
         .or_else(|| call_ok(e, cx))
         .unwrap_or(false)
+}
+
+/// The fan view only. A nested `fan { … }` and a `fan.*` call run their
+/// elements as if in list order (ADR-0024 D1) and write output through
+/// per-element timelines (D5), so they observe nothing their elements do not:
+/// they are proven when every element is. `!` returns the element's `Err` to
+/// its caller, which a fan collects in list order.
+fn fan_ok(e: &IrExpr, cx: &Cx) -> Option<bool> {
+    use IrExprKind as K;
+    if !cx.fan { return None; }
+    Some(match &e.kind {
+        K::Fan { exprs } => all_ok(exprs, cx),
+        K::Try { expr } | K::Unwrap { expr } => expr_ok(expr, cx),
+        K::Call { target: CallTarget::Module { module, .. }, args, .. } if module.as_str() == "fan" => {
+            args.iter().all(|a| runtime_arg_ok(a, cx))
+        }
+        _ => return None,
+    })
 }
 
 fn literal_ok(e: &IrExpr, _cx: &Cx) -> Option<bool> {
@@ -705,13 +736,33 @@ mod tests {
         param.name = sym("param");
         param.params.push(IrParam { var: VarId(0), ty: Ty::Int, name: sym("n"),
             borrow: ParamBorrow::Own, is_mut: true, open_record: None, default: None, attrs: vec![] });
-        let program = IrProgram { functions: vec![local, effect, external, param], ..Default::default() };
+        // A heap parameter beside the scalar loop-local (spectralnorm's row
+        // kernel: `v: List[Float]` read, `var s: Float` written) is admitted:
+        // a scalar binding holds no storage the parameter could share.
+        let list_ty = Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, vec![Ty::Float]);
+        let heap_param = |f: &IrFunction, name: &str| {
+            let mut f = f.clone();
+            f.name = sym(name);
+            f.params.push(IrParam { var: VarId(9), ty: list_ty.clone(), name: sym("v"),
+                borrow: ParamBorrow::Own, is_mut: false, open_record: None, default: None, attrs: vec![] });
+            f
+        };
+        let heap_scalar = heap_param(&local, "heap_scalar");
+        // The same write to a heap-typed local stays unproven: with a heap
+        // parameter in scope that local may share the parameter's storage.
+        let mut heap_local = heap_param(&local, "heap_local");
+        if let IrExprKind::Block { stmts, .. } = &mut heap_local.body.kind {
+            let IrStmtKind::Bind { ty, .. } = &mut stmts[0].kind else { panic!("bind") };
+            *ty = list_ty.clone();
+        }
+        let program = IrProgram { functions: vec![local, effect, external, param, heap_scalar, heap_local], ..Default::default() };
         let fusion = Purity::of(&program);
         let fan = Purity::for_fan(&program);
         assert!(!fusion.pure.contains(&sym("local")), "fusion keeps its original admission rule");
         assert!(fan.pure.contains(&sym("local")));
+        assert!(fan.pure.contains(&sym("heap_scalar")), "a scalar local beside a heap param is invocation-owned");
         assert!(fan.total.is_empty(), "local state is not a termination proof");
-        for name in ["effect", "external", "param"] {
+        for name in ["effect", "external", "param", "heap_local"] {
             assert!(!fan.pure.contains(&sym(name)), "unproven function: {name}");
         }
     }
@@ -736,7 +787,7 @@ mod tests {
     #[test]
     fn a_function_argument_needs_a_callee_proof() {
         let fns = HashSet::from([sym("known")]);
-        let cx = Cx { fns: &fns, total: false };
+        let cx = Cx { fns: &fns, total: false, fan: false };
         let fn_ty = Ty::Fn { params: vec![], ret: Box::new(Ty::Int), is_effect: false };
         for (name, expected) in [("known", true), ("prints", false)] {
             let arg = IrExpr { kind: IrExprKind::FnRef { name: sym(name) },
@@ -752,11 +803,11 @@ mod tests {
     #[test]
     fn unknown_rust_and_effectful_runtime_calls_are_not_pure() {
         let fns = HashSet::new();
-        let cx = Cx { fns: &fns, total: false };
+        let cx = Cx { fns: &fns, total: false, fan: false };
         for template in ["emit_event({e0})", "[{event()}]", "[{e0}; side_effect()]"] {
             assert!(!inline_rust_ok(template, &cx), "unproven template: {template}");
         }
-        for symbol in ["almide_rt_net_connect", "almide_rt_sse_openai_chat", "almide_rt_mem_restore", "almide_rt_unknown_action"] {
+        for symbol in ["almide_rt_net_connect", "almide_rt_sse_anthropic_messages", "almide_rt_mem_restore", "almide_rt_unknown_action"] {
             assert!(!runtime_ok(symbol, &cx), "unproven runtime call: {symbol}");
         }
         assert!(inline_rust_ok("[{e0}, {e1}]", &cx));

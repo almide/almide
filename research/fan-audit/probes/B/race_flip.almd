@@ -1,0 +1,11 @@
+fn s1(x: Int) -> Int = x * 3 + 1
+fn d1(x: Int, t: Int) -> Int = s1(x) * 0 + t
+effect fn main() -> Unit = {
+  let w = fan.race {
+    d1(1, 1)
+    0 * 5 + 2
+  } ?? -1
+  println("F1 winner: " + int.to_string(w))
+  let m = fan.race([1, 2], (x) => if x == 1 then ok(d1(1, 1)) else ok(2)) ?? -1
+  println("F2 mapper winner: " + int.to_string(m))
+}

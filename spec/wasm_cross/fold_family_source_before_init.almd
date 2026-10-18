@@ -1,0 +1,40 @@
+// @contract: C-258
+// #2045 review: every fold-shaped call evaluates its arguments left to right
+// — the source, then the init — as native does. The wasm leg lowered the
+// init first in each of these arms, so a printing source and a printing init
+// came out in the opposite order: `list.fold` over `list.enumerate` with a
+// scalar accumulator, `list.scan`, `set.fold` and `map.fold`.
+fn src() -> List[Int] = {
+  println("src")
+  [3, 4, 5]
+}
+
+fn init() -> Int = {
+  println("init")
+  100
+}
+
+fn src_set() -> Set[Int] = {
+  println("src set")
+  set.from_list([1, 2])
+}
+
+fn src_map() -> Map[String, Int] = {
+  println("src map")
+  ["a": 1, "b": 2]
+}
+
+effect fn main() -> Unit = {
+  let indexed = list.enumerate(src()) |> list.fold(init(), (a, p) => a + p.0)
+  println("indexed=${indexed}")
+  let running = src() |> list.scan(init(), (a, x) => a + x)
+  println("running=${running}")
+  let total = src_set() |> set.fold(init(), (a, x) => a + x)
+  println("total=${total}")
+  let summed = src_map() |> map.fold(init(), (a, _k, v) => a + v)
+  println("summed=${summed}")
+  let plain = src() |> list.fold(init(), (a, x) => a + x)
+  println("plain=${plain}")
+  let fused = src() |> list.map((x) => x * 2) |> list.fold(init(), (a, x) => a + x)
+  println("fused=${fused}")
+}

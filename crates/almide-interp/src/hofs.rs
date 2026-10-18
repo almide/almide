@@ -46,8 +46,8 @@ impl<'a> Interpreter<'a> {
             evaled.push(val!(self.eval_expr(a, scope)));
         }
         // INSIDE the pool tier a heap value is its address (`pool_fns`), so
-        // a VALUE-level body — `matrix_softmax_rows` is `m |> list.map(..)`
-        // — handed a block a HEAP-level body built (`matrix.mul`'s, in the
+        // a VALUE-level body — an `m |> list.map(..)` composition —
+        // handed a block a HEAP-level body built (`matrix.mul`'s, in the
         // `matrix_fused` compositions) would iterate an Int. A HOF only
         // reads its receiver, so it is read back under the receiver's STATIC
         // type here, the same read-back the pool boundary performs; what the

@@ -12,9 +12,13 @@
 /// Sanitize an IR function name into a Rust-emittable identifier.
 ///
 /// Spaces and punctuation fold to `_`; parentheses vanish; operator characters
-/// spell out. A name containing any non-ASCII character also gets an FNV-1a
-/// suffix, because the fold above maps every non-ASCII byte to `_` and two
-/// distinct names would otherwise collide on one skeleton.
+/// spell out. A non-ASCII character Rust accepts in an identifier (XID, the
+/// rule Almide's own names follow since #1456) is kept, so a user fn `挨拶`
+/// renders as `挨拶` — the spelling every call site uses. Any OTHER non-ASCII
+/// character folds to `_`, and then the name also gets an FNV-1a suffix,
+/// because two distinct names would otherwise collide on one skeleton.
+/// A name that is not in NFC is folded the same way: rustc compares
+/// identifiers after NFC, so keeping it verbatim could merge two test names.
 pub fn rust_safe_fn_name(raw: &str) -> String {
     let s = raw
         .replace([' ', '-', '.', ',', ':', '[', ']'], "_")
@@ -23,8 +27,24 @@ pub fn rust_safe_fn_name(raw: &str) -> String {
         .replace('=', "_eq_").replace('!', "_bang_").replace('?', "_q_")
         .replace('<', "_lt_").replace('>', "_gt_")
         .replace('|', "_pipe_").replace('&', "_amp_").replace('%', "_mod_");
-    let mut safe: String = s.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' }).collect();
-    if raw.chars().any(|c| !c.is_ascii()) {
+    let keep_non_ascii = unicode_normalization::is_nfc(raw)
+        && s.chars().next().is_some_and(|c| c.is_ascii() || unicode_ident::is_xid_start(c));
+    let mut folded_non_ascii = false;
+    let mut safe: String = s
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric()
+                || c == '_'
+                || (!c.is_ascii() && keep_non_ascii && unicode_ident::is_xid_continue(c))
+            {
+                c
+            } else {
+                folded_non_ascii |= !c.is_ascii();
+                '_'
+            }
+        })
+        .collect();
+    if folded_non_ascii {
         let mut h: u64 = 0xcbf2_9ce4_8422_2325;
         for b in raw.as_bytes() {
             h ^= *b as u64;
@@ -33,6 +53,25 @@ pub fn rust_safe_fn_name(raw: &str) -> String {
         safe.push_str(&format!("_{:08x}", (h >> 32) as u32 ^ h as u32));
     }
     safe
+}
+
+/// A name whose first character is a letter with no case — CJK, kana,
+/// Hangul, Thai, Arabic, Hebrew, ... (#1456). `_x`, digits, and cased
+/// letters never qualify.
+pub fn is_caseless_name(name: &str) -> bool {
+    name.chars()
+        .next()
+        .is_some_and(|c| c.is_alphabetic() && !c.is_uppercase() && !c.is_lowercase())
+}
+
+/// Can this spelling name a TYPE (or a variant case)? An uppercase start
+/// always can; a caseless start can too, because a caseless script has no
+/// capital to mark its type names (#1456). A lowercase start never can. Use
+/// this wherever a type-vs-value decision is made from a name's spelling.
+/// Deciding a qualifier (`X.f`) by it is sound because a module name is
+/// ASCII — the parser refuses any other — so a caseless head is never a module.
+pub fn is_type_side_name(name: &str) -> bool {
+    name.chars().next().is_some_and(char::is_uppercase) || is_caseless_name(name)
 }
 
 /// Does the test whose IR name is `ir_name` run under `--run <pattern>`?
@@ -62,6 +101,20 @@ mod tests {
     fn ascii_names_are_untouched_by_the_hash_rule() {
         assert_eq!(rust_safe_fn_name("__test_almd_a + b (fast)"), "__test_almd_a__plus__b_fast");
         assert_eq!(rust_safe_fn_name("string mismatch"), "string_mismatch");
+    }
+
+    // #1456: a non-ASCII identifier is already a Rust identifier; the
+    // definition must keep the spelling its call sites use.
+    #[test]
+    fn identifier_names_keep_their_spelling() {
+        assert_eq!(rust_safe_fn_name("挨拶"), "挨拶");
+        assert_eq!(rust_safe_fn_name("café"), "café");
+        // Names that differ only in a non-identifier character fold to one
+        // skeleton; the hash suffix still keeps them apart.
+        assert_ne!(rust_safe_fn_name("__test_almd_日本、語"), rust_safe_fn_name("__test_almd_日本。語"));
+        assert_eq!(rust_safe_fn_name("__test_almd_日本 語"), "__test_almd_日本_語");
+        // Not NFC: folded and hashed, never kept verbatim.
+        assert!(rust_safe_fn_name("cafe\u{301}").starts_with("cafe__"));
     }
 
     // The filter contract both legs implement. `beta fails` selecting nothing is
@@ -108,43 +161,6 @@ pub fn module_ident(path: &str) -> String {
         }
     }
     out
-}
-
-/// The pre-#3338 spelling of a module path in item names: every `.` folded to
-/// `_`, every `_` kept (`tf_v0.calc` → `tf_v0_calc`). NOT injective — `a.b`
-/// and `a_b` are both `a_b` — so it names nothing the compiler defines. It
-/// exists only to spell the deprecated aliases a package's `native/*.rs` may
-/// still call (#3425); this is the one place that spelling is made.
-pub fn legacy_module_ident(path: &str) -> String {
-    path.replace('.', "_")
-}
-
-/// Split a generated `<module_ident(path)>_<name>` back into the module path
-/// and the bare name: `tf_0v0_1calc_double` → (`tf_v0.calc`, `double`).
-/// Decodes [`module_ident`] left to right (`_0` → `_`, `_1` → `.`, the first
-/// other `_` ends the path). `None` when there is no such `_`.
-pub fn split_module_item(ident: &str) -> Option<(String, &str)> {
-    let mut path = String::with_capacity(ident.len());
-    let mut chars = ident.char_indices().peekable();
-    while let Some((i, ch)) = chars.next() {
-        if ch != '_' {
-            path.push(ch);
-            continue;
-        }
-        match chars.peek().map(|&(_, c)| c) {
-            Some('0') => {
-                path.push('_');
-                chars.next();
-            }
-            Some('1') => {
-                path.push('.');
-                chars.next();
-            }
-            Some(_) if !path.is_empty() => return Some((path, &ident[i + 1..])),
-            _ => return None,
-        }
-    }
-    None
 }
 
 /// A module-qualified declaration name (`a.b.Tok`) as one identifier:
@@ -198,25 +214,6 @@ mod module_ident_tests {
         }
         assert_eq!(spellings[6], spellings[0]);
         assert_eq!(qualified_ident("Tok"), "Tok");
-    }
-
-    #[test]
-    fn split_module_item_inverts_module_ident() {
-        use super::split_module_item;
-        for (path, name) in [("tf_v0", "entry"), ("tf_v0.calc", "double"), ("a.b", "c"), ("a_b", "c"), ("a", "b_c"), ("a._b", "_c"), ("list", "map")] {
-            let ident = format!("{}_{}", module_ident(path), name);
-            assert_eq!(split_module_item(&ident), Some((path.to_string(), name)), "{ident}");
-        }
-        assert_eq!(split_module_item("main"), None);
-        assert_eq!(split_module_item("_x"), None);
-    }
-
-    #[test]
-    fn the_legacy_spelling_folds_dots_and_keeps_underscores() {
-        use super::legacy_module_ident;
-        assert_eq!(legacy_module_ident("tf_v0"), "tf_v0");
-        assert_eq!(legacy_module_ident("tf_v0.calc"), "tf_v0_calc");
-        assert_eq!(legacy_module_ident("a.b"), legacy_module_ident("a_b"));
     }
 
     #[test]

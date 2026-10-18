@@ -1,0 +1,35 @@
+// ADR-0013 design point 3: a String that several scoped threads read and
+// copy at once. Natively, under the shared string buffer, its block is
+// marked thread-shared before the threads start and counted atomically.
+// Every leg must give the same answers.
+import fs
+
+fn copies(s: String, n: Int) -> List[String] = list.range(0, n) |> list.map((i) => s)
+
+fn tagged(s: String, n: Int) -> List[String] = list.range(0, n) |> list.map((i) => s + "${i}")
+
+test "a string every fan arm copies is copied from each arm at once" {
+  let s = string.repeat("shared", 4)
+  let (a, b, c) = fan {
+    copies(s, 2000)
+    copies(s, 2000)
+    tagged(s, 3)
+  }
+  assert_eq(list.len(a) + list.len(b), 4000)
+  assert_eq(list.all(a, (x) => x == s), true)
+  assert_eq(list.all(b, (x) => x == s), true)
+  assert_eq(c, [s + "0", s + "1", s + "2"])
+  assert_eq(s, "sharedsharedsharedshared")
+}
+
+test "a chunked fold reads a captured string and a shared init from every worker" {
+  let d = fs.create_temp_dir("thread-shared")!
+  let p = d + "/lines.txt"
+  fs.write(p, list.range(0, 200) |> list.map((i) => "l${i}") |> list.join("\n"))!
+  let prefix = string.repeat(">", 3)
+  let partials = fs.fold_lines_chunked(p, 4, [prefix], (acc, line) => acc + [prefix + line])!
+  assert_eq(list.all(partials, (xs) => list.first(xs) == some(prefix)), true)
+  let lines = partials |> list.flat_map((xs) => list.drop(xs, 1))
+  assert_eq(list.len(lines), 200)
+  assert_eq(list.all(lines, (l) => string.starts_with(l, ">>>l")), true)
+}

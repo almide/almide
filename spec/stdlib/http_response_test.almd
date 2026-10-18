@@ -39,6 +39,22 @@ test "http.status changes status code" {
   assert_eq(http.body(updated), "hi")
 }
 
+test "http.status rebind leaves an earlier alias at its old status" {
+  var x = http.with_headers(200, "hi", map.new() |> map.set("X-K", "v"))
+  let old = x
+  x = http.status(x, 201)
+  var i = 0
+  while i < 3 {
+    let before = x
+    x = http.status(x, 300 + i)
+    assert_eq(http.status_code(before), if i == 0 then 201 else 299 + i)
+    i = i + 1
+  }
+  assert_eq(http.status_code(old), 200)
+  assert_eq(http.status_code(x), 302)
+  assert_eq(http.get_header(x, "X-K"), some("v"))
+}
+
 test "http.with_headers creates response with custom headers" {
   let headers = map.new() |> map.set("X-Custom", "value") |> map.set("Content-Type", "text/html")
   let resp = http.with_headers(200, "hi", headers)

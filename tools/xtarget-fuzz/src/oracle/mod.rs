@@ -16,6 +16,9 @@
 mod interp;
 mod ladder;
 mod runner;
+pub(crate) mod fixture;
+pub(crate) mod sandbox;
+pub(crate) mod serve;
 
 pub use interp::InterpOracle;
 pub use ladder::{leak_at_exit, run_ladder, Finding, FindingKind, Outcome, RunEvidence, Rung};

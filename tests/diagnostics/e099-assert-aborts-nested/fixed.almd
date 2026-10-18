@@ -1,0 +1,6 @@
+// One call per abort, side by side in the test.
+import testing
+
+test "a panic aborts" {
+  testing.assert_aborts("boom", () => panic("boom"))
+}

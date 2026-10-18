@@ -57,6 +57,7 @@ impl<'a> Interpreter<'a> {
         if module.as_str() == "prim" && func.as_str() == "handle" {
             self.handle_arg_ty = args.first().map(|a| a.ty.clone());
         }
+        self.container_arg_tys = Some(args.iter().map(|a| a.ty.clone()).collect());
         self.dispatch_module_resolved(module, func, evaled)
     }
 
@@ -456,10 +457,11 @@ impl<'a> Interpreter<'a> {
                 let Some(Value::Str(name)) = args.first() else {
                     return Some(Flow::Abort("internal: prim.env_get expects a String".into()));
                 };
-                Some(Flow::val(match std::env::var(name.as_str()) {
-                    Ok(v) => Value::Option(Some(Box::new(Value::str(v)))),
-                    Err(_) => Value::Option(None),
-                }))
+                // A variable the program set itself wins (`env.set`, held in
+                // the interp's overlay, #3808).
+                let value = crate::bridge::env_overlay_get(name.as_str())
+                    .or_else(|| std::env::var(name.as_str()).ok());
+                Some(Flow::val(Value::Option(value.map(|v| Box::new(Value::str(v))))))
             }
             _ => self.vfs_prim(func, args),
         }

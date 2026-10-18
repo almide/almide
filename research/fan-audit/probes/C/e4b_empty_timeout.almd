@@ -1,0 +1,4 @@
+effect fn main() -> Unit = {
+  let b = fan.timeout(duration.ms(1)) { }
+  println("timeout empty: " + (match b { ok(_) => "ok", err(e) => e }))
+}

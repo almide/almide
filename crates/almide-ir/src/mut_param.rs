@@ -71,6 +71,8 @@ pub fn lower_mut_params_move_mode(program: &mut IrProgram) -> bool {
     crate::mut_param_err_carry::carry_bodies(program, &mut_fns, &carry);
     crate::mut_param_unpropagated::settle(program, &never_err);
     fold_tail_writebacks(program, &mut_fns);
+    // #3662: the value-returning twin — a tail call forwarding the mut param.
+    crate::mut_param_tail_value::fold_value_tail_writebacks(program, &mut_fns);
     hoist_branch_writebacks(program);
     true
 }

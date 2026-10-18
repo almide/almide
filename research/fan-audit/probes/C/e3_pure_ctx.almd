@@ -1,0 +1,2 @@
+fn f() -> Int = fan.bounded(compute.ms(1)) { 1 } ?? -1
+effect fn main() -> Unit = println(int.to_string(f()))

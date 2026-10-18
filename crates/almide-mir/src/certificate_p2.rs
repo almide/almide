@@ -545,6 +545,7 @@
         );
         assert_eq!(manifest_caps(&allow(&["Rand", "Net"])), vec![Capability::Entropy, Capability::Net]);
         assert_eq!(manifest_caps(&allow(&["Rand", "Fan"])), vec![Capability::Entropy]);
+        assert_eq!(manifest_caps(&allow(&["Env"])), vec![Capability::CliArgs, Capability::Process]);
 
         // An effect fn's all-caps default is REFINED to the manifest…
         let mut eff = func(vec![]);

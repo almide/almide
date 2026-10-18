@@ -5,7 +5,7 @@ use std::path::Path;
 
 use almide::fmt::format_program;
 
-use super::runner::Toolchain;
+use super::runner::{ProcResult, Toolchain};
 use crate::findings::{quoted_excerpt, SUMMARY_SIDE_CAP};
 use super::ReferenceOracle;
 
@@ -361,6 +361,10 @@ pub fn run_ladder(
 
     // ── Rung (e): wasm run + differential compare ──
     let wasm = tc.run_wasm(wasm_out);
+    // An embedded-lane run compiles too: its honest wall is a wall here.
+    if let Some(reason) = embedded_wall(wasm_out, &wasm) {
+        return Outcome::Walled { reason };
+    }
     if wasm.spawn_failed {
         // wasmtime not installed ⇒ we cannot do the differential compare.
         return Outcome::Skipped {
@@ -440,11 +444,15 @@ pub fn run_ladder(
 
     match compare_runs(source, &native, &wasm, reference, expected) {
         // ── Rung (f): live heap at exit (wasm leg) — only a clean program
-        // that exited 0 is re-run with the allocation counters armed.
-        Outcome::Clean { native } if tc.leak_check && wasm.exit_code == Some(0) => match leak_at_exit(tc, file) {
-            Some(finding) => Outcome::Finding(finding),
-            None => Outcome::Clean { native },
-        },
+        // that exited 0 is re-run with the allocation counters armed. A
+        // program that ends by `process.exit` ends without unwinding on every
+        // leg: nothing was released, so nothing leaked.
+        Outcome::Clean { native } if tc.leak_check && wasm.exit_code == Some(0) && !crate::generator::ends_without_unwinding(source) => {
+            match leak_at_exit(tc, file) {
+                Some(finding) => Outcome::Finding(finding),
+                None => Outcome::Clean { native },
+            }
+        }
         other => other,
     }
 }
@@ -572,6 +580,20 @@ fn compare_runs(
             native: Some(nat_ev),
             wasm: Some(wasm_ev),
         });
+    }
+
+    // The sandbox each leg ran in (tier E1): a write that landed differently
+    // is a divergence even when stdout agrees.
+    if let (Some(nt), Some(wt)) = (&native.tree, &wasm.tree) {
+        if nt != wt {
+            return Outcome::Finding(Finding {
+                rung: Rung::Run,
+                kind: FindingKind::OutputDivergence,
+                summary: format!("the files left in the sandbox differ ({})", first_line_diff(nt, wt)),
+                native: Some(nat_ev),
+                wasm: Some(wasm_ev),
+            });
+        }
     }
 
     // Optional future rung: compare both against a reference interpreter.
@@ -744,6 +766,17 @@ fn first_line_diff(expected: &str, actual: &str) -> String {
         expected.lines().count(),
         actual.lines().count()
     )
+}
+
+/// The `wall:` reason of a failed embedded-lane run (ADR-0027 D1), whose
+/// `almide run --target wasm` refuses a program no wasm route serves.
+fn embedded_wall(art: &Path, run: &ProcResult) -> Option<String> {
+    if run.success() || !super::runner::is_embedded_artifact(art) {
+        return None;
+    }
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    let line = stderr.lines().map(str::trim).find(|l| l.starts_with(almide::WASM_WALL_MARKER))?;
+    Some(line[almide::WASM_WALL_MARKER.len()..].to_string())
 }
 
 #[cfg(test)]
@@ -954,6 +987,7 @@ mod resource_class_tests {
             timed_out: false,
             spawn_failed: false,
             duration: std::time::Duration::from_millis(5),
+            tree: None,
         }
     }
 
@@ -1117,7 +1151,25 @@ mod compare_runs_tests {
             timed_out: false,
             spawn_failed: false,
             duration: std::time::Duration::from_millis(5),
+            tree: None,
         }
+    }
+
+    #[test]
+    fn the_same_stdout_with_different_files_left_behind_is_a_divergence() {
+        let mut nat = run("ok\n", "", 0);
+        let mut was = run("ok\n", "", 0);
+        nat.tree = Some("f data.txt 27 aa\nf out.txt 1 bb\n".into());
+        was.tree = Some("f data.txt 27 aa\n".into());
+        match compare_runs("fn main() -> Unit = ()", &nat, &was, None, None) {
+            Outcome::Finding(f) => {
+                assert!(matches!(f.kind, FindingKind::OutputDivergence));
+                assert!(f.summary.contains("sandbox"), "{}", f.summary);
+            }
+            _ => panic!("a different tree must be a finding"),
+        }
+        was.tree = nat.tree.clone();
+        assert!(matches!(compare_runs("fn main() -> Unit = ()", &nat, &was, None, None), Outcome::Clean { .. }));
     }
 
     #[test]

@@ -161,7 +161,7 @@ effect env.sleep_ms(ms: Int) -> Unit
 // @since 0.5.0 or earlier
 effect env.temp_dir() -> String
 
-// Host OS: macos, linux, windows or unknown.
+// Host OS: macos, linux, windows or unknown; "wasi" on wasm (C-189).
 // @since 0.5.0 or earlier
 env.os() -> String
 ```

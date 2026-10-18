@@ -180,54 +180,13 @@ impl Emitter<'_> {
                 if let Some((ti, ci)) = ctor {
                     return self.lower_variant_ctor(name, ti, ci, args);
                 }
-                // The http_framed op leaves (#1710 increment 3): the
-                // splice's bodyless `= _` leaves, lowered as host ops —
-                // the intra-module twins of the host_env http arms (url
-                // in a, the method/body/headers frame in b). They carry
-                // no table body, so they intercept BEFORE resolution.
-                match name {
-                    "__http_framed_text" => {
-                        self.fs_call_str2(&args[0], &args[1], crate::fs_meta::OP_HTTP_FRAMED_TEXT)?;
-                        return Ok(Some(self.fs_result_string()?));
-                    }
-                    "__http_framed_status" => {
-                        self.fs_call_str2(&args[0], &args[1], crate::fs_meta::OP_HTTP_FRAMED_STATUS)?;
-                        return Ok(Some(self.fs_result_string()?));
-                    }
-                    "__http_framed_bytes" => {
-                        self.fs_call_str2(&args[0], &args[1], crate::fs_meta::OP_HTTP_FRAMED_BYTES)?;
-                        return Ok(Some(self.fs_result_bytes()?));
-                    }
-                    // The subprocess leaves (#2589, ADR-0025): two text
-                    // operands in a/b, a Result[String, String] answer.
-                    n if n.starts_with("__proc_") => {
-                        if let Some(&(_, op)) = crate::fs_meta::PROC_LEAVES.iter().find(|(l, _)| *l == n) {
-                            self.fs_call_str2(&args[0], &args[1], op)?;
-                            return Ok(Some(self.fs_result_string()?));
-                        }
-                    }
-                    // The http call handle's leaves (#2633, http_call.rs).
-                    n if n.starts_with("__http_call_") => {
-                        if let Some(t) = self.lower_http_call_leaf(n, args)? {
-                            return Ok(Some(t));
-                        }
-                    }
-                    // The http.serve loop's leaves (#2650): bind (port
-                    // text), next (the request as a List[String] of
-                    // frames), reply (the response's cells in a).
-                    "__http_serve_bind" => {
-                        self.fs_call_1(&args[0], crate::fs_meta::OP_HTTP_SERVE_BIND)?;
-                        return Ok(Some(self.fs_result_unit()?));
-                    }
-                    "__http_serve_next" => {
-                        self.fs_call_0(crate::fs_meta::OP_HTTP_SERVE_NEXT)?;
-                        return Ok(Some(self.fs_result_string_list()?));
-                    }
-                    "__http_serve_reply" => {
-                        self.fs_call_1(&args[0], crate::fs_meta::OP_HTTP_SERVE_REPLY)?;
-                        return Ok(Some(self.fs_result_unit()?));
-                    }
-                    _ => {}
+                // The splice's bodyless `= _` host-op leaves (http_framed,
+                // http.serve, subprocess, http call — http_call.rs). They
+                // carry no table body, so they intercept BEFORE resolution;
+                // each answer is fresh, so the call is OWNED (#3623).
+                if let Some(t) = self.lower_host_leaf(name, args)? {
+                    self.mark_owned_call(target);
+                    return Ok(Some(t));
                 }
                 // Entry fns resolve by name; a miss falls back to the
                 // module-fn simple-name index (intra-module calls arrive
@@ -306,6 +265,9 @@ impl Emitter<'_> {
                 let move_in = self.take_move_in(args, save.is_none(), tail && Some(index) != self.self_index);
                 let mut moved_in = Vec::new();
                 let site = crate::witness::modes::site_begin();
+                if append_window_ok {
+                    self.note_tail_reuse_args(args, true);
+                }
                 for (k, (a, want)) in args.iter().zip(params).enumerate() {
                     // #2117: `build(acc + s, …)` at a self tail call in loop
                     // form is the growing accumulator one position over from
@@ -322,6 +284,7 @@ impl Emitter<'_> {
                     let self_tail = append_window_ok;
                     if self.tail_str_append_arg(k, a, want, self_tail)?
                         || self.tail_list_append_arg(k, a, want, self_tail)?
+                        || self.tail_list_prepend_arg(k, a, want, self_tail)?
                     {
                         self.modes_arg(want, true);
                         continue;
@@ -346,6 +309,9 @@ impl Emitter<'_> {
                     if owned_pos && param_mut.get(k).copied().unwrap_or(false) {
                         self.detach_global_mut_arg(a, i)?;
                     }
+                }
+                if append_window_ok {
+                    self.note_tail_reuse_args(args, false);
                 }
                 self.empty_moved_in(&moved_in)?;
                 crate::witness::modes::site_end(site, index);
@@ -744,8 +710,17 @@ impl Emitter<'_> {
         let depth = self.borrowed_temps.len();
         let mut no_transfer = false;
         let param_mut = crate::cells::linked_param_mut(module, func, args.len(), &self.table.infos[i].param_mut);
+        // The same move-in as the Named arm (#3337 / #3406): `x =
+        // http.status(x, c)` hands the dying `x` to the self-hosted
+        // implementation's owned param, so its `@reuse` op meets rc 1.
+        let move_in = self.take_move_in(args, true, tail && Some(index) != self.self_index);
+        let mut moved_in = Vec::new();
         let site = crate::witness::modes::site_begin();
         for (k, (a, want)) in args.iter().zip(params).enumerate() {
+            if let Some(idx) = self.try_move_in_arg(&move_in, args, (i, k), want)? {
+                moved_in.push(idx);
+                continue;
+            }
             if !self.lower_mut_param_arg(a, param_mut.get(k).copied().unwrap_or(false))? {
                 self.lower(a, Some(want))?;
             }
@@ -757,6 +732,7 @@ impl Emitter<'_> {
                 self.detach_global_mut_arg(a, i)?;
             }
         }
+        self.empty_moved_in(&moved_in)?;
         crate::witness::modes::site_end(site, index);
         let parked = self.borrowed_temps.len() > depth;
         self.calls.insert(i);

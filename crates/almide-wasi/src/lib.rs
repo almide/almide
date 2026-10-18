@@ -75,10 +75,6 @@ pub use fs_service::{fs_op_name, FS_SERVICE_OPS};
 pub use prune::prune;
 
 pub const UNSUPPORTED_MSG: &[u8] = b"Error: host op unsupported in the WASI build\n";
-/// The env.set overlay log's own refusal. It used to borrow the line above,
-/// which names an operation the build supports and had just performed — the
-/// #2103 defect (an error that does not say what failed) in the shim.
-pub const ENV_FULL_MSG: &[u8] = b"Error: env.set log full (64 KiB of names and values)\n";
 /// C-197's line, for the shim-side stagings that ask the machine for pages
 /// (#2120). The guest allocator prints the same words from its own path.
 pub const OOM_MSG: &[u8] = b"Error: out of memory\n";
@@ -103,14 +99,15 @@ pub const MSG3: u64 = 384;
 pub const MSG4: u64 = 512;
 const _: () = assert!(MSG3 + OOM_MSG.len() as u64 <= MSG4 && MSG4 + EXIT_WALL_MSG.len() as u64 <= DATA);
 pub const DATA: u64 = 1024; // stdin/entropy bytes + op result staging
-/// The env.set overlay log (#1716, `env_overlay.rs`): [klen u32][vlen u32]
-/// [key][val] entries, append-only, scanned last-write-wins by op 26. Its
-/// page sits above the staging span the other ops use.
+/// The env.set overlay log's first buffer (#1716, `env_overlay.rs`):
+/// [klen u32][vlen u32][key][val] entries, one per name. Its page sits above
+/// the staging span the other ops use; a log that outgrows it moves to the
+/// heap.
 pub const OVL: u64 = 4 * 65536;
 /// The staging room the emitter refuses to overrun (#2118) and this layout
 /// provides: one number, checked here rather than trusted.
 const _: () = assert!((OVL - DATA) as i64 == almide_wasm::WASI_STAGING_ROOM);
-/// The log fills the park's last page exactly.
+/// The log's first buffer fills the park's last page exactly.
 const _: () = assert!(OVL + env_overlay::OVERLAY_BYTES == PARK_SPAN);
 /// The park span: five pages carved out at the original heap base — four
 /// for iovecs/messages/stdin, one for the env overlay log.
@@ -451,11 +448,14 @@ pub fn to_wasi_mapped(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<(Vec<u8>
     let g_plen = global_count;
     // g_ppos exists only for the services that can stage outside the park
     // (#2120); a module without them keeps the fixed source and its bytes.
-    let g_ppos = services.stages_outside_park().then_some(global_count + 1);
-    // g_ovl (the overlay log length) exists only when an env service
-    // ships — nothing else reads or writes the log.
-    let g_ovl = (services.env_get || services.env_set)
-        .then_some(global_count + 1 + u32::from(g_ppos.is_some()));
+    // stdin take-n (op 35) stages a read larger than the park above the heap.
+    let g_ppos = (services.stages_outside_park() || host_ops.contains(&35)).then_some(global_count + 1);
+    // The overlay log's globals (length, base, capacity) exist only when an
+    // env service ships — nothing else reads or writes the log.
+    let g_ovl = (services.env_get || services.env_set).then(|| {
+        let g = global_count + 1 + u32::from(g_ppos.is_some());
+        env_overlay::OverlayLog { g_len: g, g_base: g + 1, g_cap: g + 2 }
+    });
     let mut globals = GlobalSection::new();
     for (idx, (gt, i32v, i64v, f64v)) in parsed_globals.iter().enumerate() {
         let init = if idx as u32 == heap_global {
@@ -599,15 +599,14 @@ pub fn to_wasi_mapped(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<(Vec<u8>
             &ConstExpr::i32_const((park + DATA) as i32),
         );
     }
-    // g_ovl: bytes appended to the env overlay log so far.
+    // The env overlay log: no bytes yet, in the park's last page.
     if g_ovl.is_some() {
-        globals.global(
-            GlobalType { val_type: ValType::I32, mutable: true, shared: false },
-            &ConstExpr::i32_const(0),
-        );
+        for init in [0, (park + OVL) as i32, env_overlay::OVERLAY_BYTES as i32] {
+            globals.global(GlobalType { val_type: ValType::I32, mutable: true, shared: false }, &ConstExpr::i32_const(init));
+        }
     }
     // The fs service's own globals come last.
-    let fs_first_global = global_count + 1 + u32::from(g_ppos.is_some()) + u32::from(g_ovl.is_some());
+    let fs_first_global = global_count + 1 + u32::from(g_ppos.is_some()) + 3 * u32::from(g_ovl.is_some());
     fs.iter().for_each(|f| f.emit_globals(&mut globals));
 
     let mut exports = ExportSection::new();
@@ -647,7 +646,7 @@ pub fn to_wasi_mapped(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<(Vec<u8>
         code.function(&stub);
         code.function(&stub);
     } else {
-        code.function(&shim_fs_call(park, g_plen, g_ppos, &forward, host_ops));
+        code.function(&shim_fs_call(park, (g_plen, g_ppos, heap_global), &forward, host_ops));
         code.function(&shim_host_read(park, g_plen, g_ppos));
     }
     if f_env_get.is_some() {
@@ -655,7 +654,7 @@ pub fn to_wasi_mapped(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<(Vec<u8>
         code.function(&shim_env_get(park, g_plen, g_ppos.expect("env.get stages"), g_ovl.expect("env service global"), i_sizes, i_get));
     }
     if f_env_set.is_some() {
-        code.function(&shim_env_set(park, g_ovl.expect("env service global")));
+        code.function(&shim_env_set(park, g_ovl.expect("env service global"), heap_global));
     }
     if f_args.is_some() {
         let (i_sizes, i_get) = args_imports.expect("args service imports its pair");
@@ -689,11 +688,9 @@ pub fn to_wasi_mapped(bytes: &[u8], host_ops: &[i32]) -> anyhow::Result<(Vec<u8>
     if !host_ops.is_empty() {
         data.active(0, &ConstExpr::i32_const((park + MSG) as i32), UNSUPPORTED_MSG.iter().copied());
     }
-    if f_env_set.is_some() {
-        data.active(0, &ConstExpr::i32_const((park + MSG2) as i32), ENV_FULL_MSG.iter().copied());
-    }
-    // The high-staging services are the only shim-side callers of memory.grow.
-    if f_env_get.is_some() || f_args.is_some() {
+    // The high-staging services, the overlay log's growth and stdin take-n's
+    // arena are the only shim-side callers of memory.grow.
+    if f_env_get.is_some() || f_env_set.is_some() || f_args.is_some() || host_ops.contains(&35) {
         data.active(0, &ConstExpr::i32_const((park + MSG3) as i32), OOM_MSG.iter().copied());
     }
 

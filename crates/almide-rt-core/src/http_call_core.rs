@@ -47,14 +47,24 @@ pub fn http_stream_incomplete_utf8_tail(b: &[u8]) -> usize {
 //             the worker is stuck in a name lookup.
 //   idle_ms   the longest gap between two reads that bring bytes (the wait for
 //             the first byte counts) — the socket read timeout.
-// ALMIDE_HTTP_TIMEOUT_SECS is NOT read here: it is the default of the calls
-// that take no limits. A finished call (answered, failed, timed out or
+// ALMIDE_HTTP_TIMEOUT_SECS is NOT read by a call that has limits: it is the
+// default of the calls that take none. Plain `request_stream` is such a call,
+// and it runs here too, as a CLASSIC call (`http_call_spawn_classic`): its
+// one bound is the client read timeout (ALMIDE_HTTP_TIMEOUT_SECS, 120 s by
+// default) between arrivals, which fires as C-328's timeout class.
+//
+// A body is complete only by its own framing: the Content-Length reached, the
+// terminal `0` chunk read, or — for a body framed by the close — the close.
+// A read that fails, or a close that comes, before that is C-328's protocol
+// class (`malformed or incomplete response from "<url>"`), the text the
+// buffered client gives a truncated response, never a silent `ok` with part of
+// the body (owner decision 2026-10-17: Go, Python requests, curl, reqwest and
+// fetch all report it). What arrived before the cut has been delivered. A finished call (answered, failed, timed out or
 // cancelled) has its socket shut down, so the server sees the close at once.
 // Dropping the last copy of the handle cancels it.
 
 pub struct AlmideHttpCallHead {
     status: i64,
-    reason: String,
     headers: Vec<(String, String)>,
 }
 
@@ -76,6 +86,9 @@ pub struct AlmideHttpCallShared {
     deadline: Option<std::time::Instant>,
     total_ms: i64,
     idle_ms: i64,
+    /// A plain `request_stream` call (see the header): `idle_ms` is the
+    /// client read timeout, not a limit the program named.
+    classic: bool,
 }
 
 fn http_call_total_msg(total_ms: i64) -> String {
@@ -179,7 +192,7 @@ fn http_call_result(st: &AlmideHttpCallState, outcome: &Result<(), String>) -> R
 }
 
 /// How the body is framed on the wire.
-enum HttpCallFraming {
+pub enum HttpCallFraming {
     Chunked { remaining: usize, awaiting_size: bool },
     Length(usize),
     UntilClose,
@@ -187,7 +200,7 @@ enum HttpCallFraming {
 
 /// Move the decoded body bytes out of `raw` into `out`; `Ok(true)` once the
 /// body is complete by its own framing, `Err` on a malformed chunk size.
-fn http_call_decode(f: &mut HttpCallFraming, raw: &mut Vec<u8>, out: &mut Vec<u8>) -> Result<bool, String> {
+pub fn http_call_decode(f: &mut HttpCallFraming, raw: &mut Vec<u8>, out: &mut Vec<u8>) -> Result<bool, String> {
     match f {
         HttpCallFraming::Length(left) => {
             let take = (*left).min(raw.len());
@@ -199,40 +212,62 @@ fn http_call_decode(f: &mut HttpCallFraming, raw: &mut Vec<u8>, out: &mut Vec<u8
             out.append(raw);
             Ok(false)
         }
-        HttpCallFraming::Chunked { remaining, awaiting_size } => loop {
-            if !*awaiting_size && *remaining == 0 {
-                // The CRLF that closes a chunk's data.
-                if raw.len() < 2 {
-                    return Ok(false);
-                }
-                if raw.starts_with(b"\r\n") {
-                    raw.drain(..2);
-                }
-                *awaiting_size = true;
-            }
-            if *awaiting_size {
-                let Some(nl) = raw.windows(2).position(|w| w == b"\r\n") else {
-                    return Ok(false);
-                };
-                let size = http_chunk_size(&raw[..nl])?;
-                raw.drain(..nl + 2);
-                if size == 0 {
-                    return Ok(true);
-                }
-                *remaining = size;
-                *awaiting_size = false;
-            }
-            let take = (*remaining).min(raw.len());
-            out.extend(raw.drain(..take));
-            *remaining -= take;
-            if *remaining > 0 {
-                return Ok(false);
-            }
-        },
+        HttpCallFraming::Chunked { remaining, awaiting_size } => {
+            // Walk the buffer with a cursor and drop what was consumed ONCE:
+            // draining each size line, data run and CRLF off the front moved
+            // the rest of the buffer per chunk — bytes × chunks (the
+            // http.request_stream inspection, 2026-10-17).
+            let mut at = 0;
+            let done = http_call_decode_chunks(remaining, awaiting_size, raw, &mut at, out);
+            raw.drain(..at);
+            done
+        }
     }
 }
 
-/// Split the head off `raw` once it is whole: status, reason, header lines
+/// The chunked framing from `raw[*at..]` on: decoded data appended to `out`,
+/// `*at` advanced past everything consumed; `Ok(true)` at the terminal chunk.
+fn http_call_decode_chunks(
+    remaining: &mut usize,
+    awaiting_size: &mut bool,
+    raw: &[u8],
+    at: &mut usize,
+    out: &mut Vec<u8>,
+) -> Result<bool, String> {
+    loop {
+        if !*awaiting_size && *remaining == 0 {
+            // The CRLF that closes a chunk's data.
+            if raw.len() - *at < 2 {
+                return Ok(false);
+            }
+            if raw[*at..].starts_with(b"\r\n") {
+                *at += 2;
+            }
+            *awaiting_size = true;
+        }
+        if *awaiting_size {
+            let Some(nl) = raw[*at..].windows(2).position(|w| w == b"\r\n") else {
+                return Ok(false);
+            };
+            let size = http_chunk_size(&raw[*at..*at + nl])?;
+            *at += nl + 2;
+            if size == 0 {
+                return Ok(true);
+            }
+            *remaining = size;
+            *awaiting_size = false;
+        }
+        let take = (*remaining).min(raw.len() - *at);
+        out.extend_from_slice(&raw[*at..*at + take]);
+        *at += take;
+        *remaining -= take;
+        if *remaining > 0 {
+            return Ok(false);
+        }
+    }
+}
+
+/// Split the head off `raw` once it is whole: status, header lines
 /// (wire order, repeats kept — the `request_response` rule) and framing. A
 /// 1xx interim head (`100 Continue`) is dropped and the next one awaited
 /// (#2824); a head past `HTTP_MAX_HEAD_BYTES` is an error.
@@ -248,8 +283,6 @@ fn http_call_parse_head(raw: &mut Vec<u8>) -> Result<Option<(AlmideHttpCallHead,
             break (section, status);
         }
     };
-    let status_line = section.lines().next().unwrap_or("");
-    let reason = status_line.splitn(3, ' ').nth(2).unwrap_or("").to_string();
     let headers = http_head_fields(&section);
     let chunked = http_fields_chunked(&headers);
     let length = headers
@@ -261,7 +294,7 @@ fn http_call_parse_head(raw: &mut Vec<u8>) -> Result<Option<(AlmideHttpCallHead,
         (false, Some(n)) => HttpCallFraming::Length(n),
         (false, None) => HttpCallFraming::UntilClose,
     };
-    Ok(Some((AlmideHttpCallHead { status, reason, headers }, framing)))
+    Ok(Some((AlmideHttpCallHead { status, headers }, framing)))
 }
 
 /// The socket timeout for the next blocking step: the idle limit (reads
@@ -292,7 +325,7 @@ fn http_call_io_error(sh: &AlmideHttpCallShared, url: &str, e: &std::io::Error) 
     if sh.past_deadline() {
         return http_call_total_msg(sh.total_ms);
     }
-    if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) && sh.idle_ms > 0 {
+    if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) && sh.idle_ms > 0 && !sh.classic {
         return http_call_idle_msg(sh.idle_ms);
     }
     http_io_error_text(url, e)
@@ -405,9 +438,11 @@ fn http_call_pump<S: AlmideHttpCallSock>(
             }
         };
         if n == 0 {
+            // A close before the framing is complete is a truncated body (see
+            // the header); only a body framed by the close ends here whole.
             return match framing {
-                None => Err(http_error_text(HttpErrorClass::Protocol, url)),
-                Some(_) => Ok(()),
+                Some(HttpCallFraming::UntilClose) => Ok(()),
+                _ => Err(http_error_text(HttpErrorClass::Protocol, url)),
             };
         }
         raw.extend_from_slice(&buf[..n]);
@@ -456,6 +491,29 @@ pub fn http_call_spawn(
             total_ms, idle_ms
         ));
     }
+    http_call_spawn_with(method, url, body, headers, (total_ms, idle_ms), false)
+}
+
+/// Start a CLASSIC call — plain `request_stream` on every leg: no wall
+/// clock, the client read timeout between arrivals.
+pub fn http_call_spawn_classic(
+    method: &str,
+    url: &str,
+    body: &str,
+    headers: Vec<(String, String)>,
+) -> Result<std::sync::Arc<AlmideHttpCallShared>, String> {
+    let idle_ms = client_read_timeout(120).map_or(0, |d| d.as_millis() as i64);
+    http_call_spawn_with(method, url, body, headers, (0, idle_ms), true)
+}
+
+fn http_call_spawn_with(
+    method: &str,
+    url: &str,
+    body: &str,
+    headers: Vec<(String, String)>,
+    (total_ms, idle_ms): (i64, i64),
+    classic: bool,
+) -> Result<std::sync::Arc<AlmideHttpCallShared>, String> {
     http_prepare(method, url, &headers)?;
     let shared = std::sync::Arc::new(AlmideHttpCallShared {
         state: std::sync::Mutex::new(AlmideHttpCallState {
@@ -470,6 +528,7 @@ pub fn http_call_spawn(
             .then(|| std::time::Instant::now() + std::time::Duration::from_millis(total_ms as u64)),
         total_ms,
         idle_ms,
+        classic,
     });
     let worker = shared.clone();
     let (method, url, body) = (method.to_string(), url.to_string(), body.to_string());
@@ -509,14 +568,14 @@ pub fn http_call_read_new(sh: &AlmideHttpCallShared) -> String {
 /// and the SSE twins): block until bytes arrive or the call ends, then answer
 /// the text to deliver and — once the call is over — how it ended. A non-2xx
 /// status is refused the way `request_stream` refuses it (after the whole
-/// body, its first 500 chars quoted), with nothing delivered.
+/// body, `http_status_refusal` and its first 500 chars), with nothing delivered.
 pub fn http_call_stream_step(sh: &AlmideHttpCallShared) -> (String, Option<Result<(), String>>) {
     let mut st = sh.wait_until(|st| st.head.is_some() && st.body.len() > st.delivered);
     let refused = st
         .head
         .as_ref()
         .filter(|h| !(200..300).contains(&h.status))
-        .map(|h| format!("HTTP {}: {}", h.status, h.reason));
+        .map(|h| http_status_refusal(h.status));
     if let Some(prefix) = refused {
         drop(st);
         let st = sh.wait_until(|_| false);

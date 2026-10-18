@@ -1,0 +1,2 @@
+expects_error = "Expected identifier"
+hint_substring = "is declared in this module as a type or a variant case"

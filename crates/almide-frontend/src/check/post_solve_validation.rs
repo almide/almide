@@ -269,6 +269,39 @@ impl Checker {
             Ty::Unknown
         }
     }
+
+    /// #3755: the map-key sweep's twin for every `Set[T]` in the solved type
+    /// map. A Set compares its elements, so `T` needs equality — and a
+    /// function anywhere in `T` has none. The bind-site check
+    /// (`check_collection_element_types`) only sees an annotated or let-bound
+    /// Set; one built through the API (`set.from_list(handlers)`) passed
+    /// check while rustc refused `dyn Fn: PartialEq`.
+    fn validate_set_elem_types(&mut self) {
+        let mut reported: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let elems: Vec<Ty> = self.type_map.values()
+            .filter_map(|t| match t {
+                Ty::Applied(almide_lang::types::TypeConstructorId::Set, args) if args.len() == 1 => Some(args[0].clone()),
+                _ => None,
+            })
+            .collect();
+        for elem in elems {
+            let resolved = resolve_ty(&elem, &self.uf);
+            if matches!(resolved, Ty::Unknown | Ty::TypeVar(_)) || self.env.is_eq(&resolved) {
+                continue;
+            }
+            let ty_name = Self::type_display_name(&resolved);
+            if reported.insert(ty_name.clone()) {
+                self.diagnostics.push(err(
+                    format!("type '{}' has no equality — cannot be a Set element (it contains a function)", ty_name),
+                    "A Set compares its elements, and function values have no equality — nor does a record, \
+                     variant, tuple or list that holds one. Keep the functions in a List or as Map values, \
+                     keyed by something comparable."
+                        .to_string(),
+                    "set element".to_string(),
+                ).with_code("E016"));
+            }
+        }
+    }
 }
 
 include!("post_solve_checks.rs");

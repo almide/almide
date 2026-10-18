@@ -315,6 +315,6 @@ fn a_borrowed_map_param_compares_against_a_value() {
     assert_eq!(stdout.trim(), "yes", "{stdout}\n{stderr}");
     let emitted = Command::new(env!("CARGO_BIN_EXE_almide")).arg(&src).arg("--target").arg("rust").output().expect("emit");
     let rust = String::from_utf8_lossy(&emitted.stdout);
-    assert!(rust.contains("almide_eq!(AlmideMap::from([(\"a\".to_string(), 1i64)]), (*m))"), "the reference side derefs:\n{}", rust.lines().filter(|l| l.contains("almide_eq!")).collect::<Vec<_>>().join("\n"));
+    assert!(rust.contains("almide_eq!(AlmideMap::from([(AlmideString::from(\"a\"), 1i64)]), (*m))"), "the reference side derefs:\n{}", rust.lines().filter(|l| l.contains("almide_eq!")).collect::<Vec<_>>().join("\n"));
     let _ = std::fs::remove_dir_all(&dir);
 }

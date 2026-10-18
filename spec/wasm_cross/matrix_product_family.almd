@@ -6,14 +6,11 @@
 //   rows or cols gives the all-zero / empty product;
 // - linear_row / linear_row_no_bias dot each x row with each weight row, bias
 //   added last; either operand empty is the empty matrix;
-// - swiglu_gate computes g·σ(g)·u with σ(g) = 1 / (1 + exp(−g)) through the
-//   vendored libm exp (C-223 — the incumbent's clamped fast-exp answered
-//   differently);
 // - conv1d zero-pads the input, starts each sum at the bias and is the empty
 //   matrix when the input is empty or shorter than the kernel.
 // The operands are small integers and halves so every summation order agrees
-// (native's matmul may run through the platform BLAS); the swiglu operands are
-// arbitrary because its sums are the scalar loop on every leg.
+// (native's matmul may run through the platform BLAS). (swiglu_gate, pinned
+// here before, left the stdlib at dialect epoch 14 for package almide/nnlib.)
 fn show(tag: String, m: Matrix) -> Unit = {
   let l = matrix.to_lists(m)
   let s = matrix.shape(m)
@@ -46,20 +43,6 @@ fn main() -> Unit = {
   show("lin_nb", matrix.linear_row_no_bias(a, c))
   show("lin_x0", matrix.linear_row(e, c, [1.0]))
   show("lin_w0", matrix.linear_row(a, e, []))
-  let x = matrix.from_lists([
-    [0.3, -1.7, 2.9],
-    [4.1, -0.05, 0.77]
-  ])
-  let wg = matrix.from_lists([
-    [0.1, 0.2, 0.3],
-    [-0.4, 0.5, -0.6]
-  ])
-  let wu = matrix.from_lists([
-    [1.5, -0.5, 0.25],
-    [0.7, 0.8, -0.9]
-  ])
-  show("swiglu", matrix.swiglu_gate(x, wg, wu))
-  show("swiglu_empty", matrix.swiglu_gate(x, e, wu))
   show(
     "conv",
     matrix.conv1d(

@@ -9,6 +9,13 @@
 > C-202..C-207。未了: strict cap + unwind（T1-1）と metered-clone（T1-2）—
 > research/spike/charge-probe/BURNDOWN.md が正。本文の表と食い違う場合は
 > BURNDOWN/契約台帳が勝つ。
+>
+> **#1388（2026-10-18）**: 無印 head の record 形 `fan { a: e1, b: e2 }` を実装 —
+> 値は匿名レコード、arm は tuple 形と同じ Fan ノードで走る（lowering で tuple 形 +
+> 分解 + レコード literal に落とす）、契約 C-386（serial elision と source order の
+> 先頭 Err）。`!` なしの Result フィールドは E041（settle 統合で「Result のまま残す」
+> 読みを与える余地を残す）。未了: `fan.settle { }` tuple head の退役と tuple 形からの
+> 移行（edition 境界）。
 
 
 > 憲章: [async-inception.md](./async-inception.md)。本文書はその表面詳細である。

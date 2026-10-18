@@ -1,0 +1,15 @@
+fn w(x: Int) -> Int = x + 1
+fn heavy(n: Int) -> Int = {
+  var i = 0
+  while i < n { i = i + 1 }
+  i
+}
+effect fn main() -> Unit = {
+  println("W0 w(1) at 0ns: " + int.to_string(fan.race(compute.ns(0)) { w(1) } ?? -1))
+  // source-order tie-break flips by target: arm0 = w (0u on wasm, 1u on native v1?), arm1 = 1+1 (0u)
+  println("W1 race {w(10), 1+1}: " + int.to_string(fan.race { w(10)
+    1 + 1 } ?? -1))
+  // heavy(0) = entry 1 + head 1 = 2u ; w(heavy(0)) arg evaluated outside the meter
+  println("W2 race {heavy(1), w(100)}: " + int.to_string(fan.race { heavy(1)
+    w(100) } ?? -1))
+}

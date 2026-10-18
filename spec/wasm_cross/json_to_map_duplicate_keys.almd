@@ -1,0 +1,45 @@
+// @contract: C-380
+// json.to_map builds a Map, and a Map holds one entry per key (almide/almide#3700).
+// An object can repeat a key (value.object accepts it, and so does json.parse),
+// and the repeated key must not reach the map twice. It keeps the position of its
+// first occurrence and takes the value of its last, as an upsert per field would.
+// A Str value is taken verbatim; any other value is its value.stringify text. A
+// non-object is none. Every later read of the map (len, get, iteration, equality)
+// then agrees across targets.
+import json
+
+fn show(label: String, v: Value) -> Unit = {
+  match json.to_map(v) {
+    some(m) => {
+      println("${label} ${m} len=${map.len(m)}")
+      for (k, x) in m {
+        println("  ${k} -> ${x} get=${map.get(m, k)}")
+      }
+    },
+    none => println("${label} none"),
+  }
+}
+
+fn main() -> Unit = {
+  show("twice", value.object([("k", value.int(1)), ("k", value.int(2))]))
+  show(
+    "first-position",
+    value.object([("a", value.str("x")), ("b", value.bool(true)), ("a", value.str("y"))]),
+  )
+  show(
+    "mixed",
+    value.object([
+      ("s", value.str("plain")),
+      ("n", value.null()),
+      ("f", value.float(1.5)),
+      ("arr", value.array([value.int(1)])),
+      ("s", value.array([]))
+    ]),
+  )
+  show("parsed", json.parse("{\"k\":1,\"j\":\"two\",\"k\":{\"x\":3}}") ?? value.null())
+  show("empty", value.object([]))
+  show("not-object", value.array([value.int(1)]))
+  let a = json.to_map(value.object([("k", value.int(1)), ("k", value.int(2))])) ?? map.new()
+  let b = json.to_map(value.object([("k", value.int(2))])) ?? map.new()
+  println("equal=${a == b}")
+}

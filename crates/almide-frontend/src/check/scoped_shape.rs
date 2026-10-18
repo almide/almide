@@ -249,7 +249,7 @@ fn expr_children(e: &ast::Expr) -> Vec<&ast::Expr> {
         }
         K::Block { expr, .. } => expr.iter().map(|b| b.as_ref()).collect(),
         K::ForIn { iterable: x, .. } | K::While { cond: x, .. } => vec![x],
-        K::List { elements } | K::Tuple { elements } | K::Fan { exprs: elements } | K::FanSettle { arms: elements } => elements.iter().collect(),
+        K::List { elements } | K::Tuple { elements } | K::Fan { exprs: elements, .. } | K::FanSettle { arms: elements } => elements.iter().collect(),
         K::MapLiteral { entries } => entries.iter().flat_map(|(k, v)| [k, v]).collect(),
         K::Record { fields, .. } => fields.iter().map(|f| &f.value).collect(),
         K::SpreadRecord { base, fields } => std::iter::once(base.as_ref()).chain(fields.iter().map(|f| &f.value)).collect(),

@@ -252,13 +252,16 @@ impl Checker {
     /// gate, mutable-capture diagnostic, and per-expr Result auto-unwrap.
     /// Verbatim text move.
     fn infer_expr_g3_fan(&mut self, expr: &mut ast::Expr) -> Ty {
-        let ExprKind::Fan { exprs, .. } = &mut expr.kind else { unreachable!() };
         if !self.env.can_call_effect {
             self.emit(super::err(
                 "fan block can only be used inside an effect fn".to_string(),
                 "Mark the enclosing function as `effect fn`",
                 "fan block".to_string()).with_code("E007"));
         }
+        if matches!(&expr.kind, ExprKind::Fan { names, .. } if !names.is_empty()) {
+            return self.infer_expr_g3_fan_record(expr);
+        }
+        let ExprKind::Fan { exprs, .. } = &mut expr.kind else { unreachable!() };
         // A `var` reached from an arm is E008, judged after inference by
         // `check_concurrent_var_reach` over every concurrent slot (#2697).
         let tys: Vec<Ty> = exprs.iter_mut().map(|e| {
@@ -278,6 +281,28 @@ impl Checker {
         }
     }
 
+    /// The record form `fan { name: expr, … }` (#1388): typed exactly as the
+    /// plain record literal `{ name: expr, … }` — a field's value is its
+    /// expression's value, with NO auto-unwrap. A field whose value is a
+    /// `Result` (an effect call's included) must spell its propagation with
+    /// `!`: the tuple form would propagate it implicitly and the plain literal
+    /// would keep the `Result`, so an unmarked one is refused (E041) rather
+    /// than given either reading. A `!` field's Err is the block's first-Err
+    /// candidate, as in the tuple form (C-199).
+    fn infer_expr_g3_fan_record(&mut self, expr: &mut ast::Expr) -> Ty {
+        let ExprKind::Fan { exprs, names } = &mut expr.kind else { unreachable!() };
+        let mut field_tys: Vec<(Sym, Ty)> = Vec::with_capacity(exprs.len());
+        for (e, name) in exprs.iter_mut().zip(names.iter()) {
+            let ty = self.infer_expr(e);
+            if !matches!(e.kind, ExprKind::Unwrap { .. }) {
+                self.deferred_implicit_prop_checks.push((ty.clone(), e.span, "of this fan field", true, false));
+            }
+            field_tys.push((*name, resolve_ty(&ty, &self.uf)));
+        }
+        let id = self.uf.fresh_record_literal(Ty::Record { fields: field_tys });
+        Ty::TypeVar(sym(&format!("?{}", id)))
+    }
+
     /// Budget clock firewall (ADR-0001 S4 / S6-6): the EXPECTED clock comes
     /// from the declared `TIME_CONSUMING_SURFACES` table, never from the call
     /// site — this lookup is the S6-6 face check's reading side, so a new
@@ -293,13 +318,26 @@ impl Checker {
         match budget_concrete {
             Ty::Named(n, _) if n.as_str() == clock => {}
             Ty::Named(n, _) if n.as_str() == "Duration" && clock == "Compute" => {
-                self.emit(super::err(
-                    format!("expected {clock}, found Duration"),
+                // fan.min's duration clock (first to succeed in real time) is
+                // decided (ADR-0028) and lands with #3788; until then the hint
+                // says so rather than sending the writer to fan.timeout.
+                let hint = if surface == "fan.min" {
+                    format!(
+                        "{surface} measures deterministic computation today; the duration clock \
+                         (`fan.min(duration.ms(n))`, the first branch to succeed in real time, \
+                         I/O allowed) is decided and tracked in #3788. Build the budget with \
+                         compute.ms(...)"
+                    )
+                } else {
                     format!(
                         "{surface} budgets deterministic computation, not wall-clock time. \
                          Build the budget with compute.ms(...); for a wall-clock limit use \
                          fan.timeout (oracle tier)"
-                    ),
+                    )
+                };
+                self.emit(super::err(
+                    format!("expected {clock}, found Duration"),
+                    hint,
                     format!("{surface} budget")));
             }
             Ty::Named(n, _) if n.as_str() == "Compute" && clock == "Duration" => {
@@ -326,8 +364,8 @@ impl Checker {
     /// `ExprKind::FanBounded` arm: `fan.bounded(budget) { body }` (Stage 2 v1).
     /// Effect-fn gate; budget must be a `Compute` (the ADR-0001 clock firewall
     /// — bare Int and wall-clock `Duration` are named type errors); the body is
-    /// checked in a PURE context (Rung 0) and, in v1, must be a single call
-    /// returning a plain (non-Result) value. Result[T, String] like fan.map.
+    /// checked in a PURE context (Rung 0) and must return a plain (non-Result)
+    /// value; it may be a whole block. Result[T, String] like fan.map.
     fn infer_expr_g3_fan_bounded(&mut self, expr: &mut ast::Expr) -> Ty {
         let ExprKind::FanBounded { budget, body } = &mut expr.kind else { unreachable!() };
         if !self.env.can_call_effect {
@@ -358,25 +396,25 @@ impl Checker {
 
     /// `ExprKind::FanRace` arm: `fan.race(budget?) { arms }` (Stage 3 v1).
     /// Effect-fn gate; the optional budget is a `Compute` (same firewall as
-    /// bounded); every arm is a single pure call and all arms unify to one T.
+    /// bounded); every arm is a pure expression and all arms unify to one T.
     /// Result[T, String] — Err is the ledger-constant no-winner verdict.
     fn infer_expr_g3_fan_race(&mut self, expr: &mut ast::Expr) -> Ty {
         let ExprKind::FanRace { budget, arms } = &mut expr.kind else { unreachable!() };
         if !self.env.can_call_effect {
             self.emit(super::err(
-                "fan.race can only be used inside an effect fn".to_string(),
+                "fan.min can only be used inside an effect fn".to_string(),
                 "Mark the enclosing function as `effect fn`",
-                "fan.race".to_string()).with_code("E007"));
+                "fan.min".to_string()).with_code("E007"));
         }
         if let Some(b) = budget {
             let budget_ty = self.infer_expr(b);
             let budget_concrete = resolve_ty(&budget_ty, &self.uf);
-            self.check_budget_clock("fan.race", &budget_concrete);
+            self.check_budget_clock("fan.min", &budget_concrete);
         }
         let saved_effect = self.env.can_call_effect;
         let saved_region = self.env.metered_region;
         self.env.can_call_effect = false;
-        self.env.metered_region = Some("fan.race");
+        self.env.metered_region = Some("fan.min");
         let mut arm_ty: Option<Ty> = None;
         for arm in arms.iter_mut() {
             let t = self.infer_expr(arm);
@@ -385,12 +423,18 @@ impl Checker {
             // the arm (symmetric with fan.any), and its Ok type joins the
             // unification. Plain arms are always candidates.
             let candidate = match &concrete {
-                Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 => a[0].clone(),
+                Ty::Applied(TypeConstructorId::Result, a) if a.len() == 2 => {
+                    // A literal `ok(v)` arm leaves its error type open; the
+                    // race's error channel is String, so close it here (#3782:
+                    // an open one reached codegen unresolved).
+                    self.constrain(a[1].clone(), Ty::String, "fan.race arm error type");
+                    a[0].clone()
+                }
                 _ => t,
             };
             match &arm_ty {
                 None => arm_ty = Some(candidate),
-                Some(t0) => self.constrain(candidate, t0.clone(), "fan.race arm type"),
+                Some(t0) => self.constrain(candidate, t0.clone(), "fan.min arm type"),
             }
         }
         self.env.can_call_effect = saved_effect;
@@ -408,27 +452,27 @@ impl Checker {
         let ExprKind::FanRaceMap { budget, list, mapper } = &mut expr.kind else { unreachable!() };
         if !self.env.can_call_effect {
             self.emit(super::err(
-                "fan.race can only be used inside an effect fn".to_string(),
+                "fan.min can only be used inside an effect fn".to_string(),
                 "Mark the enclosing function as `effect fn`",
-                "fan.race".to_string()).with_code("E007"));
+                "fan.min".to_string()).with_code("E007"));
         }
         if let Some(b) = budget {
             let budget_ty = self.infer_expr(b);
             let budget_concrete = resolve_ty(&budget_ty, &self.uf);
-            self.check_budget_clock("fan.race", &budget_concrete);
+            self.check_budget_clock("fan.min", &budget_concrete);
         }
         let list_ty = self.infer_expr(list);
         let elem = self.fresh_var();
         self.constrain(
             list_ty,
             Ty::Applied(TypeConstructorId::List, vec![elem.clone()]),
-            "fan.race mapper list",
+            "fan.min mapper list",
         );
         // The mapper body is a metered PURE region, exactly like a block arm.
         let saved_effect = self.env.can_call_effect;
         let saved_region = self.env.metered_region;
         self.env.can_call_effect = false;
-        self.env.metered_region = Some("fan.race");
+        self.env.metered_region = Some("fan.min");
         let mapper_ty = self.infer_expr(mapper);
         self.env.can_call_effect = saved_effect;
         self.env.metered_region = saved_region;
@@ -443,9 +487,9 @@ impl Checker {
             let r = resolve_ty(ret, &self.uf);
             if !matches!(r, Ty::Applied(TypeConstructorId::Result, _) | Ty::TypeVar(_) | Ty::Unknown) {
                 self.emit(super::err(
-                    format!("fan.race mapper must return a Result, got {}", r.display()),
+                    format!("fan.min mapper must return a Result, got {}", r.display()),
                     "Return ok(value) to compete and err(reason) to disqualify the element — the mapper-form contract (like fan.map)",
-                    "fan.race mapper".to_string()));
+                    "fan.min mapper".to_string()));
             }
         }
         let winner = self.fresh_var();
@@ -456,7 +500,7 @@ impl Checker {
                 ret: Box::new(Ty::result(winner.clone(), Ty::String)),
                 is_effect: false,
             },
-            "fan.race mapper",
+            "fan.min mapper",
         );
         Ty::result(resolve_ty(&winner, &self.uf), Ty::String)
     }
@@ -539,7 +583,9 @@ impl Checker {
         let prev_call = self.call_span_hint.take();
         self.call_span_hint = span;
         self.reject_arg_placeholders(&**callee, args.as_slice(), span);
+        self.arm_call_expect(expr.id);
         let ty = self.infer_call(callee, args, named_args, type_args);
+        self.pending_call_ret = None;
         self.call_span_hint = prev_call;
         // A generic collection constructor whose element type NO argument
         // constrains — `set.new()` / `list.with_capacity(n)` — must have
@@ -736,6 +782,7 @@ impl Checker {
     }
 
     fn infer_expr_g3_lambda(&mut self, expr: &mut ast::Expr) -> Ty {
+        let lambda_id = expr.id;
         let ExprKind::Lambda { params, body, .. } = &mut expr.kind else { unreachable!() };
         self.env.push_scope();
         // Lambda has its own return context — don't leak outer function's current_ret
@@ -759,7 +806,11 @@ impl Checker {
         // its own effect context) and the lambda ALWAYS types as the carrier
         // `(A) -> Result[B, String]`, so a pure value tail gets the same
         // ok(...) wrap the fallible machinery already emits (Phase 1b).
-        let slot_effect = std::mem::take(&mut self.lambda_slot_effect);
+        let armed_effect = std::mem::take(&mut self.lambda_slot_effect);
+        let mut ret_expect = self.lambda_ret_expect.take();
+        let mut param_hint = self.lambda_arg_hint.take();
+        // #3749: an expectation handed down through data or a branch.
+        let slot_effect = self.merge_lambda_expect(lambda_id, armed_effect, &mut ret_expect, &mut param_hint);
         // ADR-0021 D1: the channel's error type ε is decided by the context the
         // lambda flows into, else by the join of its `!` operands
         // (`lambda_channel.rs`). The effect carrier stays `String`.
@@ -767,7 +818,6 @@ impl Checker {
         self.env.lambda_ret = Some(Ty::result(channel_ok.clone(), eps.clone()));
         self.env.lambda_prop_used = false;
         self.open_lambda_channel(eps);
-        let ret_expect = self.lambda_ret_expect.take();
         let saved_can_call_effect = self.env.can_call_effect;
         if slot_effect {
             self.env.can_call_effect = true;
@@ -780,7 +830,6 @@ impl Checker {
         // method calls on the param via the protocol path instead of
         // collapsing it into a closure type. An explicit annotation on
         // the param always wins; the hint only fills inferred slots.
-        let param_hint = self.lambda_arg_hint.take();
         let param_tys: Vec<Ty> = params.iter().enumerate().map(|(i, p)| {
             let ty = p.ty.as_ref().map(|te| self.resolve_type_expr(te))
                 .or_else(|| param_hint.as_ref().and_then(|h| h.get(i).cloned().flatten()))
@@ -823,6 +872,7 @@ impl Checker {
         }).collect();
         if let Some(r) = &ret_expect {
             self.expect_lambda(body, r);
+            self.expect_expr(body, r);
         }
         let ret_ty = self.infer_expr(body);
         self.env.can_call_effect = saved_can_call_effect;
@@ -931,8 +981,15 @@ impl Checker {
     fn infer_expr_g3_unwrap_or(&mut self, expr: &mut ast::Expr) -> Ty {
         let ExprKind::UnwrapOr { expr: inner, fallback, .. } = &mut expr.kind else { unreachable!() };
         let t = self.infer_expr(inner);
+        if let Some(payload) = resolve_ty(&t, &self.uf).option_inner().or_else(|| resolve_ty(&t, &self.uf).result_ok_ty()) {
+            self.expect_expr(fallback, &payload);
+        }
         let ft = self.infer_expr(fallback);
         let resolved = resolve_ty(&t, &self.uf);
+        // #3522: an effect fn's `Option[T]` call with a `T` fallback wants `!`.
+        if let Some(payload) = self.report_qq_missing_bang(inner, fallback, &resolved, &ft) {
+            return payload;
+        }
         let inner_ty = if let Some(ty) = resolved.option_inner().or_else(|| resolved.result_ok_ty()) {
             ty
         } else if matches!(&resolved, Ty::Unknown | Ty::TypeVar(_)) {
@@ -1040,13 +1097,6 @@ impl Checker {
         if !known || self.env.lookup_var(mod_name.as_str()).is_some() {
             return;
         }
-        fn contains_unwrap(e: &mut ast::Expr) -> bool {
-            let mut found = false;
-            ast::visit_expr_mut(e, &mut |c| {
-                if matches!(c.kind, ExprKind::Unwrap { .. }) { found = true; }
-            });
-            found
-        }
         let mut fallible = false;
         for a in args.iter_mut() {
             match &mut a.kind {
@@ -1077,7 +1127,7 @@ impl Checker {
                 // `(A) -> Result[B, ε]` (its own channel, ADR-0021, + value-tail
                 // lift), which is exactly the twin's callback type.
                 ExprKind::Lambda { body, .. } => {
-                    if contains_unwrap(body) {
+                    if super::fallible_user_hof::body_has_own_bang(body) {
                         fallible = true;
                     }
                 }
@@ -1571,6 +1621,7 @@ impl Checker {
         // `xs |> list.map(f) |> list.join(",")` sees a raw TypeVar for the
         // intermediate result, causing module resolution to fail.
         let left_ty = super::types::resolve_ty(&left_ty, &self.uf);
+        let right_expect = self.call_expect.remove(&right.id);
         // #1521: the pipe path bypasses `check_call_with_type_args`, so the
         // E052 deprecation warning never fired for `x |> yell` — a caller
         // could migrate every direct call and keep using the deprecated fn
@@ -1620,7 +1671,9 @@ impl Checker {
                 }
                 // Pipe inserts left as the first argument
                 let mut all_arg_tys: Vec<Ty> = vec![left_ty];
+                self.pending_call_ret = right_expect;
                 all_arg_tys.extend(self.infer_call_arg_tys(callee, args, &call_sig));
+                self.pending_call_ret = None;
                 self.arg_spans = std::iter::once(left_span).chain(args.iter().map(|a| a.span)).collect();
                 // Resolve module calls for pipe (e.g. xs |> list.filter(f))
                 match &mut callee.kind {

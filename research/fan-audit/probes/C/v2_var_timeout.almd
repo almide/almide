@@ -1,0 +1,6 @@
+effect fn main() -> Unit = {
+  var c = 5
+  c = c + 1
+  let a = fan.timeout(duration.ms(100)) { c + 1 } ?? -1
+  println(int.to_string(a))
+}

@@ -19,7 +19,7 @@ Almide's capability system is a three-layer defense that guarantees an agent bin
 | 6 | `Proc` | Execute child processes, exit |
 | 7 | `Time` | Read system clocks |
 | 8 | `Rand` | Access cryptographic/pseudo-random bytes |
-| 9 | `Fan` | Deterministic data-parallelism (fan blocks, fan.map, fan.any, fan.settle) |
+| 9 | `Fan` | Deterministic data-parallelism (fan blocks, fan.map, fan.settle, fan.min) |
 | 10 | `IO.stdin` | Read from standard input |
 | 11 | `IO.stdout` | Write to standard output |
 | 12 | `IO.stderr` | Write to standard error |
@@ -348,9 +348,8 @@ Note: Pure datetime functions (`datetime.format`, `datetime.year`, `datetime.add
 |-----------------|-------------|
 | `fan { expr1; expr2 }` | Execute expressions concurrently, return tuple |
 | `fan.map(xs, f)` | Apply function to each element concurrently |
-| `fan.any(fns)` | Try in list order, return the first Ok |
-| `fan.any(fns)` | Run all, return first success |
-| `fan.settle(fns)` | Run all, collect all results |
+| `fan.settle(xs, f)` | Run all, collect all results |
+| `fan.min(clock, xs, f)` | One element selected by the clock (least compute within the budget) |
 
 **WASI imports:**
 

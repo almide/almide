@@ -259,13 +259,21 @@ pub enum ExprKind {
     /// (docs/specs/scoped.md). `end` is the closing brace — the "scope ends
     /// at" line of E086 — and, like every span, is not part of the JSON.
     Scoped { body: Box<Expr>, #[serde(skip)] end: Option<Span> },
-    Fan { exprs: Vec<Expr> },
+    /// `fan { a, b }` (the tuple form, `names` empty) or `fan { x: a, y: b }`
+    /// (the record form, #1388): `names[i]` is the field arm `exprs[i]`
+    /// fills, so the value is the anonymous record `{ x: …, y: … }` — the
+    /// arms run exactly as the tuple form's do.
+    Fan {
+        exprs: Vec<Expr>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        names: Vec<Sym>,
+    },
     /// `fan.bounded(budget) { body }` — deterministic computation budget
-    /// (Stage 2 v1: body is a single call expression; budget is a `Compute`).
+    /// (the body is a block, budget is a `Compute`).
     FanBounded { budget: Box<Expr>, body: Box<Expr> },
-    /// `fan.race(budget?) { arm; arm; … }` — deterministic race: the winner is
+    /// `fan.race(budget?) { arm, arm, … }` — deterministic race: the winner is
     /// the (spend, index)-lexicographic minimum completion. The optional budget
-    /// is a per-branch divergence guard (Stage 3 v1: arms are single calls).
+    /// is a per-branch divergence guard. Arms are pure expressions.
     FanRace { budget: Option<Box<Expr>>, arms: Vec<Expr> },
     /// `fan.race(xs, f)` / `fan.race(budget, xs, f)` — the MAPPER form: one
     /// pure 1-param lambda raced over a dynamic list, winner = the
@@ -795,7 +803,7 @@ pub fn visit_expr_mut(expr: &mut Expr, f: &mut impl FnMut(&mut Expr)) {
 
         // ── A flat sequence of children ──
         ExprKind::List { elements: xs } | ExprKind::Tuple { elements: xs }
-        | ExprKind::Fan { exprs: xs } | ExprKind::FanSettle { arms: xs } => {
+        | ExprKind::Fan { exprs: xs, .. } | ExprKind::FanSettle { arms: xs } => {
             visit_exprs_slice_mut(xs, f)
         }
 
@@ -992,7 +1000,7 @@ pub fn visit_expr(expr: &Expr, f: &mut impl FnMut(&Expr)) {
 
         // ── A flat sequence of children ──
         ExprKind::List { elements: xs } | ExprKind::Tuple { elements: xs }
-        | ExprKind::Fan { exprs: xs } | ExprKind::FanSettle { arms: xs } => {
+        | ExprKind::Fan { exprs: xs, .. } | ExprKind::FanSettle { arms: xs } => {
             visit_exprs_slice(xs, f)
         }
 

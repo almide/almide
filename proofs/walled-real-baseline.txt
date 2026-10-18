@@ -308,3 +308,9 @@
 # global slots are keyed by the ENTRY file's ids — a module's own top-let ids
 # had shared the key space, so `m.rec.n = 3` read `m.counts`' slot and type.
 # The set is EMPTY again. ANY row is a regression.
+
+# (2026-10-18, ADR-0029, #3792) testing.assert_aborts's two internal calls
+# (__abort_site_run, __abort_site_selected) briefly walled 19 test fns here. They are
+# now almide-mir host-op rows: the child run counts Process (id 10, the wasm
+# projection's private process capability, ADR-0025), the site selector CliArgs.
+# The 19 rows are pruned (19 -> 0). The set is EMPTY again. ANY row is a regression.

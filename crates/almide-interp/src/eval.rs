@@ -143,14 +143,9 @@ impl<'a> Interpreter<'a> {
             //     and a bare `j0` for exactly one expr;
             //   - WASM `emit_wasm/expressions.rs::Fan` builds a tuple (`>1`) or
             //     emits the single value bare (`==1`).
-            // Each Result-typed spawn body auto-unwraps with `?` semantics at the
-            // join (`handle.join().unwrap()?`): on Ok the inner value is taken, on
-            // Err the enclosing fn short-circuits. At THIS pre-codegen cut point
-            // the auto-`?` is still an explicit `Try`/`Unwrap` node wrapping each
-            // Result-typed fan expr (the `strip_fan_auto_try` codegen pass that
-            // removes it runs post-cut), so evaluating the expr already performs
-            // the unwrap and propagates an `Err` as `Flow::Return` — exactly the
-            // backends' join-point `?`. We therefore just evaluate and collect.
+            // Every arm is evaluated, in order, and an `Err` does not stop the
+            // later arms. After the last arm the LOWEST-INDEX `Err` aborts the
+            // fan (`eval_fan`), which is the backends' rule (ADR-0024 D1, C-199).
             IrExprKind::Fan { exprs } => self.eval_fan(exprs, scope),
             // ── Loops ──
             IrExprKind::ForIn { var, var_tuple, iterable, body } => {
@@ -192,6 +187,14 @@ impl<'a> Interpreter<'a> {
         let mut out = Vec::with_capacity(exprs.len());
         let mut first_err: Option<String> = None;
         for e in exprs {
+            // An arm whose marker is its own top-level `!` is a Result arm: its
+            // Err ends the ARM, not the fn, so every later arm still runs and
+            // the join below picks the lowest-index Err (C-199) — the marker
+            // the backends strip before their join (wasm `front_desugar`).
+            let e = match &e.kind {
+                IrExprKind::Unwrap { expr } if expr.ty.is_result() => &**expr,
+                _ => e,
+            };
             let v = val!(self.eval_expr(e, scope));
             match v {
                 Value::Result(Ok(payload)) => out.push(*payload),

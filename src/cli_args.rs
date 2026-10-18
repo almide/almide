@@ -39,8 +39,8 @@ pub(crate) enum Commands {
         #[arg(long)]
         release: bool,
         /// Execution target: `rust` (default, native binary) or `wasm`
-        /// (build a wasm32-wasi module and execute it on the `wasmtime`
-        /// CLI). Both targets must produce byte-identical observable
+        /// (build a wasm32-wasi module and execute it on the embedded
+        /// wasmtime host). Both targets must produce byte-identical observable
         /// behavior — the cross-target equivalence guarantee.
         #[arg(long)]
         target: Option<String>,
@@ -96,12 +96,21 @@ pub(crate) enum Commands {
         /// Without it, an inherited CARGO_BUILD_TARGET is honoured.
         #[arg(long)]
         target: Option<String>,
-        /// Optimize for performance (opt-level=2)
+        /// Optimize for performance: opt-level=3, fat LTO, one codegen unit,
+        /// and an x86_64 target tuned for the x86-64-v3 baseline (AVX2;
+        /// see --target-cpu)
         #[arg(long)]
         release: bool,
-        /// Maximum performance: native CPU, fast-math, opt-level=3, LTO
+        /// Same as --release (kept for compatibility)
         #[arg(long)]
         fast: bool,
+        /// The CPU a native --release build is tuned for (#3604). Default:
+        /// `x86-64-v3` for an x86_64 target (AVX2: Intel since 2013, AMD
+        /// since 2017), rustc's generic CPU otherwise. `portable` = the
+        /// generic CPU, for a binary that must run without AVX2; any other
+        /// value is a rustc CPU name (`native`, `x86-64-v4`, `neoverse-n1`, ...).
+        #[arg(long = "target-cpu")]
+        target_cpu: Option<String>,
         /// Use unchecked index access (unsafe, no bounds checking)
         #[arg(long)]
         unchecked_index: bool,

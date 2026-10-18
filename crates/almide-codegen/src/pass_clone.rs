@@ -40,10 +40,14 @@ impl NanoPass for CloneInsertionPass {
         // Head reads borrow (#3453); a `let` they bind by reference is no
         // owned value of this walk and renders its annotation `_`.
         let all_top_lets: HashSet<VarId> = program.top_lets.iter().chain(program.modules.iter().flat_map(|m| &m.top_lets)).map(|tl| tl.var).collect();
+        let bound_by_ref: HashSet<VarId> = program.codegen_annotations.infer_binding_tys.iter().copied().collect();
         let IrProgram { functions, modules, var_table, .. } = &mut program;
         let mut ref_lets = HashSet::new();
         for f in functions.iter_mut().chain(modules.iter_mut().flat_map(|m| &mut m.functions)) {
             ref_lets.extend(super::pass_clone_head::rewrite(f, var_table, &all_top_lets));
+            // Read-only selections borrow (#3532), over binders still bound by value.
+            let by_ref: HashSet<VarId> = ref_lets.union(&bound_by_ref).copied().collect();
+            ref_lets.extend(super::pass_clone_select::rewrite(f, var_table, &all_top_lets, &by_ref));
             super::pass_clone_projection::fold_bindings(&mut f.body);
         }
         program.codegen_annotations.infer_binding_tys.extend(ref_lets.iter().copied());
@@ -714,11 +718,7 @@ pub(crate) fn insert_clones_live(mut expr: IrExpr, ctx: &mut CloneCtx) -> IrExpr
         // nothing the enclosing loop rebinds is.
         IrExprKind::Lambda { params, body, lambda_id } => {
             let param_ids: Vec<VarId> = params.iter().map(|(v, _)| *v).collect();
-            let top: &[IrStmt] = match &body.kind {
-                IrExprKind::Block { stmts, .. } => stmts,
-                _ => &[],
-            };
-            let fresh = super::pass_clone_loops::loop_fresh_vars(None, Some(&param_ids), top);
+            let fresh = super::pass_clone_loops::lambda_fresh_vars(&param_ids, &body);
             let param_set: HashSet<VarId> = param_ids.iter().copied().collect();
             let captured: HashSet<VarId> = almide_ir::free_vars::free_vars(&body, &param_set).into_iter().collect();
             let e = IrExpr { kind: IrExprKind::Lambda { params, body, lambda_id }, ty: ty.clone(), span, def_id: None };

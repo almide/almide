@@ -22,6 +22,10 @@ fn extract_doc_comment(comments: &[String]) -> Option<String> {
 
 impl Parser {
     pub fn parse_single_expr(&mut self) -> Result<crate::ast::Expr, String> {
+        // #2810: an interpolation hole may open its line (`"${⏎ n ⏎}"`), in a
+        // plain string as in a heredoc; the newline before the expression is
+        // layout, as the one after it already was.
+        self.skip_newlines();
         self.parse_expr_ascribed()
     }
 

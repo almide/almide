@@ -122,12 +122,15 @@ fn shim_http(g: P3Globals, h: &HttpAbi, t: &HttpErrTexts, fns: HttpErrFns) -> Fu
     // entry and the body limit.
     let (colon, valid, opts_some, pre, ent) = (43u32, 44u32, 45u32, 46u32, 47u32);
     let (secs, lim) = (48u32, 49u32);
+    // Op 65's header scratch (wasi_p3_http_resp.rs).
+    let rl = RespLocals { list: 50, n: 51, k: 52, entry: 53, hlen: 54, bytes: 55, v: 56, d: 57, s: 58, c: 59 };
     let mut f = Function::new([
         (23, ValType::I32),
         (1, ValType::I64),
         (14, ValType::I32),
         (5, ValType::I32),
         (2, ValType::I64),
+        (10, ValType::I32),
     ]);
     let mut i = f.instructions();
     // ── ops 48..=50: parse the http_framed cell frame in `b` ──
@@ -205,6 +208,10 @@ fn shim_http(g: P3Globals, h: &HttpAbi, t: &HttpErrTexts, fns: HttpErrFns) -> Fu
     i.local_get(cur).local_get(tmp).i32_sub().local_set(key_len);
     i.local_get(cur).local_get(frame_end).i32_ge_u().br_if(1);
     http_frame_cell(&mut i, cur, cell_len, frame_end, tmp, digit);
+    // A name the client frames (`content-length`, check code 4) is dropped,
+    // as rt-core's writer drops it: the length appended below is the body's.
+    i.local_get(key_ptr).local_get(key_len).local_get(tmp).local_get(cur).local_get(tmp).i32_sub();
+    i.call(fns.check).i32_const(4).i32_ne().if_(BlockType::Empty);
     i.local_get(headers);
     i.local_get(key_ptr).local_get(key_len);
     i.local_get(tmp);
@@ -215,12 +222,18 @@ fn shim_http(g: P3Globals, h: &HttpAbi, t: &HttpErrTexts, fns: HttpErrFns) -> Fu
     i.local_get(headers).call(I_HTTP_FIELDS_DROP);
     http_err_call(&mut i, fns, (key_ptr, key_len), t.hdr[2][0], t.hdr[2][1], None, Piece::default());
     i.end();
+    i.end();
     i.br(0).end().end();
     i.end();
     // content-length for a non-empty body (decimal, back to front —
-    // the op-49 status rendering's shape). A host that refuses the name
-    // answers header-error, which is ignored like any other rejection.
-    i.local_get(b_len).i32_const(0).i32_gt_s().if_(BlockType::Empty);
+    // the op-49 status rendering's shape), and `0` for an empty one unless
+    // the method is GET or HEAD: without a length the host frames the
+    // request body chunked, so an empty PATCH or DELETE went out as
+    // `0\r\n\r\n` where native sends no content at all (RFC 9110 §8.6 lets a
+    // client send the 0). A host that refuses the name answers
+    // header-error, which is ignored like any other rejection.
+    req_is_get_or_head(&mut i, op, (m_ptr, m_len), rl.v);
+    i.local_get(b_len).i32_const(0).i32_gt_s().local_get(rl.v).i32_eqz().i32_or().if_(BlockType::Empty);
     i.local_get(b_len).local_set(tmp);
     i.i32_const(1).local_set(digit);
     i.local_get(tmp).local_set(cell_len);
@@ -505,8 +518,13 @@ fn shim_http(g: P3Globals, h: &HttpAbi, t: &HttpErrTexts, fns: HttpErrFns) -> Fu
     // handle (`index N is not a resource` — #1924's bare `get_status`
     // trap; the live-echo test masked it because the index happened to
     // name another live handle there).
-    i.local_get(op).i32_const(49).i32_eq().if_(BlockType::Empty);
+    i.local_get(op).i32_const(49).i32_eq().local_get(op).i32_const(65).i32_eq().i32_or().if_(BlockType::Empty);
     i.local_get(response).call(I_HTTP_STATUS).i32_const(0xFFFF).i32_and().local_set(tmp);
+    i.end();
+    // op 65 (the full response): the header fields, copied out while the
+    // response is still ours.
+    i.local_get(op).i32_const(65).i32_eq().if_(BlockType::Empty);
+    resp_headers_copy(&mut i, response, (park + RET) as i32, rl);
     i.end();
 
     // ── consume-body + the realloc'd drain (the fs read loop's shape) ──
@@ -519,6 +537,10 @@ fn shim_http(g: P3Globals, h: &HttpAbi, t: &HttpErrTexts, fns: HttpErrFns) -> Fu
     i.i32_const(0).i32_const(0).i32_const(8).i32_const(65536).call(f_alloc).local_set(buf);
     i.i32_const(65536).local_set(cap);
     i.i32_const(0).local_set(total);
+    // op 65: `<status>\n<hlen>\n<header cells>` ahead of the body.
+    i.local_get(op).i32_const(65).i32_eq().if_(BlockType::Empty);
+    resp_write_prefix(&mut i, (f_alloc, fns.check), tmp, (buf, cap, total), rl);
+    i.end();
     // op 49 (`request_status`): `<status>\n` precedes the body — the host
     // lane's `format!("{code}\n{text}")`. Decimal, no padding: count the
     // digits, then write them back to front.

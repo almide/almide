@@ -38,14 +38,29 @@ pub enum SigType {
     Var(String),
     List(Box<SigType>),
     Option(Box<SigType>),
-    /// `Result[ok, E]` — the error type is erased to its own slot but
-    /// always concretizes to `String` (the only error type the value
-    /// grammar produces); see [`SigType::instantiate`].
+    /// `Result[ok, E]` — the error type is erased to its own slot and
+    /// concretizes to `String`, or to a nominal when the signature names one
+    /// (`Result[T, HttpResponse]`); see [`SigType::instantiate`].
     Result(Box<SigType>, Box<SigType>),
     Tuple2(Box<SigType>, Box<SigType>),
+    /// `(a, b, c)` — see [`GenType::Tuple3`].
+    Tuple3(Box<SigType>, Box<SigType>, Box<SigType>),
     Map(Box<SigType>, Box<SigType>),
+    Set(Box<SigType>),
     /// `(p...) -> r` — a function/closure parameter (HOF position).
     Fn(Vec<SigType>, Box<SigType>),
+    /// A fixed-width number type (`Int8` … `Float64`).
+    Sized(&'static str),
+    Bytes,
+    Matrix,
+    Value,
+    Endian,
+    /// A stdlib nominal type the grammar builds ([`super::nominal`]).
+    Nominal(&'static str),
+    /// `Never`: the call does not return. It has no value, so no goal
+    /// unifies with it; a program calls such a function only as its last
+    /// statement ([`super::catalogue::NEVER_RETURNING`]).
+    Never,
 }
 
 /// Single-letter (or short) names the stdlib uses for generic type
@@ -69,10 +84,17 @@ impl SigType {
                     "String" => Some(SigType::String),
                     "Bool" => Some(SigType::Bool),
                     "Unit" => Some(SigType::Unit),
-                    // Width-specific integers and other nominal types are
-                    // intentionally rejected (value grammar does not cover
-                    // them; they enter via mutation).
-                    _ => None,
+                    "Never" => Some(SigType::Never),
+                    "Bytes" => Some(SigType::Bytes),
+                    "Matrix" => Some(SigType::Matrix),
+                    "Value" => Some(SigType::Value),
+                    "Endian" => Some(SigType::Endian),
+                    // The fixed-width numbers the value grammar builds; other
+                    // nominal types enter via mutation.
+                    other => match GenType::sized(other) {
+                        Some(GenType::Sized(s)) => Some(SigType::Sized(s)),
+                        _ => super::nominal::get(other).map(|k| SigType::Nominal(k.name)),
+                    },
                 }
             }
             TypeExpr::Generic { name, args } => {
@@ -81,7 +103,10 @@ impl SigType {
                     ("List", 1) => {
                         Some(SigType::List(Box::new(Self::from_type_expr(&args[0])?)))
                     }
-                    ("Option", 1) => {
+                    // `A?` parses as `Generic { name: "?" }`: without this arm
+                    // every `option.*` and every `A?`-returning `list.get` /
+                    // `first` / `find` was outside the catalogue.
+                    ("Option" | "?", 1) => {
                         Some(SigType::Option(Box::new(Self::from_type_expr(&args[0])?)))
                     }
                     ("Result", 2) => Some(SigType::Result(
@@ -92,11 +117,16 @@ impl SigType {
                         Box::new(Self::from_type_expr(&args[0])?),
                         Box::new(Self::from_type_expr(&args[1])?),
                     )),
-                    // Set is in the generator's call surface but NOT in
-                    // its goal-type universe (a Set value is built only
-                    // via set.* calls, never as a literal), so a Set
-                    // *parameter* cannot be synthesized from scratch —
-                    // reject signatures that take one.
+                    // A Set is built with `set.from_list`; its element
+                    // must be hashable (checked at `instantiate`).
+                    ("Set", 1) => Some(SigType::Set(Box::new(Self::from_type_expr(&args[0])?))),
+                    // A nominal spelled with arguments (`Matrix[Float32]`).
+                    (_, 1) => match &args[0] {
+                        TypeExpr::Simple { name: arg } => {
+                            super::nominal::get(&format!("{n}[{}]", arg.as_str())).map(|k| SigType::Nominal(k.name))
+                        }
+                        _ => None,
+                    },
                     _ => None,
                 }
             }
@@ -110,6 +140,11 @@ impl SigType {
             TypeExpr::Tuple { elements } if elements.len() == 2 => Some(SigType::Tuple2(
                 Box::new(Self::from_type_expr(&elements[0])?),
                 Box::new(Self::from_type_expr(&elements[1])?),
+            )),
+            TypeExpr::Tuple { elements } if elements.len() == 3 => Some(SigType::Tuple3(
+                Box::new(Self::from_type_expr(&elements[0])?),
+                Box::new(Self::from_type_expr(&elements[1])?),
+                Box::new(Self::from_type_expr(&elements[2])?),
             )),
             // Records, variants, unions, wider tuples, const-literals:
             // outside the universe.
@@ -125,10 +160,15 @@ impl SigType {
                     out.push(n.clone());
                 }
             }
-            SigType::List(e) | SigType::Option(e) => e.collect_vars(out),
+            SigType::List(e) | SigType::Option(e) | SigType::Set(e) => e.collect_vars(out),
             SigType::Result(a, b) | SigType::Tuple2(a, b) | SigType::Map(a, b) => {
                 a.collect_vars(out);
                 b.collect_vars(out);
+            }
+            SigType::Tuple3(a, b, c) => {
+                a.collect_vars(out);
+                b.collect_vars(out);
+                c.collect_vars(out);
             }
             SigType::Fn(ps, r) => {
                 for p in ps {
@@ -163,10 +203,15 @@ impl SigType {
                 bind_slot_to_string(err, out);
                 ok.collect_forced_bindings(out);
             }
-            SigType::List(e) | SigType::Option(e) => e.collect_forced_bindings(out),
+            SigType::List(e) | SigType::Option(e) | SigType::Set(e) => e.collect_forced_bindings(out),
             SigType::Tuple2(a, b) => {
                 a.collect_forced_bindings(out);
                 b.collect_forced_bindings(out);
+            }
+            SigType::Tuple3(a, b, c) => {
+                a.collect_forced_bindings(out);
+                b.collect_forced_bindings(out);
+                c.collect_forced_bindings(out);
             }
             SigType::Fn(ps, r) => {
                 for p in ps {
@@ -191,21 +236,38 @@ impl SigType {
             SigType::String => Some(GenType::String),
             SigType::Bool => Some(GenType::Bool),
             SigType::Unit => Some(GenType::Unit),
+            SigType::Sized(s) => Some(GenType::Sized(s)),
+            SigType::Bytes => Some(GenType::Bytes),
+            SigType::Matrix => Some(GenType::Matrix),
+            SigType::Value => Some(GenType::Value),
+            SigType::Endian => Some(GenType::Endian),
+            SigType::Nominal(k) => Some(GenType::Nominal(k)),
             SigType::Var(n) => subst.get(n).cloned(),
             SigType::List(e) => Some(GenType::List(Box::new(e.instantiate(subst)?))),
             SigType::Option(e) => Some(GenType::Option(Box::new(e.instantiate(subst)?))),
             // The error slot is fixed to String regardless of the bound
-            // variable: the value grammar only ever builds String errors.
-            SigType::Result(ok, _err) => {
-                Some(GenType::Result(Box::new(ok.instantiate(subst)?)))
-            }
+            // variable, or is the nominal the signature names
+            // (`Result[T, HttpResponse]`, GenType::ResultNom). Any other
+            // concrete error type is outside the universe: rendered as
+            // `Result[T, String]` it would be a type error, not a program.
+            SigType::Result(ok, err) => match **err {
+                SigType::Var(_) | SigType::String => Some(GenType::Result(Box::new(ok.instantiate(subst)?))),
+                SigType::Nominal(k) => Some(GenType::ResultNom(Box::new(ok.instantiate(subst)?), k)),
+                _ => None,
+            },
             SigType::Tuple2(a, b) => Some(GenType::Tuple2(
                 Box::new(a.instantiate(subst)?),
                 Box::new(b.instantiate(subst)?),
             )),
+            SigType::Tuple3(a, b, c) => Some(GenType::Tuple3(
+                Box::new(a.instantiate(subst)?),
+                Box::new(b.instantiate(subst)?),
+                Box::new(c.instantiate(subst)?),
+            )),
             SigType::Map(_k, v) => Some(GenType::Map(Box::new(v.instantiate(subst)?))),
-            // A function type is not a producible value.
-            SigType::Fn(_, _) => None,
+            SigType::Set(e) => Some(e.instantiate(subst)?).filter(GenType::is_set_elem).map(|e| GenType::Set(Box::new(e))),
+            // A function type is not a producible value, nor is Never.
+            SigType::Fn(_, _) | SigType::Never => None,
         }
     }
 
@@ -222,7 +284,13 @@ impl SigType {
             | (SigType::Float, GenType::Float)
             | (SigType::String, GenType::String)
             | (SigType::Bool, GenType::Bool)
-            | (SigType::Unit, GenType::Unit) => true,
+            | (SigType::Unit, GenType::Unit)
+            | (SigType::Bytes, GenType::Bytes)
+            | (SigType::Matrix, GenType::Matrix)
+            | (SigType::Value, GenType::Value) => true,
+            | (SigType::Endian, GenType::Endian) => true,
+            (SigType::Nominal(a), GenType::Nominal(b)) => a == b,
+            (SigType::Sized(a), GenType::Sized(b)) => a == b,
             (SigType::Var(n), g) => match subst.get(n) {
                 Some(bound) => bound == g,
                 None => {
@@ -233,12 +301,18 @@ impl SigType {
             (SigType::List(e), GenType::List(g)) => e.unify_with_goal(g, subst),
             (SigType::Option(e), GenType::Option(g)) => e.unify_with_goal(g, subst),
             // Result error slot: goal carries no error type (fixed
-            // String), so only the ok arm is unified.
-            (SigType::Result(ok, _), GenType::Result(g)) => ok.unify_with_goal(g, subst),
+            // String), so only the ok arm is unified — unless the slot
+            // names a nominal, whose goal is a ResultNom of that nominal.
+            (SigType::Result(ok, err), GenType::Result(g)) => !matches!(**err, SigType::Nominal(_)) && ok.unify_with_goal(g, subst),
+            (SigType::Result(ok, err), GenType::ResultNom(g, k)) => matches!(**err, SigType::Nominal(e) if e == *k) && ok.unify_with_goal(g, subst),
             (SigType::Tuple2(a, b), GenType::Tuple2(ga, gb)) => {
                 a.unify_with_goal(ga, subst) && b.unify_with_goal(gb, subst)
             }
+            (SigType::Tuple3(a, b, c), GenType::Tuple3(ga, gb, gc)) => {
+                a.unify_with_goal(ga, subst) && b.unify_with_goal(gb, subst) && c.unify_with_goal(gc, subst)
+            }
             (SigType::Map(_k, v), GenType::Map(gv)) => v.unify_with_goal(gv, subst),
+            (SigType::Set(e), GenType::Set(g)) => e.unify_with_goal(g, subst),
             _ => false,
         }
     }

@@ -1,0 +1,1520 @@
+//! `xtarget-fuzz inspect <module.fn>` — the harness behind the stdlib
+//! inspection ledger (proofs/stdlib-inspection.toml). One run checks one
+//! function against the criteria the ledger states and prints the evidence
+//! lines for its row:
+//!
+//!   parity      a focused differential campaign (criteria 1 and 4)
+//!   complexity  the plain call and each rebind use-shape, from built
+//!               artifacts on both legs (criterion 2): user-space
+//!               instructions (`perf stat -e instructions:u`) at n .. 16n,
+//!               fitted to the lowest order class that explains them; wall
+//!               time where no PMU counts (reported, never stampable)
+//!   alloc       0 live wasm blocks at exit for every timing program
+//!   diamond     the call through a module diamond equals the direct call,
+//!               on both legs (criterion 5)
+//!
+//! Criterion 3 (codopsy A) is a property of the change, not of a run: it is
+//! measured when a fix lands and recorded in the row's `stamp`.
+//!
+//! A verdict is PASS, FAIL or a named reason it could not be judged; only an
+//! all-PASS run may be stamped.
+
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::time::{Duration, Instant};
+
+use crate::generator::{
+    inspect_gen::{Target, ERR_PATH, OFF_DOMAIN},
+    Engine, Family,
+};
+use crate::oracle::sandbox::{self, World};
+
+mod aborts;
+mod serve;
+
+const NOISE_FLOOR: Duration = Duration::from_millis(60);
+const CALIBRATE_TARGET: Duration = Duration::from_millis(250);
+const MAX_K: u64 = 1 << 22;
+
+struct Ctx {
+    almide: PathBuf,
+    wasmtime: PathBuf,
+    dir: PathBuf,
+    /// `perf stat -e instructions:u` works here (a PMU is exposed): the
+    /// complexity criterion counts instructions instead of timing.
+    icount: bool,
+    /// The LD_PRELOAD byte counter ([`MEMSHIM_C`], compiled at start), or
+    /// None when no C compiler is here: then a counted verdict is reported
+    /// but not stampable, since bulk copies are invisible to instructions.
+    memshim: Option<PathBuf>,
+    /// The largest k this function's probes may run: [`MAX_K`], or less for
+    /// a call that holds a socket per call (`effect_recipes::max_k`).
+    max_k: u64,
+    /// The calibration targets' multiplier: 10 for a function only the
+    /// embedded host serves, whose every run compiles the program first. The
+    /// compile is the same in both programs and cancels, but its run-to-run
+    /// jitter does not, so the call's own work must stand further above it.
+    calibrate_scale: f64,
+}
+
+#[derive(Clone, Copy)]
+enum Leg {
+    Native,
+    Wasm,
+}
+
+pub fn cmd_inspect(args: &[String]) {
+    let Some(name) = args.iter().find(|a| !a.starts_with("--") && a.contains('.')).cloned() else {
+        eprintln!("usage: xtarget-fuzz inspect <module.fn> [--order 1|log|n|nlogn|n2] [--order-rebind ..] [--n N] [--count C] [--seed S] [--emit DIR]");
+        std::process::exit(2);
+    };
+    let repo = super::resolve_repo(args);
+    let dir = std::env::temp_dir().join(format!("xtarget-inspect-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    let icount = icount_available();
+    let mut ctx = Ctx {
+        // Absolute: every run enters its sandbox as its cwd, where a
+        // relative path to the compiler would not resolve.
+        almide: absolute(super::resolve_almide(&repo, args)),
+        wasmtime: super::resolve_wasmtime(),
+        memshim: if icount { build_memshim(&dir) } else { None },
+        dir,
+        icount,
+        max_k: MAX_K,
+        calibrate_scale: if crate::generator::needs_embedded(&format!("{name}(")) { 10.0 } else { 1.0 },
+    };
+    let engine = Engine::with_family(&repo, Family::Synthesis);
+    // A function that serves until stopped is inspected as sessions the
+    // harness drives (`inspect/serve.rs`), not as calls a program makes.
+    if aborts::TESTED.contains(&name.as_str()) {
+        return aborts::inspect(&mut ctx, &engine, &name, args);
+    }
+    if serve::SERVED.contains(&name.as_str()) {
+        return serve::inspect(&mut ctx, &engine, &name, args);
+    }
+    let target = engine.inspect_target(&name).unwrap_or_else(|e| {
+        eprintln!("{e}");
+        std::process::exit(2);
+    });
+    ctx.max_k = crate::generator::inspect_max_k(&name, target.is_effect()).unwrap_or(MAX_K);
+    // A generic function is also inspected with its free type variables at
+    // String, the heap instantiation (Target::new_filled). A function the
+    // grammar cannot build at String is a failed criterion, not a skip.
+    let heap = target.generic.then(|| engine.inspect_target_heap(&name));
+    let order = super::flag_value(args, "--order");
+    // Every size must sit in one memory tier: from 2000 to 8000 Int
+    // elements a list crosses L1 (16 to 64 KiB), and the 4n step read x3.6
+    // for a linear map on native — a cache cliff, not an order. Starting at
+    // 200,000 elements (1.6 MB) keeps n, 2n and 4n all past L2; only a declared
+    // quadratic function stays small enough to finish. Not a power of two:
+    // at exactly 2^18 Int elements (2 MiB) wasm list.map ran 4x slower than
+    // at 262,000 or 2^19 with identical allocation counts — a placement
+    // effect of two blocks exactly 2 MiB apart, not an order.
+    // Counted instructions see no cache tier at all, so the counted judge
+    // starts small (n .. 16n); the timed fallback keeps the past-L2 sizes.
+    let default_n = match (order == Some("n2"), ctx.icount) {
+        (true, true) => 500,
+        (true, false) => 2000,
+        (false, true) => 20_000,
+        (false, false) => 200_000,
+    };
+    let n: u64 = super::flag_value(args, "--n").and_then(|s| s.parse().ok()).unwrap_or(default_n);
+    let order_rebind = super::flag_value(args, "--order-rebind");
+    // `--emit DIR`: write the probe programs at size n and stop, so a row's
+    // evidence can be re-run by hand on both legs (#3666's audit).
+    if let Some(out) = super::flag_value(args, "--emit") {
+        let root = Path::new(out);
+        let mut files = probe_files(&target, n);
+        if let Some(Ok(h)) = &heap {
+            files.extend(probe_files(h, n).into_iter().map(|(p, src)| (format!("heap/{p}"), src)));
+        }
+        for (path, src) in files {
+            let file = root.join(path);
+            if let Err(e) = file.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|_| std::fs::write(&file, src)) {
+                eprintln!("{}: {e}", file.display());
+                std::process::exit(2);
+            }
+        }
+        let _ = std::fs::remove_dir_all(&ctx.dir);
+        return;
+    }
+
+    let mut verdicts = Vec::new();
+    verdicts.push(("parity", parity(&ctx, &name, args)));
+    let per_inst = |f: &dyn Fn(&Target) -> String| -> String {
+        match &heap {
+            None => f(&target),
+            Some(Ok(h)) => both_instantiations(&f(&target), &f(h)),
+            Some(Err(e)) => format!("FAIL: [vars=String] the heap instantiation does not build: {e}"),
+        }
+    };
+    verdicts.push(("complexity", per_inst(&|t| complexity(&ctx, t, n, order, order_rebind))));
+    verdicts.push(("alloc", per_inst(&|t| alloc(&ctx, t, n))));
+    verdicts.push(("diamond", per_inst(&|t| diamond(&ctx, t, n))));
+
+    let all_pass = verdicts.iter().all(|(_, v)| v.starts_with("PASS"));
+    println!("# {name} — {}", if all_pass { "all criteria PASS (stampable)" } else { "NOT stampable" });
+    for (k, v) in &verdicts {
+        println!("{k} = {}", toml_str(v));
+    }
+    let _ = std::fs::remove_dir_all(&ctx.dir);
+    if !all_pass {
+        std::process::exit(1);
+    }
+}
+
+/// The programs the criteria run at size `n`, as files: the plain call
+/// (3 calls), each rebind shape (3 steps) and the diamond project (at
+/// `n.min(64)`, as [`diamond`] runs it).
+fn absolute(p: PathBuf) -> PathBuf {
+    std::fs::canonicalize(&p).unwrap_or(p)
+}
+
+fn probe_files(t: &Target, n: u64) -> Vec<(String, String)> {
+    let mut files = vec![("call.almd".to_string(), t.direct_program(n, 3, true))];
+    files.extend(t.rebind_programs(n, 3).into_iter().map(|(shape, src)| (format!("{shape}.almd"), src)));
+    // Paths that run alone are emitted as the projects that run.
+    if t.diamond_runs_paths_alone() {
+        for (path, project) in ["d", "l", "r"].into_iter().zip(t.diamond_path_projects(n.min(64))) {
+            files.extend(project.files.into_iter().map(|(p, src)| (format!("diamond-{path}/{p}"), src)));
+        }
+        return files;
+    }
+    files.extend(t.diamond_project(n.min(64)).files.into_iter().map(|(p, src)| (format!("diamond/{p}"), src)));
+    files
+}
+
+/// One criterion's verdict at both instantiations: PASS only when both
+/// pass, each half labelled with what the type variables were.
+fn both_instantiations(int: &str, heap: &str) -> String {
+    let body = |v: &str| v.split_once(": ").map_or(v, |(_, r)| r).to_string();
+    let ok = int.starts_with("PASS") && heap.starts_with("PASS");
+    format!("{}: [vars=Int] {} || [vars=String] {}", if ok { "PASS" } else { "FAIL" }, body(int), body(heap))
+}
+
+fn toml_str(s: &str) -> String {
+    format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+/// Criteria 1 and 4: a fresh `--focus` campaign through the full ladder.
+fn parity(ctx: &Ctx, name: &str, args: &[String]) -> String {
+    let count = super::flag_value(args, "--count").unwrap_or("200");
+    let seed = super::flag_value(args, "--seed").map(String::from).unwrap_or_else(|| {
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs().to_string()).unwrap_or_default()
+    });
+    let out = Command::new(std::env::current_exe().expect("self"))
+        .args(["run", "--family", "synthesis", "--focus", name, "--count", count, "--seed", &seed, "--jobs", "4"])
+        .arg("--almide")
+        .arg(&ctx.almide)
+        .arg("--out")
+        .arg(ctx.dir.join("findings"))
+        .output();
+    let Ok(out) = out else { return "SKIP: could not start the campaign".into() };
+    let err = String::from_utf8_lossy(&out.stderr);
+    let findings = err
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("unique findings").map(|r| r.trim_start_matches([' ', '=']).trim().to_string()))
+        .unwrap_or_else(|| "?".into());
+    let focus = err
+        .lines()
+        .find(|l| l.contains("program(s) call it"))
+        .and_then(|l| l.split_once('=').map(|(_, r)| r.trim().to_string()))
+        .unwrap_or_else(|| "no program called it".into());
+    // "<hits> program(s) call it, <clean> of them clean on every leg"
+    let clean = focus.split(", ").nth(1).and_then(|c| c.split_whitespace().next()?.parse::<u64>().ok()).unwrap_or(0);
+    let verdict = if findings.starts_with('0') && clean > 0 { "PASS" } else { "FAIL" };
+    format!("{verdict}: seed {seed}, {count} programs; {focus}; unique findings {findings}")
+}
+
+/// A rebind step that multiplies the value (`flat_map`, `intersperse`)
+/// cannot run k steps; it is reported, not timed. Judged on the loop shape
+/// at size 16: the digest after 4 steps against the start.
+fn grows_per_step(ctx: &Ctx, t: &Target) -> Option<String> {
+    let at = |k: u64| -> Option<i64> {
+        let src = t.rebind_programs(16, k).into_iter().find(|(s, _)| *s == "loop")?.1;
+        let art = build(ctx, &src, Leg::Native).ok()?;
+        run_artifact(ctx, &art, Leg::Native).ok()?.trim().parse().ok()
+    };
+    let (Some(a), Some(b)) = (at(0), at(4)) else { return None };
+    (b > 2 * a + 8).then(|| format!("the value grows geometrically per step ({a} -> {b} after 4 steps)"))
+}
+
+fn expected_ratio(order: &str) -> Option<f64> {
+    Some(match order {
+        "1" => 1.0,
+        "log" => 1.15,
+        "n" => 2.0,
+        "nlogn" => 2.3,
+        "n2" => 4.0,
+        _ => return None,
+    })
+}
+
+/// Criterion 2. The plain call is judged against `--order`; every rebind
+/// shape against `--order-rebind`. An undeclared order is reported, not passed.
+fn complexity(ctx: &Ctx, t: &Target, n: u64, order: Option<&str>, order_rebind: Option<&str>) -> String {
+    let mut parts = Vec::new();
+    let mut ok = true;
+    // A stdin reader is sized by its stdin (`stdin_for`), not a parameter.
+    if t.size_param.is_none() && !t.reads_stdin() {
+        return "PASS: no size parameter — constant-size arguments only (the plain call is the parity campaign's)".into();
+    }
+    let direct = |n: u64, k: u64, on: bool| t.direct_program(n, k, on);
+    match judge(ctx, "call", order, n, &|n, k| (direct(n, k, true), direct(n, k, false))) {
+        Ok(s) => parts.push(s),
+        Err(s) => {
+            ok = false;
+            parts.push(s)
+        }
+    }
+    if let Some(why) = t.rebind_param.and_then(|_| grows_per_step(ctx, t)) {
+        parts.push(format!("rebind shapes not timed: {why}"));
+        return format!("{}: {}", if ok { "PASS" } else { "FAIL" }, parts.join("; "));
+    }
+    for shape in ["loop", "tail", "fold"] {
+        if t.rebind_param.is_none() {
+            break;
+        }
+        let pick = |n: u64, k: u64| {
+            let p = t.rebind_programs(n, k).into_iter().find(|(s, _)| *s == shape).map(|(_, p)| p).unwrap_or_default();
+            let base = t.rebind_programs(n, 0).into_iter().find(|(s, _)| *s == shape).map(|(_, p)| p).unwrap_or_default();
+            (p, base)
+        };
+        match judge(ctx, shape, order_rebind, n, &pick) {
+            Ok(s) => parts.push(s),
+            Err(s) => {
+                ok = false;
+                parts.push(s)
+            }
+        }
+    }
+    format!("{}: {}", if ok { "PASS" } else { "FAIL" }, parts.join("; "))
+}
+
+/// Criterion 2's judge, dispatched on the meter this host offers.
+fn judge(
+    ctx: &Ctx,
+    label: &str,
+    order: Option<&str>,
+    n: u64,
+    programs: &dyn Fn(u64, u64) -> (String, String),
+) -> Result<String, String> {
+    if ctx.icount {
+        return judge_counted(ctx, label, order, n, programs);
+    }
+    judge_timed(ctx, label, order, n, programs).map_err(|e| format!("{e} [meter=wall-time, no PMU: not stampable]"))
+        .and_then(|ok| Err(format!("{ok} [meter=wall-time, no PMU: not stampable]")))
+}
+
+/// The wall-time judge: calibrate `k` at size `n`, then time (program -
+/// baseline) at n, 2n and 4n on both legs; the growth per doubling must fit
+/// the declared order. Kept for hosts without a PMU, where it reports but
+/// never passes: a cache tier crossed between two sizes reads as an order.
+fn judge_timed(
+    ctx: &Ctx,
+    label: &str,
+    order: Option<&str>,
+    n: u64,
+    programs: &dyn Fn(u64, u64) -> (String, String),
+) -> Result<String, String> {
+    let mut k = 1u64;
+    loop {
+        let (p, b) = programs(n, k);
+        // Both legs: a call one leg optimizes away must not drive k so high
+        // that the other leg runs for hours (eight list.* runs hit the
+        // 30-minute cap that way).
+        let dn = delta(ctx, &p, &b, Leg::Native).map_err(|e| format!("{label} {e}"))?;
+        let dw = delta(ctx, &p, &b, Leg::Wasm).map_err(|e| format!("{label} {e}"))?;
+        if dn.max(dw) >= CALIBRATE_TARGET || k >= ctx.max_k {
+            break;
+        }
+        k = (k * 4).min(ctx.max_k);
+    }
+    let mut line = format!("{label} k={k}");
+    let mut worst: f64 = 0.0;
+    for leg in [Leg::Native, Leg::Wasm] {
+        let mut ds = Vec::new();
+        for m in [n, 2 * n, 4 * n] {
+            let (p, b) = programs(m, k);
+            ds.push(delta(ctx, &p, &b, leg).map_err(|e| format!("{label} {e}"))?);
+        }
+        let r1 = ratio(ds[0], ds[1]);
+        let r2 = ratio(ds[1], ds[2]);
+        let tag = leg_tag(leg);
+        line.push_str(&format!(
+            " {tag} {:.3}/{:.3}/{:.3}s x{r1:.2} x{r2:.2}",
+            ds[0].as_secs_f64(),
+            ds[1].as_secs_f64(),
+            ds[2].as_secs_f64()
+        ));
+        if ds[1] >= NOISE_FLOOR {
+            worst = worst.max(r2);
+        }
+        if ds[0] >= NOISE_FLOOR {
+            worst = worst.max(r1);
+        }
+    }
+    if worst == 0.0 {
+        // Every timing sat under the noise floor at the largest k: the call
+        // costs at most floor/k at every size, which bounds it, not grows it.
+        let bound = NOISE_FLOOR.as_secs_f64() / k as f64 * 1e9;
+        line.push_str(&format!(" (under the {}ms floor at every size: <= {bound:.1} ns/call)", NOISE_FLOOR.as_millis()));
+        return match order {
+            Some("1" | "log") => Ok(format!("{line} (order {} ok)", order.unwrap_or("?"))),
+            Some(o) => Err(format!("{line} (declared order {o} is not visible at this n — raise --n)")),
+            None => Err(format!("{line} (order undeclared)")),
+        };
+    }
+    match order.and_then(expected_ratio) {
+        None => Err(format!("{line} (order undeclared: measured worst x{worst:.2})")),
+        Some(e) if worst <= e * 1.35 + 0.15 => Ok(format!("{line} (order {} ok)", order.unwrap_or("?"))),
+        Some(_) => Err(format!("{line} (order {} exceeded: worst x{worst:.2})", order.unwrap_or("?"))),
+    }
+}
+
+fn ratio(a: Duration, b: Duration) -> f64 {
+    b.as_secs_f64() / a.as_secs_f64().max(1e-4)
+}
+
+/// Built-artifact time of `prog` minus `base`, best of three each, after
+/// checking both print the same thing on this leg's twin run.
+fn delta(ctx: &Ctx, prog: &str, base: &str, leg: Leg) -> Result<Duration, String> {
+    let tp = best_time(ctx, prog, leg)?;
+    let tb = best_time(ctx, base, leg)?;
+    Ok(tp.saturating_sub(tb))
+}
+
+fn best_time(ctx: &Ctx, src: &str, leg: Leg) -> Result<Duration, String> {
+    let art = build(ctx, src, leg)?;
+    let mut best = Duration::MAX;
+    let mut first: Option<String> = None;
+    for _ in 0..3 {
+        let start = Instant::now();
+        let out = run_artifact(ctx, &art, leg)?;
+        best = best.min(start.elapsed());
+        if first.get_or_insert_with(|| out.clone()) != &out {
+            return Err("nondeterministic output".into());
+        }
+    }
+    // Same output on the other leg (criterion 1, on the timing programs too).
+    if matches!(leg, Leg::Wasm) {
+        let native = run_artifact(ctx, &build(ctx, src, Leg::Native)?, Leg::Native)?;
+        if first.as_deref() != Some(native.as_str()) {
+            return Err(format!("native and wasm differ: {native:?} vs {first:?}"));
+        }
+    }
+    Ok(best)
+}
+
+fn build(ctx: &Ctx, src: &str, leg: Leg) -> Result<PathBuf, String> {
+    build_as(ctx, src, leg, false)
+}
+
+/// `canonical`: build the wasm leg with the meter's fixed allocator
+/// (`ALMIDE_WASM_CANONICAL_ALLOC`, owner ruling 2026-10-15). `$alloc` then
+/// never reuses a freed block, so a copy series depends on the program's
+/// requests and not on the free lists' state. The native leg ignores it.
+fn build_as(ctx: &Ctx, src: &str, leg: Leg, canonical: bool) -> Result<PathBuf, String> {
+    let file = ctx.dir.join(format!("p{:016x}.almd", hash(src)));
+    std::fs::write(&file, src).map_err(|e| e.to_string())?;
+    let canonical = canonical && matches!(leg, Leg::Wasm);
+    // A test-file probe (`// @xf-test`) is run by `almide test` on its leg's
+    // lane: its artifact is the source, or the native libtest binary built
+    // once here (`aborts::test_art`).
+    if crate::generator::aborts_gen::is_test_probe(src) {
+        return aborts::test_art(ctx, &file, src, matches!(leg, Leg::Wasm));
+    }
+    // A program only the embedded host serves (ADR-0027 D1) is built and run
+    // there in one step: its artifact is the source, under a name that
+    // carries the allocator choice (`run_cmd`).
+    // A served probe's wasm leg is the embedded lane too: the counted judge
+    // has two legs, and the stock `wasmtime serve` leg is compared in the
+    // served parity campaign (`serve::parity`).
+    if matches!(leg, Leg::Wasm) && (crate::generator::needs_embedded(src) || serve_plan(src).is_some()) {
+        let art = file.with_extension(if canonical { "canonical.embedded.almd" } else { "embedded.almd" });
+        std::fs::write(&art, src).map_err(|e| e.to_string())?;
+        return Ok(art);
+    }
+    let art = file.with_extension(match leg {
+        Leg::Wasm if canonical => "canonical.wasm",
+        Leg::Wasm => "wasm",
+        _ => "bin",
+    });
+    if art.is_file() {
+        return Ok(art);
+    }
+    let mut c = Command::new(&ctx.almide);
+    c.arg("build").arg(&file).arg("-o").arg(&art);
+    if matches!(leg, Leg::Wasm) {
+        c.args(["--target", "wasm"]);
+    }
+    if canonical {
+        c.env("ALMIDE_WASM_CANONICAL_ALLOC", "1");
+    }
+    let out = c.output().map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(format!("build failed: {}", first_error(&out.stderr)));
+    }
+    Ok(art)
+}
+
+/// One run of a timing program may take this long; past it the run is
+/// killed and reported as a timeout, never as a time.
+const RUN_CAP: Duration = Duration::from_secs(60);
+
+/// The program an artifact was built from: `build_as` writes `p<hash>.almd`
+/// and names every artifact of it `p<hash>.<kind>`.
+fn source_of(art: &Path) -> String {
+    let stem = art.file_name().map(|f| f.to_string_lossy().split('.').next().unwrap_or("").to_string()).unwrap_or_default();
+    std::fs::read_to_string(art.with_file_name(format!("{stem}.almd"))).unwrap_or_default()
+}
+
+/// The session plan of a served probe (`// @xf-serve ...`), else None.
+fn serve_plan(src: &str) -> Option<crate::oracle::serve::Plan> {
+    crate::oracle::serve::plan_of(src)
+}
+
+/// An artifact `build_as` left as source for the embedded host.
+fn is_embedded(art: &Path) -> bool {
+    art.to_string_lossy().ends_with(".embedded.almd")
+}
+
+/// `almide run <src> --target wasm --` on the embedded host, with the
+/// allocator the artifact's name asks for. Each run compiles: the compile
+/// is the same work in the program with the call and the one without, so
+/// the counted judge's difference cancels it.
+fn embedded_cmd(ctx: &Ctx, art: &Path) -> Command {
+    let mut c = Command::new(&ctx.almide);
+    c.arg("run").arg(art).args(["--target", "wasm", "--"]);
+    if art.to_string_lossy().ends_with(".canonical.embedded.almd") {
+        c.env("ALMIDE_WASM_CANONICAL_ALLOC", "1");
+    }
+    c
+}
+
+fn run_artifact(ctx: &Ctx, art: &Path, leg: Leg) -> Result<String, String> {
+    let src = source_of(art);
+    let world = World::for_program(&ctx.dir, &src)?;
+    if let Some(wasm) = aborts::test_art_leg(art) {
+        return aborts::run_test_art(ctx, art, wasm, &world);
+    }
+    let make = || {
+        let mut cmd = match leg {
+            _ if is_embedded(art) => embedded_cmd(ctx, art),
+            Leg::Native => Command::new(art),
+            Leg::Wasm => {
+                let mut c = Command::new(&ctx.wasmtime);
+                c.arg("run").args(world.wasmtime_args()).arg(art);
+                c
+            }
+        };
+        cmd.args(sandbox::ARGS);
+        world.enter(&mut cmd);
+        cmd
+    };
+    // A served probe runs as a session: the harness is its client, and its
+    // output is the transcript (`oracle/serve.rs`).
+    if let Some(plan) = serve_plan(&src) {
+        let s = crate::oracle::serve::drive_socket(&mut make(), &plan, false)?;
+        // The SIGTERM drains and returns from serve (ADR-0020 §5.6): any
+        // other exit is a failed run.
+        if !s.output.status.success() {
+            return Err(format!("after SIGTERM: {}", run_failure(&s.output)));
+        }
+        return Ok(s.transcript);
+    }
+    let mut cmd = make();
+    let child = cmd
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    let (out, _) = wait_capped(child, RUN_CAP)?;
+    if !out.status.success() {
+        return Err(run_failure(&out));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// Wait for `child` under `cap`, draining its stdout and stderr WHILE it
+/// runs. Reading them only after exit deadlocked any probe that wrote more
+/// than a pipe buffer holds (64 KiB on Linux): the child blocked on the full
+/// pipe, and the cap reported the block as a timeout (`io.write` /
+/// `io.write_bytes`, every call shape). Returns the output and the wall time.
+fn wait_capped(mut child: std::process::Child, cap: Duration) -> Result<(std::process::Output, Duration), String> {
+    use std::io::Read;
+    let drain = |pipe: Option<Box<dyn Read + Send>>| {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(mut p) = pipe {
+                let _ = p.read_to_end(&mut buf);
+            }
+            buf
+        })
+    };
+    let out_t = drain(child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
+    let err_t = drain(child.stderr.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
+    let start = Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
+            break status;
+        }
+        if start.elapsed() > cap {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = (out_t.join(), err_t.join());
+            return Err(format!("timed out ({}s cap)", cap.as_secs()));
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    };
+    let wall = start.elapsed();
+    let stdout = out_t.join().map_err(|_| "stdout reader panicked".to_string())?;
+    let stderr = err_t.join().map_err(|_| "stderr reader panicked".to_string())?;
+    Ok((std::process::Output { status, stdout, stderr }, wall))
+}
+
+/// Why a probe run failed: its exit and its first error line — or, when the
+/// program stopped because the probed call returned `err` ([`ERR_PATH`]),
+/// that it took the error path (#3666), or, when a call given an in-domain
+/// input returned `none` / `false` ([`OFF_DOMAIN`]), that it refused it
+/// (#3671). Every verdict reads a failed run through this, so such a run is
+/// never timed, counted or matched.
+fn run_failure(out: &std::process::Output) -> String {
+    format!("exit {:?}: {}", out.status.code(), failure_reason(&out.stderr))
+}
+
+fn failure_reason(stderr: &[u8]) -> String {
+    let text = String::from_utf8_lossy(stderr);
+    // The wasm allocator's exit report (`__ALMD_WASM_ALLOC ...`) can follow
+    // the panic message on the same line.
+    let reason = |rest: &str| rest.split("__ALMD_").next().unwrap_or("").trim_start_matches(':').trim().to_string();
+    let marked = |marker: &str| text.lines().find_map(|l| l.split_once(marker).map(|(_, rest)| reason(rest).chars().take(160).collect::<String>()));
+    if let Some(why) = marked(ERR_PATH) {
+        format!("took the error path (the probed call returned err: {why})")
+    } else if let Some(what) = marked(OFF_DOMAIN) {
+        format!("refused its in-domain input (the probed call returned {what})")
+    } else {
+        first_error(stderr)
+    }
+}
+
+/// The first `error` line of a failed run's stderr, else its first line: a
+/// warning printed ahead of the error (a deprecated call's E052) must not
+/// stand in for the reason.
+fn first_error(stderr: &[u8]) -> String {
+    let text = String::from_utf8_lossy(stderr);
+    let mut lines = text.lines().filter(|l| !l.trim().is_empty());
+    let first = lines.clone().next().unwrap_or("");
+    lines.find(|l| l.contains("error")).unwrap_or(first).chars().take(200).collect()
+}
+
+fn hash(s: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    s.hash(&mut h);
+    h.finish()
+}
+
+/// Live wasm blocks at exit, on the embedded host, for the plain call and
+/// every rebind shape at size n.
+fn alloc(ctx: &Ctx, t: &Target, n: u64) -> String {
+    let mut progs = vec![("call", t.direct_program(n, 3, true))];
+    // A rebind that multiplies the value cannot take 50 steps: it runs out
+    // of memory, and the count read off a trapped run is not a leak.
+    if t.rebind_param.is_some() && grows_per_step(ctx, t).is_none() {
+        progs.extend(t.rebind_programs(n, 50));
+    }
+    let mut parts = Vec::new();
+    let mut ok = true;
+    for (label, src) in progs {
+        let file = ctx.dir.join(format!("a{:016x}.almd", hash(&src)));
+        if std::fs::write(&file, &src).is_err() {
+            return "SKIP: scratch write failed".into();
+        }
+        let world = match World::for_program(&ctx.dir, &src) {
+            Ok(w) => w,
+            Err(e) => return format!("SKIP: {e}"),
+        };
+        let mut cmd = Command::new(&ctx.almide);
+        cmd.arg("run").arg(&file).args(["--target", "wasm", "--"]).args(sandbox::ARGS).env("ALMIDE_WASM_ALLOC_COUNT", "1");
+        world.enter(&mut cmd);
+        let out = cmd.output();
+        let Ok(out) = out else { return "SKIP: could not run almide".into() };
+        let (pass, part) = alloc_part_exiting(label, &out, t.expected_exit());
+        ok &= pass;
+        parts.push(part);
+    }
+    format!("{}: {}", if ok { "PASS" } else { "FAIL" }, parts.join(", "))
+}
+
+/// One alloc probe's verdict from its `almide run` output: `live=0` passes.
+/// The counters are printed at exit whatever the exit, so a run that failed
+/// reports its exit: blocks an abort left behind are not a leak (#3636).
+#[cfg(test)]
+fn alloc_part(label: &str, out: &std::process::Output) -> (bool, String) {
+    alloc_part_exiting(label, out, 0)
+}
+
+/// [`alloc_part`] for a probe that must end with exit code `expected` (a
+/// `-> Never` call's, `Target::expected_exit`; 0 for every other).
+fn alloc_part_exiting(label: &str, out: &std::process::Output, expected: i32) -> (bool, String) {
+    if out.status.code() != Some(expected) {
+        return (false, format!("{label} exit {:?} ({})", out.status.code(), failure_reason(&out.stderr)));
+    }
+    let err = String::from_utf8_lossy(&out.stderr);
+    let live = err.lines().find_map(|l| l.split_whitespace().find_map(|w| w.strip_prefix("live=")).map(String::from));
+    match live.as_deref() {
+        Some("0") => (true, format!("{label} live=0")),
+        Some(v) => (false, format!("{label} live={v}")),
+        None => (false, format!("{label} no count ({})", first_error(&out.stderr))),
+    }
+}
+
+/// Criterion 5: the three lines (direct, via left, via right) agree, and the
+/// whole output agrees across legs.
+fn diamond(ctx: &Ctx, t: &Target, n: u64) -> String {
+    if !t.ret_is_observable() {
+        return "SKIP: the return type is not printable".into();
+    }
+    let projects = if t.diamond_runs_paths_alone() { t.diamond_path_projects(n.min(64)) } else { vec![t.diamond_project(n.min(64))] };
+    let root = ctx.dir.join("diamond");
+    let mut legs = [Vec::new(), Vec::new()];
+    for project in projects {
+        let Ok(entry) = project.write_to(&root) else { return "SKIP: scratch write failed".into() };
+        for (i, wasm) in [false, true].into_iter().enumerate() {
+            let Ok(out) = run_diamond(ctx, &root, &entry, wasm) else { return "SKIP: could not run almide".into() };
+            legs[i].push(out);
+        }
+    }
+    let expected = t.expected_exit();
+    let [nat, was] = legs.map(|outs| joined(outs, expected));
+    diamond_verdict_exiting(&nat, &was, expected)
+}
+
+/// One diamond project's run. The project resolves from its own directory,
+/// so the run stays there; it still gets the sandbox's argv, env and stdin.
+fn run_diamond(ctx: &Ctx, root: &Path, entry: &Path, wasm: bool) -> std::io::Result<std::process::Output> {
+    let world = World::for_program(&ctx.dir, &std::fs::read_to_string(entry).unwrap_or_default()).map_err(std::io::Error::other)?;
+    let mut c = Command::new(&ctx.almide);
+    c.arg("run").arg(entry);
+    if wasm {
+        c.args(["--target", "wasm"]);
+    }
+    c.arg("--").args(sandbox::ARGS);
+    world.enter(&mut c);
+    c.current_dir(root.join("app")).output()
+}
+
+/// Paths run one project each, read as one run: their outputs in order,
+/// failing as the first one that did not exit `expected` did.
+fn joined(outs: Vec<std::process::Output>, expected: i32) -> std::process::Output {
+    let mut all = outs.iter().find(|o| o.status.code() != Some(expected)).unwrap_or(&outs[0]).clone();
+    all.stdout = outs.iter().flat_map(|o| o.stdout.clone()).collect();
+    all
+}
+
+/// Criterion 5's verdict from the diamond project's run on each leg. Every
+/// path prints a line: its return, `()` for a Unit return (#3636), and a
+/// `mut` parameter's mutated copy — so no output is a failure.
+#[cfg(test)]
+fn diamond_verdict(nat: &std::process::Output, was: &std::process::Output) -> String {
+    diamond_verdict_exiting(nat, was, 0)
+}
+
+/// [`diamond_verdict`] for paths that must each end with exit code
+/// `expected` (a `-> Never` call's; 0 for every other).
+fn diamond_verdict_exiting(nat: &std::process::Output, was: &std::process::Output, expected: i32) -> String {
+    if nat.status.code() != Some(expected) || was.status.code() != Some(expected) {
+        return format!("FAIL: native exit {:?} ({}), wasm exit {:?} ({})", nat.status.code(), failure_reason(&nat.stderr), was.status.code(), failure_reason(&was.stderr));
+    }
+    let (a, b) = (String::from_utf8_lossy(&nat.stdout).into_owned(), String::from_utf8_lossy(&was.stdout).into_owned());
+    // `render_print` writes `<name> = <value>`: compare the values.
+    let lines: Vec<&str> = a.lines().map(|l| l.split_once(" = ").map(|(_, v)| v).unwrap_or(l)).collect();
+    let thirds = lines.len() / 3;
+    let same_three = thirds > 0 && lines.len() % 3 == 0 && lines[..thirds] == lines[thirds..2 * thirds] && lines[..thirds] == lines[2 * thirds..];
+    match (same_three, a == b) {
+        (true, true) if expected != 0 => format!("PASS: direct = via left = via right on both legs ({thirds} line(s) each, each path exit {expected})"),
+        (true, true) => format!("PASS: direct = via left = via right on both legs ({} line(s) each)", thirds),
+        (false, _) => format!("FAIL: the three calls differ on native: {a:?}"),
+        (true, false) => format!("FAIL: native {a:?} vs wasm {b:?}"),
+    }
+}
+
+// ── The counted judge ───────────────────────────────────────────────────
+//
+// Wall time on a shared VM crosses cache tiers between sizes: a linear
+// `list.drop` read x3.1 from 200k to 400k Ints (L2) and x3.5 from 2M to 4M
+// (L3) while every other doubling read x2.0. Retired instructions see no
+// tier and repeat to the instruction (`/bin/true` 135,023-135,024 over three
+// runs on c4-standard-4). This is rustc-perf's primary metric
+// (`instructions:u`); the class is chosen the way Google Benchmark's `oAuto`
+// chooses one, by least squares over the candidate curves, here with an
+// intercept for the program-shape constant the baseline does not cancel.
+
+/// The order classes, cheapest first, and their curves.
+const CLASSES: &[(&str, fn(f64) -> f64)] = &[
+    ("1", |_| 1.0),
+    ("log", |n| n.ln()),
+    ("n", |n| n),
+    ("nlogn", |n| n * n.ln()),
+    ("n2", |n| n * n),
+    ("n3", |n| n * n * n),
+];
+
+/// Relative residual a class must stay within to explain the counts. Counts
+/// repeat to ~0.05%, so 3% is far above measurement and far below the 20%+
+/// a wrong class leaves over a 16x size range.
+const FIT_TOLERANCE: f64 = 0.03;
+
+/// Calibrate `k` until the call's own instructions at size `n` dominate,
+/// then count the MARGINAL cost of k more calls — the program at 2k calls
+/// minus the same program at k — at n, 2n, 4n, 8n and 16n on both legs.
+///
+/// Not (program at k) - (baseline at 0): that difference also holds every
+/// one-off cost the call's presence changes — a final copy, a teardown walk,
+/// the first call's reallocation into a fresh heap — and an O(n) one-off
+/// grows with n like an O(n) call would. Measured on reuse-attr (c4-standard-4):
+/// three rebind shapes read `log` from a one-off whose step doubled with n,
+/// and a list builder's moved bytes left a linear fit by 9-28% at the
+/// smallest size only. Between k and 2k calls every one-off cancels and the
+/// series is the steady per-call cost (times k).
+fn judge_counted(
+    ctx: &Ctx,
+    label: &str,
+    order: Option<&str>,
+    n: u64,
+    programs: &dyn Fn(u64, u64) -> (String, String),
+) -> Result<String, String> {
+    let marginal = |m: u64, k: u64| (programs(m, 2 * k).0, programs(m, k).0);
+    // Each leg is calibrated on its own: a k one leg's cost reaches can
+    // leave the other's marginal under its run-to-run jitter, and a
+    // difference under the jitter clips to 0 and reads as O(1) at every
+    // size (value.as_array: native O(n) at k = 1, wasm 0 / 0 / 0 / 0 / 0).
+    let calibrate = |leg: Leg| -> Result<u64, String> {
+        let mut k = 1u64;
+        loop {
+            let (p, b) = marginal(n, k);
+            let d = counted_delta(ctx, &p, &b, leg).map_err(|e| format!("{label} {} calibrating k={k} at n={n}: {e}", leg_tag(leg)))?;
+            if counted_calibrated(&d, ctx.calibrate_scale) || k >= ctx.max_k {
+                return Ok(k);
+            }
+            k = (k * 4).min(ctx.max_k);
+        }
+    };
+    let ks = [(Leg::Native, calibrate(Leg::Native)?), (Leg::Wasm, calibrate(Leg::Wasm)?)];
+    let sizes: Vec<u64> = (0..5).map(|i| n << i).collect();
+    let k_both = ks[0].1.min(ks[1].1);
+    for &m in &sizes {
+        legs_agree(ctx, &programs(m, k_both).0).map_err(|e| format!("{label} k={k_both} n={m}: {e}"))?;
+    }
+    let mut line = format!("{label} meter=instructions:u+bytes-moved alloc=canonical(wasm) n={n}..{}", n << 4);
+    let mut worst = 0usize;
+    let mut unexplained = false;
+    for (leg, k) in ks {
+        let mut ys = Vec::new();
+        let mut bs = Vec::new();
+        let mut ts = Vec::new();
+        for &m in &sizes {
+            let (p, b) = marginal(m, k);
+            // Which leg, k and size failed is the first thing a timeout's
+            // diagnosis needs (value.as_array timed out with none of it).
+            let d = counted_delta(ctx, &p, &b, leg).map_err(|e| format!("{label} {} k={k} n={m}: {e}", leg_tag(leg)))?;
+            ys.push(d.instructions);
+            bs.push(d.moved);
+            ts.push(d.wall);
+        }
+        let (class, rms) = fit_series(&sizes, &ys, k);
+        let (bclass, brms) = fit_series(&sizes, &bs, k);
+        worst = worst.max(class).max(bclass);
+        unexplained |= rms > FIT_TOLERANCE || brms > FIT_TOLERANCE;
+        let tag = leg_tag(leg);
+        let sci = |v: &[f64]| v.iter().map(|y| format!("{:.3e}", y)).collect::<Vec<_>>().join("/");
+        let times: Vec<String> = ts.iter().map(|t| format!("{:.3}", t.as_secs_f64())).collect();
+        line.push_str(&format!(
+            " {tag} k={k}..{} {} fit {} (rms {:.1}%) moved {}B fit {} (rms {:.1}%) wall {}s",
+            2 * k,
+            sci(&ys),
+            CLASSES[class].0,
+            rms * 100.0,
+            sci(&bs),
+            CLASSES[bclass].0,
+            brms * 100.0,
+            times.join("/")
+        ));
+    }
+    // A series no class explains within tolerance has no order to compare:
+    // the best-fitting class of such a series can be anything, O(1)
+    // included, so it never passes.
+    if unexplained {
+        return Err(format!("{line} (unexplained: a series fits no class within {:.0}%)", FIT_TOLERANCE * 100.0));
+    }
+    if ctx.memshim.is_none() {
+        return Err(format!("{line} [meter=instructions only, no bytes-moved meter: not stampable]"));
+    }
+    let measured = CLASSES[worst].0;
+    match order.and_then(|o| CLASSES.iter().position(|(c, _)| *c == o)) {
+        None => Err(format!("{line} (order undeclared: measured {measured})")),
+        Some(declared) if worst <= declared => Ok(format!("{line} (order {} ok)", CLASSES[declared].0)),
+        Some(declared) => Err(format!("{line} (order {} exceeded: measured {measured})", CLASSES[declared].0)),
+    }
+}
+
+fn leg_tag(leg: Leg) -> &'static str {
+    if matches!(leg, Leg::Native) { "native" } else { "wasm" }
+}
+
+/// Whether the counted judge's k is large enough for one leg: either meter
+/// past its target. Instructions alone undercount a call whose cost is
+/// one large copy — `rep movsb` retires as one instruction whatever the
+/// length (see `MEMSHIM_C`) — so an instructions-only target drove k up by
+/// 4x until each run copied gigabytes at 16n and hit the 60 s cap
+/// (set.insert / set.union's call shape on GCE, 2026-10-14). 2e8 bytes is
+/// about 20 ms of copying on c4-standard-4, the same order as 2e7
+/// instructions.
+fn counted_calibrated(d: &Delta, scale: f64) -> bool {
+    const CALIBRATE_INSTRUCTIONS: f64 = 2.0e7;
+    const CALIBRATE_BYTES: f64 = 2.0e8;
+    // A call whose work is the kernel's (an effect function's write) retires
+    // few user instructions: k stops on the wall clock too, before a run
+    // reaches the cap. Only k's growth reads it; the fit stays on the counts.
+    const CALIBRATE_WALL: Duration = Duration::from_secs(2);
+    d.instructions >= CALIBRATE_INSTRUCTIONS * scale || d.moved >= CALIBRATE_BYTES * scale || d.wall >= CALIBRATE_WALL
+}
+
+/// The cheapest class whose `a + c·f(n)` least-squares fit leaves every
+/// point within [`FIT_TOLERANCE`] (relative RMS), else the best-fitting one
+/// with its residual above the tolerance (the caller refuses to pass it).
+/// A series that stays under [`COUNT_FLOOR_DIVISOR`]'s per-call floor at
+/// every size is O(1) outright: it cannot hold a linear term, and what is
+/// left is the run's own jitter, which a relative fit reads as no class at
+/// all. Measured:
+/// - `int.to_int16_saturating` at k = 1M read 7.8e5 / 147 / 579 / 82 / 48
+///   instructions, which a relative fit called 1789% off every class.
+/// - wasm `string.drop`'s loop at k = 16 read 177 / 159 / 127 / 243 / 335
+///   per call (rms 17.5%).
+/// - native `string.drop_end`'s loop at k = 64 read 566 / 625 / 607 / 585 /
+///   632 per call (rms 3.5%).
+fn fit_series(sizes: &[u64], ys: &[f64], k: u64) -> (usize, f64) {
+    let floor = sizes[0] as f64 / COUNT_FLOOR_DIVISOR * k as f64;
+    if ys.iter().all(|&y| y < floor) {
+        return (0, 0.0);
+    }
+    fit_class(sizes, ys)
+}
+
+/// The per-call floor is `n / 16` at the smallest size `n`, held at every
+/// size. Work linear in the input touches every element; even at 64 bytes
+/// per instruction (one AVX-512 load), m elements cost at least m / 64 per
+/// call. Across the judge's 16x range, a linear term therefore adds at least
+/// (16n - n) / 64 ≈ 0.23n per call between the first and last point. A
+/// series that stays below n / 16 ≈ 0.06n at every point has no room for
+/// that rise, so the floor sits about 3.75x under the smallest linear term
+/// it could hide. The same floor applies to bytes moved, where a linear copy
+/// moves at least m bytes per call. Owner ruling 2026-10-12: the counted
+/// twin of the timed judge's [`NOISE_FLOOR`].
+const COUNT_FLOOR_DIVISOR: f64 = 16.0;
+
+fn fit_class(sizes: &[u64], ys: &[f64]) -> (usize, f64) {
+    let top = ys.iter().cloned().fold(0.0f64, f64::max);
+    if top < 5.0e3 {
+        return (0, 0.0);
+    }
+    let floor = top * 0.01;
+    let mut best = (0usize, f64::MAX);
+    for (i, (name, f)) in CLASSES.iter().enumerate() {
+        let xs: Vec<f64> = sizes.iter().map(|&m| f(m as f64)).collect();
+        let rms = if *name == "nlogn" { fit_nlogn(sizes, ys, floor) } else { fit_rms(&xs, ys, floor) };
+        if rms <= FIT_TOLERANCE {
+            return (i, rms);
+        }
+        if rms < best.1 {
+            best = (i, rms);
+        }
+    }
+    best
+}
+
+/// The nlogn class (owner ruling Q17, 2026-10-18): `a + b·n + c·n·ln n`, so
+/// a sort plus linear work fits (fs.list_dir / walk / glob return sorted
+/// entries), under a slope cap that keeps the linear term from admitting a
+/// steeper curve. Over n..16n that model alone fits n^1.2 at 0.4% and
+/// n·ln²n at 0.1%; the cap is n·ln n's own log-log slope across the measured
+/// sizes plus 0.03, taken on the fitted curve without its intercept (a
+/// program-shape constant is not the call's cost). It refuses n^1.2 (1.200)
+/// and n·ln²n (1.179) against a cap of 1.119 at n = 20000, admits n·ln n
+/// (1.089) and a sort plus linear work (below it), and leaves n^1.1 (1.100)
+/// where the 2-term fit already put it (0.71%). A curve that fails the cap
+/// reports a residual above the tolerance.
+fn fit_nlogn(sizes: &[u64], ys: &[f64], floor: f64) -> f64 {
+    let ns: Vec<f64> = sizes.iter().map(|&m| m as f64).collect();
+    let (n0, n1) = (ns[0], ns[ns.len() - 1]);
+    // Columns scaled to 1 at n0 keep the normal equations well conditioned.
+    let cols = |n: f64| [1.0, n / n0, (n * n.ln()) / (n0 * n0.ln())];
+    let Some([a, b, c]) = least_squares_3(&ns, ys, cols) else { return f64::MAX };
+    let curve = |n: f64| {
+        let x = cols(n);
+        b * x[1] + c * x[2]
+    };
+    let span = (n1 / n0).ln();
+    let cap = ((n1 * n1.ln()) / (n0 * n0.ln())).ln() / span + NLOGN_SLOPE_MARGIN;
+    if curve(n0) <= 0.0 || curve(n1) <= 0.0 || (curve(n1) / curve(n0)).ln() / span > cap {
+        return f64::MAX;
+    }
+    let sq: f64 = ns.iter().zip(ys).map(|(&n, y)| ((y - (a + curve(n))) / y.abs().max(floor)).powi(2)).sum();
+    (sq / ns.len() as f64).sqrt()
+}
+
+/// How far above n·ln n's own log-log slope the nlogn class reaches (Q17).
+const NLOGN_SLOPE_MARGIN: f64 = 0.03;
+
+/// Least-squares `y = a·x0 + b·x1 + c·x2` over the columns `cols(n)`, by the
+/// normal equations (Gaussian elimination with partial pivoting); None when
+/// they are singular.
+fn least_squares_3(ns: &[f64], ys: &[f64], cols: impl Fn(f64) -> [f64; 3]) -> Option<[f64; 3]> {
+    let mut m = [[0.0f64; 4]; 3];
+    for (&n, &y) in ns.iter().zip(ys) {
+        let x = cols(n);
+        for i in 0..3 {
+            for j in 0..3 {
+                m[i][j] += x[i] * x[j];
+            }
+            m[i][3] += x[i] * y;
+        }
+    }
+    for i in 0..3 {
+        let p = (i..3).max_by(|&r, &q| m[r][i].abs().total_cmp(&m[q][i].abs()))?;
+        m.swap(i, p);
+        if m[i][i].abs() < f64::MIN_POSITIVE {
+            return None;
+        }
+        for r in 0..3 {
+            if r != i {
+                let f = m[r][i] / m[i][i];
+                for j in i..4 {
+                    m[r][j] -= f * m[i][j];
+                }
+            }
+        }
+    }
+    Some([m[0][3] / m[0][0], m[1][3] / m[1][1], m[2][3] / m[2][2]])
+}
+
+/// Relative RMS residual of the least-squares line `y = a + c·x`.
+fn fit_rms(xs: &[f64], ys: &[f64], floor: f64) -> f64 {
+    let n = xs.len() as f64;
+    let (mx, my) = (xs.iter().sum::<f64>() / n, ys.iter().sum::<f64>() / n);
+    let sxx: f64 = xs.iter().map(|x| (x - mx) * (x - mx)).sum();
+    let sxy: f64 = xs.iter().zip(ys).map(|(x, y)| (x - mx) * (y - my)).sum();
+    let c = if sxx > 0.0 { sxy / sxx } else { 0.0 };
+    let a = my - c * mx;
+    let sq: f64 = xs.iter().zip(ys).map(|(x, y)| ((y - (a + c * x)) / y.abs().max(floor)).powi(2)).sum();
+    (sq / n).sqrt()
+}
+
+/// One leg's (program - baseline) difference under both meters, and wall
+/// time for the record.
+struct Delta {
+    instructions: f64,
+    moved: f64,
+    wall: Duration,
+}
+
+fn counted_delta(ctx: &Ctx, prog: &str, base: &str, leg: Leg) -> Result<Delta, String> {
+    let p = counted(ctx, prog, leg)?;
+    let b = counted(ctx, base, leg)?;
+    Ok(Delta {
+        instructions: (p.instructions as f64 - b.instructions as f64).max(0.0),
+        moved: (p.moved as f64 - b.moved as f64).max(0.0),
+        wall: p.wall.saturating_sub(b.wall),
+    })
+}
+
+/// One run's meters.
+struct Counts {
+    instructions: u64,
+    moved: u64,
+    wall: Duration,
+}
+
+/// The smaller counts of two runs (instructions repeat to ~0.05%; the
+/// minimum drops a rare interrupt-path outlier), with the same output checks
+/// the timed judge makes: deterministic, and equal across legs.
+fn counted(ctx: &Ctx, src: &str, leg: Leg) -> Result<Counts, String> {
+    let art = build_as(ctx, src, leg, true)?;
+    let mut best = Counts { instructions: u64::MAX, moved: u64::MAX, wall: Duration::MAX };
+    let mut first: Option<String> = None;
+    for _ in 0..2 {
+        let (out, c) = run_counted(ctx, &art, leg)?;
+        best = Counts {
+            instructions: best.instructions.min(c.instructions),
+            moved: best.moved.min(c.moved),
+            wall: best.wall.min(c.wall),
+        };
+        if first.get_or_insert_with(|| out.clone()) != &out {
+            return Err("nondeterministic output".into());
+        }
+    }
+    Ok(best)
+}
+
+/// The two legs print the same for `src`. Run once per size by the counted
+/// judge at the smaller of the two legs' k: checked inside every wasm count,
+/// it ran native at the WASM leg's k, which for an O(1)-on-wasm call over an
+/// O(n)-on-native one is no k native can afford (value.as_array: native took
+/// 102 s at k = 65536 and the run hit the 60 s cap as a "wasm" timeout).
+fn legs_agree(ctx: &Ctx, src: &str) -> Result<(), String> {
+    let native = run_artifact(ctx, &build(ctx, src, Leg::Native)?, Leg::Native)?;
+    let wasm = run_artifact(ctx, &build_as(ctx, src, Leg::Wasm, true)?, Leg::Wasm)?;
+    if native != wasm {
+        return Err(format!("native and wasm differ: {native:?} vs {wasm:?}"));
+    }
+    Ok(())
+}
+
+/// The second meter. glibc copies and fills large blocks with `rep movsb` /
+/// `rep stosb`, which retire as ONE instruction whatever the length, and
+/// wasm's `memory.copy` / `memory.fill` reach the same glibc routines through
+/// wasmtime: on c4-standard-4, 20 `memory.copy`s of 1 MB and of 16 MB both
+/// counted 6.27M instructions, so a quadratic built from copies would count
+/// as constant. (Raising glibc's rep thresholds did not help: +0.57M per
+/// 300 MB.) This shim counts the bytes each memcpy / memmove / memset is
+/// asked to move — the same probe read 21.6M / 84.5M / 336M bytes for 1 / 4
+/// / 16 MB — and the judge fits that series as well. The shim also replaces
+/// the copies with plain loops, so a copy's instruction count no longer steps
+/// where glibc changes strategy by length (see the shim's header).
+const MEMSHIM_C: &str = include_str!("memshim.c");
+
+fn build_memshim(dir: &Path) -> Option<PathBuf> {
+    let src = dir.join("memshim.c");
+    let so = dir.join("memshim.so");
+    std::fs::write(&src, MEMSHIM_C).ok()?;
+    let ok = Command::new("cc")
+        .args(["-O2", "-fno-tree-loop-distribute-patterns", "-fno-builtin", "-shared", "-fPIC", "-o"])
+        .arg(&so)
+        .arg(&src)
+        .arg("-ldl")
+        .output()
+        .is_ok_and(|o| o.status.success());
+    ok.then_some(so)
+}
+
+/// One run under `perf stat -x, -e instructions:u`: stdout and the counts.
+/// The count goes to a file so the program's stderr stays its own. The shim
+/// is preloaded through `env`, which execs the program, so perf's own copies
+/// are not counted and only the program's exit writes the byte total.
+fn run_counted(ctx: &Ctx, art: &Path, leg: Leg) -> Result<(String, Counts), String> {
+    let stat = ctx.dir.join(format!("stat-{}.csv", std::process::id()));
+    let moved_file = ctx.dir.join(format!("moved-{}.txt", std::process::id()));
+    let _ = std::fs::remove_file(&moved_file);
+    let world = World::for_program(&ctx.dir, &source_of(art))?;
+    let mut cmd = Command::new("perf");
+    cmd.args(["stat", "-x", ",", "-e", "instructions:u", "-o"]).arg(&stat).arg("--");
+    if let Some(shim) = &ctx.memshim {
+        cmd.arg("env")
+            .arg(format!("LD_PRELOAD={}", shim.display()))
+            .arg(format!("MEMSHIM_OUT={}", moved_file.display()));
+    }
+    let test_leg = aborts::test_art_leg(art);
+    match leg {
+        _ if test_leg.is_some() => {
+            let e = aborts::test_art_cmd(ctx, art, test_leg == Some(true), &world.dir);
+            cmd.arg(e.get_program()).args(e.get_args());
+            for (k, v) in e.get_envs() {
+                if let Some(v) = v {
+                    cmd.env(k, v);
+                }
+            }
+            &mut cmd
+        }
+        _ if is_embedded(art) => {
+            let e = embedded_cmd(ctx, art);
+            cmd.arg(e.get_program()).args(e.get_args());
+            for (k, v) in e.get_envs() {
+                if let Some(v) = v {
+                    cmd.env(k, v);
+                }
+            }
+            &mut cmd
+        }
+        Leg::Native => cmd.arg(art),
+        // Compile on every run, single-threaded: wasmtime's compile cache
+        // makes a module's first run count ~10x its later ones (c4-standard-4:
+        // 41.7M against 4.46M), and parallel compilation adds worker-thread
+        // spinning. A fresh compile is the same work at every n, so the fit's
+        // intercept absorbs it.
+        Leg::Wasm => cmd.arg(&ctx.wasmtime).args(["run", "-C", "cache=n", "-C", "parallel-compilation=n"]).args(world.wasmtime_args()).arg(art),
+    };
+    if test_leg.is_none() {
+        cmd.args(sandbox::ARGS);
+    }
+    world.enter(&mut cmd);
+    let (out, wall) = match serve_plan(&source_of(art)) {
+        // A served probe: the session's transcript is its output, and the
+        // SIGTERM goes to perf's child, the server, so perf reports.
+        Some(plan) => {
+            let s = crate::oracle::serve::drive_socket(&mut cmd, &plan, true)?;
+            (std::process::Output { stdout: s.transcript.into_bytes(), ..s.output }, s.wall)
+        }
+        None => {
+            let child = cmd
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .map_err(|e| e.to_string())?;
+            wait_capped(child, RUN_CAP)?
+        }
+    };
+    if !out.status.success() {
+        return Err(run_failure(&out));
+    }
+    let out = match test_leg {
+        Some(_) => std::process::Output { stdout: aborts::output_transcript(&out).into_bytes(), ..out },
+        None => out,
+    };
+    let instructions = parse_instructions(&std::fs::read_to_string(&stat).unwrap_or_default())
+        .ok_or_else(|| "perf reported no instructions:u count".to_string())?;
+    let moved = match &ctx.memshim {
+        None => 0,
+        Some(_) => std::fs::read_to_string(&moved_file)
+            .ok()
+            .and_then(|t| t.trim().parse().ok())
+            .ok_or_else(|| "the bytes-moved shim wrote no count (is the binary dynamically linked?)".to_string())?,
+    };
+    Ok((String::from_utf8_lossy(&out.stdout).into_owned(), Counts { instructions, moved, wall }))
+}
+
+/// The count of the `instructions:u` row of `perf stat -x,` output.
+fn parse_instructions(csv: &str) -> Option<u64> {
+    csv.lines()
+        .find(|l| l.contains("instructions"))
+        .and_then(|l| l.split(',').next())
+        .and_then(|c| c.trim().parse().ok())
+}
+
+/// Whether this host counts user-space instructions (a PMU is exposed and
+/// `perf_event_paranoid` lets an unprivileged process read it).
+fn icount_available() -> bool {
+    let dir = std::env::temp_dir().join(format!("xtarget-icount-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    let stat = dir.join("probe.csv");
+    let ok = Command::new("perf")
+        .args(["stat", "-x", ",", "-e", "instructions:u", "-o"])
+        .arg(&stat)
+        .args(["--", "true"])
+        .output()
+        .is_ok_and(|o| o.status.success())
+        && parse_instructions(&std::fs::read_to_string(&stat).unwrap_or_default()).is_some_and(|c| c > 0);
+    let _ = std::fs::remove_dir_all(&dir);
+    ok
+}
+
+#[cfg(test)]
+mod run_tests {
+    use super::*;
+
+    /// A probe that writes more than a pipe buffer holds (64 KiB on Linux)
+    /// must finish, not block on a full pipe until the cap reads it as a
+    /// timeout: `io.write` / `io.write_bytes` were "timed out (60s cap)" on
+    /// every call shape this way.
+    #[test]
+    fn a_run_that_writes_more_than_a_pipe_holds_finishes() {
+        let child = Command::new("sh")
+            .args(["-c", "head -c 300000 /dev/zero; head -c 200000 /dev/zero >&2"])
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("sh");
+        let (out, _) = wait_capped(child, Duration::from_secs(20)).expect("finishes under the cap");
+        assert!(out.status.success());
+        assert_eq!(out.stdout.len(), 300_000);
+        assert_eq!(out.stderr.len(), 200_000);
+    }
+
+    #[test]
+    fn a_run_past_the_cap_is_a_timeout() {
+        let child = Command::new("sh")
+            .args(["-c", "sleep 5"])
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("sh");
+        let e = wait_capped(child, Duration::from_millis(200)).expect_err("killed at the cap");
+        assert!(e.contains("timed out"), "{e}");
+    }
+
+    /// The counted judge's k stops growing on EITHER meter: a call whose
+    /// cost is one large copy retires a handful of instructions (`rep
+    /// movsb`), so an instructions-only target drove k up by 4x until each
+    /// run copied gigabytes and hit the 60 s cap (set.insert / set.union's
+    /// call shape on GCE).
+    #[test]
+    fn calibration_stops_on_bytes_moved_as_well_as_instructions() {
+        let counted_calibrated_t = |d: &Delta| counted_calibrated(d, 1.0);
+        let d = |instructions: f64, moved: f64| Delta { instructions, moved, wall: Duration::ZERO };
+        assert!(!counted_calibrated_t(&d(1e3, 1e3)));
+        assert!(counted_calibrated_t(&d(3e7, 0.0)));
+        assert!(counted_calibrated_t(&d(1e3, 3e8)));
+        // fs.write at n = 20000 calibrated to k = 65536 on instructions and
+        // timed out at 60 s: its bytes go to the kernel.
+        assert!(counted_calibrated_t(&Delta { instructions: 1e3, moved: 0.0, wall: Duration::from_secs(3) }));
+    }
+
+    /// The shim's copies cost the same instructions per byte in both
+    /// directions. A memmove copies forward when the destination sits below
+    /// the source and backward otherwise, so which loop runs depends on where
+    /// the allocator put two blocks — and that changed with n: wasm env.set's
+    /// overlay log sat in the park (below the value) at n = 20000 and in a
+    /// heap block (above it) from 40000 on, and its series read 5 then 4
+    /// instructions per byte, fitted nlogn (GCE c4-standard-4, 2026-10-17).
+    /// Skipped where no PMU is readable.
+    #[test]
+    fn the_shims_forward_and_backward_copies_count_alike() {
+        if !icount_available() {
+            eprintln!("skipping: no instructions:u counter here");
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("xtarget-memshim-dir-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let shim = build_memshim(&dir).expect("cc builds the shim");
+        // memmove 1 MB 64 times, down (forward copy) or up (backward copy)
+        // by 64 bytes; the program is the same, only the direction differs.
+        let driver = dir.join("driver.c");
+        std::fs::write(
+            &driver,
+            "#include <stdlib.h>\n#include <string.h>\nint main(int c, char **v) {\n  size_t n = 1 << 20;\n  \
+             unsigned char *b = malloc(n + 128);\n  for (size_t i = 0; i < n + 128; i++) b[i] = (unsigned char)i;\n  \
+             int up = v[1][0] == 'u';\n  for (int r = 0; r < 64; r++) {\n    if (up) memmove(b + 64, b, n); else memmove(b, b + 64, n);\n  }\n  \
+             return b[n / 2] == 7;\n}\n",
+        )
+        .unwrap();
+        let exe = dir.join("driver");
+        let ok = Command::new("cc").args(["-O0", "-o"]).arg(&exe).arg(&driver).status().is_ok_and(|s| s.success());
+        assert!(ok, "cc builds the driver");
+        let count = |dirn: &str| -> u64 {
+            let stat = dir.join(format!("{dirn}.csv"));
+            let st = Command::new("perf")
+                .args(["stat", "-x", ",", "-e", "instructions:u", "-o"])
+                .arg(&stat)
+                .arg("--")
+                .arg("env")
+                .arg(format!("LD_PRELOAD={}", shim.display()))
+                .arg(&exe)
+                .arg(dirn)
+                .status()
+                .expect("perf");
+            assert!(st.code().is_some(), "driver ran");
+            parse_instructions(&std::fs::read_to_string(&stat).unwrap()).expect("a count")
+        };
+        let (down, up) = (count("down"), count("up"));
+        let _ = std::fs::remove_dir_all(&dir);
+        // 64 MiB copied each way: a one-instruction-per-byte difference is
+        // 6.7e7, so 1% of either count is far under it and far over jitter.
+        let diff = down.abs_diff(up) as f64 / down.max(up) as f64;
+        assert!(diff < 0.01, "forward copy {down} instructions, backward {up}: the directions differ by {:.1}%", diff * 100.0);
+    }
+}
+
+#[cfg(test)]
+mod verdict_tests {
+    use super::*;
+    use std::os::unix::process::ExitStatusExt;
+
+    fn output(code: i32, stdout: &str, stderr: &str) -> std::process::Output {
+        std::process::Output {
+            status: std::process::ExitStatus::from_raw(code << 8),
+            stdout: stdout.as_bytes().to_vec(),
+            stderr: stderr.as_bytes().to_vec(),
+        }
+    }
+
+    /// #3636: a probe that exited non-zero is a failed run, not a leak count:
+    /// the allocator's exit report is printed whatever the exit, and a
+    /// `live=` read off an aborted run counts blocks the abort left behind.
+    #[test]
+    fn alloc_reports_the_exit_of_a_failed_run_not_its_live_count() {
+        let (ok, part) = alloc_part("call", &output(1, "", "error: matrix shape mismatch\nalloc: live=3 peak=9\n"));
+        assert!(!ok);
+        assert!(!part.contains("live="), "{part}");
+        assert!(part.contains("exit Some(1)") && part.contains("matrix shape mismatch"), "{part}");
+        assert_eq!(alloc_part("call", &output(0, "1\n", "alloc: live=0 peak=9\n")), (true, "call live=0".to_string()));
+        assert_eq!(alloc_part("loop", &output(0, "1\n", "alloc: live=2 peak=9\n")), (false, "loop live=2".to_string()));
+    }
+
+    /// #3666: a probe that stopped because the probed call returned `err`
+    /// is reported as the error path it took — in the timed / counted runs,
+    /// the alloc probe and the diamond alike — never as a count or a match.
+    #[test]
+    fn a_run_that_took_the_error_path_is_reported_as_such() {
+        let stderr = format!("PANIC: {ERR_PATH}: invalid base64 character\nalloc: live=0 peak=9\n");
+        let want = "took the error path (the probed call returned err: invalid base64 character)";
+        assert_eq!(run_failure(&output(1, "", &stderr)), format!("exit Some(1): {want}"));
+        let (ok, part) = alloc_part("call", &output(1, "", &stderr));
+        assert!(!ok && part.contains(want) && !part.contains("live="), "{part}");
+        // On wasm the allocator's exit report follows the panic message on
+        // the same line (measured: `...string__ALMD_WASM_ALLOC allocs=5 ...
+        // live=3`); it is not part of the reason.
+        let wasm = format!("PANIC: {ERR_PATH}: invalid base64 character__ALMD_WASM_ALLOC allocs=5 reused=0 live=3\n");
+        let (ok, part) = alloc_part("call", &output(1, "", &wasm));
+        assert!(!ok && part.ends_with(&format!("({want})")) && !part.contains("live="), "{part}");
+        let v = diamond_verdict(&output(1, "", &stderr), &output(1, "", &stderr));
+        assert!(v.starts_with("FAIL: ") && v.contains(want), "{v}");
+        // Any other failure keeps its own first error line.
+        assert_eq!(run_failure(&output(2, "", "warning: x\nerror: boom\n")), "exit Some(2): error: boom");
+    }
+
+    /// #3671: a probe that stopped because a call given an in-domain input
+    /// returned `none` / `false` is reported as the refusal it measured, in
+    /// every verdict, never as a count or a match.
+    #[test]
+    fn a_run_that_refused_its_in_domain_input_is_reported_as_such() {
+        let stderr = format!("PANIC: {OFF_DOMAIN}: none\nalloc: live=0 peak=9\n");
+        let want = "refused its in-domain input (the probed call returned none)";
+        assert_eq!(run_failure(&output(1, "", &stderr)), format!("exit Some(1): {want}"));
+        let wasm = format!("PANIC: {OFF_DOMAIN}: false__ALMD_WASM_ALLOC allocs=5 reused=0 live=3\n");
+        let (ok, part) = alloc_part("call", &output(1, "", &wasm));
+        assert!(!ok && part.ends_with("(refused its in-domain input (the probed call returned false))") && !part.contains("live="), "{part}");
+        let v = diamond_verdict(&output(1, "", &stderr), &output(1, "", &stderr));
+        assert!(v.starts_with("FAIL: ") && v.contains(want), "{v}");
+    }
+
+    /// `--emit` writes every program a verdict runs: the plain call, each
+    /// rebind shape, and the diamond project.
+    #[test]
+    fn emit_writes_every_probe_program() {
+        let t = crate::generator::inspect_gen::tests::target("result.map");
+        let files = probe_files(&t, 100);
+        let paths: Vec<&str> = files.iter().map(|(p, _)| p.as_str()).collect();
+        for want in ["call.almd", "loop.almd", "tail.almd", "fold.almd", "diamond/app/almide.toml", "diamond/app/src/main.almd"] {
+            assert!(paths.contains(&want), "{want}: {paths:?}");
+        }
+    }
+
+    /// #3636: a Unit function with no `mut` parameter prints `()` on each
+    /// path, so 0 lines is never "nothing to compare": it is a FAIL, as is a
+    /// failed leg.
+    #[test]
+    fn a_unit_diamond_prints_its_value_on_each_path() {
+        let t = crate::generator::inspect_gen::tests::target("testing.assert_gt");
+        let project = t.diamond_project(10);
+        let main = project.files.iter().find(|(p, _)| p.ends_with("main.almd")).map(|(_, s)| s.clone()).unwrap();
+        for v in ["d", "l", "r"] {
+            assert!(main.contains(&format!("println(\"{v} = ()\")")), "{main}");
+        }
+        let three = "d = ()\nl = ()\nr = ()\n";
+        let v = diamond_verdict(&output(0, three, ""), &output(0, three, ""));
+        assert!(v.starts_with("PASS: "), "{v}");
+        let v = diamond_verdict(&output(1, "", "error: boom"), &output(0, three, ""));
+        assert!(v.starts_with("FAIL: "), "{v}");
+        let v = diamond_verdict(&output(0, "", ""), &output(0, "", ""));
+        assert!(v.starts_with("FAIL: "), "{v}");
+    }
+}
+
+#[cfg(test)]
+mod fit_tests {
+    use super::*;
+
+    fn sizes() -> Vec<u64> {
+        (0..5).map(|i| 20_000u64 << i).collect()
+    }
+
+    fn class_of(f: impl Fn(f64) -> f64) -> &'static str {
+        let ys: Vec<f64> = sizes().iter().map(|&n| 1.0e6 + f(n as f64)).collect();
+        CLASSES[fit_class(&sizes(), &ys).0].0
+    }
+
+    #[test]
+    fn each_curve_is_classified_as_itself_or_cheaper_never_dearer() {
+        assert_eq!(class_of(|_| 3.0e7), "1");
+        assert_eq!(class_of(|n| 40.0 * n), "n");
+        assert_eq!(class_of(|n| 0.05 * n * n), "n2");
+        assert_eq!(class_of(|n| 1.0e-6 * n * n * n), "n3");
+        // n log n over a 16x range is within tolerance of a line with an
+        // intercept: it reads as n or nlogn, never as n2.
+        assert!(matches!(class_of(|n| 40.0 * n * n.ln()), "n" | "nlogn"));
+    }
+
+    fn class_of_exact(f: impl Fn(f64) -> f64) -> &'static str {
+        let ys: Vec<f64> = sizes().iter().map(|&n| f(n as f64)).collect();
+        CLASSES[fit_class(&sizes(), &ys).0].0
+    }
+
+    fn explained(f: impl Fn(f64) -> f64) -> bool {
+        let ys: Vec<f64> = sizes().iter().map(|&n| f(n as f64)).collect();
+        fit_class(&sizes(), &ys).1 <= FIT_TOLERANCE
+    }
+
+    #[test]
+    fn a_sort_plus_linear_work_reads_as_nlogn() {
+        // A sorted listing: n log n for the sort plus a linear term for the
+        // entries. The 2-term n and nlogn fits miss it by 3.1% and 4.9%.
+        assert_eq!(class_of_exact(|n| 20.0 * n + n * n.ln()), "nlogn");
+        // A program-shape intercept below zero does not steepen the curve.
+        assert_eq!(class_of_exact(|n| -1.0e5 + 20.0 * n + n * n.ln()), "nlogn");
+    }
+
+    #[test]
+    fn the_linear_term_does_not_let_a_steeper_curve_pass_as_nlogn() {
+        // Over n..16n `a + b·n + c·n·ln n` fits these within 3%; the slope cap
+        // (n·ln n's own log-log slope + 0.03) refuses them.
+        for f in [|n: f64| n.powf(1.2), |n: f64| n * n.ln() * n.ln()] {
+            assert!(!explained(f) || !matches!(class_of_exact(f), "1" | "log" | "n" | "nlogn"));
+        }
+    }
+
+    #[test]
+    fn a_single_cache_step_does_not_read_as_a_higher_order() {
+        // The wall-time failure this judge replaces: linear, with one x1.5
+        // jump between two sizes. Counted instructions never show it, but
+        // the fit must not over-read a modest bump either.
+        let ys: Vec<f64> = sizes().iter().enumerate()
+            .map(|(i, &n)| 40.0 * n as f64 * if i >= 2 { 1.05 } else { 1.0 })
+            .collect();
+        assert_eq!(CLASSES[fit_class(&sizes(), &ys).0].0, "n");
+    }
+
+    #[test]
+    fn a_series_no_class_explains_reports_its_residual_above_tolerance() {
+        // Measured on wasm list.drop: a (program - baseline) difference that
+        // shrinks to zero as n grows. No class explains it, and the judge
+        // must see that rather than a best-fit class.
+        let ys = [2.617e5, 2.409e5, 2.015e5, 1.213e5, 0.0];
+        assert!(fit_class(&sizes(), &ys).1 > FIT_TOLERANCE);
+    }
+
+    #[test]
+    fn under_the_per_call_floor_is_constant() {
+        let ys = [7.811e5, 1.47e2, 5.79e2, 8.2e1, 4.8e1];
+        assert_eq!(fit_series(&sizes(), &ys, 1 << 20), (0, 0.0));
+        // 763 per call at the first size, ~0 after: under n / 16 = 1250
+        // everywhere, so constant.
+        assert_eq!(fit_series(&sizes(), &ys, 1024), (0, 0.0));
+        // The same shape at 64 calls is 12,205 per call at the first size:
+        // above the floor, so it is fitted, and no class explains it.
+        assert!(fit_series(&sizes(), &ys, 64).1 > FIT_TOLERANCE);
+        // The tiny flat series the floor exists for: wasm string.drop's loop
+        // (k = 16) and native string.drop_end's loop (k = 64).
+        let drop = [2.826e3, 2.550e3, 2.036e3, 3.894e3, 5.355e3];
+        assert_eq!(fit_series(&sizes(), &drop, 16), (0, 0.0));
+        let drop_end = [3.622e4, 4.002e4, 3.883e4, 3.743e4, 4.045e4];
+        assert_eq!(fit_series(&sizes(), &drop_end, 64), (0, 0.0));
+    }
+
+    #[test]
+    fn the_floor_never_hides_a_linear_series() {
+        // The cheapest linear series physically possible: m / 64 per call
+        // (64 bytes per instruction), plus a constant. It crosses the floor
+        // and is fitted as n.
+        for k in [1u64, 64, 1 << 20] {
+            let ys: Vec<f64> = sizes().iter().map(|&m| (m as f64 / 64.0 + 100.0) * k as f64).collect();
+            assert_ne!(fit_series(&sizes(), &ys, k), (0, 0.0), "k = {k}");
+            assert_eq!(CLASSES[fit_series(&sizes(), &ys, k).0].0, "n", "k = {k}");
+        }
+    }
+
+    #[test]
+    fn perf_csv_is_parsed() {
+        assert_eq!(parse_instructions("135023,,instructions:u,362206,100.00,,\n"), Some(135023));
+        assert_eq!(parse_instructions("<not counted>,,instructions:u,0,0.00,,\n"), None);
+    }
+}

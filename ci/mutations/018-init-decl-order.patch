@@ -1,8 +1,8 @@
-diff --git a/crates/almide-wasm/src/lib.rs b/crates/almide-wasm/src/lib.rs
-index cde211f7a..08cfed973 100644
---- a/crates/almide-wasm/src/lib.rs
-+++ b/crates/almide-wasm/src/lib.rs
-@@ -578,7 +578,10 @@ fn build_globals(
+diff --git a/crates/almide-wasm/src/program_tables.rs b/crates/almide-wasm/src/program_tables.rs
+index a7c9c2e84..7cd95e28e 100644
+--- a/crates/almide-wasm/src/program_tables.rs
++++ b/crates/almide-wasm/src/program_tables.rs
+@@ -56,7 +56,10 @@ pub(crate) fn build_globals(
              global_map.insert(use_g, slot);
          }
      }

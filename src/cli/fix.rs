@@ -256,9 +256,6 @@ fn report_fix_result(outcome: FixOutcome, dry_run: bool, json: bool) {
 /// checker reasons about a program the author did not write, and a fix-it
 /// derived from it would be anchored to a span the parser invented.
 fn collect_diagnostics(file: &str, source: &str) -> (Vec<Diagnostic>, usize) {
-    use almide::check::Checker;
-    use almide::canonicalize;
-
     let tokens = almide::lexer::Lexer::tokenize(source);
     let mut parser = almide::parser::Parser::new(tokens).with_file(file);
     let Ok(mut prog) = parser.parse() else {
@@ -272,17 +269,37 @@ fn collect_diagnostics(file: &str, source: &str) -> (Vec<Diagnostic>, usize) {
         return (parse_errors, parse_error_count);
     }
 
-    let canon = canonicalize::canonicalize_program(&prog, std::iter::empty());
-    let mut checker = Checker::from_env(canon.env);
-    checker.set_source(file, source);
-    checker.diagnostics = canon.diagnostics;
-    let mut diagnostics = checker.infer_program(&mut prog);
+    let mut diagnostics = infer_entry(file, source, &mut prog);
     // E062 (#2159) is decided from the text of line 1, outside the checker;
     // its `-S` insertion is machine-applicable, so the engine must see it.
     if let Some(d) = almide::lint_shebang::split_string_warning(file, source) {
         diagnostics.push(d);
     }
     (diagnostics, 0)
+}
+
+/// Type-check the entry program against the modules it imports, as
+/// `almide check` does (#3523). Canonicalizing without them left every
+/// `module.fn(..)` call of an imported module (bundled stdlib such as
+/// `args`, or a sibling file) unresolved, so the diagnostics `check` reports
+/// on those calls — and the fix-its they carry — never reached the engine.
+/// A program whose imports do not resolve is checked alone, as before;
+/// `almide check` is where that failure is reported.
+fn infer_entry(file: &str, source: &str, prog: &mut almide::ast::Program) -> Vec<Diagnostic> {
+    use almide::check::Checker;
+    use almide::canonicalize;
+
+    static DEP_PATHS: std::sync::OnceLock<Vec<(almide::project::PkgId, std::path::PathBuf)>> = std::sync::OnceLock::new();
+    let dep_paths = DEP_PATHS.get_or_init(super::dep_paths_from_cwd_toml);
+    let modules = almide::resolve::resolve_imports_with_deps(file, prog, dep_paths)
+        .map(|r| r.modules)
+        .unwrap_or_default();
+    let canon = canonicalize::canonicalize_program(prog, modules.iter().map(|(n, p, _, s)| (n.as_str(), p, *s)));
+    let mut checker = Checker::from_env(canon.env);
+    checker.set_source(file, source);
+    checker.diagnostics = canon.diagnostics;
+    almide::resolve::refresh_module_toplets(&mut checker, &modules);
+    checker.infer_program(prog)
 }
 
 /// True when two single-line replacement ranges touch. Half-open
@@ -693,8 +710,6 @@ fn word_boundary_ok(bytes: &[u8], start: usize, end: usize) -> bool {
 ///   are exactly the fixes an IDE or a model can apply with one keystroke
 ///   once a human has agreed to the reading.
 fn collect_residual_fixes(file: &str, source: &str) -> (Vec<ManualDiag>, Vec<FixItJson>) {
-    use almide::check::Checker;
-    use almide::canonicalize;
     use almide::diagnostic;
 
     let tokens = almide::lexer::Lexer::tokenize(source);
@@ -703,11 +718,7 @@ fn collect_residual_fixes(file: &str, source: &str) -> (Vec<ManualDiag>, Vec<Fix
         Ok(p) => p,
         Err(_) => return (Vec::new(), Vec::new()),
     };
-    let canon = canonicalize::canonicalize_program(&prog, std::iter::empty());
-    let mut checker = Checker::from_env(canon.env);
-    checker.set_source(file, source);
-    checker.diagnostics = canon.diagnostics;
-    let diagnostics = checker.infer_program(&mut prog);
+    let diagnostics = infer_entry(file, source, &mut prog);
 
     let residual: Vec<&Diagnostic> = diagnostics.iter()
         .chain(parser.errors.iter())

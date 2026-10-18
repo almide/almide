@@ -21,6 +21,7 @@
 mod availability;
 mod findings;
 mod generator;
+mod inspect;
 mod metamorph;
 mod minimize;
 mod oracle;
@@ -55,6 +56,8 @@ fn main() {
         "ladder" => cmd_ladder(&args[2..]),
         "gen" => cmd_gen(&args[2..]),
         "stats" => cmd_stats(),
+        "catalogue" => Engine::new(&resolve_repo(&args[2..])).catalogue_names().iter().for_each(|n| println!("{n}")),
+        "inspect" => inspect::cmd_inspect(&args[2..]),
         "-h" | "--help" | "help" => print_usage(),
         other => {
             eprintln!("unknown subcommand: {other}\n");
@@ -72,7 +75,10 @@ fn print_usage() {
          \x20 xtarget-fuzz replay --seed N --index I [--family F]\n\
          \x20 xtarget-fuzz ladder <file.almd> [--timeout S]\n\
          \x20 xtarget-fuzz gen    --seed N --index I [--family F]\n\
-         \x20 xtarget-fuzz stats\n\n\
+         \x20 xtarget-fuzz stats\n\
+         \x20 xtarget-fuzz catalogue   (the `module.fn` names --focus and inspect can reach)\n\
+         \x20 xtarget-fuzz inspect <module.fn> [--order O] [--order-rebind O] [--n N] [--count C] [--seed S] [--emit DIR]\n\
+         \x20   the stdlib inspection ledger's harness (proofs/stdlib-inspection.toml); O = 1|log|n|nlogn|n2\n\n\
          --family all|identity|synthesis|composition|shape  (default: all)\n\
          \x20 `shape` runs ONLY the multi-module family (#3309): projects of sibling\n\
          \x20 modules and path-dependency packages with top-level lets of every kind,\n\
@@ -216,7 +222,19 @@ fn cmd_run(args: &[String]) {
         _ => {}
     }
 
-    let engine = Arc::new(Engine::with_family(&repo, family));
+    let focus = flag_value(args, "--focus").map(String::from);
+    let engine = Engine::with_family(&repo, family);
+    let engine = match &focus {
+        Some(f) => engine.focus(f).unwrap_or_else(|e| {
+            eprintln!("{e}");
+            std::process::exit(2);
+        }),
+        None => engine,
+    };
+    if let Some(f) = &focus {
+        eprintln!("  focus    = {f} (weight x{})", generator::FOCUS_BOOST);
+    }
+    let engine = Arc::new(engine);
     eprintln!(
         "  catalogue= {} stdlib signatures, {} corpus programs\n",
         engine.catalogue_len(),
@@ -260,6 +278,7 @@ fn cmd_run(args: &[String]) {
             deadline,
             max_count,
             dump_walls: dump_walls.clone(),
+            focus: focus.clone(),
         };
         handles.push(std::thread::spawn(move || {
             worker_loop(engine, sink, tc, work_dir, next_index, stop, stats, cfg);
@@ -300,6 +319,8 @@ struct WorkerCfg {
     max_count: Option<u64>,
     /// `--dump-walls`: where walled programs' sources land, if anywhere.
     dump_walls: Option<PathBuf>,
+    /// `--focus module.fn`: count the programs that call it.
+    focus: Option<String>,
 }
 
 /// One worker: pull program indices, generate, run the ladder, minimize
@@ -363,6 +384,10 @@ fn worker_loop(
         };
 
         stats.generated.fetch_add(1, Ordering::Relaxed);
+        let calls_focus = cfg.focus.as_ref().is_some_and(|f| ladder_source.contains(&format!("{f}(")));
+        if calls_focus {
+            stats.focus_hits.fetch_add(1, Ordering::Relaxed);
+        }
         if gen.expected_stdout.is_some() {
             stats.self_checked.fetch_add(1, Ordering::Relaxed);
         }
@@ -395,6 +420,9 @@ fn worker_loop(
         match outcome {
             Outcome::Clean { native } => {
                 stats.clean.fetch_add(1, Ordering::Relaxed);
+                if calls_focus {
+                    stats.focus_clean.fetch_add(1, Ordering::Relaxed);
+                }
                 // Metamorphic rung (#515): binding-shape variants of clean
                 // SYNTHESIZED programs must be accepted and byte-identical.
                 if matches!(gen.origin, crate::generator::Origin::Synthesis) {
@@ -422,7 +450,10 @@ fn worker_loop(
                 // re-discovery dedups whatever the minimizer would produce:
                 // only the first leak of the campaign pays for minimizing
                 // (with the rung armed, so the ladder reproduces the kind).
-                if let Some(leak) = if tc.leak_check && gen.project.is_none() { leak_at_exit(&tc, &file) } else { None } {
+                // A program that ends by `process.exit` released nothing on
+                // any leg, so it has no leak to judge.
+                let judged = tc.leak_check && gen.project.is_none() && !crate::generator::ends_without_unwinding(&gen.source);
+                if let Some(leak) = if judged { leak_at_exit(&tc, &file) } else { None } {
                     stats.findings.fetch_add(1, Ordering::Relaxed);
                     if !sink.is_known(&leak) {
                         let minimized = match &gen.plan {
@@ -439,8 +470,13 @@ fn worker_loop(
                     }
                 }
             }
-            Outcome::GeneratorReject { .. } => {
+            Outcome::GeneratorReject { diagnostics } => {
                 stats.generator_rejects.fetch_add(1, Ordering::Relaxed);
+                // A focused campaign's rejects are the generator's defects
+                // about that function: say which (XF_SHOW_SKIPS=1).
+                if std::env::var_os("XF_SHOW_SKIPS").is_some() {
+                    eprintln!("  reject #{index}: {}", diagnostics.lines().find(|l| l.contains("error")).unwrap_or(""));
+                }
             }
             Outcome::Walled { reason } => {
                 stats.walled.fetch_add(1, Ordering::Relaxed);
@@ -463,8 +499,13 @@ fn worker_loop(
                 };
                 *reasons.entry(key).or_insert(0) += 1;
             }
-            Outcome::Skipped { .. } => {
+            Outcome::Skipped { reason } => {
                 stats.skipped.fetch_add(1, Ordering::Relaxed);
+                // A focused campaign whose calls all skip judges nothing:
+                // say why (XF_SHOW_SKIPS=1).
+                if std::env::var_os("XF_SHOW_SKIPS").is_some() {
+                    eprintln!("  skip: {reason}");
+                }
             }
             Outcome::Finding(finding) => {
                 stats.findings.fetch_add(1, Ordering::Relaxed);
@@ -750,6 +791,14 @@ fn cmd_gen(args: &[String]) {
         .and_then(|s| s.parse().ok())
         .unwrap_or(0);
     let engine = Engine::with_family(&repo, resolve_family(args));
+    // `--focus module.fn`: the program `run --focus` would generate.
+    let engine = match flag_value(args, "--focus") {
+        Some(f) => engine.focus(f).unwrap_or_else(|e| {
+            eprintln!("xtarget-fuzz gen: {e}");
+            std::process::exit(2);
+        }),
+        None => engine,
+    };
     let gen = engine.generate(seed, index);
     print!("{}", gen.source);
 }
@@ -783,6 +832,10 @@ struct Stats {
     /// only differentially. This is the campaign's honest answer to "how
     /// much of tonight could have caught a bug both backends share".
     self_checked: AtomicU64,
+    /// `--focus`: generated programs that call the focus function, and the
+    /// ones among them every leg agreed on (the Clean outcome).
+    focus_hits: AtomicU64,
+    focus_clean: AtomicU64,
 }
 
 fn report_progress(
@@ -860,6 +913,13 @@ fn print_summary(stats: &Stats, sink: &FindingSink, elapsed: Duration, out_dir: 
         eprintln!("  unique findings  = {}", sink.count());
     }
     eprintln!("  throughput       = {:.1} programs/min", g as f64 / secs * 60.0);
+    let hits = stats.focus_hits.load(Ordering::Relaxed);
+    if hits > 0 {
+        eprintln!(
+            "  focus            = {hits} program(s) call it, {} of them clean on every leg",
+            stats.focus_clean.load(Ordering::Relaxed)
+        );
+    }
     if walls > 0 {
         let reasons = stats.wall_reasons.lock().unwrap();
         let mut top: Vec<(&String, &u64)> = reasons.iter().collect();

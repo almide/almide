@@ -1,0 +1,38 @@
+// straight-line, non-loop, non-recursive callees: entry-exempt (0 units)
+fn s1(x: Int) -> Int = x * 3 + 1
+fn s2(x: Int) -> Int = s1(s1(s1(s1(x)))) + s1(s1(s1(x)))
+fn s3(x: Int) -> Int = s2(s2(s2(s2(x)))) + s2(s2(s2(x)))
+fn s4(x: Int) -> Int = s3(s3(s3(s3(x)))) + s3(s3(s3(x)))
+fn big(x: Int, t: Int) -> Int = s4(s4(x)) * 0 + t
+// one-iteration loop: entry 1 + loop heads 2
+fn tiny(x: Int, t: Int) -> Int = {
+  var i = 0
+  while i < 1 { i = i + 1 }
+  x * 0 + t
+}
+// non-loop but recursive
+fn rec(n: Int, t: Int) -> Int = if n <= 0 then t else rec(n - 1, t)
+effect fn main() -> Unit = {
+  let a = fan.race {
+    tiny(1, 1)
+    big(1, 2)
+  } ?? -1
+  println("C1 tiny-vs-big(straight-line ~10^4 calls): " + int.to_string(a))
+  let b = fan.race(compute.ns(0)) {
+    big(1, 2)
+  } ?? -1
+  println("C2 big under 0ns budget: " + int.to_string(b))
+  let c = fan.race(compute.ns(8)) {
+    tiny(1, 1)
+  } ?? -1
+  println("C3 tiny under 8ns(2 units): " + int.to_string(c))
+  let d = fan.race(compute.ns(9)) {
+    tiny(1, 1)
+  } ?? -1
+  println("C4 tiny under 9ns(3 units): " + int.to_string(d))
+  let e = fan.race {
+    rec(3, 1)
+    tiny(1, 2)
+  } ?? -1
+  println("C5 rec(3)=4 entries vs tiny=3: " + int.to_string(e))
+}

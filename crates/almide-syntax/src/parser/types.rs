@@ -2,6 +2,20 @@ use crate::lexer::TokenType;
 use crate::ast::*;
 use crate::intern::{Sym, sym};
 use super::Parser;
+
+/// Builtin type spellings from C / Rust / Python / TS and the Almide type
+/// each means: a syntax table read by the parser's recovery, not a property
+/// of any stdlib function.
+const FOREIGN_BUILTIN_TYPES: &[(&str, &str)] = &[
+    ("int", "Int"), ("integer", "Int"), ("long", "Int"), ("i64", "Int"),
+    ("isize", "Int"), ("usize", "Int"), ("number", "Int"),
+    ("i8", "Int8"), ("i16", "Int16"), ("i32", "Int32"),
+    ("u8", "UInt8"), ("u16", "UInt16"), ("u32", "UInt32"), ("u64", "UInt64"),
+    ("float", "Float"), ("double", "Float"), ("f64", "Float"), ("f32", "Float32"),
+    ("string", "String"), ("str", "String"),
+    ("bool", "Bool"), ("boolean", "Bool"),
+    ("void", "Unit"), ("unit", "Unit"),
+];
 impl Parser {
     pub(crate) fn parse_type_expr(&mut self) -> Result<TypeExpr, String> {
         self.enter_depth()?;
@@ -57,7 +71,7 @@ impl Parser {
         if self.check(TokenType::Ident) && self.peek_dot_type_name() {
             let mut path = self.advance_and_get_sym().to_string();
             self.advance(); // skip '.'
-            while self.check(TokenType::Ident) {
+            while self.check(TokenType::Ident) && self.peek_at(1).is_some_and(|t| t.token_type == TokenType::Dot) {
                 path.push('.');
                 path.push_str(&self.advance_and_get_sym());
                 self.advance(); // skip '.' (guaranteed by peek_dot_type_name)
@@ -66,8 +80,29 @@ impl Parser {
             let qualified = sym(&format!("{}.{}", path, type_name));
             return self.parse_type_name_suffix(qualified);
         }
-        let name = self.expect_type_name()?;
+        let name = match self.respell_foreign_builtin_type() {
+            Some(name) => name,
+            None => self.expect_type_name()?,
+        };
         self.parse_type_name_suffix(name)
+    }
+
+    /// A builtin type spelled the C / Rust / Python / TS way (`int`, `i64`,
+    /// `string`, `bool`, `f64`, `u8`, …): one error naming the Almide type,
+    /// which the position then reads as — before, the param's or binding's
+    /// type error dropped the declaration and failed every use of it.
+    fn respell_foreign_builtin_type(&mut self) -> Option<Sym> {
+        let tok = self.current();
+        if tok.token_type != TokenType::Ident { return None; }
+        let almide = FOREIGN_BUILTIN_TYPES.iter().find(|(foreign, _)| *foreign == tok.value)?.1;
+        let diag = self.diag_error(
+            format!("'{}' is not an Almide type: use '{almide}'", tok.value),
+            "Almide type names start with an uppercase letter: Int, Float, String, Bool, Unit, Int32, UInt8, ….",
+            "type",
+        ).with_try(format!("x: {almide}"));
+        self.errors.push(diag);
+        self.advance();
+        Some(sym(almide))
     }
 
     /// ADR-0009 D1 (#1108 Phase 2b): a fn TYPE's return may carry the
@@ -112,7 +147,7 @@ impl Parser {
         let name = if self.check(TokenType::Ident) && self.peek_dot_type_name() {
             let mut path = self.advance_and_get_sym().to_string();
             self.advance(); // skip '.' (guaranteed by peek_dot_type_name)
-            while self.check(TokenType::Ident) {
+            while self.check(TokenType::Ident) && self.peek_at(1).is_some_and(|t| t.token_type == TokenType::Dot) {
                 path.push('.');
                 path.push_str(&self.advance_and_get_sym());
                 self.advance(); // skip '.' (guaranteed by peek_dot_type_name)
@@ -492,7 +527,7 @@ impl Parser {
         let module = if self.check(TokenType::Ident) && self.peek_dot_type_name() {
             let mut path = self.advance_and_get_sym().to_string();
             self.advance(); // skip '.'
-            while self.check(TokenType::Ident) {
+            while self.check(TokenType::Ident) && self.peek_at(1).is_some_and(|t| t.token_type == TokenType::Dot) {
                 path.push('.');
                 path.push_str(&self.advance_and_get_sym());
                 self.advance(); // skip '.' (guaranteed by peek_dot_type_name)

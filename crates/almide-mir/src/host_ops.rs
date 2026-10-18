@@ -37,8 +37,10 @@
 //! structural wasm leg (`almide_wasm::cert_project::op_caps`): clock reads and
 //! the sleep reach `Clock`; argv and environment reads/writes `CliArgs` (the
 //! manifest's `Env`); entropy `Entropy`; stdout `Stdout`; stdin `Stdin`; the
-//! filesystem `FsRead` / `FsWrite`; the http client `Net`. A function that
-//! reaches a capability it does not declare stays caps-unverified.
+//! filesystem `FsRead` / `FsWrite`; the http client `Net`; starting a child
+//! (`testing.assert_aborts`'s run, ADR-0029) `Process`, the projection's
+//! private process id. A function that reaches a capability it does not
+//! declare stays caps-unverified.
 
 use crate::Capability;
 
@@ -97,7 +99,7 @@ impl HostOp {
     }
 }
 
-use Capability::{CliArgs, Clock, Entropy, FsRead, FsWrite, Net, Stdin, Stdout};
+use Capability::{CliArgs, Clock, Entropy, FsRead, FsWrite, Net, Process, Stdin, Stdout};
 
 const ENV: &[Capability] = &[CliArgs];
 const CLOCK: &[Capability] = &[Clock];
@@ -109,6 +111,7 @@ const WRITE_ENTROPY: &[Capability] = &[FsWrite, Entropy];
 const OUT: &[Capability] = &[Stdout];
 const IN: &[Capability] = &[Stdin];
 const NET: &[Capability] = &[Net];
+const PROCESS: &[Capability] = &[Process];
 
 /// Every admitted host op. Adding one is adding a row; the contract gate then
 /// checks it against the stdlib declaration and the runtime signature.
@@ -204,7 +207,8 @@ pub const HOST_OPS: &[HostOp] = &[
     op("http", "delete_response", "almide_http_delete_response", NET).result(),
     op("http", "request_response", "almide_http_request_response", NET).result(),
     // The call handle (#2631): start, the four verbs over it, and the
-    // limited streaming twin built on it.
+    // streaming clients built on it — the limited twin, and plain
+    // request_stream as the handle's classic call (no limits named).
     wrapper("http", "start", "__call_start", "almide_rt_http___call_start", NET).result(),
     op("http", "poll", "almide_http_call_poll", NET),
     op("http", "read_new", "almide_http_call_read_new", NET),
@@ -218,31 +222,32 @@ pub const HOST_OPS: &[HostOp] = &[
         NET,
     )
     .result(),
+    op("http", "request_stream", "almide_http_request_stream", NET).result(),
+    // ── testing: assert_aborts's site pair (ADR-0029, #3792), test builds only ──
+    // The child run starts a child — a re-exec of the native test binary, a
+    // fresh instance on the embedded host (op 117) — so it counts Process. The
+    // selector reads how this run was launched (ALMIDE_ABORT_SITE natively,
+    // op 118 on the embedded host): an environment read.
+    op("testing", "__abort_site_run", "almide_rt_test_abort_site_run", PROCESS),
+    op("testing", "__abort_site_selected", "almide_rt_test_abort_site_selected", ENV),
 ];
 
 /// The modules whose surface reaches the host. Each one's `@intrinsic`s form
 /// the audited matrix; a stdlib module outside this list must be wholly pure
 /// (`crate::purity::PURE_MODULES` — the contract test checks the partition).
 pub const CAP_MODULES: &[&str] =
-    &["args", "datetime", "env", "fs", "http", "io", "mem", "net", "process", "random", "testing", "zlib"];
+    &["args", "datetime", "env", "fs", "http", "io", "net", "process", "random", "testing", "zlib"];
 
 /// The capability-module intrinsics that are NEITHER a host op NOR pure: they
 /// are refused by the lowering outright, so they never reach a certificate.
 /// `"*"` covers the rest of a module (a row or a pure admission still wins).
 pub const WALLED: &[(&str, &str, &str)] = &[
     ("net", "*", "sockets, unix sockets and shared memory: native-only, no WASI floor (the native-FFI class)"),
-    ("process", "*", "child processes, signals, stdin_lines and the exit / sleep / pid / env family: native-only; `exit` lowers as the ProcExit prim"),
+    ("process", "*", "child processes, signals and the exit / sleep / pid / env family: native-only; `exit` lowers as the ProcExit prim; stdin_lines runs on wasm through a self-host body, outside this subset"),
     ("http", "serve", "the listener: native-only, and its handler is a closure the host invokes"),
-    ("http", "request_stream", "a callback the host invokes per chunk; its limited twin is the admitted form"),
-    ("http", "openai_streaming_call", "a callback the host invokes per delta; not admitted"),
-    ("http", "anthropic_streaming_call", "a callback the host invokes per delta; not admitted"),
     ("http", "__call_start", "reached only through its wrapper row `http.start`"),
     ("http", "__request_stream_limited", "reached only through its wrapper row `http.request_stream_with_limits`"),
-    ("http", "__openai_streaming_limited", "the limited streaming twins: not admitted"),
-    ("http", "__anthropic_streaming_limited", "the limited streaming twins: not admitted"),
-    ("testing", "assert_throws", "needs an unwinding catch the MIR rung has no form for"),
-]
-;
+];
 
 /// The typed-twin suffixes a ROUTED row's call name can carry
 /// (`lower::list_heap_call_name`): random's element twins and the fold walkers'
@@ -336,6 +341,19 @@ mod tests {
         assert_eq!(host_op_capabilities("env.set"), &[Capability::CliArgs]);
         assert_eq!(host_op_capabilities("http.get"), &[Capability::Net]);
         assert_eq!(host_op_capabilities("fs.copy"), &[Capability::FsRead, Capability::FsWrite]);
+    }
+
+    /// testing.assert_aborts's site pair (ADR-0029, #3792) is admitted: the
+    /// child run counts Process (ADR-0025's child-start id, 10), the selector
+    /// reads the launch environment and counts CliArgs.
+    #[test]
+    fn the_abort_site_pair_is_admitted_and_counted() {
+        assert_eq!(classify("testing", "__abort_site_run"), Cell::HostOp);
+        assert_eq!(classify("testing", "__abort_site_selected"), Cell::HostOp);
+        assert_eq!(host_op_capabilities("testing.__abort_site_run"), &[Capability::Process]);
+        assert_eq!(host_op_capabilities("testing.__abort_site_selected"), &[Capability::CliArgs]);
+        assert_eq!(Capability::Process.id(), 10, "the wasm projection's cap::PROC");
+        assert!(!is_uncounted_host_call("testing.__abort_site_run"));
     }
 
     #[test]

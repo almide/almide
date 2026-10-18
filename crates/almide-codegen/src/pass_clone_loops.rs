@@ -124,19 +124,26 @@ fn borrowed_element_is_heap(ty: &Ty) -> bool {
     list_elem(ty).is_some_and(super::pass_clone::needs_clone)
 }
 
-fn owns_final_field_read(iterable: &IrExpr, body: &[IrStmt], ctx: &CloneCtx) -> bool {
-    if ctx.in_loop || !matches!(iterable.kind, IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. }) {
+/// Is the loop head the LAST read of a value this fn owns — an owned field
+/// read, or the owned list var itself (#3217) — so the loop may consume it
+/// and move each element out? A head the body still reads or writes, one in
+/// a loop or a closure (it runs again), or an always-cloned var is not.
+fn owns_final_read(iterable: &IrExpr, body: &[IrStmt], ctx: &CloneCtx) -> bool {
+    if ctx.in_loop
+        || !matches!(iterable.kind, IrExprKind::Var { .. } | IrExprKind::Member { .. } | IrExprKind::TupleIndex { .. })
+    {
         return false;
     }
     let Some(root) = iterable_root(iterable) else { return false; };
-    ctx.owned.contains(&root) && !ctx.always.contains(&root) && ctx.remaining.get(&root).copied().unwrap_or(1) <= 1
+    ctx.owned.contains(&root) && !ctx.always.contains(&root) && !ctx.captured.contains(&root)
+        && ctx.remaining.get(&root).copied().unwrap_or(1) <= 1
         && !body_writes_var(body, root)
 }
 
 /// `ForIn { var, var_tuple, iterable, body }` arm of [`insert_clones_live`]:
 /// the iterable is NOT in the loop, the body IS.
 pub(crate) fn insert_clones_for_in(var: VarId, var_tuple: Option<Vec<VarId>>, iterable: IrExpr, body: Vec<IrStmt>, ctx: &mut CloneCtx) -> IrExprKind {
-    let owns_field = owns_final_field_read(&iterable, &body, ctx);
+    let owns_head = owns_final_read(&iterable, &body, ctx);
     let new_iterable = strip_list_iterable_clone(insert_clones_live(iterable, ctx), &body);
     let fresh = loop_fresh_vars(Some(var), var_tuple.as_deref(), &body);
     ctx.loops.binders.insert(var);
@@ -153,7 +160,7 @@ pub(crate) fn insert_clones_for_in(var: VarId, var_tuple: Option<Vec<VarId>>, it
     let by_ref_head = is_list && !matches!(new_iterable.kind, IrExprKind::Range { .. });
     if by_ref_head && var_tuple.is_none() && only_borrowed_uses(&new_body, var) {
         ctx.loops.borrowed.insert(var);
-    } else if is_list && owns_field {
+    } else if is_list && owns_head {
         ctx.loops.consumed.insert(var);
     }
     IrExprKind::ForIn { var, var_tuple, iterable: Box::new(new_iterable), body: new_body }
@@ -166,9 +173,11 @@ pub(crate) fn insert_clones_for_in(var: VarId, var_tuple: Option<Vec<VarId>>, it
 /// a match subject, an interpolation, or any use inside a closure / fused
 /// iterator chain (whose captures must own) says no.
 fn only_borrowed_uses(body: &[IrStmt], v: VarId) -> bool {
+    // A fused chain's lambda runs inside the iteration and never outlives it
+    // (`scope_lambda`: depth stays 0), so a read there is a borrow like any
+    // other (#3216); a chain that keeps the binder uses it at an owning site.
     UseSites::of_stmts(body, &ExplicitBorrows).of(v).all(|u| {
-        u.depth == 0 && !u.in_chain
-            && matches!(u.site, Site::Borrow { mutable: false } | Site::Member | Site::Clone)
+        u.depth == 0 && matches!(u.site, Site::Borrow { mutable: false } | Site::Member | Site::Clone)
     })
 }
 
@@ -216,6 +225,21 @@ fn iterable_root(expr: &IrExpr) -> Option<VarId> {
 /// nested loop or lambda belongs to THAT scope's freshness, and a `let`
 /// inside an `if`/`match` arm is left conservative (cloned) rather than
 /// reasoned about here.
+/// [`loop_fresh_vars`] for a lambda: its params, its body's statements, and
+/// its body's tail expression, where a `match` on a param binds fresh values
+/// (`(o) => match o { some(v) => v }`).
+pub(crate) fn lambda_fresh_vars(params: &[VarId], body: &IrExpr) -> HashSet<VarId> {
+    let (stmts, tail): (&[IrStmt], Option<&IrExpr>) = match &body.kind {
+        IrExprKind::Block { stmts, expr } => (stmts, expr.as_deref()),
+        _ => (&[], Some(body)),
+    };
+    let mut fresh = loop_fresh_vars(None, Some(params), stmts);
+    if let Some(tail) = tail {
+        almide_ir::visit::IrVisitor::visit_expr(&mut FreshBinds { fresh: &mut fresh }, tail);
+    }
+    fresh
+}
+
 pub(crate) fn loop_fresh_vars(var: Option<VarId>, var_tuple: Option<&[VarId]>, body: &[IrStmt]) -> HashSet<VarId> {
     let mut fresh: HashSet<VarId> = var.into_iter().collect();
     fresh.extend(var_tuple.into_iter().flatten().copied());
@@ -249,6 +273,19 @@ impl almide_ir::visit::IrVisitor for FreshBinds<'_> {
     fn visit_expr(&mut self, expr: &IrExpr) {
         if matches!(expr.kind, IrExprKind::Lambda { .. }) {
             return;
+        }
+        // A match on a fresh variable binds fresh values too: each
+        // iteration's `o` is its own, so moving `v` out of `match o {
+        // some(v) => v }` moves out of nothing the next iteration reads. A
+        // match on anything else (a captured or outer value) binds into
+        // a value that outlives the iteration, and stays cloned.
+        if let IrExprKind::Match { subject, arms } = &expr.kind
+            && let IrExprKind::Var { id } = &subject.kind
+            && self.fresh.contains(id)
+        {
+            for arm in arms {
+                almide_ir::free_vars::collect_pattern_bindings(&arm.pattern, self.fresh);
+            }
         }
         almide_ir::visit::walk_expr(self, expr);
     }

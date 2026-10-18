@@ -89,9 +89,9 @@ fn a_chain_source_is_borrowed_unless_a_step_needs_the_element_owned() {
     // Heap elements every step only reads: the source is a borrow and the
     // steps bind `&T` — no element is cloned, not even for `format!`.
     for (name, sig) in [
-        ("lens", "pub fn lens(ws: &[String])"),
-        ("interp", "pub fn interp(ws: &[String])"),
-        ("via", "pub fn via(ws: &[String])"),
+        ("lens", "pub fn lens(ws: &[AlmideString])"),
+        ("interp", "pub fn interp(ws: &[AlmideString])"),
+        ("via", "pub fn via(ws: &[AlmideString])"),
     ] {
         let s = fn_sig_and_body(&rust, name);
         assert!(s.starts_with(sig) && s.contains("(ws).iter().map("), "{name}:\n{s}");
@@ -100,18 +100,18 @@ fn a_chain_source_is_borrowed_unless_a_step_needs_the_element_owned() {
     // A filter-family step off `.iter()` receives `&&T`: its prepared
     // rebinding derefs once instead of cloning.
     let s = fn_sig_and_body(&rust, "kept");
-    assert!(s.starts_with("pub fn kept(ws: &[String])") && s.contains("(ws).iter().filter(") && s.contains("= (*w);"), "{s}");
+    assert!(s.starts_with("pub fn kept(ws: &[AlmideString])") && s.contains("(ws).iter().filter(") && s.contains("= (*w);"), "{s}");
     assert!(!s.contains("clone"), "{s}");
     let s = fn_sig_and_body(&rust, "has");
-    assert!(s.starts_with("pub fn has(ws: &[String], t: &str)") && s.contains("(ws).iter().any(") && s.contains("w.as_str()"), "{s}");
+    assert!(s.starts_with("pub fn has(ws: &[AlmideString], t: &str)") && s.contains("(ws).iter().any(") && s.contains("w.as_str()"), "{s}");
 
     // An element that leaves the chain owned — concatenated, returned as the
     // mapped value, collected by a filter — keeps the source consumed: the
     // caller's last use moves the list and each element moves out for free.
     for (name, sig) in [
-        ("shouted", "pub fn shouted(ws: Vec<String>)"),
-        ("echo", "pub fn echo(ws: Vec<String>)"),
-        ("long", "pub fn long(ws: Vec<String>)"),
+        ("shouted", "pub fn shouted(ws: Vec<AlmideString>)"),
+        ("echo", "pub fn echo(ws: Vec<AlmideString>)"),
+        ("long", "pub fn long(ws: Vec<AlmideString>)"),
     ] {
         let s = fn_sig_and_body(&rust, name);
         assert!(s.starts_with(sig) && s.contains("(ws).into_iter()"), "{name}:\n{s}");
@@ -120,9 +120,9 @@ fn a_chain_source_is_borrowed_unless_a_step_needs_the_element_owned() {
     // A `for` loop is the same iteration: a body that only reads its binder
     // borrows the list; one that concatenates it needs it owned.
     let s = fn_sig_and_body(&rust, "loop_len");
-    assert!(s.starts_with("pub fn loop_len(ws: &[String])") && s.contains("for w in ws.iter() {"), "{s}");
+    assert!(s.starts_with("pub fn loop_len(ws: &[AlmideString])") && s.contains("for w in ws.iter() {"), "{s}");
     let s = fn_sig_and_body(&rust, "joined");
-    assert!(s.starts_with("pub fn joined(ws: Vec<String>)"), "{s}");
+    assert!(s.starts_with("pub fn joined(ws: Vec<AlmideString>)"), "{s}");
 
     for target in ["rust", "wasm"] {
         let run = Command::new(almide_bin()).args(["run", file.to_str().unwrap(), "--target", target]).output().unwrap();

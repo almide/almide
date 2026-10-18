@@ -3,11 +3,11 @@
 // non-empty — `remove_file` otherwise). The recursive floor prim.remove_all
 // would happily delete a populated tree, so a directory is first checked
 // empty through prim.read_dir; only then (or for a file / missing path, where
-// the floor errs exactly like remove_file) does the removal run. The err
-// message for a non-empty directory is this leg's own wording — err MESSAGES
-// are already per-leg in this family (io_err vs the WASI wording); fixtures
-// pin the ok/err CLASS. Reaching read_dir carries Capability::FsRead and
-// remove_all Capability::FsWrite.
+// the floor errs exactly like remove_file) does the removal run. A non-empty
+// directory answers native's message: the `fs.remove("<path>")` head and
+// ENOTEMPTY's classified text from almide_base::fs_errno (C-273), which
+// tests/fs_errno_classified_test.rs pins on this leg. Reaching read_dir
+// carries Capability::FsRead and remove_all Capability::FsWrite.
 fn __rm_ftype(path: String) -> Int = {
   let buf = prim.alloc_bytes(64)
   let p = prim.handle(buf) + 12
@@ -34,7 +34,7 @@ effect fn fs_remove(path: String) -> Result[Unit, String] = {
       err(m)
     } else {
       let entries: List[String] = prim.load_handle(rh + 12)
-      if list.len(entries) > 0 then err("directory not empty: " + path) else __rm_floor(path)
+      if list.len(entries) > 0 then err("fs.remove(\"" + path + "\"): Directory not empty") else __rm_floor(path)
     }
   } else __rm_floor(path)
 }
