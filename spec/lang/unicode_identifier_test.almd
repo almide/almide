@@ -1,7 +1,9 @@
 // #1456 — identifiers follow UAX #31 Default Identifiers: XID_Start (or `_`)
-// then XID_Continue, stored in NFC. A caseless name (CJK, kana, Hangul) is a
-// value name unless this module declares it as a type or a variant case; an
-// uppercase start (`Δ`) is a type name exactly as an ASCII capital is.
+// then XID_Continue, stored in NFC (the NFD spelling is tested in
+// tests/unicode_identifier_nfc_test.rs, out of fmt's reach). A caseless name
+// (CJK, kana, Hangul) is a value name unless this module declares it as a
+// type or a variant case; an uppercase start (`Δ`) is a type name exactly as
+// an ASCII capital is.
 type 住所 = { 都市: String, 番地: Int }
 
 type 色 = | 赤 | 緑 | 青(Int)
@@ -41,11 +43,6 @@ test "let, fn and parameter names may be non-ASCII" {
   assert_eq(日本 + café, 3)
   assert_eq(λ(4), 5)
   assert_eq(挨拶("世界"), "こんにちは、世界")
-}
-
-test "canonically equivalent spellings name one binding" {
-  let café = 5
-  assert_eq(café, 5)
 }
 
 test "a caseless record type, its fields and its repr" {
