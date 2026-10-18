@@ -99,36 +99,29 @@ impl Parser {
         super::hints::syntax_guide::check_rejected_ident(tok.value.as_str())
     }
 
+    /// A `then` / `else` branch: an expression, or — unbraced — any
+    /// assignment a statement takes (#3757). The branch defers to the
+    /// statement parser's own target recognition (`x = v`, and every place
+    /// target `try_parse_place_assign` accepts: `xs[i] = v`, `o.ui.dirty = v`,
+    /// `o.ui.xs[i] = v`) instead of a shorter lookahead of its own, which
+    /// knew only the one-level forms and sent a nested target down the
+    /// expression path to die as "Assignments return Unit". A place prefix
+    /// that turns out not to be assigned (`xs[i]`, `o.f(x)`) backtracks and
+    /// parses as the expression it is.
     fn parse_if_branch(&mut self) -> Result<Expr, String> {
-        if self.check(TokenType::Ident) || self.check(TokenType::TypeName) {
-            let is_assign = self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Eq)
-                && self.peek_at(2).map(|t| &t.token_type) != Some(&TokenType::Eq);
-            let is_index = self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::LBracket);
-            let is_field = self.peek_at(1).map(|t| &t.token_type) == Some(&TokenType::Dot)
-                && self.peek_at(2).map(|t| matches!(t.token_type, TokenType::Ident)).unwrap_or(false)
-                && self.peek_at(3).map(|t| &t.token_type) == Some(&TokenType::Eq)
-                && self.peek_at(4).map(|t| &t.token_type) != Some(&TokenType::Eq);
-
-            if is_assign || is_index || is_field {
-                let span = Some(self.current_span());
-                let stmt = self.parse_stmt()?;
-                match &stmt {
-                    Stmt::Assign { .. } | Stmt::IndexAssign { .. } | Stmt::FieldAssign { .. } => {
-                        return Ok(Expr::new(self.next_id(), span, ExprKind::Block {
-                            stmts: vec![stmt],
-                            expr: None,
-                        }));
-                    }
-                    // index lookahead matched but turned out to be an expression (e.g. xs[i])
-                    Stmt::Expr { expr, .. } => return Ok(expr.clone()),
-                    _ => return Ok(Expr::new(self.next_id(), span, ExprKind::Block {
-                        stmts: vec![stmt],
-                        expr: None,
-                    })),
-                }
-            }
+        let named = self.check(TokenType::Ident) || self.check(TokenType::TypeName);
+        let place = matches!(
+            self.peek_at(1).map(|t| &t.token_type),
+            Some(TokenType::Eq | TokenType::LBracket | TokenType::Dot)
+        );
+        if !(named && place) {
+            return self.parse_expr();
         }
-        self.parse_expr()
+        let span = Some(self.current_span());
+        match self.parse_stmt()? {
+            Stmt::Expr { expr, .. } => Ok(expr),
+            stmt => Ok(Expr::new(self.next_id(), span, ExprKind::Block { stmts: vec![stmt], expr: None })),
+        }
     }
 
     pub(crate) fn parse_match_expr(&mut self) -> Result<Expr, String> {

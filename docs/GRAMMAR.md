@@ -95,7 +95,10 @@ assign      = IDENT ("." name)* ("[" expr "]")? "=" expr (":" type)?
 guard_stmt  = "guard" expr "else" expr
             | "guard" "let" IDENT "=" expr "else" expr     (* bind Option, else on none *)
 
-if_expr     = "if" expr "then" expr ("else" expr)?         (* no else => Unit *)
+if_expr     = "if" expr "then" if_branch ("else" if_branch)?  (* no else => Unit *)
+if_branch   = assign | expr                                (* any `assign` target, unbraced:
+                                                              `if c then o.ui.xs[i] = v`; an
+                                                              assignment branch is Unit *)
 if_let      = "if" "let" IDENT "=" expr block "else" block (* else required, branches braced *)
 match_expr  = "match" expr "{" (arm ","?)* "}"
 arm         = pattern ("|" pattern)* ("if" expr)? "=>" expr  (* or-alternatives + optional guard *)
