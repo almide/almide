@@ -570,7 +570,7 @@ impl<'a> Analyzer<'a> {
                 scope.truncate(mark);
                 self.walk(else_, scope, mode);
             }
-            ExprKind::Fan { exprs } => self.fan_arms(exprs.iter(), "fan", scope, mode),
+            ExprKind::Fan { exprs, .. } => self.fan_arms(exprs.iter(), "fan", scope, mode),
             ExprKind::FanSettle { arms } => self.fan_arms(arms.iter(), "fan.settle", scope, mode),
             ExprKind::FanRace { budget, arms } => {
                 if let Some(b) = budget {
