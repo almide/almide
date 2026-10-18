@@ -54,7 +54,7 @@ fn every_stdlib_example_evaluates_to_true() {
         let name = format!("example_{i}_{file}.almd");
         // #3768: the per-fixture limit every program-running sweep holds.
         let label = format!("stdlib/{file}.almd example `{expr}`");
-        let run = almide_corpus::run_limited(&label, almide_corpus::FIXTURE_LIMIT, move || {
+        let run = almide_corpus::run_limited(&label, almide_corpus::FIXTURE_LIMIT, move |_stop| {
             almide_spine::s5::run_file(&name, &program)
         });
         match run {

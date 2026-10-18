@@ -6,7 +6,9 @@
 //! and on expiry the sweep fails naming the fixture's path and the limit — a
 //! hang is a failure, not a wait (#2567's rule for the output-parity sweep).
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::Arc;
 use std::time::Duration;
 
 /// The limit every corpus sweep in almide-spine runs one fixture under.
@@ -22,6 +24,23 @@ use std::time::Duration;
 /// 40-minute cancellation that hid the fixture in #3768.
 pub const FIXTURE_LIMIT: Duration = Duration::from_secs(1200);
 
+/// The stop a cut sets: the work polls it (or hands [`Stop::flag`] to a
+/// run that polls it, as the interpreter's step meter does) and returns.
+#[derive(Clone, Debug, Default)]
+pub struct Stop(Arc<AtomicBool>);
+
+impl Stop {
+    /// Whether the run was cut and should return now.
+    pub fn is_set(&self) -> bool {
+        self.0.load(Ordering::Relaxed)
+    }
+
+    /// The shared flag itself, for a run that polls an `AtomicBool`.
+    pub fn flag(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.0)
+    }
+}
+
 /// Run one fixture's `work` under `limit`, naming `fixture` if it is cut.
 ///
 /// The work runs on a thread of its own; the caller waits at most `limit`
@@ -32,13 +51,15 @@ pub const FIXTURE_LIMIT: Duration = Duration::from_secs(1200);
 pub fn run_limited<R: Send + 'static>(
     fixture: &str,
     limit: Duration,
-    work: impl FnOnce() -> R + Send + 'static,
+    work: impl FnOnce(Stop) -> R + Send + 'static,
 ) -> R {
+    let stop = Stop::default();
+    let handed = stop.clone();
     let (tx, rx) = mpsc::channel();
     let worker = std::thread::Builder::new()
         .name(format!("fixture {fixture}"))
         .spawn(move || {
-            let _ = tx.send(work());
+            let _ = tx.send(work(handed));
         })
         .unwrap_or_else(|e| panic!("{fixture}: cannot start its thread: {e}"));
     match rx.recv_timeout(limit) {
@@ -73,7 +94,7 @@ mod tests {
         let (tx, rx) = mpsc::channel();
         thread::spawn(move || {
             let r = std::panic::catch_unwind(|| {
-                run_limited(fixture, limit, || -> () {
+                run_limited(fixture, limit, |_: Stop| -> () {
                     loop {
                         thread::sleep(Duration::from_millis(5));
                     }
@@ -93,10 +114,43 @@ mod tests {
         assert!(msg.contains("200ms"), "the limit is not named: {msg}");
     }
 
+    /// #3809: a cut run must STOP, not keep a core busy for the rest of the
+    /// test process. The work spins on a shared counter and honours the stop
+    /// it is handed; after the cut the counter must stand still.
+    #[test]
+    fn a_cut_run_stops_its_thread() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        use std::sync::Arc;
+        let ticks = Arc::new(AtomicU64::new(0));
+        let seen = Arc::clone(&ticks);
+        let (tx, rx) = mpsc::channel();
+        thread::spawn(move || {
+            let r = std::panic::catch_unwind(move || {
+                run_limited("spec/lang/spins_forever.almd", Duration::from_millis(200), move |stop: Stop| {
+                    while !stop.is_set() {
+                        seen.fetch_add(1, Ordering::Relaxed);
+                        std::hint::spin_loop();
+                    }
+                })
+            });
+            let _ = tx.send(r.err().map(panic_text));
+        });
+        let msg = rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("run_limited did not cut a non-terminating run within 10 s")
+            .expect("a cut run must fail, not return");
+        assert!(msg.contains("spec/lang/spins_forever.almd") && msg.contains("200ms"), "{msg}");
+        let before = ticks.load(Ordering::Relaxed);
+        thread::sleep(Duration::from_millis(300));
+        let after = ticks.load(Ordering::Relaxed);
+        assert!(before > 0, "the work never ran");
+        assert_eq!(before, after, "the cut run's thread is still running after the cut");
+    }
+
     #[test]
     fn a_finished_run_returns_its_value_and_a_panicking_run_keeps_its_message() {
-        assert_eq!(run_limited("spec/lang/quick.almd", Duration::from_secs(5), || 41 + 1), 42);
-        let p = std::panic::catch_unwind(|| run_limited("spec/lang/boom.almd", Duration::from_secs(5), || -> () { panic!("boom") }))
+        assert_eq!(run_limited("spec/lang/quick.almd", Duration::from_secs(5), |_: Stop| 41 + 1), 42);
+        let p = std::panic::catch_unwind(|| run_limited("spec/lang/boom.almd", Duration::from_secs(5), |_: Stop| -> () { panic!("boom") }))
             .expect_err("the work's panic reaches the sweep");
         assert_eq!(panic_text(p), "boom");
     }

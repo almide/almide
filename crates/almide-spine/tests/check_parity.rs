@@ -31,7 +31,7 @@ type Check = for<'db> fn(&'db dyn salsa::Database, almide_spine::SourceFile) -> 
 fn check_limited(db: &mut Option<almide_spine::SpineDb>, rel: &str, text: String, check: Check) -> almide_spine::s3::CheckOutput {
     let held = db.take().expect("the db came back from the previous file");
     let path = rel.to_string();
-    let (held, out) = almide_corpus::run_limited(rel, almide_corpus::FIXTURE_LIMIT, move || {
+    let (held, out) = almide_corpus::run_limited(rel, almide_corpus::FIXTURE_LIMIT, move |_stop| {
         let file = almide_spine::SourceFile::new(&held, path, text);
         let out = check(&held, file).clone();
         (held, out)
