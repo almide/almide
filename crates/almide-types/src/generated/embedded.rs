@@ -3986,6 +3986,7 @@ effect fn args() -> List[String] = _
 effect fn get(name: String) -> String? = _
 
 /// Sets name for this process and later spawns.
+@ordered
 @intrinsic("almide_rt_env_set")
 effect fn set(name: String, value: String) -> Unit = _
 
@@ -6324,22 +6325,27 @@ effect fn read_text(path: String) -> Result[String, String] = _
 effect fn read_bytes(path: String) -> Result[List[Int], String] = _
 
 /// Overwrites or creates; err if no parent dir.
+@ordered
 @intrinsic("almide_rt_fs_write")
 effect fn write(path: String, content: String) -> Result[Unit, String] = _
 
 /// Writes low byte of each Int (-1 -> 255).
+@ordered
 @intrinsic("almide_rt_fs_write_bytes")
 effect fn write_bytes(path: String, bytes: List[Int]) -> Result[Unit, String] = _
 
 /// Writes data verbatim, replacing the file.
+@ordered
 @intrinsic("almide_rt_fs_write_bytes_raw")
 effect fn write_bytes_raw(path: String, data: Bytes) -> Result[Unit, String] = _
 
 /// Appends content; creates the file if missing.
+@ordered
 @intrinsic("almide_rt_fs_append")
 effect fn append(path: String, content: String) -> Result[Unit, String] = _
 
 /// Creates dir and parents; ok if it exists.
+@ordered
 @intrinsic("almide_rt_fs_mkdir_p")
 effect fn mkdir_p(path: String) -> Result[Unit, String] = _
 
@@ -6433,6 +6439,7 @@ effect fn read_lines_if_exists(path: String) -> Result[List[String]?, String] = 
 effect fn read_bytes_raw_if_exists(path: String) -> Result[Bytes?, String] = _
 
 /// Deletes a file or empty dir; err if missing.
+@ordered
 @intrinsic("almide_rt_fs_remove")
 effect fn remove(path: String) -> Result[Unit, String] = _
 
@@ -6449,10 +6456,12 @@ effect fn is_dir(path: String) -> Bool = _
 effect fn is_file(path: String) -> Bool = _
 
 /// Copies src to dst; overwrites dst.
+@ordered
 @intrinsic("almide_rt_fs_copy")
 effect fn copy(src: String, dst: String) -> Result[Unit, String] = _
 
 /// Moves src to dst; replaces an existing dst.
+@ordered
 @intrinsic("almide_rt_fs_rename")
 effect fn rename(src: String, dst: String) -> Result[Unit, String] = _
 
@@ -6461,6 +6470,7 @@ effect fn rename(src: String, dst: String) -> Result[Unit, String] = _
 effect fn walk(dir: String) -> Result[List[String], String] = _
 
 /// Deletes a tree or file; err if missing.
+@ordered
 @intrinsic("almide_rt_fs_remove_all")
 effect fn remove_all(path: String) -> Result[Unit, String] = _
 
@@ -6484,10 +6494,12 @@ effect fn stat(path: String) -> Result[FileStat, String] = _
 effect fn glob(pattern: String) -> Result[List[String], String] = _
 
 /// New empty file temp_dir/prefix+nanos; its path.
+@ordered
 @intrinsic("almide_rt_fs_create_temp_file")
 effect fn create_temp_file(prefix: String) -> Result[String, String] = _
 
 /// New dir temp_dir/prefix+nanos; its path.
+@ordered
 @intrinsic("almide_rt_fs_create_temp_dir")
 effect fn create_temp_dir(prefix: String) -> Result[String, String] = _
 
@@ -11092,10 +11104,12 @@ pub const SRC_IO: &str = r#"
 
 
 /// Next stdin line, newline cut; "" at EOF too — read_line_opt tells them apart.
+@ordered
 @intrinsic("almide_rt_io_read_line")
 effect fn read_line() -> String = _
 
 /// Next stdin line, newline cut; none at EOF, some("") for an empty line.
+@ordered
 @intrinsic("almide_rt_io_read_line_opt")
 effect fn read_line_opt() -> String? = _
 
@@ -11104,14 +11118,17 @@ effect fn read_line_opt() -> String? = _
 effect fn print(s: String) -> Unit = _
 
 /// Rest of stdin as text; empty at EOF.
+@ordered
 @intrinsic("almide_rt_io_read_all")
 effect fn read_all() -> String = _
 
 /// Next stdin byte 0..255, or -1 at EOF.
+@ordered
 @intrinsic("almide_rt_io_read_byte")
 effect fn read_byte() -> Int = _
 
 /// Up to n stdin bytes; [] if n <= 0.
+@ordered
 @intrinsic("almide_rt_io_read_n_bytes")
 effect fn read_n_bytes(n: Int) -> List[Int] = _
 
@@ -27451,6 +27468,7 @@ pub const SRC_PROCESS: &str = r#"
 type ProcessStatus = { code: Int, stdout: String, stderr: String }
 
 /// Stdout on exit 0; else err with stderr text.
+@ordered
 @intrinsic("almide_rt_process_exec")
 effect fn exec(cmd: String, args: List[String]) -> Result[String, String] = _
 
@@ -27463,14 +27481,17 @@ effect fn exit(code: Int) -> Never = _
 effect fn args() -> List[String] = _
 
 /// All stdin lines; err on non-UTF-8 input.
+@ordered
 @intrinsic("almide_rt_process_stdin_lines")
 effect fn stdin_lines() -> Result[List[String], String] = _
 
 /// exec in dir; err is stderr, maybe empty.
+@ordered
 @intrinsic("almide_rt_process_exec_in")
 effect fn exec_in(dir: String, cmd: String, args: List[String]) -> Result[String, String] = _
 
 /// exec with input piped in; err may be empty.
+@ordered
 @intrinsic("almide_rt_process_exec_with_stdin")
 effect fn exec_with_stdin(cmd: String, args: List[String], input: String) -> Result[String, String] = _
 
@@ -27478,6 +27499,7 @@ effect fn exec_with_stdin(cmd: String, args: List[String], input: String) -> Res
 
 
 /// Code and output; code -1 if killed by signal. Child stdin is null.
+@ordered
 @intrinsic("almide_rt_process_exec_status")
 effect fn exec_status(cmd: String, args: List[String]) -> Result[ProcessStatus, String] = _
 
@@ -27493,6 +27515,7 @@ effect fn exec_status(cmd: String, args: List[String]) -> Result[ProcessStatus, 
 
 
 /// exec_status, but kills cmd and errs at timeout_ms.
+@ordered
 @intrinsic("almide_rt_process_exec_status_timeout")
 effect fn exec_status_timeout(cmd: String, args: List[String], timeout_ms: Int) -> Result[ProcessStatus, String] = _
 
@@ -27503,14 +27526,17 @@ effect fn exec_status_timeout(cmd: String, args: List[String], timeout_ms: Int) 
 
 
 /// Run cmd on this terminal; exit code, -1 if signalled.
+@ordered
 @intrinsic("almide_rt_process_run")
 effect fn run(cmd: String, args: List[String]) -> Result[Int, String] = _
 
 /// run in dir; exit code, -1 if signalled.
+@ordered
 @intrinsic("almide_rt_process_run_in")
 effect fn run_in(dir: String, cmd: String, args: List[String]) -> Result[Int, String] = _
 
 /// Alias of process.run.
+@ordered
 @deprecated(since=10, use="process.run")
 @intrinsic("almide_rt_process_run")
 effect fn exec_attached(cmd: String, args: List[String]) -> Result[Int, String] = _
@@ -27524,10 +27550,12 @@ fn pid() -> Int = _
 fn env(key: String) -> String? = _
 
 /// Pid of cmd started in the background.
+@ordered
 @intrinsic("almide_rt_process_spawn")
 effect fn spawn(cmd: String, args: List[String]) -> Result[Int, String] = _
 
 /// Sends signal to pid; err is kill's stderr.
+@ordered
 @intrinsic("almide_rt_process_kill")
 effect fn kill(pid: Int, signal: Int) -> Result[Unit, String] = _
 
