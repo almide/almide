@@ -316,7 +316,12 @@ impl<'a> IrMutVisitor for BranchLifter<'a> {
                             )
                         })
                 }
-                IrExprKind::If { .. } => self.loop_depth > 0 || self.dense_depth > 0,
+                // In a loop body a read-only selection of live variables stays
+                // inline (#3532): the MIR lowers it there as an ordinary join
+                // of shares. Out of a loop a dense chain still lifts it, since
+                // the tail-duplication desugar would refuse the chain.
+                IrExprKind::If { .. } if self.loop_depth > 0 => !is_var_selection(value),
+                IrExprKind::If { .. } => self.dense_depth > 0,
                 _ => false,
             };
             if fire && !holds_error_op(value) {
@@ -499,6 +504,20 @@ impl<'a> BranchLifter<'a> {
 // dependency-cycle reason this file used to carry a verbatim copy is gone now
 // that the definition lives beside `Ty` itself, upstream of both this crate and
 // `almide-mir` (whose `lower::is_heap_ty` re-exports the same fn).
+/// Is `e` an `if` whose every arm (through nested `if`s) is a plain variable
+/// read? Such a SELECTION allocates nothing: each arm shares a value that is
+/// already live, so the MIR lowers it in place like the call-argument form,
+/// and the native render can borrow the chosen value instead of copying it
+/// (#3532). Lifting it into a helper turns the share into an owned return,
+/// which copies on native.
+fn is_var_selection(e: &IrExpr) -> bool {
+    match &e.kind {
+        IrExprKind::Var { .. } => true,
+        IrExprKind::If { then, else_, .. } => is_var_selection(then) && is_var_selection(else_),
+        _ => false,
+    }
+}
+
 /// Does the statement contain a HEAP-result `if`/`match` anywhere (bind value, call
 /// argument, operand)? The dense-chain scan counts these BEFORE the MIR-side ANF lift
 /// rewrites call-arg branches into let binds.
@@ -700,6 +719,22 @@ mod tests {
         let IrExprKind::Block { stmts, .. } = &main.body.kind else { panic!() };
         let IrStmtKind::Bind { value, .. } = &stmts[0].kind else { panic!() };
         assert!(matches!(value.kind, IrExprKind::If { .. }), "out-of-loop branch stays inline");
+        assert_eq!(prog.functions.len(), 1, "no helper synthesized");
+    }
+
+    #[test]
+    fn leaves_an_in_loop_variable_selection_untouched() {
+        // main: for v0 in [] { let v4: String = if v1 then v2 else (if v1 then v3 else v2) }
+        // Every arm reads a live variable (#3532): nothing to allocate, so the
+        // selection stays inline, where native borrows the chosen value.
+        let inner = iff(1, var(3, Ty::String), var(2, Ty::String), Ty::String);
+        let branch = iff(1, var(2, Ty::String), inner, Ty::String);
+        let body = for_in(0, vec![bind(4, Ty::String, branch)]);
+        let mut prog = program_with_main(body, &[Ty::Unit, Ty::Bool, Ty::String, Ty::String, Ty::String]);
+
+        lift_heap_branch_binds(&mut prog);
+
+        assert!(matches!(main_bind_value_kind(&prog), IrExprKind::If { .. }), "the selection stays inline");
         assert_eq!(prog.functions.len(), 1, "no helper synthesized");
     }
 
