@@ -69,18 +69,30 @@ fn render_expr_for_in(ctx: &RenderContext, expr: &IrExpr) -> String {
         .unwrap_or_else(|| format!("for _ in _ {{ }}"))
 }
 
-/// `list.range(a, b)` or the range literal `a..<b` as the rendered bounds
-/// `(a, b)`, for a consumer that iterates the range once and never holds the
-/// list: a `for` head or an iterator chain's source. The literal is the same
-/// list (#3810); counting it is what lets LLVM see the index stay in
-/// `[a, b)` — a fold over the materialized `Vec<i64>` reads indices it cannot
-/// bound, so `xs[j]` keeps its check in the loop (#3604). An inclusive
-/// `a..=b` keeps the built list, as the wasm leg does.
+/// `list.range(a, b)` as the rendered bounds `(a, b)`, for a consumer that
+/// iterates the range once and never holds the list: a `for` head or an
+/// iterator chain's source.
 fn list_range_bounds(ctx: &RenderContext, e: &IrExpr) -> Option<(String, String)> {
-    if let IrExprKind::Range { start, end, inclusive: false } = &e.kind {
-        return Some((render_expr(ctx, start), render_expr(ctx, end)));
-    }
     let IrExprKind::RuntimeCall { symbol, args } = &e.kind else { return None };
     let [start, end] = args.as_slice() else { return None };
     (symbol.as_str() == "almide_rt_list_range").then(|| (render_expr(ctx, start), render_expr(ctx, end)))
+}
+
+/// The range literal `a..<b` as its rendered bounds, for a chain that folds
+/// it to a value (#3810): the same list as `list.range(a, b)`, counted the
+/// same way on both legs. Counting is also what lets LLVM see the index stay
+/// in `[a, b)` — a fold over the built `Vec<i64>` reads indices it cannot
+/// bound, so `xs[j]` kept its check in the loop (#3604). A COLLECTING chain
+/// keeps the built head: its result is a list of the same length anyway, a
+/// span no machine can hold stays the C-197 out-of-memory abort rather than
+/// `collect`'s capacity-overflow panic, and the outer `list.map(0..<n, …)`
+/// of spectralnorm's enumerate spelling measured 15% slower counted on
+/// aarch64 (LLVM re-associated the inner `eval_a` around the known `i`). An
+/// inclusive `a...b` keeps the built list, as the wasm leg does.
+fn range_literal_fold_bounds(ctx: &RenderContext, e: &IrExpr, collector: &IterCollector) -> Option<(String, String)> {
+    if matches!(collector, IterCollector::Collect) {
+        return None;
+    }
+    let IrExprKind::Range { start, end, inclusive: false } = &e.kind else { return None };
+    Some((render_expr(ctx, start), render_expr(ctx, end)))
 }
