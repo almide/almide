@@ -159,24 +159,19 @@ effect fn arm(name: String, v: Int) -> Result[Int, String] = {{
 }}
 
 effect fn main() -> Unit = {{
-  match fan.any([-1, -2, 5, 7, -3], (x) => probe(x)) {{
-    ok(v) => println("any map ok ${{v}}"),
-    err(e) => println("any map err ${{e}}"),
-  }}
-  match fan.any {{ arm("a", -1), arm("b", 20), arm("c", 30) }} {{
-    ok(v) => println("any block ok ${{v}}"),
-    err(e) => println("any block err ${{e}}"),
-  }}
+  // list.find_map / a `??` chain: first Ok in list / source order; later candidates never run
+  println("any map ${{list.find_map([-1, -2, 5, 7, -3], (x) => probe(x)?) ?? -1}}")
+  println("any block ${{arm("a", -1) ?? arm("b", 20) ?? arm("c", 30) ?? -1}}")
   // cheaper second arm, cheaper first arm, a tie
-  let r1 = fan.race {{ heavy(5000) % 7 + 100, heavy(10) % 7 + 200 }} ?? -1
-  let r2 = fan.race {{ heavy(10) % 7 + 100, heavy(5000) % 7 + 200 }} ?? -1
-  let r3 = fan.race {{ heavy(10) % 7 + 100, heavy(10) % 7 + 200 }} ?? -1
+  let r1 = fan.min(compute.ms(100)) {{ heavy(5000) % 7 + 100, heavy(10) % 7 + 200 }} ?? -1
+  let r2 = fan.min(compute.ms(100)) {{ heavy(10) % 7 + 100, heavy(5000) % 7 + 200 }} ?? -1
+  let r3 = fan.min(compute.ms(100)) {{ heavy(10) % 7 + 100, heavy(10) % 7 + 200 }} ?? -1
   println("race ${{r1}} ${{r2}} ${{r3}}")
   // mapper: two cheapest elements tie, the earlier one wins
-  let m1 = fan.race([5000, 10, 10], (n) => ok(heavy(n) % 7 + n)) ?? -1
+  let m1 = fan.min(compute.ms(100), [5000, 10, 10], (n) => ok(heavy(n) % 7 + n)) ?? -1
   println("race map ${{m1}}")
   // an Err element disqualifies itself even though it is cheaper
-  let m2 = fan.race([10, 5000], (n) => if n == 10 then err("no") else ok(n)) ?? -1
+  let m2 = fan.min(compute.ms(100), [10, 5000], (n) => if n == 10 then err("no") else ok(n)) ?? -1
   println("race err-skip ${{m2}}")
 }}
 "#
@@ -184,8 +179,8 @@ effect fn main() -> Unit = {{
     four_legs(
         "anyrace.almd",
         &src,
-        "probe -1\nprobe -2\nprobe 5\nany map ok 5\n\
-         ran a\nran b\nany block ok 20\n\
+        "probe -1\nprobe -2\nprobe 5\nany map 5\n\
+         ran a\nran b\nany block 20\n\
          race 205 105 105\nrace map 15\nrace err-skip 5000\n",
     );
 }
@@ -210,16 +205,16 @@ effect fn main() -> Unit = {{
   let empty: List[Int] = []
   show_list("map empty", fan.map(empty, (x) => neg(x)))
   println("settle empty ${{list.len(fan.settle(empty, (x) => neg(x)))}}")
-  show("any empty", fan.any(empty, (x) => neg(x)))
-  show("any allfail", fan.any([-1, -2], (x) => neg(x)))
+  println("any empty ${{list.find_map(empty, (x) => neg(x)?) ?? -1}}")
+  println("any allfail ${{list.find_map([-1, -2], (x) => neg(x)?) ?? -1}}")
   show_list("map allfail", fan.map([-1, -2], (x) => neg(x)))
-  show("race empty", fan.race(empty, (x) => ok(x)))
-  show("race allfail", fan.race([1, 2], (x) => if x > 0 then err("x") else ok(x)))
+  show("race empty", fan.min(compute.ms(100), empty, (x) => ok(x)))
+  show("race allfail", fan.min(compute.ms(100), [1, 2], (x) => if x > 0 then err("x") else ok(x)))
   // heavy(1000) spends 1002 units = 3006 ns
   show("bounded at", fan.bounded(compute.ns(3006)) {{ heavy(1000) }})
   show("bounded under", fan.bounded(compute.ns(3005)) {{ heavy(1000) }})
-  show("race over budget", fan.race(compute.us(1)) {{ heavy(100000), heavy(200000) }})
-  show("race budget admits", fan.race(compute.ns(3006)) {{ heavy(100000), heavy(1000) }})
+  show("race over budget", fan.min(compute.us(1)) {{ heavy(100000), heavy(200000) }})
+  show("race budget admits", fan.min(compute.ns(3006)) {{ heavy(100000), heavy(1000) }})
 }}
 "#
     );
@@ -227,14 +222,14 @@ effect fn main() -> Unit = {{
         "edges.almd",
         &src,
         "map empty ok []\nsettle empty 0\n\
-         any empty err fan.any: all candidates failed\n\
-         any allfail err fan.any: all candidates failed\n\
+         any empty -1\n\
+         any allfail -1\n\
          map allfail err neg\n\
-         race empty err fan.race: no branch completed within budget\n\
-         race allfail err fan.race: no branch completed within budget\n\
+         race empty err fan.min: no branch succeeded within budget\n\
+         race allfail err fan.min: no branch succeeded within budget\n\
          bounded at ok 832504\n\
          bounded under err fan.bounded: budget exhausted\n\
-         race over budget err fan.race: no branch completed within budget\n\
+         race over budget err fan.min: no branch succeeded within budget\n\
          race budget admits ok 832504\n",
     );
 }
@@ -283,8 +278,8 @@ fn refused(name: &str, source: &str, code: &str) {
 #[test]
 fn effects_inside_race_bounded_and_timeout_are_refused() {
     let eff = "import env\neffect fn eff() -> Result[Int, String] = { env.sleep_ms(1)\n ok(1) }\n";
-    refused("race_block.almd", &format!("{eff}effect fn main() -> Unit = {{\n  let r = fan.race {{ eff(), eff() }} ?? 0\n  println(\"${{r}}\")\n}}\n"), "E006");
-    refused("race_map.almd", &format!("{eff}effect fn main() -> Unit = {{\n  let r = fan.race([1, 2], (x) => eff()) ?? 0\n  println(\"${{r}}\")\n}}\n"), "E006");
+    refused("race_block.almd", &format!("{eff}effect fn main() -> Unit = {{\n  let r = fan.min(compute.ms(100)) {{ eff(), eff() }} ?? 0\n  println(\"${{r}}\")\n}}\n"), "E006");
+    refused("race_map.almd", &format!("{eff}effect fn main() -> Unit = {{\n  let r = fan.min(compute.ms(100), [1, 2], (x) => eff()) ?? 0\n  println(\"${{r}}\")\n}}\n"), "E006");
     refused("bounded.almd", &format!("{eff}effect fn main() -> Unit = {{\n  let r = fan.bounded(compute.ms(1)) {{ eff() }} ?? 0\n  println(\"${{r}}\")\n}}\n"), "E006");
     refused("timeout.almd", &format!("{eff}effect fn main() -> Unit = {{\n  let r = fan.timeout(duration.ms(1)) {{ eff() }} ?? 0\n  println(\"${{r}}\")\n}}\n"), "E006");
 }
@@ -293,7 +288,7 @@ fn effects_inside_race_bounded_and_timeout_are_refused() {
 fn fan_outside_an_effect_fn_and_a_captured_var_are_refused() {
     refused(
         "pure_ctx.almd",
-        "fn f() -> Int = fan.race { 1, 2 } ?? 0\neffect fn main() -> Unit = println(\"${f()}\")\n",
+        "fn f() -> Int = fan.min(compute.ms(100)) { 1, 2 } ?? 0\neffect fn main() -> Unit = println(\"${f()}\")\n",
         "E007",
     );
     refused(

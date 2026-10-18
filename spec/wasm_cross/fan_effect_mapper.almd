@@ -13,17 +13,18 @@
 // `is_effect: true` to match what it already accepted and executed, and this
 // fixture is the evidence that the acceptance is cross-target sound.
 //
-// Three cells, one per mapper head, covering both callback SPELLINGS — the
-// #1055 lesson is that a capability decided by spelling is the bug, so an
-// inline lambda over an effect fn and a bare effect-fn VALUE must agree:
-//   fan.any   — inline lambda calling an effect fn
-//   fan.map   — bare effect-fn value
-//   fan.settle— inline lambda, mixed ok/err so the Err capture is exercised
+// Three cells covering both callback SPELLINGS — the #1055 lesson is that a
+// capability decided by spelling is the bug, so an inline lambda over an
+// effect fn and a bare effect-fn VALUE must agree:
+//   list.find_map — inline lambda calling an effect fn (the first-Ok selection
+//                   `fan.any(xs, f)` used to spell; removed in dialect epoch 14)
+//   fan.map       — bare effect-fn value
+//   fan.settle    — inline lambda, mixed ok/err so the Err capture is exercised
 effect fn probe(n: Int) -> Result[Int, String] = if n > 2 then ok(n * 10) else err("too small: ${int.to_string(n)}")
 
 effect fn main() -> Unit = {
-  // any: first Ok in LIST order — 1 fails, 5 wins (NOT 9, and NOT wall-clock).
-  let a = fan.any([1, 5, 9], (n) => probe(n))!
+  // find_map: first Ok in LIST order — 1 fails, 5 wins (NOT 9, and NOT wall-clock).
+  let a = list.find_map([1, 5, 9], (n) => probe(n)?) ?? -1
   println("any=" + int.to_string(a))
   // map: the bare effect-fn VALUE spelling, all-Ok, order preserved.
   let m = fan.map([3, 4], probe)!

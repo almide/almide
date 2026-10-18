@@ -1,9 +1,9 @@
-// The BLOCK form of fan.race (arms, no mapper) needs an effect context just
+// The BLOCK form of fan.min (arms, no mapper) needs an effect context just
 // like the mapper form.
 fn probe_a(n: Int) -> Result[Int, String] = ok(n)
 fn probe_b(n: Int) -> Result[Int, String] = ok(n + 1)
 
-effect fn fastest() -> Int = fan.race {
+effect fn fastest() -> Int = fan.min(compute.ms(100)) {
   probe_a(1)
   probe_b(2)
 } ?? -1

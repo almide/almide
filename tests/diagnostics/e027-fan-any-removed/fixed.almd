@@ -1,0 +1,7 @@
+effect fn fetch(n: Int) -> Result[Int, String] = if n < 0 then err("down") else ok(n)
+
+effect fn main() -> Unit = {
+  let first = fetch(-1) ?? fetch(2) ?? -1
+  let mapped = list.find_map([-1, 3], (n) => fetch(n)?) ?? -1
+  println("${first} ${mapped}")
+}

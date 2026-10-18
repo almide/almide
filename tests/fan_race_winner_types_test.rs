@@ -1,4 +1,4 @@
-//! #3782: a `fan.race` whose winner is not Int or String compiled on neither
+//! #3782: a `fan.min` (then `fan.race`) whose winner is not Int or String compiled on neither
 //! target — the lowering's dead placeholder for a losing arm was `0` for every
 //! type but String, and a Float region spliced through the v1 render as `i64`.
 //! The winner now rides a `Result[T, String]` slot (no placeholder of `T`),
@@ -19,19 +19,19 @@ fn costly(n: Int, v: Float) -> Float = float.from_int(heavy(n)) * 0.0 + v
 
 effect fn main() -> Unit = {
   // plain Float arms; the cheaper second arm wins
-  let a = fan.race { costly(500, 1.5), costly(5, 2.5) } ?? 0.0
+  let a = fan.min(compute.ms(100)) { costly(500, 1.5), costly(5, 2.5) } ?? 0.0
   // Result Float arms, an Err arm disqualified
-  let b = fan.race { err("no"), ok(fl(1.25)) } ?? 0.0   // literal Result arms: the open error type closes to String
+  let b = fan.min(compute.ms(100)) { err("no"), ok(fl(1.25)) } ?? 0.0   // literal Result arms: the open error type closes to String
   // List winner
-  let c = fan.race { [1, 2, 3], [4, 5] } ?? []
+  let c = fan.min(compute.ms(100)) { [1, 2, 3], [4, 5] } ?? []
   // record winner
-  let d = fan.race { { x: 1.5, tag: "one" }, { x: 2.5, tag: "two" } } ?? { x: 0.0, tag: "none" }
+  let d = fan.min(compute.ms(100)) { { x: 1.5, tag: "one" }, { x: 2.5, tag: "two" } } ?? { x: 0.0, tag: "none" }
   // mapper form, Float winner (all elements cost the same: the first, 3.0 → 6; an integral Float prints without `.0`)
-  let e = fan.race([3.0, 1.0, 2.0], (v) => ok(fl(v))) ?? 0.0
+  let e = fan.min(compute.ms(100), [3.0, 1.0, 2.0], (v) => ok(fl(v))) ?? 0.0
   // budgeted: every arm over budget → the fallback
-  let f = fan.race(compute.ns(3)) { costly(500, 9.0), costly(600, 8.0) } ?? -1.0
+  let f = fan.min(compute.ns(3)) { costly(500, 9.0), costly(600, 8.0) } ?? -1.0
   // the non-fused Result
-  let g: Result[List[Int], String] = fan.race { [7], [8, 9] }
+  let g: Result[List[Int], String] = fan.min(compute.ms(100)) { [7], [8, 9] }
   println("${a} ${b} ${c} ${d.tag} ${d.x} ${e} ${f} ${g}")
 }
 "#;

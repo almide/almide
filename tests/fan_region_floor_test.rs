@@ -137,8 +137,8 @@ effect fn main() -> Unit = {
   println("parts a,b: ${parts_units("a,b", 0)!}")
   println("parts a,b,c,d,e: ${parts_units("a,b,c,d,e", 0)!}")
   println("half 7: ${half_units(7, 0)!}")
-  println(int.to_string(fan.race { parts("a,b,c,d"), parts("a,b") } ?? -1))
-  println(float.to_string(fan.race { half(9), half(5) } ?? 0.0))
+  println(int.to_string(fan.min(compute.ms(100)) { parts("a,b,c,d"), parts("a,b") } ?? -1))
+  println(float.to_string(fan.min(compute.ms(100)) { half(9), half(5) } ?? 0.0))
   println(int.to_string(fan.bounded(compute.ns(12)) { parts("a,b,c,d,e,f") } ?? -1))
   println(float.to_string(fan.bounded(compute.ns(12)) { half(40) } ?? -1.0))
 }
@@ -183,19 +183,19 @@ effect fn mk_units(n: Int, ns: Int) -> Result[Int, String] =
   }
 
 effect fn main() -> Unit = {
-  let p = fan.race { mk(6), mk(2) } ?? { x: 0, y: 0 }
+  let p = fan.min(compute.ms(100)) { mk(6), mk(2) } ?? { x: 0, y: 0 }
   println("record: ${p.x} ${p.y}")
-  let w = fan.race { words(6), words(1) } ?? []
+  let w = fan.min(compute.ms(100)) { words(6), words(1) } ?? []
   println("words: ${list.join(w, ",")}")
-  let o = fan.race { opt(6), opt(3) } ?? none
+  let o = fan.min(compute.ms(100)) { opt(6), opt(3) } ?? none
   println("option: ${o ?? -1}")
-  let s = fan.race { shape(7), shape(1) } ?? Circle(0)
+  let s = fan.min(compute.ms(100)) { shape(7), shape(1) } ?? Circle(0)
   println("variant: ${show(s)}")
-  let t = fan.race { pair(9), pair(4) } ?? (0, "none")
+  let t = fan.min(compute.ms(100)) { pair(9), pair(4) } ?? (0, "none")
   println("tuple: ${t.0} ${t.1}")
   let base = { x: 3, y: 4 }
   let other = { x: 1, y: 1 }
-  let a = fan.race {
+  let a = fan.min(compute.ms(100)) {
     area(base)
     area(other)
   } ?? -1
@@ -260,8 +260,8 @@ effect fn main() -> Unit = {
     println("units ${k}: ${units(k, 0)!}")
   }
   let g = (x) => spin(x) * 2
-  println(int.to_string(fan.race { apply(g, 9), apply(g, 3) } ?? -1))
-  println(fan.race { build(9), build(4) } ?? "none")
+  println(int.to_string(fan.min(compute.ms(100)) { apply(g, 9), apply(g, 3) } ?? -1))
+  println(fan.min(compute.ms(100)) { build(9), build(4) } ?? "none")
   println(fan.bounded(compute.ns(60)) { build(50) } ?? "cut")
 }
 "#;
@@ -361,7 +361,7 @@ effect fn main() -> Unit = {
     let p = fan.bounded(compute.ns(ns)) { pair_of(20) } ?? (-1, -1.0)
     println("${ns}: ${r.x} ${depth(t)} ${show_tag(g)} ${o ?? "none"} ${list.len(w)} ${map.len(c)} ${p.0} ${p.1}")
   }
-  let winner = fan.race {
+  let winner = fan.min(compute.ms(100)) {
     tree_of(30)
     tree_of(4)
   } ?? Leaf

@@ -16,7 +16,7 @@ fn heavy(n: Int) -> Int = {
 effect fn main() -> Unit = {
   var ns = 1500
   while ns < 1512 {
-    let r = fan.race(compute.ns(ns)) {
+    let r = fan.min(compute.ns(ns)) {
       heavy(1000)
       heavy(500)
     } ?? -1

@@ -11,7 +11,7 @@
 //! Before #3137 the line walkers (`fs.fold_lines`, `fs.for_each_line` and
 //! the fallible `__fallible_fold_lines` / `__fallible_for_each_line`, both
 //! the inline and the closure routes) left one block per line live, the
-//! prefetch fans (`fan.map` / `fan.any` over `fs.read_text`) one Result shell
+//! prefetch fans (`fan.map` / `list.find_map` over `fs.read_text`) one Result shell
 //! per element, and the size probe under `fs.fold_lines_chunked` /
 //! `fs.file_size` its 8-byte scratch.
 //!
@@ -189,18 +189,15 @@ import fan
 effect fn main() -> Unit = {
   let xs = fan.map(["{D}/a.txt", "{D}/b.txt", "{D}/c.txt"], (p) => fs.read_text(p)!)!
   println(list.join(xs, ","))
-  let y = fan.any(["{D}/no1.txt", "{D}/no2.txt", "{D}/b.txt", "{D}/c.txt"], (p) => fs.read_text(p)!)!
+  let y = list.find_map(["{D}/no1.txt", "{D}/no2.txt", "{D}/b.txt", "{D}/c.txt"], (p) => fs.read_text(p)?) ?? "none"
   println(y)
   match fan.map(["{D}/a.txt", "{D}/no.txt", "{D}/c.txt"], (p) => fs.read_text(p)!) {
     ok(_) => println("map ok"),
     err(_) => println("map err"),
   }
-  match fan.any(["{D}/no1.txt", "{D}/no2.txt"], (p) => fs.read_text(p)!) {
-    ok(_) => println("any ok"),
-    err(e) => println(e),
-  }
+  println(list.find_map(["{D}/no1.txt", "{D}/no2.txt"], (p) => fs.read_text(p)?) ?? "any none")
 }
 "#,
-        "x,yy,zzz\nyy\nmap err\nfan.any: all candidates failed\n",
+        "x,yy,zzz\nyy\nmap err\nany none\n",
     );
 }

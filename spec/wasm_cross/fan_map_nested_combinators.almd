@@ -6,9 +6,9 @@
 // inner parameter (E0282) while the wasm leg ran the program. The matrix:
 // {map, filter, fold, flat_map} nested inside {fan.map, fan { … } block}, plus
 // a `fan.map` routed to the PARALLEL twin (scalar result, whose mapper is
-// un-boxed back to a raw `impl Fn`) and a `fan.any { … }` arm carrying a
+// un-boxed back to a raw `impl Fn`) and a `??` chain candidate carrying a
 // combinator. Every row is byte-identical on both legs.
-effect fn first_ok(n: Int) -> Result[Int, String] = if n > 0 then ok(n) else err("zero")
+effect fn positive(n: Int) -> Result[Int, String] = if n > 0 then ok(n) else err("zero")
 
 effect fn main() -> Unit = {
   let rows = [1, 2, 3]
@@ -33,10 +33,7 @@ effect fn main() -> Unit = {
     [1, 2, 3] |> list.flat_map((x) => [x, -x])
   }
   println("block=" + int.to_string(list.sum(b_map)) + "," + int.to_string(list.len(b_filter)) + "," + int.to_string(b_fold) + "," + int.to_string(list.len(b_flat)))
-  // fan.any block × map: a combinator in a first-Ok arm.
-  let anyd = fan.any {
-    first_ok([1, 2, 3] |> list.map((x) => x * 3) |> list.sum())
-    first_ok(0)
-  }!
+  // `??` chain × map: a combinator in a first-Ok candidate.
+  let anyd = positive([1, 2, 3] |> list.map((x) => x * 3) |> list.sum()) ?? positive(0) ?? -1
   println("any=" + int.to_string(anyd))
 }

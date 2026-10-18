@@ -15,8 +15,6 @@ effect fn up(s: String) -> Result[String, String] = if s == "" then err("empty")
 
 effect fn fan_bang(xs: List[String]) -> List[String] = fan.map(xs, (s) => up(s))!
 
-effect fn fan_first(xs: List[String]) -> String = fan.any(xs, (s) => up(s))!
-
 fn bang(xs: List[String]) -> List[String] = list.map(xs, (s) => s + "!")
 
 fn same(xs: List[String]) -> List[String] = list.map(xs, (s) => s)
@@ -41,7 +39,7 @@ effect fn main() -> Unit = {
   let xs = ["a", "bc"]
   println("${bang(xs)} ${same(xs)} ${kept(xs)} ${total(xs)} ${joined(xs)} ${fused(xs)} ${first(xs) ?? ""}")
   println("${any_long(xs)} ${every(xs)} ${many(xs)}")
-  println("${fan_bang(xs)!} ${fan_first(xs)!}")
+  println("${fan_bang(xs)!}")
 }
 "#;
 
@@ -60,7 +58,7 @@ fn accepted(cert: &str) -> bool {
 fn inlined_callbacks_witness_per_element_and_other_shapes_decline() {
     // ONE test: the witness sink is process-global.
     let w = witnesses();
-    for name in ["bang", "same", "kept", "total", "joined", "first", "any_long", "every", "many", "fan_bang", "fan_first"] {
+    for name in ["bang", "same", "kept", "total", "joined", "first", "any_long", "every", "many", "fan_bang"] {
         let got = w.get(name).unwrap_or_else(|| panic!("{name} must be witnessed"));
         assert!(!got.starts_with('!'), "{name}: {got:?}");
         assert!(accepted(got), "{name}: the portable checker must accept {got:?}");
@@ -81,7 +79,6 @@ fn inlined_callbacks_witness_per_element_and_other_shapes_decline() {
     // fan's accumulator: each element's carrier leaves or is released
     // (`{id|im}`), and map's ok payload moves into the accumulator.
     assert!(w["fan_bang"].contains("{id|im}\n{|im}\n") || w["fan_bang"].contains("{id|im}\n\n{|im}\n"), "{:?}", w["fan_bang"]);
-    assert!(w["fan_first"].contains("{id|im}\n"), "{:?}", w["fan_first"]);
     // A fold over a list call takes the fused lowering (#2755): one
     // activation over the inlined map stage and the fold step: the scalar
     // stage and accumulator carry no credit, the stage param is a view (the

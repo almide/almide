@@ -204,14 +204,14 @@
 
 ## Tier 6 — 残滓掃討（2026-08-03 スコープ拡大「残りも全部つぶして」で編入）
 
-- [x] **T6-1 fan.race mapper セルの正規化**（当初「実装で閉じる」と書いたが
+- [x] **T6-1 fan.min mapper セルの正規化**（当初「実装で閉じる」と書いたが
   **批准済み fan-v2 設計の規定に従い改訂**: race mapper セルは「宣言済み・
   実ユース待ち」が設計された状態（反証条件に明記の fallback）で、実ユースは
   今日時点でゼロ — 点実装は API 完備性運用（面は gate で固定、点追加しない）
   にも反する。実バグは **thunk 移行ヒントが正規の mapper 綴り
-  `fan.race(xs, (x) => …)` に誤爆**していたこと。修正: 1-param lambda 尾部を
+  `fan.min(xs, (x) => …)` に誤爆**していたこと。修正: 1-param lambda 尾部を
   mapper 綴りとして検出し「declared but not implemented (Wave 2 keeps the cell
-  open until a real use appears)」+ block 形 / fan.any(xs, f) への誘導。bounded /
+  open until a real use appears)」+ block 形 / list.find_map(xs, f) への誘導。bounded /
   timeout の mapper 綴りも matrix 回答（「has no mapper form — 設計上不在 +
   合成イディオム」）に。セルを将来実装する時は T6-2 gate が同 PR 更新を強制）
 - [x] **T6-2 fan head×form matrix gate 新設** — `tests/fan_surface_matrix_test.rs`:
@@ -242,8 +242,8 @@
 
 ## Tier 7 — race mapper 実装（2026-08-03、ユーザー決定でセルを閉じる）
 
-- [x] **T7-1 fan.race mapper 形の実装**（e7046fe1 — ユーザー指示でセルを実装で
-  閉鎖。`fan.race(xs, f)` / `fan.race(budget, xs, f)`: FanRaceMap AST + checker
+- [x] **T7-1 fan.min mapper 形の実装**（e7046fe1 — ユーザー指示でセルを実装で
+  閉鎖。`fan.min(xs, f)` / `fan.min(budget, xs, f)`: FanRaceMap AST + checker
   G3 arm（E007 / budget clock / List[X] unify / mapper は **Result[T, String]
   に直接 pin** — 自由な Err 型変数は Result[Int, Unknown] を lowering に残し
   ConcretizeTypes 拒否になる罠を踏んで学習）+ 動的 fold lowering（while +
