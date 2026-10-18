@@ -14,7 +14,9 @@
 //!
 //! The fold cells are also in the cross-target fixture
 //! `spec/wasm_cross/fold_init_rebinds_source.almd`; this test pins the
-//! native leg for the remaining cells.
+//! native leg for the remaining cells. They are native-only because the
+//! wasm leg reads the rebound value for the non-fold calls (#3815); they
+//! move into a cross-target fixture once it agrees.
 
 use std::process::Command;
 
