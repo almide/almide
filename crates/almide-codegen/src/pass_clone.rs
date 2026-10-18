@@ -44,6 +44,7 @@ impl NanoPass for CloneInsertionPass {
         let mut ref_lets = HashSet::new();
         for f in functions.iter_mut().chain(modules.iter_mut().flat_map(|m| &mut m.functions)) {
             ref_lets.extend(super::pass_clone_head::rewrite(f, var_table, &all_top_lets));
+            ref_lets.extend(super::pass_clone_select::rewrite(f, var_table, &all_top_lets));
             super::pass_clone_projection::fold_bindings(&mut f.body);
         }
         program.codegen_annotations.infer_binding_tys.extend(ref_lets.iter().copied());

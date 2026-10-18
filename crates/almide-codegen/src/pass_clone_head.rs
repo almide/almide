@@ -158,7 +158,7 @@ fn inlinable(body: &IrExpr) -> bool {
 /// Does every occurrence of `v` in `rest` leave it in place — no move (a
 /// heap field projected into a consuming position included), no write, no
 /// capture — so a reference into it stays valid across `rest`?
-fn stays_put(rest: &IrExpr, v: VarId) -> bool {
+pub(super) fn stays_put(rest: &IrExpr, v: VarId) -> bool {
     use super::use_kind::{ExplicitBorrows, Site, SlotMode, UseSites, element_top_consumes};
     UseSites::of_expr(rest, Site::Result, &ExplicitBorrows).of(v).all(|u| {
         u.depth == 0 && !u.in_chain && !u.in_mut && !u.is_write(true) && match u.site {
