@@ -1,0 +1,60 @@
+// @contract: C-386
+// `fan { name: expr, … }` is a record literal whose fields run as parallel siblings
+// (#1388). Deleting the `fan` marker changes nothing observable: the fields' output
+// appears in SOURCE order, and the value is the anonymous record the plain literal
+// `{ name: expr, … }` builds — same field names, same values, same type. Swapping two
+// fields swaps nothing, because the value is read by name, never by position.
+effect fn note(tag: String, v: Int) -> Result[Int, String] = {
+  println("eval " + tag)
+  ok(v)
+}
+
+effect fn word(tag: String) -> Result[String, String] = {
+  println("eval " + tag)
+  ok(tag + "!")
+}
+
+effect fn main() -> Unit = {
+  println("-- fan")
+  let a = fan {
+    x: note("x", 1)!
+    y: note("y", 2)!
+    s: word("s")!
+    k: 40
+  }
+  println("-- plain")
+  let b = {
+    x: note("x", 1)!,
+    y: note("y", 2)!,
+    s: word("s")!,
+    k: 40,
+  }
+  println("-- swapped")
+  let c = fan {
+    y: note("y", 2)!
+    x: note("x", 1)!
+    k: 40
+    s: word("s")!
+  }
+  println("a = " + int.to_string(a.x) + " " + int.to_string(a.y) + " " + a.s + " " + int.to_string(a.k))
+  println("b = " + int.to_string(b.x) + " " + int.to_string(b.y) + " " + b.s + " " + int.to_string(b.k))
+  println("c = " + int.to_string(c.x) + " " + int.to_string(c.y) + " " + c.s + " " + int.to_string(c.k))
+  println(if a == b and b == c then "same" else "different")
+  let one = fan {
+    only: note("only", 7)!
+  }
+  let nested = fan {
+    outer: note("outer", 1)!
+    inner: fan {
+      p: note("p", 2)!
+      q: word("q")!
+    }
+  }
+  println("one = " + int.to_string(one.only))
+  println("nested = " + int.to_string(nested.outer) + " " + int.to_string(nested.inner.p) + " " + nested.inner.q)
+  let { x, y } = fan {
+    x: note("dx", 3)!
+    y: note("dy", 4)!
+  }
+  println("destructured = " + int.to_string(x + y))
+}

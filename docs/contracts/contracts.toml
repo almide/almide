@@ -5043,3 +5043,16 @@ evidence  = [
   { path = "tests/http_request_framing_cross_test.rs", name = "a_caller_content_length_is_dropped_on_the_p3_component", class = "fixture" },
   { path = "tests/http_request_framing_cross_test.rs", name = "a_caller_content_length_is_dropped_by_the_streaming_client", class = "fixture" },
 ]
+
+# ── FAN RECORD FORM: THE RECORD LITERAL OF ITS FIELDS, RUN AS SIBLINGS ─
+[[contract]]
+id        = "C-386"
+spec      = "ALS-R3"
+title     = "A record-form fan block is the record literal of its fields, run as parallel siblings"
+statement = "`fan { a: e1, b: e2, … }` (#1388) runs its fields as the parallel siblings of the tuple form `fan { e1, e2, … }`, and its value is the anonymous record `{ a: v1, b: v2, … }`. When no field fails, deleting the `fan` marker changes nothing observable: the fields' output appears in SOURCE order and the value equals the plain record literal's — same names, same values, same type — and reordering the fields changes no value, because fields are read by name. A field written `e!` makes its Err the block's Err under the tuple form's rule (C-199): every field runs, nothing is cancelled, and the first Err in source order surfaces as `Error: <msg>` + exit 1, identically on both targets."
+since     = "0.68.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/fan_record_serial_elision.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fan_record_err_source_order.almd", class = "fixture" },
+]
