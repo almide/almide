@@ -552,10 +552,15 @@ fn fmt_expr_block(out: &mut String, expr: &Expr, depth: usize) {
 }
 
 fn fmt_expr_fan(out: &mut String, expr: &Expr, depth: usize) {
-    let ExprKind::Fan { exprs, .. } = &expr.kind else { unreachable!() };
+    let ExprKind::Fan { exprs, names } = &expr.kind else { unreachable!() };
     out.push_str("fan {\n");
-    for e in exprs {
-        out.push_str(&ind(depth + 1)); fmt_expr(out, e, depth + 1); out.push('\n');
+    for (i, e) in exprs.iter().enumerate() {
+        out.push_str(&ind(depth + 1));
+        // The record form (#1388): one `name: expr` field per line.
+        if let Some(name) = names.get(i) {
+            w!(out, "{}: ", name.as_str());
+        }
+        fmt_expr(out, e, depth + 1); out.push('\n');
     }
     out.push_str(&ind(depth)); out.push('}');
 }
