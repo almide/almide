@@ -632,7 +632,8 @@ impl Parser {
         // Module-qualified record literal: module.TypeName { field: value }
         // Detected when: the object is an Ident, the field starts with
         // uppercase, and the next token is { followed by ident: (record pattern)
-        let is_qualified_record = field.as_str().starts_with(char::is_uppercase)
+        let is_qualified_record = (field.as_str().starts_with(char::is_uppercase)
+            || super::caseless::is_caseless_name(field.as_str()))
             && matches!(&expr.kind, ExprKind::Ident { .. })
             && self.peek_named_record();
         if is_qualified_record {

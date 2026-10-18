@@ -716,7 +716,8 @@ impl Parser {
             }
         }
         let id_offset = self.expr_id_counter();
-        let mut sub_parser = super::Parser::new_with_id_offset(tokens, id_offset);
+        let mut sub_parser = super::Parser::new_with_id_offset(tokens, id_offset)
+            .with_caseless_type_names(&self.caseless_type_names);
         match sub_parser.parse_single_expr() {
             Ok(parsed) => {
                 // Advance our id counter past sub-parser's allocations

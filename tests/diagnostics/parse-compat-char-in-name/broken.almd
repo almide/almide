@@ -1,0 +1,7 @@
+// #1456: a full-width letter is a compatibility character — identifiers
+// refuse it instead of folding it, so `ｃｏｕｎｔ` cannot become a second name
+// beside `count`. The hint names the plain spelling.
+effect fn main() -> Unit = {
+  let ｃｏｕｎｔ = 3
+  println("${count}")
+}

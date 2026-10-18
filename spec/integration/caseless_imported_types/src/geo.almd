@@ -1,0 +1,12 @@
+type 住所 = { 都市: String, 番地: Int }
+
+type 色 = | 赤 | 緑(Int)
+
+fn 作る(都市: String) -> 住所 = 住所 { 都市: 都市, 番地: 1 }
+
+fn 名前(c: 色) -> String = match c {
+  赤 => "red",
+  緑(n) => "green${n}",
+}
+
+fn 住所.ラベル(self) -> String = "<${self.都市}>"
