@@ -1,0 +1,30 @@
+// @contract: C-161
+// fma / fma3 over IEEE specials, read back as bits so every leg compares the
+// exact cell: NaN, +-inf, -0.0, and a product that overflows to inf. Native's
+// `x*ka + y*kb [+ z*kc]` is two rounded products and a rounded sum per term,
+// never a fused multiply-add. Kept apart from matrix_composition_family.almd:
+// the interpreter abstains on a container holding a NaN (#1403), and this way
+// the rest of the family keeps its third vote.
+fn bits(m: Matrix) -> List[List[Int]] = matrix.to_lists(m) |> list.map((r) => r |> list.map((x) => float.to_bits(x)))
+
+fn main() -> Unit = {
+  let one = matrix.from_lists([
+    [1.5]
+  ])
+  // IEEE specials, read back as bits: NaN, ±inf, -0.0, overflow to inf
+  let nan: Float = math.log2(-1.0)
+  let inf = math.exp(1000.0)
+  let sp = matrix.from_lists([
+    [nan, inf, -0.0, 0.0],
+    [-0.0, 1.0e308, 2.0, -inf]
+  ])
+  let sq = matrix.from_lists([
+    [1.0, 0.0, -0.0, -0.0],
+    [-0.0, 1.0e308, inf, inf]
+  ])
+  let r1 = bits(matrix.fma(sp, 1.0, sq, 1.0))
+  let r2 = bits(matrix.fma(sp, 0.0, sq, -1.0))
+  let r3 = bits(matrix.fma(sp, -0.0, one, inf))
+  let r4 = bits(matrix.fma3(sp, 1.0, sq, 1.0, sp, -1.0))
+  println("specials: ${r1} ${r2} ${r3} ${r4}")
+}

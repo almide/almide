@@ -9,7 +9,8 @@
 //! n = 1000 and 0.33 s at n = 2000 on wasm, against a flat ~0.02 s natively.
 //!
 //! The values are pinned by spec/wasm_cross/matrix_composition_family.almd
-//! (the overlap shapes, the unfused rounding, NaN / ±inf / -0.0 as bits);
+//! (the overlap shapes, the unfused rounding) and matrix_fma_ieee_specials.almd
+//! (NaN / ±inf / -0.0 as bits);
 //! this file pins the cost. The program times only the fma loop (it reads the
 //! monotonic clock around it) with a 1×1 operand against an n×n one, at n and
 //! 2n: a whole-operand pass takes about 4× per call, an overlap pass about

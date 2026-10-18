@@ -2187,6 +2187,7 @@ evidence  = [
   { path = "spec/wasm_cross/string_repeat_empty.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_elementwise_family.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_composition_family.almd", class = "fixture" },
+  { path = "spec/wasm_cross/matrix_fma_ieee_specials.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_linear_f32_empty_extent_ceiling.almd", class = "fixture" },
   { path = "spec/wasm_cross/matrix_select_rows_f32_dims_ceiling.almd", class = "fixture" },
 ]
