@@ -52,10 +52,13 @@ effect fn main() -> Unit = {
   // ── list.find_map: first Ok wins, an element's err (`?` → none) skips ──
   println("any bang fs: " + (list.find_map(mixed, (p) => fs.read_text(p)?) ?? "fb"))
   println("any bang helper: " + (list.find_map(mixed, (p) => helper(p)?) ?? "fb"))
-  println("any compound: " + (list.find_map(mixed, (p) => {
-    let t = string.trim(p)
-    fs.read_text(t)?
-  }) ?? "fb"))
+  println("any compound: " + (list.find_map(
+    mixed,
+    (p) => {
+      let t = string.trim(p)
+      fs.read_text(t)?
+    },
+  ) ?? "fb"))
   println("any value: " + (list.find_map(mixed, (p) => helper(p)?) ?? "fb"))
   println("any all-fail: " + (list.find_map([absent + "/x.txt"], (p) => fs.read_text(p)?) ?? "fb"))
   // ── fan.settle: EVERY element's Result, errs captured ──
