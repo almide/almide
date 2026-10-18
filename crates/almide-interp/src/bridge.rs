@@ -653,7 +653,7 @@ mod env_overlay_tests {
     /// wasm legs, which inherit the process environment (#3808).
     #[test]
     fn env_set_stays_inside_the_interpreter() {
-        let key = "ALMIDE_INTERP_ENV_OVERLAY_TEST";
+        let key = "INTERP_ENV_OVERLAY_PROBE";
         reset_env_overlay();
         env_fn("set", &[Value::str(key.to_string()), Value::str("written".to_string())]);
         assert_eq!(std::env::var(key).ok(), None, "env.set leaked into the host process");
