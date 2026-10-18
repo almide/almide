@@ -82,6 +82,8 @@ breaks = [
 # append-only. After 0.64.0, E084's range went back up to the exit status
 # 0..=255. A literal from 126 through 255 is accepted again; one below 0 or
 # above 255 is still E084. That change only accepts more programs, so it is not
+
+
 # an epoch.
 
 [[epoch]]
@@ -167,6 +169,18 @@ summary = "The `args` module's readers read argv, so they are `effect fn`s like 
 breaks = [
   "`args.raw`, `args.flag`, `args.option`, `args.option_or`, `args.positional` and `args.positional_at` are `effect fn`s — a call from a plain fn is E006; mark the caller `effect fn`, or read the arguments in `effect fn main` and pass the value in",
   "a call to an `args` reader is typed `Result[T, String]` and is propagated with `!` like any Almide-bodied effect fn's: `args.flag(\"verbose\")!`, `args.option(\"out\")! ?? \"-\"`; without it the value is a Result (E041 on a `let`, a type mismatch as an argument)",
+]
+
+[[epoch]]
+n = 14
+since = "0.68.0"
+name = "fan-selection-names"
+summary = "The fan selection forms say what they select (ADR-0028, decided 2026-10-17/18). `fan.race` is `fan.min(clock) { … }`: the clock argument is required and its TYPE says what \"least\" is measured on — `compute` is the branch with the least deterministic compute within the budget (ties to source order); `duration` (first to succeed in real time, I/O arms, #3788) is decided and lands separately. `fan.any` is removed: the first Ok in source order is a `??` chain, and over a list it is `list.find_map(xs, (x) => f(x)?)` — every peer keeps an ordered try-in-order with its list functions (Rust/OCaml `find_map`, Elixir `find_value`), not in the concurrency library, and in every other ecosystem `race` means \"first to finish\" and `any` means \"no order guarantee\", so the old names compiled silently under the wrong reading. The interim names `fan.first_ok` / `fan.min_cost` of this epoch's first draft were never released. There is no deprecation window."
+breaks = [
+  "`fan.race { … }`, `fan.race(budget) { … }`, `fan.race(xs, f)` and `fan.race(budget, xs, f)` are E027; write `fan.min(compute.ms(n)) { … }` / `fan.min(compute.ms(n), xs, f)` — the arms and mapper are unchanged, and the budget is now required (`fan.min { … }` and `fan.min(xs, f)` without a clock are parse errors)",
+  "`fan.any { a(), b() }` is E027; write `a() ?? b() ?? fallback` — the same first-Ok-in-source-order, and later candidates never run once one succeeds; the value is the winner's payload (not a Result), so the all-failed case is the fallback, not an Err",
+  "`fan.any(xs, f)` is E027; write `list.find_map(xs, (x) => f(x)?) ?? fallback` — `?` turns an element's Err into none so the element is skipped; the all-failed case is `none`, so the fixed text `fan.any: all candidates failed` no longer exists",
+  "the all-failed error text of `fan.min` is `fan.min: no branch succeeded within budget` (was `fan.race: no branch completed within budget`); a program matching on the old text must match the new one",
 ]
 
 # DEPRECATIONS — spellings accepted for a window, with the epoch that removes them
