@@ -32,10 +32,10 @@ const VALID_TAIL: &str = "fn main() -> Unit = {\n  println(\"ok\")\n}\n";
 #[test]
 fn trailing_garbage_is_an_error_not_a_silent_pass() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let (out, ok) = check(dir.path(), &format!("{VALID_TAIL}\nあああああ\n"));
+    let (out, ok) = check(dir.path(), &format!("{VALID_TAIL}\n§§§§§\n"));
     assert!(!ok, "trailing garbage must fail check, got:\n{out}");
     assert!(
-        out.contains("Unexpected character 'あ' (U+3042)"),
+        out.contains("Unexpected character '§' (U+00A7)"),
         "must name the character and code point, got:\n{out}"
     );
 }
@@ -43,9 +43,9 @@ fn trailing_garbage_is_an_error_not_a_silent_pass() {
 #[test]
 fn leading_garbage_is_an_error_not_a_truncated_empty_program() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let (out, ok) = check(dir.path(), &format!("あああああ\n\n{VALID_TAIL}"));
+    let (out, ok) = check(dir.path(), &format!("§§§§§\n\n{VALID_TAIL}"));
     assert!(!ok, "leading garbage must fail check, got:\n{out}");
-    assert!(out.contains("U+3042"), "got:\n{out}");
+    assert!(out.contains("U+00A7"), "got:\n{out}");
 }
 
 #[test]
