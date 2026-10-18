@@ -36,8 +36,9 @@ fn main_body(rust: &str) -> &str {
 fn an_arm_temporary_moves_into_the_join() {
     let rust = almide_mir::pipeline::try_render_rust_source(SRC).expect("the program renders on v1");
     let main = main_body(&rust);
-    // one copy per arm (the arm's own Dup of the live list), none at the join
-    assert_eq!(main.matches(".clone()").count(), 2, "one copy per arm, none at the join:\n{main}");
+    // The join is only read and both lists outlive it, so the arms borrow
+    // (crate::borrow_join, #3532): no copy in the arms and none at the join.
+    assert_eq!(main.matches(".clone()").count(), 0, "a read-only selection copies:\n{main}");
 }
 
 #[test]
