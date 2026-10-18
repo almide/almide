@@ -94,6 +94,16 @@ impl Checker {
         }
     }
 
+    /// #3777: whether the position takes a `Result` as its VALUE — the tail
+    /// of a fn declared `-> Result[..]`, a `let` / `var` annotated
+    /// `Result[..]`. A Result-typed branch or arm there is that value, so the
+    /// join neither strips it nor reports it as implicit propagation (ADR-0008:
+    /// propagation is asked for by an un-annotated binding, never by a
+    /// declared `Result`).
+    pub(super) fn expect_takes_result(&self, expect: Option<&TailExpect>) -> bool {
+        expect.is_some_and(|e| resolve_ty(&e.ty, &self.uf).is_result())
+    }
+
     /// ADR-0002 D3 (#3385): in a LIFTING tail — a `-> T!` body — every value
     /// exit lifts into `ok(..)` on its own: the lowering
     /// (`wrap_fallible_value_tail`) wraps each branch / arm leaf by its own
