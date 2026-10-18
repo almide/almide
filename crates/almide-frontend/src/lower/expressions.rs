@@ -172,11 +172,15 @@ fn lower_expr_control(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option
             call
         }
 
-        ast::ExprKind::Fan { exprs, .. } => {
+        ast::ExprKind::Fan { exprs, names } => {
             let ir_exprs: Vec<IrExpr> = exprs.iter()
                 .map(|e| { let arm = lower_expr(ctx, e); fan_arm_scope(ctx, arm) })
                 .collect();
-            ctx.mk(IrExprKind::Fan { exprs: ir_exprs }, ty, span)
+            if names.is_empty() {
+                ctx.mk(IrExprKind::Fan { exprs: ir_exprs }, ty, span)
+            } else {
+                lower_fan_record(ctx, ir_exprs, names, ty, span)
+            }
         }
         // fan.bounded(budget) { body } — Stage 2 v1 desugar by OUTLINING.
         // The region becomes a synthesized PLAIN fn `__almd_bounded_N(budget,

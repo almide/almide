@@ -119,3 +119,40 @@ fn bang_channel_in_scope(e: &IrExpr) -> Option<Ty> {
     s.visit_expr(e);
     s.0
 }
+
+/// The record form `fan { x: a, y: b }` (#1388): the tuple-form fan of the
+/// same arms, destructured into one fresh binding per field, then the record
+/// literal over them — `{ let (x', y') = fan { a, b }; { x: x', y: y' } }`.
+/// Every leg (native threads + ADR-0013 share marks, wasm, interp) sees the
+/// one `Fan` node it already runs, so the arms' concurrency, `!` scoping and
+/// first-Err order are the tuple form's by construction. An arm's slot type
+/// is its value type: a scoped `!` arm is a Result the join unwraps (the
+/// checker refused a field whose own value is a Result).
+fn lower_fan_record(ctx: &mut LowerCtx, arms: Vec<IrExpr>, names: &[almide_base::intern::Sym], ty: Ty, span: Option<ast::Span>) -> IrExpr {
+    let slot_tys: Vec<Ty> = arms.iter().map(|a| match &a.ty {
+        Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 => args[0].clone(),
+        t => t.clone(),
+    }).collect();
+    let fan_ty = match slot_tys.as_slice() {
+        [one] => one.clone(),
+        many => Ty::Tuple(many.to_vec()),
+    };
+    let vars: Vec<VarId> = names.iter().zip(&slot_tys)
+        .map(|(n, t)| ctx.var_table.alloc(sym(&format!("__fan_{}", n.as_str())), t.clone(), Mutability::Let, span))
+        .collect();
+    let fan = ctx.mk(IrExprKind::Fan { exprs: arms }, fan_ty.clone(), span);
+    let bind = match vars.as_slice() {
+        [one] => IrStmtKind::Bind { var: *one, mutability: Mutability::Let, ty: fan_ty, value: fan },
+        many => IrStmtKind::BindDestructure {
+            pattern: IrPattern::Tuple {
+                elements: many.iter().zip(&slot_tys).map(|(v, t)| IrPattern::Bind { var: *v, ty: t.clone() }).collect(),
+            },
+            value: fan,
+        },
+    };
+    let fields: Vec<(almide_base::intern::Sym, IrExpr)> = names.iter().zip(vars.iter().zip(&slot_tys))
+        .map(|(n, (v, t))| (*n, ctx.mk(IrExprKind::Var { id: *v }, t.clone(), span)))
+        .collect();
+    let record = ctx.mk(IrExprKind::Record { name: None, fields }, ty.clone(), span);
+    ctx.mk(IrExprKind::Block { stmts: vec![IrStmt { kind: bind, span }], expr: Some(Box::new(record)) }, ty, span)
+}
