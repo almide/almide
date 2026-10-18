@@ -513,7 +513,7 @@
 15557	spec/wasm_cross/math_log_gamma_negative.almd
 9104	spec/wasm_cross/math_pow.almd
 20008	spec/wasm_cross/math_transcendental_bits.almd
-17021	spec/wasm_cross/matrix_composition_family.almd
+28410	spec/wasm_cross/matrix_composition_family.almd
 3261	spec/wasm_cross/matrix_dims_guard.almd
 2440	spec/wasm_cross/matrix_dims_guard_overflow.almd
 2535	spec/wasm_cross/matrix_dims_guard_product.almd
