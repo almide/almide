@@ -374,9 +374,13 @@ _for_name: _ident | UNDERSCORE
 fan_expr: FAN DOT IDENT "(" _nl expr _nl ")" _nl block   -> fan_head_call
         | FAN DOT IDENT _nl fan_arm_block                -> fan_head_block
         | FAN fan_arm_block                              -> fan_block
+        | FAN fan_record_block                           -> fan_record
         | FAN                                            -> fan_name
 
 fan_arm_block: "{" _nl (expr _stmt_sep)* _o_expr "}"
+// `fan { a: e1, b: e2 }` (#1388): every arm a `name: expr` field (no punning
+// — `fan { x }` is the one-arm tuple form); the value is the record.
+fan_record_block: "{" _nl field_kv (_seps field_kv)* _o_seps "}"
 _o_expr: expr
        |
 

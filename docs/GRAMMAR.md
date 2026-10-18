@@ -102,7 +102,8 @@ arm         = pattern ("|" pattern)* ("if" expr)? "=>" expr  (* or-alternatives 
 for_in      = "for" (binder | "(" binder ("," binder)* ")") "in" expr block
 binder      = IDENT | "_"
 while_expr  = "while" expr block
-fan_expr    = "fan" "{" (expr ";"?)+ "}"                   (* concurrent; exprs only, no statements *)
+fan_expr    = "fan" "{" (expr ","?)+ "}"                   (* concurrent arms → tuple; `,`/newline between, never `;` *)
+            | "fan" "{" (IDENT ":" expr ","?)+ "}"         (* record form: concurrent fields → record (#1388) *)
 lambda      = "(" (lparam ("," lparam)*)? ")" "=>" expr    (* the ONLY lambda form *)
 lparam      = (IDENT | "_") (":" type)?
             | "(" (IDENT | "_") ("," (IDENT | "_"))* ")"   (* tuple-destructuring param *)
