@@ -99,7 +99,7 @@ fn fan_flatten_block_bind(s: &IrStmt) -> Option<Vec<IrStmt>> {
     }
     let mut out = stmts.clone();
     *value = (**tail).clone();
-    out.push(IrStmt { kind, span: s.span.clone() });
+    out.push(IrStmt { kind, span: s.span });
     Some(out)
 }
 
@@ -174,7 +174,7 @@ fn fan_settle_block(arms: Vec<FanElem>, fan: &IrExpr, next_var: &mut u32) -> IrE
         .map(|a| match a {
             FanElem::Plain(r) => r,
             FanElem::Unwrap(r, t) => {
-                let span = fan.span.clone();
+                let span = fan.span;
                 let unwrap = IrExpr { kind: IrExprKind::Unwrap { expr: Box::new(r) }, ty: t.clone(), span, def_id: None };
                 fresh(&t, unwrap, &mut stmts)
             }
@@ -184,8 +184,8 @@ fn fan_settle_block(arms: Vec<FanElem>, fan: &IrExpr, next_var: &mut u32) -> IrE
             }
         })
         .collect();
-    let tuple = IrExpr { kind: IrExprKind::Tuple { elements }, ty: fan.ty.clone(), span: fan.span.clone(), def_id: fan.def_id };
-    IrExpr { kind: IrExprKind::Block { stmts, expr: Some(Box::new(tuple)) }, ty: fan.ty.clone(), span: fan.span.clone(), def_id: fan.def_id }
+    let tuple = IrExpr { kind: IrExprKind::Tuple { elements }, ty: fan.ty.clone(), span: fan.span, def_id: fan.def_id };
+    IrExpr { kind: IrExprKind::Block { stmts, expr: Some(Box::new(tuple)) }, ty: fan.ty.clone(), span: fan.span, def_id: fan.def_id }
 }
 
 /// A single-arm fan IS its arm: the raw value, the arm's `!`, or a split
@@ -199,5 +199,5 @@ fn fan_single_arm(arm: FanElem, fan: &IrExpr) -> IrExpr {
             IrExprKind::Block { stmts: pre, expr: Some(Box::new(value)) }
         }
     };
-    IrExpr { kind, ty: fan.ty.clone(), span: fan.span.clone(), def_id: fan.def_id }
+    IrExpr { kind, ty: fan.ty.clone(), span: fan.span, def_id: fan.def_id }
 }

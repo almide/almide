@@ -33,9 +33,10 @@ pub fn rust_safe_fn_name(raw: &str) -> String {
     let mut safe: String = s
         .chars()
         .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '_' {
-                c
-            } else if !c.is_ascii() && keep_non_ascii && unicode_ident::is_xid_continue(c) {
+            if c.is_ascii_alphanumeric()
+                || c == '_'
+                || (!c.is_ascii() && keep_non_ascii && unicode_ident::is_xid_continue(c))
+            {
                 c
             } else {
                 folded_non_ascii |= !c.is_ascii();

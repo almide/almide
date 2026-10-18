@@ -19,11 +19,11 @@ impl Parser {
     /// identifier; `fan { … }` is the plain fan block.
     pub(crate) fn parse_fan_primary(&mut self) -> Result<Expr, String> {
         let head_is = |p: &Self, name: &str| {
-            p.peek_at(1).map_or(false, |t| t.token_type == TokenType::Dot)
-                && p.peek_at(2).map_or(false, |t| t.value == name)
+            p.peek_at(1).is_some_and(|t| t.token_type == TokenType::Dot)
+                && p.peek_at(2).is_some_and(|t| t.value == name)
         };
         let head_then = |p: &Self, tt: TokenType| {
-            p.peek_at(3).map_or(false, |t| t.token_type == tt)
+            p.peek_at(3).is_some_and(|t| t.token_type == tt)
         };
         if head_is(self, "bounded") {
             return self.parse_fan_bounded_head();
@@ -52,7 +52,7 @@ impl Parser {
             return self.parse_fan_any_block_head();
         }
         // fan { ... } = fan block; fan.map/fan.race = module-like call
-        if self.peek_at(1).map_or(false, |t| t.token_type == TokenType::Dot) {
+        if self.peek_at(1).is_some_and(|t| t.token_type == TokenType::Dot) {
             // Treat `fan` as an identifier for member access
             let span = Some(self.current_span());
             self.advance();
@@ -69,14 +69,14 @@ impl Parser {
     /// tombstones with the same text (static_dispatch.rs).
     fn reject_renamed_fan_head(&mut self, head: &str) {
         let (message, hint) = renamed_fan_head_text(head);
-        let diagnostic = self.diag_error(message, hint, &format!("fan.{head}")).with_code("E027");
+        let diagnostic = self.diag_error(message, hint, format!("fan.{head}")).with_code("E027");
         self.errors.push(diagnostic);
     }
 
     /// `fan.race(e)` with no `{` after the `)`: the 0.42 thunk-list CALL, which
     /// the checker tombstones with its own text. Looks ahead without consuming.
     fn fan_race_is_legacy_thunk_call(&self) -> bool {
-        if !self.peek_at(3).map_or(false, |t| t.token_type == TokenType::LParen) {
+        if !self.peek_at(3).is_some_and(|t| t.token_type == TokenType::LParen) {
             return false;
         }
         let mut depth = 0usize;
@@ -96,12 +96,12 @@ impl Parser {
             i += 1;
         }
         let mut j = i + 1;
-        while self.peek_at(j).map_or(false, |t| t.token_type == TokenType::Newline) {
+        while self.peek_at(j).is_some_and(|t| t.token_type == TokenType::Newline) {
             j += 1;
         }
         // A mapper call `fan.race(xs, (x) => …)` is the renamed head too.
-        let has_lambda_arg = (3..i).any(|k| self.peek_at(k).map_or(false, |t| t.token_type == TokenType::FatArrow));
-        !has_lambda_arg && !self.peek_at(j).map_or(false, |t| t.token_type == TokenType::LBrace)
+        let has_lambda_arg = (3..i).any(|k| self.peek_at(k).is_some_and(|t| t.token_type == TokenType::FatArrow));
+        !has_lambda_arg && !self.peek_at(j).is_some_and(|t| t.token_type == TokenType::LBrace)
     }
 
     /// Consume `fan` `.` `<head>`, returning the head's span.

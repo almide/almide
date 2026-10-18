@@ -491,7 +491,7 @@ pub fn desugar_fan_block(body: &IrExpr) -> Option<IrExpr> {
             *e = if classes.iter().all(|c| matches!(c, FanElem::Plain(_))) {
                 // Every element raw — the original direct-tuple rewrite (no binds).
                 let elements = classes.into_iter().filter_map(|c| match c { FanElem::Plain(x) => Some(x), _ => None }).collect();
-                IrExpr { kind: IrExprKind::Tuple { elements }, ty: e.ty.clone(), span: e.span.clone(), def_id: e.def_id }
+                IrExpr { kind: IrExprKind::Tuple { elements }, ty: e.ty.clone(), span: e.span, def_id: e.def_id }
             } else {
                 // Mixed / real-Result elements: every arm runs, THEN the `!`s (#3465).
                 fan_settle_block(classes, e, &mut self.next_var)

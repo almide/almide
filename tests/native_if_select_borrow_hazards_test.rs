@@ -139,9 +139,12 @@ fn write(program: &str) -> (tempfile::TempDir, std::path::PathBuf) {
 /// `almide run` on the v1 native route, the walker leg and wasm: every leg
 /// builds and prints `expected`. `on_v1` says whether the native route must
 /// stay on the v1 render (a program outside its subset falls back).
+/// A leg's name, its extra CLI flags and its environment.
+type Leg<'a> = (&'a str, &'a [&'a str], &'a [(&'a str, &'a str)]);
+
 fn every_leg(program: &str, expected: &str, on_v1: bool) {
     let (_dir, source) = write(program);
-    let runs: [(&str, &[&str], &[(&str, &str)]); 3] = [
+    let runs: [Leg; 3] = [
         ("native", &[], &[("ALMIDE_VERIFIED_DEBUG", "1")]),
         ("native walker", &["--no-verified"], &[("ALMIDE_NO_VERIFIED_OK", "1")]),
         ("wasm", &["--target", "wasm"], &[]),

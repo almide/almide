@@ -49,12 +49,12 @@ impl Parser {
         let hint = if ch == '`' {
             "A backtick escape wraps a name that would otherwise be a keyword — \
              `type`, `protocol`. It takes identifier characters and cannot be empty."
-        } else if let Some(h) = compat.as_deref() {
-            h
         } else {
-            "This character is not Almide syntax. Full-width or invisible Unicode \
-             characters often sneak in from copy-paste — delete it, or move it into \
-             a string or comment."
+            compat.as_deref().unwrap_or(
+                "This character is not Almide syntax. Full-width or invisible Unicode \
+                 characters often sneak in from copy-paste — delete it, or move it into \
+                 a string or comment.",
+            )
         };
         let diag = self.diag_error(msg.clone(), hint, "unknown-char");
         self.errors.push(diag);

@@ -40,7 +40,7 @@ pub(crate) fn lower_body_with_globals(
 #[derive(Default)]
 pub(crate) struct LowerCtx {
     ops: Vec<Op>,
-    /// > 0 while lowering the concat chain a string INTERPOLATION desugars to.
+    /// Above 0 while lowering the concat chain a string INTERPOLATION desugars to.
     /// ALS-DT2 charges bulk concat — the `+` the writer spelled — and not
     /// interpolation (the wasm emitter, the codegen meter, the interp and the
     /// reference evaluator all leave `${…}` uncharged), so the dyn charge is

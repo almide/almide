@@ -517,7 +517,7 @@ impl Checker {
             Ty::Named(name, _) => Some(*name),
             Ty::Record { .. } | Ty::Variant { .. } => {
                 self.env.types.iter().find_map(|(name, def)| {
-                    (def == ty && almide_base::names::is_type_side_name(name.as_str())).then(|| *name)
+                    (def == ty && almide_base::names::is_type_side_name(name.as_str())).then_some(*name)
                 })
             }
             // TypeVars and inference vars are not concrete — skip protocol checking

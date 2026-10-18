@@ -966,7 +966,7 @@ fn normalize_ident(raw: &[char]) -> String {
 /// `日本`) are value-side. A caseless name the module declares as a type or a
 /// variant case is moved to the type side by the parser (#1456).
 fn name_token_type(value: &str) -> TokenType {
-    if value.chars().next().map_or(false, |c| c.is_uppercase()) { TokenType::TypeName } else { TokenType::Ident }
+    if value.chars().next().is_some_and(|c| c.is_uppercase()) { TokenType::TypeName } else { TokenType::Ident }
 }
 
 fn lex_ident(chars: &[char], start: usize, line: usize, col: usize) -> (Token, usize) {
