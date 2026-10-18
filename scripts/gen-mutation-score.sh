@@ -28,7 +28,7 @@ export LC_ALL=C
 cd "$(dirname "$0")/.." || exit 2
 
 LEDGER="proofs/mutation-score.toml"
-README="${ALMIDE_README_TARGET:-README.md}"
+README="${README_GEN_TARGET:-README.md}"
 REPO="almide/almide"
 
 mode="${1:-}"

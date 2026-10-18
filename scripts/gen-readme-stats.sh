@@ -38,7 +38,7 @@ cd "$(dirname "$0")/.." || exit 2
 . scripts/lib/readme-targets.sh
 readme_fanout "$0" "$@"
 
-README="${ALMIDE_README_TARGET:-README.md}"
+README="${README_GEN_TARGET:-README.md}"
 LEDGER="docs/contracts/contracts.toml"
 BASELINE="docs/benchmarks/wasm-size.txt"
 MODE="${1:-}"

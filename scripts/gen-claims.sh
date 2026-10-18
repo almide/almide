@@ -30,7 +30,7 @@ cd "$(dirname "$0")/.." || exit 2
 readme_fanout "$0" "$@"
 
 LEDGER="docs/contracts/contracts.toml"
-README="${ALMIDE_README_TARGET:-README.md}"
+README="${README_GEN_TARGET:-README.md}"
 START="<!-- claims:generated:start — derived from docs/contracts/contracts.toml by scripts/gen-claims.sh; DO NOT EDIT between the markers -->"
 END="<!-- claims:generated:end -->"
 
