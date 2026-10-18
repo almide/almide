@@ -28,6 +28,7 @@
 //! only the native copy goes. Wasm does not run this pass.
 use std::collections::HashSet;
 use almide_ir::*;
+use almide_ir::visit::IrVisitor;
 use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
 use almide_lang::types::Ty;
 use super::pass_clone_projection::{mentions, reads_binding};
@@ -35,24 +36,55 @@ use super::pass_clone_projection::{mentions, reads_binding};
 /// Rewrite every read-only selection of `func`'s body; returns the `let`
 /// binders now bound by reference. `by_ref` holds the binders already bound
 /// by reference.
+///
+/// Every arm must spell its binder the same way (`&x` of a value), so a
+/// binder that any selection names in an arm is never itself bound by
+/// reference — otherwise its arm would be `&y` over a `y` that is already a
+/// `&T`, and which one the walk met first would decide the arm types. With
+/// that set fixed up front the order is free of such races: the argument
+/// selections are rewritten first (their arms now read as borrows), then the
+/// `let`s that bind by reference are decided over that body, then rewritten.
 pub(super) fn rewrite(func: &mut IrFunction, vt: &VarTable, top_lets: &HashSet<VarId>, by_ref: &HashSet<VarId>) -> HashSet<VarId> {
     let lets = plain_lets(&func.body).into_iter().filter(|v| !top_lets.contains(v) && !by_ref.contains(v)).collect();
-    let mut sel = Selections { vt, lets, ref_lets: HashSet::new() };
+    let sel = Selections { vt, lets, arms: arm_vars(&func.body), ref_lets: HashSet::new() };
+    Args(&sel).visit_expr_mut(&mut func.body);
+    let mut decide = Decide { sel };
+    decide.visit_expr(&func.body);
+    let mut sel = decide.sel;
     sel.visit_expr_mut(&mut func.body);
     sel.ref_lets
+}
+
+/// Every variable a selection names in an arm, anywhere in `body`.
+fn arm_vars(body: &IrExpr) -> HashSet<VarId> {
+    struct Arms(HashSet<VarId>);
+    impl IrVisitor for Arms {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if matches!(e.kind, IrExprKind::If { .. }) && heap_value(&e.ty) {
+                self.0.extend(selected(e).into_iter().flatten());
+            }
+            almide_ir::visit::walk_expr(self, e);
+        }
+    }
+    let mut arms = Arms(HashSet::new());
+    arms.visit_expr(body);
+    arms.0
 }
 
 struct Selections<'a> {
     vt: &'a VarTable,
     /// The plain `let` binders a selection may choose between.
     lets: HashSet<VarId>,
+    /// The binders some selection names in an arm: never bound by reference.
+    arms: HashSet<VarId>,
+    /// The `let` binders bound by reference.
     ref_lets: HashSet<VarId>,
 }
 
 /// Every variable a plain `let` statement binds in `body`.
 fn plain_lets(body: &IrExpr) -> HashSet<VarId> {
     struct Lets(HashSet<VarId>);
-    impl almide_ir::visit::IrVisitor for Lets {
+    impl IrVisitor for Lets {
         fn visit_stmt(&mut self, s: &IrStmt) {
             if let IrStmtKind::Bind { var, mutability: Mutability::Let, .. } = &s.kind {
                 self.0.insert(*var);
@@ -61,7 +93,7 @@ fn plain_lets(body: &IrExpr) -> HashSet<VarId> {
         }
     }
     let mut lets = Lets(HashSet::new());
-    almide_ir::visit::IrVisitor::visit_expr(&mut lets, body);
+    lets.visit_expr(body);
     lets.0
 }
 
@@ -98,17 +130,40 @@ fn heap_value(ty: &Ty) -> bool {
     super::pass_clone::needs_clone(ty)
 }
 
+/// The block that follows `stmts[i]`, ending in `tail`.
+fn rest_after(stmts: &[IrStmt], i: usize, tail: Option<&IrExpr>) -> IrExpr {
+    IrExpr {
+        kind: IrExprKind::Block { stmts: stmts[i + 1..].to_vec(), expr: tail.map(|t| Box::new(t.clone())) },
+        ty: Ty::Unit,
+        span: None,
+        def_id: None,
+    }
+}
+
 impl Selections<'_> {
     /// The variables of a borrowable selection: an `if` over plain `let`
-    /// locals of this fn that are still bound by value.
+    /// locals of this fn.
     fn locals(&self, e: &IrExpr) -> Option<Vec<VarId>> {
         if !matches!(e.kind, IrExprKind::If { .. }) || !heap_value(&e.ty) {
             return None;
         }
         let vars = selected(e)?;
         vars.iter()
-            .all(|v| self.lets.contains(v) && !self.ref_lets.contains(v) && self.vt.get(*v).mutability == Mutability::Let)
+            .all(|v| self.lets.contains(v) && self.vt.get(*v).mutability == Mutability::Let)
             .then_some(vars)
+    }
+
+    /// Does `let h = <stmts[i]'s selection>` qualify: the rest of the block
+    /// only reads `h` and leaves the chosen locals in place?
+    fn binds_by_ref(&self, stmts: &[IrStmt], i: usize, tail: Option<&IrExpr>) -> Option<VarId> {
+        let IrStmtKind::Bind { var, mutability: Mutability::Let, value, .. } = &stmts[i].kind else { return None };
+        let vars = self.locals(value)?;
+        if vars.contains(var) || self.arms.contains(var) {
+            return None;
+        }
+        let rest = rest_after(stmts, i, tail);
+        (mentions(&rest, *var) && reads_binding(&rest, *var) && vars.iter().all(|&v| super::pass_clone_head::stays_put(&rest, v)))
+            .then_some(*var)
     }
 
     /// A borrowed call argument that is a selection: its arms borrow, so
@@ -129,40 +184,63 @@ impl Selections<'_> {
         }
     }
 
-    /// `let h = <selection>` whose binder the rest of the block only reads,
-    /// over locals the rest leaves in place: bind `h` by reference.
-    fn bind_ref(&mut self, stmts: &mut [IrStmt], tail: Option<&IrExpr>) {
-        for i in 0..stmts.len() {
-            let IrStmtKind::Bind { var, mutability: Mutability::Let, value, .. } = &stmts[i].kind else { continue };
-            let h = *var;
-            let Some(vars) = self.locals(value) else { continue };
-            if vars.contains(&h) {
+    /// Rewrite the decided `let`s of a block to bind by reference.
+    fn bind_ref(&self, stmts: &mut [IrStmt]) {
+        for stmt in stmts.iter_mut() {
+            let IrStmtKind::Bind { var, value, .. } = &mut stmt.kind else { continue };
+            if !self.ref_lets.contains(var) {
                 continue;
             }
-            let rest = IrExpr {
-                kind: IrExprKind::Block { stmts: stmts[i + 1..].to_vec(), expr: tail.map(|t| Box::new(t.clone())) },
-                ty: Ty::Unit,
-                span: None,
-                def_id: None,
-            };
-            if !mentions(&rest, h) || !reads_binding(&rest, h) || !vars.iter().all(|&v| super::pass_clone_head::stays_put(&rest, v)) {
-                continue;
-            }
-            let IrStmtKind::Bind { value, .. } = &mut stmts[i].kind else { unreachable!() };
             let sel = std::mem::replace(value, IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None });
             *value = borrow_arms(sel, false);
-            self.ref_lets.insert(h);
         }
     }
 }
 
+/// The first pass: the borrowed call arguments that are selections.
+struct Args<'s, 'a>(&'s Selections<'a>);
+
+impl IrMutVisitor for Args<'_, '_> {
+    fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+        self.0.borrow_args(e);
+        walk_expr_mut(self, e);
+    }
+}
+
+/// The second pass: which `let` selections bind by reference, judged on the
+/// body with its argument selections already borrowing.
+struct Decide<'a> {
+    sel: Selections<'a>,
+}
+
+impl Decide<'_> {
+    fn block(&mut self, stmts: &[IrStmt], tail: Option<&IrExpr>) {
+        for i in 0..stmts.len() {
+            if let Some(h) = self.sel.binds_by_ref(stmts, i, tail) {
+                self.sel.ref_lets.insert(h);
+            }
+        }
+    }
+}
+
+impl IrVisitor for Decide<'_> {
+    fn visit_expr(&mut self, e: &IrExpr) {
+        match &e.kind {
+            IrExprKind::Block { stmts, expr } => self.block(stmts, expr.as_deref()),
+            IrExprKind::ForIn { body, .. } | IrExprKind::While { body, .. } => self.block(body, None),
+            _ => {}
+        }
+        almide_ir::visit::walk_expr(self, e);
+    }
+}
+
+/// The third pass: the decided `let`s bind by reference.
 impl IrMutVisitor for Selections<'_> {
     fn visit_expr_mut(&mut self, e: &mut IrExpr) {
-        self.borrow_args(e);
         walk_expr_mut(self, e);
         match &mut e.kind {
-            IrExprKind::Block { stmts, expr } => self.bind_ref(stmts, expr.as_deref()),
-            IrExprKind::ForIn { body, .. } | IrExprKind::While { body, .. } => self.bind_ref(body, None),
+            IrExprKind::Block { stmts, .. } => self.bind_ref(stmts),
+            IrExprKind::ForIn { body, .. } | IrExprKind::While { body, .. } => self.bind_ref(body),
             _ => {}
         }
     }
