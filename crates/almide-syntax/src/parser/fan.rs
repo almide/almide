@@ -1,10 +1,11 @@
 //! The `fan.*` surface heads — block forms that are NOT ordinary calls
 //! (a call followed by `{` does not parse), so each gets its own parse:
 //! `fan.bounded(budget) { body }`, `fan.timeout(deadline) { body }`,
-//! `fan.race(budget?) { arms }`, `fan.settle { arms }`, `fan.any { arms }`,
-//! plus the legacy-spelling rebuilds that route retired forms to the
-//! checker's E027 signature-migration hints. Split out of `primary.rs`
-//! (one file per surface family).
+//! `fan.min(clock) { arms }`, `fan.settle { arms }`, plus the legacy-spelling
+//! rebuilds that route retired forms to the checker's E027 migration hints:
+//! the thunk-list calls, the name `fan.race` (renamed to `fan.min` in dialect
+//! epoch 14, ADR-0028) and the removed `fan.any { }` head (a `??` chain says
+//! the same thing). Split out of `primary.rs` (one file per surface family).
 
 use crate::lexer::TokenType;
 use crate::ast::*;
@@ -30,13 +31,24 @@ impl Parser {
         if head_is(self, "timeout") && head_then(self, TokenType::LParen) {
             return self.parse_fan_timeout_head();
         }
-        if head_is(self, "race") {
-            return self.parse_fan_race_head();
+        if head_is(self, "min") {
+            return self.parse_fan_race_head("fan.min");
+        }
+        if head_is(self, "race") && !self.fan_race_is_legacy_thunk_call() {
+            // Renamed to `fan.min` (ADR-0028). E027 names the replacement;
+            // the form still parses in full, so the tree (and `almide fmt`)
+            // keeps the program's shape.
+            self.reject_renamed_fan_head("race");
+            return self.parse_fan_race_head("fan.race");
         }
         if head_is(self, "settle") && head_then(self, TokenType::LBrace) {
             return self.parse_fan_settle_head();
         }
         if head_is(self, "any") && head_then(self, TokenType::LBrace) {
+            // Removed in dialect epoch 14 (ADR-0028): a `??` chain is the
+            // same selection. E027 here; the block still parses into the
+            // internal `__any_block` node so the tree keeps its shape.
+            self.reject_renamed_fan_head("any");
             return self.parse_fan_any_block_head();
         }
         // fan { ... } = fan block; fan.map/fan.race = module-like call
@@ -48,6 +60,48 @@ impl Parser {
         }
         self.advance();
         self.parse_fan_block()
+    }
+
+    /// E027 for a head retired in dialect epoch 14 (ADR-0028): `race` →
+    /// `fan.min(clock)`, `any { }` → a `??` chain. Pushed as a parse
+    /// diagnostic so the head still parses into its normal node. The CALL
+    /// spellings (`fan.any(xs, f)`, `fan.race(thunks)`) reach the checker's
+    /// tombstones with the same text (static_dispatch.rs).
+    fn reject_renamed_fan_head(&mut self, head: &str) {
+        let (message, hint) = renamed_fan_head_text(head);
+        let diagnostic = self.diag_error(message, hint, &format!("fan.{head}")).with_code("E027");
+        self.errors.push(diagnostic);
+    }
+
+    /// `fan.race(e)` with no `{` after the `)`: the 0.42 thunk-list CALL, which
+    /// the checker tombstones with its own text. Looks ahead without consuming.
+    fn fan_race_is_legacy_thunk_call(&self) -> bool {
+        if !self.peek_at(3).map_or(false, |t| t.token_type == TokenType::LParen) {
+            return false;
+        }
+        let mut depth = 0usize;
+        let mut i = 3;
+        while let Some(t) = self.peek_at(i) {
+            match t.token_type {
+                TokenType::LParen | TokenType::LBracket | TokenType::LBrace => depth += 1,
+                TokenType::RParen | TokenType::RBracket | TokenType::RBrace => {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                TokenType::EOF => return false,
+                _ => {}
+            }
+            i += 1;
+        }
+        let mut j = i + 1;
+        while self.peek_at(j).map_or(false, |t| t.token_type == TokenType::Newline) {
+            j += 1;
+        }
+        // A mapper call `fan.race(xs, (x) => …)` is the renamed head too.
+        let has_lambda_arg = (3..i).any(|k| self.peek_at(k).map_or(false, |t| t.token_type == TokenType::FatArrow));
+        !has_lambda_arg && !self.peek_at(j).map_or(false, |t| t.token_type == TokenType::LBrace)
     }
 
     /// Consume `fan` `.` `<head>`, returning the head's span.
@@ -199,17 +253,24 @@ impl Parser {
         }))
     }
 
-    /// fan.race(budget?) { arm; … } — like bounded, a head with an optional
-    /// budget and an arm block. `fan.race(e)` NOT followed by `{` is the
+    /// fan.min(clock) { arm; … } — like bounded, a head with a budget and an
+    /// arm block. The clock is REQUIRED under the new name (ADR-0028): it
+    /// says what "least" is measured on, and `fan.min { 3, 5 }` would read
+    /// as the smallest value. `fan.race(e)` NOT followed by `{` is the
     /// REMOVED 0.42.0 thunk-list form: reconstruct the legacy member call so
     /// the checker's E027 tombstone (now a signature-migration hint) fires.
-    fn parse_fan_race_head(&mut self) -> Result<Expr, String> {
+    fn parse_fan_race_head(&mut self, label: &str) -> Result<Expr, String> {
         let span = self.eat_fan_head();
+        if label == "fan.min" && !self.check(TokenType::LParen) {
+            return Err(format!(
+                "fan.min requires a clock argument at line {}:{}\n  Hint: fan.min(compute.ms(5)) {{ a(), b() }} — the clock says what \"least\" is measured on: compute = the least deterministic computation within the budget; without it `fan.min {{ 3, 5 }}` would read as the smallest value",
+                self.current().line, self.current().col));
+        }
         let budget = if self.check(TokenType::LParen) {
             self.advance();
             let b = self.parse_expr()?;
             if self.check(TokenType::Comma) {
-                return self.parse_fan_race_comma_tail(span, b);
+                return self.parse_fan_race_comma_tail(span, b, label);
             }
             self.expect(TokenType::RParen)?;
             Some(b)
@@ -219,16 +280,20 @@ impl Parser {
         self.skip_newlines();
         if !self.check(TokenType::LBrace) {
             if let Some(b) = budget {
-                // Legacy `fan.race(thunks)` call — rebuild it verbatim.
-                return Ok(self.legacy_fan_call(span, "race", vec![b]));
+                // Legacy `fan.race(thunks)` call — rebuild it verbatim. (Under
+                // the new name there is no legacy form: fall through to the
+                // arm-block error below.)
+                if label == "fan.race" {
+                    return Ok(self.legacy_fan_call(span, "race", vec![b]));
+                }
             }
             return Err(format!(
-                "fan.race requires an arm block at line {}:{}\n  Hint: fan.race {{ a(), b() }} or fan.race(compute.ms(5)) {{ a(), b() }}",
+                "{label} requires an arm block at line {}:{}\n  Hint: fan.min(compute.ms(5)) {{ a(), b() }}",
                 self.current().line, self.current().col));
         }
         let arms = self.parse_fan_arm_block(
-            "fan.race",
-            "race arms are expressions — wrap statements in a block arm: { let x = f(); g(x) }",
+            label,
+            "arms are expressions — wrap statements in a block arm: { let x = f(); g(x) }",
         )?;
         Ok(Expr::new(self.next_id(), span, ExprKind::FanRace {
             budget: budget.map(Box::new),
@@ -236,10 +301,11 @@ impl Parser {
         }))
     }
 
-    /// The comma tail of `fan.race(b, …)`: a 1-param lambda tail is the
-    /// MAPPER form `fan.race(xs, f)` / `fan.race(budget, xs, f)`; anything
-    /// else with a comma is the retired thunk spelling — the migration hint.
-    fn parse_fan_race_comma_tail(&mut self, span: Option<Span>, b: Expr) -> Result<Expr, String> {
+    /// The comma tail of `fan.min(b, …)`: a 1-param lambda tail is the
+    /// MAPPER form `fan.min(clock, xs, f)` (under the retired `fan.race` name
+    /// also the clockless `fan.race(xs, f)`); anything else with a comma is
+    /// the retired thunk spelling — the migration hint.
+    fn parse_fan_race_comma_tail(&mut self, span: Option<Span>, b: Expr, label: &str) -> Result<Expr, String> {
         let (line, col) = (self.current().line, self.current().col);
         let mut rest = Vec::new();
         while self.check(TokenType::Comma) {
@@ -260,9 +326,14 @@ impl Parser {
                 unreachable!("mapper_tail implies a last argument")
             };
             let (budget, list) = match rest.pop() {
-                // fan.race(budget, xs, f)
+                // fan.min(clock, xs, f)
                 Some(xs) => (Some(Box::new(b)), Box::new(xs)),
-                // fan.race(xs, f)
+                // fan.race(xs, f) — the clockless mapper, legal only under the
+                // retired name (the E027 above already named the migration).
+                None if label == "fan.min" => {
+                    return Err(format!(
+                        "fan.min requires a clock argument at line {line}:{col}\n  Hint: fan.min(compute.ms(5), xs, (x) => ok(f(x))) — the clock says what \"least\" is measured on"));
+                }
                 None => (None, Box::new(b)),
             };
             return Ok(Expr::new(self.next_id(), span, ExprKind::FanRaceMap {
@@ -272,7 +343,7 @@ impl Parser {
             }));
         }
         Err(format!(
-            "fan.race takes a BLOCK of arms, not thunk arguments, at line {line}:{col}\n  Hint: fan.race(compute.ms(5)) {{ exact(p), heuristic(p) }} — arms are expressions separated by `,` or a newline, no `() =>` wrappers; a dynamic list races via the mapper form fan.race(xs, (x) => ok(work(x)))"))
+            "{label} takes a BLOCK of arms, not thunk arguments, at line {line}:{col}\n  Hint: fan.min(compute.ms(5)) {{ exact(p), heuristic(p) }} — arms are expressions separated by `,` or a newline, no `() =>` wrappers; a dynamic list goes through the mapper form fan.min(xs, (x) => ok(work(x)))"))
     }
 
     /// fan.settle { arms } — a REAL node (T2-4): the value is a TUPLE of
@@ -344,5 +415,26 @@ impl Parser {
             last_is_mapper = matches!(&arg.kind, ExprKind::Lambda { params, .. } if params.len() == 1);
         }
         Ok(last_is_mapper)
+    }
+}
+
+/// The E027 message and hint for a fan head retired in dialect epoch 14
+/// (ADR-0028). The checker's call-form tombstones reuse it.
+pub fn renamed_fan_head_text(head: &str) -> (&'static str, &'static str) {
+    match head {
+        "race" => (
+            "fan.race was renamed to fan.min, and the clock argument is required",
+            "`fan.min(compute.ms(5)) { a(), b() }` picks the branch that spends the LEAST \
+             deterministic computation within the budget (ties go to source order); a dynamic \
+             list is `fan.min(compute.ms(5), xs, (x) => ok(f(x)))`. The clock says what \
+             \"least\" is measured on. For the first candidate that SUCCEEDS in source order, \
+             write `a() ?? b()`.",
+        ),
+        _ => (
+            "fan.any was removed: the first Ok in source order is a `??` chain, and over a list it is list.find_map",
+            "`a() ?? b() ?? fallback` tries each candidate in source order and runs no later one \
+             once one succeeds; over a list, `list.find_map(xs, (x) => f(x)?) ?? fallback` — the \
+             `?` turns an element's Err into none, so that element is skipped.",
+        ),
     }
 }
