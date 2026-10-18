@@ -5,7 +5,7 @@
 // value is an `Rc<dyn Fn>`, which is neither `Send` nor `Sync`, so it could not
 // be moved across the `thread::scope` boundary the parallel version required.
 // Results are identical to a parallel map (input order preserved); only the
-// (unobservable) parallelism is dropped. `fan.race` never reaches this file:
+// (unobservable) parallelism is dropped. `fan.min` never reaches this file:
 // it lowers in the frontend to a sequential least-(spend, index) fold
 // (almide-frontend lower/expressions_fan.rs). `fan.settle` lowers to a tuple
 // (block) or `list.map` (mapper), so `almide_rt_fan_race` and
@@ -126,8 +126,8 @@ fn almide_fan_map_settle_slots<B>(slots: Vec<Option<Result<B, String>>>) -> Resu
 
 // NO PRODUCER. This is the pre-0.42 thunk-list `fan.race(thunks)`, which
 // evaluated only thunk[0]. The call form is now refused with E027
-// (static_dispatch.rs), and the live `fan.race { }` / `fan.race(xs, f)` heads
-// lower in the frontend to the least-(spend, index) fold, so they never call
+// (static_dispatch.rs), and its successor `fan.min { }` / `fan.min(xs, f)`
+// lowers in the frontend to the least-(spend, index) fold, so they never call
 // this function. Kept only until the runtime registry drops it.
 pub fn almide_rt_fan_race<T>(
     thunks: Vec<impl Fn() -> Result<T, AlmideString>>,
@@ -141,10 +141,10 @@ pub fn almide_rt_fan_race<T>(
     __almide_r.map_err(Into::into)
 }
 
-// `fan.any` tries the thunks in LIST ORDER and returns the FIRST `Ok`
+// `fan.any { }` (removed in dialect epoch 14) tries the thunks in LIST ORDER and returns the FIRST `Ok`
 // (deterministic — NOT wall-clock fastest). If every candidate fails it returns
 // a defined `Err`, never panicking or trapping. Later thunks are never started.
-// (`fan.race` is a different selection: least compute spent, tie -> list order.)
+// (`fan.min` is a different selection: least compute spent, tie -> list order.)
 pub fn almide_rt_fan_any<T>(
     thunks: Vec<impl Fn() -> Result<T, AlmideString>>,
 ) -> Result<T, AlmideString> {
@@ -159,7 +159,7 @@ pub fn almide_rt_fan_any<T>(
     __almide_r.map_err(Into::into)
 }
 
-// `fan.any_map` -- the T2-3 MAPPER form: apply `f` to the items IN LIST ORDER
+// `fan.any(xs, f)` (removed in dialect epoch 14) (internally `any_map`) -- the T2-3 MAPPER form: apply `f` to the items IN LIST ORDER
 // and return the FIRST `Ok`; an element's Err disqualifies that element only.
 // All-fail (and the empty list) is the ledger-constant Err. Deterministic --
 // the early cut is structural (later elements are never evaluated).

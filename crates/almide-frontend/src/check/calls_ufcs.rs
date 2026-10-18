@@ -316,7 +316,7 @@ impl Checker {
                 format!("ambiguous time unit '.{}()': the unit does not name a clock", field),
                 format!(
                     "Write the clock module explicitly: compute.{f}(n) for a deterministic \
-                     compute budget (fan.bounded / fan.race), or duration.{f}(n) for \
+                     compute budget (fan.bounded / fan.min), or duration.{f}(n) for \
                      wall-clock time",
                     f = field
                 ),

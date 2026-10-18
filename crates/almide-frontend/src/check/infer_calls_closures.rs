@@ -293,13 +293,26 @@ impl Checker {
         match budget_concrete {
             Ty::Named(n, _) if n.as_str() == clock => {}
             Ty::Named(n, _) if n.as_str() == "Duration" && clock == "Compute" => {
-                self.emit(super::err(
-                    format!("expected {clock}, found Duration"),
+                // fan.min's duration clock (first to succeed in real time) is
+                // decided (ADR-0028) and lands with #3788; until then the hint
+                // says so rather than sending the writer to fan.timeout.
+                let hint = if surface == "fan.min" {
+                    format!(
+                        "{surface} measures deterministic computation today; the duration clock \
+                         (`fan.min(duration.ms(n))`, the first branch to succeed in real time, \
+                         I/O allowed) is decided and tracked in #3788. Build the budget with \
+                         compute.ms(...)"
+                    )
+                } else {
                     format!(
                         "{surface} budgets deterministic computation, not wall-clock time. \
                          Build the budget with compute.ms(...); for a wall-clock limit use \
                          fan.timeout (oracle tier)"
-                    ),
+                    )
+                };
+                self.emit(super::err(
+                    format!("expected {clock}, found Duration"),
+                    hint,
                     format!("{surface} budget")));
             }
             Ty::Named(n, _) if n.as_str() == "Compute" && clock == "Duration" => {
@@ -364,19 +377,19 @@ impl Checker {
         let ExprKind::FanRace { budget, arms } = &mut expr.kind else { unreachable!() };
         if !self.env.can_call_effect {
             self.emit(super::err(
-                "fan.race can only be used inside an effect fn".to_string(),
+                "fan.min can only be used inside an effect fn".to_string(),
                 "Mark the enclosing function as `effect fn`",
-                "fan.race".to_string()).with_code("E007"));
+                "fan.min".to_string()).with_code("E007"));
         }
         if let Some(b) = budget {
             let budget_ty = self.infer_expr(b);
             let budget_concrete = resolve_ty(&budget_ty, &self.uf);
-            self.check_budget_clock("fan.race", &budget_concrete);
+            self.check_budget_clock("fan.min", &budget_concrete);
         }
         let saved_effect = self.env.can_call_effect;
         let saved_region = self.env.metered_region;
         self.env.can_call_effect = false;
-        self.env.metered_region = Some("fan.race");
+        self.env.metered_region = Some("fan.min");
         let mut arm_ty: Option<Ty> = None;
         for arm in arms.iter_mut() {
             let t = self.infer_expr(arm);
@@ -396,7 +409,7 @@ impl Checker {
             };
             match &arm_ty {
                 None => arm_ty = Some(candidate),
-                Some(t0) => self.constrain(candidate, t0.clone(), "fan.race arm type"),
+                Some(t0) => self.constrain(candidate, t0.clone(), "fan.min arm type"),
             }
         }
         self.env.can_call_effect = saved_effect;
@@ -414,27 +427,27 @@ impl Checker {
         let ExprKind::FanRaceMap { budget, list, mapper } = &mut expr.kind else { unreachable!() };
         if !self.env.can_call_effect {
             self.emit(super::err(
-                "fan.race can only be used inside an effect fn".to_string(),
+                "fan.min can only be used inside an effect fn".to_string(),
                 "Mark the enclosing function as `effect fn`",
-                "fan.race".to_string()).with_code("E007"));
+                "fan.min".to_string()).with_code("E007"));
         }
         if let Some(b) = budget {
             let budget_ty = self.infer_expr(b);
             let budget_concrete = resolve_ty(&budget_ty, &self.uf);
-            self.check_budget_clock("fan.race", &budget_concrete);
+            self.check_budget_clock("fan.min", &budget_concrete);
         }
         let list_ty = self.infer_expr(list);
         let elem = self.fresh_var();
         self.constrain(
             list_ty,
             Ty::Applied(TypeConstructorId::List, vec![elem.clone()]),
-            "fan.race mapper list",
+            "fan.min mapper list",
         );
         // The mapper body is a metered PURE region, exactly like a block arm.
         let saved_effect = self.env.can_call_effect;
         let saved_region = self.env.metered_region;
         self.env.can_call_effect = false;
-        self.env.metered_region = Some("fan.race");
+        self.env.metered_region = Some("fan.min");
         let mapper_ty = self.infer_expr(mapper);
         self.env.can_call_effect = saved_effect;
         self.env.metered_region = saved_region;
@@ -449,9 +462,9 @@ impl Checker {
             let r = resolve_ty(ret, &self.uf);
             if !matches!(r, Ty::Applied(TypeConstructorId::Result, _) | Ty::TypeVar(_) | Ty::Unknown) {
                 self.emit(super::err(
-                    format!("fan.race mapper must return a Result, got {}", r.display()),
+                    format!("fan.min mapper must return a Result, got {}", r.display()),
                     "Return ok(value) to compete and err(reason) to disqualify the element — the mapper-form contract (like fan.map)",
-                    "fan.race mapper".to_string()));
+                    "fan.min mapper".to_string()));
             }
         }
         let winner = self.fresh_var();
@@ -462,7 +475,7 @@ impl Checker {
                 ret: Box::new(Ty::result(winner.clone(), Ty::String)),
                 is_effect: false,
             },
-            "fan.race mapper",
+            "fan.min mapper",
         );
         Ty::result(resolve_ty(&winner, &self.uf), Ty::String)
     }

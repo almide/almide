@@ -287,7 +287,7 @@ fn lower_expr_control(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option
             };
             let err_arm = ctx.mk(IrExprKind::ResultErr {
                 expr: Box::new(ctx.mk(IrExprKind::LitStr {
-                    value: "fan.race: no branch completed within budget".to_string(),
+                    value: "fan.min: no branch succeeded within budget".to_string(),
                 }, Ty::String, span)),
             }, result_ty.clone(), span);
             let tail = ctx.mk(IrExprKind::If {
@@ -317,7 +317,7 @@ fn lower_expr_control(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option
             };
             let err_arm = ctx.mk(IrExprKind::ResultErr {
                 expr: Box::new(ctx.mk(IrExprKind::LitStr {
-                    value: "fan.race: no branch completed within budget".to_string(),
+                    value: "fan.min: no branch succeeded within budget".to_string(),
                 }, Ty::String, span)),
             }, result_ty.clone(), span);
             let tail = ctx.mk(IrExprKind::If {
