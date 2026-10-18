@@ -1,6 +1,6 @@
 //! Matrix element-wise and row-wise kernels on the FLAT layout (#1423
-//! stage 4): the zip family (add / sub / div), the unary family
-//! (neg / scale / map) and broadcast_add_row. Transcribed op for op from native
+//! stage 4): the zip family (add / sub / div, and fma / fma3), the unary
+//! family (neg / scale / map) and broadcast_add_row. Transcribed op for op from native
 //! runtime/rs/src/matrix.rs + matrix_p2.rs (the self-host bodies in
 //! stdlib/matrix_core.almd / matrix_arith.almd / matrix_ext.almd agree on
 //! the sane domain):
@@ -127,6 +127,62 @@ impl Emitter<'_> {
         // ha ra ca | hb rb cb | hr hc hsame | ho | hi hj
         for _ in 0..12 {
             self.release_i32();
+        }
+        Ok(Some(Lowered::owned(SliceTy::Matrix)))
+    }
+
+    /// fma / fma3 (#3644) — native's `x*ka + y*kb [+ z*kc]` per zipped cell
+    /// in ONE pass over the overlap: rows and cols are each the shortest
+    /// operand's, as add's zip. Each product rounds, then the sum rounds left
+    /// to right — the `add(scale, scale)` composition's arithmetic, without
+    /// walking and copying each whole operand first. `terms` is the
+    /// (matrix, scalar) pairs in source order, which is also the order they
+    /// are evaluated in.
+    pub(crate) fn lower_matrix_fma(&mut self, terms: &[(&IrExpr, &IrExpr)]) -> ArmResult {
+        let mut ops: Vec<(u32, u32, u32, u32)> = Vec::with_capacity(terms.len());
+        for (m, k) in terms {
+            let (hm, hr, hc) = self.mat_open(m)?;
+            let hk = self.hold_f64()?;
+            self.lower_arg(k, Some(FLOAT), ArgMode::Borrow)?;
+            self.f.instructions().local_set(hk);
+            ops.push((hm, hr, hc, hk));
+        }
+        let hr = self.hold_i32()?;
+        let hc = self.hold_i32()?;
+        {
+            let mut i = self.f.instructions();
+            i.local_get(ops[0].1).local_set(hr);
+            i.local_get(ops[0].2).local_set(hc);
+        }
+        for &(_, r, c, _) in &ops[1..] {
+            self.min_u32(hr, hr, r);
+            self.min_u32(hc, hc, c);
+        }
+        self.zero_cols_if_no_rows(hr, hc);
+        let ho = self.mat_alloc_out(hr, hc)?;
+        let hi = self.hold_i32()?;
+        let hj = self.hold_i32()?;
+        self.loop_begin(hi, hr);
+        self.loop_begin(hj, hc);
+        self.elem_at(ho, hi, hc, hj);
+        for (n, &(hm, _, c, hk)) in ops.iter().enumerate() {
+            self.elem_at(hm, hi, c, hj);
+            let mut i = self.f.instructions();
+            i.f64_load(mat_elem()).local_get(hk).f64_mul();
+            if n > 0 {
+                i.f64_add();
+            }
+        }
+        self.f.instructions().f64_store(mat_elem());
+        self.loop_end(hj);
+        self.loop_end(hi);
+        self.f.instructions().local_get(ho);
+        // per term hm hr hc | hr hc | ho | hi hj
+        for _ in 0..(3 * ops.len() + 5) {
+            self.release_i32();
+        }
+        for _ in 0..ops.len() {
+            self.release_f64();
         }
         Ok(Some(Lowered::owned(SliceTy::Matrix)))
     }
