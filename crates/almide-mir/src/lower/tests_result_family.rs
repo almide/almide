@@ -122,3 +122,16 @@ fn every_registry_result_fn_is_in_the_materialized_set() {
         assert!(!member(module, func), "{name} is in the set now — drop it from NOT_YET");
     }
 }
+
+/// #1456: helper names derived from a caseless type name stay distinct. The
+/// old fold sent every non-ASCII character to `_`, so `住所` and `場所` (and
+/// any two one-character names) shared one helper skeleton.
+#[test]
+fn caseless_type_names_spell_distinct_helper_idents() {
+    assert_ne!(sanitize_ty_ident("住所"), sanitize_ty_ident("場所"));
+    assert_ne!(sanitize_ty_ident("色"), sanitize_ty_ident("形"));
+    assert_eq!(sanitize_ty_ident("varlib.Pigment"), "varlib_Pigment");
+    assert!(sanitize_ty_ident("住所").chars().all(|c| c.is_ascii_alphanumeric() || c == '_'));
+    let named = |n: &str| Ty::Named(almide_base::intern::sym(n), vec![]);
+    assert_ne!(repr_inst_ident("R", &[named("住所")]), repr_inst_ident("R", &[named("場所")]));
+}

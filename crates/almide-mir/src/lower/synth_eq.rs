@@ -383,8 +383,23 @@ fn synth_list_eq_loop_fn(name: String, elem_call: String) -> MirFunction {
 
 /// Identifier-safe spelling of a type/fn name (`varlib.Pigment` → `varlib_Pigment`,
 /// test names carry spaces/1+1 — flattened the same way).
+///
+/// A non-ASCII character spells its code point (`住` → `_u4f4f_`) instead of
+/// folding to `_` (#1456): with the fold, every caseless type name of one
+/// length had the same skeleton (`住所` and `場所` were both `__`), so two
+/// distinct types shared one helper name. ASCII spellings are unchanged.
 pub(crate) fn sanitize_ty_ident(name: &str) -> String {
-    name.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect()
+    let mut out = String::with_capacity(name.len());
+    for c in name.chars() {
+        if c.is_ascii_alphanumeric() {
+            out.push(c);
+        } else if c.is_ascii() {
+            out.push('_');
+        } else {
+            out.push_str(&format!("_u{:x}_", c as u32));
+        }
+    }
+    out
 }
 
 /// A GENERIC variant's per-instantiation (key, layout): substitute the layout
