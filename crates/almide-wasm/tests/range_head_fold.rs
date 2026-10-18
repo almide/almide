@@ -22,9 +22,13 @@ fn requested(src: &str) -> (String, u64, u64, u64) {
     (r.stdout, c.bytes, c.allocs, c.frees)
 }
 
-fn program(fold: &str, n: u64) -> String {
-    format!("effect fn main() -> Unit = {{\n  let r = list.range(3, {n}) {fold}\n  println(\"${{r}}\")\n}}\n")
+fn program(head: &str, fold: &str, n: u64) -> String {
+    let head = head.replace("{n}", &n.to_string());
+    format!("effect fn main() -> Unit = {{\n  let r = {head} {fold}\n  println(\"${{r}}\")\n}}\n")
 }
+
+/// The call and the range literal are the same list (#3810), so both count.
+const HEADS: [&str; 2] = ["list.range(3, {n})", "(3..<{n})"];
 
 const SHAPES: [(&str, &str); 3] = [
     ("bare fold", "|> list.fold(0, (a, x) => a + x)"),
@@ -35,14 +39,18 @@ const SHAPES: [(&str, &str); 3] = [
 #[test]
 fn a_range_head_folded_once_allocates_nothing_per_element() {
     let mut failures = Vec::new();
-    for (name, fold) in SHAPES {
-        let (_, small, a1, f1) = requested(&program(fold, 1_000));
-        let (_, large, a2, f2) = requested(&program(fold, 100_000));
-        assert_eq!(a1, f1, "{name}: n=1000 leaked {} block(s)", a1 - f1);
-        assert_eq!(a2, f2, "{name}: n=100000 leaked {} block(s)", a2 - f2);
-        // A built head is 8 bytes per element: 792 KB more at the larger span.
-        if large != small {
-            failures.push(format!("{name}: {small} -> {large} bytes requested as the span grew 100x"));
+    for head in HEADS {
+        for (name, fold) in SHAPES {
+            let (out1, small, a1, f1) = requested(&program(head, fold, 1_000));
+            let (_, large, a2, f2) = requested(&program(head, fold, 100_000));
+            assert_eq!(a1, f1, "{head} {name}: n=1000 leaked {} block(s)", a1 - f1);
+            assert_eq!(a2, f2, "{head} {name}: n=100000 leaked {} block(s)", a2 - f2);
+            // A built head is 8 bytes per element: 792 KB more at the larger span.
+            if large != small {
+                failures.push(format!("{head} {name}: {small} -> {large} bytes requested as the span grew 100x"));
+            }
+            // The literal folds the same values as the call.
+            assert_eq!(out1, requested(&program(HEADS[0], fold, 1_000)).0, "{head} {name}");
         }
     }
     assert!(failures.is_empty(), "range heads materialized on wasm:\n{}", failures.join("\n"));
