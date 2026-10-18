@@ -7,12 +7,22 @@ type P: Ord = { a: Int, b: String }
 fn label(p: P) -> String = "${p.a}${p.b}"
 
 test "list.min over structural literals of an Ord record" {
-  let m = list.min([{ a: 2, b: "x" }, { a: 1, b: "z" }, { a: 1, b: "y" }]) ?? { a: 0, b: "" }
+  let m = list.min([
+    { a: 2, b: "x" },
+    { a: 1, b: "z" },
+    { a: 1, b: "y" }
+  ]) ?? { a: 0, b: "" }
   assert_eq(label(m), "1y")
 }
 
 test "list.max and list.sort over structural literals of an Ord record" {
-  let xs = if true then [{ a: 2, b: "x" }, { a: 3, b: "w" }] else [{ a: 0, b: "" }]
+  let xs = if true then [
+    { a: 2, b: "x" },
+    { a: 3, b: "w" }
+  ]
+  else [
+    { a: 0, b: "" }
+  ]
   assert_eq(label(list.max(xs) ?? { a: 0, b: "" }), "3w")
   assert_eq(list.sort(xs) |> list.map((p) => label(p)) |> list.join(","), "2x,3w")
 }
