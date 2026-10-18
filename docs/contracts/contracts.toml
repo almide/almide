@@ -2723,6 +2723,7 @@ evidence  = [
   { path = "spec/wasm_cross/fuel_dyn_charge.almd", class = "fixture" },
   { path = "spec/wasm_cross/fuel_var_budget.almd", class = "fixture" },
   { path = "spec/wasm_cross/fuel_interp_uncharged.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fuel_single_call_args.almd", class = "fixture" },
   { path = "spec/wasm_cross/fan_race_walled_program.almd", class = "fixture" },
 ]
 
@@ -2741,6 +2742,7 @@ evidence  = [
   { path = "spec/wasm_cross/fuel_trap_cut.almd", class = "fixture" },
   { path = "spec/wasm_cross/fuel_trap_window.almd", class = "fixture" },
   { path = "spec/wasm_cross/fan_race_mapper.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fuel_single_call_args.almd", class = "fixture" },
   { path = "spec/wasm_cross/fan_race_walled_program.almd", class = "fixture" },
 ]
 

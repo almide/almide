@@ -314,6 +314,27 @@ fn a_cut_body_that_interpolates_stops_at_the_same_point_on_every_leg() {
     four_legs("cut.almd", src, "i 0\ni 1\ni 2\ni 3\ni 4\ni 5\ni 6\ni 7\ni 8\ncut -1\n");
 }
 
+/// ADR-0028 E (#3790): a single-call body's arguments run inside the region,
+/// so the meter charges them and the deadline cuts them.
+#[test]
+fn a_single_call_bodys_arguments_are_inside_the_region() {
+    let src = format!(
+        r#"{HEAVY}fn id(x: Int) -> Int = x
+
+effect fn main() -> Unit = {{
+  let b = fan.bounded(compute.ns(30)) {{ id(heavy(100000)) }} ?? -1
+  println("bounded ${{b}}")
+  let t = fan.timeout(duration.ms(1)) {{ id(heavy(50000000)) }} ?? -1
+  println("timeout ${{t}}")
+  let m = fan.min(compute.ms(1)) {{ id(heavy(1)), id(heavy(100000)) }} ?? -1
+  let n = fan.min(compute.ms(1)) {{ id(heavy(100000)), id(heavy(1)) }} ?? -1
+  println("min ${{m}} ${{n}}")
+}}
+"#
+    );
+    four_legs("args.almd", &src, "bounded -1\ntimeout -1\nmin 0 0\n");
+}
+
 #[test]
 fn a_trap_in_a_parallel_list_map_is_the_lowest_index_one() {
     let src = format!(

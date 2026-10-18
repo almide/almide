@@ -1,0 +1,38 @@
+// @contract: C-204, C-205
+// ADR-0028 E: a single-call body's ARGUMENTS run inside the metered region.
+// `id` is loop-free, so its own entry costs 0 (C-294); `{ id(heavy(1000)) }`
+// therefore spends exactly what `{ heavy(1000) }` spends, 1002 units =
+// 3006 ns, and is cut one unit below. Until #3790 the argument ran before
+// the meter started, so every body here spent 0 and nothing was cut.
+fn heavy(n: Int) -> Int = {
+  var i = 0
+  var acc = 0
+  while i < n {
+    acc = (acc + i * 7) % 999983
+    i = i + 1
+  }
+  acc
+}
+
+fn id(x: Int) -> Int = x
+
+fn add(a: Int, b: Int) -> Int = a + b
+
+fn okv(x: Int) -> Result[Int, String] = ok(x)
+
+effect fn main() -> Unit = {
+  println(int.to_string(fan.bounded(compute.ns(3006)) { id(heavy(1000)) } ?? -1))
+  println(int.to_string(fan.bounded(compute.ns(3003)) { id(heavy(1000)) } ?? -1))
+  println(int.to_string(fan.bounded(compute.ns(30)) { id(heavy(100000)) } ?? -1))
+  // Two arguments: heavy(500) = 502 units, heavy(498) = 500 units.
+  println(int.to_string(fan.bounded(compute.ns(3006)) { add(heavy(500), heavy(498)) } ?? -1))
+  println(int.to_string(fan.bounded(compute.ns(3003)) { add(heavy(500), heavy(498)) } ?? -1))
+  // fan.min: each arm's argument is that arm's spend, so the cheap arm wins
+  // although it is listed second.
+  println(int.to_string(fan.min(compute.ms(1)) {
+    id(heavy(100000))
+    id(heavy(5))
+  } ?? -1))
+  // The mapper form: the lambda's single call is metered the same way.
+  println(int.to_string(fan.min(compute.ms(1), [100000, 5], (n) => okv(heavy(n))) ?? -1))
+}
