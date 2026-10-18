@@ -695,6 +695,8 @@ let checked = fan.map(paths, read_meta)                   // read_meta: an `effe
 // an implicit `|>` chain (those are fused sequentially).
 let sums = fan.map(chunks, (c) => ok(heavy(c)))!            // parallel natively; sequential and byte-identical on wasm
 
+// fan { } — named arms run in parallel natively; the value is a record read by name
+// (see the record form below). Unnamed arms give a tuple: `let (a, b) = fan { f()!, g()! }`
 // Block heads — arms separated by `,` or newline (`fan { }` runs them in parallel natively;
 // fan.settle / fan.min run them in source order)
 // (`;` between arms is an error: it means sequencing, and stays legal only
@@ -719,6 +721,35 @@ let n = fan.min(compute.us(50), xs, (x) => ok(solve(x))) ?? fallback  // mapper 
 
 // Wall-clock deadline (oracle tier): checked cooperatively at charge sites
 let t = fan.timeout(duration.ms(5000)) { work(input) } ?? -1 // Err if the wall deadline fires first (body pure today; an I/O body lands with #3788)
+```
+
+### fan record form — parallel fields, read by name
+
+`fan { name: expr, … }` runs its fields as parallel siblings and yields the
+anonymous record `{ name: value, … }`. Removing `fan` gives the same output and
+value (fields print in source order). A fallible field must say `!`: the
+field's Err is the whole block's Err — every field still runs, and the first
+Err in source order wins. A Result field without `!` is E041. Sibling fields
+are not in scope inside the block.
+
+```almide check
+effect fn add(a: Int, b: Int) -> Result[Int, String] = ok(a + b)
+
+effect fn mul(a: Int, b: Int) -> Result[Int, String] = ok(a * b)
+
+effect fn main() -> Unit = {
+  let r = fan {
+    sum: add(3, 4)!
+    product: mul(3, 4)!
+    label: "3 and 4"
+  }
+  println(r.label + ": " + int.to_string(r.sum + r.product))
+  let { sum, product } = fan {
+    sum: add(1, 2)!
+    product: mul(1, 2)!
+  }
+  println(int.to_string(sum * product))
+}
 ```
 
 ### Time constructors (closed set)

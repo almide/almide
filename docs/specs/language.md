@@ -1,4 +1,4 @@
-> Last updated: 2026-10-01
+> Last updated: 2026-10-18
 
 # Almide Language Specification
 
@@ -962,6 +962,35 @@ test "fan returns a tuple of the unwrapped results" {
 Fan blocks execute expressions concurrently. Each expression in the block runs in parallel; the block returns a tuple of results.
 
 Fan blocks only allow expressions -- no `let`, `var`, `for`, or `while` statements.
+
+**Record form.** When every arm is a `name: expr` field, the block is a record
+literal whose fields run as parallel siblings: the value is the anonymous record
+`{ name: value, … }`, typed exactly as the plain literal, and read by name.
+
+```almide
+effect fn add(a: Int, b: Int) -> Result[Int, String] = ok(a + b)
+effect fn mul(a: Int, b: Int) -> Result[Int, String] = ok(a * b)
+
+test "fan record form" {
+  let r = fan {
+    sum: add(3, 4)!
+    product: mul(3, 4)!
+  }
+  assert_eq(r.sum + r.product, 19)
+  assert_eq(r, { sum: 7, product: 12 })
+}
+```
+
+- Removing `fan` changes nothing observable when no field fails: the fields'
+  output appears in source order and the value equals the plain literal's (C-386).
+- A field written `e!` makes its Err the block's Err under the tuple form's
+  rule: every field runs, and the first Err in source order wins (C-199, C-386).
+- A field whose value is a `Result` (an effect call's included) must be written
+  `e!`; an unmarked one is E041. Sibling fields are not in scope inside the block.
+- Every arm must be named (`fan { a: f(), g() }` is a parse error), a name
+  appears once, and there is no punning: `fan { x }` is the one-arm tuple form.
+
+テスト: `spec/lang/fan_record_test.almd`, `spec/wasm_cross/fan_record_serial_elision.almd`, `spec/wasm_cross/fan_record_err_source_order.almd`, `tests/diagnostics/e041-fan-record-field-without-bang/`
 
 The `fan.*` block heads share the surface:
 
