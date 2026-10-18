@@ -1173,6 +1173,10 @@ let t = fan.timeout(duration.ms(5000)) { work(input) } ?? fallback
   (`fan.bounded` / `fan.timeout` bodies and `fan.min(compute…)` arms are themselves checked PURE)
 - No `var` capture — only `let` bindings from outer scope (prevents data races)
 - No unstructured `spawn` — all concurrency is scoped
+- A `fan { }` whose arm reaches an `@ordered` stdlib fn (`env.set`, an `fs`
+  write, a stdin read, a `process` spawn — process-local state a sibling arm
+  could read) runs its arms in arm order on every target (ADR-0024 D3); the
+  observation is the sequential one either way
 - No cancellation of siblings, by design — a cancelled sibling's side effects would depend on
   when the cancellation landed, which is exactly the scheduling dependence the model excludes.
   The block joins every sibling and reports the first `Err` in list order. (The only cut is of a
