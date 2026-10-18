@@ -999,9 +999,12 @@ fn q8_0_row_dot_q8_scalar(x_scales: &[f32], x_q: &[i8], row: &[u8]) -> f64 {
 // Explicit AVX2 i8×i8 dot (llama.cpp's vec_dot recipe): LLVM's autovec of
 // the scalar i8→i32 widening loop measured SLOWER than the f32 path, so
 // the bandwidth win of Q8_0 never landed. maddubs needs one unsigned
-// operand: |x| on one side, x's sign transferred onto w on the other —
-// products are exact i16 (|q|≤127 ⇒ pairwise sum ≤ 32258 < i16::MAX) and
-// the block sum is exact i32, so this is BIT-IDENTICAL to the scalar path.
+// operand: |w| on one side, w's sign transferred onto x on the other. The
+// weight byte is raw and may be -128, whose negation wraps in i8, so the
+// absolute value is taken of w (read back as the unsigned 128) and the
+// negation is applied to x, which the quantizer clamps to ±127. Products
+// are exact i16 (pairwise sum ≤ 2·128·127 = 32512 < i16::MAX) and the block
+// sum is exact i32, so this is BIT-IDENTICAL to the scalar path.
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 unsafe fn q8_0_row_dot_q8_avx2(x_scales: &[f32], x_q: &[i8], row: &[u8]) -> f64 {
@@ -1013,9 +1016,9 @@ unsafe fn q8_0_row_dot_q8_avx2(x_scales: &[f32], x_q: &[i8], row: &[u8]) -> f64 
         let d_w = fp16_bits_to_f32(u16::from_le_bytes([*blk, *blk.add(1)]));
         let w = _mm256_loadu_si256(blk.add(2) as *const __m256i);
         let x = _mm256_loadu_si256(x_q.as_ptr().add(b * ALMIDE_Q8_BLOCK) as *const __m256i);
-        let ax = _mm256_sign_epi8(x, x); // |x| (unsigned operand)
-        let sw = _mm256_sign_epi8(w, x); // w with x's sign folded in
-        let p16 = _mm256_maddubs_epi16(ax, sw); // 16 × i16 pairwise products
+        let aw = _mm256_sign_epi8(w, w); // |w| (unsigned operand; -128 reads as 128)
+        let sx = _mm256_sign_epi8(x, w); // x with w's sign folded in
+        let p16 = _mm256_maddubs_epi16(aw, sx); // 16 × i16 pairwise products
         let p32 = _mm256_madd_epi16(p16, _mm256_set1_epi16(1)); // 8 × i32
         let hi = _mm256_extracti128_si256(p32, 1);
         let lo = _mm256_castsi256_si128(p32);
