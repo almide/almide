@@ -49,7 +49,6 @@ err() { echo "FAIL: $*" >&2; fail=1; }
 # absence from PURE_MODULES; enumerated HERE only so the completeness check can
 # tell "intentionally walled, justified" from "unclassified new module".
 declare -A IMPURE_PLAIN=(
-  [mem]="save/restore the allocator arena — mutates global allocator state"
   [testing]="assert_* print failures / abort the process — Stdout + process effect"
   [datetime]="now()/monotonic_ns() read the wall clock — a nondeterministic host source"
   [prim]="the v1 primitive floor — raw memory load/store + the fd_write host call (unsafe, reaches Stdout). v1 intercepts prim.* to Op::Prim BEFORE the purity gate, and Op::Prim{FdWrite} carries Capability::Stdout in cap_witness, so caps stay counted; this entry just keeps the registry complete (prim is never admitted as pure)."
