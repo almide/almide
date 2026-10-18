@@ -165,14 +165,14 @@ almide: hooks.js.kv_get returned a Promise; mark its @extern with returns: promi
 - The module starts every element in arm order, suspends once, and takes the
   values in arm order. Every element runs (D1), and the first err in arm
   order is the result (D6), so the observation is the sequential lowering's.
-  `fan.any` takes until its first ok. Its untaken slots were already awaited
-  by `wait`, and the next batch's first `start` drops them unread.
+  (The first-Ok selection is `list.find_map` / a `??` chain since dialect
+  epoch 14 — sequential by definition, so it takes no overlapped route.)
 - The emitter (`crates/almide-wasm/src/fan_js_async.rs`) engages only when
   the module is built with `--host js` and every element is one call of a
   `returns: promise` extern whose arguments are variables or literals and
   whose value is a scalar or a fallible extern's Result over one. That covers
   three shapes: `fan.map(xs, (x) => hook(x))` for a fallible hook or
-  `(x) => ok(hook(x))` for an infallible one, `fan.any` over the same, and a
+  `(x) => ok(hook(x))` for an infallible one, and a
   `fan { hook(a); other(b) }` block whose every arm is such a call.
 - Everything else stays sequential, one Suspending call per element: an
   element that computes its argument, calls a sync hook, or makes several
@@ -214,7 +214,7 @@ async hooks are marked `returns: promise`. The fixture checks:
 `fan_async_overlap.almd` covers the fan overlap (7). The gate builds it twice,
 once overlapped and once with `ALMIDE_FAN_SEQUENTIAL=1`, and both runs must
 print the same `.expected`: values in arm order, a rejection in a middle arm,
-`fan.any`, a fan block, flat memory, and an abandoning infallible hook. The
+a `list.find_map` first-Ok (sequential), a fan block, flat memory, and an abandoning infallible hook. The
 host asserts that the overlapped run has every hook in flight at once and
 takes about the slowest hook, and that the sequential run has one in flight
 and takes the sum. On Node 24.21, eight hooks of 10–80 ms took 82 ms

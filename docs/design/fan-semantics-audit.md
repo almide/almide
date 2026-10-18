@@ -5,10 +5,20 @@
 > [research/fan-audit/probes/](../../research/fan-audit/probes/) that was run
 > on native and wasm, or a test in `tests/fan_acceptance_test.rs`.
 
-This audit records the semantics that exist; it does not propose any. The
-proposals are in [ADR-0028](../adr/0028-fan-selection-names-and-cost-contract.md)
-(Proposed), and the comparison with other languages is in
+This audit records the semantics that existed at the pinned commit; it does
+not propose any. The decisions it led to are in
+[ADR-0028](../adr/0028-fan-selection-names-and-cost-contract.md) (Accepted
+2026-10-18), and the comparison with other languages is in
 [fan-cross-language.md](./fan-cross-language.md).
+
+> **Status 2026-10-18.** Since dialect epoch 14 the surface below reads
+> differently: `fan.any { }` / `fan.any(xs, f)` (§4) are removed — the same
+> selection is `a() ?? b() ?? fallback` and `list.find_map(xs, (x) => f(x)?)`,
+> both sequential by definition; `fan.race` (§5) is `fan.min(clock)`, with the
+> clock argument required, and its all-fail text is `fan.min: no branch
+> succeeded within budget`. `fan.min(duration…)` is decided and tracked in
+> #3788. The findings §6–§10 and the issues they name stand as
+> recorded.
 
 Each form was traced in order: syntax → type check → lowering → runtime
 (native and wasm, pure and effect). Legs: `almide run` (native), the same

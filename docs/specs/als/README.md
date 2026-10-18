@@ -52,7 +52,7 @@
 |----|---------|-----------|
 | [ALS-DT1](./deterministic-time.md#als-dt1-時間構築子と代数) | 時間構築子と代数 | C-202, C-203 |
 | [ALS-DT2](./deterministic-time.md#als-dt2-決定的予算（fanbounded）) | 決定的予算（fan.bounded） | C-204, C-207, C-320 |
-| [ALS-DT3](./deterministic-time.md#als-dt3-決定的-race（fanrace）) | 決定的 race（fan.race） | C-205 |
+| [ALS-DT3](./deterministic-time.md#als-dt3-決定的-race（fanmin）) | 決定的 race（fan.min） | C-205 |
 | [ALS-DT4](./deterministic-time.md#als-dt4-settle-の-tuple-契約) | settle の tuple 契約 | C-206 |
 | [ALS-DT5](./deterministic-time.md#als-dt5-壁時計期限（fantimeout、oracle-層）) | 壁時計期限（fan.timeout、oracle 層） | C-208 |
 

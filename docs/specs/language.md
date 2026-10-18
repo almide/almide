@@ -971,25 +971,27 @@ effect fn b() -> Result[Int, String] = ok(2)
 fn work(x: Int) -> Int = x * 2
 
 test "fan.* heads" {
-  let first = fan.any {                 // first Ok in source order
-    a()
-    b()
-  }
+  let first = a() ?? b() ?? -1          // first Ok in source order: a `??` chain, not a fan form
   let (ra, rb) = fan.settle {           // a TUPLE of per-arm Results
     a()
     b()
   }
   let r = fan.bounded(compute.ms(100)) { work(21) } ?? -1  // deterministic budget
-  assert_eq(first, ok(2))
+  let w = fan.min(compute.ms(5)) { work(1), work(2) } ?? -1  // least compute within the budget
+  assert_eq(first, 2)
   assert_eq(ra, err("a failed"))
   assert_eq(rb, ok(2))
   assert_eq(r, 42)
+  assert_eq(w, 2)
 }
 ```
 
 Arms are separated by newlines (or `,`), never `;`. `fan.race` was removed in
 0.42.0 — under the deterministic model it was `thunks[0]()` by another name —
-and a reference is a tombstone error (E027).
+and the deterministic head that replaced it was renamed `fan.min` in dialect
+epoch 14, with the clock argument required; `fan.any` was removed in the same
+epoch (a `??` chain or `list.find_map` says the same thing). A reference to
+either old name is a tombstone error (E027) naming the replacement.
 
 Budgets are built with the `compute.*` time constructors (closed unit set
 `ns / us / ms / s / min / h`); a bare `Int` or a wall-clock `duration.*` value
