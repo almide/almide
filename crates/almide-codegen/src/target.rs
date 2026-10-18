@@ -50,6 +50,7 @@ use super::pass_var_storage::VarStoragePass;
 use super::pass_borrow_lowering::BorrowLoweringPass;
 use super::pass_slice_binders::SliceBindersPass;
 use super::pass_str_map_key::StrMapKeyPass;
+use super::pass_thread_share::ThreadShareMarksPass;
 use super::pass_ir_link_flatten::IrLinkFlattenPass;
 use super::template::TemplateSet;
 
@@ -229,6 +230,11 @@ fn build_pipeline(target: Target) -> Pipeline {
                 // A String-keyed `map.set` / `map.upsert` whose key is
                 // `k.to_string()` takes `k` borrowed (copied on insert only).
                 .add(StrMapKeyPass)
+                // ADR-0013: every variable a fan arm or a thread-crossing
+                // runtime call reaches is marked shared before the threads
+                // start — spelled as an `InlineRust` block on the final IR,
+                // after every pass that reads a variable occurrence.
+                .add(ThreadShareMarksPass)
         }
 
         Target::Wgsl => Pipeline::new()
