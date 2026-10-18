@@ -26966,7 +26966,8 @@ effect fn __shm_read(fd: String, offset_len: String) -> Result[Bytes, String] = 
 fn __net_fd_lines(fds: List[Int]) -> String = fds |> list.map((f) => int.to_string(f)) |> list.join("\n")
 
 fn __net_fd_list(t: String) -> List[Int] =
-  if t == "" then [] else string.split(t, "\n") |> list.map((x) => int.parse(x) ?? -1)
+  if t == "" then []
+  else string.split(t, "\n") |> list.map((x) => int.parse(x) ?? -1)
 
 @implements("net.unix_connect")
 effect fn __net_unix_connect_impl(path: String) -> Result[Int, String] = {
