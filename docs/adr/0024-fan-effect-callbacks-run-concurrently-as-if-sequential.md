@@ -11,7 +11,13 @@
   joins the initial list — process-local state like `kv`), and a block whose
   arm's executable closure reaches one runs its arms in arm order on native
   too (`mark_inline_fans`, spec/wasm_cross/fan_ordered_arms.almd). D4 (the
-  sequential note) is not.
+  sequential note) is not. Also 2026-10-18 (#3779, #3784): the native
+  parallel twins (`fan.map`, `list.map` / `filter` / `any` / `all` under a
+  fan) keep one output timeline per dealt BLOCK of elements, not per
+  element — inside a block the elements run in list order on one thread, so
+  D5's order and D6's lowest-index trap hold at element granularity for one
+  registration per block (spec/wasm_cross/fan_list_map_trap_order.almd); the
+  per-element registration was what made a light map slower than sequential.
   Step 4's effect `fan.map` / `fan.settle` on threads is not either: an effect
   callback stays sequential unless its only effect is a nested fan (#2594).
   Amended 2026-10-05 (#3383): D3 and D8 for async JS hooks on `--host js`
