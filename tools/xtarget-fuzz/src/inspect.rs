@@ -419,9 +419,10 @@ fn build_as(ctx: &Ctx, src: &str, leg: Leg, canonical: bool) -> Result<PathBuf, 
     std::fs::write(&file, src).map_err(|e| e.to_string())?;
     let canonical = canonical && matches!(leg, Leg::Wasm);
     // A test-file probe (`// @xf-test`) is run by `almide test` on its leg's
-    // lane: its artifact is the source (`aborts::test_art`).
+    // lane: its artifact is the source, or the native libtest binary built
+    // once here (`aborts::test_art`).
     if crate::generator::aborts_gen::is_test_probe(src) {
-        return aborts::test_art(&file, src, matches!(leg, Leg::Wasm));
+        return aborts::test_art(ctx, &file, src, matches!(leg, Leg::Wasm));
     }
     // A program only the embedded host serves (ADR-0027 D1) is built and run
     // there in one step: its artifact is the source, under a name that
@@ -1116,8 +1117,13 @@ fn run_counted(ctx: &Ctx, art: &Path, leg: Leg) -> Result<(String, Counts), Stri
     let test_leg = aborts::test_art_leg(art);
     match leg {
         _ if test_leg.is_some() => {
-            let e = aborts::test_art_cmd(ctx, art, test_leg == Some(true));
+            let e = aborts::test_art_cmd(ctx, art, test_leg == Some(true), &world.dir);
             cmd.arg(e.get_program()).args(e.get_args());
+            for (k, v) in e.get_envs() {
+                if let Some(v) = v {
+                    cmd.env(k, v);
+                }
+            }
             &mut cmd
         }
         _ if is_embedded(art) => {
