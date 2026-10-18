@@ -78,6 +78,28 @@ Skip `: Codec` only for variants that never serialize
 variant should opt in — the roundtrip code is LLM-error prone when
 hand-written.
 
+### Names (any script)
+Identifiers are Unicode (UAX #31, held in NFC); keywords stay ASCII.
+Full-width `ａ`/`１` are refused, not folded. Uppercase start = type side,
+lowercase or caseless (漢字/かな/한글) = value side — a caseless name the
+module declares as a type or case is type-side in that module; from another
+module write it qualified (`geo.住所`).
+```almide check
+type 住所 = { 都市: String }
+
+type 色 = | 赤 | 緑
+
+fn 名前(c: 色) -> String = match c {
+  赤 => "赤",
+  緑 => "緑",
+}
+
+effect fn main() -> Unit = {
+  let 場所 = 住所 { 都市: "東京" }
+  println("${場所.都市} ${名前(赤)}")
+}
+```
+
 ### Built-in types
 - Primitives: `Int`, `Float`, `String`, `Bool`, `Unit`, `Path`
 - Collections: `List[T]`, `Map[K, V]`, `Set[T]`

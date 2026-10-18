@@ -64,6 +64,42 @@ Selective imports use the syntax `import path.{ Name1, Name2 }`. Aliases use `as
 
 テスト: `spec/lang/import_test.almd`
 
+### Identifiers
+
+An identifier follows UAX #31 Default Identifiers: an XID_Start character or
+`_`, then XID_Continue characters (the rule of Rust RFC 2457, Python PEP 3131
+and ECMAScript). Names are stored in NFC, so `é` and `e` + U+0301 are one
+name. A character whose compatibility form differs (full-width `ａ`, `１`,
+ligatures, circled forms) is not an identifier character and is reported with
+the plain spelling to write instead. Keywords are ASCII.
+
+An uppercase first character makes a type-side name (type, variant case,
+constructor); a lowercase or caseless first character (漢字, かな, 한글) a
+value-side name. A caseless name the module declares with `type` / `protocol`
+or as a variant case is type-side throughout that module, as `Red` is, and
+from another module it is written qualified (`geo.住所`).
+
+```almide
+type 住所 = { 都市: String, 番地: Int }
+
+type 色 = | 赤 | 緑
+
+fn 色名(c: 色) -> String = match c {
+  赤 => "red",
+  緑 => "green",
+}
+
+effect fn main() -> Unit = {
+  let 場所 = 住所 { 都市: "東京", 番地: 3 }
+  println("${場所} ${色名(緑)}")
+}
+```
+
+テスト: `spec/lang/unicode_identifier_test.almd`,
+`spec/integration/caseless_imported_types/`,
+`spec/wasm_cross/unicode_identifiers.almd` (C-387),
+`tests/unicode_identifier_nfc_test.rs`
+
 ---
 
 ## 2. Types
