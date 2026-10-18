@@ -65,6 +65,13 @@ pub fn almide_rt_value_float(f: f64) -> AlmideValue { AlmideValue::Float(f) }
 pub fn almide_rt_value_bool(b: bool) -> AlmideValue { AlmideValue::Bool(b) }
 pub fn almide_rt_value_array(items: &[AlmideValue]) -> AlmideValue { AlmideValue::Array(items.to_vec()) }
 pub fn almide_rt_value_object(pairs: &[(AlmideString, AlmideValue)]) -> AlmideValue { AlmideValue::Object(pairs.iter().map(|(k, v)| (almide_rt_intern_key(k), v.clone())).collect()) }
+// The `@reuse` twins (#2157): a source at its last use — the list literal or
+// `list.map` result a document is built from, almost always — is taken by
+// value and its elements MOVED into the Value. The borrowing forms above
+// cloned every element, so building a document copied each subtree once per
+// nesting level, and freed the copies' originals right after.
+pub fn almide_rt_value_array_owned(items: Vec<AlmideValue>) -> AlmideValue { AlmideValue::Array(items) }
+pub fn almide_rt_value_object_owned(pairs: Vec<(AlmideString, AlmideValue)>) -> AlmideValue { AlmideValue::Object(pairs.into_iter().map(|(k, v)| (almide_rt_intern_key(&k), v)).collect()) }
 pub fn almide_rt_value_null() -> AlmideValue { AlmideValue::Null }
 // Structural equality (`value.eq`). The wasm leg had this in its self-host
 // registry all along; native only ever reached AlmideValue equality through user
@@ -134,6 +141,14 @@ pub fn almide_rt_value_as_float(v: &AlmideValue) -> Result<f64, AlmideString> {
 }
 pub fn almide_rt_value_as_bool(v: &AlmideValue) -> Result<bool, AlmideString> { let __almide_r: Result<bool, String> = (|| { match v { AlmideValue::Bool(b) => Ok(*b), _ => Err(format!("expected Bool, received {}", almide_rt_value_kind(v))) } })(); __almide_r.map_err(Into::into) }
 pub fn almide_rt_value_as_array(v: &AlmideValue) -> Result<Vec<AlmideValue>, AlmideString> { let __almide_r: Result<Vec<AlmideValue>, String> = (|| { match v { AlmideValue::Array(a) => Ok(a.clone()), _ => Err(format!("expected Array, received {}", almide_rt_value_kind(v))) } })(); __almide_r.map_err(Into::into) }
+/// The `@reuse` twin (#2157): a Value at its last use hands its items over
+/// instead of having every element (each a whole subtree) cloned out of it.
+pub fn almide_rt_value_as_array_owned(v: AlmideValue) -> Result<Vec<AlmideValue>, AlmideString> {
+    match v {
+        AlmideValue::Array(a) => Ok(a),
+        other => Err(AlmideString::from(format!("expected Array, received {}", almide_rt_value_kind(&other)))),
+    }
+}
 
 // ── List encode/decode ──
 
@@ -434,24 +449,34 @@ pub fn almide_rt_value_float_json(f: f64) -> AlmideString { let __almide_v: Stri
 /// the interp's `DynNode::to_json` are the other copies; the three-way byte
 /// identity over all 32 control characters plus `"` and `\` is gated by
 /// tests/json_quote_matrix_test.rs.
+///
+/// Every byte the rule rewrites is ASCII, so the text between two of them is
+/// copied as one slice (it always ends on a char boundary) instead of one
+/// `push(char)` per char (#2157).
 pub fn almide_rt_value_json_escape_into(out: &mut String, s: &str) {
     const HEX: &[u8; 16] = b"0123456789abcdef";
-    for c in s.chars() {
+    let b = s.as_bytes();
+    let mut run = 0;
+    for (i, &c) in b.iter().enumerate() {
+        if c != b'\\' && c != b'"' && c >= 0x20 {
+            continue;
+        }
+        out.push_str(&s[run..i]);
+        run = i + 1;
         match c {
-            '\\' => out.push_str("\\\\"),
-            '"' => out.push_str("\\\""),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if (c as u32) < 0x20 => {
-                let b = c as u32 as usize;
+            b'\\' => out.push_str("\\\\"),
+            b'"' => out.push_str("\\\""),
+            b'\n' => out.push_str("\\n"),
+            b'\r' => out.push_str("\\r"),
+            b'\t' => out.push_str("\\t"),
+            _ => {
                 out.push_str("\\u00");
-                out.push(HEX[b >> 4] as char);
-                out.push(HEX[b & 15] as char);
+                out.push(HEX[(c >> 4) as usize] as char);
+                out.push(HEX[(c & 15) as usize] as char);
             }
-            c => out.push(c),
         }
     }
+    out.push_str(&s[run..]);
 }
 /// `almide_rt_value_json_escape_into` wrapped in the surrounding quotes.
 pub fn almide_rt_value_json_quote(s: &str) -> AlmideString {
@@ -464,27 +489,66 @@ pub fn almide_rt_value_json_quote(s: &str) -> AlmideString {
     };
     __almide_v.into_almide()
 }
+/// The compact JSON text of `v`, written into ONE buffer (#2157). The text
+/// used to be assembled bottom-up — a `String` per node, a `Vec<String>` per
+/// container, a `format!` and a `join` to splice them — so every byte was
+/// copied once per nesting level and each leaf cost several allocations:
+/// 50 000 four-field records took longer to stringify natively than the whole
+/// round trip took on the wasm leg. The bytes are unchanged.
 pub fn almide_rt_value_stringify(v: &AlmideValue) -> AlmideString {
-    let __almide_out: String = {
-        match v {
-            AlmideValue::Null => "null".to_string(),
-            AlmideValue::Bool(b) => if *b { "true".to_string() } else { "false".to_string() },
-            AlmideValue::Int(n) => n.to_string(),
-            AlmideValue::Float(f) => String::from(almide_rt_value_float_json(*f)),
-            AlmideValue::Str(s) => String::from(almide_rt_value_json_quote(s)),
-            AlmideValue::Array(items) => {
-                let inner: Vec<String> = items.iter().map(|x| String::from(almide_rt_value_stringify(x))).collect();
-                format!("[{}]", inner.join(","))
+    let mut out = String::new();
+    almide_value_write_json(&mut out, v);
+    out.into()
+}
+
+fn almide_value_write_json(out: &mut String, v: &AlmideValue) {
+    match v {
+        AlmideValue::Null => out.push_str("null"),
+        AlmideValue::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
+        AlmideValue::Int(n) => almide_value_push_int(out, *n),
+        AlmideValue::Float(f) => out.push_str(&almide_rt_value_float_json(*f)),
+        AlmideValue::Str(s) => almide_value_push_quoted(out, s),
+        AlmideValue::Array(items) => {
+            out.push('[');
+            for (i, x) in items.iter().enumerate() {
+                if i > 0 { out.push(','); }
+                almide_value_write_json(out, x);
             }
-            AlmideValue::Object(pairs) => {
-                let inner: Vec<String> = pairs.iter().map(|(k, v)| {
-                    format!("{}:{}", almide_rt_value_json_quote(k), almide_rt_value_stringify(v))
-                }).collect();
-                format!("{{{}}}", inner.join(","))
-            }
+            out.push(']');
         }
-    };
-    __almide_out.into()
+        AlmideValue::Object(pairs) => {
+            out.push('{');
+            for (i, (k, x)) in pairs.iter().enumerate() {
+                if i > 0 { out.push(','); }
+                almide_value_push_quoted(out, k);
+                out.push(':');
+                almide_value_write_json(out, x);
+            }
+            out.push('}');
+        }
+    }
+}
+
+fn almide_value_push_quoted(out: &mut String, s: &str) {
+    out.push('"');
+    almide_rt_value_json_escape_into(out, s);
+    out.push('"');
+}
+
+/// Decimal digits of `n`, as `n.to_string()` writes them, without the
+/// formatter and the intermediate `String`.
+fn almide_value_push_int(out: &mut String, n: i64) {
+    let mut buf = [0u8; 20];
+    let mut i = buf.len();
+    let mut m = n.unsigned_abs();
+    loop {
+        i -= 1;
+        buf[i] = b'0' + (m % 10) as u8;
+        m /= 10;
+        if m == 0 { break; }
+    }
+    if n < 0 { out.push('-'); }
+    out.push_str(std::str::from_utf8(&buf[i..]).unwrap_or_default());
 }
 
 // `AlmideValue` participates in derived `Repr` and string interpolation like any
