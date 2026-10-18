@@ -26,6 +26,12 @@
 //!               and through two wrapper modules, on native and the embedded
 //!               lane — a passing call, then a failing one
 //!
+//! `assert_aborts` is generic over its closure's value (`f: () -> T`), so
+//! complexity, alloc and diamond each run with every closure valued Int and
+//! again valued String, joined as `[vars=Int] … || [vars=String] …` like
+//! every generic's (the 10-16 ruling); parity's campaign draws T from Unit,
+//! Int and String per closure.
+//!
 //! Every criterion has its own reading here; none is skipped.
 
 use std::path::Path;
@@ -34,8 +40,16 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
 use super::{judge, toml_str, Ctx, World};
-use crate::generator::aborts_gen;
+use crate::generator::aborts_gen::{self, Fill};
 use crate::generator::Engine;
+
+/// Where `--emit` writes one instantiation's probes.
+fn vars_dir(fill: Fill) -> &'static str {
+    match fill {
+        Fill::String => "vars-String",
+        _ => "vars-Int",
+    }
+}
 
 /// The functions inspected as test files.
 pub const TESTED: &[&str] = &["testing.assert_aborts"];
@@ -56,9 +70,14 @@ pub(super) fn inspect(ctx: &mut Ctx, engine: &Engine, name: &str, args: &[String
     let n: u64 = super::super::flag_value(args, "--n").and_then(|s| s.parse().ok()).unwrap_or(default_n(ctx.icount));
     if let Some(out) = super::super::flag_value(args, "--emit") {
         let root = Path::new(out);
-        let mut files = vec![("call_test.almd".to_string(), aborts_gen::complexity_test(n, 3)), ("alloc_test.almd".to_string(), aborts_gen::alloc_test(8))];
-        for (i, p) in aborts_gen::diamond_projects().into_iter().enumerate() {
-            files.extend(p.files.into_iter().map(|(f, s)| (format!("diamond-{}/{f}", ["d", "l", "r"][i]), s)));
+        let mut files = Vec::new();
+        for fill in Fill::MEASURED {
+            let dir = vars_dir(fill);
+            files.push((format!("{dir}/call_test.almd"), aborts_gen::complexity_test(n, 3, fill)));
+            files.push((format!("{dir}/alloc_test.almd"), aborts_gen::alloc_test(8, fill)));
+            for (i, p) in aborts_gen::diamond_projects(fill).into_iter().enumerate() {
+                files.extend(p.files.into_iter().map(|(f, s)| (format!("{dir}/diamond-{}/{f}", ["d", "l", "r"][i]), s)));
+            }
         }
         for i in 0..3 {
             files.push((format!("parity-{i}_test.almd"), engine.abort_test(0, i)));
@@ -74,11 +93,16 @@ pub(super) fn inspect(ctx: &mut Ctx, engine: &Engine, name: &str, args: &[String
         return;
     }
     let order = super::super::flag_value(args, "--order");
+    // `assert_aborts` is generic (`f: () -> T`): the heap criteria run once
+    // per measured T and are labelled as every generic's are
+    // (`super::both_instantiations`). Parity is one campaign whose closures
+    // draw T from Unit, Int and String (`aborts_gen::synthesize_test`).
+    let per_fill = |f: &dyn Fn(Fill) -> String| super::both_instantiations(&f(Fill::Int), &f(Fill::String));
     let verdicts = vec![
         ("parity", parity(ctx, engine, args)),
-        ("complexity", complexity(ctx, n, order)),
-        ("alloc", alloc(ctx)),
-        ("diamond", diamond(ctx)),
+        ("complexity", per_fill(&|fill| complexity(ctx, n, order, fill))),
+        ("alloc", per_fill(&|fill| alloc(ctx, fill))),
+        ("diamond", per_fill(&|fill| diamond(ctx, fill))),
     ];
     let all_pass = verdicts.iter().all(|(_, v)| v.starts_with("PASS"));
     println!("# {name} — {}", if all_pass { "all criteria PASS (stampable)" } else { "NOT stampable" });
@@ -207,9 +231,9 @@ fn run_transcript(ctx: &Ctx, file: &Path, wasm: bool, cwd: Option<&Path>) -> Res
 /// the marginal cost of k more calls with the program unchanged. Each call
 /// starts a child (a process spawn natively, an instantiation of the
 /// compiled module on the embedded lane): a constant per call, in the
-/// intercept of the fit.
-fn complexity(ctx: &Ctx, n: u64, order: Option<&str>) -> String {
-    let programs = |m: u64, k: u64| (aborts_gen::complexity_test(m, k), aborts_gen::complexity_test(m, 0));
+/// intercept of the fit. The closure is valued `fill` (T).
+fn complexity(ctx: &Ctx, n: u64, order: Option<&str>, fill: Fill) -> String {
+    let programs = |m: u64, k: u64| (aborts_gen::complexity_test(m, k, fill), aborts_gen::complexity_test(m, 0, fill));
     match judge(ctx, "assert_aborts(n=child stderr bytes before the abort, k=calls)", order, n, &programs) {
         Ok(s) => format!("PASS: {s}"),
         Err(s) => format!("FAIL: {s}"),
@@ -219,9 +243,10 @@ fn complexity(ctx: &Ctx, n: u64, order: Option<&str>) -> String {
 // ── alloc ──────────────────────────────────────────────────────────────
 
 /// Criterion "alloc": the embedded lane's armed counters for the PARENT
-/// instance at exit, after one site of each abort and k=8 calls of one site.
-pub(super) fn alloc(ctx: &Ctx) -> String {
-    let src = aborts_gen::alloc_test(8);
+/// instance at exit, after one site of each abort and k=8 calls of one site,
+/// every closure valued `fill` (T).
+pub(super) fn alloc(ctx: &Ctx, fill: Fill) -> String {
+    let src = aborts_gen::alloc_test(8, fill);
     let file = ctx.dir.join(format!("a{:016x}_test.almd", super::hash(&src)));
     if std::fs::write(&file, &src).is_err() {
         return "SKIP: scratch write failed".into();
@@ -253,11 +278,12 @@ pub fn alloc_verdict(code: Option<i32>, stderr: &str) -> String {
 /// name is a module's fn, so three projects run the same test, its closure
 /// reaching the aborting fn as `base.boom`, `left.boom` and `right.boom`
 /// (wrappers over it): a passing call, then a failing one. The three
-/// transcripts must be equal on each leg, and the legs equal.
-fn diamond(ctx: &Ctx) -> String {
+/// transcripts must be equal on each leg, and the legs equal. `boom`, and so
+/// the closure, is valued `fill` (T).
+fn diamond(ctx: &Ctx, fill: Fill) -> String {
     let mut legs: [Vec<String>; 2] = [Vec::new(), Vec::new()];
-    for (p, project) in ["d", "l", "r"].into_iter().zip(aborts_gen::diamond_projects()) {
-        let root = ctx.dir.join(format!("diamond-aborts-{p}"));
+    for (p, project) in ["d", "l", "r"].into_iter().zip(aborts_gen::diamond_projects(fill)) {
+        let root = ctx.dir.join(format!("diamond-aborts-{}-{p}", vars_dir(fill)));
         let Ok(entry) = project.write_to(&root) else { return "SKIP: scratch write failed".into() };
         for (i, wasm) in [false, true].into_iter().enumerate() {
             match run_transcript(ctx, &entry, wasm, Some(&root.join("app"))) {
@@ -432,6 +458,18 @@ mod tests {
     #[test]
     fn a_failure_without_a_block_keeps_its_first_error_line() {
         assert_eq!(transcript(Some(1), "", "warning: x\nerror[E0277]: the `?` operator\nmore\n"), "fail\nerror[E0277]: the `?` operator\n");
+    }
+
+    /// The joined criterion is what the stamp gate reads: one string, PASS
+    /// only when both instantiations pass, with a `[vars=String]` half.
+    #[test]
+    fn a_heap_criterion_carries_both_instantiations() {
+        let pass = alloc_verdict(Some(0), "__ALMD_WASM_ALLOC live=0\n");
+        let joined = super::super::both_instantiations(&pass, &pass);
+        assert!(joined.starts_with("PASS: [vars=Int] [embedded] parent live=0") && joined.contains(" || [vars=String] [embedded]"), "{joined}");
+        let fail = alloc_verdict(Some(0), "__ALMD_WASM_ALLOC live=3\n");
+        assert!(super::super::both_instantiations(&pass, &fail).starts_with("FAIL: [vars=Int]"));
+        assert_eq!(vars_dir(Fill::String), "vars-String");
     }
 
     #[test]
