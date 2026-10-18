@@ -12,9 +12,12 @@
 //! append, so a builder loop was quadratic. Here the three ops render as one
 //! `s.push_str(x)`: amortized O(len(x)), the growth `String` already does.
 //!
-//! Sound because this render realizes every `Dup` as a `.clone()` — an alias
-//! of `s` is its own `String`, never the block `push_str` grows — and `Drop`
-//! is erased (scope end frees). Under ADR-0013's shared buffer a `.clone()`
+//! Sound because this render realizes a `Dup` as a `.clone()` — an alias of
+//! `s` is its own `String`, never the block `push_str` grows — and `Drop` is
+//! erased (scope end frees). The one `Dup` it renders as a shared borrow, an
+//! arm feeding a borrow join (`crate::borrow_join`), never borrows `s` here:
+//! the borrow-join analysis counts a join read by this window as live through
+//! the window's `SetLocal` of `s`, so a join choosing `s` is declined there. Under ADR-0013's shared buffer a `.clone()`
 //! is a count increment, so an alias DOES
 //! share the block; the window stays sound because `AlmideStr::push_str` goes
 //! through the unique view, which copies a shared block before it writes
@@ -27,9 +30,10 @@ use crate::render_native::{as_str_arg, var, NTy};
 use crate::{CallArg, MirFunction, Op, ValueId};
 use std::collections::BTreeMap;
 
-/// The `s.push_str(…)` line for the window opening at `ops[i]`, or `None`
-/// when the three ops there are not that rebind.
-pub(crate) fn str_self_append(func: &MirFunction, i: usize, tys: &BTreeMap<ValueId, NTy>) -> Option<String> {
+/// The `(s, x, d)` of the rebind `d = s + x; drop s; s = d` opening at
+/// `ops[i]`, by shape alone — the window [`str_self_append`] may render as
+/// `s.push_str(x)`, which writes `s` while it reads `x`.
+pub(crate) fn self_append_window(func: &MirFunction, i: usize) -> Option<(ValueId, ValueId, ValueId)> {
     let [Op::CallFn { dst: Some(d), name, args, .. }, Op::Drop { v }, Op::SetLocal { local, src }] =
         func.ops.get(i..i + 3)?
     else {
@@ -38,9 +42,14 @@ pub(crate) fn str_self_append(func: &MirFunction, i: usize, tys: &BTreeMap<Value
     let [CallArg::Handle(s), CallArg::Handle(x)] = args.as_slice() else {
         return None;
     };
-    if name != "__str_concat" || v != s || local != s || src != d || x == s {
-        return None;
-    }
+    (name == "__str_concat" && v == s && local == s && src == d && x != s).then_some((*s, *x, *d))
+}
+
+/// The `s.push_str(…)` line for the window opening at `ops[i]`, or `None`
+/// when the three ops there are not that rebind.
+pub(crate) fn str_self_append(func: &MirFunction, i: usize, tys: &BTreeMap<ValueId, NTy>) -> Option<String> {
+    let (s, x, d) = self_append_window(func, i)?;
+    let (s, x, d) = (&s, &x, &d);
     if tys.get(s) != Some(&NTy::Str) || func.ret == Some(*d) || touches(func, *d) != 2 {
         return None;
     }

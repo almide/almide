@@ -30,8 +30,10 @@
 //!    call argument, an element read, a `Borrow`, or its scope-end drop —
 //!    so it is never moved, returned, stored, rebound or yielded on;
 //! 3. no op from the `IfThen` to the join's last read (stretched to the end
-//!    of any later loop that reads it) rebinds, writes, consumes, returns or
-//!    makes unique an arm's source.
+//!    of any later loop that reads it, and over the `SetLocal` of a
+//!    self-append window the read opens, which renders as an in-place
+//!    `push_str`) rebinds, writes, consumes, returns or makes unique an arm's
+//!    source.
 
 use crate::lower::LowerError;
 use crate::mir_ops::{defined_value, op_values};
@@ -160,6 +162,12 @@ impl Facts {
             }
             if !is_drop(&func.ops[k]) {
                 last = last.max(k);
+            }
+            // The self-append window renders a read here as `s.push_str(d)`,
+            // which writes `s` at the read itself: count the join live through
+            // the window's `SetLocal` of `s`.
+            if crate::render_native_append::self_append_window(func, k).is_some() {
+                last = last.max(k + 2);
             }
         }
         // A read inside a loop that opens after the join runs again on the next
@@ -308,6 +316,18 @@ mod tests {
     fn a_source_written_after_the_last_read_keeps_the_borrow_join() {
         let f = select(vec![Op::ListSetScalar { list: v(0), idx: v(2), val: v(2) }]);
         assert_eq!(borrow_joins(&f).joins, BTreeSet::from([v(3)]));
+    }
+
+    #[test]
+    fn a_self_append_of_a_source_reading_the_join_is_not_a_borrow_join() {
+        // `p0 = p0 + d` renders as `v0.push_str(v3)`: the write of the source
+        // happens at the join's last read.
+        let f = select(vec![
+            Op::CallFn { dst: Some(v(9)), name: "__str_concat".into(), args: vec![CallArg::Handle(v(0)), CallArg::Handle(v(3))], result: None },
+            Op::Drop { v: v(0) },
+            Op::SetLocal { local: v(0), src: v(9) },
+        ]);
+        assert!(borrow_joins(&f).joins.is_empty());
     }
 
     #[test]
