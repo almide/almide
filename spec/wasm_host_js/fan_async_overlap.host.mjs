@@ -97,7 +97,7 @@ export async function after(m) {
   expectLowering("fan.map ok(peek)", peeked, keys.length, sum, max);
   console.log("peek_all: " + peeked.out.join(","));
 
-  // fan.any: the first ok in arm order wins; all-fail is the ledger Err.
+  // list.find_map: the first ok in list order wins; all-fail is the fallback.
   console.log("first_found: " + (await measured(() => m.first_found(["bad1", "k1", "k0"]))).out);
   console.log("first_found none: " + (await measured(() => m.first_found(["bad1", "bad2"]))).out);
 

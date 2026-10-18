@@ -4,7 +4,9 @@
 // wasm leg, in every spelling the ruling admits:
 //   - the canonical `!` tail (`(p) => fs.read_text(p)!`, `(p) => helper(p)!`)
 //   - a COMPOUND body — a statement before the `!` (`{ let t = ..; f(t)! }`)
-//   - a bare effect-fn VALUE (`fan.any(paths, helper)`)
+//   - a bare effect-fn VALUE (`fan.settle(paths, helper)`)
+// plus the first-Ok selection `fan.any(xs, f)` used to spell (removed in
+// dialect epoch 14): `list.find_map(xs, (p) => f(p)?)` in the same spellings
 // consumed via `!`, `??`, and a match over settle's list.
 //
 // The frontend strips the canonical `!` only for `list.*` callees, and
@@ -47,15 +49,15 @@ effect fn main() -> Unit = {
   let mixed = [absent + "/missing.txt", d + "/b.txt", d + "/a.txt"]
   let good = [d + "/a.txt", d + "/b.txt"]
   let bad_last = [d + "/a.txt", absent + "/gone.txt"]
-  // ── fan.any: first Ok wins, an element's err skips ──
-  println("any bang fs: " + fan.any(mixed, (p) => fs.read_text(p)!)!)
-  println("any bang helper: " + fan.any(mixed, (p) => helper(p)!)!)
-  println("any compound: " + fan.any(mixed, (p) => {
+  // ── list.find_map: first Ok wins, an element's err (`?` → none) skips ──
+  println("any bang fs: " + (list.find_map(mixed, (p) => fs.read_text(p)?) ?? "fb"))
+  println("any bang helper: " + (list.find_map(mixed, (p) => helper(p)?) ?? "fb"))
+  println("any compound: " + (list.find_map(mixed, (p) => {
     let t = string.trim(p)
-    fs.read_text(t)!
-  })!)
-  println("any value: " + fan.any(mixed, helper)!)
-  println("any all-fail: " + (fan.any([absent + "/x.txt"], (p) => fs.read_text(p)!) ?? "fb"))
+    fs.read_text(t)?
+  }) ?? "fb"))
+  println("any value: " + (list.find_map(mixed, (p) => helper(p)?) ?? "fb"))
+  println("any all-fail: " + (list.find_map([absent + "/x.txt"], (p) => fs.read_text(p)?) ?? "fb"))
   // ── fan.settle: EVERY element's Result, errs captured ──
   let s1 = fan.settle(mixed, (p) => fs.read_text(p)!)
   println("settle bang fs: " + list.join(s1 |> list.map((r) => show(r)), " | "))

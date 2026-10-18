@@ -464,7 +464,7 @@ fn cm1_calibration_within_declared_band() {
     );
 }
 
-/// Stage 3: `fan.race` — winner selection ((spend, index) lex-min), tie →
+/// Stage 3: `fan.min` — winner selection ((spend, index) lex-min), tie →
 /// source order, budget filtering, and the winner-appearance boundary:
 /// heavy(500) costs exactly 502 units = 1506ns at CM-1 v0.3 (3ns/unit), so the
 /// sweep flips from all-exhausted to arm-1-wins at `compute.ns(1506)` — the

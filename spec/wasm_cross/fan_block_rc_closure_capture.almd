@@ -8,7 +8,7 @@
 // evaluation the threaded form reproduces, so the output is the wasm leg's byte for byte.
 // Shapes: a fan block over a closure value, a closure capturing a list and a record, a
 // nested closure, `fan.map` with a let-bound mapper, a fn-typed parameter read in an arm,
-// a Bytes capture, `fan.any` over a closure, and an arm Err after every arm has printed.
+// a Bytes capture, a `??` chain over a closure, and an arm Err after every arm has printed.
 type Point = { x: Int, name: String }
 
 effect fn twice(x: Int, f: (Int) -> Int) -> Int = {
@@ -53,10 +53,7 @@ effect fn main() -> Unit = {
   }
   println("bytes " + int.to_string(e + w))
   let r: (Int) -> Result[Int, String] = (i) => ok(f(i))
-  println("any " + int.to_string(fan.any {
-    r(1)
-    r(2)
-  } ?? 0))
+  println("any " + int.to_string(r(1) ?? r(2) ?? 0))
   let (s, t, u) = fan {
     step(f, 2)
     step(f, 1)

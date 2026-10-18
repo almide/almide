@@ -1,0 +1,3 @@
+expects_code = "E027"
+expects_error = "fan.race was renamed to fan.min"
+hint_substring = "fan.min(compute.ms(5)) { a(), b() }"

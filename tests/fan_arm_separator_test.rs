@@ -70,10 +70,10 @@ fn semicolon_between_head_arms_is_the_same_error() {
     let dir = tempfile::tempdir().expect("tempdir");
     let (out, ok) = check(
         dir.path(),
-        &format!("{HELPERS}effect fn main() -> Unit = {{\n  let n = fan.any {{ ea(); eb() }} ?? -1\n  println(int.to_string(n))\n}}\n"),
+        &format!("{HELPERS}effect fn main() -> Unit = {{\n  let (ra, rb) = fan.settle {{ ea(); eb() }}\n  println(int.to_string((ra ?? -1) + (rb ?? -1)))\n}}\n"),
     );
-    assert!(!ok, "`;` between fan.any arms must fail, got:\n{out}");
-    assert!(out.contains("fan.any arms are separated by"), "got:\n{out}");
+    assert!(!ok, "`;` between fan.settle arms must fail, got:\n{out}");
+    assert!(out.contains("fan.settle arms are separated by"), "got:\n{out}");
 }
 
 #[test]
@@ -84,7 +84,7 @@ fn comma_separated_arms_parse_and_run() {
     let (out, ok) = run_native(
         dir.path(),
         &format!(
-            "{HELPERS}effect fn main() -> Unit = {{\n  let (x, y) = fan {{ ea(), eb() }}\n  let n = fan.any {{ ea(), eb() }} ?? -1\n  let (ra, rb) = fan.settle {{\n    ea(),\n    eb(),\n  }}\n  println(int.to_string(x + y + n + (ra ?? -1) + (rb ?? -1)))\n}}\n"
+            "{HELPERS}effect fn main() -> Unit = {{\n  let (x, y) = fan {{ ea(), eb() }}\n  let n = ea() ?? eb() ?? -1\n  let (ra, rb) = fan.settle {{\n    ea(),\n    eb(),\n  }}\n  println(int.to_string(x + y + n + (ra ?? -1) + (rb ?? -1)))\n}}\n"
         ),
     );
     assert!(ok, "comma forms must parse and run, got:\n{out}");
@@ -99,7 +99,7 @@ fn block_arm_internal_semicolons_stay_legal() {
     let (out, ok) = run_native(
         dir.path(),
         &format!(
-            "{HELPERS}effect fn main() -> Unit = {{\n  let n = fan.any {{ {{ let t = ea()!; ok(t + 10) }}, eb() }} ?? -1\n  println(int.to_string(n))\n}}\n"
+            "{HELPERS}effect fn main() -> Unit = {{\n  let (ra, rb) = fan.settle {{ {{ let t = ea()!; ok(t + 10) }}, eb() }}\n  println(int.to_string((ra ?? -1) + (rb ?? -1) - 2))\n}}\n"
         ),
     );
     assert!(ok, "block-arm internal `;` must stay legal, got:\n{out}");
@@ -114,7 +114,7 @@ fn the_hint_shows_where_semicolons_stay_legal() {
     let dir = tempfile::tempdir().expect("tempdir");
     let (out, _) = check(
         dir.path(),
-        &format!("{HELPERS}effect fn main() -> Unit = {{\n  let n = fan.any {{ ea(); eb() }} ?? -1\n  println(int.to_string(n))\n}}\n"),
+        &format!("{HELPERS}effect fn main() -> Unit = {{\n  let (ra, rb) = fan.settle {{ ea(); eb() }}\n  println(int.to_string((ra ?? -1) + (rb ?? -1)))\n}}\n"),
     );
     assert!(
         out.contains("{ let x = f(); g(x) }"),

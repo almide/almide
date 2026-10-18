@@ -37,18 +37,18 @@ effect fn main() -> Unit = {
   let d = fs.create_temp_dir("fanCap")!
   fs.write(d + "/a.txt", "alpha")!
   fs.write(d + "/b.txt", "beta")!
-  // Shape B, ok path, `!` consumption.
-  let b_ok = fan.any([d + "/a.txt"], (p) => fs.read_text(p))!
+  // Shape B, ok path.
+  let b_ok = list.find_map([d + "/a.txt"], (p) => fs.read_text(p)?) ?? "fb0"
   println("B ok ${b_ok}")
   // Shape B, err path (no candidate exists), `??` consumption.
-  let b_err = fan.any([d + "/missing1.txt", d + "/missing2.txt"], (p) => fs.read_text(p)) ?? "fb"
+  let b_err = list.find_map([d + "/missing1.txt", d + "/missing2.txt"], (p) => fs.read_text(p)?) ?? "fb"
   println("B err ${b_err}")
-  // Shape D, ok path, `!` consumption — first candidate missing, second ok:
-  // fan.any skips the failure to find the Ok.
-  let d_ok = fan.any([d + "/missing.txt", d + "/b.txt"], (p) => helper(p))!
+  // Shape D, ok path — first candidate missing, second ok: `?` turns the
+  // failure into none, so find_map skips it to find the Ok.
+  let d_ok = list.find_map([d + "/missing.txt", d + "/b.txt"], (p) => helper(p)?) ?? "fb1"
   println("D ok ${d_ok}")
   // Shape D, err path, `??` consumption.
-  let d_err = fan.any([d + "/nope.txt"], (p) => helper(p)) ?? "fb2"
+  let d_err = list.find_map([d + "/nope.txt"], (p) => helper(p)?) ?? "fb2"
   println("D err ${d_err}")
   // Shape D over fan.map (the collect-all mapper), ok path, `!` consumption —
   // the heap-Ok LIST payload family (`Result[List[String], String]`).

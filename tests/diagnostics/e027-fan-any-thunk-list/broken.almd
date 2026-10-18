@@ -1,5 +1,5 @@
-// E027: the thunk-list fan.any spelling was removed in Wave 1 — the block
-// form is the surface, and it synthesizes the same literal list internally.
+// E027: the thunk-list fan.any spelling was removed in Wave 1, and fan.any
+// itself in dialect epoch 14 (ADR-0028) — a `??` chain is the same selection.
 effect fn a() -> Result[Int, String] = ok(1)
 
 effect fn b() -> Result[Int, String] = ok(2)

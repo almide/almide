@@ -202,12 +202,13 @@ effect fn raised_all(xs: List[Int]) -> List[Int] = list.map(xs, (n) => raise(n)!
 // #2755 — `fan.map`'s sequential accumulator: each element's Result carrier
 // is born in the activation and either leaves as the whole result (an err)
 // or is released after its payload moves into the accumulator (`{|im}`).
-// `fan.any` releases a losing err and lets the winner leave.
+// `list.find_map` over the same callback releases a losing err and lets the
+// winner leave.
 effect fn bang_ok(s: String) -> Result[String, String] = if s == "" then err("empty") else ok(s + "!")
 
 effect fn fan_bang(xs: List[String]) -> List[String] = fan.map(xs, (s) => bang_ok(s))!
 
-effect fn fan_first(xs: List[String]) -> String = fan.any(xs, (s) => bang_ok(s))!
+effect fn fan_first(xs: List[String]) -> String = list.find_map(xs, (s) => bang_ok(s)?) ?? "none"
 
 // #2755 — `xs[i]` reads a VIEW of the bound list's element: the tail shares
 // it out (`am`). Out of bounds ABORTS the process: the abort terminal

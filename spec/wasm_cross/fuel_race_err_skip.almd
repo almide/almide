@@ -1,5 +1,5 @@
 // @contract: C-205
-// T2-2: a Result arm SELF-DISQUALIFIES on Err (symmetric with fan.any):
+// T2-2: a Result arm SELF-DISQUALIFIES on Err (as a `??` chain skips an Err):
 // the cheapest arm loses by returning Err, an Ok Result arm beats a plain
 // arm on spend, all-Err falls back, and the bare form carries the mix.
 fn heavy(n: Int) -> Int = {
@@ -19,20 +19,20 @@ fn ok_after(n: Int) -> Result[Int, String] = ok(heavy(n))
 effect fn main() -> Unit = {
   // arm 0 is CHEAPEST but returns Err -> skipped; arm 1 (Ok, 502 units) wins
   // over arm 2 (plain, ~1002 units).
-  let w = fan.race {
+  let w = fan.min(compute.ms(100)) {
     cheap_fail(1)
     ok_after(500)
     heavy(1000)
   } ?? -1
   println(int.to_string(w))
   // all Result arms Err -> no winner -> fallback
-  let x = fan.race {
+  let x = fan.min(compute.ms(100)) {
     cheap_fail(1)
     cheap_fail(2)
   } ?? -1
   println(int.to_string(x))
   // bare form with mixed arms
-  let y = fan.race {
+  let y = fan.min(compute.ms(100)) {
     cheap_fail(1)
     heavy(500)
   }
