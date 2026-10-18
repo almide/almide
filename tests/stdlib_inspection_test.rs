@@ -143,6 +143,10 @@ fn every_public_stdlib_function_has_one_ledger_row_and_stamps_carry_evidence() {
     let mut stale_impl = Vec::new();
     let mut missing_impl = Vec::new();
     let fp = Sources::load();
+    // The emitter reading is derived, so a refactor that hides the dispatch
+    // from it would silently shrink every fingerprint back to the stdlib body.
+    let lowered = want.keys().filter(|n| fp.wasm.contains_key(*n)).count();
+    assert!(lowered > 300, "the wasm emitter dispatch serves only {lowered} public functions — has its shape changed?");
     for r in &rows {
         let name = r.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
         *seen.entry(name.clone()).or_default() += 1;
@@ -264,11 +268,14 @@ fn row(name: &str, sig: &str, class: &str) -> String {
 ///   declarations), that impl fn's block in its own file, and the items of
 ///   that file it reaches as above.
 ///
-/// NOT covered: a dedicated lowering arm in crates/almide-wasm (e.g. the point
-/// edits in `list_edit.rs`) cannot be cut per function; nor a runtime trait
-/// method or macro-generated fn, a runtime helper in another file or passed
-/// by name (`.map(helper)`), a non-`__` Almide fn passed by name, or a
-/// private helper called through UFCS (`x.__h()`). That gap is the ledger
+/// - Wasm: the crates/almide-wasm emitter blocks that dispatch on the name of
+///   a reached item `stem.name` and the lowering helpers they reach (see
+///   [`wasm_arms`]).
+///
+/// NOT covered: a runtime trait method or macro-generated fn, a runtime helper
+/// in another file or passed by name (`.map(helper)`), a non-`__` Almide fn
+/// passed by name, a private helper called through UFCS (`x.__h()`), and the
+/// emitter code [`wasm_arms`] lists as not covered. That gap is the ledger
 /// header's, closed by re-inspecting every stamped row on a schedule.
 struct Sources {
     root: std::path::PathBuf,
@@ -278,6 +285,8 @@ struct Sources {
     rust: BTreeMap<String, BTreeMap<String, String>>,
     /// Call name (`m.f`, or a bare private `__f`) -> (stem, impl fn).
     self_host: BTreeMap<String, Vec<(String, String)>>,
+    /// `m.f` -> the wasm emitter code that lowers it ([`wasm_arms`]).
+    wasm: BTreeMap<String, BTreeMap<String, String>>,
 }
 
 /// One closure member: (source path, item name) -> its block.
@@ -320,7 +329,8 @@ impl Sources {
             v.sort();
             v.dedup();
         }
-        Sources { root: root.to_path_buf(), almide, rust, self_host }
+        let wasm = wasm_arms::read(root);
+        Sources { root: root.to_path_buf(), almide, rust, self_host, wasm }
     }
 
     /// Every source block `module.func`'s behaviour is read from (see
@@ -358,6 +368,10 @@ impl Sources {
                     for (s, imp) in self.self_host.get(&call).into_iter().flatten() {
                         work.push((format!("stdlib/{s}.almd"), imp.clone()));
                     }
+                }
+                // The wasm emitter's lowering of `stem.name`, when it has one.
+                for (label, text) in self.wasm.get(&format!("{stem}.{name}")).into_iter().flatten() {
+                    out.insert((wasm_arms::DIR.to_string(), label.clone()), text.clone());
                 }
                 out.insert(key.clone(), block.clone());
             } else {
@@ -585,6 +599,525 @@ fn impl_fingerprint(src: &Sources, name: &str) -> Option<String> {
     Some(fnv1a(&parts))
 }
 
+/// The crates/almide-wasm emitter, read for the code that lowers each stdlib
+/// function on the wasm leg (#3796). Derived from the emitter's own dispatch,
+/// never from a list of names:
+///
+/// - The function-name and module-name VARIABLES are seeded where the emitter
+///   destructures a call (`CallTarget::Module { module, func, .. }`), and
+///   followed through calls: a callee handed one of them (`func.as_str()`,
+///   `&func`) in parameter position i has its parameter i become one, and a
+///   string literal handed alongside a function name (`lower_random_call("list",
+///   func, ..)`) names a module. A callee handed a function name is a
+///   DISPATCHER, and inherits the module the calling arm is guarded by.
+/// - A guarded block — a `match` arm, or an `if` condition and its then-branch
+///   — SERVES `m.f` when it compares a function-name variable to `"f"` (in its
+///   pattern, against the scrutinee position that reads the variable, or in
+///   its guard / condition, `==` or `matches!`) and the nearest guard comparing
+///   a module-name variable says `"m"` (else the dispatcher's inherited
+///   module).
+/// - A LOWERING HELPER is a non-dispatcher fn every call site of which lies in
+///   a serving block or in another lowering helper (a greatest fixpoint, with
+///   fns nobody calls by name excluded). Shared emitter infrastructure — a fn
+///   general expression lowering also calls (`lower_arg`) — is not one.
+///
+/// `m.f`'s part of the fingerprint is the text of each block serving it and of
+/// every lowering helper those blocks reach, through lowering helpers. Text is
+/// the token stream (comments, doc attributes and layout excluded) and carries
+/// no file or fn location, so a mechanical move or reflow moves nothing.
+///
+/// NOT covered: a dispatcher's frame (the code around its arms, e.g. a
+/// fallback `_ =>` that links the self-host body), a shared helper that general
+/// lowering also calls, a name membership test (`MATRIX_COMPOSITIONS`), a
+/// fusion that matches a call shape without naming the function in a guard,
+/// and a fn passed by name rather than called.
+mod wasm_arms {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    use quote::ToTokens;
+    use syn::visit::{self, Visit};
+    use syn::{BinOp, Expr, ExprLit, Lit, Pat};
+
+    pub const DIR: &str = "crates/almide-wasm/src";
+
+    /// A match arm, or an `if` condition with its then-branch.
+    struct Block {
+        parent: Option<usize>,
+        /// (the variables a discriminant reads, the string literal it is compared to)
+        discr: Vec<(BTreeSet<String>, String)>,
+        text: String,
+    }
+
+    /// A call by name: callee, each argument as (plain variable, string literal),
+    /// and the innermost block it sits in.
+    struct Call {
+        callee: String,
+        args: Vec<(Option<String>, Option<String>)>,
+        block: Option<usize>,
+    }
+
+    #[derive(Default)]
+    struct Def {
+        name: String,
+        text: String,
+        params: Vec<String>,
+        blocks: Vec<Block>,
+        calls: Vec<Call>,
+        /// Variables bound to a call's module / function name.
+        mv: BTreeSet<String>,
+        fv: BTreeSet<String>,
+        /// Modules a dispatcher inherits from its callers' guards.
+        ctx: BTreeSet<String>,
+    }
+
+    /// Every single-segment path a expression reads.
+    fn vars(e: &Expr) -> BTreeSet<String> {
+        struct V(BTreeSet<String>);
+        impl Visit<'_> for V {
+            fn visit_expr_path(&mut self, p: &syn::ExprPath) {
+                if let Some(id) = p.path.get_ident() {
+                    self.0.insert(id.to_string());
+                }
+            }
+        }
+        let mut v = V(BTreeSet::new());
+        v.visit_expr(e);
+        v.0
+    }
+
+    fn pat_strs(p: &Pat) -> Vec<String> {
+        struct V(Vec<String>);
+        impl Visit<'_> for V {
+            fn visit_lit_str(&mut self, s: &syn::LitStr) {
+                self.0.push(s.value());
+            }
+        }
+        let mut v = V(Vec::new());
+        v.visit_pat(p);
+        v.0
+    }
+
+    /// A pattern's string literals, each paired with the scrutinee variables
+    /// its position reads.
+    fn pat_discr(p: &Pat, scrut: &[BTreeSet<String>], tuple: bool, out: &mut Vec<(BTreeSet<String>, String)>) {
+        match p {
+            Pat::Guard(g) => {
+                pat_discr(&g.pat, scrut, tuple, out);
+                cond_discr(&g.guard, out);
+            }
+            Pat::Or(o) => o.cases.iter().for_each(|c| pat_discr(c, scrut, tuple, out)),
+            Pat::Paren(q) => pat_discr(&q.pat, scrut, tuple, out),
+            Pat::Reference(r) => pat_discr(&r.pat, scrut, tuple, out),
+            Pat::Tuple(t) if tuple => {
+                for (i, e) in t.elems.iter().enumerate() {
+                    let vs = scrut.get(i).cloned().unwrap_or_default();
+                    out.extend(pat_strs(e).into_iter().map(|s| (vs.clone(), s)));
+                }
+            }
+            _ => {
+                let vs: BTreeSet<String> = scrut.iter().flatten().cloned().collect();
+                out.extend(pat_strs(p).into_iter().map(|s| (vs.clone(), s)));
+            }
+        }
+    }
+
+    fn lit_str(e: &Expr) -> Option<String> {
+        match e {
+            Expr::Lit(ExprLit { lit: Lit::Str(s), .. }) => Some(s.value()),
+            Expr::Paren(p) => lit_str(&p.expr),
+            _ => None,
+        }
+    }
+
+    /// A guard's or condition's comparisons of variables to string literals.
+    fn cond_discr(e: &Expr, out: &mut Vec<(BTreeSet<String>, String)>) {
+        match e {
+            Expr::Binary(b) if matches!(b.op, BinOp::And(_) | BinOp::Or(_)) => {
+                cond_discr(&b.left, out);
+                cond_discr(&b.right, out);
+            }
+            Expr::Binary(b) if matches!(b.op, BinOp::Eq(_) | BinOp::Ne(_)) => {
+                for (l, r) in [(&b.left, &b.right), (&b.right, &b.left)] {
+                    if let Some(s) = lit_str(l) {
+                        out.push((vars(r), s));
+                    }
+                }
+            }
+            Expr::Paren(p) => cond_discr(&p.expr, out),
+            Expr::Unary(u) => cond_discr(&u.expr, out),
+            Expr::Let(l) => pat_discr(&l.pat, &[vars(&l.expr)], false, out),
+            Expr::Macro(m) if m.mac.path.is_ident("matches") => {
+                let parsed = m.mac.parse_body_with(|input: syn::parse::ParseStream| {
+                    let scrut: Expr = input.parse()?;
+                    input.parse::<syn::Token![,]>()?;
+                    let pat = Pat::parse_multi_with_leading_vert(input)?;
+                    input.step(|c| {
+                        let mut rest = *c;
+                        while let Some((_, next)) = rest.token_tree() {
+                            rest = next;
+                        }
+                        Ok(((), rest))
+                    })?;
+                    Ok((scrut, pat))
+                });
+                if let Ok((scrut, pat)) = parsed {
+                    pat_discr(&pat, &[vars(&scrut)], false, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// An argument as a plain variable (through `&`, `*` and a no-argument
+    /// method such as `.as_str()`), or a string literal.
+    fn arg(e: &Expr) -> (Option<String>, Option<String>) {
+        match e {
+            Expr::Path(p) => (p.path.get_ident().map(|i| i.to_string()), None),
+            Expr::Reference(r) => arg(&r.expr),
+            Expr::Unary(u) => arg(&u.expr),
+            Expr::Paren(p) => arg(&p.expr),
+            Expr::MethodCall(m) if m.args.is_empty() => arg(&m.receiver),
+            _ => (None, lit_str(e)),
+        }
+    }
+
+    struct Reader<'a> {
+        def: &'a mut Def,
+        stack: Vec<usize>,
+    }
+
+    impl Reader<'_> {
+        fn open(&mut self, discr: Vec<(BTreeSet<String>, String)>, text: String) {
+            let parent = self.stack.last().copied();
+            self.def.blocks.push(Block { parent, discr, text });
+            self.stack.push(self.def.blocks.len() - 1);
+        }
+
+        fn call(&mut self, callee: String, args: Vec<(Option<String>, Option<String>)>) {
+            let block = self.stack.last().copied();
+            self.def.calls.push(Call { callee, args, block });
+        }
+    }
+
+    impl Visit<'_> for Reader<'_> {
+        fn visit_expr_match(&mut self, m: &syn::ExprMatch) {
+            self.visit_expr(&m.expr);
+            let (scrut, tuple) = match &*m.expr {
+                Expr::Tuple(t) => (t.elems.iter().map(vars).collect::<Vec<_>>(), true),
+                e => (vec![vars(e)], false),
+            };
+            for a in &m.arms {
+                let mut discr = Vec::new();
+                pat_discr(&a.pat, &scrut, tuple, &mut discr);
+                self.open(discr, a.to_token_stream().to_string());
+                // The pattern holds the guard (`Pat::Guard`): its calls are the arm's.
+                self.visit_pat(&a.pat);
+                self.visit_expr(&a.body);
+                self.stack.pop();
+            }
+        }
+
+        fn visit_expr_if(&mut self, i: &syn::ExprIf) {
+            self.visit_expr(&i.cond);
+            let mut discr = Vec::new();
+            cond_discr(&i.cond, &mut discr);
+            self.open(discr, format!("if {} {}", i.cond.to_token_stream(), i.then_branch.to_token_stream()));
+            self.visit_block(&i.then_branch);
+            self.stack.pop();
+            if let Some((_, e)) = &i.else_branch {
+                self.visit_expr(e);
+            }
+        }
+
+        fn visit_expr_method_call(&mut self, c: &syn::ExprMethodCall) {
+            if matches!(&*c.receiver, Expr::Path(p) if p.path.get_ident().is_some()) {
+                self.call(c.method.to_string(), c.args.iter().map(arg).collect());
+            }
+            visit::visit_expr_method_call(self, c);
+        }
+
+        fn visit_expr_call(&mut self, c: &syn::ExprCall) {
+            if let Expr::Path(p) = &*c.func
+                && let Some(last) = p.path.segments.last()
+            {
+                self.call(last.ident.to_string(), c.args.iter().map(arg).collect());
+            }
+            visit::visit_expr_call(self, c);
+        }
+
+        /// `CallTarget::Module { module, func, .. }` binds the call's names.
+        fn visit_pat_struct(&mut self, p: &syn::PatStruct) {
+            let segs: Vec<String> = p.path.segments.iter().map(|s| s.ident.to_string()).collect();
+            if segs.ends_with(&["CallTarget".to_string(), "Module".to_string()]) {
+                for f in &p.fields {
+                    let (syn::Member::Named(field), Pat::Ident(bind)) = (&f.member, &*f.pat) else { continue };
+                    let set = match field.to_string().as_str() {
+                        "module" => &mut self.def.mv,
+                        "func" => &mut self.def.fv,
+                        _ => continue,
+                    };
+                    set.insert(bind.ident.to_string());
+                }
+            }
+            visit::visit_pat_struct(self, p);
+        }
+    }
+
+    fn is_cfg_test(attrs: &[syn::Attribute]) -> bool {
+        attrs.iter().any(|a| a.path().is_ident("cfg") && a.meta.to_token_stream().to_string().contains("test"))
+    }
+
+    fn read_fn(defs: &mut Vec<Def>, sig: &syn::Signature, body: &syn::Block, text: String) {
+        let params = sig
+            .inputs
+            .iter()
+            .filter_map(|a| match a {
+                syn::FnArg::Typed(t) => Some(match &*t.pat {
+                    Pat::Ident(i) => i.ident.to_string(),
+                    _ => "_".to_string(),
+                }),
+                syn::FnArg::Receiver(_) => None,
+            })
+            .collect();
+        let mut def = Def { name: sig.ident.to_string(), text, params, ..Def::default() };
+        let mut r = Reader { def: &mut def, stack: Vec::new() };
+        r.visit_block(body);
+        defs.push(def);
+    }
+
+    /// The token text of an item with its doc attributes dropped.
+    fn undoc<T: ToTokens + Clone>(item: &T, attrs: impl FnOnce(&mut T) -> &mut Vec<syn::Attribute>) -> String {
+        let mut it = item.clone();
+        attrs(&mut it).retain(|a| !a.path().is_ident("doc"));
+        it.to_token_stream().to_string()
+    }
+
+    fn read_items(defs: &mut Vec<Def>, items: &[syn::Item]) {
+        for item in items {
+            match item {
+                syn::Item::Fn(f) if !is_cfg_test(&f.attrs) => {
+                    read_fn(defs, &f.sig, &f.block, undoc(f, |f| &mut f.attrs));
+                }
+                syn::Item::Impl(i) if !is_cfg_test(&i.attrs) => {
+                    for ii in &i.items {
+                        if let syn::ImplItem::Fn(f) = ii
+                            && !is_cfg_test(&f.attrs)
+                        {
+                            read_fn(defs, &f.sig, &f.block, undoc(f, |f| &mut f.attrs));
+                        }
+                    }
+                }
+                syn::Item::Mod(m) if !is_cfg_test(&m.attrs) => {
+                    if let Some((_, inner)) = &m.content {
+                        read_items(defs, inner);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn rust_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                rust_files(&p, out);
+            } else if p.extension().is_some_and(|x| x == "rs") {
+                out.push(p);
+            }
+        }
+    }
+
+    /// `m.f` -> the emitter sources that lower it: (label, token text).
+    pub fn read(root: &std::path::Path) -> BTreeMap<String, BTreeMap<String, String>> {
+        let mut files = Vec::new();
+        rust_files(&root.join(DIR), &mut files);
+        files.sort();
+        let mut defs = Vec::new();
+        for f in &files {
+            let src = std::fs::read_to_string(f).expect("emitter source");
+            let ast = syn::parse_file(&src).unwrap_or_else(|e| panic!("{}: {e}", f.display()));
+            read_items(&mut defs, &ast.items);
+        }
+        let mut by_name: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+        for (i, d) in defs.iter().enumerate() {
+            by_name.entry(d.name.clone()).or_default().push(i);
+        }
+        propagate(&mut defs, &by_name);
+        serve(&defs, &by_name)
+    }
+
+    /// The module and function literals a block compares its def's name
+    /// variables to.
+    fn names(d: &Def, b: usize) -> (BTreeSet<String>, BTreeSet<String>) {
+        let (mut ms, mut fs) = (BTreeSet::new(), BTreeSet::new());
+        for (vs, s) in &d.blocks[b].discr {
+            if !vs.is_disjoint(&d.mv) {
+                ms.insert(s.clone());
+            }
+            if !vs.is_disjoint(&d.fv) {
+                fs.insert(s.clone());
+            }
+        }
+        (ms, fs)
+    }
+
+    /// The modules in force at a block: the nearest enclosing guard naming
+    /// one, else the def's inherited modules.
+    fn modules(d: &Def, mut b: Option<usize>) -> BTreeSet<String> {
+        while let Some(i) = b {
+            let (ms, _) = names(d, i);
+            if !ms.is_empty() {
+                return ms;
+            }
+            b = d.blocks[i].parent;
+        }
+        d.ctx.clone()
+    }
+
+    /// What one call hands its callee: (callee def, a parameter that becomes a
+    /// module-name variable, one that becomes a function-name variable, the
+    /// modules it inherits).
+    type Grant = (usize, Option<String>, Option<String>, BTreeSet<String>);
+
+    /// Follow the name variables through calls, to fixpoint.
+    fn propagate(defs: &mut [Def], by_name: &BTreeMap<String, Vec<usize>>) {
+        loop {
+            let mut grants: Vec<Grant> = Vec::new();
+            for d in defs.iter() {
+                for c in &d.calls {
+                    let passes_func = c.args.iter().any(|(v, _)| v.as_ref().is_some_and(|v| d.fv.contains(v)));
+                    let passes_mod = c.args.iter().any(|(v, _)| v.as_ref().is_some_and(|v| d.mv.contains(v)));
+                    if !(passes_func || passes_mod) {
+                        continue;
+                    }
+                    let mods = if passes_func { modules(d, c.block) } else { BTreeSet::new() };
+                    for &e in by_name.get(&c.callee).into_iter().flatten() {
+                        for (i, (v, lit)) in c.args.iter().enumerate() {
+                            let Some(p) = defs[e].params.get(i) else { continue };
+                            let v = v.as_deref().unwrap_or("");
+                            if d.fv.contains(v) {
+                                grants.push((e, None, Some(p.clone()), BTreeSet::new()));
+                            } else if d.mv.contains(v) {
+                                grants.push((e, Some(p.clone()), None, BTreeSet::new()));
+                            } else if let (Some(l), true) = (lit, passes_func) {
+                                grants.push((e, Some(p.clone()), None, BTreeSet::from([l.clone()])));
+                            }
+                        }
+                        grants.push((e, None, None, mods.clone()));
+                    }
+                }
+            }
+            let mut changed = false;
+            for (e, m, f, ctx) in grants {
+                let d = &mut defs[e];
+                changed |= m.is_some_and(|m| d.mv.insert(m));
+                changed |= f.is_some_and(|f| d.fv.insert(f));
+                for c in ctx {
+                    changed |= d.ctx.insert(c);
+                }
+            }
+            if !changed {
+                return;
+            }
+        }
+    }
+
+    fn serve(defs: &[Def], by_name: &BTreeMap<String, Vec<usize>>) -> BTreeMap<String, BTreeMap<String, String>> {
+        // What each block serves: `m.f` for its function literals under its modules.
+        let served: Vec<Vec<BTreeSet<String>>> = defs
+            .iter()
+            .map(|d| {
+                (0..d.blocks.len())
+                    .map(|b| {
+                        let fs = names(d, b).1;
+                        let ms = if fs.is_empty() { BTreeSet::new() } else { modules(d, Some(b)) };
+                        ms.iter().flat_map(|m| fs.iter().map(move |f| format!("{m}.{f}"))).collect()
+                    })
+                    .collect()
+            })
+            .collect();
+        let chain = |d: usize, mut b: Option<usize>, hit: &dyn Fn(usize) -> bool| {
+            while let Some(i) = b {
+                if hit(i) {
+                    return true;
+                }
+                b = defs[d].blocks[i].parent;
+            }
+            false
+        };
+        // Lowering helpers: a greatest fixpoint over the call sites. A
+        // dispatcher qualifies too — a per-family kernel handed the name
+        // (`lower_matrix_unary(func, ..)`); its other functions' arms are cut.
+        let mut sites: BTreeMap<&str, Vec<(usize, Option<usize>)>> = BTreeMap::new();
+        for (i, d) in defs.iter().enumerate() {
+            for c in &d.calls {
+                if by_name.contains_key(&c.callee) {
+                    sites.entry(c.callee.as_str()).or_default().push((i, c.block));
+                }
+            }
+        }
+        let mut helpers: BTreeSet<&str> = sites.keys().copied().collect();
+        loop {
+            let gone: Vec<&str> = helpers
+                .iter()
+                .copied()
+                .filter(|n| {
+                    sites[n].iter().any(|&(d, b)| !(chain(d, b, &|i| !served[d][i].is_empty()) || helpers.contains(defs[d].name.as_str())))
+                })
+                .collect();
+            if gone.is_empty() {
+                break;
+            }
+            for n in gone {
+                helpers.remove(n);
+            }
+        }
+        let keys: BTreeSet<&String> = served.iter().flatten().flatten().collect();
+        let mut out: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
+        for key in keys {
+            // The blocks serving `key`, then every helper their calls reach.
+            let mut parts = BTreeMap::new();
+            let mut work: Vec<&str> = Vec::new();
+            for (d, def) in defs.iter().enumerate() {
+                for b in (0..def.blocks.len()).filter(|&b| served[d][b].contains(key)) {
+                    parts.insert(format!("arm {}", def.blocks[b].text), String::new());
+                    work.extend(
+                        def.calls
+                            .iter()
+                            .filter(|c| helpers.contains(c.callee.as_str()) && chain(d, c.block, &|i| i == b))
+                            .map(|c| c.callee.as_str()),
+                    );
+                }
+            }
+            while let Some(n) = work.pop() {
+                if parts.contains_key(&format!("fn {n}")) {
+                    continue;
+                }
+                let mut texts = Vec::new();
+                for &d in &by_name[n] {
+                    let def = &defs[d];
+                    // Another function's arm in a shared kernel is not this one's lowering.
+                    let other = |i: usize| !served[d][i].is_empty() && !served[d][i].contains(key);
+                    let mut text = def.text.clone();
+                    for b in 0..def.blocks.len() {
+                        if other(b) && !chain(d, def.blocks[b].parent, &other) {
+                            text = text.replacen(&def.blocks[b].text, "", 1);
+                        }
+                    }
+                    texts.push(text);
+                    work.extend(
+                        def.calls.iter().filter(|c| helpers.contains(c.callee.as_str()) && !chain(d, c.block, &other)).map(|c| c.callee.as_str()),
+                    );
+                }
+                parts.insert(format!("fn {n}"), texts.join("\n"));
+            }
+            out.insert(key.clone(), parts);
+        }
+        out
+    }
+}
+
 fn fnv1a(parts: &[String]) -> String {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for b in parts.join("\u{0}").bytes() {
@@ -714,6 +1247,10 @@ fn c(x: Int) -> Int = x * 2
 fn d(x: Int) -> Int = x * 3
 
 fn e(x: Int, y: Int) -> Int = x - y
+
+fn f(x: Int) -> Int = 0 - x
+
+fn g(x: Int) -> Int = x
 ";
     const EMITTER: &str = r#"
 impl Emitter<'_> {
@@ -745,6 +1282,7 @@ impl Emitter<'_> {
         match (func, args) {
             ("a", [x]) => self.lower_m_a(x),
             ("b" | "e", [x, y]) => self.lower_m_pair(func == "b", x, y),
+            ("f" | "g", [x]) => self.lower_m_unary(func, x),
             _ => self.lower_linked_call(args),
         }
     }
@@ -767,6 +1305,20 @@ impl Emitter<'_> {
         self.zip_kernel(if is_b { 2 } else { 3 })
     }
 
+    fn lower_m_unary(&mut self, func: &str, x: &IrExpr) -> ArmResult {
+        self.lower_arg(x)?;
+        match func {
+            "f" => self.f.instructions().i32_const(11),
+            _ => self.f.instructions().i32_const(12),
+        };
+        self.unary_kernel()
+    }
+
+    fn unary_kernel(&mut self) -> ArmResult {
+        self.f.instructions().i32_const(13);
+        Ok(None)
+    }
+
     fn zip_kernel(&mut self, k: i32) -> ArmResult {
         self.f.instructions().i32_const(k);
         Ok(None)
@@ -787,7 +1339,7 @@ impl Emitter<'_> {
     }
 }
 "#;
-    let fns = ["a", "b", "c", "d", "e"];
+    let fns = ["a", "b", "c", "d", "e", "f", "g"];
     let run = |emitter: &str| -> BTreeMap<&str, String> {
         let dir = tempfile::tempdir().expect("tempdir");
         for (p, text) in [("stdlib/m.almd", MODULE), ("crates/almide-wasm/src/calls.rs", emitter)] {
@@ -807,6 +1359,9 @@ impl Emitter<'_> {
         ("a helper every m arm shares", "i32_const(k)", "i32_const(k + 1)", &["a", "b", "e"]),
         ("the m.c guard arm", "self.emit_c_kernel()\n", "self.emit_c_kernel().map(|l| l)\n", &["c"]),
         ("c's own helper", "i32_const(7)", "i32_const(8)", &["c"]),
+        ("one function's arm in a kernel handed the name", "i32_const(11)", "i32_const(21)", &["f"]),
+        ("the kernel's frame", "i32_const(12)", "i32_const(22)", &["f", "g"]),
+        ("a helper the kernel's frame reaches", "i32_const(13)", "i32_const(23)", &["f", "g"]),
         ("shared infrastructure", "i32_const(0)", "i32_const(1)", &[]),
         ("another module's arm of the same name", "(\"a\", [x]) => self.lower_arg(x)", "(\"a\", [x]) => self.lower_arg(x).map(|l| l)", &[]),
         (
@@ -823,3 +1378,4 @@ impl Emitter<'_> {
         assert_eq!(changed, *want, "editing {what} changed the fingerprints of {changed:?}");
     }
 }
+
