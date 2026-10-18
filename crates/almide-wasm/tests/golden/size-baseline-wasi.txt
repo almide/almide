@@ -241,7 +241,7 @@
 3528	spec/wasm_cross/float_to_int_edges.almd
 6859	spec/wasm_cross/fold_family_source_before_init.almd
 2483	spec/wasm_cross/fold_heap_acc.almd
-4145	spec/wasm_cross/fold_init_rebinds_source.almd
+9840	spec/wasm_cross/fold_init_rebinds_source.almd
 1949	spec/wasm_cross/for_in_forms.almd
 26473	spec/wasm_cross/fs_call_head_family.almd
 22472	spec/wasm_cross/fs_composition_family.almd
