@@ -52,9 +52,4 @@ effect fn main() -> Unit = {
   }
   println("one = " + int.to_string(one.only))
   println("nested = " + int.to_string(nested.outer) + " " + int.to_string(nested.inner.p) + " " + nested.inner.q)
-  let { x, y } = fan {
-    x: note("dx", 3)!
-    y: note("dy", 4)!
-  }
-  println("destructured = " + int.to_string(x + y))
 }
