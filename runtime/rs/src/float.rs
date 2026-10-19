@@ -32,7 +32,7 @@ pub fn almide_rt_float_abs(n: f64) -> f64 { n.abs() }
 pub fn almide_rt_float_ceil(n: f64) -> f64 { n.ceil() }
 pub fn almide_rt_float_floor(n: f64) -> f64 { n.floor() }
 pub fn almide_rt_float_round(n: f64) -> f64 { n.round() }
-// The fixed +qNaN below zero, exactly as almide_rt_math_sqrt (C-055), and by
+// The fixed +qNaN below zero, matching almide_rt_math_sqrt (C-055), and by
 // the same sign-clearing `abs` (a selected NaN constant is folded away).
 pub fn almide_rt_float_sqrt(n: f64) -> f64 { let r = n.sqrt(); if n < 0.0 { r.abs() } else { r } }
 // Explicit NaN/tie decision tree — see almide_rt_math_fmin/fmax (math.rs) for
