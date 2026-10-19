@@ -437,6 +437,20 @@ fn ensure_runtime_rlib(opt_level: &str, cpu: Option<&str>, llvm: &[&str]) -> Res
     result
 }
 
+/// How the runtime rlib is code-generated (#3829): four codegen units and no
+/// local ThinLTO pass. rustc's default (16 units, then ThinLTO across them)
+/// spent ~1.7 s of the ~4.1 s cold runtime build in that ThinLTO pass at
+/// opt-level 1 (`-Z time-passes`, c4-standard-8). Turning the pass off alone
+/// saved ~0.75 s but cost programs at opt-level 1 the inlining between units
+/// (decode +6.7%, binarytrees +3.8%); four units keep most of the
+/// related code in one unit, recover that (within 1.5% on the perf rows), and
+/// build faster still (lisp cold build 4.49 s -> 3.64 s). A `--release` link
+/// runs fat LTO over the rlib's embedded bitcode, so the release binaries
+/// measured within run-to-run noise (+-3%, both directions) while their cold
+/// build went 7.76 s -> 6.50 s. Part of the cache key, so an rlib cached with
+/// other flags is never linked.
+const RUNTIME_RLIB_CODEGEN_ARGS: [&str; 4] = ["-C", "lto=off", "-C", "codegen-units=4"];
+
 fn build_runtime_rlib(opt_level: &str, cpu: Option<&str>, llvm: &[&str]) -> Result<std::path::PathBuf, String> {
     let src = crate::codegen::emit_runtime_crate();
     let rustc = crate::find_rustc();
@@ -445,8 +459,9 @@ fn build_runtime_rlib(opt_level: &str, cpu: Option<&str>, llvm: &[&str]) -> Resu
     let rustc_ver = toolchain_identity();
     // The profile string here MUST match the per-file rustc invocation that links it.
     let cpu_key = cpu.map(|c| format!("|cpu={c}")).unwrap_or_default();
+    let flags = RUNTIME_RLIB_CODEGEN_ARGS.join(" ");
     let llvm_key = if llvm.is_empty() { String::new() } else { format!("|llvm={}", llvm.join(" ")) };
-    let key = format!("{:016x}", super::hash64(format!("{src}|{rustc_ver}|opt{opt_level}|ed2021{cpu_key}{llvm_key}").as_bytes()));
+    let key = format!("{:016x}", super::hash64(format!("{src}|{rustc_ver}|opt{opt_level}|ed2021{cpu_key}|{flags}{llvm_key}").as_bytes()));
     let dir = std::env::temp_dir().join(format!("almide-rtlib-{key}"));
     let rlib = dir.join("libalmide_rt.rlib");
     if rlib.exists() {
@@ -466,6 +481,7 @@ fn build_runtime_rlib(opt_level: &str, cpu: Option<&str>, llvm: &[&str]) -> Resu
         .arg("--edition").arg("2021")
         .arg("-C").arg(format!("opt-level={opt_level}"))
         .arg("-C").arg("overflow-checks=no")
+        .args(RUNTIME_RLIB_CODEGEN_ARGS)
         .arg("-A").arg("warnings")
         .arg("--out-dir").arg(&dir);
     if let Some(cpu) = cpu {
