@@ -319,7 +319,7 @@ impl<'a> Interpreter<'a> {
         if let Some(stop) = &self.stop
             && stop.load(std::sync::atomic::Ordering::Relaxed)
         {
-            return Err(Flow::Unsupported("stopped by the caller".into()));
+            return Err(Flow::Unsupported(STOPPED.into()));
         }
         Ok(())
     }
