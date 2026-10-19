@@ -183,12 +183,6 @@ pub(crate) fn emit_alloc(oom_msg: u32, counters: Option<u32>, canonical: bool) -
 ///
 /// `counters` (#2407): when armed, every call bumps `__free_count` on
 /// entry — filed or abandoned alike, so the number is "blocks released".
-///
-/// `canonical` (canonical_alloc.rs): blocks above the ceiling are
-/// abandoned, not filed. Nothing takes from the large list under the
-/// switch, and filing walks it: every bump lands above every filed block,
-/// so the walk was the whole list and a release cost O(blocks released
-/// before it) — a cost the meter's k-scaled difference read as growth in n.
 pub(crate) fn emit_free(counters: Option<u32>, canonical: bool) -> Function {
     // params: 0=block; locals: 1=total, 2=class, 3..=5 the large-list walk
     let (block, total, class) = (0u32, 1u32, 2u32);
@@ -212,11 +206,9 @@ pub(crate) fn emit_free(counters: Option<u32>, canonical: bool) -> Function {
     // class = CEIL class of the block's want — the class alloc rounded
     // it to, so filing lands exactly where the next taker looks.
     i.i32_const(28).local_get(total).i32_const(1).i32_sub().i32_clz().i32_sub().local_set(class);
-    // Above the ceiling (#3348): the exact-size large list.
+    // Above the ceiling (#3348): the exact-size large list (canonical: abandoned).
     i.local_get(class).i32_const(FREELIST_CLASSES as i32).i32_ge_u().if_(BlockType::Empty);
-    if !canonical {
-        crate::runtime_large::emit_lfree(&mut i, (block, total), (3, 4, 5));
-    }
+    crate::canonical_alloc::emit_large_release(&mut i, canonical, (block, total), (3, 4, 5));
     i.return_();
     i.end();
     i.local_get(class)
