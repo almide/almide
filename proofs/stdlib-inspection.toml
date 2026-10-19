@@ -9924,18 +9924,12 @@ complexity = "PASS: call meter=instructions:u+bytes-moved alloc=canonical(wasm) 
 alloc = "PASS: call live=0"
 diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 
+
 [[fn]]
 name = "zlib.crc32"
 sig = "(data: Bytes) -> Int"
 class = "pure"
-status = "inspected"
-impl = "fnv1a:bb4d154f692c6611"
-stamp = "almide 0.67.1 (dev) at develop 7ba9f194b (after #3629 / #3631 / #3632); xtarget-fuzz inspect at the same sha (counted judge: instructions:u + bytes moved, marginal k..2k, n..16n; native-only fns out of the catalogue; fixed-width sized keys), 200 programs per fn; GCE c4-standard-4 (INTEL XEON PLATINUM 8581C, 4 vCPU, PMU architectural, one fn at a time per VM, us-central1-a), Ubuntu 24.04 Linux 7.0.0-1011-gcp, rustc 1.99.0, wasmtime 49.0.1; 2026-10-13; codopsy: no code change by this inspection"
-order = "n"
-parity = "PASS: seed 1791827410, 200 programs; 200 program(s) call it, 194 of them clean on every leg; unique findings 0"
-complexity = "PASS: call k=16..32 meter=instructions:u+bytes-moved n=20000..320000 native 1.696e7/3.392e7/6.784e7/1.357e8/2.714e8 fit n (rms 0.0%) moved 0.000e0/2.000e0/0.000e0/0.000e0/2.000e0B fit 1 (rms 0.0%) wall 0.005/0.010/0.010/0.030/0.056s wasm 3.744e7/7.488e7/1.498e8/2.995e8/5.990e8 fit n (rms 0.0%) moved 9.600e1/0.000e0/4.800e1/0.000e0/2.000e0B fit 1 (rms 0.0%) wall 0.015/0.030/0.061/0.116/0.238s (order n ok)"
-alloc = "PASS: call live=0"
-diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
+status = "uninspected"
 [[fn]]
 name = "zlib.decompress"
 sig = "effect (data: Bytes) -> Bytes ! String"
