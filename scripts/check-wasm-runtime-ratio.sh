@@ -10,11 +10,15 @@
 #   measured          re-bench BOTH legs. The row must still BENCH — that
 #                     is enforced everywhere. The stamped RATIO comparison
 #                     is a VERDICT only on the machine class that stamped
-#                     the ledger (local runs, or WASM_RUNTIME_RATIO_VERDICT=1):
+#                     the ledger — its `machine` line, compared on arch + OS +
+#                     CPU model by scripts/lib/machine-class.sh (a local run of
+#                     another class prints that it SKIPS, naming both classes),
+#                     or anywhere with WASM_RUNTIME_RATIO_VERDICT=1:
 #                     unlike the native/Rust gate, a CROSS-ENGINE ratio does
 #                     NOT cancel the machine — measured 2026-08-31, nbody
-#                     wasm/native was 2.09 on the stamping M-series and
-#                     19.95 on a 2-core ubuntu runner (the embedded engine's
+#                     wasm/native was 2.09 on the M-series Mac that stamped
+#                     the ledger until 2026-10 and 19.95 on a 2-core
+#                     ubuntu runner (the embedded engine's
 #                     fixed costs and the fan thread-pool advantage both
 #                     scale with hardware) — so on CI the stamped ratio
 #                     prints for information. Budget when that verdict is
@@ -77,9 +81,10 @@
 # NOISE. Each stamped figure is the MIN over 2 interleaved rounds (native,
 #   wasm, native, wasm) of 5 runs each: load can only add time. It does NOT
 #   remove code-placement luck — Cranelift does not align loop headers, and
-#   on the stamping M-series a tight loop moved 22 -> 9 ms from dead code
-#   added above it (#2987) — so a ratio move under ~1.3x on a row whose hot
-#   loop is a few instructions is not evidence by itself.
+#   on the M-series Mac that stamped the ledger until 2026-10 a tight loop
+#   moved 22 -> 9 ms from dead code added above it (#2987) — so a ratio move
+#   under ~1.3x on a row whose hot loop is a few instructions is not
+#   evidence by itself.
 #
 # Regenerate the ledger (rows + stamp): --measure. Never hand-edit numbers.
 set -uo pipefail
@@ -137,8 +142,10 @@ if [ "${1:-}" = "--measure" ]; then
 # Gate:       bash scripts/check-wasm-runtime-ratio.sh — the STATUS taxonomy
 #             is enforced everywhere (a hole that starts benching, a measured
 #             row that stops, a changed refusal class all fail); the stamped
-#             RATIO verdict runs only on the stamping machine class (cross-
-#             engine ratios do not cancel hardware — see the script header);
+#             RATIO verdict runs only on the stamping machine class — the
+#             `machine` line below, compared on arch + OS + CPU model by
+#             scripts/lib/machine-class.sh (cross-engine ratios do not
+#             cancel hardware — see the script header);
 #             CI's verdict is the SAME-RUNNER A/B (#2143): this tree's wasm
 #             leg against the latest release's, interleaved, min-of-runs,
 #             tree/release above 1 + ab_band fails.
@@ -155,8 +162,9 @@ if [ "${1:-}" = "--measure" ]; then
 #       enough to time (native ~10-30 ms); absent = the program's default.
 #   Every figure is the MIN over 2 interleaved rounds (native, wasm, native,
 #   wasm) x 5 runs + warmup, output verified identical. Min removes load, NOT
-#   code-placement luck: Cranelift does not align loop headers, and on this
-#   machine a tight loop moved 22 -> 9 ms from dead code above it (#2987),
+#   code-placement luck: Cranelift does not align loop headers, and on the
+#   M-series Mac that stamped this ledger until 2026-10 a tight loop moved
+#   22 -> 9 ms from dead code above it (#2987),
 #   so a sub-1.3x move on a row with a few-instruction hot loop is not
 #   evidence alone.
 #   measured          — `almide bench` benches both legs
@@ -186,7 +194,7 @@ if [ "${1:-}" = "--measure" ]; then
 HDR
     echo "version = $ver"
     echo "date    = $(date +%F)"
-    echo "machine = $(uname -m) $(uname -s) (local stamp; ratios are the gated quantity)"
+    echo "machine = $(bash scripts/lib/machine-class.sh)"
     echo "ab_band = ${ab_band_keep:-$AB_BAND_DEFAULT}"
     echo
     for name in nbody spectralnorm binarytrees treealloc fasta fannkuchredux mandelbrot onebrc fft strchurn listbuild_append listbuild_combinator listbuild_prealloc mapbuild; do
@@ -218,11 +226,20 @@ print(f'{n:<6.2f}| {w:<6.2f}| {w/n:.2f} | {nc:<6.2f}| {wc:<6.2f}| {wc/nc:.2f}')"
   exit 0
 fi
 
-# Stamped-ratio verdict: on by default locally (the stamping machine class),
-# off on CI unless explicitly armed — see the header for the measured reason.
+# Stamped-ratio verdict: armed only on the machine class that stamped the
+# ledger (its `machine` line, compared by scripts/lib/machine-class.sh), off on
+# CI unless explicitly armed — see the header for the measured reason. A local
+# machine of another class benches every row (the status taxonomy still gates)
+# and prints the ratios for information, saying why.
+bash scripts/lib/machine-class.sh --self-test >/dev/null || { bash scripts/lib/machine-class.sh --self-test; exit 2; }
+ledger_class=$(grep -E '^machine' "$LEDGER" | head -1 | sed -E 's/^[^=]*=[[:space:]]*//')
 if [ -n "${WASM_RUNTIME_RATIO_VERDICT:-}" ]; then RATIO_VERDICT=1
 elif [ -n "${GITHUB_ACTIONS:-}" ]; then RATIO_VERDICT=0
-else RATIO_VERDICT=1; fi
+elif bash scripts/lib/machine-class.sh --same "$ledger_class"; then RATIO_VERDICT=1
+else
+  RATIO_VERDICT=0
+  echo "wasm-runtime: stamped-ratio verdict SKIPPED — this machine's class ($(bash scripts/lib/machine-class.sh --key)) differs from the ledger's ($ledger_class); ratios print for information, the status taxonomy still gates (WASM_RUNTIME_RATIO_VERDICT=1 forces the verdict)"
+fi
 
 # Same-runner A/B verdict (#2143): armed whenever a baseline binary is given;
 # on CI its absence is an error unless the workflow disarms it by name.

@@ -183,20 +183,27 @@ effect fn main() -> Unit = {
           process.exit(1)
         }
       } else ()
-      let rows = bench.measure(alm, target)!
-      if list.get_or(args, 2, "") == "--check" then {
-        let v = bench.check_against(base, rows, 150)!
+      if mode == "--check" then {
+        // The ratchet judges only on the machine class the baseline records (bench.gate);
+        // on another class it does not measure at all and says why.
+        let base_lines = fs.read_lines(base) ?? []
+        let recorded = bench.field_of(base_lines, "machine")
+        let same = bench.same_class(recorded)!
+        let rows = if same then bench.measure(alm, target)!
+        else []
+        let v = bench.gate(same, recorded, bench.machine_key()!, base_lines, rows, 150)
         println(list.join(v.0, "\n"))
-        if v.1 then {
+        if not v.1 then process.exit(1)
+        else if same then {
           println("build-speed: OK — every row within 1.5x of the committed baseline.")
           process.exit(0)
-        } else process.exit(1)
-      } else {
-        let text = bench.baseline_text(alm, target, rows, 150)!
-        fs.write(base, text)!
-        println(text)
-        process.exit(0)
-      }
+        } else process.exit(0)
+      } else ()
+      let rows = bench.measure(alm, target)!
+      let text = bench.baseline_text(alm, target, rows, 150)!
+      fs.write(base, text)!
+      println(text)
+      process.exit(0)
     },
     "check-contracts" => {
       let g = ledger_gate.run(root)!

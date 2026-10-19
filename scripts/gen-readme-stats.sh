@@ -230,6 +230,7 @@ say_version() { # $1 = a recorded `almide --version` line
 # renderer only formats what is committed, same rule as the size block.
 rt_version="$(grep -E '^version' "$RT_LEDGER" | head -1 | sed -E 's/^[^=]*=[[:space:]]*//')"
 rt_date="$(grep -E '^date' "$RT_LEDGER" | head -1 | sed -E 's/^[^=]*=[[:space:]]*//')"
+rt_machine="$(grep -E '^machine' "$RT_LEDGER" | head -1 | sed -E 's/^[^=]*=[[:space:]]*//')"
 {
   echo '| Benchmark (`almide bench`, verify-then-time, min of 2×5 interleaved) | wasm/native, `main` only | cold start (spawn vs compile + instantiate) |'
   echo "|---|---:|---:|"
@@ -242,7 +243,7 @@ rt_date="$(grep -E '^date' "$RT_LEDGER" | head -1 | sed -E 's/^[^=]*=[[:space:]]
   printf '%s%s%s\n' \
     'Embedded wasm host (Perceus RC in linear memory) against the native binary, same machine, same run. The ratio times the program'"'"'s own `main`, entry to return, on both legs (native in-process, wasm around the host call): process spawn and module compile/instantiate are outside it, and the cold-start column shows them (#2980). Small workloads run at a ledger-fixed size (`args=`) so `main` is long enough to time. Cross-engine ratios do NOT cancel hardware (a 2-core CI runner measures nbody ~10x worse), so the stamped ratio verdict runs on the stamping machine class; CI gates the STATUS taxonomy below and judges the wasm leg by a same-runner A/B against the latest release binary (interleaved, min-of-runs, `ab_band` in the ledger — #2143) (`scripts/check-wasm-runtime-ratio.sh`). Of these rows only fannkuchredux runs its `fan` in parallel: native on threads (#2044), the embedded wasm host on separate instances of the module (#3003, ADR-0011 §D2a; every other wasm host runs it sequentially, byte-identical); binarytrees'"'"' and mandelbrot'"'"'s `fan.map` callbacks run sequentially on both legs (user time equals wall time on both, measured 2026-10-03). The unmeasured corpus cells stay honest instead of estimated: ' \
     "${walled} wall on the wasm build path, ${oom} exhaust the embedded heap (#1729)" \
-    ' — each re-measured every gate run, so a cell that starts benching fails the gate until its row is promoted. Ledger: `docs/benchmarks/wasm-runtime.txt` ('"$(say_version "${rt_version}"), ${rt_date}"').' 
+    ' — each re-measured every gate run, so a cell that starts benching fails the gate until its row is promoted. Ledger: `docs/benchmarks/wasm-runtime.txt` ('"$(say_version "${rt_version}"), ${rt_date}, measured on ${rt_machine}"').' 
 } > "$rt_body"
 
 # The native-victory block (#1330), rendered from the committed ledger — the
