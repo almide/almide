@@ -3119,9 +3119,9 @@ checksum = "ccf3ec651a847eb01de73ccad15eb7d99f80485de043efb2f370cd654f4ea44b"
 
 [[package]]
 name = "wasi-preview1-component-adapter-provider"
-version = "49.0.2"
+version = "49.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e9fb457a2a05cc8ae8d426d8f431181f5b0fab57a17fac1088b07d17e070f3b5"
+checksum = "a6330ecda6f2ff8dcd4a8fd0cb9badafdb18cc4cd593b4f005317f6df1beb3a8"
 
 [[package]]
 name = "wasip2"
