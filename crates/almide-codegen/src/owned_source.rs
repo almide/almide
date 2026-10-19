@@ -103,3 +103,27 @@ pub fn hoisted_source(e: &IrExpr) -> Option<VarId> {
     let rest_free = args[1..].iter().all(|a| scalar_read_of(a, src) == Some(false));
     (!stmts.is_empty() && stmts.iter().all(scalar_let) && rest_free).then_some(src)
 }
+
+/// Does `e` borrow `v` as the source of an op with an owned twin? The clone
+/// walk turns that borrow into a move at `v`'s last use, so a reference into
+/// `v` that outlives it — a head read or a selection bound by reference
+/// (#3870) — cannot count it as a read that leaves `v` in place.
+pub fn may_move_as_source(e: &IrExpr, v: VarId) -> bool {
+    use almide_ir::visit::{walk_expr, IrVisitor};
+    struct Find(VarId, bool);
+    impl IrVisitor for Find {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if let IrExprKind::RuntimeCall { symbol, args } = &e.kind
+                && takes_source_either_way(symbol.as_str())
+                && args.first().and_then(borrowed_var) == Some(self.0)
+            {
+                self.1 = true;
+                return;
+            }
+            walk_expr(self, e);
+        }
+    }
+    let mut find = Find(v, false);
+    find.visit_expr(e);
+    find.1
+}
