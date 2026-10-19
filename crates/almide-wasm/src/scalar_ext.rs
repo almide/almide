@@ -65,19 +65,20 @@ impl Emitter<'_> {
             // Rust's `f64::sqrt` are the SAME function, bit for bit — except
             // the NaN a negative x MANUFACTURES, whose sign is the host's
             // (x86 -NaN, aarch64 +NaN). That one is the fixed +qNaN
-            // 0x7FF8000000000000 (C-055), as runtime/rs and the self-host.
+            // 0x7FF8000000000000 (C-055), as runtime/rs: `select(abs r, r,
+            // -x > x)` — f64.sqrt's NaN carries the canonical payload, `abs`
+            // clears the sign, and `-x > x` (x < 0 without an 8-byte f64
+            // constant) is false for -0.0 and for a NaN x, which pass through.
             ("math" | "float", "sqrt", [x]) => {
                 self.lower_arg(x, Some(FLOAT), ArgMode::Borrow)?;
                 let h = self.hold_f64()?;
+                let r = self.hold_f64()?;
                 let mut i = self.f.instructions();
-                i.local_set(h);
-                i.local_get(h).f64_const(0.0.into()).f64_lt();
-                i.if_(BlockType::Result(ValType::F64));
-                i.f64_const(f64::from_bits(0x7FF8_0000_0000_0000).into());
-                i.else_();
-                i.local_get(h).f64_sqrt();
-                i.end();
+                i.local_tee(h).f64_sqrt().local_tee(r).f64_abs().local_get(r);
+                i.local_get(h).f64_neg().local_get(h).f64_gt();
+                i.select();
                 let _ = i;
+                self.release_f64();
                 self.release_f64();
                 Some(Lowered::scalar(FLOAT))
             }
