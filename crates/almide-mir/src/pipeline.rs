@@ -201,12 +201,23 @@ fn resolve_user_module_calls_impl(ir: &mut almide_ir::IrProgram, user_only: bool
                         };
                     }
                 } else if let CallTarget::Named { name } = target {
+                    // A module body's BARE call of a fn its own module defines is that fn, by
+                    // definition (#3831): it takes the module fn's mangled def name whatever the
+                    // root or another module spells the same way.
+                    let f = name.as_str();
+                    if let Some(own) = self
+                        .enclosing
+                        .as_deref()
+                        .filter(|m| self.user_mods.get(*m).is_some_and(|fs| fs.contains(f)))
+                    {
+                        *target = CallTarget::Named { name: sym(&user_module_fn_name(own, f)) };
+                        return;
+                    }
                     // A BARE Named call to a fn that lives in exactly ONE linked user module: the
                     // frontend resolves an `import self as g` call to the bare name when the target is
                     // the package's own module — rewrite to the module fn's mangled def name. Ambiguity
                     // (two modules defining the name, or a root fn shadowing it) leaves the call
                     // untouched — the unlinked gate then walls it honestly instead of guessing.
-                    let f = name.as_str();
                     if !self.root_fns.contains(f) {
                         let mut owners = self.user_mods.iter().filter(|(_, fs)| fs.contains(f));
                         if let (Some((m, _)), None) = (owners.next(), owners.next()) {
