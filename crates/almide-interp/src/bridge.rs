@@ -422,7 +422,8 @@ fn float_unary_fn(func: &str, args: &[Value]) -> Option<Flow> {
         // almide_rt_float_sqrt and stdlib/float_core.almd do.
         "sqrt" => Value::Float({
             let x = as_float(args.first())?;
-            if x < 0.0 { std::hint::black_box(f64::from_bits(0x7FF8_0000_0000_0000)) } else { x.sqrt() }
+            let r = x.sqrt();
+            if x < 0.0 { r.abs() } else { r }
         }),
         "is_nan" => Value::Bool(as_float(args.first())?.is_nan()),
         "is_infinite" => Value::Bool(as_float(args.first())?.is_infinite()),

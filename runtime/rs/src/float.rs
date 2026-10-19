@@ -32,9 +32,9 @@ pub fn almide_rt_float_abs(n: f64) -> f64 { n.abs() }
 pub fn almide_rt_float_ceil(n: f64) -> f64 { n.ceil() }
 pub fn almide_rt_float_floor(n: f64) -> f64 { n.floor() }
 pub fn almide_rt_float_round(n: f64) -> f64 { n.round() }
-// The fixed +qNaN below zero, exactly as almide_rt_math_sqrt (C-055), and
-// behind `black_box` for the same reason (LLVM folds the select away).
-pub fn almide_rt_float_sqrt(n: f64) -> f64 { if n < 0.0 { std::hint::black_box(f64::from_bits(0x7FF8_0000_0000_0000)) } else { n.sqrt() } }
+// The fixed +qNaN below zero, exactly as almide_rt_math_sqrt (C-055), and by
+// the same sign-clearing `abs` (a selected NaN constant is folded away).
+pub fn almide_rt_float_sqrt(n: f64) -> f64 { let r = n.sqrt(); if n < 0.0 { r.abs() } else { r } }
 // Explicit NaN/tie decision tree — see almide_rt_math_fmin/fmax (math.rs) for
 // why `f64::min`/`f64::max` (llvm.minnum/maxnum, unspecified ±0-tie order)
 // must not be used. Ties follow IEEE-754-2019 zero ordering (C-049,
