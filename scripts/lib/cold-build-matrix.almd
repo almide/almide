@@ -1,0 +1,13 @@
+// The cargo-path program of scripts/check-cold-build-ab.sh (#3829). A program
+// that calls the matrix runtime never takes the runtime-rlib fast path: its
+// cold build is a cargo build of the inlined runtime. Keep it on that path —
+// a matrix call in `main` is the whole point of the file.
+fn main() -> Unit = {
+  let a = matrix.from_lists([
+    [1.0, 2.0],
+    [3.0, 4.0]
+  ])
+  let b = matrix.transpose(matrix.ones(2, 2))
+  let c = matrix.mul(a, b)
+  println(float.to_string(matrix.get(c, 1, 1)))
+}
