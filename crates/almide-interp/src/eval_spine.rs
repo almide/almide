@@ -125,7 +125,10 @@ impl<'a> Interpreter<'a> {
                 {
                     return None;
                 }
-                let func = self.fns.get(name).copied()?;
+                // The same definition `eval_named_call` would call: the
+                // executing module's own sibling (#1844), then the caller's
+                // namespace (#3825) — never the flat table's same-spelled fn.
+                let func = self.own_module_sibling(*name).or_else(|| self.resolve_named_fn(*name))?;
                 if func.params.iter().any(|p| p.is_mut) {
                     return None;
                 }
