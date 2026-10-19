@@ -17,11 +17,10 @@
   <a href="https://almide.github.io/playground/">Playground</a> ·
   <a href="./docs/CHEATSHEET.md">Cheatsheet</a> ·
   <a href="./docs/SPEC.md">Specification</a> ·
-  <a href="#why-almide">Why</a> ·
   <a href="#quick-start">Quick start</a> ·
-  <a href="#what-is-measured">Evidence</a> ·
-  <a href="#how-it-works">How it works</a> ·
-  <a href="#project-status">Status</a>
+  <a href="./docs/benchmarks/README.md">Evidence</a> ·
+  <a href="./docs/how-it-works.md">How it works</a> ·
+  <a href="./docs/status.md">Status</a>
 </p>
 
 <p align="center">
@@ -32,11 +31,11 @@
 
 ---
 
-## An edit that survives
-
 Almide is a statically-typed language for code that AI writes and edits. The claim is not that the model gets it right. It is that **when the model is wrong, the compiler says so at author time and names the fix; and when the model is right, a checker proven in Rocq certifies that the program is memory-safe**: `almide verify` hands its ownership, name and capability witnesses to the independent `almide-verify` (a certificate over the shipped wasm bytes themselves is still pending, #2755–#2760). It compiles to native binaries (via Rust) and to WebAssembly, and the two produce byte-identical output.
 
-The first half in one screen. A model adds a case to a type and, as models do, touches nothing else:
+## An edit that survives
+
+A model adds a case to a type and, as models do, touches nothing else:
 
 ```almd
 type Shape =
@@ -61,16 +60,7 @@ error[E010]: non-exhaustive match: missing Triangle(_, _)
 Or use `_ => todo()` to compile incrementally.
 ```
 
-The compiler names the missing case at the site, spells out the arm to add, and offers a way to keep compiling while the rest is written. The model's next turn is `Triangle(b, h) => 0.5 * b * h`; the program then runs natively and on wasm and prints the same bytes. That loop — an edit, a diagnostic that is itself the fix, a passing build — is what every decision below serves. The same question asked against Python, on eight injected modification mistakes: [demo/make-verify](./demo/make-verify/).
-
-## Why Almide?
-
-- **Predictable** — One canonical way to express each concept, reducing token branching for LLMs
-- **Local** — Understanding any piece of code requires only nearby context
-- **Repairable** — Compiler diagnostics guide toward a specific fix, not multiple possibilities (as above)
-- **Compact** — High semantic density, low syntactic noise
-
-The full rationale: [Design Philosophy](./docs/design/DESIGN.md). The frozen surface and the breaking-change policy: [STABILITY.md](./docs/STABILITY.md) (declared 2026-08-20) — anything in the Cheatsheet or `llms.txt` keeps meaning what it means.
+The diagnostic is the fix: the model's next turn is `Triangle(b, h) => 0.5 * b * h`, and the program then prints the same bytes natively and on wasm. The same question asked against Python, on eight injected modification mistakes: [demo/make-verify](./demo/make-verify/).
 
 ## Quick Start
 
@@ -81,16 +71,7 @@ curl -fsSL https://raw.githubusercontent.com/almide/almide/main/tools/install.sh
 irm https://raw.githubusercontent.com/almide/almide/main/tools/install.ps1 | iex        # Windows (PowerShell)
 ```
 
-The installer checks the archive against the release's `almide-checksums.sha256` before unpacking. To verify a downloaded asset yourself — every release asset, the checksums file included, is Sigstore-attested by the release workflow (see [SECURITY.md](./SECURITY.md)):
-
-```bash
-gh attestation verify almide-macos-aarch64.tar.gz -R almide/almide   # provenance: built by almide/almide's release workflow
-sha256sum -c --ignore-missing almide-checksums.sha256                # digest matches the published checksums file
-```
-
-Each archive also carries `almide-verify`, the independently versioned certificate checker: `almide verify app.almd` emits the program's ownership / name / capability / call-mode witnesses and hands them to it (it must sit next to `almide` or on `PATH` — there is no built-in fallback).
-
-From source, with [Rust](https://rustup.rs/) 1.96+ (the `almide` package's `rust-version`, because the binary embeds the wasmtime host; CI builds with 1.96.0): `cargo build --release && cp target/release/almide target/release/almide-verify ~/.local/bin/` (or `make install`).
+The installer checks the archive against the release's `almide-checksums.sha256`; every release asset is Sigstore-attested ([SECURITY.md](./SECURITY.md#release-integrity) shows how to verify one). Each archive also carries `almide-verify`, the certificate checker `almide verify` hands its witnesses to. From source, with [Rust](https://rustup.rs/) 1.96+: `make install`.
 
 ```almd
 fn main() -> Unit = {
@@ -105,207 +86,28 @@ almide run hello.almd --target wasm   # same bytes, on wasmtime
 
 ## Features
 
-- **Multi-target** — Same source compiles to a native binary (via Rust) or WebAssembly (direct emit, no LLVM)
-- **Generics** — Functions (`fn id[T](x: T) -> T`), records, variant types, recursive variants with auto Box wrapping
-- **Pattern matching** — Exhaustive `match` with variant destructuring
-- **Effect functions** — `effect fn` for explicit error propagation: `expr!` propagates, a bare fallible call is an error, never silent
-- **Bidirectional type inference** — Annotations flow into expressions (`let xs: List[Int] = []`)
-- **Codec system** — `Type.decode(value)` / `Type.encode(value)` with auto-derive
-- **Map literals** — `["key": value]`, `m[key]`, `for (k, v) in m`
-- **Fan** — structured concurrency: `fan { a(), b() }` runs each arm on its own thread natively and one after another on wasm; `fan.map` / `fan.settle` return results in list order on both, `fan.map` runs every element and surfaces the lowest-index `Err` (dialect epoch 7), and natively it runs on threads only for a pure callback over scalars (an effect callback runs one element at a time). Every native arm and element writes into its own output timeline, flushed in list order, so what concurrent arms print comes out in source order on both targets, and a trap waits for the elements below it ([ADR-0024](./docs/adr/0024-fan-effect-callbacks-run-concurrently-as-if-sequential.md) steps 1 and 3, C-004, C-005, C-200). `fan.min(compute.ms(n))` picks the arm that spent the least deterministic compute, so the winner is the same on both targets. The first `Ok` in order is not a fan form: it is `a() ?? b()`, or `list.find_map` over a list (dialect epoch 14 removed `fan.any` and renamed `fan.race` to `fan.min`).
-- **Names in any script** — identifiers follow Unicode UAX #31 and are held in NFC (`let 合計 = 価格 * 数量`); keywords stay ASCII
-- **Pipeline operator** — `data |> transform |> output`
-- **Module system** — Packages, sub-namespaces, visibility control, diamond dependency resolution
-- **Standard library** — self-hosted `.almd` modules: string, list, map, json, http, fs, and more ([reference](./docs/stdlib/); the count is derived under [Project Status](#project-status)). Domain kernels live in packages, not the language: LLM provider clients in [almide/llm](https://github.com/almide/llm), neural-network matrix kernels in [almide/nnlib](https://github.com/almide/nnlib) (dialect epoch 14)
-- **Built-in testing** — `test "name" { assert_eq(a, b) }` with `almide test`; `testing.assert_aborts(expected, () => …)` for a call that must abort
+- **Multi-target** — one source, a native binary (via Rust) or WebAssembly (direct emit, no LLVM), byte-identical output ([contracts](./docs/contracts/))
+- **Diagnostics that name the fix** — every error carries its location, its context and one concrete repair ([codes](./docs/diagnostics/))
+- **Explicit effects** — `effect fn` with `expr!` propagation; a bare fallible call is an error, never silent ([cheatsheet](./docs/CHEATSHEET.md))
+- **Types** — generics, records, variants with exhaustive `match`, bidirectional inference, `Codec` auto-derive ([spec](./docs/SPEC.md))
+- **Memory without annotations** — Perceus-style ownership inference, no GC, no lifetimes ([memory safety](./docs/design/MEMORY-SAFETY.md))
+- **Fan** — structured concurrency on threads natively, in the same output order on wasm ([ADR-0024](./docs/adr/0024-fan-effect-callbacks-run-concurrently-as-if-sequential.md))
+- **Standard library** — self-hosted `.almd` modules, each public function inspected on both targets ([reference](./docs/stdlib/))
+- **Tooling built in** — `almide test`, `almide fmt`, `almide check`, modules with diamond resolution ([how it works](./docs/how-it-works.md))
 
-## What is measured
+## Learn more
 
-Every claim in this section is either derived by a script or carries the date it was measured; `scripts/check-readme-numbers.sh` refuses a bare number in CI, and refuses an LLM-writability scorecard that is older than 90 days or that does not name the almide-dojo run it came from.
-
-### LLM writability
-
-Measured by [almide-dojo](https://github.com/almide/almide-dojo) on 2026-09-22 across its bank of 38 tasks (basic / intermediate / advanced), with the pinned compiler `almide 0.62.0`, by that repo's CI lane. Both runs are stamped **`comparable`** by the harness — every planned task reached the model, so each rate is a point and not an interval — and both were sampled at a fixed seed (`20260922`) and temperature 0, recorded in the run's manifest as what the provider actually put on the wire. The runs are committed — [`almide-dojo@8af34bc`](https://github.com/almide/almide-dojo/commit/8af34bc3) — so the table below can be recomputed from their `summary.md` rather than believed; later runs are on the [live dashboard](https://almide.github.io/almide-dojo/). No Anthropic or OpenAI key is in CI by decision, so the models here are the ones the lane can reach without one:
-
-| Model | Pass Rate | 1-Shot Rate |
-|---|---|---|
-| Llama 3.3 70B (fp8-fast) | 65% (25/38) | 39% (15/38) |
-| Llama 3.1 8B | 44% (17/38) | 34% (13/38) |
-
-The most recent same-model comparison is the MiniGit bench: Sonnet 5 × 20 trials on 2026-07-15 with almide 0.29.0 (it has not been re-run on a later compiler), 100% pass, the most concise of 5 languages (233 LOC), and a faster agent wall-clock than Gleam and MoonBit but slower than Rust and TypeScript (573 s against 297 s) — an LLM-writability number, measured under 6–9× self-parallelism, **not** generated-code speed ([chart](docs/figures/lang-bench-snapshot-2026-07.png) · [method](research/benchmark/lang-bench/README.md) · [upstream](https://github.com/mame/ai-coding-lang-bench)).
-
-### Byte-identical across targets
-
-**Every program that compiles for both targets produces byte-identical observable output — stdout, stderr, exit code — whether it runs as a native binary or as WebAssembly.** Native is the oracle; `native == wasm` is a hard invariant, not a "target difference" to be documented around.
-
-The guarantee is **continuous, with an explicit, ledger-managed scope**: "byte-identical" means the execution output, not the compiled artifacts; inherently nondeterministic sources certify deterministic *invariants* instead of exact bytes; APIs not yet implemented on wasm are compile- or run-time *refusals* — never wrong bytes; and exactly two fns are exempt because their job is to report the host — `env.os()` and `env.temp_dir()`, bounded by C-189, since making them agree across targets would be the defect rather than the guarantee. Output printed from concurrent `fan { }` arms is inside the guarantee: each native arm writes into its own timeline, flushed in source order, so it reads as it does on wasm (C-004, ADR-0024 step 1).
-
-This claim is not prose. Every observable promise is a named contract in the [behavior-contract ledger](docs/contracts/), each traceable to executable evidence, and the numbers below are regenerated from the ledger (`scripts/gen-claims.sh`, enforced by `scripts/check-contracts.sh` in CI):
-
-<!-- claims:generated:start — derived from docs/contracts/contracts.toml by scripts/gen-claims.sh; DO NOT EDIT between the markers -->
-> <!-- counts:generated:start (as of 2026-10-10) — stamped totals from proofs/ledger-counts.toml; refreshed only by scripts/gen-ledger-counts.sh, never by a fixture/contract PR; DO NOT EDIT between the markers -->
-> **Ledger: 376 contracts — 376 active, 0 flagged-for-revision.**
-> <!-- counts:generated:end -->
->
-> **Divergences awaiting a fix: none.** Every contract in the ledger is
-> `active`, carrying executable evidence of class >= `fixture`. The one
-> by-design carve-out in the law — the platform-reporting fns `env.os`
-> and `env.temp_dir` — is bounded by C-189.
-<!-- claims:generated:end -->
-
-Scope, ledger mechanics, and the evidence stack (contract ledger, cross-target fixture gate, differential fuzz, emit-time Σ-probes, Lean belt, org-wide byte-verify sweep): **[docs/design/EQUIVALENCE.md](./docs/design/EQUIVALENCE.md)**.
-
-### Memory safety — proven where it is proven, trusted where it is trusted
-
-You write no ownership annotations, no lifetimes, no `free`: [Perceus](https://www.microsoft.com/en-us/research/publication/perceus-garbage-free-reference-counting-with-reuse/)-style ownership inference in the compiler decides where every heap value is introduced, duplicated, and consumed — garbage-collector-free, pause-free. The checker for those decisions is **kernel-proven** (Rocq/Coq spine, 100 audited theorems and lemmas, axiom-clean, independently re-checked by `coqchk`; the count is asserted by `proofs/check.sh`), and `almide verify --emit` still produces the MIR ownership witness it checks. The per-build certificate used to ride the incumbent wasm leg, which #2761 deleted; the **structural wasm leg** (the only wasm renderer) and the **native leg** are trusted, certificate pending (#2755–#2760): their evidence is differential — byte-identical output against each other and the interpreter on the contract corpus, held by a grow-only floor and a semantic-mutation net — and the structural runtime's bytes are checked against the Coq decoder model by `proofs/check-structural-bytes.sh`. The boundary, stage by stage: **[proven-vs-trusted.md](docs/contracts/proven-vs-trusted.md)**; the full account, including the Lean 4 Perceus belt the design started from: **[docs/design/MEMORY-SAFETY.md](./docs/design/MEMORY-SAFETY.md)**.
-
-### Performance
-
-No VM, no GC, no interpreter — native compiles through Rust to machine code, and WASM is emitted directly as self-contained modules (the runtime support a program reaches is linked in and the rest is pruned).
-
-<!-- wasm-size:generated:start — rendered from docs/benchmarks/wasm-size.txt by scripts/gen-readme-stats.sh; DO NOT EDIT between the markers -->
-| Program (`almide build --target wasm`, as shipped) | develop | released v0.66.0 |
-|---|---:|---:|
-| Hello, world | **325 B** | **953 B** |
-
-The develop column is the develop build at 5f39c06ba, after the v0.66.0 release (`almide --version`: `almide 0.66.0 (dev, 5f39c06ba)`), measured 2026-10-03; CI rebuilds it on every push and fails if the bytes move without a restamp of `docs/benchmarks/wasm-size.txt`. The released column is the compiler from the v0.66.0 release asset (`almide 0.66.0 (release, 819bbc74f)`, `gh release download v0.66.0 -R almide/almide`), measured 2026-10-03. No post-hoc optimizer touches the shipped bytes (`--wasm-opt` is opt-in and its output is not the renderer's own module).
-<!-- wasm-size:generated:end -->
-
-Rust on the same wasm target is 40 KB+ for Hello, world even fully size-tuned: 40,379 B with `rustc 1.96.1`, `wasm32-wasip1`, `opt-level="z"`, `lto`, `strip`, `panic="abort"`, `codegen-units=1` (64,844 B with the default release profile), measured 2026-10-03 by the recipe at the bottom of [WASM-OUTPUT.md](./docs/wasm/WASM-OUTPUT.md). The native CLI-shaped benchmark (`research/benchmark/perf/native/cli_app.almd`, built by `research/benchmark/perf/native/measure.sh`) is 464,488 B stripped on macOS arm64 with no crate dependencies (only `libSystem` is linked), measured 2026-10-03 with both the develop build and the v0.66.0 release. The byte-by-byte dissection, measured 2026-07-23 (it also covers the incumbent leg, since retired by #2761): **[docs/wasm/WASM-OUTPUT.md](./docs/wasm/WASM-OUTPUT.md)**.
-
-Against handwritten Rust the arithmetic kernels sit at parity: n-body and spectral-norm 1.00× on an Apple M4 Pro (2026-07-30), and 1.065× and 1.032× on the ubuntu-latest CI runner (develop CI run [37092258733](https://github.com/almide/almide/actions/runs/37092258733), 2026-10-03). Where Almide has information Rust does not — a tree whose whole lifetime is one `check(make(depth))` expression, proven by the effect system — it is faster than the ordinary Rust for the same program:
-
-<!-- native-victory:generated:start — rendered from docs/benchmarks/native-victory.txt by scripts/gen-readme-stats.sh; DO NOT EDIT between the markers -->
-| Workload (`bench.py`, median of 9, interleaved) | optimization | Almide / ordinary Rust, M4 Pro | without it (`ALMIDE_REGION_OFF=1` / `ALMIDE_FAN_SEQUENTIAL=1`), M4 Pro | ubuntu-latest CI runner |
-|---|---|---:|---:|---:|
-| binarytrees | region window (#1991) | **0.35 (d17)** / **0.32 (d19)** | 1.25 | 0.581 (d17) |
-| treealloc | region window (#1991) | **0.30 (d20)** / **0.30 (d21)** | 1.10 | 0.365 (d20) |
-| fannkuchredux | parallel fan (#2044) | **0.21 (n10)** / **0.12 (n11)** | 1.06 | 0.315 (n11) |
-
-Two ratios per row are the two input sizes (the win holds at both); the Rust side is the ordinary program a person writes for it — a `Box` per node, one thread, no arena, no `unsafe`, no SIMD — compiled with the same `rustc` flags, and the "without it" column is the same Almide source with the region window turned off, so the whole gap is that one optimization. The absolute ratio is allocator-dependent (the CI runner frees a `Box` cheaper), the direction is not: the `perf-ratchet` job fails if either row reaches 1.0 or the ablation stops paying. Declaration and methodology: [docs/project/BENCHMARKS.md](./docs/project/BENCHMARKS.md#faster-than-ordinary-rust-1330). Ledger: `docs/benchmarks/native-victory.txt`. The M4 Pro columns were measured on almide 0.62.0, 2026-09-08 and have not been re-measured since; the runner column is what the `perf-ratchet` job of develop CI run [37092258733](https://github.com/almide/almide/actions/runs/37092258733) printed at `466cac59b` (a develop build carrying version 0.66.0, not the 0.66.0 release), 2026-10-03 (the size is in each cell).
-<!-- native-victory:generated:end -->
-
-<!-- build-speed:generated:start — derived from docs/benchmarks/build-speed.txt by the almide-gates `bench` subcommand; DO NOT EDIT between the markers -->
-Measured on almide 0.59.1, arm64 Darwin, `examples/lisp.almd` (268 lines), 2026-08-27. Every row is an N-run MEAN —
-a single run of a 30ms process is scheduler noise. Cold clears BOTH `$TMPDIR/almide-run`
-and the dependency cache before each repetition; clearing only the latter measures a warm
-build. Regenerate with `almide run tools/almide-gates/src/main.almd -- bench`; the ratchet
-(`-- bench --check`) fails CI at 1.5x.
-
-| scenario | time | runs |
-|---|---|---|
-| `almide check` | **15.2 ms** | 20 |
-| build, warm (content-cache hit) | **237.2 ms** | 5 |
-| build, cold | **635.3 ms** | 3 |
-| build, cold, `--target wasm` | **61.7 ms** | 3 |
-<!-- build-speed:generated:end -->
-
-`almide check` scales close to linearly: over a 2k → 30k-line ladder of this repo's own stdlib the log-log slope of check time against project lines is **1.13** (1.0 is linear, 2.0 quadratic) and the 10k-line rung costs **4.4×** the empty-project floor — measured 2026-08-13, held by `scripts/check-edit-loop-scale.sh`, table in [BENCHMARKS.md](./docs/project/BENCHMARKS.md#edit-loop-scale-1334). Native runtime against handwritten Rust, on an Apple M4 Pro (2026-07-30, FFT re-measured 2026-08-13): **1.00×** on n-body and spectral-norm, 1.16× on fasta, 1.18× on FFT ([scoreboard](./docs/project/BENCHMARKS.md)). The listbuild rows read 1.47–1.69× there and 0.87–1.05× on the CI runner (2026-10-03); their gap on the M4 Pro is the deterministic software `sin`/`cos` that byte-identity needs, not list building (measured 2026-08-13, `scripts/perf-ratio-baseline.txt`). The ubuntu-latest runner re-measures every row on each develop CI run, and the `perf-ratchet` job fails an anchored row (n-body, spectral-norm, fasta, FFT, wordfreq) that drifts more than 40% past its committed baseline (run [37092258733](https://github.com/almide/almide/actions/runs/37092258733), 2026-10-03: fasta 0.757×, FFT 1.002×). Wasm runtime, measured and gated (#1701):
-
-<!-- wasm-runtime:generated:start — rendered from docs/benchmarks/wasm-runtime.txt by scripts/gen-readme-stats.sh; DO NOT EDIT between the markers -->
-| Benchmark (`almide bench`, verify-then-time, min of 2×5 interleaved) | wasm/native, `main` only | cold start (spawn vs compile + instantiate) |
-|---|---:|---:|
-| nbody | **1.10×** | 1.14× |
-| spectralnorm | **1.21×** | 1.22× |
-| binarytrees | **1.07×** | 1.06× |
-| treealloc | **1.04×** | 1.04× |
-| fasta | **1.52×** | 1.50× |
-| fannkuchredux | **1.28×** | 1.28× |
-| mandelbrot | **1.11×** | 1.10× |
-| onebrc | **1.26×** | 1.33× |
-| fft | **1.53×** | 1.53× |
-| strchurn | **0.85×** | 0.85× |
-| listbuild_append | **1.96×** | 1.95× |
-| listbuild_combinator | **1.88×** | 1.86× |
-| listbuild_prealloc | **1.68×** | 1.68× |
-| mapbuild | **0.67×** | 0.72× |
-
-Embedded wasm host (Perceus RC in linear memory) against the native binary, same machine, same run. The ratio times the program's own `main`, entry to return, on both legs (native in-process, wasm around the host call): process spawn and module compile/instantiate are outside it, and the cold-start column shows them (#2980). Small workloads run at a ledger-fixed size (`args=`) so `main` is long enough to time. Cross-engine ratios do NOT cancel hardware (a 2-core CI runner measures nbody ~10x worse), so the stamped ratio verdict runs on the stamping machine class; CI gates the STATUS taxonomy below and judges the wasm leg by a same-runner A/B against the latest release binary (interleaved, min-of-runs, `ab_band` in the ledger — #2143) (`scripts/check-wasm-runtime-ratio.sh`). Of these rows only fannkuchredux runs its `fan` in parallel: native on threads (#2044), the embedded wasm host on separate instances of the module (#3003, ADR-0011 §D2a; every other wasm host runs it sequentially, byte-identical); binarytrees' and mandelbrot's `fan.map` callbacks run sequentially on both legs (user time equals wall time on both, measured 2026-10-03). The unmeasured corpus cells stay honest instead of estimated: 0 wall on the wasm build path, 0 exhaust the embedded heap (#1729) — each re-measured every gate run, so a cell that starts benching fails the gate until its row is promoted. Ledger: `docs/benchmarks/wasm-runtime.txt` (a develop build carrying version 0.65.1, not the 0.65.1 release, 2026-09-29).
-<!-- wasm-runtime:generated:end -->
-
-## How It Works
-
-One frontend, one IR, one renderer per target:
-
-```mermaid
-flowchart LR
-    SRC([".almd"]) --> FE["Lexer → Parser → Type Checker → Lowering"] --> IR(["IR"])
-    IR --> NANO["Nanopass Pipeline<br/>semantic rewrites"] --> TMPL["Template Renderer<br/>TOML-driven"] --> RS([".rs → native binary"])
-    IR --> STRUCT["structural leg<br/>commissioned engine, direct emit"] --> WASM([".wasm"])
-```
-
-**Native.** The Nanopass pipeline applies target-specific transformations — `ResultPropagation` (Rust `?`), `CloneInsertion` (Rust borrow analysis), `LICM` (loop-invariant code motion). The Template Renderer is purely syntactic: every semantic decision is already encoded in the IR.
-
-**WebAssembly.** The **structural leg** — the engine commissioned in [#1599](https://github.com/almide/almide/pull/1599), `almide::wasm_leg` front + `crates/almide-wasm` emitter, entered through `render_wasm_module_routed` in `src/cli/build.rs` — is the only wasm renderer. It was accepted at 610/610 byte-identical to native on the `wasm_cross` corpus, and its build artifacts ship in the WASI form ([#1588](https://github.com/almide/almide/issues/1588)) so they run on stock runtimes. A program it does not lower is an honest error (`error[E082]`, naming the wall and the function), never a fallback: the incumbent v1 leg that once took those shapes lost its last route in #2752 and was deleted in #2761. `ALMIDE_VERIFIED_DEBUG=1` narrates the route.
-
-```bash
-almide run app.almd                  # Compile + execute (native)
-almide build app.almd --target wasm  # Build WebAssembly (WASI)
-almide test                          # Find and run all test blocks (recursive)
-almide check app.almd                # Type check only
-almide check app.almd --target wasm  # + the wasm build route: E081/E082 at check time (#1922)
-almide fmt app.almd                  # Format source code
-```
-
-Run `almide --help` for the full command list (compile, add, deps, clean, …). Pipeline and module map: [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md); the wasm leg in detail: [docs/wasm/](./docs/wasm/README.md).
-
-### What's next — v1, the Trust Spine
-
-The Perceus proof above proves one compiler pass, once. v1 generalizes that principle to the **whole pipeline** — instead of proving the whole compiler, it proves a tiny *checker* and has the compiler emit a certificate on every build that the checker re-verifies. If the checker accepts, the artifact has the property — a theorem that never mentions the compiler's internals. That collapses the trusted base from the whole compiler (about 300,000 lines of Rust under `src/` and `crates/`, test directories excluded, counted 2026-10-03) to the extracted checker (~1,400 lines of OCaml, machine-derived from the proofs), and asks a harder question than testing ever can: **not "do the tests pass?" but "can a machine prove the output is correct?"** The architecture, the receipts (C-SAFE / C-REPRO / C-FAITHFUL / C-PROVEN), and why builds are slower on purpose: **[docs/TRUST-SPINE.md](./docs/TRUST-SPINE.md)**.
-
-## Project Status
-
-| Category | Status |
-|----------|--------|
-| Maturity | Pre-1.0, under active development on `develop`; the LLM-facing surface is frozen by [STABILITY.md](docs/STABILITY.md) (declared 2026-08-20) |
-| Support | Latest release line only, pre-1.0 — policy and versioning guarantees: [SUPPORT.md](./SUPPORT.md) · vulnerabilities: [SECURITY.md](./SECURITY.md) |
-| Compiler | Pure Rust, single binary |
-| Targets | Rust (native), WASM (direct emit — the structural leg, see [How It Works](#how-it-works)) |
-| Verified codegen | Structural wasm leg: byte-exact corpus and mutation gates, trusted with its per-build certificate pending (#2755–#2760); the PCC-certified incumbent leg (per-build re-verification since 0.29.0) was retired by #2761 |
-| Codegen | Rust: Nanopass + TOML templates; wasm: structural engine → direct emit (the v0 emitter and the incumbent MIR→WAT renderer are retired — a wall is an error, never a fallback) |
-| Stdlib inspection | Every public stdlib function carries an `inspected` stamp in [`proofs/stdlib-inspection.toml`](./proofs/stdlib-inspection.toml): the same bytes on native and wasm, a per-call cost within its declared order, codopsy A, fresh fuzzed combinations, and the call through a module diamond. 0 uninspected as of 2026-10-19 (almide 0.68.0); `tests/stdlib_inspection_test.rs` voids a stamp when the signature or the body changes, and the uninspected count only falls |
-| Artifacts | `.almdi` module interface files via `almide compile` |
-| Playground | [Live](https://almide.github.io/playground/) — the compiler runs as WASM in the browser |
-
-<!-- stats:generated:start — derived from docs/stdlib/*.md, spec/, and docs/contracts/contracts.toml by scripts/gen-readme-stats.sh; DO NOT EDIT between the markers -->
-<!-- counts:generated:start (as of 2026-10-10) — stamped totals from proofs/ledger-counts.toml; refreshed only by scripts/gen-ledger-counts.sh, never by a fixture/contract PR; DO NOT EDIT between the markers -->
-| Derived count | Value |
-|---|---|
-| Stdlib | 1031 functions across 45 modules — self-hosted `.almd`, signature indexes regenerated from the compiler by `tools/gen-stdlib-doc-index.py` |
-| Tests | 512 `.almd` test files under `spec/` (`almide test spec/`) + the 376-contract cross-target ledger |
-<!-- counts:generated:end -->
-<!-- stats:generated:end -->
-
-<!-- mutation-score:generated:start (as of 2026-09-22) — stamped from proofs/mutation-score.toml by scripts/gen-mutation-score.sh; re-measured by every mutation-sweep run, refreshed only by `--from-run`; DO NOT EDIT between the markers -->
-**Mutation score** — 41/41 mutants caught (100.0 %), 0 survived, 0 stale: the full release-shape net sweep of `ci/mutations/` ([`scripts/check-mutation-gate.sh`](./scripts/check-mutation-gate.sh)), stamped 2026-09-22 from mutation-sweep run [35650396971](https://github.com/almide/almide/actions/runs/35650396971) at `3b02f7dc4`.
-<!-- mutation-score:generated:end -->
-
-## Written in Almide
-
-The standard library is the largest Almide program in this repository. The ones below are written in Almide elsewhere, and are where the surface claims meet code nobody wrote to make the language look good.
-
-- **Coding agents** — [comide](https://github.com/O6lvl4/comide), a conversation in a directory · [golemide](https://github.com/O6lvl4/golemide), one static binary, observe-then-edit, every write through a syntax gate · [homullus](https://github.com/almide-ai/homullus), a modular agent runtime · [manus](https://github.com/almide-ai/manus), computer use on macOS
-- **Agent infrastructure** — [porta](https://github.com/almide/porta), WASM isolation plus an OS sandbox, no Docker · [ctxgate](https://github.com/O6lvl4/ctxgate), a context firewall living in the tool hooks · [hew](https://github.com/O6lvl4/hew), structure-aware `cat`/`grep`/`sed` for agents · [almai](https://github.com/almide-ai/almai), one LLM interface over every provider
-- **Parsing** — [gramide](https://github.com/O6lvl4/gramide), syntax trees for coding agents, with grammar packages for [TypeScript](https://github.com/O6lvl4/gramide-typescript), [Python](https://github.com/O6lvl4/gramide-python), [Rust](https://github.com/O6lvl4/gramide-rust), [Go](https://github.com/O6lvl4/gramide-go), [JavaScript](https://github.com/O6lvl4/gramide-javascript) and [Almide](https://github.com/O6lvl4/gramide-almide), each checked against that language's own parser · [parsegen](https://github.com/almide/parsegen), a tree-sitter compatible parser generator with no C and no dynamic loading
-- **Graphics** — [ceangal2](https://github.com/almide-graphics/ceangal2), the snaidhm compute-shader-first 2D/3D renderer and the ceangal layout and widgets on top of it, one Almide program on the web, iOS, macOS, Android, Windows and Linux (start from [ceangal-hello](https://github.com/almide-graphics/ceangal-hello)) · [obsid](https://github.com/almide-graphics/obsid), Canvas 2D / WebGL / 3D through WASM · [nn](https://github.com/almide-graphics/nn) and [slabhra](https://github.com/almide-graphics/slabhra), neural-network primitives and reverse-mode autograd · [cruth](https://github.com/almide-graphics/cruth), VRM/glTF characters · [lumen](https://github.com/almide-graphics/lumen), graphics math that needs no `@extern`
-- **Desktop** — [almide-shell](https://github.com/almide-graphics/almide-shell), a Hyprland shell: bar, launcher, notifications, on-screen display · [sprid](https://github.com/O6lvl4/sprid), a terminal emulator with scrollback under a hard memory budget
-- **Bindings and packaging** — [almide-bindgen](https://github.com/almide/almide-bindgen), FFI for 20 language targets · [almide-wasm-bindgen](https://github.com/almide/almide-wasm-bindgen) · [almide-lander](https://github.com/almide/almide-lander), Almide as a native shared library · [almide-web](https://github.com/almide/almide-web), browser APIs
-- **Libraries** — [toml](https://github.com/almide/toml) · [yaml](https://github.com/almide/yaml) · [csv](https://github.com/almide/csv) · [svg](https://github.com/almide/svg) · [dfa](https://github.com/almide/dfa) · [bigint](https://github.com/almide/bigint) · [aes](https://github.com/almide/aes) · [rsa](https://github.com/almide/rsa) · [sha1](https://github.com/almide/sha1) · [base64](https://github.com/almide/base64) · [almide-sqlite](https://github.com/almide/almide-sqlite) · [llm](https://github.com/almide/llm), streaming clients for LLM providers · [nnlib](https://github.com/almide/nnlib), neural-network kernels (attention, RoPE, norms, quantized rows)
-- **Conformance and measurement** — [als](https://github.com/almide/als), the normative specification with its own judge, run against any `almide` binary · [almide-dojo](https://github.com/almide/almide-dojo), the LLM-writability ground, harness written in Almide · [bonsai-almide](https://github.com/almide/bonsai-almide), a 1-bit LLM in the browser
-
-Measured 2026-09-30: 144 public repositories outside this one carry Almide source. Hand-written, excluding generated output: [nn](https://github.com/almide-graphics/nn) 21,815 lines, the [gramide](https://github.com/O6lvl4/gramide) family 19,780 across eight repositories, [almide-shell](https://github.com/almide-graphics/almide-shell) 8,502, [snaidhm](https://github.com/almide-graphics/snaidhm) 6,800, [almide-bindgen](https://github.com/almide/almide-bindgen) 5,871, [ceangal](https://github.com/almide-graphics/ceangal) 5,099, [sprid](https://github.com/O6lvl4/sprid) 4,565, [porta](https://github.com/almide/porta) 4,419. snaidhm and ceangal were counted in their own repositories, which have since been archived and moved into ceangal2.
-
-## Ecosystem and documentation
-
-- [almide-grammar](https://github.com/almide/almide-grammar) — the syntax description the editor and tree-sitter tooling is generated from (keywords, operators, precedence, TextMate scopes), written in Almide; it mirrors the compiler's lexer rather than feeding it, and the weekly `downstream-sync` workflow (`scripts/check-downstream-grammar.sh`) fails when the two token sets differ
-- [vscode-almide](https://github.com/almide/vscode-almide) · [tree-sitter-almide](https://github.com/almide/tree-sitter-almide) (Neovim, Helix, Zed) · [playground](https://github.com/almide/playground)
-- [docs/CHEATSHEET.md](./docs/CHEATSHEET.md) — quick reference for AI code generation · [docs/SPEC.md](./docs/SPEC.md) — the language specification · [docs/GRAMMAR.md](./docs/GRAMMAR.md) — EBNF grammar + stdlib reference
-- [docs/design/DESIGN.md](./docs/design/DESIGN.md) — design philosophy · [docs/design/EQUIVALENCE.md](./docs/design/EQUIVALENCE.md) — the byte-identity claim · [docs/design/MEMORY-SAFETY.md](./docs/design/MEMORY-SAFETY.md) — the proven/trusted account · [docs/TRUST-SPINE.md](./docs/TRUST-SPINE.md) — v1
-- [docs/contracts/](./docs/contracts/) — behavior-contract ledger · [docs/stdlib/](./docs/stdlib/) — standard library, per module · [docs/project/BENCHMARKS.md](./docs/project/BENCHMARKS.md) — sizes, runtime, edit-loop scale · [docs/roadmap/](./docs/roadmap/README.md) — evolution plans
+- [Cheatsheet](./docs/CHEATSHEET.md) — syntax, stdlib and idioms; the page a model should load first (see also [`llms.txt`](./llms.txt))
+- [Specification](./docs/SPEC.md) · [grammar](./docs/GRAMMAR.md) · [standard library](./docs/stdlib/) · [design philosophy](./docs/design/DESIGN.md) · [stability policy](./docs/STABILITY.md)
+- [What is measured](./docs/benchmarks/README.md) — LLM writability, byte identity, memory safety, size and speed, each dated and gated · [benchmark methodology](./docs/project/BENCHMARKS.md)
+- [Behavior contracts](./docs/contracts/) — every native ⇄ wasm promise and its evidence · [proven vs trusted](./docs/contracts/proven-vs-trusted.md)
+- [How it works](./docs/how-it-works.md) — the pipeline and the Trust Spine · [architecture](./docs/ARCHITECTURE.md)
+- [Project status](./docs/status.md) — pre-1.0; the LLM-facing surface is frozen · [roadmap](./docs/roadmap/README.md)
+- [Written in Almide](./docs/written-in-almide.md) — agents, parsers, graphics and libraries outside this repository · editors: [vscode-almide](https://github.com/almide/vscode-almide), [tree-sitter-almide](https://github.com/almide/tree-sitter-almide)
 
 ## Contributing
 
-Issues and pull requests are welcome on [GitHub](https://github.com/almide/almide). After cloning, install the git hooks (`brew install lefthook && lefthook install`); commits must be in English (enforced by the commit-msg hook). Project conventions: [CLAUDE.md](./CLAUDE.md).
+Issues and pull requests are welcome. After cloning, run `brew install lefthook && lefthook install`; commits are in English (the commit-msg hook enforces it). Conventions: [CLAUDE.md](./CLAUDE.md).
 
 ## License
 
