@@ -817,12 +817,12 @@ jobs:
           $ALMIDE run tools/almide-gates/src/main.almd -- certified-leaks .
 
       # The published build-speed table is DERIVED from docs/benchmarks/build-speed.txt, the
-      # same discipline as the contract index and the claims block: a hand-edited number in the
-      # README is a defect this catches rather than a change a reader is trusted not to make.
+      # same discipline as the contract index and the claims block: a hand-edited number on the
+      # measurements page (docs/benchmarks/README.md) is a defect this catches rather than a change a reader is trusted not to make.
       # Freshness only — the numbers themselves are machine-dependent, so re-measuring here
       # would fail for every machine but the one that produced the baseline. The RATCHET
       # (`-- bench --check`, 1.5x) is a separate, opt-in job for that reason.
-      - name: README build-speed block is fresh (#999)
+      - name: Build-speed block on the measurements page is fresh (#999)
         run: |
           ALMIDE=/tmp/almide-bin/almide
           $ALMIDE run tools/almide-gates/src/main.almd -- bench docs/benchmarks --check-readme
@@ -1703,7 +1703,7 @@ jobs:
       - name: Stdlib doc indexes up to date (#1469 — every docs/stdlib page under the generator, regenerate and diff)
         run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/check-stdlib-docs.sh
 
-      - name: README counts derived, Hello, world bytes match the stamped baseline, no undated hand-written count
+      - name: Measurements-page counts derived, Hello, world bytes match the stamped baseline, no undated hand-written count on the README or its docs pages
         run: ALMIDE_BIN=/tmp/almide-bin/almide bash scripts/gen-readme-stats.sh --check && bash scripts/check-readme-numbers.sh
 
       - name: Mutation score block is the stamped record rendered (#2152 — the sweep workflow re-measures it)
@@ -1713,10 +1713,10 @@ jobs:
       # docs-only change skips (tests/docs_gen_test.rs in Test Rust, the
       # build-speed render in Almide gates). This job always runs, so a README
       # edit cannot dodge them by being docs-only.
-      - name: docs-gen --check (stdlib-count claim in README/SPEC/WASM-OUTPUT, llms.txt version and codes)
+      - name: docs-gen --check (stdlib-count claim in the READMEs, the measurements and status pages, SPEC and WASM-OUTPUT; llms.txt version and codes)
         run: /tmp/almide-bin/almide docs-gen --check
 
-      - name: README build-speed block is fresh (#999 — render check, no measurement)
+      - name: Build-speed block on the measurements page is fresh (#999 — render check, no measurement)
         # `almide run` builds the gates tool natively, so this step needs cargo.
         run: |
           rustup toolchain install stable --profile minimal >/dev/null 2>&1 || true

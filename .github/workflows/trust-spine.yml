@@ -214,9 +214,9 @@ jobs:
         # from a machine without Coq).
         run: |
           if ! GEN_CLAIMS_REQUIRE_MEASURED=1 bash scripts/gen-claims.sh --check; then
-            echo "--- measured regeneration (the content docs/TRUST-SPINE.md + README.md should carry) ---"
+            echo "--- measured regeneration (the content docs/TRUST-SPINE.md + docs/benchmarks/README.md should carry) ---"
             GEN_CLAIMS_REQUIRE_MEASURED=1 bash scripts/gen-claims.sh
-            git --no-pager diff docs/TRUST-SPINE.md README.md
+            git --no-pager diff docs/TRUST-SPINE.md docs/benchmarks/README.md
             exit 1
           fi
 

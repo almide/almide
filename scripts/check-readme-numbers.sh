@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# check-readme-numbers.sh — no undated hand-written count in README.md.
+# check-readme-numbers.sh — no undated hand-written count in README.md, its
+# translations, or the docs pages its sections moved to (README_NUMBER_PAGES in
+# scripts/lib/readme-targets.sh: the measurements page docs/benchmarks/README.md,
+# docs/status.md, docs/how-it-works.md, docs/written-in-almide.md).
 #
-# A count in the README is a claim. Claims here are either DERIVED (inside a
+# A count on these pages is a claim. Claims here are either DERIVED (inside a
 # `<!-- name:generated:start … -->` block some script owns) or MEASURED (the
 # line carries the date it was measured, so a reader can tell a fresh number
 # from a fossil). The "164-contract ledger" that sat at half the ledger's
@@ -32,13 +35,19 @@ cd "$here/.." || exit 2
 
 fail=0
 NOUNS='(contracts?|functions?|modules?|tests?|test files?|fixtures?|theorems?|lemmas?|tasks?|trials?|exercises?|goldens?|mutants?)'
-# Owned by proofs/check.sh (its COUNT_DOCS list includes README.md): the
+# Owned by proofs/check.sh (its COUNT_DOCS list includes the measurements
+# page, docs/benchmarks/README.md, where the count is quoted): the
 # audited-theorem count is asserted where it is computed.
 EXEMPT='audited theorems'
 
 . scripts/lib/readme-targets.sh
-for readme in "${README_TARGETS[@]}"; do
-[ -f "$readme" ] || continue
+for readme in "${README_NUMBER_PAGES[@]}"; do
+if [ ! -f "$readme" ]; then
+  # A listed page that is gone is a page nobody gates any more: red, not skipped.
+  echo "::error::$readme is listed in README_NUMBER_PAGES (scripts/lib/readme-targets.sh) but does not exist"
+  fail=1
+  continue
+fi
 while IFS= read -r hit; do
   echo "::error::$readme:$hit"
   fail=1
@@ -63,7 +72,7 @@ FOSSILS=(
   'exactly one wasm path'   # same
   '164-contract'            # the ledger passed 164 long ago; the count is derived now
 )
-for f in README.md docs/wasm/README.md docs/project/BENCHMARKS.md; do
+for f in "${README_NUMBER_PAGES[@]}" docs/wasm/README.md docs/project/BENCHMARKS.md; do
   [ -f "$f" ] || continue
   for p in "${FOSSILS[@]}"; do
     if grep -nF -- "$p" "$f" >/dev/null; then
@@ -90,7 +99,8 @@ done
 #     MiniGit bench's date, and a section-wide search would happily age the
 #     MSR claim against a different measurement's date.
 #
-# No key and no network: the date and the sha are in README.md. The line and
+# No key and no network: the date and the sha are on the measurements page
+# (README_MEASURED_PAGE, docs/benchmarks/README.md). The line and
 # the section list come from scripts/lib/readme-freshness.sh, which the
 # nightly delivery gate reads too.
 #
@@ -104,4 +114,4 @@ readme_msr_report || fail=1
 readme_freshness_report || fail=1
 
 if [ "$fail" -ne 0 ]; then exit 1; fi
-echo "readme-numbers: every count in README.md is derived or dated; the MSR scorecard is within $README_FRESHNESS_MAX_DAYS days and cites its run; no fossil phrase."
+echo "readme-numbers: every count in ${README_NUMBER_PAGES[*]} is derived or dated; the MSR scorecard is within $README_FRESHNESS_MAX_DAYS days and cites its run; no fossil phrase."

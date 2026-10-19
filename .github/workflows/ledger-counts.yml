@@ -1,6 +1,6 @@
 name: Ledger counts (nightly)
 
-# The aggregate counts the generated docs quote (README claims + stats,
+# The aggregate counts the generated docs quote (docs/benchmarks/README.md claims + stats,
 # proofs/STAGE-STATUS.md, docs/contracts/README.md,
 # docs/contracts/conformance.md) are STAMPED in proofs/ledger-counts.toml and
 # rendered from there: deriving them per PR made every fixture or contract PR
@@ -94,7 +94,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -B "$REFRESH_BRANCH"
-          git add proofs/ledger-counts.toml README.md proofs/STAGE-STATUS.md docs/contracts/README.md docs/contracts/conformance.md
+          git add proofs/ledger-counts.toml docs/benchmarks/README.md proofs/STAGE-STATUS.md docs/contracts/README.md docs/contracts/conformance.md
           git commit -q -m "Refresh the stamped ledger counts on the landed base"
           git push --force origin "$REFRESH_BRANCH"
           {

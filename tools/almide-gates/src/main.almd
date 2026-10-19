@@ -151,29 +151,35 @@ effect fn main() -> Unit = {
       let alm = list.get_or(args, 3, "almide")
       let target = list.get_or(args, 4, "examples/lisp.almd")
       let base = root + "/build-speed.txt"
-      // `--readme` renders the committed baseline into README.md and does NOT measure: a
+      // `--readme` renders the committed baseline into the measurements page and does NOT measure: a
       // generated block whose content depended on the generator's machine would be stale for
       // everyone but its author. Measuring and publishing are separate acts.
       let mode = list.get_or(args, 2, "")
       if mode == "--readme" or mode == "--check-readme" then {
         let base_lines = fs.read_lines(base) ?? []
         let block = bench.readme_block(base_lines)
-        // Every translation carries the same block (scripts/lib/readme-targets.sh holds
-        // the list for the shell generators): a translated block nobody renders is a fossil.
-        let targets = ["README.md", "README.ja.md", "README.zh-CN.md"] |> list.filter((p) => fs.exists(p))
+        // The block lives on the measurements page only (scripts/lib/readme-targets.sh holds
+        // the same list for the shell generators); the front-page READMEs link to it. A listed
+        // page that is missing is an error, never a silently empty target list.
+        let targets = ["docs/benchmarks/README.md"]
+        let missing = targets |> list.filter((p) => not fs.exists(p))
+        if not list.is_empty(missing) then {
+          println("::error::build-speed block page missing: " + list.join(missing, ", "))
+          process.exit(1)
+        } else ()
         let readmes = targets |> list.map((p) => (p, fs.read_text(p)!))!
         let stale = readmes |> list.filter(((_, text)) => bench.splice_block(text, block) != text) |> list.map(((p, _)) => p)
         if mode == "--readme" then {
           for (p, text) in readmes {
             fs.write(p, bench.splice_block(text, block))!
           }
-          println("build-speed: README block rendered from " + base + " into " + list.join(targets, ", "))
+          println("build-speed: block rendered from " + base + " into " + list.join(targets, ", "))
           process.exit(0)
         } else if list.is_empty(stale) then {
-          println("build-speed: README block is fresh in " + list.join(targets, ", ") + ".")
+          println("build-speed: block is fresh in " + list.join(targets, ", ") + ".")
           process.exit(0)
         } else {
-          println("::error::README build-speed block is stale in " + list.join(stale, ", ") + " — run: almide run tools/almide-gates/src/main.almd -- bench docs/benchmarks --readme")
+          println("::error::build-speed block is stale in " + list.join(stale, ", ") + " — run: almide run tools/almide-gates/src/main.almd -- bench docs/benchmarks --readme")
           process.exit(1)
         }
       } else ()

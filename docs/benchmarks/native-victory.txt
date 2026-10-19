@@ -1,4 +1,4 @@
-# Native victory ledger (#1330) — the SOURCE for the README's native-victory block.
+# Native victory ledger (#1330) — the SOURCE for docs/benchmarks/README.md's native-victory block.
 # Regenerate the block: bash scripts/gen-readme-stats.sh
 # Gate:  bash scripts/check-perf-ratio.sh — the VICTORY rows re-measure the
 #        claim (almide-native / ordinary-Rust ratio < 1.0) and the same-source

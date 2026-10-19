@@ -14,9 +14,15 @@
 #                                     and a gate is finished when it reaches
 #                                     someone who acts on it (#2391)
 #
-# Neither needs a key or the network: the measurement date is in README.md.
+# Neither needs a key or the network: the measurement date is on the
+# measurements page (README_MEASURED_PAGE in scripts/lib/readme-targets.sh,
+# docs/benchmarks/README.md since the README was slimmed).
 # Keeping the constant and the section list in one file is the point — the
 # 90-day line written down twice is the "second place to remember" bug class.
+
+# The page. Both callers cd to the repo root before sourcing this file.
+# shellcheck source=readme-targets.sh
+. scripts/lib/readme-targets.sh
 
 # The line. Override for a one-off reading, never in a gate.
 README_FRESHNESS_MAX_DAYS="${MAX_DAYS:-90}"
@@ -28,7 +34,7 @@ README_FRESHNESS_MAX_DAYS="${MAX_DAYS:-90}"
 # Add a row when a section starts carrying a measured claim; never remove one
 # — retire it by measuring.
 README_MEASURED_SECTIONS=(
-  '### LLM writability'
+  '## LLM writability'
 )
 
 # YYYY-MM-DD -> seconds since the epoch (GNU date and BSD date).
@@ -42,7 +48,7 @@ readme_section_date() {
     $0 == h { on = 1; next }
     on && /^#+ / { n = match($0, /^#+/); if (RLENGTH <= lvl) exit }
     on && match($0, /20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]/) { print substr($0, RSTART, RLENGTH); exit }
-  ' README.md
+  ' "$README_MEASURED_PAGE"
 }
 
 # Whole days between a YYYY-MM-DD and today (UTC).
@@ -74,20 +80,20 @@ readme_msr_report() {
     text=${hit#*:}
     d=$(printf '%s' "$text" | grep -oE '20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]' | head -1 || true)
     if [ -z "$d" ]; then
-      echo "::error::README.md:$lineno: this line cites an almide-dojo run but carries no YYYY-MM-DD — the run and the date it was measured belong on the same line, or the scorecard's age gets read off some other measurement's date"
+      echo "::error::$README_MEASURED_PAGE:$lineno: this line cites an almide-dojo run but carries no YYYY-MM-DD — the run and the date it was measured belong on the same line, or the scorecard's age gets read off some other measurement's date"
       fail=1
       continue
     fi
     age=$(readme_days_since "$d")
     if [ "$age" -gt "$README_FRESHNESS_MAX_DAYS" ]; then
-      echo "::error::README.md:$lineno: the MSR scorecard cites a run measured $d — $age days ago, above the $README_FRESHNESS_MAX_DAYS-day line. Re-measure (almide-dojo owns it, #1617: 'make msr' or its Cross-language MSR Run workflow, neither of which needs an Anthropic key) and replace the table, the date and the sha together; do not edit the date alone."
+      echo "::error::$README_MEASURED_PAGE:$lineno: the MSR scorecard cites a run measured $d — $age days ago, above the $README_FRESHNESS_MAX_DAYS-day line. Re-measure (almide-dojo owns it, #1617: 'make msr' or its Cross-language MSR Run workflow, neither of which needs an Anthropic key) and replace the table, the date and the sha together; do not edit the date alone."
       fail=1
     else
-      echo "readme-numbers: MSR scorecard (README.md:$lineno) measured $d, $age days ago, line $README_FRESHNESS_MAX_DAYS"
+      echo "readme-numbers: MSR scorecard ($README_MEASURED_PAGE:$lineno) measured $d, $age days ago, line $README_FRESHNESS_MAX_DAYS"
     fi
-  done < <(grep -nE 'almide-dojo@[0-9a-f]{7,40}' README.md || true)
+  done < <(grep -nE 'almide-dojo@[0-9a-f]{7,40}' "$README_MEASURED_PAGE" || true)
   if [ "$n" -eq 0 ]; then
-    echo "::error::README.md: no line cites an almide-dojo@<sha> run — the LLM-writability scorecard must name the committed run it came from (#1617, #2146 item 4), so a reader can recompute it from that repo's runs/ instead of believing it"
+    echo "::error::$README_MEASURED_PAGE: no line cites an almide-dojo@<sha> run — the LLM-writability scorecard must name the committed run it came from (#1617, #2146 item 4), so a reader can recompute it from that repo's runs/ instead of believing it"
     fail=1
   fi
   return "$fail"
@@ -103,13 +109,13 @@ readme_freshness_report() {
     level=$((level - 1))
     d=$(readme_section_date "$heading" "$level")
     if [ -z "$d" ]; then
-      echo "::error::README.md: section '$heading' carries no YYYY-MM-DD measurement date (check-readme-numbers.sh should have refused this)"
+      echo "::error::$README_MEASURED_PAGE: section '$heading' carries no YYYY-MM-DD measurement date (check-readme-numbers.sh should have refused this)"
       fail=1
       continue
     fi
     age=$(readme_days_since "$d")
     if [ "$age" -gt "$README_FRESHNESS_MAX_DAYS" ]; then
-      echo "::error::README.md: '$heading' was measured on $d — $age days ago, above the $README_FRESHNESS_MAX_DAYS-day line. Re-run the measurement (almide-dojo owns it: #1617) and replace the table and its date; do not edit the date alone."
+      echo "::error::$README_MEASURED_PAGE: '$heading' was measured on $d — $age days ago, above the $README_FRESHNESS_MAX_DAYS-day line. Re-run the measurement (almide-dojo owns it: #1617) and replace the table and its date; do not edit the date alone."
       fail=1
     else
       echo "readme-freshness: '$heading' measured $d ($age days ago, line $README_FRESHNESS_MAX_DAYS)"

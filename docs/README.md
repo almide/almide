@@ -7,7 +7,8 @@ Start here. Four doorways, by what you are trying to do.
 | **Write Almide** | [CHEATSHEET.md](./CHEATSHEET.md) — syntax, stdlib, idioms. The one an LLM should load first (see also [`/llms.txt`](../llms.txt)) |
 | **Know what the language *is*** | [SPEC.md](./SPEC.md) (normative) · [GRAMMAR.md](./GRAMMAR.md) (EBNF) · [specs/](./specs/) (per-area, with test paths) |
 | **Change the compiler** | [ARCHITECTURE.md](./ARCHITECTURE.md) — pipeline and module map · [cross-target-decisions.md](./cross-target-decisions.md) — the semantic questions both targets must answer from one source |
-| **Judge whether to trust it** | [TRUST-SPINE.md](./TRUST-SPINE.md) — what is proven, what is measured, what is neither |
+| **Judge whether to trust it** | [TRUST-SPINE.md](./TRUST-SPINE.md) — what is proven, what is measured, what is neither · [benchmarks/README.md](./benchmarks/README.md) — every published measurement, dated and gated |
+| **See where the project stands** | [status.md](./status.md) — maturity, targets, codegen · [how-it-works.md](./how-it-works.md) — the pipeline in one page · [written-in-almide.md](./written-in-almide.md) — programs outside this repository |
 
 ## Directories
 
@@ -22,7 +23,7 @@ Start here. Four doorways, by what you are trying to do.
 | [`design/`](./design/) | Design rationale: [DESIGN.md](./design/DESIGN.md) (ambiguity removal), [REJECTED_PATTERNS.md](./design/REJECTED_PATTERNS.md), [HIDDEN_OPERATIONS.md](./design/HIDDEN_OPERATIONS.md), [EQUIVALENCE.md](./design/EQUIVALENCE.md) |  |
 | [`wasm/`](./wasm/) | [WASM-OUTPUT.md](./wasm/WASM-OUTPUT.md) (what the wasm backend emits and commits to), capability system |  |
 | [`project/`](./project/) | [BENCHMARKS.md](./project/BENCHMARKS.md), [BREAKING_CHANGE_POLICY.md](./project/BREAKING_CHANGE_POLICY.md), [CLAUDE_TEMPLATE.md](./project/CLAUDE_TEMPLATE.md) (`almide init` embeds this one) | ✅ `include_str!` |
-| [`benchmarks/`](./benchmarks/) | `build-speed.txt` — the committed baseline the README block is rendered from | ✅ `almide-gates bench` |
+| [`benchmarks/`](./benchmarks/) | [README.md](./benchmarks/README.md) — the measurements page (moved out of the front-page README); its generated blocks render from the committed ledgers here (`build-speed.txt`, `wasm-size.txt`, `wasm-runtime.txt`, `native-victory.txt`) and from `proofs/` | ✅ `almide-gates bench`, `gen-readme-stats.sh`, `gen-claims.sh`, `gen-mutation-score.sh`, `check-readme-numbers.sh` |
 | `assets/`, `figures/` | README images and generated benchmark charts |  |
 
 ## Before you move or delete anything here
@@ -30,7 +31,7 @@ Start here. Four doorways, by what you are trying to do.
 `docs/` is not only prose. The ✅ column above marks directories a build step or
 CI gate reads by path: `docs/diagnostics/` is linked into the compiler binary,
 and `contracts/`, `stdlib/semantics-manifest.toml`, `specs/als/`, `TRUST-SPINE.md`
-and `benchmarks/build-speed.txt` are gate inputs. About twenty `roadmap/active/`
+and `benchmarks/` (the ledgers and the page they render into) are gate inputs. About twenty `roadmap/active/`
 pages are named from Rust source comments. Grep before you move.
 
 MSR (modification survival rate) lives in

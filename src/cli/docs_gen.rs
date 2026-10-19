@@ -296,7 +296,20 @@ fn check_stdlib_fn_count() -> Vec<String> {
         Ok(stamp) => stamp,
         Err(error) => return vec![error],
     };
-    for doc in ["README.md", "docs/SPEC.md", "docs/wasm/WASM-OUTPUT.md"] {
+    // The front pages and the docs pages the README's sections moved to: the
+    // stamped stdlib count lives on the measurements page now, and a live claim
+    // may appear on any of them.
+    for doc in [
+        "README.md",
+        "README.ja.md",
+        "README.zh-CN.md",
+        "docs/benchmarks/README.md",
+        "docs/status.md",
+        "docs/how-it-works.md",
+        "docs/written-in-almide.md",
+        "docs/SPEC.md",
+        "docs/wasm/WASM-OUTPUT.md",
+    ] {
         let Ok(text) = std::fs::read_to_string(doc) else {
             drifts.push(format!("cannot read {doc}"));
             continue;

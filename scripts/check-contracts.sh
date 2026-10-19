@@ -556,8 +556,9 @@ if [ -d "$ALS_DIR" ]; then
   [ "$n_orphan" -eq 0 ] && echo "spec-coverage: every normative ALS section is cited by >=1 contract."
 fi
 
-# ── (g) README claims block (#766) ───────────────────────────────────────────
-# The equivalence-claim numbers and the exceptions clause quoted in README.md
+# ── (g) claims block (#766) ───────────────────────────────────────────
+# The equivalence-claim numbers and the exceptions clause quoted on the
+# measurements page (docs/benchmarks/README.md)
 # are DERIVED from this ledger by scripts/gen-claims.sh. A stale or hand-edited
 # block is a public claim drifting from what the gates verify — red.
 bash scripts/gen-claims.sh --check || fail=1
