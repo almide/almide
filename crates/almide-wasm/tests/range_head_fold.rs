@@ -51,9 +51,10 @@ fn a_range_head_folded_once_allocates_nothing_per_element() {
 /// An init that rebinds the variable its fold's source names: the source was
 /// evaluated first, so the fold walks the OLD block, which the arm keeps
 /// alive across the init and releases after the loop — no stale read, no
-/// leak. `set.fold` / `map.fold` are pinned here rather than in a
-/// cross-target fixture because the native leg refuses this shape at rustc
-/// (E0506) for those two.
+/// leak. The block counts are what this test adds; the printed values of
+/// every arm are also pinned on both legs by
+/// `spec/wasm_cross/fold_init_rebinds_source.almd` (the `set.fold` /
+/// `map.fold` arms since native builds them, #3801).
 #[test]
 fn a_fold_source_survives_an_init_that_rebinds_it() {
     let cases = [

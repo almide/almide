@@ -14,8 +14,18 @@
 // every operand up to the last conflicting one that reads `x` or can run user
 // code — so no effect moves past another, and an operand AFTER the `&mut`
 // is never hoisted (it must see the write-back).
+//
+// A later operand that ASSIGNS `x` is the same conflict (#3801): a block
+// argument `{ st = …; 0 }` rebinds `st` while an earlier `&st` operand (a
+// runtime fn taking its source by reference, `almide_rt_set_fold(&st, …)`,
+// or a user fn whose param is inferred borrowed) still holds a borrow of it —
+// rustc E0506. Arguments are values taken left to right (ALS-E26), so the
+// earlier operand is bound before the rebind and the call reads the value
+// `x` held when that operand was evaluated.
 
-/// Every root variable a `&mut` place anywhere inside `e` borrows.
+/// Every root variable a later operand writes: the root of each `&mut`
+/// place anywhere inside `e`, and each variable `e` reassigns or writes in
+/// place (`x = …`, `x[i] = …`, `x.f = …`).
 fn nested_mut_roots(e: &IrExpr) -> Vec<VarId> {
     struct Roots(Vec<VarId>);
     impl IrVisitor for Roots {
@@ -28,6 +38,11 @@ fn nested_mut_roots(e: &IrExpr) -> Vec<VarId> {
     }
     let mut r = Roots(Vec::new());
     r.visit_expr(e);
+    let mut assigned = HashSet::new();
+    collect_assigned_vars(e, &mut assigned);
+    let mut assigned: Vec<u32> = assigned.into_iter().collect();
+    assigned.sort_unstable();
+    r.0.extend(assigned.into_iter().map(VarId));
     r.0
 }
 
