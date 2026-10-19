@@ -130,3 +130,24 @@ fn same_space_mutable_global_still_evaluates() {
     );
     assert_eq!(out.stdout, "12\n");
 }
+
+/// #3825, the module edition: a module body's TAIL call of its own private
+/// sibling (`step` inside `walker.count`) means the module's `step`, not the
+/// entry program's fn of the same spelling. The ordinary call path resolved
+/// the sibling first (#1844); the tail-call spine took the flat table's root
+/// `step`. The expected lines are native's (`almide run`).
+#[test]
+fn a_module_tail_call_reaches_its_own_sibling_not_the_roots_namesake() {
+    let out = run_project("tailsibling", &[
+        (
+            "walker.almd",
+            "fn step(n: Int, acc: Int) -> Int = if n == 0 then acc else step(n - 1, acc + 1)\n\npub fn count(n: Int) -> Int = step(n, 0)\n",
+        ),
+        (
+            "main.almd",
+            "import walker\n\nfn step(n: Int, acc: Int) -> Int = if n > 100 then step(n - 1, acc) else 999 + n + acc\n\nfn main() -> Unit = {\n  println(int.to_string(walker.count(3)))\n  println(int.to_string(step(1, 2)))\n}\n",
+        ),
+    ]);
+    assert_eq!(out.status, almide_interp::RunStatus::Ok, "run failed: stderr=<{}>", out.stderr);
+    assert_eq!(out.stdout, "3\n1002\n");
+}
