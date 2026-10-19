@@ -63,3 +63,14 @@ pub(crate) fn emit_class_head<'a, 'b>(i: &'a mut InstructionSink<'b>, canonical:
         i.local_get(slot).i32_load(MemArg { offset: 0, align: 2, memory_index: 0 })
     }
 }
+
+/// `$free`'s release of a block above the class ceiling: filed into the
+/// large list (`runtime_large::emit_lfree`), or under the switch nothing —
+/// the block is abandoned, as nothing would take it back (see the module
+/// doc for the walk this avoids). `(b, t)` are the block and its total,
+/// `walk` the three scratch locals the filing uses.
+pub(crate) fn emit_large_release(i: &mut InstructionSink<'_>, canonical: bool, (b, t): (u32, u32), walk: (u32, u32, u32)) {
+    if !canonical {
+        crate::runtime_large::emit_lfree(i, (b, t), walk);
+    }
+}
