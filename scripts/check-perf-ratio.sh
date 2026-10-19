@@ -108,7 +108,9 @@ PAIRS="nbody=rust:nbody_unrolled spectralnorm=rust:spectralnorm fasta=rust:fasta
 # 35857650106, 35864492749, 35868760167, 35872683812) against 1.77 on an M4
 # Pro, so unlike listbuild's 1.58/0.91 the ratio does travel. The workload moved
 # to 4M in the same change (bench.py QUICK_ARGS) because the reference read
-# 0.0715s once at 2M, under MIN_SECONDS. `wordfreq-group` stays reported: it
+# 0.0715s once at 2M, under MIN_SECONDS; and to 8M with #2157's NATIVE <= WASM
+# relation, whose native `wordfreq-group` row read 0.0695s at 4M on a runner
+# (develop e4fcced11). `wordfreq-group` stays reported: it
 # is the idiom spelling, and its relation to `wordfreq` is gated on the wasm
 # leg (below); natively it runs `list.group_by`'s grouping lists, a different
 # program from the reference's single `entry` per draw.
