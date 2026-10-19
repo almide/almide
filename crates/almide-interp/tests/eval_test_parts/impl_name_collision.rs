@@ -40,3 +40,25 @@ const IMPL_NAME_COLLISION_OUT: &str =
 fn a_user_fn_spelled_like_a_stdlib_impl_runs_the_users_body() {
     expect_out(IMPL_NAME_COLLISION_SRC, IMPL_NAME_COLLISION_OUT);
 }
+
+// The other direction: a self-hosted body's OWN bare call of a sibling impl
+// (`zlib_deflate_level` calls `zlib_deflate(data)!`) means the pool's
+// sibling, not the program's fn of that spelling. The expected lines are
+// native's (`almide run`).
+#[test]
+fn a_self_hosted_body_calls_its_own_sibling_not_the_users_namesake() {
+    expect_out(
+        r#"import zlib
+
+fn zlib_deflate(n: Int) -> Int = n + 1
+
+effect fn main() -> Unit = {
+  let packed = zlib.deflate_level(bytes.from_list([1, 2, 3]), 6)!
+  let back = zlib.inflate(packed)!
+  println("${bytes.to_list(back)}")
+  println(int.to_string(zlib_deflate(1)))
+}
+"#,
+        "[1, 2, 3]\n2\n",
+    );
+}
