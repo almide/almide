@@ -25,6 +25,27 @@ type Bindings = std::collections::HashMap<almide_base::intern::Sym, Ty>;
 /// How deep the effect-fn search follows type aliases and records.
 const MAX_DEPTH: usize = 8;
 
+/// The named types one search has expanded, per name: the args and the
+/// shallowest depth each instantiation was expanded at.
+type Expanded = std::collections::HashMap<almide_base::intern::Sym, Vec<(Vec<Ty>, usize)>>;
+
+/// Record that `name[args]` is expanded at `depth`; false when it already was
+/// at that depth or shallower (everything below it has been searched).
+fn first_expansion(seen: &mut Expanded, name: almide_base::intern::Sym, args: &[Ty], depth: usize) -> bool {
+    let at = seen.entry(name).or_default();
+    match at.iter_mut().find(|(a, _)| a.as_slice() == args) {
+        Some((_, d)) if *d <= depth => false,
+        Some((_, d)) => {
+            *d = depth;
+            true
+        }
+        None => {
+            at.push((args.to_vec(), depth));
+            true
+        }
+    }
+}
+
 impl Checker {
     /// `t` with inference vars and a top-level alias resolved.
     fn expect_view(&self, t: &Ty) -> Ty {
@@ -33,17 +54,26 @@ impl Checker {
 
     /// Does `t` hold an `effect` fn type anywhere (through aliases)?
     pub(crate) fn holds_effect_fn(&self, t: &Ty) -> bool {
-        self.holds_effect_fn_at(t, 0)
+        self.type_holds(t, 0, &mut Expanded::new(), &|v| matches!(v, Ty::Fn { is_effect: true, .. }))
     }
 
-    fn holds_effect_fn_at(&self, t: &Ty, depth: usize) -> bool {
+    /// Does `t`, viewed through vars and aliases, hold a type `hit` accepts
+    /// within [`MAX_DEPTH`] steps? A named type is expanded once per search
+    /// unless it is reached again shallower: the search stops at the first
+    /// hit, so a type reached again had nothing below it, and a fan of
+    /// variant cases naming the same types no longer multiplies per level.
+    fn type_holds(&self, t: &Ty, depth: usize, seen: &mut Expanded, hit: &dyn Fn(&Ty) -> bool) -> bool {
         if depth > MAX_DEPTH {
             return false;
         }
-        match self.expect_view(t) {
-            Ty::Fn { is_effect: true, .. } => true,
-            other => other.children().iter().any(|c| self.holds_effect_fn_at(c, depth + 1)),
+        let t = resolve_ty(t, &self.uf);
+        if let Ty::Named(name, args) = &t
+            && !first_expansion(seen, *name, args, depth)
+        {
+            return false;
         }
+        let view = self.env.resolve_named(&t);
+        hit(&view) || view.children().iter().any(|c| self.type_holds(c, depth + 1, seen, hit))
     }
 
     /// Hand `expected` down `expr`'s structure to the lambdas it shapes. A
@@ -158,7 +188,7 @@ impl Checker {
     pub(crate) fn expected_bindings_view(&self, seeds: &Bindings, bindings: &Bindings) -> Bindings {
         let mut view = seeds.clone();
         for (g, actual) in bindings {
-            if !seeds.contains_key(g) || self.holds_pure_fn(actual, 0) {
+            if !seeds.contains_key(g) || self.holds_pure_fn(actual) {
                 view.insert(*g, actual.clone());
             }
         }
@@ -166,14 +196,9 @@ impl Checker {
     }
 
     /// Does `t` hold a fn value that is neither effect nor the carrier?
-    fn holds_pure_fn(&self, t: &Ty, depth: usize) -> bool {
-        if depth > MAX_DEPTH {
-            return false;
-        }
-        match self.expect_view(t) {
-            Ty::Fn { is_effect: false, ret, .. } if !ret.is_result() => true,
-            other => other.children().iter().any(|c| self.holds_pure_fn(c, depth + 1)),
-        }
+    fn holds_pure_fn(&self, t: &Ty) -> bool {
+        let pure = |v: &Ty| matches!(v, Ty::Fn { is_effect: false, ret, .. } if !ret.is_result());
+        self.type_holds(t, 0, &mut Expanded::new(), &pure)
     }
 
     /// The fn type recorded for lambda `id` by [`Self::expect_expr`].
