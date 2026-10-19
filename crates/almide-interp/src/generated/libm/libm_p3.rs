@@ -557,28 +557,46 @@ fn pow(x: f64, y: f64) -> f64 {
 // Named `almide_rt_libm_*` so the runtime-registry build script auto-links
 // the `libm` module wherever `math` (or any other module) references it, and
 // so the flattened single-file crate has no bare `sin`/`cos`/`tan` collisions.
+//
+// MANUFACTURED NaN (C-055). The kernels stay verbatim musl, so a NaN they make
+// from non-NaN operands — log of a negative, sin/cos/tan of ±inf, a negative
+// base to a non-integer power — is `(x - x) / 0.0`, `x - x` or `(x - x) / (x - x)`,
+// whose SIGN is the host's: an x86 runtime division answers -NaN, aarch64 and a
+// const-folded one +NaN. list.min/max order NaN by that sign (totalOrder), so the
+// entries below return the ONE fixed pattern +qNaN 0x7FF8000000000000 for such a
+// NaN; a NaN operand still passes through as the kernel propagates it. The
+// self-hosted wasm legs (stdlib/math_log.almd, math_trig.almd, math_fpow.almd)
+// return the same pattern at the same sites.
+#[inline(always)]
+fn almide_libm_fixed_nan(r: f64, operand_is_nan: bool) -> f64 {
+    // `black_box`: LLVM treats every NaN as interchangeable and may fold a
+    // NaN-for-NaN select back to `r` (it does so for sqrt).
+    if r.is_nan() && !operand_is_nan { std::hint::black_box(f64::from_bits(0x7FF8_0000_0000_0000)) } else { r }
+}
 
 /// Deterministic `sin` for the Almide runtime. See module docs.
 #[inline(always)]
-pub fn almide_rt_libm_sin(x: f64) -> f64 { sin(x) }
+pub fn almide_rt_libm_sin(x: f64) -> f64 { almide_libm_fixed_nan(sin(x), x.is_nan()) }
 /// Deterministic `cos` for the Almide runtime. See module docs.
 #[inline(always)]
-pub fn almide_rt_libm_cos(x: f64) -> f64 { cos(x) }
+pub fn almide_rt_libm_cos(x: f64) -> f64 { almide_libm_fixed_nan(cos(x), x.is_nan()) }
 /// Deterministic `tan` for the Almide runtime. See module docs.
 #[inline(always)]
-pub fn almide_rt_libm_tan(x: f64) -> f64 { tan(x) }
+pub fn almide_rt_libm_tan(x: f64) -> f64 { almide_libm_fixed_nan(tan(x), x.is_nan()) }
 /// Deterministic `exp` for the Almide runtime. See module docs.
 #[inline(always)]
 pub fn almide_rt_libm_exp(x: f64) -> f64 { exp(x) }
 /// Deterministic natural `log` for the Almide runtime. See module docs.
 #[inline(always)]
-pub fn almide_rt_libm_log(x: f64) -> f64 { log(x) }
+pub fn almide_rt_libm_log(x: f64) -> f64 { almide_libm_fixed_nan(log(x), x.is_nan()) }
 /// Deterministic `log2` for the Almide runtime. See module docs.
 #[inline(always)]
-pub fn almide_rt_libm_log2(x: f64) -> f64 { log2(x) }
+pub fn almide_rt_libm_log2(x: f64) -> f64 { almide_libm_fixed_nan(log2(x), x.is_nan()) }
 /// Deterministic `log10` for the Almide runtime. See module docs.
 #[inline(always)]
-pub fn almide_rt_libm_log10(x: f64) -> f64 { log10(x) }
+pub fn almide_rt_libm_log10(x: f64) -> f64 { almide_libm_fixed_nan(log10(x), x.is_nan()) }
 /// Deterministic `pow` for the Almide runtime. See module docs.
 #[inline(always)]
-pub fn almide_rt_libm_pow(base: f64, exp: f64) -> f64 { pow(base, exp) }
+pub fn almide_rt_libm_pow(base: f64, exp: f64) -> f64 {
+    almide_libm_fixed_nan(pow(base, exp), base.is_nan() || exp.is_nan())
+}
