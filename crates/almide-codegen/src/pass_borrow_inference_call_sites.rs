@@ -446,7 +446,7 @@ fn hoist_expr(expr: IrExpr, cx: &mut HoistCx<'_>) -> IrExpr {
             | IrExprKind::Clone { .. } | IrExprKind::Deref { .. } | IrExprKind::Borrow { .. }
             | IrExprKind::BoxNew { .. } | IrExprKind::RcWrap { .. } | IrExprKind::ToVec { .. }) => {
             let node = IrExpr { kind, ty, span, def_id }.map_children(&mut |e| hoist_expr(e, cx));
-            return hoist_interp_parts(node, cx);
+            return hoist_index_operands(hoist_interp_parts(node, cx), cx);
         }
         // Explicit-preserve: nodes this hoist pass does NOT descend into,
         // returned unchanged exactly as the original `other => other` did.
