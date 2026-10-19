@@ -45,7 +45,7 @@ impl<'a> Interpreter<'a> {
         for a in args {
             evaled.push(val!(self.eval_expr(a, scope)));
         }
-        // INSIDE the pool tier a heap value is its address (`pool_fns`), so
+        // INSIDE the pool tier a heap value is its address (`pool_depth`), so
         // a VALUE-level body — an `m |> list.map(..)` composition —
         // handed a block a HEAP-level body built (`matrix.mul`'s, in the
         // `matrix_fused` compositions) would iterate an Int. A HOF only

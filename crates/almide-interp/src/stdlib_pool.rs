@@ -72,6 +72,19 @@ pub(crate) fn impl_fn(module: Sym, func: Sym) -> Option<Sym> {
     pool().call_map.get(&(module, func)).copied()
 }
 
+/// The pool's own body for `name` — the definition a self-hosted body's bare
+/// call of a sibling means, whatever the program spells the same (#3825).
+pub(crate) fn body(name: Sym) -> Option<&'static IrFunction> {
+    pool().fns.get(&name)
+}
+
+/// Is `f` one of the pool's bodies — by IDENTITY, not by name (#3825)? A
+/// program fn may be spelled like a registry impl (`list_len`) and is the
+/// user's own code all the same; the spelling is shared, the definition is not.
+pub(crate) fn is_pool_body(f: &IrFunction) -> bool {
+    body(f.name).is_some_and(|p| std::ptr::eq(p, f))
+}
+
 /// The reverse: the `(module, func)` a registry IMPL name stands for. Lets a
 /// NAMED call of an impl (`string_slice` — how a lowered MODULE body spells
 /// `string.slice`) take the same bridge-first resolution a module-spelled call
