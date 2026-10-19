@@ -48,6 +48,12 @@ fail() { if run "${@:2}"; then echo "FAIL: $1 — expected red" >&2; cat "$tmp/o
 golden=crates/almide-syntax/tests/golden/m.txt
 
 g init -q -b main
+# No background gc/maintenance in the scratch repo: a detached auto-gc still
+# writing .git/objects when the EXIT trap runs made `rm -rf` fail and turned
+# an all-behaved run red (PR #3830's CI, 2026-10-19).
+g config gc.auto 0
+g config gc.autoDetach false
+g config maintenance.auto false
 mkdir -p "$repo/scripts"
 printf '%s\n' "$OLD_LAW" > "$repo/scripts/check-ratchet-separation.sh"
 edit crates/x/src/a.rs "fn a() {}"
