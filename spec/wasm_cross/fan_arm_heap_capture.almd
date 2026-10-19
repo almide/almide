@@ -1,0 +1,114 @@
+// @contract: C-004
+// A fan arm that captures a heap-typed parameter or let binding builds and
+// runs on both targets, every arm in list order (#3819).
+//
+// A borrowed parameter is copied into an owned binding before the arms
+// spawn. For a String that copy must build the Almide String: on the native
+// leg it was a std `String` bound to an `AlmideString` slot, and rustc
+// refused the program with E0308. Shapes: a String, List, Map, record,
+// variant, Option[String] and Bytes parameter, each read by two arms, and
+// a String and List let binding captured the same way.
+type Point = { x: Int, name: String }
+
+type Shape =
+  | Circle(Int)
+  | Label(String)
+
+effect fn str_len(s: String, i: Int) -> Int = string.len(s) + i
+
+effect fn list_len(xs: List[String], i: Int) -> Int = list.len(xs) + i
+
+effect fn map_len(m: Map[String, Int], i: Int) -> Int = map.len(m) + i
+
+effect fn point_len(p: Point, i: Int) -> Int = p.x + string.len(p.name) + i
+
+effect fn shape_len(s: Shape, i: Int) -> Int = match s {
+  Circle(r) => r + i,
+  Label(t) => string.len(t) + i,
+}
+
+effect fn opt_len(o: String?, i: Int) -> Int = match o {
+  some(t) => string.len(t) + i,
+  none => i,
+}
+
+effect fn bytes_len(b: Bytes, i: Int) -> Int = bytes.len(b) + i
+
+effect fn by_string(cmd: String) -> Int = {
+  let r = fan {
+    str_len(cmd, 1)
+    str_len(cmd, 2)
+  }
+  r.0 + r.1
+}
+
+effect fn by_list(paths: List[String]) -> Int = {
+  let r = fan {
+    list_len(paths, 1)
+    list_len(paths, 2)
+  }
+  r.0 + r.1
+}
+
+effect fn by_map(m: Map[String, Int]) -> Int = {
+  let r = fan {
+    map_len(m, 1)
+    map_len(m, 2)
+  }
+  r.0 + r.1
+}
+
+effect fn by_point(p: Point) -> Int = {
+  let r = fan {
+    point_len(p, 1)
+    point_len(p, 2)
+  }
+  r.0 + r.1
+}
+
+effect fn by_shape(s: Shape) -> Int = {
+  let r = fan {
+    shape_len(s, 1)
+    shape_len(s, 2)
+  }
+  r.0 + r.1
+}
+
+effect fn by_option(o: String?) -> Int = {
+  let r = fan {
+    opt_len(o, 1)
+    opt_len(o, 2)
+  }
+  r.0 + r.1
+}
+
+effect fn by_bytes(b: Bytes) -> Int = {
+  let r = fan {
+    bytes_len(b, 1)
+    bytes_len(b, 2)
+  }
+  r.0 + r.1
+}
+
+effect fn by_let(n: Int) -> Int = {
+  let cmd = "run" + int.to_string(n)
+  let paths = ["a", "b", cmd]
+  let r = fan {
+    str_len(cmd, 1)
+    list_len(paths, 2)
+  }
+  r.0 + r.1
+}
+
+effect fn main() -> Unit = {
+  println(int.to_string(by_string("check")!))
+  println(int.to_string(by_list(["a", "b"])!))
+  println(int.to_string(by_map(map.from_list([("a", 1), ("b", 2), ("c", 3)]))!))
+  println(int.to_string(by_point({ x: 4, name: "pt" })!))
+  println(int.to_string(by_shape(Label("shape"))!))
+  println(int.to_string(by_shape(Circle(7))!))
+  println(int.to_string(by_option(some("opt"))!))
+  println(int.to_string(by_option(none)!))
+  println(int.to_string(by_bytes(bytes.from_list([1, 2, 3, 4]))!))
+  println(int.to_string(by_let(5)!))
+}
