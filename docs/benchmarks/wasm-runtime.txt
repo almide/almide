@@ -1,4 +1,4 @@
-# Wasm runtime ledger (#1701) — the SOURCE for the README's wasm-runtime block.
+# Wasm runtime ledger (#1701) — the SOURCE for docs/benchmarks/README.md's wasm-runtime block.
 # Regenerate: bash scripts/check-wasm-runtime-ratio.sh --measure
 # Gate:       bash scripts/check-wasm-runtime-ratio.sh — the STATUS taxonomy
 #             is enforced everywhere (a hole that starts benching, a measured

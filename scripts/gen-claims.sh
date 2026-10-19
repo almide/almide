@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
-# gen-claims.sh — regenerate the machine-derived claims block in README.md
-# from docs/contracts/contracts.toml (#766).
+# gen-claims.sh — regenerate the machine-derived claims block on the
+# measurements page (docs/benchmarks/README.md, README_TARGETS in
+# scripts/lib/readme-targets.sh) from docs/contracts/contracts.toml (#766).
 #
-# The README's "Equivalence Claim" section quotes ledger numbers (contract
+# The page's "Byte-identical across targets" section quotes ledger numbers (contract
 # count, active/flagged split) and the exceptions clause (the list of
 # flagged-for-revision contracts). Those must be DERIVED, never hand-written:
 # this script rewrites everything between the claims markers, and
 # scripts/check-contracts.sh runs `--check` in CI so a drifted block is red.
 #
-#   bash scripts/gen-claims.sh           # rewrite README.md in place
+#   bash scripts/gen-claims.sh           # rewrite the page in place
 #   bash scripts/gen-claims.sh --check   # exit 1 if a block is stale
 #   bash scripts/gen-claims.sh --counts  # also restamp proofs/ledger-counts.toml first
 #
@@ -30,7 +31,9 @@ cd "$(dirname "$0")/.." || exit 2
 readme_fanout "$0" "$@"
 
 LEDGER="docs/contracts/contracts.toml"
-README="${README_GEN_TARGET:-README.md}"
+README="${README_GEN_TARGET:-${README_TARGETS[0]}}"
+# The flagged-contract links are rendered relative to the page that holds the block.
+ROOT_LINK="$(readme_root_prefix "$README")"
 START="<!-- claims:generated:start — derived from docs/contracts/contracts.toml by scripts/gen-claims.sh; DO NOT EDIT between the markers -->"
 END="<!-- claims:generated:end -->"
 
@@ -43,7 +46,7 @@ grep -qxF "$END" "$README"   || { echo "::error::claims end marker missing from 
 # anchors skip schema comments, the ''' toggle skips multi-line statements.
 blockfile="$(mktemp)"
 trap 'rm -f "$blockfile"' EXIT
-awk '
+awk -v root="$ROOT_LINK" '
   function flush() {
     if (id == "") return
     if (status != "active") { nflag++; fid[nflag] = id; ftitle[nflag] = title; fdoc[nflag] = doc }
@@ -74,7 +77,7 @@ awk '
       printf "> **Divergences awaiting a fix (%d)** — contracts flagged for revision; the ratchet says this list may only shrink:\n", nflag
       print ">"
       for (k = 1; k <= nflag; k++) {
-        link = (fdoc[k] != "") ? "docs/contracts/" fdoc[k] : "docs/contracts/contracts.toml"
+        link = (fdoc[k] != "") ? root "/docs/contracts/" fdoc[k] : root "/docs/contracts/contracts.toml"
         printf "> - [%s — %s](%s)\n", fid[k], ftitle[k], link
       }
     }
@@ -171,7 +174,7 @@ if [ "${1:-}" = "--check" ]; then
     exit 1
   fi
   if [ "$rendered" != "$(cat "$README")" ]; then
-    echo "::error::README.md claims block is stale — run: bash scripts/gen-claims.sh"
+    echo "::error::$README claims block is stale — run: bash scripts/gen-claims.sh"
     exit 1
   fi
   if [ "$spine_rendered" != "$(cat "$SPINE")" ]; then

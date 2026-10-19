@@ -8,10 +8,10 @@
 # `score` job re-measures this record on every run and fails on drift.
 #
 # Refresh:  bash scripts/gen-mutation-score.sh --from-run <sweep run id>
-#           (stamps this file and re-renders the README block). An ordinary
+#           (stamps this file and re-renders the page block). An ordinary
 #           PR never refreshes it; a mutant PR (ci/mutations/) does not
 #           either — the next sweep judges the tree and names the drift.
-# Rendered into README.md by scripts/gen-mutation-score.sh --render.
+# Rendered into docs/benchmarks/README.md by scripts/gen-mutation-score.sh --render.
 date            = "2026-09-22"
 source          = "https://github.com/almide/almide/actions/runs/35650396971"
 head_sha        = "3b02f7dc433e664c244b661973421071ecdbe0f1"

@@ -207,7 +207,7 @@ effect fn freshness_pass() -> List[String] = {
   }
   let claims_err = if claims.code == 0 then []
   else [
-    "README.md claims block is stale — run: bash scripts/gen-claims.sh"
+    "docs/benchmarks/README.md claims block is stale — run: bash scripts/gen-claims.sh"
   ]
   let conf = if stale(
     "bash",

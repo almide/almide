@@ -1,7 +1,7 @@
 # LEDGER COUNTS — the aggregate totals the generated docs quote, STAMPED.
 #
-# Rendered verbatim (inside a dated `counts:generated` block) into README.md,
-# proofs/STAGE-STATUS.md, docs/contracts/README.md and
+# Rendered verbatim (inside a dated `counts:generated` block) into
+# docs/benchmarks/README.md, proofs/STAGE-STATUS.md, docs/contracts/README.md and
 # docs/contracts/conformance.md by their generators, which never re-measure
 # them: deriving the totals at render time made every fixture or contract PR
 # rewrite the same lines, so any two such PRs conflicted at the merge queue.

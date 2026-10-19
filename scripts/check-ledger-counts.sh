@@ -72,8 +72,8 @@ check_block() {
     diff <(printf '%s\n' "$got") <(printf '%s\n' "$want") | head -12 || true
   fi
 }
-check_block README.md 1 counts_render_claims
-check_block README.md 2 counts_render_stats
+check_block docs/benchmarks/README.md 1 counts_render_claims
+check_block docs/benchmarks/README.md 2 counts_render_stats
 check_block proofs/STAGE-STATUS.md 1 counts_render_stages
 check_block docs/contracts/README.md 1 counts_render_index
 check_block docs/contracts/conformance.md 1 counts_render_conformance

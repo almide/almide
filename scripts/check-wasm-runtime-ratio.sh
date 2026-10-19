@@ -132,7 +132,7 @@ if [ "${1:-}" = "--measure" ]; then
   ab_band_keep=$(grep -E '^ab_band' "$LEDGER" 2>/dev/null | head -1 | grep -oE '[0-9]+' | head -1)
   {
     cat <<'HDR'
-# Wasm runtime ledger (#1701) — the SOURCE for the README's wasm-runtime block.
+# Wasm runtime ledger (#1701) — the SOURCE for docs/benchmarks/README.md's wasm-runtime block.
 # Regenerate: bash scripts/check-wasm-runtime-ratio.sh --measure
 # Gate:       bash scripts/check-wasm-runtime-ratio.sh — the STATUS taxonomy
 #             is enforced everywhere (a hole that starts benching, a measured

@@ -137,7 +137,7 @@ effect fn baseline_text(alm: String, target: String, rows: List[Row], tol_pct: I
   let sha = string.slice(sh("shasum", ["-a", "256", alm])!, 0, 16)
   let src = fs.read_text(target) ?? ""
   let header = """
-    # Build-speed baseline — the SOURCE for the README's build-speed table (#999).
+    # Build-speed baseline — the SOURCE for docs/benchmarks/README.md's build-speed table (#999).
     # Regenerate: almide run tools/almide-gates/src/main.almd -- bench
     # Ratchet:    almide run tools/almide-gates/src/main.almd -- bench --check
     #

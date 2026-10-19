@@ -60,8 +60,9 @@ fi
 echo "  ok   $got/$want assumptions audits answered 'Closed under the global context'"
 
 # (d) The audited-theorem COUNT is quoted verbatim in three human-facing trust
-# documents (the README's Memory Safety section is the third — the reader who
-# sees the count first). It was hand-written and nothing checked it: by 2026-08-13 both said
+# documents (the Memory Safety section of the measurements page,
+# docs/benchmarks/README.md, is the third — it held the README's copy until the
+# README was slimmed). It was hand-written and nothing checked it: by 2026-08-13 both said
 # "37 audited theorems" while the real count was 73 — stale by 36, and nobody
 # noticed until a PR happened to touch the neighbourhood. A number in a trust
 # document that no gate reads is exactly the claim-drift this spine exists to
@@ -71,7 +72,7 @@ echo "  ok   $got/$want assumptions audits answered 'Closed under the global con
 # written by hand, and a generator would have to own their whole text. The gate
 # names the file and the fix instead.
 # cwd is proofs/ (the `cd` at the top), so these are siblings.
-COUNT_DOCS=(TRUSTED_BASE.md receipt.sh ../README.md)
+COUNT_DOCS=(TRUSTED_BASE.md receipt.sh ../docs/benchmarks/README.md)
 for doc in "${COUNT_DOCS[@]}"; do
   quoted="$(grep -oE '[0-9]+ audited theorems' "$doc" | grep -oE '^[0-9]+' | sort -u)"
   if [ -z "$quoted" ]; then

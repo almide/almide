@@ -1,4 +1,4 @@
-# Build-speed baseline — the SOURCE for the README's build-speed table (#999).
+# Build-speed baseline — the SOURCE for docs/benchmarks/README.md's build-speed table (#999).
 # Regenerate: almide run tools/almide-gates/src/main.almd -- bench
 # Ratchet:    almide run tools/almide-gates/src/main.almd -- bench --check
 #
