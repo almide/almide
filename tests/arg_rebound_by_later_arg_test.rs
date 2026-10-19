@@ -82,6 +82,10 @@ fn an_argument_that_rebinds_an_earlier_borrowed_argument_sees_the_old_value() {
     }
     let user = "fn cnt(xs: List[String], n: Int) -> Int = list.len(xs) + n\n\neffect fn main() -> Unit = {\n  var u = [\"a\", \"b\"]\n  let r = cnt(u, {\n    u = [\"z\"]\n    0\n  })\n  println(\"${r} ${list.len(u)}\")\n}\n";
     assert_eq!(run_both("user_fn", user), "2 1", "user fn");
+    // A scalar read is a value too: an inlined small fn read `k` after the
+    // block ran on wasm (`71`).
+    let scalar = "fn add(a: Int, b: Int) -> Int = a * 10 + b\n\neffect fn main() -> Unit = {\n  var k = 2\n  let r = add(k, {\n    k = 7\n    1\n  })\n  println(\"${r} ${k}\")\n}\n";
+    assert_eq!(run_both("user_fn_scalar", scalar), "21 7", "user fn scalar");
 }
 
 /// A read BETWEEN two rebinding arguments sees the first rebind and not the
