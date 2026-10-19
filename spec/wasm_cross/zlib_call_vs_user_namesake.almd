@@ -1,0 +1,47 @@
+// @contract: C-388
+// #3832, the zlib bodies: each user fn below is spelled like a fn the
+// self-hosted zlib calls by its bare name — an impl's sibling
+// (`zlib_deflate`, which `zlib.deflate_level` calls; `zlib_compress`, which
+// `zlib.compress_level` calls) or a private helper (`zld_adler32`,
+// `zld_crc32`, `zli_sym_kind`, `zli_len_kind`). The small scalar ones are the
+// wasm leg's inline candidates: spliced into zlib's call sites they stopped
+// the wasm build with E082, and `zli_sym_kind` (Int -> Int, like the helper
+// it shares a spelling with) would have decoded with the user's arithmetic.
+// `zlib_compress` takes a String and `zli_len_kind` recurses, so no inliner
+// takes them; they pin the other resolution routes. `url.build_query` (a
+// bundled module calling its own `encode_component`) rides along. Native
+// and wasm print the same lines.
+import base64
+import url
+import zlib
+
+fn zlib_deflate(n: Int) -> Int = n + 1
+
+fn zld_adler32(n: Int) -> Int = n + 2
+
+fn zld_crc32(n: Int) -> Int = n + 3
+
+fn zli_sym_kind(n: Int) -> Int = 900 + n
+
+fn encode_component(n: Int) -> Int = n * 4
+
+fn zlib_compress(s: String) -> String = "user:" + s
+
+fn zli_len_kind(n: Int) -> Int = if n > 0 then zli_len_kind(n - 1) + 5 else 0
+
+effect fn main() -> Unit = {
+  let data = bytes.from_string("hello hello hello")
+  println(bytes.to_string_lossy(zlib.inflate(zlib.deflate_level(data, 6)!)!))
+  println(bytes.to_string_lossy(zlib.decompress(zlib.compress(data)!)!))
+  println(bytes.to_string_lossy(zlib.decompress(zlib.compress_level(data, 9)!)!))
+  println(bytes.to_string_lossy(zlib.gunzip(zlib.gzip(data)!)!))
+  // Huffman-coded streams reach the inflater's symbol helpers: a fixed-code
+  // block (zli_sym_kind) and a dynamic one (zli_len_kind too).
+  println(bytes.to_string_lossy(zlib.decompress(base64.decode("eNrLSM3JyVfIQJAAOi4GfQ==")!)!))
+  println(bytes.to_string_lossy(zlib.decompress(base64.decode("eAEFwQEBAAAIgKArXcP6vyEAqNqdgwdOdwdf")!)!))
+  println(url.build_query([("a b", "c&d")]))
+  // The entry program's own calls reach its own fns.
+  println(int.to_string(zlib_deflate(1) + zld_adler32(1) + zld_crc32(1) + zli_sym_kind(1)))
+  println(int.to_string(encode_component(1)))
+  println(zlib_compress("x") + " " + int.to_string(zli_len_kind(3)))
+}

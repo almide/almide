@@ -888,6 +888,16 @@ varies = "wasm-runtime landing (2026-08-31, #1701): the first run against the ha
 blind = "UNMAPPED"
 
 [[gate]]
+path = "scripts/check-cold-build-ab.sh"
+reads = "scalar"
+wired_by = ".github/workflows/ci.yml"
+class = "NEGATIVE_TESTED"
+evidence = "#3829 landing (2026-10-19, GCE c4-standard-8). Fast-path row: with ALMIDE_BIN = develop 2001eb781 (before the fix) against COLD_BUILD_BASELINE_BIN = v0.59.1 it FAILED: 'cold-build REGRESSION: 4473 ms against the latest release's 3290 ms (1.36x, band 30%)', exit 1; with the fix it passed against develop (0.81x), v0.59.1 (1.10x) and the 0.67.1 release (0.89x). Cargo-path row: a tree binary wrapped to build its cargo path with RUSTFLAGS='-C opt-level=3 -C codegen-units=1' (the rlib fast path ignores RUSTFLAGS) FAILED on scripts/lib/cold-build-matrix.almd only: 'cold-build REGRESSION: scripts/lib/cold-build-matrix.almd 1610 ms against the latest release's 1049 ms (1.53x, band 30%)', exit 1, while its lisp row read 0.89x OK. Rlib-count check: the matrix program declared as a fast-path program (COLD_BUILD_TARGETS=...:1) FAILED with 'left 0 runtime rlib dir(s), expected 1'. An absent baseline exits 2 rather than skipping."
+measures = "min-of-rounds wall time of one cold `almide build` (fresh TMPDIR: no almide-run cache, no runtime rlib) by this tree's binary over the latest release's, same runner, interleaved, for one program per native build path (examples/lisp.almd: rlib fast path; scripts/lib/cold-build-matrix.almd: cargo path); plus the number of runtime rlib dirs each cold build leaves"
+varies = "#3829 (2026-10-19): lisp v0.59.1 3290 ms, develop 2001eb781 4473 ms, develop + the rlib codegen flags 3615 ms on one VM; the matrix program 1049 ms (0.67.1) vs 1610 ms with the cargo path slowed"
+blind = "growth below the band per release (the runtime rlib build grew 41% over nine releases, at most 11% per release, #3829) -> tools/almide-gates/src/bench.almd (the stamped absolute ratchet against docs/benchmarks/build-speed.txt)"
+
+[[gate]]
 path = "scripts/check-llm-surface.sh"
 reads = "UNCLASSIFIED"
 wired_by = ".github/workflows/ci.yml"

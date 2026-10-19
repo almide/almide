@@ -39,13 +39,22 @@ pub fn run_file_until(
     source_text: &str,
     stop: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 ) -> Result<RunResult, String> {
+    use almide::interp::{Interpreter, RunOutcome, RunStatus};
     let ir = lower_to_ir(path, source_text)?;
-    let interp = almide::interp::Interpreter::new(&ir);
+    // The front end polls nothing; everything after it does. A stop set
+    // while the stdlib pool is first built is seen within 10 ms instead of
+    // after the whole build, and one set earlier is seen at the pool wait or
+    // at the interpreter's first step.
     let out = match stop {
-        Some(stop) => interp.with_stop(stop),
-        None => interp,
-    }
-    .run_main();
+        Some(stop) if !almide::interp::pool_ready_unless_stopped(&stop) => RunOutcome {
+            status: RunStatus::Unsupported(almide::interp::STOPPED.to_string()),
+            stdout: String::new(),
+            stderr: String::new(),
+            bridge_fallbacks: Vec::new(),
+        },
+        Some(stop) => Interpreter::new(&ir).with_stop(stop).run_main(),
+        None => Interpreter::new(&ir).run_main(),
+    };
     // Surface the distinguished-outcome reason (Unsupported carries it in the
     // status, not in stderr) so harnesses can report skip classes precisely.
     let stderr = match &out.status {

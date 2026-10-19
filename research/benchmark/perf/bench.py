@@ -180,8 +180,11 @@ QUICK_ARGS = {  # small workloads for the CI ratchet: seconds, not minutes.
     # 35868760167), under the 0.08s floor PAIRS enforces as a hard error.
     # Both spellings move together so the wasm idiom relation still compares
     # one workload.
-    "wordfreq": "4000000",
-    "wordfreq-group": "4000000",
+    # 8M since #2157's NATIVE <= WASM relation gates the native rows too: once
+    # the native Map path got fast, `wordfreq-group/native` read 0.0695s at 4M
+    # on a CI runner (develop e4fcced11), under the floor that relation enforces.
+    "wordfreq": "8000000",
+    "wordfreq-group": "8000000",
     # 100k records: ~0.2s native / ~0.28s wasm on a GCE c4-standard-8
     # (2026-10-19) — over the 0.08s spawn-noise floor on both legs.
     "jsonround": "100000",
