@@ -206,6 +206,109 @@ fn a_close_before_the_head_is_an_error() {
     join(h);
 }
 
+// ── interrupted reads ──
+//
+// A read the kernel interrupts (EINTR, `ErrorKind::Interrupted`) moved no
+// bytes and is to be retried — never the end of the response. Linux returns
+// EINTR from a blocking `recv` on a socket with SO_RCVTIMEO whenever a
+// signal reaches the reading thread, SA_RESTART or not (signal(7)), and every
+// client read here runs under a timeout. A program that spawned a process
+// while a call was in flight got `malformed or incomplete response` natively
+// while the embedded lane, its reads on another process, answered.
+
+/// A stream that serves `pieces`, each preceded by one `Interrupted` read.
+struct Interrupting {
+    pieces: std::collections::VecDeque<Vec<u8>>,
+    interrupt_next: bool,
+}
+
+impl Interrupting {
+    fn new(pieces: &[&[u8]]) -> Self {
+        Interrupting { pieces: pieces.iter().map(|p| p.to_vec()).collect(), interrupt_next: true }
+    }
+}
+
+impl Read for Interrupting {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if self.interrupt_next && !self.pieces.is_empty() {
+            self.interrupt_next = false;
+            return Err(std::io::Error::from(std::io::ErrorKind::Interrupted));
+        }
+        self.interrupt_next = true;
+        let Some(mut p) = self.pieces.pop_front() else { return Ok(0) };
+        let n = p.len().min(buf.len());
+        buf[..n].copy_from_slice(&p[..n]);
+        if n < p.len() {
+            self.pieces.push_front(p.split_off(n));
+        }
+        Ok(n)
+    }
+}
+
+impl Write for Interrupting {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+const INTERRUPTED_PIECES: [&[u8]; 3] = [b"HTTP/1.1 404 Not Found\r\nContent-Le", b"ngth: 4\r\n\r\ns4", b"04"];
+
+#[test]
+fn an_interrupted_read_is_retried_by_the_buffered_client() {
+    let url = "http://127.0.0.1:1/status/404";
+    let got = client::read_response_tolerant(&mut Interrupting::new(&INTERRUPTED_PIECES), url, None).expect("answered");
+    assert_eq!(got, INTERRUPTED_PIECES.concat());
+    let raw = client::http_exchange_raw(&mut Interrupting::new(&INTERRUPTED_PIECES), url, b"GET / HTTP/1.1\r\n\r\n").expect("answered");
+    assert_eq!(raw, INTERRUPTED_PIECES.concat());
+}
+
+/// The env var that turns `signalled_call_child` into the scenario below.
+#[cfg(target_os = "linux")]
+const SIGNALLED_CALL_URL: &str = "ALMIDE_TEST_SIGNALLED_CALL_URL";
+
+/// The call handle end to end, the way the finding arose: a program spawns a
+/// command that does not exist while a call with `idle_ms` waits for its
+/// response. The child exits while the spawning thread still blocks every
+/// signal (posix_spawn), so its SIGCHLD goes to a thread that does not — the
+/// call's worker, in a process that has only those two threads. That is the
+/// shape of a compiled program, so the scenario runs in a fresh copy of this
+/// test binary (one test, on the main thread); the peer stays here.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_signal_during_a_timed_read_does_not_end_the_call() {
+    for _ in 0..20 {
+        let (url, h) = peer(|mut s| {
+            thread::sleep(Duration::from_millis(300));
+            let _ = s.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 4\r\n\r\ns404");
+        });
+        let out = std::process::Command::new(std::env::current_exe().expect("the test binary"))
+            .args(["--exact", "signalled_call_child", "--test-threads=1", "--nocapture"])
+            .env(SIGNALLED_CALL_URL, &url)
+            .output()
+            .expect("the child runs");
+        let text = String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+        assert!(out.status.success(), "{text}");
+        assert!(text.contains("answered 404 s404"), "{text}");
+        join(h);
+    }
+}
+
+/// The child half of the test above; a no-op unless its env var is set.
+#[cfg(target_os = "linux")]
+#[test]
+fn signalled_call_child() {
+    let Ok(url) = std::env::var(SIGNALLED_CALL_URL) else { return };
+    let sh = start(&url, 0, 30_000);
+    while client::http_call_poll(&sh).is_none() {
+        let _ = std::process::Command::new("/no/such/command").current_dir(".").output();
+    }
+    let (status, _, body) = client::http_call_wait(&sh).expect("answered");
+    println!("answered {status} {body}");
+}
+
 // ── streaming ──
 
 #[test]
