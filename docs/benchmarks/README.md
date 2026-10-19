@@ -65,18 +65,18 @@ Two ratios per row are the two input sizes (the win holds at both); the Rust sid
 <!-- native-victory:generated:end -->
 
 <!-- build-speed:generated:start — derived from docs/benchmarks/build-speed.txt by the almide-gates `bench` subcommand; DO NOT EDIT between the markers -->
-Measured on almide 0.59.1, arm64 Darwin, `examples/lisp.almd` (268 lines), 2026-08-27. Every row is an N-run MEAN —
+Measured on almide 0.68.0 (dev), x86_64 Linux, INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz [GCE c4-standard-8], `examples/lisp.almd` (297 lines), 2026-10-19. Every row is an N-run MEAN —
 a single run of a 30ms process is scheduler noise. Cold clears BOTH `$TMPDIR/almide-run`
 and the dependency cache before each repetition; clearing only the latter measures a warm
 build. Regenerate with `almide run tools/almide-gates/src/main.almd -- bench`; the ratchet
-(`-- bench --check`) fails CI at 1.5x.
+(`-- bench docs/benchmarks --check`) fails at 1.5x on the machine class above and skips, saying so, on any other.
 
 | scenario | time | runs |
 |---|---|---|
-| `almide check` | **15.2 ms** | 20 |
-| build, warm (content-cache hit) | **237.2 ms** | 5 |
-| build, cold | **635.3 ms** | 3 |
-| build, cold, `--target wasm` | **61.7 ms** | 3 |
+| `almide check` | **25.2 ms** | 20 |
+| build, warm (content-cache hit) | **92.9 ms** | 5 |
+| build, cold | **4846.1 ms** | 3 |
+| build, cold, `--target wasm` | **148.7 ms** | 3 |
 <!-- build-speed:generated:end -->
 
 `almide check` scales close to linearly: over a 2k → 30k-line ladder of this repo's own stdlib the log-log slope of check time against project lines is **1.13** (1.0 is linear, 2.0 quadratic) and the 10k-line rung costs **4.4×** the empty-project floor — measured 2026-08-13, held by `scripts/check-edit-loop-scale.sh`, table in [BENCHMARKS.md](../project/BENCHMARKS.md#edit-loop-scale-1334). Native runtime against handwritten Rust, on an Apple M4 Pro (2026-07-30, FFT re-measured 2026-08-13): **1.00×** on n-body and spectral-norm, 1.16× on fasta, 1.18× on FFT ([scoreboard](../project/BENCHMARKS.md)). The listbuild rows read 1.47–1.69× there and 0.87–1.05× on the CI runner (2026-10-03); their gap on the M4 Pro is the deterministic software `sin`/`cos` that byte-identity needs, not list building (measured 2026-08-13, `scripts/perf-ratio-baseline.txt`). The ubuntu-latest runner re-measures every row on each develop CI run, and the `perf-ratchet` job fails an anchored row (n-body, spectral-norm, fasta, FFT, wordfreq) that drifts more than 40% past its committed baseline (run [37092258733](https://github.com/almide/almide/actions/runs/37092258733), 2026-10-03: fasta 0.757×, FFT 1.002×). Wasm runtime, measured and gated (#1701):
@@ -84,22 +84,22 @@ build. Regenerate with `almide run tools/almide-gates/src/main.almd -- bench`; t
 <!-- wasm-runtime:generated:start — rendered from docs/benchmarks/wasm-runtime.txt by scripts/gen-readme-stats.sh; DO NOT EDIT between the markers -->
 | Benchmark (`almide bench`, verify-then-time, min of 2×5 interleaved) | wasm/native, `main` only | cold start (spawn vs compile + instantiate) |
 |---|---:|---:|
-| nbody | **1.10×** | 1.14× |
-| spectralnorm | **1.21×** | 1.22× |
-| binarytrees | **1.07×** | 1.06× |
-| treealloc | **1.04×** | 1.04× |
-| fasta | **1.52×** | 1.50× |
-| fannkuchredux | **1.28×** | 1.28× |
-| mandelbrot | **1.11×** | 1.10× |
-| onebrc | **1.26×** | 1.33× |
-| fft | **1.53×** | 1.53× |
-| strchurn | **0.85×** | 0.85× |
-| listbuild_append | **1.96×** | 1.95× |
-| listbuild_combinator | **1.88×** | 1.86× |
-| listbuild_prealloc | **1.68×** | 1.68× |
-| mapbuild | **0.67×** | 0.72× |
+| nbody | **1.21×** | 1.41× |
+| spectralnorm | **1.18×** | 1.27× |
+| binarytrees | **1.20×** | 1.34× |
+| treealloc | **1.08×** | 1.13× |
+| fasta | **0.90×** | 1.00× |
+| fannkuchredux | **1.37×** | 1.48× |
+| mandelbrot | **1.21×** | 1.30× |
+| onebrc | **1.90×** | 2.56× |
+| fft | **1.42×** | 1.52× |
+| strchurn | **0.92×** | 0.95× |
+| listbuild_append | **1.77×** | 1.98× |
+| listbuild_combinator | **1.55×** | 1.74× |
+| listbuild_prealloc | **1.36×** | 1.53× |
+| mapbuild | **0.92×** | 1.08× |
 
-Embedded wasm host (Perceus RC in linear memory) against the native binary, same machine, same run. The ratio times the program's own `main`, entry to return, on both legs (native in-process, wasm around the host call): process spawn and module compile/instantiate are outside it, and the cold-start column shows them (#2980). Small workloads run at a ledger-fixed size (`args=`) so `main` is long enough to time. Cross-engine ratios do NOT cancel hardware (a 2-core CI runner measures nbody ~10x worse), so the stamped ratio verdict runs on the stamping machine class; CI gates the STATUS taxonomy below and judges the wasm leg by a same-runner A/B against the latest release binary (interleaved, min-of-runs, `ab_band` in the ledger — #2143) (`scripts/check-wasm-runtime-ratio.sh`). Of these rows only fannkuchredux runs its `fan` in parallel: native on threads (#2044), the embedded wasm host on separate instances of the module (#3003, ADR-0011 §D2a; every other wasm host runs it sequentially, byte-identical); binarytrees' and mandelbrot's `fan.map` callbacks run sequentially on both legs (user time equals wall time on both, measured 2026-10-03). The unmeasured corpus cells stay honest instead of estimated: 0 wall on the wasm build path, 0 exhaust the embedded heap (#1729) — each re-measured every gate run, so a cell that starts benching fails the gate until its row is promoted. Ledger: `docs/benchmarks/wasm-runtime.txt` (a develop build carrying version 0.65.1, not the 0.65.1 release, 2026-09-29, measured on arm64 Darwin (local stamp; ratios are the gated quantity)).
+Embedded wasm host (Perceus RC in linear memory) against the native binary, same machine, same run. The ratio times the program's own `main`, entry to return, on both legs (native in-process, wasm around the host call): process spawn and module compile/instantiate are outside it, and the cold-start column shows them (#2980). Small workloads run at a ledger-fixed size (`args=`) so `main` is long enough to time. Cross-engine ratios do NOT cancel hardware (a 2-core CI runner measures nbody ~10x worse), so the stamped ratio verdict runs on the stamping machine class; CI gates the STATUS taxonomy below and judges the wasm leg by a same-runner A/B against the latest release binary (interleaved, min-of-runs, `ab_band` in the ledger — #2143) (`scripts/check-wasm-runtime-ratio.sh`). Of these rows only fannkuchredux runs its `fan` in parallel: native on threads (#2044), the embedded wasm host on separate instances of the module (#3003, ADR-0011 §D2a; every other wasm host runs it sequentially, byte-identical); binarytrees' and mandelbrot's `fan.map` callbacks run sequentially on both legs (user time equals wall time on both, measured 2026-10-03). The unmeasured corpus cells stay honest instead of estimated: 0 wall on the wasm build path, 0 exhaust the embedded heap (#1729) — each re-measured every gate run, so a cell that starts benching fails the gate until its row is promoted. Ledger: `docs/benchmarks/wasm-runtime.txt` (a develop build carrying version 0.68.0, not the 0.68.0 release, 2026-10-19, measured on x86_64 Linux, INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz [GCE c4-standard-8]).
 <!-- wasm-runtime:generated:end -->
 
 ## Derived counts

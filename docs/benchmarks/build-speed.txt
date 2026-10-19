@@ -1,19 +1,20 @@
 # Build-speed baseline — the SOURCE for docs/benchmarks/README.md's build-speed table (#999).
 # Regenerate: almide run tools/almide-gates/src/main.almd -- bench
-# Ratchet:    almide run tools/almide-gates/src/main.almd -- bench --check
+# Ratchet:    almide run tools/almide-gates/src/main.almd -- bench docs/benchmarks --check
+#             (runs only on the `machine` class below — scripts/lib/machine-class.sh)
 #
 # Every row is an N-run MEAN and N is recorded: a single run of a 30ms process is
 # scheduler noise, not a measurement. Cold clears BOTH $TMPDIR/almide-run and the
 # dependency cache before every repetition — clearing only the latter produces a warm
 # build wearing a cold label.
-version   = almide 0.59.1
-binary    = sha256:01542a30f66e05ae
-machine   = arm64 Darwin
-date      = 2026-08-27
+version   = almide 0.68.0 (dev)
+binary    = sha256:e6c34e8eaeecbcdd
+machine   = x86_64 Linux, INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz [GCE c4-standard-8]
+date      = 2026-10-19
 target    = examples/lisp.almd
-lines     = 268
+lines     = 297
 tolerance = 150
-check_ms  = 15.2   n=20
-cold_ms   = 635.3   n=3
-warm_ms   = 237.2   n=5
-wasm_ms   = 61.7   n=3
+check_ms  = 25.2   n=20
+cold_ms   = 4846.1   n=3
+warm_ms   = 92.9   n=5
+wasm_ms   = 148.7   n=3
