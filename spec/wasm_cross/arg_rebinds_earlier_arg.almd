@@ -4,7 +4,9 @@
 // rebinds it. The wasm leg passed such a read as a view of the variable's
 // block; the later operand's assignment released the block and the call
 // read freed memory (`list.contains` printed false, `map.get` none, the
-// rest garbage or a trap). Native refused an index whose index operand
+// rest garbage or a trap). A scalar read was no safer: an inlined user fn
+// read its argument after the later one ran (`add(k, { k = 7; 1 })`
+// printed 71). Native refused an index whose index operand
 // rebinds the container (E0506) and, for a read between two rebinding
 // operands, read the value from before the first one.
 // Cells: every argument position of a user fn, a closure call, stdlib
@@ -13,6 +15,8 @@
 // sequences. Each cell prints the result and, where it shows, the rebound
 // value too.
 type P = { a: List[String], n: Int }
+
+fn add(a: Int, b: Int) -> Int = a * 10 + b
 
 fn cnt(xs: List[String], n: Int) -> Int = list.len(xs) + n
 
@@ -121,6 +125,21 @@ effect fn main() -> Unit = {
     t4 = "z"
     "!"
   }}")
+  var k1 = 2
+  println("user scalar ${add(k1, {
+    k1 = 7
+    1
+  })} ${k1}")
+  var k2 = 3
+  println("int.max ${int.max(k2, {
+    k2 = 9
+    1
+  })}")
+  var k3 = 1
+  println("slice ${list.slice([1, 2, 3, 4], k3, {
+    k3 = 0
+    3
+  })}")
   var u1 = ["a", "b", "c"]
   println("user first ${cnt(u1, {
     u1 = ["z"]
