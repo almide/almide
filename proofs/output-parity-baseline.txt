@@ -126,6 +126,7 @@ spec/wasm_cross/anon_records_and_fusion.almd
 spec/wasm_cross/append_accumulator.almd
 spec/wasm_cross/append_accumulator_heap.almd
 spec/wasm_cross/append_accumulator_heap_linear.almd
+spec/wasm_cross/arg_rebinds_earlier_arg.almd
 spec/wasm_cross/args_surface.almd
 spec/wasm_cross/as_pattern.almd
 spec/wasm_cross/assert_abort_eq.almd
@@ -617,12 +618,12 @@ spec/wasm_cross/math_log_gamma_negative.almd
 spec/wasm_cross/math_pow.almd
 spec/wasm_cross/math_transcendental_bits.almd
 spec/wasm_cross/matrix_composition_family.almd
-spec/wasm_cross/matrix_fma_ieee_specials.almd
 spec/wasm_cross/matrix_dims_guard.almd
 spec/wasm_cross/matrix_dims_guard_overflow.almd
 spec/wasm_cross/matrix_dims_guard_product.almd
 spec/wasm_cross/matrix_dims_guard_rows.almd
 spec/wasm_cross/matrix_elementwise_family.almd
+spec/wasm_cross/matrix_fma_ieee_specials.almd
 spec/wasm_cross/matrix_from_bytes_count_domain.almd
 spec/wasm_cross/matrix_from_bytes_offset_domain.almd
 spec/wasm_cross/matrix_index_domain_family.almd

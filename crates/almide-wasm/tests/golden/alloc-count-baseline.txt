@@ -10,6 +10,7 @@
 5	2	88	5	spec/wasm_cross/append_accumulator.almd
 5	2	49	5	spec/wasm_cross/append_accumulator_heap.almd
 40541	25	706760	40541	spec/wasm_cross/append_accumulator_heap_linear.almd
+97	62	781	97	spec/wasm_cross/arg_rebinds_earlier_arg.almd
 ~	spec/wasm_cross/args_surface.almd
 11	7	139	11	spec/wasm_cross/as_pattern.almd
 0	0	0	0	spec/wasm_cross/assert_abort_eq.almd
@@ -241,7 +242,7 @@
 7	4	71	7	spec/wasm_cross/float_to_int_edges.almd
 17	9	344	17	spec/wasm_cross/fold_family_source_before_init.almd
 22	14	109	22	spec/wasm_cross/fold_heap_acc.almd
-68	43	466	68	spec/wasm_cross/fold_init_rebinds_source.almd
+68	38	466	68	spec/wasm_cross/fold_init_rebinds_source.almd
 6	0	88	6	spec/wasm_cross/for_in_forms.almd
 ~	spec/wasm_cross/fs_call_head_family.almd
 ~	spec/wasm_cross/fs_composition_family.almd
@@ -543,9 +544,9 @@
 26	15	235	26	spec/wasm_cross/mg_rebuild_two_phase.almd
 8	2	57	8	spec/wasm_cross/module_global_const.almd
 5	2	100	5	spec/wasm_cross/module_var_alias_cow.almd
-79	55	1468	79	spec/wasm_cross/mut_call_hoisted_args_distinct.almd
+79	54	1468	79	spec/wasm_cross/mut_call_hoisted_args_distinct.almd
 21	13	244	21	spec/wasm_cross/mut_call_hoisted_args_in_branch.almd
-34	13	358	34	spec/wasm_cross/mut_call_nested_read_before.almd
+40	18	456	40	spec/wasm_cross/mut_call_nested_read_before.almd
 31	19	350	31	spec/wasm_cross/mut_call_two_mut_args_read.almd
 67	26	619	67	spec/wasm_cross/mut_heap_param.almd
 63	39	444	63	spec/wasm_cross/mut_list_param_read_by_range_ops.almd
