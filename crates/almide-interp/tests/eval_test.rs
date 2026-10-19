@@ -708,3 +708,4 @@ include!("eval_test_parts/sort_and_mut.rs");
 include!("eval_test_parts/fallible_hofs.rs");
 include!("eval_test_parts/result_blocks.rs");
 include!("eval_test_parts/list_repeat.rs");
+include!("eval_test_parts/impl_name_collision.rs");
