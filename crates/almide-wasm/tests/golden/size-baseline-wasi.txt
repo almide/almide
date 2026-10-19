@@ -20,7 +20,7 @@
 1672	spec/wasm_cross/assign_alias_rc.almd
 2934	spec/wasm_cross/assign_concat_operand_release.almd
 3372	spec/wasm_cross/assign_mut_callee_consumes_var.almd
-5451	spec/wasm_cross/assign_nested_call_release.almd
+5436	spec/wasm_cross/assign_nested_call_release.almd
 2965	spec/wasm_cross/assign_nested_mut_writeback_release.almd
 6639	spec/wasm_cross/assign_self_call_release.almd
 2602	spec/wasm_cross/autotry_construction.almd
@@ -88,7 +88,7 @@
 5665	spec/wasm_cross/closure_mut_arg_in_nested_match.almd
 4670	spec/wasm_cross/closure_reads_var_written_by_mut_call.almd
 5744	spec/wasm_cross/closure_rich_list_capture.almd
-5541	spec/wasm_cross/closure_scalar_captures.almd
+5496	spec/wasm_cross/closure_scalar_captures.almd
 663	spec/wasm_cross/closure_tail_recursion.almd
 3543	spec/wasm_cross/closures_and_variants.almd
 3121	spec/wasm_cross/closures_hof.almd
@@ -126,7 +126,7 @@
 5580	spec/wasm_cross/cross_module_spread.almd
 4161	spec/wasm_cross/ctor_fn_value.almd
 3191	spec/wasm_cross/ctor_if_payload.almd
-12419	spec/wasm_cross/ctor_scalar_call_payload.almd
+12404	spec/wasm_cross/ctor_scalar_call_payload.almd
 4226	spec/wasm_cross/ctor_turbofish_family.almd
 3129	spec/wasm_cross/ctor_var_copy_semantics.almd
 4258	spec/wasm_cross/datetime_format.almd
@@ -519,7 +519,7 @@
 19082	spec/wasm_cross/math_log_gamma.almd
 15593	spec/wasm_cross/math_log_gamma_negative.almd
 9100	spec/wasm_cross/math_pow.almd
-20170	spec/wasm_cross/math_transcendental_bits.almd
+20140	spec/wasm_cross/math_transcendental_bits.almd
 23693	spec/wasm_cross/matrix_composition_family.almd
 3261	spec/wasm_cross/matrix_dims_guard.almd
 2440	spec/wasm_cross/matrix_dims_guard_overflow.almd
@@ -714,7 +714,7 @@
 6420	spec/wasm_cross/repr_parity_pin.almd
 570	spec/wasm_cross/reserved_keyword_fn.almd
 4648	spec/wasm_cross/result_combinators_heap_ok.almd
-28502	spec/wasm_cross/result_ctor_call_payload.almd
+28487	spec/wasm_cross/result_ctor_call_payload.almd
 1846	spec/wasm_cross/result_default_and_passthrough.almd
 1831	spec/wasm_cross/result_eq.almd
 3381	spec/wasm_cross/result_filter_heap_ok.almd
@@ -756,7 +756,7 @@
 12609	spec/wasm_cross/statement_after_tail_walker_bang.almd
 29957	spec/wasm_cross/stdlib_body_call_vs_user_namesake.almd
 7867	spec/wasm_cross/stdlib_call_temporaries_release.almd
-28783	spec/wasm_cross/stdlib_manufactured_nan_sign.almd
+28723	spec/wasm_cross/stdlib_manufactured_nan_sign.almd
 25001	spec/wasm_cross/stdlib_opaque_shadow.almd
 30020	spec/wasm_cross/stdlib_type_shadow.almd
 2884	spec/wasm_cross/str_result_heap_bind.almd
