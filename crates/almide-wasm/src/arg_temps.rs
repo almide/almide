@@ -35,8 +35,10 @@ use almide_types::types::Ty;
 /// Rewrite the program's function bodies and initializers; `None` when
 /// nothing needed binding (the emitter then reads the original tree).
 pub(crate) fn bind_native_temporaries(ir: &IrProgram) -> Option<IrProgram> {
-    let mut out = ir.clone();
-    let mut changed = false;
+    // #3815: a read a later operand rebinds is bound first (arg_rebind.rs).
+    let ordered = crate::arg_rebind::bind_reads_before_rebinds(ir);
+    let mut changed = ordered.is_some();
+    let mut out = ordered.unwrap_or_else(|| ir.clone());
     let yielders = address_yielder_names(ir);
     let yielders = &yielders;
     {

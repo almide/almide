@@ -200,6 +200,7 @@ mod host_read_all;
 mod host_read_line;
 mod json_path_helpers;
 mod newtype;
+mod arg_rebind;
 mod arg_temps;
 mod arm;
 pub(crate) use arm::{ArgMode, ArmResult, Lowered, Own};
