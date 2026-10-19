@@ -5080,3 +5080,15 @@ evidence  = [
   { path = "tests/diagnostics/parse-non-ascii-module-name/broken.almd", class = "fixture" },
   { path = "tests/unicode_identifier_nfc_test.rs", name = "canonically_equivalent_spellings_are_one_binding_on_wasm", class = "fixture" },
 ]
+[[contract]]
+id        = "C-388"
+spec      = "ALS-E26"
+title     = "A bare call names the definition of its own scope, never a same-spelled fn of the entry program or another module"
+statement = "A bare call `f(…)` resolves to the `f` of the scope its body belongs to, by definition and not by spelling: inside a module's fn it is that module's own `f`; inside a stdlib body (a self-hosted implementation or a bundled module) it is that body's own sibling or private helper; in the entry program it is the entry program's `f`. An entry-program or other-module fn spelled `f` is never called, inlined or spliced in its place, whichever of the definitions is small, pure, scalar, recursive or none of these; and the entry program's own calls of its `f` still reach it. The observables (stdout, stderr, exit code) are byte-identical on every leg. The wasm leg's small-fn inliner once keyed its candidates by spelling: an entry program's small `fn step(n, acc) = 999 + n + acc` replaced a module's call of its own recursive `step` (3 natively, 1002 on wasm, #3831), and a user `fn base64_decode(n: Int) -> Int` replaced `base64.decode_url`'s call of its sibling `base64_decode`, which stopped the wasm build with E082 (#3832)."
+since     = "0.68.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/stdlib_body_call_vs_user_namesake.almd", class = "fixture" },
+  { path = "spec/integration/modules/name_resolves_by_definition_test.almd", class = "fixture" },
+  { path = "spec/wasm_cross/zlib_call_vs_user_namesake.almd", class = "fixture" },
+]

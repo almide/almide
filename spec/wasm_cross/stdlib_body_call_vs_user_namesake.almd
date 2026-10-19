@@ -1,0 +1,38 @@
+// @contract: C-388
+// #3832: a stdlib body's bare call names its own sibling, never an entry
+// program fn of the same spelling. Each user fn below is spelled like a fn a
+// linked stdlib body calls by its bare name — a self-host impl's sibling
+// (`base64_decode`, which `base64.decode_url` calls), a self-host private
+// helper (`json_path_get_go`, `json_path_set_go`, `json_path_rm_go`) or a
+// bundled module's own fn (`basename`, which `path.extension` calls) — and
+// each is small, pure and scalar, the shape the wasm leg's small-fn inliner
+// takes. It spliced these bodies into the stdlib's call sites, and the wasm
+// build stopped with E082 where the types differed. Native and wasm print
+// the same lines. (zlib_call_vs_user_namesake.almd covers the zlib bodies.)
+import base64
+import json
+import path
+
+fn base64_decode(n: Int) -> Int = n * 2
+
+fn basename(n: Int) -> Int = n * 3
+
+fn json_path_get_go(n: Int) -> Int = n + 10
+
+fn json_path_set_go(n: Int) -> Int = n + 20
+
+fn json_path_rm_go(n: Int) -> Int = n + 30
+
+effect fn main() -> Unit = {
+  println(bytes.to_string(base64.decode_url("aGVsbG8=")!)!)
+  println(bytes.to_string(base64.decode("d29ybGQ=")!)!)
+  println(path.extension("a/b/c.txt") ?? "none")
+  let doc = json.parse("{\"a\": {\"b\": [1, 2, 3]}}")!
+  let at = json.index(json.field(json.field(json.root(), "a"), "b"), 1)
+  println(json.stringify(json.get_path(doc, at) ?? value.null()))
+  println(json.stringify(json.set_path(doc, at, value.int(9))!))
+  println(json.stringify(json.remove_path(doc, at)))
+  // The entry program's own calls reach its own fns.
+  println(int.to_string(base64_decode(1) + basename(1)))
+  println(int.to_string(json_path_get_go(1) + json_path_set_go(1) + json_path_rm_go(1)))
+}
