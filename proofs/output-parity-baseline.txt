@@ -367,6 +367,7 @@ spec/wasm_cross/fuel_dyn_charge.almd
 spec/wasm_cross/fuel_interp_uncharged.almd
 spec/wasm_cross/fuel_race_boundary.almd
 spec/wasm_cross/fuel_race_err_skip.almd
+spec/wasm_cross/fuel_single_call_args.almd
 spec/wasm_cross/fuel_timeout_ends.almd
 spec/wasm_cross/fuel_trap_cut.almd
 spec/wasm_cross/fuel_trap_window.almd
@@ -617,12 +618,12 @@ spec/wasm_cross/math_log_gamma_negative.almd
 spec/wasm_cross/math_pow.almd
 spec/wasm_cross/math_transcendental_bits.almd
 spec/wasm_cross/matrix_composition_family.almd
-spec/wasm_cross/matrix_fma_ieee_specials.almd
 spec/wasm_cross/matrix_dims_guard.almd
 spec/wasm_cross/matrix_dims_guard_overflow.almd
 spec/wasm_cross/matrix_dims_guard_product.almd
 spec/wasm_cross/matrix_dims_guard_rows.almd
 spec/wasm_cross/matrix_elementwise_family.almd
+spec/wasm_cross/matrix_fma_ieee_specials.almd
 spec/wasm_cross/matrix_from_bytes_count_domain.almd
 spec/wasm_cross/matrix_from_bytes_offset_domain.almd
 spec/wasm_cross/matrix_index_domain_family.almd
