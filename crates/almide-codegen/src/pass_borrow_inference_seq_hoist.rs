@@ -63,13 +63,39 @@ fn hoist_before_nested_mut(items: Vec<IrExpr>, hoisted: &mut Vec<IrStmt>, cx: &m
         .enumerate()
         .map(|(i, it)| {
             let in_prefix = i <= last && find_mut_borrow_var(&it).is_none();
-            if in_prefix && (conflicts[i] || may_run_user_code(&it)) {
+            // An operand that itself writes a variable is an effect like a
+            // user call: hoisting a later read past it would read the value
+            // from before the write (#3815: `mid({ w = …; 1 }, w, { w = …; 2 })`
+            // read the `w` the first block replaced).
+            if in_prefix && (conflicts[i] || may_run_user_code(&it) || !roots[i].is_empty()) {
                 hoist_one_arg(it, hoisted, cx)
             } else {
                 it
             }
         })
         .collect()
+}
+
+/// An index `xs[i]` / `m[k]` is an operand sequence too — the container,
+/// then the index. An index operand that rebinds the container
+/// (`xs[{ xs = …; 0 }]`) held a borrow of `xs` across the rebind (E0506);
+/// the container is bound first (#3815). Any other node is returned as is.
+fn hoist_index_operands(node: IrExpr, cx: &mut HoistCx<'_>) -> IrExpr {
+    let IrExpr { kind, ty, span, def_id } = node;
+    let (object, index, map) = match kind {
+        IrExprKind::IndexAccess { object, index } => (object, index, false),
+        IrExprKind::MapAccess { object, key } => (object, key, true),
+        kind => return IrExpr { kind, ty, span, def_id },
+    };
+    let mut hoisted = Vec::new();
+    let mut ops = hoist_before_nested_mut(vec![*object, *index], &mut hoisted, cx).into_iter();
+    let (object, index) = (Box::new(ops.next().expect("object")), Box::new(ops.next().expect("index")));
+    let kind = if map {
+        IrExprKind::MapAccess { object, key: index }
+    } else {
+        IrExprKind::IndexAccess { object, index }
+    };
+    wrap_hoisted(hoisted, IrExpr { kind, ty, span, def_id })
 }
 
 /// The direct rule: a call with `&mut x` as one argument hoists every other
