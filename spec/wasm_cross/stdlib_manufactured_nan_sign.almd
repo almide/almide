@@ -1,0 +1,52 @@
+// @contract: C-055
+// A stdlib function that MANUFACTURES a NaN from non-NaN input returns the
+// ONE fixed pattern +qNaN 0x7FF8000000000000 on every leg. The sign is what
+// list.min / list.max read under totalOrder (+NaN greatest, -NaN least), so a
+// NaN whose sign came from the host (x86 runtime 0/0, inf - inf and sqrt of a
+// negative answer -NaN; a const-folded one is +NaN; Rust's "-nan" parse is
+// -NaN) changed which element an extremum picked: native `some(-0)` against
+// wasm `some(NaN)` for list.min([-0.0, math.log(negative)]) (xtarget-fuzz seed
+// 1792404782 index 69).
+//
+// Every row is fed twice: from a literal (the optimizer may fold it) and from
+// a value parsed at run time (it cannot), so both regimes are pinned.
+fn sign_of(v: Float) -> String = {
+  let lo = list.min([v, -0.0]) ?? 1.0
+  let hi = list.max([v, 0.0]) ?? 1.0
+  if not float.is_nan(v) then "not-nan"
+  else if float.is_nan(lo) then "-NaN"
+  else if float.is_nan(hi) then "+NaN"
+  else "?"
+}
+
+fn rt(s: String) -> Float = float.parse(s) ?? 0.0
+
+fn row(name: String, folded: Float, runtime: Float) -> Unit = println("${name}: ${sign_of(folded)} ${sign_of(runtime)}")
+
+fn main() -> Unit = {
+  let neg = rt("-3")
+  let one_neg = rt("-1")
+  let inf = rt("inf")
+  let ninf = rt("-inf")
+  let half = rt("0.5")
+  row("math.sqrt", math.sqrt(-3.0), math.sqrt(neg))
+  row("float.sqrt", float.sqrt(-3.0), float.sqrt(neg))
+  row("math.log", math.log(-3.0), math.log(neg))
+  row("math.log2", math.log2(-3.0), math.log2(neg))
+  row("math.log10", math.log10(-3.0), math.log10(neg))
+  row("math.log.log", math.log(math.log(1.0e-300)), math.log(math.log(rt("1e-300"))))
+  row("math.fpow", math.fpow(-3.0, 0.5), math.fpow(neg, half))
+  row("math.fpow(-1)", math.fpow(-1.0, 0.5), math.fpow(one_neg, half))
+  row("pow operator", (0.0 - 3.0) ^ 0.5, neg ^ half)
+  row("math.sin", math.sin(1.0 / 0.0), math.sin(inf))
+  row("math.sin(-inf)", math.sin(-1.0 / 0.0), math.sin(ninf))
+  row("math.cos", math.cos(1.0 / 0.0), math.cos(inf))
+  row("math.cos(-inf)", math.cos(-1.0 / 0.0), math.cos(ninf))
+  row("math.tan", math.tan(1.0 / 0.0), math.tan(inf))
+  row("math.tan(-inf)", math.tan(-1.0 / 0.0), math.tan(ninf))
+  row("float.parse(nan)", float.parse("nan") ?? 0.0, rt("NaN"))
+  row("float.parse(-nan)", float.parse("-nan") ?? 0.0, rt("-NaN"))
+  row("float.parse(+nan)", float.parse("+nan") ?? 0.0, rt("+NaN"))
+  let r0 = math.log(rt("1e-323"))
+  println("seed 1792404782 #69: ${list.min(list.insert([-0.0], 5, math.log(r0)))}")
+}
