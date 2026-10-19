@@ -2345,6 +2345,12 @@ jobs:
           /tmp/almide-baseline/almide --version
       - name: Wasm runtime ratchet (#1701) — same-runner A/B verdict (#2143)
         run: ALMIDE_BIN=/tmp/almide-bin/almide WASM_RUNTIME_BASELINE_BIN=/tmp/almide-baseline/almide bash scripts/check-wasm-runtime-ratio.sh
+      # #3829: the cold native build went 0.6 s -> 4.8 s across nine releases
+      # because the build-speed ratchet only runs by hand. Same baseline, same
+      # runner, same idea as the step above: both binaries cold-build one
+      # program in a fresh TMPDIR, interleaved, min of runs, 30% band.
+      - name: Cold native build — same-runner A/B against the latest release (#3829)
+        run: ALMIDE_BIN=/tmp/almide-bin/almide COLD_BUILD_BASELINE_BIN=/tmp/almide-baseline/almide bash scripts/check-cold-build-ab.sh
 
   # Aviation discipline as CI (adopted from the greenfield burn, where
   # codopsy slipped to B twice and only a human check-in caught it):
