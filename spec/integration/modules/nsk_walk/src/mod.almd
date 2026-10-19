@@ -1,0 +1,18 @@
+// The module half of name_resolves_by_definition_test.almd: every fn here
+// shares its spelling with an entry-program fn and with nsk_twin's. `step`
+// is recursive (never an inline candidate itself), `bump` small, pure and
+// scalar (an inline candidate on every leg), `tag` takes a String (outside
+// every inliner).
+fn step(n: Int, acc: Int) -> Int = if n == 0 then acc else step(n - 1, acc + 1)
+
+fn bump(n: Int) -> Int = n + 1
+
+fn tag(s: String) -> String = "walk:" + s
+
+fn count(n: Int) -> Int = step(n, 0)
+
+fn bumped(n: Int) -> Int = bump(n) * 10
+
+fn tagged(s: String) -> String = tag(s)
+
+fn twice(n: Int) -> Int = bump(bump(n))
