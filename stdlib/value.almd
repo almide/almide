@@ -1,9 +1,11 @@
 /// Wraps items as an Array Value.
 @intrinsic("almide_rt_value_array")
+@reuse(items)
 fn array(items: List[Value]) -> Value = _
 
 /// Array items; err if v is another kind.
 @intrinsic("almide_rt_value_as_array")
+@reuse(v)
 fn as_array(v: Value) -> Result[List[Value], String] = _
 
 /// Bool payload; err otherwise (no truthiness).
@@ -44,6 +46,7 @@ fn null() -> Value = _
 
 /// Wraps pairs as an Object; duplicate keys kept.
 @intrinsic("almide_rt_value_object")
+@reuse(pairs)
 fn object(pairs: List[(String, Value)]) -> Value = _
 
 /// v minus the listed keys; non-objects as-is.

@@ -1,0 +1,38 @@
+// jsonround — the Value row (#2157): N four-field records (a nested object, a
+// two-string array) built as one `Value`, stringified, parsed back, and the
+// nested `meta.score` summed; prints the sum and the text's length. It is the
+// program #2157 found running 2.5x SLOWER as a native binary than under
+// wasmtime: the native runtime deep-copied the document twice (`value.array`
+// / `value.object` cloned every element out of the list they were handed,
+// `value.as_array` cloned every record out of the parsed document) and
+// stringified bottom-up through a `String` per node. The `@reuse` twins and
+// the one-buffer writer took it under the wasm leg; check-perf-ratio.sh holds
+// native <= wasm on this row.
+import env
+import int
+import json
+
+fn record(i: Int) -> Value = value.object([
+  ("id", value.int(i)),
+  ("name", value.str("user_${i}")),
+  ("tags", value.array([value.str("t${i % 7}"), value.str("t${i % 11}")])),
+  ("meta", value.object([("score", value.int((i * 37) % 1000)), ("active", value.bool(i % 2 == 0))]))
+])
+
+fn score(r: Value) -> Int = json.get_int(value.field(r, "meta") ?? value.null(), "score") ?? 0
+
+effect fn main() -> Unit = {
+  let args = env.args()
+  let n = match list.get(args, 0) {
+    some(s) => match int.parse(s) {
+      ok(v) => v,
+      err(_) => 50000,
+    },
+    none => 50000,
+  }
+  let doc = value.array(list.range(0, n) |> list.map(record))
+  let text = json.stringify(doc)
+  let back = json.parse(text) ?? value.null()
+  let sum = (value.as_array(back) ?? []) |> list.map(score) |> list.sum
+  println("${sum} ${string.len(text)}")
+}

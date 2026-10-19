@@ -219,6 +219,20 @@ nothing is published that `bench.py` did not produce.
   plain-variable-key write `m[w] = …` moving it — the 2M-draw loop's Map
   cost fell from ~93 ms to ~55 ms on an M4 Pro, under the structural wasm
   leg's ~73 ms for the same program.
+- **`jsonround` is the Value row** (#2157): N four-field records (a nested
+  object, a two-string array) built as one `Value`, `json.stringify`d,
+  `json.parse`d back, and the nested `meta.score` summed. Native and wasm
+  only — the relation between the two legs is what is gated, not a Rust
+  ratio. #2157 found it 1.3–2.5× SLOWER as a native binary than under
+  wasmtime: `value.array` / `value.object` cloned every element out of the
+  list they were handed (each element a whole subtree, so the document was
+  copied once per nesting level), `value.as_array` cloned every record out of
+  the parsed document, and `value.stringify` assembled its text bottom-up
+  through a `String` per node and a `format!` + `join` per container. The
+  three ops are now declared `@reuse` with `_owned` runtime twins, so a source
+  at its last use moves into the result, and the text is written into one
+  buffer. `check-perf-ratio.sh` holds native ≤ wasm on this row and on both
+  wordfreq rows (the NATIVE <= WASM block).
 
 ## Run
 
