@@ -225,3 +225,36 @@ fn a_cut_fixture_stops_its_interpreter_run() {
     assert!(msg.contains("spec/lang/grows_forever.almd") && msg.contains("2s"), "{msg}");
     assert!(msg.contains("cut and stopped"), "the cut fixture's interpreter run kept going: {msg}");
 }
+
+/// #3825: on this leg's recipe (the self-host sources linked into the
+/// program), a user fn spelled like a self-hosted stdlib impl fn runs the
+/// user's body, and the stdlib surface it shadows by spelling still runs the
+/// stdlib's. The expected lines are native's and wasm's (`almide run`, with
+/// and without `--target wasm`).
+#[test]
+fn a_user_fn_spelled_like_a_stdlib_impl_runs_the_users_body() {
+    let src = r#"effect fn list_len(xs: List[String], i: Int) -> Int = list.len(xs) + i
+fn map_len(m: Map[String, Int], i: Int) -> Int = map.len(m) * 100 + i
+fn string_len(s: String) -> Int = string.len(s) + 1000
+fn int_to_string(n: Int) -> String = "user:" + int.to_string(n)
+fn list_map(xs: List[Int], k: Int) -> List[Int] = list.map(xs, (x) => x * k)
+fn process_stdin_lines() -> String = "user stdin"
+
+effect fn main() -> Unit = {
+  let a = list_len(["a", "b"], 10)!
+  println(int.to_string(a))
+  println(int.to_string(map_len(["a": 1, "b": 2], 7)))
+  println(int.to_string(string_len("abc")))
+  println(int_to_string(5))
+  println("${list_map([1, 2], 3)}")
+  println(process_stdin_lines())
+  println(int.to_string(list.len([1, 2, 3])))
+  println(int.to_string(string.len("hello")))
+  println(int.to_string(map.len(["x": 1])))
+  println("${list.map([1, 2], (x) => x + 1)}")
+}
+"#;
+    let r = almide_spine::s5::run_file("impl_name_collision.almd", src).expect("lowers");
+    assert_eq!((r.exit, r.stderr.as_str()), (0, ""));
+    assert_eq!(r.stdout, "12\n207\n1003\nuser:5\n[3, 6]\nuser stdin\n3\n5\n1\n[2, 3]\n");
+}
