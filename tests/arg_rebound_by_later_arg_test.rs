@@ -109,6 +109,21 @@ fn an_index_that_rebinds_its_container_indexes_the_old_value() {
     }
 }
 
+/// The shapes the corpus fixture leaves out because the native v1 lowering
+/// walls them (the map index above is one): a list `+`, a scalar bound of
+/// `list.slice`, a tuple.
+#[test]
+fn the_v1_walled_operand_shapes_see_the_old_value() {
+    let cases = [
+        ("list_concat", "  var xs = [\"a\", \"b\"]\n  let r = xs + {\n    xs = [\"z\"]\n    [\"c\"]\n  }\n  println(\"${r} ${list.len(xs)}\")", "[\"a\", \"b\", \"c\"] 1"),
+        ("slice_scalar", "  var k = 1\n  let r = list.slice([1, 2, 3, 4], k, {\n    k = 0\n    3\n  })\n  println(\"${r} ${k}\")", "[2, 3] 0"),
+        ("tuple", "  var q = [\"a\", \"b\"]\n  let r = (q, {\n    q = [\"z\"]\n    1\n  })\n  println(\"${r} ${list.len(q)}\")", "([\"a\", \"b\"], 1) 1"),
+    ];
+    for (name, body, want) in cases {
+        assert_eq!(run_both(name, &main_with(body)), want, "{name}");
+    }
+}
+
 #[test]
 fn a_fold_lines_init_that_rebinds_the_path_reads_the_old_path() {
     let src = "import fs\n\neffect fn main() -> Unit = {\n  fs.write(\"in.txt\", \"a\\nb\\n\")!\n  var p = \"in.txt\"\n  let r = fs.fold_lines(p, {\n    p = \"missing.txt\"\n    \"\"\n  }, (a, l) => a + l)!\n  println(\"${r} ${p}\")\n}\n";
