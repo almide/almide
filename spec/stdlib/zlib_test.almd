@@ -54,6 +54,19 @@ test "crc32 known answers" {
   assert(zlib.crc32(bytes.from_string("123456789")) == 3421780262, "crc32 check vector")
 }
 
+// 256 bytes is where crc32 switches from the bit step to the table (#3848).
+test "crc32 across the table threshold" {
+  let pad = (n) => bytes.pad_right(bytes.from_list([1, 7, 2, 2, 7]), n, 255)
+  assert(zlib.crc32(pad(255)) == 2380377564, "crc32 of 255 bytes")
+  assert(zlib.crc32(pad(256)) == 1894285138, "crc32 of 256 bytes")
+  assert(zlib.crc32(pad(257)) == 2048252071, "crc32 of 257 bytes")
+  assert(zlib.crc32(bytes.from_list(list.range(0, 200))) == 3976749440, "crc32 of 0..200")
+  assert(
+    zlib.crc32(bytes.repeat(bytes.from_list(list.range(0, 256)), 3)) == 2965430058,
+    "crc32 of 0..256 x3",
+  )
+}
+
 test "adler32 known answers" {
   assert(zlib.adler32(bytes.new(0)) == 1, "adler32 of empty")
   assert(zlib.adler32(bytes.from_list([1, 2, 3])) == 851975, "adler32 of 1,2,3")
