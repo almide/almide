@@ -30,6 +30,7 @@ impl<'a> Interpreter<'a> {
         let program: &'a IrProgram = self.program;
         let fuel = self.fuel.get();
         let wall_deadline = self.wall_deadline;
+        let stop = self.stop.clone();
         std::thread::scope(|scope| {
             std::thread::Builder::new()
                 .name("almide-interp".to_string())
@@ -39,6 +40,7 @@ impl<'a> Interpreter<'a> {
                 .spawn_scoped(scope, move || {
                     let mut interp = Interpreter::new(program).with_fuel(fuel);
                     interp.wall_deadline = wall_deadline;
+                    interp.stop = stop;
                     interp.run_main_on_stack()
                 })
                 .expect("failed to spawn almide-interp worker thread")
@@ -298,11 +300,26 @@ impl<'a> Interpreter<'a> {
             return Err(Flow::Fuel);
         }
         budget.set(f - 1);
-        if f & 0xFF == 0
-            && let Some(deadline) = self.wall_deadline
+        if f & 0xFF == 0 {
+            return self.meter_check();
+        }
+        Ok(())
+    }
+
+    /// The every-256-steps checks: the wall deadline (#2611) and the
+    /// caller's stop (#3809). Both end the run as `Unsupported` — the
+    /// interpreter could not answer — never `FuelExhausted`.
+    #[cold]
+    fn meter_check(&self) -> Result<(), Flow> {
+        if let Some(deadline) = self.wall_deadline
             && std::time::Instant::now() >= deadline
         {
             return Err(Flow::Unsupported("wall-clock deadline reached".into()));
+        }
+        if let Some(stop) = &self.stop
+            && stop.load(std::sync::atomic::Ordering::Relaxed)
+        {
+            return Err(Flow::Unsupported("stopped by the caller".into()));
         }
         Ok(())
     }

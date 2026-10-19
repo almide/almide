@@ -232,6 +232,10 @@ pub struct Interpreter<'a> {
     /// the deadline is `Unsupported` (the interpreter could not answer in
     /// time), never `FuelExhausted`, which callers read as non-termination.
     pub(crate) wall_deadline: Option<std::time::Instant>,
+    /// Optional stop set from another thread (#3809), polled with the
+    /// deadline: a corpus sweep that cuts a run sets it, and the run ends as
+    /// `Unsupported` instead of spinning for the rest of the process.
+    pub(crate) stop: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     /// The pool tier's own step budget (`POOL_FUEL`), charged while a
     /// self-hosted stdlib body is on the stack (`pool_depth > 0`).
     pub(crate) pool_fuel: Cell<u64>,
@@ -571,6 +575,7 @@ impl<'a> Interpreter<'a> {
             stderr: String::new(),
             fuel: Cell::new(DEFAULT_FUEL),
             wall_deadline: None,
+            stop: None,
             pool_fuel: Cell::new(POOL_FUEL),
             depth: Cell::new(0),
             det_fuel: Cell::new(i64::MAX),
@@ -735,6 +740,14 @@ impl<'a> Interpreter<'a> {
     /// (for the fuzz oracle, which runs in-process and cannot kill a slow run).
     pub fn with_wall_deadline(mut self, deadline: std::time::Instant) -> Self {
         self.wall_deadline = Some(deadline);
+        self
+    }
+
+    /// Stop the run with `RunStatus::Unsupported` once `stop` is set from
+    /// another thread (#3809) — the corpus sweeps' per-fixture limit, which
+    /// runs in-process and must end a cut run rather than leave it spinning.
+    pub fn with_stop(mut self, stop: std::sync::Arc<std::sync::atomic::AtomicBool>) -> Self {
+        self.stop = Some(stop);
         self
     }
 

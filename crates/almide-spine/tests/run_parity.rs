@@ -134,8 +134,8 @@ fn wasm_cross_fixtures_run_identically_on_the_interpreter() {
         // #3768: each fixture under its own limit, so a hang fails naming
         // the fixture instead of running into the job's timeout.
         let path = rel.clone();
-        let outcome = almide_corpus::run_limited(rel, almide_corpus::FIXTURE_LIMIT, move || {
-            almide_spine::s5::run_file(&path, &text)
+        let outcome = almide_corpus::run_limited(rel, almide_corpus::FIXTURE_LIMIT, move |stop| {
+            almide_spine::s5::run_file_until(&path, &text, Some(stop.flag()))
         });
         walls.push((stem_of(rel), t0.elapsed()));
         match outcome {
@@ -206,4 +206,22 @@ fn wasm_cross_fixtures_run_identically_on_the_interpreter() {
         "{} of {} fixtures diverge from the oracle run, first: {}",
         mismatches.len(), manifest.len(), mismatches[0]
     );
+}
+
+/// #3809: the sweep's own wiring stops a cut fixture. Each step of this loop
+/// copies the list, so its fuel lasts hours (#2611's shape) — only the cut's
+/// stop, reaching the interpreter through `run_file_until`, ends it in time.
+#[test]
+fn a_cut_fixture_stops_its_interpreter_run() {
+    let src = "fn main() -> Unit = {\n  var items: List[Int] = []\n  while true {\n    items = items + [1]\n  }\n  println(\"${list.len(items)}\")\n}\n";
+    let p = std::panic::catch_unwind(|| {
+        almide_corpus::run_limited("spec/lang/grows_forever.almd", std::time::Duration::from_secs(2), move |stop| {
+            almide_spine::s5::run_file_until("grows_forever.almd", src, Some(stop.flag()))
+        })
+        .map(|_| ())
+    })
+    .expect_err("an endless fixture must be cut");
+    let msg = p.downcast_ref::<String>().cloned().unwrap_or_default();
+    assert!(msg.contains("spec/lang/grows_forever.almd") && msg.contains("2s"), "{msg}");
+    assert!(msg.contains("cut and stopped"), "the cut fixture's interpreter run kept going: {msg}");
 }

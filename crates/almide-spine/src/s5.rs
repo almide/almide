@@ -28,8 +28,24 @@ pub struct RunResult {
 pub use almide::wasm_leg::lower_to_ir;
 
 pub fn run_file(path: &str, source_text: &str) -> Result<RunResult, String> {
+    run_file_until(path, source_text, None)
+}
+
+/// [`run_file`], ending the interpreter run as `Unsupported` once `stop` is
+/// set from another thread (#3809) — how a corpus sweep's per-fixture limit
+/// stops a cut fixture instead of leaving its thread spinning.
+pub fn run_file_until(
+    path: &str,
+    source_text: &str,
+    stop: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+) -> Result<RunResult, String> {
     let ir = lower_to_ir(path, source_text)?;
-    let out = almide::interp::Interpreter::new(&ir).run_main();
+    let interp = almide::interp::Interpreter::new(&ir);
+    let out = match stop {
+        Some(stop) => interp.with_stop(stop),
+        None => interp,
+    }
+    .run_main();
     // Surface the distinguished-outcome reason (Unsupported carries it in the
     // status, not in stderr) so harnesses can report skip classes precisely.
     let stderr = match &out.status {
