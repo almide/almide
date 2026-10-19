@@ -118,14 +118,41 @@ pub fn effect_abi_facts(program: &IrProgram) -> EffectAbiFacts {
     facts
 }
 
+/// The scope a body's calls are resolved in: the module it belongs to (`""`
+/// for the entry program) and the names that module defines.
+#[derive(Default)]
+struct CallScope {
+    module: String,
+    own: HashSet<String>,
+}
+
+impl CallScope {
+    fn of(m: &IrModule) -> Self {
+        CallScope {
+            module: m.name.as_str().to_string(),
+            own: m.functions.iter().map(|f| f.name.as_str().to_string()).collect(),
+        }
+    }
+
+    /// Does `set` hold the fn a call spelled `name` denotes from this scope?
+    /// A module body's bare call of a fn its own module defines is THAT fn,
+    /// by definition (#3831): only its scoped key answers, never the bare key
+    /// an entry-program fn of the same spelling carries.
+    fn names_member(&self, set: &HashSet<String>, name: &str) -> bool {
+        let scoped = set.contains(&crate::mut_param::scope_key(&self.module, name));
+        if !self.module.is_empty() && self.own.contains(name) {
+            return scoped;
+        }
+        scoped || set.contains(name)
+    }
+}
+
 /// The raw return `T` of a call to a never-err lifted fn still typed with its
 /// lifted `Result[T, String]` carrier, if `e` is one.
-fn raw_never_err_call(e: &IrExpr, facts: &EffectAbiFacts, scope: &str) -> Option<Ty> {
+fn raw_never_err_call(e: &IrExpr, facts: &EffectAbiFacts, scope: &CallScope) -> Option<Ty> {
     let IrExprKind::Call { target, .. } = &e.kind else { return None };
     let name = crate::mut_param::call_spelling(target)?;
-    let quiet = facts.never_err_lifted.contains(&name)
-        || facts.never_err_lifted.contains(&crate::mut_param::scope_key(scope, &name));
-    if !quiet {
+    if !scope.names_member(&facts.never_err_lifted, &name) {
         return None;
     }
     match &e.ty {
@@ -138,7 +165,7 @@ fn raw_never_err_call(e: &IrExpr, facts: &EffectAbiFacts, scope: &str) -> Option
 
 struct Settler<'a> {
     facts: &'a EffectAbiFacts,
-    scope: String,
+    scope: CallScope,
     vt: &'a mut VarTable,
 }
 
@@ -154,9 +181,7 @@ impl Settler<'_> {
     fn already_raw(&self, e: &IrExpr, ty: &Ty) -> bool {
         let IrExprKind::Call { target, .. } = &e.kind else { return false };
         let Some(name) = crate::mut_param::call_spelling(target) else { return false };
-        let quiet = self.facts.never_err_lifted.contains(&name)
-            || self.facts.never_err_lifted.contains(&crate::mut_param::scope_key(&self.scope, &name));
-        quiet
+        self.scope.names_member(&self.facts.never_err_lifted, &name)
             && e.ty == *ty
             && !matches!(&e.ty, Ty::Applied(TypeConstructorId::Result | TypeConstructorId::Option, _) | Ty::Unknown)
     }
@@ -276,7 +301,7 @@ fn effect_free(e: &IrExpr) -> bool {
 
 /// The value exits of a never-err lifted fn's own body return its raw `T`, so
 /// a never-err call there passes its raw value through instead of a carrier.
-fn retype_raw_tails(e: &mut IrExpr, facts: &EffectAbiFacts, scope: &str) {
+fn retype_raw_tails(e: &mut IrExpr, facts: &EffectAbiFacts, scope: &CallScope) {
     match &mut e.kind {
         IrExprKind::Block { expr: Some(tail), .. } => retype_raw_tails(tail, facts, scope),
         IrExprKind::If { then, else_, .. } => {
@@ -294,11 +319,11 @@ fn retype_raw_tails(e: &mut IrExpr, facts: &EffectAbiFacts, scope: &str) {
     }
 }
 
-fn is_never_err_fn(f: &IrFunction, facts: &EffectAbiFacts, scope: &str) -> bool {
-    let key = if scope.is_empty() {
+fn is_never_err_fn(f: &IrFunction, facts: &EffectAbiFacts, scope: &CallScope) -> bool {
+    let key = if scope.module.is_empty() {
         f.name.as_str().to_string()
     } else {
-        crate::mut_param::scope_key(scope, f.name.as_str())
+        crate::mut_param::scope_key(&scope.module, f.name.as_str())
     };
     facts.never_err_lifted.contains(&key)
 }
@@ -311,7 +336,7 @@ pub fn settle_never_err_calls(program: &mut IrProgram, facts: &EffectAbiFacts) {
         return;
     }
     let IrProgram { functions, top_lets, modules, var_table, .. } = program;
-    let mut s = Settler { facts, scope: String::new(), vt: var_table };
+    let mut s = Settler { facts, scope: CallScope::default(), vt: var_table };
     let settle_fn = |s: &mut Settler<'_>, f: &mut IrFunction| {
         if is_never_err_fn(f, s.facts, &s.scope) {
             retype_raw_tails(&mut f.body, s.facts, &s.scope);
@@ -325,12 +350,33 @@ pub fn settle_never_err_calls(program: &mut IrProgram, facts: &EffectAbiFacts) {
         s.visit_expr_mut(&mut tl.value);
     }
     for m in modules.iter_mut() {
-        s.scope = m.name.as_str().to_string();
+        s.scope = CallScope::of(m);
         for f in m.functions.iter_mut() {
             settle_fn(&mut s, f);
         }
         for tl in m.top_lets.iter_mut() {
             s.visit_expr_mut(&mut tl.value);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A module body's bare `step` is the module's own `step`: an entry fn
+    /// `step` in the set (its bare key) does not answer for it (#3831).
+    #[test]
+    fn a_module_bare_call_of_its_own_fn_is_not_answered_by_an_entry_namesake() {
+        let entry_step: HashSet<String> = ["step".to_string(), crate::mut_param::scope_key("", "step")].into();
+        let walker = CallScope { module: "walker".into(), own: ["step".to_string()].into() };
+        assert!(!walker.names_member(&entry_step, "step"));
+        let own_step: HashSet<String> = [crate::mut_param::scope_key("walker", "step")].into();
+        assert!(walker.names_member(&own_step, "step"));
+        // The entry program's own call, and a module call of a name its
+        // module does not define, still reach the entry fn's key.
+        assert!(CallScope::default().names_member(&entry_step, "step"));
+        let other = CallScope { module: "other".into(), own: HashSet::new() };
+        assert!(other.names_member(&entry_step, "step"));
     }
 }
