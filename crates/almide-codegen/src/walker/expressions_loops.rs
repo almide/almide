@@ -77,3 +77,22 @@ fn list_range_bounds(ctx: &RenderContext, e: &IrExpr) -> Option<(String, String)
     let [start, end] = args.as_slice() else { return None };
     (symbol.as_str() == "almide_rt_list_range").then(|| (render_expr(ctx, start), render_expr(ctx, end)))
 }
+
+/// The range literal `a..<b` as its rendered bounds, for a chain that folds
+/// it to a value (#3810): the same list as `list.range(a, b)`, counted the
+/// same way on both legs. Counting is also what lets LLVM see the index stay
+/// in `[a, b)` — a fold over the built `Vec<i64>` reads indices it cannot
+/// bound, so `xs[j]` kept its check in the loop (#3604). A COLLECTING chain
+/// keeps the built head: its result is a list of the same length anyway, a
+/// span no machine can hold stays the C-197 out-of-memory abort rather than
+/// `collect`'s capacity-overflow panic, and the outer `list.map(0..<n, …)`
+/// of spectralnorm's enumerate spelling measured 15% slower counted on
+/// aarch64 (LLVM re-associated the inner `eval_a` around the known `i`). An
+/// inclusive `a...b` keeps the built list, as the wasm leg does.
+fn range_literal_fold_bounds(ctx: &RenderContext, e: &IrExpr, collector: &IterCollector) -> Option<(String, String)> {
+    if matches!(collector, IterCollector::Collect) {
+        return None;
+    }
+    let IrExprKind::Range { start, end, inclusive: false } = &e.kind else { return None };
+    Some((render_expr(ctx, start), render_expr(ctx, end)))
+}
