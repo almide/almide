@@ -752,6 +752,7 @@
 66624	spec/wasm_cross/spread_record_share.almd
 86704	spec/wasm_cross/sql_highlight_tokens.almd
 ~	spec/wasm_cross/statement_after_tail_walker_bang.almd
+69376	spec/wasm_cross/stdlib_body_call_vs_user_namesake.almd
 71344	spec/wasm_cross/stdlib_call_temporaries_release.almd
 68304	spec/wasm_cross/stdlib_opaque_shadow.almd
 69440	spec/wasm_cross/stdlib_type_shadow.almd
@@ -945,6 +946,7 @@
 69584	spec/wasm_cross/wide_function_body.almd
 88000	spec/wasm_cross/witness_straightline.almd
 67600	spec/wasm_cross/zip_view_shape.almd
+87696	spec/wasm_cross/zlib_call_vs_user_namesake.almd
 102944	spec/wasm_cross/zlib_selfhost.almd
 66032	spec/wasm_fail/effect_err_aborts_both_legs.almd
 66032	spec/wasm_fail/int_parse_err_propagates.almd
