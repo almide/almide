@@ -5214,7 +5214,8 @@ pub const SRC_FLOAT_CORE: &str = r#"
 
 fn float_abs(x: Float) -> Float = prim.fabs(x)
 
-fn float_sqrt(x: Float) -> Float = prim.fsqrt(x)
+
+fn float_sqrt(x: Float) -> Float = if prim.flt(x, 0.0) then prim.ffrombits(0x7FF8000000000000) else prim.fsqrt(x)
 
 fn float_floor(x: Float) -> Float = prim.ffloor(x)
 
@@ -5714,6 +5715,7 @@ fn __fp_raw(s: String) -> Result[Float, String] = {
 
 
 
+
   let tlen = en - p0
   let is_inf = (tlen == 3 and __fp_eqci(p0, 105) and __fp_eqci(p0 + 1, 110) and __fp_eqci(
     p0 + 2,
@@ -5753,7 +5755,7 @@ fn __fp_raw(s: String) -> Result[Float, String] = {
   if is_inf then {
     let infv = prim.i2f(1) / prim.i2f(0)
     if neg then ok(0.0 - infv) else ok(infv)
-  } else if is_nan then ok(prim.i2f(0) / prim.i2f(0))
+  } else if is_nan then ok(prim.ffrombits(0x7FF8000000000000))
   else if not ok_form then (if en <= st then err("cannot parse float from empty string") else err("invalid float literal"))
   else {
     let net = exp - fcnt
@@ -21764,7 +21766,10 @@ pub const SRC_MATH_FLOAT: &str = r#"
 
 
 
-fn math_sqrt(x: Float) -> Float = prim.fsqrt(x)
+
+
+
+fn math_sqrt(x: Float) -> Float = if prim.flt(x, 0.0) then prim.ffrombits(0x7FF8000000000000) else prim.fsqrt(x)
 
 
 
@@ -22098,21 +22103,24 @@ fn __fpow_algo(s: Float, x: Float, y: Float, ax: Float, ix: Int, iy: Int, hy: In
 }
 
 
+
+
 fn __fpow_signed(x: Float, y: Float, hx: Int, ix: Int, iy: Int, hy: Int, yisint: Int) -> Float = {
   let ax = prim.fabs(x)
   if hx < 0 then {
-    if yisint == 0 then (x - x) / (x - x)
+    if yisint == 0 then prim.ffrombits(0x7FF8000000000000)
     else if yisint == 1 then __fpow_algo(0.0 - 1.0, x, y, ax, ix, iy, hy)
     else __fpow_algo(1.0, x, y, ax, ix, iy, hy)
   } else __fpow_algo(1.0, x, y, ax, ix, iy, hy)
 }
 
 
+
 fn __fpow_special_x(x: Float, hx: Int, ix: Int, hy: Int, yisint: Int) -> Float = {
   let ax = prim.fabs(x)
   let z0 = if hy < 0 then 1.0 / ax else ax
   if hx < 0 then {
-    if prim.bor(ix - 1072693248, yisint) == 0 then (z0 - z0) / (z0 - z0)
+    if prim.bor(ix - 1072693248, yisint) == 0 then prim.ffrombits(0x7FF8000000000000)
     else if yisint == 1 then prim.ffrombits(prim.bxor(prim.fbits(z0), prim.bshl(1, 63))) else z0
   } else z0
 }
@@ -22369,7 +22377,10 @@ fn __log_zero(x: Float) -> Float = {
   neg1 / (x * x)
 }
 
-fn __log_nan(x: Float) -> Float = (x - x) / 0.0
+
+
+
+fn __log_nan(x: Float) -> Float = if prim.fne(x, x) then (x - x) / 0.0 else prim.ffrombits(0x7FF8000000000000)
 
 
 
@@ -23427,6 +23438,10 @@ fn __rem_pio2(x: Float, k: Int) -> Float = {
 }
 
 
+
+
+fn __trig_nan(x: Float) -> Float = if prim.fne(x, x) then x - x else prim.ffrombits(0x7FF8000000000000)
+
 fn math_sin(x: Float) -> Float = {
   let bits = prim.fbits(x)
   let ix = prim.band(prim.bshr_u(bits, 32), 2147483647)
@@ -23434,7 +23449,7 @@ fn math_sin(x: Float) -> Float = {
 
     if ix < 1045430272 then x
     else __k_sin(x, 0.0, 0)
-  } else if ix >= 2146435072 then x - x else __rem_pio2(x, 0)
+  } else if ix >= 2146435072 then __trig_nan(x) else __rem_pio2(x, 0)
 }
 
 fn math_cos(x: Float) -> Float = {
@@ -23447,7 +23462,7 @@ fn math_cos(x: Float) -> Float = {
       let xi = prim.f2i(x)
       if xi == 0 then 1.0 else __k_cos(x, 0.0)
     } else __k_cos(x, 0.0)
-  } else if ix >= 2146435072 then x - x else __rem_pio2(x, 1)
+  } else if ix >= 2146435072 then __trig_nan(x) else __rem_pio2(x, 1)
 }
 
 fn math_tan(x: Float) -> Float = {
@@ -23457,7 +23472,7 @@ fn math_tan(x: Float) -> Float = {
 
     if ix < 1044381696 then x
     else __k_tan(x, 0.0, 0)
-  } else if ix >= 2146435072 then x - x else __rem_pio2(x, 2)
+  } else if ix >= 2146435072 then __trig_nan(x) else __rem_pio2(x, 2)
 }
 "#;
 pub const SRC_MATRIX: &str = r#"
@@ -37134,22 +37149,54 @@ effect fn gunzip(data: Bytes) -> Result[Bytes, String] = _
 
 /// CRC-32 (IEEE) as an unsigned Int; 0 for empty data.
 fn crc32(data: Bytes) -> Int = {
+  let len = bytes.len(data)
+  let acc = if len < 256 then crc32_bits(data, len) else crc32_table(data, len)
+  int.bxor(acc, 4294967295)
+}
+
+
+
+
+
+local fn crc32_step(c: Int) -> Int = int.bxor(
+  int.bshr(c, 1),
+  int.band(3988292384, 0 - int.band(c, 1)),
+)
+
+
+local fn crc32_byte_bits(c: Int) -> Int = {
+  let c2 = crc32_step(crc32_step(c))
+  let c4 = crc32_step(crc32_step(c2))
+  let c6 = crc32_step(crc32_step(c4))
+  crc32_step(crc32_step(c6))
+}
+
+
+local fn crc32_bits(data: Bytes, len: Int) -> Int = {
   var acc = 4294967295
   var i = 0
-  let len = bytes.len(data)
   while i < len {
-    acc = int.bxor(acc, bytes.get_or(data, i, 0))
-    var k = 0
-    while k < 8 {
-      acc = if int.band(acc, 1) == 1 then int.bxor(3988292384, int.bshr(acc, 1)) else int.bshr(
-        acc,
-        1,
-      )
-      k = k + 1
-    }
+    acc = crc32_byte_bits(int.bxor(acc, bytes.get_or(data, i, 0)))
     i = i + 1
   }
-  int.bxor(acc, 4294967295)
+  acc
+}
+
+
+local fn crc32_table(data: Bytes, len: Int) -> Int = {
+  var t = list.repeat(0, 256)
+  var n = 0
+  while n < 256 {
+    t[n] = crc32_byte_bits(n)
+    n = n + 1
+  }
+  var acc = 4294967295
+  var i = 0
+  while i < len {
+    acc = int.bxor(t[int.band(int.bxor(acc, bytes.get_or(data, i, 0)), 255)], int.bshr(acc, 8))
+    i = i + 1
+  }
+  acc
 }
 
 /// Adler-32 as an unsigned Int; 1 for empty data.

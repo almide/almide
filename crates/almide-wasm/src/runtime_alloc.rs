@@ -183,7 +183,7 @@ pub(crate) fn emit_alloc(oom_msg: u32, counters: Option<u32>, canonical: bool) -
 ///
 /// `counters` (#2407): when armed, every call bumps `__free_count` on
 /// entry — filed or abandoned alike, so the number is "blocks released".
-pub(crate) fn emit_free(counters: Option<u32>) -> Function {
+pub(crate) fn emit_free(counters: Option<u32>, canonical: bool) -> Function {
     // params: 0=block; locals: 1=total, 2=class, 3..=5 the large-list walk
     let (block, total, class) = (0u32, 1u32, 2u32);
     let word = |offset: u32| MemArg { offset: u64::from(offset), align: 2, memory_index: 0 };
@@ -206,9 +206,9 @@ pub(crate) fn emit_free(counters: Option<u32>) -> Function {
     // class = CEIL class of the block's want — the class alloc rounded
     // it to, so filing lands exactly where the next taker looks.
     i.i32_const(28).local_get(total).i32_const(1).i32_sub().i32_clz().i32_sub().local_set(class);
-    // Above the ceiling (#3348): the exact-size large list.
+    // Above the ceiling (#3348): the exact-size large list (canonical: abandoned).
     i.local_get(class).i32_const(FREELIST_CLASSES as i32).i32_ge_u().if_(BlockType::Empty);
-    crate::runtime_large::emit_lfree(&mut i, (block, total), (3, 4, 5));
+    crate::canonical_alloc::emit_large_release(&mut i, canonical, (block, total), (3, 4, 5));
     i.return_();
     i.end();
     i.local_get(class)
@@ -755,7 +755,7 @@ mod tests {
         let mut h = DefaultHasher::new();
         body_bytes(&super::emit_inc()).hash(&mut h);
         body_bytes(&super::emit_dec_flat()).hash(&mut h);
-        body_bytes(&super::emit_free(None)).hash(&mut h);
+        body_bytes(&super::emit_free(None, false)).hash(&mut h);
         // $alloc with a FIXED probe immediate for its one per-program
         // parameter (the OOM message address): the tree shape is pinned;
         // the immediate's value is not part of the transcription.
@@ -785,7 +785,7 @@ mod byte_dump {
         for (name, f) in [
             ("inc", super::emit_inc()),
             ("dec_flat", super::emit_dec_flat()),
-            ("free", super::emit_free(None)),
+            ("free", super::emit_free(None, false)),
             // 0 stands in for the per-program OOM message address; the
             // .v side carries that immediate as a parameter.
             ("alloc", super::emit_alloc(0, None, false)),

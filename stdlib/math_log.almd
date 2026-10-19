@@ -12,7 +12,10 @@ fn __log_zero(x: Float) -> Float = {
   neg1 / (x * x)
 }
 
-fn __log_nan(x: Float) -> Float = (x - x) / 0.0
+// A NEGATIVE x manufactures the NaN: the ONE fixed pattern +qNaN 0x7FF8000000000000 (C-055), not
+// the host's runtime 0/0 (x86 -NaN, aarch64 +NaN; a const-folded one is +NaN). A negative-signed
+// NaN x also lands here and passes through as v0's expression does.
+fn __log_nan(x: Float) -> Float = if prim.fne(x, x) then (x - x) / 0.0 else prim.ffrombits(0x7FF8000000000000)
 
 // The shared reduction + polynomial (libm.rs lines 977-993), given the (possibly subnormal-scaled)
 // bit pattern, its upper-32, and the initial k.

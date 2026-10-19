@@ -24,12 +24,17 @@ pub fn almide_rt_float32_to_string(n: f32) -> AlmideString {
     };
     __almide_out.into()
 }
-pub fn almide_rt_float_parse(s: &str) -> Result<f64, AlmideString> { let __almide_r: Result<f64, String> = (|| { s.trim().parse::<f64>().map_err(|e| e.to_string()) })(); __almide_r.map_err(Into::into) }
+// Any spelling of nan parses to the fixed +qNaN 0x7FF8000000000000 (C-055):
+// Rust's parser answers -NaN for "-nan", and the self-hosted wasm parse has no
+// sign to copy, so the sign is fixed rather than inherited.
+pub fn almide_rt_float_parse(s: &str) -> Result<f64, AlmideString> { let __almide_r: Result<f64, String> = (|| { s.trim().parse::<f64>().map(|v| if v.is_nan() { f64::from_bits(0x7FF8_0000_0000_0000) } else { v }).map_err(|e| e.to_string()) })(); __almide_r.map_err(Into::into) }
 pub fn almide_rt_float_abs(n: f64) -> f64 { n.abs() }
 pub fn almide_rt_float_ceil(n: f64) -> f64 { n.ceil() }
 pub fn almide_rt_float_floor(n: f64) -> f64 { n.floor() }
 pub fn almide_rt_float_round(n: f64) -> f64 { n.round() }
-pub fn almide_rt_float_sqrt(n: f64) -> f64 { n.sqrt() }
+// The fixed +qNaN below zero, matching almide_rt_math_sqrt (C-055), and by
+// the same sign-clearing `abs` (a selected NaN constant is folded away).
+pub fn almide_rt_float_sqrt(n: f64) -> f64 { let r = n.sqrt(); if n < 0.0 { r.abs() } else { r } }
 // Explicit NaN/tie decision tree — see almide_rt_math_fmin/fmax (math.rs) for
 // why `f64::min`/`f64::max` (llvm.minnum/maxnum, unspecified ±0-tie order)
 // must not be used. Ties follow IEEE-754-2019 zero ordering (C-049,

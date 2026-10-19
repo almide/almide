@@ -316,9 +316,10 @@ fn __fp_raw(s: String) -> Result[Float, String] = {
   let p0 = if st < en and (prim.load8(st) == 45 or prim.load8(st) == 43) then st + 1 else st
   // IEEE special values (Rust's strtod accepts these): "inf" / "infinity" / "nan", case-insensitive,
   // the optional sign already folded into neg/p0. Checked before the digit grammar (which rejects them).
-  // Built by RUNTIME division (prim.i2f, NOT folded literals) so the f64 inf/nan bit patterns come from
-  // the hardware — 1/0 = +inf, 0/0 = nan, byte-identical to Rust on both targets; float.to_string
-  // already renders inf/-inf/NaN.
+  // inf is built by RUNTIME division (prim.i2f, NOT a folded literal): 1/0 = +inf on every host. Any
+  // spelling of nan ("nan", "-nan", "+NaN", ...) is the ONE fixed pattern +qNaN 0x7FF8000000000000
+  // (C-055): a runtime 0/0 is -NaN on x86 and +NaN on aarch64, and Rust's own parser answers -NaN
+  // for "-nan", so the sign would otherwise decide list.min/max differently per leg.
   let tlen = en - p0
   let is_inf = (tlen == 3 and __fp_eqci(p0, 105) and __fp_eqci(p0 + 1, 110) and __fp_eqci(
     p0 + 2,
@@ -358,7 +359,7 @@ fn __fp_raw(s: String) -> Result[Float, String] = {
   if is_inf then {
     let infv = prim.i2f(1) / prim.i2f(0)
     if neg then ok(0.0 - infv) else ok(infv)
-  } else if is_nan then ok(prim.i2f(0) / prim.i2f(0))
+  } else if is_nan then ok(prim.ffrombits(0x7FF8000000000000))
   else if not ok_form then (if en <= st then err("cannot parse float from empty string") else err("invalid float literal"))
   else {
     let net = exp - fcnt

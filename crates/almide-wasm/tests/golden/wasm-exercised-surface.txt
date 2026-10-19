@@ -189,6 +189,7 @@ call:float.floor
 call:float.from_float32
 call:float.from_float64
 call:float.from_int
+call:float.is_nan
 call:float.max
 call:float.min
 call:float.parse

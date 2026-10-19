@@ -230,11 +230,20 @@ fn http_server_fill<'a>(
     if reader.get_ref().set_read_timeout(Some(left)).is_err() {
         return Err(HttpServerReject::Drop);
     }
-    match std::io::BufRead::fill_buf(reader) {
-        Ok(b) => Ok(b),
-        Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => Err(late),
-        Err(_) => Err(HttpServerReject::Drop),
+    // An interrupted read moved no bytes: read again (EINTR under
+    // SO_RCVTIMEO — the client core's `http_read_retrying` says why). The
+    // retry is a separate call so the borrow of the buffer ends with it.
+    while let Err(e) = std::io::BufRead::fill_buf(reader) {
+        if e.kind() == std::io::ErrorKind::Interrupted {
+            continue;
+        }
+        return Err(if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) {
+            late
+        } else {
+            HttpServerReject::Drop
+        });
     }
+    std::io::BufRead::fill_buf(reader).map_err(|_| HttpServerReject::Drop)
 }
 
 /// One line without its line ending; `too_long` answers a line over the limit.
