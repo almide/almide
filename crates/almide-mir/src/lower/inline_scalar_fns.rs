@@ -14,7 +14,10 @@
 //
 // ADMISSION (all conservative, decline = keep the call):
 //   - the callee is a MAIN-PROGRAM fn (module fns keep their flatten-name
-//     calls), non-effect, non-test, non-generic, not `main`;
+//     calls), non-effect, non-test, non-generic, not `main`, and the call
+//     DENOTES it: a module or stdlib body's bare call of a name its own
+//     module defines is that module's fn, whatever the main program spells
+//     the same way (#3831, #3832; see `Scope`);
 //   - every param and the return are SCALAR (Int/Float/Bool);
 //   - the body has NO free vars beyond its params (no globals/cells);
 //   - the body REDUCES to a pure scalar expression: Block-of-`let`s + tail,
@@ -165,30 +168,76 @@ fn is_inlinable_shape(f: &almide_ir::IrFunction) -> bool {
     reduce_expr(&f.body, &env, &mut budget).is_some()
 }
 
+/// An admitted callee: its params and its body, reduced per call site.
+struct Callee {
+    params: Vec<VarId>,
+    body: IrExpr,
+}
+
+/// The entry-program fn a bare `Named` call denotes from a body, by
+/// DEFINITION, not by spelling (#3831, #3832). A body resolves a bare name
+/// in its own scope first — a module fn's call of `step` is that module's
+/// own `step`, a stdlib body's call of `zlib_deflate` its own sibling — and
+/// reaches the entry program only when its scope defines no such fn: the
+/// emitters' resolution (`resolve_named_fn`: the current module's qualified
+/// key, then the entry's). The entry program's fns are indexed by name only
+/// where the name is unique among them; a duplicated spelling names no
+/// definition here, so no call inlines to either.
+struct Scope<'a> {
+    /// Entry-program fn index by (unique) name.
+    entry: &'a HashMap<&'a str, usize>,
+    /// The names the body's own module defines; `None` for an entry body.
+    own: Option<std::collections::HashSet<&'a str>>,
+    /// The entry fn whose body this is (never inlined into itself).
+    this: Option<usize>,
+}
+
+impl Scope<'_> {
+    fn entry_fn(&self, name: &str) -> Option<usize> {
+        if self.own.as_ref().is_some_and(|own| own.contains(name)) {
+            return None;
+        }
+        self.entry.get(name).copied().filter(|&i| Some(i) != self.this)
+    }
+}
+
 /// Inline every call to a small pure-scalar MAIN-PROGRAM function as the
 /// reduced expression (#806 step 2). Shared with classify (desugar-before-both).
+/// Candidates are keyed by DEFINITION (the entry fn's index) and every call
+/// site resolves its callee through [`Scope`], so a module's or a stdlib
+/// body's call of its own same-spelled fn is never taken for an entry fn.
 pub fn inline_small_scalar_fns(program: &mut almide_ir::IrProgram) {
-    let inlinable: HashMap<String, (Vec<VarId>, Vec<Ty>, IrExpr)> = program
-        .functions
-        .iter()
-        .filter(|f| is_inlinable_shape(f))
-        .map(|f| {
-            (
-                f.name.as_str().to_string(),
-                (
-                    f.params.iter().map(|p| p.var).collect(),
-                    f.params.iter().map(|p| p.ty.clone()).collect(),
-                    f.body.clone(),
-                ),
-            )
-        })
-        .collect();
+    let mut spelled: HashMap<&str, usize> = HashMap::new();
+    for f in &program.functions {
+        *spelled.entry(f.name.as_str()).or_insert(0) += 1;
+    }
+    // Owned names: the program's bodies are rewritten while these are read.
+    let mut entry_names: HashMap<String, usize> = HashMap::new();
+    let mut inlinable: HashMap<usize, Callee> = HashMap::new();
+    for (i, f) in program.functions.iter().enumerate() {
+        if spelled[f.name.as_str()] != 1 {
+            continue;
+        }
+        entry_names.insert(f.name.as_str().to_string(), i);
+        if is_inlinable_shape(f) {
+            inlinable.insert(
+                i,
+                Callee { params: f.params.iter().map(|p| p.var).collect(), body: f.body.clone() },
+            );
+        }
+    }
     if inlinable.is_empty() {
         return;
     }
+    let entry: HashMap<&str, usize> = entry_names.iter().map(|(n, &i)| (n.as_str(), i)).collect();
+    let module_names: Vec<Vec<String>> = program
+        .modules
+        .iter()
+        .map(|m| m.functions.iter().map(|f| f.name.as_str().to_string()).collect())
+        .collect();
     struct Inliner<'a> {
-        inlinable: &'a HashMap<String, (Vec<VarId>, Vec<Ty>, IrExpr)>,
-        exclude: &'a str,
+        inlinable: &'a HashMap<usize, Callee>,
+        scope: Scope<'a>,
     }
     use almide_ir::{walk_expr_mut, IrMutVisitor};
     impl IrMutVisitor for Inliner<'_> {
@@ -198,10 +247,12 @@ pub fn inline_small_scalar_fns(program: &mut almide_ir::IrProgram) {
             else {
                 return;
             };
-            let Some((params, _ptys, body)) = self.inlinable.get(name.as_str()) else {
+            let Some(Callee { params, body }) =
+                self.scope.entry_fn(name.as_str()).and_then(|i| self.inlinable.get(&i))
+            else {
                 return;
             };
-            if name.as_str() == self.exclude || args.len() != params.len() {
+            if args.len() != params.len() {
                 return;
             }
             // Every argument must be SPECULATION-SAFE: a param read twice
@@ -227,24 +278,20 @@ pub fn inline_small_scalar_fns(program: &mut almide_ir::IrProgram) {
     // own body (no self-inlining; the reducible subset already forbids user
     // calls inside a callee, so cascades cannot occur).
     for i in 0..program.functions.len() {
-        let fname = program.functions[i].name.as_str().to_string();
-        let mut body = std::mem::replace(
-            &mut program.functions[i].body,
-            IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None },
-        );
-        let mut inl = Inliner { inlinable: &inlinable, exclude: &fname };
-        inl.visit_expr_mut(&mut body);
-        program.functions[i].body = body;
+        let mut inl = Inliner {
+            inlinable: &inlinable,
+            scope: Scope { entry: &entry, own: None, this: Some(i) },
+        };
+        inl.visit_expr_mut(&mut program.functions[i].body);
     }
-    for mi in 0..program.modules.len() {
-        for fi in 0..program.modules[mi].functions.len() {
-            let mut body = std::mem::replace(
-                &mut program.modules[mi].functions[fi].body,
-                IrExpr { kind: IrExprKind::Unit, ty: Ty::Unit, span: None, def_id: None },
-            );
-            let mut inl = Inliner { inlinable: &inlinable, exclude: "" };
-            inl.visit_expr_mut(&mut body);
-            program.modules[mi].functions[fi].body = body;
+    for (mi, names) in module_names.iter().enumerate() {
+        let own: std::collections::HashSet<&str> = names.iter().map(String::as_str).collect();
+        let mut inl = Inliner {
+            inlinable: &inlinable,
+            scope: Scope { entry: &entry, own: Some(own), this: None },
+        };
+        for f in program.modules[mi].functions.iter_mut() {
+            inl.visit_expr_mut(&mut f.body);
         }
     }
 }
