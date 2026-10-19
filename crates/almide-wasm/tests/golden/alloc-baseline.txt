@@ -756,6 +756,7 @@
 ~	spec/wasm_cross/statement_after_tail_walker_bang.almd
 69376	spec/wasm_cross/stdlib_body_call_vs_user_namesake.almd
 71344	spec/wasm_cross/stdlib_call_temporaries_release.almd
+68448	spec/wasm_cross/stdlib_manufactured_nan_sign.almd
 68304	spec/wasm_cross/stdlib_opaque_shadow.almd
 69440	spec/wasm_cross/stdlib_type_shadow.almd
 66208	spec/wasm_cross/str_result_heap_bind.almd
