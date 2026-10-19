@@ -208,20 +208,44 @@ fn wasm_cross_fixtures_run_identically_on_the_interpreter() {
     );
 }
 
-/// #3809: the sweep's own wiring stops a cut fixture. Each step of this loop
-/// copies the list, so its fuel lasts hours (#2611's shape) — only the cut's
-/// stop, reaching the interpreter through `run_file_until`, ends it in time.
+/// #3809: the sweep's wiring stops a cut fixture. Each step of this loop
+/// copies the list, so its fuel lasts hours (#2611's shape) and only the cut's
+/// stop, reaching the interpreter through `run_file_until`, can end it.
+///
+/// The verdict is WHY the run ended, never how fast. The work reports its own
+/// outcome and the test waits for it. A cold process spends seconds lowering
+/// and building the stdlib pool before the first step; a fixed grace against
+/// that setup is what made the earlier form of this test flaky. `HANG_BACKSTOP`
+/// is not a speed limit: a run that ignored its stop would end only by fuel,
+/// hours later, and the backstop turns that hang into a failure.
 #[test]
 fn a_cut_fixture_stops_its_interpreter_run() {
+    const HANG_BACKSTOP: std::time::Duration = std::time::Duration::from_secs(300);
     let src = "fn main() -> Unit = {\n  var items: List[Int] = []\n  while true {\n    items = items + [1]\n  }\n  println(\"${list.len(items)}\")\n}\n";
-    let p = std::panic::catch_unwind(|| {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let p = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
         almide_corpus::run_limited("spec/lang/grows_forever.almd", std::time::Duration::from_secs(2), move |stop| {
-            almide_spine::s5::run_file_until("grows_forever.almd", src, Some(stop.flag()))
+            let r = almide_spine::s5::run_file_until("grows_forever.almd", src, Some(stop.flag()));
+            let _ = tx.send(r.as_ref().map(|o| (o.exit, o.stderr.clone())).map_err(Clone::clone));
+            r.map(|_| ())
         })
-        .map(|_| ())
-    })
+    }))
     .expect_err("an endless fixture must be cut");
     let msg = p.downcast_ref::<String>().cloned().unwrap_or_default();
-    assert!(msg.contains("spec/lang/grows_forever.almd") && msg.contains("2s"), "{msg}");
-    assert!(msg.contains("cut and stopped"), "the cut fixture's interpreter run kept going: {msg}");
+    assert!(msg.contains("spec/lang/grows_forever.almd") && msg.contains("2s") && msg.contains("cut"), "{msg}");
+    let ended = rx
+        .recv_timeout(HANG_BACKSTOP)
+        .expect("the cut run never ended: its stop did not reach the interpreter");
+    assert_eq!(ended, Ok((-2, almide::interp::STOPPED.to_string())), "the cut run ended, but not by its stop");
+}
+
+/// #3809: a stop already set when the run starts ends it before any program
+/// step, whether the stdlib pool is still cold (the pool wait sees it) or warm
+/// (the interpreter's first step sees it). No clock is involved.
+#[test]
+fn a_run_whose_stop_is_already_set_ends_as_stopped() {
+    let src = "fn main() -> Unit = {\n  var s = 0\n  while true {\n    s = s + 1\n  }\n  println(\"${s}\")\n}\n";
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let r = almide_spine::s5::run_file_until("stopped_before_start.almd", src, Some(stop)).expect("lowers");
+    assert_eq!((r.exit, r.stderr.as_str(), r.stdout.as_str()), (-2, almide::interp::STOPPED, ""));
 }
