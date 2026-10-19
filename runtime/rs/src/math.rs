@@ -64,11 +64,15 @@ pub fn almide_rt_math_pow(base: i64, exp: i64) -> i64 {
 #[inline(always)] pub fn almide_rt_math_round(x: f64) -> f64 { x.round() }
 // A negative x MANUFACTURES a NaN: the ONE fixed +qNaN 0x7FF8000000000000
 // (C-055), not the host's sqrt NaN (x86 -NaN, aarch64 +NaN). -0.0 and a NaN x
-// take `f64::sqrt` (-0.0 stays -0.0, the NaN passes through). The constant is
-// behind `black_box`: LLVM treats every NaN as interchangeable, so a plain
-// `if x < 0.0 { NaN } else { x.sqrt() }` is folded back into the bare sqrt and
-// the host's sign returns (measured with rustc -O on aarch64).
-#[inline(always)] pub fn almide_rt_math_sqrt(x: f64) -> f64 { if x < 0.0 { std::hint::black_box(f64::from_bits(0x7FF8_0000_0000_0000)) } else { x.sqrt() } }
+// take `f64::sqrt` (-0.0 stays -0.0, the NaN passes through). The sign is
+// cleared with `abs` on the sqrt result, not by selecting a NaN constant:
+// LLVM treats every NaN as interchangeable and folds
+// `if x < 0.0 { NaN } else { x.sqrt() }` back into the bare sqrt (measured
+// with rustc -O on aarch64), while `abs` is a sign-bit operation it keeps, and
+// it stays branchless (a `black_box`ed constant cost nbody 30%). Every leg's
+// invalid-operation NaN carries the default payload (quiet bit only), so the
+// result is exactly 0x7FF8000000000000.
+#[inline(always)] pub fn almide_rt_math_sqrt(x: f64) -> f64 { let r = x.sqrt(); if x < 0.0 { r.abs() } else { r } }
 
 // Constants
 #[inline(always)] pub fn almide_rt_math_pi() -> f64 { std::f64::consts::PI }
