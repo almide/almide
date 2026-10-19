@@ -190,6 +190,7 @@
 2925	spec/wasm_cross/fallible_tuple_value_tail.almd
 2388	spec/wasm_cross/fan_any_allfail.almd
 3162	spec/wasm_cross/fan_any_early_winner.almd
+7690	spec/wasm_cross/fan_arm_heap_capture.almd
 3377	spec/wasm_cross/fan_arm_unwrap_or.almd
 2125	spec/wasm_cross/fan_block_err_list_order.almd
 4855	spec/wasm_cross/fan_block_rc_closure_capture.almd
