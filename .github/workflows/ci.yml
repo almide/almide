@@ -821,7 +821,9 @@ jobs:
       # measurements page (docs/benchmarks/README.md) is a defect this catches rather than a change a reader is trusted not to make.
       # Freshness only — the numbers themselves are machine-dependent, so re-measuring here
       # would fail for every machine but the one that produced the baseline. The RATCHET
-      # (`-- bench --check`, 1.5x) is a separate, opt-in job for that reason.
+      # (`-- bench docs/benchmarks --check`, 1.5x) is run by hand for that reason, and judges
+      # only on the machine class the baseline's `machine` line records (it skips, saying so,
+      # on any other — scripts/lib/machine-class.sh).
       - name: Build-speed block on the measurements page is fresh (#999)
         run: |
           ALMIDE=/tmp/almide-bin/almide
