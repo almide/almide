@@ -3380,6 +3380,7 @@ evidence  = [
   { path = "spec/wasm_cross/hof_fn_value_callbacks.almd", class = "fixture" },
   { path = "spec/wasm_cross/fold_family_source_before_init.almd", class = "fixture" },
   { path = "spec/wasm_cross/fold_init_rebinds_source.almd", class = "fixture" },
+  { path = "spec/wasm_cross/arg_rebinds_earlier_arg.almd", class = "fixture" },
   { path = "spec/wasm_cross/let_bound_closure_scope.almd", class = "fixture" },
 ]
 [[contract]]
