@@ -71,8 +71,12 @@ pub(super) fn capture_bindings(
         // If the captured var is a fn param with a borrowed runtime
         // representation (`&[T]` / `&str` / `&T`), the bare `Var` IR
         // renders as the borrow — but `__cap_N: Vec<T>` / `String` / `T`
-        // (the Almide-level owned type) expects an owned value. Materialise
-        // the owned form explicitly so the `move |..|` closure can take it.
+        // (the Almide-level owned type) expects an owned value, and a borrow
+        // cannot move into the closure. The bind is a `Clone` of the param:
+        // BorrowLowering's `owned_read` spells the owned copy of every
+        // by-reference param in one place (`&str` → the Almide String,
+        // `&[T]` → `Vec<T>`, `&T` → `T`). A copy spelled here instead went
+        // stale when the String representation changed (#3819).
         let borrow = cx.facts.param_borrows.get(&var_id).copied();
         // A boxed-payload binder is a `Box<T>` read as `*b` (#3174): the
         // capture binds that unboxed `T`, and `unbox_captures` drops the
@@ -83,24 +87,9 @@ pub(super) fn capture_bindings(
             IrExpr { kind: IrExprKind::Deref { expr: Box::new(var) }, ty: ty.clone(), span: None, def_id: None }
         };
         let bind_value = match borrow {
-            Some(ParamBorrow::RefSlice) => IrExpr {
-                kind: IrExprKind::ToVec {
+            Some(ParamBorrow::RefSlice | ParamBorrow::RefStr) => IrExpr {
+                kind: IrExprKind::Clone {
                     expr: Box::new(IrExpr { kind: IrExprKind::Var { id: var_id }, ty: ty.clone(), span: None, def_id: None }),
-                },
-                ty: ty.clone(), span: None, def_id: None,
-            },
-            Some(ParamBorrow::RefStr) => IrExpr {
-                kind: IrExprKind::Call {
-                    target: CallTarget::Method {
-                        object: Box::new(IrExpr { kind: IrExprKind::Var { id: var_id }, ty: ty.clone(), span: None, def_id: None }),
-                        // Use `to_owned` instead of `to_string` to avoid
-                        // StdlibLowering converting this into a module call
-                        // (e.g. `int.to_string()`) when the Almide-level type
-                        // differs from the Rust-level &str representation.
-                        method: almide_base::intern::sym("to_owned"),
-                    },
-                    args: vec![],
-                    type_args: vec![],
                 },
                 ty: ty.clone(), span: None, def_id: None,
             },
