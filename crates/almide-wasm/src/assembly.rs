@@ -87,7 +87,7 @@ fn static_helpers(lit: &HelperLits, counters: Option<u32>) -> Vec<(u32, Function
         (F_STR_CMP, emit_str_cmp()),
         (F_STR_REPLACE, emit_str_replace()),
         (F_COPY, emit_copy()),
-        (F_FREE, emit_free(counters)),
+        (F_FREE, emit_free(counters, crate::canonical_alloc::armed())),
         (F_INC, emit_inc()),
         (F_DEC_FLAT, emit_dec_flat()),
         (F_COW, emit_cow()),

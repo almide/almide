@@ -6,12 +6,17 @@
 //! program copies (a growing buffer's `memory.copy`) depend only on the
 //! requests it makes, not on which freed blocks the heap happens to hold.
 //! Reuse can only remove copies, so a series measured canonically is an
-//! upper bound of the shipped module's. `$free` still files blocks; nothing
-//! takes them back.
+//! upper bound of the shipped module's. `$free` still files small blocks
+//! into their class lists (an O(1) push; nothing takes them back) and
+//! abandons blocks above the class ceiling: filing one walks the
+//! address-ordered large list, and since every bump lands above every
+//! filed block, that walk covered all blocks released so far — a call's
+//! cost grew with how many calls came before it, which the meter's k-scaled
+//! difference read as growth in n (net.tcp_read_exact's wasm series).
 //!
-//! Not measured under the switch: the free-list walk itself. The allocator's
-//! own cost is covered by its proofs (proofs/LargeTree.v transcribes the
-//! large list's take and insert).
+//! Not measured under the switch: the free-list walks themselves. The
+//! allocator's own cost is covered by its proofs (proofs/LargeTree.v
+//! transcribes the large list's take and insert).
 //!
 //! OFF (the default) the module is byte-identical to a build without the
 //! switch. The CLI arms it from `ALMIDE_WASM_CANONICAL_ALLOC`. A test arms it
