@@ -63,8 +63,46 @@ pub(crate) struct StdlibPool {
 /// harness run interprets ~130 fixtures; lowering the registry once instead of
 /// per fixture is what makes the pool affordable.
 pub(crate) fn pool() -> &'static StdlibPool {
-    static POOL: OnceLock<StdlibPool> = OnceLock::new();
     POOL.get_or_init(build)
+}
+
+static POOL: OnceLock<StdlibPool> = OnceLock::new();
+
+/// Make the pool ready, unless `stop` is set first (#3809). The first build
+/// lowers every registry source and polls nothing; it measured 1.15 s in an
+/// idle `ci-test` build, several times that on a loaded runner. A run cut
+/// in that window returned only after the build. Here the build runs on its
+/// own thread and the caller polls `stop` while it waits: a stopped caller
+/// returns `false` at once, and the build still finishes for the next run.
+/// The build is bounded, shared and never the fixture's own work, so it
+/// does not spin. Returns `true` when the pool is ready.
+pub fn pool_ready_unless_stopped(stop: &std::sync::atomic::AtomicBool) -> bool {
+    use std::sync::atomic::Ordering;
+    use std::sync::mpsc::{self, RecvTimeoutError};
+    if POOL.get().is_some() {
+        return true;
+    }
+    let (tx, rx) = mpsc::channel();
+    let builder = std::thread::Builder::new()
+        .name("almide-interp stdlib pool".to_string())
+        .spawn(move || {
+            pool();
+            let _ = tx.send(());
+        })
+        .expect("failed to spawn the stdlib pool builder");
+    loop {
+        match rx.recv_timeout(std::time::Duration::from_millis(10)) {
+            Ok(()) => return true,
+            Err(RecvTimeoutError::Timeout) if stop.load(Ordering::Relaxed) => return false,
+            Err(RecvTimeoutError::Timeout) => {}
+            // The builder panicked: re-raise its panic here, as a build on
+            // this thread would have.
+            Err(RecvTimeoutError::Disconnected) => match builder.join() {
+                Err(panic) => std::panic::resume_unwind(panic),
+                Ok(()) => return true,
+            },
+        }
+    }
 }
 
 /// The impl fn a `module.func` call resolves to, when the registry names one.

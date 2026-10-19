@@ -31,6 +31,7 @@ mod heap;
 mod vfs;
 mod value;
 
+pub use stdlib_pool::pool_ready_unless_stopped;
 pub use value::{Closure, Value, VariantPayload};
 
 use std::cell::Cell;
@@ -305,6 +306,9 @@ pub struct Interpreter<'a> {
     pub(crate) t_ord: Cell<i64>,
     pub(crate) t_start: std::time::Instant,
 }
+
+/// The `Unsupported` reason of a run whose caller set its stop (#3809).
+pub const STOPPED: &str = "stopped by the caller";
 
 /// Default fuel budget — high enough for any real corpus program, low enough to
 /// bound an adversarial loop. Roughly 100M eval steps.
