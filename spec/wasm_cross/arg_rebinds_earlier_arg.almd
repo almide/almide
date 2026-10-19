@@ -1,0 +1,177 @@
+// @contract: C-258
+// #3815: operands are values evaluated left to right, once, so an operand
+// that reads a variable sees the value it held BEFORE a later operand
+// rebinds it. The wasm leg passed such a read as a view of the variable's
+// block; the later operand's assignment released the block and the call
+// read freed memory (`list.contains` printed false, `map.get` none, the
+// rest garbage or a trap). Native refused an index whose index operand
+// rebinds the container (E0506) and, for a read between two rebinding
+// operands, read the value from before the first one.
+// Cells: every argument position of a user fn, a closure call, stdlib
+// calls over each container kind, a binary op, an index, a map index, and
+// the list / tuple / record literals and an interpolation as operand
+// sequences. Each cell prints the result and, where it shows, the rebound
+// value too.
+type P = { a: List[String], n: Int }
+
+fn cnt(xs: List[String], n: Int) -> Int = list.len(xs) + n
+
+fn mid(n: Int, xs: List[String], m: Int) -> Int = list.len(xs) * 10 + n + m
+
+fn cat(xs: List[String], sep: String) -> String = list.join(xs, sep)
+
+effect fn main() -> Unit = {
+  var a1 = ["a", "b", "c"]
+  println("contains ${list.contains(a1, {
+    a1 = ["z"]
+    "a"
+  })} ${list.len(a1)}")
+  var a2 = ["a", "b", "c"]
+  println("index_of ${list.index_of(a2, {
+    a2 = ["z"]
+    "c"
+  })}")
+  var a3 = ["a", "b", "c"]
+  println("take ${list.take(a3, {
+    a3 = ["z"]
+    2
+  })}")
+  var a4 = ["a", "b", "c"]
+  println("drop ${list.drop(a4, {
+    a4 = ["z"]
+    1
+  })}")
+  var a5 = ["a", "b", "c"]
+  println("chunk ${list.chunk(a5, {
+    a5 = ["z"]
+    2
+  })}")
+  var a6 = ["a", "b"]
+  println("zip ${list.zip(a6, {
+    a6 = ["z"]
+    ["x", "y"]
+  })}")
+  var a7 = ["a", "b"]
+  println("join ${list.join(a7, {
+    a7 = ["z"]
+    "-"
+  })}")
+  var a8 = ["a", "b"]
+  println("get ${list.get(a8, {
+    a8 = ["z"]
+    1
+  })}")
+  var a9 = ["a", "b"]
+  println("concat ${a9 + {
+    a9 = ["z"]
+    ["c"]
+  }}")
+  var a10 = ["a", "b"]
+  println("index ${a10[{
+    a10 = ["z"]
+    1
+  }]}")
+  var s1 = set.from_list(["a", "b"])
+  println("set.contains ${set.contains(s1, {
+    s1 = set.from_list(["z"])
+    "a"
+  })} ${set.len(s1)}")
+  var s2 = set.from_list(["a", "b"])
+  println("set.union ${set.len(set.union(s2, {
+    s2 = set.from_list(["z"])
+    set.from_list(["c"])
+  }))}")
+  var m1 = ["a": "1", "b": "2"]
+  println("map.get ${map.get(m1, {
+    m1 = ["z": "9"]
+    "a"
+  })} ${map.len(m1)}")
+  var m2 = ["a": "1", "b": "2"]
+  println("map.contains ${map.contains(m2, {
+    m2 = ["z": "9"]
+    "b"
+  })}")
+  var m3 = ["a": "1"]
+  println("map.set ${map.len(map.set(m3, {
+    m3 = ["z": "9", "y": "8"]
+    "b"
+  }, "2"))}")
+  var m4 = ["a": "1", "b": "2"]
+  println("map.index ${m4[{
+    m4 = ["z": "9"]
+    "a"
+  }]}")
+  var t1 = "abc"
+  println("string.contains ${string.contains(t1, {
+    t1 = "z"
+    "a"
+  })} ${t1}")
+  var t2 = "abcabc"
+  println("string.replace ${string.replace(t2, {
+    t2 = "z"
+    "a"
+  }, "-")}")
+  var t3 = "ab"
+  println("string.pad_start ${string.pad_start(t3, {
+    t3 = "z"
+    4
+  }, ".")}")
+  var t4 = "ab"
+  println("str concat ${t4 + {
+    t4 = "z"
+    "!"
+  }}")
+  var u1 = ["a", "b", "c"]
+  println("user first ${cnt(u1, {
+    u1 = ["z"]
+    0
+  })} ${list.len(u1)}")
+  var u2 = ["a", "b", "c"]
+  println("user mid ${mid(1, u2, {
+    u2 = ["z"]
+    2
+  })}")
+  var u3 = ["a", "b", "c"]
+  println("user mid after rebind ${mid({
+    u3 = ["y", "y"]
+    1
+  }, u3, {
+    u3 = ["z"]
+    2
+  })}")
+  var u4 = ["a", "b", "c"]
+  println("user str ${cat(u4, {
+    u4 = ["z"]
+    "+"
+  })}")
+  var f1 = ["a", "b", "c"]
+  let g = (xs: List[String], n: Int) => list.len(xs) + n
+  println("closure ${g(f1, {
+    f1 = ["z"]
+    0
+  })}")
+  var l1 = ["a", "b"]
+  println("list lit ${[
+    l1,
+    {
+      l1 = ["z"]
+      ["q"]
+    }
+  ]}")
+  var r1 = ["a", "b"]
+  let rec = P { a: r1, n: {
+    r1 = ["z"]
+    1
+  } }
+  println("record ${rec.a} ${rec.n}")
+  var q1 = ["a", "b"]
+  println("tuple ${(q1, {
+    q1 = ["z"]
+    1
+  })}")
+  var i1 = "hi"
+  println("interp ${"${i1}/${{
+    i1 = "z"
+    "!"
+  }}"}")
+}
