@@ -95,7 +95,7 @@ fn parse(bytes: &[u8]) -> Result<Parsed, String> {
                     }
                 }
             }
-            Payload::CodeSectionStart { range, .. } => p.code_start = range.start as usize,
+            Payload::CodeSectionStart { unchecked_range, .. } => p.code_start = unchecked_range.start as usize,
             Payload::CodeSectionEntry(body) => {
                 // `range()` is the body after its size LEB: the locals
                 // vector first, which is the function's address.
