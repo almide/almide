@@ -903,6 +903,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/list_float_total_order.almd", class = "fixture" },
   { path = "spec/wasm_cross/sort_by_call_count.almd", class = "fixture" },
+  { path = "spec/wasm_cross/stdlib_manufactured_nan_sign.almd", class = "fixture" },
 ]
 
 # ── list.product OVERFLOW WRAPS (Cluster-B) ──────────────────────────
