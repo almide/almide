@@ -31,7 +31,7 @@
 
 ---
 
-Almide is a statically-typed language for code that AI writes and edits. The claim is not that the model gets it right. It is that **when the model is wrong, the compiler says so at author time and names the fix; and when the model is right, `almide verify` checks the program's ownership, name and capability witnesses**. The checker it runs, `almide-verify`, is an independent Rust transcription of checkers proven in Rocq; it is held to their verdicts by gates, not proven itself ([proven vs trusted](./docs/contracts/proven-vs-trusted.md)), and a certificate over the shipped wasm bytes themselves is still pending (#2755–#2760). It compiles to native binaries (via Rust) and to WebAssembly, and for every behaviour in the [contract ledger](./docs/contracts/) the two produce byte-identical output.
+Almide is a statically-typed language for code that AI writes and edits. The claim is not that the model gets it right. It is that **when the model is wrong, the compiler says so at author time and names the fix**. Programs compile to native binaries (via Rust) and to WebAssembly, with byte-identical output on every [contracted behaviour](./docs/contracts/). `almide verify` checks their ownership, name and capability witnesses ([what is proven, what is trusted](./docs/contracts/proven-vs-trusted.md)).
 
 ## An edit that survives
 
