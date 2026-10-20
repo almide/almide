@@ -270,6 +270,8 @@ fn check_stdlib_fn_count() -> Vec<String> {
                 let p = e.ok()?.path();
                 (p.extension()? == "md").then(|| p.file_stem()?.to_str().map(str::to_string))?
             })
+            // README.md is the generated one-page index, not a module page.
+            .filter(|m| m != "README")
             .collect(),
         Err(e) => return vec![format!("cannot read docs/stdlib: {e}")],
     };

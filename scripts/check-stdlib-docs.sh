@@ -29,7 +29,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 python3 tools/gen-stdlib-doc-index.py --check
-pages=$(ls docs/stdlib/*.md | wc -l | tr -d ' ')
+pages=$(ls docs/stdlib/*.md | grep -v '/README.md$' | wc -l | tr -d ' ')
 blocks=$(grep -l 'BEGIN GENERATED SIGNATURE INDEX' docs/stdlib/*.md | wc -l | tr -d ' ')
 names=$(grep -c '^"' docs/stdlib/since.toml)
 echo "  stdlib docs: ${blocks}/${pages} pages carry a generated block, all up to date;"
