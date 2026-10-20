@@ -4,6 +4,12 @@ Almide の設計判断を実験データで裏付けるための研究基盤。
 
 **原則: 設計判断は「勘」ではなく「数字」で行う。** 新しい構文提案は Grammar Lab で実験してから採否を決める。
 
+## Beyond-Rust Lab (`beyond-rust/`)
+
+rustc と LLVM を通したまま、手書きの Rust より速いコードを生成する方法を実験で探す。
+1 実験 = (カーネル, レバー) の 4 列計測（手書き Rust / 今の生成 / レバーを手で当てた生成 / 専門家の Rust）。
+実装の前に手で当てて測り、卒業条件を満たしたレバーだけをコンパイラの仕事にする。方法論と結果は [beyond-rust/README.md](beyond-rust/README.md)。
+
 ## Grammar Lab (`grammar-lab/`)
 
 構文バリアントの A/B テストフレームワーク。複数の LLM に対して構文の違いが modification survival rate に与える影響を定量的に測定する。ツール自体が Almide で実装されている（dogfooding）。
