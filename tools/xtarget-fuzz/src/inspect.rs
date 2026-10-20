@@ -791,15 +791,10 @@ fn judge_counted(
     // difference under the jitter clips to 0 and reads as O(1) at every
     // size (value.as_array: native O(n) at k = 1, wasm 0 / 0 / 0 / 0 / 0).
     let calibrate = |leg: Leg| -> Result<u64, String> {
-        let mut k = 1u64;
-        loop {
-            let (p, b) = marginal(n, k);
-            let d = counted_delta(ctx, &p, &b, leg).map_err(|e| format!("{label} {} calibrating k={k} at n={n}: {e}", leg_tag(leg)))?;
-            if counted_calibrated(&d, ctx.calibrate_scale) || k >= ctx.max_k {
-                return Ok(k);
-            }
-            k = (k * 4).min(ctx.max_k);
-        }
+        calibrate_k(n, ctx.max_k, ctx.calibrate_scale, &mut |m, k| {
+            let (p, b) = marginal(m, k);
+            counted_delta(ctx, &p, &b, leg).map_err(|e| format!("{label} {} calibrating k={k} at n={m}: {e}", leg_tag(leg)))
+        })
     };
     let ks = [(Leg::Native, calibrate(Leg::Native)?), (Leg::Wasm, calibrate(Leg::Wasm)?)];
     let sizes: Vec<u64> = (0..5).map(|i| n << i).collect();
@@ -879,6 +874,63 @@ fn counted_calibrated(d: &Delta, scale: f64) -> bool {
     // reaches the cap. Only k's growth reads it; the fit stays on the counts.
     const CALIBRATE_WALL: Duration = Duration::from_secs(2);
     d.instructions >= CALIBRATE_INSTRUCTIONS * scale || d.moved >= CALIBRATE_BYTES * scale || d.wall >= CALIBRATE_WALL
+}
+
+/// The size span the counted judge measures over: n..16n.
+const SIZE_SPAN: u64 = 16;
+
+/// The wall budget for the judge's longest run — the 2k-call program at 16n
+/// — that k's growth must keep: half of [`RUN_CAP`], so that run's own
+/// jitter on a shared VM stays far from the cap.
+const CALIBRATE_TOP_WALL: Duration = Duration::from_secs(RUN_CAP.as_secs() / 2);
+
+/// Calibrate one leg's k at size `n`: grow k by 4x until the marginal
+/// passes [`counted_calibrated`], or k reaches `max_k`, or the next k would
+/// carry the judge's longest run past [`CALIBRATE_TOP_WALL`]. `measure(m, k)`
+/// is the marginal (2k calls minus k calls) at size m.
+///
+/// The wall stop in [`counted_calibrated`] reads the marginal at n only. A
+/// kernel-bound call's user instructions are flat in n while the kernel's
+/// copy grows with it, so the run at 16n with 2k calls is ~32x that
+/// marginal, and a 4x step can land past the 2 s stop by up to 4x:
+/// net.tcp_write calibrated to k = 1048576 on instructions (7.3e7, flat) at
+/// 0.76 s per 262144 calls at n, and its 16n run passed the 60 s cap (GCE
+/// c4-standard-4, 2026-10-20; the stamped run at k = 262144 read 9.2 s at
+/// 16n). So before each step the longest run at the next k is projected,
+/// first from n assuming the per-call wall is linear in the size (cheap,
+/// and far under the budget for any call whose cost is user instructions:
+/// 2e7 instructions are milliseconds), and only when that bound is over
+/// budget measured at 16n with the current k, which reads the true growth
+/// (process.run's wall grows 1.8x over 16x, not 16x). A call whose cost the
+/// counters see is never measured at 16n here, so its k is the
+/// instruction/byte threshold's alone.
+fn calibrate_k(n: u64, max_k: u64, scale: f64, measure: &mut dyn FnMut(u64, u64) -> Result<Delta, String>) -> Result<u64, String> {
+    let mut k = 1u64;
+    loop {
+        let d = measure(n, k)?;
+        if counted_calibrated(&d, scale) || k >= max_k {
+            return Ok(k);
+        }
+        let next = (k * 4).min(max_k);
+        let grow = next / k;
+        if projected_top_wall(&d, grow, SIZE_SPAN) > CALIBRATE_TOP_WALL {
+            let top = measure(n * SIZE_SPAN, k)?;
+            if projected_top_wall(&top, grow, 1) > CALIBRATE_TOP_WALL {
+                return Ok(k);
+            }
+        }
+        k = next;
+    }
+}
+
+/// The wall of the 2·(grow·k)-call program at `span` times the size `d` was
+/// measured at, from the marginal of k calls there: the program's fixed part
+/// (the baseline's wall less its k calls) held, the per-call part times
+/// 2·grow calls and times `span` (linear in the size).
+fn projected_top_wall(d: &Delta, grow: u64, span: u64) -> Duration {
+    let fixed = d.base_wall.saturating_sub(d.wall);
+    let factor = u32::try_from(2 * grow * span).unwrap_or(u32::MAX);
+    fixed.saturating_add(d.wall.saturating_mul(factor))
 }
 
 /// The cheapest class whose `a + c·f(n)` least-squares fit leaves every
@@ -1012,11 +1064,13 @@ fn fit_rms(xs: &[f64], ys: &[f64], floor: f64) -> f64 {
 }
 
 /// One leg's (program - baseline) difference under both meters, and wall
-/// time for the record.
+/// time for the record; the baseline's own wall bounds k's growth
+/// ([`calibrate_k`]).
 struct Delta {
     instructions: f64,
     moved: f64,
     wall: Duration,
+    base_wall: Duration,
 }
 
 fn counted_delta(ctx: &Ctx, prog: &str, base: &str, leg: Leg) -> Result<Delta, String> {
@@ -1026,6 +1080,7 @@ fn counted_delta(ctx: &Ctx, prog: &str, base: &str, leg: Leg) -> Result<Delta, S
         instructions: (p.instructions as f64 - b.instructions as f64).max(0.0),
         moved: (p.moved as f64 - b.moved as f64).max(0.0),
         wall: p.wall.saturating_sub(b.wall),
+        base_wall: b.wall,
     })
 }
 
@@ -1250,13 +1305,92 @@ mod run_tests {
     #[test]
     fn calibration_stops_on_bytes_moved_as_well_as_instructions() {
         let counted_calibrated_t = |d: &Delta| counted_calibrated(d, 1.0);
-        let d = |instructions: f64, moved: f64| Delta { instructions, moved, wall: Duration::ZERO };
+        let d = |instructions: f64, moved: f64| Delta { instructions, moved, wall: Duration::ZERO, base_wall: Duration::ZERO };
         assert!(!counted_calibrated_t(&d(1e3, 1e3)));
         assert!(counted_calibrated_t(&d(3e7, 0.0)));
         assert!(counted_calibrated_t(&d(1e3, 3e8)));
         // fs.write at n = 20000 calibrated to k = 65536 on instructions and
         // timed out at 60 s: its bytes go to the kernel.
-        assert!(counted_calibrated_t(&Delta { instructions: 1e3, moved: 0.0, wall: Duration::from_secs(3) }));
+        assert!(counted_calibrated_t(&Delta { instructions: 1e3, moved: 0.0, wall: Duration::from_secs(3), base_wall: Duration::ZERO }));
+    }
+
+    /// A synthetic leg: `instr(m)` user instructions and `secs(m)` wall per
+    /// call at size m, a fixed `fixed` seconds per program; returns the
+    /// marginal [`calibrate_k`] reads and the sizes it was asked about.
+    fn synthetic(instr: fn(u64) -> f64, secs: fn(u64) -> f64, fixed: f64) -> impl FnMut(u64, u64) -> Result<Delta, String> {
+        move |m, k| {
+            let marginal = secs(m) * k as f64;
+            Ok(Delta {
+                instructions: instr(m) * k as f64,
+                moved: 2.0,
+                wall: Duration::from_secs_f64(marginal),
+                base_wall: Duration::from_secs_f64(fixed + marginal),
+            })
+        }
+    }
+
+    /// The wall of the judge's longest run (2k calls at 16n) under `secs`.
+    fn top_run(k: u64, n: u64, secs: fn(u64) -> f64, fixed: f64) -> f64 {
+        fixed + 2.0 * k as f64 * secs(n * SIZE_SPAN)
+    }
+
+    /// net.tcp_write's native shape (GCE c4-standard-4): flat user
+    /// instructions, wall linear in n·k (0.764 s per 262144 calls at
+    /// n = 20000). With ~70 instructions per call, 262144 calls stay under
+    /// the instruction target, the instruction-only rule took k = 1048576,
+    /// and its 16n run read ~98 s against the 60 s cap.
+    #[test]
+    fn a_kernel_bound_call_keeps_its_longest_run_under_the_cap() {
+        let n = 20_000;
+        let secs: fn(u64) -> f64 = |m| 0.764 / 262_144.0 * m as f64 / 20_000.0;
+        let mut measure = synthetic(|_| 70.0, secs, 0.05);
+        let k = calibrate_k(n, MAX_K, 1.0, &mut measure).unwrap();
+        let top = top_run(k, n, secs, 0.05);
+        assert!(top < CALIBRATE_TOP_WALL.as_secs_f64(), "k={k}: the 2k run at 16n takes {top:.1}s");
+        assert_eq!(k, 262_144, "the last k whose longest run fits the budget");
+    }
+
+    /// A call whose kernel wall barely grows with n (process.run: 1.8x over
+    /// 16x) under a large fixed part (an embedded run compiles first) is
+    /// measured at 16n and keeps growing: the size-linear bound alone would
+    /// stop it early.
+    #[test]
+    fn a_kernel_bound_call_with_flat_wall_keeps_its_threshold_k() {
+        let n = 20_000;
+        let mut sizes = Vec::new();
+        let mut inner = synthetic(|_| 2.0e4, |m| 6.7e-4 + 8.5e-10 * m as f64, 10.0);
+        let mut measure = |m: u64, k: u64| {
+            sizes.push(m);
+            inner(m, k)
+        };
+        let k = calibrate_k(n, MAX_K, 1.0, &mut measure).unwrap();
+        assert_eq!(k, 1024, "the instruction threshold's k (2e4 x 1024 >= 2e7)");
+        assert!(sizes.contains(&(n * SIZE_SPAN)), "the 16n probe read the true growth: {sizes:?}");
+    }
+
+    /// A call whose cost the counters see — list.reverse at ~3 instructions
+    /// per element, 1 ns each — calibrates on the instruction threshold
+    /// alone, never measures at 16n, and gets the k it always had.
+    #[test]
+    fn a_counted_call_keeps_its_threshold_k_and_is_never_probed_at_16n() {
+        let n = 20_000;
+        for (instr, want) in [(3.0, 1024u64), (300.0, 4), (0.5, 4096)] {
+            let mut sizes = Vec::new();
+            let per_call = move |m: u64| instr * m as f64;
+            let mut measure = |m: u64, k: u64| {
+                sizes.push(m);
+                let i = per_call(m) * k as f64;
+                Ok(Delta {
+                    instructions: i,
+                    moved: 0.0,
+                    wall: Duration::from_secs_f64(i * 1e-9),
+                    base_wall: Duration::from_secs_f64(0.002 + i * 1e-9),
+                })
+            };
+            let k = calibrate_k(n, MAX_K, 1.0, &mut measure).unwrap();
+            assert_eq!(k, want, "{instr} instructions per element");
+            assert!(sizes.iter().all(|&m| m == n), "probed beyond n: {sizes:?}");
+        }
     }
 
     /// The shim's copies cost the same instructions per byte in both

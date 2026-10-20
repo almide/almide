@@ -1,0 +1,226 @@
+// @contract: C-258
+// #3815: operands are values evaluated left to right, once, so an operand
+// that reads a variable sees the value it held BEFORE a later operand
+// rebinds it. The wasm leg passed such a read as a view of the variable's
+// block; the later operand's assignment released the block and the call
+// read freed memory (`list.contains` printed false, `map.get` none, the
+// rest garbage or a trap). A scalar read was no safer: an inlined user fn
+// read its argument after the later one ran (`add(k, { k = 7; 1 })`
+// printed 71). Native refused an index whose index operand rebinds the
+// container (E0506) and, for a read between two rebinding operands, read
+// the value from before the first one.
+// Cells: every argument position of a user fn, a closure call, stdlib
+// calls over each container kind, a binary op, an index, a map index, and
+// the list / tuple / record literals and an interpolation as operand
+// sequences. Each cell prints the result and, where it shows, the rebound
+// value too. Four shapes the native v1 lowering walls today (a list `+`, a
+// map index, a scalar `list.slice` bound, a tuple) are pinned on both legs in
+// tests/arg_rebound_by_later_arg_test.rs instead, so this file stays inside
+// the corpus wall.
+type P = { a: List[String], n: Int }
+
+fn add(a: Int, b: Int) -> Int = a * 10 + b
+
+fn cnt(xs: List[String], n: Int) -> Int = list.len(xs) + n
+
+fn mid(n: Int, xs: List[String], m: Int) -> Int = list.len(xs) * 10 + n + m
+
+fn cat(xs: List[String], sep: String) -> String = list.join(xs, sep)
+
+fn lists() -> Unit = {
+  var a1 = ["a", "b", "c"]
+  let contains = list.contains(a1, {
+    a1 = ["z"]
+    "a"
+  })
+  println("contains ${contains} ${list.len(a1)}")
+  var a2 = ["a", "b", "c"]
+  let index_of = list.index_of(a2, {
+    a2 = ["z"]
+    "c"
+  })
+  println("index_of ${index_of}")
+  var a3 = ["a", "b", "c"]
+  let take = list.take(a3, {
+    a3 = ["z"]
+    2
+  })
+  println("take ${take}")
+  var a4 = ["a", "b", "c"]
+  let drop = list.drop(a4, {
+    a4 = ["z"]
+    1
+  })
+  println("drop ${drop}")
+  var a5 = ["a", "b", "c"]
+  let chunk = list.chunk(a5, {
+    a5 = ["z"]
+    2
+  })
+  println("chunk ${chunk}")
+  var a6 = ["a", "b"]
+  let zip = list.zip(a6, {
+    a6 = ["z"]
+    ["x", "y"]
+  })
+  println("zip ${zip}")
+  var a7 = ["a", "b"]
+  let join = list.join(a7, {
+    a7 = ["z"]
+    "-"
+  })
+  println("join ${join}")
+  var a8 = ["a", "b"]
+  let get = list.get(a8, {
+    a8 = ["z"]
+    1
+  })
+  println("get ${get}")
+  var a10 = ["a", "b"]
+  let index = a10[{
+    a10 = ["z"]
+    1
+  }]
+  println("index ${index}")
+}
+
+fn sets_and_maps() -> Unit = {
+  var s1 = set.from_list(["a", "b"])
+  let s_contains = set.contains(s1, {
+    s1 = set.from_list(["z"])
+    "a"
+  })
+  println("set.contains ${s_contains} ${set.len(s1)}")
+  var s2 = set.from_list(["a", "b"])
+  let union = set.union(s2, {
+    s2 = set.from_list(["z"])
+    set.from_list(["c"])
+  })
+  println("set.union ${set.len(union)}")
+  var m1 = ["a": "1", "b": "2"]
+  let got = map.get(m1, {
+    m1 = ["z": "9"]
+    "a"
+  })
+  println("map.get ${got} ${map.len(m1)}")
+  var m2 = ["a": "1", "b": "2"]
+  let m_contains = map.contains(m2, {
+    m2 = ["z": "9"]
+    "b"
+  })
+  println("map.contains ${m_contains}")
+  var m3 = ["a": "1"]
+  let inserted = map.set(m3, {
+    m3 = ["z": "9", "y": "8"]
+    "b"
+  }, "2")
+  println("map.set ${map.len(inserted)}")
+}
+
+fn strings_and_scalars() -> Unit = {
+  var t1 = "abc"
+  let t_contains = string.contains(t1, {
+    t1 = "z"
+    "a"
+  })
+  println("string.contains ${t_contains} ${t1}")
+  var t2 = "abcabc"
+  let replaced = string.replace(t2, {
+    t2 = "z"
+    "a"
+  }, "-")
+  println("string.replace ${replaced}")
+  var t3 = "ab"
+  let padded = string.pad_start(t3, {
+    t3 = "z"
+    4
+  }, ".")
+  println("string.pad_start ${padded}")
+  var t4 = "ab"
+  let joined = t4 + {
+    t4 = "z"
+    "!"
+  }
+  println("str concat ${joined}")
+  var k1 = 2
+  let scalar = add(k1, {
+    k1 = 7
+    1
+  })
+  println("user scalar ${scalar} ${k1}")
+  var k2 = 3
+  let biggest = int.max(k2, {
+    k2 = 9
+    1
+  })
+  println("int.max ${biggest}")
+}
+
+fn user_fns() -> Unit = {
+  var u1 = ["a", "b", "c"]
+  let first = cnt(u1, {
+    u1 = ["z"]
+    0
+  })
+  println("user first ${first} ${list.len(u1)}")
+  var u2 = ["a", "b", "c"]
+  let middle = mid(1, u2, {
+    u2 = ["z"]
+    2
+  })
+  println("user mid ${middle}")
+  var u3 = ["a", "b", "c"]
+  let between = mid({
+    u3 = ["y", "y"]
+    1
+  }, u3, {
+    u3 = ["z"]
+    2
+  })
+  println("user mid after rebind ${between}")
+  var u4 = ["a", "b", "c"]
+  let text = cat(u4, {
+    u4 = ["z"]
+    "+"
+  })
+  println("user str ${text}")
+  var f1 = ["a", "b", "c"]
+  let g = (xs: List[String], n: Int) => list.len(xs) + n
+  let via_closure = g(f1, {
+    f1 = ["z"]
+    0
+  })
+  println("closure ${via_closure}")
+}
+
+fn literals() -> Unit = {
+  var l1 = ["a", "b"]
+  let nested = [
+    l1,
+    {
+      l1 = ["z"]
+      ["q"]
+    }
+  ]
+  println("list lit ${nested}")
+  var r1 = ["a", "b"]
+  let rec = P { a: r1, n: {
+    r1 = ["z"]
+    1
+  } }
+  println("record ${rec.a} ${rec.n}")
+  var i1 = "hi"
+  let shown = "${i1}/${{
+    i1 = "z"
+    "!"
+  }}"
+  println("interp ${shown}")
+}
+
+effect fn main() -> Unit = {
+  lists()
+  sets_and_maps()
+  strings_and_scalars()
+  user_fns()
+  literals()
+}

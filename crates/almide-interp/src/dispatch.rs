@@ -101,15 +101,21 @@ impl<'a> Interpreter<'a> {
             return flow;
         }
 
-        // 3. A user / stdlib free function lowered into the program. A stdlib
-        //    IMPL name (`string_slice` — how a lowered MODULE body spells
-        //    `string.slice`) takes the SAME resolution order a module-spelled
-        //    call takes: the interp-native container op, then the lowered
-        //    body, then the bridge only where the body abstains (#2185).
-        //    Mut-param impls skip the shortcut (the bridge has no write-back
-        //    path, #1022).
-        if let Some(func) = self.fns.get(&name).copied() {
-            if let Some((m, f)) = crate::stdlib_pool::module_of_impl(name) {
+        // 3. A user / stdlib free function lowered into the program. A POOL
+        //    body reached by its IMPL name (`string_slice` — how a lowered
+        //    MODULE body spells `string.slice`) takes the SAME resolution
+        //    order a module-spelled call takes: the interp-native container
+        //    op, then the lowered body, then the bridge only where the body
+        //    abstains (#2185). Mut-param impls skip the shortcut (the bridge
+        //    has no write-back path, #1022). Which body the name means is
+        //    decided first, by the caller's namespace (`resolve_named_fn`);
+        //    a program fn that shares an impl's spelling is the user's code
+        //    and never takes the stdlib route (#3825: a user `list_len` ran
+        //    as `list.len`).
+        if let Some(func) = self.resolve_named_fn(name) {
+            if crate::stdlib_pool::is_pool_body(func)
+                && let Some((m, f)) = crate::stdlib_pool::module_of_impl(name)
+            {
                 // The in-interp HOFs take closure ARGUMENTS and must see the
                 // arg EXPRS — same tier order as `eval_module_call`.
                 if is_hof(m.as_str(), f.as_str()) {
@@ -194,10 +200,25 @@ impl<'a> Interpreter<'a> {
         Some(self.eval_lowered_fn_call(func, args, scope))
     }
 
+    /// The definition a bare `Named` call of `name` means from the fn
+    /// executing now, below the module-sibling step: the pool's own body
+    /// while a POOL body executes (its bare calls name its registry
+    /// namespace, whatever the program spells the same), else the flat table
+    /// (program fns, then the pool bodies no program fn shadows). The
+    /// identifier space is shared; the namespace is the caller's (#3825).
+    pub(crate) fn resolve_named_fn(&self, name: Sym) -> Option<&'a almide_ir::IrFunction> {
+        if self.cur_pool.get()
+            && let Some(f) = crate::stdlib_pool::body(name)
+        {
+            return Some(f);
+        }
+        self.fns.get(&name).copied()
+    }
+
     /// Step 2d of [`Self::eval_named_ctor_or_sibling`]: the executing
     /// module's own definition of `name`, when a module body is executing
     /// (`cur_space`) and its module defines the name.
-    fn own_module_sibling(&self, name: Sym) -> Option<&'a almide_ir::IrFunction> {
+    pub(crate) fn own_module_sibling(&self, name: Sym) -> Option<&'a almide_ir::IrFunction> {
         let space = self.cur_space.get();
         let owner = self.program.modules.get(space.checked_sub(1)? as usize)?.name;
         self.module_fns.get(&(owner, name)).copied()
@@ -253,7 +274,7 @@ impl<'a> Interpreter<'a> {
             evaled.push(val!(self.eval_expr(a, scope)));
         }
         let root = self.root_scope();
-        let is_pool = self.pool_fns.contains(&func.name);
+        let is_pool = crate::stdlib_pool::is_pool_body(func);
         // Depth is owned by `run_callable`'s per-hop bump — see
         // `call_pool_tier`.
         let (flow, frame) = self.call_function_keeping_frame(func, evaled, &root);
@@ -272,7 +293,7 @@ impl<'a> Interpreter<'a> {
         // from fixture-tier code. A fixture's OWN fn never syncs — `import
         // prim` fixtures are written against the raw address model — and a
         // pool-internal call never syncs (the tier is address-uniform; see
-        // `pool_fns`).
+        // `pool_depth`).
         if is_pool {
             self.sync_at_pool_boundary(func, flow)
         } else {

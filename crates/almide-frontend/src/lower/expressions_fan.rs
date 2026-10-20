@@ -134,6 +134,21 @@ fn outline_metered_arm_with(
     outline_metered_arm_ir(ctx, budget_arg, body_ir, span, enter_sym, exit_sym)
 }
 
+/// An argument whose evaluation reaches no charge site (a variable or a
+/// scalar/string literal), so passing it from the caller is observationally
+/// the same as evaluating it inside the region.
+fn is_atomic_arg(a: &IrExpr) -> bool {
+    matches!(
+        a.kind,
+        IrExprKind::Var { .. }
+            | IrExprKind::LitInt { .. }
+            | IrExprKind::LitFloat { .. }
+            | IrExprKind::LitStr { .. }
+            | IrExprKind::LitBool { .. }
+            | IrExprKind::Unit
+    )
+}
+
 /// The post-lowering half of [`outline_metered_arm_with`]: outline an
 /// ALREADY-LOWERED region body. The mapper form (T7-1) enters here directly —
 /// its region body is the mapper lambda's body with the param bound to the
@@ -173,53 +188,54 @@ fn outline_metered_arm_ir(
         var: budget_param, ty: Ty::Int, name: sym("__b_budget"),
         borrow: ParamBorrow::Own, is_mut: false, open_record: None, default: None, attrs: vec![],
     }];
-    // Two parameterization shapes:
-    //  - single Call body (the v1 shape): the CALLEE'S ARGS become the params
-    //    (each arg expr evaluates in the caller, before the meter starts);
-    //  - anything else (block bodies, inline exprs — T2-1): the body's FREE
-    //    VARIABLES become the params. Each free var is renamed to a fresh
-    //    param id inside the body (VarIds stay globally unique) and the
-    //    caller passes the original var. The body is PURE (checker rule), so
-    //    a by-value snapshot at call time is observationally exact.
-    let (metered_body, call_tail_args): (IrExpr, Vec<IrExpr>) = match body_ir.kind {
+    // Two parameterization shapes, and in both the body's whole work runs
+    // inside the region (ADR-0028 E, #3790):
+    //  - single Call body (the v1 shape): an ATOMIC arg (a variable or a
+    //    literal — no charge site) becomes a param the caller passes; any
+    //    other arg stays in the inner call, so it evaluates after enter and
+    //    is charged like the rest of the body;
+    //  - anything else (block bodies, inline exprs — T2-1): the body as is.
+    // Then the body's FREE VARIABLES become params. Each free var is renamed
+    // to a fresh param id inside the body (VarIds stay globally unique) and
+    // the caller passes the original var. The body is PURE (checker rule),
+    // so a by-value snapshot at call time is observationally exact.
+    let mut tail_args: Vec<IrExpr> = Vec::new();
+    let mut atomic_params = std::collections::HashSet::new();
+    let mut body = match body_ir.kind {
         IrExprKind::Call { target, args: body_args, type_args } => {
             let mut inner_args: Vec<IrExpr> = Vec::with_capacity(body_args.len());
-            for (i, a) in body_args.iter().enumerate() {
+            for (i, a) in body_args.into_iter().enumerate() {
+                if !is_atomic_arg(&a) {
+                    inner_args.push(a);
+                    continue;
+                }
                 let pname = format!("__b_a{i}");
                 let pv = ctx.var_table.alloc(sym(&pname), a.ty.clone(), Mutability::Let, span);
                 params.push(IrParam {
                     var: pv, ty: a.ty.clone(), name: sym(&pname),
                     borrow: ParamBorrow::Own, is_mut: false, open_record: None, default: None, attrs: vec![],
                 });
+                atomic_params.insert(pv);
                 inner_args.push(ctx.mk(IrExprKind::Var { id: pv }, a.ty.clone(), span));
+                tail_args.push(a);
             }
-            let call = ctx.mk(
-                IrExprKind::Call { target, args: inner_args, type_args },
-                body_ty.clone(),
-                span,
-            );
-            (call, body_args)
+            ctx.mk(IrExprKind::Call { target, args: inner_args, type_args }, body_ty.clone(), span)
         }
-        kind => {
-            let mut body = IrExpr { kind, ty: body_ty.clone(), span, def_id: None };
-            let free =
-                almide_ir::free_vars::free_vars(&body, &std::collections::HashSet::new());
-            let mut tail_args = Vec::with_capacity(free.len());
-            for fv in free {
-                let info = ctx.var_table.get(fv);
-                let (fv_ty, fv_name) = (info.ty.clone(), info.name);
-                let pv = ctx.var_table.alloc_like(fv, fv_ty.clone(), Mutability::Let);
-                let pv_expr = ctx.mk(IrExprKind::Var { id: pv }, fv_ty.clone(), span);
-                body = almide_ir::substitute::substitute_var_in_expr(&body, fv, &pv_expr);
-                params.push(IrParam {
-                    var: pv, ty: fv_ty.clone(), name: fv_name,
-                    borrow: ParamBorrow::Own, is_mut: false, open_record: None, default: None, attrs: vec![],
-                });
-                tail_args.push(ctx.mk(IrExprKind::Var { id: fv }, fv_ty, span));
-            }
-            (body, tail_args)
-        }
+        kind => IrExpr { kind, ty: body_ty.clone(), span, def_id: None },
     };
+    for fv in almide_ir::free_vars::free_vars(&body, &atomic_params) {
+        let info = ctx.var_table.get(fv);
+        let (fv_ty, fv_name) = (info.ty.clone(), info.name);
+        let pv = ctx.var_table.alloc_like(fv, fv_ty.clone(), Mutability::Let);
+        let pv_expr = ctx.mk(IrExprKind::Var { id: pv }, fv_ty.clone(), span);
+        body = almide_ir::substitute::substitute_var_in_expr(&body, fv, &pv_expr);
+        params.push(IrParam {
+            var: pv, ty: fv_ty.clone(), name: fv_name,
+            borrow: ParamBorrow::Own, is_mut: false, open_record: None, default: None, attrs: vec![],
+        });
+        tail_args.push(ctx.mk(IrExprKind::Var { id: fv }, fv_ty, span));
+    }
+    let (metered_body, call_tail_args) = (body, tail_args);
 
     let saved_var = ctx.var_table.alloc(sym("__b_saved"), Ty::Int, Mutability::Let, span);
     let val_var = ctx.var_table.alloc(sym("__b_val"), body_ty.clone(), Mutability::Let, span);

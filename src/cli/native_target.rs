@@ -106,6 +106,28 @@ pub(crate) fn release_target_cpu() -> Option<String> {
     }
 }
 
+/// The LLVM options every `--release` native build passes, on every target
+/// and CPU (#3604): the release profile itself, like `opt-level=3`.
+///
+/// `-force-ordered-reductions=false` keeps the loop vectorizer off loops
+/// whose only reduction is an IN-ORDER float sum. Almide's `Float` `+` is
+/// strict IEEE (no reassociation), so a vectorized `fold(0.0, (a, x) => a +
+/// f(x))` still adds lane by lane in order: the vector body only adds the
+/// lane shuffles around a scalar chain. x86's cost model never vectorizes
+/// such a loop; AArch64's opts in (`enableOrderedReductions`), and its
+/// generic tuning then splits spectralnorm's `eval_a` i64 multiply (NEON has
+/// no 64-bit vector multiply) across lanes. Measured 2026-10-19, GCE
+/// Neoverse-V2, n=1200, release: imperative 77.0 → 53.6 ms, enumerate
+/// 77.0 → 54.2 ms; on x86 the option is what the cost model already does.
+/// Integer reductions and loops without a reduction vectorize as before;
+/// this is not `-vectorize-loops=false`, which cost enumerate 9 ms more.
+pub(crate) const RELEASE_LLVM_ARGS: &[&str] = &["-force-ordered-reductions=false"];
+
+/// [`RELEASE_LLVM_ARGS`] as rustc arguments (`-C llvm-args=…` each).
+pub(crate) fn release_llvm_rustc_args() -> Vec<String> {
+    RELEASE_LLVM_ARGS.iter().flat_map(|a| ["-C".to_string(), format!("llvm-args={a}")]).collect()
+}
+
 /// `--target-cpu native` on a cross build would tune for this machine's CPU,
 /// which the target may not have.
 pub(crate) fn validate_target_cpu(cpu: Option<&str>, triple: Option<&str>) -> Result<(), String> {
@@ -347,6 +369,17 @@ mod tests {
             assert_eq!(cross_target().as_deref(), Some("x86_64-unknown-linux-musl"));
         }
         assert_eq!(cross_target(), None);
+    }
+
+    /// #3604: a release build never vectorizes an in-order float reduction,
+    /// on any target — whatever `--target-cpu` says.
+    #[test]
+    fn a_release_keeps_in_order_float_reductions_scalar() {
+        assert!(RELEASE_LLVM_ARGS.contains(&"-force-ordered-reductions=false"), "{RELEASE_LLVM_ARGS:?}");
+        assert_eq!(
+            release_llvm_rustc_args(),
+            vec!["-C".to_string(), "llvm-args=-force-ordered-reductions=false".to_string()]
+        );
     }
 
     #[test]

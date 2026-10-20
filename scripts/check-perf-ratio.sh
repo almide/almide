@@ -108,7 +108,9 @@ PAIRS="nbody=rust:nbody_unrolled spectralnorm=rust:spectralnorm fasta=rust:fasta
 # 35857650106, 35864492749, 35868760167, 35872683812) against 1.77 on an M4
 # Pro, so unlike listbuild's 1.58/0.91 the ratio does travel. The workload moved
 # to 4M in the same change (bench.py QUICK_ARGS) because the reference read
-# 0.0715s once at 2M, under MIN_SECONDS. `wordfreq-group` stays reported: it
+# 0.0715s once at 2M, under MIN_SECONDS; and to 8M with #2157's NATIVE <= WASM
+# relation, whose native `wordfreq-group` row read 0.0695s at 4M on a runner
+# (develop e4fcced11). `wordfreq-group` stays reported: it
 # is the idiom spelling, and its relation to `wordfreq` is gated on the wasm
 # leg (below); natively it runs `list.group_by`'s grouping lists, a different
 # program from the reference's single `entry` per draw.
@@ -503,9 +505,12 @@ PYSB
 # (linear-scan) idiomatic row finishes in ~12 s instead of hanging.
 wf_out=$(mktemp -t perf-ratio-wordfreq.XXXXXX.json)
 trap 'rm -f "$out" "$sb_out" "$wf_out"; rm -rf "$idiom_dir" "$vic_dir"' EXIT
+#
+# The same run carries the native leg of both rows and of `jsonround`, for the
+# NATIVE <= WASM relation below.
 python3 research/benchmark/perf/bench.py \
-  --quick --runs "$RUNS" --legs wasm \
-  --bench wordfreq,wordfreq-group \
+  --quick --runs "$RUNS" --legs native,wasm \
+  --bench wordfreq,wordfreq-group,jsonround \
   --label ratchet-wordfreq-wasm --out "$wf_out"
 python3 - "$wf_out" "$BASELINE_FILE" "$IDIOM_CEILING" "$MIN_SECONDS" <<'PYWF'
 import json, sys
@@ -549,3 +554,55 @@ if penalty > ceiling:
 print(f"perf-ratio: {key:16s} {penalty:.3f}x the imperative loop on wasm "
       f"(ceiling {ceiling:.2f}x, recorded {baseline[key]:.3f}x) ok")
 PYWF
+
+# NATIVE <= WASM (#2157). The same program compiled natively must not run
+# slower than it does under wasmtime: the native leg is the one with no
+# sandbox, no bounds-checked linear memory and the host's allocator, so a
+# native row losing to its wasm twin is a native-runtime defect, and the
+# keyed-aggregation and Value rows were exactly that — wordfreq 404 ms native
+# against 201 ms wasm (an unindexed Map, closed by #2150), jsonround 1.3-2.5x
+# (the Value constructors and `value.as_array` deep-copying the document, and
+# a stringify that built a `String` per node; closed by the `@reuse` twins and
+# the one-buffer writer). The ceiling is the claim itself, 1.0, like a VICTORY
+# row's; the baseline rows record the reading and never gate. Whole-process
+# wall time, min of the interleaved rounds (the wasm relations' rule), from
+# the run above.
+python3 - "$wf_out" "$BASELINE_FILE" "$MIN_SECONDS" <<'PYNW'
+import json, sys
+
+out_path, baseline_path, min_s = sys.argv[1:4]
+min_s = float(min_s)
+data = json.load(open(out_path))["results"]
+baseline = {}
+for line in open(baseline_path):
+    line = line.split("#", 1)[0].strip()
+    if line:
+        k, v = line.split()
+        baseline[k] = float(v)
+
+failed = False
+for bench in ("wordfreq", "wordfreq-group", "jsonround"):
+    key = f"{bench}-native-wasm"
+    if key not in baseline:
+        sys.exit(f"::error::perf-ratio: baseline has no `{key}` row — the native <= wasm relation was "
+                 "added without its recorded value; add the line on purpose.")
+    v = data[bench]["variants"]
+    nat, wasm = v[f"{bench}/native"]["min"], v[f"{bench}/wasm"]["min"]
+    for name, sec in ((f"{bench}/native", nat), (f"{bench}/wasm", wasm)):
+        if sec < min_s:
+            sys.exit(f"::error::perf-ratio: {name} min {sec}s is under the {min_s}s floor — "
+                     "grow the QUICK_ARGS entry instead of gating on spawn noise.")
+    ratio = nat / wasm
+    if ratio > 1.0:
+        print(f"::error::perf-ratio: {bench} runs {ratio:.3f}x SLOWER as a native binary than under "
+              f"wasmtime ({nat:.3f}s vs {wasm:.3f}s, recorded {baseline[key]:.3f}x). The native leg "
+              "has no sandbox and no bounds-checked linear memory to pay for, so this is a native "
+              "runtime defect (#2157): look for a runtime fn copying what the wasm leg shares — a "
+              "borrowing `almide_rt_*` call where the stdlib declares `@reuse` and the `_owned` twin "
+              "should have been chosen, a deep `clone()` of a Value, a per-node `String`. Fix the "
+              "native leg, do not raise the ceiling.")
+        failed = True
+        continue
+    print(f"perf-ratio: {key:20s} {ratio:.3f}x the wasm leg (ceiling 1.00, recorded {baseline[key]:.3f}x) ok")
+sys.exit(1 if failed else 0)
+PYNW

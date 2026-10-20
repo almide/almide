@@ -307,6 +307,28 @@ fn huge_range_for_in_is_fuel_bounded_not_oom() {
     );
 }
 
+// ── #3809: a run whose caller set its stop ends, it does not spin on ──
+
+#[test]
+fn a_set_stop_ends_an_endless_run_as_unsupported() {
+    // Fuel is unbounded here, so only the stop can end the loop: without it
+    // this test hangs, which is the leak the corpus sweeps' cut left behind.
+    let src = "fn main() -> Unit = {\n  var s = 0\n  while true {\n    s = s + 1\n  }\n  println(\"${s}\")\n}";
+    let ir = lower(src);
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let setter = std::sync::Arc::clone(&stop);
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        setter.store(true, std::sync::atomic::Ordering::Relaxed);
+    });
+    let out = almide_interp::Interpreter::new(&ir).with_fuel(u64::MAX).with_stop(stop).run_main();
+    assert!(
+        matches!(&out.status, almide_interp::RunStatus::Unsupported(r) if r.contains("stopped")),
+        "a stopped run must end as Unsupported, got {:?}",
+        out.status
+    );
+}
+
 // ── #1022: mut-parameter copy-in/copy-out (C-132's interp leg) ──
 
 #[test]

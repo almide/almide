@@ -2,7 +2,10 @@
 // CORRECTLY-ROUNDED wasm transcendental-ish instruction, so math.sqrt = prim.fsqrt is
 // byte-exact with v0's `x.sqrt()`. (sin/cos/log/exp need a libm-matching polynomial — they
 // have no wasm instruction and are deferred.) Pure scalar — cert untouched.
-fn math_sqrt(x: Float) -> Float = prim.fsqrt(x)
+// A negative x MANUFACTURES a NaN: it is the ONE fixed pattern +qNaN 0x7FF8000000000000, never
+// the host's f64.sqrt NaN (x86 answers -NaN, aarch64 +NaN), so its totalOrder position under
+// list.min/max is the same on every leg (C-055). -0.0 and a NaN x take the instruction.
+fn math_sqrt(x: Float) -> Float = if prim.flt(x, 0.0) then prim.ffrombits(0x7FF8000000000000) else prim.fsqrt(x)
 
 // math.fmin/fmax are NaN-AWARE (return the non-NaN operand, unlike wasm f64.min/max which
 // propagate NaN). A TIE (±0 pair included) follows IEEE-754-2019 zero ordering (C-049,

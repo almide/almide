@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # gen-ledger-counts.sh — re-measure the aggregate counts, restamp
 # proofs/ledger-counts.toml with today's date, and regenerate the four docs
-# that render them (README.md claims + stats, proofs/STAGE-STATUS.md,
+# that render them (docs/benchmarks/README.md claims + stats, proofs/STAGE-STATUS.md,
 # docs/contracts/README.md, docs/contracts/conformance.md).
 #
 #   bash scripts/gen-ledger-counts.sh

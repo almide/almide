@@ -62,10 +62,24 @@ impl Emitter<'_> {
                 Some(Lowered::scalar(FLOAT))
             }
             // IEEE-754 requires sqrt correctly rounded: wasm f64.sqrt and
-            // Rust's `f64::sqrt` are the SAME function, bit for bit.
+            // Rust's `f64::sqrt` are the SAME function, bit for bit — except
+            // the NaN a negative x MANUFACTURES, whose sign is the host's
+            // (x86 -NaN, aarch64 +NaN). That one is the fixed +qNaN
+            // 0x7FF8000000000000 (C-055), as runtime/rs: `select(abs r, r,
+            // -x > x)` — f64.sqrt's NaN carries the canonical payload, `abs`
+            // clears the sign, and `-x > x` (x < 0 without an 8-byte f64
+            // constant) is false for -0.0 and for a NaN x, which pass through.
             ("math" | "float", "sqrt", [x]) => {
                 self.lower_arg(x, Some(FLOAT), ArgMode::Borrow)?;
-                self.f.instructions().f64_sqrt();
+                let h = self.hold_f64()?;
+                let r = self.hold_f64()?;
+                let mut i = self.f.instructions();
+                i.local_tee(h).f64_sqrt().local_tee(r).f64_abs().local_get(r);
+                i.local_get(h).f64_neg().local_get(h).f64_gt();
+                i.select();
+                let _ = i;
+                self.release_f64();
+                self.release_f64();
                 Some(Lowered::scalar(FLOAT))
             }
             ("float", "max" | "min", [a, b]) => {

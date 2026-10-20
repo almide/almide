@@ -160,7 +160,9 @@ fn inlinable(body: &IrExpr) -> bool {
 /// capture — so a reference into it stays valid across `rest`?
 pub(super) fn stays_put(rest: &IrExpr, v: VarId) -> bool {
     use super::use_kind::{ExplicitBorrows, Site, SlotMode, UseSites, element_top_consumes};
-    UseSites::of_expr(rest, Site::Result, &ExplicitBorrows).of(v).all(|u| {
+    // The source borrow of an op with an owned twin is a move at `v`'s last
+    // use (#3870), which the reference would outlive.
+    !crate::owned_source::may_move_as_source(rest, v) && UseSites::of_expr(rest, Site::Result, &ExplicitBorrows).of(v).all(|u| {
         u.depth == 0 && !u.in_chain && !u.in_mut && !u.is_write(true) && match u.site {
             Site::Borrow { mutable: false } | Site::Arg(SlotMode::Borrow) | Site::Clone | Site::Index => true,
             Site::Member | Site::TupleIndex => u.chain.is_some_and(|c| !(c.heap && element_top_consumes(c.top))),

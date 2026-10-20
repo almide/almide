@@ -13,7 +13,9 @@ fn render_iter_chain(ctx: &RenderContext, source: &IrExpr, consume: bool, steps:
     // A `list.range(a, b)` source yields owned `Int`s either way: iterate the
     // range itself instead of building the `Vec<i64>` to walk it once. A
     // borrowing chain (`&i64` binders) keeps the list it reads from.
-    let counted = (!by_ref).then(|| list_range_bounds(ctx, source)).flatten();
+    let counted = (!by_ref)
+        .then(|| list_range_bounds(ctx, source).or_else(|| range_literal_fold_bounds(ctx, source, collector)))
+        .flatten();
     let mut chain = if let Some((s, e)) = counted {
         format!("({s}..{e})")
     } else if consume {

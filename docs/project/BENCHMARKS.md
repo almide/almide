@@ -394,7 +394,7 @@ file its lowering, not its speed; see `optimize_program`'s header note).
 
 ## Edit-loop scale (#1334)
 
-The README's build-speed row is measured on a 268-line file, which does not establish
+The build-speed row on the [measurements page](../benchmarks/README.md) is measured on a 268-line file, which does not establish
 that the edit loop is *scale-independent* — a fast check on a small file is also exactly
 what a quadratic compiler produces. So the same command is measured over a ladder of
 nested prefixes of this repo's own stdlib (303 hand-written modules, 30,624 lines;
@@ -439,4 +439,4 @@ Five languages, one model (Claude Sonnet 5), 20 trials each, identical prompts a
 
 ## MSR — Modification Survival Rate
 
-The language's core metric, measured daily by [almide-dojo](https://github.com/almide/almide-dojo) across 30 tasks (basic / intermediate / advanced). The headline scorecard lives in the [README](../../README.md#msr-scorecard).
+The language's core metric, measured daily by [almide-dojo](https://github.com/almide/almide-dojo) across 30 tasks (basic / intermediate / advanced). The headline scorecard lives on the [measurements page](../benchmarks/README.md#llm-writability).

@@ -3,7 +3,8 @@
 # the marked block every generator wraps them in. Sourced, not run.
 #
 # Every fixture or contract PR used to regenerate the same "N fixtures" /
-# "N contracts" lines (README claims + stats, proofs/STAGE-STATUS.md, the
+# "N contracts" lines (the measurements page's claims + stats blocks in
+# docs/benchmarks/README.md, proofs/STAGE-STATUS.md, the
 # contract index, the conformance report), so any two such PRs conflicted at
 # the merge queue on lines neither of them was about. The per-row content of
 # those ledgers (sorted manifest rows, per-contract rows, fixture lists) merges
@@ -97,8 +98,8 @@ counts_stamp() {
     cat <<'EOF'
 # LEDGER COUNTS — the aggregate totals the generated docs quote, STAMPED.
 #
-# Rendered verbatim (inside a dated `counts:generated` block) into README.md,
-# proofs/STAGE-STATUS.md, docs/contracts/README.md and
+# Rendered verbatim (inside a dated `counts:generated` block) into
+# docs/benchmarks/README.md, proofs/STAGE-STATUS.md, docs/contracts/README.md and
 # docs/contracts/conformance.md by their generators, which never re-measure
 # them: deriving the totals at render time made every fixture or contract PR
 # rewrite the same lines, so any two such PRs conflicted at the merge queue.
@@ -128,7 +129,7 @@ counts_start() { printf '<!-- counts:generated:start (as of %s) — %s -->\n' "$
 counts_end()   { printf '<!-- counts:generated:end -->\n'; }
 
 # ── the rendered blocks ──────────────────────────────────────────────────────
-# README claims block, first paragraph. The markers sit INSIDE the blockquote
+# Claims block (docs/benchmarks/README.md), first paragraph. The markers sit INSIDE the blockquote
 # (`> <!-- … -->`): a bare comment line between two `>` lines would split the
 # quote in two, and the point is that the page does not change.
 counts_render_claims() {
@@ -138,7 +139,7 @@ counts_render_claims() {
   printf '> %s\n' "$(counts_end)"
 }
 
-# README stats block, the derived-count table (every cell is a total).
+# Stats block (docs/benchmarks/README.md), the derived-count table (every cell is a total).
 counts_render_stats() {
   counts_start
   cat <<EOF
@@ -197,7 +198,7 @@ counts_render_conformance() {
 
 # The N-th block (default: the first) as committed in a doc: from the start
 # marker through the end marker, markers included (a `> ` blockquote prefix is
-# part of the line). README.md carries two: the claims line, then the stats table.
+# part of the line). docs/benchmarks/README.md carries two: the claims line, then the stats table.
 counts_extract() {
   awk -v want="${2:-1}" '
     /<!-- counts:generated:start \(as of / { n++; if (n == want) on = 1 }

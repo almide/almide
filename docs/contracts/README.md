@@ -39,7 +39,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-001 | Integer division/modulo by zero is total — it aborts, never traps | 0.24.0 | active | fixture | 5 |
 | C-002 | Signed MIN / -1 overflow aborts, at the TRUE per-width MIN | 0.24.0 | active | fixture | 3 |
 | C-003 | Non-aborting integer div/mod stay byte-identical | 0.24.0 | active | fixture | 1 |
-| C-004 | fan.map / fan.settle are deterministic by list order | 0.24.0 | active | fixture | 10 |
+| C-004 | fan.map / fan.settle are deterministic by list order | 0.24.0 | active | fixture | 11 |
 | C-005 | fan error propagation surfaces as the unified main-error abort | 0.24.0 | active | fixture | 5 |
 | C-006 | [fan.timeout does not exist — wall-clock deadlines live at the host boundary](C-006-fan-timeout-removed.md) | 0.29.0 | active | fixture | 0 |
 | C-007 | Abortable top-level lets evaluate eagerly at startup | 0.24.0 | active | fixture | 4 |
@@ -90,7 +90,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-052 | A fold over an empty collection requires the collection to carry an element type (no codegen defaulting) | 0.24.0 | active | fixture | 1 |
 | C-053 | list.min/max/sort/sort_by/unique_by are type-directed and total, native == wasm | 0.24.0 | active | fixture | 5 |
 | C-054 | List/string Int counts and indices are i64-clamped before narrowing — no truncation, no OOB | 0.24.0 | active | fixture | 9 |
-| C-055 | list.min/max/sort/sort_by over Float use IEEE-754 totalOrder, valid + identical on both targets | 0.24.0 | active | fixture | 2 |
+| C-055 | list.min/max/sort/sort_by over Float use IEEE-754 totalOrder, valid + identical on both targets | 0.24.0 | active | fixture | 3 |
 | C-056 | list.product wraps on i64 overflow, consistent with list.sum and plain `*` | 0.24.0 | active | fixture | 1 |
 | C-057 | Assigning a Unit-returning in-place mutator's result is a checker error on both targets | 0.24.0 | active | fixture | 1 |
 | C-058 | An empty collection with an uninferable element type is a compile error on both targets, never silently defaulted | 0.24.0 | active | fixture | 2 |
@@ -239,8 +239,8 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-201 | An Option combinator's tuple result is materializable as an owned element for every element-type combination | 0.44.0 | active | fixture | 1 |
 | C-202 | Time constructors guard their domain: negative aborts, overflow saturates | 0.47.0 | active | fixture | 3 |
 | C-203 | The time-type operator algebra is unit-exact and saturating on both targets | 0.47.0 | active | fixture | 1 |
-| C-204 | A fan.bounded verdict is a function of the program and its inputs alone | 0.47.0 | active | fixture | 8 |
-| C-205 | The fan.min winner is the (spend, index) lexicographic minimum among admitted arms | 0.47.0 | active | fixture | 7 |
+| C-204 | A fan.bounded verdict is a function of the program and its inputs alone | 0.47.0 | active | fixture | 9 |
+| C-205 | The fan.min winner is the (spend, index) lexicographic minimum among admitted arms | 0.47.0 | active | fixture | 8 |
 | C-206 | A settle block settles every arm into its own tuple slot, in arm order | 0.47.0 | active | fixture | 1 |
 | C-207 | CM-1 is a versioned constant with a ratio-only wall-clock claim | 0.47.0 | active | fixture | 1 |
 | C-208 | fan.timeout is omega-relative: fixed ends everywhere, fixed omega replays byte-identically | 0.47.0 | active | fixture | 1 |
@@ -293,7 +293,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-255 | Record literals, member reads, and spread updates preserve value semantics identically on both targets | 0.57.1 | active | fixture | 2 |
 | C-256 | break and continue take effect at their statement position, identically on both targets and the interp | 0.57.1 | active | fixture | 2 |
 | C-257 | The scalar error operators evaluate identically on both targets | 0.57.1 | active | fixture | 1 |
-| C-258 | Named calls and lambdas evaluate identically on both targets | 0.57.1 | active | fixture | 5 |
+| C-258 | Named calls and lambdas evaluate identically on both targets | 0.57.1 | active | fixture | 6 |
 | C-259 | Variant constructor references build values eliminated identically by match on both targets | 0.57.1 | active | fixture | 1 |
 | C-260 | The declaration family compiles and runs identically on both targets | 0.57.1 | active | fixture | 5 |
 | C-261 | Canonical float values including the negative-zero sign display identically on both targets | 0.57.1 | active | fixture | 1 |
@@ -423,4 +423,5 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-385 | The http client frames the request body itself: a caller's Content-Length header is dropped on every lane | 0.68.0 | active | fixture | 0 |
 | C-386 | A record-form fan block is the record literal of its fields, run as parallel siblings | 0.68.0 | active | fixture | 2 |
 | C-387 | Identifiers are UAX #31 names held in NFC; compatibility characters are refused; a caseless name is type-side only by declaration; non-ASCII names run byte-identically on every leg | 0.68.0 | active | fixture | 1 |
+| C-388 | A bare call names the definition of its own scope, never a same-spelled fn of the entry program or another module | 0.68.0 | active | fixture | 2 |
 

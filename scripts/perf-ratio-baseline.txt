@@ -85,6 +85,16 @@ strbuild-wasm-idiom 0.99
 # the per-draw `map.get_or` read the loop pays). The gate fails on
 # IDIOM_CEILING in check-perf-ratio.sh, never on this value.
 wordfreq-wasm-idiom 0.78
+# NATIVE <= WASM (#2157): native min / wasm min over the interleaved rounds of
+# the same bench.py run, same program, same bytes out. The gate fails on the
+# claim (> 1.0) in check-perf-ratio.sh, never on these values. GCE
+# c4-standard-8 (Xeon Platinum 8581C), 2026-10-19, --quick --runs 9: jsonround
+# 0.69 (the pre-fix binary, develop d77c2557f, read 1.287 in the same session:
+# 0.363 s native against 0.282 s wasm), wordfreq 0.46, wordfreq-group 0.39
+# (both unchanged by #2157's Value fix; #2150 had already closed the Map side).
+jsonround-native-wasm 0.69
+wordfreq-native-wasm 0.46
+wordfreq-group-native-wasm 0.39
 treealloc 0.343
 # `decode` (#1679) is reported and not anchored, like strchurn: N derived
 # `User.decode`s of one 8-field document against the same-shape hand-written

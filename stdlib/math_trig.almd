@@ -749,6 +749,10 @@ fn __rem_pio2(x: Float, k: Int) -> Float = {
 }
 
 // ───────────────────────── sin / cos / tan ─────────────────────────
+// sin/cos/tan of ±inf MANUFACTURE a NaN: the ONE fixed pattern +qNaN 0x7FF8000000000000 (C-055),
+// not the host's inf - inf (x86 -NaN, aarch64 +NaN). A NaN x passes through as `x - x`.
+fn __trig_nan(x: Float) -> Float = if prim.fne(x, x) then x - x else prim.ffrombits(0x7FF8000000000000)
+
 fn math_sin(x: Float) -> Float = {
   let bits = prim.fbits(x)
   let ix = prim.band(prim.bshr_u(bits, 32), 2147483647)
@@ -756,7 +760,7 @@ fn math_sin(x: Float) -> Float = {
     // 0x3fe921fb, |x| ~< pi/4
     if ix < 1045430272 then x
     else __k_sin(x, 0.0, 0)
-  } else if ix >= 2146435072 then x - x else __rem_pio2(x, 0)
+  } else if ix >= 2146435072 then __trig_nan(x) else __rem_pio2(x, 0)
 }
 
 fn math_cos(x: Float) -> Float = {
@@ -769,7 +773,7 @@ fn math_cos(x: Float) -> Float = {
       let xi = prim.f2i(x)
       if xi == 0 then 1.0 else __k_cos(x, 0.0)
     } else __k_cos(x, 0.0)
-  } else if ix >= 2146435072 then x - x else __rem_pio2(x, 1)
+  } else if ix >= 2146435072 then __trig_nan(x) else __rem_pio2(x, 1)
 }
 
 fn math_tan(x: Float) -> Float = {
@@ -779,5 +783,5 @@ fn math_tan(x: Float) -> Float = {
     // 0x3fe921fb, |x| ~< pi/4
     if ix < 1044381696 then x
     else __k_tan(x, 0.0, 0)
-  } else if ix >= 2146435072 then x - x else __rem_pio2(x, 2)
+  } else if ix >= 2146435072 then __trig_nan(x) else __rem_pio2(x, 2)
 }

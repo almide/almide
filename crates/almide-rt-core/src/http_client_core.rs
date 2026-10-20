@@ -48,7 +48,7 @@ pub fn read_response_tolerant(stream: &mut impl Read, url: &str, max: Option<usi
     let mut response = Vec::new();
     let mut buf = [0u8; 8192];
     loop {
-        match stream.read(&mut buf) {
+        match http_read_retrying(stream, &mut buf) {
             Ok(0) => break,
             Ok(n) => {
                 response.extend_from_slice(&buf[..n]);
@@ -65,6 +65,22 @@ pub fn read_response_tolerant(stream: &mut impl Read, url: &str, max: Option<usi
         }
     }
     Ok(response)
+}
+
+/// One `read`, retried while the kernel interrupts it: an `Interrupted` read
+/// moved no bytes and says nothing about the response. Every client read runs
+/// under a socket timeout, and on Linux a blocking `recv` on a socket with
+/// SO_RCVTIMEO fails with EINTR whenever a signal reaches the reading thread,
+/// SA_RESTART or not (signal(7)) — the SIGCHLD of a process the program spawns
+/// while a call is in flight is one. Taken as the end of the exchange, it
+/// turned a whole response into `malformed or incomplete response`.
+pub fn http_read_retrying<R: Read + ?Sized>(r: &mut R, buf: &mut [u8]) -> std::io::Result<usize> {
+    loop {
+        match r.read(buf) {
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            other => return other,
+        }
+    }
 }
 
 /// The status code of a head's status line (0 when it has none).
@@ -213,8 +229,12 @@ pub fn make_tls_stream(
         .map_err(|_| http_error_text(HttpErrorClass::Tls, url))?;
     let mut conn = rustls::ClientConnection::new(config, server_name)
         .map_err(|_| http_error_text(HttpErrorClass::Tls, url))?;
+    // An interrupted handshake read (see `http_read_retrying`) is retried.
     while conn.is_handshaking() {
-        conn.complete_io(&mut stream).map_err(|e| http_tls_error(url, &e))?;
+        match conn.complete_io(&mut stream) {
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            r => r.map_err(|e| http_tls_error(url, &e))?,
+        };
     }
     Ok(rustls::StreamOwned::new(conn, stream))
 }

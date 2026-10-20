@@ -82,7 +82,7 @@ codegen-units = 1
     cmd.arg("--target-dir").arg(project_dir.join("target"));
     if release {
         cmd.arg("--release");
-        append_target_cpu(&mut cmd);
+        append_release_rustflags(&mut cmd);
     }
     // #2772: the requested target (or the host) is stated, never inherited.
     let triple = super::native_target::cross_target();
@@ -186,7 +186,10 @@ fn try_rlib_fast_build(rs_code: &str, project_dir: &std::path::Path, release: bo
     // The runtime is built for the same CPU as the main crate: fat LTO does
     // not inline across functions whose target features differ.
     let cpu = release.then(super::native_target::release_target_cpu).flatten();
-    let rlib = ensure_runtime_rlib(opt_level, cpu.as_deref()).ok()?;
+    // The release LLVM options reach the runtime too: a loop it vectorized
+    // before LTO stays vectorized through it.
+    let llvm: &[&str] = if release { super::native_target::RELEASE_LLVM_ARGS } else { &[] };
+    let rlib = ensure_runtime_rlib(opt_level, cpu.as_deref(), llvm).ok()?;
     let mut slim = crate::codegen::slim_main_with_external_runtime(rs_code)?;
     if !defines_entry_point(&slim) {
         slim.push_str("\nfn main() {}\n");
@@ -208,6 +211,9 @@ fn try_rlib_fast_build(rs_code: &str, project_dir: &std::path::Path, release: bo
     }
     if let Some(cpu) = &cpu {
         cmd.arg("-C").arg(format!("target-cpu={cpu}"));
+    }
+    if release {
+        cmd.args(super::native_target::release_llvm_rustc_args());
     }
     let output = cmd.output().ok()?;
     if output.status.success() {
@@ -284,7 +290,7 @@ fn run_cargo_build_and_locate_binary(project_dir: &std::path::Path, release: boo
     cmd.arg("--target-dir").arg(project_dir.join("target"));
     if release {
         cmd.arg("--release");
-        append_target_cpu(&mut cmd);
+        append_release_rustflags(&mut cmd);
     }
     // Suppress cargo's chatty output
     cmd.arg("--quiet");
@@ -364,16 +370,23 @@ pub(super) fn wrap_codegen_leak(stderr: String) -> String {
     )
 }
 
-/// A `--release` cargo build's `-C target-cpu` ([`super::native_target::release_target_cpu`]),
+/// A `--release` cargo build's `-C target-cpu` ([`super::native_target::release_target_cpu`])
+/// and release LLVM options ([`super::native_target::RELEASE_LLVM_ARGS`]),
 /// appended to the RUSTFLAGS the child already has — set on `cmd` (the rayon
 /// cfg) or inherited — so neither replaces the other.
-fn append_target_cpu(cmd: &mut std::process::Command) {
-    let Some(cpu) = super::native_target::release_target_cpu() else { return };
+fn append_release_rustflags(cmd: &mut std::process::Command) {
     let current = cmd.get_envs()
         .find(|(k, _)| *k == "RUSTFLAGS")
         .and_then(|(_, v)| v.map(|v| v.to_string_lossy().into_owned()))
         .unwrap_or_else(|| std::env::var("RUSTFLAGS").unwrap_or_default());
-    cmd.env("RUSTFLAGS", format!("{current} -C target-cpu={cpu}").trim_start().to_string());
+    let mut flags = current;
+    if let Some(cpu) = super::native_target::release_target_cpu() {
+        flags.push_str(&format!(" -C target-cpu={cpu}"));
+    }
+    for arg in super::native_target::RELEASE_LLVM_ARGS {
+        flags.push_str(&format!(" -C llvm-args={arg}"));
+    }
+    cmd.env("RUSTFLAGS", flags.trim_start().to_string());
 }
 
 /// Path to the precompiled `almide_rt` runtime rlib, built once per process.
@@ -392,8 +405,9 @@ fn append_target_cpu(cmd: &mut std::process::Command) {
 /// tests/debug (where runtime speed is irrelevant), "3" for release shipping
 /// (so the linked runtime keeps full optimization). Each level is cached
 /// separately and built at most once per process. `cpu` is the release
-/// `-C target-cpu` (#3604), part of the identity like the opt level.
-fn ensure_runtime_rlib(opt_level: &str, cpu: Option<&str>) -> Result<std::path::PathBuf, String> {
+/// `-C target-cpu` and `llvm` the release LLVM options (#3604), part of the
+/// identity like the opt level.
+fn ensure_runtime_rlib(opt_level: &str, cpu: Option<&str>, llvm: &[&str]) -> Result<std::path::PathBuf, String> {
     use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
     type Memo = std::collections::HashMap<String, Result<std::path::PathBuf, String>>;
     /// The per-process memo of built runtimes. The lock is held only across a
@@ -403,11 +417,11 @@ fn ensure_runtime_rlib(opt_level: &str, cpu: Option<&str>) -> Result<std::path::
         static CACHE: OnceLock<Mutex<Memo>> = OnceLock::new();
         CACHE.get_or_init(|| Mutex::new(Memo::new())).lock().unwrap_or_else(PoisonError::into_inner)
     }
-    let memo_key = format!("{opt_level}|{}", cpu.unwrap_or(""));
+    let memo_key = format!("{opt_level}|{}|{}", cpu.unwrap_or(""), llvm.join(" "));
     if let Some(r) = memo().get(&memo_key) {
         return r.clone();
     }
-    let result = build_runtime_rlib(opt_level, cpu);
+    let result = build_runtime_rlib(opt_level, cpu, llvm);
     if let Ok(rlib) = &result {
         // This rlib is in use NOW: refresh its mtime (nothing else does — a
         // warm cache is a bare `exists()`), then let the daily sweep empty
@@ -423,7 +437,21 @@ fn ensure_runtime_rlib(opt_level: &str, cpu: Option<&str>) -> Result<std::path::
     result
 }
 
-fn build_runtime_rlib(opt_level: &str, cpu: Option<&str>) -> Result<std::path::PathBuf, String> {
+/// How the runtime rlib is code-generated (#3829): four codegen units and no
+/// local ThinLTO pass. rustc's default (16 units, then ThinLTO across them)
+/// spent ~1.7 s of the ~4.1 s cold runtime build in that ThinLTO pass at
+/// opt-level 1 (`-Z time-passes`, c4-standard-8). Turning the pass off alone
+/// saved ~0.75 s but cost programs at opt-level 1 the inlining between units
+/// (decode +6.7%, binarytrees +3.8%); four units keep most of the
+/// related code in one unit, recover that (within 1.5% on the perf rows), and
+/// build faster still (lisp cold build 4.49 s -> 3.64 s). A `--release` link
+/// runs fat LTO over the rlib's embedded bitcode, so the release binaries
+/// measured within run-to-run noise (+-3%, both directions) while their cold
+/// build went 7.76 s -> 6.50 s. Part of the cache key, so an rlib cached with
+/// other flags is never linked.
+const RUNTIME_RLIB_CODEGEN_ARGS: [&str; 4] = ["-C", "lto=off", "-C", "codegen-units=4"];
+
+fn build_runtime_rlib(opt_level: &str, cpu: Option<&str>, llvm: &[&str]) -> Result<std::path::PathBuf, String> {
     let src = crate::codegen::emit_runtime_crate();
     let rustc = crate::find_rustc();
     // `-vV`, not `--version`: two toolchains of one version for different
@@ -431,7 +459,9 @@ fn build_runtime_rlib(opt_level: &str, cpu: Option<&str>) -> Result<std::path::P
     let rustc_ver = toolchain_identity();
     // The profile string here MUST match the per-file rustc invocation that links it.
     let cpu_key = cpu.map(|c| format!("|cpu={c}")).unwrap_or_default();
-    let key = format!("{:016x}", super::hash64(format!("{src}|{rustc_ver}|opt{opt_level}|ed2021{cpu_key}").as_bytes()));
+    let flags = RUNTIME_RLIB_CODEGEN_ARGS.join(" ");
+    let llvm_key = if llvm.is_empty() { String::new() } else { format!("|llvm={}", llvm.join(" ")) };
+    let key = format!("{:016x}", super::hash64(format!("{src}|{rustc_ver}|opt{opt_level}|ed2021{cpu_key}|{flags}{llvm_key}").as_bytes()));
     let dir = std::env::temp_dir().join(format!("almide-rtlib-{key}"));
     let rlib = dir.join("libalmide_rt.rlib");
     if rlib.exists() {
@@ -451,10 +481,14 @@ fn build_runtime_rlib(opt_level: &str, cpu: Option<&str>) -> Result<std::path::P
         .arg("--edition").arg("2021")
         .arg("-C").arg(format!("opt-level={opt_level}"))
         .arg("-C").arg("overflow-checks=no")
+        .args(RUNTIME_RLIB_CODEGEN_ARGS)
         .arg("-A").arg("warnings")
         .arg("--out-dir").arg(&dir);
     if let Some(cpu) = cpu {
         cmd.arg("-C").arg(format!("target-cpu={cpu}"));
+    }
+    for arg in llvm {
+        cmd.arg("-C").arg(format!("llvm-args={arg}"));
     }
     let output = cmd.output().map_err(|e| format!("rtlib rustc: {e}"))?;
     if !output.status.success() {
@@ -481,7 +515,7 @@ fn cargo_build_test_fast_path(rs_code: &str, project_dir: &std::path::Path) -> R
     // worst a file pays one extra rustc. Opt out with ALMIDE_NO_RTLIB=1.
     if !almide_base::env::flag("ALMIDE_NO_RTLIB") {
         if let (Ok(rlib), Some(mut slim)) = (
-            ensure_runtime_rlib("1", None),
+            ensure_runtime_rlib("1", None, &[]),
             crate::codegen::slim_main_with_external_runtime(rs_code),
         ) {
             if !defines_entry_point(&slim) {

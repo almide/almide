@@ -49,7 +49,7 @@ pub fn almide_rt_json_parse(text: &str) -> Result<AlmideValue, AlmideString> {
             let b = t.as_bytes();
             if *pos >= b.len() { return Err("unexpected end of input".into()); }
             match b[*pos] {
-                b'"' => parse_string(t, pos).map(|s| AlmideValue::Str(AlmideString::from(s))),
+                b'"' => parse_str_value(t, pos),
                 b'{' => parse_object(t, pos),
                 b'[' => parse_array(t, pos),
                 b't' | b'f' => parse_bool(t, pos),
@@ -122,6 +122,21 @@ pub fn almide_rt_json_parse(text: &str) -> Result<AlmideValue, AlmideString> {
             let cp = 0x10000 + ((unit - 0xD800) << 10) + (low - 0xDC00);
             if let Some(ch) = char::from_u32(cp) { s.push(ch); }
             *pos += 6; // consumed "\uYYYY"
+        }
+        /// A string value: the escape-free run becomes the `AlmideString`
+        /// straight from the input slice (#2157) — one allocation, where the
+        /// general path builds a `String` and then copies it into a new block.
+        /// Anything with an escape takes the general path, as `parse_key` does.
+        fn parse_str_value(t: &str, pos: &mut usize) -> Result<AlmideValue, String> {
+            let b = t.as_bytes();
+            let start = *pos + 1;
+            let mut i = start;
+            while i < b.len() && b[i] != b'"' && b[i] != b'\\' { i += 1; }
+            if i < b.len() && b[i] == b'"' {
+                *pos = i + 1;
+                return Ok(AlmideValue::Str(AlmideString::from(&t[start..i])));
+            }
+            parse_string(t, pos).map(|s| AlmideValue::Str(AlmideString::from(s)))
         }
         /// An object key: the escape-free run is interned straight from the input
         /// slice (no `String` in between); anything with an escape takes the

@@ -423,7 +423,7 @@ fn http_call_pump<S: AlmideHttpCallSock>(
     let mut buf = vec![0u8; 8192];
     loop {
         s.tcp().set_read_timeout(http_call_step_timeout(sh, true)?).ok();
-        let n = match s.read(&mut buf) {
+        let n = match http_read_retrying(s, &mut buf) {
             Ok(n) => n,
             Err(e) => {
                 if sh.lock().outcome.is_some() {

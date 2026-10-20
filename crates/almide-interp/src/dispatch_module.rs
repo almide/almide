@@ -395,7 +395,7 @@ impl<'a> Interpreter<'a> {
         // Applied ONLY at the boundary back OUT of the pool tier
         // (`pool_depth == 0` at the call): inside the tier a heap value IS its
         // address, and an eager rebuild there snapshots blocks the caller is
-        // still writing through (see `pool_fns`).
+        // still writing through (see `pool_depth`).
         let flow = self.sync_at_pool_boundary(func_def, flow);
         match flow {
             Flow::Unsupported(why) => self.abstain_or_bridge(floor_first, module, func, &args, why),
@@ -489,7 +489,7 @@ impl<'a> Interpreter<'a> {
     }
 
     /// Run a resolved body, tracking the pool-tier boundary: while a POOL
-    /// body (see `pool_fns`) is on the stack, heap values stay addresses and
+    /// body (see `pool_depth`) is on the stack, heap values stay addresses and
     /// no return sync fires.
     fn call_pool_tier(
         &mut self,

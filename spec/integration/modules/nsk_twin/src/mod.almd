@@ -1,0 +1,13 @@
+// The second module of name_resolves_by_definition_test.almd: the same
+// spellings as nsk_walk and the entry program, with different bodies.
+fn step(n: Int, acc: Int) -> Int = acc + n * 100
+
+fn bump(n: Int) -> Int = if n > 0 then bump(n - 1) + 2 else 0
+
+fn tag(s: String) -> String = "twin:" + s
+
+fn count(n: Int) -> Int = step(n, 0)
+
+fn bumped(n: Int) -> Int = bump(n) * 10
+
+fn tagged(s: String) -> String = tag(s)

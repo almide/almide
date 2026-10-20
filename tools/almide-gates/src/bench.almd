@@ -137,23 +137,54 @@ effect fn baseline_text(alm: String, target: String, rows: List[Row], tol_pct: I
   let sha = string.slice(sh("shasum", ["-a", "256", alm])!, 0, 16)
   let src = fs.read_text(target) ?? ""
   let header = """
-    # Build-speed baseline — the SOURCE for the README's build-speed table (#999).
+    # Build-speed baseline — the SOURCE for docs/benchmarks/README.md's build-speed table (#999).
     # Regenerate: almide run tools/almide-gates/src/main.almd -- bench
-    # Ratchet:    almide run tools/almide-gates/src/main.almd -- bench --check
+    # Ratchet:    almide run tools/almide-gates/src/main.almd -- bench docs/benchmarks --check
+    #             (runs only on the `machine` class below — scripts/lib/machine-class.sh)
     #
     # Every row is an N-run MEAN and N is recorded: a single run of a 30ms process is
     # scheduler noise, not a measurement. Cold clears BOTH $TMPDIR/almide-run and the
     # dependency cache before every repetition — clearing only the latter produces a warm
     # build wearing a cold label.
     """
-  header + "\n" + "version   = " + ver + "\n" + "binary    = sha256:" + sha + "\n" + "machine   = " + sh(
-    "uname",
-    ["-m"],
-  )! + " " + sh("uname", ["-s"])! + "\n" + "date      = " + sh("date", ["+%Y-%m-%d"])! + "\n" + "target    = " + target + "\n" + "lines     = " + int.to_string(list.len(string.split(src, "\n")) - 1) + "\n" + "tolerance = " + int.to_string(tol_pct) + "\n" + (rows |> list.map(row_line) |> list.join("\n")) + "\n"
+  header + "\n" + "version   = " + ver + "\n" + "binary    = sha256:" + sha + "\n" + "machine   = " + machine_class()! + "\n" + "date      = " + sh(
+    "date",
+    ["+%Y-%m-%d"],
+  )! + "\n" + "target    = " + target + "\n" + "lines     = " + int.to_string(list.len(string.split(src, "\n")) - 1) + "\n" + "tolerance = " + int.to_string(tol_pct) + "\n" + (rows |> list.map(row_line) |> list.join("\n")) + "\n"
 }
 
-effect fn check_against(path: String, rows: List[Row], tol_pct: Int) -> (List[String], Bool) = {
-  let lines = fs.read_lines(path) ?? []
+// The machine class a baseline is a claim about, and whether this machine is it. A build time
+// does not transfer between machine classes, so the ratchet judges only on the class the
+// baseline records and SAYS so when this is another one — a silent pass on the wrong machine
+// would read as a green ratchet. The rule (arch + OS + CPU model) lives once, in
+// scripts/lib/machine-class.sh, shared with the wasm-runtime ratio verdict.
+effect fn machine_class() -> String = sh("bash", ["scripts/lib/machine-class.sh"])!
+
+effect fn machine_key() -> String = sh("bash", ["scripts/lib/machine-class.sh", "--key"])!
+
+effect fn same_class(recorded: String) -> Bool = {
+  let st = process.exec_status("bash", ["scripts/lib/machine-class.sh", "--same", recorded])!
+  st.code == 0
+}
+
+// `key = VALUE` — a provenance line of the baseline, read back whole.
+fn field_of(lines: List[String], key: String) -> String = {
+  let hit = lines |> list.find((l) => string.starts_with(string.trim(l), key + " "))
+  match hit {
+    some(l) => string.trim(list.drop(string.split(l, "="), 1) |> list.join("=")),
+    none => "",
+  }
+}
+
+fn skip_line(recorded: String, here: String) -> String = "build-speed: ratchet SKIPPED — this machine's class (" + here + ") differs from the baseline's (" + recorded + "); a build time does not transfer between machine classes, so there is no verdict here. Run it on the recorded class, or re-stamp with `-- bench` on this one."
+
+// The ratchet's whole verdict: SKIPPED (a pass that says so) on another machine class, the
+// per-row 1.5x comparison on the recorded one.
+fn gate(same: Bool, recorded: String, here: String, lines: List[String], rows: List[Row], tol_pct: Int) -> (List[String], Bool) =
+  if same then check_against(lines, rows, tol_pct)
+  else ([skip_line(recorded, here)], true)
+
+fn check_against(lines: List[String], rows: List[Row], tol_pct: Int) -> (List[String], Bool) = {
   var out: List[String] = []
   // `ok` is the Result constructor and cannot be a binding name here.
   var passed = true
@@ -196,7 +227,7 @@ fn readme_block(lines: List[String]) -> List[String] = {
     "a single run of a 30ms process is scheduler noise. Cold clears BOTH `$TMPDIR/almide-run`",
     "and the dependency cache before each repetition; clearing only the latter measures a warm",
     "build. Regenerate with `almide run tools/almide-gates/src/main.almd -- bench`; the ratchet",
-    "(`-- bench --check`) fails CI at 1.5x.",
+    "(`-- bench docs/benchmarks --check`) fails at 1.5x on the machine class above and skips, saying so, on any other.",
     "",
     "| scenario | time | runs |",
     "|---|---|---|",
@@ -205,6 +236,72 @@ fn readme_block(lines: List[String]) -> List[String] = {
     "| build, cold | **" + ms("cold_ms") + " ms** | 3 |",
     "| build, cold, `--target wasm` | **" + ms("wasm_ms") + " ms** | 3 |"
   ]
+}
+
+test "another machine class skips the ratchet and names both classes" {
+  let lines = [
+    "machine   = x86_64 Linux, Intel Xeon 8581C [GCE c4-standard-8]",
+    "check_ms  = 10.0   n=20"
+  ]
+  let recorded = field_of(lines, "machine")
+  assert_eq(recorded, "x86_64 Linux, Intel Xeon 8581C [GCE c4-standard-8]")
+  // A 10x regression, on a machine of another class: no verdict, and the line says why.
+  let v = gate(
+    false,
+    recorded,
+    "arm64 Darwin, Apple M4 Pro",
+    lines,
+    [
+      Row { key: "check_ms", ms: 1000, n: 20 }
+    ],
+    150,
+  )
+  assert_eq(v.1, true)
+  let said = list.get_or(v.0, 0, "")
+  assert_eq(string.contains(said, "SKIPPED"), true)
+  assert_eq(string.contains(said, "arm64 Darwin, Apple M4 Pro"), true)
+  assert_eq(string.contains(said, "x86_64 Linux, Intel Xeon 8581C"), true)
+}
+
+test "the recorded machine class still fails a regressed row and passes a held one" {
+  let lines = [
+    "machine   = x86_64 Linux, Intel Xeon 8581C",
+    "check_ms  = 10.0   n=20",
+    "cold_ms   = 600.0   n=3"
+  ]
+  let bad = gate(
+    true,
+    "x86_64 Linux, Intel Xeon 8581C",
+    "x86_64 Linux, Intel Xeon 8581C",
+    lines,
+    [
+      Row { key: "check_ms", ms: 151, n: 20 },
+      Row { key: "cold_ms", ms: 6000, n: 3 }
+    ],
+    150,
+  )
+  assert_eq(bad.1, false)
+  assert_eq(
+    string.starts_with(list.get_or(bad.0, 0, ""), "::error::build-speed REGRESSION: check_ms"),
+    true,
+  )
+  let held = gate(
+    true,
+    "x86_64 Linux, Intel Xeon 8581C",
+    "x86_64 Linux, Intel Xeon 8581C",
+    lines,
+    [
+      Row { key: "check_ms", ms: 150, n: 20 },
+      Row { key: "cold_ms", ms: 6000, n: 3 }
+    ],
+    150,
+  )
+  assert_eq(held.1, true)
+  // A row the baseline lacks fails on the recorded class too: the gate cannot pass by reading nothing.
+  let missing = gate(true, "x", "x", lines, [
+    Row { key: "wasm_ms", ms: 1, n: 3 }
+  ], 150)
+  assert_eq(missing.1, false)
 }
 
 test "the README block is rendered from the baseline, values and provenance both" {

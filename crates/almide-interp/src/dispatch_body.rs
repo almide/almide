@@ -9,7 +9,7 @@
 // both recorded for `interp_bridge_fallback_ledger`.
 
 impl<'a> Interpreter<'a> {
-    /// A stdlib IMPL name reached as a bare `Named` call (`string_slice` —
+    /// A POOL body reached by its IMPL name as a bare `Named` call (`string_slice` —
     /// how a lowered module body spells `string.slice`), with its arguments
     /// already evaluated, on the SAME resolution order a module-spelled call
     /// takes: the interp-native container op, then the lowered body, then the
@@ -35,14 +35,10 @@ impl<'a> Interpreter<'a> {
         let root = self.root_scope();
         let flow = self.call_pool_tier(func, evaled.clone(), &root);
         // #1226 return sync at the NAMED spelling too — the same body
-        // reachable both ways must read back the same way. Pool bodies only:
-        // a program fn that happens to share an impl name keeps the fixture
-        // tier's raw address model.
-        let flow = if self.pool_fns.contains(&func.name) {
-            self.sync_at_pool_boundary(func, flow)
-        } else {
-            flow
-        };
+        // reachable both ways must read back the same way. `func` is a pool
+        // body by the caller's check: a program fn that shares an impl's
+        // spelling is the user's code and never reaches this route (#3825).
+        let flow = self.sync_at_pool_boundary(func, flow);
         match flow {
             Flow::Unsupported(why) => self.abstain_or_bridge(floor_first, m, f, &evaled, why),
             other => other,
@@ -165,7 +161,17 @@ impl<'a> Interpreter<'a> {
         if let Some(d) = self.fns.get(&func).copied().filter(bodied).filter(|d| !program_root(d)) {
             return Some((d, true));
         }
+        // The registry's impl NAME is the pool's key, not a program-wide one:
+        // a program-root fn spelled `int_to_string` is the user's, and taking
+        // it from the flat table ran `int.to_string` as that fn (#3825 — a
+        // user fn calling the stdlib it is spelled after recursed into
+        // itself). The pool body first, by its own table; the flat table only
+        // where the pool has none (a source that did not lower), and never
+        // the entry program's own fn.
         let impl_name = crate::stdlib_pool::impl_fn(module, func)?;
-        self.fns.get(&impl_name).copied().filter(bodied).map(|d| (d, false))
+        crate::stdlib_pool::body(impl_name)
+            .or_else(|| self.fns.get(&impl_name).copied().filter(|d| !program_root(d)))
+            .filter(bodied)
+            .map(|d| (d, false))
     }
 }

@@ -31,6 +31,7 @@ mod heap;
 mod vfs;
 mod value;
 
+pub use stdlib_pool::pool_ready_unless_stopped;
 pub use value::{Closure, Value, VariantPayload};
 
 use std::cell::Cell;
@@ -133,16 +134,16 @@ pub struct Interpreter<'a> {
     /// threads, and a shared arena would let one fixture observe another's
     /// blocks.
     pub(crate) heap: heap::Heap,
-    /// Names that resolved to POOL bodies (stdlib self-host, not shadowed by
-    /// a program fn). The pool tier is address-uniform (#1226 slice 2): a
-    /// heap value inside it IS its block address, and only the boundary back
-    /// into fixture-tier code rebuilds addresses into `Value`s —
-    /// `pool_depth` tracks that boundary. Syncing pool-INTERNAL calls was a
-    /// proven wrong vote in both directions: an eager rebuild snapshots a
-    /// fresh-alloc-still-to-be-filled (`set_union`'s `__set_alloc` came back
-    /// as eight zeros), and no rebuild at all leaks addresses into native
-    /// ops (`regex_split`'s pieces printed as integers).
-    pub(crate) pool_fns: HashSet<Sym>,
+    /// How many POOL bodies (stdlib self-host — `stdlib_pool::is_pool_body`,
+    /// by identity, #3825) are on the stack. The pool tier is
+    /// address-uniform (#1226 slice 2): a heap value inside it IS its block
+    /// address, and only the boundary back into fixture-tier code rebuilds
+    /// addresses into `Value`s — this depth tracks that boundary. Syncing
+    /// pool-INTERNAL calls was a proven wrong vote in both directions: an
+    /// eager rebuild snapshots a fresh-alloc-still-to-be-filled
+    /// (`set_union`'s `__set_alloc` came back as eight zeros), and no rebuild
+    /// at all leaks addresses into native ops (`regex_split`'s pieces printed
+    /// as integers).
     pub(crate) pool_depth: u32,
     /// The STATIC type of `prim.handle`'s argument at the current call site,
     /// stashed by `eval_module_call` and consumed by `heap_prim_handle`. This
@@ -221,6 +222,12 @@ pub struct Interpreter<'a> {
     /// resolves against this module first — the scope the checker bound it
     /// in — so two loaded modules sharing a fn name are not ambiguous (#1844).
     pub(crate) cur_space: Cell<u32>,
+    /// Whether the lowered fn currently EXECUTING is a pool body (set and
+    /// restored with `cur_space`). A pool body's bare call means its own
+    /// namespace — the registry sources spliced together — never a program
+    /// fn that happens to share the spelling (#3825: a user `list_len` beside
+    /// the pool's).
+    pub(crate) cur_pool: Cell<bool>,
     pub(crate) globals_ready: Cell<bool>,
     pub(crate) stdout: String,
     pub(crate) stderr: String,
@@ -232,6 +239,10 @@ pub struct Interpreter<'a> {
     /// the deadline is `Unsupported` (the interpreter could not answer in
     /// time), never `FuelExhausted`, which callers read as non-termination.
     pub(crate) wall_deadline: Option<std::time::Instant>,
+    /// Optional stop set from another thread (#3809), polled with the
+    /// deadline: a corpus sweep that cuts a run sets it, and the run ends as
+    /// `Unsupported` instead of spinning for the rest of the process.
+    pub(crate) stop: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     /// The pool tier's own step budget (`POOL_FUEL`), charged while a
     /// self-hosted stdlib body is on the stack (`pool_depth > 0`).
     pub(crate) pool_fuel: Cell<u64>,
@@ -272,8 +283,13 @@ pub struct Interpreter<'a> {
     /// The open region's saved outer fuel — the reap's restore source (the
     /// exit prim's `saved` operand dies with the cut frame).
     pub(crate) det_saved: Cell<i64>,
-    /// The user program's own fn names — captured BEFORE the stdlib pool is
-    /// layered into `fns`, so the meter can tell the two apart at call time.
+    /// The user program's own fns, by `&IrFunction` address — what the meter
+    /// charges. By identity, not by name: a user fn spelled like a registry
+    /// impl (`list_len`) is user code, and the pool's `list_len` is not,
+    /// although both can run in one program (#3825).
+    pub(crate) user_fns: HashSet<usize>,
+    /// The names of `user_fns` — the vocabulary `det_entry_exempt`'s call
+    /// graph is drawn in.
     pub(crate) user_fn_names: HashSet<Sym>,
     /// ENTRY-CHARGE-EXEMPT user fns — the mirror of the backends' region
     /// inliner (lazily built; see `det_entry_exempt`). W1's charge sites are
@@ -301,6 +317,9 @@ pub struct Interpreter<'a> {
     pub(crate) t_ord: Cell<i64>,
     pub(crate) t_start: std::time::Instant,
 }
+
+/// The `Unsupported` reason of a run whose caller set its stop (#3809).
+pub const STOPPED: &str = "stopped by the caller";
 
 /// Default fuel budget — high enough for any real corpus program, low enough to
 /// bound an adversarial loop. Roughly 100M eval steps.
@@ -439,6 +458,34 @@ fn index_newtype_ctors(program: &IrProgram) -> HashSet<Sym> {
 /// indexed — a shared helper name across two modules stays module-keyed
 /// and abstains honestly rather than resolving from the wrong source
 /// (the #1087 class).
+/// The deterministic meter's user fns, by `&IrFunction` address (#3825).
+///
+/// Every entry-program fn is the user's own: the self-hosted stdlib a driver
+/// links (`string_len` and its `__strlen_count` helper under the wasm leg's
+/// lowering — the spine's run_parity recipe) arrives as a MODULE, never as a
+/// root fn. A module's fns are the user's unless the module is such a linked
+/// self-host body — keyed in the compiler's `__` space (`__selfhost_N`), the
+/// key space lowering already reads as the record of who made a module
+/// (`is_user_module`, #3504). Those are stdlib bodies all
+/// the same: both backends meter user functions only, and metering one charged
+/// `string.len` an entry unit per recursion hop the moment the body answered
+/// instead of the bridge (#2185 — the C-204 fuel_dyn_charge verdict flipped a
+/// row early). Pool bodies are not program fns at all, so never in the set.
+///
+/// The set used to be NAMES, minus every name the pool defines — so a user
+/// fn spelled `list_len` went unmetered, and a name set cannot tell the user's
+/// `list_len` from the pool's when both run in one program.
+fn index_user_fns(program: &IrProgram) -> HashSet<usize> {
+    let addr = |f: &IrFunction| f as *const IrFunction as usize;
+    let mut user: HashSet<usize> = program.functions.iter().map(addr).collect();
+    for m in &program.modules {
+        if !m.name.as_str().starts_with("__") {
+            user.extend(m.functions.iter().map(addr));
+        }
+    }
+    user
+}
+
 fn index_private_module_helpers<'a>(
     program: &'a IrProgram,
     fns: &mut HashMap<Sym, &'a IrFunction>,
@@ -494,40 +541,24 @@ impl<'a> Interpreter<'a> {
         for f in &program.functions {
             fns.insert(f.name, f);
         }
-        // The deterministic meter's user-fn set: program fns + user-module fns,
-        // captured before the pool layers in (pool bodies are unmetered). A
-        // self-hosted fn the driver LINKED into the program (`string_len` and
-        // its `__strlen_count` helper under the wasm leg's lowering — the
-        // spine's run_parity recipe) is a stdlib body all the same, not user
-        // code: both backends meter user functions only, and metering it
-        // charged `string.len` an entry unit per recursion hop the moment the
-        // body answered instead of the bridge (#2185 — the C-204
-        // fuel_dyn_charge verdict flipped a row early). Membership is by the
-        // pool's own fn table, which holds every fn a registry source defines,
-        // helpers included.
-        let is_stdlib_impl = |name: &Sym| stdlib_pool::pool().fns.contains_key(name);
-        let mut user_fn_names: HashSet<Sym> =
-            fns.keys().copied().filter(|n| !is_stdlib_impl(n)).collect();
-        for m in &program.modules {
-            for f in &m.functions {
-                if !is_stdlib_impl(&f.name) {
-                    user_fn_names.insert(f.name);
-                }
-            }
-        }
+        let user_fns = index_user_fns(program);
+        let user_fn_names: HashSet<Sym> = program
+            .functions
+            .iter()
+            .chain(program.modules.iter().flat_map(|m| m.functions.iter()))
+            .filter(|f| user_fns.contains(&(*f as *const IrFunction as usize)))
+            .map(|f| f.name)
+            .collect();
         // Layer in the self-hosted stdlib bodies (lowered once, process-wide) so
         // a stdlib call the interp-native surfaces don't cover evaluates the SAME
         // definition both backends run — see `stdlib_pool`. Program fns are
         // inserted first and `or_insert` keeps them authoritative, so a fixture
         // fn can never be shadowed by a pool body; the pool's own intra-source
-        // helper calls (`__sext`) resolve through this same table, and `__`
-        // names cannot collide with user code (#868 rejects the prefix).
-        let mut pool_fns: HashSet<Sym> = HashSet::new();
+        // calls (`__sext`, a sibling impl) resolve pool-first while a pool body
+        // executes (`cur_pool`), so a program fn spelled like one cannot
+        // capture them either (#3825).
         for f in stdlib_pool::pool().fns.values() {
-            if let std::collections::hash_map::Entry::Vacant(e) = fns.entry(f.name) {
-                e.insert(f);
-                pool_fns.insert(f.name);
-            }
+            fns.entry(f.name).or_insert(f);
         }
         let mut module_fns = HashMap::new();
         let mut fn_space: HashMap<usize, u32> = HashMap::new();
@@ -553,7 +584,6 @@ impl<'a> Interpreter<'a> {
             heap: heap::Heap::new(),
             fns,
             module_fns,
-            pool_fns,
             pool_depth: 0,
             handle_arg_ty: None,
             container_arg_tys: None,
@@ -566,11 +596,13 @@ impl<'a> Interpreter<'a> {
             module_globals: program.modules.iter().map(|_| env::Scope::root()).collect(),
             fn_space,
             cur_space: Cell::new(0),
+            cur_pool: Cell::new(false),
             globals_ready: Cell::new(false),
             stdout: String::new(),
             stderr: String::new(),
             fuel: Cell::new(DEFAULT_FUEL),
             wall_deadline: None,
+            stop: None,
             pool_fuel: Cell::new(POOL_FUEL),
             depth: Cell::new(0),
             det_fuel: Cell::new(i64::MAX),
@@ -582,6 +614,7 @@ impl<'a> Interpreter<'a> {
             err_tys: std::cell::RefCell::new(Vec::new()),
             det_region_depth: Cell::new(0),
             det_saved: Cell::new(0),
+            user_fns,
             user_fn_names,
             det_exempt: std::cell::RefCell::new(None),
             bridge_fallbacks: std::cell::RefCell::new(Vec::new()),
@@ -646,6 +679,11 @@ impl<'a> Interpreter<'a> {
     /// a loop-carrying one is exempt itself while the callee keeps charging
     /// (inline-the-wrapper, keep-the-worker). Built once, lazily, from the
     /// user-fn call graph.
+    /// Is `f` one of the user program's own fns — by identity (`user_fns`)?
+    pub(crate) fn is_user_fn(&self, f: &IrFunction) -> bool {
+        self.user_fns.contains(&(f as *const IrFunction as usize))
+    }
+
     fn det_entry_exempt(&self, name: Sym) -> bool {
         let mut cache = self.det_exempt.borrow_mut();
         let set = cache.get_or_insert_with(|| {
@@ -679,7 +717,7 @@ impl<'a> Interpreter<'a> {
                 .fns
                 .values()
                 .copied()
-                .filter(|f| self.user_fn_names.contains(&f.name))
+                .filter(|f| self.is_user_fn(f))
                 .chain(self.module_fns.values().copied())
                 .collect();
             let mut loopy: HashSet<Sym> = HashSet::new();
@@ -735,6 +773,14 @@ impl<'a> Interpreter<'a> {
     /// (for the fuzz oracle, which runs in-process and cannot kill a slow run).
     pub fn with_wall_deadline(mut self, deadline: std::time::Instant) -> Self {
         self.wall_deadline = Some(deadline);
+        self
+    }
+
+    /// Stop the run with `RunStatus::Unsupported` once `stop` is set from
+    /// another thread (#3809) — the corpus sweeps' per-fixture limit, which
+    /// runs in-process and must end a cut run rather than leave it spinning.
+    pub fn with_stop(mut self, stop: std::sync::Arc<std::sync::atomic::AtomicBool>) -> Self {
+        self.stop = Some(stop);
         self
     }
 

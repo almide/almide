@@ -418,7 +418,13 @@ fn float_fn(func: &str, args: &[Value]) -> Option<Flow> {
 fn float_unary_fn(func: &str, args: &[Value]) -> Option<Flow> {
     let f = match func {
         "from_int" => Value::Float(as_int(args.first())? as f64),
-        "sqrt" => Value::Float(as_float(args.first())?.sqrt()),
+        // A negative operand gives the fixed +qNaN (C-055), as runtime/rs
+        // almide_rt_float_sqrt and stdlib/float_core.almd do.
+        "sqrt" => Value::Float({
+            let x = as_float(args.first())?;
+            let r = x.sqrt();
+            if x < 0.0 { r.abs() } else { r }
+        }),
         "is_nan" => Value::Bool(as_float(args.first())?.is_nan()),
         "is_infinite" => Value::Bool(as_float(args.first())?.is_infinite()),
         _ => return None,

@@ -189,6 +189,7 @@ call:float.floor
 call:float.from_float32
 call:float.from_float64
 call:float.from_int
+call:float.is_nan
 call:float.max
 call:float.min
 call:float.parse
@@ -677,6 +678,7 @@ call:uint8.to_float32
 call:uint8.to_int64
 call:uint8.to_int8_checked
 call:uint8.to_string
+call:url.build_query
 call:url.parse
 call:url.to_string
 call:user-fn

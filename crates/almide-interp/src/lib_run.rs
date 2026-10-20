@@ -30,6 +30,7 @@ impl<'a> Interpreter<'a> {
         let program: &'a IrProgram = self.program;
         let fuel = self.fuel.get();
         let wall_deadline = self.wall_deadline;
+        let stop = self.stop.clone();
         std::thread::scope(|scope| {
             std::thread::Builder::new()
                 .name("almide-interp".to_string())
@@ -39,6 +40,7 @@ impl<'a> Interpreter<'a> {
                 .spawn_scoped(scope, move || {
                     let mut interp = Interpreter::new(program).with_fuel(fuel);
                     interp.wall_deadline = wall_deadline;
+                    interp.stop = stop;
                     interp.run_main_on_stack()
                 })
                 .expect("failed to spawn almide-interp worker thread")
@@ -298,11 +300,26 @@ impl<'a> Interpreter<'a> {
             return Err(Flow::Fuel);
         }
         budget.set(f - 1);
-        if f & 0xFF == 0
-            && let Some(deadline) = self.wall_deadline
+        if f & 0xFF == 0 {
+            return self.meter_check();
+        }
+        Ok(())
+    }
+
+    /// The every-256-steps checks: the wall deadline (#2611) and the
+    /// caller's stop (#3809). Both end the run as `Unsupported` — the
+    /// interpreter could not answer — never `FuelExhausted`.
+    #[cold]
+    fn meter_check(&self) -> Result<(), Flow> {
+        if let Some(deadline) = self.wall_deadline
             && std::time::Instant::now() >= deadline
         {
             return Err(Flow::Unsupported("wall-clock deadline reached".into()));
+        }
+        if let Some(stop) = &self.stop
+            && stop.load(std::sync::atomic::Ordering::Relaxed)
+        {
+            return Err(Flow::Unsupported(STOPPED.into()));
         }
         Ok(())
     }
@@ -395,6 +412,7 @@ impl<'a> Interpreter<'a> {
         self.depth.set(d + 1);
         let det_was_user = self.det_in_user.get();
         let space_was = self.cur_space.get();
+        let pool_was = self.cur_pool.get();
         let chan_was = self.chan_str.get();
         // C-320: the meter's region depth at call entry — if the callee
         // leaves it HIGHER, a det cut skipped a region's budget_exit and
@@ -426,7 +444,7 @@ impl<'a> Interpreter<'a> {
             // set_union eager-snapshot class), and its own return skipped
             // the read-back entirely (codec decode handed fixture code a raw
             // block address; `list.len on non-list`).
-            let hop_pool = matches!(&callee, TailCallee::Fn(f) if self.pool_fns.contains(&f.name));
+            let hop_pool = matches!(&callee, TailCallee::Fn(f) if crate::stdlib_pool::is_pool_body(f));
             if hop_pool {
                 self.pool_depth += 1;
             }
@@ -458,6 +476,7 @@ impl<'a> Interpreter<'a> {
         let result = self.fold_pending_try(result, &pending);
         self.det_in_user.set(det_was_user);
         self.cur_space.set(space_was);
+        self.cur_pool.set(pool_was);
         self.chan_str.set(chan_was);
         self.depth.set(self.depth.get() - 1);
         (result, first_frame.unwrap_or_else(|| base.child()))
@@ -467,12 +486,14 @@ impl<'a> Interpreter<'a> {
     /// frame parents off that space's globals frame — never the
     /// caller's chain, whose same-numbered VarIds may belong to a
     /// different table. Closures keep their captured chain (which was
-    /// built under this rule at creation).
+    /// built under this rule at creation). The hop also fixes the namespace
+    /// the callee's bare calls resolve in (`cur_space`, `cur_pool`).
     fn hop_base_scope(&self, callee: &TailCallee<'a>, base: &env::Scope) -> env::Scope {
         match callee {
             TailCallee::Fn(f) => {
                 let space = self.fn_space_of(f);
                 self.cur_space.set(space);
+                self.cur_pool.set(crate::stdlib_pool::is_pool_body(f));
                 self.space_scope(space).clone()
             }
             TailCallee::Clo(_) => base.clone(),
@@ -486,7 +507,7 @@ impl<'a> Interpreter<'a> {
     fn sync_final_hop(&self, callee: &TailCallee<'a>, result: Flow) -> Flow {
         match callee {
             TailCallee::Fn(f)
-                if self.pool_depth == 0 && self.pool_fns.contains(&f.name) =>
+                if self.pool_depth == 0 && crate::stdlib_pool::is_pool_body(f) =>
             {
                 // A body ending in an early exit hands back `Flow::Return` —
                 // sync the carried value the same way and keep the flow kind
@@ -512,7 +533,7 @@ impl<'a> Interpreter<'a> {
             TailCallee::Fn(f) => {
                 // Only USER frames burn deterministic fuel; the flag is restored
                 // by the caller so a nested spine cannot leak its own answer.
-                let det_is_user = self.user_fn_names.contains(&f.name);
+                let det_is_user = self.is_user_fn(f);
                 self.det_in_user.set(det_is_user);
                 if !det_is_user {
                     return None;

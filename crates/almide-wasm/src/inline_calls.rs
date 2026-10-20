@@ -16,7 +16,11 @@
 //! WHAT IS ADMITTED (conservative; a decline keeps the call):
 //!   - the callee is a function of the SAME var space as the caller (the main
 //!     program, or one module), reached by a `Named` call whose name no entry
-//!     function shadows (an intra-module call resolves to the entry fn first);
+//!     function also spells. An intra-module call resolves to the module's
+//!     own fn first (`Emitter::resolve_named_fn`), so admitting it would be
+//!     sound; declining it is the conservative side, and callees are keyed per
+//!     space, so a call never inlines another space's same-spelled fn
+//!     (#3831);
 //!   - not effect, not a test, no generics, not `main`, not recursive into
 //!     itself, arity matches; neither side is a `scoped` fn or an outlined
 //!     `scoped { … }` block (#1997: the region window around a call there is

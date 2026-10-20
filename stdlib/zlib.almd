@@ -46,22 +46,54 @@ effect fn gunzip(data: Bytes) -> Result[Bytes, String] = _
 // value as an Int.
 /// CRC-32 (IEEE) as an unsigned Int; 0 for empty data.
 fn crc32(data: Bytes) -> Int = {
+  let len = bytes.len(data)
+  let acc = if len < 256 then crc32_bits(data, len) else crc32_table(data, len)
+  int.bxor(acc, 4294967295)
+}
+
+// One reflected CRC-32 step over the low bit of c, without a branch: the
+// polynomial is masked in by `0 - (c & 1)` (all ones or zero). A data-dependent
+// `if c & 1 == 1` here is a branch the predictor loses on half the bits, and
+// the wasm leg's code generator keeps it as a branch (#3848).
+local fn crc32_step(c: Int) -> Int = int.bxor(
+  int.bshr(c, 1),
+  int.band(3988292384, 0 - int.band(c, 1)),
+)
+
+// Eight steps: the CRC of one byte already xored into c.
+local fn crc32_byte_bits(c: Int) -> Int = {
+  let c2 = crc32_step(crc32_step(c))
+  let c4 = crc32_step(crc32_step(c2))
+  let c6 = crc32_step(crc32_step(c4))
+  crc32_step(crc32_step(c6))
+}
+
+// Short input: eight branchless steps a byte (building the table costs 2048).
+local fn crc32_bits(data: Bytes, len: Int) -> Int = {
   var acc = 4294967295
   var i = 0
-  let len = bytes.len(data)
   while i < len {
-    acc = int.bxor(acc, bytes.get_or(data, i, 0))
-    var k = 0
-    while k < 8 {
-      acc = if int.band(acc, 1) == 1 then int.bxor(3988292384, int.bshr(acc, 1)) else int.bshr(
-        acc,
-        1,
-      )
-      k = k + 1
-    }
+    acc = crc32_byte_bits(int.bxor(acc, bytes.get_or(data, i, 0)))
     i = i + 1
   }
-  int.bxor(acc, 4294967295)
+  acc
+}
+
+// Long input: one table lookup a byte.
+local fn crc32_table(data: Bytes, len: Int) -> Int = {
+  var t = list.repeat(0, 256)
+  var n = 0
+  while n < 256 {
+    t[n] = crc32_byte_bits(n)
+    n = n + 1
+  }
+  var acc = 4294967295
+  var i = 0
+  while i < len {
+    acc = int.bxor(t[int.band(int.bxor(acc, bytes.get_or(data, i, 0)), 255)], int.bshr(acc, 8))
+    i = i + 1
+  }
+  acc
 }
 
 /// Adler-32 as an unsigned Int; 1 for empty data.

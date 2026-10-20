@@ -284,21 +284,24 @@ fn __fpow_algo(s: Float, x: Float, y: Float, ax: Float, ix: Int, iy: Int, hy: In
 }
 
 // determine the sign of the result (s) for x<0, then enter the algorithm. (libm.rs:1291-1302)
+// (x<0)**(non-int) manufactures a NaN: the ONE fixed +qNaN 0x7FF8000000000000 (C-055), where
+// musl's (x - x) / (x - x) would carry the host's sign (x86 -NaN, aarch64 +NaN).
 fn __fpow_signed(x: Float, y: Float, hx: Int, ix: Int, iy: Int, hy: Int, yisint: Int) -> Float = {
   let ax = prim.fabs(x)
   if hx < 0 then {
-    if yisint == 0 then (x - x) / (x - x)
+    if yisint == 0 then prim.ffrombits(0x7FF8000000000000)
     else if yisint == 1 then __fpow_algo(0.0 - 1.0, x, y, ax, ix, iy, hy)
     else __fpow_algo(1.0, x, y, ax, ix, iy, hy)
   } else __fpow_algo(1.0, x, y, ax, ix, iy, hy)
 }
 
 // x is +-0,+-inf,+-1 (lx==0 and ix in {0, 0x3ff00000, 0x7ff00000}). (libm.rs:1268-1289)
+// (-1)**(non-int) is the fixed +qNaN, as in __fpow_signed (C-055).
 fn __fpow_special_x(x: Float, hx: Int, ix: Int, hy: Int, yisint: Int) -> Float = {
   let ax = prim.fabs(x)
   let z0 = if hy < 0 then 1.0 / ax else ax
   if hx < 0 then {
-    if prim.bor(ix - 1072693248, yisint) == 0 then (z0 - z0) / (z0 - z0)
+    if prim.bor(ix - 1072693248, yisint) == 0 then prim.ffrombits(0x7FF8000000000000)
     else if yisint == 1 then prim.ffrombits(prim.bxor(prim.fbits(z0), prim.bshl(1, 63))) else z0
   } else z0
 }

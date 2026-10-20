@@ -126,6 +126,14 @@ SUITE = [
     # check-perf-ratio.sh gates that relation on the wasm leg.
     ("wordfreq",       "wordfreq/wordfreq.almd",       ["wordfreq.rs"], "2000000", "20000", "bytes", ["native", "wasm", "rust"]),
     ("wordfreq-group", "wordfreq/wordfreq_group.almd", ["wordfreq.rs"], "2000000", "20000", "bytes", ["native", "wasm", "rust"]),
+    # jsonround (#2157): the Value row — N records built as one `Value`,
+    # stringified, parsed back and summed. Native and wasm only, and the
+    # relation between the two legs is the gate (check-perf-ratio.sh, the
+    # NATIVE <= WASM block): the native leg ran it 1.3-2.5x SLOWER than wasmtime
+    # until the `value.array` / `value.object` / `value.as_array` `@reuse`
+    # twins and the one-buffer stringify. No Rust reference: a hand-written
+    # JSON writer and parser is not the comparison this row is for.
+    ("jsonround",      "jsonround/jsonround.almd",     [],              "100000",  "1000",  "bytes", ["native", "wasm"]),
 ]
 
 QUICK_ARGS = {  # small workloads for the CI ratchet: seconds, not minutes.
@@ -172,8 +180,14 @@ QUICK_ARGS = {  # small workloads for the CI ratchet: seconds, not minutes.
     # 35868760167), under the 0.08s floor PAIRS enforces as a hard error.
     # Both spellings move together so the wasm idiom relation still compares
     # one workload.
-    "wordfreq": "4000000",
-    "wordfreq-group": "4000000",
+    # 8M since #2157's NATIVE <= WASM relation gates the native rows too: once
+    # the native Map path got fast, `wordfreq-group/native` read 0.0695s at 4M
+    # on a CI runner (develop e4fcced11), under the floor that relation enforces.
+    "wordfreq": "8000000",
+    "wordfreq-group": "8000000",
+    # 100k records: ~0.2s native / ~0.28s wasm on a GCE c4-standard-8
+    # (2026-10-19) — over the 0.08s spawn-noise floor on both legs.
+    "jsonround": "100000",
 }
 
 RUSTC_FLAGS = ["-C", "opt-level=3", "-C", "lto=yes", "-C", "codegen-units=1",

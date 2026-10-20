@@ -1,10 +1,10 @@
-# Hello, world wasm size — the SOURCE for the README's wasm-size block.
+# Hello, world wasm size — the SOURCE for docs/benchmarks/README.md's wasm-size block.
 # Regenerate: bash scripts/gen-readme-stats.sh --measure
 #             (README_RELEASE_BIN=<binary from a release asset> also restamps
 #             the released row; without it the released row is carried over)
 # Checked:    bash scripts/gen-readme-stats.sh --check rebuilds Hello, world and
 #             demands these exact bytes — a changed preamble is re-stamped HERE,
-#             never edited by hand in README.md. The bytes are machine-independent:
+#             never edited by hand on the page. The bytes are machine-independent:
 #             the emitters are pure Rust and the structural leg's build artifact is
 #             the #1588 WASI form.
 # build is derived from the binary's `almide --version` line (#2384): a develop

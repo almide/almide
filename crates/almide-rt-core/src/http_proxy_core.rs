@@ -185,7 +185,7 @@ fn http_proxy_tunnel(s: &mut TcpStream, u: &AlmideHttpUrl, p: &AlmideHttpProxy) 
     let mut head: Vec<u8> = Vec::new();
     let mut byte = [0u8; 1];
     while !head.ends_with(b"\r\n\r\n") {
-        match s.read(&mut byte) {
+        match http_read_retrying(s, &mut byte) {
             Ok(0) => return Err(format!("proxy {} closed the connection before answering CONNECT {}", p.shown, hp)),
             Ok(_) => head.push(byte[0]),
             Err(e) => return Err(http_proxy_io(p, &e)),

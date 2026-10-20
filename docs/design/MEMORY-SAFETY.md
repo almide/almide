@@ -1,9 +1,10 @@
 # Memory Safety — What Is Proven, What Is Trusted
 
-The README carries the one-paragraph form of this account; this page is the
-full one. The audited-theorem count it refers to is computed and asserted by
-`proofs/check.sh` (against `proofs/TRUSTED_BASE.md`, `proofs/receipt.sh`, and
-the README), so it is quoted there rather than repeated here.
+The measurements page ([docs/benchmarks/README.md](../benchmarks/README.md)) carries the
+one-paragraph form of this account; this page is the full one. The audited-theorem count
+it refers to is computed and asserted by `proofs/check.sh` (against
+`proofs/TRUSTED_BASE.md`, `proofs/receipt.sh`, and the measurements page), so it is
+quoted there rather than repeated here.
 
 You write no ownership annotations, no lifetimes, no `free` — memory management is decided by [Perceus](https://www.microsoft.com/en-us/research/publication/perceus-garbage-free-reference-counting-with-reuse/)-style ownership inference in the compiler: garbage-collector-free, pause-free. The inference computes where every heap value is introduced, duplicated, and consumed; what differs per target is only the *execution mechanism* for those decisions. A compiler that ships proofs owes you the boundary, so here it is:
 

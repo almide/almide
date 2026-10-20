@@ -1,0 +1,41 @@
+// @contract: C-388
+// #3831: a module's bare call names the module's own fn, whatever the entry
+// program or another module defines under the same spelling. The wasm leg's
+// small-fn inliner keyed its candidates by name and spliced the entry
+// program's small `step` into nsk_walk's call of its own private `step`:
+// `nsk_walk.count(3)` was 1002 on wasm and 3 natively. Each spelling below is
+// defined three times (here, nsk_walk, nsk_twin), and every pairing of an
+// inlinable and a non-inlinable definition is reached from the side that
+// must not see the other.
+import nsk_twin
+import nsk_walk
+
+// Small, pure and scalar: the inliner's candidate.
+fn step(n: Int, acc: Int) -> Int = 999 + n + acc
+
+// Recursive: never inlined, while nsk_walk's `bump` is.
+fn bump(n: Int) -> Int = if n > 0 then bump(n - 1) + 100 else 0
+
+fn tag(s: String) -> String = "root:" + s
+
+test "a module's call reaches its own fn, not the entry program's inlinable namesake" {
+  assert_eq(nsk_walk.count(3), 3)
+  assert_eq(nsk_twin.count(3), 300)
+}
+
+test "a module's inlinable fn is not traded for the entry program's recursive namesake" {
+  assert_eq(nsk_walk.bumped(4), 50)
+  assert_eq(nsk_walk.twice(4), 6)
+  assert_eq(nsk_twin.bumped(4), 80)
+}
+
+test "a non-scalar namesake resolves by definition too" {
+  assert_eq(nsk_walk.tagged("x"), "walk:x")
+  assert_eq(nsk_twin.tagged("x"), "twin:x")
+}
+
+test "the entry program's own calls reach its own fns" {
+  assert_eq(step(1, 2), 1002)
+  assert_eq(bump(2), 200)
+  assert_eq(tag("x"), "root:x")
+}

@@ -50,10 +50,18 @@
 #   aarch64 ubuntu-24.04-arm    imperative 1.14   indexed 0.86   enumerate 1.13
 #
 # opt-level 3 + LTO slower than opt-level 1 is a pessimization whatever its
-# cause. The aarch64 budget is a RATCHET over the CI runner's figure (1.14x,
-# Neoverse-N2), not the goal: the goal is <= 1.05 on both arches (#3604).
-# Lower it as #3604 lands. A Neoverse-V2 machine reads 1.43x today, so a local
-# run there needs SPELLING_RELEASE_BUDGET=1.50 until the fix lands.
+# cause. The cause was the vectorizer taking the in-order float reduction
+# (AArch64 opts in to ordered reductions; x86 never does); a release build now
+# keeps those loops scalar (`RELEASE_LLVM_ARGS`, src/cli/native_target.rs),
+# and a range literal heading a fold is counted rather than built. Measured
+# 2026-10-19 on GCE, n=1200, 9 samples, release/default after the fix:
+#
+#   x86_64  (Xeon 8581C)    imperative 0.80   indexed 0.81   enumerate 0.88
+#   aarch64 (Neoverse-V2)   imperative 0.99   indexed 1.08   enumerate 0.86
+#
+# The aarch64 budget is still a RATCHET (1.25 before the fix): the indexed
+# residual is LLVM's integer lowering of `eval_a` when one index is known
+# non-negative and the other is not, and the goal stays <= 1.05 (#3604).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -64,7 +72,7 @@ BUDGET="${SPELLING_RATIO_BUDGET:-2.0}"
 # `profile`: it has no wasmtime, and the spelling leg already runs on x86_64.
 LEGS="${SPELLING_RATIO_LEGS:-spelling,profile}"
 case "$(uname -m)" in
-  aarch64|arm64) RELEASE_DEFAULT_BUDGET=1.25 ;;
+  aarch64|arm64) RELEASE_DEFAULT_BUDGET=1.15 ;;
   *)             RELEASE_DEFAULT_BUDGET=1.10 ;;
 esac
 RELEASE_BUDGET="${SPELLING_RELEASE_BUDGET:-$RELEASE_DEFAULT_BUDGET}"

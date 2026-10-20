@@ -1,0 +1,116 @@
+// @contract: C-004
+// A fan arm that captures a heap-typed parameter or let binding builds and
+// runs on both targets, every arm in list order (#3819).
+//
+// A borrowed parameter is copied into an owned binding before the arms
+// spawn. For a String that copy must build the Almide String: on the native
+// leg it was a std `String` bound to an `AlmideString` slot, and rustc
+// refused the program with E0308. Shapes: a String, List, Map, record,
+// variant, Option[String] and Bytes parameter, each read by two arms, and
+// a String and List let binding captured the same way. The helpers are named
+// `arm_*` because the interpreter leg runs a fn named like a self-hosted stdlib
+// function (`list_len`) as that function (#3825).
+type Point = { x: Int, name: String }
+
+type Shape =
+  | Circle(Int)
+  | Label(String)
+
+effect fn arm_str(s: String, i: Int) -> Int = string.len(s) + i
+
+effect fn arm_list(xs: List[String], i: Int) -> Int = list.len(xs) + i
+
+effect fn arm_map(m: Map[String, Int], i: Int) -> Int = map.len(m) + i
+
+effect fn arm_point(p: Point, i: Int) -> Int = p.x + string.len(p.name) + i
+
+effect fn arm_shape(s: Shape, i: Int) -> Int = match s {
+  Circle(r) => r + i,
+  Label(t) => string.len(t) + i,
+}
+
+effect fn arm_opt(o: String?, i: Int) -> Int = match o {
+  some(t) => string.len(t) + i,
+  none => i,
+}
+
+effect fn arm_bytes(b: Bytes, i: Int) -> Int = bytes.len(b) + i
+
+effect fn by_string(cmd: String) -> Int = {
+  let r = fan {
+    arm_str(cmd, 1)
+    arm_str(cmd, 2)
+  }
+  r.0 + r.1
+}
+
+effect fn by_list(paths: List[String]) -> Int = {
+  let r = fan {
+    arm_list(paths, 1)
+    arm_list(paths, 2)
+  }
+  r.0 + r.1
+}
+
+effect fn by_map(m: Map[String, Int]) -> Int = {
+  let r = fan {
+    arm_map(m, 1)
+    arm_map(m, 2)
+  }
+  r.0 + r.1
+}
+
+effect fn by_point(p: Point) -> Int = {
+  let r = fan {
+    arm_point(p, 1)
+    arm_point(p, 2)
+  }
+  r.0 + r.1
+}
+
+effect fn by_shape(s: Shape) -> Int = {
+  let r = fan {
+    arm_shape(s, 1)
+    arm_shape(s, 2)
+  }
+  r.0 + r.1
+}
+
+effect fn by_option(o: String?) -> Int = {
+  let r = fan {
+    arm_opt(o, 1)
+    arm_opt(o, 2)
+  }
+  r.0 + r.1
+}
+
+effect fn by_bytes(b: Bytes) -> Int = {
+  let r = fan {
+    arm_bytes(b, 1)
+    arm_bytes(b, 2)
+  }
+  r.0 + r.1
+}
+
+effect fn by_let(n: Int) -> Int = {
+  let cmd = "run" + int.to_string(n)
+  let paths = ["a", "b", cmd]
+  let r = fan {
+    arm_str(cmd, 1)
+    arm_list(paths, 2)
+  }
+  r.0 + r.1
+}
+
+effect fn main() -> Unit = {
+  println(int.to_string(by_string("check")!))
+  println(int.to_string(by_list(["a", "b"])!))
+  println(int.to_string(by_map(map.from_list([("a", 1), ("b", 2), ("c", 3)]))!))
+  println(int.to_string(by_point({ x: 4, name: "pt" })!))
+  println(int.to_string(by_shape(Label("shape"))!))
+  println(int.to_string(by_shape(Circle(7))!))
+  println(int.to_string(by_option(some("opt"))!))
+  println(int.to_string(by_option(none)!))
+  println(int.to_string(by_bytes(bytes.from_list([1, 2, 3, 4]))!))
+  println(int.to_string(by_let(5)!))
+}

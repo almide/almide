@@ -144,6 +144,7 @@ evidence  = [
   { path = "spec/wasm_cross/fan_map_parallel_scalar.almd", class = "fixture" },
   { path = "spec/wasm_cross/fan_map_nested_combinators.almd", class = "fixture" },
   { path = "spec/wasm_cross/fan_block_rc_closure_capture.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fan_arm_heap_capture.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-005"
@@ -896,12 +897,13 @@ evidence  = [
 id        = "C-055"
 spec      = "ALS-C9"
 title     = "list.min/max/sort/sort_by over Float use IEEE-754 totalOrder, valid + identical on both targets"
-statement = "`list.sort`/`list.min`/`list.max` over `List[Float]` and `list.sort_by` with a Float key ORDER by IEEE-754 totalOrder (the ordering twin of `f64::total_cmp`): a +NaN takes the greatest totalOrder position (after +inf), a -NaN the least (before -inf), and `-0.0 < +0.0`. This makes Float ordering legal and byte-identical native == wasm, fixing the divergence where native REJECTED it at compile (`f64: Ord` unsatisfied) while wasm either accepted it with NaN-unaware `f64.le` or emitted an INVALID module (the `sort_by` Float-key path stored an f64 into an i64 local → `local.set` validator error). Native routes `List[Float]` ordering to `total_cmp`-based `_float` runtime variants (IntrinsicLowering swaps the symbol); wasm mirrors with the sign-magnitude bit trick inside `emit_ord_cmp3`'s Float arm (`key = bits ^ ((bits >>_s 63) >>_u 1)`, a monotone i64 key) and pre-transforms `sort_by` Float keys onto the i64 storage path; interp mirrors with `f64::total_cmp`. On the v1 leg the cached-keys desugar (`sort_by` → `sort_by_keys` + a materialized key map) admits ONLY Int keys: it types the synthesized keys list as List[Int], so an ungated String key linked the scalar `list.map` (indirect-call type mismatch trap, differential-fuzz seed 20260718 index 866) and a Float key would sort by raw i64 BIT patterns (wrong order for negatives) — String keys leave the desugar and take the cached-key `sort_by_str_key` twins instead (C-276), Float keys ride the totalOrder route. NaN-SIGN CAVEAT: the totalOrder POSITION of a NaN depends on its sign bit, which for a COMPUTED NaN (`0.0/0.0`) is implementation-defined — native/wasm const-fold it to +NaN (top) while the interp's runtime `divsd` yields -NaN (bottom), so the 3-way fixture stays sign-deterministic (uses ±inf, not a divided NaN); the +NaN-at-top positioning is verified native == wasm directly. ASYMMETRY (named deliberately): this list-extremum/ordering totalOrder is a DIFFERENT contract from the SCALAR `float.min`/`float.max`/`math.fmin`/`math.fmax`, which keep their C-049 NaN-IGNORING semantics — a resolved-but-unsupported sort element type is still a clean emit-time ICE, never an invalid module."
+statement = "`list.sort`/`list.min`/`list.max` over `List[Float]` and `list.sort_by` with a Float key ORDER by IEEE-754 totalOrder (the ordering twin of `f64::total_cmp`): a +NaN takes the greatest totalOrder position (after +inf), a -NaN the least (before -inf), and `-0.0 < +0.0`. This makes Float ordering legal and byte-identical native == wasm, fixing the divergence where native REJECTED it at compile (`f64: Ord` unsatisfied) while wasm either accepted it with NaN-unaware `f64.le` or emitted an INVALID module (the `sort_by` Float-key path stored an f64 into an i64 local → `local.set` validator error). Native routes `List[Float]` ordering to `total_cmp`-based `_float` runtime variants (IntrinsicLowering swaps the symbol); wasm mirrors with the sign-magnitude bit trick inside `emit_ord_cmp3`'s Float arm (`key = bits ^ ((bits >>_s 63) >>_u 1)`, a monotone i64 key) and pre-transforms `sort_by` Float keys onto the i64 storage path; interp mirrors with `f64::total_cmp`. On the v1 leg the cached-keys desugar (`sort_by` → `sort_by_keys` + a materialized key map) admits ONLY Int keys: it types the synthesized keys list as List[Int], so an ungated String key linked the scalar `list.map` (indirect-call type mismatch trap, differential-fuzz seed 20260718 index 866) and a Float key would sort by raw i64 BIT patterns (wrong order for negatives) — String keys leave the desugar and take the cached-key `sort_by_str_key` twins instead (C-276), Float keys ride the totalOrder route. NaN-SIGN CAVEAT: the totalOrder POSITION of a NaN depends on its sign bit, which for a COMPUTED NaN (`0.0/0.0`) is implementation-defined — native/wasm const-fold it to +NaN (top) while the interp's runtime `divsd` yields -NaN (bottom), so the 3-way fixture stays sign-deterministic (uses ±inf, not a divided NaN); the +NaN-at-top positioning is verified native == wasm directly. ASYMMETRY (named deliberately): this list-extremum/ordering totalOrder is a DIFFERENT contract from the SCALAR `float.min`/`float.max`/`math.fmin`/`math.fmax`, which keep their C-049 NaN-IGNORING semantics — a resolved-but-unsupported sort element type is still a clean emit-time ICE, never an invalid module. EXTENDED (#3846): a NaN a STDLIB FUNCTION MANUFACTURES from non-NaN input is not host-signed — `math.sqrt`/`float.sqrt` of a negative, `math.log`/`math.log2`/`math.log10` of a negative, `math.sin`/`math.cos`/`math.tan` of ±inf, `math.fpow` (and the Float `**` operator, which is the same pow) of a negative base to a non-integer power, and `float.parse` of every spelling of nan (`nan`, `-nan`, `+NaN`, …) return the ONE fixed pattern +qNaN 0x7FF8000000000000 on native, wasm and the interp, whether or not the optimizer folded the call, so such a NaN takes the greatest totalOrder position on every leg and host; a NaN operand still passes through unchanged. Before, the kernels' `(x - x) / 0.0`, `x - x` and the hardware sqrt carried the host's sign (an x86 runtime invalid operation answers -NaN, aarch64 and a const fold +NaN): `list.min(list.insert([-0.0], 5, math.log(negative)))` printed `some(-0)` native and `some(NaN)` wasm (xtarget-fuzz seed 1792404782 index 69), and Rust's parser answered -NaN for `-nan` where the self-hosted parse answered +NaN. The NaN-SIGN CAVEAT above still governs a NaN an OPERATOR makes (`0.0/0.0`, `inf - inf`, Float `%`)."
 since     = "0.24.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/list_float_total_order.almd", class = "fixture" },
   { path = "spec/wasm_cross/sort_by_call_count.almd", class = "fixture" },
+  { path = "spec/wasm_cross/stdlib_manufactured_nan_sign.almd", class = "fixture" },
 ]
 
 # ── list.product OVERFLOW WRAPS (Cluster-B) ──────────────────────────
@@ -2712,7 +2714,7 @@ evidence  = [
 id        = "C-204"
 spec      = "ALS-DT2"
 title     = "A fan.bounded verdict is a function of the program and its inputs alone"
-statement = "`fan.bounded(c) { body }` yields Err (the ledger-constant message) exactly when the region's metered spend in charge units exceeds `floor(ns / CM-1)`, and the Ok ⇄ Err flip happens at the SAME declared nanosecond on both targets — the boundary fixtures pin the flip at unit exactness (heavy(1000) = 1002 units flips at 3006ns under CM-1 v0.3). Bind statements inside a block body add zero charge; the bare (no-`??`) form produces the same verdict as a real `Result[T, String]` value; the region body is pure by typing, so no wall-clock input can reach the verdict. The budget expression may reach the head through variables (a let-bound sum, a nested-block binding, an effect-fn boundary) — the nominal time tag erases at MIR, so the variable spelling meters identically to the inline one. The charge sites are the table's: a fn entry, a loop head and a bulk concat — the `+` the writer spelled, 1 + result_bytes/16; a string INTERPOLATION is not a charge site on any leg (spec/wasm_cross/fuel_interp_uncharged.almd: a body that interpolates in its loop is cut at the same iteration on native and wasm, and one that appends with `+` pays per iteration). Until #3778 the native default route charged the concat chain an interpolation lowers to; it now places the charge where the writer spelled `+`."
+statement = "`fan.bounded(c) { body }` yields Err (the ledger-constant message) exactly when the region's metered spend in charge units exceeds `floor(ns / CM-1)`, and the Ok ⇄ Err flip happens at the SAME declared nanosecond on both targets — the boundary fixtures pin the flip at unit exactness (heavy(1000) = 1002 units flips at 3006ns under CM-1 v0.3). Bind statements inside a block body add zero charge; the bare (no-`??`) form produces the same verdict as a real `Result[T, String]` value; the region body is pure by typing, so no wall-clock input can reach the verdict. The budget expression may reach the head through variables (a let-bound sum, a nested-block binding, an effect-fn boundary) — the nominal time tag erases at MIR, so the variable spelling meters identically to the inline one. The charge sites are the table's: a fn entry, a loop head and a bulk concat — the `+` the writer spelled, 1 + result_bytes/16; a string INTERPOLATION is not a charge site on any leg (spec/wasm_cross/fuel_interp_uncharged.almd: a body that interpolates in its loop is cut at the same iteration on native and wasm, and one that appends with `+` pays per iteration). Until #3778 the native default route charged the concat chain an interpolation lowers to; it now places the charge where the writer spelled `+`. A single-call body's arguments are part of the region (ADR-0028 E): in `{ f(g(x)) }` the meter charges `g(x)` like the rest of the body, so with a loop-free `id` the body `{ id(heavy(1000)) }` spends the 1002 units `{ heavy(1000) }` spends and flips at 3006ns, and each `fan.min` arm and mapper call is metered the same way (spec/wasm_cross/fuel_single_call_args.almd). Until #3790 those arguments ran before the meter started."
 since     = "0.47.0"
 status    = "active"
 evidence  = [
@@ -2723,6 +2725,7 @@ evidence  = [
   { path = "spec/wasm_cross/fuel_dyn_charge.almd", class = "fixture" },
   { path = "spec/wasm_cross/fuel_var_budget.almd", class = "fixture" },
   { path = "spec/wasm_cross/fuel_interp_uncharged.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fuel_single_call_args.almd", class = "fixture" },
   { path = "spec/wasm_cross/fan_race_walled_program.almd", class = "fixture" },
 ]
 
@@ -2741,6 +2744,7 @@ evidence  = [
   { path = "spec/wasm_cross/fuel_trap_cut.almd", class = "fixture" },
   { path = "spec/wasm_cross/fuel_trap_window.almd", class = "fixture" },
   { path = "spec/wasm_cross/fan_race_mapper.almd", class = "fixture" },
+  { path = "spec/wasm_cross/fuel_single_call_args.almd", class = "fixture" },
   { path = "spec/wasm_cross/fan_race_walled_program.almd", class = "fixture" },
 ]
 
@@ -3380,6 +3384,7 @@ evidence  = [
   { path = "spec/wasm_cross/hof_fn_value_callbacks.almd", class = "fixture" },
   { path = "spec/wasm_cross/fold_family_source_before_init.almd", class = "fixture" },
   { path = "spec/wasm_cross/fold_init_rebinds_source.almd", class = "fixture" },
+  { path = "spec/wasm_cross/arg_rebinds_earlier_arg.almd", class = "fixture" },
   { path = "spec/wasm_cross/let_bound_closure_scope.almd", class = "fixture" },
 ]
 [[contract]]
@@ -5077,4 +5082,16 @@ evidence  = [
   { path = "tests/diagnostics/parse-caseless-case-as-binding/broken.almd", class = "fixture" },
   { path = "tests/diagnostics/parse-non-ascii-module-name/broken.almd", class = "fixture" },
   { path = "tests/unicode_identifier_nfc_test.rs", name = "canonically_equivalent_spellings_are_one_binding_on_wasm", class = "fixture" },
+]
+[[contract]]
+id        = "C-388"
+spec      = "ALS-E26"
+title     = "A bare call names the definition of its own scope, never a same-spelled fn of the entry program or another module"
+statement = "A bare call `f(…)` resolves to the `f` of the scope its body belongs to, by definition and not by spelling: inside a module's fn it is that module's own `f`; inside a stdlib body (a self-hosted implementation or a bundled module) it is that body's own sibling or private helper; in the entry program it is the entry program's `f`. An entry-program or other-module fn spelled `f` is never called, inlined or spliced in its place, whichever of the definitions is small, pure, scalar, recursive or none of these; and the entry program's own calls of its `f` still reach it. The observables (stdout, stderr, exit code) are byte-identical on every leg. The wasm leg's small-fn inliner once keyed its candidates by spelling: an entry program's small `fn step(n, acc) = 999 + n + acc` replaced a module's call of its own recursive `step` (3 natively, 1002 on wasm, #3831), and a user `fn base64_decode(n: Int) -> Int` replaced `base64.decode_url`'s call of its sibling `base64_decode`, which stopped the wasm build with E082 (#3832)."
+since     = "0.68.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/stdlib_body_call_vs_user_namesake.almd", class = "fixture" },
+  { path = "spec/integration/modules/name_resolves_by_definition_test.almd", class = "fixture" },
+  { path = "spec/wasm_cross/zlib_call_vs_user_namesake.almd", class = "fixture" },
 ]

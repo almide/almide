@@ -1115,6 +1115,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_TCO_DEBUG` | debug | print the native tail-call loop rewrite decisions |
 | `ALMIDE_TEST_ABORT_PROBE` | runtime | marks a native testing.assert_aborts child (ADR-0029) so `panic` takes the C-219 abort path there; set by the parent, never by hand |
 | `ALMIDE_TEST_LAX_WASM` | gate | let the default `almide test` lane (wasm first, native fallback) PASS a file whose wasm leg diverged — trapped where the native re-run passed; without it a diverged leg fails the run |
+| `ALMIDE_TEST_SIGNALLED_CALL_URL=value` | harness | the loopback URL that turns the almide-rt-core http test's re-run of itself into the signalled-call child (#3857): it spawns a missing command while a call waits on that URL; set by the parent test, never by hand |
 | `ALMIDE_TEST_VERBOSE` | tool | show the full cargo / rustc output of the `almide test` harness build |
 | `ALMIDE_TEST_WASM_RUNNER=value` | tool | `wasmtime` runs the wasm leg of `almide test` on the `wasmtime` CLI (the stock `to_wasi` artifact) instead of the embedded host every `almide` binary carries (#3046) — the comparison route; unset is the embedded host |
 | `ALMIDE_TIME_PHASES` | debug | print the wall-clock time of each `almide run` phase |

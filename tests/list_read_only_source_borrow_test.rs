@@ -466,3 +466,62 @@ fn perf_tail_recursion_moves_instead_of_cloning() {
          moved {moved_ms} ms vs kept {kept_ms} ms (#3398)"
     );
 }
+
+/// #3870: a read-only selection (`let a = if c then xs else xs`, #3532) binds
+/// `a` as `&xs`, and it decided so while the range op that follows still
+/// borrowed `xs`. The op is `xs`'s last use, so the clone walk then moved
+/// `xs` into the owned twin while `a` was still read afterwards: rustc E0505
+/// on a program `almide check` accepts. One local per list twin, each chosen
+/// by a selection that is read after the op.
+const SELECTED_SOURCE_OPS: &[(&str, &str)] = &[
+    ("take", "list.len(list.take(SRC, 2))"),
+    ("drop", "list.len(list.drop(SRC, 1))"),
+    ("take_while", "list.len(list.take_while(SRC, is_a))"),
+    ("drop_while", "list.len(list.drop_while(SRC, is_a))"),
+    ("find", "string.len(list.find(SRC, (s) => s == \"b\") ?? \"\")"),
+    ("slice", "list.len(list.slice(SRC, 1, 3))"),
+    ("take_end", "list.len(list.take_end(SRC, 3))"),
+    ("drop_end", "list.len(list.drop_end(SRC, 3))"),
+    ("set", "list.len(list.set(SRC, 0, \"z\"))"),
+    ("swap", "list.len(list.swap(SRC, 0, 1))"),
+];
+
+#[test]
+fn a_source_a_selection_still_borrows_is_not_moved_into_the_owned_twin() {
+    let twins: Vec<String> = owned_twins()
+        .filter_map(|(b, _)| b.strip_prefix("almide_rt_list_").map(str::to_string))
+        .collect();
+    for op in &twins {
+        assert!(
+            SELECTED_SOURCE_OPS.iter().any(|(o, _)| o == op),
+            "list.{op} has an owned twin but no row in SELECTED_SOURCE_OPS (#3870)"
+        );
+    }
+    // One fn per op: a selection alone in its fn, as the shrunk finding has it.
+    let mut fns = String::new();
+    let mut main = String::new();
+    for (op, call) in SELECTED_SOURCE_OPS {
+        let call = call.replace("SRC", "xs");
+        fns += &format!(
+            "fn sel_{op}() -> String = {{\n  let xs = mk()\n  let a = if list.contains([1], 5) then xs else xs\n  let n = {call}\n  \"{op} ${{list.len(a)}} ${{n}}\"\n}}\n\n"
+        );
+        main += &format!("  println(sel_{op}())\n");
+    }
+    let src = format!(
+        "fn is_a(s: String) -> Bool = s == \"a\"\n\nfn mk() -> List[String] = [\"a\", \"a\", \"b\", \"c\"]\n\n{fns}effect fn main() -> Unit = {{\n{main}}}\n"
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("selected_source.almd");
+    std::fs::write(&path, &src).unwrap();
+    let run = Command::new(almide()).args(["run", path.to_str().unwrap()]).output().unwrap();
+    assert!(
+        run.status.success(),
+        "a source chosen by a live selection was moved (#3870):\n{}\n{src}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&run.stdout).lines().collect::<Vec<_>>(),
+        vec!["take 4 2", "drop 4 3", "take_while 4 2", "drop_while 4 2", "find 4 1", "slice 4 2", "take_end 4 3", "drop_end 4 1", "set 4 4", "swap 4 4"],
+        "native run disagrees"
+    );
+}
