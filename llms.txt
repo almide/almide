@@ -1,6 +1,6 @@
 # Almide
 
-> The programming language LLMs can write most accurately. Pure-Rust
+> A programming language designed so that LLM-written code survives modification. Pure-Rust
 > compiler, `.almd` source files, dual-target codegen (Rust, WASM).
 > Every design decision serves one metric: **modification survival rate**
 > on the [almide-dojo](https://github.com/almide/almide-dojo) MSR benchmark.
