@@ -99,7 +99,7 @@
 # its measurand (0 -> 1). Both are enumerated gates, not new ones.
 #
 # unmapped_blind_ceiling = "108"
-# uncompensated_blind_ceiling = "16"
+# uncompensated_blind_ceiling = "17"
 #
 # History of the unverified ceiling: it moved 0 -> 2 when enumerating the
 # Almide gates (#2128) brought `output-parity` and `fuzz-track-record` INTO the
@@ -1397,3 +1397,13 @@ reason = "renders the release dossier asset; it judges nothing"
 [[not_a_gate]]
 path = "scripts/gen-ledger-counts.sh"
 reason = "the refresh that restamps proofs/ledger-counts.toml; the verdict is scripts/check-ledger-counts.sh"
+
+[[gate]]
+path = "scripts/check-release-notes.sh"
+reads = "scalar"
+wired_by = ".github/workflows/release.yml"
+class = "NEGATIVE_TESTED"
+evidence = "landing PR (2026-10-20): docs/releases/v0.68.0-rc2.md forged six ways, each exit 1 with its own message — the generated '## What's Changed' body, bare '* <title> by @user in <url>' lines, a ':' title, a 5-character headline, no Full Changelog line, an empty body; a missing file (v9.9.9) also exit 1. Restored file exit 0, and its title/body split reproduced the published release body byte for byte."
+measures = "whether docs/releases/<tag>.md has the '# <tag> — <headline>' title line and a body free of the generated PR-list shape ending in the compare link, read from that file"
+varies = "landing PR (2026-10-20): exit 0 on the seeded v0.68.0-rc1/rc2 notes, exit 1 on each forged copy"
+blind = "notes that pass the shape but misstate what the release contains (a wrong claim, a missing change) -> UNCOMPENSATED"

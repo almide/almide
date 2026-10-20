@@ -17,7 +17,15 @@ Create a GitHub release with tag. Pushing the tag triggers `.github/workflows/re
    ```
    Review all commits since the last tag.
 
-2. **Create and push tag**
+2. **Write the release notes** — `docs/releases/v{version}.md`, committed and
+   merged to `main` before the tag (format and rules: `docs/releases/README.md`).
+   Line 1 `# v{version} — <headline>` becomes the release title; the rest is the
+   body, grouped by theme. Never the auto-generated "What's Changed" PR list.
+   ```bash
+   bash scripts/check-release-notes.sh v{version}
+   ```
+
+3. **Create and push tag**
    ```bash
    git tag v{version} origin/main
    git push origin v{version}
@@ -26,25 +34,18 @@ Create a GitHub release with tag. Pushing the tag triggers `.github/workflows/re
    - Build binaries for Linux (x86_64, aarch64), macOS (x86_64, aarch64), Windows (x86_64)
    - Create archives: `almide-{os}-{arch}.tar.gz` (`.zip` for Windows)
    - Generate `almide-checksums.sha256`
-   - Create a GitHub Release with all assets and auto-generated notes
+   - Create a GitHub Release with all assets, titled and described from `docs/releases/v{version}.md`
+   (the workflow fails before building if that file is missing or malformed)
 
-3. **Verify release** — Check that all 5 binaries + checksums are attached:
+4. **Verify release** — Check that all 5 binaries + checksums are attached:
    ```bash
    gh release view v{version}
    ```
 
-4. **Edit release notes** (optional) — If auto-generated notes need refinement:
+5. **Correcting notes later** — edit the file first, then republish from it:
    ```bash
-   gh release edit v{version} --notes "..."
-   ```
-   Structure:
-   ```
-   ## What's Changed
-
-   ### Category (e.g., Compiler Fixes, New Features, WASM, Stdlib, etc.)
-   - **Feature/fix name**: Brief description of what changed and why it matters.
-
-   **Full Changelog**: https://github.com/almide/almide/compare/v{prev}...v{version}
+   bash scripts/check-release-notes.sh v{version} out
+   gh release edit v{version} --title "$(cat out/title)" --notes-file out/body.md
    ```
 
 ## Release Assets
