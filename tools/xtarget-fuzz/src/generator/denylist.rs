@@ -48,14 +48,13 @@ const DENIED_MODULES: &[&str] = &[
 /// never drift.
 ///
 /// `fan` is a language-level concurrency construct (`fan { … }`,
-/// `fan.map`, `fan.min`, `fan.first_ok`, `fan.timeout`) rather than a bundled
+/// `fan.map`, `fan.settle`, `fan.min`, `fan.timeout`) rather than a bundled
 /// stdlib module; its scheduling-order-dependent combinators are
 /// nondeterministic and are denied here for the mutation path.
 const NONDETERMINISTIC_FUNCTIONS: &[(&str, &str)] = &[
     ("list", "shuffle"), // randomized permutation — not input-determined
     ("list", "sample"),  // randomized subset — not input-determined
-    ("fan", "race"),     // first-to-finish — scheduling-order-dependent
-    ("fan", "any"),      // first-success — scheduling-order-dependent
+    ("fan", "min"),      // least-by-clock pick — wall-clock arms are run-dependent
     ("fan", "timeout"),  // wall-clock deadline — nondeterministic
     // `datetime` is a pure calendar over Int timestamps except its clocks.
     ("datetime", "now"),          // wall clock
@@ -261,7 +260,7 @@ mod tests {
             "let r = string.to_upper(\"hi\")\nlist.map(xs, f)"
         )
         .is_none());
-        // Deterministic fan forms stay allowed (not race/any/timeout).
+        // Deterministic fan forms stay allowed (not min/timeout).
         assert!(NamedDenylist::source_references_denied_surface("fan.map(xs, f)").is_none());
         assert!(NamedDenylist::source_references_denied_surface("fan { a(); b() }").is_none());
         // Substrings inside longer identifiers must NOT match.

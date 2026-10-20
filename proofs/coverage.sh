@@ -299,7 +299,18 @@ fi
 # stale); `--update` raises floors to the measured value (never lowers).
 SAFETY_FILE="$ROOT/proofs/coverage-safety-baseline.txt"
 if [ -f "$SAFETY_FILE" ]; then
-    FULL_REPORT="$("$LLVM_BIN/llvm-cov" report $OBJS -instr-profile="$COVDIR/all.profdata" 2>/dev/null)"
+    # Same filename filter as the ratchet report: every safety file lives under
+    # crates/*/src, and the unfiltered report also walks dependency and test
+    # sources — where the condition-mode llvm-cov (nightly-2026-08-01) segfaults
+    # (exit 139, nightly 2026-10-19 on). Its stderr is kept and printed on
+    # failure, so a tool crash shows its backtrace instead of a bare exit code.
+    if ! FULL_REPORT="$("$LLVM_BIN/llvm-cov" report $OBJS -instr-profile="$COVDIR/all.profdata" \
+            -ignore-filename-regex="(\\.cargo|rustc|/tests?/|tests_part|examples/|/release/build/)" \
+            2>"$COVDIR/llvm-cov-safety.err")"; then
+        echo "::error::coverage: llvm-cov report for the safety set failed — stderr follows"
+        cat "$COVDIR/llvm-cov-safety.err"
+        exit 1
+    fi
     fail=0
     updated=""
     while read -r sf floor; do
