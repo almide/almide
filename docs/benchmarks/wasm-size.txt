@@ -1,7 +1,8 @@
 # Hello, world wasm size — the SOURCE for docs/benchmarks/README.md's wasm-size block.
 # Regenerate: bash scripts/gen-readme-stats.sh --measure
 #             (README_RELEASE_BIN=<binary from a release asset> also restamps
-#             the released row; without it the released row is carried over)
+#             the released row, README_RELEASE_TAG names its tag when the
+#             version line cannot, e.g. an rc; without it the row is carried over)
 # Checked:    bash scripts/gen-readme-stats.sh --check rebuilds Hello, world and
 #             demands these exact bytes — a changed preamble is re-stamped HERE,
 #             never edited by hand on the page. The bytes are machine-independent:
@@ -18,3 +19,4 @@ structural_bytes = 325
 release_version  = almide 0.68.0 (release, fcba2bcd5)
 release_bytes    = 325
 release_date     = 2026-10-20
+release_tag      = v0.68.0-rc2

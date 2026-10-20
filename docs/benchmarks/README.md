@@ -43,11 +43,11 @@ You write no ownership annotations, no lifetimes, no `free`: [Perceus](https://w
 No VM, no GC, no interpreter — native compiles through Rust to machine code, and WASM is emitted directly as self-contained modules (the runtime support a program reaches is linked in and the rest is pruned).
 
 <!-- wasm-size:generated:start — rendered from docs/benchmarks/wasm-size.txt by scripts/gen-readme-stats.sh; DO NOT EDIT between the markers -->
-| Program (`almide build --target wasm`, as shipped) | develop | released v0.68.0 |
+| Program (`almide build --target wasm`, as shipped) | develop | released v0.68.0-rc2 |
 |---|---:|---:|
 | Hello, world | **325 B** | **325 B** |
 
-The develop column is the develop build at 437b8f127, before v0.68.0 is tagged (`almide --version`: `almide 0.68.0 (dev, 437b8f127)`), measured 2026-10-20; CI rebuilds it on every push and fails if the bytes move without a restamp of `docs/benchmarks/wasm-size.txt`. The released column is the compiler from the v0.68.0 release asset (`almide 0.68.0 (release, fcba2bcd5)`, `gh release download v0.68.0 -R almide/almide`), measured 2026-10-20. No post-hoc optimizer touches the shipped bytes (`--wasm-opt` is opt-in and its output is not the renderer's own module).
+The develop column is the develop build at 437b8f127, before v0.68.0 is tagged (`almide --version`: `almide 0.68.0 (dev, 437b8f127)`), measured 2026-10-20; CI rebuilds it on every push and fails if the bytes move without a restamp of `docs/benchmarks/wasm-size.txt`. The released column is the compiler from the v0.68.0-rc2 release asset (`almide 0.68.0 (release, fcba2bcd5)`, `gh release download v0.68.0-rc2 -R almide/almide`), measured 2026-10-20. No post-hoc optimizer touches the shipped bytes (`--wasm-opt` is opt-in and its output is not the renderer's own module).
 <!-- wasm-size:generated:end -->
 
 Rust on the same wasm target is 37 KB+ for Hello, world even fully size-tuned: 37,541 B with `rustc 1.99.1`, `wasm32-wasip1`, `opt-level="z"`, `lto`, `strip`, `panic="abort"`, `codegen-units=1` (62,405 B with the default release profile), measured 2026-10-20 on GCE c4-standard-8 by the recipe at the bottom of [WASM-OUTPUT.md](../wasm/WASM-OUTPUT.md). The native CLI-shaped benchmark (`research/benchmark/perf/native/cli_app.almd`, the build `research/benchmark/perf/native/measure.sh` makes) is 507,960 B stripped on x86_64 Linux (GCE c4-standard-8) and 463,720 B on aarch64 Linux (GCE c4a-standard-8), built 2026-10-20 by the v0.68.0-rc2 release binaries, with no crate dependencies (only the C library — `libc`, `libgcc_s` — is linked). The byte-by-byte dissection: **[docs/wasm/WASM-OUTPUT.md](../wasm/WASM-OUTPUT.md)**.

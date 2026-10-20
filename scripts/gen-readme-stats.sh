@@ -147,14 +147,17 @@ if [ "$MODE" = "--measure" ]; then
     R_VERSION="$("$README_RELEASE_BIN" --version 2>/dev/null | head -1)"
     case "$R_VERSION" in *"(release"*) ;; *) echo "::error::README_RELEASE_BIN is '$R_VERSION', not a release build"; exit 2 ;; esac
     r="$(measure_leg "$README_RELEASE_BIN")"; R_BYTES="${r%% *}"; R_DATE="$(date +%F)"
+    R_TAG="${README_RELEASE_TAG:-}"
   else
     R_VERSION="$(kv release_version 2>/dev/null || true)"; R_BYTES="$(kv release_bytes 2>/dev/null || true)"; R_DATE="$(kv release_date 2>/dev/null || true)"
+    R_TAG="$(kv release_tag 2>/dev/null || true)"
   fi
   cat > "$BASELINE" <<EOF
 # Hello, world wasm size — the SOURCE for docs/benchmarks/README.md's wasm-size block.
 # Regenerate: bash scripts/gen-readme-stats.sh --measure
 #             (README_RELEASE_BIN=<binary from a release asset> also restamps
-#             the released row; without it the released row is carried over)
+#             the released row, README_RELEASE_TAG names its tag when the
+#             version line cannot, e.g. an rc; without it the row is carried over)
 # Checked:    bash scripts/gen-readme-stats.sh --check rebuilds Hello, world and
 #             demands these exact bytes — a changed preamble is re-stamped HERE,
 #             never edited by hand on the page. The bytes are machine-independent:
@@ -172,6 +175,7 @@ release_version  = $R_VERSION
 release_bytes    = $R_BYTES
 release_date     = $R_DATE
 EOF
+  [ -z "$R_TAG" ] || echo "release_tag      = $R_TAG" >> "$BASELINE"
   echo "wasm-size: baseline restamped in $BASELINE (structural $S_BYTES B, $BUILD_DESC)"
 fi
 
@@ -200,9 +204,13 @@ size_build="$(kv build || true)"
 [ -n "$size_build" ] || { echo "::error::$BASELINE has no 'build' line — restamp with: bash scripts/gen-readme-stats.sh --measure"; exit 2; }
 rel_version="$(kv release_version || true)"; rel_bytes="$(kv release_bytes || true)"; rel_date="$(kv release_date || true)"
 if [ -n "$rel_bytes" ]; then
-  rel_num="$(printf '%s' "$rel_version" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
-  rel_head=" released v${rel_num} |"; rel_rule="---:|"; rel_cell=" **$(thousands "$rel_bytes") B** |"
-  rel_line=" The released column is the compiler from the v${rel_num} release asset (\`${rel_version}\`, \`gh release download v${rel_num} -R almide/almide\`), measured ${rel_date}."
+  # The tag the asset came from: release_tag when stamped (a prerelease binary
+  # carries the final's version number, so the number alone would name a
+  # release that may not exist yet), else the number in the version line.
+  rel_tag="$(kv release_tag 2>/dev/null || true)"
+  [ -n "$rel_tag" ] || rel_tag="v$(printf '%s' "$rel_version" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+  rel_head=" released ${rel_tag} |"; rel_rule="---:|"; rel_cell=" **$(thousands "$rel_bytes") B** |"
+  rel_line=" The released column is the compiler from the ${rel_tag} release asset (\`${rel_version}\`, \`gh release download ${rel_tag} -R almide/almide\`), measured ${rel_date}."
 else
   rel_head=""; rel_rule=""; rel_cell=""; rel_line=""
 fi
