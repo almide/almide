@@ -2,9 +2,8 @@
 // A 3-point stencil times a half-index gather, summed. Every index is in range
 // by construction (1 <= i <= n-2 with n = list.len(xs)), which the checker
 // could know from the range and the list's length; the Rust it emits today
-// still checks each access.
+// still writes a bounds check at each access (LLVM removes them all; see README E1).
 // Usage: almide run idxloop.almd -- <n> <reps>
-
 import env
 import int
 
@@ -18,11 +17,13 @@ fn smooth_dot(xs: List[Float], r: Int) -> Float = {
   acc
 }
 
-fn arg(args: List[String], k: Int, d: Int) -> Int =
-  match list.get(args, k) {
-    some(s) => match int.parse(s) { ok(v) => v, err(_) => d },
-    none => d,
-  }
+fn arg(args: List[String], k: Int, d: Int) -> Int = match list.get(args, k) {
+  some(s) => match int.parse(s) {
+    ok(v) => v,
+    err(_) => d,
+  },
+  none => d,
+}
 
 effect fn main() -> Unit = {
   let args = env.args()
