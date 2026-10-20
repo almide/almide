@@ -56,7 +56,11 @@ REPO="almide/almide"
 VERDICT_JOB="Night verdict"
 LEGACY_JOB="Generative differential fuzz"
 
-runs=$(gh api "repos/$REPO/actions/workflows/fuzz-nightly.yml/runs?per_page=60" \
+# Completed runs only: a night still running has no verdict yet, and scoring
+# its unfinished verdict job as a failure would reset the streak every time
+# the meter happens to run while the fuzz night is in progress (the scheduler
+# starts both hours late, so the two overlap).
+runs=$(gh api "repos/$REPO/actions/workflows/fuzz-nightly.yml/runs?per_page=60&status=completed" \
   --jq '.workflow_runs[] | [.id, (.conclusion // .status // "unknown"), .created_at] | @tsv')
 
 # One JSON row per run: the verdict-job conclusion qualified by the night's
@@ -120,7 +124,17 @@ EOF
 
 echo "fuzz true-green streak: ${STREAK} consecutive clean day(s) (latest run day: ${LAST_DAY}; streak start: ${FIRST_GREEN}; milestone: 90)"
 
-if [ "${1:-}" = "--update" ]; then
+# The ledger records each CHANGE of the streak, not every reading: the nightly
+# ledger-counts run calls --update, and a row per night of an unchanged 0
+# would only bury the rows that moved. The newest row's value is what
+# proofs/ledger-counts.toml stamps (scripts/lib/ledger-counts.sh).
+last_recorded=""
+if [ -f "$LEDGER" ]; then
+    last_recorded=$(grep -E '^\| [0-9]{4}-' "$LEDGER" | tail -1 | awk -F'|' '{gsub(/ /,"",$3); print $3}')
+fi
+if [ "${1:-}" = "--update" ] && [ "$last_recorded" = "$STREAK" ]; then
+    echo "ledger unchanged: the last recorded streak is already ${STREAK}"
+elif [ "${1:-}" = "--update" ]; then
     mkdir -p "$LEDGER_DIR"
     TODAY=$(date -u +%Y-%m-%d)
     {
@@ -135,7 +149,9 @@ if [ "${1:-}" = "--update" ]; then
         echo "failure breaks the streak; a day without a run neither grows nor resets it."
         echo "First milestone: **90 consecutive clean days**."
         echo
-        echo "Meter: \`scripts/fuzz-green-streak.sh\` (append a dated row with \`--update\`)."
+        echo "Meter: \`scripts/fuzz-green-streak.sh\`. The nightly ledger-counts run calls it with"
+        echo "\`--update\`, which appends a dated row whenever the streak differs from the last"
+        echo "row, and the refresh it opens carries the row with the restamped counts."
         echo
         echo "| measured (UTC) | streak (days) | streak start | latest run day |"
         echo "|---|---|---|---|"
