@@ -1825,6 +1825,15 @@ jobs:
       - name: Setup
         run: chmod +x /tmp/almide-bin/almide
 
+      # #3873: two rows (jsonround native/wasm, wordfreq-wasm-idiom) went red
+      # on one runner draw and passed on the re-run of the same commit, with
+      # the runner image identical. Name the CPU each run measured on, so a
+      # red row can be read against the machine that produced it.
+      - name: Runner CPU (#3873)
+        run: |
+          lscpu | grep -E '^(Model name|CPU\(s\)|Thread\(s\) per core|L3 cache):'
+          grep -o -w -E 'avx512f|avx2|sha_ni|vaes' /proc/cpuinfo | sort -u | tr '\n' ' '; echo
+
       # The idiom relation gates on callgrind instruction counts (wall time
       # is machine-state bimodal on this runner class — see the IDIOM_CEILING
       # comment in scripts/check-perf-ratio.sh).
