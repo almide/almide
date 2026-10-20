@@ -27,11 +27,14 @@ Almide compiles to Rust, which then compiles to native machine code. No runtime,
 ### Runtime scoreboard
 
 Benchmarks-Game-style programs, Almide `--release` vs handwritten Rust compiled
-with the same flags (opt-level=3, LTO, 1 CGU), median of 5 interleaved runs,
-byte-identical stdout verified across every variant before timing. Measured
-2026-10-20 with the v0.68.0-rc2 release binaries (`almide 0.68.0 (release,
-fcba2bcd5)`, rustc 1.99.1 for both sides) on GCE c4-standard-8 (x86, Intel Xeon
-Platinum 8581C, 8 vCPU) and c4a-standard-8 (arm, Neoverse-V2, 8 vCPU). Produced
+with the same flags (opt-level=3, LTO, 1 CGU, and the target CPU and LLVM
+options the native `--release` build adds: `-C target-cpu=x86-64-v3` on x86_64,
+the generic CPU on aarch64, as `almide build --print-release-rustflags` prints
+them), median of 5 interleaved runs, byte-identical stdout verified across
+every variant before timing. Measured 2026-10-20 with the v0.68.0-rc2 release
+binaries (`almide 0.68.0 (release, fcba2bcd5)`, rustc 1.99.1 for both sides) on
+GCE c4-standard-8 (x86, Intel Xeon Platinum 8581C, 8 vCPU) and c4a-standard-8
+(arm, Neoverse-V2, 8 vCPU). Produced
 by [research/benchmark/perf/bench.py](../../research/benchmark/perf/README.md)
 (`--runs 5 --legs native,rust`); raw per-run data:
 [x86](../../research/benchmark/perf/results/2026-10-20-gce-c4-standard-8.json),
@@ -39,12 +42,12 @@ by [research/benchmark/perf/bench.py](../../research/benchmark/perf/README.md)
 
 | Benchmark (workload) | Almide native, x86 / arm | Handwritten Rust, x86 / arm | Ratio, x86 / arm |
 |---|---:|---:|---:|
-| n-body (50M steps) | **2.014s** / **2.767s** | 1.799s / 2.720s same-shape; 1.822s / 3.464s array-based | 1.12× / **1.02×** same-shape; 1.11× / **0.80×** array-based |
-| spectral-norm (n=5500) | **0.967s** / **1.099s** | 1.218s / 1.667s | **0.79×** / **0.66×** |
-| fasta (25M) | **3.187s** / **3.232s** | 2.685s / 2.934s | 1.19× / 1.10× |
-| FFT (2^22) | **0.314s** / **0.352s** | 0.359s / 0.376s | **0.88×** / **0.93×** |
-| wordfreq (8M draws) † | **0.214s** / **0.199s** | 0.296s / 0.335s | **0.72×** / **0.59×** |
-| listbuild prealloc / append / combinator (2^23) | **0.268 / 0.270 / 0.266s** / **0.329 / 0.336 / 0.333s** | 0.333s / 0.353s | **0.80 / 0.81 / 0.80×** / **0.93 / 0.95 / 0.94×** |
+| n-body (50M steps) | **2.040s** / **2.766s** | 2.172s / 2.720s same-shape; 1.812s / 3.470s array-based | **0.94×** / 1.02× same-shape; 1.13× / **0.80×** array-based |
+| spectral-norm (n=5500) | **0.966s** / **1.099s** | 0.969s / 1.107s | **1.00×** / **0.99×** |
+| fasta (25M) | **3.176s** / **3.232s** | 2.748s / 2.934s | 1.16× / 1.10× |
+| FFT (2^22) | **0.309s** / **0.346s** | 0.351s / 0.369s | **0.88×** / **0.94×** |
+| wordfreq (8M draws) † | **0.215s** / **0.198s** | 0.293s / 0.338s | **0.73×** / **0.59×** |
+| listbuild prealloc / append / combinator (2^23) | **0.269 / 0.276 / 0.270s** / **0.333 / 0.340 / 0.338s** | 0.307s / 0.358s | **0.87 / 0.89 / 0.87×** / **0.93 / 0.95 / 0.94×** |
 
 † wordfreq is timed at its ratchet size (`bench.py --quick`, 8M draws): at the
 suite's 2M the Almide row runs in ~0.05 s, under the 0.08 s spawn-noise floor
@@ -53,8 +56,7 @@ the ratchet refuses to judge on. Raw rows:
 [arm](../../research/benchmark/perf/results/2026-10-20-gce-c4a-standard-8-wordfreq-quick.json).
 
 The same-shape n-body reference (`nbody_unrolled.rs`) isolates codegen
-overhead: 2% on arm, 12% on x86 (a second 5-run pass the same day read the
-same 1.13×). The `perf-ratchet` CI job
+overhead: Almide is 2% behind it on arm and 6% ahead on x86. The `perf-ratchet` CI job
 ([scripts/check-perf-ratio.sh](../../scripts/check-perf-ratio.sh)) gates these
 ratios against a committed baseline so they can only move on purpose.
 
@@ -69,7 +71,8 @@ writes for the workload — `rust-ref/binarytrees.rs` and `rust-ref/treealloc.rs
 are a `Box`-linked recursive enum with `make` / `check` by value,
 `rust-ref/fannkuchredux.rs` is the sequential program; one thread, no arena,
 no custom allocator, no `unsafe`, no SIMD — compiled with the same `rustc`
-flags as Almide's emitted Rust (opt-level=3, LTO, 1 CGU). Both sides print
+flags as Almide's emitted Rust (opt-level=3, LTO, 1 CGU, and the release
+target CPU and LLVM options named in the scoreboard above). Both sides print
 byte-identical stdout (verified before timing), every number is the median of
 9 interleaved runs after a warmup, and each row is measured at two input sizes
 so a win that exists at one size only would show. The ablation column is the
@@ -84,18 +87,18 @@ release binaries (rustc 1.99.1) on GCE c4-standard-8 (x86) and c4a-standard-8
 
 | Workload | size | machine | Almide native | ordinary Rust | **ratio** | Almide, optimization off | ratio, off |
 |---|---:|---|---:|---:|---:|---:|---:|
-| binarytrees | d17 | x86 | **117 ms** | 409 ms | **0.29×** | 382 ms | 0.93× |
-| binarytrees | d19 | x86 | **537 ms** | 1979 ms | **0.27×** | 1785 ms | 0.90× |
-| binarytrees | d17 | arm | **150 ms** | 451 ms | **0.33×** | 471 ms | 1.04× |
-| binarytrees | d19 | arm | **681 ms** | 2165 ms | **0.31×** | 2214 ms | 1.02× |
-| treealloc | d20 | x86 | **161 ms** | 643 ms | **0.25×** | 570 ms | 0.89× |
-| treealloc | d21 | x86 | **343 ms** | 1539 ms | **0.22×** | 1278 ms | 0.83× |
-| treealloc | d20 | arm | **141 ms** | 505 ms | **0.28×** | 515 ms | 1.02× |
-| treealloc | d21 | arm | **280 ms** | 989 ms | **0.28×** | 1013 ms | 1.02× |
-| fannkuchredux | n10 | x86 | **46 ms** | 190 ms | **0.24×** | 182 ms | 0.96× |
-| fannkuchredux | n11 | x86 | **499 ms** | 2200 ms | **0.23×** | 2067 ms | 0.94× |
-| fannkuchredux | n10 | arm | **35 ms** | 169 ms | **0.21×** | 172 ms | 1.01× |
-| fannkuchredux | n11 | arm | **376 ms** | 2035 ms | **0.18×** | 2075 ms | 1.02× |
+| binarytrees | d17 | x86 | **118 ms** | 417 ms | **0.28×** | 382 ms | 0.92× |
+| binarytrees | d19 | x86 | **541 ms** | 2021 ms | **0.27×** | 1800 ms | 0.89× |
+| binarytrees | d17 | arm | **150 ms** | 450 ms | **0.33×** | 471 ms | 1.05× |
+| binarytrees | d19 | arm | **682 ms** | 2108 ms | **0.32×** | 2188 ms | 1.04× |
+| treealloc | d20 | x86 | **170 ms** | 766 ms | **0.22×** | 630 ms | 0.82× |
+| treealloc | d21 | x86 | **371 ms** | 1558 ms | **0.24×** | 1416 ms | 0.91× |
+| treealloc | d20 | arm | **135 ms** | 498 ms | **0.27×** | 499 ms | 1.00× |
+| treealloc | d21 | arm | **279 ms** | 980 ms | **0.28×** | 1007 ms | 1.03× |
+| fannkuchredux | n10 | x86 | **46 ms** | 185 ms | **0.25×** | 182 ms | 0.98× |
+| fannkuchredux | n11 | x86 | **502 ms** | 2182 ms | **0.23×** | 2116 ms | 0.97× |
+| fannkuchredux | n10 | arm | **35 ms** | 168 ms | **0.21×** | 171 ms | 1.01× |
+| fannkuchredux | n11 | arm | **376 ms** | 2034 ms | **0.18×** | 2074 ms | 1.02× |
 
 **Which optimization did it.** binarytrees and treealloc spend their time in
 `check(make(depth))` — a tree whose whole lifetime is one expression. The
@@ -104,11 +107,11 @@ param, a scalar result), so the native leg runs it over `__rgn_` twin fns in a
 thread-local bump arena and rewinds once per tree (the region window, #1991);
 the ordinary Rust pays a `malloc` per node in and a `free` per node out, and
 cannot know it is allowed not to. With the window off, the same Almide source
-reads 1.02–1.04× the reference on arm and 0.83–0.93× on x86 — the emitted
+reads 1.00–1.05× the reference on arm and 0.82–0.92× on x86 — the emitted
 `Box` code is what the reference already is — and the window alone is worth
-3.1–3.7× on both machines. fannkuchredux's `fan { list.map }` over Int
+3.1–3.8× on both machines. fannkuchredux's `fan { list.map }` over Int
 captures is the Send-safe-scalar subset the native leg runs on a thread per
-core (#2044); with `ALMIDE_FAN_SEQUENTIAL=1` it reads 0.94–1.02× the
+core (#2044); with `ALMIDE_FAN_SEQUENTIAL=1` it reads 0.97–1.02× the
 one-thread reference, so the whole win is the parallel map, and it scales with
 the core count. The win holds at both sizes of every row on both machines.
 
@@ -130,8 +133,8 @@ output):
 
 | Workload | size | Almide native, x86 / arm | ordinary Rust (one thread), x86 / arm | ratio, x86 / arm |
 |---|---:|---:|---:|---:|
-| mandelbrot (`fan.map`) | 1000 | 46 ms / 63 ms | 48 ms / 63 ms | 0.97× / 1.00× |
-| mandelbrot (`fan.map`) | 4000 | 738 ms / 985 ms | 757 ms / 985 ms | 0.98× / 1.00× |
+| mandelbrot (`fan.map`) | 1000 | 49 ms / 63 ms | 50 ms / 63 ms | 0.97× / 1.00× |
+| mandelbrot (`fan.map`) | 4000 | 721 ms / 985 ms | 740 ms / 985 ms | 0.98× / 1.00× |
 
 - *Deterministic data parallelism (`fan`)* gives mandelbrot nothing on the
   native leg: its `fan.map` callback returns `Bytes`, whose native repr is an

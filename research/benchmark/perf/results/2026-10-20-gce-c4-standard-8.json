@@ -7,49 +7,67 @@
     "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
     "almide": "almide 0.68.0 (release, fcba2bcd5)",
     "wasmtime": null,
+    "ref_rustc_flags": [
+      "-C",
+      "opt-level=3",
+      "-C",
+      "lto=yes",
+      "-C",
+      "codegen-units=1",
+      "-C",
+      "overflow-checks=no",
+      "--edition",
+      "2021",
+      "-C",
+      "target-cpu=x86-64-v3",
+      "-C",
+      "llvm-args=-force-ordered-reductions=false"
+    ],
+    "ref_flags_from": "almide 0.68.0 (dev, 67a50022c)",
     "runs": 5,
     "quick": false,
     "machine": "GCE c4-standard-8, INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz, 8 vCPU (4 cores x 2 threads), asia-northeast1-b",
-    "binary": "v0.68.0-rc2 release asset almide-linux-x86_64.tar.gz (main fcba2bcd5)"
+    "binary": "v0.68.0-rc2 release asset almide-linux-x86_64.tar.gz (main fcba2bcd5)",
+    "ref_flags_note": "Rust references built with RUSTC_FLAGS plus `almide build --print-release-rustflags` (asked of a build of bench-refresh-0680 67a50022c, whose release-flag rule in src/cli/native_target.rs is unchanged from fcba2bcd5)"
   },
   "results": {
     "nbody": {
       "arg": "50000000",
       "variants": {
         "nbody/native": {
-          "min": 1.9978,
-          "median": 2.0137,
-          "mean": 2.0165,
+          "min": 1.9968,
+          "median": 2.0396,
+          "mean": 2.0258,
           "runs": [
-            1.9978,
-            2.0137,
-            2.0361,
-            2.0341,
-            2.0011
+            2.0479,
+            2.0476,
+            1.9968,
+            1.997,
+            2.0396
           ]
         },
         "nbody/rust:nbody": {
-          "min": 1.7894,
-          "median": 1.8217,
-          "mean": 1.8125,
+          "min": 1.7864,
+          "median": 1.8119,
+          "mean": 1.8117,
           "runs": [
-            1.8276,
-            1.8217,
-            1.791,
-            1.833,
-            1.7894
+            1.8332,
+            1.8372,
+            1.7864,
+            1.7897,
+            1.8119
           ]
         },
         "nbody/rust:nbody_unrolled": {
-          "min": 1.7627,
-          "median": 1.7991,
-          "mean": 1.7946,
+          "min": 2.1368,
+          "median": 2.1721,
+          "mean": 2.1706,
           "runs": [
-            1.8138,
-            1.7991,
-            1.7951,
-            1.8022,
-            1.7627
+            2.1914,
+            2.1721,
+            2.1368,
+            2.1832,
+            2.1698
           ]
         }
       }
@@ -58,27 +76,27 @@
       "arg": "5500",
       "variants": {
         "spectralnorm/native": {
-          "min": 0.9511,
-          "median": 0.9665,
-          "mean": 0.9619,
+          "min": 0.9648,
+          "median": 0.9657,
+          "mean": 0.9656,
           "runs": [
-            0.9511,
-            0.9556,
-            0.9673,
-            0.9689,
-            0.9665
+            0.9651,
+            0.9657,
+            0.9661,
+            0.9662,
+            0.9648
           ]
         },
         "spectralnorm/rust:spectralnorm": {
-          "min": 1.1918,
-          "median": 1.2181,
-          "mean": 1.213,
+          "min": 0.9575,
+          "median": 0.9688,
+          "mean": 0.9656,
           "runs": [
-            1.1918,
-            1.2179,
-            1.2186,
-            1.2181,
-            1.2186
+            0.9688,
+            0.9706,
+            0.9575,
+            0.9695,
+            0.9614
           ]
         }
       }
@@ -87,27 +105,27 @@
       "arg": "25000000",
       "variants": {
         "fasta/native": {
-          "min": 3.174,
-          "median": 3.187,
-          "mean": 3.1872,
+          "min": 3.1733,
+          "median": 3.1762,
+          "mean": 3.1786,
           "runs": [
-            3.174,
-            3.1764,
-            3.2048,
-            3.1938,
-            3.187
+            3.1893,
+            3.1762,
+            3.1738,
+            3.1804,
+            3.1733
           ]
         },
         "fasta/rust:fasta": {
-          "min": 2.6836,
-          "median": 2.6847,
-          "mean": 2.6877,
+          "min": 2.7469,
+          "median": 2.7478,
+          "mean": 2.7499,
           "runs": [
-            2.6947,
-            2.6914,
-            2.6836,
-            2.6842,
-            2.6847
+            2.7471,
+            2.748,
+            2.7597,
+            2.7478,
+            2.7469
           ]
         }
       }
@@ -116,27 +134,27 @@
       "arg": "22",
       "variants": {
         "fft/native": {
-          "min": 0.3028,
-          "median": 0.3139,
-          "mean": 0.3117,
+          "min": 0.3048,
+          "median": 0.3093,
+          "mean": 0.3098,
           "runs": [
-            0.3028,
-            0.3067,
-            0.318,
-            0.3139,
-            0.3172
+            0.308,
+            0.3093,
+            0.3115,
+            0.3048,
+            0.3156
           ]
         },
         "fft/rust:fft": {
-          "min": 0.3477,
-          "median": 0.3585,
-          "mean": 0.3595,
+          "min": 0.3439,
+          "median": 0.3507,
+          "mean": 0.354,
           "runs": [
-            0.3616,
-            0.3585,
-            0.3477,
-            0.3502,
-            0.3792
+            0.3488,
+            0.3692,
+            0.3572,
+            0.3439,
+            0.3507
           ]
         }
       }
@@ -145,27 +163,27 @@
       "arg": "23",
       "variants": {
         "listbuild/native": {
-          "min": 0.2662,
-          "median": 0.2679,
-          "mean": 0.2677,
+          "min": 0.2679,
+          "median": 0.2687,
+          "mean": 0.2693,
           "runs": [
-            0.2681,
-            0.2685,
+            0.2716,
+            0.2687,
             0.2679,
-            0.2679,
-            0.2662
+            0.2687,
+            0.2695
           ]
         },
         "listbuild/rust:listbuild": {
-          "min": 0.332,
-          "median": 0.3328,
-          "mean": 0.333,
+          "min": 0.3038,
+          "median": 0.3074,
+          "mean": 0.3078,
           "runs": [
-            0.3341,
-            0.332,
-            0.3322,
-            0.3328,
-            0.3339
+            0.3074,
+            0.3119,
+            0.3038,
+            0.3099,
+            0.3063
           ]
         }
       }
@@ -174,27 +192,27 @@
       "arg": "23",
       "variants": {
         "listbuild-append/native": {
-          "min": 0.2692,
-          "median": 0.2703,
-          "mean": 0.2704,
+          "min": 0.2723,
+          "median": 0.2761,
+          "mean": 0.2754,
           "runs": [
-            0.2703,
-            0.2717,
-            0.2692,
-            0.2709,
-            0.2698
+            0.2761,
+            0.2734,
+            0.2782,
+            0.2723,
+            0.2772
           ]
         },
         "listbuild-append/rust:listbuild": {
-          "min": 0.3302,
-          "median": 0.3317,
-          "mean": 0.3325,
+          "min": 0.3071,
+          "median": 0.3089,
+          "mean": 0.3087,
           "runs": [
-            0.3358,
-            0.3313,
-            0.3317,
-            0.3302,
-            0.3336
+            0.3089,
+            0.3102,
+            0.3071,
+            0.3074,
+            0.3101
           ]
         }
       }
@@ -203,27 +221,27 @@
       "arg": "23",
       "variants": {
         "listbuild-comb/native": {
-          "min": 0.264,
-          "median": 0.2658,
-          "mean": 0.266,
+          "min": 0.2693,
+          "median": 0.27,
+          "mean": 0.2702,
           "runs": [
-            0.2647,
-            0.2669,
-            0.264,
-            0.2686,
-            0.2658
+            0.2693,
+            0.2715,
+            0.2696,
+            0.27,
+            0.2706
           ]
         },
         "listbuild-comb/rust:listbuild": {
-          "min": 0.3306,
-          "median": 0.3314,
-          "mean": 0.3327,
+          "min": 0.3065,
+          "median": 0.3104,
+          "mean": 0.3098,
           "runs": [
-            0.3306,
-            0.3313,
-            0.3314,
-            0.3347,
-            0.3352
+            0.3104,
+            0.3123,
+            0.3104,
+            0.3065,
+            0.3092
           ]
         }
       }
@@ -233,26 +251,26 @@
       "variants": {
         "wordfreq/native": {
           "min": 0.0562,
-          "median": 0.0563,
-          "mean": 0.0564,
+          "median": 0.0566,
+          "mean": 0.0566,
           "runs": [
+            0.0569,
+            0.0567,
             0.0565,
             0.0562,
-            0.0563,
-            0.0565,
-            0.0563
+            0.0566
           ]
         },
         "wordfreq/rust:wordfreq": {
-          "min": 0.0759,
-          "median": 0.0763,
-          "mean": 0.0765,
+          "min": 0.0758,
+          "median": 0.0761,
+          "mean": 0.0761,
           "runs": [
-            0.0772,
-            0.0762,
-            0.0759,
-            0.0763,
-            0.0767
+            0.0761,
+            0.076,
+            0.0766,
+            0.0758,
+            0.0761
           ]
         }
       }

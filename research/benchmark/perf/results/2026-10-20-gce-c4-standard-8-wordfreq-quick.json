@@ -1,43 +1,61 @@
 {
   "meta": {
     "date": "2026-10-20",
-    "label": "wf",
+    "label": "gce-c4-standard-8",
     "host": "Linux-7.0.0-1014-gcp-x86_64-with-glibc2.39",
     "cpu": "x86_64",
     "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
     "almide": "almide 0.68.0 (release, fcba2bcd5)",
     "wasmtime": null,
+    "ref_rustc_flags": [
+      "-C",
+      "opt-level=3",
+      "-C",
+      "lto=yes",
+      "-C",
+      "codegen-units=1",
+      "-C",
+      "overflow-checks=no",
+      "--edition",
+      "2021",
+      "-C",
+      "target-cpu=x86-64-v3",
+      "-C",
+      "llvm-args=-force-ordered-reductions=false"
+    ],
+    "ref_flags_from": "almide 0.68.0 (dev, 67a50022c)",
     "runs": 5,
     "quick": true,
     "machine": "GCE c4-standard-8, INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz, 8 vCPU (4 cores x 2 threads), asia-northeast1-b",
-    "binary": "v0.68.0-rc2 release asset almide-linux-x86_64.tar.gz (main fcba2bcd5)"
+    "binary": "v0.68.0-rc2 release asset almide-linux-x86_64.tar.gz (main fcba2bcd5)",
+    "ref_flags_note": "Rust references built with RUSTC_FLAGS plus `almide build --print-release-rustflags` (asked of a build of bench-refresh-0680 67a50022c, whose release-flag rule in src/cli/native_target.rs is unchanged from fcba2bcd5)"
   },
   "results": {
     "wordfreq": {
       "arg": "8000000",
       "variants": {
         "wordfreq/native": {
-          "min": 0.2137,
-          "median": 0.2142,
-          "mean": 0.2148,
+          "min": 0.2133,
+          "median": 0.2146,
+          "mean": 0.2146,
           "runs": [
-            0.2156,
-            0.2141,
-            0.2137,
-            0.2142,
-            0.2163
+            0.2146,
+            0.2144,
+            0.2155,
+            0.2152,
+            0.2133
           ]
         },
         "wordfreq/rust:wordfreq": {
-          "min": 0.2941,
-          "median": 0.2959,
-          "mean": 0.2973,
+          "min": 0.2898,
+          "median": 0.2931,
+          "mean": 0.3023,
           "runs": [
-            0.2959,
-            0.3006,
-            0.3012,
-            0.2941,
-            0.2949
+            0.3422,
+            0.2925,
+            0.2931,
+            0.2937,
+            0.2898
           ]
         }
       }

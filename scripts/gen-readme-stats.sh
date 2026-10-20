@@ -266,7 +266,7 @@ vic_body=$(mktemp -t readme-vic.XXXXXX)
   done
   echo
   printf '%s\n' \
-    'Measured '"${vic_date}"' with '"${vic_binary}"' (`'"${vic_version}"'`, '"${vic_rustc}"' for the reference) on x86 = '"${vic_x86}"' and arm = '"${vic_arm}"'. Two ratios per cell are the two input sizes (the size is in each cell); the Rust side is the ordinary program a person writes for it — a `Box` per node, one thread, no arena, no `unsafe`, no SIMD — compiled with the same `rustc` flags, and the "without it" column is the same Almide source with that one optimization turned off, at the larger size. The `perf-ratchet` job fails if a row reaches 1.0 or the ablation stops paying. Declaration and methodology: [docs/project/BENCHMARKS.md]('"${ROOT_LINK}"'/docs/project/BENCHMARKS.md#faster-than-ordinary-rust-1330). Ledger: `docs/benchmarks/native-victory.txt`.'
+    'Measured '"${vic_date}"' with '"${vic_binary}"' (`'"${vic_version}"'`) on x86 = '"${vic_x86}"' and arm = '"${vic_arm}"'; the reference: '"${vic_rustc}"'. Two ratios per cell are the two input sizes (the size is in each cell); the Rust side is the ordinary program a person writes for it — a `Box` per node, one thread, no arena, no `unsafe`, no SIMD — compiled with the same `rustc` flags as the Almide side, and the "without it" column is the same Almide source with that one optimization turned off, at the larger size. The `perf-ratchet` job fails if a row reaches 1.0 or the ablation stops paying. Declaration and methodology: [docs/project/BENCHMARKS.md]('"${ROOT_LINK}"'/docs/project/BENCHMARKS.md#faster-than-ordinary-rust-1330). Ledger: `docs/benchmarks/native-victory.txt`.'
 } > "$vic_body"
 
 splice() { # $1 start marker, $2 end marker, $3 body file; stdin → stdout
