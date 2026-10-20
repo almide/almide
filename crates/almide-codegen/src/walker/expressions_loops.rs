@@ -78,21 +78,33 @@ fn list_range_bounds(ctx: &RenderContext, e: &IrExpr) -> Option<(String, String)
     (symbol.as_str() == "almide_rt_list_range").then(|| (render_expr(ctx, start), render_expr(ctx, end)))
 }
 
-/// The range literal `a..<b` as its rendered bounds, for a chain that folds
-/// it to a value (#3810): the same list as `list.range(a, b)`, counted the
-/// same way on both legs. Counting is also what lets LLVM see the index stay
-/// in `[a, b)` — a fold over the built `Vec<i64>` reads indices it cannot
-/// bound, so `xs[j]` kept its check in the loop (#3604). A COLLECTING chain
-/// keeps the built head: its result is a list of the same length anyway, a
-/// span no machine can hold stays the C-197 out-of-memory abort rather than
-/// `collect`'s capacity-overflow panic, and the outer `list.map(0..<n, …)`
-/// of spectralnorm's enumerate spelling measured 15% slower counted on
-/// aarch64 (LLVM re-associated the inner `eval_a` around the known `i`). An
-/// inclusive `a...b` keeps the built list, as the wasm leg does.
-fn range_literal_fold_bounds(ctx: &RenderContext, e: &IrExpr, collector: &IterCollector) -> Option<(String, String)> {
-    if matches!(collector, IterCollector::Collect) {
+/// The range literal `a..<b` as its rendered bounds, for a chain that iterates
+/// it once (#3810, #3604): the same list as `list.range(a, b)`, counted the
+/// same way on both legs. Counting is what lets LLVM see the index stay in
+/// `[a, b)` — a walk over the built `Vec<i64>` reads indices it cannot bound,
+/// so `xs[j]` kept its check in the loop. A fold-shaped collector counts
+/// whatever the steps; a COLLECTING chain counts when its steps keep the
+/// length ([`steps_keep_length`]), because then the span IS the result's
+/// length and [`render_iter_chain`] reserves it up front with the same C-197
+/// out-of-memory abort the built head had. A collecting chain that filters,
+/// flattens or takes keeps the built head: it has no span to reserve, and
+/// growing past what the machine holds must still be C-197's abort rather
+/// than the allocator's. An inclusive `a...b` keeps the built list, as the
+/// wasm leg does. Counting the collecting head makes `list.map(0..<n, f)` the
+/// same machine loop as `list.map(list.range(0, n), f)` and the imperative
+/// `for i in 0..<n`; under LLVM's generic aarch64 tuning that loop is ~12%
+/// slower than the one a built head happened to get, for every spelling
+/// alike (research/benchmark/perf/spectralnorm/README.md).
+fn range_literal_counted_bounds(ctx: &RenderContext, e: &IrExpr, steps: &[IterStep], collector: &IterCollector) -> Option<(String, String)> {
+    if matches!(collector, IterCollector::Collect) && !steps_keep_length(steps) {
         return None;
     }
     let IrExprKind::Range { start, end, inclusive: false } = &e.kind else { return None };
     Some((render_expr(ctx, start), render_expr(ctx, end)))
+}
+
+/// Every step yields exactly one element per element it reads (`map`,
+/// `enumerate`), so a chain over a counted range collects exactly the span.
+fn steps_keep_length(steps: &[IterStep]) -> bool {
+    steps.iter().all(|s| matches!(s, IterStep::Map { .. } | IterStep::Enumerate))
 }

@@ -8,8 +8,10 @@
 //! vector per run; the spelling `CHEATSHEET.md` names explicitly measured
 //! 1.68x the imperative form it tells writers to avoid.
 //!
-//! It now renders `(v).iter().cloned().enumerate().map(…)` — the same pairs in
-//! the same order, from a borrow, with nothing in between (measured 1.01x).
+//! It now renders `(0i64..i64::MAX).zip((v).iter().cloned())` — the same pairs
+//! in the same order, from a borrow, with nothing in between (measured 1.01x;
+//! the index is a counted `i64` rather than `.enumerate()`'s `usize` cast
+//! since #3604, see tests/counted_index_chain_test.rs).
 //! The clone is dropped because fusing the consuming runtime call away removes
 //! the only consumer it was inserted for; a callback that MUTATES the source
 //! keeps it, because that is the one way the borrow could observe a change the
@@ -45,7 +47,7 @@ fn a_captured_enumerate_source_streams_from_a_borrow() {
     // in its own `Vec` helpers, so read the emitted function, not the file.
     let body = emitted_fn(&rust, "rows");
     assert!(
-        body.contains(".iter().cloned().enumerate()"),
+        body.contains("(0i64..i64::MAX).zip((v).iter().cloned())"),
         "the source is still consumed rather than borrowed:\n{body}"
     );
     assert!(
@@ -88,7 +90,7 @@ fn a_callback_that_writes_to_the_source_keeps_its_snapshot() {
     let dir = tempfile::tempdir().expect("tempdir");
     let body = emitted_fn(&emit_rust(dir.path(), MUTATED), "__almide_main");
     assert!(
-        body.contains("(xs.get()).iter().cloned().enumerate()"),
+        body.contains("(0i64..i64::MAX).zip((xs.get()).iter().cloned())"),
         "the chain no longer reads the cell's snapshot:\n{body}"
     );
     assert!(

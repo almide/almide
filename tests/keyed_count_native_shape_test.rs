@@ -142,7 +142,11 @@ fn a_range_walked_once_is_not_built() {
     assert!(body.contains("for i in 0i64..10i64 {"), "the `for` head builds its range:\n{body}");
     let body_rust = emit("range_chain.almd", &grouped(10));
     let body = main_body(&body_rust);
-    assert!(body.contains("(0i64..10i64).map("), "the chain source builds its range:\n{body}");
+    // A collecting chain counts into one vector reserved for the span (#3604).
+    assert!(
+        body.contains("let __almide_re: i64 = 10i64;") && body.contains("(__almide_rs..__almide_re).map("),
+        "the chain source builds its range:\n{body}"
+    );
     assert!(!body.contains("almide_rt_list_range("), "a range is still materialized:\n{body}");
 }
 
