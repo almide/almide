@@ -14,13 +14,15 @@ fn render_iter_chain(ctx: &RenderContext, source: &IrExpr, consume: bool, steps:
     // range itself instead of building the `Vec<i64>` to walk it once. A
     // borrowing chain (`&i64` binders) keeps the list it reads from.
     let counted = (!by_ref)
-        .then(|| list_range_bounds(ctx, source).or_else(|| range_literal_counted_bounds(ctx, source, steps, collector)))
+        .then(|| list_range_bounds(ctx, source).or_else(|| range_literal_fold_bounds(ctx, source, collector)))
         .flatten();
-    // #3604: a collecting chain over a counted span whose steps keep the
-    // length fills ONE vector reserved for the span — the reservation the
-    // built head made, with the same C-197 out-of-memory abort, where
-    // `collect` would have panicked on a span it cannot size. The bounds are
-    // bound once so the reservation and the range read the same values.
+    // A collecting chain over a counted span whose steps keep the length
+    // (`list.range(a, b) |> list.map(f)`) fills ONE vector reserved for the
+    // span: the reservation `almide_rt_list_range` makes, with the same C-197
+    // out-of-memory abort, where `collect` sized the vector from the range
+    // and panicked with `capacity overflow` on a span it cannot hold. The
+    // bounds are bound once so the reservation and the range read the same
+    // values.
     let reserved = counted.is_some() && matches!(collector, IterCollector::Collect) && steps_keep_length(steps);
     let mut chain = if let Some((s, e)) = &counted {
         if reserved { "(__almide_rs..__almide_re)".to_string() } else { format!("({s}..{e})") }
@@ -39,13 +41,10 @@ fn render_iter_chain(ctx: &RenderContext, source: &IrExpr, consume: bool, steps:
             IterStep::FlatMap { lambda } => chain = format!("{}.flat_map({})", chain, render_expr(ctx, lambda)),
             IterStep::FilterMap { lambda } => chain = format!("{}.filter_map({})", chain, render_expr(ctx, lambda)),
             IterStep::Take { n } => chain = format!("{}.take(({}) as usize)", chain, render_expr(ctx, n)),
-            // `(Int, T)` pairs, which is what the `almide_rt_list_enumerate`
-            // twin returns — same pairs, same order, no `Vec<(i64, T)>` in
-            // between (#2098). The index is a counted `i64` from 0 (#3604),
-            // not `.enumerate()`'s `usize` cast to `i64`, which LLVM cannot
-            // bound: a zip with `0..i64::MAX` is a counter that provably
-            // starts at 0 and stays below its bound (no list reaches it).
-            IterStep::Enumerate => chain = format!("(0i64..i64::MAX).zip({})", chain),
+            // `(usize, T)` re-indexed to Almide's `Int`, which is what the
+            // `almide_rt_list_enumerate` twin returns — same pairs, same
+            // order, no `Vec<(i64, T)>` in between (#2098).
+            IterStep::Enumerate => chain = format!("{}.enumerate().map(|(__ei, __ex)| (__ei as i64, __ex))", chain),
         }
     }
     if let (true, Some((s, e))) = (reserved, &counted) {
@@ -60,6 +59,12 @@ fn render_iter_chain(ctx: &RenderContext, source: &IrExpr, consume: bool, steps:
 
 /// The terminal call of a rendered chain (the `collector` half of
 /// [`render_iter_chain`]).
+/// Every step yields exactly one element per element it reads (`map`,
+/// `enumerate`), so a chain over a counted span collects exactly the span.
+fn steps_keep_length(steps: &[IterStep]) -> bool {
+    steps.iter().all(|s| matches!(s, IterStep::Map { .. } | IterStep::Enumerate))
+}
+
 fn render_iter_collector(ctx: &RenderContext, chain: &str, collector: &IterCollector) -> String {
     match collector {
         IterCollector::Collect => format!("{}.collect::<Vec<_>>()", chain),

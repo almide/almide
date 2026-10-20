@@ -81,7 +81,7 @@ fn an_enumerate_source_over_copy_elements_is_borrowed() {
     let rust = emit(SINK);
     let row = emitted_fn(&rust, "row_enum");
     assert!(row.contains("v: &[f64]"), "the enumerate source param is owned:\n{row}");
-    assert!(row.contains("(0i64..i64::MAX).zip((v).iter().cloned())"), "{row}");
+    assert!(row.contains(".iter().cloned().enumerate()"), "{row}");
     let rows = emitted_fn(&rust, "rows");
     assert!(!rows.contains("to_vec()") && !rows.contains(".clone()"), "a caller still copies the list:\n{rows}");
 }
