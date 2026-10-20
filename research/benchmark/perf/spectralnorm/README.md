@@ -30,7 +30,8 @@ indexing, explicit borrowing or cloning, with no escaping nested closure.
 Scalar enumerate/fold on the wasm leg snapshots the source into a scalar list
 and reuses one private tuple slot when the callback cannot expose that tuple.
 On the native leg `list.enumerate` in SOURCE position is now a chain adapter
-(`.iter().cloned().enumerate()`) rather than a `Vec<(Int, T)>` the next stage
+(`(0i64..i64::MAX).zip(xs.iter().cloned())` since #3604; before that
+`.iter().cloned().enumerate()`) rather than a `Vec<(Int, T)>` the next stage
 walks and drops; the clone that fed the consumed runtime call goes with it.
 
 `--release` builds with opt-level 3 and LTO; without it `almide build` uses the
@@ -133,6 +134,49 @@ enumerate with the outer head counted: a `mul` + `sub` pair where the
 other build has one `madd`). Counting the outer head too measured 53.45 ms for
 indexed but 62.0 ms for enumerate, and would change a collecting chain's
 failure form, so it is not taken.
+
+Counted heads everywhere, 2026-10-20 (#3604 direction 1). The outer head is
+now counted after all, and the enumerate index with it, so all three idiom
+spellings compile to the loop the imperative one gets:
+
+- `list.map(0..<n, f)` (and any range chain that collects after length-keeping
+  steps) fills one vector reserved for the span: `try_reserve_exact` with the
+  C-197 abort, so the failure form stays the built head's. No `Vec<i64>`.
+- `list.enumerate(xs)` as a chain source zips its index from `0i64..i64::MAX`
+  instead of casting `.enumerate()`'s `usize`, so the index is a counter LLVM
+  knows starts at 0.
+- The family (which chain shapes are covered, which are not) is the header of
+  `tests/counted_index_chain_test.rs`.
+
+Apple M4 Pro (aarch64-apple-darwin, the host's default `apple-m1` tuning),
+`--release`, n=5500, 11 round-robin samples, median ms, every artifact printing
+`1.274224153`. "range" is `list.map(list.range(0, n), (i) => list.fold(list.range(0, n), …))`,
+whose head was already counted:
+
+| Profile | Imperative | Indexed fold | Enumerate fold | Range fold |
+| --- | ---: | ---: | ---: | ---: |
+| release before | 727.8 | 694.1 (0.95x) | 710.6 (0.98x) | 712.0 (0.98x) |
+| release after | 730.7 | 709.6 (0.97x) | 707.7 (0.97x) | 714.9 (0.98x) |
+| default before | 749.1 | 786.1 (1.05x) | 725.7 (0.97x) | 747.0 (1.00x) |
+| default after | 748.3 | 751.2 (1.00x) | 709.6 (0.95x) | 747.7 (1.00x) |
+
+The trade is visible under LLVM's GENERIC aarch64 tuning, which is what a
+Linux aarch64 `--release` build gets. The same emitted Rust built with rustc
+`-C opt-level=3 -C codegen-units=1 -C panic=abort -C target-cpu=generic
+-C llvm-args=-force-ordered-reductions=false` and run on the M4 (n=3000, 9
+samples, ms): imperative 238.3; enumerate 189.0 before → 234.5 after; indexed
+210.4 before → 237.8 after. Taking the two enumerate changes one at a time:
+the zipped index alone is 188.9 (neutral), and the counted outer head alone is
+215.2. A Rust microbenchmark of the outer loop alone (built `Vec<i64>` vs
+`extend`, `push` or `collect` over `0..n`) reads 205 vs 228 ms under generic
+tuning and 207–212 ms for all four under `apple-m1`. So a built outer head was
+~12% FASTER than a counted one under generic tuning. The reason is that LLVM
+schedules the inner loop differently when the outer index's range is unknown
+(a `mul` of the strength-reduced `ij`, against a `madd` of `i + j` when it is
+known), not that counting costs anything. After this change every spelling
+runs at the imperative's speed under every tuning measured. What remains is
+the imperative loop itself under generic tuning, which is the target-cpu
+question this issue leaves open (no default is chosen here; see #3727→#3734).
 
 Earlier readings kept for the record: before the wasm scalar enumerate/fold
 lowering, wasm enumerate measured 365.81 ms (3.21x); after it, 129.72 ms
