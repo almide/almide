@@ -1,0 +1,399 @@
+{
+  "meta": {
+    "date": "2026-10-20",
+    "host": "Linux-7.0.0-1014-gcp-x86_64-with-glibc2.39",
+    "cpu": "INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz",
+    "almide": "almide 0.68.0 (release, fcba2bcd5)",
+    "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+    "runs": 9,
+    "method": "interleaved median after one warmup; ratio = median / rust median; ablation = same source built and run with the knob=1",
+    "machine": "GCE c4-standard-8, INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz, 8 vCPU (4 cores x 2 threads), asia-northeast1-b",
+    "binary": "v0.68.0-rc2 release asset almide-linux-x86_64.tar.gz (main fcba2bcd5)"
+  },
+  "results": {
+    "binarytrees": {
+      "17": {
+        "native": {
+          "median_ms": 117.3,
+          "ratio": 0.286,
+          "runs_ms": [
+            117.3,
+            115.5,
+            117.1,
+            117.8,
+            117.9,
+            117.8,
+            117.0,
+            117.0,
+            117.5
+          ]
+        },
+        "native[ALMIDE_REGION_OFF]": {
+          "median_ms": 382.1,
+          "ratio": 0.933,
+          "runs_ms": [
+            383.7,
+            380.5,
+            384.3,
+            382.1,
+            382.1,
+            384.7,
+            390.0,
+            381.9,
+            381.8
+          ]
+        },
+        "rust:binarytrees": {
+          "median_ms": 409.3,
+          "ratio": 1.0,
+          "runs_ms": [
+            414.8,
+            408.4,
+            405.5,
+            399.3,
+            408.6,
+            411.0,
+            410.9,
+            409.3,
+            415.6
+          ]
+        }
+      },
+      "19": {
+        "native": {
+          "median_ms": 536.6,
+          "ratio": 0.271,
+          "runs_ms": [
+            543.3,
+            535.3,
+            533.0,
+            539.1,
+            536.6,
+            542.2,
+            536.9,
+            534.0,
+            536.4
+          ]
+        },
+        "native[ALMIDE_REGION_OFF]": {
+          "median_ms": 1785.3,
+          "ratio": 0.902,
+          "runs_ms": [
+            1784.7,
+            1779.2,
+            1785.3,
+            1797.7,
+            1770.4,
+            1797.9,
+            1797.8,
+            1782.0,
+            1803.9
+          ]
+        },
+        "rust:binarytrees": {
+          "median_ms": 1979.4,
+          "ratio": 1.0,
+          "runs_ms": [
+            1979.2,
+            1979.4,
+            1997.4,
+            1973.6,
+            2049.7,
+            1968.6,
+            2045.7,
+            1970.4,
+            1981.9
+          ]
+        }
+      }
+    },
+    "treealloc": {
+      "20": {
+        "native": {
+          "median_ms": 160.5,
+          "ratio": 0.249,
+          "runs_ms": [
+            123.7,
+            165.4,
+            185.0,
+            170.5,
+            171.0,
+            160.5,
+            156.7,
+            160.4,
+            121.1
+          ]
+        },
+        "native[ALMIDE_REGION_OFF]": {
+          "median_ms": 570.4,
+          "ratio": 0.887,
+          "runs_ms": [
+            535.8,
+            578.0,
+            721.5,
+            661.5,
+            570.4,
+            566.6,
+            534.5,
+            569.2,
+            614.3
+          ]
+        },
+        "rust:treealloc": {
+          "median_ms": 643.2,
+          "ratio": 1.0,
+          "runs_ms": [
+            636.7,
+            789.0,
+            787.5,
+            804.9,
+            597.8,
+            610.8,
+            699.3,
+            638.4,
+            643.2
+          ]
+        }
+      },
+      "21": {
+        "native": {
+          "median_ms": 343.1,
+          "ratio": 0.223,
+          "runs_ms": [
+            342.7,
+            349.0,
+            343.1,
+            339.3,
+            357.3,
+            325.7,
+            333.8,
+            344.6,
+            358.6
+          ]
+        },
+        "native[ALMIDE_REGION_OFF]": {
+          "median_ms": 1277.6,
+          "ratio": 0.83,
+          "runs_ms": [
+            1277.6,
+            1268.3,
+            1265.4,
+            1246.1,
+            1342.7,
+            1259.9,
+            1288.5,
+            1311.8,
+            1285.5
+          ]
+        },
+        "rust:treealloc": {
+          "median_ms": 1539.0,
+          "ratio": 1.0,
+          "runs_ms": [
+            1566.6,
+            1546.1,
+            1526.9,
+            1521.6,
+            1508.8,
+            1548.4,
+            1514.7,
+            1540.7,
+            1539.0
+          ]
+        }
+      }
+    },
+    "fannkuchredux": {
+      "10": {
+        "native": {
+          "median_ms": 46.0,
+          "ratio": 0.243,
+          "runs_ms": [
+            46.0,
+            50.8,
+            46.2,
+            45.4,
+            46.2,
+            46.0,
+            45.6,
+            46.0,
+            45.9
+          ]
+        },
+        "native[ALMIDE_FAN_SEQUENTIAL]": {
+          "median_ms": 181.7,
+          "ratio": 0.959,
+          "runs_ms": [
+            181.7,
+            182.1,
+            181.9,
+            179.6,
+            182.4,
+            181.7,
+            180.3,
+            182.4,
+            180.0
+          ]
+        },
+        "rust:fannkuchredux": {
+          "median_ms": 189.5,
+          "ratio": 1.0,
+          "runs_ms": [
+            189.1,
+            188.7,
+            192.6,
+            188.9,
+            191.8,
+            188.4,
+            189.5,
+            191.2,
+            189.8
+          ]
+        }
+      },
+      "11": {
+        "native": {
+          "median_ms": 499.4,
+          "ratio": 0.227,
+          "runs_ms": [
+            503.4,
+            500.7,
+            500.7,
+            506.6,
+            499.4,
+            481.3,
+            480.3,
+            480.3,
+            481.9
+          ]
+        },
+        "native[ALMIDE_FAN_SEQUENTIAL]": {
+          "median_ms": 2067.3,
+          "ratio": 0.94,
+          "runs_ms": [
+            2115.4,
+            2118.7,
+            2119.3,
+            2114.7,
+            2066.4,
+            2060.0,
+            2060.8,
+            2060.7,
+            2067.3
+          ]
+        },
+        "rust:fannkuchredux": {
+          "median_ms": 2199.7,
+          "ratio": 1.0,
+          "runs_ms": [
+            2252.2,
+            2251.8,
+            2255.3,
+            2263.3,
+            2199.2,
+            2197.5,
+            2199.7,
+            2198.4,
+            2198.8
+          ]
+        }
+      }
+    },
+    "mandelbrot": {
+      "1000": {
+        "native": {
+          "median_ms": 46.4,
+          "ratio": 0.975,
+          "runs_ms": [
+            46.5,
+            46.5,
+            46.4,
+            46.4,
+            46.5,
+            46.3,
+            46.4,
+            46.4,
+            46.3
+          ]
+        },
+        "native[ALMIDE_FAN_SEQUENTIAL]": {
+          "median_ms": 46.5,
+          "ratio": 0.977,
+          "runs_ms": [
+            46.6,
+            46.5,
+            46.4,
+            46.3,
+            46.4,
+            46.6,
+            46.4,
+            46.7,
+            46.6
+          ]
+        },
+        "rust:mandelbrot": {
+          "median_ms": 47.6,
+          "ratio": 1.0,
+          "runs_ms": [
+            47.7,
+            47.6,
+            47.5,
+            47.6,
+            47.4,
+            47.6,
+            47.7,
+            47.7,
+            47.4
+          ]
+        }
+      },
+      "4000": {
+        "native": {
+          "median_ms": 738.4,
+          "ratio": 0.976,
+          "runs_ms": [
+            720.9,
+            721.7,
+            738.4,
+            738.5,
+            737.9,
+            739.4,
+            738.3,
+            738.8,
+            738.9
+          ]
+        },
+        "native[ALMIDE_FAN_SEQUENTIAL]": {
+          "median_ms": 738.6,
+          "ratio": 0.976,
+          "runs_ms": [
+            720.6,
+            729.6,
+            738.6,
+            738.8,
+            739.0,
+            738.5,
+            738.6,
+            738.5,
+            739.6
+          ]
+        },
+        "rust:mandelbrot": {
+          "median_ms": 756.7,
+          "ratio": 1.0,
+          "runs_ms": [
+            739.3,
+            756.7,
+            757.2,
+            756.5,
+            756.8,
+            756.7,
+            756.3,
+            758.2,
+            756.7
+          ]
+        }
+      }
+    }
+  }
+}

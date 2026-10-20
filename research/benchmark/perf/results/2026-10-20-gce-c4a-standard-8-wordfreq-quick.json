@@ -1,0 +1,46 @@
+{
+  "meta": {
+    "date": "2026-10-20",
+    "label": "wf",
+    "host": "Linux-7.0.0-1014-gcp-aarch64-with-glibc2.39",
+    "cpu": "aarch64",
+    "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+    "almide": "almide 0.68.0 (release, fcba2bcd5)",
+    "wasmtime": null,
+    "runs": 5,
+    "quick": true,
+    "machine": "GCE c4a-standard-8, Neoverse-V2, 8 vCPU, asia-northeast1-b",
+    "binary": "v0.68.0-rc2 release asset almide-linux-aarch64.tar.gz (main fcba2bcd5)"
+  },
+  "results": {
+    "wordfreq": {
+      "arg": "8000000",
+      "variants": {
+        "wordfreq/native": {
+          "min": 0.1977,
+          "median": 0.1985,
+          "mean": 0.1984,
+          "runs": [
+            0.1986,
+            0.1985,
+            0.1987,
+            0.1984,
+            0.1977
+          ]
+        },
+        "wordfreq/rust:wordfreq": {
+          "min": 0.3341,
+          "median": 0.3347,
+          "mean": 0.3349,
+          "runs": [
+            0.3347,
+            0.3344,
+            0.3356,
+            0.3341,
+            0.3358
+          ]
+        }
+      }
+    }
+  }
+}

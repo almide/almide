@@ -1,0 +1,46 @@
+{
+  "meta": {
+    "date": "2026-10-20",
+    "label": "wf",
+    "host": "Linux-7.0.0-1014-gcp-x86_64-with-glibc2.39",
+    "cpu": "x86_64",
+    "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+    "almide": "almide 0.68.0 (release, fcba2bcd5)",
+    "wasmtime": null,
+    "runs": 5,
+    "quick": true,
+    "machine": "GCE c4-standard-8, INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz, 8 vCPU (4 cores x 2 threads), asia-northeast1-b",
+    "binary": "v0.68.0-rc2 release asset almide-linux-x86_64.tar.gz (main fcba2bcd5)"
+  },
+  "results": {
+    "wordfreq": {
+      "arg": "8000000",
+      "variants": {
+        "wordfreq/native": {
+          "min": 0.2137,
+          "median": 0.2142,
+          "mean": 0.2148,
+          "runs": [
+            0.2156,
+            0.2141,
+            0.2137,
+            0.2142,
+            0.2163
+          ]
+        },
+        "wordfreq/rust:wordfreq": {
+          "min": 0.2941,
+          "median": 0.2959,
+          "mean": 0.2973,
+          "runs": [
+            0.2959,
+            0.3006,
+            0.3012,
+            0.2941,
+            0.2949
+          ]
+        }
+      }
+    }
+  }
+}
