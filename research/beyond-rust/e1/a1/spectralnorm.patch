@@ -1,0 +1,24 @@
+--- a0/spectralnorm.rs
++++ a1/spectralnorm.rs
+@@ -13,8 +13,10 @@
+ pub fn multiply_av(v: &[f64], n: i64) -> Vec<f64> {
+     let mut result: Vec<f64> = Vec::<f64>::new();
+     for i in 0i64..n {
++        unsafe { std::hint::assert_unchecked(0i64 <= i && i < n) }; // E1 F1: `for i in 0..<n` counter
+         let mut sum: f64 = 0f64;
+         for j in 0i64..n {
++            unsafe { std::hint::assert_unchecked(0i64 <= j && j < n) }; // E1 F2: `for j in 0..<n` counter
+             sum = (sum + (eval_a(i, j) * almide_index!(v, j)));
+         }
+         result.push(sum);
+@@ -25,8 +27,10 @@
+ pub fn multiply_atv(v: &[f64], n: i64) -> Vec<f64> {
+     let mut result: Vec<f64> = Vec::<f64>::new();
+     for i in 0i64..n {
++        unsafe { std::hint::assert_unchecked(0i64 <= i && i < n) }; // E1 F1: `for i in 0..<n` counter
+         let mut sum: f64 = 0f64;
+         for j in 0i64..n {
++            unsafe { std::hint::assert_unchecked(0i64 <= j && j < n) }; // E1 F2: `for j in 0..<n` counter
+             sum = (sum + (eval_a(j, i) * almide_index!(v, j)));
+         }
+         result.push(sum);

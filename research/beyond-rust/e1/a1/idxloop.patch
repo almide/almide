@@ -1,0 +1,15 @@
+--- a0/idxloop.rs
++++ a1/idxloop.rs
+@@ -9,8 +9,10 @@
+     let n: i64 = almide_rt_list_len(xs);
+     let mut acc: f64 = (r as f64);
+     for i in 1i64..(n).wrapping_sub(1i64) {
+-        let s: f64 = (((almide_index!(xs, (i).wrapping_sub(1i64)) * 0.25f64) + (almide_index!(xs, i) * 0.5f64)) + (almide_index!(xs, (i).wrapping_add(1i64)) * 0.25f64));
+-        acc = (acc + (s * almide_index!(xs, almide_div!(i, 2i64))));
++        unsafe { std::hint::assert_unchecked(1i64 <= i && i < n - 1) }; // E1 F4: counter of `1..<n - 1`, n = list.len(xs)
++        // E1 F5: i-1, i, i+1 in [0, n) = [0, len(xs)) => no bounds check. E1 F6: i >= 0 => `/ 2` is unsigned; i/2 <= i < len(xs).
++        let s: f64 = (((unsafe { *xs.get_unchecked(((i) - 1i64) as usize) } * 0.25f64) + (unsafe { *xs.get_unchecked(i as usize) } * 0.5f64)) + (unsafe { *xs.get_unchecked(((i) + 1i64) as usize) } * 0.25f64));
++        acc = (acc + (s * unsafe { *xs.get_unchecked((i as u64 / 2u64) as usize) }));
+     }
+     acc
+ }
