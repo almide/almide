@@ -111,6 +111,13 @@ pub(crate) enum Commands {
         /// value is a rustc CPU name (`native`, `x86-64-v4`, `neoverse-n1`, ...).
         #[arg(long = "target-cpu")]
         target_cpu: Option<String>,
+        /// Print the rustc codegen flags a native --release build adds to
+        /// the release profile for this target and --target-cpu (the
+        /// `-C target-cpu` and `-C llvm-args` it passes), one line, and exit
+        /// without building. For benchmarks that compile a hand-written Rust
+        /// reference with the same flags.
+        #[arg(long = "print-release-rustflags")]
+        print_release_rustflags: bool,
         /// Use unchecked index access (unsafe, no bounds checking)
         #[arg(long)]
         unchecked_index: bool,
