@@ -10,11 +10,11 @@
 # build is derived from the binary's `almide --version` line (#2384): a develop
 # build is named by its sha and the release it follows, never by the bare
 # version number it carries.
-version          = almide 0.66.0 (dev, 5f39c06ba)
-build            = the develop build at 5f39c06ba, after the v0.66.0 release
-date             = 2026-10-03
+version          = almide 0.68.0 (dev, 437b8f127)
+build            = the develop build at 437b8f127, before v0.68.0 is tagged
+date             = 2026-10-20
 program          = fn main() -> Unit = { println("Hello, world!") }
 structural_bytes = 325
-release_version  = almide 0.66.0 (release, 819bbc74f)
-release_bytes    = 953
-release_date     = 2026-10-03
+release_version  = almide 0.68.0 (release, fcba2bcd5)
+release_bytes    = 325
+release_date     = 2026-10-20
