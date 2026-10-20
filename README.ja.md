@@ -31,7 +31,7 @@
 
 ---
 
-Almide は、AI が書き AI が編集するコードのための静的型付け言語です。主張は「モデルが正しく書く」ことではありません。**モデルが間違えたとき、コンパイラが書いている時点でそれを指摘し、直し方を名指しする。モデルが正しかったとき、Rocq で証明されたチェッカが、そのプログラムがメモリ安全であることを証明する。** `almide verify` がプログラムの所有権・名前・能力の証跡を独立した `almide-verify` に渡します（出荷される wasm のバイト列そのものに対する証明書は、まだ保留中です。#2755–#2760）。ネイティブバイナリ（Rust 経由）と WebAssembly の両方にコンパイルされ、その二つはバイト単位で同一の出力を出します。
+Almide は、AI が書き AI が編集するコードのための静的型付け言語です。主張は「モデルが正しく書く」ことではありません。**モデルが間違えたとき、コンパイラが書いている時点でそれを指摘し、直し方を名指しする。モデルが正しかったとき、`almide verify` がプログラムの所有権・名前・能力の証跡を検査する。** 検査するのは独立した `almide-verify` で、これは Rocq で証明されたチェッカを Rust に書き写したものです。証明されたチェッカと判定が一致することをゲートで確かめていますが、`almide-verify` 自体は証明されていません（[証明済みと信頼の境界](./docs/contracts/proven-vs-trusted.md)）。出荷される wasm のバイト列そのものに対する証明書は、まだ保留中です（#2755–#2760）。ネイティブバイナリ（Rust 経由）と WebAssembly の両方にコンパイルされ、[契約台帳](./docs/contracts/)にある振る舞いについては、その二つはバイト単位で同一の出力を出します。
 
 ## 生き残る編集
 
@@ -86,8 +86,8 @@ almide run hello.almd --target wasm   # 同じバイト列を wasmtime で
 
 ## 機能
 
-- **マルチターゲット** —— 同じソースがネイティブバイナリ（Rust 経由）にも WebAssembly（直接出力、LLVM 不要）にもなり、出力はバイト単位で同一（[契約](./docs/contracts/)）
-- **直し方を名指しする診断** —— どのエラーも位置、文脈、具体的な修正をひとつ持つ（[コード一覧](./docs/diagnostics/)）
+- **マルチターゲット** —— 同じソースがネイティブバイナリ（Rust 経由）にも WebAssembly（直接出力、LLVM 不要）にもなり、契約台帳にある振る舞いについて出力はバイト単位で同一（[契約](./docs/contracts/)）
+- **直し方を名指しする診断** —— どのエラーも位置と文脈を持ち、直し方がわかっているものには具体的な修正がつく（[コード一覧](./docs/diagnostics/)）
 - **明示的な effect** —— `effect fn` と `expr!` による伝播。裸の可謬呼び出しはエラーで、黙って進むことはない（[チートシート](./docs/CHEATSHEET.md)）
 - **型** —— ジェネリクス、レコード、網羅的な `match` つきの variant、双方向型推論、`Codec` の自動導出（[仕様](./docs/SPEC.md)）
 - **注釈のいらないメモリ管理** —— Perceus 式の所有権推論。GC もライフタイムもない（[メモリ安全性](./docs/design/MEMORY-SAFETY.md)）
@@ -104,7 +104,7 @@ almide run hello.almd --target wasm   # 同じバイト列を wasmtime で
 - [何を測っているか](./docs/benchmarks/README.md) —— LLM 可読性、バイト同一性、メモリ安全性、サイズと速度。どれも日付とゲートつき · [ベンチマークの方法](./docs/project/BENCHMARKS.md)
 - [振る舞い契約](./docs/contracts/) —— ネイティブ ⇄ wasm のすべての約束とその証拠 · [証明と信頼の境界](./docs/contracts/proven-vs-trusted.md)
 - [仕組み](./docs/how-it-works.md) —— パイプラインとトラストスパイン · [アーキテクチャ](./docs/ARCHITECTURE.md)
-- [プロジェクトの状態](./docs/status.md) —— 1.0 前。LLM 向けの表面は凍結済み · [ロードマップ](./docs/roadmap/README.md)
+- [プロジェクトの状態](./docs/status.md) —— 1.0 前。LLM 向けの表面は、移行用の診断つきの dialect epoch でのみ変わる（[安定性方針](./docs/STABILITY.md)） · [ロードマップ](./docs/roadmap/README.md)
 - [Almide で書かれたもの](./docs/written-in-almide.md) —— このリポジトリの外のエージェント、パーサ、グラフィックス、ライブラリ · エディタ：[vscode-almide](https://github.com/almide/vscode-almide)、[tree-sitter-almide](https://github.com/almide/tree-sitter-almide)
 
 ## コントリビュート
