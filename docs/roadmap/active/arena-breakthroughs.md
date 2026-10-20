@@ -240,6 +240,13 @@ jsonround = 5 万レコードの stringify→parse→Σ）を Almide・MoonBit�
    `indirect call type mismatch` trap、native は答えを印字 → **#2154（I-divergence、release blocker）**、
    wall と `list.group_by_x` 未 link は **#2155**。
 
+**現況（2026-10-20 追記。上の表と読みは 09-13 時点の記録として残す）**:
+- 読み 1 の wordfreq は解消。native の wordfreq の Rust 比は 0.97（`scripts/perf-ratio-baseline.txt`、#3507 後の再アンカー:
+  GCE c3-standard-8 で 0.98、c4a-standard-8 で 0.92）。jsonround と strchurn の対 Rust、および MoonBit との比較は再計測していない。
+- 読み 3 は解消。同じプログラムの native 時間 ÷ wasm 時間は wordfreq 0.46、wordfreq-group 0.39、jsonround 0.69
+  （GCE c4-standard-8、2026-10-19、`--quick --runs 9`）で、native が wasm より速い。`check-perf-ratio.sh` が 1.0 を天井として
+  毎 CI で見張る（実行機による揺れは #3873）。
+
 **T5/T6 への帰結**: この 3 本を `research/benchmark/perf/` の ratchet 行に（#2142 が名指しする未監視 6 行そのもの）、
 size 梯子（T6）の String / Map / JSON 段はこの 3 本で埋まる。「全軸で圧倒」の native 側の残債は**codegen ではなく
 Map と Value のデータ構造**である。

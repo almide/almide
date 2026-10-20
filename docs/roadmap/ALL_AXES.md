@@ -147,6 +147,12 @@ treealloc 0.31× / 0.30×**（M4 Pro、2 サイズずつ、中央値 9 回イン
 `|>` チェーンの stream fusion は Rust ターゲットで発火しない（perf README「Not yet covered」の 6.6×）。
 2 本とも同じ 1 機構であることは宣言に明記。次の勝ち筋は `fan` の実並列化と IterChain の点火。
 
+> **2026-10-20 追記**: 上の 2 つの「今日勝てない」はどちらも解消している。`fan` は native で実並列になり、
+> fannkuchredux が 3 本目の VICTORY 行になった（`scripts/perf-ratio-baseline.txt` で 0.326、
+> `ALMIDE_FAN_SEQUENTIAL=1` の ablation で 3.07×）。`|>` チェーンは native で数え上げ iterator に落ち、
+> `list.range` の `Vec` を作らない（30M 要素で 6.6× → 1.29×、最大 RSS 1.5 MB。perf README「Not yet covered」の
+> 2026-10-20 再計測）。こちらはまだ ratchet 行がない。
+
 ### B3（別階級）: fan → GPU で桁を変える ← [#1331](https://github.com/almide/almide/issues/1331)
 
 `--target wgsl` は既に存在する。`fan` が決定的データ並列の構文である以上、同じソースが GPU に落ちる
