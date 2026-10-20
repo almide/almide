@@ -27,8 +27,8 @@ anyhow = "1"
 # and SIGINT (Ctrl-C / Ctrl-Break on Windows) start the drain. The crate's
 # handler thread keeps the host free of `unsafe` (the workspace forbids it).
 ctrlc = { version = "3.5", features = ["termination"] }
-wasmparser = "0.261"
-wasm-encoder = "0.261"
+wasmparser = "0.262"
+wasm-encoder = "0.262"
 wasmtime = "49.0.3"
 # ADR-0023 step 7: the embedded lane runs an HTTP program's WASI 0.3
 # component. The p3 worlds come from wasmtime-wasi; wasi:http comes from
@@ -42,8 +42,8 @@ tokio = { version = "1", default-features = false, features = ["rt", "rt-multi-t
 http = "1"
 http-body-util = "0.1"
 bytes = "1"
-wit-component = "0.261"
-wit-parser = "0.261"
+wit-component = "0.262"
+wit-parser = "0.262"
 
 # The fan cost model's clock (#3341): a worker thread's CPU time, read
 # without `unsafe` (the workspace forbids it). Already in the tree via wasmtime.
