@@ -194,8 +194,8 @@ fn build_module_sigs(module: &str) -> Option<HashMap<Sym, FnSig>> {
 
     let mut out = HashMap::new();
     for decl in &program.decls {
-        if let ast::Decl::Fn { name, params, return_type, effect, generics, .. } = decl {
-            let sig = build_fn_sig(params, return_type, effect, generics);
+        if let ast::Decl::Fn { name, params, return_type, effect, generics, attrs, .. } = decl {
+            let sig = build_fn_sig(params, return_type, effect, generics, attrs);
             out.insert(*name, sig);
         }
     }
@@ -207,6 +207,7 @@ fn build_fn_sig(
     return_type: &ast::TypeExpr,
     effect: &Option<bool>,
     generics: &Option<Vec<ast::GenericParam>>,
+    attrs: &[ast::Attribute],
 ) -> FnSig {
     // Build a `known_types` map that resolves each generic param name
     // (`[A, B]`) to `Ty::TypeVar(name)`. Without this, the shared
@@ -231,10 +232,11 @@ fn build_fn_sig(
         .collect();
     let ret = crate::canonicalize::resolve::resolve_type_expr(return_type, resolver_ctx);
     let is_effect = effect.unwrap_or(false);
-    let mut_params: Vec<usize> = params.iter().enumerate()
-        .filter(|(_, p)| p.is_mut)
-        .map(|(i, _)| i)
-        .collect();
+    // `mut p` AND `@mutating` / `@mutating(p)` (#3966): the checker's E032
+    // reads these positions, so they come from the same reading lowering and
+    // codegen use. Reading `is_mut` alone let `bytes.as_mut_ptr(let_bound)`
+    // type-check while native borrowed the caller's buffer mutably.
+    let mut_params = almide_ir::mut_args::declared_mut_positions(params, attrs);
     FnSig {
         generics: gnames,
         params: ptys,
