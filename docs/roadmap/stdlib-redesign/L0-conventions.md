@@ -121,6 +121,7 @@ fn main() -> Unit = {
 2. 既定値を受け取る `_or` 版（`list.get_or`、`map.get_or`、`bytes.get_or`、`args.option_or`）は `xs |> list.get(i) ?? d` と同じなので、撤去します。`option.unwrap_or` と `result.unwrap_or` を `??` に寄せた ADR-0005 の延長です。
 3. 処理を止める（abort）のは、呼び出し側の契約違反だけです（例: `list.chunk(xs, 0)`）。
 4. 失敗しうる構築・変換は、失敗の目印になる値（空文字、0、空のリスト）を返しません。理由がなければ `Option`、理由があれば `Result[_, String]` を返します（例: `string.from_codepoint` がいま無効な値で `""` を返すのは、この規則に反します）。
+5. 例外: 数値変換の無印 `to_<型>` は、損失のある組でも折り返す版です（R-L0-08）。範囲外の値を黙って別の値に変えるので、1 の「無印は安全版」に当てはまりません。9 言語の多数派に合わせた例外として据え置き、安全版は `_checked`・`_saturating` の接尾辞で選びます。この例外をやめるかどうかは R-L0-21 で保留しています。
 
 - (a) 無印が安全版なのは Rust、OCaml Base、Elixir です。無印が例外版なのは OCaml Stdlib と Kotlin で、多数派はありません。Almide は例外を持たないので、無印が安全版である以外の選択肢はありません。既定値版は Python の `get(k, d)`、Kotlin の `getOrDefault`、Elixir の `get(m, k, default)` がありますが、Rust・Swift・JS・Gleam は演算子か汎用の関数で書きます。
 - (c) `??` は CHEATSHEET が教える唯一の書き方です。`get_or` を覚えていなくても書けます。
@@ -148,7 +149,9 @@ fn main() -> Unit = {
 - 折り返し演算 `int.wrap_add`、`wrap_sub`、`wrap_mul` と `int.wrap(n, bits)`: いまは `wrap_sub` と `wrap` がない（#3854）。
 
 - (a) 4 種を全部別の名前で持つのは Rust（接頭辞）と Swift（引数ラベル）だけで、多数派はありません。いまの接尾辞の行列はすでにゲートで守られているので、据え置きます。
+  - 9 言語の外の参考として Zig も見ました。Zig は 1 語の変換を持たず、`@intCast`（範囲外は不正な動作で、安全モードでは止まる）と `@truncate`（折り返し）のように、意味ごとに名前を分けています（[言語リファレンス](https://ziglang.org/documentation/master/#intCast)）。Rust も `as` を禁じる・警告する lint（clippy の `as_conversions`・`cast_possible_truncation`）を持っています。意図を名前に書かせる方向は、Almide の接尾辞の行列と同じです。
 - (c) 行列の穴（`wrap_sub` がない）は、LLM が規則から推測して書いたときに確実に外れます。
+- 変換の演算子 `as` を足さない判定は R-L0-18、他言語の変換の書き方から案内する診断は R-L0-19 です。
 - issue: #3854（既存）
 
 ## R-L0-09 Bool を返す関数は `is_`/`has_`、または決まった動詞 — ○ 採用
@@ -241,6 +244,54 @@ effect fn を呼んだときの型（`!` が要るか、`??` をそのまま書�
 - (d) 言語の変更です。どちらの形に揃えるかは、ADR-0002（失敗と effect は別の軸）と ADR-0008（伝搬は明示だけ）に沿って、issue で設計します。揃えた結果が既存の呼び出しを変える場合は、epoch 15 の `breaks` に入れます。
 - ゲート: 標準の effect fn すべてについて、intrinsic 版と Almide 版で `??` と `!` の受け付けが同じになることを、宣言ごとの fixture で確かめます。
 - issue: #3900
+
+## R-L0-18 型を変換する演算子 `as` は足さない — × 不採用
+
+`x as Int8` のような、1 つの記号で型を変える演算子を足すかどうかの判定です。他の言語の `as` は、次の 3 つの別の仕組みに分かれます。
+
+| 仕組み | 例 | Almide での受け持ち |
+|---|---|---|
+| 数の変換 | Rust `x as i8`（折り返し。float→int は張り付き）、Go `int8(x)`、Swift `Int8(x)`（止まる） | `to_<型>`・`_checked`・`_saturating`（R-L0-08） |
+| 実行時の型の確認（ダウンキャスト） | Kotlin `as?`、Swift `as?`/`as!`、Go `x.(T)`、Rust `downcast` | 不要。継承や `Any` が無く、中身の分からない値（`Value` など）は `match` で場合分けする |
+| 型検査を黙らせる | TypeScript `x as Foo`、Python `typing.cast` | 入れない。実行時に何も確かめない |
+| 式の途中で型を決める | Swift `[] as [Int]`、`1 as Double` | 型注釈 `[]: List[Int]`（実測: E018 のヒントもこの形を教える） |
+
+- (a) 数の変換を `as` 1 つで書くのは Rust だけです。Swift の `as` は数の変換に使えません（`x as Int8` はコンパイルエラーで、変換は初期化子 `Int8(x)` で書きます。[Type Casting](https://docs.swift.org/swift-book/documentation/the-swift-programming-language/typecasting/)）。Rust 自身も `as` を lint で禁じられるようにしています（[参照](https://doc.rust-lang.org/reference/expressions/operator-expr.html#type-cast-expressions)）。Zig は `as` に当たる 1 語の変換を持たず、意味ごとに名前を分けています。
+- (b) 該当なし（足さない）。
+- (c) 1 つの記号で「折り返す」「張り付く」「止まる」が型の組で切り替わると、どれが起きるかがコードから読めません。型検査を黙らせる `as` は、LLM が型エラーを消すために書く、よくある失敗の形です。
+- (d) 足さないので互換の影響はありません。`as` は import の別名（`import x as y`）と JSON のフィールド名の付け替えにだけ使い続けます。
+- 理由のまとめ: 数の変換は R-L0-08 の名前つき関数があり、R-L0-01（1 つの役割に綴りは 1 つ）に反します。ほかの 3 つの用途は、Almide の型の作りでは要らないか、目的に反します。他言語の癖で書かれた `as` は、R-L0-19 の診断で受け止めます。
+
+## R-L0-19 他言語の変換の書き方から、変換の関数へ案内する — ○ 採用
+
+- 内容:
+  1. `x as Int8`・`Int8(x)`・`x.into()`／`x.try_into()` を見つけたら、元の型と先の型に合わせて、使う関数とはみ出したときの動きを 1 つの診断で出します（例: `int.to_int8(x)` は折り返す、`int.to_int8_checked(x)` は `Option`、`int.to_int8_saturating(x)` は張り付く）。
+  2. 未定義の名前の「もしかして」表（`ALIASES`）を、L3 の関数表の「他言語の主な綴り」の列から生成します。全モジュールが対象です（list と string は #3905 で手で直す分）。
+- 実測（develop `9352c73e3`）: `x as Int8` は「変数 `as` がない」とヒント「もしかして `x`?」に続けて、`Int8` についても別のエラーになります。`Int8(x)` は「型 `Int8` が呼べない」、`x.into()` は「メソッド `into` がない」で、どれも正しい関数を示しません。
+- (a) 他言語の書き方は R-L0-18 の表のとおりです。
+- (b) 検査器だけの変更です。
+- (c) R-L0-18 で `as` を足さないので、Rust・TypeScript・Kotlin・Swift の癖で書かれた `as` は残ります。最初のエラーで正しい関数に着けるかどうかが、修正の生存率を決めます。
+- (d) 診断の追加だけです。互換の影響はありません。
+- 完全性の規則: L3 の「他言語の主な綴り」の各綴りは、生きている関数か正しい式を指す `ALIASES` のキーになっているか、外す理由（Almide で別の意味の生きている名前である、など）が書いてあるかのどちらかです。変換の行列のすべての組に、`as`・`T(x)`・`into` の案内があります。
+- ゲート案: #3905 で提案した `tests/stdlib_alias_table_test.rs` で、生成した行と L3 の列を突き合わせます。`tests/diagnostics/` に 4 つの形の例を置き、診断が 1 つだけ出て関数名を示すことを確かめます。
+- issue: #3958
+
+## R-L0-20 critical プロファイルで、黙って折り返す `to_<型>` を拒む — 保留
+
+- 内容: `almide check --profile critical` のときだけ、損失のある組の `to_<型>` をエラーにし、`_checked` か `_saturating` を書かせます。Rust の clippy の `cast_possible_truncation` と同じ考え方です。普段のコードは変わりません。
+- 保留の理由: いまの critical プロファイル（ALS の bounded 規則）が保証するのは、安全さと資源の上限で、計算の正しさは含みません。`xs[i]` の範囲外や 0 での割り算も、critical で拒んでいません（2026-10-01 に実測）。正しさの規則（全域性）を critical に入れる件は、[certification-grade](../active/certification-grade.md) の CG-3 として先送りになっています。黙って折り返す変換だけを先に拒むと、critical の規則の性格がばらばらになるので、全域性の規則と同時に判断します。
+- 決めるときの順番: ALS（almide/als）に規則を足す → pin を進める → 検査器（`check/bounded.rs`）を実装する。
+- issue: なし（CG-3 を再開するときに一緒に起票します）
+
+## R-L0-21 無印の `to_<型>` を、はみ出したら失敗する版に変える — 保留
+
+- 内容: 損失のある組の `to_<型>` を `Option` を返す形（いまの `_checked` と同じ）に変え、折り返す版を `to_<型>_wrapping` にします。Zig と Swift の形です。R-L0-06 の 5 の例外がなくなります。
+- (a) 1 語の損失ありの変換を持つ言語のうち、折り返すのは Rust の `as`・Go・Kotlin・OCaml の 4 つ、止まるのは Swift の 1 つです。R-L0-00 の改名の条件（5/9 以上）に届きません。
+- (b) 純粋な計算です。両 target で同じです。
+- (c) `int.to_int8(300)` が黙って `44` になるバグは、型検査も実行も通ります。この形にすれば起きません。一方で、変換を書くたびに `??` か `!` が要るようになります。
+- (d) 意味変更です。戻り型が変わるので古いコードは型エラーになり、R-L0-14.4 の条件は満たします。`almide fix` で `to_<型>_wrapping` に書き換えられます。損失のある組すべてに及ぶ大きい変更です。
+- 保留の理由: 多数派の裏付けがないので、LLM が実際に黙って折り返すバグをどれだけ書くかを測ってから決めます。測定は almide-dojo で行います。
+- issue: [almide-dojo#63](https://github.com/almide/almide-dojo/issues/63)（測定）
 
 ---
 

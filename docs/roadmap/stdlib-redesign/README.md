@@ -20,7 +20,7 @@ Almide の標準関数 999 個（44 モジュール）を、9 言語（Rust・Go
 
 [args](L2-args.md) ・ [base64](L2-base64.md) ・ [bigint](L2-bigint.md) ・ [bytes](L2-bytes.md) ・ [compute](L2-compute.md) ・ [datetime](L2-datetime.md) ・ [deque](L2-deque.md) ・ [duration](L2-duration.md) ・ [env](L2-env.md) ・ [error](L2-error.md) ・ [ffi](L2-ffi.md) ・ [float](L2-float.md) ・ [fs](L2-fs.md) ・ [hash](L2-hash.md) ・ [heap](L2-heap.md) ・ [hex](L2-hex.md) ・ [html](L2-html.md) ・ [http](L2-http.md) ・ [int](L2-int.md) ・ [io](L2-io.md) ・ [json](L2-json.md) ・ [list](L2-list.md) ・ [map](L2-map.md) ・ [math](L2-math.md) ・ [matrix](L2-matrix.md) ・ [net](L2-net.md) ・ [option](L2-option.md) ・ [path](L2-path.md) ・ [process](L2-process.md) ・ [random](L2-random.md) ・ [regex](L2-regex.md) ・ [result](L2-result.md) ・ [set](L2-set.md) ・ [sized-numbers](L2-sized-numbers.md) ・ [string](L2-string.md) ・ [testing](L2-testing.md) ・ [unix](L2-unix.md) ・ [url](L2-url.md) ・ [uuid](L2-uuid.md) ・ [value](L2-value.md) ・ [zlib](L2-zlib.md)
 
-## 案の状態（全 199 件: ○ 159・× 39・保留 1）
+## 案の状態（全 203 件: ○ 160・× 40・保留 3）
 
 | 案 | 内容 | 判定 | issue |
 |---|---|---|---|
@@ -42,6 +42,10 @@ Almide の標準関数 999 個（44 モジュール）を、9 言語（Rust・Go
 | [R-L0-15](L0-conventions.md#r-l0-15-標準関数は-native-と-wasm-の両方で動く---採用) | 標準関数は native と wasm の両方で動く | ○ | —（変更なし） |
 | [R-L0-16](L0-conventions.md#r-l0-16-順序のある型には-compare-を置く---採用) | 順序のある型には `compare` を置く | ○ | #3902 |
 | [R-L0-17](L0-conventions.md#r-l0-17-呼び出しの型は宣言だけで決まる---採用) | 呼び出しの型は宣言だけで決まる | ○ | #3900 |
+| [R-L0-18](L0-conventions.md#r-l0-18-型を変換する演算子-as-は足さない---不採用) | 型を変換する演算子 `as` は足さない | × | — |
+| [R-L0-19](L0-conventions.md#r-l0-19-他言語の変換の書き方から変換の関数へ案内する---採用) | 他言語の変換の書き方から、変換の関数へ案内する | ○ | #3958 |
+| [R-L0-20](L0-conventions.md#r-l0-20-critical-プロファイルで黙って折り返す-to_型-を拒む--保留) | critical プロファイルで、黙って折り返す `to_<型>` を拒む | 保留 | — （CG-3 と同時に判断） |
+| [R-L0-21](L0-conventions.md#r-l0-21-無印の-to_型-をはみ出したら失敗する版に変える--保留) | 無印の `to_<型>` を、はみ出したら失敗する版に変える | 保留 | [almide-dojo#63](https://github.com/almide/almide-dojo/issues/63)（測定） |
 | [R-L0-G](L0-conventions.md#ゲートの束r-l0-g---採用) | ゲートの束（R-L0-G） | ○ | #3949 |
 | [R-L1-01](L1-categories.md#r-l1-01-両端キュー-deque---採用) | 両端キュー `deque` | ○ | #3932 |
 | [R-L1-02](L1-categories.md#r-l1-02-優先度キュー-heap---採用) | 優先度キュー `heap` | ○ | #3933 |
