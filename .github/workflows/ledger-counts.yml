@@ -48,6 +48,7 @@ permissions:
   contents: write
   pull-requests: write
   issues: write
+  actions: read
 
 env:
   REFRESH_BRANCH: bot/ledger-counts-refresh
@@ -59,11 +60,24 @@ jobs:
   drift:
     name: Stamped totals vs the tree
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
         with:
           ref: develop
+
+      # The fuzz true-green streak is stamped from the last row of
+      # research/benchmark/fuzz-green/README.md, and nothing appended a row
+      # after 2026-08-10: the meter had to be run by hand with --update, so for
+      # two months proofs/STAGE-STATUS.md quoted a streak measured once.
+      # Re-measuring it here appends a row whenever the streak moved, which
+      # makes the stamp drift, and the refresh below carries the row with the
+      # restamped counts. The meter reads the fuzz runs' verdict-job logs,
+      # hence `actions: read`.
+      - name: Re-measure the fuzz true-green streak
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/fuzz-green-streak.sh --update
 
       - name: Re-measure every stamped count
         id: measure
@@ -94,7 +108,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -B "$REFRESH_BRANCH"
-          git add proofs/ledger-counts.toml docs/benchmarks/README.md proofs/STAGE-STATUS.md docs/contracts/README.md docs/contracts/conformance.md
+          git add proofs/ledger-counts.toml docs/benchmarks/README.md proofs/STAGE-STATUS.md docs/contracts/README.md docs/contracts/conformance.md research/benchmark/fuzz-green/README.md
           git commit -q -m "Refresh the stamped ledger counts on the landed base"
           git push --force origin "$REFRESH_BRANCH"
           {
