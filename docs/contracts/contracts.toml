@@ -991,6 +991,7 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/bytes_rawptr.almd", class = "fixture" },
 ]
+refusal   = ["tests/diagnostics/e032-as-mut-ptr-param"]
 
 # ── PARSE A glTF/JSON DOCUMENT + WALK ITS ARRAYS, BYTE-IDENTICAL ─
 [[contract]]
