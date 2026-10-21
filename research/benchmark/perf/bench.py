@@ -9,7 +9,9 @@ Legs:
   native — `almide build --release` (cargo release profile: opt-level=3, LTO)
   wasm   — `almide build --target wasm`, executed by the wasmtime CLI
   rust   — handwritten references in rust-ref/, compiled with the same
-           rustc flags the native leg uses (opt-level=3, lto, 1 CGU)
+           rustc flags the native leg uses (opt-level=3, lto, 1 CGU, and the
+           release target-cpu / llvm-args `almide build
+           --print-release-rustflags` reports)
 
 Usage:
   python3 bench.py                    # full suite, all legs, 5 runs
@@ -194,6 +196,32 @@ RUSTC_FLAGS = ["-C", "opt-level=3", "-C", "lto=yes", "-C", "codegen-units=1",
                "-C", "overflow-checks=no", "--edition", "2021"]
 
 
+def release_rustflags(almide):
+    """The codegen flags a native `--release` build adds to the release
+    profile — the `-C target-cpu` (x86-64-v3 on an x86_64 host since #3604)
+    and the `-C llvm-args` — as the compiler itself reports them
+    (`almide build --print-release-rustflags`). The references get the same
+    ones, or an Almide/Rust ratio reads the CPU baseline as codegen (#3883).
+
+    ALMIDE_FLAGS_BIN names the compiler to ask when the one being measured
+    predates the flag (a release binary): it must be a build whose release
+    flags are the measured one's (src/cli/native_target.rs unchanged between
+    the two), and the JSON records what was asked and what was used."""
+    asker = os.environ.get("ALMIDE_FLAGS_BIN") or almide
+    r = subprocess.run([asker, "build", "--print-release-rustflags"], capture_output=True, text=True)
+    if r.returncode != 0:
+        sys.exit(f"{asker} cannot print its release rustflags (`almide build --print-release-rustflags`):\n"
+                 f"{r.stderr.strip()[:500]}\nset ALMIDE_FLAGS_BIN to a compiler that can, built with the "
+                 f"same release flags as {almide} — never guess them")
+    return asker, r.stdout.split()
+
+
+def ref_rustc_flags(almide):
+    """RUSTC_FLAGS plus the release codegen flags the Almide side was built with."""
+    asker, extra = release_rustflags(almide)
+    return asker, RUSTC_FLAGS + extra
+
+
 def find_tool(name, extra_dirs=("/opt/homebrew/bin", "/usr/local/bin")):
     path = shutil.which(name)
     if path:
@@ -244,6 +272,8 @@ def main():
         print(f"almide: {almide} ({almide_version}) [PATH — NOT this tree's build; "
               f"set ALMIDE_BIN=<tree>/target/release/almide to measure your changes]")
     rustc = find_tool("rustc") or sys.exit("rustc not on PATH")
+    flags_from, ref_flags = ref_rustc_flags(almide)
+    print(f"rust refs: {' '.join(ref_flags)} (release flags from {flags_from})")
     wasmtime = find_tool("wasmtime")
     if "wasm" in legs and not wasmtime:
         sys.exit("wasmtime not found (needed for the wasm leg); install it or drop --legs wasm")
@@ -285,7 +315,7 @@ def main():
             for ref in refs:
                 stem = ref[:-3]
                 out = os.path.join(work, f"{name}_{stem}_ref")
-                run([rustc, *RUSTC_FLAGS, os.path.join(HERE, "rust-ref", ref), "-o", out])
+                run([rustc, *ref_flags, os.path.join(HERE, "rust-ref", ref), "-o", out])
                 vs.append((f"{name}/rust:{stem}", [out]))
         variants[name] = vs
         note = " (ablated binary identical to optimized)" if ablated_identical.get(name) else ""
@@ -353,6 +383,8 @@ def main():
         "almide": subprocess.run([almide, "--version"], capture_output=True, text=True).stdout.strip(),
         "wasmtime": subprocess.run([wasmtime, "--version"], capture_output=True, text=True).stdout.strip()
                     if wasmtime else None,
+        "ref_rustc_flags": ref_flags,
+        "ref_flags_from": subprocess.run([flags_from, "--version"], capture_output=True, text=True).stdout.strip(),
         "runs": args.runs,
         "quick": args.quick,
     }

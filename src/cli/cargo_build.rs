@@ -208,12 +208,7 @@ fn try_rlib_fast_build(rs_code: &str, project_dir: &std::path::Path, release: bo
         .arg("-A").arg("warnings");
     if release {
         cmd.args(FAST_PATH_RELEASE_ARGS);
-    }
-    if let Some(cpu) = &cpu {
-        cmd.arg("-C").arg(format!("target-cpu={cpu}"));
-    }
-    if release {
-        cmd.args(super::native_target::release_llvm_rustc_args());
+        cmd.args(super::native_target::release_codegen_rustc_args());
     }
     let output = cmd.output().ok()?;
     if output.status.success() {
@@ -380,11 +375,9 @@ fn append_release_rustflags(cmd: &mut std::process::Command) {
         .and_then(|(_, v)| v.map(|v| v.to_string_lossy().into_owned()))
         .unwrap_or_else(|| std::env::var("RUSTFLAGS").unwrap_or_default());
     let mut flags = current;
-    if let Some(cpu) = super::native_target::release_target_cpu() {
-        flags.push_str(&format!(" -C target-cpu={cpu}"));
-    }
-    for arg in super::native_target::RELEASE_LLVM_ARGS {
-        flags.push_str(&format!(" -C llvm-args={arg}"));
+    for arg in super::native_target::release_codegen_rustc_args() {
+        flags.push(' ');
+        flags.push_str(&arg);
     }
     cmd.env("RUSTFLAGS", flags.trim_start().to_string());
 }

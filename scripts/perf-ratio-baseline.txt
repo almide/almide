@@ -1,5 +1,20 @@
 # almide-native / handwritten-rust runtime ratio per benchmark
 # (bench.py --quick medians; see scripts/check-perf-ratio.sh)
+#
+# Since #3883 the references are built with the release target CPU and LLVM
+# options the compiler reports (`almide build --print-release-rustflags`):
+# 95c82cb00 made an x86_64 --release build target x86-64-v3 while the
+# references stayed generic, so the runner's ratios had drifted to measuring
+# the CPU baseline. Equal flags put them back on these anchors, which were
+# taken when both sides were generic; no anchor moves. Measured 2026-10-20,
+# GCE n2d-standard-8 (AMD EPYC 7B13, the ubuntu-latest runner's class), this
+# tree's build, bench.py --quick --runs 9, two alternated rounds each way
+# (references generic -> release flags): nbody 1.130/1.131 -> 0.950/0.948,
+# spectralnorm 0.756/0.754 -> 0.995/0.994, fft 1.098/1.105 -> 1.153/1.153,
+# fasta 1.089/1.086 -> 1.090/1.089, wordfreq 0.644/0.644 -> 0.618/0.639.
+# Every reading sits inside its +40% / -50% band; the moved ones moved to
+# within 5% of their anchor. (c4-standard-8, Intel 8581C: nbody 0.94,
+# spectralnorm 1.00, fft 0.87, fasta 1.15, wordfreq 0.73.)
 fasta 1.152
 # fft re-anchored 2026-08-13 (was 1.272): the row's input generation moved from
 # an 8.4M-iteration append loop to one sized allocation + indexed writes, so the
