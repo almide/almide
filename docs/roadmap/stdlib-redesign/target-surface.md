@@ -1476,13 +1476,13 @@
 
 | 関数 | シグネチャ（リデザイン後） | 変化 | 案 |
 |---|---|---|---|
-| `byte_len（追加）` | `fn string.byte_len（追加）(s: String) -> Int` | 新規 | R-string-06 |
+| `byte_len` | `fn string.byte_len(s: String) -> Int` | 新規 | R-string-06 |
 | `byte_slice` | `fn string.byte_slice(s: String, start: Int, end: Int) -> Option[String]` |  |  |
 | `capitalize` | `fn string.capitalize(s: String) -> String` |  |  |
 | `chars` | `fn string.chars(s: String) -> List[String]` |  |  |
 | `clear` | `fn string.clear(mut s: String) -> Unit` |  |  |
 | `codepoint` | `fn string.codepoint(s: String) -> Option[Int]` |  |  |
-| `compare（追加）` | `fn string.compare（追加）(a: String, b: String) -> Int` | 新規 | R-string-05（R-L0-16） |
+| `compare` | `fn string.compare(a: String, b: String) -> Int` | 新規 | R-string-05（R-L0-16） |
 | `contains` | `fn string.contains(s: String, sub: String) -> Bool` |  |  |
 | `count` | `fn string.count(s: String, sub: String) -> Int` |  |  |
 | `drop` | `fn string.drop(s: String, n: Int) -> String` |  |  |
@@ -1490,7 +1490,7 @@
 | `ends_with` | `fn string.ends_with(s: String, suffix: String) -> Bool` |  |  |
 | `first` | `fn string.first(s: String) -> Option[String]` |  |  |
 | `from_codepoint` | `fn string.from_codepoint(n: Int) -> Option[String]` | 意味変更: `Option[String]` を返す | R-string-11 |
-| `from_utf16（追加）` | `fn string.from_utf16（追加）(units: List[Int]) -> Result[String, String]` | 新規 | R-string-07 |
+| `from_utf16` | `fn string.from_utf16(units: List[Int]) -> Result[String, String]` | 新規 | R-string-07 |
 | `get` | `fn string.get(s: String, i: Int) -> Option[String]` |  |  |
 | `index_of` | `fn string.index_of(s: String, needle: String) -> Option[Int]` |  |  |
 | `is_alpha` | `fn string.is_alpha(s: String) -> Bool` |  |  |
@@ -1521,7 +1521,7 @@
 | `take_end` | `fn string.take_end(s: String, n: Int) -> String` |  |  |
 | `to_lower` | `fn string.to_lower(s: String) -> String` |  |  |
 | `to_upper` | `fn string.to_upper(s: String) -> String` |  |  |
-| `to_utf16（追加）` | `fn string.to_utf16（追加）(s: String) -> List[Int]` | 新規 | R-string-07 |
+| `to_utf16` | `fn string.to_utf16(s: String) -> List[Int]` | 新規 | R-string-07 |
 | `trim` | `fn string.trim(s: String) -> String` |  |  |
 | `trim_end` | `fn string.trim_end(s: String) -> String` |  |  |
 | `trim_start` | `fn string.trim_start(s: String) -> String` |  |  |
