@@ -47,7 +47,7 @@ fn declared_mut(module: &str, name: &str) -> Option<BTreeSet<String>> {
             let params = &rest[rest.find('(').unwrap() + 1..];
             return Some(
                 params
-                    .split(|c| c == '(' || c == ',')
+                    .split(['(', ','])
                     .filter_map(|p| p.trim_start().strip_prefix("mut ")?.split(':').next().map(|n| n.trim().to_string()))
                     .collect(),
             );
