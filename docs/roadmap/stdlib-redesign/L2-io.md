@@ -69,6 +69,28 @@
 - ゲート案: ADR-0022 D1 の名前の集合と、`io` の宣言の `effect` 欄を突き合わせるテスト。
 - issue: #3907
 
+### R-io-03 改行なしで標準エラーに書く `io.eprint` を足し、`print` の綴りから `io.print` へ案内する — ○ 採用
+
+- いま: 改行なしの書き出しは `io.print`（標準出力）だけで、標準エラーにはありません。`print("x")` と書くと「もしかして `println`?」と出ます（改行が付くので出力が変わる案内です）。
+- 案: `effect fn io.eprint(s: String) -> Unit` を足します。未定義の `print`・`eprint` の案内を `io.print`・`io.eprint` にします（R-L0-19）。
+- (a) 改行なしの標準エラーは 9/9 が持ちます（Rust `eprint!` (F)、Gleam `io.print_error` (F)、Go `fmt.Fprint(os.Stderr, …)` など）。
+- (b) `wasi:cli/stderr`。`eprintln` と同じ経路です。
+- (c) 進み具合の表示（`\r` で書き直す）を LLM はほぼ必ず標準エラーに書きます。
+- (d) 追加と診断です。
+- 完全性の規則: 出力は {stdout, stderr} × {改行あり, 改行なし} の 4 セル。改行ありは組み込み、改行なしは `io` です。
+- issue: #3974
+
+### R-io-04 標準入力をバイト列で全部読む `io.read_all_bytes` を足す — ○ 採用
+
+- いま: `io.read_all() -> String`（全部をテキスト）と `io.read_bytes(n) -> Bytes`（最大 n バイト）。全部をバイト列で読む関数がありません。
+- 案: `effect fn io.read_all_bytes() -> Bytes`。
+- (a) 8/9 が持ちます（Python `sys.stdin.buffer.read()` (F)、Go `io.ReadAll(os.Stdin)`、Rust `read_to_end` など）。
+- (b) `wasi:cli/stdin`。`read_all` と同じ経路で、UTF-8 に直しません。
+- (c) いまは `io.read_all()` を経て不正な UTF-8 が置換文字になり、黙って結果が変わります。
+- (d) 追加 1。
+- 完全性の規則: 標準入力の読みは {1 行 `read_line`, 全部テキスト `read_all`, 全部バイト `read_all_bytes`, 最大 n バイト `read_bytes`} です。
+- issue: #3974
+
 ## L3: 関数表
 
 | 関数 | シグネチャ(現行, mut 表示) | 他言語の主な綴り | 判定 | 案 |
@@ -82,6 +104,8 @@
 | `io.print` | `effect fn print(s: String) -> Unit` | Rust `print!` / Go `fmt.Print` / Gleam `io.print` | 据え置き | — |
 | `io.write` | `fn write(data: Bytes) -> Unit` | Rust `write_all` / Go `Stdout.Write` / Elixir `binwrite` | 撤去（→ `write_bytes`） | R-io-01・R-io-02 |
 | `io.write_bytes` | `fn write_bytes(data: List[Int]) -> Unit` | Python `buffer.write` / Kotlin `writeBytes` | 意味変更（`data: Bytes` にし、effect fn にする） | R-io-01・R-io-02 |
+| `io.eprint` | `effect fn eprint(s: String) -> Unit`（案） | Rust `eprint!` (F) / Gleam `io.print_error` (F) / OCaml `prerr_string` | 追加 | R-io-03 |
+| `io.read_all_bytes` | `effect fn read_all_bytes() -> Bytes`（案） | Python `stdin.buffer.read()` (F) / Go `io.ReadAll(os.Stdin)` | 追加 | R-io-04 |
 
 ## L0 への差し戻し（処理済み）
 

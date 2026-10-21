@@ -92,6 +92,24 @@
 - 根拠の L0 規則: R-L0-14 の 4（同じ名前のまま、旧い書き方が型の検査を通って別の結果になる変更はしない。`%%` の出力を変えると、まさにこの形になる）。`%%` を含む書式は spec に 0 件で、書き方を変える利益より、学習データの旧い意味と食い違う損のほうが大きいためです。
 - issue: なし
 
+### R-datetime-06 `add_<単位>` の族を行列として宣言し、「演算子の双子」の検出から外す — ○ 採用（記録とゲートの修正）
+
+- いま: `add_seconds(ts, n)` の本体は `ts + n` です。R-datetime-03 のゲート案（本体が演算子 1 つの公開関数を検出する）は `add_seconds` も拾います。一方、完全性の規則は `add_<単位>` を 4 つで閉じています。
+- 案: `add_{seconds, minutes, hours, days}` を単位の軸の行列として宣言し、R-L0-01 の「型の行列のセルは同義語に数えない」と同じ扱いにします。例外は許容リストではなく、族の宣言（1 か所）から導きます。
+- (d) 関数は変えません。
+- issue: #3974
+
+### R-datetime-07 `from_parts` は範囲外の部品を err にする — ○ 採用
+
+- いま: `datetime.from_parts(...) -> Int` は範囲外の部品を繰り上げます（2 月 30 日 25 時 61 分が 3 月 2 日 02:01 になる）。`parse_iso` は同じ入力を err にします。同じ値を作る 2 つの関数で、無効な日付の扱いが逆です。
+- 案: `fn datetime.from_parts(y, m, d, h, min, s) -> Result[Int, String]` にし、`parse_iso` と同じ文言（「day out of range: 30」など）で err にします。
+- 根拠の L0 規則: R-L0-06 の 4（失敗しうる構築は、別の値に黙って変えず、理由つきの Result を返す）。
+- (a) 拒むのは Python `datetime()`、Elixir `DateTime.new`、Kotlin `LocalDateTime`、繰り上げるのは Go `time.Date`、JS `Date.UTC`、OCaml `Unix.mktime`、Swift `Calendar` で、多数派はありません。Almide の中の `parse_iso` との一致を優先します。
+- (c) 「日付が正しいか確かめる」課題で、LLM は `from_parts` を使って無効な日付を通してしまいます。
+- (d) 意味変更。戻り型が変わるので古いコードは型エラーで止まり、R-L0-14.4 を満たします。`almide fix` は呼び出しに `!` を足します。月の加算（置かないと判定済み）の回り道として `from_parts(y, m + 1, …)` を使うコードは、範囲外で err になるので、ヒントで月の繰り上げを自分で書く形を示します。
+- ゲート案: 境界の入力（2 月 29 日・30 日、13 月、24 時）の結果を spec で固定します。
+- issue: #3974
+
 ## L3: 関数表
 
 `datetime` の現行 22 関数と、追加する 1 関数です。
@@ -105,7 +123,7 @@
 | `day` | `datetime.day(ts: Int) -> Int` | Go `Day()` / Python `.day` / JS `getUTCDate()` / Elixir `.day` | 据え置き | — |
 | `diff_seconds` | `datetime.diff_seconds(a: Int, b: Int) -> Int` | Go `Sub` / Elixir `DateTime.diff` / 他は `-` | 撤去 | R-datetime-03（`a - b`） |
 | `format` | `datetime.format(ts: Int, pattern: String) -> String` | Python `strftime` / Elixir `Calendar.strftime` / Go `Format`（見本の日付） | 据え置き | R-datetime-05 |
-| `from_parts` | `datetime.from_parts(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Int` | Go `time.Date` / Python `datetime(...)` / JS `Date.UTC` / Elixir `DateTime.new` | 据え置き | — |
+| `from_parts` | `datetime.from_parts(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Int` | Go `time.Date` / Python `datetime(...)` / JS `Date.UTC` / Elixir `DateTime.new` | 意味変更（範囲外は err。`-> Result[Int, String]`） | R-datetime-07 |
 | `from_unix` | `datetime.from_unix(seconds: Int) -> Int` | Elixir `DateTime.from_unix` / Go `time.Unix` / Kotlin `fromEpochSeconds` | 撤去 | R-datetime-03（引数そのもの） |
 | `hour` | `datetime.hour(ts: Int) -> Int` | Go `Hour()` / Python `.hour` / JS `getUTCHours()` | 据え置き | — |
 | `is_after` | `datetime.is_after(a: Int, b: Int) -> Bool` | Go `After` / Kotlin `>`（Java `isAfter`） / 他は `>` | 撤去 | R-datetime-03（`a > b`） |

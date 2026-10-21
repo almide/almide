@@ -42,7 +42,7 @@
 ### R-math-01 型の決まる算術を `int`・`float` に移す — ○ 採用
 
 - 内容:
-  - 撤去（残る側がすでにある）: `math.abs` → `int.abs`、`math.min` → `int.min`、`math.max` → `int.max`、`math.sqrt` → `float.sqrt`、`math.fmin` → `float.min`、`math.fmax` → `float.max`。
+  - 撤去（残る側がすでにある）: `math.abs` → `int.abs`、`math.min` → `int.min`、`math.max` → `int.max`、（`math.sqrt` → `float.sqrt` は R-math-03 で取り消し）、`math.fmin` → `float.min`、`math.fmax` → `float.max`。
   - 移動（追加と撤去の組）: `math.sign` → `int.sign(n: Int) -> Int`、`math.pow` → `int.pow(base: Int, exp: Int) -> Int`、`math.fpow` → `float.pow(base: Float, exp: Float) -> Float`。意味は変えません（`int.pow` は折り返し、負の `exp` は abort。`int.sign(0)` は 0）。
 - 根拠の L0 規則: R-L0-01、R-L0-02。
 - (a) 主語の型のモジュールやメソッドに置く言語は 7/9（Rust・Kotlin・Swift はメソッド、Gleam・Elixir・OCaml は型モジュール）。Gleam は `int.power` と `float.power` を型ごとに持っています (F)。
@@ -62,6 +62,18 @@
 - (d) 追加 7。使用数 0。
 - ゲート案: 既存の数値検品（semantics-manifest の行と inspection ledger）に 7 行を足し、両 target の byte 一致を wasm_cross fixture で固定します。
 - issue: #3926
+
+### R-math-03 実数の数学関数は `math` に集める（`sqrt` を `math` に戻し、`float.sqrt` を撤去） — ○ 採用（R-math-01 の `sqrt` の部分を見直す）
+
+- いま: R-math-01 で `math.sqrt` を撤去して `float.sqrt` に寄せ、R-math-02 で `cbrt`・`hypot` を `math` に足しました。`sqrt` だけが `float`、`cbrt`・`hypot` と三角・指数は `math` という分け方です。
+- 案: `math.sqrt(x: Float) -> Float` を残し、`float.sqrt` を撤去します。置き場所の境界を次の 1 文にします。「`Int` にも同じ役割があるもの（`abs`・`min`・`max`・`clamp`・`sign`・`pow`）は型のモジュール。実数だけの数学関数（`sqrt`・`cbrt`・`hypot`、三角・指数・対数・ガンマ）は `math`。丸め・判定・定数・ビット列・変換は表現の関数として `float`」。
+- 根拠の L0 規則: R-L0-02（置き場所は 1 つの規則で決まる。L0 の文言をこの 1 文に直します）、R-L0-00 の 2、R-L0-01。
+- (a) 9 言語のうち 8 言語は `sqrt` と `sin` を同じ場所に置き、そのうち 6 言語（Go・Python・JS・Elixir・Kotlin・Swift）は math の側です。`sqrt` を `cbrt`・`hypot` と別の場所に置く言語はありません。
+- (c) いまの案では `math.cbrt(x)` は通るのに `math.sqrt(x)` は E002 です。`math.sqrt` は LLM がいちばん書きやすい綴りです。
+- (d) `float.sqrt` の撤去（`@deprecated(since=15, use="math.sqrt")`、epoch 16、`almide fix` で 1 対 1）。`math.sqrt` の撤去はやめます。使用数は `math.sqrt` 17/0/5/0/18、`float.sqrt` 14/2/4/1/0（spec/tests/docs/stdlib/research）で、こちらのほうが書き換えが少なくて済みます。
+- 完全性の規則: `math` の公開関数は引数がすべて `Float`（`factorial`・`choose` は例外）。`float` と `math` に同じ名前は置きません。
+- ゲート案: R-L0-G に `math`/`float` の名前の振り分け表を足し、両モジュールの公開名と突き合わせます。
+- issue: #3972
 
 ## L3: 関数表
 
@@ -89,7 +101,7 @@
 | `pow` | `math.pow(base: Int, exp: Int) -> Int` | Rust `i64::pow` / Gleam `int.power`（Float）(F) / Elixir `Integer.pow` (F) | 撤去 | R-math-01（`int.pow`） |
 | `sign` | `math.sign(n: Int) -> Int` | Rust `signum` / Kotlin `sign` (F) / JS `Math.sign` | 撤去 | R-math-01（`int.sign`） |
 | `sin` | `math.sin(x: Float) -> Float` | Rust `sin` (F) / Go `Sin` / Python・JS `sin` / OCaml `sin` (F) | 据え置き | — |
-| `sqrt` | `math.sqrt(x: Float) -> Float` | Rust `sqrt` (F) / Go `Sqrt` / Gleam `float.square_root` (F) / OCaml `Float.sqrt` (F) | 撤去 | R-math-01（`float.sqrt`） |
+| `sqrt` | `math.sqrt(x: Float) -> Float` | Rust `sqrt` (F) / Go `Sqrt` / Gleam `float.square_root` (F) / OCaml `Float.sqrt` (F) | 据え置き | R-math-03（R-math-01 の見直し） |
 | `tan` | `math.tan(x: Float) -> Float` | Rust `tan` (F) / Go `Tan` / Python・JS `tan` / OCaml `tan` (F) | 据え置き | — |
 | `tanh` | `math.tanh(x: Float) -> Float` | Rust `tanh` (F) / Go `Tanh` / Python・JS `tanh` / OCaml `tanh` (F) | 据え置き | — |
 | `asin` | （追加）`math.asin(x: Float) -> Float` | Rust `asin` (F) / Go `Asin` / Python・JS `asin` / OCaml `asin` (F) / Kotlin `asin` / Swift `asin` | 追加 | R-math-02 |

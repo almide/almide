@@ -104,6 +104,18 @@
 - 理由: `str`（作る）と `as_string`（読む）は役割が違うので、R-L0-00 の条件 1（同じ役割に 2 つの綴り）に当たりません。多数派の綴りもありません。使用数が多く（spec 111 / tests 20 / docs 29 / stdlib 4 / research 11）、改名で新旧が混ざる期間の害のほうが大きいと判定します。
 - issue: なし
 
+### R-value-07 `value.field` を `value.get`（Option）にして、`get_<種類>` の族の頭にする — ○ 採用
+
+- いま: `fn value.field(v: Value, key: String) -> Result[Value, String]` と、`fn value.get_int(v: Value, key: String) -> Option[Int]` ほか 6 つ。`value.get` はありません。
+- 案: `fn value.get(v: Value, key: String) -> Value?` を足し、`value.field` を撤去します。キーで読む族は `get` と `get_<種類>` の 7 つで、すべて Option です。理由が要るときは `as_<種類>`（Result）を使います。
+- 根拠の L0 規則: R-L0-06 の 1（失敗しうる取り出しは無印の名前で Option。`list.get`・`map.get`・`bytes.get`）、R-L0-01（キーで読む役割に `field` と `get_` の 2 つの動詞）。
+- (a) キーで子を読む関数は Rust の JSON ライブラリの `Value::get`（Option）、Python `dict.get`、Elixir `Map.get`。`field` は Gleam の `decode.field` だけです。
+- (c) 実測: `value.get(v, "a")` は E002 で、ヒントは「もしかして `value.int`?」です。LLM は `map.get` と同じ綴りで書きます。
+- (d) 追加 1・撤去 1。`@deprecated(since=15, use="value.get")`、epoch 16 で撤去。`almide fix` が `value.field(v, k)` を `value.get(v, k)` に書き換え、`!` で伝搬していた箇所にはヒント「理由が要るなら `value.get(v, k) ?? …` か `match`」を出します。使用数: spec 24 / tests 17 / docs 14 / stdlib 24。
+- 完全性の規則: `get(v, key)` と `get_<k>(v, key)` はすべて Option、`as_<k>(v)` はすべて Result です。
+- ゲート案: R-value-02 の族ゲートに `get` のセルを足します。
+- issue: #3971
+
 ## L3: 関数表
 
 | 関数 | シグネチャ(現行, mut 表示) | 他言語の主な綴り | 判定 | 案 |
@@ -126,7 +138,7 @@
 | `stringify` | `value.stringify(v: Value) -> String` | JS `JSON.stringify` / Python `dumps` (F) | 撤去 → `json.stringify` | R-value-01 |
 | `to_camel_case` | `value.to_camel_case(v: Value) -> Value` | Kotlin pkg `JsonNamingStrategy` / Swift `keyEncodingStrategy`（型の設定） | 撤去 | R-value-05 |
 | `to_snake_case` | `value.to_snake_case(v: Value) -> Value` | 同上 | 撤去 | R-value-05 |
-| `field` | `value.field(v: Value, key: String) -> Result[Value, String]` | serde `get`（Option） / Gleam `decode.field` / Elixir `Access.key` (F) | 据え置き | — |
+| `field` | `value.field(v: Value, key: String) -> Result[Value, String]` | serde `get`（Option） / Gleam `decode.field` / Elixir `Access.key` (F) | 撤去 → `value.get`（Option） | R-value-07 |
 | `keys` | `value.keys(v: Value) -> List[String]` | serde `as_object()?.keys()` / JS `Object.keys` / Python `d.keys()` | 撤去 → `as_object` | R-value-04 |
 | `as_object` | `value.as_object(v: Value) -> Result[List[(String, Value)], String]`（案） | serde `as_object` / Kotlin pkg `jsonObject` / Gleam `decode.dict` | 追加 | R-value-02 |
 | `get_string` | `value.get_string(v: Value, key: String) -> Option[String]`（案） | serde `v["k"].as_str()` | 追加（`json.get_string` から移す） | R-value-02 |
@@ -141,3 +153,4 @@
 | `get_path` | `value.get_path(v: Value, p: Path) -> Option[Value]`（案） | Elixir `get_in` (F) / serde `pointer` | 追加（`json.get_path` から移す） | R-value-03 |
 | `set_path` | `value.set_path(v: Value, p: Path, x: Value) -> Result[Value, String]`（案） | Elixir `put_in` (F) / serde `pointer_mut` | 追加（`json.set_path` から移す） | R-value-03 |
 | `remove_path` | `value.remove_path(v: Value, p: Path) -> Value`（案） | Elixir `pop_in` (F) | 追加（`json.remove_path` から移す） | R-value-03 |
+| `get` | `value.get(v: Value, key: String) -> Option[Value]`（案） | Rust JSON `Value::get` / Python `dict.get` / Elixir `Map.get` | 追加 | R-value-07 |

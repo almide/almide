@@ -89,6 +89,35 @@
 - ゲート案: spec に負の数・`-0.0`・NaN・inf の行を置きます。
 - issue: #3911
 
+### R-float-05 いまの `float.sign` を `float.signum` に改名する — ○ 採用
+
+- いま: `fn float.sign(n: Float) -> Float` は Rust の `signum` と同じ動きで、`sign(0.0) = 1.0`、`sign(-0.0) = -1.0` です（契約 C-049）。一方、`int.sign(0)` と `bigint.sign` は 0 を返します。同じ `sign` という名前で、0 の扱いが型によって違います。
+- 案: いまの動きのまま `float.signum` に改名し、`float.sign` を撤去します。動きは変えないので、契約 C-049 は関数名だけを直します。
+- 根拠の L0 規則: R-L0-00 の 1（同じ動詞がモジュールによって違う意味）、R-L0-14.4（同じ名前のまま意味を変えない。新しい名前に移す）。
+- (a) 0 を 0 として返すのは JS `Math.sign` (F)・Kotlin `sign` (F)。1.0 を返すのは Rust `f64::signum` だけで、その綴りが `signum` です。
+- (c) `float.sign(dx) * speed`（dx が 0 のとき止まるつもり）が黙って違う値になる誤りを防げます。`signum` は Rust の綴りなので、動きの違いが名前に表れます。
+- (d) 改名。`@deprecated(since=15, use="float.signum")`、epoch 16 で撤去、`almide fix` で 1 対 1。als の C-049 の文の関数名を先に直します。
+- 完全性の規則: `sign` という名前は、すべての数の型で「0 は 0」を返します。
+- issue: #3972
+
+### R-float-06 `float.min`/`max` の NaN の扱いを `list.min`/`max` とそろえる — 保留
+
+- いま: `float.max(NaN, 1.0) = 1.0`（NaN を無視、C-049）、`list.max([NaN, 1.0]) = NaN`（totalOrder）。
+- 保留の理由: NaN を伝える言語（Go・JS・Kotlin・OCaml）と無視する言語（Rust・Swift）のどちらも 5 言語に届かず、契約 C-049・C-306 で決めた動きを変える話です。同じ名前で NaN の入力だけ結果を変えることは R-L0-14.4 が許さないので、変えるなら新しい名前が要ります。判定の材料として、NaN を含む `fold(…, float.max)` と `list.max` の食い違いを LLM がどれだけ踏むかを、almide-dojo の測定（[almide-dojo#63](https://github.com/almide/almide-dojo/issues/63) と同じ枠）で見ます。
+- issue: なし（測定の結果で起票します）
+
+### R-float-07 `round` と `to_fixed` の同点の丸めの違いを文書とゲートで固定する — ○ 採用（関数の面は変えない）
+
+- いま: `float.round(2.5) = 3.0`（0 から遠い側）、`float.to_fixed(2.5, 0) = "2"`（2 進の正確な値の最近接、同点は偶数）。JS の `toFixed` は `"3"` です。
+- 案: 各関数の doc の 1 行目に丸めの規則を書き、CHEATSHEET の float の行に 1 行足します。`spec/stdlib` に `0.5`・`1.5`・`2.5`・`-0.5`・`0.125` を `round` と `to_fixed` の両方で固定します。
+- (d) 文書とテストだけです。
+- issue: #3972
+
+### R-float-08 Float の床方向の剰余 `float.mod` を足す — × 不採用
+
+- 理由: 床方向の剰余を Float で持つのは Python の `%`、Kotlin の `mod`、Gleam の `float.modulo` の 3 言語で、5 言語の基準に届きません。Go・JS・OCaml・Swift・Elixir は 0 方向の剰余です。
+- issue: なし
+
 ## L3: 関数表
 
 `float` の現行 46 関数と、追加する 11 関数です（`compare` を含む）。
@@ -100,7 +129,7 @@
 | `parse` | `float.parse(s: String) -> Result[Float, String]` | Rust `parse` / Go `ParseFloat` / Gleam `parse` (F) / OCaml `of_string_opt` (F) / Kotlin `toDoubleOrNull` / Swift `Double(s)` | 据え置き | — |
 | `to_fixed` | `float.to_fixed(n: Float, decimals: Int) -> String` | JS `toFixed` / Gleam `to_precision`（Float を返す）(F) / Kotlin `"%.2f".format` / Rust `format!("{:.2}")` | 据え置き | — |
 | `to_bits` | `float.to_bits(f: Float) -> Int` | Rust `to_bits` (F) / Go `math.Float64bits` / Kotlin `toBits` / Swift `bitPattern` | 据え置き | R-float-02（`from_bits` と対にする） |
-| `sqrt` | `float.sqrt(n: Float) -> Float` | Rust `sqrt` (F) / Go `math.Sqrt` / Python `math.sqrt` / JS `Math.sqrt` / Gleam `square_root` (F) / OCaml `sqrt` (F) / Kotlin `sqrt` / Swift `squareRoot()` | 据え置き | R-math-01（`math.sqrt` の残る側） |
+| `sqrt` | `float.sqrt(n: Float) -> Float` | Rust `sqrt` (F) / Go `math.Sqrt` / Python `math.sqrt` / JS `Math.sqrt` / Gleam `square_root` (F) / OCaml `sqrt` (F) / Kotlin `sqrt` / Swift `squareRoot()` | 撤去 → `math.sqrt` | R-math-03 |
 | `abs` | `float.abs(n: Float) -> Float` | Rust `abs` (F) / Go `math.Abs` / Python `abs` / JS `Math.abs` / Gleam `absolute_value` (F) / OCaml `abs` (F) / Kotlin `absoluteValue` / Swift `abs` | 据え置き | — |
 | `floor` | `float.floor(n: Float) -> Float` | Rust `floor` (F) / Go `math.Floor` / JS `Math.floor` / Gleam `floor` (F) / OCaml `floor` (F) / Kotlin `floor` / Swift `rounded(.down)` | 据え置き | — |
 | `ceil` | `float.ceil(n: Float) -> Float` | Rust `ceil` (F) / Go `math.Ceil` / JS `Math.ceil` / Gleam `ceiling` (F) / OCaml `ceil` (F) / Kotlin `ceil` / Swift `rounded(.up)` | 据え置き | — |
@@ -108,7 +137,7 @@
 | `min` | `float.min(a: Float, b: Float) -> Float` | Rust `min` (F) / Go `min` / JS `Math.min` / Gleam `min` (F) / OCaml `min` (F) / Kotlin `minOf` / Swift `min` | 据え置き | R-math-01（`math.fmin` の残る側） |
 | `max` | `float.max(a: Float, b: Float) -> Float` | Rust `max` (F) / Go `max` / JS `Math.max` / Gleam `max` (F) / OCaml `max` (F) / Kotlin `maxOf` / Swift `max` | 据え置き | R-math-01（`math.fmax` の残る側） |
 | `clamp` | `float.clamp(n: Float, lo: Float, hi: Float) -> Float` | Rust `clamp` (F) / Gleam `clamp` (F) / Kotlin `coerceIn` | 据え置き | — |
-| `sign` | `float.sign(n: Float) -> Float` | Rust `signum` (F) / JS `Math.sign` / Kotlin `sign` / OCaml `sign_bit` (F)（Bool） | 据え置き | — |
+| `sign` | `float.sign(n: Float) -> Float` | Rust `signum` (F) / JS `Math.sign` / Kotlin `sign` / OCaml `sign_bit` (F)（Bool） | 改名 → `signum`（動きは変えない） | R-float-05 |
 | `is_nan` | `float.is_nan(n: Float) -> Bool` | Rust `is_nan` (F) / Go `math.IsNaN` / Python `math.isnan` / JS `Number.isNaN` / OCaml `is_nan` (F) / Kotlin `isNaN` / Swift `isNaN` | 据え置き | — |
 | `is_infinite` | `float.is_infinite(n: Float) -> Bool` | Rust `is_infinite` (F) / Go `math.IsInf` / Python `math.isinf` / OCaml `is_infinite` (F) / Kotlin `isInfinite` / Swift `isInfinite` | 据え置き | — |
 | `to_int8` | `float.to_int8(n: Float) -> Int8` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |

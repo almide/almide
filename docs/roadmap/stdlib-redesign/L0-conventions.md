@@ -52,7 +52,7 @@ CHEATSHEET の「No synonyms」を、モジュールの境界を越えて適用�
 ## R-L0-02 関数は主語の型のモジュールに置く — ○ 採用
 
 第 1 引数（主語）の型が属するモジュールに置きます。主語のない構築子（`map.new`、`list.range`）は、返す型のモジュールに置きます。
-`math` には、型モジュールに置き場所がない数学関数だけを置きます（超越関数、`factorial`、`choose`）。
+`math` には、型モジュールに置き場所がない数学関数だけを置きます。境界は「`Int` にも同じ役割があるもの（`abs`・`min`・`max`・`clamp`・`sign`・`pow`）は型のモジュール、実数だけの数学関数（`sqrt`・`cbrt`・`hypot`、三角・指数・対数・ガンマ）と `factorial`・`choose` は `math`、丸め・判定・定数・ビット列・変換は `float`」です（R-math-03 で `sqrt` の置き場所を見直してこの形にしました）。
 入れ物の要素の型に意味がある関数（`List[Option[T]]` を受け取る `option.collect`、`List[Result[T, E]]` を受け取る `result.partition`）は、要素の型のモジュールに置きます。
 
 - (a) 多数派は 7/9 で、主語の型のモジュールやメソッドに置いています（Rust・Kotlin・Swift はメソッド、Gleam・Elixir・OCaml は型モジュール）。Go と Python の `math` は例外です。
@@ -78,7 +78,8 @@ CHEATSHEET の「No synonyms」を、モジュールの境界を越えて適用�
    - 両端を持つ入れ物では、端を名前に付けた `push_front`・`push_back`・`pop_front`・`pop_back`（`deque`）。`push`・`pop` と同じ族として数えます
    - `append_<型>`（バイト列の末尾に書き足す）、`put_<型>`（バイト列の位置を指定して上書きする）
    - `copy_from`、`copy_within`（バイト列の範囲をコピーする）
-3. ひとつの動詞は、全モジュールで同じ様式（コピーかその場書き換えか）を表します。`set`・`insert`・`remove`・`delete`・`update` はコピー側の動詞です。
+3. ひとつの動詞は、全モジュールで同じ様式（コピーかその場書き換えか）を表します。
+4. `clear` は入れ物の型すべてに置きます（list・map・set・deque・heap・string・bytes）。確保した場所を保ったまま空にするので、コピーで同じ速さに書けないからです（set・deque・heap への追加は二巡目の見直しで決めました。R-deque-02、R-heap-02）。`set`・`insert`・`remove`・`delete`・`update` はコピー側の動詞です。
 
 **この規則から決まること（L2 で個別に判定します）:**
 - `map.insert(mut m, k, v)` と `map.delete(mut m, k)` は撤去します。`set.insert` と `list.insert` はコピーなのに、`map.insert` だけがその場書き換えです。`m[k] = v` と `m = map.remove(m, k)` が同じ速さで書けます。
@@ -121,6 +122,7 @@ fn main() -> Unit = {
 2. 既定値を受け取る `_or` 版（`list.get_or`、`map.get_or`、`bytes.get_or`、`args.option_or`）は `xs |> list.get(i) ?? d` と同じなので、撤去します。`option.unwrap_or` と `result.unwrap_or` を `??` に寄せた ADR-0005 の延長です。
 3. 処理を止める（abort）のは、呼び出し側の契約違反だけです（例: `list.chunk(xs, 0)`）。
 4. 失敗しうる構築・変換は、失敗の目印になる値（空文字、0、空のリスト）を返しません。理由がなければ `Option`、理由があれば `Result[_, String]` を返します（例: `string.from_codepoint` がいま無効な値で `""` を返すのは、この規則に反します）。
+5. 例外: 数値変換の無印 `to_<型>` は、損失のある組でも折り返す版です（R-L0-08）。範囲外の値を黙って別の値に変えるので、1 の「無印は安全版」に当てはまりません。9 言語の多数派に合わせた例外として据え置き、安全版は `_checked`・`_saturating` の接尾辞で選びます。この例外をやめるかどうかは R-L0-21 で保留しています。
 
 - (a) 無印が安全版なのは Rust、OCaml Base、Elixir です。無印が例外版なのは OCaml Stdlib と Kotlin で、多数派はありません。Almide は例外を持たないので、無印が安全版である以外の選択肢はありません。既定値版は Python の `get(k, d)`、Kotlin の `getOrDefault`、Elixir の `get(m, k, default)` がありますが、Rust・Swift・JS・Gleam は演算子か汎用の関数で書きます。
 - (c) `??` は CHEATSHEET が教える唯一の書き方です。`get_or` を覚えていなくても書けます。
@@ -148,7 +150,9 @@ fn main() -> Unit = {
 - 折り返し演算 `int.wrap_add`、`wrap_sub`、`wrap_mul` と `int.wrap(n, bits)`: いまは `wrap_sub` と `wrap` がない（#3854）。
 
 - (a) 4 種を全部別の名前で持つのは Rust（接頭辞）と Swift（引数ラベル）だけで、多数派はありません。いまの接尾辞の行列はすでにゲートで守られているので、据え置きます。
+  - 9 言語の外の参考として Zig も見ました。Zig は 1 語の変換を持たず、`@intCast`（範囲外は不正な動作で、安全モードでは止まる）と `@truncate`（折り返し）のように、意味ごとに名前を分けています（[言語リファレンス](https://ziglang.org/documentation/master/#intCast)）。Rust も `as` を禁じる・警告する lint（clippy の `as_conversions`・`cast_possible_truncation`）を持っています。意図を名前に書かせる方向は、Almide の接尾辞の行列と同じです。
 - (c) 行列の穴（`wrap_sub` がない）は、LLM が規則から推測して書いたときに確実に外れます。
+- 変換の演算子 `as` を足さない判定は R-L0-18、他言語の変換の書き方から案内する診断は R-L0-19 です。
 - issue: #3854（既存）
 
 ## R-L0-09 Bool を返す関数は `is_`/`has_`、または決まった動詞 — ○ 採用
@@ -158,6 +162,7 @@ Bool を返す公開関数の名前は、`is_` か `has_` で始めます。そ�
 - (a) `is` 接頭辞は 8/9 です（Elixir だけが末尾に `?` を付けます）。`contains` は 5/9、`starts_with` と `ends_with` も多数派です。
 - (c) 名前から Bool が返ることが読めます。
 - いまの例外（L2 で判定します）: `args.flag`、`bytes.eof`、`regex.full_match`、`net.unix_poll`。`bytes.read_bool` は Bool を読み出す関数なので、対象外です。
+- 族の接頭辞: モジュールの中で関数の族を接頭辞で分けている場合（`net.tcp_*`・`net.udp_*`）、`is_` は族の接頭辞の後ろに置きます（`net.tcp_is_open`）。名前の先頭は族、残りがこの規則に従う、と読みます。
 - ゲート: 戻り型が Bool の公開関数の名前を検査します。
 - issue: #3895
 
@@ -220,6 +225,7 @@ ADR-0022 のとおり、純粋な関数は書き出しと abort はできます�
 - 標準から外して package にする
 
 「native 専用のまま」を終点にはしません（ADR-0027 D8）。
+- 4 つめの道（二巡目の見直しで追記）: private host capability（ADR-0025・ADR-0029）。`process` の全関数と `testing.assert_aborts` は、組み込みの host が提供する私的な機能で wasm に乗ります。標準の wasm ホストでは読み込み時に拒否され、黙って違う結果にはなりません。退役の予定はないので「暫定の host op」とは別に数えます。各 L2 の (b) は、標準 WASI・暫定の host op・private host capability・標準の外（package）の 4 つのどれかを名指しします。
 
 ## R-L0-16 順序のある型には `compare` を置く — ○ 採用
 
@@ -241,6 +247,127 @@ effect fn を呼んだときの型（`!` が要るか、`??` をそのまま書�
 - (d) 言語の変更です。どちらの形に揃えるかは、ADR-0002（失敗と effect は別の軸）と ADR-0008（伝搬は明示だけ）に沿って、issue で設計します。揃えた結果が既存の呼び出しを変える場合は、epoch 15 の `breaks` に入れます。
 - ゲート: 標準の effect fn すべてについて、intrinsic 版と Almide 版で `??` と `!` の受け付けが同じになることを、宣言ごとの fixture で確かめます。
 - issue: #3900
+
+## R-L0-18 型を変換する演算子 `as` は足さない — × 不採用
+
+`x as Int8` のような、1 つの記号で型を変える演算子を足すかどうかの判定です。他の言語の `as` は、次の 3 つの別の仕組みに分かれます。
+
+| 仕組み | 例 | Almide での受け持ち |
+|---|---|---|
+| 数の変換 | Rust `x as i8`（折り返し。float→int は張り付き）、Go `int8(x)`、Swift `Int8(x)`（止まる） | `to_<型>`・`_checked`・`_saturating`（R-L0-08） |
+| 実行時の型の確認（ダウンキャスト） | Kotlin `as?`、Swift `as?`/`as!`、Go `x.(T)`、Rust `downcast` | 不要。継承や `Any` が無く、中身の分からない値（`Value` など）は `match` で場合分けする |
+| 型検査を黙らせる | TypeScript `x as Foo`、Python `typing.cast` | 入れない。実行時に何も確かめない |
+| 式の途中で型を決める | Swift `[] as [Int]`、`1 as Double` | 型注釈 `[]: List[Int]`（実測: E018 のヒントもこの形を教える） |
+
+- (a) 数の変換を `as` 1 つで書くのは Rust だけです。Swift の `as` は数の変換に使えません（`x as Int8` はコンパイルエラーで、変換は初期化子 `Int8(x)` で書きます。[Type Casting](https://docs.swift.org/swift-book/documentation/the-swift-programming-language/typecasting/)）。Rust 自身も `as` を lint で禁じられるようにしています（[参照](https://doc.rust-lang.org/reference/expressions/operator-expr.html#type-cast-expressions)）。Zig は `as` に当たる 1 語の変換を持たず、意味ごとに名前を分けています。
+- (b) 該当なし（足さない）。
+- (c) 1 つの記号で「折り返す」「張り付く」「止まる」が型の組で切り替わると、どれが起きるかがコードから読めません。型検査を黙らせる `as` は、LLM が型エラーを消すために書く、よくある失敗の形です。
+- (d) 足さないので互換の影響はありません。`as` は import の別名（`import x as y`）と JSON のフィールド名の付け替えにだけ使い続けます。
+- 理由のまとめ: 数の変換は R-L0-08 の名前つき関数があり、R-L0-01（1 つの役割に綴りは 1 つ）に反します。ほかの 3 つの用途は、Almide の型の作りでは要らないか、目的に反します。他言語の癖で書かれた `as` は、R-L0-19 の診断で受け止めます。
+
+## R-L0-19 他言語の変換の書き方から、変換の関数へ案内する — ○ 採用
+
+- 内容:
+  1. `x as Int8`・`Int8(x)`・`x.into()`／`x.try_into()` を見つけたら、元の型と先の型に合わせて、使う関数とはみ出したときの動きを 1 つの診断で出します（例: `int.to_int8(x)` は折り返す、`int.to_int8_checked(x)` は `Option`、`int.to_int8_saturating(x)` は張り付く）。
+  2. 未定義の名前の「もしかして」表（`ALIASES`）を、L3 の関数表の「他言語の主な綴り」の列から生成します。全モジュールが対象です（list と string は #3905 で手で直す分）。
+- 実測（develop `9352c73e3`）: `x as Int8` は「変数 `as` がない」とヒント「もしかして `x`?」に続けて、`Int8` についても別のエラーになります。`Int8(x)` は「型 `Int8` が呼べない」、`x.into()` は「メソッド `into` がない」で、どれも正しい関数を示しません。
+- (a) 他言語の書き方は R-L0-18 の表のとおりです。
+- (b) 検査器だけの変更です。
+- (c) R-L0-18 で `as` を足さないので、Rust・TypeScript・Kotlin・Swift の癖で書かれた `as` は残ります。最初のエラーで正しい関数に着けるかどうかが、修正の生存率を決めます。
+- (d) 診断の追加だけです。互換の影響はありません。
+- 完全性の規則: L3 の「他言語の主な綴り」の各綴りは、生きている関数か正しい式を指す `ALIASES` のキーになっているか、外す理由（Almide で別の意味の生きている名前である、など）が書いてあるかのどちらかです。変換の行列のすべての組に、`as`・`T(x)`・`into` の案内があります。
+- ゲート案: #3905 で提案した `tests/stdlib_alias_table_test.rs` で、生成した行と L3 の列を突き合わせます。`tests/diagnostics/` に 4 つの形の例を置き、診断が 1 つだけ出て関数名を示すことを確かめます。
+- issue: #3958
+- 二巡目の見直しで足すこと（issue: #3967）:
+  3. 関数を置かずに構文や式で書く役割にも案内の行を置きます。L3 の表とは別に「役割 → 正しい式」の表を 1 枚持ちます。例: `list.for_each`・`each`・`iter` → `for x in xs { … }`、`result.collect` → `rs |> list.map((r) => r!)`、`option.unwrap` → `o ?? panic("…")`、`result.ok` → `result.to_option`、`string.char_at` → `string.get`、`list.concat` → `xs + ys`、`bigint.add` → `a + b`、`float32.is_nan` → `float32.to_float(x) |> float.is_nan`。
+  4. 行列が意図して置かないセルの名前（`bytes.get_u8` → `bytes.get`、`bytes.append_u8` → `bytes.push`、`bytes.get_u64_le` → `get_i64_le`、`json.encode` → `json.stringify`、`value.to_string` → `json.stringify`、`random.next_bytes` → `next_int` の繰り返し）は、必ず案内の行を持ちます。
+  5. 編集距離で選んだ候補が、意味の違う生きた関数を指すときは出しません。実測で誤っていた案内: `list.find_last` → `find_map`、`list.last_index_of` → `index_of`、`list.iter` → `filter`、`bytes.get_u8` → `set_u8`（書き込みの関数）、`value.to_string` → `as_string`、`print` → `println`（改行が付いて出力が変わる）。
+  6. `String` と `Bytes` の取り違え（E005）には、`bytes.from_string(s)`・`bytes.to_string(b)` を示します。`fs.read_bytes`・`hash.fnv1a32`・`io.write_bytes` が `Bytes` に変わるので、この取り違えは増えます。
+  7. `5 & 3` のような他言語のビット演算子は、いまは構文エラー「`)` がない」になります。案内（#3905 で予定）は、字句ではなく構文エラーの経路に置きます。
+
+## R-L0-20 critical プロファイルで、黙って折り返す `to_<型>` を拒む — 保留
+
+- 内容: `almide check --profile critical` のときだけ、損失のある組の `to_<型>` をエラーにし、`_checked` か `_saturating` を書かせます。Rust の clippy の `cast_possible_truncation` と同じ考え方です。普段のコードは変わりません。
+- 保留の理由: いまの critical プロファイル（ALS の bounded 規則）が保証するのは、安全さと資源の上限で、計算の正しさは含みません。`xs[i]` の範囲外や 0 での割り算も、critical で拒んでいません（2026-10-01 に実測）。正しさの規則（全域性）を critical に入れる件は、[certification-grade](../active/certification-grade.md) の CG-3 として先送りになっています。黙って折り返す変換だけを先に拒むと、critical の規則の性格がばらばらになるので、全域性の規則と同時に判断します。
+- 決めるときの順番: ALS（almide/als）に規則を足す → pin を進める → 検査器（`check/bounded.rs`）を実装する。
+- issue: なし（CG-3 を再開するときに一緒に起票します）
+
+## R-L0-21 無印の `to_<型>` を、はみ出したら失敗する版に変える — 保留
+
+- 内容: 損失のある組の `to_<型>` を `Option` を返す形（いまの `_checked` と同じ）に変え、折り返す版を `to_<型>_wrapping` にします。Zig と Swift の形です。R-L0-06 の 5 の例外がなくなります。
+- (a) 1 語の損失ありの変換を持つ言語のうち、折り返すのは Rust の `as`・Go・Kotlin・OCaml の 4 つ、止まるのは Swift の 1 つです。R-L0-00 の改名の条件（5/9 以上）に届きません。
+- (b) 純粋な計算です。両 target で同じです。
+- (c) `int.to_int8(300)` が黙って `44` になるバグは、型検査も実行も通ります。この形にすれば起きません。一方で、変換を書くたびに `??` か `!` が要るようになります。
+- (d) 意味変更です。戻り型が変わるので古いコードは型エラーになり、R-L0-14.4 の条件は満たします。`almide fix` で `to_<型>_wrapping` に書き換えられます。損失のある組すべてに及ぶ大きい変更です。
+- 保留の理由: 多数派の裏付けがないので、LLM が実際に黙って折り返すバグをどれだけ書くかを測ってから決めます。測定は almide-dojo で行います。
+- issue: [almide-dojo#63](https://github.com/almide/almide-dojo/issues/63)（測定）
+
+## R-L0-22 組み込みの `Ord` プロトコルのメソッド名を `compare` にする — ○ 採用
+
+- いま: 組み込みの `Ord` のメソッドは `fn cmp(a: Self, b: Self) -> Int` です（[type-system.md](../../specs/type-system.md) §10）。一方で R-L0-16 は、順序のある型のモジュールに `<mod>.compare(a, b) -> Int` を置きます。`Duration` は `Ord` を導出しているので、同じ比較に `d.cmp(e)` と `duration.compare(d, e)` の 2 つの綴りができます。
+- 案: `Ord` のメソッド名を `compare` にします。利用者が書く `fn T.cmp(a: T, b: T) -> Int` は `fn T.compare(…)` になります。こうすると、組み込みの型の `Ord` のメソッドと、モジュールの `compare` 関数が同じ名前になり、綴りが 1 つになります。
+- 根拠の L0 規則: R-L0-01（同じ役割に綴りは 1 つ）、R-L0-16、R-L0-00（内部の衝突は改名の理由になる）。
+- (a) 3 値の比較を `compare` と呼ぶのは Go（`cmp.Compare`）、Gleam、Elixir、OCaml、Kotlin（`compareTo`）です。`cmp` は Rust だけです。
+- (b) 検査器と、メソッドを名前で探すところだけの変更です。
+- (c) `list.sort_with(xs, duration.compare)` と `a.compare(b)` が同じ単語になり、どちらから覚えても書けます。
+- (d) 改名です。epoch 15 で `cmp` を `@deprecated(since=15, use="compare")` にし、epoch 16 で撤去します。`almide fix` が `fn T.cmp` の宣言と `.cmp(` の呼び出しを書き換えます。
+- 実測（develop `437b8f127`）: `duration.ms(5).cmp(duration.s(1))` は `almide check` を通りますが、ビルドで内部エラー（`[COMPILER BUG] internal type resolution failed`）になります。これは綴りと関係なく直すべき不具合なので、別の issue #3960 にしました。
+- 完全性の規則: `Ord` を持つ標準の型は、すべて `<mod>.compare` を持ち、それが `Ord` のメソッドそのものです（転送の関数を別に置きません）。
+- ゲート案: R-L0-G のテストで、`Ord` を持つ標準の型ごとに `compare` が解決でき、check とビルドの両方を通ることを確かめます。
+- issue: #3961
+
+## R-L0-23 状態を進める関数は `next_` で始め、`(値, 次の状態)` を返す — ○ 採用
+
+- いま: 状態を渡して、値と次の状態を受け取る関数が 2 つの族にあり、名前と戻り値の順序がそろっていません。
+  - `random.next_int(rng, min, max) -> (Int, Rng)`: 名前は `next_`、値が先です。
+  - `bytes.read_i32_le_at(b, pos) -> (Int, Option[Int])`、`bytes.take_at(b, pos, n) -> (Int, Option[Bytes])`: 名前は `read_…_at`、次の位置が先です。さらに、位置を指定して読むだけの `bytes.get_i32_le(b, pos)` もあります。
+- 案: 状態を進める関数は `next_<何>` と名付け、`(値, 次の状態)` の順で返します。bytes の読み位置を進める族は、`bytes.next_<型>(b, pos) -> (Option[T], Int)` と `bytes.next_bytes(b, pos, n) -> (Option[Bytes], Int)` に改名します（細目は [L2-bytes](L2-bytes.md) R-bytes-13）。
+- 根拠の L0 規則: R-L0-01（同じ形の役割に同じ綴り）。R-L0-03 の「主語を先頭に」は引数の規則で、戻り値の順序を決めていなかったので、ここで決めます。
+- (a) 状態を明示して渡す乱数の API は、Haskell の `random :: g -> (a, g)`、Elixir の `:rand.uniform_s` が `{値, 状態}`、パーサーの慣習も `(値, 残り)` で、値が先です。Rust でよく使われる bytes ライブラリでは `get_i32_le` が「読み位置を進める」側の名前なので、Almide の `get_<型>`（位置を指定して読むだけ）と逆になります。`next_` にすれば、この取り違えも起きません。
+- (b) 純粋な計算です。
+- (c) 「`next_` は状態を進める、`get_` は位置を指定して読むだけ」が全モジュールで同じになります。`let (v, pos) = …` の分解の順序も 1 つになります。
+- (d) 改名と意味変更です。戻りのタプルの型が変わるので、古いコードは型エラーで止まります（R-L0-14.4 を満たします）。epoch 15 で旧名を `@deprecated` にし、epoch 16 で撤去します。`almide fix` は名前を書き換え、タプルの分解の順序は書き換えられないのでヒントを出します。
+- 完全性の規則: 戻り型が「状態の型を含むタプル」の公開関数は、名前が `next_` で始まり、タプルの最後が状態です。
+- ゲート案: R-L0-G のテストに、この形の検査を足します（状態の型は `Rng` と、読み位置の `Int` を返す bytes の族）。
+- issue: #3962
+
+## R-L0-24 標準の面の型は正規の綴りで書く（`T?`） — ○ 採用
+
+- いま: ADR-0010 は `T?` を `Option[T]` の正規の綴りと決めていて、`almide fmt` も `T?` に直します。ところが、標準の関数の宣言は `Option[T]` が 199、`T?` が 23 で、混ざっています。LLM が読む docs/stdlib と interface JSON も、この宣言をそのまま見せています。
+- 案: 標準の `.almd` の宣言を `T?` にそろえ、docs/stdlib・interface JSON・この記録の [target-surface.md](target-surface.md) の表示も正規の綴りにします。
+- 根拠の L0 規則: R-L0-01（同じ型に綴りは 1 つ）、ADR-0010。
+- (b)・(d) 綴りだけの変更で、型も挙動も変わりません。互換の影響はありません。
+- (c) 文書で 2 つの綴りを見た LLM は、どちらが正しいか迷います。正規の綴りだけを見せれば、`almide fmt` の結果とも一致します。
+- 完全性の規則: 標準の公開関数の宣言に `Option[` が現れません。
+- ゲート案: `stdlib/*.almd` の公開関数の宣言を対象に、`almide fmt --check --no-import-edit` と同じ正規化をかけ、差分が出ないことを確かめます。
+- issue: #3963
+
+
+## R-L0-25 文字列との変換の動詞を表で決める — ○ 採用
+
+| 種類 | 文字列へ | 文字列から |
+|---|---|---|
+| 型つきの値（`Url`・`Uuid`・`Int`・`BigInt`・`Regex` など） | `to_string` | `parse`（Result） |
+| 同じ値の別の表現（`Bytes` など） | `to_<表現>` | `from_<表現>` |
+| 中身を保ったまま文字の並びだけを変える符号化（base64・hex・URL の component・form） | `encode_<変種>`（変種がなければ `encode`） | `decode_<変種>`（Result） |
+| 例外 | `json.stringify`（学習データで圧倒的な綴り。R-json-03）、`url.build_query`（`parse_query` の逆。多数派なし） | — |
+
+- 根拠の L0 規則: R-L0-07、R-L0-01、R-L0-00。この表は、二巡目の見直しで「綴りはすでにそろっているが、規則として書かれていない」ことが分かったので足しました（`path.from_string` は R-path-02 で消えます）。`build_query` の改名は、多数派がないので × です。
+- (c) 新しいモジュールを足すときに綴りが揺れません（uuid は `parse`・`to_string`・`from_bytes`・`to_bytes` で、すでにこの表どおりです）。
+- ゲート案: R-L0-G に「`String` から `Result[T, _]` を返す公開関数の名前は `parse`・`parse_<x>`・`decode_<x>`・`from_<x>` のどれか」を足します。許容リストは上の 2 つの例外から始め、減らす方向だけにします。
+- issue: #3971
+
+## R-L0-26 演算子を持つ型は、演算子と脱糖先の表を 1 か所で宣言する — ○ 採用
+
+- いま: どの型でどの演算子が使えるかは、検査器と lowering に別々に書かれています。食い違いの実例: `-m`（Matrix の単項マイナス）は `almide check` を通るのに、lowering で内部エラー（「NegInt expects Int operand」）になります（#3965）。また、bigint と matrix は演算子の脱糖先（`bigint.add`・`matrix.add` など）を公開の関数としても持ち、同じ計算に 2 つの綴りがあります。
+- 案:
+  1. 型 × 演算子（`+ - * / %`、単項 `-`、比較）の表を 1 か所で宣言し、検査器と lowering の両方がそれを読みます。表にないセルは、内部エラーではなく診断つきの型エラーにします。
+  2. 演算子の脱糖先は公開しません（`__add` などの内部の名前）。公開の書き方は演算子だけです。例外は、ほかの型にも同じ名前があって演算子と意味が違う関数（`floor_div`・`mod`）だけです（R-bigint-04、R-matrix-14）。
+- 根拠の L0 規則: R-L0-01、R-L0-15、R-L0-17（呼び方は宣言から決まる）。
+- (c) `+` が使えるのを見た LLM は `-m` とも書きます。そこで利用者に直せない内部エラーになるのを防げます。
+- 完全性の規則: 演算子を持つ型ごとに、表の各セルが「脱糖先がある」か「診断つきの型エラー」のどちらかです。
+- ゲート案: 表のすべてのセルについて、`almide check` とビルドの結果を固定する fixture を置きます。
+- issue: #3973
 
 ---
 

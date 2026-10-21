@@ -49,11 +49,22 @@
 - ゲート案: `bytes` に `RawPtr` を引数か戻り値に持つ公開関数が無いこと。`ffi.address` の空のときの答えを native と wasm で比べる cross fixture。
 - issue: #3853（既存）
 
+### R-ffi-02 `ffi.read` と `ffi.write` を effect fn にする — ○ 採用
+
+- いま: `fn ffi.read(ptr: RawPtr, len: Int) -> Bytes` と `fn ffi.write(b: Bytes, ptr: RawPtr, cap: Int) -> Int` は純粋な fn です。
+- 案: `effect fn ffi.read(…)`、`effect fn ffi.write(…)`。`address`・`to_int` は純粋のままです。
+- 根拠の L0 規則: R-L0-13（環境を読む関数は effect）、ADR-0022（純粋な fn ができるのは書き出しと abort だけ）。`write` は Almide の値の外のメモリを書き換え、`read` は外のコードが書いたメモリを読みます。
+- (a) 9 言語とも、生の番地の読み書きは `unsafe`・`ctypes` など、ふつうの関数と区別された場所にあります。
+- (b) 実測で両 target が食い違います。純粋な fn の中で `let` の `Bytes` の番地へ書くと、native では呼び出し元の不変の値が書き換わり、wasm では書き換わりません（いまの `bytes.as_mut_ptr` と `copy_to_ptr` で再現。#3966、リリースを止める不具合として別に直します）。純粋な fn として扱うかぎり、最適化でさらに変わりえます。
+- (d) 新しい関数の宣言だけです。移行元の `bytes.from_raw_ptr`・`copy_to_ptr` を使う純粋な fn は、書き換えたあと E006 になるので、ヒント「呼び出し元を effect fn にする」を出します。
+- 完全性の規則: Almide の値の外にある状態を読み書きする関数は effect です。`ffi` では {address, to_int} が純粋、{read, write} が effect です。
+- issue: #3974
+
 ## L3: 関数表
 
 | 関数 | シグネチャ(案) | 他言語の主な綴り | 判定 | 案 |
 |---|---|---|---|---|
 | `ffi.address` | `fn address(b: Bytes) -> RawPtr` | Rust `as_ptr` / Go `unsafe.SliceData` / Python `addressof` | 追加（`bytes.as_ptr`・`as_mut_ptr` から） | R-ffi-01 |
 | `ffi.to_int` | `fn to_int(p: RawPtr) -> Int` | Go `uintptr` / Swift `Int(bitPattern:)` | 追加（`bytes.data_ptr` の役割） | R-ffi-01 |
-| `ffi.read` | `fn read(ptr: RawPtr, len: Int) -> Bytes` | Rust `from_raw_parts` / Python `string_at` / Go `unsafe.Slice` | 追加（`bytes.from_raw_ptr` から） | R-ffi-01 |
-| `ffi.write` | `fn write(b: Bytes, ptr: RawPtr, cap: Int) -> Int` | Rust `copy_nonoverlapping` / Python `memmove` | 追加（`bytes.copy_to_ptr` から） | R-ffi-01 |
+| `ffi.read` | `effect fn read(ptr: RawPtr, len: Int) -> Bytes` | Rust `from_raw_parts` / Python `string_at` / Go `unsafe.Slice` | 追加（`bytes.from_raw_ptr` から） | R-ffi-01 |
+| `ffi.write` | `effect fn write(b: Bytes, ptr: RawPtr, cap: Int) -> Int` | Rust `copy_nonoverlapping` / Python `memmove` | 追加（`bytes.copy_to_ptr` から） | R-ffi-01 |

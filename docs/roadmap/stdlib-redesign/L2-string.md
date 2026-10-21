@@ -196,6 +196,19 @@
 - ゲート案: R-L0-G の番兵検査（戻り型が `String`・`Int` で、名前が `from_`・`parse`・`decode` で始まる公開関数を一覧にし、境界入力で目印を返さないことを確かめる。L2-bytes R-bytes-09 と同じテスト）。`from_codepoint(0xD800) == none` と `from_codepoint(0x1F980) == some("🦀")` の fixture を native と wasm で置きます。
 - issue: #3946
 
+### R-string-08 `string.slice` の終わりの既定値を外し、2 引数の形は `drop` に一本化する — ○ 採用
+
+- いま: `fn string.slice(s: String, start: Int, end: Int = 末尾) -> String` は、標準の関数で唯一の既定値つきの引数です。`string.slice(s, n)` は `string.drop(s, n)` と同じ値になります。`list.slice` と `bytes.slice` は 3 引数だけで、2 引数で呼ぶと E004 です。
+- 案: `end` の既定値を外し、`fn string.slice(s: String, start: Int, end: Int) -> String` にします。2 引数の呼び出しは E004 になり、ヒントで `string.drop(s, n)` を示します。list と bytes に既定値は足しません。
+- 根拠の L0 規則: R-L0-01（2 引数の `slice` は `drop` の別名）、R-L0-12（境界の行列は list・string・bytes で同じ形）。
+- (a) 終わりを省ける slice は JS・Python・Kotlin（`substring(a)`）にありますが、Almide にはすでに `drop` があります。3 つの型すべてに既定値を足すと、`slice(n)` と `drop(n)` の同義語が 3 組できます。
+- (b) 検査器と宣言だけの変更です。
+- (c) 実測: `string.slice("abcdef", 2)` は `cdef` を返し、`list.slice([1,2,3], 1)` は E004 です。string で覚えた 2 引数の形が、list と bytes では外れます。
+- (d) 意味変更（受け付ける形を狭める）です。古い 2 引数の呼び出しは E004 になり、黙って結果は変わらないので、R-L0-14.4 を満たします。epoch 15 の `breaks` に入れ、`almide fix` が `string.slice(s, n)` を `string.drop(s, n)` に書き換えます。使用数（2 引数）: spec 6 / docs 1 / stdlib 2 / research 4 / examples 1。
+- 完全性の規則: `slice`・`take`・`drop`・`take_end`・`drop_end` を持つ型（list・string・bytes）では、同じ名前の関数の引数の数が同じです。標準の公開関数に既定値つきの引数は置きません。
+- ゲート案: R-L0-12 の境界の行列テストに「3 つの型の同名関数で引数の数が同じ」を足し、interface JSON で既定値つきの引数が 0 本であることを確かめます。
+- issue: #3969
+
 ## L3: 関数表
 
 | 関数 | シグネチャ(現行, mut 表示) | 他言語の主な綴り | 判定 | 案 |
@@ -209,7 +222,7 @@
 | `contains` | `(s: String, sub: String) -> Bool` | Rust/Gleam/Kotlin/Swift `contains` / JS `includes` | 据え置き | — |
 | `starts_with` | `(s: String, prefix: String) -> Bool` | Rust/Gleam/OCaml `starts_with` / Go `HasPrefix` | 据え置き | — |
 | `ends_with` | `(s: String, suffix: String) -> Bool` | Rust/Gleam/OCaml `ends_with` / Go `HasSuffix` | 据え置き | — |
-| `slice` | `(s: String, start: Int, end: Int = 末尾) -> String` | Gleam/Elixir/JS `slice` / Python `s[a:b]` | 据え置き（負の開始位置は 0 に丸める。list・bytes がこれに合わせる） | R-L0-12 |
+| `slice` | `(s: String, start: Int, end: Int) -> String` | Gleam/Elixir/JS `slice` / Python `s[a:b]` | 意味変更（`end` の既定値を外す。2 引数は `drop`） | R-string-08 |
 | `byte_slice` | `(s: String, start: Int, end: Int) -> Option[String]` | Elixir `byte_slice` / Rust `get(a..b)` | 据え置き | — |
 | `pad_start` | `(s: String, n: Int, ch: String) -> String` | JS/Gleam/Kotlin `padStart` / Python `rjust`。`ch` は先頭の 1 文字だけ使う（実測: `pad_start("7",5,"ab")="aaaa7"`） | 据え置き | — |
 | `to_bytes` | `(s: String) -> List[Int]` | Rust `as_bytes` / Kotlin `encodeToByteArray` / Gleam `bit_array.from_string` | 撤去（→ `bytes.from_string`） | R-string-02 |

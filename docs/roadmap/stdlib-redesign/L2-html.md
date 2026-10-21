@@ -38,11 +38,17 @@
 - 根拠の L0 規則: R-L1-29（動かさない）、R-L0-00。
 - (b) 純粋な計算です。両 target で同じ結果です（実測）。
 - (c) 文字列と `SafeHtml` を取り違えると型エラーになり、黙って二重エスケープ・エスケープ漏れになりません。
+- `empty` と `new` の使い分け: 入れ物を作る関数は `new`（`map.new`、`set.new`、`deque.new`）ですが、`html.empty()` は入れ物ではなく「空の HTML 断片」という値で、`concat` の単位元です。値の名前として `empty` を残します（R-L0-01 の同義語には当たりません）。
 - issue: なし
 
 ### R-html-02 `unescape` を足す — × 不採用
 
 - 理由: 標準に持つのは Go・Python・Deno の 3 言語で、L1 の基準（5 言語以上）に届きません。HTML を読む処理は package（HTML の構文解析器）の関心事です。
+- issue: なし
+
+### R-html-03 `SafeHtml` の列をまとめる `html.join` を足す — × 不採用
+
+- 理由: エスケープの型を持つ言語が 2 つしかなく、5 言語の基準に届きません。`list.fold(xs, html.empty(), html.concat)` で書けます。
 - issue: なし
 
 ## L3: 関数表

@@ -141,6 +141,48 @@
 - (c) `add`・`sub`・`div` が要素ごとで `mul` だけが行列の積という並びは紛らわしいので、doc の 1 行目と CHEATSHEET の matrix の行に「`mul` は行列の積。要素ごとの積は `map` で」と書きます。R-matrix-05 で形の不一致が止まるので、取り違えは実行時に見つかります。
 - issue: なし
 
+### R-matrix-09 要素ごとの二項演算を `matrix.zip_with` で書けるようにする — ○ 採用
+
+- いま: 要素ごとの演算は `add`・`sub`・`div` だけで、要素ごとの積がありません。R-matrix-07（×）は「要素ごとの積は `map` で」と書くとしていますが、`matrix.map` は 1 引数の関数なので 2 つの行列の積は書けません（R-matrix-07 への新しい証拠）。
+- 案: `fn matrix.zip_with(a: Matrix, b: Matrix, f: (Float, Float) -> Float) -> Matrix`。形が違えば R-matrix-05 と同じく abort します。
+- 根拠の L0 規則: R-L0-10（`_with`。`list.zip_with` と同じ綴り）。
+- (a) 外部ライブラリの多数派は要素ごとの積を持ちます（numpy `*`、gonum `MulElem`、Nx `multiply`）。
+- (c) `matrix.mul` を要素ごとの積だと思って書いた LLM が、直す先の関数を持てます。
+- (d) 追加 1。`mul`（行列の積）の意味は変えません。
+- issue: #3972
+
+### R-matrix-11 行方向の連結を `concat_rows(List[Matrix])` にし、`concat_cols` と形をそろえる — ○ 採用
+
+- いま: `matrix.append_rows(base, extra)`（2 つを受け取る）と `matrix.concat_cols(matrices: List[Matrix])`（リストを受け取る）。
+- 案: `fn matrix.concat_rows(matrices: List[Matrix]) -> Matrix` を足し、`append_rows` を撤去します。
+- 根拠の L0 規則: R-L0-01（軸だけが違うものは同じ形）、R-L0-04 の 2（`append_` は `mut` のその場書き換えの動詞として予約されている）。
+- (a) numpy `vstack`/`hstack`、Nx `concatenate`、ndarray `concatenate` はどれも両方の軸でリストを受け取ります。
+- (d) 追加 1・撤去 1。`@deprecated(since=15, use="matrix.concat_rows")`、`almide fix` で `append_rows(a, b)` を `concat_rows([a, b])` に書き換えます。
+- issue: #3972
+
+### R-matrix-12 `to_bytes_f16_le` を足して、バイト列の変換を対にする — ○ 採用
+
+- 案: `fn matrix.to_bytes_f16_le(m: Matrix) -> Bytes`（f16 への丸めは IEEE の最近接偶数）。
+- 根拠の L0 規則: R-L0-07 の 4（向きの対はそろえる）。幅 {f16, f32, f64} × 向き {from, to} の 6 セルにします。
+- (d) 追加 1。
+- issue: #3972
+
+### R-matrix-13 `matrix.pow` を撤去する — ○ 採用
+
+- いま: `fn matrix.pow(m: Matrix, exp: Float) -> Matrix` は要素ごとの累乗で、`matrix.map(m, (x) => float.pow(x, e))` を 1 回呼ぶだけです。数学の記法 A^2 は行列の積なので、名前の読み違いも起きます。
+- 根拠の L0 規則: R-L0-01（ほかの公開関数を 1 回呼ぶだけの関数は同義語）。
+- (d) 撤去。`almide fix` が `matrix.map(m, (x) => float.pow(x, e))` に書き換えます。使用数 6/0/3/0。
+- issue: #3973
+
+### R-matrix-14 matrix の `add`/`sub`/`mul`/`div`/`neg` を公開しない（演算子だけにする） — ○ 採用
+
+- いま: `a + b`・`a - b`・`a * b`（行列の積）・`a / b` は脱糖され、同じ計算が公開の関数としても残っています。
+- 案: R-bigint-04 と同じ規則（R-L0-26: 演算子の脱糖先は公開しない）を matrix にも当てはめ、5 つを撤去します。単項 `-` は #3965（いまは内部エラー）を直したうえで脱糖します。
+- 根拠の L0 規則: R-L0-01、R-L0-26。bigint だけに当てはめると、同じ「演算子を持つ型」で規則が割れます。
+- (c) パイプで `a |> matrix.add(b)` と書く利点はありますが、`a + b` の 1 通りにしたほうが生成されるコードが揺れません。
+- (d) 撤去 5。`@deprecated(since=15, use="+")` など、epoch 16 で撤去。`almide fix` で `matrix.add(a, b)` を `a + b` に書き換えます。
+- issue: #3973
+
 ## L3: 関数表
 
 `matrix` の現行 46 関数です（追加はありません）。
@@ -153,22 +195,22 @@
 | `transpose` | `matrix.transpose(m: Matrix) -> Matrix` | numpy `.T` / ndarray `t()` / gonum `T()` / Nx `transpose` | 据え置き | — |
 | `from_lists` | `matrix.from_lists(rows: List[List[Float]]) -> Matrix` | numpy `array` / Nx `tensor` / gonum `NewDense` | 据え置き | — |
 | `select_rows` | `matrix.select_rows(m: Matrix, row_ids: List[Int]) -> Matrix` | numpy `m[idx]` / ndarray `select` / Nx `take` | 撤去 | R-matrix-04 |
-| `append_rows` | `matrix.append_rows(base: Matrix, extra: Matrix) -> Matrix` | numpy `vstack` / ndarray `concatenate(Axis(0))` / Nx `concatenate` | 据え置き | — |
+| `append_rows` | `matrix.append_rows(base: Matrix, extra: Matrix) -> Matrix` | numpy `vstack` / ndarray `concatenate(Axis(0))` / Nx `concatenate` | 撤去 → `concat_rows([a, b])` | R-matrix-11 |
 | `linear_f32_row_no_bias` | `matrix.linear_f32_row_no_bias(x: Matrix, w_bytes: Bytes, w_offset: Int, w_rows: Int, w_cols: Int) -> Matrix` | torch `F.linear` / 外部のみ | 撤去 | R-matrix-01（nnlib） |
 | `select_rows_f32` | `matrix.select_rows_f32(data: Bytes, offset: Int, cols: Int, row_ids: List[Int]) -> Matrix` | torch `embedding` / 外部のみ | 撤去 | R-matrix-01（nnlib） |
 | `to_lists` | `matrix.to_lists(m: Matrix) -> List[List[Float]]` | numpy `tolist` / Nx `to_list` | 据え置き | — |
 | `get` | `matrix.get(m: Matrix, row: Int, col: Int) -> Float` | numpy `m[i, j]`（例外）/ Rust ndarray `get` → Option・`m[[i, j]]` → panic / gonum `At`（panic） | 意味変更（`Option[Float]` を返す） | R-matrix-08 |
 | `rows` | `matrix.rows(m: Matrix) -> Int` | ndarray `nrows` / numpy `shape[0]` | 据え置き | — |
 | `cols` | `matrix.cols(m: Matrix) -> Int` | ndarray `ncols` / numpy `shape[1]` | 据え置き | — |
-| `add` | `matrix.add(a: Matrix, b: Matrix) -> Matrix` | numpy `+` / gonum `Add` / Nx `add` | 意味変更 | R-matrix-05（形の不一致は abort） |
-| `mul` | `matrix.mul(a: Matrix, b: Matrix) -> Matrix` | numpy `@`/`matmul` / gonum `Mul` / ndarray `dot` / Nx `dot` | 意味変更 | R-matrix-05（`cols(a) != rows(b)` は abort）、R-matrix-07 |
+| `add` | `matrix.add(a: Matrix, b: Matrix) -> Matrix` | numpy `+` / gonum `Add` / Nx `add` | 撤去 → `a + b` | R-matrix-14 |
+| `mul` | `matrix.mul(a: Matrix, b: Matrix) -> Matrix` | numpy `@`/`matmul` / gonum `Mul` / ndarray `dot` / Nx `dot` | 撤去 → `a * b` | R-matrix-14 |
 | `scale` | `matrix.scale(m: Matrix, s: Float) -> Matrix` | numpy `* s` / gonum `Scale` / Nx `multiply` | 据え置き | — |
 | `fma` | `matrix.fma(a: Matrix, ka: Float, b: Matrix, kb: Float) -> Matrix` | BLAS `axpby` / 外部のみ | 撤去 | R-matrix-02（内部の `__fma`） |
 | `fma3` | `matrix.fma3(a: Matrix, ka: Float, b: Matrix, kb: Float, c: Matrix, kc: Float) -> Matrix` | 外部のみ | 撤去 | R-matrix-02（内部の `__fma3`） |
-| `sub` | `matrix.sub(a: Matrix, b: Matrix) -> Matrix` | numpy `-` / gonum `Sub` / Nx `subtract` | 意味変更 | R-matrix-05 |
-| `div` | `matrix.div(a: Matrix, b: Matrix) -> Matrix` | numpy `/` / gonum `DivElem` / Nx `divide` | 意味変更 | R-matrix-05 |
-| `neg` | `matrix.neg(m: Matrix) -> Matrix` | numpy `-m` / Nx `negate` | 据え置き | — |
-| `pow` | `matrix.pow(m: Matrix, exp: Float) -> Matrix` | numpy `**` / Nx `pow` | 据え置き | — |
+| `sub` | `matrix.sub(a: Matrix, b: Matrix) -> Matrix` | numpy `-` / gonum `Sub` / Nx `subtract` | 撤去 → `a - b` | R-matrix-14 |
+| `div` | `matrix.div(a: Matrix, b: Matrix) -> Matrix` | numpy `/` / gonum `DivElem` / Nx `divide` | 撤去 → `a / b` | R-matrix-14 |
+| `neg` | `matrix.neg(m: Matrix) -> Matrix` | numpy `-m` / Nx `negate` | 撤去 → `-m` | R-matrix-14 |
+| `pow` | `matrix.pow(m: Matrix, exp: Float) -> Matrix` | numpy `**` / Nx `pow` | 撤去 → `matrix.map(m, (x) => float.pow(x, e))` | R-matrix-13 |
 | `map` | `matrix.map(m: Matrix, f: (Float) -> Float) -> Matrix` | ndarray `mapv` / gonum `Apply` / Nx `map` | 据え置き | — |
 | `from_bytes_f32_le` | `matrix.from_bytes_f32_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix` | numpy `frombuffer(dtype='<f4')` / Nx `from_binary` | 意味変更 | R-matrix-05（データ不足は abort） |
 | `to_bytes_f64_le` | `matrix.to_bytes_f64_le(m: Matrix) -> Bytes` | numpy `astype('<f8').tobytes()` / Nx `to_binary` | 据え置き | — |
@@ -193,6 +235,9 @@
 | `mul_f32_t` | `matrix.mul_f32_t(a: Matrix[Float32], b: Matrix[Float32]) -> Matrix[Float32]` | BLAS `sgemm`（transB） | 撤去 | R-matrix-03 |
 | `mul_f32_t_scaled` | `matrix.mul_f32_t_scaled(a: Matrix[Float32], alpha: Float, b: Matrix[Float32]) -> Matrix[Float32]` | BLAS `sgemm`（alpha, transB） | 撤去 | R-matrix-03 |
 | `mul_scaled` | `matrix.mul_scaled(a: Matrix, alpha: Float, b: Matrix) -> Matrix` | BLAS `dgemm`（alpha） | 撤去 | R-matrix-02（内部の `__mul_scaled`） |
+| `zip_with` | `matrix.zip_with(a: Matrix, b: Matrix, f: (Float, Float) -> Float) -> Matrix` | numpy `*`（要素ごと） / gonum `MulElem` | 追加 | R-matrix-09 |
+| `concat_rows` | `matrix.concat_rows(matrices: List[Matrix]) -> Matrix` | numpy `vstack` / Nx `concatenate` | 追加 | R-matrix-11 |
+| `to_bytes_f16_le` | `matrix.to_bytes_f16_le(m: Matrix) -> Bytes` | numpy `astype("<f2").tobytes()` | 追加 | R-matrix-12 |
 
 ## L0 への差し戻し（処理済み）
 

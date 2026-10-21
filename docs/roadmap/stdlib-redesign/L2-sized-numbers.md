@@ -110,6 +110,24 @@
 - (c) 固定幅の型で算術がしたいときの書き方は「`to_int` してから `int.*`」の 1 通りにします。行列の `to_int` がそろう（R-sized-01）ので、この書き方がどの型でも同じ綴りになります。
 - issue: なし
 
+### R-sized-06 整数の運び手すべてに `parse_radix`・`to_string_radix` を置く — ○ 採用
+
+- いま: `int` と `bigint` だけが `parse_radix(s, radix)`・`to_string_radix(n, radix)` を持ちます。
+- 案: `int8`〜`uint64` の 8 つに `fn <T>.parse_radix(s: String, radix: Int) -> Result[<T>, String]` と `fn <T>.to_string_radix(x: <T>, radix: Int) -> String` を足します（16 関数）。文法と radix の範囲は `int.parse_radix` と同じです。
+- 根拠の L0 規則: R-sized-02 と同じ理由（2 段に分けると「範囲外」の理由が消える）。
+- R-sized-05（×）への新しい証拠: 規則 8 の「`to_int` してから `int.*`」は、`uint64` の 2^63 以上で成り立ちません。実測: `int.from_hex("ffffffffffffffff")` は err、`int.max(int.from_uint64(uint64.max_value()), 1)` は `1` です。
+- (a) 符号なし 64 bit を基数つきで読み書きできるのは Rust `u64::from_str_radix` (F)、Go `ParseUint`/`FormatUint`、Kotlin `toULong(radix)`、Swift `UInt64(s, radix:)`、Python `int(s, 16)` の 5 言語です。
+- (c) 64 bit のハッシュを 16 進で読む処理はよく書かれ、LLM は `uint64.parse_radix(s, 16)` と書きます。いまはほかの道が黙って値を失います。
+- (d) 追加 16。
+- 完全性の規則: 整数の運び手（`int`・`bigint`・固定幅の 8 つ）は、すべて `parse`・`to_string`・`parse_radix`・`to_string_radix` を持ちます。
+- ゲート案: 数の変換の行列ゲートの列に 2 つを足し、`uint64` の `max_value` の往復を radix 2・16・36 で確かめます。
+- issue: #3972
+
+### R-sized-07 `float32`・`float64` に `is_nan` などの判定を足す — × 不採用
+
+- 理由: `float32.to_float` は値を失わないので、規則 8 の「`to_float` してから `float.*`」が正しく動きます。判定まで広げると、`floor`・`sqrt` も足すかという線引きを繰り返します。代わりに、E002 の案内（R-L0-19）に「`float32.to_float(x) |> float.is_nan`」の行を入れます。
+- issue: なし
+
 ## L3: 関数表
 
 ### L3: `int8`
@@ -456,3 +474,19 @@
 | `epsilon` | （追加）`float64.epsilon() -> Float64` | Rust `EPSILON` / Swift `.ulpOfOne` | 追加 | R-sized-03 |
 | `max_value` | （追加）`float64.max_value() -> Float64` | Rust `MAX` / Go `math.MaxFloat64` / Kotlin `MAX_VALUE` | 追加 | R-sized-03 |
 | `min_value` | （追加）`float64.min_value() -> Float64` | Rust `MIN` / Swift `-.greatestFiniteMagnitude` | 追加 | R-sized-03 |
+| `parse_radix` | `int8.parse_radix(s: String, radix: Int) -> Result[Int8, String]`（案） | Rust `from_str_radix` / Go `ParseInt`・`ParseUint` | 追加 | R-sized-06 |
+| `to_string_radix` | `int8.to_string_radix(x: Int8, radix: Int) -> String`（案） | Rust `format!("{:x}")` / Go `FormatInt`・`FormatUint` | 追加 | R-sized-06 |
+| `parse_radix` | `int16.parse_radix(s: String, radix: Int) -> Result[Int16, String]`（案） | Rust `from_str_radix` / Go `ParseInt`・`ParseUint` | 追加 | R-sized-06 |
+| `to_string_radix` | `int16.to_string_radix(x: Int16, radix: Int) -> String`（案） | Rust `format!("{:x}")` / Go `FormatInt`・`FormatUint` | 追加 | R-sized-06 |
+| `parse_radix` | `int32.parse_radix(s: String, radix: Int) -> Result[Int32, String]`（案） | Rust `from_str_radix` / Go `ParseInt`・`ParseUint` | 追加 | R-sized-06 |
+| `to_string_radix` | `int32.to_string_radix(x: Int32, radix: Int) -> String`（案） | Rust `format!("{:x}")` / Go `FormatInt`・`FormatUint` | 追加 | R-sized-06 |
+| `parse_radix` | `int64.parse_radix(s: String, radix: Int) -> Result[Int64, String]`（案） | Rust `from_str_radix` / Go `ParseInt`・`ParseUint` | 追加 | R-sized-06 |
+| `to_string_radix` | `int64.to_string_radix(x: Int64, radix: Int) -> String`（案） | Rust `format!("{:x}")` / Go `FormatInt`・`FormatUint` | 追加 | R-sized-06 |
+| `parse_radix` | `uint8.parse_radix(s: String, radix: Int) -> Result[UInt8, String]`（案） | Rust `from_str_radix` / Go `ParseInt`・`ParseUint` | 追加 | R-sized-06 |
+| `to_string_radix` | `uint8.to_string_radix(x: UInt8, radix: Int) -> String`（案） | Rust `format!("{:x}")` / Go `FormatInt`・`FormatUint` | 追加 | R-sized-06 |
+| `parse_radix` | `uint16.parse_radix(s: String, radix: Int) -> Result[UInt16, String]`（案） | Rust `from_str_radix` / Go `ParseInt`・`ParseUint` | 追加 | R-sized-06 |
+| `to_string_radix` | `uint16.to_string_radix(x: UInt16, radix: Int) -> String`（案） | Rust `format!("{:x}")` / Go `FormatInt`・`FormatUint` | 追加 | R-sized-06 |
+| `parse_radix` | `uint32.parse_radix(s: String, radix: Int) -> Result[UInt32, String]`（案） | Rust `from_str_radix` / Go `ParseInt`・`ParseUint` | 追加 | R-sized-06 |
+| `to_string_radix` | `uint32.to_string_radix(x: UInt32, radix: Int) -> String`（案） | Rust `format!("{:x}")` / Go `FormatInt`・`FormatUint` | 追加 | R-sized-06 |
+| `parse_radix` | `uint64.parse_radix(s: String, radix: Int) -> Result[UInt64, String]`（案） | Rust `from_str_radix` / Go `ParseInt`・`ParseUint` | 追加 | R-sized-06 |
+| `to_string_radix` | `uint64.to_string_radix(x: UInt64, radix: Int) -> String`（案） | Rust `format!("{:x}")` / Go `FormatInt`・`FormatUint` | 追加 | R-sized-06 |

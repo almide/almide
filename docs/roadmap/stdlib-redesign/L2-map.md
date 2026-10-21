@@ -162,6 +162,20 @@ map.merge(a, b)             // 同じキーは b が勝つ。順序は a、そ�
 
 ---
 
+### R-map-07 `map.entries` を `map.to_list` に改名する（R-map-03 の見直し） — ○ 採用
+
+- いま: `fn map.entries(m: Map[K, V]) -> List[(K, V)]` と `fn map.from_list(pairs: List[(K, V)]) -> Map[K, V]`。R-map-03 は「`to_list` を足す」を ×（多数派でない・同義語になる）としました。
+- 案: 足すのではなく改名します。`map.entries` → `fn map.to_list(m: Map[K, V]) -> List[(K, V)]`。`keys`・`values` は据え置きます。
+- 新しい根拠: リデザイン後の面では、入れ物を List にする役割の綴りが `to_list` の 6 モジュール（`set`・`deque`・`heap`・`bytes`・`option`・`result`）と、`entries` の map だけに分かれました。`from_list` を持つのに `to_list` を持たない入れ物は map だけです。R-map-03 は 9 言語の多数派（R-L0-00 の 2）だけで判定していて、Almide の中の衝突（R-L0-00 の 1）を見ていませんでした。
+- 根拠の L0 規則: R-L0-00 の 1、R-L0-07 の 2（構築 `from_list` とその逆向き）。
+- (a) `to_list` は Gleam・Elixir・OCaml・Kotlin の 4/9、`entries` は JS・Kotlin の 2/9 です。
+- (b) 影響なし（同じ本体）。
+- (c) R-map-03 自身が「LLM は `map.to_list` を推測で書く」と認めています。推測が当たる側に名前を寄せれば、`map.from_list(map.to_list(m)) == m` も名前から読めます。
+- (d) 改名です。`@deprecated(since=15, use="map.to_list")`、epoch 16 で撤去、`almide fix` で 1 対 1 に書き換えます。使用数: spec 22 / tests 2 / docs 22 / stdlib 7 / research 2（計 55）。
+- 完全性の規則: `from_list` を持つ入れ物は `to_list` を持ち、`from_list(to_list(x)) == x` です。
+- ゲート案: R-L0-07 のゲートに「`from_list` と `to_list` の組がそろっている」を足し、往復の性質テストを list 以外の入れ物すべてに置きます。
+- issue: #3969
+
 ## L3: 関数表
 
 使用数は 判定が据え置き以外の行だけに書いています（R-map-01、R-map-02 を参照）。
@@ -177,7 +191,7 @@ map.merge(a, b)             // 同じキーは b が勝つ。順序は a、そ�
 | `map.keys` | `map.keys(m: Map[K, V]) -> List[K]` | 全言語 `keys`（Go `maps.Keys`） | 据え置き | — |
 | `map.values` | `map.values(m: Map[K, V]) -> List[V]` | 全言語 `values` | 据え置き | — |
 | `map.len` | `map.len(m: Map[K, V]) -> Int` | Rust `len` / Gleam `size` / JS `size` / OCaml `cardinal` / Swift `count` | 据え置き | — (R-L0-11) |
-| `map.entries` | `map.entries(m: Map[K, V]) -> List[(K, V)]` | JS `entries` / Kotlin `entries` / Gleam・Elixir・OCaml `to_list` / Python `items` | 据え置き | R-map-03 |
+| `map.entries` | `map.entries(m: Map[K, V]) -> List[(K, V)]` | JS `entries` / Kotlin `entries` / Gleam・Elixir・OCaml `to_list` / Python `items` | 改名 → `to_list` | R-map-07 |
 | `map.merge` | `map.merge(a: Map[K, V], b: Map[K, V]) -> Map[K, V]` | Gleam `merge` / Elixir `merge/2` / Python `a \| b` / Kotlin `a + b`（どれも右が勝つ） | 据え置き | — |
 | `map.is_empty` | `map.is_empty(m: Map[K, V]) -> Bool` | Rust `is_empty` / Gleam `is_empty` / OCaml `is_empty` / Kotlin `isEmpty` | 据え置き | — |
 | `map.from_list` | `map.from_list(pairs: List[(K, V)]) -> Map[K, V]` | Gleam `from_list` / OCaml `of_list` / Rust `from_iter` / Go `maps.Collect` | 据え置き | — (R-L0-07) |

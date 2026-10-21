@@ -44,6 +44,26 @@
 - ゲート案: list と同じ境界入力の行列テスト（空からの `pop`、`get` の範囲外）、native と wasm の cross fixture、`push_back` を n 回して `pop_front` を n 回する時間が線形であることの計測（`check-perf-ratio.sh` の形）。
 - issue: #3932
 
+### R-deque-02 deque に高階関数の族と `contains`・`clear` を足す — ○ 採用
+
+- いま: `deque` は 12 関数で、`contains` と D3 の族（`map`・`filter`・`fold`・`any`・`all`・`count`・`find`）を持ちません。`for x in d` も書けないので、中を調べるには毎回 `deque.to_list` を経ます。
+- 案（先頭から末尾の順に走ります）:
+  - `fn deque.contains[A](d: Deque[A], x: A) -> Bool`
+  - `fn deque.map[A, B](d: Deque[A], f: (A) -> B) -> Deque[B]`
+  - `fn deque.filter[A](d: Deque[A], f: (A) -> Bool) -> Deque[A]`
+  - `fn deque.fold[A, B](d: Deque[A], init: B, f: (B, A) -> B) -> B`
+  - `fn deque.any[A](d: Deque[A], f: (A) -> Bool) -> Bool`、`all`（同じ形）、`fn deque.count[A](d: Deque[A], f: (A) -> Bool) -> Int`
+  - `fn deque.find[A](d: Deque[A], f: (A) -> Bool) -> A?`（先頭に近いものが先）
+  - `fn deque.clear[A](mut d: Deque[A]) -> Unit`（R-L0-04 の `clear` の行列）
+- 根拠の L0 規則: L2-list の完全性の規則 1・R-map-06（D3 の 7 つと `contains` はコレクションすべてに置く）、R-L0-01（list と同じ名前・同じコールバックの形）、R-L0-04（`clear` 以外はコピー）。
+- (a) deque を調べる・変換する手段は 8/9 が持ちます（Python は反復と `in`、Erlang/Elixir の `:queue` は `all`・`any`・`filter`・`fold`・`member`、Rust `VecDeque` は `contains` と `iter()`、Kotlin・Swift はコレクションとして全部）。Go の `container/list` だけが手で回します。
+- (b) 純粋な Almide の計算です。走る順は先頭から末尾に決まっているので、両 target で同じです。
+- (c) list・map・set で `xs |> X.any(f)` と書けるのに deque だけ外れると、LLM は規則から推測して E002 になります。幅優先探索で「訪問済みか」を `deque.contains` で書くのはよくある形です。
+- (d) 追加 9 です。新しいモジュールなので互換の影響はありません。
+- 完全性の規則: 順序の決まったコレクション（list・deque）と集合系（map・set）は、D3 の 7 つと `contains` をすべて持ちます。走る順は `to_list` の順と同じです。
+- ゲート案: R-map-06 のコレクションの族の行列に deque の列を足します。性質テスト: どのセルも `deque.to_list(d) |> list.<同名>(f)` と同じ結果です。
+- issue: #3968
+
 ## L3: 関数表
 
 | 関数 | シグネチャ(案) | 他言語の主な綴り | 判定 | 案 |
@@ -60,6 +80,15 @@
 | `deque.first` | `fn first[A](d: Deque[A]) -> A?` | Kotlin・Swift `first` / Rust `front` | 追加 | R-deque-01 |
 | `deque.last` | `fn last[A](d: Deque[A]) -> A?` | Kotlin・Swift `last` / Rust `back` | 追加 | R-deque-01 |
 | `deque.get` | `fn get[A](d: Deque[A], i: Int) -> A?` | Rust・Kotlin `get` / Python `d[i]` | 追加 | R-deque-01 |
+| `deque.contains` | `fn contains[A](d: Deque[A], x: A) -> Bool` | Rust `contains` / Python `in` / Erlang `member` | 追加 | R-deque-02 |
+| `deque.map` | `fn map[A, B](d: Deque[A], f: (A) -> B) -> Deque[B]` | Kotlin・Swift（コレクション） | 追加 | R-deque-02 |
+| `deque.filter` | `fn filter[A](d: Deque[A], f: (A) -> Bool) -> Deque[A]` | Erlang `:queue.filter` | 追加 | R-deque-02 |
+| `deque.fold` | `fn fold[A, B](d: Deque[A], init: B, f: (B, A) -> B) -> B` | Erlang `:queue.fold` / OCaml `Queue.fold` | 追加 | R-deque-02 |
+| `deque.any` | `fn any[A](d: Deque[A], f: (A) -> Bool) -> Bool` | Erlang `:queue.any` | 追加 | R-deque-02 |
+| `deque.all` | `fn all[A](d: Deque[A], f: (A) -> Bool) -> Bool` | Erlang `:queue.all` | 追加 | R-deque-02 |
+| `deque.count` | `fn count[A](d: Deque[A], f: (A) -> Bool) -> Int` | Kotlin `count {}` | 追加 | R-deque-02 |
+| `deque.find` | `fn find[A](d: Deque[A], f: (A) -> Bool) -> A?` | Kotlin `find` / Swift `first(where:)` | 追加 | R-deque-02 |
+| `deque.clear` | `fn clear[A](mut d: Deque[A]) -> Unit` | Rust `clear` / Python `clear` | 追加 | R-deque-02、R-L0-04 |
 
 ## L0 への差し戻し（処理済み）
 

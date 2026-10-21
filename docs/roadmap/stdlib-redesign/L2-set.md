@@ -134,6 +134,7 @@
 | `set.all` | `set.all(s: Set[A], f: (A) -> Bool) -> Bool` | Kotlin `all` / OCaml `for_all` / Elixir `Enum.all?` / Swift `allSatisfy` | 据え置き | R-map-06 |
 | `set.count` | `set.count(s: Set[A], f: (A) -> Bool) -> Int`（案） | Kotlin `count {}` / Elixir `Enum.count/2` / Swift `count(where:)` / Gleam — | 追加 | R-set-01 |
 | `set.find` | `set.find(s: Set[A], f: (A) -> Bool) -> Option[A]`（案） | Kotlin `find` / Elixir `Enum.find` / Swift `first(where:)` / Rust `iter().find` | 追加 | R-set-01 |
+| `set.clear` | `set.clear(mut s: Set[A]) -> Unit` | Rust `clear` / Python `clear` / JS `clear` / Kotlin `clear` | 追加 | R-L0-04（`clear` の行列） |
 
 L3 の行数: 21（現行 19 + 追加 2）。判定の内訳: 据え置き 19、追加 2。
 
