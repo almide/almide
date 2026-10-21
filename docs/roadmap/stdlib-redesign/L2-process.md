@@ -105,6 +105,37 @@
 - ゲート案: 「host の状態を読む intrinsic は effect」を R-L0-G に入れ、`process.pid` を許容リストから外します。
 - issue: #3907
 
+### R-process-05 `process.poll`・`wait` の形を `http.poll`・`wait` に合わせる — ○ 採用
+
+- いま: `http.poll(c) -> Result[HttpResponse, String]?`（交換の失敗は some の中の err）に対し、新しく足す `process.poll(c) -> ProcessStatus?` は入れ子の順が逆で、err の入る場所がありません。`timeout_ms` つきで `start` した子が時間切れになったとき、結果を表せません。
+- 案: `effect fn process.poll(c: ProcessChild) -> Result[ProcessStatus, String]?`。`wait`・`stop` は `http.wait` と同じく、子の失敗（時間切れ・片付けの失敗）を effect の err で返します。ハンドルの族の約束は「`poll` は待たない。動いている間 none、終わったら some(ok(結果)) か some(err(理由))」の 1 つです。
+- 根拠の L0 規則: R-L0-01（同じ役割に形を 1 つ。R-process-03 は綴りを `http.poll` から借りたのに入れ子の順が逆）、R-L0-17。
+- (a) Rust `Child::try_wait` は `io::Result<Option<ExitStatus>>`、Python `Popen.poll()` は動いている間 `None`。どちらも待たない確認と結果を分けています。
+- (c) `match http.poll(c) { some(ok(r)) => …, some(err(e)) => …, none => … }` を覚えた LLM は、`process.poll` にも同じ形を書きます。
+- (d) 新しい関数の宣言を変えるだけです。
+- 完全性の規則: ハンドルを持つモジュール（http・process）の `poll` は `Result[T, String]?`、`wait` は `T`（失敗は effect の err）です。
+- ゲート案: `http_call_family_gate_test.rs` を「ハンドルの族のゲート」に広げ、process の宣言も同じ形であることを検査します。
+- issue: #3974
+
+### R-process-06 動いている子の pid を読む `process.child_pid` を足す — ○ 採用
+
+- 案: `effect fn process.child_pid(c: ProcessChild) -> Int`。
+- (a) Go `cmd.Process.Pid`、Python `Popen.pid`、Rust `Child::id`、Node `child.pid`、Kotlin `Process.pid()`、Swift `processIdentifier` の 6 言語が持ちます。
+- (b) native は OS の pid。wasm は `almide:process/spawn` が返す pid です（R-L0-15 の 4 つめの道）。
+- (c) `spawn` の撤去で、子に `kill` を送るための pid を得る道がなくなります。子に SIGINT を送る、pid をログに出す、はよく書かれます。
+- (d) 追加 1。
+- issue: #3974
+
+### R-process-07 `run` も `ProcessCommand` を受け取り、`run_in` を撤去する — ○ 採用
+
+- いま: `process.run(cmd, args) -> Int` と `process.run_in(dir, cmd, args) -> Int`。R-process-02 の完全性の規則は「設定は 1 つのレコードに集め、関数名の組み合わせを作らない」と書くのに、`run_in` は作業ディレクトリの軸を名前に持ったままです。標準の関数は既定値つきの引数を持たない（R-string-08）ので、設定はレコードで渡すのが規則どおりです。
+- 案: `effect fn process.run(c: ProcessCommand) -> Int`（stdin の欄が空なら端末をそのまま渡す）にし、`run_in` を撤去します。引数だけで走らせる近道は `exec(cmd, args)` の 1 つにします。
+- 根拠の L0 規則: R-process-02 の完全性の規則、CLAUDE.md「族は行列で」。
+- (a) Rust `Command::status`、Go `Cmd.Run`、Python `run()` は、ほかの実行の形と同じ設定の値を受け取ります。
+- (c) `run` に時間切れを付けたい LLM が `run_timeout` を推測で書くのを防げます。
+- (d) 意味変更（引数の型が変わるので旧い呼び出しは型エラー。R-L0-14.4 を満たす）と撤去 1。`almide fix` が `run(c, a)` を `run(ProcessCommand { cmd: c, args: a, ... })` に、`run_in(d, c, a)` を `dir: d` を足した形に書き換えます。使用数 `run` 1/6/7/0、`run_in` 2/5/8/0。
+- issue: #3974
+
 ## L3: 関数表
 
 | 関数 | シグネチャ(現行, mut 表示) | 他言語の主な綴り | 判定 | 案 |
@@ -115,12 +146,12 @@
 | `process.exec_status` | `effect fn exec_status(cmd: String, args: List[String]) -> ProcessStatus` | Rust `output` / Python `run` | 撤去（→ `output`） | R-process-02 |
 | `process.exec_status_timeout` | `effect fn exec_status_timeout(cmd: String, args: List[String], timeout_ms: Int) -> ProcessStatus` | Python `timeout=` / Go `CommandContext` | 撤去（→ `output` の `timeout_ms`） | R-process-02 |
 | `process.output` | `effect fn output(c: ProcessCommand) -> ProcessStatus`（案） | Rust `Command::output` / Go `Cmd.Output` | 追加 | R-process-02 |
-| `process.run` | `effect fn run(cmd: String, args: List[String]) -> Int` | Rust `status` / Go `Run` / Python `run()` | 据え置き | — |
-| `process.run_in` | `effect fn run_in(dir: String, cmd: String, args: List[String]) -> Int` | 同上 ＋ cwd | 据え置き | — |
+| `process.run` | `effect fn run(cmd: String, args: List[String]) -> Int` | Rust `status` / Go `Run` / Python `run()` | 意味変更（`ProcessCommand` を受け取る） | R-process-07 |
+| `process.run_in` | `effect fn run_in(dir: String, cmd: String, args: List[String]) -> Int` | 同上 ＋ cwd | 撤去 → `run(ProcessCommand { dir: … })` | R-process-07 |
 | `process.exec_attached` | `effect fn exec_attached(cmd: String, args: List[String]) -> Int`（非推奨） | — | 撤去（→ `run`） | R-process-02 |
 | `process.spawn` | `effect fn spawn(cmd: String, args: List[String]) -> Int` | Rust `spawn` / Node `spawn` / Go `Start` | 撤去（→ `start`） | R-process-03 |
 | `process.start` | `effect fn start(c: ProcessCommand) -> ProcessChild`（案） | Go `Start` / Rust `spawn` / Kotlin `start` | 追加 | R-process-03 |
-| `process.poll` | `effect fn poll(c: ProcessChild) -> ProcessStatus?`（案） | Python `Popen.poll` / Rust `try_wait` | 追加 | R-process-03 |
+| `process.poll` | `effect fn poll(c: ProcessChild) -> Result[ProcessStatus, String]?`（案、R-process-05） | Python `Popen.poll` / Rust `try_wait` | 追加 | R-process-03 |
 | `process.wait` | `effect fn wait(c: ProcessChild) -> ProcessStatus`（案） | Rust・Go・Python `wait` | 追加 | R-process-03 |
 | `process.stop` | `effect fn stop(c: ProcessChild, grace_ms: Int) -> ProcessStatus`（案） | Go `Cancel`+`WaitDelay` / execa `forceKillAfterDelay` | 追加 | R-process-03 |
 | `process.read_new_stdout` | `effect fn read_new_stdout(c: ProcessChild) -> String`（案） | — （`http.read_new` に合わせる） | 追加 | R-process-03 |
@@ -133,6 +164,7 @@
 | `process.env` | `fn env(key: String) -> String?` | Rust `env::var` | 撤去（→ `env.get`） | R-process-01 |
 | `process.sleep` | `fn sleep(ms: Int) -> Unit` | Rust `thread::sleep` | 撤去（→ `env.sleep_ms`） | R-process-01 |
 | `process.stdin_lines` | `effect fn stdin_lines() -> List[String]` | Python `readlines` | 撤去（→ `string.lines(io.read_all()!)`） | R-process-01 |
+| `process.child_pid` | `effect fn child_pid(c: ProcessChild) -> Int`（案） | Go `Process.Pid` / Python `Popen.pid` / Rust `Child::id` | 追加 | R-process-06 |
 
 ## L0 への差し戻し（処理済み）
 

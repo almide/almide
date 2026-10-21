@@ -49,13 +49,24 @@
 - ゲート案: `components` と `join` の往復、`relative_to` と `join` の往復（`join(base, relative_to(p, base)!) == normalize(p)`）を性質のテストにします。
 - issue: #3936
 
+### R-path-02 `SafePath`（`from_string`・`trusted`・`to_string`）を撤去する — ○ 採用
+
+- いま: `path.from_string(s) -> Result[SafePath, String]`、`path.trusted(s) -> SafePath`、`path.to_string(p: SafePath) -> String`。ほかの path の関数はすべて `String` を受け取り、`SafePath` を受け取る標準の関数は 1 つもありません。
+- 案: 3 関数と `type SafePath` を撤去します。安全なパスの型は、`fs` が受け取る形で設計し直すとき（docs/roadmap/on-hold/secure-by-design.md）に改めて足します。
+- 根拠の L0 規則: R-L0-06 の 4 の考え方（名前が約束する性質を値が持たない）、R-L0-00 の 1（String から型つきの値を作る失敗しうる関数は他のモジュールでは `parse`。ここだけ `from_string`）、R-L0-01（`html.raw` と `path.trusted` は同じ役割の 2 つの綴り）。
+- (a) 安全なパスの型を標準に持つのは Go の `os.Root`（1.24）だけで、これはファイルシステムの操作と一体です。字句だけで「安全」と名乗る型を持つ言語はありません。
+- (c) 実測: `path.from_string("/etc/passwd")` も `"a/%2e%2e/b"` も `ok` です。拒むのは `..` の要素だけです。「ユーザーの入力から安全にパスを作る」課題で LLM がこれを使うと、安全だと思い込んだまま絶対パスを通します。
+- (d) 撤去 3。epoch 15 で `@deprecated`、epoch 16 で撤去。形が変わるので `almide fix` はせず、ヒントで「`..` を拒むなら `path.components(p) |> list.contains("..")` を確かめる」と出します。
+- 完全性の規則: `path` の公開関数は `String` だけを受け取り、返します。
+- issue: #3971
+
 ## L3: 関数表
 
 | 関数 | シグネチャ(現行, mut 表示) | 他言語の主な綴り | 判定 | 案 |
 |---|---|---|---|---|
-| `path.from_string` | `fn from_string(s: String) -> Result[SafePath, String]` | Go `os.OpenRoot` に近い | 据え置き | — |
-| `path.trusted` | `fn trusted(s: String) -> SafePath` | — | 据え置き | — |
-| `path.to_string` | `fn to_string(p: SafePath) -> String` | Rust `to_str` / Python `str(p)` | 据え置き | — |
+| `path.from_string` | `fn from_string(s: String) -> Result[SafePath, String]` | Go `os.OpenRoot` に近い | 撤去（`SafePath` ごと） | R-path-02 |
+| `path.trusted` | `fn trusted(s: String) -> SafePath` | — | 撤去（`SafePath` ごと） | R-path-02 |
+| `path.to_string` | `fn to_string(p: SafePath) -> String` | Rust `to_str` / Python `str(p)` | 撤去（`SafePath` ごと） | R-path-02 |
 | `path.join` | `fn join(base: String, child: String) -> String` | Rust・Node・Elixir `join` / Go `Join` | 据え置き | — |
 | `path.dirname` | `fn dirname(p: String) -> String` | Node・Elixir・OCaml `dirname` / Go `Dir` / Rust `parent` | 据え置き | — |
 | `path.basename` | `fn basename(p: String) -> String` | Node・Elixir・OCaml `basename` / Go `Base` / Rust `file_name` | 据え置き | — |

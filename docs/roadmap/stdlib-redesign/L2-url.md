@@ -85,13 +85,23 @@
 - 理由: `query` と `fragment` の「無い」と「空」を区別したい場面は少なく、欄の型を変えると、すべての `u.query` の読みが壊れます（R-L0-14 の 4）。`port` はすでに Option です。
 - issue: なし
 
+### R-url-05 `Url` に userinfo を足す — ○ 採用
+
+- いま: `type Url = { scheme, host, port: Int?, path, query, fragment }`。`url.parse("https://user:pw@example.com/x")` は `err("userinfo is not supported")` です。
+- 案: 欄 `userinfo: String`（無いときは `""`。`query`・`fragment` と同じ扱い）を足し、`parse`・`to_string`・`resolve` が扱うようにします。
+- (a) Go `URL.User`、Python `urlparse().username`、JS `URL.username`、Elixir `URI.userinfo`、Gleam `Uri.userinfo`、JVM `URI.getUserInfo` の 6 言語が読めます。
+- (c) `DATABASE_URL`（`postgres://user:pass@host/db`）を読む課題はよく出ます。いまは実行して初めて err になります。
+- (d) 型の変更。`Url { ... }` のレコードの組み立ては欄の不足で型エラーになるので、R-L0-14.4 を満たします（ヒント: `userinfo: ""` を足す）。読むだけの呼び出しは変わりません。
+- ゲート案: RFC 3986 の authority の例を両 target の fixture にし、`parse(to_string(u)) == ok(u)` の性質テストに userinfo を入れます。
+- issue: #3971
+
 ## L3: 関数表
 
 | 関数 | シグネチャ(現行, mut 表示) | 他言語の主な綴り | 判定 | 案 |
 |---|---|---|---|---|
 | `encode_component` | `url.encode_component(s: String) -> String` | JS `encodeURIComponent` / Go `PathEscape` (F) / Python `quote` (F) / Elixir `encode` (F) / Gleam `percent_encode` | 据え置き | R-url-01 |
 | `decode_component` | `url.decode_component(s: String) -> Result[String, String]` | JS `decodeURIComponent` / Go `PathUnescape` (F) / Python `unquote` (F) / Elixir `decode` (F) | 据え置き | R-url-01 |
-| `parse` | `url.parse(s: String) -> Result[Url, String]` | Go `url.Parse` / Python `urlparse` (F) / JS `new URL` / Elixir `URI.parse` (F) / Gleam `uri.parse` | 据え置き | — |
+| `parse` | `url.parse(s: String) -> Result[Url, String]` | Go `url.Parse` / Python `urlparse` (F) / JS `new URL` / Elixir `URI.parse` (F) / Gleam `uri.parse` | 意味変更（userinfo を受け取り、`Url` に `userinfo` の欄を足す） | R-url-05 |
 | `to_string` | `url.to_string(u: Url) -> String` | Go `String` / Elixir `to_string` (F) / Gleam `to_string` / JS `href` | 据え置き | — |
 | `query_pairs` | `url.query_pairs(query: String) -> List[(String, String)]` | Python `parse_qsl`（復号する）(F) / Go `ParseQuery` (F) / Elixir `decode_query` (F) | 撤去 → `parse_query` | R-url-02 |
 | `build_query` | `url.build_query(pairs: List[(String, String)]) -> String` | Python `urlencode` (F) / Elixir `encode_query` (F) / Go `Values.Encode` / Gleam `query_to_string` | 据え置き | R-url-02 |

@@ -111,6 +111,18 @@
 - (c) 位置で取り出す `captures` と同じ役割に 2 つ目の形ができます（R-L0-01）。名前つきの構文を書いた場合は、R-regex-02 で `regex.new` が「対応していない」と止めるので、黙って間違えることはありません。
 - issue: なし
 
+### R-regex-07 `replace_first_with` を足して、置換の 2×2 を閉じる — ○ 採用
+
+- いま: `replace`（全部・文字列）、`replace_first`（最初・文字列）、`replace_with`（全部・関数）。最初だけを関数で置換するセルがありません。
+- 案: `fn regex.replace_first_with(re: Regex, s: String, f: (List[String]) -> String) -> String`。
+- 根拠の L0 規則: CLAUDE.md「族は行列で広げる」、R-L0-10（`_with`）。
+- (a) Rust の regex ライブラリ `replace`（関数）、Python `sub(fn, s, count=1)`、JS `replace(re, fn)`、Elixir `Regex.replace(..., global: false)`、OCaml `Str.substitute_first` の 5 言語です。
+- (c) `replace_first` と `replace_with` を知っている LLM は、規則から `replace_first_with` を書きます。
+- (d) 追加 1。
+- 完全性の規則: 置換は {全部, 最初} × {文字列, 関数} の 4 セルです。
+- ゲート案: `replace_first_with(re, s, (g) => rep) == replace_first(re, s, rep)` の性質テスト。
+- issue: #3971
+
 ## L3: 関数表
 
 | 関数 | シグネチャ(現行, mut 表示) | 他言語の主な綴り | 判定 | 案 |
@@ -130,6 +142,7 @@
 | `regex.escape` | `escape(s: String) -> String` | Rust escape / Go QuoteMeta / Python escape / Elixir escape / OCaml quote | 追加 | R-regex-04 |
 | `regex.index_of` | `index_of(re: Regex, s: String) -> Option[Int]` | Go FindStringIndex / JS search / Rust find().start() | 追加 | R-regex-04 |
 | `regex.captures_all` | `captures_all(re: Regex, s: String) -> List[List[String]]` | Rust captures_iter / Go FindAllStringSubmatch / Elixir scan | 追加 | R-regex-04 |
+| `regex.replace_first_with` | `replace_first_with(re: Regex, s: String, f: (List[String]) -> String) -> String`（案） | Python `sub(fn, s, count=1)` / JS `replace(re, fn)` / OCaml `substitute_first` | 追加 | R-regex-07 |
 
 （現行 8 関数 + 追加 7 行。追加した関数の第 1 引数はすべて `Regex` です）
 

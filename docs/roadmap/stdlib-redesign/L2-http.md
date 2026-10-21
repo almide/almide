@@ -107,6 +107,27 @@
 - (b) 2 と 3 は native の `http_client_core.rs` と p3 shim の両方に同じ規則で入れます（ADR-0023 §4 の「意味は 1 か所」）。
 - issue: #2827（既存）
 
+### R-http-06 応答の本文を差し替える `http.set_body` を足す — ○ 採用
+
+- 案: `fn http.set_body(resp: HttpResponse, body: String) -> HttpResponse`。応答の部品 {状態, ヘッダ, 本文} のそれぞれに `set_` が 1 つそろいます。
+- (a) Gleam `response.set_body` (F)。
+- (c) middleware（`http.wrap`）で本文を書き換えるとき、いまは `with_headers` と `headers()` で組み立て直すしかなく、`set-cookie` のような複数の値のヘッダが黙って消えます。
+- (d) 追加 1（内部の `__set_body` を公開します）。
+- issue: #3974
+
+### R-http-07 応答のヘッダの `get_header` と要求の `req_header` の不揃い — × 不採用（規則を書く）
+
+- 理由: 1 つのヘッダを読む綴りは Gleam `get_header` (F)、Go `Header.Get`、JS `headers.get` と「get」を含むものが多く、`header` に改名する利点は小さいです。代わりに完全性の規則に次の 2 つを書きます。「`req_` は応答の関数と名前がぶつかるときだけ付ける」「`get_` は `get`・`get_response`（HTTP の GET）と `get_header`（取り出す）の 2 つの意味を持つ」。
+- issue: なし
+
+### R-http-08 取り出しの `status_code` を `status` にする — ○ 採用（epoch 17）
+
+- いま: 取り出しは `http.status_code(resp) -> Int`、設定は `http.set_status(resp, code)` で語幹が違います。旧い設定の `http.status(resp, code)` は epoch 16 で撤去されます。
+- 案: epoch 17 で `fn http.status(resp: HttpResponse) -> Int` を取り出しとして置き、`status_code` を撤去します。旧い意味（設定）の撤去から 1 epoch 空けて、学習データの旧い意味と混ざる期間を短くします。
+- (a) `status` は JS・Python・Ktor・Gleam・Rust の HTTP ライブラリの 5 言語、`StatusCode` は Go・Swift の 2 言語です。
+- (d) 改名。旧い設定の `http.status(r, 404)` は新しい取り出しに対して引数の数のエラーになるので、R-L0-14.4 を満たします。epoch 16 で `status_code` に `@deprecated(since=16, use="http.status")` を付け、epoch 17 で撤去します。
+- issue: #3974
+
 ## L3: 関数表
 
 | 関数 | シグネチャ(現行, mut 表示) | 他言語の主な綴り | 判定 | 案 |
@@ -121,7 +142,7 @@
 | `http.set_header` | `fn set_header(resp: HttpResponse, key: String, value: String) -> HttpResponse` | Go `Header().Set` / JS `headers.set` | 据え置き（コピーの `set_`） | R-http-02 |
 | `http.body` | `fn body(resp: HttpResponse) -> String` | JS `text()` / Go `Body` / Ktor `bodyAsText` | 据え置き | — |
 | `http.body_bytes` | `fn body_bytes(resp: HttpResponse) -> Bytes`（案） | JS `arrayBuffer` / reqwest `bytes` / Ktor `bodyAsBytes` | 追加 | R-http-01 |
-| `http.status_code` | `fn status_code(resp: HttpResponse) -> Int` | Go `StatusCode` / JS `status` | 意味変更（`0` の番兵をなくし、状態行が読めないときは交換の err にする） | R-http-01 |
+| `http.status_code` | `fn status_code(resp: HttpResponse) -> Int` | Go `StatusCode` / JS `status` | 改名 → `status`（epoch 17。`0` の番兵もなくす） | R-http-04、R-http-08 |
 | `http.get_header` | `fn get_header(resp: HttpResponse, key: String) -> String?` | Go `Header.Get` / JS `headers.get` | 据え置き | — |
 | `http.header_values` | `fn header_values(resp: HttpResponse, key: String) -> List[String]` | Go `Header.Values` | 据え置き | — |
 | `http.headers` | `fn headers(resp: HttpResponse) -> Map[String, String]` | JS `headers` / reqwest `headers` | 据え置き | — |
@@ -163,3 +184,4 @@
 | `http.router` | `fn router(routes: List[HttpRoute]) -> Result[(HttpRequest) -> Result[HttpResponse, String], String]` | Go `ServeMux` | 据え置き | — |
 | `http.wrap` | `fn wrap(handler: …, middleware: List[…]) -> (HttpRequest) -> Result[HttpResponse, String]` | — | 据え置き | — |
 | `http.decode_json` | `fn decode_json[T](req: HttpRequest, decode: (Value) -> Result[T, String]) -> Result[T, HttpResponse]` | — | 据え置き | — |
+| `http.set_body` | `fn set_body(resp: HttpResponse, body: String) -> HttpResponse`（案） | Gleam `set_body` (F) | 追加 | R-http-06 |

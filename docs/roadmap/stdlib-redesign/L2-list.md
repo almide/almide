@@ -267,7 +267,7 @@
 - (c) 英語の `tail` は「末尾の要素」とも読めるので、`list.last` と取り違えやすい名前です。`drop(xs, 1)` は意味が名前から読めます。
 - (d) 撤去です。R-L0-14 のとおり、epoch 15 で `@deprecated(since=15, use="list.drop(xs, 1)")`、epoch 16 で撤去します。`almide fix` が `list.tail(xs)` を `list.drop(xs, 1)` に書き換えます。E002 の表（R-list-11）に `tail` → `list.drop(xs, 1)` の行を足します。
 - 完全性の規則: R-L0-01 の転送の検出（#3851 のゲート）が `list.tail` を拾い、許容リストに残しません。
-- issue: (起票待ち)
+- issue: #3969
 
 ### R-list-12 多数派に届かない役割は足さない — × 不採用
 
@@ -283,6 +283,31 @@
 - issue: なし
 
 ---
+
+### R-list-15 `list.binary_search` を順序のある要素型すべてで使えるようにする — ○ 採用
+
+- いま: `fn list.binary_search(xs: List[Int], target: Int) -> Option[Int]`。`list.sort`・`min`・`max` は順序のある型すべてで動くのに、探す側だけ `Int` 専用です。
+- 案: `fn list.binary_search[A](xs: List[A], target: A) -> Option[Int]`。順序は `list.sort` と同じです（Float は IEEE totalOrder）。`List[Int]` の結果は変わりません。
+- 根拠の L0 規則: R-L0-16、L2 の完全性の規則 4（R-list-08 と同じく定義域を広げる変更）。
+- (a) Rust `binary_search`（`T: Ord`）、Go `slices.BinarySearch`（`cmp.Ordered`）、Python `bisect`、Kotlin `binarySearch`（`Comparable`）は、どれも要素型を限りません。
+- (b) 純粋な計算です。順序は `list.sort` と同じ実装を使います。
+- (c) 実測: `list.binary_search(["a","b"], "b")` は E005 で、ヒントが「`int.parse(s)` で Int に変える」と出ます。意味のない直し方に連れていきます。
+- (d) 意味変更（定義域を広げるだけ。既存の呼び出しは変わらないので epoch にしません）。
+- 完全性の規則: list の順序を使う関数（`sort`・`min`・`max`・`binary_search`）は、受け付ける要素型が同じです。
+- ゲート案: 要素型（Int・Float・String・組）× {`sort`, `min`, `max`, `binary_search`} の行列テストを両 target で回します。観測できる挙動の追加なので、als に先に契約を入れます。
+- issue: #3969
+
+### R-list-16 `list.join` を `List[Bytes]` にも使えるようにする（`bytes.join` は置かない） — ○ 採用
+
+- いま: `fn list.join(xs: List[String], sep: String) -> String`。`List[Bytes]` を区切りつきで 1 つにする関数はありません（`bytes.join` は E002）。
+- 案: `list.join` を、連結 `+` を持つ列の型（`String`・`Bytes`）で受け付けます。`list.join(parts: List[Bytes], sep: Bytes) -> Bytes`。`list.sum` を `Int` と `Float` で振り分けた R-list-08 と同じ仕組みです。
+- 根拠の L0 規則: R-string-01（join は list に置く）、R-L0-01（`bytes.join` を足すと、同じ役割の置き場が型で割れる）、R-bytes-16（`Bytes` も `+` で連結する）。
+- (a) 区切りつきの連結は Go `bytes.Join`、Python `bytes.join`、OCaml `Bytes.concat`、Rust `<[V]>::join`、Swift `joined(separator:)` の 5 言語以上が持ちます。
+- (b) 純粋な計算です。
+- (c) `list.join` を覚えれば、文字列でもバイト列でも同じ形で書けます。
+- (d) 意味変更（定義域を広げるだけ）。互換の影響はありません。
+- 完全性の規則: `+` で連結できる列の型（String・Bytes）はすべて `list.join` で結べます（List どうしの連結は `list.flatten`）。
+- issue: #3969
 
 ## L3: 関数表
 
@@ -315,7 +340,7 @@
 | `is_empty` | `list.is_empty(xs: List[A]) -> Bool` | Rust is_empty / Gleam is_empty / Swift isEmpty | 据え置き | — |
 | `min` | `list.min(xs: List[A]) -> Option[A]` | Rust min / Go Min / Kotlin minOrNull | 据え置き | — |
 | `max` | `list.max(xs: List[A]) -> Option[A]` | Rust max / Go Max / Kotlin maxOrNull | 据え置き | — |
-| `join` | `list.join(xs: List[String], sep: String) -> String` | Rust join / JS join / Kotlin joinToString / Go strings.Join | 据え置き | — |
+| `join` | `list.join(xs: List[String], sep: String) -> String` | Rust join / JS join / Kotlin joinToString / Go strings.Join | 意味変更（`List[Bytes]` と `Bytes` の区切りも受け取る） | R-string-01、R-list-16 |
 | `map` | `list.map(xs: List[A], f: (A) -> B) -> List[B]` | 全言語 map | 据え置き | — |
 | `filter` | `list.filter(xs: List[A], f: (A) -> Bool) -> List[A]` | 全言語 filter | 据え置き | — |
 | `find` | `list.find(xs: List[A], f: (A) -> Bool) -> Option[A]` | Rust find / Kotlin find / Swift first(where:) | 据え置き | — |
@@ -348,7 +373,7 @@
 | `drop_end` | `list.drop_end(xs: List[A], n: Int) -> List[A]` | Kotlin dropLast / Swift dropLast | 据え置き | R-L0-12 |
 | `shuffle` | `list.shuffle(xs: List[A]) -> List[A]` | Python random.shuffle / Kotlin shuffled / Elixir shuffle | 撤去（→ `random.shuffle`） | R-list-05 |
 | `window` | `list.window(xs: List[A], n: Int) -> List[List[A]]` | Gleam window / Rust windows / Kotlin windowed | 意味変更（`n <= 0` は abort。`windows` の残る側） | R-list-03、R-list-10 |
-| `binary_search` | `list.binary_search(xs: List[Int], target: Int) -> Option[Int]` | Rust binary_search / Go BinarySearch / Kotlin binarySearch | 据え置き | — |
+| `binary_search` | `list.binary_search(xs: List[A], target: A) -> Option[Int]` | Rust binary_search / Go BinarySearch / Kotlin binarySearch | 意味変更（要素型を順序のある型すべてに広げる） | R-list-15 |
 | `push` | `list.push(mut xs: List[A], x: A) -> Unit` | Rust push / JS push / Python append | 据え置き | R-list-00 |
 | `with_capacity` | `list.with_capacity(cap: Int) -> List[A]` | Rust Vec::with_capacity / Go make(.., 0, cap) | 据え置き | R-list-00 |
 | `pop` | `list.pop(mut xs: List[A]) -> Option[A]` | Rust pop / Swift popLast / Kotlin removeLastOrNull | 据え置き | R-list-00 |

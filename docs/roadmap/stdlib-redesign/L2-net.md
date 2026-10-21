@@ -101,6 +101,15 @@
 - 理由: `TcpStream`・`TcpListener` は `Int` の別名で、取り違えは型で止まりません。不透明な型にする変更は、旧い書き方を型エラーにするだけで黙って結果を変えないので、R-L0-14 の 4 では許されます。それでも、ハンドルを `Int` の欄に持つレコードなど、正しく動いている利用者のコードをすべて書き換えさせることになります。ストリームと待ち受けを取り違えたという報告は、いまはありません。#3853 が問題にした「TCP のハンドルと OS の記述子を混ぜる」は、R-net-01 で `unix.Fd` を不透明にすれば止まります。
 - issue: なし
 
+### R-net-06 `udp_recv_from` の 3 つ組をレコードにする — ○ 採用
+
+- いま: `net.udp_recv_from(sock, max) -> (Bytes, String, Int)`。2 つの同じ型でない欄を位置で覚えさせる形です。
+- 案: `type UdpPacket = { data: Bytes, host: String, port: Int }` を返します。`host` は、`udp_send_to(host: String, …)` と TCP の関数にそのまま渡せる `String` にします。
+- 根拠の L0 規則: R-L0-01。多値の戻りは、同じ種類の値の組（`list.partition` の 2 つのリスト）だけをタプルにし、役割の違う 3 つ以上の欄はレコードにします（`ProcessStatus`・`FileStat` と同じ）。
+- (a) 並びの順は Python `(bytes, (host, port))`、Rust `(usize, SocketAddr)`、Erlang `{Address, Port, Packet}` と割れています。
+- (d) 新しい関数なので費用は 0 です。
+- issue: #3974
+
 ## L3: 関数表
 
 | 関数 | シグネチャ(現行, mut 表示) | 他言語の主な綴り | 判定 | 案 |
@@ -121,7 +130,7 @@
 | `net.udp_bind` | `effect fn udp_bind(host: String, port: Int) -> UdpSocket`（案） | Rust `UdpSocket::bind`(F) / Go `ListenUDP`(F) | 追加 | R-net-02 |
 | `net.udp_local_port` | `effect fn udp_local_port(sock: UdpSocket) -> Int`（案） | Rust `local_addr`(F) | 追加 | R-net-02 |
 | `net.udp_send_to` | `effect fn udp_send_to(sock: UdpSocket, data: Bytes, host: String, port: Int) -> Unit`（案） | Rust `send_to`(F) / Go `WriteTo`(F) / Python `sendto` | 追加 | R-net-02 |
-| `net.udp_recv_from` | `effect fn udp_recv_from(sock: UdpSocket, max: Int) -> (Bytes, String, Int)`（案） | Rust `recv_from`(F) / Go `ReadFrom`(F) / Python `recvfrom` | 追加 | R-net-02 |
+| `net.udp_recv_from` | `effect fn udp_recv_from(sock: UdpSocket, max: Int) -> UdpPacket`（案） | Rust `recv_from`(F) / Go `ReadFrom`(F) / Python `recvfrom` | 追加（`UdpPacket` を返す） | R-net-01、R-net-06 |
 | `net.udp_close` | `effect fn udp_close(sock: UdpSocket) -> Unit`（案） | Go `Close` | 追加 | R-net-02 |
 | `net.lookup_host` | `effect fn lookup_host(host: String) -> List[IpAddr]`（案） | Go `LookupHost`(F) / Python `getaddrinfo` / Node `dns.lookup` | 追加 | R-net-03 |
 | `net.parse_ip` | `fn parse_ip(s: String) -> Result[IpAddr, String]`（案） | Go `ParseIP`(F) / Rust `parse::<IpAddr>` / Elixir `parse_address` | 追加 | R-net-03 |

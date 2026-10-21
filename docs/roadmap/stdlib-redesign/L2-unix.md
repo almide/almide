@@ -59,6 +59,25 @@
 - ゲート案: `unix.Fd` が `Int` と単一化しないことの checker テスト。`net` に `native-only-forever` の行が残らないこと（L2-net）。
 - issue: #3853（既存）
 
+### R-unix-02 `unix.wait` を `unix.select` にする — ○ 採用
+
+- いま: `unix.wait(fds, timeout_ms) -> List[Fd]` は「読める記述子が出るまで待つ」関数です。`http.wait(c)` と `process.wait(c)` は「1 つのハンドルが終わるまで待って結果を返す」関数です。
+- 案: `effect fn unix.select(fds: List[Fd], timeout_ms: Int) -> List[Fd]`。`wait` は「ハンドルが終わるまで待つ」の意味だけに使います。
+- 根拠の L0 規則: R-L0-00 の 1（同じ動詞がモジュールによって違う意味）。
+- (a) Python `select.select`、OCaml `Unix.select`、JVM `Selector.select`。`wait` と呼ぶ言語はありません。
+- (d) `unix` は新しいモジュールなので費用は 0 です。`net.unix_wait`・`unix_poll` の `@deprecated` の `use` を `unix.select` にします。
+- issue: #3974
+
+### R-unix-03 `unix.recv`・`unix.send` を `unix.read`・`unix.write` にする — ○ 採用
+
+- いま: つながったストリームの読み書きが、TCP では `net.tcp_read`・`tcp_write`、Unix ソケットでは `unix.recv`・`send` です。
+- 案: `effect fn unix.read(sock: Fd, max: Int) -> Bytes`、`effect fn unix.write(sock: Fd, data: Bytes, fds: List[Fd]) -> Unit`。
+- 根拠の L0 規則: R-L0-01。L2-net の規則「つながる TCP は `read`/`write`、つながらない UDP は `send_to`/`recv_from`」を Unix ソケットにも当てはめます。
+- (a) Rust `UnixStream` は `Read`・`Write` を実装し、`recv`・`send` を持ちません (F)。Go `UnixConn`・OCaml も `read`・`write` です。
+- (d) 新しいモジュールなので費用は 0 です。
+- 完全性の規則: つながるストリームは {connect, listen, accept, read, write, close} が TCP と Unix で同じ形です。
+- issue: #3974
+
 ## L3: 関数表
 
 | 関数 | シグネチャ(案) | 他言語の主な綴り | 判定 | 案 |
@@ -66,10 +85,10 @@
 | `unix.connect` | `effect fn connect(path: String) -> Fd` | Rust `UnixStream::connect` / Go `DialUnix` | 追加（`net.unix_connect` から移動） | R-unix-01 |
 | `unix.listen` | `effect fn listen(path: String) -> Fd` | Rust `UnixListener::bind` / Go `ListenUnix` | 追加（移動） | R-unix-01 |
 | `unix.accept` | `effect fn accept(listener: Fd) -> Fd` | Rust・Python `accept` / Go `AcceptUnix` | 追加（移動） | R-unix-01 |
-| `unix.send` | `effect fn send(sock: Fd, data: Bytes, fds: List[Fd]) -> Unit` | Python `send_fds` / Go `WriteMsgUnix` | 追加（移動） | R-unix-01 |
-| `unix.recv` | `effect fn recv(sock: Fd, max: Int) -> Bytes` | Python `recv_fds` / Go `ReadMsgUnix` | 追加（移動） | R-unix-01 |
+| `unix.write` | `effect fn write(sock: Fd, data: Bytes, fds: List[Fd]) -> Unit` | Python `send_fds` / Go `WriteMsgUnix` | 追加（移動） | R-unix-01、R-unix-03 |
+| `unix.read` | `effect fn read(sock: Fd, max: Int) -> Bytes` | Python `recv_fds` / Go `ReadMsgUnix` | 追加（移動） | R-unix-01、R-unix-03 |
 | `unix.take_fds` | `effect fn take_fds(sock: Fd) -> List[Fd]` | — | 追加（移動） | R-unix-01 |
-| `unix.wait` | `effect fn wait(fds: List[Fd], timeout_ms: Int) -> List[Fd]` | Python `select.select` / OCaml `Unix.select` | 追加（移動。`unix_poll` を吸収） | R-unix-01 |
+| `unix.select` | `effect fn select(fds: List[Fd], timeout_ms: Int) -> List[Fd]` | Python `select.select` / OCaml `Unix.select` | 追加（移動。`unix_poll` を吸収） | R-unix-01、R-unix-02 |
 | `unix.close` | `effect fn close(fd: Fd) -> Unit` | Python `os.close` / OCaml `Unix.close` | 追加（移動） | R-unix-01 |
 | `unix.shm_create` | `effect fn shm_create(size: Int) -> Fd` | Python `SharedMemory(create=True, size=)` | 追加（移動） | R-unix-01 |
 | `unix.shm_resize` | `effect fn shm_resize(fd: Fd, size: Int) -> Unit` | POSIX `ftruncate` | 追加（移動） | R-unix-01 |

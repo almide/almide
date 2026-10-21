@@ -52,7 +52,7 @@ CHEATSHEET の「No synonyms」を、モジュールの境界を越えて適用�
 ## R-L0-02 関数は主語の型のモジュールに置く — ○ 採用
 
 第 1 引数（主語）の型が属するモジュールに置きます。主語のない構築子（`map.new`、`list.range`）は、返す型のモジュールに置きます。
-`math` には、型モジュールに置き場所がない数学関数だけを置きます（超越関数、`factorial`、`choose`）。
+`math` には、型モジュールに置き場所がない数学関数だけを置きます。境界は「`Int` にも同じ役割があるもの（`abs`・`min`・`max`・`clamp`・`sign`・`pow`）は型のモジュール、実数だけの数学関数（`sqrt`・`cbrt`・`hypot`、三角・指数・対数・ガンマ）と `factorial`・`choose` は `math`、丸め・判定・定数・ビット列・変換は `float`」です（R-math-03 で `sqrt` の置き場所を見直してこの形にしました）。
 入れ物の要素の型に意味がある関数（`List[Option[T]]` を受け取る `option.collect`、`List[Result[T, E]]` を受け取る `result.partition`）は、要素の型のモジュールに置きます。
 
 - (a) 多数派は 7/9 で、主語の型のモジュールやメソッドに置いています（Rust・Kotlin・Swift はメソッド、Gleam・Elixir・OCaml は型モジュール）。Go と Python の `math` は例外です。
@@ -78,7 +78,8 @@ CHEATSHEET の「No synonyms」を、モジュールの境界を越えて適用�
    - 両端を持つ入れ物では、端を名前に付けた `push_front`・`push_back`・`pop_front`・`pop_back`（`deque`）。`push`・`pop` と同じ族として数えます
    - `append_<型>`（バイト列の末尾に書き足す）、`put_<型>`（バイト列の位置を指定して上書きする）
    - `copy_from`、`copy_within`（バイト列の範囲をコピーする）
-3. ひとつの動詞は、全モジュールで同じ様式（コピーかその場書き換えか）を表します。`set`・`insert`・`remove`・`delete`・`update` はコピー側の動詞です。
+3. ひとつの動詞は、全モジュールで同じ様式（コピーかその場書き換えか）を表します。
+4. `clear` は入れ物の型すべてに置きます（list・map・set・deque・heap・string・bytes）。確保した場所を保ったまま空にするので、コピーで同じ速さに書けないからです（set・deque・heap への追加は二巡目の見直しで決めました。R-deque-02、R-heap-02）。`set`・`insert`・`remove`・`delete`・`update` はコピー側の動詞です。
 
 **この規則から決まること（L2 で個別に判定します）:**
 - `map.insert(mut m, k, v)` と `map.delete(mut m, k)` は撤去します。`set.insert` と `list.insert` はコピーなのに、`map.insert` だけがその場書き換えです。`m[k] = v` と `m = map.remove(m, k)` が同じ速さで書けます。
@@ -224,6 +225,7 @@ ADR-0022 のとおり、純粋な関数は書き出しと abort はできます�
 - 標準から外して package にする
 
 「native 専用のまま」を終点にはしません（ADR-0027 D8）。
+- 4 つめの道（二巡目の見直しで追記）: private host capability（ADR-0025・ADR-0029）。`process` の全関数と `testing.assert_aborts` は、組み込みの host が提供する私的な機能で wasm に乗ります。標準の wasm ホストでは読み込み時に拒否され、黙って違う結果にはなりません。退役の予定はないので「暫定の host op」とは別に数えます。各 L2 の (b) は、標準 WASI・暫定の host op・private host capability・標準の外（package）の 4 つのどれかを名指しします。
 
 ## R-L0-16 順序のある型には `compare` を置く — ○ 採用
 
@@ -276,6 +278,12 @@ effect fn を呼んだときの型（`!` が要るか、`??` をそのまま書�
 - 完全性の規則: L3 の「他言語の主な綴り」の各綴りは、生きている関数か正しい式を指す `ALIASES` のキーになっているか、外す理由（Almide で別の意味の生きている名前である、など）が書いてあるかのどちらかです。変換の行列のすべての組に、`as`・`T(x)`・`into` の案内があります。
 - ゲート案: #3905 で提案した `tests/stdlib_alias_table_test.rs` で、生成した行と L3 の列を突き合わせます。`tests/diagnostics/` に 4 つの形の例を置き、診断が 1 つだけ出て関数名を示すことを確かめます。
 - issue: #3958
+- 二巡目の見直しで足すこと（issue: #3967）:
+  3. 関数を置かずに構文や式で書く役割にも案内の行を置きます。L3 の表とは別に「役割 → 正しい式」の表を 1 枚持ちます。例: `list.for_each`・`each`・`iter` → `for x in xs { … }`、`result.collect` → `rs |> list.map((r) => r!)`、`option.unwrap` → `o ?? panic("…")`、`result.ok` → `result.to_option`、`string.char_at` → `string.get`、`list.concat` → `xs + ys`、`bigint.add` → `a + b`、`float32.is_nan` → `float32.to_float(x) |> float.is_nan`。
+  4. 行列が意図して置かないセルの名前（`bytes.get_u8` → `bytes.get`、`bytes.append_u8` → `bytes.push`、`bytes.get_u64_le` → `get_i64_le`、`json.encode` → `json.stringify`、`value.to_string` → `json.stringify`、`random.next_bytes` → `next_int` の繰り返し）は、必ず案内の行を持ちます。
+  5. 編集距離で選んだ候補が、意味の違う生きた関数を指すときは出しません。実測で誤っていた案内: `list.find_last` → `find_map`、`list.last_index_of` → `index_of`、`list.iter` → `filter`、`bytes.get_u8` → `set_u8`（書き込みの関数）、`value.to_string` → `as_string`、`print` → `println`（改行が付いて出力が変わる）。
+  6. `String` と `Bytes` の取り違え（E005）には、`bytes.from_string(s)`・`bytes.to_string(b)` を示します。`fs.read_bytes`・`hash.fnv1a32`・`io.write_bytes` が `Bytes` に変わるので、この取り違えは増えます。
+  7. `5 & 3` のような他言語のビット演算子は、いまは構文エラー「`)` がない」になります。案内（#3905 で予定）は、字句ではなく構文エラーの経路に置きます。
 
 ## R-L0-20 critical プロファイルで、黙って折り返す `to_<型>` を拒む — 保留
 
@@ -333,6 +341,33 @@ effect fn を呼んだときの型（`!` が要るか、`??` をそのまま書�
 - 完全性の規則: 標準の公開関数の宣言に `Option[` が現れません。
 - ゲート案: `stdlib/*.almd` の公開関数の宣言を対象に、`almide fmt --check --no-import-edit` と同じ正規化をかけ、差分が出ないことを確かめます。
 - issue: #3963
+
+
+## R-L0-25 文字列との変換の動詞を表で決める — ○ 採用
+
+| 種類 | 文字列へ | 文字列から |
+|---|---|---|
+| 型つきの値（`Url`・`Uuid`・`Int`・`BigInt`・`Regex` など） | `to_string` | `parse`（Result） |
+| 同じ値の別の表現（`Bytes` など） | `to_<表現>` | `from_<表現>` |
+| 中身を保ったまま文字の並びだけを変える符号化（base64・hex・URL の component・form） | `encode_<変種>`（変種がなければ `encode`） | `decode_<変種>`（Result） |
+| 例外 | `json.stringify`（学習データで圧倒的な綴り。R-json-03）、`url.build_query`（`parse_query` の逆。多数派なし） | — |
+
+- 根拠の L0 規則: R-L0-07、R-L0-01、R-L0-00。この表は、二巡目の見直しで「綴りはすでにそろっているが、規則として書かれていない」ことが分かったので足しました（`path.from_string` は R-path-02 で消えます）。`build_query` の改名は、多数派がないので × です。
+- (c) 新しいモジュールを足すときに綴りが揺れません（uuid は `parse`・`to_string`・`from_bytes`・`to_bytes` で、すでにこの表どおりです）。
+- ゲート案: R-L0-G に「`String` から `Result[T, _]` を返す公開関数の名前は `parse`・`parse_<x>`・`decode_<x>`・`from_<x>` のどれか」を足します。許容リストは上の 2 つの例外から始め、減らす方向だけにします。
+- issue: #3971
+
+## R-L0-26 演算子を持つ型は、演算子と脱糖先の表を 1 か所で宣言する — ○ 採用
+
+- いま: どの型でどの演算子が使えるかは、検査器と lowering に別々に書かれています。食い違いの実例: `-m`（Matrix の単項マイナス）は `almide check` を通るのに、lowering で内部エラー（「NegInt expects Int operand」）になります（#3965）。また、bigint と matrix は演算子の脱糖先（`bigint.add`・`matrix.add` など）を公開の関数としても持ち、同じ計算に 2 つの綴りがあります。
+- 案:
+  1. 型 × 演算子（`+ - * / %`、単項 `-`、比較）の表を 1 か所で宣言し、検査器と lowering の両方がそれを読みます。表にないセルは、内部エラーではなく診断つきの型エラーにします。
+  2. 演算子の脱糖先は公開しません（`__add` などの内部の名前）。公開の書き方は演算子だけです。例外は、ほかの型にも同じ名前があって演算子と意味が違う関数（`floor_div`・`mod`）だけです（R-bigint-04、R-matrix-14）。
+- 根拠の L0 規則: R-L0-01、R-L0-15、R-L0-17（呼び方は宣言から決まる）。
+- (c) `+` が使えるのを見た LLM は `-m` とも書きます。そこで利用者に直せない内部エラーになるのを防げます。
+- 完全性の規則: 演算子を持つ型ごとに、表の各セルが「脱糖先がある」か「診断つきの型エラー」のどちらかです。
+- ゲート案: 表のすべてのセルについて、`almide check` とビルドの結果を固定する fixture を置きます。
+- issue: #3973
 
 ---
 

@@ -46,6 +46,11 @@
 - 理由: 標準に持つのは Go・Python・Deno の 3 言語で、L1 の基準（5 言語以上）に届きません。HTML を読む処理は package（HTML の構文解析器）の関心事です。
 - issue: なし
 
+### R-html-03 `SafeHtml` の列をまとめる `html.join` を足す — × 不採用
+
+- 理由: エスケープの型を持つ言語が 2 つしかなく、5 言語の基準に届きません。`list.fold(xs, html.empty(), html.concat)` で書けます。
+- issue: なし
+
 ## L3: 関数表
 
 | 関数 | シグネチャ(現行, mut 表示) | 他言語の主な綴り | 判定 | 案 |
