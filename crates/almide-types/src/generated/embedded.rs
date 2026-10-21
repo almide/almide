@@ -17874,7 +17874,7 @@ fn get[K, V](m: Map[K, V], key: K) -> V? = _
 @borrow_ref(key)
 fn get_or[K, V](m: Map[K, V], key: K, default: V) -> V = _
 
-/// Copy with key -> value; existing keys stay put.
+/// Copy with key -> value; an existing key is overwritten and keeps its position.
 @intrinsic("almide_rt_map_set")
 @reuse(m)
 @consume(m)
@@ -17969,7 +17969,7 @@ fn update[K, V](m: Map[K, V], key: K, f: (V) -> V) -> Map[K, V] = _
 fn upsert[K, V](m: Map[K, V], key: K, init: V, f: (V) -> V) -> Map[K, V] = _
 
 
-/// In-place key -> value; existing keys stay put.
+/// In-place key -> value; an existing key is overwritten and keeps its position.
 @intrinsic("almide_rt_map_insert")
 fn insert[K, V](mut m: Map[K, V], key: K, value: V) -> Unit = _
 

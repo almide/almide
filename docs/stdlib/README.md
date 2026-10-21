@@ -4,6 +4,8 @@
 
 Every public function of the 44 stdlib modules, 999 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
 
+A `mut` parameter is written in place: the caller passes a `var` binding and sees the change (a `let`, a non-`mut` parameter or a temporary is E032). Every other parameter is read only, and a function that changes a value without `mut` returns a new one.
+
 | Module | Functions | Types |
 |---|---:|---:|
 | [args](#args) | 6 | 0 |
@@ -75,34 +77,34 @@ Every public function of the 44 stdlib modules, 999 in all, with its signature a
 
 [bytes.md](bytes.md)
 
-- `bytes.append_f32_be(b: Bytes, val: Float) -> Unit` — Appends val rounded to f32, BE.
-- `bytes.append_f32_le(b: Bytes, val: Float) -> Unit` — Appends val rounded to f32, LE.
-- `bytes.append_f64_be(b: Bytes, val: Float) -> Unit` — Appends val as 8-byte f64, BE.
-- `bytes.append_f64_le(b: Bytes, val: Float) -> Unit` — Appends val as 8-byte f64, LE.
-- `bytes.append_i16_be(b: Bytes, val: Int) -> Unit` — Appends val's low 16 bits, BE.
-- `bytes.append_i16_le(b: Bytes, val: Int) -> Unit` — Appends val's low 16 bits, LE.
-- `bytes.append_i32_be(b: Bytes, val: Int) -> Unit` — Appends val's low 32 bits, BE.
-- `bytes.append_i32_le(b: Bytes, val: Int) -> Unit` — Appends val's low 32 bits, LE.
-- `bytes.append_i64_be(b: Bytes, val: Int) -> Unit` — Appends val as 8 bytes, BE.
-- `bytes.append_i64_le(b: Bytes, val: Int) -> Unit` — Appends val as 8 bytes, LE.
-- `bytes.append_u16_be(b: Bytes, val: Int) -> Unit` — Appends val's low 16 bits, BE.
-- `bytes.append_u16_le(b: Bytes, val: Int) -> Unit` — Appends val's low 16 bits, LE.
-- `bytes.append_u32_be(b: Bytes, val: Int) -> Unit` — Appends val's low 32 bits, BE.
-- `bytes.append_u32_le(b: Bytes, val: Int) -> Unit` — Appends val's low 32 bits, LE.
-- `bytes.append_u8(b: Bytes, val: Int) -> Unit` — Appends val's low 8 bits; 256 becomes 0.
+- `bytes.append_f32_be(mut b: Bytes, val: Float) -> Unit` — Appends val rounded to f32, BE.
+- `bytes.append_f32_le(mut b: Bytes, val: Float) -> Unit` — Appends val rounded to f32, LE.
+- `bytes.append_f64_be(mut b: Bytes, val: Float) -> Unit` — Appends val as 8-byte f64, BE.
+- `bytes.append_f64_le(mut b: Bytes, val: Float) -> Unit` — Appends val as 8-byte f64, LE.
+- `bytes.append_i16_be(mut b: Bytes, val: Int) -> Unit` — Appends val's low 16 bits, BE.
+- `bytes.append_i16_le(mut b: Bytes, val: Int) -> Unit` — Appends val's low 16 bits, LE.
+- `bytes.append_i32_be(mut b: Bytes, val: Int) -> Unit` — Appends val's low 32 bits, BE.
+- `bytes.append_i32_le(mut b: Bytes, val: Int) -> Unit` — Appends val's low 32 bits, LE.
+- `bytes.append_i64_be(mut b: Bytes, val: Int) -> Unit` — Appends val as 8 bytes, BE.
+- `bytes.append_i64_le(mut b: Bytes, val: Int) -> Unit` — Appends val as 8 bytes, LE.
+- `bytes.append_u16_be(mut b: Bytes, val: Int) -> Unit` — Appends val's low 16 bits, BE.
+- `bytes.append_u16_le(mut b: Bytes, val: Int) -> Unit` — Appends val's low 16 bits, LE.
+- `bytes.append_u32_be(mut b: Bytes, val: Int) -> Unit` — Appends val's low 32 bits, BE.
+- `bytes.append_u32_le(mut b: Bytes, val: Int) -> Unit` — Appends val's low 32 bits, LE.
+- `bytes.append_u8(mut b: Bytes, val: Int) -> Unit` — Appends val's low 8 bits; 256 becomes 0.
 - `bytes.as_mut_ptr(b: Bytes) -> RawPtr` — Mutable address of the data; null if empty.
 - `bytes.as_ptr(b: Bytes) -> RawPtr` — Address of the data; null if empty.
 - `bytes.chunks(b: Bytes, size: Int) -> List[Bytes]` — size-byte pieces, last may be short; [] if size <= 0.
-- `bytes.clear(b: Bytes) -> Unit` — Truncates b to length 0 in place.
+- `bytes.clear(mut b: Bytes) -> Unit` — Truncates b to length 0 in place.
 - `bytes.cmp(a: Bytes, b: Bytes) -> Int` — Lexicographic -1, 0 or 1; a prefix sorts first.
 - `bytes.concat(a: Bytes, b: Bytes) -> Bytes` — New Bytes holding a then b.
 - `bytes.contains(b: Bytes, pattern: Bytes) -> Bool` — True if pattern occurs in b, or pattern is empty.
-- `bytes.copy_from(dst: Bytes, src: Bytes, dst_off: Int, src_off: Int, len: Int) -> Unit` — Copies len bytes of src into dst; clamped to fit.
+- `bytes.copy_from(mut dst: Bytes, src: Bytes, dst_off: Int, src_off: Int, len: Int) -> Unit` — Copies len bytes of src into dst; clamped to fit.
 - `bytes.copy_to_ptr(b: Bytes, ptr: RawPtr, cap: Int) -> Int` — Writes up to cap bytes to ptr; count, 0 if null.
 - `bytes.data_ptr(b: Bytes) -> Int` — Address of the data as an Int; target-specific.
 - `bytes.ends_with(b: Bytes, suffix: Bytes) -> Bool` — True if b ends with suffix, or suffix is empty.
 - `bytes.eof(b: Bytes, pos: Int) -> Bool` — True if pos >= len or pos is negative.
-- `bytes.fill(b: Bytes, val: Int) -> Unit` — Sets every byte to val's low 8 bits in place.
+- `bytes.fill(mut b: Bytes, val: Int) -> Unit` — Sets every byte to val's low 8 bits in place.
 - `bytes.from_list(xs: List[Int]) -> Bytes` — xs as bytes, low 8 bits each; -1 becomes 255.
 - `bytes.from_raw_ptr(ptr: RawPtr, len: Int) -> Bytes` — Copy of len bytes at ptr; empty if null or len <= 0.
 - `bytes.from_string(s: String) -> Bytes` — UTF-8 encoding of s.
@@ -118,9 +120,9 @@ Every public function of the 44 stdlib modules, 999 in all, with its signature a
 - `bytes.new(len: Int) -> Bytes` — len zero bytes; empty if len <= 0.
 - `bytes.pad_left(b: Bytes, target_len: Int, val: Int) -> Bytes` — Left-padded with val to target_len; as-is if longer.
 - `bytes.pad_right(b: Bytes, target_len: Int, val: Int) -> Bytes` — Right-padded with val to target_len; as-is if longer.
-- `bytes.push(b: Bytes, val: Int) -> Unit` — Appends val's low 8 bits in place.
-- `bytes.set_at(b: Bytes, i: Int, val: Int) -> Unit` — Sets byte i to val's low 8 bits; no-op out of range.
-- `bytes.copy_within(b: Bytes, src_start: Int, src_end: Int, dst: Int) -> Unit` — Copies src_start..src_end to dst; no-op if it won't fit.
+- `bytes.push(mut b: Bytes, val: Int) -> Unit` — Appends val's low 8 bits in place.
+- `bytes.set_at(mut b: Bytes, i: Int, val: Int) -> Unit` — Sets byte i to val's low 8 bits; no-op out of range.
+- `bytes.copy_within(mut b: Bytes, src_start: Int, src_end: Int, dst: Int) -> Unit` — Copies src_start..src_end to dst; no-op if it won't fit.
 - `bytes.read_bool(b: Bytes, pos: Int) -> Bool` — Byte at pos != 0; false if out of range.
 - `bytes.read_bool_at(b: Bytes, pos: Int) -> (Int, Option[Bool])` — (pos+1, byte != 0); (pos, none) at EOF.
 - `bytes.read_f16_le(b: Bytes, pos: Int) -> Float` — f16 LE at pos; 0.0 if out of range.
@@ -178,21 +180,21 @@ Every public function of the 44 stdlib modules, 999 in all, with its signature a
 - `bytes.repeat(b: Bytes, n: Int) -> Bytes` — b concatenated n times; empty if n <= 0.
 - `bytes.reverse(b: Bytes) -> Bytes` — Copy with the byte order reversed.
 - `bytes.set(b: Bytes, i: Int, val: Int) -> Bytes` — Copy with byte i set to val; as-is if out of range.
-- `bytes.set_f32_be(b: Bytes, pos: Int, val: Float) -> Unit` — Writes f32 BE at pos; no-op out of range.
-- `bytes.set_f32_le(b: Bytes, pos: Int, val: Float) -> Unit` — Writes f32 LE at pos; no-op out of range.
-- `bytes.set_f64_be(b: Bytes, pos: Int, val: Float) -> Unit` — Writes f64 BE at pos; no-op out of range.
-- `bytes.set_f64_le(b: Bytes, pos: Int, val: Float) -> Unit` — Writes f64 LE at pos; no-op out of range.
-- `bytes.set_i16_be(b: Bytes, pos: Int, val: Int) -> Unit` — Writes i16 BE at pos; no-op out of range.
-- `bytes.set_i16_le(b: Bytes, pos: Int, val: Int) -> Unit` — Writes i16 LE at pos; no-op out of range.
-- `bytes.set_i32_be(b: Bytes, pos: Int, val: Int) -> Unit` — Writes i32 BE at pos; no-op out of range.
-- `bytes.set_i32_le(b: Bytes, pos: Int, val: Int) -> Unit` — Writes i32 LE at pos; no-op out of range.
-- `bytes.set_i64_be(b: Bytes, pos: Int, val: Int) -> Unit` — Writes i64 BE at pos; no-op out of range.
-- `bytes.set_i64_le(b: Bytes, pos: Int, val: Int) -> Unit` — Writes i64 LE at pos; no-op out of range.
-- `bytes.set_u16_be(b: Bytes, pos: Int, val: Int) -> Unit` — Writes u16 BE at pos; no-op out of range.
-- `bytes.set_u16_le(b: Bytes, pos: Int, val: Int) -> Unit` — Writes u16 LE at pos; no-op out of range.
-- `bytes.set_u32_be(b: Bytes, pos: Int, val: Int) -> Unit` — Writes u32 BE at pos; no-op out of range.
-- `bytes.set_u32_le(b: Bytes, pos: Int, val: Int) -> Unit` — Writes u32 LE at pos; no-op out of range.
-- `bytes.set_u8(b: Bytes, pos: Int, val: Int) -> Unit` — Writes val's low byte at pos; no-op out of range.
+- `bytes.set_f32_be(mut b: Bytes, pos: Int, val: Float) -> Unit` — Writes f32 BE at pos; no-op out of range.
+- `bytes.set_f32_le(mut b: Bytes, pos: Int, val: Float) -> Unit` — Writes f32 LE at pos; no-op out of range.
+- `bytes.set_f64_be(mut b: Bytes, pos: Int, val: Float) -> Unit` — Writes f64 BE at pos; no-op out of range.
+- `bytes.set_f64_le(mut b: Bytes, pos: Int, val: Float) -> Unit` — Writes f64 LE at pos; no-op out of range.
+- `bytes.set_i16_be(mut b: Bytes, pos: Int, val: Int) -> Unit` — Writes i16 BE at pos; no-op out of range.
+- `bytes.set_i16_le(mut b: Bytes, pos: Int, val: Int) -> Unit` — Writes i16 LE at pos; no-op out of range.
+- `bytes.set_i32_be(mut b: Bytes, pos: Int, val: Int) -> Unit` — Writes i32 BE at pos; no-op out of range.
+- `bytes.set_i32_le(mut b: Bytes, pos: Int, val: Int) -> Unit` — Writes i32 LE at pos; no-op out of range.
+- `bytes.set_i64_be(mut b: Bytes, pos: Int, val: Int) -> Unit` — Writes i64 BE at pos; no-op out of range.
+- `bytes.set_i64_le(mut b: Bytes, pos: Int, val: Int) -> Unit` — Writes i64 LE at pos; no-op out of range.
+- `bytes.set_u16_be(mut b: Bytes, pos: Int, val: Int) -> Unit` — Writes u16 BE at pos; no-op out of range.
+- `bytes.set_u16_le(mut b: Bytes, pos: Int, val: Int) -> Unit` — Writes u16 LE at pos; no-op out of range.
+- `bytes.set_u32_be(mut b: Bytes, pos: Int, val: Int) -> Unit` — Writes u32 BE at pos; no-op out of range.
+- `bytes.set_u32_le(mut b: Bytes, pos: Int, val: Int) -> Unit` — Writes u32 LE at pos; no-op out of range.
+- `bytes.set_u8(mut b: Bytes, pos: Int, val: Int) -> Unit` — Writes val's low byte at pos; no-op out of range.
 - `bytes.skip(b: Bytes, pos: Int, n: Int) -> Int` — pos + n, capped at len.
 - `bytes.skip_length_prefixed_le(b: Bytes, pos: Int, count: Int) -> Int` — Offset past count u32-LE-prefixed records.
 - `bytes.slice(b: Bytes, start: Int, end: Int) -> Bytes` — Copy of start..end capped at len; empty if start >= end.
@@ -202,25 +204,25 @@ Every public function of the 44 stdlib modules, 999 in all, with its signature a
 - `bytes.to_list(b: Bytes) -> List[Int]` — Each byte as an Int in 0..255.
 - `bytes.to_string(b: Bytes) -> Result[String, String]` — UTF-8 decode; err "invalid UTF-8: ..." if bad.
 - `bytes.to_string_lossy(b: Bytes) -> String` — UTF-8 decode; invalid sequences become U+FFFD.
-- `bytes.write_bool(b: Bytes, val: Bool) -> Unit` — Appends 1 for true, 0 for false.
-- `bytes.write_f64_be(b: Bytes, val: Float) -> Unit` — Appends val as 8-byte f64, BE.
-- `bytes.write_i64_be(b: Bytes, val: Int) -> Unit` — Appends val as 8 bytes, BE.
-- `bytes.write_string_be(b: Bytes, s: String) -> Unit` — Appends s after a u32 BE byte-length prefix.
-- `bytes.write_u32_be(b: Bytes, val: Int) -> Unit` — Appends val's low 32 bits, BE.
-- `bytes.write_u8(b: Bytes, val: Int) -> Unit` — Appends val's low 8 bits; 256 becomes 0.
+- `bytes.write_bool(mut b: Bytes, val: Bool) -> Unit` — Appends 1 for true, 0 for false.
+- `bytes.write_f64_be(mut b: Bytes, val: Float) -> Unit` — Appends val as 8-byte f64, BE.
+- `bytes.write_i64_be(mut b: Bytes, val: Int) -> Unit` — Appends val as 8 bytes, BE.
+- `bytes.write_string_be(mut b: Bytes, s: String) -> Unit` — Appends s after a u32 BE byte-length prefix.
+- `bytes.write_u32_be(mut b: Bytes, val: Int) -> Unit` — Appends val's low 32 bits, BE.
+- `bytes.write_u8(mut b: Bytes, val: Int) -> Unit` — Appends val's low 8 bits; 256 becomes 0.
 - `bytes.xor(a: Bytes, b: Bytes) -> Bytes` — Bytewise XOR, as long as the shorter input.
 - `bytes.read_uint16(b: Bytes, offset: Int, endian: Endian) -> UInt16` — UInt16 at offset; 0 if out of range.
 - `bytes.read_uint32(b: Bytes, offset: Int, endian: Endian) -> UInt32` — UInt32 at offset; 0 if out of range.
 - `bytes.read_int32(b: Bytes, offset: Int, endian: Endian) -> Int32` — Int32 at offset; 0 if out of range.
 - `bytes.read_float32(b: Bytes, offset: Int, endian: Endian) -> Float32` — Float32 at offset; 0 if out of range.
-- `bytes.write_uint16(b: Bytes, value: UInt16, endian: Endian) -> Unit` — Appends value as 2 bytes in endian order.
-- `bytes.write_uint32(b: Bytes, value: UInt32, endian: Endian) -> Unit` — Appends value as 4 bytes in endian order.
-- `bytes.write_int32(b: Bytes, value: Int32, endian: Endian) -> Unit` — Appends value as 4 bytes in endian order.
-- `bytes.write_float32(b: Bytes, value: Float32, endian: Endian) -> Unit` — Appends value as 4 bytes in endian order.
-- `bytes.set_uint16(b: Bytes, offset: Int, value: UInt16, endian: Endian) -> Unit` — Writes value at offset; no-op out of range.
-- `bytes.set_uint32(b: Bytes, offset: Int, value: UInt32, endian: Endian) -> Unit` — Writes value at offset; no-op out of range.
-- `bytes.set_int32(b: Bytes, offset: Int, value: Int32, endian: Endian) -> Unit` — Writes value at offset; no-op out of range.
-- `bytes.set_float32(b: Bytes, offset: Int, value: Float32, endian: Endian) -> Unit` — Writes value at offset; no-op out of range.
+- `bytes.write_uint16(mut b: Bytes, value: UInt16, endian: Endian) -> Unit` — Appends value as 2 bytes in endian order.
+- `bytes.write_uint32(mut b: Bytes, value: UInt32, endian: Endian) -> Unit` — Appends value as 4 bytes in endian order.
+- `bytes.write_int32(mut b: Bytes, value: Int32, endian: Endian) -> Unit` — Appends value as 4 bytes in endian order.
+- `bytes.write_float32(mut b: Bytes, value: Float32, endian: Endian) -> Unit` — Appends value as 4 bytes in endian order.
+- `bytes.set_uint16(mut b: Bytes, offset: Int, value: UInt16, endian: Endian) -> Unit` — Writes value at offset; no-op out of range.
+- `bytes.set_uint32(mut b: Bytes, offset: Int, value: UInt32, endian: Endian) -> Unit` — Writes value at offset; no-op out of range.
+- `bytes.set_int32(mut b: Bytes, offset: Int, value: Int32, endian: Endian) -> Unit` — Writes value at offset; no-op out of range.
+- `bytes.set_float32(mut b: Bytes, offset: Int, value: Float32, endian: Endian) -> Unit` — Writes value at offset; no-op out of range.
 
 ## compute
 
@@ -778,10 +780,10 @@ Every public function of the 44 stdlib modules, 999 in all, with its signature a
 - `list.shuffle(xs: List[A]) -> List[A]` — Random permutation; unseeded, differs per run.
 - `list.window(xs: List[A], n: Int) -> List[List[A]]` — All n-long runs; [] if n > len; n = 0 aborts.
 - `list.binary_search(xs: List[Int], target: Int) -> Option[Int]` — Index of target in ascending xs, or none.
-- `list.push(xs: List[A], x: A) -> Unit` — Appends x to xs in place.
+- `list.push(mut xs: List[A], x: A) -> Unit` — Appends x to xs in place.
 - `list.with_capacity(cap: Int) -> List[A]` — Empty list; cap is only a preallocation hint.
-- `list.pop(xs: List[A]) -> Option[A]` — Removes and yields the last element; none if empty.
-- `list.clear(xs: List[A]) -> Unit` — Removes every element of xs in place.
+- `list.pop(mut xs: List[A]) -> Option[A]` — Removes and yields the last element; none if empty.
+- `list.clear(mut xs: List[A]) -> Unit` — Removes every element of xs in place.
 - `list.bundled_probe(n: Int) -> Int` — n + 1; bundled-dispatch smoke fn.
 - `list.split_at(xs: List[T], n: Int) -> (List[T], List[T])` — (take n, drop n); n past the end gives (xs, []).
 - `list.iterate(seed: T, f: (T) -> T, n: Int) -> List[T]` — [seed, f(seed), ...] of length n; [] if n <= 0.
@@ -794,7 +796,7 @@ Every public function of the 44 stdlib modules, 999 in all, with its signature a
 - `map.new() -> Map[K, V]` — An empty Map[K, V].
 - `map.get(m: Map[K, V], key: K) -> Option[V]` — Value for key, or none when absent.
 - `map.get_or(m: Map[K, V], key: K, default: V) -> V` — Value for key, or default when absent.
-- `map.set(m: Map[K, V], key: K, value: V) -> Map[K, V]` — Copy with key -> value; existing keys stay put.
+- `map.set(m: Map[K, V], key: K, value: V) -> Map[K, V]` — Copy with key -> value; an existing key is overwritten and keeps its position.
 - `map.contains(m: Map[K, V], key: K) -> Bool` — true when key is present.
 - `map.remove(m: Map[K, V], key: K) -> Map[K, V]` — Copy without key; unchanged if absent.
 - `map.keys(m: Map[K, V]) -> List[K]` — Every key, in insertion order.
@@ -813,9 +815,9 @@ Every public function of the 44 stdlib modules, 999 in all, with its signature a
 - `map.find(m: Map[K, V], f: (K, V) -> Bool) -> Option[(K, V)]` — First (k, v) where f holds, or none.
 - `map.update(m: Map[K, V], key: K, f: (V) -> V) -> Map[K, V]` — Copy with key's value f(v); no-op if absent.
 - `map.upsert(m: Map[K, V], key: K, init: V, f: (V) -> V) -> Map[K, V]` — key -> f(old) if present, else init appended.
-- `map.insert(m: Map[K, V], key: K, value: V) -> Unit` — In-place key -> value; existing keys stay put.
-- `map.delete(m: Map[K, V], key: K) -> Unit` — Removes key in place; no-op when absent.
-- `map.clear(m: Map[K, V]) -> Unit` — Removes every entry of m in place.
+- `map.insert(mut m: Map[K, V], key: K, value: V) -> Unit` — In-place key -> value; an existing key is overwritten and keeps its position.
+- `map.delete(mut m: Map[K, V], key: K) -> Unit` — Removes key in place; no-op when absent.
+- `map.clear(mut m: Map[K, V]) -> Unit` — Removes every entry of m in place.
 
 ## math
 
@@ -1101,8 +1103,8 @@ Every public function of the 44 stdlib modules, 999 in all, with its signature a
 - `string.drop(s: String, n: Int) -> String` — s minus first n codepoints; "" if n < 0.
 - `string.drop_end(s: String, n: Int) -> String` — s minus last n codepoints; "" if n < 0.
 - `string.run_length_encode(s: String) -> List[(String, Int)]` — (char, count) per run of equal codepoints.
-- `string.push(s: String, suffix: String) -> Unit` — Appends suffix to s in place.
-- `string.clear(s: String) -> Unit` — Empties s in place.
+- `string.push(mut s: String, suffix: String) -> Unit` — Appends suffix to s in place.
+- `string.clear(mut s: String) -> Unit` — Empties s in place.
 
 ## testing
 

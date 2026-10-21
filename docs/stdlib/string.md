@@ -841,11 +841,11 @@ string.run_length_encode(s: String) -> List[(String, Int)]
 
 // Appends suffix to s in place.
 // @since 0.23.3 or earlier
-string.push(s: String, suffix: String) -> Unit
+string.push(mut s: String, suffix: String) -> Unit
 
 // Empties s in place.
 // @since 0.23.3 or earlier
-string.clear(s: String) -> Unit
+string.clear(mut s: String) -> Unit
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

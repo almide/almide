@@ -114,7 +114,7 @@ def render_ty(t: dict) -> str:
 
 
 def signature(module: str, f: dict) -> str:
-    params = ", ".join(f"{p['name']}: {render_ty(p['type'])}" for p in f.get("params", []))
+    params = ", ".join(f"{'mut ' if p.get('mut') else ''}{p['name']}: {render_ty(p['type'])}" for p in f.get("params", []))
     eff = "effect " if f.get("effect") else ""
     # #1735: a deprecated fn carries its steer inline, so the generated
     # index and the E052 warning tell one story.
@@ -470,6 +470,10 @@ def render_index(pages: list, ifaces: dict) -> str:
         f"Every public function of the {len(pages)} stdlib modules, {total} in all, with its signature "
         "and the first sentence of its doc. Each module's page has the full doc, examples and the "
         "`@since` release.",
+        "",
+        "A `mut` parameter is written in place: the caller passes a `var` binding and sees the change "
+        "(a `let`, a non-`mut` parameter or a temporary is E032). Every other parameter is read only, "
+        "and a function that changes a value without `mut` returns a new one.",
         "",
         "| Module | Functions | Types |",
         "|---|---:|---:|",
