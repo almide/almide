@@ -259,6 +259,16 @@
 - ゲート案: list・bytes の位置書き込み × 境界入力 {-1, 0, len-1, len, len+1} の行列テストを native と wasm で回し、abort の位置が同じであることを確かめます（bytes の `put_<型>` と同じ表）。観測できる挙動の変更なので、契約の台帳を als に先に入れます。
 - issue: #3937
 
+### R-list-14 `list.tail` を撤去し、`list.drop(xs, 1)` に一本化する — ○ 採用
+
+- いま: `list.tail(xs: List[A]) -> List[A]` は先頭を除いたリストを返し、`list.drop(xs, 1)` と同じです（空のリストでは空を返す）。
+- 根拠の L0 規則: R-L0-01（ほかの公開関数を 1 回呼ぶだけの関数も、同じ役割の 2 つ目の綴りに数える）。L3 の表では理由なしに据え置きになっていたので、規則どおりに直します。
+- (a) `tail` を持つのは OCaml（`List.tl`、空で例外）、Elixir（`tl`、空で例外）、Haskell（`tail`、空で例外）です。Kotlin・Swift・Rust・Python・JS は `drop(1)`・`dropFirst()`・`xs[1:]`・`slice(1)` で書きます。Gleam は `list.rest`（Result）です。綴りも空の扱いもそろっていません。
+- (c) 英語の `tail` は「末尾の要素」とも読めるので、`list.last` と取り違えやすい名前です。`drop(xs, 1)` は意味が名前から読めます。
+- (d) 撤去です。R-L0-14 のとおり、epoch 15 で `@deprecated(since=15, use="list.drop(xs, 1)")`、epoch 16 で撤去します。`almide fix` が `list.tail(xs)` を `list.drop(xs, 1)` に書き換えます。E002 の表（R-list-11）に `tail` → `list.drop(xs, 1)` の行を足します。
+- 完全性の規則: R-L0-01 の転送の検出（#3851 のゲート）が `list.tail` を拾い、許容リストに残しません。
+- issue: (起票待ち)
+
 ### R-list-12 多数派に届かない役割は足さない — × 不採用
 
 - 内容: 次のものは足しません。
@@ -294,7 +304,7 @@
 | `flatten` | `list.flatten(xss: List[List[T]]) -> List[T]` | Rust flatten / Gleam flatten / JS flat | 据え置き | — |
 | `take` | `list.take(xs: List[A], n: Int) -> List[A]` | Gleam take / Kotlin take / Swift prefix | 据え置き | R-L0-12 |
 | `drop` | `list.drop(xs: List[A], n: Int) -> List[A]` | Gleam drop / Rust skip / Swift dropFirst | 据え置き | R-L0-12 |
-| `tail` | `list.tail(xs: List[A]) -> List[A]` | OCaml tl / Elixir tl / Kotlin drop(1) | 据え置き | — |
+| `tail` | `list.tail(xs: List[A]) -> List[A]` | OCaml tl / Elixir tl / Kotlin drop(1) | 撤去（→ `list.drop(xs, 1)`） | R-list-14 |
 | `unique` | `list.unique(xs: List[A]) -> List[A]` | Gleam unique / Elixir uniq / Kotlin distinct | 据え置き | — |
 | `index_of` | `list.index_of(xs: List[A], x: A) -> Option[Int]` | JS indexOf / Go Index / Swift firstIndex(of:) | 据え置き | — |
 | `last` | `list.last(xs: List[A]) -> Option[A]` | Rust last / Gleam last / Swift last | 据え置き | — |

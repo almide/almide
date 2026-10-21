@@ -22,7 +22,7 @@
 | 幅つき整数・浮動小数の読み | `read_<型>_<le/be>`（範囲外は 0）+ `read_uint16` 系（2 系統） | `u32::from_le_bytes` | `binary.LittleEndian.Uint32` (F) | `struct.unpack_from` | `DataView.getUint32(o, le)` (F) | ビット構文 | `<<x::little-32>>` | `get_int32_le` (F) | — | `load(as:)` |
 | 位置を指定して上書き | `set_<型>_<le/be>` + `set_uint16` 系 | `copy_from_slice(&x.to_le_bytes())` | `PutUint32` (F) | `struct.pack_into` | `DataView.setUint32` (F) | — | — | `set_int32_le` (F) | — | — |
 | 末尾に書き足す | `append_<型>_<le/be>` + `write_*_be` + `write_uint16` 系 | `extend_from_slice` | `AppendUint32` (F) | `+= struct.pack` | — | ビット構文 | `<<b::binary, x::32>>` | `Buffer.add_int32_le` | — | — |
-| 読み位置を進めながら読む | `read_<型>_at`、`take_at`、`skip`、`eof` | `Cursor` | `bytes.Reader` + `binary.Read` | `io.BytesIO` | — | パターン一致 | パターン一致 | — | `ByteBuffer`(JVM) | — |
+| 読み位置を進めながら読む | `next_<型>`、`next_bytes`、`skip`、`is_eof`（いまは `read_<型>_at`、`take_at`、`eof`） | `Cursor` | `bytes.Reader` + `binary.Read` | `io.BytesIO` | — | パターン一致 | パターン一致 | — | `ByteBuffer`(JVM) | — |
 | 部分列・連結・検索 | `slice`、`concat`、`index_of`、`contains`、`starts_with`、`ends_with`、`split`、`lines` | ● | `bytes.*` | ● | ● | `slice`、`starts_with` (F) | `binary_part`、`:binary.match` | `sub`、`cat` (F) | ● | ● |
 | 先頭・末尾から n 個 | **—**（`slice` だけ） | `&b[..n]` | `b[:n]` | `b[:n]` | `subarray` | `slice` (F) | `binary_part` | `sub` | `take` / `takeLast` | `prefix` / `suffix` |
 | 生ポインタ | `as_ptr`、`as_mut_ptr`、`data_ptr`、`from_raw_ptr`、`copy_to_ptr` | `as_ptr` ほか | `unsafe` | `ctypes` | — | — | — | — | — | `withUnsafeBytes` |
@@ -32,7 +32,7 @@
 1. **バイナリの読み書きは 1 系統の行列にする。** 行列の軸は「型 × 向き × 操作」です。
    - 型: `u8`、`u16`、`i16`、`u32`、`i32`、`i64`、`f16`、`f32`、`f64`、`bool`。
    - 向き: 2 バイト以上の型は `_le` と `_be` の両方を持ちます。`u8` と `bool` は向きを持ちません。
-   - 操作: `get_<型>`（位置を指定して読む。範囲外は none）、`read_<型>_at`（読み位置を進める版。`(次の位置, Option[値])` を返す）、`get_<型>_array`（2 バイト以上の型だけ。1 つでも範囲外なら none）、`put_<型>`（位置を指定して上書き、その場）、`append_<型>`（末尾に書き足す、その場）。
+   - 操作: `get_<型>`（位置を指定して読む。範囲外は none）、`next_<型>`（読み位置を進める版。`(Option[値], 次の位置)` を返す。R-bytes-13・R-L0-23）、`get_<型>_array`（2 バイト以上の型だけ。1 つでも範囲外なら none）、`put_<型>`（位置を指定して上書き、その場）、`append_<型>`（末尾に書き足す、その場）。
    - **意図した抜け**: `u8` の位置読みは `get` が持ちます（`list.get` と同じ）。`u8` の `append` は `push` が持ちます（`list.push`・`string.push` と同じ「末尾に 1 つ足す」動詞。R-bytes-02）。`u8` と `bool` の `_array` は持ちません（`bytes.slice(...) |> bytes.to_list` で書けます）。`i8` と `u64` は持ちません。`i8` は `bytes.read_u8(b, p) |> int.to_int8` で読めます。`u64` は `Int`（i64）に入りきらないので `i64` が同じビット列を担います。
    - **書き込みで符号の有無が同じ本体になるセル**（`append_i16_le` と `append_u16_le` など）は、読みの名前と対称にするために両方残します。名前から推測して書けることを優先します。R-L0-01 は、宣言されゲートで守られた型の行列のセルを同義語に数えません（「L0 への差し戻し（処理済み）」1）。
 2. **その場書き換えの動詞は R-L0-04 の集合だけ**: `push`、`clear`、`fill`、`append_<型>`、`put_<型>`、`copy_from`、`copy_within`。`set`・`insert`・`remove_at` はコピー側です。
@@ -202,6 +202,18 @@
 - ゲート案: R-L0-12 の境界行列テスト（list・string・bytes × `slice`・`take`・`drop`・`take_end`・`drop_end` × {-1, 0, len, len+1}）。
 - issue: #3944
 
+### R-bytes-13 読み位置を進める族を `next_<型>` にし、`(値, 次の位置)` を返す — ○ 採用
+
+- いま: `read_<型>_at(b, pos) -> (Int, Option[T])`（18）と `take_at(b, pos, n) -> (Int, Option[Bytes])`。次の位置が先、値が後です。
+- 案: `next_<型>(b, pos) -> (Option[T], Int)`、`next_bytes(b, pos, n) -> (Option[Bytes], Int)`。`skip(b, pos, n) -> Int` と `is_eof(b, pos) -> Bool` は名前も形も据え置きます（状態だけを返し、値を返さないので R-L0-23 の対象外です）。
+- 根拠の L0 規則: R-L0-23（状態を進める関数は `next_`、`(値, 次の状態)`）。`random.next_int(rng, …) -> (Int, Rng)` と同じ形になります。
+- (a) Rust でよく使われる bytes ライブラリの `get_i32_le` は読み位置を進める版で、Almide の `get_<型>`（位置を指定して読むだけ、R-bytes-09）と意味が逆です。進める版を `next_` にすれば、`get_` の意味は 1 つに決まります。
+- (c) `let (v, pos) = bytes.next_u32_le(b, pos)` と、乱数の `let (n, rng) = random.next_int(rng, 0, 9)` が同じ形で書けます。
+- (d) 改名と意味変更です（タプルの順序が変わる）。旧い書き方は型エラーで止まるので、R-L0-14.4 を満たします。epoch 15 で旧名を `@deprecated`、epoch 16 で撤去します。`almide fix` は名前を書き換え、分解の順序はヒントで案内します。
+- 完全性の規則: `get_<型>`（位置を指定して読む）・`next_<型>`（進める）・`put_<型>`（位置を指定して書く）・`append_<型>`（末尾に書く）の 4 列が、同じ型の行（`u16`〜`i64`・`f16`〜`f64` の le/be と `bool`）をすべて持ちます。`u8` の行だけは、`get` 列が `bytes.get`、`append` 列が `bytes.push` です（同じ役割の関数がすでにあるため。R-bytes-02・R-bytes-09）。`get_<型>_array` は 2 バイト以上の型だけです。
+- ゲート案: 4 列 × 型の行列を interface JSON から検査するテスト（R-bytes-03 の行列ゲートを広げる）。
+- issue: #3962
+
 ## L3: 関数表
 
 （146 関数 + 追加 13。判定の内訳: 据え置き 58・改名 53・撤去 31・意味変更 4・追加 13。改名の `put_` 15 件は、R-bytes-11 で範囲外の挙動も変わります）
@@ -255,58 +267,58 @@
 | `set_at` | `bytes.set_at(mut b: Bytes, i: Int, val: Int) -> Unit` | OCaml set_uint8 (F) / JS setUint8 (F) / 多数: b[i] = v | 撤去 → `put_u8`（範囲外は abort） | R-bytes-02、R-bytes-11 |
 | `copy_within` | `bytes.copy_within(mut b: Bytes, src_start: Int, src_end: Int, dst: Int) -> Unit` | Rust copy_within / JS copyWithin | 据え置き | — |
 | `read_bool` | `bytes.read_bool(b: Bytes, pos: Int) -> Bool` | Python struct '?' / 多数: — (read_u8 != 0) | 改名 → `get_bool`（範囲外は false ではなく none） | R-bytes-09 |
-| `read_bool_at` | `bytes.read_bool_at(b: Bytes, pos: Int) -> (Int, Option[Bool])` | — | 据え置き | — |
+| `read_bool_at` | `bytes.read_bool_at(b: Bytes, pos: Int) -> (Int, Option[Bool])` | — | 改名 → `next_bool`（`(値, 次の位置)` を返す） | R-bytes-13 |
 | `read_f16_le` | `bytes.read_f16_le(b: Bytes, pos: Int) -> Float` | Go binary.LittleEndian.Uint16 (F) / JS getFloat16(o, true) (F) / Python struct '<e' | 改名 → `get_f16_le`（範囲外は 0 ではなく none） | R-bytes-09 |
-| `read_f16_le_at` | `bytes.read_f16_le_at(b: Bytes, pos: Int) -> (Int, Option[Float])` | — (多数: 位置を持つ reader 型。Go bytes.Reader + binary.Read) | 据え置き | — |
+| `read_f16_le_at` | `bytes.read_f16_le_at(b: Bytes, pos: Int) -> (Int, Option[Float])` | — (多数: 位置を持つ reader 型。Go bytes.Reader + binary.Read) | 改名 → `next_f16_le`（`(値, 次の位置)` を返す） | R-bytes-13 |
 | `read_f16_le_array` | `bytes.read_f16_le_array(b: Bytes, pos: Int, count: Int) -> List[Float]` | Python struct.unpack_from('<Ne') / Go binary.Read(r, LittleEndian, []T) | 改名 → `get_f16_le_array`（範囲外は 0 ではなく none） | R-bytes-09 |
 | `read_f32_be` | `bytes.read_f32_be(b: Bytes, pos: Int) -> Float` | Go binary.BigEndian.Uint32 (F) / JS getFloat32(o, false) (F) / Python struct '>f' | 改名 → `get_f32_be`（範囲外は 0 ではなく none） | R-bytes-09 |
 | `read_f32_be_array` | `bytes.read_f32_be_array(b: Bytes, pos: Int, count: Int) -> List[Float]` | Python struct.unpack_from('>Nf') / Go binary.Read(r, BigEndian, []T) | 改名 → `get_f32_be_array`（範囲外は 0 ではなく none） | R-bytes-09 |
-| `read_f32_be_at` | `bytes.read_f32_be_at(b: Bytes, pos: Int) -> (Int, Option[Float])` | — (多数: 位置を持つ reader 型。Go bytes.Reader + binary.Read) | 据え置き | — |
+| `read_f32_be_at` | `bytes.read_f32_be_at(b: Bytes, pos: Int) -> (Int, Option[Float])` | — (多数: 位置を持つ reader 型。Go bytes.Reader + binary.Read) | 改名 → `next_f32_be`（`(値, 次の位置)` を返す） | R-bytes-13 |
 | `read_f32_le` | `bytes.read_f32_le(b: Bytes, pos: Int) -> Float` | Go binary.LittleEndian.Uint32 (F) / JS getFloat32(o, true) (F) / Python struct '<f' | 改名 → `get_f32_le`（範囲外は 0 ではなく none） | R-bytes-09 |
 | `read_f32_le_array` | `bytes.read_f32_le_array(b: Bytes, pos: Int, count: Int) -> List[Float]` | Python struct.unpack_from('<Nf') / Go binary.Read(r, LittleEndian, []T) | 改名 → `get_f32_le_array`（範囲外は 0 ではなく none） | R-bytes-09 |
-| `read_f32_le_at` | `bytes.read_f32_le_at(b: Bytes, pos: Int) -> (Int, Option[Float])` | — (多数: 位置を持つ reader 型。Go bytes.Reader + binary.Read) | 据え置き | — |
+| `read_f32_le_at` | `bytes.read_f32_le_at(b: Bytes, pos: Int) -> (Int, Option[Float])` | — (多数: 位置を持つ reader 型。Go bytes.Reader + binary.Read) | 改名 → `next_f32_le`（`(値, 次の位置)` を返す） | R-bytes-13 |
 | `read_f64_be` | `bytes.read_f64_be(b: Bytes, pos: Int) -> Float` | Go binary.BigEndian.Uint64 (F) / JS getFloat64(o, false) (F) / Python struct '>d' | 改名 → `get_f64_be`（範囲外は 0 ではなく none） | R-bytes-09 |
 | `read_f64_be_array` | `bytes.read_f64_be_array(b: Bytes, pos: Int, count: Int) -> List[Float]` | Python struct.unpack_from('>Nd') / Go binary.Read(r, BigEndian, []T) | 改名 → `get_f64_be_array`（範囲外は 0 ではなく none） | R-bytes-09 |
-| `read_f64_be_at` | `bytes.read_f64_be_at(b: Bytes, pos: Int) -> (Int, Option[Float])` | — (多数: 位置を持つ reader 型。Go bytes.Reader + binary.Read) | 据え置き | — |
+| `read_f64_be_at` | `bytes.read_f64_be_at(b: Bytes, pos: Int) -> (Int, Option[Float])` | — (多数: 位置を持つ reader 型。Go bytes.Reader + binary.Read) | 改名 → `next_f64_be`（`(値, 次の位置)` を返す） | R-bytes-13 |
 | `read_f64_le` | `bytes.read_f64_le(b: Bytes, pos: Int) -> Float` | Go binary.LittleEndian.Uint64 (F) / JS getFloat64(o, true) (F) / Python struct '<d' | 改名 → `get_f64_le`（範囲外は 0 ではなく none） | R-bytes-09 |
 | `read_f64_le_array` | `bytes.read_f64_le_array(b: Bytes, pos: Int, count: Int) -> List[Float]` | Python struct.unpack_from('<Nd') / Go binary.Read(r, LittleEndian, []T) | 改名 → `get_f64_le_array`（範囲外は 0 ではなく none） | R-bytes-09 |
-| `read_f64_le_at` | `bytes.read_f64_le_at(b: Bytes, pos: Int) -> (Int, Option[Float])` | — (多数: 位置を持つ reader 型。Go bytes.Reader + binary.Read) | 据え置き | — |
+| `read_f64_le_at` | `bytes.read_f64_le_at(b: Bytes, pos: Int) -> (Int, Option[Float])` | — (多数: 位置を持つ reader 型。Go bytes.Reader + binary.Read) | 改名 → `next_f64_le`（`(値, 次の位置)` を返す） | R-bytes-13 |
 | `read_i16_be` | `bytes.read_i16_be(b: Bytes, pos: Int) -> Int` | Go binary.BigEndian.Uint16 (F) / OCaml get_int16_be (F) / JS getInt16(o, false) (F) / Python struct '>h' | 改名 → `get_i16_be`（範囲外は 0 ではなく none） | R-bytes-09 |
-| `read_i16_be_at` | `bytes.read_i16_be_at(b: Bytes, pos: Int) -> (Int, Option[Int])` | — (多数: 位置を持つ reader 型。Go bytes.Reader + binary.Read) | 据え置き | — |
+| `read_i16_be_at` | `bytes.read_i16_be_at(b: Bytes, pos: Int) -> (Int, Option[Int])` | — (多数: 位置を持つ reader 型。Go bytes.Reader + binary.Read) | 改名 → `next_i16_be`（`(値, 次の位置)` を返す） | R-bytes-13 |
 | `read_i16_be_array` | `bytes.read_i16_be_array(b: Bytes, pos: Int, count: Int) -> List[Int]` | Python struct.unpack_from('>Nh') / Go binary.Read(r, BigEndian, []T) | 改名 → `get_i16_be_array`（範囲外は 0 ではなく none） | R-bytes-09 |
 | `read_i16_le` | `bytes.read_i16_le(b: Bytes, pos: Int) -> Int` | Go binary.LittleEndian.Uint16 (F) / OCaml get_int16_le (F) / JS getInt16(o, true) (F) / Python struct '<h' | 改名 → `get_i16_le`（範囲外は 0 ではなく none） | R-bytes-09 |
-| `read_i16_le_at` | `bytes.read_i16_le_at(b: Bytes, pos: Int) -> (Int, Option[Int])` | — (多数: 位置を持つ reader 型。Go bytes.Reader + binary.Read) | 据え置き | — |
+| `read_i16_le_at` | `bytes.read_i16_le_at(b: Bytes, pos: Int) -> (Int, Option[Int])` | — (多数: 位置を持つ reader 型。Go bytes.Reader + binary.Read) | 改名 → `next_i16_le`（`(値, 次の位置)` を返す） | R-bytes-13 |
 | `read_i16_le_array` | `bytes.read_i16_le_array(b: Bytes, pos: Int, count: Int) -> List[Int]` | Python struct.unpack_from('<Nh') / Go binary.Read(r, LittleEndian, []T) | 改名 → `get_i16_le_array`（範囲外は 0 ではなく none） | R-bytes-09 |
 | `read_i32_be` | `bytes.read_i32_be(b: Bytes, pos: Int) -> Int` | Go binary.BigEndian.Uint32 (F) / OCaml get_int32_be (F) / JS getInt32(o, false) (F) / Python struct '>i' | 改名 → `get_i32_be`（範囲外は 0 ではなく none） | R-bytes-09 |
 | `read_i32_be_array` | `bytes.read_i32_be_array(b: Bytes, pos: Int, count: Int) -> List[Int]` | Python struct.unpack_from('>Ni') / Go binary.Read(r, BigEndian, []T) | 改名 → `get_i32_be_array`（範囲外は 0 ではなく none） | R-bytes-09 |
-| `read_i32_be_at` | `bytes.read_i32_be_at(b: Bytes, pos: Int) -> (Int, Option[Int])` | — (多数: 位置を持つ reader 型。Go bytes.Reader + binary.Read) | 据え置き | — |
+| `read_i32_be_at` | `bytes.read_i32_be_at(b: Bytes, pos: Int) -> (Int, Option[Int])` | — (多数: 位置を持つ reader 型。Go bytes.Reader + binary.Read) | 改名 → `next_i32_be`（`(値, 次の位置)` を返す） | R-bytes-13 |
 | `read_i32_le` | `bytes.read_i32_le(b: Bytes, pos: Int) -> Int` | Go binary.LittleEndian.Uint32 (F) / OCaml get_int32_le (F) / JS getInt32(o, true) (F) / Python struct '<i' | 改名 → `get_i32_le`（範囲外は 0 ではなく none） | R-bytes-09 |
 | `read_i32_le_array` | `bytes.read_i32_le_array(b: Bytes, pos: Int, count: Int) -> List[Int]` | Python struct.unpack_from('<Ni') / Go binary.Read(r, LittleEndian, []T) | 改名 → `get_i32_le_array`（範囲外は 0 ではなく none） | R-bytes-09 |
-| `read_i32_le_at` | `bytes.read_i32_le_at(b: Bytes, pos: Int) -> (Int, Option[Int])` | — (多数: 位置を持つ reader 型。Go bytes.Reader + binary.Read) | 据え置き | — |
+| `read_i32_le_at` | `bytes.read_i32_le_at(b: Bytes, pos: Int) -> (Int, Option[Int])` | — (多数: 位置を持つ reader 型。Go bytes.Reader + binary.Read) | 改名 → `next_i32_le`（`(値, 次の位置)` を返す） | R-bytes-13 |
 | `read_i64_be` | `bytes.read_i64_be(b: Bytes, pos: Int) -> Int` | Go binary.BigEndian.Uint64 (F) / OCaml get_int64_be (F) / JS getBigInt64(o, false) (F) / Python struct '>q' | 改名 → `get_i64_be`（範囲外は 0 ではなく none） | R-bytes-09 |
 | `read_i64_be_array` | `bytes.read_i64_be_array(b: Bytes, pos: Int, count: Int) -> List[Int]` | Python struct.unpack_from('>Nq') / Go binary.Read(r, BigEndian, []T) | 改名 → `get_i64_be_array`（範囲外は 0 ではなく none） | R-bytes-09 |
-| `read_i64_be_at` | `bytes.read_i64_be_at(b: Bytes, pos: Int) -> (Int, Option[Int])` | — (多数: 位置を持つ reader 型。Go bytes.Reader + binary.Read) | 据え置き | — |
+| `read_i64_be_at` | `bytes.read_i64_be_at(b: Bytes, pos: Int) -> (Int, Option[Int])` | — (多数: 位置を持つ reader 型。Go bytes.Reader + binary.Read) | 改名 → `next_i64_be`（`(値, 次の位置)` を返す） | R-bytes-13 |
 | `read_i64_le` | `bytes.read_i64_le(b: Bytes, pos: Int) -> Int` | Go binary.LittleEndian.Uint64 (F) / OCaml get_int64_le (F) / JS getBigInt64(o, true) (F) / Python struct '<q' | 改名 → `get_i64_le`（範囲外は 0 ではなく none） | R-bytes-09 |
 | `read_i64_le_array` | `bytes.read_i64_le_array(b: Bytes, pos: Int, count: Int) -> List[Int]` | Python struct.unpack_from('<Nq') / Go binary.Read(r, LittleEndian, []T) | 改名 → `get_i64_le_array`（範囲外は 0 ではなく none） | R-bytes-09 |
-| `read_i64_le_at` | `bytes.read_i64_le_at(b: Bytes, pos: Int) -> (Int, Option[Int])` | — (多数: 位置を持つ reader 型。Go bytes.Reader + binary.Read) | 据え置き | — |
+| `read_i64_le_at` | `bytes.read_i64_le_at(b: Bytes, pos: Int) -> (Int, Option[Int])` | — (多数: 位置を持つ reader 型。Go bytes.Reader + binary.Read) | 改名 → `next_i64_le`（`(値, 次の位置)` を返す） | R-bytes-13 |
 | `read_length_prefixed_strings_le` | `bytes.read_length_prefixed_strings_le(b: Bytes, pos: Int, count: Int) -> List[String]` | —（形式専用） | 撤去（→ `get_u32_le` と `slice` の組み合わせ） | R-bytes-05 |
 | `read_string_at` | `bytes.read_string_at(b: Bytes, pos: Int, len: Int) -> String` | Python b[p:p+n].decode / Rust from_utf8_lossy(&b[p..p+n]) | 撤去（→ `slice` ＋ `to_string_lossy`） | R-bytes-05 |
 | `read_string_be` | `bytes.read_string_be(b: Bytes, pos: Int) -> String` | Java DataInput.readUTF（u16 BE） / 多数: — | 撤去（→ `get_u32_be` と `slice` の組み合わせ） | R-bytes-05 |
-| `read_string_be_at` | `bytes.read_string_be_at(b: Bytes, pos: Int) -> (Int, Option[String])` | — | 撤去（→ `read_u32_be_at` と `take_at` の組み合わせ） | R-bytes-05 |
+| `read_string_be_at` | `bytes.read_string_be_at(b: Bytes, pos: Int) -> (Int, Option[String])` | — | 撤去（→ `next_u32_be` と `next_bytes` の組み合わせ） | R-bytes-05 |
 | `read_u16_be` | `bytes.read_u16_be(b: Bytes, pos: Int) -> Int` | Go binary.BigEndian.Uint16 (F) / OCaml get_uint16_be (F) / JS getUint16(o, false) (F) / Python struct '>H' | 改名 → `get_u16_be`（範囲外は 0 ではなく none） | R-bytes-09 |
-| `read_u16_be_at` | `bytes.read_u16_be_at(b: Bytes, pos: Int) -> (Int, Option[Int])` | — (多数: 位置を持つ reader 型。Go bytes.Reader + binary.Read) | 据え置き | — |
+| `read_u16_be_at` | `bytes.read_u16_be_at(b: Bytes, pos: Int) -> (Int, Option[Int])` | — (多数: 位置を持つ reader 型。Go bytes.Reader + binary.Read) | 改名 → `next_u16_be`（`(値, 次の位置)` を返す） | R-bytes-13 |
 | `read_u16_be_array` | `bytes.read_u16_be_array(b: Bytes, pos: Int, count: Int) -> List[Int]` | Python struct.unpack_from('>NH') / Go binary.Read(r, BigEndian, []T) | 改名 → `get_u16_be_array`（範囲外は 0 ではなく none） | R-bytes-09 |
 | `read_u16_le` | `bytes.read_u16_le(b: Bytes, pos: Int) -> Int` | Go binary.LittleEndian.Uint16 (F) / OCaml get_uint16_le (F) / JS getUint16(o, true) (F) / Python struct '<H' | 改名 → `get_u16_le`（範囲外は 0 ではなく none） | R-bytes-09 |
 | `read_u16_le_array` | `bytes.read_u16_le_array(b: Bytes, pos: Int, count: Int) -> List[Int]` | Python struct.unpack_from('<NH') / Go binary.Read(r, LittleEndian, []T) | 改名 → `get_u16_le_array`（範囲外は 0 ではなく none） | R-bytes-09 |
-| `read_u16_le_at` | `bytes.read_u16_le_at(b: Bytes, pos: Int) -> (Int, Option[Int])` | — (多数: 位置を持つ reader 型。Go bytes.Reader + binary.Read) | 据え置き | — |
+| `read_u16_le_at` | `bytes.read_u16_le_at(b: Bytes, pos: Int) -> (Int, Option[Int])` | — (多数: 位置を持つ reader 型。Go bytes.Reader + binary.Read) | 改名 → `next_u16_le`（`(値, 次の位置)` を返す） | R-bytes-13 |
 | `read_u32_be` | `bytes.read_u32_be(b: Bytes, pos: Int) -> Int` | Go binary.BigEndian.Uint32 (F) / OCaml get_int32_be (F) / JS getUint32(o, false) (F) / Python struct '>I' | 改名 → `get_u32_be`（範囲外は 0 ではなく none） | R-bytes-09 |
 | `read_u32_be_array` | `bytes.read_u32_be_array(b: Bytes, pos: Int, count: Int) -> List[Int]` | Python struct.unpack_from('>NI') / Go binary.Read(r, BigEndian, []T) | 改名 → `get_u32_be_array`（範囲外は 0 ではなく none） | R-bytes-09 |
-| `read_u32_be_at` | `bytes.read_u32_be_at(b: Bytes, pos: Int) -> (Int, Option[Int])` | — (多数: 位置を持つ reader 型。Go bytes.Reader + binary.Read) | 据え置き | — |
+| `read_u32_be_at` | `bytes.read_u32_be_at(b: Bytes, pos: Int) -> (Int, Option[Int])` | — (多数: 位置を持つ reader 型。Go bytes.Reader + binary.Read) | 改名 → `next_u32_be`（`(値, 次の位置)` を返す） | R-bytes-13 |
 | `read_u32_le` | `bytes.read_u32_le(b: Bytes, pos: Int) -> Int` | Go binary.LittleEndian.Uint32 (F) / OCaml get_int32_le (F) / JS getUint32(o, true) (F) / Python struct '<I' | 改名 → `get_u32_le`（範囲外は 0 ではなく none） | R-bytes-09 |
 | `read_u32_le_array` | `bytes.read_u32_le_array(b: Bytes, pos: Int, count: Int) -> List[Int]` | Python struct.unpack_from('<NI') / Go binary.Read(r, LittleEndian, []T) | 改名 → `get_u32_le_array`（範囲外は 0 ではなく none） | R-bytes-09 |
-| `read_u32_le_at` | `bytes.read_u32_le_at(b: Bytes, pos: Int) -> (Int, Option[Int])` | — (多数: 位置を持つ reader 型。Go bytes.Reader + binary.Read) | 据え置き | — |
+| `read_u32_le_at` | `bytes.read_u32_le_at(b: Bytes, pos: Int) -> (Int, Option[Int])` | — (多数: 位置を持つ reader 型。Go bytes.Reader + binary.Read) | 改名 → `next_u32_le`（`(値, 次の位置)` を返す） | R-bytes-13 |
 | `read_u8` | `bytes.read_u8(b: Bytes, pos: Int) -> Int` | OCaml get_uint8 (F) / JS getUint8 (F) / 多数: b[i] | 撤去 → `get`（同じ役割。範囲外は none） | R-bytes-09 |
-| `read_u8_at` | `bytes.read_u8_at(b: Bytes, pos: Int) -> (Int, Option[Int])` | — (多数: 位置を持つ reader 型) | 据え置き | — |
+| `read_u8_at` | `bytes.read_u8_at(b: Bytes, pos: Int) -> (Int, Option[Int])` | — (多数: 位置を持つ reader 型) | 改名 → `next_u8`（`(値, 次の位置)` を返す） | R-bytes-13 |
 | `remove_at` | `bytes.remove_at(b: Bytes, pos: Int) -> Bytes` | Rust Vec::remove / Python del b[i]（その場） | 意味変更（範囲外は abort） | R-bytes-11 |
 | `repeat` | `bytes.repeat(b: Bytes, n: Int) -> Bytes` | Go bytes.Repeat / Python b * n | 据え置き | — |
 | `reverse` | `bytes.reverse(b: Bytes) -> Bytes` | Rust reverse / Kotlin reversed | 据え置き | — |
@@ -331,7 +343,7 @@
 | `slice` | `bytes.slice(b: Bytes, start: Int, end: Int) -> Bytes` | Rust &b[a..b] / Go b[a:b] / Python b[a:b] / JS subarray・slice / OCaml Bytes.sub (F) | 意味変更（負の開始位置を 0 に丸める） | R-bytes-12 |
 | `split` | `bytes.split(b: Bytes, sep: Bytes) -> List[Bytes]` | Go bytes.Split / Python b.split | 据え置き | — |
 | `starts_with` | `bytes.starts_with(b: Bytes, prefix: Bytes) -> Bool` | Go bytes.HasPrefix / Python startswith / Gleam starts_with (F) | 据え置き | — |
-| `take_at` | `bytes.take_at(b: Bytes, pos: Int, n: Int) -> (Int, Option[Bytes])` | Go bytes.Reader.Read / Python b[p:p+n] | 据え置き | — |
+| `take_at` | `bytes.take_at(b: Bytes, pos: Int, n: Int) -> (Int, Option[Bytes])` | Go bytes.Reader.Read / Python b[p:p+n] | 改名 → `next_bytes`（`(値, 次の位置)` を返す） | R-bytes-13 |
 | `to_list` | `bytes.to_list(b: Bytes) -> List[Int]` | Python list(b) / JS Array.from / Kotlin toList | 据え置き | — |
 | `to_string` | `bytes.to_string(b: Bytes) -> Result[String, String]` | Rust String::from_utf8 → Result / Gleam bit_array.to_string → Result (F) / Python b.decode() / Kotlin decodeToString | 据え置き | R-bytes-10 |
 | `to_string_lossy` | `bytes.to_string_lossy(b: Bytes) -> String` | Rust String::from_utf8_lossy / Python decode(errors='replace') | 据え置き | R-bytes-10 |
@@ -359,7 +371,7 @@
 | `append_f16_le` | `bytes.append_f16_le(mut b: Bytes, val: Float) -> Unit`（案） | Python struct.pack('<e') | 追加 | R-bytes-03 |
 | `append_f16_be` | `bytes.append_f16_be(mut b: Bytes, val: Float) -> Unit`（案） | Python struct.pack('>e') | 追加 | R-bytes-03 |
 | `get_f16_be` | `bytes.get_f16_be(b: Bytes, pos: Int) -> Option[Float]`（案） | JS getFloat16(o, false) (F) / Python struct '>e' | 追加 | R-bytes-03 |
-| `read_f16_be_at` | `bytes.read_f16_be_at(b: Bytes, pos: Int) -> (Int, Option[Float])`（案） | — | 追加 | R-bytes-03 |
+| `next_f16_be` | `bytes.next_f16_be(b: Bytes, pos: Int) -> (Option[Float], Int)`（案） | — | 追加 | R-bytes-03、R-bytes-13 |
 | `get_f16_be_array` | `bytes.get_f16_be_array(b: Bytes, pos: Int, count: Int) -> Option[List[Float]]`（案） | Python struct.unpack_from('>Ne') | 追加 | R-bytes-03 |
 | `put_bool` | `bytes.put_bool(mut b: Bytes, pos: Int, val: Bool) -> Unit`（案） | Python struct.pack_into('?') | 追加（範囲外は abort） | R-bytes-03、R-bytes-11 |
 | `append_bytes` | `bytes.append_bytes(mut b: Bytes, src: Bytes) -> Unit`（案） | Rust extend_from_slice / Go append(b, src...) / Python bytearray.extend / OCaml Buffer.add_bytes | 追加 | R-bytes-05 |

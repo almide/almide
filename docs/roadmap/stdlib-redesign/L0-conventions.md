@@ -161,6 +161,7 @@ Bool を返す公開関数の名前は、`is_` か `has_` で始めます。そ�
 - (a) `is` 接頭辞は 8/9 です（Elixir だけが末尾に `?` を付けます）。`contains` は 5/9、`starts_with` と `ends_with` も多数派です。
 - (c) 名前から Bool が返ることが読めます。
 - いまの例外（L2 で判定します）: `args.flag`、`bytes.eof`、`regex.full_match`、`net.unix_poll`。`bytes.read_bool` は Bool を読み出す関数なので、対象外です。
+- 族の接頭辞: モジュールの中で関数の族を接頭辞で分けている場合（`net.tcp_*`・`net.udp_*`）、`is_` は族の接頭辞の後ろに置きます（`net.tcp_is_open`）。名前の先頭は族、残りがこの規則に従う、と読みます。
 - ゲート: 戻り型が Bool の公開関数の名前を検査します。
 - issue: #3895
 
@@ -292,6 +293,46 @@ effect fn を呼んだときの型（`!` が要るか、`??` をそのまま書�
 - (d) 意味変更です。戻り型が変わるので古いコードは型エラーになり、R-L0-14.4 の条件は満たします。`almide fix` で `to_<型>_wrapping` に書き換えられます。損失のある組すべてに及ぶ大きい変更です。
 - 保留の理由: 多数派の裏付けがないので、LLM が実際に黙って折り返すバグをどれだけ書くかを測ってから決めます。測定は almide-dojo で行います。
 - issue: [almide-dojo#63](https://github.com/almide/almide-dojo/issues/63)（測定）
+
+## R-L0-22 組み込みの `Ord` プロトコルのメソッド名を `compare` にする — ○ 採用
+
+- いま: 組み込みの `Ord` のメソッドは `fn cmp(a: Self, b: Self) -> Int` です（[type-system.md](../../specs/type-system.md) §10）。一方で R-L0-16 は、順序のある型のモジュールに `<mod>.compare(a, b) -> Int` を置きます。`Duration` は `Ord` を導出しているので、同じ比較に `d.cmp(e)` と `duration.compare(d, e)` の 2 つの綴りができます。
+- 案: `Ord` のメソッド名を `compare` にします。利用者が書く `fn T.cmp(a: T, b: T) -> Int` は `fn T.compare(…)` になります。こうすると、組み込みの型の `Ord` のメソッドと、モジュールの `compare` 関数が同じ名前になり、綴りが 1 つになります。
+- 根拠の L0 規則: R-L0-01（同じ役割に綴りは 1 つ）、R-L0-16、R-L0-00（内部の衝突は改名の理由になる）。
+- (a) 3 値の比較を `compare` と呼ぶのは Go（`cmp.Compare`）、Gleam、Elixir、OCaml、Kotlin（`compareTo`）です。`cmp` は Rust だけです。
+- (b) 検査器と、メソッドを名前で探すところだけの変更です。
+- (c) `list.sort_with(xs, duration.compare)` と `a.compare(b)` が同じ単語になり、どちらから覚えても書けます。
+- (d) 改名です。epoch 15 で `cmp` を `@deprecated(since=15, use="compare")` にし、epoch 16 で撤去します。`almide fix` が `fn T.cmp` の宣言と `.cmp(` の呼び出しを書き換えます。
+- 実測（develop `437b8f127`）: `duration.ms(5).cmp(duration.s(1))` は `almide check` を通りますが、ビルドで内部エラー（`[COMPILER BUG] internal type resolution failed`）になります。これは綴りと関係なく直すべき不具合なので、別の issue #3960 にしました。
+- 完全性の規則: `Ord` を持つ標準の型は、すべて `<mod>.compare` を持ち、それが `Ord` のメソッドそのものです（転送の関数を別に置きません）。
+- ゲート案: R-L0-G のテストで、`Ord` を持つ標準の型ごとに `compare` が解決でき、check とビルドの両方を通ることを確かめます。
+- issue: #3961
+
+## R-L0-23 状態を進める関数は `next_` で始め、`(値, 次の状態)` を返す — ○ 採用
+
+- いま: 状態を渡して、値と次の状態を受け取る関数が 2 つの族にあり、名前と戻り値の順序がそろっていません。
+  - `random.next_int(rng, min, max) -> (Int, Rng)`: 名前は `next_`、値が先です。
+  - `bytes.read_i32_le_at(b, pos) -> (Int, Option[Int])`、`bytes.take_at(b, pos, n) -> (Int, Option[Bytes])`: 名前は `read_…_at`、次の位置が先です。さらに、位置を指定して読むだけの `bytes.get_i32_le(b, pos)` もあります。
+- 案: 状態を進める関数は `next_<何>` と名付け、`(値, 次の状態)` の順で返します。bytes の読み位置を進める族は、`bytes.next_<型>(b, pos) -> (Option[T], Int)` と `bytes.next_bytes(b, pos, n) -> (Option[Bytes], Int)` に改名します（細目は [L2-bytes](L2-bytes.md) R-bytes-13）。
+- 根拠の L0 規則: R-L0-01（同じ形の役割に同じ綴り）。R-L0-03 の「主語を先頭に」は引数の規則で、戻り値の順序を決めていなかったので、ここで決めます。
+- (a) 状態を明示して渡す乱数の API は、Haskell の `random :: g -> (a, g)`、Elixir の `:rand.uniform_s` が `{値, 状態}`、パーサーの慣習も `(値, 残り)` で、値が先です。Rust でよく使われる bytes ライブラリでは `get_i32_le` が「読み位置を進める」側の名前なので、Almide の `get_<型>`（位置を指定して読むだけ）と逆になります。`next_` にすれば、この取り違えも起きません。
+- (b) 純粋な計算です。
+- (c) 「`next_` は状態を進める、`get_` は位置を指定して読むだけ」が全モジュールで同じになります。`let (v, pos) = …` の分解の順序も 1 つになります。
+- (d) 改名と意味変更です。戻りのタプルの型が変わるので、古いコードは型エラーで止まります（R-L0-14.4 を満たします）。epoch 15 で旧名を `@deprecated` にし、epoch 16 で撤去します。`almide fix` は名前を書き換え、タプルの分解の順序は書き換えられないのでヒントを出します。
+- 完全性の規則: 戻り型が「状態の型を含むタプル」の公開関数は、名前が `next_` で始まり、タプルの最後が状態です。
+- ゲート案: R-L0-G のテストに、この形の検査を足します（状態の型は `Rng` と、読み位置の `Int` を返す bytes の族）。
+- issue: #3962
+
+## R-L0-24 標準の面の型は正規の綴りで書く（`T?`） — ○ 採用
+
+- いま: ADR-0010 は `T?` を `Option[T]` の正規の綴りと決めていて、`almide fmt` も `T?` に直します。ところが、標準の関数の宣言は `Option[T]` が 199、`T?` が 23 で、混ざっています。LLM が読む docs/stdlib と interface JSON も、この宣言をそのまま見せています。
+- 案: 標準の `.almd` の宣言を `T?` にそろえ、docs/stdlib・interface JSON・この記録の [target-surface.md](target-surface.md) の表示も正規の綴りにします。
+- 根拠の L0 規則: R-L0-01（同じ型に綴りは 1 つ）、ADR-0010。
+- (b)・(d) 綴りだけの変更で、型も挙動も変わりません。互換の影響はありません。
+- (c) 文書で 2 つの綴りを見た LLM は、どちらが正しいか迷います。正規の綴りだけを見せれば、`almide fmt` の結果とも一致します。
+- 完全性の規則: 標準の公開関数の宣言に `Option[` が現れません。
+- ゲート案: `stdlib/*.almd` の公開関数の宣言を対象に、`almide fmt --check --no-import-edit` と同じ正規化をかけ、差分が出ないことを確かめます。
+- issue: #3963
 
 ---
 

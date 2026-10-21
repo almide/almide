@@ -43,7 +43,13 @@
 ### R-compute-02 `duration` と統合する、または読み出し関数を足す — × 不採用
 
 - 内容: どちらもしません。ADR-0001 の決定（2 つの時計は互いに変換できない別の型、読み出しは S7 で省略）と、L1 R-L1-21 のとおりです。UFCS の `n.ms()` を曖昧エラーにしているのも、この分離を守るためです（S2）。
+- 型は分けたまま、同じ形であることは共通のプロトコル `TimeAmount` で宣言します → [L2-duration](L2-duration.md) R-duration-03。
 - issue: なし
+
+### R-compute-03 `Compute` を共通のプロトコル `TimeAmount` に従わせる — ○ 採用
+
+- 内容: [L2-duration](L2-duration.md) R-duration-03 の片割れです。`Compute` と `Duration` は、どちらも `TimeAmount`（6 単位の構築子と `compare`）に従います。違いは時計だけで、`Duration` は壁時計、`Compute` は決定的な計算時間（OS の CPU 時間ではなく、どのホストでも同じ charge の数）です。
+- issue: #3964
 
 ## L3: 関数表
 

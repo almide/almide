@@ -67,11 +67,11 @@ DEFLATE を標準に持つのは 3 言語（● 3・◐ 3）で、R-L1 の「足
 |---|---|---|---|---|
 | `compress` | `effect zlib.compress(data: Bytes) -> Bytes` | Python `zlib.compress` / Erlang `:zlib.compress` / Node `deflateSync` | 据え置き | R-zlib-03 |
 | `compress_level` | `effect zlib.compress_level(data: Bytes, level: Int) -> Bytes` | Python `compress(data, level)` / Go `NewWriterLevel` | 据え置き | R-zlib-03 |
-| `decompress` | `effect zlib.decompress(data: Bytes) -> Bytes` | Python `zlib.decompress` / Erlang `:zlib.uncompress` / Node `inflateSync` | 意味変更（effect を外す） | R-zlib-02 |
+| `decompress` | `effect zlib.decompress(data: Bytes) -> Bytes` | Python `zlib.decompress` / Erlang `:zlib.uncompress` / Node `inflateSync` | 意味変更（effect を外し、`fn … -> Result[Bytes, String]` にする） | R-zlib-02 |
 | `deflate` | `effect zlib.deflate(data: Bytes) -> Bytes` | Node `deflateRawSync` / Erlang `:zlib.zip` / Go `flate.NewWriter` | 据え置き | R-zlib-03 |
 | `deflate_level` | `effect zlib.deflate_level(data: Bytes, level: Int) -> Bytes` | Go `flate.NewWriter(w, level)` | 据え置き | R-zlib-03 |
-| `inflate` | `effect zlib.inflate(data: Bytes) -> Bytes` | Node `inflateRawSync` / Erlang `:zlib.unzip` / Go `flate.NewReader` | 意味変更（effect を外す） | R-zlib-02 |
+| `inflate` | `effect zlib.inflate(data: Bytes) -> Bytes` | Node `inflateRawSync` / Erlang `:zlib.unzip` / Go `flate.NewReader` | 意味変更（effect を外し、`fn … -> Result[Bytes, String]` にする） | R-zlib-02 |
 | `gzip` | `effect zlib.gzip(data: Bytes) -> Bytes` | Python `gzip.compress` / Node `gzipSync` / Erlang `:zlib.gzip` | 据え置き | R-zlib-03 |
-| `gunzip` | `effect zlib.gunzip(data: Bytes) -> Bytes` | Python `gzip.decompress` / Node `gunzipSync` / Erlang `:zlib.gunzip` | 意味変更（effect を外す） | R-zlib-02 |
+| `gunzip` | `effect zlib.gunzip(data: Bytes) -> Bytes` | Python `gzip.decompress` / Node `gunzipSync` / Erlang `:zlib.gunzip` | 意味変更（effect を外し、`fn … -> Result[Bytes, String]` にする） | R-zlib-02 |
 | `crc32` | `zlib.crc32(data: Bytes) -> Int` | Go `crc32.ChecksumIEEE` / Python `zlib.crc32` / Erlang `crc32` | 撤去 → `hash.crc32` | R-zlib-01 |
 | `adler32` | `zlib.adler32(data: Bytes) -> Int` | Go `adler32.Checksum` / Python `zlib.adler32` | 撤去 → `hash.adler32` | R-zlib-01 |

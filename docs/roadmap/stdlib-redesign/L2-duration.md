@@ -52,6 +52,38 @@
 - 根拠: ADR-0001 S7 の再開条件（「予算を計算に使う実例」「Dojo で整数換算の書き誤りが観測されたら」「実需要の記録」）が、まだ満たされていません。L1 の追加基準は「既存の裁定でまかなえない」ことを求めます。
 - issue: なし
 
+### R-duration-03 `Duration` と `Compute` を 1 つのプロトコル `TimeAmount` に従わせる — ○ 採用
+
+- いま: `Duration`（壁時計の時間）と `Compute`（決定的な計算時間）は、同じ 6 単位の構築子・`compare`・演算子を持っています。ただし「同じ面を持つ」ことは ADR-0001 S1 の文章と、型ごとに複製した行列のゲートで守っているだけで、言語の宣言にはなっていません。
+- 案: 標準にプロトコルを 1 つ置き、2 つの型をそれに従わせます。
+  ```almide
+  protocol TimeAmount {
+    fn ns(n: Int) -> Self
+    fn us(n: Int) -> Self
+    fn ms(n: Int) -> Self
+    fn s(n: Int) -> Self
+    fn min(n: Int) -> Self
+    fn h(n: Int) -> Self
+    fn compare(a: Self, b: Self) -> Int
+  }
+  type Duration: Eq, Ord, Repr, TimeAmount
+  type Compute: Eq, Ord, Repr, TimeAmount
+  ```
+  - 2 つの型の違いは「どの時計の量か」だけで、使い方は同じ、という関係が宣言 1 か所で読めます。
+  - 型は別のままです（R-L1-21・ADR-0001 S3: 混ぜると型エラー、変換関数なし）。プロトコルは「同じ形をしている」ことを表すだけで、片方をもう片方として渡せるようにはしません。
+  - 構築子と `compare` は、いまのモジュール関数（`duration.ms`、`compute.compare` など）がそのままプロトコルのメソッドになります。同じ計算の転送の関数を別に置きません（R-L0-01）。
+  - 演算子（`+`・`-`・`* Int`・`<`）は、ADR-0001 S3 の行列のまま両方の型に置きます。プロトコルはメソッドしか持てないので、ここには入りません。
+  - 時計を選ばない関数を、利用者が 1 つ書けば両方に使えます（`fn half_or_less[T: TimeAmount](a: T, limit: T) -> T`）。
+- 根拠の L0 規則: R-L0-01（同じ役割を 2 か所で手書きしない）。CLAUDE.md の「性質は宣言 1 か所から導出する」。
+- 用語の注意: `Compute` は OS が測る CPU 時間ではありません。凍結した抽象機械の charge の数（関数の入口とループの頭で数える）で、どのホストでも同じ値になる決定的な量です（ADR-0001）。壁時計と対になる「もう 1 つの時計」です。
+- (a) Swift の `Clock` プロトコルは、時計ごとに「`DurationProtocol` に従う量の型」を決められる形です（[DurationProtocol](https://developer.apple.com/documentation/swift/durationprotocol)。標準の `ContinuousClock` と `SuspendingClock` は、どちらも同じ `Duration` 型を使います）。Java の `TemporalAmount`（`Duration` と `Period` が従う）も、量の型を 1 つのインターフェースでまとめる考え方です。ほかの言語は、時計の違いを型で分けていません。
+- (b) 検査器だけの変更です。値の表現（ナノ秒の Int 1 本）は変わりません。
+- (c) `duration.ms(5)` を覚えれば `compute.ms(5)` も同じ形で書ける、という対応が、文書の約束ではなく型の宣言として見えます。片方にだけ関数が足される、というずれも、プロトコルの検査で起きなくなります。
+- (d) 追加です（新しいプロトコル 1 つと、2 つの型の宣言）。既存のコードは変わりません。名前の `TimeAmount` は、どの言語の綴りとも衝突せず、「時間の量」と読めることで選びました。
+- 完全性の規則: `TimeAmount` に従う型は、6 単位の構築子と `compare` をすべて持ちます（プロトコルの検査が強制します）。ADR-0001 S2 の 12 セルの行列ゲートは、このプロトコルの検査に置き換わります。
+- ゲート案: 2 つの型が `TimeAmount` に従うことを、`spec/stdlib/` の総称関数のテスト（同じ総称関数を `Duration` と `Compute` の両方で呼ぶ）で確かめます。
+- issue: #3964
+
 ## L3: 関数表
 
 `duration` の現行 6 関数と、追加する 1 関数です。
