@@ -94,6 +94,11 @@ summary = "The bytes in-place writers declare their receiver `mut`, like `list.p
 breaks = [
   "passing a `let` binding, a non-`mut` parameter or a temporary to a bytes writer (`bytes.append_*`, `set_*`, `write_*`, `fill`, `clear`, `copy_from`) is E032 — declare a local buffer with `var`, and give a helper that fills its caller's buffer a `mut b: Bytes` parameter (the caller then passes a `var`)",
 ]
+# Late enforcement of an existing break, not a new epoch. The ledger is
+# append-only; these notes add to epoch 5 without changing what it means.
+notes = [
+  "2026-10-22, 0.68.0 (#3966): the break now covers `bytes.as_mut_ptr`, the writer whose writes go through the RawPtr it returns. It declares its receiver with `@mutating` rather than `mut b`, and the checker read only `mut b`, so a `let` binding or a plain parameter passed to it escaped E032 — and a write through the pointer changed the caller's `let` binding on native but not on wasm. Same repair: a `var` buffer, or a `mut b: Bytes` parameter.",
+]
 
 [[epoch]]
 n = 6
