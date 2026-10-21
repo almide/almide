@@ -118,14 +118,18 @@ Contracts: C-045, C-100, C-101, C-141, C-147, C-148。
 
 ## ALS-M13 mut パラメータの in-place 変異
 
-`mut` パラメータ（Map / Bytes 等）への in-place 変異は呼び出し元の値に
-反映される（ALS-C5 の例外）。例外の例外が一つ: `Bytes` は参照意味論を
-持ち、`@intrinsic` のバイト書き込み族は**素の**(非 `mut`)`Bytes` パラメータ
-越しにも呼び出し元へ可視である(C-132、`bytes_param_writeback.almd`)。
-`bytes.push`
-蓄積も同様。**再割り当てする**コンテナ（List / String / Bytes の容量成長）
-でも成立し、値返しの callee・入れ子式位置・レコードフィールド実引数
-（`f(b.items, …)`）を含む全呼び出し位置で呼び出し元スロットに書き戻される。
+`mut` パラメータへの in-place 変異は呼び出し元の `var` に反映される（ALS-C5 の
+例外）。呼び出し側が渡せるのは `var` 束縛だけで、`let`・非 `mut` パラメータ・
+一時値は E032。この例外を開くのは宣言された `mut` だけである: 標準ライブラリの
+in-place 変異子（`list.push`/`pop`/`clear`、`map.insert`/`delete`/`clear`、
+`string.push`/`clear`、`bytes` の書き込み族）も受け手を `mut` と宣言しており、
+非 `mut` パラメータ越しに呼び出し元の値が変わる経路は無い（`Bytes` の素の
+パラメータ経路は dialect epoch 5 で閉じた、C-132）。**再割り当てする**
+コンテナ（List / String / Bytes の容量成長）でも成立し、値返しの callee・
+入れ子式位置・レコードフィールド実引数（`f(b.items, …)`）を含む全呼び出し
+位置で呼び出し元スロットに書き戻される。実引数は呼び出し時に複写され、
+呼び出しの後に書き戻される: callee が実引数の根である module-level `var` を
+読むと、呼び出し前の値が見える（C-132）。
 Contracts: C-061, C-110, C-132, C-136。
 
 ## ALS-M14 整数リテラルの型域（静的規範）

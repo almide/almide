@@ -75,7 +75,7 @@
 | [ALS-E14](./expressions.md#als-e14-ブロック式exprkindblock) | ブロック式(`ExprKind::Block`) | C-243 |
 | [ALS-E15](./expressions.md#als-e15-while-文exprkindwhile) | while 文(`ExprKind::While`) | C-244 |
 | [ALS-E16](./expressions.md#als-e16-文字列補間exprkindinterpolatedstring) | 文字列補間(`ExprKind::InterpolatedString`) | C-245 |
-| [ALS-E17](./expressions.md#als-e17-識別子exprkindident) | 識別子(`ExprKind::Ident`) | C-246 |
+| [ALS-E17](./expressions.md#als-e17-識別子exprkindident) | 識別子(`ExprKind::Ident`) | C-246, C-387 |
 | [ALS-E18](./expressions.md#als-e18-match-式exprkindmatch) | match 式(`ExprKind::Match`) | C-247, C-281, C-323, C-332, C-333, C-352 |
 | [ALS-E19](./expressions.md#als-e19-for-in-文exprkindforin) | for-in 文(`ExprKind::ForIn`) | C-248, C-279 |
 | [ALS-ST2](./expressions.md#als-st2-分解束縛stmtletdestructure) | 分解束縛(`Stmt::LetDestructure`) | C-249, C-373 |
@@ -87,7 +87,7 @@
 | [ALS-E23](./expressions.md#als-e23-レコードexprkindrecord--exprkindspreadrecord--exprkindmember) | レコード(`ExprKind::Record` / `ExprKind::SpreadRecord` / `ExprKind::Member`) | C-255 |
 | [ALS-E24](./expressions.md#als-e24-break-と-continueexprkindbreak--exprkindcontinue) | break と continue(`ExprKind::Break` / `ExprKind::Continue`) | C-256 |
 | [ALS-E25](./expressions.md#als-e25-エラー演算子exprkindunwrap--exprkindtooption--exprkindunwrapor--exprkindtry) | エラー演算子(`ExprKind::Unwrap` / `ExprKind::ToOption` / `ExprKind::UnwrapOr` / `ExprKind::Try`) | C-257, C-271 |
-| [ALS-E26](./expressions.md#als-e26-呼び出しとラムダexprkindcall--exprkindlambda) | 呼び出しとラムダ(`ExprKind::Call` / `ExprKind::Lambda`) | C-258 |
+| [ALS-E26](./expressions.md#als-e26-呼び出しとラムダexprkindcall--exprkindlambda) | 呼び出しとラムダ(`ExprKind::Call` / `ExprKind::Lambda`) | C-258, C-388 |
 | [ALS-E27](./expressions.md#als-e27-コンストラクタ参照exprkindtypename) | コンストラクタ参照(`ExprKind::TypeName`) | C-259, C-322 |
 | [ALS-DL1](./expressions.md#als-dl1-宣言declmodule--declimport--decltype--declfn--decltoplet--declprotocol--decltest--decltestwheredef) | 宣言(`Decl::Module` / `Decl::Import` / `Decl::Type` / `Decl::Fn` / `Decl::TopLet` / `Decl::Protocol` / `Decl::Test` / `Decl::TestWhereDef`) | C-260 |
 | [ALS-E3](./expressions.md#als-e3-浮動小数点リテラルexprkindfloat—-部分節) | 浮動小数点リテラル(`ExprKind::Float`)— 部分節 | C-182, C-261 |
@@ -114,7 +114,7 @@
 |----|---------|-----------|
 | [ALS-R1](./runtime.md#als-r1-effect-main-のエラー終了形) | effect-main のエラー終了形 | C-035 |
 | [ALS-R2](./runtime.md#als-r2-補間の表示形) | 補間の表示形 | C-008, C-009, C-010, C-011, C-222 |
-| [ALS-R3](./runtime.md#als-r3-fan-並行コンビネータの決定性) | fan 並行コンビネータの決定性 | C-004, C-005, C-006, C-199, C-321, C-349 |
+| [ALS-R3](./runtime.md#als-r3-fan-並行コンビネータの決定性) | fan 並行コンビネータの決定性 | C-004, C-005, C-006, C-199, C-321, C-349, C-386 |
 | [ALS-R4](./runtime.md#als-r4-非有限浮動小数の定数表示) | 非有限浮動小数の定数表示 | C-012 |
 | [ALS-R5](./runtime.md#als-r5-プロセス環境) | プロセス環境 | C-096, C-112, C-118, C-133, C-189, C-214, C-215, C-290, C-327, C-330, C-328, C-329, C-331, C-366, C-367, C-370, C-374, C-375, C-377, C-378, C-379, C-382, C-383, C-385 |
 | [ALS-R6](./runtime.md#als-r6-ファイルシステムのパス解決) | ファイルシステムのパス解決 | C-042, C-137, C-220, C-225, C-227, C-228, C-229, C-230, C-270, C-272, C-273, C-278, C-282, C-283, C-284 |

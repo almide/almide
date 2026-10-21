@@ -79,6 +79,44 @@ surface() { # ref -> sorted signature lines on stdout
 prev_s=$(surface "$PREV" || true)
 cur_s=$(surface "$CUR" || true)
 
+# THE `mut` COLUMN. The index shows a `mut` parameter as `mut name: T` since
+# the interface JSON carried the modifier; an index rendered before that drops
+# it, though the declaration always had it. Against such a PREV, a CUR `mut`
+# is compared away only where PREV's own stdlib source declares that function
+# with that `mut` parameter, so the re-render is not counted and a `mut` ADDED
+# since PREV (a let-caller now gets E032) still reads as a changed signature.
+mut_rerendered=0
+if [ -n "$prev_s" ] && ! printf '%s\n' "$prev_s" | grep -qE '(\(|, )mut [a-z_0-9]+: '; then
+  prev_mut=$(git -C "$ROOT" ls-tree -r --name-only "$PREV" -- stdlib/ 2>/dev/null | grep -E '\.almd$' \
+    | while read -r f; do git -C "$ROOT" show "$PREV:$f" 2>/dev/null; done \
+    | python3 -c '
+import re, sys
+for l in sys.stdin:
+    m = re.match(r"(?:effect )?fn ([a-z_0-9]+)(?:\[[^\]]*\])?\((.*)", l)
+    if m:
+        for p in re.findall(r"\bmut ([a-z_0-9]+):", m.group(2)):
+            print(f"{m.group(1)} {p}")
+' | sort -u)
+  cur_norm=$(printf '%s\n' "$cur_s" | PREV_MUT="$prev_mut" python3 -c '
+import os, re, sys
+known = set(os.environ["PREV_MUT"].split("\n"))
+n = 0
+for l in sys.stdin.read().split("\n"):
+    if not l: continue
+    m = re.match(r"(?:effect )?[a-z_0-9]+\.([a-z_0-9]+)\(", l)
+    def strip(p):
+        global n
+        if m and f"{m.group(1)} {p.group(2)}" in known:
+            n += 1
+            return p.group(1) + p.group(2) + ":"
+        return p.group(0)
+    print(re.sub(r"(\(|, )mut ([a-z_0-9]+):", strip, l))
+print(f"#{n}")
+')
+  mut_rerendered=$(printf '%s\n' "$cur_norm" | sed -n 's/^#//p' | tail -1)
+  cur_s=$(printf '%s\n' "$cur_norm" | grep -v '^#' | sort -u)
+fi
+
 [ -n "$prev_s" ] || { echo "check-interface-diff: no generated signature index at $PREV" >&2; exit 2; }
 [ -n "$cur_s" ]  || { echo "check-interface-diff: no generated signature index at $CUR" >&2; exit 2; }
 
@@ -145,6 +183,9 @@ else
 fi
 
 echo "interface-diff: $PREV -> $CUR = $verdict (added=$(printf '%s' "$added" | grep -c . || true) removed=$(printf '%s' "$removed" | grep -c . || true))"
+if [ "$mut_rerendered" != "0" ]; then
+  echo "re-rendered (\`mut\` shown on a parameter PREV's source already declared mut): $mut_rerendered — not counted"
+fi
 if [ "$rerendered" != "0" ]; then
   echo "re-rendered (legacy placeholder -> named type, same name and arity): $rerendered — not counted"
 fi

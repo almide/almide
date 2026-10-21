@@ -133,6 +133,10 @@ pub struct ParamExport {
     pub name: String,
     #[serde(rename = "type")]
     pub ty: TypeRef,
+    /// The `mut` modifier: the callee writes the caller's `var` in place, and
+    /// a `let`, a non-`mut` parameter or a temporary argument is E032.
+    #[serde(default, rename = "mut", skip_serializing_if = "std::ops::Not::not")]
+    pub is_mut: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -320,6 +324,7 @@ fn extract_functions(program: &IrProgram, cx: &ExtractCtx) -> Vec<FunctionExport
             params: func.params.iter().map(|p| ParamExport {
                 name: p.name.to_string(),
                 ty: resolve_ty(&p.ty, &record_names, &variant_names),
+                is_mut: p.is_mut,
             }).collect(),
             ret,
             effect: func.is_effect,

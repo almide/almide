@@ -171,63 +171,63 @@ For zero-copy interop with native code (e.g. when calling Rust runtime directly)
 ```
 // Appends val rounded to f32, BE.
 // @since 0.13.4 or earlier
-bytes.append_f32_be(b: Bytes, val: Float) -> Unit
+bytes.append_f32_be(mut b: Bytes, val: Float) -> Unit
 
 // Appends val rounded to f32, LE.
 // @since 0.13.4 or earlier
-bytes.append_f32_le(b: Bytes, val: Float) -> Unit
+bytes.append_f32_le(mut b: Bytes, val: Float) -> Unit
 
 // Appends val as 8-byte f64, BE.
 // @since 0.13.4 or earlier
-bytes.append_f64_be(b: Bytes, val: Float) -> Unit
+bytes.append_f64_be(mut b: Bytes, val: Float) -> Unit
 
 // Appends val as 8-byte f64, LE.
 // @since 0.13.4 or earlier
-bytes.append_f64_le(b: Bytes, val: Float) -> Unit
+bytes.append_f64_le(mut b: Bytes, val: Float) -> Unit
 
 // Appends val's low 16 bits, BE.
 // @since 0.13.4 or earlier
-bytes.append_i16_be(b: Bytes, val: Int) -> Unit
+bytes.append_i16_be(mut b: Bytes, val: Int) -> Unit
 
 // Appends val's low 16 bits, LE.
 // @since 0.13.4 or earlier
-bytes.append_i16_le(b: Bytes, val: Int) -> Unit
+bytes.append_i16_le(mut b: Bytes, val: Int) -> Unit
 
 // Appends val's low 32 bits, BE.
 // @since 0.13.4 or earlier
-bytes.append_i32_be(b: Bytes, val: Int) -> Unit
+bytes.append_i32_be(mut b: Bytes, val: Int) -> Unit
 
 // Appends val's low 32 bits, LE.
 // @since 0.13.4 or earlier
-bytes.append_i32_le(b: Bytes, val: Int) -> Unit
+bytes.append_i32_le(mut b: Bytes, val: Int) -> Unit
 
 // Appends val as 8 bytes, BE.
 // @since 0.13.4 or earlier
-bytes.append_i64_be(b: Bytes, val: Int) -> Unit
+bytes.append_i64_be(mut b: Bytes, val: Int) -> Unit
 
 // Appends val as 8 bytes, LE.
 // @since 0.13.4 or earlier
-bytes.append_i64_le(b: Bytes, val: Int) -> Unit
+bytes.append_i64_le(mut b: Bytes, val: Int) -> Unit
 
 // Appends val's low 16 bits, BE.
 // @since 0.13.4 or earlier
-bytes.append_u16_be(b: Bytes, val: Int) -> Unit
+bytes.append_u16_be(mut b: Bytes, val: Int) -> Unit
 
 // Appends val's low 16 bits, LE.
 // @since 0.13.4 or earlier
-bytes.append_u16_le(b: Bytes, val: Int) -> Unit
+bytes.append_u16_le(mut b: Bytes, val: Int) -> Unit
 
 // Appends val's low 32 bits, BE.
 // @since 0.13.4 or earlier
-bytes.append_u32_be(b: Bytes, val: Int) -> Unit
+bytes.append_u32_be(mut b: Bytes, val: Int) -> Unit
 
 // Appends val's low 32 bits, LE.
 // @since 0.13.4 or earlier
-bytes.append_u32_le(b: Bytes, val: Int) -> Unit
+bytes.append_u32_le(mut b: Bytes, val: Int) -> Unit
 
 // Appends val's low 8 bits; 256 becomes 0.
 // @since 0.13.4 or earlier
-bytes.append_u8(b: Bytes, val: Int) -> Unit
+bytes.append_u8(mut b: Bytes, val: Int) -> Unit
 
 // Mutable address of the data; null if empty.
 // @since 0.11.0 or earlier
@@ -243,7 +243,7 @@ bytes.chunks(b: Bytes, size: Int) -> List[Bytes]
 
 // Truncates b to length 0 in place.
 // @since 0.9.8 or earlier
-bytes.clear(b: Bytes) -> Unit
+bytes.clear(mut b: Bytes) -> Unit
 
 // Lexicographic -1, 0 or 1; a prefix sorts first.
 // @since 0.13.4 or earlier
@@ -259,7 +259,7 @@ bytes.contains(b: Bytes, pattern: Bytes) -> Bool
 
 // Copies len bytes of src into dst; clamped to fit.
 // @since 0.13.4 or earlier
-bytes.copy_from(dst: Bytes, src: Bytes, dst_off: Int, src_off: Int, len: Int) -> Unit
+bytes.copy_from(mut dst: Bytes, src: Bytes, dst_off: Int, src_off: Int, len: Int) -> Unit
 
 // Writes up to cap bytes to ptr; count, 0 if null.
 // @since 0.11.0 or earlier
@@ -279,7 +279,7 @@ bytes.eof(b: Bytes, pos: Int) -> Bool
 
 // Sets every byte to val's low 8 bits in place.
 // @since 0.13.4 or earlier
-bytes.fill(b: Bytes, val: Int) -> Unit
+bytes.fill(mut b: Bytes, val: Int) -> Unit
 
 // xs as bytes, low 8 bits each; -1 becomes 255.
 // @since 0.9.3 or earlier
@@ -343,15 +343,15 @@ bytes.pad_right(b: Bytes, target_len: Int, val: Int) -> Bytes
 
 // Appends val's low 8 bits in place.
 // @since 0.9.8 or earlier
-bytes.push(b: Bytes, val: Int) -> Unit
+bytes.push(mut b: Bytes, val: Int) -> Unit
 
 // Sets byte i to val's low 8 bits; no-op out of range.
 // @since 0.22.0 or earlier
-bytes.set_at(b: Bytes, i: Int, val: Int) -> Unit
+bytes.set_at(mut b: Bytes, i: Int, val: Int) -> Unit
 
 // Copies src_start..src_end to dst; no-op if it won't fit.
 // @since 0.22.0 or earlier
-bytes.copy_within(b: Bytes, src_start: Int, src_end: Int, dst: Int) -> Unit
+bytes.copy_within(mut b: Bytes, src_start: Int, src_end: Int, dst: Int) -> Unit
 
 // Byte at pos != 0; false if out of range.
 // @since 0.11.0 or earlier
@@ -583,63 +583,63 @@ bytes.set(b: Bytes, i: Int, val: Int) -> Bytes
 
 // Writes f32 BE at pos; no-op out of range.
 // @since 0.13.4 or earlier
-bytes.set_f32_be(b: Bytes, pos: Int, val: Float) -> Unit
+bytes.set_f32_be(mut b: Bytes, pos: Int, val: Float) -> Unit
 
 // Writes f32 LE at pos; no-op out of range.
 // @since 0.13.2 or earlier
-bytes.set_f32_le(b: Bytes, pos: Int, val: Float) -> Unit
+bytes.set_f32_le(mut b: Bytes, pos: Int, val: Float) -> Unit
 
 // Writes f64 BE at pos; no-op out of range.
 // @since 0.13.4 or earlier
-bytes.set_f64_be(b: Bytes, pos: Int, val: Float) -> Unit
+bytes.set_f64_be(mut b: Bytes, pos: Int, val: Float) -> Unit
 
 // Writes f64 LE at pos; no-op out of range.
 // @since 0.13.4 or earlier
-bytes.set_f64_le(b: Bytes, pos: Int, val: Float) -> Unit
+bytes.set_f64_le(mut b: Bytes, pos: Int, val: Float) -> Unit
 
 // Writes i16 BE at pos; no-op out of range.
 // @since 0.13.4 or earlier
-bytes.set_i16_be(b: Bytes, pos: Int, val: Int) -> Unit
+bytes.set_i16_be(mut b: Bytes, pos: Int, val: Int) -> Unit
 
 // Writes i16 LE at pos; no-op out of range.
 // @since 0.13.4 or earlier
-bytes.set_i16_le(b: Bytes, pos: Int, val: Int) -> Unit
+bytes.set_i16_le(mut b: Bytes, pos: Int, val: Int) -> Unit
 
 // Writes i32 BE at pos; no-op out of range.
 // @since 0.13.4 or earlier
-bytes.set_i32_be(b: Bytes, pos: Int, val: Int) -> Unit
+bytes.set_i32_be(mut b: Bytes, pos: Int, val: Int) -> Unit
 
 // Writes i32 LE at pos; no-op out of range.
 // @since 0.13.4 or earlier
-bytes.set_i32_le(b: Bytes, pos: Int, val: Int) -> Unit
+bytes.set_i32_le(mut b: Bytes, pos: Int, val: Int) -> Unit
 
 // Writes i64 BE at pos; no-op out of range.
 // @since 0.13.4 or earlier
-bytes.set_i64_be(b: Bytes, pos: Int, val: Int) -> Unit
+bytes.set_i64_be(mut b: Bytes, pos: Int, val: Int) -> Unit
 
 // Writes i64 LE at pos; no-op out of range.
 // @since 0.13.4 or earlier
-bytes.set_i64_le(b: Bytes, pos: Int, val: Int) -> Unit
+bytes.set_i64_le(mut b: Bytes, pos: Int, val: Int) -> Unit
 
 // Writes u16 BE at pos; no-op out of range.
 // @since 0.13.4 or earlier
-bytes.set_u16_be(b: Bytes, pos: Int, val: Int) -> Unit
+bytes.set_u16_be(mut b: Bytes, pos: Int, val: Int) -> Unit
 
 // Writes u16 LE at pos; no-op out of range.
 // @since 0.13.2 or earlier
-bytes.set_u16_le(b: Bytes, pos: Int, val: Int) -> Unit
+bytes.set_u16_le(mut b: Bytes, pos: Int, val: Int) -> Unit
 
 // Writes u32 BE at pos; no-op out of range.
 // @since 0.13.4 or earlier
-bytes.set_u32_be(b: Bytes, pos: Int, val: Int) -> Unit
+bytes.set_u32_be(mut b: Bytes, pos: Int, val: Int) -> Unit
 
 // Writes u32 LE at pos; no-op out of range.
 // @since 0.13.4 or earlier
-bytes.set_u32_le(b: Bytes, pos: Int, val: Int) -> Unit
+bytes.set_u32_le(mut b: Bytes, pos: Int, val: Int) -> Unit
 
 // Writes val's low byte at pos; no-op out of range.
 // @since 0.13.4 or earlier
-bytes.set_u8(b: Bytes, pos: Int, val: Int) -> Unit
+bytes.set_u8(mut b: Bytes, pos: Int, val: Int) -> Unit
 
 // pos + n, capped at len.
 // @since 0.13.4 or earlier
@@ -679,27 +679,27 @@ bytes.to_string_lossy(b: Bytes) -> String
 
 // Appends 1 for true, 0 for false.
 // @since 0.11.0 or earlier
-bytes.write_bool(b: Bytes, val: Bool) -> Unit
+bytes.write_bool(mut b: Bytes, val: Bool) -> Unit
 
 // Appends val as 8-byte f64, BE.
 // @since 0.11.0 or earlier
-bytes.write_f64_be(b: Bytes, val: Float) -> Unit
+bytes.write_f64_be(mut b: Bytes, val: Float) -> Unit
 
 // Appends val as 8 bytes, BE.
 // @since 0.11.0 or earlier
-bytes.write_i64_be(b: Bytes, val: Int) -> Unit
+bytes.write_i64_be(mut b: Bytes, val: Int) -> Unit
 
 // Appends s after a u32 BE byte-length prefix.
 // @since 0.11.0 or earlier
-bytes.write_string_be(b: Bytes, s: String) -> Unit
+bytes.write_string_be(mut b: Bytes, s: String) -> Unit
 
 // Appends val's low 32 bits, BE.
 // @since 0.11.0 or earlier
-bytes.write_u32_be(b: Bytes, val: Int) -> Unit
+bytes.write_u32_be(mut b: Bytes, val: Int) -> Unit
 
 // Appends val's low 8 bits; 256 becomes 0.
 // @since 0.11.0 or earlier
-bytes.write_u8(b: Bytes, val: Int) -> Unit
+bytes.write_u8(mut b: Bytes, val: Int) -> Unit
 
 // Bytewise XOR, as long as the shorter input.
 // @since 0.13.4 or earlier
@@ -723,35 +723,35 @@ bytes.read_float32(b: Bytes, offset: Int, endian: Endian) -> Float32
 
 // Appends value as 2 bytes in endian order.
 // @since 0.15.0 or earlier
-bytes.write_uint16(b: Bytes, value: UInt16, endian: Endian) -> Unit
+bytes.write_uint16(mut b: Bytes, value: UInt16, endian: Endian) -> Unit
 
 // Appends value as 4 bytes in endian order.
 // @since 0.15.0 or earlier
-bytes.write_uint32(b: Bytes, value: UInt32, endian: Endian) -> Unit
+bytes.write_uint32(mut b: Bytes, value: UInt32, endian: Endian) -> Unit
 
 // Appends value as 4 bytes in endian order.
 // @since 0.15.0 or earlier
-bytes.write_int32(b: Bytes, value: Int32, endian: Endian) -> Unit
+bytes.write_int32(mut b: Bytes, value: Int32, endian: Endian) -> Unit
 
 // Appends value as 4 bytes in endian order.
 // @since 0.15.0 or earlier
-bytes.write_float32(b: Bytes, value: Float32, endian: Endian) -> Unit
+bytes.write_float32(mut b: Bytes, value: Float32, endian: Endian) -> Unit
 
 // Writes value at offset; no-op out of range.
 // @since 0.15.0 or earlier
-bytes.set_uint16(b: Bytes, offset: Int, value: UInt16, endian: Endian) -> Unit
+bytes.set_uint16(mut b: Bytes, offset: Int, value: UInt16, endian: Endian) -> Unit
 
 // Writes value at offset; no-op out of range.
 // @since 0.15.0 or earlier
-bytes.set_uint32(b: Bytes, offset: Int, value: UInt32, endian: Endian) -> Unit
+bytes.set_uint32(mut b: Bytes, offset: Int, value: UInt32, endian: Endian) -> Unit
 
 // Writes value at offset; no-op out of range.
 // @since 0.15.0 or earlier
-bytes.set_int32(b: Bytes, offset: Int, value: Int32, endian: Endian) -> Unit
+bytes.set_int32(mut b: Bytes, offset: Int, value: Int32, endian: Endian) -> Unit
 
 // Writes value at offset; no-op out of range.
 // @since 0.15.0 or earlier
-bytes.set_float32(b: Bytes, offset: Int, value: Float32, endian: Endian) -> Unit
+bytes.set_float32(mut b: Bytes, offset: Int, value: Float32, endian: Endian) -> Unit
 ```
 
 ## Type index (1 types)
