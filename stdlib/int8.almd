@@ -148,3 +148,39 @@ fn count_ones(x: Int8) -> Int = int.pop_count(int.band(int.from_int8(x), 255))
 
 /// The bytes in reverse order; one byte, so x itself.
 fn byte_swap(x: Int8) -> Int8 = x
+
+// ── FixedWidthInteger: wrapping, rotation, bit length; parse (R-int-11, R-int-12, R-sized-02) ──
+/// a + b wrapped to 8 bits.
+fn wrap_add(a: Int8, b: Int8) -> Int8 = int.to_int8(int.from_int8(a) + int.from_int8(b))
+
+/// a - b wrapped to 8 bits.
+fn wrap_sub(a: Int8, b: Int8) -> Int8 = int.to_int8(int.from_int8(a) - int.from_int8(b))
+
+/// a * b wrapped to 8 bits.
+fn wrap_mul(a: Int8, b: Int8) -> Int8 = int.to_int8(int.from_int8(a) * int.from_int8(b))
+
+/// The 8 bits of a rotated left by n; n is taken mod 8.
+fn rotate_left(a: Int8, n: Int) -> Int8 = int.to_int8(rotate_bits(int.band(int.from_int8(a), 255), rotate_count(n)))
+
+/// The 8 bits of a rotated right by n; n is taken mod 8.
+fn rotate_right(a: Int8, n: Int) -> Int8 = int.to_int8(rotate_bits(int.band(int.from_int8(a), 255), rotate_count(0 - rotate_count(n))))
+
+// The low 8 bits v rotated left by k (k in 0..7); bits above 8 are dropped by the narrowing.
+local fn rotate_bits(v: Int, k: Int) -> Int = if k == 0 then v
+else int.bor(int.bshl(v, k), int.bshr(v, 8 - k))
+
+local fn rotate_count(n: Int) -> Int = {
+  let r = n % 8
+  if r < 0 then r + 8 else r
+}
+
+/// Bits needed to hold x; 0 for 0, 8 if negative.
+fn bit_length(x: Int8) -> Int = 64 - int.count_leading_zeros(int.band(int.from_int8(x), 255))
+
+/// Decimal Int8 from trimmed s; err on junk or outside -128..127.
+fn parse(s: String) -> Result[Int8, String] = match int.parse(s) {
+  ok(n) => if n < -128 then err("number too small to fit in target type")
+  else if n > 127 then err("number too large to fit in target type")
+  else ok(int.to_int8(n)),
+  err(e) => err(e),
+}
