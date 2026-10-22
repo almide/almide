@@ -1160,3 +1160,21 @@ id = "crates/almide-syntax/src/parser/types.rs::FOREIGN_BUILTIN_TYPES::table"
 class = "justified"
 names = 5
 why = "A syntax table, not a property of stdlib functions: the C / Rust / Python / TS spellings of the builtin types (`int`, `string`, `bool`, `f64`, …) and the Almide type each means, read only by the parser's one-error recovery. The names that collide with stdlib module names (`int`, `float`, `string`, `bool`, `str`) are type spellings here, not calls; no leg reads the table."
+
+[[site]]
+id = "src/cli/docs_gen.rs::check_numeric_protocol_matrix::INTEGERS::table"
+class = "justified"
+names = 8
+why = "The rows of a family gate, not a property of functions: the fixed-width integer carriers that conform to Integer and FixedWidthInteger (R-sized-10). The protocol pyramid is an assumed design the language cannot declare yet (R-L0-37), so the conformance list is the specification the gate checks the module interfaces against; no codegen leg reads it."
+
+[[site]]
+id = "src/cli/docs_gen.rs::check_numeric_protocol_matrix::INTEGER::table"
+class = "justified"
+names = 11
+why = "The columns of a family gate, not a property of functions: the requirements of Integer and FixedWidthInteger (protocol-view.md, R-sized-02/08/10, R-int-11/12) that every fixed-width integer must carry as a concrete function until a built-in type can conform to a protocol. The gate asserts every carrier x requirement cell exists; no codegen leg reads it."
+
+[[site]]
+id = "src/cli/docs_gen.rs::check_numeric_protocol_matrix::SIGNED::table"
+class = "justified"
+names = 2
+why = "The columns of a family gate: the SignedInteger requirements (abs, sign; R-sized-10) the four signed fixed-width integers carry. A specification the gate checks against the module interfaces; no codegen leg reads it."
