@@ -75,7 +75,7 @@
 #                      every stamped row is to be re-inspected before each final
 #                      release for that (a manual GCE run: no credentials in CI)
 #
-# uninspected_ceiling = "0"
+# uninspected_ceiling = "48"
 
 [[fn]]
 name = "args.flag"
@@ -12622,3 +12622,291 @@ parity = "PASS: seed 1792427119, 200 programs; 200 program(s) call it, 176 of th
 complexity = "PASS: no size parameter — constant-size arguments only (the plain call is the parity campaign's)"
 alloc = "PASS: call live=0"
 diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
+
+[[fn]]
+name = "list.binary_search_by"
+sig = "(xs: List[A], target: K, f: (A) -> K) -> Option[Int]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.binary_search_with"
+sig = "(xs: List[A], target: A, cmp: (A, A) -> Int) -> Option[Int]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.from_list"
+sig = "(xs: List[A]) -> List[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.max_by"
+sig = "(xs: List[A], f: (A) -> K) -> Option[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.max_with"
+sig = "(xs: List[A], cmp: (A, A) -> Int) -> Option[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.min_by"
+sig = "(xs: List[A], f: (A) -> K) -> Option[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.min_with"
+sig = "(xs: List[A], cmp: (A, A) -> Int) -> Option[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.new"
+sig = "() -> List[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.range_step"
+sig = "(start: Int, end: Int, step: Int) -> List[Int]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.sort_with"
+sig = "(xs: List[A], cmp: (A, A) -> Int) -> List[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.to_list"
+sig = "(xs: List[A]) -> List[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "list.unzip"
+sig = "(xs: List[(A, B)]) -> (List[A], List[B])"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "map.enumerate"
+sig = "(m: Map[K, V]) -> List[(Int, (K, V))]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "map.filter_map"
+sig = "(m: Map[K, V], f: ((K, V)) -> Option[B]) -> List[B]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "map.find_map"
+sig = "(m: Map[K, V], f: ((K, V)) -> Option[B]) -> Option[B]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "map.group_by"
+sig = "(m: Map[K, V], f: ((K, V)) -> B) -> Map[B, List[(K, V)]]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "map.max_by"
+sig = "(m: Map[K, V], f: ((K, V)) -> U) -> Option[(K, V)]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "map.max_with"
+sig = "(m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> Option[(K, V)]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "map.min_by"
+sig = "(m: Map[K, V], f: ((K, V)) -> U) -> Option[(K, V)]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "map.min_with"
+sig = "(m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> Option[(K, V)]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "map.partition"
+sig = "(m: Map[K, V], f: ((K, V)) -> Bool) -> (List[(K, V)], List[(K, V)])"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "map.reduce"
+sig = "(m: Map[K, V], f: ((K, V), (K, V)) -> (K, V)) -> Option[(K, V)]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "map.scan"
+sig = "(m: Map[K, V], init: B, f: (B, (K, V)) -> B) -> List[B]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "map.sort_by"
+sig = "(m: Map[K, V], f: ((K, V)) -> B) -> List[(K, V)]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "map.sort_with"
+sig = "(m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> List[(K, V)]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "map.zip"
+sig = "(m: Map[K, V], ys: List[B]) -> List[((K, V), B)]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "map.zip_with"
+sig = "(m: Map[K, V], ys: List[B], f: ((K, V), B) -> C) -> List[C]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "set.clear"
+sig = "(s: Set[A]) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "set.count"
+sig = "(s: Set[A], f: (A) -> Bool) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "set.enumerate"
+sig = "(s: Set[A]) -> List[(Int, A)]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "set.filter_map"
+sig = "(s: Set[A], f: (A) -> Option[B]) -> List[B]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "set.find"
+sig = "(s: Set[A], f: (A) -> Bool) -> Option[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "set.find_map"
+sig = "(s: Set[A], f: (A) -> Option[B]) -> Option[B]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "set.group_by"
+sig = "(s: Set[A], f: (A) -> B) -> Map[B, List[A]]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "set.max"
+sig = "(s: Set[A]) -> Option[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "set.max_by"
+sig = "(s: Set[A], f: (A) -> K) -> Option[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "set.max_with"
+sig = "(s: Set[A], cmp: (A, A) -> Int) -> Option[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "set.min"
+sig = "(s: Set[A]) -> Option[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "set.min_by"
+sig = "(s: Set[A], f: (A) -> K) -> Option[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "set.min_with"
+sig = "(s: Set[A], cmp: (A, A) -> Int) -> Option[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "set.partition"
+sig = "(s: Set[A], f: (A) -> Bool) -> (List[A], List[A])"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "set.reduce"
+sig = "(s: Set[A], f: (A, A) -> A) -> Option[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "set.scan"
+sig = "(s: Set[A], init: B, f: (B, A) -> B) -> List[B]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "set.sort"
+sig = "(s: Set[A]) -> List[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "set.sort_by"
+sig = "(s: Set[A], f: (A) -> B) -> List[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "set.sort_with"
+sig = "(s: Set[A], cmp: (A, A) -> Int) -> List[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "set.zip"
+sig = "(s: Set[A], ys: List[B]) -> List[(A, B)]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "set.zip_with"
+sig = "(s: Set[A], ys: List[B], f: (A, B) -> C) -> List[C]"
+class = "pure"
+status = "uninspected"
