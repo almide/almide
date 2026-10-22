@@ -21,7 +21,8 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 2. [L1: カテゴリ（モジュール）の一覧](L1-categories.md) — 足すカテゴリ、足さないカテゴリ、分け方と持ち分。
 3. L2/L3: モジュールごとのページ — 役割の比較表（L2）と、全関数の判定表（L3）。
 4. [リデザイン後の標準ライブラリ](target-surface.md) — ○ の案をすべて適用したあとの公開関数の一覧（モジュールごと、シグネチャつき、撤去した関数の移行先つき）。
-5. 根拠の事実: [facts/naming-conventions.md](facts/naming-conventions.md)（命名の慣習 20 項目 × 9 言語）・[facts/categories.md](facts/categories.md)（約 100 カテゴリ × 9 言語）。
+5. [リデザイン後の標準ライブラリ（protocol ごと）](protocol-view.md) — 同じ関数を protocol ごとに並べ直した一覧。型ごとの準拠、その型だけの関数、protocol の穴（R-L0-37）。
+6. 根拠の事実: [facts/naming-conventions.md](facts/naming-conventions.md)（命名の慣習 20 項目 × 9 言語）・[facts/categories.md](facts/categories.md)（約 100 カテゴリ × 9 言語）。
 
 判定の 4 軸: (a) 他言語と比べた過不足、(b) native（Rust）と wasm（WASI）の両方で成り立つか、(c) LLM が書き当てやすいか、(d) 変更の種類と互換。
 

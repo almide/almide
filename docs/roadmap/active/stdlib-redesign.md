@@ -8,5 +8,6 @@ The design record lives in [docs/roadmap/stdlib-redesign/](../stdlib-redesign/RE
 - `L2-<module>.md`: one page per module. Each has the role comparison and a verdict for every public function (1,001 today).
 - [README](../stdlib-redesign/README.md): every proposal with its verdict (○ / × / 保留) and its issue.
 - [Target surface](../stdlib-redesign/target-surface.md): the standard library once every adopted proposal lands — every public function with its post-redesign signature (1,001 today → 1,250), per module, and where each removed function goes.
+- [Protocol view](../stdlib-redesign/protocol-view.md): the same surface regrouped by protocol — each standard type as the protocols it conforms to plus its own functions, and the holes each protocol exposes.
 
 Renames and removals use the epoch-15 deprecation window, with removal in epoch 16 (R-L0-14).
