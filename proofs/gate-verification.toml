@@ -99,7 +99,7 @@
 # its measurand (0 -> 1). Both are enumerated gates, not new ones.
 #
 # unmapped_blind_ceiling = "108"
-# uncompensated_blind_ceiling = "19"
+# uncompensated_blind_ceiling = "20"
 #
 # History of the unverified ceiling: it moved 0 -> 2 when enumerating the
 # Almide gates (#2128) brought `output-parity` and `fuzz-track-record` INTO the
@@ -1437,3 +1437,13 @@ evidence = "landing (2026-10-23, #4008): reads the committed signature-index blo
 measures = "which public stdlib functions carry RawPtr in their signature (R-L0-45: only ffi, plus the shrink-only allowlist of deprecated bytes spellings), and whether ffi's surface is exactly the four functions of R-ffi-01"
 varies = "landing (2026-10-23): 8 RawPtr signatures, allowlist 4; epoch 16 removes the bytes spellings and the allowlist goes to 0"
 blind = "a memory-unsafe function whose signature carries no RawPtr (bytes.data_ptr returns an Int address) -> tests/critical_profile_test.rs (#4008: --profile critical refuses every @memory_unsafe stdlib fn, bytes.data_ptr included); whether a non-ffi function writes outside its value without a RawPtr in its type is not read, only types -> spec/stdlib out-of-range fixtures (R-L0-46)"
+
+[[gate]]
+path = "scripts/check-runtime-unsafe.sh"
+reads = "scalar"
+wired_by = ".github/workflows/ci.yml"
+class = "NEGATIVE_TESTED"
+evidence = "landing (2026-10-23, #4007): 54 unsafe lines in 9 files under runtime/rs/src, runtime/rs/burn and crates/almide-rt-core/src, each file listed in proofs/runtime-unsafe-allowlist.toml with a class and a reason. --self-test copies the trees to a scratch root, expects the unforged copy to pass, appends an unsafe block to runtime/rs/src/int.rs (an unlisted file) and expects a refusal, then replaces it with a comment mentioning unsafe and expects a pass. A scan that reads zero unsafe lines exits 2 rather than reporting a clean runtime."
+measures = "the per-file count of non-comment lines holding the word unsafe in the native runtime, against the allowlist"
+varies = "landing (2026-10-23): 55 -> 54 with the matrix_p2 align_to removal"
+blind = "an unsafe operation reached through a dependency crate (rayon, the regex crate, std) is not counted, only this repo's own lines -> UNCOMPENSATED; whether each listed line is actually sound is not read, only that it is listed -> proofs/runtime-unsafe-allowlist.toml"
