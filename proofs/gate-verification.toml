@@ -99,7 +99,7 @@
 # its measurand (0 -> 1). Both are enumerated gates, not new ones.
 #
 # unmapped_blind_ceiling = "108"
-# uncompensated_blind_ceiling = "18"
+# uncompensated_blind_ceiling = "19"
 #
 # History of the unverified ceiling: it moved 0 -> 2 when enumerating the
 # Almide gates (#2128) brought `output-parity` and `fuzz-track-record` INTO the
@@ -1417,3 +1417,14 @@ evidence = "2026-10-21, both directions on the real fuzz history: the full histo
 measures = "consecutive calendar days on which every completed Fuzz (nightly) run's verdict job concluded success over >= 75% of the planned fuzz-minutes, read from the Actions API and the verdict-job logs"
 varies = "2026-10-18 reads 3 (start 2026-10-16), 2026-10-20 reads 0, both measured 2026-10-21"
 blind = "a correctness bug the fuzz generator cannot reach: a clean night means no finding in the generated programs, not none in the compiler -> UNCOMPENSATED"
+
+[[gate]]
+path = "scripts/check-runtime-unsafe.sh"
+reads = "scalar"
+wired_by = ".github/workflows/ci.yml"
+class = "NEGATIVE_TESTED"
+evidence = "landing (2026-10-23, #4007): 54 unsafe lines in 9 files under runtime/rs/src, runtime/rs/burn and crates/almide-rt-core/src, each file listed in proofs/runtime-unsafe-allowlist.toml with a class and a reason. --self-test copies the trees to a scratch root, expects the unforged copy to pass, appends an unsafe block to runtime/rs/src/int.rs (an unlisted file) and expects a refusal, then replaces it with a comment mentioning unsafe and expects a pass. A scan that reads zero unsafe lines exits 2 rather than reporting a clean runtime."
+measures = "the per-file count of non-comment lines holding the word unsafe in the native runtime, against the allowlist"
+varies = "landing (2026-10-23): 55 -> 54 with the matrix_p2 align_to removal"
+blind = "an unsafe operation reached through a dependency crate (rayon, the regex crate, std) is not counted, only this repo's own lines -> UNCOMPENSATED; whether each listed line is actually sound is not read, only that it is listed -> proofs/runtime-unsafe-allowlist.toml"
+

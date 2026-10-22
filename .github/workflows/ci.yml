@@ -1635,6 +1635,11 @@ jobs:
         # deleted must classify `breaking`, an added effect fn must count.
         run: bash scripts/check-interface-diff-negative.sh
 
+      - name: Runtime unsafe ledger (#4007 — every unsafe line in the native runtime listed with a reason)
+        run: |
+          bash scripts/check-runtime-unsafe.sh --self-test
+          bash scripts/check-runtime-unsafe.sh
+
       - name: Gate verification ledger (every gate classified by how it can fail — no decorative gates)
         run: bash scripts/check-gate-verification.sh
 
