@@ -341,6 +341,15 @@
 - (d) 追加 6。
 - issue: #4012
 
+### R-bytes-28 `bytes.new(len)` を `bytes.zeros(n)` に改名し、`bytes.new()` を空のバイト列にする — ○ 採用
+
+- いま: 入れ物の `new()` は空の入れ物を作ります（`list`・`string`・`deque`・`set`・`heap`・`map`）。`bytes.new(len)` だけが「長さ `len` の 0 で埋めたバイト列」を作り、引数の数が違います。protocol の階層の `Container.new` の形に合いません。
+- 案: いまの関数を `bytes.zeros(n: Int) -> Bytes` に改名し（`matrix.zeros` と同じ綴り）、`bytes.new() -> Bytes` を空のバイト列にします。
+- (a) 0 で埋めた長さ n のバッファは、どの言語も「長さを渡す」形です（Rust `vec![0; n]`、Go `make([]byte, n)`、Python `bytes(n)`、JS `new Uint8Array(n)`、Swift `Data(count: n)`）。空のバッファは別の形です（Rust `Vec::new()`、Swift `Data()`）。
+- 名前の使い直し（R-L0-43 の 2）: 古い `bytes.new(10)` は引数の数が合わず型エラーになるので、黙って意味が変わりません。
+- (d) 改名と追加です。`almide fix` が `bytes.new(n)` を `bytes.zeros(n)` に書き換えます。
+- issue: #4012
+
 ## L3: 関数表
 
 （146 関数 + 追加 13。判定の内訳: 据え置き 58・改名 53・撤去 31・意味変更 4・追加 13。改名の `put_` 15 件は、R-bytes-11 で範囲外の挙動も変わります）
@@ -387,7 +396,7 @@
 | `len` | `bytes.len(b: Bytes) -> Int` | Rust len / Go len / Python len / JS length / Gleam byte_size / OCaml length | 据え置き | — |
 | `lines` | `bytes.lines(b: Bytes) -> List[Bytes]` | Go bufio.ScanLines / Python splitlines | 撤去（→ `string.lines(bytes.to_string(b)!)` か `bytes.split`） | R-bytes-17 |
 | `map_each` | `bytes.map_each(b: Bytes, f: (Int) -> Int) -> Bytes` | Kotlin map / Python bytes(map(f, b)) / Almide list.map | 改名 → `map` | R-bytes-08 |
-| `new` | `bytes.new(len: Int) -> Bytes` | Rust vec![0; n] / Go make([]byte, n) / Python bytes(n) / JS new Uint8Array(n) / OCaml Bytes.make (F) / Kotlin ByteArray(n) | 据え置き | — |
+| `new` | `bytes.new(len: Int) -> Bytes` | Rust vec![0; n] / Go make([]byte, n) / Python bytes(n) / JS new Uint8Array(n) / OCaml Bytes.make (F) / Kotlin ByteArray(n) | 改名 → `zeros` | R-bytes-28 |
 | `pad_left` | `bytes.pad_left(b: Bytes, target_len: Int, val: Int) -> Bytes` | JS padStart / Almide string.pad_start | 改名 → `pad_start` | R-bytes-08 |
 | `pad_right` | `bytes.pad_right(b: Bytes, target_len: Int, val: Int) -> Bytes` | JS padEnd / Almide string.pad_end | 改名 → `pad_end` | R-bytes-08 |
 | `push` | `bytes.push(mut b: Bytes, val: Int) -> Unit` | Rust Vec::push / Python bytearray.append / Almide list.push | 据え置き | R-bytes-02 |
@@ -557,6 +566,7 @@
 | `strip_prefix` | （追加）`bytes.strip_prefix(b: Bytes, prefix: Bytes) -> Bytes?` | Rust `strip_prefix` / Go `CutPrefix` | 追加 | R-bytes-27 |
 | `strip_suffix` | （追加）`bytes.strip_suffix(b: Bytes, suffix: Bytes) -> Bytes?` | Rust `strip_suffix` / Go `CutSuffix` | 追加 | R-bytes-27 |
 | `count_matches` | （追加）`bytes.count_matches(b: Bytes, needle: Bytes) -> Int` | Go `bytes.Count` / Python `count` | 追加 | R-bytes-27 |
+| `new` | （追加）`bytes.new() -> Bytes` | Rust `Vec::new` / Swift `Data()` / Go `[]byte{}` | 追加 | R-bytes-28 |
 
 ## L0 への差し戻し（処理済み）
 

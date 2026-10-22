@@ -38,20 +38,20 @@
 
 | いまの関数 | リデザイン後 | 据え置き | 新規 | 改名 | 意味変更 | 撤去 |
 |---:|---:|---:|---:|---:|---:|---:|
-| 1001 | 1291 | 424 | 702 | 87 | 78 | 412 |
+| 1001 | 1292 | 423 | 703 | 88 | 78 | 412 |
 
 固定幅の数（`int8`〜`uint64`、`float32`・`float64`）は型ごとに 1 関数と数えます。
 
 ## 実体の数
 
-この一覧は、同じ protocol の関数を型ごとに 1 行と数えています（計 1,291 行）。[protocol の階層](protocol-view.md)で数え直すと、覚える名前はずっと少なくなります。
+この一覧は、同じ protocol の関数を型ごとに 1 行と数えています（計 1,292 行）。[protocol の階層](protocol-view.md)で数え直すと、覚える名前はずっと少なくなります。
 
 | 数え方 | 一覧の行 | 覚える名前 |
 |---|---:|---:|
 | protocol の要件（protocol ごとに 1 回） | 791 | 161 |
-| 値の型だけが持つ関数 | 292 | 292 |
+| 値の型だけが持つ関数 | 293 | 293 |
 | 値の型を持たないモジュール（`fs`・`http`・`math` など） | 208 | 208 |
-| 計 | 1291 | 661 |
+| 計 | 1292 | 662 |
 
 ## モジュールごとの数
 
@@ -61,7 +61,7 @@
 | [`base64`](#base64) | 4 | 0 | 0 | 2 | 0 | [L2-base64.md](L2-base64.md) |
 | [`bigint`](#bigint)（新しいモジュール） | 24 | 24 | 0 | 0 | 0 | [L2-bigint.md](L2-bigint.md) |
 | [`bool`](#bool) | 3 | 3 | 0 | 0 | 0 | [L2-bool.md](L2-bool.md) |
-| [`bytes`](#bytes) | 176 | 62 | 71 | 6 | 34 | [L2-bytes.md](L2-bytes.md) |
+| [`bytes`](#bytes) | 177 | 63 | 72 | 6 | 34 | [L2-bytes.md](L2-bytes.md) |
 | [`compute`](#compute) | 7 | 1 | 0 | 0 | 0 | [L2-compute.md](L2-compute.md) |
 | [`datetime`](#datetime) | 18 | 1 | 0 | 1 | 5 | [L2-datetime.md](L2-datetime.md) |
 | [`deque`](#deque)（新しいモジュール） | 60 | 60 | 0 | 0 | 0 | [L2-deque.md](L2-deque.md) |
@@ -286,7 +286,7 @@
 | `min` | `fn bytes.min(b: Bytes) -> Int?` | 新規 | R-L0-42 |
 | `min_by` | `fn bytes.min_by(b: Bytes, f: (Int) -> K) -> Int?` | 新規 | R-L0-42 |
 | `min_with` | `fn bytes.min_with(b: Bytes, cmp: (Int, Int) -> Int) -> Int?` | 新規 | R-L0-42 |
-| `new` | `fn bytes.new(len: Int) -> Bytes` |  |  |
+| `new` | `fn bytes.new() -> Bytes` | 新規 | R-bytes-28 |
 | `next_bool` | `fn bytes.next_bool(b: Bytes, pos: Int) -> (Bool?, Int)` | 改名（旧 `read_bool_at`）。`(値, 次の位置)` を返す | R-bytes-13 |
 | `next_bytes` | `fn bytes.next_bytes(b: Bytes, pos: Int, n: Int) -> (Bytes?, Int)` | 改名（旧 `take_at`）。`(値, 次の位置)` を返す | R-bytes-13 |
 | `next_f16_be` | `fn bytes.next_f16_be(b: Bytes, pos: Int) -> (Float?, Int)` | 新規 | R-bytes-03、R-bytes-13 |
@@ -361,6 +361,7 @@
 | `unique_by` | `fn bytes.unique_by(b: Bytes, f: (Int) -> K) -> Bytes` | 新規 | R-L0-42 |
 | `window` | `fn bytes.window(b: Bytes, n: Int) -> List[Bytes]` | 新規 | R-L0-42 |
 | `xor` | `fn bytes.xor(a: Bytes, b: Bytes) -> Bytes` | 意味変更: 長さが違うと abort | R-bytes-23 |
+| `zeros` | `fn bytes.zeros(n: Int) -> Bytes` | 改名（旧 `new`） | R-bytes-28 |
 | `zip` | `fn bytes.zip(b: Bytes, ys: List[B]) -> List[(Int, B)]` | 新規 | R-L0-42 |
 | `zip_with` | `fn bytes.zip_with(b: Bytes, ys: List[B], f: (Int, B) -> C) -> List[C]` | 新規 | R-L0-42 |
 
@@ -855,7 +856,7 @@
 | `body` | `fn http.body[M: HttpMessage](m: M) -> String` | 意味変更: `HttpRequest` も受け取る | R-http-12 |
 | `body_bytes` | `fn http.body_bytes[M: HttpMessage](m: M) -> Bytes` | 新規。`HttpRequest` も受け取る | R-http-12 |
 | `cancel` | `effect fn http.cancel(c: HttpCall) -> Unit` |  | R-http-01 |
-| `decode_json` | `fn http.decode_json[T](req: HttpRequest, decode: (Value) -> Result[T, String]) -> Result[T, HttpResponse]` |  |  |
+| `decode_json` | `fn http.decode_json[A](req: HttpRequest, decode: (Value) -> Result[A, String]) -> Result[A, HttpResponse]` |  |  |
 | `get` | `effect fn http.get(url: String) -> String` |  | R-http-01 |
 | `get_response` | `effect fn http.get_response(url: String) -> HttpResponse` |  | R-http-01 |
 | `header` | `fn http.header[M: HttpMessage](m: M, name: String) -> String?` | 改名（旧 `get_header`）。`HttpRequest` も受け取る | R-http-12 |
@@ -1361,7 +1362,7 @@
 | `find_map` | `fn list.find_map(xs: List[A], f: (A) -> B?) -> B?` |  |  |
 | `first` | `fn list.first(xs: List[A]) -> A?` |  |  |
 | `flat_map` | `fn list.flat_map(xs: List[A], f: (A) -> List[B]) -> List[B]` |  |  |
-| `flatten` | `fn list.flatten(xs: List[List[T]]) -> List[T]` |  |  |
+| `flatten` | `fn list.flatten(xs: List[List[A]]) -> List[A]` |  |  |
 | `fold` | `fn list.fold(xs: List[A], init: B, f: (B, A) -> B) -> B` |  |  |
 | `from_list` | `fn list.from_list(xs: List[A]) -> List[A]` | 新規 | R-list-20 |
 | `get` | `fn list.get(xs: List[A], i: Int) -> A?` |  |  |
@@ -1370,7 +1371,7 @@
 | `insert` | `fn list.insert(xs: List[A], i: Int, x: A) -> List[A]` | 意味変更: `0..=len` の外は abort | R-list-00、R-list-13 |
 | `intersperse` | `fn list.intersperse(xs: List[A], sep: A) -> List[A]` |  |  |
 | `is_empty` | `fn list.is_empty(xs: List[A]) -> Bool` |  |  |
-| `iterate` | `fn list.iterate(seed: T, f: (T) -> T, n: Int) -> List[T]` |  |  |
+| `iterate` | `fn list.iterate(seed: A, f: (A) -> A, n: Int) -> List[A]` |  |  |
 | `join` | `fn list.join[T: Text](xs: List[T], sep: T) -> T` | 意味変更: `String`・`Bytes` の 2 つの形を、`Text` の総称関数 1 つに | R-L0-42 |
 | `last` | `fn list.last(xs: List[A]) -> A?` |  |  |
 | `len` | `fn list.len(xs: List[A]) -> Int` |  | R-L0-11 |
@@ -1398,7 +1399,7 @@
 | `sort` | `fn list.sort(xs: List[A]) -> List[A]` |  | R-list-00 |
 | `sort_by` | `fn list.sort_by(xs: List[A], f: (A) -> B) -> List[A]` |  | R-list-06 |
 | `sort_with` | `fn list.sort_with(xs: List[A], cmp: (A, A) -> Int) -> List[A]` | 新規 | R-list-06 |
-| `split_at` | `fn list.split_at(xs: List[T], n: Int) -> (List[T], List[T])` |  |  |
+| `split_at` | `fn list.split_at(xs: List[A], n: Int) -> (List[A], List[A])` |  |  |
 | `sum` | `fn list.sum[A: Numeric](xs: List[A]) -> A` | 意味変更: `Int`・`Float` の 2 つの形を、数の型すべてを受ける 1 つの総称関数に | R-L0-42 |
 | `swap` | `fn list.swap(xs: List[A], i: Int, j: Int) -> List[A]` | 意味変更: 範囲外は abort | R-list-00、R-list-13 |
 | `take` | `fn list.take(xs: List[A], n: Int) -> List[A]` | 意味変更: 負の数は abort。R-L0-29 | R-L0-12、R-L0-29 |
@@ -1638,8 +1639,8 @@
 
 | 関数 | シグネチャ（リデザイン後） | 変化 | 案 |
 |---|---|---|---|
-| `collect` | `fn option.collect(xs: List[T?]) -> List[T]?` |  | R-option-02 |
-| `collect_map` | `fn option.collect_map(xs: List[T], f: (T) -> U?) -> List[U]?` |  | R-option-02 |
+| `collect` | `fn option.collect(xs: List[A?]) -> List[A]?` |  | R-option-02 |
+| `collect_map` | `fn option.collect_map(xs: List[A], f: (A) -> B?) -> List[B]?` |  | R-option-02 |
 | `filter` | `fn option.filter(o: A?, f: (A) -> Bool) -> A?` |  | R-option-04 |
 | `flat_map` | `fn option.flat_map(o: A?, f: (A) -> B?) -> B?` |  | R-L0-10（`flat_map` の綴りは規則で固定） |
 | `flatten` | `fn option.flatten(o: A??) -> A?` |  |  |
@@ -1727,15 +1728,15 @@
 | 関数 | シグネチャ（リデザイン後） | 変化 | 案 |
 |---|---|---|---|
 | `bytes` | `effect fn random.bytes(n: Int) -> Bytes` | 新規 | R-random-02 |
-| `choice` | `effect fn random.choice(xs: List[T]) -> T?` |  |  |
+| `choice` | `effect fn random.choice(xs: List[A]) -> A?` |  |  |
 | `float` | `effect fn random.float() -> Float` |  |  |
 | `int` | `effect fn random.int(min: Int, max: Int) -> Int` |  | R-random-04 |
-| `next_choice` | `fn random.next_choice[T](rng: Rng, xs: List[T]) -> (T?, Rng)` | 新規 | R-random-01 |
+| `next_choice` | `fn random.next_choice[A](rng: Rng, xs: List[A]) -> (A?, Rng)` | 新規 | R-random-01 |
 | `next_float` | `fn random.next_float(rng: Rng) -> (Float, Rng)` | 新規 | R-random-01 |
 | `next_int` | `fn random.next_int(rng: Rng, min: Int, max: Int) -> (Int, Rng)` | 新規 | R-random-01 |
-| `next_shuffle` | `fn random.next_shuffle[T](rng: Rng, xs: List[T]) -> (List[T], Rng)` | 新規 | R-random-01 |
+| `next_shuffle` | `fn random.next_shuffle[A](rng: Rng, xs: List[A]) -> (List[A], Rng)` | 新規 | R-random-01 |
 | `seeded` | `fn random.seeded(seed: Int) -> Rng` | 新規 | R-random-01 |
-| `shuffle` | `effect fn random.shuffle(xs: List[T]) -> List[T]` |  | R-random-03 |
+| `shuffle` | `effect fn random.shuffle(xs: List[A]) -> List[A]` |  | R-random-03 |
 
 ## regex
 
@@ -1773,7 +1774,7 @@
 | `map` | `fn result.map(r: Result[A, E], f: (A) -> B) -> Result[B, E]` |  |  |
 | `map_err` | `fn result.map_err(r: Result[A, E], f: (E) -> F) -> Result[A, F]` |  | ADR-0004 D2 の正準形 |
 | `or_else` | `fn result.or_else(r: Result[A, E], f: (E) -> Result[A, F]) -> Result[A, F]` |  |  |
-| `partition` | `fn result.partition(xs: List[Result[T, E]]) -> (List[T], List[E])` |  | R-result-05 |
+| `partition` | `fn result.partition(xs: List[Result[A, E]]) -> (List[A], List[E])` |  | R-result-05 |
 | `to_err_option` | `fn result.to_err_option(r: Result[A, E]) -> E?` |  | R-result-03 |
 | `to_list` | `fn result.to_list(r: Result[A, E]) -> List[A]` |  | R-option-04 |
 | `to_option` | `fn result.to_option(r: Result[A, E]) -> A?` |  | `?` の脱糖先 |
@@ -1943,12 +1944,12 @@
 
 | 関数 | シグネチャ（リデザイン後） | 変化 | 案 |
 |---|---|---|---|
-| `assert_aborts` | `fn testing.assert_aborts[T](expected: String, f: () -> T) -> Unit` |  |  |
+| `assert_aborts` | `fn testing.assert_aborts[A](expected: String, f: () -> A) -> Unit` |  |  |
 | `assert_approx` | `fn testing.assert_approx(a: Float, b: Float, tolerance: Float) -> Unit` |  |  |
 | `assert_contains` | `fn testing.assert_contains(haystack: String, needle: String) -> Unit` |  | R-testing-01 |
 | `assert_err` | `fn testing.assert_err[A, B](r: Result[A, B]) -> Unit` |  |  |
-| `assert_gt` | `fn testing.assert_gt[T](a: T, b: T) -> Unit` | 意味変更: 順序のある型すべてに広げる | R-testing-02 |
-| `assert_lt` | `fn testing.assert_lt[T](a: T, b: T) -> Unit` | 意味変更: 順序のある型すべてに広げる | R-testing-02 |
+| `assert_gt` | `fn testing.assert_gt[A](a: A, b: A) -> Unit` | 意味変更: 順序のある型すべてに広げる | R-testing-02 |
+| `assert_lt` | `fn testing.assert_lt[A](a: A, b: A) -> Unit` | 意味変更: 順序のある型すべてに広げる | R-testing-02 |
 | `assert_none` | `fn testing.assert_none[A](o: A?) -> Unit` |  |  |
 | `assert_ok` | `fn testing.assert_ok[A, B](r: Result[A, B]) -> Unit` |  |  |
 | `assert_snapshot` | `fn testing.assert_snapshot(actual: String, expected: String) -> Unit` |  |  |

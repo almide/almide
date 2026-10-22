@@ -25,7 +25,7 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 
 十一巡目（2026-10-22）: `Bool` の順序を 9 言語で並べ直し、順序をつける 7 言語（Rust・Python・JS・Gleam・Elixir・OCaml・Kotlin）に合わせて `Bool` を `Ord` に入れ、`bool.compare` を足しました（R-bool-02 を保留から採用へ）。つけないのは Go と Swift だけでした。これで保留は R-map-04 などの計測待ちだけです。
 
-十二巡目（2026-10-22）: 「撤去した記号を別の意味で使い直さない」を規則にしました（R-L0-43）。これで九巡目のビット演算子の案（R-L0-41）を取り消し、`^` は累乗の別名をやめてエラーにするだけ、`>>` は関数の合成のまま、ビット演算は関数（`band` など）のまま `Integer` の要件にしました（R-int-10）。
+十二巡目（2026-10-22）: 「撤去した記号を別の意味で使い直さない」を規則にしました（R-L0-43）。これで九巡目のビット演算子の案（R-L0-41）を取り消し、`^` は累乗の別名をやめてエラーにするだけ、`>>` は関数の合成のまま、ビット演算は関数（`band` など）のまま `Integer` の要件にしました（R-int-10）。全体の機械点検（要件の形・書き換えの動詞・Bool の名前・型引数の名前）もかけ、\`bytes.new(len)\` を \`bytes.zeros(n)\` にして \`bytes.new()\` を空のバイト列にそろえました（R-bytes-28）。
 
 ## 読む順番
 
@@ -44,7 +44,7 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 
 [args](L2-args.md) ・ [base64](L2-base64.md) ・ [bigint](L2-bigint.md) ・ [bool](L2-bool.md) ・ [bytes](L2-bytes.md) ・ [compute](L2-compute.md) ・ [datetime](L2-datetime.md) ・ [deque](L2-deque.md) ・ [duration](L2-duration.md) ・ [env](L2-env.md) ・ [error](L2-error.md) ・ [ffi](L2-ffi.md) ・ [float](L2-float.md) ・ [fs](L2-fs.md) ・ [hash](L2-hash.md) ・ [heap](L2-heap.md) ・ [hex](L2-hex.md) ・ [html](L2-html.md) ・ [http](L2-http.md) ・ [int](L2-int.md) ・ [io](L2-io.md) ・ [json](L2-json.md) ・ [list](L2-list.md) ・ [map](L2-map.md) ・ [math](L2-math.md) ・ [matrix](L2-matrix.md) ・ [net](L2-net.md) ・ [option](L2-option.md) ・ [path](L2-path.md) ・ [process](L2-process.md) ・ [random](L2-random.md) ・ [regex](L2-regex.md) ・ [result](L2-result.md) ・ [set](L2-set.md) ・ [sized-numbers](L2-sized-numbers.md) ・ [string](L2-string.md) ・ [testing](L2-testing.md) ・ [unix](L2-unix.md) ・ [url](L2-url.md) ・ [uuid](L2-uuid.md) ・ [value](L2-value.md) ・ [zlib](L2-zlib.md)
 
-## 案の状態（全 342 件: ○ 277・× 61・保留 4）
+## 案の状態（全 343 件: ○ 278・× 61・保留 4）
 
 | 案 | 内容 | 判定 | issue |
 |---|---|---|---|
@@ -154,6 +154,7 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 | [R-bytes-25](L2-bytes.md#r-bytes-25-型つきの読み書きの行列に-get_u8append_u8-を戻す---採用r-bytes-02-の一部を見直し) | 型つきの読み書きの行列に `get_u8`・`append_u8` を戻す | ○ | #3991 |
 | [R-bytes-26](L2-bytes.md#r-bytes-26-bytesget_u8-と-getappend_u8-と-push-を-1-つにする---不採用役割の違いを明記) | `bytes.get_u8` と `get`、`append_u8` と `push` を 1 つにする | × | なし |
 | [R-bytes-27](L2-bytes.md#r-bytes-27-bytes-に-text-の要件をそろえる---採用) | `bytes` に `Text` の要件をそろえる | ○ | #4012 |
+| [R-bytes-28](L2-bytes.md#r-bytes-28-bytesnewlen-を-byteszerosn-に改名しbytesnew-を空のバイト列にする---採用) | `bytes.new(len)` を `bytes.zeros(n)` に改名し、`bytes.new()` を空のバイト列にする | ○ | #4012 |
 | [R-compute-01](L2-compute.md#r-compute-01-computecompare-を足す---採用) | `compute.compare` を足す | ○ | #3902 |
 | [R-compute-02](L2-compute.md#r-compute-02-duration-と統合するまたは読み出し関数を足す---不採用) | `duration` と統合する、または読み出し関数を足す | × | — |
 | [R-compute-03](L2-compute.md#r-compute-03-compute-を共通のプロトコル-timeamount-に従わせる---採用) | `Compute` を共通のプロトコル `TimeAmount` に従わせる | ○ | #3964 |
