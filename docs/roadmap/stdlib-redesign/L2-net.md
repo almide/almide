@@ -22,7 +22,7 @@
 ### 完全性の規則
 
 - `net` は `wasi:sockets` が運べるものだけを持ちます（R-L1-26）。TCP、UDP、名前の解決、IP アドレス。Unix ソケットと共有メモリは `unix` に移します（[L2-unix](L2-unix.md)）。
-- ソケットの族は、TCP と UDP で同じ形にそろえます: {開く, 自分のポート `<proto>_local_port`, 閉じる `<proto>_close`}。読み書きは、つながる TCP は `read`/`write`、つながらない UDP は相手を指定する `send_to`/`recv_from` です。
+- ソケットの族は、TCP と UDP で同じ形にそろえます: {開く, 自分のポート `<proto>_local_port`}。読み書きと閉じるは、取っ手の種類によらず `io.read`・`io.write`・`io.close` です（R-L0-44）。つながらない UDP だけは、相手を指定する `udp_send_to`/`udp_recv_from` を持ちます。
 - 失敗の表し方（R-L0-06 の 1 と 4。番兵を返さない）: 読み取りは相手が閉じたら空の `Bytes`（いまの `tcp_read` の約束）。名前を引けないとき・IP の文字列が読めないときは err（理由がある）。
 - `tcp_set_timeout` の `set_` は、Almide の値を書き換える動詞ではありません。OS の側にあるソケットの設定を変える effect fn で、`mut` 引数も持たず、ハンドルの値は変わりません。R-L0-04 の「`set` はコピー側の動詞」は値（レコード・入れ物）についての規則なので、これとはぶつかりません。
 - 関数名の接頭辞（`tcp_`、`udp_`）は、1 つのモジュールに 2 つのプロトコルを置くための区別です。いまの綴りを変えません（R-L0-00）。
@@ -32,7 +32,8 @@
 - 置き場所違い: `unix_*`・`shm_*` の 13 関数（WASI に無いもので、`net` の中で「まだ wasm に無い」と「永久に stock には無い」が混ざる）→ R-net-01
 - 抜けている役割: UDP、DNS、IP アドレスの型（7/9）→ R-net-02、R-net-03
 - 宣言の穴: `tcp_is_open` が純粋な `fn` でハンドルの表を読みます（実測で純粋な fn から呼べる。probe-io）→ R-net-04
-- 型: `TcpStream`・`TcpListener` が `Int` の別名で、ストリームと待ち受けを取り違えても型で止まりません → R-net-05（× と理由）
+- 型: `TcpStream`・`TcpListener` が `Int` の別名で、ストリームと待ち受けを取り違えても型で止まらず、入出力の protocol にも準拠できません → R-net-05
+- 入出力の層: 読む・書く・閉じるが TCP・UDP・Unix ソケット・標準入出力で別々の名前です → R-net-07（R-L0-44）
 - R-L0-09: `net.unix_poll` は L0 が名指しした例外 → R-net-01（移動の際に `unix.select` に一本化して消す）
 
 ## 案
@@ -51,7 +52,7 @@
 
 - 内容:
   ```almide
-  type UdpSocket = Int
+  type UdpSocket                                                    // 不透明（R-net-05）
   effect fn udp_bind(host: String, port: Int) -> UdpSocket          // port 0 で OS が選ぶ
   effect fn udp_local_port(sock: UdpSocket) -> Int
   effect fn udp_send_to(sock: UdpSocket, data: Bytes, host: String, port: Int) -> Unit
@@ -96,7 +97,13 @@
 - issue: R-process-04 と同じ新規 issue（host の状態を読む純粋な fn）
 - issue: #3907
 
-### R-net-05 TCP のハンドルを不透明な型にする — × 不採用
+### R-net-05 TCP のハンドルを不透明な型にする — ○ 採用（十三巡目に見直し。R-L0-44）
+
+- 案: `type TcpStream`・`type TcpListener`・`type UdpSocket` を不透明な型にします（`Int` の別名にしない）。`tcp_connect`・`tcp_accept` は `TcpStream`、`tcp_listen` は `TcpListener` を返し、ほかの関数はそれを受け取ります。
+- 見直した理由: 具体型は protocol の組み合わせで書き表します（R-L0-37）。`Int` のままでは、取っ手が `Read`・`Write`・`Close`（R-L0-44）に準拠できません。`Int` が `Read` に準拠すると、ただの数を `io.read` に渡せてしまいます。同じ `net` の中で、UDP は型を持ち TCP だけが `Int` という食い違いも消えます。`unix.Fd` はすでに不透明です（R-unix-01）。
+- (a) Rust `TcpStream`・`TcpListener`、Go `net.Conn`・`net.Listener`、Python `socket`、Kotlin `Socket`・`ServerSocket`、Swift（Network）`NWConnection`・`NWListener` と、型付きの取っ手が多数派です。
+- (d) 意味変更（型を変える）。古い書き方は、ハンドルを `Int` の欄やリストに入れていたところが型エラーになるだけで、黙って違う値にはなりません（R-L0-14 の 4）。`almide fix` は型注釈の `Int` を書き換えられないので、ヒントで「`net.TcpStream` にする」と案内します。
+- 以前の判定（× 不採用）:
 
 - 理由: ハンドルを `Int` の欄に持つレコードなど、正しく動いている利用者のコードをすべて書き換えさせることになり、ストリームと待ち受けを取り違えたという報告はまだありません。互換の規則（R-L0-14 の 4）には反しませんが（`TcpStream`・`TcpListener` は `Int` の別名で、不透明にすると旧い書き方は型エラーになるだけ）、得るものが書き換えの量に見合いません。ストリームと待ち受けを取り違えたという報告は、いまはありません。#3853 が問題にした「TCP のハンドルと OS の記述子を混ぜる」は、R-net-01 で `unix.Fd` を不透明にすれば止まります。
 - issue: なし
@@ -110,28 +117,35 @@
 - (d) 新しい関数なので費用は 0 です。
 - issue: #3974
 
+### R-net-07 TCP・UDP の読み書きと閉じるを `io` の総称関数にする — ○ 採用
+
+- 内容: `net.tcp_read` → `io.read`、`tcp_write` → `io.write`、`tcp_read_exact` → `io.read_exact`、`tcp_close`・`tcp_close_listener` → `io.close` に移し、`net` の 5 関数を撤去します。R-net-02 の `udp_close` は置かず、`io.close` を使います。
+- 残すもの: `tcp_read_timeout`・`tcp_set_timeout`・`tcp_available`・`tcp_is_open`（TCP だけの操作）、`tcp_connect`・`tcp_listen`・`tcp_accept`・`tcp_local_port`・`udp_*`（開く・調べる）。
+- 根拠の L0 規則: R-L0-44、R-L0-01（同じ役割に綴りを 1 つ）。
+- (d) 撤去 5。`@deprecated(since=15, use="io.read")` などで、`almide fix` が 1 対 1 で書き換えます（`net.tcp_read(s, n)` → `io.read(s, n)`）。古い名前は使い直しません（R-L0-43）。
+- issue: #4015
+
 ## L3: 関数表
 
 | 関数 | シグネチャ(現行, mut 表示) | 他言語の主な綴り | 判定 | 案 |
 |---|---|---|---|---|
-| `net.tcp_connect` | `effect fn tcp_connect(host: String, port: Int) -> Int` | Rust `TcpStream::connect` / Go `Dial` / Python `create_connection` | 据え置き | — |
-| `net.tcp_read` | `effect fn tcp_read(stream: Int, len: Int) -> Bytes` | Rust `read` / Python `recv` | 据え置き | — |
-| `net.tcp_write` | `effect fn tcp_write(stream: Int, data: Bytes) -> Unit` | Rust `write_all` / Python `sendall` | 据え置き | — |
-| `net.tcp_read_exact` | `effect fn tcp_read_exact(stream: Int, len: Int) -> Bytes` | Rust `read_exact` / Go `io.ReadFull` | 据え置き | — |
-| `net.tcp_close` | `effect fn tcp_close(stream: Int) -> Unit` | Go `Close` / Python `close` | 据え置き | — |
-| `net.tcp_is_open` | `fn tcp_is_open(stream: Int) -> Bool` | Kotlin `isClosed` の否定 | 意味変更（effect fn） | R-net-04 |
-| `net.tcp_read_timeout` | `effect fn tcp_read_timeout(stream: Int, len: Int, timeout_ms: Int) -> Bytes` | Elixir `recv(…, timeout)` | 据え置き | — |
-| `net.tcp_set_timeout` | `effect fn tcp_set_timeout(stream: Int, timeout_ms: Int) -> Unit` | Rust `set_read_timeout` / Python `settimeout` | 据え置き | — |
-| `net.tcp_available` | `effect fn tcp_available(stream: Int) -> Int` | Java `available` | 据え置き | — |
-| `net.tcp_listen` | `effect fn tcp_listen(host: String, port: Int) -> Int` | Rust `TcpListener::bind` / Go `Listen` | 据え置き | — |
-| `net.tcp_local_port` | `effect fn tcp_local_port(listener: Int) -> Int` | Rust `local_addr` / Go `Addr` | 据え置き | — |
-| `net.tcp_accept` | `effect fn tcp_accept(listener: Int) -> Int` | Rust・Go・Python `accept` | 据え置き | — |
-| `net.tcp_close_listener` | `effect fn tcp_close_listener(listener: Int) -> Unit` | Go `Listener.Close` | 据え置き | — |
+| `net.tcp_connect` | `effect fn tcp_connect(host: String, port: Int) -> Int` | Rust `TcpStream::connect` / Go `Dial` / Python `create_connection` | 意味変更（取っ手を `TcpStream`・`TcpListener` にする） | R-net-05 |
+| `net.tcp_read` | `effect fn tcp_read(stream: Int, len: Int) -> Bytes` | Rust `read` / Python `recv` | 撤去（→ `io.read`） | R-net-07 |
+| `net.tcp_write` | `effect fn tcp_write(stream: Int, data: Bytes) -> Unit` | Rust `write_all` / Python `sendall` | 撤去（→ `io.write`） | R-net-07 |
+| `net.tcp_read_exact` | `effect fn tcp_read_exact(stream: Int, len: Int) -> Bytes` | Rust `read_exact` / Go `io.ReadFull` | 撤去（→ `io.read_exact`） | R-net-07 |
+| `net.tcp_close` | `effect fn tcp_close(stream: Int) -> Unit` | Go `Close` / Python `close` | 撤去（→ `io.close`） | R-net-07 |
+| `net.tcp_is_open` | `fn tcp_is_open(stream: Int) -> Bool` | Kotlin `isClosed` の否定 | 意味変更（effect fn にし、`stream: TcpStream` にする） | R-net-04、R-net-05 |
+| `net.tcp_read_timeout` | `effect fn tcp_read_timeout(stream: Int, len: Int, timeout_ms: Int) -> Bytes` | Elixir `recv(…, timeout)` | 意味変更（取っ手を `TcpStream`・`TcpListener` にする） | R-net-05 |
+| `net.tcp_set_timeout` | `effect fn tcp_set_timeout(stream: Int, timeout_ms: Int) -> Unit` | Rust `set_read_timeout` / Python `settimeout` | 意味変更（取っ手を `TcpStream`・`TcpListener` にする） | R-net-05 |
+| `net.tcp_available` | `effect fn tcp_available(stream: Int) -> Int` | Java `available` | 意味変更（取っ手を `TcpStream`・`TcpListener` にする） | R-net-05 |
+| `net.tcp_listen` | `effect fn tcp_listen(host: String, port: Int) -> Int` | Rust `TcpListener::bind` / Go `Listen` | 意味変更（取っ手を `TcpStream`・`TcpListener` にする） | R-net-05 |
+| `net.tcp_local_port` | `effect fn tcp_local_port(listener: Int) -> Int` | Rust `local_addr` / Go `Addr` | 意味変更（取っ手を `TcpStream`・`TcpListener` にする） | R-net-05 |
+| `net.tcp_accept` | `effect fn tcp_accept(listener: Int) -> Int` | Rust・Go・Python `accept` | 意味変更（取っ手を `TcpStream`・`TcpListener` にする） | R-net-05 |
+| `net.tcp_close_listener` | `effect fn tcp_close_listener(listener: Int) -> Unit` | Go `Listener.Close` | 撤去（→ `io.close`） | R-net-07 |
 | `net.udp_bind` | `effect fn udp_bind(host: String, port: Int) -> UdpSocket`（案） | Rust `UdpSocket::bind`(F) / Go `ListenUDP`(F) | 追加 | R-net-02 |
 | `net.udp_local_port` | `effect fn udp_local_port(sock: UdpSocket) -> Int`（案） | Rust `local_addr`(F) | 追加 | R-net-02 |
 | `net.udp_send_to` | `effect fn udp_send_to(sock: UdpSocket, data: Bytes, host: String, port: Int) -> Unit`（案） | Rust `send_to`(F) / Go `WriteTo`(F) / Python `sendto` | 追加 | R-net-02 |
 | `net.udp_recv_from` | `effect fn udp_recv_from(sock: UdpSocket, max: Int) -> UdpPacket`（案） | Rust `recv_from`(F) / Go `ReadFrom`(F) / Python `recvfrom` | 追加（`UdpPacket` を返す） | R-net-01、R-net-06 |
-| `net.udp_close` | `effect fn udp_close(sock: UdpSocket) -> Unit`（案） | Go `Close` | 追加 | R-net-02 |
 | `net.lookup_host` | `effect fn lookup_host(host: String) -> List[IpAddr]`（案） | Go `LookupHost`(F) / Python `getaddrinfo` / Node `dns.lookup` | 追加 | R-net-03 |
 | `net.parse_ip` | `fn parse_ip(s: String) -> Result[IpAddr, String]`（案） | Go `ParseIP`(F) / Rust `parse::<IpAddr>` / Elixir `parse_address` | 追加 | R-net-03 |
 | `net.ip_to_string` | `fn ip_to_string(ip: IpAddr) -> String`（案） | Rust `to_string` / Go `String` | 追加 | R-net-03 |
@@ -139,12 +153,12 @@
 | `net.unix_connect` | `effect fn unix_connect(path: String) -> Int` | Rust `UnixStream::connect` | 撤去（→ `unix.connect`） | R-net-01 |
 | `net.unix_listen` | `effect fn unix_listen(path: String) -> Int` | Rust `UnixListener::bind` | 撤去（→ `unix.listen`） | R-net-01 |
 | `net.unix_accept` | `effect fn unix_accept(listener: Int) -> Int` | Rust `accept` | 撤去（→ `unix.accept`） | R-net-01 |
-| `net.unix_send` | `effect fn unix_send(sock: Int, data: Bytes, fds: List[Int]) -> Unit` | Python `send_fds` | 撤去（→ `unix.write`） | R-net-01 |
-| `net.unix_recv` | `effect fn unix_recv(sock: Int, max: Int) -> Bytes` | Python `recv_fds` | 撤去（→ `unix.read`） | R-net-01 |
+| `net.unix_send` | `effect fn unix_send(sock: Int, data: Bytes, fds: List[Int]) -> Unit` | Python `send_fds` | 撤去（→ `unix.write_fds`） | R-net-01 |
+| `net.unix_recv` | `effect fn unix_recv(sock: Int, max: Int) -> Bytes` | Python `recv_fds` | 撤去（→ `io.read`） | R-net-01 |
 | `net.unix_take_fds` | `effect fn unix_take_fds(sock: Int) -> List[Int]` | — | 撤去（→ `unix.take_fds`） | R-net-01 |
 | `net.unix_poll` | `effect fn unix_poll(fd: Int, timeout_ms: Int) -> Bool` | Python `select.poll` | 撤去（→ `unix.select([fd], t)`） | R-net-01 |
 | `net.unix_wait` | `effect fn unix_wait(fds: List[Int], timeout_ms: Int) -> List[Int]` | Python `select.select` / Go —  | 撤去（→ `unix.select`） | R-net-01 |
-| `net.unix_close` | `effect fn unix_close(fd: Int) -> Unit` | Python `os.close` | 撤去（→ `unix.close`） | R-net-01 |
+| `net.unix_close` | `effect fn unix_close(fd: Int) -> Unit` | Python `os.close` | 撤去（→ `io.close`） | R-net-01 |
 | `net.shm_create` | `effect fn shm_create(size: Int) -> Int` | Python `SharedMemory(create=True)` | 撤去（→ `unix.shm_create`） | R-net-01 |
 | `net.shm_resize` | `effect fn shm_resize(fd: Int, size: Int) -> Unit` | POSIX `ftruncate` | 撤去（→ `unix.shm_resize`） | R-net-01 |
 | `net.shm_write` | `effect fn shm_write(fd: Int, offset: Int, data: Bytes) -> Unit` | POSIX `pwrite` | 撤去（→ `unix.shm_write`） | R-net-01 |

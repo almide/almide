@@ -38,20 +38,20 @@
 
 | いまの関数 | リデザイン後 | 据え置き | 新規 | 改名 | 意味変更 | 撤去 |
 |---:|---:|---:|---:|---:|---:|---:|
-| 1001 | 1292 | 423 | 703 | 88 | 78 | 412 |
+| 1001 | 1289 | 411 | 705 | 88 | 85 | 417 |
 
 固定幅の数（`int8`〜`uint64`、`float32`・`float64`）は型ごとに 1 関数と数えます。
 
 ## 実体の数
 
-この一覧は、同じ protocol の関数を型ごとに 1 行と数えています（計 1,292 行）。[protocol の階層](protocol-view.md)で数え直すと、覚える名前はずっと少なくなります。
+この一覧は、同じ protocol の関数を型ごとに 1 行と数えています（計 1,289 行）。[protocol の階層](protocol-view.md)で数え直すと、覚える名前はずっと少なくなります。
 
 | 数え方 | 一覧の行 | 覚える名前 |
 |---|---:|---:|
-| protocol の要件（protocol ごとに 1 回） | 791 | 161 |
+| protocol の要件（protocol ごとに 1 回） | 796 | 166 |
 | 値の型だけが持つ関数 | 293 | 293 |
-| 値の型を持たないモジュール（`fs`・`http`・`math` など） | 208 | 208 |
-| 計 | 1292 | 662 |
+| 値の型を持たないモジュール（`fs`・`http`・`math` など） | 200 | 200 |
+| 計 | 1289 | 659 |
 
 ## モジュールごとの数
 
@@ -83,13 +83,13 @@
 | [`int32`](#int32) | 37 | 34 | 0 | 0 | 21 | [L2-sized-numbers.md](L2-sized-numbers.md) |
 | [`int64`](#int64) | 37 | 34 | 0 | 0 | 23 | [L2-sized-numbers.md](L2-sized-numbers.md) |
 | [`int8`](#int8) | 37 | 34 | 0 | 0 | 17 | [L2-sized-numbers.md](L2-sized-numbers.md) |
-| [`io`](#io) | 7 | 3 | 0 | 2 | 4 | [L2-io.md](L2-io.md) |
+| [`io`](#io) | 12 | 8 | 0 | 2 | 4 | [L2-io.md](L2-io.md) |
 | [`json`](#json) | 3 | 0 | 0 | 1 | 12 | [L2-json.md](L2-json.md) |
 | [`list`](#list) | 73 | 12 | 0 | 16 | 6 | [L2-list.md](L2-list.md) |
 | [`map`](#map) | 37 | 15 | 1 | 7 | 3 | [L2-map.md](L2-map.md) |
 | [`math`](#math) | 27 | 12 | 0 | 0 | 8 | [L2-math.md](L2-math.md) |
 | [`matrix`](#matrix) | 25 | 3 | 0 | 7 | 24 | [L2-matrix.md](L2-matrix.md) |
-| [`net`](#net) | 22 | 9 | 0 | 1 | 13 | [L2-net.md](L2-net.md) |
+| [`net`](#net) | 16 | 8 | 0 | 8 | 18 | [L2-net.md](L2-net.md) |
 | [`option`](#option) | 13 | 0 | 0 | 0 | 1 | [L2-option.md](L2-option.md) |
 | [`path`](#path) | 10 | 3 | 0 | 0 | 3 | [L2-path.md](L2-path.md) |
 | [`process`](#process) | 13 | 8 | 0 | 2 | 12 | [L2-process.md](L2-process.md) |
@@ -103,7 +103,7 @@
 | [`uint32`](#uint32) | 35 | 32 | 0 | 0 | 19 | [L2-sized-numbers.md](L2-sized-numbers.md) |
 | [`uint64`](#uint64) | 35 | 32 | 0 | 0 | 23 | [L2-sized-numbers.md](L2-sized-numbers.md) |
 | [`uint8`](#uint8) | 35 | 32 | 0 | 0 | 11 | [L2-sized-numbers.md](L2-sized-numbers.md) |
-| [`unix`](#unix)（新しいモジュール） | 12 | 12 | 0 | 0 | 0 | [L2-unix.md](L2-unix.md) |
+| [`unix`](#unix)（新しいモジュール） | 10 | 10 | 0 | 0 | 0 | [L2-unix.md](L2-unix.md) |
 | [`url`](#url) | 9 | 4 | 0 | 1 | 1 | [L2-url.md](L2-url.md) |
 | [`uuid`](#uuid)（新しいモジュール） | 7 | 7 | 0 | 0 | 0 | [L2-uuid.md](L2-uuid.md) |
 | [`value`](#value) | 29 | 14 | 1 | 0 | 5 | [L2-value.md](L2-value.md) |
@@ -1291,22 +1291,27 @@
 
 | 関数 | シグネチャ（リデザイン後） | 変化 | 案 |
 |---|---|---|---|
+| `close` | `effect fn io.close[H: Close](h: H) -> Unit` | 新規 | R-L0-44 |
 | `eprint` | `effect fn io.eprint(s: String) -> Unit` | 新規 | R-io-03 |
 | `print` | `effect fn io.print(s: String) -> Unit` |  |  |
+| `read` | `effect fn io.read[H: Read](h: H, max: Int) -> Bytes` | 新規 | R-L0-44 |
 | `read_all` | `effect fn io.read_all() -> String` |  |  |
-| `read_all_bytes` | `effect fn io.read_all_bytes() -> Bytes` | 新規 | R-io-04 |
-| `read_bytes` | `effect fn io.read_bytes(n: Int) -> Bytes` | 新規 | R-io-01 |
+| `read_exact` | `effect fn io.read_exact[H: Read](h: H, n: Int) -> Bytes` | 新規 | R-L0-44 |
 | `read_line` | `effect fn io.read_line() -> String?` | 意味変更: `-> String?` にする。唯一の 1 行読み | R-io-01 |
-| `write_bytes` | `effect fn io.write_bytes(data: Bytes) -> Unit` | 意味変更: `data: Bytes` にし、effect fn にする | R-io-01・R-io-02 |
+| `read_to_end` | `effect fn io.read_to_end[H: Read](h: H) -> Bytes` | 新規 | R-L0-44 |
+| `stderr` | `effect fn io.stderr() -> Stderr` | 新規 | R-io-05 |
+| `stdin` | `effect fn io.stdin() -> Stdin` | 新規 | R-io-05 |
+| `stdout` | `effect fn io.stdout() -> Stdout` | 新規 | R-io-05 |
+| `write` | `effect fn io.write[H: Write](h: H, data: Bytes) -> Unit` | 意味変更: `Write` の総称関数 `write(h, data)` にする。古い 1 引数の呼び出しは型エラー | R-L0-44・R-io-05 |
 
 撤去（4）:
 
 | 関数 | 代わり | 案 |
 |---|---|---|
-| `read_byte` | `read_bytes(1)` | R-io-01 |
+| `read_byte` | `io.read(io.stdin(), 1)` | R-io-01・R-io-05 |
 | `read_line_opt` | `read_line` | R-io-01 |
-| `read_n_bytes` | `read_bytes(n)` | R-io-01 |
-| `write` | `write_bytes` | R-io-01・R-io-02 |
+| `read_n_bytes` | `io.read(io.stdin(), n)` | R-io-01・R-io-05 |
+| `write_bytes` | `io.write(io.stdout(), data)` | R-io-01・R-io-02・R-io-05 |
 
 ## json
 
@@ -1596,26 +1601,20 @@
 | `is_loopback` | `fn net.is_loopback(ip: IpAddr) -> Bool` | 新規 | R-net-03 |
 | `lookup_host` | `effect fn net.lookup_host(host: String) -> List[IpAddr]` | 新規 | R-net-03 |
 | `parse_ip` | `fn net.parse_ip(s: String) -> Result[IpAddr, String]` | 新規 | R-net-03 |
-| `tcp_accept` | `effect fn net.tcp_accept(listener: Int) -> Int` |  |  |
-| `tcp_available` | `effect fn net.tcp_available(stream: Int) -> Int` |  |  |
-| `tcp_close` | `effect fn net.tcp_close(stream: Int) -> Unit` |  |  |
-| `tcp_close_listener` | `effect fn net.tcp_close_listener(listener: Int) -> Unit` |  |  |
-| `tcp_connect` | `effect fn net.tcp_connect(host: String, port: Int) -> Int` |  |  |
-| `tcp_is_open` | `effect fn net.tcp_is_open(stream: Int) -> Bool` | 意味変更: effect fn | R-net-04 |
-| `tcp_listen` | `effect fn net.tcp_listen(host: String, port: Int) -> Int` |  |  |
-| `tcp_local_port` | `effect fn net.tcp_local_port(listener: Int) -> Int` |  |  |
-| `tcp_read` | `effect fn net.tcp_read(stream: Int, len: Int) -> Bytes` |  |  |
-| `tcp_read_exact` | `effect fn net.tcp_read_exact(stream: Int, len: Int) -> Bytes` |  |  |
-| `tcp_read_timeout` | `effect fn net.tcp_read_timeout(stream: Int, len: Int, timeout_ms: Int) -> Bytes` |  |  |
-| `tcp_set_timeout` | `effect fn net.tcp_set_timeout(stream: Int, timeout_ms: Int) -> Unit` |  |  |
-| `tcp_write` | `effect fn net.tcp_write(stream: Int, data: Bytes) -> Unit` |  |  |
+| `tcp_accept` | `effect fn net.tcp_accept(listener: TcpListener) -> TcpStream` | 意味変更: 取っ手を `TcpStream`・`TcpListener` にする | R-net-05 |
+| `tcp_available` | `effect fn net.tcp_available(stream: TcpStream) -> Int` | 意味変更: 取っ手を `TcpStream`・`TcpListener` にする | R-net-05 |
+| `tcp_connect` | `effect fn net.tcp_connect(host: String, port: Int) -> TcpStream` | 意味変更: 取っ手を `TcpStream`・`TcpListener` にする | R-net-05 |
+| `tcp_is_open` | `effect fn net.tcp_is_open(stream: TcpStream) -> Bool` | 意味変更: effect fn にし、`stream: TcpStream` にする | R-net-04、R-net-05 |
+| `tcp_listen` | `effect fn net.tcp_listen(host: String, port: Int) -> TcpListener` | 意味変更: 取っ手を `TcpStream`・`TcpListener` にする | R-net-05 |
+| `tcp_local_port` | `effect fn net.tcp_local_port(listener: TcpListener) -> Int` | 意味変更: 取っ手を `TcpStream`・`TcpListener` にする | R-net-05 |
+| `tcp_read_timeout` | `effect fn net.tcp_read_timeout(stream: TcpStream, len: Int, timeout_ms: Int) -> Bytes` | 意味変更: 取っ手を `TcpStream`・`TcpListener` にする | R-net-05 |
+| `tcp_set_timeout` | `effect fn net.tcp_set_timeout(stream: TcpStream, timeout_ms: Int) -> Unit` | 意味変更: 取っ手を `TcpStream`・`TcpListener` にする | R-net-05 |
 | `udp_bind` | `effect fn net.udp_bind(host: String, port: Int) -> UdpSocket` | 新規 | R-net-02 |
-| `udp_close` | `effect fn net.udp_close(sock: UdpSocket) -> Unit` | 新規 | R-net-02 |
 | `udp_local_port` | `effect fn net.udp_local_port(sock: UdpSocket) -> Int` | 新規 | R-net-02 |
 | `udp_recv_from` | `effect fn net.udp_recv_from(sock: UdpSocket, max: Int) -> UdpPacket` | 新規。`UdpPacket` を返す | R-net-01、R-net-06 |
 | `udp_send_to` | `effect fn net.udp_send_to(sock: UdpSocket, data: Bytes, host: String, port: Int) -> Unit` | 新規 | R-net-02 |
 
-撤去（13）:
+撤去（18）:
 
 | 関数 | 代わり | 案 |
 |---|---|---|
@@ -1623,13 +1622,18 @@
 | `shm_read` | `unix.shm_read` | R-net-01 |
 | `shm_resize` | `unix.shm_resize` | R-net-01 |
 | `shm_write` | `unix.shm_write` | R-net-01 |
+| `tcp_close` | `io.close` | R-net-07 |
+| `tcp_close_listener` | `io.close` | R-net-07 |
+| `tcp_read` | `io.read` | R-net-07 |
+| `tcp_read_exact` | `io.read_exact` | R-net-07 |
+| `tcp_write` | `io.write` | R-net-07 |
 | `unix_accept` | `unix.accept` | R-net-01 |
-| `unix_close` | `unix.close` | R-net-01 |
+| `unix_close` | `io.close` | R-net-01 |
 | `unix_connect` | `unix.connect` | R-net-01 |
 | `unix_listen` | `unix.listen` | R-net-01 |
 | `unix_poll` | `unix.select([fd], t)` | R-net-01 |
-| `unix_recv` | `unix.read` | R-net-01 |
-| `unix_send` | `unix.write` | R-net-01 |
+| `unix_recv` | `io.read` | R-net-01 |
+| `unix_send` | `unix.write_fds` | R-net-01 |
 | `unix_take_fds` | `unix.take_fds` | R-net-01 |
 | `unix_wait` | `unix.select` | R-net-01 |
 
@@ -2219,17 +2223,15 @@
 | 関数 | シグネチャ（リデザイン後） | 変化 | 案 |
 |---|---|---|---|
 | `accept` | `effect fn unix.accept(listener: Fd) -> Fd` | 新規。移動 | R-unix-01 |
-| `close` | `effect fn unix.close(fd: Fd) -> Unit` | 新規。移動 | R-unix-01 |
 | `connect` | `effect fn unix.connect(path: String) -> Fd` | 新規。`net.unix_connect` から移動 | R-unix-01 |
 | `listen` | `effect fn unix.listen(path: String) -> Fd` | 新規。移動 | R-unix-01 |
-| `read` | `effect fn unix.read(sock: Fd, max: Int) -> Bytes` | 新規。移動 | R-unix-01、R-unix-03 |
 | `select` | `effect fn unix.select(xs: List[Fd], timeout_ms: Int) -> List[Fd]` | 新規。移動。`unix_poll` を吸収 | R-unix-01、R-unix-02 |
 | `shm_create` | `effect fn unix.shm_create(size: Int) -> Fd` | 新規。移動 | R-unix-01 |
 | `shm_read` | `effect fn unix.shm_read(fd: Fd, offset: Int, len: Int) -> Bytes` | 新規。移動 | R-unix-01 |
 | `shm_resize` | `effect fn unix.shm_resize(fd: Fd, size: Int) -> Unit` | 新規。移動 | R-unix-01 |
 | `shm_write` | `effect fn unix.shm_write(fd: Fd, offset: Int, data: Bytes) -> Unit` | 新規。移動 | R-unix-01 |
 | `take_fds` | `effect fn unix.take_fds(sock: Fd) -> List[Fd]` | 新規。移動 | R-unix-01 |
-| `write` | `effect fn unix.write(sock: Fd, data: Bytes, fds: List[Fd]) -> Unit` | 新規。移動 | R-unix-01、R-unix-03 |
+| `write_fds` | `effect fn unix.write_fds(sock: Fd, data: Bytes, fds: List[Fd]) -> Unit` | 新規。移動 | R-unix-01、R-unix-04 |
 
 ## url
 
@@ -2347,7 +2349,7 @@
 
 ## 採らなかった案・保留の案と理由
 
-レビューで同じ指摘を繰り返さないよう、いまも有効な × と保留の案（55 件）を理由の最初の 1〜2 文と一緒に載せます。全文は各ページの案にあります。
+レビューで同じ指摘を繰り返さないよう、いまも有効な × と保留の案（54 件）を理由の最初の 1〜2 文と一緒に載せます。全文は各ページの案にあります。
 
 | 案 | 内容 | 判定 | 理由 |
 |---|---|---|---|
@@ -2381,7 +2383,6 @@
 | [R-list-18](L2-list.md#r-list-18-listrepeat-を列全体の繰り返しにする---不採用) | `list.repeat` を列全体の繰り返しにする | × 不採用 | `string.repeat` と `bytes.repeat` は列全体を繰り返し、`list.repeat(v, n)` は 1 つの値を n 個並べます。 |
 | [R-map-04](L2-map.md#r-map-04-mapmap-を-map_values-に改名するまたはコールバックを-k-v-にする--保留六巡目に--から変更dojo-で測る) | `map.map` を `map_values` に改名する、またはコールバックを `(K, V)` にする | 保留（六巡目に × から変更。Dojo で測る） | 以前の理由は「間違えても型エラーになる」でしたが、R-L0-36 のとおり、それだけでは不採用の理由になりません。候補は 3 つ（いまの `map.map` の `(V)`、`map.map` を `(K, V)` にする、`map_values` に改名する）で、他言語も割れています（Swift・Kotlin `mapValues`、OCaml `map`（値）と `mapi`（キーと値）、Gleam `map_values`（キーと値））。 |
 | [R-map-05](L2-map.md#r-map-05-取り出して消す-pop合わせ方つきの-merge_withキーを変換する-map_keys-を足す---不採用) | 取り出して消す `pop`、合わせ方つきの `merge_with`、キーを変換する `map_keys` を足す | × 不採用 | R-L0-04（`pop` はその場で末尾から取る動詞）、L1 の追加基準（5/9 以上）、R-L0-00。 |
-| [R-net-05](L2-net.md#r-net-05-tcp-のハンドルを不透明な型にする---不採用) | TCP のハンドルを不透明な型にする | × 不採用 | ハンドルを `Int` の欄に持つレコードなど、正しく動いている利用者のコードをすべて書き換えさせることになり、ストリームと待ち受けを取り違えたという報告はまだありません。 |
 | [R-option-03](L2-option.md#r-option-03-抜けている役割の関数を足さない---不採用) | 抜けている役割の関数を足さない | × 不採用 | R-L0-00、R-L0-01、R-L0-06。 |
 | [R-random-04](L2-random.md#r-random-04-randomint-の-max--min-を-abort-にする---不採用) | `random.int` の `max < min` を abort にする | × 不採用 | 変えません。`max <= min` で `min` を返す規則は、失敗を隠す値ではなく、範囲が 1 点に潰れたときの決まった答えで、R-L0-06 の 4（失敗しうる構築・変換は番兵を返さない）の対象でもありません。 |
 | [R-random-06](L2-random.md#r-random-06-randomintmin-max-の上端を含むことを変える---不採用文書だけ) | `random.int(min, max)` の上端を含むことを変える | × 不採用（文書だけ） | 上端を含まない言語が多い（Go・Kotlin・OCaml・Gleam・Rust）ものの、同じ名前で意味を変えることは R-L0-14.4 が許しません。 |
@@ -2409,7 +2410,7 @@
 
 ## 後の案で判定を変えた案
 
-× や保留にしたあと、後の案で採用や置き換えに変えたもの（10 件）です。いま有効なのは右の列の案です。上の表には載せません。
+× や保留にしたあと、後の案で採用や置き換えに変えたもの（11 件）です。いま有効なのは右の列の案です。上の表には載せません。
 
 | 案 | 内容 | もとの判定 | いま有効な案 |
 |---|---|---|---|
@@ -2417,6 +2418,7 @@
 | [R-L0-21](L0-conventions.md#r-l0-21-無印の-to_型-をはみ出したら失敗する版に変える--保留--r-l0-32r-l0-34-で解消) | 無印の `to_<型>` を、はみ出したら失敗する版に変える | 保留 → R-L0-32・R-L0-34 で解消 | R-L0-32・R-L0-34 |
 | [R-hash-04](L2-hash.md#r-hash-04-_hex-のセルの入力を-bytes-に変える---不採用-r-hash-05-で採用に変更) | `_hex` のセルの入力を Bytes に変える | × 不採用（→ R-hash-05 で採用に変更） | R-hash-05 |
 | [R-http-07](L2-http.md#r-http-07-応答のヘッダの-get_header-と要求の-req_header-の不揃い---不採用規則を書く-r-http-12-で解消) | 応答のヘッダの `get_header` と要求の `req_header` の不揃い | × 不採用（規則を書く。→ R-http-12 で解消） | R-http-12 |
+| [R-io-04](L2-io.md#r-io-04-標準入力をバイト列で全部読む-ioread_all_bytes-を足す---取り消し十三巡目ioread_to_endiostdin-で書く--r-io-05) | 標準入力をバイト列で全部読む `io.read_all_bytes` を足す | × 取り消し（十三巡目。`io.read_to_end(io.stdin())` で書く → R-io-05） | R-io-05 |
 | [R-map-03](L2-map.md#r-map-03-mapto_list-を足す---不採用-r-map-07-で採用に変更) | `map.to_list` を足す | × 不採用（→ R-map-07 で採用に変更） | R-map-07 |
 | [R-matrix-07](L2-matrix.md#r-matrix-07-mul-を-matmul-に改名し要素ごとの積を足す---不採用-r-matrix-14-で--に置き換え) | `mul` を `matmul` に改名し、要素ごとの積を足す | × 不採用（→ R-matrix-14 で `*` に置き換え） | R-matrix-14 |
 | [R-sized-05](L2-sized-numbers.md#r-sized-05-固定幅のモジュールをまとめる算術関数を足す---不採用算術の部分は--r-sized-10-で見直し) | 固定幅のモジュールをまとめる・算術関数を足す | × 不採用（算術の部分は → R-sized-10 で見直し） | R-sized-10 |

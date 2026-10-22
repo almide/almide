@@ -6,13 +6,13 @@
 
 R-L0-37 のとおり、標準の具体型を「準拠する protocol の組み合わせ」と「その型だけの関数」で書き表します。protocol の階層は Swift の標準ライブラリを手本にし、Swift にない層は理由を書いて足しています。準拠と穴は、[target-surface.md](target-surface.md)（リデザイン後の関数）から機械的に出しています。
 
-- 値の型 31 種の関数 1,084 個のうち、791 個（72%）が protocol の要件です。残りの 293 個が、その型だけの関数です。
+- 値の型 37 種の関数 1,089 個のうち、796 個（73%）が protocol の要件です。残りの 293 個が、その型だけの関数です。
 - 準拠を決めると、要件のうちまだ無い関数が 0 個あります（穴）。既定の実装で埋まるものは数えていません。
 - 手本にした Swift の protocol は、表の「Swift」の列に書いています。
 
 ## 階層
 
-系統（土台・数・入れ物・分野）ごとの木です。下の protocol は上の protocol を含みます（継承）。ほかの系統の protocol も含むときは「＋」の後に書きます。
+系統（土台・数・入れ物・入出力・分野）ごとの木です。下の protocol は上の protocol を含みます（継承）。ほかの系統の protocol も含むときは「＋」の後に書きます。
 
 土台:
 
@@ -56,6 +56,14 @@ Sized
 └─ KeyValue
 ```
 
+入出力:
+
+```
+Read
+Write
+Close
+```
+
 分野:
 
 ```
@@ -93,6 +101,9 @@ HttpMessage
 | 入れ物 | `KeyValue` | `Sized` | `new`・`get`・`set`・`remove`・`contains`・`keys`・`values`・`update`・`upsert`・`merge` | — | Dictionary（具体型） | Map[K, V] |
 | 入れ物 | `PriorityQueue` | `Container` | `push`・`pop`・`peek` | — | Heap（swift-collections） | Heap[A] |
 | 入れ物 | `Text` | `Ordered` | `contains`・`starts_with`・`ends_with`・`index_of`・`last_index_of`・`count_matches`・`split`・`replace`・`replace_first`・`strip_prefix`・`strip_suffix`・`repeat`・`pad_start`・`pad_end` | — | StringProtocol | String・Bytes |
+| 入出力 | `Read` | — | `read`・`read_exact`・`read_to_end` | `read_exact`・`read_to_end` | — | TcpStream・Fd・Stdin |
+| 入出力 | `Write` | — | `write` | — | — | TcpStream・Fd・Stdout・Stderr |
+| 入出力 | `Close` | — | `close` | — | — | TcpStream・TcpListener・UdpSocket・Fd |
 | 分野 | `HttpMessage` | — | `header`・`header_values`・`headers`・`body`・`body_bytes`・`set_header`・`set_body`・`set_body_bytes` | — | — | HttpRequest・HttpResponse |
 
 注:
@@ -120,6 +131,9 @@ HttpMessage
 - `KeyValue`: `contains` はキーを受け取る。
 - `PriorityQueue`: Swift の `Heap` も `Sequence` ではない。
 - `Text`: 部分の列で探す。`contains` は部分の列を受け取るので、`Membership` とは同じ型に載せられない。
+- `Read`: R-L0-44。総称関数は `io` に 1 回だけ置く（`io.read[H: Read]`）。`read` は最大 `max` バイトで、相手が閉じたら空。
+- `Write`: R-L0-44。全部書く（Rust の `write_all`）。
+- `Close`: R-L0-44。2 回目も ok。
 - `HttpMessage`: R-http-12。
 
 ## 型ごとの準拠と穴
@@ -150,6 +164,12 @@ HttpMessage
 | `Matrix` | Repr・Eq | 25 | 25 | なし |
 | `Regex` | Repr | 15 | 15 | なし |
 | `HttpRequest・HttpResponse` | HttpMessage | 34 | 26 | なし |
+| `TcpStream` | Read・Write・Close | 0 | 0 | なし |
+| `TcpListener` | Close | 0 | 0 | なし |
+| `UdpSocket` | Close | 0 | 0 | なし |
+| `Fd` | Read・Write・Close | 0 | 0 | なし |
+| `Stdin` | Read | 0 | 0 | なし |
+| `Stdout・Stderr` | Write | 0 | 0 | なし |
 | `Int` | FixedWidthInteger・SignedInteger・Codec | 45 | 8 | なし |
 | `Int8` | FixedWidthInteger・SignedInteger・Codec | 37 | 0 | なし |
 | `Int16` | FixedWidthInteger・SignedInteger・Codec | 37 | 0 | なし |

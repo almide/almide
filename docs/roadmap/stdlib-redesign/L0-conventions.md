@@ -629,6 +629,29 @@ effect fn を呼んだときの型（`!` が要るか、`??` をそのまま書�
 - (d) 判定の規則の追加です。
 - issue: #4004
 
+## R-L0-44 入出力の protocol `Read`・`Write`・`Close` を置き、読み書きと閉じるを `io` の総称関数 1 組にする — ○ 採用
+
+- いま: 読む・書く・閉じるが、取っ手の種類ごとに別の名前です。TCP は `net.tcp_read`・`tcp_write`・`tcp_close`・`tcp_close_listener`（取っ手は素の `Int`）、Unix ソケットは `unix.read`・`unix.write`・`unix.close`（`unix.Fd`）、UDP は `net.udp_close`（`UdpSocket`）、標準入出力は `io.read_bytes`・`io.write_bytes`（取っ手なし）。[protocol の階層](protocol-view.md)に入出力の層がありません。
+- 案:
+  ```almide
+  protocol Read  { effect fn read(h: Self, max: Int) -> Bytes }      // 最大 max バイト。相手が閉じたら空
+  protocol Write { effect fn write(h: Self, data: Bytes) -> Unit }   // 全部書く（Rust の write_all）
+  protocol Close { effect fn close(h: Self) -> Unit }                // 2 回目も ok
+
+  effect fn io.read[H: Read](h: H, max: Int) -> Bytes
+  effect fn io.read_exact[H: Read](h: H, n: Int) -> Bytes            // 既定の実装。足りなければ err
+  effect fn io.read_to_end[H: Read](h: H) -> Bytes                   // 既定の実装。閉じるまで全部
+  effect fn io.write[H: Write](h: H, data: Bytes) -> Unit
+  effect fn io.close[H: Close](h: H) -> Unit
+  ```
+  - 準拠する型: `net.TcpStream`（`Read`・`Write`・`Close`）、`net.TcpListener`・`net.UdpSocket`（`Close`）、`unix.Fd`（`Read`・`Write`・`Close`）、`io.Stdin`（`Read`）、`io.Stdout`・`io.Stderr`（`Write`）。
+  - 総称関数は `io` に 1 回だけ置き、型ごとのモジュールには置きません（`http.header[M: HttpMessage]` と同じ形。R-http-12）。
+- (a) 6 言語が、取っ手の種類をまたいで読み書きを共通にしています: Rust（`Read`・`Write` の trait。`read_exact`・`read_to_end` は既定の実装）、Go（`io.Reader`・`Writer`・`Closer`、`io.ReadFull`・`io.ReadAll`）、Python（file-like object）、Elixir（IO device）、OCaml（channel）、Kotlin（`InputStream`・`OutputStream`・`Closeable`）。Swift の標準ライブラリには入出力の protocol がありません（Foundation の `FileHandle` は具体型）。階層の骨組みは Swift ですが、Swift にない層は多数派で足します（`Container` と同じ）。
+- 綴り: `read`・`write`・`close` は 9 言語の多数派です。`read_exact`・`read_to_end` は Rust の綴りです（Go は `ReadFull`・`ReadAll` ですが、`io.read_all()` はすでに標準入力をテキストで全部読む関数なので、同じ名前を 2 つの形に使えません）。
+- 名前の使い直し（R-L0-43 の 2）: `io.write` はいま標準出力に `Bytes` を書く 1 引数の関数で、R-io-01 で撤去が決まっています。新しい `io.write(h, data)` は 2 引数なので、古い `io.write(data)` は型エラーになり、黙って意味が変わりません。
+- (d) 撤去と追加です。内訳は L2-net R-net-07、L2-unix R-unix-04、L2-io R-io-05。
+- issue: #4015
+
 ## ゲートの束（R-L0-G） — ○ 採用
 
 R-L0-02、03、04、07、09、10、12、16 の検査を、1 つのテスト `tests/stdlib_surface_conventions_test.rs` にまとめます。入力は interface JSON（`mut` 欄つき）です。規則ごとの許容リストは、L2 の案で解消するたびに減らします。増やす方向には変えられません。

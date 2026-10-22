@@ -80,7 +80,7 @@
 - 完全性の規則: 出力は {stdout, stderr} × {改行あり, 改行なし} の 4 セル。改行ありは組み込み、改行なしは `io` です。
 - issue: #3974
 
-### R-io-04 標準入力をバイト列で全部読む `io.read_all_bytes` を足す — ○ 採用
+### R-io-04 標準入力をバイト列で全部読む `io.read_all_bytes` を足す — × 取り消し（十三巡目。`io.read_to_end(io.stdin())` で書く → R-io-05）
 
 - いま: `io.read_all() -> String`（全部をテキスト）と `io.read_bytes(n) -> Bytes`（最大 n バイト）。全部をバイト列で読む関数がありません。
 - 案: `effect fn io.read_all_bytes() -> Bytes`。
@@ -91,6 +91,24 @@
 - 完全性の規則: 標準入力の読みは {1 行 `read_line`, 全部テキスト `read_all`, 全部バイト `read_all_bytes`, 最大 n バイト `read_bytes`} です。
 - issue: #3974
 
+### R-io-05 標準入出力を取っ手にし、バイトの読み書きを `io.read`・`io.write` に一本化する — ○ 採用
+
+- 内容:
+  ```almide
+  type Stdin    // Read
+  type Stdout   // Write
+  type Stderr   // Write
+  effect fn stdin() -> Stdin
+  effect fn stdout() -> Stdout
+  effect fn stderr() -> Stderr
+  ```
+  - バイトの読み書きは、ほかの取っ手と同じ `io.read(io.stdin(), n)`・`io.read_to_end(io.stdin())`・`io.write(io.stdout(), data)` です（R-L0-44）。
+  - R-io-01 の `io.read_bytes` と R-io-04 の `io.read_all_bytes` は置きません。`io.write_bytes` は撤去します（→ `io.write(io.stdout(), data)`）。
+  - テキストの近道 `io.read_line`・`io.read_all`・`io.print`・`io.eprint` は残します。9 言語すべてが、取っ手を書かずに 1 行読む・文字列を書く近道を持っています（`readLine`・`print`）。
+- (a) 標準入力・出力が、ほかの取っ手と同じ読み書きの型に準拠するのは 6 言語です: Rust `io::stdin()`（`Read`）、Go `os.Stdin`（`io.Reader`）、Python `sys.stdin.buffer`、Elixir `:stdio`、OCaml `stdin`（channel）、Kotlin `System.in`（`InputStream`）。3 つの型に分けるのは Rust と同じで、標準入力に書く誤りが型エラーになります。
+- (d) `io.write_bytes` の撤去（R-io-01 で型も変わる予定だった）と追加。`almide fix` が `io.write_bytes(d)` を `io.write(io.stdout(), d)` に書き換えます。
+- issue: #4015
+
 ## L3: 関数表
 
 | 関数 | シグネチャ(現行, mut 表示) | 他言語の主な綴り | 判定 | 案 |
@@ -98,14 +116,19 @@
 | `io.read_line` | `effect fn read_line() -> String` | Swift `readLine` / Kotlin `readlnOrNull`(F) / OCaml `input_line` | 意味変更（`-> String?` にする。唯一の 1 行読み） | R-io-01 |
 | `io.read_line_opt` | `effect fn read_line_opt() -> String?` | 同上 | 撤去（→ `read_line`） | R-io-01 |
 | `io.read_all` | `effect fn read_all() -> String` | Rust `read_to_string` / Go `io.ReadAll` / OCaml `input_all` | 据え置き | — |
-| `io.read_byte` | `effect fn read_byte() -> Int` | Rust `read` / Python `read(1)` | 撤去（→ `read_bytes(1)`） | R-io-01 |
-| `io.read_n_bytes` | `effect fn read_n_bytes(n: Int) -> List[Int]` | Python `buffer.read(n)` / Elixir `binread(n)` | 撤去（→ `read_bytes(n)`） | R-io-01 |
-| `io.read_bytes` | `effect fn read_bytes(n: Int) -> Bytes`（案） | 同上 | 追加 | R-io-01 |
+| `io.read_byte` | `effect fn read_byte() -> Int` | Rust `read` / Python `read(1)` | 撤去（→ `io.read(io.stdin(), 1)`） | R-io-01・R-io-05 |
+| `io.read_n_bytes` | `effect fn read_n_bytes(n: Int) -> List[Int]` | Python `buffer.read(n)` / Elixir `binread(n)` | 撤去（→ `io.read(io.stdin(), n)`） | R-io-01・R-io-05 |
 | `io.print` | `effect fn print(s: String) -> Unit` | Rust `print!` / Go `fmt.Print` / Gleam `io.print` | 据え置き | — |
-| `io.write` | `fn write(data: Bytes) -> Unit` | Rust `write_all` / Go `Stdout.Write` / Elixir `binwrite` | 撤去（→ `write_bytes`） | R-io-01・R-io-02 |
-| `io.write_bytes` | `fn write_bytes(data: List[Int]) -> Unit` | Python `buffer.write` / Kotlin `writeBytes` | 意味変更（`data: Bytes` にし、effect fn にする） | R-io-01・R-io-02 |
+| `io.write` | `fn write(data: Bytes) -> Unit` | Rust `write_all` / Go `Stdout.Write` / Elixir `binwrite` | 意味変更（`Write` の総称関数 `write(h, data)` にする。古い 1 引数の呼び出しは型エラー） | R-L0-44・R-io-05 |
+| `io.write_bytes` | `fn write_bytes(data: List[Int]) -> Unit` | Python `buffer.write` / Kotlin `writeBytes` | 撤去（→ `io.write(io.stdout(), data)`） | R-io-01・R-io-02・R-io-05 |
 | `io.eprint` | `effect fn eprint(s: String) -> Unit`（案） | Rust `eprint!` (F) / Gleam `io.print_error` (F) / OCaml `prerr_string` | 追加 | R-io-03 |
-| `io.read_all_bytes` | `effect fn read_all_bytes() -> Bytes`（案） | Python `stdin.buffer.read()` (F) / Go `io.ReadAll(os.Stdin)` | 追加 | R-io-04 |
+| `io.stdin` | （追加）`effect fn io.stdin() -> Stdin` | Rust `io::stdin` / Go `os.Stdin` / Python `sys.stdin` | 追加 | R-io-05 |
+| `io.stdout` | （追加）`effect fn io.stdout() -> Stdout` | Rust `io::stdout` / Go `os.Stdout` / Python `sys.stdout` | 追加 | R-io-05 |
+| `io.stderr` | （追加）`effect fn io.stderr() -> Stderr` | Rust `io::stderr` / Go `os.Stderr` / Python `sys.stderr` | 追加 | R-io-05 |
+| `io.read` | （追加）`effect fn io.read[H: Read](h: H, max: Int) -> Bytes` | Rust `Read::read` / Go `Reader.Read` / Python `read(n)` | 追加 | R-L0-44 |
+| `io.read_exact` | （追加）`effect fn io.read_exact[H: Read](h: H, n: Int) -> Bytes` | Rust `read_exact` / Go `io.ReadFull` | 追加 | R-L0-44 |
+| `io.read_to_end` | （追加）`effect fn io.read_to_end[H: Read](h: H) -> Bytes` | Rust `read_to_end` / Go `io.ReadAll` / Python `read()` | 追加 | R-L0-44 |
+| `io.close` | （追加）`effect fn io.close[H: Close](h: H) -> Unit` | Rust（drop）/ Go `Closer.Close` / Python `close` | 追加 | R-L0-44 |
 
 ## L0 への差し戻し（処理済み）
 
