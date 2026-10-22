@@ -317,6 +317,16 @@
 - 理由: `set(b, i, v) -> Bytes` はコピーを返す関数、`put_u8(mut b, pos, v)` はその場で書き換える関数で、R-L0-04（コピーが既定、その場書き換えは決まった動詞）の対です。`list.set` もコピーです。
 - issue: なし
 
+### R-bytes-25 型つきの読み書きの行列に `get_u8`・`append_u8` を戻す — ○ 採用（R-bytes-02 の一部を見直し）
+
+- いま: 型つきの読み書きの族は {`get_`, `put_`, `next_`, `append_`} × {型} ですが、`u8` の列だけ `get_u8` と `append_u8` がありません（`get_i8`・`put_u8`・`next_u8` はあります）。R-bytes-02 で `append_u8` を `push` に、R-bytes-09 で `get_u8` を `get` に寄せたためです。3 つの外部レビューが続けて族の穴として挙げました。
+- 案: `fn bytes.get_u8(b: Bytes, pos: Int) -> Int?` を足し、`append_u8` を撤去せずに残します。`bytes.get`・`bytes.push` は入れ物としての読み書き（`list.get`・`list.push` と同じ形）として残します。
+  - 同じ計算が 2 つの名前を持ちますが、2 つの族（入れ物の族と、型つきの読み書きの族）のそれぞれのセルです。CLAUDE.md の「族は行列で揃える」を、R-L0-01（同義語を置かない）より先に当てます。
+- (a) Go `binary.LittleEndian` と JS `DataView` の `getUint8`、OCaml `Bytes.get_uint8`。
+- (d) 追加 1、撤去の取り消し 1。
+- 完全性の規則: 型つきの読み書きの 4 つの動詞は、`u8` を含むすべての型の列を持ちます。
+- issue: #3991
+
 ## L3: 関数表
 
 （146 関数 + 追加 13。判定の内訳: 据え置き 58・改名 53・撤去 31・意味変更 4・追加 13。改名の `put_` 15 件は、R-bytes-11 で範囲外の挙動も変わります）
@@ -337,7 +347,7 @@
 | `append_u16_le` | `bytes.append_u16_le(mut b: Bytes, val: Int) -> Unit` | Go AppendUint16 (F) / Rust extend_from_slice(&x.to_le_bytes()) | 据え置き | — |
 | `append_u32_be` | `bytes.append_u32_be(mut b: Bytes, val: Int) -> Unit` | Go AppendUint32 (F) / Rust extend_from_slice(&x.to_be_bytes()) | 据え置き | — |
 | `append_u32_le` | `bytes.append_u32_le(mut b: Bytes, val: Int) -> Unit` | Go AppendUint32 (F) / Rust extend_from_slice(&x.to_le_bytes()) | 据え置き | — |
-| `append_u8` | `bytes.append_u8(mut b: Bytes, val: Int) -> Unit` | Rust push / Python append / Go append(b, x) | 撤去 → `push` | R-bytes-02 |
+| `append_u8` | `bytes.append_u8(mut b: Bytes, val: Int) -> Unit` | Rust push / Python append / Go append(b, x) | 据え置き | R-bytes-25 |
 | `as_mut_ptr` | `bytes.as_mut_ptr(b: Bytes) -> RawPtr` | Rust as_mut_ptr | 撤去 → `ffi.address` | R-bytes-06 |
 | `as_ptr` | `bytes.as_ptr(b: Bytes) -> RawPtr` | Rust as_ptr / Go unsafe.SliceData | 撤去 → `ffi.address` | R-bytes-06 |
 | `chunks` | `bytes.chunks(b: Bytes, size: Int) -> List[Bytes]` | Rust chunks / Kotlin chunked / Almide list.chunk | 改名 → `chunk` | R-bytes-08 |
@@ -497,6 +507,7 @@
 | `first` | （追加）`bytes.first(b: Bytes) -> Option[Int]` | Rust first / Swift first | 追加 | R-bytes-20 |
 | `last` | （追加）`bytes.last(b: Bytes) -> Option[Int]` | Rust last / Swift last | 追加 | R-bytes-20 |
 | `pop` | （追加）`bytes.pop(mut b: Bytes) -> Option[Int]` | Rust Vec::pop / Python bytearray.pop | 追加 | R-bytes-20 |
+| `get_u8` | （追加）`bytes.get_u8(b: Bytes, pos: Int) -> Option[Int]` | Go `LittleEndian.Uint8` / JS `getUint8` / OCaml `get_uint8` | 追加 | R-bytes-25 |
 
 ## L0 への差し戻し（処理済み）
 

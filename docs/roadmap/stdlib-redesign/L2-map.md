@@ -176,6 +176,15 @@ map.merge(a, b)             // 同じキーは b が勝つ。順序は a、そ�
 - ゲート案: R-L0-07 のゲートに「`from_list` と `to_list` の組がそろっている」を足し、往復の性質テストを list 以外の入れ物すべてに置きます。
 - issue: #3969
 
+### R-map-08 `map.update` はキーが無ければ abort — ○ 採用
+
+- いま: キーが無ければ何もせず、同じ map を返します（実測 `almide 0.68.0 dev 437b8f127`）。`list.update` は添字が無ければ abort で、同じ「既存の要素を書き換える」役割から、無いときの動きを読めません。
+- 案: キーが無ければ abort にします。無ければ作る役割は `upsert`、あるか分からないときは `map.contains` で確かめるか `upsert` を使います。
+- 根拠の L0 規則: R-L0-33（既存の要素を書き換える役割は abort）、R-L0-06 の 3。
+- (a) Elixir `Map.update!` は無ければ例外、Kotlin `getValue` も例外。Rust の `entry().and_modify` は何もしない側ですが、名前に「and」があり、無いときの分岐が書いた形から見えます。
+- (d) 意味変更。いまは何もせずに返している呼び出しが abort になるので、epoch 15 の `breaks` に入れます。
+- issue: #3990
+
 ## L3: 関数表
 
 使用数は 判定が据え置き以外の行だけに書いています（R-map-01、R-map-02 を参照）。
@@ -202,7 +211,7 @@ map.merge(a, b)             // 同じキーは b が勝つ。順序は a、そ�
 | `map.all` | `map.all(m: Map[K, V], f: (K, V) -> Bool) -> Bool` | Kotlin `all` / OCaml `for_all` / Rust `iter().all` | 据え置き | R-map-06 |
 | `map.count` | `map.count(m: Map[K, V], f: (K, V) -> Bool) -> Int` | Kotlin `count` / Elixir `Enum.count/2` | 据え置き | R-map-06 |
 | `map.find` | `map.find(m: Map[K, V], f: (K, V) -> Bool) -> Option[(K, V)]` | Rust `iter().find` / Elixir `Enum.find` / Swift `first(where:)` | 据え置き | R-map-06 |
-| `map.update` | `map.update(m: Map[K, V], key: K, f: (V) -> V) -> Map[K, V]` | Rust `entry().and_modify` / OCaml `update` / Elixir `update!`（無ければ例外） | 据え置き | — |
+| `map.update` | `map.update(m: Map[K, V], key: K, f: (V) -> V) -> Map[K, V]` | Rust `entry().and_modify` / OCaml `update` / Elixir `update!`（無ければ例外） | 意味変更（キーが無ければ abort） | R-map-08 |
 | `map.upsert` | `map.upsert(m: Map[K, V], key: K, init: V, f: (V) -> V) -> Map[K, V]` | Elixir `update/4`（同じ意味）/ Rust `entry().and_modify(f).or_insert(v)` / Gleam `upsert`（`fn(Option(v))`） | 据え置き | — |
 | `map.insert` | `map.insert(mut m: Map[K, V], key: K, value: V) -> Unit` | Rust `insert` / JS `set` / Python `d[k] = v`（どれも in-place） | 撤去 | R-map-01 |
 | `map.delete` | `map.delete(mut m: Map[K, V], key: K) -> Unit` | Rust `remove` / JS `delete` / Go `delete`（in-place） | 撤去 | R-map-01 |

@@ -6,7 +6,7 @@
 
 採用した案（○）をすべて適用したあとの、標準ライブラリの公開関数の一覧です。各 L2 ページの L3 関数表から機械的に組み立てています。表と食い違うときは、L3 の表と L2 の案が正です。
 
-- 保留の案（R-L0-20・R-L0-21・zlib の出力の一致）は適用していません。いまの形のままです。
+- 保留の案（R-L0-20・R-L0-21・zlib の出力の一致など）は適用していません。いまの形のままです。採らなかった案と保留の案は、理由と一緒に最後の表にまとめています。
 - シグネチャは `fn モジュール.名前(引数) -> 戻り型` の形にそろえています。`mut` はその場で書き換える引数、`T?` は `Option[T]` です（R-L0-24 の正規の綴り）。`effect fn` の戻り型は、docs/stdlib と同じく成功したときの型で書きます（失敗は `String` の err で、呼び出し側は `!` で伝搬します）。effect でない関数が失敗を返すときは `Result[T, String]` と書きます。
 - 「変化」の列: 空欄は据え置き、新規は追加、改名は旧名つき、意味変更は何が変わるかを書きます。撤去した関数は、各モジュールの最後に移行先と一緒に載せます。
 - 移行の扱いはすべて R-L0-14 のとおりです（epoch 15 で `@deprecated`、epoch 16 で撤去、`almide fix` かヒントで移行）。
@@ -18,26 +18,27 @@
 | 約束 | 中身 | 根拠 |
 |---|---|---|
 | 文字列の位置 | `string` の位置・長さ（`len`・`get`・`slice`・`index_of`）と `regex.index_of` は、どれもコードポイント単位です。バイト単位は `byte_` で始まる関数（`byte_len`・`byte_slice`）だけです。 | L2-string、L2-regex |
-| `Float` の順序 | `float.compare`（`float32`・`float64` も）と、`list.sort`・`binary_search`・`heap` の既定の順序は、IEEE 754 の totalOrder です（`-0.0 < 0.0`、NaN は正の無限大より大きい）。`<` 演算子だけは NaN との比較が false です。 | L2-float 完全性の規則 4 |
+| `Float` の順序 | `float.compare`（`float32`・`float64` も）と、`list.sort`・`binary_search`・`heap` の既定の順序は、IEEE 754 の totalOrder です（`-0.0 < 0.0`）。NaN は 1 つの値（`0x7ff8000000000000`）にそろえるので、NaN は正の無限大より大きく、NaN どうしは等しい、が正確に成り立ちます。そのかわり NaN のビットは往復しません（どの NaN を読んでも、書き出すとこの値です）。`<` 演算子だけは NaN との比較が false です。 | R-float-09、L2-float 完全性の規則 |
 | `Map`・`Set` の走査順 | 入れた順です（同じキーを上書きしても位置は変わりません）。native と wasm で同じです。 | 契約台帳（Map・Set の挿入順） |
 | 数学関数の値 | `math` の超越関数は、libm に任せず Almide で書いた同じ実装を両 target で通し、ビット単位で同じ値を返します。NaN は 1 つの決まった値です。 | ADR-0016、L2-math |
 | `_checked` の変換 | 結果が元の値と正確に等しいときだけ some です。範囲外、小数部の切り捨て、精度の損失はどれも none です（`float.to_int32_checked(1.5)` も `int.to_float32_checked(16777217)` も none）。 | R-L0-28 |
 | `next_` の none | 値が none のときは、受け取った状態（読み位置・乱数の状態）をそのまま返します。 | R-L0-27 |
-| 文字列の本文 | `http.body`・`req_body` は、不正な UTF-8 を置換文字にして読みます。正確なバイトは `body_bytes`・`req_body_bytes` です。 | R-http-11 |
+| 文字列の本文 | `http.body` は、不正な UTF-8 を置換文字にして読みます（要求でも応答でも）。正確なバイトは `body_bytes` です。 | R-http-11、R-http-12 |
 | `heap` の向き | 既定（`heap.new`・`from_list`）は最小が先です。最大を先にするときは `new_with` か `new_by` で順序を渡します。`heap.to_list` は `pop` を繰り返したのと同じ順で、同じ順位は入れた順です。 | L2-heap、R-L1-02 |
 | `Matrix` の演算子 | `+`・`-`・`/`・単項 `-` は要素ごと、`*` は行列の積です（要素ごとの積は `matrix.zip_with`）。形が合わなければ abort です。 | R-matrix-14、L2-matrix |
 | `min_value` | 整数の `min_value` は最も小さい値です。浮動小数点の `min_value` は Rust の `MIN` と同じ「最も小さい有限の値」（`-max_value()`）で、Java・Kotlin の「最小の正の値」ではありません。 | L2-float 完全性の規則 2 |
-| 整数の端 | `int.bshl`・`bshr` のシフト量は 64 で割った余りです（`bshl(1, 64)` は 1）。`int.abs(int.min_value())` は `min_value` のままです（折り返し）。無印の `float.to_<整数>` は端に張り付き、NaN は 0 です。整数どうしの無印 `to_<型>` は折り返します（R-L0-08）。どれも両 target で同じです。 | 実測 `0.68.0 dev 437b8f127`、R-L0-08 |
-| `map.update` | キーが無ければ何もせず、同じ map を返します。無いときに作るなら `upsert` です。 | 実測 |
+| 整数の端 | `int.bshl`・`bshr` のシフト量は 64 で割った余りです（`bshl(1, 64)` は 1）。`int.abs(int.min_value())` は `min_value` のままです（折り返し）。無印の狭める変換 `to_<型>` は、結果の型で表せない値（範囲外、NaN）で abort します。入力が整数でも浮動小数点でも同じです。端に張り付かせるなら `_saturating`、折り返すなら `int.wrap(x, bits)`、無ければ none にするなら `_checked` です。 | R-L0-32、R-L0-08 |
+| `map.update` | キーが無ければ abort です（`list.update` の範囲外と同じ）。無いときに作るなら `upsert`、あるか分からないなら `map.contains` で確かめます。 | R-map-08 |
 | 改行 | `io.print`・`io.eprint` は改行を付けません。付けるのは組み込みの `println`・`eprintln` です。 | L2-io |
-| 範囲のはみ出し | 位置や長さが範囲を超えたら丸めます（`list.slice(xs, -3, n)` の負の開始は 0 になります）。添字 1 つを書き換える関数と、形を前提にする関数は abort です。負の位置を abort にする案は R-L0-29 で保留しています。 | R-L0-12、R-L0-29 |
-| `zlib` の圧縮 | 圧縮の出力は native と wasm で違います（往復だけを約束します）。そのため圧縮の関数は effect のままです。出力の一致は保留です。 | R-zlib-03（保留） |
+| 共通のプロトコル | 同じ形の関数を持つ型の組は、プロトコルで宣言しています。`TimeAmount`（`Duration`・`Compute`）、`HttpMessage`（`HttpRequest`・`HttpResponse`）、`Integer`（`int` とサイズつきの整数 8 型）、`FloatingPoint`（`float`・`float32`・`float64`）、`Sized`（7 つの入れ物の `len`・`is_empty`）。組のどの型にも同じ名前の関数があります。 | R-L0-31 |
+| 範囲外の扱い | 関数の役割で決まります。範囲を取り出す関数（`slice`・`take`・`drop` など）は、長さを超えた分を丸め、負の位置・負の数は abort です。位置の 1 つを読む関数（`get`・`first`・`bytes.get_*`・`next_*`）は none です。位置の 1 つを書く関数（`set`・`update`・`insert`・`remove_at`・`bytes.put_*`）と、形を前提にする関数（`matrix` の演算、`bytes.xor`、`chunk(0)`）は abort です。 | R-L0-33、R-L0-29 |
+| `zlib` の圧縮 | 圧縮した出力のバイト列は native と wasm で違います。これは「両 target で同じ結果」の約束がまだ果たせていない箇所で、`effect` を付けているのは目印にすぎず、解決ではありません。同じ実装に替えたときの速さと圧縮率を測ってから決めます。往復（圧縮して戻す）は両 target で同じです。 | R-zlib-03（保留、未達） |
 
 ## 全体の数
 
 | いまの関数 | リデザイン後 | 据え置き | 新規 | 改名 | 意味変更 | 撤去 |
 |---:|---:|---:|---:|---:|---:|---:|
-| 1001 | 1143 | 659 | 340 | 81 | 63 | 198 |
+| 1001 | 1202 | 591 | 392 | 82 | 137 | 191 |
 
 固定幅の数（`int8`〜`uint64`、`float32`・`float64`）は型ごとに 1 関数と数えます。
 
@@ -49,7 +50,7 @@
 | [`base64`](#base64) | 4 | 0 | 0 | 2 | 0 | [L2-base64.md](L2-base64.md) |
 | [`bigint`](#bigint)（新しいモジュール） | 23 | 23 | 0 | 0 | 0 | [L2-bigint.md](L2-bigint.md) |
 | [`bool`](#bool) | 1 | 1 | 0 | 0 | 0 | [L2-bool.md](L2-bool.md) |
-| [`bytes`](#bytes) | 139 | 26 | 71 | 6 | 35 | [L2-bytes.md](L2-bytes.md) |
+| [`bytes`](#bytes) | 141 | 27 | 71 | 6 | 34 | [L2-bytes.md](L2-bytes.md) |
 | [`compute`](#compute) | 7 | 1 | 0 | 0 | 0 | [L2-compute.md](L2-compute.md) |
 | [`datetime`](#datetime) | 18 | 1 | 0 | 1 | 5 | [L2-datetime.md](L2-datetime.md) |
 | [`deque`](#deque)（新しいモジュール） | 21 | 21 | 0 | 0 | 0 | [L2-deque.md](L2-deque.md) |
@@ -57,24 +58,24 @@
 | [`env`](#env) | 8 | 2 | 0 | 0 | 3 | [L2-env.md](L2-env.md) |
 | `error`（モジュールごと撤去） | 0 | 0 | 0 | 0 | 3 | [L2-error.md](L2-error.md) |
 | [`ffi`](#ffi)（新しいモジュール） | 4 | 4 | 0 | 0 | 0 | [L2-ffi.md](L2-ffi.md) |
-| [`float`](#float) | 45 | 11 | 1 | 0 | 12 | [L2-float.md](L2-float.md) |
-| [`float32`](#float32) | 30 | 20 | 0 | 0 | 0 | [L2-sized-numbers.md](L2-sized-numbers.md) |
-| [`float64`](#float64) | 31 | 21 | 0 | 0 | 0 | [L2-sized-numbers.md](L2-sized-numbers.md) |
+| [`float`](#float) | 54 | 12 | 1 | 9 | 4 | [L2-float.md](L2-float.md) |
+| [`float32`](#float32) | 44 | 34 | 0 | 8 | 0 | [L2-sized-numbers.md](L2-sized-numbers.md) |
+| [`float64`](#float64) | 45 | 35 | 0 | 8 | 0 | [L2-sized-numbers.md](L2-sized-numbers.md) |
 | [`fs`](#fs) | 30 | 1 | 2 | 3 | 5 | [L2-fs.md](L2-fs.md) |
 | [`hash`](#hash) | 11 | 8 | 0 | 2 | 1 | [L2-hash.md](L2-hash.md) |
 | [`heap`](#heap)（新しいモジュール） | 16 | 16 | 0 | 0 | 0 | [L2-heap.md](L2-heap.md) |
 | [`hex`](#hex) | 3 | 0 | 0 | 0 | 0 | [L2-hex.md](L2-hex.md) |
 | [`html`](#html) | 5 | 0 | 0 | 0 | 0 | [L2-html.md](L2-html.md) |
-| [`http`](#http) | 39 | 6 | 2 | 7 | 15 | [L2-http.md](L2-http.md) |
-| [`int`](#int) | 70 | 13 | 1 | 2 | 15 | [L2-int.md](L2-int.md) |
-| [`int16`](#int16) | 28 | 6 | 0 | 0 | 0 | [L2-sized-numbers.md](L2-sized-numbers.md) |
-| [`int32`](#int32) | 31 | 7 | 0 | 0 | 0 | [L2-sized-numbers.md](L2-sized-numbers.md) |
-| [`int64`](#int64) | 35 | 9 | 0 | 0 | 0 | [L2-sized-numbers.md](L2-sized-numbers.md) |
-| [`int8`](#int8) | 26 | 6 | 0 | 0 | 0 | [L2-sized-numbers.md](L2-sized-numbers.md) |
+| [`http`](#http) | 35 | 4 | 3 | 10 | 17 | [L2-http.md](L2-http.md) |
+| [`int`](#int) | 70 | 13 | 1 | 9 | 15 | [L2-int.md](L2-int.md) |
+| [`int16`](#int16) | 31 | 9 | 0 | 5 | 0 | [L2-sized-numbers.md](L2-sized-numbers.md) |
+| [`int32`](#int32) | 34 | 10 | 0 | 6 | 0 | [L2-sized-numbers.md](L2-sized-numbers.md) |
+| [`int64`](#int64) | 38 | 12 | 0 | 7 | 0 | [L2-sized-numbers.md](L2-sized-numbers.md) |
+| [`int8`](#int8) | 29 | 9 | 0 | 4 | 0 | [L2-sized-numbers.md](L2-sized-numbers.md) |
 | [`io`](#io) | 7 | 3 | 0 | 2 | 4 | [L2-io.md](L2-io.md) |
 | [`json`](#json) | 3 | 0 | 0 | 1 | 12 | [L2-json.md](L2-json.md) |
 | [`list`](#list) | 70 | 9 | 0 | 12 | 6 | [L2-list.md](L2-list.md) |
-| [`map`](#map) | 22 | 0 | 1 | 0 | 3 | [L2-map.md](L2-map.md) |
+| [`map`](#map) | 22 | 0 | 1 | 1 | 3 | [L2-map.md](L2-map.md) |
 | [`math`](#math) | 27 | 12 | 0 | 0 | 8 | [L2-math.md](L2-math.md) |
 | [`matrix`](#matrix) | 25 | 3 | 0 | 7 | 24 | [L2-matrix.md](L2-matrix.md) |
 | [`net`](#net) | 22 | 9 | 0 | 1 | 13 | [L2-net.md](L2-net.md) |
@@ -87,10 +88,10 @@
 | [`set`](#set) | 22 | 3 | 0 | 0 | 0 | [L2-set.md](L2-set.md) |
 | [`string`](#string) | 49 | 4 | 1 | 2 | 5 | [L2-string.md](L2-string.md) |
 | [`testing`](#testing) | 10 | 0 | 0 | 2 | 0 | [L2-testing.md](L2-testing.md) |
-| [`uint16`](#uint16) | 24 | 6 | 0 | 0 | 0 | [L2-sized-numbers.md](L2-sized-numbers.md) |
-| [`uint32`](#uint32) | 29 | 7 | 0 | 0 | 0 | [L2-sized-numbers.md](L2-sized-numbers.md) |
-| [`uint64`](#uint64) | 38 | 12 | 0 | 0 | 0 | [L2-sized-numbers.md](L2-sized-numbers.md) |
-| [`uint8`](#uint8) | 20 | 6 | 0 | 0 | 0 | [L2-sized-numbers.md](L2-sized-numbers.md) |
+| [`uint16`](#uint16) | 27 | 9 | 0 | 3 | 0 | [L2-sized-numbers.md](L2-sized-numbers.md) |
+| [`uint32`](#uint32) | 32 | 10 | 0 | 5 | 0 | [L2-sized-numbers.md](L2-sized-numbers.md) |
+| [`uint64`](#uint64) | 41 | 15 | 0 | 7 | 0 | [L2-sized-numbers.md](L2-sized-numbers.md) |
+| [`uint8`](#uint8) | 23 | 9 | 0 | 1 | 0 | [L2-sized-numbers.md](L2-sized-numbers.md) |
 | [`unix`](#unix)（新しいモジュール） | 12 | 12 | 0 | 0 | 0 | [L2-unix.md](L2-unix.md) |
 | [`url`](#url) | 9 | 4 | 0 | 1 | 1 | [L2-url.md](L2-url.md) |
 | [`uuid`](#uuid)（新しいモジュール） | 7 | 7 | 0 | 0 | 0 | [L2-uuid.md](L2-uuid.md) |
@@ -134,19 +135,19 @@
 
 | 関数 | シグネチャ（リデザイン後） | 変化 | 案 |
 |---|---|---|---|
-| `abs` | `fn bigint.abs(a: BigInt) -> BigInt` | 新規 | R-bigint-01 |
+| `abs` | `fn bigint.abs(x: BigInt) -> BigInt` | 新規 | R-bigint-01 |
 | `clamp` | `fn bigint.clamp(x: BigInt, lo: BigInt, hi: BigInt) -> BigInt` | 新規 | R-bigint-05 |
 | `compare` | `fn bigint.compare(a: BigInt, b: BigInt) -> Int` | 新規 | R-bigint-01 |
 | `floor_div` | `fn bigint.floor_div(a: BigInt, b: BigInt) -> BigInt` | 新規 | R-bigint-01（R-int-03 と同じ綴り） |
-| `is_even` | `fn bigint.is_even(a: BigInt) -> Bool` | 新規 | R-bigint-01（`int.is_even` と同じ綴り） |
-| `is_odd` | `fn bigint.is_odd(a: BigInt) -> Bool` | 新規 | R-bigint-01 |
+| `is_even` | `fn bigint.is_even(x: BigInt) -> Bool` | 新規 | R-bigint-01（`int.is_even` と同じ綴り） |
+| `is_odd` | `fn bigint.is_odd(x: BigInt) -> Bool` | 新規 | R-bigint-01 |
 | `max` | `fn bigint.max(a: BigInt, b: BigInt) -> BigInt` | 新規 | R-bigint-01 |
 | `min` | `fn bigint.min(a: BigInt, b: BigInt) -> BigInt` | 新規 | R-bigint-01 |
 | `mod` | `fn bigint.mod(a: BigInt, b: BigInt) -> BigInt` | 新規 | R-bigint-01（R-int-03 と同じ綴り） |
 | `parse` | `fn bigint.parse(s: String) -> Result[BigInt, String]` | 新規 | R-bigint-01 |
 | `parse_radix` | `fn bigint.parse_radix(s: String, radix: Int) -> Result[BigInt, String]` | 新規 | R-bigint-01 |
 | `pow` | `fn bigint.pow(base: BigInt, exp: Int) -> BigInt` | 新規 | R-bigint-01 |
-| `sign` | `fn bigint.sign(a: BigInt) -> Int` | 新規 | R-bigint-01 |
+| `sign` | `fn bigint.sign(x: BigInt) -> Int` | 新規 | R-bigint-01 |
 | `to_float` | `fn bigint.to_float(x: BigInt) -> Float` | 新規 | R-bigint-01 |
 | `to_float_checked` | `fn bigint.to_float_checked(x: BigInt) -> Float?` | 新規 | R-bigint-01 |
 | `to_int` | `fn bigint.to_int(x: BigInt) -> Int` | 新規 | R-bigint-01 |
@@ -193,9 +194,10 @@
 | `append_u16_le` | `fn bytes.append_u16_le(mut b: Bytes, x: Int) -> Unit` |  |  |
 | `append_u32_be` | `fn bytes.append_u32_be(mut b: Bytes, x: Int) -> Unit` |  |  |
 | `append_u32_le` | `fn bytes.append_u32_le(mut b: Bytes, x: Int) -> Unit` |  |  |
+| `append_u8` | `fn bytes.append_u8(mut b: Bytes, x: Int) -> Unit` |  | R-bytes-25 |
 | `chunk` | `fn bytes.chunk(b: Bytes, size: Int) -> List[Bytes]` | 改名（旧 `chunks`） | R-bytes-08 |
 | `clear` | `fn bytes.clear(mut b: Bytes) -> Unit` |  |  |
-| `compare` | `fn bytes.compare(b: Bytes, b: Bytes) -> Int` | 改名（旧 `cmp`） | R-bytes-08 |
+| `compare` | `fn bytes.compare(a: Bytes, b: Bytes) -> Int` | 改名（旧 `cmp`） | R-bytes-08 |
 | `contains` | `fn bytes.contains(b: Bytes, pattern: Bytes) -> Bool` |  |  |
 | `copy_from` | `fn bytes.copy_from(mut b: Bytes, src: Bytes, dst_off: Int, src_off: Int, len: Int) -> Unit` |  |  |
 | `copy_within` | `fn bytes.copy_within(mut b: Bytes, src_start: Int, src_end: Int, dst: Int) -> Unit` |  |  |
@@ -245,6 +247,7 @@
 | `get_u32_be_array` | `fn bytes.get_u32_be_array(b: Bytes, pos: Int, count: Int) -> List[Int]?` | 改名（旧 `read_u32_be_array`）。範囲外は 0 ではなく none | R-bytes-09 |
 | `get_u32_le` | `fn bytes.get_u32_le(b: Bytes, pos: Int) -> Int?` | 改名（旧 `read_u32_le`）。範囲外は 0 ではなく none | R-bytes-09 |
 | `get_u32_le_array` | `fn bytes.get_u32_le_array(b: Bytes, pos: Int, count: Int) -> List[Int]?` | 改名（旧 `read_u32_le_array`）。範囲外は 0 ではなく none | R-bytes-09 |
+| `get_u8` | `fn bytes.get_u8(b: Bytes, pos: Int) -> Int?` | 新規 | R-bytes-25 |
 | `index_of` | `fn bytes.index_of(b: Bytes, pattern: Bytes) -> Int?` |  |  |
 | `insert` | `fn bytes.insert(b: Bytes, i: Int, x: Int) -> Bytes` | 意味変更: `0..=len` の外は abort | R-bytes-11 |
 | `is_empty` | `fn bytes.is_empty(b: Bytes) -> Bool` |  |  |
@@ -310,13 +313,12 @@
 | `to_list` | `fn bytes.to_list(b: Bytes) -> List[Int]` |  |  |
 | `to_string` | `fn bytes.to_string(b: Bytes) -> Result[String, String]` |  | R-bytes-10 |
 | `to_string_lossy` | `fn bytes.to_string_lossy(b: Bytes) -> String` |  | R-bytes-10 |
-| `xor` | `fn bytes.xor(b: Bytes, b: Bytes) -> Bytes` | 意味変更: 長さが違うと abort | R-bytes-23 |
+| `xor` | `fn bytes.xor(a: Bytes, b: Bytes) -> Bytes` | 意味変更: 長さが違うと abort | R-bytes-23 |
 
-撤去（35）:
+撤去（34）:
 
 | 関数 | 代わり | 案 |
 |---|---|---|
-| `append_u8` | `push` | R-bytes-02 |
 | `as_mut_ptr` | `ffi.address` | R-bytes-06 |
 | `as_ptr` | `ffi.address` | R-bytes-06 |
 | `concat` | `+` | R-bytes-16 |
@@ -455,7 +457,7 @@
 | `get` | `effect fn env.get(name: String) -> String?` |  | R-env-01、R-env-03 |
 | `os` | `fn env.os() -> String` |  |  |
 | `remove` | `effect fn env.remove(name: String) -> Unit` | 新規 | R-env-02 |
-| `set` | `effect fn env.set(name: String, x: String) -> Unit` |  |  |
+| `set` | `effect fn env.set(name: String, value: String) -> Unit` |  |  |
 | `sleep_ms` | `effect fn env.sleep_ms(ms: Int) -> Unit` |  | R-env-01 |
 | `vars` | `effect fn env.vars() -> Map[String, String]` | 新規 | R-env-02 |
 
@@ -510,28 +512,37 @@
 | `to_float32` | `fn float.to_float32(x: Float) -> Float32` |  | R-sized-01（行列のセル） |
 | `to_float32_checked` | `fn float.to_float32_checked(x: Float) -> Float32?` |  | R-sized-01（行列のセル） |
 | `to_float64` | `fn float.to_float64(x: Float) -> Float64` |  | R-sized-01（行列のセル） |
-| `to_int` | `fn float.to_int(x: Float) -> Int` |  | R-sized-01（行列のセル） |
-| `to_int16` | `fn float.to_int16(x: Float) -> Int16` |  | R-sized-01（行列のセル） |
+| `to_int` | `fn float.to_int(x: Float) -> Int` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
+| `to_int16` | `fn float.to_int16(x: Float) -> Int16` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_int16_checked` | `fn float.to_int16_checked(x: Float) -> Int16?` |  | R-sized-01（行列のセル） |
-| `to_int32` | `fn float.to_int32(x: Float) -> Int32` |  | R-sized-01（行列のセル） |
+| `to_int16_saturating` | `fn float.to_int16_saturating(x: Float) -> Int16` |  | R-L0-32（R-sized-04 の撤去を取り消し） |
+| `to_int32` | `fn float.to_int32(x: Float) -> Int32` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_int32_checked` | `fn float.to_int32_checked(x: Float) -> Int32?` |  | R-sized-01（行列のセル） |
-| `to_int64` | `fn float.to_int64(x: Float) -> Int64` |  | R-sized-01（行列のセル） |
+| `to_int32_saturating` | `fn float.to_int32_saturating(x: Float) -> Int32` |  | R-L0-32（R-sized-04 の撤去を取り消し） |
+| `to_int64` | `fn float.to_int64(x: Float) -> Int64` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_int64_checked` | `fn float.to_int64_checked(x: Float) -> Int64?` |  | R-sized-01（行列のセル） |
-| `to_int8` | `fn float.to_int8(x: Float) -> Int8` |  | R-sized-01（行列のセル） |
+| `to_int64_saturating` | `fn float.to_int64_saturating(x: Float) -> Int64` |  | R-L0-32（R-sized-04 の撤去を取り消し） |
+| `to_int8` | `fn float.to_int8(x: Float) -> Int8` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_int8_checked` | `fn float.to_int8_checked(x: Float) -> Int8?` |  | R-sized-01（行列のセル） |
+| `to_int8_saturating` | `fn float.to_int8_saturating(x: Float) -> Int8` |  | R-L0-32（R-sized-04 の撤去を取り消し） |
 | `to_int_checked` | `fn float.to_int_checked(x: Float) -> Int?` | 新規 | R-sized-01 |
+| `to_int_saturating` | `fn float.to_int_saturating(x: Float) -> Int` | 新規 | R-L0-32 |
 | `to_string` | `fn float.to_string(x: Float) -> String` |  |  |
-| `to_uint16` | `fn float.to_uint16(x: Float) -> UInt16` |  | R-sized-01（行列のセル） |
+| `to_uint16` | `fn float.to_uint16(x: Float) -> UInt16` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_uint16_checked` | `fn float.to_uint16_checked(x: Float) -> UInt16?` |  | R-sized-01（行列のセル） |
-| `to_uint32` | `fn float.to_uint32(x: Float) -> UInt32` |  | R-sized-01（行列のセル） |
+| `to_uint16_saturating` | `fn float.to_uint16_saturating(x: Float) -> UInt16` |  | R-L0-32（R-sized-04 の撤去を取り消し） |
+| `to_uint32` | `fn float.to_uint32(x: Float) -> UInt32` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_uint32_checked` | `fn float.to_uint32_checked(x: Float) -> UInt32?` |  | R-sized-01（行列のセル） |
-| `to_uint64` | `fn float.to_uint64(x: Float) -> UInt64` |  | R-sized-01（行列のセル） |
+| `to_uint32_saturating` | `fn float.to_uint32_saturating(x: Float) -> UInt32` |  | R-L0-32（R-sized-04 の撤去を取り消し） |
+| `to_uint64` | `fn float.to_uint64(x: Float) -> UInt64` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_uint64_checked` | `fn float.to_uint64_checked(x: Float) -> UInt64?` |  | R-sized-01（行列のセル） |
-| `to_uint8` | `fn float.to_uint8(x: Float) -> UInt8` |  | R-sized-01（行列のセル） |
+| `to_uint64_saturating` | `fn float.to_uint64_saturating(x: Float) -> UInt64` |  | R-L0-32（R-sized-04 の撤去を取り消し） |
+| `to_uint8` | `fn float.to_uint8(x: Float) -> UInt8` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_uint8_checked` | `fn float.to_uint8_checked(x: Float) -> UInt8?` |  | R-sized-01（行列のセル） |
+| `to_uint8_saturating` | `fn float.to_uint8_saturating(x: Float) -> UInt8` |  | R-L0-32（R-sized-04 の撤去を取り消し） |
 | `trunc` | `fn float.trunc(x: Float) -> Float` | 新規 | R-float-04 |
 
-撤去（12）:
+撤去（4）:
 
 | 関数 | 代わり | 案 |
 |---|---|---|
@@ -539,14 +550,6 @@
 | `from_float64` | `float64.to_float` | R-float-01（`float64.to_float`） |
 | `from_int` | `int.to_float` と同じ | R-float-01（`int.to_float` と同じ。R-L0-07 の 3） |
 | `sqrt` | `math.sqrt` | R-math-03 |
-| `to_int16_saturating` | `float.to_int16` が同じ飽和をする | R-sized-04（`float.to_int16` が同じ飽和をする。1 回の呼び出しだけの双子） |
-| `to_int32_saturating` | `float.to_int32` が同じ飽和をする | R-sized-04（`float.to_int32` が同じ飽和をする。1 回の呼び出しだけの双子） |
-| `to_int64_saturating` | `float.to_int64` が同じ飽和をする | R-sized-04（`float.to_int64` が同じ飽和をする。1 回の呼び出しだけの双子） |
-| `to_int8_saturating` | `float.to_int8` が同じ飽和をする | R-sized-04（`float.to_int8` が同じ飽和をする。1 回の呼び出しだけの双子） |
-| `to_uint16_saturating` | `float.to_uint16` が同じ飽和をする | R-sized-04（`float.to_uint16` が同じ飽和をする。1 回の呼び出しだけの双子） |
-| `to_uint32_saturating` | `float.to_uint32` が同じ飽和をする | R-sized-04（`float.to_uint32` が同じ飽和をする。1 回の呼び出しだけの双子） |
-| `to_uint64_saturating` | `float.to_uint64` が同じ飽和をする | R-sized-04（`float.to_uint64` が同じ飽和をする。1 回の呼び出しだけの双子） |
-| `to_uint8_saturating` | `float.to_uint8` が同じ飽和をする | R-sized-04（`float.to_uint8` が同じ飽和をする。1 回の呼び出しだけの双子） |
 
 ## float32
 
@@ -554,11 +557,17 @@
 
 | 関数 | シグネチャ（リデザイン後） | 変化 | 案 |
 |---|---|---|---|
+| `clamp` | `fn float32.clamp(x: Float32, lo: Float32, hi: Float32) -> Float32` | 新規 | R-sized-08 |
 | `compare` | `fn float32.compare(a: Float32, b: Float32) -> Int` | 新規 | R-sized-02 |
 | `epsilon` | `fn float32.epsilon() -> Float32` | 新規 | R-sized-03 |
 | `from_bits` | `fn float32.from_bits(bits: Int) -> Float32` | 新規 | R-sized-03 |
 | `infinity` | `fn float32.infinity() -> Float32` | 新規 | R-sized-03 |
+| `is_finite` | `fn float32.is_finite(x: Float32) -> Bool` | 新規 | R-sized-08 |
+| `is_infinite` | `fn float32.is_infinite(x: Float32) -> Bool` | 新規 | R-sized-08 |
+| `is_nan` | `fn float32.is_nan(x: Float32) -> Bool` | 新規 | R-sized-08 |
+| `max` | `fn float32.max(a: Float32, b: Float32) -> Float32` | 新規 | R-sized-08 |
 | `max_value` | `fn float32.max_value() -> Float32` | 新規 | R-sized-03 |
+| `min` | `fn float32.min(a: Float32, b: Float32) -> Float32` | 新規 | R-sized-08 |
 | `min_value` | `fn float32.min_value() -> Float32` | 新規 | R-sized-03 |
 | `nan` | `fn float32.nan() -> Float32` | 新規 | R-sized-03 |
 | `parse` | `fn float32.parse(s: String) -> Result[Float32, String]` | 新規 | R-sized-02 |
@@ -566,24 +575,32 @@
 | `to_float` | `fn float32.to_float(x: Float32) -> Float` | 新規 | R-sized-01 |
 | `to_float64` | `fn float32.to_float64(x: Float32) -> Float64` |  | R-sized-01（行列のセル） |
 | `to_int` | `fn float32.to_int(x: Float32) -> Int` | 新規 | R-sized-01 |
-| `to_int16` | `fn float32.to_int16(x: Float32) -> Int16` |  | R-sized-01（行列のセル） |
+| `to_int16` | `fn float32.to_int16(x: Float32) -> Int16` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_int16_checked` | `fn float32.to_int16_checked(x: Float32) -> Int16?` | 新規 | R-sized-01 |
-| `to_int32` | `fn float32.to_int32(x: Float32) -> Int32` |  | R-sized-01（行列のセル） |
+| `to_int16_saturating` | `fn float32.to_int16_saturating(x: Float32) -> Int16` | 新規 | R-L0-32 |
+| `to_int32` | `fn float32.to_int32(x: Float32) -> Int32` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_int32_checked` | `fn float32.to_int32_checked(x: Float32) -> Int32?` | 新規 | R-sized-01 |
-| `to_int64` | `fn float32.to_int64(x: Float32) -> Int64` |  | R-sized-01（行列のセル） |
+| `to_int32_saturating` | `fn float32.to_int32_saturating(x: Float32) -> Int32` | 新規 | R-L0-32 |
+| `to_int64` | `fn float32.to_int64(x: Float32) -> Int64` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_int64_checked` | `fn float32.to_int64_checked(x: Float32) -> Int64?` | 新規 | R-sized-01 |
-| `to_int8` | `fn float32.to_int8(x: Float32) -> Int8` |  | R-sized-01（行列のセル） |
+| `to_int64_saturating` | `fn float32.to_int64_saturating(x: Float32) -> Int64` | 新規 | R-L0-32 |
+| `to_int8` | `fn float32.to_int8(x: Float32) -> Int8` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_int8_checked` | `fn float32.to_int8_checked(x: Float32) -> Int8?` | 新規 | R-sized-01 |
+| `to_int8_saturating` | `fn float32.to_int8_saturating(x: Float32) -> Int8` | 新規 | R-L0-32 |
 | `to_int_checked` | `fn float32.to_int_checked(x: Float32) -> Int?` | 新規 | R-sized-01 |
 | `to_string` | `fn float32.to_string(x: Float32) -> String` |  |  |
-| `to_uint16` | `fn float32.to_uint16(x: Float32) -> UInt16` |  | R-sized-01（行列のセル） |
+| `to_uint16` | `fn float32.to_uint16(x: Float32) -> UInt16` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_uint16_checked` | `fn float32.to_uint16_checked(x: Float32) -> UInt16?` | 新規 | R-sized-01 |
-| `to_uint32` | `fn float32.to_uint32(x: Float32) -> UInt32` |  | R-sized-01（行列のセル） |
+| `to_uint16_saturating` | `fn float32.to_uint16_saturating(x: Float32) -> UInt16` | 新規 | R-L0-32 |
+| `to_uint32` | `fn float32.to_uint32(x: Float32) -> UInt32` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_uint32_checked` | `fn float32.to_uint32_checked(x: Float32) -> UInt32?` | 新規 | R-sized-01 |
-| `to_uint64` | `fn float32.to_uint64(x: Float32) -> UInt64` |  | R-sized-01（行列のセル） |
+| `to_uint32_saturating` | `fn float32.to_uint32_saturating(x: Float32) -> UInt32` | 新規 | R-L0-32 |
+| `to_uint64` | `fn float32.to_uint64(x: Float32) -> UInt64` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_uint64_checked` | `fn float32.to_uint64_checked(x: Float32) -> UInt64?` | 新規 | R-sized-01 |
-| `to_uint8` | `fn float32.to_uint8(x: Float32) -> UInt8` |  | R-sized-01（行列のセル） |
+| `to_uint64_saturating` | `fn float32.to_uint64_saturating(x: Float32) -> UInt64` | 新規 | R-L0-32 |
+| `to_uint8` | `fn float32.to_uint8(x: Float32) -> UInt8` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_uint8_checked` | `fn float32.to_uint8_checked(x: Float32) -> UInt8?` | 新規 | R-sized-01 |
+| `to_uint8_saturating` | `fn float32.to_uint8_saturating(x: Float32) -> UInt8` | 新規 | R-L0-32 |
 
 ## float64
 
@@ -591,11 +608,17 @@
 
 | 関数 | シグネチャ（リデザイン後） | 変化 | 案 |
 |---|---|---|---|
+| `clamp` | `fn float64.clamp(x: Float64, lo: Float64, hi: Float64) -> Float64` | 新規 | R-sized-08 |
 | `compare` | `fn float64.compare(a: Float64, b: Float64) -> Int` | 新規 | R-sized-02 |
 | `epsilon` | `fn float64.epsilon() -> Float64` | 新規 | R-sized-03 |
 | `from_bits` | `fn float64.from_bits(bits: Int) -> Float64` | 新規 | R-sized-03 |
 | `infinity` | `fn float64.infinity() -> Float64` | 新規 | R-sized-03 |
+| `is_finite` | `fn float64.is_finite(x: Float64) -> Bool` | 新規 | R-sized-08 |
+| `is_infinite` | `fn float64.is_infinite(x: Float64) -> Bool` | 新規 | R-sized-08 |
+| `is_nan` | `fn float64.is_nan(x: Float64) -> Bool` | 新規 | R-sized-08 |
+| `max` | `fn float64.max(a: Float64, b: Float64) -> Float64` | 新規 | R-sized-08 |
 | `max_value` | `fn float64.max_value() -> Float64` | 新規 | R-sized-03 |
+| `min` | `fn float64.min(a: Float64, b: Float64) -> Float64` | 新規 | R-sized-08 |
 | `min_value` | `fn float64.min_value() -> Float64` | 新規 | R-sized-03 |
 | `nan` | `fn float64.nan() -> Float64` | 新規 | R-sized-03 |
 | `parse` | `fn float64.parse(s: String) -> Result[Float64, String]` | 新規 | R-sized-02 |
@@ -604,24 +627,32 @@
 | `to_float32` | `fn float64.to_float32(x: Float64) -> Float32` |  | R-sized-01（行列のセル） |
 | `to_float32_checked` | `fn float64.to_float32_checked(x: Float64) -> Float32?` | 新規 | R-sized-01 |
 | `to_int` | `fn float64.to_int(x: Float64) -> Int` | 新規 | R-sized-01 |
-| `to_int16` | `fn float64.to_int16(x: Float64) -> Int16` |  | R-sized-01（行列のセル） |
+| `to_int16` | `fn float64.to_int16(x: Float64) -> Int16` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_int16_checked` | `fn float64.to_int16_checked(x: Float64) -> Int16?` | 新規 | R-sized-01 |
-| `to_int32` | `fn float64.to_int32(x: Float64) -> Int32` |  | R-sized-01（行列のセル） |
+| `to_int16_saturating` | `fn float64.to_int16_saturating(x: Float64) -> Int16` | 新規 | R-L0-32 |
+| `to_int32` | `fn float64.to_int32(x: Float64) -> Int32` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_int32_checked` | `fn float64.to_int32_checked(x: Float64) -> Int32?` | 新規 | R-sized-01 |
-| `to_int64` | `fn float64.to_int64(x: Float64) -> Int64` |  | R-sized-01（行列のセル） |
+| `to_int32_saturating` | `fn float64.to_int32_saturating(x: Float64) -> Int32` | 新規 | R-L0-32 |
+| `to_int64` | `fn float64.to_int64(x: Float64) -> Int64` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_int64_checked` | `fn float64.to_int64_checked(x: Float64) -> Int64?` | 新規 | R-sized-01 |
-| `to_int8` | `fn float64.to_int8(x: Float64) -> Int8` |  | R-sized-01（行列のセル） |
+| `to_int64_saturating` | `fn float64.to_int64_saturating(x: Float64) -> Int64` | 新規 | R-L0-32 |
+| `to_int8` | `fn float64.to_int8(x: Float64) -> Int8` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_int8_checked` | `fn float64.to_int8_checked(x: Float64) -> Int8?` | 新規 | R-sized-01 |
+| `to_int8_saturating` | `fn float64.to_int8_saturating(x: Float64) -> Int8` | 新規 | R-L0-32 |
 | `to_int_checked` | `fn float64.to_int_checked(x: Float64) -> Int?` | 新規 | R-sized-01 |
 | `to_string` | `fn float64.to_string(x: Float64) -> String` |  |  |
-| `to_uint16` | `fn float64.to_uint16(x: Float64) -> UInt16` |  | R-sized-01（行列のセル） |
+| `to_uint16` | `fn float64.to_uint16(x: Float64) -> UInt16` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_uint16_checked` | `fn float64.to_uint16_checked(x: Float64) -> UInt16?` | 新規 | R-sized-01 |
-| `to_uint32` | `fn float64.to_uint32(x: Float64) -> UInt32` |  | R-sized-01（行列のセル） |
+| `to_uint16_saturating` | `fn float64.to_uint16_saturating(x: Float64) -> UInt16` | 新規 | R-L0-32 |
+| `to_uint32` | `fn float64.to_uint32(x: Float64) -> UInt32` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_uint32_checked` | `fn float64.to_uint32_checked(x: Float64) -> UInt32?` | 新規 | R-sized-01 |
-| `to_uint64` | `fn float64.to_uint64(x: Float64) -> UInt64` |  | R-sized-01（行列のセル） |
+| `to_uint32_saturating` | `fn float64.to_uint32_saturating(x: Float64) -> UInt32` | 新規 | R-L0-32 |
+| `to_uint64` | `fn float64.to_uint64(x: Float64) -> UInt64` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_uint64_checked` | `fn float64.to_uint64_checked(x: Float64) -> UInt64?` | 新規 | R-sized-01 |
-| `to_uint8` | `fn float64.to_uint8(x: Float64) -> UInt8` |  | R-sized-01（行列のセル） |
+| `to_uint64_saturating` | `fn float64.to_uint64_saturating(x: Float64) -> UInt64` | 新規 | R-L0-32 |
+| `to_uint8` | `fn float64.to_uint8(x: Float64) -> UInt8` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_uint8_checked` | `fn float64.to_uint8_checked(x: Float64) -> UInt8?` | 新規 | R-sized-01 |
+| `to_uint8_saturating` | `fn float64.to_uint8_saturating(x: Float64) -> UInt8` | 新規 | R-L0-32 |
 
 ## fs
 
@@ -746,15 +777,15 @@
 
 | 関数 | シグネチャ（リデザイン後） | 変化 | 案 |
 |---|---|---|---|
-| `body` | `fn http.body(resp: HttpResponse) -> String` |  |  |
-| `body_bytes` | `fn http.body_bytes(resp: HttpResponse) -> Bytes` | 新規 | R-http-01 |
+| `body` | `fn http.body[M: HttpMessage](m: M) -> String` | 意味変更: `HttpRequest` も受け取る | R-http-12 |
+| `body_bytes` | `fn http.body_bytes[M: HttpMessage](m: M) -> Bytes` | 新規 | R-http-12 |
 | `cancel` | `effect fn http.cancel(c: HttpCall) -> Unit` |  | R-http-01 |
 | `decode_json` | `fn http.decode_json[T](req: HttpRequest, decode: (Value) -> Result[T, String]) -> Result[T, HttpResponse]` |  |  |
 | `get` | `effect fn http.get(url: String) -> String` |  | R-http-01 |
-| `get_header` | `fn http.get_header(resp: HttpResponse, key: String) -> String?` |  |  |
 | `get_response` | `effect fn http.get_response(url: String) -> HttpResponse` |  | R-http-01 |
-| `header_values` | `fn http.header_values(resp: HttpResponse, key: String) -> List[String]` |  |  |
-| `headers` | `fn http.headers(resp: HttpResponse) -> List[(String, String)]` | 意味変更: `List[(String, String)]` を返す | R-http-09 |
+| `header` | `fn http.header[M: HttpMessage](m: M, name: String) -> String?` | 改名（旧 `get_header`）。`HttpRequest` も受け取る | R-http-12 |
+| `header_values` | `fn http.header_values[M: HttpMessage](m: M, name: String) -> List[String]` | 意味変更: `HttpRequest` も受け取る | R-http-12 |
+| `headers` | `fn http.headers[M: HttpMessage](m: M) -> List[(String, String)]` | 意味変更: `HttpRequest` も受け取る | R-http-12 |
 | `json` | `fn http.json(status: Int, body: String) -> HttpResponse` |  |  |
 | `mount` | `fn http.mount(prefix: String, sub: (HttpRequest) -> Result[HttpResponse, String]) -> HttpRoute` |  |  |
 | `new_request` | `fn http.new_request(method: String, target: String, body: String, headers: List[(String, String)]) -> HttpRequest` | 意味変更: `headers` を `List[(String, String)]` に | R-http-09 |
@@ -763,22 +794,18 @@
 | `query_params` | `fn http.query_params(req: HttpRequest) -> List[(String, String)]` | 意味変更: `List[(String, String)]` を返す | R-http-10 |
 | `read_new` | `effect fn http.read_new(c: HttpCall) -> String` |  | R-http-01 |
 | `redirect` | `fn http.redirect(url: String) -> HttpResponse` |  |  |
-| `req_body` | `fn http.req_body(req: HttpRequest) -> String` |  |  |
-| `req_body_bytes` | `fn http.req_body_bytes(req: HttpRequest) -> Bytes` | 新規 | R-http-11 |
-| `req_header` | `fn http.req_header(req: HttpRequest, key: String) -> String?` |  | R-http-03 |
-| `req_header_values` | `fn http.req_header_values(req: HttpRequest, key: String) -> List[String]` | 新規 | R-http-03 |
-| `req_headers` | `fn http.req_headers(req: HttpRequest) -> List[(String, String)]` | 新規 | R-http-03、R-http-09 |
 | `req_method` | `fn http.req_method(req: HttpRequest) -> String` |  |  |
 | `req_path` | `fn http.req_path(req: HttpRequest) -> String` |  |  |
 | `request` | `effect fn http.request(method: String, url: String, body: String, headers: List[(String, String)]) -> String` | 意味変更: `headers` を `List[(String, String)]` に | R-http-09 |
 | `request_response` | `effect fn http.request_response(method: String, url: String, body: String, headers: List[(String, String)]) -> HttpResponse` | 意味変更: `headers` を `List[(String, String)]` に | R-http-09 |
 | `response` | `fn http.response(status: Int, body: String) -> HttpResponse` |  |  |
-| `route` | `fn http.route(pattern: String, handler: (HttpRequest) -> Result[HttpResponse, String]) -> HttpRoute` |  |  |
-| `router` | `fn http.router(xs: List[HttpRoute]) -> Result[(HttpRequest) -> Result[HttpResponse, String], String]` |  |  |
-| `serve` | `effect fn http.serve(port: Int, f: effect (HttpRequest) -> HttpResponse) -> Unit` |  |  |
-| `set_body` | `fn http.set_body(resp: HttpResponse, body: String) -> HttpResponse` | 新規 | R-http-06 |
-| `set_body_bytes` | `fn http.set_body_bytes(resp: HttpResponse, body: Bytes) -> HttpResponse` | 新規 | R-http-11 |
-| `set_header` | `fn http.set_header(resp: HttpResponse, key: String, x: String) -> HttpResponse` |  | R-http-02 |
+| `route` | `fn http.route(pattern: String, handler: HttpHandler) -> HttpRoute` |  |  |
+| `router` | `fn http.router(xs: List[HttpRoute]) -> Result[HttpHandler, String]` |  |  |
+| `send` | `effect fn http.send(req: HttpRequest) -> HttpResponse` | 新規 | R-http-13 |
+| `serve` | `effect fn http.serve(port: Int, handler: HttpHandler) -> Unit` |  |  |
+| `set_body` | `fn http.set_body[M: HttpMessage](m: M, body: String) -> M` | 新規 | R-http-12 |
+| `set_body_bytes` | `fn http.set_body_bytes[M: HttpMessage](m: M, body: Bytes) -> M` | 新規 | R-http-12 |
+| `set_header` | `fn http.set_header[M: HttpMessage](m: M, name: String, value: String) -> M` | 意味変更: `HttpRequest` も受け取る | R-http-12 |
 | `set_status` | `fn http.set_status(resp: HttpResponse, code: Int) -> HttpResponse` | 改名（旧 `status`）。`set_status` | R-http-02 |
 | `start` | `effect fn http.start(method: String, url: String, body: String, headers: List[(String, String)], limits: HttpLimits) -> HttpCall` | 意味変更: `headers` を `List[(String, String)]` に | R-http-09 |
 | `status` | `fn http.status(resp: HttpResponse) -> Int` | 改名（旧 `status_code`）。epoch 17。`0` の番兵もなくす | R-http-04、R-http-08 |
@@ -786,7 +813,7 @@
 | `with_headers` | `fn http.with_headers(status: Int, body: String, headers: List[(String, String)]) -> HttpResponse` | 意味変更: `headers` を `List[(String, String)]` に | R-http-09 |
 | `wrap` | `fn http.wrap(handler: HttpHandler, middleware: List[HttpMiddleware]) -> HttpHandler` |  |  |
 
-撤去（15）:
+撤去（17）:
 
 | 関数 | 代わり | 案 |
 |---|---|---|
@@ -800,6 +827,8 @@
 | `post_response` | `request_response("POST", …)` | R-http-01 |
 | `put` | `request("PUT", …)` | R-http-01 |
 | `put_response` | `request_response("PUT", …)` | R-http-01 |
+| `req_body` | `http.body` | R-http-12 |
+| `req_header` | `http.header` | R-http-12 |
 | `request_bytes` | `body_bytes(request_response(…)!)` | R-http-01 |
 | `request_status` | `request_response` | R-http-01 |
 | `request_stream` | ハンドル | R-http-01 |
@@ -816,11 +845,11 @@
 | `band` | `fn int.band(a: Int, b: Int) -> Int` |  | R-int-05 ×（改名しない） |
 | `bit_reverse` | `fn int.bit_reverse(x: Int) -> Int` |  |  |
 | `bit_width` | `fn int.bit_width(x: Int) -> Int` |  |  |
-| `bnot` | `fn int.bnot(a: Int) -> Int` |  | R-int-05 × |
+| `bnot` | `fn int.bnot(x: Int) -> Int` |  | R-int-05 × |
 | `bor` | `fn int.bor(a: Int, b: Int) -> Int` |  | R-int-05 × |
-| `bshl` | `fn int.bshl(a: Int, n: Int) -> Int` |  | R-int-05 × |
-| `bshr` | `fn int.bshr(a: Int, n: Int) -> Int` |  | R-int-05 × |
-| `bshr_logical` | `fn int.bshr_logical(a: Int, n: Int) -> Int` | 新規 | R-int-06 |
+| `bshl` | `fn int.bshl(a: Int, b: Int) -> Int` |  | R-int-05 × |
+| `bshr` | `fn int.bshr(a: Int, b: Int) -> Int` |  | R-int-05 × |
+| `bshr_logical` | `fn int.bshr_logical(a: Int, b: Int) -> Int` | 新規 | R-int-06 |
 | `bxor` | `fn int.bxor(a: Int, b: Int) -> Int` |  | R-int-05 × |
 | `byte_swap` | `fn int.byte_swap(x: Int) -> Int` |  |  |
 | `clamp` | `fn int.clamp(x: Int, lo: Int, hi: Int) -> Int` |  |  |
@@ -843,8 +872,8 @@
 | `parse_radix` | `fn int.parse_radix(s: String, radix: Int) -> Result[Int, String]` | 新規 | R-int-04 |
 | `pow` | `fn int.pow(base: Int, exp: Int) -> Int` | 新規 | R-math-01 |
 | `prev_power_of_two` | `fn int.prev_power_of_two(x: Int) -> Int` |  |  |
-| `rotate_left` | `fn int.rotate_left(a: Int, n: Int, bits: Int) -> Int` |  |  |
-| `rotate_right` | `fn int.rotate_right(a: Int, n: Int, bits: Int) -> Int` |  |  |
+| `rotate_left` | `fn int.rotate_left(a: Int, b: Int, bits: Int) -> Int` |  |  |
+| `rotate_right` | `fn int.rotate_right(a: Int, b: Int, bits: Int) -> Int` |  |  |
 | `sign` | `fn int.sign(x: Int) -> Int` | 新規 | R-math-01 |
 | `to_bigint` | `fn int.to_bigint(x: Int) -> BigInt` | 新規 | R-bigint-01（`int` に置く。L2-int の表にも載せる） |
 | `to_float` | `fn int.to_float(x: Int) -> Float` |  |  |
@@ -854,28 +883,28 @@
 | `to_float64_checked` | `fn int.to_float64_checked(x: Int) -> Float64?` | 新規 | R-sized-01 |
 | `to_float_checked` | `fn int.to_float_checked(x: Int) -> Float?` | 新規 | R-sized-01 |
 | `to_hex` | `fn int.to_hex(x: Int) -> String` |  | R-int-04（64 bit の並びの 16 進。符号付きの基数変換は `to_string_radix`） |
-| `to_int16` | `fn int.to_int16(x: Int) -> Int16` |  | R-sized-01（行列のセル） |
+| `to_int16` | `fn int.to_int16(x: Int) -> Int16` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_int16_checked` | `fn int.to_int16_checked(x: Int) -> Int16?` |  | R-sized-01（行列のセル） |
 | `to_int16_saturating` | `fn int.to_int16_saturating(x: Int) -> Int16` |  | R-sized-01（行列のセル） |
-| `to_int32` | `fn int.to_int32(x: Int) -> Int32` |  | R-sized-01（行列のセル） |
+| `to_int32` | `fn int.to_int32(x: Int) -> Int32` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_int32_checked` | `fn int.to_int32_checked(x: Int) -> Int32?` |  | R-sized-01（行列のセル） |
 | `to_int32_saturating` | `fn int.to_int32_saturating(x: Int) -> Int32` |  | R-sized-01（行列のセル） |
 | `to_int64` | `fn int.to_int64(x: Int) -> Int64` |  | R-sized-01（行列のセル） |
-| `to_int8` | `fn int.to_int8(x: Int) -> Int8` |  | R-sized-01（行列のセル） |
+| `to_int8` | `fn int.to_int8(x: Int) -> Int8` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_int8_checked` | `fn int.to_int8_checked(x: Int) -> Int8?` |  | R-sized-01（行列のセル） |
 | `to_int8_saturating` | `fn int.to_int8_saturating(x: Int) -> Int8` |  | R-sized-01（行列のセル） |
 | `to_string` | `fn int.to_string(x: Int) -> String` |  |  |
 | `to_string_radix` | `fn int.to_string_radix(x: Int, radix: Int) -> String` | 新規 | R-int-04 |
-| `to_uint16` | `fn int.to_uint16(x: Int) -> UInt16` |  | R-sized-01（行列のセル） |
+| `to_uint16` | `fn int.to_uint16(x: Int) -> UInt16` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_uint16_checked` | `fn int.to_uint16_checked(x: Int) -> UInt16?` |  | R-sized-01（行列のセル） |
 | `to_uint16_saturating` | `fn int.to_uint16_saturating(x: Int) -> UInt16` |  | R-sized-01（行列のセル） |
-| `to_uint32` | `fn int.to_uint32(x: Int) -> UInt32` |  | R-sized-01（行列のセル） |
+| `to_uint32` | `fn int.to_uint32(x: Int) -> UInt32` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_uint32_checked` | `fn int.to_uint32_checked(x: Int) -> UInt32?` |  | R-sized-01（行列のセル） |
 | `to_uint32_saturating` | `fn int.to_uint32_saturating(x: Int) -> UInt32` |  | R-sized-01（行列のセル） |
-| `to_uint64` | `fn int.to_uint64(x: Int) -> UInt64` |  | R-sized-01（行列のセル） |
+| `to_uint64` | `fn int.to_uint64(x: Int) -> UInt64` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_uint64_checked` | `fn int.to_uint64_checked(x: Int) -> UInt64?` |  | R-sized-01（行列のセル） |
 | `to_uint64_saturating` | `fn int.to_uint64_saturating(x: Int) -> UInt64` |  | R-sized-01（行列のセル） |
-| `to_uint8` | `fn int.to_uint8(x: Int) -> UInt8` |  | R-sized-01（行列のセル） |
+| `to_uint8` | `fn int.to_uint8(x: Int) -> UInt8` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_uint8_checked` | `fn int.to_uint8_checked(x: Int) -> UInt8?` |  | R-sized-01（行列のセル） |
 | `to_uint8_saturating` | `fn int.to_uint8_saturating(x: Int) -> UInt8` |  | R-sized-01（行列のセル） |
 | `wrap` | `fn int.wrap(x: Int, bits: Int) -> Int` | 新規 | R-int-02 |
@@ -909,8 +938,11 @@
 
 | 関数 | シグネチャ（リデザイン後） | 変化 | 案 |
 |---|---|---|---|
+| `clamp` | `fn int16.clamp(x: Int16, lo: Int16, hi: Int16) -> Int16` | 新規 | R-sized-08 |
 | `compare` | `fn int16.compare(a: Int16, b: Int16) -> Int` | 新規 | R-sized-02 |
+| `max` | `fn int16.max(a: Int16, b: Int16) -> Int16` | 新規 | R-sized-08 |
 | `max_value` | `fn int16.max_value() -> Int16` |  |  |
+| `min` | `fn int16.min(a: Int16, b: Int16) -> Int16` | 新規 | R-sized-08 |
 | `min_value` | `fn int16.min_value() -> Int16` |  |  |
 | `parse` | `fn int16.parse(s: String) -> Result[Int16, String]` | 新規 | R-sized-02 |
 | `parse_radix` | `fn int16.parse_radix(s: String, radix: Int) -> Result[Int16, String]` | 新規 | R-sized-06 |
@@ -920,21 +952,21 @@
 | `to_int` | `fn int16.to_int(x: Int16) -> Int` | 新規 | R-sized-01 |
 | `to_int32` | `fn int16.to_int32(x: Int16) -> Int32` |  | R-sized-01（行列のセル） |
 | `to_int64` | `fn int16.to_int64(x: Int16) -> Int64` |  | R-sized-01（行列のセル） |
-| `to_int8` | `fn int16.to_int8(x: Int16) -> Int8` |  | R-sized-01（行列のセル） |
+| `to_int8` | `fn int16.to_int8(x: Int16) -> Int8` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_int8_checked` | `fn int16.to_int8_checked(x: Int16) -> Int8?` |  | R-sized-01（行列のセル） |
 | `to_int8_saturating` | `fn int16.to_int8_saturating(x: Int16) -> Int8` |  | R-sized-01（行列のセル） |
 | `to_string` | `fn int16.to_string(x: Int16) -> String` |  |  |
 | `to_string_radix` | `fn int16.to_string_radix(x: Int16, radix: Int) -> String` | 新規 | R-sized-06 |
-| `to_uint16` | `fn int16.to_uint16(x: Int16) -> UInt16` |  | R-sized-01（行列のセル） |
+| `to_uint16` | `fn int16.to_uint16(x: Int16) -> UInt16` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_uint16_checked` | `fn int16.to_uint16_checked(x: Int16) -> UInt16?` |  | R-sized-01（行列のセル） |
 | `to_uint16_saturating` | `fn int16.to_uint16_saturating(x: Int16) -> UInt16` |  | R-sized-01（行列のセル） |
-| `to_uint32` | `fn int16.to_uint32(x: Int16) -> UInt32` |  | R-sized-01（行列のセル） |
+| `to_uint32` | `fn int16.to_uint32(x: Int16) -> UInt32` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_uint32_checked` | `fn int16.to_uint32_checked(x: Int16) -> UInt32?` |  | R-sized-01（行列のセル） |
 | `to_uint32_saturating` | `fn int16.to_uint32_saturating(x: Int16) -> UInt32` |  | R-sized-01（行列のセル） |
-| `to_uint64` | `fn int16.to_uint64(x: Int16) -> UInt64` |  | R-sized-01（行列のセル） |
+| `to_uint64` | `fn int16.to_uint64(x: Int16) -> UInt64` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_uint64_checked` | `fn int16.to_uint64_checked(x: Int16) -> UInt64?` |  | R-sized-01（行列のセル） |
 | `to_uint64_saturating` | `fn int16.to_uint64_saturating(x: Int16) -> UInt64` |  | R-sized-01（行列のセル） |
-| `to_uint8` | `fn int16.to_uint8(x: Int16) -> UInt8` |  | R-sized-01（行列のセル） |
+| `to_uint8` | `fn int16.to_uint8(x: Int16) -> UInt8` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_uint8_checked` | `fn int16.to_uint8_checked(x: Int16) -> UInt8?` |  | R-sized-01（行列のセル） |
 | `to_uint8_saturating` | `fn int16.to_uint8_saturating(x: Int16) -> UInt8` |  | R-sized-01（行列のセル） |
 
@@ -944,8 +976,11 @@
 
 | 関数 | シグネチャ（リデザイン後） | 変化 | 案 |
 |---|---|---|---|
+| `clamp` | `fn int32.clamp(x: Int32, lo: Int32, hi: Int32) -> Int32` | 新規 | R-sized-08 |
 | `compare` | `fn int32.compare(a: Int32, b: Int32) -> Int` | 新規 | R-sized-02 |
+| `max` | `fn int32.max(a: Int32, b: Int32) -> Int32` | 新規 | R-sized-08 |
 | `max_value` | `fn int32.max_value() -> Int32` |  |  |
+| `min` | `fn int32.min(a: Int32, b: Int32) -> Int32` | 新規 | R-sized-08 |
 | `min_value` | `fn int32.min_value() -> Int32` |  |  |
 | `parse` | `fn int32.parse(s: String) -> Result[Int32, String]` | 新規 | R-sized-02 |
 | `parse_radix` | `fn int32.parse_radix(s: String, radix: Int) -> Result[Int32, String]` | 新規 | R-sized-06 |
@@ -954,25 +989,25 @@
 | `to_float32_checked` | `fn int32.to_float32_checked(x: Int32) -> Float32?` | 新規 | R-sized-01 |
 | `to_float64` | `fn int32.to_float64(x: Int32) -> Float64` |  | R-sized-01（行列のセル） |
 | `to_int` | `fn int32.to_int(x: Int32) -> Int` | 新規 | R-sized-01 |
-| `to_int16` | `fn int32.to_int16(x: Int32) -> Int16` |  | R-sized-01（行列のセル） |
+| `to_int16` | `fn int32.to_int16(x: Int32) -> Int16` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_int16_checked` | `fn int32.to_int16_checked(x: Int32) -> Int16?` |  | R-sized-01（行列のセル） |
 | `to_int16_saturating` | `fn int32.to_int16_saturating(x: Int32) -> Int16` |  | R-sized-01（行列のセル） |
 | `to_int64` | `fn int32.to_int64(x: Int32) -> Int64` |  | R-sized-01（行列のセル） |
-| `to_int8` | `fn int32.to_int8(x: Int32) -> Int8` |  | R-sized-01（行列のセル） |
+| `to_int8` | `fn int32.to_int8(x: Int32) -> Int8` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_int8_checked` | `fn int32.to_int8_checked(x: Int32) -> Int8?` |  | R-sized-01（行列のセル） |
 | `to_int8_saturating` | `fn int32.to_int8_saturating(x: Int32) -> Int8` |  | R-sized-01（行列のセル） |
 | `to_string` | `fn int32.to_string(x: Int32) -> String` |  |  |
 | `to_string_radix` | `fn int32.to_string_radix(x: Int32, radix: Int) -> String` | 新規 | R-sized-06 |
-| `to_uint16` | `fn int32.to_uint16(x: Int32) -> UInt16` |  | R-sized-01（行列のセル） |
+| `to_uint16` | `fn int32.to_uint16(x: Int32) -> UInt16` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_uint16_checked` | `fn int32.to_uint16_checked(x: Int32) -> UInt16?` |  | R-sized-01（行列のセル） |
 | `to_uint16_saturating` | `fn int32.to_uint16_saturating(x: Int32) -> UInt16` |  | R-sized-01（行列のセル） |
-| `to_uint32` | `fn int32.to_uint32(x: Int32) -> UInt32` |  | R-sized-01（行列のセル） |
+| `to_uint32` | `fn int32.to_uint32(x: Int32) -> UInt32` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_uint32_checked` | `fn int32.to_uint32_checked(x: Int32) -> UInt32?` |  | R-sized-01（行列のセル） |
 | `to_uint32_saturating` | `fn int32.to_uint32_saturating(x: Int32) -> UInt32` |  | R-sized-01（行列のセル） |
-| `to_uint64` | `fn int32.to_uint64(x: Int32) -> UInt64` |  | R-sized-01（行列のセル） |
+| `to_uint64` | `fn int32.to_uint64(x: Int32) -> UInt64` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_uint64_checked` | `fn int32.to_uint64_checked(x: Int32) -> UInt64?` |  | R-sized-01（行列のセル） |
 | `to_uint64_saturating` | `fn int32.to_uint64_saturating(x: Int32) -> UInt64` |  | R-sized-01（行列のセル） |
-| `to_uint8` | `fn int32.to_uint8(x: Int32) -> UInt8` |  | R-sized-01（行列のセル） |
+| `to_uint8` | `fn int32.to_uint8(x: Int32) -> UInt8` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_uint8_checked` | `fn int32.to_uint8_checked(x: Int32) -> UInt8?` |  | R-sized-01（行列のセル） |
 | `to_uint8_saturating` | `fn int32.to_uint8_saturating(x: Int32) -> UInt8` |  | R-sized-01（行列のセル） |
 
@@ -982,8 +1017,11 @@
 
 | 関数 | シグネチャ（リデザイン後） | 変化 | 案 |
 |---|---|---|---|
+| `clamp` | `fn int64.clamp(x: Int64, lo: Int64, hi: Int64) -> Int64` | 新規 | R-sized-08 |
 | `compare` | `fn int64.compare(a: Int64, b: Int64) -> Int` | 新規 | R-sized-02 |
+| `max` | `fn int64.max(a: Int64, b: Int64) -> Int64` | 新規 | R-sized-08 |
 | `max_value` | `fn int64.max_value() -> Int64` |  |  |
+| `min` | `fn int64.min(a: Int64, b: Int64) -> Int64` | 新規 | R-sized-08 |
 | `min_value` | `fn int64.min_value() -> Int64` |  |  |
 | `parse` | `fn int64.parse(s: String) -> Result[Int64, String]` | 新規 | R-sized-02 |
 | `parse_radix` | `fn int64.parse_radix(s: String, radix: Int) -> Result[Int64, String]` | 新規 | R-sized-06 |
@@ -994,27 +1032,27 @@
 | `to_float64_checked` | `fn int64.to_float64_checked(x: Int64) -> Float64?` | 新規 | R-sized-01 |
 | `to_float_checked` | `fn int64.to_float_checked(x: Int64) -> Float?` | 新規 | R-sized-01 |
 | `to_int` | `fn int64.to_int(x: Int64) -> Int` | 新規 | R-sized-01 |
-| `to_int16` | `fn int64.to_int16(x: Int64) -> Int16` |  | R-sized-01（行列のセル） |
+| `to_int16` | `fn int64.to_int16(x: Int64) -> Int16` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_int16_checked` | `fn int64.to_int16_checked(x: Int64) -> Int16?` |  | R-sized-01（行列のセル） |
 | `to_int16_saturating` | `fn int64.to_int16_saturating(x: Int64) -> Int16` |  | R-sized-01（行列のセル） |
-| `to_int32` | `fn int64.to_int32(x: Int64) -> Int32` |  | R-sized-01（行列のセル） |
+| `to_int32` | `fn int64.to_int32(x: Int64) -> Int32` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_int32_checked` | `fn int64.to_int32_checked(x: Int64) -> Int32?` |  | R-sized-01（行列のセル） |
 | `to_int32_saturating` | `fn int64.to_int32_saturating(x: Int64) -> Int32` |  | R-sized-01（行列のセル） |
-| `to_int8` | `fn int64.to_int8(x: Int64) -> Int8` |  | R-sized-01（行列のセル） |
+| `to_int8` | `fn int64.to_int8(x: Int64) -> Int8` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_int8_checked` | `fn int64.to_int8_checked(x: Int64) -> Int8?` |  | R-sized-01（行列のセル） |
 | `to_int8_saturating` | `fn int64.to_int8_saturating(x: Int64) -> Int8` |  | R-sized-01（行列のセル） |
 | `to_string` | `fn int64.to_string(x: Int64) -> String` |  |  |
 | `to_string_radix` | `fn int64.to_string_radix(x: Int64, radix: Int) -> String` | 新規 | R-sized-06 |
-| `to_uint16` | `fn int64.to_uint16(x: Int64) -> UInt16` |  | R-sized-01（行列のセル） |
+| `to_uint16` | `fn int64.to_uint16(x: Int64) -> UInt16` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_uint16_checked` | `fn int64.to_uint16_checked(x: Int64) -> UInt16?` |  | R-sized-01（行列のセル） |
 | `to_uint16_saturating` | `fn int64.to_uint16_saturating(x: Int64) -> UInt16` |  | R-sized-01（行列のセル） |
-| `to_uint32` | `fn int64.to_uint32(x: Int64) -> UInt32` |  | R-sized-01（行列のセル） |
+| `to_uint32` | `fn int64.to_uint32(x: Int64) -> UInt32` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_uint32_checked` | `fn int64.to_uint32_checked(x: Int64) -> UInt32?` |  | R-sized-01（行列のセル） |
 | `to_uint32_saturating` | `fn int64.to_uint32_saturating(x: Int64) -> UInt32` |  | R-sized-01（行列のセル） |
-| `to_uint64` | `fn int64.to_uint64(x: Int64) -> UInt64` |  | R-sized-01（行列のセル） |
+| `to_uint64` | `fn int64.to_uint64(x: Int64) -> UInt64` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_uint64_checked` | `fn int64.to_uint64_checked(x: Int64) -> UInt64?` |  | R-sized-01（行列のセル） |
 | `to_uint64_saturating` | `fn int64.to_uint64_saturating(x: Int64) -> UInt64` |  | R-sized-01（行列のセル） |
-| `to_uint8` | `fn int64.to_uint8(x: Int64) -> UInt8` |  | R-sized-01（行列のセル） |
+| `to_uint8` | `fn int64.to_uint8(x: Int64) -> UInt8` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_uint8_checked` | `fn int64.to_uint8_checked(x: Int64) -> UInt8?` |  | R-sized-01（行列のセル） |
 | `to_uint8_saturating` | `fn int64.to_uint8_saturating(x: Int64) -> UInt8` |  | R-sized-01（行列のセル） |
 
@@ -1024,8 +1062,11 @@
 
 | 関数 | シグネチャ（リデザイン後） | 変化 | 案 |
 |---|---|---|---|
+| `clamp` | `fn int8.clamp(x: Int8, lo: Int8, hi: Int8) -> Int8` | 新規 | R-sized-08 |
 | `compare` | `fn int8.compare(a: Int8, b: Int8) -> Int` | 新規 | R-sized-02 |
+| `max` | `fn int8.max(a: Int8, b: Int8) -> Int8` | 新規 | R-sized-08 |
 | `max_value` | `fn int8.max_value() -> Int8` |  |  |
+| `min` | `fn int8.min(a: Int8, b: Int8) -> Int8` | 新規 | R-sized-08 |
 | `min_value` | `fn int8.min_value() -> Int8` |  |  |
 | `parse` | `fn int8.parse(s: String) -> Result[Int8, String]` | 新規 | R-sized-02 |
 | `parse_radix` | `fn int8.parse_radix(s: String, radix: Int) -> Result[Int8, String]` | 新規 | R-sized-06 |
@@ -1038,16 +1079,16 @@
 | `to_int64` | `fn int8.to_int64(x: Int8) -> Int64` |  | R-sized-01（行列のセル） |
 | `to_string` | `fn int8.to_string(x: Int8) -> String` |  |  |
 | `to_string_radix` | `fn int8.to_string_radix(x: Int8, radix: Int) -> String` | 新規 | R-sized-06 |
-| `to_uint16` | `fn int8.to_uint16(x: Int8) -> UInt16` |  | R-sized-01（行列のセル） |
+| `to_uint16` | `fn int8.to_uint16(x: Int8) -> UInt16` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_uint16_checked` | `fn int8.to_uint16_checked(x: Int8) -> UInt16?` |  | R-sized-01（行列のセル） |
 | `to_uint16_saturating` | `fn int8.to_uint16_saturating(x: Int8) -> UInt16` |  | R-sized-01（行列のセル） |
-| `to_uint32` | `fn int8.to_uint32(x: Int8) -> UInt32` |  | R-sized-01（行列のセル） |
+| `to_uint32` | `fn int8.to_uint32(x: Int8) -> UInt32` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_uint32_checked` | `fn int8.to_uint32_checked(x: Int8) -> UInt32?` |  | R-sized-01（行列のセル） |
 | `to_uint32_saturating` | `fn int8.to_uint32_saturating(x: Int8) -> UInt32` |  | R-sized-01（行列のセル） |
-| `to_uint64` | `fn int8.to_uint64(x: Int8) -> UInt64` |  | R-sized-01（行列のセル） |
+| `to_uint64` | `fn int8.to_uint64(x: Int8) -> UInt64` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_uint64_checked` | `fn int8.to_uint64_checked(x: Int8) -> UInt64?` |  | R-sized-01（行列のセル） |
 | `to_uint64_saturating` | `fn int8.to_uint64_saturating(x: Int8) -> UInt64` |  | R-sized-01（行列のセル） |
-| `to_uint8` | `fn int8.to_uint8(x: Int8) -> UInt8` |  | R-sized-01（行列のセル） |
+| `to_uint8` | `fn int8.to_uint8(x: Int8) -> UInt8` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_uint8_checked` | `fn int8.to_uint8_checked(x: Int8) -> UInt8?` |  | R-sized-01（行列のセル） |
 | `to_uint8_saturating` | `fn int8.to_uint8_saturating(x: Int8) -> UInt8` |  | R-sized-01（行列のセル） |
 
@@ -1209,12 +1250,12 @@
 | `keys` | `fn map.keys(m: Map[K, V]) -> List[K]` |  |  |
 | `len` | `fn map.len(m: Map[K, V]) -> Int` |  | — (R-L0-11) |
 | `map` | `fn map.map(m: Map[K, V], f: (V) -> B) -> Map[K, B]` |  | R-map-04 |
-| `merge` | `fn map.merge(m: Map[K, V], b: Map[K, V]) -> Map[K, V]` |  |  |
+| `merge` | `fn map.merge(a: Map[K, V], b: Map[K, V]) -> Map[K, V]` |  |  |
 | `new` | `fn map.new() -> Map[K, V]` |  |  |
 | `remove` | `fn map.remove(m: Map[K, V], key: K) -> Map[K, V]` |  | R-map-01（置き換え先） |
 | `set` | `fn map.set(m: Map[K, V], key: K, value: V) -> Map[K, V]` |  | R-map-01（置き換え先） |
 | `to_list` | `fn map.to_list(m: Map[K, V]) -> List[(K, V)]` | 改名（旧 `entries`） | R-map-07 |
-| `update` | `fn map.update(m: Map[K, V], key: K, f: (V) -> V) -> Map[K, V]` |  |  |
+| `update` | `fn map.update(m: Map[K, V], key: K, f: (V) -> V) -> Map[K, V]` | 意味変更: キーが無ければ abort | R-map-08 |
 | `upsert` | `fn map.upsert(m: Map[K, V], key: K, init: V, f: (V) -> V) -> Map[K, V]` |  |  |
 | `values` | `fn map.values(m: Map[K, V]) -> List[V]` |  |  |
 
@@ -1247,7 +1288,7 @@
 | `exp` | `fn math.exp(x: Float) -> Float` |  |  |
 | `expm1` | `fn math.expm1(x: Float) -> Float` | 新規 | R-math-04 |
 | `factorial` | `fn math.factorial(n: Int) -> Int` |  | —（大きな値は [L2-bigint](L2-bigint.md)） |
-| `hypot` | `fn math.hypot(x: Float, y: Float) -> Float` | 新規 | R-math-02 |
+| `hypot` | `fn math.hypot(a: Float, b: Float) -> Float` | 新規 | R-math-02 |
 | `log` | `fn math.log(x: Float) -> Float` |  |  |
 | `log10` | `fn math.log10(x: Float) -> Float` |  |  |
 | `log1p` | `fn math.log1p(x: Float) -> Float` | 新規 | R-math-04 |
@@ -1303,7 +1344,7 @@
 | `to_lists` | `fn matrix.to_lists(m: Matrix) -> List[List[Float]]` |  |  |
 | `transpose` | `fn matrix.transpose(m: Matrix) -> Matrix` |  |  |
 | `zeros` | `fn matrix.zeros(rows: Int, cols: Int) -> Matrix` |  |  |
-| `zip_with` | `fn matrix.zip_with(m: Matrix, b: Matrix, f: (Float, Float) -> Float) -> Matrix` | 新規 | R-matrix-09 |
+| `zip_with` | `fn matrix.zip_with(a: Matrix, b: Matrix, f: (Float, Float) -> Float) -> Matrix` | 新規 | R-matrix-09 |
 
 撤去（24）:
 
@@ -1527,7 +1568,7 @@
 | `to_list` | `fn result.to_list(r: Result[A, E]) -> List[A]` |  | R-option-04 |
 | `to_option` | `fn result.to_option(r: Result[A, E]) -> A?` |  | `?` の脱糖先 |
 | `unwrap_or_else` | `fn result.unwrap_or_else(r: Result[A, E], f: (E) -> A) -> A` |  | `??` の脱糖先（ADR-0005 D1） |
-| `zip` | `fn result.zip(r: Result[A, E], b: Result[B, E]) -> Result[(A, B), E]` |  | R-option-04 |
+| `zip` | `fn result.zip(a: Result[A, E], b: Result[B, E]) -> Result[(A, B), E]` |  | R-option-04 |
 
 撤去（1）:
 
@@ -1546,23 +1587,23 @@
 | `clear` | `fn set.clear(mut s: Set[A]) -> Unit` | 新規 | R-L0-04（`clear` の行列） |
 | `contains` | `fn set.contains(s: Set[A], x: A) -> Bool` |  |  |
 | `count` | `fn set.count(s: Set[A], f: (A) -> Bool) -> Int` | 新規 | R-set-01 |
-| `difference` | `fn set.difference(s: Set[A], b: Set[A]) -> Set[A]` |  |  |
+| `difference` | `fn set.difference(a: Set[A], b: Set[A]) -> Set[A]` |  |  |
 | `filter` | `fn set.filter(s: Set[A], f: (A) -> Bool) -> Set[A]` |  | R-map-06 |
 | `find` | `fn set.find(s: Set[A], f: (A) -> Bool) -> A?` | 新規 | R-set-01 |
 | `fold` | `fn set.fold(s: Set[A], init: B, f: (B, A) -> B) -> B` |  | R-map-06 |
 | `from_list` | `fn set.from_list(xs: List[A]) -> Set[A]` |  | — (R-L0-07) |
 | `insert` | `fn set.insert(s: Set[A], x: A) -> Set[A]` |  | R-set-04 |
-| `intersection` | `fn set.intersection(s: Set[A], b: Set[A]) -> Set[A]` |  |  |
-| `is_disjoint` | `fn set.is_disjoint(s: Set[A], b: Set[A]) -> Bool` |  |  |
+| `intersection` | `fn set.intersection(a: Set[A], b: Set[A]) -> Set[A]` |  |  |
+| `is_disjoint` | `fn set.is_disjoint(a: Set[A], b: Set[A]) -> Bool` |  |  |
 | `is_empty` | `fn set.is_empty(s: Set[A]) -> Bool` |  |  |
-| `is_subset` | `fn set.is_subset(s: Set[A], b: Set[A]) -> Bool` |  | R-set-02 |
+| `is_subset` | `fn set.is_subset(a: Set[A], b: Set[A]) -> Bool` |  | R-set-02 |
 | `len` | `fn set.len(s: Set[A]) -> Int` |  | — (R-L0-11) |
 | `map` | `fn set.map(s: Set[A], f: (A) -> B) -> Set[B]` |  | R-map-06 |
 | `new` | `fn set.new() -> Set[A]` |  |  |
 | `remove` | `fn set.remove(s: Set[A], x: A) -> Set[A]` |  |  |
-| `symmetric_difference` | `fn set.symmetric_difference(s: Set[A], b: Set[A]) -> Set[A]` |  |  |
+| `symmetric_difference` | `fn set.symmetric_difference(a: Set[A], b: Set[A]) -> Set[A]` |  |  |
 | `to_list` | `fn set.to_list(s: Set[A]) -> List[A]` |  |  |
-| `union` | `fn set.union(s: Set[A], b: Set[A]) -> Set[A]` |  |  |
+| `union` | `fn set.union(a: Set[A], b: Set[A]) -> Set[A]` |  |  |
 
 ## string
 
@@ -1604,7 +1645,7 @@
 | `replace` | `fn string.replace(s: String, from: String, to: String) -> String` |  |  |
 | `replace_first` | `fn string.replace_first(s: String, from: String, to: String) -> String` |  |  |
 | `reverse` | `fn string.reverse(s: String) -> String` |  |  |
-| `slice` | `fn string.slice(s: String, start: Int, end: Int) -> String` | 意味変更: `end` の既定値を外す。2 引数は `drop` | R-string-08 |
+| `slice` | `fn string.slice(s: String, start: Int, end: Int) -> String` | 意味変更: `end` の既定値を外す。2 引数は `drop` | R-string-15 |
 | `split` | `fn string.split(s: String, sep: String) -> List[String]` |  |  |
 | `split_once` | `fn string.split_once(s: String, sep: String) -> (String, String)?` |  |  |
 | `starts_with` | `fn string.starts_with(s: String, prefix: String) -> Bool` |  |  |
@@ -1612,7 +1653,7 @@
 | `strip_suffix` | `fn string.strip_suffix(s: String, suffix: String) -> String?` |  |  |
 | `take` | `fn string.take(s: String, n: Int) -> String` |  |  |
 | `take_end` | `fn string.take_end(s: String, n: Int) -> String` |  |  |
-| `to_codepoint` | `fn string.to_codepoint(s: String) -> Int?` | 改名（旧 `codepoint`） | R-string-12 |
+| `to_codepoint` | `fn string.to_codepoint(s: String) -> Int??` | 改名（旧 `codepoint`）。1 コードポイントちょうどでなければ none | R-string-12、R-string-14 |
 | `to_lower` | `fn string.to_lower(s: String) -> String` |  |  |
 | `to_upper` | `fn string.to_upper(s: String) -> String` |  |  |
 | `to_utf16` | `fn string.to_utf16(s: String) -> List[Int]` | 新規 | R-string-07 |
@@ -1653,8 +1694,11 @@
 
 | 関数 | シグネチャ（リデザイン後） | 変化 | 案 |
 |---|---|---|---|
+| `clamp` | `fn uint16.clamp(x: UInt16, lo: UInt16, hi: UInt16) -> UInt16` | 新規 | R-sized-08 |
 | `compare` | `fn uint16.compare(a: UInt16, b: UInt16) -> Int` | 新規 | R-sized-02 |
+| `max` | `fn uint16.max(a: UInt16, b: UInt16) -> UInt16` | 新規 | R-sized-08 |
 | `max_value` | `fn uint16.max_value() -> UInt16` |  |  |
+| `min` | `fn uint16.min(a: UInt16, b: UInt16) -> UInt16` | 新規 | R-sized-08 |
 | `min_value` | `fn uint16.min_value() -> UInt16` |  |  |
 | `parse` | `fn uint16.parse(s: String) -> Result[UInt16, String]` | 新規 | R-sized-02 |
 | `parse_radix` | `fn uint16.parse_radix(s: String, radix: Int) -> Result[UInt16, String]` | 新規 | R-sized-06 |
@@ -1662,19 +1706,19 @@
 | `to_float32` | `fn uint16.to_float32(x: UInt16) -> Float32` |  | R-sized-01（行列のセル） |
 | `to_float64` | `fn uint16.to_float64(x: UInt16) -> Float64` |  | R-sized-01（行列のセル） |
 | `to_int` | `fn uint16.to_int(x: UInt16) -> Int` | 新規 | R-sized-01 |
-| `to_int16` | `fn uint16.to_int16(x: UInt16) -> Int16` |  | R-sized-01（行列のセル） |
+| `to_int16` | `fn uint16.to_int16(x: UInt16) -> Int16` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_int16_checked` | `fn uint16.to_int16_checked(x: UInt16) -> Int16?` |  | R-sized-01（行列のセル） |
 | `to_int16_saturating` | `fn uint16.to_int16_saturating(x: UInt16) -> Int16` |  | R-sized-01（行列のセル） |
 | `to_int32` | `fn uint16.to_int32(x: UInt16) -> Int32` |  | R-sized-01（行列のセル） |
 | `to_int64` | `fn uint16.to_int64(x: UInt16) -> Int64` |  | R-sized-01（行列のセル） |
-| `to_int8` | `fn uint16.to_int8(x: UInt16) -> Int8` |  | R-sized-01（行列のセル） |
+| `to_int8` | `fn uint16.to_int8(x: UInt16) -> Int8` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_int8_checked` | `fn uint16.to_int8_checked(x: UInt16) -> Int8?` |  | R-sized-01（行列のセル） |
 | `to_int8_saturating` | `fn uint16.to_int8_saturating(x: UInt16) -> Int8` |  | R-sized-01（行列のセル） |
 | `to_string` | `fn uint16.to_string(x: UInt16) -> String` |  |  |
 | `to_string_radix` | `fn uint16.to_string_radix(x: UInt16, radix: Int) -> String` | 新規 | R-sized-06 |
 | `to_uint32` | `fn uint16.to_uint32(x: UInt16) -> UInt32` |  | R-sized-01（行列のセル） |
 | `to_uint64` | `fn uint16.to_uint64(x: UInt16) -> UInt64` |  | R-sized-01（行列のセル） |
-| `to_uint8` | `fn uint16.to_uint8(x: UInt16) -> UInt8` |  | R-sized-01（行列のセル） |
+| `to_uint8` | `fn uint16.to_uint8(x: UInt16) -> UInt8` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_uint8_checked` | `fn uint16.to_uint8_checked(x: UInt16) -> UInt8?` |  | R-sized-01（行列のセル） |
 | `to_uint8_saturating` | `fn uint16.to_uint8_saturating(x: UInt16) -> UInt8` |  | R-sized-01（行列のセル） |
 
@@ -1684,8 +1728,11 @@
 
 | 関数 | シグネチャ（リデザイン後） | 変化 | 案 |
 |---|---|---|---|
+| `clamp` | `fn uint32.clamp(x: UInt32, lo: UInt32, hi: UInt32) -> UInt32` | 新規 | R-sized-08 |
 | `compare` | `fn uint32.compare(a: UInt32, b: UInt32) -> Int` | 新規 | R-sized-02 |
+| `max` | `fn uint32.max(a: UInt32, b: UInt32) -> UInt32` | 新規 | R-sized-08 |
 | `max_value` | `fn uint32.max_value() -> UInt32` |  |  |
+| `min` | `fn uint32.min(a: UInt32, b: UInt32) -> UInt32` | 新規 | R-sized-08 |
 | `min_value` | `fn uint32.min_value() -> UInt32` |  |  |
 | `parse` | `fn uint32.parse(s: String) -> Result[UInt32, String]` | 新規 | R-sized-02 |
 | `parse_radix` | `fn uint32.parse_radix(s: String, radix: Int) -> Result[UInt32, String]` | 新規 | R-sized-06 |
@@ -1694,23 +1741,23 @@
 | `to_float32_checked` | `fn uint32.to_float32_checked(x: UInt32) -> Float32?` | 新規 | R-sized-01 |
 | `to_float64` | `fn uint32.to_float64(x: UInt32) -> Float64` |  | R-sized-01（行列のセル） |
 | `to_int` | `fn uint32.to_int(x: UInt32) -> Int` | 新規 | R-sized-01 |
-| `to_int16` | `fn uint32.to_int16(x: UInt32) -> Int16` |  | R-sized-01（行列のセル） |
+| `to_int16` | `fn uint32.to_int16(x: UInt32) -> Int16` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_int16_checked` | `fn uint32.to_int16_checked(x: UInt32) -> Int16?` |  | R-sized-01（行列のセル） |
 | `to_int16_saturating` | `fn uint32.to_int16_saturating(x: UInt32) -> Int16` |  | R-sized-01（行列のセル） |
-| `to_int32` | `fn uint32.to_int32(x: UInt32) -> Int32` |  | R-sized-01（行列のセル） |
+| `to_int32` | `fn uint32.to_int32(x: UInt32) -> Int32` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_int32_checked` | `fn uint32.to_int32_checked(x: UInt32) -> Int32?` |  | R-sized-01（行列のセル） |
 | `to_int32_saturating` | `fn uint32.to_int32_saturating(x: UInt32) -> Int32` |  | R-sized-01（行列のセル） |
 | `to_int64` | `fn uint32.to_int64(x: UInt32) -> Int64` |  | R-sized-01（行列のセル） |
-| `to_int8` | `fn uint32.to_int8(x: UInt32) -> Int8` |  | R-sized-01（行列のセル） |
+| `to_int8` | `fn uint32.to_int8(x: UInt32) -> Int8` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_int8_checked` | `fn uint32.to_int8_checked(x: UInt32) -> Int8?` |  | R-sized-01（行列のセル） |
 | `to_int8_saturating` | `fn uint32.to_int8_saturating(x: UInt32) -> Int8` |  | R-sized-01（行列のセル） |
 | `to_string` | `fn uint32.to_string(x: UInt32) -> String` |  |  |
 | `to_string_radix` | `fn uint32.to_string_radix(x: UInt32, radix: Int) -> String` | 新規 | R-sized-06 |
-| `to_uint16` | `fn uint32.to_uint16(x: UInt32) -> UInt16` |  | R-sized-01（行列のセル） |
+| `to_uint16` | `fn uint32.to_uint16(x: UInt32) -> UInt16` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_uint16_checked` | `fn uint32.to_uint16_checked(x: UInt32) -> UInt16?` |  | R-sized-01（行列のセル） |
 | `to_uint16_saturating` | `fn uint32.to_uint16_saturating(x: UInt32) -> UInt16` |  | R-sized-01（行列のセル） |
 | `to_uint64` | `fn uint32.to_uint64(x: UInt32) -> UInt64` |  | R-sized-01（行列のセル） |
-| `to_uint8` | `fn uint32.to_uint8(x: UInt32) -> UInt8` |  | R-sized-01（行列のセル） |
+| `to_uint8` | `fn uint32.to_uint8(x: UInt32) -> UInt8` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_uint8_checked` | `fn uint32.to_uint8_checked(x: UInt32) -> UInt8?` |  | R-sized-01（行列のセル） |
 | `to_uint8_saturating` | `fn uint32.to_uint8_saturating(x: UInt32) -> UInt8` |  | R-sized-01（行列のセル） |
 
@@ -1720,8 +1767,11 @@
 
 | 関数 | シグネチャ（リデザイン後） | 変化 | 案 |
 |---|---|---|---|
+| `clamp` | `fn uint64.clamp(x: UInt64, lo: UInt64, hi: UInt64) -> UInt64` | 新規 | R-sized-08 |
 | `compare` | `fn uint64.compare(a: UInt64, b: UInt64) -> Int` | 新規 | R-sized-02 |
+| `max` | `fn uint64.max(a: UInt64, b: UInt64) -> UInt64` | 新規 | R-sized-08 |
 | `max_value` | `fn uint64.max_value() -> UInt64` |  |  |
+| `min` | `fn uint64.min(a: UInt64, b: UInt64) -> UInt64` | 新規 | R-sized-08 |
 | `min_value` | `fn uint64.min_value() -> UInt64` |  |  |
 | `parse` | `fn uint64.parse(s: String) -> Result[UInt64, String]` | 新規 | R-sized-02 |
 | `parse_radix` | `fn uint64.parse_radix(s: String, radix: Int) -> Result[UInt64, String]` | 新規 | R-sized-06 |
@@ -1733,29 +1783,29 @@
 | `to_float64_checked` | `fn uint64.to_float64_checked(x: UInt64) -> Float64?` | 新規 | R-sized-01 |
 | `to_float_checked` | `fn uint64.to_float_checked(x: UInt64) -> Float?` | 新規 | R-sized-01 |
 | `to_int` | `fn uint64.to_int(x: UInt64) -> Int` | 新規 | R-sized-01 |
-| `to_int16` | `fn uint64.to_int16(x: UInt64) -> Int16` |  | R-sized-01（行列のセル） |
+| `to_int16` | `fn uint64.to_int16(x: UInt64) -> Int16` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_int16_checked` | `fn uint64.to_int16_checked(x: UInt64) -> Int16?` |  | R-sized-01（行列のセル） |
 | `to_int16_saturating` | `fn uint64.to_int16_saturating(x: UInt64) -> Int16` |  | R-sized-01（行列のセル） |
-| `to_int32` | `fn uint64.to_int32(x: UInt64) -> Int32` |  | R-sized-01（行列のセル） |
+| `to_int32` | `fn uint64.to_int32(x: UInt64) -> Int32` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_int32_checked` | `fn uint64.to_int32_checked(x: UInt64) -> Int32?` |  | R-sized-01（行列のセル） |
 | `to_int32_saturating` | `fn uint64.to_int32_saturating(x: UInt64) -> Int32` |  | R-sized-01（行列のセル） |
-| `to_int64` | `fn uint64.to_int64(x: UInt64) -> Int64` |  | R-sized-01（行列のセル） |
+| `to_int64` | `fn uint64.to_int64(x: UInt64) -> Int64` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_int64_checked` | `fn uint64.to_int64_checked(x: UInt64) -> Int64?` |  | R-sized-01（行列のセル） |
 | `to_int64_saturating` | `fn uint64.to_int64_saturating(x: UInt64) -> Int64` |  | R-sized-01（行列のセル） |
-| `to_int8` | `fn uint64.to_int8(x: UInt64) -> Int8` |  | R-sized-01（行列のセル） |
+| `to_int8` | `fn uint64.to_int8(x: UInt64) -> Int8` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_int8_checked` | `fn uint64.to_int8_checked(x: UInt64) -> Int8?` |  | R-sized-01（行列のセル） |
 | `to_int8_saturating` | `fn uint64.to_int8_saturating(x: UInt64) -> Int8` |  | R-sized-01（行列のセル） |
 | `to_int_checked` | `fn uint64.to_int_checked(x: UInt64) -> Int?` | 新規 | R-sized-01 |
 | `to_int_saturating` | `fn uint64.to_int_saturating(x: UInt64) -> Int` | 新規 | R-sized-01 |
 | `to_string` | `fn uint64.to_string(x: UInt64) -> String` |  |  |
 | `to_string_radix` | `fn uint64.to_string_radix(x: UInt64, radix: Int) -> String` | 新規 | R-sized-06 |
-| `to_uint16` | `fn uint64.to_uint16(x: UInt64) -> UInt16` |  | R-sized-01（行列のセル） |
+| `to_uint16` | `fn uint64.to_uint16(x: UInt64) -> UInt16` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_uint16_checked` | `fn uint64.to_uint16_checked(x: UInt64) -> UInt16?` |  | R-sized-01（行列のセル） |
 | `to_uint16_saturating` | `fn uint64.to_uint16_saturating(x: UInt64) -> UInt16` |  | R-sized-01（行列のセル） |
-| `to_uint32` | `fn uint64.to_uint32(x: UInt64) -> UInt32` |  | R-sized-01（行列のセル） |
+| `to_uint32` | `fn uint64.to_uint32(x: UInt64) -> UInt32` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_uint32_checked` | `fn uint64.to_uint32_checked(x: UInt64) -> UInt32?` |  | R-sized-01（行列のセル） |
 | `to_uint32_saturating` | `fn uint64.to_uint32_saturating(x: UInt64) -> UInt32` |  | R-sized-01（行列のセル） |
-| `to_uint8` | `fn uint64.to_uint8(x: UInt64) -> UInt8` |  | R-sized-01（行列のセル） |
+| `to_uint8` | `fn uint64.to_uint8(x: UInt64) -> UInt8` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_uint8_checked` | `fn uint64.to_uint8_checked(x: UInt64) -> UInt8?` |  | R-sized-01（行列のセル） |
 | `to_uint8_saturating` | `fn uint64.to_uint8_saturating(x: UInt64) -> UInt8` |  | R-sized-01（行列のセル） |
 
@@ -1765,8 +1815,11 @@
 
 | 関数 | シグネチャ（リデザイン後） | 変化 | 案 |
 |---|---|---|---|
+| `clamp` | `fn uint8.clamp(x: UInt8, lo: UInt8, hi: UInt8) -> UInt8` | 新規 | R-sized-08 |
 | `compare` | `fn uint8.compare(a: UInt8, b: UInt8) -> Int` | 新規 | R-sized-02 |
+| `max` | `fn uint8.max(a: UInt8, b: UInt8) -> UInt8` | 新規 | R-sized-08 |
 | `max_value` | `fn uint8.max_value() -> UInt8` |  |  |
+| `min` | `fn uint8.min(a: UInt8, b: UInt8) -> UInt8` | 新規 | R-sized-08 |
 | `min_value` | `fn uint8.min_value() -> UInt8` |  |  |
 | `parse` | `fn uint8.parse(s: String) -> Result[UInt8, String]` | 新規 | R-sized-02 |
 | `parse_radix` | `fn uint8.parse_radix(s: String, radix: Int) -> Result[UInt8, String]` | 新規 | R-sized-06 |
@@ -1777,7 +1830,7 @@
 | `to_int16` | `fn uint8.to_int16(x: UInt8) -> Int16` |  | R-sized-01（行列のセル） |
 | `to_int32` | `fn uint8.to_int32(x: UInt8) -> Int32` |  | R-sized-01（行列のセル） |
 | `to_int64` | `fn uint8.to_int64(x: UInt8) -> Int64` |  | R-sized-01（行列のセル） |
-| `to_int8` | `fn uint8.to_int8(x: UInt8) -> Int8` |  | R-sized-01（行列のセル） |
+| `to_int8` | `fn uint8.to_int8(x: UInt8) -> Int8` | 意味変更: 範囲外・NaN は abort | R-L0-32 |
 | `to_int8_checked` | `fn uint8.to_int8_checked(x: UInt8) -> Int8?` |  | R-sized-01（行列のセル） |
 | `to_int8_saturating` | `fn uint8.to_int8_saturating(x: UInt8) -> Int8` |  | R-sized-01（行列のセル） |
 | `to_string` | `fn uint8.to_string(x: UInt8) -> String` |  |  |
@@ -1869,7 +1922,7 @@
 | `index` | `fn value.index(p: Path, i: Int) -> Path` | 新規 | R-value-03 |
 | `int` | `fn value.int(n: Int) -> Value` |  | R-value-02 |
 | `key` | `fn value.key(p: Path, name: String) -> Path` | 新規 | R-value-03 |
-| `merge` | `fn value.merge(v: Value, b: Value) -> Value` |  |  |
+| `merge` | `fn value.merge(a: Value, b: Value) -> Value` |  |  |
 | `null` | `fn value.null() -> Value` |  |  |
 | `object` | `fn value.object(xs: List[(String, Value)]) -> Value` |  | R-value-02 |
 | `omit` | `fn value.omit(v: Value, keys: List[String]) -> Value` |  |  |
@@ -1918,3 +1971,69 @@
 | `chain` | `"${a}: ${b}"`（文字列の埋め込み） | R-error-01 |
 | `context` | `result.map_err(r, (e) => "${msg}: ${e}")` | R-error-01、R-error-02 |
 | `message` | `match`、または `result.to_err_option(r) ?? ""` | R-error-01 |
+
+
+## 採らなかった案・保留の案と理由
+
+レビューで同じ指摘を繰り返さないよう、× と保留の案（58 件）を理由の最初の 1 文と一緒に載せます。全文は各ページの案にあります。
+
+| 案 | 内容 | 判定 | 理由 |
+|---|---|---|---|
+| [R-L0-18](L0-conventions.md#r-l0-18-型を変換する演算子-as-は足さない---不採用) | 型を変換する演算子 `as` は足さない | × 不採用 | のまとめ: 数の変換は R-L0-08 の名前つき関数があり、R-L0-01（1 つの役割に綴りは 1 つ）に反します。 |
+| [R-L0-20](L0-conventions.md#r-l0-20-critical-プロファイルで黙って折り返す-to_型-を拒む--保留) | critical プロファイルで、黙って折り返す `to_<型>` を拒む | 保留 | いまの critical プロファイル（ALS の bounded 規則）が保証するのは、安全さと資源の上限で、計算の正しさは含みません。 |
+| [R-L0-21](L0-conventions.md#r-l0-21-無印の-to_型-をはみ出したら失敗する版に変える--保留) | 無印の `to_<型>` を、はみ出したら失敗する版に変える | 保留 | 多数派の裏付けがないので、LLM が実際に黙って折り返すバグをどれだけ書くかを測ってから決めます。測定は almide-dojo で行います。 |
+| [R-L1-20](L1-categories.md#r-l1-20-固定幅の数のモジュールint8uint64float32float64---統合しない) | 固定幅の数のモジュール（`int8`〜`uint64`、`float32`、`float64`） | × 統合しない | `x \|> int8.to_int16` の形で、パイプの先頭の型からモジュールが決まります。 |
+| [R-L1-21](L1-categories.md#r-l1-21-compute-と-duration---統合しないadr-0001) | `compute` と `duration` | × 統合しない（ADR-0001） | ADR-0001 が、決定的な計算時間（`Compute`）と実時間（`Duration`）を、互いに変換できない別の型と決めています。 |
+| [R-L1-23](L1-categories.md#r-l1-23-hex-と-base64-を別のモジュールのまま残す---まとめない) | `hex` と `base64` を別のモジュールのまま残す | × まとめない | 5 言語は 1 か所にまとめていますが、まとめたモジュールの名前が揃っていません（Elixir は `Base`、Deno は `@std/encoding`、Python は `base64` の中の `b16encode`）。 |
+| [R-L1-29](L1-categories.md#r-l1-29-html-と-testing---動かさない) | `html` と `testing` | × 動かさない | `html` は 5 関数です。 |
+| [R-base64-02](L2-base64.md#r-base64-02--を付けない符号化を足す---不採用) | `=` を付けない符号化を足す | × 不採用 | 5 言語が持ちますが、どれも引数か設定（`padding: false`、`omitPadding`）で、別の名前ではありません。 |
+| [R-base64-03](L2-base64.md#r-base64-03-hex-とモジュールをまとめる---不採用r-l1-23) | hex とモジュールをまとめる | × 不採用（R-L1-23） | R-L1-23 のとおりです。まとめたモジュールの名前に多数派がありません。 |
+| [R-bigint-02](L2-bigint.md#r-bigint-02-123n-のような-bigint-のリテラルを足す---不採用) | `123n` のような BigInt のリテラルを足す | × 不採用 | 足しません。`bigint.parse("123…")!` と `int.to_bigint(123)` で書きます。 |
+| [R-bigint-03](L2-bigint.md#r-bigint-03-int-と-bigint-を混ぜた演算を自動で広げる---不採用) | `Int` と `BigInt` を混ぜた演算を自動で広げる | × 不採用 | しません。`a + b` で片方が `Int`、片方が `BigInt` なら型エラーにし、診断のヒントで `int.to_bigint(a)` を示します。 |
+| [R-bytes-21](L2-bytes.md#r-bytes-21-bytesskip-を-next_-の形にする---不採用) | `bytes.skip` を `next_` の形にする | × 不採用 | `skip` は値を読まずに位置だけを進めるので、`(値, 次の状態)` の値がありません。`(Unit, Int)` を返す形は、読む側が捨てる値を増やすだけです。 |
+| [R-bytes-24](L2-bytes.md#r-bytes-24-bytesset-と-put_u8-を-1-つにする---不採用) | `bytes.set` と `put_u8` を 1 つにする | × 不採用 | `set(b, i, v) -> Bytes` はコピーを返す関数、`put_u8(mut b, pos, v)` はその場で書き換える関数で、R-L0-04（コピーが既定、その場書き換えは決まった動詞）の対です。 |
+| [R-compute-02](L2-compute.md#r-compute-02-duration-と統合するまたは読み出し関数を足す---不採用) | `duration` と統合する、または読み出し関数を足す | × 不採用 | どちらもしません。ADR-0001 の決定（2 つの時計は互いに変換できない別の型、読み出しは S7 で省略）と、L1 R-L1-21 のとおりです。 |
+| [R-datetime-02](L2-datetime.md#r-datetime-02-時刻専用の型instant-などを作る---不採用) | 時刻専用の型（`Instant` など）を作る | × 不採用 | 型を作った場合、`Duration` から数値を読み出す関数がない（ADR-0001 S7）ので、`diff` の結果を秒で表示する道がなくなります。いまの `Int` なら 1 通りに書けます。 |
+| [R-datetime-04](L2-datetime.md#r-datetime-04-weekday-を数を返す関数にする---不採用) | `weekday` を数を返す関数にする | × 不採用 | 文字列と数を取り違えると型検査で止まるので、静かに外れることはありません。 |
+| [R-datetime-05](L2-datetime.md#r-datetime-05-format-の--を--にする---不採用) | `format` の `%%` を `%` にする | × 不採用 | R-L0-14 の 4（同じ名前のまま、旧い書き方が型の検査を通って別の結果になる変更はしない。`%%` の出力を変えると、まさにこの形になる）。 |
+| [R-duration-02](L2-duration.md#r-duration-02-読み出し関数小数の構築子日の単位を足す---不採用) | 読み出し関数・小数の構築子・日の単位を足す | × 不採用 | 足しません。ADR-0001 S7 の台帳のとおりで、2026-10-16 の裁定（読み出し関数を足す案の撤回）とも同じです。 |
+| [R-duration-04](L2-duration.md#r-duration-04-min分を-minutes-などの完全な綴りにする---不採用) | `min`（分）を `minutes` などの完全な綴りにする | × 不採用 | 6 つの単位の綴りは ADR-0001 S2 が決めています。`duration.min(a, b)` と最小値のつもりで書くと引数の数が合わず E004 になるので、黙って違う値にはなりません。 |
+| [R-error-02](L2-error.md#r-error-02-errorcontext-を-resultcontext-として残す---不採用) | `error.context` を `result.context` として残す | × 不採用 | 再検討の条件は ADR-0004 の Falsifier 3（lint があっても `${e}` の書き忘れが Dojo で多く測られた場合）です。その証拠はまだありません。 |
+| [R-float-06](L2-float.md#r-float-06-floatminmax-の-nan-の扱いを-listminmax-とそろえる--保留) | `float.min`/`max` の NaN の扱いを `list.min`/`max` とそろえる | 保留 | NaN を伝える言語（Go・JS・Kotlin・OCaml）と無視する言語（Rust・Swift）のどちらも 5 言語に届かず、契約 C-049・C-306 で決めた動きを変える話です。 |
+| [R-float-08](L2-float.md#r-float-08-float-の床方向の剰余-floatmod-を足す---不採用) | Float の床方向の剰余 `float.mod` を足す | × 不採用 | 床方向の剰余を Float で持つのは Python の `%`、Kotlin の `mod`、Gleam の `float.modulo` の 3 言語で、5 言語の基準に届きません。 |
+| [R-fs-04](L2-fs.md#r-fs-04-59-以上が持つが-almide-に無い役割---不採用いまは足さない) | 5/9 以上が持つが Almide に無い役割 | × 不採用（いまは足さない） |  |
+| [R-hash-04](L2-hash.md#r-hash-04-_hex-のセルの入力を-bytes-に変える---不採用) | `_hex` のセルの入力を Bytes に変える | × 不採用 | 旧い呼び出しは型エラーになるので R-L0-14.4 は満たしますが、使用数の多い `sha256_hex(s)`（spec 16 / docs 3）を全部 `bytes.from_string` で包むことになります。 |
+| [R-heap-04](L2-heap.md#r-heap-04-new_minnew_max-に分ける---不採用) | `new_min`・`new_max` に分ける | × 不採用 | 既定は「最小が先」で、Python・Go・OCaml・Kotlin と同じです（R-L1-02）。最大を先にしたいときは `heap.new_with((a, b) => b - a)` か `new_by` で書きます。 |
+| [R-hex-02](L2-hex.md#r-hex-02-decode_upper-を足す---不採用) | `decode_upper` を足す | × 不採用 | 大文字・小文字を区別して拒む復号を標準の既定にしているのは Python の `b16decode` だけです(F)。規則 2 のとおり、書き方の違いは `decode` が受け取ります。 |
+| [R-html-02](L2-html.md#r-html-02-unescape-を足す---不採用) | `unescape` を足す | × 不採用 | 標準に持つのは Go・Python・Deno の 3 言語で、L1 の基準（5 言語以上）に届きません。HTML を読む処理は package（HTML の構文解析器）の関心事です。 |
+| [R-html-03](L2-html.md#r-html-03-safehtml-の列をまとめる-htmljoin-を足す---不採用) | `SafeHtml` の列をまとめる `html.join` を足す | × 不採用 | エスケープの型を持つ言語が 2 つしかなく、5 言語の基準に届きません。`list.fold(xs, html.empty(), html.concat)` で書けます。 |
+| [R-http-07](L2-http.md#r-http-07-応答のヘッダの-get_header-と要求の-req_header-の不揃い---不採用規則を書く-r-http-12-で解消) | 応答のヘッダの `get_header` と要求の `req_header` の不揃い | × 不採用（規則を書く。→ R-http-12 で解消） | 1 つのヘッダを読む綴りは Gleam `get_header` (F)、Go `Header.Get`、JS `headers.get` と「get」を含むものが多く、`header` に改名する利点は小さいです。 |
+| [R-int-05](L2-int.md#r-int-05-bandborbxor-などを多数派の綴りに改名する---不採用) | `band`/`bor`/`bxor` などを多数派の綴りに改名する | × 不採用 | 演算子 `&` を書くと字句エラーになり、ヒントは出ますが `int.band` を名指ししません。改名ではなく診断で助けるのが筋なので、E0xx（unknown-char）のヒントに「ビット演算は `int.band` / `int.bor` / `int.bxor` / `int.bshl` / `int.bshr`」を出す変更を、別の小さな issue にします。 |
+| [R-list-12](L2-list.md#r-list-12-多数派に届かない役割は足さない---不採用) | 多数派に届かない役割は足さない | × 不採用 | 足さないかわりに、他言語の綴りを書いたときの「もしかして」を R-list-11 で出します。 |
+| [R-list-18](L2-list.md#r-list-18-listrepeat-を列全体の繰り返しにする---不採用) | `list.repeat` を列全体の繰り返しにする | × 不採用 | `string.repeat` と `bytes.repeat` は列全体を繰り返し、`list.repeat(v, n)` は 1 つの値を n 個並べます。 |
+| [R-map-03](L2-map.md#r-map-03-mapto_list-を足す---不採用) | `map.to_list` を足す | × 不採用 | `set.to_list` と `map.from_list` があるので、LLM は `map.to_list` を推測で書きます。足すと同義語になるので、ヒントで受け止めます。 |
+| [R-map-04](L2-map.md#r-map-04-mapmap-を-map_values-に改名するまたはコールバックを-k-v-にする---不採用) | `map.map` を `map_values` に改名する、またはコールバックを `(K, V)` にする | × 不採用 | `map.filter` などが `(K, V)` なのに `map.map` は `(V)` なので、`(k, v) =>` と書く誤りはあり得ます。ただしそのときは型エラー（引数の数の不一致）になり、黙って通りません。 |
+| [R-map-05](L2-map.md#r-map-05-取り出して消す-pop合わせ方つきの-merge_withキーを変換する-map_keys-を足す---不採用) | 取り出して消す `pop`、合わせ方つきの `merge_with`、キーを変換する `map_keys` を足す | × 不採用 | R-L0-04（`pop` はその場で末尾から取る動詞）、L1 の追加基準（5/9 以上）、R-L0-00。 |
+| [R-matrix-07](L2-matrix.md#r-matrix-07-mul-を-matmul-に改名し要素ごとの積を足す---不採用) | `mul` を `matmul` に改名し、要素ごとの積を足す | × 不採用 | `add`・`sub`・`div` が要素ごとで `mul` だけが行列の積という並びは紛らわしいので、doc の 1 行目と CHEATSHEET の matrix の行に「`mul` は行列の積。要素ごとの積は `map` で」と書きます。 |
+| [R-net-05](L2-net.md#r-net-05-tcp-のハンドルを不透明な型にする---不採用) | TCP のハンドルを不透明な型にする | × 不採用 | `TcpStream`・`TcpListener` は `Int` の別名で、取り違えは型で止まりません。不透明な型にする変更は、旧い書き方を型エラーにするだけで黙って結果を変えないので、R-L0-14 の 4 では許されます。 |
+| [R-option-03](L2-option.md#r-option-03-抜けている役割の関数を足さない---不採用) | 抜けている役割の関数を足さない | × 不採用 | `or` を足すと「先に評価する `or`」と「必要なときだけ評価する `or_else`」の 2 つになり、ADR-0005 が `unwrap_or` で解消した二重綴りを作り直すことになります。`?? some(9)` は型エラー（E001）になり、`option.or_else` に誘導されます。 |
+| [R-random-04](L2-random.md#r-random-04-randomint-の-max--min-を-abort-にする---不採用) | `random.int` の `max < min` を abort にする | × 不採用 | 変えません。`max <= min` で `min` を返す規則は、失敗を隠す値ではなく、範囲が 1 点に潰れたときの決まった答えで、R-L0-06 の 4（失敗しうる構築・変換は番兵を返さない）の対象でもありません。 |
+| [R-random-06](L2-random.md#r-random-06-randomintmin-max-の上端を含むことを変える---不採用文書だけ) | `random.int(min, max)` の上端を含むことを変える | × 不採用（文書だけ） | 上端を含まない言語が多い（Go・Kotlin・OCaml・Gleam・Rust）ものの、同じ名前で意味を変えることは R-L0-14.4 が許しません。 |
+| [R-regex-03](L2-regex.md#r-regex-03-パイプの取り違えを宣言の印で止める---不採用r-regex-02-の型で止まるため) | パイプの取り違えを、宣言の印で止める | × 不採用（R-regex-02 の型で止まるため） |  |
+| [R-regex-06](L2-regex.md#r-regex-06-名前つきグループを足さない---不採用) | 名前つきグループを足さない | × 不採用 | 位置で取り出す `captures` と同じ役割に 2 つ目の形ができます（R-L0-01）。名前つきの構文を書いた場合は、R-regex-02 で `regex.new` が「対応していない」と止めるので、黙って間違えることはありません。 |
+| [R-regex-09](L2-regex.md#r-regex-09-対象の文字列を第-1-引数にする---不採用) | 対象の文字列を第 1 引数にする | × 不採用 | `regex` のモジュールの主語は `Regex` で、R-L0-02・R-L0-03（関数は主語の型のモジュールに置き、主語を先頭にする）のとおりです。 |
+| [R-result-02](L2-result.md#r-result-02-resultfilter-の-3-引数を据え置く---不採用撤去も改名もしない) | `result.filter` の 3 引数を据え置く | × 不採用（撤去も改名もしない） | option から類推して `result.filter(r, pred)` と 2 引数で書くと、型エラー（引数の数）になり、黙って通ることはありません。err の値がないと err を作れないので、3 引数は意味から決まる形です。 |
+| [R-result-03](L2-result.md#r-result-03-resultto_err_option-を改名しない---不採用) | `result.to_err_option` を改名しない | × 不採用 | `to_option`（ok 側）と並ぶ `to_err_option`（err 側）は、R-L0-07 の `to_<先の型>` の形のままで、対で読めます。 |
+| [R-result-04](L2-result.md#r-result-04-抜けている役割の関数を足さない---不採用) | 抜けている役割の関数を足さない | × 不採用 | 2 つの関数を受け取る `fold` は、引数の順（ok が先か err が先か）が言語ごとに違い、書き間違いの元になります。`match r { ok(v) => .., err(e) => .. }` は順を名前で書けます。 |
+| [R-set-02](L2-set.md#r-set-02-setis_superset-を足す---不採用) | `set.is_superset` を足す | × 不採用 | 書き手が `set.is_superset` を書いたときのために、`ALIASES` に `("set", "is_superset", "set.is_subset (arguments swapped)")` を足します。 |
+| [R-set-03](L2-set.md#r-set-03-setpartition-を足す---不採用) | `set.partition` を足す | × 不採用 | L1 の追加基準（5/9 以上）、完全性の規則 1（family の 7 つに `partition` は入っていません）。 |
+| [R-set-04](L2-set.md#r-set-04-setinsert-を-setadd-に改名する---不採用) | `set.insert` を `set.add` に改名する | × 不採用 | `add` と書いた場合は `ALIASES` の行で `set.insert` に誘導します（R-set-01 で足す行）。黙って捨てられる誤りは、名前ではなく R-L0-05 で止めます。 |
+| [R-sized-04](L2-sized-numbers.md#r-sized-04-floatto_整数_saturating-8-関数を撤去する---取り消しr-l0-32) | `float.to_<整数>_saturating` 8 関数を撤去する | × 取り消し（R-L0-32） | R-L0-32 で無印の `float.to_int8` などが範囲外で abort になるので、`_saturating` は同義語でなくなり、いまの飽和の動きを持つ唯一のセルになります。 |
+| [R-sized-05](L2-sized-numbers.md#r-sized-05-固定幅のモジュールをまとめる算術関数を足す---不採用) | 固定幅のモジュールをまとめる・算術関数を足す | × 不採用 | 固定幅の型で算術がしたいときの書き方は「`to_int` してから `int.*`」の 1 通りにします。行列の `to_int` がそろう（R-sized-01）ので、この書き方がどの型でも同じ綴りになります。 |
+| [R-sized-07](L2-sized-numbers.md#r-sized-07-float32float64-に-is_nan-などの判定を足す---不採用-r-sized-08-で見直し) | `float32`・`float64` に `is_nan` などの判定を足す | × 不採用（→ R-sized-08 で見直し） | `float32.to_float` は値を失わないので、規則 8 の「`to_float` してから `float.*`」が正しく動きます。 |
+| [R-string-08](L2-string.md#r-string-08-stringsplit_whitespace-を足す---不採用) | `string.split_whitespace` を足す | × 不採用 | 専用の関数を持つのは 4/9（Rust (F)、Go `Fields` (F)、Python `split()` (F)、Elixir `split/1` (F)）で、L1 の「5 言語以上」に届きません。 |
+| [R-string-10](L2-string.md#r-string-10-指定文字の-trimsplitnコードポイントのリスト化を足す---不採用) | 指定文字の trim、`splitn`、コードポイントのリスト化を足す | × 不採用 | R-L0-00、L1 の判定基準。 |
+| [R-string-13](L2-string.md#r-string-13-stringcount-を述語で数える形にする---不採用) | `string.count` を述語で数える形にする | × 不採用 | 文字列の「数える」は、部分文字列の出現数が多数派です（Rust `matches().count()`・Go `strings.Count`・Python `str.count`・Elixir `String.count`…）。 |
+| [R-url-04](L2-url.md#r-url-04-url-の欄を-option-にする---不採用) | `Url` の欄を Option にする | × 不採用 | `query` と `fragment` の「無い」と「空」を区別したい場面は少なく、欄の型を変えると、すべての `u.query` の読みが壊れます（R-L0-14 の 4）。 |
+| [R-value-06](L2-value.md#r-value-06-構築子-str-を-string-に改名する---不採用) | 構築子 `str` を `string` に改名する | × 不採用 | `str`（作る）と `as_string`（読む）は役割が違うので、R-L0-00 の条件 1（同じ役割に 2 つの綴り）に当たりません。 |
+| [R-zlib-03](L2-zlib.md#r-zlib-03-圧縮の出力を両-target-で同じにしeffect-を外す--保留) | 圧縮の出力を両 target で同じにし、`effect` を外す | 保留 | native を host の zlib から self-host の符号化器に替えると、速さと圧縮率が落ちる見込みです。 |

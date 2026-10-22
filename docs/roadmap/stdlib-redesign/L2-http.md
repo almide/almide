@@ -115,7 +115,7 @@
 - (d) 追加 1（内部の `__set_body` を公開します）。
 - issue: #3974
 
-### R-http-07 応答のヘッダの `get_header` と要求の `req_header` の不揃い — × 不採用（規則を書く）
+### R-http-07 応答のヘッダの `get_header` と要求の `req_header` の不揃い — × 不採用（規則を書く。→ R-http-12 で解消）
 
 - 理由: 1 つのヘッダを読む綴りは Gleam `get_header` (F)、Go `Header.Get`、JS `headers.get` と「get」を含むものが多く、`header` に改名する利点は小さいです。代わりに完全性の規則に次の 2 つを書きます。「`req_` は応答の関数と名前がぶつかるときだけ付ける」「`get_` は `get`・`get_response`（HTTP の GET）と `get_header`（取り出す）の 2 つの意味を持つ」。
 - issue: なし
@@ -155,35 +155,64 @@
 
 - いま: 応答の本文は `body`（文字列）と `body_bytes`（バイト）の 2 つで読めますが、要求の本文は `req_body`（文字列）だけで、応答を作る側も `set_body`（文字列）だけです。`body` は不正な UTF-8 を置換文字にする（lossy）ので、サーバーでバイナリを受け取ると壊れます。
 - 案: `fn req_body_bytes(req: HttpRequest) -> Bytes`、`fn set_body_bytes(resp: HttpResponse, body: Bytes) -> HttpResponse` を足します。
-- 完全性の規則: 本文を読む・差し替える関数は、文字列とバイトの 2 つを持ちます（`body`/`body_bytes`、`req_body`/`req_body_bytes`、`set_body`/`set_body_bytes`）。文字列の側は lossy な UTF-8 で、そのことを文書に書きます。
-- 保留: client がバイナリの本文を送る形（`request` の `body: String`）は、要求を組み立てる型の設計と一緒に決めます。ここでは足しません。
+- 完全性の規則: 本文を読む・差し替える関数は、文字列とバイトの 2 つを持ちます（`body`/`body_bytes`、`req_body`/`req_body_bytes`、`set_body`/`set_body_bytes`）。R-http-12 で `req_` の側は無印に一本化します。文字列の側は lossy な UTF-8 で、そのことを文書に書きます。
+- 保留: client がバイナリの本文を送る形（`request` の `body: String`）は、要求を組み立てる型の設計と一緒に決めます。ここでは足しません。（→ R-http-13 の `http.send` で解消）
 - (d) 追加 2。
 - issue: #3976
+
+### R-http-12 要求と応答を `HttpMessage` で 1 つの関数にする — ○ 採用（R-http-07 を置き換え）
+
+- いま: 同じ役割の関数が、応答は無印（`body`・`headers`・`header_values`）、要求は `req_` 付き（`req_body`・`req_headers`・`req_header_values`）です。1 つのヘッダを読む関数だけは、応答が `get_header`、要求が `req_header` で、語幹まで違います。R-http-09 で全体が `headers`・`req_headers` になったので、単数だけ `get_` が付く形も残りました。3 つの外部レビューが続けて挙げています。
+- 案: 2 つの型を `HttpMessage` プロトコル（R-L0-31）に従わせ、読み書きを 1 つの総称関数にします。
+  - `fn header[M: HttpMessage](m: M, name: String) -> String?`
+  - `fn header_values[M: HttpMessage](m: M, name: String) -> List[String]`
+  - `fn headers[M: HttpMessage](m: M) -> List[(String, String)]`
+  - `fn body[M: HttpMessage](m: M) -> String`
+  - `fn body_bytes[M: HttpMessage](m: M) -> Bytes`
+  - `fn set_header[M: HttpMessage](m: M, name: String, value: String) -> M`
+  - `fn set_body[M: HttpMessage](m: M, body: String) -> M`
+  - `fn set_body_bytes[M: HttpMessage](m: M, body: Bytes) -> M`
+
+  - 撤去: `get_header`（→ `header`）、`req_header`・`req_header_values`・`req_headers`・`req_body`・`req_body_bytes`（→ 無印）。
+  - 要求にも `set_body_bytes` が使えるので、任意のバイト列を要求の本文にできます（R-http-13）。
+- 根拠の L0 規則: R-L0-31、R-L0-01、R-L0-00。
+- (a) Go は `Request.Header.Get` と `Response.Header.Get` が同じ `Header` 型の同じメソッド、JS fetch は `Request` と `Response` が同じ `Body` と `Headers` を持ちます。
+- (d) 改名・撤去。`@deprecated(since=15, use=…)`、`removal_epoch = 16`、`almide fix` が 1 対 1 で書き換えます。
+- issue: #3989
+
+### R-http-13 組み立てた要求を送る `http.send` を足す — ○ 採用
+
+- いま: クライアントの要求の本文は、`request`・`request_response`・`start` のどれも `body: String` です。任意のバイト列を送る道がありません。
+- 案: `effect fn http.send(req: HttpRequest) -> HttpResponse` を足します。`http.new_request(…) |> http.set_body_bytes(b) |> http.send` と書けます（`set_body_bytes` は R-http-12 で要求にも使えます）。文字列の本文は今までどおり `request`・`request_response` で書けます。
+- (a) Go `client.Do(req)`、Rust reqwest `Client::execute(request)`、JS `fetch(request)`。
+- (b) 両 target で `request_response` と同じ経路です。
+- (d) 追加 1。
+- issue: #3989
 
 ## L3: 関数表
 
 | 関数 | シグネチャ(現行, mut 表示) | 他言語の主な綴り | 判定 | 案 |
 |---|---|---|---|---|
-| `http.serve` | `effect fn serve(port: Int, f: effect (HttpRequest) -> HttpResponse) -> Unit` | Go `ListenAndServe` / Deno `serve` | 据え置き | — |
+| `http.serve` | `effect fn serve(port: Int, f: HttpHandler) -> Unit` | Go `ListenAndServe` / Deno `serve` | 据え置き | — |
 | `http.response` | `fn response(status: Int, body: String) -> HttpResponse` | JS `new Response` / Ktor `respondText` | 据え置き | — |
 | `http.json` | `fn json(status: Int, body: String) -> HttpResponse` | JS `Response.json` | 据え置き | — |
 | `http.with_headers` | `fn with_headers(status: Int, body: String, headers: List[(String, String)]) -> HttpResponse` | JS `new Response(b, {headers})` | 意味変更（`headers` を `List[(String, String)]` に） | R-http-09 |
 | `http.redirect` | `fn redirect(url: String) -> HttpResponse` | JS `Response.redirect` / Go `http.Redirect` | 据え置き | — |
 | `http.status` | `fn status(resp: HttpResponse, code: Int) -> HttpResponse` | Go `WriteHeader` | 改名（→ `set_status`） | R-http-02 |
 | `http.set_status` | `fn set_status(resp: HttpResponse, code: Int) -> HttpResponse`（案） | 同上 | 追加 | R-http-02 |
-| `http.set_header` | `fn set_header(resp: HttpResponse, key: String, value: String) -> HttpResponse` | Go `Header().Set` / JS `headers.set` | 据え置き（コピーの `set_`） | R-http-02 |
-| `http.body` | `fn body(resp: HttpResponse) -> String` | JS `text()` / Go `Body` / Ktor `bodyAsText` | 据え置き | — |
-| `http.body_bytes` | `fn body_bytes(resp: HttpResponse) -> Bytes`（案） | JS `arrayBuffer` / reqwest `bytes` / Ktor `bodyAsBytes` | 追加 | R-http-01 |
+| `http.set_header` | `fn set_header(resp: HttpResponse, key: String, value: String) -> HttpResponse` | Go `Header().Set` / JS `headers.set` | 意味変更（`HttpRequest` も受け取る） | R-http-12 |
+| `http.body` | `fn body(resp: HttpResponse) -> String` | JS `text()` / Go `Body` / Ktor `bodyAsText` | 意味変更（`HttpRequest` も受け取る） | R-http-12 |
+| `http.body_bytes` | `fn body_bytes(resp: HttpResponse) -> Bytes`（案） | JS `arrayBuffer` / reqwest `bytes` / Ktor `bodyAsBytes` | 追加（`HttpRequest` も受け取る） | R-http-12 |
 | `http.status_code` | `fn status_code(resp: HttpResponse) -> Int` | Go `StatusCode` / JS `status` | 改名 → `status`（epoch 17。`0` の番兵もなくす） | R-http-04、R-http-08 |
-| `http.get_header` | `fn get_header(resp: HttpResponse, key: String) -> String?` | Go `Header.Get` / JS `headers.get` | 据え置き | — |
-| `http.header_values` | `fn header_values(resp: HttpResponse, key: String) -> List[String]` | Go `Header.Values` | 据え置き | — |
-| `http.headers` | `fn headers(resp: HttpResponse) -> List[(String, String)]` | JS `headers` / reqwest `headers` | 意味変更（`List[(String, String)]` を返す） | R-http-09 |
+| `http.get_header` | `fn get_header(resp: HttpResponse, key: String) -> String?` | Go `Header.Get` / JS `headers.get` | 改名 → `header`（`HttpRequest` も受け取る） | R-http-12 |
+| `http.header_values` | `fn header_values(resp: HttpResponse, key: String) -> List[String]` | Go `Header.Values` | 意味変更（`HttpRequest` も受け取る） | R-http-12 |
+| `http.headers` | `fn headers(resp: HttpResponse) -> List[(String, String)]` | JS `headers` / reqwest `headers` | 意味変更（`HttpRequest` も受け取る） | R-http-12 |
 | `http.req_method` | `fn req_method(req: HttpRequest) -> String` | Go `r.Method` / JS `req.method` | 据え置き | — |
 | `http.req_path` | `fn req_path(req: HttpRequest) -> String` | Go `r.URL.RequestURI()` | 据え置き（クエリを含むことを文書に明記） | — |
-| `http.req_body` | `fn req_body(req: HttpRequest) -> String` | Go `r.Body` / JS `req.text()` | 据え置き | — |
-| `http.req_header` | `fn req_header(req: HttpRequest, key: String) -> String?` | Go `r.Header.Get` | 据え置き | R-http-03 |
-| `http.req_header_values` | `fn req_header_values(req: HttpRequest, key: String) -> List[String]`（案） | Go `r.Header.Values` | 追加 | R-http-03 |
-| `http.req_headers` | `fn req_headers(req: HttpRequest) -> List[(String, String)]`（案） | JS `req.headers` | 追加 | R-http-03、R-http-09 |
+| `http.req_body` | `fn req_body(req: HttpRequest) -> String` | Go `r.Body` / JS `req.text()` | 撤去 → `http.body` | R-http-12 |
+| `http.req_header` | `fn req_header(req: HttpRequest, key: String) -> String?` | Go `r.Header.Get` | 撤去 → `http.header` | R-http-12 |
+| `http.req_header_values` | `fn req_header_values(req: HttpRequest, key: String) -> List[String]`（案） | Go `r.Header.Values` | 追加しない（R-http-12 の `http.header_values` に一本化） | R-http-12 |
+| `http.req_headers` | `fn req_headers(req: HttpRequest) -> List[(String, String)]`（案） | JS `req.headers` | 追加しない（R-http-12 の `http.headers` に一本化） | R-http-12 |
 | `http.query_params` | `fn query_params(req: HttpRequest) -> List[(String, String)]` | Go `r.URL.Query()` | 意味変更（`List[(String, String)]` を返す） | R-http-10 |
 | `http.url_decode` | `fn url_decode(s: String) -> String` | Go `QueryUnescape` / Python `unquote_plus` | 撤去 → `url.decode_form(s) ?? s` | R-http-04 |
 | `http.get` | `effect fn get(url: String) -> String` | Go `http.Get` / reqwest `get` / Python `urlopen` | 据え置き | R-http-01 |
@@ -211,11 +240,12 @@
 | `http.cancel` | `effect fn cancel(c: HttpCall) -> Unit` | JS `AbortController.abort` | 据え置き | R-http-01 |
 | `http.new_request` | `fn new_request(method: String, target: String, body: String, headers: List[(String, String)]) -> HttpRequest` | JS `new Request` | 意味変更（`headers` を `List[(String, String)]` に） | R-http-09 |
 | `http.param` | `fn param(req: HttpRequest, name: String) -> String?` | Go `r.PathValue` | 据え置き | — |
-| `http.route` | `fn route(pattern: String, handler: (HttpRequest) -> Result[HttpResponse, String]) -> HttpRoute` | Go `ServeMux.HandleFunc` | 据え置き | — |
+| `http.route` | `fn route(pattern: String, handler: HttpHandler) -> HttpRoute` | Go `ServeMux.HandleFunc` | 据え置き | — |
 | `http.mount` | `fn mount(prefix: String, sub: (HttpRequest) -> Result[HttpResponse, String]) -> HttpRoute` | Go `StripPrefix` | 据え置き | — |
-| `http.router` | `fn router(routes: List[HttpRoute]) -> Result[(HttpRequest) -> Result[HttpResponse, String], String]` | Go `ServeMux` | 据え置き | — |
+| `http.router` | `fn router(routes: List[HttpRoute]) -> Result[HttpHandler, String]` | Go `ServeMux` | 据え置き | — |
 | `http.wrap` | `fn wrap(handler: HttpHandler, middleware: List[HttpMiddleware]) -> HttpHandler` | — | 据え置き | — |
 | `http.decode_json` | `fn decode_json[T](req: HttpRequest, decode: (Value) -> Result[T, String]) -> Result[T, HttpResponse]` | — | 据え置き | — |
-| `http.set_body` | `fn set_body(resp: HttpResponse, body: String) -> HttpResponse`（案） | Gleam `set_body` (F) | 追加 | R-http-06 |
-| `http.req_body_bytes` | `fn req_body_bytes(req: HttpRequest) -> Bytes`（案） | Go `io.ReadAll(r.Body)` / JS `req.arrayBuffer()` | 追加 | R-http-11 |
-| `http.set_body_bytes` | `fn set_body_bytes(resp: HttpResponse, body: Bytes) -> HttpResponse`（案） | JS `new Response(bytes)` | 追加 | R-http-11 |
+| `http.set_body` | `fn set_body(resp: HttpResponse, body: String) -> HttpResponse`（案） | Gleam `set_body` (F) | 追加（`HttpRequest` も受け取る） | R-http-12 |
+| `http.req_body_bytes` | `fn req_body_bytes(req: HttpRequest) -> Bytes`（案） | Go `io.ReadAll(r.Body)` / JS `req.arrayBuffer()` | 追加しない（R-http-12 の `http.body_bytes` に一本化） | R-http-12 |
+| `http.set_body_bytes` | `fn set_body_bytes(resp: HttpResponse, body: Bytes) -> HttpResponse`（案） | JS `new Response(bytes)` | 追加（`HttpRequest` も受け取る） | R-http-12 |
+| `http.send` | `effect fn send(req: HttpRequest) -> HttpResponse`（案） | Go `client.Do` / reqwest `execute` / JS `fetch(request)` | 追加 | R-http-13 |

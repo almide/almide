@@ -390,13 +390,15 @@ effect fn を呼んだときの型（`!` が要るか、`??` をそのまま書�
 - (d) 文書の訂正だけです。
 - issue: なし
 
-## R-L0-29 負の開始位置を丸めずに abort にする — 保留
+## R-L0-29 負の開始位置を丸めずに abort にする — ○ 採用（保留から変更）
 
 - いま: R-L0-12 は「範囲は半開区間。はみ出しは丸め、abort は契約違反だけ」です。`list.slice(xs, -3, len)` は開始を 0 に丸め、止まらずに別の値を返します。Python・JS の「負の添字は末尾から数える」の慣習で書いたコードが、黙って違う結果になります。
 - 案: 開始・終わりの位置が負のとき（`slice`・`take`・`drop` の数が負のときも）は abort にします。末尾から数えたいときは `take_end`・`drop_end` を使います。正の側のはみ出し（`len` より大きい）は今までどおり丸めます。
 - 保留の理由: R-L0-12 はゲートつきで決めた規則で、正の側の丸めと対になっています。負の添字の書き誤りがどれだけ起きるかを Dojo で測ってから決めます（R-L0-21 と同じ扱い）。
 - (a) Rust と Go は panic、Python と JS は末尾から数える。黙って 0 に丸める言語は比べた中にありません。
-- issue: almide-dojo#63 に計測項目として足します。
+- 判定の変更（五巡目）: 3 つの外部レビューが続けて最も重い指摘に挙げ、比べた言語に「黙って 0 に丸める」ものが 1 つもないため、計測を待たずに採用します。R-L0-32（無印の狭める変換）と R-L0-33（範囲外の扱いを役割で分ける）と同じ「呼び出し側が確かめられる前提の違反は abort」（R-L0-06 の 3）にそろえます。
+- (d) 意味変更。いまは丸めて返している呼び出しが abort になるので、epoch 15 の `breaks` に入れます。Dojo の計測（almide-dojo#63）は、採用後の書き誤りの数を見る項目として残します。
+- issue: #3990
 
 ## R-L0-30 引数名は役割ごとに 1 つ — ○ 採用
 
@@ -416,18 +418,82 @@ effect fn を呼んだときの型（`!` が要るか、`??` をそのまま書�
 | 外に書き出すバイト列（`io`・`fs`・`net`・`unix`・`http`・`process`） | `data` |
 | `int`・`float`・`bigint`・サイズつきの数のモジュールの主語 | `x`（2 つを取る演算は `a`・`b`） |
 | `path` の主語 | `path`（`fs` と同じ） |
-| 要素の値（list・set・deque・heap・bytes） | `x`（`map` だけは組の `key`・`value`） |
+| 要素の値（list・set・deque・heap・bytes） | `x`（`map` だけは組の `key`・`value`。入れ物の要素でない値、たとえば `env.set(name, value)` は役割の名前のまま） |
 | 要素の添字 | `i` |
 | 型つきの読み書き（`bytes.get_*`・`put_*`・`next_*`）のバイト位置 | `pos` |
 | 関数の引数 | `f`。比較関数は `cmp` |
+| 名前のついた関数型の引数（`HttpHandler`・`HttpMiddleware`） | 型の役割の名前（`handler`・`middleware`） |
+| 同じ型の 2 つの値を対等に取る関数（`compare`・`min`・`max`・`merge`・`union`・`xor`・`zip`） | `a`・`b`（主語の名前の規則より先に当てます） |
 | パターンの文字列（`regex`・`fs.glob`・`http.route`） | `pattern` |
 | 個数・量（`duration.ms(n)`・`random.bytes(n)`・`list.take(xs, n)`） | `n` |
 
 - (c) 名前つき引数で古い名前を書くと、E004「no parameter named …」になり、ヒントに正しい名前が出ます。黙って違う値にはなりません。
 - (d) 改名。`spec/`・`stdlib/`・`examples/`・exercise の中で、標準関数を名前つき引数で呼んでいる箇所は 0 件でした。epoch 15 の `breaks` に入れ、`almide fix` で書き換えます。
-- 完全性の規則: 公開関数のすべての引数を役割で分け、1 つの役割に 2 つ目の綴りがあればゲートが落ちます。
+- 完全性の規則: 公開関数のすべての引数を役割で分け、1 つの役割に 2 つ目の綴りがあればゲートが落ちます。1 つのシグネチャに同じ引数名が 2 つあっても落ちます（四巡目の書き換えで `bytes.compare(b, b)` を作ってしまい、レビューで見つかりました）。
 - 一覧（[target-surface.md](target-surface.md)）のシグネチャは、この表の名前で書いています。
 - issue: #3987
+
+## R-L0-31 同じ形を持つ型の組はプロトコルで宣言する — ○ 採用
+
+- いま: `Duration` と `Compute` が同じ形であることは、R-duration-03 で `TimeAmount` というプロトコルに宣言しました。ほかにも、型ごとに同じ関数を並べ、その揃いを手書きの行列ゲートや文章で守っている組があります。
+- 案: 「同じ役割の関数を、同じ名前・同じ形で持つ型の組」は、標準のプロトコルで宣言します。プロトコルの検査が、片方にだけ関数が足りない、というずれを型の検査で止めます。総称関数を 1 つ書けば、組のどの型にも使えます。
+- 調べた組と判定:
+
+| 組 | プロトコル | 判定 | 中身 |
+|---|---|---|---|
+| `Duration`・`Compute` | `TimeAmount` | ○（R-duration-03） | 6 単位の構築子と `compare` |
+| `HttpRequest`・`HttpResponse` | `HttpMessage` | ○（R-http-12） | `header`・`header_values`・`headers`・`body`・`body_bytes`・`set_header`・`set_body`・`set_body_bytes`。`req_` の付いた 6 関数と `get_header` が 1 つの総称関数になります |
+| `int` とサイズつきの整数 8 型 | `Integer` | ○（R-sized-08） | `compare`・`min`・`max`・`clamp`・`parse`・`parse_radix`・`to_string`・`to_string_radix`・`min_value`・`max_value` |
+| `float`・`float32`・`float64` | `FloatingPoint` | ○（R-sized-08） | `Integer` と同じ選択・比較の族に、値の分類（`is_nan`・`is_infinite`・`is_finite`）と特別な値（`nan`・`infinity`・`epsilon`） |
+| list・string・bytes・map・set・deque・heap | `Sized` | ○（この案） | `len`・`is_empty`。7 つの入れ物はすでに全部持っています |
+| 同じ 7 つの `contains`・`count` | — | × | `map.contains` はキー、`map.count` は `(K, V)` を受け取り、要素の型が 1 つに決まりません |
+| `parse` を持つ型（`int`・`bool`・`uuid`・`url` など） | `Parse` | × | 総称関数の中で `T.parse(s)` と書けません（実測 `almide 0.68.0 dev`: 引数のない関数をプロトコルに書くことはできますが、`T.parse` は E002）。言語に「型で選ぶ関数呼び出し」が入ったら出し直します |
+| `option`・`result` の `map`・`flat_map` | — | × | `Option[_]` という「型を取る型」を抽象する仕組み（高階の型）が言語にありません |
+| `base64`・`hex` などの符号化 | — | × | 型ではなくモジュールの組で、プロトコルを持つ値がありません。綴りは R-L0-25 の表で揃えています |
+
+- 演算子（`+`・`<` など）はプロトコルに入りません（R-duration-03 と同じ。R-L0-26 の演算子の表で宣言します）。
+- 引数のない関数（`min_value`・`nan`・6 単位の構築子）も、プロトコルに書いて「持っていること」を検査します。総称関数の中から呼ぶことは、いまの言語ではできません。
+- 根拠の L0 規則: R-L0-01（同じ役割を 2 か所で手書きしない）、R-L0-12（族は行列で揃える）。CLAUDE.md の「性質は宣言 1 か所から導出する」。
+- (a) Swift `BinaryInteger`・`BinaryFloatingPoint`・`Collection`、Rust の `num-traits` の `PrimInt`・`Float`、Go の `constraints.Integer`・`constraints.Float`。
+- (b) 検査器の変更です。値の表現は変わりません。
+- (c) `Float` を `Float32` に置き換えたコードが同じ関数名で書ける、ということが、型の宣言として保証されます。
+- (d) 宣言の追加です。足りない関数を埋める分（R-sized-08）は追加です。
+- ゲート案: 宣言した型ごとに、プロトコルの総称関数のテストを `spec/stdlib/` に置きます。R-L0-12 の手書きの行列ゲートのうち、プロトコルが覆うものは置き換えます。
+- issue: #3989
+
+## R-L0-32 無印の狭める変換は、範囲外と NaN で abort にする（入力の型によらない） — ○ 採用
+
+- いま: R-L0-08 の無印の `to_<T>` は、入力の型によって範囲外の扱いが違います。整数から整数は折り返し、浮動小数点から整数は端に張り付き、NaN は 0 です（実測 `almide 0.68.0 dev 437b8f127`、native と wasm で同じ: `int.to_int8(300)` = 44、`float.to_int8(300.0)` = 127、`int.to_uint8(-1)` = 255、`float.to_uint8(-1.0)` = 0）。入力の型を書き換えただけのコードが、止まらずに別の値を返します。
+- 案: 無印の狭める変換は、結果の型で表せないとき（範囲外、NaN）に abort します。浮動小数点からの小数部の切り捨て（`float.to_int(1.5)` = 1）は今のままです。ほかの扱いは、名前で選びます。
+  - `_checked`: 正確に表せなければ none（R-L0-28）。
+  - `_saturating`: 端に張り付く。浮動小数点からの変換にも、このセルを足します（`float`・`float32`・`float64` → 整数 9 型の 27 関数）。いまの無印の動きは、このセルに移ります。
+  - 折り返しは `int.wrap(x, bits)` で書きます（`int.to_int8(int.wrap(x, 8))`）。折り返しを名前で選ぶセルは足しません。
+- 根拠の L0 規則: R-L0-06 の 3（呼び出し側が確かめられる前提の違反は abort）。R-L0-08 の行列（損失のある変換は無印・`_checked`・`_saturating` の 3 つ）。
+- (a) Swift の `Int8(x)` は範囲外で trap し、`init(exactly:)`・`init(clamping:)`・`init(truncatingIfNeeded:)` で扱いを選びます。Rust の `as` は折り返しと飽和が型で分かれ、レビューが指摘した食い違いそのものです。
+- (b) 純粋な計算です。両 target で同じ判定です。
+- (c) 書き誤りが、黙った別の値ではなく、その場の abort になります。
+- (d) 意味変更。いまは折り返して返している呼び出しが abort になるので、epoch 15 の `breaks` に入れます。`almide fix` は、浮動小数点からの無印を `_saturating` に書き換えます（動きを保つ）。整数からの無印は意図が読めないので書き換えず、診断のヒントに `_checked`・`_saturating`・`int.wrap` を並べます。
+- 完全性の規則（R-L0-08 を置き換え）: 損失のある変換は、どの入力の型でも、無印（abort）・`_checked`・`_saturating` の 3 つを持ちます。
+- issue: #3990
+
+## R-L0-33 範囲外の扱いを関数の役割で分ける — ○ 採用
+
+- いま: R-L0-12 は「範囲は半開区間。はみ出しは丸め、abort は契約違反だけ」と 1 文で書いています。一方で、位置を指定して 1 つを読む関数は none、1 つを書く関数は abort と、個別のページに書いてあります。どれを当てるかを、関数ごとに推して読む必要がありました。
+- 案: 役割ごとの表を 1 枚にします。
+
+| 役割 | 例 | 正の側のはみ出し | 負の位置・負の数 |
+|---|---|---|---|
+| 範囲を取り出す | `slice`・`take`・`drop`・`take_end`・`drop_end`・`byte_slice`・`bytes.slice` | 長さまで丸める | abort（R-L0-29） |
+| 位置の 1 つを読む | `get`・`first`・`last`・`bytes.get_*`・`next_*` | none（`next_` は状態を進めない。R-L0-27） | none |
+| 位置の 1 つを書く・差し込む・消す | `set`・`update`・`swap`・`insert`・`remove_at`・`bytes.put_*` | abort | abort |
+| キーで既存の要素を書き換える | `map.update` | キーが無ければ abort（R-map-08） | — |
+| 形を前提にする | `matrix` の演算、`bytes.xor`、`chunk(n <= 0)` | abort | abort |
+| 数を作る | `list.repeat(x, n)`・`string.repeat` | — | abort |
+
+- 根拠の L0 規則: R-L0-06（失敗しうる取り出しは none、確かめられる前提の違反は abort）、R-L0-12。
+- (a) Rust の `get` は None、`v[i]` と `split_at` は panic、`iter().take(n)` は丸め。Kotlin の `getOrNull` は null、`take(-1)` は例外。
+- (d) 表の多くは今の動きの書き直しです。変わるのは R-L0-29（負の位置）、R-map-08（`map.update`）と、負の数を丸めていた `repeat` です。
+- issue: #3990
 
 ## ゲートの束（R-L0-G） — ○ 採用
 
