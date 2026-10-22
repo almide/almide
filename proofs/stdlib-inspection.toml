@@ -75,7 +75,7 @@
 #                      every stamped row is to be re-inspected before each final
 #                      release for that (a manual GCE run: no credentials in CI)
 #
-# uninspected_ceiling = "152"
+# uninspected_ceiling = "208"
 
 [[fn]]
 name = "args.flag"
@@ -13683,6 +13683,398 @@ blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/
 [[fn]]
 name = "uint8.count_trailing_zeros"
 sig = "(x: UInt8) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int16.bit_length"
+sig = "(x: Int16) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int16.parse"
+sig = "(s: String) -> Result[Int16, String]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int16.rotate_left"
+sig = "(a: Int16, n: Int) -> Int16"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int16.rotate_right"
+sig = "(a: Int16, n: Int) -> Int16"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int16.wrap_add"
+sig = "(a: Int16, b: Int16) -> Int16"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int16.wrap_mul"
+sig = "(a: Int16, b: Int16) -> Int16"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int16.wrap_sub"
+sig = "(a: Int16, b: Int16) -> Int16"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int32.bit_length"
+sig = "(x: Int32) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int32.parse"
+sig = "(s: String) -> Result[Int32, String]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int32.rotate_left"
+sig = "(a: Int32, n: Int) -> Int32"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int32.rotate_right"
+sig = "(a: Int32, n: Int) -> Int32"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int32.wrap_add"
+sig = "(a: Int32, b: Int32) -> Int32"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int32.wrap_mul"
+sig = "(a: Int32, b: Int32) -> Int32"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int32.wrap_sub"
+sig = "(a: Int32, b: Int32) -> Int32"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int64.bit_length"
+sig = "(x: Int64) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int64.parse"
+sig = "(s: String) -> Result[Int64, String]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int64.rotate_left"
+sig = "(a: Int64, n: Int) -> Int64"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int64.rotate_right"
+sig = "(a: Int64, n: Int) -> Int64"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int64.wrap_add"
+sig = "(a: Int64, b: Int64) -> Int64"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int64.wrap_mul"
+sig = "(a: Int64, b: Int64) -> Int64"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int64.wrap_sub"
+sig = "(a: Int64, b: Int64) -> Int64"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int8.bit_length"
+sig = "(x: Int8) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int8.parse"
+sig = "(s: String) -> Result[Int8, String]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int8.rotate_left"
+sig = "(a: Int8, n: Int) -> Int8"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int8.rotate_right"
+sig = "(a: Int8, n: Int) -> Int8"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int8.wrap_add"
+sig = "(a: Int8, b: Int8) -> Int8"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int8.wrap_mul"
+sig = "(a: Int8, b: Int8) -> Int8"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int8.wrap_sub"
+sig = "(a: Int8, b: Int8) -> Int8"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint16.bit_length"
+sig = "(x: UInt16) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint16.parse"
+sig = "(s: String) -> Result[UInt16, String]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint16.rotate_left"
+sig = "(a: UInt16, n: Int) -> UInt16"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint16.rotate_right"
+sig = "(a: UInt16, n: Int) -> UInt16"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint16.wrap_add"
+sig = "(a: UInt16, b: UInt16) -> UInt16"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint16.wrap_mul"
+sig = "(a: UInt16, b: UInt16) -> UInt16"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint16.wrap_sub"
+sig = "(a: UInt16, b: UInt16) -> UInt16"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint32.bit_length"
+sig = "(x: UInt32) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint32.parse"
+sig = "(s: String) -> Result[UInt32, String]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint32.rotate_left"
+sig = "(a: UInt32, n: Int) -> UInt32"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint32.rotate_right"
+sig = "(a: UInt32, n: Int) -> UInt32"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint32.wrap_add"
+sig = "(a: UInt32, b: UInt32) -> UInt32"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint32.wrap_mul"
+sig = "(a: UInt32, b: UInt32) -> UInt32"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint32.wrap_sub"
+sig = "(a: UInt32, b: UInt32) -> UInt32"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint64.bit_length"
+sig = "(x: UInt64) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint64.parse"
+sig = "(s: String) -> Result[UInt64, String]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint64.rotate_left"
+sig = "(a: UInt64, n: Int) -> UInt64"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint64.rotate_right"
+sig = "(a: UInt64, n: Int) -> UInt64"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint64.wrap_add"
+sig = "(a: UInt64, b: UInt64) -> UInt64"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint64.wrap_mul"
+sig = "(a: UInt64, b: UInt64) -> UInt64"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint64.wrap_sub"
+sig = "(a: UInt64, b: UInt64) -> UInt64"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint8.bit_length"
+sig = "(x: UInt8) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint8.parse"
+sig = "(s: String) -> Result[UInt8, String]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint8.rotate_left"
+sig = "(a: UInt8, n: Int) -> UInt8"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint8.rotate_right"
+sig = "(a: UInt8, n: Int) -> UInt8"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint8.wrap_add"
+sig = "(a: UInt8, b: UInt8) -> UInt8"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint8.wrap_mul"
+sig = "(a: UInt8, b: UInt8) -> UInt8"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint8.wrap_sub"
+sig = "(a: UInt8, b: UInt8) -> UInt8"
 class = "pure"
 status = "uninspected"
 blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
