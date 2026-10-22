@@ -232,7 +232,7 @@
 | `concat_cols_many` | `matrix.concat_cols_many(matrices: List[Matrix]) -> Matrix`（`@deprecated`） | — | 撤去 | R-matrix-06 |
 | `linear_row` | `matrix.linear_row(x: Matrix, weight: Matrix, bias: List[Float]) -> Matrix` | torch `F.linear` / Axon `dense` | 撤去 | R-matrix-01（nnlib） |
 | `linear_row_no_bias` | `matrix.linear_row_no_bias(x: Matrix, weight: Matrix) -> Matrix` | torch `F.linear(bias=None)` | 撤去 | R-matrix-01（nnlib） |
-| `slice_rows` | `matrix.slice_rows(m: Matrix, start: Int, end: Int) -> Matrix` | numpy `m[a:b]` / ndarray `slice` / gonum `Slice` | 据え置き | —（R-L0-12 の丸め） |
+| `slice_rows` | `matrix.slice_rows(m: Matrix, start: Int, end: Int) -> Matrix` | numpy `m[a:b]` / ndarray `slice` / gonum `Slice` | 意味変更（負の位置で abort。正の側は丸める） | R-L0-29、R-L0-46 |
 | `conv1d` | `matrix.conv1d(input: Matrix, weight: Matrix, bias: List[Float], kernel: Int, stride: Int, padding: Int) -> Matrix` | torch `conv1d` / Axon `conv` | 撤去 | R-matrix-01（nnlib） |
 | `gather_rows` | `matrix.gather_rows(m: Matrix, indices: List[Int]) -> Matrix` | numpy `take(axis=0)` / Nx `take` / torch `index_select` | 意味変更 | R-matrix-04・R-matrix-05（範囲外は abort） |
 | `dot_row` | `matrix.dot_row(m: Matrix, r: Int, vec: List[Float]) -> Float` | numpy `m[r] @ v` / ndarray `row(r).dot(v)` | 意味変更 | R-matrix-05（範囲外は abort） |

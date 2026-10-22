@@ -44,7 +44,7 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 
 [args](L2-args.md) ・ [base64](L2-base64.md) ・ [bigint](L2-bigint.md) ・ [bool](L2-bool.md) ・ [bytes](L2-bytes.md) ・ [compute](L2-compute.md) ・ [datetime](L2-datetime.md) ・ [deque](L2-deque.md) ・ [duration](L2-duration.md) ・ [env](L2-env.md) ・ [error](L2-error.md) ・ [ffi](L2-ffi.md) ・ [float](L2-float.md) ・ [fs](L2-fs.md) ・ [hash](L2-hash.md) ・ [heap](L2-heap.md) ・ [hex](L2-hex.md) ・ [html](L2-html.md) ・ [http](L2-http.md) ・ [int](L2-int.md) ・ [io](L2-io.md) ・ [json](L2-json.md) ・ [list](L2-list.md) ・ [map](L2-map.md) ・ [math](L2-math.md) ・ [matrix](L2-matrix.md) ・ [net](L2-net.md) ・ [option](L2-option.md) ・ [path](L2-path.md) ・ [process](L2-process.md) ・ [random](L2-random.md) ・ [regex](L2-regex.md) ・ [result](L2-result.md) ・ [set](L2-set.md) ・ [sized-numbers](L2-sized-numbers.md) ・ [string](L2-string.md) ・ [testing](L2-testing.md) ・ [unix](L2-unix.md) ・ [url](L2-url.md) ・ [uuid](L2-uuid.md) ・ [value](L2-value.md) ・ [zlib](L2-zlib.md)
 
-## 案の状態（全 343 件: ○ 278・× 61・保留 4）
+## 案の状態（全 349 件: ○ 284・× 61・保留 4）
 
 | 案 | 内容 | 判定 | issue |
 |---|---|---|---|
@@ -92,6 +92,9 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 | [R-L0-41](L0-conventions.md#r-l0-41-ビット演算を演算子にし-を関数の合成から外す---取り消し十二巡目記号の意味を入れ替えないため--r-l0-43) | ビット演算を演算子にし、`>>` を関数の合成から外す | ×（→ R-L0-43） | #4004 |
 | [R-L0-42](L0-conventions.md#r-l0-42-列のアルゴリズムは-protocol-の既定の実装として-1-回だけ書く---採用) | 列のアルゴリズムは protocol の既定の実装として 1 回だけ書く | ○ | #4012 |
 | [R-L0-43](L0-conventions.md#r-l0-43-撤去した記号を別の意味で使い直さない---採用) | 撤去した記号を別の意味で使い直さない | ○ | #4004 |
+| [R-L0-44](L0-conventions.md#r-l0-44-入出力の-protocol-readwriteclose-を置き読み書きと閉じるを-io-の総称関数-1-組にする---採用) | 入出力の protocol `Read`・`Write`・`Close` を置き、読み書きと閉じるを `io` の総称関数 1 組にする | ○ | #4015 |
+| [R-L0-45](L0-conventions.md#r-l0-45-メモリ安全でない標準の関数は-ffiread-と-ffiwrite-の-2-つだけにする---採用) | メモリ安全でない標準の関数は `ffi.read` と `ffi.write` の 2 つだけにする | ○ | #4008、#4013 |
+| [R-L0-46](L0-conventions.md#r-l0-46-位置を受け取る関数を全数で表にし役割の規則r-l0-33をゲートにする---採用) | 位置を受け取る関数を全数で表にし、役割の規則（R-L0-33）をゲートにする | ○ | #4005 |
 | [R-L0-G](L0-conventions.md#ゲートの束r-l0-g---採用) | ゲートの束（R-L0-G） | ○ | #3949 |
 | [R-L1-01](L1-categories.md#r-l1-01-両端キュー-deque---採用) | 両端キュー `deque` | ○ | #3932 |
 | [R-L1-02](L1-categories.md#r-l1-02-優先度キュー-heap---採用) | 優先度キュー `heap` | ○ | #3933 |
@@ -241,7 +244,8 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 | [R-io-01](L2-io.md#r-io-01-読み取りをeof-を区別する-1-行bytesにそろえる---採用) | 読み取りを「EOF を区別する 1 行」「Bytes」にそろえる | ○ | #3896 |
 | [R-io-02](L2-io.md#r-io-02-iowrite_bytes-を-effect-fn-に直す---採用) | `io.write_bytes` を effect fn に直す | ○ | #3907 |
 | [R-io-03](L2-io.md#r-io-03-改行なしで標準エラーに書く-ioeprint-を足しprint-の綴りから-ioprint-へ案内する---採用) | 改行なしで標準エラーに書く `io.eprint` を足し、`print` の綴りから `io.print` へ案内する | ○ | #3974 |
-| [R-io-04](L2-io.md#r-io-04-標準入力をバイト列で全部読む-ioread_all_bytes-を足す---採用) | 標準入力をバイト列で全部読む `io.read_all_bytes` を足す | ○ | #3974 |
+| [R-io-04](L2-io.md#r-io-04-標準入力をバイト列で全部読む-ioread_all_bytes-を足す---取り消し十三巡目ioread_to_endiostdin-で書く--r-io-05) | 標準入力をバイト列で全部読む `io.read_all_bytes` を足す | ×（→ R-io-05） | #3974 |
+| [R-io-05](L2-io.md#r-io-05-標準入出力を取っ手にしバイトの読み書きを-ioreadiowrite-に一本化する---採用) | 標準入出力を取っ手にし、バイトの読み書きを `io.read`・`io.write` に一本化する | ○ | #4015 |
 | [R-json-01](L2-json.md#r-json-01-型つきの取り出しと道筋の操作を-value-に移す---採用) | 型つきの取り出しと道筋の操作を `value` に移す | ○ | #3953 |
 | [R-json-02](L2-json.md#r-json-02-parse-は文書の後ろの余計な文字を-err-にする---採用) | `parse` は文書の後ろの余計な文字を err にする | ○ | #3921 |
 | [R-json-03](L2-json.md#r-json-03-stringify-と-stringify_pretty-を据え置く---採用変更なし) | `stringify` と `stringify_pretty` を据え置く | ○ | —（変更なし） |
@@ -298,8 +302,9 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 | [R-net-02](L2-net.md#r-net-02-udp-を足す---採用) | UDP を足す | ○ | #3930 |
 | [R-net-03](L2-net.md#r-net-03-名前の解決と-ip-アドレスの型を足す---採用) | 名前の解決と IP アドレスの型を足す | ○ | #3929 |
 | [R-net-04](L2-net.md#r-net-04-tcp_is_open-を-effect-fn-にする---採用) | `tcp_is_open` を effect fn にする | ○ | #3907 |
-| [R-net-05](L2-net.md#r-net-05-tcp-のハンドルを不透明な型にする---不採用) | TCP のハンドルを不透明な型にする | × | — |
+| [R-net-05](L2-net.md#r-net-05-tcp-のハンドルを不透明な型にする---採用十三巡目に見直しr-l0-44) | TCP のハンドルを不透明な型にする | ○ | #4015 |
 | [R-net-06](L2-net.md#r-net-06-udp_recv_from-の-3-つ組をレコードにする---採用) | `udp_recv_from` の 3 つ組をレコードにする | ○ | #3974 |
+| [R-net-07](L2-net.md#r-net-07-tcpudp-の読み書きと閉じるを-io-の総称関数にする---採用) | TCP・UDP の読み書きと閉じるを `io` の総称関数にする | ○ | #4015 |
 | [R-option-01](L2-option.md#r-option-01-optionunwrap_or-を-epoch-16-で撤去する---採用) | `option.unwrap_or` を epoch 16 で撤去する | ○ | #1107 |
 | [R-option-02](L2-option.md#r-option-02-optioncollect-と-optioncollect_map-を残し置き場所の例外として登録する---採用据え置き) | `option.collect` と `option.collect_map` を残し、置き場所の例外として登録する | ○ | #3949 |
 | [R-option-03](L2-option.md#r-option-03-抜けている役割の関数を足さない---不採用) | 抜けている役割の関数を足さない | × | — |
@@ -374,6 +379,7 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 | [R-unix-01](L2-unix.md#r-unix-01-unix-モジュールを作りnetunix_netshm_-を移す---採用) | `unix` モジュールを作り、`net.unix_*`・`net.shm_*` を移す | ○ | #3853 |
 | [R-unix-02](L2-unix.md#r-unix-02-unixwait-を-unixselect-にする---採用) | `unix.wait` を `unix.select` にする | ○ | #3974 |
 | [R-unix-03](L2-unix.md#r-unix-03-unixrecvunixsend-を-unixreadunixwrite-にする---採用) | `unix.recv`・`unix.send` を `unix.read`・`unix.write` にする | ○ | #3974 |
+| [R-unix-04](L2-unix.md#r-unix-04-読み書きと閉じるを-io-の総称関数にし記述子つきの書き込みを-write_fds-にする---採用) | 読み書きと閉じるを `io` の総称関数にし、記述子つきの書き込みを `write_fds` にする | ○ | #4015 |
 | [R-url-01](L2-url.md#r-url-01-フォーム形式の対-encode_form--decode_form-を足しhttpurl_decode-を撤去する---採用) | フォーム形式の対 `encode_form` / `decode_form` を足し、`http.url_decode` を撤去する | ○ | #3950 |
 | [R-url-02](L2-url.md#r-url-02-クエリの読みを復号する-parse_query-にする---採用) | クエリの読みを、復号する `parse_query` にする | ○ | #3951 |
 | [R-url-03](L2-url.md#r-url-03-相対-url-の解決-resolve-を足す---採用) | 相対 URL の解決 `resolve` を足す | ○ | #3952 |

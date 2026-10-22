@@ -559,6 +559,9 @@ effect fn を呼んだときの型（`!` が要るか、`??` をそのまま書�
   - 条件つきの準拠（`List[A]` は `A: Hash` のときだけ `Hash`）。
   - 入れ物そのものを引数にとる型（`F[_]`）は要りません。Swift と同じく、`map` は protocol に入れず型ごとの関数のままにします。
 - 進め方: 5 つの機能は ADR を書いてから入れます。入れる前に、protocol を使う総称関数が LLM の書くコードの生存率を下げないことを Dojo で確かめます。型ごとの書き方（`int.compare(a, b)`）は同じ関数なので、どちらでも書けます。
+- 位置づけ（十五巡目に追記）: [protocol の階層](protocol-view.md)は**想定設計**です。いま実装で守るのは、[リデザイン後の関数一覧](target-surface.md)の名前と形（利用者から見える公開面）です。内部の実装は、型ごとの具体的な関数のままでかまいません。階層は、上の 5 つの機能が言語に入るたびに、内部をそちらへ寄せていく将来の目標です。
+  - 一覧の総称関数のうち、いまの言語で書けない形（組み込みの型を、利用者が宣言した protocol に準拠させる必要があるもの。`list.sum[A: Numeric]`、数の型の `from[S: Numeric]` など）は、いまの具体的な形を残します。言語の機能が入った時点で一覧の形に揃えます。どの行がこれに当たるかは、`scripts/check-stdlib-target.sh` が「言語の機能待ち」として数え、それ以外の差だけを減らしていく対象にします。
+  - 利用者が宣言できる protocol で書けるもの（`io.read[H: Read]`、`http.header[M: HttpMessage]`）は、いま一覧の形で実装します。
 - (d) 方向の宣言です。階層の要件を埋める関数は、七巡目の案（R-L0-38、R-sized-10・11、R-bigint-07、R-bool-03、R-list-20、R-string-16、R-deque-03・04）で足しました。R-L0-31 の × の行（`contains`・`count`・`Parse`）は、この階層の `Membership`・`Container`・`Parse` に置き直しています。
 - issue: #4000
 
@@ -628,6 +631,55 @@ effect fn を呼んだときの型（`!` が要るか、`??` をそのまま書�
 - この規則で九巡目の R-L0-41（ビット演算を演算子にし、`>>` を関数の合成から外す）を取り消します。`^` は累乗の別名をやめてエラーにするだけ（R-L0-39）、`>>` は関数の合成のままです。ビット演算は関数のまま（R-int-10）です。
 - (d) 判定の規則の追加です。
 - issue: #4004
+
+## R-L0-44 入出力の protocol `Read`・`Write`・`Close` を置き、読み書きと閉じるを `io` の総称関数 1 組にする — ○ 採用
+
+- いま: 読む・書く・閉じるが、取っ手の種類ごとに別の名前です。TCP は `net.tcp_read`・`tcp_write`・`tcp_close`・`tcp_close_listener`（取っ手は素の `Int`）、Unix ソケットは `unix.read`・`unix.write`・`unix.close`（`unix.Fd`）、UDP は `net.udp_close`（`UdpSocket`）、標準入出力は `io.read_bytes`・`io.write_bytes`（取っ手なし）。[protocol の階層](protocol-view.md)に入出力の層がありません。
+- 案:
+  ```almide
+  protocol Read  { effect fn read(h: Self, max: Int) -> Bytes }      // 最大 max バイト。相手が閉じたら空
+  protocol Write { effect fn write(h: Self, data: Bytes) -> Unit }   // 全部書く（Rust の write_all）
+  protocol Close { effect fn close(h: Self) -> Unit }                // 2 回目も ok
+
+  effect fn io.read[H: Read](h: H, max: Int) -> Bytes
+  effect fn io.read_exact[H: Read](h: H, n: Int) -> Bytes            // 既定の実装。足りなければ err
+  effect fn io.read_to_end[H: Read](h: H) -> Bytes                   // 既定の実装。閉じるまで全部
+  effect fn io.write[H: Write](h: H, data: Bytes) -> Unit
+  effect fn io.close[H: Close](h: H) -> Unit
+  ```
+  - 準拠する型: `net.TcpStream`（`Read`・`Write`・`Close`）、`net.TcpListener`・`net.UdpSocket`（`Close`）、`unix.Fd`（`Read`・`Write`・`Close`）、`io.Stdin`（`Read`）、`io.Stdout`・`io.Stderr`（`Write`）。
+  - 総称関数は `io` に 1 回だけ置き、型ごとのモジュールには置きません（`http.header[M: HttpMessage]` と同じ形。R-http-12）。
+- (a) 6 言語が、取っ手の種類をまたいで読み書きを共通にしています: Rust（`Read`・`Write` の trait。`read_exact`・`read_to_end` は既定の実装）、Go（`io.Reader`・`Writer`・`Closer`、`io.ReadFull`・`io.ReadAll`）、Python（file-like object）、Elixir（IO device）、OCaml（channel）、Kotlin（`InputStream`・`OutputStream`・`Closeable`）。Swift の標準ライブラリには入出力の protocol がありません（Foundation の `FileHandle` は具体型）。階層の骨組みは Swift ですが、Swift にない層は多数派で足します（`Container` と同じ）。
+- 綴り: `read`・`write`・`close` は 9 言語の多数派です。`read_exact`・`read_to_end` は Rust の綴りです（Go は `ReadFull`・`ReadAll` ですが、`io.read_all()` はすでに標準入力をテキストで全部読む関数なので、同じ名前を 2 つの形に使えません）。
+- 名前の使い直し（R-L0-43 の 2）: `io.write` はいま標準出力に `Bytes` を書く 1 引数の関数で、R-io-01 で撤去が決まっています。新しい `io.write(h, data)` は 2 引数なので、古い `io.write(data)` は型エラーになり、黙って意味が変わりません。
+- (d) 撤去と追加です。内訳は L2-net R-net-07、L2-unix R-unix-04、L2-io R-io-05。
+- issue: #4015
+
+## R-L0-45 メモリ安全でない標準の関数は `ffi.read` と `ffi.write` の 2 つだけにする — ○ 採用
+
+- いま: 生の番地を読み書きする関数が、import なしで見える `bytes` にあります（`bytes.from_raw_ptr`・`copy_to_ptr`）。どれが「Almide の値の外のメモリに触る関数」かを、標準全体で数えたことがありません。メモリ安全の証明（#4011）では、ここが言語の保証と外の世界の境目になります。
+- 案:
+  1. リデザイン後の標準で、Almide の値の外のメモリを読み書きする関数は `ffi.read` と `ffi.write` の 2 つだけです（R-ffi-01・R-ffi-02）。`ffi.address`・`ffi.to_int` は番地を値として作るだけで、メモリに触りません。
+  2. `RawPtr` を引数か戻り値に持つ公開関数は、`ffi` の外に置きません。
+  3. `ffi.read`・`ffi.write` は effect fn で、`import ffi` が要ります。critical プロファイルで拒むこと、ビルドの記録に「`ffi` を使った」と出すことは #4008 で決めます。
+  4. ほかのすべての標準の関数は、範囲外を R-L0-33 の役割どおりに扱い（R-L0-46）、メモリを壊す手段を持ちません。
+- 実測（リデザイン後の 1,289 関数）: `RawPtr` が現れるのは `ffi` の 4 関数だけです。
+- (a) 9 言語とも、生の番地の読み書きは名前のはっきりした場所（Rust `unsafe`、Go `unsafe`、Python `ctypes`、Kotlin `cinterop`、Swift `UnsafeRawPointer`）に閉じています。
+- ゲート案: 公開関数の型に `RawPtr` が現れるのは `ffi` だけ、を検査します。`ffi` に関数を足すときは、この規則の 1 の一覧を同じ PR で直します。
+- issue: #4008、#4013
+
+## R-L0-46 位置を受け取る関数を全数で表にし、役割の規則（R-L0-33）をゲートにする — ○ 採用
+
+- いま: R-L0-33 が役割ごとの範囲外の扱いを決めていますが、位置を受け取る関数を全部数えて当てはめたことがありません。メモリ安全の空間の項（#4005）が検査する対象は、この一覧です。
+- 全数（リデザイン後の 1,289 関数のうち、`Int` の位置・端・オフセットを受け取るもの）: 108 関数。1 つを読む 60、1 つを書く・差し込む・消す 33、範囲を取り出す 5、そのほか 10（`list.range` は位置ではなく値、`value.index` はパスを作るだけ、`bytes.skip`・`is_eof` は読み位置を動かす・調べる、`matrix.from_bytes_*` は none を返す、`matrix.slice_rows`・`fs.fold_lines_range` は範囲）。
+- 1 つを読む 60 関数は、どれも型で none を返せます（`get_*` は `T?`、`next_*` は `(T?, Int)`）。
+- 外れていたもの（実測 `almide 0.68.0 dev 437b8f127`）:
+  - `fs.fold_lines_range(path, -2, 2, …)` は開始を 0 に丸めて畳みます。
+  - `matrix.slice_rows(m, -1, 2)` は 0 行の行列を返します。
+  - どちらも範囲を取り出す役割なので、R-L0-29 のとおり負の位置で abort にします（正の側のはみ出しは丸めたまま）。
+  - `bytes.skip(b, 0, -5)` は負の読み位置 `-5` を返し、続く `bytes.read_u8(b, -5)` は `0` を返します。R-bytes-13・R-bytes-21 ですでに「`n < 0` は abort」に決めてあり、その判定が正しいことを実測で確かめました。
+- ゲート案: 位置を受け取る公開関数の一覧を生成し、役割の列が空の行、1 つを読むのに none を返せない行、範囲・書き込みで負の位置の fixture（abort を確かめる）が無い行を拒みます。
+- issue: #4005
 
 ## ゲートの束（R-L0-G） — ○ 採用
 
