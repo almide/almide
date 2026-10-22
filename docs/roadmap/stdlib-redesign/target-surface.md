@@ -1063,7 +1063,7 @@
 | `read_all_bytes` | `effect fn io.read_all_bytes() -> Bytes` | 新規 | R-io-04 |
 | `read_bytes` | `effect fn io.read_bytes(n: Int) -> Bytes` | 新規 | R-io-01 |
 | `read_line` | `effect fn io.read_line() -> String?` | 意味変更: `-> String?` にする。唯一の 1 行読み | R-io-01 |
-| `write_bytes` | `effect fn io.write_bytes(b: Bytes) -> Unit` | 意味変更: `data: Bytes` にし、effect fn にする | R-io-01・R-io-02 |
+| `write_bytes` | `effect fn io.write_bytes(data: Bytes) -> Unit` | 意味変更: `data: Bytes` にし、effect fn にする | R-io-01・R-io-02 |
 
 撤去（4）:
 
@@ -1155,7 +1155,7 @@
 | `range_step` | `fn list.range_step(start: Int, end: Int, step: Int) -> List[Int]` | 新規 | R-list-09 |
 | `reduce` | `fn list.reduce(xs: List[A], f: (A, A) -> A) -> A?` |  |  |
 | `remove_at` | `fn list.remove_at(xs: List[A], i: Int) -> List[A]` | 意味変更: 範囲外は abort | R-list-00、R-list-13 |
-| `repeat` | `fn list.repeat(val: A, n: Int) -> List[A]` |  |  |
+| `repeat` | `fn list.repeat(x: A, n: Int) -> List[A]` |  |  |
 | `reverse` | `fn list.reverse(xs: List[A]) -> List[A]` |  | R-list-00 |
 | `scan` | `fn list.scan(xs: List[A], init: B, f: (B, A) -> B) -> List[B]` |  |  |
 | `set` | `fn list.set(xs: List[A], i: Int, x: A) -> List[A]` | 意味変更: 範囲外は abort | R-list-00、R-list-13 |
