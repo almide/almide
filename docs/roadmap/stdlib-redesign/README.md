@@ -11,6 +11,8 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 
 四巡目（2026-10-22）: 2 つめの外部レビューを同じように突き合わせました。2 つのレビューがそろって指摘した綴り（`value.str`、`hash` の `_hex` の入力）は見直して改名・変更し、R-L0-29（負の位置を abort にする案）は Dojo の計測まで保留にしました。一覧の生成の誤り（撤去欄の空の移行先、切れた注記、演算子の脱糖先の行）も直しました。
 
+五巡目（2026-10-22）: 命名の統一を一覧の全関数で機械的に点検しました。関数名は L0 のとおり揃っていましたが、引数名は同じ役割に 2 つ以上の綴りがありました（`Bytes` の `b`/`data`、要素の `x`/`val`/`value` など）。R-L0-30 で役割ごとに 1 つに決め、一覧のシグネチャをその名前で書き直しました。
+
 ## 読む順番
 
 1. [L0: 全モジュールに共通する規則](L0-conventions.md) — 名前・置き場所・その場書き換え・失敗の表し方・変換の向き・互換の扱い。下の層の判定はすべてここから導きます。
@@ -27,7 +29,7 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 
 [args](L2-args.md) ・ [base64](L2-base64.md) ・ [bigint](L2-bigint.md) ・ [bool](L2-bool.md) ・ [bytes](L2-bytes.md) ・ [compute](L2-compute.md) ・ [datetime](L2-datetime.md) ・ [deque](L2-deque.md) ・ [duration](L2-duration.md) ・ [env](L2-env.md) ・ [error](L2-error.md) ・ [ffi](L2-ffi.md) ・ [float](L2-float.md) ・ [fs](L2-fs.md) ・ [hash](L2-hash.md) ・ [heap](L2-heap.md) ・ [hex](L2-hex.md) ・ [html](L2-html.md) ・ [http](L2-http.md) ・ [int](L2-int.md) ・ [io](L2-io.md) ・ [json](L2-json.md) ・ [list](L2-list.md) ・ [map](L2-map.md) ・ [math](L2-math.md) ・ [matrix](L2-matrix.md) ・ [net](L2-net.md) ・ [option](L2-option.md) ・ [path](L2-path.md) ・ [process](L2-process.md) ・ [random](L2-random.md) ・ [regex](L2-regex.md) ・ [result](L2-result.md) ・ [set](L2-set.md) ・ [sized-numbers](L2-sized-numbers.md) ・ [string](L2-string.md) ・ [testing](L2-testing.md) ・ [unix](L2-unix.md) ・ [url](L2-url.md) ・ [uuid](L2-uuid.md) ・ [value](L2-value.md) ・ [zlib](L2-zlib.md)
 
-## 案の状態（全 294 件: ○ 236・× 53・保留 5）
+## 案の状態（全 295 件: ○ 237・× 53・保留 5）
 
 | 案 | 内容 | 判定 | issue |
 |---|---|---|---|
@@ -61,6 +63,7 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 | [R-L0-27](L0-conventions.md#r-l0-27-next_-が-none-を返すときは状態を進めない---採用) | `next_` が none を返すときは、状態を進めない | ○ | #3979 |
 | [R-L0-28](L0-conventions.md#r-l0-28-_checked-の変換は正確に表せるときだけ-some---採用記録の訂正) | `_checked` の変換は「正確に表せるときだけ some」 | ○ | —（記録の訂正） |
 | [R-L0-29](L0-conventions.md#r-l0-29-負の開始位置を丸めずに-abort-にする--保留) | 負の開始位置を丸めずに abort にする | 保留 | almide-dojo#63 |
+| [R-L0-30](L0-conventions.md#r-l0-30-引数名は役割ごとに-1-つ---採用) | 引数名は役割ごとに 1 つ | ○ | #3987 |
 | [R-L0-G](L0-conventions.md#ゲートの束r-l0-g---採用) | ゲートの束（R-L0-G） | ○ | #3949 |
 | [R-L1-01](L1-categories.md#r-l1-01-両端キュー-deque---採用) | 両端キュー `deque` | ○ | #3932 |
 | [R-L1-02](L1-categories.md#r-l1-02-優先度キュー-heap---採用) | 優先度キュー `heap` | ○ | #3933 |

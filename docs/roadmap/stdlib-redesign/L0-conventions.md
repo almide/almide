@@ -398,6 +398,37 @@ effect fn を呼んだときの型（`!` が要るか、`??` をそのまま書�
 - (a) Rust と Go は panic、Python と JS は末尾から数える。黙って 0 に丸める言語は比べた中にありません。
 - issue: almide-dojo#63 に計測項目として足します。
 
+## R-L0-30 引数名は役割ごとに 1 つ — ○ 採用
+
+- いま: 関数名は L0 で揃っていますが、引数名は揃っていません。同じ役割に 2 つ以上の綴りがあります。
+  - `Bytes` の主語: `b` が 149 か所、`data` が 12 か所（`zlib.*`・`hash.fnv1a32`・`matrix.from_bytes_*`）。外に書き出すバイト列（`fs.write_bytes`・`net.tcp_write` など）は `data` で、こちらは揃っています。
+  - 数の主語: `int`・`float` は `n`、サイズつきの型は `x`。
+  - 要素: `x`（`list.push`）、`val`（`list.insert`・`bytes.*`）、`value`（`set.insert`）。
+  - 添字: `bytes.get` は `i`、`bytes.insert` は `pos`。
+  - 関数の引数: ほとんど `f` で、`result.filter` は `pred`、`heap.new_by` は `key`。
+  - パターン: `regex.new` は `pat`、`fs.glob`・`http.route` は `pattern`。
+- 引数名は表に出る約束です。Almide には名前つき引数があり（`list.len(xs: [1, 2])` が通ります。実測 `almide 0.68.0 dev`）、シグネチャは `llms.txt` と cheatsheet に載ります。
+- 案: 役割ごとに名前を 1 つに決めます。
+
+| 役割 | 名前 |
+|---|---|
+| 主語 `List`・`Bytes`・`Map`・`Set`・`Matrix`・`Value`・`Result`・`Option` | `xs`・`b`・`m`・`s`・`m`・`v`・`r`・`o` |
+| 外に書き出すバイト列（`io`・`fs`・`net`・`unix`・`http`・`process`） | `data` |
+| `int`・`float`・`bigint`・サイズつきの数のモジュールの主語 | `x`（2 つを取る演算は `a`・`b`） |
+| `path` の主語 | `path`（`fs` と同じ） |
+| 要素の値（list・set・deque・heap・bytes） | `x`（`map` だけは組の `key`・`value`） |
+| 要素の添字 | `i` |
+| 型つきの読み書き（`bytes.get_*`・`put_*`・`next_*`）のバイト位置 | `pos` |
+| 関数の引数 | `f`。比較関数は `cmp` |
+| パターンの文字列（`regex`・`fs.glob`・`http.route`） | `pattern` |
+| 個数・量（`duration.ms(n)`・`random.bytes(n)`・`list.take(xs, n)`） | `n` |
+
+- (c) 名前つき引数で古い名前を書くと、E004「no parameter named …」になり、ヒントに正しい名前が出ます。黙って違う値にはなりません。
+- (d) 改名。`spec/`・`stdlib/`・`examples/`・exercise の中で、標準関数を名前つき引数で呼んでいる箇所は 0 件でした。epoch 15 の `breaks` に入れ、`almide fix` で書き換えます。
+- 完全性の規則: 公開関数のすべての引数を役割で分け、1 つの役割に 2 つ目の綴りがあればゲートが落ちます。
+- 一覧（[target-surface.md](target-surface.md)）のシグネチャは、この表の名前で書いています。
+- issue: #3987
+
 ## ゲートの束（R-L0-G） — ○ 採用
 
 R-L0-02、03、04、07、09、10、12、16 の検査を、1 つのテスト `tests/stdlib_surface_conventions_test.rs` にまとめます。入力は interface JSON（`mut` 欄つき）です。規則ごとの許容リストは、L2 の案で解消するたびに減らします。増やす方向には変えられません。
