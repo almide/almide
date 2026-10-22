@@ -7,7 +7,7 @@
 
 ## Active
 
-99 items
+100 items
 
 | Item | Description |
 |------|-------------|
@@ -73,6 +73,7 @@
 | [result-family-from-type — layout is a function of the type, names only choose code](active/result-family-from-type.md) | Derive call-result layout from the type, not from module/func name tables |
 | [Return-op eradication: one desugar for `!`, position zoo deleted](active/return-op-eradication.md) | One desugar for the ! operator, deleting the per-position return-op zoo |
 | [rot-eradication — the decay map and its reference-backed cures](active/rot-eradication.md) | The decay map of compiler rot and its reference-backed cures |
+| [Security by construction](active/security-by-construction.md) | The security claim Almide is working toward — the vulnerability classes behind the October 2026 PHP and Go advisories, what makes each impossible in Almide today, the gaps with their issues, and the rule for when the claim may be stated |
 | [Self-host linking v2 — link the mono instances, retire the twin matrix](active/selfhost-link-v2.md) | Self-host linking v2 — retire the shim registry's per-type twins by linking the monomorphized generic bodies the renderer already produces |
 | [Shell scripting stance: structured pipelines, no interactive shell](active/shell-scripting-surface.md) | Take Nushell's data model for scripts; do not build an interactive shell |
 | [Stdlib redesign (three layers)](active/stdlib-redesign.md) | Three-layer redesign of the standard library against nine languages — rules, category list, per-module role tables, a verdict for every public function, and the issues the adopted proposals became |
