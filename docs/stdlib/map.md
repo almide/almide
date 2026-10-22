@@ -366,7 +366,7 @@ fn main() -> Unit = {
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (25 functions)
+## Signature index (40 functions)
 
 ```
 // An empty Map[K, V].
@@ -468,6 +468,66 @@ map.delete(mut m: Map[K, V], key: K) -> Unit
 // Removes every entry of m in place.
 // @since 0.9.3 or earlier
 map.clear(mut m: Map[K, V]) -> Unit
+
+// (index, (key, value)) pairs in insertion order, index from 0.
+// @since unreleased
+map.enumerate(m: Map[K, V]) -> List[(Int, (K, V))]
+
+// Entries paired with ys by position; stops at the shorter.
+// @since unreleased
+map.zip(m: Map[K, V], ys: List[B]) -> List[((K, V), B)]
+
+// f over (entry, ys element) pairs; stops at the shorter.
+// @since unreleased
+map.zip_with(m: Map[K, V], ys: List[B], f: ((K, V), B) -> C) -> List[C]
+
+// The somes f gives over the entries, in insertion order.
+// @since unreleased
+map.filter_map(m: Map[K, V], f: ((K, V)) -> Option[B]) -> List[B]
+
+// The first some f gives over the entries, or none; f is not called after the hit.
+// @since unreleased
+map.find_map(m: Map[K, V], f: ((K, V)) -> Option[B]) -> Option[B]
+
+// Left fold of the entries seeded by the first; none when empty.
+// @since unreleased
+map.reduce(m: Map[K, V], f: ((K, V), (K, V)) -> (K, V)) -> Option[(K, V)]
+
+// Running fold values over the entries, init excluded.
+// @since unreleased
+map.scan(m: Map[K, V], init: B, f: (B, (K, V)) -> B) -> List[B]
+
+// (entries where f holds, the rest), insertion order kept.
+// @since unreleased
+map.partition(m: Map[K, V], f: ((K, V)) -> Bool) -> (List[(K, V)], List[(K, V)])
+
+// Key f(entry) -> entries; keys in first-seen order.
+// @since unreleased
+map.group_by(m: Map[K, V], f: ((K, V)) -> B) -> Map[B, List[(K, V)]]
+
+// Entries sorted by key f(entry), stable; f runs once per entry.
+// @since unreleased
+map.sort_by(m: Map[K, V], f: ((K, V)) -> B) -> List[(K, V)]
+
+// Entries sorted by cmp, stable: negative puts a first.
+// @since unreleased
+map.sort_with(m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> List[(K, V)]
+
+// Entry with the least f(entry); the first on ties.
+// @since unreleased
+map.min_by(m: Map[K, V], f: ((K, V)) -> U) -> Option[(K, V)]
+
+// Entry with the greatest f(entry); the first on ties.
+// @since unreleased
+map.max_by(m: Map[K, V], f: ((K, V)) -> U) -> Option[(K, V)]
+
+// Least entry by cmp; the first on ties.
+// @since unreleased
+map.min_with(m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> Option[(K, V)]
+
+// Greatest entry by cmp; the first on ties.
+// @since unreleased
+map.max_with(m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> Option[(K, V)]
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

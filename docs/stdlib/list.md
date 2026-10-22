@@ -847,7 +847,7 @@ When a callback that never errs leaves `E` unconstrained, annotate the result:
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (67 functions)
+## Signature index (79 functions)
 
 ```
 // Element count; 0 for an empty list.
@@ -1117,6 +1117,54 @@ list.iterate(seed: T, f: (T) -> T, n: Int) -> List[T]
 // The first some that f gives, or none; f is not called after the hit.
 // @since unreleased
 list.find_map(xs: List[A], f: (A) -> Option[B]) -> Option[B]
+
+// An empty list; the same value as [].
+// @since unreleased
+list.new() -> List[A]
+
+// xs itself; the Container constructor from a list.
+// @since unreleased
+list.from_list(xs: List[A]) -> List[A]
+
+// xs itself; the Container view as a list.
+// @since unreleased
+list.to_list(xs: List[A]) -> List[A]
+
+// Stable sort by cmp: negative puts a first, 0 keeps input order.
+// @since unreleased
+list.sort_with(xs: List[A], cmp: (A, A) -> Int) -> List[A]
+
+// Element with the least key f(x); the first on ties; f runs once per x.
+// @since unreleased
+list.min_by(xs: List[A], f: (A) -> K) -> Option[A]
+
+// Element with the greatest key f(x); the first on ties; f runs once per x.
+// @since unreleased
+list.max_by(xs: List[A], f: (A) -> K) -> Option[A]
+
+// Least element by cmp; the first on ties; none when empty.
+// @since unreleased
+list.min_with(xs: List[A], cmp: (A, A) -> Int) -> Option[A]
+
+// Greatest element by cmp; the first on ties; none when empty.
+// @since unreleased
+list.max_with(xs: List[A], cmp: (A, A) -> Int) -> Option[A]
+
+// Index of target among keys f(x) of xs sorted by key, or none.
+// @since unreleased
+list.binary_search_by(xs: List[A], target: K, f: (A) -> K) -> Option[Int]
+
+// Index of target in xs sorted by cmp, or none; cmp(x, target) is asked.
+// @since unreleased
+list.binary_search_with(xs: List[A], target: A, cmp: (A, A) -> Int) -> Option[Int]
+
+// (firsts, seconds) of a list of pairs; the inverse of zip.
+// @since unreleased
+list.unzip(xs: List[(A, B)]) -> (List[A], List[B])
+
+// start, start + step, ... before end; counts down for step < 0; step = 0 aborts.
+// @since unreleased
+list.range_step(start: Int, end: Int, step: Int) -> List[Int]
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->
