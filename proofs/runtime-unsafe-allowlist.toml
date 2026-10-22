@@ -6,7 +6,7 @@
 #
 # class: fan-sync (Almide values cross threads; Miri/loom are the plan), ffi-surface
 # (the raw-pointer stdlib surface, closed to ffi.read/ffi.write by R-L0-45),
-# c-call (a C / OS function; safe when its arguments are), dead (compiled by nothing; delete).
+# c-call (a C / OS function; safe when its arguments are).
 
 [[file]]
 path = "runtime/rs/src/list.rs"
@@ -38,23 +38,8 @@ count = 1
 class = "c-call"
 reason = "cblas_dgemm: reads m*k and k*n and writes m*n f64 through raw pointers; the dimensions come from shape-checked matrices"
 
-[[file]]
-path = "runtime/rs/burn/matrix_burn.rs"
-count = 14
-class = "dead"
-reason = "DEAD CODE: nothing builds runtime/rs/burn since the 0.28 flat-matrix runtime (src/cli/cargo_build.rs:227); its matrix_add reads the second operand up to the first one's length with no shape check — delete the directory"
 
-[[file]]
-path = "runtime/rs/burn/matrix_burn_p2.rs"
-count = 2
-class = "dead"
-reason = "DEAD CODE: nothing builds runtime/rs/burn since the 0.28 flat-matrix runtime (src/cli/cargo_build.rs:227); its matrix_add reads the second operand up to the first one's length with no shape check — delete the directory"
 
-[[file]]
-path = "runtime/rs/burn/matrix_burn_p3.rs"
-count = 5
-class = "dead"
-reason = "DEAD CODE: nothing builds runtime/rs/burn since the 0.28 flat-matrix runtime (src/cli/cargo_build.rs:227); its matrix_add reads the second operand up to the first one's length with no shape check — delete the directory"
 
 [[file]]
 path = "crates/almide-rt-core/src/net_unix_sys.rs"
