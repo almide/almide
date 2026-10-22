@@ -23,6 +23,8 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 
 十巡目（2026-10-22）: `list` だけにあった 30 の列のアルゴリズム（`enumerate`・`zip`・`sort`・`chunk` など）を、`Sequence`・`Ordered` の既定の実装として 1 回だけ書き、`deque`・`set`・`string`・`bytes`・`map` でも同じ名前・同じ形で使えるようにしました（R-L0-42。Swift の `Sequence` の拡張と同じ）。`min`・`max`・`clamp` を `Ord` から外し（`duration.min` と衝突していた）、`bytes` に `Text` の要件をそろえ（R-bytes-27）、部分文字列を数える `string.count` を `count_matches` にしました（R-string-18。`Container.count` と衝突していた）。protocol の要件の引数名がすべての型で同じであることを、生成のたびに確かめます。
 
+十一巡目（2026-10-22）: `Bool` の順序を 9 言語で並べ直し、順序をつける 7 言語（Rust・Python・JS・Gleam・Elixir・OCaml・Kotlin）に合わせて `Bool` を `Ord` に入れ、`bool.compare` を足しました（R-bool-02 を保留から採用へ）。つけないのは Go と Swift だけでした。これで保留は R-map-04 などの計測待ちだけです。
+
 ## 読む順番
 
 1. [L0: 全モジュールに共通する規則](L0-conventions.md) — 名前・置き場所・その場書き換え・失敗の表し方・変換の向き・互換の扱い。下の層の判定はすべてここから導きます。
@@ -40,7 +42,7 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 
 [args](L2-args.md) ・ [base64](L2-base64.md) ・ [bigint](L2-bigint.md) ・ [bool](L2-bool.md) ・ [bytes](L2-bytes.md) ・ [compute](L2-compute.md) ・ [datetime](L2-datetime.md) ・ [deque](L2-deque.md) ・ [duration](L2-duration.md) ・ [env](L2-env.md) ・ [error](L2-error.md) ・ [ffi](L2-ffi.md) ・ [float](L2-float.md) ・ [fs](L2-fs.md) ・ [hash](L2-hash.md) ・ [heap](L2-heap.md) ・ [hex](L2-hex.md) ・ [html](L2-html.md) ・ [http](L2-http.md) ・ [int](L2-int.md) ・ [io](L2-io.md) ・ [json](L2-json.md) ・ [list](L2-list.md) ・ [map](L2-map.md) ・ [math](L2-math.md) ・ [matrix](L2-matrix.md) ・ [net](L2-net.md) ・ [option](L2-option.md) ・ [path](L2-path.md) ・ [process](L2-process.md) ・ [random](L2-random.md) ・ [regex](L2-regex.md) ・ [result](L2-result.md) ・ [set](L2-set.md) ・ [sized-numbers](L2-sized-numbers.md) ・ [string](L2-string.md) ・ [testing](L2-testing.md) ・ [unix](L2-unix.md) ・ [url](L2-url.md) ・ [uuid](L2-uuid.md) ・ [value](L2-value.md) ・ [zlib](L2-zlib.md)
 
-## 案の状態（全 341 件: ○ 276・× 60・保留 5）
+## 案の状態（全 341 件: ○ 277・× 60・保留 4）
 
 | 案 | 内容 | 判定 | issue |
 |---|---|---|---|
@@ -120,7 +122,7 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 | [R-bigint-06](L2-bigint.md#r-bigint-06-uint64-と-bigint-を値を失わずに行き来させる---採用) | `uint64` と `BigInt` を値を失わずに行き来させる | ○ | #3972 |
 | [R-bigint-07](L2-bigint.md#r-bigint-07-bigint-に-integer-のビット演算を置く---採用) | `bigint` に `Integer` のビット演算を置く | ○ | #4000 |
 | [R-bool-01](L2-bool.md#r-bool-01-boolparse-を足す---採用) | `bool.parse` を足す | ○ | #3980 |
-| [R-bool-02](L2-bool.md#r-bool-02-boolcompare-を足す--保留protocol-の階層で--から変更dojo-で測る) | `bool.compare` を足す | 保留 | #3980 |
+| [R-bool-02](L2-bool.md#r-bool-02-boolcompare-を足す---採用十一巡目に保留から戻す9-言語中-7-つが順序をつける) | `bool.compare` を足す | ○ | #3980 |
 | [R-bool-03](L2-bool.md#r-bool-03-boolto_string-を置く---採用) | `bool.to_string` を置く | ○ | #3980 |
 | [R-bytes-01](L2-bytes.md#r-bytes-01-位置を指定した上書きを-put_型-にする---採用) | 位置を指定した上書きを `put_<型>` にする | ○ | #3898 |
 | [R-bytes-02](L2-bytes.md#r-bytes-02-1-バイトの追記は-push1-バイトの上書きは-put_u8-だけにする---採用) | 1 バイトの追記は `push`、1 バイトの上書きは `put_u8` だけにする | ○ | #3851 |

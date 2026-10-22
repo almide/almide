@@ -6,7 +6,7 @@
 
 R-L0-37 のとおり、標準の具体型を「準拠する protocol の組み合わせ」と「その型だけの関数」で書き表します。protocol の階層は Swift の標準ライブラリを手本にし、Swift にない層は理由を書いて足しています。準拠と穴は、[target-surface.md](target-surface.md)（リデザイン後の関数）から機械的に出しています。
 
-- 値の型 31 種の関数 1,021 個のうち、730 個（71%）が protocol の要件です。残りの 291 個が、その型だけの関数です。
+- 値の型 31 種の関数 1,022 個のうち、731 個（71%）が protocol の要件です。残りの 291 個が、その型だけの関数です。
 - 準拠を決めると、要件のうちまだ無い関数が 0 個あります（穴）。既定の実装で埋まるものは数えていません。
 - 手本にした Swift の protocol は、表の「Swift」の列に書いています。
 
@@ -70,7 +70,7 @@ HttpMessage
 | 土台 | `Hash` | `Eq` | — | — | Hashable | Bool・String・Bytes・List[A]・Set[A]・BigInt・Duration・Compute・Uuid・Url・Option[A]・Result[A, E]・Int・Int8・Int16・Int32・Int64・UInt8・UInt16・UInt32・UInt64 |
 | 土台 | `Repr` | — | `to_string` | `to_string` | CustomStringConvertible | Bool・String・BigInt・Float・Float32・Float64・Uuid・Url・Value・Matrix・Regex・Int・Int8・Int16・Int32・Int64・UInt8・UInt16・UInt32・UInt64 |
 | 土台 | `Parse` | `Repr` | `parse` | — | LosslessStringConvertible | Bool・BigInt・Float・Float32・Float64・Uuid・Url・Int・Int8・Int16・Int32・Int64・UInt8・UInt16・UInt32・UInt64 |
-| 土台 | `Ord` | `Eq` | `compare` | — | Comparable | String・Bytes・BigInt・Float・Float32・Float64・Duration・Compute・Uuid・Int・Int8・Int16・Int32・Int64・UInt8・UInt16・UInt32・UInt64 |
+| 土台 | `Ord` | `Eq` | `compare` | — | Comparable | Bool・String・Bytes・BigInt・Float・Float32・Float64・Duration・Compute・Uuid・Int・Int8・Int16・Int32・Int64・UInt8・UInt16・UInt32・UInt64 |
 | 土台 | `Codec` | — | — | — | Codable | Bool・String・Bytes・List[A]・Deque[A]・Set[A]・Map[K, V]・BigInt・Float・Float32・Float64・Duration・Uuid・Url・Option[A]・Result[A, E]・Value・Int・Int8・Int16・Int32・Int64・UInt8・UInt16・UInt32・UInt64 |
 | 数 | `Additive` | `Eq` | — | — | AdditiveArithmetic | BigInt・Float・Float32・Float64・Duration・Compute・Int・Int8・Int16・Int32・Int64・UInt8・UInt16・UInt32・UInt64 |
 | 数 | `Numeric` | `Additive` | `from`・`from_checked` | — | Numeric | BigInt・Float・Float32・Float64・Int・Int8・Int16・Int32・Int64・UInt8・UInt16・UInt32・UInt64 |
@@ -128,7 +128,7 @@ HttpMessage
 
 | 型 | 準拠 | 関数 | その型だけ | 穴 |
 |---|---|---|---|---|
-| `Bool` | Parse・Hash・Codec | 2 | 0 | なし |
+| `Bool` | Parse・Ord・Hash・Codec | 3 | 0 | なし |
 | `String` | Text・Growable・Ord・Repr・Hash・Codec | 85 | 21 | なし |
 | `Bytes` | Text・Indexed・Growable・Ord・Hash・Codec | 176 | 105 | なし |
 | `List[A]` | Indexed・Growable・Membership・Hash・Codec | 73 | 16 | なし |
@@ -166,7 +166,7 @@ HttpMessage
 
 | 問い | 事実 | 決定 |
 |---|---|---|
-| `Bool` は `Ord` か | Swift は `Bool` を `Comparable` にしない（真偽に大小の意味はない）。Rust・Kotlin・OCaml・Python・Elixir は順序をつける。Almide はいま `false < true` が通る。 | 保留（R-bool-02）。`Ord` から外す方向で、R-L0-36 のとおり Dojo で測る（`sort_by` の鍵に `Bool` を使うコードがどれだけ落ちるか）。それまで `bool.compare`（R-bool-02）は保留。 |
+| `Bool` は `Ord` か | Swift は `Bool` を `Comparable` にしない（真偽に大小の意味はない）。Rust・Kotlin・OCaml・Python・Elixir は順序をつける。Almide はいま `false < true` が通る。 | 採用（R-bool-02）。9 言語中 7 つ（Rust・Python・JS・Gleam・Elixir・OCaml・Kotlin）が順序をつけ、つけないのは Go と Swift だけ。Almide もいま `false < true` が通る。階層の骨組みは Swift だが、どの型をどの protocol に入れるかは型ごとに多数派で決める。 |
 | `Repr` のメソッド名 | 組み込みの `Repr` のメソッドは `repr`。一方でモジュールの関数は `int.to_string`。同じ役割に 2 つの綴り。 | 採用（R-L0-38・R-bool-03）。R-L0-22（`Ord.cmp` → `compare`）と同じく、`Repr` のメソッドを `to_string` にする。すると `<mod>.to_string` はすべての値の型にある（`bool.to_string` も、足す実装なしで生える）。 |
 | `regex.parse` は `Parse` か | Swift の `Regex` は `LosslessStringConvertible` ではない。`regex.parse` は値の文字列表現を読むのではなく、パターンを組み立てる。 | 採用（R-regex-11）。`Regex` は `Parse` に入れず、`regex.parse` を `regex.compile` と綴る（Go・Python・Elixir と同じ）。 |
 | サイズつきの整数の算術 | `int` は `floor_div`・`mod`・`pow`・ビット演算・`abs`・`sign` を持つのに、`int8`〜`uint64` は持たない。`Integer`・`FixedWidthInteger` に入れると、これがそのまま穴になる。 | 採用（R-sized-10。R-sized-05 を見直し）。`Integer` の要件として全部の整数に置く。中身は既定の実装 1 つで、型ごとに書かない。 |
