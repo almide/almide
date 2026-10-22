@@ -309,6 +309,33 @@
 - 完全性の規則: `+` で連結できる列の型（String・Bytes）はすべて `list.join` で結べます（List どうしの連結は `list.flatten`）。
 - issue: #3969
 
+### R-list-17 `binary_search_by`・`binary_search_with` を足す — ○ 採用
+
+- いま: 並べる側は `sort`・`sort_by`・`sort_with` の 3 つがあるのに、探す側は `binary_search` だけです。`sort_by(xs, key)` で並べたリストを、同じ鍵で探す関数がありません。
+- 案: `fn list.binary_search_by[A, K](xs: List[A], target: K, key: (A) -> K) -> Int?`、`fn list.binary_search_with[A](xs: List[A], target: A, cmp: (A, A) -> Int) -> Int?`。並べ方と探し方が同じ `_by`・`_with` の対になります。
+- 根拠の L0 規則: R-L0-12（族は行列で揃える）。L2 の完全性の規則 4（順序を使う関数は同じ要素型）。
+- (a) Rust `binary_search_by`・`binary_search_by_key`、Go `slices.BinarySearchFunc`、Python `bisect(key=)`、Kotlin `binarySearch(comparator)`・`binarySearchBy`。
+- (b) 純粋な計算です。
+- (c) `sort_by` で並べたら `binary_search_by` で探す、と名前の対で当たります。
+- (d) 追加 2。
+- 完全性の規則: `sort` の 3 つの形（無印・`_by`・`_with`）は、`binary_search` にも同じ 3 つがあります。
+- issue: #3980
+
+### R-list-18 `list.repeat` を列全体の繰り返しにする — × 不採用
+
+- 理由: `string.repeat` と `bytes.repeat` は列全体を繰り返し、`list.repeat(v, n)` は 1 つの値を n 個並べます。揃えると、`list.repeat([1, 2], 3)` の結果が `[[1, 2], [1, 2], [1, 2]]` から `[1, 2, 1, 2, 1, 2]` に、型エラーなしで変わります（R-L0-14 の 4: 同じ名前で黙って結果を変えない）。要素を並べる形は Gleam `repeat`・Elixir `List.duplicate`・Kotlin `List(n) { v }`・Swift `Array(repeating:count:)` と同じで、多数派から外れてもいません。L3 の表の「Go slices.Repeat」は列全体の繰り返しなので、比較の欄から外しました。
+- issue: なし
+
+### R-list-19 `min_with`・`max_with` を足す — ○ 採用
+
+- いま: 並べる・探すは無印・`_by`・`_with` の 3 つ（R-list-17）なのに、`min`・`max` は無印と `_by` だけです。
+- 案: `fn list.min_with[A](xs: List[A], cmp: (A, A) -> Int) -> A?`、`fn list.max_with[A](xs: List[A], cmp: (A, A) -> Int) -> A?`。
+- 根拠の L0 規則: R-L0-10（`_with` は比較関数）、R-L0-12（族は行列で揃える）。
+- (a) Rust `min_by`/`max_by`（比較関数）、Kotlin `minWithOrNull`/`maxWithOrNull`、Swift `min(by:)`。
+- (d) 追加 2。
+- 完全性の規則（R-list-17 を広げる）: 順序を使う関数 {`sort`, `min`, `max`, `binary_search`} は、どれも無印・`_by`・`_with` の 3 つを持ちます。
+- issue: #3985
+
 ## L3: 関数表
 
 判定の凡例: 据え置き / 改名 / 意味変更 / 撤去 / 追加。他言語の列は主な綴りだけを書きます。
@@ -365,7 +392,7 @@
 | `slice` | `list.slice(xs: List[A], start: Int, end: Int) -> List[A]` | JS slice / Python xs[a:b] / Elixir slice | 意味変更（負の開始位置を 0 に丸める） | R-list-10 |
 | `insert` | `list.insert(xs: List[A], i: Int, val: A) -> List[A]` | Go slices.Insert / Elixir List.insert_at / JS toSpliced | 意味変更（`0..=len` の外は abort） | R-list-00、R-list-13 |
 | `remove_at` | `list.remove_at(xs: List[A], i: Int) -> List[A]` | Elixir List.delete_at / Kotlin removeAt / Swift remove(at:) | 意味変更（範囲外は abort） | R-list-00、R-list-13 |
-| `repeat` | `list.repeat(val: A, n: Int) -> List[A]` | Gleam repeat / Go slices.Repeat / Elixir List.duplicate | 据え置き | — |
+| `repeat` | `list.repeat(val: A, n: Int) -> List[A]` | Gleam repeat / Elixir List.duplicate / Kotlin `List(n) { v }` | 据え置き | — |
 | `intersperse` | `list.intersperse(xs: List[A], sep: A) -> List[A]` | Gleam intersperse / Elixir intersperse | 据え置き | — |
 | `windows` | `list.windows(xs: List[A], n: Int) -> List[List[A]]` | Rust windows | 撤去（→ `list.window`） | R-list-03 |
 | `dedup` | `list.dedup(xs: List[A]) -> List[A]` | Rust dedup / Elixir dedup / Go Compact | 据え置き | — |
@@ -387,6 +414,10 @@
 | `max_by` | `list.max_by(xs: List[A], f: (A) -> K) -> Option[A]`（案） | Rust max_by_key / Kotlin maxByOrNull / Elixir max_by | 追加 | R-list-06 |
 | `unzip` | `list.unzip(xs: List[(A, B)]) -> (List[A], List[B])`（案） | Rust unzip / Gleam unzip / OCaml split | 追加 | R-list-07 |
 | `range_step` | `list.range_step(start: Int, end: Int, step: Int) -> List[Int]`（案） | Python range(a,b,s) / Rust step_by / Kotlin step | 追加 | R-list-09 |
+| `binary_search_by` | （追加）`list.binary_search_by(xs: List[A], target: K, key: (A) -> K) -> Option[Int]` | Rust binary_search_by_key / Kotlin binarySearchBy | 追加 | R-list-17 |
+| `binary_search_with` | （追加）`list.binary_search_with(xs: List[A], target: A, cmp: (A, A) -> Int) -> Option[Int]` | Rust binary_search_by / Go BinarySearchFunc | 追加 | R-list-17 |
+| `min_with` | （追加）`list.min_with(xs: List[A], cmp: (A, A) -> Int) -> Option[A]` | Kotlin minWithOrNull / Swift min(by:) | 追加 | R-list-19 |
+| `max_with` | （追加）`list.max_with(xs: List[A], cmp: (A, A) -> Int) -> Option[A]` | Kotlin maxWithOrNull / Swift max(by:) | 追加 | R-list-19 |
 
 行数: 現行 67 関数 + 追加 5 関数 = 72 行。
 

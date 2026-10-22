@@ -43,6 +43,15 @@
 - (d) 変更なし（ゲートと診断のヒントだけ）。
 - issue: #3949
 
+### R-testing-02 `assert_gt`・`assert_lt` を順序のある型すべてで使えるようにする — ○ 採用
+
+- いま: `fn assert_gt(a: Int, b: Int) -> Unit`。順序のある型はすべて `compare` を持つ（R-L0-16）のに、大小のアサートは `Int` だけです。`Float`・`Duration`・`String` の大小を確かめると E005 になります。
+- 案: `fn testing.assert_gt[T](a: T, b: T) -> Unit`、`assert_lt` も同じ。順序は `<` と同じです。
+- 根拠の L0 規則: R-L0-16。`list.binary_search` を広げた R-list-15 と同じ「定義域を広げるだけ」の変更です。
+- (a) Python `assertGreater`、Swift `XCTAssertGreaterThan` は比較できる型すべてを受け取ります。
+- (d) 意味変更（定義域を広げるだけ。既存の呼び出しは変わらない）。R-testing-01 の族（{`assert_gt`, `assert_lt`}、`ge`/`le` は置かない）はそのままです。
+- issue: #3980
+
 ## L3: 関数表
 
 | 関数 | シグネチャ(現行, mut 表示) | 他言語の主な綴り | 判定 | 案 |
@@ -50,8 +59,8 @@
 | `testing.assert_aborts` | `fn assert_aborts[T](expected: String, f: () -> T) -> Unit` | Python `assertRaises` / Elixir `assert_raise` / Kotlin `assertFails` | 据え置き | — |
 | `testing.assert_contains` | `fn assert_contains(haystack: String, needle: String) -> Unit` | Python `assertIn` / Kotlin `assertContains` | 据え置き | R-testing-01 |
 | `testing.assert_approx` | `fn assert_approx(a: Float, b: Float, tolerance: Float) -> Unit` | Python `assertAlmostEqual` / Elixir `assert_in_delta` / Swift `accuracy:` | 据え置き | — |
-| `testing.assert_gt` | `fn assert_gt(a: Int, b: Int) -> Unit` | Python `assertGreater` / Swift `XCTAssertGreaterThan` | 据え置き | R-testing-01 |
-| `testing.assert_lt` | `fn assert_lt(a: Int, b: Int) -> Unit` | Python `assertLess` / Swift `XCTAssertLessThan` | 据え置き | R-testing-01 |
+| `testing.assert_gt` | `fn assert_gt[T](a: T, b: T) -> Unit` | Python `assertGreater` / Swift `XCTAssertGreaterThan` | 意味変更（順序のある型すべてに広げる） | R-testing-02 |
+| `testing.assert_lt` | `fn assert_lt[T](a: T, b: T) -> Unit` | Python `assertLess` / Swift `XCTAssertLessThan` | 意味変更（順序のある型すべてに広げる） | R-testing-02 |
 | `testing.assert_some` | `fn assert_some[A](opt: A?) -> Unit` | Python `assertIsNotNone` / Kotlin `assertNotNull` | 据え置き | — |
 | `testing.assert_none` | `fn assert_none[A](opt: A?) -> Unit` | Python `assertIsNone` / Kotlin `assertNull` / Swift `XCTAssertNil` | 据え置き | — |
 | `testing.assert_ok` | `fn assert_ok[A, B](result: Result[A, B]) -> Unit` | Swift `XCTAssertNoThrow` | 据え置き | — |

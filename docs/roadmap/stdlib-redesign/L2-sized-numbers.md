@@ -93,8 +93,9 @@
 - ゲート案: R-sized-01 と同じゲートで 7 セルを検査します。
 - issue: #3910
 
-### R-sized-04 `float.to_<整数>_saturating` 8 関数を撤去する — ○ 採用
+### R-sized-04 `float.to_<整数>_saturating` 8 関数を撤去する — × 取り消し（R-L0-32）
 
+- 取り消し（五巡目）: R-L0-32 で無印の `float.to_int8` などが範囲外で abort になるので、`_saturating` は同義語でなくなり、いまの飽和の動きを持つ唯一のセルになります。8 関数は残します（`float.to_int_saturating` を足して 9 つにそろえます）。
 - 内容: `float.to_int8_saturating` … `float.to_uint64_saturating` を撤去します。`float.to_int8` などがすでに同じ飽和をします。
 - 根拠の L0 規則: R-L0-01（別の公開関数を 1 回呼ぶだけの公開関数も同義語に数える）。いまは `tests/stdlib_synonym_gate_test.rs:47-59` の許容リストで通しているので、この撤去で許容リストが 8 行減ります（減る方向の変更）。
 - (a) Rust の `as`、Kotlin の `toInt()` は浮動小数点 → 整数で飽和する 1 つの綴りだけを持ちます。
@@ -123,10 +124,22 @@
 - ゲート案: 数の変換の行列ゲートの列に 2 つを足し、`uint64` の `max_value` の往復を radix 2・16・36 で確かめます。
 - issue: #3972
 
-### R-sized-07 `float32`・`float64` に `is_nan` などの判定を足す — × 不採用
+### R-sized-07 `float32`・`float64` に `is_nan` などの判定を足す — × 不採用（→ R-sized-08 で見直し）
 
 - 理由: `float32.to_float` は値を失わないので、規則 8 の「`to_float` してから `float.*`」が正しく動きます。判定まで広げると、`floor`・`sqrt` も足すかという線引きを繰り返します。代わりに、E002 の案内（R-L0-19）に「`float32.to_float(x) |> float.is_nan`」の行を入れます。
 - issue: なし
+
+### R-sized-08 `Integer`・`FloatingPoint` を宣言し、選択と分類の関数を全型にそろえる — ○ 採用（R-sized-07 を見直し）
+
+- いま: 比較・選択・分類の関数が型によって欠けています。`int.min`・`max`・`clamp` はあっても `uint64.min` はありません（`UInt64` の上半分は `Int` に移せないので、`to_int` して `int.min` で代わりにすることもできません）。`float32.nan`・`infinity` はあっても `float32.is_nan` はありません。2 つの外部レビューが続けて挙げています。
+- 案: R-L0-31 の 2 つのプロトコルを宣言し、欠けているセルを埋めます。
+  - `Integer`（`int` と 8 型）: `compare`・`min`・`max`・`clamp`・`parse`・`parse_radix`・`to_string`・`to_string_radix`・`min_value`・`max_value`。足すのは 8 型の `min`・`max`・`clamp`（24 関数）。
+  - `FloatingPoint`（`float`・`float32`・`float64`）: `compare`・`min`・`max`・`clamp`・`parse`・`to_string`・`is_nan`・`is_infinite`・`is_finite`・`nan`・`infinity`・`epsilon`・`min_value`・`max_value`。足すのは 2 型の `min`・`max`・`clamp`・`is_nan`・`is_infinite`・`is_finite`（12 関数）。
+  - 線引き: 値を選ぶ・比べる・分類する関数は、型の中で答えが閉じるので型ごとに持ちます。値を計算する関数（`abs`・`floor`・`round`・`sqrt` など）は今までどおり `to_float` してから `float.*` で書きます（R-sized-07 の残りの理由。精度を上げて計算して戻しても、丸めの結果は変わりません）。
+- 根拠の L0 規則: R-L0-31、R-L0-12。
+- (a) Swift `BinaryInteger`（`min`・`max` は総称の関数）、Rust の整数型と `f32` はどれも `min`・`max`・`clamp`・`is_nan` を持ちます。
+- (d) 追加 36。
+- issue: #3989
 
 ## L3: 関数表
 
@@ -139,10 +152,10 @@
 | `to_int16` | `int8.to_int16(x: Int8) -> Int16` | Rust `from`/`into` / Swift `init(_:)` / Kotlin `toLong()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
 | `to_int32` | `int8.to_int32(x: Int8) -> Int32` | Rust `from`/`into` / Swift `init(_:)` / Kotlin `toLong()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
 | `to_int64` | `int8.to_int64(x: Int8) -> Int64` | Rust `from`/`into` / Swift `init(_:)` / Kotlin `toLong()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
-| `to_uint8` | `int8.to_uint8(x: Int8) -> UInt8` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
-| `to_uint16` | `int8.to_uint16(x: Int8) -> UInt16` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
-| `to_uint32` | `int8.to_uint32(x: Int8) -> UInt32` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
-| `to_uint64` | `int8.to_uint64(x: Int8) -> UInt64` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
+| `to_uint8` | `int8.to_uint8(x: Int8) -> UInt8` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
+| `to_uint16` | `int8.to_uint16(x: Int8) -> UInt16` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
+| `to_uint32` | `int8.to_uint32(x: Int8) -> UInt32` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
+| `to_uint64` | `int8.to_uint64(x: Int8) -> UInt64` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
 | `to_float32` | `int8.to_float32(x: Int8) -> Float32` | Rust `as` / Kotlin `toDouble()` / Swift `init(_:)` / Gleam `to_float` (F) | 据え置き | R-sized-01（行列のセル） |
 | `to_float64` | `int8.to_float64(x: Int8) -> Float64` | Rust `as` / Kotlin `toDouble()` / Swift `init(_:)` / Gleam `to_float` (F) | 据え置き | R-sized-01（行列のセル） |
 | `to_string` | `int8.to_string(x: Int8) -> String` | Rust `to_string` / Kotlin `toString` / Swift `String(x)` / Go `strconv.FormatInt(int64(x),10)` | 据え置き | — |
@@ -167,13 +180,13 @@
 
 | 関数 | シグネチャ(現行, mut 表示) | 他言語の主な綴り | 判定 | 案 |
 |---|---|---|---|---|
-| `to_int8` | `int16.to_int8(x: Int16) -> Int8` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
+| `to_int8` | `int16.to_int8(x: Int16) -> Int8` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
 | `to_int32` | `int16.to_int32(x: Int16) -> Int32` | Rust `from`/`into` / Swift `init(_:)` / Kotlin `toLong()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
 | `to_int64` | `int16.to_int64(x: Int16) -> Int64` | Rust `from`/`into` / Swift `init(_:)` / Kotlin `toLong()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
-| `to_uint8` | `int16.to_uint8(x: Int16) -> UInt8` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
-| `to_uint16` | `int16.to_uint16(x: Int16) -> UInt16` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
-| `to_uint32` | `int16.to_uint32(x: Int16) -> UInt32` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
-| `to_uint64` | `int16.to_uint64(x: Int16) -> UInt64` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
+| `to_uint8` | `int16.to_uint8(x: Int16) -> UInt8` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
+| `to_uint16` | `int16.to_uint16(x: Int16) -> UInt16` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
+| `to_uint32` | `int16.to_uint32(x: Int16) -> UInt32` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
+| `to_uint64` | `int16.to_uint64(x: Int16) -> UInt64` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
 | `to_float32` | `int16.to_float32(x: Int16) -> Float32` | Rust `as` / Kotlin `toDouble()` / Swift `init(_:)` / Gleam `to_float` (F) | 据え置き | R-sized-01（行列のセル） |
 | `to_float64` | `int16.to_float64(x: Int16) -> Float64` | Rust `as` / Kotlin `toDouble()` / Swift `init(_:)` / Gleam `to_float` (F) | 据え置き | R-sized-01（行列のセル） |
 | `to_string` | `int16.to_string(x: Int16) -> String` | Rust `to_string` / Kotlin `toString` / Swift `String(x)` / Go `strconv.FormatInt(int64(x),10)` | 据え置き | — |
@@ -200,13 +213,13 @@
 
 | 関数 | シグネチャ(現行, mut 表示) | 他言語の主な綴り | 判定 | 案 |
 |---|---|---|---|---|
-| `to_int8` | `int32.to_int8(x: Int32) -> Int8` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
-| `to_int16` | `int32.to_int16(x: Int32) -> Int16` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
+| `to_int8` | `int32.to_int8(x: Int32) -> Int8` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
+| `to_int16` | `int32.to_int16(x: Int32) -> Int16` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
 | `to_int64` | `int32.to_int64(x: Int32) -> Int64` | Rust `from`/`into` / Swift `init(_:)` / Kotlin `toLong()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
-| `to_uint8` | `int32.to_uint8(x: Int32) -> UInt8` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
-| `to_uint16` | `int32.to_uint16(x: Int32) -> UInt16` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
-| `to_uint32` | `int32.to_uint32(x: Int32) -> UInt32` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
-| `to_uint64` | `int32.to_uint64(x: Int32) -> UInt64` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
+| `to_uint8` | `int32.to_uint8(x: Int32) -> UInt8` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
+| `to_uint16` | `int32.to_uint16(x: Int32) -> UInt16` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
+| `to_uint32` | `int32.to_uint32(x: Int32) -> UInt32` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
+| `to_uint64` | `int32.to_uint64(x: Int32) -> UInt64` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
 | `to_float32` | `int32.to_float32(x: Int32) -> Float32` | Rust `as` / Kotlin `toDouble()` / Swift `init(_:)` / Gleam `to_float` (F) | 据え置き | R-sized-01（行列のセル） |
 | `to_float64` | `int32.to_float64(x: Int32) -> Float64` | Rust `as` / Kotlin `toDouble()` / Swift `init(_:)` / Gleam `to_float` (F) | 据え置き | R-sized-01（行列のセル） |
 | `to_string` | `int32.to_string(x: Int32) -> String` | Rust `to_string` / Kotlin `toString` / Swift `String(x)` / Go `strconv.FormatInt(int64(x),10)` | 据え置き | — |
@@ -236,13 +249,13 @@
 
 | 関数 | シグネチャ(現行, mut 表示) | 他言語の主な綴り | 判定 | 案 |
 |---|---|---|---|---|
-| `to_int8` | `int64.to_int8(x: Int64) -> Int8` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
-| `to_int16` | `int64.to_int16(x: Int64) -> Int16` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
-| `to_int32` | `int64.to_int32(x: Int64) -> Int32` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
-| `to_uint8` | `int64.to_uint8(x: Int64) -> UInt8` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
-| `to_uint16` | `int64.to_uint16(x: Int64) -> UInt16` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
-| `to_uint32` | `int64.to_uint32(x: Int64) -> UInt32` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
-| `to_uint64` | `int64.to_uint64(x: Int64) -> UInt64` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
+| `to_int8` | `int64.to_int8(x: Int64) -> Int8` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
+| `to_int16` | `int64.to_int16(x: Int64) -> Int16` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
+| `to_int32` | `int64.to_int32(x: Int64) -> Int32` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
+| `to_uint8` | `int64.to_uint8(x: Int64) -> UInt8` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
+| `to_uint16` | `int64.to_uint16(x: Int64) -> UInt16` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
+| `to_uint32` | `int64.to_uint32(x: Int64) -> UInt32` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
+| `to_uint64` | `int64.to_uint64(x: Int64) -> UInt64` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
 | `to_float32` | `int64.to_float32(x: Int64) -> Float32` | Rust `as` / Kotlin `toDouble()` / Swift `init(_:)` / Gleam `to_float` (F) | 据え置き | R-sized-01（行列のセル） |
 | `to_float64` | `int64.to_float64(x: Int64) -> Float64` | Rust `as` / Kotlin `toDouble()` / Swift `init(_:)` / Gleam `to_float` (F) | 据え置き | R-sized-01（行列のセル） |
 | `to_string` | `int64.to_string(x: Int64) -> String` | Rust `to_string` / Kotlin `toString` / Swift `String(x)` / Go `strconv.FormatInt(int64(x),10)` | 据え置き | — |
@@ -276,7 +289,7 @@
 
 | 関数 | シグネチャ(現行, mut 表示) | 他言語の主な綴り | 判定 | 案 |
 |---|---|---|---|---|
-| `to_int8` | `uint8.to_int8(x: UInt8) -> Int8` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
+| `to_int8` | `uint8.to_int8(x: UInt8) -> Int8` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
 | `to_int16` | `uint8.to_int16(x: UInt8) -> Int16` | Rust `from`/`into` / Swift `init(_:)` / Kotlin `toLong()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
 | `to_int32` | `uint8.to_int32(x: UInt8) -> Int32` | Rust `from`/`into` / Swift `init(_:)` / Kotlin `toLong()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
 | `to_int64` | `uint8.to_int64(x: UInt8) -> Int64` | Rust `from`/`into` / Swift `init(_:)` / Kotlin `toLong()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
@@ -301,11 +314,11 @@
 
 | 関数 | シグネチャ(現行, mut 表示) | 他言語の主な綴り | 判定 | 案 |
 |---|---|---|---|---|
-| `to_int8` | `uint16.to_int8(x: UInt16) -> Int8` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
-| `to_int16` | `uint16.to_int16(x: UInt16) -> Int16` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
+| `to_int8` | `uint16.to_int8(x: UInt16) -> Int8` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
+| `to_int16` | `uint16.to_int16(x: UInt16) -> Int16` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
 | `to_int32` | `uint16.to_int32(x: UInt16) -> Int32` | Rust `from`/`into` / Swift `init(_:)` / Kotlin `toLong()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
 | `to_int64` | `uint16.to_int64(x: UInt16) -> Int64` | Rust `from`/`into` / Swift `init(_:)` / Kotlin `toLong()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
-| `to_uint8` | `uint16.to_uint8(x: UInt16) -> UInt8` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
+| `to_uint8` | `uint16.to_uint8(x: UInt16) -> UInt8` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
 | `to_uint32` | `uint16.to_uint32(x: UInt16) -> UInt32` | Rust `from`/`into` / Swift `init(_:)` / Kotlin `toLong()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
 | `to_uint64` | `uint16.to_uint64(x: UInt16) -> UInt64` | Rust `from`/`into` / Swift `init(_:)` / Kotlin `toLong()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
 | `to_float32` | `uint16.to_float32(x: UInt16) -> Float32` | Rust `as` / Kotlin `toDouble()` / Swift `init(_:)` / Gleam `to_float` (F) | 据え置き | R-sized-01（行列のセル） |
@@ -330,12 +343,12 @@
 
 | 関数 | シグネチャ(現行, mut 表示) | 他言語の主な綴り | 判定 | 案 |
 |---|---|---|---|---|
-| `to_int8` | `uint32.to_int8(x: UInt32) -> Int8` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
-| `to_int16` | `uint32.to_int16(x: UInt32) -> Int16` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
-| `to_int32` | `uint32.to_int32(x: UInt32) -> Int32` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
+| `to_int8` | `uint32.to_int8(x: UInt32) -> Int8` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
+| `to_int16` | `uint32.to_int16(x: UInt32) -> Int16` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
+| `to_int32` | `uint32.to_int32(x: UInt32) -> Int32` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
 | `to_int64` | `uint32.to_int64(x: UInt32) -> Int64` | Rust `from`/`into` / Swift `init(_:)` / Kotlin `toLong()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
-| `to_uint8` | `uint32.to_uint8(x: UInt32) -> UInt8` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
-| `to_uint16` | `uint32.to_uint16(x: UInt32) -> UInt16` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
+| `to_uint8` | `uint32.to_uint8(x: UInt32) -> UInt8` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
+| `to_uint16` | `uint32.to_uint16(x: UInt32) -> UInt16` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
 | `to_uint64` | `uint32.to_uint64(x: UInt32) -> UInt64` | Rust `from`/`into` / Swift `init(_:)` / Kotlin `toLong()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
 | `to_float32` | `uint32.to_float32(x: UInt32) -> Float32` | Rust `as` / Kotlin `toDouble()` / Swift `init(_:)` / Gleam `to_float` (F) | 据え置き | R-sized-01（行列のセル） |
 | `to_float64` | `uint32.to_float64(x: UInt32) -> Float64` | Rust `as` / Kotlin `toDouble()` / Swift `init(_:)` / Gleam `to_float` (F) | 据え置き | R-sized-01（行列のセル） |
@@ -364,13 +377,13 @@
 
 | 関数 | シグネチャ(現行, mut 表示) | 他言語の主な綴り | 判定 | 案 |
 |---|---|---|---|---|
-| `to_int8` | `uint64.to_int8(x: UInt64) -> Int8` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
-| `to_int16` | `uint64.to_int16(x: UInt64) -> Int16` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
-| `to_int32` | `uint64.to_int32(x: UInt64) -> Int32` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
-| `to_int64` | `uint64.to_int64(x: UInt64) -> Int64` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
-| `to_uint8` | `uint64.to_uint8(x: UInt64) -> UInt8` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
-| `to_uint16` | `uint64.to_uint16(x: UInt64) -> UInt16` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
-| `to_uint32` | `uint64.to_uint32(x: UInt64) -> UInt32` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
+| `to_int8` | `uint64.to_int8(x: UInt64) -> Int8` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
+| `to_int16` | `uint64.to_int16(x: UInt64) -> Int16` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
+| `to_int32` | `uint64.to_int32(x: UInt64) -> Int32` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
+| `to_int64` | `uint64.to_int64(x: UInt64) -> Int64` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
+| `to_uint8` | `uint64.to_uint8(x: UInt64) -> UInt8` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
+| `to_uint16` | `uint64.to_uint16(x: UInt64) -> UInt16` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
+| `to_uint32` | `uint64.to_uint32(x: UInt64) -> UInt32` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
 | `to_float32` | `uint64.to_float32(x: UInt64) -> Float32` | Rust `as` / Kotlin `toDouble()` / Swift `init(_:)` / Gleam `to_float` (F) | 据え置き | R-sized-01（行列のセル） |
 | `to_float64` | `uint64.to_float64(x: UInt64) -> Float64` | Rust `as` / Kotlin `toDouble()` / Swift `init(_:)` / Gleam `to_float` (F) | 据え置き | R-sized-01（行列のセル） |
 | `to_string` | `uint64.to_string(x: UInt64) -> String` | Rust `to_string` / Kotlin `toString` / Swift `String(x)` / Go `strconv.FormatInt(int64(x),10)` | 据え置き | — |
@@ -406,14 +419,14 @@
 
 | 関数 | シグネチャ(現行, mut 表示) | 他言語の主な綴り | 判定 | 案 |
 |---|---|---|---|---|
-| `to_int8` | `float32.to_int8(x: Float32) -> Int8` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
-| `to_int16` | `float32.to_int16(x: Float32) -> Int16` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
-| `to_int32` | `float32.to_int32(x: Float32) -> Int32` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
-| `to_int64` | `float32.to_int64(x: Float32) -> Int64` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
-| `to_uint8` | `float32.to_uint8(x: Float32) -> UInt8` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
-| `to_uint16` | `float32.to_uint16(x: Float32) -> UInt16` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
-| `to_uint32` | `float32.to_uint32(x: Float32) -> UInt32` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
-| `to_uint64` | `float32.to_uint64(x: Float32) -> UInt64` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
+| `to_int8` | `float32.to_int8(x: Float32) -> Int8` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
+| `to_int16` | `float32.to_int16(x: Float32) -> Int16` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
+| `to_int32` | `float32.to_int32(x: Float32) -> Int32` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
+| `to_int64` | `float32.to_int64(x: Float32) -> Int64` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
+| `to_uint8` | `float32.to_uint8(x: Float32) -> UInt8` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
+| `to_uint16` | `float32.to_uint16(x: Float32) -> UInt16` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
+| `to_uint32` | `float32.to_uint32(x: Float32) -> UInt32` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
+| `to_uint64` | `float32.to_uint64(x: Float32) -> UInt64` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
 | `to_float64` | `float32.to_float64(x: Float32) -> Float64` | Rust `as` / Kotlin `toFloat()` / Swift `init(_:)` | 据え置き | R-sized-01（行列のセル） |
 | `to_string` | `float32.to_string(x: Float32) -> String` | Rust `to_string` / Kotlin `toString` / Swift `String(x)` / Go `strconv.FormatInt(int64(x),10)` | 据え置き | — |
 | `to_int` | （追加）`float32.to_int(x: Float32) -> Int` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` | 追加 | R-sized-01 |
@@ -443,14 +456,14 @@
 
 | 関数 | シグネチャ(現行, mut 表示) | 他言語の主な綴り | 判定 | 案 |
 |---|---|---|---|---|
-| `to_int8` | `float64.to_int8(x: Float64) -> Int8` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
-| `to_int16` | `float64.to_int16(x: Float64) -> Int16` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
-| `to_int32` | `float64.to_int32(x: Float64) -> Int32` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
-| `to_int64` | `float64.to_int64(x: Float64) -> Int64` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
-| `to_uint8` | `float64.to_uint8(x: Float64) -> UInt8` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
-| `to_uint16` | `float64.to_uint16(x: Float64) -> UInt16` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
-| `to_uint32` | `float64.to_uint32(x: Float64) -> UInt32` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
-| `to_uint64` | `float64.to_uint64(x: Float64) -> UInt64` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
+| `to_int8` | `float64.to_int8(x: Float64) -> Int8` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
+| `to_int16` | `float64.to_int16(x: Float64) -> Int16` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
+| `to_int32` | `float64.to_int32(x: Float64) -> Int32` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
+| `to_int64` | `float64.to_int64(x: Float64) -> Int64` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
+| `to_uint8` | `float64.to_uint8(x: Float64) -> UInt8` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
+| `to_uint16` | `float64.to_uint16(x: Float64) -> UInt16` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
+| `to_uint32` | `float64.to_uint32(x: Float64) -> UInt32` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
+| `to_uint64` | `float64.to_uint64(x: Float64) -> UInt64` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
 | `to_float32` | `float64.to_float32(x: Float64) -> Float32` | Rust `as` / Kotlin `toFloat()` / Swift `init(_:)` | 据え置き | R-sized-01（行列のセル） |
 | `to_string` | `float64.to_string(x: Float64) -> String` | Rust `to_string` / Kotlin `toString` / Swift `String(x)` / Go `strconv.FormatInt(int64(x),10)` | 据え置き | — |
 | `to_int` | （追加）`float64.to_int(x: Float64) -> Int` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` | 追加 | R-sized-01 |
@@ -490,3 +503,55 @@
 | `to_string_radix` | `uint32.to_string_radix(x: UInt32, radix: Int) -> String`（案） | Rust `format!("{:x}")` / Go `FormatInt`・`FormatUint` | 追加 | R-sized-06 |
 | `parse_radix` | `uint64.parse_radix(s: String, radix: Int) -> Result[UInt64, String]`（案） | Rust `from_str_radix` / Go `ParseInt`・`ParseUint` | 追加 | R-sized-06 |
 | `to_string_radix` | `uint64.to_string_radix(x: UInt64, radix: Int) -> String`（案） | Rust `format!("{:x}")` / Go `FormatInt`・`FormatUint` | 追加 | R-sized-06 |
+| `min` | （追加）`int8.min(a: Int8, b: Int8) -> Int8` | Rust `min` / Swift `min` | 追加 | R-sized-08 |
+| `max` | （追加）`int8.max(a: Int8, b: Int8) -> Int8` | Rust `max` / Swift `max` | 追加 | R-sized-08 |
+| `clamp` | （追加）`int8.clamp(x: Int8, lo: Int8, hi: Int8) -> Int8` | Rust `clamp` | 追加 | R-sized-08 |
+| `min` | （追加）`int16.min(a: Int16, b: Int16) -> Int16` | Rust `min` / Swift `min` | 追加 | R-sized-08 |
+| `max` | （追加）`int16.max(a: Int16, b: Int16) -> Int16` | Rust `max` / Swift `max` | 追加 | R-sized-08 |
+| `clamp` | （追加）`int16.clamp(x: Int16, lo: Int16, hi: Int16) -> Int16` | Rust `clamp` | 追加 | R-sized-08 |
+| `min` | （追加）`int32.min(a: Int32, b: Int32) -> Int32` | Rust `min` / Swift `min` | 追加 | R-sized-08 |
+| `max` | （追加）`int32.max(a: Int32, b: Int32) -> Int32` | Rust `max` / Swift `max` | 追加 | R-sized-08 |
+| `clamp` | （追加）`int32.clamp(x: Int32, lo: Int32, hi: Int32) -> Int32` | Rust `clamp` | 追加 | R-sized-08 |
+| `min` | （追加）`int64.min(a: Int64, b: Int64) -> Int64` | Rust `min` / Swift `min` | 追加 | R-sized-08 |
+| `max` | （追加）`int64.max(a: Int64, b: Int64) -> Int64` | Rust `max` / Swift `max` | 追加 | R-sized-08 |
+| `clamp` | （追加）`int64.clamp(x: Int64, lo: Int64, hi: Int64) -> Int64` | Rust `clamp` | 追加 | R-sized-08 |
+| `min` | （追加）`uint8.min(a: UInt8, b: UInt8) -> UInt8` | Rust `min` / Swift `min` | 追加 | R-sized-08 |
+| `max` | （追加）`uint8.max(a: UInt8, b: UInt8) -> UInt8` | Rust `max` / Swift `max` | 追加 | R-sized-08 |
+| `clamp` | （追加）`uint8.clamp(x: UInt8, lo: UInt8, hi: UInt8) -> UInt8` | Rust `clamp` | 追加 | R-sized-08 |
+| `min` | （追加）`uint16.min(a: UInt16, b: UInt16) -> UInt16` | Rust `min` / Swift `min` | 追加 | R-sized-08 |
+| `max` | （追加）`uint16.max(a: UInt16, b: UInt16) -> UInt16` | Rust `max` / Swift `max` | 追加 | R-sized-08 |
+| `clamp` | （追加）`uint16.clamp(x: UInt16, lo: UInt16, hi: UInt16) -> UInt16` | Rust `clamp` | 追加 | R-sized-08 |
+| `min` | （追加）`uint32.min(a: UInt32, b: UInt32) -> UInt32` | Rust `min` / Swift `min` | 追加 | R-sized-08 |
+| `max` | （追加）`uint32.max(a: UInt32, b: UInt32) -> UInt32` | Rust `max` / Swift `max` | 追加 | R-sized-08 |
+| `clamp` | （追加）`uint32.clamp(x: UInt32, lo: UInt32, hi: UInt32) -> UInt32` | Rust `clamp` | 追加 | R-sized-08 |
+| `min` | （追加）`uint64.min(a: UInt64, b: UInt64) -> UInt64` | Rust `min` / Swift `min` | 追加 | R-sized-08 |
+| `max` | （追加）`uint64.max(a: UInt64, b: UInt64) -> UInt64` | Rust `max` / Swift `max` | 追加 | R-sized-08 |
+| `clamp` | （追加）`uint64.clamp(x: UInt64, lo: UInt64, hi: UInt64) -> UInt64` | Rust `clamp` | 追加 | R-sized-08 |
+| `min` | （追加）`float32.min(a: Float32, b: Float32) -> Float32` | Rust `min` / Swift `min` | 追加 | R-sized-08 |
+| `max` | （追加）`float32.max(a: Float32, b: Float32) -> Float32` | Rust `max` / Swift `max` | 追加 | R-sized-08 |
+| `clamp` | （追加）`float32.clamp(x: Float32, lo: Float32, hi: Float32) -> Float32` | Rust `clamp` | 追加 | R-sized-08 |
+| `is_nan` | （追加）`float32.is_nan(x: Float32) -> Bool` | Rust `is_nan` / Swift `.isNaN` | 追加 | R-sized-08 |
+| `is_infinite` | （追加）`float32.is_infinite(x: Float32) -> Bool` | Rust `is_infinite` / Swift `.isInFinite` | 追加 | R-sized-08 |
+| `is_finite` | （追加）`float32.is_finite(x: Float32) -> Bool` | Rust `is_finite` / Swift `.isFinite` | 追加 | R-sized-08 |
+| `min` | （追加）`float64.min(a: Float64, b: Float64) -> Float64` | Rust `min` / Swift `min` | 追加 | R-sized-08 |
+| `max` | （追加）`float64.max(a: Float64, b: Float64) -> Float64` | Rust `max` / Swift `max` | 追加 | R-sized-08 |
+| `clamp` | （追加）`float64.clamp(x: Float64, lo: Float64, hi: Float64) -> Float64` | Rust `clamp` | 追加 | R-sized-08 |
+| `is_nan` | （追加）`float64.is_nan(x: Float64) -> Bool` | Rust `is_nan` / Swift `.isNaN` | 追加 | R-sized-08 |
+| `is_infinite` | （追加）`float64.is_infinite(x: Float64) -> Bool` | Rust `is_infinite` / Swift `.isInFinite` | 追加 | R-sized-08 |
+| `is_finite` | （追加）`float64.is_finite(x: Float64) -> Bool` | Rust `is_finite` / Swift `.isFinite` | 追加 | R-sized-08 |
+| `to_int8_saturating` | （追加）`float32.to_int8_saturating(x: Float32) -> Int8` | Rust `as` / Swift `init(clamping:)` 相当 | 追加 | R-L0-32 |
+| `to_int16_saturating` | （追加）`float32.to_int16_saturating(x: Float32) -> Int16` | Rust `as` / Swift `init(clamping:)` 相当 | 追加 | R-L0-32 |
+| `to_int32_saturating` | （追加）`float32.to_int32_saturating(x: Float32) -> Int32` | Rust `as` / Swift `init(clamping:)` 相当 | 追加 | R-L0-32 |
+| `to_int64_saturating` | （追加）`float32.to_int64_saturating(x: Float32) -> Int64` | Rust `as` / Swift `init(clamping:)` 相当 | 追加 | R-L0-32 |
+| `to_uint8_saturating` | （追加）`float32.to_uint8_saturating(x: Float32) -> UInt8` | Rust `as` / Swift `init(clamping:)` 相当 | 追加 | R-L0-32 |
+| `to_uint16_saturating` | （追加）`float32.to_uint16_saturating(x: Float32) -> UInt16` | Rust `as` / Swift `init(clamping:)` 相当 | 追加 | R-L0-32 |
+| `to_uint32_saturating` | （追加）`float32.to_uint32_saturating(x: Float32) -> UInt32` | Rust `as` / Swift `init(clamping:)` 相当 | 追加 | R-L0-32 |
+| `to_uint64_saturating` | （追加）`float32.to_uint64_saturating(x: Float32) -> UInt64` | Rust `as` / Swift `init(clamping:)` 相当 | 追加 | R-L0-32 |
+| `to_int8_saturating` | （追加）`float64.to_int8_saturating(x: Float64) -> Int8` | Rust `as` / Swift `init(clamping:)` 相当 | 追加 | R-L0-32 |
+| `to_int16_saturating` | （追加）`float64.to_int16_saturating(x: Float64) -> Int16` | Rust `as` / Swift `init(clamping:)` 相当 | 追加 | R-L0-32 |
+| `to_int32_saturating` | （追加）`float64.to_int32_saturating(x: Float64) -> Int32` | Rust `as` / Swift `init(clamping:)` 相当 | 追加 | R-L0-32 |
+| `to_int64_saturating` | （追加）`float64.to_int64_saturating(x: Float64) -> Int64` | Rust `as` / Swift `init(clamping:)` 相当 | 追加 | R-L0-32 |
+| `to_uint8_saturating` | （追加）`float64.to_uint8_saturating(x: Float64) -> UInt8` | Rust `as` / Swift `init(clamping:)` 相当 | 追加 | R-L0-32 |
+| `to_uint16_saturating` | （追加）`float64.to_uint16_saturating(x: Float64) -> UInt16` | Rust `as` / Swift `init(clamping:)` 相当 | 追加 | R-L0-32 |
+| `to_uint32_saturating` | （追加）`float64.to_uint32_saturating(x: Float64) -> UInt32` | Rust `as` / Swift `init(clamping:)` 相当 | 追加 | R-L0-32 |
+| `to_uint64_saturating` | （追加）`float64.to_uint64_saturating(x: Float64) -> UInt64` | Rust `as` / Swift `init(clamping:)` 相当 | 追加 | R-L0-32 |

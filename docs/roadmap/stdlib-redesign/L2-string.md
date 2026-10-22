@@ -196,7 +196,7 @@
 - ゲート案: R-L0-G の番兵検査（戻り型が `String`・`Int` で、名前が `from_`・`parse`・`decode` で始まる公開関数を一覧にし、境界入力で目印を返さないことを確かめる。L2-bytes R-bytes-09 と同じテスト）。`from_codepoint(0xD800) == none` と `from_codepoint(0x1F980) == some("🦀")` の fixture を native と wasm で置きます。
 - issue: #3946
 
-### R-string-08 `string.slice` の終わりの既定値を外し、2 引数の形は `drop` に一本化する — ○ 採用
+### R-string-15 `string.slice` の終わりの既定値を外し、2 引数の形は `drop` に一本化する — ○ 採用
 
 - いま: `fn string.slice(s: String, start: Int, end: Int = 末尾) -> String` は、標準の関数で唯一の既定値つきの引数です。`string.slice(s, n)` は `string.drop(s, n)` と同じ値になります。`list.slice` と `bytes.slice` は 3 引数だけで、2 引数で呼ぶと E004 です。
 - 案: `end` の既定値を外し、`fn string.slice(s: String, start: Int, end: Int) -> String` にします。2 引数の呼び出しは E004 になり、ヒントで `string.drop(s, n)` を示します。list と bytes に既定値は足しません。
@@ -208,6 +208,28 @@
 - 完全性の規則: `slice`・`take`・`drop`・`take_end`・`drop_end` を持つ型（list・string・bytes）では、同じ名前の関数の引数の数が同じです。標準の公開関数に既定値つきの引数は置きません。
 - ゲート案: R-L0-12 の境界の行列テストに「3 つの型の同名関数で引数の数が同じ」を足し、interface JSON で既定値つきの引数が 0 本であることを確かめます。
 - issue: #3969
+
+### R-string-12 `string.codepoint` を `string.to_codepoint` に改名する — ○ 採用
+
+- いま: 逆向きは `string.from_codepoint(n) -> String?` です。往復の対が `codepoint` と `from_codepoint` で、`to_codepoint` と書くと E002 になります。
+- 案: `fn string.to_codepoint(s: String) -> Int?`（最初の文字のコードポイント。空文字列なら none）。`from_codepoint` と `to_`/`from_` の対になります（`float.to_bits`/`from_bits` と同じ）。
+- 根拠の L0 規則: R-L0-25（変換の動詞の表: 往復する対は `to_<X>`/`from_<X>`）。
+- (a) JS `codePointAt`/`fromCodePoint`、Python `ord`/`chr`、Rust `char as u32`/`char::from_u32` と綴りは割れていて多数派はありません。Almide の中の対で決めます。
+- (d) 改名 1。`@deprecated(since=15, use="string.to_codepoint")`、`removal_epoch = 16`、`almide fix` で書き換えます。
+- issue: #3979
+
+### R-string-13 `string.count` を述語で数える形にする — × 不採用
+
+- 理由: 文字列の「数える」は、部分文字列の出現数が多数派です（Rust `matches().count()`・Go `strings.Count`・Python `str.count`・Elixir `String.count`…）。string は D3 の族（list・map・set・deque・heap・bytes の高階関数）の対象ではありません。述語で数えたいときは `string.chars(s) |> list.count(f)` と書きます。
+- issue: なし
+
+### R-string-14 `to_codepoint` は 1 コードポイントちょうどのときだけ some — ○ 採用（R-string-12 の意味を決める）
+
+- いま: R-string-12 は「最初の文字のコードポイント。空なら none」としました。`to_codepoint("ab")` が 97 を返し、2 文字目を黙って捨てます。逆向きの `from_codepoint(n) -> String?` は 1 文字を作るので、往復の対になっていません。
+- 案: 1 コードポイントちょうどの文字列のときだけ some、それ以外（空、2 つ以上）は none にします。先頭を読むときは `string.get(s, 0)` から変換します。
+- (a) Python `ord("ab")` は例外、Rust の `char` は 1 文字の型です。JS `codePointAt(0)` は先頭を返しますが、位置を引数で取る別の関数です。
+- (d) 意味変更（改名と同じ epoch 15 で入るので、新しい名前の意味として最初から決めます）。
+- issue: #3991
 
 ## L3: 関数表
 
@@ -222,7 +244,7 @@
 | `contains` | `(s: String, sub: String) -> Bool` | Rust/Gleam/Kotlin/Swift `contains` / JS `includes` | 据え置き | — |
 | `starts_with` | `(s: String, prefix: String) -> Bool` | Rust/Gleam/OCaml `starts_with` / Go `HasPrefix` | 据え置き | — |
 | `ends_with` | `(s: String, suffix: String) -> Bool` | Rust/Gleam/OCaml `ends_with` / Go `HasSuffix` | 据え置き | — |
-| `slice` | `(s: String, start: Int, end: Int) -> String` | Gleam/Elixir/JS `slice` / Python `s[a:b]` | 意味変更（`end` の既定値を外す。2 引数は `drop`） | R-string-08 |
+| `slice` | `(s: String, start: Int, end: Int) -> String` | Gleam/Elixir/JS `slice` / Python `s[a:b]` | 意味変更（`end` の既定値を外す。2 引数は `drop`） | R-string-15 |
 | `byte_slice` | `(s: String, start: Int, end: Int) -> Option[String]` | Elixir `byte_slice` / Rust `get(a..b)` | 据え置き | — |
 | `pad_start` | `(s: String, n: Int, ch: String) -> String` | JS/Gleam/Kotlin `padStart` / Python `rjust`。`ch` は先頭の 1 文字だけ使う（実測: `pad_start("7",5,"ab")="aaaa7"`） | 据え置き | — |
 | `to_bytes` | `(s: String) -> List[Int]` | Rust `as_bytes` / Kotlin `encodeToByteArray` / Gleam `bit_array.from_string` | 撤去（→ `bytes.from_string`） | R-string-02 |
@@ -242,7 +264,7 @@
 | `is_whitespace` | `(s: String) -> Bool` | Python `isspace`（空は false）/ Rust `is_whitespace`。Almide は空で true（文書どおり。空行の判定に使える形） | 据え置き | — |
 | `is_upper` | `(s: String) -> Bool` | Python `isupper`（文字以外を無視、の意味も同じ） | 据え置き | — |
 | `is_lower` | `(s: String) -> Bool` | Python `islower` | 据え置き | — |
-| `codepoint` | `(s: String) -> Option[Int]` | Python `ord` / JS `codePointAt` / Gleam `utf_codepoint_to_int` | 据え置き | — |
+| `codepoint` | `(s: String) -> Option[Int]` | Python `ord` / JS `codePointAt` / Gleam `utf_codepoint_to_int` | 改名 → `to_codepoint`（1 コードポイントちょうどでなければ none） | R-string-12、R-string-14 |
 | `from_codepoint` | `(n: Int) -> String` | Python `chr` / JS `fromCodePoint` / Rust `char::from_u32`（Option）。不正な値は `""`（実測: U+D800 で `""`） | 意味変更（`Option[String]` を返す） | R-string-11 |
 | `pad_end` | `(s: String, n: Int, ch: String) -> String` | JS/Gleam/Kotlin `padEnd` / Python `ljust`。`ch` が空なら空白 | 据え置き | — |
 | `trim_start` | `(s: String) -> String` | Rust/JS/Gleam `trim_start` / Python `lstrip` | 据え置き | — |

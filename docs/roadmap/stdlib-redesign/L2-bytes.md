@@ -280,6 +280,53 @@
 - (c) 抜けが宣言されていれば、R-L0-19 の案内で `append_f32_le_array` を書いた LLM を正しい形に導けます。
 - issue: #3970
 
+### R-bytes-20 `first`・`last`・`pop` を足す — ○ 採用
+
+- いま: bytes は `get`・`push` を持つのに、`first`・`last`・`pop` がありません。list（`first`・`last`・`pop`）と deque（`first`・`last`・`pop_back`）から類推すると E002 になります。
+- 案: `fn bytes.first(b: Bytes) -> Int?`、`fn bytes.last(b: Bytes) -> Int?`、`fn bytes.pop(mut b: Bytes) -> Int?`。
+- 根拠の L0 規則: R-L0-12（列の型は同じ綴りの関数を持つ）、R-L0-06（失敗しうる取り出しは無印で Option）。
+- (a) Rust `Vec<u8>` の `first`・`last`・`pop`、Python `bytearray.pop`、Kotlin `ByteArray.first`/`lastOrNull`、Swift `Data.first`/`last`/`popLast`。
+- (b) 純粋な計算です。`pop` はその場で書き換える関数で、`push` と同じ扱いです。
+- (d) 追加 3。
+- 完全性の規則: `push` を持つ列の型（list・bytes）は `pop`・`first`・`last` も持ちます。
+- issue: #3980
+
+### R-bytes-21 `bytes.skip` を `next_` の形にする — × 不採用
+
+- 理由: `skip` は値を読まずに位置だけを進めるので、`(値, 次の状態)` の値がありません。`(Unit, Int)` を返す形は、読む側が捨てる値を増やすだけです。R-L0-27 に「値を読まない位置の移動は次の状態だけを返す」と書きました。
+- issue: なし
+
+### R-bytes-22 `bytes.chunk` は `size <= 0` で abort — ○ 採用
+
+- いま: `list.chunk` は R-list-10 で `n <= 0` を abort にしましたが、`bytes.chunk` には決まりがありません。
+- 案: `list.chunk` と同じく abort にします。
+- 根拠の L0 規則: R-L0-12（境界の行列は list・string・bytes で同じ）。
+- (d) 意味変更（受け付けない入力を abort にする）。
+- issue: #3985
+
+### R-bytes-23 `bytes.xor` は長さが違うと abort — ○ 採用
+
+- いま: 長さが違うと、短いほうに切り詰めます（実測 `almide 0.68.0 dev 437b8f127`、native と wasm で同じ: `[1, 2, 3]` と `[1]` で `[0]`）。止まらずに、短い結果を返します。
+- 案: 長さが違えば abort にします。matrix の「形の不一致は abort」と同じ扱いで、長さは呼び出す前に `bytes.len` で確かめられます。
+- 根拠の L0 規則: R-L0-06 の 3（呼び出し側が確かめられる前提の違反は abort）。
+- (d) 意味変更。いまは切り詰めて返している呼び出しが abort になるので、epoch 15 の `breaks` に入れます。
+- issue: #3985
+
+### R-bytes-24 `bytes.set` と `put_u8` を 1 つにする — × 不採用
+
+- 理由: `set(b, i, v) -> Bytes` はコピーを返す関数、`put_u8(mut b, pos, v)` はその場で書き換える関数で、R-L0-04（コピーが既定、その場書き換えは決まった動詞）の対です。`list.set` もコピーです。
+- issue: なし
+
+### R-bytes-25 型つきの読み書きの行列に `get_u8`・`append_u8` を戻す — ○ 採用（R-bytes-02 の一部を見直し）
+
+- いま: 型つきの読み書きの族は {`get_`, `put_`, `next_`, `append_`} × {型} ですが、`u8` の列だけ `get_u8` と `append_u8` がありません（`get_i8`・`put_u8`・`next_u8` はあります）。R-bytes-02 で `append_u8` を `push` に、R-bytes-09 で `get_u8` を `get` に寄せたためです。3 つの外部レビューが続けて族の穴として挙げました。
+- 案: `fn bytes.get_u8(b: Bytes, pos: Int) -> Int?` を足し、`append_u8` を撤去せずに残します。`bytes.get`・`bytes.push` は入れ物としての読み書き（`list.get`・`list.push` と同じ形）として残します。
+  - 同じ計算が 2 つの名前を持ちますが、2 つの族（入れ物の族と、型つきの読み書きの族）のそれぞれのセルです。CLAUDE.md の「族は行列で揃える」を、R-L0-01（同義語を置かない）より先に当てます。
+- (a) Go `binary.LittleEndian` と JS `DataView` の `getUint8`、OCaml `Bytes.get_uint8`。
+- (d) 追加 1、撤去の取り消し 1。
+- 完全性の規則: 型つきの読み書きの 4 つの動詞は、`u8` を含むすべての型の列を持ちます。
+- issue: #3991
+
 ## L3: 関数表
 
 （146 関数 + 追加 13。判定の内訳: 据え置き 58・改名 53・撤去 31・意味変更 4・追加 13。改名の `put_` 15 件は、R-bytes-11 で範囲外の挙動も変わります）
@@ -300,7 +347,7 @@
 | `append_u16_le` | `bytes.append_u16_le(mut b: Bytes, val: Int) -> Unit` | Go AppendUint16 (F) / Rust extend_from_slice(&x.to_le_bytes()) | 据え置き | — |
 | `append_u32_be` | `bytes.append_u32_be(mut b: Bytes, val: Int) -> Unit` | Go AppendUint32 (F) / Rust extend_from_slice(&x.to_be_bytes()) | 据え置き | — |
 | `append_u32_le` | `bytes.append_u32_le(mut b: Bytes, val: Int) -> Unit` | Go AppendUint32 (F) / Rust extend_from_slice(&x.to_le_bytes()) | 据え置き | — |
-| `append_u8` | `bytes.append_u8(mut b: Bytes, val: Int) -> Unit` | Rust push / Python append / Go append(b, x) | 撤去 → `push` | R-bytes-02 |
+| `append_u8` | `bytes.append_u8(mut b: Bytes, val: Int) -> Unit` | Rust push / Python append / Go append(b, x) | 据え置き | R-bytes-25 |
 | `as_mut_ptr` | `bytes.as_mut_ptr(b: Bytes) -> RawPtr` | Rust as_mut_ptr | 撤去 → `ffi.address` | R-bytes-06 |
 | `as_ptr` | `bytes.as_ptr(b: Bytes) -> RawPtr` | Rust as_ptr / Go unsafe.SliceData | 撤去 → `ffi.address` | R-bytes-06 |
 | `chunks` | `bytes.chunks(b: Bytes, size: Int) -> List[Bytes]` | Rust chunks / Kotlin chunked / Almide list.chunk | 改名 → `chunk` | R-bytes-08 |
@@ -404,7 +451,7 @@
 | `set_u32_be` | `bytes.set_u32_be(mut b: Bytes, pos: Int, val: Int) -> Unit` | Go PutUint32 (F) / OCaml set_*_le・_be (F) / JS DataView setUint32 (F) | 改名 → `put_u32_be`（範囲外は abort） | R-bytes-01、R-bytes-11 |
 | `set_u32_le` | `bytes.set_u32_le(mut b: Bytes, pos: Int, val: Int) -> Unit` | Go PutUint32 (F) / OCaml set_*_le・_be (F) / JS DataView setUint32 (F) | 改名 → `put_u32_le`（範囲外は abort） | R-bytes-01、R-bytes-11 |
 | `set_u8` | `bytes.set_u8(mut b: Bytes, pos: Int, val: Int) -> Unit` | Go b[i] = x / OCaml set_*_le・_be (F) / JS DataView setUint8 (F) | 改名 → `put_u8`（範囲外は abort） | R-bytes-01、R-bytes-11 |
-| `skip` | `bytes.skip(b: Bytes, pos: Int, n: Int) -> Int` | Go bytes.Reader.Seek / Python — | 意味変更（`n < 0` は abort） | R-bytes-13 |
+| `skip` | `bytes.skip(b: Bytes, pos: Int, n: Int) -> Int` | Go bytes.Reader.Seek / Python — | 意味変更（`n < 0` は abort） | R-bytes-13、R-bytes-21 |
 | `skip_length_prefixed_le` | `bytes.skip_length_prefixed_le(b: Bytes, pos: Int, count: Int) -> Int` | —（形式専用） | 撤去（→ `get_u32_le` と `slice` の組み合わせ） | R-bytes-05 |
 | `slice` | `bytes.slice(b: Bytes, start: Int, end: Int) -> Bytes` | Rust &b[a..b] / Go b[a:b] / Python b[a:b] / JS subarray・slice / OCaml Bytes.sub (F) | 意味変更（負の開始位置を 0 に丸める） | R-bytes-12 |
 | `split` | `bytes.split(b: Bytes, sep: Bytes) -> List[Bytes]` | Go bytes.Split / Python b.split | 据え置き | — |
@@ -419,7 +466,7 @@
 | `write_string_be` | `bytes.write_string_be(mut b: Bytes, s: String) -> Unit` | Java DataOutput.writeUTF（u16 BE） / 多数: — | 撤去（→ `append_u32_be` ＋ `append_bytes`） | R-bytes-05 |
 | `write_u32_be` | `bytes.write_u32_be(mut b: Bytes, val: Int) -> Unit` | Go AppendUint32 (F) | 撤去 → `append_u32_be` | R-bytes-03 |
 | `write_u8` | `bytes.write_u8(mut b: Bytes, val: Int) -> Unit` | 同上 | 撤去 → `push` | R-bytes-02 |
-| `xor` | `bytes.xor(a: Bytes, b: Bytes) -> Bytes` | — (多数: ループで書く) | 据え置き | — |
+| `xor` | `bytes.xor(a: Bytes, b: Bytes) -> Bytes` | — (多数: ループで書く) | 意味変更（長さが違うと abort） | R-bytes-23 |
 | `read_uint16` | `bytes.read_uint16(b: Bytes, offset: Int, endian: Endian) -> UInt16` | Go binary.LittleEndian.Uint32 (F) / JS DataView getUint32(o, le) (F) | 撤去（→ 接尾辞の系統 `get_`/`append_`/`put_`） | R-bytes-04 |
 | `read_uint32` | `bytes.read_uint32(b: Bytes, offset: Int, endian: Endian) -> UInt32` | Go binary.LittleEndian.Uint32 (F) / JS DataView getUint32(o, le) (F) | 撤去（→ 接尾辞の系統 `get_`/`append_`/`put_`） | R-bytes-04 |
 | `read_int32` | `bytes.read_int32(b: Bytes, offset: Int, endian: Endian) -> Int32` | Go binary.LittleEndian.Uint32 (F) / JS DataView getUint32(o, le) (F) | 撤去（→ 接尾辞の系統 `get_`/`append_`/`put_`） | R-bytes-04 |
@@ -457,6 +504,10 @@
 | `all` | `bytes.all(b: Bytes, f: (Int) -> Bool) -> Bool`（案） | Kotlin `all` | 追加 | R-bytes-18 |
 | `count` | `bytes.count(b: Bytes, f: (Int) -> Bool) -> Int`（案） | Kotlin `count {}` | 追加 | R-bytes-18 |
 | `find` | `bytes.find(b: Bytes, f: (Int) -> Bool) -> Option[Int]`（案） | Kotlin `find` | 追加 | R-bytes-18 |
+| `first` | （追加）`bytes.first(b: Bytes) -> Option[Int]` | Rust first / Swift first | 追加 | R-bytes-20 |
+| `last` | （追加）`bytes.last(b: Bytes) -> Option[Int]` | Rust last / Swift last | 追加 | R-bytes-20 |
+| `pop` | （追加）`bytes.pop(mut b: Bytes) -> Option[Int]` | Rust Vec::pop / Python bytearray.pop | 追加 | R-bytes-20 |
+| `get_u8` | （追加）`bytes.get_u8(b: Bytes, pos: Int) -> Option[Int]` | Go `LittleEndian.Uint8` / JS `getUint8` / OCaml `get_uint8` | 追加 | R-bytes-25 |
 
 ## L0 への差し戻し（処理済み）
 

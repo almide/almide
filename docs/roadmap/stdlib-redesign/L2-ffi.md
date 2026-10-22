@@ -60,6 +60,14 @@
 - 完全性の規則: Almide の値の外にある状態を読み書きする関数は effect です。`ffi` では {address, to_int} が純粋、{read, write} が effect です。
 - issue: #3974
 
+### R-ffi-03 `ffi.write` の引数を「書き込む先が先」にする — ○ 採用
+
+- いま（案の段階）: `fn ffi.write(b: Bytes, ptr: RawPtr, cap: Int) -> Int`。標準のほかの書き込みは、書き込む先が先です（`fs.write_bytes(path, data)`、`net.tcp_write(stream, data)`、`unix.write(sock, data, fds)`、`bytes.put_<型>(mut b, pos, v)`）。
+- 案: `fn ffi.write(ptr: RawPtr, b: Bytes, cap: Int) -> Int`。`ffi.read(ptr, len)` とも、先頭がポインタで揃います。
+- 根拠の L0 規則: R-L0-03（主語の引数が先）。
+- (d) まだ出ていない関数の形を変えるだけです。`almide fix` の `bytes.copy_to_ptr(b, p, n)` からの書き換えは、引数の順を入れ替えます。
+- issue: #3979
+
 ## L3: 関数表
 
 | 関数 | シグネチャ(案) | 他言語の主な綴り | 判定 | 案 |
@@ -67,4 +75,4 @@
 | `ffi.address` | `fn address(b: Bytes) -> RawPtr` | Rust `as_ptr` / Go `unsafe.SliceData` / Python `addressof` | 追加（`bytes.as_ptr`・`as_mut_ptr` から） | R-ffi-01 |
 | `ffi.to_int` | `fn to_int(p: RawPtr) -> Int` | Go `uintptr` / Swift `Int(bitPattern:)` | 追加（`bytes.data_ptr` の役割） | R-ffi-01 |
 | `ffi.read` | `effect fn read(ptr: RawPtr, len: Int) -> Bytes` | Rust `from_raw_parts` / Python `string_at` / Go `unsafe.Slice` | 追加（`bytes.from_raw_ptr` から） | R-ffi-01 |
-| `ffi.write` | `effect fn write(b: Bytes, ptr: RawPtr, cap: Int) -> Int` | Rust `copy_nonoverlapping` / Python `memmove` | 追加（`bytes.copy_to_ptr` から） | R-ffi-01 |
+| `ffi.write` | `effect fn write(ptr: RawPtr, b: Bytes, cap: Int) -> Int` | Rust `copy_nonoverlapping` / Python `memmove` | 追加（`bytes.copy_to_ptr` から。書き込む先を先に） | R-ffi-01、R-ffi-03 |

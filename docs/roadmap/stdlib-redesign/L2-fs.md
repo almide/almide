@@ -92,6 +92,16 @@
 - Bytes の追記: `append_<型>` は R-L0-04 で「`mut` のバイト列に書き足す」動詞に予約されているので、`fs.append_bytes` は名前の規則にぶつかります。使用例もありません。
 - issue: なし
 
+### R-fs-05 `write`・`append` を `write_text`・`append_text` にし、`append_bytes` を足す — ○ 採用
+
+- いま: 読む側は `read_text`・`read_bytes`、書く側は `write`・`write_bytes`、追記は `append` だけです。`read_text` の対として `write_text` と書くと E002 になり、バイトを追記する関数はありません。
+- 案: `write` → `write_text`、`append` → `append_text` に改名し、`fn fs.append_bytes(path: String, data: Bytes) -> Unit` を足します。読む・書く・足すが、どれも `_text`・`_bytes` の 2 つになります。
+- 根拠の L0 規則: R-L0-12（族は行列で揃える）、R-L0-00（Almide の中で同じ役割の綴りが割れている）。
+- (a) Python `write_text`/`write_bytes`、Kotlin `writeText`/`writeBytes`/`appendText`/`appendBytes`。Rust `fs::write` と Go `WriteFile` は型で分けるので 1 つですが、Almide は型で振り分けません。
+- (d) 改名 2、追加 1。`@deprecated(since=15, use="fs.write_text")`・`use="fs.append_text"`、`removal_epoch = 16`、`almide fix` で書き換えます。
+- 完全性の規則: `fs` のファイル全体の読み書きは {read, write, append} × {text, bytes} の 6 セルです。
+- issue: #3979
+
 ## L3: 関数表
 
 | 関数 | シグネチャ(現行, mut 表示) | 他言語の主な綴り | 判定 | 案 |
@@ -108,10 +118,10 @@
 | `fs.for_each_line` | `effect fn for_each_line(path: String, f: (String) -> Unit) -> Unit` | Kotlin `forEachLine` / Rust `lines()` | 据え置き | — |
 | `fs.fold_lines_range` | `effect fn fold_lines_range[A](path: String, start: Int, end: Int, init: A, f: (A, String) -> A) -> A` | —（Almide 固有） | 据え置き | — |
 | `fs.fold_lines_chunked` | `effect fn fold_lines_chunked[A](path: String, workers: Int, init: A, f: (A, String) -> A) -> List[A]` | —（Almide 固有。`@concurrent`） | 据え置き | — |
-| `fs.write` | `effect fn write(path: String, content: String) -> Unit` | Rust `fs::write` / Go `WriteFile` / Python `write_text` / Elixir `File.write` | 据え置き | — |
+| `fs.write` | `effect fn write(path: String, content: String) -> Unit` | Rust `fs::write` / Go `WriteFile` / Python `write_text` / Elixir `File.write` | 改名 → `write_text` | R-fs-05 |
 | `fs.write_bytes` | `effect fn write_bytes(path: String, bytes: List[Int]) -> Unit` | Python `write_bytes` / Kotlin `writeBytes` | 意味変更（`data: Bytes` にする） | R-fs-01 |
 | `fs.write_bytes_raw` | `effect fn write_bytes_raw(path: String, data: Bytes) -> Unit` | 同上 | 撤去（→ `write_bytes`） | R-fs-01 |
-| `fs.append` | `effect fn append(path: String, content: String) -> Unit` | Node `appendFile` / Kotlin `appendText` | 据え置き | R-fs-04 |
+| `fs.append` | `effect fn append(path: String, content: String) -> Unit` | Node `appendFile` / Kotlin `appendText` | 改名 → `append_text` | R-fs-04、R-fs-05 |
 | `fs.mkdir_p` | `effect fn mkdir_p(path: String) -> Unit` | Rust `create_dir_all` / Go `MkdirAll` / Elixir `mkdir_p` | 据え置き | R-fs-04 |
 | `fs.exists` | `effect fn exists(path: String) -> Bool` | Rust・Python `exists` / Elixir `exists?` | 据え置き（R-L0-09 の動詞集合） | — |
 | `fs.is_dir` | `effect fn is_dir(path: String) -> Bool` | Rust `is_dir` / Kotlin `isDirectory` | 据え置き | — |
@@ -130,3 +140,4 @@
 | `fs.temp_dir` | `effect fn temp_dir() -> String` | Rust `env::temp_dir` / Go `TempDir` / Elixir `System.tmp_dir` | 据え置き（`env.temp_dir` を吸収） | L2-env R-env-01 |
 | `fs.create_temp_file` | `effect fn create_temp_file(prefix: String) -> String` | Go `CreateTemp` / Python `mkstemp` | 据え置き | — |
 | `fs.create_temp_dir` | `effect fn create_temp_dir(prefix: String) -> String` | Go `MkdirTemp` / Python `mkdtemp` / Node `mkdtemp` | 据え置き | — |
+| `fs.append_bytes` | `effect fn append_bytes(path: String, data: Bytes) -> Unit`（案） | Kotlin `appendBytes` / Python `open("ab")` | 追加 | R-fs-05 |
