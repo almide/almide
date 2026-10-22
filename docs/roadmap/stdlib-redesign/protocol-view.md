@@ -106,7 +106,7 @@ HttpMessage
 - `Additive`: `+`・`-` と 0。
 - `Numeric`: `*`。
 - `Signed`: 単項の `-`。
-- `Integer`: `/`・`%`。`bigint` もここに入る（Swift の `BinaryInteger` は任意精度の整数も入れる設計）。数の型どうしの変換（`to_<T>`・`_checked`・`_saturating`・`_wrapping`）もここ（Swift の `init(_:)`・`init(exactly:)`・`init(clamping:)`・`init(truncatingIfNeeded:)`）。
+- `Integer`: `/`・`%`。ビット演算の綴り（`band` など）は R-int-10 で計測して決める。`bigint` もここに入る（Swift の `BinaryInteger` は任意精度の整数も入れる設計）。数の型どうしの変換（`to_<T>`・`_checked`・`_saturating`・`_wrapping`）もここ（Swift の `init(_:)`・`init(exactly:)`・`init(clamping:)`・`init(truncatingIfNeeded:)`）。
 - `FixedWidthInteger`: 幅の決まった整数。`count_trailing_zeros` は 0 のとき型の幅を返すので、幅のない `bigint` には置かない。
 - `FloatingPoint`: `/`。順序は IEEE totalOrder（R-L0-16）。
 - `TimeAmount`: `Duration`・`Compute`（R-duration-03）。
@@ -116,7 +116,7 @@ HttpMessage
 - `Sequence`: 決まった順に 1 つずつたどれる。
 - `Ordered`: 両端から数えられる。
 - `Indexed`: 位置で読み書きする。
-- `Growable`: 足し引きできる。
+- `Growable`: 足し引きできる。`push`・`pop`・`clear` はその場書き換え（`mut`）、`insert`・`remove_at` はコピーを返す。様式は動詞で決まり、どの型でも同じ（R-L0-04。コピーの形は `@reuse` でその場と同じ速さになるので、その場書き換えはバッファを伸ばす・縮める動詞だけに限る）。Swift はすべて `mutating` だが、Almide は値の意味論で関数型の流儀をとる。
 - `KeyValue`: `contains` はキーを受け取る。
 - `PriorityQueue`: Swift の `Heap` も `Sequence` ではない。
 - `Text`: 部分の列で探す。`contains` は部分の列を受け取るので、`Membership` とは同じ型に載せられない。

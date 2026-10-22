@@ -42,6 +42,18 @@
 
 固定幅の数（`int8`〜`uint64`、`float32`・`float64`）は型ごとに 1 関数と数えます。
 
+## 実体の数
+
+この一覧は、同じ protocol の関数を型ごとに 1 行と数えています（計 1,413 行）。[protocol の階層](protocol-view.md)で数え直すと、覚える名前はずっと少なくなります。
+
+| 数え方 | 一覧の行 | 覚える名前 |
+|---|---:|---:|
+| protocol の要件（protocol ごとに 1 回） | 475 | 111 |
+| 数の型どうしの変換（`to_<型>` と `_checked`・`_saturating`・`_wrapping` の 1 つの規則） | 347 | 4 |
+| 値の型だけが持つ関数 | 383 | 383 |
+| 値の型を持たないモジュール（`fs`・`http`・`math` など） | 208 | 208 |
+| 計 | 1413 | 706 |
+
 ## モジュールごとの数
 
 | モジュール | リデザイン後 | 新規 | 改名 | 意味変更 | 撤去 | 記録 |
@@ -2187,7 +2199,7 @@
 
 ## 採らなかった案・保留の案と理由
 
-レビューで同じ指摘を繰り返さないよう、いまも有効な × と保留の案（56 件）を理由の最初の 1〜2 文と一緒に載せます。全文は各ページの案にあります。
+レビューで同じ指摘を繰り返さないよう、いまも有効な × と保留の案（57 件）を理由の最初の 1〜2 文と一緒に載せます。全文は各ページの案にあります。
 
 | 案 | 内容 | 判定 | 理由 |
 |---|---|---|---|
@@ -2246,6 +2258,7 @@
 | [R-result-06](L2-result.md#r-result-06-resultcollect-を戻す---不採用) | `result.collect` を戻す | × 不採用 | ADR-0007 D1 で撤去した関数です。失敗しうる要素の列は、`list.map` の callback に `!` を書く形（最初の err で止まる。 |
 | [R-int-08](L2-int.md#r-int-08-intto_hex-を-to_string_radixx-16-にまとめる---不採用) | `int.to_hex` を `to_string_radix(x, 16)` にまとめる | × 不採用 | 2 つは負の数で結果が違い、同義語ではありません。`int.to_hex(-1)` は 64 bit の並びの 16 進（`"ffffffffffffffff"`）、`int.to_string_radix(-1, 16)` は符号つき（`"-1"`）です。 |
 | [R-int-09](L2-int.md#r-int-09-intsign-と-floatsignum-の綴りを-1-つにする---不採用) | `int.sign` と `float.signum` の綴りを 1 つにする | × 不採用 | 0 の扱いが違うので、同じ名前にすると R-float-05 で避けた誤りが戻ります。`int.sign(0)`・`bigint.sign(0)` は 0、`float.signum(0.0)` は 1.0（Rust の `signum` と同じ）です。 |
+| [R-int-10](L2-int.md#r-int-10-ビット演算の綴りを計測で決める--保留dojo-で測る) | ビット演算の綴りを計測で決める | 保留（Dojo で測る） | いま: `band`・`bor`・`bxor`・`bnot`・`bshl`・`bshr`・`bshr_logical`（Elixir と同じ `b` 接頭辞）。 |
 | [R-bytes-26](L2-bytes.md#r-bytes-26-bytesget_u8-と-getappend_u8-と-push-を-1-つにする---不採用役割の違いを明記) | `bytes.get_u8` と `get`、`append_u8` と `push` を 1 つにする | × 不採用（役割の違いを明記） | 2 つは結果が同じですが、属する族が違います。`get`・`push` は入れ物の族（`list.get`・`deque.push` と同じ形）、`get_u8`・`append_u8` は符号化の族（`get_u16_le`・`append_u16_le` … の 1 バイトのセル）です。 |
 
 ## 後の案で判定を変えた案

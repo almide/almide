@@ -147,6 +147,18 @@
 
 - 理由: 0 の扱いが違うので、同じ名前にすると R-float-05 で避けた誤りが戻ります。`int.sign(0)`・`bigint.sign(0)` は 0、`float.signum(0.0)` は 1.0（Rust の `signum` と同じ）です。`sign` という名前は「0 は 0」の関数だけに使います（R-float-05 の完全性の規則）。
 - issue: なし
+
+### R-int-10 ビット演算の綴りを計測で決める — 保留（Dojo で測る）
+
+- いま: `band`・`bor`・`bxor`・`bnot`・`bshl`・`bshr`・`bshr_logical`（Elixir と同じ `b` 接頭辞）。R-sized-10・R-bigint-07 で `Integer` の要件になり、整数 10 型の 61 関数に広がりました。
+- R-int-05（×）の理由「関数名で書く 4 言語の綴りは割れていて、多数派がない」は今も成り立ちます。改名を、型エラーの理由だけで決めることもしません（R-L0-36）。
+- 測る候補:
+  1. いまの `int.band(a, b)`（Elixir）
+  2. 語の形 `int.bit_and(a, b)`・`bit_or`・`bit_xor`・`bit_not`・`shift_left`・`shift_right`（Gleam の `bitwise_and`、Roc の `bitwiseAnd` に近い）
+  3. 演算子 `a & b`・`a | b`・`a ^ b`・`~a`（R-L0-39 で `^` を空けたあと。Rust・Go・Python・JS・Swift の 5 言語と同じ）。シフトは `>>` が関数の合成なので、関数のまま（`shift_left`・`shift_right`）。
+- 測り方: ビット演算を使う課題（ハッシュ、フラグ、CRC、ビット集合）を LLM に書かせ、そのまま通る割合を候補ごとに比べます。
+- issue: almide-dojo#65
+
 ## L3: 関数表
 
 `int` の現行 72 関数と、追加する 13 関数です（`compare` と、[L2-bigint](L2-bigint.md) の `to_bigint` を含む）。
