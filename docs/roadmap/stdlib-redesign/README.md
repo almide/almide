@@ -15,13 +15,26 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 
 六巡目（2026-10-22）: 5 つめ・6 つめの外部レビューは、規則・関数表・注記・採否の表のあいだの食い違いを中心に指摘しました。古い規則の文（無印の変換は折り返す、など）を R-L0-32 に合わせて書き直し、後の案で判定を変えた ×・保留の案に「→ いま有効な案」を付けて別の表に分けました。整数どうしの折り返しを `_wrapping` のセルにし（R-L0-34。`int.wrap` では `UInt64` の上半分を扱えないため）、変換の丸めを変換先で分けて書き（R-L0-35）、NaN を型の幅ごとに 1 つと明記し（R-float-10）、`http.start` を組み立てた要求を受け取る形にしました（R-http-14）。「型エラーになる」だけを理由にした不採用は、`map.map` を保留にして Dojo で測ります（R-L0-36）。食い違いの再発は、一覧を組み立てる段階の検査で止めます（CI のゲートにする件は #3997）。
 
+七巡目（2026-10-22）: 標準の型を protocol の階層（Swift が手本）で組み直しました（R-L0-37、[protocol-view.md](protocol-view.md)）。階層の要件から出た穴を埋めて 164 関数を足し（R-sized-10・11、R-bigint-07、R-bool-03、R-list-20、R-string-16、R-deque-03・04）、`Repr` のメソッドを `to_string` にしました（R-L0-38）。`Bool` を順序のある型に入れるか（R-bool-02）と、`string.chars` を `to_list` にするかは保留にして Dojo で測ります。
+
+八巡目（2026-10-22）: `6 ^ 3` が黙って累乗（216）になる罠を見つけ、`^` を累乗から外して `**` だけにしました（R-L0-39。Rust・Go・Python・JS・Swift では `^` は XOR）。ビット演算の綴り（`band` か `bit_and` か演算子か）は Dojo で測って決めます（R-int-10）。[target-surface.md](target-surface.md) に、protocol の関数を 1 回と数えた「実体の数」（覚える名前は約 700）を足しました。
+
+九巡目（2026-10-22）: 表面に残っていた汚れを片付けました。数の変換を変換先の型の `from`・`from_checked`・`from_saturating`・`from_wrapping` の 4 つの総称関数にし（R-L0-40。Swift の 4 つの初期化子と同じ。347 関数 → 44 関数）、ビット演算を演算子 `&`・`|`・`^`・`~`・`<<`・`>>` にしました（R-L0-41。`>>` は関数の合成から外す）。継ぎ目は、`bit_width` → `bit_length`（R-int-11）、N bit の演算を型の幅に（R-int-12）、`map` を組の `Container` に（R-map-09）、`regex.compile`（R-regex-11）、`string.to_list`（R-string-17）で閉じました。リデザイン後は 1,100 関数、覚える名前は 690 です。
+
+十巡目（2026-10-22）: `list` だけにあった 30 の列のアルゴリズム（`enumerate`・`zip`・`sort`・`chunk` など）を、`Sequence`・`Ordered` の既定の実装として 1 回だけ書き、`deque`・`set`・`string`・`bytes`・`map` でも同じ名前・同じ形で使えるようにしました（R-L0-42。Swift の `Sequence` の拡張と同じ）。`min`・`max`・`clamp` を `Ord` から外し（`duration.min` と衝突していた）、`bytes` に `Text` の要件をそろえ（R-bytes-27）、部分文字列を数える `string.count` を `count_matches` にしました（R-string-18。`Container.count` と衝突していた）。protocol の要件の引数名がすべての型で同じであることを、生成のたびに確かめます。
+
+十一巡目（2026-10-22）: `Bool` の順序を 9 言語で並べ直し、順序をつける 7 言語（Rust・Python・JS・Gleam・Elixir・OCaml・Kotlin）に合わせて `Bool` を `Ord` に入れ、`bool.compare` を足しました（R-bool-02 を保留から採用へ）。つけないのは Go と Swift だけでした。これで保留は R-map-04 などの計測待ちだけです。
+
+十二巡目（2026-10-22）: 「撤去した記号を別の意味で使い直さない」を規則にしました（R-L0-43）。これで九巡目のビット演算子の案（R-L0-41）を取り消し、`^` は累乗の別名をやめてエラーにするだけ、`>>` は関数の合成のまま、ビット演算は関数（`band` など）のまま `Integer` の要件にしました（R-int-10）。全体の機械点検（要件の形・書き換えの動詞・Bool の名前・型引数の名前）もかけ、`bytes.new(len)` を `bytes.zeros(n)` にして `bytes.new()` を空のバイト列にそろえました（R-bytes-28）。
+
 ## 読む順番
 
 1. [L0: 全モジュールに共通する規則](L0-conventions.md) — 名前・置き場所・その場書き換え・失敗の表し方・変換の向き・互換の扱い。下の層の判定はすべてここから導きます。
 2. [L1: カテゴリ（モジュール）の一覧](L1-categories.md) — 足すカテゴリ、足さないカテゴリ、分け方と持ち分。
 3. L2/L3: モジュールごとのページ — 役割の比較表（L2）と、全関数の判定表（L3）。
 4. [リデザイン後の標準ライブラリ](target-surface.md) — ○ の案をすべて適用したあとの公開関数の一覧（モジュールごと、シグネチャつき、撤去した関数の移行先つき）。
-5. 根拠の事実: [facts/naming-conventions.md](facts/naming-conventions.md)（命名の慣習 20 項目 × 9 言語）・[facts/categories.md](facts/categories.md)（約 100 カテゴリ × 9 言語）。
+5. [protocol の階層](protocol-view.md) — Swift を手本にした標準の protocol の階層、型ごとの準拠と穴、この階層で決めること（R-L0-37）。
+6. 根拠の事実: [facts/naming-conventions.md](facts/naming-conventions.md)（命名の慣習 20 項目 × 9 言語）・[facts/categories.md](facts/categories.md)（約 100 カテゴリ × 9 言語）。
 
 判定の 4 軸: (a) 他言語と比べた過不足、(b) native（Rust）と wasm（WASI）の両方で成り立つか、(c) LLM が書き当てやすいか、(d) 変更の種類と互換。
 
@@ -31,7 +44,7 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 
 [args](L2-args.md) ・ [base64](L2-base64.md) ・ [bigint](L2-bigint.md) ・ [bool](L2-bool.md) ・ [bytes](L2-bytes.md) ・ [compute](L2-compute.md) ・ [datetime](L2-datetime.md) ・ [deque](L2-deque.md) ・ [duration](L2-duration.md) ・ [env](L2-env.md) ・ [error](L2-error.md) ・ [ffi](L2-ffi.md) ・ [float](L2-float.md) ・ [fs](L2-fs.md) ・ [hash](L2-hash.md) ・ [heap](L2-heap.md) ・ [hex](L2-hex.md) ・ [html](L2-html.md) ・ [http](L2-http.md) ・ [int](L2-int.md) ・ [io](L2-io.md) ・ [json](L2-json.md) ・ [list](L2-list.md) ・ [map](L2-map.md) ・ [math](L2-math.md) ・ [matrix](L2-matrix.md) ・ [net](L2-net.md) ・ [option](L2-option.md) ・ [path](L2-path.md) ・ [process](L2-process.md) ・ [random](L2-random.md) ・ [regex](L2-regex.md) ・ [result](L2-result.md) ・ [set](L2-set.md) ・ [sized-numbers](L2-sized-numbers.md) ・ [string](L2-string.md) ・ [testing](L2-testing.md) ・ [unix](L2-unix.md) ・ [url](L2-url.md) ・ [uuid](L2-uuid.md) ・ [value](L2-value.md) ・ [zlib](L2-zlib.md)
 
-## 案の状態（全 319 件: ○ 255・× 60・保留 4）
+## 案の状態（全 343 件: ○ 278・× 61・保留 4）
 
 | 案 | 内容 | 判定 | issue |
 |---|---|---|---|
@@ -72,6 +85,13 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 | [R-L0-34](L0-conventions.md#r-l0-34-整数から整数への損失のある変換に-_wrapping-を置く---採用) | 整数から整数への損失のある変換に `_wrapping` を置く | ○ | #3995 |
 | [R-L0-35](L0-conventions.md#r-l0-35-無印の変換の丸めと-nan-を変換先が整数か浮動小数点かで分けて書く---採用) | 無印の変換の丸めと NaN を、変換先が整数か浮動小数点かで分けて書く | ○ | #3995 |
 | [R-L0-36](L0-conventions.md#r-l0-36-間違えても型エラーになるはそれだけでは不採用の理由にしない---採用) | 「間違えても型エラーになる」は、それだけでは不採用の理由にしない | ○ | なし |
+| [R-L0-37](L0-conventions.md#r-l0-37-標準の具体型はprotocol-の組み合わせとその型だけの関数でできている---採用方向) | 標準の具体型は「protocol の組み合わせ」と「その型だけの関数」でできている | ○ | #4000 |
+| [R-L0-38](L0-conventions.md#r-l0-38-組み込みの-repr-のメソッド名を-to_string-にする---採用) | 組み込みの `Repr` のメソッド名を `to_string` にする | ○ | #4000 |
+| [R-L0-39](L0-conventions.md#r-l0-39--を累乗の演算子から外し累乗は--だけにする---採用) | `^` を累乗の演算子から外し、累乗は `**` だけにする | ○ | #4002 |
+| [R-L0-40](L0-conventions.md#r-l0-40-数の変換は変換先の型に-from-で置く---採用) | 数の変換は変換先の型に `from` で置く | ○ | #4003 |
+| [R-L0-41](L0-conventions.md#r-l0-41-ビット演算を演算子にし-を関数の合成から外す---取り消し十二巡目記号の意味を入れ替えないため--r-l0-43) | ビット演算を演算子にし、`>>` を関数の合成から外す | ×（→ R-L0-43） | #4004 |
+| [R-L0-42](L0-conventions.md#r-l0-42-列のアルゴリズムは-protocol-の既定の実装として-1-回だけ書く---採用) | 列のアルゴリズムは protocol の既定の実装として 1 回だけ書く | ○ | #4012 |
+| [R-L0-43](L0-conventions.md#r-l0-43-撤去した記号を別の意味で使い直さない---採用) | 撤去した記号を別の意味で使い直さない | ○ | #4004 |
 | [R-L0-G](L0-conventions.md#ゲートの束r-l0-g---採用) | ゲートの束（R-L0-G） | ○ | #3949 |
 | [R-L1-01](L1-categories.md#r-l1-01-両端キュー-deque---採用) | 両端キュー `deque` | ○ | #3932 |
 | [R-L1-02](L1-categories.md#r-l1-02-優先度キュー-heap---採用) | 優先度キュー `heap` | ○ | #3933 |
@@ -103,8 +123,10 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 | [R-bigint-04](L2-bigint.md#r-bigint-04-bigintaddsubmuldivremneg-を公開しない演算子だけにする---採用) | `bigint.add`/`sub`/`mul`/`div`/`rem`/`neg` を公開しない（演算子だけにする） | ○ | #3973 |
 | [R-bigint-05](L2-bigint.md#r-bigint-05-bigintclamp-を足す---採用) | `bigint.clamp` を足す | ○ | #3972 |
 | [R-bigint-06](L2-bigint.md#r-bigint-06-uint64-と-bigint-を値を失わずに行き来させる---採用) | `uint64` と `BigInt` を値を失わずに行き来させる | ○ | #3972 |
+| [R-bigint-07](L2-bigint.md#r-bigint-07-bigint-に-integer-のビット演算を置く---採用) | `bigint` に `Integer` のビット演算を置く | ○ | #4000 |
 | [R-bool-01](L2-bool.md#r-bool-01-boolparse-を足す---採用) | `bool.parse` を足す | ○ | #3980 |
-| [R-bool-02](L2-bool.md#r-bool-02-boolcompare-を足す---採用) | `bool.compare` を足す | ○ | #3980 |
+| [R-bool-02](L2-bool.md#r-bool-02-boolcompare-を足す---採用十一巡目に保留から戻す9-言語中-7-つが順序をつける) | `bool.compare` を足す | ○ | #3980 |
+| [R-bool-03](L2-bool.md#r-bool-03-boolto_string-を置く---採用) | `bool.to_string` を置く | ○ | #3980 |
 | [R-bytes-01](L2-bytes.md#r-bytes-01-位置を指定した上書きを-put_型-にする---採用) | 位置を指定した上書きを `put_<型>` にする | ○ | #3898 |
 | [R-bytes-02](L2-bytes.md#r-bytes-02-1-バイトの追記は-push1-バイトの上書きは-put_u8-だけにする---採用) | 1 バイトの追記は `push`、1 バイトの上書きは `put_u8` だけにする | ○ | #3851 |
 | [R-bytes-03](L2-bytes.md#r-bytes-03-書き足しを-append_-に揃え型--向き--操作の行列を閉じる---採用) | 書き足しを `append_` に揃え、型 × 向き × 操作の行列を閉じる | ○ | #3851 |
@@ -131,6 +153,8 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 | [R-bytes-24](L2-bytes.md#r-bytes-24-bytesset-と-put_u8-を-1-つにする---不採用) | `bytes.set` と `put_u8` を 1 つにする | × | — |
 | [R-bytes-25](L2-bytes.md#r-bytes-25-型つきの読み書きの行列に-get_u8append_u8-を戻す---採用r-bytes-02-の一部を見直し) | 型つきの読み書きの行列に `get_u8`・`append_u8` を戻す | ○ | #3991 |
 | [R-bytes-26](L2-bytes.md#r-bytes-26-bytesget_u8-と-getappend_u8-と-push-を-1-つにする---不採用役割の違いを明記) | `bytes.get_u8` と `get`、`append_u8` と `push` を 1 つにする | × | なし |
+| [R-bytes-27](L2-bytes.md#r-bytes-27-bytes-に-text-の要件をそろえる---採用) | `bytes` に `Text` の要件をそろえる | ○ | #4012 |
+| [R-bytes-28](L2-bytes.md#r-bytes-28-bytesnewlen-を-byteszerosn-に改名しbytesnew-を空のバイト列にする---採用) | `bytes.new(len)` を `bytes.zeros(n)` に改名し、`bytes.new()` を空のバイト列にする | ○ | #4012 |
 | [R-compute-01](L2-compute.md#r-compute-01-computecompare-を足す---採用) | `compute.compare` を足す | ○ | #3902 |
 | [R-compute-02](L2-compute.md#r-compute-02-duration-と統合するまたは読み出し関数を足す---不採用) | `duration` と統合する、または読み出し関数を足す | × | — |
 | [R-compute-03](L2-compute.md#r-compute-03-compute-を共通のプロトコル-timeamount-に従わせる---採用) | `Compute` を共通のプロトコル `TimeAmount` に従わせる | ○ | #3964 |
@@ -143,6 +167,8 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 | [R-datetime-07](L2-datetime.md#r-datetime-07-from_parts-は範囲外の部品を-err-にする---採用) | `from_parts` は範囲外の部品を err にする | ○ | #3974 |
 | [R-deque-01](L2-deque.md#r-deque-01-deque-モジュールを足す---採用) | `deque` モジュールを足す | ○ | #3932 |
 | [R-deque-02](L2-deque.md#r-deque-02-deque-に高階関数の族と-containsclear-を足す---採用) | deque に高階関数の族と `contains`・`clear` を足す | ○ | #3968 |
+| [R-deque-03](L2-deque.md#r-deque-03-末尾の-push_backpop_back-を-pushpop-にする---採用) | 末尾の `push_back`・`pop_back` を `push`・`pop` にする | ○ | #4000 |
+| [R-deque-04](L2-deque.md#r-deque-04-deque-に-orderedindexedgrowable-の要件をそろえる---採用) | `deque` に `Ordered`・`Indexed`・`Growable` の要件をそろえる | ○ | #4000 |
 | [R-duration-01](L2-duration.md#r-duration-01-durationcompare-を足す---採用) | `duration.compare` を足す | ○ | #3902 |
 | [R-duration-02](L2-duration.md#r-duration-02-読み出し関数小数の構築子日の単位を足す---不採用) | 読み出し関数・小数の構築子・日の単位を足す | × | — |
 | [R-duration-03](L2-duration.md#r-duration-03-duration-と-compute-を-1-つのプロトコル-timeamount-に従わせる---採用) | `Duration` と `Compute` を 1 つのプロトコル `TimeAmount` に従わせる | ○ | #3964 |
@@ -204,11 +230,14 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 | [R-int-02](L2-int.md#r-int-02-折り返しの族を-4-セルにそろえto_u32to_u8-を撤去する---採用) | 折り返しの族を 4 セルにそろえ、`to_u32`/`to_u8` を撤去する | ○ | #3854 |
 | [R-int-03](L2-int.md#r-int-03-床方向の割り算と剰余-intfloor_div--intmod-を足す---採用) | 床方向の割り算と剰余 `int.floor_div` / `int.mod` を足す | ○ | #3918 |
 | [R-int-04](L2-int.md#r-int-04-基数の変換を-to_string_radix--parse_radix-の対にしfrom_hex-を撤去する---採用) | 基数の変換を `to_string_radix` / `parse_radix` の対にし、`from_hex` を撤去する | ○ | #3920 |
-| [R-int-05](L2-int.md#r-int-05-bandborbxor-などを多数派の綴りに改名する---不採用) | `band`/`bor`/`bxor` などを多数派の綴りに改名する | × | — |
+| [R-int-05](L2-int.md#r-int-05-bandborbxor-などを多数派の綴りに改名する---不採用改名しないr-int-10-で確かめた) | `band`/`bor`/`bxor` などを多数派の綴りに改名する | × | — |
 | [R-int-06](L2-int.md#r-int-06-論理右シフト-intbshr_logical-を足す---採用) | 論理右シフト `int.bshr_logical` を足す | ○ | #3919 |
 | [R-int-07](L2-int.md#r-int-07-pop_count-を-count_ones-に改名する---採用) | `pop_count` を `count_ones` に改名する | ○ | #3985 |
 | [R-int-08](L2-int.md#r-int-08-intto_hex-を-to_string_radixx-16-にまとめる---不採用) | `int.to_hex` を `to_string_radix(x, 16)` にまとめる | × | なし |
 | [R-int-09](L2-int.md#r-int-09-intsign-と-floatsignum-の綴りを-1-つにする---不採用) | `int.sign` と `float.signum` の綴りを 1 つにする | × | なし |
+| [R-int-10](L2-int.md#r-int-10-ビット演算の綴りを計測で決める---採用関数のまま十二巡目に演算子の案を取り消し) | ビット演算の綴りを計測で決める | ○ | #4004 |
+| [R-int-11](L2-int.md#r-int-11-bit_width-を-bit_length-に改名する---採用) | `bit_width` を `bit_length` に改名する | ○ | #4004 |
+| [R-int-12](L2-int.md#r-int-12-n-bit-の演算を型の幅の演算に置き換える---採用) | N bit の演算を、型の幅の演算に置き換える | ○ | #4004 |
 | [R-io-01](L2-io.md#r-io-01-読み取りをeof-を区別する-1-行bytesにそろえる---採用) | 読み取りを「EOF を区別する 1 行」「Bytes」にそろえる | ○ | #3896 |
 | [R-io-02](L2-io.md#r-io-02-iowrite_bytes-を-effect-fn-に直す---採用) | `io.write_bytes` を effect fn に直す | ○ | #3907 |
 | [R-io-03](L2-io.md#r-io-03-改行なしで標準エラーに書く-ioeprint-を足しprint-の綴りから-ioprint-へ案内する---採用) | 改行なしで標準エラーに書く `io.eprint` を足し、`print` の綴りから `io.print` へ案内する | ○ | #3974 |
@@ -236,6 +265,7 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 | [R-list-17](L2-list.md#r-list-17-binary_search_bybinary_search_with-を足す---採用) | `binary_search_by`・`binary_search_with` を足す | ○ | #3980 |
 | [R-list-18](L2-list.md#r-list-18-listrepeat-を列全体の繰り返しにする---不採用) | `list.repeat` を列全体の繰り返しにする | × | — |
 | [R-list-19](L2-list.md#r-list-19-min_withmax_with-を足す---採用) | `min_with`・`max_with` を足す | ○ | #3985 |
+| [R-list-20](L2-list.md#r-list-20-listnewlistfrom_listlistto_list-を置く---採用) | `list.new`・`list.from_list`・`list.to_list` を置く | ○ | #4000 |
 | [R-map-01](L2-map.md#r-map-01-mapinsert-と-mapdeleteその場書き換えを撤去する---採用) | `map.insert` と `map.delete`（その場書き換え）を撤去する | ○ | #3928 |
 | [R-map-02](L2-map.md#r-map-02-mapget_or-を撤去して--に一本化する---採用) | `map.get_or` を撤去して `??` に一本化する | ○ | #3913 |
 | [R-map-03](L2-map.md#r-map-03-mapto_list-を足す---不採用-r-map-07-で採用に変更) | `map.to_list` を足す | ×（→ R-map-07） | — |
@@ -244,6 +274,7 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 | [R-map-06](L2-map.md#r-map-06-高階関数の-family-を-listmapset-の行列でゲートする---採用) | 高階関数の family を list・map・set の行列でゲートする | ○ | #3901 |
 | [R-map-07](L2-map.md#r-map-07-mapentries-を-mapto_list-に改名するr-map-03-の見直し---採用) | `map.entries` を `map.to_list` に改名する（R-map-03 の見直し） | ○ | #3969 |
 | [R-map-08](L2-map.md#r-map-08-mapupdate-はキーが無ければ-abort---採用) | `map.update` はキーが無ければ abort | ○ | #3990 |
+| [R-map-09](L2-map.md#r-map-09-map-を-k-v-の組の-container-にする---採用) | `map` を `(K, V)` の組の `Container` にする | ○ | #4004 |
 | [R-math-01](L2-math.md#r-math-01-型の決まる算術を-intfloat-に移す---採用) | 型の決まる算術を `int`・`float` に移す | ○ | #3851 |
 | [R-math-02](L2-math.md#r-math-02-逆三角関数双曲線関数hypotcbrt-を足す---採用) | 逆三角関数・双曲線関数・`hypot`・`cbrt` を足す | ○ | #3926 |
 | [R-math-03](L2-math.md#r-math-03-実数の数学関数は-math-に集めるsqrt-を-math-に戻しfloatsqrt-を撤去---採用r-math-01-の-sqrt-の部分を見直す) | 実数の数学関数は `math` に集める（`sqrt` を `math` に戻し、`float.sqrt` を撤去） | ○ | #3972 |
@@ -298,6 +329,7 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 | [R-regex-07](L2-regex.md#r-regex-07-replace_first_with-を足して置換の-22-を閉じる---採用) | `replace_first_with` を足して、置換の 2×2 を閉じる | ○ | #3971 |
 | [R-regex-08](L2-regex.md#r-regex-08-捕捉グループを-string-で返す---採用) | 捕捉グループを `String?` で返す | ○ | #3977 |
 | [R-regex-09](L2-regex.md#r-regex-09-対象の文字列を第-1-引数にする---不採用) | 対象の文字列を第 1 引数にする | × | — |
+| [R-regex-11](L2-regex.md#r-regex-11-パターンを確かめて作る関数を-regexcompile-と綴る---採用) | パターンを確かめて作る関数を `regex.compile` と綴る | ○ | #4004 |
 | [R-result-01](L2-result.md#r-result-01-resultunwrap_or-を-epoch-16-で撤去する---採用) | `result.unwrap_or` を epoch 16 で撤去する | ○ | #1107 |
 | [R-result-02](L2-result.md#r-result-02-resultfilter-の-3-引数を据え置く---不採用撤去も改名もしない) | `result.filter` の 3 引数を据え置く | × | — |
 | [R-result-03](L2-result.md#r-result-03-resultto_err_option-を改名しない---不採用) | `result.to_err_option` を改名しない | × | — |
@@ -312,11 +344,13 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 | [R-sized-02](L2-sized-numbers.md#r-sized-02-すべての運び手に-parse-と-compare-を置く---採用) | すべての運び手に `parse` と `compare` を置く | ○ | #3902 |
 | [R-sized-03](L2-sized-numbers.md#r-sized-03-float32float64-に浮動小数点の-7-セルを置く---採用) | `float32`・`float64` に浮動小数点の 7 セルを置く | ○ | #3910 |
 | [R-sized-04](L2-sized-numbers.md#r-sized-04-floatto_整数_saturating-8-関数を撤去する---取り消しr-l0-32) | `float.to_<整数>_saturating` 8 関数を撤去する | × | — |
-| [R-sized-05](L2-sized-numbers.md#r-sized-05-固定幅のモジュールをまとめる算術関数を足す---不採用) | 固定幅のモジュールをまとめる・算術関数を足す | × | — |
+| [R-sized-05](L2-sized-numbers.md#r-sized-05-固定幅のモジュールをまとめる算術関数を足す---不採用算術の部分は--r-sized-10-で見直し) | 固定幅のモジュールをまとめる・算術関数を足す | ×（→ R-sized-10） | — |
 | [R-sized-06](L2-sized-numbers.md#r-sized-06-整数の運び手すべてに-parse_radixto_string_radix-を置く---採用) | 整数の運び手すべてに `parse_radix`・`to_string_radix` を置く | ○ | #3972 |
 | [R-sized-07](L2-sized-numbers.md#r-sized-07-float32float64-に-is_nan-などの判定を足す---不採用-r-sized-08-で見直し) | `float32`・`float64` に `is_nan` などの判定を足す | ×（→ R-sized-08） | — |
 | [R-sized-08](L2-sized-numbers.md#r-sized-08-integerfloatingpoint-を宣言し選択と分類の関数を全型にそろえる---採用r-sized-07-を見直し) | `Integer`・`FloatingPoint` を宣言し、選択と分類の関数を全型にそろえる | ○ | #3989 |
 | [R-sized-09](L2-sized-numbers.md#r-sized-09-float32float64-に-to_int_saturating-を足す---採用) | `float32`・`float64` に `to_int_saturating` を足す | ○ | #3995 |
+| [R-sized-10](L2-sized-numbers.md#r-sized-10-整数-8-型に-integerfixedwidthinteger-の要件をそろえる---採用r-sized-05-を見直し) | 整数 8 型に `Integer`・`FixedWidthInteger` の要件をそろえる | ○ | #4000 |
+| [R-sized-11](L2-sized-numbers.md#r-sized-11-float32float64-に-floatingpoint-の要件をそろえる---採用r-sized-08-の線引きを見直し) | `float32`・`float64` に `FloatingPoint` の要件をそろえる | ○ | #4000 |
 | [R-string-01](L2-string.md#r-string-01-stringjoin-を撤去し-listjoin-に一本化する---採用) | `string.join` を撤去し `list.join` に一本化する | ○ | #3947 |
 | [R-string-02](L2-string.md#r-string-02-utf-8-の変換は両方向とも-bytes-に置きstringto_bytes-と-stringfrom_bytes-を撤去する---採用) | UTF-8 の変換は両方向とも `bytes` に置き、`string.to_bytes` と `string.from_bytes` を撤去する | ○ | #2078 |
 | [R-string-03](L2-string.md#r-string-03-stringrun_length_encode-を撤去する---採用) | `string.run_length_encode` を撤去する | ○ | #3852 |
@@ -332,6 +366,9 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 | [R-string-13](L2-string.md#r-string-13-stringcount-を述語で数える形にする---不採用) | `string.count` を述語で数える形にする | × | — |
 | [R-string-14](L2-string.md#r-string-14-to_codepoint-は-1-コードポイントちょうどのときだけ-some---採用r-string-12-の意味を決める) | `to_codepoint` は 1 コードポイントちょうどのときだけ some | ○ | #3991 |
 | [R-string-15](L2-string.md#r-string-15-stringslice-の終わりの既定値を外し2-引数の形は-drop-に一本化する---採用) | `string.slice` の終わりの既定値を外し、2 引数の形は `drop` に一本化する | ○ | #3969 |
+| [R-string-16](L2-string.md#r-string-16-string-に-sequencegrowable-の要件をそろえる---採用) | `string` に `Sequence`・`Growable` の要件をそろえる | ○ | #4000 |
+| [R-string-17](L2-string.md#r-string-17-stringchars-を-to_list-にしnewfrom_list-を置く---採用r-string-16-の保留を解く) | `string.chars` を `to_list` にし、`new`・`from_list` を置く | ○ | #4004 |
+| [R-string-18](L2-string.md#r-string-18-部分文字列を数える-stringcount-を-count_matches-にしcount-は-container-の述語の形にする---採用) | 部分文字列を数える `string.count` を `count_matches` にし、`count` は `Container` の述語の形にする | ○ | #4012 |
 | [R-testing-01](L2-testing.md#r-testing-01-大小と含むの族の規則をゲートに書く---採用関数は変えない) | 大小と含むの族の規則をゲートに書く | ○ | #3949 |
 | [R-testing-02](L2-testing.md#r-testing-02-assert_gtassert_lt-を順序のある型すべてで使えるようにする---採用) | `assert_gt`・`assert_lt` を順序のある型すべてで使えるようにする | ○ | #3980 |
 | [R-unix-01](L2-unix.md#r-unix-01-unix-モジュールを作りnetunix_netshm_-を移す---採用) | `unix` モジュールを作り、`net.unix_*`・`net.shm_*` を移す | ○ | #3853 |

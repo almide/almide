@@ -75,7 +75,7 @@ CHEATSHEET の「No synonyms」を、モジュールの境界を越えて適用�
 1. 関数は既定でコピーを返します（`list.sort`、`list.set`、`map.set`、`set.insert`）。変数を更新したいときは `xs = list.set(xs, i, v)` と書きます。`@reuse` の付いた関数は、この形でもコピーせずにその場で動きます（map 200 万件で `map.set` と `map.insert` と添字代入はどれも約 0.07 秒、実測済み）。
 2. `mut` 引数を取る関数（その場書き換え）は、次の動詞だけに限ります。コピー版と同じ速さで書けない、バッファを伸ばす操作・切り詰める操作・位置を指定して書く操作です。
    - `push`（末尾に 1 つ足す）、`pop`（末尾から 1 つ取る）、`clear`（空にする）、`fill`（全部同じ値にする）
-   - 両端を持つ入れ物では、端を名前に付けた `push_front`・`push_back`・`pop_front`・`pop_back`（`deque`）。`push`・`pop` と同じ族として数えます
+   - 両端を持つ入れ物では、先頭を名前に付けた `push_front`・`pop_front`（`deque`。末尾は `push`・`pop`、R-deque-03）。`push`・`pop` と同じ族として数えます
    - `append_<型>`（バイト列の末尾に書き足す）、`put_<型>`（バイト列の位置を指定して上書きする）
    - `copy_from`、`copy_within`（バイト列の範囲をコピーする）
 3. ひとつの動詞は、全モジュールで同じ様式（コピーかその場書き換えか）を表します。
@@ -541,6 +541,94 @@ effect fn を呼んだときの型（`!` が要るか、`??` をそのまま書�
 - 見直した案: R-map-04 を保留に変えました（Dojo で測る）。R-datetime-04・R-duration-04・R-result-02・R-option-03・R-regex-06 は、型エラー以外の理由（同じ役割に 2 つの綴り、意味から決まる形、ADR の決定）を持つので据え置きます。
 - (d) 判定の規則の追加です。関数は変わりません。
 - issue: なし
+## R-L0-37 標準の具体型は「protocol の組み合わせ」と「その型だけの関数」でできている — ○ 採用（方向）
+
+- いま: 型ごとに同じ役割の関数を並べ、名前と形の揃いを規則（R-L0-16 など）と手書きの行列ゲートで守っています。R-L0-31 で一部の組（`Integer`・`FloatingPoint`・`Sized`・`TimeAmount`・`HttpMessage`）を protocol にしました。
+- 案: これを標準の型全体の作り方にします。
+  1. 2 つ以上の型が同じ役割で持つ関数は、必ず protocol のメソッドとして 1 回だけ宣言します。
+  2. 型のモジュールの関数（`int.compare`・`list.len`）は、その protocol のメソッドそのものです。転送の関数を別に置きません（R-L0-22 の規則を全 protocol に広げる）。
+  3. 型の公開面は「準拠する protocol の一覧」と「その型だけの関数」で書き表せます。
+  4. protocol は階層に組みます。手本は Swift の標準ライブラリです（`Equatable`→`Comparable`、`AdditiveArithmetic`→`Numeric`→`BinaryInteger`→`FixedWidthInteger`、`Sequence`→`Collection`→`BidirectionalCollection`→`RandomAccessCollection` など）。Swift にない層は、理由を書いて足します。階層・型ごとの準拠・穴・この階層で決めることは [protocol-view.md](protocol-view.md) にあります（protocol の定義と準拠から、target-surface.md と突き合わせて機械的に作る）。R-L0-31 で名前を付けた protocol（`Integer`・`FloatingPoint`・`Sized`・`TimeAmount`・`HttpMessage`）は、この階層の中に置き直し、中身は階層の定義に従います。
+- 「protocol だけ」にしない理由: `string.split` や `regex.find` のように 1 つの型しか持たない関数を、メンバーが 1 つの protocol にしても、名前が 1 つ増えるだけで揃いは守れません。Swift も、具体型だけのメソッドを持っています。
+- 実測（リデザイン後の面）: 階層を決めた時点で、値の型 31 種の関数 1,041 個のうち 663 個が protocol の要件か数の変換の族で、要件のうちまだ無い関数（穴）が 209 個ありました（168 個は、`int` が持つ算術とビット演算をサイズつきの整数 8 型が持たないこと）。七巡目の案で 164 関数を足して埋め、九巡目で変換を変換先の `from` に（R-L0-40）、十巡目で列のアルゴリズムを `Sequence`・`Ordered` の既定の実装に（R-L0-42）まとめました。ビット演算は関数のまま `Integer` の要件です（R-int-10、R-L0-43）。リデザイン後は 1,291 関数で、protocol の関数を 1 回と数えると覚える名前は 650 ほどです。
+- 言語に足りないもの（実測 `almide 0.68.0 dev`。どれも今は書けない）:
+  - 型引数を通して、受け手のないメソッドを呼ぶ（`T.zero()` が E002）。`parse`・`max_value`・`nan` に要ります。
+  - protocol の継承（`protocol Integer: Ord`）。
+  - 関連型（`type Elem`）。入れ物の `contains`・`count` を protocol にするのに要ります（R-L0-31 で × にした理由がこれです）。
+  - 既定の実装（`compare` から `min`・`max`・`clamp` を導く）。
+  - 条件つきの準拠（`List[A]` は `A: Hash` のときだけ `Hash`）。
+  - 入れ物そのものを引数にとる型（`F[_]`）は要りません。Swift と同じく、`map` は protocol に入れず型ごとの関数のままにします。
+- 進め方: 5 つの機能は ADR を書いてから入れます。入れる前に、protocol を使う総称関数が LLM の書くコードの生存率を下げないことを Dojo で確かめます。型ごとの書き方（`int.compare(a, b)`）は同じ関数なので、どちらでも書けます。
+- (d) 方向の宣言です。階層の要件を埋める関数は、七巡目の案（R-L0-38、R-sized-10・11、R-bigint-07、R-bool-03、R-list-20、R-string-16、R-deque-03・04）で足しました。R-L0-31 の × の行（`contains`・`count`・`Parse`）は、この階層の `Membership`・`Container`・`Parse` に置き直しています。
+- issue: #4000
+
+## R-L0-38 組み込みの `Repr` のメソッド名を `to_string` にする — ○ 採用
+
+- いま: 組み込みの `Repr` のメソッドは `fn repr(v: Self) -> String` です。一方で数の型・`bigint`・`uuid`・`url` のモジュールは `<mod>.to_string` を持ち、`bool` は持ちません。同じ役割に 2 つの綴りがあり、型によって片方しかありません。
+- 案: R-L0-22（`Ord` の `cmp` → `compare`）と同じく、`Repr` のメソッドを `to_string` にします。R-L0-37 のとおりモジュールの関数は protocol の関数そのものなので、すべての値の型が `<mod>.to_string` を持ち、中身は `"${x}"` と同じ文字列です。`Parse` を持つ型では `parse(to_string(x)) == ok(x)` が成り立ちます（Swift の `LosslessStringConvertible`）。
+- (a) Swift は `CustomStringConvertible` の `description` を全型に持たせ、`LosslessStringConvertible` で `init?(_ description:)` と対にします。Rust の `Display`（`to_string`）と `FromStr` も同じ対です。
+- (c) `int.to_string` から類推した `bool.to_string(b)` が通ります。型ごとに「この型には `to_string` があるか」を覚える必要がなくなります。
+- (d) 改名と追加です。epoch 15 で利用者が書く `fn T.repr` を `@deprecated(since=15, use="to_string")` にし、epoch 16 で撤去します。`almide fix` が書き換えます。一覧には、型のページに行を持つ型（`Parse` を持つ型）の分を載せ、ほかの型の分は「一覧に出ない共通の約束」に書きます。
+- issue: #4000
+
+## R-L0-39 `^` を累乗の演算子から外し、累乗は `**` だけにする — ○ 採用
+
+- いま: `^` は累乗（`**` の別名）です。実測（`almide 0.68.0 dev`）: `6 ^ 3` は `216` を返します。
+- 問題: Rust・Go・Python・TS/JS・Swift の 5 言語で、`^` は排他的論理和（XOR）です。LLM が XOR のつもりで `a ^ b` と書くと、型エラーにならず黙って累乗の値になります。R-L0-32 の「黙って別の値を返さない」に反します。累乗に `^` を使うのは 9 言語のどれでもありません（Python・JS は `**`、ほかは関数）。
+- 案: `^` を演算子の表から外し、字句エラーにします。ヒントは「累乗は `**`、ビットの排他的論理和は `int.bxor`」です。`**` はそのまま残ります。
+- (b) 構文の変更で、両 target で同じです。
+- (d) 構文の撤去です。epoch 15 で `^` に警告を出し、epoch 16 でエラーにします（R-L0-14）。`almide fix` が `a ^ b` を `a ** b` に書き換えます（いまの意味を保つ）。`proofs/dialect-epochs.toml` に行を足します。
+- 空いた `^` は、別の意味で使い直しません（R-L0-43）。いつまでも「累乗は `**`、ビットの排他的論理和は `int.bxor`」と案内するエラーです。
+- issue: #4002
+
+## R-L0-40 数の変換は変換先の型に `from` で置く — ○ 採用
+
+- いま: 変換は変換元のモジュールに、変換先ごとの名前で並びます（`int.to_float(n)`、`int8.to_uint16_checked(x)`）。13 の数の型の組み合わせで 347 関数あり、標準ライブラリの一覧の 4 分の 1 を占めます。
+- 案: 変換先の型のモジュールに、どの数の型からでも受け取る総称関数として置きます。
+  - `fn <T>.from[S: Numeric](x: S) -> T`（無印。結果の型で表せない値は abort）
+  - `fn <T>.from_checked[S: Numeric](x: S) -> T?`
+  - `fn <T>.from_saturating[S: Numeric](x: S) -> T`（整数の型だけ）
+  - `fn <T>.from_wrapping[S: Integer](x: S) -> T`（整数の型だけ。整数からだけ）
+  - 意味は R-L0-32・R-L0-34・R-L0-35 のまま変えません（綴りだけの変更）。値を失わない組では、無印は abort せず、`_checked` は必ず値を返します。
+- (a) 変換先の側に置くのが多数派です: Rust `i8::from(x)`・`i8::try_from(x)`、Swift `Int8(x)`・`Int8(exactly:)`・`Int8(clamping:)`・`Int8(truncatingIfNeeded:)`、Python `float(n)`、Go `float64(n)`、JS `Number(x)`、OCaml `Float.of_int`。変換元の側は Kotlin（`toDouble()`）と Gleam（`int.to_float`）だけです。Swift の 4 つの初期化子と、Almide の 4 つの関数が 1 対 1 に対応します。
+- (c) 覚える名前が、型 13 × 変換先 12 × 接尾辞の行列から、接尾辞 4 つになります。パイプでも同じに書けます（`n |> float.from`）。
+- (d) 改名と撤去です。epoch 15 で `to_<T>…` を `@deprecated(since=15, use="<T>.from…")` にし、epoch 16 で撤去します。`almide fix` が `int.to_float(n)` を `float.from(n)` に機械的に書き換えます。数の型どうしの `to_string`・`parse` はこの案の外です。
+- 言語に要るもの: 型引数つきの総称関数を protocol の境界（`S: Numeric`）で受け、受け手のない要件（`T.from`）を呼べること（#4000）。
+- issue: #4003
+
+## R-L0-41 ビット演算を演算子にし、`>>` を関数の合成から外す — × 取り消し（十二巡目。記号の意味を入れ替えないため → R-L0-43）
+
+- いま: ビット演算は `int.band(a, b)` などの関数で、演算子はありません。`>>` は関数の合成（`f >> g`）、`^` は累乗でした（R-L0-39 で撤去）。
+- 案: 整数の型（`int`・サイズつきの 8 型・`bigint`）に、`&`・`|`・`^`（XOR）・`~`（否定）・`<<`・`>>` を置きます。`>>` は、符号つきの型では符号を保ち、符号なしの型では 0 で埋めます（Swift・Rust・Go と同じ）。符号を無視した右シフトは、符号なしの型に移して書きます（`uint64.from_wrapping(x) >> n`）。
+- 優先順位は Swift に合わせ、C の落とし穴（`a & b == c` が `a & (b == c)` になる）をなくします: `**` ＞ `<<` `>>` ＞ `*` `/` `%` `&` ＞ `+` `-` `|` `^` ＞ 範囲 ＞ `|>` ＞ 比較。
+- 関数の合成 `f >> g` はやめ、`(x) => g(f(x))` か `x |> f |> g` で書きます。合成の演算子を持つのは 9 言語のうち少数で（F#・Haskell の系統）、Rust・Go・Python・JS・Swift の 5 言語で `>>` は右シフトです。実測: Almide のコード中で合成の `>>` を使うのは、合成そのものを試す spec の 7 行だけです。
+- (a) R-int-05（×）は関数名だけを比べて「多数派がない」としました。演算子まで比べると、`&`・`|`・`^`・`<<`・`>>` は Rust・Go・Python・JS・Swift の 5 言語の綴りで、多数派です（R-L0-00）。
+- (d) 構文の追加と意味の変更です。`&`・`|`・`~`・`<<` は epoch 15 から使えます。`^`（累乗）と `>>`（合成）は、epoch 15 で警告、epoch 16 でエラー、epoch 17 で新しい意味にします（同じ記号の意味を黙って入れ替えないため、間に 1 epoch のエラーを挟む）。`almide fix` が `int.band(a, b)` を `a & b` に、`f >> g` を `(x) => g(f(x))` に書き換えます。`band`・`bor`・`bxor`・`bnot`・`bshl`・`bshr`・`bshr_logical` は撤去します。
+- issue: #4004
+
+## R-L0-42 列のアルゴリズムは protocol の既定の実装として 1 回だけ書く — ○ 採用
+
+- いま: `enumerate`・`zip`・`sort`・`min`・`take_while`・`chunk` など 30 の列のアルゴリズムが `list` だけにあります。`deque`・`set`・`string`・`bytes`・`map` では、`to_list` してから `list.*` と書くしかありません。`list.sum`・`product` は `Int` と `Float` の 2 つの形、`list.join` は `String` と `Bytes` の 2 つの形を持ちます。
+- 案: [protocol の階層](protocol-view.md)の `Sequence` と `Ordered` に、これらを既定の実装として 1 回だけ置きます（Swift の `Sequence`・`Collection` の拡張と同じ）。R-L0-37 のとおり、準拠するどの列のモジュールにも同じ名前・同じ形で現れます。
+  - `Sequence`（決まった順にたどれる列）: `enumerate`・`zip`・`zip_with`・`filter_map`・`find_map`・`reduce`・`scan`・`partition`・`group_by`・`sort`・`sort_by`・`sort_with`・`min`・`max`・`min_by`・`max_by`・`min_with`・`max_with`・`sum`・`product`。要素の型が変わる結果や並べ替えた結果は `List` を返します（Swift の `sorted()`・`map` が `Array` を返すのと同じ）。
+  - `Ordered`（両端から数えられる列）: `find_index`・`take_while`・`drop_while`・`chunk`・`window`・`split_at`・`dedup`・`intersperse`・`unique`・`unique_by`。切り出した結果は同じ型を返します（Swift の `SubSequence`）。
+  - 条件: `sum`・`product` は要素が `Numeric`、`sort`・`min`・`max` は要素が `Ord` のときだけです。`string` は `sum`・`product` を、`map` は `sort`・`min`・`max`・`sum`・`product` を持ちません。
+  - `list.sum`・`product` は `sum[A: Numeric](xs: List[A]) -> A`、`list.join` は `join[T: Text](xs: List[T], sep: T) -> T` の 1 つの形にします。
+- `Ord` の既定の実装から `min`・`max`・`clamp` を外し、`Integer`・`FloatingPoint` の要件に戻します（R-sized-08 の形）。`Ord` に置くと、`duration.min(n)`（n 分）や `string.min(s)`（最小の文字）と名前がぶつかるためです。
+- (a) Swift（`Sequence`・`Collection` の拡張）、Rust（`Iterator` の提供メソッド）、Kotlin（`Iterable` の拡張関数）は、列のアルゴリズムを 1 か所に書き、すべての列で使えるようにしています。
+- (d) 追加（`deque` 30・`set` 20・`string` 28・`bytes` 29・`map` 15）と、`list.sum`・`product`・`join` の型を広げる変更です。実装は既定の実装 1 つで、型ごとに書きません。
+- issue: #4012
+
+## R-L0-43 撤去した記号を別の意味で使い直さない — ○ 採用
+
+- 規則:
+  1. 演算子・記号は、撤去しても別の意味で使い直しません。撤去した記号は、いつまでも「撤去した」と案内するエラーのままです。
+  2. 関数の名前を別の意味で使い直すのは、古い書き方が必ず型エラーか abort になるときだけです（例: `string.count(s, sub)` → 述語の `count(s, f)`。文字列を渡す古い書き方は型エラーになる。R-string-18）。
+- 理由: epoch の間に 1 回エラーを挟んでも、古いコード・古い資料・LLM が覚えた書き方は残ります。同じ記号が、読む人と書かれた時期によって違う意味になります。整数の `a ^ b` を累乗から XOR に変えると、型検査を通ったまま違う値になり、R-L0-32 の「黙って別の値を返さない」に反します。
+- この規則で九巡目の R-L0-41（ビット演算を演算子にし、`>>` を関数の合成から外す）を取り消します。`^` は累乗の別名をやめてエラーにするだけ（R-L0-39）、`>>` は関数の合成のままです。ビット演算は関数のまま（R-int-10）です。
+- (d) 判定の規則の追加です。
+- issue: #4004
+
 ## ゲートの束（R-L0-G） — ○ 採用
 
 R-L0-02、03、04、07、09、10、12、16 の検査を、1 つのテスト `tests/stdlib_surface_conventions_test.rs` にまとめます。入力は interface JSON（`mut` 欄つき）です。規則ごとの許容リストは、L2 の案で解消するたびに減らします。増やす方向には変えられません。

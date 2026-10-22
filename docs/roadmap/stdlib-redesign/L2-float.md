@@ -152,7 +152,7 @@
 | 関数 | シグネチャ(現行, mut 表示) | 他言語の主な綴り | 判定 | 案 |
 |---|---|---|---|---|
 | `to_string` | `float.to_string(n: Float) -> String` | Rust `to_string` / Go `strconv.FormatInt` / Python `str` / JS `toString` / Gleam `to_string` (F) / Elixir `to_string` (F) / OCaml `to_string` (F) / Kotlin `toString` / Swift `String(x)` | 据え置き | — |
-| `to_int` | `float.to_int(n: Float) -> Int` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` / Gleam `truncate` (F) / OCaml `to_int` (F) | 意味変更（範囲外・NaN は abort） | R-L0-32 |
+| `to_int` | `float.to_int(n: Float) -> Int` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` / Gleam `truncate` (F) / OCaml `to_int` (F) | 撤去（→ `int.from`） | R-L0-40 |
 | `from_int` | `float.from_int(n: Int) -> Float` | OCaml `Float.of_int` (F) / Gleam は `int.to_float` (F) / Kotlin `toDouble` | 撤去 | R-float-01（`int.to_float` と同じ。R-L0-07 の 3） |
 | `parse` | `float.parse(s: String) -> Result[Float, String]` | Rust `parse` / Go `ParseFloat` / Gleam `parse` (F) / OCaml `of_string_opt` (F) / Kotlin `toDoubleOrNull` / Swift `Double(s)` | 据え置き | — |
 | `to_fixed` | `float.to_fixed(n: Float, decimals: Int) -> String` | JS `toFixed` / Gleam `to_precision`（Float を返す）(F) / Kotlin `"%.2f".format` / Rust `format!("{:.2}")` | 据え置き | — |
@@ -168,36 +168,35 @@
 | `sign` | `float.sign(n: Float) -> Float` | Rust `signum` (F) / JS `Math.sign` / Kotlin `sign` / OCaml `sign_bit` (F)（Bool） | 改名 → `signum`（動きは変えない） | R-float-05 |
 | `is_nan` | `float.is_nan(n: Float) -> Bool` | Rust `is_nan` (F) / Go `math.IsNaN` / Python `math.isnan` / JS `Number.isNaN` / OCaml `is_nan` (F) / Kotlin `isNaN` / Swift `isNaN` | 据え置き | — |
 | `is_infinite` | `float.is_infinite(n: Float) -> Bool` | Rust `is_infinite` (F) / Go `math.IsInf` / Python `math.isinf` / OCaml `is_infinite` (F) / Kotlin `isInfinite` / Swift `isInfinite` | 据え置き | — |
-| `to_int8` | `float.to_int8(n: Float) -> Int8` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
-| `to_int16` | `float.to_int16(n: Float) -> Int16` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
-| `to_int32` | `float.to_int32(n: Float) -> Int32` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
-| `to_uint8` | `float.to_uint8(n: Float) -> UInt8` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
-| `to_uint16` | `float.to_uint16(n: Float) -> UInt16` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
-| `to_uint32` | `float.to_uint32(n: Float) -> UInt32` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
-| `to_uint64` | `float.to_uint64(n: Float) -> UInt64` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
-| `to_float32` | `float.to_float32(n: Float) -> Float32` | Rust `as` / Kotlin `toFloat()` / Swift `init(_:)` | 据え置き | R-sized-01（行列のセル） |
-| `to_int64` | `float.to_int64(n: Float) -> Int64` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
-| `to_float64` | `float.to_float64(n: Float) -> Float64` | Rust `as` / Kotlin `toFloat()` / Swift `init(_:)` | 据え置き | R-sized-01（行列のセル） |
+| `to_int8` | `float.to_int8(n: Float) -> Int8` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` | 撤去（→ `int8.from`） | R-L0-40 |
+| `to_int16` | `float.to_int16(n: Float) -> Int16` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` | 撤去（→ `int16.from`） | R-L0-40 |
+| `to_int32` | `float.to_int32(n: Float) -> Int32` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` | 撤去（→ `int32.from`） | R-L0-40 |
+| `to_uint8` | `float.to_uint8(n: Float) -> UInt8` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` | 撤去（→ `uint8.from`） | R-L0-40 |
+| `to_uint16` | `float.to_uint16(n: Float) -> UInt16` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` | 撤去（→ `uint16.from`） | R-L0-40 |
+| `to_uint32` | `float.to_uint32(n: Float) -> UInt32` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` | 撤去（→ `uint32.from`） | R-L0-40 |
+| `to_uint64` | `float.to_uint64(n: Float) -> UInt64` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` | 撤去（→ `uint64.from`） | R-L0-40 |
+| `to_float32` | `float.to_float32(n: Float) -> Float32` | Rust `as` / Kotlin `toFloat()` / Swift `init(_:)` | 撤去（→ `float32.from`） | R-L0-40 |
+| `to_int64` | `float.to_int64(n: Float) -> Int64` | Rust `as`（飽和） / Kotlin `toInt()`（飽和）(F) / Swift `init(_:)`（trap） / Go `T(x)` | 撤去（→ `int64.from`） | R-L0-40 |
+| `to_float64` | `float.to_float64(n: Float) -> Float64` | Rust `as` / Kotlin `toFloat()` / Swift `init(_:)` | 撤去（→ `float64.from`） | R-L0-40 |
 | `from_float32` | `float.from_float32(n: Float32) -> Float` | Rust `as` / Kotlin `toFloat()` / Swift `init(_:)` | 撤去 | R-float-01（`float32.to_float`） |
 | `from_float64` | `float.from_float64(n: Float64) -> Float` | Rust `as` / Kotlin `toFloat()` / Swift `init(_:)` | 撤去 | R-float-01（`float64.to_float`） |
-| `to_int8_checked` | `float.to_int8_checked(n: Float) -> Option[Int8]` | Rust `try_from` / Swift `init(exactly:)` (F) / OCaml Base `to_int_exn`系 / 他 6 言語 — | 据え置き | R-sized-01（行列のセル） |
-| `to_int16_checked` | `float.to_int16_checked(n: Float) -> Option[Int16]` | Rust `try_from` / Swift `init(exactly:)` (F) / OCaml Base `to_int_exn`系 / 他 6 言語 — | 据え置き | R-sized-01（行列のセル） |
-| `to_int32_checked` | `float.to_int32_checked(n: Float) -> Option[Int32]` | Rust `try_from` / Swift `init(exactly:)` (F) / OCaml Base `to_int_exn`系 / 他 6 言語 — | 据え置き | R-sized-01（行列のセル） |
-| `to_int64_checked` | `float.to_int64_checked(n: Float) -> Option[Int64]` | Rust `try_from` / Swift `init(exactly:)` (F) / OCaml Base `to_int_exn`系 / 他 6 言語 — | 据え置き | R-sized-01（行列のセル） |
-| `to_uint8_checked` | `float.to_uint8_checked(n: Float) -> Option[UInt8]` | Rust `try_from` / Swift `init(exactly:)` (F) / OCaml Base `to_int_exn`系 / 他 6 言語 — | 据え置き | R-sized-01（行列のセル） |
-| `to_uint16_checked` | `float.to_uint16_checked(n: Float) -> Option[UInt16]` | Rust `try_from` / Swift `init(exactly:)` (F) / OCaml Base `to_int_exn`系 / 他 6 言語 — | 据え置き | R-sized-01（行列のセル） |
-| `to_uint32_checked` | `float.to_uint32_checked(n: Float) -> Option[UInt32]` | Rust `try_from` / Swift `init(exactly:)` (F) / OCaml Base `to_int_exn`系 / 他 6 言語 — | 据え置き | R-sized-01（行列のセル） |
-| `to_uint64_checked` | `float.to_uint64_checked(n: Float) -> Option[UInt64]` | Rust `try_from` / Swift `init(exactly:)` (F) / OCaml Base `to_int_exn`系 / 他 6 言語 — | 据え置き | R-sized-01（行列のセル） |
-| `to_float32_checked` | `float.to_float32_checked(n: Float) -> Option[Float32]` | Rust `try_from` / Swift `init(exactly:)` (F) / OCaml Base `to_int_exn`系 / 他 6 言語 — | 据え置き | R-sized-01（行列のセル） |
-| `to_int8_saturating` | `float.to_int8_saturating(n: Float) -> Int8` | Swift `init(clamping:)` (F) / Kotlin `coerceIn` / 他 7 言語 — | 据え置き | R-L0-32（R-sized-04 の撤去を取り消し） |
-| `to_int16_saturating` | `float.to_int16_saturating(n: Float) -> Int16` | Swift `init(clamping:)` (F) / Kotlin `coerceIn` / 他 7 言語 — | 据え置き | R-L0-32（R-sized-04 の撤去を取り消し） |
-| `to_int32_saturating` | `float.to_int32_saturating(n: Float) -> Int32` | Swift `init(clamping:)` (F) / Kotlin `coerceIn` / 他 7 言語 — | 据え置き | R-L0-32（R-sized-04 の撤去を取り消し） |
-| `to_int64_saturating` | `float.to_int64_saturating(n: Float) -> Int64` | Swift `init(clamping:)` (F) / Kotlin `coerceIn` / 他 7 言語 — | 据え置き | R-L0-32（R-sized-04 の撤去を取り消し） |
-| `to_uint8_saturating` | `float.to_uint8_saturating(n: Float) -> UInt8` | Swift `init(clamping:)` (F) / Kotlin `coerceIn` / 他 7 言語 — | 据え置き | R-L0-32（R-sized-04 の撤去を取り消し） |
-| `to_uint16_saturating` | `float.to_uint16_saturating(n: Float) -> UInt16` | Swift `init(clamping:)` (F) / Kotlin `coerceIn` / 他 7 言語 — | 据え置き | R-L0-32（R-sized-04 の撤去を取り消し） |
-| `to_uint32_saturating` | `float.to_uint32_saturating(n: Float) -> UInt32` | Swift `init(clamping:)` (F) / Kotlin `coerceIn` / 他 7 言語 — | 据え置き | R-L0-32（R-sized-04 の撤去を取り消し） |
-| `to_uint64_saturating` | `float.to_uint64_saturating(n: Float) -> UInt64` | Swift `init(clamping:)` (F) / Kotlin `coerceIn` / 他 7 言語 — | 据え置き | R-L0-32（R-sized-04 の撤去を取り消し） |
-| `to_int_checked` | （追加）`float.to_int_checked(x: Float) -> Option[Int]` | Rust `try_from` / Swift `init(exactly:)` (F) / OCaml Base `to_int_exn`系 / 他 6 言語 — | 追加 | R-sized-01 |
+| `to_int8_checked` | `float.to_int8_checked(n: Float) -> Option[Int8]` | Rust `try_from` / Swift `init(exactly:)` (F) / OCaml Base `to_int_exn`系 / 他 6 言語 — | 撤去（→ `int8.from_checked`） | R-L0-40 |
+| `to_int16_checked` | `float.to_int16_checked(n: Float) -> Option[Int16]` | Rust `try_from` / Swift `init(exactly:)` (F) / OCaml Base `to_int_exn`系 / 他 6 言語 — | 撤去（→ `int16.from_checked`） | R-L0-40 |
+| `to_int32_checked` | `float.to_int32_checked(n: Float) -> Option[Int32]` | Rust `try_from` / Swift `init(exactly:)` (F) / OCaml Base `to_int_exn`系 / 他 6 言語 — | 撤去（→ `int32.from_checked`） | R-L0-40 |
+| `to_int64_checked` | `float.to_int64_checked(n: Float) -> Option[Int64]` | Rust `try_from` / Swift `init(exactly:)` (F) / OCaml Base `to_int_exn`系 / 他 6 言語 — | 撤去（→ `int64.from_checked`） | R-L0-40 |
+| `to_uint8_checked` | `float.to_uint8_checked(n: Float) -> Option[UInt8]` | Rust `try_from` / Swift `init(exactly:)` (F) / OCaml Base `to_int_exn`系 / 他 6 言語 — | 撤去（→ `uint8.from_checked`） | R-L0-40 |
+| `to_uint16_checked` | `float.to_uint16_checked(n: Float) -> Option[UInt16]` | Rust `try_from` / Swift `init(exactly:)` (F) / OCaml Base `to_int_exn`系 / 他 6 言語 — | 撤去（→ `uint16.from_checked`） | R-L0-40 |
+| `to_uint32_checked` | `float.to_uint32_checked(n: Float) -> Option[UInt32]` | Rust `try_from` / Swift `init(exactly:)` (F) / OCaml Base `to_int_exn`系 / 他 6 言語 — | 撤去（→ `uint32.from_checked`） | R-L0-40 |
+| `to_uint64_checked` | `float.to_uint64_checked(n: Float) -> Option[UInt64]` | Rust `try_from` / Swift `init(exactly:)` (F) / OCaml Base `to_int_exn`系 / 他 6 言語 — | 撤去（→ `uint64.from_checked`） | R-L0-40 |
+| `to_float32_checked` | `float.to_float32_checked(n: Float) -> Option[Float32]` | Rust `try_from` / Swift `init(exactly:)` (F) / OCaml Base `to_int_exn`系 / 他 6 言語 — | 撤去（→ `float32.from_checked`） | R-L0-40 |
+| `to_int8_saturating` | `float.to_int8_saturating(n: Float) -> Int8` | Swift `init(clamping:)` (F) / Kotlin `coerceIn` / 他 7 言語 — | 撤去（→ `int8.from_saturating`） | R-L0-40 |
+| `to_int16_saturating` | `float.to_int16_saturating(n: Float) -> Int16` | Swift `init(clamping:)` (F) / Kotlin `coerceIn` / 他 7 言語 — | 撤去（→ `int16.from_saturating`） | R-L0-40 |
+| `to_int32_saturating` | `float.to_int32_saturating(n: Float) -> Int32` | Swift `init(clamping:)` (F) / Kotlin `coerceIn` / 他 7 言語 — | 撤去（→ `int32.from_saturating`） | R-L0-40 |
+| `to_int64_saturating` | `float.to_int64_saturating(n: Float) -> Int64` | Swift `init(clamping:)` (F) / Kotlin `coerceIn` / 他 7 言語 — | 撤去（→ `int64.from_saturating`） | R-L0-40 |
+| `to_uint8_saturating` | `float.to_uint8_saturating(n: Float) -> UInt8` | Swift `init(clamping:)` (F) / Kotlin `coerceIn` / 他 7 言語 — | 撤去（→ `uint8.from_saturating`） | R-L0-40 |
+| `to_uint16_saturating` | `float.to_uint16_saturating(n: Float) -> UInt16` | Swift `init(clamping:)` (F) / Kotlin `coerceIn` / 他 7 言語 — | 撤去（→ `uint16.from_saturating`） | R-L0-40 |
+| `to_uint32_saturating` | `float.to_uint32_saturating(n: Float) -> UInt32` | Swift `init(clamping:)` (F) / Kotlin `coerceIn` / 他 7 言語 — | 撤去（→ `uint32.from_saturating`） | R-L0-40 |
+| `to_uint64_saturating` | `float.to_uint64_saturating(n: Float) -> UInt64` | Swift `init(clamping:)` (F) / Kotlin `coerceIn` / 他 7 言語 — | 撤去（→ `uint64.from_saturating`） | R-L0-40 |
 | `from_bits` | （追加）`float.from_bits(bits: Int) -> Float` | Rust `f64::from_bits` (F) / Go `math.Float64frombits` / Kotlin `Double.fromBits` / Swift `Double(bitPattern:)` | 追加 | R-float-02 |
 | `trunc` | （追加）`float.trunc(n: Float) -> Float` | Rust `trunc` (F) / Go `math.Trunc` / Python `math.trunc` / JS `Math.trunc` / OCaml `trunc` (F) / Kotlin `truncate` / Swift `rounded(.towardZero)` | 追加 | R-float-04 |
 | `is_finite` | （追加）`float.is_finite(n: Float) -> Bool` | Rust `is_finite` (F) / Python `math.isfinite` / JS `Number.isFinite` / OCaml `is_finite` (F) / Kotlin `isFinite` / Swift `isFinite` | 追加 | R-float-04 |
@@ -208,4 +207,5 @@
 | `max_value` | （追加）`float.max_value() -> Float` | Rust `MAX` (F) / Go `math.MaxFloat64` / JS `Number.MAX_VALUE` / OCaml `max_float` (F) / Kotlin `MAX_VALUE` / Swift `.greatestFiniteMagnitude` | 追加 | R-float-03 |
 | `min_value` | （追加）`float.min_value() -> Float` | Rust `MIN`（最も小さい有限値）(F) / Swift `-.greatestFiniteMagnitude` / ※ Kotlin・JS の `MIN_VALUE` は最小の正の数 | 追加 | R-float-03 |
 | `compare` | （追加）`float.compare(a: Float, b: Float) -> Int`（IEEE totalOrder） | Rust `total_cmp` (F) / Go `cmp.Compare` / Gleam `compare` (F) / OCaml `compare` (F) / Kotlin `compareTo` / Swift `isTotallyOrdered` | 追加 | R-sized-02 |
-| `to_int_saturating` | （追加）`float.to_int_saturating(x: Float) -> Int` | Rust `as` / Swift `init(clamping:)` 相当 | 追加 | R-L0-32 |
+| `from` | （追加）`float.from[S: Numeric](x: S) -> Float` | Rust `From`・`as` / Swift `init(_:)` / Python `int(x)` | 追加 | R-L0-40 |
+| `from_checked` | （追加）`float.from_checked[S: Numeric](x: S) -> Float?` | Rust `TryFrom` / Swift `init(exactly:)` | 追加 | R-L0-40 |

@@ -283,7 +283,7 @@
 
 ### R-bytes-20 `first`・`last`・`pop` を足す — ○ 採用
 
-- いま: bytes は `get`・`push` を持つのに、`first`・`last`・`pop` がありません。list（`first`・`last`・`pop`）と deque（`first`・`last`・`pop_back`）から類推すると E002 になります。
+- いま: bytes は `get`・`push` を持つのに、`first`・`last`・`pop` がありません。list（`first`・`last`・`pop`）と deque（`first`・`last`・`pop`）から類推すると E002 になります。
 - 案: `fn bytes.first(b: Bytes) -> Int?`、`fn bytes.last(b: Bytes) -> Int?`、`fn bytes.pop(mut b: Bytes) -> Int?`。
 - 根拠の L0 規則: R-L0-12（列の型は同じ綴りの関数を持つ）、R-L0-06（失敗しうる取り出しは無印で Option）。
 - (a) Rust `Vec<u8>` の `first`・`last`・`pop`、Python `bytearray.pop`、Kotlin `ByteArray.first`/`lastOrNull`、Swift `Data.first`/`last`/`popLast`。
@@ -330,9 +330,26 @@
 
 ### R-bytes-26 `bytes.get_u8` と `get`、`append_u8` と `push` を 1 つにする — × 不採用（役割の違いを明記）
 
-- 理由: 2 つは結果が同じですが、属する族が違います。`get`・`push` は入れ物の族（`list.get`・`deque.push_back` と同じ形）、`get_u8`・`append_u8` は符号化の族（`get_u16_le`・`append_u16_le` … の 1 バイトのセル）です。符号化の族から `u8` だけを抜くと、`get_<型>` の行列に穴ができ、規則から推して書いた `get_u8` が外れます（R-bytes-25）。
+- 理由: 2 つは結果が同じですが、属する族が違います。`get`・`push` は入れ物の族（`list.get`・`deque.push` と同じ形）、`get_u8`・`append_u8` は符号化の族（`get_u16_le`・`append_u16_le` … の 1 バイトのセル）です。符号化の族から `u8` だけを抜くと、`get_<型>` の行列に穴ができ、規則から推して書いた `get_u8` が外れます（R-bytes-25）。
 - 約束: 2 つは定義として同じ値を返します（`get_u8(b, i) == get(b, i)`、`append_u8` と `push` は同じ書き足し）。行列のゲートで、この一致も確かめます。
 - issue: なし
+
+### R-bytes-27 `bytes` に `Text` の要件をそろえる — ○ 採用
+
+- 内容: `last_index_of`・`count_matches`・`replace`・`replace_first`・`strip_prefix`・`strip_suffix` を置きます。形と意味は `string` の同じ関数と同じで、位置はバイト単位です。
+- 理由: protocol の階層で `bytes` は `string` と同じ `Text`（部分の列で探す・置き換える）です。Go の `bytes` パッケージ（`LastIndex`・`ReplaceAll`・`CutPrefix`）、Python の `bytes`（`rfind`・`replace`・`removeprefix`）、Rust のスライス（`strip_prefix`）、Swift の `Collection`（`trimmingPrefix`・`replacing`）が持っています。
+- (d) 追加 6。
+- issue: #4012
+
+### R-bytes-28 `bytes.new(len)` を `bytes.zeros(n)` に改名し、`bytes.new()` を空のバイト列にする — ○ 採用
+
+- いま: 入れ物の `new()` は空の入れ物を作ります（`list`・`string`・`deque`・`set`・`heap`・`map`）。`bytes.new(len)` だけが「長さ `len` の 0 で埋めたバイト列」を作り、引数の数が違います。protocol の階層の `Container.new` の形に合いません。
+- 案: いまの関数を `bytes.zeros(n: Int) -> Bytes` に改名し（`matrix.zeros` と同じ綴り）、`bytes.new() -> Bytes` を空のバイト列にします。
+- (a) 0 で埋めた長さ n のバッファは、どの言語も「長さを渡す」形です（Rust `vec![0; n]`、Go `make([]byte, n)`、Python `bytes(n)`、JS `new Uint8Array(n)`、Swift `Data(count: n)`）。空のバッファは別の形です（Rust `Vec::new()`、Swift `Data()`）。
+- 名前の使い直し（R-L0-43 の 2）: 古い `bytes.new(10)` は引数の数が合わず型エラーになるので、黙って意味が変わりません。
+- (d) 改名と追加です。`almide fix` が `bytes.new(n)` を `bytes.zeros(n)` に書き換えます。
+- issue: #4012
+
 ## L3: 関数表
 
 （146 関数 + 追加 13。判定の内訳: 据え置き 58・改名 53・撤去 31・意味変更 4・追加 13。改名の `put_` 15 件は、R-bytes-11 で範囲外の挙動も変わります）
@@ -379,7 +396,7 @@
 | `len` | `bytes.len(b: Bytes) -> Int` | Rust len / Go len / Python len / JS length / Gleam byte_size / OCaml length | 据え置き | — |
 | `lines` | `bytes.lines(b: Bytes) -> List[Bytes]` | Go bufio.ScanLines / Python splitlines | 撤去（→ `string.lines(bytes.to_string(b)!)` か `bytes.split`） | R-bytes-17 |
 | `map_each` | `bytes.map_each(b: Bytes, f: (Int) -> Int) -> Bytes` | Kotlin map / Python bytes(map(f, b)) / Almide list.map | 改名 → `map` | R-bytes-08 |
-| `new` | `bytes.new(len: Int) -> Bytes` | Rust vec![0; n] / Go make([]byte, n) / Python bytes(n) / JS new Uint8Array(n) / OCaml Bytes.make (F) / Kotlin ByteArray(n) | 据え置き | — |
+| `new` | `bytes.new(len: Int) -> Bytes` | Rust vec![0; n] / Go make([]byte, n) / Python bytes(n) / JS new Uint8Array(n) / OCaml Bytes.make (F) / Kotlin ByteArray(n) | 改名 → `zeros` | R-bytes-28 |
 | `pad_left` | `bytes.pad_left(b: Bytes, target_len: Int, val: Int) -> Bytes` | JS padStart / Almide string.pad_start | 改名 → `pad_start` | R-bytes-08 |
 | `pad_right` | `bytes.pad_right(b: Bytes, target_len: Int, val: Int) -> Bytes` | JS padEnd / Almide string.pad_end | 改名 → `pad_end` | R-bytes-08 |
 | `push` | `bytes.push(mut b: Bytes, val: Int) -> Unit` | Rust Vec::push / Python bytearray.append / Almide list.push | 据え置き | R-bytes-02 |
@@ -514,6 +531,42 @@
 | `last` | （追加）`bytes.last(b: Bytes) -> Option[Int]` | Rust last / Swift last | 追加 | R-bytes-20 |
 | `pop` | （追加）`bytes.pop(mut b: Bytes) -> Option[Int]` | Rust Vec::pop / Python bytearray.pop | 追加 | R-bytes-20 |
 | `get_u8` | （追加）`bytes.get_u8(b: Bytes, pos: Int) -> Option[Int]` | Go `LittleEndian.Uint8` / JS `getUint8` / OCaml `get_uint8` | 追加 | R-bytes-25 |
+| `enumerate` | （追加）`bytes.enumerate(b: Bytes) -> List[(Int, Int)]` | Swift `enumerated` / Rust `enumerate` | 追加 | R-L0-42 |
+| `zip` | （追加）`bytes.zip(b: Bytes, ys: List[B]) -> List[(Int, B)]` | Swift `zip` / Rust `zip` | 追加 | R-L0-42 |
+| `zip_with` | （追加）`bytes.zip_with(b: Bytes, ys: List[B], f: (Int, B) -> C) -> List[C]` | Kotlin `zip(other, f)` | 追加 | R-L0-42 |
+| `filter_map` | （追加）`bytes.filter_map(b: Bytes, f: (Int) -> B?) -> List[B]` | Swift `compactMap` / Rust `filter_map` | 追加 | R-L0-42 |
+| `find_map` | （追加）`bytes.find_map(b: Bytes, f: (Int) -> B?) -> B?` | Rust `find_map` | 追加 | R-L0-42 |
+| `reduce` | （追加）`bytes.reduce(b: Bytes, f: (Int, Int) -> Int) -> Int?` | Swift `reduce` / Rust `reduce` | 追加 | R-L0-42 |
+| `scan` | （追加）`bytes.scan(b: Bytes, init: B, f: (B, Int) -> B) -> List[B]` | Rust `scan` / Kotlin `runningFold` | 追加 | R-L0-42 |
+| `partition` | （追加）`bytes.partition(b: Bytes, f: (Int) -> Bool) -> (List[Int], List[Int])` | Kotlin `partition` | 追加 | R-L0-42 |
+| `group_by` | （追加）`bytes.group_by(b: Bytes, f: (Int) -> B) -> Map[B, List[Int]]` | Kotlin `groupBy` / Swift `Dictionary(grouping:)` | 追加 | R-L0-42 |
+| `sort` | （追加）`bytes.sort(b: Bytes) -> List[Int]` | Swift `sorted()` | 追加 | R-L0-42 |
+| `sort_by` | （追加）`bytes.sort_by(b: Bytes, f: (Int) -> B) -> List[Int]` | Kotlin `sortedBy` | 追加 | R-L0-42 |
+| `sort_with` | （追加）`bytes.sort_with(b: Bytes, cmp: (Int, Int) -> Int) -> List[Int]` | Swift `sorted(by:)` | 追加 | R-L0-42 |
+| `min` | （追加）`bytes.min(b: Bytes) -> Int?` | Swift `min()` / Rust `min` | 追加 | R-L0-42 |
+| `max` | （追加）`bytes.max(b: Bytes) -> Int?` | Swift `max()` / Rust `max` | 追加 | R-L0-42 |
+| `min_by` | （追加）`bytes.min_by(b: Bytes, f: (Int) -> K) -> Int?` | Kotlin `minByOrNull` | 追加 | R-L0-42 |
+| `max_by` | （追加）`bytes.max_by(b: Bytes, f: (Int) -> K) -> Int?` | Kotlin `maxByOrNull` | 追加 | R-L0-42 |
+| `min_with` | （追加）`bytes.min_with(b: Bytes, cmp: (Int, Int) -> Int) -> Int?` | Swift `min(by:)` | 追加 | R-L0-42 |
+| `max_with` | （追加）`bytes.max_with(b: Bytes, cmp: (Int, Int) -> Int) -> Int?` | Swift `max(by:)` | 追加 | R-L0-42 |
+| `sum` | （追加）`bytes.sum(b: Bytes) -> Int` | Rust `sum` / Kotlin `sum` | 追加 | R-L0-42 |
+| `product` | （追加）`bytes.product(b: Bytes) -> Int` | Rust `product` | 追加 | R-L0-42 |
+| `find_index` | （追加）`bytes.find_index(b: Bytes, f: (Int) -> Bool) -> Int?` | Swift `firstIndex(where:)` | 追加 | R-L0-42 |
+| `take_while` | （追加）`bytes.take_while(b: Bytes, f: (Int) -> Bool) -> Bytes` | Swift `prefix(while:)` | 追加 | R-L0-42 |
+| `drop_while` | （追加）`bytes.drop_while(b: Bytes, f: (Int) -> Bool) -> Bytes` | Swift `drop(while:)` | 追加 | R-L0-42 |
+| `window` | （追加）`bytes.window(b: Bytes, n: Int) -> List[Bytes]` | Kotlin `windowed` | 追加 | R-L0-42 |
+| `split_at` | （追加）`bytes.split_at(b: Bytes, n: Int) -> (Bytes, Bytes)` | Rust `split_at` | 追加 | R-L0-42 |
+| `dedup` | （追加）`bytes.dedup(b: Bytes) -> Bytes` | Rust `dedup` | 追加 | R-L0-42 |
+| `intersperse` | （追加）`bytes.intersperse(b: Bytes, sep: Int) -> Bytes` | Rust `intersperse` | 追加 | R-L0-42 |
+| `unique` | （追加）`bytes.unique(b: Bytes) -> Bytes` | Kotlin `distinct` | 追加 | R-L0-42 |
+| `unique_by` | （追加）`bytes.unique_by(b: Bytes, f: (Int) -> K) -> Bytes` | Kotlin `distinctBy` | 追加 | R-L0-42 |
+| `last_index_of` | （追加）`bytes.last_index_of(b: Bytes, needle: Bytes) -> Int?` | Go `bytes.LastIndex` / Python `rfind` | 追加 | R-bytes-27 |
+| `replace` | （追加）`bytes.replace(b: Bytes, from: Bytes, to: Bytes) -> Bytes` | Go `bytes.ReplaceAll` / Python `replace` | 追加 | R-bytes-27 |
+| `replace_first` | （追加）`bytes.replace_first(b: Bytes, from: Bytes, to: Bytes) -> Bytes` | Go `bytes.Replace(…, 1)` / Python `replace(…, 1)` | 追加 | R-bytes-27 |
+| `strip_prefix` | （追加）`bytes.strip_prefix(b: Bytes, prefix: Bytes) -> Bytes?` | Rust `strip_prefix` / Go `CutPrefix` | 追加 | R-bytes-27 |
+| `strip_suffix` | （追加）`bytes.strip_suffix(b: Bytes, suffix: Bytes) -> Bytes?` | Rust `strip_suffix` / Go `CutSuffix` | 追加 | R-bytes-27 |
+| `count_matches` | （追加）`bytes.count_matches(b: Bytes, needle: Bytes) -> Int` | Go `bytes.Count` / Python `count` | 追加 | R-bytes-27 |
+| `new` | （追加）`bytes.new() -> Bytes` | Rust `Vec::new` / Swift `Data()` / Go `[]byte{}` | 追加 | R-bytes-28 |
 
 ## L0 への差し戻し（処理済み）
 

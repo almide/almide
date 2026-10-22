@@ -186,6 +186,14 @@ map.merge(a, b)             // 同じキーは b が勝つ。順序は a、そ�
 - (d) 意味変更。いまは何もせずに返している呼び出しが abort になるので、epoch 15 の `breaks` に入れます。
 - issue: #3990
 
+### R-map-09 `map` を `(K, V)` の組の `Container` にする — ○ 採用
+
+- いま: `map.filter`・`any`・`all`・`count`・`find` の callback は 2 引数 `(K, V) -> Bool`、`fold` は 3 引数 `(A, K, V) -> A` です。ほかの入れ物の callback は要素 1 つを受け取るので、`map` は protocol の階層の `Container`・`Sequence` に入れませんでした。
+- 案: callback を、要素 `(K, V)` の組 1 つを受け取る形にします（`filter(m, f: ((K, V)) -> Bool)`、`fold(m, init: A, f: (A, (K, V)) -> A)`）。`map.to_list`・`from_list` はすでに組の列です。言語の規則として「組 1 つを受け取る関数の場所に、組の要素の数だけ引数を持つ無名関数を書ける」を入れるので、`map.filter(m, (k, v) => v > 0)` はそのまま通ります（Swift の `dict.filter { key, value in … }` と同じ規則）。
+- (a) Swift の `Dictionary` は `(key, value)` の組の `Collection` です。Rust の `HashMap` の反復、Kotlin の `Map.Entry`、Python の `items()` も組を 1 つずつ渡します。
+- (d) 型の変更です。2 引数の無名関数はそのまま通ります。`fold` の 3 引数の無名関数は、`almide fix` が `(acc, (k, v)) =>` に書き換えます。
+- issue: #4004
+
 ## L3: 関数表
 
 使用数は 判定が据え置き以外の行だけに書いています（R-map-01、R-map-02 を参照）。
@@ -206,17 +214,32 @@ map.merge(a, b)             // 同じキーは b が勝つ。順序は a、そ�
 | `map.is_empty` | `map.is_empty(m: Map[K, V]) -> Bool` | Rust `is_empty` / Gleam `is_empty` / OCaml `is_empty` / Kotlin `isEmpty` | 据え置き | — |
 | `map.from_list` | `map.from_list(pairs: List[(K, V)]) -> Map[K, V]` | Gleam `from_list` / OCaml `of_list` / Rust `from_iter` / Go `maps.Collect` | 据え置き | — (R-L0-07) |
 | `map.map` | `map.map(m: Map[K, V], f: (V) -> B) -> Map[K, B]` | Gleam `map_values` / Kotlin・Swift `mapValues` / OCaml `map` | 据え置き | R-map-04 |
-| `map.filter` | `map.filter(m: Map[K, V], f: (K, V) -> Bool) -> Map[K, V]` | Gleam `filter` / Elixir `filter` / OCaml `filter` / Kotlin `filter` / Rust `retain` | 据え置き | R-map-06 |
-| `map.fold` | `map.fold(m: Map[K, V], init: A, f: (A, K, V) -> A) -> A` | Gleam `fold` / OCaml `fold` / Elixir `Enum.reduce` | 据え置き | R-map-06 |
-| `map.any` | `map.any(m: Map[K, V], f: (K, V) -> Bool) -> Bool` | Kotlin `any` / OCaml `exists` / Rust `iter().any` | 据え置き | R-map-06 |
-| `map.all` | `map.all(m: Map[K, V], f: (K, V) -> Bool) -> Bool` | Kotlin `all` / OCaml `for_all` / Rust `iter().all` | 据え置き | R-map-06 |
-| `map.count` | `map.count(m: Map[K, V], f: (K, V) -> Bool) -> Int` | Kotlin `count` / Elixir `Enum.count/2` | 据え置き | R-map-06 |
-| `map.find` | `map.find(m: Map[K, V], f: (K, V) -> Bool) -> Option[(K, V)]` | Rust `iter().find` / Elixir `Enum.find` / Swift `first(where:)` | 据え置き | R-map-06 |
+| `map.filter` | `map.filter(m: Map[K, V], f: ((K, V)) -> Bool) -> Map[K, V]` | Gleam `filter` / Elixir `filter` / OCaml `filter` / Kotlin `filter` / Rust `retain` | 意味変更（callback は組 1 つ。`(k, v) =>` はそのまま書ける） | R-map-09 |
+| `map.fold` | `map.fold(m: Map[K, V], init: A, f: (A, (K, V)) -> A) -> A` | Gleam `fold` / OCaml `fold` / Elixir `Enum.reduce` | 意味変更（callback の 2 つめは組。`almide fix` が書き換える） | R-map-09 |
+| `map.any` | `map.any(m: Map[K, V], f: ((K, V)) -> Bool) -> Bool` | Kotlin `any` / OCaml `exists` / Rust `iter().any` | 意味変更（callback は組 1 つ。`(k, v) =>` はそのまま書ける） | R-map-09 |
+| `map.all` | `map.all(m: Map[K, V], f: ((K, V)) -> Bool) -> Bool` | Kotlin `all` / OCaml `for_all` / Rust `iter().all` | 意味変更（callback は組 1 つ。`(k, v) =>` はそのまま書ける） | R-map-09 |
+| `map.count` | `map.count(m: Map[K, V], f: ((K, V)) -> Bool) -> Int` | Kotlin `count` / Elixir `Enum.count/2` | 意味変更（callback は組 1 つ。`(k, v) =>` はそのまま書ける） | R-map-09 |
+| `map.find` | `map.find(m: Map[K, V], f: ((K, V)) -> Bool) -> Option[(K, V)]` | Rust `iter().find` / Elixir `Enum.find` / Swift `first(where:)` | 意味変更（callback は組 1 つ。`(k, v) =>` はそのまま書ける） | R-map-09 |
 | `map.update` | `map.update(m: Map[K, V], key: K, f: (V) -> V) -> Map[K, V]` | Rust `entry().and_modify` / OCaml `update` / Elixir `update!`（無ければ例外） | 意味変更（キーが無ければ abort） | R-map-08 |
 | `map.upsert` | `map.upsert(m: Map[K, V], key: K, init: V, f: (V) -> V) -> Map[K, V]` | Elixir `update/4`（同じ意味）/ Rust `entry().and_modify(f).or_insert(v)` / Gleam `upsert`（`fn(Option(v))`） | 据え置き | — |
 | `map.insert` | `map.insert(mut m: Map[K, V], key: K, value: V) -> Unit` | Rust `insert` / JS `set` / Python `d[k] = v`（どれも in-place） | 撤去 | R-map-01 |
 | `map.delete` | `map.delete(mut m: Map[K, V], key: K) -> Unit` | Rust `remove` / JS `delete` / Go `delete`（in-place） | 撤去 | R-map-01 |
 | `map.clear` | `map.clear(mut m: Map[K, V]) -> Unit` | Rust `clear` / Python `clear` / JS `clear` / Kotlin `clear` | 据え置き | — (R-L0-04 の動詞) |
+| `map.enumerate` | （追加）`map.enumerate(m: Map[K, V]) -> List[(Int, (K, V))]` | Swift `enumerated` / Rust `enumerate` | 追加 | R-L0-42 |
+| `map.zip` | （追加）`map.zip(m: Map[K, V], ys: List[B]) -> List[((K, V), B)]` | Swift `zip` / Rust `zip` | 追加 | R-L0-42 |
+| `map.zip_with` | （追加）`map.zip_with(m: Map[K, V], ys: List[B], f: ((K, V), B) -> C) -> List[C]` | Kotlin `zip(other, f)` | 追加 | R-L0-42 |
+| `map.filter_map` | （追加）`map.filter_map(m: Map[K, V], f: ((K, V)) -> B?) -> List[B]` | Swift `compactMap` / Rust `filter_map` | 追加 | R-L0-42 |
+| `map.find_map` | （追加）`map.find_map(m: Map[K, V], f: ((K, V)) -> B?) -> B?` | Rust `find_map` | 追加 | R-L0-42 |
+| `map.reduce` | （追加）`map.reduce(m: Map[K, V], f: ((K, V), (K, V)) -> (K, V)) -> (K, V)?` | Swift `reduce` / Rust `reduce` | 追加 | R-L0-42 |
+| `map.scan` | （追加）`map.scan(m: Map[K, V], init: B, f: (B, (K, V)) -> B) -> List[B]` | Rust `scan` / Kotlin `runningFold` | 追加 | R-L0-42 |
+| `map.partition` | （追加）`map.partition(m: Map[K, V], f: ((K, V)) -> Bool) -> (List[(K, V)], List[(K, V)])` | Kotlin `partition` | 追加 | R-L0-42 |
+| `map.group_by` | （追加）`map.group_by(m: Map[K, V], f: ((K, V)) -> B) -> Map[B, List[(K, V)]]` | Kotlin `groupBy` / Swift `Dictionary(grouping:)` | 追加 | R-L0-42 |
+| `map.sort_by` | （追加）`map.sort_by(m: Map[K, V], f: ((K, V)) -> B) -> List[(K, V)]` | Kotlin `sortedBy` | 追加 | R-L0-42 |
+| `map.sort_with` | （追加）`map.sort_with(m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> List[(K, V)]` | Swift `sorted(by:)` | 追加 | R-L0-42 |
+| `map.min_by` | （追加）`map.min_by(m: Map[K, V], f: ((K, V)) -> U) -> (K, V)?` | Kotlin `minByOrNull` | 追加 | R-L0-42 |
+| `map.max_by` | （追加）`map.max_by(m: Map[K, V], f: ((K, V)) -> U) -> (K, V)?` | Kotlin `maxByOrNull` | 追加 | R-L0-42 |
+| `map.min_with` | （追加）`map.min_with(m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> (K, V)?` | Swift `min(by:)` | 追加 | R-L0-42 |
+| `map.max_with` | （追加）`map.max_with(m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> (K, V)?` | Swift `max(by:)` | 追加 | R-L0-42 |
 
 L3 の行数: 25（追加なし）。判定の内訳: 据え置き 22、撤去 3（`get_or`、`insert`、`delete`）。
 
