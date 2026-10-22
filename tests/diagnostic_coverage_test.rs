@@ -39,6 +39,11 @@ const FIXTURE_ALLOWLIST: &[&str] = &[
     // logic is pinned by crates/almide-tools/tests/fmt_corpus_test.rs, which
     // feeds corrupted outputs straight into verify_format (#1464).
     "E054",
+    // E100 (#4008) fires only under `almide check --profile critical`; the
+    // fixture harness runs the plain check, under which the same program is
+    // valid by construction (critical is a subset). Pinned instead by
+    // tests/critical_profile_test.rs (`memory_unsafe_surface_is_refused_under_critical`).
+    "E100",
 ];
 
 fn repo_root() -> PathBuf {

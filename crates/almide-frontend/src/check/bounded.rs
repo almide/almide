@@ -35,6 +35,21 @@ impl Checker {
             return;
         }
         let mut diags: Vec<Diagnostic> = Vec::new();
+        // #4008: an `@extern` fn's body is foreign code — outside the
+        // memory-safety guarantee, so critical refuses the declaration itself.
+        if critical {
+            for decl in &program.decls {
+                if let ast::Decl::Fn { name, extern_attrs, span, .. } = decl {
+                    if !extern_attrs.is_empty() {
+                        diags.push(memory_unsafe_err(
+                            "an `@extern` function is outside the memory-safety guarantee and is not admissible under `--profile critical`",
+                            name.as_str(),
+                            *span,
+                        ));
+                    }
+                }
+            }
+        }
         for decl in &program.decls {
             let ast::Decl::Fn { name, attrs, body: Some(body), span, .. } = decl else {
                 continue;
@@ -107,8 +122,38 @@ const BOUNDED_PURE_MODULES: &[&str] = &[
 /// `prim` is the raw-memory floor; nothing bounded may reach it directly.
 const BOUNDED_DENIED_MODULES: &[&str] = &[
     "env", "fs", "http", "net", "process", "random", "zlib", "datetime", "args",
-    "testing", "fan", "compute", "duration", "prim",
+    "testing", "fan", "compute", "duration", "prim", "ffi",
 ];
+
+/// #4008: the stdlib calls outside the memory-safety guarantee that are not in
+/// `ffi` — the deprecated `bytes` raw-pointer spellings (R-ffi-01, removed in
+/// dialect epoch 16). `--profile critical` refuses these and every `ffi.*`
+/// call with E100, and no `--allow` grants them back.
+pub const MEMORY_UNSAFE_BYTES_FNS: &[&str] =
+    &["as_ptr", "as_mut_ptr", "data_ptr", "from_raw_ptr", "copy_to_ptr"];
+
+/// Is `m.f` outside the memory-safety guarantee (#4008, R-L0-45)?
+pub fn is_memory_unsafe_call(m: &str, f: &str) -> bool {
+    m == "ffi" || (m == "bytes" && MEMORY_UNSAFE_BYTES_FNS.contains(&f))
+}
+
+/// E100 (#4008): a construct outside the memory-safety guarantee under
+/// `--profile critical`. Not an ALS §B rule (E070–E079): the plain `@bounded`
+/// attribute does not raise it; the critical profile does.
+fn memory_unsafe_err(msg: &str, fn_name: &str, span: Option<BSpan>) -> Diagnostic {
+    let mut d = Diagnostic::error(
+        msg.to_string(),
+        "the critical profile admits only code inside the memory-safety guarantee — keep raw-address and foreign code in a module that is not checked with `--profile critical`".to_string(),
+        format!("fn {}()", fn_name),
+    )
+    .with_code("E100");
+    if let Some(s) = span {
+        d.line = Some(s.line);
+        d.col = Some(s.col);
+        d.end_col = Some(s.end_col);
+    }
+    d
+}
 
 /// `--allow` capability names → the modules a grant un-denies (#567). Kept
 /// beside the denied set so a grant cannot name a module the profile never
@@ -869,6 +914,17 @@ impl BoundedCx<'_, '_> {
     /// capability questions, and a module outside the pure set is not a
     /// profile callee. `true` when that settles the call.
     fn member_module_decided(&mut self, call: &ast::Expr, m: &str, f: &str) -> bool {
+        // #4008: outside the memory-safety guarantee — no grant reaches it.
+        if self.checker.profile_critical && is_memory_unsafe_call(m, f) {
+            self.diags.push(memory_unsafe_err(
+                &format!(
+                    "`{m}.{f}` is outside the memory-safety guarantee and is not admissible under `--profile critical`"
+                ),
+                self.fn_name,
+                call.span.or(self.fn_span),
+            ));
+            return true;
+        }
         if m == "io" {
             if self.module_granted("io") {
                 return true;
