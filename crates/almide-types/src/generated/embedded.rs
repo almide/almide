@@ -10889,6 +10889,42 @@ fn count_ones(x: Int16) -> Int = int.pop_count(int.band(int.from_int16(x), 65535
 
 /// The 2 bytes in reverse order (endian flip).
 fn byte_swap(x: Int16) -> Int16 = int.to_int16(int.bshr(int.byte_swap(int.band(int.from_int16(x), 65535)), 48))
+
+
+/// a + b wrapped to 16 bits.
+fn wrap_add(a: Int16, b: Int16) -> Int16 = int.to_int16(int.from_int16(a) + int.from_int16(b))
+
+/// a - b wrapped to 16 bits.
+fn wrap_sub(a: Int16, b: Int16) -> Int16 = int.to_int16(int.from_int16(a) - int.from_int16(b))
+
+/// a * b wrapped to 16 bits.
+fn wrap_mul(a: Int16, b: Int16) -> Int16 = int.to_int16(int.from_int16(a) * int.from_int16(b))
+
+/// The 16 bits of a rotated left by n; n is taken mod 16.
+fn rotate_left(a: Int16, n: Int) -> Int16 = int.to_int16(rotate_bits(int.band(int.from_int16(a), 65535), rotate_count(n)))
+
+/// The 16 bits of a rotated right by n; n is taken mod 16.
+fn rotate_right(a: Int16, n: Int) -> Int16 = int.to_int16(rotate_bits(int.band(int.from_int16(a), 65535), rotate_count(0 - rotate_count(n))))
+
+
+local fn rotate_bits(v: Int, k: Int) -> Int = if k == 0 then v
+else int.bor(int.bshl(v, k), int.bshr(v, 16 - k))
+
+local fn rotate_count(n: Int) -> Int = {
+  let r = n % 16
+  if r < 0 then r + 16 else r
+}
+
+/// Bits needed to hold x; 0 for 0, 16 if negative.
+fn bit_length(x: Int16) -> Int = 64 - int.count_leading_zeros(int.band(int.from_int16(x), 65535))
+
+/// Decimal Int16 from trimmed s; err on junk or outside -32768..32767.
+fn parse(s: String) -> Result[Int16, String] = match int.parse(s) {
+  ok(n) => if n < -32768 then err("number too small to fit in target type")
+  else if n > 32767 then err("number too large to fit in target type")
+  else ok(int.to_int16(n)),
+  err(e) => err(e),
+}
 "#;
 pub const SRC_INT16_CONVERT: &str = r#"
 
@@ -11147,6 +11183,42 @@ fn count_ones(x: Int32) -> Int = int.pop_count(int.band(int.from_int32(x), 42949
 
 /// The 4 bytes in reverse order (endian flip).
 fn byte_swap(x: Int32) -> Int32 = int.to_int32(int.bshr(int.byte_swap(int.band(int.from_int32(x), 4294967295)), 32))
+
+
+/// a + b wrapped to 32 bits.
+fn wrap_add(a: Int32, b: Int32) -> Int32 = int.to_int32(int.from_int32(a) + int.from_int32(b))
+
+/// a - b wrapped to 32 bits.
+fn wrap_sub(a: Int32, b: Int32) -> Int32 = int.to_int32(int.from_int32(a) - int.from_int32(b))
+
+/// a * b wrapped to 32 bits.
+fn wrap_mul(a: Int32, b: Int32) -> Int32 = int.to_int32(int.from_int32(a) * int.from_int32(b))
+
+/// The 32 bits of a rotated left by n; n is taken mod 32.
+fn rotate_left(a: Int32, n: Int) -> Int32 = int.to_int32(rotate_bits(int.band(int.from_int32(a), 4294967295), rotate_count(n)))
+
+/// The 32 bits of a rotated right by n; n is taken mod 32.
+fn rotate_right(a: Int32, n: Int) -> Int32 = int.to_int32(rotate_bits(int.band(int.from_int32(a), 4294967295), rotate_count(0 - rotate_count(n))))
+
+
+local fn rotate_bits(v: Int, k: Int) -> Int = if k == 0 then v
+else int.bor(int.bshl(v, k), int.bshr(v, 32 - k))
+
+local fn rotate_count(n: Int) -> Int = {
+  let r = n % 32
+  if r < 0 then r + 32 else r
+}
+
+/// Bits needed to hold x; 0 for 0, 32 if negative.
+fn bit_length(x: Int32) -> Int = 64 - int.count_leading_zeros(int.band(int.from_int32(x), 4294967295))
+
+/// Decimal Int32 from trimmed s; err on junk or outside -2147483648..2147483647.
+fn parse(s: String) -> Result[Int32, String] = match int.parse(s) {
+  ok(n) => if n < -2147483648 then err("number too small to fit in target type")
+  else if n > 2147483647 then err("number too large to fit in target type")
+  else ok(int.to_int32(n)),
+  err(e) => err(e),
+}
 "#;
 pub const SRC_INT32_CONVERT: &str = r#"
 
@@ -11427,6 +11499,40 @@ fn count_ones(x: Int64) -> Int = int.pop_count(int.from_int64(x))
 
 /// The 8 bytes in reverse order (endian flip).
 fn byte_swap(x: Int64) -> Int64 = int.to_int64(int.byte_swap(int.from_int64(x)))
+
+
+/// a + b wrapped to 64 bits.
+fn wrap_add(a: Int64, b: Int64) -> Int64 = int.to_int64(int.from_int64(a) + int.from_int64(b))
+
+/// a - b wrapped to 64 bits.
+fn wrap_sub(a: Int64, b: Int64) -> Int64 = int.to_int64(int.from_int64(a) - int.from_int64(b))
+
+/// a * b wrapped to 64 bits.
+fn wrap_mul(a: Int64, b: Int64) -> Int64 = int.to_int64(int.from_int64(a) * int.from_int64(b))
+
+/// The 64 bits of a rotated left by n; n is taken mod 64.
+fn rotate_left(a: Int64, n: Int) -> Int64 = int.to_int64(rotate_bits(int.from_int64(a), rotate_count(n)))
+
+/// The 64 bits of a rotated right by n; n is taken mod 64.
+fn rotate_right(a: Int64, n: Int) -> Int64 = int.to_int64(rotate_bits(int.from_int64(a), rotate_count(0 - rotate_count(n))))
+
+
+local fn rotate_bits(v: Int, k: Int) -> Int = if k == 0 then v
+else int.bor(int.bshl(v, k), int.band(int.bshr(v, 64 - k), int.bnot(int.bshl(-1, k))))
+
+local fn rotate_count(n: Int) -> Int = {
+  let r = n % 64
+  if r < 0 then r + 64 else r
+}
+
+/// Bits needed to hold x; 0 for 0, 64 if negative.
+fn bit_length(x: Int64) -> Int = 64 - int.count_leading_zeros(int.from_int64(x))
+
+/// Decimal Int64 from trimmed s; err on junk or overflow.
+fn parse(s: String) -> Result[Int64, String] = match int.parse(s) {
+  ok(n) => ok(int.to_int64(n)),
+  err(e) => err(e),
+}
 "#;
 pub const SRC_INT64_CONVERT: &str = r#"
 
@@ -11702,6 +11808,42 @@ fn count_ones(x: Int8) -> Int = int.pop_count(int.band(int.from_int8(x), 255))
 
 /// The bytes in reverse order; one byte, so x itself.
 fn byte_swap(x: Int8) -> Int8 = x
+
+
+/// a + b wrapped to 8 bits.
+fn wrap_add(a: Int8, b: Int8) -> Int8 = int.to_int8(int.from_int8(a) + int.from_int8(b))
+
+/// a - b wrapped to 8 bits.
+fn wrap_sub(a: Int8, b: Int8) -> Int8 = int.to_int8(int.from_int8(a) - int.from_int8(b))
+
+/// a * b wrapped to 8 bits.
+fn wrap_mul(a: Int8, b: Int8) -> Int8 = int.to_int8(int.from_int8(a) * int.from_int8(b))
+
+/// The 8 bits of a rotated left by n; n is taken mod 8.
+fn rotate_left(a: Int8, n: Int) -> Int8 = int.to_int8(rotate_bits(int.band(int.from_int8(a), 255), rotate_count(n)))
+
+/// The 8 bits of a rotated right by n; n is taken mod 8.
+fn rotate_right(a: Int8, n: Int) -> Int8 = int.to_int8(rotate_bits(int.band(int.from_int8(a), 255), rotate_count(0 - rotate_count(n))))
+
+
+local fn rotate_bits(v: Int, k: Int) -> Int = if k == 0 then v
+else int.bor(int.bshl(v, k), int.bshr(v, 8 - k))
+
+local fn rotate_count(n: Int) -> Int = {
+  let r = n % 8
+  if r < 0 then r + 8 else r
+}
+
+/// Bits needed to hold x; 0 for 0, 8 if negative.
+fn bit_length(x: Int8) -> Int = 64 - int.count_leading_zeros(int.band(int.from_int8(x), 255))
+
+/// Decimal Int8 from trimmed s; err on junk or outside -128..127.
+fn parse(s: String) -> Result[Int8, String] = match int.parse(s) {
+  ok(n) => if n < -128 then err("number too small to fit in target type")
+  else if n > 127 then err("number too large to fit in target type")
+  else ok(int.to_int8(n)),
+  err(e) => err(e),
+}
 "#;
 pub const SRC_INT8_CONVERT: &str = r#"
 
@@ -37919,6 +38061,42 @@ fn count_ones(x: UInt16) -> Int = int.pop_count(int.from_uint16(x))
 
 /// The 2 bytes in reverse order (endian flip).
 fn byte_swap(x: UInt16) -> UInt16 = int.to_uint16(int.bshr(int.byte_swap(int.from_uint16(x)), 48))
+
+
+/// a + b wrapped to 16 bits.
+fn wrap_add(a: UInt16, b: UInt16) -> UInt16 = int.to_uint16(int.from_uint16(a) + int.from_uint16(b))
+
+/// a - b wrapped to 16 bits.
+fn wrap_sub(a: UInt16, b: UInt16) -> UInt16 = int.to_uint16(int.from_uint16(a) - int.from_uint16(b))
+
+/// a * b wrapped to 16 bits.
+fn wrap_mul(a: UInt16, b: UInt16) -> UInt16 = int.to_uint16(int.from_uint16(a) * int.from_uint16(b))
+
+/// The 16 bits of a rotated left by n; n is taken mod 16.
+fn rotate_left(a: UInt16, n: Int) -> UInt16 = int.to_uint16(rotate_bits(int.from_uint16(a), rotate_count(n)))
+
+/// The 16 bits of a rotated right by n; n is taken mod 16.
+fn rotate_right(a: UInt16, n: Int) -> UInt16 = int.to_uint16(rotate_bits(int.from_uint16(a), rotate_count(0 - rotate_count(n))))
+
+
+local fn rotate_bits(v: Int, k: Int) -> Int = if k == 0 then v
+else int.bor(int.bshl(v, k), int.bshr(v, 16 - k))
+
+local fn rotate_count(n: Int) -> Int = {
+  let r = n % 16
+  if r < 0 then r + 16 else r
+}
+
+/// Bits needed to hold x; 0 for 0.
+fn bit_length(x: UInt16) -> Int = 64 - int.count_leading_zeros(int.from_uint16(x))
+
+/// Decimal UInt16 from trimmed s; err on junk, a sign of -, or above 65535.
+fn parse(s: String) -> Result[UInt16, String] =
+  if string.starts_with(string.trim(s), "-") then err("invalid digit found in string")
+  else match int.parse(s) {
+    ok(n) => if n > 65535 then err("number too large to fit in target type") else ok(int.to_uint16(n)),
+    err(e) => err(e),
+  }
 "#;
 pub const SRC_UINT16_CONVERT: &str = r#"
 
@@ -38141,6 +38319,42 @@ fn count_ones(x: UInt32) -> Int = int.pop_count(int.from_uint32(x))
 
 /// The 4 bytes in reverse order (endian flip).
 fn byte_swap(x: UInt32) -> UInt32 = int.to_uint32(int.bshr(int.byte_swap(int.from_uint32(x)), 32))
+
+
+/// a + b wrapped to 32 bits.
+fn wrap_add(a: UInt32, b: UInt32) -> UInt32 = int.to_uint32(int.from_uint32(a) + int.from_uint32(b))
+
+/// a - b wrapped to 32 bits.
+fn wrap_sub(a: UInt32, b: UInt32) -> UInt32 = int.to_uint32(int.from_uint32(a) - int.from_uint32(b))
+
+/// a * b wrapped to 32 bits.
+fn wrap_mul(a: UInt32, b: UInt32) -> UInt32 = int.to_uint32(int.from_uint32(a) * int.from_uint32(b))
+
+/// The 32 bits of a rotated left by n; n is taken mod 32.
+fn rotate_left(a: UInt32, n: Int) -> UInt32 = int.to_uint32(rotate_bits(int.from_uint32(a), rotate_count(n)))
+
+/// The 32 bits of a rotated right by n; n is taken mod 32.
+fn rotate_right(a: UInt32, n: Int) -> UInt32 = int.to_uint32(rotate_bits(int.from_uint32(a), rotate_count(0 - rotate_count(n))))
+
+
+local fn rotate_bits(v: Int, k: Int) -> Int = if k == 0 then v
+else int.bor(int.bshl(v, k), int.bshr(v, 32 - k))
+
+local fn rotate_count(n: Int) -> Int = {
+  let r = n % 32
+  if r < 0 then r + 32 else r
+}
+
+/// Bits needed to hold x; 0 for 0.
+fn bit_length(x: UInt32) -> Int = 64 - int.count_leading_zeros(int.from_uint32(x))
+
+/// Decimal UInt32 from trimmed s; err on junk, a sign of -, or above 4294967295.
+fn parse(s: String) -> Result[UInt32, String] =
+  if string.starts_with(string.trim(s), "-") then err("invalid digit found in string")
+  else match int.parse(s) {
+    ok(n) => if n > 4294967295 then err("number too large to fit in target type") else ok(int.to_uint32(n)),
+    err(e) => err(e),
+  }
 "#;
 pub const SRC_UINT32_CONVERT: &str = r#"
 
@@ -38432,6 +38646,58 @@ fn count_ones(x: UInt64) -> Int = int.pop_count(int.from_uint64(x))
 
 /// The 8 bytes in reverse order (endian flip).
 fn byte_swap(x: UInt64) -> UInt64 = int.to_uint64(int.byte_swap(int.from_uint64(x)))
+
+
+/// a + b wrapped to 64 bits.
+fn wrap_add(a: UInt64, b: UInt64) -> UInt64 = int.to_uint64(int.from_uint64(a) + int.from_uint64(b))
+
+/// a - b wrapped to 64 bits.
+fn wrap_sub(a: UInt64, b: UInt64) -> UInt64 = int.to_uint64(int.from_uint64(a) - int.from_uint64(b))
+
+/// a * b wrapped to 64 bits.
+fn wrap_mul(a: UInt64, b: UInt64) -> UInt64 = int.to_uint64(int.from_uint64(a) * int.from_uint64(b))
+
+/// The 64 bits of a rotated left by n; n is taken mod 64.
+fn rotate_left(a: UInt64, n: Int) -> UInt64 = int.to_uint64(rotate_bits(int.from_uint64(a), rotate_count(n)))
+
+/// The 64 bits of a rotated right by n; n is taken mod 64.
+fn rotate_right(a: UInt64, n: Int) -> UInt64 = int.to_uint64(rotate_bits(int.from_uint64(a), rotate_count(0 - rotate_count(n))))
+
+
+local fn rotate_bits(v: Int, k: Int) -> Int = if k == 0 then v
+else int.bor(int.bshl(v, k), int.band(int.bshr(v, 64 - k), int.bnot(int.bshl(-1, k))))
+
+local fn rotate_count(n: Int) -> Int = {
+  let r = n % 64
+  if r < 0 then r + 64 else r
+}
+
+/// Bits needed to hold x; 0 for 0.
+fn bit_length(x: UInt64) -> Int = 64 - int.count_leading_zeros(int.from_uint64(x))
+
+/// Decimal UInt64 from trimmed s; err on junk, a sign of -, or above 2^64-1.
+fn parse(s: String) -> Result[UInt64, String] = {
+  let t = string.trim(s)
+  if string.starts_with(t, "-") then err("invalid digit found in string")
+  else match int.parse(t) {
+    ok(n) => ok(int.to_uint64(n)),
+    err(e) => match parse_upper(t) {
+      some(u) => ok(u),
+      none => err(e),
+    },
+  }
+}
+
+
+
+local fn parse_upper(t: String) -> UInt64? = {
+  let n = string.len(t)
+  match (int.parse(string.slice(t, 0, n - 1)), int.parse(string.slice(t, n - 1, n))) {
+    (ok(head), ok(digit)) => if head < 1844674407370955161 or head == 1844674407370955161 and digit <= 5 then some(int.to_uint64(head) * int.to_uint64(10) + int.to_uint64(digit))
+    else none,
+    _ => none,
+  }
+}
 "#;
 pub const SRC_UINT64_CONVERT: &str = r#"
 
@@ -38708,6 +38974,42 @@ fn count_ones(x: UInt8) -> Int = int.pop_count(int.from_uint8(x))
 
 /// The bytes in reverse order; one byte, so x itself.
 fn byte_swap(x: UInt8) -> UInt8 = x
+
+
+/// a + b wrapped to 8 bits.
+fn wrap_add(a: UInt8, b: UInt8) -> UInt8 = int.to_uint8(int.from_uint8(a) + int.from_uint8(b))
+
+/// a - b wrapped to 8 bits.
+fn wrap_sub(a: UInt8, b: UInt8) -> UInt8 = int.to_uint8(int.from_uint8(a) - int.from_uint8(b))
+
+/// a * b wrapped to 8 bits.
+fn wrap_mul(a: UInt8, b: UInt8) -> UInt8 = int.to_uint8(int.from_uint8(a) * int.from_uint8(b))
+
+/// The 8 bits of a rotated left by n; n is taken mod 8.
+fn rotate_left(a: UInt8, n: Int) -> UInt8 = int.to_uint8(rotate_bits(int.from_uint8(a), rotate_count(n)))
+
+/// The 8 bits of a rotated right by n; n is taken mod 8.
+fn rotate_right(a: UInt8, n: Int) -> UInt8 = int.to_uint8(rotate_bits(int.from_uint8(a), rotate_count(0 - rotate_count(n))))
+
+
+local fn rotate_bits(v: Int, k: Int) -> Int = if k == 0 then v
+else int.bor(int.bshl(v, k), int.bshr(v, 8 - k))
+
+local fn rotate_count(n: Int) -> Int = {
+  let r = n % 8
+  if r < 0 then r + 8 else r
+}
+
+/// Bits needed to hold x; 0 for 0.
+fn bit_length(x: UInt8) -> Int = 64 - int.count_leading_zeros(int.from_uint8(x))
+
+/// Decimal UInt8 from trimmed s; err on junk, a sign of -, or above 255.
+fn parse(s: String) -> Result[UInt8, String] =
+  if string.starts_with(string.trim(s), "-") then err("invalid digit found in string")
+  else match int.parse(s) {
+    ok(n) => if n > 255 then err("number too large to fit in target type") else ok(int.to_uint8(n)),
+    err(e) => err(e),
+  }
 "#;
 pub const SRC_UINT8_CONVERT: &str = r#"
 
