@@ -2,7 +2,7 @@
 
 # Standard library
 
-Every public function of the 48 stdlib modules, 1356 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
+Every public function of the 48 stdlib modules, 1412 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
 
 A `mut` parameter is written in place: the caller passes a `var` binding and sees the change (a `let`, a non-`mut` parameter or a temporary is E032). Every other parameter is read only, and a function that changes a value without `mut` returns a new one.
 
@@ -29,10 +29,10 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [html](#html) | 5 | 0 |
 | [http](#http) | 48 | 4 |
 | [int](#int) | 72 | 0 |
-| [int16](#int16) | 42 | 0 |
-| [int32](#int32) | 44 | 0 |
-| [int64](#int64) | 46 | 0 |
-| [int8](#int8) | 40 | 0 |
+| [int16](#int16) | 49 | 0 |
+| [int32](#int32) | 51 | 0 |
+| [int64](#int64) | 53 | 0 |
+| [int8](#int8) | 47 | 0 |
 | [io](#io) | 8 | 0 |
 | [json](#json) | 15 | 0 |
 | [list](#list) | 79 | 0 |
@@ -49,10 +49,10 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [set](#set) | 40 | 0 |
 | [string](#string) | 88 | 0 |
 | [testing](#testing) | 10 | 0 |
-| [uint16](#uint16) | 36 | 0 |
-| [uint32](#uint32) | 40 | 0 |
-| [uint64](#uint64) | 44 | 0 |
-| [uint8](#uint8) | 32 | 0 |
+| [uint16](#uint16) | 43 | 0 |
+| [uint32](#uint32) | 47 | 0 |
+| [uint64](#uint64) | 51 | 0 |
+| [uint8](#uint8) | 39 | 0 |
 | [url](#url) | 10 | 1 |
 | [value](#value) | 20 | 0 |
 | [zlib](#zlib) | 10 | 0 |
@@ -735,6 +735,13 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `int16.count_trailing_zeros(x: Int16) -> Int` — Zero bits below the lowest set bit; 16 for 0.
 - `int16.count_ones(x: Int16) -> Int` — Number of set bits among the 16.
 - `int16.byte_swap(x: Int16) -> Int16` — The 2 bytes in reverse order (endian flip).
+- `int16.wrap_add(a: Int16, b: Int16) -> Int16` — a + b wrapped to 16 bits.
+- `int16.wrap_sub(a: Int16, b: Int16) -> Int16` — a - b wrapped to 16 bits.
+- `int16.wrap_mul(a: Int16, b: Int16) -> Int16` — a * b wrapped to 16 bits.
+- `int16.rotate_left(a: Int16, n: Int) -> Int16` — The 16 bits of a rotated left by n; n is taken mod 16.
+- `int16.rotate_right(a: Int16, n: Int) -> Int16` — The 16 bits of a rotated right by n; n is taken mod 16.
+- `int16.bit_length(x: Int16) -> Int` — Bits needed to hold x; 0 for 0, 16 if negative.
+- `int16.parse(s: String) -> Result[Int16, String]` — Decimal Int16 from trimmed s; err on junk or outside -32768..32767.
 
 ## int32
 
@@ -784,6 +791,13 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `int32.count_trailing_zeros(x: Int32) -> Int` — Zero bits below the lowest set bit; 32 for 0.
 - `int32.count_ones(x: Int32) -> Int` — Number of set bits among the 32.
 - `int32.byte_swap(x: Int32) -> Int32` — The 4 bytes in reverse order (endian flip).
+- `int32.wrap_add(a: Int32, b: Int32) -> Int32` — a + b wrapped to 32 bits.
+- `int32.wrap_sub(a: Int32, b: Int32) -> Int32` — a - b wrapped to 32 bits.
+- `int32.wrap_mul(a: Int32, b: Int32) -> Int32` — a * b wrapped to 32 bits.
+- `int32.rotate_left(a: Int32, n: Int) -> Int32` — The 32 bits of a rotated left by n; n is taken mod 32.
+- `int32.rotate_right(a: Int32, n: Int) -> Int32` — The 32 bits of a rotated right by n; n is taken mod 32.
+- `int32.bit_length(x: Int32) -> Int` — Bits needed to hold x; 0 for 0, 32 if negative.
+- `int32.parse(s: String) -> Result[Int32, String]` — Decimal Int32 from trimmed s; err on junk or outside -2147483648..2147483647.
 
 ## int64
 
@@ -835,6 +849,13 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `int64.count_trailing_zeros(x: Int64) -> Int` — Zero bits below the lowest set bit; 64 for 0.
 - `int64.count_ones(x: Int64) -> Int` — Number of set bits among the 64.
 - `int64.byte_swap(x: Int64) -> Int64` — The 8 bytes in reverse order (endian flip).
+- `int64.wrap_add(a: Int64, b: Int64) -> Int64` — a + b wrapped to 64 bits.
+- `int64.wrap_sub(a: Int64, b: Int64) -> Int64` — a - b wrapped to 64 bits.
+- `int64.wrap_mul(a: Int64, b: Int64) -> Int64` — a * b wrapped to 64 bits.
+- `int64.rotate_left(a: Int64, n: Int) -> Int64` — The 64 bits of a rotated left by n; n is taken mod 64.
+- `int64.rotate_right(a: Int64, n: Int) -> Int64` — The 64 bits of a rotated right by n; n is taken mod 64.
+- `int64.bit_length(x: Int64) -> Int` — Bits needed to hold x; 0 for 0, 64 if negative.
+- `int64.parse(s: String) -> Result[Int64, String]` — Decimal Int64 from trimmed s; err on junk or overflow.
 
 ## int8
 
@@ -880,6 +901,13 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `int8.count_trailing_zeros(x: Int8) -> Int` — Zero bits below the lowest set bit; 8 for 0.
 - `int8.count_ones(x: Int8) -> Int` — Number of set bits among the 8.
 - `int8.byte_swap(x: Int8) -> Int8` — The bytes in reverse order; one byte, so x itself.
+- `int8.wrap_add(a: Int8, b: Int8) -> Int8` — a + b wrapped to 8 bits.
+- `int8.wrap_sub(a: Int8, b: Int8) -> Int8` — a - b wrapped to 8 bits.
+- `int8.wrap_mul(a: Int8, b: Int8) -> Int8` — a * b wrapped to 8 bits.
+- `int8.rotate_left(a: Int8, n: Int) -> Int8` — The 8 bits of a rotated left by n; n is taken mod 8.
+- `int8.rotate_right(a: Int8, n: Int) -> Int8` — The 8 bits of a rotated right by n; n is taken mod 8.
+- `int8.bit_length(x: Int8) -> Int` — Bits needed to hold x; 0 for 0, 8 if negative.
+- `int8.parse(s: String) -> Result[Int8, String]` — Decimal Int8 from trimmed s; err on junk or outside -128..127.
 
 ## io
 
@@ -1466,6 +1494,13 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `uint16.count_trailing_zeros(x: UInt16) -> Int` — Zero bits below the lowest set bit; 16 for 0.
 - `uint16.count_ones(x: UInt16) -> Int` — Number of set bits among the 16.
 - `uint16.byte_swap(x: UInt16) -> UInt16` — The 2 bytes in reverse order (endian flip).
+- `uint16.wrap_add(a: UInt16, b: UInt16) -> UInt16` — a + b wrapped to 16 bits.
+- `uint16.wrap_sub(a: UInt16, b: UInt16) -> UInt16` — a - b wrapped to 16 bits.
+- `uint16.wrap_mul(a: UInt16, b: UInt16) -> UInt16` — a * b wrapped to 16 bits.
+- `uint16.rotate_left(a: UInt16, n: Int) -> UInt16` — The 16 bits of a rotated left by n; n is taken mod 16.
+- `uint16.rotate_right(a: UInt16, n: Int) -> UInt16` — The 16 bits of a rotated right by n; n is taken mod 16.
+- `uint16.bit_length(x: UInt16) -> Int` — Bits needed to hold x; 0 for 0.
+- `uint16.parse(s: String) -> Result[UInt16, String]` — Decimal UInt16 from trimmed s; err on junk, a sign of -, or above 65535.
 
 ## uint32
 
@@ -1511,6 +1546,13 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `uint32.count_trailing_zeros(x: UInt32) -> Int` — Zero bits below the lowest set bit; 32 for 0.
 - `uint32.count_ones(x: UInt32) -> Int` — Number of set bits among the 32.
 - `uint32.byte_swap(x: UInt32) -> UInt32` — The 4 bytes in reverse order (endian flip).
+- `uint32.wrap_add(a: UInt32, b: UInt32) -> UInt32` — a + b wrapped to 32 bits.
+- `uint32.wrap_sub(a: UInt32, b: UInt32) -> UInt32` — a - b wrapped to 32 bits.
+- `uint32.wrap_mul(a: UInt32, b: UInt32) -> UInt32` — a * b wrapped to 32 bits.
+- `uint32.rotate_left(a: UInt32, n: Int) -> UInt32` — The 32 bits of a rotated left by n; n is taken mod 32.
+- `uint32.rotate_right(a: UInt32, n: Int) -> UInt32` — The 32 bits of a rotated right by n; n is taken mod 32.
+- `uint32.bit_length(x: UInt32) -> Int` — Bits needed to hold x; 0 for 0.
+- `uint32.parse(s: String) -> Result[UInt32, String]` — Decimal UInt32 from trimmed s; err on junk, a sign of -, or above 4294967295.
 
 ## uint64
 
@@ -1560,6 +1602,13 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `uint64.count_trailing_zeros(x: UInt64) -> Int` — Zero bits below the lowest set bit; 64 for 0.
 - `uint64.count_ones(x: UInt64) -> Int` — Number of set bits among the 64.
 - `uint64.byte_swap(x: UInt64) -> UInt64` — The 8 bytes in reverse order (endian flip).
+- `uint64.wrap_add(a: UInt64, b: UInt64) -> UInt64` — a + b wrapped to 64 bits.
+- `uint64.wrap_sub(a: UInt64, b: UInt64) -> UInt64` — a - b wrapped to 64 bits.
+- `uint64.wrap_mul(a: UInt64, b: UInt64) -> UInt64` — a * b wrapped to 64 bits.
+- `uint64.rotate_left(a: UInt64, n: Int) -> UInt64` — The 64 bits of a rotated left by n; n is taken mod 64.
+- `uint64.rotate_right(a: UInt64, n: Int) -> UInt64` — The 64 bits of a rotated right by n; n is taken mod 64.
+- `uint64.bit_length(x: UInt64) -> Int` — Bits needed to hold x; 0 for 0.
+- `uint64.parse(s: String) -> Result[UInt64, String]` — Decimal UInt64 from trimmed s; err on junk, a sign of -, or above 2^64-1.
 
 ## uint8
 
@@ -1597,6 +1646,13 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `uint8.count_trailing_zeros(x: UInt8) -> Int` — Zero bits below the lowest set bit; 8 for 0.
 - `uint8.count_ones(x: UInt8) -> Int` — Number of set bits among the 8.
 - `uint8.byte_swap(x: UInt8) -> UInt8` — The bytes in reverse order; one byte, so x itself.
+- `uint8.wrap_add(a: UInt8, b: UInt8) -> UInt8` — a + b wrapped to 8 bits.
+- `uint8.wrap_sub(a: UInt8, b: UInt8) -> UInt8` — a - b wrapped to 8 bits.
+- `uint8.wrap_mul(a: UInt8, b: UInt8) -> UInt8` — a * b wrapped to 8 bits.
+- `uint8.rotate_left(a: UInt8, n: Int) -> UInt8` — The 8 bits of a rotated left by n; n is taken mod 8.
+- `uint8.rotate_right(a: UInt8, n: Int) -> UInt8` — The 8 bits of a rotated right by n; n is taken mod 8.
+- `uint8.bit_length(x: UInt8) -> Int` — Bits needed to hold x; 0 for 0.
+- `uint8.parse(s: String) -> Result[UInt8, String]` — Decimal UInt8 from trimmed s; err on junk, a sign of -, or above 255.
 
 ## url
 
