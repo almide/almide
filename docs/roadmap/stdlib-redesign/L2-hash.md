@@ -76,6 +76,16 @@ MD5・SHA-1・SHA-512 は 7 言語（● と ◐）が持っています（[fact
 - 理由: 旧い呼び出しは型エラーになるので R-L0-14.4 は満たしますが、使用数の多い `sha256_hex(s)`（spec 16 / docs 3）を全部 `bytes.from_string` で包むことになります。取り違えは型エラーで止まるので、R-L0-19 の型違いの案内（`bytes.from_string(s)`／`hex.encode(hash.sha256(b))`）で受け止めるほうが安上がりです。
 - issue: なし
 
+### R-hash-05 `_hex` も `Bytes` を受け取る（完全性の規則 2 の見直し） — ○ 採用
+
+- いま: `<alg>(b: Bytes) -> Bytes` と `<alg>_hex(s: String) -> String` で、`_hex` という名前が「出力の符号化」と「入力の型」の 2 つを同時に変えています。規則 1 の「入力は `Bytes`」の唯一の例外で、`hash.fnv1a32` は `Bytes` に揃えたのに `_hex` だけ残っています。規則 2 は R-L0-14 の 4 を理由にしましたが、型を変える変更は型エラーで気づくので、R-L0-14 の 4 は禁じていません。
+- 案: `<alg>_hex(b: Bytes) -> String` にします。文字列を要約するときは `hash.sha256_hex(bytes.from_string(s))` と書きます。
+- 根拠の L0 規則: R-L0-00（`_hex` の意味を 1 つに）、規則 1。
+- (a) Python `hashlib.sha256(b).hexdigest()`、Go `sha256.Sum256(b)`、Rust の sha2 crate は、どれもバイトを受け取ります。
+- (d) 意味変更（型エラーで気づく）。`almide fix` が `bytes.from_string(…)` を差し込みます。
+- 完全性の規則（1・2 を置き換え）: `hash` のすべての関数は `Bytes` を受け取ります。`_hex` は出力を小文字の 16 進にすることだけを表します。
+- issue: #3985
+
 ## L3: 関数表
 
 | 関数 | シグネチャ(現行, mut 表示) | 他言語の主な綴り | 判定 | 案 |
@@ -83,12 +93,12 @@ MD5・SHA-1・SHA-512 は 7 言語（● と ◐）が持っています（[fact
 | `fnv1a32` | `hash.fnv1a32(s: String) -> Int` | Go `fnv.New32a` | 意味変更（引数を `Bytes` に。`fnv1a32(bytes.from_string(s))`） | R-hash-01 |
 | `fnv1a32_bytes` | `hash.fnv1a32_bytes(b: Bytes) -> Int` | Go `fnv.New32a` | 撤去 → `fnv1a32` | R-hash-01 |
 | `sha256` | `hash.sha256(b: Bytes) -> Bytes` | Go `sha256.Sum256` / Python `hashlib.sha256(b).digest()` (F) / JS `subtle.digest("SHA-256")` / Elixir `:crypto.hash(:sha256, b)` | 据え置き | — |
-| `sha256_hex` | `hash.sha256_hex(s: String) -> String` | Python `hexdigest()` (F) / Go `hex.EncodeToString` | 据え置き | — |
+| `sha256_hex` | `hash.sha256_hex(b: Bytes) -> String` | Python `hexdigest()` (F) / Go `hex.EncodeToString` | 意味変更（`Bytes` を受け取る） | R-hash-05 |
 | `crc32` | `hash.crc32(b: Bytes) -> Int`（案） | Go `crc32.ChecksumIEEE` / Python `zlib.crc32` / Erlang `crc32` | 追加 | R-hash-02 |
 | `adler32` | `hash.adler32(b: Bytes) -> Int`（案） | Go `adler32.Checksum` / Python `zlib.adler32` | 追加 | R-hash-02 |
 | `md5` | `hash.md5(b: Bytes) -> Bytes`（案） | Go `md5.Sum` / Python `hashlib.md5` (F) / OCaml `Digest` | 追加 | R-hash-03 |
-| `md5_hex` | `hash.md5_hex(s: String) -> String`（案） | Python `md5(..).hexdigest()` (F) / OCaml `Digest.to_hex` | 追加 | R-hash-03 |
+| `md5_hex` | `hash.md5_hex(b: Bytes) -> String` | Python `md5(..).hexdigest()` (F) / OCaml `Digest.to_hex` | 追加（`Bytes` を受け取る） | R-hash-03、R-hash-05 |
 | `sha1` | `hash.sha1(b: Bytes) -> Bytes`（案） | Go `sha1.Sum` / Python `hashlib.sha1` (F) / JS `digest("SHA-1")` | 追加 | R-hash-03 |
-| `sha1_hex` | `hash.sha1_hex(s: String) -> String`（案） | Python `hexdigest()` (F) | 追加 | R-hash-03 |
+| `sha1_hex` | `hash.sha1_hex(b: Bytes) -> String` | Python `hexdigest()` (F) | 追加（`Bytes` を受け取る） | R-hash-03、R-hash-05 |
 | `sha512` | `hash.sha512(b: Bytes) -> Bytes`（案） | Go `sha512.Sum512` / Python `hashlib.sha512` (F) / JS `digest("SHA-512")` | 追加 | R-hash-03 |
-| `sha512_hex` | `hash.sha512_hex(s: String) -> String`（案） | Python `hexdigest()` (F) | 追加 | R-hash-03 |
+| `sha512_hex` | `hash.sha512_hex(b: Bytes) -> String` | Python `hexdigest()` (F) | 追加（`Bytes` を受け取る） | R-hash-03、R-hash-05 |

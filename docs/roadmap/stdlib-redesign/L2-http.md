@@ -214,7 +214,7 @@
 | `http.route` | `fn route(pattern: String, handler: (HttpRequest) -> Result[HttpResponse, String]) -> HttpRoute` | Go `ServeMux.HandleFunc` | 据え置き | — |
 | `http.mount` | `fn mount(prefix: String, sub: (HttpRequest) -> Result[HttpResponse, String]) -> HttpRoute` | Go `StripPrefix` | 据え置き | — |
 | `http.router` | `fn router(routes: List[HttpRoute]) -> Result[(HttpRequest) -> Result[HttpResponse, String], String]` | Go `ServeMux` | 据え置き | — |
-| `http.wrap` | `fn wrap(handler: …, middleware: List[…]) -> (HttpRequest) -> Result[HttpResponse, String]` | — | 据え置き | — |
+| `http.wrap` | `fn wrap(handler: HttpHandler, middleware: List[HttpMiddleware]) -> HttpHandler` | — | 据え置き | — |
 | `http.decode_json` | `fn decode_json[T](req: HttpRequest, decode: (Value) -> Result[T, String]) -> Result[T, HttpResponse]` | — | 据え置き | — |
 | `http.set_body` | `fn set_body(resp: HttpResponse, body: String) -> HttpResponse`（案） | Gleam `set_body` (F) | 追加 | R-http-06 |
 | `http.req_body_bytes` | `fn req_body_bytes(req: HttpRequest) -> Bytes`（案） | Go `io.ReadAll(r.Body)` / JS `req.arrayBuffer()` | 追加 | R-http-11 |

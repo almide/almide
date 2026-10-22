@@ -60,6 +60,16 @@
 - 完全性の規則: `path` の公開関数は `String` だけを受け取り、返します。
 - issue: #3971
 
+### R-path-03 `with_extension` を足す — ○ 採用
+
+- いま: 拡張子を読む `extension` と、拡張子を除いた名前の `stem` はありますが、拡張子を差し替える関数がありません。
+- 案: `fn path.with_extension(p: String, ext: String) -> String`。`ext` が `""` なら拡張子を外します。
+- 根拠: L1 の追加基準（5 言語以上）。
+- (a) Rust `with_extension`、Python `with_suffix`、Swift `appendingPathExtension`/`deletingPathExtension`、Kotlin（`resolveSibling`）、Elixir `Path.rootname` + 連結、OCaml `remove_extension` + 連結。
+- (b) 純粋な文字列の計算です。
+- (d) 追加 1。
+- issue: #3985
+
 ## L3: 関数表
 
 | 関数 | シグネチャ(現行, mut 表示) | 他言語の主な綴り | 判定 | 案 |
@@ -76,3 +86,4 @@
 | `path.normalize` | `fn normalize(p: String) -> String` | Go `Clean` / Python `normpath` / Node `normalize` | 据え置き | — |
 | `path.components` | `fn components(p: String) -> List[String]`（案） | Rust `components` / Python `parts` / Elixir `split` | 追加 | R-path-01 |
 | `path.relative_to` | `fn relative_to(p: String, base: String) -> String?`（案） | Python・Elixir `relative_to` / Go `Rel` / Node `relative` | 追加 | R-path-01 |
+| `path.with_extension` | `fn with_extension(p: String, ext: String) -> String`（案） | Rust `with_extension` / Python `with_suffix` | 追加 | R-path-03 |

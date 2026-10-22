@@ -326,6 +326,16 @@
 - 理由: `string.repeat` と `bytes.repeat` は列全体を繰り返し、`list.repeat(v, n)` は 1 つの値を n 個並べます。揃えると、`list.repeat([1, 2], 3)` の結果が `[[1, 2], [1, 2], [1, 2]]` から `[1, 2, 1, 2, 1, 2]` に、型エラーなしで変わります（R-L0-14 の 4: 同じ名前で黙って結果を変えない）。要素を並べる形は Gleam `repeat`・Elixir `List.duplicate`・Kotlin `List(n) { v }`・Swift `Array(repeating:count:)` と同じで、多数派から外れてもいません。L3 の表の「Go slices.Repeat」は列全体の繰り返しなので、比較の欄から外しました。
 - issue: なし
 
+### R-list-19 `min_with`・`max_with` を足す — ○ 採用
+
+- いま: 並べる・探すは無印・`_by`・`_with` の 3 つ（R-list-17）なのに、`min`・`max` は無印と `_by` だけです。
+- 案: `fn list.min_with[A](xs: List[A], cmp: (A, A) -> Int) -> A?`、`fn list.max_with[A](xs: List[A], cmp: (A, A) -> Int) -> A?`。
+- 根拠の L0 規則: R-L0-10（`_with` は比較関数）、R-L0-12（族は行列で揃える）。
+- (a) Rust `min_by`/`max_by`（比較関数）、Kotlin `minWithOrNull`/`maxWithOrNull`、Swift `min(by:)`。
+- (d) 追加 2。
+- 完全性の規則（R-list-17 を広げる）: 順序を使う関数 {`sort`, `min`, `max`, `binary_search`} は、どれも無印・`_by`・`_with` の 3 つを持ちます。
+- issue: #3985
+
 ## L3: 関数表
 
 判定の凡例: 据え置き / 改名 / 意味変更 / 撤去 / 追加。他言語の列は主な綴りだけを書きます。
@@ -406,6 +416,8 @@
 | `range_step` | `list.range_step(start: Int, end: Int, step: Int) -> List[Int]`（案） | Python range(a,b,s) / Rust step_by / Kotlin step | 追加 | R-list-09 |
 | `binary_search_by` | （追加）`list.binary_search_by(xs: List[A], target: K, key: (A) -> K) -> Option[Int]` | Rust binary_search_by_key / Kotlin binarySearchBy | 追加 | R-list-17 |
 | `binary_search_with` | （追加）`list.binary_search_with(xs: List[A], target: A, cmp: (A, A) -> Int) -> Option[Int]` | Rust binary_search_by / Go BinarySearchFunc | 追加 | R-list-17 |
+| `min_with` | （追加）`list.min_with(xs: List[A], cmp: (A, A) -> Int) -> Option[A]` | Kotlin minWithOrNull / Swift min(by:) | 追加 | R-list-19 |
+| `max_with` | （追加）`list.max_with(xs: List[A], cmp: (A, A) -> Int) -> Option[A]` | Kotlin maxWithOrNull / Swift max(by:) | 追加 | R-list-19 |
 
 行数: 現行 67 関数 + 追加 5 関数 = 72 行。
 

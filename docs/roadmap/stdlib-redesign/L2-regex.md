@@ -137,6 +137,11 @@
 - (d) 意味変更（要素の型が変わるので、文字列として使うと型エラーで気づく）。`captures` は R-regex-0x の第 1 引数の変更と同じ epoch で入れます。
 - issue: #3977
 
+### R-regex-09 対象の文字列を第 1 引数にする — × 不採用
+
+- 理由: `regex` のモジュールの主語は `Regex` で、R-L0-02・R-L0-03（関数は主語の型のモジュールに置き、主語を先頭にする）のとおりです。Rust `re.replace_all(s, …)`、Go `re.ReplaceAllString(s, …)`、Elixir `Regex.replace(re, s, …)` も正規表現が先です。文字列の側から書きたいときは `string.replace` を使います。
+- issue: なし
+
 ## L3: 関数表
 
 | 関数 | シグネチャ(現行, mut 表示) | 他言語の主な綴り | 判定 | 案 |

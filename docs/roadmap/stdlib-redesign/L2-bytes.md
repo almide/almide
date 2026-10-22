@@ -296,6 +296,27 @@
 - 理由: `skip` は値を読まずに位置だけを進めるので、`(値, 次の状態)` の値がありません。`(Unit, Int)` を返す形は、読む側が捨てる値を増やすだけです。R-L0-27 に「値を読まない位置の移動は次の状態だけを返す」と書きました。
 - issue: なし
 
+### R-bytes-22 `bytes.chunk` は `size <= 0` で abort — ○ 採用
+
+- いま: `list.chunk` は R-list-10 で `n <= 0` を abort にしましたが、`bytes.chunk` には決まりがありません。
+- 案: `list.chunk` と同じく abort にします。
+- 根拠の L0 規則: R-L0-12（境界の行列は list・string・bytes で同じ）。
+- (d) 意味変更（受け付けない入力を abort にする）。
+- issue: #3985
+
+### R-bytes-23 `bytes.xor` は長さが違うと abort — ○ 採用
+
+- いま: 長さが違うと、短いほうに切り詰めます（実測 `almide 0.68.0 dev 437b8f127`、native と wasm で同じ: `[1, 2, 3]` と `[1]` で `[0]`）。止まらずに、短い結果を返します。
+- 案: 長さが違えば abort にします。matrix の「形の不一致は abort」と同じ扱いで、長さは呼び出す前に `bytes.len` で確かめられます。
+- 根拠の L0 規則: R-L0-06 の 3（呼び出し側が確かめられる前提の違反は abort）。
+- (d) 意味変更。いまは切り詰めて返している呼び出しが abort になるので、epoch 15 の `breaks` に入れます。
+- issue: #3985
+
+### R-bytes-24 `bytes.set` と `put_u8` を 1 つにする — × 不採用
+
+- 理由: `set(b, i, v) -> Bytes` はコピーを返す関数、`put_u8(mut b, pos, v)` はその場で書き換える関数で、R-L0-04（コピーが既定、その場書き換えは決まった動詞）の対です。`list.set` もコピーです。
+- issue: なし
+
 ## L3: 関数表
 
 （146 関数 + 追加 13。判定の内訳: 据え置き 58・改名 53・撤去 31・意味変更 4・追加 13。改名の `put_` 15 件は、R-bytes-11 で範囲外の挙動も変わります）
@@ -435,7 +456,7 @@
 | `write_string_be` | `bytes.write_string_be(mut b: Bytes, s: String) -> Unit` | Java DataOutput.writeUTF（u16 BE） / 多数: — | 撤去（→ `append_u32_be` ＋ `append_bytes`） | R-bytes-05 |
 | `write_u32_be` | `bytes.write_u32_be(mut b: Bytes, val: Int) -> Unit` | Go AppendUint32 (F) | 撤去 → `append_u32_be` | R-bytes-03 |
 | `write_u8` | `bytes.write_u8(mut b: Bytes, val: Int) -> Unit` | 同上 | 撤去 → `push` | R-bytes-02 |
-| `xor` | `bytes.xor(a: Bytes, b: Bytes) -> Bytes` | — (多数: ループで書く) | 据え置き | — |
+| `xor` | `bytes.xor(a: Bytes, b: Bytes) -> Bytes` | — (多数: ループで書く) | 意味変更（長さが違うと abort） | R-bytes-23 |
 | `read_uint16` | `bytes.read_uint16(b: Bytes, offset: Int, endian: Endian) -> UInt16` | Go binary.LittleEndian.Uint32 (F) / JS DataView getUint32(o, le) (F) | 撤去（→ 接尾辞の系統 `get_`/`append_`/`put_`） | R-bytes-04 |
 | `read_uint32` | `bytes.read_uint32(b: Bytes, offset: Int, endian: Endian) -> UInt32` | Go binary.LittleEndian.Uint32 (F) / JS DataView getUint32(o, le) (F) | 撤去（→ 接尾辞の系統 `get_`/`append_`/`put_`） | R-bytes-04 |
 | `read_int32` | `bytes.read_int32(b: Bytes, offset: Int, endian: Endian) -> Int32` | Go binary.LittleEndian.Uint32 (F) / JS DataView getUint32(o, le) (F) | 撤去（→ 接尾辞の系統 `get_`/`append_`/`put_`） | R-bytes-04 |
