@@ -231,11 +231,11 @@ bytes.append_u8(mut b: Bytes, val: Int) -> Unit
 
 // Mutable address of the data; null if empty.
 // @since 0.11.0 or earlier
-bytes.as_mut_ptr(b: Bytes) -> RawPtr
+bytes.as_mut_ptr(b: Bytes) -> RawPtr   (deprecated — use ffi.address)
 
 // Address of the data; null if empty.
 // @since 0.11.0 or earlier
-bytes.as_ptr(b: Bytes) -> RawPtr
+bytes.as_ptr(b: Bytes) -> RawPtr   (deprecated — use ffi.address)
 
 // size-byte pieces, last may be short; [] if size <= 0.
 // @since 0.13.4 or earlier
@@ -263,11 +263,11 @@ bytes.copy_from(mut dst: Bytes, src: Bytes, dst_off: Int, src_off: Int, len: Int
 
 // Writes up to cap bytes to ptr; count, 0 if null.
 // @since 0.11.0 or earlier
-bytes.copy_to_ptr(b: Bytes, ptr: RawPtr, cap: Int) -> Int
+bytes.copy_to_ptr(b: Bytes, ptr: RawPtr, cap: Int) -> Int   (deprecated — use ffi.write)
 
 // Address of the data as an Int; target-specific.
 // @since 0.13.2 or earlier
-bytes.data_ptr(b: Bytes) -> Int
+bytes.data_ptr(b: Bytes) -> Int   (deprecated — use ffi.address)
 
 // True if b ends with suffix, or suffix is empty.
 // @since 0.13.4 or earlier
@@ -287,7 +287,7 @@ bytes.from_list(xs: List[Int]) -> Bytes
 
 // Copy of len bytes at ptr; empty if null or len <= 0.
 // @since 0.11.0 or earlier
-bytes.from_raw_ptr(ptr: RawPtr, len: Int) -> Bytes
+bytes.from_raw_ptr(ptr: RawPtr, len: Int) -> Bytes   (deprecated — use ffi.read)
 
 // UTF-8 encoding of s.
 // @since 0.9.8 or earlier

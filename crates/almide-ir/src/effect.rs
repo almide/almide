@@ -100,6 +100,12 @@ pub const STDLIB_MODULE_EFFECTS: &[(&str, ModuleEffects)] = &[
     // `zlib`'s `effect fn`s are compress/decompress over in-memory bytes:
     // `effect` there buys the error channel (ADR-0002 §D6), not host access.
     ("zlib", ModuleEffects::Pure),
+    // `ffi.read` / `ffi.write` touch memory outside Almide's values (R-ffi-02)
+    // but reach no host capability: the address is the program's own memory,
+    // or one an `@extern` fn handed back (and an `@extern` is already every
+    // category). Memory safety is not a category; `--profile critical`
+    // refuses the module instead (#4008).
+    ("ffi", ModuleEffects::Pure),
     // Collections and scalars.
     ("list", ModuleEffects::Pure),
     ("map", ModuleEffects::Pure),
@@ -135,6 +141,7 @@ pub const STDLIB_MODULE_EFFECTS: &[(&str, ModuleEffects)] = &[
 pub const HOST_FREE_EFFECT_FNS: &[&str] = &[
     "zlib.compress", "zlib.compress_level", "zlib.decompress", "zlib.deflate",
     "zlib.deflate_level", "zlib.inflate", "zlib.gzip", "zlib.gunzip",
+    "ffi.read", "ffi.write",
 ];
 
 /// Runtime-symbol prefixes that are not their module's name

@@ -8,6 +8,9 @@ pub const STDLIB_MODULES: &[&str] = &[
     "json", "http", "process", "math", "random", "regex", "io", "result",
     "option", "error", "datetime", "testing", "value", "set",
     "base64", "hex", "hash", "net", "url", "zlib",
+    // Raw addresses at the foreign-function boundary (R-ffi-01). Never
+    // auto-imported: `import ffi` is the opt-in.
+    "ffi",
     // Sized numeric types (Stage 3 of the sized-numeric-types arc).
     // Each hosts UFCS conversion methods (`.to_int64()`,
     // `.to_float32()`, ...). Auto-imported alongside `int` / `float`
@@ -24,6 +27,7 @@ pub const BUNDLED_MODULES: &[&str] = &[
     "map", "set", "string",
     "env", "io", "random", "regex", "testing",
     "process", "fs", "http", "html", "json", "matrix", "net", "url", "zlib",
+    "ffi",
     "int8", "int16", "int32", "int64",
     "uint8", "uint16", "uint32", "uint64",
     "float32", "float64",
@@ -281,6 +285,7 @@ fn bundled_source_sized_numeric(name: &str) -> Option<&'static str> {
         "float64" => Some(crate::embedded::SRC_FLOAT64),
         "net" => Some(crate::embedded::SRC_NET),
         "zlib" => Some(crate::embedded::SRC_ZLIB),
+        "ffi" => Some(crate::embedded::SRC_FFI),
         // The v1 primitive floor (raw memory + fd_write). v1 maps `prim.*` to MIR
         // primitive ops by module name; the @intrinsic symbols are v0 placeholders.
         "prim" => Some(crate::embedded::SRC_PRIM),

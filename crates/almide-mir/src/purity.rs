@@ -84,6 +84,7 @@ pub const PURE_MODULES: &[&str] = &[
     "error_message",
     "fan_any",
     "fan_map",
+    "ffi_rawptr",
     "float",
     "float32",
     "float32_convert",
@@ -378,6 +379,13 @@ fn is_pure_fn_in_impure_module(module: &str, func: &str) -> bool {
         // spelling is the Result carrier, not an effect. Same admission class
         // as http's pure codecs below — enumerated, so a future zlib fn with
         // a real capability does not ride in silently.
+        // `ffi` (R-ffi-01): `address` / `to_int` build an address as a value,
+        // and `read` / `write` copy through one inside the program's own
+        // memory (stdlib/ffi_rawptr.almd: prim loads and stores, no host op).
+        // The `effect fn` spelling of read/write marks memory outside Almide's
+        // values (R-ffi-02), not a host capability; `--profile critical`
+        // refuses the module wholesale (#4008).
+        "ffi" => matches!(func, "address" | "to_int" | "read" | "write"),
         "zlib" => matches!(
             func,
             "compress"
