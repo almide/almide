@@ -114,3 +114,40 @@ fn abs(x: Int32) -> Int32 = int.to_int32(int.abs(int.from_int32(x)))
 
 /// -1, 0 or 1 by the sign of x.
 fn sign(x: Int32) -> Int = math.sign(int.from_int32(x))
+
+// ── Integer: bitwise, FixedWidthInteger: bit counts (R-sized-10) ──
+/// Bitwise AND.
+fn band(a: Int32, b: Int32) -> Int32 = int.to_int32(int.band(int.from_int32(a), int.from_int32(b)))
+
+/// Bitwise OR.
+fn bor(a: Int32, b: Int32) -> Int32 = int.to_int32(int.bor(int.from_int32(a), int.from_int32(b)))
+
+/// Bitwise XOR.
+fn bxor(a: Int32, b: Int32) -> Int32 = int.to_int32(int.bxor(int.from_int32(a), int.from_int32(b)))
+
+/// Bitwise complement of all 32 bits.
+fn bnot(x: Int32) -> Int32 = int.to_int32(int.bnot(int.from_int32(x)))
+
+/// a shifted left by n bits; n is taken mod 32.
+fn bshl(a: Int32, n: Int) -> Int32 = int.to_int32(int.bshl(int.from_int32(a), shift_count(n)))
+
+/// Sign-filling right shift; n is taken mod 32.
+fn bshr(a: Int32, n: Int) -> Int32 = int.to_int32(int.bshr(int.from_int32(a), shift_count(n)))
+
+// n reduced into 0..31, a negative n included.
+local fn shift_count(n: Int) -> Int = {
+  let r = n % 32
+  if r < 0 then r + 32 else r
+}
+
+/// Zero bits above the highest set bit, counted in 32 bits; 32 for 0.
+fn count_leading_zeros(x: Int32) -> Int = int.count_leading_zeros(int.band(int.from_int32(x), 4294967295)) - 32
+
+/// Zero bits below the lowest set bit; 32 for 0.
+fn count_trailing_zeros(x: Int32) -> Int = int.min(int.count_trailing_zeros(int.from_int32(x)), 32)
+
+/// Number of set bits among the 32.
+fn count_ones(x: Int32) -> Int = int.pop_count(int.band(int.from_int32(x), 4294967295))
+
+/// The 4 bytes in reverse order (endian flip).
+fn byte_swap(x: Int32) -> Int32 = int.to_int32(int.bshr(int.byte_swap(int.band(int.from_int32(x), 4294967295)), 32))

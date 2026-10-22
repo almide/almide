@@ -9924,6 +9924,43 @@ fn abs(x: Int16) -> Int16 = int.to_int16(int.abs(int.from_int16(x)))
 
 /// -1, 0 or 1 by the sign of x.
 fn sign(x: Int16) -> Int = math.sign(int.from_int16(x))
+
+
+/// Bitwise AND.
+fn band(a: Int16, b: Int16) -> Int16 = int.to_int16(int.band(int.from_int16(a), int.from_int16(b)))
+
+/// Bitwise OR.
+fn bor(a: Int16, b: Int16) -> Int16 = int.to_int16(int.bor(int.from_int16(a), int.from_int16(b)))
+
+/// Bitwise XOR.
+fn bxor(a: Int16, b: Int16) -> Int16 = int.to_int16(int.bxor(int.from_int16(a), int.from_int16(b)))
+
+/// Bitwise complement of all 16 bits.
+fn bnot(x: Int16) -> Int16 = int.to_int16(int.bnot(int.from_int16(x)))
+
+/// a shifted left by n bits; n is taken mod 16.
+fn bshl(a: Int16, n: Int) -> Int16 = int.to_int16(int.bshl(int.from_int16(a), shift_count(n)))
+
+/// Sign-filling right shift; n is taken mod 16.
+fn bshr(a: Int16, n: Int) -> Int16 = int.to_int16(int.bshr(int.from_int16(a), shift_count(n)))
+
+
+local fn shift_count(n: Int) -> Int = {
+  let r = n % 16
+  if r < 0 then r + 16 else r
+}
+
+/// Zero bits above the highest set bit, counted in 16 bits; 16 for 0.
+fn count_leading_zeros(x: Int16) -> Int = int.count_leading_zeros(int.band(int.from_int16(x), 65535)) - 48
+
+/// Zero bits below the lowest set bit; 16 for 0.
+fn count_trailing_zeros(x: Int16) -> Int = int.min(int.count_trailing_zeros(int.from_int16(x)), 16)
+
+/// Number of set bits among the 16.
+fn count_ones(x: Int16) -> Int = int.pop_count(int.band(int.from_int16(x), 65535))
+
+/// The 2 bytes in reverse order (endian flip).
+fn byte_swap(x: Int16) -> Int16 = int.to_int16(int.bshr(int.byte_swap(int.band(int.from_int16(x), 65535)), 48))
 "#;
 pub const SRC_INT16_CONVERT: &str = r#"
 
@@ -10145,6 +10182,43 @@ fn abs(x: Int32) -> Int32 = int.to_int32(int.abs(int.from_int32(x)))
 
 /// -1, 0 or 1 by the sign of x.
 fn sign(x: Int32) -> Int = math.sign(int.from_int32(x))
+
+
+/// Bitwise AND.
+fn band(a: Int32, b: Int32) -> Int32 = int.to_int32(int.band(int.from_int32(a), int.from_int32(b)))
+
+/// Bitwise OR.
+fn bor(a: Int32, b: Int32) -> Int32 = int.to_int32(int.bor(int.from_int32(a), int.from_int32(b)))
+
+/// Bitwise XOR.
+fn bxor(a: Int32, b: Int32) -> Int32 = int.to_int32(int.bxor(int.from_int32(a), int.from_int32(b)))
+
+/// Bitwise complement of all 32 bits.
+fn bnot(x: Int32) -> Int32 = int.to_int32(int.bnot(int.from_int32(x)))
+
+/// a shifted left by n bits; n is taken mod 32.
+fn bshl(a: Int32, n: Int) -> Int32 = int.to_int32(int.bshl(int.from_int32(a), shift_count(n)))
+
+/// Sign-filling right shift; n is taken mod 32.
+fn bshr(a: Int32, n: Int) -> Int32 = int.to_int32(int.bshr(int.from_int32(a), shift_count(n)))
+
+
+local fn shift_count(n: Int) -> Int = {
+  let r = n % 32
+  if r < 0 then r + 32 else r
+}
+
+/// Zero bits above the highest set bit, counted in 32 bits; 32 for 0.
+fn count_leading_zeros(x: Int32) -> Int = int.count_leading_zeros(int.band(int.from_int32(x), 4294967295)) - 32
+
+/// Zero bits below the lowest set bit; 32 for 0.
+fn count_trailing_zeros(x: Int32) -> Int = int.min(int.count_trailing_zeros(int.from_int32(x)), 32)
+
+/// Number of set bits among the 32.
+fn count_ones(x: Int32) -> Int = int.pop_count(int.band(int.from_int32(x), 4294967295))
+
+/// The 4 bytes in reverse order (endian flip).
+fn byte_swap(x: Int32) -> Int32 = int.to_int32(int.bshr(int.byte_swap(int.band(int.from_int32(x), 4294967295)), 32))
 "#;
 pub const SRC_INT32_CONVERT: &str = r#"
 
@@ -10388,6 +10462,43 @@ fn abs(x: Int64) -> Int64 = int.to_int64(int.abs(int.from_int64(x)))
 
 /// -1, 0 or 1 by the sign of x.
 fn sign(x: Int64) -> Int = math.sign(int.from_int64(x))
+
+
+/// Bitwise AND.
+fn band(a: Int64, b: Int64) -> Int64 = int.to_int64(int.band(int.from_int64(a), int.from_int64(b)))
+
+/// Bitwise OR.
+fn bor(a: Int64, b: Int64) -> Int64 = int.to_int64(int.bor(int.from_int64(a), int.from_int64(b)))
+
+/// Bitwise XOR.
+fn bxor(a: Int64, b: Int64) -> Int64 = int.to_int64(int.bxor(int.from_int64(a), int.from_int64(b)))
+
+/// Bitwise complement of all 64 bits.
+fn bnot(x: Int64) -> Int64 = int.to_int64(int.bnot(int.from_int64(x)))
+
+/// a shifted left by n bits; n is taken mod 64.
+fn bshl(a: Int64, n: Int) -> Int64 = int.to_int64(int.bshl(int.from_int64(a), shift_count(n)))
+
+/// Sign-filling right shift; n is taken mod 64.
+fn bshr(a: Int64, n: Int) -> Int64 = int.to_int64(int.bshr(int.from_int64(a), shift_count(n)))
+
+
+local fn shift_count(n: Int) -> Int = {
+  let r = n % 64
+  if r < 0 then r + 64 else r
+}
+
+/// Zero bits above the highest set bit, counted in 64 bits; 64 for 0.
+fn count_leading_zeros(x: Int64) -> Int = int.count_leading_zeros(int.from_int64(x))
+
+/// Zero bits below the lowest set bit; 64 for 0.
+fn count_trailing_zeros(x: Int64) -> Int = int.min(int.count_trailing_zeros(int.from_int64(x)), 64)
+
+/// Number of set bits among the 64.
+fn count_ones(x: Int64) -> Int = int.pop_count(int.from_int64(x))
+
+/// The 8 bytes in reverse order (endian flip).
+fn byte_swap(x: Int64) -> Int64 = int.to_int64(int.byte_swap(int.from_int64(x)))
 "#;
 pub const SRC_INT64_CONVERT: &str = r#"
 
@@ -10626,6 +10737,43 @@ fn abs(x: Int8) -> Int8 = int.to_int8(int.abs(int.from_int8(x)))
 
 /// -1, 0 or 1 by the sign of x.
 fn sign(x: Int8) -> Int = math.sign(int.from_int8(x))
+
+
+/// Bitwise AND.
+fn band(a: Int8, b: Int8) -> Int8 = int.to_int8(int.band(int.from_int8(a), int.from_int8(b)))
+
+/// Bitwise OR.
+fn bor(a: Int8, b: Int8) -> Int8 = int.to_int8(int.bor(int.from_int8(a), int.from_int8(b)))
+
+/// Bitwise XOR.
+fn bxor(a: Int8, b: Int8) -> Int8 = int.to_int8(int.bxor(int.from_int8(a), int.from_int8(b)))
+
+/// Bitwise complement of all 8 bits.
+fn bnot(x: Int8) -> Int8 = int.to_int8(int.bnot(int.from_int8(x)))
+
+/// a shifted left by n bits; n is taken mod 8.
+fn bshl(a: Int8, n: Int) -> Int8 = int.to_int8(int.bshl(int.from_int8(a), shift_count(n)))
+
+/// Sign-filling right shift; n is taken mod 8.
+fn bshr(a: Int8, n: Int) -> Int8 = int.to_int8(int.bshr(int.from_int8(a), shift_count(n)))
+
+
+local fn shift_count(n: Int) -> Int = {
+  let r = n % 8
+  if r < 0 then r + 8 else r
+}
+
+/// Zero bits above the highest set bit, counted in 8 bits; 8 for 0.
+fn count_leading_zeros(x: Int8) -> Int = int.count_leading_zeros(int.band(int.from_int8(x), 255)) - 56
+
+/// Zero bits below the lowest set bit; 8 for 0.
+fn count_trailing_zeros(x: Int8) -> Int = int.min(int.count_trailing_zeros(int.from_int8(x)), 8)
+
+/// Number of set bits among the 8.
+fn count_ones(x: Int8) -> Int = int.pop_count(int.band(int.from_int8(x), 255))
+
+/// The bytes in reverse order; one byte, so x itself.
+fn byte_swap(x: Int8) -> Int8 = x
 "#;
 pub const SRC_INT8_CONVERT: &str = r#"
 
@@ -34650,6 +34798,46 @@ fn is_even(x: UInt16) -> Bool = int.from_uint16(x) % 2 == 0
 
 /// True when x is not a multiple of 2.
 fn is_odd(x: UInt16) -> Bool = int.from_uint16(x) % 2 != 0
+
+
+/// Bitwise AND.
+fn band(a: UInt16, b: UInt16) -> UInt16 = int.to_uint16(int.band(int.from_uint16(a), int.from_uint16(b)))
+
+/// Bitwise OR.
+fn bor(a: UInt16, b: UInt16) -> UInt16 = int.to_uint16(int.bor(int.from_uint16(a), int.from_uint16(b)))
+
+/// Bitwise XOR.
+fn bxor(a: UInt16, b: UInt16) -> UInt16 = int.to_uint16(int.bxor(int.from_uint16(a), int.from_uint16(b)))
+
+/// Bitwise complement of all 16 bits.
+fn bnot(x: UInt16) -> UInt16 = int.to_uint16(int.bnot(int.from_uint16(x)))
+
+/// a shifted left by n bits; n is taken mod 16.
+fn bshl(a: UInt16, n: Int) -> UInt16 = int.to_uint16(int.bshl(int.from_uint16(a), shift_count(n)))
+
+/// Zero-filling right shift; n is taken mod 16.
+fn bshr(a: UInt16, n: Int) -> UInt16 = int.to_uint16(int.bshr(int.from_uint16(a), shift_count(n)))
+
+
+local fn shift_count(n: Int) -> Int = {
+  let r = n % 16
+  if r < 0 then r + 16 else r
+}
+
+/// Zero bits above the highest set bit, counted in 16 bits; 16 for 0.
+fn count_leading_zeros(x: UInt16) -> Int = int.count_leading_zeros(int.from_uint16(x)) - 48
+
+/// Zero bits below the lowest set bit; 16 for 0.
+fn count_trailing_zeros(x: UInt16) -> Int = int.min(
+  int.count_trailing_zeros(int.from_uint16(x)),
+  16,
+)
+
+/// Number of set bits among the 16.
+fn count_ones(x: UInt16) -> Int = int.pop_count(int.from_uint16(x))
+
+/// The 2 bytes in reverse order (endian flip).
+fn byte_swap(x: UInt16) -> UInt16 = int.to_uint16(int.bshr(int.byte_swap(int.from_uint16(x)), 48))
 "#;
 pub const SRC_UINT16_CONVERT: &str = r#"
 
@@ -34832,6 +35020,46 @@ fn is_even(x: UInt32) -> Bool = int.from_uint32(x) % 2 == 0
 
 /// True when x is not a multiple of 2.
 fn is_odd(x: UInt32) -> Bool = int.from_uint32(x) % 2 != 0
+
+
+/// Bitwise AND.
+fn band(a: UInt32, b: UInt32) -> UInt32 = int.to_uint32(int.band(int.from_uint32(a), int.from_uint32(b)))
+
+/// Bitwise OR.
+fn bor(a: UInt32, b: UInt32) -> UInt32 = int.to_uint32(int.bor(int.from_uint32(a), int.from_uint32(b)))
+
+/// Bitwise XOR.
+fn bxor(a: UInt32, b: UInt32) -> UInt32 = int.to_uint32(int.bxor(int.from_uint32(a), int.from_uint32(b)))
+
+/// Bitwise complement of all 32 bits.
+fn bnot(x: UInt32) -> UInt32 = int.to_uint32(int.bnot(int.from_uint32(x)))
+
+/// a shifted left by n bits; n is taken mod 32.
+fn bshl(a: UInt32, n: Int) -> UInt32 = int.to_uint32(int.bshl(int.from_uint32(a), shift_count(n)))
+
+/// Zero-filling right shift; n is taken mod 32.
+fn bshr(a: UInt32, n: Int) -> UInt32 = int.to_uint32(int.bshr(int.from_uint32(a), shift_count(n)))
+
+
+local fn shift_count(n: Int) -> Int = {
+  let r = n % 32
+  if r < 0 then r + 32 else r
+}
+
+/// Zero bits above the highest set bit, counted in 32 bits; 32 for 0.
+fn count_leading_zeros(x: UInt32) -> Int = int.count_leading_zeros(int.from_uint32(x)) - 32
+
+/// Zero bits below the lowest set bit; 32 for 0.
+fn count_trailing_zeros(x: UInt32) -> Int = int.min(
+  int.count_trailing_zeros(int.from_uint32(x)),
+  32,
+)
+
+/// Number of set bits among the 32.
+fn count_ones(x: UInt32) -> Int = int.pop_count(int.from_uint32(x))
+
+/// The 4 bytes in reverse order (endian flip).
+fn byte_swap(x: UInt32) -> UInt32 = int.to_uint32(int.bshr(int.byte_swap(int.from_uint32(x)), 32))
 "#;
 pub const SRC_UINT32_CONVERT: &str = r#"
 
@@ -35079,6 +35307,50 @@ fn is_even(x: UInt64) -> Bool = int.from_uint64(x) % 2 == 0
 
 /// True when x is not a multiple of 2.
 fn is_odd(x: UInt64) -> Bool = int.from_uint64(x) % 2 != 0
+
+
+/// Bitwise AND.
+fn band(a: UInt64, b: UInt64) -> UInt64 = int.to_uint64(int.band(int.from_uint64(a), int.from_uint64(b)))
+
+/// Bitwise OR.
+fn bor(a: UInt64, b: UInt64) -> UInt64 = int.to_uint64(int.bor(int.from_uint64(a), int.from_uint64(b)))
+
+/// Bitwise XOR.
+fn bxor(a: UInt64, b: UInt64) -> UInt64 = int.to_uint64(int.bxor(int.from_uint64(a), int.from_uint64(b)))
+
+/// Bitwise complement of all 64 bits.
+fn bnot(x: UInt64) -> UInt64 = int.to_uint64(int.bnot(int.from_uint64(x)))
+
+/// a shifted left by n bits; n is taken mod 64.
+fn bshl(a: UInt64, n: Int) -> UInt64 = int.to_uint64(int.bshl(int.from_uint64(a), shift_count(n)))
+
+/// Zero-filling right shift; n is taken mod 64.
+fn bshr(a: UInt64, n: Int) -> UInt64 = int.to_uint64(shift_right_zero(int.from_uint64(a), shift_count(n)))
+
+
+local fn shift_right_zero(v: Int, k: Int) -> Int = if k == 0 then v
+else int.band(int.bshr(v, k), int.bnot(int.bshl(-1, 64 - k)))
+
+
+local fn shift_count(n: Int) -> Int = {
+  let r = n % 64
+  if r < 0 then r + 64 else r
+}
+
+/// Zero bits above the highest set bit, counted in 64 bits; 64 for 0.
+fn count_leading_zeros(x: UInt64) -> Int = int.count_leading_zeros(int.from_uint64(x))
+
+/// Zero bits below the lowest set bit; 64 for 0.
+fn count_trailing_zeros(x: UInt64) -> Int = int.min(
+  int.count_trailing_zeros(int.from_uint64(x)),
+  64,
+)
+
+/// Number of set bits among the 64.
+fn count_ones(x: UInt64) -> Int = int.pop_count(int.from_uint64(x))
+
+/// The 8 bytes in reverse order (endian flip).
+fn byte_swap(x: UInt64) -> UInt64 = int.to_uint64(int.byte_swap(int.from_uint64(x)))
 "#;
 pub const SRC_UINT64_CONVERT: &str = r#"
 
@@ -35318,6 +35590,43 @@ fn is_even(x: UInt8) -> Bool = int.from_uint8(x) % 2 == 0
 
 /// True when x is not a multiple of 2.
 fn is_odd(x: UInt8) -> Bool = int.from_uint8(x) % 2 != 0
+
+
+/// Bitwise AND.
+fn band(a: UInt8, b: UInt8) -> UInt8 = int.to_uint8(int.band(int.from_uint8(a), int.from_uint8(b)))
+
+/// Bitwise OR.
+fn bor(a: UInt8, b: UInt8) -> UInt8 = int.to_uint8(int.bor(int.from_uint8(a), int.from_uint8(b)))
+
+/// Bitwise XOR.
+fn bxor(a: UInt8, b: UInt8) -> UInt8 = int.to_uint8(int.bxor(int.from_uint8(a), int.from_uint8(b)))
+
+/// Bitwise complement of all 8 bits.
+fn bnot(x: UInt8) -> UInt8 = int.to_uint8(int.bnot(int.from_uint8(x)))
+
+/// a shifted left by n bits; n is taken mod 8.
+fn bshl(a: UInt8, n: Int) -> UInt8 = int.to_uint8(int.bshl(int.from_uint8(a), shift_count(n)))
+
+/// Zero-filling right shift; n is taken mod 8.
+fn bshr(a: UInt8, n: Int) -> UInt8 = int.to_uint8(int.bshr(int.from_uint8(a), shift_count(n)))
+
+
+local fn shift_count(n: Int) -> Int = {
+  let r = n % 8
+  if r < 0 then r + 8 else r
+}
+
+/// Zero bits above the highest set bit, counted in 8 bits; 8 for 0.
+fn count_leading_zeros(x: UInt8) -> Int = int.count_leading_zeros(int.from_uint8(x)) - 56
+
+/// Zero bits below the lowest set bit; 8 for 0.
+fn count_trailing_zeros(x: UInt8) -> Int = int.min(int.count_trailing_zeros(int.from_uint8(x)), 8)
+
+/// Number of set bits among the 8.
+fn count_ones(x: UInt8) -> Int = int.pop_count(int.from_uint8(x))
+
+/// The bytes in reverse order; one byte, so x itself.
+fn byte_swap(x: UInt8) -> UInt8 = x
 "#;
 pub const SRC_UINT8_CONVERT: &str = r#"
 

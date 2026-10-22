@@ -140,3 +140,47 @@ fn is_even(x: UInt64) -> Bool = int.from_uint64(x) % 2 == 0
 
 /// True when x is not a multiple of 2.
 fn is_odd(x: UInt64) -> Bool = int.from_uint64(x) % 2 != 0
+
+// ── Integer: bitwise, FixedWidthInteger: bit counts (R-sized-10) ──
+/// Bitwise AND.
+fn band(a: UInt64, b: UInt64) -> UInt64 = int.to_uint64(int.band(int.from_uint64(a), int.from_uint64(b)))
+
+/// Bitwise OR.
+fn bor(a: UInt64, b: UInt64) -> UInt64 = int.to_uint64(int.bor(int.from_uint64(a), int.from_uint64(b)))
+
+/// Bitwise XOR.
+fn bxor(a: UInt64, b: UInt64) -> UInt64 = int.to_uint64(int.bxor(int.from_uint64(a), int.from_uint64(b)))
+
+/// Bitwise complement of all 64 bits.
+fn bnot(x: UInt64) -> UInt64 = int.to_uint64(int.bnot(int.from_uint64(x)))
+
+/// a shifted left by n bits; n is taken mod 64.
+fn bshl(a: UInt64, n: Int) -> UInt64 = int.to_uint64(int.bshl(int.from_uint64(a), shift_count(n)))
+
+/// Zero-filling right shift; n is taken mod 64.
+fn bshr(a: UInt64, n: Int) -> UInt64 = int.to_uint64(shift_right_zero(int.from_uint64(a), shift_count(n)))
+
+// A right shift of the 64-bit pattern that fills with zeros (k in 0..63).
+local fn shift_right_zero(v: Int, k: Int) -> Int = if k == 0 then v
+else int.band(int.bshr(v, k), int.bnot(int.bshl(-1, 64 - k)))
+
+// n reduced into 0..63, a negative n included.
+local fn shift_count(n: Int) -> Int = {
+  let r = n % 64
+  if r < 0 then r + 64 else r
+}
+
+/// Zero bits above the highest set bit, counted in 64 bits; 64 for 0.
+fn count_leading_zeros(x: UInt64) -> Int = int.count_leading_zeros(int.from_uint64(x))
+
+/// Zero bits below the lowest set bit; 64 for 0.
+fn count_trailing_zeros(x: UInt64) -> Int = int.min(
+  int.count_trailing_zeros(int.from_uint64(x)),
+  64,
+)
+
+/// Number of set bits among the 64.
+fn count_ones(x: UInt64) -> Int = int.pop_count(int.from_uint64(x))
+
+/// The 8 bytes in reverse order (endian flip).
+fn byte_swap(x: UInt64) -> UInt64 = int.to_uint64(int.byte_swap(int.from_uint64(x)))
