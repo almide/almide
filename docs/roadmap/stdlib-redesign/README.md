@@ -31,7 +31,7 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 
 [args](L2-args.md) ・ [base64](L2-base64.md) ・ [bigint](L2-bigint.md) ・ [bool](L2-bool.md) ・ [bytes](L2-bytes.md) ・ [compute](L2-compute.md) ・ [datetime](L2-datetime.md) ・ [deque](L2-deque.md) ・ [duration](L2-duration.md) ・ [env](L2-env.md) ・ [error](L2-error.md) ・ [ffi](L2-ffi.md) ・ [float](L2-float.md) ・ [fs](L2-fs.md) ・ [hash](L2-hash.md) ・ [heap](L2-heap.md) ・ [hex](L2-hex.md) ・ [html](L2-html.md) ・ [http](L2-http.md) ・ [int](L2-int.md) ・ [io](L2-io.md) ・ [json](L2-json.md) ・ [list](L2-list.md) ・ [map](L2-map.md) ・ [math](L2-math.md) ・ [matrix](L2-matrix.md) ・ [net](L2-net.md) ・ [option](L2-option.md) ・ [path](L2-path.md) ・ [process](L2-process.md) ・ [random](L2-random.md) ・ [regex](L2-regex.md) ・ [result](L2-result.md) ・ [set](L2-set.md) ・ [sized-numbers](L2-sized-numbers.md) ・ [string](L2-string.md) ・ [testing](L2-testing.md) ・ [unix](L2-unix.md) ・ [url](L2-url.md) ・ [uuid](L2-uuid.md) ・ [value](L2-value.md) ・ [zlib](L2-zlib.md)
 
-## 案の状態（全 319 件: ○ 255・× 60・保留 4）
+## 案の状態（全 320 件: ○ 256・× 60・保留 4）
 
 | 案 | 内容 | 判定 | issue |
 |---|---|---|---|
@@ -72,6 +72,7 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 | [R-L0-34](L0-conventions.md#r-l0-34-整数から整数への損失のある変換に-_wrapping-を置く---採用) | 整数から整数への損失のある変換に `_wrapping` を置く | ○ | #3995 |
 | [R-L0-35](L0-conventions.md#r-l0-35-無印の変換の丸めと-nan-を変換先が整数か浮動小数点かで分けて書く---採用) | 無印の変換の丸めと NaN を、変換先が整数か浮動小数点かで分けて書く | ○ | #3995 |
 | [R-L0-36](L0-conventions.md#r-l0-36-間違えても型エラーになるはそれだけでは不採用の理由にしない---採用) | 「間違えても型エラーになる」は、それだけでは不採用の理由にしない | ○ | なし |
+| [R-L0-37](L0-conventions.md#r-l0-37-標準の具体型はprotocol-の組み合わせとその型だけの関数でできている---採用方向) | 標準の具体型は「protocol の組み合わせ」と「その型だけの関数」でできている | ○ | #4000 |
 | [R-L0-G](L0-conventions.md#ゲートの束r-l0-g---採用) | ゲートの束（R-L0-G） | ○ | #3949 |
 | [R-L1-01](L1-categories.md#r-l1-01-両端キュー-deque---採用) | 両端キュー `deque` | ○ | #3932 |
 | [R-L1-02](L1-categories.md#r-l1-02-優先度キュー-heap---採用) | 優先度キュー `heap` | ○ | #3933 |
