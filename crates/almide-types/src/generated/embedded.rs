@@ -10814,6 +10814,45 @@ fn min_value() -> Int16 = int.to_int16(-32768)
 
 /// Largest Int16: 32767.
 fn max_value() -> Int16 = int.to_int16(32767)
+
+
+/// -1, 0 or 1 as a is below, equal to or above b.
+fn compare(a: Int16, b: Int16) -> Int = if a < b then -1
+else if a > b then 1 else 0
+
+/// Lesser of a and b.
+fn min(a: Int16, b: Int16) -> Int16 = if a <= b then a else b
+
+/// Greater of a and b.
+fn max(a: Int16, b: Int16) -> Int16 = if a >= b then a else b
+
+/// x limited to lo..hi; aborts when lo > hi.
+fn clamp(x: Int16, lo: Int16, hi: Int16) -> Int16 = int.to_int16(int.clamp(int.from_int16(x), int.from_int16(lo), int.from_int16(hi)))
+
+/// Quotient rounded toward -inf; b == 0 aborts; min_value / -1 wraps.
+fn floor_div(a: Int16, b: Int16) -> Int16 = int.to_int16(floor_quotient(int.from_int16(a), int.from_int16(b)))
+
+
+local fn floor_quotient(a: Int, b: Int) -> Int = if b == -1 then 0 - a
+else {
+  let q = a / b
+  if a % b != 0 and (a < 0) != (b < 0) then q - 1 else q
+}
+
+/// base raised to exp, wrapping to 16 bits like *; exp < 0 aborts.
+fn pow(base: Int16, exp: Int) -> Int16 = int.to_int16(math.pow(int.from_int16(base), exp))
+
+/// True when x is a multiple of 2.
+fn is_even(x: Int16) -> Bool = int.from_int16(x) % 2 == 0
+
+/// True when x is not a multiple of 2.
+fn is_odd(x: Int16) -> Bool = int.from_int16(x) % 2 != 0
+
+/// Magnitude of x; min_value wraps to itself.
+fn abs(x: Int16) -> Int16 = int.to_int16(int.abs(int.from_int16(x)))
+
+/// -1, 0 or 1 by the sign of x.
+fn sign(x: Int16) -> Int = math.sign(int.from_int16(x))
 "#;
 pub const SRC_INT16_CONVERT: &str = r#"
 
@@ -10996,6 +11035,45 @@ fn min_value() -> Int32 = int.to_int32(-2147483648)
 
 /// Largest Int32: 2147483647.
 fn max_value() -> Int32 = int.to_int32(2147483647)
+
+
+/// -1, 0 or 1 as a is below, equal to or above b.
+fn compare(a: Int32, b: Int32) -> Int = if a < b then -1
+else if a > b then 1 else 0
+
+/// Lesser of a and b.
+fn min(a: Int32, b: Int32) -> Int32 = if a <= b then a else b
+
+/// Greater of a and b.
+fn max(a: Int32, b: Int32) -> Int32 = if a >= b then a else b
+
+/// x limited to lo..hi; aborts when lo > hi.
+fn clamp(x: Int32, lo: Int32, hi: Int32) -> Int32 = int.to_int32(int.clamp(int.from_int32(x), int.from_int32(lo), int.from_int32(hi)))
+
+/// Quotient rounded toward -inf; b == 0 aborts; min_value / -1 wraps.
+fn floor_div(a: Int32, b: Int32) -> Int32 = int.to_int32(floor_quotient(int.from_int32(a), int.from_int32(b)))
+
+
+local fn floor_quotient(a: Int, b: Int) -> Int = if b == -1 then 0 - a
+else {
+  let q = a / b
+  if a % b != 0 and (a < 0) != (b < 0) then q - 1 else q
+}
+
+/// base raised to exp, wrapping to 32 bits like *; exp < 0 aborts.
+fn pow(base: Int32, exp: Int) -> Int32 = int.to_int32(math.pow(int.from_int32(base), exp))
+
+/// True when x is a multiple of 2.
+fn is_even(x: Int32) -> Bool = int.from_int32(x) % 2 == 0
+
+/// True when x is not a multiple of 2.
+fn is_odd(x: Int32) -> Bool = int.from_int32(x) % 2 != 0
+
+/// Magnitude of x; min_value wraps to itself.
+fn abs(x: Int32) -> Int32 = int.to_int32(int.abs(int.from_int32(x)))
+
+/// -1, 0 or 1 by the sign of x.
+fn sign(x: Int32) -> Int = math.sign(int.from_int32(x))
 "#;
 pub const SRC_INT32_CONVERT: &str = r#"
 
@@ -11200,6 +11278,45 @@ fn min_value() -> Int64 = int.to_int64(-9223372036854775807 - 1)
 
 /// Largest Int64: 2^63-1.
 fn max_value() -> Int64 = int.to_int64(9223372036854775807)
+
+
+/// -1, 0 or 1 as a is below, equal to or above b.
+fn compare(a: Int64, b: Int64) -> Int = if a < b then -1
+else if a > b then 1 else 0
+
+/// Lesser of a and b.
+fn min(a: Int64, b: Int64) -> Int64 = if a <= b then a else b
+
+/// Greater of a and b.
+fn max(a: Int64, b: Int64) -> Int64 = if a >= b then a else b
+
+/// x limited to lo..hi; aborts when lo > hi.
+fn clamp(x: Int64, lo: Int64, hi: Int64) -> Int64 = int.to_int64(int.clamp(int.from_int64(x), int.from_int64(lo), int.from_int64(hi)))
+
+/// Quotient rounded toward -inf; b == 0 aborts; min_value / -1 wraps.
+fn floor_div(a: Int64, b: Int64) -> Int64 = int.to_int64(floor_quotient(int.from_int64(a), int.from_int64(b)))
+
+
+local fn floor_quotient(a: Int, b: Int) -> Int = if b == -1 then 0 - a
+else {
+  let q = a / b
+  if a % b != 0 and (a < 0) != (b < 0) then q - 1 else q
+}
+
+/// base raised to exp, wrapping to 64 bits like *; exp < 0 aborts.
+fn pow(base: Int64, exp: Int) -> Int64 = int.to_int64(math.pow(int.from_int64(base), exp))
+
+/// True when x is a multiple of 2.
+fn is_even(x: Int64) -> Bool = int.from_int64(x) % 2 == 0
+
+/// True when x is not a multiple of 2.
+fn is_odd(x: Int64) -> Bool = int.from_int64(x) % 2 != 0
+
+/// Magnitude of x; min_value wraps to itself.
+fn abs(x: Int64) -> Int64 = int.to_int64(int.abs(int.from_int64(x)))
+
+/// -1, 0 or 1 by the sign of x.
+fn sign(x: Int64) -> Int = math.sign(int.from_int64(x))
 "#;
 pub const SRC_INT64_CONVERT: &str = r#"
 
@@ -11399,6 +11516,45 @@ fn min_value() -> Int8 = int.to_int8(-128)
 
 /// Largest Int8: 127.
 fn max_value() -> Int8 = int.to_int8(127)
+
+
+/// -1, 0 or 1 as a is below, equal to or above b.
+fn compare(a: Int8, b: Int8) -> Int = if a < b then -1
+else if a > b then 1 else 0
+
+/// Lesser of a and b.
+fn min(a: Int8, b: Int8) -> Int8 = if a <= b then a else b
+
+/// Greater of a and b.
+fn max(a: Int8, b: Int8) -> Int8 = if a >= b then a else b
+
+/// x limited to lo..hi; aborts when lo > hi.
+fn clamp(x: Int8, lo: Int8, hi: Int8) -> Int8 = int.to_int8(int.clamp(int.from_int8(x), int.from_int8(lo), int.from_int8(hi)))
+
+/// Quotient rounded toward -inf; b == 0 aborts; min_value / -1 wraps.
+fn floor_div(a: Int8, b: Int8) -> Int8 = int.to_int8(floor_quotient(int.from_int8(a), int.from_int8(b)))
+
+
+local fn floor_quotient(a: Int, b: Int) -> Int = if b == -1 then 0 - a
+else {
+  let q = a / b
+  if a % b != 0 and (a < 0) != (b < 0) then q - 1 else q
+}
+
+/// base raised to exp, wrapping to 8 bits like *; exp < 0 aborts.
+fn pow(base: Int8, exp: Int) -> Int8 = int.to_int8(math.pow(int.from_int8(base), exp))
+
+/// True when x is a multiple of 2.
+fn is_even(x: Int8) -> Bool = int.from_int8(x) % 2 == 0
+
+/// True when x is not a multiple of 2.
+fn is_odd(x: Int8) -> Bool = int.from_int8(x) % 2 != 0
+
+/// Magnitude of x; min_value wraps to itself.
+fn abs(x: Int8) -> Int8 = int.to_int8(int.abs(int.from_int8(x)))
+
+/// -1, 0 or 1 by the sign of x.
+fn sign(x: Int8) -> Int = math.sign(int.from_int8(x))
 "#;
 pub const SRC_INT8_CONVERT: &str = r#"
 
@@ -37550,6 +37706,32 @@ fn min_value() -> UInt16 = int.to_uint16(0)
 
 /// Largest UInt16: 65535.
 fn max_value() -> UInt16 = int.to_uint16(65535)
+
+
+/// -1, 0 or 1 as a is below, equal to or above b.
+fn compare(a: UInt16, b: UInt16) -> Int = if a < b then -1
+else if a > b then 1 else 0
+
+/// Lesser of a and b.
+fn min(a: UInt16, b: UInt16) -> UInt16 = if a <= b then a else b
+
+/// Greater of a and b.
+fn max(a: UInt16, b: UInt16) -> UInt16 = if a >= b then a else b
+
+/// x limited to lo..hi; aborts when lo > hi.
+fn clamp(x: UInt16, lo: UInt16, hi: UInt16) -> UInt16 = int.to_uint16(int.clamp(int.from_uint16(x), int.from_uint16(lo), int.from_uint16(hi)))
+
+/// Quotient; the same as a / b for an unsigned type; b == 0 aborts.
+fn floor_div(a: UInt16, b: UInt16) -> UInt16 = a / b
+
+/// base raised to exp, wrapping to 16 bits like *; exp < 0 aborts.
+fn pow(base: UInt16, exp: Int) -> UInt16 = int.to_uint16(math.pow(int.from_uint16(base), exp))
+
+/// True when x is a multiple of 2.
+fn is_even(x: UInt16) -> Bool = int.from_uint16(x) % 2 == 0
+
+/// True when x is not a multiple of 2.
+fn is_odd(x: UInt16) -> Bool = int.from_uint16(x) % 2 != 0
 "#;
 pub const SRC_UINT16_CONVERT: &str = r#"
 
@@ -37706,6 +37888,32 @@ fn min_value() -> UInt32 = int.to_uint32(0)
 
 /// Largest UInt32: 4294967295.
 fn max_value() -> UInt32 = int.to_uint32(4294967295)
+
+
+/// -1, 0 or 1 as a is below, equal to or above b.
+fn compare(a: UInt32, b: UInt32) -> Int = if a < b then -1
+else if a > b then 1 else 0
+
+/// Lesser of a and b.
+fn min(a: UInt32, b: UInt32) -> UInt32 = if a <= b then a else b
+
+/// Greater of a and b.
+fn max(a: UInt32, b: UInt32) -> UInt32 = if a >= b then a else b
+
+/// x limited to lo..hi; aborts when lo > hi.
+fn clamp(x: UInt32, lo: UInt32, hi: UInt32) -> UInt32 = int.to_uint32(int.clamp(int.from_uint32(x), int.from_uint32(lo), int.from_uint32(hi)))
+
+/// Quotient; the same as a / b for an unsigned type; b == 0 aborts.
+fn floor_div(a: UInt32, b: UInt32) -> UInt32 = a / b
+
+/// base raised to exp, wrapping to 32 bits like *; exp < 0 aborts.
+fn pow(base: UInt32, exp: Int) -> UInt32 = int.to_uint32(math.pow(int.from_uint32(base), exp))
+
+/// True when x is a multiple of 2.
+fn is_even(x: UInt32) -> Bool = int.from_uint32(x) % 2 == 0
+
+/// True when x is not a multiple of 2.
+fn is_odd(x: UInt32) -> Bool = int.from_uint32(x) % 2 != 0
 "#;
 pub const SRC_UINT32_CONVERT: &str = r#"
 
@@ -37922,6 +38130,37 @@ fn min_value() -> UInt64 = int.to_uint64(0)
 
 /// Largest UInt64: 2^64-1.
 fn max_value() -> UInt64 = int.to_uint64(-1)
+
+
+/// -1, 0 or 1 as a is below, equal to or above b.
+fn compare(a: UInt64, b: UInt64) -> Int = if a < b then -1
+else if a > b then 1 else 0
+
+/// Lesser of a and b.
+fn min(a: UInt64, b: UInt64) -> UInt64 = if a <= b then a else b
+
+/// Greater of a and b.
+fn max(a: UInt64, b: UInt64) -> UInt64 = if a >= b then a else b
+
+/// x limited to lo..hi; aborts when lo > hi.
+fn clamp(x: UInt64, lo: UInt64, hi: UInt64) -> UInt64 = unbias(int.clamp(bias(x), bias(lo), bias(hi)))
+
+
+local fn bias(x: UInt64) -> Int = int.bxor(int.from_uint64(x), int.bshl(1, 63))
+
+local fn unbias(n: Int) -> UInt64 = int.to_uint64(int.bxor(n, int.bshl(1, 63)))
+
+/// Quotient; the same as a / b for an unsigned type; b == 0 aborts.
+fn floor_div(a: UInt64, b: UInt64) -> UInt64 = a / b
+
+/// base raised to exp, wrapping to 64 bits like *; exp < 0 aborts.
+fn pow(base: UInt64, exp: Int) -> UInt64 = int.to_uint64(math.pow(int.from_uint64(base), exp))
+
+/// True when x is a multiple of 2.
+fn is_even(x: UInt64) -> Bool = int.from_uint64(x) % 2 == 0
+
+/// True when x is not a multiple of 2.
+fn is_odd(x: UInt64) -> Bool = int.from_uint64(x) % 2 != 0
 "#;
 pub const SRC_UINT64_CONVERT: &str = r#"
 
@@ -38135,6 +38374,32 @@ fn min_value() -> UInt8 = int.to_uint8(0)
 
 /// Largest UInt8: 255.
 fn max_value() -> UInt8 = int.to_uint8(255)
+
+
+/// -1, 0 or 1 as a is below, equal to or above b.
+fn compare(a: UInt8, b: UInt8) -> Int = if a < b then -1
+else if a > b then 1 else 0
+
+/// Lesser of a and b.
+fn min(a: UInt8, b: UInt8) -> UInt8 = if a <= b then a else b
+
+/// Greater of a and b.
+fn max(a: UInt8, b: UInt8) -> UInt8 = if a >= b then a else b
+
+/// x limited to lo..hi; aborts when lo > hi.
+fn clamp(x: UInt8, lo: UInt8, hi: UInt8) -> UInt8 = int.to_uint8(int.clamp(int.from_uint8(x), int.from_uint8(lo), int.from_uint8(hi)))
+
+/// Quotient; the same as a / b for an unsigned type; b == 0 aborts.
+fn floor_div(a: UInt8, b: UInt8) -> UInt8 = a / b
+
+/// base raised to exp, wrapping to 8 bits like *; exp < 0 aborts.
+fn pow(base: UInt8, exp: Int) -> UInt8 = int.to_uint8(math.pow(int.from_uint8(base), exp))
+
+/// True when x is a multiple of 2.
+fn is_even(x: UInt8) -> Bool = int.from_uint8(x) % 2 == 0
+
+/// True when x is not a multiple of 2.
+fn is_odd(x: UInt8) -> Bool = int.from_uint8(x) % 2 != 0
 "#;
 pub const SRC_UINT8_CONVERT: &str = r#"
 
