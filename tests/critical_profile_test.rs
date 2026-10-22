@@ -175,3 +175,50 @@ fn a_variant_constructor_is_a_value_not_a_call() {
     let (crit, err) = check(payload, "variant_payload_hof.almd", &["--profile", "critical"]);
     assert!(!crit && err.contains("E074"), "a higher-order call inside a constructor payload must stay E074:\n{err}");
 }
+
+/// #4008: `--profile critical` admits only code inside the memory-safety
+/// guarantee. Every `ffi.*` call, the five deprecated `bytes` raw-pointer
+/// spellings and an `@extern` declaration are E100, and no `--allow` grant
+/// brings them back, unlike a capability. Each program passes the normal
+/// check (the subset witness). The `bytes.from_raw_ptr` row is the probe the
+/// issue recorded: an over-long read off a 3-byte buffer passed
+/// `--profile critical --allow IO` clean.
+#[test]
+fn memory_unsafe_surface_is_refused_under_critical() {
+    let cases: Vec<(&str, &str)> = vec![
+        ("`ffi.address`", "import ffi\n\nfn main() -> Unit = {\n  let b = bytes.from_string(\"abc\")\n  let p = ffi.address(b)\n  println(\"ok\")\n}\n"),
+        ("`ffi.to_int`", "import ffi\n\nfn main() -> Unit = {\n  let b = bytes.from_string(\"abc\")\n  println(int.to_string(ffi.to_int(ffi.address(b))))\n}\n"),
+        ("`ffi.read`", "import ffi\n\neffect fn main() -> Unit = {\n  let b = bytes.from_string(\"abc\")\n  let c = ffi.read(ffi.address(b), 3)\n  println(int.to_string(bytes.len(c)))\n}\n"),
+        ("`ffi.write`", "import ffi\n\neffect fn main() -> Unit = {\n  var d = bytes.new(3)\n  let n = ffi.write(ffi.address(d), bytes.from_string(\"abc\"), 3)\n  println(int.to_string(n))\n}\n"),
+        ("`bytes.as_ptr`", "fn main() -> Unit = {\n  let b = bytes.from_string(\"abc\")\n  let p = bytes.as_ptr(b)\n  println(\"ok\")\n}\n"),
+        ("`bytes.as_mut_ptr`", "fn main() -> Unit = {\n  var b = bytes.from_string(\"abc\")\n  let p = bytes.as_mut_ptr(b)\n  println(\"ok\")\n}\n"),
+        ("`bytes.data_ptr`", "fn main() -> Unit = {\n  let b = bytes.from_string(\"abc\")\n  println(int.to_string(bytes.data_ptr(b)))\n}\n"),
+        ("`bytes.from_raw_ptr`", "fn main() -> Unit = {\n  let b = bytes.from_string(\"abc\")\n  let c = bytes.from_raw_ptr(bytes.as_ptr(b), 1000000)\n  println(int.to_string(bytes.len(c)))\n}\n"),
+        ("`bytes.copy_to_ptr`", "fn main() -> Unit = {\n  var d = bytes.new(3)\n  let n = bytes.copy_to_ptr(bytes.from_string(\"abc\"), bytes.as_mut_ptr(d), 3)\n  println(int.to_string(n))\n}\n"),
+        ("an `@extern` function", "@extern(rs, \"std::cmp\", \"max\")\nfn imax(a: Int, b: Int) -> Int\n\nfn main() -> Unit = println(int.to_string(imax(1, 2)))\n"),
+    ];
+    for (i, (what, src)) in cases.iter().enumerate() {
+        let name = format!("mem_unsafe{i}.almd");
+        let (normal, err) = check(src, &name, &[]);
+        assert!(normal, "{what}: the normal check must accept the program (subset witness):\n{err}");
+        for grants in [&["--profile", "critical"][..], &["--profile", "critical", "--allow", "IO"][..]] {
+            let (crit, err) = check(src, &name, grants);
+            assert!(!crit, "{what}: {grants:?} accepted it");
+            assert!(err.contains("E100"), "{what}: expected E100, got:\n{err}");
+            assert!(err.contains(what), "{what}: the diagnostic does not name it:\n{err}");
+            assert!(err.contains("memory-safety guarantee"), "{what}: the reason is not named:\n{err}");
+            assert!(err.contains("--profile critical"), "{what}: the profile is not named:\n{err}");
+        }
+    }
+}
+
+/// The refusal is the critical profile's, not ALS §B's: a plain `@bounded`
+/// fn keeps the E070–E079 vocabulary (an `ffi` call there is the E076 of any
+/// module outside the declared capability).
+#[test]
+fn memory_safety_refusal_is_critical_only() {
+    let src = "import ffi\n\n@bounded\nfn addr(b: Bytes) -> Int = ffi.to_int(ffi.address(b))\n\nfn main() -> Unit = println(int.to_string(addr(bytes.from_string(\"abc\"))))\n";
+    let (ok, err) = check(src, "bounded_ffi.almd", &[]);
+    assert!(!ok, "a @bounded fn accepted an ffi call");
+    assert!(err.contains("E076") && !err.contains("E100"), "expected E076 under @bounded, got:\n{err}");
+}

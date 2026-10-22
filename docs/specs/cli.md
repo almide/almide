@@ -1,6 +1,6 @@
 # CLI Specification
 
-> Last updated: 2026-10-03
+> Last updated: 2026-10-23
 
 ## Overview
 
@@ -411,6 +411,16 @@ error[E076]: an effect outside the declared capability is not admissible under `
   hint: capabilities start deny-all — grant one with --allow IO|Net|Env|Time|Rand|Process
 $ almide check rd.almd --profile critical --allow IO
 No errors found
+```
+
+メモリ安全の保証の外にあるものは E100 になり、どの `--allow` でも通らない(#4008)。
+`ffi.*` の呼び出し、非推奨の `bytes` の生ポインタ関数(`as_ptr`・`as_mut_ptr`・
+`data_ptr`・`from_raw_ptr`・`copy_to_ptr`)の呼び出し、`@extern` fn の宣言の 3 つ。
+`--profile` 無しの check では同じプログラムが通る。
+
+```
+$ almide check raw.almd --profile critical --allow IO
+error[E100]: `bytes.from_raw_ptr` is outside the memory-safety guarantee and is not admissible under `--profile critical`
 ```
 
 拒否されるもの(いずれも終了コード 1):
