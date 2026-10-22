@@ -231,7 +231,7 @@ ADR-0022 のとおり、純粋な関数は書き出しと abort はできます�
 
 ## R-L0-16 順序のある型には `compare` を置く — ○ 採用
 
-順序のある型（`int`、`float`、sized の数、`bigint`、`string`、`bytes`、`duration`、`compute`、`uuid`）には、`<mod>.compare(a, b) -> Int` を置きます。小さければ負、等しければ 0、大きければ正を返します。`list.sort_with` などの比較関数は、この形の関数を受け取ります（R-L0-10）。
+順序のある型（`int`、`float`、sized の数、`bigint`、`bool`、`string`、`bytes`、`duration`、`compute`、`uuid`）には、`<mod>.compare(a, b) -> Int` を置きます。小さければ負、等しければ 0、大きければ正を返します。`list.sort_with` などの比較関数は、この形の関数を受け取ります（R-L0-10）。
 
 - (a) 3 値を返す比較関数は、Rust の `cmp`（`Ordering`）、Go の `cmp.Compare`、Kotlin の `compareTo`、OCaml の `compare`、Gleam の `int.compare`（`Order`）、Elixir の `compare` と、多数派が持っています。
 - (c) `list.sort_with(xs, int.compare)` のように、比較関数を自分で書かずに渡せます。
