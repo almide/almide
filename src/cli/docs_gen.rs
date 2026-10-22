@@ -50,9 +50,10 @@ pub fn cmd_docs_gen(check: bool) {
     drifts.extend(check_diagnostic_registry_bijection());
     drifts.extend(check_stdlib_fn_count());
     drifts.extend(check_numeric_conversion_matrix());
+    drifts.extend(check_numeric_protocol_matrix());
 
     if drifts.is_empty() {
-        out(&format!("docs-gen: ok (version, llms.txt diagnostic refs, auto-imported, registry bijection, stdlib count, numeric matrix)"));
+        out(&format!("docs-gen: ok (version, llms.txt diagnostic refs, auto-imported, registry bijection, stdlib count, numeric matrix, numeric protocol matrix)"));
         return;
     }
 
@@ -322,6 +323,55 @@ fn check_stdlib_fn_count() -> Vec<String> {
     drifts
 }
 
+/// The public function names of one bundled stdlib module, read from the
+/// compiler's own module interface (the same view `almide compile <m>` prints).
+fn module_function_names(m: &str) -> std::collections::HashSet<String> {
+    let (file, bundled_module) = super::compile::resolve_module_to_file(m);
+    let (program, source_text, checker) =
+        super::compile::parse_and_typecheck_for_compile(&file, bundled_module.as_deref());
+    let ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
+    let iface = almide::interface::extract(&ir, m, Some(&source_text));
+    iface.functions.iter().map(|f| f.name.clone()).collect()
+}
+
+/// The fixed-width numeric PROTOCOL matrix gate (R-sized-02/08/10, R-int-11/12).
+/// The protocol pyramid (docs/roadmap/stdlib-redesign/protocol-view.md) is an assumed
+/// design: the language cannot yet say `Int8: Integer`, so every type carries each
+/// requirement as a concrete function. That makes the requirements a matrix — every
+/// carrier × every requirement of each protocol it conforms to — and this gate checks
+/// every cell exists, so the family can only be extended a whole row or column at a
+/// time. `mod` is absent from the integer rows on purpose: it is a reserved word, so
+/// `fn mod(...)` cannot be declared today.
+fn check_numeric_protocol_matrix() -> Vec<String> {
+    const INTEGERS: &[(&str, bool)] = &[
+        ("int8", true), ("int16", true), ("int32", true), ("int64", true),
+        ("uint8", false), ("uint16", false), ("uint32", false), ("uint64", false),
+    ];
+    // Integer (R-sized-02/08/10).
+    const INTEGER: &[&str] = &[
+        "compare", "min", "max", "clamp", "to_string", "min_value", "max_value",
+        "floor_div", "pow", "is_even", "is_odd",
+    ];
+    // SignedInteger (R-sized-10).
+    const SIGNED: &[&str] = &["abs", "sign"];
+
+    let mut drifts = Vec::new();
+    let mut require = |m: &str, names: &[&str]| {
+        let surface = module_function_names(m);
+        for f in names {
+            if !surface.contains(*f) {
+                drifts.push(format!("numeric protocol matrix: `{m}.{f}` is a requirement of a protocol `{m}` conforms to, but missing"));
+            }
+        }
+    };
+    for (m, signed) in INTEGERS {
+        let mut names: Vec<&str> = INTEGER.to_vec();
+        if *signed { names.extend_from_slice(SIGNED); }
+        require(m, &names);
+    }
+    drifts
+}
+
 /// The integer-conversion MATRIX gate (#956). The conversion family is defined
 /// by a rule, not by enumeration-by-hand: over the carriers {Int, Int8..Int64,
 /// UInt8..UInt64}, every ordered pair has the plain (truncating) form, and a
@@ -378,12 +428,7 @@ fn check_numeric_conversion_matrix() -> Vec<String> {
     let mut surface: std::collections::HashMap<&str, std::collections::HashSet<String>> =
         std::collections::HashMap::new();
     for m in CARRIERS.iter().map(|c| c.0).chain(["int"]) {
-        let (file, bundled_module) = super::compile::resolve_module_to_file(m);
-        let (program, source_text, checker) =
-            super::compile::parse_and_typecheck_for_compile(&file, bundled_module.as_deref());
-        let ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
-        let iface = almide::interface::extract(&ir, m, Some(&source_text));
-        surface.insert(m, iface.functions.iter().map(|f| f.name.clone()).collect());
+        surface.insert(m, module_function_names(m));
     }
     for (m, f) in &expect_present {
         if !surface[m].contains(f) {
