@@ -191,7 +191,7 @@ fn main() -> Unit = {
 Caller must pass a `var` binding (`let`, a non-`mut` parameter or a temporary
 is E032). `mut` can be on any parameter, any position. This is how every
 in-place stdlib op works (`list.push`, `list.pop`, `list.clear`, `map.insert`,
-`string.push`, and the whole `bytes` writer family — `push`, `append_*`,
+`map.delete`, `map.clear`, `string.push`, `string.clear`, and the whole `bytes` writer family — `push`, `append_*`,
 `set_*`, `write_*`, `fill`, `clear`, `copy_from`): the receiver is a `mut`
 parameter, so a local buffer is a `var` and a helper that writes its caller's
 buffer declares `mut b: Bytes`. Value semantics otherwise: `let c = a` copies,

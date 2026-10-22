@@ -31,7 +31,7 @@
 
 ---
 
-Almide is a statically-typed language for code that AI writes and edits. The claim is not that the model gets it right. It is that **when the model is wrong, the compiler says so at author time and names the fix; and when the model is right, a checker proven in Rocq certifies that the program is memory-safe**: `almide verify` hands its ownership, name and capability witnesses to the independent `almide-verify` (a certificate over the shipped wasm bytes themselves is still pending, #2755–#2760). It compiles to native binaries (via Rust) and to WebAssembly, and the two produce byte-identical output.
+Almide is a statically-typed language for code that AI writes and edits. The claim is not that the model gets it right. It is that **when the model is wrong, the compiler says so at author time and names the fix**. Programs compile to native binaries (via Rust) and to WebAssembly, with byte-identical output on every [contracted behaviour](./docs/contracts/). `almide verify` checks their ownership, name and capability witnesses ([what is proven, what is trusted](./docs/contracts/proven-vs-trusted.md)).
 
 ## An edit that survives
 
@@ -86,8 +86,8 @@ almide run hello.almd --target wasm   # same bytes, on wasmtime
 
 ## Features
 
-- **Multi-target** — one source, a native binary (via Rust) or WebAssembly (direct emit, no LLVM), byte-identical output ([contracts](./docs/contracts/))
-- **Diagnostics that name the fix** — every error carries its location, its context and one concrete repair ([codes](./docs/diagnostics/))
+- **Multi-target** — one source, a native binary (via Rust) or WebAssembly (direct emit, no LLVM), byte-identical output on every behaviour in the contract ledger ([contracts](./docs/contracts/))
+- **Diagnostics that name the fix** — every error carries its location and its context, and a concrete repair where one is known ([codes](./docs/diagnostics/))
 - **Explicit effects** — `effect fn` with `expr!` propagation; a bare fallible call is an error, never silent ([cheatsheet](./docs/CHEATSHEET.md))
 - **Types** — generics, records, variants with exhaustive `match`, bidirectional inference, `Codec` auto-derive ([spec](./docs/SPEC.md))
 - **Memory without annotations** — Perceus-style ownership inference, no GC, no lifetimes ([memory safety](./docs/design/MEMORY-SAFETY.md))
@@ -102,7 +102,7 @@ almide run hello.almd --target wasm   # same bytes, on wasmtime
 - [What is measured](./docs/benchmarks/README.md) — LLM writability, byte identity, memory safety, size and speed, each dated and gated · [benchmark methodology](./docs/project/BENCHMARKS.md)
 - [Behavior contracts](./docs/contracts/) — every native ⇄ wasm promise and its evidence · [proven vs trusted](./docs/contracts/proven-vs-trusted.md)
 - [How it works](./docs/how-it-works.md) — the pipeline and the Trust Spine · [architecture](./docs/ARCHITECTURE.md)
-- [Project status](./docs/status.md) — pre-1.0; the LLM-facing surface is frozen · [roadmap](./docs/roadmap/README.md)
+- [Project status](./docs/status.md) — pre-1.0; the LLM-facing surface changes only through a dialect epoch with a migration diagnostic ([stability policy](./docs/STABILITY.md)) · [roadmap](./docs/roadmap/README.md)
 - [Written in Almide](./docs/written-in-almide.md) — agents, parsers, graphics and libraries outside this repository · editors: [vscode-almide](https://github.com/almide/vscode-almide), [tree-sitter-almide](https://github.com/almide/tree-sitter-almide)
 
 ## Contributing

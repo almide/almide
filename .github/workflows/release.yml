@@ -18,7 +18,20 @@ permissions:
   attestations: write
 
 jobs:
+  # The release title and body come from docs/releases/<tag>.md, written by
+  # hand and committed before the tag. Checked first, so a tag without notes
+  # (or with the auto-generated "What's Changed" PR list) fails in seconds
+  # instead of after every build.
+  notes:
+    name: Release notes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check docs/releases/<tag>.md
+        run: bash scripts/check-release-notes.sh "${GITHUB_REF#refs/tags/}"
+
   build:
+    needs: notes
     name: Build (${{ matrix.target }})
     strategy:
       fail-fast: false
@@ -172,6 +185,7 @@ jobs:
           # language-surface change and the final tag.
           FLAGS=""
           case "$TAG" in *-rc*) FLAGS="--prerelease" ;; esac
+          bash scripts/check-release-notes.sh "$TAG" notes-out
           gh release create "$TAG" release/* \
-            --title "$TAG" \
-            --generate-notes $FLAGS
+            --title "$(cat notes-out/title)" \
+            --notes-file notes-out/body.md $FLAGS

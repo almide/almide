@@ -1,0 +1,62 @@
+{
+  "meta": {
+    "date": "2026-10-20",
+    "label": "gce-c4a-standard-8",
+    "host": "Linux-7.0.0-1014-gcp-aarch64-with-glibc2.39",
+    "cpu": "aarch64",
+    "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+    "almide": "almide 0.68.0 (release, fcba2bcd5)",
+    "wasmtime": null,
+    "ref_rustc_flags": [
+      "-C",
+      "opt-level=3",
+      "-C",
+      "lto=yes",
+      "-C",
+      "codegen-units=1",
+      "-C",
+      "overflow-checks=no",
+      "--edition",
+      "2021",
+      "-C",
+      "llvm-args=-force-ordered-reductions=false"
+    ],
+    "ref_flags_from": "almide 0.68.0 (dev, 67a50022c)",
+    "runs": 5,
+    "quick": true,
+    "machine": "GCE c4a-standard-8, Neoverse-V2, 8 vCPU, asia-northeast1-b",
+    "binary": "v0.68.0-rc2 release asset almide-linux-aarch64.tar.gz (main fcba2bcd5)",
+    "ref_flags_note": "Rust references built with RUSTC_FLAGS plus `almide build --print-release-rustflags` (asked of a build of bench-refresh-0680 67a50022c, whose release-flag rule in src/cli/native_target.rs is unchanged from fcba2bcd5)"
+  },
+  "results": {
+    "wordfreq": {
+      "arg": "8000000",
+      "variants": {
+        "wordfreq/native": {
+          "min": 0.1979,
+          "median": 0.1982,
+          "mean": 0.1982,
+          "runs": [
+            0.1984,
+            0.1979,
+            0.1982,
+            0.198,
+            0.1982
+          ]
+        },
+        "wordfreq/rust:wordfreq": {
+          "min": 0.3362,
+          "median": 0.3375,
+          "mean": 0.3383,
+          "runs": [
+            0.3374,
+            0.3362,
+            0.3427,
+            0.3379,
+            0.3375
+          ]
+        }
+      }
+    }
+  }
+}

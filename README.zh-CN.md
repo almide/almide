@@ -31,7 +31,7 @@
 
 ---
 
-Almide 是一门面向「由 AI 编写、由 AI 修改的代码」的静态类型语言。它的主张不是「模型能写对」，而是：**当模型写错时，编译器在编写阶段就指出来，并点名该怎么改；当模型写对时，一个在 Rocq 中证明过的检查器会证明该程序内存安全。** `almide verify` 把程序的所有权、名称与能力见证交给独立的 `almide-verify`（针对所发布 wasm 字节本身的证书仍在推进中，#2755–#2760）。它同时编译为原生二进制（经由 Rust）和 WebAssembly，两者产生逐字节相同的输出。
+Almide 是一门面向「由 AI 编写、由 AI 修改的代码」的静态类型语言。它的主张不是「模型能写对」，而是：**当模型写错时，编译器在编写阶段就指出来，并点名该怎么改。** 程序编译为原生二进制（经由 Rust）和 WebAssembly，在每一项[契约](./docs/contracts/)行为上输出逐字节相同。`almide verify` 检查程序的所有权、名称与能力见证（[哪些已证明，哪些是受信任的](./docs/contracts/proven-vs-trusted.md)）。
 
 ## 活下来的一次修改
 
@@ -86,8 +86,8 @@ almide run hello.almd --target wasm   # 相同的字节，在 wasmtime 上
 
 ## 特性
 
-- **多目标** —— 同一份源码编译为原生二进制（经由 Rust）或 WebAssembly（直接产出，不经 LLVM），输出逐字节相同（[契约](./docs/contracts/)）
-- **点名修复的诊断** —— 每条错误都带有位置、上下文和一个具体的修改（[错误码](./docs/diagnostics/)）
+- **多目标** —— 同一份源码编译为原生二进制（经由 Rust）或 WebAssembly（直接产出，不经 LLVM），对契约台账中的行为输出逐字节相同（[契约](./docs/contracts/)）
+- **点名修复的诊断** —— 每条错误都带有位置和上下文，已知修法的错误还附带一个具体的修改（[错误码](./docs/diagnostics/)）
 - **显式 effect** —— `effect fn` 与 `expr!` 传播；裸的可失败调用是错误，绝不静默（[速查表](./docs/CHEATSHEET.md)）
 - **类型** —— 泛型、记录、带穷尽 `match` 的 variant、双向类型推导、`Codec` 自动派生（[规范](./docs/SPEC.md)）
 - **无需注解的内存管理** —— Perceus 式所有权推导，没有 GC，没有生命周期（[内存安全](./docs/design/MEMORY-SAFETY.md)）
@@ -104,7 +104,7 @@ almide run hello.almd --target wasm   # 相同的字节，在 wasmtime 上
 - [测量了什么](./docs/benchmarks/README.md) —— LLM 可写性、逐字节相同、内存安全、体积与速度，均带日期并有门禁 · [基准方法](./docs/project/BENCHMARKS.md)
 - [行为契约](./docs/contracts/) —— 原生 ⇄ wasm 的每一项承诺及其证据 · [证明与信任的边界](./docs/contracts/proven-vs-trusted.md)
 - [工作原理](./docs/how-it-works.md) —— 流水线与信任主干 · [架构](./docs/ARCHITECTURE.md)
-- [项目状态](./docs/status.md) —— 1.0 之前；面向 LLM 的表面已冻结 · [路线图](./docs/roadmap/README.md)
+- [项目状态](./docs/status.md) —— 1.0 之前；面向 LLM 的表面只通过附带迁移诊断的 dialect epoch 变更（[稳定性策略](./docs/STABILITY.md)） · [路线图](./docs/roadmap/README.md)
 - [用 Almide 写成的](./docs/written-in-almide.md) —— 本仓库之外的智能体、解析器、图形与库 · 编辑器：[vscode-almide](https://github.com/almide/vscode-almide)、[tree-sitter-almide](https://github.com/almide/tree-sitter-almide)
 
 ## 参与贡献

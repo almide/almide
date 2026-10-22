@@ -113,6 +113,7 @@ pub fn cmd_install(
         release: true,
         fast: false,
         target_cpu: None,
+        print_release_rustflags: false,
         unchecked_index: false,
         no_check: false,
         repr_c: false,

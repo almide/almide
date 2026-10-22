@@ -99,7 +99,7 @@
 # its measurand (0 -> 1). Both are enumerated gates, not new ones.
 #
 # unmapped_blind_ceiling = "108"
-# uncompensated_blind_ceiling = "16"
+# uncompensated_blind_ceiling = "18"
 #
 # History of the unverified ceiling: it moved 0 -> 2 when enumerating the
 # Almide gates (#2128) brought `output-parity` and `fuzz-track-record` INTO the
@@ -922,7 +922,7 @@ path = "scripts/check-interface-diff-negative.sh"
 reads = "UNCLASSIFIED"
 wired_by = ".github/workflows/ci.yml"
 class = "EXERCISED"
-evidence = "#1860 landing (2026-09-03): recorded 9-mode exercise on every run against a scratch git repository carrying a copy of docs/stdlib/*.md (the gate reads refs, so a forged index is a commit, fed through INTERFACE_DIFF_ROOT) — one positive control (base vs base must be `identical`, so a harness blind to the index cannot report vacuous green) plus eight forged inputs: an EFFECT fn deleted (breaking, named, exit 1 — the #1860 direction); a pure fn deleted (breaking); the same effect fn with its return type changed (breaking, 1 added / 1 removed — the http.serve v0.56->v0.57 shape); the effect removal with --allow-breaking (declared path, exit 0); an effect fn added and a pure fn added (each `additive (1, 0)` and listed); the effect removal reversed (additive); and every signature stripped from the index (must exit 2 naming the missing index, not classify). The pre-#1860 matcher, run through INTERFACE_DIFF_GATE, fails the removed-effect control with `identical` — the demonstration that the control fires. Wired into the checks job directly after the dialect-epoch negatives."
+evidence = "#1860 landing (2026-09-03): recorded 9-mode exercise on every run against a scratch git repository carrying a copy of docs/stdlib/*.md (the gate reads refs, so a forged index is a commit, fed through INTERFACE_DIFF_ROOT) — one positive control (base vs base must be `identical`, so a harness blind to the index cannot report vacuous green) plus eight forged inputs: an EFFECT fn deleted (breaking, named, exit 1 — the #1860 direction); a pure fn deleted (breaking); the same effect fn with its return type changed (breaking, 1 added / 1 removed — the http.serve v0.56->v0.57 shape); the effect removal with --allow-breaking (declared path, exit 0); an effect fn added and a pure fn added (each `additive (1, 0)` and listed); the effect removal reversed (additive); and every signature stripped from the index (must exit 2 naming the missing index, not classify). The pre-#1860 matcher, run through INTERFACE_DIFF_GATE, fails the removed-effect control with `identical` — the demonstration that the control fires. Wired into the checks job directly after the dialect-epoch negatives. 2026-10-21 (the `mut` column): two more forged inputs over a copy of stdlib/*.almd carried into the scratch repo — every `mut ` stripped from the index (a pre-column rendering) reads `identical` against the current one with each re-render counted and named, and the same stripped index over a source whose first `mut` fn no longer declares it (the fn GAINED `mut` since) reads `breaking (added=1 removed=1)` naming the new line."
 measures = "the classification check-interface-diff.sh gives nine forged commits in a scratch repository (a removed pure fn, a removed effect fn, an added effect fn, ...)"
 varies = "#1860 landing (2026-09-03): before the matcher fix a removed effect fn read `identical` and six added effect twins read `added=3`; after, each forged commit reads its intended class"
 blind = "UNMAPPED"
@@ -1397,3 +1397,23 @@ reason = "renders the release dossier asset; it judges nothing"
 [[not_a_gate]]
 path = "scripts/gen-ledger-counts.sh"
 reason = "the refresh that restamps proofs/ledger-counts.toml; the verdict is scripts/check-ledger-counts.sh"
+
+[[gate]]
+path = "scripts/check-release-notes.sh"
+reads = "scalar"
+wired_by = ".github/workflows/release.yml"
+class = "NEGATIVE_TESTED"
+evidence = "landing PR (2026-10-20): docs/releases/v0.68.0-rc2.md forged six ways, each exit 1 with its own message — the generated '## What's Changed' body, bare '* <title> by @user in <url>' lines, a ':' title, a 5-character headline, no Full Changelog line, an empty body; a missing file (v9.9.9) also exit 1. Restored file exit 0, and its title/body split reproduced the published release body byte for byte."
+measures = "whether docs/releases/<tag>.md has the '# <tag> — <headline>' title line and a body free of the generated PR-list shape ending in the compare link, read from that file"
+varies = "landing PR (2026-10-20): exit 0 on the seeded v0.68.0-rc1/rc2 notes, exit 1 on each forged copy"
+blind = "notes that pass the shape but misstate what the release contains (a wrong claim, a missing change) -> UNCOMPENSATED"
+
+[[gate]]
+path = "scripts/fuzz-green-streak.sh"
+reads = "scalar"
+wired_by = ".github/workflows/ledger-counts.yml, scripts/check-stability-closure.sh"
+class = "EXERCISED"
+evidence = "2026-10-21, both directions on the real fuzz history: the full history reads 0 (2026-10-20 had a red scheduled night beside a green dispatch, so the day is not clean), and the same meter over the history cut before 2026-10-19 reads 3 (2026-10-16..18 clean). The ledger row it feeds was last appended 2026-08-10, so STAGE-STATUS quoted 0 through that 3-day streak. The --update path is exercised both ways: an unchanged streak leaves the ledger byte-identical, and a forged last row of 5 is followed by an appended 0 row, while check-ledger-counts names the drift ('fuzz_green_streak_days: recorded 0, measured 5')."
+measures = "consecutive calendar days on which every completed Fuzz (nightly) run's verdict job concluded success over >= 75% of the planned fuzz-minutes, read from the Actions API and the verdict-job logs"
+varies = "2026-10-18 reads 3 (start 2026-10-16), 2026-10-20 reads 0, both measured 2026-10-21"
+blind = "a correctness bug the fuzz generator cannot reach: a clean night means no finding in the generated programs, not none in the compiler -> UNCOMPENSATED"

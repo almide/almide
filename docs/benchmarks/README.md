@@ -22,8 +22,8 @@ The guarantee is **continuous, with an explicit, ledger-managed scope**: "byte-i
 This claim is not prose. Every observable promise is a named contract in the [behavior-contract ledger](../contracts/), each traceable to executable evidence, and the numbers below are regenerated from the ledger (`scripts/gen-claims.sh`, enforced by `scripts/check-contracts.sh` in CI):
 
 <!-- claims:generated:start — derived from docs/contracts/contracts.toml by scripts/gen-claims.sh; DO NOT EDIT between the markers -->
-> <!-- counts:generated:start (as of 2026-10-10) — stamped totals from proofs/ledger-counts.toml; refreshed only by scripts/gen-ledger-counts.sh, never by a fixture/contract PR; DO NOT EDIT between the markers -->
-> **Ledger: 376 contracts — 376 active, 0 flagged-for-revision.**
+> <!-- counts:generated:start (as of 2026-10-21) — stamped totals from proofs/ledger-counts.toml; refreshed only by scripts/gen-ledger-counts.sh, never by a fixture/contract PR; DO NOT EDIT between the markers -->
+> **Ledger: 388 contracts — 388 active, 0 flagged-for-revision.**
 > <!-- counts:generated:end -->
 >
 > **Divergences awaiting a fix: none.** Every contract in the ledger is
@@ -43,25 +43,25 @@ You write no ownership annotations, no lifetimes, no `free`: [Perceus](https://w
 No VM, no GC, no interpreter — native compiles through Rust to machine code, and WASM is emitted directly as self-contained modules (the runtime support a program reaches is linked in and the rest is pruned).
 
 <!-- wasm-size:generated:start — rendered from docs/benchmarks/wasm-size.txt by scripts/gen-readme-stats.sh; DO NOT EDIT between the markers -->
-| Program (`almide build --target wasm`, as shipped) | develop | released v0.66.0 |
+| Program (`almide build --target wasm`, as shipped) | develop | released v0.68.0-rc2 |
 |---|---:|---:|
-| Hello, world | **325 B** | **953 B** |
+| Hello, world | **325 B** | **325 B** |
 
-The develop column is the develop build at 5f39c06ba, after the v0.66.0 release (`almide --version`: `almide 0.66.0 (dev, 5f39c06ba)`), measured 2026-10-03; CI rebuilds it on every push and fails if the bytes move without a restamp of `docs/benchmarks/wasm-size.txt`. The released column is the compiler from the v0.66.0 release asset (`almide 0.66.0 (release, 819bbc74f)`, `gh release download v0.66.0 -R almide/almide`), measured 2026-10-03. No post-hoc optimizer touches the shipped bytes (`--wasm-opt` is opt-in and its output is not the renderer's own module).
+The develop column is the develop build at 437b8f127, before v0.68.0 is tagged (`almide --version`: `almide 0.68.0 (dev, 437b8f127)`), measured 2026-10-20; CI rebuilds it on every push and fails if the bytes move without a restamp of `docs/benchmarks/wasm-size.txt`. The released column is the compiler from the v0.68.0-rc2 release asset (`almide 0.68.0 (release, fcba2bcd5)`, `gh release download v0.68.0-rc2 -R almide/almide`), measured 2026-10-20. No post-hoc optimizer touches the shipped bytes (`--wasm-opt` is opt-in and its output is not the renderer's own module).
 <!-- wasm-size:generated:end -->
 
-Rust on the same wasm target is 40 KB+ for Hello, world even fully size-tuned: 40,379 B with `rustc 1.96.1`, `wasm32-wasip1`, `opt-level="z"`, `lto`, `strip`, `panic="abort"`, `codegen-units=1` (64,844 B with the default release profile), measured 2026-10-03 by the recipe at the bottom of [WASM-OUTPUT.md](../wasm/WASM-OUTPUT.md). The native CLI-shaped benchmark (`research/benchmark/perf/native/cli_app.almd`, built by `research/benchmark/perf/native/measure.sh`) is 464,488 B stripped on macOS arm64 with no crate dependencies (only `libSystem` is linked), measured 2026-10-03 with both the develop build and the v0.66.0 release. The byte-by-byte dissection, measured 2026-07-23 (it also covers the incumbent leg, since retired by #2761): **[docs/wasm/WASM-OUTPUT.md](../wasm/WASM-OUTPUT.md)**.
+Rust on the same wasm target is 37 KB+ for Hello, world even fully size-tuned: 37,541 B with `rustc 1.99.1`, `wasm32-wasip1`, `opt-level="z"`, `lto`, `strip`, `panic="abort"`, `codegen-units=1` (62,405 B with the default release profile), measured 2026-10-20 on GCE c4-standard-8 by the recipe at the bottom of [WASM-OUTPUT.md](../wasm/WASM-OUTPUT.md). The native CLI-shaped benchmark (`research/benchmark/perf/native/cli_app.almd`, the build `research/benchmark/perf/native/measure.sh` makes) is 507,960 B stripped on x86_64 Linux (GCE c4-standard-8) and 463,720 B on aarch64 Linux (GCE c4a-standard-8), built 2026-10-20 by the v0.68.0-rc2 release binaries, with no crate dependencies (only the C library — `libc`, `libgcc_s` — is linked). The byte-by-byte dissection: **[docs/wasm/WASM-OUTPUT.md](../wasm/WASM-OUTPUT.md)**.
 
-Against handwritten Rust the arithmetic kernels sit at parity: n-body and spectral-norm 1.00× on an Apple M4 Pro (2026-07-30), and 1.065× and 1.032× on the ubuntu-latest CI runner (develop CI run [37092258733](https://github.com/almide/almide/actions/runs/37092258733), 2026-10-03). Where Almide has information Rust does not — a tree whose whole lifetime is one `check(make(depth))` expression, proven by the effect system — it is faster than the ordinary Rust for the same program:
+Against handwritten Rust compiled with the same flags as the Almide side — the release profile plus the target CPU the native `--release` build uses (`x86-64-v3` on x86_64, the generic CPU on aarch64; `almide build --print-release-rustflags` prints them) — `bench.py`, full workloads, median of 5 interleaved runs, measured 2026-10-20 with the v0.68.0-rc2 release binaries (`almide 0.68.0 (release, fcba2bcd5)`) on GCE c4-standard-8 (x86) / c4a-standard-8 (arm): n-body **0.94×** / **1.02×**, spectral-norm **1.00×** / **0.99×**, fasta **1.16×** / **1.10×**, FFT **0.88×** / **0.94×**, wordfreq **0.73×** / **0.59×** (at 8M draws, its ratchet size — 2M runs under the 0.08 s spawn-noise floor), listbuild **0.87–0.89×** / **0.93–0.95×** ([scoreboard](../project/BENCHMARKS.md#runtime-scoreboard)). Where Almide has information Rust does not — a tree whose whole lifetime is one `check(make(depth))` expression, proven by the effect system — it is faster than the ordinary Rust for the same program:
 
 <!-- native-victory:generated:start — rendered from docs/benchmarks/native-victory.txt by scripts/gen-readme-stats.sh; DO NOT EDIT between the markers -->
-| Workload (`bench.py`, median of 9, interleaved) | optimization | Almide / ordinary Rust, M4 Pro | without it (`ALMIDE_REGION_OFF=1` / `ALMIDE_FAN_SEQUENTIAL=1`), M4 Pro | ubuntu-latest CI runner |
+| Workload (`bench.py` method, median of 9, interleaved) | optimization | Almide / ordinary Rust, x86 | Almide / ordinary Rust, arm | without it (`ALMIDE_REGION_OFF=1` / `ALMIDE_FAN_SEQUENTIAL=1`), x86 / arm |
 |---|---|---:|---:|---:|
-| binarytrees | region window (#1991) | **0.35 (d17)** / **0.32 (d19)** | 1.25 | 0.581 (d17) |
-| treealloc | region window (#1991) | **0.30 (d20)** / **0.30 (d21)** | 1.10 | 0.365 (d20) |
-| fannkuchredux | parallel fan (#2044) | **0.21 (n10)** / **0.12 (n11)** | 1.06 | 0.315 (n11) |
+| binarytrees | region window (#1991) | **0.28 (d17)** / **0.27 (d19)** | **0.33 (d17)** / **0.32 (d19)** | 0.89 / 1.04 |
+| treealloc | region window (#1991) | **0.22 (d20)** / **0.24 (d21)** | **0.27 (d20)** / **0.28 (d21)** | 0.91 / 1.03 |
+| fannkuchredux | parallel fan (#2044) | **0.25 (n10)** / **0.23 (n11)** | **0.21 (n10)** / **0.18 (n11)** | 0.97 / 1.02 |
 
-Two ratios per row are the two input sizes (the win holds at both); the Rust side is the ordinary program a person writes for it — a `Box` per node, one thread, no arena, no `unsafe`, no SIMD — compiled with the same `rustc` flags, and the "without it" column is the same Almide source with the region window turned off, so the whole gap is that one optimization. The absolute ratio is allocator-dependent (the CI runner frees a `Box` cheaper), the direction is not: the `perf-ratchet` job fails if either row reaches 1.0 or the ablation stops paying. Declaration and methodology: [docs/project/BENCHMARKS.md](../../docs/project/BENCHMARKS.md#faster-than-ordinary-rust-1330). Ledger: `docs/benchmarks/native-victory.txt`. The M4 Pro columns were measured on almide 0.62.0, 2026-09-08 and have not been re-measured since; the runner column is what the `perf-ratchet` job of develop CI run [37092258733](https://github.com/almide/almide/actions/runs/37092258733) printed at `466cac59b` (a develop build carrying version 0.66.0, not the 0.66.0 release), 2026-10-03 (the size is in each cell).
+Measured 2026-10-20 with the v0.68.0-rc2 release assets (almide-linux-x86_64 / almide-linux-aarch64), built from main fcba2bcd5 (`almide 0.68.0 (release, fcba2bcd5)`) on x86 = GCE c4-standard-8 (Intel Xeon Platinum 8581C, 8 vCPU) and arm = GCE c4a-standard-8 (Neoverse-V2, 8 vCPU); the reference: rustc 1.99.1, with the release flags `almide build --print-release-rustflags` reports (-C target-cpu=x86-64-v3 on x86; -C llvm-args=-force-ordered-reductions=false on both). Two ratios per cell are the two input sizes (the size is in each cell); the Rust side is the ordinary program a person writes for it — a `Box` per node, one thread, no arena, no `unsafe`, no SIMD — compiled with the same `rustc` flags as the Almide side, and the "without it" column is the same Almide source with that one optimization turned off, at the larger size. The `perf-ratchet` job fails if a row reaches 1.0 or the ablation stops paying. Declaration and methodology: [docs/project/BENCHMARKS.md](../../docs/project/BENCHMARKS.md#faster-than-ordinary-rust-1330). Ledger: `docs/benchmarks/native-victory.txt`.
 <!-- native-victory:generated:end -->
 
 <!-- build-speed:generated:start — derived from docs/benchmarks/build-speed.txt by the almide-gates `bench` subcommand; DO NOT EDIT between the markers -->
@@ -79,7 +79,7 @@ build. Regenerate with `almide run tools/almide-gates/src/main.almd -- bench`; t
 | build, cold, `--target wasm` | **148.7 ms** | 3 |
 <!-- build-speed:generated:end -->
 
-`almide check` scales close to linearly: over a 2k → 30k-line ladder of this repo's own stdlib the log-log slope of check time against project lines is **1.13** (1.0 is linear, 2.0 quadratic) and the 10k-line rung costs **4.4×** the empty-project floor — measured 2026-08-13, held by `scripts/check-edit-loop-scale.sh`, table in [BENCHMARKS.md](../project/BENCHMARKS.md#edit-loop-scale-1334). Native runtime against handwritten Rust, on an Apple M4 Pro (2026-07-30, FFT re-measured 2026-08-13): **1.00×** on n-body and spectral-norm, 1.16× on fasta, 1.18× on FFT ([scoreboard](../project/BENCHMARKS.md)). The listbuild rows read 1.47–1.69× there and 0.87–1.05× on the CI runner (2026-10-03); their gap on the M4 Pro is the deterministic software `sin`/`cos` that byte-identity needs, not list building (measured 2026-08-13, `scripts/perf-ratio-baseline.txt`). The ubuntu-latest runner re-measures every row on each develop CI run, and the `perf-ratchet` job fails an anchored row (n-body, spectral-norm, fasta, FFT, wordfreq) that drifts more than 40% past its committed baseline (run [37092258733](https://github.com/almide/almide/actions/runs/37092258733), 2026-10-03: fasta 0.757×, FFT 1.002×). Wasm runtime, measured and gated (#1701):
+`almide check` scales close to linearly: over a 2k → 33k-line ladder of this repo's own stdlib the log-log slope of check time against project lines is **1.10** on both machines (1.0 is linear, 2.0 quadratic) and the 10.7k-line rung costs **4.2×** (x86) / **4.3×** (arm) the empty-project floor — measured 2026-10-20 with the v0.68.0-rc2 release binaries on GCE c4-standard-8 / c4a-standard-8 (`research/benchmark/editloop/scale.py --runs 40`), held by `scripts/check-edit-loop-scale.sh`, table in [BENCHMARKS.md](../project/BENCHMARKS.md#edit-loop-scale-1334). The `perf-ratchet` job (`scripts/check-perf-ratio.sh`) re-measures every native row on each develop CI run and fails an anchored row (n-body, spectral-norm, fasta, FFT, wordfreq) that drifts more than 40% past its committed baseline. Wasm runtime, measured and gated (#1701):
 
 <!-- wasm-runtime:generated:start — rendered from docs/benchmarks/wasm-runtime.txt by scripts/gen-readme-stats.sh; DO NOT EDIT between the markers -->
 | Benchmark (`almide bench`, verify-then-time, min of 2×5 interleaved) | wasm/native, `main` only | cold start (spawn vs compile + instantiate) |
@@ -107,11 +107,11 @@ Embedded wasm host (Perceus RC in linear memory) against the native binary, same
 The stamped totals behind the [project status](../status.md), and the mutation score of the gate net.
 
 <!-- stats:generated:start — derived from docs/stdlib/*.md, spec/, and docs/contracts/contracts.toml by scripts/gen-readme-stats.sh; DO NOT EDIT between the markers -->
-<!-- counts:generated:start (as of 2026-10-10) — stamped totals from proofs/ledger-counts.toml; refreshed only by scripts/gen-ledger-counts.sh, never by a fixture/contract PR; DO NOT EDIT between the markers -->
+<!-- counts:generated:start (as of 2026-10-21) — stamped totals from proofs/ledger-counts.toml; refreshed only by scripts/gen-ledger-counts.sh, never by a fixture/contract PR; DO NOT EDIT between the markers -->
 | Derived count | Value |
 |---|---|
-| Stdlib | 1031 functions across 45 modules — self-hosted `.almd`, signature indexes regenerated from the compiler by `tools/gen-stdlib-doc-index.py` |
-| Tests | 512 `.almd` test files under `spec/` (`almide test spec/`) + the 376-contract cross-target ledger |
+| Stdlib | 999 functions across 44 modules — self-hosted `.almd`, signature indexes regenerated from the compiler by `tools/gen-stdlib-doc-index.py` |
+| Tests | 514 `.almd` test files under `spec/` (`almide test spec/`) + the 388-contract cross-target ledger |
 <!-- counts:generated:end -->
 <!-- stats:generated:end -->
 

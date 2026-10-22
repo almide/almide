@@ -1088,7 +1088,7 @@ list.binary_search(xs: List[Int], target: Int) -> Option[Int]
 
 // Appends x to xs in place.
 // @since 0.9.3 or earlier
-list.push(xs: List[A], x: A) -> Unit
+list.push(mut xs: List[A], x: A) -> Unit
 
 // Empty list; cap is only a preallocation hint.
 // @since 0.15.1 or earlier
@@ -1096,11 +1096,11 @@ list.with_capacity(cap: Int) -> List[A]
 
 // Removes and yields the last element; none if empty.
 // @since 0.9.3 or earlier
-list.pop(xs: List[A]) -> Option[A]
+list.pop(mut xs: List[A]) -> Option[A]
 
 // Removes every element of xs in place.
 // @since 0.9.3 or earlier
-list.clear(xs: List[A]) -> Unit
+list.clear(mut xs: List[A]) -> Unit
 
 // n + 1; bundled-dispatch smoke fn.
 // @since 0.14.6 or earlier

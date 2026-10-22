@@ -16,8 +16,16 @@ fn render_iter_chain(ctx: &RenderContext, source: &IrExpr, consume: bool, steps:
     let counted = (!by_ref)
         .then(|| list_range_bounds(ctx, source).or_else(|| range_literal_fold_bounds(ctx, source, collector)))
         .flatten();
-    let mut chain = if let Some((s, e)) = counted {
-        format!("({s}..{e})")
+    // A collecting chain over a counted span whose steps keep the length
+    // (`list.range(a, b) |> list.map(f)`) fills ONE vector reserved for the
+    // span: the reservation `almide_rt_list_range` makes, with the same C-197
+    // out-of-memory abort, where `collect` sized the vector from the range
+    // and panicked with `capacity overflow` on a span it cannot hold. The
+    // bounds are bound once so the reservation and the range read the same
+    // values.
+    let reserved = counted.is_some() && matches!(collector, IterCollector::Collect) && steps_keep_length(steps);
+    let mut chain = if let Some((s, e)) = &counted {
+        if reserved { "(__almide_rs..__almide_re)".to_string() } else { format!("({s}..{e})") }
     } else if consume {
         format!("({}).into_iter()", src)
     } else if by_ref {
@@ -39,11 +47,24 @@ fn render_iter_chain(ctx: &RenderContext, source: &IrExpr, consume: bool, steps:
             IterStep::Enumerate => chain = format!("{}.enumerate().map(|(__ei, __ex)| (__ei as i64, __ex))", chain),
         }
     }
+    if let (true, Some((s, e))) = (reserved, &counted) {
+        return format!(
+            "{{ let __almide_rs: i64 = {s}; let __almide_re: i64 = {e}; let mut __almide_cv = Vec::new(); \
+             if __almide_cv.try_reserve_exact(__almide_re.saturating_sub(__almide_rs).max(0) as usize).is_err() {{ almide_abort(\"out of memory\"); }} \
+             __almide_cv.extend({chain}); __almide_cv }}"
+        );
+    }
     render_iter_collector(ctx, &chain, collector)
 }
 
 /// The terminal call of a rendered chain (the `collector` half of
 /// [`render_iter_chain`]).
+/// Every step yields exactly one element per element it reads (`map`,
+/// `enumerate`), so a chain over a counted span collects exactly the span.
+fn steps_keep_length(steps: &[IterStep]) -> bool {
+    steps.iter().all(|s| matches!(s, IterStep::Map { .. } | IterStep::Enumerate))
+}
+
 fn render_iter_collector(ctx: &RenderContext, chain: &str, collector: &IterCollector) -> String {
     match collector {
         IterCollector::Collect => format!("{}.collect::<Vec<_>>()", chain),

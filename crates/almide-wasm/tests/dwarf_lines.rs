@@ -101,7 +101,7 @@ fn call_sites(bytes: &[u8], callee: &str) -> Vec<u64> {
                     }
                 }
             }
-            Payload::CodeSectionStart { range, .. } => code_start = range.start,
+            Payload::CodeSectionStart { unchecked_range, .. } => code_start = unchecked_range.start,
             Payload::CodeSectionEntry(body) => {
                 let mut ops = body.get_operators_reader().expect("ops");
                 while !ops.eof() {

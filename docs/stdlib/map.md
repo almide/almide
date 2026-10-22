@@ -381,7 +381,7 @@ map.get(m: Map[K, V], key: K) -> Option[V]
 // @since 0.5.0 or earlier
 map.get_or(m: Map[K, V], key: K, default: V) -> V
 
-// Copy with key -> value; existing keys stay put.
+// Copy with key -> value; an existing key is overwritten and keeps its position.
 // @since 0.5.0 or earlier
 map.set(m: Map[K, V], key: K, value: V) -> Map[K, V]
 
@@ -457,17 +457,17 @@ map.update(m: Map[K, V], key: K, f: (V) -> V) -> Map[K, V]
 // @since 0.57.0
 map.upsert(m: Map[K, V], key: K, init: V, f: (V) -> V) -> Map[K, V]
 
-// In-place key -> value; existing keys stay put.
+// In-place key -> value; an existing key is overwritten and keeps its position.
 // @since 0.9.3 or earlier
-map.insert(m: Map[K, V], key: K, value: V) -> Unit
+map.insert(mut m: Map[K, V], key: K, value: V) -> Unit
 
 // Removes key in place; no-op when absent.
 // @since 0.9.3 or earlier
-map.delete(m: Map[K, V], key: K) -> Unit
+map.delete(mut m: Map[K, V], key: K) -> Unit
 
 // Removes every entry of m in place.
 // @since 0.9.3 or earlier
-map.clear(m: Map[K, V]) -> Unit
+map.clear(mut m: Map[K, V]) -> Unit
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

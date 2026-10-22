@@ -134,6 +134,54 @@ other build has one `madd`). Counting the outer head too measured 53.45 ms for
 indexed but 62.0 ms for enumerate, and would change a collecting chain's
 failure form, so it is not taken.
 
+Counting the outer head and the enumerate index, measured 2026-10-20 and not
+taken (#3604 direction 1). Two candidate lowerings were measured:
+
+- counting a COLLECTING range-literal head (`list.map(0..<n, f)`) into one
+  vector reserved for the span, with the C-197 abort;
+- zipping the enumerate adapter's index from `0i64..i64::MAX` instead of
+  casting `.enumerate()`'s `usize`.
+
+Apple M4 Pro (aarch64-apple-darwin, the host's default `apple-m1` tuning),
+`--release`, n=5500, 11 round-robin samples, median ms, every artifact printing
+`1.274224153`. "range" is `list.map(list.range(0, n), (i) => list.fold(list.range(0, n), …))`,
+whose head was already counted:
+
+| Profile | Imperative | Indexed fold | Enumerate fold | Range fold |
+| --- | ---: | ---: | ---: | ---: |
+| release, develop | 727.8 | 694.1 (0.95x) | 710.6 (0.98x) | 712.0 (0.98x) |
+| release, both lowerings | 730.7 | 709.6 (0.97x) | 707.7 (0.97x) | 714.9 (0.98x) |
+| default, develop | 749.1 | 786.1 (1.05x) | 725.7 (0.97x) | 747.0 (1.00x) |
+| default, both lowerings | 748.3 | 751.2 (1.00x) | 709.6 (0.95x) | 747.7 (1.00x) |
+
+Under LLVM's GENERIC aarch64 tuning, which is what a Linux aarch64 `--release`
+build gets, the outer count costs. The same emitted Rust was built with rustc
+`-C opt-level=3 -C codegen-units=1 -C panic=abort -C target-cpu=generic
+-C llvm-args=-force-ordered-reductions=false` and run on the M4 (n=3000, 9
+samples, ms):
+
+- imperative: 238.3;
+- enumerate: 189.0 on develop, 234.5 with both lowerings;
+- indexed: 210.4 on develop, 237.8 with the outer count.
+
+Taking the enumerate changes one at a time: the zipped index alone reads 188.9
+(neutral), and the counted outer head alone reads 215.2. A Rust microbenchmark
+of only the outer loop reads 205 ms for a built `Vec<i64>` against 228 ms for
+`extend`, `push` or `collect` over `0..n` under generic tuning, and 207–212 ms
+for all four under `apple-m1`. LLVM schedules the inner loop differently when
+the outer index's range is known: a `madd` of `i + j` instead of a `mul` of the
+strength-reduced `ij`.
+
+So under generic tuning, counting the outer head would take the idiom
+spellings from 12–20% faster than the imperative down to its speed, and under
+the host's tuning it gains nothing. The zipped index is neutral everywhere. Neither
+is taken: the 1.53x itself was fixed by #3824. What did land is the failure
+form of the chains that were ALREADY counted. `list.range(a, b) |> list.map(f)`
+collected through `.collect()`, which panicked with `capacity overflow` on a
+span no machine holds. It now fills a vector reserved with the C-197 abort,
+the same as `almide_rt_list_range` and the wasm leg
+(`tests/counted_index_chain_test.rs`). Spectralnorm is not affected.
+
 Earlier readings kept for the record: before the wasm scalar enumerate/fold
 lowering, wasm enumerate measured 365.81 ms (3.21x); after it, 129.72 ms
 (1.17x). Before native scalar-fold capture borrowing, native indexed measured

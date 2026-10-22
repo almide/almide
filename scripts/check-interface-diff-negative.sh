@@ -24,9 +24,11 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 scratch="$tmp/repo"
 pristine="$tmp/pristine"
-mkdir -p "$scratch/docs/stdlib" "$pristine"
+mkdir -p "$scratch/docs/stdlib" "$scratch/stdlib" "$pristine/stdlib"
 cp docs/stdlib/*.md "$pristine/"
+cp stdlib/*.almd "$pristine/stdlib/"
 cp "$pristine"/*.md "$scratch/docs/stdlib/"
+cp "$pristine"/stdlib/*.almd "$scratch/stdlib/"
 export INTERFACE_DIFF_ROOT="$scratch"
 
 g() { git -C "$scratch" -c user.name=negative -c user.email=negative@localhost -c commit.gpgsign=false "$@"; }
@@ -39,6 +41,7 @@ snapshot() { # tag
   g commit -qm "$1" >/dev/null || { echo "FAIL: snapshot '$1' did not commit (empty tree?)" >&2; exit 1; }
   g tag "$1"
   cp "$pristine"/*.md "$scratch/docs/stdlib/"
+  cp "$pristine"/stdlib/*.almd "$scratch/stdlib/"
 }
 
 # Signature lines are only the ones INSIDE the generated blocks — the prose
@@ -85,8 +88,32 @@ tuple_pick=$(pick '^[a-z_0-9]+\.[a-z_0-9]+\(.*-> List\[\(') \
 tuple_file=${tuple_pick%%	*}; tuple_line=${tuple_pick#*	}
 legacy_line="${tuple_line%% -> *} -> List[()]"
 legacy_orphan="${tuple_line%%(*}_orphan(${tuple_line#*(}"; legacy_orphan="${legacy_orphan%% -> *} -> List[()]"
+# The `mut`-column control: an index rendered before the interface carried
+# `mut` (every `mut ` stripped from the blocks) reads as identical against the
+# current one, since each stripped `mut` is declared in that ref's own source;
+# but when the source at that ref did NOT declare it (the fn gained `mut`
+# since), the same re-render is a changed signature.
+mut_pick=$(pick '^(effect )?[a-z_0-9]+\.[a-z_0-9]+\(mut [a-z_0-9]+: ') \
+  || { echo "FAIL: no fn with a leading mut parameter in the committed index — the mut control has no subject" >&2; exit 1; }
+mut_line=${mut_pick#*	}
+mut_fn=$(printf '%s' "$mut_line" | sed -E 's/^(effect )?[a-z_0-9]+\.([a-z_0-9]+)\(.*/\2/')
+mut_param=$(printf '%s' "$mut_line" | sed -E 's/^[^(]*\(mut ([a-z_0-9]+):.*/\1/')
+mut_total=$(cat "$pristine"/*.md | awk '/BEGIN GENERATED SIGNATURE INDEX/{on=1} /END GENERATED SIGNATURE INDEX/{on=0} on' \
+  | grep -E '^(effect )?[a-z_0-9]+\.[a-z_0-9]+\(' | grep -oE '(\(|, )mut [a-z_0-9]+: ' | wc -l | tr -d ' ')
+strip_mut() {
+  local f
+  for f in "$scratch"/docs/stdlib/*.md; do
+    sed -E 's/(\(|, )mut ([a-z_0-9]+): /\1\2: /g' "$f" >"$tmp/edit" && mv "$tmp/edit" "$f"
+  done
+}
 g init -q
 snapshot base
+strip_mut; snapshot legacy-mut
+strip_mut
+for f in "$scratch"/stdlib/*.almd; do
+  sed -E "s/^((effect )?fn ${mut_fn}(\[[^]]*\])?\()mut ${mut_param}:/\1${mut_param}:/" "$f" >"$tmp/edit" && mv "$tmp/edit" "$f"
+done
+snapshot legacy-mut-gained
 drop_line "$tuple_file" "$tuple_line"; add_line "$tuple_file" "$legacy_line"; snapshot legacy-tuple
 drop_line "$tuple_file" "$tuple_line"; add_line "$tuple_file" "$legacy_orphan"; snapshot legacy-orphan
 
@@ -156,8 +183,12 @@ run legacy-tuple base
 expect "legacy placeholder re-rendered as a named tuple" 0 "= identical (added=0 removed=0)" "re-rendered (legacy placeholder -> named type, same name and arity): 1"
 run legacy-orphan base
 expect "legacy placeholder with no current twin is a removal" 1 "= breaking (added=1 removed=1)" "  - $legacy_orphan"
+run legacy-mut base
+expect "mut column re-rendered over a source that declared it" 0 "= identical (added=0 removed=0)" "re-rendered (\`mut\` shown on a parameter PREV's source already declared mut): $mut_total"
+run legacy-mut-gained base
+expect "mut gained since a legacy index is a changed signature" 1 "= breaking (added=1 removed=1)" "  + $mut_line"
 run base blank
 expect "blank index goes loud" 2 "no generated signature index"
 
-echo "interface-diff negative controls: 1 positive + 10 forged inputs all behaved" \
+echo "interface-diff negative controls: 1 positive + 12 forged inputs all behaved" \
   "(effect: $effect_line | pure: $pure_line)"

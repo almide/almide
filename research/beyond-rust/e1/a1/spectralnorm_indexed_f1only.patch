@@ -1,0 +1,16 @@
+--- a0/spectralnorm_indexed.rs
++++ a1/spectralnorm_indexed_f1only.rs
+@@ -11,11 +11,11 @@
+ }
+ 
+ pub fn multiply_av(v: &[f64], n: i64) -> Vec<f64> {
+-    ({ let __almide_rs: i64 = 0i64; let __almide_re: i64 = n; let __almide_rn = __almide_re.saturating_sub(__almide_rs).max(0) as usize; let mut __almide_rv: Vec<i64> = Vec::new(); if __almide_rv.try_reserve_exact(__almide_rn).is_err() { almide_abort("out of memory"); } __almide_rv.extend(__almide_rs..__almide_re); __almide_rv }).into_iter().map(|i| (0i64..n).fold(0f64, |acc, j| (acc + (eval_a(i, j) * almide_index!(v, j))))).collect::<Vec<_>>()
++    ({ let __almide_rs: i64 = 0i64; let __almide_re: i64 = n; let __almide_rn = __almide_re.saturating_sub(__almide_rs).max(0) as usize; let mut __almide_rv: Vec<i64> = Vec::new(); if __almide_rv.try_reserve_exact(__almide_rn).is_err() { almide_abort("out of memory"); } __almide_rv.extend(__almide_rs..__almide_re); __almide_rv }).into_iter().map(|i| { unsafe { std::hint::assert_unchecked(0i64 <= i && i < n) }; /* E1 F1: element of `0..<n` */ (0i64..n).fold(0f64, |acc, j| (acc + (eval_a(i, j) * almide_index!(v, j)))) }).collect::<Vec<_>>()
+ }
+ 
+ pub fn multiply_atv(v: &[f64], n: i64) -> Vec<f64> {
+-    ({ let __almide_rs: i64 = 0i64; let __almide_re: i64 = n; let __almide_rn = __almide_re.saturating_sub(__almide_rs).max(0) as usize; let mut __almide_rv: Vec<i64> = Vec::new(); if __almide_rv.try_reserve_exact(__almide_rn).is_err() { almide_abort("out of memory"); } __almide_rv.extend(__almide_rs..__almide_re); __almide_rv }).into_iter().map(|i| (0i64..n).fold(0f64, |acc, j| (acc + (eval_a(j, i) * almide_index!(v, j))))).collect::<Vec<_>>()
++    ({ let __almide_rs: i64 = 0i64; let __almide_re: i64 = n; let __almide_rn = __almide_re.saturating_sub(__almide_rs).max(0) as usize; let mut __almide_rv: Vec<i64> = Vec::new(); if __almide_rv.try_reserve_exact(__almide_rn).is_err() { almide_abort("out of memory"); } __almide_rv.extend(__almide_rs..__almide_re); __almide_rv }).into_iter().map(|i| { unsafe { std::hint::assert_unchecked(0i64 <= i && i < n) }; /* E1 F1: element of `0..<n` */ (0i64..n).fold(0f64, |acc, j| (acc + (eval_a(j, i) * almide_index!(v, j)))) }).collect::<Vec<_>>()
+ }
+ 
+ pub fn multiply_atav(v: &[f64], n: i64) -> Vec<f64> {

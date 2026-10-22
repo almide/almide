@@ -4,7 +4,7 @@ Where Almide stands today. The stamped totals (stdlib size, test files, contract
 
 | Category | Status |
 |----------|--------|
-| Maturity | Pre-1.0, under active development on `develop`; the LLM-facing surface is frozen by [STABILITY.md](./STABILITY.md) (declared 2026-08-20) |
+| Maturity | Pre-1.0, under active development on `develop`; the LLM-facing surface changes only through a dialect epoch with a migration diagnostic, per [STABILITY.md](./STABILITY.md) (declared 2026-08-20) |
 | Support | Latest release line only, pre-1.0 — policy and versioning guarantees: [SUPPORT.md](../SUPPORT.md) · vulnerabilities: [SECURITY.md](../SECURITY.md) |
 | Compiler | Pure Rust, single binary |
 | Targets | Rust (native), WASM (direct emit — the structural leg, see [How It Works](./how-it-works.md)) |

@@ -128,6 +128,18 @@ pub(crate) fn release_llvm_rustc_args() -> Vec<String> {
     RELEASE_LLVM_ARGS.iter().flat_map(|a| ["-C".to_string(), format!("llvm-args={a}")]).collect()
 }
 
+/// Every codegen flag a `--release` native build adds on top of the release
+/// profile (opt-level=3, fat LTO, one codegen unit), as rustc arguments: the
+/// `-C target-cpu` of [`release_target_cpu`], if any, then
+/// [`release_llvm_rustc_args`]. The one list both build paths pass, and what
+/// `almide build --print-release-rustflags` prints, so a benchmark can compile
+/// its hand-written Rust reference with the same flags instead of copying
+/// this decision.
+pub(crate) fn release_codegen_rustc_args() -> Vec<String> {
+    let cpu = release_target_cpu().map(|cpu| ["-C".to_string(), format!("target-cpu={cpu}")]);
+    cpu.into_iter().flatten().chain(release_llvm_rustc_args()).collect()
+}
+
 /// `--target-cpu native` on a cross build would tune for this machine's CPU,
 /// which the target may not have.
 pub(crate) fn validate_target_cpu(cpu: Option<&str>, triple: Option<&str>) -> Result<(), String> {
@@ -404,5 +416,24 @@ mod tests {
         assert!(validate_target_cpu(Some("native"), Some("aarch64-unknown-linux-musl")).is_err());
         assert!(validate_target_cpu(Some("native"), None).is_ok());
         assert!(validate_target_cpu(Some("x86-64-v3"), Some("x86_64-unknown-linux-musl")).is_ok());
+    }
+
+    /// The printed flag list is the CPU decision plus the LLVM options, in
+    /// that order, and follows the target and `--target-cpu` like the build.
+    #[test]
+    fn the_release_codegen_args_are_the_cpu_then_the_llvm_options() {
+        let llvm = release_llvm_rustc_args();
+        {
+            let _g = CrossTargetGuard::set(Some("x86_64-unknown-linux-musl".into()));
+            let mut want = vec!["-C".to_string(), "target-cpu=x86-64-v3".to_string()];
+            want.extend(llvm.clone());
+            assert_eq!(release_codegen_rustc_args(), want);
+            let _c = TargetCpuGuard::set(Some("portable".into()));
+            assert_eq!(release_codegen_rustc_args(), llvm, "portable adds no target-cpu");
+        }
+        {
+            let _g = CrossTargetGuard::set(Some("aarch64-unknown-linux-musl".into()));
+            assert_eq!(release_codegen_rustc_args(), llvm, "aarch64 stays generic");
+        }
     }
 }

@@ -1,7 +1,8 @@
 # Hello, world wasm size — the SOURCE for docs/benchmarks/README.md's wasm-size block.
 # Regenerate: bash scripts/gen-readme-stats.sh --measure
 #             (README_RELEASE_BIN=<binary from a release asset> also restamps
-#             the released row; without it the released row is carried over)
+#             the released row, README_RELEASE_TAG names its tag when the
+#             version line cannot, e.g. an rc; without it the row is carried over)
 # Checked:    bash scripts/gen-readme-stats.sh --check rebuilds Hello, world and
 #             demands these exact bytes — a changed preamble is re-stamped HERE,
 #             never edited by hand on the page. The bytes are machine-independent:
@@ -10,11 +11,12 @@
 # build is derived from the binary's `almide --version` line (#2384): a develop
 # build is named by its sha and the release it follows, never by the bare
 # version number it carries.
-version          = almide 0.66.0 (dev, 5f39c06ba)
-build            = the develop build at 5f39c06ba, after the v0.66.0 release
-date             = 2026-10-03
+version          = almide 0.68.0 (dev, 437b8f127)
+build            = the develop build at 437b8f127, before v0.68.0 is tagged
+date             = 2026-10-20
 program          = fn main() -> Unit = { println("Hello, world!") }
 structural_bytes = 325
-release_version  = almide 0.66.0 (release, 819bbc74f)
-release_bytes    = 953
-release_date     = 2026-10-03
+release_version  = almide 0.68.0 (release, fcba2bcd5)
+release_bytes    = 325
+release_date     = 2026-10-20
+release_tag      = v0.68.0-rc2

@@ -20,44 +20,43 @@ Almide compiles to Rust, which then compiles to native machine code. No runtime,
 
 | Metric | Value |
 |--------|-------|
-| Binary size (`perf/native/cli_app.almd`, the minigit-shaped CLI) | **464,488 B** stripped — macOS arm64, measured 2026-10-03 by `research/benchmark/perf/native/measure.sh` with the develop build and the v0.66.0 release (418 KB on 2026-07-30) |
-| Dependencies | **0** crates (only the platform C library is dynamically linked: `libSystem` on macOS) |
+| Binary size (`perf/native/cli_app.almd`, the minigit-shaped CLI) | **507,960 B** stripped on x86_64 Linux (GCE c4-standard-8), **463,720 B** on aarch64 Linux (GCE c4a-standard-8) — built 2026-10-20 by the v0.68.0-rc2 release binaries, the build `research/benchmark/perf/native/measure.sh` makes |
+| Dependencies | **0** crates (only the platform C library is dynamically linked: `libc` and `libgcc_s` on Linux) |
 | WASM target | `almide build app.almd --target wasm` |
 
-### Runtime scoreboard (2026-07-30, Apple M4 Pro, rustc 1.96.1)
+### Runtime scoreboard
 
 Benchmarks-Game-style programs, Almide `--release` vs handwritten Rust compiled
-with the same flags (opt-level=3, LTO, 1 CGU), median of 5 interleaved runs,
-byte-identical stdout verified across every variant before timing. Produced by
-[research/benchmark/perf/bench.py](../../research/benchmark/perf/README.md); raw
-per-run data: [results/2026-07-30-m4pro.json](../../research/benchmark/perf/results/2026-07-30-m4pro.json),
-and for the rows dated 2026-08-13 below,
-[results/2026-08-13-m4pro.json](../../research/benchmark/perf/results/2026-08-13-m4pro.json).
+with the same flags (opt-level=3, LTO, 1 CGU, and the target CPU and LLVM
+options the native `--release` build adds: `-C target-cpu=x86-64-v3` on x86_64,
+the generic CPU on aarch64, as `almide build --print-release-rustflags` prints
+them), median of 5 interleaved runs, byte-identical stdout verified across
+every variant before timing. Measured 2026-10-20 with the v0.68.0-rc2 release
+binaries (`almide 0.68.0 (release, fcba2bcd5)`, rustc 1.99.1 for both sides) on
+GCE c4-standard-8 (x86, Intel Xeon Platinum 8581C, 8 vCPU) and c4a-standard-8
+(arm, Neoverse-V2, 8 vCPU). Produced
+by [research/benchmark/perf/bench.py](../../research/benchmark/perf/README.md)
+(`--runs 5 --legs native,rust`); raw per-run data:
+[x86](../../research/benchmark/perf/results/2026-10-20-gce-c4-standard-8.json),
+[arm](../../research/benchmark/perf/results/2026-10-20-gce-c4a-standard-8.json).
 
-| Benchmark (workload) | Almide native | Handwritten Rust | Ratio |
+| Benchmark (workload) | Almide native, x86 / arm | Handwritten Rust, x86 / arm | Ratio, x86 / arm |
 |---|---:|---:|---:|
-| n-body (50M steps) | **1.135s** | 1.134s same-shape / 1.552s array-based | **1.00×** / 0.73× |
-| spectral-norm (n=5500) | **0.685s** | 0.685s | **1.00×** |
-| fasta (25M) | **3.590s** | 3.083s | 1.16× |
-| FFT (2^22) † | **0.180s** | 0.153s | 1.18× |
+| n-body (50M steps) | **2.040s** / **2.766s** | 2.172s / 2.720s same-shape; 1.812s / 3.470s array-based | **0.94×** / 1.02× same-shape; 1.13× / **0.80×** array-based |
+| spectral-norm (n=5500) | **0.966s** / **1.099s** | 0.969s / 1.107s | **1.00×** / **0.99×** |
+| fasta (25M) | **3.176s** / **3.232s** | 2.748s / 2.934s | 1.16× / 1.10× |
+| FFT (2^22) | **0.309s** / **0.346s** | 0.351s / 0.369s | **0.88×** / **0.94×** |
+| wordfreq (8M draws) † | **0.215s** / **0.198s** | 0.293s / 0.338s | **0.73×** / **0.59×** |
+| listbuild prealloc / append / combinator (2^23) | **0.269 / 0.276 / 0.270s** / **0.333 / 0.340 / 0.338s** | 0.307s / 0.358s | **0.87 / 0.89 / 0.87×** / **0.93 / 0.95 / 0.94×** |
 
-† **The FFT row was re-measured 2026-08-13 and its number moved on purpose.**
-It previously built its 8.4M-element input with `data = data + [x]` inside a
-loop, so roughly 8% of the row's wall clock was list construction reported as
-codegen — a benchmark partly measuring its own setup (#1338). It now
-preallocates and writes by index, the same shape as the reference's
-`Vec::with_capacity` + push, which is the fairness rule the suite already
-applies to `nbody_unrolled.rs`. A/B in one interleaved run of both binaries
-plus the reference, 2^22, median of 11, repeated three times (before
-194.8 / 199.9 / 193.6 ms, after 179.9 / 184.0 / 176.8 ms):
-**0.195s → 0.180s wall clock, 1.27× → 1.18×**. The transform is bit-identical
-across the change, verified out of band at 2^12 / 2^16 / 2^20 on a
-position-weighted checksum of the whole array. The other three rows are the
-2026-07-30 run, unchanged.
+† wordfreq is timed at its ratchet size (`bench.py --quick`, 8M draws): at the
+suite's 2M the Almide row runs in ~0.05 s, under the 0.08 s spawn-noise floor
+the ratchet refuses to judge on. Raw rows:
+[x86](../../research/benchmark/perf/results/2026-10-20-gce-c4-standard-8-wordfreq-quick.json),
+[arm](../../research/benchmark/perf/results/2026-10-20-gce-c4a-standard-8-wordfreq-quick.json).
 
-Almide beats the array-based n-body reference because its unrolled-scalar idiom
-compiles to bounds-check-free locals; the same-shape reference isolates pure
-codegen overhead (≤1%). The `perf-ratchet` CI job
+The same-shape n-body reference (`nbody_unrolled.rs`) isolates codegen
+overhead: Almide is 2% behind it on arm and 6% ahead on x86. The `perf-ratchet` CI job
 ([scripts/check-perf-ratio.sh](../../scripts/check-perf-ratio.sh)) gates these
 ratios against a committed baseline so they can only move on purpose.
 
@@ -69,74 +68,85 @@ constraints stated up front.
 
 **Methodology.** The Rust side is the *ordinary* program a competent person
 writes for the workload — `rust-ref/binarytrees.rs` and `rust-ref/treealloc.rs`
-are a `Box`-linked recursive enum with `make` / `check` by value, one thread,
-no arena, no custom allocator, no `unsafe`, no SIMD — compiled with the same
-`rustc` flags as Almide's emitted Rust (opt-level=3, LTO, 1 CGU). Both sides
-print byte-identical stdout (verified before timing), every number is the
-median of 9 interleaved runs after a warmup, and each row is measured at two
-input sizes so a win that exists at one size only would show. The ablation
-column is the *same Almide source* rebuilt with the one optimization turned
-off (`ALMIDE_REGION_OFF=1`), so the gap between the two Almide columns is
-that optimization and nothing else. arm64 Apple M4 Pro, almide 0.62.0,
-2026-09-08; raw rows in
-[results/2026-09-08-m4pro-victory-1330.json](../../research/benchmark/perf/results/2026-09-08-m4pro-victory-1330.json).
+are a `Box`-linked recursive enum with `make` / `check` by value,
+`rust-ref/fannkuchredux.rs` is the sequential program; one thread, no arena,
+no custom allocator, no `unsafe`, no SIMD — compiled with the same `rustc`
+flags as Almide's emitted Rust (opt-level=3, LTO, 1 CGU, and the release
+target CPU and LLVM options named in the scoreboard above). Both sides print
+byte-identical stdout (verified before timing), every number is the median of
+9 interleaved runs after a warmup, and each row is measured at two input sizes
+so a win that exists at one size only would show. The ablation column is the
+*same Almide source* rebuilt and run with the one optimization turned off
+(`ALMIDE_REGION_OFF=1`, `ALMIDE_FAN_SEQUENTIAL=1`), timed in the same
+interleaved loop, so the gap between the two Almide columns is that
+optimization and nothing else. Measured 2026-10-20 with the v0.68.0-rc2
+release binaries (rustc 1.99.1) on GCE c4-standard-8 (x86) and c4a-standard-8
+(arm); raw rows in
+[x86](../../research/benchmark/perf/results/2026-10-20-gce-c4-standard-8-victory.json) /
+[arm](../../research/benchmark/perf/results/2026-10-20-gce-c4a-standard-8-victory.json).
 
-| Workload | size | Almide native | ordinary Rust | **ratio** | Almide, window off | ratio, window off |
-|---|---:|---:|---:|---:|---:|---:|
-| binarytrees | d17 | **134 ms** | 382 ms | **0.35×** | 482 ms | 1.26× |
-| binarytrees | d19 | **581 ms** | 1826 ms | **0.32×** | 2290 ms | 1.25× |
-| treealloc | d20 | **112 ms** | 375 ms | **0.30×** | 416 ms | 1.11× |
-| treealloc | d21 | **221 ms** | 748 ms | **0.30×** | 825 ms | 1.10× |
+| Workload | size | machine | Almide native | ordinary Rust | **ratio** | Almide, optimization off | ratio, off |
+|---|---:|---|---:|---:|---:|---:|---:|
+| binarytrees | d17 | x86 | **118 ms** | 417 ms | **0.28×** | 382 ms | 0.92× |
+| binarytrees | d19 | x86 | **541 ms** | 2021 ms | **0.27×** | 1800 ms | 0.89× |
+| binarytrees | d17 | arm | **150 ms** | 450 ms | **0.33×** | 471 ms | 1.05× |
+| binarytrees | d19 | arm | **682 ms** | 2108 ms | **0.32×** | 2188 ms | 1.04× |
+| treealloc | d20 | x86 | **170 ms** | 766 ms | **0.22×** | 630 ms | 0.82× |
+| treealloc | d21 | x86 | **371 ms** | 1558 ms | **0.24×** | 1416 ms | 0.91× |
+| treealloc | d20 | arm | **135 ms** | 498 ms | **0.27×** | 499 ms | 1.00× |
+| treealloc | d21 | arm | **279 ms** | 980 ms | **0.28×** | 1007 ms | 1.03× |
+| fannkuchredux | n10 | x86 | **46 ms** | 185 ms | **0.25×** | 182 ms | 0.98× |
+| fannkuchredux | n11 | x86 | **502 ms** | 2182 ms | **0.23×** | 2116 ms | 0.97× |
+| fannkuchredux | n10 | arm | **35 ms** | 168 ms | **0.21×** | 171 ms | 1.01× |
+| fannkuchredux | n11 | arm | **376 ms** | 2034 ms | **0.18×** | 2074 ms | 1.02× |
 
-**Which optimization did it: the region window (#1991), and only that.** Both
-programs spend their time in `check(make(depth))` — a tree whose whole
-lifetime is one expression. The effect system proves the pair region-pure
-(no effect, no global, no `mut` param, a scalar result), so the native leg
-runs it over `__rgn_` twin fns in a thread-local bump arena and rewinds once
-per tree; the ordinary Rust pays a `malloc` per node in and a `free` per node
-out, and cannot know it is allowed not to. With the window off, the same
-Almide source is 1.1–1.26× *slower* than the reference — the emitted `Box`
-code is what the reference already is, plus the drop glue — so the whole win
-is the information Rust does not have. The win holds at both sizes of both
-rows; the ratio is flat in size because both sides are linear in node count.
+**Which optimization did it.** binarytrees and treealloc spend their time in
+`check(make(depth))` — a tree whose whole lifetime is one expression. The
+effect system proves the pair region-pure (no effect, no global, no `mut`
+param, a scalar result), so the native leg runs it over `__rgn_` twin fns in a
+thread-local bump arena and rewinds once per tree (the region window, #1991);
+the ordinary Rust pays a `malloc` per node in and a `free` per node out, and
+cannot know it is allowed not to. With the window off, the same Almide source
+reads 1.00–1.05× the reference on arm and 0.82–0.92× on x86 — the emitted
+`Box` code is what the reference already is — and the window alone is worth
+3.1–3.8× on both machines. fannkuchredux's `fan { list.map }` over Int
+captures is the Send-safe-scalar subset the native leg runs on a thread per
+core (#2044); with `ALMIDE_FAN_SEQUENTIAL=1` it reads 0.97–1.02× the
+one-thread reference, so the whole win is the parallel map, and it scales with
+the core count. The win holds at both sizes of every row on both machines.
 
-**What the numbers are not.** The absolute ratio is allocator-dependent: the
-same binarytrees commit reads 0.61× on the ubuntu-latest CI runner, because
-glibc frees a `Box` far cheaper than macOS's allocator — the *reference* gets
-faster, the window does not change. The direction is machine-stable, which
-is what the ratchet gates: the VICTORY rows of
+**What the numbers are not.** The absolute ratio is machine- and
+allocator-dependent (the region rows read lower on x86, the fan row lower on
+arm). The direction is machine-stable, which is what the ratchet gates: the
+VICTORY rows of
 [scripts/check-perf-ratio.sh](../../scripts/check-perf-ratio.sh) fail the
-build if either row reaches 1.0, if it regresses past +40% of the committed
-runner-class baseline, or if the `ALMIDE_REGION_OFF=1` ablation stops costing
-the row at least 1.3× (the declaration would then be attributing the win to
-the wrong thing). Two workloads, one mechanism: this is stated rather than
-dressed up — the second row exists to show the window is a property of the
-shape `consume(produce(scalars))`, not of one benchmark.
+build if a row reaches 1.0, if it regresses past +40% of the committed
+runner-class baseline, or if the ablation stops costing the row at least 1.3×
+(the declaration would then be attributing the win to the wrong thing). Two
+mechanisms, three workloads: this is stated rather than dressed up — the
+second region row exists to show the window is a property of the shape
+`consume(produce(scalars))`, not of one benchmark.
 
-**The candidates the issue named, measured and not claimed.** Both were
-measured the same day with ordinary sequential Rust references added for the
-purpose (`rust-ref/fannkuchredux.rs`, `rust-ref/mandelbrot.rs`, byte-identical
+**The other candidate the issue named, measured and not claimed.** Same run,
+ordinary sequential Rust reference (`rust-ref/mandelbrot.rs`, byte-identical
 output):
 
-| Workload | size | Almide native | ordinary Rust (one thread) | ratio |
+| Workload | size | Almide native, x86 / arm | ordinary Rust (one thread), x86 / arm | ratio, x86 / arm |
 |---|---:|---:|---:|---:|
-| fannkuchredux (`fan { list.map }`) | 9 / 11 | 19 ms / 2147 ms | 20 ms / 2028 ms | 0.96× / 1.06× |
-| mandelbrot (`fan.map`) | 1000 / 4000 | 50 ms / 609 ms | 44 ms / 601 ms | 1.12× / 1.01× |
+| mandelbrot (`fan.map`) | 1000 | 49 ms / 63 ms | 50 ms / 63 ms | 0.97× / 1.00× |
+| mandelbrot (`fan.map`) | 4000 | 721 ms / 985 ms | 740 ms / 985 ms | 0.98× / 1.00× |
 
-- *Deterministic data parallelism (`fan`)* gives the native leg nothing
-  today: `fan.map` runs sequentially over an `Rc<dyn Fn>` thunk (the uniform
-  closure representation is not `Send`), a `fan { … }` block spawns one
-  thread for the whole block, and `AutoParallelPass` — the pass that would
-  turn a pure `list.map` into a threaded one — never fires, because it
-  matches a `Call { Named }` that `StdlibLowering` stopped emitting (it emits
-  `RuntimeCall`). A single-thread reference is therefore the honest one, and
-  the rows sit at parity. They are REPORTED by the ratchet so that a real
-  parallel win becomes a number the day it lands.
+- *Deterministic data parallelism (`fan`)* gives mandelbrot nothing on the
+  native leg: its `fan.map` callback returns `Bytes`, whose native repr is an
+  `Rc`, so #2044's Send-safe-scalar routing declines it and the map runs
+  sequentially (`ALMIDE_FAN_SEQUENTIAL=1` reads the same time). A
+  single-thread reference is therefore the honest one, and the row sits at
+  parity. The ratchet REPORTS it so that a real parallel win becomes a number
+  the day it lands.
 - *Stream fusion of `|>` chains* does not fire on the Rust target
   (`IterChain` never lowers there; see the perf suite's "Not yet covered"),
   and ordinary Rust iterator chains are already fused by LLVM, so there is no
-  fusion win to claim; the listbuild rows read 1.47–1.69× here and 0.91× on
-  the runner for the allocator reason above.
+  fusion win to claim; the listbuild rows are in the scoreboard above.
 
 ### Allocation: the region window on the native leg (2026-09-08, #1991)
 
@@ -397,24 +407,25 @@ file its lowering, not its speed; see `optimize_program`'s header note).
 The build-speed row on the [measurements page](../benchmarks/README.md) is measured on a 268-line file, which does not establish
 that the edit loop is *scale-independent* — a fast check on a small file is also exactly
 what a quadratic compiler produces. So the same command is measured over a ladder of
-nested prefixes of this repo's own stdlib (303 hand-written modules, 30,624 lines;
+nested prefixes of this repo's own stdlib (285 hand-written modules, 31,729 lines;
 nothing synthesized), 40 interleaved runs per rung:
 
-| project size | `almide check` p50 | p95 | µs/line |
+| project size | `almide check` p50, x86 / arm | p95, x86 / arm | µs/line, x86 / arm |
 |---:|---:|---:|---:|
-| 2,047 lines | 18.4 ms | 19.5 ms | 2.87 |
-| 5,456 lines | 31.2 ms | 32.3 ms | 3.29 |
-| **10,151 lines** | **52.1 ms** | **53.3 ms** | 3.78 |
-| 20,378 lines | 97.4 ms | 99.5 ms | 4.06 |
-| 30,624 lines | 141.5 ms | 145.1 ms | 4.06 |
+| 2,480 lines | 37.5 / 41.4 ms | 38.4 / 42.1 ms | 5.50 / 6.35 |
+| 5,577 lines | 56.3 / 63.7 ms | 58.3 / 64.3 ms | 5.81 / 6.74 |
+| **10,669 lines** | **97.4 / 109.6 ms** | **99.9 / 110.6 ms** | 6.75 / 7.75 |
+| 21,080 lines | 175.3 / 195.5 ms | 178.5 / 197.3 ms | 6.87 / 7.96 |
+| 32,666 lines | 260.2 / 295.3 ms | 268.3 / 297.7 ms | 7.03 / 8.12 |
 
-arm64 Darwin, almide 0.57.0, 2026-08-13, load average 6.7. **The p95 column is an
-observation, not a promise**: the same commit on the same box at load average 42 read
-p95 332 ms at the 10,151-line rung — 6× — so the CI ratchet
+Measured 2026-10-20 with the v0.68.0-rc2 release binaries
+(`scale.py --runs 40`) on GCE c4-standard-8 (x86) and c4a-standard-8 (arm). **The
+p95 column is an observation, not a promise**: on a loaded machine the tail
+tracks the load, not the compiler, so the CI ratchet
 (`scripts/check-edit-loop-scale.sh`) anchors two dimensionless same-run ratios instead:
-the log-log slope of marginal check time against project lines (**1.13**, where 1.0 is
-linear and 2.0 quadratic; it moved 0.6% across that 7× load swing) and the cost of the
-10k-line rung in units of the empty-project floor (**4.4×**). Reproduce with
+the log-log slope of marginal check time against project lines (**1.10** on both
+machines, where 1.0 is linear and 2.0 quadratic) and the cost of the
+10k-line rung in units of the empty-project floor (**4.2×** x86 / **4.3×** arm). Reproduce with
 `python3 research/benchmark/editloop/scale.py`.
 
 ## AI Coding Language Benchmark

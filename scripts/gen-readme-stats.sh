@@ -147,14 +147,17 @@ if [ "$MODE" = "--measure" ]; then
     R_VERSION="$("$README_RELEASE_BIN" --version 2>/dev/null | head -1)"
     case "$R_VERSION" in *"(release"*) ;; *) echo "::error::README_RELEASE_BIN is '$R_VERSION', not a release build"; exit 2 ;; esac
     r="$(measure_leg "$README_RELEASE_BIN")"; R_BYTES="${r%% *}"; R_DATE="$(date +%F)"
+    R_TAG="${README_RELEASE_TAG:-}"
   else
     R_VERSION="$(kv release_version 2>/dev/null || true)"; R_BYTES="$(kv release_bytes 2>/dev/null || true)"; R_DATE="$(kv release_date 2>/dev/null || true)"
+    R_TAG="$(kv release_tag 2>/dev/null || true)"
   fi
   cat > "$BASELINE" <<EOF
 # Hello, world wasm size — the SOURCE for docs/benchmarks/README.md's wasm-size block.
 # Regenerate: bash scripts/gen-readme-stats.sh --measure
 #             (README_RELEASE_BIN=<binary from a release asset> also restamps
-#             the released row; without it the released row is carried over)
+#             the released row, README_RELEASE_TAG names its tag when the
+#             version line cannot, e.g. an rc; without it the row is carried over)
 # Checked:    bash scripts/gen-readme-stats.sh --check rebuilds Hello, world and
 #             demands these exact bytes — a changed preamble is re-stamped HERE,
 #             never edited by hand on the page. The bytes are machine-independent:
@@ -172,6 +175,7 @@ release_version  = $R_VERSION
 release_bytes    = $R_BYTES
 release_date     = $R_DATE
 EOF
+  [ -z "$R_TAG" ] || echo "release_tag      = $R_TAG" >> "$BASELINE"
   echo "wasm-size: baseline restamped in $BASELINE (structural $S_BYTES B, $BUILD_DESC)"
 fi
 
@@ -200,9 +204,13 @@ size_build="$(kv build || true)"
 [ -n "$size_build" ] || { echo "::error::$BASELINE has no 'build' line — restamp with: bash scripts/gen-readme-stats.sh --measure"; exit 2; }
 rel_version="$(kv release_version || true)"; rel_bytes="$(kv release_bytes || true)"; rel_date="$(kv release_date || true)"
 if [ -n "$rel_bytes" ]; then
-  rel_num="$(printf '%s' "$rel_version" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
-  rel_head=" released v${rel_num} |"; rel_rule="---:|"; rel_cell=" **$(thousands "$rel_bytes") B** |"
-  rel_line=" The released column is the compiler from the v${rel_num} release asset (\`${rel_version}\`, \`gh release download v${rel_num} -R almide/almide\`), measured ${rel_date}."
+  # The tag the asset came from: release_tag when stamped (a prerelease binary
+  # carries the final's version number, so the number alone would name a
+  # release that may not exist yet), else the number in the version line.
+  rel_tag="$(kv release_tag 2>/dev/null || true)"
+  [ -n "$rel_tag" ] || rel_tag="v$(printf '%s' "$rel_version" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+  rel_head=" released ${rel_tag} |"; rel_rule="---:|"; rel_cell=" **$(thousands "$rel_bytes") B** |"
+  rel_line=" The released column is the compiler from the ${rel_tag} release asset (\`${rel_version}\`, \`gh release download ${rel_tag} -R almide/almide\`), measured ${rel_date}."
 else
   rel_head=""; rel_rule=""; rel_cell=""; rel_line=""
 fi
@@ -250,23 +258,23 @@ rt_machine="$(grep -E '^machine' "$RT_LEDGER" | head -1 | sed -E 's/^[^=]*=[[:sp
 # gate (scripts/check-perf-ratio.sh, VICTORY rows) re-measures the claim
 # (ratio < 1.0) and the ablation every CI round; this renderer only formats
 # what is committed, same rule as the two blocks above.
-vic_version="$(grep -E '^version' "$VIC_LEDGER" | head -1 | sed -E 's/^[^=]*=[[:space:]]*//')"
-vic_date="$(grep -E '^date' "$VIC_LEDGER" | head -1 | sed -E 's/^[^=]*=[[:space:]]*//')"
 vic_kv() { grep -E "^$1[[:space:]]*=" "$VIC_LEDGER" | head -1 | sed -E 's/^[^=]*=[[:space:]]*//'; }
-vic_run="$(vic_kv runner_run)"; vic_commit="$(vic_kv runner_commit)"
-vic_rversion="$(vic_kv runner_version)"; vic_rdate="$(vic_kv runner_date)"
-[ -n "$vic_run" ] && [ -n "$vic_rdate" ] || { echo "::error::$VIC_LEDGER has no runner_run/runner_date stamp for its CI column"; exit 2; }
+vic_version="$(vic_kv version)"; vic_binary="$(vic_kv binary)"; vic_date="$(vic_kv date)"
+vic_x86="$(vic_kv x86)"; vic_arm="$(vic_kv arm)"; vic_rustc="$(vic_kv rustc)"
+for k in vic_version vic_binary vic_date vic_x86 vic_arm vic_rustc; do
+  [ -n "${!k}" ] || { echo "::error::$VIC_LEDGER has no '${k#vic_}' stamp — every number names its binary, machine and date"; exit 2; }
+done
 vic_body=$(mktemp -t readme-vic.XXXXXX)
 {
-  echo '| Workload (`bench.py`, median of 9, interleaved) | optimization | Almide / ordinary Rust, M4 Pro | without it (`ALMIDE_REGION_OFF=1` / `ALMIDE_FAN_SEQUENTIAL=1`), M4 Pro | ubuntu-latest CI runner |'
+  echo '| Workload (`bench.py` method, median of 9, interleaved) | optimization | Almide / ordinary Rust, x86 | Almide / ordinary Rust, arm | without it (`ALMIDE_REGION_OFF=1` / `ALMIDE_FAN_SEQUENTIAL=1`), x86 / arm |'
   echo "|---|---|---:|---:|---:|"
-  grep -E '^[a-z][a-z_-]* *\|' "$VIC_LEDGER" | while IFS='|' read -r n opt small large abl runner; do
-    printf '| %s | %s | **%s** / **%s** | %s | %s |\n' "$(echo "$n" | xargs)" "$(echo "$opt" | xargs)" \
-      "$(echo "$small" | xargs)" "$(echo "$large" | xargs)" "$(echo "$abl" | xargs)" "$(echo "$runner" | xargs)"
+  grep -E '^[a-z][a-z_-]* *\|' "$VIC_LEDGER" | while IFS='|' read -r n opt xs xl as al ax aa; do
+    printf '| %s | %s | **%s** / **%s** | **%s** / **%s** | %s / %s |\n' "$(echo "$n" | xargs)" "$(echo "$opt" | xargs)" \
+      "$(echo "$xs" | xargs)" "$(echo "$xl" | xargs)" "$(echo "$as" | xargs)" "$(echo "$al" | xargs)" "$(echo "$ax" | xargs)" "$(echo "$aa" | xargs)"
   done
   echo
   printf '%s\n' \
-    'Two ratios per row are the two input sizes (the win holds at both); the Rust side is the ordinary program a person writes for it — a `Box` per node, one thread, no arena, no `unsafe`, no SIMD — compiled with the same `rustc` flags, and the "without it" column is the same Almide source with the region window turned off, so the whole gap is that one optimization. The absolute ratio is allocator-dependent (the CI runner frees a `Box` cheaper), the direction is not: the `perf-ratchet` job fails if either row reaches 1.0 or the ablation stops paying. Declaration and methodology: [docs/project/BENCHMARKS.md]('"${ROOT_LINK}"'/docs/project/BENCHMARKS.md#faster-than-ordinary-rust-1330). Ledger: `docs/benchmarks/native-victory.txt`. The M4 Pro columns were measured on '"${vic_version}, ${vic_date}"' and have not been re-measured since; the runner column is what the `perf-ratchet` job of develop CI run ['"${vic_run}"'](https://github.com/almide/almide/actions/runs/'"${vic_run}"') printed at `'"${vic_commit}"'` ('"$(say_version "${vic_rversion}")"'), '"${vic_rdate}"' (the size is in each cell).'
+    'Measured '"${vic_date}"' with '"${vic_binary}"' (`'"${vic_version}"'`) on x86 = '"${vic_x86}"' and arm = '"${vic_arm}"'; the reference: '"${vic_rustc}"'. Two ratios per cell are the two input sizes (the size is in each cell); the Rust side is the ordinary program a person writes for it — a `Box` per node, one thread, no arena, no `unsafe`, no SIMD — compiled with the same `rustc` flags as the Almide side, and the "without it" column is the same Almide source with that one optimization turned off, at the larger size. The `perf-ratchet` job fails if a row reaches 1.0 or the ablation stops paying. Declaration and methodology: [docs/project/BENCHMARKS.md]('"${ROOT_LINK}"'/docs/project/BENCHMARKS.md#faster-than-ordinary-rust-1330). Ledger: `docs/benchmarks/native-victory.txt`.'
 } > "$vic_body"
 
 splice() { # $1 start marker, $2 end marker, $3 body file; stdin → stdout

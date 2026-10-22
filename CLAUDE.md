@@ -80,8 +80,16 @@ Correct flow:
      committed signature indexes, and refuses a breaking diff unless declared
      with `--allow-breaking` (a removal needs its `@deprecated` window and,
      when it can break written code, a `proofs/dialect-epochs.toml` entry).
-5. **Let the workflow create the release.** It auto-generates notes from commits.
-6. If you want custom notes, edit after the workflow completes: `gh release edit vX.Y.Z --notes "..."`
+5. **Write the release notes before the tag** — `docs/releases/vX.Y.Z.md` (every
+   `-rc` tag too), landed on `develop` → `main` so the tagged commit contains it.
+   Line 1 `# vX.Y.Z — <headline>` is the release title; the rest is the body,
+   grouped by theme — never the auto-generated "What's Changed" PR list. Format:
+   [docs/releases/README.md](./docs/releases/README.md). Check with
+   `bash scripts/check-release-notes.sh vX.Y.Z`.
+6. **Let the workflow create the release.** It publishes the title and body from
+   that file, and refuses the tag (before building) when the file is missing or
+   malformed. A later correction goes into the file first, then
+   `bash scripts/check-release-notes.sh vX.Y.Z out && gh release edit vX.Y.Z --title "$(cat out/title)" --notes-file out/body.md`.
 7. **Refresh the stamped ledger counts** — `bash scripts/gen-ledger-counts.sh`, commit
    `proofs/ledger-counts.toml` with the four docs it re-renders. Fixture/contract PRs
    never refresh them; the nightly `scripts/check-ledger-counts.sh` going red is the

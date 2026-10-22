@@ -489,10 +489,9 @@ pub fn register_fn_sig(env: &mut TypeEnv, decl: &FnSigToRegister<'_>) {
         }
         (sym(&p.name), resolve_in(env, &p.ty, tcm))
     }).collect();
-    let mut_params: Vec<usize> = params.iter().enumerate()
-        .filter(|(_, p)| p.is_mut)
-        .map(|(i, _)| i)
-        .collect();
+    // `mut p` plus `@mutating` / `@mutating(p)` — one reading shared with
+    // lowering (#2948), so E032 sees every position codegen borrows mutably (#3966).
+    let mut_params = almide_ir::mut_args::declared_mut_positions(params, attrs);
     let ret = resolve_in(env, return_type, tcm);
     let pba = collect_protocol_bound_args(env, generics, tcm);
     for (gn, prev) in shadowed.into_iter().rev() {

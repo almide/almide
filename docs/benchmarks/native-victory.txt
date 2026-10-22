@@ -7,29 +7,26 @@
 #        cost the row more than the script's VICTORY_ABLATION_FLOOR) every CI
 #        round; a row that stops being faster fails the gate.
 # Method: research/benchmark/perf/bench.py shape — both sides compiled with
-#        the same rustc flags (opt-level=3, lto, 1 CGU), byte-identical stdout
-#        verified before timing, median of 9 interleaved runs after a warmup.
-#        The Rust side is the ORDINARY program for the workload (a `Box` per
-#        node, one thread, no arena, no `unsafe`, no SIMD).
+#        the same rustc flags (opt-level=3, lto, 1 CGU, plus the release
+#        target-cpu / llvm-args `almide build --print-release-rustflags`
+#        reports — x86-64-v3 on x86_64), byte-identical stdout
+#        verified before timing, median of 9 interleaved runs after a warmup;
+#        the ablated build is built AND run with its knob set, interleaved with
+#        the optimized binary and the reference. The Rust side is the ORDINARY
+#        program for the workload (a `Box` per node, one thread, no arena, no
+#        `unsafe`, no SIMD).
 #
-# Rows: name | optimization | ratio at the small size (arg) | ratio at the
-#       large size (arg) | ratio with the optimization off, large size |
-#       ratio on the ubuntu-latest CI runner (quick arg)
-# The CI column is a MEASUREMENT, not the baseline: the ratios the develop
-# perf-ratchet job printed (`perf-ratio: <row> <ratio> (victory: …)`) in the
-# run named by runner_run. It used to carry "0.61 (est.)" for treealloc and
-# fannkuchredux — binarytrees' number copied across — while the runner read
-# 0.34 and 0.33; an estimate in a published table is a number nobody measured.
-# version/date/machine stamp the local (M4 Pro) columns; runner_* stamp the
-# CI column. The two are re-measured separately, so they carry separate dates.
-version = almide 0.62.0
-date    = 2026-09-08
-machine = arm64 Darwin, Apple M4 Pro (local stamp); runner = ubuntu-latest
-runner_run     = 37092258733
-runner_commit  = 466cac59b
-runner_version = almide 0.66.0 (dev)
-runner_date    = 2026-10-03
+# Rows: name | optimization | x86 ratio at the small size (arg) | x86 ratio at
+#       the large size (arg) | arm ratio, small | arm ratio, large | ratio with
+#       the optimization off, large size, x86 | the same, arm
+# Raw runs: research/benchmark/perf/results/<date>-gce-<machine class>-victory.json
+version = almide 0.68.0 (release, fcba2bcd5)
+binary  = the v0.68.0-rc2 release assets (almide-linux-x86_64 / almide-linux-aarch64), built from main fcba2bcd5
+date    = 2026-10-20
+x86     = GCE c4-standard-8 (Intel Xeon Platinum 8581C, 8 vCPU)
+arm     = GCE c4a-standard-8 (Neoverse-V2, 8 vCPU)
+rustc   = rustc 1.99.1, with the release flags `almide build --print-release-rustflags` reports (-C target-cpu=x86-64-v3 on x86; -C llvm-args=-force-ordered-reductions=false on both)
 
-binarytrees | region window (#1991) | 0.35 (d17) | 0.32 (d19) | 1.25 | 0.581 (d17)
-treealloc   | region window (#1991) | 0.30 (d20) | 0.30 (d21) | 1.10 | 0.365 (d20)
-fannkuchredux | parallel fan (#2044) | 0.21 (n10) | 0.12 (n11) | 1.06 | 0.315 (n11)
+binarytrees | region window (#1991) | 0.28 (d17) | 0.27 (d19) | 0.33 (d17) | 0.32 (d19) | 0.89 | 1.04
+treealloc   | region window (#1991) | 0.22 (d20) | 0.24 (d21) | 0.27 (d20) | 0.28 (d21) | 0.91 | 1.03
+fannkuchredux | parallel fan (#2044) | 0.25 (n10) | 0.23 (n11) | 0.21 (n10) | 0.18 (n11) | 0.97 | 1.02

@@ -1,0 +1,279 @@
+{
+  "meta": {
+    "date": "2026-10-20",
+    "label": "gce-c4-standard-8",
+    "host": "Linux-7.0.0-1014-gcp-x86_64-with-glibc2.39",
+    "cpu": "x86_64",
+    "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+    "almide": "almide 0.68.0 (release, fcba2bcd5)",
+    "wasmtime": null,
+    "ref_rustc_flags": [
+      "-C",
+      "opt-level=3",
+      "-C",
+      "lto=yes",
+      "-C",
+      "codegen-units=1",
+      "-C",
+      "overflow-checks=no",
+      "--edition",
+      "2021",
+      "-C",
+      "target-cpu=x86-64-v3",
+      "-C",
+      "llvm-args=-force-ordered-reductions=false"
+    ],
+    "ref_flags_from": "almide 0.68.0 (dev, 67a50022c)",
+    "runs": 5,
+    "quick": false,
+    "machine": "GCE c4-standard-8, INTEL(R) XEON(R) PLATINUM 8581C CPU @ 2.30GHz, 8 vCPU (4 cores x 2 threads), asia-northeast1-b",
+    "binary": "v0.68.0-rc2 release asset almide-linux-x86_64.tar.gz (main fcba2bcd5)",
+    "ref_flags_note": "Rust references built with RUSTC_FLAGS plus `almide build --print-release-rustflags` (asked of a build of bench-refresh-0680 67a50022c, whose release-flag rule in src/cli/native_target.rs is unchanged from fcba2bcd5)"
+  },
+  "results": {
+    "nbody": {
+      "arg": "50000000",
+      "variants": {
+        "nbody/native": {
+          "min": 1.9968,
+          "median": 2.0396,
+          "mean": 2.0258,
+          "runs": [
+            2.0479,
+            2.0476,
+            1.9968,
+            1.997,
+            2.0396
+          ]
+        },
+        "nbody/rust:nbody": {
+          "min": 1.7864,
+          "median": 1.8119,
+          "mean": 1.8117,
+          "runs": [
+            1.8332,
+            1.8372,
+            1.7864,
+            1.7897,
+            1.8119
+          ]
+        },
+        "nbody/rust:nbody_unrolled": {
+          "min": 2.1368,
+          "median": 2.1721,
+          "mean": 2.1706,
+          "runs": [
+            2.1914,
+            2.1721,
+            2.1368,
+            2.1832,
+            2.1698
+          ]
+        }
+      }
+    },
+    "spectralnorm": {
+      "arg": "5500",
+      "variants": {
+        "spectralnorm/native": {
+          "min": 0.9648,
+          "median": 0.9657,
+          "mean": 0.9656,
+          "runs": [
+            0.9651,
+            0.9657,
+            0.9661,
+            0.9662,
+            0.9648
+          ]
+        },
+        "spectralnorm/rust:spectralnorm": {
+          "min": 0.9575,
+          "median": 0.9688,
+          "mean": 0.9656,
+          "runs": [
+            0.9688,
+            0.9706,
+            0.9575,
+            0.9695,
+            0.9614
+          ]
+        }
+      }
+    },
+    "fasta": {
+      "arg": "25000000",
+      "variants": {
+        "fasta/native": {
+          "min": 3.1733,
+          "median": 3.1762,
+          "mean": 3.1786,
+          "runs": [
+            3.1893,
+            3.1762,
+            3.1738,
+            3.1804,
+            3.1733
+          ]
+        },
+        "fasta/rust:fasta": {
+          "min": 2.7469,
+          "median": 2.7478,
+          "mean": 2.7499,
+          "runs": [
+            2.7471,
+            2.748,
+            2.7597,
+            2.7478,
+            2.7469
+          ]
+        }
+      }
+    },
+    "fft": {
+      "arg": "22",
+      "variants": {
+        "fft/native": {
+          "min": 0.3048,
+          "median": 0.3093,
+          "mean": 0.3098,
+          "runs": [
+            0.308,
+            0.3093,
+            0.3115,
+            0.3048,
+            0.3156
+          ]
+        },
+        "fft/rust:fft": {
+          "min": 0.3439,
+          "median": 0.3507,
+          "mean": 0.354,
+          "runs": [
+            0.3488,
+            0.3692,
+            0.3572,
+            0.3439,
+            0.3507
+          ]
+        }
+      }
+    },
+    "listbuild": {
+      "arg": "23",
+      "variants": {
+        "listbuild/native": {
+          "min": 0.2679,
+          "median": 0.2687,
+          "mean": 0.2693,
+          "runs": [
+            0.2716,
+            0.2687,
+            0.2679,
+            0.2687,
+            0.2695
+          ]
+        },
+        "listbuild/rust:listbuild": {
+          "min": 0.3038,
+          "median": 0.3074,
+          "mean": 0.3078,
+          "runs": [
+            0.3074,
+            0.3119,
+            0.3038,
+            0.3099,
+            0.3063
+          ]
+        }
+      }
+    },
+    "listbuild-append": {
+      "arg": "23",
+      "variants": {
+        "listbuild-append/native": {
+          "min": 0.2723,
+          "median": 0.2761,
+          "mean": 0.2754,
+          "runs": [
+            0.2761,
+            0.2734,
+            0.2782,
+            0.2723,
+            0.2772
+          ]
+        },
+        "listbuild-append/rust:listbuild": {
+          "min": 0.3071,
+          "median": 0.3089,
+          "mean": 0.3087,
+          "runs": [
+            0.3089,
+            0.3102,
+            0.3071,
+            0.3074,
+            0.3101
+          ]
+        }
+      }
+    },
+    "listbuild-comb": {
+      "arg": "23",
+      "variants": {
+        "listbuild-comb/native": {
+          "min": 0.2693,
+          "median": 0.27,
+          "mean": 0.2702,
+          "runs": [
+            0.2693,
+            0.2715,
+            0.2696,
+            0.27,
+            0.2706
+          ]
+        },
+        "listbuild-comb/rust:listbuild": {
+          "min": 0.3065,
+          "median": 0.3104,
+          "mean": 0.3098,
+          "runs": [
+            0.3104,
+            0.3123,
+            0.3104,
+            0.3065,
+            0.3092
+          ]
+        }
+      }
+    },
+    "wordfreq": {
+      "arg": "2000000",
+      "variants": {
+        "wordfreq/native": {
+          "min": 0.0562,
+          "median": 0.0566,
+          "mean": 0.0566,
+          "runs": [
+            0.0569,
+            0.0567,
+            0.0565,
+            0.0562,
+            0.0566
+          ]
+        },
+        "wordfreq/rust:wordfreq": {
+          "min": 0.0758,
+          "median": 0.0761,
+          "mean": 0.0761,
+          "runs": [
+            0.0761,
+            0.076,
+            0.0766,
+            0.0758,
+            0.0761
+          ]
+        }
+      }
+    }
+  }
+}

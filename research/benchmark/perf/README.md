@@ -260,15 +260,13 @@ ablation of the optimization the row is attributed to).
 
 ## Not yet covered
 
-- **List-combinator laziness.** `IterChain`, the fused-iterator IR node, never
-  fires on the Rust target: `list.map`/`filter`/`fold` all emit
-  `almide_rt_list_*(Vec, Rc<dyn Fn>)` over a materialized `Vec`, in a pipe, in
-  a direct call, and over a `list.range` source alike. (What DOES work is the
-  egg pass's combinator fusion — `range` → `map` → `fold` becomes one
-  `almide_rt_list_fold` with the map composed into the reducer.) On a cheap
-  lambda body at 30M elements this is worth **6.6x**: 31.5 ms for the
-  egg-fused shape against 4.8 ms for a fused Rust iterator chain, essentially
-  all of it `list.range` being a real 240 MB `Vec` rather than an
-  `impl Iterator`. Measured 2026-08-13 in
-  [string-gap-1004.md](./string-gap-1004.md) finding (a); no benchmark row
-  covers it yet, and it is the largest un-taken win the suite has surfaced.
+- **List-combinator laziness: no longer a gap, still no row.** On 2026-08-13
+  ([string-gap-1004.md](./string-gap-1004.md) finding (a)), `list.range` →
+  `map` → `fold` built a real 240 MB `Vec` at 30M elements and ran 6.6x a fused
+  Rust iterator chain. The chain now lowers to a counted iterator on the native
+  leg: `(0i64..n).map(…).filter(…)` with no range `Vec` (the fusion work of
+  #2045 and the counted fold heads of #3824). Re-measured 2026-10-20 on an M4 Pro
+  (develop 5d52899e2, `--release`, `n` read from argv, a `% 1000` body so LLVM
+  cannot close the loop, 9 interleaved runs): Almide 18.0 ms median at 1.5 MB
+  max RSS, against 14.0 ms for the hand-written Rust iterator chain, so 1.29x
+  rather than 6.6x. No benchmark row gates the shape yet.

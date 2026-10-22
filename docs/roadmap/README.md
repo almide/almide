@@ -7,7 +7,7 @@
 
 ## Active
 
-98 items
+99 items
 
 | Item | Description |
 |------|-------------|
@@ -75,6 +75,7 @@
 | [rot-eradication — the decay map and its reference-backed cures](active/rot-eradication.md) | The decay map of compiler rot and its reference-backed cures |
 | [Self-host linking v2 — link the mono instances, retire the twin matrix](active/selfhost-link-v2.md) | Self-host linking v2 — retire the shim registry's per-type twins by linking the monomorphized generic bodies the renderer already produces |
 | [Shell scripting stance: structured pipelines, no interactive shell](active/shell-scripting-surface.md) | Take Nushell's data model for scripts; do not build an interactive shell |
+| [Stdlib redesign (three layers)](active/stdlib-redesign.md) | Three-layer redesign of the standard library against nine languages — rules, category list, per-module role tables, a verdict for every public function, and the issues the adopted proposals became |
 | [Test-surface 25× — the road to reference-compiler scale](active/test-surface-25x.md) | Grow the committed test surface 25x toward reference-compiler scale |
 | [Ticks interface audit — is the demanded API shape different?](active/ticks-interface-audit.md) | Audit of ticks against timeout-shaped APIs: the unwritable-number problem, three fixes |
 | [Trust Layer — 機械が書くソフトウェアの信頼層](active/trust-layer.md) | Category strategy — winning "the trust layer for machine-written software": MWS Trust Levels, receipts, critical path |
