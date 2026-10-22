@@ -1463,6 +1463,16 @@ probe pins both the origin (start included) and the exclusivity in one image.
 """
 
 [[list.fn]]
+name = "range_step"
+index_unit = "value"
+probe = 'list.range_step(5, 0, -2)'
+expect = "[5, 3, 1]"
+note = """
+Half-open like range: start included, the end VALUE never appears, whichever
+way the step counts. The probe pins a negative step stopping before end.
+"""
+
+[[list.fn]]
 name = "binary_search"
 index_unit = "element-index"
 probe = 'list.binary_search([10, 20, 30], 20) ?? (0 - 1)'
