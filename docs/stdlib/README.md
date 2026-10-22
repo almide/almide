@@ -2,7 +2,7 @@
 
 # Standard library
 
-Every public function of the 46 stdlib modules, 1082 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
+Every public function of the 46 stdlib modules, 1130 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
 
 A `mut` parameter is written in place: the caller passes a `var` binding and sees the change (a `let`, a non-`mut` parameter or a temporary is E032). Every other parameter is read only, and a function that changes a value without `mut` returns a new one.
 
@@ -33,8 +33,8 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [int8](#int8) | 20 | 0 |
 | [io](#io) | 8 | 0 |
 | [json](#json) | 15 | 0 |
-| [list](#list) | 67 | 0 |
-| [map](#map) | 25 | 0 |
+| [list](#list) | 79 | 0 |
+| [map](#map) | 40 | 0 |
 | [math](#math) | 35 | 0 |
 | [matrix](#matrix) | 48 | 0 |
 | [net](#net) | 26 | 2 |
@@ -44,7 +44,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [random](#random) | 9 | 0 |
 | [regex](#regex) | 8 | 0 |
 | [result](#result) | 15 | 0 |
-| [set](#set) | 19 | 0 |
+| [set](#set) | 40 | 0 |
 | [string](#string) | 88 | 0 |
 | [testing](#testing) | 10 | 0 |
 | [uint16](#uint16) | 18 | 0 |
@@ -819,6 +819,18 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `list.split_at(xs: List[T], n: Int) -> (List[T], List[T])` — (take n, drop n); n past the end gives (xs, []).
 - `list.iterate(seed: T, f: (T) -> T, n: Int) -> List[T]` — [seed, f(seed), ...] of length n; [] if n <= 0.
 - `list.find_map(xs: List[A], f: (A) -> Option[B]) -> Option[B]` — The first some that f gives, or none; f is not called after the hit.
+- `list.new() -> List[A]` — An empty list; the same value as [].
+- `list.from_list(xs: List[A]) -> List[A]` — xs itself; the Container constructor from a list.
+- `list.to_list(xs: List[A]) -> List[A]` — xs itself; the Container view as a list.
+- `list.sort_with(xs: List[A], cmp: (A, A) -> Int) -> List[A]` — Stable sort by cmp: negative puts a first, 0 keeps input order.
+- `list.min_by(xs: List[A], f: (A) -> K) -> Option[A]` — Element with the least key f(x); the first on ties; f runs once per x.
+- `list.max_by(xs: List[A], f: (A) -> K) -> Option[A]` — Element with the greatest key f(x); the first on ties; f runs once per x.
+- `list.min_with(xs: List[A], cmp: (A, A) -> Int) -> Option[A]` — Least element by cmp; the first on ties; none when empty.
+- `list.max_with(xs: List[A], cmp: (A, A) -> Int) -> Option[A]` — Greatest element by cmp; the first on ties; none when empty.
+- `list.binary_search_by(xs: List[A], target: K, f: (A) -> K) -> Option[Int]` — Index of target among keys f(x) of xs sorted by key, or none.
+- `list.binary_search_with(xs: List[A], target: A, cmp: (A, A) -> Int) -> Option[Int]` — Index of target in xs sorted by cmp, or none; cmp(x, target) is asked.
+- `list.unzip(xs: List[(A, B)]) -> (List[A], List[B])` — (firsts, seconds) of a list of pairs; the inverse of zip.
+- `list.range_step(start: Int, end: Int, step: Int) -> List[Int]` — start, start + step, ...
 
 ## map
 
@@ -849,6 +861,21 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `map.insert(mut m: Map[K, V], key: K, value: V) -> Unit` — In-place key -> value; an existing key is overwritten and keeps its position.
 - `map.delete(mut m: Map[K, V], key: K) -> Unit` — Removes key in place; no-op when absent.
 - `map.clear(mut m: Map[K, V]) -> Unit` — Removes every entry of m in place.
+- `map.enumerate(m: Map[K, V]) -> List[(Int, (K, V))]` — (index, (key, value)) pairs in insertion order, index from 0.
+- `map.zip(m: Map[K, V], ys: List[B]) -> List[((K, V), B)]` — Entries paired with ys by position; stops at the shorter.
+- `map.zip_with(m: Map[K, V], ys: List[B], f: ((K, V), B) -> C) -> List[C]` — f over (entry, ys element) pairs; stops at the shorter.
+- `map.filter_map(m: Map[K, V], f: ((K, V)) -> Option[B]) -> List[B]` — The somes f gives over the entries, in insertion order.
+- `map.find_map(m: Map[K, V], f: ((K, V)) -> Option[B]) -> Option[B]` — The first some f gives over the entries, or none; f is not called after the hit.
+- `map.reduce(m: Map[K, V], f: ((K, V), (K, V)) -> (K, V)) -> Option[(K, V)]` — Left fold of the entries seeded by the first; none when empty.
+- `map.scan(m: Map[K, V], init: B, f: (B, (K, V)) -> B) -> List[B]` — Running fold values over the entries, init excluded.
+- `map.partition(m: Map[K, V], f: ((K, V)) -> Bool) -> (List[(K, V)], List[(K, V)])` — (entries where f holds, the rest), insertion order kept.
+- `map.group_by(m: Map[K, V], f: ((K, V)) -> B) -> Map[B, List[(K, V)]]` — Key f(entry) -> entries; keys in first-seen order.
+- `map.sort_by(m: Map[K, V], f: ((K, V)) -> B) -> List[(K, V)]` — Entries sorted by key f(entry), stable; f runs once per entry.
+- `map.sort_with(m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> List[(K, V)]` — Entries sorted by cmp, stable: negative puts a first.
+- `map.min_by(m: Map[K, V], f: ((K, V)) -> U) -> Option[(K, V)]` — Entry with the least f(entry); the first on ties.
+- `map.max_by(m: Map[K, V], f: ((K, V)) -> U) -> Option[(K, V)]` — Entry with the greatest f(entry); the first on ties.
+- `map.min_with(m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> Option[(K, V)]` — Least entry by cmp; the first on ties.
+- `map.max_with(m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> Option[(K, V)]` — Greatest entry by cmp; the first on ties.
 
 ## math
 
@@ -1103,6 +1130,27 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `set.fold(s: Set[A], init: B, f: (B, A) -> B) -> B` — Folds f(acc, x) in insertion order.
 - `set.any(s: Set[A], f: (A) -> Bool) -> Bool` — true if f holds for some member; false if empty.
 - `set.all(s: Set[A], f: (A) -> Bool) -> Bool` — true if f holds for every member; true if empty.
+- `set.count(s: Set[A], f: (A) -> Bool) -> Int` — Number of members where f holds.
+- `set.find(s: Set[A], f: (A) -> Bool) -> Option[A]` — First member, in insertion order, where f holds, or none.
+- `set.clear(mut s: Set[A]) -> Unit` — Removes every member of s in place.
+- `set.enumerate(s: Set[A]) -> List[(Int, A)]` — (index, member) pairs in insertion order, index from 0.
+- `set.zip(s: Set[A], ys: List[B]) -> List[(A, B)]` — Members paired with ys by position; stops at the shorter.
+- `set.zip_with(s: Set[A], ys: List[B], f: (A, B) -> C) -> List[C]` — f over (member, ys element) pairs; stops at the shorter.
+- `set.filter_map(s: Set[A], f: (A) -> Option[B]) -> List[B]` — The somes f gives, in insertion order.
+- `set.find_map(s: Set[A], f: (A) -> Option[B]) -> Option[B]` — The first some f gives, or none; f is not called after the hit.
+- `set.reduce(s: Set[A], f: (A, A) -> A) -> Option[A]` — Left fold seeded by the first member; none when empty.
+- `set.scan(s: Set[A], init: B, f: (B, A) -> B) -> List[B]` — Running fold values in insertion order, init excluded.
+- `set.partition(s: Set[A], f: (A) -> Bool) -> (List[A], List[A])` — (members where f holds, the rest), insertion order kept.
+- `set.group_by(s: Set[A], f: (A) -> B) -> Map[B, List[A]]` — Key f(x) -> members; keys in first-seen order.
+- `set.sort(s: Set[A]) -> List[A]` — Members in ascending order; Floats in IEEE totalOrder.
+- `set.sort_by(s: Set[A], f: (A) -> B) -> List[A]` — Members sorted by key f(x), stable; f runs once per member.
+- `set.sort_with(s: Set[A], cmp: (A, A) -> Int) -> List[A]` — Members sorted by cmp, stable: negative puts a first.
+- `set.min(s: Set[A]) -> Option[A]` — Least member, or none when empty.
+- `set.max(s: Set[A]) -> Option[A]` — Greatest member, or none when empty.
+- `set.min_by(s: Set[A], f: (A) -> K) -> Option[A]` — Member with the least key f(x); the first on ties.
+- `set.max_by(s: Set[A], f: (A) -> K) -> Option[A]` — Member with the greatest key f(x); the first on ties.
+- `set.min_with(s: Set[A], cmp: (A, A) -> Int) -> Option[A]` — Least member by cmp; the first on ties.
+- `set.max_with(s: Set[A], cmp: (A, A) -> Int) -> Option[A]` — Greatest member by cmp; the first on ties.
 
 ## string
 
