@@ -72,7 +72,7 @@ impl<'a> Interpreter<'a> {
             "update" => self.hof_try_list_update(a),
             "iterate" => self.hof_try_iterate(a),
             "sort_by" | "group_by" | "unique_by" => self.hof_try_keyed(hof, a),
-            _ => Flow::Unsupported(format!("HOF list.__fallible_{hof}")),
+            _ => self.eval_try_order(hof, a),
         }
     }
 
@@ -289,3 +289,4 @@ impl<'a> Interpreter<'a> {
 }
 
 include!("hofs_fallible_containers.rs");
+include!("hofs_fallible_order.rs");
