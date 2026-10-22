@@ -7733,6 +7733,24 @@
 "name": "gunzip",
 "sig": "fn zlib.gunzip(b: Bytes) -> Result[Bytes, String]",
 "kind": "意味変更"
+},
+{
+"mod": "zlib",
+"name": "decompress_max",
+"sig": "fn zlib.decompress_max(b: Bytes, max_len: Int) -> Result[Bytes, String]",
+"kind": "追加"
+},
+{
+"mod": "zlib",
+"name": "inflate_max",
+"sig": "fn zlib.inflate_max(b: Bytes, max_len: Int) -> Result[Bytes, String]",
+"kind": "追加"
+},
+{
+"mod": "zlib",
+"name": "gunzip_max",
+"sig": "fn zlib.gunzip_max(b: Bytes, max_len: Int) -> Result[Bytes, String]",
+"kind": "追加"
 }
 ],
 "removed": {

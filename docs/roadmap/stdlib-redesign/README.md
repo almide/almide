@@ -44,7 +44,7 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 
 [args](L2-args.md) ・ [base64](L2-base64.md) ・ [bigint](L2-bigint.md) ・ [bool](L2-bool.md) ・ [bytes](L2-bytes.md) ・ [compute](L2-compute.md) ・ [datetime](L2-datetime.md) ・ [deque](L2-deque.md) ・ [duration](L2-duration.md) ・ [env](L2-env.md) ・ [error](L2-error.md) ・ [ffi](L2-ffi.md) ・ [float](L2-float.md) ・ [fs](L2-fs.md) ・ [hash](L2-hash.md) ・ [heap](L2-heap.md) ・ [hex](L2-hex.md) ・ [html](L2-html.md) ・ [http](L2-http.md) ・ [int](L2-int.md) ・ [io](L2-io.md) ・ [json](L2-json.md) ・ [list](L2-list.md) ・ [map](L2-map.md) ・ [math](L2-math.md) ・ [matrix](L2-matrix.md) ・ [net](L2-net.md) ・ [option](L2-option.md) ・ [path](L2-path.md) ・ [process](L2-process.md) ・ [random](L2-random.md) ・ [regex](L2-regex.md) ・ [result](L2-result.md) ・ [set](L2-set.md) ・ [sized-numbers](L2-sized-numbers.md) ・ [string](L2-string.md) ・ [testing](L2-testing.md) ・ [unix](L2-unix.md) ・ [url](L2-url.md) ・ [uuid](L2-uuid.md) ・ [value](L2-value.md) ・ [zlib](L2-zlib.md)
 
-## 案の状態（全 349 件: ○ 284・× 61・保留 4）
+## 案の状態（全 353 件: ○ 288・× 61・保留 4）
 
 | 案 | 内容 | 判定 | issue |
 |---|---|---|---|
@@ -95,6 +95,7 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 | [R-L0-44](L0-conventions.md#r-l0-44-入出力の-protocol-readwriteclose-を置き読み書きと閉じるを-io-の総称関数-1-組にする---採用) | 入出力の protocol `Read`・`Write`・`Close` を置き、読み書きと閉じるを `io` の総称関数 1 組にする | ○ | #4015 |
 | [R-L0-45](L0-conventions.md#r-l0-45-メモリ安全でない標準の関数は-ffiread-と-ffiwrite-の-2-つだけにする---採用) | メモリ安全でない標準の関数は `ffi.read` と `ffi.write` の 2 つだけにする | ○ | #4008、#4013 |
 | [R-L0-46](L0-conventions.md#r-l0-46-位置を受け取る関数を全数で表にし役割の規則r-l0-33をゲートにする---採用) | 位置を受け取る関数を全数で表にし、役割の規則（R-L0-33）をゲートにする | ○ | #4005 |
+| [R-L0-47](L0-conventions.md#r-l0-47-信頼しない入力を読む関数は時間と大きさに上限を持つ---採用) | 信頼しない入力を読む関数は、時間と大きさに上限を持つ | ○ | #4019、#4020 |
 | [R-L0-G](L0-conventions.md#ゲートの束r-l0-g---採用) | ゲートの束（R-L0-G） | ○ | #3949 |
 | [R-L1-01](L1-categories.md#r-l1-01-両端キュー-deque---採用) | 両端キュー `deque` | ○ | #3932 |
 | [R-L1-02](L1-categories.md#r-l1-02-優先度キュー-heap---採用) | 優先度キュー `heap` | ○ | #3933 |
@@ -249,6 +250,7 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 | [R-json-01](L2-json.md#r-json-01-型つきの取り出しと道筋の操作を-value-に移す---採用) | 型つきの取り出しと道筋の操作を `value` に移す | ○ | #3953 |
 | [R-json-02](L2-json.md#r-json-02-parse-は文書の後ろの余計な文字を-err-にする---採用) | `parse` は文書の後ろの余計な文字を err にする | ○ | #3921 |
 | [R-json-03](L2-json.md#r-json-03-stringify-と-stringify_pretty-を据え置く---採用変更なし) | `stringify` と `stringify_pretty` を据え置く | ○ | —（変更なし） |
+| [R-json-04](L2-json.md#r-json-04-parse-の入れ子の深さに上限を置く---採用) | `parse` の入れ子の深さに上限を置く | ○ | #4020 |
 | [R-list-00](L2-list.md#r-list-00-その場書き換えとコピーの様式を据え置きr-l0-05-の保険をかける---採用) | その場書き換えとコピーの様式を据え置き、R-L0-05 の保険をかける | ○ | #3928 |
 | [R-list-01](L2-list.md#r-list-01-listget_or-を撤去し--に一本化する---採用) | `list.get_or` を撤去し `??` に一本化する | ○ | #3913 |
 | [R-list-02](L2-list.md#r-list-02-listlength-を-epoch-16-で撤去する---採用) | `list.length` を epoch 16 で撤去する | ○ | #3851 |
@@ -335,6 +337,7 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 | [R-regex-08](L2-regex.md#r-regex-08-捕捉グループを-string-で返す---採用) | 捕捉グループを `String?` で返す | ○ | #3977 |
 | [R-regex-09](L2-regex.md#r-regex-09-対象の文字列を第-1-引数にする---不採用) | 対象の文字列を第 1 引数にする | × | — |
 | [R-regex-11](L2-regex.md#r-regex-11-パターンを確かめて作る関数を-regexcompile-と綴る---採用) | パターンを確かめて作る関数を `regex.compile` と綴る | ○ | #4004 |
+| [R-regex-12](L2-regex.md#r-regex-12-一致の照合を線形時間にする---採用) | 一致の照合を線形時間にする | ○ | #4019 |
 | [R-result-01](L2-result.md#r-result-01-resultunwrap_or-を-epoch-16-で撤去する---採用) | `result.unwrap_or` を epoch 16 で撤去する | ○ | #1107 |
 | [R-result-02](L2-result.md#r-result-02-resultfilter-の-3-引数を据え置く---不採用撤去も改名もしない) | `result.filter` の 3 引数を据え置く | × | — |
 | [R-result-03](L2-result.md#r-result-03-resultto_err_option-を改名しない---不採用) | `result.to_err_option` を改名しない | × | — |
@@ -397,3 +400,4 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 | [R-zlib-01](L2-zlib.md#r-zlib-01-crc32-と-adler32-を-hash-に移す---採用) | `crc32` と `adler32` を `hash` に移す | ○ | #3914 |
 | [R-zlib-02](L2-zlib.md#r-zlib-02-展開の-3-関数から-effect-を外す---採用) | 展開の 3 関数から `effect` を外す | ○ | #3956 |
 | [R-zlib-03](L2-zlib.md#r-zlib-03-圧縮の出力を両-target-で同じにしeffect-を外す--保留) | 圧縮の出力を両 target で同じにし、`effect` を外す | 保留 | #3892 |
+| [R-zlib-04](L2-zlib.md#r-zlib-04-展開の出力に既定の上限を置き上限を引数にとる関数を足す---採用) | 展開の出力に既定の上限を置き、上限を引数にとる関数を足す | ○ | #4020 |

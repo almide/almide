@@ -38,20 +38,20 @@
 
 | いまの関数 | リデザイン後 | 据え置き | 新規 | 改名 | 意味変更 | 撤去 |
 |---:|---:|---:|---:|---:|---:|---:|
-| 1001 | 1289 | 409 | 705 | 88 | 87 | 417 |
+| 1001 | 1292 | 409 | 708 | 88 | 87 | 417 |
 
 固定幅の数（`int8`〜`uint64`、`float32`・`float64`）は型ごとに 1 関数と数えます。
 
 ## 実体の数
 
-この一覧は、同じ protocol の関数を型ごとに 1 行と数えています（計 1,289 行）。[protocol の階層](protocol-view.md)で数え直すと、覚える名前はずっと少なくなります。
+この一覧は、同じ protocol の関数を型ごとに 1 行と数えています（計 1,292 行）。[protocol の階層](protocol-view.md)で数え直すと、覚える名前はずっと少なくなります。
 
 | 数え方 | 一覧の行 | 覚える名前 |
 |---|---:|---:|
 | protocol の要件（protocol ごとに 1 回） | 796 | 166 |
 | 値の型だけが持つ関数 | 293 | 293 |
-| 値の型を持たないモジュール（`fs`・`http`・`math` など） | 200 | 200 |
-| 計 | 1289 | 659 |
+| 値の型を持たないモジュール（`fs`・`http`・`math` など） | 203 | 203 |
+| 計 | 1292 | 662 |
 
 ## モジュールごとの数
 
@@ -107,7 +107,7 @@
 | [`url`](#url) | 9 | 4 | 0 | 1 | 1 | [L2-url.md](L2-url.md) |
 | [`uuid`](#uuid)（新しいモジュール） | 7 | 7 | 0 | 0 | 0 | [L2-uuid.md](L2-uuid.md) |
 | [`value`](#value) | 29 | 14 | 1 | 0 | 5 | [L2-value.md](L2-value.md) |
-| [`zlib`](#zlib) | 8 | 0 | 0 | 3 | 2 | [L2-zlib.md](L2-zlib.md) |
+| [`zlib`](#zlib) | 11 | 3 | 0 | 3 | 2 | [L2-zlib.md](L2-zlib.md) |
 
 ## args
 
@@ -1319,7 +1319,7 @@
 
 | 関数 | シグネチャ（リデザイン後） | 変化 | 案 |
 |---|---|---|---|
-| `parse` | `fn json.parse(text: String) -> Result[Value, String]` | 意味変更: 後ろの余計な文字は err | R-json-02 |
+| `parse` | `fn json.parse(text: String) -> Result[Value, String]` | 意味変更: 後ろの余計な文字は err。入れ子が 1000 段を超えたら err | R-json-02、R-json-04 |
 | `stringify` | `fn json.stringify(v: Value) -> String` |  | R-json-03 |
 | `stringify_pretty` | `fn json.stringify_pretty(v: Value) -> String` |  | R-json-03 |
 
@@ -2324,12 +2324,15 @@
 |---|---|---|---|
 | `compress` | `effect fn zlib.compress(b: Bytes) -> Bytes` |  | R-zlib-03 |
 | `compress_level` | `effect fn zlib.compress_level(b: Bytes, level: Int) -> Bytes` |  | R-zlib-03 |
-| `decompress` | `fn zlib.decompress(b: Bytes) -> Result[Bytes, String]` | 意味変更: effect を外し、`fn … -> Result[Bytes, String]` にする | R-zlib-02 |
+| `decompress` | `fn zlib.decompress(b: Bytes) -> Result[Bytes, String]` | 意味変更: effect を外し、`fn … -> Result[Bytes, String]` にする。出力が 256 MiB を超えたら err | R-zlib-02、R-zlib-04 |
+| `decompress_max` | `fn zlib.decompress_max(b: Bytes, max_len: Int) -> Result[Bytes, String]` | 新規 | R-zlib-04 |
 | `deflate` | `effect fn zlib.deflate(b: Bytes) -> Bytes` |  | R-zlib-03 |
 | `deflate_level` | `effect fn zlib.deflate_level(b: Bytes, level: Int) -> Bytes` |  | R-zlib-03 |
-| `gunzip` | `fn zlib.gunzip(b: Bytes) -> Result[Bytes, String]` | 意味変更: effect を外し、`fn … -> Result[Bytes, String]` にする | R-zlib-02 |
+| `gunzip` | `fn zlib.gunzip(b: Bytes) -> Result[Bytes, String]` | 意味変更: effect を外し、`fn … -> Result[Bytes, String]` にする。出力が 256 MiB を超えたら err | R-zlib-02、R-zlib-04 |
+| `gunzip_max` | `fn zlib.gunzip_max(b: Bytes, max_len: Int) -> Result[Bytes, String]` | 新規 | R-zlib-04 |
 | `gzip` | `effect fn zlib.gzip(b: Bytes) -> Bytes` |  | R-zlib-03 |
-| `inflate` | `fn zlib.inflate(b: Bytes) -> Result[Bytes, String]` | 意味変更: effect を外し、`fn … -> Result[Bytes, String]` にする | R-zlib-02 |
+| `inflate` | `fn zlib.inflate(b: Bytes) -> Result[Bytes, String]` | 意味変更: effect を外し、`fn … -> Result[Bytes, String]` にする。出力が 256 MiB を超えたら err | R-zlib-02、R-zlib-04 |
+| `inflate_max` | `fn zlib.inflate_max(b: Bytes, max_len: Int) -> Result[Bytes, String]` | 新規 | R-zlib-04 |
 
 撤去（2）:
 
