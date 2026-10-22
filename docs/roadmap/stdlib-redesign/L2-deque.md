@@ -41,6 +41,7 @@
 - (b) 純粋な計算です。native と wasm で同じです。host の機能は要りません。
 - (c) 幅優先探索で、いまは `list.drop(xs, 1)` が毎回 O(n) です。他言語の deque を前提に書いた LLM のコードが、そのまま速く動きます。
 - (d) 追加（新しいモジュール。`import` の要否は、`list`・`map` と同じく自動の import に入れる。stdlib_info の `AUTO_IMPORT_BUNDLED` に足す）。
+- 採らなかった案: `List` の先頭からの取り出しを Go の `s[1:]` のように写さずに済ませ、deque を足さない。覚える型は減るが、`List` の表現を変えるのでコンパイラの深い所に手が入り、先頭に足す側は速くならない。他言語で LLM が見る形も「待ち行列は deque」（Python `collections.deque`、Rust `VecDeque`、Kotlin `ArrayDeque`）なので、deque を足す。`List` の先頭操作の速さは、`List` の性能を見直すときに別に測る。
 - ゲート案: list と同じ境界入力の行列テスト（空からの `pop`、`get` の範囲外）、native と wasm の cross fixture、`push_back` を n 回して `pop_front` を n 回する時間が線形であることの計測（`check-perf-ratio.sh` の形）。
 - issue: #3932
 
