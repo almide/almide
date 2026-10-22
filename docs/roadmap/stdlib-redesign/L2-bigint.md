@@ -88,6 +88,15 @@
 - 完全性の規則: `to_int` を経由すると値を失う運び手（いまは `uint64` だけ）は、`BigInt` と直接つなぎます。
 - issue: #3972
 
+### R-bigint-07 `bigint` に `Integer` のビット演算を置く — ○ 採用
+
+- いま: `bigint` は `Integer` の算術（`floor_div`・`mod`・`pow`・`is_even`・`is_odd`）を持ちますが、ビット演算を持ちません。
+- 案: `band`・`bor`・`bxor`・`bnot`・`bshl`・`bshr` を置きます。負の数は、上に無限に 1 が続く 2 の補数として扱います（Python の `int`、Swift の `BinaryInteger` と同じ）。`bnot(x)` は `-x - 1` です。
+- 意図した抜け: `count_leading_zeros`・`count_trailing_zeros`・`count_ones`・`byte_swap` は置きません（`FixedWidthInteger` の要件で、幅のない型には決まった答えがない）。
+- (a) Swift の `BinaryInteger` はビット演算を要件にし、任意精度の整数もこれを持つ設計です。Python の `int`、Go の `big.Int`（`And`・`Or`・`Xor`・`Not`・`Lsh`・`Rsh`）、Java/Kotlin の `BigInteger`（`and`・`or`・`xor`・`not`・`shiftLeft`・`shiftRight`）も持ちます。
+- (d) 追加 6。
+- issue: #4000
+
 ## L3: 関数表（提案）
 
 | 関数 | シグネチャ(提案) | 他言語の主な綴り | 判定 | 案 |
@@ -123,3 +132,9 @@
 | `to_uint64` | `bigint.to_uint64(b: BigInt) -> UInt64` | Go `Uint64` | 追加（範囲外は abort） | R-bigint-06、R-L0-32 |
 | `to_uint64_checked` | `bigint.to_uint64_checked(b: BigInt) -> Option[UInt64]` | Go `IsUint64` | 追加 | R-bigint-06 |
 | `to_uint64_saturating` | `bigint.to_uint64_saturating(b: BigInt) -> UInt64` | — | 追加 | R-bigint-06 |
+| `band` | `bigint.band(a: BigInt, b: BigInt) -> BigInt` | Go `And` / Kotlin `and` / Python `&` | 追加 | R-bigint-07 |
+| `bor` | `bigint.bor(a: BigInt, b: BigInt) -> BigInt` | Go `Or` / Kotlin `or` / Python `\|` | 追加 | R-bigint-07 |
+| `bxor` | `bigint.bxor(a: BigInt, b: BigInt) -> BigInt` | Go `Xor` / Kotlin `xor` / Python `^` | 追加 | R-bigint-07 |
+| `bnot` | `bigint.bnot(a: BigInt) -> BigInt` | Go `Not` / Kotlin `not` / Python `~` | 追加 | R-bigint-07 |
+| `bshl` | `bigint.bshl(a: BigInt, n: Int) -> BigInt` | Go `Lsh` / Kotlin `shiftLeft` / Python `<<` | 追加 | R-bigint-07 |
+| `bshr` | `bigint.bshr(a: BigInt, n: Int) -> BigInt` | Go `Rsh` / Kotlin `shiftRight` / Python `>>` | 追加 | R-bigint-07 |

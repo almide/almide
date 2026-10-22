@@ -46,7 +46,7 @@
 - (b) 純粋な計算です。host の機能は要りません。
 - (c) 幅優先探索のようなアルゴリズム問題で、LLM は他言語の deque を前提に書きます。無いと、自前のキューを毎回書くことになり、書き間違いが増えます。
 - (d) 追加です（新しいモジュール）。
-- 関数（L0 の動詞に従う）: `deque.new`、`from_list`、`to_list`、`len`、`is_empty`、`push_back`、`push_front`、`pop_back`、`pop_front`、`first`、`last`。`push_*`・`pop_*` は `list.push`・`list.pop` と同じく、`mut` 引数を取るその場書き換えです（R-L0-04 の 3: 1 つの動詞は全モジュールで同じ様式）。詳細は [L2-deque](L2-deque.md)。
+- 関数（L0 の動詞に従う）: `deque.new`、`from_list`、`to_list`、`len`、`is_empty`、`push`、`push_front`、`pop`、`pop_front`、`first`、`last`。`push_*`・`pop_*` は `list.push`・`list.pop` と同じく、`mut` 引数を取るその場書き換えです（R-L0-04 の 3: 1 つの動詞は全モジュールで同じ様式）。詳細は [L2-deque](L2-deque.md)。
 - ゲート: list と同じ境界入力の行列テストを使います。native と wasm で結果が一致することを確かめる fixture を置きます。
 - issue: #3932
 

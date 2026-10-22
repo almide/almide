@@ -231,6 +231,17 @@
 - (d) 意味変更（改名と同じ epoch 15 で入るので、新しい名前の意味として最初から決めます）。
 - issue: #3991
 
+### R-string-16 `string` に `Sequence`・`Growable` の要件をそろえる — ○ 採用
+
+- いま: `string` は `Text`（`Ordered`・`Sequence`・`Container` を含む）と `Growable` に入りますが、`filter`・`fold`・`pop`・`insert`・`remove_at` を持ちません。
+- 案: 5 つを置きます。要素は 1 文字（1 コードポイント）の `String` で、位置はコードポイント単位です（R-string の約束と同じ）。
+  - `filter(s, f: (String) -> Bool) -> String`、`fold(s, init: B, f: (B, String) -> B) -> B`
+  - `pop(mut s) -> String?`（末尾の 1 文字を取り出す）、`insert(s, i: Int, sub: String) -> String`、`remove_at(s, i: Int) -> String`（`list` と同じく `0..=len`・`0..len` の外は abort）
+- (a) Swift の `String` は `RangeReplaceableCollection` で、`filter`（`String` を返す）・`reduce`・`popLast`・`insert(_:at:)`・`remove(at:)` を持ちます。Kotlin も `filter`・`fold` を `String` に持ちます。
+- 保留: `new`・`from_list`・`to_list` は、`to_list` が `chars` と同じ役割になるので、`chars` の改名と一緒に Dojo で測ってから決めます（protocol-view.md の「この階層で決めること」）。
+- (d) 追加 5。
+- issue: #4000
+
 ## L3: 関数表
 
 | 関数 | シグネチャ(現行, mut 表示) | 他言語の主な綴り | 判定 | 案 |
@@ -289,6 +300,11 @@
 | `byte_len`（追加） | `(s: String) -> Int` | Rust `len` / Go `len` / Gleam・Elixir `byte_size` / Swift `utf8.count` | 追加 | R-string-06 |
 | `to_utf16`（追加） | `(s: String) -> List[Int]` | Rust `encode_utf16` / JS `charCodeAt` / Swift `utf16` | 追加 | R-string-07 |
 | `from_utf16`（追加） | `(units: List[Int]) -> Result[String, String]` | Rust `String::from_utf16`（Result）/ JS `fromCharCode` | 追加 | R-string-07 |
+| `filter` | （追加）`(s: String, f: (String) -> Bool) -> String` | Swift `filter` / Kotlin `filter` | 追加 | R-string-16 |
+| `fold` | （追加）`(s: String, init: B, f: (B, String) -> B) -> B` | Swift `reduce` / Kotlin `fold` | 追加 | R-string-16 |
+| `pop` | （追加）`(mut s: String) -> String?` | Swift `popLast` / Rust `pop` | 追加 | R-string-16 |
+| `insert` | （追加）`(s: String, i: Int, sub: String) -> String` | Swift `insert(contentsOf:at:)` / Rust `insert_str` | 追加 | R-string-16 |
+| `remove_at` | （追加）`(s: String, i: Int) -> String` | Swift `remove(at:)` / Rust `remove` | 追加 | R-string-16 |
 
 現行 50 関数 + 追加 4 = 54 行。
 

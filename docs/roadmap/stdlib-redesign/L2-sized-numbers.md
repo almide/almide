@@ -105,7 +105,7 @@
 - ゲート案: 行列のゲートで、浮動小数点 → 整数の `_saturating` を「存在してはならない」側に置きます。同義語ゲートの許容リストから 8 行を消します。
 - issue: #3935
 
-### R-sized-05 固定幅のモジュールをまとめる・算術関数を足す — × 不採用
+### R-sized-05 固定幅のモジュールをまとめる・算術関数を足す — × 不採用（算術の部分は → R-sized-10 で見直し）
 
 - 内容: モジュールを統合しません（R-L1-20）。`int8.abs`、`uint32.max` などの算術関数も足しません（完全性の規則 8）。
 - 根拠の L0 規則: R-L0-02（主語の型のモジュールに置く。Almide にはメソッドがないので、型ごとのモジュールになる）、R-L0-01（`Int` の関数と同じ計算の複製を 10 倍に増やさない）。
@@ -150,6 +150,30 @@
 - (d) 追加（2 関数）。
 - 完全性の規則: 行列のゲートが、浮動小数点 3 型 × 整数 9 型の 27 セルすべてに無印・`_checked`・`_saturating` があることを確かめます。
 - issue: #3995
+
+### R-sized-10 整数 8 型に `Integer`・`FixedWidthInteger` の要件をそろえる — ○ 採用（R-sized-05 を見直し）
+
+- いま: `int` は `floor_div`・`mod`・`pow`・`is_even`・`is_odd`・ビット演算（`band`・`bor`・`bxor`・`bnot`・`bshl`・`bshr`）・`count_leading_zeros`・`count_trailing_zeros`・`count_ones`・`byte_swap`・`abs`・`sign` を持ちますが、`int8`〜`uint64` は持ちません。
+- 案: [protocol の階層](protocol-view.md)の要件として、8 型すべてに置きます。
+  - `Integer`: `floor_div(a, b)`・`mod(a, b)`・`pow(base, exp: Int)`・`is_even`・`is_odd`・`band`・`bor`・`bxor`・`bnot`・`bshl(a, n: Int)`・`bshr(a, n: Int)`。`bshr` は、符号つきの型では符号を保ち、符号なしの型では 0 で埋めます（Swift の `>>` と同じ）。
+  - `FixedWidthInteger`: `count_leading_zeros`・`count_trailing_zeros`・`count_ones`・`byte_swap`（どれも型の幅で数える。`int8.count_leading_zeros(1)` は 7）。
+  - `SignedInteger`（`int8`〜`int64`）: `abs`・`sign`。
+  - 結果が型の範囲を出たときの扱いは、その型の `+`・`*` と同じです。
+- R-sized-05（×）を見直す理由: 不採用の理由は「`Int` の関数と同じ計算を 10 倍に複製しない」でした。R-L0-37 では、これらは protocol の既定の実装 1 つで、型ごとに書きません。もう 1 つの理由「`to_int` してから `int.*`」は、`uint64` の 2^63 以上で成り立ちません（R-sized-06 の実測）。
+- 意図した抜け: `int` の N bit の演算（`wrap_add(a, b, bits)`・`rotate_left(a, n, bits)`・`bit_width`・`bshr_logical`）は置きません。固定幅の型では幅が型で決まり、同じ名前で形が食い違うためです（protocol-view.md の「この階層で決めること」）。
+- (a) Swift の `BinaryInteger`・`FixedWidthInteger` は、全部の整数型にこの関数群を持たせます。Rust の整数型も同じです（`div_euclid`・`rem_euclid`・`pow`・`count_ones`・`leading_zeros`・`swap_bytes`）。
+- (d) 追加 128（8 型 × 15、符号つき 4 型 × 2）。
+- issue: #4000
+
+### R-sized-11 `float32`・`float64` に `FloatingPoint` の要件をそろえる — ○ 採用（R-sized-08 の線引きを見直し）
+
+- いま: `float` は `abs`・`floor`・`ceil`・`round`・`trunc`・`signum` を持ちますが、`float32`・`float64` は持ちません。R-sized-08 は「値を計算する関数は `to_float` してから `float.*`」と線を引いていました。
+- 案: protocol の階層の `Signed`（`abs`）と `FloatingPoint`（`floor`・`ceil`・`round`・`trunc`・`signum`）の要件として、2 型に置きます。意味は `float` の同じ関数と同じです（`round` は 0 から遠い側に丸める）。
+- R-sized-08 の線引きを見直す理由: 線引きの心配は「どこまで足すかを繰り返し決める」ことでした。protocol の要件が線になるので、繰り返しません。`sqrt` などの数学関数は `math` に残します（`FloatingPoint` の要件ではない）。
+- (a) Swift の `FloatingPoint` は `rounded`・`magnitude` を、Rust の `f32` は `abs`・`floor`・`ceil`・`round`・`trunc`・`signum` を持ちます。
+- (d) 追加 12。
+- issue: #4000
+
 ## L3: 関数表
 
 ### L3: `int8`
@@ -186,6 +210,23 @@
 | `to_float` | （追加）`int8.to_float(x: Int8) -> Float` | Rust `as` / Kotlin `toDouble()` / Swift `init(_:)` / Gleam `to_float` (F) | 追加 | R-sized-01 |
 | `parse` | （追加）`int8.parse(s: String) -> Result[Int8, String]` | Rust `str::parse::<T>` / Go `ParseInt(s,10,bits)` / OCaml `Int32.of_string_opt` / Kotlin `toByteOrNull` 等 / Swift `T(s)` | 追加 | R-sized-02 |
 | `compare` | （追加）`int8.compare(a: Int8, b: Int8) -> Int` | Rust `cmp`/`total_cmp` / Go `cmp.Compare` / Kotlin `compareTo` / Swift `<` | 追加 | R-sized-02 |
+| `floor_div` | （追加）`int8.floor_div(a: Int8, b: Int8) -> Int8` | Rust `div_euclid` / Swift — / Python `//` | 追加 | R-sized-10 |
+| `mod` | （追加）`int8.mod(a: Int8, b: Int8) -> Int8` | Rust `rem_euclid` / Python `%` | 追加 | R-sized-10 |
+| `pow` | （追加）`int8.pow(base: Int8, exp: Int) -> Int8` | Rust `pow` / Swift — | 追加 | R-sized-10 |
+| `is_even` | （追加）`int8.is_even(n: Int8) -> Bool` | Swift `isMultiple(of: 2)` / Kotlin — | 追加 | R-sized-10 |
+| `is_odd` | （追加）`int8.is_odd(n: Int8) -> Bool` | Swift `!isMultiple(of: 2)` | 追加 | R-sized-10 |
+| `band` | （追加）`int8.band(a: Int8, b: Int8) -> Int8` | Rust・Go・Swift 演算子 `&` | 追加 | R-sized-10 |
+| `bor` | （追加）`int8.bor(a: Int8, b: Int8) -> Int8` | Rust・Go・Swift 演算子 `\|` | 追加 | R-sized-10 |
+| `bxor` | （追加）`int8.bxor(a: Int8, b: Int8) -> Int8` | Rust・Go・Swift 演算子 `^` | 追加 | R-sized-10 |
+| `bnot` | （追加）`int8.bnot(a: Int8) -> Int8` | Rust `!` / Swift `~` | 追加 | R-sized-10 |
+| `bshl` | （追加）`int8.bshl(a: Int8, n: Int) -> Int8` | Rust・Go・Swift 演算子 `<<` | 追加 | R-sized-10 |
+| `bshr` | （追加）`int8.bshr(a: Int8, n: Int) -> Int8` | Rust・Go・Swift 演算子 `>>` | 追加 | R-sized-10 |
+| `count_leading_zeros` | （追加）`int8.count_leading_zeros(n: Int8) -> Int` | Rust `leading_zeros` / Swift `leadingZeroBitCount` | 追加 | R-sized-10 |
+| `count_trailing_zeros` | （追加）`int8.count_trailing_zeros(n: Int8) -> Int` | Rust `trailing_zeros` / Swift `trailingZeroBitCount` | 追加 | R-sized-10 |
+| `count_ones` | （追加）`int8.count_ones(n: Int8) -> Int` | Rust `count_ones` / Swift `nonzeroBitCount` | 追加 | R-sized-10 |
+| `byte_swap` | （追加）`int8.byte_swap(n: Int8) -> Int8` | Rust `swap_bytes` / Swift `byteSwapped` | 追加 | R-sized-10 |
+| `abs` | （追加）`int8.abs(n: Int8) -> Int8` | Rust `abs` / Swift `abs` | 追加 | R-sized-10 |
+| `sign` | （追加）`int8.sign(n: Int8) -> Int` | Rust `signum` / Swift `signum()` | 追加 | R-sized-10 |
 
 ### L3: `int16`
 
@@ -224,6 +265,23 @@
 | `to_float` | （追加）`int16.to_float(x: Int16) -> Float` | Rust `as` / Kotlin `toDouble()` / Swift `init(_:)` / Gleam `to_float` (F) | 追加 | R-sized-01 |
 | `parse` | （追加）`int16.parse(s: String) -> Result[Int16, String]` | Rust `str::parse::<T>` / Go `ParseInt(s,10,bits)` / OCaml `Int32.of_string_opt` / Kotlin `toByteOrNull` 等 / Swift `T(s)` | 追加 | R-sized-02 |
 | `compare` | （追加）`int16.compare(a: Int16, b: Int16) -> Int` | Rust `cmp`/`total_cmp` / Go `cmp.Compare` / Kotlin `compareTo` / Swift `<` | 追加 | R-sized-02 |
+| `floor_div` | （追加）`int16.floor_div(a: Int16, b: Int16) -> Int16` | Rust `div_euclid` / Swift — / Python `//` | 追加 | R-sized-10 |
+| `mod` | （追加）`int16.mod(a: Int16, b: Int16) -> Int16` | Rust `rem_euclid` / Python `%` | 追加 | R-sized-10 |
+| `pow` | （追加）`int16.pow(base: Int16, exp: Int) -> Int16` | Rust `pow` / Swift — | 追加 | R-sized-10 |
+| `is_even` | （追加）`int16.is_even(n: Int16) -> Bool` | Swift `isMultiple(of: 2)` / Kotlin — | 追加 | R-sized-10 |
+| `is_odd` | （追加）`int16.is_odd(n: Int16) -> Bool` | Swift `!isMultiple(of: 2)` | 追加 | R-sized-10 |
+| `band` | （追加）`int16.band(a: Int16, b: Int16) -> Int16` | Rust・Go・Swift 演算子 `&` | 追加 | R-sized-10 |
+| `bor` | （追加）`int16.bor(a: Int16, b: Int16) -> Int16` | Rust・Go・Swift 演算子 `\|` | 追加 | R-sized-10 |
+| `bxor` | （追加）`int16.bxor(a: Int16, b: Int16) -> Int16` | Rust・Go・Swift 演算子 `^` | 追加 | R-sized-10 |
+| `bnot` | （追加）`int16.bnot(a: Int16) -> Int16` | Rust `!` / Swift `~` | 追加 | R-sized-10 |
+| `bshl` | （追加）`int16.bshl(a: Int16, n: Int) -> Int16` | Rust・Go・Swift 演算子 `<<` | 追加 | R-sized-10 |
+| `bshr` | （追加）`int16.bshr(a: Int16, n: Int) -> Int16` | Rust・Go・Swift 演算子 `>>` | 追加 | R-sized-10 |
+| `count_leading_zeros` | （追加）`int16.count_leading_zeros(n: Int16) -> Int` | Rust `leading_zeros` / Swift `leadingZeroBitCount` | 追加 | R-sized-10 |
+| `count_trailing_zeros` | （追加）`int16.count_trailing_zeros(n: Int16) -> Int` | Rust `trailing_zeros` / Swift `trailingZeroBitCount` | 追加 | R-sized-10 |
+| `count_ones` | （追加）`int16.count_ones(n: Int16) -> Int` | Rust `count_ones` / Swift `nonzeroBitCount` | 追加 | R-sized-10 |
+| `byte_swap` | （追加）`int16.byte_swap(n: Int16) -> Int16` | Rust `swap_bytes` / Swift `byteSwapped` | 追加 | R-sized-10 |
+| `abs` | （追加）`int16.abs(n: Int16) -> Int16` | Rust `abs` / Swift `abs` | 追加 | R-sized-10 |
+| `sign` | （追加）`int16.sign(n: Int16) -> Int` | Rust `signum` / Swift `signum()` | 追加 | R-sized-10 |
 
 ### L3: `int32`
 
@@ -266,6 +324,23 @@
 | `to_float32_checked` | （追加）`int32.to_float32_checked(x: Int32) -> Option[Float32]` | Rust `try_from` / Swift `init(exactly:)` (F) / OCaml Base `to_int_exn`系 / 他 6 言語 — | 追加 | R-sized-01 |
 | `parse` | （追加）`int32.parse(s: String) -> Result[Int32, String]` | Rust `str::parse::<T>` / Go `ParseInt(s,10,bits)` / OCaml `Int32.of_string_opt` / Kotlin `toByteOrNull` 等 / Swift `T(s)` | 追加 | R-sized-02 |
 | `compare` | （追加）`int32.compare(a: Int32, b: Int32) -> Int` | Rust `cmp`/`total_cmp` / Go `cmp.Compare` / Kotlin `compareTo` / Swift `<` | 追加 | R-sized-02 |
+| `floor_div` | （追加）`int32.floor_div(a: Int32, b: Int32) -> Int32` | Rust `div_euclid` / Swift — / Python `//` | 追加 | R-sized-10 |
+| `mod` | （追加）`int32.mod(a: Int32, b: Int32) -> Int32` | Rust `rem_euclid` / Python `%` | 追加 | R-sized-10 |
+| `pow` | （追加）`int32.pow(base: Int32, exp: Int) -> Int32` | Rust `pow` / Swift — | 追加 | R-sized-10 |
+| `is_even` | （追加）`int32.is_even(n: Int32) -> Bool` | Swift `isMultiple(of: 2)` / Kotlin — | 追加 | R-sized-10 |
+| `is_odd` | （追加）`int32.is_odd(n: Int32) -> Bool` | Swift `!isMultiple(of: 2)` | 追加 | R-sized-10 |
+| `band` | （追加）`int32.band(a: Int32, b: Int32) -> Int32` | Rust・Go・Swift 演算子 `&` | 追加 | R-sized-10 |
+| `bor` | （追加）`int32.bor(a: Int32, b: Int32) -> Int32` | Rust・Go・Swift 演算子 `\|` | 追加 | R-sized-10 |
+| `bxor` | （追加）`int32.bxor(a: Int32, b: Int32) -> Int32` | Rust・Go・Swift 演算子 `^` | 追加 | R-sized-10 |
+| `bnot` | （追加）`int32.bnot(a: Int32) -> Int32` | Rust `!` / Swift `~` | 追加 | R-sized-10 |
+| `bshl` | （追加）`int32.bshl(a: Int32, n: Int) -> Int32` | Rust・Go・Swift 演算子 `<<` | 追加 | R-sized-10 |
+| `bshr` | （追加）`int32.bshr(a: Int32, n: Int) -> Int32` | Rust・Go・Swift 演算子 `>>` | 追加 | R-sized-10 |
+| `count_leading_zeros` | （追加）`int32.count_leading_zeros(n: Int32) -> Int` | Rust `leading_zeros` / Swift `leadingZeroBitCount` | 追加 | R-sized-10 |
+| `count_trailing_zeros` | （追加）`int32.count_trailing_zeros(n: Int32) -> Int` | Rust `trailing_zeros` / Swift `trailingZeroBitCount` | 追加 | R-sized-10 |
+| `count_ones` | （追加）`int32.count_ones(n: Int32) -> Int` | Rust `count_ones` / Swift `nonzeroBitCount` | 追加 | R-sized-10 |
+| `byte_swap` | （追加）`int32.byte_swap(n: Int32) -> Int32` | Rust `swap_bytes` / Swift `byteSwapped` | 追加 | R-sized-10 |
+| `abs` | （追加）`int32.abs(n: Int32) -> Int32` | Rust `abs` / Swift `abs` | 追加 | R-sized-10 |
+| `sign` | （追加）`int32.sign(n: Int32) -> Int` | Rust `signum` / Swift `signum()` | 追加 | R-sized-10 |
 
 ### L3: `int64`
 
@@ -313,6 +388,23 @@
 | `to_float64_checked` | （追加）`int64.to_float64_checked(x: Int64) -> Option[Float64]` | Rust `try_from` / Swift `init(exactly:)` (F) / OCaml Base `to_int_exn`系 / 他 6 言語 — | 追加 | R-sized-01 |
 | `parse` | （追加）`int64.parse(s: String) -> Result[Int64, String]` | Rust `str::parse::<T>` / Go `ParseInt(s,10,bits)` / OCaml `Int32.of_string_opt` / Kotlin `toByteOrNull` 等 / Swift `T(s)` | 追加 | R-sized-02 |
 | `compare` | （追加）`int64.compare(a: Int64, b: Int64) -> Int` | Rust `cmp`/`total_cmp` / Go `cmp.Compare` / Kotlin `compareTo` / Swift `<` | 追加 | R-sized-02 |
+| `floor_div` | （追加）`int64.floor_div(a: Int64, b: Int64) -> Int64` | Rust `div_euclid` / Swift — / Python `//` | 追加 | R-sized-10 |
+| `mod` | （追加）`int64.mod(a: Int64, b: Int64) -> Int64` | Rust `rem_euclid` / Python `%` | 追加 | R-sized-10 |
+| `pow` | （追加）`int64.pow(base: Int64, exp: Int) -> Int64` | Rust `pow` / Swift — | 追加 | R-sized-10 |
+| `is_even` | （追加）`int64.is_even(n: Int64) -> Bool` | Swift `isMultiple(of: 2)` / Kotlin — | 追加 | R-sized-10 |
+| `is_odd` | （追加）`int64.is_odd(n: Int64) -> Bool` | Swift `!isMultiple(of: 2)` | 追加 | R-sized-10 |
+| `band` | （追加）`int64.band(a: Int64, b: Int64) -> Int64` | Rust・Go・Swift 演算子 `&` | 追加 | R-sized-10 |
+| `bor` | （追加）`int64.bor(a: Int64, b: Int64) -> Int64` | Rust・Go・Swift 演算子 `\|` | 追加 | R-sized-10 |
+| `bxor` | （追加）`int64.bxor(a: Int64, b: Int64) -> Int64` | Rust・Go・Swift 演算子 `^` | 追加 | R-sized-10 |
+| `bnot` | （追加）`int64.bnot(a: Int64) -> Int64` | Rust `!` / Swift `~` | 追加 | R-sized-10 |
+| `bshl` | （追加）`int64.bshl(a: Int64, n: Int) -> Int64` | Rust・Go・Swift 演算子 `<<` | 追加 | R-sized-10 |
+| `bshr` | （追加）`int64.bshr(a: Int64, n: Int) -> Int64` | Rust・Go・Swift 演算子 `>>` | 追加 | R-sized-10 |
+| `count_leading_zeros` | （追加）`int64.count_leading_zeros(n: Int64) -> Int` | Rust `leading_zeros` / Swift `leadingZeroBitCount` | 追加 | R-sized-10 |
+| `count_trailing_zeros` | （追加）`int64.count_trailing_zeros(n: Int64) -> Int` | Rust `trailing_zeros` / Swift `trailingZeroBitCount` | 追加 | R-sized-10 |
+| `count_ones` | （追加）`int64.count_ones(n: Int64) -> Int` | Rust `count_ones` / Swift `nonzeroBitCount` | 追加 | R-sized-10 |
+| `byte_swap` | （追加）`int64.byte_swap(n: Int64) -> Int64` | Rust `swap_bytes` / Swift `byteSwapped` | 追加 | R-sized-10 |
+| `abs` | （追加）`int64.abs(n: Int64) -> Int64` | Rust `abs` / Swift `abs` | 追加 | R-sized-10 |
+| `sign` | （追加）`int64.sign(n: Int64) -> Int` | Rust `signum` / Swift `signum()` | 追加 | R-sized-10 |
 
 ### L3: `uint8`
 
@@ -339,6 +431,21 @@
 | `to_float` | （追加）`uint8.to_float(x: UInt8) -> Float` | Rust `as` / Kotlin `toDouble()` / Swift `init(_:)` / Gleam `to_float` (F) | 追加 | R-sized-01 |
 | `parse` | （追加）`uint8.parse(s: String) -> Result[UInt8, String]` | Rust `str::parse::<T>` / Go `ParseInt(s,10,bits)` / OCaml `Int32.of_string_opt` / Kotlin `toByteOrNull` 等 / Swift `T(s)` | 追加 | R-sized-02 |
 | `compare` | （追加）`uint8.compare(a: UInt8, b: UInt8) -> Int` | Rust `cmp`/`total_cmp` / Go `cmp.Compare` / Kotlin `compareTo` / Swift `<` | 追加 | R-sized-02 |
+| `floor_div` | （追加）`uint8.floor_div(a: UInt8, b: UInt8) -> UInt8` | Rust `div_euclid` / Swift — / Python `//` | 追加 | R-sized-10 |
+| `mod` | （追加）`uint8.mod(a: UInt8, b: UInt8) -> UInt8` | Rust `rem_euclid` / Python `%` | 追加 | R-sized-10 |
+| `pow` | （追加）`uint8.pow(base: UInt8, exp: Int) -> UInt8` | Rust `pow` / Swift — | 追加 | R-sized-10 |
+| `is_even` | （追加）`uint8.is_even(n: UInt8) -> Bool` | Swift `isMultiple(of: 2)` / Kotlin — | 追加 | R-sized-10 |
+| `is_odd` | （追加）`uint8.is_odd(n: UInt8) -> Bool` | Swift `!isMultiple(of: 2)` | 追加 | R-sized-10 |
+| `band` | （追加）`uint8.band(a: UInt8, b: UInt8) -> UInt8` | Rust・Go・Swift 演算子 `&` | 追加 | R-sized-10 |
+| `bor` | （追加）`uint8.bor(a: UInt8, b: UInt8) -> UInt8` | Rust・Go・Swift 演算子 `\|` | 追加 | R-sized-10 |
+| `bxor` | （追加）`uint8.bxor(a: UInt8, b: UInt8) -> UInt8` | Rust・Go・Swift 演算子 `^` | 追加 | R-sized-10 |
+| `bnot` | （追加）`uint8.bnot(a: UInt8) -> UInt8` | Rust `!` / Swift `~` | 追加 | R-sized-10 |
+| `bshl` | （追加）`uint8.bshl(a: UInt8, n: Int) -> UInt8` | Rust・Go・Swift 演算子 `<<` | 追加 | R-sized-10 |
+| `bshr` | （追加）`uint8.bshr(a: UInt8, n: Int) -> UInt8` | Rust・Go・Swift 演算子 `>>` | 追加 | R-sized-10 |
+| `count_leading_zeros` | （追加）`uint8.count_leading_zeros(n: UInt8) -> Int` | Rust `leading_zeros` / Swift `leadingZeroBitCount` | 追加 | R-sized-10 |
+| `count_trailing_zeros` | （追加）`uint8.count_trailing_zeros(n: UInt8) -> Int` | Rust `trailing_zeros` / Swift `trailingZeroBitCount` | 追加 | R-sized-10 |
+| `count_ones` | （追加）`uint8.count_ones(n: UInt8) -> Int` | Rust `count_ones` / Swift `nonzeroBitCount` | 追加 | R-sized-10 |
+| `byte_swap` | （追加）`uint8.byte_swap(n: UInt8) -> UInt8` | Rust `swap_bytes` / Swift `byteSwapped` | 追加 | R-sized-10 |
 
 ### L3: `uint16`
 
@@ -371,6 +478,21 @@
 | `to_float` | （追加）`uint16.to_float(x: UInt16) -> Float` | Rust `as` / Kotlin `toDouble()` / Swift `init(_:)` / Gleam `to_float` (F) | 追加 | R-sized-01 |
 | `parse` | （追加）`uint16.parse(s: String) -> Result[UInt16, String]` | Rust `str::parse::<T>` / Go `ParseInt(s,10,bits)` / OCaml `Int32.of_string_opt` / Kotlin `toByteOrNull` 等 / Swift `T(s)` | 追加 | R-sized-02 |
 | `compare` | （追加）`uint16.compare(a: UInt16, b: UInt16) -> Int` | Rust `cmp`/`total_cmp` / Go `cmp.Compare` / Kotlin `compareTo` / Swift `<` | 追加 | R-sized-02 |
+| `floor_div` | （追加）`uint16.floor_div(a: UInt16, b: UInt16) -> UInt16` | Rust `div_euclid` / Swift — / Python `//` | 追加 | R-sized-10 |
+| `mod` | （追加）`uint16.mod(a: UInt16, b: UInt16) -> UInt16` | Rust `rem_euclid` / Python `%` | 追加 | R-sized-10 |
+| `pow` | （追加）`uint16.pow(base: UInt16, exp: Int) -> UInt16` | Rust `pow` / Swift — | 追加 | R-sized-10 |
+| `is_even` | （追加）`uint16.is_even(n: UInt16) -> Bool` | Swift `isMultiple(of: 2)` / Kotlin — | 追加 | R-sized-10 |
+| `is_odd` | （追加）`uint16.is_odd(n: UInt16) -> Bool` | Swift `!isMultiple(of: 2)` | 追加 | R-sized-10 |
+| `band` | （追加）`uint16.band(a: UInt16, b: UInt16) -> UInt16` | Rust・Go・Swift 演算子 `&` | 追加 | R-sized-10 |
+| `bor` | （追加）`uint16.bor(a: UInt16, b: UInt16) -> UInt16` | Rust・Go・Swift 演算子 `\|` | 追加 | R-sized-10 |
+| `bxor` | （追加）`uint16.bxor(a: UInt16, b: UInt16) -> UInt16` | Rust・Go・Swift 演算子 `^` | 追加 | R-sized-10 |
+| `bnot` | （追加）`uint16.bnot(a: UInt16) -> UInt16` | Rust `!` / Swift `~` | 追加 | R-sized-10 |
+| `bshl` | （追加）`uint16.bshl(a: UInt16, n: Int) -> UInt16` | Rust・Go・Swift 演算子 `<<` | 追加 | R-sized-10 |
+| `bshr` | （追加）`uint16.bshr(a: UInt16, n: Int) -> UInt16` | Rust・Go・Swift 演算子 `>>` | 追加 | R-sized-10 |
+| `count_leading_zeros` | （追加）`uint16.count_leading_zeros(n: UInt16) -> Int` | Rust `leading_zeros` / Swift `leadingZeroBitCount` | 追加 | R-sized-10 |
+| `count_trailing_zeros` | （追加）`uint16.count_trailing_zeros(n: UInt16) -> Int` | Rust `trailing_zeros` / Swift `trailingZeroBitCount` | 追加 | R-sized-10 |
+| `count_ones` | （追加）`uint16.count_ones(n: UInt16) -> Int` | Rust `count_ones` / Swift `nonzeroBitCount` | 追加 | R-sized-10 |
+| `byte_swap` | （追加）`uint16.byte_swap(n: UInt16) -> UInt16` | Rust `swap_bytes` / Swift `byteSwapped` | 追加 | R-sized-10 |
 
 ### L3: `uint32`
 
@@ -410,6 +532,21 @@
 | `to_float32_checked` | （追加）`uint32.to_float32_checked(x: UInt32) -> Option[Float32]` | Rust `try_from` / Swift `init(exactly:)` (F) / OCaml Base `to_int_exn`系 / 他 6 言語 — | 追加 | R-sized-01 |
 | `parse` | （追加）`uint32.parse(s: String) -> Result[UInt32, String]` | Rust `str::parse::<T>` / Go `ParseInt(s,10,bits)` / OCaml `Int32.of_string_opt` / Kotlin `toByteOrNull` 等 / Swift `T(s)` | 追加 | R-sized-02 |
 | `compare` | （追加）`uint32.compare(a: UInt32, b: UInt32) -> Int` | Rust `cmp`/`total_cmp` / Go `cmp.Compare` / Kotlin `compareTo` / Swift `<` | 追加 | R-sized-02 |
+| `floor_div` | （追加）`uint32.floor_div(a: UInt32, b: UInt32) -> UInt32` | Rust `div_euclid` / Swift — / Python `//` | 追加 | R-sized-10 |
+| `mod` | （追加）`uint32.mod(a: UInt32, b: UInt32) -> UInt32` | Rust `rem_euclid` / Python `%` | 追加 | R-sized-10 |
+| `pow` | （追加）`uint32.pow(base: UInt32, exp: Int) -> UInt32` | Rust `pow` / Swift — | 追加 | R-sized-10 |
+| `is_even` | （追加）`uint32.is_even(n: UInt32) -> Bool` | Swift `isMultiple(of: 2)` / Kotlin — | 追加 | R-sized-10 |
+| `is_odd` | （追加）`uint32.is_odd(n: UInt32) -> Bool` | Swift `!isMultiple(of: 2)` | 追加 | R-sized-10 |
+| `band` | （追加）`uint32.band(a: UInt32, b: UInt32) -> UInt32` | Rust・Go・Swift 演算子 `&` | 追加 | R-sized-10 |
+| `bor` | （追加）`uint32.bor(a: UInt32, b: UInt32) -> UInt32` | Rust・Go・Swift 演算子 `\|` | 追加 | R-sized-10 |
+| `bxor` | （追加）`uint32.bxor(a: UInt32, b: UInt32) -> UInt32` | Rust・Go・Swift 演算子 `^` | 追加 | R-sized-10 |
+| `bnot` | （追加）`uint32.bnot(a: UInt32) -> UInt32` | Rust `!` / Swift `~` | 追加 | R-sized-10 |
+| `bshl` | （追加）`uint32.bshl(a: UInt32, n: Int) -> UInt32` | Rust・Go・Swift 演算子 `<<` | 追加 | R-sized-10 |
+| `bshr` | （追加）`uint32.bshr(a: UInt32, n: Int) -> UInt32` | Rust・Go・Swift 演算子 `>>` | 追加 | R-sized-10 |
+| `count_leading_zeros` | （追加）`uint32.count_leading_zeros(n: UInt32) -> Int` | Rust `leading_zeros` / Swift `leadingZeroBitCount` | 追加 | R-sized-10 |
+| `count_trailing_zeros` | （追加）`uint32.count_trailing_zeros(n: UInt32) -> Int` | Rust `trailing_zeros` / Swift `trailingZeroBitCount` | 追加 | R-sized-10 |
+| `count_ones` | （追加）`uint32.count_ones(n: UInt32) -> Int` | Rust `count_ones` / Swift `nonzeroBitCount` | 追加 | R-sized-10 |
+| `byte_swap` | （追加）`uint32.byte_swap(n: UInt32) -> UInt32` | Rust `swap_bytes` / Swift `byteSwapped` | 追加 | R-sized-10 |
 
 ### L3: `uint64`
 
@@ -460,6 +597,21 @@
 | `to_float64_checked` | （追加）`uint64.to_float64_checked(x: UInt64) -> Option[Float64]` | Rust `try_from` / Swift `init(exactly:)` (F) / OCaml Base `to_int_exn`系 / 他 6 言語 — | 追加 | R-sized-01 |
 | `parse` | （追加）`uint64.parse(s: String) -> Result[UInt64, String]` | Rust `str::parse::<T>` / Go `ParseInt(s,10,bits)` / OCaml `Int32.of_string_opt` / Kotlin `toByteOrNull` 等 / Swift `T(s)` | 追加 | R-sized-02 |
 | `compare` | （追加）`uint64.compare(a: UInt64, b: UInt64) -> Int` | Rust `cmp`/`total_cmp` / Go `cmp.Compare` / Kotlin `compareTo` / Swift `<` | 追加 | R-sized-02 |
+| `floor_div` | （追加）`uint64.floor_div(a: UInt64, b: UInt64) -> UInt64` | Rust `div_euclid` / Swift — / Python `//` | 追加 | R-sized-10 |
+| `mod` | （追加）`uint64.mod(a: UInt64, b: UInt64) -> UInt64` | Rust `rem_euclid` / Python `%` | 追加 | R-sized-10 |
+| `pow` | （追加）`uint64.pow(base: UInt64, exp: Int) -> UInt64` | Rust `pow` / Swift — | 追加 | R-sized-10 |
+| `is_even` | （追加）`uint64.is_even(n: UInt64) -> Bool` | Swift `isMultiple(of: 2)` / Kotlin — | 追加 | R-sized-10 |
+| `is_odd` | （追加）`uint64.is_odd(n: UInt64) -> Bool` | Swift `!isMultiple(of: 2)` | 追加 | R-sized-10 |
+| `band` | （追加）`uint64.band(a: UInt64, b: UInt64) -> UInt64` | Rust・Go・Swift 演算子 `&` | 追加 | R-sized-10 |
+| `bor` | （追加）`uint64.bor(a: UInt64, b: UInt64) -> UInt64` | Rust・Go・Swift 演算子 `\|` | 追加 | R-sized-10 |
+| `bxor` | （追加）`uint64.bxor(a: UInt64, b: UInt64) -> UInt64` | Rust・Go・Swift 演算子 `^` | 追加 | R-sized-10 |
+| `bnot` | （追加）`uint64.bnot(a: UInt64) -> UInt64` | Rust `!` / Swift `~` | 追加 | R-sized-10 |
+| `bshl` | （追加）`uint64.bshl(a: UInt64, n: Int) -> UInt64` | Rust・Go・Swift 演算子 `<<` | 追加 | R-sized-10 |
+| `bshr` | （追加）`uint64.bshr(a: UInt64, n: Int) -> UInt64` | Rust・Go・Swift 演算子 `>>` | 追加 | R-sized-10 |
+| `count_leading_zeros` | （追加）`uint64.count_leading_zeros(n: UInt64) -> Int` | Rust `leading_zeros` / Swift `leadingZeroBitCount` | 追加 | R-sized-10 |
+| `count_trailing_zeros` | （追加）`uint64.count_trailing_zeros(n: UInt64) -> Int` | Rust `trailing_zeros` / Swift `trailingZeroBitCount` | 追加 | R-sized-10 |
+| `count_ones` | （追加）`uint64.count_ones(n: UInt64) -> Int` | Rust `count_ones` / Swift `nonzeroBitCount` | 追加 | R-sized-10 |
+| `byte_swap` | （追加）`uint64.byte_swap(n: UInt64) -> UInt64` | Rust `swap_bytes` / Swift `byteSwapped` | 追加 | R-sized-10 |
 
 ### L3: `float32`
 
@@ -498,6 +650,12 @@
 | `epsilon` | （追加）`float32.epsilon() -> Float32` | Rust `EPSILON` / Swift `.ulpOfOne` | 追加 | R-sized-03 |
 | `max_value` | （追加）`float32.max_value() -> Float32` | Rust `MAX` / Go `math.MaxFloat32` / Kotlin `MAX_VALUE` | 追加 | R-sized-03 |
 | `min_value` | （追加）`float32.min_value() -> Float32` | Rust `MIN` / Swift `-.greatestFiniteMagnitude` | 追加 | R-sized-03 |
+| `abs` | （追加）`float32.abs(x: Float32) -> Float32` | Rust `abs` / Swift `magnitude` | 追加 | R-sized-11 |
+| `floor` | （追加）`float32.floor(x: Float32) -> Float32` | Rust `floor` / Swift `rounded(.down)` | 追加 | R-sized-11 |
+| `ceil` | （追加）`float32.ceil(x: Float32) -> Float32` | Rust `ceil` / Swift `rounded(.up)` | 追加 | R-sized-11 |
+| `round` | （追加）`float32.round(x: Float32) -> Float32` | Rust `round` / Swift `rounded()` | 追加 | R-sized-11 |
+| `trunc` | （追加）`float32.trunc(x: Float32) -> Float32` | Rust `trunc` / Swift `rounded(.towardZero)` | 追加 | R-sized-11 |
+| `signum` | （追加）`float32.signum(x: Float32) -> Float32` | Rust `signum` | 追加 | R-sized-11 |
 
 ### L3: `float64`
 
@@ -605,3 +763,9 @@
 | `to_uint16_saturating` | （追加）`float64.to_uint16_saturating(x: Float64) -> UInt16` | Rust `as` / Swift `init(clamping:)` 相当 | 追加 | R-L0-32 |
 | `to_uint32_saturating` | （追加）`float64.to_uint32_saturating(x: Float64) -> UInt32` | Rust `as` / Swift `init(clamping:)` 相当 | 追加 | R-L0-32 |
 | `to_uint64_saturating` | （追加）`float64.to_uint64_saturating(x: Float64) -> UInt64` | Rust `as` / Swift `init(clamping:)` 相当 | 追加 | R-L0-32 |
+| `abs` | （追加）`float64.abs(x: Float64) -> Float64` | Rust `abs` / Swift `magnitude` | 追加 | R-sized-11 |
+| `floor` | （追加）`float64.floor(x: Float64) -> Float64` | Rust `floor` / Swift `rounded(.down)` | 追加 | R-sized-11 |
+| `ceil` | （追加）`float64.ceil(x: Float64) -> Float64` | Rust `ceil` / Swift `rounded(.up)` | 追加 | R-sized-11 |
+| `round` | （追加）`float64.round(x: Float64) -> Float64` | Rust `round` / Swift `rounded()` | 追加 | R-sized-11 |
+| `trunc` | （追加）`float64.trunc(x: Float64) -> Float64` | Rust `trunc` / Swift `rounded(.towardZero)` | 追加 | R-sized-11 |
+| `signum` | （追加）`float64.signum(x: Float64) -> Float64` | Rust `signum` | 追加 | R-sized-11 |

@@ -337,6 +337,14 @@
 - 完全性の規則（R-list-17 を広げる）: 順序を使う関数 {`sort`, `min`, `max`, `binary_search`} は、どれも無印・`_by`・`_with` の 3 つを持ちます。
 - issue: #3985
 
+### R-list-20 `list.new`・`list.from_list`・`list.to_list` を置く — ○ 採用
+
+- 内容: `fn list.new() -> List[A]`（`[]`）、`fn list.from_list(xs: List[A]) -> List[A]`・`fn list.to_list(xs: List[A]) -> List[A]`（そのまま返す）。
+- 理由: [protocol の階層](protocol-view.md)の `Container` の要件です。総称関数の中で `T.new()`・`T.from_list(xs)` と書いたとき、`List` もほかの入れ物と同じに動く必要があります。Swift の `Array` も `init()` と `init(_ s: some Sequence)` を持ちます。
+- (c) 直接書くときは今までどおり `[]` を使います。案内（R-L0-19）はリテラルを示します。
+- (d) 追加 3。
+- issue: #4000
+
 ## L3: 関数表
 
 判定の凡例: 据え置き / 改名 / 意味変更 / 撤去 / 追加。他言語の列は主な綴りだけを書きます。
@@ -419,6 +427,9 @@
 | `binary_search_with` | （追加）`list.binary_search_with(xs: List[A], target: A, cmp: (A, A) -> Int) -> Option[Int]` | Rust binary_search_by / Go BinarySearchFunc | 追加 | R-list-17 |
 | `min_with` | （追加）`list.min_with(xs: List[A], cmp: (A, A) -> Int) -> Option[A]` | Kotlin minWithOrNull / Swift min(by:) | 追加 | R-list-19 |
 | `max_with` | （追加）`list.max_with(xs: List[A], cmp: (A, A) -> Int) -> Option[A]` | Kotlin maxWithOrNull / Swift max(by:) | 追加 | R-list-19 |
+| `new` | （追加）`list.new() -> List[A]` | Swift `Array()` / Rust `Vec::new` | 追加 | R-list-20 |
+| `from_list` | （追加）`list.from_list(xs: List[A]) -> List[A]` | Swift `Array(seq)` | 追加 | R-list-20 |
+| `to_list` | （追加）`list.to_list(xs: List[A]) -> List[A]` | Swift `Array(seq)` / Kotlin `toList` | 追加 | R-list-20 |
 
 行数: 現行 67 関数 + 追加 5 関数 = 72 行。
 

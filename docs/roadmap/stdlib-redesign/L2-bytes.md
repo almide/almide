@@ -283,7 +283,7 @@
 
 ### R-bytes-20 `first`・`last`・`pop` を足す — ○ 採用
 
-- いま: bytes は `get`・`push` を持つのに、`first`・`last`・`pop` がありません。list（`first`・`last`・`pop`）と deque（`first`・`last`・`pop_back`）から類推すると E002 になります。
+- いま: bytes は `get`・`push` を持つのに、`first`・`last`・`pop` がありません。list（`first`・`last`・`pop`）と deque（`first`・`last`・`pop`）から類推すると E002 になります。
 - 案: `fn bytes.first(b: Bytes) -> Int?`、`fn bytes.last(b: Bytes) -> Int?`、`fn bytes.pop(mut b: Bytes) -> Int?`。
 - 根拠の L0 規則: R-L0-12（列の型は同じ綴りの関数を持つ）、R-L0-06（失敗しうる取り出しは無印で Option）。
 - (a) Rust `Vec<u8>` の `first`・`last`・`pop`、Python `bytearray.pop`、Kotlin `ByteArray.first`/`lastOrNull`、Swift `Data.first`/`last`/`popLast`。
@@ -330,7 +330,7 @@
 
 ### R-bytes-26 `bytes.get_u8` と `get`、`append_u8` と `push` を 1 つにする — × 不採用（役割の違いを明記）
 
-- 理由: 2 つは結果が同じですが、属する族が違います。`get`・`push` は入れ物の族（`list.get`・`deque.push_back` と同じ形）、`get_u8`・`append_u8` は符号化の族（`get_u16_le`・`append_u16_le` … の 1 バイトのセル）です。符号化の族から `u8` だけを抜くと、`get_<型>` の行列に穴ができ、規則から推して書いた `get_u8` が外れます（R-bytes-25）。
+- 理由: 2 つは結果が同じですが、属する族が違います。`get`・`push` は入れ物の族（`list.get`・`deque.push` と同じ形）、`get_u8`・`append_u8` は符号化の族（`get_u16_le`・`append_u16_le` … の 1 バイトのセル）です。符号化の族から `u8` だけを抜くと、`get_<型>` の行列に穴ができ、規則から推して書いた `get_u8` が外れます（R-bytes-25）。
 - 約束: 2 つは定義として同じ値を返します（`get_u8(b, i) == get(b, i)`、`append_u8` と `push` は同じ書き足し）。行列のゲートで、この一致も確かめます。
 - issue: なし
 ## L3: 関数表

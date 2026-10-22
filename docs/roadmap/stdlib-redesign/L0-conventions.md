@@ -75,7 +75,7 @@ CHEATSHEET の「No synonyms」を、モジュールの境界を越えて適用�
 1. 関数は既定でコピーを返します（`list.sort`、`list.set`、`map.set`、`set.insert`）。変数を更新したいときは `xs = list.set(xs, i, v)` と書きます。`@reuse` の付いた関数は、この形でもコピーせずにその場で動きます（map 200 万件で `map.set` と `map.insert` と添字代入はどれも約 0.07 秒、実測済み）。
 2. `mut` 引数を取る関数（その場書き換え）は、次の動詞だけに限ります。コピー版と同じ速さで書けない、バッファを伸ばす操作・切り詰める操作・位置を指定して書く操作です。
    - `push`（末尾に 1 つ足す）、`pop`（末尾から 1 つ取る）、`clear`（空にする）、`fill`（全部同じ値にする）
-   - 両端を持つ入れ物では、端を名前に付けた `push_front`・`push_back`・`pop_front`・`pop_back`（`deque`）。`push`・`pop` と同じ族として数えます
+   - 両端を持つ入れ物では、先頭を名前に付けた `push_front`・`pop_front`（`deque`。末尾は `push`・`pop`、R-deque-03）。`push`・`pop` と同じ族として数えます
    - `append_<型>`（バイト列の末尾に書き足す）、`put_<型>`（バイト列の位置を指定して上書きする）
    - `copy_from`、`copy_within`（バイト列の範囲をコピーする）
 3. ひとつの動詞は、全モジュールで同じ様式（コピーかその場書き換えか）を表します。
@@ -550,7 +550,7 @@ effect fn を呼んだときの型（`!` が要るか、`??` をそのまま書�
   3. 型の公開面は「準拠する protocol の一覧」と「その型だけの関数」で書き表せます。
   4. protocol は階層に組みます。手本は Swift の標準ライブラリです（`Equatable`→`Comparable`、`AdditiveArithmetic`→`Numeric`→`BinaryInteger`→`FixedWidthInteger`、`Sequence`→`Collection`→`BidirectionalCollection`→`RandomAccessCollection` など）。Swift にない層は、理由を書いて足します。階層・型ごとの準拠・穴・この階層で決めることは [protocol-view.md](protocol-view.md) にあります（protocol の定義と準拠から、target-surface.md と突き合わせて機械的に作る）。R-L0-31 で名前を付けた protocol（`Integer`・`FloatingPoint`・`Sized`・`TimeAmount`・`HttpMessage`）は、この階層の中に置き直し、中身は階層の定義に従います。
 - 「protocol だけ」にしない理由: `string.split` や `regex.find` のように 1 つの型しか持たない関数を、メンバーが 1 つの protocol にしても、名前が 1 つ増えるだけで揃いは守れません。Swift も、具体型だけのメソッドを持っています。
-- 実測（リデザイン後の面）: 値の型 31 種の関数 1,041 個のうち、663 個が階層の protocol の要件か、数の型どうしの変換の族です。準拠を決めると、要件のうちまだ無い関数（穴）が 209 個出ます。そのうち 168 個は、`int` が持つ算術とビット演算をサイズつきの整数 8 型が持たないことによるもので、既定の実装 1 つで埋まります。
+- 実測（リデザイン後の面）: 階層を決めた時点で、値の型 31 種の関数 1,041 個のうち 663 個が protocol の要件か数の変換の族で、要件のうちまだ無い関数（穴）が 209 個ありました（168 個は、`int` が持つ算術とビット演算をサイズつきの整数 8 型が持たないこと）。七巡目の案で 164 関数を足して埋め、残る穴は `string` の `new`・`from_list`・`to_list` の 3 つ（`chars` の改名と一緒に保留）です。
 - 言語に足りないもの（実測 `almide 0.68.0 dev`。どれも今は書けない）:
   - 型引数を通して、受け手のないメソッドを呼ぶ（`T.zero()` が E002）。`parse`・`max_value`・`nan` に要ります。
   - protocol の継承（`protocol Integer: Ord`）。
@@ -559,7 +559,16 @@ effect fn を呼んだときの型（`!` が要るか、`??` をそのまま書�
   - 条件つきの準拠（`List[A]` は `A: Hash` のときだけ `Hash`）。
   - 入れ物そのものを引数にとる型（`F[_]`）は要りません。Swift と同じく、`map` は protocol に入れず型ごとの関数のままにします。
 - 進め方: 5 つの機能は ADR を書いてから入れます。入れる前に、protocol を使う総称関数が LLM の書くコードの生存率を下げないことを Dojo で確かめます。型ごとの書き方（`int.compare(a, b)`）は同じ関数なので、どちらでも書けます。
-- (d) 方向の宣言です。この案だけでは関数は変わりません。R-L0-31 の × の行（`contains`・`count`・`Parse`）は、機能が入ったら出し直します。
+- (d) 方向の宣言です。階層の要件を埋める関数は、七巡目の案（R-L0-38、R-sized-10・11、R-bigint-07、R-bool-03、R-list-20、R-string-16、R-deque-03・04）で足しました。R-L0-31 の × の行（`contains`・`count`・`Parse`）は、この階層の `Membership`・`Container`・`Parse` に置き直しています。
+- issue: #4000
+
+## R-L0-38 組み込みの `Repr` のメソッド名を `to_string` にする — ○ 採用
+
+- いま: 組み込みの `Repr` のメソッドは `fn repr(v: Self) -> String` です。一方で数の型・`bigint`・`uuid`・`url` のモジュールは `<mod>.to_string` を持ち、`bool` は持ちません。同じ役割に 2 つの綴りがあり、型によって片方しかありません。
+- 案: R-L0-22（`Ord` の `cmp` → `compare`）と同じく、`Repr` のメソッドを `to_string` にします。R-L0-37 のとおりモジュールの関数は protocol の関数そのものなので、すべての値の型が `<mod>.to_string` を持ち、中身は `"${x}"` と同じ文字列です。`Parse` を持つ型では `parse(to_string(x)) == ok(x)` が成り立ちます（Swift の `LosslessStringConvertible`）。
+- (a) Swift は `CustomStringConvertible` の `description` を全型に持たせ、`LosslessStringConvertible` で `init?(_ description:)` と対にします。Rust の `Display`（`to_string`）と `FromStr` も同じ対です。
+- (c) `int.to_string` から類推した `bool.to_string(b)` が通ります。型ごとに「この型には `to_string` があるか」を覚える必要がなくなります。
+- (d) 改名と追加です。epoch 15 で利用者が書く `fn T.repr` を `@deprecated(since=15, use="to_string")` にし、epoch 16 で撤去します。`almide fix` が書き換えます。一覧には、型のページに行を持つ型（`Parse` を持つ型）の分を載せ、ほかの型の分は「一覧に出ない共通の約束」に書きます。
 - issue: #4000
 
 ## ゲートの束（R-L0-G） — ○ 採用
