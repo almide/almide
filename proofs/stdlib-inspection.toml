@@ -75,7 +75,7 @@
 #                      every stamped row is to be re-inspected before each final
 #                      release for that (a manual GCE run: no credentials in CI)
 #
-# uninspected_ceiling = "0"
+# uninspected_ceiling = "72"
 
 [[fn]]
 name = "args.flag"
@@ -12622,3 +12622,507 @@ parity = "PASS: seed 1792427119, 200 programs; 200 program(s) call it, 176 of th
 complexity = "PASS: no size parameter — constant-size arguments only (the plain call is the parity campaign's)"
 alloc = "PASS: call live=0"
 diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
+
+[[fn]]
+name = "int16.abs"
+sig = "(x: Int16) -> Int16"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int16.clamp"
+sig = "(x: Int16, lo: Int16, hi: Int16) -> Int16"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int16.compare"
+sig = "(a: Int16, b: Int16) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int16.floor_div"
+sig = "(a: Int16, b: Int16) -> Int16"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int16.is_even"
+sig = "(x: Int16) -> Bool"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int16.is_odd"
+sig = "(x: Int16) -> Bool"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int16.max"
+sig = "(a: Int16, b: Int16) -> Int16"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int16.min"
+sig = "(a: Int16, b: Int16) -> Int16"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int16.pow"
+sig = "(base: Int16, exp: Int) -> Int16"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int16.sign"
+sig = "(x: Int16) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int32.abs"
+sig = "(x: Int32) -> Int32"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int32.clamp"
+sig = "(x: Int32, lo: Int32, hi: Int32) -> Int32"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int32.compare"
+sig = "(a: Int32, b: Int32) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int32.floor_div"
+sig = "(a: Int32, b: Int32) -> Int32"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int32.is_even"
+sig = "(x: Int32) -> Bool"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int32.is_odd"
+sig = "(x: Int32) -> Bool"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int32.max"
+sig = "(a: Int32, b: Int32) -> Int32"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int32.min"
+sig = "(a: Int32, b: Int32) -> Int32"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int32.pow"
+sig = "(base: Int32, exp: Int) -> Int32"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int32.sign"
+sig = "(x: Int32) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int64.abs"
+sig = "(x: Int64) -> Int64"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int64.clamp"
+sig = "(x: Int64, lo: Int64, hi: Int64) -> Int64"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int64.compare"
+sig = "(a: Int64, b: Int64) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int64.floor_div"
+sig = "(a: Int64, b: Int64) -> Int64"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int64.is_even"
+sig = "(x: Int64) -> Bool"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int64.is_odd"
+sig = "(x: Int64) -> Bool"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int64.max"
+sig = "(a: Int64, b: Int64) -> Int64"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int64.min"
+sig = "(a: Int64, b: Int64) -> Int64"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int64.pow"
+sig = "(base: Int64, exp: Int) -> Int64"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int64.sign"
+sig = "(x: Int64) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int8.abs"
+sig = "(x: Int8) -> Int8"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int8.clamp"
+sig = "(x: Int8, lo: Int8, hi: Int8) -> Int8"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int8.compare"
+sig = "(a: Int8, b: Int8) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int8.floor_div"
+sig = "(a: Int8, b: Int8) -> Int8"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int8.is_even"
+sig = "(x: Int8) -> Bool"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int8.is_odd"
+sig = "(x: Int8) -> Bool"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int8.max"
+sig = "(a: Int8, b: Int8) -> Int8"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int8.min"
+sig = "(a: Int8, b: Int8) -> Int8"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int8.pow"
+sig = "(base: Int8, exp: Int) -> Int8"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int8.sign"
+sig = "(x: Int8) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint16.clamp"
+sig = "(x: UInt16, lo: UInt16, hi: UInt16) -> UInt16"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint16.compare"
+sig = "(a: UInt16, b: UInt16) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint16.floor_div"
+sig = "(a: UInt16, b: UInt16) -> UInt16"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint16.is_even"
+sig = "(x: UInt16) -> Bool"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint16.is_odd"
+sig = "(x: UInt16) -> Bool"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint16.max"
+sig = "(a: UInt16, b: UInt16) -> UInt16"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint16.min"
+sig = "(a: UInt16, b: UInt16) -> UInt16"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint16.pow"
+sig = "(base: UInt16, exp: Int) -> UInt16"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint32.clamp"
+sig = "(x: UInt32, lo: UInt32, hi: UInt32) -> UInt32"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint32.compare"
+sig = "(a: UInt32, b: UInt32) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint32.floor_div"
+sig = "(a: UInt32, b: UInt32) -> UInt32"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint32.is_even"
+sig = "(x: UInt32) -> Bool"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint32.is_odd"
+sig = "(x: UInt32) -> Bool"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint32.max"
+sig = "(a: UInt32, b: UInt32) -> UInt32"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint32.min"
+sig = "(a: UInt32, b: UInt32) -> UInt32"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint32.pow"
+sig = "(base: UInt32, exp: Int) -> UInt32"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint64.clamp"
+sig = "(x: UInt64, lo: UInt64, hi: UInt64) -> UInt64"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint64.compare"
+sig = "(a: UInt64, b: UInt64) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint64.floor_div"
+sig = "(a: UInt64, b: UInt64) -> UInt64"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint64.is_even"
+sig = "(x: UInt64) -> Bool"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint64.is_odd"
+sig = "(x: UInt64) -> Bool"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint64.max"
+sig = "(a: UInt64, b: UInt64) -> UInt64"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint64.min"
+sig = "(a: UInt64, b: UInt64) -> UInt64"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint64.pow"
+sig = "(base: UInt64, exp: Int) -> UInt64"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint8.clamp"
+sig = "(x: UInt8, lo: UInt8, hi: UInt8) -> UInt8"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint8.compare"
+sig = "(a: UInt8, b: UInt8) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint8.floor_div"
+sig = "(a: UInt8, b: UInt8) -> UInt8"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint8.is_even"
+sig = "(x: UInt8) -> Bool"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint8.is_odd"
+sig = "(x: UInt8) -> Bool"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint8.max"
+sig = "(a: UInt8, b: UInt8) -> UInt8"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint8.min"
+sig = "(a: UInt8, b: UInt8) -> UInt8"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint8.pow"
+sig = "(base: UInt8, exp: Int) -> UInt8"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"

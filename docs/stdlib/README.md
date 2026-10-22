@@ -2,7 +2,7 @@
 
 # Standard library
 
-Every public function of the 44 stdlib modules, 999 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
+Every public function of the 44 stdlib modules, 1071 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
 
 A `mut` parameter is written in place: the caller passes a `var` binding and sees the change (a `let`, a non-`mut` parameter or a temporary is E032). Every other parameter is read only, and a function that changes a value without `mut` returns a new one.
 
@@ -25,10 +25,10 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [html](#html) | 5 | 0 |
 | [http](#http) | 48 | 4 |
 | [int](#int) | 72 | 0 |
-| [int16](#int16) | 22 | 0 |
-| [int32](#int32) | 24 | 0 |
-| [int64](#int64) | 26 | 0 |
-| [int8](#int8) | 20 | 0 |
+| [int16](#int16) | 32 | 0 |
+| [int32](#int32) | 34 | 0 |
+| [int64](#int64) | 36 | 0 |
+| [int8](#int8) | 30 | 0 |
 | [io](#io) | 8 | 0 |
 | [json](#json) | 15 | 0 |
 | [list](#list) | 67 | 0 |
@@ -45,10 +45,10 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [set](#set) | 19 | 0 |
 | [string](#string) | 50 | 0 |
 | [testing](#testing) | 10 | 0 |
-| [uint16](#uint16) | 18 | 0 |
-| [uint32](#uint32) | 22 | 0 |
-| [uint64](#uint64) | 26 | 0 |
-| [uint8](#uint8) | 14 | 0 |
+| [uint16](#uint16) | 26 | 0 |
+| [uint32](#uint32) | 30 | 0 |
+| [uint64](#uint64) | 34 | 0 |
+| [uint8](#uint8) | 22 | 0 |
 | [url](#url) | 6 | 1 |
 | [value](#value) | 20 | 0 |
 | [zlib](#zlib) | 10 | 0 |
@@ -598,6 +598,16 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `int16.to_uint64_saturating(x: Int16) -> UInt64` — Negative x clamps to 0.
 - `int16.min_value() -> Int16` — Smallest Int16: -32768.
 - `int16.max_value() -> Int16` — Largest Int16: 32767.
+- `int16.compare(a: Int16, b: Int16) -> Int` — -1, 0 or 1 as a is below, equal to or above b.
+- `int16.min(a: Int16, b: Int16) -> Int16` — Lesser of a and b.
+- `int16.max(a: Int16, b: Int16) -> Int16` — Greater of a and b.
+- `int16.clamp(x: Int16, lo: Int16, hi: Int16) -> Int16` — x limited to lo..hi; aborts when lo > hi.
+- `int16.floor_div(a: Int16, b: Int16) -> Int16` — Quotient rounded toward -inf; b == 0 aborts; min_value / -1 wraps.
+- `int16.pow(base: Int16, exp: Int) -> Int16` — base raised to exp, wrapping to 16 bits like *; exp < 0 aborts.
+- `int16.is_even(x: Int16) -> Bool` — True when x is a multiple of 2.
+- `int16.is_odd(x: Int16) -> Bool` — True when x is not a multiple of 2.
+- `int16.abs(x: Int16) -> Int16` — Magnitude of x; min_value wraps to itself.
+- `int16.sign(x: Int16) -> Int` — -1, 0 or 1 by the sign of x.
 
 ## int32
 
@@ -627,6 +637,16 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `int32.to_uint64_saturating(x: Int32) -> UInt64` — Negative x clamps to 0.
 - `int32.min_value() -> Int32` — Smallest Int32: -2147483648.
 - `int32.max_value() -> Int32` — Largest Int32: 2147483647.
+- `int32.compare(a: Int32, b: Int32) -> Int` — -1, 0 or 1 as a is below, equal to or above b.
+- `int32.min(a: Int32, b: Int32) -> Int32` — Lesser of a and b.
+- `int32.max(a: Int32, b: Int32) -> Int32` — Greater of a and b.
+- `int32.clamp(x: Int32, lo: Int32, hi: Int32) -> Int32` — x limited to lo..hi; aborts when lo > hi.
+- `int32.floor_div(a: Int32, b: Int32) -> Int32` — Quotient rounded toward -inf; b == 0 aborts; min_value / -1 wraps.
+- `int32.pow(base: Int32, exp: Int) -> Int32` — base raised to exp, wrapping to 32 bits like *; exp < 0 aborts.
+- `int32.is_even(x: Int32) -> Bool` — True when x is a multiple of 2.
+- `int32.is_odd(x: Int32) -> Bool` — True when x is not a multiple of 2.
+- `int32.abs(x: Int32) -> Int32` — Magnitude of x; min_value wraps to itself.
+- `int32.sign(x: Int32) -> Int` — -1, 0 or 1 by the sign of x.
 
 ## int64
 
@@ -658,6 +678,16 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `int64.to_uint64_saturating(x: Int64) -> UInt64` — Negative x clamps to 0.
 - `int64.min_value() -> Int64` — Smallest Int64: -2^63.
 - `int64.max_value() -> Int64` — Largest Int64: 2^63-1.
+- `int64.compare(a: Int64, b: Int64) -> Int` — -1, 0 or 1 as a is below, equal to or above b.
+- `int64.min(a: Int64, b: Int64) -> Int64` — Lesser of a and b.
+- `int64.max(a: Int64, b: Int64) -> Int64` — Greater of a and b.
+- `int64.clamp(x: Int64, lo: Int64, hi: Int64) -> Int64` — x limited to lo..hi; aborts when lo > hi.
+- `int64.floor_div(a: Int64, b: Int64) -> Int64` — Quotient rounded toward -inf; b == 0 aborts; min_value / -1 wraps.
+- `int64.pow(base: Int64, exp: Int) -> Int64` — base raised to exp, wrapping to 64 bits like *; exp < 0 aborts.
+- `int64.is_even(x: Int64) -> Bool` — True when x is a multiple of 2.
+- `int64.is_odd(x: Int64) -> Bool` — True when x is not a multiple of 2.
+- `int64.abs(x: Int64) -> Int64` — Magnitude of x; min_value wraps to itself.
+- `int64.sign(x: Int64) -> Int` — -1, 0 or 1 by the sign of x.
 
 ## int8
 
@@ -683,6 +713,16 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `int8.to_uint64_saturating(x: Int8) -> UInt64` — Negative x clamps to 0.
 - `int8.min_value() -> Int8` — Smallest Int8: -128.
 - `int8.max_value() -> Int8` — Largest Int8: 127.
+- `int8.compare(a: Int8, b: Int8) -> Int` — -1, 0 or 1 as a is below, equal to or above b.
+- `int8.min(a: Int8, b: Int8) -> Int8` — Lesser of a and b.
+- `int8.max(a: Int8, b: Int8) -> Int8` — Greater of a and b.
+- `int8.clamp(x: Int8, lo: Int8, hi: Int8) -> Int8` — x limited to lo..hi; aborts when lo > hi.
+- `int8.floor_div(a: Int8, b: Int8) -> Int8` — Quotient rounded toward -inf; b == 0 aborts; min_value / -1 wraps.
+- `int8.pow(base: Int8, exp: Int) -> Int8` — base raised to exp, wrapping to 8 bits like *; exp < 0 aborts.
+- `int8.is_even(x: Int8) -> Bool` — True when x is a multiple of 2.
+- `int8.is_odd(x: Int8) -> Bool` — True when x is not a multiple of 2.
+- `int8.abs(x: Int8) -> Int8` — Magnitude of x; min_value wraps to itself.
+- `int8.sign(x: Int8) -> Int` — -1, 0 or 1 by the sign of x.
 
 ## io
 
@@ -1143,6 +1183,14 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `uint16.to_uint8_saturating(x: UInt16) -> UInt8` — Clamps x to at most 255.
 - `uint16.min_value() -> UInt16` — Smallest UInt16: 0.
 - `uint16.max_value() -> UInt16` — Largest UInt16: 65535.
+- `uint16.compare(a: UInt16, b: UInt16) -> Int` — -1, 0 or 1 as a is below, equal to or above b.
+- `uint16.min(a: UInt16, b: UInt16) -> UInt16` — Lesser of a and b.
+- `uint16.max(a: UInt16, b: UInt16) -> UInt16` — Greater of a and b.
+- `uint16.clamp(x: UInt16, lo: UInt16, hi: UInt16) -> UInt16` — x limited to lo..hi; aborts when lo > hi.
+- `uint16.floor_div(a: UInt16, b: UInt16) -> UInt16` — Quotient; the same as a / b for an unsigned type; b == 0 aborts.
+- `uint16.pow(base: UInt16, exp: Int) -> UInt16` — base raised to exp, wrapping to 16 bits like *; exp < 0 aborts.
+- `uint16.is_even(x: UInt16) -> Bool` — True when x is a multiple of 2.
+- `uint16.is_odd(x: UInt16) -> Bool` — True when x is not a multiple of 2.
 
 ## uint32
 
@@ -1170,6 +1218,14 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `uint32.to_uint16_saturating(x: UInt32) -> UInt16` — Clamps x to at most 65535.
 - `uint32.min_value() -> UInt32` — Smallest UInt32: 0.
 - `uint32.max_value() -> UInt32` — Largest UInt32: 4294967295.
+- `uint32.compare(a: UInt32, b: UInt32) -> Int` — -1, 0 or 1 as a is below, equal to or above b.
+- `uint32.min(a: UInt32, b: UInt32) -> UInt32` — Lesser of a and b.
+- `uint32.max(a: UInt32, b: UInt32) -> UInt32` — Greater of a and b.
+- `uint32.clamp(x: UInt32, lo: UInt32, hi: UInt32) -> UInt32` — x limited to lo..hi; aborts when lo > hi.
+- `uint32.floor_div(a: UInt32, b: UInt32) -> UInt32` — Quotient; the same as a / b for an unsigned type; b == 0 aborts.
+- `uint32.pow(base: UInt32, exp: Int) -> UInt32` — base raised to exp, wrapping to 32 bits like *; exp < 0 aborts.
+- `uint32.is_even(x: UInt32) -> Bool` — True when x is a multiple of 2.
+- `uint32.is_odd(x: UInt32) -> Bool` — True when x is not a multiple of 2.
 
 ## uint64
 
@@ -1201,6 +1257,14 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `uint64.to_uint32_saturating(x: UInt64) -> UInt32` — Clamps x to at most 2^32-1.
 - `uint64.min_value() -> UInt64` — Smallest UInt64: 0.
 - `uint64.max_value() -> UInt64` — Largest UInt64: 2^64-1.
+- `uint64.compare(a: UInt64, b: UInt64) -> Int` — -1, 0 or 1 as a is below, equal to or above b.
+- `uint64.min(a: UInt64, b: UInt64) -> UInt64` — Lesser of a and b.
+- `uint64.max(a: UInt64, b: UInt64) -> UInt64` — Greater of a and b.
+- `uint64.clamp(x: UInt64, lo: UInt64, hi: UInt64) -> UInt64` — x limited to lo..hi; aborts when lo > hi.
+- `uint64.floor_div(a: UInt64, b: UInt64) -> UInt64` — Quotient; the same as a / b for an unsigned type; b == 0 aborts.
+- `uint64.pow(base: UInt64, exp: Int) -> UInt64` — base raised to exp, wrapping to 64 bits like *; exp < 0 aborts.
+- `uint64.is_even(x: UInt64) -> Bool` — True when x is a multiple of 2.
+- `uint64.is_odd(x: UInt64) -> Bool` — True when x is not a multiple of 2.
 
 ## uint8
 
@@ -1220,6 +1284,14 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `uint8.to_int8_saturating(x: UInt8) -> Int8` — Clamps x to at most 127.
 - `uint8.min_value() -> UInt8` — Smallest UInt8: 0.
 - `uint8.max_value() -> UInt8` — Largest UInt8: 255.
+- `uint8.compare(a: UInt8, b: UInt8) -> Int` — -1, 0 or 1 as a is below, equal to or above b.
+- `uint8.min(a: UInt8, b: UInt8) -> UInt8` — Lesser of a and b.
+- `uint8.max(a: UInt8, b: UInt8) -> UInt8` — Greater of a and b.
+- `uint8.clamp(x: UInt8, lo: UInt8, hi: UInt8) -> UInt8` — x limited to lo..hi; aborts when lo > hi.
+- `uint8.floor_div(a: UInt8, b: UInt8) -> UInt8` — Quotient; the same as a / b for an unsigned type; b == 0 aborts.
+- `uint8.pow(base: UInt8, exp: Int) -> UInt8` — base raised to exp, wrapping to 8 bits like *; exp < 0 aborts.
+- `uint8.is_even(x: UInt8) -> Bool` — True when x is a multiple of 2.
+- `uint8.is_odd(x: UInt8) -> Bool` — True when x is not a multiple of 2.
 
 ## url
 
