@@ -155,14 +155,14 @@
 
 - いま: `int` は `floor_div`・`mod`・`pow`・`is_even`・`is_odd`・ビット演算（`band`・`bor`・`bxor`・`bnot`・`bshl`・`bshr`）・`count_leading_zeros`・`count_trailing_zeros`・`count_ones`・`byte_swap`・`abs`・`sign` を持ちますが、`int8`〜`uint64` は持ちません。
 - 案: [protocol の階層](protocol-view.md)の要件として、8 型すべてに置きます。
-  - `Integer`: `floor_div(a, b)`・`mod(a, b)`・`pow(base, exp: Int)`・`is_even`・`is_odd`・ビット演算は関数ではなく演算子 `&`・`|`・`^`・`~`・`<<`・`>>` です（R-L0-41）。
+  - `Integer`: `floor_div(a, b)`・`mod(a, b)`・`pow(base, exp: Int)`・`is_even`・`is_odd`・`band`・`bor`・`bxor`・`bnot`・`bshl(a, n: Int)`・`bshr(a, n: Int)`。`bshr` は、符号つきの型では符号を保ち、符号なしの型では 0 で埋めます（Swift の `>>` と同じ）。
   - `FixedWidthInteger`: `count_leading_zeros`・`count_trailing_zeros`・`count_ones`・`byte_swap`（どれも型の幅で数える。`int8.count_leading_zeros(1)` は 7）。
   - `SignedInteger`（`int8`〜`int64`）: `abs`・`sign`。
   - 結果が型の範囲を出たときの扱いは、その型の `+`・`*` と同じです。
 - R-sized-05（×）を見直す理由: 不採用の理由は「`Int` の関数と同じ計算を 10 倍に複製しない」でした。R-L0-37 では、これらは protocol の既定の実装 1 つで、型ごとに書きません。もう 1 つの理由「`to_int` してから `int.*`」は、`uint64` の 2^63 以上で成り立ちません（R-sized-06 の実測）。
 - 意図した抜け: `int` の N bit の演算（`wrap_add(a, b, bits)`・`rotate_left(a, n, bits)`・`bit_width`・`bshr_logical`）は置きません。固定幅の型では幅が型で決まり、同じ名前で形が食い違うためです（protocol-view.md の「この階層で決めること」）。
 - (a) Swift の `BinaryInteger`・`FixedWidthInteger` は、全部の整数型にこの関数群を持たせます。Rust の整数型も同じです（`div_euclid`・`rem_euclid`・`pow`・`count_ones`・`leading_zeros`・`swap_bytes`）。
-- (d) 追加 80（8 型 × 9、符号つき 4 型 × 2。ビット演算の 6 つは R-L0-41 で演算子にしたので関数にしない）。
+- (d) 追加 128（8 型 × 15、符号つき 4 型 × 2）。
 - issue: #4000
 
 ### R-sized-11 `float32`・`float64` に `FloatingPoint` の要件をそろえる — ○ 採用（R-sized-08 の線引きを見直し）
@@ -225,6 +225,12 @@
 | `rotate_left` | （追加）`int8.rotate_left(a: Int8, n: Int) -> Int8` | Rust `rotate_left` / Go `bits.RotateLeft` | 追加 | R-int-12 |
 | `rotate_right` | （追加）`int8.rotate_right(a: Int8, n: Int) -> Int8` | Rust `rotate_right` | 追加 | R-int-12 |
 | `bit_length` | （追加）`int8.bit_length(n: Int8) -> Int` | Python `bit_length` / Go `bits.Len` | 追加 | R-int-11 |
+| `band` | （追加）`int8.band(a: Int8, b: Int8) -> Int8` | Elixir `band` / Rust・Go・Swift 演算子 `&` | 追加 | R-sized-10 |
+| `bor` | （追加）`int8.bor(a: Int8, b: Int8) -> Int8` | Elixir `bor` / Rust・Go・Swift 演算子 `\|` | 追加 | R-sized-10 |
+| `bxor` | （追加）`int8.bxor(a: Int8, b: Int8) -> Int8` | Elixir `bxor` / Rust・Go・Swift 演算子 `^` | 追加 | R-sized-10 |
+| `bnot` | （追加）`int8.bnot(a: Int8) -> Int8` | Elixir `bnot` / Swift `~` | 追加 | R-sized-10 |
+| `bshl` | （追加）`int8.bshl(a: Int8, n: Int) -> Int8` | Elixir `bsl` / 演算子 `<<` | 追加 | R-sized-10 |
+| `bshr` | （追加）`int8.bshr(a: Int8, n: Int) -> Int8` | Elixir `bsr` / 演算子 `>>` | 追加 | R-sized-10 |
 
 ### L3: `int16`
 
@@ -277,6 +283,12 @@
 | `rotate_left` | （追加）`int16.rotate_left(a: Int16, n: Int) -> Int16` | Rust `rotate_left` / Go `bits.RotateLeft` | 追加 | R-int-12 |
 | `rotate_right` | （追加）`int16.rotate_right(a: Int16, n: Int) -> Int16` | Rust `rotate_right` | 追加 | R-int-12 |
 | `bit_length` | （追加）`int16.bit_length(n: Int16) -> Int` | Python `bit_length` / Go `bits.Len` | 追加 | R-int-11 |
+| `band` | （追加）`int16.band(a: Int16, b: Int16) -> Int16` | Elixir `band` / Rust・Go・Swift 演算子 `&` | 追加 | R-sized-10 |
+| `bor` | （追加）`int16.bor(a: Int16, b: Int16) -> Int16` | Elixir `bor` / Rust・Go・Swift 演算子 `\|` | 追加 | R-sized-10 |
+| `bxor` | （追加）`int16.bxor(a: Int16, b: Int16) -> Int16` | Elixir `bxor` / Rust・Go・Swift 演算子 `^` | 追加 | R-sized-10 |
+| `bnot` | （追加）`int16.bnot(a: Int16) -> Int16` | Elixir `bnot` / Swift `~` | 追加 | R-sized-10 |
+| `bshl` | （追加）`int16.bshl(a: Int16, n: Int) -> Int16` | Elixir `bsl` / 演算子 `<<` | 追加 | R-sized-10 |
+| `bshr` | （追加）`int16.bshr(a: Int16, n: Int) -> Int16` | Elixir `bsr` / 演算子 `>>` | 追加 | R-sized-10 |
 
 ### L3: `int32`
 
@@ -331,6 +343,12 @@
 | `rotate_left` | （追加）`int32.rotate_left(a: Int32, n: Int) -> Int32` | Rust `rotate_left` / Go `bits.RotateLeft` | 追加 | R-int-12 |
 | `rotate_right` | （追加）`int32.rotate_right(a: Int32, n: Int) -> Int32` | Rust `rotate_right` | 追加 | R-int-12 |
 | `bit_length` | （追加）`int32.bit_length(n: Int32) -> Int` | Python `bit_length` / Go `bits.Len` | 追加 | R-int-11 |
+| `band` | （追加）`int32.band(a: Int32, b: Int32) -> Int32` | Elixir `band` / Rust・Go・Swift 演算子 `&` | 追加 | R-sized-10 |
+| `bor` | （追加）`int32.bor(a: Int32, b: Int32) -> Int32` | Elixir `bor` / Rust・Go・Swift 演算子 `\|` | 追加 | R-sized-10 |
+| `bxor` | （追加）`int32.bxor(a: Int32, b: Int32) -> Int32` | Elixir `bxor` / Rust・Go・Swift 演算子 `^` | 追加 | R-sized-10 |
+| `bnot` | （追加）`int32.bnot(a: Int32) -> Int32` | Elixir `bnot` / Swift `~` | 追加 | R-sized-10 |
+| `bshl` | （追加）`int32.bshl(a: Int32, n: Int) -> Int32` | Elixir `bsl` / 演算子 `<<` | 追加 | R-sized-10 |
+| `bshr` | （追加）`int32.bshr(a: Int32, n: Int) -> Int32` | Elixir `bsr` / 演算子 `>>` | 追加 | R-sized-10 |
 
 ### L3: `int64`
 
@@ -387,6 +405,12 @@
 | `rotate_left` | （追加）`int64.rotate_left(a: Int64, n: Int) -> Int64` | Rust `rotate_left` / Go `bits.RotateLeft` | 追加 | R-int-12 |
 | `rotate_right` | （追加）`int64.rotate_right(a: Int64, n: Int) -> Int64` | Rust `rotate_right` | 追加 | R-int-12 |
 | `bit_length` | （追加）`int64.bit_length(n: Int64) -> Int` | Python `bit_length` / Go `bits.Len` | 追加 | R-int-11 |
+| `band` | （追加）`int64.band(a: Int64, b: Int64) -> Int64` | Elixir `band` / Rust・Go・Swift 演算子 `&` | 追加 | R-sized-10 |
+| `bor` | （追加）`int64.bor(a: Int64, b: Int64) -> Int64` | Elixir `bor` / Rust・Go・Swift 演算子 `\|` | 追加 | R-sized-10 |
+| `bxor` | （追加）`int64.bxor(a: Int64, b: Int64) -> Int64` | Elixir `bxor` / Rust・Go・Swift 演算子 `^` | 追加 | R-sized-10 |
+| `bnot` | （追加）`int64.bnot(a: Int64) -> Int64` | Elixir `bnot` / Swift `~` | 追加 | R-sized-10 |
+| `bshl` | （追加）`int64.bshl(a: Int64, n: Int) -> Int64` | Elixir `bsl` / 演算子 `<<` | 追加 | R-sized-10 |
+| `bshr` | （追加）`int64.bshr(a: Int64, n: Int) -> Int64` | Elixir `bsr` / 演算子 `>>` | 追加 | R-sized-10 |
 
 ### L3: `uint8`
 
@@ -429,6 +453,12 @@
 | `rotate_left` | （追加）`uint8.rotate_left(a: UInt8, n: Int) -> UInt8` | Rust `rotate_left` / Go `bits.RotateLeft` | 追加 | R-int-12 |
 | `rotate_right` | （追加）`uint8.rotate_right(a: UInt8, n: Int) -> UInt8` | Rust `rotate_right` | 追加 | R-int-12 |
 | `bit_length` | （追加）`uint8.bit_length(n: UInt8) -> Int` | Python `bit_length` / Go `bits.Len` | 追加 | R-int-11 |
+| `band` | （追加）`uint8.band(a: UInt8, b: UInt8) -> UInt8` | Elixir `band` / Rust・Go・Swift 演算子 `&` | 追加 | R-sized-10 |
+| `bor` | （追加）`uint8.bor(a: UInt8, b: UInt8) -> UInt8` | Elixir `bor` / Rust・Go・Swift 演算子 `\|` | 追加 | R-sized-10 |
+| `bxor` | （追加）`uint8.bxor(a: UInt8, b: UInt8) -> UInt8` | Elixir `bxor` / Rust・Go・Swift 演算子 `^` | 追加 | R-sized-10 |
+| `bnot` | （追加）`uint8.bnot(a: UInt8) -> UInt8` | Elixir `bnot` / Swift `~` | 追加 | R-sized-10 |
+| `bshl` | （追加）`uint8.bshl(a: UInt8, n: Int) -> UInt8` | Elixir `bsl` / 演算子 `<<` | 追加 | R-sized-10 |
+| `bshr` | （追加）`uint8.bshr(a: UInt8, n: Int) -> UInt8` | Elixir `bsr` / 演算子 `>>` | 追加 | R-sized-10 |
 
 ### L3: `uint16`
 
@@ -475,6 +505,12 @@
 | `rotate_left` | （追加）`uint16.rotate_left(a: UInt16, n: Int) -> UInt16` | Rust `rotate_left` / Go `bits.RotateLeft` | 追加 | R-int-12 |
 | `rotate_right` | （追加）`uint16.rotate_right(a: UInt16, n: Int) -> UInt16` | Rust `rotate_right` | 追加 | R-int-12 |
 | `bit_length` | （追加）`uint16.bit_length(n: UInt16) -> Int` | Python `bit_length` / Go `bits.Len` | 追加 | R-int-11 |
+| `band` | （追加）`uint16.band(a: UInt16, b: UInt16) -> UInt16` | Elixir `band` / Rust・Go・Swift 演算子 `&` | 追加 | R-sized-10 |
+| `bor` | （追加）`uint16.bor(a: UInt16, b: UInt16) -> UInt16` | Elixir `bor` / Rust・Go・Swift 演算子 `\|` | 追加 | R-sized-10 |
+| `bxor` | （追加）`uint16.bxor(a: UInt16, b: UInt16) -> UInt16` | Elixir `bxor` / Rust・Go・Swift 演算子 `^` | 追加 | R-sized-10 |
+| `bnot` | （追加）`uint16.bnot(a: UInt16) -> UInt16` | Elixir `bnot` / Swift `~` | 追加 | R-sized-10 |
+| `bshl` | （追加）`uint16.bshl(a: UInt16, n: Int) -> UInt16` | Elixir `bsl` / 演算子 `<<` | 追加 | R-sized-10 |
+| `bshr` | （追加）`uint16.bshr(a: UInt16, n: Int) -> UInt16` | Elixir `bsr` / 演算子 `>>` | 追加 | R-sized-10 |
 
 ### L3: `uint32`
 
@@ -525,6 +561,12 @@
 | `rotate_left` | （追加）`uint32.rotate_left(a: UInt32, n: Int) -> UInt32` | Rust `rotate_left` / Go `bits.RotateLeft` | 追加 | R-int-12 |
 | `rotate_right` | （追加）`uint32.rotate_right(a: UInt32, n: Int) -> UInt32` | Rust `rotate_right` | 追加 | R-int-12 |
 | `bit_length` | （追加）`uint32.bit_length(n: UInt32) -> Int` | Python `bit_length` / Go `bits.Len` | 追加 | R-int-11 |
+| `band` | （追加）`uint32.band(a: UInt32, b: UInt32) -> UInt32` | Elixir `band` / Rust・Go・Swift 演算子 `&` | 追加 | R-sized-10 |
+| `bor` | （追加）`uint32.bor(a: UInt32, b: UInt32) -> UInt32` | Elixir `bor` / Rust・Go・Swift 演算子 `\|` | 追加 | R-sized-10 |
+| `bxor` | （追加）`uint32.bxor(a: UInt32, b: UInt32) -> UInt32` | Elixir `bxor` / Rust・Go・Swift 演算子 `^` | 追加 | R-sized-10 |
+| `bnot` | （追加）`uint32.bnot(a: UInt32) -> UInt32` | Elixir `bnot` / Swift `~` | 追加 | R-sized-10 |
+| `bshl` | （追加）`uint32.bshl(a: UInt32, n: Int) -> UInt32` | Elixir `bsl` / 演算子 `<<` | 追加 | R-sized-10 |
+| `bshr` | （追加）`uint32.bshr(a: UInt32, n: Int) -> UInt32` | Elixir `bsr` / 演算子 `>>` | 追加 | R-sized-10 |
 
 ### L3: `uint64`
 
@@ -579,6 +621,12 @@
 | `rotate_left` | （追加）`uint64.rotate_left(a: UInt64, n: Int) -> UInt64` | Rust `rotate_left` / Go `bits.RotateLeft` | 追加 | R-int-12 |
 | `rotate_right` | （追加）`uint64.rotate_right(a: UInt64, n: Int) -> UInt64` | Rust `rotate_right` | 追加 | R-int-12 |
 | `bit_length` | （追加）`uint64.bit_length(n: UInt64) -> Int` | Python `bit_length` / Go `bits.Len` | 追加 | R-int-11 |
+| `band` | （追加）`uint64.band(a: UInt64, b: UInt64) -> UInt64` | Elixir `band` / Rust・Go・Swift 演算子 `&` | 追加 | R-sized-10 |
+| `bor` | （追加）`uint64.bor(a: UInt64, b: UInt64) -> UInt64` | Elixir `bor` / Rust・Go・Swift 演算子 `\|` | 追加 | R-sized-10 |
+| `bxor` | （追加）`uint64.bxor(a: UInt64, b: UInt64) -> UInt64` | Elixir `bxor` / Rust・Go・Swift 演算子 `^` | 追加 | R-sized-10 |
+| `bnot` | （追加）`uint64.bnot(a: UInt64) -> UInt64` | Elixir `bnot` / Swift `~` | 追加 | R-sized-10 |
+| `bshl` | （追加）`uint64.bshl(a: UInt64, n: Int) -> UInt64` | Elixir `bsl` / 演算子 `<<` | 追加 | R-sized-10 |
+| `bshr` | （追加）`uint64.bshr(a: UInt64, n: Int) -> UInt64` | Elixir `bsr` / 演算子 `>>` | 追加 | R-sized-10 |
 
 ### L3: `float32`
 

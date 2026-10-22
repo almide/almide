@@ -91,10 +91,10 @@
 ### R-bigint-07 `bigint` に `Integer` のビット演算を置く — ○ 採用
 
 - いま: `bigint` は `Integer` の算術（`floor_div`・`mod`・`pow`・`is_even`・`is_odd`）を持ちますが、ビット演算を持ちません。
-- 案: 演算子 `&`・`|`・`^`・`~`・`<<`・`>>` を置きます（R-L0-41。関数ではない）。負の数は、上に無限に 1 が続く 2 の補数として扱います（Python の `int`、Swift の `BinaryInteger` と同じ）。`bnot(x)` は `-x - 1` です。
+- 案: `band`・`bor`・`bxor`・`bnot`・`bshl`・`bshr` を置きます（`int` と同じ関数。R-int-10）。負の数は、上に無限に 1 が続く 2 の補数として扱います（Python の `int`、Swift の `BinaryInteger` と同じ）。`bnot(x)` は `-x - 1` です。
 - 意図した抜け: `count_leading_zeros`・`count_trailing_zeros`・`count_ones`・`byte_swap` は置きません（`FixedWidthInteger` の要件で、幅のない型には決まった答えがない）。
 - (a) Swift の `BinaryInteger` はビット演算を要件にし、任意精度の整数もこれを持つ設計です。Python の `int`、Go の `big.Int`（`And`・`Or`・`Xor`・`Not`・`Lsh`・`Rsh`）、Java/Kotlin の `BigInteger`（`and`・`or`・`xor`・`not`・`shiftLeft`・`shiftRight`）も持ちます。
-- (d) 演算子の追加で、関数は増えません。
+- (d) 追加 6。
 - issue: #4000
 
 ## L3: 関数表（提案）
@@ -125,3 +125,9 @@
 | `from` | （追加）`bigint.from[S: Numeric](x: S) -> BigInt` | Rust `From`・`as` / Swift `init(_:)` / Python `int(x)` | 追加 | R-L0-40 |
 | `from_checked` | （追加）`bigint.from_checked[S: Numeric](x: S) -> BigInt?` | Rust `TryFrom` / Swift `init(exactly:)` | 追加 | R-L0-40 |
 | `bit_length` | （追加）`bigint.bit_length(n: BigInt) -> Int` | Python `bit_length` / Go `BitLen` | 追加 | R-int-11 |
+| `band` | `bigint.band(a: BigInt, b: BigInt) -> BigInt` | Elixir `band` / Rust・Go・Swift 演算子 `&` | 追加 | R-bigint-07 |
+| `bor` | `bigint.bor(a: BigInt, b: BigInt) -> BigInt` | Elixir `bor` / Rust・Go・Swift 演算子 `\|` | 追加 | R-bigint-07 |
+| `bxor` | `bigint.bxor(a: BigInt, b: BigInt) -> BigInt` | Elixir `bxor` / Rust・Go・Swift 演算子 `^` | 追加 | R-bigint-07 |
+| `bnot` | `bigint.bnot(a: BigInt) -> BigInt` | Elixir `bnot` / Swift `~` | 追加 | R-bigint-07 |
+| `bshl` | `bigint.bshl(a: BigInt, n: Int) -> BigInt` | Elixir `bsl` / 演算子 `<<` | 追加 | R-bigint-07 |
+| `bshr` | `bigint.bshr(a: BigInt, n: Int) -> BigInt` | Elixir `bsr` / 演算子 `>>` | 追加 | R-bigint-07 |

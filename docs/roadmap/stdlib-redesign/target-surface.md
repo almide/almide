@@ -38,20 +38,20 @@
 
 | いまの関数 | リデザイン後 | 据え置き | 新規 | 改名 | 意味変更 | 撤去 |
 |---:|---:|---:|---:|---:|---:|---:|
-| 1001 | 1230 | 418 | 647 | 87 | 78 | 418 |
+| 1001 | 1291 | 424 | 702 | 87 | 78 | 412 |
 
 固定幅の数（`int8`〜`uint64`、`float32`・`float64`）は型ごとに 1 関数と数えます。
 
 ## 実体の数
 
-この一覧は、同じ protocol の関数を型ごとに 1 行と数えています（計 1,230 行）。[protocol の階層](protocol-view.md)で数え直すと、覚える名前はずっと少なくなります。
+この一覧は、同じ protocol の関数を型ごとに 1 行と数えています（計 1,291 行）。[protocol の階層](protocol-view.md)で数え直すと、覚える名前はずっと少なくなります。
 
 | 数え方 | 一覧の行 | 覚える名前 |
 |---|---:|---:|
-| protocol の要件（protocol ごとに 1 回） | 731 | 155 |
-| 値の型だけが持つ関数 | 291 | 291 |
+| protocol の要件（protocol ごとに 1 回） | 791 | 161 |
+| 値の型だけが持つ関数 | 292 | 292 |
 | 値の型を持たないモジュール（`fs`・`http`・`math` など） | 208 | 208 |
-| 計 | 1230 | 654 |
+| 計 | 1291 | 661 |
 
 ## モジュールごとの数
 
@@ -59,7 +59,7 @@
 |---|---:|---:|---:|---:|---:|---|
 | [`args`](#args) | 3 | 1 | 0 | 0 | 4 | [L2-args.md](L2-args.md) |
 | [`base64`](#base64) | 4 | 0 | 0 | 2 | 0 | [L2-base64.md](L2-base64.md) |
-| [`bigint`](#bigint)（新しいモジュール） | 18 | 18 | 0 | 0 | 0 | [L2-bigint.md](L2-bigint.md) |
+| [`bigint`](#bigint)（新しいモジュール） | 24 | 24 | 0 | 0 | 0 | [L2-bigint.md](L2-bigint.md) |
 | [`bool`](#bool) | 3 | 3 | 0 | 0 | 0 | [L2-bool.md](L2-bool.md) |
 | [`bytes`](#bytes) | 176 | 62 | 71 | 6 | 34 | [L2-bytes.md](L2-bytes.md) |
 | [`compute`](#compute) | 7 | 1 | 0 | 0 | 0 | [L2-compute.md](L2-compute.md) |
@@ -78,11 +78,11 @@
 | [`hex`](#hex) | 3 | 0 | 0 | 0 | 0 | [L2-hex.md](L2-hex.md) |
 | [`html`](#html) | 5 | 0 | 0 | 0 | 0 | [L2-html.md](L2-html.md) |
 | [`http`](#http) | 34 | 4 | 5 | 9 | 18 | [L2-http.md](L2-http.md) |
-| [`int`](#int) | 38 | 13 | 2 | 4 | 47 | [L2-int.md](L2-int.md) |
-| [`int16`](#int16) | 31 | 28 | 0 | 0 | 19 | [L2-sized-numbers.md](L2-sized-numbers.md) |
-| [`int32`](#int32) | 31 | 28 | 0 | 0 | 21 | [L2-sized-numbers.md](L2-sized-numbers.md) |
-| [`int64`](#int64) | 31 | 28 | 0 | 0 | 23 | [L2-sized-numbers.md](L2-sized-numbers.md) |
-| [`int8`](#int8) | 31 | 28 | 0 | 0 | 17 | [L2-sized-numbers.md](L2-sized-numbers.md) |
+| [`int`](#int) | 45 | 14 | 2 | 4 | 41 | [L2-int.md](L2-int.md) |
+| [`int16`](#int16) | 37 | 34 | 0 | 0 | 19 | [L2-sized-numbers.md](L2-sized-numbers.md) |
+| [`int32`](#int32) | 37 | 34 | 0 | 0 | 21 | [L2-sized-numbers.md](L2-sized-numbers.md) |
+| [`int64`](#int64) | 37 | 34 | 0 | 0 | 23 | [L2-sized-numbers.md](L2-sized-numbers.md) |
+| [`int8`](#int8) | 37 | 34 | 0 | 0 | 17 | [L2-sized-numbers.md](L2-sized-numbers.md) |
 | [`io`](#io) | 7 | 3 | 0 | 2 | 4 | [L2-io.md](L2-io.md) |
 | [`json`](#json) | 3 | 0 | 0 | 1 | 12 | [L2-json.md](L2-json.md) |
 | [`list`](#list) | 73 | 12 | 0 | 16 | 6 | [L2-list.md](L2-list.md) |
@@ -99,10 +99,10 @@
 | [`set`](#set) | 42 | 23 | 0 | 0 | 0 | [L2-set.md](L2-set.md) |
 | [`string`](#string) | 85 | 40 | 3 | 2 | 5 | [L2-string.md](L2-string.md) |
 | [`testing`](#testing) | 10 | 0 | 0 | 2 | 0 | [L2-testing.md](L2-testing.md) |
-| [`uint16`](#uint16) | 29 | 26 | 0 | 0 | 15 | [L2-sized-numbers.md](L2-sized-numbers.md) |
-| [`uint32`](#uint32) | 29 | 26 | 0 | 0 | 19 | [L2-sized-numbers.md](L2-sized-numbers.md) |
-| [`uint64`](#uint64) | 29 | 26 | 0 | 0 | 23 | [L2-sized-numbers.md](L2-sized-numbers.md) |
-| [`uint8`](#uint8) | 29 | 26 | 0 | 0 | 11 | [L2-sized-numbers.md](L2-sized-numbers.md) |
+| [`uint16`](#uint16) | 35 | 32 | 0 | 0 | 15 | [L2-sized-numbers.md](L2-sized-numbers.md) |
+| [`uint32`](#uint32) | 35 | 32 | 0 | 0 | 19 | [L2-sized-numbers.md](L2-sized-numbers.md) |
+| [`uint64`](#uint64) | 35 | 32 | 0 | 0 | 23 | [L2-sized-numbers.md](L2-sized-numbers.md) |
+| [`uint8`](#uint8) | 35 | 32 | 0 | 0 | 11 | [L2-sized-numbers.md](L2-sized-numbers.md) |
 | [`unix`](#unix)（新しいモジュール） | 12 | 12 | 0 | 0 | 0 | [L2-unix.md](L2-unix.md) |
 | [`url`](#url) | 9 | 4 | 0 | 1 | 1 | [L2-url.md](L2-url.md) |
 | [`uuid`](#uuid)（新しいモジュール） | 7 | 7 | 0 | 0 | 0 | [L2-uuid.md](L2-uuid.md) |
@@ -147,7 +147,13 @@
 | 関数 | シグネチャ（リデザイン後） | 変化 | 案 |
 |---|---|---|---|
 | `abs` | `fn bigint.abs(x: BigInt) -> BigInt` | 新規 | R-bigint-01 |
+| `band` | `fn bigint.band(a: BigInt, b: BigInt) -> BigInt` | 新規 | R-bigint-07 |
 | `bit_length` | `fn bigint.bit_length(x: BigInt) -> Int` | 新規 | R-int-11 |
+| `bnot` | `fn bigint.bnot(x: BigInt) -> BigInt` | 新規 | R-bigint-07 |
+| `bor` | `fn bigint.bor(a: BigInt, b: BigInt) -> BigInt` | 新規 | R-bigint-07 |
+| `bshl` | `fn bigint.bshl(a: BigInt, n: Int) -> BigInt` | 新規 | R-bigint-07 |
+| `bshr` | `fn bigint.bshr(a: BigInt, n: Int) -> BigInt` | 新規 | R-bigint-07 |
+| `bxor` | `fn bigint.bxor(a: BigInt, b: BigInt) -> BigInt` | 新規 | R-bigint-07 |
 | `clamp` | `fn bigint.clamp(x: BigInt, lo: BigInt, hi: BigInt) -> BigInt` | 新規 | R-bigint-05 |
 | `compare` | `fn bigint.compare(a: BigInt, b: BigInt) -> Int` | 新規 | R-bigint-01 |
 | `floor_div` | `fn bigint.floor_div(a: BigInt, b: BigInt) -> BigInt` | 新規 | R-bigint-01（R-int-03 と同じ綴り） |
@@ -911,8 +917,15 @@
 | 関数 | シグネチャ（リデザイン後） | 変化 | 案 |
 |---|---|---|---|
 | `abs` | `fn int.abs(x: Int) -> Int` |  | R-math-01（`math.abs` の残る側） |
+| `band` | `fn int.band(a: Int, b: Int) -> Int` |  | R-int-05 ×（改名しない） |
 | `bit_length` | `fn int.bit_length(x: Int) -> Int` | 改名（旧 `bit_width`） | R-int-11 |
 | `bit_reverse` | `fn int.bit_reverse(x: Int) -> Int` |  |  |
+| `bnot` | `fn int.bnot(x: Int) -> Int` |  | R-int-05 × |
+| `bor` | `fn int.bor(a: Int, b: Int) -> Int` |  | R-int-05 × |
+| `bshl` | `fn int.bshl(a: Int, n: Int) -> Int` |  | R-int-05 × |
+| `bshr` | `fn int.bshr(a: Int, n: Int) -> Int` |  | R-int-05 × |
+| `bshr_logical` | `fn int.bshr_logical(a: Int, n: Int) -> Int` | 新規 | R-int-06 |
+| `bxor` | `fn int.bxor(a: Int, b: Int) -> Int` |  | R-int-05 × |
 | `byte_swap` | `fn int.byte_swap(x: Int) -> Int` |  |  |
 | `clamp` | `fn int.clamp(x: Int, lo: Int, hi: Int) -> Int` |  |  |
 | `compare` | `fn int.compare(a: Int, b: Int) -> Int` | 新規 | R-sized-02 |
@@ -949,18 +962,12 @@
 | `wrap_mul` | `fn int.wrap_mul(a: Int, b: Int) -> Int` | 意味変更: `bits` を外し 64 bit で折り返す。N bit は `int.wrap` と組む | R-int-12 |
 | `wrap_sub` | `fn int.wrap_sub(a: Int, b: Int) -> Int` | 新規 | R-int-02、R-int-12 |
 
-撤去（47）:
+撤去（41）:
 
 | 関数 | 代わり | 案 |
 |---|---|---|
-| `band` | 演算子 `a & b` | R-L0-41 |
 | `bits_to_f32` | `float32.from_bits` → `float32.to_float` | R-float-02（`float32.from_bits` → `float32.to_float`） |
 | `bits_to_float` | `float.from_bits` | R-float-02（`float.from_bits`） |
-| `bnot` | 演算子 `~a` | R-L0-41 |
-| `bor` | 演算子 `a \| b` | R-L0-41 |
-| `bshl` | 演算子 `a << n` | R-L0-41 |
-| `bshr` | 演算子 `a >> n` | R-L0-41 |
-| `bxor` | 演算子 `a ^ b` | R-L0-41 |
 | `from_hex` | `int.parse_radix(s, 16)` に一本化 | R-int-04（`int.parse_radix(s, 16)` に一本化） |
 | `from_int16` | `int16.to_int` に移す | R-sized-01（`int16.to_int` に移す。R-L0-07） |
 | `from_int32` | `int32.to_int` に移す | R-sized-01（`int32.to_int` に移す。R-L0-07） |
@@ -1008,7 +1015,13 @@
 | 関数 | シグネチャ（リデザイン後） | 変化 | 案 |
 |---|---|---|---|
 | `abs` | `fn int16.abs(x: Int16) -> Int16` | 新規 | R-sized-10 |
+| `band` | `fn int16.band(a: Int16, b: Int16) -> Int16` | 新規 | R-sized-10 |
 | `bit_length` | `fn int16.bit_length(x: Int16) -> Int` | 新規 | R-int-11 |
+| `bnot` | `fn int16.bnot(x: Int16) -> Int16` | 新規 | R-sized-10 |
+| `bor` | `fn int16.bor(a: Int16, b: Int16) -> Int16` | 新規 | R-sized-10 |
+| `bshl` | `fn int16.bshl(a: Int16, n: Int) -> Int16` | 新規 | R-sized-10 |
+| `bshr` | `fn int16.bshr(a: Int16, n: Int) -> Int16` | 新規 | R-sized-10 |
+| `bxor` | `fn int16.bxor(a: Int16, b: Int16) -> Int16` | 新規 | R-sized-10 |
 | `byte_swap` | `fn int16.byte_swap(x: Int16) -> Int16` | 新規 | R-sized-10 |
 | `clamp` | `fn int16.clamp(x: Int16, lo: Int16, hi: Int16) -> Int16` | 新規 | R-sized-08 |
 | `compare` | `fn int16.compare(a: Int16, b: Int16) -> Int` | 新規 | R-sized-02 |
@@ -1070,7 +1083,13 @@
 | 関数 | シグネチャ（リデザイン後） | 変化 | 案 |
 |---|---|---|---|
 | `abs` | `fn int32.abs(x: Int32) -> Int32` | 新規 | R-sized-10 |
+| `band` | `fn int32.band(a: Int32, b: Int32) -> Int32` | 新規 | R-sized-10 |
 | `bit_length` | `fn int32.bit_length(x: Int32) -> Int` | 新規 | R-int-11 |
+| `bnot` | `fn int32.bnot(x: Int32) -> Int32` | 新規 | R-sized-10 |
+| `bor` | `fn int32.bor(a: Int32, b: Int32) -> Int32` | 新規 | R-sized-10 |
+| `bshl` | `fn int32.bshl(a: Int32, n: Int) -> Int32` | 新規 | R-sized-10 |
+| `bshr` | `fn int32.bshr(a: Int32, n: Int) -> Int32` | 新規 | R-sized-10 |
+| `bxor` | `fn int32.bxor(a: Int32, b: Int32) -> Int32` | 新規 | R-sized-10 |
 | `byte_swap` | `fn int32.byte_swap(x: Int32) -> Int32` | 新規 | R-sized-10 |
 | `clamp` | `fn int32.clamp(x: Int32, lo: Int32, hi: Int32) -> Int32` | 新規 | R-sized-08 |
 | `compare` | `fn int32.compare(a: Int32, b: Int32) -> Int` | 新規 | R-sized-02 |
@@ -1134,7 +1153,13 @@
 | 関数 | シグネチャ（リデザイン後） | 変化 | 案 |
 |---|---|---|---|
 | `abs` | `fn int64.abs(x: Int64) -> Int64` | 新規 | R-sized-10 |
+| `band` | `fn int64.band(a: Int64, b: Int64) -> Int64` | 新規 | R-sized-10 |
 | `bit_length` | `fn int64.bit_length(x: Int64) -> Int` | 新規 | R-int-11 |
+| `bnot` | `fn int64.bnot(x: Int64) -> Int64` | 新規 | R-sized-10 |
+| `bor` | `fn int64.bor(a: Int64, b: Int64) -> Int64` | 新規 | R-sized-10 |
+| `bshl` | `fn int64.bshl(a: Int64, n: Int) -> Int64` | 新規 | R-sized-10 |
+| `bshr` | `fn int64.bshr(a: Int64, n: Int) -> Int64` | 新規 | R-sized-10 |
+| `bxor` | `fn int64.bxor(a: Int64, b: Int64) -> Int64` | 新規 | R-sized-10 |
 | `byte_swap` | `fn int64.byte_swap(x: Int64) -> Int64` | 新規 | R-sized-10 |
 | `clamp` | `fn int64.clamp(x: Int64, lo: Int64, hi: Int64) -> Int64` | 新規 | R-sized-08 |
 | `compare` | `fn int64.compare(a: Int64, b: Int64) -> Int` | 新規 | R-sized-02 |
@@ -1200,7 +1225,13 @@
 | 関数 | シグネチャ（リデザイン後） | 変化 | 案 |
 |---|---|---|---|
 | `abs` | `fn int8.abs(x: Int8) -> Int8` | 新規 | R-sized-10 |
+| `band` | `fn int8.band(a: Int8, b: Int8) -> Int8` | 新規 | R-sized-10 |
 | `bit_length` | `fn int8.bit_length(x: Int8) -> Int` | 新規 | R-int-11 |
+| `bnot` | `fn int8.bnot(x: Int8) -> Int8` | 新規 | R-sized-10 |
+| `bor` | `fn int8.bor(a: Int8, b: Int8) -> Int8` | 新規 | R-sized-10 |
+| `bshl` | `fn int8.bshl(a: Int8, n: Int) -> Int8` | 新規 | R-sized-10 |
+| `bshr` | `fn int8.bshr(a: Int8, n: Int) -> Int8` | 新規 | R-sized-10 |
+| `bxor` | `fn int8.bxor(a: Int8, b: Int8) -> Int8` | 新規 | R-sized-10 |
 | `byte_swap` | `fn int8.byte_swap(x: Int8) -> Int8` | 新規 | R-sized-10 |
 | `clamp` | `fn int8.clamp(x: Int8, lo: Int8, hi: Int8) -> Int8` | 新規 | R-sized-08 |
 | `compare` | `fn int8.compare(a: Int8, b: Int8) -> Int` | 新規 | R-sized-02 |
@@ -1929,7 +1960,13 @@
 
 | 関数 | シグネチャ（リデザイン後） | 変化 | 案 |
 |---|---|---|---|
+| `band` | `fn uint16.band(a: UInt16, b: UInt16) -> UInt16` | 新規 | R-sized-10 |
 | `bit_length` | `fn uint16.bit_length(x: UInt16) -> Int` | 新規 | R-int-11 |
+| `bnot` | `fn uint16.bnot(x: UInt16) -> UInt16` | 新規 | R-sized-10 |
+| `bor` | `fn uint16.bor(a: UInt16, b: UInt16) -> UInt16` | 新規 | R-sized-10 |
+| `bshl` | `fn uint16.bshl(a: UInt16, n: Int) -> UInt16` | 新規 | R-sized-10 |
+| `bshr` | `fn uint16.bshr(a: UInt16, n: Int) -> UInt16` | 新規 | R-sized-10 |
+| `bxor` | `fn uint16.bxor(a: UInt16, b: UInt16) -> UInt16` | 新規 | R-sized-10 |
 | `byte_swap` | `fn uint16.byte_swap(x: UInt16) -> UInt16` | 新規 | R-sized-10 |
 | `clamp` | `fn uint16.clamp(x: UInt16, lo: UInt16, hi: UInt16) -> UInt16` | 新規 | R-sized-08 |
 | `compare` | `fn uint16.compare(a: UInt16, b: UInt16) -> Int` | 新規 | R-sized-02 |
@@ -1985,7 +2022,13 @@
 
 | 関数 | シグネチャ（リデザイン後） | 変化 | 案 |
 |---|---|---|---|
+| `band` | `fn uint32.band(a: UInt32, b: UInt32) -> UInt32` | 新規 | R-sized-10 |
 | `bit_length` | `fn uint32.bit_length(x: UInt32) -> Int` | 新規 | R-int-11 |
+| `bnot` | `fn uint32.bnot(x: UInt32) -> UInt32` | 新規 | R-sized-10 |
+| `bor` | `fn uint32.bor(a: UInt32, b: UInt32) -> UInt32` | 新規 | R-sized-10 |
+| `bshl` | `fn uint32.bshl(a: UInt32, n: Int) -> UInt32` | 新規 | R-sized-10 |
+| `bshr` | `fn uint32.bshr(a: UInt32, n: Int) -> UInt32` | 新規 | R-sized-10 |
+| `bxor` | `fn uint32.bxor(a: UInt32, b: UInt32) -> UInt32` | 新規 | R-sized-10 |
 | `byte_swap` | `fn uint32.byte_swap(x: UInt32) -> UInt32` | 新規 | R-sized-10 |
 | `clamp` | `fn uint32.clamp(x: UInt32, lo: UInt32, hi: UInt32) -> UInt32` | 新規 | R-sized-08 |
 | `compare` | `fn uint32.compare(a: UInt32, b: UInt32) -> Int` | 新規 | R-sized-02 |
@@ -2045,7 +2088,13 @@
 
 | 関数 | シグネチャ（リデザイン後） | 変化 | 案 |
 |---|---|---|---|
+| `band` | `fn uint64.band(a: UInt64, b: UInt64) -> UInt64` | 新規 | R-sized-10 |
 | `bit_length` | `fn uint64.bit_length(x: UInt64) -> Int` | 新規 | R-int-11 |
+| `bnot` | `fn uint64.bnot(x: UInt64) -> UInt64` | 新規 | R-sized-10 |
+| `bor` | `fn uint64.bor(a: UInt64, b: UInt64) -> UInt64` | 新規 | R-sized-10 |
+| `bshl` | `fn uint64.bshl(a: UInt64, n: Int) -> UInt64` | 新規 | R-sized-10 |
+| `bshr` | `fn uint64.bshr(a: UInt64, n: Int) -> UInt64` | 新規 | R-sized-10 |
+| `bxor` | `fn uint64.bxor(a: UInt64, b: UInt64) -> UInt64` | 新規 | R-sized-10 |
 | `byte_swap` | `fn uint64.byte_swap(x: UInt64) -> UInt64` | 新規 | R-sized-10 |
 | `clamp` | `fn uint64.clamp(x: UInt64, lo: UInt64, hi: UInt64) -> UInt64` | 新規 | R-sized-08 |
 | `compare` | `fn uint64.compare(a: UInt64, b: UInt64) -> Int` | 新規 | R-sized-02 |
@@ -2109,7 +2158,13 @@
 
 | 関数 | シグネチャ（リデザイン後） | 変化 | 案 |
 |---|---|---|---|
+| `band` | `fn uint8.band(a: UInt8, b: UInt8) -> UInt8` | 新規 | R-sized-10 |
 | `bit_length` | `fn uint8.bit_length(x: UInt8) -> Int` | 新規 | R-int-11 |
+| `bnot` | `fn uint8.bnot(x: UInt8) -> UInt8` | 新規 | R-sized-10 |
+| `bor` | `fn uint8.bor(a: UInt8, b: UInt8) -> UInt8` | 新規 | R-sized-10 |
+| `bshl` | `fn uint8.bshl(a: UInt8, n: Int) -> UInt8` | 新規 | R-sized-10 |
+| `bshr` | `fn uint8.bshr(a: UInt8, n: Int) -> UInt8` | 新規 | R-sized-10 |
+| `bxor` | `fn uint8.bxor(a: UInt8, b: UInt8) -> UInt8` | 新規 | R-sized-10 |
 | `byte_swap` | `fn uint8.byte_swap(x: UInt8) -> UInt8` | 新規 | R-sized-10 |
 | `clamp` | `fn uint8.clamp(x: UInt8, lo: UInt8, hi: UInt8) -> UInt8` | 新規 | R-sized-08 |
 | `compare` | `fn uint8.compare(a: UInt8, b: UInt8) -> Int` | 新規 | R-sized-02 |
@@ -2291,7 +2346,7 @@
 
 ## 採らなかった案・保留の案と理由
 
-レビューで同じ指摘を繰り返さないよう、いまも有効な × と保留の案（54 件）を理由の最初の 1〜2 文と一緒に載せます。全文は各ページの案にあります。
+レビューで同じ指摘を繰り返さないよう、いまも有効な × と保留の案（55 件）を理由の最初の 1〜2 文と一緒に載せます。全文は各ページの案にあります。
 
 | 案 | 内容 | 判定 | 理由 |
 |---|---|---|---|
@@ -2320,6 +2375,7 @@
 | [R-hex-02](L2-hex.md#r-hex-02-decode_upper-を足す---不採用) | `decode_upper` を足す | × 不採用 | 大文字・小文字を区別して拒む復号を標準の既定にしているのは Python の `b16decode` だけです(F)。規則 2 のとおり、書き方の違いは `decode` が受け取ります。 |
 | [R-html-02](L2-html.md#r-html-02-unescape-を足す---不採用) | `unescape` を足す | × 不採用 | 標準に持つのは Go・Python・Deno の 3 言語で、L1 の基準（5 言語以上）に届きません。HTML を読む処理は package（HTML の構文解析器）の関心事です。 |
 | [R-html-03](L2-html.md#r-html-03-safehtml-の列をまとめる-htmljoin-を足す---不採用) | `SafeHtml` の列をまとめる `html.join` を足す | × 不採用 | エスケープの型を持つ言語が 2 つしかなく、5 言語の基準に届きません。`list.fold(xs, html.empty(), html.concat)` で書けます。 |
+| [R-int-05](L2-int.md#r-int-05-bandborbxor-などを多数派の綴りに改名する---不採用改名しないr-int-10-で確かめた) | `band`/`bor`/`bxor` などを多数派の綴りに改名する | × 不採用（改名しない。R-int-10 で確かめた） | R-L0-00。関数名でビット演算を書く 4 言語の綴りは割れています（Gleam `bitwise_and`、Elixir `band`、OCaml `logand`、Kotlin `and`、すべて (F)）。 |
 | [R-list-12](L2-list.md#r-list-12-多数派に届かない役割は足さない---不採用) | 多数派に届かない役割は足さない | × 不採用 | L1 の「カテゴリを足す基準」と同じ 5/9 の線、R-L0-01。 |
 | [R-list-18](L2-list.md#r-list-18-listrepeat-を列全体の繰り返しにする---不採用) | `list.repeat` を列全体の繰り返しにする | × 不採用 | `string.repeat` と `bytes.repeat` は列全体を繰り返し、`list.repeat(v, n)` は 1 つの値を n 個並べます。 |
 | [R-map-04](L2-map.md#r-map-04-mapmap-を-map_values-に改名するまたはコールバックを-k-v-にする--保留六巡目に--から変更dojo-で測る) | `map.map` を `map_values` に改名する、またはコールバックを `(K, V)` にする | 保留（六巡目に × から変更。Dojo で測る） | 以前の理由は「間違えても型エラーになる」でしたが、R-L0-36 のとおり、それだけでは不採用の理由になりません。候補は 3 つ（いまの `map.map` の `(V)`、`map.map` を `(K, V)` にする、`map_values` に改名する）で、他言語も割れています（Swift・Kotlin `mapValues`、OCaml `map`（値）と `mapi`（キーと値）、Gleam `map_values`（キーと値））。 |
@@ -2360,9 +2416,9 @@
 | [R-L0-21](L0-conventions.md#r-l0-21-無印の-to_型-をはみ出したら失敗する版に変える--保留--r-l0-32r-l0-34-で解消) | 無印の `to_<型>` を、はみ出したら失敗する版に変える | 保留 → R-L0-32・R-L0-34 で解消 | R-L0-32・R-L0-34 |
 | [R-hash-04](L2-hash.md#r-hash-04-_hex-のセルの入力を-bytes-に変える---不採用-r-hash-05-で採用に変更) | `_hex` のセルの入力を Bytes に変える | × 不採用（→ R-hash-05 で採用に変更） | R-hash-05 |
 | [R-http-07](L2-http.md#r-http-07-応答のヘッダの-get_header-と要求の-req_header-の不揃い---不採用規則を書く-r-http-12-で解消) | 応答のヘッダの `get_header` と要求の `req_header` の不揃い | × 不採用（規則を書く。→ R-http-12 で解消） | R-http-12 |
-| [R-int-05](L2-int.md#r-int-05-bandborbxor-などを多数派の綴りに改名する---不採用-r-int-10-で演算子に) | `band`/`bor`/`bxor` などを多数派の綴りに改名する | × 不採用（→ R-int-10 で演算子に） | R-int-10 |
 | [R-map-03](L2-map.md#r-map-03-mapto_list-を足す---不採用-r-map-07-で採用に変更) | `map.to_list` を足す | × 不採用（→ R-map-07 で採用に変更） | R-map-07 |
 | [R-matrix-07](L2-matrix.md#r-matrix-07-mul-を-matmul-に改名し要素ごとの積を足す---不採用-r-matrix-14-で--に置き換え) | `mul` を `matmul` に改名し、要素ごとの積を足す | × 不採用（→ R-matrix-14 で `*` に置き換え） | R-matrix-14 |
 | [R-sized-05](L2-sized-numbers.md#r-sized-05-固定幅のモジュールをまとめる算術関数を足す---不採用算術の部分は--r-sized-10-で見直し) | 固定幅のモジュールをまとめる・算術関数を足す | × 不採用（算術の部分は → R-sized-10 で見直し） | R-sized-10 |
 | [R-sized-07](L2-sized-numbers.md#r-sized-07-float32float64-に-is_nan-などの判定を足す---不採用-r-sized-08-で見直し) | `float32`・`float64` に `is_nan` などの判定を足す | × 不採用（→ R-sized-08 で見直し） | R-sized-08 |
 | [R-value-06](L2-value.md#r-value-06-構築子-str-を-string-に改名する---不採用-r-value-08-で採用に変更) | 構築子 `str` を `string` に改名する | × 不採用（→ R-value-08 で採用に変更） | R-value-08 |
+| [R-L0-41](L0-conventions.md#r-l0-41-ビット演算を演算子にし-を関数の合成から外す---取り消し十二巡目記号の意味を入れ替えないため--r-l0-43) | ビット演算を演算子にし、`>>` を関数の合成から外す | × 取り消し（十二巡目。記号の意味を入れ替えないため → R-L0-43） | R-L0-43 |

@@ -111,14 +111,14 @@
 - ゲート案: `to_string_radix` → `parse_radix` の往復を radix 2〜36、`min_value`・`max_value`・`0`・`-1` で検査する spec と、`from_hex` の既存 spec を `parse_radix(s, 16)` で通す差分テスト（撤去までの窓のあいだ）。
 - issue: #3920
 
-### R-int-05 `band`/`bor`/`bxor` などを多数派の綴りに改名する — × 不採用（→ R-int-10 で演算子に）
+### R-int-05 `band`/`bor`/`bxor` などを多数派の綴りに改名する — × 不採用（改名しない。R-int-10 で確かめた）
 
 - 内容: 改名しません。
 - 根拠の L0 規則: R-L0-00。関数名でビット演算を書く 4 言語の綴りは割れています（Gleam `bitwise_and`、Elixir `band`、OCaml `logand`、Kotlin `and`、すべて (F)）。残りの 5 言語は演算子だけです。多数派がないので、いまの綴り（Elixir と同じ `b` 接頭辞）を据え置きます。
 - (c) 演算子 `&` を書くと字句エラーになり、ヒントは出ますが `int.band` を名指ししません。改名ではなく診断で助けるのが筋なので、E0xx（unknown-char）のヒントに「ビット演算は `int.band` / `int.bor` / `int.bxor` / `int.bshl` / `int.bshr`」を出す変更を、別の小さな issue にします。
 - issue: #3905（診断ヒントのみ）
 
-### R-int-06 論理右シフト `int.bshr_logical` を足す — ○ 採用（→ R-L0-41 で撤去。符号なしの型に移して `>>`）
+### R-int-06 論理右シフト `int.bshr_logical` を足す — ○ 採用
 
 - 内容: `int.bshr_logical(a: Int, n: Int) -> Int`。上位を 0 で埋める右シフト。`n` は `bshr` と同じく 64 で割った余り。
 - 根拠の L0 規則: L1 の追加基準（6/9）、R-L0-00（綴りは OCaml `shift_right_logical` の語を Almide の `b` 族の形にしたもの。Kotlin `ushr`、JS `>>>` は族の形に合いません）。
@@ -148,7 +148,7 @@
 - 理由: 0 の扱いが違うので、同じ名前にすると R-float-05 で避けた誤りが戻ります。`int.sign(0)`・`bigint.sign(0)` は 0、`float.signum(0.0)` は 1.0（Rust の `signum` と同じ）です。`sign` という名前は「0 は 0」の関数だけに使います（R-float-05 の完全性の規則）。
 - issue: なし
 
-### R-int-10 ビット演算の綴りを計測で決める — ○ 採用（演算子にする。R-L0-41）
+### R-int-10 ビット演算の綴りを計測で決める — ○ 採用（関数のまま。十二巡目に演算子の案を取り消し）
 
 - いま: `band`・`bor`・`bxor`・`bnot`・`bshl`・`bshr`・`bshr_logical`（Elixir と同じ `b` 接頭辞）。R-sized-10・R-bigint-07 で `Integer` の要件になり、整数 10 型の 61 関数に広がりました。
 - R-int-05（×）の理由「関数名で書く 4 言語の綴りは割れていて、多数派がない」は今も成り立ちます。改名を、型エラーの理由だけで決めることもしません（R-L0-36）。
@@ -156,7 +156,7 @@
   1. いまの `int.band(a, b)`（Elixir）
   2. 語の形 `int.bit_and(a, b)`・`bit_or`・`bit_xor`・`bit_not`・`shift_left`・`shift_right`（Gleam の `bitwise_and`、Roc の `bitwiseAnd` に近い）
   3. 演算子 `a & b`・`a | b`・`a ^ b`・`~a`（R-L0-39 で `^` を空けたあと。Rust・Go・Python・JS・Swift の 5 言語と同じ）。シフトは `>>` が関数の合成なので、関数のまま（`shift_left`・`shift_right`）。
-- 決定（九巡目）: 3 の演算子にします（R-L0-41）。R-int-05 は関数名だけを比べていましたが、演算子まで比べると `&`・`|`・`^`・`<<`・`>>` は 5 言語の多数派です。`>>` は関数の合成から外してシフトにします。Dojo の計測（almide-dojo#65）は、移行の後に生存率が下がっていないことの確認に使います。
+- 決定（十二巡目）: 1 のいまの関数のままにし、`Integer` の要件にします。九巡目に演算子（3）に決めましたが、`^` は累乗、`>>` は関数の合成として使われてきた記号で、別の意味に使い直すことになるため取り消しました（R-L0-43）。`&`・`|` だけを演算子にすると XOR とシフトだけが関数になり、半端な形になります。関数の綴りは 4 言語で割れていて多数派がないので（R-int-05）、いまの綴りを据え置きます。
 - issue: almide-dojo#65
 
 ### R-int-11 `bit_width` を `bit_length` に改名する — ○ 採用
@@ -191,12 +191,12 @@
 | `clamp` | `int.clamp(n: Int, lo: Int, hi: Int) -> Int` | Rust `clamp` / Gleam `clamp` (F) / Kotlin `coerceIn` (F) / Swift — | 据え置き | — |
 | `is_even` | `int.is_even(n: Int) -> Bool` | Gleam `is_even` (F) / Elixir `is_even` (F) / Swift `isMultiple(of: 2)` / 他 — | 据え置き | — |
 | `is_odd` | `int.is_odd(n: Int) -> Bool` | Gleam `is_odd` (F) / Elixir `is_odd` (F) / 他 — | 据え置き | — |
-| `band` | `int.band(a: Int, b: Int) -> Int` | Gleam `bitwise_and` (F) / Elixir `Bitwise.band` / OCaml `logand` (F) / Kotlin `and` (F) / Rust・Go・Python・JS・Swift 演算子 `&` | 撤去（→ 演算子 `a & b`） | R-L0-41 |
-| `bor` | `int.bor(a: Int, b: Int) -> Int` | Gleam `bitwise_or` (F) / Elixir `Bitwise.bor` / OCaml `logor` (F) / Kotlin `or` (F) / 他 5 言語 演算子 `\|` | 撤去（→ 演算子 `a \| b`） | R-L0-41 |
-| `bxor` | `int.bxor(a: Int, b: Int) -> Int` | Gleam `bitwise_exclusive_or` (F) / Elixir `Bitwise.bxor` / OCaml `logxor` (F) / Kotlin `xor` (F) / 他 演算子 `^` | 撤去（→ 演算子 `a ^ b`） | R-L0-41 |
-| `bnot` | `int.bnot(a: Int) -> Int` | Gleam `bitwise_not` (F) / Elixir `Bitwise.bnot` / OCaml `lognot` (F) / Kotlin `inv` (F) / 他 演算子 `!`/`~` | 撤去（→ 演算子 `~a`） | R-L0-41 |
-| `bshl` | `int.bshl(a: Int, n: Int) -> Int` | Gleam `bitwise_shift_left` (F) / Elixir `Bitwise.bsl` / OCaml `shift_left` (F) / Kotlin `shl` (F) / 他 演算子 `<<` | 撤去（→ 演算子 `a << n`） | R-L0-41 |
-| `bshr` | `int.bshr(a: Int, n: Int) -> Int` | Gleam `bitwise_shift_right` (F) / Elixir `Bitwise.bsr` / OCaml `shift_right` (F) / Kotlin `shr` (F) / 他 演算子 `>>` | 撤去（→ 演算子 `a >> n`） | R-L0-41 |
+| `band` | `int.band(a: Int, b: Int) -> Int` | Gleam `bitwise_and` (F) / Elixir `Bitwise.band` / OCaml `logand` (F) / Kotlin `and` (F) / Rust・Go・Python・JS・Swift 演算子 `&` | 据え置き | R-int-05 ×（改名しない） |
+| `bor` | `int.bor(a: Int, b: Int) -> Int` | Gleam `bitwise_or` (F) / Elixir `Bitwise.bor` / OCaml `logor` (F) / Kotlin `or` (F) / 他 5 言語 演算子 `\|` | 据え置き | R-int-05 × |
+| `bxor` | `int.bxor(a: Int, b: Int) -> Int` | Gleam `bitwise_exclusive_or` (F) / Elixir `Bitwise.bxor` / OCaml `logxor` (F) / Kotlin `xor` (F) / 他 演算子 `^` | 据え置き | R-int-05 × |
+| `bnot` | `int.bnot(a: Int) -> Int` | Gleam `bitwise_not` (F) / Elixir `Bitwise.bnot` / OCaml `lognot` (F) / Kotlin `inv` (F) / 他 演算子 `!`/`~` | 据え置き | R-int-05 × |
+| `bshl` | `int.bshl(a: Int, n: Int) -> Int` | Gleam `bitwise_shift_left` (F) / Elixir `Bitwise.bsl` / OCaml `shift_left` (F) / Kotlin `shl` (F) / 他 演算子 `<<` | 据え置き | R-int-05 × |
+| `bshr` | `int.bshr(a: Int, n: Int) -> Int` | Gleam `bitwise_shift_right` (F) / Elixir `Bitwise.bsr` / OCaml `shift_right` (F) / Kotlin `shr` (F) / 他 演算子 `>>` | 据え置き | R-int-05 × |
 | `count_leading_zeros` | `int.count_leading_zeros(n: Int) -> Int` | Rust `leading_zeros` / Go `bits.LeadingZeros64` / OCaml `leading_zeros` (F) / Kotlin `countLeadingZeroBits` (F) / Swift `leadingZeroBitCount` | 据え置き | — |
 | `count_trailing_zeros` | `int.count_trailing_zeros(n: Int) -> Int` | Rust `trailing_zeros` / Go `bits.TrailingZeros64` / OCaml `trailing_zeros` (F) / Kotlin `countTrailingZeroBits` (F) / Swift `trailingZeroBitCount` | 据え置き | — |
 | `pop_count` | `int.pop_count(n: Int) -> Int` | Rust `count_ones` / Go `bits.OnesCount64` / Python `bit_count` / OCaml `popcount` (F) / Elixir `popcount` (F) / Kotlin `countOneBits` (F) / Swift `nonzeroBitCount` | 改名 → `count_ones` | R-int-07 |
@@ -263,3 +263,4 @@
 | `from_checked` | （追加）`int.from_checked[S: Numeric](x: S) -> Int?` | Rust `TryFrom` / Swift `init(exactly:)` | 追加 | R-L0-40 |
 | `from_saturating` | （追加）`int.from_saturating[S: Numeric](x: S) -> Int` | Swift `init(clamping:)` / Rust `as`（浮動小数点から） | 追加 | R-L0-40 |
 | `from_wrapping` | （追加）`int.from_wrapping[S: Integer](x: S) -> Int` | Swift `init(truncatingIfNeeded:)` / Rust `as` | 追加 | R-L0-40 |
+| `bshr_logical` | （追加）`int.bshr_logical(a: Int, n: Int) -> Int` | OCaml `shift_right_logical` (F) / Kotlin `ushr` (F) / JS `>>>` | 追加 | R-int-06 |

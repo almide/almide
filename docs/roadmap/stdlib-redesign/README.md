@@ -25,6 +25,8 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 
 十一巡目（2026-10-22）: `Bool` の順序を 9 言語で並べ直し、順序をつける 7 言語（Rust・Python・JS・Gleam・Elixir・OCaml・Kotlin）に合わせて `Bool` を `Ord` に入れ、`bool.compare` を足しました（R-bool-02 を保留から採用へ）。つけないのは Go と Swift だけでした。これで保留は R-map-04 などの計測待ちだけです。
 
+十二巡目（2026-10-22）: 「撤去した記号を別の意味で使い直さない」を規則にしました（R-L0-43）。これで九巡目のビット演算子の案（R-L0-41）を取り消し、`^` は累乗の別名をやめてエラーにするだけ、`>>` は関数の合成のまま、ビット演算は関数（`band` など）のまま `Integer` の要件にしました（R-int-10）。
+
 ## 読む順番
 
 1. [L0: 全モジュールに共通する規則](L0-conventions.md) — 名前・置き場所・その場書き換え・失敗の表し方・変換の向き・互換の扱い。下の層の判定はすべてここから導きます。
@@ -42,7 +44,7 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 
 [args](L2-args.md) ・ [base64](L2-base64.md) ・ [bigint](L2-bigint.md) ・ [bool](L2-bool.md) ・ [bytes](L2-bytes.md) ・ [compute](L2-compute.md) ・ [datetime](L2-datetime.md) ・ [deque](L2-deque.md) ・ [duration](L2-duration.md) ・ [env](L2-env.md) ・ [error](L2-error.md) ・ [ffi](L2-ffi.md) ・ [float](L2-float.md) ・ [fs](L2-fs.md) ・ [hash](L2-hash.md) ・ [heap](L2-heap.md) ・ [hex](L2-hex.md) ・ [html](L2-html.md) ・ [http](L2-http.md) ・ [int](L2-int.md) ・ [io](L2-io.md) ・ [json](L2-json.md) ・ [list](L2-list.md) ・ [map](L2-map.md) ・ [math](L2-math.md) ・ [matrix](L2-matrix.md) ・ [net](L2-net.md) ・ [option](L2-option.md) ・ [path](L2-path.md) ・ [process](L2-process.md) ・ [random](L2-random.md) ・ [regex](L2-regex.md) ・ [result](L2-result.md) ・ [set](L2-set.md) ・ [sized-numbers](L2-sized-numbers.md) ・ [string](L2-string.md) ・ [testing](L2-testing.md) ・ [unix](L2-unix.md) ・ [url](L2-url.md) ・ [uuid](L2-uuid.md) ・ [value](L2-value.md) ・ [zlib](L2-zlib.md)
 
-## 案の状態（全 341 件: ○ 277・× 60・保留 4）
+## 案の状態（全 342 件: ○ 277・× 61・保留 4）
 
 | 案 | 内容 | 判定 | issue |
 |---|---|---|---|
@@ -87,8 +89,9 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 | [R-L0-38](L0-conventions.md#r-l0-38-組み込みの-repr-のメソッド名を-to_string-にする---採用) | 組み込みの `Repr` のメソッド名を `to_string` にする | ○ | #4000 |
 | [R-L0-39](L0-conventions.md#r-l0-39--を累乗の演算子から外し累乗は--だけにする---採用) | `^` を累乗の演算子から外し、累乗は `**` だけにする | ○ | #4002 |
 | [R-L0-40](L0-conventions.md#r-l0-40-数の変換は変換先の型に-from-で置く---採用) | 数の変換は変換先の型に `from` で置く | ○ | #4003 |
-| [R-L0-41](L0-conventions.md#r-l0-41-ビット演算を演算子にし-を関数の合成から外す---採用) | ビット演算を演算子にし、`>>` を関数の合成から外す | ○ | #4004 |
+| [R-L0-41](L0-conventions.md#r-l0-41-ビット演算を演算子にし-を関数の合成から外す---取り消し十二巡目記号の意味を入れ替えないため--r-l0-43) | ビット演算を演算子にし、`>>` を関数の合成から外す | ×（→ R-L0-43） | #4004 |
 | [R-L0-42](L0-conventions.md#r-l0-42-列のアルゴリズムは-protocol-の既定の実装として-1-回だけ書く---採用) | 列のアルゴリズムは protocol の既定の実装として 1 回だけ書く | ○ | #4012 |
+| [R-L0-43](L0-conventions.md#r-l0-43-撤去した記号を別の意味で使い直さない---採用) | 撤去した記号を別の意味で使い直さない | ○ | #4004 |
 | [R-L0-G](L0-conventions.md#ゲートの束r-l0-g---採用) | ゲートの束（R-L0-G） | ○ | #3949 |
 | [R-L1-01](L1-categories.md#r-l1-01-両端キュー-deque---採用) | 両端キュー `deque` | ○ | #3932 |
 | [R-L1-02](L1-categories.md#r-l1-02-優先度キュー-heap---採用) | 優先度キュー `heap` | ○ | #3933 |
@@ -226,12 +229,12 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 | [R-int-02](L2-int.md#r-int-02-折り返しの族を-4-セルにそろえto_u32to_u8-を撤去する---採用) | 折り返しの族を 4 セルにそろえ、`to_u32`/`to_u8` を撤去する | ○ | #3854 |
 | [R-int-03](L2-int.md#r-int-03-床方向の割り算と剰余-intfloor_div--intmod-を足す---採用) | 床方向の割り算と剰余 `int.floor_div` / `int.mod` を足す | ○ | #3918 |
 | [R-int-04](L2-int.md#r-int-04-基数の変換を-to_string_radix--parse_radix-の対にしfrom_hex-を撤去する---採用) | 基数の変換を `to_string_radix` / `parse_radix` の対にし、`from_hex` を撤去する | ○ | #3920 |
-| [R-int-05](L2-int.md#r-int-05-bandborbxor-などを多数派の綴りに改名する---不採用-r-int-10-で演算子に) | `band`/`bor`/`bxor` などを多数派の綴りに改名する | ×（→ R-int-10） | — |
-| [R-int-06](L2-int.md#r-int-06-論理右シフト-intbshr_logical-を足す---採用-r-l0-41-で撤去符号なしの型に移して-) | 論理右シフト `int.bshr_logical` を足す | ○（→ R-L0-41） | #3919 |
+| [R-int-05](L2-int.md#r-int-05-bandborbxor-などを多数派の綴りに改名する---不採用改名しないr-int-10-で確かめた) | `band`/`bor`/`bxor` などを多数派の綴りに改名する | × | — |
+| [R-int-06](L2-int.md#r-int-06-論理右シフト-intbshr_logical-を足す---採用) | 論理右シフト `int.bshr_logical` を足す | ○ | #3919 |
 | [R-int-07](L2-int.md#r-int-07-pop_count-を-count_ones-に改名する---採用) | `pop_count` を `count_ones` に改名する | ○ | #3985 |
 | [R-int-08](L2-int.md#r-int-08-intto_hex-を-to_string_radixx-16-にまとめる---不採用) | `int.to_hex` を `to_string_radix(x, 16)` にまとめる | × | なし |
 | [R-int-09](L2-int.md#r-int-09-intsign-と-floatsignum-の綴りを-1-つにする---不採用) | `int.sign` と `float.signum` の綴りを 1 つにする | × | なし |
-| [R-int-10](L2-int.md#r-int-10-ビット演算の綴りを計測で決める---採用演算子にするr-l0-41) | ビット演算の綴りを計測で決める | ○ | #4004 |
+| [R-int-10](L2-int.md#r-int-10-ビット演算の綴りを計測で決める---採用関数のまま十二巡目に演算子の案を取り消し) | ビット演算の綴りを計測で決める | ○ | #4004 |
 | [R-int-11](L2-int.md#r-int-11-bit_width-を-bit_length-に改名する---採用) | `bit_width` を `bit_length` に改名する | ○ | #4004 |
 | [R-int-12](L2-int.md#r-int-12-n-bit-の演算を型の幅の演算に置き換える---採用) | N bit の演算を、型の幅の演算に置き換える | ○ | #4004 |
 | [R-io-01](L2-io.md#r-io-01-読み取りをeof-を区別する-1-行bytesにそろえる---採用) | 読み取りを「EOF を区別する 1 行」「Bytes」にそろえる | ○ | #3896 |

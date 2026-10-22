@@ -6,7 +6,7 @@
 
 R-L0-37 のとおり、標準の具体型を「準拠する protocol の組み合わせ」と「その型だけの関数」で書き表します。protocol の階層は Swift の標準ライブラリを手本にし、Swift にない層は理由を書いて足しています。準拠と穴は、[target-surface.md](target-surface.md)（リデザイン後の関数）から機械的に出しています。
 
-- 値の型 31 種の関数 1,022 個のうち、731 個（71%）が protocol の要件です。残りの 291 個が、その型だけの関数です。
+- 値の型 31 種の関数 1,083 個のうち、791 個（73%）が protocol の要件です。残りの 292 個が、その型だけの関数です。
 - 準拠を決めると、要件のうちまだ無い関数が 0 個あります（穴）。既定の実装で埋まるものは数えていません。
 - 手本にした Swift の protocol は、表の「Swift」の列に書いています。
 
@@ -75,7 +75,7 @@ HttpMessage
 | 数 | `Additive` | `Eq` | — | — | AdditiveArithmetic | BigInt・Float・Float32・Float64・Duration・Compute・Int・Int8・Int16・Int32・Int64・UInt8・UInt16・UInt32・UInt64 |
 | 数 | `Numeric` | `Additive` | `from`・`from_checked` | — | Numeric | BigInt・Float・Float32・Float64・Int・Int8・Int16・Int32・Int64・UInt8・UInt16・UInt32・UInt64 |
 | 数 | `Signed` | `Numeric` | `abs` | — | SignedNumeric | BigInt・Float・Float32・Float64・Int・Int8・Int16・Int32・Int64 |
-| 数 | `Integer` | `Numeric`・`Ord`・`Hash`・`Parse` | `min`・`max`・`clamp`・`floor_div`・`mod`・`pow`・`is_even`・`is_odd`・`parse_radix`・`to_string_radix`・`bit_length` | `is_even`・`is_odd` | BinaryInteger | BigInt・Int・Int8・Int16・Int32・Int64・UInt8・UInt16・UInt32・UInt64 |
+| 数 | `Integer` | `Numeric`・`Ord`・`Hash`・`Parse` | `min`・`max`・`clamp`・`floor_div`・`mod`・`pow`・`is_even`・`is_odd`・`parse_radix`・`to_string_radix`・`bit_length`・`band`・`bor`・`bxor`・`bnot`・`bshl`・`bshr` | `is_even`・`is_odd` | BinaryInteger | BigInt・Int・Int8・Int16・Int32・Int64・UInt8・UInt16・UInt32・UInt64 |
 | 数 | `FixedWidthInteger` | `Integer` | `min_value`・`max_value`・`count_leading_zeros`・`count_trailing_zeros`・`count_ones`・`byte_swap`・`wrap_add`・`wrap_sub`・`wrap_mul`・`rotate_left`・`rotate_right`・`from_saturating`・`from_wrapping` | — | FixedWidthInteger | Int・Int8・Int16・Int32・Int64・UInt8・UInt16・UInt32・UInt64 |
 | 数 | `SignedInteger` | `Integer`・`Signed` | `sign` | — | SignedInteger | BigInt・Int・Int8・Int16・Int32・Int64 |
 | 数 | `UnsignedInteger` | `Integer` | — | — | UnsignedInteger | UInt8・UInt16・UInt32・UInt64 |
@@ -106,7 +106,7 @@ HttpMessage
 - `Additive`: `+`・`-` と 0。
 - `Numeric`: `*`。`from`・`from_checked` はどの数の型からでも受け取る変換（R-L0-40。Swift の `init(_:)`・`init(exactly:)`）。
 - `Signed`: 単項の `-`。
-- `Integer`: `/`・`%` と、ビット演算の演算子 `&`・`|`・`^`・`~`・`<<`・`>>`（R-L0-41）。`bigint` もここに入る（Swift の `BinaryInteger` は任意精度の整数も入れる設計）。数の型どうしの変換（`to_<T>`・`_checked`・`_saturating`・`_wrapping`）もここ（Swift の `init(_:)`・`init(exactly:)`・`init(clamping:)`・`init(truncatingIfNeeded:)`）。
+- `Integer`: `/`・`%`。ビット演算は関数（`band` など。R-int-10）で、撤去した記号を使い直さない（R-L0-43）。`bigint` もここに入る（Swift の `BinaryInteger` は任意精度の整数も入れる設計）。数の型どうしの変換（`to_<T>`・`_checked`・`_saturating`・`_wrapping`）もここ（Swift の `init(_:)`・`init(exactly:)`・`init(clamping:)`・`init(truncatingIfNeeded:)`）。
 - `FixedWidthInteger`: 幅の決まった整数。`wrap_*`・`rotate_*` は型の幅で動く（Swift の `&+`・`&-`・`&*`）。`from_saturating`・`from_wrapping` は Swift の `init(clamping:)`・`init(truncatingIfNeeded:)`。`count_trailing_zeros` は 0 のとき型の幅を返すので、幅のない `bigint` には置かない。
 - `FloatingPoint`: `/`。順序は IEEE totalOrder（R-L0-16）。
 - `TimeAmount`: `Duration`・`Compute`（R-duration-03）。
@@ -136,7 +136,7 @@ HttpMessage
 | `Set[A]` | SetAlgebra・Sequence・Hash・Codec | 42 | 1 | なし |
 | `Heap[A]` | PriorityQueue・Membership | 16 | 2 | なし |
 | `Map[K, V]` | KeyValue・Sequence・Codec | 37 | 1 | なし |
-| `BigInt` | SignedInteger・Codec | 18 | 0 | なし |
+| `BigInt` | SignedInteger・Codec | 24 | 0 | なし |
 | `Float` | BinaryFloatingPoint・Codec | 26 | 2 | なし |
 | `Float32` | BinaryFloatingPoint・Codec | 24 | 0 | なし |
 | `Float64` | BinaryFloatingPoint・Codec | 24 | 0 | なし |
@@ -150,15 +150,15 @@ HttpMessage
 | `Matrix` | Repr・Eq | 25 | 25 | なし |
 | `Regex` | Repr | 15 | 15 | なし |
 | `HttpRequest・HttpResponse` | HttpMessage | 34 | 26 | なし |
-| `Int` | FixedWidthInteger・SignedInteger・Codec | 38 | 7 | なし |
-| `Int8` | FixedWidthInteger・SignedInteger・Codec | 31 | 0 | なし |
-| `Int16` | FixedWidthInteger・SignedInteger・Codec | 31 | 0 | なし |
-| `Int32` | FixedWidthInteger・SignedInteger・Codec | 31 | 0 | なし |
-| `Int64` | FixedWidthInteger・SignedInteger・Codec | 31 | 0 | なし |
-| `UInt8` | FixedWidthInteger・UnsignedInteger・Codec | 29 | 0 | なし |
-| `UInt16` | FixedWidthInteger・UnsignedInteger・Codec | 29 | 0 | なし |
-| `UInt32` | FixedWidthInteger・UnsignedInteger・Codec | 29 | 0 | なし |
-| `UInt64` | FixedWidthInteger・UnsignedInteger・Codec | 29 | 0 | なし |
+| `Int` | FixedWidthInteger・SignedInteger・Codec | 45 | 8 | なし |
+| `Int8` | FixedWidthInteger・SignedInteger・Codec | 37 | 0 | なし |
+| `Int16` | FixedWidthInteger・SignedInteger・Codec | 37 | 0 | なし |
+| `Int32` | FixedWidthInteger・SignedInteger・Codec | 37 | 0 | なし |
+| `Int64` | FixedWidthInteger・SignedInteger・Codec | 37 | 0 | なし |
+| `UInt8` | FixedWidthInteger・UnsignedInteger・Codec | 35 | 0 | なし |
+| `UInt16` | FixedWidthInteger・UnsignedInteger・Codec | 35 | 0 | なし |
+| `UInt32` | FixedWidthInteger・UnsignedInteger・Codec | 35 | 0 | なし |
+| `UInt64` | FixedWidthInteger・UnsignedInteger・Codec | 35 | 0 | なし |
 
 ## この階層で決めたこと
 
@@ -191,7 +191,7 @@ HttpMessage
 | 関連型 | `Container` の要素の型（`List[A]` は `A`、`Bytes` は `Int`） | 入れ物の層すべて |
 | 既定の実装 | `compare` から `min`・`max`・`clamp`、`len` から `is_empty`、`fold` から `any`・`all`・`count` | 穴の多くが実装なしで埋まる |
 | 受け手のない要件の呼び出し | 総称関数の中の `T.parse(s)`・`T.new()`・`T.max_value()`・`T.nan()` | `Parse`・`Container`・`FixedWidthInteger`・`FloatingPoint` |
-| 演算子の要件 | `Integer` の `&`・`|`・`^`・`~`・`<<`・`>>`、`Additive` の `+`・`-` | 数の層（Swift の `static func &`） |
+| 演算子の要件 | `Additive` の `+`・`-`、`Numeric` の `*` | 数の層（Swift の `static func +`） |
 | 組の場所に書ける無名関数 | `((K, V)) -> Bool` の場所に `(k, v) => …` を書ける | `map` の `Sequence`（R-map-09） |
 | 条件つきの準拠 | `List[A]` は `A: Hash` のときだけ `Hash`、`contains` は要素が `Eq` のときだけ | `Hash`・`Membership` |
 
@@ -213,4 +213,4 @@ HttpMessage
 - `Matrix`（25）: `broadcast_add_row`、`cols`、`concat_cols`、`concat_rows`、`dot_row`、`from_bytes_f16_le`、`from_bytes_f32_le`、`from_bytes_f64_le`、`from_lists`、`gather_rows`、`get`、`map`、`ones`、`rows`、`scale`、`shape`、`slice_rows`、`split_cols_even`、`to_bytes_f16_le`、`to_bytes_f32_le`、`to_bytes_f64_le`、`to_lists`、`transpose`、`zeros`、`zip_with`
 - `Regex`（15）: `captures`、`captures_all`、`compile`、`escape`、`find`、`find_all`、`index_of`、`is_full_match`、`is_match`、`new`、`replace`、`replace_first`、`replace_first_with`、`replace_with`、`split`
 - `HttpRequest・HttpResponse`（26）: `cancel`、`decode_json`、`get`、`get_response`、`json`、`method`、`mount`、`new_request`、`param`、`path`、`poll`、`query_params`、`read_new`、`redirect`、`request`、`response`、`route`、`router`、`send`、`serve`、`set_status`、`start`、`status`、`wait`、`with_headers`、`wrap`
-- `Int`（7）: `bit_reverse`、`log2_ceil`、`log2_floor`、`next_power_of_two`、`prev_power_of_two`、`to_hex`、`wrap`
+- `Int`（8）: `bit_reverse`、`bshr_logical`、`log2_ceil`、`log2_floor`、`next_power_of_two`、`prev_power_of_two`、`to_hex`、`wrap`
