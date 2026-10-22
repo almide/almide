@@ -727,7 +727,7 @@ names = 2
 [[site]]
 id = "crates/almide-types/src/fallible_hofs.rs::FALLIBLE_HOFS::table"
 class = "legacy"
-names = 28
+names = 35
 
 [[site]]
 id = "crates/almide-types/src/fallible_hofs.rs::TOTAL_ONLY_HOFS::table"
