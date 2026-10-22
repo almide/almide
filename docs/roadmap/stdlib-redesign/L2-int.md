@@ -129,6 +129,15 @@
 - ゲート案: `spec/stdlib/int_bits_test.almd` に負の数の論理シフトを足し、wasm_cross fixture で両 target を一致させます。
 - issue: #3919
 
+### R-int-07 `pop_count` を `count_ones` に改名する — ○ 採用
+
+- いま: ビットを数える族は `count_leading_zeros`・`count_trailing_zeros` で、1 のビットを数える関数だけ `pop_count` です。
+- 案: `int.count_ones` に改名します。族が `count_` で揃います。
+- 根拠の L0 規則: R-L0-00（族の中で綴りが割れている）。
+- (a) Rust `count_ones`、Kotlin `countOneBits`、Python `bit_count`、Go `OnesCount64`。`pop_count` の綴りは OCaml・Elixir の `popcount` に近いだけです。
+- (d) 改名。`@deprecated(since=15, use="int.count_ones")`、`removal_epoch = 16`、`almide fix` で書き換えます。
+- issue: #3985
+
 ## L3: 関数表
 
 `int` の現行 72 関数と、追加する 13 関数です（`compare` と、[L2-bigint](L2-bigint.md) の `to_bigint` を含む）。
@@ -155,7 +164,7 @@
 | `bshr` | `int.bshr(a: Int, n: Int) -> Int` | Gleam `bitwise_shift_right` (F) / Elixir `Bitwise.bsr` / OCaml `shift_right` (F) / Kotlin `shr` (F) / 他 演算子 `>>` | 据え置き | R-int-05 × |
 | `count_leading_zeros` | `int.count_leading_zeros(n: Int) -> Int` | Rust `leading_zeros` / Go `bits.LeadingZeros64` / OCaml `leading_zeros` (F) / Kotlin `countLeadingZeroBits` (F) / Swift `leadingZeroBitCount` | 据え置き | — |
 | `count_trailing_zeros` | `int.count_trailing_zeros(n: Int) -> Int` | Rust `trailing_zeros` / Go `bits.TrailingZeros64` / OCaml `trailing_zeros` (F) / Kotlin `countTrailingZeroBits` (F) / Swift `trailingZeroBitCount` | 据え置き | — |
-| `pop_count` | `int.pop_count(n: Int) -> Int` | Rust `count_ones` / Go `bits.OnesCount64` / Python `bit_count` / OCaml `popcount` (F) / Elixir `popcount` (F) / Kotlin `countOneBits` (F) / Swift `nonzeroBitCount` | 据え置き | — |
+| `pop_count` | `int.pop_count(n: Int) -> Int` | Rust `count_ones` / Go `bits.OnesCount64` / Python `bit_count` / OCaml `popcount` (F) / Elixir `popcount` (F) / Kotlin `countOneBits` (F) / Swift `nonzeroBitCount` | 改名 → `count_ones` | R-int-07 |
 | `bit_reverse` | `int.bit_reverse(n: Int) -> Int` | Rust `reverse_bits` / Go `bits.Reverse64` / 他 — | 据え置き | — |
 | `byte_swap` | `int.byte_swap(n: Int) -> Int` | Rust `swap_bytes` / Go `bits.ReverseBytes64` / Swift `byteSwapped` | 据え置き | — |
 | `bit_width` | `int.bit_width(n: Int) -> Int` | Go `bits.Len64` / Python `bit_length` / OCaml `unsigned_bitsize` (F) / Swift `bitWidth`（意味違い） | 据え置き | — |

@@ -33,13 +33,13 @@
 - 抜けている役割: UDP、DNS、IP アドレスの型（7/9）→ R-net-02、R-net-03
 - 宣言の穴: `tcp_is_open` が純粋な `fn` でハンドルの表を読みます（実測で純粋な fn から呼べる。probe-io）→ R-net-04
 - 型: `TcpStream`・`TcpListener` が `Int` の別名で、ストリームと待ち受けを取り違えても型で止まりません → R-net-05（× と理由）
-- R-L0-09: `net.unix_poll` は L0 が名指しした例外 → R-net-01（移動の際に `unix.wait` に一本化して消す）
+- R-L0-09: `net.unix_poll` は L0 が名指しした例外 → R-net-01（移動の際に `unix.select` に一本化して消す）
 
 ## 案
 
 ### R-net-01 `unix_*`・`shm_*` を `unix` モジュールへ移す — ○ 採用
 
-- 内容: 13 関数を `unix.*` に移し、`net.unix_*`・`net.shm_*` を撤去します。新しい綴りと型（`unix.Fd`）は [L2-unix](L2-unix.md) の R-unix-01 で決めます。`net.unix_poll` は移さず、`unix.wait([fd], t)` に一本化します。
+- 内容: 13 関数を `unix.*` に移し、`net.unix_*`・`net.shm_*` を撤去します。新しい綴りと型（`unix.Fd`）は [L2-unix](L2-unix.md) の R-unix-01 で決めます。`net.unix_poll` は移さず、`unix.select([fd], t)` に一本化します。
 - 根拠の L0 規則: R-L0-02（Unix のプロセス間通信は `net` の主語ではない）、R-L0-09（`unix_poll`）、R-L0-15、R-L1-26。
 - (b) いまの実体のまま移します。wasm では、裁定済みの暫定の組み込み host op 104〜116 で運びます（ADR-0023 step 7 で退役）。WASI には Unix ソケットも共有メモリもないので、退役の時に WASI のインタフェースがまだ無ければ、`unix` は標準から外して package にします（R-L0-15 の 3 つめの道）。native だけを終点にはしません。詳しくは [L2-unix](L2-unix.md) の R-unix-01。
 - (c) CHEATSHEET と llms.txt にこの 13 関数は出ていません。`net.tcp_*` の隣に並ばなくなれば、ふつうのネットワークのコードで迷いません。
@@ -139,11 +139,11 @@
 | `net.unix_connect` | `effect fn unix_connect(path: String) -> Int` | Rust `UnixStream::connect` | 撤去（→ `unix.connect`） | R-net-01 |
 | `net.unix_listen` | `effect fn unix_listen(path: String) -> Int` | Rust `UnixListener::bind` | 撤去（→ `unix.listen`） | R-net-01 |
 | `net.unix_accept` | `effect fn unix_accept(listener: Int) -> Int` | Rust `accept` | 撤去（→ `unix.accept`） | R-net-01 |
-| `net.unix_send` | `effect fn unix_send(sock: Int, data: Bytes, fds: List[Int]) -> Unit` | Python `send_fds` | 撤去（→ `unix.send`） | R-net-01 |
-| `net.unix_recv` | `effect fn unix_recv(sock: Int, max: Int) -> Bytes` | Python `recv_fds` | 撤去（→ `unix.recv`） | R-net-01 |
+| `net.unix_send` | `effect fn unix_send(sock: Int, data: Bytes, fds: List[Int]) -> Unit` | Python `send_fds` | 撤去（→ `unix.write`） | R-net-01 |
+| `net.unix_recv` | `effect fn unix_recv(sock: Int, max: Int) -> Bytes` | Python `recv_fds` | 撤去（→ `unix.read`） | R-net-01 |
 | `net.unix_take_fds` | `effect fn unix_take_fds(sock: Int) -> List[Int]` | — | 撤去（→ `unix.take_fds`） | R-net-01 |
-| `net.unix_poll` | `effect fn unix_poll(fd: Int, timeout_ms: Int) -> Bool` | Python `select.poll` | 撤去（→ `unix.wait([fd], t)`） | R-net-01 |
-| `net.unix_wait` | `effect fn unix_wait(fds: List[Int], timeout_ms: Int) -> List[Int]` | Python `select.select` / Go —  | 撤去（→ `unix.wait`） | R-net-01 |
+| `net.unix_poll` | `effect fn unix_poll(fd: Int, timeout_ms: Int) -> Bool` | Python `select.poll` | 撤去（→ `unix.select([fd], t)`） | R-net-01 |
+| `net.unix_wait` | `effect fn unix_wait(fds: List[Int], timeout_ms: Int) -> List[Int]` | Python `select.select` / Go —  | 撤去（→ `unix.select`） | R-net-01 |
 | `net.unix_close` | `effect fn unix_close(fd: Int) -> Unit` | Python `os.close` | 撤去（→ `unix.close`） | R-net-01 |
 | `net.shm_create` | `effect fn shm_create(size: Int) -> Int` | Python `SharedMemory(create=True)` | 撤去（→ `unix.shm_create`） | R-net-01 |
 | `net.shm_resize` | `effect fn shm_resize(fd: Int, size: Int) -> Unit` | POSIX `ftruncate` | 撤去（→ `unix.shm_resize`） | R-net-01 |

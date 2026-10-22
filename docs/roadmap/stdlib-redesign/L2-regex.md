@@ -123,6 +123,25 @@
 - ゲート案: `replace_first_with(re, s, (g) => rep) == replace_first(re, s, rep)` の性質テスト。
 - issue: #3971
 
+### R-regex-08 捕捉グループを `String?` で返す — ○ 採用
+
+- いま: `captures` は `Option[List[String]]` で、一致に参加しなかったグループを `""` にします（L3 の表の注）。`(a)?(b)` を `"b"` に当てたときの 1 つめと、`(a*)(b)` の空の一致が区別できません。
+- 案: グループの要素を `String?` にします。
+  - `fn captures(re: Regex, s: String) -> List[String?]?`
+  - `fn captures_all(re: Regex, s: String) -> List[List[String?]]`
+  - `replace_with`・`replace_first_with` のコールバックも `(List[String?]) -> String`
+  - 要素 0（一致全体）は必ず some です。
+- 根拠の L0 規則: R-L0-06（失敗の目印の値 `""` を返さない）、R-L0-24。
+- (a) Rust `Captures::get` → `Option<Match>`、Python `groups()` → `None`、JS `exec` → `undefined`、Kotlin `groups[i]` → `null`、Swift `Regex` の出力 → `Substring?`。Go だけが `""` を返します（位置の関数では -1 で区別できる）。
+- (b) native と wasm の両方の正規表現の実装で、参加しなかったグループの印をそのまま運びます。
+- (d) 意味変更（要素の型が変わるので、文字列として使うと型エラーで気づく）。`captures` は R-regex-0x の第 1 引数の変更と同じ epoch で入れます。
+- issue: #3977
+
+### R-regex-09 対象の文字列を第 1 引数にする — × 不採用
+
+- 理由: `regex` のモジュールの主語は `Regex` で、R-L0-02・R-L0-03（関数は主語の型のモジュールに置き、主語を先頭にする）のとおりです。Rust `re.replace_all(s, …)`、Go `re.ReplaceAllString(s, …)`、Elixir `Regex.replace(re, s, …)` も正規表現が先です。文字列の側から書きたいときは `string.replace` を使います。
+- issue: なし
+
 ## L3: 関数表
 
 | 関数 | シグネチャ(現行, mut 表示) | 他言語の主な綴り | 判定 | 案 |
@@ -134,15 +153,15 @@
 | `regex.replace` | `replace(pat: String, s: String, rep: String) -> String` | Rust replace_all / Go ReplaceAllLiteralString / JS replaceAll / Kotlin replace | 意味変更（第 1 引数を `Regex` に） | R-regex-02、R-regex-05（`$1` は解釈しない） |
 | `regex.replace_first` | `replace_first(pat: String, s: String, rep: String) -> String` | Rust replace / Kotlin replaceFirst / OCaml replace_first | 意味変更（第 1 引数を `Regex` に） | R-regex-02 |
 | `regex.split` | `split(pat: String, s: String) -> List[String]` | 全言語 split | 意味変更（第 1 引数を `Regex` に） | R-regex-02 |
-| `regex.captures` | `captures(pat: String, s: String) -> Option[List[String]]` | Rust captures / Go FindStringSubmatch / JS exec / Elixir run | 意味変更（第 1 引数を `Regex` に） | 注: 一致しなかった省略可能なグループは `""`（probe: `captures("(a)(b)?", "xa")` → `["a", "a", ""]`）。Go・Elixir と同じ扱いで、変えると意味の付け替えになるので据え置き |
+| `regex.captures` | `captures(re: Regex, s: String) -> Option[List[Option[String]]]` | Rust captures / Go FindStringSubmatch / JS exec / Elixir run | 意味変更（第 1 引数を `Regex` に。グループは `String?`） | R-regex-08 |
 | `regex.is_full_match` | `is_full_match(re: Regex, s: String) -> Bool` | （上の full_match と同じ） | 追加 | R-regex-01 |
 | `regex.new` | `new(pat: String) -> Regex` | Go MustCompile / Rust Regex::new / Kotlin Regex() / JS RegExp / Swift Regex | 追加 | R-regex-02 |
 | `regex.parse` | `parse(pat: String) -> Result[Regex, String]` | Go Compile / Rust Regex::new / Gleam from_string / Elixir compile | 追加 | R-regex-02 |
-| `regex.replace_with` | `replace_with(re: Regex, s: String, f: (List[String]) -> String) -> String` | Rust replace_all(closure) / Go ReplaceAllStringFunc / Python sub(fn) / JS replace(fn) | 追加 | R-regex-05 |
+| `regex.replace_with` | `replace_with(re: Regex, s: String, f: (List[Option[String]]) -> String) -> String` | Rust replace_all(closure) / Go ReplaceAllStringFunc / Python sub(fn) / JS replace(fn) | 追加 | R-regex-05、R-regex-08 |
 | `regex.escape` | `escape(s: String) -> String` | Rust escape / Go QuoteMeta / Python escape / Elixir escape / OCaml quote | 追加 | R-regex-04 |
 | `regex.index_of` | `index_of(re: Regex, s: String) -> Option[Int]` | Go FindStringIndex / JS search / Rust find().start() | 追加 | R-regex-04 |
-| `regex.captures_all` | `captures_all(re: Regex, s: String) -> List[List[String]]` | Rust captures_iter / Go FindAllStringSubmatch / Elixir scan | 追加 | R-regex-04 |
-| `regex.replace_first_with` | `replace_first_with(re: Regex, s: String, f: (List[String]) -> String) -> String`（案） | Python `sub(fn, s, count=1)` / JS `replace(re, fn)` / OCaml `substitute_first` | 追加 | R-regex-07 |
+| `regex.captures_all` | `captures_all(re: Regex, s: String) -> List[List[Option[String]]]` | Rust captures_iter / Go FindAllStringSubmatch / Elixir scan | 追加 | R-regex-04、R-regex-08 |
+| `regex.replace_first_with` | `replace_first_with(re: Regex, s: String, f: (List[Option[String]]) -> String) -> String`（案） | Python `sub(fn, s, count=1)` / JS `replace(re, fn)` / OCaml `substitute_first` | 追加 | R-regex-07、R-regex-08 |
 
 （現行 8 関数 + 追加 7 行。追加した関数の第 1 引数はすべて `Regex` です）
 

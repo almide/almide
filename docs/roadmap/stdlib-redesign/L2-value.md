@@ -33,7 +33,7 @@
    `object` の `T` は、構築子 `object` が受け取る `List[(String, Value)]` と同じ形です（順序と重複を保つ）。`null` は中身を持たないので `as_`・`get_` を持たず、`v == value.null()` で確かめます。
 3. **道筋（`Path`）**: `root()`、`key(p, name)`、`index(p, i)` で作り、`get_path`（Option）、`set_path`（Result）、`remove_path`（無ければそのまま）で使います。負の添字は範囲外です（R-L0-12）。
 4. **失敗を番兵で隠さない**（R-L0-06 の 4）: オブジェクトでない値に対する読みは Option か Result にします。`pick`・`omit`・`merge` は読みではなく変換なので、オブジェクトでなければそのまま返す今の形を保ちます。
-5. **意図した抜け**: 構築子の `str` は `as_string`・`get_string` と綴りが違いますが、改名しません（R-L0-00: Almide の中で同じ役割の衝突ではなく、多数派もない）。
+5. **意図した抜け**: 構築子の `str` は `as_string`・`get_string` と綴りが違いますが、改名しません（→ R-value-08 で見直し、`string` に改名します）（R-L0-00: Almide の中で同じ役割の衝突ではなく、多数派もない）。
 
 ### L2 の判定
 
@@ -116,6 +116,15 @@
 - ゲート案: R-value-02 の族ゲートに `get` のセルを足します。
 - issue: #3971
 
+### R-value-08 `value.str` を `value.string` に改名する（完全性の規則 5 の見直し） — ○ 採用
+
+- いま: 構築子は `value.int`・`float`・`bool`・`array`・`object` と型の名前なのに、文字列だけ `str` です。取り出す側は `as_string`・`get_string` です。2 つの外部レビューが、どちらも `value.string` と書き誤ると指摘しました。
+- 案: `value.str` → `value.string` に改名します。
+- 根拠の L0 規則: R-L0-00（Almide の中で同じ役割の綴りが割れている。規則 5 は「衝突ではない」としましたが、構築子の族の中で 1 つだけ綴りが違う、という割れ方でした）。
+- (a) gleam_json `json.string`、serde `Value::String`。
+- (d) 改名。`@deprecated(since=15, use="value.string")`、`removal_epoch = 16`、`almide fix` で書き換えます。
+- issue: #3985
+
 ## L3: 関数表
 
 | 関数 | シグネチャ(現行, mut 表示) | 他言語の主な綴り | 判定 | 案 |
@@ -134,7 +143,7 @@
 | `object` | `value.object(pairs: List[(String, Value)]) -> Value` | gleam_json `json.object` / Kotlin pkg `buildJsonObject` | 据え置き | R-value-02 |
 | `omit` | `value.omit(v: Value, keys: List[String]) -> Value` | Elixir `Map.drop` / lodash `omit` | 据え置き | — |
 | `pick` | `value.pick(v: Value, keys: List[String]) -> Value` | Elixir `Map.take` / lodash `pick` | 据え置き | — |
-| `str` | `value.str(s: String) -> Value` | gleam_json `json.string` / serde `Value::String` | 据え置き | R-value-06 |
+| `str` | `value.str(s: String) -> Value` | gleam_json `json.string` / serde `Value::String` | 改名 → `string` | R-value-08 |
 | `stringify` | `value.stringify(v: Value) -> String` | JS `JSON.stringify` / Python `dumps` (F) | 撤去 → `json.stringify` | R-value-01 |
 | `to_camel_case` | `value.to_camel_case(v: Value) -> Value` | Kotlin pkg `JsonNamingStrategy` / Swift `keyEncodingStrategy`（型の設定） | 撤去 | R-value-05 |
 | `to_snake_case` | `value.to_snake_case(v: Value) -> Value` | 同上 | 撤去 | R-value-05 |

@@ -183,6 +183,15 @@
 - (d) 撤去 5。`@deprecated(since=15, use="+")` など、epoch 16 で撤去。`almide fix` で `matrix.add(a, b)` を `a + b` に書き換えます。
 - issue: #3973
 
+### R-matrix-15 `from_bytes_*_le` はデータが足りないと none を返す（R-matrix-05 の見直し） — ○ 採用
+
+- いま: R-matrix-05 は、データが足りないとき（いまは全部 0 の番兵）を abort にすると決めました。ところが同じバイト列を読む `bytes.get_f32_le_array` などは、足りなければ none を返します。外から来たファイルを読む処理を Matrix 版に替えると、回復できた失敗がプログラムの終了に変わります。
+- 案: 2 つを分けます。`rows`・`cols`・`offset` が負なのは呼び出し側の誤りなので abort のまま。`offset` から `rows × cols` 個を読むのにバイトが足りないのは入力の問題なので、`-> Matrix?` で none を返します。
+  - `fn matrix.from_bytes_f16_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix?`（f32・f64 も同じ）
+- 根拠の L0 規則: R-L0-06（失敗しうる取り出しは無印で Option）。bytes の `get_<型>_array` と同じ失敗の形です。
+- (d) 意味変更。戻り型が変わるので、古い呼び出しは型エラーになり、黙って結果は変わりません（R-L0-14 の 4）。`almide fix` は末尾に `!` ではなく `?? abort` 相当のヒントを出します。
+- issue: #3978
+
 ## L3: 関数表
 
 `matrix` の現行 46 関数です（追加はありません）。
@@ -212,11 +221,11 @@
 | `neg` | `matrix.neg(m: Matrix) -> Matrix` | numpy `-m` / Nx `negate` | 撤去 → `-m` | R-matrix-14 |
 | `pow` | `matrix.pow(m: Matrix, exp: Float) -> Matrix` | numpy `**` / Nx `pow` | 撤去 → `matrix.map(m, (x) => float.pow(x, e))` | R-matrix-13 |
 | `map` | `matrix.map(m: Matrix, f: (Float) -> Float) -> Matrix` | ndarray `mapv` / gonum `Apply` / Nx `map` | 据え置き | — |
-| `from_bytes_f32_le` | `matrix.from_bytes_f32_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix` | numpy `frombuffer(dtype='<f4')` / Nx `from_binary` | 意味変更 | R-matrix-05（データ不足は abort） |
+| `from_bytes_f32_le` | `matrix.from_bytes_f32_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Option[Matrix]` | numpy `frombuffer(dtype='<f4')` / Nx `from_binary` | 意味変更（負の形は abort、データ不足は none） | R-matrix-05、R-matrix-15 |
 | `to_bytes_f64_le` | `matrix.to_bytes_f64_le(m: Matrix) -> Bytes` | numpy `astype('<f8').tobytes()` / Nx `to_binary` | 据え置き | — |
 | `to_bytes_f32_le` | `matrix.to_bytes_f32_le(m: Matrix) -> Bytes` | numpy `astype('<f4').tobytes()` / Nx `to_binary` | 据え置き | — |
-| `from_bytes_f16_le` | `matrix.from_bytes_f16_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix` | numpy `frombuffer(dtype='<f2')` | 意味変更 | R-matrix-05 |
-| `from_bytes_f64_le` | `matrix.from_bytes_f64_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix` | numpy `frombuffer(dtype='<f8')` | 意味変更 | R-matrix-05 |
+| `from_bytes_f16_le` | `matrix.from_bytes_f16_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Option[Matrix]` | numpy `frombuffer(dtype='<f2')` | 意味変更（負の形は abort、データ不足は none） | R-matrix-05、R-matrix-15 |
+| `from_bytes_f64_le` | `matrix.from_bytes_f64_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Option[Matrix]` | numpy `frombuffer(dtype='<f8')` | 意味変更（負の形は abort、データ不足は none） | R-matrix-05、R-matrix-15 |
 | `broadcast_add_row` | `matrix.broadcast_add_row(m: Matrix, bias: List[Float]) -> Matrix` | numpy `m + v`（ブロードキャスト） / Nx `add` | 意味変更 | R-matrix-05（長さ違いは abort） |
 | `split_cols_even` | `matrix.split_cols_even(m: Matrix, n: Int) -> List[Matrix]` | numpy `hsplit` / Nx `split` | 据え置き | — |
 | `concat_cols` | `matrix.concat_cols(matrices: List[Matrix]) -> Matrix` | numpy `hstack` / ndarray `concatenate(Axis(1))` / gonum `Augment` | 据え置き | — |
