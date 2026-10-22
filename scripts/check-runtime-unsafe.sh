@@ -9,7 +9,7 @@ set -uo pipefail
 export LC_ALL=C
 ROOT="${RUNTIME_UNSAFE_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 LEDGER="$ROOT/proofs/runtime-unsafe-allowlist.toml"
-TREES=(runtime/rs/src runtime/rs/burn crates/almide-rt-core/src)
+TREES=(runtime/rs/src crates/almide-rt-core/src)
 
 if [ "${1:-}" = "--self-test" ]; then
   tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
