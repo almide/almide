@@ -57,3 +57,29 @@ fn min_value() -> UInt16 = int.to_uint16(0)
 
 /// Largest UInt16: 65535.
 fn max_value() -> UInt16 = int.to_uint16(65535)
+
+// ── Integer: compare, select, divide (R-sized-02, R-sized-08, R-sized-10) ──
+/// -1, 0 or 1 as a is below, equal to or above b.
+fn compare(a: UInt16, b: UInt16) -> Int = if a < b then -1
+else if a > b then 1 else 0
+
+/// Lesser of a and b.
+fn min(a: UInt16, b: UInt16) -> UInt16 = if a <= b then a else b
+
+/// Greater of a and b.
+fn max(a: UInt16, b: UInt16) -> UInt16 = if a >= b then a else b
+
+/// x limited to lo..hi; aborts when lo > hi.
+fn clamp(x: UInt16, lo: UInt16, hi: UInt16) -> UInt16 = int.to_uint16(int.clamp(int.from_uint16(x), int.from_uint16(lo), int.from_uint16(hi)))
+
+/// Quotient; the same as a / b for an unsigned type; b == 0 aborts.
+fn floor_div(a: UInt16, b: UInt16) -> UInt16 = a / b
+
+/// base raised to exp, wrapping to 16 bits like *; exp < 0 aborts.
+fn pow(base: UInt16, exp: Int) -> UInt16 = int.to_uint16(math.pow(int.from_uint16(base), exp))
+
+/// True when x is a multiple of 2.
+fn is_even(x: UInt16) -> Bool = int.from_uint16(x) % 2 == 0
+
+/// True when x is not a multiple of 2.
+fn is_odd(x: UInt16) -> Bool = int.from_uint16(x) % 2 != 0

@@ -45,3 +45,29 @@ fn min_value() -> UInt8 = int.to_uint8(0)
 
 /// Largest UInt8: 255.
 fn max_value() -> UInt8 = int.to_uint8(255)
+
+// ── Integer: compare, select, divide (R-sized-02, R-sized-08, R-sized-10) ──
+/// -1, 0 or 1 as a is below, equal to or above b.
+fn compare(a: UInt8, b: UInt8) -> Int = if a < b then -1
+else if a > b then 1 else 0
+
+/// Lesser of a and b.
+fn min(a: UInt8, b: UInt8) -> UInt8 = if a <= b then a else b
+
+/// Greater of a and b.
+fn max(a: UInt8, b: UInt8) -> UInt8 = if a >= b then a else b
+
+/// x limited to lo..hi; aborts when lo > hi.
+fn clamp(x: UInt8, lo: UInt8, hi: UInt8) -> UInt8 = int.to_uint8(int.clamp(int.from_uint8(x), int.from_uint8(lo), int.from_uint8(hi)))
+
+/// Quotient; the same as a / b for an unsigned type; b == 0 aborts.
+fn floor_div(a: UInt8, b: UInt8) -> UInt8 = a / b
+
+/// base raised to exp, wrapping to 8 bits like *; exp < 0 aborts.
+fn pow(base: UInt8, exp: Int) -> UInt8 = int.to_uint8(math.pow(int.from_uint8(base), exp))
+
+/// True when x is a multiple of 2.
+fn is_even(x: UInt8) -> Bool = int.from_uint8(x) % 2 == 0
+
+/// True when x is not a multiple of 2.
+fn is_odd(x: UInt8) -> Bool = int.from_uint8(x) % 2 != 0
