@@ -69,3 +69,42 @@ fn min_value() -> Int16 = int.to_int16(-32768)
 
 /// Largest Int16: 32767.
 fn max_value() -> Int16 = int.to_int16(32767)
+
+// ── Integer: compare, select, divide (R-sized-02, R-sized-08, R-sized-10) ──
+/// -1, 0 or 1 as a is below, equal to or above b.
+fn compare(a: Int16, b: Int16) -> Int = if a < b then -1
+else if a > b then 1 else 0
+
+/// Lesser of a and b.
+fn min(a: Int16, b: Int16) -> Int16 = if a <= b then a else b
+
+/// Greater of a and b.
+fn max(a: Int16, b: Int16) -> Int16 = if a >= b then a else b
+
+/// x limited to lo..hi; aborts when lo > hi.
+fn clamp(x: Int16, lo: Int16, hi: Int16) -> Int16 = int.to_int16(int.clamp(int.from_int16(x), int.from_int16(lo), int.from_int16(hi)))
+
+/// Quotient rounded toward -inf; b == 0 aborts; min_value / -1 wraps.
+fn floor_div(a: Int16, b: Int16) -> Int16 = int.to_int16(floor_quotient(int.from_int16(a), int.from_int16(b)))
+
+// b == -1 is answered before `/` and `%`, which abort on min_value / -1.
+local fn floor_quotient(a: Int, b: Int) -> Int = if b == -1 then 0 - a
+else {
+  let q = a / b
+  if a % b != 0 and (a < 0) != (b < 0) then q - 1 else q
+}
+
+/// base raised to exp, wrapping to 16 bits like *; exp < 0 aborts.
+fn pow(base: Int16, exp: Int) -> Int16 = int.to_int16(math.pow(int.from_int16(base), exp))
+
+/// True when x is a multiple of 2.
+fn is_even(x: Int16) -> Bool = int.from_int16(x) % 2 == 0
+
+/// True when x is not a multiple of 2.
+fn is_odd(x: Int16) -> Bool = int.from_int16(x) % 2 != 0
+
+/// Magnitude of x; min_value wraps to itself.
+fn abs(x: Int16) -> Int16 = int.to_int16(int.abs(int.from_int16(x)))
+
+/// -1, 0 or 1 by the sign of x.
+fn sign(x: Int16) -> Int = math.sign(int.from_int16(x))
