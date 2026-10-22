@@ -225,6 +225,21 @@ map.merge(a, b)             // 同じキーは b が勝つ。順序は a、そ�
 | `map.insert` | `map.insert(mut m: Map[K, V], key: K, value: V) -> Unit` | Rust `insert` / JS `set` / Python `d[k] = v`（どれも in-place） | 撤去 | R-map-01 |
 | `map.delete` | `map.delete(mut m: Map[K, V], key: K) -> Unit` | Rust `remove` / JS `delete` / Go `delete`（in-place） | 撤去 | R-map-01 |
 | `map.clear` | `map.clear(mut m: Map[K, V]) -> Unit` | Rust `clear` / Python `clear` / JS `clear` / Kotlin `clear` | 据え置き | — (R-L0-04 の動詞) |
+| `map.enumerate` | （追加）`map.enumerate(m: Map[K, V]) -> List[(Int, (K, V))]` | Swift `enumerated` / Rust `enumerate` | 追加 | R-L0-42 |
+| `map.zip` | （追加）`map.zip(m: Map[K, V], ys: List[B]) -> List[((K, V), B)]` | Swift `zip` / Rust `zip` | 追加 | R-L0-42 |
+| `map.zip_with` | （追加）`map.zip_with(m: Map[K, V], ys: List[B], f: ((K, V), B) -> C) -> List[C]` | Kotlin `zip(other, f)` | 追加 | R-L0-42 |
+| `map.filter_map` | （追加）`map.filter_map(m: Map[K, V], f: ((K, V)) -> B?) -> List[B]` | Swift `compactMap` / Rust `filter_map` | 追加 | R-L0-42 |
+| `map.find_map` | （追加）`map.find_map(m: Map[K, V], f: ((K, V)) -> B?) -> B?` | Rust `find_map` | 追加 | R-L0-42 |
+| `map.reduce` | （追加）`map.reduce(m: Map[K, V], f: ((K, V), (K, V)) -> (K, V)) -> (K, V)?` | Swift `reduce` / Rust `reduce` | 追加 | R-L0-42 |
+| `map.scan` | （追加）`map.scan(m: Map[K, V], init: B, f: (B, (K, V)) -> B) -> List[B]` | Rust `scan` / Kotlin `runningFold` | 追加 | R-L0-42 |
+| `map.partition` | （追加）`map.partition(m: Map[K, V], f: ((K, V)) -> Bool) -> (List[(K, V)], List[(K, V)])` | Kotlin `partition` | 追加 | R-L0-42 |
+| `map.group_by` | （追加）`map.group_by(m: Map[K, V], f: ((K, V)) -> B) -> Map[B, List[(K, V)]]` | Kotlin `groupBy` / Swift `Dictionary(grouping:)` | 追加 | R-L0-42 |
+| `map.sort_by` | （追加）`map.sort_by(m: Map[K, V], f: ((K, V)) -> B) -> List[(K, V)]` | Kotlin `sortedBy` | 追加 | R-L0-42 |
+| `map.sort_with` | （追加）`map.sort_with(m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> List[(K, V)]` | Swift `sorted(by:)` | 追加 | R-L0-42 |
+| `map.min_by` | （追加）`map.min_by(m: Map[K, V], f: ((K, V)) -> U) -> (K, V)?` | Kotlin `minByOrNull` | 追加 | R-L0-42 |
+| `map.max_by` | （追加）`map.max_by(m: Map[K, V], f: ((K, V)) -> U) -> (K, V)?` | Kotlin `maxByOrNull` | 追加 | R-L0-42 |
+| `map.min_with` | （追加）`map.min_with(m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> (K, V)?` | Swift `min(by:)` | 追加 | R-L0-42 |
+| `map.max_with` | （追加）`map.max_with(m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> (K, V)?` | Swift `max(by:)` | 追加 | R-L0-42 |
 
 L3 の行数: 25（追加なし）。判定の内訳: 据え置き 22、撤去 3（`get_or`、`insert`、`delete`）。
 

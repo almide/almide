@@ -550,7 +550,7 @@ effect fn を呼んだときの型（`!` が要るか、`??` をそのまま書�
   3. 型の公開面は「準拠する protocol の一覧」と「その型だけの関数」で書き表せます。
   4. protocol は階層に組みます。手本は Swift の標準ライブラリです（`Equatable`→`Comparable`、`AdditiveArithmetic`→`Numeric`→`BinaryInteger`→`FixedWidthInteger`、`Sequence`→`Collection`→`BidirectionalCollection`→`RandomAccessCollection` など）。Swift にない層は、理由を書いて足します。階層・型ごとの準拠・穴・この階層で決めることは [protocol-view.md](protocol-view.md) にあります（protocol の定義と準拠から、target-surface.md と突き合わせて機械的に作る）。R-L0-31 で名前を付けた protocol（`Integer`・`FloatingPoint`・`Sized`・`TimeAmount`・`HttpMessage`）は、この階層の中に置き直し、中身は階層の定義に従います。
 - 「protocol だけ」にしない理由: `string.split` や `regex.find` のように 1 つの型しか持たない関数を、メンバーが 1 つの protocol にしても、名前が 1 つ増えるだけで揃いは守れません。Swift も、具体型だけのメソッドを持っています。
-- 実測（リデザイン後の面）: 階層を決めた時点で、値の型 31 種の関数 1,041 個のうち 663 個が protocol の要件か数の変換の族で、要件のうちまだ無い関数（穴）が 209 個ありました（168 個は、`int` が持つ算術とビット演算をサイズつきの整数 8 型が持たないこと）。七巡目の案で 164 関数を足して埋め、九巡目で変換を変換先の `from` に（R-L0-40）、ビット演算を演算子に（R-L0-41）まとめ、残る穴も閉じました。リデザイン後は 1,100 関数で、protocol の関数を 1 回と数えると覚える名前は 690 です。
+- 実測（リデザイン後の面）: 階層を決めた時点で、値の型 31 種の関数 1,041 個のうち 663 個が protocol の要件か数の変換の族で、要件のうちまだ無い関数（穴）が 209 個ありました（168 個は、`int` が持つ算術とビット演算をサイズつきの整数 8 型が持たないこと）。七巡目の案で 164 関数を足して埋め、九巡目で変換を変換先の `from` に（R-L0-40）、ビット演算を演算子に（R-L0-41）まとめ、残る穴も閉じました。十巡目で列のアルゴリズムを `Sequence`・`Ordered` の既定の実装にまとめ（R-L0-42）、リデザイン後は 1,229 関数、protocol の関数を 1 回と数えると覚える名前は 650 ほどです。
 - 言語に足りないもの（実測 `almide 0.68.0 dev`。どれも今は書けない）:
   - 型引数を通して、受け手のないメソッドを呼ぶ（`T.zero()` が E002）。`parse`・`max_value`・`nan` に要ります。
   - protocol の継承（`protocol Integer: Ord`）。
@@ -605,6 +605,19 @@ effect fn を呼んだときの型（`!` が要るか、`??` をそのまま書�
 - (a) R-int-05（×）は関数名だけを比べて「多数派がない」としました。演算子まで比べると、`&`・`|`・`^`・`<<`・`>>` は Rust・Go・Python・JS・Swift の 5 言語の綴りで、多数派です（R-L0-00）。
 - (d) 構文の追加と意味の変更です。`&`・`|`・`~`・`<<` は epoch 15 から使えます。`^`（累乗）と `>>`（合成）は、epoch 15 で警告、epoch 16 でエラー、epoch 17 で新しい意味にします（同じ記号の意味を黙って入れ替えないため、間に 1 epoch のエラーを挟む）。`almide fix` が `int.band(a, b)` を `a & b` に、`f >> g` を `(x) => g(f(x))` に書き換えます。`band`・`bor`・`bxor`・`bnot`・`bshl`・`bshr`・`bshr_logical` は撤去します。
 - issue: #4004
+
+## R-L0-42 列のアルゴリズムは protocol の既定の実装として 1 回だけ書く — ○ 採用
+
+- いま: `enumerate`・`zip`・`sort`・`min`・`take_while`・`chunk` など 30 の列のアルゴリズムが `list` だけにあります。`deque`・`set`・`string`・`bytes`・`map` では、`to_list` してから `list.*` と書くしかありません。`list.sum`・`product` は `Int` と `Float` の 2 つの形、`list.join` は `String` と `Bytes` の 2 つの形を持ちます。
+- 案: [protocol の階層](protocol-view.md)の `Sequence` と `Ordered` に、これらを既定の実装として 1 回だけ置きます（Swift の `Sequence`・`Collection` の拡張と同じ）。R-L0-37 のとおり、準拠するどの列のモジュールにも同じ名前・同じ形で現れます。
+  - `Sequence`（決まった順にたどれる列）: `enumerate`・`zip`・`zip_with`・`filter_map`・`find_map`・`reduce`・`scan`・`partition`・`group_by`・`sort`・`sort_by`・`sort_with`・`min`・`max`・`min_by`・`max_by`・`min_with`・`max_with`・`sum`・`product`。要素の型が変わる結果や並べ替えた結果は `List` を返します（Swift の `sorted()`・`map` が `Array` を返すのと同じ）。
+  - `Ordered`（両端から数えられる列）: `find_index`・`take_while`・`drop_while`・`chunk`・`window`・`split_at`・`dedup`・`intersperse`・`unique`・`unique_by`。切り出した結果は同じ型を返します（Swift の `SubSequence`）。
+  - 条件: `sum`・`product` は要素が `Numeric`、`sort`・`min`・`max` は要素が `Ord` のときだけです。`string` は `sum`・`product` を、`map` は `sort`・`min`・`max`・`sum`・`product` を持ちません。
+  - `list.sum`・`product` は `sum[A: Numeric](xs: List[A]) -> A`、`list.join` は `join[T: Text](xs: List[T], sep: T) -> T` の 1 つの形にします。
+- `Ord` の既定の実装から `min`・`max`・`clamp` を外し、`Integer`・`FloatingPoint` の要件に戻します（R-sized-08 の形）。`Ord` に置くと、`duration.min(n)`（n 分）や `string.min(s)`（最小の文字）と名前がぶつかるためです。
+- (a) Swift（`Sequence`・`Collection` の拡張）、Rust（`Iterator` の提供メソッド）、Kotlin（`Iterable` の拡張関数）は、列のアルゴリズムを 1 か所に書き、すべての列で使えるようにしています。
+- (d) 追加（`deque` 30・`set` 20・`string` 28・`bytes` 29・`map` 15）と、`list.sum`・`product`・`join` の型を広げる変更です。実装は既定の実装 1 つで、型ごとに書きません。
+- issue: #4012
 
 ## ゲートの束（R-L0-G） — ○ 採用
 

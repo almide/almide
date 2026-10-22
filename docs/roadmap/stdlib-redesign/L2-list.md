@@ -370,13 +370,13 @@
 | `index_of` | `list.index_of(xs: List[A], x: A) -> Option[Int]` | JS indexOf / Go Index / Swift firstIndex(of:) | 据え置き | — |
 | `last` | `list.last(xs: List[A]) -> Option[A]` | Rust last / Gleam last / Swift last | 据え置き | — |
 | `chunk` | `list.chunk(xs: List[A], n: Int) -> List[List[A]]` | Rust chunks / Kotlin chunked / Gleam sized_chunk | 意味変更（`n <= 0` は abort） | R-list-10 |
-| `sum` | `list.sum(xs: List[Int]) -> Int` | Rust sum / Python sum / Elixir sum | 意味変更（`List[Float]` も受け取る） | R-list-08 |
-| `product` | `list.product(xs: List[Int]) -> Int` | Rust product / Elixir product | 意味変更（`List[Float]` も受け取る） | R-list-08 |
+| `sum` | `list.sum[A: Numeric](xs: List[A]) -> A` | Rust sum / Python sum / Elixir sum | 意味変更（`Int`・`Float` の 2 つの形を、数の型すべてを受ける 1 つの総称関数に） | R-L0-42 |
+| `product` | `list.product[A: Numeric](xs: List[A]) -> A` | Rust product / Elixir product | 意味変更（`Int`・`Float` の 2 つの形を、数の型すべてを受ける 1 つの総称関数に） | R-L0-42 |
 | `first` | `list.first(xs: List[A]) -> Option[A]` | Rust first / Gleam first / Kotlin firstOrNull | 据え置き | — |
 | `is_empty` | `list.is_empty(xs: List[A]) -> Bool` | Rust is_empty / Gleam is_empty / Swift isEmpty | 据え置き | — |
 | `min` | `list.min(xs: List[A]) -> Option[A]` | Rust min / Go Min / Kotlin minOrNull | 据え置き | — |
 | `max` | `list.max(xs: List[A]) -> Option[A]` | Rust max / Go Max / Kotlin maxOrNull | 据え置き | — |
-| `join` | `list.join(xs: List[String], sep: String) -> String` | Rust join / JS join / Kotlin joinToString / Go strings.Join | 意味変更（`List[Bytes]` と `Bytes` の区切りも受け取る） | R-string-01、R-list-16 |
+| `join` | `list.join[T: Text](xs: List[T], sep: T) -> T` | Rust join / JS join / Kotlin joinToString / Go strings.Join | 意味変更（`String`・`Bytes` の 2 つの形を、`Text` の総称関数 1 つに） | R-L0-42 |
 | `map` | `list.map(xs: List[A], f: (A) -> B) -> List[B]` | 全言語 map | 据え置き | — |
 | `filter` | `list.filter(xs: List[A], f: (A) -> Bool) -> List[A]` | 全言語 filter | 据え置き | — |
 | `find` | `list.find(xs: List[A], f: (A) -> Bool) -> Option[A]` | Rust find / Kotlin find / Swift first(where:) | 据え置き | — |

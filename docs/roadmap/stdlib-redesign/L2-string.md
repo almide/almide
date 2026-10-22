@@ -249,6 +249,14 @@
 - (d) 改名と追加です。epoch 15 で `chars` を `@deprecated(since=15, use="to_list")` にし、epoch 16 で撤去します。
 - issue: #4004
 
+### R-string-18 部分文字列を数える `string.count` を `count_matches` にし、`count` は `Container` の述語の形にする — ○ 採用
+
+- いま: `string.count(s, sub)` は部分文字列が現れる回数を返します。ほかの 6 つの入れ物の `count(xs, f)` は、述語に合う要素の数です。同じ名前で意味が違います。一巡目は「引数の型が違うので取り違えは型エラーになる」として据え置きましたが、R-L0-36 のとおり型エラーだけでは据え置く理由になりません。protocol の階層では `string` も `Container` なので、`count` は 2 つの意味を同時に持てません。
+- 案: 部分文字列を数える関数を `count_matches(s, needle) -> Int` に改名し、`Text` の要件にします（`bytes` にも置く）。`string.count(s, f: (String) -> Bool) -> Int` は `Container` の述語の形で置きます。
+- (a) 述語で数える `count` は Kotlin・Swift（`count(where:)`）・Rust（`filter().count()`）・Elixir・Gleam の 5 言語、部分文字列を `count` で数えるのは Go・Python の 2 言語です。
+- (d) 改名と追加です。epoch 15 で `string.count(s, sub)`（文字列を渡す形）を `@deprecated(use="count_matches")` にし、epoch 16 で述語の形だけにします。`almide fix` が文字列を渡す呼び出しを `count_matches` に書き換えます。
+- issue: #4012
+
 ## L3: 関数表
 
 | 関数 | シグネチャ(現行, mut 表示) | 他言語の主な綴り | 判定 | 案 |
@@ -287,7 +295,7 @@
 | `pad_end` | `(s: String, n: Int, ch: String) -> String` | JS/Gleam/Kotlin `padEnd` / Python `ljust`。`ch` が空なら空白 | 据え置き | — |
 | `trim_start` | `(s: String) -> String` | Rust/JS/Gleam `trim_start` / Python `lstrip` | 据え置き | — |
 | `trim_end` | `(s: String) -> String` | Rust/JS/Gleam `trim_end` / Python `rstrip` | 据え置き | — |
-| `count` | `(s: String, sub: String) -> Int` | Python `count` / Go `Count`（空の sub で len+1、Almide も同じ (F)）。`list.count`（述語）と動詞は同じだが、引数の型が違うので取り違えは型エラーになる | 据え置き | — |
+| `count` | `(s: String, sub: String) -> Int` | Python `count` / Go `Count`（空の sub で len+1、Almide も同じ (F)）。`list.count`（述語）と動詞は同じだが、引数の型が違うので取り違えは型エラーになる | 改名 → `count_matches` | R-string-18 |
 | `is_empty` | `(s: String) -> Bool` | Rust/Gleam/OCaml `is_empty` / Kotlin `isEmpty` | 据え置き | — |
 | `reverse` | `(s: String) -> String` | Gleam/Elixir `reverse`（書記素単位）/ Rust `chars().rev()`。Almide はコードポイント単位 | 据え置き | — |
 | `strip_prefix` | `(s: String, prefix: String) -> Option[String]` | Rust `strip_prefix`（Option）/ Python `removeprefix` / Gleam `remove_prefix` | 据え置き | — |
@@ -314,6 +322,35 @@
 | `remove_at` | （追加）`(s: String, i: Int) -> String` | Swift `remove(at:)` / Rust `remove` | 追加 | R-string-16 |
 | `new` | （追加）`() -> String` | Swift `String()` / Rust `String::new` | 追加 | R-string-17 |
 | `from_list` | （追加）`(xs: List[String]) -> String` | Swift `String(chars)` / Kotlin `joinToString("")` | 追加 | R-string-17 |
+| `enumerate` | （追加）`string.enumerate(s: String) -> List[(Int, String)]` | Swift `enumerated` / Rust `enumerate` | 追加 | R-L0-42 |
+| `zip` | （追加）`string.zip(s: String, ys: List[B]) -> List[(String, B)]` | Swift `zip` / Rust `zip` | 追加 | R-L0-42 |
+| `zip_with` | （追加）`string.zip_with(s: String, ys: List[B], f: (String, B) -> C) -> List[C]` | Kotlin `zip(other, f)` | 追加 | R-L0-42 |
+| `filter_map` | （追加）`string.filter_map(s: String, f: (String) -> B?) -> List[B]` | Swift `compactMap` / Rust `filter_map` | 追加 | R-L0-42 |
+| `find_map` | （追加）`string.find_map(s: String, f: (String) -> B?) -> B?` | Rust `find_map` | 追加 | R-L0-42 |
+| `reduce` | （追加）`string.reduce(s: String, f: (String, String) -> String) -> String?` | Swift `reduce` / Rust `reduce` | 追加 | R-L0-42 |
+| `scan` | （追加）`string.scan(s: String, init: B, f: (B, String) -> B) -> List[B]` | Rust `scan` / Kotlin `runningFold` | 追加 | R-L0-42 |
+| `partition` | （追加）`string.partition(s: String, f: (String) -> Bool) -> (List[String], List[String])` | Kotlin `partition` | 追加 | R-L0-42 |
+| `group_by` | （追加）`string.group_by(s: String, f: (String) -> B) -> Map[B, List[String]]` | Kotlin `groupBy` / Swift `Dictionary(grouping:)` | 追加 | R-L0-42 |
+| `sort` | （追加）`string.sort(s: String) -> List[String]` | Swift `sorted()` | 追加 | R-L0-42 |
+| `sort_by` | （追加）`string.sort_by(s: String, f: (String) -> B) -> List[String]` | Kotlin `sortedBy` | 追加 | R-L0-42 |
+| `sort_with` | （追加）`string.sort_with(s: String, cmp: (String, String) -> Int) -> List[String]` | Swift `sorted(by:)` | 追加 | R-L0-42 |
+| `min` | （追加）`string.min(s: String) -> String?` | Swift `min()` / Rust `min` | 追加 | R-L0-42 |
+| `max` | （追加）`string.max(s: String) -> String?` | Swift `max()` / Rust `max` | 追加 | R-L0-42 |
+| `min_by` | （追加）`string.min_by(s: String, f: (String) -> K) -> String?` | Kotlin `minByOrNull` | 追加 | R-L0-42 |
+| `max_by` | （追加）`string.max_by(s: String, f: (String) -> K) -> String?` | Kotlin `maxByOrNull` | 追加 | R-L0-42 |
+| `min_with` | （追加）`string.min_with(s: String, cmp: (String, String) -> Int) -> String?` | Swift `min(by:)` | 追加 | R-L0-42 |
+| `max_with` | （追加）`string.max_with(s: String, cmp: (String, String) -> Int) -> String?` | Swift `max(by:)` | 追加 | R-L0-42 |
+| `find_index` | （追加）`string.find_index(s: String, f: (String) -> Bool) -> Int?` | Swift `firstIndex(where:)` | 追加 | R-L0-42 |
+| `take_while` | （追加）`string.take_while(s: String, f: (String) -> Bool) -> String` | Swift `prefix(while:)` | 追加 | R-L0-42 |
+| `drop_while` | （追加）`string.drop_while(s: String, f: (String) -> Bool) -> String` | Swift `drop(while:)` | 追加 | R-L0-42 |
+| `chunk` | （追加）`string.chunk(s: String, n: Int) -> List[String]` | Kotlin `chunked` | 追加 | R-L0-42 |
+| `window` | （追加）`string.window(s: String, n: Int) -> List[String]` | Kotlin `windowed` | 追加 | R-L0-42 |
+| `split_at` | （追加）`string.split_at(s: String, n: Int) -> (String, String)` | Rust `split_at` | 追加 | R-L0-42 |
+| `dedup` | （追加）`string.dedup(s: String) -> String` | Rust `dedup` | 追加 | R-L0-42 |
+| `intersperse` | （追加）`string.intersperse(s: String, sep: String) -> String` | Rust `intersperse` | 追加 | R-L0-42 |
+| `unique` | （追加）`string.unique(s: String) -> String` | Kotlin `distinct` | 追加 | R-L0-42 |
+| `unique_by` | （追加）`string.unique_by(s: String, f: (String) -> K) -> String` | Kotlin `distinctBy` | 追加 | R-L0-42 |
+| `count` | （追加）`(s: String, f: (String) -> Bool) -> Int` | Kotlin `count {}` / Swift `count(where:)` | 追加 | R-string-18、R-L0-42 |
 
 現行 50 関数 + 追加 4 = 54 行。
 

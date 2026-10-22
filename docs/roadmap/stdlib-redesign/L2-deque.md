@@ -113,6 +113,36 @@
 | `deque.set` | `fn set[A](d: Deque[A], i: Int, x: A) -> Deque[A]` | Swift `d[i] = x` / Rust `d[i] = x` | 追加 | R-deque-04 |
 | `deque.insert` | `fn insert[A](d: Deque[A], i: Int, x: A) -> Deque[A]` | Swift `insert(_:at:)` / Rust `insert` | 追加 | R-deque-04 |
 | `deque.remove_at` | `fn remove_at[A](d: Deque[A], i: Int) -> Deque[A]` | Swift `remove(at:)` / Rust `remove` | 追加 | R-deque-04 |
+| `deque.enumerate` | （追加）`deque.enumerate(d: Deque[A]) -> List[(Int, A)]` | Swift `enumerated` / Rust `enumerate` | 追加 | R-L0-42 |
+| `deque.zip` | （追加）`deque.zip(d: Deque[A], ys: List[B]) -> List[(A, B)]` | Swift `zip` / Rust `zip` | 追加 | R-L0-42 |
+| `deque.zip_with` | （追加）`deque.zip_with(d: Deque[A], ys: List[B], f: (A, B) -> C) -> List[C]` | Kotlin `zip(other, f)` | 追加 | R-L0-42 |
+| `deque.filter_map` | （追加）`deque.filter_map(d: Deque[A], f: (A) -> B?) -> List[B]` | Swift `compactMap` / Rust `filter_map` | 追加 | R-L0-42 |
+| `deque.find_map` | （追加）`deque.find_map(d: Deque[A], f: (A) -> B?) -> B?` | Rust `find_map` | 追加 | R-L0-42 |
+| `deque.reduce` | （追加）`deque.reduce(d: Deque[A], f: (A, A) -> A) -> A?` | Swift `reduce` / Rust `reduce` | 追加 | R-L0-42 |
+| `deque.scan` | （追加）`deque.scan(d: Deque[A], init: B, f: (B, A) -> B) -> List[B]` | Rust `scan` / Kotlin `runningFold` | 追加 | R-L0-42 |
+| `deque.partition` | （追加）`deque.partition(d: Deque[A], f: (A) -> Bool) -> (List[A], List[A])` | Kotlin `partition` | 追加 | R-L0-42 |
+| `deque.group_by` | （追加）`deque.group_by(d: Deque[A], f: (A) -> B) -> Map[B, List[A]]` | Kotlin `groupBy` / Swift `Dictionary(grouping:)` | 追加 | R-L0-42 |
+| `deque.sort` | （追加）`deque.sort(d: Deque[A]) -> List[A]` | Swift `sorted()` | 追加 | R-L0-42 |
+| `deque.sort_by` | （追加）`deque.sort_by(d: Deque[A], f: (A) -> B) -> List[A]` | Kotlin `sortedBy` | 追加 | R-L0-42 |
+| `deque.sort_with` | （追加）`deque.sort_with(d: Deque[A], cmp: (A, A) -> Int) -> List[A]` | Swift `sorted(by:)` | 追加 | R-L0-42 |
+| `deque.min` | （追加）`deque.min(d: Deque[A]) -> A?` | Swift `min()` / Rust `min` | 追加 | R-L0-42 |
+| `deque.max` | （追加）`deque.max(d: Deque[A]) -> A?` | Swift `max()` / Rust `max` | 追加 | R-L0-42 |
+| `deque.min_by` | （追加）`deque.min_by(d: Deque[A], f: (A) -> K) -> A?` | Kotlin `minByOrNull` | 追加 | R-L0-42 |
+| `deque.max_by` | （追加）`deque.max_by(d: Deque[A], f: (A) -> K) -> A?` | Kotlin `maxByOrNull` | 追加 | R-L0-42 |
+| `deque.min_with` | （追加）`deque.min_with(d: Deque[A], cmp: (A, A) -> Int) -> A?` | Swift `min(by:)` | 追加 | R-L0-42 |
+| `deque.max_with` | （追加）`deque.max_with(d: Deque[A], cmp: (A, A) -> Int) -> A?` | Swift `max(by:)` | 追加 | R-L0-42 |
+| `deque.sum` | （追加）`deque.sum[A: Numeric](d: Deque[A]) -> A` | Rust `sum` / Kotlin `sum` | 追加 | R-L0-42 |
+| `deque.product` | （追加）`deque.product[A: Numeric](d: Deque[A]) -> A` | Rust `product` | 追加 | R-L0-42 |
+| `deque.find_index` | （追加）`deque.find_index(d: Deque[A], f: (A) -> Bool) -> Int?` | Swift `firstIndex(where:)` | 追加 | R-L0-42 |
+| `deque.take_while` | （追加）`deque.take_while(d: Deque[A], f: (A) -> Bool) -> Deque[A]` | Swift `prefix(while:)` | 追加 | R-L0-42 |
+| `deque.drop_while` | （追加）`deque.drop_while(d: Deque[A], f: (A) -> Bool) -> Deque[A]` | Swift `drop(while:)` | 追加 | R-L0-42 |
+| `deque.chunk` | （追加）`deque.chunk(d: Deque[A], n: Int) -> List[Deque[A]]` | Kotlin `chunked` | 追加 | R-L0-42 |
+| `deque.window` | （追加）`deque.window(d: Deque[A], n: Int) -> List[Deque[A]]` | Kotlin `windowed` | 追加 | R-L0-42 |
+| `deque.split_at` | （追加）`deque.split_at(d: Deque[A], n: Int) -> (Deque[A], Deque[A])` | Rust `split_at` | 追加 | R-L0-42 |
+| `deque.dedup` | （追加）`deque.dedup(d: Deque[A]) -> Deque[A]` | Rust `dedup` | 追加 | R-L0-42 |
+| `deque.intersperse` | （追加）`deque.intersperse(d: Deque[A], sep: A) -> Deque[A]` | Rust `intersperse` | 追加 | R-L0-42 |
+| `deque.unique` | （追加）`deque.unique(d: Deque[A]) -> Deque[A]` | Kotlin `distinct` | 追加 | R-L0-42 |
+| `deque.unique_by` | （追加）`deque.unique_by(d: Deque[A], f: (A) -> K) -> Deque[A]` | Kotlin `distinctBy` | 追加 | R-L0-42 |
 
 ## L0 への差し戻し（処理済み）
 

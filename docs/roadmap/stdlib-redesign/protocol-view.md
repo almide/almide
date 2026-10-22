@@ -6,7 +6,7 @@
 
 R-L0-37 のとおり、標準の具体型を「準拠する protocol の組み合わせ」と「その型だけの関数」で書き表します。protocol の階層は Swift の標準ライブラリを手本にし、Swift にない層は理由を書いて足しています。準拠と穴は、[target-surface.md](target-surface.md)（リデザイン後の関数）から機械的に出しています。
 
-- 値の型 31 種の関数 892 個のうち、525 個（58%）が protocol の要件です。残りの 367 個が、その型だけの関数です。
+- 値の型 31 種の関数 1,021 個のうち、730 個（71%）が protocol の要件です。残りの 291 個が、その型だけの関数です。
 - 準拠を決めると、要件のうちまだ無い関数が 0 個あります（穴）。既定の実装で埋まるものは数えていません。
 - 手本にした Swift の protocol は、表の「Swift」の列に書いています。
 
@@ -70,29 +70,29 @@ HttpMessage
 | 土台 | `Hash` | `Eq` | — | — | Hashable | Bool・String・Bytes・List[A]・Set[A]・BigInt・Duration・Compute・Uuid・Url・Option[A]・Result[A, E]・Int・Int8・Int16・Int32・Int64・UInt8・UInt16・UInt32・UInt64 |
 | 土台 | `Repr` | — | `to_string` | `to_string` | CustomStringConvertible | Bool・String・BigInt・Float・Float32・Float64・Uuid・Url・Value・Matrix・Regex・Int・Int8・Int16・Int32・Int64・UInt8・UInt16・UInt32・UInt64 |
 | 土台 | `Parse` | `Repr` | `parse` | — | LosslessStringConvertible | Bool・BigInt・Float・Float32・Float64・Uuid・Url・Int・Int8・Int16・Int32・Int64・UInt8・UInt16・UInt32・UInt64 |
-| 土台 | `Ord` | `Eq` | `compare` | `min`・`max`・`clamp` | Comparable | String・Bytes・BigInt・Float・Float32・Float64・Duration・Compute・Uuid・Int・Int8・Int16・Int32・Int64・UInt8・UInt16・UInt32・UInt64 |
+| 土台 | `Ord` | `Eq` | `compare` | — | Comparable | String・Bytes・BigInt・Float・Float32・Float64・Duration・Compute・Uuid・Int・Int8・Int16・Int32・Int64・UInt8・UInt16・UInt32・UInt64 |
 | 土台 | `Codec` | — | — | — | Codable | Bool・String・Bytes・List[A]・Deque[A]・Set[A]・Map[K, V]・BigInt・Float・Float32・Float64・Duration・Uuid・Url・Option[A]・Result[A, E]・Value・Int・Int8・Int16・Int32・Int64・UInt8・UInt16・UInt32・UInt64 |
 | 数 | `Additive` | `Eq` | — | — | AdditiveArithmetic | BigInt・Float・Float32・Float64・Duration・Compute・Int・Int8・Int16・Int32・Int64・UInt8・UInt16・UInt32・UInt64 |
 | 数 | `Numeric` | `Additive` | `from`・`from_checked` | — | Numeric | BigInt・Float・Float32・Float64・Int・Int8・Int16・Int32・Int64・UInt8・UInt16・UInt32・UInt64 |
 | 数 | `Signed` | `Numeric` | `abs` | — | SignedNumeric | BigInt・Float・Float32・Float64・Int・Int8・Int16・Int32・Int64 |
-| 数 | `Integer` | `Numeric`・`Ord`・`Hash`・`Parse` | `floor_div`・`mod`・`pow`・`is_even`・`is_odd`・`parse_radix`・`to_string_radix`・`bit_length` | `is_even`・`is_odd` | BinaryInteger | BigInt・Int・Int8・Int16・Int32・Int64・UInt8・UInt16・UInt32・UInt64 |
+| 数 | `Integer` | `Numeric`・`Ord`・`Hash`・`Parse` | `min`・`max`・`clamp`・`floor_div`・`mod`・`pow`・`is_even`・`is_odd`・`parse_radix`・`to_string_radix`・`bit_length` | `is_even`・`is_odd` | BinaryInteger | BigInt・Int・Int8・Int16・Int32・Int64・UInt8・UInt16・UInt32・UInt64 |
 | 数 | `FixedWidthInteger` | `Integer` | `min_value`・`max_value`・`count_leading_zeros`・`count_trailing_zeros`・`count_ones`・`byte_swap`・`wrap_add`・`wrap_sub`・`wrap_mul`・`rotate_left`・`rotate_right`・`from_saturating`・`from_wrapping` | — | FixedWidthInteger | Int・Int8・Int16・Int32・Int64・UInt8・UInt16・UInt32・UInt64 |
 | 数 | `SignedInteger` | `Integer`・`Signed` | `sign` | — | SignedInteger | BigInt・Int・Int8・Int16・Int32・Int64 |
 | 数 | `UnsignedInteger` | `Integer` | — | — | UnsignedInteger | UInt8・UInt16・UInt32・UInt64 |
-| 数 | `FloatingPoint` | `Signed`・`Ord`・`Parse` | `nan`・`infinity`・`epsilon`・`min_value`・`max_value`・`is_nan`・`is_finite`・`is_infinite`・`floor`・`ceil`・`round`・`trunc`・`signum` | — | FloatingPoint | Float・Float32・Float64 |
+| 数 | `FloatingPoint` | `Signed`・`Ord`・`Parse` | `min`・`max`・`clamp`・`nan`・`infinity`・`epsilon`・`min_value`・`max_value`・`is_nan`・`is_finite`・`is_infinite`・`floor`・`ceil`・`round`・`trunc`・`signum` | — | FloatingPoint | Float・Float32・Float64 |
 | 数 | `BinaryFloatingPoint` | `FloatingPoint` | `to_bits`・`from_bits` | — | BinaryFloatingPoint | Float・Float32・Float64 |
 | 数 | `TimeAmount` | `Additive`・`Ord` | `ns`・`us`・`ms`・`s`・`min`・`h` | — | DurationProtocol | Duration・Compute |
 | 入れ物 | `Sized` | — | `len`・`is_empty` | `is_empty` | Collection（count・isEmpty） | String・Bytes・List[A]・Deque[A]・Set[A]・Heap[A]・Map[K, V] |
-| 入れ物 | `Container` | `Sized` | `new`・`from_list`・`to_list`・`any`・`all`・`count`・`filter` | `any`・`all`・`count` | — | String・Bytes・List[A]・Deque[A]・Set[A]・Heap[A]・Map[K, V] |
+| 入れ物 | `Container` | `Sized` | `new`・`from_list`・`to_list`・`any`・`all`・`count`・`filter`・`clear` | `any`・`all`・`count` | — | String・Bytes・List[A]・Deque[A]・Set[A]・Heap[A]・Map[K, V] |
 | 入れ物 | `Membership` | `Container` | `contains` | — | Sequence.contains（Element: Equatable） | List[A]・Deque[A]・Set[A]・Heap[A] |
-| 入れ物 | `Sequence` | `Container` | `fold`・`find` | `find` | Sequence | String・Bytes・List[A]・Deque[A]・Set[A]・Map[K, V] |
-| 入れ物 | `Ordered` | `Sequence` | `first`・`last`・`reverse`・`take`・`drop`・`take_end`・`drop_end`・`slice` | — | BidirectionalCollection | String・Bytes・List[A]・Deque[A] |
+| 入れ物 | `Sequence` | `Container` | `fold`・`find`・`enumerate`・`zip`・`zip_with`・`filter_map`・`find_map`・`reduce`・`scan`・`partition`・`group_by`・`sort`・`sort_by`・`sort_with`・`min`・`max`・`min_by`・`max_by`・`min_with`・`max_with`・`sum`・`product` | `find`・`enumerate`・`zip`・`zip_with`・`filter_map`・`find_map`・`reduce`・`scan`・`partition`・`group_by`・`sort`・`sort_by`・`sort_with`・`min`・`max`・`min_by`・`max_by`・`min_with`・`max_with`・`sum`・`product` | Sequence | String・Bytes・List[A]・Deque[A]・Set[A]・Map[K, V] |
+| 入れ物 | `Ordered` | `Sequence` | `first`・`last`・`reverse`・`take`・`drop`・`take_end`・`drop_end`・`slice`・`find_index`・`take_while`・`drop_while`・`chunk`・`window`・`split_at`・`dedup`・`intersperse`・`unique`・`unique_by` | `find_index`・`take_while`・`drop_while`・`chunk`・`window`・`split_at`・`dedup`・`intersperse`・`unique`・`unique_by` | BidirectionalCollection | String・Bytes・List[A]・Deque[A] |
 | 入れ物 | `Indexed` | `Ordered` | `get`・`set` | — | RandomAccessCollection・MutableCollection | Bytes・List[A]・Deque[A] |
-| 入れ物 | `Growable` | `Container` | `push`・`pop`・`insert`・`remove_at`・`clear` | — | RangeReplaceableCollection | String・Bytes・List[A]・Deque[A] |
+| 入れ物 | `Growable` | `Container` | `push`・`pop`・`insert`・`remove_at` | — | RangeReplaceableCollection | String・Bytes・List[A]・Deque[A] |
 | 入れ物 | `SetAlgebra` | `Membership` | `insert`・`remove`・`union`・`intersection`・`difference`・`symmetric_difference`・`is_subset`・`is_disjoint` | — | SetAlgebra | Set[A] |
-| 入れ物 | `KeyValue` | `Sized` | `new`・`get`・`set`・`remove`・`contains`・`keys`・`values`・`update`・`upsert`・`merge`・`clear` | — | Dictionary（具体型） | Map[K, V] |
-| 入れ物 | `PriorityQueue` | `Container` | `push`・`pop`・`peek`・`clear` | — | Heap（swift-collections） | Heap[A] |
-| 入れ物 | `Text` | `Ordered` | `contains`・`starts_with`・`ends_with`・`index_of`・`split`・`repeat`・`pad_start`・`pad_end` | — | StringProtocol | String・Bytes |
+| 入れ物 | `KeyValue` | `Sized` | `new`・`get`・`set`・`remove`・`contains`・`keys`・`values`・`update`・`upsert`・`merge` | — | Dictionary（具体型） | Map[K, V] |
+| 入れ物 | `PriorityQueue` | `Container` | `push`・`pop`・`peek` | — | Heap（swift-collections） | Heap[A] |
+| 入れ物 | `Text` | `Ordered` | `contains`・`starts_with`・`ends_with`・`index_of`・`last_index_of`・`count_matches`・`split`・`replace`・`replace_first`・`strip_prefix`・`strip_suffix`・`repeat`・`pad_start`・`pad_end` | — | StringProtocol | String・Bytes |
 | 分野 | `HttpMessage` | — | `header`・`header_values`・`headers`・`body`・`body_bytes`・`set_header`・`set_body`・`set_body_bytes` | — | — | HttpRequest・HttpResponse |
 
 注:
@@ -101,7 +101,7 @@ HttpMessage
 - `Hash`: Map のキー・Set の要素になれる。浮動小数点数は持たない。
 - `Repr`: `"${x}"` の中身。関数の形が `<mod>.to_string`。
 - `Parse`: `parse(to_string(x)) == ok(x)` が成り立つ型だけが持つ。
-- `Ord`: `<` など。`min`・`max`・`clamp` は `compare` から既定の実装で作る。
+- `Ord`: `<` など。2 つの値から選ぶ `min`・`max`・`clamp` は数の protocol の要件（`TimeAmount` の `min` は「分」で、列の `min` は最小の要素なので、`Ord` には置かない）。
 - `Codec`: `encode`・`decode`。導出で付く。
 - `Additive`: `+`・`-` と 0。
 - `Numeric`: `*`。`from`・`from_checked` はどの数の型からでも受け取る変換（R-L0-40。Swift の `init(_:)`・`init(exactly:)`）。
@@ -113,8 +113,8 @@ HttpMessage
 - `Sized`: `is_empty` は `len` から既定の実装。
 - `Container`: 順序に頼らない問い合わせ。`filter` は同じ型を返す（Swift の `RangeReplaceableCollection.filter`）。Swift にない層で、`heap` のように中の順序を外に見せない入れ物のために置く（R-heap-05）。
 - `Membership`: 要素が入っているか。要素が `Eq` のときだけ。
-- `Sequence`: 決まった順に 1 つずつたどれる。
-- `Ordered`: 両端から数えられる。
+- `Sequence`: 決まった順に 1 つずつたどれる。列のアルゴリズムは `fold` からの既定の実装で 1 回だけ書き、どの列でも使える（Swift の `Sequence` の拡張と同じ）。要素の型が変わる結果は `List` を返す。`sum`・`product` は要素が `Numeric`、`sort`・`min`・`max` は要素が `Ord` のときだけ（R-L0-42）。
+- `Ordered`: 両端から数えられる。切り出す関数（`take_while`・`chunk`・`split_at` など）は同じ型を返す（Swift の `SubSequence`）。
 - `Indexed`: 位置で読み書きする。
 - `Growable`: 足し引きできる。`push`・`pop`・`clear` はその場書き換え（`mut`）、`insert`・`remove_at` はコピーを返す。様式は動詞で決まり、どの型でも同じ（R-L0-04。コピーの形は `@reuse` でその場と同じ速さになるので、その場書き換えはバッファを伸ばす・縮める動詞だけに限る）。Swift はすべて `mutating` だが、Almide は値の意味論で関数型の流儀をとる。
 - `KeyValue`: `contains` はキーを受け取る。
@@ -129,17 +129,17 @@ HttpMessage
 | 型 | 準拠 | 関数 | その型だけ | 穴 |
 |---|---|---|---|---|
 | `Bool` | Parse・Hash・Codec | 2 | 0 | なし |
-| `String` | Text・Growable・Ord・Repr・Hash・Codec | 56 | 26 | なし |
-| `Bytes` | Text・Indexed・Growable・Ord・Hash・Codec | 141 | 106 | なし |
-| `List[A]` | Indexed・Growable・Membership・Hash・Codec | 73 | 46 | なし |
-| `Deque[A]` | Indexed・Growable・Membership・Codec | 30 | 3 | なし |
-| `Set[A]` | SetAlgebra・Sequence・Hash・Codec | 22 | 2 | なし |
+| `String` | Text・Growable・Ord・Repr・Hash・Codec | 85 | 21 | なし |
+| `Bytes` | Text・Indexed・Growable・Ord・Hash・Codec | 176 | 105 | なし |
+| `List[A]` | Indexed・Growable・Membership・Hash・Codec | 73 | 16 | なし |
+| `Deque[A]` | Indexed・Growable・Membership・Codec | 60 | 3 | なし |
+| `Set[A]` | SetAlgebra・Sequence・Hash・Codec | 42 | 1 | なし |
 | `Heap[A]` | PriorityQueue・Membership | 16 | 2 | なし |
-| `Map[K, V]` | KeyValue・Sequence・Codec | 22 | 1 | なし |
-| `BigInt` | SignedInteger・Codec | 18 | 3 | なし |
-| `Float` | BinaryFloatingPoint・Codec | 26 | 5 | なし |
-| `Float32` | BinaryFloatingPoint・Codec | 24 | 3 | なし |
-| `Float64` | BinaryFloatingPoint・Codec | 24 | 3 | なし |
+| `Map[K, V]` | KeyValue・Sequence・Codec | 37 | 1 | なし |
+| `BigInt` | SignedInteger・Codec | 18 | 0 | なし |
+| `Float` | BinaryFloatingPoint・Codec | 26 | 2 | なし |
+| `Float32` | BinaryFloatingPoint・Codec | 24 | 0 | なし |
+| `Float64` | BinaryFloatingPoint・Codec | 24 | 0 | なし |
 | `Duration` | TimeAmount・Hash・Codec | 7 | 0 | なし |
 | `Compute` | TimeAmount・Hash | 7 | 0 | なし |
 | `Uuid` | Parse・Ord・Hash・Codec | 7 | 4 | なし |
@@ -150,15 +150,15 @@ HttpMessage
 | `Matrix` | Repr・Eq | 25 | 25 | なし |
 | `Regex` | Repr | 15 | 15 | なし |
 | `HttpRequest・HttpResponse` | HttpMessage | 34 | 26 | なし |
-| `Int` | FixedWidthInteger・SignedInteger・Codec | 38 | 10 | なし |
-| `Int8` | FixedWidthInteger・SignedInteger・Codec | 31 | 3 | なし |
-| `Int16` | FixedWidthInteger・SignedInteger・Codec | 31 | 3 | なし |
-| `Int32` | FixedWidthInteger・SignedInteger・Codec | 31 | 3 | なし |
-| `Int64` | FixedWidthInteger・SignedInteger・Codec | 31 | 3 | なし |
-| `UInt8` | FixedWidthInteger・UnsignedInteger・Codec | 29 | 3 | なし |
-| `UInt16` | FixedWidthInteger・UnsignedInteger・Codec | 29 | 3 | なし |
-| `UInt32` | FixedWidthInteger・UnsignedInteger・Codec | 29 | 3 | なし |
-| `UInt64` | FixedWidthInteger・UnsignedInteger・Codec | 29 | 3 | なし |
+| `Int` | FixedWidthInteger・SignedInteger・Codec | 38 | 7 | なし |
+| `Int8` | FixedWidthInteger・SignedInteger・Codec | 31 | 0 | なし |
+| `Int16` | FixedWidthInteger・SignedInteger・Codec | 31 | 0 | なし |
+| `Int32` | FixedWidthInteger・SignedInteger・Codec | 31 | 0 | なし |
+| `Int64` | FixedWidthInteger・SignedInteger・Codec | 31 | 0 | なし |
+| `UInt8` | FixedWidthInteger・UnsignedInteger・Codec | 29 | 0 | なし |
+| `UInt16` | FixedWidthInteger・UnsignedInteger・Codec | 29 | 0 | なし |
+| `UInt32` | FixedWidthInteger・UnsignedInteger・Codec | 29 | 0 | なし |
+| `UInt64` | FixedWidthInteger・UnsignedInteger・Codec | 29 | 0 | なし |
 
 ## この階層で決めたこと
 
@@ -197,17 +197,14 @@ HttpMessage
 
 ## その型だけの関数
 
-- `String`（26）: `byte_len`、`byte_slice`、`capitalize`、`from_codepoint`、`from_utf16`、`get`、`is_alpha`、`is_alphanumeric`、`is_digit`、`is_lower`、`is_upper`、`is_whitespace`、`last_index_of`、`lines`、`replace`、`replace_first`、`split_once`、`strip_prefix`、`strip_suffix`、`to_codepoint`、`to_lower`、`to_upper`、`to_utf16`、`trim`、`trim_end`、`trim_start`
-- `Bytes`（106）: `append_bool`、`append_bytes`、`append_f16_be`、`append_f16_le`、`append_f32_be`、`append_f32_le`、`append_f64_be`、`append_f64_le`、`append_i16_be`、`append_i16_le`、`append_i32_be`、`append_i32_le`、`append_i64_be`、`append_i64_le`、`append_i8`、`append_u16_be`、`append_u16_le`、`append_u32_be`、`append_u32_le`、`append_u8`、`chunk`、`copy_from`、`copy_within`、`fill`、`from_string`、`get_bool`、`get_f16_be`、`get_f16_be_array`、`get_f16_le`、`get_f16_le_array`、`get_f32_be`、`get_f32_be_array`、`get_f32_le`、`get_f32_le_array`、`get_f64_be`、`get_f64_be_array`、`get_f64_le`、`get_f64_le_array`、`get_i16_be`、`get_i16_be_array`、`get_i16_le`、`get_i16_le_array`、`get_i32_be`、`get_i32_be_array`、`get_i32_le`、`get_i32_le_array`、`get_i64_be`、`get_i64_be_array`、`get_i64_le`、`get_i64_le_array`、`get_i8`、`get_u16_be`、`get_u16_be_array`、`get_u16_le`、`get_u16_le_array`、`get_u32_be`、`get_u32_be_array`、`get_u32_le`、`get_u32_le_array`、`get_u8`、`is_eof`、`is_valid_utf8`、`map`、`next_bool`、`next_bytes`、`next_f16_be`、`next_f16_le`、`next_f32_be`、`next_f32_le`、`next_f64_be`、`next_f64_le`、`next_i16_be`、`next_i16_le`、`next_i32_be`、`next_i32_le`、`next_i64_be`、`next_i64_le`、`next_i8`、`next_u16_be`、`next_u16_le`、`next_u32_be`、`next_u32_le`、`next_u8`、`put_bool`、`put_f16_be`、`put_f16_le`、`put_f32_be`、`put_f32_le`、`put_f64_be`、`put_f64_le`、`put_i16_be`、`put_i16_le`、`put_i32_be`、`put_i32_le`、`put_i64_be`、`put_i64_le`、`put_i8`、`put_u16_be`、`put_u16_le`、`put_u32_be`、`put_u32_le`、`put_u8`、`skip`、`to_string`、`to_string_lossy`、`xor`
-- `List[A]`（46）: `binary_search`、`binary_search_by`、`binary_search_with`、`chunk`、`dedup`、`drop_while`、`enumerate`、`filter_map`、`find_index`、`find_map`、`flat_map`、`flatten`、`group_by`、`index_of`、`intersperse`、`iterate`、`join`、`map`、`max`、`max_by`、`max_with`、`min`、`min_by`、`min_with`、`partition`、`product`、`range`、`range_step`、`reduce`、`repeat`、`scan`、`sort`、`sort_by`、`sort_with`、`split_at`、`sum`、`swap`、`take_while`、`unique`、`unique_by`、`unzip`、`update`、`window`、`with_capacity`、`zip`、`zip_with`
+- `String`（21）: `byte_len`、`byte_slice`、`capitalize`、`from_codepoint`、`from_utf16`、`get`、`is_alpha`、`is_alphanumeric`、`is_digit`、`is_lower`、`is_upper`、`is_whitespace`、`lines`、`split_once`、`to_codepoint`、`to_lower`、`to_upper`、`to_utf16`、`trim`、`trim_end`、`trim_start`
+- `Bytes`（105）: `append_bool`、`append_bytes`、`append_f16_be`、`append_f16_le`、`append_f32_be`、`append_f32_le`、`append_f64_be`、`append_f64_le`、`append_i16_be`、`append_i16_le`、`append_i32_be`、`append_i32_le`、`append_i64_be`、`append_i64_le`、`append_i8`、`append_u16_be`、`append_u16_le`、`append_u32_be`、`append_u32_le`、`append_u8`、`copy_from`、`copy_within`、`fill`、`from_string`、`get_bool`、`get_f16_be`、`get_f16_be_array`、`get_f16_le`、`get_f16_le_array`、`get_f32_be`、`get_f32_be_array`、`get_f32_le`、`get_f32_le_array`、`get_f64_be`、`get_f64_be_array`、`get_f64_le`、`get_f64_le_array`、`get_i16_be`、`get_i16_be_array`、`get_i16_le`、`get_i16_le_array`、`get_i32_be`、`get_i32_be_array`、`get_i32_le`、`get_i32_le_array`、`get_i64_be`、`get_i64_be_array`、`get_i64_le`、`get_i64_le_array`、`get_i8`、`get_u16_be`、`get_u16_be_array`、`get_u16_le`、`get_u16_le_array`、`get_u32_be`、`get_u32_be_array`、`get_u32_le`、`get_u32_le_array`、`get_u8`、`is_eof`、`is_valid_utf8`、`map`、`next_bool`、`next_bytes`、`next_f16_be`、`next_f16_le`、`next_f32_be`、`next_f32_le`、`next_f64_be`、`next_f64_le`、`next_i16_be`、`next_i16_le`、`next_i32_be`、`next_i32_le`、`next_i64_be`、`next_i64_le`、`next_i8`、`next_u16_be`、`next_u16_le`、`next_u32_be`、`next_u32_le`、`next_u8`、`put_bool`、`put_f16_be`、`put_f16_le`、`put_f32_be`、`put_f32_le`、`put_f64_be`、`put_f64_le`、`put_i16_be`、`put_i16_le`、`put_i32_be`、`put_i32_le`、`put_i64_be`、`put_i64_le`、`put_i8`、`put_u16_be`、`put_u16_le`、`put_u32_be`、`put_u32_le`、`put_u8`、`skip`、`to_string`、`to_string_lossy`、`xor`
+- `List[A]`（16）: `binary_search`、`binary_search_by`、`binary_search_with`、`flat_map`、`flatten`、`index_of`、`iterate`、`join`、`map`、`range`、`range_step`、`repeat`、`swap`、`unzip`、`update`、`with_capacity`
 - `Deque[A]`（3）: `map`、`pop_front`、`push_front`
-- `Set[A]`（2）: `clear`、`map`
+- `Set[A]`（1）: `map`
 - `Heap[A]`（2）: `new_by`、`new_with`
 - `Map[K, V]`（1）: `map`
-- `BigInt`（3）: `clamp`、`max`、`min`
-- `Float`（5）: `clamp`、`max`、`min`、`pow`、`to_fixed`
-- `Float32`（3）: `clamp`、`max`、`min`
-- `Float64`（3）: `clamp`、`max`、`min`
+- `Float`（2）: `pow`、`to_fixed`
 - `Uuid`（4）: `from_bytes`、`to_bytes`、`v4`、`v7`
 - `Url`（7）: `build_query`、`decode_component`、`decode_form`、`encode_component`、`encode_form`、`parse_query`、`resolve`
 - `Option[A]`（13）: `collect`、`collect_map`、`filter`、`flat_map`、`flatten`、`is_none`、`is_some`、`map`、`or_else`、`to_list`、`to_result`、`unwrap_or_else`、`zip`
@@ -216,12 +213,4 @@ HttpMessage
 - `Matrix`（25）: `broadcast_add_row`、`cols`、`concat_cols`、`concat_rows`、`dot_row`、`from_bytes_f16_le`、`from_bytes_f32_le`、`from_bytes_f64_le`、`from_lists`、`gather_rows`、`get`、`map`、`ones`、`rows`、`scale`、`shape`、`slice_rows`、`split_cols_even`、`to_bytes_f16_le`、`to_bytes_f32_le`、`to_bytes_f64_le`、`to_lists`、`transpose`、`zeros`、`zip_with`
 - `Regex`（15）: `captures`、`captures_all`、`compile`、`escape`、`find`、`find_all`、`index_of`、`is_full_match`、`is_match`、`new`、`replace`、`replace_first`、`replace_first_with`、`replace_with`、`split`
 - `HttpRequest・HttpResponse`（26）: `cancel`、`decode_json`、`get`、`get_response`、`json`、`method`、`mount`、`new_request`、`param`、`path`、`poll`、`query_params`、`read_new`、`redirect`、`request`、`response`、`route`、`router`、`send`、`serve`、`set_status`、`start`、`status`、`wait`、`with_headers`、`wrap`
-- `Int`（10）: `bit_reverse`、`clamp`、`log2_ceil`、`log2_floor`、`max`、`min`、`next_power_of_two`、`prev_power_of_two`、`to_hex`、`wrap`
-- `Int8`（3）: `clamp`、`max`、`min`
-- `Int16`（3）: `clamp`、`max`、`min`
-- `Int32`（3）: `clamp`、`max`、`min`
-- `Int64`（3）: `clamp`、`max`、`min`
-- `UInt8`（3）: `clamp`、`max`、`min`
-- `UInt16`（3）: `clamp`、`max`、`min`
-- `UInt32`（3）: `clamp`、`max`、`min`
-- `UInt64`（3）: `clamp`、`max`、`min`
+- `Int`（7）: `bit_reverse`、`log2_ceil`、`log2_floor`、`next_power_of_two`、`prev_power_of_two`、`to_hex`、`wrap`

@@ -38,20 +38,20 @@
 
 | いまの関数 | リデザイン後 | 据え置き | 新規 | 改名 | 意味変更 | 撤去 |
 |---:|---:|---:|---:|---:|---:|---:|
-| 1001 | 1100 | 419 | 517 | 86 | 78 | 418 |
+| 1001 | 1229 | 418 | 646 | 87 | 78 | 418 |
 
 固定幅の数（`int8`〜`uint64`、`float32`・`float64`）は型ごとに 1 関数と数えます。
 
 ## 実体の数
 
-この一覧は、同じ protocol の関数を型ごとに 1 行と数えています（計 1,100 行）。[protocol の階層](protocol-view.md)で数え直すと、覚える名前はずっと少なくなります。
+この一覧は、同じ protocol の関数を型ごとに 1 行と数えています（計 1,229 行）。[protocol の階層](protocol-view.md)で数え直すと、覚える名前はずっと少なくなります。
 
 | 数え方 | 一覧の行 | 覚える名前 |
 |---|---:|---:|
-| protocol の要件（protocol ごとに 1 回） | 525 | 115 |
-| 値の型だけが持つ関数 | 367 | 367 |
+| protocol の要件（protocol ごとに 1 回） | 730 | 155 |
+| 値の型だけが持つ関数 | 291 | 291 |
 | 値の型を持たないモジュール（`fs`・`http`・`math` など） | 208 | 208 |
-| 計 | 1100 | 690 |
+| 計 | 1229 | 654 |
 
 ## モジュールごとの数
 
@@ -61,10 +61,10 @@
 | [`base64`](#base64) | 4 | 0 | 0 | 2 | 0 | [L2-base64.md](L2-base64.md) |
 | [`bigint`](#bigint)（新しいモジュール） | 18 | 18 | 0 | 0 | 0 | [L2-bigint.md](L2-bigint.md) |
 | [`bool`](#bool) | 2 | 2 | 0 | 0 | 0 | [L2-bool.md](L2-bool.md) |
-| [`bytes`](#bytes) | 141 | 27 | 71 | 6 | 34 | [L2-bytes.md](L2-bytes.md) |
+| [`bytes`](#bytes) | 176 | 62 | 71 | 6 | 34 | [L2-bytes.md](L2-bytes.md) |
 | [`compute`](#compute) | 7 | 1 | 0 | 0 | 0 | [L2-compute.md](L2-compute.md) |
 | [`datetime`](#datetime) | 18 | 1 | 0 | 1 | 5 | [L2-datetime.md](L2-datetime.md) |
-| [`deque`](#deque)（新しいモジュール） | 30 | 30 | 0 | 0 | 0 | [L2-deque.md](L2-deque.md) |
+| [`deque`](#deque)（新しいモジュール） | 60 | 60 | 0 | 0 | 0 | [L2-deque.md](L2-deque.md) |
 | [`duration`](#duration) | 7 | 1 | 0 | 0 | 0 | [L2-duration.md](L2-duration.md) |
 | [`env`](#env) | 8 | 2 | 0 | 0 | 3 | [L2-env.md](L2-env.md) |
 | `error`（モジュールごと撤去） | 0 | 0 | 0 | 0 | 3 | [L2-error.md](L2-error.md) |
@@ -86,7 +86,7 @@
 | [`io`](#io) | 7 | 3 | 0 | 2 | 4 | [L2-io.md](L2-io.md) |
 | [`json`](#json) | 3 | 0 | 0 | 1 | 12 | [L2-json.md](L2-json.md) |
 | [`list`](#list) | 73 | 12 | 0 | 16 | 6 | [L2-list.md](L2-list.md) |
-| [`map`](#map) | 22 | 0 | 1 | 7 | 3 | [L2-map.md](L2-map.md) |
+| [`map`](#map) | 37 | 15 | 1 | 7 | 3 | [L2-map.md](L2-map.md) |
 | [`math`](#math) | 27 | 12 | 0 | 0 | 8 | [L2-math.md](L2-math.md) |
 | [`matrix`](#matrix) | 25 | 3 | 0 | 7 | 24 | [L2-matrix.md](L2-matrix.md) |
 | [`net`](#net) | 22 | 9 | 0 | 1 | 13 | [L2-net.md](L2-net.md) |
@@ -96,8 +96,8 @@
 | [`random`](#random) | 10 | 6 | 0 | 0 | 0 | [L2-random.md](L2-random.md) |
 | [`regex`](#regex) | 15 | 7 | 1 | 7 | 0 | [L2-regex.md](L2-regex.md) |
 | [`result`](#result) | 14 | 0 | 0 | 0 | 1 | [L2-result.md](L2-result.md) |
-| [`set`](#set) | 22 | 3 | 0 | 0 | 0 | [L2-set.md](L2-set.md) |
-| [`string`](#string) | 56 | 11 | 2 | 2 | 5 | [L2-string.md](L2-string.md) |
+| [`set`](#set) | 42 | 23 | 0 | 0 | 0 | [L2-set.md](L2-set.md) |
+| [`string`](#string) | 85 | 40 | 3 | 2 | 5 | [L2-string.md](L2-string.md) |
 | [`testing`](#testing) | 10 | 0 | 0 | 2 | 0 | [L2-testing.md](L2-testing.md) |
 | [`uint16`](#uint16) | 29 | 26 | 0 | 0 | 15 | [L2-sized-numbers.md](L2-sized-numbers.md) |
 | [`uint32`](#uint32) | 29 | 26 | 0 | 0 | 19 | [L2-sized-numbers.md](L2-sized-numbers.md) |
@@ -202,19 +202,26 @@
 | `append_u32_be` | `fn bytes.append_u32_be(mut b: Bytes, x: Int) -> Unit` |  |  |
 | `append_u32_le` | `fn bytes.append_u32_le(mut b: Bytes, x: Int) -> Unit` |  |  |
 | `append_u8` | `fn bytes.append_u8(mut b: Bytes, x: Int) -> Unit` |  | R-bytes-25 |
-| `chunk` | `fn bytes.chunk(b: Bytes, size: Int) -> List[Bytes]` | 改名（旧 `chunks`） | R-bytes-08 |
+| `chunk` | `fn bytes.chunk(b: Bytes, n: Int) -> List[Bytes]` | 改名（旧 `chunks`） | R-bytes-08 |
 | `clear` | `fn bytes.clear(mut b: Bytes) -> Unit` |  |  |
 | `compare` | `fn bytes.compare(a: Bytes, b: Bytes) -> Int` | 改名（旧 `cmp`） | R-bytes-08 |
-| `contains` | `fn bytes.contains(b: Bytes, pattern: Bytes) -> Bool` |  |  |
+| `contains` | `fn bytes.contains(b: Bytes, needle: Bytes) -> Bool` |  |  |
 | `copy_from` | `fn bytes.copy_from(mut b: Bytes, src: Bytes, dst_off: Int, src_off: Int, len: Int) -> Unit` |  |  |
 | `copy_within` | `fn bytes.copy_within(mut b: Bytes, src_start: Int, src_end: Int, dst: Int) -> Unit` |  |  |
 | `count` | `fn bytes.count(b: Bytes, f: (Int) -> Bool) -> Int` | 新規 | R-bytes-18 |
+| `count_matches` | `fn bytes.count_matches(b: Bytes, needle: Bytes) -> Int` | 新規 | R-bytes-27 |
+| `dedup` | `fn bytes.dedup(b: Bytes) -> Bytes` | 新規 | R-L0-42 |
 | `drop` | `fn bytes.drop(b: Bytes, n: Int) -> Bytes` | 新規。負の数は abort。R-L0-29 | R-bytes-08 |
 | `drop_end` | `fn bytes.drop_end(b: Bytes, n: Int) -> Bytes` | 新規。負の数は abort。R-L0-29 | R-bytes-08 |
+| `drop_while` | `fn bytes.drop_while(b: Bytes, f: (Int) -> Bool) -> Bytes` | 新規 | R-L0-42 |
 | `ends_with` | `fn bytes.ends_with(b: Bytes, suffix: Bytes) -> Bool` |  |  |
+| `enumerate` | `fn bytes.enumerate(b: Bytes) -> List[(Int, Int)]` | 新規 | R-L0-42 |
 | `fill` | `fn bytes.fill(mut b: Bytes, x: Int) -> Unit` |  |  |
 | `filter` | `fn bytes.filter(b: Bytes, f: (Int) -> Bool) -> Bytes` | 新規 | R-bytes-18 |
+| `filter_map` | `fn bytes.filter_map(b: Bytes, f: (Int) -> B?) -> List[B]` | 新規 | R-L0-42 |
 | `find` | `fn bytes.find(b: Bytes, f: (Int) -> Bool) -> Int?` | 新規 | R-bytes-18 |
+| `find_index` | `fn bytes.find_index(b: Bytes, f: (Int) -> Bool) -> Int?` | 新規 | R-L0-42 |
+| `find_map` | `fn bytes.find_map(b: Bytes, f: (Int) -> B?) -> B?` | 新規 | R-L0-42 |
 | `first` | `fn bytes.first(b: Bytes) -> Int?` | 新規 | R-bytes-20 |
 | `fold` | `fn bytes.fold(b: Bytes, init: B, f: (B, Int) -> B) -> B` | 新規 | R-bytes-18 |
 | `from_list` | `fn bytes.from_list(xs: List[Int]) -> Bytes` |  |  |
@@ -255,14 +262,23 @@
 | `get_u32_le` | `fn bytes.get_u32_le(b: Bytes, pos: Int) -> Int?` | 改名（旧 `read_u32_le`）。範囲外は 0 ではなく none | R-bytes-09 |
 | `get_u32_le_array` | `fn bytes.get_u32_le_array(b: Bytes, pos: Int, count: Int) -> List[Int]?` | 改名（旧 `read_u32_le_array`）。範囲外は 0 ではなく none | R-bytes-09 |
 | `get_u8` | `fn bytes.get_u8(b: Bytes, pos: Int) -> Int?` | 新規 | R-bytes-25 |
-| `index_of` | `fn bytes.index_of(b: Bytes, pattern: Bytes) -> Int?` |  |  |
+| `group_by` | `fn bytes.group_by(b: Bytes, f: (Int) -> B) -> Map[B, List[Int]]` | 新規 | R-L0-42 |
+| `index_of` | `fn bytes.index_of(b: Bytes, needle: Bytes) -> Int?` |  |  |
 | `insert` | `fn bytes.insert(b: Bytes, i: Int, x: Int) -> Bytes` | 意味変更: `0..=len` の外は abort | R-bytes-11 |
+| `intersperse` | `fn bytes.intersperse(b: Bytes, sep: Int) -> Bytes` | 新規 | R-L0-42 |
 | `is_empty` | `fn bytes.is_empty(b: Bytes) -> Bool` |  |  |
 | `is_eof` | `fn bytes.is_eof(b: Bytes, pos: Int) -> Bool` | 改名（旧 `eof`） | R-bytes-07 |
 | `is_valid_utf8` | `fn bytes.is_valid_utf8(b: Bytes) -> Bool` |  |  |
 | `last` | `fn bytes.last(b: Bytes) -> Int?` | 新規 | R-bytes-20 |
+| `last_index_of` | `fn bytes.last_index_of(b: Bytes, needle: Bytes) -> Int?` | 新規 | R-bytes-27 |
 | `len` | `fn bytes.len(b: Bytes) -> Int` |  |  |
 | `map` | `fn bytes.map(b: Bytes, f: (Int) -> Int) -> Bytes` | 改名（旧 `map_each`） | R-bytes-08 |
+| `max` | `fn bytes.max(b: Bytes) -> Int?` | 新規 | R-L0-42 |
+| `max_by` | `fn bytes.max_by(b: Bytes, f: (Int) -> K) -> Int?` | 新規 | R-L0-42 |
+| `max_with` | `fn bytes.max_with(b: Bytes, cmp: (Int, Int) -> Int) -> Int?` | 新規 | R-L0-42 |
+| `min` | `fn bytes.min(b: Bytes) -> Int?` | 新規 | R-L0-42 |
+| `min_by` | `fn bytes.min_by(b: Bytes, f: (Int) -> K) -> Int?` | 新規 | R-L0-42 |
+| `min_with` | `fn bytes.min_with(b: Bytes, cmp: (Int, Int) -> Int) -> Int?` | 新規 | R-L0-42 |
 | `new` | `fn bytes.new(len: Int) -> Bytes` |  |  |
 | `next_bool` | `fn bytes.next_bool(b: Bytes, pos: Int) -> (Bool?, Int)` | 改名（旧 `read_bool_at`）。`(値, 次の位置)` を返す | R-bytes-13 |
 | `next_bytes` | `fn bytes.next_bytes(b: Bytes, pos: Int, n: Int) -> (Bytes?, Int)` | 改名（旧 `take_at`）。`(値, 次の位置)` を返す | R-bytes-13 |
@@ -284,9 +300,11 @@
 | `next_u32_be` | `fn bytes.next_u32_be(b: Bytes, pos: Int) -> (Int?, Int)` | 改名（旧 `read_u32_be_at`）。`(値, 次の位置)` を返す | R-bytes-13 |
 | `next_u32_le` | `fn bytes.next_u32_le(b: Bytes, pos: Int) -> (Int?, Int)` | 改名（旧 `read_u32_le_at`）。`(値, 次の位置)` を返す | R-bytes-13 |
 | `next_u8` | `fn bytes.next_u8(b: Bytes, pos: Int) -> (Int?, Int)` | 改名（旧 `read_u8_at`）。`(値, 次の位置)` を返す | R-bytes-13 |
-| `pad_end` | `fn bytes.pad_end(b: Bytes, target_len: Int, x: Int) -> Bytes` | 改名（旧 `pad_right`） | R-bytes-08 |
-| `pad_start` | `fn bytes.pad_start(b: Bytes, target_len: Int, x: Int) -> Bytes` | 改名（旧 `pad_left`） | R-bytes-08 |
+| `pad_end` | `fn bytes.pad_end(b: Bytes, n: Int, fill: Int) -> Bytes` | 改名（旧 `pad_right`） | R-bytes-08 |
+| `pad_start` | `fn bytes.pad_start(b: Bytes, n: Int, fill: Int) -> Bytes` | 改名（旧 `pad_left`） | R-bytes-08 |
+| `partition` | `fn bytes.partition(b: Bytes, f: (Int) -> Bool) -> (List[Int], List[Int])` | 新規 | R-L0-42 |
 | `pop` | `fn bytes.pop(mut b: Bytes) -> Int?` | 新規 | R-bytes-20 |
+| `product` | `fn bytes.product(b: Bytes) -> Int` | 新規 | R-L0-42 |
 | `push` | `fn bytes.push(mut b: Bytes, x: Int) -> Unit` |  | R-bytes-02 |
 | `put_bool` | `fn bytes.put_bool(mut b: Bytes, pos: Int, x: Bool) -> Unit` | 新規。範囲外は abort | R-bytes-03、R-bytes-11 |
 | `put_f16_be` | `fn bytes.put_f16_be(mut b: Bytes, pos: Int, x: Float) -> Unit` | 新規 | R-bytes-03 |
@@ -307,20 +325,37 @@
 | `put_u32_be` | `fn bytes.put_u32_be(mut b: Bytes, pos: Int, x: Int) -> Unit` | 改名（旧 `set_u32_be`）。範囲外は abort | R-bytes-01、R-bytes-11 |
 | `put_u32_le` | `fn bytes.put_u32_le(mut b: Bytes, pos: Int, x: Int) -> Unit` | 改名（旧 `set_u32_le`）。範囲外は abort | R-bytes-01、R-bytes-11 |
 | `put_u8` | `fn bytes.put_u8(mut b: Bytes, pos: Int, x: Int) -> Unit` | 改名（旧 `set_u8`）。範囲外は abort | R-bytes-01、R-bytes-11 |
+| `reduce` | `fn bytes.reduce(b: Bytes, f: (Int, Int) -> Int) -> Int?` | 新規 | R-L0-42 |
 | `remove_at` | `fn bytes.remove_at(b: Bytes, i: Int) -> Bytes` | 意味変更: 範囲外は abort | R-bytes-11 |
 | `repeat` | `fn bytes.repeat(b: Bytes, n: Int) -> Bytes` |  |  |
+| `replace` | `fn bytes.replace(b: Bytes, from: Bytes, to: Bytes) -> Bytes` | 新規 | R-bytes-27 |
+| `replace_first` | `fn bytes.replace_first(b: Bytes, from: Bytes, to: Bytes) -> Bytes` | 新規 | R-bytes-27 |
 | `reverse` | `fn bytes.reverse(b: Bytes) -> Bytes` |  |  |
+| `scan` | `fn bytes.scan(b: Bytes, init: B, f: (B, Int) -> B) -> List[B]` | 新規 | R-L0-42 |
 | `set` | `fn bytes.set(b: Bytes, i: Int, x: Int) -> Bytes` | 意味変更: 範囲外は abort | R-bytes-11 |
 | `skip` | `fn bytes.skip(b: Bytes, pos: Int, n: Int) -> Int` | 意味変更: `n < 0` は abort | R-bytes-13、R-bytes-21 |
 | `slice` | `fn bytes.slice(b: Bytes, start: Int, end: Int) -> Bytes` | 意味変更: 負の位置は abort。R-L0-29 | R-bytes-12、R-L0-29 |
+| `sort` | `fn bytes.sort(b: Bytes) -> List[Int]` | 新規 | R-L0-42 |
+| `sort_by` | `fn bytes.sort_by(b: Bytes, f: (Int) -> B) -> List[Int]` | 新規 | R-L0-42 |
+| `sort_with` | `fn bytes.sort_with(b: Bytes, cmp: (Int, Int) -> Int) -> List[Int]` | 新規 | R-L0-42 |
 | `split` | `fn bytes.split(b: Bytes, sep: Bytes) -> List[Bytes]` |  |  |
+| `split_at` | `fn bytes.split_at(b: Bytes, n: Int) -> (Bytes, Bytes)` | 新規 | R-L0-42 |
 | `starts_with` | `fn bytes.starts_with(b: Bytes, prefix: Bytes) -> Bool` |  |  |
+| `strip_prefix` | `fn bytes.strip_prefix(b: Bytes, prefix: Bytes) -> Bytes?` | 新規 | R-bytes-27 |
+| `strip_suffix` | `fn bytes.strip_suffix(b: Bytes, suffix: Bytes) -> Bytes?` | 新規 | R-bytes-27 |
+| `sum` | `fn bytes.sum(b: Bytes) -> Int` | 新規 | R-L0-42 |
 | `take` | `fn bytes.take(b: Bytes, n: Int) -> Bytes` | 新規。負の数は abort。R-L0-29 | R-bytes-08 |
 | `take_end` | `fn bytes.take_end(b: Bytes, n: Int) -> Bytes` | 新規。負の数は abort。R-L0-29 | R-bytes-08 |
+| `take_while` | `fn bytes.take_while(b: Bytes, f: (Int) -> Bool) -> Bytes` | 新規 | R-L0-42 |
 | `to_list` | `fn bytes.to_list(b: Bytes) -> List[Int]` |  |  |
 | `to_string` | `fn bytes.to_string(b: Bytes) -> Result[String, String]` |  | R-bytes-10 |
 | `to_string_lossy` | `fn bytes.to_string_lossy(b: Bytes) -> String` |  | R-bytes-10 |
+| `unique` | `fn bytes.unique(b: Bytes) -> Bytes` | 新規 | R-L0-42 |
+| `unique_by` | `fn bytes.unique_by(b: Bytes, f: (Int) -> K) -> Bytes` | 新規 | R-L0-42 |
+| `window` | `fn bytes.window(b: Bytes, n: Int) -> List[Bytes]` | 新規 | R-L0-42 |
 | `xor` | `fn bytes.xor(a: Bytes, b: Bytes) -> Bytes` | 意味変更: 長さが違うと abort | R-bytes-23 |
+| `zip` | `fn bytes.zip(b: Bytes, ys: List[B]) -> List[(Int, B)]` | 新規 | R-L0-42 |
+| `zip_with` | `fn bytes.zip_with(b: Bytes, ys: List[B], f: (Int, B) -> C) -> List[C]` | 新規 | R-L0-42 |
 
 撤去（34）:
 
@@ -419,34 +454,64 @@
 |---|---|---|---|
 | `all` | `fn deque.all[A](d: Deque[A], f: (A) -> Bool) -> Bool` | 新規 | R-deque-02 |
 | `any` | `fn deque.any[A](d: Deque[A], f: (A) -> Bool) -> Bool` | 新規 | R-deque-02 |
+| `chunk` | `fn deque.chunk(d: Deque[A], n: Int) -> List[Deque[A]]` | 新規 | R-L0-42 |
 | `clear` | `fn deque.clear[A](mut d: Deque[A]) -> Unit` | 新規 | R-deque-02、R-L0-04 |
 | `contains` | `fn deque.contains[A](d: Deque[A], x: A) -> Bool` | 新規 | R-deque-02 |
 | `count` | `fn deque.count[A](d: Deque[A], f: (A) -> Bool) -> Int` | 新規 | R-deque-02 |
+| `dedup` | `fn deque.dedup(d: Deque[A]) -> Deque[A]` | 新規 | R-L0-42 |
 | `drop` | `fn deque.drop[A](d: Deque[A], n: Int) -> Deque[A]` | 新規 | R-deque-04 |
 | `drop_end` | `fn deque.drop_end[A](d: Deque[A], n: Int) -> Deque[A]` | 新規 | R-deque-04 |
+| `drop_while` | `fn deque.drop_while(d: Deque[A], f: (A) -> Bool) -> Deque[A]` | 新規 | R-L0-42 |
+| `enumerate` | `fn deque.enumerate(d: Deque[A]) -> List[(Int, A)]` | 新規 | R-L0-42 |
 | `filter` | `fn deque.filter[A](d: Deque[A], f: (A) -> Bool) -> Deque[A]` | 新規 | R-deque-02 |
+| `filter_map` | `fn deque.filter_map(d: Deque[A], f: (A) -> B?) -> List[B]` | 新規 | R-L0-42 |
 | `find` | `fn deque.find[A](d: Deque[A], f: (A) -> Bool) -> A?` | 新規 | R-deque-02 |
+| `find_index` | `fn deque.find_index(d: Deque[A], f: (A) -> Bool) -> Int?` | 新規 | R-L0-42 |
+| `find_map` | `fn deque.find_map(d: Deque[A], f: (A) -> B?) -> B?` | 新規 | R-L0-42 |
 | `first` | `fn deque.first[A](d: Deque[A]) -> A?` | 新規 | R-deque-01 |
 | `fold` | `fn deque.fold[A, B](d: Deque[A], init: B, f: (B, A) -> B) -> B` | 新規 | R-deque-02 |
 | `from_list` | `fn deque.from_list[A](xs: List[A]) -> Deque[A]` | 新規 | R-deque-01 |
 | `get` | `fn deque.get[A](d: Deque[A], i: Int) -> A?` | 新規 | R-deque-01 |
+| `group_by` | `fn deque.group_by(d: Deque[A], f: (A) -> B) -> Map[B, List[A]]` | 新規 | R-L0-42 |
 | `insert` | `fn deque.insert[A](d: Deque[A], i: Int, x: A) -> Deque[A]` | 新規 | R-deque-04 |
+| `intersperse` | `fn deque.intersperse(d: Deque[A], sep: A) -> Deque[A]` | 新規 | R-L0-42 |
 | `is_empty` | `fn deque.is_empty[A](d: Deque[A]) -> Bool` | 新規 | R-deque-01 |
 | `last` | `fn deque.last[A](d: Deque[A]) -> A?` | 新規 | R-deque-01 |
 | `len` | `fn deque.len[A](d: Deque[A]) -> Int` | 新規 | R-deque-01 |
 | `map` | `fn deque.map[A, B](d: Deque[A], f: (A) -> B) -> Deque[B]` | 新規 | R-deque-02 |
+| `max` | `fn deque.max(d: Deque[A]) -> A?` | 新規 | R-L0-42 |
+| `max_by` | `fn deque.max_by(d: Deque[A], f: (A) -> K) -> A?` | 新規 | R-L0-42 |
+| `max_with` | `fn deque.max_with(d: Deque[A], cmp: (A, A) -> Int) -> A?` | 新規 | R-L0-42 |
+| `min` | `fn deque.min(d: Deque[A]) -> A?` | 新規 | R-L0-42 |
+| `min_by` | `fn deque.min_by(d: Deque[A], f: (A) -> K) -> A?` | 新規 | R-L0-42 |
+| `min_with` | `fn deque.min_with(d: Deque[A], cmp: (A, A) -> Int) -> A?` | 新規 | R-L0-42 |
 | `new` | `fn deque.new[A]() -> Deque[A]` | 新規 | R-deque-01 |
+| `partition` | `fn deque.partition(d: Deque[A], f: (A) -> Bool) -> (List[A], List[A])` | 新規 | R-L0-42 |
 | `pop` | `fn deque.pop[A](mut d: Deque[A]) -> A?` | 新規 | R-deque-01、R-deque-03 |
 | `pop_front` | `fn deque.pop_front[A](mut d: Deque[A]) -> A?` | 新規 | R-deque-01 |
+| `product` | `fn deque.product[A: Numeric](d: Deque[A]) -> A` | 新規 | R-L0-42 |
 | `push` | `fn deque.push[A](mut d: Deque[A], x: A) -> Unit` | 新規 | R-deque-01、R-deque-03 |
 | `push_front` | `fn deque.push_front[A](mut d: Deque[A], x: A) -> Unit` | 新規 | R-deque-01 |
+| `reduce` | `fn deque.reduce(d: Deque[A], f: (A, A) -> A) -> A?` | 新規 | R-L0-42 |
 | `remove_at` | `fn deque.remove_at[A](d: Deque[A], i: Int) -> Deque[A]` | 新規 | R-deque-04 |
 | `reverse` | `fn deque.reverse[A](d: Deque[A]) -> Deque[A]` | 新規 | R-deque-04 |
+| `scan` | `fn deque.scan(d: Deque[A], init: B, f: (B, A) -> B) -> List[B]` | 新規 | R-L0-42 |
 | `set` | `fn deque.set[A](d: Deque[A], i: Int, x: A) -> Deque[A]` | 新規 | R-deque-04 |
 | `slice` | `fn deque.slice[A](d: Deque[A], start: Int, end: Int) -> Deque[A]` | 新規 | R-deque-04 |
+| `sort` | `fn deque.sort(d: Deque[A]) -> List[A]` | 新規 | R-L0-42 |
+| `sort_by` | `fn deque.sort_by(d: Deque[A], f: (A) -> B) -> List[A]` | 新規 | R-L0-42 |
+| `sort_with` | `fn deque.sort_with(d: Deque[A], cmp: (A, A) -> Int) -> List[A]` | 新規 | R-L0-42 |
+| `split_at` | `fn deque.split_at(d: Deque[A], n: Int) -> (Deque[A], Deque[A])` | 新規 | R-L0-42 |
+| `sum` | `fn deque.sum[A: Numeric](d: Deque[A]) -> A` | 新規 | R-L0-42 |
 | `take` | `fn deque.take[A](d: Deque[A], n: Int) -> Deque[A]` | 新規 | R-deque-04 |
 | `take_end` | `fn deque.take_end[A](d: Deque[A], n: Int) -> Deque[A]` | 新規 | R-deque-04 |
+| `take_while` | `fn deque.take_while(d: Deque[A], f: (A) -> Bool) -> Deque[A]` | 新規 | R-L0-42 |
 | `to_list` | `fn deque.to_list[A](d: Deque[A]) -> List[A]` | 新規 | R-deque-01 |
+| `unique` | `fn deque.unique(d: Deque[A]) -> Deque[A]` | 新規 | R-L0-42 |
+| `unique_by` | `fn deque.unique_by(d: Deque[A], f: (A) -> K) -> Deque[A]` | 新規 | R-L0-42 |
+| `window` | `fn deque.window(d: Deque[A], n: Int) -> List[Deque[A]]` | 新規 | R-L0-42 |
+| `zip` | `fn deque.zip(d: Deque[A], ys: List[B]) -> List[(A, B)]` | 新規 | R-L0-42 |
+| `zip_with` | `fn deque.zip_with(d: Deque[A], ys: List[B], f: (A, B) -> C) -> List[C]` | 新規 | R-L0-42 |
 
 ## duration
 
@@ -872,8 +937,8 @@
 | `parse_radix` | `fn int.parse_radix(s: String, radix: Int) -> Result[Int, String]` | 新規 | R-int-04 |
 | `pow` | `fn int.pow(base: Int, exp: Int) -> Int` | 新規 | R-math-01 |
 | `prev_power_of_two` | `fn int.prev_power_of_two(x: Int) -> Int` |  |  |
-| `rotate_left` | `fn int.rotate_left(a: Int, b: Int) -> Int` | 意味変更: `bits` を外し 64 bit で回す | R-int-12 |
-| `rotate_right` | `fn int.rotate_right(a: Int, b: Int) -> Int` | 意味変更: `bits` を外し 64 bit で回す | R-int-12 |
+| `rotate_left` | `fn int.rotate_left(a: Int, n: Int) -> Int` | 意味変更: `bits` を外し 64 bit で回す | R-int-12 |
+| `rotate_right` | `fn int.rotate_right(a: Int, n: Int) -> Int` | 意味変更: `bits` を外し 64 bit で回す | R-int-12 |
 | `sign` | `fn int.sign(x: Int) -> Int` | 新規 | R-math-01 |
 | `to_hex` | `fn int.to_hex(x: Int) -> String` |  | R-int-04（64 bit の並びの 16 進。符号付きの基数変換は `to_string_radix`） |
 | `to_string` | `fn int.to_string(x: Int) -> String` |  |  |
@@ -1274,7 +1339,7 @@
 | `intersperse` | `fn list.intersperse(xs: List[A], sep: A) -> List[A]` |  |  |
 | `is_empty` | `fn list.is_empty(xs: List[A]) -> Bool` |  |  |
 | `iterate` | `fn list.iterate(seed: T, f: (T) -> T, n: Int) -> List[T]` |  |  |
-| `join` | `fn list.join(xs: List[String], sep: String) -> String` ・ `fn list.join(xs: List[Bytes], sep: Bytes) -> Bytes` | 意味変更: `List[Bytes]` と `Bytes` の区切りも受け取る | R-string-01、R-list-16 |
+| `join` | `fn list.join[T: Text](xs: List[T], sep: T) -> T` | 意味変更: `String`・`Bytes` の 2 つの形を、`Text` の総称関数 1 つに | R-L0-42 |
 | `last` | `fn list.last(xs: List[A]) -> A?` |  |  |
 | `len` | `fn list.len(xs: List[A]) -> Int` |  | R-L0-11 |
 | `map` | `fn list.map(xs: List[A], f: (A) -> B) -> List[B]` |  |  |
@@ -1287,7 +1352,7 @@
 | `new` | `fn list.new() -> List[A]` | 新規 | R-list-20 |
 | `partition` | `fn list.partition(xs: List[A], f: (A) -> Bool) -> (List[A], List[A])` |  |  |
 | `pop` | `fn list.pop(mut xs: List[A]) -> A?` |  | R-list-00 |
-| `product` | `fn list.product(xs: List[Int]) -> Int` ・ `fn list.product(xs: List[Float]) -> Float` | 意味変更: `List[Float]` も受け取る | R-list-08 |
+| `product` | `fn list.product[A: Numeric](xs: List[A]) -> A` | 意味変更: `Int`・`Float` の 2 つの形を、数の型すべてを受ける 1 つの総称関数に | R-L0-42 |
 | `push` | `fn list.push(mut xs: List[A], x: A) -> Unit` |  | R-list-00 |
 | `range` | `fn list.range(start: Int, end: Int) -> List[Int]` |  |  |
 | `range_step` | `fn list.range_step(start: Int, end: Int, step: Int) -> List[Int]` | 新規 | R-list-09 |
@@ -1302,7 +1367,7 @@
 | `sort_by` | `fn list.sort_by(xs: List[A], f: (A) -> B) -> List[A]` |  | R-list-06 |
 | `sort_with` | `fn list.sort_with(xs: List[A], cmp: (A, A) -> Int) -> List[A]` | 新規 | R-list-06 |
 | `split_at` | `fn list.split_at(xs: List[T], n: Int) -> (List[T], List[T])` |  |  |
-| `sum` | `fn list.sum(xs: List[Int]) -> Int` ・ `fn list.sum(xs: List[Float]) -> Float` | 意味変更: `List[Float]` も受け取る | R-list-08 |
+| `sum` | `fn list.sum[A: Numeric](xs: List[A]) -> A` | 意味変更: `Int`・`Float` の 2 つの形を、数の型すべてを受ける 1 つの総称関数に | R-L0-42 |
 | `swap` | `fn list.swap(xs: List[A], i: Int, j: Int) -> List[A]` | 意味変更: 範囲外は abort | R-list-00、R-list-13 |
 | `take` | `fn list.take(xs: List[A], n: Int) -> List[A]` | 意味変更: 負の数は abort。R-L0-29 | R-L0-12、R-L0-29 |
 | `take_end` | `fn list.take_end(xs: List[A], n: Int) -> List[A]` | 意味変更: 負の数は abort。R-L0-29 | R-L0-12、R-L0-29 |
@@ -1339,23 +1404,38 @@
 | `clear` | `fn map.clear(mut m: Map[K, V]) -> Unit` |  | — (R-L0-04 の動詞) |
 | `contains` | `fn map.contains(m: Map[K, V], key: K) -> Bool` |  |  |
 | `count` | `fn map.count(m: Map[K, V], f: ((K, V)) -> Bool) -> Int` | 意味変更: callback は組 1 つ。`(k, v) =>` はそのまま書ける | R-map-09 |
+| `enumerate` | `fn map.enumerate(m: Map[K, V]) -> List[(Int, (K, V))]` | 新規 | R-L0-42 |
 | `filter` | `fn map.filter(m: Map[K, V], f: ((K, V)) -> Bool) -> Map[K, V]` | 意味変更: callback は組 1 つ。`(k, v) =>` はそのまま書ける | R-map-09 |
+| `filter_map` | `fn map.filter_map(m: Map[K, V], f: ((K, V)) -> B?) -> List[B]` | 新規 | R-L0-42 |
 | `find` | `fn map.find(m: Map[K, V], f: ((K, V)) -> Bool) -> (K, V)?` | 意味変更: callback は組 1 つ。`(k, v) =>` はそのまま書ける | R-map-09 |
+| `find_map` | `fn map.find_map(m: Map[K, V], f: ((K, V)) -> B?) -> B?` | 新規 | R-L0-42 |
 | `fold` | `fn map.fold(m: Map[K, V], init: A, f: (A, (K, V)) -> A) -> A` | 意味変更: callback の 2 つめは組。`almide fix` が書き換える | R-map-09 |
 | `from_list` | `fn map.from_list(xs: List[(K, V)]) -> Map[K, V]` |  | — (R-L0-07) |
 | `get` | `fn map.get(m: Map[K, V], key: K) -> V?` |  |  |
+| `group_by` | `fn map.group_by(m: Map[K, V], f: ((K, V)) -> B) -> Map[B, List[(K, V)]]` | 新規 | R-L0-42 |
 | `is_empty` | `fn map.is_empty(m: Map[K, V]) -> Bool` |  |  |
 | `keys` | `fn map.keys(m: Map[K, V]) -> List[K]` |  |  |
 | `len` | `fn map.len(m: Map[K, V]) -> Int` |  | — (R-L0-11) |
 | `map` | `fn map.map(m: Map[K, V], f: (V) -> B) -> Map[K, B]` |  | R-map-04 |
+| `max_by` | `fn map.max_by(m: Map[K, V], f: ((K, V)) -> U) -> (K, V)?` | 新規 | R-L0-42 |
+| `max_with` | `fn map.max_with(m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> (K, V)?` | 新規 | R-L0-42 |
 | `merge` | `fn map.merge(a: Map[K, V], b: Map[K, V]) -> Map[K, V]` |  |  |
+| `min_by` | `fn map.min_by(m: Map[K, V], f: ((K, V)) -> U) -> (K, V)?` | 新規 | R-L0-42 |
+| `min_with` | `fn map.min_with(m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> (K, V)?` | 新規 | R-L0-42 |
 | `new` | `fn map.new() -> Map[K, V]` |  |  |
+| `partition` | `fn map.partition(m: Map[K, V], f: ((K, V)) -> Bool) -> (List[(K, V)], List[(K, V)])` | 新規 | R-L0-42 |
+| `reduce` | `fn map.reduce(m: Map[K, V], f: ((K, V), (K, V)) -> (K, V)) -> (K, V)?` | 新規 | R-L0-42 |
 | `remove` | `fn map.remove(m: Map[K, V], key: K) -> Map[K, V]` |  | R-map-01（置き換え先） |
+| `scan` | `fn map.scan(m: Map[K, V], init: B, f: (B, (K, V)) -> B) -> List[B]` | 新規 | R-L0-42 |
 | `set` | `fn map.set(m: Map[K, V], key: K, value: V) -> Map[K, V]` |  | R-map-01（置き換え先） |
+| `sort_by` | `fn map.sort_by(m: Map[K, V], f: ((K, V)) -> B) -> List[(K, V)]` | 新規 | R-L0-42 |
+| `sort_with` | `fn map.sort_with(m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> List[(K, V)]` | 新規 | R-L0-42 |
 | `to_list` | `fn map.to_list(m: Map[K, V]) -> List[(K, V)]` | 改名（旧 `entries`） | R-map-07 |
 | `update` | `fn map.update(m: Map[K, V], key: K, f: (V) -> V) -> Map[K, V]` | 意味変更: キーが無ければ abort | R-map-08 |
 | `upsert` | `fn map.upsert(m: Map[K, V], key: K, init: V, f: (V) -> V) -> Map[K, V]` |  |  |
 | `values` | `fn map.values(m: Map[K, V]) -> List[V]` |  |  |
+| `zip` | `fn map.zip(m: Map[K, V], ys: List[B]) -> List[((K, V), B)]` | 新規 | R-L0-42 |
+| `zip_with` | `fn map.zip_with(m: Map[K, V], ys: List[B], f: ((K, V), B) -> C) -> List[C]` | 新規 | R-L0-42 |
 
 撤去（3）:
 
@@ -1686,10 +1766,14 @@
 | `contains` | `fn set.contains(s: Set[A], x: A) -> Bool` |  |  |
 | `count` | `fn set.count(s: Set[A], f: (A) -> Bool) -> Int` | 新規 | R-set-01 |
 | `difference` | `fn set.difference(a: Set[A], b: Set[A]) -> Set[A]` |  |  |
+| `enumerate` | `fn set.enumerate(s: Set[A]) -> List[(Int, A)]` | 新規 | R-L0-42 |
 | `filter` | `fn set.filter(s: Set[A], f: (A) -> Bool) -> Set[A]` |  | R-map-06 |
+| `filter_map` | `fn set.filter_map(s: Set[A], f: (A) -> B?) -> List[B]` | 新規 | R-L0-42 |
 | `find` | `fn set.find(s: Set[A], f: (A) -> Bool) -> A?` | 新規 | R-set-01 |
+| `find_map` | `fn set.find_map(s: Set[A], f: (A) -> B?) -> B?` | 新規 | R-L0-42 |
 | `fold` | `fn set.fold(s: Set[A], init: B, f: (B, A) -> B) -> B` |  | R-map-06 |
 | `from_list` | `fn set.from_list(xs: List[A]) -> Set[A]` |  | — (R-L0-07) |
+| `group_by` | `fn set.group_by(s: Set[A], f: (A) -> B) -> Map[B, List[A]]` | 新規 | R-L0-42 |
 | `insert` | `fn set.insert(s: Set[A], x: A) -> Set[A]` |  | R-set-04 |
 | `intersection` | `fn set.intersection(a: Set[A], b: Set[A]) -> Set[A]` |  |  |
 | `is_disjoint` | `fn set.is_disjoint(a: Set[A], b: Set[A]) -> Bool` |  |  |
@@ -1697,11 +1781,27 @@
 | `is_subset` | `fn set.is_subset(a: Set[A], b: Set[A]) -> Bool` |  | R-set-02 |
 | `len` | `fn set.len(s: Set[A]) -> Int` |  | — (R-L0-11) |
 | `map` | `fn set.map(s: Set[A], f: (A) -> B) -> Set[B]` |  | R-map-06 |
+| `max` | `fn set.max(s: Set[A]) -> A?` | 新規 | R-L0-42 |
+| `max_by` | `fn set.max_by(s: Set[A], f: (A) -> K) -> A?` | 新規 | R-L0-42 |
+| `max_with` | `fn set.max_with(s: Set[A], cmp: (A, A) -> Int) -> A?` | 新規 | R-L0-42 |
+| `min` | `fn set.min(s: Set[A]) -> A?` | 新規 | R-L0-42 |
+| `min_by` | `fn set.min_by(s: Set[A], f: (A) -> K) -> A?` | 新規 | R-L0-42 |
+| `min_with` | `fn set.min_with(s: Set[A], cmp: (A, A) -> Int) -> A?` | 新規 | R-L0-42 |
 | `new` | `fn set.new() -> Set[A]` |  |  |
+| `partition` | `fn set.partition(s: Set[A], f: (A) -> Bool) -> (List[A], List[A])` | 新規 | R-L0-42 |
+| `product` | `fn set.product[A: Numeric](s: Set[A]) -> A` | 新規 | R-L0-42 |
+| `reduce` | `fn set.reduce(s: Set[A], f: (A, A) -> A) -> A?` | 新規 | R-L0-42 |
 | `remove` | `fn set.remove(s: Set[A], x: A) -> Set[A]` |  |  |
+| `scan` | `fn set.scan(s: Set[A], init: B, f: (B, A) -> B) -> List[B]` | 新規 | R-L0-42 |
+| `sort` | `fn set.sort(s: Set[A]) -> List[A]` | 新規 | R-L0-42 |
+| `sort_by` | `fn set.sort_by(s: Set[A], f: (A) -> B) -> List[A]` | 新規 | R-L0-42 |
+| `sort_with` | `fn set.sort_with(s: Set[A], cmp: (A, A) -> Int) -> List[A]` | 新規 | R-L0-42 |
+| `sum` | `fn set.sum[A: Numeric](s: Set[A]) -> A` | 新規 | R-L0-42 |
 | `symmetric_difference` | `fn set.symmetric_difference(a: Set[A], b: Set[A]) -> Set[A]` |  |  |
 | `to_list` | `fn set.to_list(s: Set[A]) -> List[A]` |  |  |
 | `union` | `fn set.union(a: Set[A], b: Set[A]) -> Set[A]` |  |  |
+| `zip` | `fn set.zip(s: Set[A], ys: List[B]) -> List[(A, B)]` | 新規 | R-L0-42 |
+| `zip_with` | `fn set.zip_with(s: Set[A], ys: List[B], f: (A, B) -> C) -> List[C]` | 新規 | R-L0-42 |
 
 ## string
 
@@ -1712,22 +1812,32 @@
 | `byte_len` | `fn string.byte_len(s: String) -> Int` | 新規 | R-string-06 |
 | `byte_slice` | `fn string.byte_slice(s: String, start: Int, end: Int) -> String?` |  |  |
 | `capitalize` | `fn string.capitalize(s: String) -> String` |  |  |
+| `chunk` | `fn string.chunk(s: String, n: Int) -> List[String]` | 新規 | R-L0-42 |
 | `clear` | `fn string.clear(mut s: String) -> Unit` |  |  |
 | `compare` | `fn string.compare(a: String, b: String) -> Int` | 新規 | R-string-05（R-L0-16） |
-| `contains` | `fn string.contains(s: String, sub: String) -> Bool` |  |  |
-| `count` | `fn string.count(s: String, sub: String) -> Int` |  |  |
+| `contains` | `fn string.contains(s: String, needle: String) -> Bool` |  |  |
+| `count` | `fn string.count(s: String, f: (String) -> Bool) -> Int` | 新規 | R-string-18、R-L0-42 |
+| `count_matches` | `fn string.count_matches(s: String, needle: String) -> Int` | 改名（旧 `count`） | R-string-18 |
+| `dedup` | `fn string.dedup(s: String) -> String` | 新規 | R-L0-42 |
 | `drop` | `fn string.drop(s: String, n: Int) -> String` |  |  |
 | `drop_end` | `fn string.drop_end(s: String, n: Int) -> String` |  |  |
+| `drop_while` | `fn string.drop_while(s: String, f: (String) -> Bool) -> String` | 新規 | R-L0-42 |
 | `ends_with` | `fn string.ends_with(s: String, suffix: String) -> Bool` |  |  |
+| `enumerate` | `fn string.enumerate(s: String) -> List[(Int, String)]` | 新規 | R-L0-42 |
 | `filter` | `fn string.filter(s: String, f: (String) -> Bool) -> String` | 新規 | R-string-16 |
+| `filter_map` | `fn string.filter_map(s: String, f: (String) -> B?) -> List[B]` | 新規 | R-L0-42 |
+| `find_index` | `fn string.find_index(s: String, f: (String) -> Bool) -> Int?` | 新規 | R-L0-42 |
+| `find_map` | `fn string.find_map(s: String, f: (String) -> B?) -> B?` | 新規 | R-L0-42 |
 | `first` | `fn string.first(s: String) -> String?` |  |  |
 | `fold` | `fn string.fold(s: String, init: B, f: (B, String) -> B) -> B` | 新規 | R-string-16 |
 | `from_codepoint` | `fn string.from_codepoint(n: Int) -> String?` | 意味変更: `Option[String]` を返す | R-string-11 |
 | `from_list` | `fn string.from_list(xs: List[String]) -> String` | 新規 | R-string-17 |
 | `from_utf16` | `fn string.from_utf16(xs: List[Int]) -> Result[String, String]` | 新規 | R-string-07 |
 | `get` | `fn string.get(s: String, i: Int) -> String?` |  |  |
+| `group_by` | `fn string.group_by(s: String, f: (String) -> B) -> Map[B, List[String]]` | 新規 | R-L0-42 |
 | `index_of` | `fn string.index_of(s: String, needle: String) -> Int?` |  |  |
-| `insert` | `fn string.insert(s: String, i: Int, sub: String) -> String` | 新規 | R-string-16 |
+| `insert` | `fn string.insert(s: String, i: Int, x: String) -> String` | 新規 | R-string-16 |
+| `intersperse` | `fn string.intersperse(s: String, sep: String) -> String` | 新規 | R-L0-42 |
 | `is_alpha` | `fn string.is_alpha(s: String) -> Bool` |  |  |
 | `is_alphanumeric` | `fn string.is_alphanumeric(s: String) -> Bool` |  |  |
 | `is_digit` | `fn string.is_digit(s: String) -> Bool` |  |  |
@@ -1739,24 +1849,38 @@
 | `last_index_of` | `fn string.last_index_of(s: String, needle: String) -> Int?` |  |  |
 | `len` | `fn string.len(s: String) -> Int` |  |  |
 | `lines` | `fn string.lines(s: String) -> List[String]` |  |  |
+| `max` | `fn string.max(s: String) -> String?` | 新規 | R-L0-42 |
+| `max_by` | `fn string.max_by(s: String, f: (String) -> K) -> String?` | 新規 | R-L0-42 |
+| `max_with` | `fn string.max_with(s: String, cmp: (String, String) -> Int) -> String?` | 新規 | R-L0-42 |
+| `min` | `fn string.min(s: String) -> String?` | 新規 | R-L0-42 |
+| `min_by` | `fn string.min_by(s: String, f: (String) -> K) -> String?` | 新規 | R-L0-42 |
+| `min_with` | `fn string.min_with(s: String, cmp: (String, String) -> Int) -> String?` | 新規 | R-L0-42 |
 | `new` | `fn string.new() -> String` | 新規 | R-string-17 |
-| `pad_end` | `fn string.pad_end(s: String, n: Int, ch: String) -> String` |  |  |
-| `pad_start` | `fn string.pad_start(s: String, n: Int, ch: String) -> String` |  |  |
+| `pad_end` | `fn string.pad_end(s: String, n: Int, fill: String) -> String` |  |  |
+| `pad_start` | `fn string.pad_start(s: String, n: Int, fill: String) -> String` |  |  |
+| `partition` | `fn string.partition(s: String, f: (String) -> Bool) -> (List[String], List[String])` | 新規 | R-L0-42 |
 | `pop` | `fn string.pop(mut s: String) -> String?` | 新規 | R-string-16 |
-| `push` | `fn string.push(mut s: String, suffix: String) -> Unit` |  |  |
+| `push` | `fn string.push(mut s: String, x: String) -> Unit` |  |  |
+| `reduce` | `fn string.reduce(s: String, f: (String, String) -> String) -> String?` | 新規 | R-L0-42 |
 | `remove_at` | `fn string.remove_at(s: String, i: Int) -> String` | 新規 | R-string-16 |
 | `repeat` | `fn string.repeat(s: String, n: Int) -> String` |  |  |
 | `replace` | `fn string.replace(s: String, from: String, to: String) -> String` |  |  |
 | `replace_first` | `fn string.replace_first(s: String, from: String, to: String) -> String` |  |  |
 | `reverse` | `fn string.reverse(s: String) -> String` |  |  |
+| `scan` | `fn string.scan(s: String, init: B, f: (B, String) -> B) -> List[B]` | 新規 | R-L0-42 |
 | `slice` | `fn string.slice(s: String, start: Int, end: Int) -> String` | 意味変更: `end` の既定値を外す。2 引数は `drop` | R-string-15 |
+| `sort` | `fn string.sort(s: String) -> List[String]` | 新規 | R-L0-42 |
+| `sort_by` | `fn string.sort_by(s: String, f: (String) -> B) -> List[String]` | 新規 | R-L0-42 |
+| `sort_with` | `fn string.sort_with(s: String, cmp: (String, String) -> Int) -> List[String]` | 新規 | R-L0-42 |
 | `split` | `fn string.split(s: String, sep: String) -> List[String]` |  |  |
+| `split_at` | `fn string.split_at(s: String, n: Int) -> (String, String)` | 新規 | R-L0-42 |
 | `split_once` | `fn string.split_once(s: String, sep: String) -> (String, String)?` |  |  |
 | `starts_with` | `fn string.starts_with(s: String, prefix: String) -> Bool` |  |  |
 | `strip_prefix` | `fn string.strip_prefix(s: String, prefix: String) -> String?` |  |  |
 | `strip_suffix` | `fn string.strip_suffix(s: String, suffix: String) -> String?` |  |  |
 | `take` | `fn string.take(s: String, n: Int) -> String` |  |  |
 | `take_end` | `fn string.take_end(s: String, n: Int) -> String` |  |  |
+| `take_while` | `fn string.take_while(s: String, f: (String) -> Bool) -> String` | 新規 | R-L0-42 |
 | `to_codepoint` | `fn string.to_codepoint(s: String) -> Int?` | 改名（旧 `codepoint`）。1 コードポイントちょうどでなければ none | R-string-12、R-string-14 |
 | `to_list` | `fn string.to_list(s: String) -> List[String]` | 改名（旧 `chars`） | R-string-17 |
 | `to_lower` | `fn string.to_lower(s: String) -> String` |  |  |
@@ -1765,6 +1889,11 @@
 | `trim` | `fn string.trim(s: String) -> String` |  |  |
 | `trim_end` | `fn string.trim_end(s: String) -> String` |  |  |
 | `trim_start` | `fn string.trim_start(s: String) -> String` |  |  |
+| `unique` | `fn string.unique(s: String) -> String` | 新規 | R-L0-42 |
+| `unique_by` | `fn string.unique_by(s: String, f: (String) -> K) -> String` | 新規 | R-L0-42 |
+| `window` | `fn string.window(s: String, n: Int) -> List[String]` | 新規 | R-L0-42 |
+| `zip` | `fn string.zip(s: String, ys: List[B]) -> List[(String, B)]` | 新規 | R-L0-42 |
+| `zip_with` | `fn string.zip_with(s: String, ys: List[B], f: (String, B) -> C) -> List[C]` | 新規 | R-L0-42 |
 
 撤去（5）:
 

@@ -21,6 +21,8 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 
 九巡目（2026-10-22）: 表面に残っていた汚れを片付けました。数の変換を変換先の型の `from`・`from_checked`・`from_saturating`・`from_wrapping` の 4 つの総称関数にし（R-L0-40。Swift の 4 つの初期化子と同じ。347 関数 → 44 関数）、ビット演算を演算子 `&`・`|`・`^`・`~`・`<<`・`>>` にしました（R-L0-41。`>>` は関数の合成から外す）。継ぎ目は、`bit_width` → `bit_length`（R-int-11）、N bit の演算を型の幅に（R-int-12）、`map` を組の `Container` に（R-map-09）、`regex.compile`（R-regex-11）、`string.to_list`（R-string-17）で閉じました。リデザイン後は 1,100 関数、覚える名前は 690 です。
 
+十巡目（2026-10-22）: `list` だけにあった 30 の列のアルゴリズム（`enumerate`・`zip`・`sort`・`chunk` など）を、`Sequence`・`Ordered` の既定の実装として 1 回だけ書き、`deque`・`set`・`string`・`bytes`・`map` でも同じ名前・同じ形で使えるようにしました（R-L0-42。Swift の `Sequence` の拡張と同じ）。`min`・`max`・`clamp` を `Ord` から外し（`duration.min` と衝突していた）、`bytes` に `Text` の要件をそろえ（R-bytes-27）、部分文字列を数える `string.count` を `count_matches` にしました（R-string-18。`Container.count` と衝突していた）。protocol の要件の引数名がすべての型で同じであることを、生成のたびに確かめます。
+
 ## 読む順番
 
 1. [L0: 全モジュールに共通する規則](L0-conventions.md) — 名前・置き場所・その場書き換え・失敗の表し方・変換の向き・互換の扱い。下の層の判定はすべてここから導きます。
@@ -38,7 +40,7 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 
 [args](L2-args.md) ・ [base64](L2-base64.md) ・ [bigint](L2-bigint.md) ・ [bool](L2-bool.md) ・ [bytes](L2-bytes.md) ・ [compute](L2-compute.md) ・ [datetime](L2-datetime.md) ・ [deque](L2-deque.md) ・ [duration](L2-duration.md) ・ [env](L2-env.md) ・ [error](L2-error.md) ・ [ffi](L2-ffi.md) ・ [float](L2-float.md) ・ [fs](L2-fs.md) ・ [hash](L2-hash.md) ・ [heap](L2-heap.md) ・ [hex](L2-hex.md) ・ [html](L2-html.md) ・ [http](L2-http.md) ・ [int](L2-int.md) ・ [io](L2-io.md) ・ [json](L2-json.md) ・ [list](L2-list.md) ・ [map](L2-map.md) ・ [math](L2-math.md) ・ [matrix](L2-matrix.md) ・ [net](L2-net.md) ・ [option](L2-option.md) ・ [path](L2-path.md) ・ [process](L2-process.md) ・ [random](L2-random.md) ・ [regex](L2-regex.md) ・ [result](L2-result.md) ・ [set](L2-set.md) ・ [sized-numbers](L2-sized-numbers.md) ・ [string](L2-string.md) ・ [testing](L2-testing.md) ・ [unix](L2-unix.md) ・ [url](L2-url.md) ・ [uuid](L2-uuid.md) ・ [value](L2-value.md) ・ [zlib](L2-zlib.md)
 
-## 案の状態（全 338 件: ○ 273・× 60・保留 5）
+## 案の状態（全 341 件: ○ 276・× 60・保留 5）
 
 | 案 | 内容 | 判定 | issue |
 |---|---|---|---|
@@ -84,6 +86,7 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 | [R-L0-39](L0-conventions.md#r-l0-39--を累乗の演算子から外し累乗は--だけにする---採用) | `^` を累乗の演算子から外し、累乗は `**` だけにする | ○ | #4002 |
 | [R-L0-40](L0-conventions.md#r-l0-40-数の変換は変換先の型に-from-で置く---採用) | 数の変換は変換先の型に `from` で置く | ○ | #4003 |
 | [R-L0-41](L0-conventions.md#r-l0-41-ビット演算を演算子にし-を関数の合成から外す---採用) | ビット演算を演算子にし、`>>` を関数の合成から外す | ○ | #4004 |
+| [R-L0-42](L0-conventions.md#r-l0-42-列のアルゴリズムは-protocol-の既定の実装として-1-回だけ書く---採用) | 列のアルゴリズムは protocol の既定の実装として 1 回だけ書く | ○ | #4012 |
 | [R-L0-G](L0-conventions.md#ゲートの束r-l0-g---採用) | ゲートの束（R-L0-G） | ○ | #3949 |
 | [R-L1-01](L1-categories.md#r-l1-01-両端キュー-deque---採用) | 両端キュー `deque` | ○ | #3932 |
 | [R-L1-02](L1-categories.md#r-l1-02-優先度キュー-heap---採用) | 優先度キュー `heap` | ○ | #3933 |
@@ -145,6 +148,7 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 | [R-bytes-24](L2-bytes.md#r-bytes-24-bytesset-と-put_u8-を-1-つにする---不採用) | `bytes.set` と `put_u8` を 1 つにする | × | — |
 | [R-bytes-25](L2-bytes.md#r-bytes-25-型つきの読み書きの行列に-get_u8append_u8-を戻す---採用r-bytes-02-の一部を見直し) | 型つきの読み書きの行列に `get_u8`・`append_u8` を戻す | ○ | #3991 |
 | [R-bytes-26](L2-bytes.md#r-bytes-26-bytesget_u8-と-getappend_u8-と-push-を-1-つにする---不採用役割の違いを明記) | `bytes.get_u8` と `get`、`append_u8` と `push` を 1 つにする | × | なし |
+| [R-bytes-27](L2-bytes.md#r-bytes-27-bytes-に-text-の要件をそろえる---採用) | `bytes` に `Text` の要件をそろえる | ○ | #4012 |
 | [R-compute-01](L2-compute.md#r-compute-01-computecompare-を足す---採用) | `compute.compare` を足す | ○ | #3902 |
 | [R-compute-02](L2-compute.md#r-compute-02-duration-と統合するまたは読み出し関数を足す---不採用) | `duration` と統合する、または読み出し関数を足す | × | — |
 | [R-compute-03](L2-compute.md#r-compute-03-compute-を共通のプロトコル-timeamount-に従わせる---採用) | `Compute` を共通のプロトコル `TimeAmount` に従わせる | ○ | #3964 |
@@ -358,6 +362,7 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 | [R-string-15](L2-string.md#r-string-15-stringslice-の終わりの既定値を外し2-引数の形は-drop-に一本化する---採用) | `string.slice` の終わりの既定値を外し、2 引数の形は `drop` に一本化する | ○ | #3969 |
 | [R-string-16](L2-string.md#r-string-16-string-に-sequencegrowable-の要件をそろえる---採用) | `string` に `Sequence`・`Growable` の要件をそろえる | ○ | #4000 |
 | [R-string-17](L2-string.md#r-string-17-stringchars-を-to_list-にしnewfrom_list-を置く---採用r-string-16-の保留を解く) | `string.chars` を `to_list` にし、`new`・`from_list` を置く | ○ | #4004 |
+| [R-string-18](L2-string.md#r-string-18-部分文字列を数える-stringcount-を-count_matches-にしcount-は-container-の述語の形にする---採用) | 部分文字列を数える `string.count` を `count_matches` にし、`count` は `Container` の述語の形にする | ○ | #4012 |
 | [R-testing-01](L2-testing.md#r-testing-01-大小と含むの族の規則をゲートに書く---採用関数は変えない) | 大小と含むの族の規則をゲートに書く | ○ | #3949 |
 | [R-testing-02](L2-testing.md#r-testing-02-assert_gtassert_lt-を順序のある型すべてで使えるようにする---採用) | `assert_gt`・`assert_lt` を順序のある型すべてで使えるようにする | ○ | #3980 |
 | [R-unix-01](L2-unix.md#r-unix-01-unix-モジュールを作りnetunix_netshm_-を移す---採用) | `unix` モジュールを作り、`net.unix_*`・`net.shm_*` を移す | ○ | #3853 |
