@@ -61,7 +61,7 @@ machine-enforced by the numeric-matrix gate in `almide docs-gen --check` (#956).
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (30 functions)
+## Signature index (40 functions)
 
 ```
 // Sign-extending widen; always exact.
@@ -183,6 +183,46 @@ int8.abs(x: Int8) -> Int8
 // -1, 0 or 1 by the sign of x.
 // @since unreleased
 int8.sign(x: Int8) -> Int
+
+// Bitwise AND.
+// @since unreleased
+int8.band(a: Int8, b: Int8) -> Int8
+
+// Bitwise OR.
+// @since unreleased
+int8.bor(a: Int8, b: Int8) -> Int8
+
+// Bitwise XOR.
+// @since unreleased
+int8.bxor(a: Int8, b: Int8) -> Int8
+
+// Bitwise complement of all 8 bits.
+// @since unreleased
+int8.bnot(x: Int8) -> Int8
+
+// a shifted left by n bits; n is taken mod 8.
+// @since unreleased
+int8.bshl(a: Int8, n: Int) -> Int8
+
+// Sign-filling right shift; n is taken mod 8.
+// @since unreleased
+int8.bshr(a: Int8, n: Int) -> Int8
+
+// Zero bits above the highest set bit, counted in 8 bits; 8 for 0.
+// @since unreleased
+int8.count_leading_zeros(x: Int8) -> Int
+
+// Zero bits below the lowest set bit; 8 for 0.
+// @since unreleased
+int8.count_trailing_zeros(x: Int8) -> Int
+
+// Number of set bits among the 8.
+// @since unreleased
+int8.count_ones(x: Int8) -> Int
+
+// The bytes in reverse order; one byte, so x itself.
+// @since unreleased
+int8.byte_swap(x: Int8) -> Int8
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->
