@@ -12576,6 +12576,203 @@ fn find_map[A, B](xs: List[A], f: (A) -> B?) -> B? = {
 
 
 
+/// An empty list; the same value as [].
+fn new[A]() -> List[A] = []
+
+/// xs itself; the Container constructor from a list.
+fn from_list[A](xs: List[A]) -> List[A] = xs
+
+/// xs itself; the Container view as a list.
+fn to_list[A](xs: List[A]) -> List[A] = xs
+
+
+
+
+
+
+/// Stable sort by cmp: negative puts a first, 0 keeps input order.
+fn sort_with[A](xs: List[A], cmp: (A, A) -> Int) -> List[A] = {
+  let n = list.len(xs)
+  if n <= 1 then xs
+  else {
+    let half = n / 2
+    __merge_with(sort_with(list.take(xs, half), cmp), sort_with(list.drop(xs, half), cmp), cmp)
+  }
+}
+
+
+
+fn __merge_with[A](a: List[A], b: List[A], cmp: (A, A) -> Int) -> List[A] = {
+  var out: List[A] = []
+  var i = 0
+  var j = 0
+  for _ in 0..<(list.len(a) + list.len(b)) {
+    match (list.get(a, i), list.get(b, j)) {
+      (some(x), some(y)) => if cmp(x, y) > 0 then {
+        list.push(out, y)
+        j = j + 1
+      } else {
+        list.push(out, x)
+        i = i + 1
+      },
+      (some(x), none) => {
+        list.push(out, x)
+        i = i + 1
+      },
+      (none, some(y)) => {
+        list.push(out, y)
+        j = j + 1
+      },
+      (none, none) => (),
+    }
+  }
+  out
+}
+
+
+
+
+
+fn __key_order[K](a: K, b: K) -> Int =
+  if a == b then 0
+  else match list.first(list.sort_by([1, 0], (i) => if i == 0 then a else b)) {
+    some(0) => -1,
+    _ => 1,
+  }
+
+/// Element with the least key f(x); the first on ties; f runs once per x.
+fn min_by[A, K](xs: List[A], f: (A) -> K) -> A? = __pick_by_keys(xs, list.map(xs, f), -1)
+
+/// Element with the greatest key f(x); the first on ties; f runs once per x.
+fn max_by[A, K](xs: List[A], f: (A) -> K) -> A? = __pick_by_keys(xs, list.map(xs, f), 1)
+
+
+
+
+fn __pick_by_keys[A, K](xs: List[A], keys: List[K], want: Int) -> A? = {
+  var best: A? = none
+  var best_key: K? = none
+  var i = 0
+  for x in xs {
+    match list.get(keys, i) {
+      some(k) => {
+        let better = match best_key {
+          some(bk) => __key_order(k, bk) == want,
+          none => true,
+        }
+        if better then {
+          best = some(x)
+          best_key = some(k)
+        } else ()
+      },
+      none => (),
+    }
+    i = i + 1
+  }
+  best
+}
+
+/// Least element by cmp; the first on ties; none when empty.
+fn min_with[A](xs: List[A], cmp: (A, A) -> Int) -> A? = {
+  var best: A? = none
+  for x in xs {
+    best = match best {
+      some(b) => if cmp(x, b) < 0 then some(x) else some(b),
+      none => some(x),
+    }
+  }
+  best
+}
+
+/// Greatest element by cmp; the first on ties; none when empty.
+fn max_with[A](xs: List[A], cmp: (A, A) -> Int) -> A? = {
+  var best: A? = none
+  for x in xs {
+    best = match best {
+      some(b) => if cmp(x, b) > 0 then some(x) else some(b),
+      none => some(x),
+    }
+  }
+  best
+}
+
+
+
+/// Index of target among keys f(x) of xs sorted by key, or none.
+fn binary_search_by[A, K](xs: List[A], target: K, f: (A) -> K) -> Int? = {
+  var base = 0
+  var size = list.len(xs)
+  while size > 1 {
+    let half = size / 2
+    let mid = base + half
+    match list.get(xs, mid) {
+      some(e) => if __key_order(f(e), target) > 0 then ()
+      else {
+        base = mid
+      },
+      none => (),
+    }
+    size = size - half
+  }
+  if size == 0 then none
+  else match list.get(xs, base) {
+    some(e) => if __key_order(f(e), target) == 0 then some(base) else none,
+    none => none,
+  }
+}
+
+/// Index of target in xs sorted by cmp, or none; cmp(x, target) is asked.
+fn binary_search_with[A](xs: List[A], target: A, cmp: (A, A) -> Int) -> Int? = {
+  var base = 0
+  var size = list.len(xs)
+  while size > 1 {
+    let half = size / 2
+    let mid = base + half
+    match list.get(xs, mid) {
+      some(e) => if cmp(e, target) > 0 then ()
+      else {
+        base = mid
+      },
+      none => (),
+    }
+    size = size - half
+  }
+  if size == 0 then none
+  else match list.get(xs, base) {
+    some(e) => if cmp(e, target) == 0 then some(base) else none,
+    none => none,
+  }
+}
+
+
+/// (firsts, seconds) of a list of pairs; the inverse of zip.
+fn unzip[A, B](xs: List[(A, B)]) -> (List[A], List[B]) = {
+  var firsts: List[A] = []
+  var seconds: List[B] = []
+  for (a, b) in xs {
+    list.push(firsts, a)
+    list.push(seconds, b)
+  }
+  (firsts, seconds)
+}
+
+/// start, start + step, ... before end; counts down for step < 0; step = 0 aborts.
+fn range_step(start: Int, end: Int, step: Int) -> List[Int] = {
+  if step == 0 then panic("list.range_step: step must not be 0") else ()
+  let steps = if step > 0 then (if end > start then (end - start - 1) / step + 1 else 0)
+  else if start > end then (start - end - 1) / (0 - step) + 1
+  else 0
+  var out: List[Int] = []
+  for i in 0..<steps {
+    list.push(out, start + i * step)
+  }
+  out
+}
+
+
+
+
+
 
 
 
@@ -13091,6 +13288,170 @@ fn __fallible_unique_by[A, K, E](xs: List[A], f: (A) -> Result[K, E]) -> Result[
 ) {
   ok(keys) => ok(list.zip(keys, xs) |> list.unique_by((p) => p.0) |> list.map((p) => p.1)),
   err(e) => err(e),
+}
+
+
+
+
+
+fn __fallible_min_by[A, K, E](xs: List[A], f: (A) -> Result[K, E]) -> Result[A?, E] = match __fallible_map(
+  xs,
+  f,
+) {
+  ok(keys) => ok(__pick_by_keys(xs, keys, -1)),
+  err(e) => err(e),
+}
+
+fn __fallible_max_by[A, K, E](xs: List[A], f: (A) -> Result[K, E]) -> Result[A?, E] = match __fallible_map(
+  xs,
+  f,
+) {
+  ok(keys) => ok(__pick_by_keys(xs, keys, 1)),
+  err(e) => err(e),
+}
+
+fn __fallible_min_with[A, E](xs: List[A], cmp: (A, A) -> Result[Int, E]) -> Result[A?, E] = __pick_with_fallible(
+  xs,
+  cmp,
+  -1,
+)
+
+fn __fallible_max_with[A, E](xs: List[A], cmp: (A, A) -> Result[Int, E]) -> Result[A?, E] = __pick_with_fallible(
+  xs,
+  cmp,
+  1,
+)
+
+
+fn __pick_with_fallible[A, E](xs: List[A], cmp: (A, A) -> Result[Int, E], want: Int) -> Result[A?, E] = {
+  var best: A? = none
+  var failed: E? = none
+  var stop = false
+  for x in xs {
+    if stop then ()
+    else match best {
+      some(b) => match cmp(x, b) {
+        ok(c) => if c * want > 0 then {
+          best = some(x)
+        } else (),
+        err(e) => {
+          failed = some(e)
+          stop = true
+        },
+      },
+      none => {
+        best = some(x)
+      },
+    }
+  }
+  match failed {
+    some(e) => err(e),
+    none => ok(best),
+  }
+}
+
+fn __fallible_sort_with[A, E](xs: List[A], cmp: (A, A) -> Result[Int, E]) -> Result[List[A], E] = {
+  let n = list.len(xs)
+  if n <= 1 then ok(xs)
+  else {
+    let half = n / 2
+    match __fallible_sort_with(list.take(xs, half), cmp) {
+      ok(a) => match __fallible_sort_with(list.drop(xs, half), cmp) {
+        ok(b) => __merge_with_fallible(a, b, cmp),
+        err(e) => err(e),
+      },
+      err(e) => err(e),
+    }
+  }
+}
+
+fn __merge_with_fallible[A, E](a: List[A], b: List[A], cmp: (A, A) -> Result[Int, E]) -> Result[List[A], E] = {
+  var out: List[A] = []
+  var failed: E? = none
+  var stop = false
+  var i = 0
+  var j = 0
+  for _ in 0..<(list.len(a) + list.len(b)) {
+    if stop then ()
+    else match (list.get(a, i), list.get(b, j)) {
+      (some(x), some(y)) => match cmp(x, y) {
+        ok(c) => if c > 0 then {
+          list.push(out, y)
+          j = j + 1
+        } else {
+          list.push(out, x)
+          i = i + 1
+        },
+        err(e) => {
+          failed = some(e)
+          stop = true
+        },
+      },
+      (some(x), none) => {
+        list.push(out, x)
+        i = i + 1
+      },
+      (none, some(y)) => {
+        list.push(out, y)
+        j = j + 1
+      },
+      (none, none) => (),
+    }
+  }
+  match failed {
+    some(e) => err(e),
+    none => ok(out),
+  }
+}
+
+
+fn __fallible_binary_search_by[A, K, E](xs: List[A], target: K, f: (A) -> Result[K, E]) -> Result[Int?, E] = __search_fallible(
+  xs,
+  (e) => match f(e) {
+    ok(k) => ok(__key_order(k, target)),
+    err(x) => err(x),
+  },
+)
+
+fn __fallible_binary_search_with[A, E](xs: List[A], target: A, cmp: (A, A) -> Result[Int, E]) -> Result[Int?, E] = __search_fallible(
+  xs,
+  (e) => cmp(e, target),
+)
+
+
+fn __search_fallible[A, E](xs: List[A], order: (A) -> Result[Int, E]) -> Result[Int?, E] = {
+  var base = 0
+  var size = list.len(xs)
+  var failed: E? = none
+  while size > 1 {
+    let half = size / 2
+    let mid = base + half
+    match list.get(xs, mid) {
+      some(e) => match order(e) {
+        ok(c) => if c > 0 then ()
+        else {
+          base = mid
+        },
+        err(x) => {
+          failed = some(x)
+          size = 1
+        },
+      },
+      none => (),
+    }
+    size = if size == 1 then 1 else size - half
+  }
+  match failed {
+    some(x) => err(x),
+    none => if list.len(xs) == 0 then ok(none)
+    else match list.get(xs, base) {
+      some(e) => match order(e) {
+        ok(c) => ok(if c == 0 then some(base) else none),
+        err(x) => err(x),
+      },
+      none => ok(none),
+    },
+  }
 }
 "#;
 pub const SRC_LIST_ANYALL: &str = r#"
@@ -18053,6 +18414,88 @@ fn clear[K, V](mut m: Map[K, V]) -> Unit = _
 
 
 
+/// (index, (key, value)) pairs in insertion order, index from 0.
+fn enumerate[K, V](m: Map[K, V]) -> List[(Int, (K, V))] = list.enumerate(map.entries(m))
+
+/// Entries paired with ys by position; stops at the shorter.
+fn zip[K, V, B](m: Map[K, V], ys: List[B]) -> List[((K, V), B)] = list.zip(map.entries(m), ys)
+
+/// f over (entry, ys element) pairs; stops at the shorter.
+fn zip_with[K, V, B, C](m: Map[K, V], ys: List[B], f: ((K, V), B) -> C) -> List[C] = list.zip_with(
+  map.entries(m),
+  ys,
+  f,
+)
+
+/// The somes f gives over the entries, in insertion order.
+fn filter_map[K, V, B](m: Map[K, V], f: ((K, V)) -> B?) -> List[B] = list.filter_map(
+  map.entries(m),
+  f,
+)
+
+/// The first some f gives over the entries, or none; f is not called after the hit.
+fn find_map[K, V, B](m: Map[K, V], f: ((K, V)) -> B?) -> B? = list.find_map(map.entries(m), f)
+
+/// Left fold of the entries seeded by the first; none when empty.
+fn reduce[K, V](m: Map[K, V], f: ((K, V), (K, V)) -> (K, V)) -> (K, V)? = list.reduce(
+  map.entries(m),
+  f,
+)
+
+/// Running fold values over the entries, init excluded.
+fn scan[K, V, B](m: Map[K, V], init: B, f: (B, (K, V)) -> B) -> List[B] = list.scan(
+  map.entries(m),
+  init,
+  f,
+)
+
+/// (entries where f holds, the rest), insertion order kept.
+fn partition[K, V](m: Map[K, V], f: ((K, V)) -> Bool) -> (List[(K, V)], List[(K, V)]) = list.partition(
+  map.entries(m),
+  f,
+)
+
+/// Key f(entry) -> entries; keys in first-seen order.
+fn group_by[K, V, B](m: Map[K, V], f: ((K, V)) -> B) -> Map[B, List[(K, V)]] = list.group_by(
+  map.entries(m),
+  f,
+)
+
+/// Entries sorted by key f(entry), stable; f runs once per entry.
+fn sort_by[K, V, B](m: Map[K, V], f: ((K, V)) -> B) -> List[(K, V)] = list.sort_by(
+  map.entries(m),
+  f,
+)
+
+/// Entries sorted by cmp, stable: negative puts a first.
+fn sort_with[K, V](m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> List[(K, V)] = list.sort_with(
+  map.entries(m),
+  cmp,
+)
+
+/// Entry with the least f(entry); the first on ties.
+fn min_by[K, V, U](m: Map[K, V], f: ((K, V)) -> U) -> (K, V)? = list.min_by(map.entries(m), f)
+
+/// Entry with the greatest f(entry); the first on ties.
+fn max_by[K, V, U](m: Map[K, V], f: ((K, V)) -> U) -> (K, V)? = list.max_by(map.entries(m), f)
+
+/// Least entry by cmp; the first on ties.
+fn min_with[K, V](m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> (K, V)? = list.min_with(
+  map.entries(m),
+  cmp,
+)
+
+/// Greatest entry by cmp; the first on ties.
+fn max_with[K, V](m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> (K, V)? = list.max_with(
+  map.entries(m),
+  cmp,
+)
+
+
+
+
+
+
 
 
 fn __fallible_map[K, V, B, E](m: Map[K, V], f: (V) -> Result[B, E]) -> Result[Map[K, B], E] = {
@@ -18240,6 +18683,76 @@ fn __fallible_upsert[K, V, E](m: Map[K, V], key: K, init: V, f: (V) -> Result[V,
     err(e) => err(e),
   },
 }
+
+
+
+
+fn __fallible_zip_with[K, V, B, C, E](m: Map[K, V], ys: List[B], f: ((K, V), B) -> Result[C, E]) -> Result[List[C], E] = list.zip_with(
+  map.entries(m),
+  ys,
+  (p, y) => f(p, y)!,
+)
+
+fn __fallible_filter_map[K, V, B, E](m: Map[K, V], f: ((K, V)) -> Result[B?, E]) -> Result[List[B], E] = list.filter_map(
+  map.entries(m),
+  (p) => f(p)!,
+)
+
+fn __fallible_find_map[K, V, B, E](m: Map[K, V], f: ((K, V)) -> Result[B?, E]) -> Result[B?, E] = list.find_map(
+  map.entries(m),
+  (p) => f(p)!,
+)
+
+fn __fallible_reduce[K, V, E](m: Map[K, V], f: ((K, V), (K, V)) -> Result[(K, V), E]) -> Result[(K, V)?, E] = list.reduce(
+  map.entries(m),
+  (a, b) => f(a, b)!,
+)
+
+fn __fallible_scan[K, V, B, E](m: Map[K, V], init: B, f: (B, (K, V)) -> Result[B, E]) -> Result[List[B], E] = list.scan(
+  map.entries(m),
+  init,
+  (acc, p) => f(acc, p)!,
+)
+
+fn __fallible_partition[K, V, E](m: Map[K, V], f: ((K, V)) -> Result[Bool, E]) -> Result[(List[(K, V)], List[(K, V)]), E] = list.partition(
+  map.entries(m),
+  (p) => f(p)!,
+)
+
+fn __fallible_group_by[K, V, B, E](m: Map[K, V], f: ((K, V)) -> Result[B, E]) -> Result[Map[B, List[(K, V)]], E] = list.group_by(
+  map.entries(m),
+  (p) => f(p)!,
+)
+
+fn __fallible_sort_by[K, V, B, E](m: Map[K, V], f: ((K, V)) -> Result[B, E]) -> Result[List[(K, V)], E] = list.sort_by(
+  map.entries(m),
+  (p) => f(p)!,
+)
+
+fn __fallible_sort_with[K, V, E](m: Map[K, V], cmp: ((K, V), (K, V)) -> Result[Int, E]) -> Result[List[(K, V)], E] = list.sort_with(
+  map.entries(m),
+  (a, b) => cmp(a, b)!,
+)
+
+fn __fallible_min_by[K, V, U, E](m: Map[K, V], f: ((K, V)) -> Result[U, E]) -> Result[(K, V)?, E] = list.min_by(
+  map.entries(m),
+  (p) => f(p)!,
+)
+
+fn __fallible_max_by[K, V, U, E](m: Map[K, V], f: ((K, V)) -> Result[U, E]) -> Result[(K, V)?, E] = list.max_by(
+  map.entries(m),
+  (p) => f(p)!,
+)
+
+fn __fallible_min_with[K, V, E](m: Map[K, V], cmp: ((K, V), (K, V)) -> Result[Int, E]) -> Result[(K, V)?, E] = list.min_with(
+  map.entries(m),
+  (a, b) => cmp(a, b)!,
+)
+
+fn __fallible_max_with[K, V, E](m: Map[K, V], cmp: ((K, V), (K, V)) -> Result[Int, E]) -> Result[(K, V)?, E] = list.max_with(
+  map.entries(m),
+  (a, b) => cmp(a, b)!,
+)
 "#;
 pub const SRC_MAP_CORE: &str = r#"
 
@@ -31006,6 +31519,80 @@ fn all[A](s: Set[A], f: (A) -> Bool) -> Bool = _
 
 
 
+/// Number of members where f holds.
+fn count[A](s: Set[A], f: (A) -> Bool) -> Int = list.count(set.to_list(s), f)
+
+/// First member, in insertion order, where f holds, or none.
+fn find[A](s: Set[A], f: (A) -> Bool) -> A? = list.find(set.to_list(s), f)
+
+/// Removes every member of s in place.
+fn clear[A](mut s: Set[A]) -> Unit = {
+  s = set.new()
+}
+
+/// (index, member) pairs in insertion order, index from 0.
+fn enumerate[A](s: Set[A]) -> List[(Int, A)] = list.enumerate(set.to_list(s))
+
+/// Members paired with ys by position; stops at the shorter.
+fn zip[A, B](s: Set[A], ys: List[B]) -> List[(A, B)] = list.zip(set.to_list(s), ys)
+
+/// f over (member, ys element) pairs; stops at the shorter.
+fn zip_with[A, B, C](s: Set[A], ys: List[B], f: (A, B) -> C) -> List[C] = list.zip_with(
+  set.to_list(s),
+  ys,
+  f,
+)
+
+/// The somes f gives, in insertion order.
+fn filter_map[A, B](s: Set[A], f: (A) -> B?) -> List[B] = list.filter_map(set.to_list(s), f)
+
+/// The first some f gives, or none; f is not called after the hit.
+fn find_map[A, B](s: Set[A], f: (A) -> B?) -> B? = list.find_map(set.to_list(s), f)
+
+/// Left fold seeded by the first member; none when empty.
+fn reduce[A](s: Set[A], f: (A, A) -> A) -> A? = list.reduce(set.to_list(s), f)
+
+/// Running fold values in insertion order, init excluded.
+fn scan[A, B](s: Set[A], init: B, f: (B, A) -> B) -> List[B] = list.scan(set.to_list(s), init, f)
+
+/// (members where f holds, the rest), insertion order kept.
+fn partition[A](s: Set[A], f: (A) -> Bool) -> (List[A], List[A]) = list.partition(set.to_list(s), f)
+
+/// Key f(x) -> members; keys in first-seen order.
+fn group_by[A, B](s: Set[A], f: (A) -> B) -> Map[B, List[A]] = list.group_by(set.to_list(s), f)
+
+/// Members in ascending order; Floats in IEEE totalOrder.
+fn sort[A](s: Set[A]) -> List[A] = list.sort(set.to_list(s))
+
+/// Members sorted by key f(x), stable; f runs once per member.
+fn sort_by[A, B](s: Set[A], f: (A) -> B) -> List[A] = list.sort_by(set.to_list(s), f)
+
+/// Members sorted by cmp, stable: negative puts a first.
+fn sort_with[A](s: Set[A], cmp: (A, A) -> Int) -> List[A] = list.sort_with(set.to_list(s), cmp)
+
+/// Least member, or none when empty.
+fn min[A](s: Set[A]) -> A? = list.min(set.to_list(s))
+
+/// Greatest member, or none when empty.
+fn max[A](s: Set[A]) -> A? = list.max(set.to_list(s))
+
+/// Member with the least key f(x); the first on ties.
+fn min_by[A, K](s: Set[A], f: (A) -> K) -> A? = list.min_by(set.to_list(s), f)
+
+/// Member with the greatest key f(x); the first on ties.
+fn max_by[A, K](s: Set[A], f: (A) -> K) -> A? = list.max_by(set.to_list(s), f)
+
+/// Least member by cmp; the first on ties.
+fn min_with[A](s: Set[A], cmp: (A, A) -> Int) -> A? = list.min_with(set.to_list(s), cmp)
+
+/// Greatest member by cmp; the first on ties.
+fn max_with[A](s: Set[A], cmp: (A, A) -> Int) -> A? = list.max_with(set.to_list(s), cmp)
+
+
+
+
+
+
 
 fn __fallible_map[A, B, E](s: Set[A], f: (A) -> Result[B, E]) -> Result[Set[B], E] = {
   var out: List[B] = []
@@ -31115,6 +31702,86 @@ fn __fallible_all[A, E](s: Set[A], f: (A) -> Result[Bool, E]) -> Result[Bool, E]
     none => ok(held),
   }
 }
+
+
+
+
+fn __fallible_count[A, E](s: Set[A], f: (A) -> Result[Bool, E]) -> Result[Int, E] = list.count(
+  set.to_list(s),
+  (x) => f(x)!,
+)
+
+fn __fallible_find[A, E](s: Set[A], f: (A) -> Result[Bool, E]) -> Result[A?, E] = list.find(
+  set.to_list(s),
+  (x) => f(x)!,
+)
+
+fn __fallible_zip_with[A, B, C, E](s: Set[A], ys: List[B], f: (A, B) -> Result[C, E]) -> Result[List[C], E] = list.zip_with(
+  set.to_list(s),
+  ys,
+  (a, b) => f(a, b)!,
+)
+
+fn __fallible_filter_map[A, B, E](s: Set[A], f: (A) -> Result[B?, E]) -> Result[List[B], E] = list.filter_map(
+  set.to_list(s),
+  (x) => f(x)!,
+)
+
+fn __fallible_find_map[A, B, E](s: Set[A], f: (A) -> Result[B?, E]) -> Result[B?, E] = list.find_map(
+  set.to_list(s),
+  (x) => f(x)!,
+)
+
+fn __fallible_reduce[A, E](s: Set[A], f: (A, A) -> Result[A, E]) -> Result[A?, E] = list.reduce(
+  set.to_list(s),
+  (a, b) => f(a, b)!,
+)
+
+fn __fallible_scan[A, B, E](s: Set[A], init: B, f: (B, A) -> Result[B, E]) -> Result[List[B], E] = list.scan(
+  set.to_list(s),
+  init,
+  (acc, x) => f(acc, x)!,
+)
+
+fn __fallible_partition[A, E](s: Set[A], f: (A) -> Result[Bool, E]) -> Result[(List[A], List[A]), E] = list.partition(
+  set.to_list(s),
+  (x) => f(x)!,
+)
+
+fn __fallible_group_by[A, B, E](s: Set[A], f: (A) -> Result[B, E]) -> Result[Map[B, List[A]], E] = list.group_by(
+  set.to_list(s),
+  (x) => f(x)!,
+)
+
+fn __fallible_sort_by[A, B, E](s: Set[A], f: (A) -> Result[B, E]) -> Result[List[A], E] = list.sort_by(
+  set.to_list(s),
+  (x) => f(x)!,
+)
+
+fn __fallible_sort_with[A, E](s: Set[A], cmp: (A, A) -> Result[Int, E]) -> Result[List[A], E] = list.sort_with(
+  set.to_list(s),
+  (a, b) => cmp(a, b)!,
+)
+
+fn __fallible_min_by[A, K, E](s: Set[A], f: (A) -> Result[K, E]) -> Result[A?, E] = list.min_by(
+  set.to_list(s),
+  (x) => f(x)!,
+)
+
+fn __fallible_max_by[A, K, E](s: Set[A], f: (A) -> Result[K, E]) -> Result[A?, E] = list.max_by(
+  set.to_list(s),
+  (x) => f(x)!,
+)
+
+fn __fallible_min_with[A, E](s: Set[A], cmp: (A, A) -> Result[Int, E]) -> Result[A?, E] = list.min_with(
+  set.to_list(s),
+  (a, b) => cmp(a, b)!,
+)
+
+fn __fallible_max_with[A, E](s: Set[A], cmp: (A, A) -> Result[Int, E]) -> Result[A?, E] = list.max_with(
+  set.to_list(s),
+  (a, b) => cmp(a, b)!,
+)
 "#;
 pub const SRC_SET_CORE: &str = r#"
 
