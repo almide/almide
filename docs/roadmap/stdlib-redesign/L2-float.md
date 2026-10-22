@@ -134,6 +134,18 @@
 - (d) 意味変更（負の NaN と NaN の並び順が変わる）。NaN の符号を見るコードは標準の面にありません。
 - issue: #3990
 
+### R-float-10 NaN を型の幅ごとに 1 つにし、ビットの読み書きでも同じにすることを明記する — ○ 採用（R-float-09 の補い）
+
+- いま: R-float-09 は NaN を `0x7ff8000000000000` の 1 つにそろえるとしましたが、64 bit の形しか書いていません。`float32` のビットとバイトの読み書き（`float32.to_bits`・`from_bits`・`bytes.append_f32_le`）には当てはまりません。また、`bytes` の読み書きと `to_bits` を通すと NaN の中身（payload）が消えることも、約束に書いていませんでした。
+- 案:
+  - NaN は型の幅ごとに 1 つです。`Float`・`Float64` は `0x7ff8000000000000`、`Float32` は `0x7fc00000`（どちらも符号が正の quiet NaN）。
+  - `to_bits`・`from_bits`・`bytes` の `get_f32_le`・`get_f64_le`・`append_f32_le`・`append_f64_le` などでも、NaN はこの 1 つの値になります。読んだ NaN の payload は残りません。
+  - NaN の payload を含むバイト列をそのまま往復させたいとき（wasm のバイト列、msgpack など）は、浮動小数点として読まず、`get_u32_le`・`get_u64_le` で整数として読み書きします。
+- 根拠の L0 規則: R-float-09。
+- (a) Java の `Float.floatToIntBits` も NaN を `0x7fc00000` の 1 つにそろえます（`floatToRawIntBits` はそろえない）。
+- (b) 両 target で同じです（R-float-09 の実測）。
+- (d) 文書の確定です。R-float-09 と同じ epoch 15 で入ります。
+- issue: #3995
 ## L3: 関数表
 
 `float` の現行 46 関数と、追加する 11 関数です（`compare` を含む）。

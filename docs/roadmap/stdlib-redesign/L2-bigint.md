@@ -97,7 +97,7 @@
 | `parse_radix` | `bigint.parse_radix(s: String, radix: Int) -> Result[BigInt, String]` | Go `SetString(s, base)` / Python `int(s, base)` / Kotlin `BigInteger(s, radix)` | 追加 | R-bigint-01 |
 | `to_string` | `bigint.to_string(b: BigInt) -> String` | Go `String` / Python `str` / JS `toString` / Elixir `to_string` (F) | 追加 | R-bigint-01 |
 | `to_string_radix` | `bigint.to_string_radix(b: BigInt, radix: Int) -> String` | Go `Text(base)` / JS `toString(radix)` / Kotlin `toString(radix)` | 追加 | R-bigint-01 |
-| `to_int` | `bigint.to_int(b: BigInt) -> Int`（下位 64 bit で折り返す） | JS `BigInt.asIntN(64, b)` / Kotlin `toLong` | 追加 | R-bigint-01 |
+| `to_int` | `bigint.to_int(b: BigInt) -> Int` | Kotlin `longValueExact` / Go `Int64`（範囲外は未定義） / JS `Number(b)` | 追加（範囲外は abort） | R-bigint-01、R-L0-32 |
 | `to_int_checked` | `bigint.to_int_checked(b: BigInt) -> Option[Int]` | Go `IsInt64` + `Int64` / Kotlin `longValueExact`（例外） | 追加 | R-bigint-01 |
 | `to_int_saturating` | `bigint.to_int_saturating(b: BigInt) -> Int` | Swift `init(clamping:)` の考え方 / 他 — | 追加 | R-bigint-01 |
 | `to_float` | `bigint.to_float(b: BigInt) -> Float`（最も近い値、溢れたら ±inf） | Go `Float64` / Python `float` / JS `Number` / Kotlin `toDouble` | 追加 | R-bigint-01 |
@@ -120,6 +120,6 @@
 | `is_odd` | `bigint.is_odd(a: BigInt) -> Bool` | Elixir `Integer.is_odd` (F) | 追加 | R-bigint-01 |
 | `clamp` | `bigint.clamp(n: BigInt, lo: BigInt, hi: BigInt) -> BigInt` | Rust `clamp` / Kotlin `coerceIn` | 追加 | R-bigint-05 |
 | `uint64.to_bigint` | `uint64.to_bigint(x: UInt64) -> BigInt` | Go `SetUint64` | 追加 | R-bigint-06 |
-| `to_uint64` | `bigint.to_uint64(b: BigInt) -> UInt64` | Go `Uint64` | 追加 | R-bigint-06 |
+| `to_uint64` | `bigint.to_uint64(b: BigInt) -> UInt64` | Go `Uint64` | 追加（範囲外は abort） | R-bigint-06、R-L0-32 |
 | `to_uint64_checked` | `bigint.to_uint64_checked(b: BigInt) -> Option[UInt64]` | Go `IsUint64` | 追加 | R-bigint-06 |
 | `to_uint64_saturating` | `bigint.to_uint64_saturating(b: BigInt) -> UInt64` | — | 追加 | R-bigint-06 |

@@ -189,6 +189,19 @@
 - (d) 追加 1。
 - issue: #3989
 
+### R-http-14 要求を組み立てる道を 1 つにする: `start(req, limits)`、`request_response` の撤去、`req_` を外す — ○ 採用
+
+- いま: R-http-13 で `send(req: HttpRequest)` を足したので、組み立てた要求（`set_body_bytes` で本文をバイト列にしたものなど）は同期では送れます。ところが非同期の `start` は `method, url, body: String, headers, limits` の 5 引数のままで、バイト列の本文を送れません。応答全体を返す綴りも、`request_response(method, url, body, headers)` と `send(new_request(…))` の 2 つになりました。要求だけに使う関数は、`req_method`・`req_path` には `req_` が付き、`param`・`query_params` には付いていません（R-http-12 で共通の 8 関数からは外しました）。
+- 案:
+  - `effect fn http.start(req: HttpRequest, limits: HttpLimits) -> HttpCall` にします。`send` と同じ要求をそのまま渡せます。
+  - `request_response` を撤去します（→ `send(new_request(method, url, body, headers))`）。`request`（本文の文字列を返す）と `get`・`get_response`（GET の近道）は残します。応答全体を返す一般の道は `send` だけです。
+  - `req_method` を `method` に、`req_path` を `path` に改名します。要求だけに使う関数に接頭辞は付けません。どの型の関数かは引数の型が決めます（R-L0-02。「接頭辞は名前空間ではない」）。
+- 根拠の L0 規則: R-L0-01（同じ役割に綴りは 1 つ）、R-L0-02。
+- (a) Go は `client.Do(req)` で同期・非同期とも同じ要求を使い、`r.Method`・`r.URL.Path` に接頭辞がありません。JS の `fetch(request)` も同じです。
+- (b) 呼び出しの形の変更です。通信の中身は変わりません。
+- (c) 同期で書いた `send(req)` を非同期にするとき、`start(req, limits)` と引数の形を保ったまま書き換えられます。
+- (d) `start` は意味変更（旧い 5 引数の呼び出しは型エラーになる）。`request_response` は撤去、`req_method`・`req_path` は改名で、どれも epoch 15 で `@deprecated`、epoch 16 で撤去、`almide fix` で 1 対 1 に書き換えます。
+- issue: #3996
 ## L3: 関数表
 
 | 関数 | シグネチャ(現行, mut 表示) | 他言語の主な綴り | 判定 | 案 |
@@ -207,8 +220,8 @@
 | `http.get_header` | `fn get_header(resp: HttpResponse, key: String) -> String?` | Go `Header.Get` / JS `headers.get` | 改名 → `header`（`HttpRequest` も受け取る） | R-http-12 |
 | `http.header_values` | `fn header_values(resp: HttpResponse, key: String) -> List[String]` | Go `Header.Values` | 意味変更（`HttpRequest` も受け取る） | R-http-12 |
 | `http.headers` | `fn headers(resp: HttpResponse) -> List[(String, String)]` | JS `headers` / reqwest `headers` | 意味変更（`HttpRequest` も受け取る） | R-http-12 |
-| `http.req_method` | `fn req_method(req: HttpRequest) -> String` | Go `r.Method` / JS `req.method` | 据え置き | — |
-| `http.req_path` | `fn req_path(req: HttpRequest) -> String` | Go `r.URL.RequestURI()` | 据え置き（クエリを含むことを文書に明記） | — |
+| `http.req_method` | `fn req_method(req: HttpRequest) -> String` | Go `r.Method` / JS `req.method` | 改名 → `method` | R-http-14 |
+| `http.req_path` | `fn req_path(req: HttpRequest) -> String` | Go `r.URL.RequestURI()` | 改名 → `path`（クエリを含むことを文書に明記） | R-http-14 |
 | `http.req_body` | `fn req_body(req: HttpRequest) -> String` | Go `r.Body` / JS `req.text()` | 撤去 → `http.body` | R-http-12 |
 | `http.req_header` | `fn req_header(req: HttpRequest, key: String) -> String?` | Go `r.Header.Get` | 撤去 → `http.header` | R-http-12 |
 | `http.req_header_values` | `fn req_header_values(req: HttpRequest, key: String) -> List[String]`（案） | Go `r.Header.Values` | 追加しない（R-http-12 の `http.header_values` に一本化） | R-http-12 |
@@ -218,22 +231,22 @@
 | `http.get` | `effect fn get(url: String) -> String` | Go `http.Get` / reqwest `get` / Python `urlopen` | 据え置き | R-http-01 |
 | `http.get_response` | `effect fn get_response(url: String) -> HttpResponse` | JS `fetch(u)` / Ktor `client.get(u)` | 据え置き | R-http-01 |
 | `http.request` | `effect fn request(method: String, url: String, body: String, headers: List[(String, String)]) -> String` | Go `Client.Do` / JS `fetch(u, {method})` | 意味変更（`headers` を `List[(String, String)]` に） | R-http-09 |
-| `http.request_response` | `effect fn request_response(method: String, url: String, body: String, headers: List[(String, String)]) -> HttpResponse` | 同上 | 意味変更（`headers` を `List[(String, String)]` に） | R-http-09 |
+| `http.request_response` | `effect fn request_response(method: String, url: String, body: String, headers: List[(String, String)]) -> HttpResponse` | 同上 | 撤去（→ `send(new_request(method, url, body, headers))`） | R-http-14 |
 | `http.post` | `effect fn post(url: String, body: String) -> String` | Go `http.Post` / Ktor `post` | 撤去（→ `request("POST", …)`） | R-http-01 |
 | `http.put` | `effect fn put(url: String, body: String) -> String` | Ktor `put` | 撤去（→ `request("PUT", …)`） | R-http-01 |
 | `http.patch` | `effect fn patch(url: String, body: String) -> String` | Ktor `patch` | 撤去（→ `request("PATCH", …)`） | R-http-01 |
 | `http.delete` | `effect fn delete(url: String) -> String` | Ktor `delete` | 撤去（→ `request("DELETE", …)`） | R-http-01 |
 | `http.get_status` | `effect fn get_status(url: String) -> (Int, String)` | — | 撤去（→ `get_response`） | R-http-01 |
-| `http.request_status` | `effect fn request_status(method: String, url: String, body: String, headers: Map[String, String]) -> (Int, String)` | — | 撤去（→ `request_response`） | R-http-01 |
-| `http.post_response` | `effect fn post_response(url: String, body: String) -> HttpResponse` | — | 撤去（→ `request_response("POST", …)`） | R-http-01 |
-| `http.put_response` | `effect fn put_response(url: String, body: String) -> HttpResponse` | — | 撤去（→ `request_response("PUT", …)`） | R-http-01 |
-| `http.patch_response` | `effect fn patch_response(url: String, body: String) -> HttpResponse` | — | 撤去（→ `request_response("PATCH", …)`） | R-http-01 |
-| `http.delete_response` | `effect fn delete_response(url: String) -> HttpResponse` | — | 撤去（→ `request_response("DELETE", …)`） | R-http-01 |
+| `http.request_status` | `effect fn request_status(method: String, url: String, body: String, headers: Map[String, String]) -> (Int, String)` | — | 撤去（→ `send`） | R-http-01 |
+| `http.post_response` | `effect fn post_response(url: String, body: String) -> HttpResponse` | — | 撤去（→ `send(new_request("POST", …))`） | R-http-01 |
+| `http.put_response` | `effect fn put_response(url: String, body: String) -> HttpResponse` | — | 撤去（→ `send(new_request("PUT", …))`） | R-http-01 |
+| `http.patch_response` | `effect fn patch_response(url: String, body: String) -> HttpResponse` | — | 撤去（→ `send(new_request("PATCH", …))`） | R-http-01 |
+| `http.delete_response` | `effect fn delete_response(url: String) -> HttpResponse` | — | 撤去（→ `send(new_request("DELETE", …))`） | R-http-01 |
 | `http.get_bytes` | `effect fn get_bytes(url: String) -> Bytes` | reqwest `bytes` | 撤去（→ `body_bytes(get_response(u)!)`） | R-http-01 |
-| `http.request_bytes` | `effect fn request_bytes(method: String, url: String, body: String, headers: Map[String, String]) -> Bytes` | — | 撤去（→ `body_bytes(request_response(…)!)`） | R-http-01 |
+| `http.request_bytes` | `effect fn request_bytes(method: String, url: String, body: String, headers: Map[String, String]) -> Bytes` | — | 撤去（→ `body_bytes(send(new_request(…))!)`） | R-http-01 |
 | `http.request_stream` | `effect fn request_stream(method: String, url: String, body: String, headers: Map[String, String], on_chunk: (String) -> Unit) -> Unit` | reqwest `bytes_stream` / JS `body.getReader` | 撤去（→ ハンドル） | R-http-01 |
 | `http.request_stream_with_limits` | `effect fn request_stream_with_limits(method: String, url: String, body: String, headers: Map[String, String], limits: HttpLimits, on_chunk: (String) -> Unit) -> Unit` | — | 撤去（→ ハンドル） | R-http-01 |
-| `http.start` | `effect fn start(method: String, url: String, body: String, headers: List[(String, String)], limits: HttpLimits) -> HttpCall` | JS `fetch`（Promise） | 意味変更（`headers` を `List[(String, String)]` に） | R-http-09 |
+| `http.start` | `effect fn start(method: String, url: String, body: String, headers: List[(String, String)], limits: HttpLimits) -> HttpCall` | JS `fetch`（Promise） | 意味変更（`start(req: HttpRequest, limits: HttpLimits)` にする） | R-http-09、R-http-14 |
 | `http.poll` | `effect fn poll(c: HttpCall) -> Result[HttpResponse, String]?` | Python `Popen.poll` に相当 | 据え置き（`process.poll` と同じ綴り） | R-http-01 |
 | `http.read_new` | `effect fn read_new(c: HttpCall) -> String` | — | 据え置き | R-http-01 |
 | `http.wait` | `effect fn wait(c: HttpCall) -> HttpResponse` | — | 据え置き | R-http-01 |

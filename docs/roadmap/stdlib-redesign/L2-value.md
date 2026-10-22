@@ -99,7 +99,7 @@
 - (d) 撤去。`@deprecated(since=15, use="Codec")`（置き換えの関数はない）、`removal_epoch = 16`。機械的な書き換えはできないので、ヒントで「`Codec` の型で wire の名前を書く」と出します。使用数（2 関数）: spec 14 / tests 0 / docs 12 / stdlib 2。
 - issue: #3852（既存）
 
-### R-value-06 構築子 `str` を `string` に改名する — × 不採用
+### R-value-06 構築子 `str` を `string` に改名する — × 不採用（→ R-value-08 で採用に変更）
 
 - 理由: `str`（作る）と `as_string`（読む）は役割が違うので、R-L0-00 の条件 1（同じ役割に 2 つの綴り）に当たりません。多数派の綴りもありません。使用数が多く（spec 111 / tests 20 / docs 29 / stdlib 4 / research 11）、改名で新旧が混ざる期間の害のほうが大きいと判定します。
 - issue: なし

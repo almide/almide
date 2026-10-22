@@ -92,6 +92,10 @@ Result を型として持つのは Rust、Gleam、OCaml、Kotlin、Swift の 5 �
 - (d) なし。使用数: spec 11 / tests 7 / docs 17 / stdlib 2。
 - issue: #3949
 
+### R-result-06 `result.collect` を戻す — × 不採用
+
+- 理由: ADR-0007 D1 で撤去した関数です。失敗しうる要素の列は、`list.map` の callback に `!` を書く形（最初の err で止まる。ADR-0006）で 1 通りに書けます。`collect` を戻すと同じ役割に 2 つ目の綴りができ（R-L0-01）、Rust の `collect`（入れ物を作る汎用の関数）とも意味がずれます。
+- issue: なし
 ## L3: 関数表
 
 | 関数 | シグネチャ(現行, mut 表示) | 他言語の主な綴り | 判定 | 案 |

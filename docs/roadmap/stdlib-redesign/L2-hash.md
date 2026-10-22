@@ -71,7 +71,7 @@ MD5・SHA-1・SHA-512 は 7 言語（● と ◐）が持っています（[fact
 - ゲート案: 族ゲート `tests/stdlib_hash_family_test.rs` が、規則 2・3 の全セルの名前と型を interface JSON と突き合わせます。FIPS 180-4・RFC 1321 のテストベクタを native と wasm の fixture にし、契約台帳に新しい C 番号を als で先に立てます。
 - issue: #3915
 
-### R-hash-04 `_hex` のセルの入力を Bytes に変える — × 不採用
+### R-hash-04 `_hex` のセルの入力を Bytes に変える — × 不採用（→ R-hash-05 で採用に変更）
 
 - 理由: 旧い呼び出しは型エラーになるので R-L0-14.4 は満たしますが、使用数の多い `sha256_hex(s)`（spec 16 / docs 3）を全部 `bytes.from_string` で包むことになります。取り違えは型エラーで止まるので、R-L0-19 の型違いの案内（`bytes.from_string(s)`／`hex.encode(hash.sha256(b))`）で受け止めるほうが安上がりです。
 - issue: なし

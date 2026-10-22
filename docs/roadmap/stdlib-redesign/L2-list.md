@@ -219,6 +219,7 @@
 
 ### R-list-10 境界の扱いをそろえる: `slice` の負の開始位置、`chunk`・`window` の `n <= 0` — ○ 採用
 
+- 六巡目の注: `slice` の負の開始位置を 0 に丸める部分は、R-L0-29 で abort に変わりました。`chunk`・`window` の `n <= 0` の扱いは、この案のままです。
 - 内容:
   1. `list.slice(xs, start, end)` の負の `start` を 0 に丸めます。実測（`p6.almd`）で、同じ `(-1, 2)` に対して `string.slice("abc", -1, 2)` は `"ab"` を返し、`list.slice([1, 2, 3], -1, 2)` は `[]`、`bytes.slice(..., -1, 2)` は長さ 0 です。R-L0-12（範囲外は端に丸め、負の添字は範囲外なので 0 に丸める）と文書の「clamped」に合うのは string の挙動です。list と bytes をそれに合わせ、3 つの型すべてで `slice(-1, 2)` が先頭の 2 要素を返すようにします（bytes は L2-bytes の `slice` の行、string は据え置き）。
   2. `list.chunk(xs, n)` と `list.window(xs, n)` は、`n <= 0` を契約違反として止めます。いまは `n = 0` だけが止まり、`chunk(xs, -1)` は `[[1, 2, 3]]`、`window(xs, -1)` は `[]` を返します（実測 `p6.almd`）。
@@ -354,8 +355,8 @@
 | `enumerate` | `list.enumerate(xs: List[A]) -> List[(Int, A)]` | Rust enumerate / Python enumerate / Swift enumerated | 据え置き | — |
 | `zip` | `list.zip(xs: List[A], ys: List[B]) -> List[(A, B)]` | Rust zip / Gleam zip / OCaml combine | 据え置き | — |
 | `flatten` | `list.flatten(xss: List[List[T]]) -> List[T]` | Rust flatten / Gleam flatten / JS flat | 据え置き | — |
-| `take` | `list.take(xs: List[A], n: Int) -> List[A]` | Gleam take / Kotlin take / Swift prefix | 据え置き | R-L0-12 |
-| `drop` | `list.drop(xs: List[A], n: Int) -> List[A]` | Gleam drop / Rust skip / Swift dropFirst | 据え置き | R-L0-12 |
+| `take` | `list.take(xs: List[A], n: Int) -> List[A]` | Gleam take / Kotlin take / Swift prefix | 意味変更（負の数は abort。R-L0-29） | R-L0-12、R-L0-29 |
+| `drop` | `list.drop(xs: List[A], n: Int) -> List[A]` | Gleam drop / Rust skip / Swift dropFirst | 意味変更（負の数は abort。R-L0-29） | R-L0-12、R-L0-29 |
 | `tail` | `list.tail(xs: List[A]) -> List[A]` | OCaml tl / Elixir tl / Kotlin drop(1) | 撤去（→ `list.drop(xs, 1)`） | R-list-14 |
 | `unique` | `list.unique(xs: List[A]) -> List[A]` | Gleam unique / Elixir uniq / Kotlin distinct | 据え置き | — |
 | `index_of` | `list.index_of(xs: List[A], x: A) -> Option[Int]` | JS indexOf / Go Index / Swift firstIndex(of:) | 据え置き | — |
@@ -389,15 +390,15 @@
 | `zip_with` | `list.zip_with(xs: List[A], ys: List[B], f: (A, B) -> C) -> List[C]` | Elixir zip_with / Gleam map2 / Kotlin zip(other){} | 据え置き | — |
 | `unique_by` | `list.unique_by(xs: List[A], f: (A) -> K) -> List[A]` | Elixir uniq_by / Kotlin distinctBy | 据え置き | — |
 | `range` | `list.range(start: Int, end: Int) -> List[Int]` | Python range / Gleam range / Rust a..b | 据え置き | — |
-| `slice` | `list.slice(xs: List[A], start: Int, end: Int) -> List[A]` | JS slice / Python xs[a:b] / Elixir slice | 意味変更（負の開始位置を 0 に丸める） | R-list-10 |
+| `slice` | `list.slice(xs: List[A], start: Int, end: Int) -> List[A]` | JS slice / Python xs[a:b] / Elixir slice | 意味変更（負の位置は abort。R-L0-29） | R-list-10、R-L0-29 |
 | `insert` | `list.insert(xs: List[A], i: Int, val: A) -> List[A]` | Go slices.Insert / Elixir List.insert_at / JS toSpliced | 意味変更（`0..=len` の外は abort） | R-list-00、R-list-13 |
 | `remove_at` | `list.remove_at(xs: List[A], i: Int) -> List[A]` | Elixir List.delete_at / Kotlin removeAt / Swift remove(at:) | 意味変更（範囲外は abort） | R-list-00、R-list-13 |
 | `repeat` | `list.repeat(val: A, n: Int) -> List[A]` | Gleam repeat / Elixir List.duplicate / Kotlin `List(n) { v }` | 据え置き | — |
 | `intersperse` | `list.intersperse(xs: List[A], sep: A) -> List[A]` | Gleam intersperse / Elixir intersperse | 据え置き | — |
 | `windows` | `list.windows(xs: List[A], n: Int) -> List[List[A]]` | Rust windows | 撤去（→ `list.window`） | R-list-03 |
 | `dedup` | `list.dedup(xs: List[A]) -> List[A]` | Rust dedup / Elixir dedup / Go Compact | 据え置き | — |
-| `take_end` | `list.take_end(xs: List[A], n: Int) -> List[A]` | Kotlin takeLast / Swift suffix | 据え置き | R-L0-12 |
-| `drop_end` | `list.drop_end(xs: List[A], n: Int) -> List[A]` | Kotlin dropLast / Swift dropLast | 据え置き | R-L0-12 |
+| `take_end` | `list.take_end(xs: List[A], n: Int) -> List[A]` | Kotlin takeLast / Swift suffix | 意味変更（負の数は abort。R-L0-29） | R-L0-12、R-L0-29 |
+| `drop_end` | `list.drop_end(xs: List[A], n: Int) -> List[A]` | Kotlin dropLast / Swift dropLast | 意味変更（負の数は abort。R-L0-29） | R-L0-12、R-L0-29 |
 | `shuffle` | `list.shuffle(xs: List[A]) -> List[A]` | Python random.shuffle / Kotlin shuffled / Elixir shuffle | 撤去（→ `random.shuffle`） | R-list-05 |
 | `window` | `list.window(xs: List[A], n: Int) -> List[List[A]]` | Gleam window / Rust windows / Kotlin windowed | 意味変更（`n <= 0` は abort。`windows` の残る側） | R-list-03、R-list-10 |
 | `binary_search` | `list.binary_search(xs: List[A], target: A) -> Option[Int]` | Rust binary_search / Go BinarySearch / Kotlin binarySearch | 意味変更（要素型を順序のある型すべてに広げる） | R-list-15 |

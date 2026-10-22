@@ -191,8 +191,9 @@
 - ゲート案: 行列ゲート（R-bytes-03）の `put_` の全セルと `set`・`insert`・`remove_at` に、境界入力 {-1, 0, len-幅, len-幅+1, len} の fixture を native と wasm で置き、abort の位置が同じであることを確かめます（L2-list R-list-13 と同じ表）。観測できる挙動の変更なので、契約の台帳を als に先に入れます。
 - issue: #3937
 
-### R-bytes-12 `slice` の負の開始位置を 0 に丸める — ○ 採用
+### R-bytes-12 `slice` の負の開始位置を 0 に丸める — ○ 採用（→ R-L0-29 で abort に変更）
 
+- 六巡目の注: 負の開始位置を 0 に丸める部分は、R-L0-29 で abort に変わりました。正の側のはみ出しを長さまで丸める部分は、この案のままです。
 - 内容: `bytes.slice(b, start, end)` の負の `start` を 0 に丸めます。いまは `bytes.slice(b, -1, 2)` が長さ 0 を返します。`string.slice("abc", -1, 2)` と同じく、先頭の 2 バイトを返すようにします。
 - 根拠の L0 規則: R-L0-12（範囲外の添字は端に丸める。負の添字は範囲外）。
 - (a) Python・JS は負の添字を末尾からの位置に使いますが、R-L0-12 はそれを採りません。丸めの規則は Gleam・Elixir の `slice` と同じです。
@@ -327,6 +328,11 @@
 - 完全性の規則: 型つきの読み書きの 4 つの動詞は、`u8` を含むすべての型の列を持ちます。
 - issue: #3991
 
+### R-bytes-26 `bytes.get_u8` と `get`、`append_u8` と `push` を 1 つにする — × 不採用（役割の違いを明記）
+
+- 理由: 2 つは結果が同じですが、属する族が違います。`get`・`push` は入れ物の族（`list.get`・`deque.push_back` と同じ形）、`get_u8`・`append_u8` は符号化の族（`get_u16_le`・`append_u16_le` … の 1 バイトのセル）です。符号化の族から `u8` だけを抜くと、`get_<型>` の行列に穴ができ、規則から推して書いた `get_u8` が外れます（R-bytes-25）。
+- 約束: 2 つは定義として同じ値を返します（`get_u8(b, i) == get(b, i)`、`append_u8` と `push` は同じ書き足し）。行列のゲートで、この一致も確かめます。
+- issue: なし
 ## L3: 関数表
 
 （146 関数 + 追加 13。判定の内訳: 据え置き 58・改名 53・撤去 31・意味変更 4・追加 13。改名の `put_` 15 件は、R-bytes-11 で範囲外の挙動も変わります）
@@ -453,7 +459,7 @@
 | `set_u8` | `bytes.set_u8(mut b: Bytes, pos: Int, val: Int) -> Unit` | Go b[i] = x / OCaml set_*_le・_be (F) / JS DataView setUint8 (F) | 改名 → `put_u8`（範囲外は abort） | R-bytes-01、R-bytes-11 |
 | `skip` | `bytes.skip(b: Bytes, pos: Int, n: Int) -> Int` | Go bytes.Reader.Seek / Python — | 意味変更（`n < 0` は abort） | R-bytes-13、R-bytes-21 |
 | `skip_length_prefixed_le` | `bytes.skip_length_prefixed_le(b: Bytes, pos: Int, count: Int) -> Int` | —（形式専用） | 撤去（→ `get_u32_le` と `slice` の組み合わせ） | R-bytes-05 |
-| `slice` | `bytes.slice(b: Bytes, start: Int, end: Int) -> Bytes` | Rust &b[a..b] / Go b[a:b] / Python b[a:b] / JS subarray・slice / OCaml Bytes.sub (F) | 意味変更（負の開始位置を 0 に丸める） | R-bytes-12 |
+| `slice` | `bytes.slice(b: Bytes, start: Int, end: Int) -> Bytes` | Rust &b[a..b] / Go b[a:b] / Python b[a:b] / JS subarray・slice / OCaml Bytes.sub (F) | 意味変更（負の位置は abort。R-L0-29） | R-bytes-12、R-L0-29 |
 | `split` | `bytes.split(b: Bytes, sep: Bytes) -> List[Bytes]` | Go bytes.Split / Python b.split | 据え置き | — |
 | `starts_with` | `bytes.starts_with(b: Bytes, prefix: Bytes) -> Bool` | Go bytes.HasPrefix / Python startswith / Gleam starts_with (F) | 据え置き | — |
 | `take_at` | `bytes.take_at(b: Bytes, pos: Int, n: Int) -> (Int, Option[Bytes])` | Go bytes.Reader.Read / Python b[p:p+n] | 改名 → `next_bytes`（`(値, 次の位置)` を返す） | R-bytes-13 |
@@ -488,10 +494,10 @@
 | `get_f16_be_array` | `bytes.get_f16_be_array(b: Bytes, pos: Int, count: Int) -> Option[List[Float]]`（案） | Python struct.unpack_from('>Ne') | 追加 | R-bytes-03 |
 | `put_bool` | `bytes.put_bool(mut b: Bytes, pos: Int, val: Bool) -> Unit`（案） | Python struct.pack_into('?') | 追加（範囲外は abort） | R-bytes-03、R-bytes-11 |
 | `append_bytes` | `bytes.append_bytes(mut b: Bytes, src: Bytes) -> Unit`（案） | Rust extend_from_slice / Go append(b, src...) / Python bytearray.extend / OCaml Buffer.add_bytes | 追加 | R-bytes-05 |
-| `take` | `bytes.take(b: Bytes, n: Int) -> Bytes`（案） | Rust &b[..n] / Python b[:n] / Kotlin take / Almide list.take | 追加 | R-bytes-08 |
-| `drop` | `bytes.drop(b: Bytes, n: Int) -> Bytes`（案） | Rust &b[n..] / Python b[n:] / Kotlin drop / Almide list.drop | 追加 | R-bytes-08 |
-| `take_end` | `bytes.take_end(b: Bytes, n: Int) -> Bytes`（案） | Python b[-n:] / Kotlin takeLast / Almide list.take_end | 追加 | R-bytes-08 |
-| `drop_end` | `bytes.drop_end(b: Bytes, n: Int) -> Bytes`（案） | Python b[:-n] / Kotlin dropLast / Almide list.drop_end | 追加 | R-bytes-08 |
+| `take` | `bytes.take(b: Bytes, n: Int) -> Bytes`（案） | Rust &b[..n] / Python b[:n] / Kotlin take / Almide list.take | 追加（負の数は abort。R-L0-29） | R-bytes-08 |
+| `drop` | `bytes.drop(b: Bytes, n: Int) -> Bytes`（案） | Rust &b[n..] / Python b[n:] / Kotlin drop / Almide list.drop | 追加（負の数は abort。R-L0-29） | R-bytes-08 |
+| `take_end` | `bytes.take_end(b: Bytes, n: Int) -> Bytes`（案） | Python b[-n:] / Kotlin takeLast / Almide list.take_end | 追加（負の数は abort。R-L0-29） | R-bytes-08 |
+| `drop_end` | `bytes.drop_end(b: Bytes, n: Int) -> Bytes`（案） | Python b[:-n] / Kotlin dropLast / Almide list.drop_end | 追加（負の数は abort。R-L0-29） | R-bytes-08 |
 | `heap_save` | `bytes.heap_save() -> Int` | — | 撤去（内部の名前にする） | R-bytes-14 |
 | `heap_restore` | `bytes.heap_restore(checkpoint: Int) -> Unit` | — | 撤去（内部の名前にする） | R-bytes-14 |
 | `get_i8` | `bytes.get_i8(b: Bytes, pos: Int) -> Option[Int]`（案） | OCaml `get_int8` (F) / JS `getInt8` | 追加 | R-bytes-15 |
