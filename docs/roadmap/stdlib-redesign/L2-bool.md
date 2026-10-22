@@ -34,6 +34,7 @@
 - (a) Rust（`Ord`）・Gleam・OCaml・Kotlin が持っています。
 - (b) 純粋な計算です。両 target で同じです。いまの `<` と `list.sort` の順序（`false` が先）と同じです。
 - (c) R-L0-16 は「順序のある型には `compare` を置く」と決めていますが、対象の一覧から `Bool` が抜けていました。R-L1-30 で `bool` モジュールができたので、ここで埋めます。
+- 実装: 別の関数を書きません。`Bool` の `Ord` の `compare` そのものです（R-L0-22 の完全性の規則）。`a.compare(b)` と `bool.compare(a, b)` は同じ関数です。
 - (d) 追加 1。
 - issue: #3980
 
