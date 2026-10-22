@@ -8,16 +8,11 @@
 // walks the same loop as its `stdlib/list.almd` carrier, so the callback sees
 // the same calls in the same order and the first err is the same one.
 
-/// The set / map carriers that are the list carrier over the members or the
-/// entry pairs.
-const SEQUENCE_CELLS: &[&str] = &[
-    "count", "find", "zip_with", "filter_map", "find_map", "reduce", "scan", "partition", "group_by",
-    "sort_by", "sort_with", "min_by", "max_by", "min_with", "max_with",
-];
-
 impl<'a> Interpreter<'a> {
-    /// `set.__fallible_<hof>` / `map.__fallible_<hof>` for a sequence cell: the
-    /// list carrier over the members / the `(k, v)` entry tuples.
+    /// `set.__fallible_<hof>` / `map.__fallible_<hof>` for a sequence cell —
+    /// a cell the receiver's own arms do not serve that the list matrix has
+    /// (`almide_types::fallible_hofs`, not a name list here): the list carrier
+    /// over the members / the `(k, v)` entry tuples.
     fn try_sequence_cell(&mut self, hof: &str, a: &[Value]) -> Flow {
         let items = match a.first() {
             Some(Value::Set(xs)) => (**xs).clone(),
@@ -48,7 +43,8 @@ impl<'a> Interpreter<'a> {
             "max_by" => self.hof_try_pick_by(a, 1),
             "min_with" => self.hof_try_pick_with(a, -1),
             "max_with" => self.hof_try_pick_with(a, 1),
-            "binary_search_by" | "binary_search_with" => self.hof_try_binary_search(a, hof == "binary_search_by"),
+            "binary_search_by" => self.hof_try_binary_search(a, true),
+            "binary_search_with" => self.hof_try_binary_search(a, false),
             _ => Flow::Unsupported(format!("HOF list.__fallible_{hof}")),
         }
     }
