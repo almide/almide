@@ -1635,6 +1635,11 @@ jobs:
         # deleted must classify `breaking`, an added effect fn must count.
         run: bash scripts/check-interface-diff-negative.sh
 
+      - name: Stdlib redesign target distance (shrink-only; missing / shape / undeprecated toward target-surface.json)
+        run: |
+          python3 scripts/check-stdlib-target.py --self-test
+          python3 scripts/check-stdlib-target.py
+
       - name: Gate verification ledger (every gate classified by how it can fail — no decorative gates)
         run: bash scripts/check-gate-verification.sh
 

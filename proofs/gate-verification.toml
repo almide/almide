@@ -99,7 +99,7 @@
 # its measurand (0 -> 1). Both are enumerated gates, not new ones.
 #
 # unmapped_blind_ceiling = "108"
-# uncompensated_blind_ceiling = "18"
+# uncompensated_blind_ceiling = "19"
 #
 # History of the unverified ceiling: it moved 0 -> 2 when enumerating the
 # Almide gates (#2128) brought `output-parity` and `fuzz-track-record` INTO the
@@ -1417,3 +1417,13 @@ evidence = "2026-10-21, both directions on the real fuzz history: the full histo
 measures = "consecutive calendar days on which every completed Fuzz (nightly) run's verdict job concluded success over >= 75% of the planned fuzz-minutes, read from the Actions API and the verdict-job logs"
 varies = "2026-10-18 reads 3 (start 2026-10-16), 2026-10-20 reads 0, both measured 2026-10-21"
 blind = "a correctness bug the fuzz generator cannot reach: a clean night means no finding in the generated programs, not none in the compiler -> UNCOMPENSATED"
+
+[[gate]]
+path = "scripts/check-stdlib-target.py"
+reads = "scalar"
+wired_by = ".github/workflows/ci.yml"
+class = "NEGATIVE_TESTED"
+evidence = "landing (2026-10-23): compares the committed signature-index blocks of docs/stdlib/*.md with docs/roadmap/stdlib-redesign/target-surface.json; at landing it read missing 742, shape 152, undeprecated 408, lang_wait 51 of 1,289 target functions, written to proofs/stdlib-target-distance.toml. --self-test forges four surfaces in memory and asserts each moves exactly its own count: a present target fn deleted (missing +1), a present fn's effect flipped (shape +1), a removed fn present without @deprecated (undeprecated +1), the same fn with @deprecated (undeprecated +0). An empty index exits 2 instead of reading a vacuous distance."
+measures = "how far the shipped stdlib surface is from the redesign target: target functions missing, present with another signature, and removed functions still public without @deprecated"
+varies = "landing (2026-10-23): 742 / 152 / 408 against develop 8d872cf72; each stdlib redesign PR lowers it"
+blind = "a signature the index renders differently from the target for the same type (an alias, a spelled-out Result on a pure fn) reads as a shape difference, so the count can over-report but never hides a missing fn -> UNCOMPENSATED; whether the shipped behaviour matches the target (abort vs none, clamping) is not read, only names and types -> spec/stdlib"
