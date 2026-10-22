@@ -1170,7 +1170,7 @@ why = "The rows of a family gate, not a property of functions: the fixed-width i
 [[site]]
 id = "src/cli/docs_gen.rs::check_numeric_protocol_matrix::INTEGER::table"
 class = "justified"
-names = 21
+names = 28
 why = "The columns of a family gate, not a property of functions: the requirements of Integer and FixedWidthInteger (protocol-view.md, R-sized-02/08/10, R-int-11/12) that every fixed-width integer must carry as a concrete function until a built-in type can conform to a protocol. The gate asserts every carrier x requirement cell exists; no codegen leg reads it."
 
 [[site]]
