@@ -38,7 +38,7 @@
 
 | いまの関数 | リデザイン後 | 据え置き | 新規 | 改名 | 意味変更 | 撤去 |
 |---:|---:|---:|---:|---:|---:|---:|
-| 1001 | 1250 | 585 | 441 | 84 | 140 | 192 |
+| 1001 | 1249 | 585 | 440 | 84 | 140 | 192 |
 
 固定幅の数（`int8`〜`uint64`、`float32`・`float64`）は型ごとに 1 関数と数えます。
 
@@ -49,7 +49,7 @@
 | [`args`](#args) | 3 | 1 | 0 | 0 | 4 | [L2-args.md](L2-args.md) |
 | [`base64`](#base64) | 4 | 0 | 0 | 2 | 0 | [L2-base64.md](L2-base64.md) |
 | [`bigint`](#bigint)（新しいモジュール） | 23 | 23 | 0 | 0 | 0 | [L2-bigint.md](L2-bigint.md) |
-| [`bool`](#bool) | 2 | 2 | 0 | 0 | 0 | [L2-bool.md](L2-bool.md) |
+| [`bool`](#bool) | 1 | 1 | 0 | 0 | 0 | [L2-bool.md](L2-bool.md) |
 | [`bytes`](#bytes) | 141 | 27 | 71 | 6 | 34 | [L2-bytes.md](L2-bytes.md) |
 | [`compute`](#compute) | 7 | 1 | 0 | 0 | 0 | [L2-compute.md](L2-compute.md) |
 | [`datetime`](#datetime) | 18 | 1 | 0 | 1 | 5 | [L2-datetime.md](L2-datetime.md) |
@@ -165,7 +165,6 @@
 
 | 関数 | シグネチャ（リデザイン後） | 変化 | 案 |
 |---|---|---|---|
-| `compare` | `fn bool.compare(a: Bool, b: Bool) -> Int` | 新規 | R-bool-02 |
 | `parse` | `fn bool.parse(s: String) -> Result[Bool, String]` | 新規 | R-bool-01 |
 
 ## bytes
@@ -2024,7 +2023,7 @@
 
 ## 採らなかった案・保留の案と理由
 
-レビューで同じ指摘を繰り返さないよう、いまも有効な × と保留の案（56 件）を理由の最初の 1〜2 文と一緒に載せます。全文は各ページの案にあります。
+レビューで同じ指摘を繰り返さないよう、いまも有効な × と保留の案（57 件）を理由の最初の 1〜2 文と一緒に載せます。全文は各ページの案にあります。
 
 | 案 | 内容 | 判定 | 理由 |
 |---|---|---|---|
@@ -2037,6 +2036,7 @@
 | [R-base64-03](L2-base64.md#r-base64-03-hex-とモジュールをまとめる---不採用r-l1-23) | hex とモジュールをまとめる | × 不採用（R-L1-23） | R-L1-23 のとおりです。まとめたモジュールの名前に多数派がありません。 |
 | [R-bigint-02](L2-bigint.md#r-bigint-02-123n-のような-bigint-のリテラルを足す---不採用) | `123n` のような BigInt のリテラルを足す | × 不採用 | 足しません。`bigint.parse("123…")!` と `int.to_bigint(123)` で書きます。 |
 | [R-bigint-03](L2-bigint.md#r-bigint-03-int-と-bigint-を混ぜた演算を自動で広げる---不採用) | `Int` と `BigInt` を混ぜた演算を自動で広げる | × 不採用 | しません。`a + b` で片方が `Int`、片方が `BigInt` なら型エラーにし、診断のヒントで `int.to_bigint(a)` を示します。 |
+| [R-bool-02](L2-bool.md#r-bool-02-boolcompare-を足す--保留protocol-の階層で--から変更dojo-で測る) | `bool.compare` を足す | 保留（protocol の階層で ○ から変更。Dojo で測る） | `fn bool.compare(a: Bool, b: Bool) -> Int`。`false < true` の順で、小さければ負、等しければ 0、大きければ正を返します。 |
 | [R-bytes-21](L2-bytes.md#r-bytes-21-bytesskip-を-next_-の形にする---不採用) | `bytes.skip` を `next_` の形にする | × 不採用 | `skip` は値を読まずに位置だけを進めるので、`(値, 次の状態)` の値がありません。`(Unit, Int)` を返す形は、読む側が捨てる値を増やすだけです。 |
 | [R-bytes-24](L2-bytes.md#r-bytes-24-bytesset-と-put_u8-を-1-つにする---不採用) | `bytes.set` と `put_u8` を 1 つにする | × 不採用 | `set(b, i, v) -> Bytes` はコピーを返す関数、`put_u8(mut b, pos, v)` はその場で書き換える関数で、R-L0-04（コピーが既定、その場書き換えは決まった動詞）の対です。 |
 | [R-compute-02](L2-compute.md#r-compute-02-duration-と統合するまたは読み出し関数を足す---不採用) | `duration` と統合する、または読み出し関数を足す | × 不採用 | どちらもしません。ADR-0001 の決定（2 つの時計は互いに変換できない別の型、読み出しは S7 で省略）と、L1 R-L1-21 のとおりです。 |

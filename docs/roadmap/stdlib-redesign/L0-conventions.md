@@ -547,15 +547,18 @@ effect fn を呼んだときの型（`!` が要るか、`??` をそのまま書�
 - 案: これを標準の型全体の作り方にします。
   1. 2 つ以上の型が同じ役割で持つ関数は、必ず protocol のメソッドとして 1 回だけ宣言します。
   2. 型のモジュールの関数（`int.compare`・`list.len`）は、その protocol のメソッドそのものです。転送の関数を別に置きません（R-L0-22 の規則を全 protocol に広げる）。
-  3. 型の公開面は「準拠する protocol の一覧」と「その型だけの関数」で書き表せます。この形で並べ直した一覧が [protocol-view.md](protocol-view.md) です（target-surface.md から機械的に作る）。
+  3. 型の公開面は「準拠する protocol の一覧」と「その型だけの関数」で書き表せます。
+  4. protocol は階層に組みます。手本は Swift の標準ライブラリです（`Equatable`→`Comparable`、`AdditiveArithmetic`→`Numeric`→`BinaryInteger`→`FixedWidthInteger`、`Sequence`→`Collection`→`BidirectionalCollection`→`RandomAccessCollection` など）。Swift にない層は、理由を書いて足します。階層・型ごとの準拠・穴・この階層で決めることは [protocol-view.md](protocol-view.md) にあります（protocol の定義と準拠から、target-surface.md と突き合わせて機械的に作る）。R-L0-31 で名前を付けた protocol（`Integer`・`FloatingPoint`・`Sized`・`TimeAmount`・`HttpMessage`）は、この階層の中に置き直し、中身は階層の定義に従います。
 - 「protocol だけ」にしない理由: `string.split` や `regex.find` のように 1 つの型しか持たない関数を、メンバーが 1 つの protocol にしても、名前が 1 つ増えるだけで揃いは守れません。Swift も、具体型だけのメソッドを持っています。
-- 実測（リデザイン後の面 1,250 関数）: 値の型を持つ 32 モジュールの関数 1,036 個のうち、725 個はほかの型の関数と名前が同じで、protocol の候補です。残る 311 個のうち 102 個は `bytes` の数の型ごとの符号化で、これも数の型の側の族です。
+- 実測（リデザイン後の面）: 値の型 31 種の関数 1,041 個のうち、663 個が階層の protocol の要件か、数の型どうしの変換の族です。準拠を決めると、要件のうちまだ無い関数（穴）が 209 個出ます。そのうち 168 個は、`int` が持つ算術とビット演算をサイズつきの整数 8 型が持たないことによるもので、既定の実装 1 つで埋まります。
 - 言語に足りないもの（実測 `almide 0.68.0 dev`。どれも今は書けない）:
   - 型引数を通して、受け手のないメソッドを呼ぶ（`T.zero()` が E002）。`parse`・`max_value`・`nan` に要ります。
   - protocol の継承（`protocol Integer: Ord`）。
   - 関連型（`type Elem`）。入れ物の `contains`・`count` を protocol にするのに要ります（R-L0-31 で × にした理由がこれです）。
   - 既定の実装（`compare` から `min`・`max`・`clamp` を導く）。
-- 進め方: 4 つの機能は ADR を書いてから入れます。入れる前に、protocol を使う総称関数が LLM の書くコードの生存率を下げないことを Dojo で確かめます。型ごとの書き方（`int.compare(a, b)`）は同じ関数なので、どちらでも書けます。
+  - 条件つきの準拠（`List[A]` は `A: Hash` のときだけ `Hash`）。
+  - 入れ物そのものを引数にとる型（`F[_]`）は要りません。Swift と同じく、`map` は protocol に入れず型ごとの関数のままにします。
+- 進め方: 5 つの機能は ADR を書いてから入れます。入れる前に、protocol を使う総称関数が LLM の書くコードの生存率を下げないことを Dojo で確かめます。型ごとの書き方（`int.compare(a, b)`）は同じ関数なので、どちらでも書けます。
 - (d) 方向の宣言です。この案だけでは関数は変わりません。R-L0-31 の × の行（`contains`・`count`・`Parse`）は、機能が入ったら出し直します。
 - issue: #4000
 
