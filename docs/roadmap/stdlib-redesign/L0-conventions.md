@@ -122,7 +122,7 @@ fn main() -> Unit = {
 2. 既定値を受け取る `_or` 版（`list.get_or`、`map.get_or`、`bytes.get_or`、`args.option_or`）は `xs |> list.get(i) ?? d` と同じなので、撤去します。`option.unwrap_or` と `result.unwrap_or` を `??` に寄せた ADR-0005 の延長です。
 3. 処理を止める（abort）のは、呼び出し側の契約違反だけです（例: `list.chunk(xs, 0)`）。
 4. 失敗しうる構築・変換は、失敗の目印になる値（空文字、0、空のリスト）を返しません。理由がなければ `Option`、理由があれば `Result[_, String]` を返します（例: `string.from_codepoint` がいま無効な値で `""` を返すのは、この規則に反します）。
-5. 例外: 数値変換の無印 `to_<型>` は、損失のある組でも折り返す版です（R-L0-08）。範囲外の値を黙って別の値に変えるので、1 の「無印は安全版」に当てはまりません。9 言語の多数派に合わせた例外として据え置き、安全版は `_checked`・`_saturating` の接尾辞で選びます。この例外をやめるかどうかは R-L0-21 で保留しています。
+5. 数値変換の無印 `to_<型>` は、結果の型で表せない値で abort します（R-L0-32）。3 の「確かめられる前提の違反は abort」の 1 つで、例外ではありません。ほかの扱いは接尾辞で選びます（`_checked`・`_saturating`・`_wrapping`。R-L0-34）。（六巡目に書き直し。以前は「無印は折り返す例外」と書いていました。）
 
 - (a) 無印が安全版なのは Rust、OCaml Base、Elixir です。無印が例外版なのは OCaml Stdlib と Kotlin で、多数派はありません。Almide は例外を持たないので、無印が安全版である以外の選択肢はありません。既定値版は Python の `get(k, d)`、Kotlin の `getOrDefault`、Elixir の `get(m, k, default)` がありますが、Rust・Swift・JS・Gleam は演算子か汎用の関数で書きます。
 - (c) `??` は CHEATSHEET が教える唯一の書き方です。`get_or` を覚えていなくても書けます。
@@ -144,10 +144,12 @@ fn main() -> Unit = {
 
 ## R-L0-08 数値変換の 4 種は接尾辞の行列 — ○ 据え置き＋穴埋め
 
-- `to_<T>`: 損失あり。整数は折り返し、浮動小数点から整数への変換は規則に従って丸める。
-- `to_<T>_checked`: 範囲外なら `Option` で none。
+- `to_<T>`: 結果の型で表せない値（範囲外、整数への NaN）で abort（R-L0-32）。丸めの位置は R-L0-35。
+- `to_<T>_checked`: 正確に表せるときだけ some（R-L0-28）。
 - `to_<T>_saturating`: 範囲外なら端の値に張り付く。
-- 折り返し演算 `int.wrap_add`、`wrap_sub`、`wrap_mul` と `int.wrap(n, bits)`: いまは `wrap_sub` と `wrap` がない（#3854）。
+- `to_<T>_wrapping`: 整数から整数への変換で、下位のビットを残して折り返す（R-L0-34）。
+- 折り返し演算 `int.wrap_add`、`wrap_sub`、`wrap_mul` と `int.wrap(x, bits)`: `Int` の中の計算です。型の変換には使いません（R-L0-34）。
+- （六巡目に、R-L0-32・R-L0-34・R-L0-35 に合わせて書き直しました。）
 
 - (a) 4 種を全部別の名前で持つのは Rust（接頭辞）と Swift（引数ラベル）だけで、多数派はありません。いまの接尾辞の行列はすでにゲートで守られているので、据え置きます。
   - 9 言語の外の参考として Zig も見ました。Zig は 1 語の変換を持たず、`@intCast`（範囲外は不正な動作で、安全モードでは止まる）と `@truncate`（折り返し）のように、意味ごとに名前を分けています（[言語リファレンス](https://ziglang.org/documentation/master/#intCast)）。Rust も `as` を禁じる・警告する lint（clippy の `as_conversions`・`cast_possible_truncation`）を持っています。意図を名前に書かせる方向は、Almide の接尾辞の行列と同じです。
@@ -285,16 +287,20 @@ effect fn を呼んだときの型（`!` が要るか、`??` をそのまま書�
   6. `String` と `Bytes` の取り違え（E005）には、`bytes.from_string(s)`・`bytes.to_string(b)` を示します。`fs.read_bytes`・`hash.fnv1a32`・`io.write_bytes` が `Bytes` に変わるので、この取り違えは増えます。
   7. `5 & 3` のような他言語のビット演算子は、いまは構文エラー「`)` がない」になります。案内（#3905 で予定）は、字句ではなく構文エラーの経路に置きます。
 
-## R-L0-20 critical プロファイルで、黙って折り返す `to_<型>` を拒む — 保留
+## R-L0-20 critical プロファイルで、黙って折り返す `to_<型>` を拒む — × 取り消し（→ R-L0-32 で解消）
 
 - 内容: `almide check --profile critical` のときだけ、損失のある組の `to_<型>` をエラーにし、`_checked` か `_saturating` を書かせます。Rust の clippy の `cast_possible_truncation` と同じ考え方です。普段のコードは変わりません。
 - 保留の理由: いまの critical プロファイル（ALS の bounded 規則）が保証するのは、安全さと資源の上限で、計算の正しさは含みません。`xs[i]` の範囲外や 0 での割り算も、critical で拒んでいません（2026-10-01 に実測）。正しさの規則（全域性）を critical に入れる件は、[certification-grade](../active/certification-grade.md) の CG-3 として先送りになっています。黙って折り返す変換だけを先に拒むと、critical の規則の性格がばらばらになるので、全域性の規則と同時に判断します。
+
+- 取り消し（六巡目）: R-L0-32 で無印の狭める変換が abort になり、黙って折り返す無印がなくなりました。critical で拒む対象が残らないので、この案は閉じます。折り返しは `_wrapping` と名前に書いたときだけ起きます（R-L0-34）。
 - 決めるときの順番: ALS（almide/als）に規則を足す → pin を進める → 検査器（`check/bounded.rs`）を実装する。
 - issue: なし（CG-3 を再開するときに一緒に起票します）
 
-## R-L0-21 無印の `to_<型>` を、はみ出したら失敗する版に変える — 保留
+## R-L0-21 無印の `to_<型>` を、はみ出したら失敗する版に変える — 保留 → R-L0-32・R-L0-34 で解消
 
 - 内容: 損失のある組の `to_<型>` を `Option` を返す形（いまの `_checked` と同じ）に変え、折り返す版を `to_<型>_wrapping` にします。Zig と Swift の形です。R-L0-06 の 5 の例外がなくなります。
+
+- 解消（六巡目）: 無印を「はみ出したら失敗」にする点は R-L0-32 で採用しました（none ではなく abort）。折り返す版を `_wrapping` にする点は R-L0-34 で採用しました。下の本文は保留していたときの記録です。
 - (a) 1 語の損失ありの変換を持つ言語のうち、折り返すのは Rust の `as`・Go・Kotlin・OCaml の 4 つ、止まるのは Swift の 1 つです。R-L0-00 の改名の条件（5/9 以上）に届きません。
 - (b) 純粋な計算です。両 target で同じです。
 - (c) `int.to_int8(300)` が黙って `44` になるバグは、型検査も実行も通ります。この形にすれば起きません。一方で、変換を書くたびに `??` か `!` が要るようになります。
@@ -446,11 +452,12 @@ effect fn を呼んだときの型（`!` が要るか、`??` をそのまま書�
 | `int` とサイズつきの整数 8 型 | `Integer` | ○（R-sized-08） | `compare`・`min`・`max`・`clamp`・`parse`・`parse_radix`・`to_string`・`to_string_radix`・`min_value`・`max_value` |
 | `float`・`float32`・`float64` | `FloatingPoint` | ○（R-sized-08） | `Integer` と同じ選択・比較の族に、値の分類（`is_nan`・`is_infinite`・`is_finite`）と特別な値（`nan`・`infinity`・`epsilon`） |
 | list・string・bytes・map・set・deque・heap | `Sized` | ○（この案） | `len`・`is_empty`。7 つの入れ物はすでに全部持っています |
-| 同じ 7 つの `contains`・`count` | — | × | `map.contains` はキー、`map.count` は `(K, V)` を受け取り、要素の型が 1 つに決まりません |
+| list・string・bytes・map・set・deque・heap の `contains`・`count` | — | × | `map.contains` はキー、`map.count` は `(K, V)` を受け取り、要素の型が 1 つに決まりません |
 | `parse` を持つ型（`int`・`bool`・`uuid`・`url` など） | `Parse` | × | 総称関数の中で `T.parse(s)` と書けません（実測 `almide 0.68.0 dev`: 引数のない関数をプロトコルに書くことはできますが、`T.parse` は E002）。言語に「型で選ぶ関数呼び出し」が入ったら出し直します |
 | `option`・`result` の `map`・`flat_map` | — | × | `Option[_]` という「型を取る型」を抽象する仕組み（高階の型）が言語にありません |
 | `base64`・`hex` などの符号化 | — | × | 型ではなくモジュールの組で、プロトコルを持つ値がありません。綴りは R-L0-25 の表で揃えています |
 
+- プロトコルが揃いを保証するのは、表の「中身」の列に挙げた関数だけです。組の一方にだけある関数（`float.floor`・`round`・`signum` など。`float32`・`float64` では `to_float` してから `float.*`）は、プロトコルの外です。
 - 演算子（`+`・`<` など）はプロトコルに入りません（R-duration-03 と同じ。R-L0-26 の演算子の表で宣言します）。
 - 引数のない関数（`min_value`・`nan`・6 単位の構築子）も、プロトコルに書いて「持っていること」を検査します。総称関数の中から呼ぶことは、いまの言語ではできません。
 - 根拠の L0 規則: R-L0-01（同じ役割を 2 か所で手書きしない）、R-L0-12（族は行列で揃える）。CLAUDE.md の「性質は宣言 1 か所から導出する」。
@@ -467,13 +474,13 @@ effect fn を呼んだときの型（`!` が要るか、`??` をそのまま書�
 - 案: 無印の狭める変換は、結果の型で表せないとき（範囲外、NaN）に abort します。浮動小数点からの小数部の切り捨て（`float.to_int(1.5)` = 1）は今のままです。ほかの扱いは、名前で選びます。
   - `_checked`: 正確に表せなければ none（R-L0-28）。
   - `_saturating`: 端に張り付く。浮動小数点からの変換にも、このセルを足します（`float`・`float32`・`float64` → 整数 9 型の 27 関数）。いまの無印の動きは、このセルに移ります。
-  - 折り返しは `int.wrap(x, bits)` で書きます（`int.to_int8(int.wrap(x, 8))`）。折り返しを名前で選ぶセルは足しません。
+  - 折り返しは `_wrapping` のセルで書きます（R-L0-34。六巡目に `int.wrap` への誘導から変更）。
 - 根拠の L0 規則: R-L0-06 の 3（呼び出し側が確かめられる前提の違反は abort）。R-L0-08 の行列（損失のある変換は無印・`_checked`・`_saturating` の 3 つ）。
 - (a) Swift の `Int8(x)` は範囲外で trap し、`init(exactly:)`・`init(clamping:)`・`init(truncatingIfNeeded:)` で扱いを選びます。Rust の `as` は折り返しと飽和が型で分かれ、レビューが指摘した食い違いそのものです。
 - (b) 純粋な計算です。両 target で同じ判定です。
 - (c) 書き誤りが、黙った別の値ではなく、その場の abort になります。
-- (d) 意味変更。いまは折り返して返している呼び出しが abort になるので、epoch 15 の `breaks` に入れます。`almide fix` は、浮動小数点からの無印を `_saturating` に書き換えます（動きを保つ）。整数からの無印は意図が読めないので書き換えず、診断のヒントに `_checked`・`_saturating`・`int.wrap` を並べます。
-- 完全性の規則（R-L0-08 を置き換え）: 損失のある変換は、どの入力の型でも、無印（abort）・`_checked`・`_saturating` の 3 つを持ちます。
+- (d) 意味変更。いまは折り返して返している呼び出しが abort になるので、epoch 15 の `breaks` に入れます。`almide fix` は、浮動小数点からの無印を `_saturating` に書き換えます（動きを保つ）。整数からの無印は `_wrapping` に書き換えます（動きを保つ。R-L0-34）。
+- 完全性の規則（R-L0-08 を置き換え）: 損失のある変換は、どの入力の型でも、無印（abort）・`_checked`・`_saturating` の 3 つを持ちます。整数から整数への損失のある変換は、`_wrapping` を加えた 4 つです（R-L0-34）。変換先が浮動小数点のときは R-L0-35 です。
 - issue: #3990
 
 ## R-L0-33 範囲外の扱いを関数の役割で分ける — ○ 採用
@@ -495,6 +502,45 @@ effect fn を呼んだときの型（`!` が要るか、`??` をそのまま書�
 - (d) 表の多くは今の動きの書き直しです。変わるのは R-L0-29（負の位置）、R-map-08（`map.update`）と、負の数を丸めていた `repeat` です。
 - issue: #3990
 
+## R-L0-34 整数から整数への損失のある変換に `_wrapping` を置く — ○ 採用
+
+- いま: R-L0-32 は、折り返しを `int.to_int8(int.wrap(x, 8))` で書くとしていました。`int.wrap(x: Int, bits: Int) -> Int` は `Int` の中の計算なので、`Int` に入らない `UInt64` の上半分（2^63 以上）を受け取れず、折り返した結果の `UInt64` も返せません。`uint64.to_int(uint64.max_value())` は R-L0-32 で abort になるので、`UInt64` を経由する折り返しの道がありませんでした。
+- 案: 整数（`Int` と固定幅の整数 8 型）から整数への損失のある変換に、`to_<T>_wrapping` を置きます（46 関数）。下位のビットを残し、結果の型の範囲に折り返します（2 の補数）。`int.wrap`・`wrap_add`・`wrap_sub`・`wrap_mul` は `Int` の中の計算として残し、型の変換の案内には使いません。
+  - 例: `int.to_uint8_wrapping(300)` = 44、`int.to_uint64_wrapping(-1)` = `uint64.max_value()`、`uint64.to_int_wrapping(uint64.max_value())` = -1。
+  - `UInt64` の計算は `uint64` 同士の演算子で書きます（R-L0-26）。`Int` に移すときは、`to_int`（範囲外は abort）・`to_int_checked`・`to_int_saturating`・`to_int_wrapping` から選びます。
+  - `BigInt` からの変換には置きません（任意の長さの整数の下位ビットを取る用途は、`bigint` の剰余で書けます）。
+- 根拠の L0 規則: R-L0-08（変換の扱いは接尾辞の行列で選ぶ）、R-L0-32 の完全性の規則、CLAUDE.md の「族は行列で揃える」。
+- (a) 折り返しを名前で選ぶのは Swift `init(truncatingIfNeeded:)` (F)。Rust の `as`、Go の `T(x)`、Kotlin の `toByte()` は、1 語の変換がそのまま折り返します。`_wrapping` の綴りは Rust の `wrapping_add` などの接頭辞と、Almide の `wrap_add` に揃えています。
+- (b) 純粋な計算です。両 target で同じです。
+- (c) 他言語の `as` で書く意図（折り返す）を、名前で 1 通りに書けます。`almide fix` が整数からの無印を `_wrapping` に書き換えれば、今の動きをそのまま保てます（R-L0-32 の (d) をこれで置き換え）。
+- (d) 追加（46 関数）。
+- 完全性の規則: 整数から整数への損失のある組は、無印・`_checked`・`_saturating`・`_wrapping` の 4 つを持ちます。行列のゲート（R-sized-01）にこの列を足します。
+- issue: #3995
+
+## R-L0-35 無印の変換の丸めと NaN を、変換先が整数か浮動小数点かで分けて書く — ○ 採用
+
+- いま: R-L0-32 の「結果の型で表せない値は abort」は、小数部の切り捨て、`Float32` への精度の損失、浮動小数点同士の NaN にも当てはまるように読めます。
+- 案: 規則を次の表にします。実装はいまの動きのままで、文を確定させる案です。
+
+| 変換先 | 小数部・精度 | 範囲外 | NaN |
+|---|---|---|---|
+| 整数（`float.to_int` など） | 0 の方向に切り捨て（`float.to_int(1.5)` = 1、`float.to_int(-1.5)` = -1） | abort | abort |
+| 整数（整数から） | — | abort | — |
+| 浮動小数点（`float.to_float32`・`int.to_float32`・`int.to_float` など） | 最も近い値に丸める（偶数への丸め。`int.to_float32(16777217)` = 16777216.0） | 無限大（`float.to_float32(1e300)` = 無限大） | NaN のまま |
+
+- `_checked` は、どの行でも「正確に表せるときだけ some」です（R-L0-28）。切り捨て・丸め・範囲外・NaN はどれも none です。無印との違いは、無印が上の表の丸めを許すことです。
+- 根拠の L0 規則: R-L0-28、R-L0-32。
+- (a) IEEE 754 の変換の既定（最も近い値に丸める）と、Rust・Swift・Go・Kotlin の float から int への 0 方向の切り捨て。
+- (d) 文書の確定だけです。
+- issue: #3995
+
+## R-L0-36 「間違えても型エラーになる」は、それだけでは不採用の理由にしない — ○ 採用
+
+- いま: いくつかの不採用の理由が「書き間違えても型エラーになり、黙って通らない」です。Almide の物差しは改変生存率で、最初に書いたコードが型エラーになることも失敗に数えます。黙って違う値になるよりは良いですが、「そのまま正しく動く割合」は下がります。
+- 案: 型エラーになることは、害を小さくする事情として書きます。不採用の理由そのものには、変更すると失われる具体的な性質（今のコードが黙って違う値になる、同じ役割に 2 つの綴りができる、など）か、計測の結果を書きます。どちらもないときは保留にして、Dojo で候補ごとの生存率を測ります。
+- 見直した案: R-map-04 を保留に変えました（Dojo で測る）。R-datetime-04・R-duration-04・R-result-02・R-option-03・R-regex-06 は、型エラー以外の理由（同じ役割に 2 つの綴り、意味から決まる形、ADR の決定）を持つので据え置きます。
+- (d) 判定の規則の追加です。関数は変わりません。
+- issue: なし
 ## ゲートの束（R-L0-G） — ○ 採用
 
 R-L0-02、03、04、07、09、10、12、16 の検査を、1 つのテスト `tests/stdlib_surface_conventions_test.rs` にまとめます。入力は interface JSON（`mut` 欄つき）です。規則ごとの許容リストは、L2 の案で解消するたびに減らします。増やす方向には変えられません。

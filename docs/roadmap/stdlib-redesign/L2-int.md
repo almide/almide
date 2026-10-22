@@ -138,6 +138,15 @@
 - (d) 改名。`@deprecated(since=15, use="int.count_ones")`、`removal_epoch = 16`、`almide fix` で書き換えます。
 - issue: #3985
 
+### R-int-08 `int.to_hex` を `to_string_radix(x, 16)` にまとめる — × 不採用
+
+- 理由: 2 つは負の数で結果が違い、同義語ではありません。`int.to_hex(-1)` は 64 bit の並びの 16 進（`"ffffffffffffffff"`）、`int.to_string_radix(-1, 16)` は符号つき（`"-1"`）です。ハッシュ値やビットの並びを表示する用途と、数を別の基数で書く用途に分かれます。
+- issue: なし
+
+### R-int-09 `int.sign` と `float.signum` の綴りを 1 つにする — × 不採用
+
+- 理由: 0 の扱いが違うので、同じ名前にすると R-float-05 で避けた誤りが戻ります。`int.sign(0)`・`bigint.sign(0)` は 0、`float.signum(0.0)` は 1.0（Rust の `signum` と同じ）です。`sign` という名前は「0 は 0」の関数だけに使います（R-float-05 の完全性の規則）。
+- issue: なし
 ## L3: 関数表
 
 `int` の現行 72 関数と、追加する 13 関数です（`compare` と、[L2-bigint](L2-bigint.md) の `to_bigint` を含む）。
@@ -178,13 +187,13 @@
 | `rotate_left` | `int.rotate_left(a: Int, n: Int, bits: Int) -> Int` | Rust `rotate_left` / Go `bits.RotateLeft64` / Kotlin `rotateLeft` (F) | 据え置き | — |
 | `to_u32` | `int.to_u32(a: Int) -> Int` | JS `x >>> 0` / Rust `as u32 as i64` / 他 — | 撤去 | R-int-02（`int.wrap(x, 32)`。#3851 E） |
 | `to_u8` | `int.to_u8(a: Int) -> Int` | Rust `as u8` / 他 — | 撤去 | R-int-02（`int.wrap(x, 8)`。#3851 E） |
-| `to_int8` | `int.to_int8(n: Int) -> Int8` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
-| `to_int16` | `int.to_int16(n: Int) -> Int16` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
-| `to_int32` | `int.to_int32(n: Int) -> Int32` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
-| `to_uint8` | `int.to_uint8(n: Int) -> UInt8` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
-| `to_uint16` | `int.to_uint16(n: Int) -> UInt16` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
-| `to_uint32` | `int.to_uint32(n: Int) -> UInt32` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
-| `to_uint64` | `int.to_uint64(n: Int) -> UInt64` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外・NaN は abort） | R-L0-32 |
+| `to_int8` | `int.to_int8(n: Int) -> Int8` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外は abort） | R-L0-32 |
+| `to_int16` | `int.to_int16(n: Int) -> Int16` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外は abort） | R-L0-32 |
+| `to_int32` | `int.to_int32(n: Int) -> Int32` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外は abort） | R-L0-32 |
+| `to_uint8` | `int.to_uint8(n: Int) -> UInt8` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外は abort） | R-L0-32 |
+| `to_uint16` | `int.to_uint16(n: Int) -> UInt16` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外は abort） | R-L0-32 |
+| `to_uint32` | `int.to_uint32(n: Int) -> UInt32` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外は abort） | R-L0-32 |
+| `to_uint64` | `int.to_uint64(n: Int) -> UInt64` | Rust `as` / Swift `init(truncatingIfNeeded:)` (F) / Kotlin `toByte()` 等 / Go `T(x)` | 意味変更（範囲外は abort） | R-L0-32 |
 | `to_float32` | `int.to_float32(n: Int) -> Float32` | Rust `as` / Kotlin `toDouble()` / Swift `init(_:)` / Gleam `to_float` (F) | 据え置き | R-sized-01（行列のセル） |
 | `to_float64` | `int.to_float64(n: Int) -> Float64` | Rust `as` / Kotlin `toDouble()` / Swift `init(_:)` / Gleam `to_float` (F) | 据え置き | R-sized-01（行列のセル） |
 | `to_int64` | `int.to_int64(n: Int) -> Int64` | Rust `from`/`into` / Swift `init(_:)` / Kotlin `toLong()` 等 / Go `T(x)` | 据え置き | R-sized-01（行列のセル） |
@@ -205,12 +214,19 @@
 | `to_uint64_checked` | `int.to_uint64_checked(n: Int) -> Option[UInt64]` | Rust `try_from` / Swift `init(exactly:)` (F) / OCaml Base `to_int_exn`系 / 他 6 言語 — | 据え置き | R-sized-01（行列のセル） |
 | `to_float32_checked` | `int.to_float32_checked(n: Int) -> Option[Float32]` | Rust `try_from` / Swift `init(exactly:)` (F) / OCaml Base `to_int_exn`系 / 他 6 言語 — | 据え置き | R-sized-01（行列のセル） |
 | `to_int8_saturating` | `int.to_int8_saturating(n: Int) -> Int8` | Swift `init(clamping:)` (F) / Kotlin `coerceIn` / 他 7 言語 — | 据え置き | R-sized-01（行列のセル） |
+| `to_int8_wrapping` | （追加）`int.to_int8_wrapping(x: Int) -> Int8` | Swift `init(truncatingIfNeeded:)` (F) / Rust `as` / Go `T(x)` / Kotlin `toByte()` 等 | 追加 | R-L0-34 |
 | `to_int16_saturating` | `int.to_int16_saturating(n: Int) -> Int16` | Swift `init(clamping:)` (F) / Kotlin `coerceIn` / 他 7 言語 — | 据え置き | R-sized-01（行列のセル） |
+| `to_int16_wrapping` | （追加）`int.to_int16_wrapping(x: Int) -> Int16` | Swift `init(truncatingIfNeeded:)` (F) / Rust `as` / Go `T(x)` / Kotlin `toByte()` 等 | 追加 | R-L0-34 |
 | `to_int32_saturating` | `int.to_int32_saturating(n: Int) -> Int32` | Swift `init(clamping:)` (F) / Kotlin `coerceIn` / 他 7 言語 — | 据え置き | R-sized-01（行列のセル） |
+| `to_int32_wrapping` | （追加）`int.to_int32_wrapping(x: Int) -> Int32` | Swift `init(truncatingIfNeeded:)` (F) / Rust `as` / Go `T(x)` / Kotlin `toByte()` 等 | 追加 | R-L0-34 |
 | `to_uint8_saturating` | `int.to_uint8_saturating(n: Int) -> UInt8` | Swift `init(clamping:)` (F) / Kotlin `coerceIn` / 他 7 言語 — | 据え置き | R-sized-01（行列のセル） |
+| `to_uint8_wrapping` | （追加）`int.to_uint8_wrapping(x: Int) -> UInt8` | Swift `init(truncatingIfNeeded:)` (F) / Rust `as` / Go `T(x)` / Kotlin `toByte()` 等 | 追加 | R-L0-34 |
 | `to_uint16_saturating` | `int.to_uint16_saturating(n: Int) -> UInt16` | Swift `init(clamping:)` (F) / Kotlin `coerceIn` / 他 7 言語 — | 据え置き | R-sized-01（行列のセル） |
+| `to_uint16_wrapping` | （追加）`int.to_uint16_wrapping(x: Int) -> UInt16` | Swift `init(truncatingIfNeeded:)` (F) / Rust `as` / Go `T(x)` / Kotlin `toByte()` 等 | 追加 | R-L0-34 |
 | `to_uint32_saturating` | `int.to_uint32_saturating(n: Int) -> UInt32` | Swift `init(clamping:)` (F) / Kotlin `coerceIn` / 他 7 言語 — | 据え置き | R-sized-01（行列のセル） |
+| `to_uint32_wrapping` | （追加）`int.to_uint32_wrapping(x: Int) -> UInt32` | Swift `init(truncatingIfNeeded:)` (F) / Rust `as` / Go `T(x)` / Kotlin `toByte()` 等 | 追加 | R-L0-34 |
 | `to_uint64_saturating` | `int.to_uint64_saturating(n: Int) -> UInt64` | Swift `init(clamping:)` (F) / Kotlin `coerceIn` / 他 7 言語 — | 据え置き | R-sized-01（行列のセル） |
+| `to_uint64_wrapping` | （追加）`int.to_uint64_wrapping(x: Int) -> UInt64` | Swift `init(truncatingIfNeeded:)` (F) / Rust `as` / Go `T(x)` / Kotlin `toByte()` 等 | 追加 | R-L0-34 |
 | `from_uint64_checked` | `int.from_uint64_checked(n: UInt64) -> Option[Int]` | Rust `try_from` / Swift `init(exactly:)` (F) / OCaml Base `to_int_exn`系 / 他 6 言語 — | 撤去 | R-sized-01（`uint64.to_int_checked`） |
 | `from_uint64_saturating` | `int.from_uint64_saturating(n: UInt64) -> Int` | Swift `init(clamping:)` (F) / Kotlin `coerceIn` / 他 7 言語 — | 撤去 | R-sized-01（`uint64.to_int_saturating`） |
 | `min_value` | `int.min_value() -> Int` | Rust `i64::MIN` / Go `math.MinInt64` / OCaml `min_int` (F) / Kotlin `MIN_VALUE` (F) / Swift `.min` | 据え置き | — |

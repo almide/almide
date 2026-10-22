@@ -79,6 +79,12 @@
 - issue: R-L0-17 と同じ issue（新規）
 - issue: #3900
 
+### R-env-04 待ち時間・タイムアウトの引数を `Duration` にする — × 不採用
+
+- 内容: `env.sleep_ms(ms: Int)`、`net.tcp_set_timeout(stream, timeout_ms: Int)`、`net.tcp_read_timeout`、`unix.select(xs, timeout_ms: Int)`、`process.stop(c, grace_ms: Int)` の時間の引数を `Duration` にし、`sleep_ms` を `sleep` に改名する案です。
+- 理由: 9 言語で待ち時間を時間の型で受け取るのは Go（`time.Duration`）・Rust（`Duration`）・Swift（`Duration`）・Kotlin（`delay` の `Duration` 版）の 4 つで、5 言語の基準に届きません。JS・Elixir・Kotlin はミリ秒の整数、Python・OCaml は秒の数で受け取ります。Almide は量を単位つきの名前の `Int` で表すと決めています（`sleep_ms`・`add_seconds`。L2-datetime の「時間の量を受け取る関数の型」）。`Duration` は ADR-0001 のとおり `fan` の予算と期限のための型で、数値を読み出す関数を持ちません（S7）。待ちの関数だけ `Duration` にすると、`Int` のミリ秒を持っている呼び出し側が `duration.ms(x)` で包む手間が増え、名前に単位がある今の形より読み誤りが減る根拠もありません。
+- 再検討の条件: `Duration` に読み出し関数を足す判断（ADR-0001 S7 の見直し）をしたとき。
+- issue: なし
 ## L3: 関数表
 
 | 関数 | シグネチャ(現行, mut 表示) | 他言語の主な綴り | 判定 | 案 |
