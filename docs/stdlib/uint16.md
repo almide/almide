@@ -61,7 +61,7 @@ machine-enforced by the numeric-matrix gate in `almide docs-gen --check` (#956).
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (26 functions)
+## Signature index (36 functions)
 
 ```
 // Wraps to 8 bits; 255 becomes -1.
@@ -167,6 +167,46 @@ uint16.is_even(x: UInt16) -> Bool
 // True when x is not a multiple of 2.
 // @since unreleased
 uint16.is_odd(x: UInt16) -> Bool
+
+// Bitwise AND.
+// @since unreleased
+uint16.band(a: UInt16, b: UInt16) -> UInt16
+
+// Bitwise OR.
+// @since unreleased
+uint16.bor(a: UInt16, b: UInt16) -> UInt16
+
+// Bitwise XOR.
+// @since unreleased
+uint16.bxor(a: UInt16, b: UInt16) -> UInt16
+
+// Bitwise complement of all 16 bits.
+// @since unreleased
+uint16.bnot(x: UInt16) -> UInt16
+
+// a shifted left by n bits; n is taken mod 16.
+// @since unreleased
+uint16.bshl(a: UInt16, n: Int) -> UInt16
+
+// Zero-filling right shift; n is taken mod 16.
+// @since unreleased
+uint16.bshr(a: UInt16, n: Int) -> UInt16
+
+// Zero bits above the highest set bit, counted in 16 bits; 16 for 0.
+// @since unreleased
+uint16.count_leading_zeros(x: UInt16) -> Int
+
+// Zero bits below the lowest set bit; 16 for 0.
+// @since unreleased
+uint16.count_trailing_zeros(x: UInt16) -> Int
+
+// Number of set bits among the 16.
+// @since unreleased
+uint16.count_ones(x: UInt16) -> Int
+
+// The 2 bytes in reverse order (endian flip).
+// @since unreleased
+uint16.byte_swap(x: UInt16) -> UInt16
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

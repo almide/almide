@@ -75,7 +75,7 @@
 #                      every stamped row is to be re-inspected before each final
 #                      release for that (a manual GCE run: no credentials in CI)
 #
-# uninspected_ceiling = "72"
+# uninspected_ceiling = "152"
 
 [[fn]]
 name = "args.flag"
@@ -13123,6 +13123,566 @@ blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/
 [[fn]]
 name = "uint8.pow"
 sig = "(base: UInt8, exp: Int) -> UInt8"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int16.band"
+sig = "(a: Int16, b: Int16) -> Int16"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int16.bnot"
+sig = "(x: Int16) -> Int16"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int16.bor"
+sig = "(a: Int16, b: Int16) -> Int16"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int16.bshl"
+sig = "(a: Int16, n: Int) -> Int16"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int16.bshr"
+sig = "(a: Int16, n: Int) -> Int16"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int16.bxor"
+sig = "(a: Int16, b: Int16) -> Int16"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int16.byte_swap"
+sig = "(x: Int16) -> Int16"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int16.count_leading_zeros"
+sig = "(x: Int16) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int16.count_ones"
+sig = "(x: Int16) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int16.count_trailing_zeros"
+sig = "(x: Int16) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int32.band"
+sig = "(a: Int32, b: Int32) -> Int32"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int32.bnot"
+sig = "(x: Int32) -> Int32"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int32.bor"
+sig = "(a: Int32, b: Int32) -> Int32"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int32.bshl"
+sig = "(a: Int32, n: Int) -> Int32"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int32.bshr"
+sig = "(a: Int32, n: Int) -> Int32"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int32.bxor"
+sig = "(a: Int32, b: Int32) -> Int32"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int32.byte_swap"
+sig = "(x: Int32) -> Int32"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int32.count_leading_zeros"
+sig = "(x: Int32) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int32.count_ones"
+sig = "(x: Int32) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int32.count_trailing_zeros"
+sig = "(x: Int32) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int64.band"
+sig = "(a: Int64, b: Int64) -> Int64"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int64.bnot"
+sig = "(x: Int64) -> Int64"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int64.bor"
+sig = "(a: Int64, b: Int64) -> Int64"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int64.bshl"
+sig = "(a: Int64, n: Int) -> Int64"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int64.bshr"
+sig = "(a: Int64, n: Int) -> Int64"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int64.bxor"
+sig = "(a: Int64, b: Int64) -> Int64"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int64.byte_swap"
+sig = "(x: Int64) -> Int64"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int64.count_leading_zeros"
+sig = "(x: Int64) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int64.count_ones"
+sig = "(x: Int64) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int64.count_trailing_zeros"
+sig = "(x: Int64) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int8.band"
+sig = "(a: Int8, b: Int8) -> Int8"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int8.bnot"
+sig = "(x: Int8) -> Int8"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int8.bor"
+sig = "(a: Int8, b: Int8) -> Int8"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int8.bshl"
+sig = "(a: Int8, n: Int) -> Int8"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int8.bshr"
+sig = "(a: Int8, n: Int) -> Int8"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int8.bxor"
+sig = "(a: Int8, b: Int8) -> Int8"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int8.byte_swap"
+sig = "(x: Int8) -> Int8"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int8.count_leading_zeros"
+sig = "(x: Int8) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int8.count_ones"
+sig = "(x: Int8) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "int8.count_trailing_zeros"
+sig = "(x: Int8) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint16.band"
+sig = "(a: UInt16, b: UInt16) -> UInt16"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint16.bnot"
+sig = "(x: UInt16) -> UInt16"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint16.bor"
+sig = "(a: UInt16, b: UInt16) -> UInt16"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint16.bshl"
+sig = "(a: UInt16, n: Int) -> UInt16"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint16.bshr"
+sig = "(a: UInt16, n: Int) -> UInt16"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint16.bxor"
+sig = "(a: UInt16, b: UInt16) -> UInt16"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint16.byte_swap"
+sig = "(x: UInt16) -> UInt16"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint16.count_leading_zeros"
+sig = "(x: UInt16) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint16.count_ones"
+sig = "(x: UInt16) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint16.count_trailing_zeros"
+sig = "(x: UInt16) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint32.band"
+sig = "(a: UInt32, b: UInt32) -> UInt32"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint32.bnot"
+sig = "(x: UInt32) -> UInt32"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint32.bor"
+sig = "(a: UInt32, b: UInt32) -> UInt32"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint32.bshl"
+sig = "(a: UInt32, n: Int) -> UInt32"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint32.bshr"
+sig = "(a: UInt32, n: Int) -> UInt32"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint32.bxor"
+sig = "(a: UInt32, b: UInt32) -> UInt32"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint32.byte_swap"
+sig = "(x: UInt32) -> UInt32"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint32.count_leading_zeros"
+sig = "(x: UInt32) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint32.count_ones"
+sig = "(x: UInt32) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint32.count_trailing_zeros"
+sig = "(x: UInt32) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint64.band"
+sig = "(a: UInt64, b: UInt64) -> UInt64"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint64.bnot"
+sig = "(x: UInt64) -> UInt64"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint64.bor"
+sig = "(a: UInt64, b: UInt64) -> UInt64"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint64.bshl"
+sig = "(a: UInt64, n: Int) -> UInt64"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint64.bshr"
+sig = "(a: UInt64, n: Int) -> UInt64"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint64.bxor"
+sig = "(a: UInt64, b: UInt64) -> UInt64"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint64.byte_swap"
+sig = "(x: UInt64) -> UInt64"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint64.count_leading_zeros"
+sig = "(x: UInt64) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint64.count_ones"
+sig = "(x: UInt64) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint64.count_trailing_zeros"
+sig = "(x: UInt64) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint8.band"
+sig = "(a: UInt8, b: UInt8) -> UInt8"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint8.bnot"
+sig = "(x: UInt8) -> UInt8"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint8.bor"
+sig = "(a: UInt8, b: UInt8) -> UInt8"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint8.bshl"
+sig = "(a: UInt8, n: Int) -> UInt8"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint8.bshr"
+sig = "(a: UInt8, n: Int) -> UInt8"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint8.bxor"
+sig = "(a: UInt8, b: UInt8) -> UInt8"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint8.byte_swap"
+sig = "(x: UInt8) -> UInt8"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint8.count_leading_zeros"
+sig = "(x: UInt8) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint8.count_ones"
+sig = "(x: UInt8) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "uint8.count_trailing_zeros"
+sig = "(x: UInt8) -> Int"
 class = "pure"
 status = "uninspected"
 blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"

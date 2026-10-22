@@ -61,7 +61,7 @@ machine-enforced by the numeric-matrix gate in `almide docs-gen --check` (#956).
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (22 functions)
+## Signature index (32 functions)
 
 ```
 // Wraps to 8 bits; 255 becomes -1.
@@ -151,6 +151,46 @@ uint8.is_even(x: UInt8) -> Bool
 // True when x is not a multiple of 2.
 // @since unreleased
 uint8.is_odd(x: UInt8) -> Bool
+
+// Bitwise AND.
+// @since unreleased
+uint8.band(a: UInt8, b: UInt8) -> UInt8
+
+// Bitwise OR.
+// @since unreleased
+uint8.bor(a: UInt8, b: UInt8) -> UInt8
+
+// Bitwise XOR.
+// @since unreleased
+uint8.bxor(a: UInt8, b: UInt8) -> UInt8
+
+// Bitwise complement of all 8 bits.
+// @since unreleased
+uint8.bnot(x: UInt8) -> UInt8
+
+// a shifted left by n bits; n is taken mod 8.
+// @since unreleased
+uint8.bshl(a: UInt8, n: Int) -> UInt8
+
+// Zero-filling right shift; n is taken mod 8.
+// @since unreleased
+uint8.bshr(a: UInt8, n: Int) -> UInt8
+
+// Zero bits above the highest set bit, counted in 8 bits; 8 for 0.
+// @since unreleased
+uint8.count_leading_zeros(x: UInt8) -> Int
+
+// Zero bits below the lowest set bit; 8 for 0.
+// @since unreleased
+uint8.count_trailing_zeros(x: UInt8) -> Int
+
+// Number of set bits among the 8.
+// @since unreleased
+uint8.count_ones(x: UInt8) -> Int
+
+// The bytes in reverse order; one byte, so x itself.
+// @since unreleased
+uint8.byte_swap(x: UInt8) -> UInt8
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

@@ -61,7 +61,7 @@ machine-enforced by the numeric-matrix gate in `almide docs-gen --check` (#956).
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (34 functions)
+## Signature index (44 functions)
 
 ```
 // Wraps to 8 bits; 255 becomes -1.
@@ -199,6 +199,46 @@ uint64.is_even(x: UInt64) -> Bool
 // True when x is not a multiple of 2.
 // @since unreleased
 uint64.is_odd(x: UInt64) -> Bool
+
+// Bitwise AND.
+// @since unreleased
+uint64.band(a: UInt64, b: UInt64) -> UInt64
+
+// Bitwise OR.
+// @since unreleased
+uint64.bor(a: UInt64, b: UInt64) -> UInt64
+
+// Bitwise XOR.
+// @since unreleased
+uint64.bxor(a: UInt64, b: UInt64) -> UInt64
+
+// Bitwise complement of all 64 bits.
+// @since unreleased
+uint64.bnot(x: UInt64) -> UInt64
+
+// a shifted left by n bits; n is taken mod 64.
+// @since unreleased
+uint64.bshl(a: UInt64, n: Int) -> UInt64
+
+// Zero-filling right shift; n is taken mod 64.
+// @since unreleased
+uint64.bshr(a: UInt64, n: Int) -> UInt64
+
+// Zero bits above the highest set bit, counted in 64 bits; 64 for 0.
+// @since unreleased
+uint64.count_leading_zeros(x: UInt64) -> Int
+
+// Zero bits below the lowest set bit; 64 for 0.
+// @since unreleased
+uint64.count_trailing_zeros(x: UInt64) -> Int
+
+// Number of set bits among the 64.
+// @since unreleased
+uint64.count_ones(x: UInt64) -> Int
+
+// The 8 bytes in reverse order (endian flip).
+// @since unreleased
+uint64.byte_swap(x: UInt64) -> UInt64
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->
