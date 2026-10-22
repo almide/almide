@@ -280,6 +280,22 @@
 - (c) 抜けが宣言されていれば、R-L0-19 の案内で `append_f32_le_array` を書いた LLM を正しい形に導けます。
 - issue: #3970
 
+### R-bytes-20 `first`・`last`・`pop` を足す — ○ 採用
+
+- いま: bytes は `get`・`push` を持つのに、`first`・`last`・`pop` がありません。list（`first`・`last`・`pop`）と deque（`first`・`last`・`pop_back`）から類推すると E002 になります。
+- 案: `fn bytes.first(b: Bytes) -> Int?`、`fn bytes.last(b: Bytes) -> Int?`、`fn bytes.pop(mut b: Bytes) -> Int?`。
+- 根拠の L0 規則: R-L0-12（列の型は同じ綴りの関数を持つ）、R-L0-06（失敗しうる取り出しは無印で Option）。
+- (a) Rust `Vec<u8>` の `first`・`last`・`pop`、Python `bytearray.pop`、Kotlin `ByteArray.first`/`lastOrNull`、Swift `Data.first`/`last`/`popLast`。
+- (b) 純粋な計算です。`pop` はその場で書き換える関数で、`push` と同じ扱いです。
+- (d) 追加 3。
+- 完全性の規則: `push` を持つ列の型（list・bytes）は `pop`・`first`・`last` も持ちます。
+- issue: #3980
+
+### R-bytes-21 `bytes.skip` を `next_` の形にする — × 不採用
+
+- 理由: `skip` は値を読まずに位置だけを進めるので、`(値, 次の状態)` の値がありません。`(Unit, Int)` を返す形は、読む側が捨てる値を増やすだけです。R-L0-27 に「値を読まない位置の移動は次の状態だけを返す」と書きました。
+- issue: なし
+
 ## L3: 関数表
 
 （146 関数 + 追加 13。判定の内訳: 据え置き 58・改名 53・撤去 31・意味変更 4・追加 13。改名の `put_` 15 件は、R-bytes-11 で範囲外の挙動も変わります）
@@ -404,7 +420,7 @@
 | `set_u32_be` | `bytes.set_u32_be(mut b: Bytes, pos: Int, val: Int) -> Unit` | Go PutUint32 (F) / OCaml set_*_le・_be (F) / JS DataView setUint32 (F) | 改名 → `put_u32_be`（範囲外は abort） | R-bytes-01、R-bytes-11 |
 | `set_u32_le` | `bytes.set_u32_le(mut b: Bytes, pos: Int, val: Int) -> Unit` | Go PutUint32 (F) / OCaml set_*_le・_be (F) / JS DataView setUint32 (F) | 改名 → `put_u32_le`（範囲外は abort） | R-bytes-01、R-bytes-11 |
 | `set_u8` | `bytes.set_u8(mut b: Bytes, pos: Int, val: Int) -> Unit` | Go b[i] = x / OCaml set_*_le・_be (F) / JS DataView setUint8 (F) | 改名 → `put_u8`（範囲外は abort） | R-bytes-01、R-bytes-11 |
-| `skip` | `bytes.skip(b: Bytes, pos: Int, n: Int) -> Int` | Go bytes.Reader.Seek / Python — | 意味変更（`n < 0` は abort） | R-bytes-13 |
+| `skip` | `bytes.skip(b: Bytes, pos: Int, n: Int) -> Int` | Go bytes.Reader.Seek / Python — | 意味変更（`n < 0` は abort） | R-bytes-13、R-bytes-21 |
 | `skip_length_prefixed_le` | `bytes.skip_length_prefixed_le(b: Bytes, pos: Int, count: Int) -> Int` | —（形式専用） | 撤去（→ `get_u32_le` と `slice` の組み合わせ） | R-bytes-05 |
 | `slice` | `bytes.slice(b: Bytes, start: Int, end: Int) -> Bytes` | Rust &b[a..b] / Go b[a:b] / Python b[a:b] / JS subarray・slice / OCaml Bytes.sub (F) | 意味変更（負の開始位置を 0 に丸める） | R-bytes-12 |
 | `split` | `bytes.split(b: Bytes, sep: Bytes) -> List[Bytes]` | Go bytes.Split / Python b.split | 据え置き | — |
@@ -457,6 +473,9 @@
 | `all` | `bytes.all(b: Bytes, f: (Int) -> Bool) -> Bool`（案） | Kotlin `all` | 追加 | R-bytes-18 |
 | `count` | `bytes.count(b: Bytes, f: (Int) -> Bool) -> Int`（案） | Kotlin `count {}` | 追加 | R-bytes-18 |
 | `find` | `bytes.find(b: Bytes, f: (Int) -> Bool) -> Option[Int]`（案） | Kotlin `find` | 追加 | R-bytes-18 |
+| `first` | （追加）`bytes.first(b: Bytes) -> Option[Int]` | Rust first / Swift first | 追加 | R-bytes-20 |
+| `last` | （追加）`bytes.last(b: Bytes) -> Option[Int]` | Rust last / Swift last | 追加 | R-bytes-20 |
+| `pop` | （追加）`bytes.pop(mut b: Bytes) -> Option[Int]` | Rust Vec::pop / Python bytearray.pop | 追加 | R-bytes-20 |
 
 ## L0 への差し戻し（処理済み）
 

@@ -27,7 +27,7 @@
 ### 完全性の規則
 
 1. **置き場所**（R-L0-02）: `math` には、型のモジュールに置き場所がない関数だけを置きます。超越関数（三角・逆三角・双曲線・指数・対数・ガンマ）と定数、整数の組み合わせ論（`factorial`、`choose`）です。主語の型が決まる算術（`abs`、`min`、`max`、`sign`、`pow`、`sqrt`）は `int` か `float` に置きます。
-2. **超越関数の族**: 三角関数（`sin` `cos` `tan`）、逆三角関数（`asin` `acos` `atan` `atan2`）、双曲線関数（`sinh` `cosh` `tanh`）がそろって存在します。逆双曲線関数（`asinh` など）は意図的に置きません（標準に持つのは Rust・Python・JS・OCaml・Swift ほかですが、使う場面が少なく、`log` と `sqrt` から 1 行で書けます）。
+2. **超越関数の族**: 三角関数（`sin` `cos` `tan`）、逆三角関数（`asin` `acos` `atan` `atan2`）、双曲線関数（`sinh` `cosh` `tanh`）がそろって存在します。逆双曲線関数（`asinh` など）は意図的に置きません（→ R-math-05 で見直し、足します）（標準に持つのは Rust・Python・JS・OCaml・Swift ほかですが、使う場面が少なく、`log` と `sqrt` から 1 行で書けます）。
 3. `math` の関数はすべて `Float` を取ります（`factorial` と `choose` の `Int` だけが例外）。`f` 接頭辞で型を区別する綴り（`fmin` `fmax` `fpow`）は置きません。
 
 ### L2 の判定
@@ -75,6 +75,25 @@
 - ゲート案: R-L0-G に `math`/`float` の名前の振り分け表を足し、両モジュールの公開名と突き合わせます。
 - issue: #3972
 
+### R-math-04 `expm1`・`log1p` を足す — ○ 採用
+
+- いま: `math.exp`・`math.log` はありますが、0 に近い `x` で `exp(x) - 1`・`log(1 + x)` を精度よく求める関数がありません。合成すると桁落ちするので、便利関数ではなく、ほかの関数では書けない役割です。
+- 案: `fn math.expm1(x: Float) -> Float`、`fn math.log1p(x: Float) -> Float`。
+- 根拠: L1 の追加基準（5 言語以上）。
+- (a) Rust `exp_m1`/`ln_1p`、Go `Expm1`/`Log1p`、Python `expm1`/`log1p`、JS `Math.expm1`/`log1p`、Kotlin `expm1`/`ln1p`、OCaml `expm1`/`log1p`。
+- (b) 純粋な計算です。R-math-02 と同じく musl の移植を Almide で書き、ADR-0016（数値の決定性）の検品に入れます。
+- (d) 追加 2。
+- issue: #3980
+
+### R-math-05 逆双曲線関数 `asinh`・`acosh`・`atanh` を足す（完全性の規則 2 の見直し） — ○ 採用
+
+- いま: 完全性の規則 2 は「逆双曲線関数は使う場面が少ないので置かない」としました。ところが標準に持つ言語は Rust・Go・Python・JS・Kotlin・OCaml・Swift で、L1 の追加基準（5 言語以上）を満たします。ほかの関数では基準を当てはめ、ここだけ外す理由がありません。
+- 案: `fn math.asinh(x: Float) -> Float`、`fn math.acosh(x: Float) -> Float`、`fn math.atanh(x: Float) -> Float`。定義域の外（`acosh` の `x < 1`、`atanh` の `|x| > 1`）は、`math.asin` と同じく NaN を返します。
+- (b) R-math-04 と同じです。
+- (d) 追加 3。三角関数・双曲線関数の族が、正逆ともにそろいます。
+- 完全性の規則（2 を置き換え）: 三角関数と双曲線関数は、それぞれ正と逆の 3 つずつを持ちます。
+- issue: #3980
+
 ## L3: 関数表
 
 `math` の現行 23 関数と、追加する 7 関数です。
@@ -111,3 +130,8 @@
 | `cosh` | （追加）`math.cosh(x: Float) -> Float` | Rust `cosh` (F) / Go `Cosh` / Python・JS `cosh` / OCaml `cosh` (F) | 追加 | R-math-02 |
 | `hypot` | （追加）`math.hypot(x: Float, y: Float) -> Float` | Rust `hypot` (F) / Go `Hypot` / Python・JS `hypot` / OCaml `hypot` (F) / Kotlin `hypot` | 追加 | R-math-02 |
 | `cbrt` | （追加）`math.cbrt(x: Float) -> Float` | Rust `cbrt` (F) / Go `Cbrt` / Python・JS `cbrt` / OCaml `cbrt` (F) / Kotlin `cbrt` | 追加 | R-math-02 |
+| `expm1` | （追加）`math.expm1(x: Float) -> Float` | Rust `exp_m1` / Go `Expm1` / Python・JS `expm1` | 追加 | R-math-04 |
+| `log1p` | （追加）`math.log1p(x: Float) -> Float` | Rust `ln_1p` / Go `Log1p` / Python・JS `log1p` | 追加 | R-math-04 |
+| `asinh` | （追加）`math.asinh(x: Float) -> Float` | Rust `asinh` / Go `Asinh` / Python・JS `asinh` | 追加 | R-math-05 |
+| `acosh` | （追加）`math.acosh(x: Float) -> Float` | Rust `acosh` / Go `Acosh` / Python・JS `acosh` | 追加 | R-math-05 |
+| `atanh` | （追加）`math.atanh(x: Float) -> Float` | Rust `atanh` / Go `Atanh` / Python・JS `atanh` | 追加 | R-math-05 |

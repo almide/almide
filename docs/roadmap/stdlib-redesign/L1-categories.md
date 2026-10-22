@@ -106,6 +106,14 @@
 ---
 - issue: #3948
 
+### R-L1-30 `bool` モジュールを置き、`bool.parse` を足す — ○ 採用
+
+- いま: `int.parse`・`float.parse`・各固定幅の型の `parse` はあるのに、`Bool` を文字列から読む関数がありません。設定値を `s == "true"` で読むと、`"ture"` のような書き誤りが黙って `false` になります。
+- 案: `bool` モジュールを置き（`int`・`float` と同じく import なしで使える）、`fn bool.parse(s: String) -> Result[Bool, String]` を足します。受け取るのは `"true"` と `"false"` だけです（前後の空白・大文字は err）。中身は [L2-bool](L2-bool.md)。
+- 根拠: L1 の追加基準（5 言語以上）。R-L0-25（文字列からの変換は先の型の `parse`）。
+- (a) Rust `"true".parse::<bool>()`、Go `strconv.ParseBool`、OCaml `bool_of_string_opt`、Kotlin `toBooleanStrictOrNull`、Swift `Bool("true")`。どれも不正な入力を拒みます。
+- issue: #3980
+
 ## 3. 足さないカテゴリ（× と理由）
 
 | カテゴリ | 持つ言語 | 判定 | 理由 |

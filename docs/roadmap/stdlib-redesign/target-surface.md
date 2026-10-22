@@ -1,7 +1,7 @@
 <!-- description: Stdlib redesign — the standard library as it stands once every adopted proposal lands: every public function with its post-redesign signature, per module, and what was removed -->
 # リデザイン後の標準ライブラリ（設計）
 
-> Last updated: 2026-10-21
+> Last updated: 2026-10-22
 > 元の記録: [README.md](README.md)（案の索引）・各 L2 ページの L3 関数表
 
 採用した案（○）をすべて適用したあとの、標準ライブラリの公開関数の一覧です。各 L2 ページの L3 関数表から機械的に組み立てています。表と食い違うときは、L3 の表と L2 の案が正です。
@@ -11,11 +11,26 @@
 - 「変化」の列: 空欄は据え置き、新規は追加、改名は旧名つき、意味変更は何が変わるかを書きます。撤去した関数は、各モジュールの最後に移行先と一緒に載せます。
 - 移行の扱いはすべて R-L0-14 のとおりです（epoch 15 で `@deprecated`、epoch 16 で撤去、`almide fix` かヒントで移行）。
 
+## 一覧に出ない共通の約束
+
+シグネチャだけでは読めない、全モジュールに共通する約束です。根拠は各ページと契約台帳（docs/contracts）にあります。
+
+| 約束 | 中身 | 根拠 |
+|---|---|---|
+| 文字列の位置 | `string` の位置・長さ（`len`・`get`・`slice`・`index_of`）と `regex.index_of` は、どれもコードポイント単位です。バイト単位は `byte_` で始まる関数（`byte_len`・`byte_slice`）だけです。 | L2-string、L2-regex |
+| `Float` の順序 | `float.compare`（`float32`・`float64` も）と、`list.sort`・`binary_search`・`heap` の既定の順序は、IEEE 754 の totalOrder です（`-0.0 < 0.0`、NaN は正の無限大より大きい）。`<` 演算子だけは NaN との比較が false です。 | L2-float 完全性の規則 4 |
+| `Map`・`Set` の走査順 | 入れた順です（同じキーを上書きしても位置は変わりません）。native と wasm で同じです。 | 契約台帳（Map・Set の挿入順） |
+| 数学関数の値 | `math` の超越関数は、libm に任せず Almide で書いた同じ実装を両 target で通し、ビット単位で同じ値を返します。NaN は 1 つの決まった値です。 | ADR-0016、L2-math |
+| `_checked` の変換 | 結果が元の値と正確に等しいときだけ some です。範囲外、小数部の切り捨て、精度の損失はどれも none です（`float.to_int32_checked(1.5)` も `int.to_float32_checked(16777217)` も none）。 | R-L0-28 |
+| `next_` の none | 値が none のときは、受け取った状態（読み位置・乱数の状態）をそのまま返します。 | R-L0-27 |
+| 文字列の本文 | `http.body`・`req_body` は、不正な UTF-8 を置換文字にして読みます。正確なバイトは `body_bytes`・`req_body_bytes` です。 | R-http-11 |
+| `zlib` の圧縮 | 圧縮の出力は native と wasm で違います（往復だけを約束します）。そのため圧縮の関数は effect のままです。出力の一致は保留です。 | R-zlib-03（保留） |
+
 ## 全体の数
 
 | いまの関数 | リデザイン後 | 据え置き | 新規 | 改名 | 意味変更 | 撤去 |
 |---:|---:|---:|---:|---:|---:|---:|
-| 1001 | 1133 | 676 | 329 | 76 | 52 | 197 |
+| 1001 | 1146 | 663 | 343 | 79 | 61 | 198 |
 
 固定幅の数（`int8`〜`uint64`、`float32`・`float64`）は型ごとに 1 関数と数えます。
 
@@ -23,10 +38,11 @@
 
 | モジュール | リデザイン後 | 新規 | 改名 | 意味変更 | 撤去 | 記録 |
 |---|---:|---:|---:|---:|---:|---|
-| [`args`](#args) | 4 | 1 | 0 | 0 | 3 | [L2-args.md](L2-args.md) |
+| [`args`](#args) | 3 | 1 | 0 | 0 | 4 | [L2-args.md](L2-args.md) |
 | [`base64`](#base64) | 4 | 0 | 0 | 2 | 0 | [L2-base64.md](L2-base64.md) |
 | [`bigint`](#bigint)（新しいモジュール） | 29 | 29 | 0 | 0 | 0 | [L2-bigint.md](L2-bigint.md) |
-| [`bytes`](#bytes) | 136 | 23 | 71 | 5 | 35 | [L2-bytes.md](L2-bytes.md) |
+| [`bool`](#bool) | 1 | 1 | 0 | 0 | 0 | [L2-bool.md](L2-bool.md) |
+| [`bytes`](#bytes) | 139 | 26 | 71 | 5 | 35 | [L2-bytes.md](L2-bytes.md) |
 | [`compute`](#compute) | 7 | 1 | 0 | 0 | 0 | [L2-compute.md](L2-compute.md) |
 | [`datetime`](#datetime) | 18 | 1 | 0 | 1 | 5 | [L2-datetime.md](L2-datetime.md) |
 | [`deque`](#deque)（新しいモジュール） | 21 | 21 | 0 | 0 | 0 | [L2-deque.md](L2-deque.md) |
@@ -37,12 +53,12 @@
 | [`float`](#float) | 45 | 11 | 1 | 0 | 12 | [L2-float.md](L2-float.md) |
 | [`float32`](#float32) | 30 | 20 | 0 | 0 | 0 | [L2-sized-numbers.md](L2-sized-numbers.md) |
 | [`float64`](#float64) | 31 | 21 | 0 | 0 | 0 | [L2-sized-numbers.md](L2-sized-numbers.md) |
-| [`fs`](#fs) | 29 | 0 | 0 | 3 | 5 | [L2-fs.md](L2-fs.md) |
+| [`fs`](#fs) | 30 | 1 | 2 | 3 | 5 | [L2-fs.md](L2-fs.md) |
 | [`hash`](#hash) | 11 | 8 | 0 | 1 | 1 | [L2-hash.md](L2-hash.md) |
 | [`heap`](#heap)（新しいモジュール） | 16 | 16 | 0 | 0 | 0 | [L2-heap.md](L2-heap.md) |
 | [`hex`](#hex) | 3 | 0 | 0 | 0 | 0 | [L2-hex.md](L2-hex.md) |
 | [`html`](#html) | 5 | 0 | 0 | 0 | 0 | [L2-html.md](L2-html.md) |
-| [`http`](#http) | 37 | 4 | 2 | 0 | 15 | [L2-http.md](L2-http.md) |
+| [`http`](#http) | 39 | 6 | 2 | 7 | 15 | [L2-http.md](L2-http.md) |
 | [`int`](#int) | 70 | 13 | 0 | 2 | 15 | [L2-int.md](L2-int.md) |
 | [`int16`](#int16) | 28 | 6 | 0 | 0 | 0 | [L2-sized-numbers.md](L2-sized-numbers.md) |
 | [`int32`](#int32) | 31 | 7 | 0 | 0 | 0 | [L2-sized-numbers.md](L2-sized-numbers.md) |
@@ -50,9 +66,9 @@
 | [`int8`](#int8) | 26 | 6 | 0 | 0 | 0 | [L2-sized-numbers.md](L2-sized-numbers.md) |
 | [`io`](#io) | 7 | 3 | 0 | 2 | 4 | [L2-io.md](L2-io.md) |
 | [`json`](#json) | 3 | 0 | 0 | 1 | 12 | [L2-json.md](L2-json.md) |
-| [`list`](#list) | 66 | 5 | 0 | 12 | 6 | [L2-list.md](L2-list.md) |
+| [`list`](#list) | 68 | 7 | 0 | 12 | 6 | [L2-list.md](L2-list.md) |
 | [`map`](#map) | 22 | 0 | 1 | 0 | 3 | [L2-map.md](L2-map.md) |
-| [`math`](#math) | 22 | 7 | 0 | 0 | 8 | [L2-math.md](L2-math.md) |
+| [`math`](#math) | 27 | 12 | 0 | 0 | 8 | [L2-math.md](L2-math.md) |
 | [`matrix`](#matrix) | 25 | 3 | 0 | 7 | 24 | [L2-matrix.md](L2-matrix.md) |
 | [`net`](#net) | 22 | 9 | 0 | 1 | 13 | [L2-net.md](L2-net.md) |
 | [`option`](#option) | 13 | 0 | 0 | 0 | 1 | [L2-option.md](L2-option.md) |
@@ -62,8 +78,8 @@
 | [`regex`](#regex) | 15 | 7 | 1 | 7 | 0 | [L2-regex.md](L2-regex.md) |
 | [`result`](#result) | 14 | 0 | 0 | 0 | 1 | [L2-result.md](L2-result.md) |
 | [`set`](#set) | 22 | 3 | 0 | 0 | 0 | [L2-set.md](L2-set.md) |
-| [`string`](#string) | 49 | 4 | 0 | 2 | 5 | [L2-string.md](L2-string.md) |
-| [`testing`](#testing) | 10 | 0 | 0 | 0 | 0 | [L2-testing.md](L2-testing.md) |
+| [`string`](#string) | 49 | 4 | 1 | 2 | 5 | [L2-string.md](L2-string.md) |
+| [`testing`](#testing) | 10 | 0 | 0 | 2 | 0 | [L2-testing.md](L2-testing.md) |
 | [`uint16`](#uint16) | 24 | 6 | 0 | 0 | 0 | [L2-sized-numbers.md](L2-sized-numbers.md) |
 | [`uint32`](#uint32) | 29 | 7 | 0 | 0 | 0 | [L2-sized-numbers.md](L2-sized-numbers.md) |
 | [`uint64`](#uint64) | 38 | 12 | 0 | 0 | 0 | [L2-sized-numbers.md](L2-sized-numbers.md) |
@@ -83,14 +99,14 @@
 | `has_flag` | `effect fn args.has_flag(name: String) -> Bool` | 新規 | R-args-01 |
 | `option` | `effect fn args.option(name: String) -> String?` |  |  |
 | `positional` | `effect fn args.positional() -> List[String]` |  |  |
-| `positional_at` | `effect fn args.positional_at(i: Int) -> String?` |  |  |
 
-撤去（3）:
+撤去（4）:
 
 | 関数 | 代わり | 案 |
 |---|---|---|
 | `flag` | `has_flag` | R-args-01 |
 | `option_or` | `option(n)! ?? d` | R-args-02 |
+| `positional_at` | `list.get(args.positional()!, i)` | R-args-03 |
 | `raw` | `env.args` | R-args-02 |
 
 ## base64
@@ -141,6 +157,14 @@
 | `to_uint64_checked` | `fn bigint.to_uint64_checked(b: BigInt) -> UInt64?` | 新規 | R-bigint-06 |
 | `to_uint64_saturating` | `fn bigint.to_uint64_saturating(b: BigInt) -> UInt64` | 新規 | R-bigint-06 |
 
+## bool
+
+記録: [L2-bool.md](L2-bool.md)
+
+| 関数 | シグネチャ（リデザイン後） | 変化 | 案 |
+|---|---|---|---|
+| `parse` | `fn bool.parse(s: String) -> Result[Bool, String]` | 新規 | R-bool-01 |
+
 ## bytes
 
 記録: [L2-bytes.md](L2-bytes.md)
@@ -181,6 +205,7 @@
 | `fill` | `fn bytes.fill(mut b: Bytes, val: Int) -> Unit` |  |  |
 | `filter` | `fn bytes.filter(b: Bytes, f: (Int) -> Bool) -> Bytes` | 新規 | R-bytes-18 |
 | `find` | `fn bytes.find(b: Bytes, f: (Int) -> Bool) -> Int?` | 新規 | R-bytes-18 |
+| `first` | `fn bytes.first(b: Bytes) -> Int?` | 新規 | R-bytes-20 |
 | `fold` | `fn bytes.fold(b: Bytes, init: B, f: (B, Int) -> B) -> B` | 新規 | R-bytes-18 |
 | `from_list` | `fn bytes.from_list(xs: List[Int]) -> Bytes` |  |  |
 | `from_string` | `fn bytes.from_string(s: String) -> Bytes` |  | R-bytes-10 |
@@ -224,6 +249,7 @@
 | `is_empty` | `fn bytes.is_empty(b: Bytes) -> Bool` |  |  |
 | `is_eof` | `fn bytes.is_eof(b: Bytes, pos: Int) -> Bool` | 改名（旧 `eof`） | R-bytes-07 |
 | `is_valid_utf8` | `fn bytes.is_valid_utf8(b: Bytes) -> Bool` |  |  |
+| `last` | `fn bytes.last(b: Bytes) -> Int?` | 新規 | R-bytes-20 |
 | `len` | `fn bytes.len(b: Bytes) -> Int` |  |  |
 | `map` | `fn bytes.map(b: Bytes, f: (Int) -> Int) -> Bytes` | 改名（旧 `map_each`） | R-bytes-08 |
 | `new` | `fn bytes.new(len: Int) -> Bytes` |  |  |
@@ -249,6 +275,7 @@
 | `next_u8` | `fn bytes.next_u8(b: Bytes, pos: Int) -> (Int?, Int)` | 改名（旧 `read_u8_at`）。を返す | R-bytes-13 |
 | `pad_end` | `fn bytes.pad_end(b: Bytes, target_len: Int, val: Int) -> Bytes` | 改名（旧 `pad_right`） | R-bytes-08 |
 | `pad_start` | `fn bytes.pad_start(b: Bytes, target_len: Int, val: Int) -> Bytes` | 改名（旧 `pad_left`） | R-bytes-08 |
+| `pop` | `fn bytes.pop(mut b: Bytes) -> Int?` | 新規 | R-bytes-20 |
 | `push` | `fn bytes.push(mut b: Bytes, val: Int) -> Unit` |  | R-bytes-02 |
 | `put_bool` | `fn bytes.put_bool(mut b: Bytes, pos: Int, val: Bool) -> Unit` | 新規 | R-bytes-03、R-bytes-11 |
 | `put_f16_be` | `fn bytes.put_f16_be(mut b: Bytes, pos: Int, val: Float) -> Unit` | 新規 | R-bytes-03 |
@@ -273,7 +300,7 @@
 | `repeat` | `fn bytes.repeat(b: Bytes, n: Int) -> Bytes` |  |  |
 | `reverse` | `fn bytes.reverse(b: Bytes) -> Bytes` |  |  |
 | `set` | `fn bytes.set(b: Bytes, i: Int, val: Int) -> Bytes` | 意味変更: 範囲外は abort | R-bytes-11 |
-| `skip` | `fn bytes.skip(b: Bytes, pos: Int, n: Int) -> Int` | 意味変更: `n < 0` は abort | R-bytes-13 |
+| `skip` | `fn bytes.skip(b: Bytes, pos: Int, n: Int) -> Int` | 意味変更: `n < 0` は abort | R-bytes-13、R-bytes-21 |
 | `slice` | `fn bytes.slice(b: Bytes, start: Int, end: Int) -> Bytes` | 意味変更: 負の開始位置を 0 に丸める | R-bytes-12 |
 | `split` | `fn bytes.split(b: Bytes, sep: Bytes) -> List[Bytes]` |  |  |
 | `starts_with` | `fn bytes.starts_with(b: Bytes, prefix: Bytes) -> Bool` |  |  |
@@ -350,7 +377,7 @@
 | `add_seconds` | `fn datetime.add_seconds(ts: Int, n: Int) -> Int` |  |  |
 | `day` | `fn datetime.day(ts: Int) -> Int` |  |  |
 | `format` | `fn datetime.format(ts: Int, pattern: String) -> String` |  | R-datetime-05 |
-| `from_parts` | `fn datetime.from_parts(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Int` | 意味変更: 範囲外は err。`-> Result[Int, String]` | R-datetime-07 |
+| `from_parts` | `fn datetime.from_parts(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Result[Int, String]` | 意味変更: 範囲外は err。`-> Result[Int, String]` | R-datetime-07 |
 | `hour` | `fn datetime.hour(ts: Int) -> Int` |  |  |
 | `minute` | `fn datetime.minute(ts: Int) -> Int` |  |  |
 | `monotonic_ns` | `effect fn datetime.monotonic_ns() -> Int` |  |  |
@@ -449,7 +476,7 @@
 | `address` | `fn ffi.address(b: Bytes) -> RawPtr` | 新規 | R-ffi-01 |
 | `read` | `effect fn ffi.read(ptr: RawPtr, len: Int) -> Bytes` | 新規 | R-ffi-01 |
 | `to_int` | `fn ffi.to_int(p: RawPtr) -> Int` | 新規 | R-ffi-01 |
-| `write` | `effect fn ffi.write(b: Bytes, ptr: RawPtr, cap: Int) -> Int` | 新規 | R-ffi-01 |
+| `write` | `effect fn ffi.write(ptr: RawPtr, b: Bytes, cap: Int) -> Int` | 新規 | R-ffi-01、R-ffi-03 |
 
 ## float
 
@@ -601,7 +628,8 @@
 
 | 関数 | シグネチャ（リデザイン後） | 変化 | 案 |
 |---|---|---|---|
-| `append` | `effect fn fs.append(path: String, content: String) -> Unit` |  | R-fs-04 |
+| `append_bytes` | `effect fn fs.append_bytes(path: String, data: Bytes) -> Unit` | 新規 | R-fs-05 |
+| `append_text` | `effect fn fs.append_text(path: String, content: String) -> Unit` | 改名（旧 `append`） | R-fs-04、R-fs-05 |
 | `copy` | `effect fn fs.copy(src: String, dst: String) -> Unit` |  |  |
 | `create_temp_dir` | `effect fn fs.create_temp_dir(prefix: String) -> String` |  |  |
 | `create_temp_file` | `effect fn fs.create_temp_file(prefix: String) -> String` |  |  |
@@ -628,8 +656,8 @@
 | `stat` | `effect fn fs.stat(path: String) -> FileStat` |  | R-fs-02 |
 | `temp_dir` | `effect fn fs.temp_dir() -> String` |  | L2-env R-env-01 |
 | `walk` | `effect fn fs.walk(dir: String) -> List[String]` |  |  |
-| `write` | `effect fn fs.write(path: String, content: String) -> Unit` |  |  |
 | `write_bytes` | `effect fn fs.write_bytes(path: String, data: Bytes) -> Unit` | 意味変更: `data: Bytes` にする | R-fs-01 |
+| `write_text` | `effect fn fs.write_text(path: String, content: String) -> Unit` | 改名（旧 `write`） | R-fs-05 |
 
 撤去（5）:
 
@@ -725,34 +753,36 @@
 | `get_header` | `fn http.get_header(resp: HttpResponse, key: String) -> String?` |  |  |
 | `get_response` | `effect fn http.get_response(url: String) -> HttpResponse` |  | R-http-01 |
 | `header_values` | `fn http.header_values(resp: HttpResponse, key: String) -> List[String]` |  |  |
-| `headers` | `fn http.headers(resp: HttpResponse) -> Map[String, String]` |  |  |
+| `headers` | `fn http.headers(resp: HttpResponse) -> List[(String, String)]` | 意味変更: `List[(String, String)]` を返す | R-http-09 |
 | `json` | `fn http.json(status: Int, body: String) -> HttpResponse` |  |  |
 | `mount` | `fn http.mount(prefix: String, sub: (HttpRequest) -> Result[HttpResponse, String]) -> HttpRoute` |  |  |
-| `new_request` | `fn http.new_request(method: String, target: String, body: String, headers: Map[String, String]) -> HttpRequest` |  | R-http-05 の 5 |
+| `new_request` | `fn http.new_request(method: String, target: String, body: String, headers: List[(String, String)]) -> HttpRequest` | 意味変更: `headers` を `List[(String, String)]` に | R-http-09 |
 | `param` | `fn http.param(req: HttpRequest, name: String) -> String?` |  |  |
 | `poll` | `effect fn http.poll(c: HttpCall) -> Result[HttpResponse, String]?` |  | R-http-01 |
-| `query_params` | `fn http.query_params(req: HttpRequest) -> Map[String, String]` |  |  |
+| `query_params` | `fn http.query_params(req: HttpRequest) -> List[(String, String)]` | 意味変更: `List[(String, String)]` を返す | R-http-10 |
 | `read_new` | `effect fn http.read_new(c: HttpCall) -> String` |  | R-http-01 |
 | `redirect` | `fn http.redirect(url: String) -> HttpResponse` |  |  |
 | `req_body` | `fn http.req_body(req: HttpRequest) -> String` |  |  |
+| `req_body_bytes` | `fn http.req_body_bytes(req: HttpRequest) -> Bytes` | 新規 | R-http-11 |
 | `req_header` | `fn http.req_header(req: HttpRequest, key: String) -> String?` |  | R-http-03 |
 | `req_header_values` | `fn http.req_header_values(req: HttpRequest, key: String) -> List[String]` | 新規 | R-http-03 |
-| `req_headers` | `fn http.req_headers(req: HttpRequest) -> Map[String, String]` | 新規 | R-http-03 |
+| `req_headers` | `fn http.req_headers(req: HttpRequest) -> List[(String, String)]` | 新規 | R-http-03、R-http-09 |
 | `req_method` | `fn http.req_method(req: HttpRequest) -> String` |  |  |
 | `req_path` | `fn http.req_path(req: HttpRequest) -> String` |  |  |
-| `request` | `effect fn http.request(method: String, url: String, body: String, headers: Map[String, String]) -> String` |  | R-http-01 |
-| `request_response` | `effect fn http.request_response(method: String, url: String, body: String, headers: Map[String, String]) -> HttpResponse` |  | R-http-01 |
+| `request` | `effect fn http.request(method: String, url: String, body: String, headers: List[(String, String)]) -> String` | 意味変更: `headers` を `List[(String, String)]` に | R-http-09 |
+| `request_response` | `effect fn http.request_response(method: String, url: String, body: String, headers: List[(String, String)]) -> HttpResponse` | 意味変更: `headers` を `List[(String, String)]` に | R-http-09 |
 | `response` | `fn http.response(status: Int, body: String) -> HttpResponse` |  |  |
 | `route` | `fn http.route(pattern: String, handler: (HttpRequest) -> Result[HttpResponse, String]) -> HttpRoute` |  |  |
 | `router` | `fn http.router(routes: List[HttpRoute]) -> Result[(HttpRequest) -> Result[HttpResponse, String], String]` |  |  |
 | `serve` | `effect fn http.serve(port: Int, f: effect (HttpRequest) -> HttpResponse) -> Unit` |  |  |
 | `set_body` | `fn http.set_body(resp: HttpResponse, body: String) -> HttpResponse` | 新規 | R-http-06 |
+| `set_body_bytes` | `fn http.set_body_bytes(resp: HttpResponse, body: Bytes) -> HttpResponse` | 新規 | R-http-11 |
 | `set_header` | `fn http.set_header(resp: HttpResponse, key: String, value: String) -> HttpResponse` |  | R-http-02 |
 | `set_status` | `fn http.set_status(resp: HttpResponse, code: Int) -> HttpResponse` | 改名（旧 `status`） | R-http-02 |
-| `start` | `effect fn http.start(method: String, url: String, body: String, headers: Map[String, String], limits: HttpLimits) -> HttpCall` |  | R-http-01 |
+| `start` | `effect fn http.start(method: String, url: String, body: String, headers: List[(String, String)], limits: HttpLimits) -> HttpCall` | 意味変更: `headers` を `List[(String, String)]` に | R-http-09 |
 | `status` | `fn http.status(resp: HttpResponse) -> Int` | 改名（旧 `status_code`）。epoch 17。`0` の番兵もなくす | R-http-04、R-http-08 |
 | `wait` | `effect fn http.wait(c: HttpCall) -> HttpResponse` |  | R-http-01 |
-| `with_headers` | `fn http.with_headers(status: Int, body: String, headers: Map[String, String]) -> HttpResponse` |  |  |
+| `with_headers` | `fn http.with_headers(status: Int, body: String, headers: List[(String, String)]) -> HttpResponse` | 意味変更: `headers` を `List[(String, String)]` に | R-http-09 |
 | `wrap` | `fn http.wrap(handler: …, middleware: List[…]) -> (HttpRequest) -> Result[HttpResponse, String]` |  |  |
 
 撤去（15）:
@@ -1079,6 +1109,8 @@
 | `all` | `fn list.all(xs: List[A], f: (A) -> Bool) -> Bool` |  |  |
 | `any` | `fn list.any(xs: List[A], f: (A) -> Bool) -> Bool` |  |  |
 | `binary_search` | `fn list.binary_search(xs: List[A], target: A) -> Int?` | 意味変更: 要素型を順序のある型すべてに広げる | R-list-15 |
+| `binary_search_by` | `fn list.binary_search_by(xs: List[A], target: K, key: (A) -> K) -> Int?` | 新規 | R-list-17 |
+| `binary_search_with` | `fn list.binary_search_with(xs: List[A], target: A, cmp: (A, A) -> Int) -> Int?` | 新規 | R-list-17 |
 | `chunk` | `fn list.chunk(xs: List[A], n: Int) -> List[List[A]]` | 意味変更: `n <= 0` は abort | R-list-10 |
 | `clear` | `fn list.clear(mut xs: List[A]) -> Unit` |  | R-list-00 |
 | `contains` | `fn list.contains(xs: List[A], x: A) -> Bool` |  |  |
@@ -1104,7 +1136,7 @@
 | `intersperse` | `fn list.intersperse(xs: List[A], sep: A) -> List[A]` |  |  |
 | `is_empty` | `fn list.is_empty(xs: List[A]) -> Bool` |  |  |
 | `iterate` | `fn list.iterate(seed: T, f: (T) -> T, n: Int) -> List[T]` |  |  |
-| `join` | `fn list.join(xs: List[String], sep: String) -> String` | 意味変更: `List[Bytes]` と `Bytes` の区切りも受け取る | R-string-01、R-list-16 |
+| `join` | `fn list.join(xs: List[String], sep: String) -> String` ・ `fn list.join(xs: List[Bytes], sep: Bytes) -> Bytes` | 意味変更: `List[Bytes]` と `Bytes` の区切りも受け取る | R-string-01、R-list-16 |
 | `last` | `fn list.last(xs: List[A]) -> A?` |  |  |
 | `len` | `fn list.len(xs: List[A]) -> Int` |  | R-L0-11 |
 | `map` | `fn list.map(xs: List[A], f: (A) -> B) -> List[B]` |  |  |
@@ -1114,7 +1146,7 @@
 | `min_by` | `fn list.min_by(xs: List[A], f: (A) -> K) -> A?` | 新規 | R-list-06 |
 | `partition` | `fn list.partition(xs: List[A], f: (A) -> Bool) -> (List[A], List[A])` |  |  |
 | `pop` | `fn list.pop(mut xs: List[A]) -> A?` |  | R-list-00 |
-| `product` | `fn list.product(xs: List[Int]) -> Int` | 意味変更: `List[Float]` も受け取る | R-list-08 |
+| `product` | `fn list.product(xs: List[Int]) -> Int` ・ `fn list.product(xs: List[Float]) -> Float` | 意味変更: `List[Float]` も受け取る | R-list-08 |
 | `push` | `fn list.push(mut xs: List[A], x: A) -> Unit` |  | R-list-00 |
 | `range` | `fn list.range(start: Int, end: Int) -> List[Int]` |  |  |
 | `range_step` | `fn list.range_step(start: Int, end: Int, step: Int) -> List[Int]` | 新規 | R-list-09 |
@@ -1129,7 +1161,7 @@
 | `sort_by` | `fn list.sort_by(xs: List[A], f: (A) -> B) -> List[A]` |  | R-list-06 |
 | `sort_with` | `fn list.sort_with(xs: List[A], cmp: (A, A) -> Int) -> List[A]` | 新規 | R-list-06 |
 | `split_at` | `fn list.split_at(xs: List[T], n: Int) -> (List[T], List[T])` |  |  |
-| `sum` | `fn list.sum(xs: List[Int]) -> Int` | 意味変更: `List[Float]` も受け取る | R-list-08 |
+| `sum` | `fn list.sum(xs: List[Int]) -> Int` ・ `fn list.sum(xs: List[Float]) -> Float` | 意味変更: `List[Float]` も受け取る | R-list-08 |
 | `swap` | `fn list.swap(xs: List[A], i: Int, j: Int) -> List[A]` | 意味変更: 範囲外は abort | R-list-00、R-list-13 |
 | `take` | `fn list.take(xs: List[A], n: Int) -> List[A]` |  | R-L0-12 |
 | `take_end` | `fn list.take_end(xs: List[A], n: Int) -> List[A]` |  | R-L0-12 |
@@ -1198,19 +1230,24 @@
 | 関数 | シグネチャ（リデザイン後） | 変化 | 案 |
 |---|---|---|---|
 | `acos` | `fn math.acos(x: Float) -> Float` | 新規 | R-math-02 |
+| `acosh` | `fn math.acosh(x: Float) -> Float` | 新規 | R-math-05 |
 | `asin` | `fn math.asin(x: Float) -> Float` | 新規 | R-math-02 |
+| `asinh` | `fn math.asinh(x: Float) -> Float` | 新規 | R-math-05 |
 | `atan` | `fn math.atan(x: Float) -> Float` |  |  |
 | `atan2` | `fn math.atan2(y: Float, x: Float) -> Float` | 新規 | R-math-02 |
+| `atanh` | `fn math.atanh(x: Float) -> Float` | 新規 | R-math-05 |
 | `cbrt` | `fn math.cbrt(x: Float) -> Float` | 新規 | R-math-02 |
 | `choose` | `fn math.choose(n: Int, k: Int) -> Int` |  |  |
 | `cos` | `fn math.cos(x: Float) -> Float` |  |  |
 | `cosh` | `fn math.cosh(x: Float) -> Float` | 新規 | R-math-02 |
 | `e` | `fn math.e() -> Float` |  |  |
 | `exp` | `fn math.exp(x: Float) -> Float` |  |  |
+| `expm1` | `fn math.expm1(x: Float) -> Float` | 新規 | R-math-04 |
 | `factorial` | `fn math.factorial(n: Int) -> Int` |  | —（大きな値は [L2-bigint](L2-bigint.md)） |
 | `hypot` | `fn math.hypot(x: Float, y: Float) -> Float` | 新規 | R-math-02 |
 | `log` | `fn math.log(x: Float) -> Float` |  |  |
 | `log10` | `fn math.log10(x: Float) -> Float` |  |  |
+| `log1p` | `fn math.log1p(x: Float) -> Float` | 新規 | R-math-04 |
 | `log2` | `fn math.log2(x: Float) -> Float` |  |  |
 | `log_gamma` | `fn math.log_gamma(x: Float) -> Float` |  |  |
 | `pi` | `fn math.pi() -> Float` |  |  |
@@ -1244,9 +1281,9 @@
 | `concat_cols` | `fn matrix.concat_cols(matrices: List[Matrix]) -> Matrix` |  |  |
 | `concat_rows` | `fn matrix.concat_rows(matrices: List[Matrix]) -> Matrix` | 新規 | R-matrix-11 |
 | `dot_row` | `fn matrix.dot_row(m: Matrix, r: Int, vec: List[Float]) -> Float` | 意味変更: 範囲・形の不一致は abort | R-matrix-05（範囲外は abort） |
-| `from_bytes_f16_le` | `fn matrix.from_bytes_f16_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix` | 意味変更: 範囲・形の不一致は abort | R-matrix-05 |
-| `from_bytes_f32_le` | `fn matrix.from_bytes_f32_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix` | 意味変更: 範囲・形の不一致は abort | R-matrix-05（データ不足は abort） |
-| `from_bytes_f64_le` | `fn matrix.from_bytes_f64_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix` | 意味変更: 範囲・形の不一致は abort | R-matrix-05 |
+| `from_bytes_f16_le` | `fn matrix.from_bytes_f16_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix?` | 意味変更: 負の形は abort、データ不足は none | R-matrix-05、R-matrix-15 |
+| `from_bytes_f32_le` | `fn matrix.from_bytes_f32_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix?` | 意味変更: 負の形は abort、データ不足は none | R-matrix-05、R-matrix-15 |
+| `from_bytes_f64_le` | `fn matrix.from_bytes_f64_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix?` | 意味変更: 負の形は abort、データ不足は none | R-matrix-05、R-matrix-15 |
 | `from_lists` | `fn matrix.from_lists(rows: List[List[Float]]) -> Matrix` |  |  |
 | `gather_rows` | `fn matrix.gather_rows(m: Matrix, indices: List[Int]) -> Matrix` | 意味変更: 範囲・形の不一致は abort | R-matrix-04・R-matrix-05（範囲外は abort） |
 | `get` | `fn matrix.get(m: Matrix, row: Int, col: Int) -> Float?` | 意味変更: `Option[Float]` を返す | R-matrix-08 |
@@ -1335,11 +1372,11 @@
 | `unix_close` | `unix.close` | R-net-01 |
 | `unix_connect` | `unix.connect` | R-net-01 |
 | `unix_listen` | `unix.listen` | R-net-01 |
-| `unix_poll` | `unix.wait([fd], t)` | R-net-01 |
-| `unix_recv` | `unix.recv` | R-net-01 |
-| `unix_send` | `unix.send` | R-net-01 |
+| `unix_poll` | `unix.select([fd], t)` | R-net-01 |
+| `unix_recv` | `unix.read` | R-net-01 |
+| `unix_send` | `unix.write` | R-net-01 |
 | `unix_take_fds` | `unix.take_fds` | R-net-01 |
-| `unix_wait` | `unix.wait` | R-net-01 |
+| `unix_wait` | `unix.select` | R-net-01 |
 
 ## option
 
@@ -1406,7 +1443,7 @@
 | `poll` | `effect fn process.poll(c: ProcessChild) -> Result[ProcessStatus, String]?` | 新規 | R-process-03 |
 | `read_new_stderr` | `effect fn process.read_new_stderr(c: ProcessChild) -> String` | 新規 | R-process-03 |
 | `read_new_stdout` | `effect fn process.read_new_stdout(c: ProcessChild) -> String` | 新規 | R-process-03 |
-| `run` | `effect fn process.run(cmd: String, args: List[String]) -> Int` | 意味変更: `ProcessCommand` を受け取る | R-process-07 |
+| `run` | `effect fn process.run(c: ProcessCommand) -> Int` | 意味変更: `ProcessCommand` を受け取る | R-process-07 |
 | `start` | `effect fn process.start(c: ProcessCommand) -> ProcessChild` | 新規 | R-process-03 |
 | `stop` | `effect fn process.stop(c: ProcessChild, grace_ms: Int) -> ProcessStatus` | 新規 | R-process-03 |
 | `wait` | `effect fn process.wait(c: ProcessChild) -> ProcessStatus` | 新規 | R-process-03 |
@@ -1451,8 +1488,8 @@
 
 | 関数 | シグネチャ（リデザイン後） | 変化 | 案 |
 |---|---|---|---|
-| `captures` | `fn regex.captures(re: Regex, s: String) -> List[String]?` | 意味変更: 第 1 引数を `Regex` に | 注: 一致しなかった省略可能なグループは `""`（probe: `captures("(a)(b)?", "xa")` → `["a", "a", ""]`）。Go・Elixir と同じ扱いで、変えると意味の付け替えになるので据え置き |
-| `captures_all` | `fn regex.captures_all(re: Regex, s: String) -> List[List[String]]` | 新規 | R-regex-04 |
+| `captures` | `fn regex.captures(re: Regex, s: String) -> List[String?]?` | 意味変更: 第 1 引数を `Regex` に。グループは `String?` | R-regex-08 |
+| `captures_all` | `fn regex.captures_all(re: Regex, s: String) -> List[List[String?]]` | 新規 | R-regex-04、R-regex-08 |
 | `escape` | `fn regex.escape(s: String) -> String` | 新規 | R-regex-04 |
 | `find` | `fn regex.find(re: Regex, s: String) -> String?` | 意味変更: 第 1 引数を `Regex` に | R-regex-02 |
 | `find_all` | `fn regex.find_all(re: Regex, s: String) -> List[String]` | 意味変更: 第 1 引数を `Regex` に | R-regex-02 |
@@ -1463,8 +1500,8 @@
 | `parse` | `fn regex.parse(pat: String) -> Result[Regex, String]` | 新規 | R-regex-02 |
 | `replace` | `fn regex.replace(re: Regex, s: String, rep: String) -> String` | 意味変更: 第 1 引数を `Regex` に | R-regex-02、R-regex-05（`$1` は解釈しない） |
 | `replace_first` | `fn regex.replace_first(re: Regex, s: String, rep: String) -> String` | 意味変更: 第 1 引数を `Regex` に | R-regex-02 |
-| `replace_first_with` | `fn regex.replace_first_with(re: Regex, s: String, f: (List[String]) -> String) -> String` | 新規 | R-regex-07 |
-| `replace_with` | `fn regex.replace_with(re: Regex, s: String, f: (List[String]) -> String) -> String` | 新規 | R-regex-05 |
+| `replace_first_with` | `fn regex.replace_first_with(re: Regex, s: String, f: (List[String?]) -> String) -> String` | 新規 | R-regex-07、R-regex-08 |
+| `replace_with` | `fn regex.replace_with(re: Regex, s: String, f: (List[String?]) -> String) -> String` | 新規 | R-regex-05、R-regex-08 |
 | `split` | `fn regex.split(re: Regex, s: String) -> List[String]` | 意味変更: 第 1 引数を `Regex` に | R-regex-02 |
 
 ## result
@@ -1534,7 +1571,6 @@
 | `capitalize` | `fn string.capitalize(s: String) -> String` |  |  |
 | `chars` | `fn string.chars(s: String) -> List[String]` |  |  |
 | `clear` | `fn string.clear(mut s: String) -> Unit` |  |  |
-| `codepoint` | `fn string.codepoint(s: String) -> Int?` |  |  |
 | `compare` | `fn string.compare(a: String, b: String) -> Int` | 新規 | R-string-05（R-L0-16） |
 | `contains` | `fn string.contains(s: String, sub: String) -> Bool` |  |  |
 | `count` | `fn string.count(s: String, sub: String) -> Int` |  |  |
@@ -1572,6 +1608,7 @@
 | `strip_suffix` | `fn string.strip_suffix(s: String, suffix: String) -> String?` |  |  |
 | `take` | `fn string.take(s: String, n: Int) -> String` |  |  |
 | `take_end` | `fn string.take_end(s: String, n: Int) -> String` |  |  |
+| `to_codepoint` | `fn string.to_codepoint(s: String) -> Int?` | 改名（旧 `codepoint`） | R-string-12 |
 | `to_lower` | `fn string.to_lower(s: String) -> String` |  |  |
 | `to_upper` | `fn string.to_upper(s: String) -> String` |  |  |
 | `to_utf16` | `fn string.to_utf16(s: String) -> List[Int]` | 新規 | R-string-07 |
@@ -1599,8 +1636,8 @@
 | `assert_approx` | `fn testing.assert_approx(a: Float, b: Float, tolerance: Float) -> Unit` |  |  |
 | `assert_contains` | `fn testing.assert_contains(haystack: String, needle: String) -> Unit` |  | R-testing-01 |
 | `assert_err` | `fn testing.assert_err[A, B](result: Result[A, B]) -> Unit` |  |  |
-| `assert_gt` | `fn testing.assert_gt(a: Int, b: Int) -> Unit` |  | R-testing-01 |
-| `assert_lt` | `fn testing.assert_lt(a: Int, b: Int) -> Unit` |  | R-testing-01 |
+| `assert_gt` | `fn testing.assert_gt[T](a: T, b: T) -> Unit` | 意味変更: 順序のある型すべてに広げる | R-testing-02 |
+| `assert_lt` | `fn testing.assert_lt[T](a: T, b: T) -> Unit` | 意味変更: 順序のある型すべてに広げる | R-testing-02 |
 | `assert_none` | `fn testing.assert_none[A](opt: A?) -> Unit` |  |  |
 | `assert_ok` | `fn testing.assert_ok[A, B](result: Result[A, B]) -> Unit` |  |  |
 | `assert_snapshot` | `fn testing.assert_snapshot(actual: String, expected: String) -> Unit` |  |  |
