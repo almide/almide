@@ -61,7 +61,7 @@ machine-enforced by the numeric-matrix gate in `almide docs-gen --check` (#956).
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (24 functions)
+## Signature index (34 functions)
 
 ```
 // Wraps to 8 bits; 128 becomes -128.
@@ -159,6 +159,46 @@ int32.min_value() -> Int32
 // Largest Int32: 2147483647.
 // @since 0.38.0
 int32.max_value() -> Int32
+
+// -1, 0 or 1 as a is below, equal to or above b.
+// @since unreleased
+int32.compare(a: Int32, b: Int32) -> Int
+
+// Lesser of a and b.
+// @since unreleased
+int32.min(a: Int32, b: Int32) -> Int32
+
+// Greater of a and b.
+// @since unreleased
+int32.max(a: Int32, b: Int32) -> Int32
+
+// x limited to lo..hi; aborts when lo > hi.
+// @since unreleased
+int32.clamp(x: Int32, lo: Int32, hi: Int32) -> Int32
+
+// Quotient rounded toward -inf; b == 0 aborts; min_value / -1 wraps.
+// @since unreleased
+int32.floor_div(a: Int32, b: Int32) -> Int32
+
+// base raised to exp, wrapping to 32 bits like *; exp < 0 aborts.
+// @since unreleased
+int32.pow(base: Int32, exp: Int) -> Int32
+
+// True when x is a multiple of 2.
+// @since unreleased
+int32.is_even(x: Int32) -> Bool
+
+// True when x is not a multiple of 2.
+// @since unreleased
+int32.is_odd(x: Int32) -> Bool
+
+// Magnitude of x; min_value wraps to itself.
+// @since unreleased
+int32.abs(x: Int32) -> Int32
+
+// -1, 0 or 1 by the sign of x.
+// @since unreleased
+int32.sign(x: Int32) -> Int
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

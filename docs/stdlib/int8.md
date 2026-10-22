@@ -61,7 +61,7 @@ machine-enforced by the numeric-matrix gate in `almide docs-gen --check` (#956).
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (20 functions)
+## Signature index (30 functions)
 
 ```
 // Sign-extending widen; always exact.
@@ -143,6 +143,46 @@ int8.min_value() -> Int8
 // Largest Int8: 127.
 // @since 0.38.0
 int8.max_value() -> Int8
+
+// -1, 0 or 1 as a is below, equal to or above b.
+// @since unreleased
+int8.compare(a: Int8, b: Int8) -> Int
+
+// Lesser of a and b.
+// @since unreleased
+int8.min(a: Int8, b: Int8) -> Int8
+
+// Greater of a and b.
+// @since unreleased
+int8.max(a: Int8, b: Int8) -> Int8
+
+// x limited to lo..hi; aborts when lo > hi.
+// @since unreleased
+int8.clamp(x: Int8, lo: Int8, hi: Int8) -> Int8
+
+// Quotient rounded toward -inf; b == 0 aborts; min_value / -1 wraps.
+// @since unreleased
+int8.floor_div(a: Int8, b: Int8) -> Int8
+
+// base raised to exp, wrapping to 8 bits like *; exp < 0 aborts.
+// @since unreleased
+int8.pow(base: Int8, exp: Int) -> Int8
+
+// True when x is a multiple of 2.
+// @since unreleased
+int8.is_even(x: Int8) -> Bool
+
+// True when x is not a multiple of 2.
+// @since unreleased
+int8.is_odd(x: Int8) -> Bool
+
+// Magnitude of x; min_value wraps to itself.
+// @since unreleased
+int8.abs(x: Int8) -> Int8
+
+// -1, 0 or 1 by the sign of x.
+// @since unreleased
+int8.sign(x: Int8) -> Int
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->
