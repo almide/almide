@@ -785,3 +785,26 @@ fn same_head_applied_mismatch(lc: &Ty, rc: &Ty) -> bool {
         _ => false,
     }
 }
+
+/// #4018: both operands are concrete scalars of different kinds — a number, a
+/// `String`, a `Bool`, `Bytes`, `Unit`, a `Matrix` or a `RawPtr` — which no
+/// equality can relate. Numbers of different widths are one kind here: literal
+/// typing decides those, and this check must not second-guess it.
+fn scalar_kind_mismatch(lc: &Ty, rc: &Ty) -> bool {
+    fn kind(t: &Ty) -> Option<u8> {
+        Some(match t {
+            Ty::Int | Ty::Float | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
+            | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
+            | Ty::Float32 | Ty::Float64 => 0,
+            Ty::String => 1,
+            Ty::Bool => 2,
+            Ty::Bytes => 3,
+            Ty::Unit => 4,
+            Ty::Matrix => 5,
+            Ty::RawPtr => 6,
+            _ => return None,
+        })
+    }
+    matches!((kind(lc), kind(rc)), (Some(a), Some(b)) if a != b)
+}
+
