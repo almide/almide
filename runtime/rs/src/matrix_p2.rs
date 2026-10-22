@@ -70,7 +70,7 @@ pub fn almide_rt_matrix_row_dot(m: &AlmideMatrix, r: i64, vec: &[f64]) -> f64 {
 
 // matrix: f32 path stubs for WASM target. matrix.rs has no distinct f32
 // matrix: storage (all Vec<Vec<f64>>), so these delegate to f64 ops.
-// matrix: burn/matrix_burn.rs provides the real f32 path via cblas_sgemm.
+// matrix: storage stays f64 on native; the f32 values are widened on load.
 pub fn almide_rt_matrix_zeros_f32(rows: i64, cols: i64) -> AlmideMatrix {
     almide_rt_matrix_zeros(rows, cols)
 }
@@ -199,37 +199,24 @@ pub fn almide_rt_matrix_linear_f32_row_no_bias(
         return mk(x_rows, out_cols, vec![0.0f64; x_rows * out_cols]);
     }
     let mut out = vec![0.0f64; x_rows * out_cols];
-    // Fast path: reinterpret the (4-byte-aligned, little-endian) weight bytes
-    // as &[f32] so the inner dot auto-vectorizes (cvtps2pd + fma), and split
-    // the output row across threads — GEMV is embarrassingly parallel over
-    // output elements. Falls back to per-element decode when misaligned.
-    let w_all = &w_bytes[off..off + out_cols * n_in * 4];
-    let (head, w_f32, _) = unsafe { w_all.align_to::<f32>() };
-    if head.is_empty() && w_f32.len() == out_cols * n_in {
-        for i in 0..x_rows {
-            let xi = &x.data[i * n_in..(i + 1) * n_in];
-            par_out_rows(&mut out[i * out_cols..(i + 1) * out_cols], |j, o| {
-                let wj = &w_f32[j * n_in..(j + 1) * n_in];
-                let mut acc = 0.0f64;
-                for k in 0..n_in {
-                    acc += xi[k] * wj[k] as f64;
-                }
-                *o = acc;
-            });
-        }
-    } else {
-        for j in 0..out_cols {
-            let row_off = off + j * n_in * 4;
-            let wj = &w_bytes[row_off..row_off + n_in * 4];
-            for i in 0..x_rows {
-                let xi = &x.data[i * n_in..(i + 1) * n_in];
-                let mut acc = 0.0f64;
-                for (k, c) in wj.chunks_exact(4).enumerate() {
-                    acc += xi[k] * f32::from_le_bytes([c[0], c[1], c[2], c[3]]) as f64;
-                }
-                out[i * out_cols + j] = acc;
+    // One safe path (#4007): each weight is decoded from its little-endian bytes
+    // in the inner loop (`from_le_bytes` over `chunks_exact(4)` is a plain load
+    // on a little-endian target, so the dot still vectorizes), and the output row
+    // is split across threads — GEMV is embarrassingly parallel over output
+    // elements. The earlier `align_to::<f32>()` fast path was `unsafe`, read the
+    // bytes in the HOST's byte order (wrong on a big-endian target) and fell back
+    // to a serial loop when the buffer happened to be misaligned.
+    let w_all = &w_bytes[off..off + need];
+    for i in 0..x_rows {
+        let xi = &x.data[i * n_in..(i + 1) * n_in];
+        par_out_rows(&mut out[i * out_cols..(i + 1) * out_cols], |j, o| {
+            let wj = &w_all[j * n_in * 4..(j + 1) * n_in * 4];
+            let mut acc = 0.0f64;
+            for (xk, c) in xi.iter().zip(wj.chunks_exact(4)) {
+                acc += xk * f32::from_le_bytes([c[0], c[1], c[2], c[3]]) as f64;
             }
-        }
+            *o = acc;
+        });
     }
     mk(x_rows, out_cols, out)
 }
