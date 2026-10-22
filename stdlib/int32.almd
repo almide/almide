@@ -151,3 +151,39 @@ fn count_ones(x: Int32) -> Int = int.pop_count(int.band(int.from_int32(x), 42949
 
 /// The 4 bytes in reverse order (endian flip).
 fn byte_swap(x: Int32) -> Int32 = int.to_int32(int.bshr(int.byte_swap(int.band(int.from_int32(x), 4294967295)), 32))
+
+// ── FixedWidthInteger: wrapping, rotation, bit length; parse (R-int-11, R-int-12, R-sized-02) ──
+/// a + b wrapped to 32 bits.
+fn wrap_add(a: Int32, b: Int32) -> Int32 = int.to_int32(int.from_int32(a) + int.from_int32(b))
+
+/// a - b wrapped to 32 bits.
+fn wrap_sub(a: Int32, b: Int32) -> Int32 = int.to_int32(int.from_int32(a) - int.from_int32(b))
+
+/// a * b wrapped to 32 bits.
+fn wrap_mul(a: Int32, b: Int32) -> Int32 = int.to_int32(int.from_int32(a) * int.from_int32(b))
+
+/// The 32 bits of a rotated left by n; n is taken mod 32.
+fn rotate_left(a: Int32, n: Int) -> Int32 = int.to_int32(rotate_bits(int.band(int.from_int32(a), 4294967295), rotate_count(n)))
+
+/// The 32 bits of a rotated right by n; n is taken mod 32.
+fn rotate_right(a: Int32, n: Int) -> Int32 = int.to_int32(rotate_bits(int.band(int.from_int32(a), 4294967295), rotate_count(0 - rotate_count(n))))
+
+// The low 32 bits v rotated left by k (k in 0..31); bits above 32 are dropped by the narrowing.
+local fn rotate_bits(v: Int, k: Int) -> Int = if k == 0 then v
+else int.bor(int.bshl(v, k), int.bshr(v, 32 - k))
+
+local fn rotate_count(n: Int) -> Int = {
+  let r = n % 32
+  if r < 0 then r + 32 else r
+}
+
+/// Bits needed to hold x; 0 for 0, 32 if negative.
+fn bit_length(x: Int32) -> Int = 64 - int.count_leading_zeros(int.band(int.from_int32(x), 4294967295))
+
+/// Decimal Int32 from trimmed s; err on junk or outside -2147483648..2147483647.
+fn parse(s: String) -> Result[Int32, String] = match int.parse(s) {
+  ok(n) => if n < -2147483648 then err("number too small to fit in target type")
+  else if n > 2147483647 then err("number too large to fit in target type")
+  else ok(int.to_int32(n)),
+  err(e) => err(e),
+}

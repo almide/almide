@@ -184,3 +184,55 @@ fn count_ones(x: UInt64) -> Int = int.pop_count(int.from_uint64(x))
 
 /// The 8 bytes in reverse order (endian flip).
 fn byte_swap(x: UInt64) -> UInt64 = int.to_uint64(int.byte_swap(int.from_uint64(x)))
+
+// ── FixedWidthInteger: wrapping, rotation, bit length; parse (R-int-11, R-int-12, R-sized-02) ──
+/// a + b wrapped to 64 bits.
+fn wrap_add(a: UInt64, b: UInt64) -> UInt64 = int.to_uint64(int.from_uint64(a) + int.from_uint64(b))
+
+/// a - b wrapped to 64 bits.
+fn wrap_sub(a: UInt64, b: UInt64) -> UInt64 = int.to_uint64(int.from_uint64(a) - int.from_uint64(b))
+
+/// a * b wrapped to 64 bits.
+fn wrap_mul(a: UInt64, b: UInt64) -> UInt64 = int.to_uint64(int.from_uint64(a) * int.from_uint64(b))
+
+/// The 64 bits of a rotated left by n; n is taken mod 64.
+fn rotate_left(a: UInt64, n: Int) -> UInt64 = int.to_uint64(rotate_bits(int.from_uint64(a), rotate_count(n)))
+
+/// The 64 bits of a rotated right by n; n is taken mod 64.
+fn rotate_right(a: UInt64, n: Int) -> UInt64 = int.to_uint64(rotate_bits(int.from_uint64(a), rotate_count(0 - rotate_count(n))))
+
+// The low 64 bits v rotated left by k (k in 0..63); bits above 64 are dropped by the narrowing.
+local fn rotate_bits(v: Int, k: Int) -> Int = if k == 0 then v
+else int.bor(int.bshl(v, k), int.band(int.bshr(v, 64 - k), int.bnot(int.bshl(-1, k))))
+
+local fn rotate_count(n: Int) -> Int = {
+  let r = n % 64
+  if r < 0 then r + 64 else r
+}
+
+/// Bits needed to hold x; 0 for 0.
+fn bit_length(x: UInt64) -> Int = 64 - int.count_leading_zeros(int.from_uint64(x))
+
+/// Decimal UInt64 from trimmed s; err on junk, a sign of -, or above 2^64-1.
+fn parse(s: String) -> Result[UInt64, String] = {
+  let t = string.trim(s)
+  if string.starts_with(t, "-") then err("invalid digit found in string")
+  else match int.parse(t) {
+    ok(n) => ok(int.to_uint64(n)),
+    err(e) => match parse_upper(t) {
+      some(u) => ok(u),
+      none => err(e),
+    },
+  }
+}
+
+// int.parse refused t. When t is a decimal in 2^63..2^64-1, its value is head * 10 plus
+// the last digit, and head fits Int (1844674407370955161 * 10 + 5 is 2^64-1).
+local fn parse_upper(t: String) -> UInt64? = {
+  let n = string.len(t)
+  match (int.parse(string.slice(t, 0, n - 1)), int.parse(string.slice(t, n - 1, n))) {
+    (ok(head), ok(digit)) => if head < 1844674407370955161 or head == 1844674407370955161 and digit <= 5 then some(int.to_uint64(head) * int.to_uint64(10) + int.to_uint64(digit))
+    else none,
+    _ => none,
+  }
+}
