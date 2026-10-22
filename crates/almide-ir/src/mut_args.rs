@@ -65,6 +65,23 @@ pub fn stdlib_mut_positions(module: &str, func: &str) -> Option<Vec<usize>> {
     })
 }
 
+/// Is the bundled stdlib fn `module.func` written in Almide — declared without
+/// `@intrinsic`? A mono instance (`__almd_monoN_<fn>__<tys>`) answers for its
+/// generic. `false` for an intrinsic, an unknown name, or a non-bundled module.
+pub fn stdlib_fn_has_almide_body(module: &str, func: &str) -> bool {
+    if !almide_lang::stdlib_info::is_bundled_module(module) {
+        return false;
+    }
+    let Some(program) = almide_lang::stdlib_info::bundled_source(module).and_then(almide_lang::parse_cached) else {
+        return false;
+    };
+    let base = crate::mono_base_or_self(func);
+    program.decls.iter().any(|d| {
+        matches!(d, Decl::Fn { name, attrs, .. }
+            if name.as_str() == base && !attrs.iter().any(|a| a.name.as_str() == "intrinsic"))
+    })
+}
+
 /// Every bundled stdlib fn that writes a param, as `(module, func, positions)`,
 /// enumerated from the declarations. The gates iterate this rather than a
 /// hand list, so a new `mut` fn is covered the day it is declared.

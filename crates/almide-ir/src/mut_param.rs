@@ -525,7 +525,7 @@ fn fold_if_arms(e: &mut IrExpr, p: VarId, mut_ty: &Ty, scope: &str, mut_fns: &Mu
                         };
                         matches!(&inner.kind,
                             IrExprKind::Call { target, args, .. }
-                                if call_spelling(target).is_some_and(|name| mut_fns.contains_key(&name) || mut_fns.contains_key(&scope_key(scope, &name)))
+                                if mut_call_spelling(target).is_some_and(|name| mut_fns.contains_key(&name) || mut_fns.contains_key(&scope_key(scope, &name)))
                                     && args.iter().any(|a| matches!(&a.kind, IrExprKind::Var { id } if *id == p)))
                     }
                     _ => false,
@@ -610,6 +610,26 @@ pub(crate) fn call_spelling(target: &CallTarget) -> Option<String> {
         }
         CallTarget::Module { module, func, .. } => Some(format!("{module}.{func}")),
         CallTarget::Method { .. } | CallTarget::Computed { .. } => None,
+    }
+}
+
+/// The spelling the MOVE-MODE call-site rewrite keys a call by: what
+/// [`call_spelling`] gives, plus a stdlib module call whose callee is written
+/// in Almide (declared without `@intrinsic`, a mono instance by its generic).
+/// Such a callee's body takes the rewrite like a user module fn's (its `mut`
+/// param comes back as the returned buffer), so its call sites must take the
+/// write-back too — without it `set.clear(s)` on wasm cleared the callee's copy
+/// and left the caller's set as it was, while native's `&mut` cleared it. An
+/// intrinsic stdlib mutator stays out: the emitters lower it in place.
+pub(crate) fn mut_call_spelling(target: &CallTarget) -> Option<String> {
+    match target {
+        CallTarget::Module { module, func, .. }
+            if almide_lang::stdlib_info::is_any_stdlib(module.as_str())
+                && crate::mut_args::stdlib_fn_has_almide_body(module.as_str(), func.as_str()) =>
+        {
+            Some(format!("{module}.{func}"))
+        }
+        _ => call_spelling(target),
     }
 }
 
@@ -1169,7 +1189,7 @@ impl IrMutVisitor for CallSiteRewriter<'_> {
         let IrExprKind::Call { target, args, .. } = &expr.kind else {
             return;
         };
-        let Some(name) = call_spelling(target) else { return };
+        let Some(name) = mut_call_spelling(target) else { return };
         let Some((idx, mut_ty, was_unit, callee_ret, extra)) = self.lookup_mut_fn(&name).cloned() else {
             return;
         };
