@@ -42,7 +42,7 @@ names = 2
 [[site]]
 id = "crates/almide-codegen/src/pass_concretize_types_call_ret.rs::resolve_list_poly_ret_ty_aggregate::or-pattern"
 class = "legacy"
-names = 5
+names = 8
 
 [[site]]
 id = "crates/almide-codegen/src/pass_concretize_types_call_ret.rs::resolve_list_poly_ret_ty_lambda::or-pattern"
@@ -77,7 +77,7 @@ names = 2
 [[site]]
 id = "crates/almide-codegen/src/pass_lambda_type_resolve.rs::LIST_ELEM_FIRST_METHODS::table"
 class = "legacy"
-names = 14
+names = 16
 
 [[site]]
 id = "crates/almide-codegen/src/pass_lambda_type_resolve.rs::LIST_ELEM_SECOND_METHODS::table"
@@ -727,7 +727,7 @@ names = 2
 [[site]]
 id = "crates/almide-types/src/fallible_hofs.rs::FALLIBLE_HOFS::table"
 class = "legacy"
-names = 28
+names = 35
 
 [[site]]
 id = "crates/almide-types/src/fallible_hofs.rs::TOTAL_ONLY_HOFS::table"
