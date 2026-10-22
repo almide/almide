@@ -347,10 +347,12 @@ fn check_numeric_protocol_matrix() -> Vec<String> {
         ("int8", true), ("int16", true), ("int32", true), ("int64", true),
         ("uint8", false), ("uint16", false), ("uint32", false), ("uint64", false),
     ];
-    // Integer (R-sized-02/08/10).
+    // Integer (R-sized-02/08/10) and FixedWidthInteger (R-sized-10).
     const INTEGER: &[&str] = &[
         "compare", "min", "max", "clamp", "to_string", "min_value", "max_value",
         "floor_div", "pow", "is_even", "is_odd",
+        "band", "bor", "bxor", "bnot", "bshl", "bshr",
+        "count_leading_zeros", "count_trailing_zeros", "count_ones", "byte_swap",
     ];
     // SignedInteger (R-sized-10).
     const SIGNED: &[&str] = &["abs", "sign"];
