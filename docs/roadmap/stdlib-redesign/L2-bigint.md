@@ -91,26 +91,20 @@
 ### R-bigint-07 `bigint` に `Integer` のビット演算を置く — ○ 採用
 
 - いま: `bigint` は `Integer` の算術（`floor_div`・`mod`・`pow`・`is_even`・`is_odd`）を持ちますが、ビット演算を持ちません。
-- 案: `band`・`bor`・`bxor`・`bnot`・`bshl`・`bshr` を置きます。負の数は、上に無限に 1 が続く 2 の補数として扱います（Python の `int`、Swift の `BinaryInteger` と同じ）。`bnot(x)` は `-x - 1` です。
+- 案: 演算子 `&`・`|`・`^`・`~`・`<<`・`>>` を置きます（R-L0-41。関数ではない）。負の数は、上に無限に 1 が続く 2 の補数として扱います（Python の `int`、Swift の `BinaryInteger` と同じ）。`bnot(x)` は `-x - 1` です。
 - 意図した抜け: `count_leading_zeros`・`count_trailing_zeros`・`count_ones`・`byte_swap` は置きません（`FixedWidthInteger` の要件で、幅のない型には決まった答えがない）。
 - (a) Swift の `BinaryInteger` はビット演算を要件にし、任意精度の整数もこれを持つ設計です。Python の `int`、Go の `big.Int`（`And`・`Or`・`Xor`・`Not`・`Lsh`・`Rsh`）、Java/Kotlin の `BigInteger`（`and`・`or`・`xor`・`not`・`shiftLeft`・`shiftRight`）も持ちます。
-- (d) 追加 6。
+- (d) 演算子の追加で、関数は増えません。
 - issue: #4000
 
 ## L3: 関数表（提案）
 
 | 関数 | シグネチャ(提案) | 他言語の主な綴り | 判定 | 案 |
 |---|---|---|---|---|
-| `int.to_bigint` | `int.to_bigint(n: Int) -> BigInt` | Go `big.NewInt` / JS `BigInt(n)` / Kotlin `BigInteger.valueOf` | 追加 | R-bigint-01（`int` に置く。L2-int の表にも載せる） |
 | `parse` | `bigint.parse(s: String) -> Result[BigInt, String]` | Go `SetString` / Python `int(s)` / JS `BigInt(s)` / Elixir `Integer.parse` (F) | 追加 | R-bigint-01 |
 | `parse_radix` | `bigint.parse_radix(s: String, radix: Int) -> Result[BigInt, String]` | Go `SetString(s, base)` / Python `int(s, base)` / Kotlin `BigInteger(s, radix)` | 追加 | R-bigint-01 |
 | `to_string` | `bigint.to_string(b: BigInt) -> String` | Go `String` / Python `str` / JS `toString` / Elixir `to_string` (F) | 追加 | R-bigint-01 |
 | `to_string_radix` | `bigint.to_string_radix(b: BigInt, radix: Int) -> String` | Go `Text(base)` / JS `toString(radix)` / Kotlin `toString(radix)` | 追加 | R-bigint-01 |
-| `to_int` | `bigint.to_int(b: BigInt) -> Int` | Kotlin `longValueExact` / Go `Int64`（範囲外は未定義） / JS `Number(b)` | 追加（範囲外は abort） | R-bigint-01、R-L0-32 |
-| `to_int_checked` | `bigint.to_int_checked(b: BigInt) -> Option[Int]` | Go `IsInt64` + `Int64` / Kotlin `longValueExact`（例外） | 追加 | R-bigint-01 |
-| `to_int_saturating` | `bigint.to_int_saturating(b: BigInt) -> Int` | Swift `init(clamping:)` の考え方 / 他 — | 追加 | R-bigint-01 |
-| `to_float` | `bigint.to_float(b: BigInt) -> Float`（最も近い値、溢れたら ±inf） | Go `Float64` / Python `float` / JS `Number` / Kotlin `toDouble` | 追加 | R-bigint-01 |
-| `to_float_checked` | `bigint.to_float_checked(b: BigInt) -> Option[Float]`（正確に表せるときだけ some） | Go `Float64` の `Accuracy` / 他 — | 追加 | R-bigint-01 |
 | `add` | `bigint.add(a: BigInt, b: BigInt) -> BigInt`（`+`） | Go `Add` / Kotlin `add` / 他は `+` | 追加しない（演算子の内部の脱糖先にする） | R-bigint-04 |
 | `sub` | `bigint.sub(a: BigInt, b: BigInt) -> BigInt`（`-`） | Go `Sub` / Kotlin `subtract` | 追加しない（演算子の内部の脱糖先にする） | R-bigint-04 |
 | `mul` | `bigint.mul(a: BigInt, b: BigInt) -> BigInt`（`*`） | Go `Mul` / Kotlin `multiply` | 追加しない（演算子の内部の脱糖先にする） | R-bigint-04 |
@@ -128,13 +122,6 @@
 | `is_even` | `bigint.is_even(a: BigInt) -> Bool` | Elixir `Integer.is_even` (F) / Kotlin `!testBit(0)` | 追加 | R-bigint-01（`int.is_even` と同じ綴り） |
 | `is_odd` | `bigint.is_odd(a: BigInt) -> Bool` | Elixir `Integer.is_odd` (F) | 追加 | R-bigint-01 |
 | `clamp` | `bigint.clamp(n: BigInt, lo: BigInt, hi: BigInt) -> BigInt` | Rust `clamp` / Kotlin `coerceIn` | 追加 | R-bigint-05 |
-| `uint64.to_bigint` | `uint64.to_bigint(x: UInt64) -> BigInt` | Go `SetUint64` | 追加 | R-bigint-06 |
-| `to_uint64` | `bigint.to_uint64(b: BigInt) -> UInt64` | Go `Uint64` | 追加（範囲外は abort） | R-bigint-06、R-L0-32 |
-| `to_uint64_checked` | `bigint.to_uint64_checked(b: BigInt) -> Option[UInt64]` | Go `IsUint64` | 追加 | R-bigint-06 |
-| `to_uint64_saturating` | `bigint.to_uint64_saturating(b: BigInt) -> UInt64` | — | 追加 | R-bigint-06 |
-| `band` | `bigint.band(a: BigInt, b: BigInt) -> BigInt` | Go `And` / Kotlin `and` / Python `&` | 追加 | R-bigint-07 |
-| `bor` | `bigint.bor(a: BigInt, b: BigInt) -> BigInt` | Go `Or` / Kotlin `or` / Python `\|` | 追加 | R-bigint-07 |
-| `bxor` | `bigint.bxor(a: BigInt, b: BigInt) -> BigInt` | Go `Xor` / Kotlin `xor` / Python `^` | 追加 | R-bigint-07 |
-| `bnot` | `bigint.bnot(a: BigInt) -> BigInt` | Go `Not` / Kotlin `not` / Python `~` | 追加 | R-bigint-07 |
-| `bshl` | `bigint.bshl(a: BigInt, n: Int) -> BigInt` | Go `Lsh` / Kotlin `shiftLeft` / Python `<<` | 追加 | R-bigint-07 |
-| `bshr` | `bigint.bshr(a: BigInt, n: Int) -> BigInt` | Go `Rsh` / Kotlin `shiftRight` / Python `>>` | 追加 | R-bigint-07 |
+| `from` | （追加）`bigint.from[S: Numeric](x: S) -> BigInt` | Rust `From`・`as` / Swift `init(_:)` / Python `int(x)` | 追加 | R-L0-40 |
+| `from_checked` | （追加）`bigint.from_checked[S: Numeric](x: S) -> BigInt?` | Rust `TryFrom` / Swift `init(exactly:)` | 追加 | R-L0-40 |
+| `bit_length` | （追加）`bigint.bit_length(n: BigInt) -> Int` | Python `bit_length` / Go `BitLen` | 追加 | R-int-11 |

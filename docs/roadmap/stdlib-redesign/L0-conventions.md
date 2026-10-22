@@ -550,7 +550,7 @@ effect fn を呼んだときの型（`!` が要るか、`??` をそのまま書�
   3. 型の公開面は「準拠する protocol の一覧」と「その型だけの関数」で書き表せます。
   4. protocol は階層に組みます。手本は Swift の標準ライブラリです（`Equatable`→`Comparable`、`AdditiveArithmetic`→`Numeric`→`BinaryInteger`→`FixedWidthInteger`、`Sequence`→`Collection`→`BidirectionalCollection`→`RandomAccessCollection` など）。Swift にない層は、理由を書いて足します。階層・型ごとの準拠・穴・この階層で決めることは [protocol-view.md](protocol-view.md) にあります（protocol の定義と準拠から、target-surface.md と突き合わせて機械的に作る）。R-L0-31 で名前を付けた protocol（`Integer`・`FloatingPoint`・`Sized`・`TimeAmount`・`HttpMessage`）は、この階層の中に置き直し、中身は階層の定義に従います。
 - 「protocol だけ」にしない理由: `string.split` や `regex.find` のように 1 つの型しか持たない関数を、メンバーが 1 つの protocol にしても、名前が 1 つ増えるだけで揃いは守れません。Swift も、具体型だけのメソッドを持っています。
-- 実測（リデザイン後の面）: 階層を決めた時点で、値の型 31 種の関数 1,041 個のうち 663 個が protocol の要件か数の変換の族で、要件のうちまだ無い関数（穴）が 209 個ありました（168 個は、`int` が持つ算術とビット演算をサイズつきの整数 8 型が持たないこと）。七巡目の案で 164 関数を足して埋め、残る穴は `string` の `new`・`from_list`・`to_list` の 3 つ（`chars` の改名と一緒に保留）です。
+- 実測（リデザイン後の面）: 階層を決めた時点で、値の型 31 種の関数 1,041 個のうち 663 個が protocol の要件か数の変換の族で、要件のうちまだ無い関数（穴）が 209 個ありました（168 個は、`int` が持つ算術とビット演算をサイズつきの整数 8 型が持たないこと）。七巡目の案で 164 関数を足して埋め、九巡目で変換を変換先の `from` に（R-L0-40）、ビット演算を演算子に（R-L0-41）まとめ、残る穴も閉じました。リデザイン後は 1,100 関数で、protocol の関数を 1 回と数えると覚える名前は 690 です。
 - 言語に足りないもの（実測 `almide 0.68.0 dev`。どれも今は書けない）:
   - 型引数を通して、受け手のないメソッドを呼ぶ（`T.zero()` が E002）。`parse`・`max_value`・`nan` に要ります。
   - protocol の継承（`protocol Integer: Ord`）。
@@ -578,8 +578,33 @@ effect fn を呼んだときの型（`!` が要るか、`??` をそのまま書�
 - 案: `^` を演算子の表から外し、字句エラーにします。ヒントは「累乗は `**`、ビットの排他的論理和は `int.bxor`（綴りは R-int-10 で決める）」です。`**` はそのまま残ります。
 - (b) 構文の変更で、両 target で同じです。
 - (d) 構文の撤去です。epoch 15 で `^` に警告を出し、epoch 16 でエラーにします（R-L0-14）。`almide fix` が `a ^ b` を `a ** b` に書き換えます（いまの意味を保つ）。`proofs/dialect-epochs.toml` に行を足します。
-- 空いた `^` を XOR の演算子にするかは、R-int-10 の計測で決めます。
+- 空いた `^` は、epoch 17 で XOR の演算子にします（R-L0-41）。epoch 16 の 1 epoch はエラーのままにして、古い意味のコードが黙って XOR に変わらないようにします。
 - issue: #4002
+
+## R-L0-40 数の変換は変換先の型に `from` で置く — ○ 採用
+
+- いま: 変換は変換元のモジュールに、変換先ごとの名前で並びます（`int.to_float(n)`、`int8.to_uint16_checked(x)`）。13 の数の型の組み合わせで 347 関数あり、標準ライブラリの一覧の 4 分の 1 を占めます。
+- 案: 変換先の型のモジュールに、どの数の型からでも受け取る総称関数として置きます。
+  - `fn <T>.from[S: Numeric](x: S) -> T`（無印。結果の型で表せない値は abort）
+  - `fn <T>.from_checked[S: Numeric](x: S) -> T?`
+  - `fn <T>.from_saturating[S: Numeric](x: S) -> T`（整数の型だけ）
+  - `fn <T>.from_wrapping[S: Integer](x: S) -> T`（整数の型だけ。整数からだけ）
+  - 意味は R-L0-32・R-L0-34・R-L0-35 のまま変えません（綴りだけの変更）。値を失わない組では、無印は abort せず、`_checked` は必ず値を返します。
+- (a) 変換先の側に置くのが多数派です: Rust `i8::from(x)`・`i8::try_from(x)`、Swift `Int8(x)`・`Int8(exactly:)`・`Int8(clamping:)`・`Int8(truncatingIfNeeded:)`、Python `float(n)`、Go `float64(n)`、JS `Number(x)`、OCaml `Float.of_int`。変換元の側は Kotlin（`toDouble()`）と Gleam（`int.to_float`）だけです。Swift の 4 つの初期化子と、Almide の 4 つの関数が 1 対 1 に対応します。
+- (c) 覚える名前が、型 13 × 変換先 12 × 接尾辞の行列から、接尾辞 4 つになります。パイプでも同じに書けます（`n |> float.from`）。
+- (d) 改名と撤去です。epoch 15 で `to_<T>…` を `@deprecated(since=15, use="<T>.from…")` にし、epoch 16 で撤去します。`almide fix` が `int.to_float(n)` を `float.from(n)` に機械的に書き換えます。数の型どうしの `to_string`・`parse` はこの案の外です。
+- 言語に要るもの: 型引数つきの総称関数を protocol の境界（`S: Numeric`）で受け、受け手のない要件（`T.from`）を呼べること（#4000）。
+- issue: #4003
+
+## R-L0-41 ビット演算を演算子にし、`>>` を関数の合成から外す — ○ 採用
+
+- いま: ビット演算は `int.band(a, b)` などの関数で、演算子はありません。`>>` は関数の合成（`f >> g`）、`^` は累乗でした（R-L0-39 で撤去）。
+- 案: 整数の型（`int`・サイズつきの 8 型・`bigint`）に、`&`・`|`・`^`（XOR）・`~`（否定）・`<<`・`>>` を置きます。`>>` は、符号つきの型では符号を保ち、符号なしの型では 0 で埋めます（Swift・Rust・Go と同じ）。符号を無視した右シフトは、符号なしの型に移して書きます（`uint64.from_wrapping(x) >> n`）。
+- 優先順位は Swift に合わせ、C の落とし穴（`a & b == c` が `a & (b == c)` になる）をなくします: `**` ＞ `<<` `>>` ＞ `*` `/` `%` `&` ＞ `+` `-` `|` `^` ＞ 範囲 ＞ `|>` ＞ 比較。
+- 関数の合成 `f >> g` はやめ、`(x) => g(f(x))` か `x |> f |> g` で書きます。合成の演算子を持つのは 9 言語のうち少数で（F#・Haskell の系統）、Rust・Go・Python・JS・Swift の 5 言語で `>>` は右シフトです。実測: Almide のコード中で合成の `>>` を使うのは、合成そのものを試す spec の 7 行だけです。
+- (a) R-int-05（×）は関数名だけを比べて「多数派がない」としました。演算子まで比べると、`&`・`|`・`^`・`<<`・`>>` は Rust・Go・Python・JS・Swift の 5 言語の綴りで、多数派です（R-L0-00）。
+- (d) 構文の追加と意味の変更です。`&`・`|`・`~`・`<<` は epoch 15 から使えます。`^`（累乗）と `>>`（合成）は、epoch 15 で警告、epoch 16 でエラー、epoch 17 で新しい意味にします（同じ記号の意味を黙って入れ替えないため、間に 1 epoch のエラーを挟む）。`almide fix` が `int.band(a, b)` を `a & b` に、`f >> g` を `(x) => g(f(x))` に書き換えます。`band`・`bor`・`bxor`・`bnot`・`bshl`・`bshr`・`bshr_logical` は撤去します。
+- issue: #4004
 
 ## ゲートの束（R-L0-G） — ○ 採用
 

@@ -61,7 +61,7 @@
 - 内容:
   1. 不透明な型 `Regex` を足します。作り方は 2 つです。
      - `regex.new(pat: String) -> Regex`: パターンが文字列リテラルなら `almide check` の段階で構文を検査し、不正なら新しい E コードで止めます（対応していない構文、例えば名前つきグループも「対応していない」と言って止めます）。実行時に組み立てた不正なパターンは、呼び出し側の契約違反として abort します（R-L0-06 の 3。Go の `regexp.MustCompile` と同じ形）。
-     - `regex.parse(pat: String) -> Result[Regex, String]`: 実行時に組み立てたパターンを、理由つきで確かめながら作ります（R-L0-06 の 1。Go の `regexp.Compile`、Rust の `Regex::new`、Gleam の `regexp.from_string`、Elixir の `Regex.compile`）。
+     - `regex.compile(pat: String) -> Result[Regex, String]`: 実行時に組み立てたパターンを、理由つきで確かめながら作ります（R-L0-06 の 1。Go の `regexp.Compile`、Rust の `Regex::new`、Gleam の `regexp.from_string`、Elixir の `Regex.compile`）。
   2. 一致・検索・置換・分割の関数は、第 1 引数に `Regex` を取ります（`regex.is_match(re: Regex, s: String) -> Bool` など）。名前は変えません。
   3. abort のメッセージは `Error: invalid regex: <理由>` の 1 行、終了コード 1 で、native と wasm で同じにします（新しい契約 C-NNN と fixture。als の台帳を先に通します）。
 - 根拠の L0 規則: R-L0-00（9/9 が正規表現の型を持つ）、R-L0-02（主語＝`Regex`）、R-L0-03、R-L0-06、R-L0-14
@@ -72,7 +72,7 @@
   2. `|>` でパイプしたときの取り違え（`"order 42" |> regex.is_match("[0-9]+")` が `false`）は、`String` を `Regex` の位置に渡す型エラーになります。宣言に印を付けて検査器に読ませる仕組み（旧 R-regex-03 案）は要りません。
 - (d) 引数の型の変更です。旧い呼び出し `regex.find("[0-9]+", s)` は、黙って別の意味になるのではなく、型エラーになります。ヒントは `regex.find(regex.new("[0-9]+"), s)` です（R-L0-14 の 4 が禁じるのは「型が合ったまま意味が変わる」変更で、これは当てはまりません）。`almide fix` は、文字列リテラルのパターンを `regex.new(...)` で包む書き換えを機械的に行います。`String` を `Regex` に自動で変換する仕組みは入れません（書き方が 2 つになるため）。epoch 15 の `breaks` に入れ、spec（約 500 か所）・tests・下流の件数を `summary` に書きます。
 - 速さ: いまは呼び出しのたびにパターンを解析しています。`let re = regex.new(p)` を一度作ってループで使えば、解析が 1 回で済みます。
-- ゲート: 不正なパターンの行列 fixture（`(`、`[`、`*`、`a{`、`(?P<n>a)`）で、check 時のエラー、`regex.new` の abort、`regex.parse` の err の 3 つを確かめます。native と wasm の一致は `spec/wasm_cross/` の fixture で確かめます。`tests/diagnostics/` に、文字列をパターンの位置へパイプした broken と、`regex.new` を使う fixed を置きます。
+- ゲート: 不正なパターンの行列 fixture（`(`、`[`、`*`、`a{`、`(?P<n>a)`）で、check 時のエラー、`regex.new` の abort、`regex.compile` の err の 3 つを確かめます。native と wasm の一致は `spec/wasm_cross/` の fixture で確かめます。`tests/diagnostics/` に、文字列をパターンの位置へパイプした broken と、`regex.new` を使う fixed を置きます。
 - issue: #3942
 
 ### R-regex-03 パイプの取り違えを、宣言の印で止める — × 不採用（R-regex-02 の型で止まるため）
@@ -142,6 +142,13 @@
 - 理由: `regex` のモジュールの主語は `Regex` で、R-L0-02・R-L0-03（関数は主語の型のモジュールに置き、主語を先頭にする）のとおりです。Rust `re.replace_all(s, …)`、Go `re.ReplaceAllString(s, …)`、Elixir `Regex.replace(re, s, …)` も正規表現が先です。文字列の側から書きたいときは `string.replace` を使います。
 - issue: なし
 
+### R-regex-11 パターンを確かめて作る関数を `regex.compile` と綴る — ○ 採用
+
+- 内容: R-regex-02 で足す `regex.parse(pat) -> Result[Regex, String]` を `regex.compile` と綴ります（ほかは R-regex-02 のまま）。
+- 理由: protocol の階層では、`parse` は「`to_string` と往復する値の文字列表現を読む」関数です（`Parse`、Swift の `LosslessStringConvertible`）。パターンを組み立てる関数は役割が違います。Go `regexp.Compile`、Python `re.compile`、Elixir `Regex.compile` が `compile` です。
+- (d) このリデザインで足す関数の名前の変更です。
+- issue: #4004
+
 ## L3: 関数表
 
 | 関数 | シグネチャ(現行, mut 表示) | 他言語の主な綴り | 判定 | 案 |
@@ -156,7 +163,7 @@
 | `regex.captures` | `captures(re: Regex, s: String) -> Option[List[Option[String]]]` | Rust captures / Go FindStringSubmatch / JS exec / Elixir run | 意味変更（第 1 引数を `Regex` に。グループは `String?`） | R-regex-08 |
 | `regex.is_full_match` | `is_full_match(re: Regex, s: String) -> Bool` | （上の full_match と同じ） | 追加 | R-regex-01 |
 | `regex.new` | `new(pat: String) -> Regex` | Go MustCompile / Rust Regex::new / Kotlin Regex() / JS RegExp / Swift Regex | 追加 | R-regex-02 |
-| `regex.parse` | `parse(pat: String) -> Result[Regex, String]` | Go Compile / Rust Regex::new / Gleam from_string / Elixir compile | 追加 | R-regex-02 |
+| `regex.compile` | `compile(pat: String) -> Result[Regex, String]` | Go Compile / Rust Regex::new / Gleam from_string / Elixir compile | 追加 | R-regex-02 |
 | `regex.replace_with` | `replace_with(re: Regex, s: String, f: (List[Option[String]]) -> String) -> String` | Rust replace_all(closure) / Go ReplaceAllStringFunc / Python sub(fn) / JS replace(fn) | 追加 | R-regex-05、R-regex-08 |
 | `regex.escape` | `escape(s: String) -> String` | Rust escape / Go QuoteMeta / Python escape / Elixir escape / OCaml quote | 追加 | R-regex-04 |
 | `regex.index_of` | `index_of(re: Regex, s: String) -> Option[Int]` | Go FindStringIndex / JS search / Rust find().start() | 追加 | R-regex-04 |

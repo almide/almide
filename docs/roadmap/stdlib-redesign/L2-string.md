@@ -238,9 +238,16 @@
   - `filter(s, f: (String) -> Bool) -> String`、`fold(s, init: B, f: (B, String) -> B) -> B`
   - `pop(mut s) -> String?`（末尾の 1 文字を取り出す）、`insert(s, i: Int, sub: String) -> String`、`remove_at(s, i: Int) -> String`（`list` と同じく `0..=len`・`0..len` の外は abort）
 - (a) Swift の `String` は `RangeReplaceableCollection` で、`filter`（`String` を返す）・`reduce`・`popLast`・`insert(_:at:)`・`remove(at:)` を持ちます。Kotlin も `filter`・`fold` を `String` に持ちます。
-- 保留: `new`・`from_list`・`to_list` は、`to_list` が `chars` と同じ役割になるので、`chars` の改名と一緒に Dojo で測ってから決めます（protocol-view.md の「この階層で決めること」）。
+- `new`・`from_list`・`to_list` は R-string-17 で決めました。
 - (d) 追加 5。
 - issue: #4000
+
+### R-string-17 `string.chars` を `to_list` にし、`new`・`from_list` を置く — ○ 採用（R-string-16 の保留を解く）
+
+- 内容: `string.chars(s)` を `string.to_list(s)` に改名し、`string.new() -> String`（`""`）と `string.from_list(xs: List[String]) -> String`（つなげる）を置きます。`string` が `Container` の要件をすべて持ちます。
+- 理由: protocol の階層で `string` は `Text`（`Ordered`・`Sequence`・`Container` を含む）です。`to_list` と `chars` が同じ役割の 2 つの綴りになるのを避けます。Swift は `Array(s)`、Kotlin は `toList()` です。Rust の `chars` に慣れた書き方には、E002 のヒントで `string.to_list` を示します。
+- (d) 改名と追加です。epoch 15 で `chars` を `@deprecated(since=15, use="to_list")` にし、epoch 16 で撤去します。
+- issue: #4004
 
 ## L3: 関数表
 
@@ -265,7 +272,7 @@
 | `replace` | `(s: String, from: String, to: String) -> String` | Rust/Python/Gleam `replace` / JS・Go `replaceAll`/`ReplaceAll` | 据え置き | — |
 | `get` | `(s: String, i: Int) -> Option[String]` | JS `at` / Elixir `at` / Rust `chars().nth` | 据え置き | — |
 | `lines` | `(s: String) -> List[String]` | Rust/Kotlin `lines` / Python `splitlines` / Go `Lines` | 据え置き | — |
-| `chars` | `(s: String) -> List[String]` | Rust `chars` / Gleam `to_graphemes` / Elixir `graphemes` | 据え置き | — |
+| `chars` | `(s: String) -> List[String]` | Rust `chars` / Gleam `to_graphemes` / Elixir `graphemes` | 改名 → `to_list` | R-string-17 |
 | `index_of` | `(s: String, needle: String) -> Option[Int]` | Rust `find` / Go `Index` / JS `indexOf` / OCaml `index_opt` | 据え置き | — |
 | `repeat` | `(s: String, n: Int) -> String` | Rust/JS/Gleam `repeat` / Go `Repeat` / Elixir `duplicate` | 据え置き | — |
 | `from_bytes` | `(bytes: List[Int]) -> String` | Rust `String::from_utf8_lossy` / Kotlin `decodeToString` | 撤去（→ `bytes.from_list(xs) \|> bytes.to_string_lossy`） | R-string-02 |
@@ -305,6 +312,8 @@
 | `pop` | （追加）`(mut s: String) -> String?` | Swift `popLast` / Rust `pop` | 追加 | R-string-16 |
 | `insert` | （追加）`(s: String, i: Int, sub: String) -> String` | Swift `insert(contentsOf:at:)` / Rust `insert_str` | 追加 | R-string-16 |
 | `remove_at` | （追加）`(s: String, i: Int) -> String` | Swift `remove(at:)` / Rust `remove` | 追加 | R-string-16 |
+| `new` | （追加）`() -> String` | Swift `String()` / Rust `String::new` | 追加 | R-string-17 |
+| `from_list` | （追加）`(xs: List[String]) -> String` | Swift `String(chars)` / Kotlin `joinToString("")` | 追加 | R-string-17 |
 
 現行 50 関数 + 追加 4 = 54 行。
 
