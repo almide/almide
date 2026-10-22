@@ -117,7 +117,7 @@
 | `fs.read_bytes_raw_if_exists` | `effect fn read_bytes_raw_if_exists(path: String) -> Bytes?` | — | 撤去（→ `read_bytes_if_exists`） | R-fs-01・R-fs-03 |
 | `fs.fold_lines` | `effect fn fold_lines[A](path: String, init: A, f: (A, String) -> A) -> A` | OCaml `In_channel.fold_lines` / Kotlin `useLines` | 据え置き | — |
 | `fs.for_each_line` | `effect fn for_each_line(path: String, f: (String) -> Unit) -> Unit` | Kotlin `forEachLine` / Rust `lines()` | 据え置き | — |
-| `fs.fold_lines_range` | `effect fn fold_lines_range[A](path: String, start: Int, end: Int, init: A, f: (A, String) -> A) -> A` | —（Almide 固有） | 据え置き | — |
+| `fs.fold_lines_range` | `effect fn fold_lines_range[A](path: String, start: Int, end: Int, init: A, f: (A, String) -> A) -> A` | —（Almide 固有） | 意味変更（負の位置で abort） | R-L0-29、R-L0-46 |
 | `fs.fold_lines_chunked` | `effect fn fold_lines_chunked[A](path: String, workers: Int, init: A, f: (A, String) -> A) -> List[A]` | —（Almide 固有。`@concurrent`） | 据え置き | — |
 | `fs.write` | `effect fn write(path: String, content: String) -> Unit` | Rust `fs::write` / Go `WriteFile` / Python `write_text` / Elixir `File.write` | 改名 → `write_text` | R-fs-05 |
 | `fs.write_bytes` | `effect fn write_bytes(path: String, bytes: List[Int]) -> Unit` | Python `write_bytes` / Kotlin `writeBytes` | 意味変更（`data: Bytes` にする） | R-fs-01 |

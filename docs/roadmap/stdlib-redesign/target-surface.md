@@ -38,7 +38,7 @@
 
 | いまの関数 | リデザイン後 | 据え置き | 新規 | 改名 | 意味変更 | 撤去 |
 |---:|---:|---:|---:|---:|---:|---:|
-| 1001 | 1289 | 411 | 705 | 88 | 85 | 417 |
+| 1001 | 1289 | 409 | 705 | 88 | 87 | 417 |
 
 固定幅の数（`int8`〜`uint64`、`float32`・`float64`）は型ごとに 1 関数と数えます。
 
@@ -72,7 +72,7 @@
 | [`float`](#float) | 26 | 12 | 1 | 0 | 32 | [L2-float.md](L2-float.md) |
 | [`float32`](#float32) | 24 | 23 | 0 | 0 | 9 | [L2-sized-numbers.md](L2-sized-numbers.md) |
 | [`float64`](#float64) | 24 | 23 | 0 | 0 | 9 | [L2-sized-numbers.md](L2-sized-numbers.md) |
-| [`fs`](#fs) | 30 | 1 | 2 | 3 | 5 | [L2-fs.md](L2-fs.md) |
+| [`fs`](#fs) | 30 | 1 | 2 | 4 | 5 | [L2-fs.md](L2-fs.md) |
 | [`hash`](#hash) | 11 | 8 | 0 | 2 | 1 | [L2-hash.md](L2-hash.md) |
 | [`heap`](#heap)（新しいモジュール） | 16 | 16 | 0 | 0 | 0 | [L2-heap.md](L2-heap.md) |
 | [`hex`](#hex) | 3 | 0 | 0 | 0 | 0 | [L2-hex.md](L2-hex.md) |
@@ -88,7 +88,7 @@
 | [`list`](#list) | 73 | 12 | 0 | 16 | 6 | [L2-list.md](L2-list.md) |
 | [`map`](#map) | 37 | 15 | 1 | 7 | 3 | [L2-map.md](L2-map.md) |
 | [`math`](#math) | 27 | 12 | 0 | 0 | 8 | [L2-math.md](L2-math.md) |
-| [`matrix`](#matrix) | 25 | 3 | 0 | 7 | 24 | [L2-matrix.md](L2-matrix.md) |
+| [`matrix`](#matrix) | 25 | 3 | 0 | 8 | 24 | [L2-matrix.md](L2-matrix.md) |
 | [`net`](#net) | 16 | 8 | 0 | 8 | 18 | [L2-net.md](L2-net.md) |
 | [`option`](#option) | 13 | 0 | 0 | 0 | 1 | [L2-option.md](L2-option.md) |
 | [`path`](#path) | 10 | 3 | 0 | 0 | 3 | [L2-path.md](L2-path.md) |
@@ -744,7 +744,7 @@
 | `exists` | `effect fn fs.exists(path: String) -> Bool` |  |  |
 | `fold_lines` | `effect fn fs.fold_lines[A](path: String, init: A, f: (A, String) -> A) -> A` |  |  |
 | `fold_lines_chunked` | `effect fn fs.fold_lines_chunked[A](path: String, workers: Int, init: A, f: (A, String) -> A) -> List[A]` |  |  |
-| `fold_lines_range` | `effect fn fs.fold_lines_range[A](path: String, start: Int, end: Int, init: A, f: (A, String) -> A) -> A` |  |  |
+| `fold_lines_range` | `effect fn fs.fold_lines_range[A](path: String, start: Int, end: Int, init: A, f: (A, String) -> A) -> A` | 意味変更: 負の位置で abort | R-L0-29、R-L0-46 |
 | `for_each_line` | `effect fn fs.for_each_line(path: String, f: (String) -> Unit) -> Unit` |  |  |
 | `glob` | `effect fn fs.glob(pattern: String) -> List[String]` |  |  |
 | `is_dir` | `effect fn fs.is_dir(path: String) -> Bool` |  |  |
@@ -1552,7 +1552,7 @@
 | `rows` | `fn matrix.rows(m: Matrix) -> Int` |  |  |
 | `scale` | `fn matrix.scale(m: Matrix, s: Float) -> Matrix` |  |  |
 | `shape` | `fn matrix.shape(m: Matrix) -> (Int, Int)` |  |  |
-| `slice_rows` | `fn matrix.slice_rows(m: Matrix, start: Int, end: Int) -> Matrix` |  | —（R-L0-12 の丸め） |
+| `slice_rows` | `fn matrix.slice_rows(m: Matrix, start: Int, end: Int) -> Matrix` | 意味変更: 負の位置で abort。正の側は丸める | R-L0-29、R-L0-46 |
 | `split_cols_even` | `fn matrix.split_cols_even(m: Matrix, n: Int) -> List[Matrix]` |  |  |
 | `to_bytes_f16_le` | `fn matrix.to_bytes_f16_le(m: Matrix) -> Bytes` | 新規 | R-matrix-12 |
 | `to_bytes_f32_le` | `fn matrix.to_bytes_f32_le(m: Matrix) -> Bytes` |  |  |

@@ -44,7 +44,7 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 
 [args](L2-args.md) ・ [base64](L2-base64.md) ・ [bigint](L2-bigint.md) ・ [bool](L2-bool.md) ・ [bytes](L2-bytes.md) ・ [compute](L2-compute.md) ・ [datetime](L2-datetime.md) ・ [deque](L2-deque.md) ・ [duration](L2-duration.md) ・ [env](L2-env.md) ・ [error](L2-error.md) ・ [ffi](L2-ffi.md) ・ [float](L2-float.md) ・ [fs](L2-fs.md) ・ [hash](L2-hash.md) ・ [heap](L2-heap.md) ・ [hex](L2-hex.md) ・ [html](L2-html.md) ・ [http](L2-http.md) ・ [int](L2-int.md) ・ [io](L2-io.md) ・ [json](L2-json.md) ・ [list](L2-list.md) ・ [map](L2-map.md) ・ [math](L2-math.md) ・ [matrix](L2-matrix.md) ・ [net](L2-net.md) ・ [option](L2-option.md) ・ [path](L2-path.md) ・ [process](L2-process.md) ・ [random](L2-random.md) ・ [regex](L2-regex.md) ・ [result](L2-result.md) ・ [set](L2-set.md) ・ [sized-numbers](L2-sized-numbers.md) ・ [string](L2-string.md) ・ [testing](L2-testing.md) ・ [unix](L2-unix.md) ・ [url](L2-url.md) ・ [uuid](L2-uuid.md) ・ [value](L2-value.md) ・ [zlib](L2-zlib.md)
 
-## 案の状態（全 347 件: ○ 282・× 61・保留 4）
+## 案の状態（全 349 件: ○ 284・× 61・保留 4）
 
 | 案 | 内容 | 判定 | issue |
 |---|---|---|---|
@@ -93,6 +93,8 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 | [R-L0-42](L0-conventions.md#r-l0-42-列のアルゴリズムは-protocol-の既定の実装として-1-回だけ書く---採用) | 列のアルゴリズムは protocol の既定の実装として 1 回だけ書く | ○ | #4012 |
 | [R-L0-43](L0-conventions.md#r-l0-43-撤去した記号を別の意味で使い直さない---採用) | 撤去した記号を別の意味で使い直さない | ○ | #4004 |
 | [R-L0-44](L0-conventions.md#r-l0-44-入出力の-protocol-readwriteclose-を置き読み書きと閉じるを-io-の総称関数-1-組にする---採用) | 入出力の protocol `Read`・`Write`・`Close` を置き、読み書きと閉じるを `io` の総称関数 1 組にする | ○ | #4015 |
+| [R-L0-45](L0-conventions.md#r-l0-45-メモリ安全でない標準の関数は-ffiread-と-ffiwrite-の-2-つだけにする---採用) | メモリ安全でない標準の関数は `ffi.read` と `ffi.write` の 2 つだけにする | ○ | #4008、#4013 |
+| [R-L0-46](L0-conventions.md#r-l0-46-位置を受け取る関数を全数で表にし役割の規則r-l0-33をゲートにする---採用) | 位置を受け取る関数を全数で表にし、役割の規則（R-L0-33）をゲートにする | ○ | #4005 |
 | [R-L0-G](L0-conventions.md#ゲートの束r-l0-g---採用) | ゲートの束（R-L0-G） | ○ | #3949 |
 | [R-L1-01](L1-categories.md#r-l1-01-両端キュー-deque---採用) | 両端キュー `deque` | ○ | #3932 |
 | [R-L1-02](L1-categories.md#r-l1-02-優先度キュー-heap---採用) | 優先度キュー `heap` | ○ | #3933 |
