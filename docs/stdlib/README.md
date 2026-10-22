@@ -2,7 +2,7 @@
 
 # Standard library
 
-Every public function of the 48 stdlib modules, 1276 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
+Every public function of the 48 stdlib modules, 1356 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
 
 A `mut` parameter is written in place: the caller passes a `var` binding and sees the change (a `let`, a non-`mut` parameter or a temporary is E032). Every other parameter is read only, and a function that changes a value without `mut` returns a new one.
 
@@ -29,10 +29,10 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [html](#html) | 5 | 0 |
 | [http](#http) | 48 | 4 |
 | [int](#int) | 72 | 0 |
-| [int16](#int16) | 32 | 0 |
-| [int32](#int32) | 34 | 0 |
-| [int64](#int64) | 36 | 0 |
-| [int8](#int8) | 30 | 0 |
+| [int16](#int16) | 42 | 0 |
+| [int32](#int32) | 44 | 0 |
+| [int64](#int64) | 46 | 0 |
+| [int8](#int8) | 40 | 0 |
 | [io](#io) | 8 | 0 |
 | [json](#json) | 15 | 0 |
 | [list](#list) | 79 | 0 |
@@ -49,10 +49,10 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [set](#set) | 40 | 0 |
 | [string](#string) | 88 | 0 |
 | [testing](#testing) | 10 | 0 |
-| [uint16](#uint16) | 26 | 0 |
-| [uint32](#uint32) | 30 | 0 |
-| [uint64](#uint64) | 34 | 0 |
-| [uint8](#uint8) | 22 | 0 |
+| [uint16](#uint16) | 36 | 0 |
+| [uint32](#uint32) | 40 | 0 |
+| [uint64](#uint64) | 44 | 0 |
+| [uint8](#uint8) | 32 | 0 |
 | [url](#url) | 10 | 1 |
 | [value](#value) | 20 | 0 |
 | [zlib](#zlib) | 10 | 0 |
@@ -725,6 +725,16 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `int16.is_odd(x: Int16) -> Bool` — True when x is not a multiple of 2.
 - `int16.abs(x: Int16) -> Int16` — Magnitude of x; min_value wraps to itself.
 - `int16.sign(x: Int16) -> Int` — -1, 0 or 1 by the sign of x.
+- `int16.band(a: Int16, b: Int16) -> Int16` — Bitwise AND.
+- `int16.bor(a: Int16, b: Int16) -> Int16` — Bitwise OR.
+- `int16.bxor(a: Int16, b: Int16) -> Int16` — Bitwise XOR.
+- `int16.bnot(x: Int16) -> Int16` — Bitwise complement of all 16 bits.
+- `int16.bshl(a: Int16, n: Int) -> Int16` — a shifted left by n bits; n is taken mod 16.
+- `int16.bshr(a: Int16, n: Int) -> Int16` — Sign-filling right shift; n is taken mod 16.
+- `int16.count_leading_zeros(x: Int16) -> Int` — Zero bits above the highest set bit, counted in 16 bits; 16 for 0.
+- `int16.count_trailing_zeros(x: Int16) -> Int` — Zero bits below the lowest set bit; 16 for 0.
+- `int16.count_ones(x: Int16) -> Int` — Number of set bits among the 16.
+- `int16.byte_swap(x: Int16) -> Int16` — The 2 bytes in reverse order (endian flip).
 
 ## int32
 
@@ -764,6 +774,16 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `int32.is_odd(x: Int32) -> Bool` — True when x is not a multiple of 2.
 - `int32.abs(x: Int32) -> Int32` — Magnitude of x; min_value wraps to itself.
 - `int32.sign(x: Int32) -> Int` — -1, 0 or 1 by the sign of x.
+- `int32.band(a: Int32, b: Int32) -> Int32` — Bitwise AND.
+- `int32.bor(a: Int32, b: Int32) -> Int32` — Bitwise OR.
+- `int32.bxor(a: Int32, b: Int32) -> Int32` — Bitwise XOR.
+- `int32.bnot(x: Int32) -> Int32` — Bitwise complement of all 32 bits.
+- `int32.bshl(a: Int32, n: Int) -> Int32` — a shifted left by n bits; n is taken mod 32.
+- `int32.bshr(a: Int32, n: Int) -> Int32` — Sign-filling right shift; n is taken mod 32.
+- `int32.count_leading_zeros(x: Int32) -> Int` — Zero bits above the highest set bit, counted in 32 bits; 32 for 0.
+- `int32.count_trailing_zeros(x: Int32) -> Int` — Zero bits below the lowest set bit; 32 for 0.
+- `int32.count_ones(x: Int32) -> Int` — Number of set bits among the 32.
+- `int32.byte_swap(x: Int32) -> Int32` — The 4 bytes in reverse order (endian flip).
 
 ## int64
 
@@ -805,6 +825,16 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `int64.is_odd(x: Int64) -> Bool` — True when x is not a multiple of 2.
 - `int64.abs(x: Int64) -> Int64` — Magnitude of x; min_value wraps to itself.
 - `int64.sign(x: Int64) -> Int` — -1, 0 or 1 by the sign of x.
+- `int64.band(a: Int64, b: Int64) -> Int64` — Bitwise AND.
+- `int64.bor(a: Int64, b: Int64) -> Int64` — Bitwise OR.
+- `int64.bxor(a: Int64, b: Int64) -> Int64` — Bitwise XOR.
+- `int64.bnot(x: Int64) -> Int64` — Bitwise complement of all 64 bits.
+- `int64.bshl(a: Int64, n: Int) -> Int64` — a shifted left by n bits; n is taken mod 64.
+- `int64.bshr(a: Int64, n: Int) -> Int64` — Sign-filling right shift; n is taken mod 64.
+- `int64.count_leading_zeros(x: Int64) -> Int` — Zero bits above the highest set bit, counted in 64 bits; 64 for 0.
+- `int64.count_trailing_zeros(x: Int64) -> Int` — Zero bits below the lowest set bit; 64 for 0.
+- `int64.count_ones(x: Int64) -> Int` — Number of set bits among the 64.
+- `int64.byte_swap(x: Int64) -> Int64` — The 8 bytes in reverse order (endian flip).
 
 ## int8
 
@@ -840,6 +870,16 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `int8.is_odd(x: Int8) -> Bool` — True when x is not a multiple of 2.
 - `int8.abs(x: Int8) -> Int8` — Magnitude of x; min_value wraps to itself.
 - `int8.sign(x: Int8) -> Int` — -1, 0 or 1 by the sign of x.
+- `int8.band(a: Int8, b: Int8) -> Int8` — Bitwise AND.
+- `int8.bor(a: Int8, b: Int8) -> Int8` — Bitwise OR.
+- `int8.bxor(a: Int8, b: Int8) -> Int8` — Bitwise XOR.
+- `int8.bnot(x: Int8) -> Int8` — Bitwise complement of all 8 bits.
+- `int8.bshl(a: Int8, n: Int) -> Int8` — a shifted left by n bits; n is taken mod 8.
+- `int8.bshr(a: Int8, n: Int) -> Int8` — Sign-filling right shift; n is taken mod 8.
+- `int8.count_leading_zeros(x: Int8) -> Int` — Zero bits above the highest set bit, counted in 8 bits; 8 for 0.
+- `int8.count_trailing_zeros(x: Int8) -> Int` — Zero bits below the lowest set bit; 8 for 0.
+- `int8.count_ones(x: Int8) -> Int` — Number of set bits among the 8.
+- `int8.byte_swap(x: Int8) -> Int8` — The bytes in reverse order; one byte, so x itself.
 
 ## io
 
@@ -1416,6 +1456,16 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `uint16.pow(base: UInt16, exp: Int) -> UInt16` — base raised to exp, wrapping to 16 bits like *; exp < 0 aborts.
 - `uint16.is_even(x: UInt16) -> Bool` — True when x is a multiple of 2.
 - `uint16.is_odd(x: UInt16) -> Bool` — True when x is not a multiple of 2.
+- `uint16.band(a: UInt16, b: UInt16) -> UInt16` — Bitwise AND.
+- `uint16.bor(a: UInt16, b: UInt16) -> UInt16` — Bitwise OR.
+- `uint16.bxor(a: UInt16, b: UInt16) -> UInt16` — Bitwise XOR.
+- `uint16.bnot(x: UInt16) -> UInt16` — Bitwise complement of all 16 bits.
+- `uint16.bshl(a: UInt16, n: Int) -> UInt16` — a shifted left by n bits; n is taken mod 16.
+- `uint16.bshr(a: UInt16, n: Int) -> UInt16` — Zero-filling right shift; n is taken mod 16.
+- `uint16.count_leading_zeros(x: UInt16) -> Int` — Zero bits above the highest set bit, counted in 16 bits; 16 for 0.
+- `uint16.count_trailing_zeros(x: UInt16) -> Int` — Zero bits below the lowest set bit; 16 for 0.
+- `uint16.count_ones(x: UInt16) -> Int` — Number of set bits among the 16.
+- `uint16.byte_swap(x: UInt16) -> UInt16` — The 2 bytes in reverse order (endian flip).
 
 ## uint32
 
@@ -1451,6 +1501,16 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `uint32.pow(base: UInt32, exp: Int) -> UInt32` — base raised to exp, wrapping to 32 bits like *; exp < 0 aborts.
 - `uint32.is_even(x: UInt32) -> Bool` — True when x is a multiple of 2.
 - `uint32.is_odd(x: UInt32) -> Bool` — True when x is not a multiple of 2.
+- `uint32.band(a: UInt32, b: UInt32) -> UInt32` — Bitwise AND.
+- `uint32.bor(a: UInt32, b: UInt32) -> UInt32` — Bitwise OR.
+- `uint32.bxor(a: UInt32, b: UInt32) -> UInt32` — Bitwise XOR.
+- `uint32.bnot(x: UInt32) -> UInt32` — Bitwise complement of all 32 bits.
+- `uint32.bshl(a: UInt32, n: Int) -> UInt32` — a shifted left by n bits; n is taken mod 32.
+- `uint32.bshr(a: UInt32, n: Int) -> UInt32` — Zero-filling right shift; n is taken mod 32.
+- `uint32.count_leading_zeros(x: UInt32) -> Int` — Zero bits above the highest set bit, counted in 32 bits; 32 for 0.
+- `uint32.count_trailing_zeros(x: UInt32) -> Int` — Zero bits below the lowest set bit; 32 for 0.
+- `uint32.count_ones(x: UInt32) -> Int` — Number of set bits among the 32.
+- `uint32.byte_swap(x: UInt32) -> UInt32` — The 4 bytes in reverse order (endian flip).
 
 ## uint64
 
@@ -1490,6 +1550,16 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `uint64.pow(base: UInt64, exp: Int) -> UInt64` — base raised to exp, wrapping to 64 bits like *; exp < 0 aborts.
 - `uint64.is_even(x: UInt64) -> Bool` — True when x is a multiple of 2.
 - `uint64.is_odd(x: UInt64) -> Bool` — True when x is not a multiple of 2.
+- `uint64.band(a: UInt64, b: UInt64) -> UInt64` — Bitwise AND.
+- `uint64.bor(a: UInt64, b: UInt64) -> UInt64` — Bitwise OR.
+- `uint64.bxor(a: UInt64, b: UInt64) -> UInt64` — Bitwise XOR.
+- `uint64.bnot(x: UInt64) -> UInt64` — Bitwise complement of all 64 bits.
+- `uint64.bshl(a: UInt64, n: Int) -> UInt64` — a shifted left by n bits; n is taken mod 64.
+- `uint64.bshr(a: UInt64, n: Int) -> UInt64` — Zero-filling right shift; n is taken mod 64.
+- `uint64.count_leading_zeros(x: UInt64) -> Int` — Zero bits above the highest set bit, counted in 64 bits; 64 for 0.
+- `uint64.count_trailing_zeros(x: UInt64) -> Int` — Zero bits below the lowest set bit; 64 for 0.
+- `uint64.count_ones(x: UInt64) -> Int` — Number of set bits among the 64.
+- `uint64.byte_swap(x: UInt64) -> UInt64` — The 8 bytes in reverse order (endian flip).
 
 ## uint8
 
@@ -1517,6 +1587,16 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `uint8.pow(base: UInt8, exp: Int) -> UInt8` — base raised to exp, wrapping to 8 bits like *; exp < 0 aborts.
 - `uint8.is_even(x: UInt8) -> Bool` — True when x is a multiple of 2.
 - `uint8.is_odd(x: UInt8) -> Bool` — True when x is not a multiple of 2.
+- `uint8.band(a: UInt8, b: UInt8) -> UInt8` — Bitwise AND.
+- `uint8.bor(a: UInt8, b: UInt8) -> UInt8` — Bitwise OR.
+- `uint8.bxor(a: UInt8, b: UInt8) -> UInt8` — Bitwise XOR.
+- `uint8.bnot(x: UInt8) -> UInt8` — Bitwise complement of all 8 bits.
+- `uint8.bshl(a: UInt8, n: Int) -> UInt8` — a shifted left by n bits; n is taken mod 8.
+- `uint8.bshr(a: UInt8, n: Int) -> UInt8` — Zero-filling right shift; n is taken mod 8.
+- `uint8.count_leading_zeros(x: UInt8) -> Int` — Zero bits above the highest set bit, counted in 8 bits; 8 for 0.
+- `uint8.count_trailing_zeros(x: UInt8) -> Int` — Zero bits below the lowest set bit; 8 for 0.
+- `uint8.count_ones(x: UInt8) -> Int` — Number of set bits among the 8.
+- `uint8.byte_swap(x: UInt8) -> UInt8` — The bytes in reverse order; one byte, so x itself.
 
 ## url
 

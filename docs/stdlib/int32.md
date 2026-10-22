@@ -61,7 +61,7 @@ machine-enforced by the numeric-matrix gate in `almide docs-gen --check` (#956).
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (34 functions)
+## Signature index (44 functions)
 
 ```
 // Wraps to 8 bits; 128 becomes -128.
@@ -199,6 +199,46 @@ int32.abs(x: Int32) -> Int32
 // -1, 0 or 1 by the sign of x.
 // @since unreleased
 int32.sign(x: Int32) -> Int
+
+// Bitwise AND.
+// @since unreleased
+int32.band(a: Int32, b: Int32) -> Int32
+
+// Bitwise OR.
+// @since unreleased
+int32.bor(a: Int32, b: Int32) -> Int32
+
+// Bitwise XOR.
+// @since unreleased
+int32.bxor(a: Int32, b: Int32) -> Int32
+
+// Bitwise complement of all 32 bits.
+// @since unreleased
+int32.bnot(x: Int32) -> Int32
+
+// a shifted left by n bits; n is taken mod 32.
+// @since unreleased
+int32.bshl(a: Int32, n: Int) -> Int32
+
+// Sign-filling right shift; n is taken mod 32.
+// @since unreleased
+int32.bshr(a: Int32, n: Int) -> Int32
+
+// Zero bits above the highest set bit, counted in 32 bits; 32 for 0.
+// @since unreleased
+int32.count_leading_zeros(x: Int32) -> Int
+
+// Zero bits below the lowest set bit; 32 for 0.
+// @since unreleased
+int32.count_trailing_zeros(x: Int32) -> Int
+
+// Number of set bits among the 32.
+// @since unreleased
+int32.count_ones(x: Int32) -> Int
+
+// The 4 bytes in reverse order (endian flip).
+// @since unreleased
+int32.byte_swap(x: Int32) -> Int32
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->
