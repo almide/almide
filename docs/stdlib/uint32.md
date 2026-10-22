@@ -61,7 +61,7 @@ machine-enforced by the numeric-matrix gate in `almide docs-gen --check` (#956).
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (22 functions)
+## Signature index (30 functions)
 
 ```
 // Wraps to 8 bits; 255 becomes -1.
@@ -151,6 +151,38 @@ uint32.min_value() -> UInt32
 // Largest UInt32: 4294967295.
 // @since 0.38.0
 uint32.max_value() -> UInt32
+
+// -1, 0 or 1 as a is below, equal to or above b.
+// @since unreleased
+uint32.compare(a: UInt32, b: UInt32) -> Int
+
+// Lesser of a and b.
+// @since unreleased
+uint32.min(a: UInt32, b: UInt32) -> UInt32
+
+// Greater of a and b.
+// @since unreleased
+uint32.max(a: UInt32, b: UInt32) -> UInt32
+
+// x limited to lo..hi; aborts when lo > hi.
+// @since unreleased
+uint32.clamp(x: UInt32, lo: UInt32, hi: UInt32) -> UInt32
+
+// Quotient; the same as a / b for an unsigned type; b == 0 aborts.
+// @since unreleased
+uint32.floor_div(a: UInt32, b: UInt32) -> UInt32
+
+// base raised to exp, wrapping to 32 bits like *; exp < 0 aborts.
+// @since unreleased
+uint32.pow(base: UInt32, exp: Int) -> UInt32
+
+// True when x is a multiple of 2.
+// @since unreleased
+uint32.is_even(x: UInt32) -> Bool
+
+// True when x is not a multiple of 2.
+// @since unreleased
+uint32.is_odd(x: UInt32) -> Bool
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->
