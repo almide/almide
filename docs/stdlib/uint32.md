@@ -61,7 +61,7 @@ machine-enforced by the numeric-matrix gate in `almide docs-gen --check` (#956).
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (40 functions)
+## Signature index (47 functions)
 
 ```
 // Wraps to 8 bits; 255 becomes -1.
@@ -223,6 +223,34 @@ uint32.count_ones(x: UInt32) -> Int
 // The 4 bytes in reverse order (endian flip).
 // @since unreleased
 uint32.byte_swap(x: UInt32) -> UInt32
+
+// a + b wrapped to 32 bits.
+// @since unreleased
+uint32.wrap_add(a: UInt32, b: UInt32) -> UInt32
+
+// a - b wrapped to 32 bits.
+// @since unreleased
+uint32.wrap_sub(a: UInt32, b: UInt32) -> UInt32
+
+// a * b wrapped to 32 bits.
+// @since unreleased
+uint32.wrap_mul(a: UInt32, b: UInt32) -> UInt32
+
+// The 32 bits of a rotated left by n; n is taken mod 32.
+// @since unreleased
+uint32.rotate_left(a: UInt32, n: Int) -> UInt32
+
+// The 32 bits of a rotated right by n; n is taken mod 32.
+// @since unreleased
+uint32.rotate_right(a: UInt32, n: Int) -> UInt32
+
+// Bits needed to hold x; 0 for 0.
+// @since unreleased
+uint32.bit_length(x: UInt32) -> Int
+
+// Decimal UInt32 from trimmed s; err on junk, a sign of -, or above 4294967295.
+// @since unreleased
+uint32.parse(s: String) -> Result[UInt32, String]
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->
