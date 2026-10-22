@@ -71,3 +71,40 @@ fn is_even(x: UInt8) -> Bool = int.from_uint8(x) % 2 == 0
 
 /// True when x is not a multiple of 2.
 fn is_odd(x: UInt8) -> Bool = int.from_uint8(x) % 2 != 0
+
+// ── Integer: bitwise, FixedWidthInteger: bit counts (R-sized-10) ──
+/// Bitwise AND.
+fn band(a: UInt8, b: UInt8) -> UInt8 = int.to_uint8(int.band(int.from_uint8(a), int.from_uint8(b)))
+
+/// Bitwise OR.
+fn bor(a: UInt8, b: UInt8) -> UInt8 = int.to_uint8(int.bor(int.from_uint8(a), int.from_uint8(b)))
+
+/// Bitwise XOR.
+fn bxor(a: UInt8, b: UInt8) -> UInt8 = int.to_uint8(int.bxor(int.from_uint8(a), int.from_uint8(b)))
+
+/// Bitwise complement of all 8 bits.
+fn bnot(x: UInt8) -> UInt8 = int.to_uint8(int.bnot(int.from_uint8(x)))
+
+/// a shifted left by n bits; n is taken mod 8.
+fn bshl(a: UInt8, n: Int) -> UInt8 = int.to_uint8(int.bshl(int.from_uint8(a), shift_count(n)))
+
+/// Zero-filling right shift; n is taken mod 8.
+fn bshr(a: UInt8, n: Int) -> UInt8 = int.to_uint8(int.bshr(int.from_uint8(a), shift_count(n)))
+
+// n reduced into 0..7, a negative n included.
+local fn shift_count(n: Int) -> Int = {
+  let r = n % 8
+  if r < 0 then r + 8 else r
+}
+
+/// Zero bits above the highest set bit, counted in 8 bits; 8 for 0.
+fn count_leading_zeros(x: UInt8) -> Int = int.count_leading_zeros(int.from_uint8(x)) - 56
+
+/// Zero bits below the lowest set bit; 8 for 0.
+fn count_trailing_zeros(x: UInt8) -> Int = int.min(int.count_trailing_zeros(int.from_uint8(x)), 8)
+
+/// Number of set bits among the 8.
+fn count_ones(x: UInt8) -> Int = int.pop_count(int.from_uint8(x))
+
+/// The bytes in reverse order; one byte, so x itself.
+fn byte_swap(x: UInt8) -> UInt8 = x

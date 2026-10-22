@@ -83,3 +83,43 @@ fn is_even(x: UInt16) -> Bool = int.from_uint16(x) % 2 == 0
 
 /// True when x is not a multiple of 2.
 fn is_odd(x: UInt16) -> Bool = int.from_uint16(x) % 2 != 0
+
+// ── Integer: bitwise, FixedWidthInteger: bit counts (R-sized-10) ──
+/// Bitwise AND.
+fn band(a: UInt16, b: UInt16) -> UInt16 = int.to_uint16(int.band(int.from_uint16(a), int.from_uint16(b)))
+
+/// Bitwise OR.
+fn bor(a: UInt16, b: UInt16) -> UInt16 = int.to_uint16(int.bor(int.from_uint16(a), int.from_uint16(b)))
+
+/// Bitwise XOR.
+fn bxor(a: UInt16, b: UInt16) -> UInt16 = int.to_uint16(int.bxor(int.from_uint16(a), int.from_uint16(b)))
+
+/// Bitwise complement of all 16 bits.
+fn bnot(x: UInt16) -> UInt16 = int.to_uint16(int.bnot(int.from_uint16(x)))
+
+/// a shifted left by n bits; n is taken mod 16.
+fn bshl(a: UInt16, n: Int) -> UInt16 = int.to_uint16(int.bshl(int.from_uint16(a), shift_count(n)))
+
+/// Zero-filling right shift; n is taken mod 16.
+fn bshr(a: UInt16, n: Int) -> UInt16 = int.to_uint16(int.bshr(int.from_uint16(a), shift_count(n)))
+
+// n reduced into 0..15, a negative n included.
+local fn shift_count(n: Int) -> Int = {
+  let r = n % 16
+  if r < 0 then r + 16 else r
+}
+
+/// Zero bits above the highest set bit, counted in 16 bits; 16 for 0.
+fn count_leading_zeros(x: UInt16) -> Int = int.count_leading_zeros(int.from_uint16(x)) - 48
+
+/// Zero bits below the lowest set bit; 16 for 0.
+fn count_trailing_zeros(x: UInt16) -> Int = int.min(
+  int.count_trailing_zeros(int.from_uint16(x)),
+  16,
+)
+
+/// Number of set bits among the 16.
+fn count_ones(x: UInt16) -> Int = int.pop_count(int.from_uint16(x))
+
+/// The 2 bytes in reverse order (endian flip).
+fn byte_swap(x: UInt16) -> UInt16 = int.to_uint16(int.bshr(int.byte_swap(int.from_uint16(x)), 48))
