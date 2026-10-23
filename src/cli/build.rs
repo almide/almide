@@ -311,6 +311,7 @@ pub fn cmd_build(args: BuildArgs) {
         None => rs_code,
     };
     let rs_code = arm_alloc_count(rs_code);
+    let rs_code = inject_fs_scope(rs_code);
 
     // Load native deps from almide.toml (search in input file's directory, then
     // CWD). BOTH the cdylib and bin paths need them: a cdylib with a `native/*.rs`
@@ -420,6 +421,23 @@ pub(crate) fn alloc_count_armed() -> bool {
 /// `ALMIDE_ALLOC_COUNT` (#2228): inject the counting allocator when the lane is
 /// armed, taking the self-contained cargo path the same way `--heap-cap` does
 /// (see the comment there for why the rlib fast path cannot carry it).
+/// `[permissions] fs` (#4022) on native: the granted roots, set as the first
+/// statement of `main` (`almide_fs_scope_set`, runtime/rs/src/fs.rs), so every
+/// fs call of the run asks the scope before it touches a path. Only a program
+/// that reaches the fs runtime carries the call; a test harness build has no
+/// `main` and runs unscoped. The roots are absolute: the manifest anchored
+/// the relative ones to its own directory.
+pub(crate) fn inject_fs_scope(rs_code: String) -> String {
+    let Some(roots) = almide_wasm_run::fs_scope() else { return rs_code };
+    if !rs_code.contains("almide_rt_fs_") {
+        return rs_code;
+    }
+    let Some(m) = rs_code.find("\nfn main() {\n") else { return rs_code };
+    let at = m + "\nfn main() {\n".len();
+    let list: Vec<String> = roots.iter().map(|r| format!("{r:?}")).collect();
+    format!("{}    almide_fs_scope_set(&[{}]);\n{}", &rs_code[..at], list.join(", "), &rs_code[at..])
+}
+
 pub(crate) fn arm_alloc_count(rs_code: String) -> String {
     if !alloc_count_armed() {
         return rs_code;

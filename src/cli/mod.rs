@@ -188,6 +188,11 @@ pub fn check_proc_allowlist(ir: &almide::ir::IrProgram, allow: &[String]) -> Res
 /// the build routes reach it through `compile_driver::optimize_gate_and_link`,
 /// and `check` calls it directly. Each violation is printed as it is found.
 pub fn enforce_project_permissions(ir: &almide::ir::IrProgram, proj: &crate::project::Project) -> Result<(), String> {
+    // `[permissions] fs` (#4022): the directories the program may touch. Paths
+    // are run-time values, so the bound is enforced where they are used: the
+    // embedded wasm host checks every fs op and preopens only these roots, and
+    // the native build embeds them in `main` (`build::inject_fs_scope`).
+    almide_wasm_run::set_fs_scope(proj.fs_allow.clone());
     if !proj.permissions.is_empty() {
         check_permissions(ir, &proj.permissions)?;
     }
