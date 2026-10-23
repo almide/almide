@@ -41,15 +41,23 @@ test "filter_map, find_map, reduce and scan" {
 
 test "partition and group_by" {
   let m = map.from_list([("a", 1), ("b", 2), ("c", 3)])
-  assert_eq(map.partition(m, ((_, v)) => v > 1), ([("b", 2), ("c", 3)], [("a", 1)]))
+  let (big, small) = map.partition(m, ((_, v)) => v > 1)
+  assert_eq(big, [("b", 2), ("c", 3)])
+  assert_eq(small, [("a", 1)])
   let g = map.group_by(m, ((_, v)) => v % 2)
-  assert_eq(map.get(g, 1), some([("a", 1), ("c", 3)]))
-  assert_eq(map.get(g, 0), some([("b", 2)]))
+  let odd = map.get(g, 1) ?? []
+  let even = map.get(g, 0) ?? []
+  assert_eq(odd, [("a", 1), ("c", 3)])
+  assert_eq(even, [("b", 2)])
   let t = map.from_list([(1, "x"), (2, "yy")])
-  assert_eq(map.partition(t, ((k, _)) => k > 1), ([(2, "yy")], [(1, "x")]))
+  let (hi, lo) = map.partition(t, ((k, _)) => k > 1)
+  assert_eq(hi, [(2, "yy")])
+  assert_eq(lo, [(1, "x")])
   assert_eq(map.keys(map.group_by(t, ((_, v)) => string.len(v))), [1, 2])
   let e: Map[String, Int] = map.new()
-  assert_eq(map.partition(e, ((_, v)) => v > 0), ([], []))
+  let (ey, en) = map.partition(e, ((_, v)) => v > 0)
+  assert_eq(ey, [])
+  assert_eq(en, [])
   assert_eq(map.len(map.group_by(e, ((k, _)) => k)), 0)
 }
 
