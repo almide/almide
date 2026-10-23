@@ -91,13 +91,22 @@ compiler with qualified use in safety-critical settings).
   `if` expressions and one-argument functions with recursion (a call runs
   the body in a fresh environment holding only the parameter) — with a
   big-step semantics that emits MemorySafe.v's heap trace in the
-  layout the compiler uses (header, then one slot per element).
+  layout the compiler uses (header, then one slot per element). Blocks are
+  reference counted and freed: reading a list variable shares its block
+  (`EInc`), and a consumed operand, an overwritten variable and a returning
+  call's parameter give their reference back (`EDec`); at zero the block is
+  freed. The invariant is that every block's count covers the references
+  the program still holds.
   `typed_core_memory_safe`: every run of a well-typed program that finishes,
   or that a failed check ends, is `MemorySafe` — spatial, temporal,
   initialization and type. `unchecked_index_not_safe` shows the check is
-  what spatial rests on, and `count_down_ok` types a self-recursive
-  function. Not yet: closures, records, variants, strings, multi-argument
-  calls, frees, diverging runs, and any link to the compiler's lowering.
+  what spatial rests on, `shared_list_survives_mutation` runs an alias
+  through a mutation and a free, `missing_inc_is_use_after_free` shows the
+  same run without the shared read's `EInc` loads from freed memory, and
+  `count_down_ok` types a self-recursive function. Not yet: closures,
+  records, variants, strings, multi-argument calls, release at scope end
+  (a binding is released when overwritten; the rest leaks), diverging runs,
+  and any link to the compiler's lowering.
 
 ## Verify (the third-party `make verify`)
 

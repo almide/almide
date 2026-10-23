@@ -112,6 +112,8 @@ fabricated row fails the gate). The table is a representative sample of the spin
 | `check_bounds_cert_sound` | BoundsCert.v | Closed under the global context |
 | `typed_core_memory_safe` | CoreSafe.v | Closed under the global context |
 | `unchecked_index_not_safe` | CoreSafe.v | Closed under the global context |
+| `shared_list_survives_mutation` | CoreSafe.v | Closed under the global context |
+| `missing_inc_is_use_after_free` | CoreSafe.v | Closed under the global context |
 
 ## Known limitations (what is NOT yet proven — recorded, not hidden)
 
@@ -138,10 +140,14 @@ at the SOURCE level, `CoreSafe.v` (#4014) gives a typed core of Almide (ints,
 bools, int lists with value semantics, `let`, assignment, element store,
 `if`, `while`, indexing with its bounds check, `if` expressions and
 recursive one-argument functions) a big-step semantics that
-emits the heap trace and proves `typed_core_memory_safe`: every finishing or
+emits the heap trace — with reference counting: a shared read increments,
+a consumed operand, an overwritten variable and a returning call's
+parameter decrement, and a block whose count reaches zero is freed — and
+proves `typed_core_memory_safe`: every finishing or
 check-aborted run of a well-typed core program is `MemorySafe`, all four
 clauses, for any function table whose bodies are well typed. It is a core
-(no closures, records, strings, multi-argument calls; no frees;
+(no closures, records, strings, multi-argument calls; a binding is released
+when overwritten, not at scope end, so the rest leaks;
 terminating and aborting runs only), and nothing ties it to the compiler's
 lowering. And
 no certificate carries a trace yet, so the theorem the definition is for — `K(c, a) accepts ⟹ MemorySafe a`
@@ -181,7 +187,7 @@ The receipt's claims are scoped to exactly this:
   machine + the FULL `$rc_dec` bytes' SAFETY — no double-free AND leak-freedom —
   executed on the renderer's real bytes by a general interpreter (`WasmExec`),
   operand-stack balance, and termination of the loop-free fragment — all
-  kernel-checked and axiom-clean (112 audited theorems). What remains is DEPTH (the byte-binding ISA layer; and
+  kernel-checked and axiom-clean (114 audited theorems). What remains is DEPTH (the byte-binding ISA layer; and
   the RENDERER realizing the free-list/`rc_inc` — its safety MODEL is now proven,
   so that slice REFINES a proof rather than adding trusted runtime) and BREADTH
   (lowering beyond the subset: control flow, closures, stdlib) — not new properties
