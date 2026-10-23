@@ -86,13 +86,13 @@
 - ゲート案: #3854 の案どおり、`stdlib_synonym_gate_test.rs` の隣に「wrap 族の 4 セルがそろい、シグネチャが同じで、`self_host_registry.rs` に行がある」ことを検査するテストを置きます。`bits = 0`・`-1`・`64`・`65` の端を `spec/wasm_cross` の fixture で両 target 一致にします（新しい契約 C 番号を als に先に置く）。
 - issue: #3854（1 節）、#3851 E
 
-### R-int-03 床方向の割り算と剰余 `int.floor_div` / `int.mod` を足す — ○ 採用
+### R-int-03 床方向の割り算と剰余 `int.floor_div` / `int.modulo` を足す — ○ 採用
 
-- 内容: `int.floor_div(a: Int, b: Int) -> Int`（−∞ 方向へ丸める商）、`int.mod(a: Int, b: Int) -> Int`（結果の符号は `b` と同じ。`a == floor_div(a, b) * b + mod(a, b)`）。`b == 0` は `/` と同じく abort（契約違反、R-L0-06 の 3）。`floor_div(min_value, -1)` は `Int` の演算と同じく折り返します。
-- 根拠の L0 規則: R-L0-02（主語が `Int` なので `int`）、L1 の追加基準（6/9 が持つ）。綴りは R-L0-00 の範囲で選びます: 剰余は `mod`（Elixir、Kotlin、Python の演算子名）、商は `floor_div`（Elixir、OCaml `fdiv` の意味、Kotlin `floorDiv`）。
+- 内容: `int.floor_div(a: Int, b: Int) -> Int`（−∞ 方向へ丸める商）、`int.modulo(a: Int, b: Int) -> Int`（結果の符号は `b` と同じ。`a == floor_div(a, b) * b + modulo(a, b)`）。`b == 0` は `/` と同じく abort（契約違反、R-L0-06 の 3）。`floor_div(min_value, -1)` は `/` と同じく abort します（"integer overflow"）。
+- 根拠の L0 規則: R-L0-02（主語が `Int` なので `int`）、L1 の追加基準（6/9 が持つ）。綴りは R-L0-00 の範囲で選びます: 剰余は `modulo`（Gleam。Elixir・Kotlin の `mod` は、Almide では可視性のキーワード `mod` と同じ綴りで関数名にできないため）、商は `floor_div`（Elixir、OCaml `fdiv` の意味、Kotlin `floorDiv`）。
 - (a) 6/9 が持っています（Python、Gleam、Elixir、OCaml、Kotlin、Rust の euclid 版）。Go、JS、Swift だけがありません。
 - (b) 純粋な計算です。`/` と `%` から Almide で書けます。
-- (c) いまの `%` は 0 方向の剰余なので、`(i - 1) % n` で配列を回すと負の添字になります。他言語で `%` が床方向の Python から来た LLM が、ここで静かに外れます。名前で引ける関数があれば、規則（「床方向は `int.mod`」）を CHEATSHEET に 1 行で書けます。
+- (c) いまの `%` は 0 方向の剰余なので、`(i - 1) % n` で配列を回すと負の添字になります。他言語で `%` が床方向の Python から来た LLM が、ここで静かに外れます。名前で引ける関数があれば、規則（「床方向は `int.modulo`」）を CHEATSHEET に 1 行で書けます。
 - (d) 追加。使用数 0。
 - ゲート案: `spec/stdlib/int_floor_div_test.almd` で符号の 4 象限と `b = 0` の abort を固定し、wasm_cross fixture を 1 本置きます。
 - issue: #3918
@@ -172,6 +172,20 @@
 - 案: 5 つを `FixedWidthInteger` の要件にし、`bits` を外して型の幅で動かします（`int` は 64 bit、`int32.wrap_add(a, b)` は 32 bit。Swift の `&+`・`&-`・`&*`、Rust の `wrapping_add`・`rotate_left` と同じ）。N bit で切りたいときは `int.wrap(n, bits)` と組みます（`int.wrap(int.wrap_add(a, b), 12)`）。`int.wrap` は `int` だけの関数に残します。
 - (d) 意味変更です。`almide fix` が `int.wrap_add(a, b, bits)` を `int.wrap(int.wrap_add(a, b), bits)` に書き換えます。8・16・32・64 以外の幅の `rotate_*` は書き換えられないので、ヒントで知らせます。
 - issue: #4004
+
+### R-int-13 床方向の剰余の名前は `modulo`、`floor_div(min_value, -1)` は abort — ○ 採用（R-int-03 を直す）
+
+- 見つかったこと（wave 1B、#4045〜#4048 の実装中）:
+  - `mod` は可視性のキーワードです（`mod fn f() = …`、`TokenType::Mod`）。`fn mod(` は構文として読めず、`int.mod` も `int8.mod` も書けません。
+  - R-int-03 は「`floor_div(min_value, -1)` は `Int` の演算と同じく折り返す」と書いていましたが、`Int` の `/` は native でも wasm でもそこで "integer overflow" の abort です（2026-10-23 に実測）。
+- 案:
+  - 床方向の剰余は `modulo` にします（`int`、整数 8 型、`bigint`）。`mod` をキーワードから外して関数名に使えるようにする案は、宣言の先頭の `mod fn` と式の中の `x.mod(…)` を文脈で分ける必要があり、構文の変更になるので採りません。
+  - `floor_div(min_value, -1)` は、`/` と同じく abort にします（整数 9 型すべて）。整数の溢れを黙って折り返さないことは、[安全の表](../active/security-by-construction.md)の「整数の溢れ」の行の前提です。折り返しが欲しいときは `wrap_*` を使います。
+- 根拠の L0 規則: R-L0-00（綴りは比べた言語の範囲から）、R-L0-14（同じ名前で別の意味にしない: `/` と `floor_div` の端をそろえる）。
+- (a) 剰余の関数名: Gleam `int.modulo`、Elixir `Integer.mod`、Kotlin `mod`、Rust `rem_euclid`。`modulo` は Gleam と同じ綴りです。`MIN / -1`: Rust の `div_euclid` は debug で panic、Python は多倍長で溢れない、Kotlin `floorDiv` は折り返す。
+- (c) LLM は `int.mod` を書きがちです。`int.mod` の呼び出しには「`int.modulo` を使う」の診断（E002 の hint）を出します。
+- (d) 名前の変更（まだ出荷していない関数なので、利用者のコードへの影響はありません）と、端の意味の決め直し 1 つ。
+- issue: #4045
 
 ## L3: 関数表
 
@@ -254,7 +268,7 @@
 | `wrap_sub` | （追加）`int.wrap_sub(a: Int, b: Int) -> Int` | Rust `wrapping_sub` / Swift `&-` / 他 — | 追加 | R-int-02、R-int-12 |
 | `pow` | （追加）`int.pow(base: Int, exp: Int) -> Int` | Rust `pow` / Gleam `power`（Float）(F) / Elixir `Integer.pow` (F) / Python `**` | 追加 | R-math-01 |
 | `sign` | （追加）`int.sign(n: Int) -> Int` | Rust `signum` / Kotlin `sign` (F) / JS `Math.sign` / Swift `signum()` | 追加 | R-math-01 |
-| `mod` | （追加）`int.mod(a: Int, b: Int) -> Int` | Python `%` / Gleam `modulo` (F) / Elixir `Integer.mod` (F) / Kotlin `mod` (F) / Rust `rem_euclid` | 追加 | R-int-03 |
+| `modulo` | （追加）`int.modulo(a: Int, b: Int) -> Int` | Python `%` / Gleam `modulo` (F) / Elixir `Integer.mod` (F) / Kotlin `mod` (F) / Rust `rem_euclid` | 追加 | R-int-03 |
 | `floor_div` | （追加）`int.floor_div(a: Int, b: Int) -> Int` | Python `//` / Gleam `floor_divide` (F) / Elixir `Integer.floor_div` (F) / Kotlin `floorDiv` (F) / OCaml `fdiv` (F) | 追加 | R-int-03 |
 | `to_string_radix` | （追加）`int.to_string_radix(n: Int, radix: Int) -> String` | Go `FormatInt(n, base)` / JS `toString(radix)` / Gleam `to_base_string` (F) / Elixir `to_string(n, base)` (F) / Kotlin `toString(radix)` / Swift `String(n, radix:)` | 追加 | R-int-04 |
 | `parse_radix` | （追加）`int.parse_radix(s: String, radix: Int) -> Result[Int, String]` | Rust `from_str_radix` / Go `ParseInt(s, base, 64)` / Python `int(s, base)` / Gleam `base_parse` (F) / Elixir `parse(s, base)` (F) / Kotlin `toIntOrNull(radix)` / Swift `Int(s, radix:)` | 追加 | R-int-04 |

@@ -85,7 +85,7 @@ HttpMessage
 | 数 | `Additive` | `Eq` | — | — | AdditiveArithmetic | BigInt・Float・Float32・Float64・Duration・Compute・Int・Int8・Int16・Int32・Int64・UInt8・UInt16・UInt32・UInt64 |
 | 数 | `Numeric` | `Additive` | `from`・`from_checked` | — | Numeric | BigInt・Float・Float32・Float64・Int・Int8・Int16・Int32・Int64・UInt8・UInt16・UInt32・UInt64 |
 | 数 | `Signed` | `Numeric` | `abs` | — | SignedNumeric | BigInt・Float・Float32・Float64・Int・Int8・Int16・Int32・Int64 |
-| 数 | `Integer` | `Numeric`・`Ord`・`Hash`・`Parse` | `min`・`max`・`clamp`・`floor_div`・`mod`・`pow`・`is_even`・`is_odd`・`parse_radix`・`to_string_radix`・`bit_length`・`band`・`bor`・`bxor`・`bnot`・`bshl`・`bshr` | `is_even`・`is_odd` | BinaryInteger | BigInt・Int・Int8・Int16・Int32・Int64・UInt8・UInt16・UInt32・UInt64 |
+| 数 | `Integer` | `Numeric`・`Ord`・`Hash`・`Parse` | `min`・`max`・`clamp`・`floor_div`・`modulo`・`pow`・`is_even`・`is_odd`・`parse_radix`・`to_string_radix`・`bit_length`・`band`・`bor`・`bxor`・`bnot`・`bshl`・`bshr` | `is_even`・`is_odd` | BinaryInteger | BigInt・Int・Int8・Int16・Int32・Int64・UInt8・UInt16・UInt32・UInt64 |
 | 数 | `FixedWidthInteger` | `Integer` | `min_value`・`max_value`・`count_leading_zeros`・`count_trailing_zeros`・`count_ones`・`byte_swap`・`wrap_add`・`wrap_sub`・`wrap_mul`・`rotate_left`・`rotate_right`・`from_saturating`・`from_wrapping` | — | FixedWidthInteger | Int・Int8・Int16・Int32・Int64・UInt8・UInt16・UInt32・UInt64 |
 | 数 | `SignedInteger` | `Integer`・`Signed` | `sign` | — | SignedInteger | BigInt・Int・Int8・Int16・Int32・Int64 |
 | 数 | `UnsignedInteger` | `Integer` | — | — | UnsignedInteger | UInt8・UInt16・UInt32・UInt64 |
@@ -191,7 +191,7 @@ HttpMessage
 | `Bool` は `Ord` か | Swift は `Bool` を `Comparable` にしない（真偽に大小の意味はない）。Rust・Kotlin・OCaml・Python・Elixir は順序をつける。Almide はいま `false < true` が通る。 | 採用（R-bool-02）。9 言語中 7 つ（Rust・Python・JS・Gleam・Elixir・OCaml・Kotlin）が順序をつけ、つけないのは Go と Swift だけ。Almide もいま `false < true` が通る。階層の骨組みは Swift だが、どの型をどの protocol に入れるかは型ごとに多数派で決める。 |
 | `Repr` のメソッド名 | 組み込みの `Repr` のメソッドは `repr`。一方でモジュールの関数は `int.to_string`。同じ役割に 2 つの綴り。 | 採用（R-L0-38・R-bool-03）。R-L0-22（`Ord.cmp` → `compare`）と同じく、`Repr` のメソッドを `to_string` にする。すると `<mod>.to_string` はすべての値の型にある（`bool.to_string` も、足す実装なしで生える）。 |
 | `regex.parse` は `Parse` か | Swift の `Regex` は `LosslessStringConvertible` ではない。`regex.parse` は値の文字列表現を読むのではなく、パターンを組み立てる。 | 採用（R-regex-11）。`Regex` は `Parse` に入れず、`regex.parse` を `regex.compile` と綴る（Go・Python・Elixir と同じ）。 |
-| サイズつきの整数の算術 | `int` は `floor_div`・`mod`・`pow`・ビット演算・`abs`・`sign` を持つのに、`int8`〜`uint64` は持たない。`Integer`・`FixedWidthInteger` に入れると、これがそのまま穴になる。 | 採用（R-sized-10。R-sized-05 を見直し）。`Integer` の要件として全部の整数に置く。中身は既定の実装 1 つで、型ごとに書かない。 |
+| サイズつきの整数の算術 | `int` は `floor_div`・`modulo`・`pow`・ビット演算・`abs`・`sign` を持つのに、`int8`〜`uint64` は持たない。`Integer`・`FixedWidthInteger` に入れると、これがそのまま穴になる。 | 採用（R-sized-10。R-sized-05 を見直し）。`Integer` の要件として全部の整数に置く。中身は既定の実装 1 つで、型ごとに書かない。 |
 | `bigint` のビット演算 | Swift の `BinaryInteger` はビット演算を要件にする（任意精度でも 2 の補数として振る舞う）。`bigint` はいま持たない。 | 採用（R-bigint-07）。要件に含める。代わりに `bigint` を `Integer` から外す案は、`int` と `bigint` を同じ総称関数で扱えなくなるので採らない。 |
 | `bytes.contains` の意味 | `Text` の `contains` は部分の列、`Membership` の `contains` は要素。Almide には重ね定義がないので、1 つの型は片方にしか入れない。 | `bytes` は `string` と同じ `Text` にする（`bytes.contains(b, pat)` のまま）。1 つの値は `bytes.any(b, (x) => x == v)` で書く。 |
 | `string` は `Indexed` か | Swift の `String` は `BidirectionalCollection` 止まり（位置で読むのは O(1) ではない）。Almide の `string.get` はコードポイント単位。 | `Ordered` までにして、`string.get` は `string` だけの関数に残す。 |

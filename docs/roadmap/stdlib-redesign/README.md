@@ -44,7 +44,7 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 
 [args](L2-args.md) ・ [base64](L2-base64.md) ・ [bigint](L2-bigint.md) ・ [bool](L2-bool.md) ・ [bytes](L2-bytes.md) ・ [compute](L2-compute.md) ・ [datetime](L2-datetime.md) ・ [deque](L2-deque.md) ・ [duration](L2-duration.md) ・ [env](L2-env.md) ・ [error](L2-error.md) ・ [ffi](L2-ffi.md) ・ [float](L2-float.md) ・ [fs](L2-fs.md) ・ [hash](L2-hash.md) ・ [heap](L2-heap.md) ・ [hex](L2-hex.md) ・ [html](L2-html.md) ・ [http](L2-http.md) ・ [int](L2-int.md) ・ [io](L2-io.md) ・ [json](L2-json.md) ・ [list](L2-list.md) ・ [map](L2-map.md) ・ [math](L2-math.md) ・ [matrix](L2-matrix.md) ・ [net](L2-net.md) ・ [option](L2-option.md) ・ [path](L2-path.md) ・ [process](L2-process.md) ・ [random](L2-random.md) ・ [regex](L2-regex.md) ・ [result](L2-result.md) ・ [set](L2-set.md) ・ [sized-numbers](L2-sized-numbers.md) ・ [string](L2-string.md) ・ [testing](L2-testing.md) ・ [unix](L2-unix.md) ・ [url](L2-url.md) ・ [uuid](L2-uuid.md) ・ [value](L2-value.md) ・ [zlib](L2-zlib.md)
 
-## 案の状態（全 355 件: ○ 290・× 61・保留 4）
+## 案の状態（全 356 件: ○ 291・× 61・保留 4）
 
 | 案 | 内容 | 判定 | issue |
 |---|---|---|---|
@@ -234,7 +234,7 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 | [R-http-14](L2-http.md#r-http-14-要求を組み立てる道を-1-つにする-startreq-limitsrequest_response-の撤去req_-を外す---採用) | 要求を組み立てる道を 1 つにする: `start(req, limits)`、`request_response` の撤去、`req_` を外す | ○ | #3996 |
 | [R-int-01](L2-int.md#r-int-01-intfrom_型-の列を撤去し元の型の-to_int-に移す---採用) | `int.from_<型>` の列を撤去し、元の型の `to_int` に移す | ○ | #3935 |
 | [R-int-02](L2-int.md#r-int-02-折り返しの族を-4-セルにそろえto_u32to_u8-を撤去する---採用) | 折り返しの族を 4 セルにそろえ、`to_u32`/`to_u8` を撤去する | ○ | #3854 |
-| [R-int-03](L2-int.md#r-int-03-床方向の割り算と剰余-intfloor_div--intmod-を足す---採用) | 床方向の割り算と剰余 `int.floor_div` / `int.mod` を足す | ○ | #3918 |
+| [R-int-03](L2-int.md#r-int-03-床方向の割り算と剰余-intfloor_div--intmodulo-を足す---採用) | 床方向の割り算と剰余 `int.floor_div` / `int.modulo` を足す | ○ | #3918 |
 | [R-int-04](L2-int.md#r-int-04-基数の変換を-to_string_radix--parse_radix-の対にしfrom_hex-を撤去する---採用) | 基数の変換を `to_string_radix` / `parse_radix` の対にし、`from_hex` を撤去する | ○ | #3920 |
 | [R-int-05](L2-int.md#r-int-05-bandborbxor-などを多数派の綴りに改名する---不採用改名しないr-int-10-で確かめた) | `band`/`bor`/`bxor` などを多数派の綴りに改名する | × | — |
 | [R-int-06](L2-int.md#r-int-06-論理右シフト-intbshr_logical-を足す---採用) | 論理右シフト `int.bshr_logical` を足す | ○ | #3919 |
@@ -244,6 +244,7 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 | [R-int-10](L2-int.md#r-int-10-ビット演算の綴りを計測で決める---採用関数のまま十二巡目に演算子の案を取り消し) | ビット演算の綴りを計測で決める | ○ | #4004 |
 | [R-int-11](L2-int.md#r-int-11-bit_width-を-bit_length-に改名する---採用) | `bit_width` を `bit_length` に改名する | ○ | #4004 |
 | [R-int-12](L2-int.md#r-int-12-n-bit-の演算を型の幅の演算に置き換える---採用) | N bit の演算を、型の幅の演算に置き換える | ○ | #4004 |
+| [R-int-13](L2-int.md#r-int-13-床方向の剰余の名前は-modulofloor_divmin_value--1-は-abort---採用r-int-03-を直す) | 床方向の剰余の名前は `modulo`、`floor_div(min_value, -1)` は abort | ○ | #4045 |
 | [R-io-01](L2-io.md#r-io-01-読み取りをeof-を区別する-1-行bytesにそろえる---採用) | 読み取りを「EOF を区別する 1 行」「Bytes」にそろえる | ○ | #3896 |
 | [R-io-02](L2-io.md#r-io-02-iowrite_bytes-を-effect-fn-に直す---採用) | `io.write_bytes` を effect fn に直す | ○ | #3907 |
 | [R-io-03](L2-io.md#r-io-03-改行なしで標準エラーに書く-ioeprint-を足しprint-の綴りから-ioprint-へ案内する---採用) | 改行なしで標準エラーに書く `io.eprint` を足し、`print` の綴りから `io.print` へ案内する | ○ | #3974 |
