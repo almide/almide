@@ -11,6 +11,8 @@ uses the natural order. Equal elements come out in the order they went in.
 an empty heap give `none`. `to_list` is the pop order.
 
 ```almd run
+import heap
+
 fn main() -> Unit = {
   var h: Heap[Int] = heap.new()
   for x in [5, 1, 4] {
@@ -26,6 +28,8 @@ some(1) some(4) [4, 5]
 The greatest first, and a key with ties broken by push order:
 
 ```almd run
+import heap
+
 fn main() -> Unit = {
   var top = heap.new_with((a: Int, b: Int) => if a > b then -1 else if a < b then 1 else 0)
   for x in [3, 9, 1] {

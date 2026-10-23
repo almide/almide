@@ -12,6 +12,8 @@ name, and the sequence algorithms (`map`, `fold`, `sort_by`, `min_by`, …) walk
 the deque front to back.
 
 ```almd run
+import deque
+
 fn main() -> Unit = {
   var q: Deque[Int] = deque.new()
   deque.push(q, 2)
@@ -29,6 +31,8 @@ some(1) some(3) 1
 A breadth-first search keeps its frontier in a deque:
 
 ```almd run
+import deque
+
 fn reachable(edges: Map[Int, List[Int]], start: Int) -> List[Int] = {
   var seen = [start]
   var queue = deque.from_list([start])
