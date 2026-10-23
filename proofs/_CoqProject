@@ -28,3 +28,4 @@ StructuralAlloc.v
 StructuralDecode.v
 StructuralRun.v
 MemorySafe.v
+SpatialCert.v

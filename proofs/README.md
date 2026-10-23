@@ -61,6 +61,21 @@ compiler with qualified use in safety-critical settings).
   a trace yet, so this fixes the right-hand side of
   `K(c, a) accepts ⟹ MemorySafe a` rather than proving it of shipped bytes.
 
+- **#4005: `SpatialCert.v` — the SPATIAL clause from a static certificate.**
+  A certificate language for the element reads of one list block (read,
+  bounds check, reassign the index, loop, branch), a checker that accepts a
+  read only when every path to it passes a check of the same index slot with
+  no reassignment since, and `accepts_spatial`: every run of an accepted
+  certificate — any loop count, any arm, any i64 written to an index, runs cut
+  short by a failed check — yields a `Spatial` (and `WellTyped`) trace. The
+  check is the emitter's single unsigned compare; `unsigned_ge_excludes` shows
+  it excludes negative indices too. Elided repeat checks (#3345) and hoisted
+  checks (#2319) are re-derived by the checker, not trusted; the `rejects_*`
+  controls show a stale check, a check hoisted past a reassignment and a
+  one-armed check are refused, and `unchecked_run_not_spatial` that the
+  refused shape does read out of bounds. Not yet: stores, resizes, more than
+  one block, and the compiler emitting the certificate.
+
 ## Verify (the third-party `make verify`)
 
 ```
