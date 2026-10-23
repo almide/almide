@@ -8,11 +8,13 @@
 #   os-ffi      a call into libc / Win32 that std does not wrap
 #   blas-ffi    the optional BLAS fast path (cfg(have_blas))
 #   fan-sync    the fan work-sharing gate (lifetime erasure, raw parent links)
-#   raw-ptr     the RawPtr bridge — UNSOUND today, see #4043
+#   raw-ptr     the declared FFI boundary (`@memory_unsafe`, refused by
+#               --profile critical, E100): the caller promises the length
 #   reinterpret a byte buffer read as another element type
 12 runtime/rs/src/http.rs os-ffi — pthread_self/pthread_kill, signal, _exit, SetConsoleCtrlHandler for serve shutdown
 8 runtime/rs/src/list.rs os-ffi+fan-sync — clock_gettime(CLOCK_THREAD_CPUTIME_ID) has no std form; the fan gate erases a borrow's lifetime and follows raw parent pointers
 3 runtime/rs/src/process.rs os-ffi — signal(SIGPIPE) and waitpid(WNOHANG|WUNTRACED) have no std form
-2 runtime/rs/src/bytes.rs raw-ptr — from_raw_ptr / copy_to_ptr trust a caller-supplied length (#4043)
+2 runtime/rs/src/bytes.rs raw-ptr — the deprecated from_raw_ptr / copy_to_ptr (epoch 15, removed at 16); reachable without `import ffi` until then (#4043)
+2 runtime/rs/src/ffi.rs raw-ptr — ffi.read / ffi.write: the caller promises len / cap bytes at the address (R-L0-45, #4042)
 1 runtime/rs/src/matrix.rs blas-ffi — cblas_dgemm under cfg(have_blas)
 1 runtime/rs/src/matrix_p2.rs reinterpret — align_to::<f32> on the weight bytes; the safe from_le_bytes rewrite waits on a GCE re-inspection of matrix.linear_f32_row_no_bias, whose inspection fingerprint it moves

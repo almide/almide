@@ -838,7 +838,7 @@ wired_by = ".github/workflows/ci.yml"
 class = "NEGATIVE_TESTED"
 evidence = "#4007 landing (2026-10-23, PR #4044): scripts/check-runtime-unsafe-ratchet-negative.sh runs on every CI run and copies runtime/rs/src into a scratch tree — one new unsafe line in a listed file (matrix.rs) goes red, an unsafe line in an unlisted file (int.rs) goes red, an allowlist count above the tree goes red as STALE, a row naming a missing file goes red; the committed tree and a comment-only mention of `unsafe` stay green"
 measures = "per-file count of code lines containing the word `unsafe` in runtime/rs/src/*.rs, against scripts/runtime-unsafe-allowlist.txt"
-varies = "origin/develop 3c35408ae reads 29 lines; PR #4044 reads 27 (list.rs UnsafeCell and its unsafe impl Sync replaced by Mutex); the draft that also rewrites matrix_p2.rs align_to read 26"
+varies = "origin/develop 3c35408ae reads 29 lines; PR #4044 reads 27 on that base (list.rs UnsafeCell and its unsafe impl Sync replaced by Mutex), and 29 after merging develop 703bbf298, which added runtime/rs/src/ffi.rs (2 lines, #4042); the draft that also rewrites matrix_p2.rs align_to read 26"
 blind = "unsafe emitted by the compiler into the output crate (crates/almide-codegen/src/prelude_region.rs, walker/mod.rs, tracked in #4007) -> UNCOMPENSATED; whether an allowed site is sound (#4043 is one that is not) -> UNCOMPENSATED"
 
 [[gate]]
