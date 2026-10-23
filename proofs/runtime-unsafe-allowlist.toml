@@ -10,9 +10,9 @@
 
 [[file]]
 path = "runtime/rs/src/list.rs"
-count = 10
+count = 8
 class = "fan-sync"
-reason = "the fan gate: a lifetime-erasing transmute of the take closure, two `unsafe impl Sync`, raw parent pointers and cell reads (lines 680-992); plus clock_gettime (c-call) at 417/423"
+reason = "the fan gate: a lifetime-erasing transmute of the take closure, one `unsafe impl Sync` (AlmideFanGate), raw parent pointers and the take-cell read (lines 680-989); plus clock_gettime (c-call) at 417/423. The fan blocks are Mutex cells since #4007, with no unsafe"
 
 [[file]]
 path = "runtime/rs/src/bytes.rs"
