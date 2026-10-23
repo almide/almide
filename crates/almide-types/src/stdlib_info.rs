@@ -55,7 +55,7 @@ pub const TIER1_ALWAYS_ACCESSIBLE: &[&str] = &[
 /// are auto-imported via `TIER1_ALWAYS_ACCESSIBLE` above; this list is for
 /// bundled `.almd` modules that need resolve-time loading.
 pub const AUTO_IMPORT_BUNDLED: &[&str] = &[
-    "list", "int", "float", "bool",
+    "list", "int", "float", "bool", "bytes",
     // Stdlib modules migrated from TOML to bundled `.almd` need
     // auto-import so their signatures and dispatch reach every file
     // without requiring a redundant `import <name>`. The set mirrors
