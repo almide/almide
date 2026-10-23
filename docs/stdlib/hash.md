@@ -80,7 +80,7 @@ needed.
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (4 functions)
+## Signature index (12 functions)
 
 ```
 // 32-bit FNV-1a of s's UTF-8; non-negative Int.
@@ -98,6 +98,38 @@ hash.sha256(b: Bytes) -> Bytes
 // SHA-256 of s's UTF-8, 64 lowercase hex chars.
 // @since 0.58.0 or earlier
 hash.sha256_hex(s: String) -> String
+
+// CRC-32 (IEEE, reflected) as an unsigned Int; 0 for empty b.
+// @since unreleased
+hash.crc32(b: Bytes) -> Int
+
+// Adler-32 as an unsigned Int; 1 for empty b.
+// @since unreleased
+hash.adler32(b: Bytes) -> Int
+
+// 16-byte MD5 digest of b. For compatibility only: MD5 is broken, never use it for security.
+// @since unreleased
+hash.md5(b: Bytes) -> Bytes
+
+// MD5 of b as 32 lowercase hex chars. For compatibility only, never for security.
+// @since unreleased
+hash.md5_hex(b: Bytes) -> String
+
+// 20-byte SHA-1 digest of b. For compatibility only: SHA-1 is broken, never use it for security.
+// @since unreleased
+hash.sha1(b: Bytes) -> Bytes
+
+// SHA-1 of b as 40 lowercase hex chars. For compatibility only, never for security.
+// @since unreleased
+hash.sha1_hex(b: Bytes) -> String
+
+// 64-byte SHA-512 digest of b.
+// @since unreleased
+hash.sha512(b: Bytes) -> Bytes
+
+// SHA-512 of b as 128 lowercase hex chars.
+// @since unreleased
+hash.sha512_hex(b: Bytes) -> String
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

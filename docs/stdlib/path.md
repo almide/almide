@@ -173,7 +173,7 @@ fn main() -> Unit = {
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (10 functions)
+## Signature index (13 functions)
 
 ```
 // SafePath of s; err if any segment is "..".
@@ -215,6 +215,18 @@ path.stem(p: String) -> String
 // Resolves . and .. lexically; "" becomes ".".
 // @since 0.3.0 or earlier
 path.normalize(p: String) -> String
+
+// Segments of normalize(path), led by "/" when absolute; ["."] for "" or ".".
+// @since unreleased
+path.components(path: String) -> List[String]
+
+// path relative to base, lexically; "." when equal; none when not under base.
+// @since unreleased
+path.relative_to(path: String, base: String) -> Option[String]
+
+// path with its last extension replaced by ext; "" removes it; unchanged without a file name.
+// @since unreleased
+path.with_extension(path: String, ext: String) -> String
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

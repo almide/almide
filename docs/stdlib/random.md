@@ -73,7 +73,7 @@ native leg.
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (4 functions)
+## Signature index (9 functions)
 
 ```
 // Random Int in [min, max]; min if max <= min.
@@ -91,6 +91,26 @@ effect random.choice(xs: List[T]) -> Option[T]
 // Random permutation of xs as a new list.
 // @since 0.5.0 or earlier
 effect random.shuffle(xs: List[T]) -> List[T]
+
+// A generator whose stream is fixed by seed.
+// @since unreleased
+random.seeded(seed: Int) -> Rng
+
+// An Int in [min, max] (both ends) and the next state; min, state unchanged, if max <= min.
+// @since unreleased
+random.next_int(rng: Rng, min: Int, max: Int) -> (Int, Rng)
+
+// A Float in [0, 1) from the top 53 bits, and the next state.
+// @since unreleased
+random.next_float(rng: Rng) -> (Float, Rng)
+
+// A uniformly chosen element (none, state unchanged, when xs is empty) and the next state.
+// @since unreleased
+random.next_choice(rng: Rng, xs: List[A]) -> (Option[A], Rng)
+
+// A uniform permutation of xs (Fisher-Yates) and the next state.
+// @since unreleased
+random.next_shuffle(rng: Rng, xs: List[A]) -> (List[A], Rng)
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

@@ -43,7 +43,7 @@ rejected with a pointer to `compute.ms(...)` / `fan.timeout`).
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (6 functions)
+## Signature index (7 functions)
 
 ```
 // n nanoseconds of wall-clock time; negative n aborts.
@@ -69,6 +69,10 @@ duration.min(n: Int) -> Duration
 // n hours of wall-clock time; negative n aborts.
 // @since 0.51.0 or earlier
 duration.h(n: Int) -> Duration
+
+// Negative if a < b, 0 if equal, positive if a > b.
+// @since unreleased
+duration.compare(a: Duration, b: Duration) -> Int
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

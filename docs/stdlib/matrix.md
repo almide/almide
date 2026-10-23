@@ -148,7 +148,7 @@ The `from_bytes_f16_le` / `_f32_le` / `_f64_le` *decoders* keep a stored
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (46 functions)
+## Signature index (48 functions)
 
 ```
 // rows x cols of 0.0; negatives clamp to 0.
@@ -334,6 +334,14 @@ matrix.mul_f32_t_scaled(a: Matrix[Float32], alpha: Float, b: Matrix[Float32]) ->
 // Same as scale(mul(a, b), alpha).
 // @since 0.14.0 or earlier
 matrix.mul_scaled(a: Matrix, alpha: Float, b: Matrix) -> Matrix
+
+// f over each pair of same-position elements; a shape mismatch aborts.
+// @since unreleased
+matrix.zip_with(a: Matrix, b: Matrix, f: (Float, Float) -> Float) -> Matrix
+
+// Rows of every matrix, top to bottom; empty members skipped, a width mismatch aborts.
+// @since unreleased
+matrix.concat_rows(xs: List[Matrix]) -> Matrix
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->
