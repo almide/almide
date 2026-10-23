@@ -145,8 +145,7 @@ fn the_pool_still_admits_only_strings_and_block_payloads() {
 /// `Pool::intern` becomes wrong and should be rewritten, not silently left.
 #[test]
 fn cow_still_returns_a_static_uncopied() {
-    let alloc_rs =
-        std::fs::read_to_string(src_dir().join("runtime_alloc.rs")).expect("read runtime_alloc.rs");
+    let alloc_rs = std::fs::read_to_string(src_dir().join("runtime_alloc_cow.rs")).expect("read runtime_alloc_cow.rs");
     let body = alloc_rs
         .split_once("pub(crate) fn emit_cow(")
         .expect("emit_cow")
