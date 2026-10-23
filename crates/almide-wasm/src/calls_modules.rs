@@ -326,7 +326,17 @@ impl Emitter<'_> {
             // reads in the module; the rest of it is self-host and keeps the
             // generic route.
             CallTarget::Module { module, func, .. }
-                if module.as_str() == "datetime" && matches!(func.as_str(), "now" | "now_ms" | "monotonic_ns") =>
+                if module.as_str() == "datetime" && matches!(func.as_str(), "now" | "monotonic_ns") =>
+            {
+                if let Some(out) = self.lower_host_call("datetime", func.as_str(), args)? {
+                    return Ok(out);
+                }
+                unsup(&format!("call:{module}.{func}"))
+            }
+            // datetime.now_ms (R-datetime-01): the third clock read, env.millis's
+            // op under the datetime name.
+            CallTarget::Module { module, func, .. }
+                if module.as_str() == "datetime" && func.as_str() == "now_ms" =>
             {
                 if let Some(out) = self.lower_host_call("datetime", func.as_str(), args)? {
                     return Ok(out);
