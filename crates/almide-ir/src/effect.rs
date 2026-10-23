@@ -110,6 +110,8 @@ pub const STDLIB_MODULE_EFFECTS: &[(&str, ModuleEffects)] = &[
     ("list", ModuleEffects::Pure),
     ("map", ModuleEffects::Pure),
     ("set", ModuleEffects::Pure),
+    ("deque", ModuleEffects::Pure),
+    ("heap", ModuleEffects::Pure),
     ("option", ModuleEffects::Pure),
     ("result", ModuleEffects::Pure),
     ("error", ModuleEffects::Pure),
