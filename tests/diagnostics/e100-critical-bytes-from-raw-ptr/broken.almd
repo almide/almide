@@ -1,0 +1,8 @@
+// E100 (#4008): the probe recorded on the issue. A million-byte read off a
+// 3-byte buffer passed `--profile critical --allow IO`; the deprecated
+// `bytes` raw-pointer spellings are refused like `ffi` itself.
+fn main() -> Unit = {
+  let b = bytes.from_string("abc")
+  let c = bytes.from_raw_ptr(bytes.as_ptr(b), 1000000)
+  println(int.to_string(bytes.len(c)))
+}
