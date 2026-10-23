@@ -634,9 +634,6 @@ fn set_float32(mut b: Bytes, offset: Int, value: Float32, endian: Endian) -> Uni
 // run of bytes comes back as Bytes (R-L0-42). Out of range follows R-L0-33: a
 // one-position read is none, a range extraction clamps past the end and aborts
 // on a negative count. Closures are passed through, never captured (#892).
-/// The byte at pos as 0..255; none outside 0..len.
-fn get_u8(b: Bytes, pos: Int) -> Int? = bytes.get(b, pos)
-
 /// The byte at pos as a signed -128..127; none outside 0..len.
 fn get_i8(b: Bytes, pos: Int) -> Int? = match bytes.get(b, pos) {
   some(v) => some(if v >= 128 then v - 256 else v),
@@ -760,11 +757,14 @@ fn sort(b: Bytes) -> List[Int] = list.sort(bytes.to_list(b))
 /// The bytes ordered by f's key; equal keys keep their order.
 fn sort_by[B](b: Bytes, f: (Int) -> B) -> List[Int] = list.sort_by(bytes.to_list(b), f)
 
-local fn merge_with(xs: List[Int], ys: List[Int], cmp: (Int, Int) -> Int, acc: List[Int]) -> List[Int] = match (list.first(xs), list.first(ys)) {
-  (some(x), some(y)) => if cmp(y, x) < 0 then merge_with(xs, list.drop(ys, 1), cmp, [y] + acc)
-  else merge_with(list.drop(xs, 1), ys, cmp, [x] + acc),
-  (some(_), none) => list.reverse(acc) + xs,
-  _ => list.reverse(acc) + ys,
+local fn merge_with(xs: List[Int], ys: List[Int], cmp: (Int, Int) -> Int, i: Int, j: Int, acc: List[Int]) -> List[Int] = match (list.get(
+  xs,
+  i,
+), list.get(ys, j)) {
+  (some(x), some(y)) => if cmp(y, x) < 0 then merge_with(xs, ys, cmp, i, j + 1, acc + [y])
+  else merge_with(xs, ys, cmp, i + 1, j, acc + [x]),
+  (some(_), none) => acc + list.drop(xs, i),
+  _ => acc + list.drop(ys, j),
 }
 
 local fn merge_sort_with(xs: List[Int], cmp: (Int, Int) -> Int) -> List[Int] = {
@@ -774,6 +774,8 @@ local fn merge_sort_with(xs: List[Int], cmp: (Int, Int) -> Int) -> List[Int] = {
     merge_sort_with(list.take(xs, n / 2), cmp),
     merge_sort_with(list.drop(xs, n / 2), cmp),
     cmp,
+    0,
+    0,
     [],
   )
 }
