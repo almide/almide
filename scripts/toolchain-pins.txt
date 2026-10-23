@@ -12,8 +12,7 @@ rustc nightly-2025-06-01 — mcdc-probe.yml: the workflow_dispatch default, the 
 #
 # wasmtime runs the wasm leg.
 wasmtime-crate 49.0.4 — the embedded engine in crates/almide-wasm-run: `almide run --target wasm`, `almide test` on wasm, the fan workers
-wasmtime-cli 49.0.1 — the stock runtime most CI jobs install to run built .wasm artifacts
-wasmtime-cli 27.0.0 — the stock runtime of the almide-gates job and the three commissioned-wasm-gates jobs; REQ-VM-9 (tests/wasm_vm_parity_test.rs) compares almide-wasm-vm against this one
+wasmtime-cli 49.0.1 — the stock runtime every CI job installs to run built .wasm artifacts; REQ-VM-9 (tests/wasm_vm_parity_test.rs) compares almide-wasm-vm against it
 #
 # Steps that name no version run whatever the channel is that day. Each is
 # debt: pin it to RUST_TOOLCHAIN (or a dated nightly) and delete its line.

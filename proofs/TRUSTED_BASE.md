@@ -40,7 +40,7 @@ but not listed fails, and so does a version listed but no longer used.
 | rustc (Ferrocene) | **1.95.0** | builds the generated Rust of the run-manifest corpus under the ISO 26262 qualified toolchain (#573) | the qualification is Ferrocene's |
 | rustc nightly | **nightly-2026-08-01**, **nightly-2025-06-01** | coverage instrumentation only (branch coverage, MC/DC); nothing shipped is built with them | — |
 | wasmtime (embedded crate) | **49.0.4** | `almide run` / `almide test` on wasm, the fan workers | the stock CLI runs below |
-| wasmtime (stock CLI in CI) | **49.0.1**, **27.0.0** | runs built `.wasm` artifacts in the CI gates | 27.0.0 is the runtime `tests/wasm_vm_parity_test.rs` (REQ-VM-9) compares against |
+| wasmtime (stock CLI in CI) | **49.0.1** | runs built `.wasm` artifacts in the CI gates, one version everywhere | the runtime `tests/wasm_vm_parity_test.rs` (REQ-VM-9) compares `almide-wasm-vm` against |
 | almide-wasm-vm | this tree | a second, independent wasm interpreter (standard library only, no `unsafe`) for the Critical-profile surface | REQ-VM-9: every `spec/wasm_cross` fixture inside its five WASI imports runs equal to the stock runtime, and to native when it passes `--profile critical` |
 | OS, libc, CPU | the CI runners' and the user's | everything | accepted, not checked |
 
