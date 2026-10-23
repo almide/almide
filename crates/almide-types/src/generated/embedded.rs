@@ -3956,6 +3956,243 @@ fn datetime_parse_iso(s: String) -> Result[Int, String] = {
   }
 }
 "#;
+pub const SRC_DEQUE: &str = r#"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/// A double-ended queue, front to back.
+type Deque[A] = { front: List[A], back: List[A] }
+
+
+/// An empty deque.
+fn new[A]() -> Deque[A] = { front: [], back: [] }
+
+/// A deque of xs, front to back.
+fn from_list[A](xs: List[A]) -> Deque[A] = { front: [], back: xs }
+
+/// The elements, front to back.
+fn to_list[A](d: Deque[A]) -> List[A] = list.reverse(d.front) + d.back
+
+/// Element count; 0 for an empty deque.
+fn len[A](d: Deque[A]) -> Int = list.len(d.front) + list.len(d.back)
+
+/// true iff d has no elements.
+fn is_empty[A](d: Deque[A]) -> Bool = list.is_empty(d.front) and list.is_empty(d.back)
+
+
+/// Appends x at the back in place.
+fn push[A](mut d: Deque[A], x: A) -> Unit = list.push(d.back, x)
+
+/// Adds x at the front in place.
+fn push_front[A](mut d: Deque[A], x: A) -> Unit = list.push(d.front, x)
+
+/// Removes and yields the last element; none when empty.
+fn pop[A](mut d: Deque[A]) -> A? = {
+  if list.is_empty(d.back) then {
+    let xs = list.reverse(d.front)
+    let keep = list.len(xs) / 2
+    d = { front: list.reverse(list.take(xs, keep)), back: list.drop(xs, keep) }
+  } else ()
+  list.pop(d.back)
+}
+
+/// Removes and yields the first element; none when empty.
+fn pop_front[A](mut d: Deque[A]) -> A? = {
+  if list.is_empty(d.front) then {
+    let keep = (list.len(d.back) + 1) / 2
+    d = { front: list.reverse(list.take(d.back, keep)), back: list.drop(d.back, keep) }
+  } else ()
+  list.pop(d.front)
+}
+
+/// The first element, or none when empty.
+fn first[A](d: Deque[A]) -> A? = match list.last(d.front) {
+  some(x) => some(x),
+  none => list.first(d.back),
+}
+
+/// The last element, or none when empty.
+fn last[A](d: Deque[A]) -> A? = match list.last(d.back) {
+  some(x) => some(x),
+  none => list.first(d.front),
+}
+
+/// Element at index i from the front, or none when out of range.
+fn get[A](d: Deque[A], i: Int) -> A? = {
+  let nf = list.len(d.front)
+  if i < 0 then none
+  else if i < nf then list.get(d.front, nf - 1 - i)
+  else list.get(d.back, i - nf)
+}
+
+/// true if some element == x.
+fn contains[A](d: Deque[A], x: A) -> Bool = list.contains(d.front, x) or list.contains(d.back, x)
+
+/// Removes every element of d in place.
+fn clear[A](mut d: Deque[A]) -> Unit = {
+  d = { front: [], back: [] }
+}
+
+
+/// Deque of f(x), front to back; f runs front to back.
+fn map[A, B](d: Deque[A], f: (A) -> B) -> Deque[B] = deque.from_list(list.map(deque.to_list(d), f))
+
+/// Elements where f holds, order kept.
+fn filter[A](d: Deque[A], f: (A) -> Bool) -> Deque[A] = deque.from_list(list.filter(deque.to_list(d), f))
+
+/// Folds f(acc, x) front to back.
+fn fold[A, B](d: Deque[A], init: B, f: (B, A) -> B) -> B = list.fold(deque.to_list(d), init, f)
+
+/// true if f holds for some element; false when empty.
+fn any[A](d: Deque[A], f: (A) -> Bool) -> Bool = list.any(deque.to_list(d), f)
+
+/// true if f holds for every element; true when empty.
+fn all[A](d: Deque[A], f: (A) -> Bool) -> Bool = list.all(deque.to_list(d), f)
+
+/// Number of elements where f holds.
+fn count[A](d: Deque[A], f: (A) -> Bool) -> Int = list.count(deque.to_list(d), f)
+
+/// The element nearest the front where f holds, or none.
+fn find[A](d: Deque[A], f: (A) -> Bool) -> A? = list.find(deque.to_list(d), f)
+
+
+/// Elements back to front.
+fn reverse[A](d: Deque[A]) -> Deque[A] = { front: d.back, back: d.front }
+
+/// First n elements, as list.take.
+fn take[A](d: Deque[A], n: Int) -> Deque[A] = deque.from_list(list.take(deque.to_list(d), n))
+
+/// All but the first n, as list.drop.
+fn drop[A](d: Deque[A], n: Int) -> Deque[A] = deque.from_list(list.drop(deque.to_list(d), n))
+
+/// Last n elements, as list.take_end.
+fn take_end[A](d: Deque[A], n: Int) -> Deque[A] = deque.from_list(list.take_end(deque.to_list(d), n))
+
+/// All but the last n, as list.drop_end.
+fn drop_end[A](d: Deque[A], n: Int) -> Deque[A] = deque.from_list(list.drop_end(deque.to_list(d), n))
+
+/// Indices start..<end, as list.slice.
+fn slice[A](d: Deque[A], start: Int, end: Int) -> Deque[A] = deque.from_list(list.slice(deque.to_list(d), start, end))
+
+/// Copy with slot i = x, as list.set.
+fn set[A](d: Deque[A], i: Int, x: A) -> Deque[A] = deque.from_list(list.set(deque.to_list(d), i, x))
+
+/// Copy with x at i, as list.insert.
+fn insert[A](d: Deque[A], i: Int, x: A) -> Deque[A] = deque.from_list(list.insert(deque.to_list(d), i, x))
+
+/// Copy without slot i, as list.remove_at.
+fn remove_at[A](d: Deque[A], i: Int) -> Deque[A] = deque.from_list(list.remove_at(deque.to_list(d), i))
+
+
+/// (index, element) pairs, index from 0 at the front.
+fn enumerate[A](d: Deque[A]) -> List[(Int, A)] = list.enumerate(deque.to_list(d))
+
+/// Elements paired with ys by position; stops at the shorter.
+fn zip[A, B](d: Deque[A], ys: List[B]) -> List[(A, B)] = list.zip(deque.to_list(d), ys)
+
+/// f over (element, ys element) pairs; stops at the shorter.
+fn zip_with[A, B, C](d: Deque[A], ys: List[B], f: (A, B) -> C) -> List[C] = list.zip_with(
+  deque.to_list(d),
+  ys,
+  f,
+)
+
+/// The somes f gives, front to back.
+fn filter_map[A, B](d: Deque[A], f: (A) -> B?) -> List[B] = list.filter_map(deque.to_list(d), f)
+
+/// The first some f gives, or none; f is not called after the hit.
+fn find_map[A, B](d: Deque[A], f: (A) -> B?) -> B? = list.find_map(deque.to_list(d), f)
+
+/// Left fold seeded by the first element; none when empty.
+fn reduce[A](d: Deque[A], f: (A, A) -> A) -> A? = list.reduce(deque.to_list(d), f)
+
+/// Running fold values front to back, init excluded.
+fn scan[A, B](d: Deque[A], init: B, f: (B, A) -> B) -> List[B] = list.scan(
+  deque.to_list(d),
+  init,
+  f,
+)
+
+/// (elements where f holds, the rest), order kept.
+fn partition[A](d: Deque[A], f: (A) -> Bool) -> (List[A], List[A]) = list.partition(
+  deque.to_list(d),
+  f,
+)
+
+/// Key f(x) -> elements; keys in first-seen order.
+fn group_by[A, B](d: Deque[A], f: (A) -> B) -> Map[B, List[A]] = list.group_by(deque.to_list(d), f)
+
+/// Elements in ascending order; Floats in IEEE totalOrder.
+fn sort[A](d: Deque[A]) -> List[A] = list.sort(deque.to_list(d))
+
+/// Elements sorted by key f(x), stable; f runs once per element.
+fn sort_by[A, B](d: Deque[A], f: (A) -> B) -> List[A] = list.sort_by(deque.to_list(d), f)
+
+/// Elements sorted by cmp, stable: negative puts a first.
+fn sort_with[A](d: Deque[A], cmp: (A, A) -> Int) -> List[A] = list.sort_with(deque.to_list(d), cmp)
+
+/// Least element, or none when empty.
+fn min[A](d: Deque[A]) -> A? = list.min(deque.to_list(d))
+
+/// Greatest element, or none when empty.
+fn max[A](d: Deque[A]) -> A? = list.max(deque.to_list(d))
+
+/// Element with the least key f(x); the nearest the front on ties.
+fn min_by[A, K](d: Deque[A], f: (A) -> K) -> A? = list.min_by(deque.to_list(d), f)
+
+/// Element with the greatest key f(x); the nearest the front on ties.
+fn max_by[A, K](d: Deque[A], f: (A) -> K) -> A? = list.max_by(deque.to_list(d), f)
+
+/// Least element by cmp; the nearest the front on ties.
+fn min_with[A](d: Deque[A], cmp: (A, A) -> Int) -> A? = list.min_with(deque.to_list(d), cmp)
+
+/// Greatest element by cmp; the nearest the front on ties.
+fn max_with[A](d: Deque[A], cmp: (A, A) -> Int) -> A? = list.max_with(deque.to_list(d), cmp)
+
+/// Index from the front of the first x where f holds, or none.
+fn find_index[A](d: Deque[A], f: (A) -> Bool) -> Int? = list.find_index(deque.to_list(d), f)
+
+/// Longest front run where f holds.
+fn take_while[A](d: Deque[A], f: (A) -> Bool) -> Deque[A] = deque.from_list(list.take_while(deque.to_list(d), f))
+
+/// The rest after the longest front run where f holds.
+fn drop_while[A](d: Deque[A], f: (A) -> Bool) -> Deque[A] = deque.from_list(list.drop_while(deque.to_list(d), f))
+
+/// Runs of n from the front, as list.chunk.
+fn chunk[A](d: Deque[A], n: Int) -> List[Deque[A]] = list.chunk(deque.to_list(d), n) |> list.map((xs) => deque.from_list(xs))
+
+/// All n-long runs, as list.window.
+fn window[A](d: Deque[A], n: Int) -> List[Deque[A]] = list.window(deque.to_list(d), n) |> list.map((xs) => deque.from_list(xs))
+
+/// (first n, the rest), as list.split_at.
+fn split_at[A](d: Deque[A], n: Int) -> (Deque[A], Deque[A]) = {
+  let xs = deque.to_list(d)
+  (deque.from_list(list.take(xs, n)), deque.from_list(list.drop(xs, n)))
+}
+
+/// Adjacent equal runs collapsed, as list.dedup.
+fn dedup[A](d: Deque[A]) -> Deque[A] = deque.from_list(list.dedup(deque.to_list(d)))
+
+/// sep between adjacent elements.
+fn intersperse[A](d: Deque[A], sep: A) -> Deque[A] = deque.from_list(list.intersperse(deque.to_list(d), sep))
+
+/// Duplicates removed; the occurrence nearest the front kept.
+fn unique[A](d: Deque[A]) -> Deque[A] = deque.from_list(list.unique(deque.to_list(d)))
+
+/// The first element per distinct key f(x).
+fn unique_by[A, K](d: Deque[A], f: (A) -> K) -> Deque[A] = deque.from_list(list.unique_by(deque.to_list(d), f))
+"#;
 pub const SRC_ENV: &str = r#"
 
 
@@ -8073,6 +8310,195 @@ fn hash_sha256_hex(s: String) -> String = {
   let d = __sha256_digest(h + 12, prim.load32(h + 4))
   let out = prim.alloc_str(64)
   let _x = __sha_hex_fill(prim.handle(out) + 12, prim.handle(d) + 12, 0)
+  out
+}
+"#;
+pub const SRC_HEAP: &str = r#"
+
+
+
+
+
+
+
+
+
+
+
+
+
+/// A priority queue; the least element by its order comes out first.
+type Heap[A] = { slots: List[(A, Int)], next: Int, cmp: (A, A) -> Int }
+
+
+
+fn __natural[A](a: A, b: A) -> Int =
+  if a == b then 0
+  else match list.first(list.sort_by([1, 0], (i) => if i == 0 then a else b)) {
+    some(0) => -1,
+    _ => 1,
+  }
+
+
+/// An empty heap; the least element comes out first.
+fn new[A]() -> Heap[A] = { slots: [], next: 0, cmp: (a, b) => __natural(a, b) }
+
+/// An empty heap ordered by key f(x); the least key comes out first.
+fn new_by[A, K](f: (A) -> K) -> Heap[A] = {
+  slots: [],
+  next: 0,
+  cmp: (a, b) => __natural(f(a), f(b)),
+}
+
+/// An empty heap ordered by cmp; negative puts a first.
+fn new_with[A](cmp: (A, A) -> Int) -> Heap[A] = { slots: [], next: 0, cmp: cmp }
+
+/// A heap of xs in the natural order; equal elements leave in list order.
+fn from_list[A](xs: List[A]) -> Heap[A] = {
+  var h: Heap[A] = heap.new()
+  for x in xs {
+    heap.push(h, x)
+  }
+  h
+}
+
+
+fn __before[A](h: Heap[A], a: (A, Int), b: (A, Int)) -> Bool = {
+  let c = (h.cmp)(a.0, b.0)
+  c < 0 or (c == 0 and a.1 < b.1)
+}
+
+
+fn __swap[A](xs: List[(A, Int)], i: Int, j: Int) -> List[(A, Int)] = list.swap(xs, i, j)
+
+
+/// Adds x in place.
+fn push[A](mut h: Heap[A], x: A) -> Unit = {
+  var slots = h.slots
+  list.push(slots, (x, h.next))
+  var i = list.len(slots) - 1
+  var moving = true
+  while moving and i > 0 {
+    let parent = (i - 1) / 2
+    match (list.get(slots, i), list.get(slots, parent)) {
+      (some(child), some(up)) => if __before(h, child, up) then {
+        slots = __swap(slots, i, parent)
+        i = parent
+      } else {
+        moving = false
+      },
+      _ => {
+        moving = false
+      },
+    }
+  }
+  h = { slots: slots, next: h.next + 1, cmp: h.cmp }
+}
+
+/// Removes and yields the first element out; none when empty.
+fn pop[A](mut h: Heap[A]) -> A? = {
+  let n = list.len(h.slots)
+  if n == 0 then none
+  else {
+    let top = list.get(h.slots, 0)
+    var slots = __swap(h.slots, 0, n - 1)
+    let _ = list.pop(slots)
+    let size = n - 1
+    var i = 0
+    var moving = true
+    while moving {
+      let l = 2 * i + 1
+      let r = l + 1
+      var best = i
+      match (list.get(slots, l), list.get(slots, best)) {
+        (some(a), some(b)) => if l < size and __before(h, a, b) then {
+          best = l
+        } else (),
+        _ => (),
+      }
+      match (list.get(slots, r), list.get(slots, best)) {
+        (some(a), some(b)) => if r < size and __before(h, a, b) then {
+          best = r
+        } else (),
+        _ => (),
+      }
+      if best == i then {
+        moving = false
+      } else {
+        slots = __swap(slots, i, best)
+        i = best
+      }
+    }
+    h = { slots: slots, next: h.next, cmp: h.cmp }
+    match top {
+      some((x, _)) => some(x),
+      none => none,
+    }
+  }
+}
+
+/// Removes every element of h in place; the order is kept.
+fn clear[A](mut h: Heap[A]) -> Unit = {
+  h = { slots: [], next: 0, cmp: h.cmp }
+}
+
+
+/// The element pop would yield next, or none when empty.
+fn peek[A](h: Heap[A]) -> A? = match list.first(h.slots) {
+  some((x, _)) => some(x),
+  none => none,
+}
+
+/// Element count; 0 for an empty heap.
+fn len[A](h: Heap[A]) -> Int = list.len(h.slots)
+
+/// true iff h has no elements.
+fn is_empty[A](h: Heap[A]) -> Bool = list.is_empty(h.slots)
+
+/// The elements in pop order.
+fn to_list[A](h: Heap[A]) -> List[A] = {
+  var q = h
+  var out: List[A] = []
+  for _ in 0..<list.len(h.slots) {
+    match heap.pop(q) {
+      some(x) => list.push(out, x),
+      none => (),
+    }
+  }
+  out
+}
+
+
+
+
+
+/// true if some element == x.
+fn contains[A](h: Heap[A], x: A) -> Bool = {
+  var hit = false
+  for (y, _) in h.slots {
+    if y == x then {
+      hit = true
+    } else ()
+  }
+  hit
+}
+
+/// true if f holds for some element; false when empty.
+fn any[A](h: Heap[A], f: (A) -> Bool) -> Bool = list.any(heap.to_list(h), f)
+
+/// true if f holds for every element; true when empty.
+fn all[A](h: Heap[A], f: (A) -> Bool) -> Bool = list.all(heap.to_list(h), f)
+
+/// Number of elements where f holds.
+fn count[A](h: Heap[A], f: (A) -> Bool) -> Int = list.count(heap.to_list(h), f)
+
+/// The elements where f holds, in a heap of the same order; equal elements
+/// keep the order they went in.
+fn filter[A](h: Heap[A], f: (A) -> Bool) -> Heap[A] = {
+  var out: Heap[A] = { slots: [], next: 0, cmp: h.cmp }
+  for x in heap.to_list(h) {
+    if f(x) then heap.push(out, x) else ()
+  }
   out
 }
 "#;
@@ -39425,6 +39851,7 @@ pub fn source_of(stem: &str) -> Option<&'static str> {
         "datetime_calendar" => Some(SRC_DATETIME_CALENDAR),
         "datetime_format" => Some(SRC_DATETIME_FORMAT),
         "datetime_parse_iso" => Some(SRC_DATETIME_PARSE_ISO),
+        "deque" => Some(SRC_DEQUE),
         "env" => Some(SRC_ENV),
         "env_args" => Some(SRC_ENV_ARGS),
         "env_cwd" => Some(SRC_ENV_CWD),
@@ -39485,6 +39912,7 @@ pub fn source_of(stem: &str) -> Option<&'static str> {
         "fs_write_bytes_raw" => Some(SRC_FS_WRITE_BYTES_RAW),
         "hash" => Some(SRC_HASH),
         "hash_impl" => Some(SRC_HASH_IMPL),
+        "heap" => Some(SRC_HEAP),
         "hex" => Some(SRC_HEX),
         "hex_encode" => Some(SRC_HEX_ENCODE),
         "html" => Some(SRC_HTML),
