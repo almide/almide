@@ -3,8 +3,6 @@
 // the same name over the front-to-back order. Each generic fn runs with Int
 // and String elements and meets the empty deque; the one-position reads give
 // none out of range.
-import deque
-
 local fn asc(a: Int, b: Int) -> Int = if a < b then -1
 else if a > b then 1 else 0
 
