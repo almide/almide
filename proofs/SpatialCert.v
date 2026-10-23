@@ -3,11 +3,17 @@
    MemorySafe.v fixes what memory safety means over ONE run's heap trace. A
    per-build checker cannot see runs; it sees a certificate. This file is the
    first static half for the SPATIAL clause: a certificate language for the
-   element accesses of one list block, a checker over it, and the theorem
-   that EVERY run of an accepted certificate is SPATIAL (`accepts_spatial`).
+   element reads and writes of list blocks, a checker over it, and the
+   theorem that EVERY run of an accepted certificate is SPATIAL
+   (`accepts_spatial`).
+
+   An index SLOT is one (list, index expression) pair the emitter keys its
+   facts by (bounds_facts.rs: `(xs, i, c)` for `xs[i + c]`); `B x` is the
+   slot's block, `Lb b` that block's layout.
 
      PAccess x k    read element `x` (an index slot), then run k:
-                    emits ELoad b (HDR + x * W) W R
+                    emits ELoad (B x) (HDR + x * W) W R
+     PStore x k     write element `x`: emits EStore at the same offset
      PCheck x k     the bounds check the emitter places before a read:
                     `x >=u len` aborts the run, otherwise k runs
      PSet x k       the index slot is reassigned (to any i64)
@@ -26,9 +32,10 @@
    i64 index reads as a value above every count, so one compare excludes
    both ends (`unsigned_ge_excludes`).
 
-   HONEST SCOPE. One block of fixed length (a resize is a new block in the
-   value semantics); loads only (a store is bounded the same way); and the
-   compiler does not emit this certificate yet (#4013's design note, #1696).
+   HONEST SCOPE. Blocks of fixed length: a resize is a new block in the value
+   semantics, and a copy-on-write copy keeps the count and layout, so it is
+   modelled as the same block. The compiler does not emit this certificate
+   yet (#4013's design note, #1696).
    What is proven is the checker's soundness, for every run of an accepted
    certificate, against MemorySafe's own SPATIAL clause. *)
 
@@ -46,6 +53,7 @@ Definition Slot := nat.
 Inductive Prog : Type :=
   | PEnd
   | PAccess (x : Slot) (k : Prog)
+  | PStore (x : Slot) (k : Prog)
   | PCheck (x : Slot) (k : Prog)
   | PSet (x : Slot) (k : Prog)
   | PLoop (body : Prog) (k : Prog)
@@ -59,7 +67,14 @@ Definition well_formed (l : Layout) : Prop :=
 
 Definition bytes_of (l : Layout) : Z := HDR l + LEN l * W l.
 
-Definition blk : Blk := 0%nat.
+(* Which block each slot indexes, and each block's layout. *)
+Record Mem := { B : Slot -> Blk; Lb : Blk -> Layout }.
+
+Definition L (m : Mem) (x : Slot) : Layout := Lb m (B m x).
+
+Definition wf_mem (m : Mem) : Prop := forall b, well_formed (Lb m b).
+
+Definition off_of (m : Mem) (e : Slot -> Z) (x : Slot) : Z := HDR (L m x) + e x * W (L m x).
 
 (* ── Runs ─────────────────────────────────────────────────────────────── *)
 
@@ -78,53 +93,58 @@ Definition fails_check (l : Layout) (v : Z) : bool := LEN l <=? unsigned v.
 
 Inductive Outcome := Done (e : Env) | Aborted.
 
-(* `run l e p t o`: executing `p` from slot values `e` emits trace `t` and ends
+(* `run m e p t o`: executing `p` from slot values `e` emits trace `t` and ends
    in `o`. A failed check aborts the run; a loop runs zero or more times; a
    reassignment writes an i64. *)
-Inductive run (l : Layout) : Env -> Prog -> list Ev -> Outcome -> Prop :=
-  | REnd : forall e, run l e PEnd [] (Done e)
+Inductive run (m : Mem) : Env -> Prog -> list Ev -> Outcome -> Prop :=
+  | REnd : forall e, run m e PEnd [] (Done e)
   | RAccess : forall e x k t o,
-      run l e k t o ->
-      run l e (PAccess x k) (ELoad blk (HDR l + e x * W l) (W l) (R l) :: t) o
+      run m e k t o ->
+      run m e (PAccess x k) (ELoad (B m x) (off_of m e x) (W (L m x)) (R (L m x)) :: t) o
+  | RStore : forall e x k t o,
+      run m e k t o ->
+      run m e (PStore x k) (EStore (B m x) (off_of m e x) (W (L m x)) (R (L m x)) :: t) o
   | RCheckPass : forall e x k t o,
-      fails_check l (e x) = false ->
-      run l e k t o ->
-      run l e (PCheck x k) t o
+      fails_check (L m x) (e x) = false ->
+      run m e k t o ->
+      run m e (PCheck x k) t o
   | RCheckAbort : forall e x k,
-      fails_check l (e x) = true ->
-      run l e (PCheck x k) [] Aborted
+      fails_check (L m x) (e x) = true ->
+      run m e (PCheck x k) [] Aborted
   | RSet : forall e x v k t o,
       is_i64 v ->
-      run l (upd e x v) k t o ->
-      run l e (PSet x k) t o
+      run m (upd e x v) k t o ->
+      run m e (PSet x k) t o
   | RLoopExit : forall e body k t o,
-      run l e k t o ->
-      run l e (PLoop body k) t o
+      run m e k t o ->
+      run m e (PLoop body k) t o
   | RLoopAgain : forall e body k t1 e1 t2 o,
-      run l e body t1 (Done e1) ->
-      run l e1 (PLoop body k) t2 o ->
-      run l e (PLoop body k) (t1 ++ t2) o
+      run m e body t1 (Done e1) ->
+      run m e1 (PLoop body k) t2 o ->
+      run m e (PLoop body k) (t1 ++ t2) o
   | RLoopAbort : forall e body k t1,
-      run l e body t1 Aborted ->
-      run l e (PLoop body k) t1 Aborted
+      run m e body t1 Aborted ->
+      run m e (PLoop body k) t1 Aborted
   | RBranchThen : forall e thn els k t1 e1 t2 o,
-      run l e thn t1 (Done e1) ->
-      run l e1 k t2 o ->
-      run l e (PBranch thn els k) (t1 ++ t2) o
+      run m e thn t1 (Done e1) ->
+      run m e1 k t2 o ->
+      run m e (PBranch thn els k) (t1 ++ t2) o
   | RBranchThenAbort : forall e thn els k t1,
-      run l e thn t1 Aborted ->
-      run l e (PBranch thn els k) t1 Aborted
+      run m e thn t1 Aborted ->
+      run m e (PBranch thn els k) t1 Aborted
   | RBranchElse : forall e thn els k t1 e1 t2 o,
-      run l e els t1 (Done e1) ->
-      run l e1 k t2 o ->
-      run l e (PBranch thn els k) (t1 ++ t2) o
+      run m e els t1 (Done e1) ->
+      run m e1 k t2 o ->
+      run m e (PBranch thn els k) (t1 ++ t2) o
   | RBranchElseAbort : forall e thn els k t1,
-      run l e els t1 Aborted ->
-      run l e (PBranch thn els k) t1 Aborted.
+      run m e els t1 Aborted ->
+      run m e (PBranch thn els k) t1 Aborted.
 
-(* A whole program: allocate the block, then run the body. *)
-Definition program_trace (l : Layout) (t : list Ev) : list Ev :=
-  EAlloc blk (bytes_of l) (R l) :: t.
+(* A whole program: allocate the blocks `bs`, then run the body. *)
+Definition alloc_ev (m : Mem) (b : Blk) : Ev := EAlloc b (bytes_of (Lb m b)) (R (Lb m b)).
+
+Definition program_trace (m : Mem) (bs : list Blk) (t : list Ev) : list Ev :=
+  map (alloc_ev m) bs ++ t.
 
 (* ── The checker ──────────────────────────────────────────────────────── *)
 
@@ -142,7 +162,7 @@ Definition subset (a b : Known) : bool := forallb (mem b) a.
 Fixpoint kills (p : Prog) : list Slot :=
   match p with
   | PEnd => []
-  | PAccess _ k | PCheck _ k => kills k
+  | PAccess _ k | PStore _ k | PCheck _ k => kills k
   | PSet x k => x :: kills k
   | PLoop body k => kills body ++ kills k
   | PBranch t e k => kills t ++ kills e ++ kills k
@@ -155,7 +175,7 @@ Definition minus (k : Known) (ks : list Slot) : Known := filter (fun y => negb (
 Fixpoint check (kn : Known) (p : Prog) : option Known :=
   match p with
   | PEnd => Some kn
-  | PAccess x k => if mem kn x then check kn k else None
+  | PAccess x k | PStore x k => if mem kn x then check kn k else None
   | PCheck x k => check (x :: kn) k
   | PSet x k => check (remove kn x) k
   | PLoop body k =>
@@ -183,8 +203,8 @@ Proof.
 Qed.
 
 (* What the known set promises about the slot values. *)
-Definition sound (l : Layout) (kn : Known) (e : Env) : Prop :=
-  forall x, mem kn x = true -> 0 <= e x < LEN l.
+Definition sound (m : Mem) (kn : Known) (e : Env) : Prop :=
+  forall x, mem kn x = true -> 0 <= e x < LEN (L m x).
 
 Lemma mem_spec : forall k x, mem k x = true <-> In x k.
 Proof.
@@ -234,34 +254,48 @@ Proof.
 Qed.
 Print Assumptions unsigned_ge_excludes.
 
-(* Every load an accepted certificate's run emits lies inside the block. *)
-Definition in_block (l : Layout) (ev : Ev) : Prop :=
+(* Every access an accepted certificate's run emits lies inside its block. *)
+Definition inside (m : Mem) (b : Blk) (off w : Z) (r : Repr) : Prop :=
+  (exists x, b = B m x) /\ r = R (Lb m b) /\ w = W (Lb m b) /\ 0 <= off /\ off + w <= bytes_of (Lb m b).
+
+Definition in_block (m : Mem) (ev : Ev) : Prop :=
   match ev with
-  | ELoad b off w r => b = blk /\ r = R l /\ w = W l /\ 0 <= off /\ off + w <= bytes_of l
+  | ELoad b off w r | EStore b off w r => inside m b off w r
   | _ => False
   end.
 
-Lemma run_sound : forall l e p t o,
-  run l e p t o ->
-  well_formed l -> i64 e ->
-  forall kn kn', sound l kn e -> check kn p = Some kn' ->
-  Forall (in_block l) t /\ (forall e', o = Done e' -> i64 e' /\ sound l kn' e').
+Lemma inside_slot : forall m e x,
+  wf_mem m -> 0 <= e x < LEN (L m x) ->
+  inside m (B m x) (off_of m e x) (W (L m x)) (R (L m x)).
 Proof.
-  intros l e p t o Hrun Hwf.
+  intros m e x Hwf Hx. specialize (Hwf (B m x)).
+  unfold inside, off_of, L, bytes_of, well_formed in *.
+  split; [exists x; reflexivity |]. repeat split; try reflexivity; nia.
+Qed.
+
+Lemma run_sound : forall m e p t o,
+  run m e p t o ->
+  wf_mem m -> i64 e ->
+  forall kn kn', sound m kn e -> check kn p = Some kn' ->
+  Forall (in_block m) t /\ (forall e', o = Done e' -> i64 e' /\ sound m kn' e').
+Proof.
+  intros m e p t o Hrun Hwf.
   induction Hrun; intros Hi kn kn' Hs Hc; simpl in Hc.
   - (* REnd *)
     injection Hc as <-. split; [constructor |]. intros e' He. injection He as <-. tauto.
   - (* RAccess *)
     destruct (mem kn x) eqn:Hm; [| discriminate].
     destruct (IHHrun Hi kn kn' Hs Hc) as [Ht Ho]. split; [| exact Ho].
-    constructor; [| exact Ht].
-    specialize (Hs x Hm). unfold in_block, bytes_of, well_formed in *.
-    repeat split; try reflexivity; nia.
+    constructor; [| exact Ht]. exact (inside_slot m e x Hwf (Hs x Hm)).
+  - (* RStore *)
+    destruct (mem kn x) eqn:Hm; [| discriminate].
+    destruct (IHHrun Hi kn kn' Hs Hc) as [Ht Ho]. split; [| exact Ho].
+    constructor; [| exact Ht]. exact (inside_slot m e x Hwf (Hs x Hm)).
   - (* RCheckPass *)
     apply (IHHrun Hi (x :: kn) kn'); [| exact Hc].
     intros y Hy. simpl in Hy. apply orb_true_iff in Hy. destruct Hy as [Hy | Hy].
-    + apply Nat.eqb_eq in Hy. subst y. destruct Hwf as [_ [Hlen _]].
-      exact (unsigned_ge_excludes (LEN l) (e x) Hlen (Hi x) H).
+    + apply Nat.eqb_eq in Hy. subst y. destruct (Hwf (B m x)) as [_ [Hlen _]].
+      exact (unsigned_ge_excludes (LEN (L m x)) (e x) Hlen (Hi x) H).
     + exact (Hs y Hy).
   - (* RCheckAbort *)
     split; [constructor | discriminate].
@@ -280,10 +314,10 @@ Proof.
     destruct (check (minus kn (kills body)) body) as [kb |] eqn:Hb; [| discriminate].
     destruct (subset (minus kn (kills body)) kb) eqn:Hsub; [| discriminate].
     set (k0 := minus kn (kills body)) in *.
-    assert (Hs0 : sound l k0 e) by (intros y Hy; exact (Hs y (mem_minus _ _ _ Hy))).
+    assert (Hs0 : sound m k0 e) by (intros y Hy; exact (Hs y (mem_minus _ _ _ Hy))).
     destruct (IHHrun1 Hi k0 kb Hs0 Hb) as [Ht1 Ho1].
     destruct (Ho1 e1 eq_refl) as [Hi1 Hs1].
-    assert (Hs01 : sound l k0 e1) by (intros y Hy; exact (Hs1 y (subset_mem _ _ _ Hsub Hy))).
+    assert (Hs01 : sound m k0 e1) by (intros y Hy; exact (Hs1 y (subset_mem _ _ _ Hsub Hy))).
     assert (Hc2 : check k0 (PLoop body k) = Some kn').
     { simpl. assert (Hmm : minus k0 (kills body) = k0) by (unfold k0, minus; apply filter_idem).
       rewrite Hmm, Hb, Hsub. exact Hc. }
@@ -291,14 +325,14 @@ Proof.
     split; [apply Forall_app; split; assumption | exact Ho2].
   - (* RLoopAbort *)
     destruct (check (minus kn (kills body)) body) as [kb |] eqn:Hb; [| discriminate].
-    assert (Hs0 : sound l (minus kn (kills body)) e) by (intros y Hy; exact (Hs y (mem_minus _ _ _ Hy))).
+    assert (Hs0 : sound m (minus kn (kills body)) e) by (intros y Hy; exact (Hs y (mem_minus _ _ _ Hy))).
     destruct (IHHrun Hi _ kb Hs0 Hb) as [Ht _]. split; [exact Ht | discriminate].
   - (* RBranchThen *)
     destruct (check kn thn) as [kt |] eqn:Ht; [| discriminate].
     destruct (check kn els) as [ke |] eqn:He; [| discriminate].
     destruct (IHHrun1 Hi kn kt Hs Ht) as [Ht1 Ho1].
     destruct (Ho1 e1 eq_refl) as [Hi1 Hs1].
-    assert (Hsi : sound l (inter kt ke) e1) by (intros y Hy; exact (Hs1 y (proj1 (mem_inter _ _ _ Hy)))).
+    assert (Hsi : sound m (inter kt ke) e1) by (intros y Hy; exact (Hs1 y (proj1 (mem_inter _ _ _ Hy)))).
     destruct (IHHrun2 Hi1 (inter kt ke) kn' Hsi Hc) as [Ht2 Ho2].
     split; [apply Forall_app; split; assumption | exact Ho2].
   - (* RBranchThenAbort *)
@@ -309,7 +343,7 @@ Proof.
     destruct (check kn els) as [ke |] eqn:He; [| discriminate].
     destruct (IHHrun1 Hi kn ke Hs He) as [Ht1 Ho1].
     destruct (Ho1 e1 eq_refl) as [Hi1 Hs1].
-    assert (Hsi : sound l (inter kt ke) e1) by (intros y Hy; exact (Hs1 y (proj2 (mem_inter _ _ _ Hy)))).
+    assert (Hsi : sound m (inter kt ke) e1) by (intros y Hy; exact (Hs1 y (proj2 (mem_inter _ _ _ Hy)))).
     destruct (IHHrun2 Hi1 (inter kt ke) kn' Hsi Hc) as [Ht2 Ho2].
     split; [apply Forall_app; split; assumption | exact Ho2].
   - (* RBranchElseAbort *)
@@ -321,37 +355,89 @@ Print Assumptions run_sound.
 
 (* ── The theorem: every run of an accepted certificate is SPATIAL ─────── *)
 
-Definition block_of (l : Layout) : Block := mkBlock (bytes_of l) (R l) 1 (fun _ => false).
+(* What the heap must hold for block b: its size and representation. *)
+Definition shaped (m : Mem) (h : Heap) (b : Blk) : Prop :=
+  exists x, h b = Some x /\ size x = bytes_of (Lb m b) /\ repr x = R (Lb m b).
 
-Lemma loads_spatial : forall l h t,
-  well_formed l -> h blk = Some (block_of l) -> Forall (in_block l) t ->
-  holds spatial_ev h t /\ holds type_ev h t.
+Lemma step_keeps_shape : forall m h b ev,
+  in_block m ev -> shaped m h b -> shaped m (step h ev) b.
 Proof.
-  intros l h t Hwf Hh Hall. induction Hall as [| ev t Hev _ IH]; simpl; [tauto |].
-  destruct ev as [b n k | b o w k | b o w k | b | b]; simpl in Hev; try contradiction.
-  destruct Hev as [-> [-> [-> [Ho Hw]]]]. simpl.
-  destruct Hwf as [_ [_ HW]].
-  split; split; try apply IH;
-    exists (block_of l); split; try exact Hh; try reflexivity.
-  unfold in_bounds, block_of. simpl. lia.
+  intros m h b ev Hev [x [Hx [Hsz Hr]]].
+  destruct ev as [b' n k | b' o w k | b' o w k | b' | b']; simpl in Hev; try contradiction; simpl.
+  - (* EStore *)
+    destruct (h b') as [y |] eqn:Hy; [| exists x; tauto].
+    unfold set. cbv beta. destruct (Nat.eqb b b') eqn:E.
+    + apply Nat.eqb_eq in E. subst b'. rewrite Hx in Hy. injection Hy as <-.
+      exists (mkBlock (size x) (repr x) (rc x) (mark (init x) o w)). simpl. rewrite Nat.eqb_refl. split; [reflexivity | tauto].
+    + exists x. rewrite E. tauto.
+  - (* ELoad *) exists x. tauto.
 Qed.
 
-(* `accepts_spatial`: an accepted certificate, a well-formed block and i64
-   index slots give a SPATIAL trace (and a well-typed one: every load reads
-   the block's representation) on EVERY run — every loop count, every arm,
-   every reassigned value, and runs cut short by a failed check. *)
-Theorem accepts_spatial : forall l e p t o,
-  well_formed l -> accepts p = true -> i64 e -> run l e p t o ->
-  Spatial (program_trace l t) /\ WellTyped (program_trace l t).
+Lemma accesses_spatial : forall m h t,
+  wf_mem m -> (forall b, (exists x, b = B m x) -> shaped m h b) -> Forall (in_block m) t ->
+  holds spatial_ev h t /\ holds type_ev h t.
 Proof.
-  intros l e p t o Hwf Hacc Hi Hrun. unfold accepts in Hacc.
+  intros m h t Hwf Hh Hall. revert h Hh.
+  induction Hall as [| ev t Hev _ IH]; intros h Hh; simpl; [tauto |].
+  assert (Hh' : forall b, (exists x, b = B m x) -> shaped m (step h ev) b)
+    by (intros b Hb; exact (step_keeps_shape m h b ev Hev (Hh b Hb))).
+  destruct (IH (step h ev) Hh') as [Hs Ht].
+  destruct ev as [b n k | b o w k | b o w k | b | b]; simpl in Hev; try contradiction;
+    destruct Hev as [Hb [Hr [Hw [Ho Hend]]]];
+    destruct (Hh b Hb) as [x [Hx [Hsz Hrx]]];
+    destruct (Hwf b) as [_ [_ HW]];
+    (split; split; [| exact Hs | | exact Ht]);
+    exists x; (split; [exact Hx |]); unfold in_bounds; try lia; congruence.
+Qed.
+
+Lemma holds_app : forall P h a b,
+  holds P h (a ++ b) <-> holds P h a /\ holds P (fold_left step a h) b.
+Proof.
+  intros P h a. revert h. induction a as [| ev a IH]; intros h b; simpl; [tauto |].
+  rewrite IH. tauto.
+Qed.
+
+Lemma allocs_shaped : forall m bs h b,
+  (In b bs \/ shaped m h b) -> shaped m (fold_left step (map (alloc_ev m) bs) h) b.
+Proof.
+  intros m bs. induction bs as [| b0 bs IH]; intros h b Hb; simpl.
+  - destruct Hb as [[] | Hb]. exact Hb.
+  - apply IH. destruct (in_dec Nat.eq_dec b bs) as [Hin | Hnin]; [left; exact Hin |]. right.
+    unfold alloc_ev, set. simpl. cbv beta. destruct (Nat.eqb b b0) eqn:E.
+    + apply Nat.eqb_eq in E. subst b0.
+      exists (mkBlock (bytes_of (Lb m b)) (R (Lb m b)) 1 (fun _ => false)). simpl. rewrite Nat.eqb_refl. split; [reflexivity | tauto].
+    + destruct Hb as [[E' | Hin] | [x [Hx Hrest]]];
+        [subst b0; rewrite Nat.eqb_refl in E; discriminate | contradiction |].
+      exists x. simpl. rewrite E. tauto.
+Qed.
+
+Lemma allocs_spatial : forall P m bs h,
+  (forall h b n k, P h (EAlloc b n k)) -> holds P h (map (alloc_ev m) bs).
+Proof.
+  intros P m bs. induction bs as [| b bs IH]; intros h HP; simpl; [exact I |].
+  split; [apply HP | apply IH; exact HP].
+Qed.
+
+(* `accepts_spatial`: an accepted certificate, well-formed blocks that the
+   program allocates, and i64 index slots give a SPATIAL trace (and a
+   well-typed one: every access uses its block's representation) on EVERY
+   run — every loop count, every arm, every reassigned value, and runs cut
+   short by a failed check. *)
+Theorem accepts_spatial : forall m bs e p t o,
+  wf_mem m -> (forall x, In (B m x) bs) ->
+  accepts p = true -> i64 e -> run m e p t o ->
+  Spatial (program_trace m bs t) /\ WellTyped (program_trace m bs t).
+Proof.
+  intros m bs e p t o Hwf Hbs Hacc Hi Hrun. unfold accepts in Hacc.
   destruct (check [] p) as [kn' |] eqn:Hc; [| discriminate].
-  assert (Hs : sound l [] e) by (intros x Hx; discriminate).
-  destruct (run_sound l e p t o Hrun Hwf Hi [] kn' Hs Hc) as [Hall _].
-  set (h1 := step empty_heap (EAlloc blk (bytes_of l) (R l))).
-  assert (Hh : h1 blk = Some (block_of l)) by (unfold h1; simpl; unfold set; reflexivity).
-  destruct (loads_spatial l h1 t Hwf Hh Hall) as [Hsp Hty].
-  unfold Spatial, WellTyped, program_trace. simpl. split; split; trivial; exact I.
+  assert (Hs : sound m [] e) by (intros x Hx; discriminate).
+  destruct (run_sound m e p t o Hrun Hwf Hi [] kn' Hs Hc) as [Hall _].
+  assert (Hh : forall b, (exists x, b = B m x) ->
+                 shaped m (fold_left step (map (alloc_ev m) bs) empty_heap) b).
+  { intros b [x ->]. apply allocs_shaped. left. apply Hbs. }
+  destruct (accesses_spatial m _ t Hwf Hh Hall) as [Hsp Hty].
+  unfold Spatial, WellTyped, program_trace. rewrite !holds_app.
+  split; split; try assumption; apply allocs_spatial; intros; exact I.
 Qed.
 Print Assumptions accepts_spatial.
 
@@ -393,24 +479,35 @@ Example rejects_one_arm :
   accepts (PBranch (PCheck 0 PEnd) PEnd (PAccess 0 PEnd)) = false.
 Proof. reflexivity. Qed.
 
+(* Accepted: a checked read then a store to the same element (#3345's
+   fannkuch flip). Rejected: a store with no check. *)
+Example accepts_read_then_store : accepts (PCheck 0 (PAccess 0 (PStore 0 PEnd))) = true.
+Proof. reflexivity. Qed.
+
+Example rejects_unchecked_store : accepts (PStore 0 PEnd) = false.
+Proof. reflexivity. Qed.
+
 (* Rejected: a check of a different slot. *)
 Example rejects_other_slot : accepts (PCheck 1 (PAccess 0 PEnd)) = false.
 Proof. reflexivity. Qed.
 
 Local Open Scope Z_scope.
 
-(* The rejections matter: the unchecked read's run IS out of bounds. A block
-   of one 8-byte element and index 5 reads past the end. *)
+(* The rejections matter: the unchecked read's run IS out of bounds. One
+   block of one 8-byte element, and index 5 reads past its end. *)
+Definition one_block : Mem :=
+  {| B := fun _ => 0%nat; Lb := fun _ => {| HDR := 8; LEN := 1; W := 8; R := 0%nat |} |}.
+
 Example unchecked_run_not_spatial :
-  let l := {| HDR := 8; LEN := 1; W := 8; R := 0%nat |} in
-  let t := [ELoad blk (HDR l + 5 * W l) (W l) (R l)] in
-  run l (fun _ => 5) (PAccess 0%nat PEnd) t (Done (fun _ => 5)) /\
-  ~ Spatial (program_trace l t).
+  let t := [ELoad 0%nat (off_of one_block (fun _ => 5) 0%nat) 8 0%nat] in
+  run one_block (fun _ => 5) (PAccess 0%nat PEnd) t (Done (fun _ => 5)) /\
+  ~ Spatial (program_trace one_block [0%nat] t).
 Proof.
   simpl. split.
   - apply RAccess. apply REnd.
   - unfold Spatial, program_trace. simpl. unfold set. simpl.
-    intros [_ [[x [Hx Hb]] _]]. injection Hx as <-. unfold in_bounds in Hb. cbv [size bytes_of HDR LEN W] in Hb. lia.
+    intros [_ [[x [Hx Hb]] _]]. injection Hx as <-. unfold in_bounds in Hb.
+    cbv [size bytes_of off_of L HDR LEN W B Lb one_block] in Hb. lia.
 Qed.
 Print Assumptions unchecked_run_not_spatial.
 
