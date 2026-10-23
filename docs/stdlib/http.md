@@ -28,12 +28,24 @@ effect fn main() -> Unit = {
 }
 ```
 
-The server listens on `0.0.0.0:port` (every interface; ADR-0020 §5.7) and
-handles one request at a time, in the order they arrive. The server reads each
-request within limits before the handler sees it. A body over 1 MiB, declared
-by `Content-Length` or sent chunked, is answered `413`. A body shorter than its
-`Content-Length` is `400`. A request not read within 30 s is `503`. The
-handler is not called for any of them. A chunked request body is decoded.
+The server listens on `0.0.0.0:port` (every interface; ADR-0020 §5.7). It
+accepts and reads up to 64 connections at once, and calls the handler for one
+request at a time, in the order the requests arrive whole. At 64 connections in
+flight it stops accepting until one closes; new connections wait in the
+operating system's backlog. A client that sends its request slowly holds only
+its own connection, so other clients are still answered (#4021). The server
+reads each request within limits before the handler sees it:
+
+| Limit | Value | Answer |
+|---|---|---|
+| Request head (request line and header fields), from accept | 10 s | `408`; a client that sent nothing by then is closed without an answer |
+| Whole request, from accept (the body read and the wait for the handler included) | 30 s | `503` |
+| Body, declared by `Content-Length` or sent chunked | 1 MiB | `413` |
+| Request line / header line | 8 KiB | `414` / `431` |
+| Header fields | 100 | `431` |
+
+A body shorter than its `Content-Length` is `400`. The handler is not called
+for any of these. A chunked request body is decoded.
 The response goes out as `HTTP/1.1 <status> <reason>` (the registered reason,
 empty for an unregistered code), the response's headers in order,
 `Connection: close`, `Content-Length`, the body, and then the connection
@@ -49,9 +61,11 @@ replaced by `503`. A handler `err(m)` answers `500` with the body
 `Error: bind failed: <reason>` and exit code 1.
 
 **On wasm** (C-367): `almide run app.almd --target wasm` serves the same
-program on the embedded host. One instance handles every request, exactly as
-the native process does: `main` runs once, and a value it computed before
-`http.serve` is the same on every request. The status line, headers and body
+program on the embedded host. One instance handles every request, one at a
+time, exactly as the native process does: `main` runs once. The host reads
+connections through the same server code as native, with the same limits (64
+connections, the 10 s request-head deadline and its `408`), so a slow client
+does not hold up the others there either. The status line, headers and body
 are byte-identical to native. A stock artifact from
 `almide build --target wasm` has no listening socket, so `almide build` and
 `almide check --target wasm` still refuse `http.serve` (E081, #2659).
