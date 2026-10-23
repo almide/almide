@@ -1,11 +1,11 @@
 //! #4022: file access bounded by directory, on both targets.
 //!
-//! - The rooted family (`fs.open_root`, `fs.root_*`, C-395) refuses a path
+//! - The rooted family (`fs.open_root`, `fs.root_*`, C-392) refuses a path
 //!   that leaves its root through a symlink anywhere along it with the same
 //!   `fs: path escapes root: <path>` on native and on the embedded wasm host.
 //!   The stdlib cannot make a symlink, so the tree is built here;
 //!   `spec/wasm_cross/fs_root_escape.almd` holds the `..` and absolute cases.
-//! - `[permissions] fs` (C-396) bounds every fs call of the program: a path
+//! - `[permissions] fs` (C-393) bounds every fs call of the program: a path
 //!   whose resolved place (symlinks followed) lies outside the granted roots
 //!   is refused with `fs: "<path>" is outside [permissions] fs`, the
 //!   predicates answer false, and both targets print the same bytes. Without

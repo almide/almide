@@ -5103,7 +5103,7 @@ id        = "C-389"
 spec      = "ALS-R5"
 title     = "http.serve reads up to 64 connections at once and answers a request head not whole within 10 s with 408, so a slow client holds only its own connection"
 statement = "ALS-R5 (almide/almide#4021): on a socket host — native, and the embedded wasm lane (`almide run --target wasm`) — `http.serve(port, f)` accepts and reads up to 64 connections at once. A connection whose request is still arriving holds only itself: a request on another connection that arrives whole is handed to the handler without waiting for it. The handler is still called for one request at a time, in the order the requests arrive whole (C-367). While 64 connections are accepted and not yet closed, the host accepts no more; the next connections wait in the operating system's listen backlog until one closes. The request head (the request line and the header fields up to the empty line) must arrive whole within 10 s of accept. A client that has sent part of the head but not all of it by then is answered `408` with `Content-Type: text/plain` and `Connection: close`, and the connection closes; the handler is not called. A client that has sent nothing by then is closed unanswered. The 10 s head deadline is separate from the request timeout: the body is read, and the request waits for the handler, under the 30 s request timeout counted from accept, whose answer stays `503`. NOT covered: the exact instant of the `408` within the scheduler's slack; whether a connection past the 64 is accepted later or refused by a full backlog (the operating system's); the answer to a slow reader of the response (bounded by the write timeout, then closed); export hosts (`wasmtime serve` running a stock artifact, C-375), whose admission, concurrency and timeouts are the host's configuration. Evidence: spec/serve_cross/http_serve_limits.almd, the server fixture the implementation's driver starts on both legs at once: one client sends a request head one byte every 100 ms and never finishes it, a second client's request is answered within 2 s, the slow client is answered `408` between 9.9 s and 15 s after it connected, the handler logs only the second request, and the two legs' answers are equal under C-367's comparison."
-since     = "0.68.0"
+since     = "0.69.0"
 status    = "active"
 evidence  = [
   { path = "spec/serve_cross/http_serve_limits.almd", class = "fixture" },
@@ -5131,4 +5131,29 @@ since     = "0.69.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/json_parse_depth_bound.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-392"
+spec      = "ALS-R6"
+title     = "fs.open_root's family keeps every path inside its root: a path that leaves it by .., an absolute path or a symlink is refused with one message on every target"
+statement = "`fs.open_root(dir)` (#4022) answers an `FsRoot` for an existing directory and `err(\"fs.open_root(\\\"<dir>\\\"): not a directory\")` otherwise. `fs.root_read_text`, `root_read_bytes`, `root_write_text`, `root_list_dir`, `root_exists` and `root_remove` take the root and a `path` relative to it: `.` and empty segments are dropped and `..` removes the segment before it, so `sub/../sub/a.txt` names `sub/a.txt` under the root. A `path` that is absolute, whose `..` climbs past the root, or that passes through a symlink at any of its segments under the root (the last one included, whatever the link points to) is refused with `err(\"fs: path escapes root: <path>\")` before anything is read, written or removed; every other path is the plain fs call (`read_text`, `read_bytes_raw`, `write`, `list_dir`, `exists` as `ok(Bool)`, `remove`) on `<root>/<segments>`, with that call's own answer. Symlinks are not followed inside a root at all (the openat2 RESOLVE_NO_SYMLINKS rule, not in-root following). The check is written once, in Almide over the plain fs calls, so native and wasm refuse the same paths with the same bytes. It runs before the call: a tree rewritten between the two can race it."
+since     = "0.69.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/fs_root_escape.almd", class = "fixture" },
+  { path = "spec/stdlib/fs_root_test.almd", class = "fixture" },
+  { path = "tests/fs_scope_test.rs", name = "a_symlink_inside_a_root_pointing_outside_is_refused_alike_on_both_targets", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-393"
+spec      = "ALS-R6"
+title     = "[permissions] fs bounds every fs call to the granted directories, symlinks resolved, with one refusal on native and the embedded wasm host"
+statement = "`almide.toml` `[permissions] fs = [\"./data\", \"/tmp\"]` (#4022) lists the directories a program may touch; a relative entry is anchored to the manifest's directory. Every fs call of `almide run` / `almide build` on native and of the embedded wasm host resolves its path first — absolute against the working directory, the longest existing prefix with every symlink resolved, the rest applied lexically — and a path that lands outside every granted directory, or that passes a dangling symlink, is refused before it is touched: `exists`, `is_dir`, `is_file` and `is_symlink` answer `false`, every other call `err(\"fs: \\\"<path>\\\" is outside [permissions] fs\")`, byte-identical on both legs. Every call is judged by where its path leads, the no-follow ones (`is_symlink`, `remove`) included, so a link inside a granted directory that points out of it can be neither asked about nor removed under the scope. On native the check wraps the program's calls to the fs runtime (the runtime itself is unchanged), on the embedded wasm host it sits in front of the one fs import. The temp ops are judged by the temp dir they create in, `glob` by its pattern's literal base. The p3 component the embedded host runs for a full-response http program preopens exactly the granted directories (the working directory and the temp dir when the key is absent) instead of `/`. Without the key nothing is bounded, as before. A test harness build (`almide test`) has no `main` and is not bounded; a stock wasm runtime is bounded by the preopens its operator grants."
+since     = "0.69.0"
+status    = "active"
+evidence  = [
+  { path = "tests/fs_scope_test.rs", name = "permissions_fs_bounds_every_fs_call_alike_on_both_targets", class = "fixture" },
+  { path = "tests/fs_scope_test.rs", name = "the_component_host_preopens_only_the_granted_roots", class = "fixture" },
 ]
