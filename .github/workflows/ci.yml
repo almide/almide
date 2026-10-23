@@ -2220,7 +2220,10 @@ jobs:
     # evicted, and a cancelled run saves none). 45 covers the cold path; the
     # develop-only `save-if` on every rust-cache step keeps merge-queue and
     # PR refs, which nothing ever reads back, from evicting develop's entries.
-    timeout-minutes: 45
+    # 70 since the double-free trap step (#4081) reruns backend_parity and the
+    # gauntlet: develop's run measured 17-41 min before it, and #4081's main
+    # test step alone took 42 min of 45 on 2026-10-23 before it was cancelled.
+    timeout-minutes: 70
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
