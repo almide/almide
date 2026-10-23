@@ -29,9 +29,9 @@ slope 1.132
 #   redesign adds functions to `list`, `map`, `set` and `string` (#4062,
 #   #4078), and the ratio fell with no slower per-line work (`slope` and
 #   `slope_check` stayed in band). CI readings: develop 4.178, 3.847, 3.605 as
-#   #4042 and #4062 landed; #4078 3.035 with `deque` and `heap` auto-imported,
-#   which this change makes `import`-only (a one-line check 24 -> 22 ms against
-#   develop's 19 ms). Loading a bundled module only when a program uses it
+#   #4042 and #4062 landed; #4078 3.035 (a one-line check 24 ms against
+#   develop's 19 ms, about 2 ms of it `deque` and `heap`, which stay
+#   auto-imported). Loading a bundled module only when a program uses it
 #   (#4071) gives the floor back and should re-anchor this up again.
 ratio 3.500
 #
