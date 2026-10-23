@@ -497,6 +497,10 @@ pub(crate) fn compile_to_wasm_bytes_surfaced(file: &str, allow_unverified: bool,
     // requests alone, not on what the free lists hold (canonical_alloc.rs).
     let _canonical_alloc = almide_base::env::flag("ALMIDE_WASM_CANONICAL_ALLOC")
         .then(almide_wasm::canonical_alloc::CanonicalGuard::set);
+    // ALMIDE_WASM_CHECKED_ALLOC (#4009): poison freed blocks and check the
+    // poison on reuse — a write after free traps (checked_alloc.rs).
+    let _checked_alloc = almide_base::env::flag("ALMIDE_WASM_CHECKED_ALLOC")
+        .then(almide_wasm::checked_alloc::CheckedGuard::set);
 
     // The route resolves the module list itself (once, off disk, through the
     // same resolver) and hands the FRESH un-inferred programs to whichever

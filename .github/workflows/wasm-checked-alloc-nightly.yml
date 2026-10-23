@@ -1,0 +1,64 @@
+name: Wasm checked allocator (nightly)
+
+# #4009 item 2: the wasm leg's use-after-free and stray-write detector.
+# scripts/wasm-checked-alloc.sh builds every spec/wasm_cross program twice —
+# ordinarily and under ALMIDE_WASM_CHECKED_ALLOC, where `$free` poisons a
+# freed block and `$alloc` checks the poison before reuse — and fails on any
+# difference in stdout, stderr or exit status. Its negative control (a write
+# through a dangling `ffi` address, proofs/fixtures/heap-check/) must exit 0
+# ordinarily and 70 under the switch, or the check has no teeth.
+
+on:
+  schedule:
+    # 05:40 UTC — clear of the fuzz (03:00), conformance (04:30), shape
+    # matrix (04:50) and mutation-sweep (05:15) windows.
+    - cron: "40 5 * * *"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_TOOLCHAIN: "1.96.0"
+
+permissions:
+  contents: read
+
+jobs:
+  corpus:
+    name: Checked allocator, shard ${{ matrix.shard }}/4
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: linux-release-${{ env.RUST_TOOLCHAIN }}
+
+      - name: Install wasmtime (the pin setup-test-leg uses)
+        run: |
+          VERSION=v49.0.1
+          TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
+          for i in 1 2 3 4 5; do
+            curl -fLO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" && break
+            echo "wasmtime download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$TARBALL"
+          done
+          tar -xf "$TARBALL"
+          sudo mv wasmtime-*/wasmtime /usr/local/bin/
+          wasmtime --version
+
+      - name: Build the compiler (release)
+        run: cargo build --release --bin almide
+
+      - name: Ordinary build vs checked build, every fixture of the shard
+        env:
+          ALMIDE: ${{ github.workspace }}/target/release/almide
+          WASM_CHECKED_SHARD: ${{ matrix.shard }}/4
+        run: bash scripts/wasm-checked-alloc.sh

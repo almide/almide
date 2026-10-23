@@ -55,10 +55,18 @@ impl Drop for CanonicalGuard {
 
 /// `$alloc`'s class-slot head, the value its pop test reads: the slot's
 /// first word, or under the switch a constant 0 (an empty list), so the
-/// request takes the bump path.
-pub(crate) fn emit_class_head<'a, 'b>(i: &'a mut InstructionSink<'b>, canonical: bool, slot: u32) -> &'a mut InstructionSink<'b> {
+/// request takes the bump path. Under the checked-allocator switch
+/// (checked_alloc.rs, #4009) a non-empty head's poison is checked first;
+/// `(head, p, end)` are `$alloc`'s head local and two scratch locals.
+pub(crate) fn emit_class_head<'a, 'b>(i: &'a mut InstructionSink<'b>, canonical: bool, slot: u32, (head, p, end): (u32, u32, u32)) -> &'a mut InstructionSink<'b> {
     if canonical {
         i.i32_const(0)
+    } else if crate::checked_alloc::armed() {
+        i.local_get(slot).i32_load(MemArg { offset: 0, align: 2, memory_index: 0 }).local_tee(head);
+        i.if_(wasm_encoder::BlockType::Empty);
+        crate::checked_alloc::emit_poison_check(i, head, p, end);
+        i.end();
+        i.local_get(head)
     } else {
         i.local_get(slot).i32_load(MemArg { offset: 0, align: 2, memory_index: 0 })
     }
