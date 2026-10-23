@@ -1153,11 +1153,11 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_UPDATE_INTERP_LEDGER` | harness | regenerate the interpreter abstain and bridge-fallback ledgers |
 | `ALMIDE_UPDATE_NAME_SITES` | harness | remove stale rows from the name-keyed property ledger and append the new sites (each still needs its `why`) |
 | `ALMIDE_UPDATE_NATIVE_OWN` | harness | regenerate the native result-ownership ledger |
+| `ALMIDE_UPDATE_NATIVE_VERIFIED_FLOOR` | harness | regenerate proofs/native-verified-floor.txt, the spec/wasm_cross fixtures the verified native renderer covers (#4006, tests/native_verified_floor_test.rs) |
 | `ALMIDE_UPDATE_SIZES` | harness | regenerate the structural leg's size baselines |
 | `ALMIDE_UPDATE_SIZE_LADDER` | harness | regenerate the stdlib-linking size ladder ledger (#2141) |
 | `ALMIDE_UPDATE_SNAPSHOTS` | tool | same as `almide test --update-snapshots` |
 | `ALMIDE_UPDATE_SURFACE` | harness | regenerate the exercised-surface golden |
-| `ALMIDE_UPDATE_NATIVE_VERIFIED_FLOOR` | harness | regenerate proofs/native-verified-floor.txt, the spec/wasm_cross fixtures the verified native renderer covers (#4006, tests/native_verified_floor_test.rs) |
 | `ALMIDE_UPDATE_WITNESS_FLOOR` | harness | regenerate the certificate witness floor |
 | `ALMIDE_VERBOSE` | debug | same as `almide -v`: surface the native wall-and-fallback notes that a quiet run hides |
 | `ALMIDE_VERIFIED_DEBUG` | debug | name the wasm leg that rendered, and why the other declined (the route oracle) |
