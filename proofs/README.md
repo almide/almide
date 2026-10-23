@@ -84,6 +84,18 @@ compiler with qualified use in safety-critical settings).
   checker, kernel, almide-verify). That the witness's events are the
   accesses the bytes contain is trusted, as for the ownership witness.
 
+- **#4014: `CoreSafe.v` — well-typed core programs are MemorySafe.** A
+  typed core of the source language — ints, bools, int lists with value
+  semantics, `let` (fresh names), assignment, element store (copy into a
+  fresh block), `if`, `while`, `make`, indexing with its bounds check, `len`
+  — with a big-step semantics that emits MemorySafe.v's heap trace in the
+  layout the compiler uses (header, then one slot per element).
+  `typed_core_memory_safe`: every run of a well-typed program that finishes,
+  or that a failed check ends, is `MemorySafe` — spatial, temporal,
+  initialization and type. `unchecked_index_not_safe` shows the check is
+  what spatial rests on. Not yet: closures, records, variants, strings,
+  calls, frees, diverging runs, and any link to the compiler's lowering.
+
 ## Verify (the third-party `make verify`)
 
 ```
