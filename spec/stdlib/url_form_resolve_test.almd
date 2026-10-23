@@ -23,10 +23,15 @@ test "decode_form inverts encode_form" {
 }
 
 test "parse_query decodes keys and values" {
-  assert_eq(url.parse_query("q=a+b&lang=ja"), ok([("q", "a b"), ("lang", "ja")]))
-  assert_eq(url.parse_query("flag&x=%41&&"), ok([("flag", ""), ("x", "A")]))
-  assert_eq(url.parse_query(""), ok([]))
-  assert_eq(url.parse_query("x=%zz"), err("url.parse_query: invalid percent escape"))
+  let want_plus = [("q", "a b"), ("lang", "ja")]
+  assert_eq(url.parse_query("q=a+b&lang=ja"), ok(want_plus))
+  let want_bare = [("flag", ""), ("x", "A")]
+  assert_eq(url.parse_query("flag&x=%41&&"), ok(want_bare))
+  let want_empty: List[(String, String)] = []
+  assert_eq(url.parse_query(""), ok(want_empty))
+  let bad = url.parse_query("x=%zz")
+  assert_eq(result.is_err(bad), true)
+  assert_eq(result.to_err_option(bad) ?? "", "url.parse_query: invalid percent escape")
 }
 
 test "parse_query inverts build_query" {
