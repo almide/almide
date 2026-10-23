@@ -881,8 +881,8 @@ wired_by = ".github/workflows/wasm-checked-alloc-nightly.yml"
 class = "NEGATIVE_TESTED"
 evidence = "#4009 landing (2026-10-23): every invocation first runs a control — proofs/fixtures/heap-check/uaf_write.almd writes through a dangling ffi address — and fails unless the ordinary build exits 0 and the checked build exits 70 with the heap-check message; locally the control read exit 0 vs 70, and scripts/wasm-checked-alloc-reinject.sh re-injects #3538 and requires this gate to fail"
 measures = "the number of spec/wasm_cross programs whose ordinary and ALMIDE_WASM_CHECKED_ALLOC builds differ in stdout, stderr or exit status, plus the control's verdict"
-varies = "develop 5059b4cde + the switch, aarch64-apple-darwin, wasmtime 47.0.2: 958 built, 958 identical, 0 different; with #3538 re-injected the reproduction differs (both builds print freed bytes, different ones)"
-blind = "an out-of-bounds write into a LIVE block -> UNCOMPENSATED; blocks above the size-class ceiling (the large list keeps links in the payload) -> UNCOMPENSATED; a read after free whose poisoned value prints the same as the old one -> .github/workflows/ci-cross-target.yml"
+varies = "develop 5059b4cde + the switch, aarch64-apple-darwin, wasmtime 47.0.2: 958 built, 958 identical, 0 different (again with the canaries: 958 identical, and the overrun control exits 0 ordinarily and 70 checked); with #3538 re-injected the reproduction differs (both builds print freed bytes, different ones)"
+blind = "an out-of-bounds write inside a LIVE block's usable capacity, or one that skips the canary and lands further on, or into a block never freed -> UNCOMPENSATED; blocks above the size-class ceiling (the large list keeps links in the payload) -> UNCOMPENSATED; a read after free whose poisoned value prints the same as the old one -> .github/workflows/ci-cross-target.yml"
 
 [[gate]]
 path = "scripts/wasm-checked-alloc-reinject.sh"
