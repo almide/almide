@@ -61,11 +61,21 @@ fn stdlib_module_names() -> BTreeSet<String> {
     names
 }
 
-/// One cell's module: `type <ty>` built by `build`. The payload is a `Bool`,
-/// never the declared name, so the signature and the literal both name the
-/// declared type whatever builtin it shares a name with.
+/// A cell's payload: its type, the literal `build` is called with, and the
+/// test that reads it back. It is a `Bool`, never the declared name, except
+/// in the cell that declares `Bool` itself (the `bool` module's): there the
+/// bare `Bool` names the declared type (module-system §4.5) and the builtin
+/// cannot be written, so that cell carries a `String`.
+fn cell_payload(ty: &str) -> (&'static str, &'static str, &'static str) {
+    if ty == "Bool" { ("String", "\"y\"", " == \"y\"") } else { ("Bool", "true", "") }
+}
+
+/// One cell's module: `type <ty>` built by `build`. The payload is never the
+/// declared name, so the signature and the literal both name the declared
+/// type whatever builtin it shares a name with.
 fn cell_module(ty: &str) -> String {
-    format!("type {ty} = {{ ok: Bool }}\n\nfn build(b: Bool) -> {ty} = {ty} {{ ok: b }}\n")
+    let (p, _, _) = cell_payload(ty);
+    format!("type {ty} = {{ ok: {p} }}\n\nfn build(b: {p}) -> {ty} = {ty} {{ ok: b }}\n")
 }
 
 /// The line a cell prints when its value came back through its own type.
@@ -87,7 +97,13 @@ fn stdlib_named_package(root: &Path, modules: &[String], as_dependency: bool) ->
         write(&pkg.join(format!("src/{m}.almd")), &cell_module(&pascal(m)));
     }
     let imports: String = modules.iter().map(|m| format!("import self.{m}\n")).collect();
-    let parts: Vec<String> = modules.iter().map(|m| cell_line(&format!("{m}.build(true)"), m)).collect();
+    let parts: Vec<String> = modules
+        .iter()
+        .map(|m| {
+            let (_, lit, test) = cell_payload(&pascal(m));
+            format!("if {m}.build({lit}).ok{test} then \"ok-{m}\" else \"lost-{m}\"")
+        })
+        .collect();
     if as_dependency {
         write(&pkg.join("src/mod.almd"), &format!("{imports}\nfn run() -> List[String] = [{}]\n", parts.join(", ")));
         let app = root.join("app");
