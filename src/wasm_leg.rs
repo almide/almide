@@ -355,31 +355,35 @@ fn link_self_host(
             c
         });
     }
-    /// `main`'s abort renders a non-String error through its repr (#3470,
-    /// `emit_abort_message`): a Result in main whose err type can reach a
-    /// Float is a display demand, the same as `${e}`. Before #4071 the demand
-    /// was met by accident — every auto-imported module was lowered into
-    /// every program, and their bodies demanded the float formatter.
-    fn main_err_reaches_float(e: &crate::ir::IrExpr) -> bool {
+    /// An error value whose type can reach a Float is displayed at emission
+    /// wherever it meets a String channel: `main`'s abort renders it through
+    /// its repr (#3470, `emit_abort_message`), and a `!` from a
+    /// `Result[_, Float32]` into an effect fn's String error formats it. Any
+    /// Result in a body with such an err type is therefore a display demand,
+    /// the same as `${e}` (an unused splice is reachability-pruned). Before
+    /// #4071 the demand was met by accident — every auto-imported module was
+    /// lowered into every program, and their bodies demanded the formatter.
+    fn err_reaches_float(e: &crate::ir::IrExpr) -> bool {
         let here = matches!(
             &e.ty,
             crate::types::Ty::Applied(crate::types::TypeConstructorId::Result, a)
-                if a.len() == 2 && !ty_float_free(&a[1])
+                if a.len() == 2 && !ty_float_free(&a[1]) && !a[1].is_unresolved()
         );
         let mut below = false;
         e.clone().map_children(&mut |c| {
-            below |= main_err_reaches_float(&c);
+            below |= err_reaches_float(&c);
             c
         });
         here || below
     }
     fn scan_program(ir: &crate::ir::IrProgram, out: &mut HashSet<String>) {
+        let bodies = ir.functions.iter().chain(ir.modules.iter().flat_map(|m| m.functions.iter()));
+        if bodies.into_iter().any(|f| err_reaches_float(&f.body)) {
+            out.insert("float.to_string_compound".to_string());
+            out.insert("float32.to_string_compound".to_string());
+        }
         for f in &ir.functions {
             scan_expr(&f.body, out);
-            if f.name.as_str() == "main" && main_err_reaches_float(&f.body) {
-                out.insert("float.to_string_compound".to_string());
-                out.insert("float32.to_string_compound".to_string());
-            }
         }
         for tl in &ir.top_lets {
             scan_expr(&tl.value, out);

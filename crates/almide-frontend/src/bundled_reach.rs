@@ -16,10 +16,13 @@
 //! list of module names: module `M` is reached when a loaded source spells
 //!
 //! - the identifier `M` (`M.f(..)`, `M.f` passed as a value, `|> M.f`, a
-//!   test `where M.f = ..` override), or
-//! - a member name `f` that `M` declares as a function (UFCS: `xs.f(..)`
-//!   resolves by receiver type, which is not known before checking, so every
-//!   module declaring `f` is reached), or
+//!   test `where M.f = ..` override, a `M.T` type) — a qualified reference
+//!   reaches `M` and only `M`, or
+//! - a member name `f` that `M` declares as a function, on a receiver that
+//!   is not a module name (UFCS: `xs.f(..)` resolves by receiver type, which
+//!   is not known before checking, so every module declaring `f` is
+//!   reached). A module name that the sources also BIND (`let list = "s"`)
+//!   is read as a receiver, so `list.trim()` there reaches `string`, or
 //! - a type or variant constructor that `M` declares.
 //!
 //! What `M` declares is read from `M`'s own embedded source. The closure is
@@ -40,11 +43,27 @@ use almide_lang::stdlib_info::{bundled_source, AUTO_IMPORT_BUNDLED};
 /// module from.
 #[derive(Default)]
 struct Spelled {
-    /// Bare identifiers, type names, constructor names — a module qualifier
-    /// or a declared type/ctor.
+    /// Bare identifiers, type names, constructor names — a declared
+    /// type/ctor, or (in type position) a module qualifier.
     idents: HashSet<String>,
-    /// Member names (`x.f`) — a UFCS method candidate.
+    /// Member names on a receiver that is not a bare name (`f(x).g()`,
+    /// `p.q.r`) — a UFCS method candidate.
     members: HashSet<String>,
+    /// `a.f` on a bare name `a`: a qualified call when `a` is a module, a
+    /// UFCS call when `a` is a binding (`let list = "s"; list.len()` is
+    /// `string.len`).
+    qualified: HashSet<(String, String)>,
+    /// Every name the sources bind (params, lets, patterns, loop vars). A
+    /// module name bound anywhere is read as a binding wherever it is spelled.
+    binders: HashSet<String>,
+}
+
+impl Spelled {
+    /// Is `a` in `a.f` (certainly) a module rather than a binding?
+    fn is_module_qualifier(&self, a: &str) -> bool {
+        !self.binders.contains(a)
+            && (almide_lang::stdlib_info::is_any_stdlib(a) || almide_lang::stdlib_info::is_bundled_module(a))
+    }
 }
 
 /// What an auto-imported module declares: its function names (the UFCS
@@ -116,8 +135,19 @@ pub fn reached_auto_bundled<'a>(roots: impl IntoIterator<Item = &'a Program>) ->
 }
 
 fn reaches(spelled: &Spelled, name: &str, surface: &Surface) -> bool {
-    spelled.idents.contains(name)
-        || surface.fns.iter().any(|f| spelled.members.contains(f))
+    let qualified_here = spelled
+        .qualified
+        .iter()
+        .any(|(a, _)| a == name && spelled.is_module_qualifier(a));
+    // A member on a binding (or on anything that is not a module name) may
+    // be a UFCS call into any module declaring it.
+    let ufcs = |f: &String| {
+        spelled.members.contains(f)
+            || spelled.qualified.iter().any(|(a, m)| m == f && !spelled.is_module_qualifier(a))
+    };
+    qualified_here
+        || spelled.idents.contains(name)
+        || surface.fns.iter().any(ufcs)
         || surface.types.iter().any(|t| spelled.idents.contains(t))
 }
 
@@ -152,7 +182,8 @@ fn spell_decl(d: &Decl, out: &mut Spelled) {
             spell_expr(body, out);
         }
         Decl::TestWhereDef { clauses, .. } => spell_test_wheres(clauses, out),
-        Decl::TopLet { ty, value, .. } => {
+        Decl::TopLet { name, ty, value, .. } => {
+            out.binders.insert(name.to_string());
             if let Some(t) = ty {
                 spell_type(t, out);
             }
@@ -176,6 +207,7 @@ fn spell_decl(d: &Decl, out: &mut Spelled) {
 
 fn spell_params(params: &[Param], out: &mut Spelled) {
     for p in params {
+        out.binders.insert(p.name.to_string());
         spell_type(&p.ty, out);
         if let Some(d) = &p.default {
             spell_expr(d, out);
@@ -206,7 +238,10 @@ fn spell_protocol_refs(refs: Option<&[ProtocolRef]>, out: &mut Spelled) {
 fn spell_test_wheres(wheres: &[TestWhere], out: &mut Spelled) {
     for w in wheres {
         match w {
-            TestWhere::Bind { value, .. } => spell_expr(value, out),
+            TestWhere::Bind { name, value } => {
+                out.binders.insert(name.to_string());
+                spell_expr(value, out)
+            }
             TestWhere::Override { path, value } => {
                 for s in path {
                     out.idents.insert(s.to_string());
@@ -303,20 +338,33 @@ fn spell_pattern(p: &Pattern, out: &mut Spelled) {
             }
         }
         Pattern::Literal { value } => spell_expr(value, out),
-        Pattern::Tuple { elements } | Pattern::List { elements, .. } => {
+        Pattern::Tuple { elements } => {
             for e in elements {
                 spell_pattern(e, out);
             }
         }
-        Pattern::As { inner, .. } | Pattern::Some { inner } | Pattern::Ok { inner } | Pattern::Err { inner } => {
+        Pattern::List { elements, rest } => {
+            if let Some(Some(r)) = rest {
+                out.binders.insert(r.to_string());
+            }
+            for e in elements {
+                spell_pattern(e, out);
+            }
+        }
+        Pattern::As { name, inner } => {
+            out.binders.insert(name.to_string());
             spell_pattern(inner, out)
         }
+        Pattern::Some { inner } | Pattern::Ok { inner } | Pattern::Err { inner } => spell_pattern(inner, out),
         Pattern::Or { alts } => {
             for a in alts {
                 spell_pattern(a, out);
             }
         }
-        Pattern::Wildcard | Pattern::Ident { .. } | Pattern::None => {}
+        Pattern::Ident { name } => {
+            out.binders.insert(name.to_string());
+        }
+        Pattern::Wildcard | Pattern::None => {}
     }
 }
 
@@ -330,16 +378,38 @@ fn spell_expr(e: &Expr, out: &mut Spelled) {
 fn spell_node(x: &Expr, out: &mut Spelled) {
     match &x.kind {
         ExprKind::Ident { name } | ExprKind::TypeName { name } => spell_type_name(name.as_str(), out),
-        ExprKind::Member { field, .. } | ExprKind::OptionalChain { field, .. } => {
+        ExprKind::Member { object, field } => match &object.kind {
+            ExprKind::Ident { name } => {
+                out.qualified.insert((name.to_string(), field.to_string()));
+            }
+            _ => {
+                out.members.insert(field.to_string());
+            }
+        },
+        ExprKind::OptionalChain { field, .. } => {
             out.members.insert(field.to_string());
         }
         ExprKind::Record { name: Some(n), .. } => spell_type_name(n.as_str(), out),
         ExprKind::Lambda { params, .. } => {
             for p in params {
+                out.binders.insert(p.name.to_string());
+                for n in p.tuple_names.iter().flatten() {
+                    out.binders.insert(n.to_string());
+                }
                 if let Some(t) = &p.ty {
                     spell_type(t, out);
                 }
             }
+        }
+        ExprKind::ForIn { var, var_tuple, body, .. } => {
+            out.binders.insert(var.to_string());
+            for n in var_tuple.iter().flatten() {
+                out.binders.insert(n.to_string());
+            }
+            spell_stmt_types(body, out);
+        }
+        ExprKind::IfLet { name, .. } => {
+            out.binders.insert(name.to_string());
         }
         ExprKind::TypeAscription { ty, .. } => spell_type(ty, out),
         ExprKind::Call { type_args: Some(ts), .. } => {
@@ -353,18 +423,26 @@ fn spell_node(x: &Expr, out: &mut Spelled) {
             }
         }
         ExprKind::Block { stmts, .. } => spell_stmt_types(stmts, out),
-        ExprKind::ForIn { body, .. } | ExprKind::While { body, .. } => spell_stmt_types(body, out),
+        ExprKind::While { body, .. } => spell_stmt_types(body, out),
         _ => {}
     }
 }
 
-/// The names a statement keeps outside its expressions: `let x: T`, a
-/// destructuring pattern's constructors.
+/// The names a statement keeps outside its expressions: `let x: T` (its
+/// type and its binder), a destructuring pattern, a `guard let` binder.
 fn spell_stmt_types(stmts: &[Stmt], out: &mut Spelled) {
     for s in stmts {
         match s {
-            Stmt::Let { ty: Some(t), .. } | Stmt::Var { ty: Some(t), .. } => spell_type(t, out),
+            Stmt::Let { name, ty, .. } | Stmt::Var { name, ty, .. } => {
+                out.binders.insert(name.to_string());
+                if let Some(t) = ty {
+                    spell_type(t, out);
+                }
+            }
             Stmt::LetDestructure { pattern, .. } => spell_pattern(pattern, out),
+            Stmt::GuardLet { name, .. } => {
+                out.binders.insert(name.to_string());
+            }
             _ => {}
         }
     }
@@ -378,6 +456,21 @@ mod tests {
         let tokens = almide_lang::lexer::Lexer::tokenize(src);
         let prog = almide_lang::parser::Parser::new(tokens).parse().expect("parse");
         reached_auto_bundled(std::iter::once(&prog))
+    }
+
+    #[test]
+    fn a_qualified_call_reaches_only_its_module() {
+        // `int.to_string` is a call into `int`, not a UFCS `to_string` on
+        // every module that declares one.
+        let r = reached("fn main() -> Unit = println(int.to_string(1))\n");
+        assert!(!r.contains(&"int8") && !r.contains(&"float64"), "{r:?}");
+    }
+
+    #[test]
+    fn a_binding_named_like_a_module_is_a_ufcs_receiver() {
+        // `list` is a String here: `list.trim()` is `string.trim`.
+        let r = reached("fn f(list: String) -> String = list.trim()\n");
+        assert!(r.contains(&"string"), "{r:?}");
     }
 
     #[test]
