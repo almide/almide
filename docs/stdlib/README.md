@@ -2,25 +2,26 @@
 
 # Standard library
 
-Every public function of the 44 stdlib modules, 999 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
+Every public function of the 45 stdlib modules, 1040 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
 
 A `mut` parameter is written in place: the caller passes a `var` binding and sees the change (a `let`, a non-`mut` parameter or a temporary is E032). Every other parameter is read only, and a function that changes a value without `mut` returns a new one.
 
 | Module | Functions | Types |
 |---|---:|---:|
-| [args](#args) | 6 | 0 |
+| [args](#args) | 7 | 0 |
 | [base64](#base64) | 4 | 0 |
+| [bool](#bool) | 3 | 0 |
 | [bytes](#bytes) | 146 | 1 |
-| [compute](#compute) | 6 | 0 |
-| [datetime](#datetime) | 22 | 0 |
-| [duration](#duration) | 6 | 0 |
+| [compute](#compute) | 7 | 0 |
+| [datetime](#datetime) | 23 | 0 |
+| [duration](#duration) | 7 | 0 |
 | [env](#env) | 9 | 0 |
 | [error](#error) | 3 | 0 |
 | [float](#float) | 46 | 0 |
 | [float32](#float32) | 10 | 0 |
 | [float64](#float64) | 10 | 0 |
 | [fs](#fs) | 34 | 1 |
-| [hash](#hash) | 4 | 0 |
+| [hash](#hash) | 12 | 0 |
 | [hex](#hex) | 3 | 0 |
 | [html](#html) | 5 | 0 |
 | [http](#http) | 48 | 4 |
@@ -33,13 +34,13 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [json](#json) | 15 | 0 |
 | [list](#list) | 67 | 0 |
 | [map](#map) | 25 | 0 |
-| [math](#math) | 23 | 0 |
-| [matrix](#matrix) | 46 | 0 |
+| [math](#math) | 35 | 0 |
+| [matrix](#matrix) | 48 | 0 |
 | [net](#net) | 26 | 2 |
 | [option](#option) | 14 | 0 |
-| [path](#path) | 10 | 0 |
+| [path](#path) | 13 | 0 |
 | [process](#process) | 17 | 1 |
-| [random](#random) | 4 | 0 |
+| [random](#random) | 9 | 0 |
 | [regex](#regex) | 8 | 0 |
 | [result](#result) | 15 | 0 |
 | [set](#set) | 19 | 0 |
@@ -49,7 +50,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [uint32](#uint32) | 22 | 0 |
 | [uint64](#uint64) | 26 | 0 |
 | [uint8](#uint8) | 14 | 0 |
-| [url](#url) | 6 | 1 |
+| [url](#url) | 10 | 1 |
 | [value](#value) | 20 | 0 |
 | [zlib](#zlib) | 10 | 0 |
 
@@ -59,6 +60,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 
 - `effect args.raw() -> List[String]` — Same as env.args; argv[0] excluded.
 - `effect args.flag(name: String) -> Bool` — True on --name or -<first letter of name>.
+- `effect args.has_flag(name: String) -> Bool` — True on --name; a one-letter name also matches -name.
 - `effect args.option(name: String) -> Option[String]` — Value of --name=v or --name v; none if absent.
 - `effect args.option_or(name: String, fallback: String) -> String` — option(name), or fallback when absent.
 - `effect args.positional() -> List[String]` — Args not starting with -; option values too.
@@ -72,6 +74,14 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `base64.decode(s: String) -> Result[Bytes, String]` — Bytes from base64; padding optional; err if bad.
 - `base64.encode_url(b: Bytes) -> String` — URL-safe base64 (- _), still = padded.
 - `base64.decode_url(s: String) -> Result[Bytes, String]` — Same as decode; accepts either alphabet.
+
+## bool
+
+[bool.md](bool.md)
+
+- `bool.to_string(b: Bool) -> String` — "true" or "false"; bool.parse reads it back.
+- `bool.parse(s: String) -> Result[Bool, String]` — ok(true) for "true", ok(false) for "false", err for anything else.
+- `bool.compare(a: Bool, b: Bool) -> Int` — Negative if a < b, 0 if equal, positive if a > b; false < true.
 
 ## bytes
 
@@ -234,6 +244,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `compute.s(n: Int) -> Compute` — n seconds of deterministic compute time; negative n aborts.
 - `compute.min(n: Int) -> Compute` — n minutes of deterministic compute time; negative n aborts.
 - `compute.h(n: Int) -> Compute` — n hours of deterministic compute time; negative n aborts.
+- `compute.compare(a: Compute, b: Compute) -> Int` — Negative if a < b, 0 if equal, positive if a > b.
 
 ## datetime
 
@@ -255,6 +266,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `datetime.month(ts: Int) -> Int` — UTC month, 1..12.
 - `effect datetime.now() -> Int` — Wall-clock Unix seconds (not monotonic).
 - `effect datetime.monotonic_ns() -> Int` — Monotonic ns since first call; compare differences.
+- `effect datetime.now_ms() -> Int` — Wall-clock milliseconds since the Unix epoch (not monotonic).
 - `datetime.parse_iso(s: String) -> Result[Int, String]` — Epoch secs of YYYY-MM-DDTHH:MM:SSZ; fractions err.
 - `datetime.second(ts: Int) -> Int` — UTC second, 0..59.
 - `datetime.to_iso(ts: Int) -> String` — YYYY-MM-DDTHH:MM:SSZ in UTC.
@@ -272,6 +284,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `duration.s(n: Int) -> Duration` — n seconds of wall-clock time; negative n aborts.
 - `duration.min(n: Int) -> Duration` — n minutes of wall-clock time; negative n aborts.
 - `duration.h(n: Int) -> Duration` — n hours of wall-clock time; negative n aborts.
+- `duration.compare(a: Duration, b: Duration) -> Int` — Negative if a < b, 0 if equal, positive if a > b.
 
 ## env
 
@@ -423,6 +436,14 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `hash.fnv1a32_bytes(b: Bytes) -> Int` — 32-bit FNV-1a of b, in 0..4294967295.
 - `hash.sha256(b: Bytes) -> Bytes` — 32-byte SHA-256 digest of b.
 - `hash.sha256_hex(s: String) -> String` — SHA-256 of s's UTF-8, 64 lowercase hex chars.
+- `hash.crc32(b: Bytes) -> Int` — CRC-32 (IEEE, reflected) as an unsigned Int; 0 for empty b.
+- `hash.adler32(b: Bytes) -> Int` — Adler-32 as an unsigned Int; 1 for empty b.
+- `hash.md5(b: Bytes) -> Bytes` — 16-byte MD5 digest of b.
+- `hash.md5_hex(b: Bytes) -> String` — MD5 of b as 32 lowercase hex chars.
+- `hash.sha1(b: Bytes) -> Bytes` — 20-byte SHA-1 digest of b.
+- `hash.sha1_hex(b: Bytes) -> String` — SHA-1 of b as 40 lowercase hex chars.
+- `hash.sha512(b: Bytes) -> Bytes` — 64-byte SHA-512 digest of b.
+- `hash.sha512_hex(b: Bytes) -> String` — SHA-512 of b as 128 lowercase hex chars.
 
 ## hex
 
@@ -846,6 +867,18 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `math.sqrt(x: Float) -> Float` — Square root; NaN below 0, -0.0 stays -0.0.
 - `math.tan(x: Float) -> Float` — Tangent of x radians; NaN for infinite x.
 - `math.tanh(x: Float) -> Float` — Hyperbolic tangent in -1..1; inf gives 1.0.
+- `math.asin(x: Float) -> Float` — Arcsine in radians, within -pi/2..pi/2; NaN outside -1..1.
+- `math.acos(x: Float) -> Float` — Arccosine in radians, within 0..pi; NaN outside -1..1.
+- `math.atan2(y: Float, x: Float) -> Float` — Angle of the point (x, y) in radians, within -pi..pi.
+- `math.expm1(x: Float) -> Float` — e to the x, minus 1, accurate near 0; -1.0 below about -38.
+- `math.log1p(x: Float) -> Float` — Natural log of 1 + x, accurate near 0; -inf at -1, NaN below.
+- `math.sinh(x: Float) -> Float` — Hyperbolic sine; overflows to +-inf past about 710.
+- `math.cosh(x: Float) -> Float` — Hyperbolic cosine, at least 1.0; overflows to inf past about 710.
+- `math.hypot(a: Float, b: Float) -> Float` — sqrt(a*a + b*b) without overflow or underflow on the way.
+- `math.cbrt(x: Float) -> Float` — Real cube root; negative x gives a negative root.
+- `math.asinh(x: Float) -> Float` — Inverse hyperbolic sine.
+- `math.acosh(x: Float) -> Float` — Inverse hyperbolic cosine, at least 0.0; NaN below 1.0.
+- `math.atanh(x: Float) -> Float` — Inverse hyperbolic tangent; +-inf at +-1, NaN outside -1..1.
 
 ## matrix
 
@@ -897,6 +930,8 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `matrix.mul_f32_t(a: Matrix[Float32], b: Matrix[Float32]) -> Matrix[Float32]` — a x transpose(b), Float32.
 - `matrix.mul_f32_t_scaled(a: Matrix[Float32], alpha: Float, b: Matrix[Float32]) -> Matrix[Float32]` — alpha * (a x transpose(b)), Float32.
 - `matrix.mul_scaled(a: Matrix, alpha: Float, b: Matrix) -> Matrix` — Same as scale(mul(a, b), alpha).
+- `matrix.zip_with(a: Matrix, b: Matrix, f: (Float, Float) -> Float) -> Matrix` — f over each pair of same-position elements; a shape mismatch aborts.
+- `matrix.concat_rows(xs: List[Matrix]) -> Matrix` — Rows of every matrix, top to bottom; empty members skipped, a width mismatch aborts.
 
 ## net
 
@@ -962,6 +997,9 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `path.is_absolute(p: String) -> Bool` — True when p starts with /.
 - `path.stem(p: String) -> String` — Basename minus last extension; dotfiles as-is.
 - `path.normalize(p: String) -> String` — Resolves .
+- `path.components(path: String) -> List[String]` — Segments of normalize(path), led by "/" when absolute; ["."] for "" or ".".
+- `path.relative_to(path: String, base: String) -> Option[String]` — path relative to base, lexically; "." when equal; none when not under base.
+- `path.with_extension(path: String, ext: String) -> String` — path with its last extension replaced by ext; "" removes it; unchanged without a file name.
 
 ## process
 
@@ -993,6 +1031,11 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `effect random.float() -> Float` — Random Float in [0, 1); not crypto-grade.
 - `effect random.choice(xs: List[T]) -> Option[T]` — Random element of xs; none when empty.
 - `effect random.shuffle(xs: List[T]) -> List[T]` — Random permutation of xs as a new list.
+- `random.seeded(seed: Int) -> Rng` — A generator whose stream is fixed by seed.
+- `random.next_int(rng: Rng, min: Int, max: Int) -> (Int, Rng)` — An Int in [min, max] (both ends) and the next state; min, state unchanged, if max <= min.
+- `random.next_float(rng: Rng) -> (Float, Rng)` — A Float in [0, 1) from the top 53 bits, and the next state.
+- `random.next_choice(rng: Rng, xs: List[A]) -> (Option[A], Rng)` — A uniformly chosen element (none, state unchanged, when xs is empty) and the next state.
+- `random.next_shuffle(rng: Rng, xs: List[A]) -> (List[A], Rng)` — A uniform permutation of xs (Fisher-Yates) and the next state.
 
 ## regex
 
@@ -1231,6 +1274,10 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `url.to_string(u: Url) -> String` — URL text of u; empty query/fragment omitted.
 - `url.query_pairs(query: String) -> List[(String, String)]` — Undecoded (k, v) pairs; bare key gets "".
 - `url.build_query(pairs: List[(String, String)]) -> String` — k=v joined by &, both sides percent-encoded.
+- `url.encode_form(s: String) -> String` — Like encode_component, but a space becomes +.
+- `url.decode_form(s: String) -> Result[String, String]` — + as space, then percent-decoded; err on bad escape/UTF-8.
+- `url.parse_query(query: String) -> Result[List[(String, String)], String]` — Decoded (k, v) pairs; bare key gets ""; err on a bad escape.
+- `url.resolve(base: Url, ref: String) -> Result[Url, String]` — ref resolved against base (RFC 3986 5.2); err when the result is not a URL.
 
 ## value
 

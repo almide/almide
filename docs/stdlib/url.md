@@ -94,7 +94,7 @@ q=a%20b&lang=ja
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (6 functions)
+## Signature index (10 functions)
 
 ```
 // All but A-Za-z0-9-._~ as UTF-8 %XX escapes.
@@ -120,6 +120,22 @@ url.query_pairs(query: String) -> List[(String, String)]
 // k=v joined by &, both sides percent-encoded.
 // @since 0.60.0 or earlier
 url.build_query(pairs: List[(String, String)]) -> String
+
+// Like encode_component, but a space becomes +.
+// @since unreleased
+url.encode_form(s: String) -> String
+
+// + as space, then percent-decoded; err on bad escape/UTF-8.
+// @since unreleased
+url.decode_form(s: String) -> Result[String, String]
+
+// Decoded (k, v) pairs; bare key gets ""; err on a bad escape.
+// @since unreleased
+url.parse_query(query: String) -> Result[List[(String, String)], String]
+
+// ref resolved against base (RFC 3986 5.2); err when the result is not a URL.
+// @since unreleased
+url.resolve(base: Url, ref: String) -> Result[Url, String]
 ```
 
 ## Type index (1 types)
