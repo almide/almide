@@ -96,7 +96,40 @@ NAMED_CANDIDATES = {
     "UInt32": ["(1).to_uint32()"], "UInt64": ["(1).to_uint64()"],
     "Float32": ["(1.0).to_float32()"], "Float64": ["(1.0).to_float64()"],
     "Endian": ["LittleEndian"],
+    "Deque": ["deque.from_list([1, 2])"], "Heap": ["heap.from_list([1, 2])"],
 }
+
+
+def render_ty(ty):
+    """A type annotation for a JSON-shaped type with every type variable at Int,
+    or None. A generic constructor that takes no element (`heap.new()`,
+    `list.new()`) leaves its element type open, so its probe only types with
+    the binding annotated."""
+    k = ty.get("kind")
+    simple = {"int": "Int", "float": "Float", "string": "String", "bool": "Bool",
+              "unit": "Unit", "bytes": "Bytes", "matrix": "Matrix", "type_var": "Int"}
+    if k in simple:
+        return simple[k]
+    def inner(key):
+        return render_ty(ty.get(key, {}))
+    if k == "named":
+        args = [render_ty(a) for a in ty.get("args", []) or []]
+        if any(a is None for a in args):
+            return None
+        return ty.get("name", "") + (f"[{', '.join(args)}]" if args else "")
+    if k in ("list", "set"):
+        x = inner("inner")
+        return f"{k.capitalize()}[{x}]" if x else None
+    if k == "option":
+        x = inner("inner")
+        return f"{x}?" if x else None
+    if k == "map":
+        a, b = inner("key"), inner("value")
+        return f"Map[{a}, {b}]" if a and b else None
+    if k == "tuple":
+        parts = [render_ty(e) for e in ty.get("elements", []) or []]
+        return "(" + ", ".join(parts) + ")" if parts and all(parts) else None
+    return None
 
 
 def synth_ty(ty, depth=0):
@@ -177,6 +210,10 @@ def programs(f, args):
         bodies = [f"  let _ = {call}{bang}", f"  {call}{bang}"]
         if f["ret"] == "Unit":               # a Unit result binds to nothing useful
             bodies.reverse()
+        else:
+            annot = render_ty(f.get("ret_json", {}))
+            if annot:
+                bodies.append(f"  let _: {annot} = {call}{bang}")
         for b in bodies:
             prog = f"{imp}{head} main() -> Unit = {{\n{binds}{b}\n}}\n"
             if prog not in shapes:
