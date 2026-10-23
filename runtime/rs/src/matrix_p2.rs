@@ -106,6 +106,22 @@ pub fn almide_rt_matrix_append_rows(a: &AlmideMatrix, b: &AlmideMatrix) -> Almid
     out.into()
 }
 
+// concat_rows (R-matrix-11): append_rows folded over the list, so an empty
+// member is skipped and two non-empty members of different widths abort.
+// Generic over the element so a list of shared (AlmideRcCow) matrices passes
+// as it is, with no per-call-site element unwrapping.
+pub fn almide_rt_matrix_concat_rows<M: std::ops::Deref<Target = AlmideMatrix>>(xs: &[M]) -> AlmideMatrix {
+    xs.iter().fold(mk(0, 0, Vec::new()), |acc, m| almide_rt_matrix_append_rows(&acc, m))
+}
+
+// zip_with (R-matrix-09): f over same-position elements; any shape mismatch
+// aborts (the R-matrix-05 rule), never a truncation to the overlap.
+pub fn almide_rt_matrix_zip_with(a: &AlmideMatrix, b: &AlmideMatrix, f: std::rc::Rc<dyn Fn(f64, f64) -> f64>) -> AlmideMatrix {
+    almide_rt_matrix_shape_eq(a.rows, b.rows);
+    almide_rt_matrix_shape_eq(a.cols, b.cols);
+    mk(a.rows, a.cols, a.data.iter().zip(b.data.iter()).map(|(x, y)| f(*x, *y)).collect())
+}
+
 // select_rows: gather a small number of rows from a big matrix into a
 // new matrix. Avoids the `to_lists` round-trip for the common case of
 // embedding lookups (LLM inference).
