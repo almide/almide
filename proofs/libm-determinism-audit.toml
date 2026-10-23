@@ -20,6 +20,10 @@
 # excused by it. What remains reaches no Almide program: three scalar fns with
 # no `@intrinsic`, one IEEE-exact `powi`, and a test helper.
 #
+# Round 2 (2026-10-23): the three scalar fns (platform asin / acos / atan2) are
+# gone. math.asin / acos / atan2 are now pure-Almide transcriptions of the
+# vendored musl kernels (stdlib/math.almd), the same code on every leg.
+#
 # ZERO entries are DECLARED_APPROX today. That verdict stays in the vocabulary
 # on purpose: the next accuracy/speed trade must be WRITTEN DOWN with a
 # contract or issue ref, which is exactly what #1197 found missing.
@@ -30,24 +34,3 @@ fn = "f16_bits_to_f64"
 calls = 2
 verdict = "IEEE_EXACT"
 why = "(2.0f32).powi(k) — powi is compiler-expanded multiplication, not a libm call, and both exponents here (-24 and exp-15) are exact powers of two, so every platform produces the same bits."
-
-[[site]]
-file = "runtime/rs/src/math.rs"
-fn = "almide_rt_math_acos"
-calls = 1
-verdict = "UNREACHABLE"
-why = "platform x.acos(), but NO `@intrinsic` in stdlib/*.almd names almide_rt_math_acos, so no Almide program can reach it. Adding that intrinsic without first routing through the vendored libm would re-open #1197 — the gate flags it the moment the site or its verdict changes."
-
-[[site]]
-file = "runtime/rs/src/math.rs"
-fn = "almide_rt_math_asin"
-calls = 1
-verdict = "UNREACHABLE"
-why = "platform x.asin(), but NO `@intrinsic` in stdlib/*.almd names almide_rt_math_asin, so no Almide program can reach it. Adding that intrinsic without first routing through the vendored libm would re-open #1197 — the gate flags it the moment the site or its verdict changes."
-
-[[site]]
-file = "runtime/rs/src/math.rs"
-fn = "almide_rt_math_atan2"
-calls = 1
-verdict = "UNREACHABLE"
-why = "platform y.atan2(x), but NO `@intrinsic` in stdlib/*.almd names almide_rt_math_atan2, so no Almide program can reach it. Adding that intrinsic without first routing through the vendored libm would re-open #1197 — the gate flags it the moment the site or its verdict changes. The vendored file provides atan, not atan2."

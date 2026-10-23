@@ -9,10 +9,7 @@
 #[inline(always)] pub fn almide_rt_math_sin(x: f64) -> f64 { almide_rt_libm_sin(x) }
 #[inline(always)] pub fn almide_rt_math_cos(x: f64) -> f64 { almide_rt_libm_cos(x) }
 #[inline(always)] pub fn almide_rt_math_tan(x: f64) -> f64 { almide_rt_libm_tan(x) }
-#[inline(always)] pub fn almide_rt_math_asin(x: f64) -> f64 { x.asin() }
-#[inline(always)] pub fn almide_rt_math_acos(x: f64) -> f64 { x.acos() }
 #[inline(always)] pub fn almide_rt_math_atan(x: f64) -> f64 { almide_rt_libm_atan(x) }
-#[inline(always)] pub fn almide_rt_math_atan2(y: f64, x: f64) -> f64 { y.atan2(x) }
 #[inline(always)] pub fn almide_rt_math_tanh(x: f64) -> f64 { almide_rt_libm_tanh(x) }
 
 // Logarithms / exponentials
