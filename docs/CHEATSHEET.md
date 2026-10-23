@@ -936,6 +936,7 @@ Full function signatures: [docs/stdlib/](stdlib/)
 | [set](stdlib/set.md) | Set operations | auto-imported | 19 |
 | [int](stdlib/int.md) | Integer arithmetic and bitwise | auto-imported | 22 |
 | [float](stdlib/float.md) | Floating-point operations | auto-imported | 17 |
+| [bool](stdlib/bool.md) | Parse, compare and print booleans | auto-imported | 3 |
 | [value](stdlib/value.md) | Dynamic value manipulation | auto-imported | 19 |
 | [result](stdlib/result.md) | Result type operations | auto-imported | 12 |
 | [option](stdlib/option.md) | Option type operations | auto-imported | 12 |
