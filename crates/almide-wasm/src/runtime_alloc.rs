@@ -51,7 +51,7 @@ pub(crate) fn emit_alloc(oom_msg: u32, counters: Option<u32>, canonical: bool) -
         .i32_const(FREELIST_BASE as i32)
         .i32_add()
         .local_set(next); // next = the class slot ADDRESS now
-    crate::canonical_alloc::emit_class_head(&mut i, canonical, next).local_tee(head).if_(BlockType::Empty);
+    crate::canonical_alloc::emit_class_head(&mut i, canonical, next, (head, 5, 6)).local_tee(head).if_(BlockType::Empty);
     // pop: slot = head.payload[0]; headers rc=1/len/cap=len; done.
     if let Some(c) = counters {
         bump_counter(&mut i, c + crate::alloc_count::REUSED);
@@ -178,8 +178,7 @@ pub(crate) fn emit_alloc(oom_msg: u32, counters: Option<u32>, canonical: bool) -
 /// taken by ceil at alloc, so reuse never under-serves. Blocks too
 /// small for a next pointer are abandoned; blocks above the ceiling join
 /// the exact-size large list (runtime_large.rs, #3348).
-/// The caller must OWN the block outright — there is no rc check yet;
-/// the only callers are the sort machinery's private scratch buffers.
+/// The caller must OWN the block outright (`$dec_flat` at rc 0, scratch buffers).
 ///
 /// `counters` (#2407): when armed, every call bumps `__free_count` on
 /// entry — filed or abandoned alike, so the number is "blocks released".
@@ -222,6 +221,7 @@ pub(crate) fn emit_free(counters: Option<u32>, canonical: bool) -> Function {
     i.local_get(class).i32_load(word(0));
     i.i32_store(word(almide_layout::PAYLOAD));
     i.local_get(class).local_get(block).i32_store(word(0));
+    crate::checked_alloc::emit_poison(&mut i, block, total); // #4009, only when armed
     i.end();
     f
 }

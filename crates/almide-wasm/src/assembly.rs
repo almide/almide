@@ -52,6 +52,10 @@ impl HelperLits {
         let false_base = at(F_APPEND_BOOL, "false");
         let oom_msg = at(F_ALLOC, "Error: out of memory");
         let repeat_msg = at(F_STR_REPEAT, "Error: repeat result too large");
+        if crate::checked_alloc::armed() {
+            // #4009: pooled only under the switch — the shipped data is unchanged.
+            crate::checked_alloc::set_message(at(F_ALLOC, crate::checked_alloc::TEXT));
+        }
         Self { true_base, false_base, oom_msg, repeat_msg }
     }
 }
