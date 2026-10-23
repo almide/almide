@@ -7,6 +7,11 @@ name: Miri over generated Rust (nightly)
 # the output does not change. scripts/miri-generated.sh holds the verdict and
 # a control that must come back UB. Red here is a finding: the failing program
 # and Miri's report are posted to an open `miri` issue.
+#
+# The `asan` job runs the same crates compiled with AddressSanitizer
+# (scripts/asan-generated.sh): it covers what Miri stops at (sockets, child
+# processes, host calls) and the stress fixtures Miri cannot finish, with its
+# own control that must come back ASAN.
 
 on:
   schedule:
@@ -84,4 +89,63 @@ jobs:
           else
             gh label create miri --color F9D0C4 --description "Miri over generated Rust: undefined behaviour findings (#4009)" 2>/dev/null || true
             gh issue create --title "Miri nightly: undefined behaviour" --label miri --label A-runtime --body-file /tmp/body.md
+          fi
+
+  asan:
+    name: AddressSanitizer, shard ${{ matrix.shard }}/2
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.MIRI_TOOLCHAIN }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: linux-release-${{ env.RUST_TOOLCHAIN }}
+
+      - name: Build the compiler (release)
+        run: cargo +${{ env.RUST_TOOLCHAIN }} build --release --bin almide
+
+      - name: Every program of the shard under AddressSanitizer
+        env:
+          ALMIDE_BIN: ${{ github.workspace }}/target/release/almide
+          ASAN_TOOLCHAIN: ${{ env.MIRI_TOOLCHAIN }}
+        run: |
+          set -o pipefail
+          ls spec/wasm_cross/*.almd | awk -v s=${{ matrix.shard }} '(NR - 1) % 2 == s' > /tmp/shard.txt
+          xargs bash scripts/asan-generated.sh < /tmp/shard.txt 2>&1 | tee /tmp/asan.log
+
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: asan-shard-${{ matrix.shard }}
+          path: /tmp/asan.log
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Post the red night to the open miri issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          { echo "AddressSanitizer nightly is red (shard ${{ matrix.shard }}/2): $RUN_URL"; echo; echo '```'; grep -E '^(::error::|    |  )' /tmp/asan.log | head -80 || true; echo '```'; } > /tmp/body.md
+          N="$(gh issue list --state open --label miri --json number -q '.[0].number' || true)"
+          if [ -n "$N" ]; then
+            gh issue comment "$N" --body-file /tmp/body.md
+          else
+            gh label create miri --color F9D0C4 --description "Miri over generated Rust: undefined behaviour findings (#4009)" 2>/dev/null || true
+            gh issue create --title "Miri / AddressSanitizer nightly: memory error" --label miri --label A-runtime --body-file /tmp/body.md
           fi
