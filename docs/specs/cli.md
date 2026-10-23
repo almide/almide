@@ -423,6 +423,19 @@ $ almide check raw.almd --profile critical --allow IO
 error[E100]: `bytes.from_raw_ptr` is outside the memory-safety guarantee and is not admissible under `--profile critical`
 ```
 
+profile に関係なく、`almide build` は保証の外に出る場所を `Built` 行の末尾に出す
+(#4008)。挙げるのは `@extern` fn と、各宣言で最初に現れる生ポインタ(`RawPtr`
+の値)。型で判定するので、呼び出し・メソッド呼び出し・別名 import・関数値・引数の
+どの書き方でも出る。import した user module の中のものも出る。最初の 3 か所を挙げ、
+残りは件数で示す。保証の内側にあるプログラムの `Built` 行は変わらない。
+
+```
+$ almide build raw.almd
+Built raw — outside the memory-safety guarantee: a raw pointer in fn `main` (raw.almd:5)
+```
+
+テスト: `tests/build_outside_guarantee_test.rs`
+
 拒否されるもの(いずれも終了コード 1):
 
 - 語彙に無い名前: ``error: unknown capability `io` in --allow — grantable capabilities are IO, Net, Env, Time, Rand, Process``

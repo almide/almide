@@ -114,6 +114,12 @@ pub struct Checker {
     /// expanded from capability names (`--allow Rand` → `random`) at the
     /// CLI boundary. Empty = deny-all.
     pub critical_allow: Vec<String>,
+    /// #4008: the places in user code that leave the memory-safety guarantee
+    /// — each `@extern` fn and the first raw pointer of each declaration —
+    /// gathered over the entry program and every user module it imports, in
+    /// any profile. `almide build` names them on its `Built` line, so a build
+    /// that reaches FFI is told apart from one that does not.
+    pub outside_guarantee: Vec<String>,
     pub(crate) current_span: Option<crate::ast::Span>,
     /// #2097: a postfix `!` / `?` node's span covers only the operator
     /// character, so the argument text under an E005 caret is `!`. This
@@ -673,6 +679,7 @@ impl Checker {
             in_bundled_module: false,
             profile_critical: false,
             critical_allow: Vec::new(),
+            outside_guarantee: Vec::new(),
             current_span: None,
             postfix_inner_spans: std::collections::HashMap::new(),
             callee_span_hint: None,

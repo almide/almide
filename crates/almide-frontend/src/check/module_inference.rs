@@ -37,6 +37,7 @@ impl Checker {
         self.check_abort_sites(program);
         self.check_scoped(program);
         self.check_pure_attrs(program);
+        self.record_outside_guarantee(program);
     }
 
     /// Type-check a module's declarations. Populates type_map for all expressions.

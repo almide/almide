@@ -129,6 +129,51 @@ impl Checker {
         self.emit(diagnostic);
     }
 
+    /// #4008: record where this user file leaves the memory-safety guarantee
+    /// (`outside_guarantee`). An `@extern` fn's body is foreign code. A raw
+    /// pointer is the one value the `ffi` functions and the deprecated
+    /// `bytes` raw-pointer spellings take or give, so judging by TYPE finds
+    /// every spelling of them (call, method call, alias, fn value, a helper's
+    /// parameter). The stdlib's own sources, and a source whose origin is
+    /// unknown (the language server), are not recorded.
+    pub(super) fn record_outside_guarantee(&mut self, program: &crate::ast::Program) {
+        if self.stdlib_authority() != Some(false) {
+            return;
+        }
+        let file = self.source_file.clone().unwrap_or_default();
+        let at = |span: Option<Span>| span.map(|s| format!("{file}:{}", s.line)).unwrap_or_else(|| file.clone());
+        let mut found = Vec::new();
+        for decl in &program.decls {
+            if let Decl::Fn { name, extern_attrs, span, .. } = decl
+                && !extern_attrs.is_empty()
+            {
+                found.push(format!("@extern fn `{name}` ({})", at(*span)));
+            }
+            let (label, body) = match decl {
+                Decl::Fn { name, body: Some(b), .. } => (format!("fn `{name}`"), b),
+                Decl::TopLet { name, value, .. } => (format!("`{name}`"), value),
+                Decl::Test { name, body, .. } => (format!("test \"{name}\""), body),
+                _ => continue,
+            };
+            let mut first: Option<Option<Span>> = None;
+            crate::ast::visit_expr(body, &mut |e| {
+                if first.is_none()
+                    && self.type_map.get(&e.id).is_some_and(|t| {
+                        let t = super::resolve_ty(t, &self.uf);
+                        t.any_child_recursive(&|c| matches!(c, almide_lang::types::Ty::RawPtr))
+                            || matches!(t, almide_lang::types::Ty::RawPtr)
+                    })
+                {
+                    first = Some(e.span);
+                }
+            });
+            if let Some(span) = first {
+                found.push(format!("a raw pointer in {label} ({})", at(span)));
+            }
+        }
+        self.outside_guarantee.extend(found);
+    }
+
     /// E085 for `import prim` outside the stdlib: the module is not user
     /// surface, so naming it in an import is refused like naming one of its fns.
     pub(super) fn reject_user_prim_import(&mut self, imports: &[Decl]) {
