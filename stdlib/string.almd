@@ -338,11 +338,14 @@ fn sort(s: String) -> List[String] = list.sort(string.chars(s))
 /// The characters ordered by f's key; equal keys keep their order.
 fn sort_by[B](s: String, f: (String) -> B) -> List[String] = list.sort_by(string.chars(s), f)
 
-local fn merge_with(xs: List[String], ys: List[String], cmp: (String, String) -> Int, acc: List[String]) -> List[String] = match (list.first(xs), list.first(ys)) {
-  (some(x), some(y)) => if cmp(y, x) < 0 then merge_with(xs, list.drop(ys, 1), cmp, [y] + acc)
-  else merge_with(list.drop(xs, 1), ys, cmp, [x] + acc),
-  (some(_), none) => list.reverse(acc) + xs,
-  _ => list.reverse(acc) + ys,
+local fn merge_with(xs: List[String], ys: List[String], cmp: (String, String) -> Int, i: Int, j: Int, acc: List[String]) -> List[String] = match (list.get(
+  xs,
+  i,
+), list.get(ys, j)) {
+  (some(x), some(y)) => if cmp(y, x) < 0 then merge_with(xs, ys, cmp, i, j + 1, acc + [y])
+  else merge_with(xs, ys, cmp, i + 1, j, acc + [x]),
+  (some(_), none) => acc + list.drop(xs, i),
+  _ => acc + list.drop(ys, j),
 }
 
 local fn merge_sort_with(xs: List[String], cmp: (String, String) -> Int) -> List[String] = {
@@ -352,6 +355,8 @@ local fn merge_sort_with(xs: List[String], cmp: (String, String) -> Int) -> List
     merge_sort_with(list.take(xs, n / 2), cmp),
     merge_sort_with(list.drop(xs, n / 2), cmp),
     cmp,
+    0,
+    0,
     [],
   )
 }
