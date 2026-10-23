@@ -5,6 +5,10 @@ pub fn almide_rt_datetime_now() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64
 }
 
+pub fn almide_rt_datetime_now_ms() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as i64
+}
+
 /// Monotonic nanosecond clock for benchmarking. Returns nanoseconds
 /// since an unspecified reference point; only differences are
 /// meaningful. Never goes backwards, unlike `now()` which follows
