@@ -30,3 +30,4 @@ StructuralRun.v
 MemorySafe.v
 SpatialCert.v
 BoundsCert.v
+CoreSafe.v

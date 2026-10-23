@@ -110,6 +110,8 @@ fabricated row fails the gate). The table is a representative sample of the spin
 | `accepts_spatial` | SpatialCert.v | Closed under the global context |
 | `unchecked_run_not_spatial` | SpatialCert.v | Closed under the global context |
 | `check_bounds_cert_sound` | BoundsCert.v | Closed under the global context |
+| `typed_core_memory_safe` | CoreSafe.v | Closed under the global context |
+| `unchecked_index_not_safe` | CoreSafe.v | Closed under the global context |
 
 ## Known limitations (what is NOT yet proven — recorded, not hidden)
 
@@ -132,6 +134,14 @@ compare excluding negative indices (`unsigned_ge_excludes`). `BoundsCert.v`
 puts the certificate's byte parser inside the proof and extracts
 `check_bounds_cert` (driver mode `bounds`, `check_bounds_cert_sound`), and
 the structural wasm leg emits it per build as the `bounds` witness (crates/almide-wasm/src/witness_bounds.rs) for every list access the fact discipline of #3345 can reach — the accesses whose check may be elided — and almide-verify and proofs/structural-wall.sh judge it with the extracted checker and the kernel; every other access keeps its check immediately before it, which the witness does not record. TRUSTED: that the recorded events are the accesses and assignments the bytes contain, and that a hoisted count is the list's count (len_hoist.rs). And
+at the SOURCE level, `CoreSafe.v` (#4014) gives a typed core of Almide (ints,
+bools, int lists with value semantics, `let`, assignment, element store,
+`if`, `while`, indexing with its bounds check) a big-step semantics that
+emits the heap trace and proves `typed_core_memory_safe`: every finishing or
+check-aborted run of a well-typed core program is `MemorySafe`, all four
+clauses. It is a core (no closures, records, strings, calls; no frees;
+terminating and aborting runs only), and nothing ties it to the compiler's
+lowering. And
 no certificate carries a trace yet, so the theorem the definition is for — `K(c, a) accepts ⟹ MemorySafe a`
 for a shipped artifact `a` — is still open (#4005, #4006, #1696). Until it is
 proven, "memory safe" is a claim about the trace model, not about the bytes.
@@ -169,7 +179,7 @@ The receipt's claims are scoped to exactly this:
   machine + the FULL `$rc_dec` bytes' SAFETY — no double-free AND leak-freedom —
   executed on the renderer's real bytes by a general interpreter (`WasmExec`),
   operand-stack balance, and termination of the loop-free fragment — all
-  kernel-checked and axiom-clean (110 audited theorems). What remains is DEPTH (the byte-binding ISA layer; and
+  kernel-checked and axiom-clean (112 audited theorems). What remains is DEPTH (the byte-binding ISA layer; and
   the RENDERER realizing the free-list/`rc_inc` — its safety MODEL is now proven,
   so that slice REFINES a proof rather than adding trusted runtime) and BREADTH
   (lowering beyond the subset: control flow, closures, stdlib) — not new properties
