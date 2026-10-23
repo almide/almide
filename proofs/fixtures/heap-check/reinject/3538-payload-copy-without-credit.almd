@@ -1,0 +1,5 @@
+fn mk(i: Int) -> Result[String, String] = if i % 2 == 0 then ok("ok" + int.to_string(i)) else err("e" + int.to_string(i))
+fn main() -> Unit = {
+  let (a, b) = result.partition(list.map([0, 1, 2, 3], mk))
+  println("${a} ${b}")
+}
