@@ -75,6 +75,8 @@ const MODULE_DESCRIPTIONS: &[(&str, &str)] = &[
     ("testing", "test assertion utilities"),
     ("value", "dynamic value operations"),
     ("set", "hash set operations"),
+    ("deque", "double-ended queue"),
+    ("heap", "priority queue (least first)"),
     ("args", "command-line arguments"),
     ("path", "file path manipulation"),
     ("base64", "Base64 encoding and decoding"),
