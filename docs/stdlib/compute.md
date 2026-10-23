@@ -118,7 +118,7 @@ two are different clocks and never claim to be the same quantity.
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (6 functions)
+## Signature index (7 functions)
 
 ```
 // n nanoseconds of deterministic compute time; negative n aborts.
@@ -144,6 +144,10 @@ compute.min(n: Int) -> Compute
 // n hours of deterministic compute time; negative n aborts.
 // @since 0.51.0 or earlier
 compute.h(n: Int) -> Compute
+
+// Negative if a < b, 0 if equal, positive if a > b.
+// @since unreleased
+compute.compare(a: Compute, b: Compute) -> Int
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

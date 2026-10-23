@@ -333,7 +333,7 @@ true
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (22 functions)
+## Signature index (23 functions)
 
 ```
 // ts + n * 86400; no DST or calendar logic.
@@ -399,6 +399,10 @@ effect datetime.now() -> Int
 // Monotonic ns since first call; compare differences.
 // @since 0.15.0 or earlier
 effect datetime.monotonic_ns() -> Int
+
+// Wall-clock milliseconds since the Unix epoch (not monotonic).
+// @since unreleased
+effect datetime.now_ms() -> Int
 
 // Epoch secs of YYYY-MM-DDTHH:MM:SSZ; fractions err.
 // @since 0.6.0 or earlier

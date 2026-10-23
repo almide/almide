@@ -29,6 +29,9 @@ pub(super) fn lower_call(ctx: &mut LowerCtx, callee: &ast::Expr, call: CallArgs<
     // become `n * <ns factor>` typed Int. The nominal Compute/Duration types
     // exist only in the checker (the clock firewall); MIR and both renderers
     // see a plain i64 of nanoseconds.
+    if let Some(cmp) = lower_time_compare_call(ctx, callee, args, span) {
+        return cmp;
+    }
     if let Some(erased) = lower_time_ctor(ctx, callee, args, span) {
         return erased;
     }
@@ -713,6 +716,8 @@ fn desugar_assert_abort(
 include!("calls_target.rs");
 
 include!("calls_time.rs");
+
+include!("calls_time_compare.rs");
 
 include!("calls_testing_assert.rs");
 

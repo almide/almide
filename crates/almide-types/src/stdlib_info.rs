@@ -4,7 +4,7 @@
 
 /// All built-in stdlib module names (hardcoded in the compiler).
 pub const STDLIB_MODULES: &[&str] = &[
-    "string", "list", "int", "float", "bytes", "matrix", "fs", "env", "map",
+    "string", "list", "int", "float", "bool", "bytes", "matrix", "fs", "env", "map",
     "json", "http", "process", "math", "random", "regex", "io", "result",
     "option", "error", "datetime", "testing", "value", "set",
     "base64", "hex", "hash", "net", "url", "zlib",
@@ -19,7 +19,7 @@ pub const STDLIB_MODULES: &[&str] = &[
 
 /// Bundled stdlib modules written in Almide (.almd files embedded in the compiler binary).
 pub const BUNDLED_MODULES: &[&str] = &[
-    "args", "path", "list", "int", "base64", "hex", "hash", "float", "bytes",
+    "args", "path", "list", "int", "base64", "hex", "hash", "float", "bool", "bytes",
     "error", "math", "datetime", "value", "option", "result",
     "map", "set", "string",
     "env", "io", "random", "regex", "testing",
@@ -55,7 +55,7 @@ pub const TIER1_ALWAYS_ACCESSIBLE: &[&str] = &[
 /// are auto-imported via `TIER1_ALWAYS_ACCESSIBLE` above; this list is for
 /// bundled `.almd` modules that need resolve-time loading.
 pub const AUTO_IMPORT_BUNDLED: &[&str] = &[
-    "list", "int", "float",
+    "list", "int", "float", "bool",
     // Stdlib modules migrated from TOML to bundled `.almd` need
     // auto-import so their signatures and dispatch reach every file
     // without requiring a redundant `import <name>`. The set mirrors
@@ -138,6 +138,7 @@ pub const STDLIB_OWNED_TYPES: &[(&str, &str)] = &[
     ("net", "TcpStream"),
     ("path", "SafePath"),
     ("process", "ProcessStatus"),
+    ("random", "Rng"),
     ("url", "Url"),
 ];
 
@@ -233,6 +234,7 @@ fn bundled_source_core(name: &str) -> Option<&'static str> {
         "url" => Some(crate::embedded::SRC_URL),
         "hash" => Some(crate::embedded::SRC_HASH),
         "float" => Some(crate::embedded::SRC_FLOAT),
+        "bool" => Some(crate::embedded::SRC_BOOL),
         "bytes" => Some(crate::embedded::SRC_BYTES),
         "error" => Some(crate::embedded::SRC_ERROR),
         "value" => Some(crate::embedded::SRC_VALUE),

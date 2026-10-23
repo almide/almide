@@ -180,6 +180,11 @@ impl Emitter<'_> {
                 self.wall_now_div(1_000_000);
                 Some(Lowered::scalar(INT))
             }
+            // datetime.now_ms is env.millis's read under the datetime name.
+            ("datetime", "now_ms", []) => {
+                self.wall_now_div(1_000_000);
+                Some(Lowered::scalar(INT))
+            }
             // The monotonic clock (op 60): raw nanos from the host's own
             // origin, no division — native's `monotonic_ns` counts from its
             // first call, so only differences agree across legs, which is the

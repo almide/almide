@@ -116,6 +116,7 @@ pub const STDLIB_MODULE_EFFECTS: &[(&str, ModuleEffects)] = &[
     ("bytes", ModuleEffects::Pure),
     ("matrix", ModuleEffects::Pure),
     ("math", ModuleEffects::Pure),
+    ("bool", ModuleEffects::Pure),
     ("int", ModuleEffects::Pure),
     ("float", ModuleEffects::Pure),
     ("int8", ModuleEffects::Pure),

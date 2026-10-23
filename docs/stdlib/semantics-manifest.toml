@@ -202,6 +202,90 @@ index_unit = "count"
 probe = 'string.run_length_encode("ééa")'
 expect = """[("é", 2), ("a", 1)]"""
 
+[[string.fn]]
+name = "compare"
+index_unit = "ordering"
+probe = '"${string.compare("a", "b")} ${string.compare("é", "é")} ${string.compare("b", "a")}"'
+expect = "-1 0 1"
+
+[[string.fn]]
+name = "byte_len"
+index_unit = "byte"
+probe = 'string.byte_len("café")'
+expect = "5"
+
+[[string.fn]]
+name = "to_utf16"
+index_unit = "value"
+probe = 'string.to_utf16("é😀")'
+expect = "[233, 55357, 56832]"
+
+[[string.fn]]
+name = "from_utf16"
+index_unit = "value"
+probe = 'string.from_utf16([233, 55357, 56832]) ?? "E"'
+expect = "é😀"
+
+[[string.fn]]
+name = "insert"
+index_unit = "codepoint"
+probe = 'string.insert("éa", 1, "X")'
+expect = "éXa"
+
+[[string.fn]]
+name = "remove_at"
+index_unit = "codepoint"
+probe = 'string.remove_at("éab", 1)'
+expect = "éb"
+
+[[string.fn]]
+name = "enumerate"
+index_unit = "codepoint"
+probe = 'string.enumerate("éa")'
+expect = """[(0, "é"), (1, "a")]"""
+
+[[string.fn]]
+name = "sort_with"
+index_unit = "ordering"
+probe = 'string.sort_with("abc", (a, b) => string.compare(b, a))'
+expect = """["c", "b", "a"]"""
+
+[[string.fn]]
+name = "min_with"
+index_unit = "ordering"
+probe = 'string.min_with("bca", (a, b) => string.compare(a, b))'
+expect = """some("a")"""
+
+[[string.fn]]
+name = "max_with"
+index_unit = "ordering"
+probe = 'string.max_with("bca", (a, b) => string.compare(a, b))'
+expect = """some("c")"""
+
+[[string.fn]]
+name = "find_index"
+index_unit = "codepoint"
+probe = 'string.find_index("éa1", (c) => c == "1")'
+expect = "some(2)"
+
+[[string.fn]]
+name = "chunk"
+index_unit = "codepoint"
+probe = 'string.chunk("éabc", 2)'
+expect = """["éa", "bc"]"""
+
+[[string.fn]]
+name = "window"
+index_unit = "codepoint"
+probe = 'string.window("éab", 2)'
+expect = """["éa", "ab"]"""
+
+[[string.fn]]
+name = "split_at"
+index_unit = "codepoint"
+probe = 'string.split_at("éab", 1).1'
+expect = "ab"
+
 # ---------------------------------------------------------------------------
 # datetime — the second module on the ratchet. The #419 question here is the
 # TIMESTAMP SCALE (seconds, not milliseconds — a JS-shaped assumption is off by
@@ -330,6 +414,17 @@ SCALE, which is the dimension that bites. The window is the discriminator: a
 seconds clock lands in it (1.7e9) and a millisecond clock does not (1.7e12
 exceeds the 1e11 ceiling), so a unit regression fails here rather than silently
 shipping a 1000x error.
+"""
+
+[[datetime.fn]]
+name = "now_ms"
+index_unit = "millisecond"
+probe = 'if datetime.now_ms() > 1700000000000 and datetime.now_ms() < 100000000000000 then "millisecond" else "other"'
+expect = "millisecond"
+note = """
+The millisecond twin of datetime.now: the window admits a millisecond clock
+(1.7e12) and refuses a seconds clock (1.7e9 is below the floor) and a
+microsecond one (1.7e15 is above the ceiling).
 """
 
 [[datetime.fn]]
@@ -1666,6 +1761,29 @@ expect = "true"
 note = """
 Both ends inclusive (a die roll reaches 6), and the degenerate min >= max
 case returns min — the two bound behaviors a caller gets wrong.
+"""
+
+[[random.fn]]
+name = "seeded"
+index_unit = "value"
+probe = 'random.next_int(random.seeded(0), 1, 6).0'
+expect = "4"
+note = """
+The seed fixes the stream: SplitMix64 from state 0 draws 4 first on the
+1..6 range, on every target, every run.
+"""
+
+[[random.fn]]
+name = "next_int"
+index_unit = "value"
+setup = [
+  "let r = random.next_int(random.seeded(7), 1, 6).0",
+  "let collapsed = random.next_int(random.seeded(7), 9, 3).0",
+]
+probe = 'r >= 1 and r <= 6 and collapsed == 9'
+expect = "true"
+note = """
+The bounds rule of random.int: both ends inclusive, and min >= max returns min.
 """
 
 # index_unit vocabulary — json:
@@ -3109,7 +3227,16 @@ fn = []
 
 [bool]
 default_index_unit = "value"
-fn = []
+
+[[bool.fn]]
+name = "compare"
+index_unit = "ordering"
+probe = '"${bool.compare(false, true)} ${bool.compare(true, true)} ${bool.compare(true, false)}"'
+expect = "-1 0 1"
+note = """
+false < true, the order `<` and list.sort already use; the sign is the
+answer, as every compare in the stdlib.
+"""
 
 [path]
 default_index_unit = "value"

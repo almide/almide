@@ -23,6 +23,13 @@ effect fn flag(name: String) -> Bool = {
   __flag_at(env.args(), "--" + name, "-" + string.slice(name, 0, 1), 0)
 }
 
+/// True on --name; a one-letter name also matches -name. No short form is derived.
+effect fn has_flag(name: String) -> Bool = {
+
+  let short = if string.len(name) == 1 then "-" + name else "--" + name
+  __flag_at(env.args(), "--" + name, short, 0)
+}
+
 fn __flag_at(args: List[String], long: String, short: String, i: Int) -> Bool =
   if i >= list.len(args) then false
   else {
@@ -249,13 +256,19 @@ pub const SRC_BOOL: &str = r#"
 
 
 
+/// "true" or "false"; bool.parse reads it back.
+fn to_string(b: Bool) -> String = if b then "true" else "false"
 
+/// ok(true) for "true", ok(false) for "false", err for anything else.
+fn parse(s: String) -> Result[Bool, String] = match s {
+  "true" => ok(true),
+  "false" => ok(false),
+  _ => err("provided string was not `true` or `false`"),
+}
 
-
-
-
-
-fn bool_to_string(b: Bool) -> String = if b then "true" else "false"
+/// Negative if a < b, 0 if equal, positive if a > b; false < true.
+fn compare(a: Bool, b: Bool) -> Int = if a == b then 0
+else if b then -1 else 1
 "#;
 pub const SRC_BYTES: &str = r#"
 
@@ -3569,6 +3582,10 @@ effect fn now() -> Int = _
 /// Monotonic ns since first call; compare differences.
 @intrinsic("almide_rt_datetime_monotonic_ns")
 effect fn monotonic_ns() -> Int = _
+
+/// Wall-clock milliseconds since the Unix epoch (not monotonic).
+@intrinsic("almide_rt_datetime_now_ms")
+effect fn now_ms() -> Int = _
 
 /// Epoch secs of YYYY-MM-DDTHH:MM:SSZ; fractions err.
 @intrinsic("almide_rt_datetime_parse_iso")
@@ -7869,6 +7886,425 @@ fn sha256(b: Bytes) -> Bytes = _
 /// SHA-256 of s's UTF-8, 64 lowercase hex chars.
 @intrinsic("almide_rt_hash_sha256_hex")
 fn sha256_hex(s: String) -> String = _
+
+
+
+
+
+/// CRC-32 (IEEE, reflected) as an unsigned Int; 0 for empty b.
+fn crc32(b: Bytes) -> Int = {
+  var table = list.repeat(0, 256)
+  var n = 0
+  while n < 256 {
+    var c = n
+    var k = 0
+    while k < 8 {
+      c = int.bxor(int.bshr(c, 1), int.band(3988292384, 0 - int.band(c, 1)))
+      k = k + 1
+    }
+    table[n] = c
+    n = n + 1
+  }
+  var acc = 4294967295
+  var i = 0
+  let len = bytes.len(b)
+  while i < len {
+    acc = int.bxor(table[int.band(int.bxor(acc, bytes.get_or(b, i, 0)), 255)], int.bshr(acc, 8))
+    i = i + 1
+  }
+  int.bxor(acc, 4294967295)
+}
+
+/// Adler-32 as an unsigned Int; 1 for empty b.
+fn adler32(b: Bytes) -> Int = {
+  var s1 = 1
+  var s2 = 0
+  var i = 0
+  let len = bytes.len(b)
+  while i < len {
+    s1 = (s1 + bytes.get_or(b, i, 0)) % 65521
+    s2 = (s2 + s1) % 65521
+    i = i + 1
+  }
+  int.bor(int.bshl(s2, 16), s1)
+}
+
+local fn h_mask32(x: Int) -> Int = int.band(x, 4294967295)
+
+local fn h_rotl32(x: Int, n: Int) -> Int = h_mask32(int.bor(int.bshl(x, n), int.bshr(x, 32 - n)))
+
+
+local fn h_shr64(x: Int, n: Int) -> Int = int.band(int.bshr(x, n), int.bshl(1, 64 - n) - 1)
+
+local fn h_rotr64(x: Int, n: Int) -> Int = int.bor(h_shr64(x, n), int.bshl(x, 64 - n))
+
+
+local fn h_len_bytes(n: Int, count: Int, big_endian: Bool) -> List[Int] = {
+  let le = list.range(0, count) |> list.map((i) => if i < 8 then int.band(int.bshr(n * 8, i * 8), 255) else 0)
+  if big_endian then list.reverse(le) else le
+}
+
+
+local fn h_pad(b: Bytes, block: Int, len_count: Int, big_endian: Bool) -> List[Int] = {
+  let n = bytes.len(b)
+  let total = (n + 1 + len_count + block - 1) / block * block
+  bytes.to_list(b) + [128] + list.repeat(0, total - n - 1 - len_count) + h_len_bytes(
+    n,
+    len_count,
+    big_endian,
+  )
+}
+
+local fn h_word32(m: List[Int], at: Int, big_endian: Bool) -> Int =
+  if big_endian then int.bor(
+    int.bor(int.bshl(m[at], 24), int.bshl(m[at + 1], 16)),
+    int.bor(int.bshl(m[at + 2], 8), m[at + 3]),
+  ) else int.bor(
+    int.bor(m[at], int.bshl(m[at + 1], 8)),
+    int.bor(int.bshl(m[at + 2], 16), int.bshl(m[at + 3], 24)),
+  )
+
+local fn h_word64(m: List[Int], at: Int) -> Int = list.range(0, 8) |> list.fold(
+  0,
+  (acc, k) => int.bor(int.bshl(acc, 8), m[at + k]),
+)
+
+
+local fn h_out(words: List[Int], width: Int, big_endian: Bool) -> Bytes = words |> list.flat_map((w) => list.range(0, width) |> list.map((k) => {
+  let shift = if big_endian then (width - 1 - k) * 8 else k * 8
+  int.band(int.bshr(w, shift), 255)
+})) |> bytes.from_list
+
+local fn h_hex(b: Bytes) -> String = bytes.to_list(b) |> list.map((x) => string.slice("0123456789abcdef", int.bshr(x, 4), int.bshr(x, 4) + 1) + string.slice(
+  "0123456789abcdef",
+  int.band(x, 15),
+  int.band(x, 15) + 1,
+)) |> string.join("")
+
+local fn h_md5_k() -> List[Int] = [
+  3614090360,
+  3905402710,
+  606105819,
+  3250441966,
+  4118548399,
+  1200080426,
+  2821735955,
+  4249261313,
+  1770035416,
+  2336552879,
+  4294925233,
+  2304563134,
+  1804603682,
+  4254626195,
+  2792965006,
+  1236535329,
+  4129170786,
+  3225465664,
+  643717713,
+  3921069994,
+  3593408605,
+  38016083,
+  3634488961,
+  3889429448,
+  568446438,
+  3275163606,
+  4107603335,
+  1163531501,
+  2850285829,
+  4243563512,
+  1735328473,
+  2368359562,
+  4294588738,
+  2272392833,
+  1839030562,
+  4259657740,
+  2763975236,
+  1272893353,
+  4139469664,
+  3200236656,
+  681279174,
+  3936430074,
+  3572445317,
+  76029189,
+  3654602809,
+  3873151461,
+  530742520,
+  3299628645,
+  4096336452,
+  1126891415,
+  2878612391,
+  4237533241,
+  1700485571,
+  2399980690,
+  4293915773,
+  2240044497,
+  1873313359,
+  4264355552,
+  2734768916,
+  1309151649,
+  4149444226,
+  3174756917,
+  718787259,
+  3951481745
+]
+
+local fn h_md5_s(i: Int) -> Int = {
+  let row = match i / 16 {
+    0 => [7, 12, 17, 22],
+    1 => [5, 9, 14, 20],
+    2 => [4, 11, 16, 23],
+    _ => [6, 10, 15, 21],
+  }
+  row[i % 4]
+}
+
+/// 16-byte MD5 digest of b. For compatibility only: MD5 is broken, never use it for security.
+fn md5(b: Bytes) -> Bytes = {
+  let m = h_pad(b, 64, 8, false)
+  let k = h_md5_k()
+  var h0 = 1732584193
+  var h1 = 4023233417
+  var h2 = 2562383102
+  var h3 = 271733878
+  var off = 0
+  while off < list.len(m) {
+    var a = h0
+    var bb = h1
+    var c = h2
+    var d = h3
+    var i = 0
+    while i < 64 {
+      let fg = match i / 16 {
+        0 => (int.bor(int.band(bb, c), int.band(int.bxor(bb, 4294967295), d)), i),
+        1 => (int.bor(int.band(d, bb), int.band(int.bxor(d, 4294967295), c)), (5 * i + 1) % 16),
+        2 => (int.bxor(int.bxor(bb, c), d), (3 * i + 5) % 16),
+        _ => (int.bxor(c, int.bor(bb, int.bxor(d, 4294967295))), (7 * i) % 16),
+      }
+      let f = h_mask32(fg.0 + a + k[i] + h_word32(m, off + fg.1 * 4, false))
+      a = d
+      d = c
+      c = bb
+      bb = h_mask32(bb + h_rotl32(f, h_md5_s(i)))
+      i = i + 1
+    }
+    h0 = h_mask32(h0 + a)
+    h1 = h_mask32(h1 + bb)
+    h2 = h_mask32(h2 + c)
+    h3 = h_mask32(h3 + d)
+    off = off + 64
+  }
+  h_out([h0, h1, h2, h3], 4, false)
+}
+
+/// MD5 of b as 32 lowercase hex chars. For compatibility only, never for security.
+fn md5_hex(b: Bytes) -> String = h_hex(md5(b))
+
+/// 20-byte SHA-1 digest of b. For compatibility only: SHA-1 is broken, never use it for security.
+fn sha1(b: Bytes) -> Bytes = {
+  let m = h_pad(b, 64, 8, true)
+  var h0 = 1732584193
+  var h1 = 4023233417
+  var h2 = 2562383102
+  var h3 = 271733878
+  var h4 = 3285377520
+  var w = list.repeat(0, 80)
+  var off = 0
+  while off < list.len(m) {
+    var t = 0
+    while t < 80 {
+      w[t] = if t < 16 then h_word32(m, off + t * 4, true)
+      else h_rotl32(int.bxor(int.bxor(w[t - 3], w[t - 8]), int.bxor(w[t - 14], w[t - 16])), 1)
+      t = t + 1
+    }
+    var a = h0
+    var bb = h1
+    var c = h2
+    var d = h3
+    var e = h4
+    var i = 0
+    while i < 80 {
+      let fk = match i / 20 {
+        0 => (int.bor(int.band(bb, c), int.band(int.bxor(bb, 4294967295), d)), 1518500249),
+        1 => (int.bxor(int.bxor(bb, c), d), 1859775393),
+        2 => (int.bor(int.bor(int.band(bb, c), int.band(bb, d)), int.band(c, d)), 2400959708),
+        _ => (int.bxor(int.bxor(bb, c), d), 3395469782),
+      }
+      let temp = h_mask32(h_rotl32(a, 5) + fk.0 + e + fk.1 + w[i])
+      e = d
+      d = c
+      c = h_rotl32(bb, 30)
+      bb = a
+      a = temp
+      i = i + 1
+    }
+    h0 = h_mask32(h0 + a)
+    h1 = h_mask32(h1 + bb)
+    h2 = h_mask32(h2 + c)
+    h3 = h_mask32(h3 + d)
+    h4 = h_mask32(h4 + e)
+    off = off + 64
+  }
+  h_out([h0, h1, h2, h3, h4], 4, true)
+}
+
+/// SHA-1 of b as 40 lowercase hex chars. For compatibility only, never for security.
+fn sha1_hex(b: Bytes) -> String = h_hex(sha1(b))
+
+local fn h_sha512_k() -> List[Int] = [
+  4794697086780616226,
+  8158064640168781261,
+  -5349999486874862801,
+  -1606136188198331460,
+  4131703408338449720,
+  6480981068601479193,
+  -7908458776815382629,
+  -6116909921290321640,
+  -2880145864133508542,
+  1334009975649890238,
+  2608012711638119052,
+  6128411473006802146,
+  8268148722764581231,
+  -9160688886553864527,
+  -7215885187991268811,
+  -4495734319001033068,
+  -1973867731355612462,
+  -1171420211273849373,
+  1135362057144423861,
+  2597628984639134821,
+  3308224258029322869,
+  5365058923640841347,
+  6679025012923562964,
+  8573033837759648693,
+  -7476448914759557205,
+  -6327057829258317296,
+  -5763719355590565569,
+  -4658551843659510044,
+  -4116276920077217854,
+  -3051310485924567259,
+  489312712824947311,
+  1452737877330783856,
+  2861767655752347644,
+  3322285676063803686,
+  5560940570517711597,
+  5996557281743188959,
+  7280758554555802590,
+  8532644243296465576,
+  -9096487096722542874,
+  -7894198246740708037,
+  -6719396339535248540,
+  -6333637450476146687,
+  -4446306890439682159,
+  -4076793802049405392,
+  -3345356375505022440,
+  -2983346525034927856,
+  -860691631967231958,
+  1182934255886127544,
+  1847814050463011016,
+  2177327727835720531,
+  2830643537854262169,
+  3796741975233480872,
+  4115178125766777443,
+  5681478168544905931,
+  6601373596472566643,
+  7507060721942968483,
+  8399075790359081724,
+  8693463985226723168,
+  -8878714635349349518,
+  -8302665154208450068,
+  -8016688836872298968,
+  -6606660893046293015,
+  -4685533653050689259,
+  -4147400797238176981,
+  -3880063495543823972,
+  -3348786107499101689,
+  -1523767162380948706,
+  -757361751448694408,
+  500013540394364858,
+  748580250866718886,
+  1242879168328830382,
+  1977374033974150939,
+  2944078676154940804,
+  3659926193048069267,
+  4368137639120453308,
+  4836135668995329356,
+  5532061633213252278,
+  6448918945643986474,
+  6902733635092675308,
+  7801388544844847127
+]
+
+/// 64-byte SHA-512 digest of b.
+fn sha512(b: Bytes) -> Bytes = {
+  let m = h_pad(b, 128, 16, true)
+  let k = h_sha512_k()
+  var hs = [
+    7640891576956012808,
+    -4942790177534073029,
+    4354685564936845355,
+    -6534734903238641935,
+    5840696475078001361,
+    -7276294671716946913,
+    2270897969802886507,
+    6620516959819538809
+  ]
+  var w = list.repeat(0, 80)
+  var off = 0
+  while off < list.len(m) {
+    var t = 0
+    while t < 80 {
+      w[t] = if t < 16 then h_word64(m, off + t * 8)
+      else {
+        let w15 = w[t - 15]
+        let w2 = w[t - 2]
+        let s0 = int.bxor(int.bxor(h_rotr64(w15, 1), h_rotr64(w15, 8)), h_shr64(w15, 7))
+        let s1 = int.bxor(int.bxor(h_rotr64(w2, 19), h_rotr64(w2, 61)), h_shr64(w2, 6))
+        w[t - 16] + s0 + w[t - 7] + s1
+      }
+      t = t + 1
+    }
+    var a = hs[0]
+    var bb = hs[1]
+    var c = hs[2]
+    var d = hs[3]
+    var e = hs[4]
+    var f = hs[5]
+    var g = hs[6]
+    var h = hs[7]
+    var i = 0
+    while i < 80 {
+      let s1 = int.bxor(int.bxor(h_rotr64(e, 14), h_rotr64(e, 18)), h_rotr64(e, 41))
+      let ch = int.bxor(int.band(e, f), int.band(int.bnot(e), g))
+      let t1 = h + s1 + ch + k[i] + w[i]
+      let s0 = int.bxor(int.bxor(h_rotr64(a, 28), h_rotr64(a, 34)), h_rotr64(a, 39))
+      let maj = int.bxor(int.bxor(int.band(a, bb), int.band(a, c)), int.band(bb, c))
+      let t2 = s0 + maj
+      h = g
+      g = f
+      f = e
+      e = d + t1
+      d = c
+      c = bb
+      bb = a
+      a = t1 + t2
+      i = i + 1
+    }
+    hs = [
+      hs[0] + a,
+      hs[1] + bb,
+      hs[2] + c,
+      hs[3] + d,
+      hs[4] + e,
+      hs[5] + f,
+      hs[6] + g,
+      hs[7] + h
+    ]
+    off = off + 128
+  }
+  h_out(hs, 8, true)
+}
+
+/// SHA-512 of b as 128 lowercase hex chars.
+fn sha512_hex(b: Bytes) -> String = h_hex(sha512(b))
 "#;
 pub const SRC_HASH_IMPL: &str = r#"
 
@@ -21664,6 +22100,357 @@ fn tan(x: Float) -> Float = _
 /// Hyperbolic tangent in -1..1; inf gives 1.0.
 @intrinsic("almide_rt_math_tanh")
 fn tanh(x: Float) -> Float = _
+
+
+
+
+
+
+
+
+local fn m_bits(x: Float) -> Int = float.to_bits(x)
+
+local fn m_from(b: Int) -> Float = int.bits_to_float(b)
+
+
+local fn m_hi(x: Float) -> Int = int.band(int.bshr(m_bits(x), 32), 4294967295)
+
+local fn m_lo(x: Float) -> Int = int.band(m_bits(x), 4294967295)
+
+local fn m_fabs(x: Float) -> Float = m_from(int.band(m_bits(x), 9223372036854775807))
+
+local fn m_signed(neg: Bool, x: Float) -> Float = if neg then -x else x
+
+local fn m_fix_nan(r: Float, operand_is_nan: Bool) -> Float =
+  if float.is_nan(r) and not operand_is_nan then m_from(9221120237041090560) else r
+
+
+local fn m_asin_r(z: Float) -> Float = {
+  let p = z * (1.66666666666666657415e-01 + z * (-3.25565818622400915405e-01 + z * (2.01212532134862925881e-01 + z * (-4.00555345006794114027e-02 + z * (7.91534994289814532176e-04 + z * 3.47933107596021167570e-05)))))
+  let q = 1.0 + z * (-2.40339491173441421878e+00 + z * (2.02094576023350569471e+00 + z * (-6.88283971605453293030e-01 + z * 7.70381505559019352791e-02)))
+  p / q
+}
+
+local fn m_asin(x: Float) -> Float = {
+  let pio2_hi = 1.57079632679489655800e+00
+  let pio2_lo = 6.12323399573676603587e-17
+  let hx = m_hi(x)
+  let ix = int.band(hx, 2147483647)
+  if ix >= 1072693248 then {
+    if int.bor(ix - 1072693248, m_lo(x)) == 0 then x * pio2_hi + m_from(4066750463515557888)
+    else 0.0 / (x - x)
+  } else if ix < 1071644672 then {
+    if ix >= 1048576 and ix < 1045430272 then x else x + x * m_asin_r(x * x)
+  } else {
+    let z = (1.0 - m_fabs(x)) * 0.5
+    let s = math.sqrt(z)
+    let r = m_asin_r(z)
+    let y = if ix >= 1072640819 then pio2_hi - (2.0 * (s + s * r) - pio2_lo)
+    else {
+      let f = m_from(int.band(m_bits(s), -4294967296))
+      let c = (z - f * f) / (s + f)
+      0.5 * pio2_hi - (2.0 * s * r - (pio2_lo - 2.0 * c) - (0.5 * pio2_hi - 2.0 * f))
+    }
+    m_signed(int.bshr(hx, 31) != 0, y)
+  }
+}
+
+/// Arcsine in radians, within -pi/2..pi/2; NaN outside -1..1.
+fn asin(x: Float) -> Float = m_fix_nan(m_asin(x), float.is_nan(x))
+
+local fn m_acos(x: Float) -> Float = {
+  let pio2_hi = 1.57079632679489655800e+00
+  let pio2_lo = 6.12323399573676603587e-17
+  let x1p_120 = m_from(4066750463515557888)
+  let hx = m_hi(x)
+  let ix = int.band(hx, 2147483647)
+  if ix >= 1072693248 then {
+    if int.bor(ix - 1072693248, m_lo(x)) == 0 then {
+      if int.bshr(hx, 31) != 0 then 2.0 * pio2_hi + x1p_120 else 0.0
+    } else 0.0 / (x - x)
+  } else if ix < 1071644672 then {
+    if ix <= 1012924416 then pio2_hi + x1p_120
+    else pio2_hi - (x - (pio2_lo - x * m_asin_r(x * x)))
+  } else if int.bshr(hx, 31) != 0 then {
+    let z = (1.0 + x) * 0.5
+    let s = math.sqrt(z)
+    let w = m_asin_r(z) * s - pio2_lo
+    2.0 * (pio2_hi - (s + w))
+  } else {
+    let z = (1.0 - x) * 0.5
+    let s = math.sqrt(z)
+    let df = m_from(int.band(m_bits(s), -4294967296))
+    let c = (z - df * df) / (s + df)
+    let w = m_asin_r(z) * s + c
+    2.0 * (df + w)
+  }
+}
+
+/// Arccosine in radians, within 0..pi; NaN outside -1..1.
+fn acos(x: Float) -> Float = m_fix_nan(m_acos(x), float.is_nan(x))
+
+local fn m_atan2(y: Float, x: Float) -> Float = {
+  let pi_v = 3.1415926535897931160e+00
+  let pi_lo = 1.2246467991473531772e-16
+  let hx = m_hi(x)
+  let lx = m_lo(x)
+  let hy = m_hi(y)
+  let ly = m_lo(y)
+  let m = int.bor(int.band(int.bshr(hy, 31), 1), int.band(int.bshr(hx, 30), 2))
+  let ix = int.band(hx, 2147483647)
+  let iy = int.band(hy, 2147483647)
+  if float.is_nan(x) or float.is_nan(y) then x + y
+  else if int.bor(int.band(hx - 1072693248, 4294967295), lx) == 0 then math.atan(y)
+  else if int.bor(iy, ly) == 0 then match m {
+    0 => y,
+    1 => y,
+    2 => pi_v,
+    _ => -pi_v,
+  } else if int.bor(ix, lx) == 0 then {
+    if int.band(m, 1) != 0 then -pi_v / 2.0 else pi_v / 2.0
+  } else if ix == 2146435072 then {
+    if iy == 2146435072 then match m {
+      0 => pi_v / 4.0,
+      1 => -pi_v / 4.0,
+      2 => 3.0 * pi_v / 4.0,
+      _ => -3.0 * pi_v / 4.0,
+    } else match m {
+      0 => 0.0,
+      1 => -0.0,
+      2 => pi_v,
+      _ => -pi_v,
+    }
+  } else if int.band(ix + 67108864, 4294967295) < iy or iy == 2146435072 then {
+    if int.band(m, 1) != 0 then -pi_v / 2.0 else pi_v / 2.0
+  } else {
+    let z = if int.band(m, 2) != 0 and int.band(iy + 67108864, 4294967295) < ix then 0.0
+    else math.atan(m_fabs(y / x))
+    match m {
+      0 => z,
+      1 => -z,
+      2 => pi_v - (z - pi_lo),
+      _ => (z - pi_lo) - pi_v,
+    }
+  }
+}
+
+/// Angle of the point (x, y) in radians, within -pi..pi.
+fn atan2(y: Float, x: Float) -> Float = m_atan2(y, x)
+
+/// e to the x, minus 1, accurate near 0; -1.0 below about -38.
+fn expm1(x: Float) -> Float = {
+  let ln2_hi = 6.93147180369123816490e-01
+  let ln2_lo = 1.90821492927058770002e-10
+  let hx = int.band(m_hi(x), 2147483647)
+  let sgn = int.bshr(m_hi(x), 31)
+  if hx >= 1078159482 and float.is_nan(x) then x
+  else if hx >= 1078159482 and sgn != 0 then -1.0
+  else if hx >= 1078159482 and x > 7.09782712893383973096e+02 then x * m_from(9214364837600034816)
+  else if hx <= 1071001154 and hx < 1016070144 then x
+  else {
+    let reduce = hx > 1071001154
+    let near = hx < 1072734898
+    let k = if not reduce then 0
+    else if near then {
+      if sgn == 0 then 1 else -1
+    } else float.to_int(1.44269504088896338700e+00 * x + (if sgn != 0 then -0.5 else 0.5))
+    let hl = if not reduce then (x, 0.0)
+    else if near then {
+      if sgn == 0 then (x - ln2_hi, ln2_lo) else (x + ln2_hi, -ln2_lo)
+    } else {
+      let t = float.from_int(k)
+      (x - t * ln2_hi, t * ln2_lo)
+    }
+    let x1 = if reduce then hl.0 - hl.1
+    else x
+    let c = if reduce then (hl.0 - x1) - hl.1
+    else 0.0
+    let hfx = 0.5 * x1
+    let hxs = x1 * hfx
+    let r1 = 1.0 + hxs * (-3.33333333333331316428e-02 + hxs * (1.58730158725481460165e-03 + hxs * (-7.93650757867487942473e-05 + hxs * (4.00821782732936239552e-06 + hxs * -2.01099218183624371326e-07))))
+    let t = 3.0 - r1 * hfx
+    let e0 = hxs * ((r1 - t) / (6.0 - x1 * t))
+    if k == 0 then x1 - (x1 * e0 - hxs)
+    else {
+      let e1 = (x1 * (e0 - c) - c) - hxs
+      if k == -1 then 0.5 * (x1 - e1) - 0.5
+      else if k == 1 then {
+        if x1 < -0.25 then -2.0 * (e1 - (x1 + 0.5)) else 1.0 + 2.0 * (x1 - e1)
+      } else {
+        let twopk = m_from(int.bshl(1023 + k, 52))
+        if k < 0 or k > 56 then {
+          let y0 = x1 - e1 + 1.0
+          let y1 = if k == 1024 then y0 * 2.0 * m_from(9214364837600034816) else y0 * twopk
+          y1 - 1.0
+        } else {
+          let uf = m_from(int.bshl(1023 - k, 52))
+          if k < 20 then (x1 - e1 + (1.0 - uf)) * twopk else (x1 - (e1 + uf) + 1.0) * twopk
+        }
+      }
+    }
+  }
+}
+
+local fn m_log1p(x: Float) -> Float = {
+  let ln2_hi = 6.93147180369123816490e-01
+  let ln2_lo = 1.90821492927058770002e-10
+  let hx = m_hi(x)
+  let small = hx < 1071284858 or int.bshr(hx, 31) > 0
+  if small and hx >= 3220176896 then {
+    if x == -1.0 then x / 0.0 else (x - x) / 0.0
+  } else if small and int.band(int.bshl(hx, 1), 4294967295) < 2034237440 then x
+  else if not small and hx >= 2146435072 then x
+  else {
+    let direct = small and hx <= 3218259652
+    let parts = if direct then (0, 0.0, x)
+    else {
+      let u = 1.0 + x
+      let hu0 = m_hi(u) + 1072693248 - 1072079006
+      let k = int.bshr(hu0, 20) - 1023
+      let c = if k < 54 then {
+        let c0 = if k >= 2 then 1.0 - (u - x) else x - (u - 1.0)
+        c0 / u
+      } else 0.0
+      let hu = int.band(hu0, 1048575) + 1072079006
+      let f = m_from(int.bor(int.bshl(hu, 32), m_lo(u))) - 1.0
+      (k, c, f)
+    }
+    let f = parts.2
+    let hfsq = 0.5 * f * f
+    let s = f / (2.0 + f)
+    let z = s * s
+    let w = z * z
+    let t1 = w * (3.999999999940941908e-01 + w * (2.222219843214978396e-01 + w * 1.531383769920937332e-01))
+    let t2 = z * (6.666666666666735130e-01 + w * (2.857142874366239149e-01 + w * (1.818357216161805012e-01 + w * 1.479819860511658591e-01)))
+    let r = t2 + t1
+    let dk = float.from_int(parts.0)
+    s * (hfsq + r) + (dk * ln2_lo + parts.1) - hfsq + f + dk * ln2_hi
+  }
+}
+
+/// Natural log of 1 + x, accurate near 0; -inf at -1, NaN below.
+fn log1p(x: Float) -> Float = m_fix_nan(m_log1p(x), float.is_nan(x))
+
+
+local fn m_expo2(x: Float) -> Float = {
+  let scale = m_from(int.bshl(2044, 52))
+  math.exp(x - m_from(4653942887746821515)) * scale * scale
+}
+
+/// Hyperbolic sine; overflows to +-inf past about 710.
+fn sinh(x: Float) -> Float = {
+  let h = if int.bshr(m_bits(x), 63) != 0 then -0.5 else 0.5
+  let absx = m_fabs(x)
+  let w = m_hi(absx)
+  if w < 1082535490 then {
+    let t = expm1(absx)
+    if w < 1072693248 then {
+      if w < 1072693248 - 27262976 then x else h * (2.0 * t - t * t / (t + 1.0))
+    } else h * (t + t / (t + 1.0))
+  } else 2.0 * h * m_expo2(absx)
+}
+
+/// Hyperbolic cosine, at least 1.0; overflows to inf past about 710.
+fn cosh(x: Float) -> Float = {
+  let ax = m_fabs(x)
+  let w = m_hi(ax)
+  if w < 1072049730 then {
+    if w < 1072693248 - 27262976 then 1.0
+    else {
+      let t = expm1(ax)
+      1.0 + t * t / (2.0 * (1.0 + t))
+    }
+  } else if w < 1082535490 then {
+    let t = math.exp(ax)
+    0.5 * (t + 1.0 / t)
+  } else m_expo2(ax)
+}
+
+
+local fn m_sq(x: Float) -> (Float, Float) = {
+  let xc = x * 134217729.0
+  let xh = x - xc + xc
+  let xl = x - xh
+  let hi = x * x
+  (hi, xh * xh - hi + 2.0 * xh * xl + xl * xl)
+}
+
+/// sqrt(a*a + b*b) without overflow or underflow on the way.
+fn hypot(a: Float, b: Float) -> Float = {
+  let ua = int.band(m_bits(a), 9223372036854775807)
+  let ub = int.band(m_bits(b), 9223372036854775807)
+  let uxi = if ua < ub then ub else ua
+  let uyi = if ua < ub then ua else ub
+  let ex = int.bshr(uxi, 52)
+  let ey = int.bshr(uyi, 52)
+  let x = m_from(uxi)
+  let y = m_from(uyi)
+  if ey == 2047 then y
+  else if ex == 2047 or uyi == 0 then x
+  else if ex - ey > 64 then x + y
+  else {
+    let x1p700 = m_from(7759702157959364608)
+    let x1p_700 = m_from(1454662679640670208)
+    let scaled = if ex > 1023 + 510 then (x1p700, x * x1p_700, y * x1p_700)
+    else if ey < 1023 - 450 then (x1p_700, x * x1p700, y * x1p700) else (1.0, x, y)
+    let sx = m_sq(scaled.1)
+    let sy = m_sq(scaled.2)
+    scaled.0 * math.sqrt(sy.1 + sx.1 + sy.0 + sx.0)
+  }
+}
+
+/// Real cube root; negative x gives a negative root.
+fn cbrt(x: Float) -> Float = {
+  let hx0 = int.band(m_hi(x), 2147483647)
+  let sub = hx0 < 1048576
+  let hx = if sub then int.band(m_hi(x * m_from(4850376798678024192)), 2147483647) else hx0
+  if hx0 >= 2146435072 then x + x
+  else if sub and hx == 0 then x
+  else {
+    let hw = if sub then hx / 3 + 696219795 else hx / 3 + 715094163
+    let t0 = m_from(int.bor(int.band(m_bits(x), int.bshl(1, 63)), int.bshl(hw, 32)))
+    let r0 = (t0 * t0) * (t0 / x)
+    let t1 = t0 * ((1.87595182427177009643 + r0 * (-1.88497979543377169875 + r0 * 1.621429720105354466140)) + ((r0 * r0) * r0) * (-0.758397934778766047437 + r0 * 0.145996192886612446982))
+    let t = m_from(int.band(m_bits(t1) + 2147483648, -1073741824))
+    let s = t * t
+    let r1 = x / s
+    let w = t + t
+    let r = (r1 - t) / (w + r1)
+    t + t * r
+  }
+}
+
+/// Inverse hyperbolic sine.
+fn asinh(x: Float) -> Float = {
+  let ex = int.band(int.bshr(m_bits(x), 52), 2047)
+  let ax = m_fabs(x)
+  let y = if ex >= 1023 + 26 then math.log(ax) + 0.693147180559945309417232121458176568
+  else if ex >= 1023 + 1 then math.log(2.0 * ax + 1.0 / (math.sqrt(ax * ax + 1.0) + ax))
+  else if ex >= 1023 - 26 then m_log1p(ax + ax * ax / (math.sqrt(ax * ax + 1.0) + 1.0)) else ax
+  m_signed(int.bshr(m_bits(x), 63) != 0, y)
+}
+
+local fn m_acosh(x: Float) -> Float = {
+  let ex = int.band(int.bshr(m_bits(x), 52), 2047)
+  if ex < 1023 + 1 then m_log1p(x - 1.0 + math.sqrt((x - 1.0) * (x - 1.0) + 2.0 * (x - 1.0)))
+  else if ex < 1023 + 26 then math.log(2.0 * x - 1.0 / (x + math.sqrt(x * x - 1.0)))
+  else math.log(x) + 0.693147180559945309417232121458176568
+}
+
+/// Inverse hyperbolic cosine, at least 0.0; NaN below 1.0.
+fn acosh(x: Float) -> Float = m_fix_nan(m_acosh(x), float.is_nan(x))
+
+local fn m_atanh(x: Float) -> Float = {
+  let ex = int.band(int.bshr(m_bits(x), 52), 2047)
+  let y = m_fabs(x)
+  let r = if ex < 1023 - 1 then {
+    if ex < 1023 - 32 then y else 0.5 * m_log1p(2.0 * y + 2.0 * y * y / (1.0 - y))
+  } else 0.5 * m_log1p(2.0 * (y / (1.0 - y)))
+  m_signed(int.bshr(m_bits(x), 63) != 0, r)
+}
+
+/// Inverse hyperbolic tangent; +-inf at +-1, NaN outside -1..1.
+fn atanh(x: Float) -> Float = m_fix_nan(m_atanh(x), float.is_nan(x))
 "#;
 pub const SRC_MATH_ATAN: &str = r#"
 
@@ -23773,6 +24560,14 @@ fn mul_f32_t_scaled(a: Matrix[Float32], alpha: Float, b: Matrix[Float32]) -> Mat
 @rewrite(name="mul_scaled_lhs", from="matrix.mul(matrix.scale(?a, ?s), ?b)", to="matrix.mul_scaled(?a, ?s, ?b)")
 @intrinsic("almide_rt_matrix_mul_scaled")
 fn mul_scaled(a: Matrix, alpha: Float, b: Matrix) -> Matrix = _
+
+/// f over each pair of same-position elements; a shape mismatch aborts.
+@intrinsic("almide_rt_matrix_zip_with")
+fn zip_with(a: Matrix, b: Matrix, f: (Float, Float) -> Float) -> Matrix = _
+
+/// Rows of every matrix, top to bottom; empty members skipped, a width mismatch aborts.
+@intrinsic("almide_rt_matrix_concat_rows")
+fn concat_rows(xs: List[Matrix]) -> Matrix = _
 "#;
 pub const SRC_MATRIX_ARITH: &str = r#"
 
@@ -25048,6 +25843,65 @@ fn matrix_shape(m: Matrix) -> (Int, Int) = {
   let c = matrix.cols(m)
   (r, c)
 }
+
+
+
+
+
+
+fn __matrix_concat_rows_go(xs: List[Matrix], i: Int, acc: Matrix) -> Matrix = match list.get(xs, i) {
+  some(m) => __matrix_concat_rows_go(xs, i + 1, matrix.append_rows(acc, m)),
+  none => acc,
+}
+
+@implements("matrix.concat_rows")
+fn __matrix_concat_rows(xs: List[Matrix]) -> Matrix = __matrix_concat_rows_go(
+  xs,
+  0,
+  matrix.from_lists([]),
+)
+
+fn __matrix_zip_row(ra: List[Float], rb: List[Float], f: (Float, Float) -> Float, i: Int, acc: List[Float]) -> List[Float] = match (list.get(
+  ra,
+  i,
+), list.get(rb, i)) {
+  (some(x), some(y)) => __matrix_zip_row(ra, rb, f, i + 1, acc + [f(x, y)]),
+  _ => acc,
+}
+
+fn __matrix_zip_rows(la: List[List[Float]], lb: List[List[Float]], f: (Float, Float) -> Float, i: Int, acc: List[List[Float]]) -> List[List[Float]] = match (list.get(
+  la,
+  i,
+), list.get(lb, i)) {
+  (some(ra), some(rb)) => __matrix_zip_rows(
+    la,
+    lb,
+    f,
+    i + 1,
+    acc + [
+      __matrix_zip_row(ra, rb, f, 0, [])
+    ],
+  ),
+  _ => acc,
+}
+
+
+
+
+
+@implements("matrix.zip_with")
+fn __matrix_zip_with(a: Matrix, b: Matrix, f: (Float, Float) -> Float) -> Matrix = {
+  let rows_probe = matrix.append_rows(
+    matrix.zeros(1, matrix.rows(a)),
+    matrix.zeros(1, matrix.rows(b)),
+  )
+  let cols_probe = matrix.append_rows(
+    matrix.zeros(1, matrix.cols(a)),
+    matrix.zeros(1, matrix.cols(b)),
+  )
+  if matrix.cols(rows_probe) + matrix.cols(cols_probe) < 0 then a
+  else matrix.from_lists(__matrix_zip_rows(matrix.to_lists(a), matrix.to_lists(b), f, 0, []))
+}
 "#;
 pub const SRC_NET: &str = r#"
 
@@ -25959,6 +26813,15 @@ fn option_to_string_b(o: Bool?) -> String = match o {
   some(v) => "some(" + (if v then "true" else "false") + ")",
   none => "none",
 }
+
+
+
+
+
+
+
+@implements("bool.to_string")
+fn __bool_to_string(b: Bool) -> String = if b then "true" else "false"
 "#;
 pub const SRC_OPTION_TO_STRING_F: &str = r#"
 
@@ -26994,6 +27857,44 @@ fn normalize(p: String) -> String = {
   if absolute then "/" + joined
   else if string.len(joined) == 0 then "." else joined
 }
+
+/// Segments of normalize(path), led by "/" when absolute; ["."] for "" or ".".
+fn components(path: String) -> List[String] = {
+  let n = normalize(path)
+  let segs = string.split(n, "/") |> list.filter((s) => string.len(s) > 0)
+  if string.starts_with(n, "/") then ["/"] + segs
+  else segs
+}
+
+/// path relative to base, lexically; "." when equal; none when not under base.
+fn relative_to(path: String, base: String) -> String? = {
+  let pc = components(path) |> list.filter((s) => s != ".")
+  let bc = components(base) |> list.filter((s) => s != ".")
+  let rest = list.drop(pc, list.len(bc))
+  if list.take(pc, list.len(bc)) != bc or list.contains(rest, "..") then none
+  else if list.is_empty(rest) then some(".")
+  else some(string.join(rest, "/"))
+}
+
+local fn trim_end_slashes(p: String) -> String =
+  if string.len(p) > 1 and string.ends_with(p, "/") then trim_end_slashes(string.drop_end(p, 1))
+  else p
+
+/// path with its last extension replaced by ext; "" removes it; unchanged without a file name.
+fn with_extension(path: String, ext: String) -> String = {
+  let name = basename(path)
+  match name {
+    "" => path,
+    "." => path,
+    ".." => path,
+    _ => {
+      let trimmed = trim_end_slashes(path)
+      let dir = string.drop_end(trimmed, string.len(name))
+      let s = stem(name)
+      if ext == "" then dir + s else dir + s + "." + ext
+    },
+  }
+}
 "#;
 pub const SRC_PRIM: &str = r#"
 
@@ -27835,6 +28736,91 @@ effect fn choice[T](xs: List[T]) -> T? = _
 @intrinsic("almide_rt_random_shuffle")
 @consume(xs)
 effect fn shuffle[T](xs: List[T]) -> List[T] = _
+
+
+
+
+
+
+/// A seeded random generator; its whole state is one 64-bit word.
+mod type Rng = Int
+
+
+local fn rng_shr(x: Int, n: Int) -> Int = int.band(int.bshr(x, n), int.bshl(1, 64 - n) - 1)
+
+
+local fn rng_next64(rng: Rng) -> (Int, Rng) = match rng {
+  Rng(s) => {
+    let state = s + -7046029254386353131
+    let z1 = int.bxor(state, rng_shr(state, 30)) * -4658895280553007687
+    let z2 = int.bxor(z1, rng_shr(z1, 27)) * -7723592293110705685
+    (int.bxor(z2, rng_shr(z2, 31)), Rng(state))
+  }
+}
+
+/// A generator whose stream is fixed by seed.
+fn seeded(seed: Int) -> Rng = Rng(seed)
+
+
+local fn rng_ult(a: Int, b: Int) -> Bool = int.bxor(a, int.bshl(1, 63)) < int.bxor(
+  b,
+  int.bshl(1, 63),
+)
+
+
+local fn rng_below(rng: Rng, span: Int) -> (Int, Rng) = {
+  let (z, next) = rng_next64(rng)
+  if span > 0 then {
+
+    let r = rng_shr(z, 1)
+    let rem = (9223372036854775807 % span + 1) % span
+    if rem == 0 or r <= 9223372036854775807 - rem then (r % span, next) else rng_below(next, span)
+  } else if rng_ult(z, span) then (z, next)
+  else rng_below(next, span)
+}
+
+/// An Int in [min, max] (both ends) and the next state; min, state unchanged, if max <= min.
+fn next_int(rng: Rng, min: Int, max: Int) -> (Int, Rng) = if max <= min then (min, rng)
+else {
+  let span = max - min + 1
+  if span == 0 then {
+
+    let (z, next) = rng_next64(rng)
+    (z, next)
+  } else {
+    let (r, next) = rng_below(rng, span)
+    (min + r, next)
+  }
+}
+
+/// A Float in [0, 1) from the top 53 bits, and the next state.
+fn next_float(rng: Rng) -> (Float, Rng) = {
+  let (z, next) = rng_next64(rng)
+  (float.from_int(rng_shr(z, 11)) * 1.1102230246251565e-16, next)
+}
+
+/// A uniformly chosen element (none, state unchanged, when xs is empty) and the next state.
+fn next_choice[A](rng: Rng, xs: List[A]) -> (A?, Rng) = if list.is_empty(xs) then (none, rng)
+else {
+  let (i, next) = next_int(rng, 0, list.len(xs) - 1)
+  (list.get(xs, i), next)
+}
+
+/// A uniform permutation of xs (Fisher-Yates) and the next state.
+fn next_shuffle[A](rng: Rng, xs: List[A]) -> (List[A], Rng) = {
+  var ys = xs
+  var r = rng
+  var i = list.len(xs) - 1
+  while i > 0 {
+    let (j, next) = next_int(r, 0, i)
+    r = next
+    let t = ys[i]
+    ys[i] = ys[j]
+    ys[j] = t
+    i = i - 1
+  }
+  (ys, r)
+}
 "#;
 pub const SRC_RANDOM_CHOICE: &str = r#"
 
@@ -32491,6 +33477,236 @@ fn push(mut s: String, suffix: String) -> Unit = _
 /// Empties s in place.
 @intrinsic("almide_rt_string_clear")
 fn clear(mut s: String) -> Unit = _
+
+
+
+
+
+
+
+
+/// Negative if a sorts before b, 0 if equal, positive after; codepoint order.
+fn compare(a: String, b: String) -> Int = if a < b then -1
+else if a > b then 1 else 0
+
+local fn utf8_width(cp: Int) -> Int = if cp < 128 then 1
+else if cp < 2048 then 2
+else if cp < 65536 then 3 else 4
+
+/// UTF-8 byte count (string.len counts codepoints).
+fn byte_len(s: String) -> Int = string.chars(s) |> list.fold(
+  0,
+  (n, c) => n + utf8_width(string.codepoint(c) ?? 0),
+)
+
+local fn utf16_units(cp: Int) -> List[Int] = if cp < 65536 then [cp]
+else [55296 + (cp - 65536) / 1024, 56320 + (cp - 65536) % 1024]
+
+/// UTF-16 code units; a codepoint past U+FFFF is a surrogate pair.
+fn to_utf16(s: String) -> List[Int] = string.chars(s) |> list.flat_map((c) => utf16_units(string.codepoint(c) ?? 0))
+
+local fn utf16_decode(xs: List[Int], i: Int, acc: List[String]) -> Result[String, String] = match list.get(
+  xs,
+  i,
+) {
+  none => ok(string.join(list.reverse(acc), "")),
+  some(u) => if u < 0 or u > 65535 then err("string.from_utf16: code unit out of range at ${i}: ${u}")
+  else if u >= 55296 and u <= 56319 then match list.get(xs, i + 1) {
+    some(lo) => if lo >= 56320 and lo <= 57343 then utf16_decode(
+      xs,
+      i + 2,
+      [string.from_codepoint(65536 + (u - 55296) * 1024 + (lo - 56320))] + acc,
+    )
+    else err("string.from_utf16: unpaired surrogate at ${i}"),
+    none => err("string.from_utf16: unpaired surrogate at ${i}"),
+  } else if u >= 56320 and u <= 57343 then err("string.from_utf16: unpaired surrogate at ${i}")
+  else utf16_decode(xs, i + 1, [string.from_codepoint(u)] + acc),
+}
+
+/// String from UTF-16 code units; err on an unpaired surrogate or a unit outside 0..65535.
+fn from_utf16(xs: List[Int]) -> Result[String, String] = utf16_decode(xs, 0, [])
+
+/// The characters of s for which f is true.
+fn filter(s: String, f: (String) -> Bool) -> String = string.join(
+  list.filter(string.chars(s), f),
+  "",
+)
+
+/// f folded over the characters of s, left to right.
+fn fold[B](s: String, init: B, f: (B, String) -> B) -> B = list.fold(string.chars(s), init, f)
+
+/// s with x inserted before character i; i outside 0..=len aborts.
+fn insert(s: String, i: Int, x: String) -> String = {
+  let n = string.len(s)
+  if i < 0 or i > n then panic("string.insert: index ${i} out of range 0..=${n}")
+  else string.take(s, i) + x + string.drop(s, i)
+}
+
+/// s without character i; i outside 0..len aborts.
+fn remove_at(s: String, i: Int) -> String = {
+  let n = string.len(s)
+  if i < 0 or i >= n then panic("string.remove_at: index ${i} out of range 0..${n}")
+  else string.take(s, i) + string.drop(s, i + 1)
+}
+
+/// The empty string.
+fn new() -> String = ""
+
+/// The strings of xs joined with nothing between.
+fn from_list(xs: List[String]) -> String = string.join(xs, "")
+
+/// (index, character) pairs from 0.
+fn enumerate(s: String) -> List[(Int, String)] = list.enumerate(string.chars(s))
+
+/// Characters paired with ys; stops at the shorter.
+fn zip[B](s: String, ys: List[B]) -> List[(String, B)] = list.zip(string.chars(s), ys)
+
+/// f over characters paired with ys; stops at the shorter.
+fn zip_with[B, C](s: String, ys: List[B], f: (String, B) -> C) -> List[C] = list.zip_with(
+  string.chars(s),
+  ys,
+  f,
+)
+
+/// The some results of f over the characters, in order.
+fn filter_map[B](s: String, f: (String) -> B?) -> List[B] = list.filter_map(string.chars(s), f)
+
+/// The first some result of f over the characters, or none.
+fn find_map[B](s: String, f: (String) -> B?) -> B? = list.find_map(string.chars(s), f)
+
+/// f folded over the characters from the first; none if s is empty.
+fn reduce(s: String, f: (String, String) -> String) -> String? = list.reduce(string.chars(s), f)
+
+/// The running fold over the characters, init excluded.
+fn scan[B](s: String, init: B, f: (B, String) -> B) -> List[B] = list.scan(string.chars(s), init, f)
+
+/// (characters where f is true, the rest), each in order.
+fn partition(s: String, f: (String) -> Bool) -> (List[String], List[String]) = list.partition(
+  string.chars(s),
+  f,
+)
+
+/// Characters grouped by f's key, each group in order.
+fn group_by[B](s: String, f: (String) -> B) -> Map[B, List[String]] = list.group_by(
+  string.chars(s),
+  f,
+)
+
+/// The characters in codepoint order.
+fn sort(s: String) -> List[String] = list.sort(string.chars(s))
+
+/// The characters ordered by f's key; equal keys keep their order.
+fn sort_by[B](s: String, f: (String) -> B) -> List[String] = list.sort_by(string.chars(s), f)
+
+local fn merge_with(xs: List[String], ys: List[String], cmp: (String, String) -> Int, i: Int, j: Int, acc: List[String]) -> List[String] = match (list.get(
+  xs,
+  i,
+), list.get(ys, j)) {
+  (some(x), some(y)) => if cmp(y, x) < 0 then merge_with(xs, ys, cmp, i, j + 1, acc + [y])
+  else merge_with(xs, ys, cmp, i + 1, j, acc + [x]),
+  (some(_), none) => acc + list.drop(xs, i),
+  _ => acc + list.drop(ys, j),
+}
+
+local fn merge_sort_with(xs: List[String], cmp: (String, String) -> Int) -> List[String] = {
+  let n = list.len(xs)
+  if n <= 1 then xs
+  else merge_with(
+    merge_sort_with(list.take(xs, n / 2), cmp),
+    merge_sort_with(list.drop(xs, n / 2), cmp),
+    cmp,
+    0,
+    0,
+    [],
+  )
+}
+
+/// The characters ordered by cmp (negative = first argument first); stable.
+fn sort_with(s: String, cmp: (String, String) -> Int) -> List[String] = merge_sort_with(
+  string.chars(s),
+  cmp,
+)
+
+/// The smallest character in codepoint order; none if empty.
+fn min(s: String) -> String? = list.min(string.chars(s))
+
+/// The largest character in codepoint order; none if empty.
+fn max(s: String) -> String? = list.max(string.chars(s))
+
+/// The first character with the smallest key; none if empty.
+fn min_by[K](s: String, f: (String) -> K) -> String? = list.first(list.sort_by(string.chars(s), f))
+
+/// The last character with the largest key; none if empty.
+fn max_by[K](s: String, f: (String) -> K) -> String? = list.last(list.sort_by(string.chars(s), f))
+
+local fn pick_with(xs: List[String], i: Int, best: String, cmp: (String, String) -> Int, want_max: Bool) -> String = match list.get(
+  xs,
+  i,
+) {
+  none => best,
+  some(c) => {
+    let o = cmp(c, best)
+    let chosen = if want_max then o >= 0 else o < 0
+    pick_with(xs, i + 1, if chosen then c else best, cmp, want_max)
+  },
+}
+
+/// The first smallest character by cmp; none if empty.
+fn min_with(s: String, cmp: (String, String) -> Int) -> String? = match string.first(s) {
+  some(c) => some(pick_with(string.chars(s), 1, c, cmp, false)),
+  none => none,
+}
+
+/// The last largest character by cmp; none if empty.
+fn max_with(s: String, cmp: (String, String) -> Int) -> String? = match string.first(s) {
+  some(c) => some(pick_with(string.chars(s), 1, c, cmp, true)),
+  none => none,
+}
+
+/// Index of the first character where f is true, or none.
+fn find_index(s: String, f: (String) -> Bool) -> Int? = list.find_index(string.chars(s), f)
+
+/// The longest prefix whose characters all satisfy f.
+fn take_while(s: String, f: (String) -> Bool) -> String = string.join(
+  list.take_while(string.chars(s), f),
+  "",
+)
+
+/// s after the longest prefix whose characters all satisfy f.
+fn drop_while(s: String, f: (String) -> Bool) -> String = string.join(
+  list.drop_while(string.chars(s), f),
+  "",
+)
+
+/// Runs of n characters, the last may be shorter; n <= 0 aborts.
+fn chunk(s: String, n: Int) -> List[String] =
+  if n <= 0 then panic("string.chunk: size must be positive, got ${n}")
+  else list.chunk(string.chars(s), n) |> list.map((cs) => string.join(cs, ""))
+
+/// Every run of n consecutive characters; [] if n > len; n <= 0 aborts.
+fn window(s: String, n: Int) -> List[String] =
+  if n <= 0 then panic("string.window: size must be positive, got ${n}")
+  else list.window(string.chars(s), n) |> list.map((cs) => string.join(cs, ""))
+
+/// (first n characters, the rest); n past the end gives (s, ""); n < 0 aborts.
+fn split_at(s: String, n: Int) -> (String, String) =
+  if n < 0 then panic("string.split_at: negative index ${n}")
+  else (string.take(s, n), string.drop(s, n))
+
+/// s with each run of equal adjacent characters collapsed to one.
+fn dedup(s: String) -> String = string.join(list.dedup(string.chars(s)), "")
+
+/// The characters of s with sep between each pair.
+fn intersperse(s: String, sep: String) -> String = string.join(string.chars(s), sep)
+
+/// The first occurrence of each character, in order.
+fn unique(s: String) -> String = string.join(list.unique(string.chars(s)), "")
+
+/// The first character of each key f gives, in order.
+fn unique_by[K](s: String, f: (String) -> K) -> String = string.join(
+  list.unique_by(string.chars(s), f),
+  "",
+)
 "#;
 pub const SRC_STRING_BYTE_SLICE: &str = r#"
 fn __byte_slice_boundary(base: Int, len: Int, pos: Int) -> Bool = if pos == len then true else prim.load8(base + pos) / 64 != 2
@@ -36173,6 +37389,119 @@ else query |> string.split("&") |> list.filter((part) => string.len(part) > 0) |
 
 /// k=v joined by &, both sides percent-encoded.
 fn build_query(pairs: List[(String, String)]) -> String = pairs |> list.map(((k, v)) => encode_component(k) + "=" + encode_component(v)) |> list.join("&")
+
+
+
+
+
+/// Like encode_component, but a space becomes +.
+fn encode_form(s: String) -> String = s |> string.chars |> list.map((c) => if c == " " then "+" else __url_enc_char(c)) |> list.join("")
+
+
+
+
+
+/// + as space, then percent-decoded; err on bad escape/UTF-8.
+fn decode_form(s: String) -> Result[String, String] = match decode_component(string.replace(s, "+", " ")) {
+  ok(v) => ok(v),
+  err(e) => err(string.replace(e, "url.decode_component", "url.decode_form")),
+}
+
+fn __url_parse_pairs(parts: List[String], acc: List[(String, String)]) -> Result[List[(String, String)], String] = match list.first(parts) {
+  none => ok(list.reverse(acc)),
+  some(part) => {
+    let kv = __url_split_once(part, "=")
+    match (decode_form(kv.0), decode_form(kv.1)) {
+      (ok(k), ok(v)) => __url_parse_pairs(list.drop(parts, 1), [(k, v)] + acc),
+      (err(e), _) => err(string.replace(e, "url.decode_form", "url.parse_query")),
+      (_, err(e)) => err(string.replace(e, "url.decode_form", "url.parse_query")),
+    }
+  },
+}
+
+
+
+
+
+
+
+
+/// Decoded (k, v) pairs; bare key gets ""; err on a bad escape.
+fn parse_query(query: String) -> Result[List[(String, String)], String] = __url_parse_pairs(
+  string.split(query, "&") |> list.filter((part) => string.len(part) > 0),
+  [],
+)
+
+
+fn __url_rds(input: String, out: String) -> String =
+  if string.len(input) == 0 then out
+  else if string.starts_with(input, "../") then __url_rds(string.drop(input, 3), out)
+  else if string.starts_with(input, "./") then __url_rds(string.drop(input, 2), out)
+  else if string.starts_with(input, "/./") then __url_rds("/" + string.drop(input, 3), out)
+  else if input == "/." then __url_rds("/", out)
+  else if string.starts_with(input, "/../") then __url_rds(
+    "/" + string.drop(input, 4),
+    __url_pop_segment(out),
+  )
+  else if input == "/.." then __url_rds("/", __url_pop_segment(out))
+  else if input == "." or input == ".." then out
+  else {
+    let lead = if string.starts_with(input, "/") then 1 else 0
+    let seg_end = match string.index_of(string.drop(input, lead), "/") {
+      some(i) => i + lead,
+      none => string.len(input),
+    }
+    __url_rds(string.drop(input, seg_end), out + string.take(input, seg_end))
+  }
+
+
+fn __url_pop_segment(out: String) -> String = match string.last_index_of(out, "/") {
+  some(i) => string.take(out, i),
+  none => "",
+}
+
+
+fn __url_merge(base: Url, rel: String) -> String = if string.len(base.path) == 0 then "/" + rel
+else match string.last_index_of(base.path, "/") {
+  some(i) => string.take(base.path, i + 1) + rel,
+  none => rel,
+}
+
+
+fn __url_has_scheme(r: String) -> Bool = match string.index_of(r, ":") {
+  none => false,
+  some(i) => i > 0 and string.take(r, i) |> string.chars |> list.enumerate |> list.all(((j, c)) => match string.codepoint(c) {
+    some(cp) => (cp >= 65 and cp <= 90) or (cp >= 97 and cp <= 122) or (j > 0 and ((cp >= 48 and cp <= 57) or cp == 43 or cp == 45 or cp == 46)),
+    none => false,
+  }),
+}
+
+
+
+
+
+
+
+
+/// ref resolved against base (RFC 3986 5.2); err when the result is not a URL.
+fn resolve(base: Url, ref: String) -> Result[Url, String] =
+  if __url_has_scheme(ref) then match parse(ref) {
+    ok(u) => ok({ ...u, path: __url_rds(u.path, "") }),
+    err(e) => err(e),
+  } else if string.starts_with(ref, "//") then match parse(base.scheme + ":" + ref) {
+    ok(u) => ok({ ...u, path: __url_rds(u.path, "") }),
+    err(e) => err(e),
+  } else {
+    let hf = __url_split_once(ref, "#")
+    let qs = __url_split_once(hf.0, "?")
+    let rpath = qs.0
+    let path = if string.len(rpath) == 0 then base.path
+    else if string.starts_with(rpath, "/") then __url_rds(rpath, "")
+    else __url_rds(__url_merge(base, rpath), "")
+    let query = if string.len(rpath) == 0 and not qs.2 then base.query
+    else qs.1
+    ok({ ...base, path: path, query: query, fragment: hf.1 })
+  }
 
 
 fn __url_t_pctend(s: String) -> Int = __url_pct_end(string.chars(s), 1, string.len(s))

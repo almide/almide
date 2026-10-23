@@ -10,3 +10,13 @@ test "random.int unit=value" {
   let collapsed = random.int(9, 3)
   assert_eq("${r >= 1 and r <= 6 and collapsed == 9}", "true")
 }
+
+test "random.seeded unit=value" {
+  assert_eq("${random.next_int(random.seeded(0), 1, 6).0}", "4")
+}
+
+test "random.next_int unit=value" {
+  let r = random.next_int(random.seeded(7), 1, 6).0
+  let collapsed = random.next_int(random.seeded(7), 9, 3).0
+  assert_eq("${r >= 1 and r <= 6 and collapsed == 9}", "true")
+}

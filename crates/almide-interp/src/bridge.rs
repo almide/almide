@@ -478,12 +478,10 @@ fn math_fn(func: &str, args: &[Value]) -> Option<Flow> {
     // self-hosted bodies now (#2185); only the five transcendentals a body
     // consumes as its floor stay here.
     //
-    // NOT bridged, and still honestly Unsupported: names the vendored file does
-    // not provide (`asin`/`acos`/`atan2`/`sinh`/`cosh`/`exp2`/`log1p`/`cbrt`/
-    // `hypot`). The runtime's own asin/acos/atan2 delegate to the PLATFORM
-    // libm, so they have no stable oracle either — they are unreachable from
-    // Almide today (no `@intrinsic` in stdlib/math.almd) and must not be
-    // bridged here on a guess.
+    // asin / acos / atan2 / sinh / cosh / hypot / cbrt / expm1 / log1p and the
+    // inverse hyperbolics are pure-Almide bodies in stdlib/math.almd (musl
+    // transcriptions over the floor above), so the interp evaluates the body
+    // like either backend does; none of them reaches this bridge.
     //
     // The float `**` OPERATOR is the same floor and routes to the same
     // `pow` in the binop path (`eval_match.rs`, `BinOp::PowFloat`) — #924's
@@ -491,15 +489,6 @@ fn math_fn(func: &str, args: &[Value]) -> Option<Flow> {
     // in both places.
     if let Some(v) = math_vendored_libm(func, args) {
         return Some(Flow::val(Value::Float(v)));
-    }
-    if matches!(
-        func,
-        "asin" | "acos" | "atan2" | "sinh" | "cosh"
-            | "exp2" | "log1p" | "cbrt" | "hypot"
-    ) {
-        return Some(Flow::Unsupported(format!(
-            "transcendental `math.{func}` (no vendored musl-libm implementation;              the runtime's own delegates to the platform libm — no oracle match)"
-        )));
     }
     None
 }

@@ -281,6 +281,119 @@ else query |> string.split("&") |> list.filter((part) => string.len(part) > 0) |
 /// k=v joined by &, both sides percent-encoded.
 fn build_query(pairs: List[(String, String)]) -> String = pairs |> list.map(((k, v)) => encode_component(k) + "=" + encode_component(v)) |> list.join("&")
 
+// Form encoding (application/x-www-form-urlencoded): a space is `+`, every
+// other character is escaped as encode_component escapes it.
+// See also: url.decode_form (the inverse), url.encode_component.
+// Example: url.encode_form("a b+c") == "a+b%2Bc"
+/// Like encode_component, but a space becomes +.
+fn encode_form(s: String) -> String = s |> string.chars |> list.map((c) => if c == " " then "+" else __url_enc_char(c)) |> list.join("")
+
+// Form decoding: `+` becomes a space, then the decode_component rules apply.
+// See also: url.encode_form (the inverse), url.decode_component.
+// Example: match url.decode_form("a+b%2Bc") { ok(v) => v == "a b+c", err(_) => false }
+// Example: match url.decode_form("%zz") { ok(_) => false, err(_) => true }
+/// + as space, then percent-decoded; err on bad escape/UTF-8.
+fn decode_form(s: String) -> Result[String, String] = match decode_component(string.replace(s, "+", " ")) {
+  ok(v) => ok(v),
+  err(e) => err(string.replace(e, "url.decode_component", "url.decode_form")),
+}
+
+fn __url_parse_pairs(parts: List[String], acc: List[(String, String)]) -> Result[List[(String, String)], String] = match list.first(parts) {
+  none => ok(list.reverse(acc)),
+  some(part) => {
+    let kv = __url_split_once(part, "=")
+    match (decode_form(kv.0), decode_form(kv.1)) {
+      (ok(k), ok(v)) => __url_parse_pairs(list.drop(parts, 1), [(k, v)] + acc),
+      (err(e), _) => err(string.replace(e, "url.decode_form", "url.parse_query")),
+      (_, err(e)) => err(string.replace(e, "url.decode_form", "url.parse_query")),
+    }
+  },
+}
+
+// Split a query string into key/value pairs and decode both sides with the
+// decode_form rules. Empty segments are dropped; a segment without `=`
+// becomes (key, ""). The first malformed escape fails the whole query.
+// See also: url.build_query (the inverse), url.decode_form.
+// Example: match url.parse_query("q=a+b&lang=ja") { ok(ps) => ps == [("q", "a b"), ("lang", "ja")], err(_) => false }
+// Example: match url.parse_query("") { ok(ps) => ps == [], err(_) => false }
+// Example: match url.parse_query("x=%zz") { ok(_) => false, err(_) => true }
+/// Decoded (k, v) pairs; bare key gets ""; err on a bad escape.
+fn parse_query(query: String) -> Result[List[(String, String)], String] = __url_parse_pairs(
+  string.split(query, "&") |> list.filter((part) => string.len(part) > 0),
+  [],
+)
+
+// RFC 3986 5.2.4: remove "." and ".." segments from a path, one step at a time.
+fn __url_rds(input: String, out: String) -> String =
+  if string.len(input) == 0 then out
+  else if string.starts_with(input, "../") then __url_rds(string.drop(input, 3), out)
+  else if string.starts_with(input, "./") then __url_rds(string.drop(input, 2), out)
+  else if string.starts_with(input, "/./") then __url_rds("/" + string.drop(input, 3), out)
+  else if input == "/." then __url_rds("/", out)
+  else if string.starts_with(input, "/../") then __url_rds(
+    "/" + string.drop(input, 4),
+    __url_pop_segment(out),
+  )
+  else if input == "/.." then __url_rds("/", __url_pop_segment(out))
+  else if input == "." or input == ".." then out
+  else {
+    let lead = if string.starts_with(input, "/") then 1 else 0
+    let seg_end = match string.index_of(string.drop(input, lead), "/") {
+      some(i) => i + lead,
+      none => string.len(input),
+    }
+    __url_rds(string.drop(input, seg_end), out + string.take(input, seg_end))
+  }
+
+// The output buffer minus its last segment and the "/" before it.
+fn __url_pop_segment(out: String) -> String = match string.last_index_of(out, "/") {
+  some(i) => string.take(out, i),
+  none => "",
+}
+
+// RFC 3986 5.2.3: a relative path merged onto the base path.
+fn __url_merge(base: Url, rel: String) -> String = if string.len(base.path) == 0 then "/" + rel
+else match string.last_index_of(base.path, "/") {
+  some(i) => string.take(base.path, i + 1) + rel,
+  none => rel,
+}
+
+// A scheme is ALPHA *( ALPHA / DIGIT / "+" / "-" / "." ) before the first ':'.
+fn __url_has_scheme(r: String) -> Bool = match string.index_of(r, ":") {
+  none => false,
+  some(i) => i > 0 and string.take(r, i) |> string.chars |> list.enumerate |> list.all(((j, c)) => match string.codepoint(c) {
+    some(cp) => (cp >= 65 and cp <= 90) or (cp >= 97 and cp <= 122) or (j > 0 and ((cp >= 48 and cp <= 57) or cp == 43 or cp == 45 or cp == 46)),
+    none => false,
+  }),
+}
+
+// Resolve a reference against a base URL by RFC 3986 section 5.2. An
+// absolute reference is parsed on its own; a network-path reference
+// (`//host/p`) takes the base's scheme. Like url.parse, the result must have
+// an authority, so a reference such as `mailto:x` is an err.
+// See also: url.parse, url.to_string.
+// Example: match url.parse("http://a/b/c/d;p?q") { ok(b) => match url.resolve(b, "../g") { ok(u) => url.to_string(u) == "http://a/b/g", err(_) => false }, err(_) => false }
+// Example: match url.parse("http://a/b/c/d;p?q") { ok(b) => match url.resolve(b, "?y") { ok(u) => url.to_string(u) == "http://a/b/c/d;p?y", err(_) => false }, err(_) => false }
+/// ref resolved against base (RFC 3986 5.2); err when the result is not a URL.
+fn resolve(base: Url, ref: String) -> Result[Url, String] =
+  if __url_has_scheme(ref) then match parse(ref) {
+    ok(u) => ok({ ...u, path: __url_rds(u.path, "") }),
+    err(e) => err(e),
+  } else if string.starts_with(ref, "//") then match parse(base.scheme + ":" + ref) {
+    ok(u) => ok({ ...u, path: __url_rds(u.path, "") }),
+    err(e) => err(e),
+  } else {
+    let hf = __url_split_once(ref, "#")
+    let qs = __url_split_once(hf.0, "?")
+    let rpath = qs.0
+    let path = if string.len(rpath) == 0 then base.path
+    else if string.starts_with(rpath, "/") then __url_rds(rpath, "")
+    else __url_rds(__url_merge(base, rpath), "")
+    let query = if string.len(rpath) == 0 and not qs.2 then base.query
+    else qs.1
+    ok({ ...base, path: path, query: query, fragment: hf.1 })
+  }
+
 // TEMP probes
 fn __url_t_pctend(s: String) -> Int = __url_pct_end(string.chars(s), 1, string.len(s))
 

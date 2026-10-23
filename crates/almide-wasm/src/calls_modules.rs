@@ -333,6 +333,16 @@ impl Emitter<'_> {
                 }
                 unsup(&format!("call:{module}.{func}"))
             }
+            // datetime.now_ms (R-datetime-01): the third clock read, env.millis's
+            // op under the datetime name.
+            CallTarget::Module { module, func, .. }
+                if module.as_str() == "datetime" && func.as_str() == "now_ms" =>
+            {
+                if let Some(out) = self.lower_host_call("datetime", func.as_str(), args)? {
+                    return Ok(out);
+                }
+                unsup(&format!("call:{module}.{func}"))
+            }
             // http (#1710): the ported client fns take the host route; the
             // REST of the family keeps its pre-port path (self-host /
             // honest wall) — walling here regressed the pure constructors

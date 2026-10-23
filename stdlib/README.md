@@ -53,7 +53,7 @@ Auto-imported modules are the union of two authoritative lists:
 - the seed list in `crates/almide-frontend/src/import_table.rs`
 - `AUTO_IMPORT_BUNDLED` in `crates/almide-types/src/stdlib_info.rs`
 
-Currently: `string, list, int, float, bytes, matrix, map, set, option, result,
+Currently: `string, list, int, float, bool, bytes, matrix, map, set, option, result,
 value, prim, error, math, datetime, int8, int16, int32, uint8, uint16, uint32,
 uint64, float32`.
 

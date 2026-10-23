@@ -1,0 +1,22 @@
+// duration.compare (R-duration-01) and compute.compare (R-compute-01): the
+// function form of each clock's `<`, an Int whose sign is the order.
+test "duration.compare orders wall-clock amounts" {
+  assert_eq(duration.compare(duration.ms(5), duration.s(1)), -1)
+  assert_eq(duration.compare(duration.s(1), duration.ms(1000)), 0)
+  assert_eq(duration.compare(duration.h(1), duration.min(59)), 1)
+  assert_eq(duration.compare(duration.ns(0), duration.ns(0)), 0)
+}
+
+test "compute.compare orders compute amounts" {
+  assert_eq(compute.compare(compute.us(1), compute.ns(999)), 1)
+  assert_eq(compute.compare(compute.min(1), compute.s(60)), 0)
+  assert_eq(compute.compare(compute.ms(1), compute.s(1)), -1)
+}
+
+test "compare agrees with the operators" {
+  let a = duration.ms(250)
+  let b = duration.ms(400)
+  assert_eq(duration.compare(a, b) < 0, a < b)
+  assert_eq(duration.compare(b, a) > 0, b > a)
+  assert_eq(duration.compare(a + a, duration.ms(500)), 0)
+}

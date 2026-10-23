@@ -86,7 +86,11 @@ cur_s=$(surface "$CUR" || true)
 # with that `mut` parameter, so the re-render is not counted and a `mut` ADDED
 # since PREV (a let-caller now gets E032) still reads as a changed signature.
 mut_rerendered=0
-if [ -n "$prev_s" ] && ! printf '%s\n' "$prev_s" | grep -qE '(\(|, )mut [a-z_0-9]+: '; then
+# A here-string, not `printf | grep -q`: grep -q exits at its first match, and
+# once the index outgrows the pipe buffer printf dies of SIGPIPE, which
+# pipefail turns into "no mut found" — the branch then ran against a PREV that
+# already renders `mut`, and every `mut` line read as removed.
+if [ -n "$prev_s" ] && ! grep -qE '(\(|, )mut [a-z_0-9]+: ' <<<"$prev_s"; then
   prev_mut=$(git -C "$ROOT" ls-tree -r --name-only "$PREV" -- stdlib/ 2>/dev/null | grep -E '\.almd$' \
     | while read -r f; do git -C "$ROOT" show "$PREV:$f" 2>/dev/null; done \
     | python3 -c '

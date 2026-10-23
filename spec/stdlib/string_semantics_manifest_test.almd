@@ -82,3 +82,62 @@ test "string.drop_end unit=codepoint" {
 test "string.run_length_encode unit=count" {
   assert_eq("${string.run_length_encode("ééa")}", "[(\"é\", 2), (\"a\", 1)]")
 }
+
+test "string.compare unit=ordering" {
+  assert_eq(
+    "${"${string.compare("a", "b")} ${string.compare("é", "é")} ${string.compare("b", "a")}"}",
+    "-1 0 1",
+  )
+}
+
+test "string.byte_len unit=byte" {
+  assert_eq("${string.byte_len("café")}", "5")
+}
+
+test "string.to_utf16 unit=value" {
+  assert_eq("${string.to_utf16("é😀")}", "[233, 55357, 56832]")
+}
+
+test "string.from_utf16 unit=value" {
+  assert_eq("${string.from_utf16([233, 55357, 56832]) ?? "E"}", "é😀")
+}
+
+test "string.insert unit=codepoint" {
+  assert_eq("${string.insert("éa", 1, "X")}", "éXa")
+}
+
+test "string.remove_at unit=codepoint" {
+  assert_eq("${string.remove_at("éab", 1)}", "éb")
+}
+
+test "string.enumerate unit=codepoint" {
+  assert_eq("${string.enumerate("éa")}", "[(0, \"é\"), (1, \"a\")]")
+}
+
+test "string.sort_with unit=ordering" {
+  assert_eq("${string.sort_with("abc", (a, b) => string.compare(b, a))}", "[\"c\", \"b\", \"a\"]")
+}
+
+test "string.min_with unit=ordering" {
+  assert_eq("${string.min_with("bca", (a, b) => string.compare(a, b))}", "some(\"a\")")
+}
+
+test "string.max_with unit=ordering" {
+  assert_eq("${string.max_with("bca", (a, b) => string.compare(a, b))}", "some(\"c\")")
+}
+
+test "string.find_index unit=codepoint" {
+  assert_eq("${string.find_index("éa1", (c) => c == "1")}", "some(2)")
+}
+
+test "string.chunk unit=codepoint" {
+  assert_eq("${string.chunk("éabc", 2)}", "[\"éa\", \"bc\"]")
+}
+
+test "string.window unit=codepoint" {
+  assert_eq("${string.window("éab", 2)}", "[\"éa\", \"ab\"]")
+}
+
+test "string.split_at unit=codepoint" {
+  assert_eq("${string.split_at("éab", 1).1}", "ab")
+}

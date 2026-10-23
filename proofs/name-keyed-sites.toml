@@ -42,7 +42,7 @@ names = 2
 [[site]]
 id = "crates/almide-codegen/src/pass_concretize_types_call_ret.rs::resolve_list_poly_ret_ty_aggregate::or-pattern"
 class = "legacy"
-names = 5
+names = 8
 
 [[site]]
 id = "crates/almide-codegen/src/pass_concretize_types_call_ret.rs::resolve_list_poly_ret_ty_lambda::or-pattern"
@@ -77,7 +77,7 @@ names = 2
 [[site]]
 id = "crates/almide-codegen/src/pass_lambda_type_resolve.rs::LIST_ELEM_FIRST_METHODS::table"
 class = "legacy"
-names = 14
+names = 16
 
 [[site]]
 id = "crates/almide-codegen/src/pass_lambda_type_resolve.rs::LIST_ELEM_SECOND_METHODS::table"
@@ -177,7 +177,7 @@ names = 8
 [[site]]
 id = "crates/almide-codegen/src/walker/expressions_calls_binops.rs::render_method_call_full::or-pattern"
 class = "legacy"
-names = 40
+names = 43
 
 [[site]]
 id = "crates/almide-codegen/src/walker/expressions_calls_binops.rs::try_render_numeric_cast::or-pattern"
@@ -207,7 +207,7 @@ names = 13
 [[site]]
 id = "crates/almide-frontend/src/check/bounded.rs::BOUNDED_PURE_MODULES::table"
 class = "legacy"
-names = 31
+names = 32
 
 [[site]]
 id = "crates/almide-frontend/src/check/bounded.rs::BOUNDED_SIZED_CTORS::table"
@@ -272,7 +272,7 @@ names = 42
 [[site]]
 id = "crates/almide-frontend/src/stdlib.rs::MODULE_DESCRIPTIONS::table"
 class = "legacy"
-names = 43
+names = 44
 
 [[site]]
 id = "crates/almide-frontend/src/stdlib.rs::comparison_operator_of::or-pattern"
@@ -382,7 +382,7 @@ names = 8
 [[site]]
 id = "crates/almide-ir/src/effect.rs::STDLIB_MODULE_EFFECTS::table"
 class = "legacy"
-names = 43
+names = 44
 
 [[site]]
 id = "crates/almide-ir/src/fusion.rs::EFFECT_MODULES::table"
@@ -757,12 +757,12 @@ names = 1821
 [[site]]
 id = "crates/almide-types/src/stdlib_info.rs::AUTO_IMPORT_BUNDLED::table"
 class = "legacy"
-names = 22
+names = 23
 
 [[site]]
 id = "crates/almide-types/src/stdlib_info.rs::BUNDLED_MODULES::table"
 class = "legacy"
-names = 43
+names = 44
 
 [[site]]
 id = "crates/almide-types/src/stdlib_info.rs::RUNTIME_BACKED_TYPES::table"
@@ -772,12 +772,12 @@ names = 2
 [[site]]
 id = "crates/almide-types/src/stdlib_info.rs::STDLIB_MODULES::table"
 class = "legacy"
-names = 39
+names = 40
 
 [[site]]
 id = "crates/almide-types/src/stdlib_info.rs::STDLIB_OWNED_TYPES::table"
 class = "legacy"
-names = 10
+names = 11
 
 [[site]]
 id = "crates/almide-types/src/stdlib_info.rs::TIER1_ALWAYS_ACCESSIBLE::table"
