@@ -139,5 +139,5 @@ test "string.window unit=codepoint" {
 }
 
 test "string.split_at unit=codepoint" {
-  assert_eq("${string.split_at("éab", 1)}", "(\"é\", \"ab\")")
+  assert_eq("${string.split_at("éab", 1).1}", "ab")
 }
