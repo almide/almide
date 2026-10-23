@@ -61,7 +61,9 @@ test "filter_map, find_map, reduce, scan" {
 }
 
 test "partition and group_by" {
-  assert_eq(string.partition("a1b2", (c) => string.is_digit(c)), (["1", "2"], ["a", "b"]))
+  let (digits, rest) = string.partition("a1b2", (c) => string.is_digit(c))
+  assert_eq(digits, ["1", "2"])
+  assert_eq(rest, ["a", "b"])
   let g = string.group_by("aAbB", (c) => string.to_lower(c))
   assert_eq(map.get(g, "a"), some(["a", "A"]))
   assert_eq(map.get(g, "b"), some(["b", "B"]))
