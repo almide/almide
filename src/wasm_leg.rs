@@ -355,9 +355,31 @@ fn link_self_host(
             c
         });
     }
+    /// `main`'s abort renders a non-String error through its repr (#3470,
+    /// `emit_abort_message`): a Result in main whose err type can reach a
+    /// Float is a display demand, the same as `${e}`. Before #4071 the demand
+    /// was met by accident — every auto-imported module was lowered into
+    /// every program, and their bodies demanded the float formatter.
+    fn main_err_reaches_float(e: &crate::ir::IrExpr) -> bool {
+        let here = matches!(
+            &e.ty,
+            crate::types::Ty::Applied(crate::types::TypeConstructorId::Result, a)
+                if a.len() == 2 && !ty_float_free(&a[1])
+        );
+        let mut below = false;
+        e.clone().map_children(&mut |c| {
+            below |= main_err_reaches_float(&c);
+            c
+        });
+        here || below
+    }
     fn scan_program(ir: &crate::ir::IrProgram, out: &mut HashSet<String>) {
         for f in &ir.functions {
             scan_expr(&f.body, out);
+            if f.name.as_str() == "main" && main_err_reaches_float(&f.body) {
+                out.insert("float.to_string_compound".to_string());
+                out.insert("float32.to_string_compound".to_string());
+            }
         }
         for tl in &ir.top_lets {
             scan_expr(&tl.value, out);

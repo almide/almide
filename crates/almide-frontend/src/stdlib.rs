@@ -38,7 +38,7 @@ pub fn is_import_suggestable(name: &str) -> bool {
 }
 
 /// The whole auto-import surface: the resolver's Tier-1 set plus the bundled
-/// modules it loads eagerly. Kept as one predicate so callers cannot consult
+/// modules it loads on reach. Kept as one predicate so callers cannot consult
 /// half of it.
 fn is_auto_imported(name: &str) -> bool {
     crate::import_table::TIER1_ALWAYS_ACCESSIBLE.contains(&name)

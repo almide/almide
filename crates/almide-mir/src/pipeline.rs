@@ -571,7 +571,8 @@ pub(crate) fn source_to_ir(source: &str) -> Result<almide_ir::IrProgram, LowerEr
 /// from (v0 codegen). NEVER a wrong module: honest-wall.
 /// Resolve the BUNDLED stdlib modules a single-file program needs — the
 /// standalone-harness subset of the CLI resolver (`src/resolve.rs`): every
-/// auto-import bundled module, plus every explicitly imported bundled module,
+/// explicitly imported bundled module, plus every auto-import bundled module
+/// the program reaches (`almide_frontend::bundled_reach`, #4071),
 /// each with its bundled dependencies, depth-first in import order (the same
 /// visit order `load_bundled_module` produces — deterministic, deduped).
 /// Callers with a real resolver (the CLI) never need this; the wasmgen
@@ -609,16 +610,20 @@ pub fn bundled_self_modules(source: &str) -> Vec<(String, almide_lang::ast::Prog
     // of through the 'static-keyed AST cache.
     let tokens = almide_lang::lexer::Lexer::tokenize(source);
     let mut parser = almide_lang::parser::Parser::new(tokens);
-    if let Ok(prog) = parser.parse() {
-        for imp in &prog.imports {
-            if let almide_lang::ast::Decl::Import { path, .. } = imp {
-                if let Some(root) = path.first() {
-                    add(root.as_str(), &mut out, &mut seen);
-                }
+    let Ok(prog) = parser.parse() else { return out };
+    for imp in &prog.imports {
+        if let almide_lang::ast::Decl::Import { path, .. } = imp {
+            if let Some(root) = path.first() {
+                add(root.as_str(), &mut out, &mut seen);
             }
         }
     }
-    for name in almide_lang::stdlib_info::AUTO_IMPORT_BUNDLED {
+    // #4071: the auto-imported modules the entry (or an imported bundled
+    // module) reaches — the resolver's rule, from the same function.
+    let reached = almide_frontend::bundled_reach::reached_auto_bundled(
+        std::iter::once(&prog).chain(out.iter().map(|(_, p, _)| p)),
+    );
+    for name in reached {
         add(name, &mut out, &mut seen);
     }
     out
