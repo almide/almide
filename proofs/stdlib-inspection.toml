@@ -75,7 +75,7 @@
 #                      every stamped row is to be re-inspected before each final
 #                      release for that (a manual GCE run: no credentials in CI)
 #
-# uninspected_ceiling = "208"
+# uninspected_ceiling = "249"
 
 [[fn]]
 name = "args.flag"
@@ -14075,6 +14075,293 @@ blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/
 [[fn]]
 name = "uint8.wrap_sub"
 sig = "(a: UInt8, b: UInt8) -> UInt8"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "float32.abs"
+sig = "(x: Float32) -> Float32"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "float32.ceil"
+sig = "(x: Float32) -> Float32"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "float32.clamp"
+sig = "(x: Float32, lo: Float32, hi: Float32) -> Float32"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "float32.compare"
+sig = "(a: Float32, b: Float32) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "float32.epsilon"
+sig = "() -> Float32"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "float32.floor"
+sig = "(x: Float32) -> Float32"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "float32.from_bits"
+sig = "(bits: Int) -> Float32"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "float32.infinity"
+sig = "() -> Float32"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "float32.is_finite"
+sig = "(x: Float32) -> Bool"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "float32.is_infinite"
+sig = "(x: Float32) -> Bool"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "float32.is_nan"
+sig = "(x: Float32) -> Bool"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "float32.max"
+sig = "(a: Float32, b: Float32) -> Float32"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "float32.max_value"
+sig = "() -> Float32"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "float32.min"
+sig = "(a: Float32, b: Float32) -> Float32"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "float32.min_value"
+sig = "() -> Float32"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "float32.nan"
+sig = "() -> Float32"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "float32.round"
+sig = "(x: Float32) -> Float32"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "float32.signum"
+sig = "(x: Float32) -> Float32"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "float32.to_bits"
+sig = "(x: Float32) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "float32.trunc"
+sig = "(x: Float32) -> Float32"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "float64.abs"
+sig = "(x: Float64) -> Float64"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "float64.ceil"
+sig = "(x: Float64) -> Float64"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "float64.clamp"
+sig = "(x: Float64, lo: Float64, hi: Float64) -> Float64"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "float64.compare"
+sig = "(a: Float64, b: Float64) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "float64.epsilon"
+sig = "() -> Float64"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "float64.floor"
+sig = "(x: Float64) -> Float64"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "float64.from_bits"
+sig = "(bits: Int) -> Float64"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "float64.infinity"
+sig = "() -> Float64"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "float64.is_finite"
+sig = "(x: Float64) -> Bool"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "float64.is_infinite"
+sig = "(x: Float64) -> Bool"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "float64.is_nan"
+sig = "(x: Float64) -> Bool"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "float64.max"
+sig = "(a: Float64, b: Float64) -> Float64"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "float64.max_value"
+sig = "() -> Float64"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "float64.min"
+sig = "(a: Float64, b: Float64) -> Float64"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "float64.min_value"
+sig = "() -> Float64"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "float64.nan"
+sig = "() -> Float64"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "float64.parse"
+sig = "(s: String) -> Result[Float64, String]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "float64.round"
+sig = "(x: Float64) -> Float64"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "float64.signum"
+sig = "(x: Float64) -> Float64"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "float64.to_bits"
+sig = "(x: Float64) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
+
+[[fn]]
+name = "float64.trunc"
+sig = "(x: Float64) -> Float64"
 class = "pure"
 status = "uninspected"
 blocked = "new in the stdlib redesign wave 1B (R-sized-02/03/08/10/11, R-int-11/12): awaits its GCE inspection run"
