@@ -62,7 +62,7 @@ fn settle_arm_scope(ctx: &mut LowerCtx, arm: IrExpr, slot: Option<&Ty>) -> IrExp
 fn arm_thunk(ctx: &mut LowerCtx, arm: IrExpr, err_ty: &Ty) -> IrExpr {
     let span = arm.span;
     let mut body = arm;
-    convert_option_unwraps_to_result(&mut body);
+    convert_option_unwraps_to_result(ctx, &mut body);
     if !body.ty.is_result() {
         body = crate::lower::wrap_fallible_value_tail(body, err_ty);
     }
