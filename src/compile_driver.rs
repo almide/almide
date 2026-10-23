@@ -323,7 +323,7 @@ fn typecheck_and_lower_for_compile(
     resolved: &mut resolve::ResolvedModules,
     self_versioned: &resolve::SelfVersionedNames,
     module_irs: &mut std::collections::HashMap<String, almide::ir::IrProgram>,
-) -> Result<Option<almide::ir::IrProgram>, String> {
+) -> Result<(Option<almide::ir::IrProgram>, Vec<String>), String> {
     let canon = canonicalize::canonicalize_program(
         program,
         resolved.modules.iter().map(|(n, p, _, s)| (n.as_str(), p, *s)),
@@ -354,7 +354,8 @@ fn typecheck_and_lower_for_compile(
     // An imported module's own type errors are fatal for the importer too:
     // a program that cannot be checked cannot be trusted to build (#862).
     report_module_diagnostics(&module_diags)?;
-    Ok(ir_program)
+    // #4008: the entry and every user module are checked by now.
+    Ok((ir_program, std::mem::take(&mut checker.outside_guarantee)))
 }
 
 /// `try_compile_with_ir`'s post-typecheck IR pipeline: optimize, verify
@@ -375,13 +376,21 @@ fn optimize_verify_and_link(ir_program: &mut Option<almide::ir::IrProgram>, pars
 /// codegen's own meter ([`codegen_metered`], #3673) without a second
 /// type-check.
 pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &codegen::CodegenOptions) -> Result<(String, Option<almide::ir::IrProgram>), String> {
+    try_compile_reporting(file, no_check, codegen_opts).map(|(code, metered, _)| (code, metered))
+}
+
+/// [`try_compile_with_ir`], plus where the user code leaves the
+/// memory-safety guarantee (#4008), which `almide build` names on its
+/// `Built` line. Empty under `--no-check`, which checks nothing.
+pub(crate) fn try_compile_reporting(file: &str, no_check: bool, codegen_opts: &codegen::CodegenOptions) -> Result<(String, Option<almide::ir::IrProgram>, Vec<String>), String> {
     let (mut program, source_text, parse_errors, has_parse_errors, mut resolved, parsed_project, self_versioned) = parse_and_resolve_for_compile(file)?;
 
     let mut ir_program: Option<almide::ir::IrProgram> = None;
     let mut module_irs = std::collections::HashMap::new();
+    let mut outside_guarantee = Vec::new();
     if !no_check {
         let parsed = ParsedSource { file, source_text: &source_text, parse_errors: &parse_errors, has_parse_errors };
-        ir_program = typecheck_and_lower_for_compile(parsed, &mut program, &mut resolved, &self_versioned, &mut module_irs)?;
+        (ir_program, outside_guarantee) = typecheck_and_lower_for_compile(parsed, &mut program, &mut resolved, &self_versioned, &mut module_irs)?;
     }
 
     optimize_verify_and_link(&mut ir_program, &parsed_project)?;
@@ -393,7 +402,7 @@ pub(crate) fn try_compile_with_ir(file: &str, no_check: bool, codegen_opts: &cod
         codegen::CodegenOutput::Source(s) => s,
         codegen::CodegenOutput::Binary(_) => unreachable!(),
     };
-    Ok((code, metered))
+    Ok((code, metered, outside_guarantee))
 }
 
 /// #3673: build a metered program's linked IR with the codegen's own

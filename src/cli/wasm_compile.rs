@@ -472,13 +472,13 @@ fn report_structural_wall_site() {
 /// PCC-verified v1 trust-spine output — the caller MUST NOT post-process it (wasm-opt would replace
 /// the verified bytes with an unverified transform), so `--verified` ships exactly what was verified.
 pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified: bool, library_ok: bool, embedded_leg: bool) -> Result<(Vec<u8>, Vec<i32>), ()> {
-    compile_to_wasm_bytes_surfaced(file, allow_unverified, verified, library_ok, embedded_leg).map(|(b, o, _)| (b, o))
+    compile_to_wasm_bytes_surfaced(file, allow_unverified, verified, library_ok, embedded_leg).map(|(b, o, _, _)| (b, o))
 }
 
 /// [`compile_to_wasm_bytes`] plus the program's host-visible surface (the
 /// `pub fn` exports, the `@extern(wasm, ..)` imports, whether `main` exists),
 /// read from the IR before routing — what `--host js` marshals (#2265).
-pub(crate) fn compile_to_wasm_bytes_surfaced(file: &str, allow_unverified: bool, verified: bool, library_ok: bool, embedded_leg: bool) -> Result<(Vec<u8>, Vec<i32>, crate::cli::js_host::HostSurface), ()> {
+pub(crate) fn compile_to_wasm_bytes_surfaced(file: &str, allow_unverified: bool, verified: bool, library_ok: bool, embedded_leg: bool) -> Result<(Vec<u8>, Vec<i32>, crate::cli::js_host::HostSurface, Vec<String>), ()> {
     let (mut program, source_text, mut resolved, dep_paths) = parse_and_resolve_wasm(file)?;
     // Read off the source before the checker desugars it (#2659).
     let serve_shape = almide::serve_export::check_serve_shape(&program);
@@ -498,6 +498,8 @@ pub(crate) fn compile_to_wasm_bytes_surfaced(file: &str, allow_unverified: bool,
     // leg renders — the capture that used to live here (#782).
     let mut checker = typecheck_wasm_program(file, &source_text, &mut program, &resolved)?;
     let mut ir_program = lower_and_link_wasm_ir(&program, &mut checker, &mut resolved)?;
+    // #4008: the entry and every user module are checked by now.
+    let outside_guarantee = std::mem::take(&mut checker.outside_guarantee);
     verify_wasm_ir(&ir_program)?;
     check_no_native_only_matrix(&ir_program)?;
     let package: std::collections::HashSet<String> = resolved
@@ -541,5 +543,5 @@ pub(crate) fn compile_to_wasm_bytes_surfaced(file: &str, allow_unverified: bool,
         err(&message);
         return Err(());
     }
-    Ok((bytes, host_ops, surface))
+    Ok((bytes, host_ops, surface, outside_guarantee))
 }
