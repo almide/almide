@@ -31,3 +31,4 @@ MemorySafe.v
 SpatialCert.v
 BoundsCert.v
 CoreSafe.v
+Certified.v

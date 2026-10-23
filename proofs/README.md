@@ -96,6 +96,17 @@ compiler with qualified use in safety-critical settings).
   what spatial rests on. Not yet: closures, records, variants, strings,
   calls, frees, diverging runs, and any link to the compiler's lowering.
 
+- **#4013: `Certified.v` — the two certificates, composed.** The RC
+  certificate gives TEMPORAL (`rc_check_gives_temporal`); the bounds
+  certificate puts every access inside its block's layout (`run_sound`).
+  Neither alone gives SPATIAL over a trace that frees: an access needs its
+  block to exist, which only the RC side says.
+  `certified_with_bounds_cert` states what the pair gives on one interleaved
+  trace — `Spatial`, `Temporal` and `WellTyped` — given a fresh allocator
+  and layout-true allocations. `access_after_free_not_temporal` is the
+  control: an in-layout read of a freed block is not safe. Not reached:
+  INITIALIZATION, and the link from the certificates' events to the bytes.
+
 ## Verify (the third-party `make verify`)
 
 ```
