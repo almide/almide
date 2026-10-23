@@ -740,11 +740,14 @@ call:value.to_snake_case
 call:zlib.compress
 call:zlib.compress_level
 call:zlib.decompress
+call:zlib.decompress_max
 call:zlib.deflate
 call:zlib.deflate_level
 call:zlib.gunzip
+call:zlib.gunzip_max
 call:zlib.gzip
 call:zlib.inflate
+call:zlib.inflate_max
 expr:BinOp
 expr:Block
 expr:Break
