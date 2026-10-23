@@ -3,8 +3,6 @@
 // (`new_by`) or a comparator (`new_with`) — and equal elements leave in the
 // order they went in. push / pop / clear are in-place `mut` verbs. Each fn
 // runs with Int and String elements and meets the empty heap.
-import heap
-
 local fn desc(a: Int, b: Int) -> Int = if a > b then -1
 else if a < b then 1 else 0
 
