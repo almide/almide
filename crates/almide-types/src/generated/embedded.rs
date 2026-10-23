@@ -9553,7 +9553,6 @@ fn clamp(n: Int, lo: Int, hi: Int) -> Int = _
 
 
 
-
 /// True when n % 2 == 0; exact for negatives.
 fn is_even(n: Int) -> Bool = n % 2 == 0
 
