@@ -13,10 +13,8 @@
 // handed out `handle + 12` of a 0-len block and wrote over the NEXT allocation
 // (differential fuzz, 2026-08-10 night). Null moves nothing on either target.
 //
-// The same bodies serve `ffi` (R-ffi-01), which replaces the deprecated
-// `bytes` spellings at dialect epoch 16: `ffi.address` is `bytes_as_ptr`,
-// `ffi.read` is `bytes_from_raw_ptr`, and `ffi.write` takes the address first.
-@implements("ffi.address")
+// `ffi` (R-ffi-01) reaches these bodies through stdlib/ffi_bridge.almd; only
+// `ffi.to_int`, a prim cast, is here.
 fn bytes_as_ptr(b: Bytes) -> RawPtr = {
   let h = prim.handle(b)
   if prim.load32(h + 4) == 0 then prim.int_to_ptr(0) else prim.int_to_ptr(h + 12)
@@ -35,7 +33,6 @@ else {
 
 // NULL / non-positive guards mirror the native oracle exactly
 // (`if ptr.is_null() || len <= 0 { return Vec::new(); }`).
-@implements("ffi.read")
 fn bytes_from_raw_ptr(p: RawPtr, n: Int) -> Bytes = {
   let src = prim.ptr_to_int(p)
   if src == 0 or n <= 0 then prim.alloc_bytes(0)
@@ -61,10 +58,6 @@ fn bytes_copy_to_ptr(b: Bytes, ptr: RawPtr, cap: Int) -> Int = {
   let _c = __brp_copy(dst, h + 12, n, 0)
   n
 }
-
-// `ffi.write(ptr, b, cap)`: `bytes.copy_to_ptr` with the address first (R-ffi-03).
-@implements("ffi.write")
-fn ffi_write(ptr: RawPtr, b: Bytes, cap: Int) -> Int = bytes_copy_to_ptr(b, ptr, cap)
 
 // `ffi.to_int(p)`: the address as an Int; null is 0.
 @implements("ffi.to_int")

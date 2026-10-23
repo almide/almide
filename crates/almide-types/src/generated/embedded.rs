@@ -368,7 +368,7 @@ fn contains(b: Bytes, pattern: Bytes) -> Bool = _
 fn copy_from(mut dst: Bytes, src: Bytes, dst_off: Int, src_off: Int, len: Int) -> Unit = _
 
 /// Writes up to cap bytes to ptr; count, 0 if null.
-@deprecated(since=15, use="ffi.write", note="the address comes first, `ffi.write(ptr, b, cap)`, and it is an effect fn")
+@deprecated(since=15, use="ffi.write", note="the address comes first (ptr, b, cap), and it is an effect fn")
 @memory_unsafe
 @intrinsic("almide_rt_bytes_copy_to_ptr")
 fn copy_to_ptr(b: Bytes, ptr: RawPtr, cap: Int) -> Int = _
@@ -396,7 +396,7 @@ fn fill(mut b: Bytes, val: Int) -> Unit = _
 fn from_list(xs: List[Int]) -> Bytes = _
 
 /// Copy of len bytes at ptr; empty if null or len <= 0.
-@deprecated(since=15, use="ffi.read", note="`ffi.read(ptr, len)` is an effect fn")
+@deprecated(since=15, use="ffi.read", note="ffi.read is an effect fn")
 @memory_unsafe
 @intrinsic("almide_rt_bytes_from_raw_ptr")
 fn from_raw_ptr(ptr: RawPtr, len: Int) -> Bytes = _
@@ -2738,8 +2738,6 @@ pub const SRC_BYTES_RAWPTR: &str = r#"
 
 
 
-
-@implements("ffi.address")
 fn bytes_as_ptr(b: Bytes) -> RawPtr = {
   let h = prim.handle(b)
   if prim.load32(h + 4) == 0 then prim.int_to_ptr(0) else prim.int_to_ptr(h + 12)
@@ -2758,7 +2756,6 @@ else {
 
 
 
-@implements("ffi.read")
 fn bytes_from_raw_ptr(p: RawPtr, n: Int) -> Bytes = {
   let src = prim.ptr_to_int(p)
   if src == 0 or n <= 0 then prim.alloc_bytes(0)
@@ -2784,10 +2781,6 @@ fn bytes_copy_to_ptr(b: Bytes, ptr: RawPtr, cap: Int) -> Int = {
   let _c = __brp_copy(dst, h + 12, n, 0)
   n
 }
-
-
-@implements("ffi.write")
-fn ffi_write(ptr: RawPtr, b: Bytes, cap: Int) -> Int = bytes_copy_to_ptr(b, ptr, cap)
 
 
 @implements("ffi.to_int")
@@ -4567,6 +4560,23 @@ effect fn read(ptr: RawPtr, len: Int) -> Bytes = _
 @memory_unsafe
 @intrinsic("almide_rt_ffi_write")
 effect fn write(ptr: RawPtr, b: Bytes, cap: Int) -> Int = _
+"#;
+pub const SRC_FFI_BRIDGE: &str = r#"
+
+
+
+
+
+
+
+@implements("ffi.address")
+fn ffi_address(b: Bytes) -> RawPtr = bytes.as_ptr(b)
+
+@implements("ffi.read")
+fn ffi_read(ptr: RawPtr, len: Int) -> Bytes = bytes.from_raw_ptr(ptr, len)
+
+@implements("ffi.write")
+fn ffi_write(ptr: RawPtr, b: Bytes, cap: Int) -> Int = bytes.copy_to_ptr(b, ptr, cap)
 "#;
 pub const SRC_FLOAT: &str = r#"
 
@@ -38123,6 +38133,7 @@ pub fn source_of(stem: &str) -> Option<&'static str> {
         "fan_any" => Some(SRC_FAN_ANY),
         "fan_map" => Some(SRC_FAN_MAP),
         "ffi" => Some(SRC_FFI),
+        "ffi_bridge" => Some(SRC_FFI_BRIDGE),
         "float" => Some(SRC_FLOAT),
         "float32" => Some(SRC_FLOAT32),
         "float32_convert" => Some(SRC_FLOAT32_CONVERT),
