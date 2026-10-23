@@ -55,6 +55,7 @@ impl HelperLits {
         if crate::checked_alloc::armed() {
             // #4009: pooled only under the switch — the shipped data is unchanged.
             crate::checked_alloc::set_message(at(F_ALLOC, crate::checked_alloc::TEXT));
+            crate::checked_alloc::set_overrun_message(at(F_ALLOC, crate::checked_alloc::OVERRUN_TEXT));
         }
         Self { true_base, false_base, oom_msg, repeat_msg }
     }

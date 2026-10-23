@@ -1,0 +1,16 @@
+import ffi
+
+// Writes 16 bytes into a 4-byte buffer. The source is allocated first, so
+// the buffer is the newest block and the 12 bytes past its end land in the
+// heap beyond it: silently, unless the allocator keeps a canary there. The
+// buffer dies when this returns, and `$free` checks the canary.
+effect fn overrun() -> Int = {
+  let src = bytes.from_list([7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7])
+  let small = bytes.new(4)
+  ffi.write(ffi.address(small), src, 16)
+}
+
+effect fn main() -> Unit = {
+  let n = overrun()!
+  println("wrote ${n}")
+}

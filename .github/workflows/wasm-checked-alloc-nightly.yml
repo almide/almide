@@ -1,12 +1,14 @@
 name: Wasm checked allocator (nightly)
 
-# #4009 item 2: the wasm leg's use-after-free and stray-write detector.
+# #4009 item 2: the wasm leg's use-after-free and heap-overflow detector.
 # scripts/wasm-checked-alloc.sh builds every spec/wasm_cross program twice —
 # ordinarily and under ALMIDE_WASM_CHECKED_ALLOC, where `$free` poisons a
-# freed block and `$alloc` checks the poison before reuse — and fails on any
-# difference in stdout, stderr or exit status. Its negative control (a write
-# through a dangling `ffi` address, proofs/fixtures/heap-check/) must exit 0
-# ordinarily and 70 under the switch, or the check has no teeth.
+# freed block and `$alloc` checks the poison before reuse, and every block
+# carries a canary past its usable capacity that `$free` checks — and fails
+# on any difference in stdout, stderr or exit status. Its two negative
+# controls (a write through a dangling `ffi` address, and a 16-byte write into
+# a 4-byte buffer; proofs/fixtures/heap-check/) must exit 0 ordinarily and 70
+# under the switch, or the check has no teeth.
 
 on:
   schedule:
