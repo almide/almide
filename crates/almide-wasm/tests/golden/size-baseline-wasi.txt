@@ -101,11 +101,11 @@
 25540	spec/wasm_cross/codec_extra_keys.almd
 26695	spec/wasm_cross/codec_float_int.almd
 26877	spec/wasm_cross/codec_int_float_boundaries.almd
-29941	spec/wasm_cross/codec_list_default.almd
-31971	spec/wasm_cross/codec_list_default_field.almd
-28914	spec/wasm_cross/codec_list_list_field.almd
+29942	spec/wasm_cross/codec_list_default.almd
+31972	spec/wasm_cross/codec_list_default_field.almd
+28915	spec/wasm_cross/codec_list_list_field.almd
 29482	spec/wasm_cross/codec_nested_records.almd
-33799	spec/wasm_cross/codec_none_omission.almd
+33800	spec/wasm_cross/codec_none_omission.almd
 27656	spec/wasm_cross/codec_option_numeric.almd
 31150	spec/wasm_cross/codec_option_record_default.almd
 25261	spec/wasm_cross/codec_string_escapes.almd
@@ -260,7 +260,7 @@
 9201	spec/wasm_cross/fs_relative_path.almd
 15287	spec/wasm_cross/fs_write_errno.almd
 3145	spec/wasm_cross/fuel_bare_result.almd
-2422	spec/wasm_cross/fuel_block_body.almd
+2498	spec/wasm_cross/fuel_block_body.almd
 1688	spec/wasm_cross/fuel_bounded_boundary.almd
 3481	spec/wasm_cross/fuel_cut_in_arm_loop.almd
 3179	spec/wasm_cross/fuel_cut_releases_frame.almd
@@ -676,7 +676,7 @@
 8233	spec/wasm_cross/rc_alloc_stress.almd
 2632	spec/wasm_cross/rc_reclaim_churn.almd
 2402	spec/wasm_cross/record_default_field_omitted.almd
-36817	spec/wasm_cross/record_field_rust_keyword.almd
+36818	spec/wasm_cross/record_field_rust_keyword.almd
 1736	spec/wasm_cross/record_forms.almd
 11406	spec/wasm_cross/record_map_field_update.almd
 10768	spec/wasm_cross/record_option_none_cells.almd
@@ -755,7 +755,7 @@
 5957	spec/wasm_cross/spread_record_share.almd
 12081	spec/wasm_cross/sql_highlight_tokens.almd
 12609	spec/wasm_cross/statement_after_tail_walker_bang.almd
-29957	spec/wasm_cross/stdlib_body_call_vs_user_namesake.almd
+29958	spec/wasm_cross/stdlib_body_call_vs_user_namesake.almd
 7867	spec/wasm_cross/stdlib_call_temporaries_release.almd
 28723	spec/wasm_cross/stdlib_manufactured_nan_sign.almd
 25001	spec/wasm_cross/stdlib_opaque_shadow.almd
