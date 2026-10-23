@@ -7,7 +7,7 @@
 # rustc builds the native leg; the LLVM inside it is trusted with it.
 rustc 1.96.0 — RUST_TOOLCHAIN in every workflow env: builds the compiler and the native leg in CI and in release
 rustc 1.95.0 — ferrocene-lane.yml: the Ferrocene-pinned (ISO 26262 qualified) rustc that builds the generated Rust of the run-manifest corpus (#573)
-rustc nightly-2026-08-01 — fuzz-nightly.yml: the dated nightly for per-condition branch coverage (nightly-gated flag), under the stable job's floors
+rustc nightly-2026-08-01 — fuzz-nightly.yml: the dated nightly for per-condition branch coverage (nightly-gated flag), under the stable job's floors; ci.yml miri-almide-str: Miri over almide-str's raw heap block
 rustc nightly-2025-06-01 — mcdc-probe.yml: the workflow_dispatch default, the last nightly with MC/DC instrumentation
 #
 # wasmtime runs the wasm leg.
@@ -18,7 +18,6 @@ wasmtime-cli 49.0.1 — the stock runtime every CI job installs to run built .wa
 # debt: pin it to RUST_TOOLCHAIN (or a dated nightly) and delete its line.
 # What is left measures a number (perf, coverage, the runtime ratio) that a
 # pin would move, or is Miri, which needs a dated nightly that ships it.
-floating ci.yml:miri-almide-str nightly — Miri needs nightly; a dated pin needs a date whose nightly ships the miri component
 floating ci.yml:perf-ratchet stable — the native/Rust ratio is measured with this rustc; pinning moves the baseline
 floating ci.yml:perf-profile-arm stable — the aarch64 perf ratio, same as perf-ratchet
 floating ci.yml:commissioned-wasm-gates-probes stable — target availability and the runtime ratio
