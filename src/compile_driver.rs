@@ -258,6 +258,8 @@ pub(crate) fn optimize_gate_and_link(
     verify(ir)?;
     if let Some(proj) = proj {
         cli::enforce_project_permissions(ir, proj)?;
+    } else {
+        almide_wasm_run::set_fs_scope(None);
     }
     almide_driver::link_half(ir);
     Ok(())
