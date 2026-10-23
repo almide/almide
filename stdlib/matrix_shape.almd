@@ -68,3 +68,48 @@ fn __matrix_zip_with(a: Matrix, b: Matrix, f: (Float, Float) -> Float) -> Matrix
   if matrix.cols(rows_probe) + matrix.cols(cols_probe) < 0 then a
   else matrix.from_lists(__matrix_zip_rows(matrix.to_lists(a), matrix.to_lists(b), f, 0, []))
 }
+
+// to_bytes_f16_le: native (matrix_p2.rs almide_f64_to_f16_bits) rounds each
+// f64 straight to IEEE half, to nearest even, overflow to +-inf, a NaN to the
+// canonical 0x7E00. The same integer steps here, prim-free.
+fn __matrix_f16_bits(x: Float) -> Int = {
+  let bits = float.to_bits(x)
+  let sign = if bits < 0 then 32768 else 0
+  let exp = int.band(int.bshr(bits, 52), 2047)
+  let mant = int.band(bits, 4503599627370495)
+  if exp == 2047 then (if mant != 0 then 32256 else sign + 31744)
+  else if exp == 0 then sign
+  else {
+    let e = exp - 1023 + 15
+    let m = 4503599627370496 + mant
+    let shift = if e >= 1 then 42 else 42 + (1 - e)
+    if shift > 53 then sign
+    else {
+      let q0 = int.bshr(m, shift)
+      let r = int.band(m, int.bshl(1, shift) - 1)
+      let half = int.bshl(1, shift - 1)
+      let q = if r > half or (r == half and int.band(q0, 1) == 1) then q0 + 1 else q0
+      let out = if e >= 1 then int.bshl(e, 10) + (q - 1024) else q
+      if out >= 31744 then sign + 31744 else sign + out
+    }
+  }
+}
+
+fn __matrix_f16_row(row: List[Float], i: Int, acc: List[Int]) -> List[Int] = match list.get(row, i) {
+  some(x) => {
+    let h = __matrix_f16_bits(x)
+    __matrix_f16_row(row, i + 1, acc + [int.band(h, 255), int.bshr(h, 8)])
+  },
+  none => acc,
+}
+
+fn __matrix_f16_rows(rows: List[List[Float]], i: Int, acc: List[Int]) -> List[Int] = match list.get(
+  rows,
+  i,
+) {
+  some(row) => __matrix_f16_rows(rows, i + 1, __matrix_f16_row(row, 0, acc)),
+  none => acc,
+}
+
+@implements("matrix.to_bytes_f16_le")
+fn __matrix_to_bytes_f16_le(m: Matrix) -> Bytes = bytes.from_list(__matrix_f16_rows(matrix.to_lists(m), 0, []))

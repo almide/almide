@@ -23,6 +23,44 @@ pub fn almide_rt_matrix_to_bytes_f32_le(m: &AlmideMatrix) -> Vec<u8> {
     out.into()
 }
 
+// f64 -> IEEE half bits, round-to-nearest-even straight from the f64 (no f32
+// double rounding); overflow is +-inf, a NaN is the canonical quiet 0x7E00.
+// stdlib/matrix_shape.almd's self-host runs the same integer steps.
+fn almide_f64_to_f16_bits(x: f64) -> u16 {
+    let bits = x.to_bits();
+    let sign = ((bits >> 63) as u16) << 15;
+    let exp = ((bits >> 52) & 0x7ff) as i64;
+    let mant = bits & ((1u64 << 52) - 1);
+    if exp == 0x7ff {
+        return if mant != 0 { 0x7E00 } else { sign | 0x7C00 };
+    }
+    if exp == 0 {
+        return sign; // f64 subnormals are far below the f16 range
+    }
+    let e = exp - 1023 + 15; // the f16 biased exponent
+    let m = (1u64 << 52) | mant; // 53-bit significand
+    // A normal result keeps 11 significant bits; a subnormal keeps fewer.
+    let shift = if e >= 1 { 42 } else { 42 + (1 - e) };
+    if shift > 53 {
+        return sign; // below half the smallest subnormal
+    }
+    let q = m >> shift;
+    let r = m & ((1u64 << shift) - 1);
+    let half = 1u64 << (shift - 1);
+    let q = if r > half || (r == half && (q & 1) == 1) { q + 1 } else { q };
+    let out = if e >= 1 { (((e as u64) << 10) + (q - (1 << 10))) as u64 } else { q };
+    if out >= 0x7C00 { sign | 0x7C00 } else { sign | out as u16 }
+}
+
+// to_bytes_f16_le (R-matrix): row-major half floats, 2 bytes each, rounded.
+pub fn almide_rt_matrix_to_bytes_f16_le(m: &AlmideMatrix) -> Vec<u8> {
+    let mut out: Vec<u8> = Vec::with_capacity(m.data.len() * 2);
+    for v in m.data.iter() {
+        out.extend_from_slice(&almide_f64_to_f16_bits(*v).to_le_bytes());
+    }
+    out.into()
+}
+
 pub fn almide_rt_matrix_from_bytes_f64_le(data: &Vec<u8>, offset: i64, rows: i64, cols: i64) -> AlmideMatrix {
     // #1503: negative dims clamp to the empty matrix (C-034/C-161), a negative
     // offset is OOB by definition, and the bounds compare is overflow-safe —
