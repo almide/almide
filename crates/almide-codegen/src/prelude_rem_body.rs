@@ -47,7 +47,9 @@ impl<const D: i64> AlmideRemConst<{ D }> {
 /// fix-ups, a longer chain than the signed multiply it stands for.
 #[inline(always)]
 pub fn almide_mulhs(a: i64, b: i64) -> i64 {
-    #[cfg(target_arch = "x86_64")]
+    // Miri cannot run inline assembly, so under Miri the portable form runs
+    // on x86_64 too (#4009): the nightly Miri job is on x86_64 Linux.
+    #[cfg(all(target_arch = "x86_64", not(miri)))]
     {
         let hi: i64;
         // SAFETY: `imul r64` reads rax and the operand, writes rdx:rax and
@@ -57,7 +59,7 @@ pub fn almide_mulhs(a: i64, b: i64) -> i64 {
         }
         hi
     }
-    #[cfg(not(target_arch = "x86_64"))]
+    #[cfg(any(not(target_arch = "x86_64"), miri))]
     {
         ((a as i128 * b as i128) >> 64) as i64
     }
