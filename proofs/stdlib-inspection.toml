@@ -75,7 +75,7 @@
 #                      every stamped row is to be re-inspected before each final
 #                      release for that (a manual GCE run: no credentials in CI)
 #
-# uninspected_ceiling = "456"
+# uninspected_ceiling = "464"
 
 [[fn]]
 name = "args.flag"
@@ -4530,20 +4530,12 @@ complexity = "PASS: call meter=instructions:u+bytes-moved alloc=canonical(wasm) 
 alloc = "PASS: call live=0"
 diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 
+
 [[fn]]
 name = "http.serve"
 sig = "effect (port: Int, f: (HttpRequest) -> Result[HttpResponse, String]) -> Unit ! String"
 class = "effect"
-status = "inspected"
-impl = "fnv1a:3bae0c1cc297a23d"
-stamp = "almide 0.68.0 (dev) at insp-0680b 07588809b (insp-0680 plus the fixed +qNaN a stdlib function manufactures #3846, the canonical allocator's O(1) large-block release #3849, the http client's retried interrupted read #3857, the table-driven zlib.crc32 #3848, and the counted judge's k bounded by the projected wall of its longest run #3859); xtarget-fuzz inspect at the same sha (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC, no free-list reuse), 200 programs per fn; every type variable measured at Int AND at String; effect functions in the fixed world of ADR-0027 D2 (every probe on every leg in a fresh sandbox, host-decided results compared as verdict lines, process from a fixed command set, net and http against loopback fixtures); GCE c4-standard-4 (INTEL XEON PLATINUM 8581C, 4 vCPU, PMU architectural, one fn at a time per VM, asia-northeast1-b), Ubuntu 24.04, rustc 1.99.1, wasmtime 49.0.1; 2026-10-20; codopsy: every workspace crate A at the same sha"
-order = "n"
-parity = "PASS: seed 1792434852, 200 generated handlers over a 8-request script; legs native, embedded, stock (wasmtime serve); 182 served, 180 clean on every leg, 2 trapped alike on the socket hosts (stock not compared, C-375); 18 generator rejects (first: error[E002]: undefined method 'extension' on string); unique findings 0"
-complexity = "PASS: serve(n=request body bytes, k=requests) meter=instructions:u+bytes-moved alloc=canonical(wasm) n=16384..262144 native k=256..512 8.061e7/1.438e8/2.702e8/5.227e8/1.028e9 fit n (rms 0.0%) moved 1.268e7/2.107e7/3.784e7/7.140e7/1.385e8B fit n (rms 0.0%) wall 0.023/0.022/0.052/0.098/0.200s wasm k=256..512 1.659e8/2.942e8/5.556e8/1.074e9/2.118e9 fit n (rms 0.3%) moved 2.962e7/5.480e7/1.051e8/2.058e8/4.071e8B fit n (rms 0.0%) wall 0.032/0.042/0.046/0.100/0.258s (order n ok)"
-alloc = "PASS: probe-app live=0 after 16 requests and the SIGTERM, constant-app live=0 after 16 requests and the SIGTERM"
-diamond = "PASS: direct = via left = via right on both legs (9 transcript line(s) per path: 8 responses and exit 0)"
-
-
+status = "uninspected"
 [[fn]]
 name = "http.set_header"
 sig = "(resp: HttpResponse, key: String, value: String) -> HttpResponse"
@@ -6837,19 +6829,12 @@ alloc = "PASS: call live=0, loop live=0, tail live=0, fold live=0"
 diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 
 
+
 [[fn]]
 name = "json.parse"
 sig = "(text: String) -> Result[Value, String]"
 class = "pure"
-status = "inspected"
-impl = "fnv1a:4151db0aac272276"
-stamp = "almide 0.68.0 (dev) at insp-0680 d6b80c19b (develop 302e0d120 plus the inspection fingerprint covering each function's wasm emitter arm, #3796; the pre-release re-inspection of every stamped row); xtarget-fuzz inspect at the same sha (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC, no free-list reuse), 200 programs per fn; every type variable measured at Int AND at String; effect functions in the fixed world of ADR-0027 D2 (every probe on every leg in a fresh sandbox, host-decided results compared as verdict lines, process from a fixed command set, net and http against loopback fixtures); GCE c4-standard-4 (INTEL XEON PLATINUM 8581C, 4 vCPU, PMU architectural, one fn at a time per VM, asia-northeast1-b), Ubuntu 24.04, rustc 1.99.1, wasmtime 49.0.1; 2026-10-19; codopsy: no crate code changed by this inspection"
-order = "n"
-parity = "PASS: seed 1792423929, 200 programs; 200 program(s) call it, 180 of them clean on every leg; unique findings 0"
-complexity = "PASS: call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=4..8 3.923e7/7.843e7/1.568e8/3.136e8/6.272e8 fit n (rms 0.0%) moved 0.000e0/0.000e0/0.000e0/0.000e0/0.000e0B fit 1 (rms 0.0%) wall 0.005/0.010/0.010/0.025/0.051s wasm k=1..2 5.656e7/1.131e8/2.261e8/4.521e8/9.041e8 fit n (rms 0.0%) moved 1.309e5/2.619e5/5.240e5/1.048e6/2.097e6B fit n (rms 0.0%) wall 0.005/0.015/0.025/0.051/0.091s (order n ok)"
-alloc = "PASS: call live=0"
-diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
-
+status = "uninspected"
 [[fn]]
 name = "json.remove_path"
 sig = "(j: Value, path: JsonPath) -> Value"
@@ -12529,19 +12514,12 @@ parity = "PASS: seed 1792437284, 200 programs; 200 program(s) call it, 177 of th
 complexity = "PASS: call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=256..512 7.516e7/1.468e8/2.902e8/5.769e8/1.150e9 fit n (rms 0.0%) moved 3.000e0/3.000e0/3.000e0/0.000e0/0.000e0B fit 1 (rms 0.0%) wall 0.015/0.020/0.056/0.081/0.172s wasm k=64..128 3.839e7/7.423e7/1.459e8/2.893e8/5.760e8 fit n (rms 0.0%) moved 0.000e0/9.900e1/0.000e0/5.100e1/0.000e0B fit 1 (rms 0.0%) wall 0.005/0.010/0.015/0.025/0.056s (order n ok)"
 alloc = "PASS: call live=0"
 diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
+
 [[fn]]
 name = "zlib.decompress"
 sig = "effect (data: Bytes) -> Bytes ! String"
 class = "effect"
-status = "inspected"
-impl = "fnv1a:8124a3073aa1e5de"
-stamp = "almide 0.68.0 (dev) at insp-0680 d6b80c19b (develop 302e0d120 plus the inspection fingerprint covering each function's wasm emitter arm, #3796; the pre-release re-inspection of every stamped row); xtarget-fuzz inspect at the same sha (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC, no free-list reuse), 200 programs per fn; every type variable measured at Int AND at String; effect functions in the fixed world of ADR-0027 D2 (every probe on every leg in a fresh sandbox, host-decided results compared as verdict lines, process from a fixed command set, net and http against loopback fixtures); GCE c4-standard-4 (INTEL XEON PLATINUM 8581C, 4 vCPU, PMU architectural, one fn at a time per VM, asia-northeast1-b), Ubuntu 24.04, rustc 1.99.1, wasmtime 49.0.1; 2026-10-19; codopsy: no crate code changed by this inspection"
-order = "n"
-parity = "PASS: seed 1792416360, 200 programs; 200 program(s) call it, 182 of them clean on every leg; unique findings 0"
-complexity = "PASS: call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=64..128 5.871e7/9.379e7/1.636e8/3.031e8/5.825e8 fit n (rms 0.1%) moved 9.764e6/1.314e7/1.990e7/3.340e7/6.042e7B fit n (rms 0.0%) wall 0.010/0.015/0.025/0.046/0.086s wasm k=16..32 4.575e7/9.073e7/1.807e8/3.607e8/7.205e8 fit n (rms 0.0%) moved 5.670e5/1.091e6/2.139e6/4.236e6/8.430e6B fit n (rms 0.0%) wall 0.005/0.010/0.015/0.030/0.056s (order n ok)"
-alloc = "PASS: call live=0"
-diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
-
+status = "uninspected"
 [[fn]]
 name = "zlib.deflate"
 sig = "effect (data: Bytes) -> Bytes ! String"
@@ -12568,19 +12546,12 @@ complexity = "PASS: call meter=instructions:u+bytes-moved alloc=canonical(wasm) 
 alloc = "PASS: call live=0"
 diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 
+
 [[fn]]
 name = "zlib.gunzip"
 sig = "effect (data: Bytes) -> Bytes ! String"
 class = "effect"
-status = "inspected"
-impl = "fnv1a:02bc5ea3a72ed9fb"
-stamp = "almide 0.68.0 (dev) at insp-0680 d6b80c19b (develop 302e0d120 plus the inspection fingerprint covering each function's wasm emitter arm, #3796; the pre-release re-inspection of every stamped row); xtarget-fuzz inspect at the same sha (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC, no free-list reuse), 200 programs per fn; every type variable measured at Int AND at String; effect functions in the fixed world of ADR-0027 D2 (every probe on every leg in a fresh sandbox, host-decided results compared as verdict lines, process from a fixed command set, net and http against loopback fixtures); GCE c4-standard-4 (INTEL XEON PLATINUM 8581C, 4 vCPU, PMU architectural, one fn at a time per VM, asia-northeast1-b), Ubuntu 24.04, rustc 1.99.1, wasmtime 49.0.1; 2026-10-19; codopsy: no crate code changed by this inspection"
-order = "n"
-parity = "PASS: seed 1792410426, 200 programs; 200 program(s) call it, 180 of them clean on every leg; unique findings 0"
-complexity = "PASS: call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=64..128 4.093e7/5.821e7/9.246e7/1.608e8/2.979e8 fit n (rms 0.1%) moved 9.764e6/1.314e7/1.990e7/3.340e7/6.042e7B fit n (rms 0.0%) wall 0.005/0.000/0.005/0.005/0.020s wasm k=16..32 4.171e7/8.221e7/1.632e8/3.253e8/6.493e8 fit n (rms 0.0%) moved 5.670e5/1.091e6/2.139e6/4.236e6/8.430e6B fit n (rms 0.0%) wall 0.005/0.000/0.010/0.020/0.045s (order n ok)"
-alloc = "PASS: call live=0"
-diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
-
+status = "uninspected"
 [[fn]]
 name = "zlib.gzip"
 sig = "effect (data: Bytes) -> Bytes ! String"
@@ -12594,19 +12565,12 @@ complexity = "PASS: call meter=instructions:u+bytes-moved alloc=canonical(wasm) 
 alloc = "PASS: call live=0"
 diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 
+
 [[fn]]
 name = "zlib.inflate"
 sig = "effect (data: Bytes) -> Bytes ! String"
 class = "effect"
-status = "inspected"
-impl = "fnv1a:e61a340668d1b3e2"
-stamp = "almide 0.68.0 (dev) at insp-0680 d6b80c19b (develop 302e0d120 plus the inspection fingerprint covering each function's wasm emitter arm, #3796; the pre-release re-inspection of every stamped row); xtarget-fuzz inspect at the same sha (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC, no free-list reuse), 200 programs per fn; every type variable measured at Int AND at String; effect functions in the fixed world of ADR-0027 D2 (every probe on every leg in a fresh sandbox, host-decided results compared as verdict lines, process from a fixed command set, net and http against loopback fixtures); GCE c4-standard-4 (INTEL XEON PLATINUM 8581C, 4 vCPU, PMU architectural, one fn at a time per VM, asia-northeast1-b), Ubuntu 24.04, rustc 1.99.1, wasmtime 49.0.1; 2026-10-19; codopsy: no crate code changed by this inspection"
-order = "n"
-parity = "PASS: seed 1792420838, 200 programs; 200 program(s) call it, 176 of them clean on every leg; unique findings 0"
-complexity = "PASS: call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=64..128 4.082e7/5.798e7/9.195e7/1.598e8/2.958e8 fit n (rms 0.1%) moved 9.764e6/1.314e7/1.990e7/3.340e7/6.042e7B fit n (rms 0.0%) wall 0.005/0.000/0.010/0.015/0.025s wasm k=16..32 3.198e7/6.321e7/1.257e8/2.506e8/5.004e8 fit n (rms 0.0%) moved 5.668e5/1.091e6/2.140e6/4.236e6/8.430e6B fit n (rms 0.0%) wall 0.005/0.005/0.005/0.015/0.030s (order n ok)"
-alloc = "PASS: call live=0"
-diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
-
+status = "uninspected"
 [[fn]]
 name = "net.tcp_local_port"
 sig = "effect (listener: Int) -> Int ! String"
@@ -15482,5 +15446,23 @@ status = "uninspected"
 [[fn]]
 name = "uint8.wrap_sub"
 sig = "(a: UInt8, b: UInt8) -> UInt8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "zlib.decompress_max"
+sig = "(data: Bytes, max_len: Int) -> Result[Bytes, String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "zlib.gunzip_max"
+sig = "(data: Bytes, max_len: Int) -> Result[Bytes, String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "zlib.inflate_max"
+sig = "(data: Bytes, max_len: Int) -> Result[Bytes, String]"
 class = "pure"
 status = "uninspected"
