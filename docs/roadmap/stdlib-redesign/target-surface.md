@@ -163,7 +163,7 @@
 | `is_odd` | `fn bigint.is_odd(x: BigInt) -> Bool` | 新規 | R-bigint-01 |
 | `max` | `fn bigint.max(a: BigInt, b: BigInt) -> BigInt` | 新規 | R-bigint-01 |
 | `min` | `fn bigint.min(a: BigInt, b: BigInt) -> BigInt` | 新規 | R-bigint-01 |
-| `mod` | `fn bigint.mod(a: BigInt, b: BigInt) -> BigInt` | 新規 | R-bigint-01（R-int-03 と同じ綴り） |
+| `modulo` | `fn bigint.modulo(a: BigInt, b: BigInt) -> BigInt` | 新規 | R-bigint-01（R-int-03 と同じ綴り） |
 | `parse` | `fn bigint.parse(s: String) -> Result[BigInt, String]` | 新規 | R-bigint-01 |
 | `parse_radix` | `fn bigint.parse_radix(s: String, radix: Int) -> Result[BigInt, String]` | 新規 | R-bigint-01 |
 | `pow` | `fn bigint.pow(base: BigInt, exp: Int) -> BigInt` | 新規 | R-bigint-01 |
@@ -946,7 +946,7 @@
 | `max_value` | `fn int.max_value() -> Int` |  |  |
 | `min` | `fn int.min(a: Int, b: Int) -> Int` |  | R-math-01（`math.min` の残る側） |
 | `min_value` | `fn int.min_value() -> Int` |  |  |
-| `mod` | `fn int.mod(a: Int, b: Int) -> Int` | 新規 | R-int-03 |
+| `modulo` | `fn int.modulo(a: Int, b: Int) -> Int` | 新規 | R-int-03 |
 | `next_power_of_two` | `fn int.next_power_of_two(x: Int) -> Int` |  |  |
 | `parse` | `fn int.parse(s: String) -> Result[Int, String]` |  |  |
 | `parse_radix` | `fn int.parse_radix(s: String, radix: Int) -> Result[Int, String]` | 新規 | R-int-04 |
@@ -1040,7 +1040,7 @@
 | `max_value` | `fn int16.max_value() -> Int16` |  |  |
 | `min` | `fn int16.min(a: Int16, b: Int16) -> Int16` | 新規 | R-sized-08 |
 | `min_value` | `fn int16.min_value() -> Int16` |  |  |
-| `mod` | `fn int16.mod(a: Int16, b: Int16) -> Int16` | 新規 | R-sized-10 |
+| `modulo` | `fn int16.modulo(a: Int16, b: Int16) -> Int16` | 新規 | R-sized-10 |
 | `parse` | `fn int16.parse(s: String) -> Result[Int16, String]` | 新規 | R-sized-02 |
 | `parse_radix` | `fn int16.parse_radix(s: String, radix: Int) -> Result[Int16, String]` | 新規 | R-sized-06 |
 | `pow` | `fn int16.pow(base: Int16, exp: Int) -> Int16` | 新規 | R-sized-10 |
@@ -1108,7 +1108,7 @@
 | `max_value` | `fn int32.max_value() -> Int32` |  |  |
 | `min` | `fn int32.min(a: Int32, b: Int32) -> Int32` | 新規 | R-sized-08 |
 | `min_value` | `fn int32.min_value() -> Int32` |  |  |
-| `mod` | `fn int32.mod(a: Int32, b: Int32) -> Int32` | 新規 | R-sized-10 |
+| `modulo` | `fn int32.modulo(a: Int32, b: Int32) -> Int32` | 新規 | R-sized-10 |
 | `parse` | `fn int32.parse(s: String) -> Result[Int32, String]` | 新規 | R-sized-02 |
 | `parse_radix` | `fn int32.parse_radix(s: String, radix: Int) -> Result[Int32, String]` | 新規 | R-sized-06 |
 | `pow` | `fn int32.pow(base: Int32, exp: Int) -> Int32` | 新規 | R-sized-10 |
@@ -1178,7 +1178,7 @@
 | `max_value` | `fn int64.max_value() -> Int64` |  |  |
 | `min` | `fn int64.min(a: Int64, b: Int64) -> Int64` | 新規 | R-sized-08 |
 | `min_value` | `fn int64.min_value() -> Int64` |  |  |
-| `mod` | `fn int64.mod(a: Int64, b: Int64) -> Int64` | 新規 | R-sized-10 |
+| `modulo` | `fn int64.modulo(a: Int64, b: Int64) -> Int64` | 新規 | R-sized-10 |
 | `parse` | `fn int64.parse(s: String) -> Result[Int64, String]` | 新規 | R-sized-02 |
 | `parse_radix` | `fn int64.parse_radix(s: String, radix: Int) -> Result[Int64, String]` | 新規 | R-sized-06 |
 | `pow` | `fn int64.pow(base: Int64, exp: Int) -> Int64` | 新規 | R-sized-10 |
@@ -1250,7 +1250,7 @@
 | `max_value` | `fn int8.max_value() -> Int8` |  |  |
 | `min` | `fn int8.min(a: Int8, b: Int8) -> Int8` | 新規 | R-sized-08 |
 | `min_value` | `fn int8.min_value() -> Int8` |  |  |
-| `mod` | `fn int8.mod(a: Int8, b: Int8) -> Int8` | 新規 | R-sized-10 |
+| `modulo` | `fn int8.modulo(a: Int8, b: Int8) -> Int8` | 新規 | R-sized-10 |
 | `parse` | `fn int8.parse(s: String) -> Result[Int8, String]` | 新規 | R-sized-02 |
 | `parse_radix` | `fn int8.parse_radix(s: String, radix: Int) -> Result[Int8, String]` | 新規 | R-sized-06 |
 | `pow` | `fn int8.pow(base: Int8, exp: Int) -> Int8` | 新規 | R-sized-10 |
@@ -1989,7 +1989,7 @@
 | `max_value` | `fn uint16.max_value() -> UInt16` |  |  |
 | `min` | `fn uint16.min(a: UInt16, b: UInt16) -> UInt16` | 新規 | R-sized-08 |
 | `min_value` | `fn uint16.min_value() -> UInt16` |  |  |
-| `mod` | `fn uint16.mod(a: UInt16, b: UInt16) -> UInt16` | 新規 | R-sized-10 |
+| `modulo` | `fn uint16.modulo(a: UInt16, b: UInt16) -> UInt16` | 新規 | R-sized-10 |
 | `parse` | `fn uint16.parse(s: String) -> Result[UInt16, String]` | 新規 | R-sized-02 |
 | `parse_radix` | `fn uint16.parse_radix(s: String, radix: Int) -> Result[UInt16, String]` | 新規 | R-sized-06 |
 | `pow` | `fn uint16.pow(base: UInt16, exp: Int) -> UInt16` | 新規 | R-sized-10 |
@@ -2051,7 +2051,7 @@
 | `max_value` | `fn uint32.max_value() -> UInt32` |  |  |
 | `min` | `fn uint32.min(a: UInt32, b: UInt32) -> UInt32` | 新規 | R-sized-08 |
 | `min_value` | `fn uint32.min_value() -> UInt32` |  |  |
-| `mod` | `fn uint32.mod(a: UInt32, b: UInt32) -> UInt32` | 新規 | R-sized-10 |
+| `modulo` | `fn uint32.modulo(a: UInt32, b: UInt32) -> UInt32` | 新規 | R-sized-10 |
 | `parse` | `fn uint32.parse(s: String) -> Result[UInt32, String]` | 新規 | R-sized-02 |
 | `parse_radix` | `fn uint32.parse_radix(s: String, radix: Int) -> Result[UInt32, String]` | 新規 | R-sized-06 |
 | `pow` | `fn uint32.pow(base: UInt32, exp: Int) -> UInt32` | 新規 | R-sized-10 |
@@ -2117,7 +2117,7 @@
 | `max_value` | `fn uint64.max_value() -> UInt64` |  |  |
 | `min` | `fn uint64.min(a: UInt64, b: UInt64) -> UInt64` | 新規 | R-sized-08 |
 | `min_value` | `fn uint64.min_value() -> UInt64` |  |  |
-| `mod` | `fn uint64.mod(a: UInt64, b: UInt64) -> UInt64` | 新規 | R-sized-10 |
+| `modulo` | `fn uint64.modulo(a: UInt64, b: UInt64) -> UInt64` | 新規 | R-sized-10 |
 | `parse` | `fn uint64.parse(s: String) -> Result[UInt64, String]` | 新規 | R-sized-02 |
 | `parse_radix` | `fn uint64.parse_radix(s: String, radix: Int) -> Result[UInt64, String]` | 新規 | R-sized-06 |
 | `pow` | `fn uint64.pow(base: UInt64, exp: Int) -> UInt64` | 新規 | R-sized-10 |
@@ -2187,7 +2187,7 @@
 | `max_value` | `fn uint8.max_value() -> UInt8` |  |  |
 | `min` | `fn uint8.min(a: UInt8, b: UInt8) -> UInt8` | 新規 | R-sized-08 |
 | `min_value` | `fn uint8.min_value() -> UInt8` |  |  |
-| `mod` | `fn uint8.mod(a: UInt8, b: UInt8) -> UInt8` | 新規 | R-sized-10 |
+| `modulo` | `fn uint8.modulo(a: UInt8, b: UInt8) -> UInt8` | 新規 | R-sized-10 |
 | `parse` | `fn uint8.parse(s: String) -> Result[UInt8, String]` | 新規 | R-sized-02 |
 | `parse_radix` | `fn uint8.parse_radix(s: String, radix: Int) -> Result[UInt8, String]` | 新規 | R-sized-06 |
 | `pow` | `fn uint8.pow(base: UInt8, exp: Int) -> UInt8` | 新規 | R-sized-10 |

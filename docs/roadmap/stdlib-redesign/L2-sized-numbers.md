@@ -153,9 +153,9 @@
 
 ### R-sized-10 整数 8 型に `Integer`・`FixedWidthInteger` の要件をそろえる — ○ 採用（R-sized-05 を見直し）
 
-- いま: `int` は `floor_div`・`mod`・`pow`・`is_even`・`is_odd`・ビット演算（`band`・`bor`・`bxor`・`bnot`・`bshl`・`bshr`）・`count_leading_zeros`・`count_trailing_zeros`・`count_ones`・`byte_swap`・`abs`・`sign` を持ちますが、`int8`〜`uint64` は持ちません。
+- いま: `int` は `floor_div`・`modulo`・`pow`・`is_even`・`is_odd`・ビット演算（`band`・`bor`・`bxor`・`bnot`・`bshl`・`bshr`）・`count_leading_zeros`・`count_trailing_zeros`・`count_ones`・`byte_swap`・`abs`・`sign` を持ちますが、`int8`〜`uint64` は持ちません。
 - 案: [protocol の階層](protocol-view.md)の要件として、8 型すべてに置きます。
-  - `Integer`: `floor_div(a, b)`・`mod(a, b)`・`pow(base, exp: Int)`・`is_even`・`is_odd`・`band`・`bor`・`bxor`・`bnot`・`bshl(a, n: Int)`・`bshr(a, n: Int)`。`bshr` は、符号つきの型では符号を保ち、符号なしの型では 0 で埋めます（Swift の `>>` と同じ）。
+  - `Integer`: `floor_div(a, b)`・`modulo(a, b)`（`floor_div(min_value, -1)` は `/` と同じく abort、R-int-13）・`pow(base, exp: Int)`・`is_even`・`is_odd`・`band`・`bor`・`bxor`・`bnot`・`bshl(a, n: Int)`・`bshr(a, n: Int)`。`bshr` は、符号つきの型では符号を保ち、符号なしの型では 0 で埋めます（Swift の `>>` と同じ）。
   - `FixedWidthInteger`: `count_leading_zeros`・`count_trailing_zeros`・`count_ones`・`byte_swap`（どれも型の幅で数える。`int8.count_leading_zeros(1)` は 7）。
   - `SignedInteger`（`int8`〜`int64`）: `abs`・`sign`。
   - 結果が型の範囲を出たときの扱いは、その型の `+`・`*` と同じです。
@@ -205,7 +205,7 @@
 | `parse` | （追加）`int8.parse(s: String) -> Result[Int8, String]` | Rust `str::parse::<T>` / Go `ParseInt(s,10,bits)` / OCaml `Int32.of_string_opt` / Kotlin `toByteOrNull` 等 / Swift `T(s)` | 追加 | R-sized-02 |
 | `compare` | （追加）`int8.compare(a: Int8, b: Int8) -> Int` | Rust `cmp`/`total_cmp` / Go `cmp.Compare` / Kotlin `compareTo` / Swift `<` | 追加 | R-sized-02 |
 | `floor_div` | （追加）`int8.floor_div(a: Int8, b: Int8) -> Int8` | Rust `div_euclid` / Swift — / Python `//` | 追加 | R-sized-10 |
-| `mod` | （追加）`int8.mod(a: Int8, b: Int8) -> Int8` | Rust `rem_euclid` / Python `%` | 追加 | R-sized-10 |
+| `modulo` | （追加）`int8.modulo(a: Int8, b: Int8) -> Int8` | Rust `rem_euclid` / Python `%` | 追加 | R-sized-10 |
 | `pow` | （追加）`int8.pow(base: Int8, exp: Int) -> Int8` | Rust `pow` / Swift — | 追加 | R-sized-10 |
 | `is_even` | （追加）`int8.is_even(n: Int8) -> Bool` | Swift `isMultiple(of: 2)` / Kotlin — | 追加 | R-sized-10 |
 | `is_odd` | （追加）`int8.is_odd(n: Int8) -> Bool` | Swift `!isMultiple(of: 2)` | 追加 | R-sized-10 |
@@ -263,7 +263,7 @@
 | `parse` | （追加）`int16.parse(s: String) -> Result[Int16, String]` | Rust `str::parse::<T>` / Go `ParseInt(s,10,bits)` / OCaml `Int32.of_string_opt` / Kotlin `toByteOrNull` 等 / Swift `T(s)` | 追加 | R-sized-02 |
 | `compare` | （追加）`int16.compare(a: Int16, b: Int16) -> Int` | Rust `cmp`/`total_cmp` / Go `cmp.Compare` / Kotlin `compareTo` / Swift `<` | 追加 | R-sized-02 |
 | `floor_div` | （追加）`int16.floor_div(a: Int16, b: Int16) -> Int16` | Rust `div_euclid` / Swift — / Python `//` | 追加 | R-sized-10 |
-| `mod` | （追加）`int16.mod(a: Int16, b: Int16) -> Int16` | Rust `rem_euclid` / Python `%` | 追加 | R-sized-10 |
+| `modulo` | （追加）`int16.modulo(a: Int16, b: Int16) -> Int16` | Rust `rem_euclid` / Python `%` | 追加 | R-sized-10 |
 | `pow` | （追加）`int16.pow(base: Int16, exp: Int) -> Int16` | Rust `pow` / Swift — | 追加 | R-sized-10 |
 | `is_even` | （追加）`int16.is_even(n: Int16) -> Bool` | Swift `isMultiple(of: 2)` / Kotlin — | 追加 | R-sized-10 |
 | `is_odd` | （追加）`int16.is_odd(n: Int16) -> Bool` | Swift `!isMultiple(of: 2)` | 追加 | R-sized-10 |
@@ -323,7 +323,7 @@
 | `parse` | （追加）`int32.parse(s: String) -> Result[Int32, String]` | Rust `str::parse::<T>` / Go `ParseInt(s,10,bits)` / OCaml `Int32.of_string_opt` / Kotlin `toByteOrNull` 等 / Swift `T(s)` | 追加 | R-sized-02 |
 | `compare` | （追加）`int32.compare(a: Int32, b: Int32) -> Int` | Rust `cmp`/`total_cmp` / Go `cmp.Compare` / Kotlin `compareTo` / Swift `<` | 追加 | R-sized-02 |
 | `floor_div` | （追加）`int32.floor_div(a: Int32, b: Int32) -> Int32` | Rust `div_euclid` / Swift — / Python `//` | 追加 | R-sized-10 |
-| `mod` | （追加）`int32.mod(a: Int32, b: Int32) -> Int32` | Rust `rem_euclid` / Python `%` | 追加 | R-sized-10 |
+| `modulo` | （追加）`int32.modulo(a: Int32, b: Int32) -> Int32` | Rust `rem_euclid` / Python `%` | 追加 | R-sized-10 |
 | `pow` | （追加）`int32.pow(base: Int32, exp: Int) -> Int32` | Rust `pow` / Swift — | 追加 | R-sized-10 |
 | `is_even` | （追加）`int32.is_even(n: Int32) -> Bool` | Swift `isMultiple(of: 2)` / Kotlin — | 追加 | R-sized-10 |
 | `is_odd` | （追加）`int32.is_odd(n: Int32) -> Bool` | Swift `!isMultiple(of: 2)` | 追加 | R-sized-10 |
@@ -385,7 +385,7 @@
 | `parse` | （追加）`int64.parse(s: String) -> Result[Int64, String]` | Rust `str::parse::<T>` / Go `ParseInt(s,10,bits)` / OCaml `Int32.of_string_opt` / Kotlin `toByteOrNull` 等 / Swift `T(s)` | 追加 | R-sized-02 |
 | `compare` | （追加）`int64.compare(a: Int64, b: Int64) -> Int` | Rust `cmp`/`total_cmp` / Go `cmp.Compare` / Kotlin `compareTo` / Swift `<` | 追加 | R-sized-02 |
 | `floor_div` | （追加）`int64.floor_div(a: Int64, b: Int64) -> Int64` | Rust `div_euclid` / Swift — / Python `//` | 追加 | R-sized-10 |
-| `mod` | （追加）`int64.mod(a: Int64, b: Int64) -> Int64` | Rust `rem_euclid` / Python `%` | 追加 | R-sized-10 |
+| `modulo` | （追加）`int64.modulo(a: Int64, b: Int64) -> Int64` | Rust `rem_euclid` / Python `%` | 追加 | R-sized-10 |
 | `pow` | （追加）`int64.pow(base: Int64, exp: Int) -> Int64` | Rust `pow` / Swift — | 追加 | R-sized-10 |
 | `is_even` | （追加）`int64.is_even(n: Int64) -> Bool` | Swift `isMultiple(of: 2)` / Kotlin — | 追加 | R-sized-10 |
 | `is_odd` | （追加）`int64.is_odd(n: Int64) -> Bool` | Swift `!isMultiple(of: 2)` | 追加 | R-sized-10 |
@@ -435,7 +435,7 @@
 | `parse` | （追加）`uint8.parse(s: String) -> Result[UInt8, String]` | Rust `str::parse::<T>` / Go `ParseInt(s,10,bits)` / OCaml `Int32.of_string_opt` / Kotlin `toByteOrNull` 等 / Swift `T(s)` | 追加 | R-sized-02 |
 | `compare` | （追加）`uint8.compare(a: UInt8, b: UInt8) -> Int` | Rust `cmp`/`total_cmp` / Go `cmp.Compare` / Kotlin `compareTo` / Swift `<` | 追加 | R-sized-02 |
 | `floor_div` | （追加）`uint8.floor_div(a: UInt8, b: UInt8) -> UInt8` | Rust `div_euclid` / Swift — / Python `//` | 追加 | R-sized-10 |
-| `mod` | （追加）`uint8.mod(a: UInt8, b: UInt8) -> UInt8` | Rust `rem_euclid` / Python `%` | 追加 | R-sized-10 |
+| `modulo` | （追加）`uint8.modulo(a: UInt8, b: UInt8) -> UInt8` | Rust `rem_euclid` / Python `%` | 追加 | R-sized-10 |
 | `pow` | （追加）`uint8.pow(base: UInt8, exp: Int) -> UInt8` | Rust `pow` / Swift — | 追加 | R-sized-10 |
 | `is_even` | （追加）`uint8.is_even(n: UInt8) -> Bool` | Swift `isMultiple(of: 2)` / Kotlin — | 追加 | R-sized-10 |
 | `is_odd` | （追加）`uint8.is_odd(n: UInt8) -> Bool` | Swift `!isMultiple(of: 2)` | 追加 | R-sized-10 |
@@ -487,7 +487,7 @@
 | `parse` | （追加）`uint16.parse(s: String) -> Result[UInt16, String]` | Rust `str::parse::<T>` / Go `ParseInt(s,10,bits)` / OCaml `Int32.of_string_opt` / Kotlin `toByteOrNull` 等 / Swift `T(s)` | 追加 | R-sized-02 |
 | `compare` | （追加）`uint16.compare(a: UInt16, b: UInt16) -> Int` | Rust `cmp`/`total_cmp` / Go `cmp.Compare` / Kotlin `compareTo` / Swift `<` | 追加 | R-sized-02 |
 | `floor_div` | （追加）`uint16.floor_div(a: UInt16, b: UInt16) -> UInt16` | Rust `div_euclid` / Swift — / Python `//` | 追加 | R-sized-10 |
-| `mod` | （追加）`uint16.mod(a: UInt16, b: UInt16) -> UInt16` | Rust `rem_euclid` / Python `%` | 追加 | R-sized-10 |
+| `modulo` | （追加）`uint16.modulo(a: UInt16, b: UInt16) -> UInt16` | Rust `rem_euclid` / Python `%` | 追加 | R-sized-10 |
 | `pow` | （追加）`uint16.pow(base: UInt16, exp: Int) -> UInt16` | Rust `pow` / Swift — | 追加 | R-sized-10 |
 | `is_even` | （追加）`uint16.is_even(n: UInt16) -> Bool` | Swift `isMultiple(of: 2)` / Kotlin — | 追加 | R-sized-10 |
 | `is_odd` | （追加）`uint16.is_odd(n: UInt16) -> Bool` | Swift `!isMultiple(of: 2)` | 追加 | R-sized-10 |
@@ -543,7 +543,7 @@
 | `parse` | （追加）`uint32.parse(s: String) -> Result[UInt32, String]` | Rust `str::parse::<T>` / Go `ParseInt(s,10,bits)` / OCaml `Int32.of_string_opt` / Kotlin `toByteOrNull` 等 / Swift `T(s)` | 追加 | R-sized-02 |
 | `compare` | （追加）`uint32.compare(a: UInt32, b: UInt32) -> Int` | Rust `cmp`/`total_cmp` / Go `cmp.Compare` / Kotlin `compareTo` / Swift `<` | 追加 | R-sized-02 |
 | `floor_div` | （追加）`uint32.floor_div(a: UInt32, b: UInt32) -> UInt32` | Rust `div_euclid` / Swift — / Python `//` | 追加 | R-sized-10 |
-| `mod` | （追加）`uint32.mod(a: UInt32, b: UInt32) -> UInt32` | Rust `rem_euclid` / Python `%` | 追加 | R-sized-10 |
+| `modulo` | （追加）`uint32.modulo(a: UInt32, b: UInt32) -> UInt32` | Rust `rem_euclid` / Python `%` | 追加 | R-sized-10 |
 | `pow` | （追加）`uint32.pow(base: UInt32, exp: Int) -> UInt32` | Rust `pow` / Swift — | 追加 | R-sized-10 |
 | `is_even` | （追加）`uint32.is_even(n: UInt32) -> Bool` | Swift `isMultiple(of: 2)` / Kotlin — | 追加 | R-sized-10 |
 | `is_odd` | （追加）`uint32.is_odd(n: UInt32) -> Bool` | Swift `!isMultiple(of: 2)` | 追加 | R-sized-10 |
@@ -603,7 +603,7 @@
 | `parse` | （追加）`uint64.parse(s: String) -> Result[UInt64, String]` | Rust `str::parse::<T>` / Go `ParseInt(s,10,bits)` / OCaml `Int32.of_string_opt` / Kotlin `toByteOrNull` 等 / Swift `T(s)` | 追加 | R-sized-02 |
 | `compare` | （追加）`uint64.compare(a: UInt64, b: UInt64) -> Int` | Rust `cmp`/`total_cmp` / Go `cmp.Compare` / Kotlin `compareTo` / Swift `<` | 追加 | R-sized-02 |
 | `floor_div` | （追加）`uint64.floor_div(a: UInt64, b: UInt64) -> UInt64` | Rust `div_euclid` / Swift — / Python `//` | 追加 | R-sized-10 |
-| `mod` | （追加）`uint64.mod(a: UInt64, b: UInt64) -> UInt64` | Rust `rem_euclid` / Python `%` | 追加 | R-sized-10 |
+| `modulo` | （追加）`uint64.modulo(a: UInt64, b: UInt64) -> UInt64` | Rust `rem_euclid` / Python `%` | 追加 | R-sized-10 |
 | `pow` | （追加）`uint64.pow(base: UInt64, exp: Int) -> UInt64` | Rust `pow` / Swift — | 追加 | R-sized-10 |
 | `is_even` | （追加）`uint64.is_even(n: UInt64) -> Bool` | Swift `isMultiple(of: 2)` / Kotlin — | 追加 | R-sized-10 |
 | `is_odd` | （追加）`uint64.is_odd(n: UInt64) -> Bool` | Swift `!isMultiple(of: 2)` | 追加 | R-sized-10 |

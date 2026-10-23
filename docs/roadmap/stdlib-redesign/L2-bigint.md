@@ -17,7 +17,7 @@
 | Int へ | `to_int`（`_checked`・`_saturating`） | — | `Int64` `IsInt64` | （同じ型） | `Number(b)` `asIntN` | — | — | — | `toLong` `longValueExact` | — |
 | 文字列から・へ | `parse` `to_string`（`_radix` 版も） | — | `SetString` `String` `Text(base)` | `int(s)` `str` | `BigInt(s)` `toString(r)` | — | `parse` `to_string` (F) | — | `BigInteger(s)` `toString(r)` | — |
 | 四則と剰余 | `add` `sub` `mul` `div` `rem`（演算子） | — | `Add` `Sub` `Mul` `Quo` `Rem` | `+ - * // %` | `+ - * / %` | — | `+ - * div rem` | — | `add` `subtract` `multiply` `divide` `remainder` | — |
-| 床方向の割り算・剰余 | `floor_div` `mod` | — | `Div` `Mod`（Euclid） | `//` `%` | — | — | `floor_div` `mod` (F) | — | `mod`（非負） | — |
+| 床方向の割り算・剰余 | `floor_div` `modulo` | — | `Div` `Mod`（Euclid） | `//` `%` | — | — | `floor_div` `mod` (F) | — | `mod`（非負） | — |
 | 符号・絶対値・累乗 | `neg` `abs` `sign` `pow` | — | `Neg` `Abs` `Sign` `Exp` | `-` `abs` `**` | `-` `**` | — | `abs` `pow` (F) | — | `negate` `abs` `signum` `pow` | — |
 | 比較・最小・最大 | `compare` `min` `max`（演算子 `<` も） | — | `Cmp` | `<` | `<` | — | `<` | — | `compareTo` `min` `max` | — |
 | Float へ | `to_float`（`_checked`） | — | `Float64` | `float` | `Number` | — | — | — | `toDouble` | — |
@@ -62,7 +62,7 @@
 ### R-bigint-04 `bigint.add`/`sub`/`mul`/`div`/`rem`/`neg` を公開しない（演算子だけにする） — ○ 採用
 
 - いま: 案では `bigint.add(a, b)` などの 6 関数を公開し、演算子 `+ - * / %` と単項 `-` をそれに脱糖します。
-- 案: 6 つを内部の名前（`__add` など）にし、公開の書き方は演算子だけにします。`floor_div`・`mod`・`abs`・`pow` は `int` にもあるので公開のままです。
+- 案: 6 つを内部の名前（`__add` など）にし、公開の書き方は演算子だけにします。`floor_div`・`modulo`・`abs`・`pow` は `int` にもあるので公開のままです。
 - 根拠の L0 規則: R-L0-01（同じ役割に綴りは 1 つ）、bigint の完全性の規則 1（`int` と同じ綴り。`int.add`・`int.rem` は無い）、R-L0-26（演算子の脱糖先は公開しない）。前例は R-matrix-02 の `__` の名前です。
 - (a) 演算子で書ける言語（Python・JS・Elixir）では関数の綴りは出てきません。関数で書く Go `Add`・JVM `add` は、演算子の多重定義がない言語です。
 - (c) `a + b` と `bigint.add(a, b)` の 2 通りがあると、生成されるコードが揺れます。`bigint.rem` があって `int.rem` がない非対称から、LLM は `int.rem` を推測して外れます。
@@ -90,7 +90,7 @@
 
 ### R-bigint-07 `bigint` に `Integer` のビット演算を置く — ○ 採用
 
-- いま: `bigint` は `Integer` の算術（`floor_div`・`mod`・`pow`・`is_even`・`is_odd`）を持ちますが、ビット演算を持ちません。
+- いま: `bigint` は `Integer` の算術（`floor_div`・`modulo`・`pow`・`is_even`・`is_odd`）を持ちますが、ビット演算を持ちません。
 - 案: `band`・`bor`・`bxor`・`bnot`・`bshl`・`bshr` を置きます（`int` と同じ関数。R-int-10）。負の数は、上に無限に 1 が続く 2 の補数として扱います（Python の `int`、Swift の `BinaryInteger` と同じ）。`bnot(x)` は `-x - 1` です。
 - 意図した抜け: `count_leading_zeros`・`count_trailing_zeros`・`count_ones`・`byte_swap` は置きません（`FixedWidthInteger` の要件で、幅のない型には決まった答えがない）。
 - (a) Swift の `BinaryInteger` はビット演算を要件にし、任意精度の整数もこれを持つ設計です。Python の `int`、Go の `big.Int`（`And`・`Or`・`Xor`・`Not`・`Lsh`・`Rsh`）、Java/Kotlin の `BigInteger`（`and`・`or`・`xor`・`not`・`shiftLeft`・`shiftRight`）も持ちます。
@@ -111,7 +111,7 @@
 | `div` | `bigint.div(a: BigInt, b: BigInt) -> BigInt`（`/`、0 方向。0 で割ると abort） | Go `Quo` / Kotlin `divide` / JS `/` | 追加しない（演算子の内部の脱糖先にする） | R-bigint-04 |
 | `rem` | `bigint.rem(a: BigInt, b: BigInt) -> BigInt`（`%`） | Go `Rem` / Kotlin `remainder` / JS `%` | 追加しない（演算子の内部の脱糖先にする） | R-bigint-04 |
 | `floor_div` | `bigint.floor_div(a: BigInt, b: BigInt) -> BigInt` | Python `//` / Elixir `Integer.floor_div` (F) | 追加 | R-bigint-01（R-int-03 と同じ綴り） |
-| `mod` | `bigint.mod(a: BigInt, b: BigInt) -> BigInt` | Python `%` / Elixir `Integer.mod` (F) / Kotlin `mod` | 追加 | R-bigint-01（R-int-03 と同じ綴り） |
+| `modulo` | `bigint.modulo(a: BigInt, b: BigInt) -> BigInt` | Python `%` / Elixir `Integer.mod` (F) / Kotlin `mod` | 追加 | R-bigint-01（R-int-03 と同じ綴り） |
 | `neg` | `bigint.neg(a: BigInt) -> BigInt`（単項 `-`） | Go `Neg` / Kotlin `negate` | 追加しない（演算子の内部の脱糖先にする） | R-bigint-04 |
 | `abs` | `bigint.abs(a: BigInt) -> BigInt` | Go `Abs` / Python `abs` / Kotlin `abs` | 追加 | R-bigint-01 |
 | `sign` | `bigint.sign(a: BigInt) -> Int` | Go `Sign` / Kotlin `signum` | 追加 | R-bigint-01 |

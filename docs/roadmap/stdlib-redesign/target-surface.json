@@ -74,8 +74,8 @@
 },
 {
 "mod": "bigint",
-"name": "mod",
-"sig": "fn bigint.mod(a: BigInt, b: BigInt) -> BigInt",
+"name": "modulo",
+"sig": "fn bigint.modulo(a: BigInt, b: BigInt) -> BigInt",
 "kind": "追加"
 },
 {
@@ -2852,8 +2852,8 @@
 },
 {
 "mod": "int",
-"name": "mod",
-"sig": "fn int.mod(a: Int, b: Int) -> Int",
+"name": "modulo",
+"sig": "fn int.modulo(a: Int, b: Int) -> Int",
 "kind": "追加"
 },
 {
@@ -4808,8 +4808,8 @@
 },
 {
 "mod": "int8",
-"name": "mod",
-"sig": "fn int8.mod(a: Int8, b: Int8) -> Int8",
+"name": "modulo",
+"sig": "fn int8.modulo(a: Int8, b: Int8) -> Int8",
 "kind": "追加"
 },
 {
@@ -5000,8 +5000,8 @@
 },
 {
 "mod": "int16",
-"name": "mod",
-"sig": "fn int16.mod(a: Int16, b: Int16) -> Int16",
+"name": "modulo",
+"sig": "fn int16.modulo(a: Int16, b: Int16) -> Int16",
 "kind": "追加"
 },
 {
@@ -5192,8 +5192,8 @@
 },
 {
 "mod": "int32",
-"name": "mod",
-"sig": "fn int32.mod(a: Int32, b: Int32) -> Int32",
+"name": "modulo",
+"sig": "fn int32.modulo(a: Int32, b: Int32) -> Int32",
 "kind": "追加"
 },
 {
@@ -5384,8 +5384,8 @@
 },
 {
 "mod": "int64",
-"name": "mod",
-"sig": "fn int64.mod(a: Int64, b: Int64) -> Int64",
+"name": "modulo",
+"sig": "fn int64.modulo(a: Int64, b: Int64) -> Int64",
 "kind": "追加"
 },
 {
@@ -5576,8 +5576,8 @@
 },
 {
 "mod": "uint8",
-"name": "mod",
-"sig": "fn uint8.mod(a: UInt8, b: UInt8) -> UInt8",
+"name": "modulo",
+"sig": "fn uint8.modulo(a: UInt8, b: UInt8) -> UInt8",
 "kind": "追加"
 },
 {
@@ -5756,8 +5756,8 @@
 },
 {
 "mod": "uint16",
-"name": "mod",
-"sig": "fn uint16.mod(a: UInt16, b: UInt16) -> UInt16",
+"name": "modulo",
+"sig": "fn uint16.modulo(a: UInt16, b: UInt16) -> UInt16",
 "kind": "追加"
 },
 {
@@ -5936,8 +5936,8 @@
 },
 {
 "mod": "uint32",
-"name": "mod",
-"sig": "fn uint32.mod(a: UInt32, b: UInt32) -> UInt32",
+"name": "modulo",
+"sig": "fn uint32.modulo(a: UInt32, b: UInt32) -> UInt32",
 "kind": "追加"
 },
 {
@@ -6116,8 +6116,8 @@
 },
 {
 "mod": "uint64",
-"name": "mod",
-"sig": "fn uint64.mod(a: UInt64, b: UInt64) -> UInt64",
+"name": "modulo",
+"sig": "fn uint64.modulo(a: UInt64, b: UInt64) -> UInt64",
 "kind": "追加"
 },
 {
