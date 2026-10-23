@@ -23,20 +23,15 @@ pub fn scope() -> Option<Vec<String>> {
     SCOPE.lock().unwrap_or_else(|p| p.into_inner()).clone()
 }
 
-/// The paths fs op `op` touches, each with whether the op acts on the entry
-/// itself (`is_symlink`, `remove`, `remove_all`, the rename source — native's
-/// `fs_scope_guard_entry`): the operand in `a`, the copy / rename destination
-/// in `b`, a glob's base directory, the temp dir a temp op creates in. Ops
-/// that are not fs ops touch none.
-fn touched(op: i32, a: &str, b: &[u8]) -> Vec<(String, bool)> {
-    let to = || (String::from_utf8_lossy(b).to_string(), false);
+/// The paths fs op `op` touches: the operand in `a`, the copy / rename
+/// destination in `b`, a glob's base directory, the temp dir a temp op
+/// creates in. Ops that are not fs ops touch none.
+fn touched(op: i32, a: &str, b: &[u8]) -> Vec<String> {
     match op {
-        10 | 21 => vec![(std::env::temp_dir().to_string_lossy().to_string(), false)],
-        19 => vec![(a.to_string(), false), to()],
-        20 => vec![(a.to_string(), true), to()],
-        39 => vec![(almide_base::fs_scope::fs_scope_glob_base(a), false)],
-        8 | 9 | 22 => vec![(a.to_string(), true)],
-        1..=7 | 11..=18 | 23..=25 | 38 | 41 | 51 | 52 | 61..=64 => vec![(a.to_string(), false)],
+        10 | 21 => vec![std::env::temp_dir().to_string_lossy().to_string()],
+        19 | 20 => vec![a.to_string(), String::from_utf8_lossy(b).to_string()],
+        39 => vec![almide_base::fs_scope::fs_scope_glob_base(a)],
+        1..=9 | 11..=18 | 22..=25 | 38 | 41 | 51 | 52 | 61..=64 => vec![a.to_string()],
         _ => Vec::new(),
     }
 }
@@ -48,9 +43,7 @@ pub(crate) fn refuse(op: i32, a: &str, b: &[u8]) -> Option<(i64, Vec<u8>)> {
     let guard = SCOPE.lock().unwrap_or_else(|p| p.into_inner());
     let roots: Vec<PathBuf> = guard.as_ref()?.iter().map(|r| almide_base::fs_scope::fs_scope_root(r)).collect();
     drop(guard);
-    let (out, _) = touched(op, a, b)
-        .into_iter()
-        .find(|(p, entry)| !almide_base::fs_scope::fs_scope_admits(p, &roots, *entry))?;
+    let out = touched(op, a, b).into_iter().find(|p| !almide_base::fs_scope::fs_scope_admits(p, &roots))?;
     if matches!(op, 4..=6 | 22) {
         return Some((0, Vec::new()));
     }
