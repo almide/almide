@@ -61,17 +61,32 @@ DEFLATE を標準に持つのは 3 言語（● 3・◐ 3）で、R-L1 の「足
 - 根拠の L0 規則: R-L0-15、ADR-0016（数値の決定性）。
 - issue: #3892
 
+### R-zlib-04 展開の出力に既定の上限を置き、上限を引数にとる関数を足す — ○ 採用
+
+- いま: `decompress`・`inflate`・`gunzip` は出力に上限がなく、数 KB の圧縮爆弾がメモリを使い果たすまで展開を続けます（`runtime/rs/src/zlib.rs:98-112`）。
+- 案:
+  - 3 関数は、出力が 256 MiB を超えたら `err("zlib: output exceeds 268435456 bytes")` を返します（展開をそこで止める）。
+  - 上限を変える関数を足します: `fn decompress_max(data: Bytes, max_len: Int) -> Result[Bytes, String]`、`inflate_max`、`gunzip_max`。`max_len <= 0` は abort（R-L0-33 の「数を作る」と同じ、呼び出し側の契約違反）。
+- 根拠の L0 規則: R-L0-47 の 2・3、R-L0-06。
+- (a) Python `zlib.decompressobj().decompress(data, max_length)`、Node `zlib.inflateSync(buf, { maxOutputLength })`、Go は `io.LimitReader` を重ねる書き方。上限を引数にとる綴りは Python・Node の 2 つで、名前の多数派はありません。Almide では上限つきの版を `_max` の接尾辞で表します。
+- (b) native と wasm で、上限の判定と err の文言を同じにします。
+- (d) 意味変更（256 MiB を超える展開が err になる）と追加 3。256 MiB を超える正当な展開は `_max` で書けます。epoch 15 の `breaks` に入れます。
+- issue: #4020
+
 ## L3: 関数表
 
 | 関数 | シグネチャ(現行, mut 表示) | 他言語の主な綴り | 判定 | 案 |
 |---|---|---|---|---|
 | `compress` | `effect zlib.compress(data: Bytes) -> Bytes` | Python `zlib.compress` / Erlang `:zlib.compress` / Node `deflateSync` | 据え置き | R-zlib-03 |
 | `compress_level` | `effect zlib.compress_level(data: Bytes, level: Int) -> Bytes` | Python `compress(data, level)` / Go `NewWriterLevel` | 据え置き | R-zlib-03 |
-| `decompress` | `effect zlib.decompress(data: Bytes) -> Bytes` | Python `zlib.decompress` / Erlang `:zlib.uncompress` / Node `inflateSync` | 意味変更（effect を外し、`fn … -> Result[Bytes, String]` にする） | R-zlib-02 |
+| `decompress` | `effect zlib.decompress(data: Bytes) -> Bytes` | Python `zlib.decompress` / Erlang `:zlib.uncompress` / Node `inflateSync` | 意味変更（effect を外し、`fn … -> Result[Bytes, String]` にする。出力が 256 MiB を超えたら err） | R-zlib-02、R-zlib-04 |
 | `deflate` | `effect zlib.deflate(data: Bytes) -> Bytes` | Node `deflateRawSync` / Erlang `:zlib.zip` / Go `flate.NewWriter` | 据え置き | R-zlib-03 |
 | `deflate_level` | `effect zlib.deflate_level(data: Bytes, level: Int) -> Bytes` | Go `flate.NewWriter(w, level)` | 据え置き | R-zlib-03 |
-| `inflate` | `effect zlib.inflate(data: Bytes) -> Bytes` | Node `inflateRawSync` / Erlang `:zlib.unzip` / Go `flate.NewReader` | 意味変更（effect を外し、`fn … -> Result[Bytes, String]` にする） | R-zlib-02 |
+| `inflate` | `effect zlib.inflate(data: Bytes) -> Bytes` | Node `inflateRawSync` / Erlang `:zlib.unzip` / Go `flate.NewReader` | 意味変更（effect を外し、`fn … -> Result[Bytes, String]` にする。出力が 256 MiB を超えたら err） | R-zlib-02、R-zlib-04 |
 | `gzip` | `effect zlib.gzip(data: Bytes) -> Bytes` | Python `gzip.compress` / Node `gzipSync` / Erlang `:zlib.gzip` | 据え置き | R-zlib-03 |
-| `gunzip` | `effect zlib.gunzip(data: Bytes) -> Bytes` | Python `gzip.decompress` / Node `gunzipSync` / Erlang `:zlib.gunzip` | 意味変更（effect を外し、`fn … -> Result[Bytes, String]` にする） | R-zlib-02 |
+| `gunzip` | `effect zlib.gunzip(data: Bytes) -> Bytes` | Python `gzip.decompress` / Node `gunzipSync` / Erlang `:zlib.gunzip` | 意味変更（effect を外し、`fn … -> Result[Bytes, String]` にする。出力が 256 MiB を超えたら err） | R-zlib-02、R-zlib-04 |
 | `crc32` | `zlib.crc32(data: Bytes) -> Int` | Go `crc32.ChecksumIEEE` / Python `zlib.crc32` / Erlang `crc32` | 撤去 → `hash.crc32` | R-zlib-01 |
 | `adler32` | `zlib.adler32(data: Bytes) -> Int` | Go `adler32.Checksum` / Python `zlib.adler32` | 撤去 → `hash.adler32` | R-zlib-01 |
+| `decompress_max` | （追加）`fn zlib.decompress_max(data: Bytes, max_len: Int) -> Result[Bytes, String]` | Python `max_length` / Node `maxOutputLength` | 追加 | R-zlib-04 |
+| `inflate_max` | （追加）`fn zlib.inflate_max(data: Bytes, max_len: Int) -> Result[Bytes, String]` | Python `max_length` / Node `maxOutputLength` | 追加 | R-zlib-04 |
+| `gunzip_max` | （追加）`fn zlib.gunzip_max(data: Bytes, max_len: Int) -> Result[Bytes, String]` | Python `max_length` / Node `maxOutputLength` | 追加 | R-zlib-04 |
