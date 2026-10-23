@@ -1,0 +1,19 @@
+// A callback parameter that shares a fallible top-level fn's name is the
+// parameter, not that fn: `list.filter(xs, f)` below stays the plain form. The
+// bundled stdlib bodies are checked beside this file, so the top-level `f`
+// once also retyped `string.filter`'s own `f` and the native build refused.
+fn f(n: Int) -> Int! = {
+  let d = n + 1
+  d
+}
+
+fn keep(xs: List[Int], f: (Int) -> Bool) -> List[Int] = list.filter(xs, f)
+
+test "a parameter named like a fallible fn keeps the plain HOF form" {
+  assert_eq(keep([1, 2, 3], (x) => x > 1), [2, 3])
+  assert_eq(f(1) ?? 0, 2)
+}
+
+test "a stdlib body whose callback parameter shares the name still builds" {
+  assert_eq(string.filter("a1b2", (c) => string.is_digit(c)), "12")
+}
