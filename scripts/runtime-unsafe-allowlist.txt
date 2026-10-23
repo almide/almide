@@ -1,0 +1,16 @@
+# Every `unsafe` in runtime/rs/src that is allowed to exist (#4007).
+# Format: <count> <file> <category> — <why it cannot be safe Rust yet>
+# A count is the number of CODE lines in the file that contain the word
+# `unsafe` (comment lines are not counted). Shrink-only: lower a count, or
+# delete the line, in the same PR that removes a site.
+#
+# Categories:
+#   os-ffi      a call into libc / Win32 that std does not wrap
+#   blas-ffi    the optional BLAS fast path (cfg(have_blas))
+#   fan-sync    the fan work-sharing gate (lifetime erasure, raw parent links)
+#   raw-ptr     the RawPtr bridge — UNSOUND today, see #4043
+12 runtime/rs/src/http.rs os-ffi — pthread_self/pthread_kill, signal, _exit, SetConsoleCtrlHandler for serve shutdown
+8 runtime/rs/src/list.rs os-ffi+fan-sync — clock_gettime(CLOCK_THREAD_CPUTIME_ID) has no std form; the fan gate erases a borrow's lifetime and follows raw parent pointers
+3 runtime/rs/src/process.rs os-ffi — signal(SIGPIPE) and waitpid(WNOHANG|WUNTRACED) have no std form
+2 runtime/rs/src/bytes.rs raw-ptr — from_raw_ptr / copy_to_ptr trust a caller-supplied length (#4043)
+1 runtime/rs/src/matrix.rs blas-ffi — cblas_dgemm under cfg(have_blas)
