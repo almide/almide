@@ -24,6 +24,56 @@ ships only the `rocq` driver, so CI provides `coqc`/`coqchk` as thin shims over
 `rocq compile` / `rocq check` (the latter IS the Rocq Proof Checker — the
 independent De Bruijn re-check is genuine).
 
+## Build and run toolchain (#4010)
+
+The proofs below are about Almide's checkers and models. The bytes that run
+are produced and executed by tools no proof here covers, so each is trusted
+by name and version. `scripts/check-toolchain-pins.sh` keeps this list equal
+to what the workflows and `Cargo.toml` actually use
+(`scripts/toolchain-pins.txt` is the machine-readable copy). A version used
+but not listed fails, and so does a version listed but no longer used.
+
+| component | version | what it does | what checks it independently |
+|---|---|---|---|
+| rustc | **1.96.0** (`RUST_TOOLCHAIN`) | builds the compiler, and compiles the native leg's generated Rust | nothing proves it. The native leg is compared byte for byte with the wasm leg on the contract corpus |
+| LLVM | the copy inside that rustc (the 22.1 series for 1.96; `rustc -vV` prints it) | native code generation | as rustc |
+| rustc (Ferrocene) | **1.95.0** | builds the generated Rust of the run-manifest corpus under the ISO 26262 qualified toolchain (#573) | the qualification is Ferrocene's |
+| rustc nightly | **nightly-2026-08-01**, **nightly-2025-06-01** | coverage instrumentation only (branch coverage, MC/DC); nothing shipped is built with them | — |
+| wasmtime (embedded crate) | **49.0.4** | `almide run` / `almide test` on wasm, the fan workers | the stock CLI runs below |
+| wasmtime (stock CLI in CI) | **49.0.1**, **27.0.0** | runs built `.wasm` artifacts in the CI gates | 27.0.0 is the runtime `tests/wasm_vm_parity_test.rs` (REQ-VM-9) compares against |
+| almide-wasm-vm | this tree | a second, independent wasm interpreter (standard library only, no `unsafe`) for the Critical-profile surface | REQ-VM-9: every `spec/wasm_cross` fixture inside its five WASI imports runs equal to the stock runtime, and to native when it passes `--profile critical` |
+| OS, libc, CPU | the CI runners' and the user's | everything | accepted, not checked |
+
+**Two engines.** wasm execution does not rest on wasmtime alone.
+`almide-wasm-vm` shares no code with wasmtime, and REQ-VM-9 diffs it against
+the stock runtime on the whole `spec/wasm_cross` corpus. Its scope is the
+Critical-profile surface: an artifact that imports more than its five WASI
+calls (fs, env, args) is refused at load, so for those artifacts wasmtime
+remains the only engine.
+
+**Floating steps (debt).** Nine CI steps install Rust without a version and
+run whatever `stable` or `nightly` is that day. Among them are the three
+commissioned wasm gate jobs, which include REQ-VM-9, the perf ratchets, and
+`almide-gates`. They are listed by job in `scripts/toolchain-pins.txt`. A new
+one fails the gate, and pinning one requires deleting its line. They are not
+pinned yet because pinning moves the numbers the perf and coverage ratchets
+measure. That move should be its own change.
+
+**On a toolchain bump.** Raising `RUST_TOOLCHAIN` or a wasmtime version
+changes a trusted component, so before it lands:
+
+1. Read the upstream issues labelled `I-unsound` (rust-lang/rust) and the
+   security advisories for wasmtime that are fixed or introduced between the
+   two versions. Write in the PR which of them the generated Rust or the
+   emitted wasm can reach. The generated Rust keeps its `unsafe` to
+   `runtime/rs` and two compiler-emitted preludes (the region arena and the
+   SIGPIPE setup, #4007), so a soundness bug in safe-Rust checking is the
+   case that matters most.
+2. Run the cross-target corpus and REQ-VM-9 on the new version. A difference
+   is a finding, not noise.
+3. Update `scripts/toolchain-pins.txt` and this table in the same PR. The
+   gate refuses the PR otherwise.
+
 ## The irreducible base (cannot be discharged by proof — "消えない底")
 
 These four are trusted by necessity; everything else is proven against them:

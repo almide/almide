@@ -97,9 +97,13 @@
 # are UNCLASSIFIED until ported (79 -> 83); gen-mutation-score.sh has read
 # 41/41 on every sweep since its 2026-09-22 stamp, so no real run has moved
 # its measurand (0 -> 1). Both are enumerated gates, not new ones.
+# The uncompensated count rose 19 -> 21 on 2026-10-23 (#4010): the toolchain
+# pins gate and its negative control land naming what they do not see — a
+# toolchain installed by a means they do not parse, and drifts the controls
+# do not try.
 #
 # unmapped_blind_ceiling = "108"
-# uncompensated_blind_ceiling = "19"
+# uncompensated_blind_ceiling = "21"
 #
 # History of the unverified ceiling: it moved 0 -> 2 when enumerating the
 # Almide gates (#2128) brought `output-parity` and `fuzz-track-record` INTO the
@@ -826,6 +830,26 @@ evidence = "str-twin ratchet landing (2026-08-17, #1460 item 2): freezes the std
 measures = "count of `_str`-suffixed stdlib twins, against scripts/str-twin-baseline.txt"
 varies = "2026-08-16 measured 119, 2026-08-17 120 (the creep the ratchet froze); 2026-08-20 eb6529a45 raised the baseline 119 -> 120 on purpose for map_upsert_str (C-301)"
 blind = "UNMAPPED"
+
+[[gate]]
+path = "scripts/check-toolchain-pins.sh"
+reads = "scalar"
+wired_by = ".github/workflows/ci.yml"
+class = "NEGATIVE_TESTED"
+evidence = "#4010 landing (2026-10-23): scripts/check-toolchain-pins-negative.sh runs on every CI run over a scratch copy of the workflows, the embedded engine's Cargo.toml, the pins list and TRUSTED_BASE.md. A new job installing rustc with no version, an unlisted rustc version, the embedded wasmtime bumped alone, an unlisted stock wasmtime CLI, a floating step whose list line was deleted, a list line for a step that no longer exists, and the ledger no longer naming a pinned version each go red. The committed tree and a new job pinned to RUST_TOOLCHAIN stay green"
+measures = "the set of rustc / wasmtime versions and version-less rustc steps the workflows and crates/almide-wasm-run/Cargo.toml use, against scripts/toolchain-pins.txt, and each listed version's presence in proofs/TRUSTED_BASE.md"
+varies = "develop 703bbf298 reads 7 pinned versions (rustc 1.96.0, 1.95.0, nightly-2026-08-01, nightly-2025-06-01; wasmtime crate 49.0.4; stock CLI 49.0.1 and 27.0.0) and 9 floating steps"
+blind = "a toolchain installed some other way (a container image, apt, a setup action other than dtolnay/rust-toolchain, a wasmtime install step not named for wasmtime) -> UNCOMPENSATED"
+
+[[gate]]
+path = "scripts/check-toolchain-pins-negative.sh"
+reads = "scalar"
+wired_by = ".github/workflows/ci.yml"
+class = "EXERCISED"
+evidence = "#4010 landing (2026-10-23): nine-mode exercise on every run — two green controls and seven red ones against check-toolchain-pins.sh; the script exits 1 if any verdict comes out the other way, so a pins gate that stops failing turns this red"
+measures = "the exit code check-toolchain-pins.sh gives nine scratch trees"
+varies = "the seven forged trees read exit 1 and the two controls read exit 0 in the same run"
+blind = "a way to drift a version the nine trees do not try (a dtolnay ref that is itself a version, an inputs.toolchain default) -> UNCOMPENSATED"
 
 [[gate]]
 path = "scripts/check-dep-shaped-skips.sh"
