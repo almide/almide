@@ -17,14 +17,10 @@ wasmtime-cli 27.0.0 — the stock runtime of the almide-gates job and the three 
 #
 # Steps that name no version run whatever the channel is that day. Each is
 # debt: pin it to RUST_TOOLCHAIN (or a dated nightly) and delete its line.
-# Pinning can move a measured number (perf, coverage) at the same time, which
-# is why these were not pinned in the PR that listed them.
-floating ci.yml:shard-coverage stable — counts the test shards; builds nothing it judges
-floating ci.yml:almide-gates stable — builds the gate tools that judge the release artifact (parity goldens, wasm gates)
+# What is left measures a number (perf, coverage, the runtime ratio) that a
+# pin would move, or is Miri, which needs a dated nightly that ships it.
 floating ci.yml:miri-almide-str nightly — Miri needs nightly; a dated pin needs a date whose nightly ships the miri component
 floating ci.yml:perf-ratchet stable — the native/Rust ratio is measured with this rustc; pinning moves the baseline
 floating ci.yml:perf-profile-arm stable — the aarch64 perf ratio, same as perf-ratchet
-floating ci.yml:commissioned-wasm-gates stable — builds the commissioned wasm gates, including REQ-VM-9's second-engine parity
-floating ci.yml:commissioned-wasm-gates-root stable — the release-only root tests of the same gates
 floating ci.yml:commissioned-wasm-gates-probes stable — target availability and the runtime ratio
 floating fuzz-nightly.yml:coverage-ratchet stable — the structural coverage ratchet's stable job
