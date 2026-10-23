@@ -1,4 +1,4 @@
 fn main() -> Unit = {
   let s = "  hi  "
-  println(s.shout())
+  println(s.holler())
 }
