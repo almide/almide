@@ -75,7 +75,7 @@
 #                      every stamped row is to be re-inspected before each final
 #                      release for that (a manual GCE run: no credentials in CI)
 #
-# uninspected_ceiling = "0"
+# uninspected_ceiling = "39"
 
 [[fn]]
 name = "args.flag"
@@ -12671,3 +12671,276 @@ parity = "PASS: seed 1792734238, 200 programs; 200 program(s) call it, 174 of th
 complexity = "PASS: call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=256..512 2.049e7/4.097e7/8.193e7/1.639e8/3.277e8 fit n (rms 0.0%) moved 5.120e6/1.024e7/2.048e7/4.096e7/8.192e7B fit n (rms 0.0%) wall 0.005/0.005/0.005/0.015/0.025s wasm k=256..512 5.126e7/1.025e8/2.049e8/4.097e8/8.193e8 fit n (rms 0.0%) moved 0.000e0/0.000e0/0.000e0/0.000e0/0.000e0B fit 1 (rms 0.0%) wall 0.005/0.005/0.010/0.025/0.051s (order n ok)"
 alloc = "PASS: call live=0"
 diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
+
+[[fn]]
+name = "args.has_flag"
+sig = "effect (name: String) -> Bool ! String"
+class = "effect"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bool.compare"
+sig = "(a: Bool, b: Bool) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bool.parse"
+sig = "(s: String) -> Result[Bool, String]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bool.to_string"
+sig = "(b: Bool) -> String"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "datetime.now_ms"
+sig = "effect () -> Int ! String"
+class = "effect"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "hash.adler32"
+sig = "(b: Bytes) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "hash.crc32"
+sig = "(b: Bytes) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "hash.md5"
+sig = "(b: Bytes) -> Bytes"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "hash.md5_hex"
+sig = "(b: Bytes) -> String"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "hash.sha1"
+sig = "(b: Bytes) -> Bytes"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "hash.sha1_hex"
+sig = "(b: Bytes) -> String"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "hash.sha512"
+sig = "(b: Bytes) -> Bytes"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "hash.sha512_hex"
+sig = "(b: Bytes) -> String"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "math.acos"
+sig = "(x: Float) -> Float"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "math.acosh"
+sig = "(x: Float) -> Float"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "math.asin"
+sig = "(x: Float) -> Float"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "math.asinh"
+sig = "(x: Float) -> Float"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "math.atan2"
+sig = "(y: Float, x: Float) -> Float"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "math.atanh"
+sig = "(x: Float) -> Float"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "math.cbrt"
+sig = "(x: Float) -> Float"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "math.cosh"
+sig = "(x: Float) -> Float"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "math.expm1"
+sig = "(x: Float) -> Float"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "math.hypot"
+sig = "(a: Float, b: Float) -> Float"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "math.log1p"
+sig = "(x: Float) -> Float"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "math.sinh"
+sig = "(x: Float) -> Float"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "matrix.concat_rows"
+sig = "(xs: List[Matrix]) -> Matrix"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "matrix.zip_with"
+sig = "(a: Matrix, b: Matrix, f: (Float, Float) -> Float) -> Matrix"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "path.components"
+sig = "(path: String) -> List[String]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "path.relative_to"
+sig = "(path: String, base: String) -> Option[String]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "path.with_extension"
+sig = "(path: String, ext: String) -> String"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "random.next_choice"
+sig = "(rng: Rng, xs: List[A]) -> (Option[A], Rng)"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "random.next_float"
+sig = "(rng: Rng) -> (Float, Rng)"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "random.next_int"
+sig = "(rng: Rng, min: Int, max: Int) -> (Int, Rng)"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "random.next_shuffle"
+sig = "(rng: Rng, xs: List[A]) -> (List[A], Rng)"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "random.seeded"
+sig = "(seed: Int) -> Rng"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "url.decode_form"
+sig = "(s: String) -> Result[String, String]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "url.encode_form"
+sig = "(s: String) -> String"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "url.parse_query"
+sig = "(query: String) -> Result[List[(String, String)], String]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "url.resolve"
+sig = "(base: Url, ref: String) -> Result[Url, String]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
