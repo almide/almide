@@ -102,7 +102,7 @@
 # does not reach, and the whole wasm leg.
 #
 # unmapped_blind_ceiling = "108"
-# uncompensated_blind_ceiling = "21"
+# uncompensated_blind_ceiling = "24"
 #
 # History of the unverified ceiling: it moved 0 -> 2 when enumerating the
 # Almide gates (#2128) brought `output-parity` and `fuzz-track-record` INTO the
@@ -829,6 +829,16 @@ evidence = "str-twin ratchet landing (2026-08-17, #1460 item 2): freezes the std
 measures = "count of `_str`-suffixed stdlib twins, against scripts/str-twin-baseline.txt"
 varies = "2026-08-16 measured 119, 2026-08-17 120 (the creep the ratchet froze); 2026-08-20 eb6529a45 raised the baseline 119 -> 120 on purpose for map_upsert_str (C-301)"
 blind = "UNMAPPED"
+
+[[gate]]
+path = "scripts/asan-generated.sh"
+reads = "scalar"
+wired_by = ".github/workflows/miri-nightly.yml"
+class = "NEGATIVE_TESTED"
+evidence = "#4009 landing (2026-10-23): every invocation first runs a control, a 64-byte ffi.read through a 4-byte buffer's address (the #4043 shape), and refuses to judge unless AddressSanitizer reports it as a heap-buffer-overflow"
+measures = "the number of spec/wasm_cross programs whose generated native crate, built with -Zsanitizer=address, gets an AddressSanitizer report, plus the control's verdict"
+varies = "develop 703bbf298 + the Miri guards, aarch64-apple-darwin, nightly-2026-08-01: over all 958 programs 955 ok and 3 reports, all three allocation-size-too-big on the OOM fixtures' deliberate huge try_reserve (not memory errors); with allocator_may_return_null=1 those 3 reach their defined abort and report nothing"
+blind = "a memory error the corpus does not reach -> UNCOMPENSATED; an out-of-bounds access that lands inside another live allocation, past the redzone -> UNCOMPENSATED; the wasm leg -> UNCOMPENSATED"
 
 [[gate]]
 path = "scripts/miri-generated.sh"
