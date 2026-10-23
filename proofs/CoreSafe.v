@@ -4,7 +4,9 @@
    Until now the spine reasoned about witnesses the compiler emits; nothing
    said what a source program MEANS. This file fixes a small core of Almide
    — ints, bools, lists of ints with value semantics, `let`, assignment,
-   element store, `if`, `while`, indexing with its bounds check — gives it a
+   element store, `if`, `while`, indexing with its bounds check, and
+   functions (one parameter, an expression body, recursion allowed) — gives
+   it a
    big-step semantics that EMITS the heap trace of MemorySafe.v, a type
    system, and proves:
 
@@ -22,7 +24,8 @@
    CowSafety.v).
 
    HONEST SCOPE. A core, not the language: no closures, records, variants,
-   strings, maps, calls or effects; elements are ints; a `let` binds a fresh
+   strings, maps or effects; a function takes one argument and its body is
+   an expression; elements are ints; a `let` binds a fresh
    name (a front end renames shadowing away); no block is freed (the RC
    discipline that frees them is the ownership checker's, and its TEMPORAL
    guarantee is MemorySafe.rc_check_gives_temporal); only terminating and
@@ -48,12 +51,20 @@ Definition Var := nat.
 
 Inductive binop := Add | Lt | Make | Index.
 
+Inductive ty := TInt | TBool | TList.
+
 Inductive expr :=
   | EInt (z : Z)
   | EBool (b : bool)
   | EVar (x : Var)
   | EBin (op : binop) (e1 e2 : expr)   (* Make n v = list.repeat(v, n); Index l i = l[i] *)
-  | ELen (e : expr).
+  | ELen (e : expr)
+  | EIf (c e1 e2 : expr)               (* if c then e1 else e2 *)
+  | ECall (f : nat) (a : expr).        (* a call of function f on one argument *)
+
+(* A function: one parameter, an expression body, a declared signature.
+   Recursion (direct or mutual) is a call to a function in the same table. *)
+Record FunDef := { fparam : Var; fpty : ty; fbody : expr; frty : ty }.
 
 Inductive stmt :=
   | SSkip
@@ -95,23 +106,42 @@ Inductive binop_step : binop -> val -> val -> nat -> list Ev -> res -> Prop :=
   | BIndexOut : forall b vs i n, ~ (0 <= i < Z.of_nat (length vs)) ->
       binop_step Index (VList b vs) (VInt i) n [] Abort.
 
-Inductive eval (r : Env) : nat -> expr -> list Ev -> res -> Prop :=
-  | EvInt : forall n z, eval r n (EInt z) [] (Val (VInt z) n)
-  | EvBool : forall n b, eval r n (EBool b) [] (Val (VBool b) n)
-  | EvVar : forall n x v, r x = Some v -> eval r n (EVar x) [] (Val v n)
-  | EvBin : forall n op e1 e2 t1 v1 n1 t2 v2 n2 t3 o,
+(* The program's functions, by name. Everything below is stated for an
+   arbitrary table; the theorem asks only that every body is well typed. *)
+Section Calls.
+Variable funs : nat -> option FunDef.
+
+Definition empty_env : Env := fun _ => None.
+
+Inductive eval : Env -> nat -> expr -> list Ev -> res -> Prop :=
+  | EvInt : forall r n z, eval r n (EInt z) [] (Val (VInt z) n)
+  | EvBool : forall r n b, eval r n (EBool b) [] (Val (VBool b) n)
+  | EvVar : forall r n x v, r x = Some v -> eval r n (EVar x) [] (Val v n)
+  | EvBin : forall r n op e1 e2 t1 v1 n1 t2 v2 n2 t3 o,
       eval r n e1 t1 (Val v1 n1) -> eval r n1 e2 t2 (Val v2 n2) ->
       binop_step op v1 v2 n2 t3 o ->
       eval r n (EBin op e1 e2) (t1 ++ t2 ++ t3) o
-  | EvBinAbort1 : forall n op e1 e2 t1,
+  | EvBinAbort1 : forall r n op e1 e2 t1,
       eval r n e1 t1 Abort -> eval r n (EBin op e1 e2) t1 Abort
-  | EvBinAbort2 : forall n op e1 e2 t1 v1 n1 t2,
+  | EvBinAbort2 : forall r n op e1 e2 t1 v1 n1 t2,
       eval r n e1 t1 (Val v1 n1) -> eval r n1 e2 t2 Abort ->
       eval r n (EBin op e1 e2) (t1 ++ t2) Abort
-  | EvLen : forall n e t b vs n1,
+  | EvLen : forall r n e t b vs n1,
       eval r n e t (Val (VList b vs) n1) ->
       eval r n (ELen e) (t ++ [ELoad b 0 HDR RL]) (Val (VInt (Z.of_nat (length vs))) n1)
-  | EvLenAbort : forall n e t, eval r n e t Abort -> eval r n (ELen e) t Abort.
+  | EvLenAbort : forall r n e t, eval r n e t Abort -> eval r n (ELen e) t Abort
+  | EvIfT : forall r n c e1 e2 t n1 t1 o,
+      eval r n c t (Val (VBool true) n1) -> eval r n1 e1 t1 o -> eval r n (EIf c e1 e2) (t ++ t1) o
+  | EvIfF : forall r n c e1 e2 t n1 t2 o,
+      eval r n c t (Val (VBool false) n1) -> eval r n1 e2 t2 o -> eval r n (EIf c e1 e2) (t ++ t2) o
+  | EvIfAbort : forall r n c e1 e2 t, eval r n c t Abort -> eval r n (EIf c e1 e2) t Abort
+  (* A call: the argument, then the body in a fresh environment holding only
+     the parameter. The body's outcome — a value or an abort — is the call's. *)
+  | EvCall : forall r n f d a t1 v n1 t2 o,
+      funs f = Some d -> eval r n a t1 (Val v n1) ->
+      eval (upd empty_env (fparam d) v) n1 (fbody d) t2 o ->
+      eval r n (ECall f a) (t1 ++ t2) o
+  | EvCallAbort : forall r n f a t1, eval r n a t1 Abort -> eval r n (ECall f a) t1 Abort.
 
 Inductive sres := Normal (r : Env) (n : nat) | SAbort.
 
@@ -162,8 +192,6 @@ Inductive exec : Env -> nat -> stmt -> list Ev -> sres -> Prop :=
 
 (* ── Types ──────────────────────────────────────────────────────────────── *)
 
-Inductive ty := TInt | TBool | TList.
-
 Definition Ctx := Var -> option ty.
 Definition tupd (g : Ctx) (x : Var) (t : ty) : Ctx := fun y => if Nat.eqb y x then Some t else g y.
 
@@ -179,7 +207,9 @@ Inductive etyped (g : Ctx) : expr -> ty -> Prop :=
   | TyVar : forall x t, g x = Some t -> etyped g (EVar x) t
   | TyBin : forall op e1 e2 t1 t2 t,
       optype op t1 t2 t -> etyped g e1 t1 -> etyped g e2 t2 -> etyped g (EBin op e1 e2) t
-  | TyLen : forall e, etyped g e TList -> etyped g (ELen e) TInt.
+  | TyLen : forall e, etyped g e TList -> etyped g (ELen e) TInt
+  | TyEIf : forall c e1 e2 t, etyped g c TBool -> etyped g e1 t -> etyped g e2 t -> etyped g (EIf c e1 e2) t
+  | TyCall : forall f d a, funs f = Some d -> etyped g a (fpty d) -> etyped g (ECall f a) (frty d).
 
 Inductive styped : Ctx -> stmt -> Ctx -> Prop :=
   | TySkip : forall g, styped g SSkip g
@@ -191,6 +221,12 @@ Inductive styped : Ctx -> stmt -> Ctx -> Prop :=
   | TyIf : forall g c s1 g1 s2 g2, etyped g c TBool -> styped g s1 g1 -> styped g s2 g2 ->
       styped g (SIf c s1 s2) g
   | TyWhile : forall g c s g1, etyped g c TBool -> styped g s g1 -> styped g (SWhile c s) g.
+
+(* Every function's body is well typed under its parameter alone. *)
+Definition funs_ok : Prop :=
+  forall f d, funs f = Some d -> etyped (fun y => if Nat.eqb y (fparam d) then Some (fpty d) else None) (fbody d) (frty d).
+
+Hypothesis Hfuns : funs_ok.
 
 (* ── The invariant ──────────────────────────────────────────────────────── *)
 
@@ -448,6 +484,35 @@ Proof.
     intros vv nn Ev. injection Ev as <- <-. split; [exact N1 |]. split; [exact W1 | exact I].
   - (* EvLenAbort *)
     destruct (IHHev g TList h ltac:(eassumption) E W0) as [S1 [G1 _]]. split; [exact S1 |]. split; [exact G1 | discriminate].
+  - (* EvIfT *)
+    destruct (IHHev1 g TBool h ltac:(eassumption) E W0) as [S1 [G1 R1]].
+    destruct (R1 (VBool true) n1 eq_refl) as [N1 [W1 _]].
+    destruct (IHHev2 g ty _ ltac:(eassumption) (envok_mono g r h _ n n1 G1 N1 E) W1) as [S2 [G2 R2]].
+    rewrite holds_app, fold_left_app. split; [split; [exact S1 | exact S2] |].
+    split; [exact (grows_trans _ _ _ G1 G2) |].
+    intros vv nn Ev. destruct (R2 vv nn Ev) as [N2 R]. split; [lia | exact R].
+  - (* EvIfF *)
+    destruct (IHHev1 g TBool h ltac:(eassumption) E W0) as [S1 [G1 R1]].
+    destruct (R1 (VBool false) n1 eq_refl) as [N1 [W1 _]].
+    destruct (IHHev2 g ty _ ltac:(eassumption) (envok_mono g r h _ n n1 G1 N1 E) W1) as [S2 [G2 R2]].
+    rewrite holds_app, fold_left_app. split; [split; [exact S1 | exact S2] |].
+    split; [exact (grows_trans _ _ _ G1 G2) |].
+    intros vv nn Ev. destruct (R2 vv nn Ev) as [N2 R]. split; [lia | exact R].
+  - (* EvIfAbort *)
+    destruct (IHHev g TBool h ltac:(eassumption) E W0) as [S1 [G1 _]]. split; [exact S1 |]. split; [exact G1 | discriminate].
+  - (* EvCall: the callee runs on its own environment, typed by its signature *)
+    match goal with Hd : funs f = Some d, Hd' : funs f = Some ?d0 |- _ => rewrite Hd in Hd'; injection Hd' as <- end.
+    destruct (IHHev1 g (fpty d) h ltac:(eassumption) E W0) as [S1 [G1 R1]].
+    destruct (R1 v n1 eq_refl) as [N1 [W1 V1]].
+    set (h1 := fold_left step t1 h) in *.
+    assert (Ec : envok (fun y => if Nat.eqb y (fparam d) then Some (fpty d) else None) (upd empty_env (fparam d) v) h1 n1).
+    { intros y ty0 Hy. unfold upd. destruct (Nat.eqb y (fparam d)); [injection Hy as <-; eauto | discriminate]. }
+    destruct (IHHev2 _ (frty d) h1 (Hfuns f d H) Ec W1) as [S2 [G2 R2]].
+    rewrite holds_app, fold_left_app. fold h1. split; [split; [exact S1 | exact S2] |].
+    split; [exact (grows_trans _ _ _ G1 G2) |].
+    intros vv nn Ev. destruct (R2 vv nn Ev) as [N2 R]. split; [lia | exact R].
+  - (* EvCallAbort *)
+    destruct (IHHev g _ h ltac:(eassumption) E W0) as [S1 [G1 _]]. split; [exact S1 |]. split; [exact G1 | discriminate].
 Qed.
 
 (* ── Statements ─────────────────────────────────────────────────────────── *)
@@ -615,7 +680,6 @@ Qed.
 
 (* ── The theorem ────────────────────────────────────────────────────────── *)
 
-Definition empty_env : Env := fun _ => None.
 Definition empty_ctx : Ctx := fun _ => None.
 
 (* `typed_core_memory_safe`: a well-typed core program, run from nothing,
@@ -629,12 +693,19 @@ Proof.
   assert (E0 : envok empty_ctx empty_env empty_heap 0) by (intros x ty H; discriminate).
   exact (proj1 (exec_safe empty_env 0 s t o Hx empty_ctx g' empty_heap Ht E0 W0)).
 Qed.
+End Calls.
+
 Print Assumptions typed_core_memory_safe.
 
 (* ── Controls ───────────────────────────────────────────────────────────── *)
 
 (* The check is what the theorem rests on: the load an unchecked `xs[5]`
    would emit against a one-element list is NOT MemorySafe. *)
+(* A program with no functions. *)
+Definition no_funs : nat -> option FunDef := fun _ => None.
+Lemma no_funs_ok : funs_ok no_funs.
+Proof. intros f d H; discriminate. Qed.
+
 Example unchecked_index_not_safe :
   ~ MemorySafe [EAlloc 0%nat (bsize 1) RL; EStore 0%nat 0 (bsize 1) RL; ELoad 0%nat (HDR + 5 * W) W RL].
 Proof.
@@ -645,23 +716,49 @@ Print Assumptions unchecked_index_not_safe.
 
 (* The type system is what keeps a list where an int is expected: `5[0]`
    (an int indexed) has no type, and no rule evaluates it. *)
-Example int_index_untyped : forall g t, ~ etyped g (EBin Index (EInt 5) (EInt 0)) t.
-Proof. intros g t H. inversion H; subst. inversion H3; subst. inversion H5. Qed.
+Example int_index_untyped : forall fs g t, ~ etyped fs g (EBin Index (EInt 5) (EInt 0)) t.
+Proof.
+  intros fs g t H. inversion H as [| | | op e1 e2 t1 t2 t' Hop He1 He2 | | | ]; subst.
+  inversion Hop; subst. inversion He1.
+Qed.
 
 (* A run that the check aborts: `let xs = make(1, 7); xs[3] = 0` stops at
    the store's check, and its trace is still MemorySafe. *)
 Example aborting_run_is_safe :
   let s := SSeq (SLet 0%nat (EBin Make (EInt 1) (EInt 7))) (SSet 0%nat (EInt 3) (EInt 0)) in
-  exists t, exec empty_env 0 s t SAbort /\ MemorySafe t.
+  exists t, exec no_funs empty_env 0 s t SAbort /\ MemorySafe t.
 Proof.
   intro s.
-  assert (Ht : styped empty_ctx s (tupd empty_ctx 0%nat TList)).
-  { apply (TySeq _ _ (tupd empty_ctx 0%nat TList));
+  assert (Ht : styped no_funs empty_ctx s (tupd empty_ctx 0%nat TList)).
+  { apply (TySeq no_funs _ _ (tupd empty_ctx 0%nat TList));
       [apply TyLet; [reflexivity | eapply TyBin; [apply OMake | apply TyInt | apply TyInt]] |].
     apply TySet; [reflexivity | apply TyInt | apply TyInt]. }
   eexists. match goal with |- ?A /\ _ => assert (Hx : A) end.
   { eapply XSeq.
     - apply XLet. eapply EvBin; [apply EvInt | apply EvInt | apply BMake; lia].
     - eapply XSetOut; [reflexivity | apply EvInt | apply EvInt |]. simpl. lia. }
-  split; [exact Hx | exact (typed_core_memory_safe s _ _ _ Ht Hx)].
+  split; [exact Hx | exact (typed_core_memory_safe no_funs no_funs_ok s _ _ _ Ht Hx)].
+Qed.
+
+(* Recursion is in: function 0 counts its argument down to zero, calling
+   itself, and its table is well typed — so every program over it is
+   covered by typed_core_memory_safe. *)
+Definition count_down_def : FunDef :=
+  {| fparam := 0%nat; fpty := TInt;
+     fbody := EIf (EBin Lt (EVar 0%nat) (EInt 1)) (EInt 0)
+                  (ECall 0%nat (EBin Add (EVar 0%nat) (EInt (-1))));
+     frty := TInt |}.
+
+Definition count_down : nat -> option FunDef := fun f =>
+  match f with O => Some count_down_def | _ => None end.
+
+Example count_down_ok : funs_ok count_down.
+Proof.
+  intros f d H. destruct f as [| f]; [| discriminate]. injection H as <-. simpl.
+  apply TyEIf.
+  - eapply TyBin; [apply OLt | apply TyVar; reflexivity | apply TyInt].
+  - apply TyInt.
+  - change TInt with (frty count_down_def) at 2.
+    apply TyCall; [reflexivity |]. simpl.
+    eapply TyBin; [apply OAdd | apply TyVar; reflexivity | apply TyInt].
 Qed.
