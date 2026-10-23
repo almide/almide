@@ -491,6 +491,17 @@ impl Checker {
                     "== requires both operands to have the same type — convert one side \
                      (or compare the payloads after unwrapping)",
                     format!("operator {}", op)).with_code("E037"));
+            } else if scalar_kind_mismatch(&lc, &rc) {
+                // #4018: two concrete scalars of different kinds (`1 == "1"`,
+                // `true == 0`) passed check the same way and were refused only
+                // by rustc E0308 natively and a ty-mismatch wall on wasm.
+                // Numeric widths are left to the literal-typing rules: only
+                // kinds that no coercion relates are reported.
+                self.emit(super::err(
+                    format!("operator '{}' compares {} with {}", op, lc.display(), rc.display()),
+                    "== requires both operands to have the same type — convert one side \
+                     (`int.to_string(n)`, `int.parse(s)`)",
+                    format!("operator {}", op)).with_code("E037"));
             }
             // #1116: `none == none` (both sides `Option[?0]`, never pinned)
             // passed check and died as rustc E0282. Queue the unified operand
