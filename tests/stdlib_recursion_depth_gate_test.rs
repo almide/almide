@@ -84,6 +84,8 @@ const BOUNDED: &[(&str, &str, &str, &str)] = &[
     ("json_path.almd", "__jpr_pairs", "json_path_rm_go", PATH_SEGMENTS),
     ("json_path.almd", "json_path_rm_field", "__jpr_pairs", PATH_SEGMENTS),
     ("json_path.almd", "json_path_rm_index", "__jpr_items", PATH_SEGMENTS),
+    ("list.almd", "__fallible_sort_with", "__fallible_sort_with", HALVING),
+    ("list.almd", "sort_with", "sort_with", HALVING),
     ("list_to_string.almd", "__lts_fill_digits", "__lts_fill_digits", DIGITS),
     ("list_to_string.almd", "__lts_fill_neg", "__lts_fill_neg", DIGITS),
     ("map_to_string.almd", "__mts_fill_digits", "__mts_fill_digits", DIGITS),
