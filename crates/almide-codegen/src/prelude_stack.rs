@@ -10,13 +10,15 @@
 //! lock, which a handler may not take — so a lower element's output that had
 //! not reached the fds yet is not printed (declared in C-196).
 
+// Under Miri the guard is not installed: `sigaction` and the alternate stack
+// are calls Miri cannot run, and Miri reports stack exhaustion itself (#4009).
 const STACK_GLUE: &str = r#"
 VIS fn almide_stack_guard_install() {
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[cfg(all(any(target_os = "linux", target_os = "macos"), not(miri)))]
     almide_stack_guard::install();
 }
 VIS fn almide_stack_guard_register() {
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[cfg(all(any(target_os = "linux", target_os = "macos"), not(miri)))]
     almide_stack_guard::register();
 }
 #[cfg(any(target_os = "linux", target_os = "macos"))]
