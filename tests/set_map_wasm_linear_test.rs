@@ -30,12 +30,15 @@ fn set_map_is_linear_on_wasm_and_keeps_its_answers() {
     let native = Command::new(env!("CARGO_BIN_EXE_almide")).arg("run").arg(&file).output().expect("native run");
     assert!(native.status.success(), "{}", String::from_utf8_lossy(&native.stderr));
     assert_eq!(String::from_utf8_lossy(&native.stdout), EXPECTED, "native");
-    // Warm the build cache so only the wasm run is timed.
+    // Warm the wasm build cache so only the run is timed: `check` builds no
+    // wasm, and a cold build of the program (seconds on a loaded runner) once
+    // timed past the bound on develop with set.map itself still linear.
     let warm = Command::new(env!("CARGO_BIN_EXE_almide"))
-        .arg("check")
+        .arg("run")
         .arg(&file)
+        .args(["--target", "wasm"])
         .output()
-        .expect("check");
+        .expect("warm wasm run");
     assert!(warm.status.success(), "{}", String::from_utf8_lossy(&warm.stderr));
     let t = Instant::now();
     let run = Command::new(env!("CARGO_BIN_EXE_almide"))
