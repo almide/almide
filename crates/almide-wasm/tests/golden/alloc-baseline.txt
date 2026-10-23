@@ -708,7 +708,7 @@
 70768	spec/wasm_cross/regex_captures_accumulator_release.almd
 74384	spec/wasm_cross/regex_engine.almd
 130592	spec/wasm_cross/regex_fuzz_batch.almd
-100998816	spec/wasm_cross/regex_linear_time.almd
+201408	spec/wasm_cross/regex_linear_time.almd
 67840244	spec/wasm_cross/regex_repetition_depth.almd
 ~	spec/wasm_cross/repeat_size_ceiling.almd
 65920	spec/wasm_cross/replace_empty_pat.almd
