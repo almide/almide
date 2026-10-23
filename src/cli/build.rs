@@ -563,6 +563,20 @@ fn cmd_build_wasi_rustc(rs_code: &str, output: &str, note: &str) {
 }
 
 
+/// #4008: the `Built` line's tail for a build that leaves the memory-safety
+/// guarantee — empty for one that does not. Names up to three places, the
+/// first an author reading the line would look at, and counts the rest.
+pub(super) fn guarantee_note(sites: &[String]) -> String {
+    match sites {
+        [] => String::new(),
+        _ => {
+            let shown = sites.iter().take(3).cloned().collect::<Vec<_>>().join("; ");
+            let more = if sites.len() > 3 { format!("; and {} more", sites.len() - 3) } else { String::new() };
+            format!(" — outside the memory-safety guarantee: {shown}{more}")
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -590,19 +604,5 @@ mod tests {
             cdylib_output_path(None, "pkg", Some("x86_64-pc-windows-gnu")),
             std::path::PathBuf::from("pkg.dll")
         );
-    }
-}
-
-/// #4008: the `Built` line's tail for a build that leaves the memory-safety
-/// guarantee — empty for one that does not. Names up to three places, the
-/// first an author reading the line would look at, and counts the rest.
-pub(super) fn guarantee_note(sites: &[String]) -> String {
-    match sites {
-        [] => String::new(),
-        _ => {
-            let shown = sites.iter().take(3).cloned().collect::<Vec<_>>().join("; ");
-            let more = if sites.len() > 3 { format!("; and {} more", sites.len() - 3) } else { String::new() };
-            format!(" — outside the memory-safety guarantee: {shown}{more}")
-        }
     }
 }

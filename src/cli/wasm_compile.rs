@@ -475,10 +475,15 @@ pub(crate) fn compile_to_wasm_bytes(file: &str, allow_unverified: bool, verified
     compile_to_wasm_bytes_surfaced(file, allow_unverified, verified, library_ok, embedded_leg).map(|(b, o, _, _)| (b, o))
 }
 
+/// What [`compile_to_wasm_bytes_surfaced`] returns: the bytes, the host ops,
+/// the host-visible surface, and the places the build leaves the
+/// memory-safety guarantee (#4008).
+pub(crate) type SurfacedWasm = (Vec<u8>, Vec<i32>, crate::cli::js_host::HostSurface, Vec<String>);
+
 /// [`compile_to_wasm_bytes`] plus the program's host-visible surface (the
 /// `pub fn` exports, the `@extern(wasm, ..)` imports, whether `main` exists),
 /// read from the IR before routing — what `--host js` marshals (#2265).
-pub(crate) fn compile_to_wasm_bytes_surfaced(file: &str, allow_unverified: bool, verified: bool, library_ok: bool, embedded_leg: bool) -> Result<(Vec<u8>, Vec<i32>, crate::cli::js_host::HostSurface, Vec<String>), ()> {
+pub(crate) fn compile_to_wasm_bytes_surfaced(file: &str, allow_unverified: bool, verified: bool, library_ok: bool, embedded_leg: bool) -> Result<SurfacedWasm, ()> {
     let (mut program, source_text, mut resolved, dep_paths) = parse_and_resolve_wasm(file)?;
     // Read off the source before the checker desugars it (#2659).
     let serve_shape = almide::serve_export::check_serve_shape(&program);
