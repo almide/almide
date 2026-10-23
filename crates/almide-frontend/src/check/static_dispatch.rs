@@ -122,6 +122,9 @@ impl Checker {
         // firewall (bare Int and cross-clock arguments are type errors at the
         // consuming heads).
         if module == "compute" || module == "duration" {
+            if field == "compare" {
+                return Some(self.resolve_time_compare(module, arg_tys));
+            }
             return Some(self.resolve_time_ctor(module, field, arg_tys));
         }
         // Codec convenience: `json.encode(t)` is String when `t` has `T.encode`.
@@ -172,6 +175,26 @@ impl Checker {
         }
         self.constrain(arg_tys[0].clone(), Ty::Int, "time constructor argument");
         Ty::Named(sym(ty_name), vec![])
+    }
+
+    /// `compute.compare(a, b)` / `duration.compare(a, b)` (R-duration-01,
+    /// R-compute-01): the function form of the clock's `Ord` — both operands of
+    /// the module's own clock, an Int answer. Lowering erases it to an Int
+    /// three-way compare of the two nanosecond counts.
+    fn resolve_time_compare(&mut self, module: &str, arg_tys: &[Ty]) -> Ty {
+        let ty_name = almide_lang::time_units::clock_type_of_module(module)
+            .expect("resolve_time_compare called for a non-clock module");
+        if arg_tys.len() != 2 {
+            self.emit(super::err(
+                format!("{}.compare() expects 2 arguments but got {}", module, arg_tys.len()),
+                format!("Usage: {}.compare(a, b)", module),
+                format!("call to {}.compare()", module)));
+            return Ty::Int;
+        }
+        for a in arg_tys {
+            self.constrain(Ty::Named(sym(ty_name), vec![]), a.clone(), "clock compare argument");
+        }
+        Ty::Int
     }
 
     fn resolve_fan_call(&mut self, field: &str, arg_tys: &[Ty]) -> Option<Ty> {
