@@ -1,0 +1,97 @@
+// math.asin / acos / atan2 / sinh / cosh / hypot / cbrt / expm1 / log1p /
+// asinh / acosh / atanh (R-math-02, R-math-04, R-math-05). The expected bits
+// are the vendored musl libm 0.2.16 kernels' answers (cbrt: FreeBSD s_cbrt.c),
+// which the pure-Almide bodies transcribe op for op on every target.
+fn bits(x: Float) -> Int = float.to_bits(x)
+
+// The one NaN a math function manufactures from non-NaN operands (C-055).
+fn fixed_nan() -> Int = 9221120237041090560
+
+test "asin and acos match the musl kernels" {
+  assert_eq(bits(math.asin(0.5)), 4602891378046628710)
+  assert_eq(bits(math.asin(-0.3)), -4624211562044524801)
+  assert_eq(bits(math.asin(1.0)), 4609753056924675352)
+  assert_eq(bits(math.asin(-1.0)), -4613618979930100456)
+  assert_eq(bits(math.acos(0.5)), 4607394977673999206)
+  assert_eq(bits(math.acos(-0.3)), 4611125270647761624)
+  assert_eq(bits(math.acos(1.0)), 0)
+  assert_eq(bits(math.acos(-1.0)), 4614256656552045848)
+}
+
+test "asin and acos outside -1..1 are the fixed NaN" {
+  assert_eq(bits(math.asin(2.0)), fixed_nan())
+  assert_eq(bits(math.acos(-2.0)), fixed_nan())
+  assert_eq(bits(math.asin(-0.0)), bits(-0.0))
+}
+
+test "atan2 takes y first and picks the quadrant" {
+  assert_eq(bits(math.atan2(0.5, 0.7)), 4603761930253174369)
+  assert_eq(bits(math.atan2(0.3, -1.0)), 4613600354196543288)
+  assert_eq(math.atan2(0.0, -1.0), math.pi())
+  assert_eq(math.atan2(-0.0, -1.0), -math.pi())
+  assert_eq(math.atan2(1.0, 0.0), math.pi() / 2.0)
+  assert_eq(math.atan2(-1.0, 0.0), -math.pi() / 2.0)
+  assert_eq(bits(math.atan2(-0.0, 1.0)), bits(-0.0))
+}
+
+test "sinh and cosh" {
+  assert_eq(bits(math.sinh(0.5)), 4602868828792568727)
+  assert_eq(bits(math.sinh(-1.0)), -4615400582024349310)
+  assert_eq(bits(math.cosh(0.5)), 4607757195049363664)
+  assert_eq(bits(math.cosh(-0.3)), 4607386605315353676)
+  assert_eq(math.cosh(0.0), 1.0)
+  assert_eq(bits(math.sinh(-0.0)), bits(-0.0))
+  assert_eq(bits(math.sinh(710.0)), 9215457865006123001)
+  assert_eq(math.cosh(1000.0), 1.0 / 0.0)
+  assert_eq(math.sinh(-1000.0), -1.0 / 0.0)
+}
+
+test "hypot does not overflow on the way" {
+  assert_eq(math.hypot(3.0, 4.0), 5.0)
+  assert_eq(bits(math.hypot(0.5, 3.0)), 4614031000566225977)
+  assert_eq(math.hypot(1.0e300, 1.0e300) < 1.0 / 0.0, true)
+  assert_eq(math.hypot(-3.0, -4.0), 5.0)
+  assert_eq(math.hypot(1.0 / 0.0, 0.0 / 0.0), 1.0 / 0.0)
+}
+
+test "cbrt keeps the sign and is exact on cubes" {
+  assert_eq(math.cbrt(27.0), 3.0)
+  assert_eq(math.cbrt(-8.0), -2.0)
+  assert_eq(bits(math.cbrt(0.5)), 4605324238331407933)
+  assert_eq(bits(math.cbrt(-0.3)), -4619167101340420211)
+  assert_eq(bits(math.cbrt(-0.0)), bits(-0.0))
+  assert_eq(bits(math.cbrt(1.0e-300)), 3110860544497550640)
+}
+
+test "expm1 and log1p are accurate near 0" {
+  assert_eq(bits(math.expm1(0.5)), 4604018381291261240)
+  assert_eq(bits(math.expm1(-0.3)), -4625031413077833738)
+  assert_eq(math.expm1(1.0e-300), 1.0e-300)
+  assert_eq(math.expm1(-1000.0), -1.0)
+  assert_eq(math.expm1(1000.0), 1.0 / 0.0)
+  assert_eq(bits(math.log1p(0.5)), 4600975829957056588)
+  assert_eq(bits(math.log1p(-0.3)), -4623275132358410418)
+  assert_eq(math.log1p(1.0e-300), 1.0e-300)
+  assert_eq(math.log1p(-1.0), -1.0 / 0.0)
+  assert_eq(bits(math.log1p(-2.0)), fixed_nan())
+}
+
+test "inverse hyperbolic functions" {
+  assert_eq(bits(math.asinh(0.5)), 4602340361502004746)
+  assert_eq(bits(math.asinh(-1.0)), -4617258109793348569)
+  assert_eq(bits(math.acosh(2.0)), 4608609870266500148)
+  assert_eq(math.acosh(1.0), 0.0)
+  assert_eq(bits(math.acosh(0.5)), fixed_nan())
+  assert_eq(bits(math.atanh(0.5)), 4603122929439146762)
+  assert_eq(math.atanh(1.0), 1.0 / 0.0)
+  assert_eq(math.atanh(-1.0), -1.0 / 0.0)
+  assert_eq(bits(math.atanh(2.0)), fixed_nan())
+}
+
+test "a NaN operand passes through" {
+  let nan = 0.0 / 0.0
+  assert_eq(float.is_nan(math.asin(nan)), true)
+  assert_eq(float.is_nan(math.log1p(nan)), true)
+  assert_eq(float.is_nan(math.atan2(nan, 1.0)), true)
+  assert_eq(float.is_nan(math.cbrt(nan)), true)
+}
