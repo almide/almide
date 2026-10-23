@@ -166,7 +166,7 @@ For zero-copy interop with native code (e.g. when calling Rust runtime directly)
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (146 functions)
+## Signature index (199 functions)
 
 ```
 // Appends val rounded to f32, BE.
@@ -752,6 +752,218 @@ bytes.set_int32(mut b: Bytes, offset: Int, value: Int32, endian: Endian) -> Unit
 // Writes value at offset; no-op out of range.
 // @since 0.15.0 or earlier
 bytes.set_float32(mut b: Bytes, offset: Int, value: Float32, endian: Endian) -> Unit
+
+// The byte at pos as 0..255; none outside 0..len.
+// @since unreleased
+bytes.get_u8(b: Bytes, pos: Int) -> Option[Int]
+
+// The byte at pos as a signed -128..127; none outside 0..len.
+// @since unreleased
+bytes.get_i8(b: Bytes, pos: Int) -> Option[Int]
+
+// (get_i8(b, pos), pos + 1); the position stays at pos when nothing is read.
+// @since unreleased
+bytes.next_i8(b: Bytes, pos: Int) -> (Option[Int], Int)
+
+// The big-endian half-precision float at pos; none unless 2 bytes fit.
+// @since unreleased
+bytes.get_f16_be(b: Bytes, pos: Int) -> Option[Float]
+
+// (get_f16_be(b, pos), pos + 2); the position stays at pos when nothing is read.
+// @since unreleased
+bytes.next_f16_be(b: Bytes, pos: Int) -> (Option[Float], Int)
+
+// count big-endian half floats from pos; none unless all fit or if count < 0.
+// @since unreleased
+bytes.get_f16_be_array(b: Bytes, pos: Int, count: Int) -> Option[List[Float]]
+
+// The first n bytes; all of b past its length; n < 0 aborts.
+// @since unreleased
+bytes.take(b: Bytes, n: Int) -> Bytes
+
+// b without its first n bytes; empty past its length; n < 0 aborts.
+// @since unreleased
+bytes.drop(b: Bytes, n: Int) -> Bytes
+
+// The last n bytes; all of b past its length; n < 0 aborts.
+// @since unreleased
+bytes.take_end(b: Bytes, n: Int) -> Bytes
+
+// b without its last n bytes; empty past its length; n < 0 aborts.
+// @since unreleased
+bytes.drop_end(b: Bytes, n: Int) -> Bytes
+
+// (first n bytes, the rest); n past the end gives (b, empty); n < 0 aborts.
+// @since unreleased
+bytes.split_at(b: Bytes, n: Int) -> (Bytes, Bytes)
+
+// The first byte, or none if b is empty.
+// @since unreleased
+bytes.first(b: Bytes) -> Option[Int]
+
+// The last byte, or none if b is empty.
+// @since unreleased
+bytes.last(b: Bytes) -> Option[Int]
+
+// The bytes for which f is true.
+// @since unreleased
+bytes.filter(b: Bytes, f: (Int) -> Bool) -> Bytes
+
+// f folded over the bytes, left to right.
+// @since unreleased
+bytes.fold(b: Bytes, init: B, f: (B, Int) -> B) -> B
+
+// True when f holds for some byte; false for empty b.
+// @since unreleased
+bytes.any(b: Bytes, f: (Int) -> Bool) -> Bool
+
+// True when f holds for every byte; true for empty b.
+// @since unreleased
+bytes.all(b: Bytes, f: (Int) -> Bool) -> Bool
+
+// How many bytes satisfy f.
+// @since unreleased
+bytes.count(b: Bytes, f: (Int) -> Bool) -> Int
+
+// The first byte satisfying f, or none.
+// @since unreleased
+bytes.find(b: Bytes, f: (Int) -> Bool) -> Option[Int]
+
+// Index of the first byte satisfying f, or none.
+// @since unreleased
+bytes.find_index(b: Bytes, f: (Int) -> Bool) -> Option[Int]
+
+// (index, byte) pairs from 0.
+// @since unreleased
+bytes.enumerate(b: Bytes) -> List[(Int, Int)]
+
+// Bytes paired with ys; stops at the shorter.
+// @since unreleased
+bytes.zip(b: Bytes, ys: List[B]) -> List[(Int, B)]
+
+// f over bytes paired with ys; stops at the shorter.
+// @since unreleased
+bytes.zip_with(b: Bytes, ys: List[B], f: (Int, B) -> C) -> List[C]
+
+// The some results of f over the bytes, in order.
+// @since unreleased
+bytes.filter_map(b: Bytes, f: (Int) -> Option[B]) -> List[B]
+
+// The first some result of f over the bytes, or none.
+// @since unreleased
+bytes.find_map(b: Bytes, f: (Int) -> Option[B]) -> Option[B]
+
+// f folded over the bytes from the first; none if b is empty.
+// @since unreleased
+bytes.reduce(b: Bytes, f: (Int, Int) -> Int) -> Option[Int]
+
+// The running fold over the bytes, init excluded.
+// @since unreleased
+bytes.scan(b: Bytes, init: B, f: (B, Int) -> B) -> List[B]
+
+// (bytes where f is true, the rest), each in order.
+// @since unreleased
+bytes.partition(b: Bytes, f: (Int) -> Bool) -> (List[Int], List[Int])
+
+// Bytes grouped by f's key, each group in order.
+// @since unreleased
+bytes.group_by(b: Bytes, f: (Int) -> B) -> Map[B, List[Int]]
+
+// The bytes in ascending order.
+// @since unreleased
+bytes.sort(b: Bytes) -> List[Int]
+
+// The bytes ordered by f's key; equal keys keep their order.
+// @since unreleased
+bytes.sort_by(b: Bytes, f: (Int) -> B) -> List[Int]
+
+// The bytes ordered by cmp (negative = first argument first); stable.
+// @since unreleased
+bytes.sort_with(b: Bytes, cmp: (Int, Int) -> Int) -> List[Int]
+
+// The smallest byte; none if empty.
+// @since unreleased
+bytes.min(b: Bytes) -> Option[Int]
+
+// The largest byte; none if empty.
+// @since unreleased
+bytes.max(b: Bytes) -> Option[Int]
+
+// The first byte with the smallest key; none if empty.
+// @since unreleased
+bytes.min_by(b: Bytes, f: (Int) -> K) -> Option[Int]
+
+// The last byte with the largest key; none if empty.
+// @since unreleased
+bytes.max_by(b: Bytes, f: (Int) -> K) -> Option[Int]
+
+// The first smallest byte by cmp; none if empty.
+// @since unreleased
+bytes.min_with(b: Bytes, cmp: (Int, Int) -> Int) -> Option[Int]
+
+// The last largest byte by cmp; none if empty.
+// @since unreleased
+bytes.max_with(b: Bytes, cmp: (Int, Int) -> Int) -> Option[Int]
+
+// The sum of the bytes; 0 for empty b.
+// @since unreleased
+bytes.sum(b: Bytes) -> Int
+
+// The product of the bytes, wrapping; 1 for empty b.
+// @since unreleased
+bytes.product(b: Bytes) -> Int
+
+// The longest prefix whose bytes all satisfy f.
+// @since unreleased
+bytes.take_while(b: Bytes, f: (Int) -> Bool) -> Bytes
+
+// b after the longest prefix whose bytes all satisfy f.
+// @since unreleased
+bytes.drop_while(b: Bytes, f: (Int) -> Bool) -> Bytes
+
+// Every run of n consecutive bytes; [] if n > len; n <= 0 aborts.
+// @since unreleased
+bytes.window(b: Bytes, n: Int) -> List[Bytes]
+
+// b with each run of equal adjacent bytes collapsed to one.
+// @since unreleased
+bytes.dedup(b: Bytes) -> Bytes
+
+// The bytes of b with sep between each pair.
+// @since unreleased
+bytes.intersperse(b: Bytes, sep: Int) -> Bytes
+
+// The first occurrence of each byte value, in order.
+// @since unreleased
+bytes.unique(b: Bytes) -> Bytes
+
+// The first byte of each key f gives, in order.
+// @since unreleased
+bytes.unique_by(b: Bytes, f: (Int) -> K) -> Bytes
+
+// Byte index of the last needle, or none; an empty needle is found at len.
+// @since unreleased
+bytes.last_index_of(b: Bytes, needle: Bytes) -> Option[Int]
+
+// b with every non-overlapping from replaced by to, left to right.
+// @since unreleased
+bytes.replace(b: Bytes, from: Bytes, to: Bytes) -> Bytes
+
+// b with the first from replaced by to.
+// @since unreleased
+bytes.replace_first(b: Bytes, from: Bytes, to: Bytes) -> Bytes
+
+// b without prefix, or none when b does not start with it.
+// @since unreleased
+bytes.strip_prefix(b: Bytes, prefix: Bytes) -> Option[Bytes]
+
+// b without suffix, or none when b does not end with it.
+// @since unreleased
+bytes.strip_suffix(b: Bytes, suffix: Bytes) -> Option[Bytes]
+
+// Non-overlapping occurrences of needle; len + 1 for an empty needle.
+// @since unreleased
+bytes.count_matches(b: Bytes, needle: Bytes) -> Int
 ```
 
 ## Type index (1 types)

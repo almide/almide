@@ -1522,6 +1522,222 @@ setup = [
 probe = "bytes.to_list(b)"
 expect = "[0, 63, 192, 0, 0, 0]"
 
+[[bytes.fn]]
+name = "get_u8"
+index_unit = "byte-value"
+probe = 'bytes.get_u8(bytes.from_list([7, 200]), 1)'
+expect = "some(200)"
+
+[[bytes.fn]]
+name = "get_i8"
+index_unit = "byte-value"
+probe = 'bytes.get_i8(bytes.from_list([7, 200]), 1)'
+expect = "some(-56)"
+
+[[bytes.fn]]
+name = "next_i8"
+index_unit = "byte-offset"
+probe = 'bytes.next_i8(bytes.from_list([7, 200]), 1)'
+expect = "(some(-56), 2)"
+
+[[bytes.fn]]
+name = "get_f16_be"
+index_unit = "byte-offset"
+probe = 'bytes.get_f16_be(bytes.from_list([0, 60, 0]), 1)'
+expect = "some(1)"
+
+[[bytes.fn]]
+name = "next_f16_be"
+index_unit = "byte-offset"
+probe = 'bytes.next_f16_be(bytes.from_list([0, 60, 0]), 1)'
+expect = "(some(1), 3)"
+
+[[bytes.fn]]
+name = "get_f16_be_array"
+index_unit = "byte-offset"
+probe = 'bytes.get_f16_be_array(bytes.from_list([0, 60, 0, 64, 0]), 1, 2)'
+expect = "some([1, 2])"
+
+[[bytes.fn]]
+name = "take"
+index_unit = "byte-count"
+probe = 'bytes.to_list(bytes.take(bytes.from_list([1, 2, 3]), 2))'
+expect = "[1, 2]"
+
+[[bytes.fn]]
+name = "drop"
+index_unit = "byte-count"
+probe = 'bytes.to_list(bytes.drop(bytes.from_list([1, 2, 3]), 2))'
+expect = "[3]"
+
+[[bytes.fn]]
+name = "take_end"
+index_unit = "byte-count"
+probe = 'bytes.to_list(bytes.take_end(bytes.from_list([1, 2, 3]), 2))'
+expect = "[2, 3]"
+
+[[bytes.fn]]
+name = "drop_end"
+index_unit = "byte-count"
+probe = 'bytes.to_list(bytes.drop_end(bytes.from_list([1, 2, 3]), 2))'
+expect = "[1]"
+
+[[bytes.fn]]
+name = "split_at"
+index_unit = "byte-offset"
+probe = 'bytes.to_list(bytes.split_at(bytes.from_list([1, 2, 3]), 1).1)'
+expect = "[2, 3]"
+
+[[bytes.fn]]
+name = "first"
+index_unit = "byte-value"
+probe = 'bytes.first(bytes.from_list([9, 8]))'
+expect = "some(9)"
+
+[[bytes.fn]]
+name = "last"
+index_unit = "byte-value"
+probe = 'bytes.last(bytes.from_list([9, 8]))'
+expect = "some(8)"
+
+[[bytes.fn]]
+name = "filter"
+index_unit = "byte-value"
+probe = 'bytes.to_list(bytes.filter(bytes.from_list([1, 200, 3]), (v) => v > 2))'
+expect = "[200, 3]"
+
+[[bytes.fn]]
+name = "any"
+index_unit = "byte-value"
+probe = 'bytes.any(bytes.from_list([1, 200]), (v) => v == 200)'
+expect = "true"
+
+[[bytes.fn]]
+name = "all"
+index_unit = "byte-value"
+probe = 'bytes.all(bytes.from_list([1, 200]), (v) => v > 0)'
+expect = "true"
+
+[[bytes.fn]]
+name = "count"
+index_unit = "count"
+probe = 'bytes.count(bytes.from_list([5, 1, 5]), (v) => v == 5)'
+expect = "2"
+
+[[bytes.fn]]
+name = "find"
+index_unit = "byte-value"
+probe = 'bytes.find(bytes.from_list([1, 200, 3]), (v) => v > 2)'
+expect = "some(200)"
+
+[[bytes.fn]]
+name = "find_index"
+index_unit = "byte-offset"
+probe = 'bytes.find_index(bytes.from_list([1, 200, 3]), (v) => v > 2)'
+expect = "some(1)"
+
+[[bytes.fn]]
+name = "enumerate"
+index_unit = "byte-offset"
+probe = 'bytes.enumerate(bytes.from_list([9, 8]))'
+expect = "[(0, 9), (1, 8)]"
+
+[[bytes.fn]]
+name = "reduce"
+index_unit = "byte-value"
+probe = 'bytes.reduce(bytes.from_list([1, 2, 3]), (a, b) => a + b)'
+expect = "some(6)"
+
+[[bytes.fn]]
+name = "partition"
+index_unit = "byte-value"
+probe = 'bytes.partition(bytes.from_list([1, 200, 3]), (v) => v > 2)'
+expect = "([200, 3], [1])"
+
+[[bytes.fn]]
+name = "sort"
+index_unit = "byte-value"
+probe = 'bytes.sort(bytes.from_list([200, 1, 3]))'
+expect = "[1, 3, 200]"
+
+[[bytes.fn]]
+name = "sort_with"
+index_unit = "ordering"
+probe = 'bytes.sort_with(bytes.from_list([1, 200, 3]), (a, b) => b - a)'
+expect = "[200, 3, 1]"
+
+[[bytes.fn]]
+name = "min"
+index_unit = "byte-value"
+probe = 'bytes.min(bytes.from_list([200, 1, 3]))'
+expect = "some(1)"
+
+[[bytes.fn]]
+name = "max"
+index_unit = "byte-value"
+probe = 'bytes.max(bytes.from_list([200, 1, 3]))'
+expect = "some(200)"
+
+[[bytes.fn]]
+name = "min_with"
+index_unit = "ordering"
+probe = 'bytes.min_with(bytes.from_list([200, 1, 3]), (a, b) => a - b)'
+expect = "some(1)"
+
+[[bytes.fn]]
+name = "max_with"
+index_unit = "ordering"
+probe = 'bytes.max_with(bytes.from_list([200, 1, 3]), (a, b) => a - b)'
+expect = "some(200)"
+
+[[bytes.fn]]
+name = "sum"
+index_unit = "value"
+probe = 'bytes.sum(bytes.from_list([200, 100]))'
+expect = "300"
+
+[[bytes.fn]]
+name = "product"
+index_unit = "value"
+probe = 'bytes.product(bytes.from_list([200, 100]))'
+expect = "20000"
+
+[[bytes.fn]]
+name = "take_while"
+index_unit = "byte-value"
+probe = 'bytes.to_list(bytes.take_while(bytes.from_list([1, 2, 200, 1]), (v) => v < 100))'
+expect = "[1, 2]"
+
+[[bytes.fn]]
+name = "drop_while"
+index_unit = "byte-value"
+probe = 'bytes.to_list(bytes.drop_while(bytes.from_list([1, 2, 200, 1]), (v) => v < 100))'
+expect = "[200, 1]"
+
+[[bytes.fn]]
+name = "window"
+index_unit = "byte-count"
+probe = 'bytes.window(bytes.from_list([1, 2, 3]), 2) |> list.map((w) => bytes.to_list(w))'
+expect = "[[1, 2], [2, 3]]"
+
+[[bytes.fn]]
+name = "intersperse"
+index_unit = "byte-value"
+probe = 'bytes.to_list(bytes.intersperse(bytes.from_list([1, 2]), 0))'
+expect = "[1, 0, 2]"
+
+[[bytes.fn]]
+name = "last_index_of"
+index_unit = "byte-offset"
+probe = 'bytes.last_index_of(bytes.from_list([1, 2, 1, 2]), bytes.from_list([1, 2]))'
+expect = "some(2)"
+
+[[bytes.fn]]
+name = "count_matches"
+index_unit = "count"
+probe = 'bytes.count_matches(bytes.from_list([1, 2, 1, 2]), bytes.from_list([1, 2]))'
+expect = "2"
+
 
 # index_unit vocabulary — list (the GENERIC fns — len[A], get[A], take[A] … —
 # sit outside the signature sweep, which reads only non-generic signatures; the

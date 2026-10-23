@@ -899,6 +899,302 @@ fn set_int32(mut b: Bytes, offset: Int, value: Int32, endian: Endian) -> Unit = 
 /// Writes value at offset; no-op out of range.
 @intrinsic("almide_rt_bytes_set_float32")
 fn set_float32(mut b: Bytes, offset: Int, value: Float32, endian: Endian) -> Unit = _
+
+
+
+
+
+
+
+/// The byte at pos as 0..255; none outside 0..len.
+fn get_u8(b: Bytes, pos: Int) -> Int? = bytes.get(b, pos)
+
+/// The byte at pos as a signed -128..127; none outside 0..len.
+fn get_i8(b: Bytes, pos: Int) -> Int? = match bytes.get(b, pos) {
+  some(v) => some(if v >= 128 then v - 256 else v),
+  none => none,
+}
+
+/// (get_i8(b, pos), pos + 1); the position stays at pos when nothing is read.
+fn next_i8(b: Bytes, pos: Int) -> (Int?, Int) = match get_i8(b, pos) {
+  some(v) => (some(v), pos + 1),
+  none => (none, pos),
+}
+
+local fn f16_be_at(b: Bytes, pos: Int) -> Float = bytes.read_f16_le(
+  bytes.from_list([
+    bytes.get_or(b, pos + 1, 0),
+    bytes.get_or(b, pos, 0)
+  ]),
+  0,
+)
+
+/// The big-endian half-precision float at pos; none unless 2 bytes fit.
+fn get_f16_be(b: Bytes, pos: Int) -> Float? = if pos < 0 or pos > bytes.len(b) - 2 then none
+else some(f16_be_at(b, pos))
+
+/// (get_f16_be(b, pos), pos + 2); the position stays at pos when nothing is read.
+fn next_f16_be(b: Bytes, pos: Int) -> (Float?, Int) = match get_f16_be(b, pos) {
+  some(v) => (some(v), pos + 2),
+  none => (none, pos),
+}
+
+/// count big-endian half floats from pos; none unless all fit or if count < 0.
+fn get_f16_be_array(b: Bytes, pos: Int, count: Int) -> List[Float]? =
+  if count < 0 or pos < 0 or pos > bytes.len(b) - 2 * count then none
+  else some(list.range(0, count) |> list.map((i) => f16_be_at(b, pos + 2 * i)))
+
+/// The first n bytes; all of b past its length; n < 0 aborts.
+fn take(b: Bytes, n: Int) -> Bytes = if n < 0 then panic("bytes.take: negative count ${n}")
+else bytes.slice(b, 0, n)
+
+/// b without its first n bytes; empty past its length; n < 0 aborts.
+fn drop(b: Bytes, n: Int) -> Bytes = if n < 0 then panic("bytes.drop: negative count ${n}")
+else bytes.slice(b, n, bytes.len(b))
+
+/// The last n bytes; all of b past its length; n < 0 aborts.
+fn take_end(b: Bytes, n: Int) -> Bytes = if n < 0 then panic("bytes.take_end: negative count ${n}")
+else bytes.slice(b, int.max(bytes.len(b) - n, 0), bytes.len(b))
+
+/// b without its last n bytes; empty past its length; n < 0 aborts.
+fn drop_end(b: Bytes, n: Int) -> Bytes = if n < 0 then panic("bytes.drop_end: negative count ${n}")
+else bytes.slice(b, 0, int.max(bytes.len(b) - n, 0))
+
+/// (first n bytes, the rest); n past the end gives (b, empty); n < 0 aborts.
+fn split_at(b: Bytes, n: Int) -> (Bytes, Bytes) =
+  if n < 0 then panic("bytes.split_at: negative index ${n}")
+  else (bytes.slice(b, 0, n), bytes.slice(b, n, bytes.len(b)))
+
+/// The first byte, or none if b is empty.
+fn first(b: Bytes) -> Int? = bytes.get(b, 0)
+
+/// The last byte, or none if b is empty.
+fn last(b: Bytes) -> Int? = bytes.get(b, bytes.len(b) - 1)
+
+/// The bytes for which f is true.
+fn filter(b: Bytes, f: (Int) -> Bool) -> Bytes = bytes.from_list(list.filter(bytes.to_list(b), f))
+
+/// f folded over the bytes, left to right.
+fn fold[B](b: Bytes, init: B, f: (B, Int) -> B) -> B = list.fold(bytes.to_list(b), init, f)
+
+/// True when f holds for some byte; false for empty b.
+fn any(b: Bytes, f: (Int) -> Bool) -> Bool = list.any(bytes.to_list(b), f)
+
+/// True when f holds for every byte; true for empty b.
+fn all(b: Bytes, f: (Int) -> Bool) -> Bool = list.all(bytes.to_list(b), f)
+
+/// How many bytes satisfy f.
+fn count(b: Bytes, f: (Int) -> Bool) -> Int = list.count(bytes.to_list(b), f)
+
+/// The first byte satisfying f, or none.
+fn find(b: Bytes, f: (Int) -> Bool) -> Int? = list.find(bytes.to_list(b), f)
+
+/// Index of the first byte satisfying f, or none.
+fn find_index(b: Bytes, f: (Int) -> Bool) -> Int? = list.find_index(bytes.to_list(b), f)
+
+/// (index, byte) pairs from 0.
+fn enumerate(b: Bytes) -> List[(Int, Int)] = list.enumerate(bytes.to_list(b))
+
+/// Bytes paired with ys; stops at the shorter.
+fn zip[B](b: Bytes, ys: List[B]) -> List[(Int, B)] = list.zip(bytes.to_list(b), ys)
+
+/// f over bytes paired with ys; stops at the shorter.
+fn zip_with[B, C](b: Bytes, ys: List[B], f: (Int, B) -> C) -> List[C] = list.zip_with(
+  bytes.to_list(b),
+  ys,
+  f,
+)
+
+/// The some results of f over the bytes, in order.
+fn filter_map[B](b: Bytes, f: (Int) -> B?) -> List[B] = list.filter_map(bytes.to_list(b), f)
+
+/// The first some result of f over the bytes, or none.
+fn find_map[B](b: Bytes, f: (Int) -> B?) -> B? = list.find_map(bytes.to_list(b), f)
+
+/// f folded over the bytes from the first; none if b is empty.
+fn reduce(b: Bytes, f: (Int, Int) -> Int) -> Int? = list.reduce(bytes.to_list(b), f)
+
+/// The running fold over the bytes, init excluded.
+fn scan[B](b: Bytes, init: B, f: (B, Int) -> B) -> List[B] = list.scan(bytes.to_list(b), init, f)
+
+/// (bytes where f is true, the rest), each in order.
+fn partition(b: Bytes, f: (Int) -> Bool) -> (List[Int], List[Int]) = list.partition(
+  bytes.to_list(b),
+  f,
+)
+
+/// Bytes grouped by f's key, each group in order.
+fn group_by[B](b: Bytes, f: (Int) -> B) -> Map[B, List[Int]] = list.group_by(bytes.to_list(b), f)
+
+/// The bytes in ascending order.
+fn sort(b: Bytes) -> List[Int] = list.sort(bytes.to_list(b))
+
+/// The bytes ordered by f's key; equal keys keep their order.
+fn sort_by[B](b: Bytes, f: (Int) -> B) -> List[Int] = list.sort_by(bytes.to_list(b), f)
+
+local fn merge_with(xs: List[Int], ys: List[Int], cmp: (Int, Int) -> Int, acc: List[Int]) -> List[Int] = match (list.first(xs), list.first(ys)) {
+  (some(x), some(y)) => if cmp(y, x) < 0 then merge_with(xs, list.drop(ys, 1), cmp, [y] + acc)
+  else merge_with(list.drop(xs, 1), ys, cmp, [x] + acc),
+  (some(_), none) => list.reverse(acc) + xs,
+  _ => list.reverse(acc) + ys,
+}
+
+local fn merge_sort_with(xs: List[Int], cmp: (Int, Int) -> Int) -> List[Int] = {
+  let n = list.len(xs)
+  if n <= 1 then xs
+  else merge_with(
+    merge_sort_with(list.take(xs, n / 2), cmp),
+    merge_sort_with(list.drop(xs, n / 2), cmp),
+    cmp,
+    [],
+  )
+}
+
+/// The bytes ordered by cmp (negative = first argument first); stable.
+fn sort_with(b: Bytes, cmp: (Int, Int) -> Int) -> List[Int] = merge_sort_with(bytes.to_list(b), cmp)
+
+/// The smallest byte; none if empty.
+fn min(b: Bytes) -> Int? = list.min(bytes.to_list(b))
+
+/// The largest byte; none if empty.
+fn max(b: Bytes) -> Int? = list.max(bytes.to_list(b))
+
+/// The first byte with the smallest key; none if empty.
+fn min_by[K](b: Bytes, f: (Int) -> K) -> Int? = list.first(list.sort_by(bytes.to_list(b), f))
+
+/// The last byte with the largest key; none if empty.
+fn max_by[K](b: Bytes, f: (Int) -> K) -> Int? = list.last(list.sort_by(bytes.to_list(b), f))
+
+local fn pick_with(xs: List[Int], i: Int, best: Int, cmp: (Int, Int) -> Int, want_max: Bool) -> Int = match list.get(
+  xs,
+  i,
+) {
+  none => best,
+  some(c) => {
+    let o = cmp(c, best)
+    let chosen = if want_max then o >= 0 else o < 0
+    pick_with(xs, i + 1, if chosen then c else best, cmp, want_max)
+  },
+}
+
+/// The first smallest byte by cmp; none if empty.
+fn min_with(b: Bytes, cmp: (Int, Int) -> Int) -> Int? = match bytes.get(b, 0) {
+  some(c) => some(pick_with(bytes.to_list(b), 1, c, cmp, false)),
+  none => none,
+}
+
+/// The last largest byte by cmp; none if empty.
+fn max_with(b: Bytes, cmp: (Int, Int) -> Int) -> Int? = match bytes.get(b, 0) {
+  some(c) => some(pick_with(bytes.to_list(b), 1, c, cmp, true)),
+  none => none,
+}
+
+/// The sum of the bytes; 0 for empty b.
+fn sum(b: Bytes) -> Int = list.fold(bytes.to_list(b), 0, (acc, x) => acc + x)
+
+/// The product of the bytes, wrapping; 1 for empty b.
+fn product(b: Bytes) -> Int = list.fold(bytes.to_list(b), 1, (acc, x) => acc * x)
+
+/// The longest prefix whose bytes all satisfy f.
+fn take_while(b: Bytes, f: (Int) -> Bool) -> Bytes = bytes.from_list(list.take_while(bytes.to_list(b), f))
+
+/// b after the longest prefix whose bytes all satisfy f.
+fn drop_while(b: Bytes, f: (Int) -> Bool) -> Bytes = bytes.from_list(list.drop_while(bytes.to_list(b), f))
+
+/// Every run of n consecutive bytes; [] if n > len; n <= 0 aborts.
+fn window(b: Bytes, n: Int) -> List[Bytes] =
+  if n <= 0 then panic("bytes.window: size must be positive, got ${n}")
+  else list.window(bytes.to_list(b), n) |> list.map((xs) => bytes.from_list(xs))
+
+/// b with each run of equal adjacent bytes collapsed to one.
+fn dedup(b: Bytes) -> Bytes = bytes.from_list(list.dedup(bytes.to_list(b)))
+
+/// The bytes of b with sep between each pair.
+fn intersperse(b: Bytes, sep: Int) -> Bytes = bytes.from_list(list.intersperse(bytes.to_list(b), sep))
+
+/// The first occurrence of each byte value, in order.
+fn unique(b: Bytes) -> Bytes = bytes.from_list(list.unique(bytes.to_list(b)))
+
+/// The first byte of each key f gives, in order.
+fn unique_by[K](b: Bytes, f: (Int) -> K) -> Bytes = bytes.from_list(list.unique_by(bytes.to_list(b), f))
+
+
+local fn matches_at(xs: List[Int], needle: List[Int], i: Int) -> Bool = list.slice(
+  xs,
+  i,
+  i + list.len(needle),
+) == needle
+
+
+local fn find_from(xs: List[Int], needle: List[Int], i: Int) -> Int =
+  if i + list.len(needle) > list.len(xs) then -1
+  else if matches_at(xs, needle, i) then i
+  else find_from(xs, needle, i + 1)
+
+
+local fn find_back(xs: List[Int], needle: List[Int], i: Int) -> Int =
+  if i < 0 then -1
+  else if matches_at(xs, needle, i) then i
+  else find_back(xs, needle, i - 1)
+
+/// Byte index of the last needle, or none; an empty needle is found at len.
+fn last_index_of(b: Bytes, needle: Bytes) -> Int? = {
+  let xs = bytes.to_list(b)
+  let ns = bytes.to_list(needle)
+  let i = find_back(xs, ns, list.len(xs) - list.len(ns))
+  if i < 0 then none else some(i)
+}
+
+
+local fn replace_go(xs: List[Int], from: List[Int], to: List[Int], i: Int, limit: Int, acc: List[Int]) -> List[Int] = {
+  let j = if limit == 0 then -1
+  else find_from(xs, from, i)
+  if j < 0 then acc + list.drop(xs, i)
+  else replace_go(xs, from, to, j + list.len(from), limit - 1, acc + list.slice(xs, i, j) + to)
+}
+
+
+local fn replace_empty(xs: List[Int], to: List[Int], limit: Int) -> List[Int] =
+  if limit < 0 then to + (xs |> list.flat_map((x) => [x] + to))
+  else to + xs
+
+/// b with every non-overlapping from replaced by to, left to right.
+fn replace(b: Bytes, from: Bytes, to: Bytes) -> Bytes = {
+  let xs = bytes.to_list(b)
+  let fs = bytes.to_list(from)
+  let ts = bytes.to_list(to)
+  if list.is_empty(fs) then bytes.from_list(replace_empty(xs, ts, -1))
+  else bytes.from_list(replace_go(xs, fs, ts, 0, -1, []))
+}
+
+/// b with the first from replaced by to.
+fn replace_first(b: Bytes, from: Bytes, to: Bytes) -> Bytes = {
+  let xs = bytes.to_list(b)
+  let fs = bytes.to_list(from)
+  let ts = bytes.to_list(to)
+  if list.is_empty(fs) then bytes.from_list(replace_empty(xs, ts, 1))
+  else bytes.from_list(replace_go(xs, fs, ts, 0, 1, []))
+}
+
+/// b without prefix, or none when b does not start with it.
+fn strip_prefix(b: Bytes, prefix: Bytes) -> Bytes? =
+  if bytes.starts_with(b, prefix) then some(bytes.slice(b, bytes.len(prefix), bytes.len(b)))
+  else none
+
+/// b without suffix, or none when b does not end with it.
+fn strip_suffix(b: Bytes, suffix: Bytes) -> Bytes? =
+  if bytes.ends_with(b, suffix) then some(bytes.slice(b, 0, bytes.len(b) - bytes.len(suffix)))
+  else none
+
+local fn count_go(xs: List[Int], needle: List[Int], i: Int, n: Int) -> Int = {
+  let j = find_from(xs, needle, i)
+  if j < 0 then n
+  else count_go(xs, needle, j + list.len(needle), n + 1)
+}
+
+/// Non-overlapping occurrences of needle; len + 1 for an empty needle.
+fn count_matches(b: Bytes, needle: Bytes) -> Int = if bytes.len(needle) == 0 then bytes.len(b) + 1
+else count_go(bytes.to_list(b), bytes.to_list(needle), 0, 0)
 "#;
 pub const SRC_BYTES_APPEND_MULTI: &str = r#"
 
