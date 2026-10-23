@@ -128,6 +128,10 @@ net.unix_recv :: HOST_CAPABILITY :: WASI has neither Unix-domain sockets nor sha
 net.unix_send :: HOST_CAPABILITY :: WASI has neither Unix-domain sockets nor shared memory: the stock artifact refuses it (E081); the embedded host serves it through interim ops 104..=116 (proofs/target-availability.toml, #3620)
 net.unix_take_fds :: HOST_CAPABILITY :: WASI has neither Unix-domain sockets nor shared memory: the stock artifact refuses it (E081); the embedded host serves it through interim ops 104..=116 (proofs/target-availability.toml, #3620)
 net.unix_wait :: HOST_CAPABILITY :: WASI has neither Unix-domain sockets nor shared memory: the stock artifact refuses it (E081); the embedded host serves it through interim ops 104..=116 (proofs/target-availability.toml, #3620)
+random.next_choice :: UNPROBEABLE :: parameter type outside the synthesizer
+random.next_float :: UNPROBEABLE :: parameter type outside the synthesizer
+random.next_int :: UNPROBEABLE :: parameter type outside the synthesizer
+random.next_shuffle :: UNPROBEABLE :: parameter type outside the synthesizer
 result.flat_map :: UNPROBEABLE :: no candidate shape builds natively
 result.flatten :: UNPROBEABLE :: no candidate shape builds natively
 result.is_err :: UNPROBEABLE :: no candidate shape builds natively
@@ -146,6 +150,7 @@ set.new :: UNPROBEABLE :: no candidate shape builds natively
 testing.assert_aborts :: UNPROBEABLE :: no candidate shape builds natively
 testing.assert_err :: UNPROBEABLE :: no candidate shape builds natively
 testing.assert_ok :: UNPROBEABLE :: no candidate shape builds natively
+url.resolve :: UNPROBEABLE :: parameter type outside the synthesizer
 url.to_string :: UNPROBEABLE :: parameter type outside the synthesizer
 value.array :: UNPROBEABLE :: no candidate shape builds natively
 value.as_array :: UNPROBEABLE :: no candidate shape builds natively
