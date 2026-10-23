@@ -114,6 +114,7 @@ fabricated row fails the gate). The table is a representative sample of the spin
 | `unchecked_index_not_safe` | CoreSafe.v | Closed under the global context |
 | `certified_spatial_temporal` | Certified.v | Closed under the global context |
 | `certified_with_bounds_cert` | Certified.v | Closed under the global context |
+| `certified_memory_safe` | Certified.v | Closed under the global context |
 
 ## Known limitations (what is NOT yet proven — recorded, not hidden)
 
@@ -147,8 +148,10 @@ lowering. `Certified.v` composes the two per-build certificates on ONE
 trace: `certified_with_bounds_cert` — the guarded RC check accepting every
 block's stream, a fresh allocator, layout-true allocations, and the trace's
 accesses being a run of an accepted bounds certificate give `Spatial`,
-`Temporal` and `WellTyped` (not INITIALIZATION, which neither certificate
-tracks). And
+`Temporal` and `WellTyped`; `certified_memory_safe` adds INITIALIZATION from
+one more hypothesis, the constructor discipline (every allocation is
+immediately followed by the store that initializes its whole extent), which
+no witness checks yet. And
 no certificate carries a trace yet, so the theorem the definition is for — `K(c, a) accepts ⟹ MemorySafe a`
 for a shipped artifact `a` — is still open (#4005, #4006, #1696). Until it is
 proven, "memory safe" is a claim about the trace model, not about the bytes.
@@ -186,7 +189,7 @@ The receipt's claims are scoped to exactly this:
   machine + the FULL `$rc_dec` bytes' SAFETY — no double-free AND leak-freedom —
   executed on the renderer's real bytes by a general interpreter (`WasmExec`),
   operand-stack balance, and termination of the loop-free fragment — all
-  kernel-checked and axiom-clean (114 audited theorems). What remains is DEPTH (the byte-binding ISA layer; and
+  kernel-checked and axiom-clean (115 audited theorems). What remains is DEPTH (the byte-binding ISA layer; and
   the RENDERER realizing the free-list/`rc_inc` — its safety MODEL is now proven,
   so that slice REFINES a proof rather than adding trusted runtime) and BREADTH
   (lowering beyond the subset: control flow, closures, stdlib) — not new properties
