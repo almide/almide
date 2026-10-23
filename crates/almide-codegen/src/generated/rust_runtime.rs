@@ -35,12 +35,14 @@ pub const RUST_RUNTIME_MODULES: &[(&str, &str)] = &[
 ];
 
 /// Inter-module runtime dependencies, auto-extracted from source.
-/// If module A's source references `almide_rt_B_*`, A depends on B.
+/// If module A's source references `almide_rt_B_*`, or names an `Almide*`
+/// type B defines at top level, A depends on B.
 pub const RUNTIME_DEPS: &[(&str, &[&str])] = &[
     ("fan", &["list"]),
     ("float", &["math"]),
-    ("json", &["value"]),
-    ("list", &["fan"]),
+    ("http", &["map"]),
+    ("json", &["map", "value"]),
+    ("list", &["fan", "map"]),
     ("math", &["libm"]),
     ("matrix", &["libm"]),
     ("set", &["map"]),

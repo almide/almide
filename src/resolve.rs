@@ -238,10 +238,15 @@ pub fn resolve_imports_with_deps(
         }
     }
 
-    // Auto-load bundled stdlib modules that have Tier 1 (auto-import) behavior.
-    // These are written in Almide but available without explicit `import`.
-    for name in stdlib::AUTO_IMPORT_BUNDLED {
-        if !ctx.loaded_names.contains(*name) {
+    // Auto-imported bundled stdlib modules (written in Almide, nameable
+    // without an `import`) load only when a loaded source reaches them
+    // (#4071) — the one rule `bundled_reach` derives, shared with the
+    // single-file resolver `almide_mir::pipeline::bundled_self_modules`.
+    let reached = almide_frontend::bundled_reach::reached_auto_bundled(
+        std::iter::once(program).chain(ctx.loaded.iter().map(|(_, p, _, _)| p)),
+    );
+    for name in reached {
+        if !ctx.loaded_names.contains(name) {
             if let Some(source) = stdlib::get_bundled_source(name) {
                 load_bundled_module(name, source, &mut ctx)?;
             }

@@ -53,7 +53,9 @@ pub const TIER1_ALWAYS_ACCESSIBLE: &[&str] = &[
 /// Bundled modules that should be auto-imported (Tier 1 behavior).
 /// Tier-1 stdlib modules with no bundled-Almide content (option, result, etc.)
 /// are auto-imported via `TIER1_ALWAYS_ACCESSIBLE` above; this list is for
-/// bundled `.almd` modules that need resolve-time loading.
+/// bundled `.almd` modules that need resolve-time loading. Auto-import is a
+/// NAMING rule: a module here is loaded only when a loaded source reaches it
+/// (`almide_frontend::bundled_reach`, #4071), never into every program.
 pub const AUTO_IMPORT_BUNDLED: &[&str] = &[
     "list", "int", "float", "bool",
     // Stdlib modules migrated from TOML to bundled `.almd` need
