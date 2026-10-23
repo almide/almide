@@ -135,9 +135,6 @@ const CORPUS: &[(&str, &str)] = &[
     //    materialized at each use: literals, const arithmetic over other
     //    lets (wrapping), a float division and a string. ──
     ("top_let_consts", "let LIMIT = 10\nlet SCALE = LIMIT * 3 + 9223372036854775807\nlet HALF = 1.0 / 2.0\nlet NAME = \"almide\"\nfn main() -> Unit = {\n  println(int.to_string(LIMIT + SCALE))\n  println(float.to_string(HALF))\n  println(NAME)\n}\n"),
-    // ── #4006: scalar-list `+` (the __list_concat floor row) over a growing
-    //    accumulator, an empty operand and an empty literal. ──
-    ("list_concat_scalar", "fn build(n: Int) -> List[Int] = {\n  var acc: List[Int] = []\n  var i = 0\n  while i < n {\n    acc = acc + [i * i]\n    i = i + 1\n  }\n  acc\n}\nfn main() -> Unit = {\n  let xs = build(5)\n  let ys = xs + []\n  println(int.to_string(list.len(ys)))\n  println(int.to_string(ys[4]))\n}\n"),
 ];
 
 #[test]
@@ -249,6 +246,21 @@ fn main() -> Unit = {
         ("top_var", "var COUNT = 0
 fn main() -> Unit = {
   println(int.to_string(COUNT))
+}
+"),
+        // #4006 / C-131: `list.push` lowers to `__list_concat(xs, [x])`. The
+        // v1 render has no in-place append, so a concat shim would copy the
+        // whole list on every push — the O(n²) shape C-131 forbids
+        // (loop_push_trailing_increment took 38 s on v1 against 0.16 s on
+        // v0). Scalar-list `+` stays walled until v1 can append in place.
+        ("push_loop_concat", "fn main() -> Unit = {
+  var xs: List[Int] = []
+  var i = 0
+  while i < 3 {
+    list.push(xs, i)
+    i = i + 1
+  }
+  println(int.to_string(list.len(xs)))
 }
 "),
     ];

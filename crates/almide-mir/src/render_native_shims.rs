@@ -109,11 +109,6 @@ const SHIMS: &[(&str, &[NTy], Option<NTy>, &str)] = &[
     ("list.range", &[NTy::I64, NTy::I64],
             Some(NTy::Vec),
             "fn rt_list_range(s: i64, e: i64) -> Vec<i64> {\n    let count = e.saturating_sub(s).max(0) as usize;\n    let mut v: Vec<i64> = Vec::new();\n    if v.try_reserve_exact(count).is_err() {\n        eprintln!(\"Error: out of memory\");\n        std::process::exit(1);\n    }\n    v.extend(s..e);\n    v\n}"),
-    // #4006: `xs + ys` over scalar lists — a fresh list, both operands
-    // borrowed (the shim's arg gate admits only i64-slot lists).
-    ("__list_concat", &[NTy::VecRef, NTy::VecRef],
-            Some(NTy::Vec),
-            "fn rt_list_concat(a: &[i64], b: &[i64]) -> Vec<i64> {\n    let mut v: Vec<i64> = Vec::with_capacity(a.len() + b.len());\n    v.extend_from_slice(a);\n    v.extend_from_slice(b);\n    v\n}"),
     ("string.repeat", &[NTy::Str, NTy::I64],
             Some(NTy::Str),
             // The SAME clamp + ceiling as the v0 runtime and the wasm self-host
