@@ -641,7 +641,7 @@ true
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (34 functions)
+## Signature index (41 functions)
 
 ```
 // Whole file as UTF-8; err if missing or not UTF-8.
@@ -779,6 +779,34 @@ effect fs.modified_at(path: String) -> Int
 // Whole file as Bytes; err if missing.
 // @since 0.13.4 or earlier
 effect fs.read_bytes_raw(path: String) -> Bytes
+
+// dir as an FsRoot; err if dir is not a directory.
+// @since unreleased
+effect fs.open_root(dir: String) -> FsRoot
+
+// read_text of path inside root; err if it escapes.
+// @since unreleased
+effect fs.root_read_text(root: FsRoot, path: String) -> String
+
+// read_bytes_raw of path inside root; err if it escapes.
+// @since unreleased
+effect fs.root_read_bytes(root: FsRoot, path: String) -> Bytes
+
+// write of content to path inside root; err if it escapes.
+// @since unreleased
+effect fs.root_write_text(root: FsRoot, path: String, content: String) -> Unit
+
+// list_dir of path inside root; err if it escapes.
+// @since unreleased
+effect fs.root_list_dir(root: FsRoot, path: String) -> List[String]
+
+// exists of path inside root; err if it escapes.
+// @since unreleased
+effect fs.root_exists(root: FsRoot, path: String) -> Bool
+
+// remove of path inside root; err if it escapes.
+// @since unreleased
+effect fs.root_remove(root: FsRoot, path: String) -> Unit
 ```
 
 ## Type index (1 types)

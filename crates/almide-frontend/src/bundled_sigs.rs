@@ -182,6 +182,19 @@ pub fn bundled_effect_fn_has_body(module: &str, func: &str) -> bool {
                 && !attrs.iter().any(|a| matches!(a.name.as_str(), "intrinsic" | "inline_rust" | "wasm_intrinsic"))))
 }
 
+/// The complement within effect fns: `func` is an effect fn of bundled
+/// `module` dispatched to a runtime template (`@intrinsic`, `@inline_rust`,
+/// `@wasm_intrinsic`, `@extern`), whose call returns its declared value.
+pub fn bundled_effect_fn_is_template(module: &str, func: &str) -> bool {
+    let Some(source) = super::stdlib::get_bundled_source(module) else { return false };
+    let Some(program) = almide_lang::parse_cached(source) else { return false };
+    program.decls.iter().any(|d| matches!(d,
+        ast::Decl::Fn { name, effect: Some(true), extern_attrs, attrs, .. }
+            if name.as_str() == func
+                && (!extern_attrs.is_empty()
+                    || attrs.iter().any(|a| matches!(a.name.as_str(), "intrinsic" | "inline_rust" | "wasm_intrinsic")))))
+}
+
 /// Parse the bundled source for `module` and extract every fn
 /// declaration's signature. Returns `None` if the module is not
 /// bundled or parsing fails outright.
