@@ -56,6 +56,7 @@ const MODULE_DESCRIPTIONS: &[(&str, &str)] = &[
     ("list", "list operations"),
     ("int", "integer utilities"),
     ("float", "floating-point utilities"),
+    ("bool", "boolean parsing and comparison"),
     ("bytes", "byte buffer operations"),
     ("matrix", "matrix operations"),
     ("fs", "file system operations"),
