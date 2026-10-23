@@ -1,7 +1,7 @@
 # spec/wasm_cross fixtures the verified native renderer (v1 trust spine,
 # almide_mir::pipeline::try_render_rust_source) renders, #4006. GROW-ONLY; re-anchor with
 # ALMIDE_UPDATE_NATIVE_VERIFIED_FLOOR=1 cargo test --test native_verified_floor_test
-# rendered: 94 of 958
+# rendered: 101 of 958
 spec/wasm_cross/accum_recursion_int.almd
 spec/wasm_cross/assert_abort_eq.almd
 spec/wasm_cross/assert_abort_msg.almd
@@ -10,6 +10,7 @@ spec/wasm_cross/assert_abort_ne.almd
 spec/wasm_cross/binding_stmts.almd
 spec/wasm_cross/call_lambda_ctor.almd
 spec/wasm_cross/closure_tail_recursion.almd
+spec/wasm_cross/const_fold_nonfinite_float.almd
 spec/wasm_cross/default_param_ref.almd
 spec/wasm_cross/effect_operand_unwrap_distinct.almd
 spec/wasm_cross/effect_tco.almd
@@ -41,6 +42,7 @@ spec/wasm_cross/gleam_int_radix.almd
 spec/wasm_cross/gleam_multi_subject.almd
 spec/wasm_cross/gleam_precedence_unary.almd
 spec/wasm_cross/grain_functions.almd
+spec/wasm_cross/grouping_unary.almd
 spec/wasm_cross/guard_else_exit_code.almd
 spec/wasm_cross/heap_result_err_interp.almd
 spec/wasm_cross/heap_result_if_bind_chain.almd
@@ -56,12 +58,16 @@ spec/wasm_cross/int_div_mod_ok.almd
 spec/wasm_cross/int_div_overflow.almd
 spec/wasm_cross/int_mod_by_zero.almd
 spec/wasm_cross/int_mod_overflow.almd
+spec/wasm_cross/int_pow_negative_exponent.almd
+spec/wasm_cross/int_pow_overflow_wraps.almd
 spec/wasm_cross/interp_diverging_part.almd
 spec/wasm_cross/kernel_conformance.almd
 spec/wasm_cross/koka_parc14_generic_pick.almd
 spec/wasm_cross/koka_parc21_eval_order.almd
 spec/wasm_cross/let_wildcard_discard.almd
 spec/wasm_cross/letbound_variant_match.almd
+spec/wasm_cross/literal_int_forms.almd
+spec/wasm_cross/literal_unit.almd
 spec/wasm_cross/loop_break_continue.almd
 spec/wasm_cross/mutual_tail_recursion.almd
 spec/wasm_cross/nested_tuple_destructure.almd
@@ -78,6 +84,7 @@ spec/wasm_cross/range_materialize_oom.almd
 spec/wasm_cross/recursion_depth_within_limits.almd
 spec/wasm_cross/ref_gleam_div_zero_abort.almd
 spec/wasm_cross/ref_int_min_div_abort.almd
+spec/wasm_cross/replace_empty_pat.almd
 spec/wasm_cross/reserved_keyword_fn.almd
 spec/wasm_cross/result_heap_err_match.almd
 spec/wasm_cross/string_bool_ordering.almd

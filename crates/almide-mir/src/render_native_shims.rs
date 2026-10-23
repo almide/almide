@@ -50,6 +50,23 @@ const SHIMS: &[(&str, &[NTy], Option<NTy>, &str)] = &[
     ("string.trim", &[NTy::Str],
             Some(NTy::Str),
             "fn rt_string_trim(s: &str) -> AlmideString { AlmideString::from(s.trim()) }"),
+    // #4006: four floor rows the corpus walls on most, each the v0 oracle's
+    // body (runtime/rs/src/string.rs, math.rs; stdlib/bool.almd).
+    ("bool.to_string", &[NTy::I64],
+            Some(NTy::Str),
+            "fn rt_bool_to_string(b: i64) -> AlmideString { AlmideString::from(if b != 0 { \"true\" } else { \"false\" }) }"),
+    ("string.replace", &[NTy::Str, NTy::Str, NTy::Str],
+            Some(NTy::Str),
+            "fn rt_string_replace(s: &str, from: &str, to: &str) -> AlmideString { AlmideString::from(s.replace(from, to)) }"),
+    // CODEPOINT indices clamped to [0, char_count] (almide_rt_string_slice).
+    ("string.slice", &[NTy::Str, NTy::I64, NTy::I64],
+            Some(NTy::Str),
+            "fn rt_string_slice(s: &str, start: i64, end: i64) -> AlmideString {\n    let s_idx = start.max(0) as usize;\n    let e_idx = end.max(0) as usize;\n    if s_idx >= e_idx { AlmideString::new() } else { AlmideString::from(s.chars().skip(s_idx).take(e_idx - s_idx).collect::<String>()) }\n}"),
+    // Square-and-multiply with wrapping steps; a negative exponent is the
+    // v0 abort `Error: negative exponent`, exit 1 (almide_rt_math_pow).
+    ("math.pow", &[NTy::I64, NTy::I64],
+            Some(NTy::I64),
+            "fn rt_math_pow(base: i64, exp: i64) -> i64 {\n    if exp < 0 { eprintln!(\"Error: negative exponent\"); std::process::exit(1); }\n    let mut result: i64 = 1;\n    let mut b = base;\n    let mut e = exp as u64;\n    while e > 0 {\n        if e & 1 == 1 { result = result.wrapping_mul(b); }\n        e >>= 1;\n        if e > 0 { b = b.wrapping_mul(b); }\n    }\n    result\n}"),
     // #1869: `list.range` joins the floor as a closed shim. The lowering
     // materializes a `let`-bound range that is indexed or measured as
     // `CallFn list.range(s, e)`; without a floor entry the whole program
