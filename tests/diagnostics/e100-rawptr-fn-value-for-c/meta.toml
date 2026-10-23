@@ -1,0 +1,3 @@
+expects_code = "E100"
+expects_error = "a `RawPtr` in a file that declares no `@extern` fn"
+hint_substring = "or declare the `@extern` fn the pointer is for in this file"

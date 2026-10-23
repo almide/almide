@@ -3,7 +3,10 @@
 // `mut` position like the receiver of `bytes.set_u8`. Before #3966 the checker
 // read only `mut b` and missed `@mutating`, so this compiled, and the targets
 // disagreed about whether the caller's `let` buffer changed: native wrote
-// through, wasm did not.
+// through, wasm did not. The `@extern` makes the RawPtr legal (E100).
+@extern(c, "c", "labs")
+fn c_labs(x: Int) -> Int
+
 fn poke(dst: Bytes, src: Bytes) -> Int = bytes.copy_to_ptr(src, bytes.as_mut_ptr(dst), 4)
 
 fn main() -> Unit = {

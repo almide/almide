@@ -380,7 +380,17 @@ pub fn imports_for(src: &str) -> String {
             out.push_str(&format!("import {module}\n"));
         }
     }
+    out.push_str(rawptr_marker_for(src));
     out
+}
+
+/// A RawPtr is legal only in a file that declares an `@extern` fn (E100,
+/// #4043), so a generated file that reaches one carries this never-called
+/// declaration. Every header goes through [`imports_for`], one file at a time.
+pub fn rawptr_marker_for(src: &str) -> &'static str {
+    const MARKER: &str = "@extern(c, \"c\", \"labs\")\nfn xf_c_labs(x: Int) -> Int\n\n";
+    let reaches = ["as_ptr(", "as_mut_ptr(", "from_raw_ptr", "copy_to_ptr", "RawPtr"].iter().any(|n| src.contains(n));
+    if reaches && !src.contains("@extern(") { MARKER } else { "" }
 }
 
 /// The declared availability matrix (#1423), the same file the E081
@@ -469,6 +479,15 @@ mod availability_tests {
     fn private_helpers_are_left_out_of_the_catalogue() {
         let private: Vec<String> = build().iter().filter(|s| s.func.starts_with("__")).map(|s| format!("{}.{}", s.module, s.func)).collect();
         assert!(private.is_empty(), "private helpers in the catalogue: {private:?}");
+    }
+
+    #[test]
+    fn a_program_reaching_a_rawptr_gets_one_extern_declaration() {
+        let src = "fn main() -> Unit = {\n  let c = bytes.from_raw_ptr(bytes.as_ptr(bytes.new(2)), 1)\n}\n";
+        assert!(imports_for(src).ends_with("@extern(c, \"c\", \"labs\")\nfn xf_c_labs(x: Int) -> Int\n\n"));
+        // A file that already declares one, or holds no pointer, needs none.
+        assert_eq!(rawptr_marker_for("@extern(c, \"m\", \"sqrt\")\nfn s(x: Float) -> Float\nlet p = bytes.as_ptr(b)"), "");
+        assert_eq!(rawptr_marker_for("let n = bytes.len(bytes.new(2))"), "");
     }
 
     #[test]

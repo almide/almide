@@ -156,6 +156,13 @@ Appenders (preferred). The `write_*_be` family is the older spelling and remains
 
 For zero-copy interop with native code (e.g. when calling Rust runtime directly).
 
+A `RawPtr` is legal only in a file that declares an `@extern` fn
+([E100](../diagnostics/E100.md)). `from_raw_ptr` and `copy_to_ptr` move as
+many bytes as they are told, and nothing checks that the memory behind the
+pointer is that long. They are outside every memory guarantee, like the
+foreign code they exist for. To copy bytes within a program, use `slice` or
+`copy_from`, which stop at the end of the buffer.
+
 | Signature | Purpose |
 |---|---|
 | `bytes.as_ptr(b) -> RawPtr` | Read-only pointer to data region |

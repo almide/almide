@@ -1,0 +1,6 @@
+// The fix: copy with `bytes.slice`, which stops at the end of the buffer.
+effect fn main() -> Unit = {
+  let small = bytes.from_list([1, 2, 3, 4])
+  let copy = bytes.slice(small, 0, 4096)
+  println(int.to_string(bytes.len(copy)))
+}

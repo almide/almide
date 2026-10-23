@@ -3,6 +3,9 @@
 // regenerates and diffs). Each case executes a manifest probe; a
 // failure here means the implementation drifted from the DECLARED
 // semantic dimension (#419 class).
+@extern(c, "c", "labs")
+fn c_labs(x: Int) -> Int
+
 test "bytes.read_i16_be unit=value" {
   assert_eq(
     "${bytes.read_i16_be(

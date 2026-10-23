@@ -129,6 +129,77 @@ impl Checker {
         self.emit(diagnostic);
     }
 
+    /// E100 (#4043): a `RawPtr` value in a user file that declares no
+    /// `@extern` fn.
+    ///
+    /// `bytes.from_raw_ptr(p, n)` and `bytes.copy_to_ptr(b, p, cap)` move `n`
+    /// / `cap` bytes through an address nothing can bound: on native a
+    /// `RawPtr` is a bare `*mut u8`, on wasm a linear-memory offset. With
+    /// `bytes.as_ptr` they read and wrote past a 4-byte buffer from ordinary
+    /// code (native heap corruption, wasm exit 0). A `RawPtr` is the C-ABI
+    /// pointer scalar, and without an `@extern` there is no foreign code to
+    /// hand it to, so every use is a round trip through the program's own
+    /// memory. The rule ties the one unchecked surface to the declaration that
+    /// already marks a file as foreign: a program with no `@extern` holds no
+    /// `RawPtr` at all. The judgement is by TYPE, so every spelling is caught
+    /// — a call, UFCS, a pipe, an alias import, a fn value, a helper's param.
+    pub(super) fn reject_rawptr_without_extern(&mut self, program: &crate::ast::Program) {
+        if self.stdlib_authority() != Some(false) {
+            return;
+        }
+        let declares_extern = program
+            .decls
+            .iter()
+            .any(|d| matches!(d, Decl::Fn { extern_attrs, .. } if !extern_attrs.is_empty()));
+        if declares_extern {
+            return;
+        }
+        let mut sites: Vec<Option<Span>> = Vec::new();
+        for decl in &program.decls {
+            let body = match decl {
+                Decl::Fn { body: Some(b), .. } => b,
+                Decl::TopLet { value, .. } => value,
+                Decl::Test { body, .. } => body,
+                _ => continue,
+            };
+            // The outermost RawPtr-typed expression of each decl: one error
+            // per decl, at the first place the pointer appears.
+            let mut first: Option<Option<Span>> = None;
+            crate::ast::visit_expr(body, &mut |e| {
+                if first.is_some() {
+                    return;
+                }
+                let has_ptr = self.type_map.get(&e.id).is_some_and(|t| {
+                    let t = super::resolve_ty(t, &self.uf);
+                    matches!(t, almide_lang::types::Ty::RawPtr) || t.any_child_recursive(&|c| matches!(c, almide_lang::types::Ty::RawPtr))
+                });
+                if has_ptr {
+                    first = Some(e.span);
+                }
+            });
+            if let Some(span) = first {
+                sites.push(span);
+            }
+        }
+        for span in sites {
+            let mut diagnostic = err(
+                "a `RawPtr` in a file that declares no `@extern` fn".to_string(),
+                "`RawPtr` is the C-ABI pointer of `@extern`: `bytes.from_raw_ptr` and `bytes.copy_to_ptr` move as many bytes as they are told through it, with no bound. Copy within Almide with `bytes.slice` / `bytes.copy_from`, or declare the `@extern` fn the pointer is for in this file",
+                "RawPtr value".to_string(),
+            )
+            .with_code("E100");
+            if let Some(sp) = span {
+                diagnostic.file = self.source_file.clone();
+                diagnostic.line = Some(sp.line);
+                diagnostic.col = Some(sp.col);
+                if sp.end_col > sp.col {
+                    diagnostic.end_col = Some(sp.end_col);
+                }
+            }
+            self.emit(diagnostic);
+        }
+    }
+
     /// E085 for `import prim` outside the stdlib: the module is not user
     /// surface, so naming it in an import is refused like naming one of its fns.
     pub(super) fn reject_user_prim_import(&mut self, imports: &[Decl]) {

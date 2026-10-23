@@ -98,6 +98,12 @@ for module in COVERED_MODULES:
         "// semantic dimension (#419 class).",
         "",
     ]
+    # Optional module-level `prelude`: top-level declarations emitted once,
+    # before the tests. `bytes` needs an `@extern` for its RawPtr probes (E100).
+    prelude = manifest[module].get("prelude", [])
+    lines.extend(prelude)
+    if prelude:
+        lines.append("")
     for e in manifest[module]["fn"]:
         probe, unit = e["probe"], e["index_unit"]
         expect = e["expect"].replace("\\", "\\\\").replace('"', '\\"')

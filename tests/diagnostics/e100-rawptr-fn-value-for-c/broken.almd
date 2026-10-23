@@ -1,0 +1,12 @@
+// E100: the pointer is meant for C, but the file declares no `@extern` fn, so
+// nothing the pointer could be handed to exists. Naming `as_ptr` as a value
+// under an alias import is caught as well: the rule reads the type, not the
+// spelling.
+import bytes as b
+
+let ADDRESS_OF = b.as_ptr
+
+effect fn main() -> Unit = {
+  let msg = bytes.from_string("hi\n")
+  println(int.to_string(bytes.len(msg)))
+}

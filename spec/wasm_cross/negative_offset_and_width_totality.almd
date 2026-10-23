@@ -15,6 +15,11 @@
 //      where the wasm self-host correctly returned the string unchanged.
 import bytes
 
+// The copy_to_ptr probes hold a RawPtr, legal only in a file that declares an
+// `@extern` fn (E100, #4043). This declaration is never called.
+@extern(c, "c", "labs")
+fn c_labs(x: Int) -> Int
+
 fn show(label: String, v: Float) -> Unit = println(label + ":" + float.to_string(v))
 
 effect fn main() -> Unit = {

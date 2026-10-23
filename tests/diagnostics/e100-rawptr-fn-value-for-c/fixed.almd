@@ -1,0 +1,9 @@
+// The fix: declare the C function the pointer is for. The file is then FFI
+// code, outside every memory guarantee, and says so.
+@extern(c, "c", "write")
+fn c_write(fd: Int, buf: RawPtr, n: Int) -> Int
+
+effect fn main() -> Unit = {
+  let msg = bytes.from_string("hi\n")
+  let _ = c_write(1, bytes.as_ptr(msg), bytes.len(msg))
+}

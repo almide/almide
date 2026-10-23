@@ -1,0 +1,11 @@
+// E100: the write side (#4043). A helper takes the pointer as a parameter and
+// `copy_to_ptr` writes `b.len()` bytes through it, whatever the buffer behind
+// the pointer holds. Into a 4-byte buffer this wrote 4092 bytes past its end:
+// native died with a corrupted heap, wasm overwrote the next block and exited 0.
+fn put(b: Bytes, p: RawPtr) -> Int = bytes.copy_to_ptr(b, p, bytes.len(b))
+
+effect fn main() -> Unit = {
+  var small = bytes.new(4)
+  let big = bytes.new(4096)
+  println(int.to_string(put(big, small.as_mut_ptr())))
+}

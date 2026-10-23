@@ -1,0 +1,7 @@
+// The fix: `copy_from` writes into a Bytes and stops at its end.
+effect fn main() -> Unit = {
+  var small = bytes.new(4)
+  let big = bytes.new(4096)
+  bytes.copy_from(small, big, 0, 0, bytes.len(big))
+  println(int.to_string(bytes.len(small)))
+}

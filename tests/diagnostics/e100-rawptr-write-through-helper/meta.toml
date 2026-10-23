@@ -1,0 +1,3 @@
+expects_code = "E100"
+expects_error = "a `RawPtr` in a file that declares no `@extern` fn"
+hint_substring = "Copy within Almide with `bytes.slice` / `bytes.copy_from`"

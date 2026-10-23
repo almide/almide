@@ -1,0 +1,8 @@
+// E100: a RawPtr in a file with no @extern (#4043). `from_raw_ptr` copies as
+// many bytes as it is told from the address, so this read 4092 bytes past the
+// end of a 4-byte buffer on both targets.
+effect fn main() -> Unit = {
+  let small = bytes.from_list([1, 2, 3, 4])
+  let copy = bytes.from_raw_ptr(bytes.as_ptr(small), 4096)
+  println(int.to_string(bytes.len(copy)))
+}

@@ -392,6 +392,12 @@ expect = "2024"
 
 [bytes]
 default_index_unit = "byte-offset"
+# The `from_raw_ptr` / `copy_to_ptr` probes hold a RawPtr, which is legal only
+# in a file that declares an `@extern` fn (E100, #4043). This one is never called.
+prelude = [
+  '@extern(c, "c", "labs")',
+  "fn c_labs(x: Int) -> Int",
+]
 
 [[bytes.fn]]
 name = "read_i16_be"
