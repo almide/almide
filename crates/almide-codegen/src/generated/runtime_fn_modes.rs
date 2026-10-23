@@ -593,6 +593,7 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_matrix_split_cols_even" => &[false, false],
         "almide_rt_matrix_stride" => &[false],
         "almide_rt_matrix_sub" => &[false, false],
+        "almide_rt_matrix_to_bytes_f16_le" => &[false],
         "almide_rt_matrix_to_bytes_f32_le" => &[false],
         "almide_rt_matrix_to_bytes_f64_le" => &[false],
         "almide_rt_matrix_to_lists" => &[false],
