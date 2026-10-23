@@ -91,7 +91,7 @@ pub(crate) fn var(v: ValueId) -> String {
 /// shared with that leg (`almide_base::native_stack_guard`); this render's
 /// stdout is std's own line-buffered handle, so the handler has no buffer of
 /// ours to write out first.
-const STACK_GUARD_GLUE_SHIM: &str = "fn almide_stack_guard_install() {\n    #[cfg(any(target_os = \"linux\", target_os = \"macos\"))]\n    almide_stack_guard::install();\n}\n#[cfg(any(target_os = \"linux\", target_os = \"macos\"))]\nfn almide_stack_guard_stdout() {}";
+const STACK_GUARD_GLUE_SHIM: &str = "fn almide_stack_guard_install() {\n    #[cfg(all(any(target_os = \"linux\", target_os = \"macos\"), not(miri)))]\n    almide_stack_guard::install();\n}\n#[cfg(any(target_os = \"linux\", target_os = \"macos\"))]\nfn almide_stack_guard_stdout() {}";
 const IDX_GET_SHIM: &str = "fn almide_idx_get(v: &[i64], i: i64) -> i64 {\n        if i < 0 || i as usize >= v.len() { eprintln!(\"Error: index out of bounds\"); std::process::exit(1); }\n        v[i as usize]\n}";
 const IDX_SET_SHIM: &str = "fn almide_idx_set(v: &mut Vec<i64>, i: i64, x: i64) {\n        if i < 0 || i as usize >= v.len() { eprintln!(\"Error: index out of bounds\"); std::process::exit(1); }\n        v[i as usize] = x;\n}";
 

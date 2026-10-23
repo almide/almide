@@ -1,0 +1,6 @@
+fn main() -> Unit = {
+  let r_str: String = list.fold(list.filter(string.chars("AB"), ((a) => true)), "X", ((n, y) => y))
+  println("borrow str  filter = ${r_str}")
+  let r_li: List[Int] = list.fold(list.filter([[1], [2]], ((a) => true)), [0], ((n, y) => y))
+  println("borrow li   filter = ${r_li}")
+}

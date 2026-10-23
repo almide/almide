@@ -423,6 +423,19 @@ $ almide check raw.almd --profile critical --allow IO
 error[E100]: `bytes.from_raw_ptr` is outside the memory-safety guarantee and is not admissible under `--profile critical`
 ```
 
+profile に関係なく、`almide build` は保証の外に出る場所を `Built` 行の末尾に出す
+(#4008)。挙げるのは `@extern` fn と、各宣言で最初に現れる生ポインタ(`RawPtr`
+の値)。型で判定するので、呼び出し・メソッド呼び出し・別名 import・関数値・引数の
+どの書き方でも出る。import した user module の中のものも出る。最初の 3 か所を挙げ、
+残りは件数で示す。保証の内側にあるプログラムの `Built` 行は変わらない。
+
+```
+$ almide build raw.almd
+Built raw — outside the memory-safety guarantee: a raw pointer in fn `main` (raw.almd:5)
+```
+
+テスト: `tests/build_outside_guarantee_test.rs`
+
 拒否されるもの(いずれも終了コード 1):
 
 - 語彙に無い名前: ``error: unknown capability `io` in --allow — grantable capabilities are IO, Net, Env, Time, Rand, Process``
@@ -1140,6 +1153,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_UPDATE_INTERP_LEDGER` | harness | regenerate the interpreter abstain and bridge-fallback ledgers |
 | `ALMIDE_UPDATE_NAME_SITES` | harness | remove stale rows from the name-keyed property ledger and append the new sites (each still needs its `why`) |
 | `ALMIDE_UPDATE_NATIVE_OWN` | harness | regenerate the native result-ownership ledger |
+| `ALMIDE_UPDATE_NATIVE_VERIFIED_FLOOR` | harness | regenerate proofs/native-verified-floor.txt, the spec/wasm_cross fixtures the verified native renderer covers (#4006, tests/native_verified_floor_test.rs) |
 | `ALMIDE_UPDATE_SIZES` | harness | regenerate the structural leg's size baselines |
 | `ALMIDE_UPDATE_SIZE_LADDER` | harness | regenerate the stdlib-linking size ladder ledger (#2141) |
 | `ALMIDE_UPDATE_SNAPSHOTS` | tool | same as `almide test --update-snapshots` |
@@ -1151,6 +1165,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_WALL_REASON` | debug | make `almide test` say WHICH stage of the wasm leg declined a fallback file, not just `v1 wall` |
 | `ALMIDE_WASM_ALLOC_COUNT` | harness | emit the structural wasm leg's allocation counters (#2407: five i64 globals `$alloc`/`$free`/a region restore bump, exported as `__alloc_count` / `__alloc_reused` / `__alloc_bytes` / `__free_count` / `__region_reclaimed`; `main` also releases its top-let globals before returning) and make `almide run --target wasm` print `__ALMD_WASM_ALLOC allocs=N reused=N bytes=N frees=N reclaimed=N live=N heap_end=N` on stderr after the run, `live` being the heap blocks never released; off, the module is byte-identical to a build without the switch (the wasm twin of `ALMIDE_ALLOC_COUNT`; the ledgers are crates/almide-wasm/tests/golden/alloc-count-baseline.txt and live-at-exit-baseline.txt) |
 | `ALMIDE_WASM_CANONICAL_ALLOC` | harness | emit the structural wasm leg's `$alloc` without its free-list paths, so every request bumps (the stdlib inspection meter's fixed allocator, owner ruling 2026-10-15): a measured bytes-moved series then depends on the program's requests alone, not on which freed blocks the heap holds, and is an upper bound of the shipped module's copies; off, the module is byte-identical to a build without the switch (crates/almide-wasm/src/canonical_alloc.rs) |
+| `ALMIDE_WASM_CHECKED_ALLOC` | harness | emit the structural wasm leg's `$free` poisoning a freed size-class block with 0xA5 and `$alloc` checking that poison before reusing the block, trapping on a write that landed while it was free (#4009: the wasm leg's use-after-free and stray-write detector; scripts/wasm-checked-alloc.sh runs the corpus under it); off, the module is byte-identical to a build without the switch (crates/almide-wasm/src/checked_alloc.rs) |
 | `ALMIDE_WASM_FREES` | ci | the frees-churn gate's switch; its compiler reader retired with the v0 emitter (#782), the gate that still sets it is #2207's |
 | `ALMIDE_WASM_SKIP_STOCK_AUDIT` | route | skip the stock-WASI host-op audit on `almide build --target wasm` (the emitter-frontier probe the parity, diff-fuzz and availability gates build under); named ALMIDE_WASM_STRUCTURAL until #2934 |
 | `ALMIDE_WASM_WATCHDOG_SECS=value` | harness | the wall-time seconds the IN-PROCESS test runner's epoch watchdog (`run_wasm` / `run_wasm_with` / `run_wasm_capped` in almide-wasm-run) lets a module run before it traps with `interrupt` (default 30); `almide run --target wasm` and `almide bench --target wasm` arm no watchdog on any setting, as native has none (#2615) |

@@ -631,6 +631,7 @@ fn sink() -> &'static Sink {
 pub fn start_collecting() {
     *sink().lock().expect("witness sink") = Some(Vec::new());
     crate::witness::modes::start();
+    crate::witness::bounds::start();
     crate::witness::decls::start();
 }
 
@@ -641,6 +642,14 @@ pub use modes::take as take_modes;
 /// The call-mode witness sink (split for the file budget).
 #[path = "witness_modes.rs"]
 pub(crate) mod modes;
+
+/// The bounds witness of every emission pass (#4005, witness_bounds.rs):
+/// `(pass, stretches)`, for `almide-verify bounds`.
+pub use bounds::take as take_bounds;
+
+/// The bounds witness sink (split for the file budget).
+#[path = "witness_bounds.rs"]
+pub(crate) mod bounds;
 
 /// The per-pass declaration table the name and capability witnesses read
 /// (#2759, witness_decls.rs).

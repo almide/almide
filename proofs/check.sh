@@ -26,6 +26,7 @@ SPINE_FILES=(
   TypeConcretization.v CapabilityBound.v CapabilityReach.v CallModes.v
   StackBalance.v Termination.v FreeList.v FreeListRc.v WasmRcDec.v WasmEncode.v WasmExec.v
   WasmIsa.v WasmDecode.v CowSafety.v LargeList.v LargeTree.v StructuralRuntime.v StructuralAlloc.v StructuralDecode.v StructuralRun.v
+  MemorySafe.v SpatialCert.v BoundsCert.v CoreSafe.v Certified.v
 )
 
 echo "== kernel check (coqc) + axiom audit (Print Assumptions) =="

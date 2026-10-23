@@ -717,7 +717,7 @@ names = 67
 [[site]]
 id = "crates/almide-mir/src/render_native_shims.rs::SHIMS::table"
 class = "legacy"
-names = 15
+names = 26
 
 [[site]]
 id = "crates/almide-spine/src/s2.rs::fingerprint_decl::table"

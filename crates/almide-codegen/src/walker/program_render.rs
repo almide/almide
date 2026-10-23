@@ -250,12 +250,19 @@ fn render_tls_struct(fields: &[String]) -> String {
 
 /// The `static` handle of a `var`'s per-thread cell: `NAME.with(|c| …)` reaches
 /// field `NAME` of the program's TLS struct, filling it on first access.
+/// The handle hands out the view `OnceCell::get` gives, never the one the
+/// initialising `get_or_init` returns. That first reference is derived from
+/// std's internal `&mut` to the slot, so once a nested access (`g.n = g.n + 1`
+/// reads the global inside the closure that writes it) touches the cell
+/// through `get`, the first reference is invalid under both Stacked and Tree
+/// Borrows: Miri reported UB in `spec/wasm_cross/mutable_global_field_mut_arg`
+/// (#4009). Every reference from `get` shares one parent, so they coexist.
 fn render_tls_cell_handle(name: &str, cell_ty: &str, init: &str) -> String {
     format!(
         "#[allow(non_camel_case_types)]\nstruct __AlmideTls_{name};\n\
          impl __AlmideTls_{name} {{\n    \
          fn with<R>(&self, f: impl FnOnce(&{cell_ty}) -> R) -> R {{\n        \
-         __ALMIDE_TLS.with(|g| f(g.{name}.get_or_init(|| {init})))\n    }}\n}}\n\
+         __ALMIDE_TLS.with(|g| {{ let _ = g.{name}.get_or_init(|| {init}); match g.{name}.get() {{ Some(c) => f(c), None => unreachable!() }} }})\n    }}\n}}\n\
          #[allow(non_upper_case_globals)]\nstatic {name}: __AlmideTls_{name} = __AlmideTls_{name};"
     )
 }

@@ -16,7 +16,7 @@ This rests on an asymmetry the whole field stands on: **building is hard, checki
 
 > *If the checker accepts, the artifact has the property* — and this theorem never mentions the compiler's internals.
 
-That single move collapses the **trusted base from ~100,000 lines to the extracted checker** — ~1,400 lines of OCaml, machine-derived from the proofs (the exact, regenerated number is below). The big compiler becomes *untrusted* — free to be as large and buggy as it likes, because nothing trusts it.
+That single move collapses the **trusted base from ~100,000 lines to the extracted checker** — ~1,650 lines of OCaml, machine-derived from the proofs (the exact, regenerated number is below). The big compiler becomes *untrusted* — free to be as large and buggy as it likes, because nothing trusts it.
 
 ## The pipeline (proof-carrying code)
 
@@ -46,11 +46,11 @@ flowchart TB
 - **V (translation checker)** *(retired with the incumbent wasm renderer by #2761; described as it ran)* checked — *on every build* — that the emitted wasm **realizes** the certified MIR: every op's required instruction pattern is present in the emitted module, and the release count matches the certificate's drops (leak-freedom — an under-freeing renderer fails; see `translation_validation.rs`'s own contract). It is a structural realization check, **not** a semantic refinement proof: the answer to *"does the running thing match the model?"* is V's structure check **plus** the differential evidence below.
 - **ALS** (Almide Language Specification) names the normative semantics. What exists in Rocq today is the RC-discipline model ([`proofs/ALS.v`](../proofs/ALS.v)) — there is no mechanized evaluation relation for Almide source yet, and no theorem of the shape `⟦s⟧ ≈ ⟦compile(s)⟧`. **Byte-for-byte agreement between targets is established empirically**, and heavily: the [contract ledger](contracts/README.md)'s cross-target fixture gate, `proofs/output-parity.sh`, the nightly differential fuzz, and the 3-way `almide-interp` oracle. The design *aims* the pipeline at a single semantics; the agreement itself is measured, not derived.
 
-The **trusted base is the Rocq kernel plus the extracted checker** (~1,400 lines of OCaml derived from the proofs — the exact number is in the block below), plus the hardware and the assumption that the spec says what we intend. Verified extraction (CertiRocq) is a *future ratchet*, not a present fact — see [`proofs/TRUSTED_BASE.md`](../proofs/TRUSTED_BASE.md) for the full ledger. Everything else is either proven against the kernel or untrusted. The stage-by-stage boundary — which rows are proven, which are trusted, and what every gate does and does not claim — is **[proven-vs-trusted.md](contracts/proven-vs-trusted.md)**.
+The **trusted base is the Rocq kernel plus the extracted checker** (~1,650 lines of OCaml derived from the proofs — the exact number is in the block below), plus the hardware and the assumption that the spec says what we intend. Verified extraction (CertiRocq) is a *future ratchet*, not a present fact — see [`proofs/TRUSTED_BASE.md`](../proofs/TRUSTED_BASE.md) for the full ledger. Everything else is either proven against the kernel or untrusted. The stage-by-stage boundary — which rows are proven, which are trusted, and what every gate does and does not claim — is **[proven-vs-trusted.md](contracts/proven-vs-trusted.md)**.
 
 <!-- tcb:generated:start — derived by scripts/gen-claims.sh; DO NOT EDIT between the markers -->
-> **Measured, regenerated:** extracted checker `proofs/checker.ml` = **1433 lines** (+ 347
-> `.mli`); Rocq spine = **315 theorems+lemmas** (axiom-clean, asserted by `proofs/check.sh`);
+> **Measured, regenerated:** extracted checker `proofs/checker.ml` = **1658 lines** (+ 392
+> `.mli`); Rocq spine = **419 theorems+lemmas** (axiom-clean, asserted by `proofs/check.sh`);
 > Lean Perceus belt = **41 theorems**, 0 sorry (CI-gated).
 <!-- tcb:generated:end -->
 

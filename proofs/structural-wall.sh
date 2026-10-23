@@ -124,7 +124,8 @@ python3 - "$OUT" "$ROOT/proofs/checker" "$EXCEPTIONS" "$KGEN" <<'PYEOF'
 import os, subprocess, sys
 out, checker, exceptions_path, kgen = sys.argv[1:5]
 FN = {"ownership": "check_xc", "names": "check_names_cert", "caps": "check_caps_cert",
-      "caps-transitive": "check_prog_cert", "call-modes": "check_modes_cert"}
+      "caps-transitive": "check_prog_cert", "call-modes": "check_modes_cert",
+      "bounds": "check_bounds_cert"}
 
 def parse(path):
     b = open(path, "rb").read()
@@ -212,7 +213,7 @@ for key in sorted(exceptions - rejected_seen):
 def lit(s):
     return '"' + s.replace('"', '""') + '"'
 with open(kgen, "w") as g:
-    g.write("From AlmideTrust Require Import OwnershipChecker NameTotality CapabilityBound CapabilityReach CallModes.\n")
+    g.write("From AlmideTrust Require Import OwnershipChecker NameTotality CapabilityBound CapabilityReach CallModes BoundsCert.\n")
     g.write("From Stdlib Require Import String List.\nImport ListNotations.\nOpen Scope string_scope.\n")
     LIMIT = 60000  # literal bytes per goal: bounds the kernel's peak term
     for prop, ws in accepts.items():
@@ -302,6 +303,6 @@ fi
 
 echo
 echo "STRUCTURAL WALL OK: over the $N certified spec/wasm_cross fixtures, every ownership, call-mode,"
-echo "name-totality, capability and call-graph witness of the structural build is accepted —"
+echo "bounds, name-totality, capability and call-graph witness of the structural build is accepted —"
 echo "the extracted checker, the Rocq kernel and almide-verify agreeing on every verdict — and"
 echo "every bundle names the SHA-256 of the file 'almide build --target wasm' shipped for it."

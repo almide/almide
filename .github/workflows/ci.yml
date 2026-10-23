@@ -378,6 +378,8 @@ jobs:
           exit 1
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
       - uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/develop' }}
@@ -708,6 +710,8 @@ jobs:
         run: chmod +x /tmp/almide-bin/almide
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -718,16 +722,16 @@ jobs:
         uses: actions/cache@v6
         with:
           path: /tmp/wasmtime.tar.xz
-          key: wasmtime-v27.0.0-x86_64-linux
+          key: wasmtime-v49.0.1-x86_64-linux
 
       - name: Install wasmtime
         run: |
           if [ ! -f /tmp/wasmtime.tar.xz ]; then
             curl -sSfL --retry 5 --retry-all-errors --retry-delay 15 -o /tmp/wasmtime.tar.xz \
-              https://github.com/bytecodealliance/wasmtime/releases/download/v27.0.0/wasmtime-v27.0.0-x86_64-linux.tar.xz
+              https://github.com/bytecodealliance/wasmtime/releases/download/v49.0.1/wasmtime-v49.0.1-x86_64-linux.tar.xz
           fi
           tar -xf /tmp/wasmtime.tar.xz -C /tmp
-          sudo mv /tmp/wasmtime-v27.0.0-x86_64-linux/wasmtime /usr/local/bin/
+          sudo mv /tmp/wasmtime-v49.0.1-x86_64-linux/wasmtime /usr/local/bin/
           wasmtime --version
 
       - name: Install wasm-opt (binaryen)
@@ -939,14 +943,16 @@ jobs:
     # `unsafe_code = "forbid"`. Its tests run here under Miri, which checks every raw access:
     # use-after-free, double free, leaks, out-of-bounds reads and writes, and
     # Stacked Borrows aliasing. The crate is std-only, so this job builds
-    # nothing else. Miri needs nightly, so this is the one nightly job.
+    # nothing else. Miri needs nightly; the dated one (#4010) is the nightly
+    # fuzz-nightly's coverage job already pins, which ships the miri component.
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
 
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: nightly-2026-08-01
           components: miri, rust-src
 
       - name: Run almide-str's tests under Miri
@@ -1645,6 +1651,11 @@ jobs:
           python3 scripts/check-rawptr-surface.py --self-test
           python3 scripts/check-rawptr-surface.py
 
+      - name: Runtime unsafe ledger (#4007 — every unsafe line in the native runtime listed with a reason)
+        run: |
+          bash scripts/check-runtime-unsafe.sh --self-test
+          bash scripts/check-runtime-unsafe.sh
+
       - name: Gate verification ledger (every gate classified by how it can fail — no decorative gates)
         run: bash scripts/check-gate-verification.sh
 
@@ -1749,6 +1760,10 @@ jobs:
 
       - name: _str twin ratchet (#1460 — the suffix bill is frozen while the protocol decision pends)
         run: bash scripts/check-str-twin-ratchet.sh
+      - name: toolchain pins (#4010 — every trusted rustc / wasmtime version is listed and named in TRUSTED_BASE.md)
+        run: bash scripts/check-toolchain-pins.sh
+      - name: toolchain pins negative controls (#4010)
+        run: bash scripts/check-toolchain-pins-negative.sh
       - name: diagnostic-code coverage floor (attack-list A1-3)
         run: bash scripts/check-diagnostic-code-coverage.sh
 
@@ -2205,10 +2220,15 @@ jobs:
     # evicted, and a cancelled run saves none). 45 covers the cold path; the
     # develop-only `save-if` on every rust-cache step keeps merge-queue and
     # PR refs, which nothing ever reads back, from evicting develop's entries.
-    timeout-minutes: 45
+    # 70 since the double-free trap step (#4081) reruns backend_parity and the
+    # gauntlet: develop's run measured 17-41 min before it, and #4081's main
+    # test step alone took 42 min of 45 on 2026-10-23 before it was cancelled.
+    timeout-minutes: 70
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
       - uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/develop' }}
@@ -2222,11 +2242,11 @@ jobs:
         uses: actions/cache@v6
         with:
           path: /tmp/wasmtime.tar.xz
-          key: wasmtime-v27.0.0-x86_64-linux
+          key: wasmtime-v49.0.1-x86_64-linux
       - name: Install wasmtime (stock CLI — the WASI gate's third-party runtime)
         run: |
           set -euo pipefail
-          VERSION=v27.0.0
+          VERSION=v49.0.1
           TARBALL=/tmp/wasmtime.tar.xz
           if ! tar -tf "$TARBALL" >/dev/null 2>&1; then
             curl --fail --location --retry 5 --retry-all-errors \
@@ -2266,6 +2286,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
       - uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/develop' }}
@@ -2279,11 +2301,11 @@ jobs:
         uses: actions/cache@v6
         with:
           path: /tmp/wasmtime.tar.xz
-          key: wasmtime-v27.0.0-x86_64-linux
+          key: wasmtime-v49.0.1-x86_64-linux
       - name: Install wasmtime (stock CLI — the WASI gate's third-party runtime)
         run: |
           set -euo pipefail
-          VERSION=v27.0.0
+          VERSION=v49.0.1
           TARBALL=/tmp/wasmtime.tar.xz
           if ! tar -tf "$TARBALL" >/dev/null 2>&1; then
             curl --fail --location --retry 5 --retry-all-errors \
@@ -2327,11 +2349,11 @@ jobs:
         uses: actions/cache@v6
         with:
           path: /tmp/wasmtime.tar.xz
-          key: wasmtime-v27.0.0-x86_64-linux
+          key: wasmtime-v49.0.1-x86_64-linux
       - name: Install wasmtime (stock CLI — the WASI gate's third-party runtime)
         run: |
           set -euo pipefail
-          VERSION=v27.0.0
+          VERSION=v49.0.1
           TARBALL=/tmp/wasmtime.tar.xz
           if ! tar -tf "$TARBALL" >/dev/null 2>&1; then
             curl --fail --location --retry 5 --retry-all-errors \

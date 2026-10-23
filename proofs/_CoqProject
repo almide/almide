@@ -27,3 +27,8 @@ StructuralRuntime.v
 StructuralAlloc.v
 StructuralDecode.v
 StructuralRun.v
+MemorySafe.v
+SpatialCert.v
+BoundsCert.v
+CoreSafe.v
+Certified.v

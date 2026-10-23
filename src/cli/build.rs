@@ -143,7 +143,7 @@ fn install_artifact(built: &std::path::Path, dest: &std::path::Path) -> std::io:
 /// `cmd_build`'s cdylib target: build a shared library (.dylib/.so/.dll) and
 /// write it to `dest`. Exits the process on a compile error, otherwise prints
 /// the written path and returns.
-fn cmd_build_cdylib(rs_code: &str, crate_name: &str, dest: &std::path::Path, use_release: bool, native_deps: &[project::NativeDep], source_root: Option<&std::path::Path>) {
+fn cmd_build_cdylib(rs_code: &str, crate_name: &str, dest: &std::path::Path, use_release: bool, native_deps: &[project::NativeDep], source_root: Option<&std::path::Path>, note: &str) {
     let project_dir = std::env::temp_dir().join("almide-build-cdylib");
     // Strip fn main() from the code — cdylib has no entry point
     let lib_code = rs_code.replace("fn main()", "fn __almide_unused_main()");
@@ -164,7 +164,7 @@ fn cmd_build_cdylib(rs_code: &str, crate_name: &str, dest: &std::path::Path, use
                 err(&format!("Failed to copy library to {}: {}", dest.display(), e));
                 std::process::exit(1);
             }
-            err(&format!("Built {}", dest.display()));
+            err(&format!("Built {}{}", dest.display(), note));
         }
         Err(e) => {
             err(&format!("Compile error:\n{}", e));
@@ -179,14 +179,14 @@ fn cmd_build_cdylib(rs_code: &str, crate_name: &str, dest: &std::path::Path, use
 /// entirely. Locking and atomic binary staging live inside
 /// `build_native_cached`; the copy-out below reads a content-named,
 /// atomically-renamed file, so it needs no lock.
-fn cmd_build_native(rs_code: &str, output: &str, use_release: bool, native_deps: &[project::NativeDep], source_root: Option<&std::path::Path>) {
+fn cmd_build_native(rs_code: &str, output: &str, use_release: bool, native_deps: &[project::NativeDep], source_root: Option<&std::path::Path>, note: &str) {
     match super::run::build_native_cached(rs_code, false, use_release, None, native_deps, source_root) {
         Ok(bin_path) => {
             if let Err(e) = install_artifact(&bin_path, std::path::Path::new(output)) {
                 err(&format!("Failed to copy binary to {}: {}", output, e));
                 std::process::exit(1);
             }
-            err(&format!("Built {}", output));
+            err(&format!("Built {}{}", output, note));
         }
         Err(e) => {
             err(&format!("Compile error:\n{}", e));
@@ -268,7 +268,7 @@ pub fn cmd_build(args: BuildArgs) {
     let output = compute_output_path(file, output, is_wasm);
 
     let opts = crate::codegen::CodegenOptions { repr_c, allow_unverified: false, trace: false, meter_in_codegen: false };
-    let (rs_code, metered) = crate::try_compile_with_ir(file, no_check, &opts)
+    let (rs_code, metered, outside_guarantee) = crate::try_compile_reporting(file, no_check, &opts)
         .unwrap_or_else(|_| std::process::exit(1));
 
     // WASI target: use bare rustc (no external crate deps needed for WASM)
@@ -277,7 +277,7 @@ pub fn cmd_build(args: BuildArgs) {
             Some(n) => inject_heap_cap(&rs_code, n),
             None => rs_code,
         };
-        cmd_build_wasi_rustc(&rs_code, &output);
+        cmd_build_wasi_rustc(&rs_code, &output, &guarantee_note(&outside_guarantee));
         return;
     }
 
@@ -327,11 +327,11 @@ pub fn cmd_build(args: BuildArgs) {
         let crate_name = native_crate_name(file);
         let triple = super::native_target::cross_target();
         let dest = cdylib_output_path(requested_output, &crate_name, triple.as_deref());
-        cmd_build_cdylib(&rs_code, &crate_name, &dest, use_release, &native_deps, source_root.as_deref());
+        cmd_build_cdylib(&rs_code, &crate_name, &dest, use_release, &native_deps, source_root.as_deref(), &guarantee_note(&outside_guarantee));
         return;
     }
 
-    cmd_build_native(&rs_code, &output, use_release, &native_deps, source_root.as_deref());
+    cmd_build_native(&rs_code, &output, use_release, &native_deps, source_root.as_deref(), &guarantee_note(&outside_guarantee));
 }
 
 /// `--heap-cap` (#1530): wrap the generated program's allocator in a counting
@@ -529,7 +529,7 @@ impl Drop for __AlmideAllocGuard {
 }
 
 /// Build for WASI target using bare rustc (no external crate deps).
-fn cmd_build_wasi_rustc(rs_code: &str, output: &str) {
+fn cmd_build_wasi_rustc(rs_code: &str, output: &str, note: &str) {
     let stem = output.strip_suffix(".wasm").unwrap_or(output);
     let tmp_rs = format!("{}.rs", stem);
     if let Err(e) = std::fs::write(&tmp_rs, rs_code) {
@@ -559,9 +559,23 @@ fn cmd_build_wasi_rustc(rs_code: &str, output: &str) {
         std::process::exit(1);
     }
 
-    err(&format!("Built {}", output));
+    err(&format!("Built {}{}", output, note));
 }
 
+
+/// #4008: the `Built` line's tail for a build that leaves the memory-safety
+/// guarantee — empty for one that does not. Names up to three places, the
+/// first an author reading the line would look at, and counts the rest.
+pub(super) fn guarantee_note(sites: &[String]) -> String {
+    match sites {
+        [] => String::new(),
+        _ => {
+            let shown = sites.iter().take(3).cloned().collect::<Vec<_>>().join("; ");
+            let more = if sites.len() > 3 { format!("; and {} more", sites.len() - 3) } else { String::new() };
+            format!(" — outside the memory-safety guarantee: {shown}{more}")
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {

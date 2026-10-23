@@ -553,8 +553,10 @@ fn render_fn_safe_name(
 /// "failed printing to stdout: Broken pipe" and exit 101; with the default
 /// disposition the process stops quietly the way `yes | head` does.
 /// Self-contained (no runtime symbol) so it renders the same in the
-/// single-file and module layouts. A no-op off unix.
-const MAIN_SIGPIPE_PRELUDE: &str = "    #[cfg(unix)]\n    {\n        extern \"C\" {\n            fn signal(sig: i32, handler: usize) -> usize;\n        }\n        // SIGPIPE = 13, SIG_DFL = 0\n        unsafe {\n            signal(13, 0);\n        }\n    }\n";
+/// single-file and module layouts. A no-op off unix, and under Miri, which
+/// cannot call `signal` and runs the generated crate to find UB in the
+/// runtime's `unsafe` (#4009).
+const MAIN_SIGPIPE_PRELUDE: &str = "    #[cfg(all(unix, not(miri)))]\n    {\n        extern \"C\" {\n            fn signal(sig: i32, handler: usize) -> usize;\n        }\n        // SIGPIPE = 13, SIG_DFL = 0\n        unsafe {\n            signal(13, 0);\n        }\n    }\n";
 
 /// Call-stack exhaustion as the defined abort (C-196): replace std's
 /// guard-page handler with the one that prints `Error: stack overflow` and
