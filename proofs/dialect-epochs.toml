@@ -230,6 +230,7 @@ name = "stdlib-redesign"
 summary = "The standard-library redesign (docs/roadmap/stdlib-redesign/). Its waves add their breaks here. First: the memory-unsafe stdlib surface moves to an explicitly imported `ffi` module (R-ffi-01, R-L0-45), and `--profile critical` refuses everything outside the memory-safety guarantee (#4008)."
 breaks = [
   "under `--profile critical`, every `ffi.*` call, the deprecated `bytes` raw-pointer functions (`as_ptr`, `as_mut_ptr`, `data_ptr`, `from_raw_ptr`, `copy_to_ptr`) and an `@extern` fn declaration are E100 (outside the memory-safety guarantee), and no `--allow` grants them; the program checked without the profile is unchanged. Keep raw-address and foreign code in a module that is not checked with `--profile critical`",
+  "a program that runs as its p3 component on the embedded wasm host (`almide run --target wasm` of a program naming the full-response http family) has the working directory and the temp dir preopened instead of `/` (#4022): an fs path outside both now errs there; grant it with `[permissions] fs = [\"<dir>\", …]` in almide.toml, which preopens exactly the listed directories",
 ]
 
 # DEPRECATIONS — spellings accepted for a window, with the epoch that removes them
