@@ -752,7 +752,7 @@ names = 1821
 [[site]]
 id = "crates/almide-types/src/stdlib_info.rs::AUTO_IMPORT_BUNDLED::table"
 class = "legacy"
-names = 25
+names = 26
 
 [[site]]
 id = "crates/almide-types/src/stdlib_info.rs::BUNDLED_MODULES::table"

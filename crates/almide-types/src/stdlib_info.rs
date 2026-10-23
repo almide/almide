@@ -61,7 +61,7 @@ pub const TIER1_ALWAYS_ACCESSIBLE: &[&str] = &[
 /// NAMING rule: a module here is loaded only when a loaded source reaches it
 /// (`almide_frontend::bundled_reach`, #4071), never into every program.
 pub const AUTO_IMPORT_BUNDLED: &[&str] = &[
-    "list", "int", "float", "bool",
+    "list", "int", "float", "bool", "bytes",
     // Stdlib modules migrated from TOML to bundled `.almd` need
     // auto-import so their signatures and dispatch reach every file
     // without requiring a redundant `import <name>`. The set mirrors
