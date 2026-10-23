@@ -4,6 +4,8 @@ expression: "run_outline(&[\"@stdlib/list\"])"
 ---
 fn list.__fallible_all[A, E](xs: List[A], f: fn(A) -> Result[Bool, E]) -> Result[Bool, E]
 fn list.__fallible_any[A, E](xs: List[A], f: fn(A) -> Result[Bool, E]) -> Result[Bool, E]
+fn list.__fallible_binary_search_by[A, K, E](xs: List[A], target: K, f: fn(A) -> Result[K, E]) -> Result[Option[Int], E]
+fn list.__fallible_binary_search_with[A, E](xs: List[A], target: A, cmp: fn(A, A) -> Result[Int, E]) -> Result[Option[Int], E]
 fn list.__fallible_count[A, E](xs: List[A], f: fn(A) -> Result[Bool, E]) -> Result[Int, E]
 fn list.__fallible_drop_while[A, E](xs: List[A], f: fn(A) -> Result[Bool, E]) -> Result[List[A], E]
 fn list.__fallible_each[A, E](xs: List[A], f: fn(A) -> Result[Unit, E]) -> Result[Unit, E]
@@ -17,17 +19,30 @@ fn list.__fallible_fold[A, B, E](xs: List[A], init: B, f: fn(B, A) -> Result[B, 
 fn list.__fallible_group_by[A, B, E](xs: List[A], f: fn(A) -> Result[B, E]) -> Result[Map[B, List[A]], E]
 fn list.__fallible_iterate[T, E](seed: T, f: fn(T) -> Result[T, E], n: Int) -> Result[List[T], E]
 fn list.__fallible_map[A, B, E](xs: List[A], f: fn(A) -> Result[B, E]) -> Result[List[B], E]
+fn list.__fallible_max_by[A, K, E](xs: List[A], f: fn(A) -> Result[K, E]) -> Result[Option[A], E]
+fn list.__fallible_max_with[A, E](xs: List[A], cmp: fn(A, A) -> Result[Int, E]) -> Result[Option[A], E]
+fn list.__fallible_min_by[A, K, E](xs: List[A], f: fn(A) -> Result[K, E]) -> Result[Option[A], E]
+fn list.__fallible_min_with[A, E](xs: List[A], cmp: fn(A, A) -> Result[Int, E]) -> Result[Option[A], E]
 fn list.__fallible_partition[A, E](xs: List[A], f: fn(A) -> Result[Bool, E]) -> Result[(List[A], List[A]), E]
 fn list.__fallible_reduce[A, E](xs: List[A], f: fn(A, A) -> Result[A, E]) -> Result[Option[A], E]
 fn list.__fallible_scan[A, B, E](xs: List[A], init: B, f: fn(B, A) -> Result[B, E]) -> Result[List[B], E]
 fn list.__fallible_sort_by[A, B, E](xs: List[A], f: fn(A) -> Result[B, E]) -> Result[List[A], E]
+fn list.__fallible_sort_with[A, E](xs: List[A], cmp: fn(A, A) -> Result[Int, E]) -> Result[List[A], E]
 fn list.__fallible_take_while[A, E](xs: List[A], f: fn(A) -> Result[Bool, E]) -> Result[List[A], E]
 fn list.__fallible_unique_by[A, K, E](xs: List[A], f: fn(A) -> Result[K, E]) -> Result[List[A], E]
 fn list.__fallible_update[A, E](xs: List[A], i: Int, f: fn(A) -> Result[A, E]) -> Result[List[A], E]
 fn list.__fallible_zip_with[A, B, C, E](xs: List[A], ys: List[B], f: fn(A, B) -> Result[C, E]) -> Result[List[C], E]
+fn list.__key_order[K](a: K, b: K) -> Int
+fn list.__merge_with[A](a: List[A], b: List[A], cmp: fn(A, A) -> Int) -> List[A]
+fn list.__merge_with_fallible[A, E](a: List[A], b: List[A], cmp: fn(A, A) -> Result[Int, E]) -> Result[List[A], E]
+fn list.__pick_by_keys[A, K](xs: List[A], keys: List[K], want: Int) -> Option[A]
+fn list.__pick_with_fallible[A, E](xs: List[A], cmp: fn(A, A) -> Result[Int, E], want: Int) -> Result[Option[A], E]
+fn list.__search_fallible[A, E](xs: List[A], order: fn(A) -> Result[Int, E]) -> Result[Option[Int], E]
 fn list.all[A](xs: List[A], f: fn(A) -> Bool) -> Bool
 fn list.any[A](xs: List[A], f: fn(A) -> Bool) -> Bool
 fn list.binary_search(xs: List[Int], target: Int) -> Option[Int]
+fn list.binary_search_by[A, K](xs: List[A], target: K, f: fn(A) -> K) -> Option[Int]
+fn list.binary_search_with[A](xs: List[A], target: A, cmp: fn(A, A) -> Int) -> Option[Int]
 fn list.bundled_probe(n: Int) -> Int
 fn list.chunk[A](xs: List[A], n: Int) -> List[List[A]]
 fn list.clear[A](xs: List[A]) -> Unit
@@ -47,6 +62,7 @@ fn list.first[A](xs: List[A]) -> Option[A]
 fn list.flat_map[A, B](xs: List[A], f: fn(A) -> List[B]) -> List[B]
 fn list.flatten[T](xss: List[List[T]]) -> List[T]
 fn list.fold[A, B](xs: List[A], init: B, f: fn(B, A) -> B) -> B
+fn list.from_list[A](xs: List[A]) -> List[A]
 fn list.get[A](xs: List[A], i: Int) -> Option[A]
 fn list.get_or[A](xs: List[A], i: Int, default: A) -> A
 fn list.group_by[A, B](xs: List[A], f: fn(A) -> B) -> Map[B, List[A]]
@@ -61,12 +77,18 @@ fn list.len[A](xs: List[A]) -> Int
 fn list.length[A](xs: List[A]) -> Int
 fn list.map[A, B](xs: List[A], f: fn(A) -> B) -> List[B]
 fn list.max[A](xs: List[A]) -> Option[A]
+fn list.max_by[A, K](xs: List[A], f: fn(A) -> K) -> Option[A]
+fn list.max_with[A](xs: List[A], cmp: fn(A, A) -> Int) -> Option[A]
 fn list.min[A](xs: List[A]) -> Option[A]
+fn list.min_by[A, K](xs: List[A], f: fn(A) -> K) -> Option[A]
+fn list.min_with[A](xs: List[A], cmp: fn(A, A) -> Int) -> Option[A]
+fn list.new[A]() -> List[A]
 fn list.partition[A](xs: List[A], f: fn(A) -> Bool) -> (List[A], List[A])
 fn list.pop[A](xs: List[A]) -> Option[A]
 fn list.product(xs: List[Int]) -> Int
 fn list.push[A](xs: List[A], x: A) -> Unit
 fn list.range(start: Int, end: Int) -> List[Int]
+fn list.range_step(start: Int, end: Int, step: Int) -> List[Int]
 fn list.reduce[A](xs: List[A], f: fn(A, A) -> A) -> Option[A]
 fn list.remove_at[A](xs: List[A], i: Int) -> List[A]
 fn list.repeat[A](val: A, n: Int) -> List[A]
@@ -77,6 +99,7 @@ fn list.shuffle[A](xs: List[A]) -> List[A]
 fn list.slice[A](xs: List[A], start: Int, end: Int) -> List[A]
 fn list.sort[A](xs: List[A]) -> List[A]
 fn list.sort_by[A, B](xs: List[A], f: fn(A) -> B) -> List[A]
+fn list.sort_with[A](xs: List[A], cmp: fn(A, A) -> Int) -> List[A]
 fn list.split_at[T](xs: List[T], n: Int) -> (List[T], List[T])
 fn list.sum(xs: List[Int]) -> Int
 fn list.swap[A](xs: List[A], i: Int, j: Int) -> List[A]
@@ -84,8 +107,10 @@ fn list.tail[A](xs: List[A]) -> List[A]
 fn list.take[A](xs: List[A], n: Int) -> List[A]
 fn list.take_end[A](xs: List[A], n: Int) -> List[A]
 fn list.take_while[A](xs: List[A], f: fn(A) -> Bool) -> List[A]
+fn list.to_list[A](xs: List[A]) -> List[A]
 fn list.unique[A](xs: List[A]) -> List[A]
 fn list.unique_by[A, K](xs: List[A], f: fn(A) -> K) -> List[A]
+fn list.unzip[A, B](xs: List[(A, B)]) -> (List[A], List[B])
 fn list.update[A](xs: List[A], i: Int, f: fn(A) -> A) -> List[A]
 fn list.window[A](xs: List[A], n: Int) -> List[List[A]]
 fn list.windows[A](xs: List[A], n: Int) -> List[List[A]]
