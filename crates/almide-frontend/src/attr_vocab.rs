@@ -45,6 +45,9 @@ pub const KNOWN_ATTRS: &[&str] = &[
     "ordered",
     // The empty effect set, checked (E092, #3250)
     "pure",
+    // Outside the memory-safety guarantee (#4008): `--profile critical`
+    // refuses a call (E100); crates/almide-types `memory_unsafe_stdlib_fns`
+    "memory_unsafe",
     // Scheduling and placement
     "schedule",
     "location",

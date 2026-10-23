@@ -8,9 +8,6 @@ pub const STDLIB_MODULES: &[&str] = &[
     "json", "http", "process", "math", "random", "regex", "io", "result",
     "option", "error", "datetime", "testing", "value", "set",
     "base64", "hex", "hash", "net", "url", "zlib",
-    // Raw addresses at the foreign-function boundary (R-ffi-01). Never
-    // auto-imported: `import ffi` is the opt-in.
-    "ffi",
     // Sized numeric types (Stage 3 of the sized-numeric-types arc).
     // Each hosts UFCS conversion methods (`.to_int64()`,
     // `.to_float32()`, ...). Auto-imported alongside `int` / `float`
@@ -27,6 +24,8 @@ pub const BUNDLED_MODULES: &[&str] = &[
     "map", "set", "string",
     "env", "io", "random", "regex", "testing",
     "process", "fs", "http", "html", "json", "matrix", "net", "url", "zlib",
+    // Raw addresses at the foreign-function boundary (R-ffi-01). Never
+    // auto-imported: `import ffi` is the opt-in.
     "ffi",
     "int8", "int16", "int32", "int64",
     "uint8", "uint16", "uint32", "uint64",
@@ -514,18 +513,41 @@ fn resolve_ufcs_sized_numeric(method: &str) -> Vec<&'static str> {
 pub fn ordered_stdlib_fns() -> &'static [(&'static str, String, Option<String>)] {
     use std::sync::OnceLock;
     static TABLE: OnceLock<Vec<(&'static str, String, Option<String>)>> = OnceLock::new();
-    TABLE.get_or_init(|| {
+    TABLE.get_or_init(|| marked_stdlib_fns("@ordered"))
+}
+
+/// Every bundled stdlib fn declared `@memory_unsafe` (#4008, R-L0-45): it
+/// reads or writes memory at a raw address, or hands out the address that
+/// does, outside Almide's memory-safety guarantee — `ffi.*` and the deprecated
+/// `bytes` raw-pointer spellings. `--profile critical` refuses a call to one
+/// (E100), and an `effect fn` carrying it in a `Pure` effect module is
+/// explained by it (its effect is memory, not a host capability).
+pub fn memory_unsafe_stdlib_fns() -> &'static [(&'static str, String, Option<String>)] {
+    use std::sync::OnceLock;
+    static TABLE: OnceLock<Vec<(&'static str, String, Option<String>)>> = OnceLock::new();
+    TABLE.get_or_init(|| marked_stdlib_fns("@memory_unsafe"))
+}
+
+/// True if `module.func` is a `@memory_unsafe` stdlib fn (#4008).
+pub fn is_memory_unsafe_stdlib_fn(module: &str, func: &str) -> bool {
+    memory_unsafe_stdlib_fns().iter().any(|(m, f, _)| *m == module && f == func)
+}
+
+/// The bundled stdlib fns an attribute `mark` (`"@ordered"`) annotates, by a
+/// text scan of the bundled sources (an attribute block, then the fn it
+/// annotates), with each fn's `@intrinsic` runtime symbol when it has one.
+fn marked_stdlib_fns(mark: &str) -> Vec<(&'static str, String, Option<String>)> {
         let mut out = Vec::new();
         for &module in BUNDLED_MODULES {
             let Some(src) = bundled_source(module) else { continue };
-            if !src.contains("@ordered") {
+            if !src.contains(mark) {
                 continue;
             }
             let mut pending = false;
             let mut intrinsic: Option<String> = None;
             for line in src.lines() {
                 let line = line.trim_start();
-                if line.starts_with("@ordered") {
+                if line.strip_prefix(mark).is_some_and(|rest| !rest.starts_with(|c: char| c.is_ascii_alphanumeric() || c == '_')) {
                     pending = true;
                 } else if let Some(rest) = line.strip_prefix("@intrinsic(\"") {
                     intrinsic = rest.split('"').next().map(str::to_string);
@@ -547,7 +569,6 @@ pub fn ordered_stdlib_fns() -> &'static [(&'static str, String, Option<String>)]
             }
         }
         out
-    })
 }
 
 /// True if `module.func` is an `@ordered` stdlib fn (ADR-0024 D3).
@@ -578,5 +599,19 @@ mod ordered_tests {
         assert!(!super::is_ordered_stdlib_fn("io", "print"));
         assert!(!super::is_ordered_runtime_symbol("almide_rt_env_get"));
         assert_eq!(t.len(), 28, "{t:?}");
+    }
+
+    #[test]
+    fn the_memory_unsafe_table_is_ffi_and_the_deprecated_bytes_spellings() {
+        let mut t: Vec<String> = super::memory_unsafe_stdlib_fns().iter().map(|(m, f, _)| format!("{m}.{f}")).collect();
+        t.sort();
+        assert_eq!(
+            t,
+            [
+                "bytes.as_mut_ptr", "bytes.as_ptr", "bytes.copy_to_ptr", "bytes.data_ptr", "bytes.from_raw_ptr",
+                "ffi.address", "ffi.read", "ffi.to_int", "ffi.write",
+            ]
+        );
+        assert!(!super::is_memory_unsafe_stdlib_fn("bytes", "get"));
     }
 }

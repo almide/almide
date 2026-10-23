@@ -39,14 +39,14 @@ impl Checker {
         // memory-safety guarantee, so critical refuses the declaration itself.
         if critical {
             for decl in &program.decls {
-                if let ast::Decl::Fn { name, extern_attrs, span, .. } = decl {
-                    if !extern_attrs.is_empty() {
-                        diags.push(memory_unsafe_err(
-                            "an `@extern` function is outside the memory-safety guarantee and is not admissible under `--profile critical`",
-                            name.as_str(),
-                            *span,
-                        ));
-                    }
+                if let ast::Decl::Fn { name, extern_attrs, span, .. } = decl
+                    && !extern_attrs.is_empty()
+                {
+                    diags.push(memory_unsafe_err(
+                        "an `@extern` function is outside the memory-safety guarantee and is not admissible under `--profile critical`",
+                        name.as_str(),
+                        *span,
+                    ));
                 }
             }
         }
@@ -125,16 +125,12 @@ const BOUNDED_DENIED_MODULES: &[&str] = &[
     "testing", "fan", "compute", "duration", "prim", "ffi",
 ];
 
-/// #4008: the stdlib calls outside the memory-safety guarantee that are not in
-/// `ffi` — the deprecated `bytes` raw-pointer spellings (R-ffi-01, removed in
-/// dialect epoch 16). `--profile critical` refuses these and every `ffi.*`
-/// call with E100, and no `--allow` grants them back.
-pub const MEMORY_UNSAFE_BYTES_FNS: &[&str] =
-    &["as_ptr", "as_mut_ptr", "data_ptr", "from_raw_ptr", "copy_to_ptr"];
-
-/// Is `m.f` outside the memory-safety guarantee (#4008, R-L0-45)?
+/// #4008: is `m.f` outside the memory-safety guarantee? Declared once, at the
+/// functions (`@memory_unsafe` in stdlib/ffi.almd and on the deprecated
+/// `bytes` raw-pointer spellings). `--profile critical` refuses such a call
+/// with E100, and no `--allow` grants it back.
 pub fn is_memory_unsafe_call(m: &str, f: &str) -> bool {
-    m == "ffi" || (m == "bytes" && MEMORY_UNSAFE_BYTES_FNS.contains(&f))
+    almide_lang::stdlib_info::is_memory_unsafe_stdlib_fn(m, f)
 }
 
 /// E100 (#4008): a construct outside the memory-safety guarantee under

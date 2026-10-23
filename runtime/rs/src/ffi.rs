@@ -1,7 +1,7 @@
 // ffi — raw addresses at the foreign-function boundary (R-ffi-01, #3853).
 //
 // The native oracle for `ffi.{address,to_int,read,write}`; the wasm bodies are
-// stdlib/ffi_rawptr.almd. `read` and `write` are the only stdlib functions that
+// in stdlib/bytes_rawptr.almd. `read` and `write` are the only stdlib functions that
 // reach memory outside an Almide value (R-L0-45): nothing here can check that
 // an address and a length describe memory the program owns, so the caller of
 // `ffi.read` / `ffi.write` promises it, and `--profile critical` refuses both
