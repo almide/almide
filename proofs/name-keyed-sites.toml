@@ -207,7 +207,7 @@ names = 13
 [[site]]
 id = "crates/almide-frontend/src/check/bounded.rs::BOUNDED_PURE_MODULES::table"
 class = "legacy"
-names = 31
+names = 32
 
 [[site]]
 id = "crates/almide-frontend/src/check/bounded.rs::BOUNDED_SIZED_CTORS::table"
