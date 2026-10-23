@@ -757,12 +757,12 @@ names = 1821
 [[site]]
 id = "crates/almide-types/src/stdlib_info.rs::AUTO_IMPORT_BUNDLED::table"
 class = "legacy"
-names = 22
+names = 24
 
 [[site]]
 id = "crates/almide-types/src/stdlib_info.rs::BUNDLED_MODULES::table"
 class = "legacy"
-names = 43
+names = 44
 
 [[site]]
 id = "crates/almide-types/src/stdlib_info.rs::RUNTIME_BACKED_TYPES::table"
@@ -772,12 +772,12 @@ names = 2
 [[site]]
 id = "crates/almide-types/src/stdlib_info.rs::STDLIB_MODULES::table"
 class = "legacy"
-names = 39
+names = 41
 
 [[site]]
 id = "crates/almide-types/src/stdlib_info.rs::STDLIB_OWNED_TYPES::table"
 class = "legacy"
-names = 10
+names = 12
 
 [[site]]
 id = "crates/almide-types/src/stdlib_info.rs::TIER1_ALWAYS_ACCESSIBLE::table"
