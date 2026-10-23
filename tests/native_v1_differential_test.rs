@@ -135,6 +135,9 @@ const CORPUS: &[(&str, &str)] = &[
     //    materialized at each use: literals, const arithmetic over other
     //    lets (wrapping), a float division and a string. ──
     ("top_let_consts", "let LIMIT = 10\nlet SCALE = LIMIT * 3 + 9223372036854775807\nlet HALF = 1.0 / 2.0\nlet NAME = \"almide\"\nfn main() -> Unit = {\n  println(int.to_string(LIMIT + SCALE))\n  println(float.to_string(HALF))\n  println(NAME)\n}\n"),
+    // ── #4006: scalar-list `+` (the __list_concat floor row) over a growing
+    //    accumulator, an empty operand and an empty literal. ──
+    ("list_concat_scalar", "fn build(n: Int) -> List[Int] = {\n  var acc: List[Int] = []\n  var i = 0\n  while i < n {\n    acc = acc + [i * i]\n    i = i + 1\n  }\n  acc\n}\nfn main() -> Unit = {\n  let xs = build(5)\n  let ys = xs + []\n  println(int.to_string(list.len(ys)))\n  println(int.to_string(ys[4]))\n}\n"),
 ];
 
 #[test]

@@ -1,12 +1,15 @@
 # spec/wasm_cross fixtures the verified native renderer (v1 trust spine,
 # almide_mir::pipeline::try_render_rust_source) renders, #4006. GROW-ONLY; re-anchor with
 # ALMIDE_UPDATE_NATIVE_VERIFIED_FLOOR=1 cargo test --test native_verified_floor_test
-# rendered: 106 of 958
+# rendered: 111 of 958
 spec/wasm_cross/accum_recursion_int.almd
+spec/wasm_cross/allocation_within_limits.almd
+spec/wasm_cross/append_accumulator.almd
 spec/wasm_cross/assert_abort_eq.almd
 spec/wasm_cross/assert_abort_msg.almd
 spec/wasm_cross/assert_abort_multiline.almd
 spec/wasm_cross/assert_abort_ne.almd
+spec/wasm_cross/binary_operators.almd
 spec/wasm_cross/binding_stmts.almd
 spec/wasm_cross/call_lambda_ctor.almd
 spec/wasm_cross/closure_tail_recursion.almd
@@ -71,6 +74,7 @@ spec/wasm_cross/letbound_variant_match.almd
 spec/wasm_cross/literal_int_forms.almd
 spec/wasm_cross/literal_unit.almd
 spec/wasm_cross/loop_break_continue.almd
+spec/wasm_cross/loop_push_trailing_increment.almd
 spec/wasm_cross/mutual_tail_recursion.almd
 spec/wasm_cross/nested_tuple_destructure.almd
 spec/wasm_cross/num_edge_to_string.almd
@@ -96,6 +100,7 @@ spec/wasm_cross/string_is_alphanumeric.almd
 spec/wasm_cross/string_to_upper.almd
 spec/wasm_cross/tco_let_bound_if.almd
 spec/wasm_cross/tco_multi_concat.almd
+spec/wasm_cross/tco_nested_list_accumulator.almd
 spec/wasm_cross/testing_assert_abort_contains.almd
 spec/wasm_cross/testing_assert_abort_gt.almd
 spec/wasm_cross/testing_assert_abort_lt.almd
