@@ -65,25 +65,12 @@ pub fn fs_scope_resolve(path: &str) -> Option<std::path::PathBuf> {
     None
 }
 
-/// [`fs_scope_resolve`] for an operation on the final entry itself, not on
-/// what it points to (`is_symlink`, `remove`, `remove_all`, the source of a
-/// `rename`): the parent is resolved and the last name kept as written.
-pub fn fs_scope_resolve_entry(path: &str) -> Option<std::path::PathBuf> {
-    let p = std::path::Path::new(path);
-    match (p.parent(), p.file_name()) {
-        (Some(parent), Some(name)) => {
-            let parent = if parent.as_os_str().is_empty() { "." } else { parent.to_str()? };
-            Some(fs_scope_resolve(parent)?.join(name))
-        }
-        _ => fs_scope_resolve(path),
-    }
-}
-
-/// Whether `path` lands under one of `roots` (each from [`fs_scope_root`]);
-/// `entry` judges the final entry itself ([`fs_scope_resolve_entry`]).
-pub fn fs_scope_admits(path: &str, roots: &[std::path::PathBuf], entry: bool) -> bool {
-    let landed = if entry { fs_scope_resolve_entry(path) } else { fs_scope_resolve(path) };
-    landed.is_some_and(|r| roots.iter().any(|root| r.starts_with(root)))
+/// Whether `path` lands under one of `roots` (each from [`fs_scope_root`]).
+/// Every operation is judged by where the path leads, the no-follow ones
+/// (`is_symlink`, `remove`) included: a link inside a granted directory that
+/// points out of it can be neither asked about nor removed under the scope.
+pub fn fs_scope_admits(path: &str, roots: &[std::path::PathBuf]) -> bool {
+    fs_scope_resolve(path).is_some_and(|r| roots.iter().any(|root| r.starts_with(root)))
 }
 
 /// The directory a glob pattern reads: its segments before the first one
