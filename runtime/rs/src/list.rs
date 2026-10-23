@@ -414,11 +414,18 @@ const ALMIDE_FAN_PROBE: u32 = u32::MAX;
 fn almide_fan_cpu_ns() -> u64 {
     #[repr(C)]
     struct Timespec { sec: i64, nsec: i64 }
+    // `clockid_t` is `int` on Linux and an unsigned enum on macOS. Declaring
+    // it i32 on both passed the same bits, but a foreign signature that does
+    // not match the real one is UB, and Miri reports it (#4009).
+    #[cfg(target_os = "macos")]
+    type ClockId = u32;
+    #[cfg(not(target_os = "macos"))]
+    type ClockId = i32;
     unsafe extern "C" {
-        fn clock_gettime(clock: i32, ts: *mut Timespec) -> i32;
+        fn clock_gettime(clock: ClockId, ts: *mut Timespec) -> i32;
     }
     // CLOCK_THREAD_CPUTIME_ID
-    const CLOCK: i32 = if cfg!(target_os = "linux") { 3 } else { 16 };
+    const CLOCK: ClockId = if cfg!(target_os = "linux") { 3 } else { 16 };
     let mut ts = Timespec { sec: 0, nsec: 0 };
     if unsafe { clock_gettime(CLOCK, &mut ts) } != 0 {
         return 0;

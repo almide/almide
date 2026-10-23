@@ -11,7 +11,7 @@ pub fn __almide_main() -> () {
 }
 
 fn main() {
-    #[cfg(unix)]
+    #[cfg(all(unix, not(miri)))]
     {
         extern "C" {
             fn signal(sig: i32, handler: usize) -> usize;
