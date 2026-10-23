@@ -498,7 +498,10 @@ jobs:
     # docs-only change the four shards expand, run nothing, and report
     # success under their real names in seconds.
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # 70, not 45: develop's slowest shard ran 33 min, and the stdlib
+    # redesign's wave 1 makes every compile ~1.5x (more auto-imported lines
+    # checked and lowered per program; see the Almide gates job). #4071 gives it back.
+    timeout-minutes: 70
     env:
       DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
     strategy:
@@ -695,7 +698,11 @@ jobs:
     needs: [changes, build]
     if: needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # 50, not 30: the stdlib redesign's wave 1 adds ~2,100 lines to the
+    # auto-imported modules every program checks and lowers (a one-line
+    # program's wasm build 96 -> 144 ms), and this job ran 20 min on develop.
+    # Loading a bundled module only when the program uses it (#4071) gives it back.
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v7
 
