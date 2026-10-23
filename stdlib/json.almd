@@ -9,7 +9,7 @@
 // Runtime ABI — `j: &Value`, `key: &str`, `path: &AlmideJsonPath`, etc.
 // `set_path` returns `Result[Value, String]`, so callers propagate via
 // `!` / `?` / match.
-/// Value or err; lenient, trailing text ignored.
+/// Value or err; lenient, trailing text ignored; nesting over 1000 is err.
 @intrinsic("almide_rt_json_parse")
 fn parse(text: String) -> Result[Value, String] = _
 

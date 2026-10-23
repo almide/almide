@@ -18,6 +18,12 @@ pub fn almide_rt_json_parse(text: &str) -> Result<AlmideValue, AlmideString> {
         // lone surrogate is dropped, whitespace is `char::is_whitespace` (Unicode),
         // and an error reports the CHAR index of the offending position (ALS-T3)
         // — computed by one linear count at error time only.
+        //
+        // Nesting is bounded (R-L0-47, R-json-04, #4020): an array or object
+        // opened inside 1000 others is `json: nesting deeper than 1000`, where
+        // it used to recurse until the stack overflowed. `depth` counts the
+        // containers around the value being parsed; stdlib/json_parse.almd
+        // checks at the same point with the same text.
         let mut pos = 0usize;
         #[inline]
         fn char_len_at(t: &str, pos: usize) -> usize {
@@ -44,14 +50,16 @@ pub fn almide_rt_json_parse(text: &str) -> Result<AlmideValue, AlmideString> {
                 }
             }
         }
-        fn parse_value(t: &str, pos: &mut usize) -> Result<AlmideValue, String> {
+        const JSON_MAX_DEPTH: usize = 1000;
+        fn parse_value(t: &str, pos: &mut usize, depth: usize) -> Result<AlmideValue, String> {
             skip_ws(t, pos);
             let b = t.as_bytes();
             if *pos >= b.len() { return Err("unexpected end of input".into()); }
             match b[*pos] {
                 b'"' => parse_str_value(t, pos),
-                b'{' => parse_object(t, pos),
-                b'[' => parse_array(t, pos),
+                b'{' | b'[' if depth >= JSON_MAX_DEPTH => Err("json: nesting deeper than 1000".into()),
+                b'{' => parse_object(t, pos, depth + 1),
+                b'[' => parse_array(t, pos, depth + 1),
                 b't' | b'f' => parse_bool(t, pos),
                 b'n' => parse_null(t, pos),
                 c if c == b'-' || c.is_ascii_digit() => parse_number(t, pos),
@@ -183,7 +191,7 @@ pub fn almide_rt_json_parse(text: &str) -> Result<AlmideValue, AlmideString> {
         fn parse_null(t: &str, pos: &mut usize) -> Result<AlmideValue, String> {
             if t.as_bytes()[*pos..].starts_with(b"null") { *pos += 4; Ok(AlmideValue::Null) } else { Err("expected null".into()) }
         }
-        fn parse_array(t: &str, pos: &mut usize) -> Result<AlmideValue, String> {
+        fn parse_array(t: &str, pos: &mut usize, depth: usize) -> Result<AlmideValue, String> {
             let b = t.as_bytes();
             *pos += 1;
             skip_ws(t, pos);
@@ -193,7 +201,7 @@ pub fn almide_rt_json_parse(text: &str) -> Result<AlmideValue, AlmideString> {
             let mut items = Vec::with_capacity(8);
             if *pos < b.len() && b[*pos] == b']' { *pos += 1; return Ok(AlmideValue::Array(items)); }
             loop {
-                items.push(parse_value(t, pos)?);
+                items.push(parse_value(t, pos, depth)?);
                 skip_ws(t, pos);
                 if *pos < b.len() && b[*pos] == b',' { *pos += 1; skip_ws(t, pos); } else { break; }
             }
@@ -201,7 +209,7 @@ pub fn almide_rt_json_parse(text: &str) -> Result<AlmideValue, AlmideString> {
             if *pos < b.len() && b[*pos] == b']' { *pos += 1; }
             Ok(AlmideValue::Array(items))
         }
-        fn parse_object(t: &str, pos: &mut usize) -> Result<AlmideValue, String> {
+        fn parse_object(t: &str, pos: &mut usize, depth: usize) -> Result<AlmideValue, String> {
             let b = t.as_bytes();
             *pos += 1;
             skip_ws(t, pos);
@@ -212,7 +220,7 @@ pub fn almide_rt_json_parse(text: &str) -> Result<AlmideValue, AlmideString> {
                 let key = parse_key(t, pos)?;
                 skip_ws(t, pos);
                 if *pos < b.len() && b[*pos] == b':' { *pos += 1; }
-                let val = parse_value(t, pos)?;
+                let val = parse_value(t, pos, depth)?;
                 pairs.push((key, val));
                 skip_ws(t, pos);
                 if *pos < b.len() && b[*pos] == b',' { *pos += 1; } else { break; }
@@ -221,7 +229,7 @@ pub fn almide_rt_json_parse(text: &str) -> Result<AlmideValue, AlmideString> {
             if *pos < b.len() && b[*pos] == b'}' { *pos += 1; }
             Ok(AlmideValue::Object(pairs))
         }
-        parse_value(text, &mut pos)
+        parse_value(text, &mut pos, 0)
     })();
     __almide_r.map_err(Into::into)
 }
