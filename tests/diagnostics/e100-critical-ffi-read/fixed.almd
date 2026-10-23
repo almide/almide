@@ -1,0 +1,6 @@
+// The bounded copy: `bytes.slice` cannot read past the buffer.
+fn main() -> Unit = {
+  let b = bytes.from_string("abc")
+  let c = bytes.slice(b, 0, 3)
+  println(int.to_string(bytes.len(c)))
+}

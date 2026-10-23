@@ -236,7 +236,7 @@ pub const HOST_OPS: &[HostOp] = &[
 /// the audited matrix; a stdlib module outside this list must be wholly pure
 /// (`crate::purity::PURE_MODULES` — the contract test checks the partition).
 pub const CAP_MODULES: &[&str] =
-    &["args", "datetime", "env", "fs", "http", "io", "net", "process", "random", "testing", "zlib"];
+    &["args", "datetime", "env", "ffi", "fs", "http", "io", "net", "process", "random", "testing", "zlib"];
 
 /// The capability-module intrinsics that are NEITHER a host op NOR pure: they
 /// are refused by the lowering outright, so they never reach a certificate.

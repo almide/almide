@@ -145,6 +145,10 @@ pub(super) const EFFECT_RECIPES: &[Recipe] = &[
     Recipe { func: "bytes.data_ptr", size: "b", args: &[("b", SIZED_BYTES)] },
     Recipe { func: "bytes.copy_to_ptr", size: "b", args: &[("b", SIZED_BYTES), ("ptr", "bytes.as_ptr(live_buf)"), ("cap", "{n}")] },
     Recipe { func: "bytes.from_raw_ptr", size: "len", args: &[("ptr", "bytes.as_ptr(live_buf)"), ("len", "{n}")] },
+    Recipe { func: "ffi.address", size: "b", args: &[("b", SIZED_BYTES)] },
+    Recipe { func: "ffi.to_int", size: "", args: &[("p", "ffi.address(live_buf)")] },
+    Recipe { func: "ffi.read", size: "len", args: &[("ptr", "ffi.address(live_buf)"), ("len", "{n}")] },
+    Recipe { func: "ffi.write", size: "b", args: &[("ptr", "ffi.address(live_buf)"), ("b", SIZED_BYTES), ("cap", "{n}")] },
     // TCP against the loopback fixtures (ADR-0027 D5): a fresh socket per
     // step where the call consumes or holds one, the sink for writes and the
     // source for reads so neither side waits.
@@ -237,7 +241,7 @@ pub(super) const EFFECT_RECIPES: &[Recipe] = &[
 /// buffer is bound here and the address taken from it in the recipe.
 pub(super) fn prelude_for(func: &str, n: u64) -> Option<String> {
     match func {
-        "bytes.copy_to_ptr" | "bytes.from_raw_ptr" => {
+        "bytes.copy_to_ptr" | "bytes.from_raw_ptr" | "ffi.to_int" | "ffi.read" | "ffi.write" => {
             Some(format!("  let live_buf: Bytes = bytes.from_list(list.range(0, {n}) |> list.map((i) => i % 251))\n"))
         }
         _ => None,

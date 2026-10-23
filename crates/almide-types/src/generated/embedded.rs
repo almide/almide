@@ -331,11 +331,15 @@ fn append_u32_le(mut b: Bytes, val: Int) -> Unit = _
 fn append_u8(mut b: Bytes, val: Int) -> Unit = _
 
 /// Mutable address of the data; null if empty.
+@deprecated(since=15, use="ffi.address")
+@memory_unsafe
 @intrinsic("almide_rt_bytes_as_mut_ptr")
 @mutating
 fn as_mut_ptr(b: Bytes) -> RawPtr = _
 
 /// Address of the data; null if empty.
+@deprecated(since=15, use="ffi.address")
+@memory_unsafe
 @intrinsic("almide_rt_bytes_as_ptr")
 fn as_ptr(b: Bytes) -> RawPtr = _
 
@@ -364,10 +368,14 @@ fn contains(b: Bytes, pattern: Bytes) -> Bool = _
 fn copy_from(mut dst: Bytes, src: Bytes, dst_off: Int, src_off: Int, len: Int) -> Unit = _
 
 /// Writes up to cap bytes to ptr; count, 0 if null.
+@deprecated(since=15, use="ffi.write", note="the address comes first (ptr, b, cap), and it is an effect fn")
+@memory_unsafe
 @intrinsic("almide_rt_bytes_copy_to_ptr")
 fn copy_to_ptr(b: Bytes, ptr: RawPtr, cap: Int) -> Int = _
 
 /// Address of the data as an Int; target-specific.
+@deprecated(since=15, use="ffi.address", note="write `ffi.to_int(ffi.address(b))`, which is 0 for an empty b")
+@memory_unsafe
 @intrinsic("almide_rt_bytes_data_ptr")
 fn data_ptr(b: Bytes) -> Int = _
 
@@ -388,6 +396,8 @@ fn fill(mut b: Bytes, val: Int) -> Unit = _
 fn from_list(xs: List[Int]) -> Bytes = _
 
 /// Copy of len bytes at ptr; empty if null or len <= 0.
+@deprecated(since=15, use="ffi.read", note="ffi.read is an effect fn")
+@memory_unsafe
 @intrinsic("almide_rt_bytes_from_raw_ptr")
 fn from_raw_ptr(ptr: RawPtr, len: Int) -> Bytes = _
 
@@ -2725,6 +2735,9 @@ pub const SRC_BYTES_RAWPTR: &str = r#"
 
 
 
+
+
+
 fn bytes_as_ptr(b: Bytes) -> RawPtr = {
   let h = prim.handle(b)
   if prim.load32(h + 4) == 0 then prim.int_to_ptr(0) else prim.int_to_ptr(h + 12)
@@ -2768,6 +2781,10 @@ fn bytes_copy_to_ptr(b: Bytes, ptr: RawPtr, cap: Int) -> Int = {
   let _c = __brp_copy(dst, h + 12, n, 0)
   n
 }
+
+
+@implements("ffi.to_int")
+fn ffi_to_int(p: RawPtr) -> Int = prim.ptr_to_int(p)
 "#;
 pub const SRC_BYTES_SKIP: &str = r#"
 
@@ -4510,6 +4527,56 @@ fn fan_map_sf(xs: List[String], f: (String) -> Result[Float, String]) -> Result[
   [],
   none,
 )
+"#;
+pub const SRC_FFI: &str = r#"
+
+
+
+
+
+
+
+
+
+
+
+
+/// Address of b's first byte; null if b is empty.
+@memory_unsafe
+@intrinsic("almide_rt_ffi_address")
+fn address(b: Bytes) -> RawPtr = _
+
+/// The address as an Int; null is 0.
+@memory_unsafe
+@intrinsic("almide_rt_ffi_to_int")
+fn to_int(p: RawPtr) -> Int = _
+
+/// Copy of len bytes at ptr; empty if null or len <= 0.
+@memory_unsafe
+@intrinsic("almide_rt_ffi_read")
+effect fn read(ptr: RawPtr, len: Int) -> Bytes = _
+
+/// Writes up to cap bytes of b to ptr; the count, 0 if null.
+@memory_unsafe
+@intrinsic("almide_rt_ffi_write")
+effect fn write(ptr: RawPtr, b: Bytes, cap: Int) -> Int = _
+"#;
+pub const SRC_FFI_BRIDGE: &str = r#"
+
+
+
+
+
+
+
+@implements("ffi.address")
+fn ffi_address(b: Bytes) -> RawPtr = bytes.as_ptr(b)
+
+@implements("ffi.read")
+fn ffi_read(ptr: RawPtr, len: Int) -> Bytes = bytes.from_raw_ptr(ptr, len)
+
+@implements("ffi.write")
+fn ffi_write(ptr: RawPtr, b: Bytes, cap: Int) -> Int = bytes.copy_to_ptr(b, ptr, cap)
 "#;
 pub const SRC_FLOAT: &str = r#"
 
@@ -38771,6 +38838,8 @@ pub fn source_of(stem: &str) -> Option<&'static str> {
         "error_message" => Some(SRC_ERROR_MESSAGE),
         "fan_any" => Some(SRC_FAN_ANY),
         "fan_map" => Some(SRC_FAN_MAP),
+        "ffi" => Some(SRC_FFI),
+        "ffi_bridge" => Some(SRC_FFI_BRIDGE),
         "float" => Some(SRC_FLOAT),
         "float32" => Some(SRC_FLOAT32),
         "float32_convert" => Some(SRC_FLOAT32_CONVERT),

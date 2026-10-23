@@ -126,6 +126,10 @@ impl super::Checker {
             ),
         };
 
+        let unreachable_module: Option<String> = edit.as_ref().and_then(|(r, _)| {
+            let (m, _) = r.split_once('.')?;
+            self.env.import_table.resolve(m).is_none().then(|| m.to_string())
+        });
         let mut diag = Diagnostic::warning(message, hint, key.clone()).with_code("E052");
         if let Some(s) = &span {
             diag.file = self.source_file.clone();
@@ -145,13 +149,20 @@ impl super::Checker {
                 None => edit.as_ref().map(|(r, _)| r.clone()),
                 Some(m) => edit.as_ref().and_then(|(r, _)| r.strip_prefix(m)?.strip_prefix('.')).map(str::to_string),
             };
+            // A replacement in a module this file cannot reach (`ffi.address`
+            // for `bytes.as_ptr` without `import ffi`) needs an import line as
+            // well, so the rename alone is not the whole edit: no span fix-it,
+            // the hint names the import.
             if let (Some((_, edit)), Some(text)) = (&edit, spelled) {
-                if edit.is_mechanical() && s.end_col > s.col {
+                if edit.is_mechanical() && unreachable_module.is_none() && s.end_col > s.col {
                     diag = diag.with_machine_fix(s.line, s.col, s.end_col, text);
                 }
             }
         }
-        if edit.as_ref().is_some_and(|(_, e)| !e.is_mechanical()) {
+        if let Some(m) = &unreachable_module {
+            diag.hint = format!("{} Add `import {m}`.", diag.hint);
+        }
+        if edit.as_ref().is_some_and(|(_, e)| !e.is_mechanical() || unreachable_module.is_some()) {
             if let Some((replacement, _)) = &edit {
                 diag = diag.with_try(replacement.clone());
             }

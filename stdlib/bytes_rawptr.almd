@@ -12,6 +12,9 @@
 // through it was UB (silent heap corruption + death) while this self-host
 // handed out `handle + 12` of a 0-len block and wrote over the NEXT allocation
 // (differential fuzz, 2026-08-10 night). Null moves nothing on either target.
+//
+// `ffi` (R-ffi-01) reaches these bodies through stdlib/ffi_bridge.almd; only
+// `ffi.to_int`, a prim cast, is here.
 fn bytes_as_ptr(b: Bytes) -> RawPtr = {
   let h = prim.handle(b)
   if prim.load32(h + 4) == 0 then prim.int_to_ptr(0) else prim.int_to_ptr(h + 12)
@@ -55,3 +58,7 @@ fn bytes_copy_to_ptr(b: Bytes, ptr: RawPtr, cap: Int) -> Int = {
   let _c = __brp_copy(dst, h + 12, n, 0)
   n
 }
+
+// `ffi.to_int(p)`: the address as an Int; null is 0.
+@implements("ffi.to_int")
+fn ffi_to_int(p: RawPtr) -> Int = prim.ptr_to_int(p)

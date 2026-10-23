@@ -100,6 +100,12 @@ pub const STDLIB_MODULE_EFFECTS: &[(&str, ModuleEffects)] = &[
     // `zlib`'s `effect fn`s are compress/decompress over in-memory bytes:
     // `effect` there buys the error channel (ADR-0002 §D6), not host access.
     ("zlib", ModuleEffects::Pure),
+    // `ffi.read` / `ffi.write` touch memory outside Almide's values (R-ffi-02)
+    // but reach no host capability: the address is the program's own memory,
+    // or one an `@extern` fn handed back (and an `@extern` is already every
+    // category). Memory safety is not a category: the fns say so with
+    // `@memory_unsafe`, which `--profile critical` refuses (#4008).
+    ("ffi", ModuleEffects::Pure),
     // Collections and scalars.
     ("list", ModuleEffects::Pure),
     ("map", ModuleEffects::Pure),
@@ -347,6 +353,9 @@ mod classification_gate {
             if *e != ModuleEffects::Pure { continue; }
             for d in module_fns(m).filter(|d| fn_is_effect(d)) {
                 let q = format!("{m}.{}", fn_name(d));
+                // `@memory_unsafe` (#4008) is the explanation: its effect is
+                // memory outside Almide's values, not a host capability.
+                if almide_lang::stdlib_info::is_memory_unsafe_stdlib_fn(m, fn_name(d)) { continue; }
                 assert!(HOST_FREE_EFFECT_FNS.contains(&q.as_str()),
                     "`{q}` is an effect fn in a module classified Pure — classify `{m}` or list it in HOST_FREE_EFFECT_FNS");
             }
