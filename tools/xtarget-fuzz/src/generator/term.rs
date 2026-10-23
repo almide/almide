@@ -212,7 +212,7 @@ fn render_verdict_call(
     subst: &HashMap<String, GenType>,
 ) -> Option<String> {
     let mut bound: Vec<(String, String)> = Vec::new();
-    for ((name, p), a) in sig.param_names.iter().zip(&sig.params).zip(args) {
+    for (i, ((name, p), a)) in sig.param_names.iter().zip(&sig.params).zip(args).enumerate() {
         let ty = p.instantiate(subst)?;
         let a = match v.domain.iter().find(|(d, _)| d == name) {
             Some((_, tmpl)) => super::verdicts::fill(tmpl, &[(name, &a)]),
@@ -220,8 +220,10 @@ fn render_verdict_call(
         };
         // Out of scope like the raw result: a domain operand can be a host
         // choice too (`process.kill`'s pid is a fresh child's).
+        // The written operand is a `var` (E032): `bytes.as_mut_ptr`'s receiver.
+        let kw = if Some(i) == sig.mut_param { "var" } else { "let" };
         let v = b.fresh_name();
-        b.stmts.push(format!("let {v}: {} = {a}", ty.render()));
+        b.stmts.push(format!("{kw} {v}: {} = {a}", ty.render()));
         bound.push((name.clone(), v));
     }
     let names: Vec<(&str, &str)> = bound.iter().map(|(p, e)| (p.as_str(), e.as_str())).collect();
