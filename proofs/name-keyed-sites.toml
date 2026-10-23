@@ -272,7 +272,7 @@ names = 42
 [[site]]
 id = "crates/almide-frontend/src/stdlib.rs::MODULE_DESCRIPTIONS::table"
 class = "legacy"
-names = 45
+names = 46
 
 [[site]]
 id = "crates/almide-frontend/src/stdlib.rs::comparison_operator_of::or-pattern"
@@ -382,7 +382,7 @@ names = 8
 [[site]]
 id = "crates/almide-ir/src/effect.rs::STDLIB_MODULE_EFFECTS::table"
 class = "legacy"
-names = 44
+names = 46
 
 [[site]]
 id = "crates/almide-ir/src/fusion.rs::EFFECT_MODULES::table"
@@ -757,12 +757,12 @@ names = 1821
 [[site]]
 id = "crates/almide-types/src/stdlib_info.rs::AUTO_IMPORT_BUNDLED::table"
 class = "legacy"
-names = 23
+names = 25
 
 [[site]]
 id = "crates/almide-types/src/stdlib_info.rs::BUNDLED_MODULES::table"
 class = "legacy"
-names = 45
+names = 46
 
 [[site]]
 id = "crates/almide-types/src/stdlib_info.rs::RUNTIME_BACKED_TYPES::table"
@@ -772,12 +772,12 @@ names = 2
 [[site]]
 id = "crates/almide-types/src/stdlib_info.rs::STDLIB_MODULES::table"
 class = "legacy"
-names = 40
+names = 42
 
 [[site]]
 id = "crates/almide-types/src/stdlib_info.rs::STDLIB_OWNED_TYPES::table"
 class = "legacy"
-names = 11
+names = 13
 
 [[site]]
 id = "crates/almide-types/src/stdlib_info.rs::TIER1_ALWAYS_ACCESSIBLE::table"
