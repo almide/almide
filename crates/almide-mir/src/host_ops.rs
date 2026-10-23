@@ -131,6 +131,8 @@ pub const HOST_OPS: &[HostOp] = &[
     // ── datetime: the two clock reads (the rest of the module is pure) ──
     op("datetime", "now", "almide_rt_datetime_now", CLOCK),
     op("datetime", "monotonic_ns", "almide_rt_datetime_monotonic_ns", CLOCK),
+    // `datetime.now_ms` is env.millis's body under the datetime name (R-datetime-01).
+    op("datetime", "now_ms", "almide_rt_env_millis", CLOCK),
     // ── random ──
     op("random", "int", "almide_rt_random_int", ENTROPY),
     op("random", "float", "almide_rt_random_float", ENTROPY),

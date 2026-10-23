@@ -326,7 +326,7 @@ impl Emitter<'_> {
             // reads in the module; the rest of it is self-host and keeps the
             // generic route.
             CallTarget::Module { module, func, .. }
-                if module.as_str() == "datetime" && matches!(func.as_str(), "now" | "monotonic_ns") =>
+                if module.as_str() == "datetime" && matches!(func.as_str(), "now" | "now_ms" | "monotonic_ns") =>
             {
                 if let Some(out) = self.lower_host_call("datetime", func.as_str(), args)? {
                     return Ok(out);
