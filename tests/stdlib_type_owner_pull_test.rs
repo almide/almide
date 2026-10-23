@@ -90,8 +90,11 @@ fn auto_import_endian_rows_build_on_the_wasm_leg() {
     assert!(failures.is_empty(), "auto-import Endian rows:\n{}", failures.join("\n"));
 }
 
-/// A program spelling only the type: a fn taking and returning it.
-fn spelling_program(ty: &str) -> String {
+/// A program spelling only the type: a fn taking and returning it. A generic
+/// type is spelled with `Int` for each parameter (`Deque[Int]`); a bare
+/// `Deque` is an arity error the checker does not report yet (#4085).
+fn spelling_program(ty: &str, arity: usize) -> String {
+    let ty = if arity == 0 { ty.to_string() } else { format!("{ty}[{}]", vec!["Int"; arity].join(", ")) };
     format!("fn keep(x: {ty}) -> {ty} = x\nfn main() -> Unit = println(\"ok\")\n")
 }
 
@@ -100,17 +103,17 @@ fn every_bundled_type_decl_is_pulled_when_spelled() {
     let owners = almide_frontend::bundled_sigs::bundled_type_owners();
     assert!(owners.contains_key("Endian"), "bytes.Endian is the auto-import row of the matrix");
     let nominal = nominal_bundled_types();
-    assert!(nominal.contains("Endian") && nominal.contains("FileStat"), "the nominal set enumerates");
+    assert!(nominal.contains_key("Endian") && nominal.contains_key("FileStat"), "the nominal set enumerates");
     let mut names: Vec<&String> = owners.keys().collect();
     names.sort();
     let mut failures = Vec::new();
     for name in names {
         let module = owners[name];
-        if !nominal.contains(name.as_str()) {
+        let Some(&arity) = nominal.get(name.as_str()) else {
             eprintln!("{module}.{name}: transparent alias — resolves away at check time, no cell");
             continue;
-        }
-        let src = spelling_program(name);
+        };
+        let src = spelling_program(name, arity);
         let path = scratch(&format!("pull_{name}"), &src);
         let ir = match almide::wasm_leg::lower_to_ir(path.to_str().unwrap(), &src) {
             Ok(ir) => ir,
@@ -122,7 +125,11 @@ fn every_bundled_type_decl_is_pulled_when_spelled() {
                 continue;
             }
         };
-        let declared = ir.type_decls.iter().any(|td| td.name.as_str() == name);
+        // The decl is pulled to the top level, or the owner was lowered as a
+        // module (an auto-imported module whose fns are linked, `deque` and
+        // `heap`) and carries it there — the pull skips a name already declared.
+        let declared = ir.type_decls.iter().any(|td| td.name.as_str() == name)
+            || ir.modules.iter().any(|m| m.name.as_str() == module && m.type_decls.iter().any(|td| td.name.as_str() == name));
         let owner_used = ir.used_stdlib_modules.contains(module);
         if !declared || !owner_used {
             failures.push(format!("{module}.{name}: declared={declared} owner_used={owner_used}"));
@@ -132,17 +139,18 @@ fn every_bundled_type_decl_is_pulled_when_spelled() {
 }
 
 /// The bare names of every RECORD or VARIANT `type` a bundled module
-/// declares — the nominal cells of the matrix.
-fn nominal_bundled_types() -> std::collections::HashSet<String> {
-    let mut out = std::collections::HashSet::new();
+/// declares, with the number of its type parameters — the nominal cells of
+/// the matrix.
+fn nominal_bundled_types() -> std::collections::HashMap<String, usize> {
+    let mut out = std::collections::HashMap::new();
     for module in almide::stdlib_info::BUNDLED_MODULES.iter().copied() {
         let Some(source) = almide::stdlib_info::bundled_source(module) else { continue };
         let program = almide_lang::parse_cached(source).expect("bundled source parses");
         for decl in &program.decls {
-            if let almide::ast::Decl::Type { name, ty, .. } = decl
+            if let almide::ast::Decl::Type { name, ty, generics, .. } = decl
                 && matches!(ty, almide::ast::TypeExpr::Record { .. } | almide::ast::TypeExpr::Variant { .. })
             {
-                out.insert(name.as_str().to_string());
+                out.insert(name.as_str().to_string(), generics.as_ref().map_or(0, |g| g.len()));
             }
         }
     }
