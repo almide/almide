@@ -146,11 +146,6 @@ pub fn generate(workspace_root: &Path, out_dir: &Path) -> io::Result<()> {
         "cargo:rerun-if-changed={}",
         workspace_root.join("crates/almide-base/src/fs_errno_classified.rs").display()
     );
-    // ... and its [permissions] fs scope check (#4022).
-    println!(
-        "cargo:rerun-if-changed={}",
-        workspace_root.join("crates/almide-base/src/fs_scope.rs").display()
-    );
     Ok(())
 }
 
