@@ -80,7 +80,10 @@ impl Emitter<'_> {
         }
         // #3345: each iteration starts with no bounds facts (bounds_facts.rs).
         let outer_facts = self.bounds_facts.replace(Vec::new());
-        self.lower_stmts_moving(body, None, Self::lower_stmt_with_facts)?;
+        crate::witness::bounds::open();
+        let lowered = self.lower_stmts_moving(body, None, Self::lower_stmt_with_facts);
+        crate::witness::bounds::close();
+        lowered?;
         self.bounds_facts = outer_facts;
         if for_in {
             self.f.instructions().end();

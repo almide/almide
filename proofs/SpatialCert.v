@@ -34,8 +34,10 @@
 
    HONEST SCOPE. Blocks of fixed length: a resize is a new block in the value
    semantics, and a copy-on-write copy keeps the count and layout, so it is
-   modelled as the same block. The compiler does not emit this certificate
-   yet (#4013's design note, #1696).
+   modelled as the same block. The structural wasm leg emits the
+   certificate per build (crates/almide-wasm/src/witness_bounds.rs) for the
+   accesses whose check #3345 may elide; that its events are the accesses
+   the bytes contain is trusted, as for the ownership witness.
    What is proven is the checker's soundness, for every run of an accepted
    certificate, against MemorySafe's own SPATIAL clause. *)
 

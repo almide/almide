@@ -76,15 +76,23 @@ impl Emitter<'_> {
     pub(crate) fn lower_stmt_with_facts(&mut self, st: &IrStmt) -> Result<(), crate::EmitError> {
         if !fact_preserving(st) {
             let on = self.bounds_facts.take().is_some();
+            if on {
+                crate::witness::bounds::close();
+            }
             self.lower_stmt(st)?;
             self.bounds_facts = on.then(Vec::new);
+            if on {
+                crate::witness::bounds::open();
+            }
             return Ok(());
         }
         self.lower_stmt(st)?;
-        if let IrStmtKind::Bind { var, .. } | IrStmtKind::Assign { var, .. } = &st.kind
-            && let Some(facts) = self.bounds_facts.as_mut()
-        {
-            facts.retain(|&(xs, i, _)| xs != *var && i != *var);
+        if let IrStmtKind::Bind { var, .. } | IrStmtKind::Assign { var, .. } = &st.kind {
+            // #4005: the bounds witness sees the same kill (witness_bounds.rs).
+            crate::witness::bounds::kill(var.0);
+            if let Some(facts) = self.bounds_facts.as_mut() {
+                facts.retain(|&(xs, i, _)| xs != *var && i != *var);
+            }
         }
         Ok(())
     }
@@ -104,8 +112,21 @@ impl Emitter<'_> {
         self.fact_key(xs, index).is_some_and(|k| self.bounds_facts.as_ref().is_some_and(|f| f.contains(&k)))
     }
 
+    /// An access to `xs[index]`: `checked` when its check was just emitted
+    /// (and passed), so it becomes a fact. #4005: the access goes to the
+    /// bounds witness first (witness_bounds.rs) — a non-candidate key is not
+    /// recorded, its check sits right before it.
+    pub(crate) fn bounds_note(&mut self, xs: VarId, index: &IrExpr, checked: bool, write: bool) {
+        if let Some((l, v, c)) = self.fact_key(xs, index) {
+            crate::witness::bounds::access((l.0, v.0, c), checked, write);
+        }
+        if checked {
+            self.bounds_record(xs, index);
+        }
+    }
+
     /// Record that `xs[index]`'s check was just emitted and passed.
-    pub(crate) fn bounds_record(&mut self, xs: VarId, index: &IrExpr) {
+    fn bounds_record(&mut self, xs: VarId, index: &IrExpr) {
         if let Some(k) = self.fact_key(xs, index)
             && let Some(f) = self.bounds_facts.as_mut()
             && !f.contains(&k)

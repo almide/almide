@@ -146,8 +146,10 @@ impl Emitter<'_> {
                     self.witness_abort_site();
                     self.f.instructions().end();
                     if is_local && !in_cell {
-                        self.bounds_record(*target, index);
+                        self.bounds_note(*target, index, true, true);
                     }
+                } else {
+                    self.bounds_note(*target, index, false, true);
                 }
                 // RC-5: the COW judge, not an unconditional copy — a
                 // uniquely-held list takes the store IN PLACE, a shared one

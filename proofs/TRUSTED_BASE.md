@@ -130,8 +130,8 @@ TYPE have no counterpart in any other file, except that `SpatialCert.v`
 arm and reassigned i64 index, is `Spatial` — with the emitter's one unsigned
 compare excluding negative indices (`unsigned_ge_excludes`). `BoundsCert.v`
 puts the certificate's byte parser inside the proof and extracts
-`check_bounds_cert` (driver mode `bounds`, `check_bounds_cert_sound`). The
-compiler does not emit that certificate yet. And
+`check_bounds_cert` (driver mode `bounds`, `check_bounds_cert_sound`), and
+the structural wasm leg emits it per build as the `bounds` witness (crates/almide-wasm/src/witness_bounds.rs) for every list access the fact discipline of #3345 can reach — the accesses whose check may be elided — and almide-verify and proofs/structural-wall.sh judge it with the extracted checker and the kernel; every other access keeps its check immediately before it, which the witness does not record. TRUSTED: that the recorded events are the accesses and assignments the bytes contain, and that a hoisted count is the list's count (len_hoist.rs). And
 no certificate carries a trace yet, so the theorem the definition is for — `K(c, a) accepts ⟹ MemorySafe a`
 for a shipped artifact `a` — is still open (#4005, #4006, #1696). Until it is
 proven, "memory safe" is a claim about the trace model, not about the bytes.

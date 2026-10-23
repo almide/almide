@@ -294,9 +294,9 @@ impl Emitter<'_> {
         } else {
             self.f.instructions().local_tee(idx);
             self.emit_read_bounds_check(hold, hoisted, stride);
-            if let Some(id) = list_var {
-                self.bounds_record(id, index);
-            }
+        }
+        if let Some(id) = list_var {
+            self.bounds_note(id, index, !known, false);
         }
         let off = self.emit_elem_addr(list_var, hold, idx, index, i64::from(stride))?;
         self.load_slot_off(elem, off);
