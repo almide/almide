@@ -5110,3 +5110,25 @@ evidence  = [
   { path = "tests/http_serve_cross_test.rs", name = "a_client_trickling_its_head_does_not_stall_the_next_client_and_is_answered_408_at_the_header_deadline_on_native_and_the_embedded_lane", class = "fixture" },
   { path = "crates/almide-rt-core/tests/almide_rt_core_http.rs", name = "a_head_not_whole_by_the_header_deadline_is_408_and_a_silent_client_is_closed_unanswered", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-390"
+spec      = "ALS-R5"
+title     = "The zlib decoders bound their output: past the bound they stop with one err text on every leg"
+statement = "`zlib.inflate`, `zlib.decompress` and `zlib.gunzip` never produce more than 268435456 bytes (256 MiB): a decode whose output would pass that bound stops there and answers `err(\"zlib: output exceeds 268435456 bytes\")` — the whole text, without the function's own prefix — on every leg, so a few KB of compression bomb is an err and never a memory exhaustion (R-L0-47, R-zlib-04, #4020). `zlib.inflate_max`, `zlib.decompress_max` and `zlib.gunzip_max(data, max_len)` are the same decoders with the bound `max_len` in place of 268435456 and the text `zlib: output exceeds <max_len> bytes`; they are plain `fn`s, callable from a pure function. An output of exactly the bound is ok; one byte more is the err. For gzip the bound is on the sum of the members. The bound is judged in stream order against the other failures: a header error is reported before any output, a corrupt or truncated stream is reported where the decoder meets it, and the bound where the output passes it — a stored block cut off by the end of the input counts the bytes it holds before it reports truncation, and a back-reference that crosses the bound is the err as a whole. A `max_len` of 0 or less aborts with `PANIC: zlib.<fn>: max_len must be positive, got <max_len>` and exit 1 on every leg (R-L0-33). The observables are stdout, stderr and the exit code."
+since     = "0.69.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/zlib_output_bound.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-391"
+spec      = "ALS-T3"
+title     = "json.parse bounds nesting at 1000 levels with one err text on every leg"
+statement = "`json.parse` accepts arrays and objects nested 1000 deep and answers `err(\"json: nesting deeper than 1000\")` for an array or object opened inside 1000 others, whichever of `[` and `{` makes the levels and whether or not the innermost one is empty, on every leg — where the recursive descent used to recurse until the stack overflowed (R-L0-47, R-json-04, #4020). The check sits where the container opens, in text order: an error earlier in the text is still the one reported, and nothing past the 1001st opener is read, so an unclosed run of 100000 `[` is this err and not a stack exhaustion. The observables are stdout, stderr and the exit code."
+since     = "0.69.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/json_parse_depth_bound.almd", class = "fixture" },
+]
