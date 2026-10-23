@@ -117,6 +117,8 @@ fabricated row fails the gate). The table is a representative sample of the spin
 | `certified_memory_safe` | Certified.v | Closed under the global context |
 | `shared_list_survives_mutation` | CoreSafe.v | Closed under the global context |
 | `missing_inc_is_use_after_free` | CoreSafe.v | Closed under the global context |
+| `box_frees_and_keeps_content` | CoreSafe.v | Closed under the global context |
+| `box_store_without_share_is_use_after_free` | CoreSafe.v | Closed under the global context |
 
 ## Known limitations (what is NOT yet proven — recorded, not hidden)
 
@@ -145,7 +147,9 @@ bools, int lists with value semantics, `let`, assignment, element store,
 recursive one-argument functions) a big-step semantics that
 emits the heap trace — with reference counting: a shared read increments,
 a consumed operand, an overwritten variable and a returning call's
-parameter decrement, and a block whose count reaches zero is freed — and
+parameter decrement, a block whose count reaches zero is freed, and freeing
+a box (a block whose one slot holds any value) gives back what its slot
+held — and
 proves `typed_core_memory_safe`: every finishing or
 check-aborted run of a well-typed core program is `MemorySafe`, all four
 clauses, for any function table whose bodies are well typed. It is a core
@@ -197,7 +201,7 @@ The receipt's claims are scoped to exactly this:
   machine + the FULL `$rc_dec` bytes' SAFETY — no double-free AND leak-freedom —
   executed on the renderer's real bytes by a general interpreter (`WasmExec`),
   operand-stack balance, and termination of the loop-free fragment — all
-  kernel-checked and axiom-clean (117 audited theorems). What remains is DEPTH (the byte-binding ISA layer; and
+  kernel-checked and axiom-clean (119 audited theorems). What remains is DEPTH (the byte-binding ISA layer; and
   the RENDERER realizing the free-list/`rc_inc` — its safety MODEL is now proven,
   so that slice REFINES a proof rather than adding trusted runtime) and BREADTH
   (lowering beyond the subset: control flow, closures, stdlib) — not new properties
