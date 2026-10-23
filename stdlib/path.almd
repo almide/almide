@@ -121,3 +121,41 @@ fn normalize(p: String) -> String = {
   if absolute then "/" + joined
   else if string.len(joined) == 0 then "." else joined
 }
+
+/// Segments of normalize(path), led by "/" when absolute; ["."] for "" or ".".
+fn components(path: String) -> List[String] = {
+  let n = normalize(path)
+  let segs = string.split(n, "/") |> list.filter((s) => string.len(s) > 0)
+  if string.starts_with(n, "/") then ["/"] + segs
+  else segs
+}
+
+/// path relative to base, lexically; "." when equal; none when not under base.
+fn relative_to(path: String, base: String) -> String? = {
+  let pc = components(path) |> list.filter((s) => s != ".")
+  let bc = components(base) |> list.filter((s) => s != ".")
+  let rest = list.drop(pc, list.len(bc))
+  if list.take(pc, list.len(bc)) != bc or list.contains(rest, "..") then none
+  else if list.is_empty(rest) then some(".")
+  else some(string.join(rest, "/"))
+}
+
+local fn trim_end_slashes(p: String) -> String =
+  if string.len(p) > 1 and string.ends_with(p, "/") then trim_end_slashes(string.drop_end(p, 1))
+  else p
+
+/// path with its last extension replaced by ext; "" removes it; unchanged without a file name.
+fn with_extension(path: String, ext: String) -> String = {
+  let name = basename(path)
+  match name {
+    "" => path,
+    "." => path,
+    ".." => path,
+    _ => {
+      let trimmed = trim_end_slashes(path)
+      let dir = string.drop_end(trimmed, string.len(name))
+      let s = stem(name)
+      if ext == "" then dir + s else dir + s + "." + ext
+    },
+  }
+}
