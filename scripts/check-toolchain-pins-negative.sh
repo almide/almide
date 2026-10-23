@@ -48,7 +48,9 @@ printf 'jobs:\n  sneak:\n    steps:\n      - name: Install wasmtime\n        run
 red "a stock wasmtime CLI version the list does not name"
 
 fresh
-grep -v '^floating ci.yml:shard-coverage ' "$root/scripts/toolchain-pins.txt" > "$tmp/t/scripts/toolchain-pins.txt"
+first_floating=$(grep -m1 '^floating ' "$root/scripts/toolchain-pins.txt" | awk '{print $2}')
+[ -n "$first_floating" ] || { echo "FAIL: no floating line left to delete — retire this control with the last floating step" >&2; exit 1; }
+grep -v "^floating $first_floating " "$root/scripts/toolchain-pins.txt" > "$tmp/t/scripts/toolchain-pins.txt"
 red "a floating step whose list line was deleted"
 
 fresh
