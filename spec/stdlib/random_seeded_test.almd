@@ -1,0 +1,93 @@
+// The seeded generator (R-random-01): random.seeded / next_int / next_float /
+// next_choice / next_shuffle. The stream is SplitMix64, so the first values
+// from a seed are fixed on every target.
+import random
+
+test "the first draws from seed 0 are fixed" {
+  let r0 = random.seeded(0)
+  let (a, r1) = random.next_int(r0, 1, 6)
+  let (b, r2) = random.next_int(r1, 1, 6)
+  let (f, r3) = random.next_float(r2)
+  let (c, r4) = random.next_choice(r3, ["x", "y", "z"])
+  let (s, _) = random.next_shuffle(r4, [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8
+  ])
+  assert_eq((a, b), (4, 1))
+  assert_eq(f, 0.026433771592597743)
+  assert_eq(c, some("z"))
+  assert_eq(s, [
+    8,
+    5,
+    4,
+    7,
+    1,
+    3,
+    2,
+    6
+  ])
+}
+
+test "the same state gives the same value" {
+  let r = random.seeded(12345)
+  assert_eq(random.next_int(r, 0, 1000000).0, random.next_int(r, 0, 1000000).0)
+  assert_eq(random.next_float(r).0, random.next_float(r).0)
+}
+
+test "next_int stays in range and covers both ends" {
+  let draws = list.range(0, 200) |> list.fold(
+    (random.seeded(1), []),
+    ((g, acc), _) => {
+      let (x, next) = random.next_int(g, -2, 2)
+      (next, acc + [x])
+    },
+  )
+  let xs = draws.1
+  assert_eq(list.all(xs, (x) => x >= -2 and x <= 2), true)
+  assert_eq(list.contains(xs, -2) and list.contains(xs, 2), true)
+}
+
+test "next_int collapses an empty range to min without drawing" {
+  let r = random.seeded(9)
+  let (x, next) = random.next_int(r, 9, 3)
+  assert_eq(x, 9)
+  assert_eq(random.next_int(next, 0, 100).0, random.next_int(r, 0, 100).0)
+}
+
+test "next_int over the whole Int range" {
+  let (x, _) = random.next_int(random.seeded(0), -9223372036854775807 - 1, 9223372036854775807)
+  assert_eq(x, -2152535657050944081)
+  let (y, _) = random.next_int(random.seeded(0), -9223372036854775807, 9223372036854775807)
+  assert_eq(y >= -9223372036854775807, true)
+}
+
+test "next_float is in [0, 1)" {
+  let fs = list.range(0, 100) |> list.fold(
+    (random.seeded(3), []),
+    ((g, acc), _) => {
+      let (x, next) = random.next_float(g)
+      (next, acc + [x])
+    },
+  )
+  assert_eq(list.all(fs.1, (x) => x >= 0.0 and x < 1.0), true)
+}
+
+test "next_choice and next_shuffle on empty and String lists" {
+  let r = random.seeded(5)
+  let no_ints: List[Int] = []
+  let (none_pick, _) = random.next_choice(r, no_ints)
+  assert_eq(none_pick, none)
+  let (empty, _) = random.next_shuffle(r, no_ints)
+  assert_eq(list.len(empty), 0)
+  let words = ["a", "b", "c", "d"]
+  let (perm, _) = random.next_shuffle(r, words)
+  assert_eq(list.sort(perm), words)
+  let (pick, _) = random.next_choice(r, [7])
+  assert_eq(pick, some(7))
+}
