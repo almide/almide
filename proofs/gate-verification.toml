@@ -100,10 +100,12 @@
 # The uncompensated count rose 19 -> 22 on 2026-10-23: the runtime unsafe
 # ledger (#4007) names dependency crates' unsafe, and the toolchain pins gate and
 # its negative control (#4010) name a toolchain installed by a means they do not
-# parse, and drifts the controls do not try.
+# parse, and drifts the controls do not try. The Miri gate (#4009) adds two
+# more: the UB Miri does not model or the corpus does not reach, and the whole
+# wasm leg (22 -> 24).
 #
 # unmapped_blind_ceiling = "108"
-# uncompensated_blind_ceiling = "22"
+# uncompensated_blind_ceiling = "24"
 #
 # History of the unverified ceiling: it moved 0 -> 2 when enumerating the
 # Almide gates (#2128) brought `output-parity` and `fuzz-track-record` INTO the
@@ -850,6 +852,16 @@ evidence = "#4010 landing (2026-10-23): nine-mode exercise on every run — two 
 measures = "the exit code check-toolchain-pins.sh gives nine scratch trees"
 varies = "the seven forged trees read exit 1 and the two controls read exit 0 in the same run"
 blind = "a way to drift a version the nine trees do not try (a dtolnay ref that is itself a version, an inputs.toolchain default) -> UNCOMPENSATED"
+
+[[gate]]
+path = "scripts/miri-generated.sh"
+reads = "scalar"
+wired_by = ".github/workflows/miri-nightly.yml"
+class = "NEGATIVE_TESTED"
+evidence = "#4009 landing (2026-10-23): every invocation first runs a control — a 64-byte ffi.read through a 4-byte buffer's address, the #4043 shape — and refuses to judge unless Miri reports it UB. Its first corpus run was a genuine catch: 10 of 30 fan fixtures were UB because the fan clock declared clock_gettime's clockid_t as i32 where macOS has an unsigned enum, fixed in the same change"
+measures = "the number of spec/wasm_cross programs whose generated native crate Miri reports undefined behaviour in, plus the control's verdict"
+varies = "develop 703bbf298 + the Miri guards, aarch64-apple-darwin: 10 UB of 30 fan fixtures (clock_gettime signature), then over all 958 spec/wasm_cross programs 1 UB (a OnceCell::get_or_init reference held across a re-entrant global access) and 2 no-build (E0747, a user record named D); with the three fixes 949 ok, 0 UB, 2 unsupported (fs), 7 cut off"
+blind = "undefined behaviour Miri does not model or that the corpus does not reach (a program stopped at an unsupported foreign call such as a socket or a child process is reported, not judged, and a code path no fixture runs is not seen) -> UNCOMPENSATED; the wasm leg -> UNCOMPENSATED"
 
 [[gate]]
 path = "scripts/check-dep-shaped-skips.sh"
