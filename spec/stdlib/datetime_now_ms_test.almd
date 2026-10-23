@@ -1,0 +1,8 @@
+// datetime.now_ms (R-datetime-01): wall-clock milliseconds since the epoch,
+// on the same clock as datetime.now (seconds).
+test "now_ms is milliseconds on the same clock as now" {
+  let s = datetime.now()!
+  let ms = datetime.now_ms()!
+  assert_eq(ms > 1700000000000, true)
+  assert_eq(ms / 1000 - s >= -1 and ms / 1000 - s <= 1, true)
+}

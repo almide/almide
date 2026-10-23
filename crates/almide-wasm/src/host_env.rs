@@ -176,7 +176,7 @@ impl Emitter<'_> {
                 self.wall_now_div(1_000_000_000);
                 Some(Lowered::scalar(INT))
             }
-            ("env", "millis", []) => {
+            ("env", "millis", []) | ("datetime", "now_ms", []) => {
                 self.wall_now_div(1_000_000);
                 Some(Lowered::scalar(INT))
             }
