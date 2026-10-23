@@ -1,0 +1,103 @@
+// matrix.zip_with (R-matrix-09) and matrix.concat_rows (R-matrix-11).
+import testing
+
+fn m(rows: List[List[Float]]) -> Matrix = matrix.from_lists(rows)
+
+test "zip_with applies f to same-position elements" {
+  let a = m([
+    [1.0, 2.0],
+    [3.0, 4.0]
+  ])
+  let b = m([
+    [10.0, 20.0],
+    [30.0, 40.0]
+  ])
+  assert_eq(
+    matrix.to_lists(matrix.zip_with(a, b, (x, y) => x * y)),
+    [
+      [10.0, 40.0],
+      [90.0, 160.0]
+    ],
+  )
+  assert_eq(
+    matrix.to_lists(matrix.zip_with(a, b, (x, y) => y - x)),
+    [
+      [9.0, 18.0],
+      [27.0, 36.0]
+    ],
+  )
+  assert_eq(matrix.shape(matrix.zip_with(m([]), m([]), (x, y) => x + y)), (0, 0))
+}
+
+test "zip_with aborts on a shape mismatch" {
+  testing.assert_aborts(
+    "matrix shape mismatch",
+    () => matrix.zip_with(
+      m([
+        [1.0, 2.0]
+      ]),
+      m([
+        [1.0, 2.0],
+        [3.0, 4.0]
+      ]),
+      (x, y) => x + y,
+    ),
+  )
+  testing.assert_aborts(
+    "matrix shape mismatch",
+    () => matrix.zip_with(
+      m([
+        [1.0, 2.0]
+      ]),
+      m([
+        [1.0, 2.0, 3.0]
+      ]),
+      (x, y) => x + y,
+    ),
+  )
+}
+
+test "concat_rows stacks rows top to bottom" {
+  let a = m([
+    [1.0, 2.0]
+  ])
+  let b = m([
+    [3.0, 4.0],
+    [5.0, 6.0]
+  ])
+  assert_eq(
+    matrix.to_lists(matrix.concat_rows([a, b])),
+    [
+      [1.0, 2.0],
+      [3.0, 4.0],
+      [5.0, 6.0]
+    ],
+  )
+  assert_eq(
+    matrix.to_lists(matrix.concat_rows([
+      a,
+      m([]),
+      a
+    ])),
+    [
+      [1.0, 2.0],
+      [1.0, 2.0]
+    ],
+  )
+  assert_eq(matrix.shape(matrix.concat_rows([])), (0, 0))
+  assert_eq(matrix.shape(matrix.concat_rows([b])), (2, 2))
+}
+
+test "concat_rows aborts on a width mismatch" {
+  testing.assert_aborts(
+    "matrix shape mismatch",
+    () => matrix.concat_rows([
+      m([
+        [1.0]
+      ]),
+      m([
+        [1.0, 2.0]
+      ])
+    ]),
+  )
+}

@@ -229,3 +229,11 @@ fn mul_f32_t_scaled(a: Matrix[Float32], alpha: Float, b: Matrix[Float32]) -> Mat
 @rewrite(name="mul_scaled_lhs", from="matrix.mul(matrix.scale(?a, ?s), ?b)", to="matrix.mul_scaled(?a, ?s, ?b)")
 @intrinsic("almide_rt_matrix_mul_scaled")
 fn mul_scaled(a: Matrix, alpha: Float, b: Matrix) -> Matrix = _
+
+/// f over each pair of same-position elements; a shape mismatch aborts.
+@intrinsic("almide_rt_matrix_zip_with")
+fn zip_with(a: Matrix, b: Matrix, f: (Float, Float) -> Float) -> Matrix = _
+
+/// Rows of every matrix, top to bottom; empty members skipped, a width mismatch aborts.
+@intrinsic("almide_rt_matrix_concat_rows")
+fn concat_rows(xs: List[Matrix]) -> Matrix = _
