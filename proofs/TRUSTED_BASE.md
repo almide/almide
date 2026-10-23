@@ -38,7 +38,7 @@ but not listed fails, and so does a version listed but no longer used.
 | rustc | **1.96.0** (`RUST_TOOLCHAIN`) | builds the compiler, and compiles the native leg's generated Rust | nothing proves it. The native leg is compared byte for byte with the wasm leg on the contract corpus |
 | LLVM | the copy inside that rustc (the 22.1 series for 1.96; `rustc -vV` prints it) | native code generation | as rustc |
 | rustc (Ferrocene) | **1.95.0** | builds the generated Rust of the run-manifest corpus under the ISO 26262 qualified toolchain (#573) | the qualification is Ferrocene's |
-| rustc nightly | **nightly-2026-08-01**, **nightly-2025-06-01** | coverage instrumentation only (branch coverage, MC/DC); nothing shipped is built with them | — |
+| rustc nightly | **nightly-2026-08-01**, **nightly-2025-06-01** | coverage instrumentation (branch coverage, MC/DC) and Miri over `almide-str`; nothing shipped is built with them | — |
 | wasmtime (embedded crate) | **49.0.4** | `almide run` / `almide test` on wasm, the fan workers | the stock CLI runs below |
 | wasmtime (stock CLI in CI) | **49.0.1** | runs built `.wasm` artifacts in the CI gates, one version everywhere | the runtime `tests/wasm_vm_parity_test.rs` (REQ-VM-9) compares `almide-wasm-vm` against |
 | almide-wasm-vm | this tree | a second, independent wasm interpreter (standard library only, no `unsafe`) for the Critical-profile surface | REQ-VM-9: every `spec/wasm_cross` fixture inside its five WASI imports runs equal to the stock runtime, and to native when it passes `--profile critical` |
@@ -51,14 +51,14 @@ Critical-profile surface: an artifact that imports more than its five WASI
 calls (fs, env, args) is refused at load, so for those artifacts wasmtime
 remains the only engine.
 
-**Floating steps (debt).** Five CI steps install Rust without a version and
-run whatever `stable` or `nightly` is that day: the two perf ratchets, the
-commissioned wasm probes (the runtime ratio), fuzz-nightly's coverage ratchet,
-and the Miri job for `almide-str`. They are listed by job in
-`scripts/toolchain-pins.txt`. A new one fails the gate, and pinning one
-requires deleting its line. Each measures a number a pin would move (or needs
-a nightly that ships Miri), so each should be pinned in a change that re-takes
-its baseline. The four that judge no measured number (`shard-coverage`,
+**Floating steps (debt).** Four CI steps install Rust without a version and
+run whatever `stable` is that day: the two perf ratchets, the commissioned
+wasm probes (the runtime ratio) and fuzz-nightly's coverage ratchet. They are
+listed by job in `scripts/toolchain-pins.txt`. A new one fails the gate, and
+pinning one requires deleting its line. Each measures a number a pin would
+move, so each should be pinned in a change that re-takes its baseline. The
+Miri job for `almide-str` runs on the dated nightly-2026-08-01, which ships
+the miri component. The four that judge no measured number (`shard-coverage`,
 `almide-gates` and the two commissioned wasm gate jobs that run REQ-VM-9) are
 pinned to `RUST_TOOLCHAIN` since #4010.
 

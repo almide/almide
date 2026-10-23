@@ -943,14 +943,16 @@ jobs:
     # `unsafe_code = "forbid"`. Its tests run here under Miri, which checks every raw access:
     # use-after-free, double free, leaks, out-of-bounds reads and writes, and
     # Stacked Borrows aliasing. The crate is std-only, so this job builds
-    # nothing else. Miri needs nightly, so this is the one nightly job.
+    # nothing else. Miri needs nightly; the dated one (#4010) is the nightly
+    # fuzz-nightly's coverage job already pins, which ships the miri component.
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
 
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: nightly-2026-08-01
           components: miri, rust-src
 
       - name: Run almide-str's tests under Miri
