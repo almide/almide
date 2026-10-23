@@ -3584,7 +3584,7 @@ effect fn now() -> Int = _
 effect fn monotonic_ns() -> Int = _
 
 /// Wall-clock milliseconds since the Unix epoch (not monotonic).
-@intrinsic("almide_rt_env_millis")
+@intrinsic("almide_rt_datetime_now_ms")
 effect fn now_ms() -> Int = _
 
 /// Epoch secs of YYYY-MM-DDTHH:MM:SSZ; fractions err.
