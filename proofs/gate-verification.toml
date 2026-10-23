@@ -891,8 +891,8 @@ wired_by = ".github/workflows/wasm-checked-alloc-nightly.yml"
 class = "NEGATIVE_TESTED"
 evidence = "#4009 landing (2026-10-23): its verdict is the inverse of the gate it drives — each re-injected bug must make scripts/wasm-checked-alloc.sh FAIL — and a patch that no longer applies fails it too; locally #3538 re-injected read 'caught', and the same run against the unpatched tree would read the gate passing, i.e. this script failing"
 measures = "the number of re-injected fixed memory bugs (proofs/fixtures/heap-check/reinject/*.patch) the checked-allocator gate does NOT catch, plus patches that no longer apply"
-varies = "develop 5059b4cde + the switch: 1 patch (#3538), 1 caught, 0 missed"
-blind = "a memory bug with no re-injection patch (only #3538 has one, the older I-unsound fixes no longer reverse-apply) -> UNCOMPENSATED"
+varies = "develop 5059b4cde + the switch: 3 patches (#3538, #2397 fused fold, #2133 variant payload), 3 caught, 0 missed; #2133 prints garbage and exits 0 ordinarily and faults at 0xa5a5a5a9 (the poison) under the switch"
+blind = "a memory bug with no re-injection patch (#3538, #2397 and #2133 have one; #1770 no longer reproduces by reverting its fix, since the frame releases are a set union, and the older I-unsound fixes no longer reverse-apply) -> UNCOMPENSATED"
 
 [[gate]]
 path = "scripts/check-dep-shaped-skips.sh"
