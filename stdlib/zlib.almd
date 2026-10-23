@@ -11,9 +11,13 @@ effect fn compress(data: Bytes) -> Result[Bytes, String] = _
 @intrinsic("almide_rt_zlib_compress_level")
 effect fn compress_level(data: Bytes, level: Int) -> Result[Bytes, String] = _
 
-/// Inflated zlib stream; err on corrupt input.
+/// Inflated zlib stream; err on corrupt input or output over 268435456 bytes.
 @intrinsic("almide_rt_zlib_decompress")
 effect fn decompress(data: Bytes) -> Result[Bytes, String] = _
+
+/// Like decompress, output bound max_len bytes; max_len <= 0 aborts.
+@intrinsic("almide_rt_zlib_decompress_max")
+fn decompress_max(data: Bytes, max_len: Int) -> Result[Bytes, String] = _
 
 // ── Deflate (raw, no header — used by Minecraft protocol) ──
 /// Raw DEFLATE, no header; bytes vary by target.
@@ -24,9 +28,13 @@ effect fn deflate(data: Bytes) -> Result[Bytes, String] = _
 @intrinsic("almide_rt_zlib_deflate_level")
 effect fn deflate_level(data: Bytes, level: Int) -> Result[Bytes, String] = _
 
-/// Raw DEFLATE decoded; err on a corrupt stream.
+/// Raw DEFLATE decoded; err on a corrupt stream or output over 268435456 bytes.
 @intrinsic("almide_rt_zlib_inflate")
 effect fn inflate(data: Bytes) -> Result[Bytes, String] = _
+
+/// Like inflate, output bound max_len bytes; max_len <= 0 aborts.
+@intrinsic("almide_rt_zlib_inflate_max")
+fn inflate_max(data: Bytes, max_len: Int) -> Result[Bytes, String] = _
 
 // ── Gzip ──
 /// RFC 1952 gzip of data; bytes vary by target.
@@ -35,9 +43,18 @@ effect fn gzip(data: Bytes) -> Result[Bytes, String] = _
 
 // Empty input is `err("zlib.gunzip: unexpected end of file")` on every leg
 // (#2478): a gzip file has at least one member.
-/// Gzip member decoded; err on bad header, CRC or empty input.
+//
+// The three decoders bound their output (R-L0-47, R-zlib-04, #4020): past
+// 268435456 bytes (256 MiB) they stop and return
+// `err("zlib: output exceeds 268435456 bytes")`, so a compression bomb is an
+// err, never a memory exhaustion. The `_max` forms take the bound instead.
+/// Gzip members decoded; err on bad header, CRC, empty input or output over 268435456 bytes.
 @intrinsic("almide_rt_zlib_gunzip")
 effect fn gunzip(data: Bytes) -> Result[Bytes, String] = _
+
+/// Like gunzip, output bound max_len bytes (all members); max_len <= 0 aborts.
+@intrinsic("almide_rt_zlib_gunzip_max")
+fn gunzip_max(data: Bytes, max_len: Int) -> Result[Bytes, String] = _
 
 // ── Checksums (#1700) ──
 // Pure Almide on every target (no intrinsic): CRC-32 (IEEE, reflected) and
