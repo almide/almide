@@ -44,7 +44,7 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 
 [args](L2-args.md) ・ [base64](L2-base64.md) ・ [bigint](L2-bigint.md) ・ [bool](L2-bool.md) ・ [bytes](L2-bytes.md) ・ [compute](L2-compute.md) ・ [datetime](L2-datetime.md) ・ [deque](L2-deque.md) ・ [duration](L2-duration.md) ・ [env](L2-env.md) ・ [error](L2-error.md) ・ [ffi](L2-ffi.md) ・ [float](L2-float.md) ・ [fs](L2-fs.md) ・ [hash](L2-hash.md) ・ [heap](L2-heap.md) ・ [hex](L2-hex.md) ・ [html](L2-html.md) ・ [http](L2-http.md) ・ [int](L2-int.md) ・ [io](L2-io.md) ・ [json](L2-json.md) ・ [list](L2-list.md) ・ [map](L2-map.md) ・ [math](L2-math.md) ・ [matrix](L2-matrix.md) ・ [net](L2-net.md) ・ [option](L2-option.md) ・ [path](L2-path.md) ・ [process](L2-process.md) ・ [random](L2-random.md) ・ [regex](L2-regex.md) ・ [result](L2-result.md) ・ [set](L2-set.md) ・ [sized-numbers](L2-sized-numbers.md) ・ [string](L2-string.md) ・ [testing](L2-testing.md) ・ [unix](L2-unix.md) ・ [url](L2-url.md) ・ [uuid](L2-uuid.md) ・ [value](L2-value.md) ・ [zlib](L2-zlib.md)
 
-## 案の状態（全 353 件: ○ 288・× 61・保留 4）
+## 案の状態（全 355 件: ○ 290・× 61・保留 4）
 
 | 案 | 内容 | 判定 | issue |
 |---|---|---|---|
@@ -173,6 +173,7 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 | [R-deque-02](L2-deque.md#r-deque-02-deque-に高階関数の族と-containsclear-を足す---採用) | deque に高階関数の族と `contains`・`clear` を足す | ○ | #3968 |
 | [R-deque-03](L2-deque.md#r-deque-03-末尾の-push_backpop_back-を-pushpop-にする---採用) | 末尾の `push_back`・`pop_back` を `push`・`pop` にする | ○ | #4000 |
 | [R-deque-04](L2-deque.md#r-deque-04-deque-に-orderedindexedgrowable-の要件をそろえる---採用) | `deque` に `Ordered`・`Indexed`・`Growable` の要件をそろえる | ○ | #4000 |
+| [R-deque-05](L2-deque.md#r-deque-05--と-d-は要素を前から順に比べ書く---採用) | `==` と `"${d}"` は要素を前から順に比べ・書く | ○ | #4033 |
 | [R-duration-01](L2-duration.md#r-duration-01-durationcompare-を足す---採用) | `duration.compare` を足す | ○ | #3902 |
 | [R-duration-02](L2-duration.md#r-duration-02-読み出し関数小数の構築子日の単位を足す---不採用) | 読み出し関数・小数の構築子・日の単位を足す | × | — |
 | [R-duration-03](L2-duration.md#r-duration-03-duration-と-compute-を-1-つのプロトコル-timeamount-に従わせる---採用) | `Duration` と `Compute` を 1 つのプロトコル `TimeAmount` に従わせる | ○ | #3964 |
@@ -211,6 +212,7 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 | [R-heap-03](L2-heap.md#r-heap-03-heapnew_with-の例を引き算にしない---採用文書だけ) | `heap.new_with` の例を引き算にしない | ○ | #3968 |
 | [R-heap-04](L2-heap.md#r-heap-04-new_minnew_max-に分ける---不採用) | `new_min`・`new_max` に分ける | × | — |
 | [R-heap-05](L2-heap.md#r-heap-05-heapfoldheapfind-を足す---不採用) | `heap.fold`・`heap.find` を足す | × | なし |
+| [R-heap-06](L2-heap.md#r-heap-06--は取り出す順の要素の並びで比べh-もその順で書く---採用) | `==` は取り出す順の要素の並びで比べ、`"${h}"` もその順で書く | ○ | #4033 |
 | [R-hex-01](L2-hex.md#r-hex-01-3-関数を据え置く---採用変更なし) | 3 関数を据え置く | ○ | —（変更なし） |
 | [R-hex-02](L2-hex.md#r-hex-02-decode_upper-を足す---不採用) | `decode_upper` を足す | × | — |
 | [R-html-01](L2-html.md#r-html-01-5-関数を据え置く---採用変更なし) | 5 関数を据え置く | ○ | —（変更なし） |
