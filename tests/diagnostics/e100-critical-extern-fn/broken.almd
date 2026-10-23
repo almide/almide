@@ -1,0 +1,6 @@
+// E100 (#4008): an `@extern` fn's body is foreign code, outside the
+// memory-safety guarantee, so `--profile critical` refuses the declaration.
+@extern(rs, "std::cmp", "max")
+fn imax(a: Int, b: Int) -> Int
+
+fn main() -> Unit = println(int.to_string(imax(1, 2)))
