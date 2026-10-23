@@ -127,6 +127,10 @@ const CORPUS: &[(&str, &str)] = &[
     //    floor rows — empty pattern, reversed and out-of-range slice bounds
     //    over multi-byte text, a wrapping power. ──
     ("floor_4006_shims", "fn main() -> Unit = {\n  println(bool.to_string(1 < 2))\n  println(bool.to_string(3 < 2))\n  println(string.replace(\"a-b-c\", \"-\", \"+\"))\n  println(string.replace(\"abc\", \"\", \"-\"))\n  println(string.slice(\"h\u{e9}llo w\u{f6}rld\", 1, 7))\n  println(string.slice(\"abc\", 2, 1))\n  println(string.slice(\"abc\", -3, 99))\n  println(int.to_string(math.pow(3, 5)))\n  println(int.to_string(math.pow(2, 64)))\n}\n"),
+    // ── #4006: the string predicate / take / capitalize / from_codepoint and
+    //    float.to_bits floor rows — empty, non-alphabetic and multi-byte text,
+    //    an over-long take, an invalid codepoint, a NaN's canonical bits. ──
+    ("floor_4006_shims_b", "fn main() -> Unit = {\n  println(bool.to_string(string.is_empty(\"\")))\n  println(bool.to_string(string.is_alpha(\"\u{e9}t\u{e9}\")))\n  println(bool.to_string(string.is_alpha(\"a1\")))\n  println(bool.to_string(string.is_alphanumeric(\"a1\")))\n  println(bool.to_string(string.is_alphanumeric(\"\")))\n  println(string.capitalize(\"\u{df}tra\u{df}e\"))\n  println(string.take(\"h\u{e9}llo\", 3))\n  println(string.take(\"ab\", 9))\n  println(string.from_codepoint(955) + string.from_codepoint(-1) + \"|\")\n  println(int.to_string(float.to_bits(1.5)))\n  println(int.to_string(float.to_bits(0.0 / 0.0)))\n}\n"),
 ];
 
 #[test]
