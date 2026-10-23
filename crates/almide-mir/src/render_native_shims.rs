@@ -50,6 +50,45 @@ const SHIMS: &[(&str, &[NTy], Option<NTy>, &str)] = &[
     ("string.trim", &[NTy::Str],
             Some(NTy::Str),
             "fn rt_string_trim(s: &str) -> AlmideString { AlmideString::from(s.trim()) }"),
+    // #4006: four floor rows the corpus walls on most, each the v0 oracle's
+    // body (runtime/rs/src/string.rs, math.rs; stdlib/bool.almd).
+    ("bool.to_string", &[NTy::I64],
+            Some(NTy::Str),
+            "fn rt_bool_to_string(b: i64) -> AlmideString { AlmideString::from(if b != 0 { \"true\" } else { \"false\" }) }"),
+    ("string.replace", &[NTy::Str, NTy::Str, NTy::Str],
+            Some(NTy::Str),
+            "fn rt_string_replace(s: &str, from: &str, to: &str) -> AlmideString { AlmideString::from(s.replace(from, to)) }"),
+    // CODEPOINT indices clamped to [0, char_count] (almide_rt_string_slice).
+    ("string.slice", &[NTy::Str, NTy::I64, NTy::I64],
+            Some(NTy::Str),
+            "fn rt_string_slice(s: &str, start: i64, end: i64) -> AlmideString {\n    let s_idx = start.max(0) as usize;\n    let e_idx = end.max(0) as usize;\n    if s_idx >= e_idx { AlmideString::new() } else { AlmideString::from(s.chars().skip(s_idx).take(e_idx - s_idx).collect::<String>()) }\n}"),
+    ("string.is_empty", &[NTy::Str],
+            Some(NTy::I64),
+            "fn rt_string_is_empty(s: &str) -> i64 { s.is_empty() as i64 }"),
+    ("string.is_alpha", &[NTy::Str],
+            Some(NTy::I64),
+            "fn rt_string_is_alpha(s: &str) -> i64 { (!s.is_empty() && s.chars().all(|c| c.is_alphabetic())) as i64 }"),
+    ("string.is_alphanumeric", &[NTy::Str],
+            Some(NTy::I64),
+            "fn rt_string_is_alphanumeric(s: &str) -> i64 { (!s.is_empty() && s.chars().all(|c| c.is_alphanumeric())) as i64 }"),
+    ("string.capitalize", &[NTy::Str],
+            Some(NTy::Str),
+            "fn rt_string_capitalize(s: &str) -> AlmideString { let mut c = s.chars(); match c.next() { Some(f) => AlmideString::from(format!(\"{}{}\", f.to_uppercase(), c.collect::<String>())), None => AlmideString::new() } }"),
+    ("string.take", &[NTy::Str, NTy::I64],
+            Some(NTy::Str),
+            "fn rt_string_take(s: &str, n: i64) -> AlmideString { AlmideString::from(s.chars().take(n as usize).collect::<String>()) }"),
+    ("string.from_codepoint", &[NTy::I64],
+            Some(NTy::Str),
+            "fn rt_string_from_codepoint(cp: i64) -> AlmideString { AlmideString::from(<u32 as std::convert::TryFrom<i64>>::try_from(cp).ok().and_then(char::from_u32).map(|c| c.to_string()).unwrap_or_default()) }"),
+    // A NaN maps to the one canonical quiet-NaN pattern (almide_rt_float_to_bits).
+    ("float.to_bits", &[NTy::F64],
+            Some(NTy::I64),
+            "fn rt_float_to_bits(f: f64) -> i64 { if f.is_nan() { 0x7FF8_0000_0000_0000_u64 as i64 } else { f.to_bits() as i64 } }"),
+    // Square-and-multiply with wrapping steps; a negative exponent is the
+    // v0 abort `Error: negative exponent`, exit 1 (almide_rt_math_pow).
+    ("math.pow", &[NTy::I64, NTy::I64],
+            Some(NTy::I64),
+            "fn rt_math_pow(base: i64, exp: i64) -> i64 {\n    if exp < 0 { eprintln!(\"Error: negative exponent\"); std::process::exit(1); }\n    let mut result: i64 = 1;\n    let mut b = base;\n    let mut e = exp as u64;\n    while e > 0 {\n        if e & 1 == 1 { result = result.wrapping_mul(b); }\n        e >>= 1;\n        if e > 0 { b = b.wrapping_mul(b); }\n    }\n    result\n}"),
     // #1869: `list.range` joins the floor as a closed shim. The lowering
     // materializes a `let`-bound range that is indexed or measured as
     // `CallFn list.range(s, e)`; without a floor entry the whole program
@@ -70,6 +109,11 @@ const SHIMS: &[(&str, &[NTy], Option<NTy>, &str)] = &[
     ("list.range", &[NTy::I64, NTy::I64],
             Some(NTy::Vec),
             "fn rt_list_range(s: i64, e: i64) -> Vec<i64> {\n    let count = e.saturating_sub(s).max(0) as usize;\n    let mut v: Vec<i64> = Vec::new();\n    if v.try_reserve_exact(count).is_err() {\n        eprintln!(\"Error: out of memory\");\n        std::process::exit(1);\n    }\n    v.extend(s..e);\n    v\n}"),
+    // #4006: `xs + ys` over scalar lists — a fresh list, both operands
+    // borrowed (the shim's arg gate admits only i64-slot lists).
+    ("__list_concat", &[NTy::VecRef, NTy::VecRef],
+            Some(NTy::Vec),
+            "fn rt_list_concat(a: &[i64], b: &[i64]) -> Vec<i64> {\n    let mut v: Vec<i64> = Vec::with_capacity(a.len() + b.len());\n    v.extend_from_slice(a);\n    v.extend_from_slice(b);\n    v\n}"),
     ("string.repeat", &[NTy::Str, NTy::I64],
             Some(NTy::Str),
             // The SAME clamp + ceiling as the v0 runtime and the wasm self-host
