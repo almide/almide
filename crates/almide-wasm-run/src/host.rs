@@ -690,7 +690,9 @@ fn host_linker(engine: &wasmtime::Engine) -> anyhow::Result<wasmtime::Linker<Hos
             let (ret, buf) = if op == 53 {
                 crate::http_call_host::open(&caller.data().calls.clone(), &a, &b)
             } else {
-                fs_dispatch(op, &a, &b)
+                // `[permissions] fs` (#4022): a path outside the granted roots is
+                // refused before the host touches it, with native's bytes.
+                crate::host_fs_scope::refuse(op, &a, &b).unwrap_or_else(|| fs_dispatch(op, &a, &b))
             };
             *caller.data().fs_buf.lock().expect("fs buf") = buf;
             Ok(ret)

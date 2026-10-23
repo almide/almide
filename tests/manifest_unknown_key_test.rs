@@ -41,7 +41,7 @@ fn parsed(tag: &str, text: &str) -> String {
     let _ = std::fs::remove_dir_all(&dir);
     // `root` and each `declared_at` name the scratch directory, which differs
     // per tag; only what the keys say is compared.
-    format!("{:?} {:?} {:?} {:?} {:?}", p.package, p.dependencies, p.permissions, p.proc_allow, p.native_deps)
+    format!("{:?} {:?} {:?} {:?} {:?} {:?}", p.package, p.dependencies, p.permissions, p.proc_allow, p.fs_allow, p.native_deps)
         .replace(&dir.display().to_string(), "<dir>")
 }
 
