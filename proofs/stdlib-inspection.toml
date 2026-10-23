@@ -75,7 +75,7 @@
 #                      every stamped row is to be re-inspected before each final
 #                      release for that (a manual GCE run: no credentials in CI)
 #
-# uninspected_ceiling = "77"
+# uninspected_ceiling = "130"
 
 [[fn]]
 name = "args.flag"
@@ -13207,6 +13207,377 @@ blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface
 [[fn]]
 name = "string.zip_with"
 sig = "(s: String, ys: List[B], f: (String, B) -> C) -> List[C]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bytes.all"
+sig = "(b: Bytes, f: (Int) -> Bool) -> Bool"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bytes.any"
+sig = "(b: Bytes, f: (Int) -> Bool) -> Bool"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bytes.count"
+sig = "(b: Bytes, f: (Int) -> Bool) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bytes.count_matches"
+sig = "(b: Bytes, needle: Bytes) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bytes.dedup"
+sig = "(b: Bytes) -> Bytes"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bytes.drop"
+sig = "(b: Bytes, n: Int) -> Bytes"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bytes.drop_end"
+sig = "(b: Bytes, n: Int) -> Bytes"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bytes.drop_while"
+sig = "(b: Bytes, f: (Int) -> Bool) -> Bytes"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bytes.enumerate"
+sig = "(b: Bytes) -> List[(Int, Int)]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bytes.filter"
+sig = "(b: Bytes, f: (Int) -> Bool) -> Bytes"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bytes.filter_map"
+sig = "(b: Bytes, f: (Int) -> Option[B]) -> List[B]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bytes.find"
+sig = "(b: Bytes, f: (Int) -> Bool) -> Option[Int]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bytes.find_index"
+sig = "(b: Bytes, f: (Int) -> Bool) -> Option[Int]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bytes.find_map"
+sig = "(b: Bytes, f: (Int) -> Option[B]) -> Option[B]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bytes.first"
+sig = "(b: Bytes) -> Option[Int]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bytes.fold"
+sig = "(b: Bytes, init: B, f: (B, Int) -> B) -> B"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bytes.get_f16_be"
+sig = "(b: Bytes, pos: Int) -> Option[Float]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bytes.get_f16_be_array"
+sig = "(b: Bytes, pos: Int, count: Int) -> Option[List[Float]]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bytes.get_i8"
+sig = "(b: Bytes, pos: Int) -> Option[Int]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bytes.group_by"
+sig = "(b: Bytes, f: (Int) -> B) -> Map[B, List[Int]]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bytes.intersperse"
+sig = "(b: Bytes, sep: Int) -> Bytes"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bytes.last"
+sig = "(b: Bytes) -> Option[Int]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bytes.last_index_of"
+sig = "(b: Bytes, needle: Bytes) -> Option[Int]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bytes.max"
+sig = "(b: Bytes) -> Option[Int]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bytes.max_by"
+sig = "(b: Bytes, f: (Int) -> K) -> Option[Int]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bytes.max_with"
+sig = "(b: Bytes, cmp: (Int, Int) -> Int) -> Option[Int]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bytes.min"
+sig = "(b: Bytes) -> Option[Int]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bytes.min_by"
+sig = "(b: Bytes, f: (Int) -> K) -> Option[Int]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bytes.min_with"
+sig = "(b: Bytes, cmp: (Int, Int) -> Int) -> Option[Int]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bytes.next_f16_be"
+sig = "(b: Bytes, pos: Int) -> (Option[Float], Int)"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bytes.next_i8"
+sig = "(b: Bytes, pos: Int) -> (Option[Int], Int)"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bytes.partition"
+sig = "(b: Bytes, f: (Int) -> Bool) -> (List[Int], List[Int])"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bytes.product"
+sig = "(b: Bytes) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bytes.reduce"
+sig = "(b: Bytes, f: (Int, Int) -> Int) -> Option[Int]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bytes.replace"
+sig = "(b: Bytes, from: Bytes, to: Bytes) -> Bytes"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bytes.replace_first"
+sig = "(b: Bytes, from: Bytes, to: Bytes) -> Bytes"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bytes.scan"
+sig = "(b: Bytes, init: B, f: (B, Int) -> B) -> List[B]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bytes.sort"
+sig = "(b: Bytes) -> List[Int]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bytes.sort_by"
+sig = "(b: Bytes, f: (Int) -> B) -> List[Int]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bytes.sort_with"
+sig = "(b: Bytes, cmp: (Int, Int) -> Int) -> List[Int]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bytes.split_at"
+sig = "(b: Bytes, n: Int) -> (Bytes, Bytes)"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bytes.strip_prefix"
+sig = "(b: Bytes, prefix: Bytes) -> Option[Bytes]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bytes.strip_suffix"
+sig = "(b: Bytes, suffix: Bytes) -> Option[Bytes]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bytes.sum"
+sig = "(b: Bytes) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bytes.take"
+sig = "(b: Bytes, n: Int) -> Bytes"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bytes.take_end"
+sig = "(b: Bytes, n: Int) -> Bytes"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bytes.take_while"
+sig = "(b: Bytes, f: (Int) -> Bool) -> Bytes"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bytes.unique"
+sig = "(b: Bytes) -> Bytes"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bytes.unique_by"
+sig = "(b: Bytes, f: (Int) -> K) -> Bytes"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bytes.window"
+sig = "(b: Bytes, n: Int) -> List[Bytes]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bytes.zip"
+sig = "(b: Bytes, ys: List[B]) -> List[(Int, B)]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "bytes.zip_with"
+sig = "(b: Bytes, ys: List[B], f: (Int, B) -> C) -> List[C]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "matrix.to_bytes_f16_le"
+sig = "(m: Matrix) -> Bytes"
 class = "pure"
 status = "uninspected"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
