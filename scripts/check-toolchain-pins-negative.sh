@@ -58,8 +58,7 @@ printf 'floating ci.yml:gone stable — a job that no longer exists\n' >> "$tmp/
 red "a list line for a floating step that no longer exists (stale)"
 
 fresh
-sed 's/\*\*27\.0\.0\*\*/(removed)/' "$root/proofs/TRUSTED_BASE.md" > "$tmp/t/proofs/TRUSTED_BASE.md"
-grep -q '27\.0\.0' "$tmp/t/proofs/TRUSTED_BASE.md" && sed -i.bak 's/27\.0\.0/(removed)/g' "$tmp/t/proofs/TRUSTED_BASE.md"
+sed 's/49\.0\.1/(removed)/g' "$root/proofs/TRUSTED_BASE.md" > "$tmp/t/proofs/TRUSTED_BASE.md"
 red "TRUSTED_BASE.md no longer naming a version the list pins"
 
 echo "toolchain-pins negative controls: all verdicts as expected"

@@ -722,16 +722,16 @@ jobs:
         uses: actions/cache@v6
         with:
           path: /tmp/wasmtime.tar.xz
-          key: wasmtime-v27.0.0-x86_64-linux
+          key: wasmtime-v49.0.1-x86_64-linux
 
       - name: Install wasmtime
         run: |
           if [ ! -f /tmp/wasmtime.tar.xz ]; then
             curl -sSfL --retry 5 --retry-all-errors --retry-delay 15 -o /tmp/wasmtime.tar.xz \
-              https://github.com/bytecodealliance/wasmtime/releases/download/v27.0.0/wasmtime-v27.0.0-x86_64-linux.tar.xz
+              https://github.com/bytecodealliance/wasmtime/releases/download/v49.0.1/wasmtime-v49.0.1-x86_64-linux.tar.xz
           fi
           tar -xf /tmp/wasmtime.tar.xz -C /tmp
-          sudo mv /tmp/wasmtime-v27.0.0-x86_64-linux/wasmtime /usr/local/bin/
+          sudo mv /tmp/wasmtime-v49.0.1-x86_64-linux/wasmtime /usr/local/bin/
           wasmtime --version
 
       - name: Install wasm-opt (binaryen)
@@ -2232,11 +2232,11 @@ jobs:
         uses: actions/cache@v6
         with:
           path: /tmp/wasmtime.tar.xz
-          key: wasmtime-v27.0.0-x86_64-linux
+          key: wasmtime-v49.0.1-x86_64-linux
       - name: Install wasmtime (stock CLI — the WASI gate's third-party runtime)
         run: |
           set -euo pipefail
-          VERSION=v27.0.0
+          VERSION=v49.0.1
           TARBALL=/tmp/wasmtime.tar.xz
           if ! tar -tf "$TARBALL" >/dev/null 2>&1; then
             curl --fail --location --retry 5 --retry-all-errors \
@@ -2291,11 +2291,11 @@ jobs:
         uses: actions/cache@v6
         with:
           path: /tmp/wasmtime.tar.xz
-          key: wasmtime-v27.0.0-x86_64-linux
+          key: wasmtime-v49.0.1-x86_64-linux
       - name: Install wasmtime (stock CLI — the WASI gate's third-party runtime)
         run: |
           set -euo pipefail
-          VERSION=v27.0.0
+          VERSION=v49.0.1
           TARBALL=/tmp/wasmtime.tar.xz
           if ! tar -tf "$TARBALL" >/dev/null 2>&1; then
             curl --fail --location --retry 5 --retry-all-errors \
@@ -2339,11 +2339,11 @@ jobs:
         uses: actions/cache@v6
         with:
           path: /tmp/wasmtime.tar.xz
-          key: wasmtime-v27.0.0-x86_64-linux
+          key: wasmtime-v49.0.1-x86_64-linux
       - name: Install wasmtime (stock CLI — the WASI gate's third-party runtime)
         run: |
           set -euo pipefail
-          VERSION=v27.0.0
+          VERSION=v49.0.1
           TARBALL=/tmp/wasmtime.tar.xz
           if ! tar -tf "$TARBALL" >/dev/null 2>&1; then
             curl --fail --location --retry 5 --retry-all-errors \
