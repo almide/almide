@@ -86,7 +86,8 @@ compiler with qualified use in safety-critical settings).
 
 - **#4014: `CoreSafe.v` — well-typed core programs are MemorySafe.** A
   typed core of the source language — ints, bools, int lists with value
-  semantics, `let` (fresh names), assignment, element store (copy into a
+  semantics, boxes (a block whose one slot holds any value, lists and boxes
+  included), `let` (fresh names), assignment, element store (copy into a
   fresh block), `if`, `while`, `make`, indexing with its bounds check, `len`,
   `if` expressions and one-argument functions with recursion (a call runs
   the body in a fresh environment holding only the parameter) — with a
@@ -95,16 +96,21 @@ compiler with qualified use in safety-critical settings).
   reference counted and freed: reading a list variable shares its block
   (`EInc`), and a consumed operand, an overwritten variable and a returning
   call's parameter give their reference back (`EDec`); at zero the block is
-  freed. The invariant is that every block's count covers the references
-  the program still holds.
+  freed, and freeing a box gives back the reference its slot held (the
+  semantics is indexed by the heap to decide that). The invariant is that
+  every block's count covers the references the program still holds,
+  including those in the slots of live boxes (a ghost store records them).
   `typed_core_memory_safe`: every run of a well-typed program that finishes,
   or that a failed check ends, is `MemorySafe` — spatial, temporal,
   initialization and type. `unchecked_index_not_safe` shows the check is
   what spatial rests on, `shared_list_survives_mutation` runs an alias
   through a mutation and a free, `missing_inc_is_use_after_free` shows the
-  same run without the shared read's `EInc` loads from freed memory, and
+  same run without the shared read's `EInc` loads from freed memory,
+  `box_frees_and_keeps_content` frees a box and keeps the list it held
+  alive, `box_store_without_share_is_use_after_free` shows a box store
+  without its `EInc` (the shape of #2133) reaches freed memory, and
   `count_down_ok` types a self-recursive function. Not yet: closures,
-  records, variants, strings, multi-argument calls, release at scope end
+  records of more than one field, variants, strings, multi-argument calls, release at scope end
   (a binding is released when overwritten; the rest leaks), diverging runs,
   and any link to the compiler's lowering.
 
