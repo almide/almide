@@ -95,7 +95,7 @@ impl Checker {
 /// arithmetic on separators and never touches the filesystem.
 const BOUNDED_PURE_MODULES: &[&str] = &[
     "int", "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64", "float",
-    "float32", "float64", "string", "list", "map", "set", "math", "option", "result", "value",
+    "float32", "float64", "bool", "string", "list", "map", "set", "math", "option", "result", "value",
     "json", "bytes", "regex", "matrix", "hex", "base64", "url", "html", "hash", "error", "path",
 ];
 

@@ -1,13 +1,8 @@
 // bool — the Bool module (R-bool-01..03): parse, compare, to_string.
-//
-// Also the SELF-HOSTED `bool.to_string` for v1, the one new `to_string` the
-// uniform string-interpolation desugar needs (`"flag=${b}"` → `"" ++
-// bool.to_string(b)`): `__bool_to_string` below, registered in
-// `self_host_runtime()` and renamed to bool.to_string there. Pure scalar `if` —
-// NO heap, NO prim floor. The two String literals are the SAME bytes v0 emits
-// for a Bool interpolation part, so a `${b}` interp byte-matches v0.
-fn __bool_to_string(b: Bool) -> String = if b then "true" else "false"
-
+// Auto-imported. The v1 self-host of `bool.to_string` (the body the string
+// interpolation desugar `"${b}"` links on the self-host legs) lives in
+// stdlib/option_to_string_b.almd, so this module source is not spliced into
+// the registry's one flat namespace, where its public names would collide.
 /// "true" or "false"; bool.parse reads it back.
 fn to_string(b: Bool) -> String = if b then "true" else "false"
 

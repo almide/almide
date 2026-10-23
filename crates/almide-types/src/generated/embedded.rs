@@ -256,11 +256,6 @@ pub const SRC_BOOL: &str = r#"
 
 
 
-
-
-
-fn __bool_to_string(b: Bool) -> String = if b then "true" else "false"
-
 /// "true" or "false"; bool.parse reads it back.
 fn to_string(b: Bool) -> String = if b then "true" else "false"
 
@@ -26751,6 +26746,15 @@ fn option_to_string_b(o: Bool?) -> String = match o {
   some(v) => "some(" + (if v then "true" else "false") + ")",
   none => "none",
 }
+
+
+
+
+
+
+
+@implements("bool.to_string")
+fn __bool_to_string(b: Bool) -> String = if b then "true" else "false"
 "#;
 pub const SRC_OPTION_TO_STRING_F: &str = r#"
 
