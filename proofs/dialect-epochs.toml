@@ -230,6 +230,8 @@ name = "stdlib-redesign"
 summary = "The standard-library redesign (docs/roadmap/stdlib-redesign/). Its waves add their breaks here. First: the memory-unsafe stdlib surface moves to an explicitly imported `ffi` module (R-ffi-01, R-L0-45), and `--profile critical` refuses everything outside the memory-safety guarantee (#4008)."
 breaks = [
   "under `--profile critical`, every `ffi.*` call, the deprecated `bytes` raw-pointer functions (`as_ptr`, `as_mut_ptr`, `data_ptr`, `from_raw_ptr`, `copy_to_ptr`) and an `@extern` fn declaration are E100 (outside the memory-safety guarantee), and no `--allow` grants them; the program checked without the profile is unchanged. Keep raw-address and foreign code in a module that is not checked with `--profile critical`",
+  "`zlib.inflate`, `zlib.decompress` and `zlib.gunzip` return `err(\"zlib: output exceeds 268435456 bytes\")` for a stream whose output passes 256 MiB, where they used to decode it whole (R-zlib-04, #4020, C-390); a program that decodes more than 256 MiB at once writes `zlib.inflate_max(data, n)` / `decompress_max` / `gunzip_max` with its own bound",
+  "`json.parse` returns `err(\"json: nesting deeper than 1000\")` for an array or object opened inside 1000 others, where it used to recurse until the stack ran out (R-json-04, #4020, C-391); a document nested more than 1000 deep cannot be parsed",
 ]
 
 # DEPRECATIONS — spellings accepted for a window, with the epoch that removes them
